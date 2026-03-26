@@ -1,0 +1,39 @@
+services:
+  - type: web
+    name: bling-automacao-girassol
+    runtime: node
+    plan: starter          # Starter = sem hibernação (~$7/mês) — OBRIGATÓRIO para cron funcionar 24/7
+    buildCommand: npm install
+    startCommand: node index.js
+    healthCheckPath: /health
+    envVars:
+      - key: TZ
+        value: America/Sao_Paulo
+      - key: NODE_ENV
+        value: production
+      - key: TOKEN_FILE
+        value: /data/tokens.json
+      # As variáveis secretas abaixo devem ser preenchidas manualmente
+      # no painel do Render (não as coloque aqui com valores reais)
+      - key: BLING_CLIENT_ID
+        sync: false
+      - key: BLING_CLIENT_SECRET
+        sync: false
+      - key: BLING_REDIRECT_URI
+        sync: false
+      - key: SITUACAO_AGUARDANDO
+        value: "7259"
+      - key: ME_LOJA_IDS
+        value: "203584107"
+      - key: JANELA_ULTIMOS_DIAS
+        value: "15"
+      - key: MAX_PEDIDOS_F1
+        value: "40"
+      - key: MAX_PEDIDOS_F2
+        value: "60"
+      - key: PAUSA_MS
+        value: "700"
+    disk:
+      name: tokens-disk
+      mountPath: /data
+      sizeGB: 1

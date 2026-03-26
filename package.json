@@ -1,0 +1,17 @@
+{
+  "name": "bling-automacao-girassol",
+  "version": "2.0.0",
+  "description": "Automação de status de pedidos Bling — GIRASSOL",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "node-cron": "^3.0.3",
+    "node-fetch": "^2.7.0"
+  }
+}
