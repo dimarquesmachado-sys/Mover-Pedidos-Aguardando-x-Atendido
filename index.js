@@ -1,6 +1,5 @@
 'use strict';
 
-require('dotenv').config({ path: '.env' }); // só para dev local; Render usa env vars nativas
 
 const http  = require('http');
 const cron  = require('node-cron');
