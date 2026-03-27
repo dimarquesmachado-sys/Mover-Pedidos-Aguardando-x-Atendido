@@ -13,7 +13,6 @@ const {
 const MAX_F1 = parseInt(process.env.MAX_PEDIDOS_F1 || '40');
 const MAX_F2 = parseInt(process.env.MAX_PEDIDOS_F2 || '60');
 
-// ── Guard: impede execuções simultâneas do mesmo fluxo ────────────────
 const _rodando = { F1: false, F2: false };
 
 async function comGuard(fluxo, fn) {
@@ -29,7 +28,6 @@ async function comGuard(fluxo, fn) {
   }
 }
 
-// ── Wrapper que retenta 1x em caso de token expirado mid-flight ───────
 async function comTokenRenewable(fn) {
   try {
     return await fn(await garantirToken());
@@ -43,7 +41,6 @@ async function comTokenRenewable(fn) {
   }
 }
 
-// ── Fluxo 1 — ATENDIDO → AGUARDANDO ──────────────────────────────────
 async function _fluxo1(token) {
   const { inicial, final } = getPeriodo();
   const lista = await getPedidosPorStatus(token, SITUACAO_ATENDIDO, inicial, final);
@@ -51,28 +48,22 @@ async function _fluxo1(token) {
 
   console.log(`[F1] ${lista.length} encontrados | processando ${batch.length}`);
 
-  // DEBUG temporário: mostra estrutura de transporte do primeiro pedido ML
   const primML = batch.find(p => isMercadoEnvios(p));
   if (primML) {
-    console.log(`[DEBUG] Pedido ${primML.id} transporte:`, JSON.stringify(primML.transporte).slice(0, 800));
+    console.log(`[DEBUG] Pedido ${primML.id} transporte:`, JSON.stringify(primML.transporte || {}).substring(0, 800));
   }
 
   let movidos = 0, pulados = 0, ignorados = 0;
 
   for (const p of batch) {
-    // Se já vimos esse pedido hoje (com ou sem rastreio), pula.
-    // O ML só libera etiqueta após meia-noite — não adianta re-checar no mesmo dia.
     if (jaProcessado('F1', p.id)) { pulados++; continue; }
 
     const rastreio = getCodigoRastreio(p);
     console.log(`[F1] Pedido ${p.id} | loja=${p.loja?.id} | rastreio="${rastreio}"`);
 
     if (p.situacao?.id !== SITUACAO_ATENDIDO) { marcarProcessado('F1', p.id); ignorados++; continue; }
-
-    // Tem rastreio → já está OK, estoquista pode trabalhar. Marca e ignora.
     if (!pedidoSemRastreio(p)) { marcarProcessado('F1', p.id); ignorados++; continue; }
 
-    // Sem rastreio → move pra AGUARDANDO e nunca mais toca hoje
     try {
       await alterarSituacao(token, p.id, SITUACAO_AGUARDANDO);
       movidos++;
@@ -86,7 +77,6 @@ async function _fluxo1(token) {
   console.log(`[F1] movidos=${movidos} | ignorados=${ignorados} | já processados=${pulados}`);
 }
 
-// ── Fluxo 2 — AGUARDANDO → ATENDIDO ──────────────────────────────────
 async function _fluxo2(token) {
   const { inicial, final } = getPeriodo();
   const lista = await getPedidosPorStatus(token, SITUACAO_AGUARDANDO, inicial, final);
@@ -97,19 +87,18 @@ async function _fluxo2(token) {
   let movidos = 0;
 
   for (const p of batch) {
-    // Se já confirmamos rastreio e movemos esse pedido hoje, pula.
     if (jaProcessado('F2', p.id)) { console.log(`[F2] Pedido ${p.id} já processado hoje — pulando`); continue; }
 
     const rastreio = getCodigoRastreio(p);
     console.log(`[F2] Pedido ${p.id} | loja=${p.loja?.id} | rastreio="${rastreio}"`);
 
     if (p.situacao?.id !== SITUACAO_AGUARDANDO) continue;
-    if (!pedidoComRastreio(p))                  continue;
+    if (!pedidoComRastreio(p)) continue;
 
     try {
       await alterarSituacao(token, p.id, SITUACAO_ATENDIDO);
       movidos++;
-      marcarProcessado('F2', p.id); // não precisa checar de novo — etiqueta confirmada
+      marcarProcessado('F2', p.id);
     } catch (e) {
       if (e.code === 401 || e.message === 'TOKEN_EXPIRADO') throw e;
       console.error(`[F2] Erro pedido ${p.id}:`, e.message);
@@ -118,8 +107,6 @@ async function _fluxo2(token) {
 
   console.log(`[F2] movidos=${movidos}`);
 }
-
-// ── Rotinas públicas ──────────────────────────────────────────────────
 
 async function rotinaExpediente() {
   await comGuard('F1', () => comTokenRenewable(_fluxo1));
