@@ -5,7 +5,7 @@ const {
   SITUACAO_ATENDIDO, SITUACAO_AGUARDANDO,
   getPeriodo,
   getPedidosPorStatus, getPedidoDetalhe,
-  getCodigoRastreio, isMercadoEnvios,
+  isMercadoEnviosPorLoja, getCodigoRastreio,
   alterarSituacao,
   jaProcessado, marcarProcessado, limparMemoriaAntiga
 } = require('./blingApi');
@@ -21,11 +21,7 @@ async function comGuard(fluxo, fn) {
     return;
   }
   _rodando[fluxo] = true;
-  try {
-    await fn();
-  } finally {
-    _rodando[fluxo] = false;
-  }
+  try { await fn(); } finally { _rodando[fluxo] = false; }
 }
 
 async function comTokenRenewable(fn) {
@@ -33,7 +29,6 @@ async function comTokenRenewable(fn) {
     return await fn(await garantirToken());
   } catch (e) {
     if (e.code === 401 || e.message === 'TOKEN_EXPIRADO') {
-      console.log('[fluxos] Token expirado mid-flight — renovando e retentando...');
       const token = await renovarToken();
       return await fn(token);
     }
@@ -41,6 +36,9 @@ async function comTokenRenewable(fn) {
   }
 }
 
+// ── Fluxo 1 — ATENDIDO → AGUARDANDO ──────────────────────────────────
+// Só atua em pedidos do Mercado Livre (por loja ID).
+// Busca detalhe individual para verificar o rastreio real.
 async function _fluxo1(token) {
   const { inicial, final } = getPeriodo();
   const lista = await getPedidosPorStatus(token, SITUACAO_ATENDIDO, inicial, final);
@@ -53,42 +51,52 @@ async function _fluxo1(token) {
   for (const p of batch) {
     if (jaProcessado('F1', p.id)) { pulados++; continue; }
 
-    if (!isMercadoEnvios(p)) {
+    // Ignora pedidos que não são do ML (verificação rápida por loja)
+    if (!isMercadoEnviosPorLoja(p)) {
       marcarProcessado('F1', p.id);
       ignorados++;
       continue;
     }
 
-    let pDetalhe = p;
+    // Busca detalhe completo para ter o transporte/rastreio
+    let pDetalhe = null;
     try {
-      pDetalhe = await getPedidoDetalhe(token, p.id) || p;
+      pDetalhe = await getPedidoDetalhe(token, p.id);
     } catch (e) {
       if (e.code === 401 || e.message === 'TOKEN_EXPIRADO') throw e;
-      console.error(`[F1] Erro ao buscar detalhe ${p.id}:`, e.message);
+      console.error(`[F1] Erro detalhe ${p.id}:`, e.message);
+    }
+
+    if (!pDetalhe) {
+      console.log(`[F1] Pedido ${p.id} — detalhe não obtido, pulando`);
+      continue;
     }
 
     const rastreio = getCodigoRastreio(pDetalhe);
     console.log(`[F1] Pedido ${p.id} | loja=${p.loja?.id} | rastreio="${rastreio}"`);
 
+    // Tem rastreio → etiqueta OK, estoquista pode trabalhar. Não mexe.
     if (rastreio !== '') {
       marcarProcessado('F1', p.id);
       ignorados++;
       continue;
     }
 
+    // Sem rastreio → move para AGUARDANDO e não verifica mais hoje
     try {
       await alterarSituacao(token, p.id, SITUACAO_AGUARDANDO);
       movidos++;
       marcarProcessado('F1', p.id);
     } catch (e) {
       if (e.code === 401 || e.message === 'TOKEN_EXPIRADO') throw e;
-      console.error(`[F1] Erro pedido ${p.id}:`, e.message);
+      console.error(`[F1] Erro ao mover ${p.id}:`, e.message);
     }
   }
 
   console.log(`[F1] movidos=${movidos} | ignorados=${ignorados} | já processados=${pulados}`);
 }
 
+// ── Fluxo 2 — AGUARDANDO → ATENDIDO ──────────────────────────────────
 async function _fluxo2(token) {
   const { inicial, final } = getPeriodo();
   const lista = await getPedidosPorStatus(token, SITUACAO_AGUARDANDO, inicial, final);
@@ -99,20 +107,23 @@ async function _fluxo2(token) {
   let movidos = 0;
 
   for (const p of batch) {
-    if (jaProcessado('F2', p.id)) { console.log(`[F2] Pedido ${p.id} já processado hoje — pulando`); continue; }
+    if (jaProcessado('F2', p.id)) { continue; }
 
-    let pDetalhe = p;
+    if (!isMercadoEnviosPorLoja(p)) continue;
+
+    let pDetalhe = null;
     try {
-      pDetalhe = await getPedidoDetalhe(token, p.id) || p;
+      pDetalhe = await getPedidoDetalhe(token, p.id);
     } catch (e) {
       if (e.code === 401 || e.message === 'TOKEN_EXPIRADO') throw e;
-      console.error(`[F2] Erro ao buscar detalhe ${p.id}:`, e.message);
+      console.error(`[F2] Erro detalhe ${p.id}:`, e.message);
     }
+
+    if (!pDetalhe) continue;
 
     const rastreio = getCodigoRastreio(pDetalhe);
     console.log(`[F2] Pedido ${p.id} | loja=${p.loja?.id} | rastreio="${rastreio}"`);
 
-    if (p.situacao?.id !== SITUACAO_AGUARDANDO) continue;
     if (rastreio === '') continue;
 
     try {
@@ -121,7 +132,7 @@ async function _fluxo2(token) {
       marcarProcessado('F2', p.id);
     } catch (e) {
       if (e.code === 401 || e.message === 'TOKEN_EXPIRADO') throw e;
-      console.error(`[F2] Erro pedido ${p.id}:`, e.message);
+      console.error(`[F2] Erro ao mover ${p.id}:`, e.message);
     }
   }
 

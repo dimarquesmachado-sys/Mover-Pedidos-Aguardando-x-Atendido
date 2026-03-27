@@ -13,14 +13,14 @@ const PAUSA_MS            = parseInt(process.env.PAUSA_MS || '700');
 
 let _ultimaReq = 0;
 
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
 async function esperarSlot(minMs) {
   const agora  = Date.now();
   const espera = Math.max(0, _ultimaReq + minMs - agora);
   if (espera > 0) await sleep(espera);
   _ultimaReq = Date.now();
 }
-
-function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 function getPeriodo() {
   const hoje = new Date();
@@ -36,18 +36,12 @@ async function fetchComRetry(url, options, ctx, tentativas = 4) {
   for (let t = 1; t <= tentativas; t++) {
     await esperarSlot(options.method === 'PATCH' ? PAUSA_MS : 300);
     const resp = await fetch(url, options);
-
     if (resp.status >= 200 && resp.status < 300) return resp;
-
     if (resp.status === 429) {
-      const wait = 2000 * t;
-      console.warn(`[blingApi] 429 em ${ctx} — aguardando ${wait}ms (t${t})`);
-      await sleep(wait);
+      await sleep(2000 * t);
       continue;
     }
-
     if (resp.status === 401) throw Object.assign(new Error('TOKEN_EXPIRADO'), { code: 401 });
-
     const txt = await resp.text();
     console.error(`[blingApi] HTTP ${resp.status} em ${ctx}:`, txt.slice(0, 300));
     if (t === tentativas) throw new Error(`API Bling (${ctx}) HTTP ${resp.status}`);
@@ -63,14 +57,7 @@ async function getPedidoDetalhe(token, idPedido) {
     `detalhe pedido=${idPedido}`
   );
   const data = await resp.json();
-  const p = data.data || null;
-
-  // DEBUG: mostra estrutura completa do transporte para o pedido 103198
-  if (p && String(idPedido) === '25405148425') {
-    console.log('[DEBUG-DETALHE] transporte completo:', JSON.stringify(p.transporte || {}).substring(0, 1500));
-  }
-
-  return p;
+  return data.data || null;
 }
 
 async function getPedidosPorStatus(token, statusId, dataInicial, dataFinal) {
@@ -80,13 +67,11 @@ async function getPedidosPorStatus(token, statusId, dataInicial, dataFinal) {
       `${BLING_API}/pedidos/vendas?idsSituacoes=${statusId}` +
       `&dataEmissaoInicial=${dataInicial}&dataEmissaoFinal=${dataFinal}` +
       `&limite=100&pagina=${pag}`;
-
     const resp = await fetchComRetry(
       url,
       { headers: { Authorization: `Bearer ${token}` } },
       `lista status=${statusId} pag=${pag}`
     );
-
     const data  = await resp.json();
     const lista = (data.data || []).filter(p => p.situacao?.id === statusId);
     console.log(`[blingApi] Status ${statusId} pag=${pag} → ${lista.length} pedidos`);
@@ -117,11 +102,16 @@ function isMercadoEnvios(p) {
   return ME_LOJA_IDS.includes(lojaId) || nome.includes('MERCADO ENVIOS');
 }
 
-const pedidoSemRastreio = p => isMercadoEnvios(p) && getCodigoRastreio(p) === '';
-const pedidoComRastreio = p => isMercadoEnvios(p) && getCodigoRastreio(p) !== '';
+// Versão que usa o detalhe do pedido para checar ML
+// (na listagem, o campo loja vem, mas transporte não)
+function isMercadoEnviosPorLoja(p) {
+  if (!p) return false;
+  const lojaId = p.loja?.id;
+  return ME_LOJA_IDS.includes(lojaId);
+}
 
 async function alterarSituacao(token, idPedido, novaSituacao) {
-  const url  = `${BLING_API}/pedidos/vendas/${idPedido}/situacoes/${novaSituacao}`;
+  const url = `${BLING_API}/pedidos/vendas/${idPedido}/situacoes/${novaSituacao}`;
   await fetchComRetry(
     url,
     { method: 'PATCH', headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } },
@@ -131,10 +121,9 @@ async function alterarSituacao(token, idPedido, novaSituacao) {
 }
 
 const _mem = new Map();
-const hojeStr = () => new Date().toISOString().split('T')[0];
-const chave   = (f, id) => `${f}:${hojeStr()}:${id}`;
-
-const jaProcessado   = (f, id) => _mem.get(chave(f, id)) === true;
+const hojeStr      = () => new Date().toISOString().split('T')[0];
+const chave        = (f, id) => `${f}:${hojeStr()}:${id}`;
+const jaProcessado = (f, id) => _mem.get(chave(f, id)) === true;
 const marcarProcessado = (f, id) => _mem.set(chave(f, id), true);
 
 function limparMemoriaAntiga() {
@@ -147,18 +136,11 @@ function limparMemoriaAntiga() {
 }
 
 module.exports = {
-  SITUACAO_ATENDIDO,
-  SITUACAO_AGUARDANDO,
-  getPeriodo,
-  sleep,
-  getPedidosPorStatus,
-  getPedidoDetalhe,
-  isMercadoEnvios,
-  pedidoSemRastreio,
-  pedidoComRastreio,
+  SITUACAO_ATENDIDO, SITUACAO_AGUARDANDO,
+  getPeriodo, sleep,
+  getPedidosPorStatus, getPedidoDetalhe,
+  isMercadoEnvios, isMercadoEnviosPorLoja,
   getCodigoRastreio,
   alterarSituacao,
-  jaProcessado,
-  marcarProcessado,
-  limparMemoriaAntiga
+  jaProcessado, marcarProcessado, limparMemoriaAntiga
 };
