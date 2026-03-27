@@ -108,7 +108,7 @@ const server = http.createServer(async (req, res) => {
   }
 if (url === '/copiar-tokens' && method === 'POST') {
     try {
-      const { garantirToken } = require('./tokenManager');
+      const fetch = require('node-fetch');
       const fs = require('fs');
       const tokens = JSON.parse(fs.readFileSync(process.env.TOKEN_FILE || '/data/tokens.json', 'utf8'));
       const resp = await fetch('https://girassol-corrigir-nome-cidade-x-cep-x-nfs.onrender.com/setup-token', {
