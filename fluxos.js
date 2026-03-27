@@ -69,20 +69,17 @@ async function _fluxo1(token) {
 
     const rastreio = getCodigoRastreio(pDetalhe);
     const isFlex = String(pDetalhe?.transporte?.volumes?.[0]?.servico || '').toUpperCase().includes('FLEX');
-    console.log(`[F1] Pedido ${p.id} | loja=${p.loja?.id} | rastreio="${rastreio}" | flex=${isFlex}`);
+    const volumes = pDetalhe?.transporte?.volumes || [];
+    console.log(`[F1] Pedido ${p.id} | loja=${p.loja?.id} | rastreio="${rastreio}" | flex=${isFlex} | volumes=${volumes.length}`);
 
-    // FLEX = entrega por motoboy, etiqueta sempre disponível → não move
-    if (isFlex) {
-      marcarProcessado('F1', p.id);
-      ignorados++;
-      continue;
-    }
+    // FLEX = entrega por motoboy → não move
+    if (isFlex) { marcarProcessado('F1', p.id); ignorados++; continue; }
 
-    if (rastreio !== '') {
-      marcarProcessado('F1', p.id);
-      ignorados++;
-      continue;
-    }
+    // Já tem rastreio → não move
+    if (rastreio !== '') { marcarProcessado('F1', p.id); ignorados++; continue; }
+
+    // volumes[] vazio = etiqueta gerada mas não sincronizada pelo ML → não move
+    if (volumes.length === 0) { marcarProcessado('F1', p.id); ignorados++; continue; }
 
     try {
       await alterarSituacao(token, p.id, SITUACAO_AGUARDANDO);
@@ -119,13 +116,17 @@ async function _fluxo2(token) {
 
     const rastreio = getCodigoRastreio(pDetalhe);
     const isFlex = String(pDetalhe?.transporte?.volumes?.[0]?.servico || '').toUpperCase().includes('FLEX');
-    console.log(`[F2] Pedido ${p.id} | loja=${p.loja?.id} | rastreio="${rastreio}" | flex=${isFlex}`);
+    const volumes = pDetalhe?.transporte?.volumes || [];
+    const dataEmissao = new Date(p.data);
+    const hoje = new Date(); hoje.setHours(0, 0, 0, 0);
+    const maisDeUmDia = dataEmissao < hoje;
+    console.log(`[F2] Pedido ${p.id} | loja=${p.loja?.id} | rastreio="${rastreio}" | flex=${isFlex} | volumes=${volumes.length}`);
 
     if (p.situacao?.id !== SITUACAO_AGUARDANDO) continue;
 
-    // FLEX sempre tem etiqueta disponível → move de volta para ATENDIDO
-    // Pedido normal sem rastreio → deixa em AGUARDANDO
-    if (!isFlex && rastreio === '') continue;
+    // Move se: FLEX, ou tem rastreio, ou volumes vazio há mais de 1 dia (importação quebrada)
+    const deveAtender = isFlex || rastreio !== '' || (volumes.length === 0 && maisDeUmDia);
+    if (!deveAtender) continue;
 
     try {
       await alterarSituacao(token, p.id, SITUACAO_ATENDIDO);
