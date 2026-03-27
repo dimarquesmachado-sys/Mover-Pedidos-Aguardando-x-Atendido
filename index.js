@@ -13,22 +13,31 @@ console.log('╚═════════════════════�
 console.log('Timezone:', TZ);
 console.log('Iniciado:', new Date().toLocaleString('pt-BR', { timeZone: TZ }));
 
+// F1 — a cada 3 min das 06h às 23h59
 cron.schedule('*/3 6-23 * * *', () => {
   console.log(`\n[CRON] Expediente ${ts()}`);
   rotinaExpediente().catch(e => console.error('[CRON] Expediente erro:', e.message));
 }, { timezone: TZ });
 
+// F2 — virada 00:10
 cron.schedule('10 0 * * *', () => {
   console.log(`\n[CRON] Virada ${ts()}`);
   rotinaVirada().catch(e => console.error('[CRON] Virada erro:', e.message));
 }, { timezone: TZ });
 
+// F2 — manhã 06:00, 06:30, 07:00
 ['0 6', '30 6', '0 7'].forEach(h => {
   cron.schedule(`${h} * * *`, () => {
     console.log(`\n[CRON] Manhã ${ts()}`);
     rotinaManha().catch(e => console.error('[CRON] Manhã erro:', e.message));
   }, { timezone: TZ });
 });
+
+// F2 — diurno a cada 15 min das 06h às 23h
+cron.schedule('*/15 6-23 * * *', () => {
+  console.log(`\n[CRON] F2 Diurno ${ts()}`);
+  rotinaManha().catch(e => console.error('[CRON] F2 Diurno erro:', e.message));
+}, { timezone: TZ });
 
 function ts() {
   return new Date().toLocaleString('pt-BR', { timeZone: TZ });
