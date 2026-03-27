@@ -124,7 +124,34 @@ const server = http.createServer(async (req, res) => {
       return json(res, 500, { error: e.message });
     }
   }
+// ── Debug: token atual ───────────────────────────────────────
+  if (method === 'GET' && url === '/debug/token') {
+    try {
+      const { garantirToken } = require('./tokenManager');
+      const token = await garantirToken();
+      return json(res, 200, { token });
+    } catch (e) {
+      return json(res, 500, { error: e.message });
+    }
+  }
 
+  // ── Debug: detalhe de pedido ─────────────────────────────────
+  if (method === 'GET' && url.startsWith('/debug/pedido/')) {
+    const partes = url.split('/');
+    const idPedido = partes[partes.length - 1];
+    try {
+      const { getPedidoDetalhe } = require('./blingApi');
+      const { garantirToken } = require('./tokenManager');
+      const token = await garantirToken();
+      const detalhe = await getPedidoDetalhe(token, idPedido);
+      return json(res, 200, detalhe);
+    } catch (e) {
+      return json(res, 500, { error: e.message });
+    }
+  }
+
+  json(res, 404, { error: 'not found' });   // ← adicionar
+});                                           // ← adicionar
   json(res, 404, { error: 'not found' });   // ← adicionar
 });                                           // ← adicionar
 
