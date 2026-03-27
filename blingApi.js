@@ -84,7 +84,7 @@ async function getPedidosPorStatus(token, statusId, dataInicial, dataFinal) {
 function getCodigoRastreio(p) {
   const v = p?.transporte?.volumes?.[0];
 
-  // 1. Tenta o código de rastreamento em volumes
+  // Só considera o código de rastreamento real em volumes
   const codigo =
     v?.codigoRastreamento ||
     v?.codigoRastreio ||
@@ -92,21 +92,8 @@ function getCodigoRastreio(p) {
     v?.codigo ||
     p?.transporte?.codigoRastreamento ||
     '';
-  if (String(codigo).trim() !== '') return String(codigo).trim();
 
-  // 2. Verifica etiqueta dentro de volumes
-  const etiquetaVolume = v?.etiqueta;
-  if (etiquetaVolume && typeof etiquetaVolume === 'object' && Object.keys(etiquetaVolume).length > 0) {
-    return 'ETIQUETA_DISPONIVEL';
-  }
-
-  // 3. Verifica etiqueta diretamente no transporte (caso volumes venha vazio)
-  const etiquetaTransporte = p?.transporte?.etiqueta;
-  if (etiquetaTransporte && typeof etiquetaTransporte === 'object' && etiquetaTransporte.nome && String(etiquetaTransporte.nome).trim() !== '') {
-    return 'ETIQUETA_DISPONIVEL';
-  }
-
-  return '';
+  return String(codigo).trim();
 }
 
 function isMercadoEnvios(p) {
