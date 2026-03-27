@@ -119,14 +119,14 @@ const server = http.createServer(async (req, res) => {
     const idPedido = url.split('/debug/pedido/')[1];
     try {
       const { getPedidoDetalhe } = require('./blingApi');
-      const detalhe = await getPedidoDetalhe(idPedido);
+      const { getToken } = require('./tokenManager');
+      const token = await getToken();
+      const detalhe = await getPedidoDetalhe(token, idPedido);
       return json(res, 200, detalhe);
     } catch (e) {
       return json(res, 500, { error: e.message });
     }
   }
-  json(res, 404, { error: 'not found' });
-});
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => console.log(`\n🌐 HTTP ouvindo na porta ${PORT}`));
