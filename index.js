@@ -129,6 +129,9 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
+  json(res, 404, { error: 'not found' });   // ← adicionar
+});                                           // ← adicionar
+
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => console.log(`\n🌐 HTTP ouvindo na porta ${PORT}`));
 
