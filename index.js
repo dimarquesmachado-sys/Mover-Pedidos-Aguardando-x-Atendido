@@ -114,7 +114,17 @@ const server = http.createServer(async (req, res) => {
       return json(res, 202, { queued: 'rotinaManha' });
     }
   }
-
+// ── Debug: detalhe de pedido ─────────────────────────────────
+  if (method === 'GET' && url.startsWith('/debug/pedido/')) {
+    const idPedido = url.split('/debug/pedido/')[1];
+    try {
+      const { getPedidoDetalhe } = require('./blingApi');
+      const detalhe = await getPedidoDetalhe(idPedido);
+      return json(res, 200, detalhe);
+    } catch (e) {
+      return json(res, 500, { error: e.message });
+    }
+  }
   json(res, 404, { error: 'not found' });
 });
 
