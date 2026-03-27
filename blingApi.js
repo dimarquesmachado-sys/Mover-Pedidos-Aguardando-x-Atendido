@@ -57,14 +57,7 @@ async function getPedidoDetalhe(token, idPedido) {
     `detalhe pedido=${idPedido}`
   );
   const data = await resp.json();
-  const p = data.data || null;
-
-  // DEBUG temporário para investigar 3 pedidos problemáticos
-  if (['25410660619','25391982677','25371874186'].includes(String(idPedido))) {
-    console.log('[DEBUG-ETIQUETA]', JSON.stringify(p?.transporte || {}));
-  }
-
-  return p;
+  return data.data || null;
 }
 
 async function getPedidosPorStatus(token, statusId, dataInicial, dataFinal) {
@@ -90,6 +83,8 @@ async function getPedidosPorStatus(token, statusId, dataInicial, dataFinal) {
 
 function getCodigoRastreio(p) {
   const v = p?.transporte?.volumes?.[0];
+
+  // 1. Tenta o código de rastreamento em volumes
   const codigo =
     v?.codigoRastreamento ||
     v?.codigoRastreio ||
@@ -99,9 +94,15 @@ function getCodigoRastreio(p) {
     '';
   if (String(codigo).trim() !== '') return String(codigo).trim();
 
-  // Se tem objeto etiqueta preenchido, considera disponível
-  const etiqueta = v?.etiqueta;
-  if (etiqueta && typeof etiqueta === 'object' && Object.keys(etiqueta).length > 0) {
+  // 2. Verifica etiqueta dentro de volumes
+  const etiquetaVolume = v?.etiqueta;
+  if (etiquetaVolume && typeof etiquetaVolume === 'object' && Object.keys(etiquetaVolume).length > 0) {
+    return 'ETIQUETA_DISPONIVEL';
+  }
+
+  // 3. Verifica etiqueta diretamente no transporte (caso volumes venha vazio)
+  const etiquetaTransporte = p?.transporte?.etiqueta;
+  if (etiquetaTransporte && typeof etiquetaTransporte === 'object' && etiquetaTransporte.nome && String(etiquetaTransporte.nome).trim() !== '') {
     return 'ETIQUETA_DISPONIVEL';
   }
 
