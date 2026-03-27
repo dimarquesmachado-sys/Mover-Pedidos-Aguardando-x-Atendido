@@ -116,7 +116,8 @@ const server = http.createServer(async (req, res) => {
   }
  // ── Debug: detalhe de pedido ─────────────────────────────────
   if (method === 'GET' && url.startsWith('/debug/pedido/')) {
-    const idPedido = url.split('/debug/pedido/')[1];
+    const partes = url.split('/');
+    const idPedido = partes[partes.length - 1];
     try {
       const { getPedidoDetalhe } = require('./blingApi');
       const { garantirToken } = require('./tokenManager');
