@@ -71,7 +71,13 @@ async function getPedidoDetalhe(token, idPedido) {
     `detalhe pedido=${idPedido}`
   );
   const data = await resp.json();
-  return data.data || null;
+  const p = data.data || null;
+
+  if (['25410660619','25391982677','25371874186'].includes(String(idPedido))) {
+    console.log('[DEBUG-ETIQUETA]', JSON.stringify(p?.transporte || {}));
+  }
+
+  return p;
 }
   const todos = [];
   for (let pag = 1; pag <= MAX_PAGINAS; pag++) {
