@@ -114,7 +114,7 @@ const server = http.createServer(async (req, res) => {
       return json(res, 202, { queued: 'rotinaManha' });
     }
   }
- // ── Debug: token atual ───────────────────────────────────────
+  // ── Debug: token atual ───────────────────────────────────────
   if (method === 'GET' && url === '/debug/token') {
     try {
       const { garantirToken } = require('./tokenManager');
