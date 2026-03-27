@@ -114,13 +114,13 @@ const server = http.createServer(async (req, res) => {
       return json(res, 202, { queued: 'rotinaManha' });
     }
   }
-// ── Debug: detalhe de pedido ─────────────────────────────────
+ // ── Debug: detalhe de pedido ─────────────────────────────────
   if (method === 'GET' && url.startsWith('/debug/pedido/')) {
     const idPedido = url.split('/debug/pedido/')[1];
     try {
       const { getPedidoDetalhe } = require('./blingApi');
-      const { getToken } = require('./tokenManager');
-      const token = await getToken();
+      const { garantirToken } = require('./tokenManager');
+      const token = await garantirToken();
       const detalhe = await getPedidoDetalhe(token, idPedido);
       return json(res, 200, detalhe);
     } catch (e) {
