@@ -106,7 +106,22 @@ const server = http.createServer(async (req, res) => {
       return json(res, 500, { error: e.message });
     }
   }
-
+if (url === '/copiar-tokens' && method === 'POST') {
+    try {
+      const { garantirToken } = require('./tokenManager');
+      const fs = require('fs');
+      const tokens = JSON.parse(fs.readFileSync(process.env.TOKEN_FILE || '/data/tokens.json', 'utf8'));
+      const resp = await fetch('https://girassol-corrigir-nome-cidade-x-cep-x-nfs.onrender.com/setup-token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(tokens)
+      });
+      const data = await resp.json();
+      return json(res, 200, { ok: true, resultado: data });
+    } catch (e) {
+      return json(res, 500, { error: e.message });
+    }
+  }
   json(res, 404, { error: 'not found' });
 });
 
