@@ -89,7 +89,28 @@ async function getPedidosPorStatus(token, statusId, dataInicial, dataFinal) {
 // ── Regras Mercado Envios ─────────────────────────────────────────────
 
 function getCodigoRastreio(p) {
-  return String(p?.transporte?.volumes?.[0]?.codigoRastreamento || '').trim();
+  // Tenta todas as formas que o Bling pode retornar o rastreio
+  const v = p?.transporte?.volumes?.[0];
+  const codigo =
+    v?.codigoRastreamento ||
+    v?.codigoRastreio ||
+    v?.tracking ||
+    v?.codigo ||
+    p?.transporte?.codigoRastreamento ||
+    '';
+  return String(codigo).trim();
+}
+
+function temEtiqueta(p) {
+  // Verifica também pelo campo etiqueta e pelo serviço logístico
+  const rastreio = getCodigoRastreio(p);
+  if (rastreio !== '') return true;
+
+  // Verifica se tem etiqueta pelo campo volumes
+  const v = p?.transporte?.volumes?.[0];
+  if (v?.etiqueta && String(v.etiqueta).trim() !== '') return true;
+
+  return false;
 }
 
 function isMercadoEnvios(p) {
@@ -139,6 +160,7 @@ module.exports = {
   getPeriodo,
   sleep,
   getPedidosPorStatus,
+  isMercadoEnvios,
   pedidoSemRastreio,
   pedidoComRastreio,
   getCodigoRastreio,

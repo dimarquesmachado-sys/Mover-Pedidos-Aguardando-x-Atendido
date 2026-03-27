@@ -5,7 +5,7 @@ const {
   SITUACAO_ATENDIDO, SITUACAO_AGUARDANDO,
   getPeriodo, sleep,
   getPedidosPorStatus,
-  pedidoSemRastreio, pedidoComRastreio, getCodigoRastreio,
+  pedidoSemRastreio, pedidoComRastreio, getCodigoRastreio, isMercadoEnvios,
   alterarSituacao,
   jaProcessado, marcarProcessado, limparMemoriaAntiga
 } = require('./blingApi');
@@ -50,6 +50,12 @@ async function _fluxo1(token) {
   const batch = lista.slice(0, MAX_F1);
 
   console.log(`[F1] ${lista.length} encontrados | processando ${batch.length}`);
+
+  // DEBUG temporário: mostra estrutura de transporte do primeiro pedido ML
+  const primML = batch.find(p => isMercadoEnvios(p));
+  if (primML) {
+    console.log(`[DEBUG] Pedido ${primML.id} transporte:`, JSON.stringify(primML.transporte).slice(0, 800));
+  }
 
   let movidos = 0, pulados = 0, ignorados = 0;
 
