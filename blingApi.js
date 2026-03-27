@@ -63,7 +63,16 @@ async function fetchComRetry(url, options, ctx, tentativas = 4) {
 
 // ── Buscar pedidos por status ─────────────────────────────────────────
 
-async function getPedidosPorStatus(token, statusId, dataInicial, dataFinal) {
+async function getPedidoDetalhe(token, idPedido) {
+  const url = `${BLING_API}/pedidos/vendas/${idPedido}`;
+  const resp = await fetchComRetry(
+    url,
+    { headers: { Authorization: `Bearer ${token}` } },
+    `detalhe pedido=${idPedido}`
+  );
+  const data = await resp.json();
+  return data.data || null;
+}
   const todos = [];
   for (let pag = 1; pag <= MAX_PAGINAS; pag++) {
     const url =
@@ -160,6 +169,7 @@ module.exports = {
   getPeriodo,
   sleep,
   getPedidosPorStatus,
+  getPedidoDetalhe,
   isMercadoEnvios,
   pedidoSemRastreio,
   pedidoComRastreio,

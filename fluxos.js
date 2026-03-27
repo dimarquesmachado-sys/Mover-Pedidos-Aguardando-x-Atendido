@@ -3,9 +3,9 @@
 const { garantirToken, renovarToken } = require('./tokenManager');
 const {
   SITUACAO_ATENDIDO, SITUACAO_AGUARDANDO,
-  getPeriodo, sleep,
-  getPedidosPorStatus,
-  pedidoSemRastreio, pedidoComRastreio, getCodigoRastreio, isMercadoEnvios,
+  getPeriodo,
+  getPedidosPorStatus, getPedidoDetalhe,
+  getCodigoRastreio, isMercadoEnvios,
   alterarSituacao,
   jaProcessado, marcarProcessado, limparMemoriaAntiga
 } = require('./blingApi');
@@ -48,21 +48,33 @@ async function _fluxo1(token) {
 
   console.log(`[F1] ${lista.length} encontrados | processando ${batch.length}`);
 
-  const primML = batch.find(p => isMercadoEnvios(p));
-  if (primML) {
-    console.log(`[DEBUG] Pedido ${primML.id} transporte:`, JSON.stringify(primML.transporte || {}).substring(0, 800));
-  }
-
   let movidos = 0, pulados = 0, ignorados = 0;
 
   for (const p of batch) {
     if (jaProcessado('F1', p.id)) { pulados++; continue; }
 
-    const rastreio = getCodigoRastreio(p);
+    if (!isMercadoEnvios(p)) {
+      marcarProcessado('F1', p.id);
+      ignorados++;
+      continue;
+    }
+
+    let pDetalhe = p;
+    try {
+      pDetalhe = await getPedidoDetalhe(token, p.id) || p;
+    } catch (e) {
+      if (e.code === 401 || e.message === 'TOKEN_EXPIRADO') throw e;
+      console.error(`[F1] Erro ao buscar detalhe ${p.id}:`, e.message);
+    }
+
+    const rastreio = getCodigoRastreio(pDetalhe);
     console.log(`[F1] Pedido ${p.id} | loja=${p.loja?.id} | rastreio="${rastreio}"`);
 
-    if (p.situacao?.id !== SITUACAO_ATENDIDO) { marcarProcessado('F1', p.id); ignorados++; continue; }
-    if (!pedidoSemRastreio(p)) { marcarProcessado('F1', p.id); ignorados++; continue; }
+    if (rastreio !== '') {
+      marcarProcessado('F1', p.id);
+      ignorados++;
+      continue;
+    }
 
     try {
       await alterarSituacao(token, p.id, SITUACAO_AGUARDANDO);
@@ -89,11 +101,19 @@ async function _fluxo2(token) {
   for (const p of batch) {
     if (jaProcessado('F2', p.id)) { console.log(`[F2] Pedido ${p.id} já processado hoje — pulando`); continue; }
 
-    const rastreio = getCodigoRastreio(p);
+    let pDetalhe = p;
+    try {
+      pDetalhe = await getPedidoDetalhe(token, p.id) || p;
+    } catch (e) {
+      if (e.code === 401 || e.message === 'TOKEN_EXPIRADO') throw e;
+      console.error(`[F2] Erro ao buscar detalhe ${p.id}:`, e.message);
+    }
+
+    const rastreio = getCodigoRastreio(pDetalhe);
     console.log(`[F2] Pedido ${p.id} | loja=${p.loja?.id} | rastreio="${rastreio}"`);
 
     if (p.situacao?.id !== SITUACAO_AGUARDANDO) continue;
-    if (!pedidoComRastreio(p)) continue;
+    if (rastreio === '') continue;
 
     try {
       await alterarSituacao(token, p.id, SITUACAO_ATENDIDO);
