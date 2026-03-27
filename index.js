@@ -114,16 +114,12 @@ const server = http.createServer(async (req, res) => {
       return json(res, 202, { queued: 'rotinaManha' });
     }
   }
- // ── Debug: detalhe de pedido ─────────────────────────────────
-  if (method === 'GET' && url.startsWith('/debug/pedido/')) {
-    const partes = url.split('/');
-    const idPedido = partes[partes.length - 1];
+ // ── Debug: token atual ───────────────────────────────────────
+  if (method === 'GET' && url === '/debug/token') {
     try {
-      const { getPedidoDetalhe } = require('./blingApi');
       const { garantirToken } = require('./tokenManager');
       const token = await garantirToken();
-      const detalhe = await getPedidoDetalhe(token, idPedido);
-      return json(res, 200, detalhe);
+      return json(res, 200, { token });
     } catch (e) {
       return json(res, 500, { error: e.message });
     }
