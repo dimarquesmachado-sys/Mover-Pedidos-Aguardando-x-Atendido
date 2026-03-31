@@ -234,7 +234,7 @@ async function rotinaManha() {
   await comGuard('F2', () => comTokenRenewable(_fluxo2));
 }
 
-aasync function rotinaNFe() {
+async function rotinaNFe() {
   console.log('[rotinas] === NF-e ML ===');
   await comGuard('F3', () => comTokenRenewable(_fluxo3));
 }
