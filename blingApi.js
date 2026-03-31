@@ -181,7 +181,7 @@ function limparMemoriaAntiga() {
 }
 
 module.exports = {
-  SITUACAO_ATENDIDO, SITUACAO_AGUARDANDO,
+  SITUACAO_ATENDIDO, SITUACAO_AGUARDANDO, ME_LOJA_IDS,
   getPeriodo, sleep,
   getPedidosPorStatus, getPedidoDetalhe,
   isMercadoEnvios, isMercadoEnviosPorLoja,

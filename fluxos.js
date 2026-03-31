@@ -3,6 +3,7 @@
 const { garantirToken, renovarToken } = require('./tokenManager');
 const {
   SITUACAO_ATENDIDO, SITUACAO_AGUARDANDO,
+  ME_LOJA_IDS,
   getPeriodo,
   getPedidosPorStatus, getPedidoDetalhe,
   getCodigoRastreio, isMercadoEnvios,
@@ -137,6 +138,8 @@ async function _fluxo2(token) {
 }
 
 // ─── F3: Sincronizar NF-e do Bling para o ML ─────────────────────────────────
+// A NF já contém: loja.id (para filtrar ML) e numeroPedidoLoja (nº do pedido ML)
+// Não precisa buscar o pedido separado — lógica simplificada.
 
 async function _fluxo3(token) {
   const { inicial, final } = getPeriodo();
@@ -150,7 +153,7 @@ async function _fluxo3(token) {
 
     if (jaProcessado('F3', nfId)) { puladas++; continue; }
 
-    // Buscar detalhe da NF para pegar o pedido vinculado
+    // Buscar detalhe da NF
     let nfDetalhe;
     try {
       nfDetalhe = await getNFeDetalhe(token, nfId);
@@ -160,46 +163,31 @@ async function _fluxo3(token) {
       continue;
     }
 
-    // Verificar se tem pedido de venda vinculado
-    const pedidoVinculado = nfDetalhe?.pedidoVenda;
-    if (!pedidoVinculado?.id) {
-      console.log(`[F3] NF ${nfId} sem pedido vinculado — ignorando`);
+    // Verificar se é da loja ML
+    const lojaId = nfDetalhe?.loja?.id;
+    if (!ME_LOJA_IDS.includes(lojaId)) {
+      console.log(`[F3] NF ${nfId} → loja=${lojaId} (não é ML) — ignorando`);
       marcarProcessado('F3', nfId);
       ignoradas++;
       continue;
     }
 
-    // Buscar detalhe do pedido
-    let pedido;
-    try {
-      pedido = await getPedidoDetalhe(token, pedidoVinculado.id);
-    } catch (e) {
-      if (e.code === 401 || e.message === 'TOKEN_EXPIRADO') throw e;
-      console.error(`[F3] Erro detalhe pedido ${pedidoVinculado.id}:`, e.message);
-      continue;
-    }
-
-    // Verificar se pedido está ATENDIDO
-    if (pedido?.situacao?.id !== SITUACAO_ATENDIDO) {
-      console.log(`[F3] NF ${nfId} → Pedido ${pedidoVinculado.id} situação=${pedido?.situacao?.id} (não é ATENDIDO) — ignorando`);
+    // Verificar se tem número de pedido ML
+    const numeroPedidoLoja = nfDetalhe?.numeroPedidoLoja;
+    if (!numeroPedidoLoja) {
+      console.log(`[F3] NF ${nfId} → sem numeroPedidoLoja — ignorando`);
       marcarProcessado('F3', nfId);
       ignoradas++;
       continue;
     }
 
-    // Verificar se é loja ML
-    if (!isMercadoEnvios(pedido)) {
-      marcarProcessado('F3', nfId);
-      ignoradas++;
-      continue;
-    }
-
-    console.log(`[F3] NF ${nfId} → Pedido ${pedidoVinculado.id} → ML ATENDIDO. Enviando...`);
+    console.log(`[F3] NF ${nfId} → Pedido ML ${numeroPedidoLoja}. Enviando...`);
 
     try {
       await enviarNFeParaLojaVirtual(token, nfId);
       marcarProcessado('F3', nfId);
       sincronizadas++;
+      console.log(`[F3] ✅ NF ${nfId} → Pedido ML ${numeroPedidoLoja} enviada com sucesso!`);
     } catch (e) {
       if (e.code === 401 || e.message === 'TOKEN_EXPIRADO') throw e;
       console.error(`[F3] ❌ Erro ao enviar NF ${nfId}:`, e.message);
