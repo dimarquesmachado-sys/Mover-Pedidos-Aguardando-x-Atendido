@@ -169,7 +169,7 @@ async function _fluxo3(token) {
       continue;
     }
 
-    // Buscar detalhe do pedido para confirmar se é loja ML
+    // Buscar detalhe do pedido
     let pedido;
     try {
       pedido = await getPedidoDetalhe(token, pedidoVinculado.id);
@@ -179,13 +179,22 @@ async function _fluxo3(token) {
       continue;
     }
 
+    // Verificar se pedido está ATENDIDO
+    if (pedido?.situacao?.id !== SITUACAO_ATENDIDO) {
+      console.log(`[F3] NF ${nfId} → Pedido ${pedidoVinculado.id} situação=${pedido?.situacao?.id} (não é ATENDIDO) — ignorando`);
+      marcarProcessado('F3', nfId);
+      ignoradas++;
+      continue;
+    }
+
+    // Verificar se é loja ML
     if (!isMercadoEnvios(pedido)) {
       marcarProcessado('F3', nfId);
       ignoradas++;
       continue;
     }
 
-    console.log(`[F3] NF ${nfId} → Pedido ${pedidoVinculado.id} → ML. Enviando...`);
+    console.log(`[F3] NF ${nfId} → Pedido ${pedidoVinculado.id} → ML ATENDIDO. Enviando...`);
 
     try {
       await enviarNFeParaLojaVirtual(token, nfId);
