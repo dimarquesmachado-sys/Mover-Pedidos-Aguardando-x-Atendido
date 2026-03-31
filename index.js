@@ -114,6 +114,20 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
+  if (method === 'GET' && url.startsWith('/debug/nfe/')) {
+    const partes = url.split('/');
+    const idNfe = partes[partes.length - 1];
+    try {
+      const { getNFeDetalhe } = require('./blingApi');
+      const { garantirToken } = require('./tokenManager');
+      const token = await garantirToken();
+      const detalhe = await getNFeDetalhe(token, idNfe);
+      return json(res, 200, detalhe);
+    } catch (e) {
+      return json(res, 500, { error: e.message });
+    }
+  }
+
   if (url === '/copiar-tokens' && method === 'POST') {
     try {
       const fetch = require('node-fetch');
