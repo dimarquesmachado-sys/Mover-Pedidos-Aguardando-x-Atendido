@@ -7,7 +7,8 @@ const {
   getPedidosPorStatus, getPedidoDetalhe,
   getCodigoRastreio, isMercadoEnvios,
   alterarSituacao,
-  jaProcessado, marcarProcessado, limparMemoriaAntiga
+  jaProcessado, marcarProcessado, limparMemoriaAntiga,
+  getNFesAutorizadas, getNFeDetalhe, enviarNFeParaLojaVirtual
 } = require('./blingApi');
 
 const MAX_F1 = parseInt(process.env.MAX_PEDIDOS_F1 || '40');
@@ -72,13 +73,8 @@ async function _fluxo1(token) {
     const volumes = pDetalhe?.transporte?.volumes || [];
     console.log(`[F1] Pedido ${p.id} | loja=${p.loja?.id} | rastreio="${rastreio}" | flex=${isFlex} | volumes=${volumes.length}`);
 
-    // FLEX = entrega por motoboy → não move
     if (isFlex) { marcarProcessado('F1', p.id); ignorados++; continue; }
-
-    // Já tem rastreio → não move
     if (rastreio !== '') { marcarProcessado('F1', p.id); ignorados++; continue; }
-
-    // volumes[] vazio = etiqueta gerada mas não sincronizada pelo ML → não move
     if (volumes.length === 0) { marcarProcessado('F1', p.id); ignorados++; continue; }
 
     try {
@@ -124,7 +120,6 @@ async function _fluxo2(token) {
 
     if (p.situacao?.id !== SITUACAO_AGUARDANDO) continue;
 
-    // Move se: FLEX, ou tem rastreio, ou volumes vazio há mais de 1 dia (importação quebrada)
     const deveAtender = isFlex || rastreio !== '' || (volumes.length === 0 && maisDeUmDia);
     if (!deveAtender) continue;
 
@@ -141,6 +136,72 @@ async function _fluxo2(token) {
   console.log(`[F2] movidos=${movidos}`);
 }
 
+// ─── F3: Sincronizar NF-e do Bling para o ML ─────────────────────────────────
+
+async function _fluxo3(token) {
+  const { inicial, final } = getPeriodo();
+  const nfs = await getNFesAutorizadas(token, inicial, final);
+  console.log(`[F3] ${nfs.length} NFs autorizadas encontradas`);
+
+  let sincronizadas = 0, puladas = 0, ignoradas = 0;
+
+  for (const nf of nfs) {
+    const nfId = nf.id;
+
+    if (jaProcessado('F3', nfId)) { puladas++; continue; }
+
+    // Buscar detalhe da NF para pegar o pedido vinculado
+    let nfDetalhe;
+    try {
+      nfDetalhe = await getNFeDetalhe(token, nfId);
+    } catch (e) {
+      if (e.code === 401 || e.message === 'TOKEN_EXPIRADO') throw e;
+      console.error(`[F3] Erro detalhe NF ${nfId}:`, e.message);
+      continue;
+    }
+
+    // Verificar se tem pedido de venda vinculado
+    const pedidoVinculado = nfDetalhe?.pedidoVenda;
+    if (!pedidoVinculado?.id) {
+      console.log(`[F3] NF ${nfId} sem pedido vinculado — ignorando`);
+      marcarProcessado('F3', nfId);
+      ignoradas++;
+      continue;
+    }
+
+    // Buscar detalhe do pedido para confirmar se é loja ML
+    let pedido;
+    try {
+      pedido = await getPedidoDetalhe(token, pedidoVinculado.id);
+    } catch (e) {
+      if (e.code === 401 || e.message === 'TOKEN_EXPIRADO') throw e;
+      console.error(`[F3] Erro detalhe pedido ${pedidoVinculado.id}:`, e.message);
+      continue;
+    }
+
+    if (!isMercadoEnvios(pedido)) {
+      marcarProcessado('F3', nfId);
+      ignoradas++;
+      continue;
+    }
+
+    console.log(`[F3] NF ${nfId} → Pedido ${pedidoVinculado.id} → ML. Enviando...`);
+
+    try {
+      await enviarNFeParaLojaVirtual(token, nfId);
+      marcarProcessado('F3', nfId);
+      sincronizadas++;
+    } catch (e) {
+      if (e.code === 401 || e.message === 'TOKEN_EXPIRADO') throw e;
+      console.error(`[F3] ❌ Erro ao enviar NF ${nfId}:`, e.message);
+    }
+  }
+
+  console.log(`[F3] sincronizadas=${sincronizadas} | ignoradas=${ignoradas} | já feitas=${puladas}`);
+}
+
+// ─── Rotinas públicas ─────────────────────────────────────────────────────────
+
 async function rotinaExpediente() {
   await comGuard('F1', () => comTokenRenewable(_fluxo1));
 }
@@ -156,4 +217,9 @@ async function rotinaManha() {
   await comGuard('F2', () => comTokenRenewable(_fluxo2));
 }
 
-module.exports = { rotinaExpediente, rotinaVirada, rotinaManha };
+async function rotinaNFe() {
+  console.log('[rotinas] === NF-e ML ===');
+  await comGuard('F1', () => comTokenRenewable(_fluxo3));
+}
+
+module.exports = { rotinaExpediente, rotinaVirada, rotinaManha, rotinaNFe };

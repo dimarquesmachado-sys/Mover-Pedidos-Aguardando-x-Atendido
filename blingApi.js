@@ -84,7 +84,6 @@ async function getPedidosPorStatus(token, statusId, dataInicial, dataFinal) {
 function getCodigoRastreio(p) {
   const v = p?.transporte?.volumes?.[0];
 
-  // Só considera o código de rastreamento real em volumes
   const codigo =
     v?.codigoRastreamento ||
     v?.codigoRastreio ||
@@ -120,6 +119,52 @@ async function alterarSituacao(token, idPedido, novaSituacao) {
   console.log(`[blingApi] Pedido ${idPedido} → situação ${novaSituacao} ✓`);
 }
 
+// ─── F3: NF-e ────────────────────────────────────────────────────────────────
+
+async function getNFesAutorizadas(token, dataInicial, dataFinal) {
+  const todos = [];
+  for (let pag = 1; pag <= MAX_PAGINAS; pag++) {
+    const url =
+      `${BLING_API}/nfe?situacao=5` +
+      `&dataEmissaoInicial=${dataInicial}&dataEmissaoFinal=${dataFinal}` +
+      `&limite=100&pagina=${pag}`;
+    const resp = await fetchComRetry(
+      url,
+      { headers: { Authorization: `Bearer ${token}` } },
+      `lista NFs pag=${pag}`
+    );
+    const data  = await resp.json();
+    const lista = data.data || [];
+    console.log(`[blingApi] NFs autorizadas pag=${pag} → ${lista.length}`);
+    todos.push(...lista);
+    if (lista.length < 100) break;
+  }
+  return todos;
+}
+
+async function getNFeDetalhe(token, nfeId) {
+  const url  = `${BLING_API}/nfe/${nfeId}`;
+  const resp = await fetchComRetry(
+    url,
+    { headers: { Authorization: `Bearer ${token}` } },
+    `detalhe NF=${nfeId}`
+  );
+  const data = await resp.json();
+  return data.data || null;
+}
+
+async function enviarNFeParaLojaVirtual(token, nfeId) {
+  const url = `${BLING_API}/nfe/${nfeId}/enviar-loja-virtual`;
+  await fetchComRetry(
+    url,
+    { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } },
+    `enviar NF=${nfeId} loja virtual`
+  );
+  console.log(`[blingApi] NF ${nfeId} → loja virtual ✓`);
+}
+
+// ─── Memória do dia ───────────────────────────────────────────────────────────
+
 const _mem = new Map();
 const hojeStr      = () => new Date().toISOString().split('T')[0];
 const chave        = (f, id) => `${f}:${hojeStr()}:${id}`;
@@ -142,5 +187,6 @@ module.exports = {
   isMercadoEnvios, isMercadoEnviosPorLoja,
   getCodigoRastreio,
   alterarSituacao,
-  jaProcessado, marcarProcessado, limparMemoriaAntiga
+  jaProcessado, marcarProcessado, limparMemoriaAntiga,
+  getNFesAutorizadas, getNFeDetalhe, enviarNFeParaLojaVirtual
 };

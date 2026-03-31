@@ -2,7 +2,7 @@
 
 const http  = require('http');
 const cron  = require('node-cron');
-const { rotinaExpediente, rotinaVirada, rotinaManha } = require('./fluxos');
+const { rotinaExpediente, rotinaVirada, rotinaManha, rotinaNFe } = require('./fluxos');
 const { gerarTokenInicial } = require('./tokenManager');
 
 const TZ = process.env.TZ || 'America/Sao_Paulo';
@@ -37,6 +37,12 @@ cron.schedule('10 0 * * *', () => {
 cron.schedule('*/15 6-23 * * *', () => {
   console.log(`\n[CRON] F2 Diurno ${ts()}`);
   rotinaManha().catch(e => console.error('[CRON] F2 Diurno erro:', e.message));
+}, { timezone: TZ });
+
+// F3 — NF-e a cada 30 min das 06h às 23h
+cron.schedule('*/30 6-23 * * *', () => {
+  console.log(`\n[CRON] NF-e ML ${ts()}`);
+  rotinaNFe().catch(e => console.error('[CRON] NF-e erro:', e.message));
 }, { timezone: TZ });
 
 function ts() {
@@ -81,6 +87,7 @@ const server = http.createServer(async (req, res) => {
     if (url === '/run/expedicao') { rotinaExpediente().catch(console.error); return json(res, 202, { queued: 'rotinaExpediente' }); }
     if (url === '/run/virada')    { rotinaVirada().catch(console.error);     return json(res, 202, { queued: 'rotinaVirada' }); }
     if (url === '/run/manha')     { rotinaManha().catch(console.error);      return json(res, 202, { queued: 'rotinaManha' }); }
+    if (url === '/run/nfe-ml')    { rotinaNFe().catch(console.error);        return json(res, 202, { queued: 'rotinaNFe' }); }
   }
 
   if (method === 'GET' && url === '/debug/token') {
@@ -106,7 +113,8 @@ const server = http.createServer(async (req, res) => {
       return json(res, 500, { error: e.message });
     }
   }
-if (url === '/copiar-tokens' && method === 'POST') {
+
+  if (url === '/copiar-tokens' && method === 'POST') {
     try {
       const fetch = require('node-fetch');
       const fs = require('fs');
@@ -122,6 +130,7 @@ if (url === '/copiar-tokens' && method === 'POST') {
       return json(res, 500, { error: e.message });
     }
   }
+
   json(res, 404, { error: 'not found' });
 });
 
