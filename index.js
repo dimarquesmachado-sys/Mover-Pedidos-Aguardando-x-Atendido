@@ -4,6 +4,7 @@ const http  = require('http');
 const cron  = require('node-cron');
 const { rotinaExpediente, rotinaVirada, rotinaManha, rotinaNFe } = require('./fluxos');
 const { gerarTokenInicial } = require('./tokenManager');
+const { trocarCodigoPorToken, gerarUrlAutorizacao } = require('./mlTokenManager');
 
 const TZ = process.env.TZ || 'America/Sao_Paulo';
 
@@ -54,6 +55,11 @@ function json(res, code, body) {
   res.end(JSON.stringify(body));
 }
 
+function html(res, code, body) {
+  res.writeHead(code, { 'Content-Type': 'text/html; charset=utf-8' });
+  res.end(body);
+}
+
 function readBody(req) {
   return new Promise((resolve, reject) => {
     let b = '';
@@ -68,29 +74,56 @@ function readBody(req) {
 
 const server = http.createServer(async (req, res) => {
   const { method, url } = req;
+  const urlObj = new URL(url, 'http://localhost');
+  const path   = urlObj.pathname;
 
-  if (url === '/health' || url === '/') {
+  if (path === '/health' || path === '/') {
     return json(res, 200, { status: 'ok', service: 'bling-automacao-girassol', time: ts() });
   }
 
-  if (url === '/setup' && method === 'POST') {
+  if (path === '/setup' && method === 'POST') {
     const body = await readBody(req);
     try {
       await gerarTokenInicial(body.auth_code);
-      return json(res, 200, { ok: true, message: 'Tokens gerados e salvos ✓' });
+      return json(res, 200, { ok: true, message: 'Tokens Bling gerados e salvos ✓' });
     } catch (e) {
       return json(res, 400, { ok: false, error: e.message });
     }
   }
 
-  if (method === 'POST') {
-    if (url === '/run/expedicao') { rotinaExpediente().catch(console.error); return json(res, 202, { queued: 'rotinaExpediente' }); }
-    if (url === '/run/virada')    { rotinaVirada().catch(console.error);     return json(res, 202, { queued: 'rotinaVirada' }); }
-    if (url === '/run/manha')     { rotinaManha().catch(console.error);      return json(res, 202, { queued: 'rotinaManha' }); }
-    if (url === '/run/nfe-ml')    { rotinaNFe().catch(console.error);        return json(res, 202, { queued: 'rotinaNFe' }); }
+  // ─── ML OAuth ────────────────────────────────────────────────────────────────
+
+  // Passo 1: redireciona para autorização do ML
+  if (path === '/setup-ml' && method === 'GET') {
+    const authUrl = gerarUrlAutorizacao();
+    res.writeHead(302, { Location: authUrl });
+    return res.end();
   }
 
-  if (method === 'GET' && url === '/debug/token') {
+  // Passo 2: ML redireciona de volta aqui com o code
+  if (path === '/callback-ml' && method === 'GET') {
+    const code = urlObj.searchParams.get('code');
+    if (!code) return html(res, 400, '<h2>❌ Código não encontrado na URL</h2>');
+    try {
+      await trocarCodigoPorToken(code);
+      return html(res, 200, '<h2>✅ Token do ML obtido e salvo com sucesso! Pode fechar esta aba.</h2>');
+    } catch (e) {
+      return html(res, 500, `<h2>❌ Erro: ${e.message}</h2>`);
+    }
+  }
+
+  // ─── Runs manuais ─────────────────────────────────────────────────────────────
+
+  if (method === 'POST') {
+    if (path === '/run/expedicao') { rotinaExpediente().catch(console.error); return json(res, 202, { queued: 'rotinaExpediente' }); }
+    if (path === '/run/virada')    { rotinaVirada().catch(console.error);     return json(res, 202, { queued: 'rotinaVirada' }); }
+    if (path === '/run/manha')     { rotinaManha().catch(console.error);      return json(res, 202, { queued: 'rotinaManha' }); }
+    if (path === '/run/nfe-ml')    { rotinaNFe().catch(console.error);        return json(res, 202, { queued: 'rotinaNFe' }); }
+  }
+
+  // ─── Debugs ───────────────────────────────────────────────────────────────────
+
+  if (method === 'GET' && path === '/debug/token') {
     try {
       const { garantirToken } = require('./tokenManager');
       const token = await garantirToken();
@@ -100,13 +133,12 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  if (method === 'GET' && url.startsWith('/debug/pedido/')) {
-    const partes = url.split('/');
-    const idPedido = partes[partes.length - 1];
+  if (method === 'GET' && path.startsWith('/debug/pedido/')) {
+    const idPedido = path.split('/').pop();
     try {
       const { getPedidoDetalhe } = require('./blingApi');
-      const { garantirToken } = require('./tokenManager');
-      const token = await garantirToken();
+      const { garantirToken }    = require('./tokenManager');
+      const token   = await garantirToken();
       const detalhe = await getPedidoDetalhe(token, idPedido);
       return json(res, 200, detalhe);
     } catch (e) {
@@ -114,13 +146,12 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  if (method === 'GET' && url.startsWith('/debug/nfe/')) {
-    const partes = url.split('/');
-    const idNfe = partes[partes.length - 1];
+  if (method === 'GET' && path.startsWith('/debug/nfe/')) {
+    const idNfe = path.split('/').pop();
     try {
       const { getNFeDetalhe } = require('./blingApi');
       const { garantirToken } = require('./tokenManager');
-      const token = await garantirToken();
+      const token   = await garantirToken();
       const detalhe = await getNFeDetalhe(token, idNfe);
       return json(res, 200, detalhe);
     } catch (e) {
@@ -128,15 +159,15 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  if (url === '/copiar-tokens' && method === 'POST') {
+  if (path === '/copiar-tokens' && method === 'POST') {
     try {
-      const fetch = require('node-fetch');
-      const fs = require('fs');
+      const fetch  = require('node-fetch');
+      const fs     = require('fs');
       const tokens = JSON.parse(fs.readFileSync(process.env.TOKEN_FILE || '/data/tokens.json', 'utf8'));
-      const resp = await fetch('https://girassol-corrigir-nome-cidade-x-cep-x-nfs.onrender.com/setup-token', {
-        method: 'POST',
+      const resp   = await fetch('https://girassol-corrigir-nome-cidade-x-cep-x-nfs.onrender.com/setup-token', {
+        method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(tokens)
+        body:    JSON.stringify(tokens)
       });
       const data = await resp.json();
       return json(res, 200, { ok: true, resultado: data });

@@ -1,6 +1,8 @@
 'use strict';
 
 const { garantirToken, renovarToken } = require('./tokenManager');
+const { garantirTokenML }             = require('./mlTokenManager');
+const { enviarNFeParaML }             = require('./mlApi');
 const {
   SITUACAO_ATENDIDO, SITUACAO_AGUARDANDO,
   ME_LOJA_IDS,
@@ -9,7 +11,7 @@ const {
   getCodigoRastreio, isMercadoEnvios,
   alterarSituacao,
   jaProcessado, marcarProcessado, limparMemoriaAntiga,
-  getNFesAutorizadas, getNFeDetalhe, enviarNFeParaLojaVirtual
+  getNFesAutorizadas, getNFeDetalhe
 } = require('./blingApi');
 
 const MAX_F1 = parseInt(process.env.MAX_PEDIDOS_F1 || '40');
@@ -70,11 +72,11 @@ async function _fluxo1(token) {
     }
 
     const rastreio = getCodigoRastreio(pDetalhe);
-    const isFlex = String(pDetalhe?.transporte?.volumes?.[0]?.servico || '').toUpperCase().includes('FLEX');
-    const volumes = pDetalhe?.transporte?.volumes || [];
+    const isFlex   = String(pDetalhe?.transporte?.volumes?.[0]?.servico || '').toUpperCase().includes('FLEX');
+    const volumes  = pDetalhe?.transporte?.volumes || [];
     console.log(`[F1] Pedido ${p.id} | loja=${p.loja?.id} | rastreio="${rastreio}" | flex=${isFlex} | volumes=${volumes.length}`);
 
-    if (isFlex) { marcarProcessado('F1', p.id); ignorados++; continue; }
+    if (isFlex)          { marcarProcessado('F1', p.id); ignorados++; continue; }
     if (rastreio !== '') { marcarProcessado('F1', p.id); ignorados++; continue; }
     if (volumes.length === 0) { marcarProcessado('F1', p.id); ignorados++; continue; }
 
@@ -111,11 +113,11 @@ async function _fluxo2(token) {
       console.error(`[F2] Erro ao buscar detalhe ${p.id}:`, e.message);
     }
 
-    const rastreio = getCodigoRastreio(pDetalhe);
-    const isFlex = String(pDetalhe?.transporte?.volumes?.[0]?.servico || '').toUpperCase().includes('FLEX');
-    const volumes = pDetalhe?.transporte?.volumes || [];
+    const rastreio    = getCodigoRastreio(pDetalhe);
+    const isFlex      = String(pDetalhe?.transporte?.volumes?.[0]?.servico || '').toUpperCase().includes('FLEX');
+    const volumes     = pDetalhe?.transporte?.volumes || [];
     const dataEmissao = new Date(p.data);
-    const hoje = new Date(); hoje.setHours(0, 0, 0, 0);
+    const hoje        = new Date(); hoje.setHours(0, 0, 0, 0);
     const maisDeUmDia = dataEmissao < hoje;
     console.log(`[F2] Pedido ${p.id} | loja=${p.loja?.id} | rastreio="${rastreio}" | flex=${isFlex} | volumes=${volumes.length}`);
 
@@ -137,14 +139,22 @@ async function _fluxo2(token) {
   console.log(`[F2] movidos=${movidos}`);
 }
 
-// ─── F3: Sincronizar NF-e do Bling para o ML ─────────────────────────────────
-// A NF já contém: loja.id (para filtrar ML) e numeroPedidoLoja (nº do pedido ML)
-// Não precisa buscar o pedido separado — lógica simplificada.
+// ─── F3: Sincronizar NF-e do Bling para o ML via API do ML ───────────────────
 
-async function _fluxo3(token) {
+async function _fluxo3(tokenBling) {
   const { inicial, final } = getPeriodo();
-  const nfs = await getNFesAutorizadas(token, inicial, final);
+  const nfs = await getNFesAutorizadas(tokenBling, inicial, final);
   console.log(`[F3] ${nfs.length} NFs autorizadas encontradas`);
+
+  // Obter token do ML
+  let tokenML;
+  try {
+    tokenML = await garantirTokenML();
+  } catch (e) {
+    console.error('[F3] ❌ Token ML não disponível:', e.message);
+    console.error('[F3] Acesse /setup-ml para autorizar o app do ML');
+    return;
+  }
 
   let sincronizadas = 0, puladas = 0, ignoradas = 0;
 
@@ -153,44 +163,54 @@ async function _fluxo3(token) {
 
     if (jaProcessado('F3', nfId)) { puladas++; continue; }
 
-    // Buscar detalhe da NF
+    // Verificar se é da loja ML pela listagem
+    const lojaId = nf.loja?.id;
+    if (!ME_LOJA_IDS.includes(lojaId)) {
+      marcarProcessado('F3', nfId);
+      ignoradas++;
+      continue;
+    }
+
+    // Buscar detalhe da NF para pegar numeroPedidoLoja e chaveAcesso
     let nfDetalhe;
     try {
-      nfDetalhe = await getNFeDetalhe(token, nfId);
+      nfDetalhe = await getNFeDetalhe(tokenBling, nfId);
     } catch (e) {
       if (e.code === 401 || e.message === 'TOKEN_EXPIRADO') throw e;
       console.error(`[F3] Erro detalhe NF ${nfId}:`, e.message);
       continue;
     }
 
-    // Verificar se é da loja ML
-    const lojaId = nfDetalhe?.loja?.id;
-    if (!ME_LOJA_IDS.includes(lojaId)) {
-      console.log(`[F3] NF ${nfId} → loja=${lojaId} (não é ML) — ignorando`);
-      marcarProcessado('F3', nfId);
-      ignoradas++;
-      continue;
-    }
-
-    // Verificar se tem número de pedido ML
     const numeroPedidoLoja = nfDetalhe?.numeroPedidoLoja;
     if (!numeroPedidoLoja) {
-      console.log(`[F3] NF ${nfId} → sem numeroPedidoLoja — ignorando`);
+      console.log(`[F3] NF ${nfId} sem numeroPedidoLoja — ignorando`);
       marcarProcessado('F3', nfId);
       ignoradas++;
       continue;
     }
 
-    console.log(`[F3] NF ${nfId} → Pedido ML ${numeroPedidoLoja}. Enviando...`);
+    console.log(`[F3] NF ${nfId} → Pedido ML ${numeroPedidoLoja}. Enviando via API ML...`);
 
     try {
-      await enviarNFeParaLojaVirtual(token, nfId);
+      await enviarNFeParaML(tokenML, numeroPedidoLoja, nfDetalhe);
       marcarProcessado('F3', nfId);
       sincronizadas++;
-      console.log(`[F3] ✅ NF ${nfId} → Pedido ML ${numeroPedidoLoja} enviada com sucesso!`);
+      console.log(`[F3] ✅ NF ${nfId} → Pedido ML ${numeroPedidoLoja} enviada!`);
     } catch (e) {
-      if (e.code === 401 || e.message === 'TOKEN_EXPIRADO') throw e;
       console.error(`[F3] ❌ Erro ao enviar NF ${nfId}:`, e.message);
+      // Se token ML expirou, tentar renovar e retentar uma vez
+      if (e.message.includes('401')) {
+        try {
+          const { renovarTokenML } = require('./mlTokenManager');
+          tokenML = await renovarTokenML();
+          await enviarNFeParaML(tokenML, numeroPedidoLoja, nfDetalhe);
+          marcarProcessado('F3', nfId);
+          sincronizadas++;
+          console.log(`[F3] ✅ NF ${nfId} enviada após renovar token ML!`);
+        } catch (e2) {
+          console.error(`[F3] ❌ Falhou mesmo após renovar token:`, e2.message);
+        }
+      }
     }
   }
 
