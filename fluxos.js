@@ -17,7 +17,7 @@ const {
 const MAX_F1 = parseInt(process.env.MAX_PEDIDOS_F1 || '40');
 const MAX_F2 = parseInt(process.env.MAX_PEDIDOS_F2 || '60');
 
-const _rodando = { F1: false, F2: false };
+const _rodando = { F1: false, F2: false, F3: false };
 
 async function comGuard(fluxo, fn) {
   if (_rodando[fluxo]) {
@@ -234,9 +234,9 @@ async function rotinaManha() {
   await comGuard('F2', () => comTokenRenewable(_fluxo2));
 }
 
-async function rotinaNFe() {
+aasync function rotinaNFe() {
   console.log('[rotinas] === NF-e ML ===');
-  await comGuard('F1', () => comTokenRenewable(_fluxo3));
+  await comGuard('F3', () => comTokenRenewable(_fluxo3));
 }
 
 module.exports = { rotinaExpediente, rotinaVirada, rotinaManha, rotinaNFe };
