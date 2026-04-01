@@ -1,23 +1,19 @@
 'use strict';
 
 const { garantirToken, renovarToken } = require('./tokenManager');
-const { garantirTokenML }             = require('./mlTokenManager');
-const { enviarNFeParaML }             = require('./mlApi');
 const {
   SITUACAO_ATENDIDO, SITUACAO_AGUARDANDO,
-  ME_LOJA_IDS,
   getPeriodo,
   getPedidosPorStatus, getPedidoDetalhe,
-  getCodigoRastreio, isMercadoEnvios,
+  getCodigoRastreio, isMercadoEnvios, isMercadoEnviosPorLoja,
   alterarSituacao,
-  jaProcessado, marcarProcessado, limparMemoriaAntiga,
-  getNFesAutorizadas, getNFeDetalhe
+  jaProcessado, marcarProcessado, limparMemoriaAntiga
 } = require('./blingApi');
 
 const MAX_F1 = parseInt(process.env.MAX_PEDIDOS_F1 || '40');
 const MAX_F2 = parseInt(process.env.MAX_PEDIDOS_F2 || '60');
 
-const _rodando = { F1: false, F2: false, F3: false };
+const _rodando = { F1: false, F2: false };
 
 async function comGuard(fluxo, fn) {
   if (_rodando[fluxo]) {
@@ -55,10 +51,11 @@ async function _fluxo1(token) {
   let movidos = 0, pulados = 0, ignorados = 0;
 
   for (const p of batch) {
+    // Só pula se já foi MOVIDO hoje (não se foi apenas visto)
     if (jaProcessado('F1', p.id)) { pulados++; continue; }
 
-    if (!isMercadoEnvios(p)) {
-      marcarProcessado('F1', p.id);
+    // Não é pedido ML — ignora sem memorizar
+    if (!isMercadoEnviosPorLoja(p)) {
       ignorados++;
       continue;
     }
@@ -72,18 +69,26 @@ async function _fluxo1(token) {
     }
 
     const rastreio = getCodigoRastreio(pDetalhe);
-    const isFlex   = String(pDetalhe?.transporte?.volumes?.[0]?.servico || '').toUpperCase().includes('FLEX');
-    const volumes  = pDetalhe?.transporte?.volumes || [];
-    console.log(`[F1] Pedido ${p.id} | loja=${p.loja?.id} | rastreio="${rastreio}" | flex=${isFlex} | volumes=${volumes.length}`);
+    const isFlex = String(pDetalhe?.transporte?.volumes?.[0]?.servico || '').toUpperCase().includes('FLEX');
+    console.log(`[F1] Pedido ${p.id} | loja=${p.loja?.id} | rastreio="${rastreio}" | flex=${isFlex}`);
 
-    if (isFlex)          { marcarProcessado('F1', p.id); ignorados++; continue; }
-    if (rastreio !== '') { marcarProcessado('F1', p.id); ignorados++; continue; }
-    if (volumes.length === 0) { marcarProcessado('F1', p.id); ignorados++; continue; }
+    // FLEX = motoboy, sempre tem etiqueta → não move, não memoriza
+    if (isFlex) {
+      ignorados++;
+      continue;
+    }
 
+    // Tem rastreio → etiqueta OK, não move, não memoriza (pode checar de novo)
+    if (rastreio !== '') {
+      ignorados++;
+      continue;
+    }
+
+    // Sem rastreio → move para AGUARDANDO e memoriza (não precisa checar de novo hoje)
     try {
       await alterarSituacao(token, p.id, SITUACAO_AGUARDANDO);
       movidos++;
-      marcarProcessado('F1', p.id);
+      marcarProcessado('F1', p.id); // só memoriza quando move
     } catch (e) {
       if (e.code === 401 || e.message === 'TOKEN_EXPIRADO') throw e;
       console.error(`[F1] Erro pedido ${p.id}:`, e.message);
@@ -113,18 +118,15 @@ async function _fluxo2(token) {
       console.error(`[F2] Erro ao buscar detalhe ${p.id}:`, e.message);
     }
 
-    const rastreio    = getCodigoRastreio(pDetalhe);
-    const isFlex      = String(pDetalhe?.transporte?.volumes?.[0]?.servico || '').toUpperCase().includes('FLEX');
-    const volumes     = pDetalhe?.transporte?.volumes || [];
-    const dataEmissao = new Date(p.data);
-    const hoje        = new Date(); hoje.setHours(0, 0, 0, 0);
-    const maisDeUmDia = dataEmissao < hoje;
-    console.log(`[F2] Pedido ${p.id} | loja=${p.loja?.id} | rastreio="${rastreio}" | flex=${isFlex} | volumes=${volumes.length}`);
+    const rastreio = getCodigoRastreio(pDetalhe);
+    const isFlex = String(pDetalhe?.transporte?.volumes?.[0]?.servico || '').toUpperCase().includes('FLEX');
+    console.log(`[F2] Pedido ${p.id} | loja=${p.loja?.id} | rastreio="${rastreio}" | flex=${isFlex}`);
 
     if (p.situacao?.id !== SITUACAO_AGUARDANDO) continue;
 
-    const deveAtender = isFlex || rastreio !== '' || (volumes.length === 0 && maisDeUmDia);
-    if (!deveAtender) continue;
+    // FLEX sempre tem etiqueta disponível → move de volta para ATENDIDO
+    // Pedido normal sem rastreio → deixa em AGUARDANDO
+    if (!isFlex && rastreio === '') continue;
 
     try {
       await alterarSituacao(token, p.id, SITUACAO_ATENDIDO);
@@ -138,86 +140,6 @@ async function _fluxo2(token) {
 
   console.log(`[F2] movidos=${movidos}`);
 }
-
-// ─── F3: Sincronizar NF-e do Bling para o ML via API do ML ───────────────────
-
-async function _fluxo3(tokenBling) {
-  const { inicial, final } = getPeriodo();
-  const nfs = await getNFesAutorizadas(tokenBling, inicial, final);
-  console.log(`[F3] ${nfs.length} NFs autorizadas encontradas`);
-
-  // Obter token do ML
-  let tokenML;
-  try {
-    tokenML = await garantirTokenML();
-  } catch (e) {
-    console.error('[F3] ❌ Token ML não disponível:', e.message);
-    console.error('[F3] Acesse /setup-ml para autorizar o app do ML');
-    return;
-  }
-
-  let sincronizadas = 0, puladas = 0, ignoradas = 0;
-
-  for (const nf of nfs) {
-    const nfId = nf.id;
-
-    if (jaProcessado('F3', nfId)) { puladas++; continue; }
-
-    // Verificar se é da loja ML pela listagem
-    const lojaId = nf.loja?.id;
-    if (!ME_LOJA_IDS.includes(lojaId)) {
-      marcarProcessado('F3', nfId);
-      ignoradas++;
-      continue;
-    }
-
-    // Buscar detalhe da NF para pegar numeroPedidoLoja e chaveAcesso
-    let nfDetalhe;
-    try {
-      nfDetalhe = await getNFeDetalhe(tokenBling, nfId);
-    } catch (e) {
-      if (e.code === 401 || e.message === 'TOKEN_EXPIRADO') throw e;
-      console.error(`[F3] Erro detalhe NF ${nfId}:`, e.message);
-      continue;
-    }
-
-    const numeroPedidoLoja = nfDetalhe?.numeroPedidoLoja;
-    if (!numeroPedidoLoja) {
-      console.log(`[F3] NF ${nfId} sem numeroPedidoLoja — ignorando`);
-      marcarProcessado('F3', nfId);
-      ignoradas++;
-      continue;
-    }
-
-    console.log(`[F3] NF ${nfId} → Pedido ML ${numeroPedidoLoja}. Enviando via API ML...`);
-
-    try {
-      await enviarNFeParaML(tokenML, numeroPedidoLoja, nfDetalhe);
-      marcarProcessado('F3', nfId);
-      sincronizadas++;
-      console.log(`[F3] ✅ NF ${nfId} → Pedido ML ${numeroPedidoLoja} enviada!`);
-    } catch (e) {
-      console.error(`[F3] ❌ Erro ao enviar NF ${nfId}:`, e.message);
-      // Se token ML expirou, tentar renovar e retentar uma vez
-      if (e.message.includes('401')) {
-        try {
-          const { renovarTokenML } = require('./mlTokenManager');
-          tokenML = await renovarTokenML();
-          await enviarNFeParaML(tokenML, numeroPedidoLoja, nfDetalhe);
-          marcarProcessado('F3', nfId);
-          sincronizadas++;
-          console.log(`[F3] ✅ NF ${nfId} enviada após renovar token ML!`);
-        } catch (e2) {
-          console.error(`[F3] ❌ Falhou mesmo após renovar token:`, e2.message);
-        }
-      }
-    }
-  }
-
-  console.log(`[F3] sincronizadas=${sincronizadas} | ignoradas=${ignoradas} | já feitas=${puladas}`);
-}
-
-// ─── Rotinas públicas ─────────────────────────────────────────────────────────
 
 async function rotinaExpediente() {
   await comGuard('F1', () => comTokenRenewable(_fluxo1));
@@ -234,9 +156,4 @@ async function rotinaManha() {
   await comGuard('F2', () => comTokenRenewable(_fluxo2));
 }
 
-async function rotinaNFe() {
-  console.log('[rotinas] === NF-e ML ===');
-  await comGuard('F3', () => comTokenRenewable(_fluxo3));
-}
-
-module.exports = { rotinaExpediente, rotinaVirada, rotinaManha, rotinaNFe };
+module.exports = { rotinaExpediente, rotinaVirada, rotinaManha };
