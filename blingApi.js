@@ -2,7 +2,7 @@
 
 const fetch = require('node-fetch');
 
-const BLING_API = 'https://www.bling.com.br/Api/v3';
+const BLING_API = 'https://api.bling.com.br/Api/v3';
 
 const SITUACAO_ATENDIDO   = 9;
 const SITUACAO_AGUARDANDO = parseInt(process.env.SITUACAO_AGUARDANDO || '7259');
