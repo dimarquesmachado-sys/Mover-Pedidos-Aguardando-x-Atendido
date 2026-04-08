@@ -93,4 +93,4 @@ async function enviarNFeParaML(token, numeroPedidoLoja, nfDetalhe) {
   return result;
 }
 
-module.exports = { enviarNFeParaML };
+module.exports = { enviarNFeParaML, getShipmentInfo, getShipmentSubstatus };
