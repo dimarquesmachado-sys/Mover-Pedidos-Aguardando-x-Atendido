@@ -60,9 +60,7 @@ async function getPedidoDetalhe(token, idPedido) {
   const p = data.data || null;
 
   // DEBUG temporário — apagar depois
-  if (String(idPedido) === '25700908226') {
-    console.log('[DEBUG-107192]', JSON.stringify(p?.transporte || {}));
-  }
+  
 
   return p;
 }
