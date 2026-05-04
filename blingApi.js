@@ -57,7 +57,14 @@ async function getPedidoDetalhe(token, idPedido) {
     `detalhe pedido=${idPedido}`
   );
   const data = await resp.json();
-  return data.data || null;
+  const p = data.data || null;
+
+  // DEBUG temporário — apagar depois
+  if (String(idPedido) === '25700908226') {
+    console.log('[DEBUG-107192]', JSON.stringify(p?.transporte || {}));
+  }
+
+  return p;
 }
 
 async function getPedidosPorStatus(token, statusId, dataInicial, dataFinal) {
