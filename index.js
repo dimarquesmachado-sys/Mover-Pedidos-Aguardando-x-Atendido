@@ -6,10 +6,15 @@ const { rotinaExpediente, rotinaVirada, rotinaManha, rotinaNFe } = require('./fl
 const { gerarTokenInicial } = require('./tokenManager');
 const { trocarCodigoPorToken, gerarUrlAutorizacao } = require('./mlTokenManager');
 
+// ── NOVO: Corrigir-NFs incorporado ───────────────────────────────────
+const { corrigirNFsPendentes } = require('./nfFluxos');
+const { gerarTokenInicialNF, garantirTokenNF } = require('./nfTokenManager');
+
 const TZ = process.env.TZ || 'America/Sao_Paulo';
 
 console.log('╔══════════════════════════════════════════╗');
-console.log('║  Bling Automação GIRASSOL  v2.0           ║');
+console.log('║  Bling Automação GIRASSOL  v2.1           ║');
+console.log('║  + Corrigir-NFs incorporado               ║');
 console.log('╚══════════════════════════════════════════╝');
 console.log('Timezone:', TZ);
 console.log('Iniciado:', new Date().toLocaleString('pt-BR', { timeZone: TZ }));
@@ -44,6 +49,12 @@ cron.schedule('*/15 6-23 * * *', () => {
 cron.schedule('*/30 6-23 * * *', () => {
   console.log(`\n[CRON] NF-e ML ${ts()}`);
   rotinaNFe().catch(e => console.error('[CRON] NF-e erro:', e.message));
+}, { timezone: TZ });
+
+// ── NOVO: Corrigir-NFs a cada 5 min das 06h às 23h ───────────────────
+cron.schedule('*/5 6-23 * * *', () => {
+  console.log(`\n[CRON] Corrigir NFs ${ts()}`);
+  corrigirNFsPendentes().catch(e => console.error('[CRON] Corrigir NFs erro:', e.message));
 }, { timezone: TZ });
 
 function ts() {
@@ -91,6 +102,30 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
+  // ─── NOVO: Setup OAuth do app Bling do Corrigir-NFs ──────────────────────────
+  // Passo 1: você cola o auth_code do Bling neste POST
+  if (path === '/setup-nf' && method === 'POST') {
+    const body = await readBody(req);
+    try {
+      await gerarTokenInicialNF(body.auth_code);
+      return json(res, 200, { ok: true, message: 'Tokens Bling NF gerados e salvos ✓' });
+    } catch (e) {
+      return json(res, 400, { ok: false, error: e.message });
+    }
+  }
+
+  // Passo 2 (opcional): Bling redireciona para cá com ?code=... no callback OAuth
+  if (path === '/callback-nf' && method === 'GET') {
+    const code = urlObj.searchParams.get('code');
+    if (!code) return html(res, 400, '<h2>❌ Código não encontrado na URL</h2>');
+    try {
+      await gerarTokenInicialNF(code);
+      return html(res, 200, '<h2>✅ Token do Bling NF obtido e salvo com sucesso! Pode fechar esta aba.</h2>');
+    } catch (e) {
+      return html(res, 500, `<h2>❌ Erro: ${e.message}</h2>`);
+    }
+  }
+
   // ─── ML OAuth ────────────────────────────────────────────────────────────────
 
   // Passo 1: redireciona para autorização do ML
@@ -115,10 +150,11 @@ const server = http.createServer(async (req, res) => {
   // ─── Runs manuais ─────────────────────────────────────────────────────────────
 
   if (method === 'POST') {
-    if (path === '/run/expedicao') { rotinaExpediente().catch(console.error); return json(res, 202, { queued: 'rotinaExpediente' }); }
-    if (path === '/run/virada')    { rotinaVirada().catch(console.error);     return json(res, 202, { queued: 'rotinaVirada' }); }
-    if (path === '/run/manha')     { rotinaManha().catch(console.error);      return json(res, 202, { queued: 'rotinaManha' }); }
-    if (path === '/run/nfe-ml')    { rotinaNFe().catch(console.error);        return json(res, 202, { queued: 'rotinaNFe' }); }
+    if (path === '/run/expedicao')    { rotinaExpediente().catch(console.error);     return json(res, 202, { queued: 'rotinaExpediente' }); }
+    if (path === '/run/virada')       { rotinaVirada().catch(console.error);         return json(res, 202, { queued: 'rotinaVirada' }); }
+    if (path === '/run/manha')        { rotinaManha().catch(console.error);          return json(res, 202, { queued: 'rotinaManha' }); }
+    if (path === '/run/nfe-ml')       { rotinaNFe().catch(console.error);            return json(res, 202, { queued: 'rotinaNFe' }); }
+    if (path === '/run/corrigir-nfs') { corrigirNFsPendentes().catch(console.error); return json(res, 202, { queued: 'corrigirNFsPendentes' }); }
   }
 
   // ─── Debugs ───────────────────────────────────────────────────────────────────
@@ -127,6 +163,16 @@ const server = http.createServer(async (req, res) => {
     try {
       const { garantirToken } = require('./tokenManager');
       const token = await garantirToken();
+      return json(res, 200, { token });
+    } catch (e) {
+      return json(res, 500, { error: e.message });
+    }
+  }
+
+  // NOVO: debug do token do Bling do Corrigir-NFs
+  if (method === 'GET' && path === '/debug/token-nf') {
+    try {
+      const token = await garantirTokenNF();
       return json(res, 200, { token });
     } catch (e) {
       return json(res, 500, { error: e.message });
@@ -154,6 +200,37 @@ const server = http.createServer(async (req, res) => {
       const token   = await garantirToken();
       const detalhe = await getNFeDetalhe(token, idNfe);
       return json(res, 200, detalhe);
+    } catch (e) {
+      return json(res, 500, { error: e.message });
+    }
+  }
+
+  // NOVO: debug NF do Corrigir-NFs (usa token NF)
+  if (method === 'GET' && path.startsWith('/debug/nf-corrigir/')) {
+    const idNF = path.split('/').pop();
+    try {
+      const { getNFDetalhe } = require('./nfBlingApi');
+      const token   = await garantirTokenNF();
+      const detalhe = await getNFDetalhe(token, idNF);
+      return json(res, 200, detalhe);
+    } catch (e) {
+      return json(res, 500, { error: e.message });
+    }
+  }
+
+  // NOVO: debug CEP (testar ViaCEP)
+  if (method === 'GET' && path.startsWith('/debug/cep/')) {
+    const cep = path.split('/').pop();
+    try {
+      const { getCidadePorCEP } = require('./nfBlingApi');
+      const resultado = await getCidadePorCEP(cep);
+      return json(res, 200, {
+        cep,
+        resultado,
+        observacao: resultado
+          ? 'Este é o que seria gravado na NF (municipio + uf)'
+          : 'CEP inválido ou ViaCEP não retornou dados'
+      });
     } catch (e) {
       return json(res, 500, { error: e.message });
     }

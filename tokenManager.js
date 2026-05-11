@@ -35,7 +35,7 @@ function basicAuth() {
 }
 
 async function postOAuth(body) {
-  const resp = await fetch('https://www.bling.com.br/Api/v3/oauth/token', {
+  const resp = await fetch('https://api.bling.com.br/Api/v3/oauth/token', {
     method: 'POST',
     headers: {
       Authorization: basicAuth(),
@@ -94,7 +94,7 @@ async function garantirToken() {
     return renovarToken();
   }
 
-  const resp = await fetch('https://www.bling.com.br/Api/v3/produtos?limite=1', {
+  const resp = await fetch('https://api.bling.com.br/Api/v3/produtos?limite=1', {
     headers: { Authorization: `Bearer ${access_token}` }
   });
 
