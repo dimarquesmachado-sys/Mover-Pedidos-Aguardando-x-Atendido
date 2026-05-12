@@ -1,263 +1,103 @@
 'use strict';
 
-const http  = require('http');
-const cron  = require('node-cron');
-const { rotinaExpediente, rotinaVirada, rotinaManha, rotinaNFe } = require('./fluxos');
-const { gerarTokenInicial } = require('./tokenManager');
-const { trocarCodigoPorToken, gerarUrlAutorizacao } = require('./mlTokenManager');
-
-// ── NOVO: Corrigir-NFs incorporado ───────────────────────────────────
-const { corrigirNFsPendentes } = require('./nfFluxos');
-const { gerarTokenInicialNF, garantirTokenNF } = require('./nfTokenManager');
+const http = require('http');
+const cron = require('node-cron');
+const { json, readBody } = require('./lib/http');
+const empresas = require('./config/empresas');
 
 const TZ = process.env.TZ || 'America/Sao_Paulo';
 
+// ── Boot log ──────────────────────────────────────────────────────────
 console.log('╔══════════════════════════════════════════╗');
-console.log('║  Bling Automação GIRASSOL  v2.1           ║');
-console.log('║  + Corrigir-NFs incorporado               ║');
+console.log('║  Bling Automação UNIFICADO  v3.0          ║');
+console.log('║  Multi-empresa / Multi-funcionalidade     ║');
 console.log('╚══════════════════════════════════════════╝');
 console.log('Timezone:', TZ);
 console.log('Iniciado:', new Date().toLocaleString('pt-BR', { timeZone: TZ }));
-
-// F1 — a cada 3 min das 06h às 23h59
-cron.schedule('*/3 6-23 * * *', () => {
-  console.log(`\n[CRON] Expediente ${ts()}`);
-  rotinaExpediente().catch(e => console.error('[CRON] Expediente erro:', e.message));
-}, { timezone: TZ });
-
-// F2 — virada 00:10
-cron.schedule('10 0 * * *', () => {
-  console.log(`\n[CRON] Virada ${ts()}`);
-  rotinaVirada().catch(e => console.error('[CRON] Virada erro:', e.message));
-}, { timezone: TZ });
-
-// F2 — manhã 06:00, 06:30, 07:00
-['0 6', '30 6', '0 7'].forEach(h => {
-  cron.schedule(`${h} * * *`, () => {
-    console.log(`\n[CRON] Manhã ${ts()}`);
-    rotinaManha().catch(e => console.error('[CRON] Manhã erro:', e.message));
-  }, { timezone: TZ });
-});
-
-// F2 — diurno a cada 15 min das 06h às 23h
-cron.schedule('*/15 6-23 * * *', () => {
-  console.log(`\n[CRON] F2 Diurno ${ts()}`);
-  rotinaManha().catch(e => console.error('[CRON] F2 Diurno erro:', e.message));
-}, { timezone: TZ });
-
-// F3 — NF-e a cada 30 min das 06h às 23h
-cron.schedule('*/30 6-23 * * *', () => {
-  console.log(`\n[CRON] NF-e ML ${ts()}`);
-  rotinaNFe().catch(e => console.error('[CRON] NF-e erro:', e.message));
-}, { timezone: TZ });
-
-// ── NOVO: Corrigir-NFs a cada 5 min das 06h às 23h ───────────────────
-cron.schedule('*/5 6-23 * * *', () => {
-  console.log(`\n[CRON] Corrigir NFs ${ts()}`);
-  corrigirNFsPendentes().catch(e => console.error('[CRON] Corrigir NFs erro:', e.message));
-}, { timezone: TZ });
+console.log('Empresas ativas:', empresas.map(e => e.nome).join(', ') || '(nenhuma)');
 
 function ts() {
   return new Date().toLocaleString('pt-BR', { timeZone: TZ });
 }
 
-function json(res, code, body) {
-  res.writeHead(code, { 'Content-Type': 'application/json' });
-  res.end(JSON.stringify(body));
+// ── Agendar crons de cada empresa ────────────────────────────────────
+function agendarCron(empresa, expr, label, fn) {
+  if (!expr) return;
+  cron.schedule(expr, () => {
+    console.log(`\n[${empresa.nome}] [CRON ${label}] ${ts()}`);
+    Promise.resolve()
+      .then(() => fn())
+      .catch(e => console.error(`[${empresa.nome}] [${label}] erro:`, e.message));
+  }, { timezone: TZ });
+  console.log(`   [${empresa.nome}] cron ${label}: ${expr}`);
 }
 
-function html(res, code, body) {
-  res.writeHead(code, { 'Content-Type': 'text/html; charset=utf-8' });
-  res.end(body);
+console.log('\n── Agendando crons ──');
+for (const emp of empresas) {
+  const { crons: c, rotinas: r } = emp;
+
+  // F1 — Expediente
+  if (c.expediente && r.rotinaExpediente) {
+    agendarCron(emp, c.expediente, 'F1', r.rotinaExpediente);
+  }
+
+  // F2 — Virada
+  if (c.virada && r.rotinaVirada) {
+    agendarCron(emp, c.virada, 'F2-Virada', r.rotinaVirada);
+  }
+
+  // F2 — Manhã (pode ser string ou array de expressões)
+  if (c.manha && r.rotinaManha) {
+    const arr = Array.isArray(c.manha) ? c.manha : [c.manha];
+    arr.forEach((expr, i) => agendarCron(emp, expr, `F2-Manha-${i+1}`, r.rotinaManha));
+  }
+
+  // Corrigir-NFs (opcional, só Girassol tem hoje)
+  if (c.corrigirNFs && r.corrigirNFs) {
+    agendarCron(emp, c.corrigirNFs, 'CorrigirNFs', r.corrigirNFs);
+  }
 }
 
-function readBody(req) {
-  return new Promise((resolve, reject) => {
-    let b = '';
-    req.on('data', c => b += c);
-    req.on('end', () => {
-      try { resolve(b ? JSON.parse(b) : {}); }
-      catch { resolve({}); }
-    });
-    req.on('error', reject);
-  });
-}
+// ── HTTP server ──────────────────────────────────────────────────────
+// Carrega handlers de cada empresa
+const handlers = empresas.map(e => ({
+  nome:    e.nome,
+  id:      e.id,
+  handle:  e.routes(readBody)
+}));
 
 const server = http.createServer(async (req, res) => {
   const { method, url } = req;
   const urlObj = new URL(url, 'http://localhost');
   const path   = urlObj.pathname;
 
+  // Rota global de health
   if (path === '/health' || path === '/') {
-    return json(res, 200, { status: 'ok', service: 'bling-automacao-girassol', time: ts() });
+    return json(res, 200, {
+      status:   'ok',
+      service:  'bling-automacao-unificado',
+      time:     ts(),
+      empresas: empresas.map(e => ({ id: e.id, nome: e.nome }))
+    });
   }
 
-  if (path === '/setup' && method === 'POST') {
-    const body = await readBody(req);
-    try {
-      await gerarTokenInicial(body.auth_code);
-      return json(res, 200, { ok: true, message: 'Tokens Bling gerados e salvos ✓' });
-    } catch (e) {
-      return json(res, 400, { ok: false, error: e.message });
+  // Tenta cada handler de empresa
+  try {
+    for (const h of handlers) {
+      const tratou = await h.handle(req, res, urlObj);
+      if (tratou) return;
     }
+  } catch (e) {
+    console.error('[server] Erro no handler:', e.message);
+    return json(res, 500, { error: e.message });
   }
 
-  // ─── NOVO: Setup OAuth do app Bling do Corrigir-NFs ──────────────────────────
-  // Passo 1: você cola o auth_code do Bling neste POST
-  if (path === '/setup-nf' && method === 'POST') {
-    const body = await readBody(req);
-    try {
-      await gerarTokenInicialNF(body.auth_code);
-      return json(res, 200, { ok: true, message: 'Tokens Bling NF gerados e salvos ✓' });
-    } catch (e) {
-      return json(res, 400, { ok: false, error: e.message });
-    }
-  }
-
-  // Passo 2 (opcional): Bling redireciona para cá com ?code=... no callback OAuth
-  if (path === '/callback-nf' && method === 'GET') {
-    const code = urlObj.searchParams.get('code');
-    if (!code) return html(res, 400, '<h2>❌ Código não encontrado na URL</h2>');
-    try {
-      await gerarTokenInicialNF(code);
-      return html(res, 200, '<h2>✅ Token do Bling NF obtido e salvo com sucesso! Pode fechar esta aba.</h2>');
-    } catch (e) {
-      return html(res, 500, `<h2>❌ Erro: ${e.message}</h2>`);
-    }
-  }
-
-  // ─── ML OAuth ────────────────────────────────────────────────────────────────
-
-  // Passo 1: redireciona para autorização do ML
-  if (path === '/setup-ml' && method === 'GET') {
-    const authUrl = gerarUrlAutorizacao();
-    res.writeHead(302, { Location: authUrl });
-    return res.end();
-  }
-
-  // Passo 2: ML redireciona de volta aqui com o code
-  if (path === '/callback-ml' && method === 'GET') {
-    const code = urlObj.searchParams.get('code');
-    if (!code) return html(res, 400, '<h2>❌ Código não encontrado na URL</h2>');
-    try {
-      await trocarCodigoPorToken(code);
-      return html(res, 200, '<h2>✅ Token do ML obtido e salvo com sucesso! Pode fechar esta aba.</h2>');
-    } catch (e) {
-      return html(res, 500, `<h2>❌ Erro: ${e.message}</h2>`);
-    }
-  }
-
-  // ─── Runs manuais ─────────────────────────────────────────────────────────────
-
-  if (method === 'POST') {
-    if (path === '/run/expedicao')    { rotinaExpediente().catch(console.error);     return json(res, 202, { queued: 'rotinaExpediente' }); }
-    if (path === '/run/virada')       { rotinaVirada().catch(console.error);         return json(res, 202, { queued: 'rotinaVirada' }); }
-    if (path === '/run/manha')        { rotinaManha().catch(console.error);          return json(res, 202, { queued: 'rotinaManha' }); }
-    if (path === '/run/nfe-ml')       { rotinaNFe().catch(console.error);            return json(res, 202, { queued: 'rotinaNFe' }); }
-    if (path === '/run/corrigir-nfs') { corrigirNFsPendentes().catch(console.error); return json(res, 202, { queued: 'corrigirNFsPendentes' }); }
-  }
-
-  // ─── Debugs ───────────────────────────────────────────────────────────────────
-
-  if (method === 'GET' && path === '/debug/token') {
-    try {
-      const { garantirToken } = require('./tokenManager');
-      const token = await garantirToken();
-      return json(res, 200, { token });
-    } catch (e) {
-      return json(res, 500, { error: e.message });
-    }
-  }
-
-  // NOVO: debug do token do Bling do Corrigir-NFs
-  if (method === 'GET' && path === '/debug/token-nf') {
-    try {
-      const token = await garantirTokenNF();
-      return json(res, 200, { token });
-    } catch (e) {
-      return json(res, 500, { error: e.message });
-    }
-  }
-
-  if (method === 'GET' && path.startsWith('/debug/pedido/')) {
-    const idPedido = path.split('/').pop();
-    try {
-      const { getPedidoDetalhe } = require('./blingApi');
-      const { garantirToken }    = require('./tokenManager');
-      const token   = await garantirToken();
-      const detalhe = await getPedidoDetalhe(token, idPedido);
-      return json(res, 200, detalhe);
-    } catch (e) {
-      return json(res, 500, { error: e.message });
-    }
-  }
-
-  if (method === 'GET' && path.startsWith('/debug/nfe/')) {
-    const idNfe = path.split('/').pop();
-    try {
-      const { getNFeDetalhe } = require('./blingApi');
-      const { garantirToken } = require('./tokenManager');
-      const token   = await garantirToken();
-      const detalhe = await getNFeDetalhe(token, idNfe);
-      return json(res, 200, detalhe);
-    } catch (e) {
-      return json(res, 500, { error: e.message });
-    }
-  }
-
-  // NOVO: debug NF do Corrigir-NFs (usa token NF)
-  if (method === 'GET' && path.startsWith('/debug/nf-corrigir/')) {
-    const idNF = path.split('/').pop();
-    try {
-      const { getNFDetalhe } = require('./nfBlingApi');
-      const token   = await garantirTokenNF();
-      const detalhe = await getNFDetalhe(token, idNF);
-      return json(res, 200, detalhe);
-    } catch (e) {
-      return json(res, 500, { error: e.message });
-    }
-  }
-
-  // NOVO: debug CEP (testar ViaCEP)
-  if (method === 'GET' && path.startsWith('/debug/cep/')) {
-    const cep = path.split('/').pop();
-    try {
-      const { getCidadePorCEP } = require('./nfBlingApi');
-      const resultado = await getCidadePorCEP(cep);
-      return json(res, 200, {
-        cep,
-        resultado,
-        observacao: resultado
-          ? 'Este é o que seria gravado na NF (municipio + uf)'
-          : 'CEP inválido ou ViaCEP não retornou dados'
-      });
-    } catch (e) {
-      return json(res, 500, { error: e.message });
-    }
-  }
-
-  if (path === '/copiar-tokens' && method === 'POST') {
-    try {
-      const fetch  = require('node-fetch');
-      const fs     = require('fs');
-      const tokens = JSON.parse(fs.readFileSync(process.env.TOKEN_FILE || '/data/tokens.json', 'utf8'));
-      const resp   = await fetch('https://girassol-corrigir-nome-cidade-x-cep-x-nfs.onrender.com/setup-token', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify(tokens)
-      });
-      const data = await resp.json();
-      return json(res, 200, { ok: true, resultado: data });
-    } catch (e) {
-      return json(res, 500, { error: e.message });
-    }
-  }
-
-  json(res, 404, { error: 'not found' });
+  // Nenhum handler tratou
+  return json(res, 404, { error: 'not found', path });
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`\n🌐 HTTP ouvindo na porta ${PORT}`));
+server.listen(PORT, () => console.log(`\n🌐 HTTP ouvindo na porta ${PORT}\n`));
 
 process.on('SIGTERM', () => { server.close(); process.exit(0); });
 process.on('SIGINT',  () => { server.close(); process.exit(0); });
