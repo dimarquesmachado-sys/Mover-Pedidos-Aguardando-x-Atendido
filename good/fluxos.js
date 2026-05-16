@@ -12,14 +12,14 @@ const {
 } = require('./blingApi');
 const { getShipmentInfo, getShipmentSubstatus } = require('./mlApi');
 
-const MAX_F1 = parseInt(process.env.MAX_PEDIDOS_F1 || '40');
-const MAX_F2 = parseInt(process.env.MAX_PEDIDOS_F2 || '60');
+const MAX_F1 = parseInt(process.env.GOOD_MAX_PEDIDOS_F1 || '40');
+const MAX_F2 = parseInt(process.env.GOOD_MAX_PEDIDOS_F2 || '60');
 
 const _rodando = { F1: false, F2: false };
 
 async function comGuard(fluxo, fn) {
   if (_rodando[fluxo]) {
-    console.log(`[fluxos] ${fluxo} já em execução — pulando`);
+    console.log(`[GOOD fluxos] ${fluxo} já em execução — pulando`);
     return;
   }
   _rodando[fluxo] = true;
@@ -38,19 +38,31 @@ async function comTokenRenewable(fn) {
   }
 }
 
-// Verifica via API do ML se pedido tem etiqueta disponível
-// Retorna true = tem etiqueta, false = buffered (sem etiqueta)
+/**
+ * Verifica via API do ML se pedido tem etiqueta disponível.
+ *
+ * IMPORTANTE (incorporado do código original GOOD): além de substatus,
+ * checa o status. Se status === 'ready_to_ship', considera com etiqueta
+ * mesmo que substatus esteja como 'buffered' (caso de borda).
+ *
+ * Retorna: true = tem etiqueta | false = sem etiqueta
+ */
 async function temEtiquetaML(mlToken, numeroLoja) {
   try {
     const shipmentId = await getShipmentInfo(mlToken, numeroLoja);
     const { status, substatus } = await getShipmentSubstatus(mlToken, shipmentId);
-    console.log(`[ML] numeroLoja=${numeroLoja} shipment=${shipmentId} status=${status} substatus=${substatus}`);
-    // Proteção caso de borda: status pronto p/ envio → tem etiqueta (mesmo se substatus='buffered')
+    console.log(`[GOOD ML] numeroLoja=${numeroLoja} shipment=${shipmentId} status=${status} substatus=${substatus}`);
+
+    // Status indicando que está pronto para envio → tem etiqueta
     if (status === 'ready_to_ship') return true;
+
+    // Substatus 'buffered' → sem etiqueta
     if (substatus === 'buffered') return false;
+
+    // Qualquer outro caso → tem etiqueta
     return true;
   } catch (e) {
-    console.warn(`[ML] Erro ao consultar ${numeroLoja}: ${e.message} — assumindo sem etiqueta`);
+    console.warn(`[GOOD ML] Erro ao consultar ${numeroLoja}: ${e.message} — assumindo sem etiqueta`);
     return false;
   }
 }
@@ -61,11 +73,11 @@ async function _fluxo1(token) {
   const lista = await getPedidosPorStatus(token, SITUACAO_ATENDIDO, inicial, final);
   const batch = lista.slice(0, MAX_F1);
 
-  console.log(`[F1] ${lista.length} encontrados | processando ${batch.length}`);
+  console.log(`[GOOD F1] ${lista.length} encontrados | processando ${batch.length}`);
 
   let mlToken = null;
   try { mlToken = await garantirTokenML(); } catch (e) {
-    console.warn('[F1] Sem token ML:', e.message);
+    console.warn('[GOOD F1] Sem token ML:', e.message);
   }
 
   let movidos = 0, pulados = 0, ignorados = 0;
@@ -80,22 +92,30 @@ async function _fluxo1(token) {
       pDetalhe = await getPedidoDetalhe(token, p.id) || p;
     } catch (e) {
       if (e.code === 401 || e.message === 'TOKEN_EXPIRADO') throw e;
-      console.error(`[F1] Erro detalhe ${p.id}:`, e.message);
+      console.error(`[GOOD F1] Erro detalhe ${p.id}:`, e.message);
+    }
+
+    // PROTEÇÃO: confirma que ainda está em ATENDIDO no momento do processamento
+    if (pDetalhe?.situacao?.id !== SITUACAO_ATENDIDO) {
+      console.log(`[GOOD F1] Pedido ${p.id} situação=${pDetalhe?.situacao?.id} — não é mais ATENDIDO, ignorando`);
+      marcarProcessado('F1', p.id);
+      ignorados++; continue;
     }
 
     const rastreio = getCodigoRastreio(pDetalhe);
-    const isFlex = String(pDetalhe?.transporte?.volumes?.[0]?.servico || '').toUpperCase().includes('FLEX');
-    console.log(`[F1] Pedido ${p.id} | loja=${p.loja?.id} | rastreio="${rastreio}" | flex=${isFlex}`);
+    const isFlex   = String(pDetalhe?.transporte?.volumes?.[0]?.servico || '').toUpperCase().includes('FLEX');
+    console.log(`[GOOD F1] Pedido ${p.id} | loja=${p.loja?.id} | rastreio="${rastreio}" | flex=${isFlex}`);
 
-    if (isFlex) { ignorados++; continue; }
-    if (rastreio !== '') { ignorados++; continue; }
+    if (isFlex)         { marcarProcessado('F1', p.id); ignorados++; continue; }
+    if (rastreio !== '') { marcarProcessado('F1', p.id); ignorados++; continue; }
 
     // Sem rastreio no Bling → confirma no ML
     const numeroLoja = pDetalhe?.numeroLoja || p?.numeroLoja;
     if (mlToken && numeroLoja) {
       const temEtiqueta = await temEtiquetaML(mlToken, numeroLoja);
       if (temEtiqueta) {
-        console.log(`[F1] Pedido ${p.id} tem etiqueta no ML — não move`);
+        console.log(`[GOOD F1] Pedido ${p.id} tem etiqueta no ML — não move`);
+        marcarProcessado('F1', p.id);
         ignorados++;
         continue;
       }
@@ -108,11 +128,11 @@ async function _fluxo1(token) {
       marcarProcessado('F1', p.id);
     } catch (e) {
       if (e.code === 401 || e.message === 'TOKEN_EXPIRADO') throw e;
-      console.error(`[F1] Erro ao mover ${p.id}:`, e.message);
+      console.error(`[GOOD F1] Erro ao mover ${p.id}:`, e.message);
     }
   }
 
-  console.log(`[F1] movidos=${movidos} | ignorados=${ignorados} | já processados=${pulados}`);
+  console.log(`[GOOD F1] movidos=${movidos} | ignorados=${ignorados} | já processados=${pulados}`);
 }
 
 // ── Fluxo 2 — AGUARDANDO → ATENDIDO ──────────────────────────────────
@@ -121,11 +141,11 @@ async function _fluxo2(token) {
   const lista = await getPedidosPorStatus(token, SITUACAO_AGUARDANDO, inicial, final);
   const batch = lista.slice(0, MAX_F2);
 
-  console.log(`[F2] ${lista.length} encontrados | processando ${batch.length}`);
+  console.log(`[GOOD F2] ${lista.length} encontrados | processando ${batch.length}`);
 
   let mlToken = null;
   try { mlToken = await garantirTokenML(); } catch (e) {
-    console.warn('[F2] Sem token ML:', e.message);
+    console.warn('[GOOD F2] Sem token ML:', e.message);
   }
 
   let movidos = 0;
@@ -139,14 +159,18 @@ async function _fluxo2(token) {
       pDetalhe = await getPedidoDetalhe(token, p.id) || p;
     } catch (e) {
       if (e.code === 401 || e.message === 'TOKEN_EXPIRADO') throw e;
-      console.error(`[F2] Erro detalhe ${p.id}:`, e.message);
+      console.error(`[GOOD F2] Erro detalhe ${p.id}:`, e.message);
+    }
+
+    // PROTEÇÃO CRÍTICA: só move se ainda está em AGUARDANDO
+    if (pDetalhe?.situacao?.id !== SITUACAO_AGUARDANDO) {
+      console.log(`[GOOD F2] Pedido ${p.id} situação=${pDetalhe?.situacao?.id} — não é AGUARDANDO, ignorando`);
+      continue;
     }
 
     const rastreio = getCodigoRastreio(pDetalhe);
-    const isFlex = String(pDetalhe?.transporte?.volumes?.[0]?.servico || '').toUpperCase().includes('FLEX');
-    console.log(`[F2] Pedido ${p.id} | loja=${p.loja?.id} | rastreio="${rastreio}" | flex=${isFlex}`);
-
-    if (p.situacao?.id !== SITUACAO_AGUARDANDO) continue;
+    const isFlex   = String(pDetalhe?.transporte?.volumes?.[0]?.servico || '').toUpperCase().includes('FLEX');
+    console.log(`[GOOD F2] Pedido ${p.id} | loja=${p.loja?.id} | rastreio="${rastreio}" | flex=${isFlex}`);
 
     let deveAtender = false;
 
@@ -159,7 +183,7 @@ async function _fluxo2(token) {
       const numeroLoja = pDetalhe?.numeroLoja || p?.numeroLoja;
       if (mlToken && numeroLoja) {
         deveAtender = await temEtiquetaML(mlToken, numeroLoja);
-        if (deveAtender) console.log(`[F2] Pedido ${p.id} tem etiqueta no ML → move para ATENDIDO`);
+        if (deveAtender) console.log(`[GOOD F2] Pedido ${p.id} tem etiqueta no ML → move para ATENDIDO`);
       }
     }
 
@@ -171,11 +195,11 @@ async function _fluxo2(token) {
       marcarProcessado('F2', p.id);
     } catch (e) {
       if (e.code === 401 || e.message === 'TOKEN_EXPIRADO') throw e;
-      console.error(`[F2] Erro ao mover ${p.id}:`, e.message);
+      console.error(`[GOOD F2] Erro ao mover ${p.id}:`, e.message);
     }
   }
 
-  console.log(`[F2] movidos=${movidos}`);
+  console.log(`[GOOD F2] movidos=${movidos}`);
 }
 
 async function rotinaExpediente() {
@@ -183,13 +207,13 @@ async function rotinaExpediente() {
 }
 
 async function rotinaVirada() {
-  console.log('[rotinas] === VIRADA ===');
+  console.log('[GOOD rotinas] === VIRADA ===');
   limparMemoriaAntiga();
   await comGuard('F2', () => comTokenRenewable(_fluxo2));
 }
 
 async function rotinaManha() {
-  console.log('[rotinas] === MANHÃ ===');
+  console.log('[GOOD rotinas] === MANHÃ ===');
   await comGuard('F2', () => comTokenRenewable(_fluxo2));
 }
 

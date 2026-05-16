@@ -45,6 +45,8 @@ async function temEtiquetaML(mlToken, numeroLoja) {
     const shipmentId = await getShipmentInfo(mlToken, numeroLoja);
     const { status, substatus } = await getShipmentSubstatus(mlToken, shipmentId);
     console.log(`[AMB ML] numeroLoja=${numeroLoja} shipment=${shipmentId} status=${status} substatus=${substatus}`);
+    // Proteção caso de borda: status pronto p/ envio → tem etiqueta (mesmo se substatus='buffered')
+    if (status === 'ready_to_ship') return true;
     if (substatus === 'buffered') return false;
     return true;
   } catch (e) {

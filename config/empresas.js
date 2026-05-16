@@ -14,7 +14,7 @@
 const empresas = [
   require('../girassol'),
   require('../ambtotal'),
-  // require('../good'),    // ← descomentar quando a pasta /good estiver pronta
+  require('../good'),
 ];
 
 // Filtra empresas marcadas como inativas via env var (ex: SKIP_EMPRESAS=girassol,good)
