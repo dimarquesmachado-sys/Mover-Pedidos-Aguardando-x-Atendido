@@ -40,7 +40,8 @@ async function postOAuth(body) {
     headers: {
       Authorization: basicAuth(),
       'Content-Type': 'application/x-www-form-urlencoded',
-      Accept: 'application/json'
+      Accept: 'application/json',
+      'enable-jwt': '1'
     },
     body: new URLSearchParams(body)
   });
