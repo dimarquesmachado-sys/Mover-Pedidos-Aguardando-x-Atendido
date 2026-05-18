@@ -93,7 +93,13 @@ function routes(readBody) {
     if (method === 'OPTIONS') { res.writeHead(204); res.end(); return true; }
 
     // ─ Frontend estático ─
-    if (method === 'GET' && (p === '/fragil' || p === '/fragil/')) {
+    // /fragil sem barra → redirect pra /fragil/ (senão paths relativos quebram)
+    if (method === 'GET' && p === '/fragil') {
+      res.writeHead(301, { Location: '/fragil/' });
+      res.end();
+      return true;
+    }
+    if (method === 'GET' && p === '/fragil/') {
       servirArquivo(res, 'index.html');
       return true;
     }
