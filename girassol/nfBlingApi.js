@@ -6,6 +6,7 @@
 // ──────────────────────────────────────────────────────────────────────
 
 const fetch = require('node-fetch');
+const { aplicarCorrecaoCidade } = require('../lib/correcoesCidades');
 
 const BLING_API = 'https://api.bling.com.br/Api/v3';
 const PAUSA_MS  = parseInt(process.env.NF_PAUSA_MS || '700');
@@ -13,19 +14,6 @@ const PAUSA_MS  = parseInt(process.env.NF_PAUSA_MS || '700');
 const SINTEGRA_TOKEN       = process.env.SINTEGRA_TOKEN || '';
 const NF_INTERMEDIADOR_CNPJ = process.env.NF_INTERMEDIADOR_CNPJ || '03007331000141';
 const NF_INTERMEDIADOR_NOME = process.env.NF_INTERMEDIADOR_NOME || 'MAGAZINEGIRASSOL';
-
-// Mapa de correções manuais: chave = "cidade|uf" em minúsculo
-// Usar quando ViaCEP retorna nome diferente do aceito pelo Bling
-const CORRECOES_CIDADE = {
-  "sant'ana do livramento|rs":  { municipio: "Sant'Ana do Livramento", uf: 'RS' },
-  'santana do livramento|rs':   { municipio: "Sant'Ana do Livramento", uf: 'RS' },
-  "santa bárbara d'oeste|sp":   { municipio: "Santa Bárbara D'Oeste", uf: 'SP' },
-  'santa bárbara d oeste|sp':   { municipio: "Santa Bárbara D'Oeste", uf: 'SP' },
-  'santa barbara d oeste|sp':   { municipio: "Santa Bárbara D'Oeste", uf: 'SP' },
-  'santa barbara doeste|sp':    { municipio: "Santa Bárbara D'Oeste", uf: 'SP' },
-  'perpétuo socorro|mg':        { municipio: 'Belo Oriente', uf: 'MG' },
-  'perpetuo socorro|mg':        { municipio: 'Belo Oriente', uf: 'MG' },
-};
 
 let _ultimaReqNF = 0;
 
@@ -206,13 +194,8 @@ async function getCidadePorCEP(cep) {
     const uf = data.uf || null;
     if (!municipio || !uf) return null;
 
-    const chave = `${municipio}|${uf}`.toLowerCase();
-    if (CORRECOES_CIDADE[chave]) {
-      console.log(`[nfBlingApi] Correção manual: "${chave}" -> ${JSON.stringify(CORRECOES_CIDADE[chave])}`);
-      return CORRECOES_CIDADE[chave];
-    }
-
-    return { municipio, uf };
+    // Aplica correção manual se houver (usa mapa compartilhado em lib/)
+    return aplicarCorrecaoCidade(municipio, uf);
   } catch (e) {
     console.error('[nfBlingApi] Erro ao buscar CEP:', e.message);
     return null;
