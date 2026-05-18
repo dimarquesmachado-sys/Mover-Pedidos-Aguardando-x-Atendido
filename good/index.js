@@ -1,26 +1,29 @@
 'use strict';
 
 /**
- * Módulo GOOD Import — Mover Pedidos
+ * Módulo GOOD Import — Mover Pedidos + Corrigir-NFs
  *
  * Expõe a interface padrão usada pelo orquestrador raiz:
- *   - rotinas:  { rotinaExpediente, rotinaVirada, rotinaManha }
+ *   - rotinas:  { rotinaExpediente, rotinaVirada, rotinaManha, corrigirNFs }
  *   - routes:   função que registra as rotas HTTP da empresa
  *   - crons:    configuração dos crons (timing)
  */
 
 const { rotinaExpediente, rotinaVirada, rotinaManha } = require('./fluxos');
+const { corrigirNFsPendentes }                         = require('./nfFluxos');
 const { garantirToken, gerarTokenInicial }            = require('./tokenManager');
+const { gerarTokenInicialNF, garantirTokenNF }        = require('./nfTokenManager');
 const { garantirTokenML, trocarCodigoPorToken,
         gerarUrlAutorizacao }                          = require('./mlTokenManager');
 const { getPedidoDetalhe }                             = require('./blingApi');
 
-// ── Crons da GOOD Import ──────────────────────────────────────────────
+// ── Crons da GOOD Import ─────────────────────────────────────────────────
 const crons = {
-  expediente: '*/3 6-23 * * *',                                  // F1 a cada 3 min
-  virada:     '10 0 * * *',                                      // F2 às 00:10
-  manha:      ['0 6 * * *', '30 6 * * *', '0 7 * * *',           // F2 às 06:00, 06:30, 07:00
-               '*/15 6-23 * * *']                                // F2 a cada 15 min diurno
+  expediente:    '*/3 6-23 * * *',                              // F1 a cada 3 min
+  virada:        '10 0 * * *',                                  // F2 às 00:10
+  manha:         ['0 6 * * *', '30 6 * * *', '0 7 * * *',       // F2 às 06:00, 06:30, 07:00
+                  '*/15 6-23 * * *'],                           // F2 a cada 15 min diurno
+  corrigirNFs:   '*/5 6-23 * * *'                               // Corrigir-NFs a cada 5 min
 };
 
 // ── Helpers HTTP locais ───────────────────────────────────────────────
@@ -35,14 +38,14 @@ function html(res, code, body) {
 }
 
 /**
- * Registra as rotas HTTP do módulo GOOD sob o prefixo /good
+ * Registra as rotas HTTP do módulo GOOD Import sob o prefixo /amb
  */
 function routes(readBody) {
   return async function handle(req, res, urlObj) {
     const { method } = req;
     const p = urlObj.pathname;
 
-    // Setup OAuth Bling
+    // ─── Setup OAuth Bling (Mover-Pedidos) ─────────────────────────
     if (p === '/good/setup' && method === 'POST') {
       const body = await readBody(req);
       try {
@@ -62,7 +65,27 @@ function routes(readBody) {
       return true;
     }
 
-    // Setup OAuth ML
+    // ─── Setup OAuth Bling NF (Corrigir-NFs) ───────────────────────
+    if (p === '/good/setup-nf' && method === 'POST') {
+      const body = await readBody(req);
+      try {
+        await gerarTokenInicialNF(body.auth_code);
+        json(res, 200, { ok: true, message: 'GOOD: Tokens Bling NF gerados ✓' });
+      } catch (e) { json(res, 400, { ok: false, error: e.message }); }
+      return true;
+    }
+
+    if (p === '/good/callback-nf' && method === 'GET') {
+      const code = urlObj.searchParams.get('code');
+      if (!code) { html(res, 400, '<h2>❌ AMB NF: Código não encontrado</h2>'); return true; }
+      try {
+        await gerarTokenInicialNF(code);
+        html(res, 200, '<h2>✅ GOOD: Token Bling NF obtido. Pode fechar.</h2>');
+      } catch (e) { html(res, 500, `<h2>❌ GOOD NF Erro: ${e.message}</h2>`); }
+      return true;
+    }
+
+    // ─── Setup OAuth ML ────────────────────────────────────────────
     if (p === '/good/setup-ml' && method === 'GET') {
       try {
         const authUrl = gerarUrlAutorizacao();
@@ -74,7 +97,7 @@ function routes(readBody) {
 
     if (p === '/good/callback-ml' && method === 'GET') {
       const code = urlObj.searchParams.get('code');
-      if (!code) { html(res, 400, '<h2>❌ GOOD ML: Código não encontrado</h2>'); return true; }
+      if (!code) { html(res, 400, '<h2>❌ AMB ML: Código não encontrado</h2>'); return true; }
       try {
         await trocarCodigoPorToken(code);
         html(res, 200, '<h2>✅ GOOD: Token ML obtido. Pode fechar.</h2>');
@@ -82,7 +105,7 @@ function routes(readBody) {
       return true;
     }
 
-    // Runs manuais
+    // ─── Runs manuais ──────────────────────────────────────────────
     if (method === 'POST') {
       if (p === '/good/run/expedicao') {
         rotinaExpediente().catch(console.error);
@@ -99,12 +122,25 @@ function routes(readBody) {
         json(res, 202, { queued: 'GOOD rotinaManha' });
         return true;
       }
+      if (p === '/good/run/corrigir-nfs') {
+        corrigirNFsPendentes().catch(console.error);
+        json(res, 202, { queued: 'GOOD corrigirNFsPendentes' });
+        return true;
+      }
     }
 
-    // Debug
+    // ─── Debug ─────────────────────────────────────────────────────
     if (method === 'GET' && p === '/good/debug/token') {
       try {
         const token = await garantirToken();
+        json(res, 200, { token });
+      } catch (e) { json(res, 500, { error: e.message }); }
+      return true;
+    }
+
+    if (method === 'GET' && p === '/good/debug/token-nf') {
+      try {
+        const token = await garantirTokenNF();
         json(res, 200, { token });
       } catch (e) { json(res, 500, { error: e.message }); }
       return true;
@@ -128,14 +164,30 @@ function routes(readBody) {
       return true;
     }
 
-    return false; // não tratou
+    if (method === 'GET' && p.startsWith('/good/debug/nf-corrigir/')) {
+      const idNF = p.split('/').pop();
+      try {
+        const { getNFDetalhe } = require('./nfBlingApi');
+        const token   = await garantirTokenNF();
+        const detalhe = await getNFDetalhe(token, idNF);
+        json(res, 200, detalhe);
+      } catch (e) { json(res, 500, { error: e.message }); }
+      return true;
+    }
+
+    return false;
   };
 }
 
 module.exports = {
   id:   'good',
   nome: 'GOOD Import',
-  rotinas: { rotinaExpediente, rotinaVirada, rotinaManha },
+  rotinas: {
+    rotinaExpediente,
+    rotinaVirada,
+    rotinaManha,
+    corrigirNFs: corrigirNFsPendentes
+  },
   routes,
   crons
 };
