@@ -97,7 +97,21 @@ const server = http.createServer(async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`\n🌐 HTTP ouvindo na porta ${PORT}\n`));
+server.listen(PORT, () => {
+  console.log(`\n🌐 HTTP ouvindo na porta ${PORT}\n`);
+
+  // Bootstrap de módulos que precisam (ex: fragil carrega índice de produtos)
+  for (const e of empresas) {
+    if (typeof e.bootstrap === 'function') {
+      try {
+        e.bootstrap();
+        console.log(`[${e.nome}] bootstrap disparado`);
+      } catch (err) {
+        console.error(`[${e.nome}] erro no bootstrap:`, err.message);
+      }
+    }
+  }
+});
 
 process.on('SIGTERM', () => { server.close(); process.exit(0); });
 process.on('SIGINT',  () => { server.close(); process.exit(0); });

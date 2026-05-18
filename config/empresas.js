@@ -15,6 +15,7 @@ const empresas = [
   require('../girassol'),
   require('../ambtotal'),
   require('../good'),
+  require('../fragil'),
 ];
 
 // Filtra empresas marcadas como inativas via env var (ex: SKIP_EMPRESAS=girassol,good)

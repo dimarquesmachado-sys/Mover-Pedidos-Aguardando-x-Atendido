@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GOOD - Alerta Produto Frágil — Painel</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; margin: 0; padding: 24px; color: #212529; }
+    .container { max-width: 1200px; margin: 0 auto; }
+    h1 { color: #dc3545; margin-top: 0; display: flex; align-items: center; gap: 10px; }
+    h1 .ico { font-size: 36px; }
+    h1 .versao { font-size: 13px; color: #6c757d; font-weight: normal; margin-left: auto; }
+    h2 { color: #495057; margin-top: 0; font-size: 20px; }
+    h2 small { font-size: 14px; color: #6c757d; font-weight: normal; }
+    .card { background: white; border-radius: 12px; padding: 24px; box-shadow: 0 2px 6px rgba(0,0,0,0.08); margin-bottom: 20px; }
+    .info { background: #e3f2fd; border-left: 5px solid #2196f3; padding: 14px 18px; border-radius: 6px; margin-bottom: 18px; font-size: 14px; line-height: 1.5; }
+    .info code { background: #fff; padding: 2px 6px; border-radius: 4px; border: 1px solid #ddd; font-size: 13px; }
+    .alerta { background: #fff3cd; border-left: 5px solid #ffc107; padding: 14px 18px; border-radius: 6px; margin-bottom: 18px; font-size: 14px; line-height: 1.5; }
+    .alerta a { color: #856404; font-weight: bold; }
+    label { display: block; font-weight: bold; margin-bottom: 8px; color: #495057; }
+    input[type=text], input[type=number], input[type=password], input[type=search] {
+      width: 100%; font-family: Arial, sans-serif; font-size: 14px;
+      padding: 10px 12px; border: 2px solid #dee2e6; border-radius: 8px;
+    }
+    input[type=number] { width: 100px; }
+    input:focus { outline: none; border-color: #dc3545; }
+    .row { display: flex; gap: 24px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
+    .row > div { flex: 1; min-width: 220px; }
+    .acoes { display: flex; gap: 12px; margin-top: 16px; flex-wrap: wrap; align-items: center; }
+    button { padding: 12px 28px; font-size: 15px; font-weight: bold; border: none; border-radius: 8px; cursor: pointer; transition: opacity 0.15s; }
+    button:hover:not(:disabled) { opacity: 0.85; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-salvar { background: #28a745; color: white; }
+    .btn-recarregar { background: #6c757d; color: white; }
+    .btn-add { background: #007bff; color: white; padding: 10px 20px; font-size: 14px; }
+    .btn-buscar { background: #17a2b8; color: white; padding: 10px 24px; font-size: 14px; }
+    .btn-secundario { background: #6c757d; color: white; padding: 8px 16px; font-size: 13px; }
+    .btn-perigo { background: #dc3545; color: white; padding: 8px 16px; font-size: 13px; }
+    #status, #status-busca { font-weight: bold; font-size: 14px; margin-left: auto; }
+    .ok { color: #28a745; }
+    .erro { color: #dc3545; }
+    .aviso { color: #ffc107; }
+    .contador { display: inline-block; background: #dc3545; color: white; padding: 4px 12px; border-radius: 20px; font-size: 13px; font-weight: bold; margin-left: 8px; }
+    .meta { font-size: 12px; color: #6c757d; margin-top: 8px; }
+    input[type=checkbox] { transform: scale(1.3); margin-right: 8px; vertical-align: middle; }
+
+    /* HEADER */
+    .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; flex-wrap: wrap; gap: 16px; }
+    .header-user { display: flex; align-items: center; gap: 12px; font-size: 14px; color: #495057; }
+    .header-user b { color: #212529; }
+    .badge-status { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: bold; }
+    .badge-ok { background: #d4edda; color: #155724; }
+    .badge-erro { background: #f8d7da; color: #721c24; }
+    .badge-aviso { background: #fff3cd; color: #856404; }
+
+    /* TABELA SKUs CADASTRADOS */
+    .tabela-skus { width: 100%; border-collapse: separate; border-spacing: 0; margin-top: 12px; }
+    .tabela-skus thead th { background: #495057; color: white; text-align: left; padding: 12px 14px; font-size: 14px; font-weight: bold; }
+    .tabela-skus thead th:first-child { border-top-left-radius: 8px; }
+    .tabela-skus thead th:last-child { border-top-right-radius: 8px; text-align: center; width: 70px; }
+    .tabela-skus tbody td { padding: 8px; border-bottom: 1px solid #e9ecef; vertical-align: middle; }
+    .tabela-skus tbody tr:hover { background: #f8f9fa; }
+    .tabela-skus input[type=text] { padding: 8px 10px; border-radius: 6px; font-size: 14px; }
+    .col-img { width: 60px; text-align: center; }
+    .col-img img { width: 50px; height: 50px; object-fit: contain; border: 1px solid #dee2e6; border-radius: 4px; background: white; }
+    .col-img .sem-img { width: 50px; height: 50px; background: #f1f3f5; border: 1px dashed #adb5bd; border-radius: 4px; display: inline-flex; align-items: center; justify-content: center; color: #adb5bd; font-size: 20px; }
+    .col-sku { width: 22%; }
+    .col-nome { width: 30%; }
+    .col-msg  { width: auto; }
+    .col-acao { width: 70px; text-align: center; }
+    .col-sku input { font-family: 'Courier New', monospace; font-weight: bold; }
+    .col-nome { font-size: 13px; color: #495057; padding-left: 12px; padding-right: 12px; }
+    .btn-remover { background: #dc3545; color: white; border: none; width: 36px; height: 36px; border-radius: 6px; cursor: pointer; font-size: 18px; font-weight: bold; padding: 0; }
+    .btn-remover:hover { background: #c82333; }
+    .filtro { width: 100%; max-width: 380px; margin-bottom: 12px; padding: 10px 12px; font-size: 14px; border: 2px solid #dee2e6; border-radius: 8px; }
+    .filtro:focus { outline: none; border-color: #dc3545; }
+
+    /* TELA DE LOGIN */
+    .login-tela { display: none; max-width: 420px; margin: 80px auto; background: white; padding: 40px; border-radius: 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.12); }
+    .login-tela.visivel { display: block; }
+    .login-tela h2 { text-align: center; color: #dc3545; }
+    .login-tela label { margin-top: 16px; }
+    .login-tela button { width: 100%; margin-top: 20px; }
+    .conteudo.escondido { display: none; }
+
+    /* IMPORT/EXPORT MODAL */
+    .modal-import .acoes-import {
+      display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 16px;
+    }
+    .modal-import .tab-btns {
+      display: flex; gap: 4px; margin-bottom: 12px; border-bottom: 2px solid #dee2e6;
+    }
+    .modal-import .tab-btn {
+      padding: 10px 18px; background: transparent; color: #6c757d; border: none;
+      border-radius: 6px 6px 0 0; cursor: pointer; font-weight: bold; font-size: 14px;
+    }
+    .modal-import .tab-btn.ativo {
+      background: #495057; color: white;
+    }
+    .modal-import .tab-conteudo { display: none; }
+    .modal-import .tab-conteudo.ativo { display: block; }
+    .upload-area {
+      border: 2px dashed #adb5bd; border-radius: 12px; padding: 40px 20px; text-align: center;
+      cursor: pointer; transition: all 0.15s;
+    }
+    .upload-area:hover { border-color: #007bff; background: #f8f9fa; }
+    .upload-area.dragover { border-color: #28a745; background: #d4edda; }
+    .upload-area .icone { font-size: 56px; margin-bottom: 8px; }
+    .upload-area input[type=file] { display: none; }
+    .modal-import textarea#bulk-textarea {
+      width: 100%; min-height: 240px; padding: 12px;
+      border: 2px solid #dee2e6; border-radius: 8px;
+      font-family: 'Courier New', monospace; font-size: 13px;
+    }
+    .modal-import textarea:focus { outline: none; border-color: #dc3545; }
+    .preview-import {
+      margin-top: 14px; padding: 12px; background: #f8f9fa; border-radius: 8px;
+      max-height: 240px; overflow-y: auto; font-size: 13px; border: 1px solid #dee2e6;
+    }
+    .preview-import .ok-line { color: #155724; }
+    .preview-import .erro-line { color: #721c24; }
+    .preview-import .aviso-line { color: #856404; }
+
+    /* MODAL DE BUSCA DE PRODUTOS */
+    .modal-overlay {
+      display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 100;
+      align-items: flex-start; justify-content: center; padding: 30px; overflow-y: auto;
+    }
+    .modal-overlay.visivel { display: flex; }
+    .modal {
+      background: white; border-radius: 12px; padding: 24px; width: 100%; max-width: 800px;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+    }
+    .modal-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+    .modal-header h2 { margin: 0; }
+    .modal-fechar { background: transparent; color: #6c757d; border: none; font-size: 28px; cursor: pointer; padding: 0; line-height: 1; }
+    .busca-input-row { display: flex; gap: 8px; margin-bottom: 14px; }
+    .busca-input-row input { flex: 1; }
+    .busca-resultados { max-height: 480px; overflow-y: auto; border: 1px solid #dee2e6; border-radius: 8px; }
+    .busca-item {
+      display: flex; align-items: center; gap: 12px; padding: 10px 14px;
+      border-bottom: 1px solid #e9ecef; cursor: pointer;
+    }
+    .busca-item:last-child { border-bottom: none; }
+    .busca-item:hover { background: #f8f9fa; }
+    .busca-item input[type=checkbox] { transform: scale(1.4); }
+    .busca-item img { width: 50px; height: 50px; object-fit: contain; border: 1px solid #dee2e6; border-radius: 4px; background: white; }
+    .busca-item .sem-img { width: 50px; height: 50px; background: #f1f3f5; border: 1px dashed #adb5bd; border-radius: 4px; display: inline-flex; align-items: center; justify-content: center; color: #adb5bd; font-size: 20px; }
+    .busca-item-info { flex: 1; min-width: 0; }
+    .busca-item-info .sku { font-family: 'Courier New', monospace; font-weight: bold; color: #212529; }
+    .busca-item-info .nome { font-size: 13px; color: #495057; margin-top: 2px; }
+    .busca-item-info .ean { font-size: 12px; color: #6c757d; margin-top: 2px; }
+    .busca-vazio { padding: 40px 20px; text-align: center; color: #6c757d; font-style: italic; }
+    .modal-footer { display: flex; justify-content: space-between; margin-top: 18px; align-items: center; }
+    .modal-footer .info-total { font-size: 13px; color: #6c757d; }
+
+    /* CARDS COLAPSÁVEIS */
+    .card-collapse h2 { cursor: pointer; user-select: none; display: flex; align-items: center; gap: 8px; }
+    .card-collapse h2::before {
+      content: "▼"; font-size: 12px; transition: transform 0.2s;
+    }
+    .card-collapse.collapsed h2::before { transform: rotate(-90deg); }
+    .card-collapse.collapsed .card-body { display: none; }
+
+    /* USUÁRIOS */
+    .lista-usuarios { width: 100%; border-collapse: separate; border-spacing: 0; }
+    .lista-usuarios th { background: #495057; color: white; text-align: left; padding: 10px 14px; font-size: 13px; }
+    .lista-usuarios td { padding: 10px 14px; border-bottom: 1px solid #e9ecef; font-size: 14px; }
+    .lista-usuarios tr:hover { background: #f8f9fa; }
+    .badge-perfil { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 12px; font-weight: bold; background: #d4edda; color: #155724; }
+  </style>
+</head>
+<body>
+
+  <!-- TELA DE LOGIN -->
+  <div class="login-tela" id="login-tela">
+    <h2>🔒 Acesso ao Painel</h2>
+    <label for="login-usuario">Usuário</label>
+    <input type="text" id="login-usuario" placeholder="seu usuário" autofocus />
+    <label for="login-senha">Senha</label>
+    <input type="password" id="login-senha" placeholder="sua senha" />
+    <button class="btn-salvar" id="btn-login">Entrar</button>
+    <div id="login-erro" class="erro" style="margin-top:12px; text-align:center;"></div>
+    <div id="login-aviso-mestra" style="margin-top:18px; padding:12px; background:#fff3cd; border-radius:8px; font-size:13px; display:none;">
+      💡 <b>Primeiro acesso:</b> nenhum usuário cadastrado ainda. Entre como <code>admin</code> com a senha mestra (<code>ADMIN_PASSWORD</code> do Render) e crie seus usuários no painel.
+    </div>
+  </div>
+
+  <!-- CONTEÚDO PRINCIPAL -->
+  <div class="container conteudo escondido" id="conteudo">
+
+    <div class="header">
+      <h1>
+        <span class="ico">⚠️</span>
+        Alerta Produto Frágil
+        <span class="versao" id="versao-info">v3.0 · carregando status…</span>
+      </h1>
+      <div class="header-user">
+        <span>Olá, <b id="user-nome">…</b></span>
+        <button class="btn-secundario" id="btn-logout">Sair</button>
+      </div>
+    </div>
+
+    <!-- STATUS DO SISTEMA -->
+    <div class="card" id="card-status">
+      <h2>📡 Status do Sistema</h2>
+      <div id="status-painel" style="display:flex; gap:16px; flex-wrap:wrap; font-size:13px; line-height:1.6;">Carregando...</div>
+      <div id="alerta-bling" class="alerta" style="display:none; margin-top:16px;"></div>
+    </div>
+
+    <!-- CONFIGURAÇÕES GERAIS -->
+    <div class="card card-collapse collapsed" id="card-config">
+      <h2>⚙️ Configurações Gerais</h2>
+      <div class="card-body">
+      <div class="row">
+        <div>
+          <label for="tempo">Tempo mínimo antes do botão OK liberar (segundos)</label>
+          <input type="number" id="tempo" min="0" max="30" value="2" />
+          <div class="meta">0 = libera imediatamente · 2 a 5 = força o estoquista a ler antes de clicar</div>
+        </div>
+        <div>
+          <label for="repetir">
+            <input type="checkbox" id="repetir" /> Repetir a voz 1x ao terminar
+          </label>
+          <div class="meta">Se ativado, a voz toca de novo após terminar (com pausa de 0,5s).</div>
+        </div>
+      </div>
+      <div class="row" style="align-items:flex-start;">
+        <div style="flex: 2;">
+          <label for="velocidade">Velocidade da voz: <b id="velocidade-valor">1.2x</b></label>
+          <input type="range" id="velocidade" min="0.7" max="2.0" step="0.1" value="1.2" style="width:100%; padding:0;" />
+          <div class="meta">0.7x = bem devagar · 1.0x = normal · 1.2x = um pouco mais rápida (recomendado) · 2.0x = bem rápida</div>
+        </div>
+      </div>
+      <div class="row" style="align-items:flex-end;">
+        <div style="flex: 2;">
+          <label for="nomeVoz">Voz</label>
+          <select id="nomeVoz" style="width:100%; padding:10px 12px; border:2px solid #dee2e6; border-radius:8px; font-size:14px;">
+            <option value="">Voz padrão do sistema (automático)</option>
+          </select>
+          <div class="meta">As vozes mostradas aqui são as do <b>SEU PC</b>. Se a voz escolhida não existir no PC do estoquista, ele usará a melhor voz pt-BR disponível dele.</div>
+        </div>
+        <div>
+          <button class="btn-buscar" id="btn-testar-voz" type="button" style="margin-bottom: 0;">🔊 Testar voz</button>
+        </div>
+      </div>
+      <label for="msgPadrao">Mensagem padrão (quando o SKU não tiver mensagem própria)</label>
+      <input type="text" id="msgPadrao" maxlength="500" />
+      <div class="meta">Esta é a frase que a voz vai ler para SKUs cadastrados sem mensagem custom.</div>
+      </div>
+    </div>
+
+    <!-- LISTA DE SKUs FRÁGEIS -->
+    <div class="card">
+      <h2>
+        🛡️ SKUs Frágeis Cadastrados
+        <span class="contador" id="contador">0 SKUs</span>
+      </h2>
+
+      <div class="info">
+        Use o botão <b>Buscar produtos no Bling</b> pra adicionar produtos por SKU, EAN ou nome.
+        Mudanças aqui são refletidas em <strong>todos os computadores do estoque automaticamente</strong> em até alguns minutos.
+      </div>
+
+      <input type="text" class="filtro" id="filtro" placeholder="🔎 Filtrar SKUs já cadastrados (por SKU, nome ou mensagem)..." />
+
+      <table class="tabela-skus">
+        <thead>
+          <tr>
+            <th class="col-img">Foto</th>
+            <th class="col-sku">SKU</th>
+            <th class="col-nome">Nome do produto</th>
+            <th class="col-msg">Mensagem (opcional)</th>
+            <th class="col-acao">Ação</th>
+          </tr>
+        </thead>
+        <tbody id="tbody-skus"></tbody>
+      </table>
+
+      <div style="margin-top:14px; display:flex; gap:10px; flex-wrap:wrap;">
+        <button class="btn-buscar" id="btn-abrir-busca">🔎 Buscar produtos no Bling</button>
+        <button class="btn-add" id="btn-add-manual">➕ Adicionar SKU manualmente</button>
+        <button class="btn-add" id="btn-importar" style="background:#6f42c1;">📥 Importar planilha</button>
+        <button class="btn-add" id="btn-exportar" style="background:#fd7e14;">📤 Exportar Excel</button>
+      </div>
+    </div>
+
+    <!-- SALVAR -->
+    <div class="card">
+      <div class="acoes">
+        <button class="btn-salvar" id="btn-salvar">💾 Salvar tudo</button>
+        <button class="btn-recarregar" id="btn-recarregar">🔄 Recarregar</button>
+        <span id="status"></span>
+      </div>
+      <div class="meta" id="atualizadoEm" style="margin-top:14px;"></div>
+    </div>
+
+    <!-- USUÁRIOS -->
+    <div class="card card-collapse collapsed" id="card-usuarios">
+      <h2>👥 Usuários do Painel <small>(somente quem pode editar a lista)</small></h2>
+      <div class="card-body">
+      <div id="lista-usuarios-area">Carregando...</div>
+      <div style="margin-top:14px;">
+        <button class="btn-add" id="btn-novo-usuario">➕ Novo usuário</button>
+      </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL DE BUSCA DE PRODUTOS NO BLING -->
+  <div class="modal-overlay" id="modal-busca">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>🔎 Buscar produtos no Bling</h2>
+        <button class="modal-fechar" id="busca-fechar">×</button>
+      </div>
+      <div class="busca-input-row">
+        <input type="search" id="busca-input" placeholder="Digite SKU, nome do produto ou EAN (8+ dígitos)..." autofocus />
+        <button class="btn-buscar" id="busca-btn">Buscar</button>
+      </div>
+      <div id="status-busca" style="margin-bottom:8px;"></div>
+      <div class="busca-resultados" id="busca-resultados">
+        <div class="busca-vazio">Digite algo acima e clique em <b>Buscar</b> (ou pressione Enter).</div>
+      </div>
+      <div class="modal-footer">
+        <span class="info-total" id="busca-info-total"></span>
+        <div>
+          <button class="btn-secundario" id="busca-cancelar">Cancelar</button>
+          <button class="btn-salvar" id="busca-adicionar" disabled>Adicionar selecionados (0)</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL DE NOVO USUÁRIO -->
+  <div class="modal-overlay" id="modal-usuario">
+    <div class="modal" style="max-width: 460px;">
+      <div class="modal-header">
+        <h2>➕ Novo usuário</h2>
+        <button class="modal-fechar" id="usuario-fechar">×</button>
+      </div>
+      <label>Usuário (login)</label>
+      <input type="text" id="novo-usuario" placeholder="ex: maria" />
+      <label style="margin-top:14px;">Nome completo</label>
+      <input type="text" id="novo-nome" placeholder="ex: Maria Silva" />
+      <label style="margin-top:14px;">Senha (mín. 6 caracteres)</label>
+      <input type="password" id="novo-senha" placeholder="senha forte" />
+      <div id="status-usuario" style="margin-top:12px;"></div>
+      <div class="modal-footer" style="margin-top:18px;">
+        <span></span>
+        <div>
+          <button class="btn-secundario" id="usuario-cancelar">Cancelar</button>
+          <button class="btn-salvar" id="usuario-criar">Criar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL DE IMPORTAR PLANILHA -->
+  <div class="modal-overlay modal-import" id="modal-import">
+    <div class="modal" style="max-width: 680px;">
+      <div class="modal-header">
+        <h2>📥 Importar SKUs em lote</h2>
+        <button class="modal-fechar" id="import-fechar">×</button>
+      </div>
+
+      <div class="tab-btns">
+        <button class="tab-btn ativo" data-tab="excel">📊 Excel/CSV</button>
+        <button class="tab-btn" data-tab="bulk">📋 Colar texto</button>
+      </div>
+
+      <!-- Tab: Excel -->
+      <div class="tab-conteudo ativo" data-tab="excel">
+        <div class="info" style="margin-top:0;">
+          Formato esperado: <b>2 colunas</b> — primeira <code>SKU</code>, segunda <code>Mensagem</code> (opcional).
+          A primeira linha pode ser cabeçalho (será detectada e ignorada). Aceita <code>.xlsx</code>, <code>.xls</code> e <code>.csv</code>.
+        </div>
+        <label for="upload-arquivo" class="upload-area" id="upload-area">
+          <input type="file" id="upload-arquivo" accept=".xlsx,.xls,.csv" />
+          <div class="icone">📁</div>
+          <div><b>Clique aqui ou arraste o arquivo</b></div>
+          <div class="meta">Excel (.xlsx, .xls) ou CSV</div>
+        </label>
+      </div>
+
+      <!-- Tab: Colar -->
+      <div class="tab-conteudo" data-tab="bulk">
+        <div class="info" style="margin-top:0;">
+          Cola direto do Excel/Sheets (Ctrl+C lá → Ctrl+V aqui). Formato: <code>SKU [TAB] Mensagem</code> — uma linha por SKU.
+          Ou simplesmente <code>SKU | Mensagem</code> (separado por <code>|</code>). A mensagem é opcional.
+        </div>
+        <textarea id="bulk-textarea" placeholder="Exemplo:
+KJDD-E-187	Globo de vidro, embalar com bolha
+TAC-CR-001	Taça de cristal
+COPO-VID-09	(deixar em branco para usar mensagem padrão)
+ABAJUR-22	Embalar com isopor"></textarea>
+        <div style="margin-top:12px;">
+          <button class="btn-add" id="bulk-processar">Processar texto colado</button>
+        </div>
+      </div>
+
+      <div class="preview-import" id="preview-import" style="display:none;"></div>
+
+      <div class="modal-footer" style="margin-top:18px;">
+        <span class="info-total" id="import-info"></span>
+        <div>
+          <button class="btn-secundario" id="import-cancelar">Cancelar</button>
+          <button class="btn-salvar" id="import-confirmar" disabled>Adicionar à lista</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
