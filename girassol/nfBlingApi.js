@@ -17,8 +17,14 @@ const NF_INTERMEDIADOR_NOME = process.env.NF_INTERMEDIADOR_NOME || 'MAGAZINEGIRA
 // Mapa de correções manuais: chave = "cidade|uf" em minúsculo
 // Usar quando ViaCEP retorna nome diferente do aceito pelo Bling
 const CORRECOES_CIDADE = {
-  "sant'ana do livramento|rs": { municipio: "Sant'Ana do Livramento", uf: 'RS' },
-  'santana do livramento|rs':  { municipio: "Sant'Ana do Livramento", uf: 'RS' },
+  "sant'ana do livramento|rs":  { municipio: "Sant'Ana do Livramento", uf: 'RS' },
+  'santana do livramento|rs':   { municipio: "Sant'Ana do Livramento", uf: 'RS' },
+  "santa bárbara d'oeste|sp":   { municipio: "Santa Bárbara D'Oeste", uf: 'SP' },
+  'santa bárbara d oeste|sp':   { municipio: "Santa Bárbara D'Oeste", uf: 'SP' },
+  'santa barbara d oeste|sp':   { municipio: "Santa Bárbara D'Oeste", uf: 'SP' },
+  'santa barbara doeste|sp':    { municipio: "Santa Bárbara D'Oeste", uf: 'SP' },
+  'perpétuo socorro|mg':        { municipio: 'Belo Oriente', uf: 'MG' },
+  'perpetuo socorro|mg':        { municipio: 'Belo Oriente', uf: 'MG' },
 };
 
 let _ultimaReqNF = 0;
