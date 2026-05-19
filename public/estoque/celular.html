@@ -193,6 +193,73 @@
       padding: 24px 16px; box-shadow: var(--shadow); margin-top: 8px;
     }
 
+    /* ===== Botão câmera ===== */
+    .btn-cam {
+      background: #fff;
+      color: var(--verde);
+      border: 2px solid var(--verde);
+      border-radius: 8px;
+      padding: 0;
+      width: 48px; min-width: 48px;
+      height: 48px;
+      font-size: 22px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .btn-cam:active { background: #e8f5e9; }
+
+    /* ===== Modal scanner ===== */
+    #modalScanner {
+      display: none;
+      position: fixed;
+      top: 0; left: 0;
+      width: 100vw; height: 100vh;
+      background: rgba(0,0,0,0.92);
+      z-index: 1000;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+    #modalScanner.aberto { display: flex; }
+    #modalScanner .scanner-topo {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%;
+      padding: 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      color: #fff;
+      background: rgba(0,0,0,0.5);
+    }
+    #modalScanner .scanner-topo h3 { margin: 0; font-size: 16px; }
+    #modalScanner .scanner-fechar {
+      background: #fff;
+      color: #000;
+      border: none;
+      border-radius: 50%;
+      width: 40px; height: 40px;
+      font-size: 22px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    #leitorCam {
+      width: 100%;
+      max-width: 500px;
+      max-height: 70vh;
+    }
+    #leitorCam video {
+      border-radius: 12px;
+    }
+    #scannerMsg {
+      color: #fff;
+      margin-top: 16px;
+      padding: 0 20px;
+      text-align: center;
+      font-size: 14px;
+    }
 
   </style>
 </head>
@@ -236,6 +303,7 @@
         inputmode="text" autocomplete="off"
         onkeypress="if(event.key==='Enter'){buscar();}"
       />
+      <button class="btn-cam" id="btnCam" onclick="abrirScanner()" title="Ler código de barras com a câmera">📷</button>
       <button class="btn btn-primario" id="btnBuscar" onclick="buscar()">Buscar</button>
     </div>
 
@@ -281,6 +349,19 @@
 
   </div>
 </div>
+
+<!-- ===== MODAL SCANNER (câmera) ===== -->
+<div id="modalScanner">
+  <div class="scanner-topo">
+    <h3>📷 Aponte para o código de barras</h3>
+    <button class="scanner-fechar" onclick="fecharScanner()" aria-label="Fechar">✕</button>
+  </div>
+  <div id="leitorCam"></div>
+  <div id="scannerMsg">Mantenha o código dentro do quadro</div>
+</div>
+
+<!-- Biblioteca de scanner (CDN) -->
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 
 <audio id="somOk" preload="auto">
   <source src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg" type="audio/ogg">
@@ -589,6 +670,102 @@
 
   document.getElementById("senha").addEventListener("keypress", (e) => {
     if (e.key === "Enter") login();
+  });
+
+  // ===== SCANNER CÂMERA =====
+  let scannerInstance = null;
+  let scannerEmUso = false;
+
+  async function abrirScanner() {
+    if (scannerEmUso) return;
+    if (typeof Html5Qrcode === 'undefined') {
+      mostrarToast("Biblioteca do scanner não carregou. Verifique a conexão.", "erro");
+      return;
+    }
+
+    const modal = document.getElementById("modalScanner");
+    const msg   = document.getElementById("scannerMsg");
+    modal.classList.add("aberto");
+    msg.innerText = "Iniciando câmera...";
+
+    try {
+      scannerInstance = new Html5Qrcode("leitorCam", { verbose: false });
+      scannerEmUso = true;
+
+      const formatosAceitos = [
+        Html5QrcodeSupportedFormats.EAN_13,
+        Html5QrcodeSupportedFormats.EAN_8,
+        Html5QrcodeSupportedFormats.CODE_128,
+        Html5QrcodeSupportedFormats.CODE_39,
+        Html5QrcodeSupportedFormats.UPC_A,
+        Html5QrcodeSupportedFormats.UPC_E,
+        Html5QrcodeSupportedFormats.QR_CODE
+      ];
+
+      const config = {
+        fps: 10,
+        qrbox: { width: 280, height: 140 },
+        aspectRatio: 1.333,
+        formatsToSupport: formatosAceitos,
+        experimentalFeatures: { useBarCodeDetectorIfSupported: true }
+      };
+
+      await scannerInstance.start(
+        { facingMode: "environment" },
+        config,
+        onScanSucesso,
+        () => {} // ignora "no match" — chamado várias vezes/segundo
+      );
+
+      msg.innerText = "Mantenha o código dentro do quadro";
+    } catch (e) {
+      console.error("[scanner] erro ao iniciar:", e);
+      msg.innerText = "Erro ao acessar a câmera: " + (e.message || e);
+      mostrarToast("Não foi possível acessar a câmera. Permita o acesso nas configurações.", "erro");
+      setTimeout(fecharScanner, 2000);
+    }
+  }
+
+  function onScanSucesso(codigoLido) {
+    if (!scannerEmUso) return;
+    scannerEmUso = false; // trava pra evitar disparos múltiplos
+
+    const msg = document.getElementById("scannerMsg");
+    msg.innerText = "✓ Código lido: " + codigoLido;
+
+    tocarSom("ok"); vibrarOk();
+
+    const inputSku = document.getElementById("sku");
+    inputSku.value = codigoLido.trim();
+    marcarCampoBusca("");
+
+    setTimeout(() => {
+      fecharScanner();
+      buscar();
+    }, 400);
+  }
+
+  async function fecharScanner() {
+    const modal = document.getElementById("modalScanner");
+    if (scannerInstance) {
+      try {
+        const state = scannerInstance.getState && scannerInstance.getState();
+        if (state === 2) { // RUNNING
+          await scannerInstance.stop();
+        }
+        await scannerInstance.clear();
+      } catch (_) { /* ignora */ }
+      scannerInstance = null;
+    }
+    scannerEmUso = false;
+    modal.classList.remove("aberto");
+  }
+
+  // Fecha modal se apertar ESC
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && document.getElementById("modalScanner").classList.contains("aberto")) {
+      fecharScanner();
+    }
   });
 
   // ===== INIT =====
