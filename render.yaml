@@ -85,6 +85,22 @@ services:
       #   value: /data/good/bling-tokens.json
       # ... etc
 
+      # ─── ESTOQUE (Localização Warehouse) ────────────────────────────
+      - key: ESTOQUE_API_KEY
+        sync: false
+      - key: ESTOQUE_USUARIOS
+        sync: false
+      - key: ESTOQUE_ADMIN_PASSWORD
+        sync: false
+      - key: ESTOQUE_BLING_CLIENT_ID
+        sync: false
+      - key: ESTOQUE_BLING_CLIENT_SECRET
+        sync: false
+      - key: ESTOQUE_BLING_REDIRECT_URI
+        sync: false
+      - key: ESTOQUE_TOKEN_FILE
+        value: /data/estoque/bling-tokens.json
+
     disk:
       name: tokens-disk
       mountPath: /data
