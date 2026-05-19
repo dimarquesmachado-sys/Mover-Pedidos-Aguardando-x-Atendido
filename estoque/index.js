@@ -174,7 +174,7 @@ function routes(readBody) {
     const { method } = req;
     const p = urlObj.pathname;
 
-    if (!p.startsWith('/estoque')) return false;
+    if (p !== '/estoque' && !p.startsWith('/estoque/')) return false;
 
     setCors(res);
     if (method === 'OPTIONS') { res.writeHead(204); res.end(); return true; }
