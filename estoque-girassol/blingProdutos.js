@@ -128,11 +128,11 @@ async function blingFetchComRetry(url, options = {}) {
 
 async function buscarDetalhe(id) {
   const cached = cacheDetalhes.get(String(id));
-  if (cached) return cached;
+  if (cached && cached.expira > Date.now()) return cached.produto;
   const { response, data } = await blingFetchComRetry(`${BLING_API}/produtos/${id}`);
   if (!response.ok || !data?.data) return null;
   const p = data.data;
-  cacheDetalhes.set(String(p.id), p);
+cacheDetalhes.set(String(p.id), { produto: p, expira: Date.now() + CACHE_TTL_MS });
   getEans(p).forEach(e => {
     const d = onlyDigits(e);
     if (d && d.length >= 8) indiceEan.set(d, String(p.id));
