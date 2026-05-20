@@ -314,7 +314,7 @@ async function atualizarLocalizacao(produto, novaLocalizacao) {
     ...produto,
     estoque: { ...(produto.estoque || {}), localizacao: novaLocalizacao }
   };
-  cacheDetalhes.set(String(id), pAtualizado);
+cacheDetalhes.set(String(id), { produto: pAtualizado, expira: Date.now() + CACHE_TTL_MS });
   return { ok: true, produto: pAtualizado };
 }
 
