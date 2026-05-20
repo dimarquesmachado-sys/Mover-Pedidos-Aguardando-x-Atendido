@@ -53,7 +53,7 @@ function setCors(res) {
 }
 
 // Servir arquivo estático
-const PUBLIC_DIR = path.join(__dirname, '..', 'public', 'estoque');
+const PUBLIC_DIR = path.join(__dirname, '..', 'public', 'estoque-girassol');
 
 function servirArquivo(res, relPath) {
   const ext = path.extname(relPath).toLowerCase();
