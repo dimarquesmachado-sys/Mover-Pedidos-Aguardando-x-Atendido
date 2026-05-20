@@ -195,6 +195,13 @@ function routes(readBody) {
       return true;
     }
 
+    // Servir favicon, manifest, e outros arquivos diretamente em /estoque/{arquivo}
+    if (method === 'GET' && /\.(ico|png|jpg|svg|json|css|js)$/i.test(p)) {
+      const rel = p.replace('/estoque/', '');
+      servirArquivo(res, rel);
+      return true;
+    }
+
     // ─ Health ─
     if (method === 'GET' && p === '/estoque/health') {
       const tokens = tokenManager.lerTokens();
