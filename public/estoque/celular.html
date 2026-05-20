@@ -327,7 +327,7 @@
           <div class="valor" id="estoque">—</div>
         </div>
         <div class="campo-info">
-          <label>Local atual</label>
+          <label>Local atual <button type="button" id="btnAtualizarLocal" onclick="atualizarLocal()" title="Buscar localização atual no Bling" style="display:none;border:1px solid var(--verde);color:var(--verde);background:#fff;border-radius:6px;width:22px;height:22px;font-size:13px;padding:0;vertical-align:middle;cursor:pointer;">↻</button></label>
           <div class="valor" id="local">—</div>
         </div>
       </div>
@@ -573,8 +573,9 @@ let SESSION_TOKEN = null;
       document.getElementById("estoque").innerText = p.estoque != null ? p.estoque : "—";
       document.getElementById("local").innerText   = p.localizacao || "—";
 
-      codigoProdutoAtual = p.codigo || null;
-
+codigoProdutoAtual = p.codigo || null;
+      document.getElementById("btnAtualizarLocal").style.display = codigoProdutoAtual ? "inline-block" : "none";
+      
       const img     = document.getElementById("imagem");
       const imgWrap = document.getElementById("imgWrap");
       if (p.imagem) {
@@ -599,6 +600,38 @@ let SESSION_TOKEN = null;
     } finally {
       btn.disabled = false;
       btn.innerText = "Buscar";
+    }
+  }
+
+ // ===== ATUALIZAR LOCAL (força refresh do Bling) =====
+  async function atualizarLocal() {
+    const sku = codigoProdutoAtual;
+    if (!sku) return;
+    const btn = document.getElementById("btnAtualizarLocal");
+    const localEl = document.getElementById("local");
+    btn.disabled = true;
+    const txtAntigo = localEl.innerText;
+    localEl.innerText = "...";
+    try {
+      const r = await fetch(
+        "/estoque-girassol/buscar?tipo=SKU&forcar=1&codigo=" + encodeURIComponent(sku),
+        { headers: { "X-Session-Token": SESSION_TOKEN || "" } }
+      );
+      const d = await r.json().catch(() => ({ ok: false }));
+      if (d.ok && d.produto) {
+        localEl.innerText = d.produto.localizacao || "—";
+        document.getElementById("estoque").innerText = d.produto.estoque != null ? d.produto.estoque : "—";
+        tocarSom("ok");
+        mostrarToast("Localização atualizada do Bling", "ok");
+      } else {
+        localEl.innerText = txtAntigo;
+        mostrarToast("Não foi possível atualizar", "erro");
+      }
+    } catch(e) {
+      localEl.innerText = txtAntigo;
+      mostrarToast("Erro ao atualizar: " + e.message, "erro");
+    } finally {
+      btn.disabled = false;
     }
   }
 
