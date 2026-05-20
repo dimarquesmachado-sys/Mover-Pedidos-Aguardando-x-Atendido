@@ -126,9 +126,9 @@ async function blingFetchComRetry(url, options = {}) {
 
 // ── Buscar detalhe de produto ────────────────────────────────────────
 
-async function buscarDetalhe(id) {
+async function buscarDetalhe(id, forcar = false) {
   const cached = cacheDetalhes.get(String(id));
-  if (cached && cached.expira > Date.now()) return cached.produto;
+  if (!forcar && cached && cached.expira > Date.now()) return cached.produto;
   const { response, data } = await blingFetchComRetry(`${BLING_API}/produtos/${id}`);
   if (!response.ok || !data?.data) return null;
   const p = data.data;
@@ -214,7 +214,7 @@ async function carregarIndiceListagem() {
 
 // ── Resolver produto (SKU ou EAN) ────────────────────────────────────
 
-async function resolverProduto(tipo, valor) {
+async function resolverProduto(tipo, valor, forcar = false) {
   const tipoBusca = String(tipo || '').toUpperCase();
   const valorOriginal = String(valor || '').trim();
   if (!valorOriginal) return { ok: false, erro: 'Código não informado' };
@@ -223,7 +223,7 @@ async function resolverProduto(tipo, valor) {
   if (tipoBusca === 'SKU') {
     const id = indiceSku.get(normalize(valorOriginal));
     if (id) {
-      const p = await buscarDetalhe(id);
+      const p = await buscarDetalhe(id, forcar);
       if (p && getSkus(p).some(s => isExactCI(s, valorOriginal))) {
         console.log(`[estoque SKU-HIT] ${valorOriginal} → ${p.codigo}`);
         return { ok: true, produto: p };
