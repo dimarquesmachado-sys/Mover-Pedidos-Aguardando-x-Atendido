@@ -1,40 +1,43 @@
 'use strict';
 
 /**
- * Módulo /estoque — Sistema de localização e estoque para warehouse
+ * Módulo /estoque-girassol — Sistema de localização e estoque para warehouse
  *
  * - PWA mobile em /estoque-girassol/celular (leitor de código de barras)
  * - Extensão Chrome consome /estoque-girassol/buscar e /estoque-girassol/salvar
  * - Login via env var ESTOQUE_GIRASSOL_USUARIOS
  * - OAuth Bling próprio (env vars ESTOQUE_GIRASSOL_BLING_*)
  *
+ * AUTENTICAÇÃO (v2 - migração JWT):
+ * - Prioridade 1: Header X-Session-Token (NOVO - JWT via auth.js)
+ * - Prioridade 2: Param ?key=API_KEY (ANTIGO - fallback temporário p/ extensão)
+ * - Quando todos os clients migrarem, remover o fallback API_KEY.
+ *
  * Rotas:
- *   GET  /estoque-girassol                           → redirect /estoque-girassol/celular
+ *   GET  /estoque-girassol                     → redirect /estoque-girassol/celular
  *   GET  /estoque-girassol/celular             → serve celular.html
  *   GET  /estoque-girassol/health              → status
  *   GET  /estoque-girassol/cache-status        → debug cache
  *   POST /estoque-girassol/login               → autentica (compat com PWA atual)
  *   POST /estoque-girassol/api/login           → autentica (padrão novo)
  *   POST /estoque-girassol/api/logout          → encerra sessão
- *   GET  /estoque-girassol/buscar              → busca produto (compat com extensão)
- *   GET  /estoque-girassol/api/buscar          → busca produto (padrão novo)
- *   POST /estoque-girassol/salvar              → atualiza localização (compat com extensão)
- *   POST /estoque-girassol/api/salvar          → atualiza localização (padrão novo)
+ *   GET  /estoque-girassol/buscar              → busca produto (JWT ou API_KEY)
+ *   GET  /estoque-girassol/api/buscar          → busca produto (JWT ou API_KEY)
+ *   POST /estoque-girassol/salvar              → atualiza localização (JWT ou API_KEY)
+ *   POST /estoque-girassol/api/salvar          → atualiza localização (JWT ou API_KEY)
  *   GET  /estoque-girassol/auth/bling          → inicia OAuth Bling
  *   GET  /estoque-girassol/bling/callback      → recebe code do OAuth
  */
 
-const fs   = require('fs');
+const fs = require('fs');
 const path = require('path');
-
-const auth          = require('./auth');
-const tokenManager  = require('./tokenManager');
+const auth = require('./auth');
+const tokenManager = require('./tokenManager');
 const blingProdutos = require('./blingProdutos');
 
 const API_KEY = process.env.ESTOQUE_GIRASSOL_API_KEY || '';
 
 // ── Helpers HTTP ─────────────────────────────────────────────────────
-
 function json(res, code, body) {
   res.writeHead(code, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(body));
@@ -54,7 +57,6 @@ function setCors(res) {
 
 // Servir arquivo estático
 const PUBLIC_DIR = path.join(__dirname, '..', 'public', 'estoque-girassol');
-
 function servirArquivo(res, relPath) {
   const ext = path.extname(relPath).toLowerCase();
   const mime = {
@@ -67,6 +69,7 @@ function servirArquivo(res, relPath) {
     '.svg':  'image/svg+xml',
     '.ico':  'image/x-icon'
   }[ext] || 'application/octet-stream';
+
   const fullPath = path.join(PUBLIC_DIR, relPath);
   if (!fullPath.startsWith(PUBLIC_DIR)) return notFound(res);
   if (!fs.existsSync(fullPath) || !fs.statSync(fullPath).isFile()) return notFound(res);
@@ -74,23 +77,46 @@ function servirArquivo(res, relPath) {
   fs.createReadStream(fullPath).pipe(res);
 }
 
-// Validação de API key (extensão)
-function apiKeyValida(req, urlObj) {
-  const key = urlObj.searchParams.get('key') || (req.headers['x-api-key'] || '');
-  return key && API_KEY && key === API_KEY;
+// ── AUTENTICAÇÃO (v2) ────────────────────────────────────────────────
+// Aceita JWT (X-Session-Token) OU API_KEY (fallback). Retorna:
+//   { ok: true, via: 'jwt', usuario, perfil } se JWT válido
+//   { ok: true, via: 'apikey' } se API_KEY válida (sem usuário identificado)
+//   { ok: false, erro: '...' } se nenhum dos dois
+function autenticarRequest(req, urlObj, bodyKey) {
+  // 1) JWT (prioridade)
+  const token = req.headers['x-session-token'] || '';
+  if (token) {
+    const sess = auth.validarSessao(token);
+    if (sess) {
+      return { ok: true, via: 'jwt', usuario: sess.usuario, perfil: sess.perfil };
+    }
+    // Token enviado mas inválido/expirado → erro explícito
+    return { ok: false, erro: 'Sessão expirada. Faça login novamente.' };
+  }
+
+  // 2) API_KEY (fallback - DEPRECATED)
+  const key = (urlObj && urlObj.searchParams.get('key'))
+            || bodyKey
+            || (req.headers['x-api-key'] || '');
+  if (key && API_KEY && key === API_KEY) {
+    console.log('[estoque-girassol] ⚠️  Autenticação via API_KEY (deprecated). Migre para JWT.');
+    return { ok: true, via: 'apikey' };
+  }
+
+  return { ok: false, erro: 'Não autenticado. Faça login.' };
 }
 
-// Pega usuário da sessão (header X-Session-Token)
+// Pega usuário da sessão (header X-Session-Token) - usado em endpoints que exigem JWT obrigatório
 function pegarUsuario(req) {
   const token = req.headers['x-session-token'] || '';
   return auth.validarSessao(token);
 }
 
 // ── Handlers compartilhados (compat + api) ───────────────────────────
-
 async function handleBuscar(req, res, urlObj) {
-  if (!apiKeyValida(req, urlObj)) {
-    return json(res, 401, { ok: false, erro: 'API key inválida' });
+  const a = autenticarRequest(req, urlObj, null);
+  if (!a.ok) {
+    return json(res, 401, { ok: false, erro: a.erro || 'API key inválida' });
   }
   try {
     const tipo = String(urlObj.searchParams.get('tipo') || '').toUpperCase();
@@ -109,15 +135,16 @@ async function handleBuscar(req, res, urlObj) {
   }
 }
 
-async function handleSalvar(req, res, body) {
+async function handleSalvar(req, res, body, urlObj) {
   const { key, codigo, tipo, novaLocalizacao } = body || {};
-  if (!key || !API_KEY || key !== API_KEY) {
-    return json(res, 401, { ok: false, erro: 'API key inválida' });
+  const a = autenticarRequest(req, urlObj, key);
+  if (!a.ok) {
+    return json(res, 401, { ok: false, erro: a.erro || 'API key inválida' });
   }
   try {
     const localizacaoFinal = String(novaLocalizacao ?? '');
-
     let resultado = null;
+
     if (tipo && String(tipo).toUpperCase() === 'EAN') {
       resultado = await blingProdutos.resolverProduto('EAN', codigo);
     } else {
@@ -131,6 +158,11 @@ async function handleSalvar(req, res, body) {
 
     const r = await blingProdutos.atualizarLocalizacao(resultado.produto, localizacaoFinal);
     if (!r.ok) return json(res, 200, { ok: false, erro: r.erro });
+
+    // Log com identificação do usuário (se via JWT)
+    if (a.via === 'jwt') {
+      console.log(`[estoque-girassol SALVAR] ${a.usuario} (${a.perfil}) → ${resultado.produto.codigo || resultado.produto.id} = "${localizacaoFinal}"`);
+    }
 
     return json(res, 200, {
       ok: true,
@@ -168,12 +200,10 @@ async function handleLogin(req, res, body) {
 }
 
 // ── Rotas ────────────────────────────────────────────────────────────
-
 function routes(readBody) {
   return async function handle(req, res, urlObj) {
     const { method } = req;
     const p = urlObj.pathname;
-
     if (p !== '/estoque-girassol' && !p.startsWith('/estoque-girassol/')) return false;
 
     setCors(res);
@@ -207,7 +237,6 @@ function routes(readBody) {
         ...blingProdutos.getCacheStatus()
       }), true;
     }
-
     if (method === 'GET' && p === '/estoque-girassol/cache-status') {
       return json(res, 200, blingProdutos.getCacheStatus()), true;
     }
@@ -237,7 +266,7 @@ function routes(readBody) {
     // ─ SALVAR (compat + api) ─
     if (method === 'POST' && (p === '/estoque-girassol/salvar' || p === '/estoque-girassol/api/salvar')) {
       const body = await readBody(req);
-      await handleSalvar(req, res, body);
+      await handleSalvar(req, res, body, urlObj);
       return true;
     }
 
@@ -250,7 +279,6 @@ function routes(readBody) {
       res.end();
       return true;
     }
-
     if (method === 'GET' && p === '/estoque-girassol/bling/callback') {
       const code = urlObj.searchParams.get('code');
       if (!code) { html(res, 400, '<h2>❌ Estoque: Código não recebido</h2>'); return true; }
@@ -278,20 +306,18 @@ function routes(readBody) {
 
 // ── Bootstrap ────────────────────────────────────────────────────────
 // Dispara carregamento do índice de produtos no startup (se tiver tokens)
-
 function bootstrap() {
   setTimeout(() => {
     const tokens = tokenManager.lerTokens();
     if (tokens.access_token || tokens.refresh_token) {
       blingProdutos.carregarIndiceListagem().catch(e => console.error('[estoque-girassol bootstrap]', e));
     } else {
-      console.log('[estoque] Sem tokens Bling — acesse /estoque-girassol/auth/bling pra autorizar');
+      console.log('[estoque-girassol] Sem tokens Bling — acesse /estoque-girassol/auth/bling pra autorizar');
     }
   }, 9000); // 9s — depois do fragil (5s) pra não competir por API rate-limit
 }
 
 // ── Exporta interface compatível com config/empresas ─────────────────
-
 module.exports = {
   id: 'estoque-girassol',
   nome: 'Estoque Girassol (Localização Warehouse)',
