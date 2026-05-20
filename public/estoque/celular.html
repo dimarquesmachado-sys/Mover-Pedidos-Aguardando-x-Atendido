@@ -437,9 +437,9 @@ let SESSION_TOKEN = null;
   }
 
   // ===== SESSÃO =====
-  function salvarSessao(usuario) {
+  function salvarSessao(usuario, token) {
     localStorage.setItem("bling_login", JSON.stringify({
-      usuario, expiraEm: Date.now() + DURACAO_LOGIN_MS
+      usuario, token, expiraEm: Date.now() + DURACAO_LOGIN_MS
     }));
   }
 
