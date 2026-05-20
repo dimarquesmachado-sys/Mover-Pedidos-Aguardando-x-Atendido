@@ -121,10 +121,11 @@ async function handleBuscar(req, res, urlObj) {
   try {
     const tipo = String(urlObj.searchParams.get('tipo') || '').toUpperCase();
     const codigo = urlObj.searchParams.get('codigo') || '';
+    const forcar = urlObj.searchParams.get('forcar') === '1';
     if (!['SKU', 'EAN'].includes(tipo)) {
       return json(res, 200, { ok: false, erro: 'Tipo inválido' });
     }
-    const resultado = await blingProdutos.resolverProduto(tipo, codigo);
+    const resultado = await blingProdutos.resolverProduto(tipo, codigo, forcar);
     if (!resultado.ok || !resultado.produto) {
       return json(res, 200, { ok: false, erro: resultado.erro || 'Produto não encontrado' });
     }
