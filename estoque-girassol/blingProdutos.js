@@ -278,7 +278,8 @@ async function resolverProduto(tipo, valor) {
   }
 
   // Varre cache de detalhes já carregados
-  for (const [, p] of cacheDetalhes) {
+  for (const [, entry] of cacheDetalhes) {
+    const p = entry.produto;
     if (getEans(p).some(e => isExactDigits(e, valorOriginal))) {
       console.log(`[estoque-girassol EAN-CACHE] Encontrado em cache: ${p.codigo}`);
       indiceEan.set(eanDigits, String(p.id));
