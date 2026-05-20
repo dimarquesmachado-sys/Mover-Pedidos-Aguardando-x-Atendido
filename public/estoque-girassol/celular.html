@@ -662,7 +662,7 @@ document.getElementById("novoLocal").addEventListener("touchstart", handleNovoLo
   function handleNovoLocalFocus() {
     this.removeAttribute("readonly");
     this.focus();
-  });
+  }
   document.getElementById("novoLocal").addEventListener("blur", function() {
     // restaura readOnly quando sai do campo, para próxima bipagem funcionar
     this.setAttribute("readonly", true);
