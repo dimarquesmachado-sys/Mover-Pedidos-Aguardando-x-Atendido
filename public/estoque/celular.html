@@ -545,7 +545,7 @@ let SESSION_TOKEN = null;
     try {
       // Tenta SKU primeiro
       let r = await fetch(
-        "/estoque-girassol/buscar?tipo=SKU&codigo=" + encodeURIComponent(codigoDigitado),
+        "/estoque/buscar?tipo=SKU&codigo=" + encodeURIComponent(codigoDigitado),
         { headers: { "X-Session-Token": SESSION_TOKEN || "" } }
       );
       let d = await r.json().catch(() => ({ ok: false }));
@@ -553,8 +553,8 @@ let SESSION_TOKEN = null;
       // Se não achou, tenta EAN
       if (!d.ok || !d.produto) {
         r = await fetch(
-          "/estoque/buscar?key=" + encodeURIComponent(API_KEY) +
-          "&tipo=EAN&codigo=" + encodeURIComponent(codigoDigitado)
+          "/estoque/buscar?tipo=EAN&codigo=" + encodeURIComponent(codigoDigitado),
+          { headers: { "X-Session-Token": SESSION_TOKEN || "" } }
         );
         d = await r.json().catch(() => ({ ok: false }));
       }
@@ -630,8 +630,11 @@ let SESSION_TOKEN = null;
     try {
       const r = await fetch("/estoque/salvar", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ key: API_KEY, codigo: sku, novaLocalizacao: novoLocal })
+        headers: {
+          "Content-Type": "application/json",
+          "X-Session-Token": SESSION_TOKEN || ""
+        },
+        body: JSON.stringify({ codigo: sku, novaLocalizacao: novoLocal })
       });
       const d = await r.json().catch(() => ({ ok: false, erro: "Resposta inválida do servidor" }));
 
