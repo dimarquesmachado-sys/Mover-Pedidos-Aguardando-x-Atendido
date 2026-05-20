@@ -451,6 +451,7 @@ let SESSION_TOKEN = null;
         localStorage.removeItem("bling_login");
         return null;
       }
+      SESSION_TOKEN = s.token || null;
       return s;
     } catch {
       localStorage.removeItem("bling_login");
