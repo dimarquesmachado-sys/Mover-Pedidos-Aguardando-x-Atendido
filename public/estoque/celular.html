@@ -506,7 +506,8 @@ let SESSION_TOKEN = null;
       const d = await r.json().catch(() => ({}));
 
       if (r.ok && d.sucesso) {
-        salvarSessao(usuario);
+        SESSION_TOKEN = d.token;
+        salvarSessao(usuario, d.token);;
         aplicarLoginNaTela();
         mostrarToast("Login realizado com sucesso", "ok");
         tocarSom("ok");
