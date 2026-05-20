@@ -545,8 +545,8 @@ let SESSION_TOKEN = null;
     try {
       // Tenta SKU primeiro
       let r = await fetch(
-        "/estoque/buscar?key=" + encodeURIComponent(API_KEY) +
-        "&tipo=SKU&codigo=" + encodeURIComponent(codigoDigitado)
+        "/estoque-girassol/buscar?tipo=SKU&codigo=" + encodeURIComponent(codigoDigitado),
+        { headers: { "X-Session-Token": SESSION_TOKEN || "" } }
       );
       let d = await r.json().catch(() => ({ ok: false }));
 
