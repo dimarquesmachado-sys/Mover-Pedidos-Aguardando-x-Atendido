@@ -614,7 +614,7 @@ codigoProdutoAtual = p.codigo || null;
     localEl.innerText = "...";
     try {
       const r = await fetch(
-        "/estoque-girassol/buscar?tipo=SKU&forcar=1&codigo=" + encodeURIComponent(sku),
+        "/estoque/buscar?tipo=SKU&forcar=1&codigo=" + encodeURIComponent(sku),
         { headers: { "X-Session-Token": SESSION_TOKEN || "" } }
       );
       const d = await r.json().catch(() => ({ ok: false }));
