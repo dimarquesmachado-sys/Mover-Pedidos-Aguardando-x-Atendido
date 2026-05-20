@@ -74,10 +74,21 @@ function servirArquivo(res, relPath) {
   fs.createReadStream(fullPath).pipe(res);
 }
 
-// Validação de API key (extensão)
-function apiKeyValida(req, urlObj) {
-  const key = urlObj.searchParams.get('key') || (req.headers['x-api-key'] || '');
-  return key && API_KEY && key === API_KEY;
+// ── AUTENTICAÇÃO (v2) ────────────────────────────────────────────────
+// Aceita JWT (X-Session-Token) OU API_KEY (fallback)
+function autenticarRequest(req, urlObj, bodyKey) {
+  const token = req.headers['x-session-token'] || '';
+  if (token) {
+    const sess = auth.validarSessao(token);
+    if (sess) return { ok: true, via: 'jwt', usuario: sess.usuario, perfil: sess.perfil };
+    return { ok: false, erro: 'Sessão expirada. Faça login novamente.' };
+  }
+  const key = (urlObj && urlObj.searchParams.get('key')) || bodyKey || (req.headers['x-api-key'] || '');
+  if (key && API_KEY && key === API_KEY) {
+    console.log('[estoque] ⚠️  Autenticação via API_KEY (deprecated). Migre para JWT.');
+    return { ok: true, via: 'apikey' };
+  }
+  return { ok: false, erro: 'Não autenticado. Faça login.' };
 }
 
 // Pega usuário da sessão (header X-Session-Token)
@@ -89,8 +100,9 @@ function pegarUsuario(req) {
 // ── Handlers compartilhados (compat + api) ───────────────────────────
 
 async function handleBuscar(req, res, urlObj) {
-  if (!apiKeyValida(req, urlObj)) {
-    return json(res, 401, { ok: false, erro: 'API key inválida' });
+  const a = autenticarRequest(req, urlObj, null);
+  if (!a.ok) {
+    return json(res, 401, { ok: false, erro: a.erro || 'API key inválida' });
   }
   try {
     const tipo = String(urlObj.searchParams.get('tipo') || '').toUpperCase();
@@ -109,10 +121,11 @@ async function handleBuscar(req, res, urlObj) {
   }
 }
 
-async function handleSalvar(req, res, body) {
+async function handleSalvar(req, res, body, urlObj) {
   const { key, codigo, tipo, novaLocalizacao } = body || {};
-  if (!key || !API_KEY || key !== API_KEY) {
-    return json(res, 401, { ok: false, erro: 'API key inválida' });
+  const a = autenticarRequest(req, urlObj, key);
+  if (!a.ok) {
+    return json(res, 401, { ok: false, erro: a.erro || 'API key inválida' });
   }
   try {
     const localizacaoFinal = String(novaLocalizacao ?? '');
@@ -244,7 +257,7 @@ function routes(readBody) {
     // ─ SALVAR (compat + api) ─
     if (method === 'POST' && (p === '/estoque/salvar' || p === '/estoque/api/salvar')) {
       const body = await readBody(req);
-      await handleSalvar(req, res, body);
+await handleSalvar(req, res, body, urlObj);
       return true;
     }
 
