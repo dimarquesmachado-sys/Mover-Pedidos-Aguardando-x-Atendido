@@ -19,7 +19,8 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 // ── Caches ───────────────────────────────────────────────────────────
 
-const cacheDetalhes = new Map();   // id -> produto completo
+const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutos
+const cacheDetalhes = new Map();   // id -> { produto, expira }
 const indiceSku     = new Map();   // sku_lower -> id
 const indiceEan     = new Map();   // ean_digits -> id
 let listagemCarregada = false;
