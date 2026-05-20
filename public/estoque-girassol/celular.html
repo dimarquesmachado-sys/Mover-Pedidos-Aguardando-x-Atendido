@@ -657,7 +657,9 @@
   document.getElementById("sku").addEventListener("input", () => marcarCampoBusca(""));
 
   // readOnly no novoLocal: remove ao toque (abre teclado) mas mantém para coletor
-  document.getElementById("novoLocal").addEventListener("touchstart", function() {
+document.getElementById("novoLocal").addEventListener("touchstart", handleNovoLocalFocus);
+  document.getElementById("novoLocal").addEventListener("mousedown", handleNovoLocalFocus);
+  function handleNovoLocalFocus() {
     this.removeAttribute("readonly");
     this.focus();
   });
