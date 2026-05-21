@@ -8,18 +8,12 @@ const {
   getPedidosPorStatus, getPedidoDetalhe,
   getCodigoRastreio, isMercadoEnviosPorLoja,
   alterarSituacao,
-  jaProcessado, marcarProcessado, limparMemoriaAntiga,
-  getNFeDetalhe
+  jaProcessado, marcarProcessado, limparMemoriaAntiga
 } = require('./blingApi');
 const { getShipmentInfo, getShipmentSubstatus } = require('./mlApi');
 
 const MAX_F1 = parseInt(process.env.MAX_PEDIDOS_F1 || '40');
 const MAX_F2 = parseInt(process.env.MAX_PEDIDOS_F2 || '60');
-
-// Anti vai-e-vem: tempo mínimo (min) desde a emissão da NF antes do F1 mover.
-// Enquanto a NF está "fresca", a integração nativa Bling↔ML ainda mexe no
-// pedido e reverte AGUARDANDO→Atendido. Esperamos a NF maturar.
-const NF_MIN_MINUTOS = parseInt(process.env.F1_NF_MIN_MINUTOS || '6');
 
 const _rodando = { F1: false, F2: false };
 
@@ -61,33 +55,6 @@ async function temEtiquetaML(mlToken, numeroLoja) {
   }
 }
 
-/**
- * Anti vai-e-vem: retorna true se a NF do pedido ainda está "fresca"
- * (emitida há menos de NF_MIN_MINUTOS). Nesse caso o F1 NÃO deve mover.
- * Em caso de erro de rede ou ausência de NF, retorna false (não bloqueia).
- */
-async function nfAindaFresca(token, pDetalhe, idPedido) {
-  const nfId = pDetalhe?.notaFiscal?.id;
-  if (!nfId) return false; // sem NF → não bloqueia
-  try {
-    const nf = await getNFeDetalhe(token, nfId);
-    const dataEmissaoStr = nf?.dataEmissao;
-    if (!dataEmissaoStr) return false; // sem data → não bloqueia
-    // Formato Bling: "2026-05-21 11:19:31" (horário de Brasília, sem TZ)
-    const emissao = new Date(String(dataEmissaoStr).replace(' ', 'T') + '-03:00');
-    if (isNaN(emissao.getTime())) return false; // data inválida → não bloqueia
-    const minutos = (Date.now() - emissao.getTime()) / 60000;
-    if (minutos < NF_MIN_MINUTOS) {
-      console.log(`[F1] Pedido ${idPedido} NF ${nfId} tem ${minutos.toFixed(1)} min — aguardando maturar, NÃO move`);
-      return true;
-    }
-    return false;
-  } catch (e) {
-    console.warn(`[F1] Erro ao checar maturidade NF do pedido ${idPedido}: ${e.message} — não bloqueia`);
-    return false;
-  }
-}
-
 // ── Fluxo 1 — ATENDIDO → AGUARDANDO ────────────────────────────────────────────
 async function _fluxo1(token) {
   const { inicial, final } = getPeriodo();
@@ -124,13 +91,7 @@ async function _fluxo1(token) {
         continue;
       }
     }
-    // ANTI VAI-E-VEM: se a NF está fresca, pula SEM marcar processado
-    // (reavalia na próxima rodada, quando a NF já tiver maturado)
-    if (await nfAindaFresca(token, pDetalhe, p.id)) {
-      ignorados++;
-      continue;
-    }
-    // Sem etiqueta e NF madura → move para AGUARDANDO
+    // Sem etiqueta → move para AGUARDANDO
     try {
       await alterarSituacao(token, p.id, SITUACAO_AGUARDANDO);
       movidos++;
