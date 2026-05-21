@@ -3,18 +3,12 @@
 /**
  * F3 — Envio automático de NF-e (dados fiscais) Bling → Mercado Livre. (GOOD Import)
  *
- * Problema que resolve:
- *   Às vezes o Bling não transmite os dados fiscais da NF-e para o ML.
- *   O pedido fica travado no ML com "Adicione os dados fiscais...". Sem isso,
- *   o ML não gera a etiqueta de envio.
- *
- * Como funciona:
- *   1. Lista as NF-e AUTORIZADAS (situacao=5) dos últimos dias no Bling.
- *   2. Para cada NF da loja ML (loja.id em ME_LOJA_IDS) ainda não processada:
- *        - pega o detalhe (numeroPedidoLoja + link do XML);
- *        - envia para o ML SOMENTE se o shipment estiver "invoice_pending";
- *        - se o ML já tiver os dados (não está pendente), pula sem erro.
- *   3. Marca como processada para não reenviar à toa.
+ * 1. Lista NF-e AUTORIZADAS (situacao=5) dos últimos dias no Bling.
+ * 2. Para cada NF da loja ML (loja.id em ME_LOJA_IDS) ainda não processada:
+ *      - pega o detalhe (numeroPedidoLoja + link do XML);
+ *      - envia para o ML SOMENTE se o shipment estiver "invoice_pending";
+ *      - se o ML já tiver os dados, pula sem erro.
+ * 3. Marca como processada para não reenviar.
  *
  * Trava de segurança: só NF com situacao=5 E com link de XML é enviada.
  */
