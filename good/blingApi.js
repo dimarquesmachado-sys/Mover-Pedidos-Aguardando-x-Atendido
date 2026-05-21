@@ -126,6 +126,38 @@ async function alterarSituacao(token, idPedido, novaSituacao) {
   );
   console.log(`[GOOD blingApi] Pedido ${idPedido} → situação ${novaSituacao} ✓`);
 }
+// ─── F3: NF-e ────────────────────────────────────────────────────────────────
+async function getNFesAutorizadas(token, dataInicial, dataFinal) {
+  const todos = [];
+  for (let pag = 1; pag <= MAX_PAGINAS; pag++) {
+    const url =
+      `${BLING_API}/nfe?situacao=5` +
+      `&dataEmissaoInicial=${dataInicial}&dataEmissaoFinal=${dataFinal}` +
+      `&limite=100&pagina=${pag}`;
+    const resp = await fetchComRetry(
+      url,
+      { headers: { Authorization: `Bearer ${token}` } },
+      `lista NFs pag=${pag}`
+    );
+    const data = await resp.json();
+    const lista = data.data || [];
+    console.log(`[GOOD blingApi] NFs autorizadas pag=${pag} → ${lista.length}`);
+    todos.push(...lista);
+    if (lista.length < 100) break;
+  }
+  return todos;
+}
+
+async function getNFeDetalhe(token, nfeId) {
+  const url = `${BLING_API}/nfe/${nfeId}`;
+  const resp = await fetchComRetry(
+    url,
+    { headers: { Authorization: `Bearer ${token}` } },
+    `detalhe NF=${nfeId}`
+  );
+  const data = await resp.json();
+  return data.data || null;
+}
 
 // ─── Memória do dia ──────────────────────────────────────────────────
 
@@ -151,5 +183,6 @@ module.exports = {
   isMercadoEnviosPorLoja,
   getCodigoRastreio,
   alterarSituacao,
-  jaProcessado, marcarProcessado, limparMemoriaAntiga
+  jaProcessado, marcarProcessado, limparMemoriaAntiga,
+  getNFesAutorizadas, getNFeDetalhe
 };
