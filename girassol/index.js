@@ -18,14 +18,18 @@ const { gerarTokenInicialNF, garantirTokenNF }         = require('./nfTokenManag
 const { trocarCodigoPorToken, gerarUrlAutorizacao }    = require('./mlTokenManager');
 const { rotinaNFeML, enviarNFeUnica } = require('./nfeMlFluxo');
 
-// ── Crons do Girassol ─────────────────────────────────────────────────
+// ── Crons do Girassol (offset 0 — escalonado p/ não bater com GOOD/AMB) ──
 const crons = {
-  expediente:    '*/3 6-23 * * *',                              // F1 a cada 3 min
-  virada:        '10 0 * * *',                                  // F2 às 00:10
-  manha:         ['0 6 * * *', '30 6 * * *', '0 7 * * *',       // F2 às 06:00, 06:30, 07:00
-                  '*/15 6-23 * * *'],                           // F2 a cada 15 min diurno
-  corrigirNFs: '*/5 6-23 * * *', // Corrigir-NFs a cada 5 min
-  nfeMl:       '*/10 * * * *'    // F3 NF-e → ML a cada 10 min, 24h
+  // F1 — dia (6-19h) a cada 3 min (minutos 0,3,6...); madrugada (20-5h) a cada 15 min
+  expediente:  ['0-59/3 6-19 * * *', '0,15,30,45 20-23,0-5 * * *'],
+  // F2 — virada + manhã + diurno a cada 30 min
+  virada:      '10 0 * * *',
+  manha:       ['0 6 * * *', '30 6 * * *', '0 7 * * *',
+                '0,30 8-19 * * *'],
+  // Corrigir-NFs — dia 5 min; madrugada 20 min
+  corrigirNFs: ['0-59/5 6-19 * * *', '0,20,40 20-23,0-5 * * *'],
+  // F3 NF-e → ML — 24h a cada 10 min (minutos 0,10,20...)
+  nfeMl:       '0,10,20,30,40,50 * * * *'
 };
 
 // ── Helpers HTTP locais ───────────────────────────────────────────────
