@@ -9,7 +9,7 @@ const TZ = process.env.TZ || 'America/Sao_Paulo';
 
 // ── Boot log ──────────────────────────────────────────────────────────
 console.log('╔══════════════════════════════════════════╗');
-console.log('║  Bling Automação UNIFICADO  v3.0          ║');
+console.log('║  Bling Automação UNIFICADO v3.0           ║');
 console.log('║  Multi-empresa / Multi-funcionalidade     ║');
 console.log('╚══════════════════════════════════════════╝');
 console.log('Timezone:', TZ);
@@ -29,7 +29,14 @@ function agendarCron(empresa, expr, label, fn) {
       .then(() => fn())
       .catch(e => console.error(`[${empresa.nome}] [${label}] erro:`, e.message));
   }, { timezone: TZ });
-  console.log(`   [${empresa.nome}] cron ${label}: ${expr}`);
+  console.log(`  [${empresa.nome}] cron ${label}: ${expr}`);
+}
+
+// Aceita string OU array de expressões cron. Agenda todas.
+function agendarCrons(empresa, expr, label, fn) {
+  if (!expr || !fn) return;
+  const arr = Array.isArray(expr) ? expr : [expr];
+  arr.forEach((e, i) => agendarCron(empresa, e, arr.length > 1 ? `${label}-${i+1}` : label, fn));
 }
 
 console.log('\n── Agendando crons ──');
@@ -38,50 +45,49 @@ for (const emp of empresas) {
 
   // F1 — Expediente
   if (c.expediente && r.rotinaExpediente) {
-    agendarCron(emp, c.expediente, 'F1', r.rotinaExpediente);
+    agendarCrons(emp, c.expediente, 'F1', r.rotinaExpediente);
   }
 
   // F2 — Virada
   if (c.virada && r.rotinaVirada) {
-    agendarCron(emp, c.virada, 'F2-Virada', r.rotinaVirada);
+    agendarCrons(emp, c.virada, 'F2-Virada', r.rotinaVirada);
   }
 
-  // F2 — Manhã (pode ser string ou array de expressões)
+  // F2 — Manhã / diurno
   if (c.manha && r.rotinaManha) {
-    const arr = Array.isArray(c.manha) ? c.manha : [c.manha];
-    arr.forEach((expr, i) => agendarCron(emp, expr, `F2-Manha-${i+1}`, r.rotinaManha));
+    agendarCrons(emp, c.manha, 'F2-Manha', r.rotinaManha);
   }
 
-  // Corrigir-NFs (opcional, só Girassol tem hoje)
+  // Corrigir-NFs
   if (c.corrigirNFs && r.corrigirNFs) {
-    agendarCron(emp, c.corrigirNFs, 'CorrigirNFs', r.corrigirNFs);
+    agendarCrons(emp, c.corrigirNFs, 'CorrigirNFs', r.corrigirNFs);
   }
 
   // F3 — NF-e → Mercado Livre (envio dos dados fiscais)
   if (c.nfeMl && r.nfeMl) {
-    agendarCron(emp, c.nfeMl, 'F3-NFeML', r.nfeMl);
+    agendarCrons(emp, c.nfeMl, 'F3-NFeML', r.nfeMl);
   }
 }
 
 // ── HTTP server ──────────────────────────────────────────────────────
 // Carrega handlers de cada empresa
 const handlers = empresas.map(e => ({
-  nome:    e.nome,
-  id:      e.id,
-  handle:  e.routes(readBody)
+  nome: e.nome,
+  id: e.id,
+  handle: e.routes(readBody)
 }));
 
 const server = http.createServer(async (req, res) => {
   const { method, url } = req;
   const urlObj = new URL(url, 'http://localhost');
-  const path   = urlObj.pathname;
+  const path = urlObj.pathname;
 
   // Rota global de health
   if (path === '/health' || path === '/') {
     return json(res, 200, {
-      status:   'ok',
-      service:  'bling-automacao-unificado',
-      time:     ts(),
+      status: 'ok',
+      service: 'bling-automacao-unificado',
+      time: ts(),
       empresas: empresas.map(e => ({ id: e.id, nome: e.nome }))
     });
   }
@@ -104,7 +110,6 @@ const server = http.createServer(async (req, res) => {
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log(`\n🌐 HTTP ouvindo na porta ${PORT}\n`);
-
   // Bootstrap de módulos que precisam (ex: fragil carrega índice de produtos)
   for (const e of empresas) {
     if (typeof e.bootstrap === 'function') {
