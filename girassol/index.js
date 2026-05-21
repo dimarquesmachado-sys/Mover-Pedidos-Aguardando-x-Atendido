@@ -24,7 +24,7 @@ const crons = {
   virada:        '10 0 * * *',                                  // F2 às 00:10
   manha:         ['0 6 * * *', '30 6 * * *', '0 7 * * *',       // F2 às 06:00, 06:30, 07:00
                   '*/15 6-23 * * *'],                           // F2 a cada 15 min diurno
-  corrigirNFs:   '*/5 6-23 * * *'                               // Corrigir-NFs a cada 5 min
+  corrigirNFs: '*/5 6-23 * * *', // Corrigir-NFs a cada 5 min
   nfeMl:       '*/10 * * * *'    // F3 NF-e → ML a cada 10 min, 24h
 };
 
