@@ -11,6 +11,7 @@ const ME_LOJA_IDS = (process.env.AMB_ME_LOJA_IDS || '206017293').split(',').map(
 const JANELA_DIAS = parseInt(process.env.AMB_JANELA_ULTIMOS_DIAS || '15');
 const MAX_PAGINAS = parseInt(process.env.AMB_MAX_PAGINAS || '5');
 const PAUSA_MS    = parseInt(process.env.AMB_PAUSA_MS || '700');
+const GET_PAUSA_MS = parseInt(process.env.AMB_GET_PAUSA_MS || '500');
 
 let _ultimaReq = 0;
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -31,22 +32,34 @@ function getPeriodo() {
   return { inicial: fmt(ini), final: fmt(fim) };
 }
 
-async function fetchComRetry(url, options, ctx, tentativas = 4) {
+async function fetchComRetry(url, options, ctx, tentativas = 6) {
+  let ultimoErro = null;
   for (let t = 1; t <= tentativas; t++) {
-    await esperarSlot(options.method === 'PATCH' ? PAUSA_MS : 300);
-    const resp = await fetch(url, options);
+    await esperarSlot(options.method === 'PATCH' ? PAUSA_MS : GET_PAUSA_MS);
+    let resp;
+    try {
+      resp = await fetch(url, options);
+    } catch (e) {
+      ultimoErro = e;
+      console.error(`[AMB blingApi] Erro de rede em ${ctx} (tentativa ${t}/${tentativas}):`, e.message);
+      if (t === tentativas) throw new Error(`API Bling AMBTotal (${ctx}) erro de rede: ${e.message}`);
+      await sleep(1000 * t);
+      continue;
+    }
     if (resp.status >= 200 && resp.status < 300) return resp;
+    if (resp.status === 401) throw Object.assign(new Error('TOKEN_EXPIRADO'), { code: 401 });
     if (resp.status === 429) {
-      console.warn(`[AMB blingApi] 429 em ${ctx}, aguardando...`);
+      console.warn(`[AMB blingApi] HTTP 429 em ${ctx} (tentativa ${t}/${tentativas}) — aguardando`);
+      if (t === tentativas) throw new Error(`API Bling AMBTotal (${ctx}) HTTP 429 após ${tentativas} tentativas`);
       await sleep(2000 * t);
       continue;
     }
-    if (resp.status === 401) throw Object.assign(new Error('TOKEN_EXPIRADO'), { code: 401 });
     const txt = await resp.text();
     console.error(`[AMB blingApi] HTTP ${resp.status} em ${ctx}:`, txt.slice(0, 300));
     if (t === tentativas) throw new Error(`API Bling AMBTotal (${ctx}) HTTP ${resp.status}`);
     await sleep(1000 * t);
   }
+  throw new Error(`API Bling AMBTotal (${ctx}) falhou após ${tentativas} tentativas${ultimoErro ? ': ' + ultimoErro.message : ''}`);
 }
 
 async function getPedidoDetalhe(token, idPedido) {
@@ -62,12 +75,7 @@ async function getPedidoDetalhe(token, idPedido) {
 
 /**
  * Busca pedidos por situação.
- *
- * IMPORTANTE: A API Bling v3 está IGNORANDO o filtro de situação na rota
- * /pedidos/vendas — retorna pedidos de TODAS as situações. Por isso fazemos
- * um filtro LOCAL adicional comparando situacao.id.
- *
- * Param da API: idsSituacoes (mesmo padrão do Girassol)
+ * API Bling v3 ignora o filtro de situação — fazemos filtro LOCAL.
  */
 async function getPedidosPorStatus(token, statusId, dataInicial, dataFinal) {
   const todos = [];
@@ -85,7 +93,6 @@ async function getPedidosPorStatus(token, statusId, dataInicial, dataFinal) {
     const data = await resp.json();
     const bruto = data.data || [];
     totalBruto += bruto.length;
-    // FILTRO LOCAL — protege contra bug da API que ignora o filtro
     const lista = bruto.filter(p => p.situacao?.id === statusId);
     console.log(`[AMB blingApi] Status ${statusId} pag=${pag} → API=${bruto.length} filtrado=${lista.length}`);
     todos.push(...lista);
@@ -157,7 +164,7 @@ async function getNFeDetalhe(token, nfeId) {
   return data.data || null;
 }
 
-// ─── Memória do dia (mesma estrutura do Girassol) ────────────────────────────
+// ─── Memória do dia ──────────────────────────────────────────────────
 const _mem = new Map();
 const hojeStr = () => new Date().toISOString().split('T')[0];
 const chave = (f, id) => `${f}:${hojeStr()}:${id}`;
