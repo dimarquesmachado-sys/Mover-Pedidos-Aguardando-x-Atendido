@@ -18,14 +18,18 @@ const { garantirTokenML, trocarCodigoPorToken,
 const { getPedidoDetalhe } = require('./blingApi');
 const { rotinaNFeML, enviarNFeUnica } = require('./nfeMlFluxo');
 
-// ── Crons da GOOD Import ─────────────────────────────────────────────────
+// ── Crons da GOOD Import (offset 1 — escalonado p/ não bater com Girassol/AMB) ──
 const crons = {
-  expediente:  '*/3 6-23 * * *',                              // F1 a cada 3 min
-  virada:      '10 0 * * *',                                  // F2 às 00:10
-  manha:       ['0 6 * * *', '30 6 * * *', '0 7 * * *',       // F2 às 06:00, 06:30, 07:00
-                '*/15 6-23 * * *'],                           // F2 a cada 15 min diurno
-  corrigirNFs: '*/5 6-23 * * *',                              // Corrigir-NFs a cada 5 min
-  nfeMl:       '*/10 * * * *'                                 // F3 NF-e → ML a cada 10 min, 24h
+  // F1 — dia (6-19h) a cada 3 min (minutos 1,4,7...); madrugada (20-5h) a cada 15 min
+  expediente:  ['1-59/3 6-19 * * *', '5,20,35,50 20-23,0-5 * * *'],
+  // F2 — virada + manhã + diurno a cada 30 min
+  virada:      '12 0 * * *',
+  manha:       ['2 6 * * *', '32 6 * * *', '2 7 * * *',
+                '10,40 8-19 * * *'],
+  // Corrigir-NFs — dia 5 min; madrugada 20 min
+  corrigirNFs: ['1-59/5 6-19 * * *', '5,25,45 20-23,0-5 * * *'],
+  // F3 NF-e → ML — 24h a cada 10 min (minutos 3,13,23...)
+  nfeMl:       '3,13,23,33,43,53 * * * *'
 };
 
 // ── Helpers HTTP locais ───────────────────────────────────────────────
