@@ -147,6 +147,18 @@ function routes(readBody) {
       } catch (e) { json(res, 500, { error: e.message }); }
       return true;
     }
+    // DEBUG TEMPORÁRIO: shipment cru do ML a partir do número do pedido ML (numeroLoja)
+    if (method === 'GET' && p.startsWith('/debug/shipment-pedido/')) {
+      const numeroML = p.split('/').pop();
+      try {
+        const { getShipmentInfo, getShipmentRaw } = require('./mlApi');
+        const token = await garantirTokenML();
+        const shipmentId = await getShipmentInfo(token, numeroML);
+        const resultado = await getShipmentRaw(token, shipmentId);
+        json(res, 200, { numeroML, shipmentId, ...resultado });
+      } catch (e) { json(res, 500, { error: e.message }); }
+      return true;
+    }
     if (method === 'GET' && p.startsWith('/debug/cep/')) {
       const cep = p.split('/').pop();
       try {
