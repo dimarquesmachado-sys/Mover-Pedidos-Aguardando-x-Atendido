@@ -56,6 +56,11 @@ for (const emp of empresas) {
   if (c.corrigirNFs && r.corrigirNFs) {
     agendarCron(emp, c.corrigirNFs, 'CorrigirNFs', r.corrigirNFs);
   }
+
+  // F3 — NF-e → Mercado Livre (envio dos dados fiscais)
+  if (c.nfeMl && r.nfeMl) {
+    agendarCron(emp, c.nfeMl, 'F3-NFeML', r.nfeMl);
+  }
 }
 
 // ── HTTP server ──────────────────────────────────────────────────────
