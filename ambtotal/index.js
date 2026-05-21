@@ -18,14 +18,18 @@ const { garantirTokenML, trocarCodigoPorToken,
 const { getPedidoDetalhe } = require('./blingApi');
 const { rotinaNFeML, enviarNFeUnica } = require('./nfeMlFluxo');
 
-// ── Crons da AMBTotal ─────────────────────────────────────────────────
+// ── Crons da AMBTotal (offset 2 — escalonado p/ não bater com Girassol/GOOD) ──
 const crons = {
-  expediente:  '*/3 6-23 * * *',                              // F1 a cada 3 min
-  virada:      '10 0 * * *',                                  // F2 às 00:10
-  manha:       ['0 6 * * *', '30 6 * * *', '0 7 * * *',       // F2 às 06:00, 06:30, 07:00
-                '*/15 6-23 * * *'],                           // F2 a cada 15 min diurno
-  corrigirNFs: '*/5 6-23 * * *',                              // Corrigir-NFs a cada 5 min
-  nfeMl:       '*/10 * * * *'                                 // F3 NF-e → ML a cada 10 min, 24h
+  // F1 — dia (6-19h) a cada 3 min (minutos 2,5,8...); madrugada (20-5h) a cada 15 min
+  expediente:  ['2-59/3 6-19 * * *', '10,25,40,55 20-23,0-5 * * *'],
+  // F2 — virada + manhã + diurno a cada 30 min
+  virada:      '14 0 * * *',
+  manha:       ['4 6 * * *', '34 6 * * *', '4 7 * * *',
+                '20,50 8-19 * * *'],
+  // Corrigir-NFs — dia 5 min; madrugada 20 min
+  corrigirNFs: ['2-59/5 6-19 * * *', '10,30,50 20-23,0-5 * * *'],
+  // F3 NF-e → ML — 24h a cada 10 min (minutos 6,16,26...)
+  nfeMl:       '6,16,26,36,46,56 * * * *'
 };
 
 // ── Helpers HTTP locais ───────────────────────────────────────────────
