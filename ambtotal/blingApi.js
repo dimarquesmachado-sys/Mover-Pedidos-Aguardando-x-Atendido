@@ -7,17 +7,15 @@ const BLING_API = 'https://api.bling.com.br/Api/v3';
 // IDs da AMBTotal (745122 AGUARDANDO, 745123 DESPACHADOS, 9 Atendido)
 const SITUACAO_ATENDIDO   = 9;
 const SITUACAO_AGUARDANDO = parseInt(process.env.AMB_SITUACAO_AGUARDANDO || '745122');
-const ME_LOJA_IDS         = (process.env.AMB_ME_LOJA_IDS || '206017293').split(',').map(Number);
-const JANELA_DIAS         = parseInt(process.env.AMB_JANELA_ULTIMOS_DIAS || '15');
-const MAX_PAGINAS         = parseInt(process.env.AMB_MAX_PAGINAS || '5');
-const PAUSA_MS            = parseInt(process.env.AMB_PAUSA_MS || '700');
+const ME_LOJA_IDS = (process.env.AMB_ME_LOJA_IDS || '206017293').split(',').map(Number);
+const JANELA_DIAS = parseInt(process.env.AMB_JANELA_ULTIMOS_DIAS || '15');
+const MAX_PAGINAS = parseInt(process.env.AMB_MAX_PAGINAS || '5');
+const PAUSA_MS    = parseInt(process.env.AMB_PAUSA_MS || '700');
 
 let _ultimaReq = 0;
-
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
-
 async function esperarSlot(minMs) {
-  const agora  = Date.now();
+  const agora = Date.now();
   const espera = Math.max(0, _ultimaReq + minMs - agora);
   if (espera > 0) await sleep(espera);
   _ultimaReq = Date.now();
@@ -26,8 +24,8 @@ async function esperarSlot(minMs) {
 function getPeriodo() {
   const hoje = new Date();
   hoje.setHours(0, 0, 0, 0);
-  const fim  = new Date(hoje);
-  const ini  = new Date(hoje);
+  const fim = new Date(hoje);
+  const ini = new Date(hoje);
   ini.setDate(ini.getDate() - (JANELA_DIAS - 1));
   const fmt = d => d.toISOString().split('T')[0];
   return { inicial: fmt(ini), final: fmt(fim) };
@@ -52,7 +50,7 @@ async function fetchComRetry(url, options, ctx, tentativas = 4) {
 }
 
 async function getPedidoDetalhe(token, idPedido) {
-  const url  = `${BLING_API}/pedidos/vendas/${idPedido}`;
+  const url = `${BLING_API}/pedidos/vendas/${idPedido}`;
   const resp = await fetchComRetry(
     url,
     { headers: { Authorization: `Bearer ${token}` } },
@@ -84,11 +82,11 @@ async function getPedidosPorStatus(token, statusId, dataInicial, dataFinal) {
       { headers: { Authorization: `Bearer ${token}` } },
       `lista status=${statusId} pag=${pag}`
     );
-    const data    = await resp.json();
-    const bruto   = data.data || [];
-    totalBruto   += bruto.length;
+    const data = await resp.json();
+    const bruto = data.data || [];
+    totalBruto += bruto.length;
     // FILTRO LOCAL — protege contra bug da API que ignora o filtro
-    const lista   = bruto.filter(p => p.situacao?.id === statusId);
+    const lista = bruto.filter(p => p.situacao?.id === statusId);
     console.log(`[AMB blingApi] Status ${statusId} pag=${pag} → API=${bruto.length} filtrado=${lista.length}`);
     todos.push(...lista);
     if (bruto.length < 100) break;
@@ -126,14 +124,45 @@ async function alterarSituacao(token, idPedido, novaSituacao) {
   console.log(`[AMB blingApi] Pedido ${idPedido} → situação ${novaSituacao} ✓`);
 }
 
-// ─── Memória do dia (mesma estrutura do Girassol) ────────────────────────────
+// ─── F3: NF-e ────────────────────────────────────────────────────────────────
+async function getNFesAutorizadas(token, dataInicial, dataFinal) {
+  const todos = [];
+  for (let pag = 1; pag <= MAX_PAGINAS; pag++) {
+    const url =
+      `${BLING_API}/nfe?situacao=5` +
+      `&dataEmissaoInicial=${dataInicial}&dataEmissaoFinal=${dataFinal}` +
+      `&limite=100&pagina=${pag}`;
+    const resp = await fetchComRetry(
+      url,
+      { headers: { Authorization: `Bearer ${token}` } },
+      `lista NFs pag=${pag}`
+    );
+    const data = await resp.json();
+    const lista = data.data || [];
+    console.log(`[AMB blingApi] NFs autorizadas pag=${pag} → ${lista.length}`);
+    todos.push(...lista);
+    if (lista.length < 100) break;
+  }
+  return todos;
+}
 
+async function getNFeDetalhe(token, nfeId) {
+  const url = `${BLING_API}/nfe/${nfeId}`;
+  const resp = await fetchComRetry(
+    url,
+    { headers: { Authorization: `Bearer ${token}` } },
+    `detalhe NF=${nfeId}`
+  );
+  const data = await resp.json();
+  return data.data || null;
+}
+
+// ─── Memória do dia (mesma estrutura do Girassol) ────────────────────────────
 const _mem = new Map();
-const hojeStr      = () => new Date().toISOString().split('T')[0];
-const chave        = (f, id) => `${f}:${hojeStr()}:${id}`;
+const hojeStr = () => new Date().toISOString().split('T')[0];
+const chave = (f, id) => `${f}:${hojeStr()}:${id}`;
 const jaProcessado = (f, id) => _mem.get(chave(f, id)) === true;
 const marcarProcessado = (f, id) => _mem.set(chave(f, id), true);
-
 function limparMemoriaAntiga() {
   const hoje = hojeStr();
   let n = 0;
@@ -150,5 +179,6 @@ module.exports = {
   isMercadoEnviosPorLoja,
   getCodigoRastreio,
   alterarSituacao,
-  jaProcessado, marcarProcessado, limparMemoriaAntiga
+  jaProcessado, marcarProcessado, limparMemoriaAntiga,
+  getNFesAutorizadas, getNFeDetalhe
 };
