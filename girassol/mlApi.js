@@ -2,7 +2,7 @@
 
 const fetch = require('node-fetch');
 
-const ML_API  = 'https://api.mercadolibre.com';
+const ML_API = 'https://api.mercadolibre.com';
 const SITE_ID = 'MLB';
 
 // Busca o shipment_id e substatus a partir do número do pedido ML
@@ -11,16 +11,13 @@ async function getShipmentInfo(token, numeroPedidoLoja) {
     `${ML_API}/orders/${numeroPedidoLoja}`,
     { headers: { Authorization: `Bearer ${token}` } }
   );
-
   if (!resp.ok) {
     const txt = await resp.text();
     throw new Error(`ML busca pedido ${numeroPedidoLoja} erro ${resp.status}: ${txt.slice(0, 200)}`);
   }
-
   const data = await resp.json();
   const shipmentId = data?.shipping?.id;
   if (!shipmentId) throw new Error(`ML: pedido ${numeroPedidoLoja} sem shipment_id`);
-
   return shipmentId;
 }
 
@@ -30,17 +27,25 @@ async function getShipmentSubstatus(token, shipmentId) {
     `${ML_API}/shipments/${shipmentId}`,
     { headers: { Authorization: `Bearer ${token}`, 'x-format-new': 'true' } }
   );
-
   if (!resp.ok) {
     const txt = await resp.text();
     throw new Error(`ML shipment ${shipmentId} erro ${resp.status}: ${txt.slice(0, 200)}`);
   }
-
   const data = await resp.json();
   return {
-    status:    data?.status,
+    status: data?.status,
     substatus: data?.substatus
   };
+}
+
+// DEBUG TEMPORÁRIO: retorna o shipment CRU do ML (todos os campos)
+async function getShipmentRaw(token, shipmentId) {
+  const resp = await fetch(
+    `${ML_API}/shipments/${shipmentId}`,
+    { headers: { Authorization: `Bearer ${token}`, 'x-format-new': 'true' } }
+  );
+  const data = await resp.json().catch(() => ({}));
+  return { httpStatus: resp.status, data };
 }
 
 // Baixa o XML da NF-e direto do link do Bling
@@ -74,9 +79,9 @@ async function enviarNFeParaML(token, numeroPedidoLoja, nfDetalhe) {
   const resp = await fetch(
     `${ML_API}/shipments/${shipmentId}/invoice_data/?siteId=${SITE_ID}`,
     {
-      method:  'POST',
+      method: 'POST',
       headers: {
-        Authorization:  `Bearer ${token}`,
+        Authorization: `Bearer ${token}`,
         'Content-Type': 'application/xml'
       },
       body: xmlContent
@@ -93,4 +98,4 @@ async function enviarNFeParaML(token, numeroPedidoLoja, nfDetalhe) {
   return result;
 }
 
-module.exports = { enviarNFeParaML, getShipmentInfo, getShipmentSubstatus };
+module.exports = { enviarNFeParaML, getShipmentInfo, getShipmentSubstatus, getShipmentRaw };
