@@ -10,16 +10,13 @@ async function getShipmentInfo(token, numeroPedidoLoja) {
     `${ML_API}/orders/${numeroPedidoLoja}`,
     { headers: { Authorization: `Bearer ${token}` } }
   );
-
   if (!resp.ok) {
     const txt = await resp.text();
     throw new Error(`AMB ML busca pedido ${numeroPedidoLoja} erro ${resp.status}: ${txt.slice(0, 200)}`);
   }
-
   const data = await resp.json();
   const shipmentId = data?.shipping?.id;
   if (!shipmentId) throw new Error(`AMB ML: pedido ${numeroPedidoLoja} sem shipment_id`);
-
   return shipmentId;
 }
 
@@ -29,12 +26,10 @@ async function getShipmentSubstatus(token, shipmentId) {
     `${ML_API}/shipments/${shipmentId}`,
     { headers: { Authorization: `Bearer ${token}`, 'x-format-new': 'true' } }
   );
-
   if (!resp.ok) {
     const txt = await resp.text();
     throw new Error(`AMB ML shipment ${shipmentId} erro ${resp.status}: ${txt.slice(0, 200)}`);
   }
-
   const data = await resp.json();
   return {
     status:    data?.status,
@@ -42,4 +37,55 @@ async function getShipmentSubstatus(token, shipmentId) {
   };
 }
 
-module.exports = { getShipmentInfo, getShipmentSubstatus };
+// Baixa o XML da NF-e direto do link do Bling
+async function baixarXmlNFe(xmlUrl) {
+  const resp = await fetch(xmlUrl);
+  if (!resp.ok) throw new Error(`AMB: Erro ao baixar XML da NF: ${resp.status}`);
+  return await resp.text();
+}
+
+// Envia a NF-e para o ML via XML
+async function enviarNFeParaML(token, numeroPedidoLoja, nfDetalhe) {
+  const SITE_ID = 'MLB';
+  // 1. Buscar shipment_id
+  const shipmentId = await getShipmentInfo(token, numeroPedidoLoja);
+  console.log(`[AMB mlApi] Pedido ML ${numeroPedidoLoja} → shipment_id=${shipmentId}`);
+
+  // 2. Verificar substatus
+  const { status, substatus } = await getShipmentSubstatus(token, shipmentId);
+  console.log(`[AMB mlApi] Shipment ${shipmentId} → status=${status} substatus=${substatus}`);
+
+  if (substatus !== 'invoice_pending') {
+    throw new Error(`Shipment ${shipmentId} substatus=${substatus} (não é invoice_pending) — NF não pode ser enviada agora`);
+  }
+
+  // 3. Baixar XML da NF-e
+  if (!nfDetalhe.xml) throw new Error(`AMB NF ${nfDetalhe.id} sem URL de XML`);
+  console.log(`[AMB mlApi] Baixando XML da NF...`);
+  const xmlContent = await baixarXmlNFe(nfDetalhe.xml);
+
+  // 4. Enviar XML para o ML
+  console.log(`[AMB mlApi] Enviando XML para shipment ${shipmentId}...`);
+  const resp = await fetch(
+    `${ML_API}/shipments/${shipmentId}/invoice_data/?siteId=${SITE_ID}`,
+    {
+      method:  'POST',
+      headers: {
+        Authorization:  `Bearer ${token}`,
+        'Content-Type': 'application/xml'
+      },
+      body: xmlContent
+    }
+  );
+
+  if (!resp.ok) {
+    const txt = await resp.text();
+    throw new Error(`AMB ML envio NF shipment=${shipmentId} erro ${resp.status}: ${txt.slice(0, 300)}`);
+  }
+
+  const result = await resp.json().catch(() => ({}));
+  console.log(`[AMB mlApi] ✅ NF enviada para shipment ${shipmentId}:`, JSON.stringify(result));
+  return result;
+}
+
+module.exports = { getShipmentInfo, getShipmentSubstatus, enviarNFeParaML, baixarXmlNFe };
