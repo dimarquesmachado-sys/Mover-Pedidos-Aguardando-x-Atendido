@@ -8,12 +8,18 @@ const {
   getPedidosPorStatus, getPedidoDetalhe,
   getCodigoRastreio, isMercadoEnviosPorLoja,
   alterarSituacao,
-  jaProcessado, marcarProcessado, limparMemoriaAntiga
+  jaProcessado, marcarProcessado, limparMemoriaAntiga,
+  getNFeDetalhe
 } = require('./blingApi');
 const { getShipmentInfo, getShipmentSubstatus } = require('./mlApi');
 
 const MAX_F1 = parseInt(process.env.MAX_PEDIDOS_F1 || '40');
 const MAX_F2 = parseInt(process.env.MAX_PEDIDOS_F2 || '60');
+
+// Anti vai-e-vem: tempo mínimo (min) desde a emissão da NF antes do F1 mover.
+// Enquanto a NF está "fresca", a integração nativa Bling↔ML ainda mexe no
+// pedido e reverte AGUARDANDO→Atendido. Esperamos a NF maturar.
+const NF_MIN_MINUTOS = parseInt(process.env.F1_NF_MIN_MINUTOS || '6');
 
 const _rodando = { F1: false, F2: false };
 
@@ -55,26 +61,47 @@ async function temEtiquetaML(mlToken, numeroLoja) {
   }
 }
 
-// ── Fluxo 1 — ATENDIDO → AGUARDANDO ──────────────────────────────────
+/**
+ * Anti vai-e-vem: retorna true se a NF do pedido ainda está "fresca"
+ * (emitida há menos de NF_MIN_MINUTOS). Nesse caso o F1 NÃO deve mover.
+ * Em caso de erro de rede ou ausência de NF, retorna false (não bloqueia).
+ */
+async function nfAindaFresca(token, pDetalhe, idPedido) {
+  const nfId = pDetalhe?.notaFiscal?.id;
+  if (!nfId) return false; // sem NF → não bloqueia
+  try {
+    const nf = await getNFeDetalhe(token, nfId);
+    const dataEmissaoStr = nf?.dataEmissao;
+    if (!dataEmissaoStr) return false; // sem data → não bloqueia
+    // Formato Bling: "2026-05-21 11:19:31" (horário de Brasília, sem TZ)
+    const emissao = new Date(String(dataEmissaoStr).replace(' ', 'T') + '-03:00');
+    if (isNaN(emissao.getTime())) return false; // data inválida → não bloqueia
+    const minutos = (Date.now() - emissao.getTime()) / 60000;
+    if (minutos < NF_MIN_MINUTOS) {
+      console.log(`[F1] Pedido ${idPedido} NF ${nfId} tem ${minutos.toFixed(1)} min — aguardando maturar, NÃO move`);
+      return true;
+    }
+    return false;
+  } catch (e) {
+    console.warn(`[F1] Erro ao checar maturidade NF do pedido ${idPedido}: ${e.message} — não bloqueia`);
+    return false;
+  }
+}
+
+// ── Fluxo 1 — ATENDIDO → AGUARDANDO ────────────────────────────────────────────
 async function _fluxo1(token) {
   const { inicial, final } = getPeriodo();
   const lista = await getPedidosPorStatus(token, SITUACAO_ATENDIDO, inicial, final);
   const batch = lista.slice(0, MAX_F1);
-
   console.log(`[F1] ${lista.length} encontrados | processando ${batch.length}`);
-
   let mlToken = null;
   try { mlToken = await garantirTokenML(); } catch (e) {
     console.warn('[F1] Sem token ML:', e.message);
   }
-
   let movidos = 0, pulados = 0, ignorados = 0;
-
   for (const p of batch) {
     if (jaProcessado('F1', p.id)) { pulados++; continue; }
-
     if (!isMercadoEnviosPorLoja(p)) { ignorados++; continue; }
-
     let pDetalhe = p;
     try {
       pDetalhe = await getPedidoDetalhe(token, p.id) || p;
@@ -82,14 +109,11 @@ async function _fluxo1(token) {
       if (e.code === 401 || e.message === 'TOKEN_EXPIRADO') throw e;
       console.error(`[F1] Erro detalhe ${p.id}:`, e.message);
     }
-
     const rastreio = getCodigoRastreio(pDetalhe);
     const isFlex = String(pDetalhe?.transporte?.volumes?.[0]?.servico || '').toUpperCase().includes('FLEX');
     console.log(`[F1] Pedido ${p.id} | loja=${p.loja?.id} | rastreio="${rastreio}" | flex=${isFlex}`);
-
     if (isFlex) { ignorados++; continue; }
     if (rastreio !== '') { ignorados++; continue; }
-
     // Sem rastreio no Bling → confirma no ML
     const numeroLoja = pDetalhe?.numeroLoja || p?.numeroLoja;
     if (mlToken && numeroLoja) {
@@ -100,8 +124,13 @@ async function _fluxo1(token) {
         continue;
       }
     }
-
-    // Sem etiqueta → move para AGUARDANDO
+    // ANTI VAI-E-VEM: se a NF está fresca, pula SEM marcar processado
+    // (reavalia na próxima rodada, quando a NF já tiver maturado)
+    if (await nfAindaFresca(token, pDetalhe, p.id)) {
+      ignorados++;
+      continue;
+    }
+    // Sem etiqueta e NF madura → move para AGUARDANDO
     try {
       await alterarSituacao(token, p.id, SITUACAO_AGUARDANDO);
       movidos++;
@@ -111,29 +140,23 @@ async function _fluxo1(token) {
       console.error(`[F1] Erro ao mover ${p.id}:`, e.message);
     }
   }
-
   console.log(`[F1] movidos=${movidos} | ignorados=${ignorados} | já processados=${pulados}`);
 }
 
-// ── Fluxo 2 — AGUARDANDO → ATENDIDO ──────────────────────────────────
+// ── Fluxo 2 — AGUARDANDO → ATENDIDO ────────────────────────────────────────────
 async function _fluxo2(token) {
   const { inicial, final } = getPeriodo();
   const lista = await getPedidosPorStatus(token, SITUACAO_AGUARDANDO, inicial, final);
   const batch = lista.slice(0, MAX_F2);
-
   console.log(`[F2] ${lista.length} encontrados | processando ${batch.length}`);
-
   let mlToken = null;
   try { mlToken = await garantirTokenML(); } catch (e) {
     console.warn('[F2] Sem token ML:', e.message);
   }
-
   let movidos = 0;
-
   for (const p of batch) {
     if (jaProcessado('F2', p.id)) { continue; }
     if (!isMercadoEnviosPorLoja(p)) continue;
-
     let pDetalhe = p;
     try {
       pDetalhe = await getPedidoDetalhe(token, p.id) || p;
@@ -141,15 +164,11 @@ async function _fluxo2(token) {
       if (e.code === 401 || e.message === 'TOKEN_EXPIRADO') throw e;
       console.error(`[F2] Erro detalhe ${p.id}:`, e.message);
     }
-
     const rastreio = getCodigoRastreio(pDetalhe);
     const isFlex = String(pDetalhe?.transporte?.volumes?.[0]?.servico || '').toUpperCase().includes('FLEX');
     console.log(`[F2] Pedido ${p.id} | loja=${p.loja?.id} | rastreio="${rastreio}" | flex=${isFlex}`);
-
     if (p.situacao?.id !== SITUACAO_AGUARDANDO) continue;
-
     let deveAtender = false;
-
     if (isFlex) {
       deveAtender = true;
     } else if (rastreio !== '') {
@@ -162,9 +181,7 @@ async function _fluxo2(token) {
         if (deveAtender) console.log(`[F2] Pedido ${p.id} tem etiqueta no ML → move para ATENDIDO`);
       }
     }
-
     if (!deveAtender) continue;
-
     try {
       await alterarSituacao(token, p.id, SITUACAO_ATENDIDO);
       movidos++;
@@ -174,7 +191,6 @@ async function _fluxo2(token) {
       console.error(`[F2] Erro ao mover ${p.id}:`, e.message);
     }
   }
-
   console.log(`[F2] movidos=${movidos}`);
 }
 
