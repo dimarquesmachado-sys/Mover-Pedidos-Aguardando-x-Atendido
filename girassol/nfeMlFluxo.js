@@ -1,31 +1,26 @@
 'use strict';
 
 /**
- * F3 — Envio automático de NF-e (dados fiscais) Bling → Mercado Livre.
+ * F3 — Envio automático de NF-e (dados fiscais) Bling → Mercado Livre. (Girassol)
  *
- * Problema que resolve:
- *   Às vezes o Bling não transmite os dados fiscais da NF-e para o ML.
- *   O pedido fica travado no ML com a mensagem "Adicione os dados fiscais
- *   para poder emitir a NF-e e entregar o pacote". Sem isso, o ML não gera
- *   a etiqueta de envio.
- *
- * Como funciona:
- *   1. Lista as NF-e AUTORIZADAS (situacao=5) dos últimos dias no Bling.
- *   2. Para cada NF da loja ML (loja.id em ME_LOJA_IDS) ainda não processada:
- *        - pega o detalhe (numeroPedidoLoja + link do XML);
- *        - envia para o ML SOMENTE se o shipment estiver "invoice_pending"
- *          (que é exatamente o estado "faltam dados fiscais");
- *        - se o ML já tiver os dados (não está pendente), pula sem erro.
- *   3. Marca como processada para não reenviar à toa.
+ * 1. Lista NF-e AUTORIZADAS (situacao=5) dos ÚLTIMOS DIAS no Bling.
+ *    >>> Usa JANELA PRÓPRIA E CURTA (NF_JANELA_DIAS, padrão 5 dias) <<<
+ *    Motivo: uma NF que o Bling não enviou ao ML é sempre RECENTE. Olhar a
+ *    janela longa do F1/F2 (15-20 dias) enchia a lista de centenas de NFs
+ *    antigas (já resolvidas) e estourava o limite MAX_NFE — as NFs novas
+ *    (que precisam de envio) ficavam fora do lote e nunca eram processadas.
+ * 2. Para cada NF da loja ML (loja.id em ME_LOJA_IDS) ainda não processada:
+ *      - pega o detalhe (numeroPedidoLoja + link do XML);
+ *      - envia para o ML SOMENTE se o shipment estiver "invoice_pending";
+ *      - se o ML já tiver os dados, pula sem erro.
+ * 3. Marca como processada para não reenviar.
  *
  * Trava de segurança: só NF com situacao=5 E com link de XML é enviada.
- * NF travada/rejeitada/com erro não tem situacao=5 nem XML → nunca é enviada.
  */
 
 const { garantirToken, renovarToken } = require('./tokenManager');
 const { garantirTokenML } = require('./mlTokenManager');
 const {
-  getPeriodo,
   getNFesAutorizadas,
   getNFeDetalhe,
   ME_LOJA_IDS,
@@ -36,7 +31,20 @@ const { enviarNFeParaML } = require('./mlApi');
 
 const MAX_NFE = parseInt(process.env.MAX_NFE_ML || '60');
 
-// Guard para não rodar duas vezes ao mesmo tempo
+// Janela PRÓPRIA do F3 — curta, porque NF travada no ML é sempre recente.
+// Não usa o getPeriodo() do blingApi (que é a janela longa do F1/F2).
+const NF_JANELA_DIAS = parseInt(process.env.NF_JANELA_DIAS || '5');
+
+function getPeriodoNF() {
+  const hoje = new Date();
+  hoje.setHours(0, 0, 0, 0);
+  const fim = new Date(hoje);
+  const ini = new Date(hoje);
+  ini.setDate(ini.getDate() - (NF_JANELA_DIAS - 1));
+  const fmt = d => d.toISOString().split('T')[0];
+  return { inicial: fmt(ini), final: fmt(fim) };
+}
+
 let _rodando = false;
 
 async function comTokenRenewable(fn) {
@@ -52,10 +60,10 @@ async function comTokenRenewable(fn) {
 }
 
 async function _fluxoNFeML(tokenBling) {
-  const { inicial, final } = getPeriodo();
+  const { inicial, final } = getPeriodoNF();
   const lista = await getNFesAutorizadas(tokenBling, inicial, final);
   const batch = lista.slice(0, MAX_NFE);
-  console.log(`[F3-NFeML] ${lista.length} NF autorizadas | processando ${batch.length}`);
+  console.log(`[F3-NFeML] janela ${NF_JANELA_DIAS}d (${inicial}→${final}) | ${lista.length} NF autorizadas | processando ${batch.length}`);
 
   let mlToken = null;
   try {
@@ -69,11 +77,8 @@ async function _fluxoNFeML(tokenBling) {
 
   for (const nfResumo of batch) {
     const nfeId = nfResumo.id;
-
-    // Já tratada hoje?
     if (jaProcessado('F3', nfeId)) { puladas++; continue; }
 
-    // Pega o detalhe (a listagem resumida nem sempre traz loja.id / xml / numeroPedidoLoja)
     let nf = null;
     try {
       nf = await getNFeDetalhe(tokenBling, nfeId);
@@ -85,18 +90,15 @@ async function _fluxoNFeML(tokenBling) {
     }
     if (!nf) { ignoradas++; continue; }
 
-    // Filtro 1: precisa ser da loja ML desta empresa
     const lojaId = nf?.loja?.id;
     if (!ME_LOJA_IDS.includes(lojaId)) { ignoradas++; continue; }
 
-    // Filtro 2 (segurança): precisa ter link de XML (NF realmente autorizada)
     if (!nf.xml) {
       console.warn(`[F3-NFeML] NF ${nfeId} (nº ${nf.numero}) sem XML — pulando`);
       ignoradas++;
       continue;
     }
 
-    // Filtro 3: precisa ter o número do pedido na loja (ML)
     const numeroPedidoLoja = nf.numeroPedidoLoja;
     if (!numeroPedidoLoja) {
       console.warn(`[F3-NFeML] NF ${nfeId} (nº ${nf.numero}) sem numeroPedidoLoja — pulando`);
@@ -104,7 +106,6 @@ async function _fluxoNFeML(tokenBling) {
       continue;
     }
 
-    // Tenta enviar. enviarNFeParaML já confere se o shipment está "invoice_pending".
     try {
       await enviarNFeParaML(mlToken, numeroPedidoLoja, nf);
       console.log(`[F3-NFeML] ✅ NF ${nf.numero} (pedido ML ${numeroPedidoLoja}) enviada`);
@@ -112,15 +113,13 @@ async function _fluxoNFeML(tokenBling) {
       marcarProcessado('F3', nfeId);
     } catch (e) {
       const msg = e.message || '';
-      // Caso esperado: o ML já tem os dados fiscais (não está pendente). Não é erro.
       if (msg.includes('não é invoice_pending') || msg.includes('invoice_pending')) {
         console.log(`[F3-NFeML] NF ${nf.numero} (pedido ML ${numeroPedidoLoja}) — ML não está pendente, nada a fazer`);
         semPendencia++;
-        marcarProcessado('F3', nfeId); // já resolvido, não tentar de novo hoje
+        marcarProcessado('F3', nfeId);
       } else {
         console.error(`[F3-NFeML] Erro ao enviar NF ${nf.numero} (pedido ML ${numeroPedidoLoja}):`, msg);
         erros++;
-        // NÃO marca como processada → tenta de novo na próxima rodada
       }
     }
   }
@@ -131,9 +130,6 @@ async function _fluxoNFeML(tokenBling) {
   );
 }
 
-/**
- * Rotina pública chamada pelo cron e pela rota manual.
- */
 async function rotinaNFeML() {
   if (_rodando) {
     console.log('[F3-NFeML] já em execução — pulando');
@@ -147,10 +143,6 @@ async function rotinaNFeML() {
   }
 }
 
-/**
- * Envia UMA NF específica (uso manual / apaga-incêndio).
- * Não respeita o filtro de "já processada", pois é disparo intencional.
- */
 async function enviarNFeUnica(nfeId) {
   return comTokenRenewable(async (tokenBling) => {
     const nf = await getNFeDetalhe(tokenBling, nfeId);
