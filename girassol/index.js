@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * Módulo Girassol — Mover Pedidos + Corrigir-NFs
+ * Módulo Girassol — Mover Pedidos + Corrigir-NFs + F3 NF-e → ML
  */
 
 const { rotinaExpediente, rotinaVirada, rotinaManha } = require('./fluxos');
@@ -9,6 +9,7 @@ const { corrigirNFsPendentes } = require('./nfFluxos');
 const { gerarTokenInicial, garantirToken } = require('./tokenManager');
 const { gerarTokenInicialNF, garantirTokenNF } = require('./nfTokenManager');
 const { trocarCodigoPorToken, gerarUrlAutorizacao, garantirTokenML } = require('./mlTokenManager');
+const { rotinaNFeML, enviarNFeUnica } = require('./nfeMlFluxo');
 
 // ── Crons do Girassol ─────────────────────────────────────────────────
 const crons = {
@@ -16,7 +17,8 @@ const crons = {
   virada:      '10 0 * * *',                                  // F2 às 00:10
   manha:       ['0 6 * * *', '30 6 * * *', '0 7 * * *',       // F2 às 06:00, 06:30, 07:00
                 '*/15 6-23 * * *'],                           // F2 a cada 15 min diurno
-  corrigirNFs: '*/5 6-23 * * *'                               // Corrigir-NFs a cada 5 min
+  corrigirNFs: '*/5 6-23 * * *',                              // Corrigir-NFs a cada 5 min
+  nfeMl:       '0,10,20,30,40,50 6-23 * * *'                  // F3 NF-e→ML a cada 10 min (min 0,10,20...)
 };
 
 // ── Helpers HTTP locais ───────────────────────────────────────────────
@@ -89,6 +91,16 @@ function routes(readBody) {
       if (p === '/run/virada')       { rotinaVirada().catch(console.error);     json(res, 202, { queued: 'rotinaVirada' }); return true; }
       if (p === '/run/manha')        { rotinaManha().catch(console.error);      json(res, 202, { queued: 'rotinaManha' }); return true; }
       if (p === '/run/corrigir-nfs') { corrigirNFsPendentes().catch(console.error); json(res, 202, { queued: 'corrigirNFsPendentes' }); return true; }
+      if (p === '/run/nfe-ml')       { rotinaNFeML().catch(console.error);      json(res, 202, { queued: 'rotinaNFeML' }); return true; }
+      // Envio manual de UMA NF específica: POST /run/nfe-ml/:idNfe
+      if (p.startsWith('/run/nfe-ml/')) {
+        const idNfe = p.split('/').pop();
+        try {
+          const resultado = await enviarNFeUnica(idNfe);
+          json(res, 200, resultado);
+        } catch (e) { json(res, 500, { ok: false, error: e.message }); }
+        return true;
+      }
     }
 
     // Debug
@@ -102,6 +114,13 @@ function routes(readBody) {
     if (method === 'GET' && p === '/debug/token-nf') {
       try {
         const token = await garantirTokenNF();
+        json(res, 200, { token });
+      } catch (e) { json(res, 500, { error: e.message }); }
+      return true;
+    }
+    if (method === 'GET' && p === '/debug/token-ml') {
+      try {
+        const token = await garantirTokenML();
         json(res, 200, { token });
       } catch (e) { json(res, 500, { error: e.message }); }
       return true;
@@ -123,6 +142,15 @@ function routes(readBody) {
         const token = await garantirToken();
         const detalhe = await getNFeDetalhe(token, idNfe);
         json(res, 200, detalhe);
+      } catch (e) { json(res, 500, { error: e.message }); }
+      return true;
+    }
+    // Envio único de NF-e → ML (debug/manual via GET)
+    if (method === 'GET' && p.startsWith('/debug/enviar-nfe/')) {
+      const nfeId = p.split('/').pop();
+      try {
+        const resultado = await enviarNFeUnica(nfeId);
+        json(res, 200, resultado);
       } catch (e) { json(res, 500, { error: e.message }); }
       return true;
     }
@@ -185,7 +213,8 @@ module.exports = {
     rotinaExpediente,
     rotinaVirada,
     rotinaManha,
-    corrigirNFs: corrigirNFsPendentes
+    corrigirNFs: corrigirNFsPendentes,
+    nfeMl: rotinaNFeML
   },
   routes,
   crons
