@@ -1,0 +1,20 @@
+{
+  "name": "Respostas Rápidas ML",
+  "short_name": "Respostas",
+  "start_url": "/respostas-rapidas/painel",
+  "display": "standalone",
+  "background_color": "#2563eb",
+  "theme_color": "#2563eb",
+  "icons": [
+    {
+      "src": "/respostas-rapidas/favicon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/respostas-rapidas/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png"
+    }
+  ]
+}
