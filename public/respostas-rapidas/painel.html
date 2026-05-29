@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Respostas Rápidas ML</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f5f5f7;
+      color: #1d1d1f;
+      min-height: 100vh;
+    }
+    .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+    header {
+      background: #fff;
+      padding: 16px 24px;
+      border-radius: 12px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+      margin-bottom: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    h1 { font-size: 22px; color: #333; }
+    h2 { font-size: 18px; margin-bottom: 12px; color: #444; }
+    .user-info { display: flex; align-items: center; gap: 12px; font-size: 14px; color: #666; flex-wrap: wrap; }
+    button {
+      background: #2563eb;
+      color: white;
+      border: none;
+      padding: 10px 18px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 500;
+      transition: all 0.15s;
+    }
+    button:hover { background: #1d4ed8; }
+    button.secondary { background: #e5e7eb; color: #1f2937; }
+    button.secondary:hover { background: #d1d5db; }
+    button.danger { background: #dc2626; }
+    button.danger:hover { background: #b91c1c; }
+    button.small { padding: 6px 12px; font-size: 13px; }
+
+    .login-box {
+      max-width: 380px;
+      margin: 100px auto;
+      background: white;
+      padding: 32px;
+      border-radius: 12px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+    }
+    .login-box h1 { margin-bottom: 24px; text-align: center; }
+    .login-box input {
+      width: 100%;
+      padding: 12px;
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      margin-bottom: 12px;
+      font-size: 14px;
+    }
+    .login-box button { width: 100%; padding: 12px; }
+    .erro {
+      color: #dc2626;
+      font-size: 14px;
+      margin-top: 8px;
+      text-align: center;
+    }
+
+    .filtros {
+      background: white;
+      padding: 16px;
+      border-radius: 12px;
+      margin-bottom: 16px;
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .filtros label { font-size: 13px; color: #555; font-weight: 500; }
+    .filtros select {
+      padding: 8px 12px;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      font-size: 14px;
+      background: white;
+    }
+
+    .lista { display: flex; flex-direction: column; gap: 10px; }
+    .resposta-card {
+      background: white;
+      padding: 16px;
+      border-radius: 10px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+      border-left: 4px solid #2563eb;
+    }
+    .resposta-card.loja-AMBTOTAL { border-left-color: #f59e0b; }
+    .resposta-card.loja-GIRASSOL { border-left-color: #eab308; }
+    .resposta-card.loja-GIMPO { border-left-color: #3b82f6; }
+    .resposta-titulo { font-weight: 600; font-size: 15px; margin-bottom: 8px; }
+    .resposta-tags { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+    .tag {
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 12px;
+      background: #e0e7ff;
+      color: #3730a3;
+      font-weight: 500;
+    }
+    .tag.loja { background: #fef3c7; color: #92400e; }
+    .resposta-texto {
+      font-size: 14px;
+      color: #444;
+      white-space: pre-wrap;
+      line-height: 1.5;
+      background: #f9fafb;
+      padding: 10px;
+      border-radius: 6px;
+    }
+    .resposta-acoes { display: flex; gap: 8px; margin-top: 10px; }
+
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.5);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      padding: 20px;
+    }
+    .modal-overlay.active { display: flex; }
+    .modal {
+      background: white;
+      padding: 24px;
+      border-radius: 12px;
+      max-width: 600px;
+      width: 100%;
+      max-height: 90vh;
+      overflow-y: auto;
+    }
+    .modal h2 { margin-bottom: 16px; }
+    .form-group { margin-bottom: 14px; }
+    .form-group label {
+      display: block;
+      font-size: 13px;
+      font-weight: 500;
+      color: #555;
+      margin-bottom: 6px;
+    }
+    .form-group input, .form-group select, .form-group textarea {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      font-size: 14px;
+      font-family: inherit;
+    }
+    .form-group textarea { min-height: 120px; resize: vertical; line-height: 1.5; }
+    .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }
+    .empty { text-align: center; padding: 60px 20px; color: #999; background: white; border-radius: 12px; }
+    .toast {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      background: #16a34a;
+      color: white;
+      padding: 12px 20px;
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      z-index: 2000;
+      display: none;
+    }
+    .toast.show { display: block; animation: slideIn 0.3s; }
+    .toast.error { background: #dc2626; }
+    @keyframes slideIn {
+      from { transform: translateY(20px); opacity: 0; }
+      to { transform: translateY(0); opacity: 1; }
+    }
+  </style>
+</head>
+<body>
+
+  <div id="loginView" class="login-box" style="display:none;">
+    <h1>🔐 Respostas Rápidas</h1>
+    <input type="text" id="loginUser" placeholder="Usuário" autocomplete="username">
+    <input type="password" id="loginPass" placeholder="Senha" autocomplete="current-password">
+    <button onclick="fazerLogin()">Entrar</button>
+    <div id="loginErro" class="erro"></div>
+  </div>
+
+  <div id="appView" class="container" style="display:none;">
+    <header>
+      <h1>💬 Respostas Rápidas - Mercado Livre</h1>
+      <div class="user-info">
+        <span id="usuarioLogado"></span>
+        <button class="secondary small" onclick="logout()">Sair</button>
+      </div>
+    </header>
+
+    <div class="filtros">
+      <label>Loja:</label>
+      <select id="filtroLoja" onchange="renderizar()">
+        <option value="">Todas</option>
+        <option value="AMBTOTAL">AMBTOTAL</option>
+        <option value="GIRASSOL">GIRASSOL</option>
+        <option value="GIMPO">GIMPO</option>
+      </select>
+
+      <label>Categoria:</label>
+      <select id="filtroCategoria" onchange="renderizar()">
+        <option value="">Todas</option>
+        <option value="mensagens">Mensagens</option>
+        <option value="reclamacoes">Reclamações</option>
+        <option value="pos-venda">Pós-venda</option>
+        <option value="geral">Geral</option>
+      </select>
+
+      <button onclick="abrirNova()" style="margin-left:auto;">+ Nova resposta</button>
+    </div>
+
+    <div id="lista" class="lista"></div>
+  </div>
+
+  <div id="modalOverlay" class="modal-overlay">
+    <div class="modal">
+      <h2 id="modalTitulo">Nova resposta</h2>
+      <input type="hidden" id="formId">
+
+      <div class="form-group">
+        <label>Loja</label>
+        <select id="formLoja">
+          <option value="AMBTOTAL">AMBTOTAL</option>
+          <option value="GIRASSOL">GIRASSOL</option>
+          <option value="GIMPO">GIMPO</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label>Categoria</label>
+        <select id="formCategoria">
+          <option value="mensagens">Mensagens (/vendas/novo/mensagens/)</option>
+          <option value="reclamacoes">Reclamações</option>
+          <option value="pos-venda">Pós-venda</option>
+          <option value="geral">Geral (aparece em todas)</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label>Título do botão (curto)</label>
+        <input type="text" id="formTitulo" maxlength="40" placeholder="Ex: Lâmpada não inclusa">
+      </div>
+
+      <div class="form-group">
+        <label>Texto da resposta</label>
+        <textarea id="formTexto" placeholder="Olá! Conforme descrito no anúncio..."></textarea>
+      </div>
+
+      <div class="modal-actions">
+        <button class="secondary" onclick="fecharModal()">Cancelar</button>
+        <button onclick="salvar()">Salvar</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script>
+    const BASE = '/respostas-rapidas';
+    let token = localStorage.getItem('rr_token') || null;
+    let username = localStorage.getItem('rr_username') || null;
+    let respostas = [];
+
+    if (token) { mostrarApp(); carregar(); } else { mostrarLogin(); }
+
+    function mostrarLogin() {
+      document.getElementById('loginView').style.display = 'block';
+      document.getElementById('appView').style.display = 'none';
+    }
+    function mostrarApp() {
+      document.getElementById('loginView').style.display = 'none';
+      document.getElementById('appView').style.display = 'block';
+      document.getElementById('usuarioLogado').textContent = '👤 ' + username;
+    }
+
+    async function fazerLogin() {
+      const usuario = document.getElementById('loginUser').value.trim();
+      const senha = document.getElementById('loginPass').value;
+      const erroEl = document.getElementById('loginErro');
+      erroEl.textContent = '';
+      try {
+        const r = await fetch(BASE + '/api/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ usuario, senha })
+        });
+        const data = await r.json();
+        if (!r.ok || !data.ok) {
+          erroEl.textContent = data.erro || 'Erro ao fazer login';
+          return;
+        }
+        token = data.token;
+        username = data.usuario;
+        localStorage.setItem('rr_token', token);
+        localStorage.setItem('rr_username', username);
+        mostrarApp();
+        carregar();
+      } catch (e) {
+        erroEl.textContent = 'Erro de conexão';
+      }
+    }
+
+    async function logout() {
+      try {
+        await fetch(BASE + '/api/logout', {
+          method: 'POST',
+          headers: { 'X-Session-Token': token }
+        });
+      } catch (e) { /* ignora */ }
+      localStorage.removeItem('rr_token');
+      localStorage.removeItem('rr_username');
+      token = null;
+      username = null;
+      mostrarLogin();
+    }
+
+    document.getElementById('loginPass').addEventListener('keypress', e => {
+      if (e.key === 'Enter') fazerLogin();
+    });
+
+    async function api(url, options = {}) {
+      const headers = {
+        'Content-Type': 'application/json',
+        'X-Session-Token': token,
+        ...(options.headers || {})
+      };
+      const r = await fetch(BASE + url, { ...options, headers });
+      const data = await r.json();
+      if (r.status === 401) {
+        localStorage.removeItem('rr_token');
+        localStorage.removeItem('rr_username');
+        token = null;
+        mostrarLogin();
+        throw new Error(data.erro || 'Sessão expirada');
+      }
+      if (!r.ok || !data.ok) throw new Error(data.erro || 'Erro');
+      return data;
+    }
+
+    async function carregar() {
+      try {
+        const data = await api('/api/admin/list');
+        respostas = data.respostas || [];
+        renderizar();
+      } catch (e) {
+        toast('Erro ao carregar: ' + e.message, true);
+      }
+    }
+
+    function renderizar() {
+      const filtroLoja = document.getElementById('filtroLoja').value;
+      const filtroCategoria = document.getElementById('filtroCategoria').value;
+      let filtradas = [...respostas];
+      if (filtroLoja) filtradas = filtradas.filter(r => r.loja === filtroLoja);
+      if (filtroCategoria) filtradas = filtradas.filter(r => r.categoria === filtroCategoria);
+      filtradas.sort((a, b) => {
+        if (a.loja !== b.loja) return a.loja.localeCompare(b.loja);
+        if (a.categoria !== b.categoria) return a.categoria.localeCompare(b.categoria);
+        return (a.ordem || 0) - (b.ordem || 0);
+      });
+      const lista = document.getElementById('lista');
+      if (filtradas.length === 0) {
+        lista.innerHTML = '<div class="empty">Nenhuma resposta. Clique em "+ Nova resposta" pra começar.</div>';
+        return;
+      }
+      lista.innerHTML = filtradas.map(r => `
+        <div class="resposta-card loja-${r.loja}">
+          <div class="resposta-titulo">${escapeHtml(r.titulo)}</div>
+          <div class="resposta-tags">
+            <span class="tag loja">${r.loja}</span>
+            <span class="tag">${r.categoria}</span>
+          </div>
+          <div class="resposta-texto">${escapeHtml(r.texto)}</div>
+          <div class="resposta-acoes">
+            <button class="secondary small" onclick="editar('${r.id}')">✏️ Editar</button>
+            <button class="danger small" onclick="excluir('${r.id}')">🗑️ Excluir</button>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function escapeHtml(s) {
+      if (!s) return '';
+      return s.replace(/[&<>"']/g, c => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+      }[c]));
+    }
+
+    function abrirNova() {
+      document.getElementById('modalTitulo').textContent = 'Nova resposta';
+      document.getElementById('formId').value = '';
+      document.getElementById('formLoja').value = document.getElementById('filtroLoja').value || 'AMBTOTAL';
+      document.getElementById('formCategoria').value = document.getElementById('filtroCategoria').value || 'mensagens';
+      document.getElementById('formTitulo').value = '';
+      document.getElementById('formTexto').value = '';
+      document.getElementById('modalOverlay').classList.add('active');
+    }
+
+    function editar(id) {
+      const r = respostas.find(x => x.id === id);
+      if (!r) return;
+      document.getElementById('modalTitulo').textContent = 'Editar resposta';
+      document.getElementById('formId').value = r.id;
+      document.getElementById('formLoja').value = r.loja;
+      document.getElementById('formCategoria').value = r.categoria;
+      document.getElementById('formTitulo').value = r.titulo;
+      document.getElementById('formTexto').value = r.texto;
+      document.getElementById('modalOverlay').classList.add('active');
+    }
+
+    function fecharModal() { document.getElementById('modalOverlay').classList.remove('active'); }
+
+    async function salvar() {
+      const id = document.getElementById('formId').value;
+      const body = {
+        loja: document.getElementById('formLoja').value,
+        categoria: document.getElementById('formCategoria').value,
+        titulo: document.getElementById('formTitulo').value.trim(),
+        texto: document.getElementById('formTexto').value.trim()
+      };
+      if (!body.titulo || !body.texto) { toast('Preencha título e texto', true); return; }
+      try {
+        if (id) {
+          await api('/api/admin/editar/' + id, { method: 'PUT', body: JSON.stringify(body) });
+          toast('Resposta atualizada');
+        } else {
+          await api('/api/admin/criar', { method: 'POST', body: JSON.stringify(body) });
+          toast('Resposta criada');
+        }
+        fecharModal();
+        carregar();
+      } catch (e) {
+        toast('Erro: ' + e.message, true);
+      }
+    }
+
+    async function excluir(id) {
+      if (!confirm('Excluir esta resposta?')) return;
+      try {
+        await api('/api/admin/excluir/' + id, { method: 'POST' });
+        toast('Excluída');
+        carregar();
+      } catch (e) {
+        toast('Erro: ' + e.message, true);
+      }
+    }
+
+    function toast(msg, erro = false) {
+      const t = document.getElementById('toast');
+      t.textContent = msg;
+      t.className = 'toast show' + (erro ? ' error' : '');
+      setTimeout(() => t.classList.remove('show'), 3000);
+    }
+  </script>
+</body>
+</html>
