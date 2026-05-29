@@ -216,8 +216,7 @@
         <option value="">Todas</option>
         <option value="mensagens">Mensagens</option>
         <option value="reclamacoes">Reclamações</option>
-        <option value="pos-venda">Pós-venda</option>
-        <option value="geral">Geral</option>
+        <option value="ambos">AMBOS (mensagens + reclamações)</option>
       </select>
 
       <button onclick="abrirNova()" style="margin-left:auto;">+ Nova resposta</button>
@@ -243,10 +242,9 @@
       <div class="form-group">
         <label>Categoria</label>
         <select id="formCategoria">
-          <option value="mensagens">Mensagens (/vendas/novo/mensagens/)</option>
-          <option value="reclamacoes">Reclamações</option>
-          <option value="pos-venda">Pós-venda</option>
-          <option value="geral">Geral (aparece em todas)</option>
+          <option value="mensagens">Mensagens (URL /vendas/novo/mensagens/...)</option>
+          <option value="reclamacoes">Reclamações (URL com /reclamacao/ ou /mediacao/)</option>
+          <option value="ambos">AMBOS (aparece em mensagens E reclamações)</option>
         </select>
       </div>
 
@@ -377,12 +375,14 @@
         lista.innerHTML = '<div class="empty">Nenhuma resposta. Clique em "+ Nova resposta" pra começar.</div>';
         return;
       }
-      lista.innerHTML = filtradas.map(r => `
+      lista.innerHTML = filtradas.map(r => {
+        const catExibir = r.categoria === 'geral' ? 'ambos' : r.categoria;
+        return `
         <div class="resposta-card loja-${r.loja}">
           <div class="resposta-titulo">${escapeHtml(r.titulo)}</div>
           <div class="resposta-tags">
             <span class="tag loja">${r.loja}</span>
-            <span class="tag">${r.categoria}</span>
+            <span class="tag">${catExibir}</span>
           </div>
           <div class="resposta-texto">${escapeHtml(r.texto)}</div>
           <div class="resposta-acoes">
@@ -390,7 +390,8 @@
             <button class="danger small" onclick="excluir('${r.id}')">🗑️ Excluir</button>
           </div>
         </div>
-      `).join('');
+        `;
+      }).join('');
     }
 
     function escapeHtml(s) {
@@ -416,7 +417,7 @@
       document.getElementById('modalTitulo').textContent = 'Editar resposta';
       document.getElementById('formId').value = r.id;
       document.getElementById('formLoja').value = r.loja;
-      document.getElementById('formCategoria').value = r.categoria;
+      document.getElementById('formCategoria').value = r.categoria === 'geral' ? 'ambos' : r.categoria;
       document.getElementById('formTitulo').value = r.titulo;
       document.getElementById('formTexto').value = r.texto;
       document.getElementById('modalOverlay').classList.add('active');
