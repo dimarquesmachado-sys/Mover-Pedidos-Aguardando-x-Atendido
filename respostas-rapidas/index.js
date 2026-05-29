@@ -23,6 +23,11 @@
  *   PUT  /respostas-rapidas/api/admin/editar/:id
  *   POST /respostas-rapidas/api/admin/excluir/:id
  *   GET  /respostas-rapidas/api/respostas  → consumida pela extensão (X-API-Key)
+ *
+ * Categorias válidas:
+ *   - mensagens   (URL /vendas/novo/mensagens/ sem reclamação)
+ *   - reclamacoes (URL com /reclamacao/ ou /mediacao/)
+ *   - ambos       (aparece em mensagens E reclamações)
  */
 
 const fs   = require('fs');
@@ -35,7 +40,13 @@ const DATA_DIR = process.env.RESPOSTAS_DATA_DIR || '/data/respostas-rapidas';
 const DATA_FILE = path.join(DATA_DIR, 'respostas.json');
 
 const LOJAS_VALIDAS = ['AMBTOTAL', 'GIRASSOL', 'GIMPO'];
-const CATEGORIAS_VALIDAS = ['mensagens', 'reclamacoes', 'pos-venda', 'geral'];
+// Aceita 'geral' como sinônimo de 'ambos' (compatibilidade com respostas antigas)
+const CATEGORIAS_VALIDAS = ['mensagens', 'reclamacoes', 'ambos'];
+const CATEGORIA_AMBOS = 'ambos';
+function normalizarCategoria(c) {
+  if (c === 'geral') return 'ambos';
+  return c;
+}
 
 // ── Helpers HTTP ─────────────────────────────────────────────────────
 
@@ -153,7 +164,8 @@ async function handleCriar(req, res, body) {
   const a = autenticarSessao(req);
   if (!a.ok) return json(res, 401, { ok: false, erro: a.erro });
 
-  const { loja, categoria, titulo, texto } = body || {};
+  let { loja, categoria, titulo, texto } = body || {};
+  categoria = normalizarCategoria(categoria);
   if (!loja || !categoria || !titulo || !texto) {
     return json(res, 400, { ok: false, erro: 'loja, categoria, titulo e texto são obrigatórios' });
   }
@@ -190,7 +202,8 @@ async function handleEditar(req, res, body, id) {
   const idx = dados.respostas.findIndex(r => r.id === id);
   if (idx === -1) return json(res, 404, { ok: false, erro: 'Resposta não encontrada' });
 
-  const { loja, categoria, titulo, texto, ordem } = body || {};
+  const { loja, titulo, texto, ordem } = body || {};
+  let categoria = normalizarCategoria(body?.categoria);
   if (loja !== undefined) {
     if (!LOJAS_VALIDAS.includes(loja)) return json(res, 400, { ok: false, erro: 'Loja inválida' });
     dados.respostas[idx].loja = loja;
@@ -235,7 +248,10 @@ async function handleApiPublica(req, res, urlObj) {
   const { respostas } = lerRespostas();
   let filtradas = respostas.filter(r => r.loja === loja);
   if (categoria) {
-    filtradas = filtradas.filter(r => r.categoria === categoria || r.categoria === 'geral');
+    filtradas = filtradas.filter(r => {
+      const cat = normalizarCategoria(r.categoria);
+      return cat === categoria || cat === CATEGORIA_AMBOS;
+    });
   }
   filtradas.sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
   return json(res, 200, { ok: true, respostas: filtradas });
