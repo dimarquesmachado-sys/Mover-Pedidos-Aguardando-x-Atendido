@@ -161,6 +161,17 @@
       font-family: inherit;
     }
     .form-group textarea { min-height: 120px; resize: vertical; line-height: 1.5; }
+    .contador {
+      font-size: 12px;
+      color: #6b7280;
+      text-align: right;
+      margin-top: 4px;
+      font-weight: 500;
+    }
+    .contador.passou {
+      color: #dc2626;
+      font-weight: 600;
+    }
     .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }
     .empty { text-align: center; padding: 60px 20px; color: #999; background: white; border-radius: 12px; }
     .toast {
@@ -256,6 +267,7 @@
       <div class="form-group">
         <label>Texto da resposta</label>
         <textarea id="formTexto" placeholder="Olá! Conforme descrito no anúncio..."></textarea>
+        <div id="contadorTexto" class="contador">0 / 350 caracteres</div>
       </div>
 
       <div class="modal-actions">
@@ -401,6 +413,21 @@
       }[c]));
     }
 
+    function atualizarContador() {
+      const texto = document.getElementById('formTexto').value;
+      const len = texto.length;
+      const el = document.getElementById('contadorTexto');
+      el.textContent = `${len} / 350 caracteres`;
+      if (len > 350) {
+        el.classList.add('passou');
+      } else {
+        el.classList.remove('passou');
+      }
+    }
+
+    // Atualiza contador conforme digita
+    document.getElementById('formTexto').addEventListener('input', atualizarContador);
+
     function abrirNova() {
       document.getElementById('modalTitulo').textContent = 'Nova resposta';
       document.getElementById('formId').value = '';
@@ -408,6 +435,7 @@
       document.getElementById('formCategoria').value = document.getElementById('filtroCategoria').value || 'mensagens';
       document.getElementById('formTitulo').value = '';
       document.getElementById('formTexto').value = '';
+      atualizarContador();
       document.getElementById('modalOverlay').classList.add('active');
     }
 
@@ -420,6 +448,7 @@
       document.getElementById('formCategoria').value = r.categoria === 'geral' ? 'ambos' : r.categoria;
       document.getElementById('formTitulo').value = r.titulo;
       document.getElementById('formTexto').value = r.texto;
+      atualizarContador();
       document.getElementById('modalOverlay').classList.add('active');
     }
 
