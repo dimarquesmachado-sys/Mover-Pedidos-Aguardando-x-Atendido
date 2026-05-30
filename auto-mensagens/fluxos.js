@@ -353,6 +353,22 @@ async function rotinaLerRespostas() {
           const textoCliente = conv.ultimaCliente.text || conv.ultimaCliente.message || '';
           const dataResposta = conv.ultimaCliente.date_created || conv.ultimaCliente.date || new Date().toISOString();
 
+          // ════════════════════════════════════════════════════════
+          // ANTI-DUPLICACAO (fix bug Diego 30/05): se a ultima resposta
+          // ja foi processada pela IA (mesma data), nao processa de novo.
+          // ════════════════════════════════════════════════════════
+          if (venda.ia_processado_em && venda.ultima_resposta_em) {
+            const tIa = new Date(venda.ia_processado_em).getTime();
+            const tResp = new Date(venda.ultima_resposta_em).getTime();
+            const tRespAtual = new Date(dataResposta).getTime();
+            // Se IA ja processou DEPOIS da resposta atual do cliente, eh duplicata
+            if (tIa >= tRespAtual - 1000) {
+              console.log(`[lixas-combinar lerRespostas] ⏭️  Order ${venda.order_id} ja processada pela IA (msg cliente nao mudou) - pulando`);
+              stats.semNovidade++;
+              continue;
+            }
+          }
+
           // Cliente respondeu - grava na tabela
           await lcp.marcarRespostaCliente(venda.order_id, {
             texto: textoCliente,
@@ -380,13 +396,27 @@ async function rotinaLerRespostas() {
               const totalLixas = graosResult.lixas_por_kit; // 100 por padrao (quantidade comprada armazenada na venda)
               const unidadesPorPacote = graosResult.unidades_por_pacote || 10;
 
-              console.log(`[ia] processando order ${venda.order_id}: msg="${textoCliente.slice(0,50)}..."`);
+              // Monta historico da conversa pro contexto (max 10 ultimas msgs)
+              const sellerId = String(require('./mlTokenManager').getUserId() || '');
+              const historicoConversa = (conv.messages || [])
+                .slice(-10)
+                .map(m => {
+                  const fromId = String(m.from?.user_id || m.from_user_id || '');
+                  return {
+                    role: fromId === sellerId ? 'seller' : 'buyer',
+                    text: m.text || m.message || ''
+                  };
+                })
+                .filter(m => m.text);
+
+              console.log(`[ia] processando order ${venda.order_id}: msg="${textoCliente.slice(0,50)}..." (historico=${historicoConversa.length} msgs)`);
               const iaResult = await ia.interpretarRespostaCliente({
                 mensagemCliente: textoCliente,
                 descricaoProduto: graosResult.descricao,
                 totalLixas,
                 unidadesPorPacote,
-                graosDisponiveis
+                graosDisponiveis,
+                historicoConversa
               });
 
               if (!iaResult.ok) {
