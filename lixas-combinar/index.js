@@ -251,6 +251,92 @@ function routes(readBody) {
       return true;
     }
 
+    // POST /lixas-combinar/api/pedido/:orderId/editar-bling  → edita pedido Bling
+    //   Body: { graos: [{grao:"24", quantidade:20}, ...], dryRun?: true }
+    //   Aceita query ?dryRun=1 pra so previsualizar sem enviar
+    if (method === 'POST' && p.startsWith('/lixas-combinar/api/pedido/') && p.endsWith('/editar-bling')) {
+      const sessao = requerAuth();
+      if (!sessao.ok) { json(res, 401, { ok: false, erro: 'nao_autenticado' }); return true; }
+
+      const orderId = p.replace('/lixas-combinar/api/pedido/', '').replace('/editar-bling', '');
+      try {
+        const corpo = await readBody(req);
+        let payload = {};
+        try { payload = JSON.parse(corpo || '{}'); } catch (_) { payload = {}; }
+
+        const dryRun = urlObj.searchParams.get('dryRun') === '1' || !!payload.dryRun;
+        const lcp = require('../auto-mensagens/lixasCombinarPendentes');
+        const venda = await lcp.buscar(orderId);
+
+        if (!venda.ok || !venda.data) {
+          json(res, 404, { ok: false, erro: 'venda_nao_encontrada', orderId });
+          return true;
+        }
+
+        const v = venda.data;
+        let graosEscolhidos = payload.graos;
+
+        // Se nao veio body, tenta usar o pedido_estruturado que IA salvou
+        if (!Array.isArray(graosEscolhidos) || graosEscolhidos.length === 0) {
+          if (v.ia_pedido_estruturado) {
+            try {
+              graosEscolhidos = JSON.parse(v.ia_pedido_estruturado);
+            } catch (_) {
+              json(res, 400, { ok: false, erro: 'ia_pedido_estruturado invalido na tabela' });
+              return true;
+            }
+          } else {
+            json(res, 400, { ok: false, erro: 'precisa fornecer graos no body OU venda precisa ter ia_pedido_estruturado' });
+            return true;
+          }
+        }
+
+        // Consulta graos disponiveis no Bling
+        const lixasService = require('./lixasService');
+        const graosResult = await lixasService.getGraosDisponiveisPorSkuACombinar(v.sku_a_combinar);
+        if (!graosResult.ok) {
+          json(res, 500, { ok: false, erro: 'erro_consultar_graos_bling', detalhe: graosResult.erro });
+          return true;
+        }
+
+        // Edita pedido
+        const bp = require('./blingPedidos');
+        const r = await bp.editarPedidoComGraos({
+          orderId,
+          graosEscolhidos,
+          graosDisponiveis: graosResult.graos,
+          unidadesPorPacote: graosResult.unidades_por_pacote,
+          descricaoBase: graosResult.descricao,
+          dryRun
+        });
+
+        if (!r.ok) {
+          // Atualiza tabela com erro
+          await lcp.atualizarVenda(orderId, {
+            bling_erro: `${r.etapa}: ${r.erro || JSON.stringify(r).slice(0,200)}`.slice(0, 500)
+          });
+          json(res, 500, { ok: false, ...r });
+          return true;
+        }
+
+        // Sucesso (ou dryRun)
+        if (!dryRun) {
+          await lcp.atualizarVenda(orderId, {
+            bling_pedido_id: String(r.pedidoId),
+            bling_editado_em: new Date().toISOString(),
+            bling_erro: null,
+            status: 'processado'
+          });
+        }
+
+        json(res, 200, { ok: true, ...r });
+      } catch (e) {
+        console.error('[lixas-combinar editar-bling]', e);
+        json(res, 500, { ok: false, erro: e.message });
+      }
+      return true;
+    }
+
     // ════════════════════════════════════════════════════════════════
 
     // Rota /lixas-combinar (raiz) → redireciona pra setup
