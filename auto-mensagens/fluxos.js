@@ -125,4 +125,78 @@ async function rotinaACombinar() {
   }
 }
 
-module.exports = { rotinaACombinar, HABILITADO, TEXTO };
+module.exports = { rotinaACombinar, forcarOrder, HABILITADO, TEXTO };
+
+/**
+ * Força processamento de UMA venda específica (ignora janela de tempo)
+ * Usa pra mandar mensagem em vendas antigas ou de teste.
+ */
+async function forcarOrder(orderId) {
+  const stats = { orderId, etapa: 'inicio' };
+  try {
+    if (!TEXTO) {
+      return { ok: false, erro: 'AUTO_MSG_GIRASSOL_TEXTO_A_COMBINAR vazio', stats };
+    }
+    if (!tracker.configurado()) {
+      return { ok: false, erro: 'Supabase nao configurado', stats };
+    }
+
+    // 1. Já enviou?
+    stats.etapa = 'checar_duplicado';
+    if (await tracker.jaEnviou(orderId)) {
+      return { ok: false, erro: 'Ja enviou pra esta venda anteriormente', stats };
+    }
+
+    // 2. Busca detalhe completo
+    stats.etapa = 'buscar_detalhe';
+    const detalhe = await ml.getOrderDetalhe(orderId);
+    stats.status_venda = detalhe.status;
+    stats.buyer_id = detalhe.buyer?.id;
+    stats.pack_id = detalhe.pack_id;
+
+    // 3. Tem A COMBINAR?
+    stats.etapa = 'verificar_a_combinar';
+    const temACombinar = ml.temVariacaoACombinar(detalhe);
+    stats.tem_a_combinar = temACombinar;
+    if (!temACombinar) {
+      return { ok: false, erro: 'Venda NAO tem variacao A COMBINAR', stats };
+    }
+
+    // 4. Envia
+    stats.etapa = 'enviar';
+    const buyerId = detalhe.buyer?.id;
+    const packId = detalhe.pack_id;
+    console.log(`[auto-mensagens FORCAR] order=${orderId} buyer=${buyerId} pack=${packId || 'null'}`);
+
+    const r = await ml.enviarMensagem({ packId, orderId, buyerId, texto: TEXTO });
+    stats.etapa = 'gravar';
+
+    if (r.ok) {
+      const modStatus = r.moderation_status || 'unknown';
+      const foiModerado = ['IN_MODERATION', 'rejected', 'REJECTED'].includes(modStatus);
+      await tracker.registrar({
+        orderId, packId, buyerId,
+        tipo: 'a_combinar', textoEnviado: TEXTO,
+        messageIdMl: r.message_id, status: foiModerado ? 'moderado' : 'enviado',
+        erroDetalhe: foiModerado ? `moderation=${modStatus}` : null,
+        loja: 'GIRASSOL'
+      });
+      stats.message_id = r.message_id;
+      stats.moderation = modStatus;
+      console.log(`[auto-mensagens FORCAR] ✅ order=${orderId} status=${foiModerado ? 'moderado' : 'enviado'}`);
+      return { ok: true, enviado: !foiModerado, moderado: foiModerado, stats };
+    } else {
+      await tracker.registrar({
+        orderId, packId, buyerId,
+        tipo: 'a_combinar', textoEnviado: TEXTO,
+        messageIdMl: null, status: 'erro', erroDetalhe: `${r.status}: ${r.erro}`.slice(0, 500),
+        loja: 'GIRASSOL'
+      });
+      stats.ml_erro = r.erro;
+      stats.ml_status = r.status;
+      return { ok: false, erro: `ML retornou ${r.status}: ${r.erro}`, stats };
+    }
+  } catch (e) {
+    return { ok: false, erro: e.message, stats };
+  }
+}
