@@ -14,7 +14,10 @@ const tokenMgr = require('./tokenManager');
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 
 // Pausa entre chamadas (rate limit Bling ~3 req/s por app)
-const PAUSA_MS = Number(process.env.LIXAS_BLING_PAUSA_MS || 350);
+const PAUSA_MS = Number(process.env.LIXAS_BLING_PAUSA_MS || 500);
+
+// Retry com backoff em caso de 429 (TOO_MANY_REQUESTS)
+const MAX_RETRIES = 5;
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
@@ -22,14 +25,35 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 async function blingGet(path) {
   const url = `${BLING_BASE}${path}`;
-  const r = await tokenMgr.fetchComRetry(url, { method: 'GET' });
-  const txt = await r.text();
-  let data;
-  try { data = JSON.parse(txt); } catch { data = { _raw: txt }; }
-  if (!r.ok) {
+
+  let ultimaResposta = null;
+  for (let tentativa = 1; tentativa <= MAX_RETRIES; tentativa++) {
+    const r = await tokenMgr.fetchComRetry(url, { method: 'GET' });
+    const txt = await r.text();
+    let data;
+    try { data = JSON.parse(txt); } catch { data = { _raw: txt }; }
+
+    if (r.ok) {
+      return data;
+    }
+
+    ultimaResposta = { status: r.status, data };
+
+    // 429 = rate limit, vale a pena tentar de novo
+    if (r.status === 429) {
+      // backoff exponencial: 1s, 2s, 4s, 8s, 16s
+      const waitMs = Math.min(1000 * Math.pow(2, tentativa - 1), 16000);
+      console.log(`[lixas-combinar blingProdutos] HTTP 429 em GET ${path} (tentativa ${tentativa}/${MAX_RETRIES}) — aguardando ${waitMs}ms`);
+      await sleep(waitMs);
+      continue;
+    }
+
+    // Outros erros: não vale tentar de novo (5xx pode valer, mas raro)
     throw new Error(`Bling GET ${path} ${r.status}: ${JSON.stringify(data).slice(0, 300)}`);
   }
-  return data;
+
+  // Esgotou retries
+  throw new Error(`Bling GET ${path} ${ultimaResposta.status} apos ${MAX_RETRIES} tentativas: ${JSON.stringify(ultimaResposta.data).slice(0, 300)}`);
 }
 
 // ── Buscas ───────────────────────────────────────────────────────────
