@@ -1,306 +1,475 @@
 'use strict';
 
 /**
- * ML API — Auto Mensagens Girassol
+ * Fluxo Auto-Mensagens Girassol
  *
- * Endpoints usados:
- *   GET  /orders/search?seller={seller_id}&order.date_created.from=...&order.status=paid
- *   GET  /orders/{order_id}    (detalhe com pack_id e variações)
- *   POST /messages/packs/{pack_id}/sellers/{user_id}    (enviar mensagem)
+ * A cada 5 min (cron):
+ *   1. Busca vendas pagas Girassol das últimas 30 min
+ *   2. Pra cada venda:
+ *      a) Checa se já enviou (Supabase)  → pula
+ *      b) Busca detalhe (variation_attributes)
+ *      c) Tem "A COMBINAR"?  → envia mensagem  +  grava Supabase
+ *      d) Não tem?  → registra como 'pulado' (opcional)
  */
 
-const { garantirTokenML, getUserId } = require('./mlTokenManager');
+const ml = require('./mlApi');
+const tracker = require('./supabaseTracker');
 
-const ML_BASE = 'https://api.mercadolibre.com';
-
-async function mlFetch(method, path, body) {
-  const token = await garantirTokenML();
-  const opts = {
-    method,
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json'
-    }
-  };
-  if (body) opts.body = JSON.stringify(body);
-  const r = await fetch(`${ML_BASE}${path}`, opts);
-  const txt = await r.text();
-  let data;
-  try { data = txt ? JSON.parse(txt) : null; } catch { data = txt; }
-  return { ok: r.ok, status: r.status, data };
+// Integração opcional com módulo /lixas-combinar
+// Se falhar (modulo nao disponivel), cai pro texto generico
+let lixasService = null;
+try {
+  lixasService = require('../lixas-combinar/lixasService');
+} catch (e) {
+  console.log('[auto-mensagens] modulo lixas-combinar nao disponivel — usando msg generica');
 }
 
-/**
- * Busca vendas pagas do seller numa janela de tempo
- * @param {Date} desde - busca vendas a partir desta data
- * @returns {Array} lista de orders (pode ser vazia)
- */
-async function buscarVendasPagas(desde) {
-  const sellerId = getUserId();
-  if (!sellerId) throw new Error('user_id (seller) não disponível - faltou autorização inicial');
+const HABILITADO = (process.env.AUTO_MSG_GIRASSOL_HABILITADO || 'false').toLowerCase() === 'true';
+const TEXTO = process.env.AUTO_MSG_GIRASSOL_TEXTO_A_COMBINAR || '';
 
-  const dateFrom = desde.toISOString();
-  // ML aceita formato ISO sem ms: 2026-05-29T20:00:00.000-03:00 ou com Z
-  // /orders/search documentado: order.date_created.from=DATE_FROM&order.date_created.to=DATE_TO
-  const path = `/orders/search?seller=${sellerId}&order.date_created.from=${encodeURIComponent(dateFrom)}&order.status=paid&sort=date_desc&limit=50`;
-  const r = await mlFetch('GET', path);
-  if (!r.ok) {
-    throw new Error(`ML buscar vendas ${r.status}: ${JSON.stringify(r.data).slice(0, 300)}`);
-  }
-  return r.data?.results || [];
-}
+// Janela de busca de vendas: 30 min pra trás (pega vendas dos últimos minutos)
+const JANELA_MIN = Number(process.env.AUTO_MSG_JANELA_MIN || 30);
+
+// Limite de chars da mensagem ML (action_guide aceita até 350)
+const LIMITE_CHARS = 350;
 
 /**
- * Busca detalhe completo de um pedido (pra ver variation_attributes)
- */
-async function getOrderDetalhe(orderId) {
-  const r = await mlFetch('GET', `/orders/${orderId}`);
-  if (!r.ok) {
-    throw new Error(`ML detalhe pedido ${orderId} ${r.status}: ${JSON.stringify(r.data).slice(0, 200)}`);
-  }
-  return r.data;
-}
-
-/**
- * Busca info de um pack (carrinho com 1+ orders dentro)
- * Útil quando o ID que aparece na URL do ML é pack_id, não order_id
- */
-async function getPackInfo(packId) {
-  const r = await mlFetch('GET', `/packs/${packId}`);
-  if (!r.ok) {
-    throw new Error(`ML pack ${packId} ${r.status}: ${JSON.stringify(r.data).slice(0, 200)}`);
-  }
-  return r.data;
-}
-
-/**
- * Detecta se o pedido tem variação "A COMBINAR" em qualquer item
- * Procura em:
- *   - order_items[].item.variation_attributes[].value_name
- *   - order_items[].item.title (fallback)
- */
-function temVariacaoACombinar(order) {
-  if (!order?.order_items) return false;
-  const ALVO = 'A COMBINAR';
-  for (const item of order.order_items) {
-    // 1) Atributos de variação
-    const attrs = item.item?.variation_attributes || [];
-    for (const a of attrs) {
-      const val = String(a.value_name || '').toUpperCase().trim();
-      if (val === ALVO || val.includes(ALVO)) return true;
-    }
-    // 2) Fallback: título do item (caso ML retorne a variação no título)
-    const titulo = String(item.item?.title || '').toUpperCase();
-    if (titulo.includes(ALVO)) return true;
-  }
-  return false;
-}
-
-/**
- * Extrai o SKU (seller_sku) do primeiro item com variação A COMBINAR.
- * Retorna { sku, quantidade } ou null.
+ * Tenta montar mensagem inteligente com grãos disponíveis.
+ * Se falhar (SKU nao mapeado, Bling fora, etc), retorna o TEXTO genérico.
  *
- * O SKU é usado pra cruzar com o catálogo do módulo /lixas-combinar.
- * Exemplo: "A-COMBINAR-100-lisa-180mm"
+ * Formato final (desenhado pra cliente entender):
+ *   "Ola! Sua compra de {N} lixas {desc}.
+ *
+ *    GRAOS DISPONIVEIS: 24, 40, 60, ...
+ *
+ *    Responda com QUANTIDADE + GRAO. MULTIPLOS de {U}. Total {N} lixas.
+ *    Ex: 30 do grao 24; 70 do grao 80."
+ *
+ * @param {object} detalhe - objeto order completo do ML
+ * @returns {Promise<string>} texto da mensagem (max 350 chars)
  */
-function extrairSkuACombinar(order) {
-  if (!order?.order_items) return null;
-  const ALVO = 'A COMBINAR';
-  for (const item of order.order_items) {
-    const attrs = item.item?.variation_attributes || [];
-    const ehACombinar = attrs.some(a => {
-      const val = String(a.value_name || '').toUpperCase().trim();
-      return val === ALVO || val.includes(ALVO);
-    });
-    if (!ehACombinar) continue;
-
-    // Pegou um item A COMBINAR — extrai SKU
-    // SKU pode vir em order_items[].item.seller_sku OU order_items[].item.seller_custom_field
-    const sku = item.item?.seller_sku
-             || item.item?.seller_custom_field
-             || null;
-    const quantidade = Number(item.quantity) || 1;
-    return { sku, quantidade, titulo: item.item?.title };
+async function montarMensagemInteligente(detalhe) {
+  // Se nao tem lixas-combinar carregado, usa generico
+  if (!lixasService) {
+    return TEXTO;
   }
-  return null;
-}
-
-/**
- * Envia mensagem pro comprador via API ML
- *
- * IMPORTANTE: ML BR exige que vendedor escolha um motivo (option_id) pra iniciar conversa
- * com cliente que ainda não mandou mensagem. Endpoint usado:
- *   POST /messages/action_guide/packs/{PACK_ID}/option?tag=post_sale
- *   Body: { "option_id": "OTHER", "text": "..." }
- *
- * @param {string|number} packId - pack_id (se null, usa order_id)
- * @param {string|number} orderId - usado como fallback se pack_id null
- * @param {string|number} buyerId - destinatário (não usado nesta API, mas mantido pra log)
- * @param {string} texto - mensagem (max 350 chars)
- * @returns {object} { ok, message_id, moderation_status, raw }
- */
-async function enviarMensagem({ packId, orderId, buyerId, texto }) {
-  if (!texto) throw new Error('texto obrigatório');
-
-  // ML: se pack_id null, usar order_id mantendo /packs/ no path
-  const packOrOrder = packId || orderId;
-
-  const body = {
-    option_id: 'OTHER',
-    text: texto
-  };
-
-  const r = await mlFetch(
-    'POST',
-    `/messages/action_guide/packs/${packOrOrder}/option?tag=post_sale`,
-    body
-  );
-
-  if (!r.ok) {
-    return {
-      ok: false,
-      status: r.status,
-      erro: typeof r.data === 'object' ? JSON.stringify(r.data) : String(r.data)
-    };
-  }
-  // Resposta esperada contém id da mensagem e moderation_status (pode vir IN_MODERATION)
-  return {
-    ok: true,
-    message_id: r.data?.id || r.data?.message_id || null,
-    moderation_status: r.data?.status || r.data?.message_moderation?.status || null,
-    raw: r.data
-  };
-}
-
-/**
- * Consulta TODA a conversa de uma venda (pack).
- * Retorna { ok, messages, totalCliente, totalLoja, ultimaCliente, conversaVirgem }
- *
- * messages = array de { from_user_id, to_user_id, text, date_created, message_id, status, read }
- * conversaVirgem = true se NÃO tem nenhuma mensagem ainda
- *
- * Endpoint: GET /messages/packs/{packId}/sellers/{sellerId}?tag=post_sale
- * Param mark_as_read=false pra não marcar como lida só de consultar.
- *
- * Importante: se packId for null (venda Mercado Shop sem pack), usa orderId no lugar.
- */
-async function consultarConversa({ packId, orderId, sellerId, markAsRead = false }) {
-  const sId = sellerId || process.env.ML_SELLER_ID_GIRASSOL;
-  if (!sId) {
-    return { ok: false, erro: 'ML_SELLER_ID_GIRASSOL nao configurado' };
-  }
-  const id = packId || orderId;
-  if (!id) return { ok: false, erro: 'packId ou orderId obrigatorio' };
-
-  const markParam = markAsRead ? '' : '&mark_as_read=false';
-  const path = `/messages/packs/${id}/sellers/${sId}?tag=post_sale${markParam}`;
 
   try {
-    const r = await mlFetch(path, { method: 'GET' });
-    if (!r.ok) {
-      // 404 = conversa virgem (NUNCA teve msg) - é caso normal
-      if (r.status === 404) {
-        return {
-          ok: true,
-          messages: [],
-          totalCliente: 0,
-          totalLoja: 0,
-          ultimaCliente: null,
-          conversaVirgem: true
-        };
-      }
-      return { ok: false, status: r.status, erro: JSON.stringify(r.data).slice(0, 200) };
+    const info = ml.extrairSkuACombinar(detalhe);
+    if (!info?.sku) {
+      console.log('[auto-mensagens] sem SKU no item — usando msg generica');
+      return TEXTO;
     }
 
-    const messages = Array.isArray(r.data?.messages) ? r.data.messages
-                   : Array.isArray(r.data?.results)  ? r.data.results
-                   : [];
+    console.log(`[auto-mensagens] SKU A COMBINAR detectado: ${info.sku} (qtd=${info.quantidade})`);
 
-    const sellerIdNum = String(sId);
-    const msgsCliente = messages.filter(m =>
-      String(m.from?.user_id || m.from_user_id) !== sellerIdNum
-    );
-    const msgsLoja = messages.filter(m =>
-      String(m.from?.user_id || m.from_user_id) === sellerIdNum
-    );
+    const r = await lixasService.getGraosDisponiveisPorSkuACombinar(info.sku);
+    if (!r.ok || !r.graos || r.graos.length === 0) {
+      console.log(`[auto-mensagens] sem graos disponiveis pra ${info.sku} (${r.erro || 'vazio'}) — usando msg generica`);
+      return TEXTO;
+    }
 
-    // Ultima msg do cliente (mais recente)
-    const ultimaCliente = msgsCliente.length > 0
-      ? msgsCliente.sort((a,b) => new Date(b.date_created || b.date) - new Date(a.date_created || a.date))[0]
-      : null;
+    // Calcula total de lixas que cliente comprou
+    const totalLixas = r.lixas_por_kit * info.quantidade;
+    const unidades = r.unidades_por_pacote || 10;
 
-    return {
-      ok: true,
-      messages,
-      totalCliente: msgsCliente.length,
-      totalLoja: msgsLoja.length,
-      ultimaCliente,
-      conversaVirgem: messages.length === 0
-    };
+    // Gera exemplo DINÂMICO que SOMA até o total real
+    function gerarExemplo(total, unidades, graosArr) {
+      if (graosArr.length === 0) return `Ex: ${total} do grão desejado.`;
+      if (graosArr.length === 1) return `Ex: ${total} do grão ${graosArr[0]}.`;
+      const grao1 = graosArr[0];
+      const idx2 = Math.min(2, graosArr.length - 1);
+      const grao2 = graosArr[idx2];
+      const parte1 = Math.round(total * 0.3 / unidades) * unidades;
+      const parte2 = total - parte1;
+      return `Ex: ${parte1} do grão ${grao1}; ${parte2} do grão ${grao2}.`;
+    }
+
+    // Monta mensagem desenhada (com acentos, MAIUSCULO nos pontos chave)
+    function montar(graosArr) {
+      const graosStr = graosArr.join(', ');
+      const exemplo = gerarExemplo(totalLixas, unidades, graosArr);
+      return `Olá! Sua compra de ${totalLixas} lixas ${r.descricao}.
+
+GRÃOS DISPONÍVEIS: ${graosStr}
+
+Responda com QUANTIDADE + GRÃO. MÚLTIPLOS de ${unidades}. Total ${totalLixas} lixas.
+${exemplo}`;
+    }
+
+    let graosArr = r.graos.map(g => g.grao);
+    let msg = montar(graosArr);
+
+    // Safety: se ultrapassar 350, vai removendo graos do fim (mais grossos)
+    if (msg.length > LIMITE_CHARS) {
+      while (graosArr.length > 3 && msg.length > LIMITE_CHARS) {
+        graosArr.pop();
+        msg = montar(graosArr);
+      }
+      // Sinaliza que cortou — adiciona "..." no ultimo grao
+      if (msg.length <= LIMITE_CHARS) {
+        graosArr[graosArr.length - 1] = graosArr[graosArr.length - 1] + ' ...';
+        msg = montar(graosArr);
+      }
+      // Se MESMO assim passou, usa generico
+      if (msg.length > LIMITE_CHARS) {
+        console.log(`[auto-mensagens] msg inteligente impossivel < ${LIMITE_CHARS} (${msg.length}) — usando generica`);
+        return TEXTO;
+      }
+    }
+
+    console.log(`[auto-mensagens] msg inteligente montada (${msg.length} chars, ${graosArr.length} graos)`);
+    return msg;
   } catch (e) {
-    return { ok: false, erro: e.message };
+    console.error(`[auto-mensagens] erro montando msg inteligente: ${e.message} — usando generica`);
+    return TEXTO;
   }
 }
 
+let _executando = false;
+
+async function rotinaACombinar() {
+  if (_executando) {
+    console.log('[auto-mensagens] já em execução, pulando');
+    return { skipped: 'em_execucao' };
+  }
+  _executando = true;
+
+  const inicio = Date.now();
+  const stats = { lidos: 0, jaEnviados: 0, semACombinar: 0, enviados: 0, erros: 0, moderados: 0 };
+
+  try {
+    if (!HABILITADO) {
+      console.log('[auto-mensagens] AUTO_MSG_GIRASSOL_HABILITADO=false → pulando');
+      return { skipped: 'desligado', stats };
+    }
+    if (!TEXTO) {
+      console.error('[auto-mensagens] ⚠️ AUTO_MSG_GIRASSOL_TEXTO_A_COMBINAR vazio - não enviando');
+      return { erro: 'texto_vazio', stats };
+    }
+    if (!tracker.configurado()) {
+      console.error('[auto-mensagens] ⚠️ Supabase não configurado - abortando pra não duplicar');
+      return { erro: 'supabase_nao_configurado', stats };
+    }
+
+    const desde = new Date(Date.now() - JANELA_MIN * 60 * 1000);
+    console.log(`[auto-mensagens] 🔍 Buscando vendas Girassol desde ${desde.toISOString()}`);
+
+    const vendas = await ml.buscarVendasPagas(desde);
+    stats.lidos = vendas.length;
+    console.log(`[auto-mensagens] ${vendas.length} venda(s) paga(s) na janela`);
+
+    for (const venda of vendas) {
+      try {
+        const orderId = venda.id;
+        // 1. Já enviou?
+        if (await tracker.jaEnviou(orderId)) {
+          stats.jaEnviados++;
+          continue;
+        }
+        // 2. Busca detalhe completo (variation_attributes)
+        const detalhe = await ml.getOrderDetalhe(orderId);
+        // 3. Tem "A COMBINAR"?
+        if (!ml.temVariacaoACombinar(detalhe)) {
+          stats.semACombinar++;
+          // Registra como pulado pra não verificar de novo na próxima rodada
+          await tracker.registrar({
+            orderId, packId: detalhe.pack_id, buyerId: detalhe.buyer?.id,
+            tipo: 'a_combinar', textoEnviado: null, messageIdMl: null,
+            status: 'pulado', erroDetalhe: 'sem_variacao_a_combinar',
+            loja: 'GIRASSOL'
+          });
+          continue;
+        }
+        // 4. Monta mensagem (inteligente se SKU mapeado, senão genérica)
+        const buyerId = detalhe.buyer?.id;
+        const packId = detalhe.pack_id;
+        const textoFinal = await montarMensagemInteligente(detalhe);
+
+        // 4.5. NOVO (Sessao 3 Etapa A): consulta conversa pra decidir endpoint
+        //      - virgem  → action_guide OTHER (1 uso, gasta o cap)
+        //      - tem msg → POST direto (preserva o cap pra outra situacao)
+        const conv = await ml.consultarConversa({ packId, orderId });
+        let r;
+        let viaEndpoint;
+        let respostasCliente = null;
+
+        if (conv.ok && !conv.conversaVirgem && conv.totalCliente > 0) {
+          // Cliente ja mandou msg - envia direto sem action_guide
+          viaEndpoint = 'direto';
+          respostasCliente = conv.ultimaCliente;
+          console.log(`[auto-mensagens] 💬 Order ${orderId} ja tem ${conv.totalCliente} msg(s) do cliente — enviando DIRETO (preserva OTHER)`);
+          r = await ml.enviarMensagemDireta({
+            packId, orderId, buyerId, texto: textoFinal
+          });
+        } else {
+          // Conversa virgem (ou erro consultando) - usa action_guide
+          viaEndpoint = 'action_guide';
+          console.log(`[auto-mensagens] 📨 Order ${orderId} conversa virgem — enviando via ACTION_GUIDE OTHER (buyer ${buyerId}, pack ${packId || 'null'}, ${textoFinal.length} chars)`);
+          r = await ml.enviarMensagem({
+            packId, orderId, buyerId, texto: textoFinal
+          });
+        }
+        if (r.ok) {
+          const modStatus = r.moderation_status || 'unknown';
+          const foiModerado = ['IN_MODERATION', 'rejected', 'REJECTED'].includes(modStatus);
+          if (foiModerado) stats.moderados++;
+          else stats.enviados++;
+
+          await tracker.registrar({
+            orderId, packId, buyerId,
+            tipo: 'a_combinar', textoEnviado: textoFinal,
+            messageIdMl: r.message_id, status: foiModerado ? 'moderado' : 'enviado',
+            erroDetalhe: foiModerado ? `moderation=${modStatus}` : (viaEndpoint === 'direto' ? 'enviado_direto_cliente_ja_respondeu' : null),
+            loja: 'GIRASSOL'
+          });
+
+          // NOVO Sessao 3: registra na tabela lixas_combinar_pendentes
+          try {
+            const sku = ml.extrairSkuACombinar(detalhe);
+            const lcp = require('./lixasCombinarPendentes');
+            if (lcp.configurado()) {
+              await lcp.upsertPendente({
+                orderId, packId, buyerId,
+                buyerNome: detalhe.buyer?.nickname || `${detalhe.buyer?.first_name || ''} ${detalhe.buyer?.last_name || ''}`.trim(),
+                skuACombinar: sku?.sku || null,
+                descricaoProduto: sku?.titulo || null,
+                quantidadeLixas: null, // preenchido pelo painel
+                dataVenda: detalhe.date_created || new Date().toISOString(),
+                msgInicialEnviada: textoFinal,
+                msgInicialEnviadaEm: new Date().toISOString(),
+                clienteRespondeu: !!respostasCliente,
+                ultimaRespostaCliente: respostasCliente?.text || null,
+                ultimaRespostaEm: respostasCliente?.date_created || null,
+                totalMsgsCliente: conv.totalCliente || 0,
+                status: respostasCliente ? 'cliente_respondeu' : 'aguardando_resposta',
+                viaEndpoint
+              });
+            }
+          } catch (e) {
+            console.error(`[auto-mensagens] erro upsert pendente: ${e.message}`);
+          }
+
+          console.log(`[auto-mensagens] ✅ Order ${orderId} → status=${foiModerado ? 'moderado' : 'enviado'} via=${viaEndpoint} (msg_id=${r.message_id})`);
+        } else {
+          stats.erros++;
+          await tracker.registrar({
+            orderId, packId, buyerId,
+            tipo: 'a_combinar', textoEnviado: textoFinal,
+            messageIdMl: null, status: 'erro', erroDetalhe: `${viaEndpoint} ${r.status}: ${r.erro}`.slice(0, 500),
+            loja: 'GIRASSOL'
+          });
+          console.error(`[auto-mensagens] ❌ Order ${orderId} → erro ${r.status} via ${viaEndpoint}: ${r.erro}`);
+        }
+      } catch (e) {
+        stats.erros++;
+        console.error(`[auto-mensagens] erro processando order ${venda.id}: ${e.message}`);
+      }
+    }
+
+    const dur = ((Date.now() - inicio) / 1000).toFixed(1);
+    console.log(`[auto-mensagens] ✓ Fim em ${dur}s — ${JSON.stringify(stats)}`);
+    return { ok: true, stats, duracao_s: Number(dur) };
+  } catch (e) {
+    console.error('[auto-mensagens] ❌ erro fatal:', e.message);
+    return { ok: false, erro: e.message, stats };
+  } finally {
+    _executando = false;
+  }
+}
+
+module.exports = { rotinaACombinar, rotinaLerRespostas, forcarOrder, HABILITADO, TEXTO };
+
 /**
- * Envia mensagem DIRETA (sem action_guide), usada quando cliente já mandou msg
- * ou quando loja já usou o cap OTHER e quer mandar mais mensagens.
+ * NOVO (Sessao 3): rotinaLerRespostas
  *
- * Endpoint: POST /messages/packs/{packId}/sellers/{sellerId}?tag=post_sale
- * Body: { from: { user_id: sellerId }, to: { user_id: buyerId }, text }
+ * Roda a cada 2 min (cron). Busca todas as vendas A COMBINAR dos ultimos 7 dias
+ * que estao na tabela lixas_combinar_pendentes com status 'aguardando_resposta',
+ * e pra cada uma consulta a conversa no ML. Se o cliente respondeu, atualiza
+ * o Supabase com a mensagem dele E marca como lida no ML.
  */
-async function enviarMensagemDireta({ packId, orderId, buyerId, sellerId, texto }) {
-  const sId = sellerId || process.env.ML_SELLER_ID_GIRASSOL;
-  if (!sId) return { ok: false, erro: 'ML_SELLER_ID_GIRASSOL nao configurado' };
-  if (!buyerId) return { ok: false, erro: 'buyerId obrigatorio' };
-  if (!texto) return { ok: false, erro: 'texto obrigatorio' };
+let _lendoRespostas = false;
 
-  const id = packId || orderId;
-  const path = `/messages/packs/${id}/sellers/${sId}?tag=post_sale`;
-  const body = {
-    from: { user_id: Number(sId) },
-    to:   { user_id: Number(buyerId) },
-    text: texto
-  };
-
-  const r = await mlFetch(path, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
-  });
-
-  if (!r.ok) {
-    return {
-      ok: false,
-      status: r.status,
-      erro: typeof r.data === 'string' ? r.data : JSON.stringify(r.data).slice(0, 300)
-    };
+async function rotinaLerRespostas() {
+  if (_lendoRespostas) {
+    console.log('[lixas-combinar lerRespostas] já em execução, pulando');
+    return { skipped: 'em_execucao' };
   }
+  _lendoRespostas = true;
 
-  return {
-    ok: true,
-    message_id: r.data?.id || r.data?.message_id || null,
-    moderation_status: r.data?.status || r.data?.message_moderation?.status || null,
-    raw: r.data
-  };
+  const inicio = Date.now();
+  const stats = { lidas: 0, novasRespostas: 0, semNovidade: 0, erros: 0 };
+
+  try {
+    const lcp = require('./lixasCombinarPendentes');
+    if (!lcp.configurado()) {
+      console.log('[lixas-combinar lerRespostas] supabase nao configurado, pulando');
+      return { skipped: 'supabase_nao_configurado' };
+    }
+
+    // Lista pendentes aguardando resposta (ultimos 7 dias)
+    const lista = await lcp.listarPendentes({
+      dias: 7,
+      status: 'aguardando_resposta',
+      limit: 50
+    });
+    if (!lista.ok) {
+      console.error(`[lixas-combinar lerRespostas] erro listando: ${JSON.stringify(lista.data).slice(0,200)}`);
+      return { ok: false, erro: 'erro_listar', stats };
+    }
+
+    const pendentes = Array.isArray(lista.data) ? lista.data : [];
+    stats.lidas = pendentes.length;
+    if (pendentes.length === 0) {
+      console.log('[lixas-combinar lerRespostas] sem pendentes pra checar');
+      return { ok: true, stats };
+    }
+
+    console.log(`[lixas-combinar lerRespostas] checando ${pendentes.length} venda(s) pendente(s)`);
+
+    for (const venda of pendentes) {
+      try {
+        const conv = await ml.consultarConversa({
+          packId: venda.pack_id,
+          orderId: venda.order_id,
+          markAsRead: true   // já marca como lida ao consultar (Diego pediu)
+        });
+
+        if (!conv.ok) {
+          stats.erros++;
+          console.error(`[lixas-combinar lerRespostas] erro conversa order ${venda.order_id}: ${conv.erro}`);
+          continue;
+        }
+
+        if (conv.totalCliente > 0 && conv.ultimaCliente) {
+          // Cliente respondeu!
+          await lcp.marcarRespostaCliente(venda.order_id, {
+            texto: conv.ultimaCliente.text || conv.ultimaCliente.message || '',
+            dataResposta: conv.ultimaCliente.date_created || conv.ultimaCliente.date || new Date().toISOString(),
+            totalMsgsCliente: conv.totalCliente
+          });
+          stats.novasRespostas++;
+          console.log(`[lixas-combinar lerRespostas] 💬 Order ${venda.order_id} cliente respondeu! (${conv.totalCliente} msg(s))`);
+        } else {
+          stats.semNovidade++;
+        }
+      } catch (e) {
+        stats.erros++;
+        console.error(`[lixas-combinar lerRespostas] erro order ${venda.order_id}: ${e.message}`);
+      }
+    }
+
+    const dur = ((Date.now() - inicio) / 1000).toFixed(1);
+    console.log(`[lixas-combinar lerRespostas] ✓ Fim em ${dur}s — ${JSON.stringify(stats)}`);
+    return { ok: true, stats, duracao_s: Number(dur) };
+  } catch (e) {
+    console.error('[lixas-combinar lerRespostas] ❌ erro fatal:', e.message);
+    return { ok: false, erro: e.message, stats };
+  } finally {
+    _lendoRespostas = false;
+  }
 }
 
 /**
- * Marca todas mensagens não lidas de uma conversa como LIDAS.
- * Faz isso simplesmente CONSULTANDO a conversa sem mark_as_read=false.
+ * Força processamento de UMA venda específica (ignora janela de tempo)
+ * Aceita TANTO order_id quanto pack_id (o que aparece na URL do ML).
+ * Se for pack_id (carrinho), busca o order real automaticamente.
  */
-async function marcarConversaLida({ packId, orderId, sellerId }) {
-  return consultarConversa({ packId, orderId, sellerId, markAsRead: true });
-}
+async function forcarOrder(idEntrada) {
+  const stats = { idEntrada, etapa: 'inicio' };
+  try {
+    if (!TEXTO) {
+      return { ok: false, erro: 'AUTO_MSG_GIRASSOL_TEXTO_A_COMBINAR vazio', stats };
+    }
+    if (!tracker.configurado()) {
+      return { ok: false, erro: 'Supabase nao configurado', stats };
+    }
 
-module.exports = {
-  buscarVendasPagas,
-  getOrderDetalhe,
-  getPackInfo,
-  temVariacaoACombinar,
-  extrairSkuACombinar,
-  enviarMensagem,
-  consultarConversa,
-  enviarMensagemDireta,
-  marcarConversaLida
-};
+    // 0. Detectar se é pack_id ou order_id
+    // Tenta como order primeiro (rota normal). Se 404, tenta como pack pra extrair order_id.
+    stats.etapa = 'detectar_tipo';
+    let orderId = idEntrada;
+    let detalhe = null;
+    let packIdDescoberto = null;
+
+    try {
+      detalhe = await ml.getOrderDetalhe(idEntrada);
+      stats.tipo_id = 'order';
+    } catch (e) {
+      // Se der 404, tenta como pack
+      if (e.message.includes('404') || e.message.includes('order_not_found')) {
+        stats.tipo_id = 'pack_tentativa';
+        const packInfo = await ml.getPackInfo(idEntrada);
+        if (packInfo?.orders?.length > 0) {
+          orderId = String(packInfo.orders[0].id);
+          packIdDescoberto = idEntrada;
+          stats.tipo_id = 'pack';
+          stats.order_id_real = orderId;
+          stats.pack_id_real = packIdDescoberto;
+          detalhe = await ml.getOrderDetalhe(orderId);
+        } else {
+          return { ok: false, erro: `Pack ${idEntrada} sem orders dentro`, stats };
+        }
+      } else {
+        return { ok: false, erro: e.message, stats };
+      }
+    }
+
+    // 1. Já enviou?
+    stats.etapa = 'checar_duplicado';
+    if (await tracker.jaEnviou(orderId)) {
+      return { ok: false, erro: `Ja enviou pra esta venda (order ${orderId}) anteriormente`, stats };
+    }
+
+    stats.status_venda = detalhe.status;
+    stats.buyer_id = detalhe.buyer?.id;
+    stats.pack_id = detalhe.pack_id || packIdDescoberto;
+
+    // 2. Tem A COMBINAR?
+    stats.etapa = 'verificar_a_combinar';
+    const temACombinar = ml.temVariacaoACombinar(detalhe);
+    stats.tem_a_combinar = temACombinar;
+    if (!temACombinar) {
+      return { ok: false, erro: 'Venda NAO tem variacao A COMBINAR', stats };
+    }
+
+    // 3. Envia
+    stats.etapa = 'enviar';
+    const buyerId = detalhe.buyer?.id;
+    const packId = detalhe.pack_id || packIdDescoberto;
+    const textoFinal = await montarMensagemInteligente(detalhe);
+    stats.texto_chars = textoFinal.length;
+    console.log(`[auto-mensagens FORCAR] order=${orderId} buyer=${buyerId} pack=${packId || 'null'} chars=${textoFinal.length}`);
+
+    const r = await ml.enviarMensagem({ packId, orderId, buyerId, texto: textoFinal });
+    stats.etapa = 'gravar';
+
+    if (r.ok) {
+      const modStatus = r.moderation_status || 'unknown';
+      const foiModerado = ['IN_MODERATION', 'rejected', 'REJECTED'].includes(modStatus);
+      await tracker.registrar({
+        orderId, packId, buyerId,
+        tipo: 'a_combinar', textoEnviado: textoFinal,
+        messageIdMl: r.message_id, status: foiModerado ? 'moderado' : 'enviado',
+        erroDetalhe: foiModerado ? `moderation=${modStatus}` : null,
+        loja: 'GIRASSOL'
+      });
+      stats.message_id = r.message_id;
+      stats.moderation = modStatus;
+      console.log(`[auto-mensagens FORCAR] ✅ order=${orderId} status=${foiModerado ? 'moderado' : 'enviado'}`);
+      return { ok: true, enviado: !foiModerado, moderado: foiModerado, stats };
+    } else {
+      await tracker.registrar({
+        orderId, packId, buyerId,
+        tipo: 'a_combinar', textoEnviado: textoFinal,
+        messageIdMl: null, status: 'erro', erroDetalhe: `${r.status}: ${r.erro}`.slice(0, 500),
+        loja: 'GIRASSOL'
+      });
+      stats.ml_erro = r.erro;
+      stats.ml_status = r.status;
+      return { ok: false, erro: `ML retornou ${r.status}: ${r.erro}`, stats };
+    }
+  } catch (e) {
+    return { ok: false, erro: e.message, stats };
+  }
+}
