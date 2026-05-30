@@ -185,9 +185,9 @@ async function enviarMensagem({ packId, orderId, buyerId, texto }) {
  * Importante: se packId for null (venda Mercado Shop sem pack), usa orderId no lugar.
  */
 async function consultarConversa({ packId, orderId, sellerId, markAsRead = false }) {
-  const sId = sellerId || process.env.ML_SELLER_ID_GIRASSOL;
+  const sId = sellerId || getUserId();
   if (!sId) {
-    return { ok: false, erro: 'ML_SELLER_ID_GIRASSOL nao configurado' };
+    return { ok: false, erro: 'seller_id nao disponivel - faltou autorizacao inicial' };
   }
   const id = packId || orderId;
   if (!id) return { ok: false, erro: 'packId ou orderId obrigatorio' };
@@ -250,8 +250,8 @@ async function consultarConversa({ packId, orderId, sellerId, markAsRead = false
  * Body: { from: { user_id: sellerId }, to: { user_id: buyerId }, text }
  */
 async function enviarMensagemDireta({ packId, orderId, buyerId, sellerId, texto }) {
-  const sId = sellerId || process.env.ML_SELLER_ID_GIRASSOL;
-  if (!sId) return { ok: false, erro: 'ML_SELLER_ID_GIRASSOL nao configurado' };
+  const sId = sellerId || getUserId();
+  if (!sId) return { ok: false, erro: 'seller_id nao disponivel' };
   if (!buyerId) return { ok: false, erro: 'buyerId obrigatorio' };
   if (!texto) return { ok: false, erro: 'texto obrigatorio' };
 
