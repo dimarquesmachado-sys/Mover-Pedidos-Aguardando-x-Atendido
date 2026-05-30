@@ -62,6 +62,18 @@ async function getOrderDetalhe(orderId) {
 }
 
 /**
+ * Busca info de um pack (carrinho com 1+ orders dentro)
+ * Útil quando o ID que aparece na URL do ML é pack_id, não order_id
+ */
+async function getPackInfo(packId) {
+  const r = await mlFetch('GET', `/packs/${packId}`);
+  if (!r.ok) {
+    throw new Error(`ML pack ${packId} ${r.status}: ${JSON.stringify(r.data).slice(0, 200)}`);
+  }
+  return r.data;
+}
+
+/**
  * Detecta se o pedido tem variação "A COMBINAR" em qualquer item
  * Procura em:
  *   - order_items[].item.variation_attributes[].value_name
@@ -132,6 +144,7 @@ async function enviarMensagem({ packId, orderId, buyerId, texto }) {
 module.exports = {
   buscarVendasPagas,
   getOrderDetalhe,
+  getPackInfo,
   temVariacaoACombinar,
   enviarMensagem
 };
