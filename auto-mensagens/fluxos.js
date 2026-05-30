@@ -73,29 +73,27 @@ async function montarMensagemInteligente(detalhe) {
     const totalLixas = r.lixas_por_kit * info.quantidade;
     const unidades = r.unidades_por_pacote || 10;
 
-    // Gera exemplo DINÂMICO que SOMA até o total real (importante: se cliente
-    // comprou 200 lixas, o exemplo precisa somar 200 — senão confunde)
+    // Gera exemplo DINÂMICO que SOMA até o total real
     function gerarExemplo(total, unidades, graosArr) {
-      if (graosArr.length === 0) return `Ex: ${total} do grao desejado.`;
-      if (graosArr.length === 1) return `Ex: ${total} do grao ${graosArr[0]}.`;
-      // 2 graos do início da lista (mais finos/comuns)
+      if (graosArr.length === 0) return `Ex: ${total} do grão desejado.`;
+      if (graosArr.length === 1) return `Ex: ${total} do grão ${graosArr[0]}.`;
       const grao1 = graosArr[0];
       const idx2 = Math.min(2, graosArr.length - 1);
       const grao2 = graosArr[idx2];
       const parte1 = Math.round(total * 0.3 / unidades) * unidades;
       const parte2 = total - parte1;
-      return `Ex: ${parte1} do grao ${grao1}; ${parte2} do grao ${grao2}.`;
+      return `Ex: ${parte1} do grão ${grao1}; ${parte2} do grão ${grao2}.`;
     }
 
-    // Monta mensagem desenhada (sem abreviar, MAIUSCULO nos pontos chave)
+    // Monta mensagem desenhada (com acentos, MAIUSCULO nos pontos chave)
     function montar(graosArr) {
       const graosStr = graosArr.join(', ');
       const exemplo = gerarExemplo(totalLixas, unidades, graosArr);
-      return `Ola! Sua compra de ${totalLixas} lixas ${r.descricao}.
+      return `Olá! Sua compra de ${totalLixas} lixas ${r.descricao}.
 
-GRAOS DISPONIVEIS: ${graosStr}
+GRÃOS DISPONÍVEIS: ${graosStr}
 
-Responda com QUANTIDADE + GRAO. MULTIPLOS de ${unidades}. Total ${totalLixas} lixas.
+Responda com QUANTIDADE + GRÃO. MÚLTIPLOS de ${unidades}. Total ${totalLixas} lixas.
 ${exemplo}`;
     }
 
