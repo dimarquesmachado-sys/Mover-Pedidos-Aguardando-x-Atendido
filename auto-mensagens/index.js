@@ -269,6 +269,100 @@ function routes(readBody) {
       return true;
     }
 
+    // Debug: preview da mensagem que SERIA enviada (sem enviar nada)
+    // GET /auto-mensagens/preview/:orderId  (aceita order_id OU pack_id)
+    if (method === 'GET' && p.startsWith('/auto-mensagens/preview/')) {
+      const idEntrada = p.replace('/auto-mensagens/preview/', '');
+      try {
+        const ml = require('./mlApi');
+        // Resolver pack vs order (igual forcarOrder)
+        let orderId = idEntrada;
+        let detalhe = null;
+        let packIdDescoberto = null;
+        try {
+          detalhe = await ml.getOrderDetalhe(idEntrada);
+        } catch (e) {
+          if (e.message.includes('404') || e.message.includes('order_not_found')) {
+            const packInfo = await ml.getPackInfo(idEntrada);
+            if (packInfo?.orders?.length > 0) {
+              orderId = String(packInfo.orders[0].id);
+              packIdDescoberto = idEntrada;
+              detalhe = await ml.getOrderDetalhe(orderId);
+            } else {
+              json(res, 404, { ok: false, erro: 'pack sem orders dentro' });
+              return true;
+            }
+          } else {
+            json(res, 500, { ok: false, erro: e.message });
+            return true;
+          }
+        }
+
+        const temACombinar = ml.temVariacaoACombinar(detalhe);
+        const skuInfo = ml.extrairSkuACombinar(detalhe);
+
+        // Importa fluxos pra usar montarMensagemInteligente
+        const fluxos = require('./fluxos');
+        let textoFinal = null;
+        // Truque: re-implementar so a parte de montar (nao expomos a funcao)
+        // Em vez disso, vamos chamar via require do lixasService direto
+        let lixasService = null;
+        try { lixasService = require('../lixas-combinar/lixasService'); } catch {}
+
+        const TEXTO_ENV = process.env.AUTO_MSG_GIRASSOL_TEXTO_A_COMBINAR || '';
+
+        if (lixasService && skuInfo?.sku) {
+          try {
+            const r = await lixasService.getGraosDisponiveisPorSkuACombinar(skuInfo.sku);
+            if (r.ok && r.graos && r.graos.length > 0) {
+              const totalLixas = r.lixas_por_kit * (skuInfo.quantidade || 1);
+              const unidades = r.unidades_por_pacote || 10;
+              const exemplo = unidades === 1
+                ? '20 da 80, 30 da 100, 50 da 240'
+                : '30 da 24, 40 da 40, 30 da 80';
+              let graosCompacto = r.graos.map(g => g.grao).join(', ');
+              let msg = `Ola! Sua compra de ${totalLixas} lixas ${r.descricao}.\nGraos: ${graosCompacto}\nResponda com QTD + GRAO (mult. de ${unidades}, total ${totalLixas}). Ex: ${exemplo}.`;
+
+              // Safety: reduz graos se passar 350
+              if (msg.length > 350) {
+                const graosArr = r.graos.map(g => g.grao);
+                while (graosArr.length > 3 && msg.length > 350) {
+                  graosArr.pop();
+                  graosCompacto = graosArr.join(', ') + '...';
+                  msg = `Ola! Sua compra de ${totalLixas} lixas ${r.descricao}.\nGraos: ${graosCompacto}\nResponda com QTD + GRAO (mult. de ${unidades}, total ${totalLixas}). Ex: ${exemplo}.`;
+                }
+              }
+
+              textoFinal = msg.length <= 350 ? msg : TEXTO_ENV;
+            } else {
+              textoFinal = TEXTO_ENV;
+            }
+          } catch (e) {
+            textoFinal = TEXTO_ENV;
+          }
+        } else {
+          textoFinal = TEXTO_ENV;
+        }
+
+        json(res, 200, {
+          ok: true,
+          id_entrada: idEntrada,
+          tipo_id: packIdDescoberto ? 'pack' : 'order',
+          order_id_real: orderId,
+          tem_a_combinar: temACombinar,
+          sku_detectado: skuInfo?.sku || null,
+          quantidade: skuInfo?.quantidade || null,
+          titulo_item: skuInfo?.titulo || null,
+          mensagem_que_seria_enviada: textoFinal,
+          mensagem_chars: textoFinal.length,
+          eh_inteligente: lixasService && skuInfo?.sku ? 'tentou' : 'fallback'
+        });
+      } catch (e) {
+        json(res, 500, { ok: false, erro: e.message });
+      }
+      return true;
+    }
+
     // Stats (últimas mensagens enviadas, do Supabase)
     if (method === 'GET' && p === '/auto-mensagens/stats') {
       const s = await tracker.stats();
