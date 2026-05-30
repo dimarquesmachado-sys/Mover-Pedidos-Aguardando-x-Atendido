@@ -43,7 +43,7 @@ function html(res, code, body) {
 
 // ── Crons ─────────────────────────────────────────────────────────────
 const crons = {
-  girassolACombinar: '*/5 6-23 * * *'   // a cada 5 min entre 6h e 23h
+  girassolACombinar: '*/5 * * * *'   // a cada 5 min, 24h por dia
 };
 
 // ── Rotas ─────────────────────────────────────────────────────────────
