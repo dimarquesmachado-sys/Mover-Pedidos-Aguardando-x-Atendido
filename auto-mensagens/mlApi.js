@@ -192,11 +192,12 @@ async function consultarConversa({ packId, orderId, sellerId, markAsRead = false
   const id = packId || orderId;
   if (!id) return { ok: false, erro: 'packId ou orderId obrigatorio' };
 
-  const markParam = markAsRead ? '' : '&mark_as_read=false';
-  const path = `/messages/packs/${id}/sellers/${sId}?tag=post_sale${markParam}`;
+  // Documentacao oficial ML: GET /messages/packs/{PACK_ID}/sellers/{SELLER_ID}?tag=post_sale
+  // (mark_as_read=false nao existe nessa rota, removido)
+  const path = `/messages/packs/${id}/sellers/${sId}?tag=post_sale`;
 
   try {
-    const r = await mlFetch(path, { method: 'GET' });
+    const r = await mlFetch('GET', path);
     if (!r.ok) {
       // 404 = conversa virgem (NUNCA teve msg) - é caso normal
       if (r.status === 404) {
@@ -206,7 +207,8 @@ async function consultarConversa({ packId, orderId, sellerId, markAsRead = false
           totalCliente: 0,
           totalLoja: 0,
           ultimaCliente: null,
-          conversaVirgem: true
+          conversaVirgem: true,
+          aviso: 'endpoint_404_pode_ser_virgem'
         };
       }
       return { ok: false, status: r.status, erro: JSON.stringify(r.data).slice(0, 200) };
@@ -235,7 +237,8 @@ async function consultarConversa({ packId, orderId, sellerId, markAsRead = false
       totalCliente: msgsCliente.length,
       totalLoja: msgsLoja.length,
       ultimaCliente,
-      conversaVirgem: messages.length === 0
+      conversaVirgem: messages.length === 0,
+      conversation_status: r.data?.conversation_status || null
     };
   } catch (e) {
     return { ok: false, erro: e.message };
@@ -263,11 +266,7 @@ async function enviarMensagemDireta({ packId, orderId, buyerId, sellerId, texto 
     text: texto
   };
 
-  const r = await mlFetch(path, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
-  });
+  const r = await mlFetch('POST', path, body);
 
   if (!r.ok) {
     return {
@@ -287,7 +286,7 @@ async function enviarMensagemDireta({ packId, orderId, buyerId, sellerId, texto 
 
 /**
  * Marca todas mensagens não lidas de uma conversa como LIDAS.
- * Faz isso simplesmente CONSULTANDO a conversa sem mark_as_read=false.
+ * Faz isso simplesmente CONSULTANDO a conversa (consulta marca como lida por default).
  */
 async function marcarConversaLida({ packId, orderId, sellerId }) {
   return consultarConversa({ packId, orderId, sellerId, markAsRead: true });
