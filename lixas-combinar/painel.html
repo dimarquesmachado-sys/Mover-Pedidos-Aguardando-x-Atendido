@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lixas A COMBINAR - Painel Pendentes</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+         background: #f5f5f7; color: #333; min-height: 100vh; }
+  header {
+    background: #fff; padding: 16px 20px; border-bottom: 1px solid #e5e5e5;
+    position: sticky; top: 0; z-index: 10;
+    display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;
+  }
+  header h1 { font-size: 20px; color: #d97706; }
+  header h1 .badge { font-size: 12px; background: #fef3c7; color: #92400e; padding: 2px 8px; border-radius: 6px; margin-left: 6px; }
+  .toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .toolbar button, .toolbar select {
+    padding: 6px 12px; border: 1px solid #d4d4d8; background: #fff; border-radius: 6px;
+    font-size: 14px; cursor: pointer;
+  }
+  .toolbar button.primary { background: #d97706; color: #fff; border-color: #d97706; }
+  .toolbar button.primary:hover { background: #b45309; }
+  .user-info { font-size: 13px; color: #666; }
+
+  main { padding: 16px; max-width: 1400px; margin: 0 auto; }
+
+  .stats {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 12px; margin-bottom: 16px;
+  }
+  .stat {
+    background: #fff; padding: 12px; border-radius: 8px; border: 1px solid #e5e5e5;
+    text-align: center;
+  }
+  .stat .num { font-size: 24px; font-weight: 700; color: #d97706; }
+  .stat .label { font-size: 12px; color: #666; margin-top: 2px; }
+
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 12px; }
+  .card {
+    background: #fff; padding: 14px; border-radius: 8px; border: 1px solid #e5e5e5;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+  }
+  .card-header {
+    display: flex; justify-content: space-between; align-items: start;
+    padding-bottom: 8px; border-bottom: 1px solid #f0f0f0; margin-bottom: 8px;
+  }
+  .card-titulo { font-weight: 600; font-size: 14px; line-height: 1.3; flex: 1; padding-right: 8px; }
+  .card-status {
+    font-size: 11px; padding: 3px 8px; border-radius: 4px; white-space: nowrap;
+    text-transform: uppercase; font-weight: 600;
+  }
+  .status-aguardando { background: #fef3c7; color: #92400e; }
+  .status-respondeu { background: #dcfce7; color: #166534; }
+  .status-processado { background: #e0e7ff; color: #3730a3; }
+  .status-cancelado { background: #f3f4f6; color: #6b7280; }
+
+  .card-info { font-size: 13px; color: #555; margin: 4px 0; }
+  .card-info b { color: #333; }
+  .card-msg {
+    background: #f9f9f9; padding: 8px; border-radius: 4px; font-size: 12px; color: #555;
+    margin-top: 8px; max-height: 80px; overflow-y: auto;
+    border-left: 3px solid #d97706;
+  }
+  .card-resposta {
+    background: #ecfdf5; padding: 8px; border-radius: 4px; font-size: 12px; color: #064e3b;
+    margin-top: 8px; border-left: 3px solid #10b981; font-weight: 500;
+  }
+  .card-actions {
+    display: flex; gap: 6px; margin-top: 10px; padding-top: 8px;
+    border-top: 1px solid #f0f0f0; flex-wrap: wrap;
+  }
+  .card-actions button {
+    padding: 5px 10px; font-size: 12px; border: 1px solid #d4d4d8; background: #fff;
+    border-radius: 4px; cursor: pointer;
+  }
+  .card-actions a {
+    padding: 5px 10px; font-size: 12px; border: 1px solid #d4d4d8; background: #fff;
+    border-radius: 4px; cursor: pointer; text-decoration: none; color: #333;
+  }
+  .card-actions button:hover, .card-actions a:hover { background: #f5f5f7; }
+  .card-actions .processed { background: #10b981; color: #fff; border-color: #10b981; }
+
+  .empty { text-align: center; padding: 40px; color: #999; }
+  .loading { text-align: center; padding: 20px; color: #666; }
+
+  /* Login */
+  .login-bg {
+    min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    background: linear-gradient(135deg, #d97706 0%, #92400e 100%);
+  }
+  .login-box {
+    background: #fff; padding: 32px; border-radius: 12px; width: 90%; max-width: 360px;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+  }
+  .login-box h2 { color: #d97706; margin-bottom: 4px; }
+  .login-box .sub { color: #666; font-size: 13px; margin-bottom: 20px; }
+  .login-box input {
+    width: 100%; padding: 10px; border: 1px solid #d4d4d8; border-radius: 6px;
+    font-size: 14px; margin-bottom: 10px;
+  }
+  .login-box button {
+    width: 100%; padding: 10px; background: #d97706; color: #fff; border: 0;
+    border-radius: 6px; font-size: 15px; font-weight: 600; cursor: pointer;
+  }
+  .login-box button:hover { background: #b45309; }
+  .login-box .err { color: #dc2626; font-size: 13px; margin-top: 8px; min-height: 20px; }
+
+  @media (max-width: 600px) {
+    header { padding: 12px 14px; }
+    header h1 { font-size: 17px; }
+    main { padding: 10px; }
+    .cards { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<div id="login" class="login-bg" style="display:none">
+  <div class="login-box">
+    <h2>🌻 Lixas A COMBINAR</h2>
+    <div class="sub">Painel Pendentes Girassol</div>
+    <input id="li-user" type="text" placeholder="Usuário" autocomplete="username">
+    <input id="li-pass" type="password" placeholder="Senha" autocomplete="current-password">
+    <button onclick="fazerLogin()">Entrar</button>
+    <div class="err" id="li-err"></div>
+  </div>
+</div>
+
+<div id="app" style="display:none">
+<header>
+  <h1>🌻 Lixas A COMBINAR <span class="badge">Pendentes</span></h1>
+  <div class="toolbar">
+    <select id="filtro-status" onchange="recarregar()">
+      <option value="">Todos os status</option>
+      <option value="aguardando_resposta" selected>Aguardando resposta</option>
+      <option value="cliente_respondeu">Cliente respondeu</option>
+      <option value="processado">Processado</option>
+    </select>
+    <button onclick="recarregar()">🔄 Atualizar</button>
+    <span class="user-info" id="user-info"></span>
+    <button onclick="logout()">Sair</button>
+  </div>
+</header>
+
+<main>
+  <div class="stats" id="stats">
+    <div class="stat"><div class="num" id="stat-total">0</div><div class="label">Total 7 dias</div></div>
+    <div class="stat"><div class="num" id="stat-aguardando">0</div><div class="label">Aguardando</div></div>
+    <div class="stat"><div class="num" id="stat-respondeu">0</div><div class="label">Cliente respondeu</div></div>
+    <div class="stat"><div class="num" id="stat-processado">0</div><div class="label">Processado</div></div>
+  </div>
+
+  <div id="cards" class="cards">
+    <div class="loading">Carregando pendentes…</div>
+  </div>
+</main>
+</div>
+
+<script>
+const API_BASE = '/lixas-combinar';
+
+function token() { return localStorage.getItem('lixas_combinar_token') || ''; }
+function setToken(t) { localStorage.setItem('lixas_combinar_token', t); }
+function clearToken() { localStorage.removeItem('lixas_combinar_token'); localStorage.removeItem('lixas_combinar_user'); }
+function user() { return localStorage.getItem('lixas_combinar_user') || ''; }
+function setUser(u) { localStorage.setItem('lixas_combinar_user', u); }
+
+async function fazerLogin() {
+  const u = document.getElementById('li-user').value.trim();
+  const p = document.getElementById('li-pass').value;
+  const err = document.getElementById('li-err');
+  err.textContent = '';
+  if (!u || !p) { err.textContent = 'Preencha usuário e senha'; return; }
+
+  try {
+    const r = await fetch(`${API_BASE}/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ usuario: u, senha: p })
+    });
+    const d = await r.json();
+    if (!d.ok) { err.textContent = d.erro || 'Falha no login'; return; }
+    setToken(d.token);
+    setUser(u);
+    mostrarApp();
+  } catch (e) {
+    err.textContent = 'Erro: ' + e.message;
+  }
+}
+
+function logout() {
+  clearToken();
+  document.getElementById('app').style.display = 'none';
+  document.getElementById('login').style.display = 'flex';
+}
+
+async function mostrarApp() {
+  document.getElementById('login').style.display = 'none';
+  document.getElementById('app').style.display = 'block';
+  document.getElementById('user-info').textContent = '👤 ' + user();
+  await recarregar();
+}
+
+async function recarregar() {
+  const cardsEl = document.getElementById('cards');
+  cardsEl.innerHTML = '<div class="loading">Carregando pendentes…</div>';
+
+  const status = document.getElementById('filtro-status').value;
+  const url = `${API_BASE}/api/pendentes${status ? '?status=' + status : ''}`;
+
+  try {
+    const r = await fetch(url, { headers: { 'X-Session-Token': token() } });
+    if (r.status === 401) { logout(); return; }
+    const d = await r.json();
+    if (!d.ok) { cardsEl.innerHTML = `<div class="empty">Erro: ${d.erro || 'desconhecido'}</div>`; return; }
+
+    const lista = d.pendentes || [];
+    renderStats(d.stats || {});
+
+    if (lista.length === 0) {
+      cardsEl.innerHTML = '<div class="empty">Nenhuma venda pendente no filtro atual.</div>';
+      return;
+    }
+
+    cardsEl.innerHTML = lista.map(renderCard).join('');
+  } catch (e) {
+    cardsEl.innerHTML = `<div class="empty">Erro carregando: ${e.message}</div>`;
+  }
+}
+
+function renderStats(s) {
+  document.getElementById('stat-total').textContent = s.total || 0;
+  document.getElementById('stat-aguardando').textContent = s.aguardando || 0;
+  document.getElementById('stat-respondeu').textContent = s.respondeu || 0;
+  document.getElementById('stat-processado').textContent = s.processado || 0;
+}
+
+function renderCard(v) {
+  const statusLabel = {
+    'aguardando_resposta': 'Aguardando',
+    'cliente_respondeu': 'Respondeu',
+    'processado': 'Processado',
+    'cancelado': 'Cancelado'
+  }[v.status] || v.status;
+  const statusCls = {
+    'aguardando_resposta': 'status-aguardando',
+    'cliente_respondeu': 'status-respondeu',
+    'processado': 'status-processado',
+    'cancelado': 'status-cancelado'
+  }[v.status] || 'status-aguardando';
+
+  const dataVenda = v.data_venda ? new Date(v.data_venda).toLocaleString('pt-BR') : '';
+  const tempoResp = v.ultima_resposta_em ? new Date(v.ultima_resposta_em).toLocaleString('pt-BR') : '';
+  const orderLink = `https://www.mercadolivre.com.br/vendas/${v.order_id}/detalhe`;
+  const msgLink = v.pack_id ? `https://www.mercadolivre.com.br/mensagens/post-venda/${v.pack_id}` : orderLink;
+
+  return `
+    <div class="card">
+      <div class="card-header">
+        <div class="card-titulo">${esc(v.descricao_produto || v.sku_a_combinar || 'Sem desc')}</div>
+        <div class="card-status ${statusCls}">${statusLabel}</div>
+      </div>
+      <div class="card-info">📦 SKU: <b>${esc(v.sku_a_combinar || '-')}</b></div>
+      <div class="card-info">👤 ${esc(v.buyer_nome || '-')} ${v.total_msgs_cliente ? `(${v.total_msgs_cliente} msg${v.total_msgs_cliente > 1 ? 's' : ''})` : ''}</div>
+      <div class="card-info">🛒 Venda: ${dataVenda}</div>
+      ${v.ultima_resposta_cliente ? `
+        <div class="card-resposta">💬 <b>${esc(v.ultima_resposta_cliente).slice(0, 300)}</b>
+          <div style="font-size:11px;color:#047857;margin-top:4px">em ${tempoResp}</div>
+        </div>
+      ` : ''}
+      ${v.msg_inicial_enviada ? `
+        <details>
+          <summary style="cursor:pointer;font-size:12px;color:#666;margin-top:6px">Ver msg que enviamos</summary>
+          <div class="card-msg">${esc(v.msg_inicial_enviada)}</div>
+        </details>
+      ` : ''}
+      <div class="card-actions">
+        <a href="${msgLink}" target="_blank">💬 Abrir ML</a>
+        <a href="${orderLink}" target="_blank">🛒 Venda</a>
+        ${v.status !== 'processado' ? `<button class="processed" onclick="marcarProcessado('${v.order_id}')">✓ Processado</button>` : ''}
+      </div>
+    </div>
+  `;
+}
+
+async function marcarProcessado(orderId) {
+  if (!confirm('Marcar venda ' + orderId + ' como PROCESSADO?')) return;
+  try {
+    const r = await fetch(`${API_BASE}/api/pendentes/${orderId}/marcar-processado`, {
+      method: 'POST',
+      headers: { 'X-Session-Token': token() }
+    });
+    if (r.status === 401) { logout(); return; }
+    const d = await r.json();
+    if (d.ok) { await recarregar(); }
+    else { alert('Erro: ' + (d.erro || 'desconhecido')); }
+  } catch (e) {
+    alert('Erro: ' + e.message);
+  }
+}
+
+function esc(s) {
+  if (s == null) return '';
+  return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+}
+
+// Auto-refresh a cada 60s
+setInterval(() => {
+  if (document.getElementById('app').style.display !== 'none') recarregar();
+}, 60000);
+
+// Inicializacao
+if (token()) mostrarApp();
+else {
+  document.getElementById('login').style.display = 'flex';
+  document.getElementById('li-user').focus();
+}
+</script>
+</body>
+</html>
