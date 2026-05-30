@@ -78,10 +78,11 @@ async function getGraosDisponiveisPorSkuACombinar(sku) {
   }
 
   // Monta resposta amigável
+  const unidadesPorPacote = Number(entry.unidades_por_pacote) || 10;
   const graos = resultado.variacoes.map(v => ({
     grao: v.grao,
-    estoque_pacotes: v.estoque,        // cada pacote = 10 lixas
-    estoque_lixas: v.estoque * 10,     // total de lixas disponíveis
+    estoque_pacotes: v.estoque,                       // cada pacote pode ter 1, 10 ou outro N lixas
+    estoque_lixas: v.estoque * unidadesPorPacote,     // total de lixas disponíveis
     sku: v.codigo,
     id_bling: v.id,
     ean: v.ean
@@ -92,6 +93,7 @@ async function getGraosDisponiveisPorSkuACombinar(sku) {
     sku,
     descricao: entry.descricao,
     lixas_por_kit: entry.lixas_por_kit,
+    unidades_por_pacote: unidadesPorPacote,
     pai_10_lixas: entry.pai_10_lixas_codigo,
     total_graos_disponiveis: graos.length,
     graos
