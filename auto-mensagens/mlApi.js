@@ -98,30 +98,32 @@ function temVariacaoACombinar(order) {
 
 /**
  * Envia mensagem pro comprador via API ML
+ *
+ * IMPORTANTE: ML BR exige que vendedor escolha um motivo (option_id) pra iniciar conversa
+ * com cliente que ainda não mandou mensagem. Endpoint usado:
+ *   POST /messages/action_guide/packs/{PACK_ID}/option?tag=post_sale
+ *   Body: { "option_id": "OTHER", "text": "..." }
+ *
  * @param {string|number} packId - pack_id (se null, usa order_id)
  * @param {string|number} orderId - usado como fallback se pack_id null
- * @param {string|number} buyerId - destinatário
+ * @param {string|number} buyerId - destinatário (não usado nesta API, mas mantido pra log)
  * @param {string} texto - mensagem (max 350 chars)
  * @returns {object} { ok, message_id, moderation_status, raw }
  */
 async function enviarMensagem({ packId, orderId, buyerId, texto }) {
-  const sellerId = getUserId();
-  if (!sellerId) throw new Error('seller user_id não disponível');
-  if (!buyerId)  throw new Error('buyerId obrigatório');
-  if (!texto)    throw new Error('texto obrigatório');
+  if (!texto) throw new Error('texto obrigatório');
 
   // ML: se pack_id null, usar order_id mantendo /packs/ no path
   const packOrOrder = packId || orderId;
 
   const body = {
-    from: { user_id: String(sellerId) },
-    to:   { user_id: String(buyerId) },
+    option_id: 'OTHER',
     text: texto
   };
 
   const r = await mlFetch(
     'POST',
-    `/messages/packs/${packOrOrder}/sellers/${sellerId}?application_id=${process.env.AUTO_MSG_GIRASSOL_ML_CLIENT_ID || ''}`,
+    `/messages/action_guide/packs/${packOrOrder}/option?tag=post_sale`,
     body
   );
 
@@ -135,7 +137,7 @@ async function enviarMensagem({ packId, orderId, buyerId, texto }) {
   // Resposta esperada contém id da mensagem e moderation_status (pode vir IN_MODERATION)
   return {
     ok: true,
-    message_id: r.data?.id || null,
+    message_id: r.data?.id || r.data?.message_id || null,
     moderation_status: r.data?.status || r.data?.message_moderation?.status || null,
     raw: r.data
   };
