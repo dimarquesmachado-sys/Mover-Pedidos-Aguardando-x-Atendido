@@ -298,7 +298,15 @@ async function rotinaLerRespostas() {
   _lendoRespostas = true;
 
   const inicio = Date.now();
-  const stats = { lidas: 0, novasRespostas: 0, semNovidade: 0, erros: 0 };
+  const stats = { lidas: 0, novasRespostas: 0, semNovidade: 0, erros: 0, iaProcessadas: 0, iaEscalonadas: 0, iaErros: 0 };
+
+  // IA opcional
+  let ia = null;
+  const IA_HABILITADO = (process.env.LIXAS_IA_HABILITADO || 'false').toLowerCase() === 'true';
+  if (IA_HABILITADO) {
+    try { ia = require('../lixas-combinar/iaCliente'); }
+    catch (e) { console.log('[lixas-combinar lerRespostas] IA modulo nao carregavel:', e.message); }
+  }
 
   try {
     const lcp = require('./lixasCombinarPendentes');
@@ -342,14 +350,118 @@ async function rotinaLerRespostas() {
         }
 
         if (conv.totalCliente > 0 && conv.ultimaCliente) {
-          // Cliente respondeu!
+          const textoCliente = conv.ultimaCliente.text || conv.ultimaCliente.message || '';
+          const dataResposta = conv.ultimaCliente.date_created || conv.ultimaCliente.date || new Date().toISOString();
+
+          // Cliente respondeu - grava na tabela
           await lcp.marcarRespostaCliente(venda.order_id, {
-            texto: conv.ultimaCliente.text || conv.ultimaCliente.message || '',
-            dataResposta: conv.ultimaCliente.date_created || conv.ultimaCliente.date || new Date().toISOString(),
+            texto: textoCliente,
+            dataResposta,
             totalMsgsCliente: conv.totalCliente
           });
           stats.novasRespostas++;
-          console.log(`[lixas-combinar lerRespostas] 💬 Order ${venda.order_id} cliente respondeu! (${conv.totalCliente} msg(s))`);
+          console.log(`[lixas-combinar lerRespostas] 💬 Order ${venda.order_id} cliente respondeu (${conv.totalCliente} msg) - "${textoCliente.slice(0, 60)}..."`);
+
+          // ════════════════════════════════════════════════════════
+          // PROCESSAMENTO IA (Sessao 4)
+          // ════════════════════════════════════════════════════════
+          if (ia && ia.configurado() && venda.sku_a_combinar) {
+            try {
+              // Consulta graos disponiveis (lixasService)
+              const lixasService = require('../lixas-combinar/lixasService');
+              const graosResult = await lixasService.getGraosDisponiveisPorSkuACombinar(venda.sku_a_combinar);
+
+              if (!graosResult.ok || !graosResult.graos || graosResult.graos.length === 0) {
+                console.log(`[ia] sem graos disponiveis pra ${venda.sku_a_combinar} - pulando IA`);
+                continue;
+              }
+
+              const graosDisponiveis = graosResult.graos.map(g => g.grao);
+              const totalLixas = graosResult.lixas_por_kit; // 100 por padrao (quantidade comprada armazenada na venda)
+              const unidadesPorPacote = graosResult.unidades_por_pacote || 10;
+
+              console.log(`[ia] processando order ${venda.order_id}: msg="${textoCliente.slice(0,50)}..."`);
+              const iaResult = await ia.interpretarRespostaCliente({
+                mensagemCliente: textoCliente,
+                descricaoProduto: graosResult.descricao,
+                totalLixas,
+                unidadesPorPacote,
+                graosDisponiveis
+              });
+
+              if (!iaResult.ok) {
+                stats.iaErros++;
+                console.error(`[ia] order ${venda.order_id} erro IA: ${iaResult.erro}`);
+                await lcp.atualizarVenda(venda.order_id, {
+                  ia_categoria: 'erro_ia',
+                  ia_confianca: 0,
+                  ia_interpretacao: iaResult.erro?.slice(0, 200),
+                  ia_processado_em: new Date().toISOString()
+                });
+                continue;
+              }
+
+              console.log(`[ia] order ${venda.order_id} categoria=${iaResult.categoria} confianca=${iaResult.confianca}`);
+
+              // 4 categorias possiveis
+              if (iaResult.categoria === 'fora_escopo') {
+                // ESCALA PRA HUMANO - apenas marca, nao envia mensagem
+                stats.iaEscalonadas++;
+                await lcp.atualizarVenda(venda.order_id, {
+                  ia_categoria: 'fora_escopo',
+                  ia_confianca: iaResult.confianca,
+                  ia_interpretacao: iaResult.interpretacao?.slice(0, 300),
+                  ia_escalou_humano: true,
+                  ia_processado_em: new Date().toISOString(),
+                  status: 'precisa_atencao_humano'
+                });
+                console.log(`[ia] order ${venda.order_id} 🚨 ESCALADO pra humano: "${iaResult.interpretacao}"`);
+              }
+              else if (iaResult.msg_pra_cliente) {
+                // ENVIA RESPOSTA AUTOMATICA (categorias claro/ambiguo/pergunta_graos)
+                const msgIA = iaResult.msg_pra_cliente;
+
+                // Envia via POST direto (conversa nao eh mais virgem)
+                const envR = await ml.enviarMensagemDireta({
+                  packId: venda.pack_id,
+                  orderId: venda.order_id,
+                  buyerId: venda.buyer_id,
+                  texto: msgIA
+                });
+
+                if (envR.ok) {
+                  stats.iaProcessadas++;
+                  await lcp.atualizarVenda(venda.order_id, {
+                    ia_categoria: iaResult.categoria,
+                    ia_confianca: iaResult.confianca,
+                    ia_interpretacao: iaResult.interpretacao?.slice(0, 300),
+                    ia_msg_enviada: msgIA,
+                    ia_pedido_estruturado: iaResult.pedido_estruturado ? JSON.stringify(iaResult.pedido_estruturado) : null,
+                    ia_processado_em: new Date().toISOString(),
+                    status: iaResult.categoria === 'claro' ? 'cliente_confirmou_pedido' : 'aguardando_resposta'
+                  });
+                  console.log(`[ia] ✅ order ${venda.order_id} respondida auto: ${msgIA.length} chars, msg_id=${envR.message_id}`);
+                } else {
+                  stats.iaErros++;
+                  console.error(`[ia] ❌ order ${venda.order_id} falhou envio: ${envR.status} ${envR.erro?.slice(0,200)}`);
+                  await lcp.atualizarVenda(venda.order_id, {
+                    ia_categoria: iaResult.categoria,
+                    ia_confianca: iaResult.confianca,
+                    ia_interpretacao: iaResult.interpretacao?.slice(0, 300),
+                    ia_msg_enviada: msgIA + ' [FALHOU ENVIO]',
+                    ia_erro_envio: `${envR.status}: ${envR.erro?.slice(0,200)}`,
+                    ia_processado_em: new Date().toISOString()
+                  });
+                }
+              }
+            } catch (e) {
+              stats.iaErros++;
+              console.error(`[ia] order ${venda.order_id} excecao: ${e.message}`);
+            }
+          } else if (!IA_HABILITADO) {
+            console.log(`[ia] desabilitado (LIXAS_IA_HABILITADO=false) - pulando processamento IA`);
+          }
+          // ════════════════════════════════════════════════════════
         } else {
           stats.semNovidade++;
         }
