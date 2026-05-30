@@ -211,14 +211,20 @@ function routes(readBody) {
           return true;
         }
         const status = urlObj.searchParams.get('status') || null;
-        const r = await lcp.listarPendentes({ dias: 7, status, limit: 100 });
-        if (!r.ok) { json(res, 500, { ok: false, erro: 'erro_listar', data: r.data }); return true; }
 
-        const pendentes = Array.isArray(r.data) ? r.data : [];
-
-        // Stats (busca tudo p contagem global, sem filtro de status)
+        // Busca TODOS uma vez so e filtra em memoria (evita 2 chamadas Supabase)
         const todosR = await lcp.listarPendentes({ dias: 7, limit: 500 });
         const todos = todosR.ok && Array.isArray(todosR.data) ? todosR.data : [];
+
+        // Aplica filtro - "cliente_respondeu" cobre ambos os status (respondeu E confirmou)
+        let pendentes = todos;
+        if (status === 'cliente_respondeu') {
+          pendentes = todos.filter(v => v.status === 'cliente_respondeu' || v.status === 'cliente_confirmou_pedido');
+        } else if (status) {
+          pendentes = todos.filter(v => v.status === status);
+        }
+        pendentes = pendentes.slice(0, 100);
+
         const stats = {
           total: todos.length,
           aguardando: todos.filter(v => v.status === 'aguardando_resposta').length,
