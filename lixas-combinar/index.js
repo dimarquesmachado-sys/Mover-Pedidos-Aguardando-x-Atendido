@@ -167,12 +167,25 @@ function routes(readBody) {
     if (method === 'POST' && p === '/lixas-combinar/login') {
       try {
         const body = await readBody(req);
-        const { usuario, senha } = JSON.parse(body || '{}');
+        const { usuario, senha } = body || {};
         const auth = require('./auth');
-        const r = auth.criarSessao(usuario, senha);
-        if (!r.ok) { json(res, 401, r); return true; }
-        json(res, 200, r);
+
+        // 1) Autentica usuario+senha
+        const autR = auth.autenticar(usuario, senha);
+        if (!autR.ok) { json(res, 401, autR); return true; }
+
+        // 2) Cria sessao e retorna token
+        const token = auth.criarSessao(autR.usuario, autR.perfil);
+        console.log(`[lixas-combinar LOGIN] ${autR.usuario} (${autR.perfil})`);
+
+        json(res, 200, {
+          ok: true,
+          token,
+          usuario: autR.usuario,
+          perfil: autR.perfil
+        });
       } catch (e) {
+        console.error(`[lixas-combinar LOGIN] erro: ${e.message}`);
         json(res, 400, { ok: false, erro: e.message });
       }
       return true;
@@ -182,7 +195,8 @@ function routes(readBody) {
     function requerAuth() {
       const auth = require('./auth');
       const token = req.headers['x-session-token'] || '';
-      return auth.validarToken(token);
+      const sess = auth.validarSessao(token);
+      return sess ? { ok: true, sessao: sess } : { ok: false };
     }
 
     // GET /lixas-combinar/api/pendentes → lista vendas pendentes
