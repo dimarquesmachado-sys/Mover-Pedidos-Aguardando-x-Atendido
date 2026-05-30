@@ -15,11 +15,87 @@
 const ml = require('./mlApi');
 const tracker = require('./supabaseTracker');
 
+// Integração opcional com módulo /lixas-combinar
+// Se falhar (modulo nao disponivel), cai pro texto generico
+let lixasService = null;
+try {
+  lixasService = require('../lixas-combinar/lixasService');
+} catch (e) {
+  console.log('[auto-mensagens] modulo lixas-combinar nao disponivel — usando msg generica');
+}
+
 const HABILITADO = (process.env.AUTO_MSG_GIRASSOL_HABILITADO || 'false').toLowerCase() === 'true';
 const TEXTO = process.env.AUTO_MSG_GIRASSOL_TEXTO_A_COMBINAR || '';
 
 // Janela de busca de vendas: 30 min pra trás (pega vendas dos últimos minutos)
 const JANELA_MIN = Number(process.env.AUTO_MSG_JANELA_MIN || 30);
+
+// Limite de chars da mensagem ML (action_guide aceita até 350)
+const LIMITE_CHARS = 350;
+
+/**
+ * Tenta montar mensagem inteligente com grãos disponíveis.
+ * Se falhar (SKU nao mapeado, Bling fora, etc), retorna o TEXTO genérico.
+ *
+ * @param {object} detalhe - objeto order completo do ML
+ * @returns {Promise<string>} texto da mensagem (max 350 chars)
+ */
+async function montarMensagemInteligente(detalhe) {
+  // Se nao tem lixas-combinar carregado, usa generico
+  if (!lixasService) {
+    return TEXTO;
+  }
+
+  try {
+    const info = ml.extrairSkuACombinar(detalhe);
+    if (!info?.sku) {
+      console.log('[auto-mensagens] sem SKU no item — usando msg generica');
+      return TEXTO;
+    }
+
+    console.log(`[auto-mensagens] SKU A COMBINAR detectado: ${info.sku} (qtd=${info.quantidade})`);
+
+    const r = await lixasService.getGraosDisponiveisPorSkuACombinar(info.sku);
+    if (!r.ok || !r.graos || r.graos.length === 0) {
+      console.log(`[auto-mensagens] sem graos disponiveis pra ${info.sku} (${r.erro || 'vazio'}) — usando msg generica`);
+      return TEXTO;
+    }
+
+    // Calcula total de lixas que cliente comprou
+    const totalLixas = r.lixas_por_kit * info.quantidade;
+    const unidades = r.unidades_por_pacote || 10;
+    const unidadeStr = unidades === 1 ? 'lixas' : `pacotes de ${unidades}`;
+
+    // Lista compacta dos grãos
+    const graosCompacto = r.graos.map(g => g.grao).join(', ');
+
+    // Monta mensagem
+    let msg = `Ola! Sua compra de ${totalLixas} lixas ${r.descricao}.\n\n`;
+    msg += `Graos disponiveis: ${graosCompacto}\n\n`;
+    msg += `Por favor responda escolhendo as quantidades (multiplos de ${unidades}, totalizando ${totalLixas} lixas).\n`;
+    msg += `Ex: 30 da 24, 40 da 40, 30 da 60.`;
+
+    // Garante limite 350 chars
+    if (msg.length > LIMITE_CHARS) {
+      // Versao mais compacta sem exemplo
+      msg = `Ola! Sua compra de ${totalLixas} lixas ${r.descricao}.\n`;
+      msg += `Graos disponiveis: ${graosCompacto}\n`;
+      msg += `Responda escolhendo (mult. de ${unidades}, total ${totalLixas} lixas).`;
+
+      if (msg.length > LIMITE_CHARS) {
+        // Ainda muito grande — usa generico
+        console.log(`[auto-mensagens] msg inteligente passou ${LIMITE_CHARS} chars (${msg.length}) — usando generica`);
+        return TEXTO;
+      }
+    }
+
+    console.log(`[auto-mensagens] msg inteligente montada (${msg.length} chars)`);
+    return msg;
+  } catch (e) {
+    console.error(`[auto-mensagens] erro montando msg inteligente: ${e.message} — usando generica`);
+    return TEXTO;
+  }
+}
 
 let _executando = false;
 
@@ -76,13 +152,14 @@ async function rotinaACombinar() {
           });
           continue;
         }
-        // 4. Envia mensagem
+        // 4. Monta mensagem (inteligente se SKU mapeado, senão genérica)
         const buyerId = detalhe.buyer?.id;
         const packId = detalhe.pack_id;
-        console.log(`[auto-mensagens] 📨 Enviando msg pra order ${orderId} (buyer ${buyerId}, pack ${packId || 'null'})`);
+        const textoFinal = await montarMensagemInteligente(detalhe);
+        console.log(`[auto-mensagens] 📨 Enviando msg pra order ${orderId} (buyer ${buyerId}, pack ${packId || 'null'}, ${textoFinal.length} chars)`);
 
         const r = await ml.enviarMensagem({
-          packId, orderId, buyerId, texto: TEXTO
+          packId, orderId, buyerId, texto: textoFinal
         });
         if (r.ok) {
           const modStatus = r.moderation_status || 'unknown';
@@ -92,7 +169,7 @@ async function rotinaACombinar() {
 
           await tracker.registrar({
             orderId, packId, buyerId,
-            tipo: 'a_combinar', textoEnviado: TEXTO,
+            tipo: 'a_combinar', textoEnviado: textoFinal,
             messageIdMl: r.message_id, status: foiModerado ? 'moderado' : 'enviado',
             erroDetalhe: foiModerado ? `moderation=${modStatus}` : null,
             loja: 'GIRASSOL'
@@ -102,7 +179,7 @@ async function rotinaACombinar() {
           stats.erros++;
           await tracker.registrar({
             orderId, packId, buyerId,
-            tipo: 'a_combinar', textoEnviado: TEXTO,
+            tipo: 'a_combinar', textoEnviado: textoFinal,
             messageIdMl: null, status: 'erro', erroDetalhe: `${r.status}: ${r.erro}`.slice(0, 500),
             loja: 'GIRASSOL'
           });
@@ -194,9 +271,11 @@ async function forcarOrder(idEntrada) {
     stats.etapa = 'enviar';
     const buyerId = detalhe.buyer?.id;
     const packId = detalhe.pack_id || packIdDescoberto;
-    console.log(`[auto-mensagens FORCAR] order=${orderId} buyer=${buyerId} pack=${packId || 'null'}`);
+    const textoFinal = await montarMensagemInteligente(detalhe);
+    stats.texto_chars = textoFinal.length;
+    console.log(`[auto-mensagens FORCAR] order=${orderId} buyer=${buyerId} pack=${packId || 'null'} chars=${textoFinal.length}`);
 
-    const r = await ml.enviarMensagem({ packId, orderId, buyerId, texto: TEXTO });
+    const r = await ml.enviarMensagem({ packId, orderId, buyerId, texto: textoFinal });
     stats.etapa = 'gravar';
 
     if (r.ok) {
@@ -204,7 +283,7 @@ async function forcarOrder(idEntrada) {
       const foiModerado = ['IN_MODERATION', 'rejected', 'REJECTED'].includes(modStatus);
       await tracker.registrar({
         orderId, packId, buyerId,
-        tipo: 'a_combinar', textoEnviado: TEXTO,
+        tipo: 'a_combinar', textoEnviado: textoFinal,
         messageIdMl: r.message_id, status: foiModerado ? 'moderado' : 'enviado',
         erroDetalhe: foiModerado ? `moderation=${modStatus}` : null,
         loja: 'GIRASSOL'
@@ -216,7 +295,7 @@ async function forcarOrder(idEntrada) {
     } else {
       await tracker.registrar({
         orderId, packId, buyerId,
-        tipo: 'a_combinar', textoEnviado: TEXTO,
+        tipo: 'a_combinar', textoEnviado: textoFinal,
         messageIdMl: null, status: 'erro', erroDetalhe: `${r.status}: ${r.erro}`.slice(0, 500),
         loja: 'GIRASSOL'
       });
