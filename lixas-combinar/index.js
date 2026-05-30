@@ -240,6 +240,49 @@ function routes(readBody) {
       return true;
     }
 
+    // GET /lixas-combinar/api/debug-buscar-bling?orderId=XXX  → mostra TODOS pedidos Bling
+    if (method === 'GET' && p === '/lixas-combinar/api/debug-buscar-bling') {
+      const sessao = requerAuth();
+      if (!sessao.ok) { json(res, 401, { ok: false, erro: 'nao_autenticado' }); return true; }
+
+      const orderId = urlObj.searchParams.get('orderId');
+      if (!orderId) { json(res, 400, { ok: false, erro: 'orderId obrigatorio' }); return true; }
+
+      try {
+        const bp = require('./blingPedidos');
+        // Chama fetchBling direto pra ver tudo que retorna
+        const tokenMgrLocal = require('./tokenManager');
+        const url = `https://api.bling.com.br/Api/v3/pedidos/vendas?numeroLoja=${encodeURIComponent(orderId)}`;
+        const r = await tokenMgrLocal.fetchComRetry(url, { method: 'GET' });
+        const text = await r.text();
+        let data = null;
+        try { data = JSON.parse(text); } catch (_) { data = { _raw: text }; }
+
+        const arr = Array.isArray(data?.data) ? data.data : [];
+        const resumo = arr.map(p => ({
+          id: p.id,
+          numero: p.numero,
+          numeroLoja: p.numeroLoja,
+          data: p.data,
+          total: p.total,
+          situacao_id: p.situacao?.id,
+          loja_id: p.loja?.id
+        }));
+
+        json(res, 200, {
+          ok: r.ok,
+          status: r.status,
+          total_encontrados: arr.length,
+          orderId_buscado: orderId,
+          resumo,
+          raw: data
+        });
+      } catch (e) {
+        json(res, 500, { ok: false, erro: e.message });
+      }
+      return true;
+    }
+
     // POST /lixas-combinar/api/pendentes/:orderId/marcar-processado
     if (method === 'POST' && p.startsWith('/lixas-combinar/api/pendentes/') && p.endsWith('/marcar-processado')) {
       const sessao = requerAuth();
