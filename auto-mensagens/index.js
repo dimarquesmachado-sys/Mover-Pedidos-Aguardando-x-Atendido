@@ -155,6 +155,55 @@ function routes(readBody) {
       return true;
     }
 
+    // Debug: inspeciona status da conversação ML antes de enviar (sem enviar nada)
+    if (method === 'GET' && p.startsWith('/auto-mensagens/debug/conversation/')) {
+      const id = p.replace('/auto-mensagens/debug/conversation/', '');
+      try {
+        const token = await tokenMgr.garantirTokenML();
+        const sellerId = tokenMgr.getUserId();
+
+        const out = { id, seller_id_salvo: sellerId, tentativas: {} };
+
+        // 1) Status da conversa /messages/packs/{id}/sellers/{seller_id}?mark_as_read=false
+        const r1 = await fetch(
+          `https://api.mercadolibre.com/messages/packs/${id}/sellers/${sellerId}?mark_as_read=false`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        const txt1 = await r1.text();
+        out.tentativas.conversa_status = {
+          status: r1.status,
+          body: txt1.slice(0, 1500)
+        };
+
+        // 2) Dados do seller atual (pra confirmar que o user_id está correto)
+        const r2 = await fetch(
+          `https://api.mercadolibre.com/users/me`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        const txt2 = await r2.text();
+        out.tentativas.users_me = {
+          status: r2.status,
+          body: txt2.slice(0, 800)
+        };
+
+        // 3) Detalhe do pack pra ver buyer e estado
+        const r3 = await fetch(
+          `https://api.mercadolibre.com/packs/${id}`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        const txt3 = await r3.text();
+        out.tentativas.pack = {
+          status: r3.status,
+          body: txt3.slice(0, 800)
+        };
+
+        json(res, 200, out);
+      } catch (e) {
+        json(res, 500, { erro: e.message });
+      }
+      return true;
+    }
+
     // Debug: tenta acessar um ID como pack E como order, retorna o que achar
     if (method === 'GET' && p.startsWith('/auto-mensagens/debug/lookup/')) {
       const id = p.replace('/auto-mensagens/debug/lookup/', '');
