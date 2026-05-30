@@ -317,19 +317,35 @@ function routes(readBody) {
             if (r.ok && r.graos && r.graos.length > 0) {
               const totalLixas = r.lixas_por_kit * (skuInfo.quantidade || 1);
               const unidades = r.unidades_por_pacote || 10;
-              const exemplo = unidades === 1
-                ? '20 da 80, 30 da 100, 50 da 240'
-                : '30 da 24, 40 da 40, 30 da 80';
-              let graosCompacto = r.graos.map(g => g.grao).join(', ');
-              let msg = `Ola! Sua compra de ${totalLixas} lixas ${r.descricao}.\nGraos: ${graosCompacto}\nResponda com QTD + GRAO (mult. de ${unidades}, total ${totalLixas}). Ex: ${exemplo}.`;
 
-              // Safety: reduz graos se passar 350
+              function gerarExemplo(total, unidades, graosArr) {
+                if (graosArr.length === 0) return `Ex: ${total} do grao desejado.`;
+                if (graosArr.length === 1) return `Ex: ${total} do grao ${graosArr[0]}.`;
+                const grao1 = graosArr[0];
+                const idx2 = Math.min(2, graosArr.length - 1);
+                const grao2 = graosArr[idx2];
+                const parte1 = Math.round(total * 0.3 / unidades) * unidades;
+                const parte2 = total - parte1;
+                return `Ex: ${parte1} do grao ${grao1}; ${parte2} do grao ${grao2}.`;
+              }
+
+              function montar(graosArr) {
+                const graosStr = graosArr.join(', ');
+                const exemplo = gerarExemplo(totalLixas, unidades, graosArr);
+                return `Ola! Sua compra de ${totalLixas} lixas ${r.descricao}.\n\nGRAOS DISPONIVEIS: ${graosStr}\n\nResponda com QUANTIDADE + GRAO. MULTIPLOS de ${unidades}. Total ${totalLixas} lixas.\n${exemplo}`;
+              }
+
+              let graosArr = r.graos.map(g => g.grao);
+              let msg = montar(graosArr);
+
               if (msg.length > 350) {
-                const graosArr = r.graos.map(g => g.grao);
                 while (graosArr.length > 3 && msg.length > 350) {
                   graosArr.pop();
-                  graosCompacto = graosArr.join(', ') + '...';
-                  msg = `Ola! Sua compra de ${totalLixas} lixas ${r.descricao}.\nGraos: ${graosCompacto}\nResponda com QTD + GRAO (mult. de ${unidades}, total ${totalLixas}). Ex: ${exemplo}.`;
+                  msg = montar(graosArr);
+                }
+                if (msg.length <= 350) {
+                  graosArr[graosArr.length - 1] = graosArr[graosArr.length - 1] + ' ...';
+                  msg = montar(graosArr);
                 }
               }
 
