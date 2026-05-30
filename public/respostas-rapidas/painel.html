@@ -4,11 +4,11 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Respostas Rápidas ML</title>
-  <link rel="icon" type="image/x-icon" href="/respostas-rapidas/favicon.ico">
-  <link rel="icon" type="image/png" sizes="32x32" href="/respostas-rapidas/favicon-32.png">
-  <link rel="icon" type="image/png" sizes="192x192" href="/respostas-rapidas/favicon-192.png">
-  <link rel="apple-touch-icon" href="/respostas-rapidas/apple-touch-icon.png">
-  <link rel="manifest" href="/respostas-rapidas/manifest.json">
+  <link rel="icon" type="image/x-icon" href="favicon.ico">
+  <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="favicon-192.png">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="manifest" href="manifest.json">
   <meta name="theme-color" content="#2563eb">
   <meta name="apple-mobile-web-app-title" content="Respostas">
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -290,6 +290,16 @@
 
   <script>
     const BASE = '/respostas-rapidas';
+
+    // Detecta a loja a partir da URL (ex: /respostas-rapidas/girassol/painel → 'GIRASSOL')
+    function detectarLojaPelaUrl() {
+      const path = window.location.pathname;
+      if (/\/ambtotal\//i.test(path)) return 'AMBTOTAL';
+      if (/\/girassol\//i.test(path)) return 'GIRASSOL';
+      if (/\/gimpo\//i.test(path)) return 'GIMPO';
+      return null; // URL raiz /respostas-rapidas/painel → sem loja específica
+    }
+    const LOJA_DA_URL = detectarLojaPelaUrl();
     let token = localStorage.getItem('rr_token') || null;
     let username = localStorage.getItem('rr_username') || null;
     let respostas = [];
@@ -304,6 +314,20 @@
       document.getElementById('loginView').style.display = 'none';
       document.getElementById('appView').style.display = 'block';
       document.getElementById('usuarioLogado').textContent = '👤 ' + username;
+      // Se URL tem loja específica, pré-seleciona o filtro e bloqueia troca
+      if (LOJA_DA_URL) {
+        const filtroLoja = document.getElementById('filtroLoja');
+        filtroLoja.value = LOJA_DA_URL;
+        // Esconde a opção "Todas" e as outras lojas pra evitar confusão
+        Array.from(filtroLoja.options).forEach(opt => {
+          if (opt.value !== LOJA_DA_URL) opt.style.display = 'none';
+        });
+        filtroLoja.disabled = true;
+        // Ajusta título da página
+        document.title = 'Respostas Rápidas ' + LOJA_DA_URL;
+        const h1 = document.querySelector('header h1');
+        if (h1) h1.textContent = '💬 Respostas Rápidas - ' + LOJA_DA_URL;
+      }
     }
 
     async function fazerLogin() {
@@ -440,7 +464,9 @@
     function abrirNova() {
       document.getElementById('modalTitulo').textContent = 'Nova resposta';
       document.getElementById('formId').value = '';
-      document.getElementById('formLoja').value = document.getElementById('filtroLoja').value || 'AMBTOTAL';
+      const formLoja = document.getElementById('formLoja');
+      formLoja.value = LOJA_DA_URL || document.getElementById('filtroLoja').value || 'AMBTOTAL';
+      formLoja.disabled = !!LOJA_DA_URL;
       document.getElementById('formCategoria').value = document.getElementById('filtroCategoria').value || 'mensagens';
       document.getElementById('formTitulo').value = '';
       document.getElementById('formTexto').value = '';
@@ -453,7 +479,9 @@
       if (!r) return;
       document.getElementById('modalTitulo').textContent = 'Editar resposta';
       document.getElementById('formId').value = r.id;
-      document.getElementById('formLoja').value = r.loja;
+      const formLoja = document.getElementById('formLoja');
+      formLoja.value = r.loja;
+      formLoja.disabled = !!LOJA_DA_URL;
       document.getElementById('formCategoria').value = r.categoria === 'geral' ? 'ambos' : r.categoria;
       document.getElementById('formTitulo').value = r.titulo;
       document.getElementById('formTexto').value = r.texto;
