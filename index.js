@@ -67,6 +67,25 @@ for (const emp of empresas) {
   if (c.nfeMl && r.nfeMl) {
     agendarCrons(emp, c.nfeMl, 'F3-NFeML', r.nfeMl);
   }
+
+  // ════════════════════════════════════════════════════════════════
+  // Crons CUSTOMIZADOS — pega qualquer chave de c que NAO seja uma
+  // das hardcoded acima, e tenta achar a rotina com mesmo nome em r.
+  // Permite modulos novos (auto-mensagens, lixas-combinar, etc) usar
+  // crons sem precisar editar este arquivo.
+  // ════════════════════════════════════════════════════════════════
+  const cronsConhecidos = new Set([
+    'expediente', 'virada', 'manha', 'corrigirNFs', 'nfeMl'
+  ]);
+  if (c) {
+    for (const chaveCron of Object.keys(c)) {
+      if (cronsConhecidos.has(chaveCron)) continue;
+      const fn = r?.[chaveCron];
+      if (fn && c[chaveCron]) {
+        agendarCrons(emp, c[chaveCron], chaveCron, fn);
+      }
+    }
+  }
 }
 
 // ── HTTP server ──────────────────────────────────────────────────────
