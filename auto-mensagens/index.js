@@ -29,7 +29,7 @@
 
 const tokenMgr = require('./mlTokenManager');
 const tracker  = require('./supabaseTracker');
-const { rotinaACombinar } = require('./fluxos');
+const { rotinaACombinar, forcarOrder } = require('./fluxos');
 
 // ── Helpers HTTP ──────────────────────────────────────────────────────
 function json(res, code, body) {
@@ -149,6 +149,23 @@ function routes(readBody) {
       try {
         const r = await rotinaACombinar();
         json(res, 200, r);
+      } catch (e) {
+        json(res, 500, { ok: false, erro: e.message });
+      }
+      return true;
+    }
+
+    // Forçar envio de UMA venda específica (ignora janela de tempo)
+    // GET ou POST /auto-mensagens/forcar/:orderId
+    if ((method === 'GET' || method === 'POST') && p.startsWith('/auto-mensagens/forcar/')) {
+      const orderId = p.replace('/auto-mensagens/forcar/', '');
+      if (!orderId) {
+        json(res, 400, { ok: false, erro: 'orderId obrigatorio' });
+        return true;
+      }
+      try {
+        const r = await forcarOrder(orderId);
+        json(res, r.ok ? 200 : 400, r);
       } catch (e) {
         json(res, 500, { ok: false, erro: e.message });
       }
