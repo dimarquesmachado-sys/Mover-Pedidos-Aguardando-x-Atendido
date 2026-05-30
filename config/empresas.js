@@ -1,5 +1,4 @@
 'use strict';
-
 /**
  * Lista de empresas ATIVAS no orquestrador.
  *
@@ -10,7 +9,6 @@
  *
  * Para desativar uma empresa temporariamente: comenta a linha aqui.
  */
-
 const empresas = [
   require('../girassol'),
   require('../ambtotal'),
@@ -19,11 +17,10 @@ const empresas = [
   require('../estoque'),
   require('../estoque-girassol'),
   require('../respostas-rapidas'),
+  require('../auto-mensagens'),
 ];
-
 // Filtra empresas marcadas como inativas via env var (ex: SKIP_EMPRESAS=girassol,good)
 const SKIP = (process.env.SKIP_EMPRESAS || '').split(',').map(s => s.trim()).filter(Boolean);
-
 module.exports = empresas.filter(e => {
   if (SKIP.includes(e.id)) {
     console.log(`[config] Empresa "${e.id}" pulada (SKIP_EMPRESAS)`);
