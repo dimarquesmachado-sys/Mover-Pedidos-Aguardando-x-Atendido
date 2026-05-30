@@ -156,6 +156,27 @@ function routes(readBody) {
       return true;
     }
 
+    // Debug NOVO Sessao 3: testa a funcao consultarConversa do mlApi
+    // GET /auto-mensagens/debug/consultar/:packId
+    if (method === 'GET' && p.startsWith('/auto-mensagens/debug/consultar/')) {
+      const id = p.replace('/auto-mensagens/debug/consultar/', '');
+      try {
+        const ml = require('./mlApi');
+        // Testa consultarConversa com markAsRead=false (nao marca como lida)
+        const r = await ml.consultarConversa({ packId: id, markAsRead: false });
+        json(res, 200, {
+          ok: true,
+          id_entrada: id,
+          resultado_consultarConversa: r,
+          // Tambem mostra o sellerId pra ver se ta certo
+          seller_id_atual: tokenMgr.getUserId()
+        });
+      } catch (e) {
+        json(res, 500, { ok: false, erro: e.message, stack: e.stack });
+      }
+      return true;
+    }
+
     // Debug: inspeciona status da conversação ML antes de enviar (sem enviar nada)
     if (method === 'GET' && p.startsWith('/auto-mensagens/debug/conversation/')) {
       const id = p.replace('/auto-mensagens/debug/conversation/', '');
