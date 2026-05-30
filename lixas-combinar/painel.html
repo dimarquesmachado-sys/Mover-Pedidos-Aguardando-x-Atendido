@@ -1,467 +1,380 @@
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Lixas A COMBINAR - Painel Pendentes</title>
-<style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-         background: #f5f5f7; color: #333; min-height: 100vh; }
-  header {
-    background: #fff; padding: 16px 20px; border-bottom: 1px solid #e5e5e5;
-    position: sticky; top: 0; z-index: 10;
-    display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;
-  }
-  header h1 { font-size: 20px; color: #d97706; }
-  header h1 .badge { font-size: 12px; background: #fef3c7; color: #92400e; padding: 2px 8px; border-radius: 6px; margin-left: 6px; }
-  .toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-  .toolbar button, .toolbar select {
-    padding: 6px 12px; border: 1px solid #d4d4d8; background: #fff; border-radius: 6px;
-    font-size: 14px; cursor: pointer;
-  }
-  .toolbar button.primary { background: #d97706; color: #fff; border-color: #d97706; }
-  .toolbar button.primary:hover { background: #b45309; }
-  .user-info { font-size: 13px; color: #666; }
+'use strict';
 
-  main { padding: 16px; max-width: 1400px; margin: 0 auto; }
+/**
+ * Módulo /lixas-combinar — Consulta estoque de grãos disponíveis pra vendas A COMBINAR
+ *
+ * Sessão 1 do projeto Lixas A COMBINAR: catalogar e listar variações filhas
+ * de 10 lixas com estoque, a partir de um SKU A COMBINAR de 100 lixas.
+ *
+ * Não envia mensagens nem edita pedidos — só consulta.
+ *
+ * Rotas:
+ *   GET  /lixas-combinar/health                 → status do módulo
+ *   GET  /lixas-combinar/catalogo               → mostra o JSON catalogo
+ *   GET  /lixas-combinar/setup                  → página com botão "Autorizar Bling"
+ *   GET  /lixas-combinar/oauth/callback         → recebe code Bling e troca por tokens
+ *   GET  /lixas-combinar/graos/:sku             → função principal: lista grãos disponíveis
+ *   GET  /lixas-combinar/debug/produto/:codigo  → debug: busca produto Bling pelo código
+ */
 
-  .stats {
-    display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-    gap: 12px; margin-bottom: 16px;
-  }
-  .stat {
-    background: #fff; padding: 12px; border-radius: 8px; border: 1px solid #e5e5e5;
-    text-align: center;
-    cursor: pointer;
-    transition: all 0.15s;
-    user-select: none;
-  }
-  .stat:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 8px rgba(0,0,0,0.12);
-    border-color: #d97706;
-  }
-  .stat.ativo {
-    border: 2px solid #d97706;
-    background: #fef3c7;
-  }
-  .stat .num { font-size: 24px; font-weight: 700; color: #d97706; }
-  .stat .label { font-size: 12px; color: #666; margin-top: 2px; }
+const tokenMgr = require('./tokenManager');
+const lixasService = require('./lixasService');
 
-  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 12px; }
-  .card {
-    background: #fff; padding: 14px; border-radius: 8px; border: 1px solid #e5e5e5;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
-  }
-  .card-header {
-    display: flex; justify-content: space-between; align-items: start;
-    padding-bottom: 8px; border-bottom: 1px solid #f0f0f0; margin-bottom: 8px;
-  }
-  .card-titulo { font-weight: 600; font-size: 14px; line-height: 1.3; flex: 1; padding-right: 8px; }
-  .card-status {
-    font-size: 11px; padding: 3px 8px; border-radius: 4px; white-space: nowrap;
-    text-transform: uppercase; font-weight: 600;
-  }
-  .status-aguardando { background: #fef3c7; color: #92400e; }
-  .status-respondeu { background: #dcfce7; color: #166534; }
-  .status-confirmou { background: #d1fae5; color: #065f46; }
-  .status-atencao { background: #fee2e2; color: #991b1b; animation: pulsa 1.6s ease-in-out infinite; }
-  .status-processado { background: #e0e7ff; color: #3730a3; }
-  .status-cancelado { background: #f3f4f6; color: #6b7280; }
-
-  @keyframes pulsa { 0%,100%{opacity:1} 50%{opacity:.65} }
-
-  .ia-block {
-    background: #f3f4ff; border-left: 3px solid #6366f1;
-    padding: 8px; border-radius: 4px; font-size: 12px; margin-top: 8px;
-  }
-  .ia-block .ia-cat { display: inline-block; font-size: 11px; padding: 2px 6px; border-radius: 4px;
-    background: #6366f1; color: #fff; font-weight: 600; margin-right: 6px; }
-  .ia-block .ia-conf { color: #6366f1; font-weight: 600; }
-  .ia-block .ia-msg { background: #fff; padding: 6px 8px; border-radius: 4px; margin-top: 6px;
-    border-left: 2px solid #818cf8; color: #1e1b4b; }
-  .ia-escala { background: #fff7ed; border-left: 3px solid #f97316; padding: 8px;
-    border-radius: 4px; font-size: 12px; margin-top: 8px; color: #7c2d12; font-weight: 500; }
-
-  .bling-block { background: #ecfdf5; border-left: 3px solid #10b981; padding: 8px;
-    border-radius: 4px; font-size: 12px; margin-top: 8px; color: #064e3b; }
-  .bling-block-erro { background: #fef2f2; border-left: 3px solid #ef4444; padding: 8px;
-    border-radius: 4px; font-size: 12px; margin-top: 8px; color: #7f1d1d; }
-  .btn-dry { background: #6366f1 !important; color: #fff !important; }
-  .btn-real { background: #059669 !important; color: #fff !important; }
-
-  .card-info { font-size: 13px; color: #555; margin: 4px 0; }
-  .card-info b { color: #333; }
-  .card-msg {
-    background: #f9f9f9; padding: 8px; border-radius: 4px; font-size: 12px; color: #555;
-    margin-top: 8px; max-height: 80px; overflow-y: auto;
-    border-left: 3px solid #d97706;
-  }
-  .card-resposta {
-    background: #ecfdf5; padding: 8px; border-radius: 4px; font-size: 12px; color: #064e3b;
-    margin-top: 8px; border-left: 3px solid #10b981; font-weight: 500;
-  }
-  .card-actions {
-    display: flex; gap: 6px; margin-top: 10px; padding-top: 8px;
-    border-top: 1px solid #f0f0f0; flex-wrap: wrap;
-  }
-  .card-actions button {
-    padding: 5px 10px; font-size: 12px; border: 1px solid #d4d4d8; background: #fff;
-    border-radius: 4px; cursor: pointer;
-  }
-  .card-actions a {
-    padding: 5px 10px; font-size: 12px; border: 1px solid #d4d4d8; background: #fff;
-    border-radius: 4px; cursor: pointer; text-decoration: none; color: #333;
-  }
-  .card-actions button:hover, .card-actions a:hover { background: #f5f5f7; }
-  .card-actions .processed { background: #10b981; color: #fff; border-color: #10b981; }
-
-  .empty { text-align: center; padding: 40px; color: #999; }
-  .loading { text-align: center; padding: 20px; color: #666; }
-
-  /* Login */
-  .login-bg {
-    min-height: 100vh; display: flex; align-items: center; justify-content: center;
-    background: linear-gradient(135deg, #d97706 0%, #92400e 100%);
-  }
-  .login-box {
-    background: #fff; padding: 32px; border-radius: 12px; width: 90%; max-width: 360px;
-    box-shadow: 0 10px 40px rgba(0,0,0,0.2);
-  }
-  .login-box h2 { color: #d97706; margin-bottom: 4px; }
-  .login-box .sub { color: #666; font-size: 13px; margin-bottom: 20px; }
-  .login-box input {
-    width: 100%; padding: 10px; border: 1px solid #d4d4d8; border-radius: 6px;
-    font-size: 14px; margin-bottom: 10px;
-  }
-  .login-box button {
-    width: 100%; padding: 10px; background: #d97706; color: #fff; border: 0;
-    border-radius: 6px; font-size: 15px; font-weight: 600; cursor: pointer;
-  }
-  .login-box button:hover { background: #b45309; }
-  .login-box .err { color: #dc2626; font-size: 13px; margin-top: 8px; min-height: 20px; }
-
-  @media (max-width: 600px) {
-    header { padding: 12px 14px; }
-    header h1 { font-size: 17px; }
-    main { padding: 10px; }
-    .cards { grid-template-columns: 1fr; }
-  }
-</style>
-</head>
-<body>
-
-<div id="login" class="login-bg" style="display:none">
-  <div class="login-box">
-    <h2>🌻 Lixas A COMBINAR</h2>
-    <div class="sub">Painel Pendentes Girassol</div>
-    <input id="li-user" type="text" placeholder="Usuário" autocomplete="username">
-    <input id="li-pass" type="password" placeholder="Senha" autocomplete="current-password">
-    <button onclick="fazerLogin()">Entrar</button>
-    <div class="err" id="li-err"></div>
-  </div>
-</div>
-
-<div id="app" style="display:none">
-<header>
-  <h1>🌻 Lixas A COMBINAR <span class="badge">Pendentes</span></h1>
-  <div class="toolbar">
-    <select id="filtro-status" onchange="recarregar()">
-      <option value="">Todos os status</option>
-      <option value="aguardando_resposta" selected>Aguardando resposta</option>
-      <option value="cliente_respondeu">Cliente respondeu</option>
-      <option value="cliente_confirmou_pedido">Confirmou pedido</option>
-      <option value="precisa_atencao_humano">🚨 Precisa atenção</option>
-      <option value="processado">Processado</option>
-    </select>
-    <button onclick="recarregar()">🔄 Atualizar</button>
-    <span class="user-info" id="user-info"></span>
-    <button onclick="logout()">Sair</button>
-  </div>
-</header>
-
-<main>
-  <div class="stats" id="stats">
-    <div class="stat" onclick="filtrarPor('')" data-filtro=""><div class="num" id="stat-total">0</div><div class="label">Total 7 dias</div></div>
-    <div class="stat" onclick="filtrarPor('aguardando_resposta')" data-filtro="aguardando_resposta"><div class="num" id="stat-aguardando">0</div><div class="label">Aguardando</div></div>
-    <div class="stat" onclick="filtrarPor('cliente_respondeu')" data-filtro="cliente_respondeu"><div class="num" id="stat-respondeu">0</div><div class="label">Cliente respondeu</div></div>
-    <div class="stat" onclick="filtrarPor('precisa_atencao_humano')" data-filtro="precisa_atencao_humano"><div class="num" id="stat-atencao" style="color:#dc2626">0</div><div class="label">🚨 Atenção humana</div></div>
-    <div class="stat" onclick="filtrarPor('processado')" data-filtro="processado"><div class="num" id="stat-processado">0</div><div class="label">Processado</div></div>
-  </div>
-
-  <div id="cards" class="cards">
-    <div class="loading">Carregando pendentes…</div>
-  </div>
-</main>
-</div>
-
-<script>
-const API_BASE = '/lixas-combinar';
-
-function token() { return localStorage.getItem('lixas_combinar_token') || ''; }
-function setToken(t) { localStorage.setItem('lixas_combinar_token', t); }
-function clearToken() { localStorage.removeItem('lixas_combinar_token'); localStorage.removeItem('lixas_combinar_user'); }
-function user() { return localStorage.getItem('lixas_combinar_user') || ''; }
-function setUser(u) { localStorage.setItem('lixas_combinar_user', u); }
-
-async function fazerLogin() {
-  const u = document.getElementById('li-user').value.trim();
-  const p = document.getElementById('li-pass').value;
-  const err = document.getElementById('li-err');
-  err.textContent = '';
-  if (!u || !p) { err.textContent = 'Preencha usuário e senha'; return; }
-
-  try {
-    const r = await fetch(`${API_BASE}/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ usuario: u, senha: p })
-    });
-    const d = await r.json();
-    if (!d.ok) { err.textContent = d.erro || 'Falha no login'; return; }
-    setToken(d.token);
-    setUser(u);
-    mostrarApp();
-  } catch (e) {
-    err.textContent = 'Erro: ' + e.message;
-  }
+// ── Helpers HTTP ─────────────────────────────────────────────────────
+function json(res, code, body) {
+  res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' });
+  res.end(JSON.stringify(body, null, 2));
 }
 
-function logout() {
-  clearToken();
-  document.getElementById('app').style.display = 'none';
-  document.getElementById('login').style.display = 'flex';
+function html(res, code, body) {
+  res.writeHead(code, { 'Content-Type': 'text/html; charset=utf-8' });
+  res.end(body);
 }
 
-async function mostrarApp() {
-  document.getElementById('login').style.display = 'none';
-  document.getElementById('app').style.display = 'block';
-  document.getElementById('user-info').textContent = '👤 ' + user();
-  await recarregar();
-}
+// ── Router (interface esperada pelo orquestrador raiz) ───────────────
+function routes(readBody) {
+  return async function handle(req, res, urlObj) {
+    const p = urlObj.pathname;
+    const method = req.method;
 
-function filtrarPor(status) {
-  // Atualiza o select de filtro
-  const sel = document.getElementById('filtro-status');
-  if (sel) sel.value = status;
-  // Marca stat clicado como ativo
-  document.querySelectorAll('.stat').forEach(el => {
-    el.classList.toggle('ativo', el.getAttribute('data-filtro') === status);
-  });
-  recarregar();
-}
+    // Filtro: só responde rotas do módulo
+    if (p !== '/lixas-combinar' && !p.startsWith('/lixas-combinar/')) return false;
 
-async function recarregar() {
-  const cardsEl = document.getElementById('cards');
-  cardsEl.innerHTML = '<div class="loading">Carregando pendentes…</div>';
-
-  const status = document.getElementById('filtro-status').value;
-  // Sincroniza marcacao dos stats com o filtro atual
-  document.querySelectorAll('.stat').forEach(el => {
-    el.classList.toggle('ativo', el.getAttribute('data-filtro') === status);
-  });
-  const url = `${API_BASE}/api/pendentes${status ? '?status=' + status : ''}`;
-
-  try {
-    const r = await fetch(url, { headers: { 'X-Session-Token': token() } });
-    if (r.status === 401) { logout(); return; }
-    const d = await r.json();
-    if (!d.ok) { cardsEl.innerHTML = `<div class="empty">Erro: ${d.erro || 'desconhecido'}</div>`; return; }
-
-    const lista = d.pendentes || [];
-    renderStats(d.stats || {});
-
-    if (lista.length === 0) {
-      cardsEl.innerHTML = '<div class="empty">Nenhuma venda pendente no filtro atual.</div>';
-      return;
+    // health
+    if (method === 'GET' && p === '/lixas-combinar/health') {
+      json(res, 200, {
+        ok: true,
+        modulo: 'lixas-combinar',
+        bling: tokenMgr.getStatus(),
+        catalogo_skus: Object.keys(lixasService.listarCatalogo()),
+        ts: Date.now()
+      });
+      return true;
     }
 
-    cardsEl.innerHTML = lista.map(renderCard).join('');
-  } catch (e) {
-    cardsEl.innerHTML = `<div class="empty">Erro carregando: ${e.message}</div>`;
-  }
-}
+    // catalogo
+    if (method === 'GET' && p === '/lixas-combinar/catalogo') {
+      json(res, 200, { ok: true, catalogo: lixasService.listarCatalogo() });
+      return true;
+    }
 
-function renderStats(s) {
-  document.getElementById('stat-total').textContent = s.total || 0;
-  document.getElementById('stat-aguardando').textContent = s.aguardando || 0;
-  document.getElementById('stat-respondeu').textContent = s.respondeu || 0;
-  document.getElementById('stat-atencao').textContent = s.atencao || 0;
-  document.getElementById('stat-processado').textContent = s.processado || 0;
-}
-
-function renderCard(v) {
-  const statusLabel = {
-    'aguardando_resposta': 'Aguardando',
-    'cliente_respondeu': 'Respondeu',
-    'cliente_confirmou_pedido': '✓ Confirmou pedido',
-    'precisa_atencao_humano': '🚨 Atenção humana',
-    'processado': 'Processado',
-    'cancelado': 'Cancelado'
-  }[v.status] || v.status;
-  const statusCls = {
-    'aguardando_resposta': 'status-aguardando',
-    'cliente_respondeu': 'status-respondeu',
-    'cliente_confirmou_pedido': 'status-confirmou',
-    'precisa_atencao_humano': 'status-atencao',
-    'processado': 'status-processado',
-    'cancelado': 'status-cancelado'
-  }[v.status] || 'status-aguardando';
-
-  const dataVenda = v.data_venda ? new Date(v.data_venda).toLocaleString('pt-BR') : '';
-  const tempoResp = v.ultima_resposta_em ? new Date(v.ultima_resposta_em).toLocaleString('pt-BR') : '';
-  const orderLink = `https://www.mercadolivre.com.br/vendas/${v.order_id}/detalhe`;
-  const msgLink = v.pack_id ? `https://www.mercadolivre.com.br/mensagens/post-venda/${v.pack_id}` : orderLink;
-
-  // Bloco IA - quando processado pela IA
-  let iaBlock = '';
-  if (v.ia_categoria === 'fora_escopo' || v.ia_escalou_humano) {
-    iaBlock = `<div class="ia-escala">🤖🚨 IA escalou: "${esc(v.ia_interpretacao || 'fora do escopo - precisa resposta humana')}"</div>`;
-  } else if (v.ia_categoria) {
-    const catLabel = {
-      'claro': 'Pedido claro',
-      'ambiguo': 'Pedido ambíguo',
-      'pergunta_graos': 'Pergunta grãos',
-      'erro_ia': 'Erro IA'
-    }[v.ia_categoria] || v.ia_categoria;
-    iaBlock = `
-      <div class="ia-block">
-        <span class="ia-cat">🤖 ${esc(catLabel)}</span>
-        <span class="ia-conf">${v.ia_confianca || 0}%</span>
-        <div style="margin-top:4px;color:#3730a3">${esc(v.ia_interpretacao || '')}</div>
-        ${v.ia_msg_enviada ? `<div class="ia-msg">📤 ${esc(v.ia_msg_enviada)}</div>` : ''}
-      </div>
-    `;
-  }
-
-  // Bloco BLING — mostra status edicao Bling
-  let blingBlock = '';
-  if (v.bling_editado_em) {
-    const dt = new Date(v.bling_editado_em).toLocaleString('pt-BR');
-    blingBlock = `<div class="bling-block">✅ <b>Pedido Bling editado</b> em ${dt} ${v.bling_pedido_id ? `(ID ${esc(v.bling_pedido_id)})` : ''}</div>`;
-  } else if (v.bling_erro) {
-    blingBlock = `<div class="bling-block-erro">❌ <b>Erro editando Bling:</b> ${esc(v.bling_erro)}</div>`;
-  }
-
-  // Botoes Bling — sao mostrados quando IA classificou como "claro" e tem pedido estruturado
-  let botoesBling = '';
-  if (v.ia_categoria === 'claro' && v.ia_pedido_estruturado && !v.bling_editado_em) {
-    botoesBling = `
-      <button class="btn-dry" onclick="testarBling('${v.order_id}', true)">🧪 Dry Run</button>
-      <button class="btn-real" onclick="testarBling('${v.order_id}', false)">✅ Editar Bling</button>
-    `;
-  }
-
-  return `
-    <div class="card">
-      <div class="card-header">
-        <div class="card-titulo">${esc(v.descricao_produto || v.sku_a_combinar || 'Sem desc')}</div>
-        <div class="card-status ${statusCls}">${statusLabel}</div>
-      </div>
-      <div class="card-info">📦 SKU: <b>${esc(v.sku_a_combinar || '-')}</b></div>
-      <div class="card-info">👤 ${esc(v.buyer_nome || '-')} ${v.total_msgs_cliente ? `(${v.total_msgs_cliente} msg${v.total_msgs_cliente > 1 ? 's' : ''})` : ''}</div>
-      <div class="card-info">🛒 Venda: ${dataVenda}</div>
-      ${v.ultima_resposta_cliente ? `
-        <div class="card-resposta">💬 <b>${esc(v.ultima_resposta_cliente).slice(0, 300)}</b>
-          <div style="font-size:11px;color:#047857;margin-top:4px">em ${tempoResp}</div>
-        </div>
-      ` : ''}
-      ${iaBlock}
-      ${blingBlock}
-      ${v.msg_inicial_enviada ? `
-        <details>
-          <summary style="cursor:pointer;font-size:12px;color:#666;margin-top:6px">Ver msg inicial enviada</summary>
-          <div class="card-msg">${esc(v.msg_inicial_enviada)}</div>
-        </details>
-      ` : ''}
-      <div class="card-actions">
-        <a href="${msgLink}" target="_blank">💬 Abrir ML</a>
-        <a href="${orderLink}" target="_blank">🛒 Venda</a>
-        ${botoesBling}
-        ${v.status !== 'processado' ? `<button class="processed" onclick="marcarProcessado('${v.order_id}')">✓ Processado</button>` : ''}
-      </div>
-    </div>
-  `;
-}
-
-async function marcarProcessado(orderId) {
-  if (!confirm('Marcar venda ' + orderId + ' como PROCESSADO?')) return;
-  try {
-    const r = await fetch(`${API_BASE}/api/pendentes/${orderId}/marcar-processado`, {
-      method: 'POST',
-      headers: { 'X-Session-Token': token() }
-    });
-    if (r.status === 401) { logout(); return; }
-    const d = await r.json();
-    if (d.ok) { await recarregar(); }
-    else { alert('Erro: ' + (d.erro || 'desconhecido')); }
-  } catch (e) {
-    alert('Erro: ' + e.message);
-  }
-}
-
-async function testarBling(orderId, dryRun) {
-  const tipo = dryRun ? 'DRY RUN (preview)' : 'EDIÇÃO REAL no Bling';
-  if (!confirm(`Vai executar ${tipo} no pedido ${orderId}.\n\nConfirmar?`)) return;
-
-  // Mostra loading
-  const btnSelector = dryRun ? '.btn-dry' : '.btn-real';
-  const btns = document.querySelectorAll(btnSelector);
-  btns.forEach(b => b.disabled = true);
-
-  try {
-    const url = `${API_BASE}/api/pedido/${orderId}/editar-bling${dryRun ? '?dryRun=1' : ''}`;
-    const r = await fetch(url, {
-      method: 'POST',
-      headers: { 'X-Session-Token': token(), 'Content-Type': 'application/json' },
-      body: '{}'
-    });
-    if (r.status === 401) { logout(); return; }
-    const d = await r.json();
-
-    if (d.ok) {
-      if (dryRun) {
-        // Mostra preview formatado em alerta
-        const rateio = d.rateio || {};
-        const linhas = (rateio.linhas || []).map(l =>
-          `  ${l.codigo} | qty=${l.quantidade} × R$ ${l.valor} = R$ ${(l.quantidade * l.valor).toFixed(2)}`
-        ).join('\n');
-        const ajusteTxt = rateio.ajuste
-          ? `\n${rateio.ajuste.tipo}: R$ ${rateio.ajuste.valor}`
-          : '\n(sem ajuste — soma bateu exato)';
-        alert(`✅ DRY RUN OK — pedido Bling ID ${d.pedidoId}\n\nLinhas:\n${linhas}\n${ajusteTxt}\n\nSoma subtotais: R$ ${rateio.somaSubtotais}\nValor total pedido: R$ ${rateio.valorTotalPedido}\n\n👉 Confira e clique em "Editar Bling" pra aplicar de verdade.`);
-      } else {
-        alert(`✅ PEDIDO BLING EDITADO!\n\nPedido ID: ${d.pedidoId}\nNumero: ${d.numero || '?'}\n\nConfira no Bling.`);
-        await recarregar();
+    // setup (OAuth start)
+    if (method === 'GET' && p === '/lixas-combinar/setup') {
+      const clientId = process.env.LIXAS_BLING_CLIENT_ID;
+      if (!clientId) {
+        html(res, 500, '<h1>Erro</h1><p>LIXAS_BLING_CLIENT_ID não configurado no Render.</p>');
+        return true;
       }
-    } else {
-      const detalhe = JSON.stringify(d, null, 2).slice(0, 800);
-      alert(`❌ ERRO (${d.etapa || 'desconhecida'}):\n\n${d.erro || ''}\n\n${detalhe}`);
+      const redirect = encodeURIComponent(tokenMgr.getRedirectUri());
+      const state = Math.random().toString(36).slice(2, 15);
+      const authUrl = `https://www.bling.com.br/Api/v3/oauth/authorize?response_type=code&client_id=${clientId}&state=${state}&redirect_uri=${redirect}`;
+      html(res, 200, `
+        <!doctype html>
+        <html><head><meta charset="utf-8"><title>Setup Lixas A COMBINAR</title></head>
+        <body style="font-family:system-ui;max-width:600px;margin:40px auto;padding:20px;">
+          <h2>🪨 Setup — Lixas A COMBINAR (Bling)</h2>
+          <p>Clique no botão abaixo para autorizar este app no Bling.</p>
+          <p>⚠️ Faça login na conta <b>Magazine Girassol</b> antes de clicar.</p>
+          <p><a href="${authUrl}" style="display:inline-block;padding:12px 24px;background:#3490dc;color:#fff;text-decoration:none;border-radius:6px;font-weight:600;">Autorizar no Bling</a></p>
+          <hr>
+          <p style="font-size:13px;color:#666;">Redirect URI configurado: <code>${tokenMgr.getRedirectUri()}</code></p>
+        </body></html>
+      `);
+      return true;
     }
-  } catch (e) {
-    alert('Erro: ' + e.message);
-  } finally {
-    btns.forEach(b => b.disabled = false);
-  }
+
+    // oauth callback
+    if (method === 'GET' && p === '/lixas-combinar/oauth/callback') {
+      const code = urlObj.searchParams.get('code');
+      if (!code) {
+        html(res, 400, '<h1>Erro</h1><p>Code não recebido na callback.</p>');
+        return true;
+      }
+      try {
+        await tokenMgr.trocarCodePorTokens(code);
+        html(res, 200, `
+          <!doctype html>
+          <html><head><meta charset="utf-8"><title>Sucesso</title></head>
+          <body style="font-family:system-ui;max-width:600px;margin:40px auto;padding:20px;">
+            <h2>✅ Token Bling obtido com sucesso!</h2>
+            <p>Pode fechar esta aba.</p>
+            <p><strong>Próximos passos:</strong></p>
+            <ol>
+              <li>Conferir status: <a href="/lixas-combinar/health">/lixas-combinar/health</a></li>
+              <li>Testar: <a href="/lixas-combinar/graos/A-COMBINAR-100-lisa-125mm">/lixas-combinar/graos/A-COMBINAR-100-lisa-125mm</a></li>
+            </ol>
+          </body></html>
+        `);
+      } catch (e) {
+        html(res, 500, `<h1>Erro</h1><pre>${e.message}</pre>`);
+      }
+      return true;
+    }
+
+    // graos/:sku — função principal
+    if (method === 'GET' && p.startsWith('/lixas-combinar/graos/')) {
+      const sku = decodeURIComponent(p.replace('/lixas-combinar/graos/', ''));
+      try {
+        const r = await lixasService.getGraosDisponiveisPorSkuACombinar(sku);
+        json(res, r.ok ? 200 : 400, r);
+      } catch (e) {
+        json(res, 500, { ok: false, erro: e.message });
+      }
+      return true;
+    }
+
+    // debug — produto por codigo
+    if (method === 'GET' && p.startsWith('/lixas-combinar/debug/produto/')) {
+      const codigo = decodeURIComponent(p.replace('/lixas-combinar/debug/produto/', ''));
+      try {
+        const blingProdutos = require('./blingProdutos');
+        const produto = await blingProdutos.buscarProdutoPorCodigo(codigo);
+        if (!produto) {
+          json(res, 404, { ok: false, erro: 'Produto não encontrado', codigo });
+          return true;
+        }
+        const detalhe = await blingProdutos.buscarProdutoPorId(produto.id);
+        json(res, 200, {
+          ok: true,
+          codigo,
+          produto_basico: produto,
+          detalhe_completo: detalhe
+        });
+      } catch (e) {
+        json(res, 500, { ok: false, erro: e.message });
+      }
+      return true;
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    // SESSAO 3: PAINEL PENDENTES
+    // ════════════════════════════════════════════════════════════════
+
+    // GET /lixas-combinar/painel → serve o painel.html
+    if (method === 'GET' && p === '/lixas-combinar/painel') {
+      try {
+        const fs = require('fs');
+        const path = require('path');
+        const htmlContent = fs.readFileSync(path.join(__dirname, 'painel.html'), 'utf8');
+        html(res, 200, htmlContent);
+      } catch (e) {
+        json(res, 500, { ok: false, erro: 'erro lendo painel.html: ' + e.message });
+      }
+      return true;
+    }
+
+    // POST /lixas-combinar/login → JWT login
+    if (method === 'POST' && p === '/lixas-combinar/login') {
+      try {
+        const body = await readBody(req);
+        const { usuario, senha } = body || {};
+        const auth = require('./auth');
+
+        // 1) Autentica usuario+senha
+        const autR = auth.autenticar(usuario, senha);
+        if (!autR.ok) { json(res, 401, autR); return true; }
+
+        // 2) Cria sessao e retorna token
+        const token = auth.criarSessao(autR.usuario, autR.perfil);
+        console.log(`[lixas-combinar LOGIN] ${autR.usuario} (${autR.perfil})`);
+
+        json(res, 200, {
+          ok: true,
+          token,
+          usuario: autR.usuario,
+          perfil: autR.perfil
+        });
+      } catch (e) {
+        console.error(`[lixas-combinar LOGIN] erro: ${e.message}`);
+        json(res, 400, { ok: false, erro: e.message });
+      }
+      return true;
+    }
+
+    // ── A partir daqui, todas rotas exigem token ────────────────────
+    function requerAuth() {
+      const auth = require('./auth');
+      const token = req.headers['x-session-token'] || '';
+      const sess = auth.validarSessao(token);
+      return sess ? { ok: true, sessao: sess } : { ok: false };
+    }
+
+    // GET /lixas-combinar/api/pendentes → lista vendas pendentes
+    if (method === 'GET' && p === '/lixas-combinar/api/pendentes') {
+      const sessao = requerAuth();
+      if (!sessao.ok) { json(res, 401, { ok: false, erro: 'nao_autenticado' }); return true; }
+
+      try {
+        const lcp = require('../auto-mensagens/lixasCombinarPendentes');
+        if (!lcp.configurado()) {
+          json(res, 200, { ok: true, pendentes: [], stats: {}, aviso: 'supabase_nao_configurado' });
+          return true;
+        }
+        const status = urlObj.searchParams.get('status') || null;
+
+        // Busca TODOS uma vez so e filtra em memoria (evita 2 chamadas Supabase)
+        const todosR = await lcp.listarPendentes({ dias: 7, limit: 500 });
+        const todos = todosR.ok && Array.isArray(todosR.data) ? todosR.data : [];
+
+        // Aplica filtro - "cliente_respondeu" cobre ambos os status (respondeu E confirmou)
+        let pendentes = todos;
+        if (status === 'cliente_respondeu') {
+          pendentes = todos.filter(v => v.status === 'cliente_respondeu' || v.status === 'cliente_confirmou_pedido');
+        } else if (status) {
+          pendentes = todos.filter(v => v.status === status);
+        }
+        pendentes = pendentes.slice(0, 100);
+
+        const stats = {
+          total: todos.length,
+          aguardando: todos.filter(v => v.status === 'aguardando_resposta').length,
+          respondeu: todos.filter(v => v.status === 'cliente_respondeu' || v.status === 'cliente_confirmou_pedido').length,
+          atencao: todos.filter(v => v.status === 'precisa_atencao_humano' || v.ia_escalou_humano).length,
+          processado: todos.filter(v => v.status === 'processado').length
+        };
+
+        json(res, 200, { ok: true, pendentes, stats });
+      } catch (e) {
+        json(res, 500, { ok: false, erro: e.message });
+      }
+      return true;
+    }
+
+    // POST /lixas-combinar/api/pendentes/:orderId/marcar-processado
+    if (method === 'POST' && p.startsWith('/lixas-combinar/api/pendentes/') && p.endsWith('/marcar-processado')) {
+      const sessao = requerAuth();
+      if (!sessao.ok) { json(res, 401, { ok: false, erro: 'nao_autenticado' }); return true; }
+
+      const orderId = p.replace('/lixas-combinar/api/pendentes/', '').replace('/marcar-processado', '');
+      try {
+        const lcp = require('../auto-mensagens/lixasCombinarPendentes');
+        const r = await lcp.atualizarVenda(orderId, { status: 'processado' });
+        if (!r.ok) { json(res, 500, { ok: false, erro: 'erro_atualizar', data: r.data }); return true; }
+        json(res, 200, { ok: true, orderId });
+      } catch (e) {
+        json(res, 500, { ok: false, erro: e.message });
+      }
+      return true;
+    }
+
+    // POST /lixas-combinar/api/pedido/:orderId/editar-bling  → edita pedido Bling
+    //   Body: { graos: [{grao:"24", quantidade:20}, ...], dryRun?: true }
+    //   Aceita query ?dryRun=1 pra so previsualizar sem enviar
+    if (method === 'POST' && p.startsWith('/lixas-combinar/api/pedido/') && p.endsWith('/editar-bling')) {
+      const sessao = requerAuth();
+      if (!sessao.ok) { json(res, 401, { ok: false, erro: 'nao_autenticado' }); return true; }
+
+      const orderId = p.replace('/lixas-combinar/api/pedido/', '').replace('/editar-bling', '');
+      try {
+        const corpo = await readBody(req);
+        let payload = {};
+        try { payload = JSON.parse(corpo || '{}'); } catch (_) { payload = {}; }
+
+        const dryRun = urlObj.searchParams.get('dryRun') === '1' || !!payload.dryRun;
+        const lcp = require('../auto-mensagens/lixasCombinarPendentes');
+        const venda = await lcp.buscar(orderId);
+
+        if (!venda.ok || !venda.data) {
+          json(res, 404, { ok: false, erro: 'venda_nao_encontrada', orderId });
+          return true;
+        }
+
+        const v = venda.data;
+        let graosEscolhidos = payload.graos;
+
+        // Se nao veio body, tenta usar o pedido_estruturado que IA salvou
+        if (!Array.isArray(graosEscolhidos) || graosEscolhidos.length === 0) {
+          if (v.ia_pedido_estruturado) {
+            try {
+              graosEscolhidos = JSON.parse(v.ia_pedido_estruturado);
+            } catch (_) {
+              json(res, 400, { ok: false, erro: 'ia_pedido_estruturado invalido na tabela' });
+              return true;
+            }
+          } else {
+            json(res, 400, { ok: false, erro: 'precisa fornecer graos no body OU venda precisa ter ia_pedido_estruturado' });
+            return true;
+          }
+        }
+
+        // Consulta graos disponiveis no Bling
+        const lixasService = require('./lixasService');
+        const graosResult = await lixasService.getGraosDisponiveisPorSkuACombinar(v.sku_a_combinar);
+        if (!graosResult.ok) {
+          json(res, 500, { ok: false, erro: 'erro_consultar_graos_bling', detalhe: graosResult.erro });
+          return true;
+        }
+
+        // Edita pedido
+        const bp = require('./blingPedidos');
+        const r = await bp.editarPedidoComGraos({
+          orderId,
+          graosEscolhidos,
+          graosDisponiveis: graosResult.graos,
+          unidadesPorPacote: graosResult.unidades_por_pacote,
+          descricaoBase: graosResult.descricao,
+          dryRun
+        });
+
+        if (!r.ok) {
+          // Atualiza tabela com erro
+          await lcp.atualizarVenda(orderId, {
+            bling_erro: `${r.etapa}: ${r.erro || JSON.stringify(r).slice(0,200)}`.slice(0, 500)
+          });
+          json(res, 500, { ok: false, ...r });
+          return true;
+        }
+
+        // Sucesso (ou dryRun)
+        if (!dryRun) {
+          await lcp.atualizarVenda(orderId, {
+            bling_pedido_id: String(r.pedidoId),
+            bling_editado_em: new Date().toISOString(),
+            bling_erro: null,
+            status: 'processado'
+          });
+        }
+
+        json(res, 200, { ok: true, ...r });
+      } catch (e) {
+        console.error('[lixas-combinar editar-bling]', e);
+        json(res, 500, { ok: false, erro: e.message });
+      }
+      return true;
+    }
+
+    // ════════════════════════════════════════════════════════════════
+
+    // Rota /lixas-combinar (raiz) → redireciona pra setup
+    if (method === 'GET' && p === '/lixas-combinar') {
+      res.writeHead(302, { Location: '/lixas-combinar/setup' });
+      res.end();
+      return true;
+    }
+
+    return false;
+  };
 }
 
-function esc(s) {
-  if (s == null) return '';
-  return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+// ── Bootstrap ────────────────────────────────────────────────────────
+function bootstrap() {
+  setTimeout(() => {
+    const st = tokenMgr.getStatus();
+    console.log(`[lixas-combinar] Pronto. Bling configurado=${st.configurado} tokens_ok=${st.tokens_ok}`);
+    if (!st.configurado) {
+      console.warn('[lixas-combinar] ⚠️ Defina LIXAS_BLING_CLIENT_ID e LIXAS_BLING_CLIENT_SECRET no Render');
+    } else if (!st.tokens_ok) {
+      console.warn('[lixas-combinar] ⚠️ Tokens Bling não obtidos — acessar /lixas-combinar/setup');
+    }
+  }, 3000);
 }
 
-// Auto-refresh a cada 60s
-setInterval(() => {
-  if (document.getElementById('app').style.display !== 'none') recarregar();
-}, 60000);
-
-// Inicializacao
-if (token()) mostrarApp();
-else {
-  document.getElementById('login').style.display = 'flex';
-  document.getElementById('li-user').focus();
-}
-</script>
-</body>
-</html>
+// ── Exporta (interface igual respostas-rapidas) ──────────────────────
+module.exports = {
+  id: 'lixas-combinar',
+  nome: 'Lixas A COMBINAR',
+  rotinas: {},
+  routes,
+  crons: {},
+  bootstrap
+};
