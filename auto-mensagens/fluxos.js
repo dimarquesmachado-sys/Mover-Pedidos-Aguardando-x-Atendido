@@ -37,10 +37,13 @@ const LIMITE_CHARS = 350;
  * Tenta montar mensagem inteligente com grãos disponíveis.
  * Se falhar (SKU nao mapeado, Bling fora, etc), retorna o TEXTO genérico.
  *
- * Formato (orienta cliente: 1º QTD, 2º GRÃO):
+ * Formato final (desenhado pra cliente entender):
  *   "Ola! Sua compra de {N} lixas {desc}.
- *    Graos: 24, 40, 60, ...
- *    Responda com QTD + GRAO (mult. de {U}). Ex: 30 da 24, 40 da 40, 30 da 80."
+ *
+ *    GRAOS DISPONIVEIS: 24, 40, 60, ...
+ *
+ *    Responda com QUANTIDADE + GRAO. MULTIPLOS de {U}. Total {N} lixas.
+ *    Ex: 30 do grao 24; 70 do grao 80."
  *
  * @param {object} detalhe - objeto order completo do ML
  * @returns {Promise<string>} texto da mensagem (max 350 chars)
@@ -70,35 +73,54 @@ async function montarMensagemInteligente(detalhe) {
     const totalLixas = r.lixas_por_kit * info.quantidade;
     const unidades = r.unidades_por_pacote || 10;
 
-    // Lista compacta dos grãos
-    let graosCompacto = r.graos.map(g => g.grao).join(', ');
+    // Gera exemplo DINÂMICO que SOMA até o total real (importante: se cliente
+    // comprou 200 lixas, o exemplo precisa somar 200 — senão confunde)
+    function gerarExemplo(total, unidades, graosArr) {
+      if (graosArr.length === 0) return `Ex: ${total} do grao desejado.`;
+      if (graosArr.length === 1) return `Ex: ${total} do grao ${graosArr[0]}.`;
+      // 2 graos do início da lista (mais finos/comuns)
+      const grao1 = graosArr[0];
+      const idx2 = Math.min(2, graosArr.length - 1);
+      const grao2 = graosArr[idx2];
+      const parte1 = Math.round(total * 0.3 / unidades) * unidades;
+      const parte2 = total - parte1;
+      return `Ex: ${parte1} do grao ${grao1}; ${parte2} do grao ${grao2}.`;
+    }
 
-    // Monta mensagem v3 (orientação QTD + GRÃO)
-    // Ex pra mult.10: "30 da 24, 40 da 40, 30 da 80" (soma 100)
-    // Ex pra mult.1:  "20 da 80, 30 da 100, 50 da 240" (soma 100)
-    const exemplo = unidades === 1
-      ? '20 da 80, 30 da 100, 50 da 240'
-      : '30 da 24, 40 da 40, 30 da 80';
+    // Monta mensagem desenhada (sem abreviar, MAIUSCULO nos pontos chave)
+    function montar(graosArr) {
+      const graosStr = graosArr.join(', ');
+      const exemplo = gerarExemplo(totalLixas, unidades, graosArr);
+      return `Ola! Sua compra de ${totalLixas} lixas ${r.descricao}.
 
-    let msg = `Ola! Sua compra de ${totalLixas} lixas ${r.descricao}.\nGraos: ${graosCompacto}\nResponda com QTD + GRAO (mult. de ${unidades}, total ${totalLixas}). Ex: ${exemplo}.`;
+GRAOS DISPONIVEIS: ${graosStr}
 
-    // Safety: se ultrapassar 350, vai reduzindo graos do fim
+Responda com QUANTIDADE + GRAO. MULTIPLOS de ${unidades}. Total ${totalLixas} lixas.
+${exemplo}`;
+    }
+
+    let graosArr = r.graos.map(g => g.grao);
+    let msg = montar(graosArr);
+
+    // Safety: se ultrapassar 350, vai removendo graos do fim (mais grossos)
     if (msg.length > LIMITE_CHARS) {
-      const graosArr = r.graos.map(g => g.grao);
       while (graosArr.length > 3 && msg.length > LIMITE_CHARS) {
-        graosArr.pop(); // remove o ultimo (geralmente o mais grosso e menos usado)
-        graosCompacto = graosArr.join(', ') + '...';
-        msg = `Ola! Sua compra de ${totalLixas} lixas ${r.descricao}.\nGraos: ${graosCompacto}\nResponda com QTD + GRAO (mult. de ${unidades}, total ${totalLixas}). Ex: ${exemplo}.`;
+        graosArr.pop();
+        msg = montar(graosArr);
       }
-
-      // Se mesmo cortando passou, usa generica
+      // Sinaliza que cortou — adiciona "..." no ultimo grao
+      if (msg.length <= LIMITE_CHARS) {
+        graosArr[graosArr.length - 1] = graosArr[graosArr.length - 1] + ' ...';
+        msg = montar(graosArr);
+      }
+      // Se MESMO assim passou, usa generico
       if (msg.length > LIMITE_CHARS) {
         console.log(`[auto-mensagens] msg inteligente impossivel < ${LIMITE_CHARS} (${msg.length}) — usando generica`);
         return TEXTO;
       }
     }
 
-    console.log(`[auto-mensagens] msg inteligente montada (${msg.length} chars, ${r.graos.length} graos)`);
+    console.log(`[auto-mensagens] msg inteligente montada (${msg.length} chars, ${graosArr.length} graos)`);
     return msg;
   } catch (e) {
     console.error(`[auto-mensagens] erro montando msg inteligente: ${e.message} — usando generica`);
