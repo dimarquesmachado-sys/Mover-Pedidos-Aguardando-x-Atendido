@@ -319,20 +319,20 @@ function routes(readBody) {
               const unidades = r.unidades_por_pacote || 10;
 
               function gerarExemplo(total, unidades, graosArr) {
-                if (graosArr.length === 0) return `Ex: ${total} do grao desejado.`;
-                if (graosArr.length === 1) return `Ex: ${total} do grao ${graosArr[0]}.`;
+                if (graosArr.length === 0) return `Ex: ${total} do grão desejado.`;
+                if (graosArr.length === 1) return `Ex: ${total} do grão ${graosArr[0]}.`;
                 const grao1 = graosArr[0];
                 const idx2 = Math.min(2, graosArr.length - 1);
                 const grao2 = graosArr[idx2];
                 const parte1 = Math.round(total * 0.3 / unidades) * unidades;
                 const parte2 = total - parte1;
-                return `Ex: ${parte1} do grao ${grao1}; ${parte2} do grao ${grao2}.`;
+                return `Ex: ${parte1} do grão ${grao1}; ${parte2} do grão ${grao2}.`;
               }
 
               function montar(graosArr) {
                 const graosStr = graosArr.join(', ');
                 const exemplo = gerarExemplo(totalLixas, unidades, graosArr);
-                return `Ola! Sua compra de ${totalLixas} lixas ${r.descricao}.\n\nGRAOS DISPONIVEIS: ${graosStr}\n\nResponda com QUANTIDADE + GRAO. MULTIPLOS de ${unidades}. Total ${totalLixas} lixas.\n${exemplo}`;
+                return `Olá! Sua compra de ${totalLixas} lixas ${r.descricao}.\n\nGRÃOS DISPONÍVEIS: ${graosStr}\n\nResponda com QUANTIDADE + GRÃO. MÚLTIPLOS de ${unidades}. Total ${totalLixas} lixas.\n${exemplo}`;
               }
 
               let graosArr = r.graos.map(g => g.grao);
