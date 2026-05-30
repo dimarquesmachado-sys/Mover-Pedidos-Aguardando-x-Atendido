@@ -439,9 +439,33 @@ async function forcarOrder(idEntrada) {
     const packId = detalhe.pack_id || packIdDescoberto;
     const textoFinal = await montarMensagemInteligente(detalhe);
     stats.texto_chars = textoFinal.length;
-    console.log(`[auto-mensagens FORCAR] order=${orderId} buyer=${buyerId} pack=${packId || 'null'} chars=${textoFinal.length}`);
 
-    const r = await ml.enviarMensagem({ packId, orderId, buyerId, texto: textoFinal });
+    // 3.5. NOVO: consulta conversa pra decidir endpoint (igual rotinaACombinar)
+    //      - virgem  → action_guide OTHER (1 uso, gasta o cap)
+    //      - tem msg → POST direto (preserva cap, permite mensagens livres)
+    const conv = await ml.consultarConversa({ packId, orderId });
+    let r;
+    let viaEndpoint;
+    let respostasCliente = null;
+
+    if (conv.ok && !conv.conversaVirgem && conv.totalCliente > 0) {
+      viaEndpoint = 'direto';
+      respostasCliente = conv.ultimaCliente;
+      console.log(`[auto-mensagens FORCAR] 💬 order=${orderId} ja tem ${conv.totalCliente} msg(s) cliente — DIRETO (chars=${textoFinal.length})`);
+      r = await ml.enviarMensagemDireta({ packId, orderId, buyerId, texto: textoFinal });
+    } else if (conv.ok && !conv.conversaVirgem && conv.totalLoja > 0) {
+      // Loja ja mandou msg mas cliente nao respondeu - tenta direto tambem
+      // (cap do OTHER provavelmente esgotado, e nao adianta repetir action_guide)
+      viaEndpoint = 'direto_sem_resposta';
+      console.log(`[auto-mensagens FORCAR] 📨 order=${orderId} loja ja enviou mas cliente nao respondeu — tentando DIRETO (chars=${textoFinal.length})`);
+      r = await ml.enviarMensagemDireta({ packId, orderId, buyerId, texto: textoFinal });
+    } else {
+      // Conversa virgem (ou erro consultando) - usa action_guide
+      viaEndpoint = 'action_guide';
+      console.log(`[auto-mensagens FORCAR] 📨 order=${orderId} virgem — ACTION_GUIDE OTHER (chars=${textoFinal.length})`);
+      r = await ml.enviarMensagem({ packId, orderId, buyerId, texto: textoFinal });
+    }
+    stats.via_endpoint = viaEndpoint;
     stats.etapa = 'gravar';
 
     if (r.ok) {
@@ -451,23 +475,50 @@ async function forcarOrder(idEntrada) {
         orderId, packId, buyerId,
         tipo: 'a_combinar', textoEnviado: textoFinal,
         messageIdMl: r.message_id, status: foiModerado ? 'moderado' : 'enviado',
-        erroDetalhe: foiModerado ? `moderation=${modStatus}` : null,
+        erroDetalhe: foiModerado ? `moderation=${modStatus}` : (viaEndpoint !== 'action_guide' ? `via_${viaEndpoint}` : null),
         loja: 'GIRASSOL'
       });
+
+      // Popula tabela lixas_combinar_pendentes (mesmo padrao da rotinaACombinar)
+      try {
+        const sku = ml.extrairSkuACombinar(detalhe);
+        const lcp = require('./lixasCombinarPendentes');
+        if (lcp.configurado()) {
+          await lcp.upsertPendente({
+            orderId, packId, buyerId,
+            buyerNome: detalhe.buyer?.nickname || `${detalhe.buyer?.first_name || ''} ${detalhe.buyer?.last_name || ''}`.trim(),
+            skuACombinar: sku?.sku || null,
+            descricaoProduto: sku?.titulo || null,
+            quantidadeLixas: null,
+            dataVenda: detalhe.date_created || new Date().toISOString(),
+            msgInicialEnviada: textoFinal,
+            msgInicialEnviadaEm: new Date().toISOString(),
+            clienteRespondeu: !!respostasCliente,
+            ultimaRespostaCliente: respostasCliente?.text || null,
+            ultimaRespostaEm: respostasCliente?.date_created || null,
+            totalMsgsCliente: conv.totalCliente || 0,
+            status: respostasCliente ? 'cliente_respondeu' : 'aguardando_resposta',
+            viaEndpoint
+          });
+        }
+      } catch (e) {
+        console.error(`[auto-mensagens FORCAR] erro upsert pendente: ${e.message}`);
+      }
+
       stats.message_id = r.message_id;
       stats.moderation = modStatus;
-      console.log(`[auto-mensagens FORCAR] ✅ order=${orderId} status=${foiModerado ? 'moderado' : 'enviado'}`);
+      console.log(`[auto-mensagens FORCAR] ✅ order=${orderId} status=${foiModerado ? 'moderado' : 'enviado'} via=${viaEndpoint}`);
       return { ok: true, enviado: !foiModerado, moderado: foiModerado, stats };
     } else {
       await tracker.registrar({
         orderId, packId, buyerId,
         tipo: 'a_combinar', textoEnviado: textoFinal,
-        messageIdMl: null, status: 'erro', erroDetalhe: `${r.status}: ${r.erro}`.slice(0, 500),
+        messageIdMl: null, status: 'erro', erroDetalhe: `${viaEndpoint} ${r.status}: ${r.erro}`.slice(0, 500),
         loja: 'GIRASSOL'
       });
       stats.ml_erro = r.erro;
       stats.ml_status = r.status;
-      return { ok: false, erro: `ML retornou ${r.status}: ${r.erro}`, stats };
+      return { ok: false, erro: `ML retornou ${r.status} via ${viaEndpoint}: ${r.erro}`, stats };
     }
   } catch (e) {
     return { ok: false, erro: e.message, stats };
