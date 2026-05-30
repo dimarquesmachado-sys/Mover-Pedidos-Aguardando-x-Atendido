@@ -1,0 +1,14 @@
+{
+  "_descricao": "Mapeamento dos SKUs A COMBINAR (kit 100 lixas) para o produto pai dos pacotes de 10 lixas correspondente. Atualizar conforme novos anuncios sao criados.",
+  "_atualizado_em": "2026-05-30",
+  "_observacao": "Quando um cliente compra um anuncio A COMBINAR no ML, o sistema usa este mapa para descobrir quais SKUs de 10 lixas estao disponiveis em estoque para oferecer ao cliente.",
+
+  "catalogo": {
+    "A-COMBINAR-100-lisa-125mm": {
+      "descricao": "5 polegadas - LISA",
+      "pai_10_lixas_codigo": "10-lisa-125mm-PAI-X",
+      "lixas_por_kit": 100,
+      "ativo": true
+    }
+  }
+}
