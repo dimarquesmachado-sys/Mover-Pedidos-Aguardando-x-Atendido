@@ -146,6 +146,98 @@ function routes(readBody) {
       return true;
     }
 
+    // ════════════════════════════════════════════════════════════════
+    // SESSAO 3: PAINEL PENDENTES
+    // ════════════════════════════════════════════════════════════════
+
+    // GET /lixas-combinar/painel → serve o painel.html
+    if (method === 'GET' && p === '/lixas-combinar/painel') {
+      try {
+        const fs = require('fs');
+        const path = require('path');
+        const htmlContent = fs.readFileSync(path.join(__dirname, 'painel.html'), 'utf8');
+        html(res, 200, htmlContent);
+      } catch (e) {
+        json(res, 500, { ok: false, erro: 'erro lendo painel.html: ' + e.message });
+      }
+      return true;
+    }
+
+    // POST /lixas-combinar/login → JWT login
+    if (method === 'POST' && p === '/lixas-combinar/login') {
+      try {
+        const body = await readBody(req);
+        const { usuario, senha } = JSON.parse(body || '{}');
+        const auth = require('./auth');
+        const r = auth.criarSessao(usuario, senha);
+        if (!r.ok) { json(res, 401, r); return true; }
+        json(res, 200, r);
+      } catch (e) {
+        json(res, 400, { ok: false, erro: e.message });
+      }
+      return true;
+    }
+
+    // ── A partir daqui, todas rotas exigem token ────────────────────
+    function requerAuth() {
+      const auth = require('./auth');
+      const token = req.headers['x-session-token'] || '';
+      return auth.validarToken(token);
+    }
+
+    // GET /lixas-combinar/api/pendentes → lista vendas pendentes
+    if (method === 'GET' && p === '/lixas-combinar/api/pendentes') {
+      const sessao = requerAuth();
+      if (!sessao.ok) { json(res, 401, { ok: false, erro: 'nao_autenticado' }); return true; }
+
+      try {
+        const lcp = require('../auto-mensagens/lixasCombinarPendentes');
+        if (!lcp.configurado()) {
+          json(res, 200, { ok: true, pendentes: [], stats: {}, aviso: 'supabase_nao_configurado' });
+          return true;
+        }
+        const status = urlObj.searchParams.get('status') || null;
+        const r = await lcp.listarPendentes({ dias: 7, status, limit: 100 });
+        if (!r.ok) { json(res, 500, { ok: false, erro: 'erro_listar', data: r.data }); return true; }
+
+        const pendentes = Array.isArray(r.data) ? r.data : [];
+
+        // Stats (busca tudo p contagem global, sem filtro de status)
+        const todosR = await lcp.listarPendentes({ dias: 7, limit: 500 });
+        const todos = todosR.ok && Array.isArray(todosR.data) ? todosR.data : [];
+        const stats = {
+          total: todos.length,
+          aguardando: todos.filter(v => v.status === 'aguardando_resposta').length,
+          respondeu: todos.filter(v => v.status === 'cliente_respondeu').length,
+          processado: todos.filter(v => v.status === 'processado').length
+        };
+
+        json(res, 200, { ok: true, pendentes, stats });
+      } catch (e) {
+        json(res, 500, { ok: false, erro: e.message });
+      }
+      return true;
+    }
+
+    // POST /lixas-combinar/api/pendentes/:orderId/marcar-processado
+    if (method === 'POST' && p.startsWith('/lixas-combinar/api/pendentes/') && p.endsWith('/marcar-processado')) {
+      const sessao = requerAuth();
+      if (!sessao.ok) { json(res, 401, { ok: false, erro: 'nao_autenticado' }); return true; }
+
+      const orderId = p.replace('/lixas-combinar/api/pendentes/', '').replace('/marcar-processado', '');
+      try {
+        const lcp = require('../auto-mensagens/lixasCombinarPendentes');
+        const r = await lcp.atualizarVenda(orderId, { status: 'processado' });
+        if (!r.ok) { json(res, 500, { ok: false, erro: 'erro_atualizar', data: r.data }); return true; }
+        json(res, 200, { ok: true, orderId });
+      } catch (e) {
+        json(res, 500, { ok: false, erro: e.message });
+      }
+      return true;
+    }
+
+    // ════════════════════════════════════════════════════════════════
+
     // Rota /lixas-combinar (raiz) → redireciona pra setup
     if (method === 'GET' && p === '/lixas-combinar') {
       res.writeHead(302, { Location: '/lixas-combinar/setup' });
