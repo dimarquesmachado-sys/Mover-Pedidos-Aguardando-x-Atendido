@@ -129,10 +129,11 @@ module.exports = { rotinaACombinar, forcarOrder, HABILITADO, TEXTO };
 
 /**
  * Força processamento de UMA venda específica (ignora janela de tempo)
- * Usa pra mandar mensagem em vendas antigas ou de teste.
+ * Aceita TANTO order_id quanto pack_id (o que aparece na URL do ML).
+ * Se for pack_id (carrinho), busca o order real automaticamente.
  */
-async function forcarOrder(orderId) {
-  const stats = { orderId, etapa: 'inicio' };
+async function forcarOrder(idEntrada) {
+  const stats = { idEntrada, etapa: 'inicio' };
   try {
     if (!TEXTO) {
       return { ok: false, erro: 'AUTO_MSG_GIRASSOL_TEXTO_A_COMBINAR vazio', stats };
@@ -141,20 +142,47 @@ async function forcarOrder(orderId) {
       return { ok: false, erro: 'Supabase nao configurado', stats };
     }
 
+    // 0. Detectar se é pack_id ou order_id
+    // Tenta como order primeiro (rota normal). Se 404, tenta como pack pra extrair order_id.
+    stats.etapa = 'detectar_tipo';
+    let orderId = idEntrada;
+    let detalhe = null;
+    let packIdDescoberto = null;
+
+    try {
+      detalhe = await ml.getOrderDetalhe(idEntrada);
+      stats.tipo_id = 'order';
+    } catch (e) {
+      // Se der 404, tenta como pack
+      if (e.message.includes('404') || e.message.includes('order_not_found')) {
+        stats.tipo_id = 'pack_tentativa';
+        const packInfo = await ml.getPackInfo(idEntrada);
+        if (packInfo?.orders?.length > 0) {
+          orderId = String(packInfo.orders[0].id);
+          packIdDescoberto = idEntrada;
+          stats.tipo_id = 'pack';
+          stats.order_id_real = orderId;
+          stats.pack_id_real = packIdDescoberto;
+          detalhe = await ml.getOrderDetalhe(orderId);
+        } else {
+          return { ok: false, erro: `Pack ${idEntrada} sem orders dentro`, stats };
+        }
+      } else {
+        return { ok: false, erro: e.message, stats };
+      }
+    }
+
     // 1. Já enviou?
     stats.etapa = 'checar_duplicado';
     if (await tracker.jaEnviou(orderId)) {
-      return { ok: false, erro: 'Ja enviou pra esta venda anteriormente', stats };
+      return { ok: false, erro: `Ja enviou pra esta venda (order ${orderId}) anteriormente`, stats };
     }
 
-    // 2. Busca detalhe completo
-    stats.etapa = 'buscar_detalhe';
-    const detalhe = await ml.getOrderDetalhe(orderId);
     stats.status_venda = detalhe.status;
     stats.buyer_id = detalhe.buyer?.id;
-    stats.pack_id = detalhe.pack_id;
+    stats.pack_id = detalhe.pack_id || packIdDescoberto;
 
-    // 3. Tem A COMBINAR?
+    // 2. Tem A COMBINAR?
     stats.etapa = 'verificar_a_combinar';
     const temACombinar = ml.temVariacaoACombinar(detalhe);
     stats.tem_a_combinar = temACombinar;
@@ -162,10 +190,10 @@ async function forcarOrder(orderId) {
       return { ok: false, erro: 'Venda NAO tem variacao A COMBINAR', stats };
     }
 
-    // 4. Envia
+    // 3. Envia
     stats.etapa = 'enviar';
     const buyerId = detalhe.buyer?.id;
-    const packId = detalhe.pack_id;
+    const packId = detalhe.pack_id || packIdDescoberto;
     console.log(`[auto-mensagens FORCAR] order=${orderId} buyer=${buyerId} pack=${packId || 'null'}`);
 
     const r = await ml.enviarMensagem({ packId, orderId, buyerId, texto: TEXTO });
