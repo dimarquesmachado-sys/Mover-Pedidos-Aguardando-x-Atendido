@@ -35,17 +35,25 @@ CONTEXTO DA VENDA ATUAL:
 - Graos disponiveis em estoque AGORA: ${graosDisponiveis.join(', ')}
 - Soma das quantidades escolhidas deve dar EXATAMENTE ${totalLixas} lixas
 
+IMPORTANTE - CONTEXTO DA CONVERSA:
+Voce vera o HISTORICO da conversa. Use-o para interpretar mensagens curtas ou ambiguas
+do cliente. Por exemplo, se a loja perguntou "quantos de cada grao?" e o cliente
+respondeu "20 de cada", junte com os graos que JA foram mencionados pela loja ou cliente
+anteriormente. Cliente curto eh normal — interprete usando contexto.
+
 SUA UNICA TAREFA:
-Interpretar a mensagem do cliente sobre QUAIS graos e QUANTAS lixas de cada grao ele quer.
+Interpretar a ULTIMA mensagem do cliente sobre QUAIS graos e QUANTAS lixas de cada quer.
+Considere TODO o historico ao interpretar.
 
 CLASSIFIQUE em UMA destas 4 categorias:
 
-1. "claro" - Cliente especificou QUANTIDADES E GRAOS, soma confere
-   Ex: "30 do 24 e 70 do 80" (30+70=${totalLixas} ✅)
-   AÇÃO: Confirme o pedido de forma amigavel.
+1. "claro" - Cliente especificou QUANTIDADES E GRAOS, soma confere ${totalLixas}
+   Ex direto: "30 do 24 e 70 do 80" (30+70=${totalLixas} ✅)
+   Ex contextual: cliente diz "20 de cada" apos loja listar 5 graos = 5×20=100 ✅
+   AÇÃO: Confirme o pedido de forma amigavel, listando EXATAMENTE qual o pedido entendido.
 
 2. "ambiguo" - Cliente listou graos mas SEM quantidades, ou quantidades nao fecham
-   Ex: "40 60 80 100 150" (só listou graos)
+   Ex: "40 60 80 100 150" SEM contexto previo de loja sugerindo qtds
    Ex: "20 do 24 e 30 do 80" (50 != ${totalLixas})
    AÇÃO: Peça as quantidades de forma clara, dando exemplo.
 
@@ -64,6 +72,7 @@ REGRAS RIGIDAS:
 - NUNCA peça dados pessoais (CPF, telefone, endereco)
 - Mensagem pro cliente: max 350 caracteres, com acentos, tom cordial
 - Use "Olá!" no inicio, assinatura sutil (sem emojis demais, max 1)
+- Ao confirmar pedido CLARO, LISTE os itens entendidos para o cliente verificar
 
 FORMATO DE RESPOSTA (JSON puro, sem markdown, sem comentario):
 {
@@ -78,13 +87,17 @@ FORMATO DE RESPOSTA (JSON puro, sem markdown, sem comentario):
 /**
  * Interpreta a mensagem do cliente usando Claude API.
  * Retorna o JSON estruturado.
+ *
+ * @param {string} mensagemCliente - ultima mensagem do cliente (foco)
+ * @param {Array}  historicoConversa - opcional: [{role:'seller'|'buyer', text}, ...] para contexto
  */
 async function interpretarRespostaCliente({
   mensagemCliente,
   descricaoProduto,
   totalLixas,
   unidadesPorPacote,
-  graosDisponiveis
+  graosDisponiveis,
+  historicoConversa
 }) {
   if (!configurado()) {
     return { ok: false, erro: 'IA nao configurada (env ANTHROPIC_API_KEY_LIXAS_IA ausente)' };
@@ -98,12 +111,24 @@ async function interpretarRespostaCliente({
     descricaoProduto, totalLixas, unidadesPorPacote, graosDisponiveis
   });
 
+  // Monta texto da mensagem do user com historico (se disponivel) + msg atual
+  let userText = '';
+  if (Array.isArray(historicoConversa) && historicoConversa.length > 0) {
+    userText += 'HISTORICO DA CONVERSA (mais antiga primeiro):\n';
+    for (const m of historicoConversa) {
+      const quem = m.role === 'seller' ? 'Loja' : 'Cliente';
+      userText += `${quem}: "${m.text}"\n`;
+    }
+    userText += '\n';
+  }
+  userText += `ULTIMA MENSAGEM DO CLIENTE (foco da interpretacao):\n"""${mensagemCliente}"""\n\nAnalise considerando o historico e responda em JSON puro.`;
+
   const body = {
     model: MODELO,
     max_tokens: MAX_TOKENS,
     system: systemPrompt,
     messages: [
-      { role: 'user', content: `Mensagem do cliente:\n"""${mensagemCliente}"""\n\nAnalise e responda em JSON puro.` }
+      { role: 'user', content: userText }
     ]
   };
 
