@@ -155,6 +155,54 @@ function routes(readBody) {
       return true;
     }
 
+    // Debug: tenta acessar um ID como pack E como order, retorna o que achar
+    if (method === 'GET' && p.startsWith('/auto-mensagens/debug/lookup/')) {
+      const id = p.replace('/auto-mensagens/debug/lookup/', '');
+      const resultados = { id, tentativas: {} };
+
+      // Tenta como pack
+      try {
+        const ml = require('./mlApi');
+        const token = await tokenMgr.garantirTokenML();
+        // 1) Como pack
+        const r1 = await fetch(`https://api.mercadolibre.com/packs/${id}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        const txt1 = await r1.text();
+        resultados.tentativas.pack = {
+          status: r1.status,
+          body: txt1.slice(0, 500)
+        };
+
+        // 2) Como order direto
+        const r2 = await fetch(`https://api.mercadolibre.com/orders/${id}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        const txt2 = await r2.text();
+        resultados.tentativas.order = {
+          status: r2.status,
+          body: txt2.slice(0, 500)
+        };
+
+        // 3) Buscar via /orders/search com pack_id
+        const sellerId = tokenMgr.getUserId();
+        const r3 = await fetch(
+          `https://api.mercadolibre.com/orders/search?seller=${sellerId}&pack_id=${id}`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        const txt3 = await r3.text();
+        resultados.tentativas.search_by_pack = {
+          status: r3.status,
+          body: txt3.slice(0, 800)
+        };
+
+        json(res, 200, resultados);
+      } catch (e) {
+        json(res, 500, { erro: e.message, parcial: resultados });
+      }
+      return true;
+    }
+
     // Forçar envio de UMA venda específica (ignora janela de tempo)
     // GET ou POST /auto-mensagens/forcar/:orderId
     if ((method === 'GET' || method === 'POST') && p.startsWith('/auto-mensagens/forcar/')) {
