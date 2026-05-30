@@ -405,7 +405,6 @@ async function testarBling(orderId, dryRun) {
   const tipo = dryRun ? 'DRY RUN (preview)' : 'EDIÇÃO REAL no Bling';
   if (!confirm(`Vai executar ${tipo} no pedido ${orderId}.\n\nConfirmar?`)) return;
 
-  // Mostra loading
   const btnSelector = dryRun ? '.btn-dry' : '.btn-real';
   const btns = document.querySelectorAll(btnSelector);
   btns.forEach(b => b.disabled = true);
@@ -422,7 +421,6 @@ async function testarBling(orderId, dryRun) {
 
     if (d.ok) {
       if (dryRun) {
-        // Mostra preview formatado em alerta
         const rateio = d.rateio || {};
         const linhas = (rateio.linhas || []).map(l =>
           `  ${l.codigo} | qty=${l.quantidade} × R$ ${l.valor} = R$ ${(l.quantidade * l.valor).toFixed(2)}`
@@ -430,19 +428,72 @@ async function testarBling(orderId, dryRun) {
         const ajusteTxt = rateio.ajuste
           ? `\n${rateio.ajuste.tipo}: R$ ${rateio.ajuste.valor}`
           : '\n(sem ajuste — soma bateu exato)';
-        alert(`✅ DRY RUN OK — pedido Bling ID ${d.pedidoId}\n\nLinhas:\n${linhas}\n${ajusteTxt}\n\nSoma subtotais: R$ ${rateio.somaSubtotais}\nValor total pedido: R$ ${rateio.valorTotalPedido}\n\n👉 Confira e clique em "Editar Bling" pra aplicar de verdade.`);
+        const texto = `✅ DRY RUN OK — pedido Bling ID ${d.pedidoId}\n\nLinhas:\n${linhas}\n${ajusteTxt}\n\nSoma subtotais: R$ ${rateio.somaSubtotais}\nValor total pedido: R$ ${rateio.valorTotalPedido}`;
+        mostrarModal('✅ DRY RUN OK', texto, false);
       } else {
-        alert(`✅ PEDIDO BLING EDITADO!\n\nPedido ID: ${d.pedidoId}\nNumero: ${d.numero || '?'}\n\nConfira no Bling.`);
+        const texto = `✅ PEDIDO BLING EDITADO!\n\nPedido ID: ${d.pedidoId}\nNumero: ${d.numero || '?'}\n\nConfira no Bling.`;
+        mostrarModal('✅ Sucesso', texto, false);
         await recarregar();
       }
     } else {
-      const detalhe = JSON.stringify(d, null, 2).slice(0, 800);
-      alert(`❌ ERRO (${d.etapa || 'desconhecida'}):\n\n${d.erro || ''}\n\n${detalhe}`);
+      const textoErro = `❌ ERRO (${d.etapa || 'desconhecida'}):\n\n${d.erro || ''}\n\n${JSON.stringify(d, null, 2)}`;
+      mostrarModal('❌ Erro', textoErro, true);
     }
   } catch (e) {
-    alert('Erro: ' + e.message);
+    mostrarModal('❌ Erro', e.message + '\n\n' + (e.stack || ''), true);
   } finally {
     btns.forEach(b => b.disabled = false);
+  }
+}
+
+function mostrarModal(titulo, texto, isErro) {
+  // Remove modal anterior se existir
+  const antigo = document.getElementById('modal-resultado');
+  if (antigo) antigo.remove();
+
+  const modal = document.createElement('div');
+  modal.id = 'modal-resultado';
+  modal.style.cssText = `
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.5); z-index: 9999;
+    display: flex; align-items: center; justify-content: center;
+    padding: 20px;
+  `;
+
+  const cor = isErro ? '#dc2626' : '#059669';
+  modal.innerHTML = `
+    <div style="background:#fff; border-radius:8px; max-width:700px; width:100%; max-height:80vh; display:flex; flex-direction:column;">
+      <div style="padding:16px 20px; border-bottom:1px solid #e5e5e5; display:flex; justify-content:space-between; align-items:center;">
+        <h3 style="margin:0; color:${cor}; font-size:18px">${titulo}</h3>
+        <button onclick="document.getElementById('modal-resultado').remove()" style="background:none;border:none;font-size:24px;cursor:pointer;color:#666">×</button>
+      </div>
+      <div style="padding:16px 20px; overflow:auto; flex:1">
+        <textarea id="modal-texto" readonly style="width:100%; min-height:300px; font-family:'Courier New',monospace; font-size:12px; padding:10px; border:1px solid #e5e5e5; border-radius:4px; background:#f9fafb; white-space:pre; resize:vertical;">${texto.replace(/</g, '&lt;')}</textarea>
+      </div>
+      <div style="padding:12px 20px; border-top:1px solid #e5e5e5; display:flex; gap:8px; justify-content:flex-end">
+        <button onclick="copiarTextoModal()" style="background:#3b82f6; color:#fff; border:none; padding:8px 16px; border-radius:4px; cursor:pointer; font-weight:600">📋 Copiar tudo</button>
+        <button onclick="document.getElementById('modal-resultado').remove()" style="background:#6b7280; color:#fff; border:none; padding:8px 16px; border-radius:4px; cursor:pointer">Fechar</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+}
+
+function copiarTextoModal() {
+  const ta = document.getElementById('modal-texto');
+  if (!ta) return;
+  ta.select();
+  try {
+    navigator.clipboard.writeText(ta.value).then(() => {
+      const btn = document.querySelector('#modal-resultado button[onclick="copiarTextoModal()"]');
+      if (btn) {
+        const orig = btn.innerHTML;
+        btn.innerHTML = '✅ Copiado!';
+        setTimeout(() => { btn.innerHTML = orig; }, 1500);
+      }
+    });
+  } catch (_) {
+    document.execCommand('copy');
   }
 }
 
