@@ -241,10 +241,8 @@ function routes(readBody) {
     }
 
     // GET /lixas-combinar/api/debug-buscar-bling?orderId=XXX  → mostra TODOS pedidos Bling
+    // SEM AUTH - so leitura, util pra diagnostico via navegador direto
     if (method === 'GET' && p === '/lixas-combinar/api/debug-buscar-bling') {
-      const sessao = requerAuth();
-      if (!sessao.ok) { json(res, 401, { ok: false, erro: 'nao_autenticado' }); return true; }
-
       const orderId = urlObj.searchParams.get('orderId');
       if (!orderId) { json(res, 400, { ok: false, erro: 'orderId obrigatorio' }); return true; }
 
