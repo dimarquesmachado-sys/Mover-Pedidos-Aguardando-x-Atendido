@@ -29,7 +29,7 @@
 
 const tokenMgr = require('./mlTokenManager');
 const tracker  = require('./supabaseTracker');
-const { rotinaACombinar, forcarOrder } = require('./fluxos');
+const { rotinaACombinar, rotinaLerRespostas, forcarOrder } = require('./fluxos');
 
 // ── Helpers HTTP ──────────────────────────────────────────────────────
 function json(res, code, body) {
@@ -43,7 +43,8 @@ function html(res, code, body) {
 
 // ── Crons ─────────────────────────────────────────────────────────────
 const crons = {
-  girassolACombinar: '*/5 * * * *'   // a cada 5 min, 24h por dia
+  girassolACombinar: '*/2 * * * *',          // a cada 2 min - envio msg auto
+  girassolLerRespostas: '*/2 * * * *'        // a cada 2 min - le respostas dos clientes (Sessao 3)
 };
 
 // ── Rotas ─────────────────────────────────────────────────────────────
@@ -417,7 +418,8 @@ module.exports = {
   id: 'auto-mensagens',
   nome: 'Auto Mensagens ML',
   rotinas: {
-    girassolACombinar: rotinaACombinar
+    girassolACombinar: rotinaACombinar,
+    girassolLerRespostas: rotinaLerRespostas
   },
   routes,
   crons,
