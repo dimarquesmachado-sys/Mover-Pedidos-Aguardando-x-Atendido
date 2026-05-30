@@ -72,6 +72,13 @@
   .ia-escala { background: #fff7ed; border-left: 3px solid #f97316; padding: 8px;
     border-radius: 4px; font-size: 12px; margin-top: 8px; color: #7c2d12; font-weight: 500; }
 
+  .bling-block { background: #ecfdf5; border-left: 3px solid #10b981; padding: 8px;
+    border-radius: 4px; font-size: 12px; margin-top: 8px; color: #064e3b; }
+  .bling-block-erro { background: #fef2f2; border-left: 3px solid #ef4444; padding: 8px;
+    border-radius: 4px; font-size: 12px; margin-top: 8px; color: #7f1d1d; }
+  .btn-dry { background: #6366f1 !important; color: #fff !important; }
+  .btn-real { background: #059669 !important; color: #fff !important; }
+
   .card-info { font-size: 13px; color: #555; margin: 4px 0; }
   .card-info b { color: #333; }
   .card-msg {
@@ -301,6 +308,24 @@ function renderCard(v) {
     `;
   }
 
+  // Bloco BLING — mostra status edicao Bling
+  let blingBlock = '';
+  if (v.bling_editado_em) {
+    const dt = new Date(v.bling_editado_em).toLocaleString('pt-BR');
+    blingBlock = `<div class="bling-block">✅ <b>Pedido Bling editado</b> em ${dt} ${v.bling_pedido_id ? `(ID ${esc(v.bling_pedido_id)})` : ''}</div>`;
+  } else if (v.bling_erro) {
+    blingBlock = `<div class="bling-block-erro">❌ <b>Erro editando Bling:</b> ${esc(v.bling_erro)}</div>`;
+  }
+
+  // Botoes Bling — sao mostrados quando IA classificou como "claro" e tem pedido estruturado
+  let botoesBling = '';
+  if (v.ia_categoria === 'claro' && v.ia_pedido_estruturado && !v.bling_editado_em) {
+    botoesBling = `
+      <button class="btn-dry" onclick="testarBling('${v.order_id}', true)">🧪 Dry Run</button>
+      <button class="btn-real" onclick="testarBling('${v.order_id}', false)">✅ Editar Bling</button>
+    `;
+  }
+
   return `
     <div class="card">
       <div class="card-header">
@@ -316,6 +341,7 @@ function renderCard(v) {
         </div>
       ` : ''}
       ${iaBlock}
+      ${blingBlock}
       ${v.msg_inicial_enviada ? `
         <details>
           <summary style="cursor:pointer;font-size:12px;color:#666;margin-top:6px">Ver msg inicial enviada</summary>
@@ -325,6 +351,7 @@ function renderCard(v) {
       <div class="card-actions">
         <a href="${msgLink}" target="_blank">💬 Abrir ML</a>
         <a href="${orderLink}" target="_blank">🛒 Venda</a>
+        ${botoesBling}
         ${v.status !== 'processado' ? `<button class="processed" onclick="marcarProcessado('${v.order_id}')">✓ Processado</button>` : ''}
       </div>
     </div>
@@ -344,6 +371,51 @@ async function marcarProcessado(orderId) {
     else { alert('Erro: ' + (d.erro || 'desconhecido')); }
   } catch (e) {
     alert('Erro: ' + e.message);
+  }
+}
+
+async function testarBling(orderId, dryRun) {
+  const tipo = dryRun ? 'DRY RUN (preview)' : 'EDIÇÃO REAL no Bling';
+  if (!confirm(`Vai executar ${tipo} no pedido ${orderId}.\n\nConfirmar?`)) return;
+
+  // Mostra loading
+  const btnSelector = dryRun ? '.btn-dry' : '.btn-real';
+  const btns = document.querySelectorAll(btnSelector);
+  btns.forEach(b => b.disabled = true);
+
+  try {
+    const url = `${API_BASE}/api/pedido/${orderId}/editar-bling${dryRun ? '?dryRun=1' : ''}`;
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'X-Session-Token': token(), 'Content-Type': 'application/json' },
+      body: '{}'
+    });
+    if (r.status === 401) { logout(); return; }
+    const d = await r.json();
+
+    if (d.ok) {
+      if (dryRun) {
+        // Mostra preview formatado em alerta
+        const rateio = d.rateio || {};
+        const linhas = (rateio.linhas || []).map(l =>
+          `  ${l.codigo} | qty=${l.quantidade} × R$ ${l.valor} = R$ ${(l.quantidade * l.valor).toFixed(2)}`
+        ).join('\n');
+        const ajusteTxt = rateio.ajuste
+          ? `\n${rateio.ajuste.tipo}: R$ ${rateio.ajuste.valor}`
+          : '\n(sem ajuste — soma bateu exato)';
+        alert(`✅ DRY RUN OK — pedido Bling ID ${d.pedidoId}\n\nLinhas:\n${linhas}\n${ajusteTxt}\n\nSoma subtotais: R$ ${rateio.somaSubtotais}\nValor total pedido: R$ ${rateio.valorTotalPedido}\n\n👉 Confira e clique em "Editar Bling" pra aplicar de verdade.`);
+      } else {
+        alert(`✅ PEDIDO BLING EDITADO!\n\nPedido ID: ${d.pedidoId}\nNumero: ${d.numero || '?'}\n\nConfira no Bling.`);
+        await recarregar();
+      }
+    } else {
+      const detalhe = JSON.stringify(d, null, 2).slice(0, 800);
+      alert(`❌ ERRO (${d.etapa || 'desconhecida'}):\n\n${d.erro || ''}\n\n${detalhe}`);
+    }
+  } catch (e) {
+    alert('Erro: ' + e.message);
+  } finally {
+    btns.forEach(b => b.disabled = false);
   }
 }
 
