@@ -1,0 +1,20 @@
+{
+  "name": "Respostas Rápidas Girassol",
+  "short_name": "Girassol RR",
+  "start_url": "/respostas-rapidas/girassol/painel",
+  "display": "standalone",
+  "background_color": "#ffc704",
+  "theme_color": "#ffc704",
+  "icons": [
+    {
+      "src": "/respostas-rapidas/girassol/favicon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/respostas-rapidas/girassol/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png"
+    }
+  ]
+}

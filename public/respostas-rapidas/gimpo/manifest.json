@@ -1,0 +1,20 @@
+{
+  "name": "Respostas Rápidas GIMPO",
+  "short_name": "GIMPO RR",
+  "start_url": "/respostas-rapidas/gimpo/painel",
+  "display": "standalone",
+  "background_color": "#e6a817",
+  "theme_color": "#e6a817",
+  "icons": [
+    {
+      "src": "/respostas-rapidas/gimpo/favicon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/respostas-rapidas/gimpo/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png"
+    }
+  ]
+}
