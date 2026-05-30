@@ -172,11 +172,135 @@ async function enviarMensagem({ packId, orderId, buyerId, texto }) {
   };
 }
 
+/**
+ * Consulta TODA a conversa de uma venda (pack).
+ * Retorna { ok, messages, totalCliente, totalLoja, ultimaCliente, conversaVirgem }
+ *
+ * messages = array de { from_user_id, to_user_id, text, date_created, message_id, status, read }
+ * conversaVirgem = true se NÃO tem nenhuma mensagem ainda
+ *
+ * Endpoint: GET /messages/packs/{packId}/sellers/{sellerId}?tag=post_sale
+ * Param mark_as_read=false pra não marcar como lida só de consultar.
+ *
+ * Importante: se packId for null (venda Mercado Shop sem pack), usa orderId no lugar.
+ */
+async function consultarConversa({ packId, orderId, sellerId, markAsRead = false }) {
+  const sId = sellerId || process.env.ML_SELLER_ID_GIRASSOL;
+  if (!sId) {
+    return { ok: false, erro: 'ML_SELLER_ID_GIRASSOL nao configurado' };
+  }
+  const id = packId || orderId;
+  if (!id) return { ok: false, erro: 'packId ou orderId obrigatorio' };
+
+  const markParam = markAsRead ? '' : '&mark_as_read=false';
+  const path = `/messages/packs/${id}/sellers/${sId}?tag=post_sale${markParam}`;
+
+  try {
+    const r = await mlFetch(path, { method: 'GET' });
+    if (!r.ok) {
+      // 404 = conversa virgem (NUNCA teve msg) - é caso normal
+      if (r.status === 404) {
+        return {
+          ok: true,
+          messages: [],
+          totalCliente: 0,
+          totalLoja: 0,
+          ultimaCliente: null,
+          conversaVirgem: true
+        };
+      }
+      return { ok: false, status: r.status, erro: JSON.stringify(r.data).slice(0, 200) };
+    }
+
+    const messages = Array.isArray(r.data?.messages) ? r.data.messages
+                   : Array.isArray(r.data?.results)  ? r.data.results
+                   : [];
+
+    const sellerIdNum = String(sId);
+    const msgsCliente = messages.filter(m =>
+      String(m.from?.user_id || m.from_user_id) !== sellerIdNum
+    );
+    const msgsLoja = messages.filter(m =>
+      String(m.from?.user_id || m.from_user_id) === sellerIdNum
+    );
+
+    // Ultima msg do cliente (mais recente)
+    const ultimaCliente = msgsCliente.length > 0
+      ? msgsCliente.sort((a,b) => new Date(b.date_created || b.date) - new Date(a.date_created || a.date))[0]
+      : null;
+
+    return {
+      ok: true,
+      messages,
+      totalCliente: msgsCliente.length,
+      totalLoja: msgsLoja.length,
+      ultimaCliente,
+      conversaVirgem: messages.length === 0
+    };
+  } catch (e) {
+    return { ok: false, erro: e.message };
+  }
+}
+
+/**
+ * Envia mensagem DIRETA (sem action_guide), usada quando cliente já mandou msg
+ * ou quando loja já usou o cap OTHER e quer mandar mais mensagens.
+ *
+ * Endpoint: POST /messages/packs/{packId}/sellers/{sellerId}?tag=post_sale
+ * Body: { from: { user_id: sellerId }, to: { user_id: buyerId }, text }
+ */
+async function enviarMensagemDireta({ packId, orderId, buyerId, sellerId, texto }) {
+  const sId = sellerId || process.env.ML_SELLER_ID_GIRASSOL;
+  if (!sId) return { ok: false, erro: 'ML_SELLER_ID_GIRASSOL nao configurado' };
+  if (!buyerId) return { ok: false, erro: 'buyerId obrigatorio' };
+  if (!texto) return { ok: false, erro: 'texto obrigatorio' };
+
+  const id = packId || orderId;
+  const path = `/messages/packs/${id}/sellers/${sId}?tag=post_sale`;
+  const body = {
+    from: { user_id: Number(sId) },
+    to:   { user_id: Number(buyerId) },
+    text: texto
+  };
+
+  const r = await mlFetch(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+
+  if (!r.ok) {
+    return {
+      ok: false,
+      status: r.status,
+      erro: typeof r.data === 'string' ? r.data : JSON.stringify(r.data).slice(0, 300)
+    };
+  }
+
+  return {
+    ok: true,
+    message_id: r.data?.id || r.data?.message_id || null,
+    moderation_status: r.data?.status || r.data?.message_moderation?.status || null,
+    raw: r.data
+  };
+}
+
+/**
+ * Marca todas mensagens não lidas de uma conversa como LIDAS.
+ * Faz isso simplesmente CONSULTANDO a conversa sem mark_as_read=false.
+ */
+async function marcarConversaLida({ packId, orderId, sellerId }) {
+  return consultarConversa({ packId, orderId, sellerId, markAsRead: true });
+}
+
 module.exports = {
   buscarVendasPagas,
   getOrderDetalhe,
   getPackInfo,
   temVariacaoACombinar,
   extrairSkuACombinar,
-  enviarMensagem
+  enviarMensagem,
+  consultarConversa,
+  enviarMensagemDireta,
+  marcarConversaLida
 };
