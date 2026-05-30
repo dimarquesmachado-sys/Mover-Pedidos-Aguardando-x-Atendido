@@ -97,6 +97,35 @@ function temVariacaoACombinar(order) {
 }
 
 /**
+ * Extrai o SKU (seller_sku) do primeiro item com variação A COMBINAR.
+ * Retorna { sku, quantidade } ou null.
+ *
+ * O SKU é usado pra cruzar com o catálogo do módulo /lixas-combinar.
+ * Exemplo: "A-COMBINAR-100-lisa-180mm"
+ */
+function extrairSkuACombinar(order) {
+  if (!order?.order_items) return null;
+  const ALVO = 'A COMBINAR';
+  for (const item of order.order_items) {
+    const attrs = item.item?.variation_attributes || [];
+    const ehACombinar = attrs.some(a => {
+      const val = String(a.value_name || '').toUpperCase().trim();
+      return val === ALVO || val.includes(ALVO);
+    });
+    if (!ehACombinar) continue;
+
+    // Pegou um item A COMBINAR — extrai SKU
+    // SKU pode vir em order_items[].item.seller_sku OU order_items[].item.seller_custom_field
+    const sku = item.item?.seller_sku
+             || item.item?.seller_custom_field
+             || null;
+    const quantidade = Number(item.quantity) || 1;
+    return { sku, quantidade, titulo: item.item?.title };
+  }
+  return null;
+}
+
+/**
  * Envia mensagem pro comprador via API ML
  *
  * IMPORTANTE: ML BR exige que vendedor escolha um motivo (option_id) pra iniciar conversa
@@ -148,5 +177,6 @@ module.exports = {
   getOrderDetalhe,
   getPackInfo,
   temVariacaoACombinar,
+  extrairSkuACombinar,
   enviarMensagem
 };
