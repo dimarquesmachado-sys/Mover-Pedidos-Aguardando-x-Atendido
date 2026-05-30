@@ -53,8 +53,24 @@
   }
   .status-aguardando { background: #fef3c7; color: #92400e; }
   .status-respondeu { background: #dcfce7; color: #166534; }
+  .status-confirmou { background: #d1fae5; color: #065f46; }
+  .status-atencao { background: #fee2e2; color: #991b1b; animation: pulsa 1.6s ease-in-out infinite; }
   .status-processado { background: #e0e7ff; color: #3730a3; }
   .status-cancelado { background: #f3f4f6; color: #6b7280; }
+
+  @keyframes pulsa { 0%,100%{opacity:1} 50%{opacity:.65} }
+
+  .ia-block {
+    background: #f3f4ff; border-left: 3px solid #6366f1;
+    padding: 8px; border-radius: 4px; font-size: 12px; margin-top: 8px;
+  }
+  .ia-block .ia-cat { display: inline-block; font-size: 11px; padding: 2px 6px; border-radius: 4px;
+    background: #6366f1; color: #fff; font-weight: 600; margin-right: 6px; }
+  .ia-block .ia-conf { color: #6366f1; font-weight: 600; }
+  .ia-block .ia-msg { background: #fff; padding: 6px 8px; border-radius: 4px; margin-top: 6px;
+    border-left: 2px solid #818cf8; color: #1e1b4b; }
+  .ia-escala { background: #fff7ed; border-left: 3px solid #f97316; padding: 8px;
+    border-radius: 4px; font-size: 12px; margin-top: 8px; color: #7c2d12; font-weight: 500; }
 
   .card-info { font-size: 13px; color: #555; margin: 4px 0; }
   .card-info b { color: #333; }
@@ -136,6 +152,8 @@
       <option value="">Todos os status</option>
       <option value="aguardando_resposta" selected>Aguardando resposta</option>
       <option value="cliente_respondeu">Cliente respondeu</option>
+      <option value="cliente_confirmou_pedido">Confirmou pedido</option>
+      <option value="precisa_atencao_humano">🚨 Precisa atenção</option>
       <option value="processado">Processado</option>
     </select>
     <button onclick="recarregar()">🔄 Atualizar</button>
@@ -149,6 +167,7 @@
     <div class="stat"><div class="num" id="stat-total">0</div><div class="label">Total 7 dias</div></div>
     <div class="stat"><div class="num" id="stat-aguardando">0</div><div class="label">Aguardando</div></div>
     <div class="stat"><div class="num" id="stat-respondeu">0</div><div class="label">Cliente respondeu</div></div>
+    <div class="stat"><div class="num" id="stat-atencao" style="color:#dc2626">0</div><div class="label">🚨 Atenção humana</div></div>
     <div class="stat"><div class="num" id="stat-processado">0</div><div class="label">Processado</div></div>
   </div>
 
@@ -234,6 +253,7 @@ function renderStats(s) {
   document.getElementById('stat-total').textContent = s.total || 0;
   document.getElementById('stat-aguardando').textContent = s.aguardando || 0;
   document.getElementById('stat-respondeu').textContent = s.respondeu || 0;
+  document.getElementById('stat-atencao').textContent = s.atencao || 0;
   document.getElementById('stat-processado').textContent = s.processado || 0;
 }
 
@@ -241,12 +261,16 @@ function renderCard(v) {
   const statusLabel = {
     'aguardando_resposta': 'Aguardando',
     'cliente_respondeu': 'Respondeu',
+    'cliente_confirmou_pedido': '✓ Confirmou pedido',
+    'precisa_atencao_humano': '🚨 Atenção humana',
     'processado': 'Processado',
     'cancelado': 'Cancelado'
   }[v.status] || v.status;
   const statusCls = {
     'aguardando_resposta': 'status-aguardando',
     'cliente_respondeu': 'status-respondeu',
+    'cliente_confirmou_pedido': 'status-confirmou',
+    'precisa_atencao_humano': 'status-atencao',
     'processado': 'status-processado',
     'cancelado': 'status-cancelado'
   }[v.status] || 'status-aguardando';
@@ -255,6 +279,27 @@ function renderCard(v) {
   const tempoResp = v.ultima_resposta_em ? new Date(v.ultima_resposta_em).toLocaleString('pt-BR') : '';
   const orderLink = `https://www.mercadolivre.com.br/vendas/${v.order_id}/detalhe`;
   const msgLink = v.pack_id ? `https://www.mercadolivre.com.br/mensagens/post-venda/${v.pack_id}` : orderLink;
+
+  // Bloco IA - quando processado pela IA
+  let iaBlock = '';
+  if (v.ia_categoria === 'fora_escopo' || v.ia_escalou_humano) {
+    iaBlock = `<div class="ia-escala">🤖🚨 IA escalou: "${esc(v.ia_interpretacao || 'fora do escopo - precisa resposta humana')}"</div>`;
+  } else if (v.ia_categoria) {
+    const catLabel = {
+      'claro': 'Pedido claro',
+      'ambiguo': 'Pedido ambíguo',
+      'pergunta_graos': 'Pergunta grãos',
+      'erro_ia': 'Erro IA'
+    }[v.ia_categoria] || v.ia_categoria;
+    iaBlock = `
+      <div class="ia-block">
+        <span class="ia-cat">🤖 ${esc(catLabel)}</span>
+        <span class="ia-conf">${v.ia_confianca || 0}%</span>
+        <div style="margin-top:4px;color:#3730a3">${esc(v.ia_interpretacao || '')}</div>
+        ${v.ia_msg_enviada ? `<div class="ia-msg">📤 ${esc(v.ia_msg_enviada)}</div>` : ''}
+      </div>
+    `;
+  }
 
   return `
     <div class="card">
@@ -270,9 +315,10 @@ function renderCard(v) {
           <div style="font-size:11px;color:#047857;margin-top:4px">em ${tempoResp}</div>
         </div>
       ` : ''}
+      ${iaBlock}
       ${v.msg_inicial_enviada ? `
         <details>
-          <summary style="cursor:pointer;font-size:12px;color:#666;margin-top:6px">Ver msg que enviamos</summary>
+          <summary style="cursor:pointer;font-size:12px;color:#666;margin-top:6px">Ver msg inicial enviada</summary>
           <div class="card-msg">${esc(v.msg_inicial_enviada)}</div>
         </details>
       ` : ''}

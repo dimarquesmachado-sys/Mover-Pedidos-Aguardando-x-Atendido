@@ -222,7 +222,8 @@ function routes(readBody) {
         const stats = {
           total: todos.length,
           aguardando: todos.filter(v => v.status === 'aguardando_resposta').length,
-          respondeu: todos.filter(v => v.status === 'cliente_respondeu').length,
+          respondeu: todos.filter(v => v.status === 'cliente_respondeu' || v.status === 'cliente_confirmou_pedido').length,
+          atencao: todos.filter(v => v.status === 'precisa_atencao_humano' || v.ia_escalou_humano).length,
           processado: todos.filter(v => v.status === 'processado').length
         };
 
