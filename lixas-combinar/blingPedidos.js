@@ -28,35 +28,23 @@ const MAX_DECIMAIS = 10;
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 /**
- * Faz request HTTP autenticado pra API Bling. Renova token em caso 401.
+ * Faz request HTTP autenticado pra API Bling.
+ * Usa fetchComRetry do tokenManager (que ja lida com refresh automatico de token).
  */
 async function fetchBling(method, path, body) {
   await sleep(PAUSA_MS);
 
   const url = `${BLING_API}${path}`;
-  const fazRequest = async () => {
-    const token = await tokenManager.garantirToken();
-    const opts = {
-      method,
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Accept': 'application/json'
-      }
-    };
-    if (body !== undefined) {
-      opts.headers['Content-Type'] = 'application/json';
-      opts.body = JSON.stringify(body);
-    }
-    return fetch(url, opts);
+  const opts = {
+    method,
+    headers: {}
   };
-
-  let resp = await fazRequest();
-  if (resp.status === 401) {
-    console.log(`[blingPedidos] 401 em ${method} ${path}, tentando refresh token`);
-    await tokenManager.renovarToken();
-    resp = await fazRequest();
+  if (body !== undefined) {
+    opts.headers['Content-Type'] = 'application/json';
+    opts.body = JSON.stringify(body);
   }
 
+  const resp = await tokenManager.fetchComRetry(url, opts);
   const text = await resp.text();
   let data = null;
   try { data = text ? JSON.parse(text) : null; } catch (_) { data = { _raw: text }; }
