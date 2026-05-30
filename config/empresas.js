@@ -18,6 +18,7 @@ const empresas = [
   require('../estoque-girassol'),
   require('../respostas-rapidas'),
   require('../auto-mensagens'),
+  require('../lixas-combinar'),
 ];
 // Filtra empresas marcadas como inativas via env var (ex: SKIP_EMPRESAS=girassol,good)
 const SKIP = (process.env.SKIP_EMPRESAS || '').split(',').map(s => s.trim()).filter(Boolean);
