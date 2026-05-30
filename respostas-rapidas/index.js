@@ -89,6 +89,38 @@ function servirArquivo(res, relPath) {
   fs.createReadStream(fullPath).pipe(res);
 }
 
+// Serve arquivos da subpasta da loja: public/respostas-rapidas/{loja}/{arquivo}
+// Fallback: se o arquivo não existir na subpasta, tenta na raiz public/respostas-rapidas/
+// (útil pro painel.html que é único pra todas as lojas)
+function servirArquivoSubpasta(res, loja, relPath) {
+  const ext = path.extname(relPath).toLowerCase();
+  const mime = {
+    '.html': 'text/html; charset=utf-8',
+    '.js':   'application/javascript; charset=utf-8',
+    '.css':  'text/css; charset=utf-8',
+    '.json': 'application/json; charset=utf-8',
+    '.png':  'image/png',
+    '.jpg':  'image/jpeg',
+    '.svg':  'image/svg+xml',
+    '.ico':  'image/x-icon'
+  }[ext] || 'application/octet-stream';
+  const lojaDir = path.join(PUBLIC_DIR, loja);
+  const fullPath = path.join(lojaDir, relPath);
+  if (!fullPath.startsWith(lojaDir)) return notFound(res);
+  // Tenta primeiro na subpasta da loja
+  if (fs.existsSync(fullPath) && fs.statSync(fullPath).isFile()) {
+    res.writeHead(200, { 'Content-Type': mime });
+    return fs.createReadStream(fullPath).pipe(res);
+  }
+  // Fallback: arquivo único na raiz (ex: painel.html)
+  const fallbackPath = path.join(PUBLIC_DIR, relPath);
+  if (fallbackPath.startsWith(PUBLIC_DIR) && fs.existsSync(fallbackPath) && fs.statSync(fallbackPath).isFile()) {
+    res.writeHead(200, { 'Content-Type': mime });
+    return fs.createReadStream(fallbackPath).pipe(res);
+  }
+  return notFound(res);
+}
+
 // ── Persistência ─────────────────────────────────────────────────────
 
 function garantirDir() {
@@ -275,6 +307,26 @@ function routes(readBody) {
       res.end();
       return true;
     }
+
+    // Lojas: rotas /respostas-rapidas/{loja}/painel e /respostas-rapidas/{loja}/{arquivo}
+    // Lojas válidas pra paths estáticos
+    const matchLoja = p.match(/^\/respostas-rapidas\/(ambtotal|girassol|gimpo)(\/.*)?$/i);
+    if (method === 'GET' && matchLoja) {
+      const loja = matchLoja[1].toLowerCase();
+      const sub = (matchLoja[2] || '').replace(/^\//, '');
+      // /respostas-rapidas/{loja}  ou  /respostas-rapidas/{loja}/painel  → serve painel.html
+      if (sub === '' || sub === 'painel') {
+        servirArquivoSubpasta(res, loja, 'painel.html');
+        return true;
+      }
+      // Outros arquivos: favicon.ico, favicon-32.png, manifest.json, etc.
+      if (/\.(ico|png|jpg|svg|json|css|js|html)$/i.test(sub)) {
+        servirArquivoSubpasta(res, loja, sub);
+        return true;
+      }
+    }
+
+    // Rota genérica (sem loja) — ainda funciona pra compatibilidade
     if (method === 'GET' && p === '/respostas-rapidas/painel') {
       servirArquivo(res, 'painel.html');
       return true;
