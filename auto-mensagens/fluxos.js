@@ -37,6 +37,11 @@ const LIMITE_CHARS = 350;
  * Tenta montar mensagem inteligente com grãos disponíveis.
  * Se falhar (SKU nao mapeado, Bling fora, etc), retorna o TEXTO genérico.
  *
+ * Formato (orienta cliente: 1º QTD, 2º GRÃO):
+ *   "Ola! Sua compra de {N} lixas {desc}.
+ *    Graos: 24, 40, 60, ...
+ *    Responda com QTD + GRAO (mult. de {U}). Ex: 30 da 24, 40 da 40, 30 da 80."
+ *
  * @param {object} detalhe - objeto order completo do ML
  * @returns {Promise<string>} texto da mensagem (max 350 chars)
  */
@@ -64,32 +69,36 @@ async function montarMensagemInteligente(detalhe) {
     // Calcula total de lixas que cliente comprou
     const totalLixas = r.lixas_por_kit * info.quantidade;
     const unidades = r.unidades_por_pacote || 10;
-    const unidadeStr = unidades === 1 ? 'lixas' : `pacotes de ${unidades}`;
 
     // Lista compacta dos grãos
-    const graosCompacto = r.graos.map(g => g.grao).join(', ');
+    let graosCompacto = r.graos.map(g => g.grao).join(', ');
 
-    // Monta mensagem
-    let msg = `Ola! Sua compra de ${totalLixas} lixas ${r.descricao}.\n\n`;
-    msg += `Graos disponiveis: ${graosCompacto}\n\n`;
-    msg += `Por favor responda escolhendo as quantidades (multiplos de ${unidades}, totalizando ${totalLixas} lixas).\n`;
-    msg += `Ex: 30 da 24, 40 da 40, 30 da 60.`;
+    // Monta mensagem v3 (orientação QTD + GRÃO)
+    // Ex pra mult.10: "30 da 24, 40 da 40, 30 da 80" (soma 100)
+    // Ex pra mult.1:  "20 da 80, 30 da 100, 50 da 240" (soma 100)
+    const exemplo = unidades === 1
+      ? '20 da 80, 30 da 100, 50 da 240'
+      : '30 da 24, 40 da 40, 30 da 80';
 
-    // Garante limite 350 chars
+    let msg = `Ola! Sua compra de ${totalLixas} lixas ${r.descricao}.\nGraos: ${graosCompacto}\nResponda com QTD + GRAO (mult. de ${unidades}, total ${totalLixas}). Ex: ${exemplo}.`;
+
+    // Safety: se ultrapassar 350, vai reduzindo graos do fim
     if (msg.length > LIMITE_CHARS) {
-      // Versao mais compacta sem exemplo
-      msg = `Ola! Sua compra de ${totalLixas} lixas ${r.descricao}.\n`;
-      msg += `Graos disponiveis: ${graosCompacto}\n`;
-      msg += `Responda escolhendo (mult. de ${unidades}, total ${totalLixas} lixas).`;
+      const graosArr = r.graos.map(g => g.grao);
+      while (graosArr.length > 3 && msg.length > LIMITE_CHARS) {
+        graosArr.pop(); // remove o ultimo (geralmente o mais grosso e menos usado)
+        graosCompacto = graosArr.join(', ') + '...';
+        msg = `Ola! Sua compra de ${totalLixas} lixas ${r.descricao}.\nGraos: ${graosCompacto}\nResponda com QTD + GRAO (mult. de ${unidades}, total ${totalLixas}). Ex: ${exemplo}.`;
+      }
 
+      // Se mesmo cortando passou, usa generica
       if (msg.length > LIMITE_CHARS) {
-        // Ainda muito grande — usa generico
-        console.log(`[auto-mensagens] msg inteligente passou ${LIMITE_CHARS} chars (${msg.length}) — usando generica`);
+        console.log(`[auto-mensagens] msg inteligente impossivel < ${LIMITE_CHARS} (${msg.length}) — usando generica`);
         return TEXTO;
       }
     }
 
-    console.log(`[auto-mensagens] msg inteligente montada (${msg.length} chars)`);
+    console.log(`[auto-mensagens] msg inteligente montada (${msg.length} chars, ${r.graos.length} graos)`);
     return msg;
   } catch (e) {
     console.error(`[auto-mensagens] erro montando msg inteligente: ${e.message} — usando generica`);
