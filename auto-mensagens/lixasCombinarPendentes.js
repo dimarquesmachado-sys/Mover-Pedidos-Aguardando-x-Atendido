@@ -12,8 +12,8 @@
  * O log historico continua em auto_mensagens_enviadas (imutavel).
  */
 
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const SUPABASE_URL = process.env.AUTO_MSG_GIRASSOL_SUPABASE_URL || process.env.SUPABASE_URL || '';
+const SUPABASE_KEY = process.env.AUTO_MSG_GIRASSOL_SUPABASE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 const TABELA = process.env.LIXAS_COMBINAR_TABELA || 'lixas_combinar_pendentes';
 
 function configurado() {
