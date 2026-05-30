@@ -33,6 +33,18 @@
   .stat {
     background: #fff; padding: 12px; border-radius: 8px; border: 1px solid #e5e5e5;
     text-align: center;
+    cursor: pointer;
+    transition: all 0.15s;
+    user-select: none;
+  }
+  .stat:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.12);
+    border-color: #d97706;
+  }
+  .stat.ativo {
+    border: 2px solid #d97706;
+    background: #fef3c7;
   }
   .stat .num { font-size: 24px; font-weight: 700; color: #d97706; }
   .stat .label { font-size: 12px; color: #666; margin-top: 2px; }
@@ -171,11 +183,11 @@
 
 <main>
   <div class="stats" id="stats">
-    <div class="stat"><div class="num" id="stat-total">0</div><div class="label">Total 7 dias</div></div>
-    <div class="stat"><div class="num" id="stat-aguardando">0</div><div class="label">Aguardando</div></div>
-    <div class="stat"><div class="num" id="stat-respondeu">0</div><div class="label">Cliente respondeu</div></div>
-    <div class="stat"><div class="num" id="stat-atencao" style="color:#dc2626">0</div><div class="label">🚨 Atenção humana</div></div>
-    <div class="stat"><div class="num" id="stat-processado">0</div><div class="label">Processado</div></div>
+    <div class="stat" onclick="filtrarPor('')" data-filtro=""><div class="num" id="stat-total">0</div><div class="label">Total 7 dias</div></div>
+    <div class="stat" onclick="filtrarPor('aguardando_resposta')" data-filtro="aguardando_resposta"><div class="num" id="stat-aguardando">0</div><div class="label">Aguardando</div></div>
+    <div class="stat" onclick="filtrarPor('cliente_respondeu')" data-filtro="cliente_respondeu"><div class="num" id="stat-respondeu">0</div><div class="label">Cliente respondeu</div></div>
+    <div class="stat" onclick="filtrarPor('precisa_atencao_humano')" data-filtro="precisa_atencao_humano"><div class="num" id="stat-atencao" style="color:#dc2626">0</div><div class="label">🚨 Atenção humana</div></div>
+    <div class="stat" onclick="filtrarPor('processado')" data-filtro="processado"><div class="num" id="stat-processado">0</div><div class="label">Processado</div></div>
   </div>
 
   <div id="cards" class="cards">
@@ -229,11 +241,26 @@ async function mostrarApp() {
   await recarregar();
 }
 
+function filtrarPor(status) {
+  // Atualiza o select de filtro
+  const sel = document.getElementById('filtro-status');
+  if (sel) sel.value = status;
+  // Marca stat clicado como ativo
+  document.querySelectorAll('.stat').forEach(el => {
+    el.classList.toggle('ativo', el.getAttribute('data-filtro') === status);
+  });
+  recarregar();
+}
+
 async function recarregar() {
   const cardsEl = document.getElementById('cards');
   cardsEl.innerHTML = '<div class="loading">Carregando pendentes…</div>';
 
   const status = document.getElementById('filtro-status').value;
+  // Sincroniza marcacao dos stats com o filtro atual
+  document.querySelectorAll('.stat').forEach(el => {
+    el.classList.toggle('ativo', el.getAttribute('data-filtro') === status);
+  });
   const url = `${API_BASE}/api/pendentes${status ? '?status=' + status : ''}`;
 
   try {
