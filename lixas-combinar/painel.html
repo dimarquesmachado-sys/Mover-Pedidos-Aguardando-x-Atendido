@@ -90,6 +90,7 @@
     border-radius: 4px; font-size: 12px; margin-top: 8px; color: #7f1d1d; }
   .btn-dry { background: #6366f1 !important; color: #fff !important; }
   .btn-real { background: #059669 !important; color: #fff !important; }
+  .btn-nf { background: #d97706 !important; color: #fff !important; }
 
   .card-info { font-size: 13px; color: #555; margin: 4px 0; }
   .card-info b { color: #333; }
@@ -352,6 +353,12 @@ function renderCard(v) {
       <button class="btn-real" onclick="testarBling('${v.order_id}', false)">✅ Editar Bling</button>
     `;
   }
+  // Botao Emitir NF — quando pedido ja foi editado no Bling, mas NF ainda nao foi emitida
+  if (v.bling_editado_em && v.bling_pedido_id && !v.nf_emitida_em) {
+    botoesBling += `
+      <button class="btn-nf" onclick="emitirNF('${v.order_id}')">📄 Emitir NF</button>
+    `;
+  }
 
   return `
     <div class="card">
@@ -438,6 +445,36 @@ async function testarBling(orderId, dryRun) {
     } else {
       const textoErro = `❌ ERRO (${d.etapa || 'desconhecida'}):\n\n${d.erro || ''}\n\n${JSON.stringify(d, null, 2)}`;
       mostrarModal('❌ Erro', textoErro, true);
+    }
+  } catch (e) {
+    mostrarModal('❌ Erro', e.message + '\n\n' + (e.stack || ''), true);
+  } finally {
+    btns.forEach(b => b.disabled = false);
+  }
+}
+
+async function emitirNF(orderId) {
+  if (!confirm(`Vai emitir NF-e do pedido ${orderId} no Bling.\n\nA NF sera transmitida pra SEFAZ. Confirmar?`)) return;
+
+  const btns = document.querySelectorAll('.btn-nf');
+  btns.forEach(b => b.disabled = true);
+
+  try {
+    const r = await fetch(`${API_BASE}/api/pedido/${orderId}/emitir-nf`, {
+      method: 'POST',
+      headers: { 'X-Session-Token': token(), 'Content-Type': 'application/json' },
+      body: '{}'
+    });
+    if (r.status === 401) { logout(); return; }
+    const d = await r.json();
+
+    if (d.ok) {
+      const texto = `✅ NF-e EMITIDA!\n\nNF ID: ${d.nfeId || '?'}\nNumero: ${d.numero || '?'}\nSerie: ${d.serie || '?'}\nChave: ${d.chave || '(aguardando SEFAZ)'}\n\nConfira no Bling.`;
+      mostrarModal('✅ NF emitida', texto, false);
+      await recarregar();
+    } else {
+      const texto = `❌ ERRO ao emitir NF:\n\nStatus HTTP: ${d.status || '?'}\nErro: ${d.erro || '(sem msg)'}\n\nDetalhe:\n${JSON.stringify(d.detalhe || d, null, 2)}`;
+      mostrarModal('❌ Erro NF', texto, true);
     }
   } catch (e) {
     mostrarModal('❌ Erro', e.message + '\n\n' + (e.stack || ''), true);
