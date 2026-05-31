@@ -24,16 +24,16 @@ const tokenManager = require('./tokenManager');
 const BLING_API = 'https://api.bling.com.br/Api/v3';
 const PAUSA_MS = parseInt(process.env.LIXAS_BLING_PAUSA_MS || '500');
 const MAX_DECIMAIS = 10;
+const MAX_RETRIES_429 = 6;
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 /**
  * Faz request HTTP autenticado pra API Bling.
  * Usa fetchComRetry do tokenManager (que ja lida com refresh automatico de token).
+ * Adicionalmente faz retry em HTTP 429 com backoff exponencial.
  */
 async function fetchBling(method, path, body) {
-  await sleep(PAUSA_MS);
-
   const url = `${BLING_API}${path}`;
   const opts = {
     method,
@@ -44,12 +44,30 @@ async function fetchBling(method, path, body) {
     opts.body = JSON.stringify(body);
   }
 
-  const resp = await tokenManager.fetchComRetry(url, opts);
-  const text = await resp.text();
-  let data = null;
-  try { data = text ? JSON.parse(text) : null; } catch (_) { data = { _raw: text }; }
+  for (let tentativa = 1; tentativa <= MAX_RETRIES_429; tentativa++) {
+    await sleep(PAUSA_MS);
+    const resp = await tokenManager.fetchComRetry(url, opts);
 
-  return { ok: resp.ok, status: resp.status, data };
+    // 429 = rate limit - espera e tenta de novo
+    if (resp.status === 429) {
+      const espera = 1500 * tentativa; // 1.5s, 3s, 4.5s, 6s, 7.5s, 9s
+      console.warn(`[blingPedidos] HTTP 429 em ${method} ${path} (tentativa ${tentativa}/${MAX_RETRIES_429}) - aguardando ${espera}ms`);
+      if (tentativa === MAX_RETRIES_429) {
+        const text = await resp.text();
+        let data = null;
+        try { data = text ? JSON.parse(text) : null; } catch (_) { data = { _raw: text }; }
+        return { ok: false, status: 429, data, erro: `Rate limit excedido apos ${MAX_RETRIES_429} tentativas` };
+      }
+      await sleep(espera);
+      continue;
+    }
+
+    const text = await resp.text();
+    let data = null;
+    try { data = text ? JSON.parse(text) : null; } catch (_) { data = { _raw: text }; }
+
+    return { ok: resp.ok, status: resp.status, data };
+  }
 }
 
 /**
