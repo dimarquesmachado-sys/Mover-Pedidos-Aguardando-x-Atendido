@@ -45,6 +45,15 @@ const LIMIAR_CONFIANCA_AUTO = Number(process.env.LIXAS_AUTO_CONFIANCA_MIN || 95)
 // Default 999 = praticamente sem limite. Sugestao: LIXAS_AUTO_MAX_POR_DIA=5 na 1a semana.
 const AUTO_MAX_POR_DIA = Number(process.env.LIXAS_AUTO_MAX_POR_DIA || 999);
 
+// ── LEMBRETE controlado (reenvio apos X horas de silencio) ──────────
+// So age em conversa que o cliente JA abriu (ML so permite enviar nesses casos).
+// NASCE DESLIGADO. Manda no MAXIMO REENVIO_MAX lembretes, espacados de REENVIO_HORAS.
+const REENVIO_HABILITADO = (process.env.LIXAS_REENVIO_HABILITADO || 'false').toLowerCase() === 'true';
+const REENVIO_HORAS = Number(process.env.LIXAS_REENVIO_HORAS || 6);   // silencio do cliente antes de lembrar
+const REENVIO_MAX = Number(process.env.LIXAS_REENVIO_MAX || 1);       // quantos lembretes no maximo (alem da pergunta original)
+const REENVIO_TEXTO = process.env.LIXAS_REENVIO_TEXTO ||              // fallback se nao der pra reenviar a pergunta original
+  'Olá! Ainda precisamos da sua resposta (quantidades e grãos) para fechar e enviar seu pedido. Pode nos responder por aqui? Obrigado!';
+
 // Contador in-memory (zera a cada dia / a cada restart do Render — proposital,
 // eh so um freio leve, nao precisa de persistencia).
 let _autoEmitidasHoje = { data: '', count: 0 };
@@ -327,7 +336,7 @@ async function rotinaLerRespostas() {
   _lendoRespostas = true;
 
   const inicio = Date.now();
-  const stats = { lidas: 0, novasRespostas: 0, semNovidade: 0, erros: 0, iaProcessadas: 0, iaEscalonadas: 0, iaErros: 0, autoEmitidas: 0, autoPuladasConfianca: 0, autoFalhas: 0 };
+  const stats = { lidas: 0, novasRespostas: 0, semNovidade: 0, erros: 0, iaProcessadas: 0, iaEscalonadas: 0, iaErros: 0, lembretesEnviados: 0, autoEmitidas: 0, autoPuladasConfianca: 0, autoFalhas: 0 };
 
   // IA opcional
   let ia = null;
@@ -383,12 +392,54 @@ async function rotinaLerRespostas() {
           const dataResposta = conv.ultimaCliente.date_created || conv.ultimaCliente.date || new Date().toISOString();
 
           // ════════════════════════════════════════════════════════
-          // ANTI-DUPLICACAO (fix bug Diego 30/05): se a ultima resposta
-          // ja foi processada pela IA (mesma data), nao processa de novo.
+          // ANTI-SPAM ROBUSTO (fix urgente 31/05) — NAO depende do banco.
+          // Usa a propria conversa do ML: se a LOJA ja mandou uma mensagem
+          // com data >= a ultima msg do cliente, entao a bola esta com o
+          // cliente (ja respondemos) -> NAO reenvia. So volta a agir quando
+          // o cliente mandar uma mensagem NOVA (mais recente que a da loja).
+          // Isto cobre o caso em que ia_processado_em nao persiste no Supabase.
+          // ════════════════════════════════════════════════════════
+          {
+            const _sellerId = String(require('./mlTokenManager').getUserId() || '');
+            const _msgs = Array.isArray(conv.messages) ? conv.messages : [];
+            const _ehLoja = (m) => String(m.from_user_id || m.from?.user_id || '') === _sellerId;
+            const _ts = (m) => new Date(m.date_created || m.date || 0).getTime();
+            const _ultCliente = _msgs.filter(m => !_ehLoja(m)).reduce((mx, m) => Math.max(mx, _ts(m)), 0);
+            const _ultLoja = _msgs.filter(_ehLoja).reduce((mx, m) => Math.max(mx, _ts(m)), 0);
+            if (_sellerId && _ultLoja && _ultLoja >= _ultCliente) {
+              // A loja ja respondeu apos o cliente -> bola com o cliente.
+              // EXCECAO: lembrete controlado. Se passou REENVIO_HORAS desde a
+              // nossa ultima msg e ainda nao batemos o teto de lembretes,
+              // reenvia a pergunta original UMA vez. Senao, nao reenvia (anti-spam).
+              const horasDesdeLoja = (Date.now() - _ultLoja) / 3600000;
+              const lojaAposCliente = _msgs.filter(m => _ehLoja(m) && _ts(m) > _ultCliente).sort((a, b) => _ts(a) - _ts(b));
+              const lembretesFeitos = Math.max(0, lojaAposCliente.length - 1); // -1 = a pergunta original
+              if (REENVIO_HABILITADO && _ultCliente > 0 && horasDesdeLoja >= REENVIO_HORAS && lembretesFeitos < REENVIO_MAX) {
+                const textoLembrete = (lojaAposCliente[0]?.text || '').slice(0, 350) || REENVIO_TEXTO;
+                const lemb = await ml.enviarMensagemDireta({
+                  packId: venda.pack_id, orderId: venda.order_id, buyerId: venda.buyer_id, texto: textoLembrete
+                });
+                if (lemb.ok) {
+                  stats.lembretesEnviados++;
+                  console.log(`[lixas-combinar lerRespostas] 🔔 Order ${venda.order_id} LEMBRETE #${lembretesFeitos + 1}/${REENVIO_MAX} enviado (silencio ${horasDesdeLoja.toFixed(1)}h)`);
+                } else {
+                  console.error(`[lixas-combinar lerRespostas] order ${venda.order_id} falhou lembrete: ${lemb.status} ${lemb.erro?.slice(0, 150)}`);
+                }
+                continue; // nao processa IA (nao ha msg nova do cliente)
+              }
+              // Sem lembrete a fazer agora -> nao reenvia (anti-spam normal)
+              console.log(`[lixas-combinar lerRespostas] ⏭️  Order ${venda.order_id} loja ja respondeu apos o cliente — aguardando cliente (NAO reenvia)`);
+              stats.semNovidade++;
+              continue;
+            }
+          }
+
+          // ════════════════════════════════════════════════════════
+          // ANTI-DUPLICACAO (banco) — trava secundaria. Se ia_processado_em
+          // estiver persistindo, reforca; se nao, a trava acima ja cobre.
           // ════════════════════════════════════════════════════════
           if (venda.ia_processado_em && venda.ultima_resposta_em) {
             const tIa = new Date(venda.ia_processado_em).getTime();
-            const tResp = new Date(venda.ultima_resposta_em).getTime();
             const tRespAtual = new Date(dataResposta).getTime();
             // Se IA ja processou DEPOIS da resposta atual do cliente, eh duplicata
             if (tIa >= tRespAtual - 1000) {
