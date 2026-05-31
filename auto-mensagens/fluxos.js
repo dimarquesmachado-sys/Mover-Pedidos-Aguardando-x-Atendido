@@ -10,13 +10,18 @@
  *      b) Busca detalhe (variation_attributes)
  *      c) Tem "A COMBINAR"?  → envia mensagem  +  grava Supabase
  *      d) Não tem?  → registra como 'pulado' (opcional)
+ *
+ * SESSAO 7 (auto-emissao NF): ver bloco "PROCESSAR AUTO EMISSAO" abaixo.
+ * 3 melhorias aplicadas:
+ *   - Limiar default 95% (era 100%, IA quase nunca da 100 cravado)
+ *   - Guarda 3 le quantidade de kits comprada do ML (evita NF errada em 2+ kits)
+ *   - Limite diario opcional (LIXAS_AUTO_MAX_POR_DIA) pra dormir tranquilo
  */
 
 const ml = require('./mlApi');
 const tracker = require('./supabaseTracker');
 
 // Integração opcional com módulo /lixas-combinar
-// Se falhar (modulo nao disponivel), cai pro texto generico
 let lixasService = null;
 try {
   lixasService = require('../lixas-combinar/lixasService');
@@ -26,11 +31,7 @@ try {
 
 const HABILITADO = (process.env.AUTO_MSG_GIRASSOL_HABILITADO || 'false').toLowerCase() === 'true';
 const TEXTO = process.env.AUTO_MSG_GIRASSOL_TEXTO_A_COMBINAR || '';
-
-// Janela de busca de vendas: 30 min pra trás (pega vendas dos últimos minutos)
 const JANELA_MIN = Number(process.env.AUTO_MSG_JANELA_MIN || 30);
-
-// Limite de chars da mensagem ML (action_guide aceita até 350)
 const LIMITE_CHARS = 350;
 
 // ════════════════════════════════════════════════════════════════
@@ -38,26 +39,34 @@ const LIMITE_CHARS = 350;
 // ════════════════════════════════════════════════════════════════
 // Liga/desliga a auto-emissao. NASCE DESLIGADA — Diego liga quando quiser.
 const AUTO_EMITIR_HABILITADO = (process.env.LIXAS_AUTO_EMITIR_NF_HABILITADO || 'false').toLowerCase() === 'true';
-// Confianca minima da IA pra auto-executar. Diego: 100% exato. Abaixo disso -> humano.
-const LIMIAR_CONFIANCA_AUTO = Number(process.env.LIXAS_AUTO_CONFIANCA_MIN || 100);
+// Confianca minima da IA pra auto-executar. Default 95 (IA quase nunca da 100 cravado).
+const LIMIAR_CONFIANCA_AUTO = Number(process.env.LIXAS_AUTO_CONFIANCA_MIN || 95);
+// Limite diario de NFs auto-emitidas (safety na primeira semana). 999 = sem limite efetivo.
+const AUTO_MAX_POR_DIA = Number(process.env.LIXAS_AUTO_MAX_POR_DIA || 999);
+
+// Contador in-memory de auto-emissoes do dia (reseta ao virar o dia ou reiniciar Render)
+let _autoEmitidasHoje = { data: '', count: 0 };
+
+function podeAutoEmitir() {
+  const hoje = new Date().toISOString().slice(0, 10);
+  if (_autoEmitidasHoje.data !== hoje) {
+    _autoEmitidasHoje = { data: hoje, count: 0 };
+  }
+  return _autoEmitidasHoje.count < AUTO_MAX_POR_DIA;
+}
+
+function incrementarAutoEmitida() {
+  const hoje = new Date().toISOString().slice(0, 10);
+  if (_autoEmitidasHoje.data !== hoje) _autoEmitidasHoje = { data: hoje, count: 0 };
+  _autoEmitidasHoje.count++;
+  return _autoEmitidasHoje.count;
+}
 
 /**
  * Tenta montar mensagem inteligente com grãos disponíveis.
  * Se falhar (SKU nao mapeado, Bling fora, etc), retorna o TEXTO genérico.
- *
- * Formato final (desenhado pra cliente entender):
- *   "Ola! Sua compra de {N} lixas {desc}.
- *
- *    GRAOS DISPONIVEIS: 24, 40, 60, ...
- *
- *    Responda com QUANTIDADE + GRAO. MULTIPLOS de {U}. Total {N} lixas.
- *    Ex: 30 do grao 24; 70 do grao 80."
- *
- * @param {object} detalhe - objeto order completo do ML
- * @returns {Promise<string>} texto da mensagem (max 350 chars)
  */
 async function montarMensagemInteligente(detalhe) {
-  // Se nao tem lixas-combinar carregado, usa generico
   if (!lixasService) {
     return TEXTO;
   }
@@ -77,11 +86,9 @@ async function montarMensagemInteligente(detalhe) {
       return TEXTO;
     }
 
-    // Calcula total de lixas que cliente comprou
     const totalLixas = r.lixas_por_kit * info.quantidade;
     const unidades = r.unidades_por_pacote || 10;
 
-    // Gera exemplo DINÂMICO que SOMA até o total real
     function gerarExemplo(total, unidades, graosArr) {
       if (graosArr.length === 0) return `Ex: ${total} do grão desejado.`;
       if (graosArr.length === 1) return `Ex: ${total} do grão ${graosArr[0]}.`;
@@ -93,7 +100,6 @@ async function montarMensagemInteligente(detalhe) {
       return `Ex: ${parte1} do grão ${grao1}; ${parte2} do grão ${grao2}.`;
     }
 
-    // Monta mensagem desenhada (com acentos, MAIUSCULO nos pontos chave)
     function montar(graosArr) {
       const graosStr = graosArr.join(', ');
       const exemplo = gerarExemplo(totalLixas, unidades, graosArr);
@@ -108,18 +114,15 @@ ${exemplo}`;
     let graosArr = r.graos.map(g => g.grao);
     let msg = montar(graosArr);
 
-    // Safety: se ultrapassar 350, vai removendo graos do fim (mais grossos)
     if (msg.length > LIMITE_CHARS) {
       while (graosArr.length > 3 && msg.length > LIMITE_CHARS) {
         graosArr.pop();
         msg = montar(graosArr);
       }
-      // Sinaliza que cortou — adiciona "..." no ultimo grao
       if (msg.length <= LIMITE_CHARS) {
         graosArr[graosArr.length - 1] = graosArr[graosArr.length - 1] + ' ...';
         msg = montar(graosArr);
       }
-      // Se MESMO assim passou, usa generico
       if (msg.length > LIMITE_CHARS) {
         console.log(`[auto-mensagens] msg inteligente impossivel < ${LIMITE_CHARS} (${msg.length}) — usando generica`);
         return TEXTO;
@@ -170,17 +173,13 @@ async function rotinaACombinar() {
     for (const venda of vendas) {
       try {
         const orderId = venda.id;
-        // 1. Já enviou?
         if (await tracker.jaEnviou(orderId)) {
           stats.jaEnviados++;
           continue;
         }
-        // 2. Busca detalhe completo (variation_attributes)
         const detalhe = await ml.getOrderDetalhe(orderId);
-        // 3. Tem "A COMBINAR"?
         if (!ml.temVariacaoACombinar(detalhe)) {
           stats.semACombinar++;
-          // Registra como pulado pra não verificar de novo na próxima rodada
           await tracker.registrar({
             orderId, packId: detalhe.pack_id, buyerId: detalhe.buyer?.id,
             tipo: 'a_combinar', textoEnviado: null, messageIdMl: null,
@@ -189,34 +188,24 @@ async function rotinaACombinar() {
           });
           continue;
         }
-        // 4. Monta mensagem (inteligente se SKU mapeado, senão genérica)
         const buyerId = detalhe.buyer?.id;
         const packId = detalhe.pack_id;
         const textoFinal = await montarMensagemInteligente(detalhe);
 
-        // 4.5. NOVO (Sessao 3 Etapa A): consulta conversa pra decidir endpoint
-        //      - virgem  → action_guide OTHER (1 uso, gasta o cap)
-        //      - tem msg → POST direto (preserva o cap pra outra situacao)
         const conv = await ml.consultarConversa({ packId, orderId });
         let r;
         let viaEndpoint;
         let respostasCliente = null;
 
         if (conv.ok && !conv.conversaVirgem && conv.totalCliente > 0) {
-          // Cliente ja mandou msg - envia direto sem action_guide
           viaEndpoint = 'direto';
           respostasCliente = conv.ultimaCliente;
           console.log(`[auto-mensagens] 💬 Order ${orderId} ja tem ${conv.totalCliente} msg(s) do cliente — enviando DIRETO (preserva OTHER)`);
-          r = await ml.enviarMensagemDireta({
-            packId, orderId, buyerId, texto: textoFinal
-          });
+          r = await ml.enviarMensagemDireta({ packId, orderId, buyerId, texto: textoFinal });
         } else {
-          // Conversa virgem (ou erro consultando) - usa action_guide
           viaEndpoint = 'action_guide';
           console.log(`[auto-mensagens] 📨 Order ${orderId} conversa virgem — enviando via ACTION_GUIDE OTHER (buyer ${buyerId}, pack ${packId || 'null'}, ${textoFinal.length} chars)`);
-          r = await ml.enviarMensagem({
-            packId, orderId, buyerId, texto: textoFinal
-          });
+          r = await ml.enviarMensagem({ packId, orderId, buyerId, texto: textoFinal });
         }
         if (r.ok) {
           const modStatus = r.moderation_status || 'unknown';
@@ -232,7 +221,6 @@ async function rotinaACombinar() {
             loja: 'GIRASSOL'
           });
 
-          // NOVO Sessao 3: registra na tabela lixas_combinar_pendentes
           try {
             const sku = ml.extrairSkuACombinar(detalhe);
             const lcp = require('./lixasCombinarPendentes');
@@ -242,7 +230,7 @@ async function rotinaACombinar() {
                 buyerNome: detalhe.buyer?.nickname || `${detalhe.buyer?.first_name || ''} ${detalhe.buyer?.last_name || ''}`.trim(),
                 skuACombinar: sku?.sku || null,
                 descricaoProduto: sku?.titulo || null,
-                quantidadeLixas: null, // preenchido pelo painel
+                quantidadeLixas: null,
                 dataVenda: detalhe.date_created || new Date().toISOString(),
                 msgInicialEnviada: textoFinal,
                 msgInicialEnviadaEm: new Date().toISOString(),
@@ -289,12 +277,8 @@ async function rotinaACombinar() {
 module.exports = { rotinaACombinar, rotinaLerRespostas, forcarOrder, processarAutoEmissao, HABILITADO, TEXTO };
 
 /**
- * NOVO (Sessao 3): rotinaLerRespostas
- *
- * Roda a cada 2 min (cron). Busca todas as vendas A COMBINAR dos ultimos 7 dias
- * que estao na tabela lixas_combinar_pendentes com status 'aguardando_resposta',
- * e pra cada uma consulta a conversa no ML. Se o cliente respondeu, atualiza
- * o Supabase com a mensagem dele E marca como lida no ML.
+ * Sessao 3: rotinaLerRespostas
+ * Roda a cada 2 min (cron). Le respostas dos clientes no ML e processa via IA.
  */
 let _lendoRespostas = false;
 
@@ -306,9 +290,8 @@ async function rotinaLerRespostas() {
   _lendoRespostas = true;
 
   const inicio = Date.now();
-  const stats = { lidas: 0, novasRespostas: 0, semNovidade: 0, erros: 0, iaProcessadas: 0, iaEscalonadas: 0, iaErros: 0, autoEmitidas: 0, autoPuladasConfianca: 0, autoFalhas: 0 };
+  const stats = { lidas: 0, novasRespostas: 0, semNovidade: 0, erros: 0, iaProcessadas: 0, iaEscalonadas: 0, iaErros: 0, autoEmitidas: 0, autoPuladasConfianca: 0, autoFalhas: 0, autoLimiteDiario: 0 };
 
-  // IA opcional
   let ia = null;
   const IA_HABILITADO = (process.env.LIXAS_IA_HABILITADO || 'false').toLowerCase() === 'true';
   if (IA_HABILITADO) {
@@ -323,7 +306,6 @@ async function rotinaLerRespostas() {
       return { skipped: 'supabase_nao_configurado' };
     }
 
-    // Lista pendentes aguardando resposta (ultimos 7 dias)
     const lista = await lcp.listarPendentes({
       dias: 7,
       status: 'aguardando_resposta',
@@ -348,7 +330,7 @@ async function rotinaLerRespostas() {
         const conv = await ml.consultarConversa({
           packId: venda.pack_id,
           orderId: venda.order_id,
-          markAsRead: true   // já marca como lida ao consultar (Diego pediu)
+          markAsRead: true
         });
 
         if (!conv.ok) {
@@ -361,15 +343,10 @@ async function rotinaLerRespostas() {
           const textoCliente = conv.ultimaCliente.text || conv.ultimaCliente.message || '';
           const dataResposta = conv.ultimaCliente.date_created || conv.ultimaCliente.date || new Date().toISOString();
 
-          // ════════════════════════════════════════════════════════
-          // ANTI-DUPLICACAO (fix bug Diego 30/05): se a ultima resposta
-          // ja foi processada pela IA (mesma data), nao processa de novo.
-          // ════════════════════════════════════════════════════════
+          // ANTI-DUPLICACAO
           if (venda.ia_processado_em && venda.ultima_resposta_em) {
             const tIa = new Date(venda.ia_processado_em).getTime();
-            const tResp = new Date(venda.ultima_resposta_em).getTime();
             const tRespAtual = new Date(dataResposta).getTime();
-            // Se IA ja processou DEPOIS da resposta atual do cliente, eh duplicata
             if (tIa >= tRespAtual - 1000) {
               console.log(`[lixas-combinar lerRespostas] ⏭️  Order ${venda.order_id} ja processada pela IA (msg cliente nao mudou) - pulando`);
               stats.semNovidade++;
@@ -377,7 +354,6 @@ async function rotinaLerRespostas() {
             }
           }
 
-          // Cliente respondeu - grava na tabela
           await lcp.marcarRespostaCliente(venda.order_id, {
             texto: textoCliente,
             dataResposta,
@@ -386,12 +362,9 @@ async function rotinaLerRespostas() {
           stats.novasRespostas++;
           console.log(`[lixas-combinar lerRespostas] 💬 Order ${venda.order_id} cliente respondeu (${conv.totalCliente} msg) - "${textoCliente.slice(0, 60)}..."`);
 
-          // ════════════════════════════════════════════════════════
-          // PROCESSAMENTO IA (Sessao 4)
-          // ════════════════════════════════════════════════════════
+          // PROCESSAMENTO IA
           if (ia && ia.configurado() && venda.sku_a_combinar) {
             try {
-              // Consulta graos disponiveis (lixasService)
               const lixasService = require('../lixas-combinar/lixasService');
               const graosResult = await lixasService.getGraosDisponiveisPorSkuACombinar(venda.sku_a_combinar);
 
@@ -401,10 +374,9 @@ async function rotinaLerRespostas() {
               }
 
               const graosDisponiveis = graosResult.graos.map(g => g.grao);
-              const totalLixas = graosResult.lixas_por_kit; // 100 por padrao (quantidade comprada armazenada na venda)
+              const totalLixas = graosResult.lixas_por_kit;
               const unidadesPorPacote = graosResult.unidades_por_pacote || 10;
 
-              // Monta historico da conversa pro contexto (max 10 ultimas msgs)
               const sellerId = String(require('./mlTokenManager').getUserId() || '');
               const historicoConversa = (conv.messages || [])
                 .slice(-10)
@@ -441,9 +413,7 @@ async function rotinaLerRespostas() {
 
               console.log(`[ia] order ${venda.order_id} categoria=${iaResult.categoria} confianca=${iaResult.confianca}`);
 
-              // 4 categorias possiveis
               if (iaResult.categoria === 'fora_escopo') {
-                // ESCALA PRA HUMANO - apenas marca, nao envia mensagem
                 stats.iaEscalonadas++;
                 await lcp.atualizarVenda(venda.order_id, {
                   ia_categoria: 'fora_escopo',
@@ -456,10 +426,8 @@ async function rotinaLerRespostas() {
                 console.log(`[ia] order ${venda.order_id} 🚨 ESCALADO pra humano: "${iaResult.interpretacao}"`);
               }
               else if (iaResult.msg_pra_cliente) {
-                // ENVIA RESPOSTA AUTOMATICA (categorias claro/ambiguo/pergunta_graos)
                 const msgIA = iaResult.msg_pra_cliente;
 
-                // Envia via POST direto (conversa nao eh mais virgem)
                 const envR = await ml.enviarMensagemDireta({
                   packId: venda.pack_id,
                   orderId: venda.order_id,
@@ -470,17 +438,13 @@ async function rotinaLerRespostas() {
                 if (envR.ok) {
                   stats.iaProcessadas++;
 
-                  // SESSAO 7: define status conforme categoria + confianca.
-                  // IMPORTANTE: com a auto-emissao DESLIGADA, o comportamento eh
-                  // IDENTICO ao original (claro -> 'cliente_confirmou_pedido' sempre).
-                  // So quando LIGADA o claro com confianca < LIMIAR vai pra humano.
                   const ehClaro = iaResult.categoria === 'claro';
                   const confOk = Number(iaResult.confianca) >= LIMIAR_CONFIANCA_AUTO;
                   let statusInicial;
                   if (ehClaro) {
                     statusInicial = (AUTO_EMITIR_HABILITADO && !confOk)
-                      ? 'precisa_atencao_humano'   // so com feature ligada: claro de baixa confianca -> humano
-                      : 'cliente_confirmou_pedido'; // original
+                      ? 'precisa_atencao_humano'
+                      : 'cliente_confirmou_pedido';
                   } else {
                     statusInicial = 'aguardando_resposta';
                   }
@@ -496,12 +460,26 @@ async function rotinaLerRespostas() {
                   });
                   console.log(`[ia] ✅ order ${venda.order_id} respondida auto: ${msgIA.length} chars, msg_id=${envR.message_id}`);
 
-                  // ── SESSAO 7: auto-emissao (claro + 100% + habilitado) ──
+                  // ── SESSAO 7: auto-emissao (claro + confianca OK + habilitado) ──
                   if (ehClaro && confOk && AUTO_EMITIR_HABILITADO) {
-                    const auto = await processarAutoEmissao({ venda, iaResult, graosResult, lcp });
-                    if (auto.emitida) stats.autoEmitidas++;
-                    else if (auto.puladaConfianca) stats.autoPuladasConfianca++;
-                    else stats.autoFalhas++;
+                    // SAFETY: limite diario
+                    if (!podeAutoEmitir()) {
+                      console.warn(`[auto-emissao] 🛑 LIMITE DIARIO ${AUTO_MAX_POR_DIA} atingido — venda ${venda.order_id} vai pro painel humano`);
+                      await lcp.atualizarVenda(venda.order_id, {
+                        status: 'precisa_atencao_humano',
+                        bling_erro: `auto: limite diario ${AUTO_MAX_POR_DIA} atingido`
+                      });
+                      stats.autoLimiteDiario++;
+                    } else {
+                      const auto = await processarAutoEmissao({ venda, iaResult, graosResult, lcp });
+                      if (auto.emitida) {
+                        stats.autoEmitidas++;
+                        const total = incrementarAutoEmitida();
+                        console.log(`[auto-emissao] 📊 ${total}/${AUTO_MAX_POR_DIA} NFs auto-emitidas hoje`);
+                      }
+                      else if (auto.puladaConfianca) stats.autoPuladasConfianca++;
+                      else stats.autoFalhas++;
+                    }
                   } else if (ehClaro && AUTO_EMITIR_HABILITADO && !confOk) {
                     console.log(`[auto-emissao] order ${venda.order_id} claro mas confianca ${iaResult.confianca}% < ${LIMIAR_CONFIANCA_AUTO}% — humano (nao emite)`);
                   }
@@ -525,7 +503,6 @@ async function rotinaLerRespostas() {
           } else if (!IA_HABILITADO) {
             console.log(`[ia] desabilitado (LIXAS_IA_HABILITADO=false) - pulando processamento IA`);
           }
-          // ════════════════════════════════════════════════════════
         } else {
           stats.semNovidade++;
         }
@@ -554,18 +531,19 @@ async function rotinaLerRespostas() {
  *
  *   Guarda 1  confianca (defesa extra)
  *   Guarda 2  pedido_estruturado valido
- *   Guarda 3  soma das quantidades == total que a IA usou (lixas_por_kit)
- *   Guarda 4  cada grao existe nos disponiveis E tem estoque suficiente
+ *   Guarda 3  QUANTIDADE DE KITS COMPRADA (le do ML order_items.quantity)
+ *             CRITICO: se cliente comprou 2+ kits, total = lixas_por_kit × qtdKits.
+ *             Sem isso, venda de 2 kits = 200 lixas viraria NF errada de 100 lixas.
+ *             Se nao conseguir determinar a qtdKits, vai pra humano por seguranca.
+ *   Guarda 4  soma das quantidades == total real (lixas_por_kit × qtdKits)
+ *   Guarda 5  cada grao existe nos disponiveis E tem estoque suficiente
  *   Edita pedido no Bling (mesma funcao do botao "Editar Bling") — o rateio
  *             fiscal entra aqui: sobra de centavo vai pro DESCONTO/OUTRAS
  *             DESPESAS do pedido, total sempre bate exato.
  *   Emite NF (mesma funcao do botao laranja "Emitir NF")
- *   Marca 'processado'
+ *   Marca 'processado' + flag auto_emitida=true (pro painel diferenciar)
  *
- * Qualquer falha grava bling_erro/nf_erro e poe a venda em 'precisa_atencao_humano'
- * (o painel mostra o erro + os botoes manuais pra voce terminar na mao).
- *
- * Reusa blingPedidos.editarPedidoComGraos + gerarNFe (NAO reescreve a logica).
+ * Qualquer falha grava bling_erro/nf_erro e poe a venda em 'precisa_atencao_humano'.
  *
  * @returns {object} { emitida? , puladaConfianca? , falha? , motivo? }
  */
@@ -573,7 +551,7 @@ async function processarAutoEmissao({ venda, iaResult, graosResult, lcp }) {
   const orderId = venda.order_id;
   const bp = require('../lixas-combinar/blingPedidos');
 
-  // Guarda 1 — confianca (defesa em profundidade; o chamador ja filtra)
+  // Guarda 1 — confianca (defesa em profundidade)
   if (Number(iaResult.confianca) < LIMIAR_CONFIANCA_AUTO) {
     await lcp.atualizarVenda(orderId, { status: 'precisa_atencao_humano' });
     console.log(`[auto-emissao] order ${orderId} confianca ${iaResult.confianca}% < ${LIMIAR_CONFIANCA_AUTO}% — humano`);
@@ -588,16 +566,57 @@ async function processarAutoEmissao({ venda, iaResult, graosResult, lcp }) {
     return { falha: true, motivo: 'pedido_estruturado_invalido' };
   }
 
-  // Guarda 3 — soma confere o MESMO total que a IA usou (graosResult.lixas_por_kit)
-  const totalLixas = Number(graosResult.lixas_por_kit);
-  const somaPedido = graosEscolhidos.reduce((s, g) => s + Number(g.quantidade || 0), 0);
-  if (somaPedido !== totalLixas) {
-    await lcp.atualizarVenda(orderId, { status: 'precisa_atencao_humano', bling_erro: `auto: soma ${somaPedido} != total ${totalLixas}` });
-    console.warn(`[auto-emissao] order ${orderId} soma ${somaPedido} != total ${totalLixas} — humano`);
-    return { falha: true, motivo: 'soma_diverge' };
+  // Guarda 3 — QUANTIDADE DE KITS COMPRADA (CRITICO!)
+  // Le do ML order_items[].quantity. Se nao conseguir, manda pra humano.
+  // SEM essa guarda, venda de 2 kits = 200 lixas seria editada como 100 lixas (NF errada irreversivel).
+  let qtdKits = null;
+  try {
+    const det = await ml.getOrderDetalhe(orderId);
+    const items = det?.order_items || [];
+
+    // Tenta usar helper do mlApi se existir
+    let itemAcombinar = null;
+    if (typeof ml.itemTemVariacaoACombinar === 'function') {
+      itemAcombinar = items.find(it => ml.itemTemVariacaoACombinar(it));
+    }
+    // Fallback 1: busca "A COMBINAR" em qualquer campo do item
+    if (!itemAcombinar) {
+      itemAcombinar = items.find(it => JSON.stringify(it || {}).toUpperCase().includes('A COMBINAR'));
+    }
+    // Fallback 2: se so tem 1 item, assume que eh ele (mais comum)
+    if (!itemAcombinar && items.length === 1) {
+      itemAcombinar = items[0];
+    }
+
+    if (itemAcombinar && Number(itemAcombinar.quantity) > 0) {
+      qtdKits = Number(itemAcombinar.quantity);
+    }
+  } catch (e) {
+    console.warn(`[auto-emissao] order ${orderId} erro lendo quantity do ML: ${e.message}`);
+  }
+  if (!qtdKits || qtdKits < 1) {
+    await lcp.atualizarVenda(orderId, {
+      status: 'precisa_atencao_humano',
+      bling_erro: 'auto: nao consegui determinar quantidade de kits comprada (campo order_items.quantity)'
+    });
+    console.warn(`[auto-emissao] order ${orderId} qtdKits indefinida — humano por seguranca`);
+    return { falha: true, motivo: 'qtd_kits_indefinida' };
   }
 
-  // Guarda 4 — cada grao existe nos disponiveis e tem estoque suficiente
+  // Guarda 4 — soma confere o total real (lixas_por_kit × qtdKits)
+  const totalLixas = Number(graosResult.lixas_por_kit) * qtdKits;
+  const somaPedido = graosEscolhidos.reduce((s, g) => s + Number(g.quantidade || 0), 0);
+  if (somaPedido !== totalLixas) {
+    await lcp.atualizarVenda(orderId, {
+      status: 'precisa_atencao_humano',
+      bling_erro: `auto: soma ${somaPedido} != total ${totalLixas} (${qtdKits} kit${qtdKits>1?'s':''} × ${graosResult.lixas_por_kit})`
+    });
+    console.warn(`[auto-emissao] order ${orderId} qtdKits=${qtdKits} soma=${somaPedido} != total=${totalLixas} — humano`);
+    return { falha: true, motivo: 'soma_diverge' };
+  }
+  console.log(`[auto-emissao] order ${orderId} qtdKits=${qtdKits} total_lixas=${totalLixas} OK`);
+
+  // Guarda 5 — cada grao existe nos disponiveis e tem estoque suficiente
   for (const g of graosEscolhidos) {
     const disp = graosResult.graos.find(x => String(x.grao) === String(g.grao));
     if (!disp) {
@@ -612,8 +631,7 @@ async function processarAutoEmissao({ venda, iaResult, graosResult, lcp }) {
     }
   }
 
-  // Args comuns pro blingPedidos (mesma logica da rota /editar-bling:
-  // Bling guarda pack_id em numeroLoja, entao usa pack_id se existir)
+  // Args comuns pro blingPedidos (Bling guarda pack_id em numeroLoja)
   const idBuscaBling = venda.pack_id || orderId;
   const dataVenda = venda.data_venda ? String(venda.data_venda).split('T')[0] : null;
   const baseArgs = {
@@ -625,10 +643,7 @@ async function processarAutoEmissao({ venda, iaResult, graosResult, lcp }) {
     dataVenda
   };
 
-  // Edita o pedido no Bling. O rateio fiscal eh calculado dentro de
-  // editarPedidoComGraos -> calcularRateio, e a sobra de centavos (se houver)
-  // entra no campo DESCONTO ou OUTRAS DESPESAS do pedido, de modo que o TOTAL
-  // sempre bate exato. Nao ha desvio pra humano por causa de centavo.
+  // Edita o pedido no Bling
   const edit = await bp.editarPedidoComGraos({ ...baseArgs, dryRun: false });
   if (!edit.ok) {
     await lcp.atualizarVenda(orderId, { status: 'precisa_atencao_humano', bling_erro: `auto edit ${edit.etapa || ''}: ${edit.erro || ''}`.slice(0, 500) });
@@ -642,14 +657,13 @@ async function processarAutoEmissao({ venda, iaResult, graosResult, lcp }) {
   await lcp.atualizarVenda(orderId, {
     bling_pedido_id: String(edit.pedidoId),
     bling_editado_em: new Date().toISOString(),
-    bling_erro: null
+    bling_erro: null,
+    auto_emitida: true  // flag pro painel mostrar badge "🤖 Auto"
   });
 
-  // Emite a NF (NF transmitida pra SEFAZ — irreversivel)
+  // Emite a NF (IRREVERSIVEL — vai pra SEFAZ)
   const nf = await bp.gerarNFe(edit.pedidoId);
   if (!nf.ok) {
-    // Pedido ja foi editado: deixa o bling_pedido_id salvo pro painel mostrar
-    // o botao laranja e voce emitir na mao.
     await lcp.atualizarVenda(orderId, {
       status: 'precisa_atencao_humano',
       nf_erro: `${nf.status || ''}: ${nf.erro || JSON.stringify(nf.detalhe || {}).slice(0, 200)}`.slice(0, 500)
@@ -668,14 +682,13 @@ async function processarAutoEmissao({ venda, iaResult, graosResult, lcp }) {
     nf_erro: null,
     status: 'processado'
   });
-  console.log(`[auto-emissao] ✅ order ${orderId} → pedido ${edit.pedidoId} editado + NF ${nf.numero}/${nf.serie} emitida (auto)`);
-  return { emitida: true, pedidoId: edit.pedidoId, nfNumero: nf.numero };
+  console.log(`[auto-emissao] ✅ order ${orderId} → pedido ${edit.pedidoId} editado + NF ${nf.numero}/${nf.serie} emitida (auto, ${qtdKits} kit${qtdKits>1?'s':''}=${totalLixas} lixas)`);
+  return { emitida: true, pedidoId: edit.pedidoId, nfNumero: nf.numero, qtdKits };
 }
 
 /**
  * Força processamento de UMA venda específica (ignora janela de tempo)
- * Aceita TANTO order_id quanto pack_id (o que aparece na URL do ML).
- * Se for pack_id (carrinho), busca o order real automaticamente.
+ * Aceita TANTO order_id quanto pack_id.
  */
 async function forcarOrder(idEntrada) {
   const stats = { idEntrada, etapa: 'inicio' };
@@ -687,8 +700,6 @@ async function forcarOrder(idEntrada) {
       return { ok: false, erro: 'Supabase nao configurado', stats };
     }
 
-    // 0. Detectar se é pack_id ou order_id
-    // Tenta como order primeiro (rota normal). Se 404, tenta como pack pra extrair order_id.
     stats.etapa = 'detectar_tipo';
     let orderId = idEntrada;
     let detalhe = null;
@@ -698,7 +709,6 @@ async function forcarOrder(idEntrada) {
       detalhe = await ml.getOrderDetalhe(idEntrada);
       stats.tipo_id = 'order';
     } catch (e) {
-      // Se der 404, tenta como pack
       if (e.message.includes('404') || e.message.includes('order_not_found')) {
         stats.tipo_id = 'pack_tentativa';
         const packInfo = await ml.getPackInfo(idEntrada);
@@ -717,7 +727,6 @@ async function forcarOrder(idEntrada) {
       }
     }
 
-    // 1. Já enviou?
     stats.etapa = 'checar_duplicado';
     if (await tracker.jaEnviou(orderId)) {
       return { ok: false, erro: `Ja enviou pra esta venda (order ${orderId}) anteriormente`, stats };
@@ -727,7 +736,6 @@ async function forcarOrder(idEntrada) {
     stats.buyer_id = detalhe.buyer?.id;
     stats.pack_id = detalhe.pack_id || packIdDescoberto;
 
-    // 2. Tem A COMBINAR?
     stats.etapa = 'verificar_a_combinar';
     const temACombinar = ml.temVariacaoACombinar(detalhe);
     stats.tem_a_combinar = temACombinar;
@@ -735,16 +743,12 @@ async function forcarOrder(idEntrada) {
       return { ok: false, erro: 'Venda NAO tem variacao A COMBINAR', stats };
     }
 
-    // 3. Envia
     stats.etapa = 'enviar';
     const buyerId = detalhe.buyer?.id;
     const packId = detalhe.pack_id || packIdDescoberto;
     const textoFinal = await montarMensagemInteligente(detalhe);
     stats.texto_chars = textoFinal.length;
 
-    // 3.5. NOVO: consulta conversa pra decidir endpoint (igual rotinaACombinar)
-    //      - virgem  → action_guide OTHER (1 uso, gasta o cap)
-    //      - tem msg → POST direto (preserva cap, permite mensagens livres)
     const conv = await ml.consultarConversa({ packId, orderId });
     let r;
     let viaEndpoint;
@@ -756,13 +760,10 @@ async function forcarOrder(idEntrada) {
       console.log(`[auto-mensagens FORCAR] 💬 order=${orderId} ja tem ${conv.totalCliente} msg(s) cliente — DIRETO (chars=${textoFinal.length})`);
       r = await ml.enviarMensagemDireta({ packId, orderId, buyerId, texto: textoFinal });
     } else if (conv.ok && !conv.conversaVirgem && conv.totalLoja > 0) {
-      // Loja ja mandou msg mas cliente nao respondeu - tenta direto tambem
-      // (cap do OTHER provavelmente esgotado, e nao adianta repetir action_guide)
       viaEndpoint = 'direto_sem_resposta';
       console.log(`[auto-mensagens FORCAR] 📨 order=${orderId} loja ja enviou mas cliente nao respondeu — tentando DIRETO (chars=${textoFinal.length})`);
       r = await ml.enviarMensagemDireta({ packId, orderId, buyerId, texto: textoFinal });
     } else {
-      // Conversa virgem (ou erro consultando) - usa action_guide
       viaEndpoint = 'action_guide';
       console.log(`[auto-mensagens FORCAR] 📨 order=${orderId} virgem — ACTION_GUIDE OTHER (chars=${textoFinal.length})`);
       r = await ml.enviarMensagem({ packId, orderId, buyerId, texto: textoFinal });
@@ -781,7 +782,6 @@ async function forcarOrder(idEntrada) {
         loja: 'GIRASSOL'
       });
 
-      // Popula tabela lixas_combinar_pendentes (mesmo padrao da rotinaACombinar)
       try {
         const sku = ml.extrairSkuACombinar(detalhe);
         const lcp = require('./lixasCombinarPendentes');
