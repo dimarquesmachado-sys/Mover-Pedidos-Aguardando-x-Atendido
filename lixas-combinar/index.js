@@ -240,40 +240,30 @@ function routes(readBody) {
       return true;
     }
 
-    // GET /lixas-combinar/api/debug-buscar-bling?orderId=XXX  → mostra TODOS pedidos Bling
+    // GET /lixas-combinar/api/debug-buscar-bling?orderId=XXX&data=YYYY-MM-DD  → busca pedido
     // SEM AUTH - so leitura, util pra diagnostico via navegador direto
     if (method === 'GET' && p === '/lixas-combinar/api/debug-buscar-bling') {
       const orderId = urlObj.searchParams.get('orderId');
+      const dataParam = urlObj.searchParams.get('data');
       if (!orderId) { json(res, 400, { ok: false, erro: 'orderId obrigatorio' }); return true; }
 
       try {
         const bp = require('./blingPedidos');
-        // Chama fetchBling direto pra ver tudo que retorna
-        const tokenMgrLocal = require('./tokenManager');
-        const url = `https://api.bling.com.br/Api/v3/pedidos/vendas?numeroLoja=${encodeURIComponent(orderId)}`;
-        const r = await tokenMgrLocal.fetchComRetry(url, { method: 'GET' });
-        const text = await r.text();
-        let data = null;
-        try { data = JSON.parse(text); } catch (_) { data = { _raw: text }; }
+        // Define janela de busca - se data informada, +/- 2 dias dela
+        let dataInicial, dataFinal;
+        if (dataParam) {
+          const d = new Date(dataParam);
+          const iniD = new Date(d); iniD.setDate(iniD.getDate() - 2);
+          const fimD = new Date(d); fimD.setDate(fimD.getDate() + 2);
+          dataInicial = iniD.toISOString().split('T')[0];
+          dataFinal = fimD.toISOString().split('T')[0];
+        }
 
-        const arr = Array.isArray(data?.data) ? data.data : [];
-        const resumo = arr.map(p => ({
-          id: p.id,
-          numero: p.numero,
-          numeroLoja: p.numeroLoja,
-          data: p.data,
-          total: p.total,
-          situacao_id: p.situacao?.id,
-          loja_id: p.loja?.id
-        }));
-
+        const r = await bp.buscarPedidoPorOrderId(orderId, dataInicial, dataFinal);
         json(res, 200, {
-          ok: r.ok,
-          status: r.status,
-          total_encontrados: arr.length,
           orderId_buscado: orderId,
-          resumo,
-          raw: data
+          janela: { dataInicial: dataInicial || '(default -30d)', dataFinal: dataFinal || '(default hoje+1)' },
+          resultado: r
         });
       } catch (e) {
         json(res, 500, { ok: false, erro: e.message });
@@ -348,12 +338,18 @@ function routes(readBody) {
 
         // Edita pedido
         const bp = require('./blingPedidos');
+        // Extrai data da venda (formato YYYY-MM-DD) do timestamp
+        let dataVenda = null;
+        if (v.data_venda) {
+          dataVenda = String(v.data_venda).split('T')[0];
+        }
         const r = await bp.editarPedidoComGraos({
           orderId,
           graosEscolhidos,
           graosDisponiveis: graosResult.graos,
           unidadesPorPacote: graosResult.unidades_por_pacote,
           descricaoBase: graosResult.descricao,
+          dataVenda,
           dryRun
         });
 
