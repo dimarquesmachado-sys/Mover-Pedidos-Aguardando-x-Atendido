@@ -249,12 +249,12 @@ function routes(readBody) {
 
       try {
         const bp = require('./blingPedidos');
-        // Define janela de busca - se data informada, +/- 2 dias dela
+        // Define janela de busca - se data informada, ±15 dias dela (mais ampla pra debug)
         let dataInicial, dataFinal;
         if (dataParam) {
           const d = new Date(dataParam);
-          const iniD = new Date(d); iniD.setDate(iniD.getDate() - 2);
-          const fimD = new Date(d); fimD.setDate(fimD.getDate() + 2);
+          const iniD = new Date(d); iniD.setDate(iniD.getDate() - 15);
+          const fimD = new Date(d); fimD.setDate(fimD.getDate() + 15);
           dataInicial = iniD.toISOString().split('T')[0];
           dataFinal = fimD.toISOString().split('T')[0];
         }
@@ -343,8 +343,13 @@ function routes(readBody) {
         if (v.data_venda) {
           dataVenda = String(v.data_venda).split('T')[0];
         }
+        // IMPORTANTE: Bling armazena pack_id em numeroLoja (nao order_id).
+        // Se a venda tem pack_id, usa ele pra buscar no Bling. Fallback pro order_id.
+        const idBuscaBling = v.pack_id || orderId;
+        console.log(`[lixas-combinar editar-bling] buscando Bling com numeroLoja=${idBuscaBling} (pack_id=${v.pack_id || 'null'}, order_id=${orderId})`);
+
         const r = await bp.editarPedidoComGraos({
-          orderId,
+          orderId: idBuscaBling,
           graosEscolhidos,
           graosDisponiveis: graosResult.graos,
           unidadesPorPacote: graosResult.unidades_por_pacote,
