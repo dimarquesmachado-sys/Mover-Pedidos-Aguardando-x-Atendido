@@ -54,32 +54,90 @@ async function fetchBling(method, path, body) {
 
 /**
  * Busca pedido Bling pelo numeroLoja (= order_id ML).
- * Retorna { ok, pedidoId, raw } ou erro.
+ *
+ * ⚠️ A API Bling V3 NAO suporta filtrar /pedidos/vendas por numeroLoja
+ * (parametro eh ignorado, retorna todos pedidos da pagina).
+ *
+ * Estrategia: Buscar pedidos por intervalo de DATA (dataVenda) e filtrar em memoria.
+ *
+ * @param {string} orderId - numero loja ML
+ * @param {string} dataInicial - YYYY-MM-DD, opcional (padrao: hoje-30dias)
+ * @param {string} dataFinal - YYYY-MM-DD, opcional (padrao: hoje+1dia)
  */
-async function buscarPedidoPorOrderId(orderId) {
+async function buscarPedidoPorOrderId(orderId, dataInicial, dataFinal) {
   if (!orderId) return { ok: false, erro: 'orderId obrigatorio' };
 
-  const r = await fetchBling('GET', `/pedidos/vendas?numeroLoja=${encodeURIComponent(orderId)}`);
-  if (!r.ok) {
-    return { ok: false, erro: `Bling HTTP ${r.status} buscando pedido`, detalhe: r.data };
+  // Define janela de datas. Padrao: ultimos 30 dias.
+  if (!dataFinal) {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    dataFinal = d.toISOString().split('T')[0];
+  }
+  if (!dataInicial) {
+    const d = new Date();
+    d.setDate(d.getDate() - 30);
+    dataInicial = d.toISOString().split('T')[0];
   }
 
-  const arr = Array.isArray(r.data?.data) ? r.data.data : [];
-  if (arr.length === 0) {
-    return { ok: false, erro: `Nenhum pedido encontrado com numeroLoja=${orderId}` };
-  }
+  const orderIdStr = String(orderId);
+  const MAX_PAGINAS = 10;
+  let pagina = 1;
 
-  if (arr.length > 1) {
-    console.warn(`[blingPedidos] Mais de 1 pedido pra order_id ${orderId} (${arr.length}) - usando primeiro`);
+  while (pagina <= MAX_PAGINAS) {
+    const params = new URLSearchParams({
+      dataEmissaoInicial: dataInicial,
+      dataEmissaoFinal: dataFinal,
+      pagina: String(pagina),
+      limite: '100'
+    });
+    const r = await fetchBling('GET', `/pedidos/vendas?${params}`);
+    if (!r.ok) {
+      return { ok: false, erro: `Bling HTTP ${r.status} buscando pedidos`, detalhe: r.data };
+    }
+
+    const arr = Array.isArray(r.data?.data) ? r.data.data : [];
+    if (arr.length === 0) break; // sem mais paginas
+
+    // Filtra por numeroLoja exato
+    const encontrados = arr.filter(p => String(p.numeroLoja || '') === orderIdStr);
+
+    if (encontrados.length === 1) {
+      const p = encontrados[0];
+      return {
+        ok: true,
+        pedidoId: p.id,
+        numero: p.numero,
+        numeroLoja: p.numeroLoja,
+        situacaoId: p.situacao?.id,
+        valorTotal: p.total,
+        raw: p
+      };
+    }
+    if (encontrados.length > 1) {
+      // Duplicidade real no Bling - retorna o de menor ID (mais antigo)
+      const escolhido = encontrados.sort((a,b) => a.id - b.id)[0];
+      console.warn(`[blingPedidos] DUPLICIDADE: ${encontrados.length} pedidos com numeroLoja=${orderId}, usando id=${escolhido.id} (mais antigo)`);
+      return {
+        ok: true,
+        pedidoId: escolhido.id,
+        numero: escolhido.numero,
+        numeroLoja: escolhido.numeroLoja,
+        situacaoId: escolhido.situacao?.id,
+        valorTotal: escolhido.total,
+        raw: escolhido,
+        aviso: `Duplicidade no Bling: ${encontrados.length} pedidos com mesmo numeroLoja`,
+        outrosIds: encontrados.slice(1).map(x => x.id)
+      };
+    }
+
+    // Nao achou nesta pagina, continua
+    if (arr.length < 100) break; // ultima pagina
+    pagina++;
   }
 
   return {
-    ok: true,
-    pedidoId: arr[0].id,
-    numero: arr[0].numero,
-    situacaoId: arr[0].situacao?.id,
-    valorTotal: arr[0].total,
-    raw: arr[0]
+    ok: false,
+    erro: `Nenhum pedido encontrado com numeroLoja=${orderId} na janela ${dataInicial} a ${dataFinal} (${pagina-1} pagina(s) verificadas)`
   };
 }
 
@@ -274,10 +332,19 @@ async function atualizarPedido(pedidoId, body) {
  */
 async function editarPedidoComGraos({
   orderId, graosEscolhidos, graosDisponiveis,
-  unidadesPorPacote, descricaoBase, dryRun
+  unidadesPorPacote, descricaoBase, dryRun,
+  dataVenda // opcional - YYYY-MM-DD da venda ML, usado pra estreitar busca
 }) {
-  // 1. Busca pedido
-  const buscar = await buscarPedidoPorOrderId(orderId);
+  // 1. Busca pedido com janela centrada na data da venda (se conhecida)
+  let dataInicial, dataFinal;
+  if (dataVenda) {
+    const d = new Date(dataVenda);
+    const iniD = new Date(d); iniD.setDate(iniD.getDate() - 2);
+    const fimD = new Date(d); fimD.setDate(fimD.getDate() + 2);
+    dataInicial = iniD.toISOString().split('T')[0];
+    dataFinal = fimD.toISOString().split('T')[0];
+  }
+  const buscar = await buscarPedidoPorOrderId(orderId, dataInicial, dataFinal);
   if (!buscar.ok) return { ok: false, etapa: 'buscar', ...buscar };
 
   // 2. Detalhe completo
