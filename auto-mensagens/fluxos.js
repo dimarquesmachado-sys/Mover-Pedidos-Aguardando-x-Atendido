@@ -40,10 +40,6 @@ const LIMITE_CHARS = 350;
 const AUTO_EMITIR_HABILITADO = (process.env.LIXAS_AUTO_EMITIR_NF_HABILITADO || 'false').toLowerCase() === 'true';
 // Confianca minima da IA pra auto-executar. Diego: 100% exato. Abaixo disso -> humano.
 const LIMIAR_CONFIANCA_AUTO = Number(process.env.LIXAS_AUTO_CONFIANCA_MIN || 100);
-// Rateio: se false (padrao, regra original "sem ajuste"), QUALQUER centavo de
-// ajuste manda pro humano. Se true, emite mesmo com ajuste de rodape (a NF
-// continua batendo o total — o ajuste eh so um desconto/acrescimo de centavos).
-const PERMITE_AJUSTE_RATEIO = (process.env.LIXAS_AUTO_PERMITE_AJUSTE_RATEIO || 'false').toLowerCase() === 'true';
 
 /**
  * Tenta montar mensagem inteligente com grãos disponíveis.
@@ -310,7 +306,7 @@ async function rotinaLerRespostas() {
   _lendoRespostas = true;
 
   const inicio = Date.now();
-  const stats = { lidas: 0, novasRespostas: 0, semNovidade: 0, erros: 0, iaProcessadas: 0, iaEscalonadas: 0, iaErros: 0, autoEmitidas: 0, autoPuladasConfianca: 0, autoPuladasRateio: 0, autoFalhas: 0 };
+  const stats = { lidas: 0, novasRespostas: 0, semNovidade: 0, erros: 0, iaProcessadas: 0, iaEscalonadas: 0, iaErros: 0, autoEmitidas: 0, autoPuladasConfianca: 0, autoFalhas: 0 };
 
   // IA opcional
   let ia = null;
@@ -504,7 +500,6 @@ async function rotinaLerRespostas() {
                   if (ehClaro && confOk && AUTO_EMITIR_HABILITADO) {
                     const auto = await processarAutoEmissao({ venda, iaResult, graosResult, lcp });
                     if (auto.emitida) stats.autoEmitidas++;
-                    else if (auto.puladaRateio) stats.autoPuladasRateio++;
                     else if (auto.puladaConfianca) stats.autoPuladasConfianca++;
                     else stats.autoFalhas++;
                   } else if (ehClaro && AUTO_EMITIR_HABILITADO && !confOk) {
@@ -561,9 +556,9 @@ async function rotinaLerRespostas() {
  *   Guarda 2  pedido_estruturado valido
  *   Guarda 3  soma das quantidades == total que a IA usou (lixas_por_kit)
  *   Guarda 4  cada grao existe nos disponiveis E tem estoque suficiente
- *   Guarda 5  RATEIO (dry-run ANTES de qualquer escrita): se precisar ajuste
- *             de centavo e PERMITE_AJUSTE_RATEIO=false -> humano (nao escreve nada)
- *   Edita pedido no Bling (mesma funcao do botao "Editar Bling")
+ *   Edita pedido no Bling (mesma funcao do botao "Editar Bling") — o rateio
+ *             fiscal entra aqui: sobra de centavo vai pro DESCONTO/OUTRAS
+ *             DESPESAS do pedido, total sempre bate exato.
  *   Emite NF (mesma funcao do botao laranja "Emitir NF")
  *   Marca 'processado'
  *
@@ -572,7 +567,7 @@ async function rotinaLerRespostas() {
  *
  * Reusa blingPedidos.editarPedidoComGraos + gerarNFe (NAO reescreve a logica).
  *
- * @returns {object} { emitida? , puladaRateio? , puladaConfianca? , falha? , motivo? }
+ * @returns {object} { emitida? , puladaConfianca? , falha? , motivo? }
  */
 async function processarAutoEmissao({ venda, iaResult, graosResult, lcp }) {
   const orderId = venda.order_id;
@@ -630,26 +625,19 @@ async function processarAutoEmissao({ venda, iaResult, graosResult, lcp }) {
     dataVenda
   };
 
-  // Guarda 5 — RATEIO via dry-run ANTES de escrever nada no Bling
-  const preview = await bp.editarPedidoComGraos({ ...baseArgs, dryRun: true });
-  if (!preview.ok) {
-    await lcp.atualizarVenda(orderId, { status: 'precisa_atencao_humano', bling_erro: `auto dryrun ${preview.etapa || ''}: ${preview.erro || ''}`.slice(0, 500) });
-    console.warn(`[auto-emissao] order ${orderId} dry-run falhou (${preview.etapa}) — humano`);
-    return { falha: true, motivo: 'dryrun_falhou' };
-  }
-  if (preview.rateio?.ajuste && !PERMITE_AJUSTE_RATEIO) {
-    const aj = preview.rateio.ajuste;
-    await lcp.atualizarVenda(orderId, { status: 'precisa_atencao_humano', bling_erro: `auto: rateio precisa ${aj.tipo} de R$${aj.valor} (modo "sem ajuste") — revisar e emitir manual` });
-    console.log(`[auto-emissao] order ${orderId} rateio precisa ajuste de R$${aj.valor} e PERMITE_AJUSTE_RATEIO=false — humano`);
-    return { puladaRateio: true };
-  }
-
-  // Edita o pedido de verdade
+  // Edita o pedido no Bling. O rateio fiscal eh calculado dentro de
+  // editarPedidoComGraos -> calcularRateio, e a sobra de centavos (se houver)
+  // entra no campo DESCONTO ou OUTRAS DESPESAS do pedido, de modo que o TOTAL
+  // sempre bate exato. Nao ha desvio pra humano por causa de centavo.
   const edit = await bp.editarPedidoComGraos({ ...baseArgs, dryRun: false });
   if (!edit.ok) {
     await lcp.atualizarVenda(orderId, { status: 'precisa_atencao_humano', bling_erro: `auto edit ${edit.etapa || ''}: ${edit.erro || ''}`.slice(0, 500) });
     console.error(`[auto-emissao] order ${orderId} edit falhou (${edit.etapa}): ${edit.erro}`);
     return { falha: true, motivo: 'edit_falhou' };
+  }
+  if (edit.rateio?.ajuste) {
+    const aj = edit.rateio.ajuste;
+    console.log(`[auto-emissao] order ${orderId} rateio com ${aj.tipo} de R$${aj.valor} no rodape (total bate exato)`);
   }
   await lcp.atualizarVenda(orderId, {
     bling_pedido_id: String(edit.pedidoId),
