@@ -585,6 +585,8 @@ async function rotinaLerRespostas() {
  *   Guarda 2  pedido_estruturado valido
  *   Guarda 3  soma das quantidades == total que a IA usou (lixas_por_kit)
  *   Guarda 4  cada grao existe nos disponiveis E tem estoque suficiente
+ *   Guarda 5  CARRINHO: se o pedido tem +1 item, ou ha +1 pedido no mesmo
+ *             pack -> humano (a edicao automatica so trata 1 item A-COMBINAR)
  *   Edita pedido no Bling (mesma funcao do botao "Editar Bling") — o rateio
  *             fiscal entra aqui: sobra de centavo vai pro DESCONTO/OUTRAS
  *             DESPESAS do pedido, total sempre bate exato.
@@ -667,6 +669,49 @@ async function processarAutoEmissao({ venda, iaResult, graosResult, lcp }) {
     descricaoBase: graosResult.descricao,
     dataVenda
   };
+
+  // ── Guarda 5 — CARRINHO / pedido multi-item ──────────────────────────
+  // A edicao automatica SUBSTITUI todos os itens do pedido pelos graos de UM
+  // sku. Isso so eh seguro quando o pedido tem exatamente 1 item A-COMBINAR.
+  // Num carrinho (2+ anuncios A-COMBINAR), o Bling pode montar:
+  //   (a) 1 pedido com varios itens   -> pega via itens.length != 1
+  //   (b) varios pedidos no mesmo pack -> pega via "duplicidade" do buscar
+  // Em qualquer dos casos -> manda pro humano (NAO emite NF errada).
+  // Pre-check leve antes de escrever nada; mesma janela de data do editar.
+  try {
+    let dIni, dFim;
+    if (dataVenda) {
+      const d = new Date(dataVenda);
+      const ini = new Date(d); ini.setDate(ini.getDate() - 2);
+      const fim = new Date(d); fim.setDate(fim.getDate() + 2);
+      dIni = ini.toISOString().split('T')[0];
+      dFim = fim.toISOString().split('T')[0];
+    }
+    const busca = await bp.buscarPedidoPorOrderId(idBuscaBling, dIni, dFim);
+    if (!busca.ok) {
+      await lcp.atualizarVenda(orderId, { status: 'precisa_atencao_humano', bling_erro: `auto: pedido nao encontrado no Bling (${(busca.erro || '').slice(0, 200)})` });
+      console.warn(`[auto-emissao] order ${orderId} pedido nao achado no Bling — humano`);
+      return { falha: true, motivo: 'pedido_nao_encontrado' };
+    }
+    if (busca.aviso) {
+      // duplicidade = mais de um pedido com o mesmo numeroLoja (carrinho)
+      await lcp.atualizarVenda(orderId, { status: 'precisa_atencao_humano', bling_erro: `auto: carrinho detectado (${busca.aviso}) — varios pedidos no mesmo pack, tratar manual` });
+      console.warn(`[auto-emissao] order ${orderId} CARRINHO (duplicidade de pedido) — humano`);
+      return { falha: true, motivo: 'carrinho_multi_pedido' };
+    }
+    const det = await bp.obterPedidoCompleto(busca.pedidoId);
+    const nItens = (det.ok && Array.isArray(det.pedido?.itens)) ? det.pedido.itens.length : null;
+    if (nItens !== 1) {
+      await lcp.atualizarVenda(orderId, { status: 'precisa_atencao_humano', bling_erro: `auto: carrinho/pedido multi-item (${nItens} itens) — auto-emissao so trata 1 item, tratar manual` });
+      console.warn(`[auto-emissao] order ${orderId} pedido com ${nItens} itens (carrinho?) — humano`);
+      return { falha: true, motivo: 'carrinho_multi_item' };
+    }
+  } catch (e) {
+    // Se o pre-check falhar por erro inesperado, NAO arrisca: manda pro humano.
+    await lcp.atualizarVenda(orderId, { status: 'precisa_atencao_humano', bling_erro: `auto: erro no pre-check de carrinho: ${e.message}`.slice(0, 500) });
+    console.error(`[auto-emissao] order ${orderId} erro pre-check carrinho: ${e.message} — humano`);
+    return { falha: true, motivo: 'precheck_erro' };
+  }
 
   // Edita o pedido no Bling. O rateio fiscal eh calculado dentro de
   // editarPedidoComGraos -> calcularRateio, e a sobra de centavos (se houver)
