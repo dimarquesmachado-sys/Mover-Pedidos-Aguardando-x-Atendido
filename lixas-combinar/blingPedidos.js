@@ -76,16 +76,18 @@ async function fetchBling(method, path, body) {
  * ⚠️ A API Bling V3 NAO suporta filtrar /pedidos/vendas por numeroLoja
  * (parametro eh ignorado, retorna todos pedidos da pagina).
  *
- * Estrategia: Buscar pedidos por intervalo de DATA (dataVenda) e filtrar em memoria.
+ * Estrategia: Buscar pedidos por intervalo de DATA (dataInicial/dataFinal)
+ * e filtrar em memoria.
  *
  * @param {string} orderId - numero loja ML
- * @param {string} dataInicial - YYYY-MM-DD, opcional (padrao: hoje-30dias)
- * @param {string} dataFinal - YYYY-MM-DD, opcional (padrao: hoje+1dia)
+ * @param {string} dataInicial - YYYY-MM-DD, opcional
+ * @param {string} dataFinal - YYYY-MM-DD, opcional
+ * @param {boolean} verbose - se true, retorna info de debug nos warnings
  */
-async function buscarPedidoPorOrderId(orderId, dataInicial, dataFinal) {
+async function buscarPedidoPorOrderId(orderId, dataInicial, dataFinal, verbose) {
   if (!orderId) return { ok: false, erro: 'orderId obrigatorio' };
 
-  // Define janela de datas. Padrao: ultimos 30 dias.
+  // Janela padrao: ultimos 60 dias (cobre maioria dos casos)
   if (!dataFinal) {
     const d = new Date();
     d.setDate(d.getDate() + 1);
@@ -93,13 +95,16 @@ async function buscarPedidoPorOrderId(orderId, dataInicial, dataFinal) {
   }
   if (!dataInicial) {
     const d = new Date();
-    d.setDate(d.getDate() - 30);
+    d.setDate(d.getDate() - 60);
     dataInicial = d.toISOString().split('T')[0];
   }
 
   const orderIdStr = String(orderId);
-  const MAX_PAGINAS = 10;
+  const MAX_PAGINAS = 30; // ate 3000 pedidos
   let pagina = 1;
+  let totalPedidosVistos = 0;
+  const datasVistas = new Set();
+  const amostraNumerosLoja = [];
 
   while (pagina <= MAX_PAGINAS) {
     const params = new URLSearchParams({
@@ -114,48 +119,52 @@ async function buscarPedidoPorOrderId(orderId, dataInicial, dataFinal) {
     }
 
     const arr = Array.isArray(r.data?.data) ? r.data.data : [];
-    if (arr.length === 0) break; // sem mais paginas
+    if (arr.length === 0) break;
 
-    // Filtra por numeroLoja exato
+    totalPedidosVistos += arr.length;
+    for (const p of arr) {
+      if (p.data) datasVistas.add(String(p.data).slice(0,10));
+      if (amostraNumerosLoja.length < 10 && p.numeroLoja) {
+        amostraNumerosLoja.push(p.numeroLoja);
+      }
+    }
+
     const encontrados = arr.filter(p => String(p.numeroLoja || '') === orderIdStr);
 
-    if (encontrados.length === 1) {
-      const p = encontrados[0];
-      return {
-        ok: true,
-        pedidoId: p.id,
-        numero: p.numero,
-        numeroLoja: p.numeroLoja,
-        situacaoId: p.situacao?.id,
-        valorTotal: p.total,
-        raw: p
-      };
-    }
-    if (encontrados.length > 1) {
-      // Duplicidade real no Bling - retorna o de menor ID (mais antigo)
-      const escolhido = encontrados.sort((a,b) => a.id - b.id)[0];
-      console.warn(`[blingPedidos] DUPLICIDADE: ${encontrados.length} pedidos com numeroLoja=${orderId}, usando id=${escolhido.id} (mais antigo)`);
-      return {
+    if (encontrados.length >= 1) {
+      const escolhido = encontrados.length === 1
+        ? encontrados[0]
+        : encontrados.sort((a,b) => a.id - b.id)[0];
+      const ret = {
         ok: true,
         pedidoId: escolhido.id,
         numero: escolhido.numero,
         numeroLoja: escolhido.numeroLoja,
         situacaoId: escolhido.situacao?.id,
         valorTotal: escolhido.total,
-        raw: escolhido,
-        aviso: `Duplicidade no Bling: ${encontrados.length} pedidos com mesmo numeroLoja`,
-        outrosIds: encontrados.slice(1).map(x => x.id)
+        raw: escolhido
       };
+      if (encontrados.length > 1) {
+        ret.aviso = `Duplicidade: ${encontrados.length} pedidos`;
+        ret.outrosIds = encontrados.slice(1).map(x => x.id);
+      }
+      return ret;
     }
 
-    // Nao achou nesta pagina, continua
-    if (arr.length < 100) break; // ultima pagina
+    if (arr.length < 100) break;
     pagina++;
   }
 
+  // Nao achou - retorna info detalhada pra debug
   return {
     ok: false,
-    erro: `Nenhum pedido encontrado com numeroLoja=${orderId} na janela ${dataInicial} a ${dataFinal} (${pagina-1} pagina(s) verificadas)`
+    erro: `Nenhum pedido encontrado com numeroLoja=${orderId} na janela ${dataInicial} a ${dataFinal}`,
+    debug: {
+      paginas_verificadas: pagina - 1,
+      total_pedidos_vistos: totalPedidosVistos,
+      datas_vistas_amostra: Array.from(datasVistas).sort().slice(0, 10),
+      amostra_numerosLoja: amostraNumerosLoja
+    }
   };
 }
 
