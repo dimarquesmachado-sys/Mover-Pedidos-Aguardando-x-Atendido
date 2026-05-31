@@ -103,8 +103,8 @@ async function buscarPedidoPorOrderId(orderId, dataInicial, dataFinal) {
 
   while (pagina <= MAX_PAGINAS) {
     const params = new URLSearchParams({
-      dataEmissaoInicial: dataInicial,
-      dataEmissaoFinal: dataFinal,
+      dataInicial: dataInicial,
+      dataFinal: dataFinal,
       pagina: String(pagina),
       limite: '100'
     });
