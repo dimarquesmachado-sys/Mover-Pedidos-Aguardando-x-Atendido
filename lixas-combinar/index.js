@@ -385,6 +385,61 @@ function routes(readBody) {
       return true;
     }
 
+    // POST /lixas-combinar/api/pedido/:orderId/emitir-nf  → gera NF-e do pedido
+    // Pode ser chamado manualmente (botao painel) ou automaticamente apos edicao OK
+    if (method === 'POST' && p.startsWith('/lixas-combinar/api/pedido/') && p.endsWith('/emitir-nf')) {
+      const sessao = requerAuth();
+      if (!sessao.ok) { json(res, 401, { ok: false, erro: 'nao_autenticado' }); return true; }
+
+      const orderId = p.replace('/lixas-combinar/api/pedido/', '').replace('/emitir-nf', '');
+      try {
+        const lcp = require('../auto-mensagens/lixasCombinarPendentes');
+        const venda = await lcp.buscar(orderId);
+        if (!venda.ok || !venda.data) {
+          json(res, 404, { ok: false, erro: 'venda_nao_encontrada', orderId });
+          return true;
+        }
+
+        const v = venda.data;
+        if (!v.bling_pedido_id) {
+          json(res, 400, {
+            ok: false,
+            erro: 'pedido_bling_nao_identificado',
+            mensagem: 'Edite o pedido no Bling primeiro (botao Editar Bling) - precisamos do bling_pedido_id salvo.'
+          });
+          return true;
+        }
+
+        const bp = require('./blingPedidos');
+        console.log(`[lixas-combinar emitir-nf] orderId=${orderId} pedidoBling=${v.bling_pedido_id}`);
+        const r = await bp.gerarNFe(v.bling_pedido_id);
+
+        if (!r.ok) {
+          await lcp.atualizarVenda(orderId, {
+            nf_erro: `${r.status || ''}: ${r.erro || JSON.stringify(r.detalhe || {}).slice(0,200)}`.slice(0,500)
+          });
+          json(res, 200, { ok: false, ...r });
+          return true;
+        }
+
+        // Sucesso - grava na Supabase
+        await lcp.atualizarVenda(orderId, {
+          nf_emitida_em: new Date().toISOString(),
+          nf_id: r.nfeId,
+          nf_numero: r.numero,
+          nf_serie: r.serie,
+          nf_chave: r.chave || null,
+          nf_erro: null
+        });
+
+        json(res, 200, { ok: true, ...r });
+      } catch (e) {
+        console.error('[lixas-combinar emitir-nf]', e);
+        json(res, 500, { ok: false, erro: e.message });
+      }
+      return true;
+    }
+
     // ════════════════════════════════════════════════════════════════
 
     // Rota /lixas-combinar (raiz) → redireciona pra setup
