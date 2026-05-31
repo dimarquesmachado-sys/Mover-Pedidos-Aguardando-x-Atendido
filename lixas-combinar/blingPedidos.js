@@ -382,16 +382,19 @@ async function editarPedidoComGraos({
   const valorTotalPedido = Number(pedido.total);
   const situacaoId = pedido.situacao?.id;
 
-  // 3. Valida status (nao pode estar Atendido=9 nem Cancelado=12)
-  const STATUS_BLOQUEADOS = [9, 12]; // 9=Atendido (estoque/contas lancado), 12=Cancelado
-  if (STATUS_BLOQUEADOS.includes(Number(situacaoId))) {
+  // 3. Status info (so loga, nao bloqueia - deixa Bling decidir)
+  const STATUS_BLOQUEADOS_ESTRITO = [12]; // 12=Cancelado (sempre bloquear)
+  if (STATUS_BLOQUEADOS_ESTRITO.includes(Number(situacaoId))) {
     return {
       ok: false,
       etapa: 'validar_status',
-      erro: `Pedido ${buscar.pedidoId} esta na situacao ${situacaoId} (bloqueada pra edicao). Estorne estoque/contas no Bling primeiro.`,
+      erro: `Pedido ${buscar.pedidoId} esta cancelado (situacao ${situacaoId}). Nao da pra editar.`,
       situacaoId,
       pedidoId: buscar.pedidoId
     };
+  }
+  if (Number(situacaoId) === 9) {
+    console.log(`[blingPedidos] Pedido ${buscar.pedidoId} esta em status 9 (Atendido). Tentando editar mesmo assim - se Bling rejeitar, sera necessario estornar estoque/contas.`);
   }
 
   // 4. Calcula rateio
