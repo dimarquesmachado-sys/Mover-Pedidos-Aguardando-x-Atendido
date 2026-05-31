@@ -33,6 +33,18 @@ const JANELA_MIN = Number(process.env.AUTO_MSG_JANELA_MIN || 30);
 // Limite de chars da mensagem ML (action_guide aceita até 350)
 const LIMITE_CHARS = 350;
 
+// ════════════════════════════════════════════════════════════════
+// SESSAO 7: AUTO-EMISSAO DE NF NO FLUXO IA
+// ════════════════════════════════════════════════════════════════
+// Liga/desliga a auto-emissao. NASCE DESLIGADA — Diego liga quando quiser.
+const AUTO_EMITIR_HABILITADO = (process.env.LIXAS_AUTO_EMITIR_NF_HABILITADO || 'false').toLowerCase() === 'true';
+// Confianca minima da IA pra auto-executar. Diego: 100% exato. Abaixo disso -> humano.
+const LIMIAR_CONFIANCA_AUTO = Number(process.env.LIXAS_AUTO_CONFIANCA_MIN || 100);
+// Rateio: se false (padrao, regra original "sem ajuste"), QUALQUER centavo de
+// ajuste manda pro humano. Se true, emite mesmo com ajuste de rodape (a NF
+// continua batendo o total — o ajuste eh so um desconto/acrescimo de centavos).
+const PERMITE_AJUSTE_RATEIO = (process.env.LIXAS_AUTO_PERMITE_AJUSTE_RATEIO || 'false').toLowerCase() === 'true';
+
 /**
  * Tenta montar mensagem inteligente com grãos disponíveis.
  * Se falhar (SKU nao mapeado, Bling fora, etc), retorna o TEXTO genérico.
@@ -278,7 +290,7 @@ async function rotinaACombinar() {
   }
 }
 
-module.exports = { rotinaACombinar, rotinaLerRespostas, forcarOrder, HABILITADO, TEXTO };
+module.exports = { rotinaACombinar, rotinaLerRespostas, forcarOrder, processarAutoEmissao, HABILITADO, TEXTO };
 
 /**
  * NOVO (Sessao 3): rotinaLerRespostas
@@ -298,7 +310,7 @@ async function rotinaLerRespostas() {
   _lendoRespostas = true;
 
   const inicio = Date.now();
-  const stats = { lidas: 0, novasRespostas: 0, semNovidade: 0, erros: 0, iaProcessadas: 0, iaEscalonadas: 0, iaErros: 0 };
+  const stats = { lidas: 0, novasRespostas: 0, semNovidade: 0, erros: 0, iaProcessadas: 0, iaEscalonadas: 0, iaErros: 0, autoEmitidas: 0, autoPuladasConfianca: 0, autoPuladasRateio: 0, autoFalhas: 0 };
 
   // IA opcional
   let ia = null;
@@ -461,6 +473,22 @@ async function rotinaLerRespostas() {
 
                 if (envR.ok) {
                   stats.iaProcessadas++;
+
+                  // SESSAO 7: define status conforme categoria + confianca.
+                  // IMPORTANTE: com a auto-emissao DESLIGADA, o comportamento eh
+                  // IDENTICO ao original (claro -> 'cliente_confirmou_pedido' sempre).
+                  // So quando LIGADA o claro com confianca < LIMIAR vai pra humano.
+                  const ehClaro = iaResult.categoria === 'claro';
+                  const confOk = Number(iaResult.confianca) >= LIMIAR_CONFIANCA_AUTO;
+                  let statusInicial;
+                  if (ehClaro) {
+                    statusInicial = (AUTO_EMITIR_HABILITADO && !confOk)
+                      ? 'precisa_atencao_humano'   // so com feature ligada: claro de baixa confianca -> humano
+                      : 'cliente_confirmou_pedido'; // original
+                  } else {
+                    statusInicial = 'aguardando_resposta';
+                  }
+
                   await lcp.atualizarVenda(venda.order_id, {
                     ia_categoria: iaResult.categoria,
                     ia_confianca: iaResult.confianca,
@@ -468,9 +496,20 @@ async function rotinaLerRespostas() {
                     ia_msg_enviada: msgIA,
                     ia_pedido_estruturado: iaResult.pedido_estruturado ? JSON.stringify(iaResult.pedido_estruturado) : null,
                     ia_processado_em: new Date().toISOString(),
-                    status: iaResult.categoria === 'claro' ? 'cliente_confirmou_pedido' : 'aguardando_resposta'
+                    status: statusInicial
                   });
                   console.log(`[ia] ✅ order ${venda.order_id} respondida auto: ${msgIA.length} chars, msg_id=${envR.message_id}`);
+
+                  // ── SESSAO 7: auto-emissao (claro + 100% + habilitado) ──
+                  if (ehClaro && confOk && AUTO_EMITIR_HABILITADO) {
+                    const auto = await processarAutoEmissao({ venda, iaResult, graosResult, lcp });
+                    if (auto.emitida) stats.autoEmitidas++;
+                    else if (auto.puladaRateio) stats.autoPuladasRateio++;
+                    else if (auto.puladaConfianca) stats.autoPuladasConfianca++;
+                    else stats.autoFalhas++;
+                  } else if (ehClaro && AUTO_EMITIR_HABILITADO && !confOk) {
+                    console.log(`[auto-emissao] order ${venda.order_id} claro mas confianca ${iaResult.confianca}% < ${LIMIAR_CONFIANCA_AUTO}% — humano (nao emite)`);
+                  }
                 } else {
                   stats.iaErros++;
                   console.error(`[ia] ❌ order ${venda.order_id} falhou envio: ${envR.status} ${envR.erro?.slice(0,200)}`);
@@ -510,6 +549,139 @@ async function rotinaLerRespostas() {
   } finally {
     _lendoRespostas = false;
   }
+}
+
+/**
+ * SESSAO 7: processarAutoEmissao
+ *
+ * Chamada APENAS quando a IA classificou 'claro' com confianca >= LIMIAR e a
+ * feature esta habilitada. Faz, na ordem (parando no primeiro problema):
+ *
+ *   Guarda 1  confianca (defesa extra)
+ *   Guarda 2  pedido_estruturado valido
+ *   Guarda 3  soma das quantidades == total que a IA usou (lixas_por_kit)
+ *   Guarda 4  cada grao existe nos disponiveis E tem estoque suficiente
+ *   Guarda 5  RATEIO (dry-run ANTES de qualquer escrita): se precisar ajuste
+ *             de centavo e PERMITE_AJUSTE_RATEIO=false -> humano (nao escreve nada)
+ *   Edita pedido no Bling (mesma funcao do botao "Editar Bling")
+ *   Emite NF (mesma funcao do botao laranja "Emitir NF")
+ *   Marca 'processado'
+ *
+ * Qualquer falha grava bling_erro/nf_erro e poe a venda em 'precisa_atencao_humano'
+ * (o painel mostra o erro + os botoes manuais pra voce terminar na mao).
+ *
+ * Reusa blingPedidos.editarPedidoComGraos + gerarNFe (NAO reescreve a logica).
+ *
+ * @returns {object} { emitida? , puladaRateio? , puladaConfianca? , falha? , motivo? }
+ */
+async function processarAutoEmissao({ venda, iaResult, graosResult, lcp }) {
+  const orderId = venda.order_id;
+  const bp = require('../lixas-combinar/blingPedidos');
+
+  // Guarda 1 — confianca (defesa em profundidade; o chamador ja filtra)
+  if (Number(iaResult.confianca) < LIMIAR_CONFIANCA_AUTO) {
+    await lcp.atualizarVenda(orderId, { status: 'precisa_atencao_humano' });
+    console.log(`[auto-emissao] order ${orderId} confianca ${iaResult.confianca}% < ${LIMIAR_CONFIANCA_AUTO}% — humano`);
+    return { puladaConfianca: true };
+  }
+
+  // Guarda 2 — pedido_estruturado valido
+  const graosEscolhidos = Array.isArray(iaResult.pedido_estruturado) ? iaResult.pedido_estruturado : null;
+  if (!graosEscolhidos || graosEscolhidos.length === 0) {
+    await lcp.atualizarVenda(orderId, { status: 'precisa_atencao_humano', bling_erro: 'auto: pedido_estruturado vazio/invalido' });
+    console.warn(`[auto-emissao] order ${orderId} pedido_estruturado invalido — humano`);
+    return { falha: true, motivo: 'pedido_estruturado_invalido' };
+  }
+
+  // Guarda 3 — soma confere o MESMO total que a IA usou (graosResult.lixas_por_kit)
+  const totalLixas = Number(graosResult.lixas_por_kit);
+  const somaPedido = graosEscolhidos.reduce((s, g) => s + Number(g.quantidade || 0), 0);
+  if (somaPedido !== totalLixas) {
+    await lcp.atualizarVenda(orderId, { status: 'precisa_atencao_humano', bling_erro: `auto: soma ${somaPedido} != total ${totalLixas}` });
+    console.warn(`[auto-emissao] order ${orderId} soma ${somaPedido} != total ${totalLixas} — humano`);
+    return { falha: true, motivo: 'soma_diverge' };
+  }
+
+  // Guarda 4 — cada grao existe nos disponiveis e tem estoque suficiente
+  for (const g of graosEscolhidos) {
+    const disp = graosResult.graos.find(x => String(x.grao) === String(g.grao));
+    if (!disp) {
+      await lcp.atualizarVenda(orderId, { status: 'precisa_atencao_humano', bling_erro: `auto: grao ${g.grao} indisponivel no Bling` });
+      console.warn(`[auto-emissao] order ${orderId} grao ${g.grao} indisponivel — humano`);
+      return { falha: true, motivo: 'grao_indisponivel' };
+    }
+    if (Number(disp.estoque_lixas) < Number(g.quantidade)) {
+      await lcp.atualizarVenda(orderId, { status: 'precisa_atencao_humano', bling_erro: `auto: estoque insuficiente grao ${g.grao} (tem ${disp.estoque_lixas}, pediu ${g.quantidade})` });
+      console.warn(`[auto-emissao] order ${orderId} estoque insuficiente grao ${g.grao} — humano`);
+      return { falha: true, motivo: 'estoque_insuficiente' };
+    }
+  }
+
+  // Args comuns pro blingPedidos (mesma logica da rota /editar-bling:
+  // Bling guarda pack_id em numeroLoja, entao usa pack_id se existir)
+  const idBuscaBling = venda.pack_id || orderId;
+  const dataVenda = venda.data_venda ? String(venda.data_venda).split('T')[0] : null;
+  const baseArgs = {
+    orderId: idBuscaBling,
+    graosEscolhidos,
+    graosDisponiveis: graosResult.graos,
+    unidadesPorPacote: graosResult.unidades_por_pacote,
+    descricaoBase: graosResult.descricao,
+    dataVenda
+  };
+
+  // Guarda 5 — RATEIO via dry-run ANTES de escrever nada no Bling
+  const preview = await bp.editarPedidoComGraos({ ...baseArgs, dryRun: true });
+  if (!preview.ok) {
+    await lcp.atualizarVenda(orderId, { status: 'precisa_atencao_humano', bling_erro: `auto dryrun ${preview.etapa || ''}: ${preview.erro || ''}`.slice(0, 500) });
+    console.warn(`[auto-emissao] order ${orderId} dry-run falhou (${preview.etapa}) — humano`);
+    return { falha: true, motivo: 'dryrun_falhou' };
+  }
+  if (preview.rateio?.ajuste && !PERMITE_AJUSTE_RATEIO) {
+    const aj = preview.rateio.ajuste;
+    await lcp.atualizarVenda(orderId, { status: 'precisa_atencao_humano', bling_erro: `auto: rateio precisa ${aj.tipo} de R$${aj.valor} (modo "sem ajuste") — revisar e emitir manual` });
+    console.log(`[auto-emissao] order ${orderId} rateio precisa ajuste de R$${aj.valor} e PERMITE_AJUSTE_RATEIO=false — humano`);
+    return { puladaRateio: true };
+  }
+
+  // Edita o pedido de verdade
+  const edit = await bp.editarPedidoComGraos({ ...baseArgs, dryRun: false });
+  if (!edit.ok) {
+    await lcp.atualizarVenda(orderId, { status: 'precisa_atencao_humano', bling_erro: `auto edit ${edit.etapa || ''}: ${edit.erro || ''}`.slice(0, 500) });
+    console.error(`[auto-emissao] order ${orderId} edit falhou (${edit.etapa}): ${edit.erro}`);
+    return { falha: true, motivo: 'edit_falhou' };
+  }
+  await lcp.atualizarVenda(orderId, {
+    bling_pedido_id: String(edit.pedidoId),
+    bling_editado_em: new Date().toISOString(),
+    bling_erro: null
+  });
+
+  // Emite a NF (NF transmitida pra SEFAZ — irreversivel)
+  const nf = await bp.gerarNFe(edit.pedidoId);
+  if (!nf.ok) {
+    // Pedido ja foi editado: deixa o bling_pedido_id salvo pro painel mostrar
+    // o botao laranja e voce emitir na mao.
+    await lcp.atualizarVenda(orderId, {
+      status: 'precisa_atencao_humano',
+      nf_erro: `${nf.status || ''}: ${nf.erro || JSON.stringify(nf.detalhe || {}).slice(0, 200)}`.slice(0, 500)
+    });
+    console.error(`[auto-emissao] order ${orderId} pedido ${edit.pedidoId} editado mas NF falhou: ${nf.status} ${nf.erro}`);
+    return { falha: true, motivo: 'nf_falhou', pedidoId: edit.pedidoId };
+  }
+
+  // Sucesso total
+  await lcp.atualizarVenda(orderId, {
+    nf_emitida_em: new Date().toISOString(),
+    nf_id: nf.nfeId,
+    nf_numero: nf.numero,
+    nf_serie: nf.serie,
+    nf_chave: nf.chave || null,
+    nf_erro: null,
+    status: 'processado'
+  });
+  console.log(`[auto-emissao] ✅ order ${orderId} → pedido ${edit.pedidoId} editado + NF ${nf.numero}/${nf.serie} emitida (auto)`);
+  return { emitida: true, pedidoId: edit.pedidoId, nfNumero: nf.numero };
 }
 
 /**
