@@ -446,6 +446,43 @@ async function editarPedidoComGraos({
   };
 }
 
+/**
+ * Emite NF-e a partir de um pedido de venda.
+ * Bling endpoint: POST /pedidos/vendas/{idPedidoVenda}/gerar-nfe
+ *
+ * IMPORTANTE: requer scope adicional no app Bling = "Notas Fiscais Eletronicas".
+ * Sem o scope retorna HTTP 403 insufficient_scope.
+ *
+ * @param {number|string} pedidoId - ID do pedido Bling (NAO orderId)
+ * @returns {object} { ok, status, nfeId, numero, serie, chave, raw }
+ */
+async function gerarNFe(pedidoId) {
+  if (!pedidoId) return { ok: false, erro: 'pedidoId obrigatorio' };
+
+  const r = await fetchBling('POST', `/pedidos/vendas/${pedidoId}/gerar-nfe`, {});
+
+  if (!r.ok) {
+    return {
+      ok: false,
+      status: r.status,
+      erro: `Bling HTTP ${r.status} gerando NFe`,
+      detalhe: r.data
+    };
+  }
+
+  // Resposta tipica: { data: { id, numero, serie, chaveAcesso? } }
+  const data = r.data?.data || r.data || {};
+  return {
+    ok: true,
+    status: r.status,
+    nfeId: data.id,
+    numero: data.numero,
+    serie: data.serie,
+    chave: data.chaveAcesso || data.chave,
+    raw: r.data
+  };
+}
+
 module.exports = {
   buscarPedidoPorOrderId,
   obterPedidoCompleto,
@@ -453,5 +490,6 @@ module.exports = {
   montarBodyPUT,
   atualizarPedido,
   editarPedidoComGraos,
+  gerarNFe,
   truncarDecimais
 };
