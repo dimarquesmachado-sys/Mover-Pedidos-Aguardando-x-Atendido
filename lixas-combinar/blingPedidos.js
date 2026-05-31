@@ -181,12 +181,22 @@ async function obterPedidoCompleto(pedidoId) {
 
 /**
  * Trunca um numero pra max N decimais (sem arredondar pra cima — corta).
+ * Usado SOMENTE pro preco unitario (que pode ter ate 10 decimais).
  * Ex: truncarDecimais(0.789, 10) = 0.789
  *     truncarDecimais(11.27142857142857, 10) = 11.2714285714
  */
 function truncarDecimais(num, maxDecimais = MAX_DECIMAIS) {
   const fator = Math.pow(10, maxDecimais);
   return Math.trunc(num * fator) / fator;
+}
+
+/**
+ * Arredonda matematicamente pra 2 decimais (banker's rounding nao - usa Math.round padrao).
+ * Usado pro CALCULO DE SUBTOTAIS (evita erros de floating-point).
+ * Ex: arredondar2(78.89999999) = 78.9
+ */
+function arredondar2(num) {
+  return Math.round(num * 100) / 100;
 }
 
 /**
@@ -244,8 +254,8 @@ function calcularRateio({ valorTotalPedido, graosEscolhidos, graosDisponiveis, u
       return { ok: false, erro: `Grao ${g.grao} quantidade ${g.quantidade} nao eh multiplo de ${mult}` };
     }
 
-    const subtotal = truncarDecimais(precoUnitPacote * quantidade, 2); // subtotal em 2 dec
-    somaSubtotais = truncarDecimais(somaSubtotais + subtotal, 2);
+    const subtotal = arredondar2(precoUnitPacote * quantidade);
+    somaSubtotais = arredondar2(somaSubtotais + subtotal);
 
     linhas.push({
       produto: { id: Number(filho.id_bling) },
@@ -257,10 +267,8 @@ function calcularRateio({ valorTotalPedido, graosEscolhidos, graosDisponiveis, u
     });
   }
 
-  // 5. Calcula ajuste se nao bater
-  // Bling vai calcular subtotal_itens = somaSubtotais (com 2 decimais arredondado)
-  // Se != valorTotalPedido, lanca desconto OU acrescimo
-  const diff = truncarDecimais(valorTotalPedido - somaSubtotais, 2);
+  // 5. Calcula ajuste se nao bater (usa arredondamento matematico, evita FP bug)
+  const diff = arredondar2(valorTotalPedido - somaSubtotais);
   let ajuste = null;
   if (Math.abs(diff) >= 0.01) {
     ajuste = {
