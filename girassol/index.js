@@ -184,6 +184,27 @@ function routes(readBody) {
       } catch (e) { json(res, 500, { error: e.message }); }
       return true;
     }
+    // Debug SintegraWS: GET /debug/sintegra/:cnpj/:uf
+    if (method === 'GET' && p.startsWith('/debug/sintegra/')) {
+      const partes = p.split('/');
+      const cnpj = partes[3];
+      const uf = partes[4];
+      if (!cnpj || !uf) {
+        json(res, 400, { ok: false, erro: 'Uso: /debug/sintegra/:cnpj/:uf' });
+        return true;
+      }
+      try {
+        const { getIEPorCNPJ } = require('./nfBlingApi');
+        const resultado = await getIEPorCNPJ(cnpj, uf);
+        json(res, 200, {
+          cnpj, uf, resultado,
+          observacao: resultado
+            ? `IE encontrada: "${resultado.ie}" (contribuinte=${resultado.contribuinte})`
+            : 'IE não encontrada — SintegraWS pode ter falhado ou retornou vazio. Veja os logs do servidor.'
+        });
+      } catch (e) { json(res, 500, { error: e.message }); }
+      return true;
+    }
     // DEBUG TEMPORÁRIO: shipment cru do ML (use o shipment_id que aparece no log)
     if (method === 'GET' && p.startsWith('/debug/shipment/')) {
       const idShipment = p.split('/').pop();
