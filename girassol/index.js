@@ -255,6 +255,16 @@ function routes(readBody) {
       return true;
     }
 
+    // PROBE — testa se o Render fala com a API interna do Bling via cookie (somente leitura)
+    if (method === 'GET' && p === '/debug/staging-list') {
+      try {
+        const { listarStaging } = require('./stagingImport');
+        const resultado = await listarStaging();
+        json(res, 200, resultado);
+      } catch (e) { json(res, 500, { error: e.message }); }
+      return true;
+    }
+
     return false; // não tratou
   };
 }
