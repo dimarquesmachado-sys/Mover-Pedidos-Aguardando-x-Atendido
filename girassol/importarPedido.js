@@ -113,6 +113,7 @@ async function buscarProdutoPorSku(token, sku) {
 
   // 1) match por código
   let r = await blingGet(token, `/produtos?codigo=${encodeURIComponent(sku)}&limite=5`);
+  const stCod = r.status;
   let lista = r.status === 200 ? (r.data.data || []) : [];
   let achado = lista.find(p => String(p.codigo) === String(sku)) || lista[0];
   if (achado) {
@@ -122,6 +123,7 @@ async function buscarProdutoPorSku(token, sku) {
 
   // 2) fallback: pesquisa (código + nome)
   r = await blingGet(token, `/produtos?pesquisa=${encodeURIComponent(sku)}&limite=5`);
+  const stPesq = r.status;
   lista = r.status === 200 ? (r.data.data || []) : [];
   achado = lista.find(p => String(p.codigo) === String(sku));
   if (achado) {
@@ -129,9 +131,10 @@ async function buscarProdutoPorSku(token, sku) {
              diag: `OK via pesquisa= (codigo no Bling: "${achado.codigo}")` };
   }
 
-  // 3) nada — devolve candidatos pra diagnóstico
+  // 3) nada — devolve candidatos + STATUS HTTP (pra detectar falta de escopo)
+  const erroCorpo = r.status !== 200 ? ` | corpo: ${JSON.stringify(r.data).slice(0, 200)}` : '';
   const cand = lista.slice(0, 3).map(p => `${p.codigo}="${(p.nome || '').slice(0, 30)}"`).join(' | ') || '(nenhum)';
-  return { prod: null, diag: `NAO achou produto. Candidatos da pesquisa: ${cand}` };
+  return { prod: null, diag: `NAO achou. HTTP codigo=${stCod} pesquisa=${stPesq} | candidatos: ${cand}${erroCorpo}` };
 }
 
 // ── Bling: achar contato (read) ───────────────────────────────────────
@@ -181,6 +184,10 @@ async function testarImportarPedido(numeroML, confirmar = false) {
   const log = [];
   const blingToken = await garantirToken();
   const mlToken    = await garantirTokenML();
+
+  // diagnóstico de escopo: o app do Mover-Pedidos enxerga /produtos?
+  const _scopeResp = await blingGet(blingToken, `/produtos?limite=1`);
+  const checkProdutos = { httpStatus: _scopeResp.status, corpo: _scopeResp.status !== 200 ? JSON.stringify(_scopeResp.data).slice(0,250) : 'OK (200) — escopo Produtos presente' };
 
   const order = await buscarOrder(mlToken, numeroML);
   const { itens: itensML, ordersIds, ehPack } = await coletarItensML(mlToken, order);
@@ -248,6 +255,7 @@ async function testarImportarPedido(numeroML, confirmar = false) {
       mapeamentoItens: mapeamento,
       cobrancaML: { nome: billing.nome, doc: billing.doc },
       enderecoCru: endereco.raw,
+      checkProdutos,
       payloadQueSeriaEnviado: payload,
       log,
       proximo: 'Se o mapeamento estiver certo, rode com ?confirmar=1 para criar'
