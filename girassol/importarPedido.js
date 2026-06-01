@@ -2,16 +2,11 @@
 // ──────────────────────────────────────────────────────────────────────
 // TESTE — importar pedido do ML criando o pedido de venda via API v3.
 //
-// Objetivo do teste: descobrir se CRIAR o pedido com `numeroLoja` faz o
-// Bling marcar o pedido como "Já importado" no staging (sem duplicar).
-//
-// Rota (sem prefixo, padrão Girassol):
 //   GET /debug/teste-importar/:numeroML              → DRY-RUN (só mostra, NÃO cria)
 //   GET /debug/teste-importar/:numeroML?confirmar=1  → cria de verdade
 //
-// Em DRY-RUN: faz só LEITURAS (ML + busca produto/contato no Bling) e
-// devolve o payload que SERIA enviado. Não grava nada.
-// Com confirmar=1: cria contato (se não existir) e cria o pedido.
+// v2: detecta PF/PJ pelo documento, busca produto por código + pesquisa
+//     (com diagnóstico), e devolve o endereço cru pra diagnosticar.
 // ──────────────────────────────────────────────────────────────────────
 
 const fetch = require('node-fetch');
@@ -53,7 +48,6 @@ async function buscarOrder(mlToken, numeroML) {
   return data;
 }
 
-// Junta os itens de todas as orders do pack (se for pack)
 async function coletarItensML(mlToken, order) {
   const orders = [order];
   if (order.pack_id) {
@@ -83,47 +77,66 @@ async function coletarItensML(mlToken, order) {
   return { itens, ordersIds: orders.map(o => String(o.id)), ehPack: !!order.pack_id };
 }
 
-// ── ML: cobrança (nome + CPF) ─────────────────────────────────────────
+// ── ML: cobrança (nome + documento) ───────────────────────────────────
 async function buscarBilling(mlToken, numeroML) {
   const { status, data } = await mlGet(mlToken, `/orders/${numeroML}/billing_info`, { 'x-version': '2' });
-  if (status !== 200) return { cpf: null, nome: null, raw: { status, data } };
+  if (status !== 200) return { doc: null, nome: null };
   const bi = data?.buyer?.billing_info || data?.billing_info || data || {};
   const ids = bi.identification || bi.doc || {};
-  const cpf = (bi.doc_number || ids.number || '').toString().replace(/\D/g, '') || null;
-  const nome = [bi.first_name || bi.name, bi.last_name].filter(Boolean).join(' ').trim() || null;
-  return { cpf, nome, raw: bi };
+  const doc = (bi.doc_number || ids.number || '').toString().replace(/\D/g, '') || null;
+  const nome = [bi.first_name || bi.name || bi.business_name, bi.last_name].filter(Boolean).join(' ').trim() || null;
+  return { doc, nome };
 }
 
 // ── ML: endereço de entrega (do shipment) ─────────────────────────────
 async function buscarEndereco(mlToken, shipmentId) {
-  if (!shipmentId) return null;
+  if (!shipmentId) return { parsed: null, raw: null };
   const { status, data } = await mlGet(mlToken, `/shipments/${shipmentId}`, { 'x-format-new': 'true' });
-  if (status !== 200) return null;
+  if (status !== 200) return { parsed: null, raw: { status } };
   const r = data?.receiver_address || {};
-  return {
+  const parsed = {
     nome:        data?.receiver_name || r.receiver_name || '',
     endereco:    r.street_name || r.address_line || '',
-    numero:      r.street_number || r.number || 'SN',
+    numero:      (r.street_number || r.number || 'SN').toString(),
     complemento: r.comment || '',
     bairro:      r.neighborhood?.name || r.neighborhood || '',
     municipio:   r.city?.name || r.city || '',
-    uf:          r.state?.id?.replace?.('BR-', '') || r.state?.name || '',
+    uf:          (r.state?.id || r.state?.name || '').toString().replace('BR-', ''),
     cep:         (r.zip_code || '').toString().replace(/\D/g, '')
   };
+  return { parsed, raw: r };
 }
 
-// ── Bling: produto por SKU ────────────────────────────────────────────
+// ── Bling: produto por SKU (com diagnóstico) ──────────────────────────
 async function buscarProdutoPorSku(token, sku) {
-  if (!sku) return null;
-  const { status, data } = await blingGet(token, `/produtos?codigo=${encodeURIComponent(sku)}&limite=1`);
-  if (status !== 200) return null;
-  const p = (data.data || [])[0];
-  return p ? { id: p.id, unidade: p.unidade || 'UN', nome: p.nome } : null;
+  if (!sku) return { prod: null, diag: 'item sem SKU no ML' };
+
+  // 1) match por código
+  let r = await blingGet(token, `/produtos?codigo=${encodeURIComponent(sku)}&limite=5`);
+  let lista = r.status === 200 ? (r.data.data || []) : [];
+  let achado = lista.find(p => String(p.codigo) === String(sku)) || lista[0];
+  if (achado) {
+    return { prod: { id: achado.id, unidade: achado.unidade || 'UN', nome: achado.nome },
+             diag: `OK via codigo= (codigo no Bling: "${achado.codigo}")` };
+  }
+
+  // 2) fallback: pesquisa (código + nome)
+  r = await blingGet(token, `/produtos?pesquisa=${encodeURIComponent(sku)}&limite=5`);
+  lista = r.status === 200 ? (r.data.data || []) : [];
+  achado = lista.find(p => String(p.codigo) === String(sku));
+  if (achado) {
+    return { prod: { id: achado.id, unidade: achado.unidade || 'UN', nome: achado.nome },
+             diag: `OK via pesquisa= (codigo no Bling: "${achado.codigo}")` };
+  }
+
+  // 3) nada — devolve candidatos pra diagnóstico
+  const cand = lista.slice(0, 3).map(p => `${p.codigo}="${(p.nome || '').slice(0, 30)}"`).join(' | ') || '(nenhum)';
+  return { prod: null, diag: `NAO achou produto. Candidatos da pesquisa: ${cand}` };
 }
 
 // ── Bling: achar contato (read) ───────────────────────────────────────
-async function acharContato(token, cpf, nome) {
-  const termo = cpf || nome;
+async function acharContato(token, doc, nome) {
+  const termo = doc || nome;
   if (!termo) return null;
   const { status, data } = await blingGet(token, `/contatos?pesquisa=${encodeURIComponent(termo)}&limite=1`);
   if (status !== 200) return null;
@@ -131,10 +144,12 @@ async function acharContato(token, cpf, nome) {
   return c ? { id: c.id, nome: c.nome } : null;
 }
 
-// ── Bling: criar contato (write) ──────────────────────────────────────
-async function criarContato(token, { nome, cpf }) {
-  const payload = { nome: nome || 'Cliente Mercado Livre', tipo: 'F' };
-  if (cpf) payload.numeroDocumento = cpf;
+// ── Bling: criar contato (write) — detecta PF/PJ ──────────────────────
+async function criarContato(token, { nome, doc }) {
+  const numeros = (doc || '').replace(/\D/g, '');
+  const tipo = numeros.length === 14 ? 'J' : 'F';
+  const payload = { nome: nome || 'Cliente Mercado Livre', tipo };
+  if (numeros) payload.numeroDocumento = numeros;
   const resp = await fetch(`${BLING_API}/contatos`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -144,7 +159,7 @@ async function criarContato(token, { nome, cpf }) {
   if (resp.status < 200 || resp.status >= 300) {
     throw new Error(`Bling criar contato HTTP ${resp.status}: ${JSON.stringify(data).slice(0, 250)}`);
   }
-  return { id: data?.data?.id, criado: true };
+  return { id: data?.data?.id, criado: true, tipo };
 }
 
 // ── Bling: criar pedido (write) ───────────────────────────────────────
@@ -167,7 +182,6 @@ async function testarImportarPedido(numeroML, confirmar = false) {
   const blingToken = await garantirToken();
   const mlToken    = await garantirTokenML();
 
-  // 1) ML: order + itens (trata pack) + cobrança + endereço
   const order = await buscarOrder(mlToken, numeroML);
   const { itens: itensML, ordersIds, ehPack } = await coletarItensML(mlToken, order);
   log.push(`ML order ${numeroML} | pack=${ehPack} | orders=${ordersIds.join(',')} | itens=${itensML.length}`);
@@ -175,41 +189,38 @@ async function testarImportarPedido(numeroML, confirmar = false) {
   const billing  = await buscarBilling(mlToken, numeroML);
   const shipId   = order?.shipping?.id || null;
   const endereco = await buscarEndereco(mlToken, shipId);
-  const nomeCliente = billing.nome || endereco?.nome || order?.buyer?.nickname || 'Cliente Mercado Livre';
+  const nomeCliente = billing.nome || endereco.parsed?.nome || order?.buyer?.nickname || 'Cliente Mercado Livre';
+  const tipoCliente = (billing.doc || '').length === 14 ? 'PJ' : 'PF';
 
-  // 2) Bling: mapeia cada item por SKU → produto.id (free-text se não achar)
+  // mapeia itens por SKU
   const itensBling = [];
   const mapeamento = [];
   for (const it of itensML) {
-    const prod = await buscarProdutoPorSku(blingToken, it.sku);
+    const { prod, diag } = await buscarProdutoPorSku(blingToken, it.sku);
     if (prod) {
-      itensBling.push({
-        codigo: it.sku, descricao: it.titulo, unidade: prod.unidade,
-        quantidade: it.quantidade, valor: it.valor, produto: { id: prod.id }
-      });
-      mapeamento.push({ sku: it.sku, mlb: it.mlb, produtoId: prod.id, ok: true });
+      itensBling.push({ codigo: it.sku, descricao: it.titulo, unidade: prod.unidade,
+                        quantidade: it.quantidade, valor: it.valor, produto: { id: prod.id } });
+      mapeamento.push({ sku: it.sku, mlb: it.mlb, produtoId: prod.id, ok: true, diag });
     } else {
-      itensBling.push({
-        descricao: it.titulo || `Item ML ${it.mlb || ''}`, unidade: 'UN',
-        quantidade: it.quantidade, valor: it.valor
-      });
-      mapeamento.push({ sku: it.sku, mlb: it.mlb, produtoId: null, ok: false });
+      itensBling.push({ descricao: it.titulo || `Item ML ${it.mlb || ''}`, unidade: 'UN',
+                        quantidade: it.quantidade, valor: it.valor });
+      mapeamento.push({ sku: it.sku, mlb: it.mlb, produtoId: null, ok: false, diag });
     }
   }
 
-  // 3) contato — só LÊ no dry-run; cria no confirmar
-  let contato = await acharContato(blingToken, billing.cpf, nomeCliente);
+  // contato — só lê no dry-run; cria no confirmar
+  let contato = await acharContato(blingToken, billing.doc, nomeCliente);
   let contatoStatus;
   if (contato) {
     contatoStatus = `encontrado id=${contato.id} (${contato.nome})`;
   } else if (confirmar) {
-    contato = await criarContato(blingToken, { nome: nomeCliente, cpf: billing.cpf });
-    contatoStatus = `CRIADO id=${contato.id}`;
+    contato = await criarContato(blingToken, { nome: nomeCliente, doc: billing.doc });
+    contatoStatus = `CRIADO id=${contato.id} tipo=${contato.tipo}`;
   } else {
-    contatoStatus = `NÃO existe — seria criado: { nome:"${nomeCliente}", cpf:"${billing.cpf || '—'}" }`;
+    contatoStatus = `NAO existe — seria criado: { nome:"${nomeCliente}", doc:"${billing.doc || '—'}", tipo:${tipoCliente} }`;
   }
 
-  // 4) monta o payload do pedido
+  // monta payload
   const dataPedido = (order.date_created || new Date().toISOString()).split('T')[0];
   const payload = {
     numeroLoja: String(numeroML),
@@ -218,35 +229,32 @@ async function testarImportarPedido(numeroML, confirmar = false) {
     contato: contato ? { id: contato.id } : undefined,
     itens: itensBling,
     intermediador: { cnpj: INTERMEDIADOR_CNPJ, nomeUsuario: INTERMEDIADOR_NOME },
-    observacoes: `[TESTE API] Nº Pedido na Loja: ${numeroML}` + (ehPack ? ` | pack: ${ordersIds.join(',')}` : '')
+    observacoes: `[TESTE API] No Pedido na Loja: ${numeroML}` + (ehPack ? ` | pack: ${ordersIds.join(',')}` : '')
   };
-  if (endereco) {
-    payload.transporte = {
-      fretePorConta: 0, frete: 0,
-      etiqueta: {
-        nome: endereco.nome || nomeCliente, endereco: endereco.endereco,
-        numero: endereco.numero, complemento: endereco.complemento,
-        bairro: endereco.bairro, municipio: endereco.municipio,
-        uf: endereco.uf, cep: endereco.cep
-      }
-    };
+  if (endereco.parsed) {
+    payload.transporte = { fretePorConta: 0, frete: 0, etiqueta: {
+      nome: endereco.parsed.nome || nomeCliente, endereco: endereco.parsed.endereco,
+      numero: endereco.parsed.numero, complemento: endereco.parsed.complemento,
+      bairro: endereco.parsed.bairro, municipio: endereco.parsed.municipio,
+      uf: endereco.parsed.uf, cep: endereco.parsed.cep
+    } };
   }
 
-  // 5) DRY-RUN x criar
   if (!confirmar) {
     return {
       modo: 'DRY-RUN (nada foi gravado)',
-      numeroML, ehPack, ordersIds,
+      numeroML, ehPack, ordersIds, tipoCliente,
       contato: contatoStatus,
       mapeamentoItens: mapeamento,
-      cobrancaML: { nome: billing.nome, cpf: billing.cpf },
+      cobrancaML: { nome: billing.nome, doc: billing.doc },
+      enderecoCru: endereco.raw,
       payloadQueSeriaEnviado: payload,
       log,
-      proximo: `Se o mapeamento estiver certo, rode com ?confirmar=1 para criar`
+      proximo: 'Se o mapeamento estiver certo, rode com ?confirmar=1 para criar'
     };
   }
 
-  if (!payload.contato) throw new Error('Sem contato.id — não dá pra criar o pedido');
+  if (!payload.contato) throw new Error('Sem contato.id — nao da pra criar o pedido');
   const criado = await criarPedido(blingToken, payload);
   return {
     modo: 'CRIADO',
@@ -255,7 +263,7 @@ async function testarImportarPedido(numeroML, confirmar = false) {
     contato: contatoStatus,
     mapeamentoItens: mapeamento,
     log,
-    proximo: `Agora abra o vendas.lojas.virtuais.php e veja se o pedido ${numeroML} virou "Já importado" ou continuou idImportado=0`
+    proximo: `Abra o vendas.lojas.virtuais.php e veja se o pedido ${numeroML} virou "Ja importado" ou continuou idImportado=0`
   };
 }
 
