@@ -10,6 +10,7 @@ const { gerarTokenInicial, garantirToken } = require('./tokenManager');
 const { gerarTokenInicialNF, garantirTokenNF } = require('./nfTokenManager');
 const { trocarCodigoPorToken, gerarUrlAutorizacao, garantirTokenML } = require('./mlTokenManager');
 const { rotinaNFeML, enviarNFeUnica } = require('./nfeMlFluxo');
+const { rotinaImportStaging } = require('./stagingImport');
 
 // ── Crons do Girassol ─────────────────────────────────────────────────
 const crons = {
@@ -18,7 +19,8 @@ const crons = {
   manha:       ['0 6 * * *', '30 6 * * *', '0 7 * * *',       // F2 às 06:00, 06:30, 07:00
                 '*/15 6-23 * * *'],                           // F2 a cada 15 min diurno
   corrigirNFs: '*/5 6-23 * * *',                              // Corrigir-NFs a cada 5 min
-  nfeMl:       '0,10,20,30,40,50 6-23 * * *'                  // F3 NF-e→ML a cada 10 min
+  nfeMl:       '0,10,20,30,40,50 6-23 * * *',                 // F3 NF-e→ML a cada 10 min
+  importStaging: '*/30 6-23 * * *'                            // Importa parados do staging a cada 30 min
 };
 
 // ── Helpers HTTP locais ───────────────────────────────────────────────
@@ -294,6 +296,21 @@ function routes(readBody) {
       return true;
     }
 
+    // Rodar importador do staging manualmente (espera e devolve resumo)
+    if (method === 'GET' && p === '/debug/run-import') {
+      try {
+        const forcarAgora = urlObj.searchParams.get('agora') === '1';
+        const resumo = await rotinaImportStaging({ forcarAgora });
+        json(res, 200, resumo);
+      } catch (e) { json(res, 500, { error: e.message }); }
+      return true;
+    }
+    if (method === 'POST' && p === '/run/import-staging') {
+      rotinaImportStaging().catch(console.error);
+      json(res, 202, { queued: 'rotinaImportStaging' });
+      return true;
+    }
+
     return false; // não tratou
   };
 }
@@ -306,7 +323,8 @@ module.exports = {
     rotinaVirada,
     rotinaManha,
     corrigirNFs: corrigirNFsPendentes,
-    nfeMl: rotinaNFeML
+    nfeMl: rotinaNFeML,
+    importStaging: rotinaImportStaging
   },
   routes,
   crons
