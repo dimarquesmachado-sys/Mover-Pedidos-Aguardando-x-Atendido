@@ -1,17 +1,16 @@
 'use strict';
 
 /**
- * Módulo GOOD Import — Mover Pedidos + Corrigir-NFs + F3 NF-e→ML
+ * Módulo GOOD Import — Mover Pedidos + Corrigir-NFs
  *
  * Expõe a interface padrão usada pelo orquestrador raiz:
- * - rotinas: { rotinaExpediente, rotinaVirada, rotinaManha, corrigirNFs, nfeMl }
- * - routes: função que registra as rotas HTTP da empresa
- * - crons: configuração dos crons (timing)
+ *   - rotinas: { rotinaExpediente, rotinaVirada, rotinaManha, corrigirNFs }
+ *   - routes:  função que registra as rotas HTTP da empresa
+ *   - crons:   configuração dos crons (timing)
  */
 
 const { rotinaExpediente, rotinaVirada, rotinaManha } = require('./fluxos');
-const { corrigirNFsPendentes } = require('./nfFluxos');
-const { rotinaNFeML, enviarNFeUnica } = require('./nfeMlFluxo');
+const { corrigirNFsPendentes, retryNFManual, getEstadoRetrySEFAZ } = require('./nfFluxos');
 const { garantirToken, gerarTokenInicial } = require('./tokenManager');
 const { gerarTokenInicialNF, garantirTokenNF } = require('./nfTokenManager');
 const { garantirTokenML, trocarCodigoPorToken,
@@ -24,8 +23,7 @@ const crons = {
   virada:      '10 0 * * *',                                  // F2 às 00:10
   manha:       ['0 6 * * *', '30 6 * * *', '0 7 * * *',       // F2 às 06:00, 06:30, 07:00
                 '*/15 6-23 * * *'],                           // F2 a cada 15 min diurno
-  corrigirNFs: '*/5 6-23 * * *',                              // Corrigir-NFs a cada 5 min
-  nfeMl:       '3-59/10 6-23 * * *'                           // F3 NF-e→ML a cada 10 min (minuto 3,13,23...)
+  corrigirNFs: '*/5 6-23 * * *'                               // Corrigir-NFs a cada 5 min
 };
 
 // ── Helpers HTTP locais ───────────────────────────────────────────────
@@ -76,7 +74,7 @@ function routes(readBody) {
     }
     if (p === '/good/callback-nf' && method === 'GET') {
       const code = urlObj.searchParams.get('code');
-      if (!code) { html(res, 400, '<h2>❌ AMB NF: Código não encontrado</h2>'); return true; }
+      if (!code) { html(res, 400, '<h2>❌ GOOD NF: Código não encontrado</h2>'); return true; }
       try {
         await gerarTokenInicialNF(code);
         html(res, 200, '<h2>✅ GOOD: Token Bling NF obtido. Pode fechar.</h2>');
@@ -95,7 +93,7 @@ function routes(readBody) {
     }
     if (p === '/good/callback-ml' && method === 'GET') {
       const code = urlObj.searchParams.get('code');
-      if (!code) { html(res, 400, '<h2>❌ AMB ML: Código não encontrado</h2>'); return true; }
+      if (!code) { html(res, 400, '<h2>❌ GOOD ML: Código não encontrado</h2>'); return true; }
       try {
         await trocarCodigoPorToken(code);
         html(res, 200, '<h2>✅ GOOD: Token ML obtido. Pode fechar.</h2>');
@@ -125,14 +123,25 @@ function routes(readBody) {
         json(res, 202, { queued: 'GOOD corrigirNFsPendentes' });
         return true;
       }
-      if (p === '/good/run/nfe-ml') {
-        rotinaNFeML().catch(console.error);
-        json(res, 202, { queued: 'GOOD rotinaNFeML' });
+      // Retry manual de UMA NF rejeitada por SEFAZ: POST /good/run/retry-nf/:id
+      if (p.startsWith('/good/run/retry-nf/')) {
+        const idNF = p.split('/').pop();
+        if (!idNF || !/^\d+$/.test(idNF)) { json(res, 400, { ok: false, erro: 'ID da NF inválido' }); return true; }
+        try {
+          const r = await retryNFManual(idNF);
+          json(res, r.ok ? 200 : 400, r);
+        } catch (e) {
+          json(res, 500, { ok: false, erro: e.message });
+        }
         return true;
       }
     }
 
     // ─── Debug ─────────────────────────────────────────────────────
+    if (method === 'GET' && p === '/good/debug/retry-sefaz') {
+      json(res, 200, getEstadoRetrySEFAZ());
+      return true;
+    }
     if (method === 'GET' && p === '/good/debug/token') {
       try {
         const token = await garantirToken();
@@ -173,29 +182,19 @@ function routes(readBody) {
       } catch (e) { json(res, 500, { error: e.message }); }
       return true;
     }
-    // Envio único de NF-e → ML (debug/manual)
-    if (method === 'GET' && p.startsWith('/good/debug/enviar-nfe/')) {
-      const nfeId = p.split('/').pop();
-      try {
-        const resultado = await enviarNFeUnica(nfeId);
-        json(res, 200, resultado);
-      } catch (e) { json(res, 500, { error: e.message }); }
-      return true;
-    }
 
     return false;
   };
 }
 
 module.exports = {
-  id: 'good',
-  nome: 'GOOD Import',
+  id:    'good',
+  nome:  'GOOD Import',
   rotinas: {
     rotinaExpediente,
     rotinaVirada,
     rotinaManha,
-    corrigirNFs: corrigirNFsPendentes,
-    nfeMl: rotinaNFeML
+    corrigirNFs: corrigirNFsPendentes
   },
   routes,
   crons
