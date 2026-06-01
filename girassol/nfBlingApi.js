@@ -9,14 +9,14 @@ const fetch = require('node-fetch');
 const { aplicarCorrecaoCidade } = require('../lib/correcoesCidades');
 
 const BLING_API = 'https://api.bling.com.br/Api/v3';
-const PAUSA_MS  = parseInt(process.env.NF_PAUSA_MS || '700');
-
-const SINTEGRA_TOKEN       = process.env.SINTEGRA_TOKEN || '';
+const PAUSA_MS = parseInt(process.env.NF_PAUSA_MS || '700');
+const SINTEGRA_TOKEN = process.env.SINTEGRA_TOKEN || '';
 const NF_INTERMEDIADOR_CNPJ = process.env.NF_INTERMEDIADOR_CNPJ || '03007331000141';
 const NF_INTERMEDIADOR_NOME = process.env.NF_INTERMEDIADOR_NOME || 'MAGAZINEGIRASSOL';
+// Janela de dias pra trás na busca de NFs a corrigir (padrão 7 dias)
+const NF_JANELA_DIAS = parseInt(process.env.NF_JANELA_DIAS || '7');
 
 let _ultimaReqNF = 0;
-
 function sleepNF(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 async function esperarSlotNF(minMs) {
@@ -28,10 +28,8 @@ async function esperarSlotNF(minMs) {
 
 async function fetchComRetryNF(url, options, ctx, tentativas = 4) {
   let ultimoErro = null;
-
   for (let t = 1; t <= tentativas; t++) {
     await esperarSlotNF(options.method === 'GET' || !options.method ? 300 : PAUSA_MS);
-
     let resp;
     try {
       resp = await fetch(url, options);
@@ -42,33 +40,29 @@ async function fetchComRetryNF(url, options, ctx, tentativas = 4) {
       await sleepNF(1000 * t);
       continue;
     }
-
     if (resp.status >= 200 && resp.status < 300) return resp;
     if (resp.status === 401) throw Object.assign(new Error('TOKEN_EXPIRADO'), { code: 401 });
-
     if (resp.status === 429) {
       console.warn(`[nfBlingApi] HTTP 429 em ${ctx} (tentativa ${t}/${tentativas}) — aguardando`);
       if (t === tentativas) throw new Error(`API Bling NF (${ctx}) HTTP 429 após ${tentativas} tentativas`);
       await sleepNF(2000 * t);
       continue;
     }
-
     const txt = await resp.text();
     console.error(`[nfBlingApi] HTTP ${resp.status} em ${ctx}:`, txt.slice(0, 300));
     if (t === tentativas) throw new Error(`API Bling NF (${ctx}) HTTP ${resp.status}`);
     await sleepNF(1000 * t);
   }
-
   throw new Error(`API Bling NF (${ctx}) falhou após ${tentativas} tentativas${ultimoErro ? ': ' + ultimoErro.message : ''}`);
 }
 
 // ── Listar NFs candidatas a corrigir ─────────────────────────────────
 // situacoes 1=pendente, 4=rejeitada, 5=denegada
+// Janela configurável via NF_JANELA_DIAS (padrão 7 dias)
 async function getNFsParaCorrigir(token) {
   const situacoes = [1, 4, 5];
-  const ontem = new Date(Date.now() - 24*60*60*1000);
+  const dataLimite = new Date(Date.now() - NF_JANELA_DIAS * 24*60*60*1000);
   let todas = [];
-
   for (const sit of situacoes) {
     const url = `${BLING_API}/nfe?situacao=${sit}&limite=100&pagina=1`;
     const resp = await fetchComRetryNF(
@@ -79,11 +73,11 @@ async function getNFsParaCorrigir(token) {
     const data = await resp.json();
     const recentes = (data.data || []).filter(nf => {
       const dataEmissao = new Date(nf.dataEmissao || nf.data);
-      return dataEmissao >= ontem;
+      return dataEmissao >= dataLimite;
     });
     todas = todas.concat(recentes);
   }
-
+  console.log(`[nfBlingApi] getNFsParaCorrigir: ${todas.length} NFs nos últimos ${NF_JANELA_DIAS}d`);
   return todas;
 }
 
@@ -107,7 +101,6 @@ async function salvarNF(token, idNF, detalhe) {
     },
     parcelas: []
   };
-
   const url = `${BLING_API}/nfe/${idNF}`;
   const body = JSON.stringify(payload);
   const resp = await fetch(url, {
@@ -119,12 +112,10 @@ async function salvarNF(token, idNF, detalhe) {
     },
     body
   });
-
   if (resp.status >= 200 && resp.status < 300) {
     console.log(`[nfBlingApi] NF ${idNF} salva`);
     return;
   }
-
   if (resp.status === 401) throw Object.assign(new Error('TOKEN_EXPIRADO'), { code: 401 });
   const txt = await resp.text();
   console.error(`[nfBlingApi] HTTP ${resp.status} em salvar NF=${idNF}:`, txt.slice(0, 300));
@@ -143,12 +134,10 @@ async function enviarNF(token, idNF) {
     },
     body
   });
-
   if (resp.status >= 200 && resp.status < 300) {
     console.log(`[nfBlingApi] NF ${idNF} enviada para SEFAZ`);
     return;
   }
-
   if (resp.status === 401) throw Object.assign(new Error('TOKEN_EXPIRADO'), { code: 401 });
   const txt = await resp.text();
   console.error(`[nfBlingApi] HTTP ${resp.status} em enviar NF=${idNF}:`, txt.slice(0, 300));
@@ -193,7 +182,6 @@ async function getCidadePorCEP(cep) {
     const municipio = data.localidade || null;
     const uf = data.uf || null;
     if (!municipio || !uf) return null;
-
     // Aplica correção manual se houver (usa mapa compartilhado em lib/)
     return aplicarCorrecaoCidade(municipio, uf);
   } catch (e) {
@@ -214,7 +202,6 @@ async function getIEPorCNPJ(cnpj, uf) {
     if (!resp.ok) { console.log(`[nfBlingApi] SintegraWS HTTP ${resp.status}`); return null; }
     const data = await resp.json();
     console.log(`[nfBlingApi] SintegraWS CNPJ=${cnpjLimpo} UF=${uf}:`, JSON.stringify(data).slice(0, 200));
-
     if (data && data.inscricoes_estaduais) {
       const ieEstado = data.inscricoes_estaduais.find(i => i.uf === uf);
       if (ieEstado && ieEstado.inscricao_estadual && ieEstado.inscricao_estadual !== 'ISENTO') {
