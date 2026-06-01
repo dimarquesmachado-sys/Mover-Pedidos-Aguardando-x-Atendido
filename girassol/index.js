@@ -265,6 +265,24 @@ function routes(readBody) {
       return true;
     }
 
+    // Página pra colar o cURL e salvar o cookie do Bling
+    if (method === 'GET' && p === '/cookie-setup') {
+      const { paginaSetup } = require('./stagingImport');
+      html(res, 200, paginaSetup());
+      return true;
+    }
+    if (method === 'POST' && p === '/cookie-setup') {
+      try {
+        const body = await readBody(req);
+        const { extrairCookie, salvarCookie } = require('./stagingImport');
+        const cookie = extrairCookie(body.curl || '');
+        if (!cookie || cookie.length < 20) { json(res, 400, { ok: false, erro: 'Não consegui extrair um cookie válido do texto colado' }); return true; }
+        salvarCookie(cookie);
+        json(res, 200, { ok: true, tamanho: cookie.length });
+      } catch (e) { json(res, 500, { ok: false, erro: e.message }); }
+      return true;
+    }
+
     return false; // não tratou
   };
 }
