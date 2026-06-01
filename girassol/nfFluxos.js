@@ -115,9 +115,7 @@ async function corrigirNFsPendentes() {
 
         // Se NF já autorizada (situacao=2) — ignora
         if (detalhe.situacao === 2) { ignoradas++; continue; }
-
-        // Se tem XML gerado, NF já foi autorizada — ignora
-        if (detalhe.xml && detalhe.xml.length > 0) { ignoradas++; continue; }
+        // NOTA: NÃO checar detalhe.xml — Bling gera XML local mesmo em NF rejeitada
 
         const idContato = detalhe.contato?.id;
         const cep = detalhe.contato?.endereco?.cep;
@@ -247,9 +245,7 @@ async function retryNFManual(idNF) {
   if (detalhe.situacao === 5) {
     return { ok: false, erro: `NF ${idNF} denegada pela SEFAZ (situacao=5) — não pode ser reenviada` };
   }
-  if (detalhe.xml && detalhe.xml.length > 0) {
-    return { ok: false, erro: `NF ${idNF} já tem XML — provavelmente autorizada` };
-  }
+  // NOTA: NÃO checar detalhe.xml — Bling gera XML local mesmo em NF rejeitada (sit=4) ou pendente (sit=1)
 
   console.log(`[retryNFManual] Reenviando NF ${idNF} (situacao=${detalhe.situacao})`);
   await enviarNF(token, idNF);
