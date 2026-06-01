@@ -283,6 +283,17 @@ function routes(readBody) {
       return true;
     }
 
+    // TESTE — importa UM pedido do staging via importação nativa do Bling (write)
+    if (method === 'GET' && p.startsWith('/debug/importar-um/')) {
+      const numeroML = p.split('/').pop();
+      try {
+        const { importarUm } = require('./stagingImport');
+        const r = await importarUm(numeroML);
+        json(res, 200, r);
+      } catch (e) { json(res, 500, { error: e.message }); }
+      return true;
+    }
+
     return false; // não tratou
   };
 }
