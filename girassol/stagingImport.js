@@ -146,6 +146,60 @@ async function listarStaging() {
   };
 }
 
+
+// headers de navegador usados nas chamadas internas
+function headersBling(cookie) {
+  return {
+    'Cookie': cookie,
+    'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36',
+    'X-Requested-With': 'XMLHttpRequest',
+    'Origin': 'https://www.bling.com.br',
+    'Referer': 'https://www.bling.com.br/vendas.lojas.virtuais.php',
+    'Accept': '*/*',
+    'Accept-Language': 'pt-BR,pt;q=0.9'
+  };
+}
+
+// Importa UM pedido (dispara o "Importar Pedido para Vendas" nativo do Bling)
+async function importarUm(numero) {
+  const cookie = lerCookie();
+  if (!cookie) return { ok: false, erro: 'Cookie não configurado — abra /cookie-setup' };
+
+  const params = new URLSearchParams();
+  params.append('xajax', 'importarPedidoSelecionado');
+  params.append('xajaxr', Date.now().toString());
+  params.append('xajaxargs[]', TIPO_INTEGRACAO);
+  params.append('xajaxargs[]', ID_INTEGRACAO);
+  params.append('xajaxargs[]', String(numero));
+  params.append('xajaxargs[]', ID_LOJA);
+  params.append('xajaxargs[]', 'P');
+  params.append('xajaxargs[]', '');
+  params.append('xajaxargs[]', '0');
+
+  const resp = await fetch('https://www.bling.com.br/services/vendas.lojas.virtuais.server.php?f=importarPedidoSelecionado', {
+    method: 'POST', headers: headersBling(cookie), body: params.toString()
+  });
+  const texto = await resp.text();
+  const low = texto.toLowerCase();
+
+  if (low.includes('login?r=') || low.includes('window.location.href')) {
+    return { ok: false, motivo: 'SESSAO_EXPIRADA — recole o cookie', httpStatus: resp.status, amostra: texto.slice(0, 200) };
+  }
+  const m = texto.match(/vendas\.php#edit\/(\d+)/);
+  const jaImportado = /j(á|a) importado/i.test(texto) || !!m;
+  return {
+    ok: jaImportado,
+    numero,
+    pedidoBlingId: m ? m[1] : null,
+    veredicto: jaImportado
+      ? '✅ IMPORTADO pelo Bling (nativo) — confira no vendas.lojas.virtuais e veja se gerou NF/endereço'
+      : '⚠️ Resposta inesperada — veja a amostra',
+    httpStatus: resp.status,
+    amostra: texto.slice(0, 500)
+  };
+}
+
 // ── Página HTML pra colar o cURL ──────────────────────────────────────
 function paginaSetup(msg) {
   const cookieAtual = lerCookie();
@@ -182,4 +236,4 @@ function paginaSetup(msg) {
   </body></html>`;
 }
 
-module.exports = { listarStaging, extrairCookie, salvarCookie, lerCookie, paginaSetup };
+module.exports = { listarStaging, importarUm, extrairCookie, salvarCookie, lerCookie, paginaSetup };
