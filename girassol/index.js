@@ -5,7 +5,7 @@
  */
 
 const { rotinaExpediente, rotinaVirada, rotinaManha } = require('./fluxos');
-const { corrigirNFsPendentes } = require('./nfFluxos');
+const { corrigirNFsPendentes, retryNFManual, getEstadoRetrySEFAZ } = require('./nfFluxos');
 const { gerarTokenInicial, garantirToken } = require('./tokenManager');
 const { gerarTokenInicialNF, garantirTokenNF } = require('./nfTokenManager');
 const { trocarCodigoPorToken, gerarUrlAutorizacao, garantirTokenML } = require('./mlTokenManager');
@@ -18,7 +18,7 @@ const crons = {
   manha:       ['0 6 * * *', '30 6 * * *', '0 7 * * *',       // F2 às 06:00, 06:30, 07:00
                 '*/15 6-23 * * *'],                           // F2 a cada 15 min diurno
   corrigirNFs: '*/5 6-23 * * *',                              // Corrigir-NFs a cada 5 min
-  nfeMl:       '0,10,20,30,40,50 6-23 * * *'                  // F3 NF-e→ML a cada 10 min (min 0,10,20...)
+  nfeMl:       '0,10,20,30,40,50 6-23 * * *'                  // F3 NF-e→ML a cada 10 min
 };
 
 // ── Helpers HTTP locais ───────────────────────────────────────────────
@@ -92,6 +92,7 @@ function routes(readBody) {
       if (p === '/run/manha')        { rotinaManha().catch(console.error);      json(res, 202, { queued: 'rotinaManha' }); return true; }
       if (p === '/run/corrigir-nfs') { corrigirNFsPendentes().catch(console.error); json(res, 202, { queued: 'corrigirNFsPendentes' }); return true; }
       if (p === '/run/nfe-ml')       { rotinaNFeML().catch(console.error);      json(res, 202, { queued: 'rotinaNFeML' }); return true; }
+
       // Envio manual de UMA NF específica: POST /run/nfe-ml/:idNfe
       if (p.startsWith('/run/nfe-ml/')) {
         const idNfe = p.split('/').pop();
@@ -101,6 +102,25 @@ function routes(readBody) {
         } catch (e) { json(res, 500, { ok: false, error: e.message }); }
         return true;
       }
+
+      // Retry manual de UMA NF rejeitada por SEFAZ: POST /run/retry-nf/:id
+      if (p.startsWith('/run/retry-nf/')) {
+        const idNF = p.split('/').pop();
+        if (!idNF || !/^\d+$/.test(idNF)) { json(res, 400, { ok: false, erro: 'ID da NF inválido' }); return true; }
+        try {
+          const r = await retryNFManual(idNF);
+          json(res, r.ok ? 200 : 400, r);
+        } catch (e) {
+          json(res, 500, { ok: false, erro: e.message });
+        }
+        return true;
+      }
+    }
+
+    // Debug — estado do retry SEFAZ em memória
+    if (method === 'GET' && p === '/debug/retry-sefaz') {
+      json(res, 200, getEstadoRetrySEFAZ());
+      return true;
     }
 
     // Debug
