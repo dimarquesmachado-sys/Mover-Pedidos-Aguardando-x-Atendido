@@ -67,14 +67,42 @@ function lerCookie() {
 // ── Alerta (Telegram opcional) ────────────────────────────────────────
 async function sendAlerta(msg) {
   console.log('[ALERTA]', msg);
+  // WhatsApp via CallMeBot
+  const waPhone = process.env.WHATSAPP_PHONE, waKey = process.env.CALLMEBOT_APIKEY;
+  if (waPhone && waKey) {
+    try {
+      const url = `https://api.callmebot.com/whatsapp.php?phone=${encodeURIComponent(waPhone)}&text=${encodeURIComponent(msg)}&apikey=${encodeURIComponent(waKey)}`;
+      await fetch(url);
+    } catch (e) { console.error('[ALERTA] whatsapp falhou:', e.message); }
+  }
+  // Telegram (se configurado)
   const token = process.env.TELEGRAM_BOT_TOKEN, chat = process.env.TELEGRAM_CHAT_ID;
-  if (!token || !chat) return;
-  try {
-    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: chat, text: msg })
-    });
-  } catch (e) { console.error('[ALERTA] falha telegram:', e.message); }
+  if (token && chat) {
+    try {
+      await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: chat, text: msg })
+      });
+    } catch (e) { console.error('[ALERTA] falha telegram:', e.message); }
+  }
+}
+
+// Manda uma mensagem de teste e devolve o que o CallMeBot respondeu (debug)
+async function testarAlerta() {
+  const waPhone = process.env.WHATSAPP_PHONE, waKey = process.env.CALLMEBOT_APIKEY;
+  const out = { whatsappConfigurado: !!(waPhone && waKey) };
+  if (waPhone && waKey) {
+    try {
+      const txt = '🟢 Teste do importador Girassol — se chegou isso, o alerta no WhatsApp está OK!';
+      const url = `https://api.callmebot.com/whatsapp.php?phone=${encodeURIComponent(waPhone)}&text=${encodeURIComponent(txt)}&apikey=${encodeURIComponent(waKey)}`;
+      const r = await fetch(url);
+      out.httpStatus = r.status;
+      out.respostaCallMeBot = (await r.text()).replace(/<[^>]+>/g, ' ').slice(0, 300);
+    } catch (e) { out.erro = e.message; }
+  } else {
+    out.aviso = 'WHATSAPP_PHONE e/ou CALLMEBOT_APIKEY não estão nas env vars do Render';
+  }
+  return out;
 }
 
 // ── headers de navegador ──────────────────────────────────────────────
@@ -245,5 +273,5 @@ async function listarStaging() {
 
 module.exports = {
   listarStaging, importarUm, rotinaImportStaging,
-  extrairCookie, salvarCookie, lerCookie, paginaSetup
+  extrairCookie, salvarCookie, lerCookie, paginaSetup, testarAlerta
 };
