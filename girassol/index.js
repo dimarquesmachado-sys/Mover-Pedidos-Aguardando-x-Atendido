@@ -311,6 +311,15 @@ function routes(readBody) {
       return true;
     }
 
+    // Testa o alerta no WhatsApp (CallMeBot)
+    if (method === 'GET' && p === '/debug/test-alerta') {
+      try {
+        const { testarAlerta } = require('./stagingImport');
+        json(res, 200, await testarAlerta());
+      } catch (e) { json(res, 500, { error: e.message }); }
+      return true;
+    }
+
     return false; // não tratou
   };
 }
