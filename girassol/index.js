@@ -243,6 +243,18 @@ function routes(readBody) {
       return true;
     }
 
+    // TESTE — importar pedido do ML via API (dry-run por padrão; ?confirmar=1 cria)
+    if (method === 'GET' && p.startsWith('/debug/teste-importar/')) {
+      const numeroML = p.split('/').pop();
+      const confirmar = urlObj.searchParams.get('confirmar') === '1';
+      try {
+        const { testarImportarPedido } = require('./importarPedido');
+        const resultado = await testarImportarPedido(numeroML, confirmar);
+        json(res, 200, resultado);
+      } catch (e) { json(res, 500, { error: e.message }); }
+      return true;
+    }
+
     return false; // não tratou
   };
 }
