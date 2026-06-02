@@ -5,7 +5,7 @@
 // ──────────────────────────────────────────────────────────────────────
 
 const fetch = require('node-fetch');
-const { aplicarCorrecaoCidade } = require('../lib/correcoesCidades');
+const { aplicarCorrecaoCidade, fallbackPorCEP } = require('../lib/correcoesCidades');
 
 const BLING_API = 'https://api.bling.com.br/Api/v3';
 const PAUSA_MS = parseInt(process.env.AMB_NF_PAUSA_MS || '700');
@@ -174,16 +174,20 @@ async function getCidadePorCEP(cep) {
   if (cepLimpo.length !== 8) return null;
   try {
     const resp = await fetch(`https://viacep.com.br/ws/${cepLimpo}/json/`);
-    if (!resp.ok) return null;
+    if (!resp.ok) {
+      return fallbackPorCEP(cepLimpo);
+    }
     const data = await resp.json();
-    if (data.erro) return null;
+    if (data.erro) {
+      return fallbackPorCEP(cepLimpo);
+    }
     const municipio = data.localidade || null;
     const uf = data.uf || null;
-    if (!municipio || !uf) return null;
+    if (!municipio || !uf) return fallbackPorCEP(cepLimpo);
     return aplicarCorrecaoCidade(municipio, uf);
   } catch (e) {
     console.error('[AMB nfBlingApi] Erro ao buscar CEP:', e.message);
-    return null;
+    return fallbackPorCEP(cepLimpo);
   }
 }
 
