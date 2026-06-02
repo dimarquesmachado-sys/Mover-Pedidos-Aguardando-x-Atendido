@@ -22,6 +22,7 @@ const empresas = [
   require('../auto-mensagens'),
   require('../lixas-combinar'),
   require('../good-drive-imagens'),
+  require('../amb-drive-imagens'),
 ];
 
 // Filtra empresas marcadas como inativas via env var (ex: SKIP_EMPRESAS=girassol,good)
