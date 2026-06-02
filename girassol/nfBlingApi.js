@@ -6,7 +6,7 @@
 // ──────────────────────────────────────────────────────────────────────
 
 const fetch = require('node-fetch');
-const { aplicarCorrecaoCidade } = require('../lib/correcoesCidades');
+const { aplicarCorrecaoCidade, fallbackPorCEP } = require('../lib/correcoesCidades');
 
 const BLING_API = 'https://api.bling.com.br/Api/v3';
 const PAUSA_MS = parseInt(process.env.NF_PAUSA_MS || '700');
@@ -176,17 +176,24 @@ async function getCidadePorCEP(cep) {
   if (cepLimpo.length !== 8) return null;
   try {
     const resp = await fetch(`https://viacep.com.br/ws/${cepLimpo}/json/`);
-    if (!resp.ok) return null;
+    if (!resp.ok) {
+      // ViaCEP fora ou erro — tenta fallback
+      return fallbackPorCEP(cepLimpo);
+    }
     const data = await resp.json();
-    if (data.erro) return null;
+    if (data.erro) {
+      // CEP não cadastrado no ViaCEP — tenta fallback
+      return fallbackPorCEP(cepLimpo);
+    }
     const municipio = data.localidade || null;
     const uf = data.uf || null;
-    if (!municipio || !uf) return null;
+    if (!municipio || !uf) return fallbackPorCEP(cepLimpo);
     // Aplica correção manual se houver (usa mapa compartilhado em lib/)
     return aplicarCorrecaoCidade(municipio, uf);
   } catch (e) {
     console.error('[nfBlingApi] Erro ao buscar CEP:', e.message);
-    return null;
+    // Em caso de exceção (ViaCEP fora), tenta fallback
+    return fallbackPorCEP(cepLimpo);
   }
 }
 
