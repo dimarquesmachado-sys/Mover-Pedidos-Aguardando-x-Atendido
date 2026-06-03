@@ -163,6 +163,7 @@
         <div class="tot"><div class="v" id="totSaldo">--:--</div><div class="l">Saldo</div></div>
       </div>
       <div id="histLista"></div>
+      <button class="btn ghost" style="margin-top:14px" onclick="imprimirMeuMes()">Imprimir / PDF do mês</button>
     </div>
   </div>
 
@@ -434,16 +435,54 @@ async function carregarHistorico(){
     body:JSON.stringify({token:sess.token, ano, mes})});
   const j = await r.json();
   if(!r.ok){ if(r.status===401) sair(); return; }
+  ultimoHist = j;
   $('totTrab').textContent = hhmm(j.trabalhado);
   $('totExtra').textContent = hhmm(j.extras);
   const sEl=$('totSaldo'); sEl.textContent = hhmm(j.saldo); sEl.className='v '+(j.saldo>=0?'pos':'neg');
-  if(!j.detalhe.length){ $('histLista').innerHTML='<p class="dica" style="padding:8px 2px">Nenhuma batida neste mês.</p>'; return; }
+  const temReal = (j.detalhe||[]).some(d=>!d.vazio);
+  if(!temReal){ $('histLista').innerHTML='<p class="dica" style="padding:8px 2px">Nenhuma batida neste mês.</p>'; return; }
   $('histLista').innerHTML = j.detalhe.map(d=>{
+    if(d.vazio) return `<div class="linha" style="opacity:.4"><div class="d">${diasC[d.dow]} ${d.data.slice(8,10)}/${d.data.slice(5,7)}</div><div class="t">—</div></div>`;
     const txt = d.abono ? `<span class="azul">${d.abono}</span>` : hhmm(d.trabalhado)+(d.completo?'':' ⚠');
     const saldo = d.abono ? '' : `<span class="s ${d.saldo>=0?'pos':'neg'}">${hhmm(d.saldo)}</span>`;
     return `<div class="linha"><div class="d">${diasC[d.dow]} ${d.data.slice(8,10)}/${d.data.slice(5,7)}</div>
       <div class="t">${txt}</div>${saldo}</div>`;
   }).join('');
+}
+let ultimoHist=null;
+function imprimirMeuMes(){
+  if(!ultimoHist || !ultimoHist.detalhe){ alert('Abra o mês primeiro.'); return; }
+  const j=ultimoHist; const reais=j.detalhe.filter(d=>!d.vazio);
+  let tT=0,tP=0,tE=0,tD=0; reais.forEach(d=>{ tT+=d.trabalhado||0; tP+=d.esperado||0; const s=d.saldo||0; if(s>0)tE+=s; else if(s<0)tD+=s; });
+  const brd=s=>s.split('-').reverse().join('/');
+  const linhas=j.detalhe.map(d=>{ const h=d.horarios||{};
+    return {dia:diasC[d.dow],data:brd(d.data),e:h.entrada||'—',sa:h.saida_almoco||'—',ra:h.retorno_almoco||'—',s:h.saida||'—',
+      trab:(d.vazio&&!d.abono)?'—':hhmm(d.trabalhado),prev:hhmm(d.esperado),
+      saldo:d.vazio?'—':hhmm(d.saldo),saldoCls:d.vazio?'':(d.saldo>=0?'pos':'neg'),obs:d.abono||''};
+  });
+  espelhoPDF({nome:(sess&&sess.nome)||'—',matricula:'',cargo:(sess&&sess.cargo)||'',setor:(sess&&sess.setor)||'',
+    periodo:$('mesLabel').textContent,escala:'—',linhas,tT,tP,tE,tD});
+}
+function espelhoPDF(o){
+  const rows=o.linhas.map(l=>`<tr><td class=l>${l.dia}</td><td>${l.data}</td><td>${l.e}</td><td>${l.sa}</td><td>${l.ra}</td><td>${l.s}</td><td>${l.trab}</td><td>${l.prev}</td><td class="${l.saldoCls}">${l.saldo}</td><td class=l>${l.obs}</td></tr>`).join('');
+  const html=`<!doctype html><html><head><meta charset="utf-8"><title>Espelho de Ponto - ${o.nome}</title>
+<style>@page{size:A4 portrait;margin:11mm}*{font-family:Arial,Helvetica,sans-serif;box-sizing:border-box}
+body{margin:0;color:#111;font-size:10px}h1{font-size:16px;margin:0}.sub{color:#555;font-size:10px;margin:1px 0 10px}
+.meta{display:flex;justify-content:space-between;font-size:11px;margin-bottom:8px}
+table{width:100%;border-collapse:collapse}th,td{border:1px solid #ccc;padding:2.5px 4px;text-align:center;font-size:9px}
+th{background:#eee}td.l,th.l{text-align:left}.neg{color:#c00}.pos{color:#080}
+.tot{display:flex;gap:16px;margin-top:9px;font-size:11px;flex-wrap:wrap}
+.sig{display:flex;gap:50px;margin-top:30px}.sig div{flex:1;border-top:1px solid #333;padding-top:4px;text-align:center;font-size:10px;color:#333}</style>
+</head><body>
+<h1>Espelho de Ponto</h1><div class="sub">GOOD Import</div>
+<div class="meta"><div><b>${o.nome}</b>${o.matricula?' · Matrícula '+o.matricula:''}<br>${[o.cargo,o.setor].filter(Boolean).join(' · ')}</div>
+<div style="text-align:right">Período: ${o.periodo}<br>Escala: ${o.escala}</div></div>
+<table><thead><tr><th class=l>Dia</th><th>Data</th><th>Entrada</th><th>S.Almoço</th><th>Retorno</th><th>Saída</th><th>Trab.</th><th>Prev.</th><th>Saldo</th><th class=l>Obs.</th></tr></thead><tbody>${rows}</tbody></table>
+<div class="tot"><span>Trabalhado: <b>${hhmm(o.tT)}</b></span><span>Previsto: <b>${hhmm(o.tP)}</b></span><span>Horas extras: <b class=pos>${hhmm(o.tE)}</b></span><span>Débito: <b class=neg>${hhmm(o.tD)}</b></span><span>Saldo: <b>${hhmm(o.tT-o.tP)}</b></span></div>
+<div class="sig"><div>Assinatura do funcionário</div><div>Assinatura do gestor</div></div>
+</body></html>`;
+  const w=window.open('','_blank'); if(!w){ alert('Permita pop-ups para gerar o PDF.'); return; }
+  w.document.write(html); w.document.close(); w.focus(); setTimeout(()=>{ w.print(); },350);
 }
 
 // ---------- utils ----------
