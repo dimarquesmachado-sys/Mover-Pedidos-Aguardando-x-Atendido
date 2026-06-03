@@ -16,6 +16,8 @@
   body{font-family:'Archivo',system-ui,sans-serif;background:var(--bg);color:var(--txt);
        min-height:100dvh;display:flex;flex-direction:column;padding:18px 16px 32px}
   .topo{display:flex;align-items:center;gap:10px;margin-bottom:18px}
+  .topo-sair{margin-left:auto;background:transparent;border:1px solid var(--line);color:var(--mut);font:700 12px 'Archivo';padding:8px 15px;border-radius:9px;cursor:pointer}
+  .topo-sair:active{transform:scale(.97)}
   .logo{width:38px;height:38px;border-radius:11px;background:linear-gradient(135deg,var(--accent),var(--accent2));
         display:grid;place-items:center;font-weight:800;color:#03110c;font-size:18px}
   .topo h1{font-size:16px;font-weight:700;letter-spacing:.3px}
@@ -92,6 +94,7 @@
 <div class="topo">
   <div class="logo">G</div>
   <div><h1>Registro de Ponto</h1><small>GOOD Import</small></div>
+  <button id="topSair" class="topo-sair hide" onclick="sair()">Sair</button>
 </div>
 
 <!-- LOGIN -->
@@ -159,7 +162,6 @@
     </div>
   </div>
 
-  <button class="btn ghost sair" onclick="sair()">Sair</button>
 </div>
 
 <!-- MODAL JUSTIFICATIVA -->
@@ -236,6 +238,7 @@ function sair(){ localStorage.removeItem('ponto_sess'); location.reload(); }
 function abrirPainel(){
   ['login','criarSenha'].forEach(x=>$(x).classList.add('hide'));
   $('painel').classList.remove('hide');
+  $('topSair').classList.remove('hide');
   $('primeiroNome').textContent = (sess.nome||'').split(' ')[0];
   $('cargoSetor').textContent = [sess.cargo, sess.setor].filter(Boolean).join(' · ');
   relogioTick();
