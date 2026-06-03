@@ -20,6 +20,10 @@
   label{display:block;font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.6px;margin:0 0 6px 2px;font-weight:600}
   input,select{background:#10131a;border:1px solid var(--line);border-radius:10px;color:var(--txt);font:600 14px 'Archivo';padding:11px 13px;outline:none}
   input:focus,select:focus{border-color:var(--accent)}
+  /* seletor nativo de data/hora no modo claro (branco), legível sobre o fundo escuro */
+  input[type=date],input[type=time]{color-scheme:light}
+  input[type=date]::-webkit-calendar-picker-indicator,
+  input[type=time]::-webkit-calendar-picker-indicator{filter:invert(1);opacity:.75;cursor:pointer}
   .btn{border:none;border-radius:11px;padding:12px 18px;font:700 14px 'Archivo';cursor:pointer;color:#03110c;background:var(--accent)}
   .btn.sm{padding:8px 12px;font-size:13px}
   .btn.ghost{background:transparent;border:1px solid var(--line);color:var(--txt)}
@@ -48,8 +52,8 @@
   .slots{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px}
   .slot{display:flex;flex-direction:column;gap:4px}
   .slot span{font-size:10.5px;color:var(--mut);text-transform:uppercase;letter-spacing:.4px;font-weight:600}
-  .slot input[type=time]{background:#1a1e27;border:1px solid var(--line);border-radius:9px;color:var(--txt);font:700 15px 'Archivo';padding:9px 11px}
-  .slot input[type=time]:focus{border-color:var(--accent)}
+  .slot input{background:#1a1e27;border:1px solid var(--line);border-radius:9px;color:var(--txt);font:700 16px 'Archivo';padding:9px 8px;width:86px;text-align:center;letter-spacing:1.5px}
+  .slot input:focus{border-color:var(--accent);background:#222838}
   .jornGrid{display:flex;flex-direction:column}
   .jrow{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:10px 0;border-bottom:1px solid var(--line)}
   .jday{width:42px;font-weight:700;color:var(--mut);text-transform:uppercase;font-size:12px;letter-spacing:.5px}
@@ -68,6 +72,7 @@
   .periodoBox .pb b{font-size:20px;font-weight:800}
   .diaCard.abonado{border-color:rgba(79,140,255,.45)}
   .diaCard.vazio .slots{opacity:.85}
+  .diaBody{display:flex;justify-content:space-between;align-items:flex-end;gap:18px;flex-wrap:wrap}
   .diaAcoes{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
   .abonoWrap{font-size:12px;color:var(--mut);display:flex;align-items:center;gap:6px}
   .abonoSel{padding:7px 10px;font-size:13px}
@@ -104,6 +109,7 @@
 
   <div id="relat" class="card hide">
     <div class="filtros">
+      <div><label>Funcionário</label><select id="relFunc" onchange="renderRelatorio()"><option value="">Todos</option></select></div>
       <div><label>Mês</label><select id="relMes"></select></div>
       <div><label>Ano</label><input id="relAno" type="number" style="width:100px"></div>
       <button class="btn" onclick="carregarRelatorio()">Gerar</button>
@@ -254,11 +260,20 @@ async function decidir(id,status){ await fetch(API+'/admin/aprovacoes/'+id,{meth
 
 async function carregarRelatorio(){
   const r = await fetch(`${API}/admin/relatorio?ano=${$('relAno').value}&mes=${$('relMes').value}`,{headers:H()});
-  const j = await r.json(); ultimoRelatorio=j;
-  $('relTol').textContent = `Tolerância aplicada: ${j.tolerancia} min/dia. Só conta como hora extra o que passar disso.`;
-  if(!j.relatorio.length){ $('relBox').innerHTML='<p style="color:var(--mut)">Sem dados nesse mês.</p>'; return; }
+  ultimoRelatorio = await r.json();
+  $('relTol').textContent = `Tolerância aplicada: ${ultimoRelatorio.tolerancia} min/dia. Só conta como hora extra o que passar disso.`;
+  renderRelatorio();
+}
+function relFiltrado(){
+  if(!ultimoRelatorio || !ultimoRelatorio.relatorio) return [];
+  const f=$('relFunc').value;
+  return f ? ultimoRelatorio.relatorio.filter(x=>String(x.funcionario_id)===String(f)) : ultimoRelatorio.relatorio;
+}
+function renderRelatorio(){
+  const lista=relFiltrado();
+  if(!lista.length){ $('relBox').innerHTML='<p style="color:var(--mut)">Sem dados nesse mês.</p>'; return; }
   let html = `<table><thead><tr><th>Funcionário</th><th>Trabalhado</th><th>Previsto</th><th>Saldo</th><th>Horas extras</th><th>Sábado (rodízio)</th><th>Almoços curtos</th></tr></thead><tbody>`;
-  for(const f of j.relatorio){
+  for(const f of lista){
     html += `<tr><td>${f.nome}</td><td>${hhmm(f.trabalhado)}</td><td>${hhmm(f.esperado)}</td>
       <td class="${f.saldo>=0?'pos':'neg'}">${hhmm(f.saldo)}</td><td class="pos"><b>${hhmm(f.extras)}</b></td>
       <td class="pos">${hhmm(f.extras_sabado)}</td><td class="${f.almocos_curtos?'tagw':''}">${f.almocos_curtos}</td></tr>
@@ -277,7 +292,7 @@ async function carregarRelatorio(){
 function exportCSV(){
   if(!ultimoRelatorio) return;
   let linhas=[['Funcionario','Matricula','Trabalhado','Previsto','Saldo','HorasExtras','ExtrasSabado','AlmocosCurtos']];
-  for(const f of ultimoRelatorio.relatorio) linhas.push([f.nome,f.matricula,hhmm(f.trabalhado),hhmm(f.esperado),hhmm(f.saldo),hhmm(f.extras),hhmm(f.extras_sabado),f.almocos_curtos]);
+  for(const f of relFiltrado()) linhas.push([f.nome,f.matricula,hhmm(f.trabalhado),hhmm(f.esperado),hhmm(f.saldo),hhmm(f.extras),hhmm(f.extras_sabado),f.almocos_curtos]);
   const csv = linhas.map(l=>l.map(c=>`"${c}"`).join(';')).join('\n');
   const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob(["\ufeff"+csv],{type:'text/csv'}));
   a.download=`horas_${$('relAno').value}_${$('relMes').value}.csv`; a.click();
@@ -298,37 +313,87 @@ async function carregarBatidas(){
   diasCache=j.dias; renderDias();
 }
 const ABONOS=[['','Normal'],['ferias','Férias'],['folga','Folga'],['atestado','Atestado'],['feriado','Feriado'],['completar','Completar (escala)']];
-function renderDias(){
-  if(!diasCache.length){ $('batBox').innerHTML='<p class="hint">Sem dados no período.</p>'; return; }
+function buildHeader(){
   const reais=diasCache.filter(d=>!d.novo && !d.vazio);
-  const tT=reais.reduce((s,d)=>s+(d.trabalhado||0),0), tP=reais.reduce((s,d)=>s+(d.esperado||0),0), tS=reais.reduce((s,d)=>s+(d.saldo||0),0);
-  const header=`<div class="periodoBox">
+  let tT=0,tP=0,tExtra=0,tDeb=0;
+  reais.forEach(d=>{ tT+=d.trabalhado||0; tP+=d.esperado||0; const s=d.saldo||0; if(s>0) tExtra+=s; else if(s<0) tDeb+=s; });
+  const tS=tT-tP;
+  return `<div class="periodoBox">
     <div class="pb"><span>Trabalhado</span><b>${hhmm(tT)}</b></div>
     <div class="pb"><span>Previsto</span><b>${hhmm(tP)}</b></div>
+    <div class="pb"><span>Horas extras</span><b class="pos">${hhmm(tExtra)}</b></div>
+    <div class="pb"><span>Débito (faltou)</span><b class="neg">${hhmm(tDeb)}</b></div>
     <div class="pb"><span>Saldo do período</span><b class="${tS>=0?'pos':'neg'}">${hhmm(tS)}</b></div>
-  </div><p class="hint" style="margin-bottom:14px">Mês inteiro. "Pela escala" preenche os horários do dia; ou marque um abono (Férias, Folga, Atestado, Feriado). Dias em branco não entram no saldo.</p>`;
+  </div><p class="hint" style="margin-bottom:14px">Mês inteiro. Clique num campo de hora e digite os 4 números (ex.: <b>0800</b> = 08:00) — ele pula sozinho pro próximo e salva ao sair do dia. <b class="pos">Verde</b> = hora extra · <b class="neg">vermelho</b> = o que faltou.</p>`;
+}
+function buildRes(d){
+  if(d.novo) return '<span class="dres">novo — preencha</span>';
+  if(d.abono_tipo) return `<span class="dres">Previsto ${hhmm(d.esperado)} · <span class="tagb">${d.abono}</span></span>`;
+  if(d.vazio) return `<span class="dres" style="opacity:.6">Previsto ${hhmm(d.esperado)} · sem batidas</span>`;
+  const s=d.saldo||0;
+  const fim = s>0 ? `Extra <span class="pos">+${hhmm(s)}</span>`
+            : s<0 ? `Débito <span class="neg">${hhmm(s)}</span>`
+            : `<span class="pos">Em dia (00:00)</span>`;
+  return `<span class="dres">Trab ${hhmm(d.trabalhado)} · Prev ${hhmm(d.esperado)} · ${fim}</span>`;
+}
+function renderDias(){
+  if(!diasCache.length){ $('batBox').innerHTML='<p class="hint">Sem dados no período.</p>'; return; }
   const cards=diasCache.map(d=>{
     const dow=d.dow!=null?d.dow:new Date(d.data+'T12:00:00').getDay();
     const escTag=d.escala?` · <span class="tagb">${esc(d.escala)}</span>`:'';
-    let res;
-    if(d.novo) res='<span class="dres">novo — preencha e salve</span>';
-    else if(d.abono_tipo) res=`<span class="dres">Previsto ${hhmm(d.esperado)} · Saldo <span class="pos">00:00</span> · <span class="tagb">${d.abono}</span></span>`;
-    else if(d.vazio) res=`<span class="dres" style="opacity:.6">Previsto ${hhmm(d.esperado)} · sem batidas</span>`;
-    else res=`<span class="dres">Trabalhado ${hhmm(d.trabalhado)} · Previsto ${hhmm(d.esperado)} · Saldo <span class="${d.saldo>=0?'pos':'neg'}">${hhmm(d.saldo)}</span></span>`;
-    const slots=SLOT_ORDEM.map(t=>`<div class="slot"><span>${SLOT_LABEL[t]}</span><input type="time" id="t_${d.data}_${t}" value="${(d.horarios&&d.horarios[t])||''}"></div>`).join('');
+    const slots=SLOT_ORDEM.map((t,idx)=>`<div class="slot"><span>${SLOT_LABEL[t]}</span><input type="text" inputmode="numeric" maxlength="5" placeholder="--:--" id="t_${d.data}_${t}" value="${(d.horarios&&d.horarios[t])||''}" oninput="maskTime(this,'${d.data}',${idx})" onfocus="this.select()"></div>`).join('');
     const abonoSel=`<select class="abonoSel" onchange="setAbono('${d.data}',this.value)">${ABONOS.map(([v,l])=>`<option value="${v}" ${(d.abono_tipo||'')===v?'selected':''}>${l}</option>`).join('')}</select>`;
     const cls=d.abono_tipo?'diaCard abonado':(d.vazio?'diaCard vazio':'diaCard');
-    return `<div class="${cls}">
-      <div class="diaHead"><div class="dlabel">${dias[dow]} · ${br(d.data)}${escTag}</div>${res}</div>
-      <div class="slots">${slots}</div>
-      <div class="diaAcoes">
-        <button class="btn sm" onclick="salvarDia('${d.data}')">Salvar</button>
-        <button class="btn sm ghost" onclick="autoEscala('${d.data}')">Pela escala</button>
-        <span class="abonoWrap">Abono: ${abonoSel}</span>
+    return `<div class="${cls}" onfocusout="cardBlur(event,'${d.data}')">
+      <div class="diaHead"><div class="dlabel">${dias[dow]} · ${br(d.data)}${escTag}</div><span id="res_${d.data}">${buildRes(d)}</span></div>
+      <div class="diaBody">
+        <div class="slots">${slots}</div>
+        <div class="diaAcoes">
+          <button class="btn sm ghost" onclick="autoEscala('${d.data}')">Pela escala</button>
+          <span class="abonoWrap">Abono: ${abonoSel}</span>
+        </div>
       </div>
     </div>`;
   }).join('');
-  $('batBox').innerHTML=header+cards;
+  $('batBox').innerHTML=`<div id="topoBox">${buildHeader()}</div>`+cards;
+}
+function maskTime(el, data, idx){
+  const d=el.value.replace(/\D/g,'').slice(0,4);
+  el.value = d.length<=2 ? d : d.slice(0,2)+':'+d.slice(2);
+  if(d.length===4){
+    if(idx<3){ const nx=$(`t_${data}_${SLOT_ORDEM[idx+1]}`); if(nx){ nx.focus(); nx.select(); } }
+    else el.blur();
+  }
+}
+function calcDia(h){
+  const m=v=>{ if(!/^\d{1,2}:\d{2}$/.test(v||'')) return null; const [hh,mm]=v.split(':').map(Number); return hh*60+mm; };
+  const e=m(h.entrada), sa=m(h.saida_almoco), ra=m(h.retorno_almoco), s=m(h.saida);
+  let trab=0;
+  if(e!=null&&sa!=null&&sa>e) trab+=sa-e;
+  if(ra!=null&&s!=null&&s>ra) trab+=s-ra;
+  if(e!=null&&s!=null&&sa==null&&ra==null&&s>e) trab=s-e;
+  return trab;
+}
+function cardBlur(ev, data){
+  const card=ev.currentTarget;
+  if(!card.contains(ev.relatedTarget)) salvarDiaSilencioso(data);
+}
+async function salvarDiaSilencioso(data){
+  const d=diasCache.find(x=>x.data===data); if(!d) return;
+  const horarios={}; SLOT_ORDEM.forEach(t=>{ horarios[t]=$(`t_${data}_${t}`)?$(`t_${data}_${t}`).value:''; });
+  try{
+    const r=await fetch(`${API}/admin/dia`,{method:'POST',headers:H(),body:JSON.stringify({funcionario_id:$('batFunc').value,data,horarios})});
+    if(!r.ok) return;
+  }catch(e){ return; }
+  d.horarios={...horarios};
+  if(!d.abono_tipo){
+    const trab=calcDia(horarios);
+    const temAlgum=SLOT_ORDEM.some(t=>/^\d{1,2}:\d{2}$/.test(horarios[t]||''));
+    d.trabalhado=trab; d.saldo=trab-(d.esperado||0); d.vazio=!temAlgum; d.novo=false;
+  }
+  ultimoRelatorio=null;
+  const resEl=$(`res_${data}`); if(resEl) resEl.innerHTML=buildRes(d);
+  const topo=$('topoBox'); if(topo) topo.innerHTML=buildHeader();
 }
 function autoEscala(data){
   const d=diasCache.find(x=>x.data===data); if(!d) return;
@@ -337,9 +402,21 @@ function autoEscala(data){
   const set=(t,v)=>{ const el=$(`t_${data}_${t}`); if(el) el.value=v||''; };
   set('entrada', ts[0]&&ts[0][0]); set('saida_almoco', ts[0]&&ts[0][1]);
   set('retorno_almoco', ts[1]&&ts[1][0]); set('saida', ts[1]&&ts[1][1]);
+  salvarDiaSilencioso(data);
 }
 async function setAbono(data,tipo){
-  const r=await fetch(`${API}/admin/lancamento-dia`,{method:'POST',headers:H(),body:JSON.stringify({funcionario_id:$('batFunc').value,data,tipo})});
+  const fid=$('batFunc').value;
+  if(tipo==='completar'){
+    const d=diasCache.find(x=>x.data===data);
+    if(!d || !d.turnos || !d.turnos.length){ alert('A escala desse dia não tem horários definidos (ou é folga). Não dá pra completar pela escala.'); return carregarBatidas(); }
+    await fetch(`${API}/admin/lancamento-dia`,{method:'POST',headers:H(),body:JSON.stringify({funcionario_id:fid,data,tipo:''})});
+    const ts=d.turnos;
+    const horarios={ entrada:(ts[0]&&ts[0][0])||'', saida_almoco:(ts[0]&&ts[0][1])||'', retorno_almoco:(ts[1]&&ts[1][0])||'', saida:(ts[1]&&ts[1][1])||'' };
+    const r=await fetch(`${API}/admin/dia`,{method:'POST',headers:H(),body:JSON.stringify({funcionario_id:fid,data,horarios})});
+    const j=await r.json(); if(!r.ok) alert(j.erro||'Erro.');
+    ultimoRelatorio=null; return carregarBatidas();
+  }
+  const r=await fetch(`${API}/admin/lancamento-dia`,{method:'POST',headers:H(),body:JSON.stringify({funcionario_id:fid,data,tipo})});
   const j=await r.json(); if(!r.ok){ alert(j.erro||'Erro.'); return; }
   ultimoRelatorio=null; carregarBatidas();
 }
@@ -385,6 +462,7 @@ async function carregarFuncionarios(){
   $('batFunc').innerHTML = opts;
   $('lFunc').innerHTML = opts;
   $('atrVerFunc').innerHTML = opts;
+  $('relFunc').innerHTML = '<option value="">Todos</option>' + opts;
   $('atrFuncs').innerHTML = listaFunc.map(f=>`<label><input type="checkbox" value="${f.id}"> ${esc(f.nome)}</label>`).join('');
   renderFuncionarios();
 }
