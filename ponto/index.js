@@ -89,6 +89,8 @@ function limitesMes(ano,mes){
   const fim=`${ano}-${String(mes).padStart(2,'0')}-${String(ultimo).padStart(2,'0')}`;
   return { inicio, fim };
 }
+function montarMomento(data, hhmm){ return new Date(`${data}T${hhmm}:00-03:00`).toISOString(); }
+function horaSP(m){ return new Date(m).toLocaleTimeString('pt-BR',{ timeZone:'America/Sao_Paulo', hour:'2-digit', minute:'2-digit' }); }
 const ORDEM=['entrada','saida_almoco','retorno_almoco','saida'];
 const ROTULO={ entrada:'Entrada', saida_almoco:'Saída p/ almoço', retorno_almoco:'Retorno do almoço', saida:'Saída (fim do dia)' };
 const TIPO_LABEL={ ferias:'Férias', folga:'Folga', atestado:'Atestado', completar:'Completado (escala)' };
@@ -305,6 +307,50 @@ function routes(readBody){
         let q=`batidas?select=*,funcionarios(nome,matricula)&data=gte.${ini}&data=lte.${fim}&order=data.asc,momento.asc`;
         if(fid) q+=`&funcionario_id=eq.${fid}`;
         json(res,200,await sbGet(q)); return true;
+      }
+
+      // Tratamento de ponto — dias com horários + resultado (1 funcionário)
+      if (method==='GET' && p==='/ponto/admin/dias') {
+        if(!adminOk(req)) return naoAutorizado(res);
+        const fid=urlObj.searchParams.get('funcionario_id');
+        const ini=urlObj.searchParams.get('inicio'), fim=urlObj.searchParams.get('fim');
+        if(!fid){ json(res,400,{erro:'Selecione um funcionário.'}); return true; }
+        const cfg=await getConfig();
+        const bs=await sbGet(`batidas?funcionario_id=eq.${fid}&data=gte.${ini}&data=lte.${fim}&select=*&order=momento.asc`);
+        const lancs=await sbGet(`lancamentos?funcionario_id=eq.${fid}&data=gte.${ini}&data=lte.${fim}&select=data,tipo`);
+        const porDia={}; for(const x of bs)(porDia[x.data]=porDia[x.data]||[]).push(x);
+        const lmap={}; for(const l of lancs) lmap[l.data]=l.tipo;
+        const datas=[...new Set([...Object.keys(porDia), ...Object.keys(lmap)])].sort();
+        const dias=datas.map(data=>{
+          const dow=diaSemana(data), esp=cfg.jornada_min[String(dow)] ?? 0, abono=lmap[data];
+          const arr=porDia[data]||[];
+          const horarios={}; for(const t of ORDEM){ const b=arr.find(x=>x.tipo===t); horarios[t]=b?horaSP(b.momento):''; }
+          let trab, saldo;
+          if(abono){ trab=esp; saldo=0; } else { const mm=minutosDia(arr); trab=mm.trab; saldo=trab-esp; }
+          return { data, dow, abono: abono?TIPO_LABEL[abono]:null, horarios, trabalhado:trab, esperado:esp, saldo };
+        });
+        json(res,200,{dias}); return true;
+      }
+
+      // Salvar o dia inteiro: edita / cria / exclui as 4 batidas conforme os horários
+      if (method==='POST' && p==='/ponto/admin/dia') {
+        if(!adminOk(req)) return naoAutorizado(res);
+        const b=await readBody(req); const { funcionario_id, data, horarios }=b;
+        if(!funcionario_id || !data || !horarios){ json(res,400,{erro:'Dados incompletos.'}); return true; }
+        const atuais=await sbGet(`batidas?funcionario_id=eq.${funcionario_id}&data=eq.${data}&select=id,tipo`);
+        const mapAtual={}; atuais.forEach(x=>mapAtual[x.tipo]=x);
+        for(const tipo of ORDEM){
+          const val=String(horarios[tipo]||'').trim();
+          const ex=mapAtual[tipo];
+          if(val && /^\d{1,2}:\d{2}$/.test(val)){
+            const momento=montarMomento(data,val);
+            if(ex) await sbPatch('batidas',`id=eq.${ex.id}`,{momento});
+            else   await sbInsert('batidas',{funcionario_id,tipo,momento,data},'return=minimal');
+          } else if(ex){
+            await sbDelete('batidas',`id=eq.${ex.id}`);
+          }
+        }
+        json(res,200,{ok:true}); return true;
       }
 
       if (method==='GET' && p==='/ponto/admin/aprovacoes') {
