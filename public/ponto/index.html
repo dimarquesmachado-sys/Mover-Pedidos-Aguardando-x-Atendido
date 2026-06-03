@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#0f1115">
+<title>Ponto · GOOD Import</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{--bg:#0f1115;--card:#171a21;--line:#262b36;--txt:#f3f5f8;--mut:#8a93a3;
+        --accent:#22d3a6;--accent2:#15b48c;--warn:#f6b73c;--danger:#ff5a5f;--blue:#4f8cff}
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+  body{font-family:'Archivo',system-ui,sans-serif;background:var(--bg);color:var(--txt);
+       min-height:100dvh;display:flex;flex-direction:column;padding:18px 16px 32px}
+  .topo{display:flex;align-items:center;gap:10px;margin-bottom:18px}
+  .logo{width:38px;height:38px;border-radius:11px;background:linear-gradient(135deg,var(--accent),var(--accent2));
+        display:grid;place-items:center;font-weight:800;color:#03110c;font-size:18px}
+  .topo h1{font-size:16px;font-weight:700;letter-spacing:.3px}
+  .topo small{display:block;color:var(--mut);font-weight:500;font-size:11px;letter-spacing:.6px;text-transform:uppercase}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:20px;margin-bottom:14px}
+  label{display:block;font-size:12px;color:var(--mut);text-transform:uppercase;letter-spacing:.6px;margin:0 0 6px 2px;font-weight:600}
+  input{width:100%;background:#10131a;border:1px solid var(--line);border-radius:12px;color:var(--txt);
+        font:600 17px 'Archivo';padding:14px 16px;margin-bottom:14px;outline:none}
+  input:focus{border-color:var(--accent)}
+  .btn{width:100%;border:none;border-radius:14px;padding:16px;font:800 16px 'Archivo';letter-spacing:.4px;
+       cursor:pointer;color:#03110c;background:var(--accent);transition:transform .06s,opacity .2s}
+  .btn:active{transform:scale(.98)}
+  .btn.lg{padding:22px;font-size:19px;border-radius:18px}
+  .btn[disabled]{opacity:.5}
+  .btn.ghost{background:transparent;border:1px solid var(--line);color:var(--mut);font-weight:600}
+  .hide{display:none!important}
+  .dica{color:var(--mut);font-size:12.5px;line-height:1.5;margin-top:4px}
+  .saud{font-size:22px;font-weight:800;margin-bottom:2px}
+  .saud span{color:var(--accent)}
+  .info{color:var(--mut);font-size:13px;font-weight:600;margin-bottom:18px}
+  .relogio{font-size:46px;font-weight:800;text-align:center;letter-spacing:1px;margin:6px 0 2px;font-variant-numeric:tabular-nums}
+  .dia{text-align:center;color:var(--mut);font-weight:600;text-transform:capitalize;margin-bottom:18px}
+  .switch{display:flex;gap:8px;margin-bottom:14px}
+  .switch button{flex:1;padding:12px;border-radius:12px;border:1px solid var(--line);background:var(--card);
+    color:var(--mut);font:700 14px 'Archivo';cursor:pointer}
+  .switch button.on{background:var(--accent);color:#03110c;border-color:var(--accent)}
+  .contador{padding:16px;border-radius:14px;text-align:center;font-weight:700;font-size:15px;margin-bottom:14px;line-height:1.5}
+  .contador.wait{background:rgba(246,183,60,.12);color:var(--warn);border:1px solid rgba(246,183,60,.3)}
+  .contador.ok{background:rgba(34,211,166,.12);color:var(--accent);border:1px solid rgba(34,211,166,.3)}
+  .contador b{display:block;font-size:42px;font-variant-numeric:tabular-nums;margin:4px 0;letter-spacing:1px}
+  .contador small{color:var(--mut);font-weight:600;font-size:12.5px}
+  .steps{display:flex;flex-direction:column;gap:10px;margin-bottom:18px}
+  .step{display:flex;align-items:center;gap:12px;padding:13px 14px;border:1px solid var(--line);border-radius:13px;background:#10131a}
+  .dot{width:26px;height:26px;border-radius:50%;border:2px solid var(--line);flex:none;display:grid;place-items:center;font-size:13px;color:var(--mut)}
+  .step.done .dot{background:var(--accent);border-color:var(--accent);color:#03110c}
+  .step.next{border-color:var(--accent)}
+  .step .nome{flex:1;font-weight:600;font-size:14px}
+  .step .hora{font-weight:800;font-variant-numeric:tabular-nums;color:var(--accent)}
+  .step.pend{border-color:var(--warn)}
+  .msg{padding:13px 15px;border-radius:12px;font-weight:600;font-size:14px;margin-bottom:14px;line-height:1.4}
+  .msg.ok{background:rgba(34,211,166,.12);color:var(--accent);border:1px solid rgba(34,211,166,.3)}
+  .msg.err{background:rgba(255,90,95,.1);color:var(--danger);border:1px solid rgba(255,90,95,.3)}
+  .msg.warn{background:rgba(246,183,60,.1);color:var(--warn);border:1px solid rgba(246,183,60,.3)}
+  textarea{width:100%;background:#10131a;border:1px solid var(--line);border-radius:12px;color:var(--txt);
+           font:600 15px 'Archivo';padding:14px;min-height:110px;resize:vertical;outline:none;margin-bottom:8px}
+  textarea:focus{border-color:var(--warn)}
+  .conta{font-size:12px;color:var(--mut);text-align:right;margin-bottom:12px}
+  .overlay{position:fixed;inset:0;background:rgba(8,10,14,.75);backdrop-filter:blur(3px);display:grid;place-items:center;padding:18px;z-index:9}
+  .modal{background:var(--card);border:1px solid var(--line);border-radius:20px;padding:22px;max-width:440px;width:100%}
+  .modal h3{font-size:18px;margin-bottom:6px}
+  .modal p{color:var(--mut);font-size:13.5px;line-height:1.5;margin-bottom:16px}
+  .totais{display:flex;gap:10px;margin-bottom:14px}
+  .tot{flex:1;background:#10131a;border:1px solid var(--line);border-radius:13px;padding:13px;text-align:center}
+  .tot .v{font-size:22px;font-weight:800;font-variant-numeric:tabular-nums}
+  .tot .l{font-size:10.5px;color:var(--mut);text-transform:uppercase;letter-spacing:.4px;margin-top:2px}
+  .navmes{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+  .navmes button{background:#10131a;border:1px solid var(--line);color:var(--txt);border-radius:10px;width:42px;height:38px;font-size:18px;font-weight:800;cursor:pointer}
+  .navmes .mes{font-weight:700;font-size:15px}
+  .linha{display:flex;align-items:center;gap:10px;padding:11px 12px;border-bottom:1px solid #1d212b;font-size:13.5px}
+  .linha .d{width:74px;color:var(--mut);font-weight:700}
+  .linha .t{flex:1;font-weight:600}
+  .linha .s{font-weight:800;font-variant-numeric:tabular-nums}
+  .pos{color:var(--accent)}.neg{color:var(--danger)}.azul{color:var(--blue)}
+  .sair{margin-top:6px}
+</style>
+</head>
+<body>
+
+<div class="topo">
+  <div class="logo">G</div>
+  <div><h1>Registro de Ponto</h1><small>GOOD Import</small></div>
+</div>
+
+<!-- LOGIN -->
+<div id="login" class="card">
+  <label>Email</label>
+  <input id="email" type="email" inputmode="email" placeholder="seu@email.com" autocomplete="username">
+  <label>Senha</label>
+  <input id="senha" type="password" placeholder="••••••" autocomplete="current-password">
+  <button class="btn" onclick="entrar()">Entrar</button>
+  <div id="loginMsg"></div>
+  <p class="dica">Primeiro acesso? Digite seu email e clique em Entrar — o sistema vai pedir pra você criar sua senha.</p>
+</div>
+
+<!-- CRIAR SENHA (1º acesso) -->
+<div id="criarSenha" class="card hide">
+  <div class="saud" style="margin-bottom:10px">Olá, <span id="nomeNovo">—</span> 👋</div>
+  <p class="dica" style="margin-bottom:16px">Este é seu primeiro acesso. Crie uma senha pessoal (mínimo 4 caracteres).</p>
+  <label>Nova senha</label>
+  <input id="novaSenha" type="password" placeholder="••••••" autocomplete="new-password">
+  <label>Repita a senha</label>
+  <input id="novaSenha2" type="password" placeholder="••••••" autocomplete="new-password">
+  <button class="btn" onclick="criarSenhaFn()">Criar senha e entrar</button>
+  <div id="criarMsg"></div>
+  <button class="btn ghost" style="margin-top:10px" onclick="voltarLogin()">Voltar</button>
+</div>
+
+<!-- PAINEL -->
+<div id="painel" class="hide">
+  <div class="switch">
+    <button id="tbBater" class="on" onclick="aba('bater')">Bater ponto</button>
+    <button id="tbHist" onclick="aba('hist')">Minhas batidas</button>
+  </div>
+
+  <!-- ABA BATER -->
+  <div id="abaBater">
+    <div class="card">
+      <div class="saud">Olá, <span id="primeiroNome">—</span></div>
+      <div class="info" id="cargoSetor">—</div>
+      <div class="relogio" id="relogio">--:--</div>
+      <div class="dia" id="dataHoje">—</div>
+      <div id="contador" class="contador hide"></div>
+      <div id="resultado"></div>
+      <button class="btn lg" id="btnBater" onclick="baterPonto()">Bater ponto</button>
+    </div>
+    <div class="card">
+      <label>Pontos de hoje</label>
+      <div class="steps" id="steps"></div>
+    </div>
+  </div>
+
+  <!-- ABA HISTORICO -->
+  <div id="abaHist" class="hide">
+    <div class="card">
+      <div class="navmes">
+        <button onclick="mudarMes(-1)">‹</button>
+        <div class="mes" id="mesLabel">—</div>
+        <button onclick="mudarMes(1)">›</button>
+      </div>
+      <div class="totais">
+        <div class="tot"><div class="v" id="totTrab">--:--</div><div class="l">Trabalhado</div></div>
+        <div class="tot"><div class="v pos" id="totExtra">--:--</div><div class="l">Horas extras</div></div>
+        <div class="tot"><div class="v" id="totSaldo">--:--</div><div class="l">Saldo</div></div>
+      </div>
+      <div id="histLista"></div>
+    </div>
+  </div>
+
+  <button class="btn ghost sair" onclick="sair()">Sair</button>
+</div>
+
+<!-- MODAL JUSTIFICATIVA -->
+<div id="modal" class="overlay hide">
+  <div class="modal">
+    <h3>Almoço abaixo de 1h</h3>
+    <p id="modalTxt">—</p>
+    <label>Justificativa (mínimo 30 caracteres)</label>
+    <textarea id="just" oninput="contaJust()" placeholder="Explique o motivo do almoço reduzido..."></textarea>
+    <div class="conta"><span id="qtd">0</span>/30</div>
+    <button class="btn" id="btnJust" onclick="enviarJust()" disabled>Enviar para aprovação</button>
+    <button class="btn ghost" style="margin-top:10px" onclick="fecharModal()">Cancelar</button>
+  </div>
+</div>
+
+<script>
+const API = '/ponto';
+let sess = JSON.parse(localStorage.getItem('ponto_sess') || 'null');  // {token, nome, cargo, setor}
+let emailDigitado = '';
+let pendente = null;
+let almocoMin = 60;
+let tickInt = null;
+let histRef = new Date();
+
+const $ = id => document.getElementById(id);
+const dias = ['domingo','segunda-feira','terça-feira','quarta-feira','quinta-feira','sexta-feira','sábado'];
+const diasC = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+const meses = ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
+const mesesL = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+function hhmm(min){const s=min<0?'-':'';min=Math.abs(min);return s+String(Math.floor(min/60)).padStart(2,'0')+':'+String(min%60).padStart(2,'0');}
+
+function relogioTick(){
+  const d = new Date();
+  $('relogio').textContent = d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  $('dataHoje').textContent = dias[d.getDay()] + ', ' + d.getDate() + ' ' + meses[d.getMonth()];
+}
+setInterval(relogioTick, 1000);
+
+// ---------- LOGIN / CRIAR SENHA ----------
+async function entrar(){
+  const email = $('email').value.trim(), senha = $('senha').value;
+  if(!email) return showMsg('loginMsg','Digite seu email.','err');
+  emailDigitado = email;
+  const r = await fetch(API+'/login',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({email, senha})});
+  const j = await r.json();
+  if(j.precisa_criar_senha){
+    $('nomeNovo').textContent = (j.nome||'').split(' ')[0];
+    $('login').classList.add('hide'); $('criarSenha').classList.remove('hide');
+    return;
+  }
+  if(!r.ok) return showMsg('loginMsg', j.erro,'err');
+  salvarSessao(j);
+}
+async function criarSenhaFn(){
+  const s1 = $('novaSenha').value, s2 = $('novaSenha2').value;
+  if(s1.length < 4) return showMsg('criarMsg','A senha precisa ter pelo menos 4 caracteres.','err');
+  if(s1 !== s2) return showMsg('criarMsg','As senhas não são iguais.','err');
+  const r = await fetch(API+'/criar-senha',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({email:emailDigitado, senha:s1})});
+  const j = await r.json();
+  if(!r.ok) return showMsg('criarMsg', j.erro,'err');
+  salvarSessao(j);
+}
+function voltarLogin(){ $('criarSenha').classList.add('hide'); $('login').classList.remove('hide'); }
+function salvarSessao(j){
+  sess = {token:j.token, nome:j.nome, cargo:j.cargo, setor:j.setor};
+  localStorage.setItem('ponto_sess', JSON.stringify(sess));
+  abrirPainel();
+}
+function sair(){ localStorage.removeItem('ponto_sess'); location.reload(); }
+
+function abrirPainel(){
+  ['login','criarSenha'].forEach(x=>$(x).classList.add('hide'));
+  $('painel').classList.remove('hide');
+  $('primeiroNome').textContent = (sess.nome||'').split(' ')[0];
+  $('cargoSetor').textContent = [sess.cargo, sess.setor].filter(Boolean).join(' · ');
+  relogioTick();
+  carregar();
+}
+
+function aba(qual){
+  const bater = qual==='bater';
+  $('abaBater').classList.toggle('hide', !bater);
+  $('abaHist').classList.toggle('hide', bater);
+  $('tbBater').classList.toggle('on', bater);
+  $('tbHist').classList.toggle('on', !bater);
+  if(!bater){ histRef = new Date(); carregarHistorico(); }
+}
+
+// ---------- BATER PONTO ----------
+const LABELS = {entrada:'Entrada', saida_almoco:'Saída p/ almoço', retorno_almoco:'Retorno do almoço', saida:'Saída (fim do dia)'};
+const ORDEM = ['entrada','saida_almoco','retorno_almoco','saida'];
+
+async function carregar(){
+  const r = await fetch(API+'/minhas-batidas',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({token:sess.token})});
+  const j = await r.json();
+  if(!r.ok){ if(r.status===401){ sair(); } return; }
+  if(j.almoco_minimo) almocoMin = j.almoco_minimo;
+  renderSteps(j.batidas, j.proximo);
+  atualizarContador(j.batidas, j.proximo);
+}
+
+function renderSteps(batidas, proximo){
+  const cont = $('steps'); cont.innerHTML='';
+  ORDEM.forEach((tipo,i)=>{
+    const b = batidas.find(x=>x.tipo===tipo);
+    const div = document.createElement('div');
+    div.className = 'step' + (b?' done':'') + (tipo===proximo?' next':'') + (b&&b.justificativa?' pend':'');
+    const hora = b ? new Date(b.momento).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) : '';
+    div.innerHTML = `<div class="dot">${b?'✓':i+1}</div>
+      <div class="nome">${LABELS[tipo]}${b&&b.justificativa?' · em aprovação':''}</div>
+      <div class="hora">${hora}</div>`;
+    cont.appendChild(div);
+  });
+  const btn = $('btnBater');
+  if(proximo){ btn.textContent = 'Bater: ' + LABELS[proximo]; btn.disabled=false; }
+  else { btn.textContent = 'Todos os pontos de hoje registrados'; btn.disabled=true; }
+}
+
+function atualizarContador(batidas, proximo){
+  clearInterval(tickInt); tickInt=null;
+  const el = $('contador'); el.classList.add('hide'); el.innerHTML='';
+  if(proximo !== 'retorno_almoco') return;
+  const sa = batidas.find(b=>b.tipo==='saida_almoco'); if(!sa) return;
+  const alvo = new Date(sa.momento).getTime() + almocoMin*60000;
+  const horaLib = new Date(alvo).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
+  el.classList.remove('hide');
+  const render = ()=>{
+    const restante = alvo - Date.now();
+    if(restante <= 0){
+      el.className='contador ok';
+      el.innerHTML = `✓ Almoço de ${almocoMin} min completo<br><small>Já pode bater o retorno</small>`;
+      clearInterval(tickInt); tickInt=null;
+    } else {
+      const mm=Math.floor(restante/60000), ss=Math.floor((restante%60000)/1000);
+      el.className='contador wait';
+      el.innerHTML = `Falta para completar o almoço de ${almocoMin} min
+        <b>${String(mm).padStart(2,'0')}:${String(ss).padStart(2,'0')}</b>
+        <small>Você poderá bater o retorno às ${horaLib}</small>`;
+    }
+  };
+  render(); tickInt=setInterval(render,1000);
+}
+
+function pegarLocal(){
+  return new Promise((res,rej)=>{
+    if(!navigator.geolocation) return rej('Seu celular não suporta GPS.');
+    navigator.geolocation.getCurrentPosition(
+      p => res({latitude:p.coords.latitude, longitude:p.coords.longitude}),
+      e => rej(e.code===1 ? 'Permissão de localização negada. Ative o GPS para o app.' : 'Não consegui pegar sua localização. Tente de novo.'),
+      {enableHighAccuracy:true, timeout:12000, maximumAge:0}
+    );
+  });
+}
+
+async function baterPonto(justificativa){
+  const btn=$('btnBater'); btn.disabled=true; const original=btn.textContent;
+  showResult('Pegando localização...','warn');
+  try{
+    const loc = pendente || await pegarLocal();
+    pendente = loc;
+    showResult('Registrando ponto...','warn');
+    const r = await fetch(API+'/bater-ponto',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({token:sess.token, ...loc, justificativa})});
+    const j = await r.json();
+    if(r.status===401){ pendente=null; sair(); return; }
+    if(r.status===422 && j.requer_justificativa){
+      $('modalTxt').textContent = j.erro;
+      $('modal').classList.remove('hide');
+      $('just').value=''; contaJust();
+      btn.disabled=false; btn.textContent=original; showResult('','');
+      return;
+    }
+    if(!r.ok){ pendente=null; showResult(j.erro,'err'); btn.disabled=false; btn.textContent=original; return; }
+    pendente=null;
+    let txt = `${j.rotulo} registrada às ${new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})} (${j.distancia} m do trabalho).`;
+    if(j.pendente_aprovacao) txt += ' Almoço enviado para aprovação do gestor.';
+    showResult(txt,'ok');
+    fecharModal();
+    carregar();
+  }catch(err){
+    pendente=null;
+    showResult(typeof err==='string'?err:'Erro ao bater ponto.','err');
+    btn.disabled=false; btn.textContent=original;
+  }
+}
+function contaJust(){ const n=$('just').value.trim().length; $('qtd').textContent=n; $('btnJust').disabled=n<30; }
+function enviarJust(){ baterPonto($('just').value.trim()); }
+function fecharModal(){ $('modal').classList.add('hide'); }
+
+// ---------- HISTORICO ----------
+function mudarMes(delta){ histRef.setMonth(histRef.getMonth()+delta); carregarHistorico(); }
+async function carregarHistorico(){
+  const ano = histRef.getFullYear(), mes = histRef.getMonth()+1;
+  $('mesLabel').textContent = mesesL[mes-1] + ' / ' + ano;
+  const r = await fetch(API+'/meu-historico',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({token:sess.token, ano, mes})});
+  const j = await r.json();
+  if(!r.ok){ if(r.status===401) sair(); return; }
+  $('totTrab').textContent = hhmm(j.trabalhado);
+  $('totExtra').textContent = hhmm(j.extras);
+  const sEl=$('totSaldo'); sEl.textContent = hhmm(j.saldo); sEl.className='v '+(j.saldo>=0?'pos':'neg');
+  if(!j.detalhe.length){ $('histLista').innerHTML='<p class="dica" style="padding:8px 2px">Nenhuma batida neste mês.</p>'; return; }
+  $('histLista').innerHTML = j.detalhe.map(d=>{
+    const txt = d.abono ? `<span class="azul">${d.abono}</span>` : hhmm(d.trabalhado)+(d.completo?'':' ⚠');
+    const saldo = d.abono ? '' : `<span class="s ${d.saldo>=0?'pos':'neg'}">${hhmm(d.saldo)}</span>`;
+    return `<div class="linha"><div class="d">${diasC[d.dow]} ${d.data.slice(8,10)}/${d.data.slice(5,7)}</div>
+      <div class="t">${txt}</div>${saldo}</div>`;
+  }).join('');
+}
+
+// ---------- utils ----------
+function showMsg(id,txt,tipo){ const el=$(id); el.className='msg '+tipo; el.textContent=txt; }
+function showResult(txt,tipo){ const el=$('resultado'); el.innerHTML = txt?`<div class="msg ${tipo}">${txt}</div>`:''; }
+
+// auto-login
+if(sess && sess.token) abrirPainel();
+</script>
+</body>
+</html>
