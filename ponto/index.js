@@ -223,8 +223,20 @@ function routes(readBody){
         const bs=await sbGet(`batidas?funcionario_id=eq.${f.id}&data=eq.${data}&select=*&order=momento.asc`);
         const cfg=await getConfig();
         const ap=await sbGet(`aprovacoes?funcionario_id=eq.${f.id}&data=eq.${data}&select=status&order=criado_em.desc&limit=1`);
+        const sols=await sbGet(`solicitacoes_batida?funcionario_id=eq.${f.id}&data=eq.${data}&status=eq.pendente&select=tipo,momento`);
         const proximo=ORDEM[bs.length]||null;
-        json(res,200,{batidas:bs,proximo,rotulo:proximo?ROTULO[proximo]:null,almoco_minimo:cfg?cfg.almoco_minimo:60,aprovacao_status:ap[0]?ap[0].status:null}); return true;
+        json(res,200,{batidas:bs,proximo,rotulo:proximo?ROTULO[proximo]:null,almoco_minimo:cfg?cfg.almoco_minimo:60,aprovacao_status:ap[0]?ap[0].status:null,solicitacoes:sols}); return true;
+      }
+
+      // Funcionário lança uma batida que esqueceu (sujeita a aprovação; ignora GPS/raio)
+      if (method==='POST' && p==='/ponto/solicitar-batida') {
+        const b=await readBody(req); const f=await funcionarioDoToken(b.token);
+        if(!f){ json(res,401,{erro:'Sessão expirada. Faça login de novo.'}); return true; }
+        const { data, tipo, hora, justificativa } = b;
+        if(!data || !ORDEM.includes(tipo) || !/^\d{1,2}:\d{2}$/.test(hora||'')){ json(res,400,{erro:'Preencha data, tipo e hora corretamente.'}); return true; }
+        if(!justificativa || String(justificativa).trim().length<10){ json(res,400,{erro:'Explique o motivo (mínimo 10 caracteres).'}); return true; }
+        await sbInsert('solicitacoes_batida',{funcionario_id:f.id,data,tipo,momento:montarMomento(data,hora),justificativa:String(justificativa).trim(),status:'pendente'},'return=minimal');
+        json(res,200,{ok:true}); return true;
       }
 
       if (method==='POST' && p==='/ponto/bater-ponto') {
@@ -347,6 +359,8 @@ function routes(readBody){
         const lmap={}; for(const l of lancs) lmap[l.data]=l.tipo;
         const aprovs=await sbGet(`aprovacoes?funcionario_id=eq.${fid}&data=gte.${ini}&data=lte.${fim}&select=data,status`);
         const apMap={}; for(const a of aprovs) apMap[a.data]=a.status;
+        const sols=await sbGet(`solicitacoes_batida?funcionario_id=eq.${fid}&data=gte.${ini}&data=lte.${fim}&status=eq.pendente&select=data`);
+        const solSet=new Set(sols.map(x=>x.data));
         // todos os dias do intervalo
         const datas=[]; let dt=new Date(ini+'T12:00:00Z'); const fdt=new Date(fim+'T12:00:00Z');
         while(dt<=fdt){ datas.push(dt.toISOString().slice(0,10)); dt.setUTCDate(dt.getUTCDate()+1); }
@@ -359,7 +373,7 @@ function routes(readBody){
           if(abono){ trab=esp; saldo=0; } else { const mm=minutosDia(arr); trab=mm.trab; saldo=trab-esp; }
           return { data, dow, escala:esc.nome, turnos:(esc.turnos&&esc.turnos[String(dow)])||null,
                    vazio:(arr.length===0 && !abono), abono_tipo:abono||null, abono: abono?TIPO_LABEL[abono]:null,
-                   aprovacao: apMap[data]||null,
+                   aprovacao: apMap[data]||null, solicitacao: solSet.has(data),
                    horarios, trabalhado:trab, esperado:esp, saldo };
         });
         json(res,200,{dias}); return true;
@@ -389,6 +403,25 @@ function routes(readBody){
       if (method==='GET' && p==='/ponto/admin/aprovacoes') {
         if(!adminOk(req)) return naoAutorizado(res);
         json(res,200,await sbGet('aprovacoes?select=*,funcionarios(nome,matricula)&status=eq.pendente&order=criado_em.asc')); return true;
+      }
+
+      // Solicitações de batida esquecida — pendentes
+      if (method==='GET' && p==='/ponto/admin/solicitacoes') {
+        if(!adminOk(req)) return naoAutorizado(res);
+        json(res,200,await sbGet('solicitacoes_batida?select=*,funcionarios(nome,matricula)&status=eq.pendente&order=criado_em.asc')); return true;
+      }
+      if (method==='POST' && /^\/ponto\/admin\/solicitacoes\/[^/]+$/.test(p)) {
+        if(!adminOk(req)) return naoAutorizado(res);
+        const id=p.split('/')[4]; const b=await readBody(req);
+        if(!['aprovado','rejeitado'].includes(b.status)){ json(res,400,{erro:'Status inválido.'}); return true; }
+        const upd=await sbPatch('solicitacoes_batida',`id=eq.${enc(id)}`,{status:b.status,decidido_em:new Date().toISOString()});
+        const s=Array.isArray(upd)?upd[0]:upd;
+        if(b.status==='aprovado' && s){
+          const ex=await sbGet(`batidas?funcionario_id=eq.${s.funcionario_id}&data=eq.${s.data}&tipo=eq.${s.tipo}&select=id`);
+          if(ex[0]) await sbPatch('batidas',`id=eq.${ex[0].id}`,{momento:s.momento});
+          else await sbInsert('batidas',{funcionario_id:s.funcionario_id,tipo:s.tipo,momento:s.momento,data:s.data,justificativa:'lançado pelo funcionário (aprovado)'},'return=minimal');
+        }
+        json(res,200,s); return true;
       }
 
       if (method==='POST' && /^\/ponto\/admin\/aprovacoes\/[^/]+$/.test(p)) {
