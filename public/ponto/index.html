@@ -83,10 +83,11 @@
   .navmes{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
   .navmes button{background:#10131a;border:1px solid var(--line);color:var(--txt);border-radius:10px;width:42px;height:38px;font-size:18px;font-weight:800;cursor:pointer}
   .navmes .mes{font-weight:700;font-size:15px}
-  .linha{display:flex;align-items:center;gap:10px;padding:11px 12px;border-bottom:1px solid #1d212b;font-size:13.5px}
-  .linha .d{width:74px;color:var(--mut);font-weight:700}
+  .linha{display:flex;align-items:flex-start;gap:10px;padding:11px 12px;border-bottom:1px solid #1d212b;font-size:13.5px}
+  .linha .d{width:74px;color:var(--mut);font-weight:700;padding-top:1px}
   .linha .t{flex:1;font-weight:600}
-  .linha .s{font-weight:800;font-variant-numeric:tabular-nums}
+  .linha .t .hr{font-weight:500;font-size:11.5px;color:var(--mut);margin-top:3px;line-height:1.45}
+  .linha .s{font-weight:800;font-variant-numeric:tabular-nums;padding-top:1px}
   .pos{color:var(--accent)}.neg{color:var(--danger)}.azul{color:var(--blue)}
   .sair{margin-top:6px}
 </style>
@@ -483,12 +484,16 @@ async function carregarHistorico(){
   const temReal = (j.detalhe||[]).some(d=>!d.vazio);
   if(!temReal){ $('histLista').innerHTML='<p class="dica" style="padding:8px 2px">Nenhuma batida neste mês.</p>'; return; }
   $('histLista').innerHTML = j.detalhe.map(d=>{
-    if(d.vazio) return `<div class="linha" style="opacity:.4"><div class="d">${diasC[d.dow]} ${d.data.slice(8,10)}/${d.data.slice(5,7)}</div><div class="t">—</div></div>`;
+    const dataBr=`${diasC[d.dow]} ${d.data.slice(8,10)}/${d.data.slice(5,7)}`;
+    if(d.vazio) return `<div class="linha" style="opacity:.4"><div class="d">${dataBr}</div><div class="t">—</div></div>`;
     const txt = d.abono ? `<span class="azul">${d.abono}</span>` : hhmm(d.trabalhado)+(d.completo?'':' ⚠');
     const ef = d.saldo_efetivo||0;
     const saldo = d.abono ? '' : `<span class="s ${ef>=0?'pos':'neg'}">${hhmm(ef)}</span>`;
-    return `<div class="linha"><div class="d">${diasC[d.dow]} ${d.data.slice(8,10)}/${d.data.slice(5,7)}</div>
-      <div class="t">${txt}</div>${saldo}</div>`;
+    const H=d.horarios||{};
+    const alm=(H.saida_almoco||H.retorno_almoco)?`${H.saida_almoco||'—'}–${H.retorno_almoco||'—'}`:'';
+    const hr=[H.entrada?`Entrada ${H.entrada}`:'', alm?`Almoço ${alm}`:'', H.saida?`Saída ${H.saida}`:''].filter(Boolean).join(' · ');
+    return `<div class="linha"><div class="d">${dataBr}</div>
+      <div class="t">${txt}${hr?`<div class="hr">${hr}</div>`:''}</div>${saldo}</div>`;
   }).join('');
 }
 let ultimoHist=null;
