@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <meta name="theme-color" content="#0f1115">
-<title>Ponto · GOOD Import</title>
+<title>Registro de Ponto</title>
 <link rel="icon" type="image/png" href="/ponto/favicon.png">
 <link rel="apple-touch-icon" href="/ponto/favicon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -95,7 +95,7 @@
 
 <div class="topo">
   <div class="logo">G</div>
-  <div><h1>Registro de Ponto</h1><small>GOOD Import</small></div>
+  <div><h1>Registro de Ponto</h1></div>
   <button id="topSair" class="topo-sair hide" onclick="sair()">Sair</button>
 </div>
 
@@ -438,13 +438,14 @@ async function carregarHistorico(){
   ultimoHist = j;
   $('totTrab').textContent = hhmm(j.trabalhado);
   $('totExtra').textContent = hhmm(j.extras);
-  const sEl=$('totSaldo'); sEl.textContent = hhmm(j.saldo); sEl.className='v '+(j.saldo>=0?'pos':'neg');
+  const sEl=$('totSaldo'); const saldoEf=(j.extras||0)+(j.deficit||0); sEl.textContent = hhmm(saldoEf); sEl.className='v '+(saldoEf>=0?'pos':'neg');
   const temReal = (j.detalhe||[]).some(d=>!d.vazio);
   if(!temReal){ $('histLista').innerHTML='<p class="dica" style="padding:8px 2px">Nenhuma batida neste mês.</p>'; return; }
   $('histLista').innerHTML = j.detalhe.map(d=>{
     if(d.vazio) return `<div class="linha" style="opacity:.4"><div class="d">${diasC[d.dow]} ${d.data.slice(8,10)}/${d.data.slice(5,7)}</div><div class="t">—</div></div>`;
     const txt = d.abono ? `<span class="azul">${d.abono}</span>` : hhmm(d.trabalhado)+(d.completo?'':' ⚠');
-    const saldo = d.abono ? '' : `<span class="s ${d.saldo>=0?'pos':'neg'}">${hhmm(d.saldo)}</span>`;
+    const ef = d.saldo_efetivo||0;
+    const saldo = d.abono ? '' : `<span class="s ${ef>=0?'pos':'neg'}">${hhmm(ef)}</span>`;
     return `<div class="linha"><div class="d">${diasC[d.dow]} ${d.data.slice(8,10)}/${d.data.slice(5,7)}</div>
       <div class="t">${txt}</div>${saldo}</div>`;
   }).join('');
@@ -453,15 +454,15 @@ let ultimoHist=null;
 function imprimirMeuMes(){
   if(!ultimoHist || !ultimoHist.detalhe){ alert('Abra o mês primeiro.'); return; }
   const j=ultimoHist; const reais=j.detalhe.filter(d=>!d.vazio);
-  let tT=0,tP=0,tE=0,tD=0; reais.forEach(d=>{ tT+=d.trabalhado||0; tP+=d.esperado||0; const s=d.saldo||0; if(s>0)tE+=s; else if(s<0)tD+=s; });
+  let tT=0,tP=0,tE=0,tD=0; reais.forEach(d=>{ tT+=d.trabalhado||0; tP+=d.esperado||0; const s=d.saldo_efetivo||0; if(s>0)tE+=s; else if(s<0)tD+=s; });
   const brd=s=>s.split('-').reverse().join('/');
-  const linhas=j.detalhe.map(d=>{ const h=d.horarios||{};
+  const linhas=j.detalhe.map(d=>{ const h=d.horarios||{}; const ef=d.saldo_efetivo||0;
     return {dia:diasC[d.dow],data:brd(d.data),e:h.entrada||'—',sa:h.saida_almoco||'—',ra:h.retorno_almoco||'—',s:h.saida||'—',
       trab:(d.vazio&&!d.abono)?'—':hhmm(d.trabalhado),prev:hhmm(d.esperado),
-      saldo:d.vazio?'—':hhmm(d.saldo),saldoCls:d.vazio?'':(d.saldo>=0?'pos':'neg'),obs:d.abono||''};
+      saldo:d.vazio?'—':hhmm(ef),saldoCls:d.vazio?'':(ef>=0?'pos':'neg'),obs:d.abono||''};
   });
   espelhoPDF({nome:(sess&&sess.nome)||'—',matricula:'',cargo:(sess&&sess.cargo)||'',setor:(sess&&sess.setor)||'',
-    periodo:$('mesLabel').textContent,escala:'—',linhas,tT,tP,tE,tD});
+    periodo:$('mesLabel').textContent,escala:'—',linhas,tT,tP,tE,tD,saldoFinal:tE+tD});
 }
 function espelhoPDF(o){
   const rows=o.linhas.map(l=>`<tr><td class=l>${l.dia}</td><td>${l.data}</td><td>${l.e}</td><td>${l.sa}</td><td>${l.ra}</td><td>${l.s}</td><td>${l.trab}</td><td>${l.prev}</td><td class="${l.saldoCls}">${l.saldo}</td><td class=l>${l.obs}</td></tr>`).join('');
@@ -474,11 +475,11 @@ th{background:#eee}td.l,th.l{text-align:left}.neg{color:#c00}.pos{color:#080}
 .tot{display:flex;gap:16px;margin-top:9px;font-size:11px;flex-wrap:wrap}
 .sig{display:flex;gap:50px;margin-top:30px}.sig div{flex:1;border-top:1px solid #333;padding-top:4px;text-align:center;font-size:10px;color:#333}</style>
 </head><body>
-<h1>Espelho de Ponto</h1><div class="sub">GOOD Import</div>
+<h1>Espelho de Ponto</h1>
 <div class="meta"><div><b>${o.nome}</b>${o.matricula?' · Matrícula '+o.matricula:''}<br>${[o.cargo,o.setor].filter(Boolean).join(' · ')}</div>
 <div style="text-align:right">Período: ${o.periodo}<br>Escala: ${o.escala}</div></div>
 <table><thead><tr><th class=l>Dia</th><th>Data</th><th>Entrada</th><th>S.Almoço</th><th>Retorno</th><th>Saída</th><th>Trab.</th><th>Prev.</th><th>Saldo</th><th class=l>Obs.</th></tr></thead><tbody>${rows}</tbody></table>
-<div class="tot"><span>Trabalhado: <b>${hhmm(o.tT)}</b></span><span>Previsto: <b>${hhmm(o.tP)}</b></span><span>Horas extras: <b class=pos>${hhmm(o.tE)}</b></span><span>Débito: <b class=neg>${hhmm(o.tD)}</b></span><span>Saldo: <b>${hhmm(o.tT-o.tP)}</b></span></div>
+<div class="tot"><span>Trabalhado: <b>${hhmm(o.tT)}</b></span><span>Previsto: <b>${hhmm(o.tP)}</b></span><span>Horas extras: <b class=pos>${hhmm(o.tE)}</b></span><span>Débito: <b class=neg>${hhmm(o.tD)}</b></span><span>Saldo: <b>${hhmm(o.saldoFinal!=null?o.saldoFinal:o.tT-o.tP)}</b></span></div>
 <div class="sig"><div>Assinatura do funcionário</div><div>Assinatura do gestor</div></div>
 </body></html>`;
   const w=window.open('','_blank'); if(!w){ alert('Permita pop-ups para gerar o PDF.'); return; }
