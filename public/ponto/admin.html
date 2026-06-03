@@ -58,6 +58,11 @@
   .slot .orig{display:block;color:var(--danger);font-size:10.5px;margin-top:3px;cursor:pointer;font-weight:700;text-align:center}
   .slot .orig s{opacity:.95}
   .slot .novo{display:block;color:var(--blue);font-size:9.5px;margin-top:3px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;text-align:center}
+  .abonoBanner{flex:1;min-width:240px;display:flex;flex-direction:column;justify-content:center;gap:3px;padding:12px 16px;border-radius:11px;font-weight:800;font-size:14.5px;background:rgba(79,140,255,.12);border:1px dashed rgba(79,140,255,.55);color:var(--blue)}
+  .abonoBanner .abonoSub{font-weight:600;font-size:11px;color:var(--mut);text-transform:none;letter-spacing:0}
+  .abonoBanner.ab-atestado{background:rgba(246,183,60,.12);border-color:rgba(246,183,60,.55);color:var(--warn)}
+  .abonoBanner.ab-feriado{background:rgba(34,211,166,.12);border-color:rgba(34,211,166,.55);color:var(--accent)}
+  .abonoBanner.ab-folga{background:rgba(255,255,255,.05);border-color:var(--line);color:var(--mut)}
   .jornGrid{display:flex;flex-direction:column}
   .jrow{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:10px 0;border-bottom:1px solid var(--line)}
   .jday{width:42px;font-weight:700;color:var(--mut);text-transform:uppercase;font-size:12px;letter-spacing:.5px}
@@ -232,7 +237,7 @@
   </div>
 </div>
 
-<div class="versao">Painel de Ponto v1.1 · 03/06/2026</div>
+<div class="versao">Painel de Ponto v1.2 · 03/06/2026</div>
 
 <div id="fotoOvl" class="ovl hide" onclick="if(event.target===this)this.classList.add('hide')">
   <div class="ovlBox">
@@ -453,6 +458,11 @@ function buildSlots(d){
     return `<div class="slot"><span>${SLOT_LABEL[t]}</span><input type="text" inputmode="numeric" maxlength="5" placeholder="--:--" id="t_${d.data}_${t}" value="${cur}" class="${temCorr?'editado':''}" oninput="maskTime(this,'${d.data}',${idx})" onfocus="this.select()">${marca}</div>`;
   }).join('');
 }
+function buildAbonoBanner(d){
+  const cred = (d.esperado||0)>0 ? ` · ${hhmm(d.esperado)} creditadas` : '';
+  const ic = {ferias:'🏖️',folga:'💤',atestado:'🩺',feriado:'🎉'}[d.abono_tipo]||'•';
+  return `<div class="abonoBanner ab-${d.abono_tipo}">${ic} ${d.abono}${cred}<div class="abonoSub">dia abonado — sem batidas a registrar</div></div>`;
+}
 function restaurar(data,tipo,orig){
   const el=$(`t_${data}_${tipo}`); if(el) el.value=orig;
   salvarDiaSilencioso(data);
@@ -462,7 +472,7 @@ function renderDias(){
   const cards=diasCache.map(d=>{
     const dow=d.dow!=null?d.dow:new Date(d.data+'T12:00:00').getDay();
     const escTag=d.escala?` · <span class="tagb">${esc(d.escala)}</span>`:'';
-    const slots=buildSlots(d);
+    const slots = d.abono_tipo ? buildAbonoBanner(d) : buildSlots(d);
     const abonoSel=`<select class="abonoSel" onchange="setAbono('${d.data}',this.value)">${ABONOS.map(([v,l])=>`<option value="${v}" ${(d.abono_tipo||'')===v?'selected':''}>${l}</option>`).join('')}</select>`;
     let cls=d.abono_tipo?'diaCard abonado':(d.vazio?'diaCard vazio':'diaCard');
     if(d.solicitacao) cls+=' solicit';
@@ -502,6 +512,7 @@ function cardBlur(ev, data){
 }
 async function salvarDiaSilencioso(data){
   const d=diasCache.find(x=>x.data===data); if(!d) return;
+  if(d.abono_tipo) return;   // dia abonado não tem campos de hora pra salvar
   const horarios={}; SLOT_ORDEM.forEach(t=>{ horarios[t]=$(`t_${data}_${t}`)?$(`t_${data}_${t}`).value:''; });
   let resp={};
   try{
