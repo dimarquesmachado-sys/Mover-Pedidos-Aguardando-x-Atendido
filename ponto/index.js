@@ -222,8 +222,9 @@ function routes(readBody){
         const data=b.data||dataSP();
         const bs=await sbGet(`batidas?funcionario_id=eq.${f.id}&data=eq.${data}&select=*&order=momento.asc`);
         const cfg=await getConfig();
+        const ap=await sbGet(`aprovacoes?funcionario_id=eq.${f.id}&data=eq.${data}&select=status&order=criado_em.desc&limit=1`);
         const proximo=ORDEM[bs.length]||null;
-        json(res,200,{batidas:bs,proximo,rotulo:proximo?ROTULO[proximo]:null,almoco_minimo:cfg?cfg.almoco_minimo:60}); return true;
+        json(res,200,{batidas:bs,proximo,rotulo:proximo?ROTULO[proximo]:null,almoco_minimo:cfg?cfg.almoco_minimo:60,aprovacao_status:ap[0]?ap[0].status:null}); return true;
       }
 
       if (method==='POST' && p==='/ponto/bater-ponto') {
@@ -344,6 +345,8 @@ function routes(readBody){
         const lancs=await sbGet(`lancamentos?funcionario_id=eq.${fid}&data=gte.${ini}&data=lte.${fim}&select=data,tipo`);
         const porDia={}; for(const x of bs)(porDia[x.data]=porDia[x.data]||[]).push(x);
         const lmap={}; for(const l of lancs) lmap[l.data]=l.tipo;
+        const aprovs=await sbGet(`aprovacoes?funcionario_id=eq.${fid}&data=gte.${ini}&data=lte.${fim}&select=data,status`);
+        const apMap={}; for(const a of aprovs) apMap[a.data]=a.status;
         // todos os dias do intervalo
         const datas=[]; let dt=new Date(ini+'T12:00:00Z'); const fdt=new Date(fim+'T12:00:00Z');
         while(dt<=fdt){ datas.push(dt.toISOString().slice(0,10)); dt.setUTCDate(dt.getUTCDate()+1); }
@@ -356,6 +359,7 @@ function routes(readBody){
           if(abono){ trab=esp; saldo=0; } else { const mm=minutosDia(arr); trab=mm.trab; saldo=trab-esp; }
           return { data, dow, escala:esc.nome, turnos:(esc.turnos&&esc.turnos[String(dow)])||null,
                    vazio:(arr.length===0 && !abono), abono_tipo:abono||null, abono: abono?TIPO_LABEL[abono]:null,
+                   aprovacao: apMap[data]||null,
                    horarios, trabalhado:trab, esperado:esp, saldo };
         });
         json(res,200,{dias}); return true;
@@ -392,7 +396,18 @@ function routes(readBody){
         const id=p.split('/')[4]; const b=await readBody(req);
         if(!['aprovado','rejeitado'].includes(b.status)){ json(res,400,{erro:'Status inválido.'}); return true; }
         const upd=await sbPatch('aprovacoes',`id=eq.${enc(id)}`,{status:b.status,decidido_em:new Date().toISOString()});
-        json(res,200,Array.isArray(upd)?upd[0]:upd); return true;
+        const ap=Array.isArray(upd)?upd[0]:upd;
+        // Rejeitado: o almoço passa a contar como o mínimo (1h) — empurra o retorno
+        if(b.status==='rejeitado' && ap){
+          const cfg=await getConfig(); const min=cfg.almoco_minimo||60;
+          const arr=await sbGet(`batidas?funcionario_id=eq.${ap.funcionario_id}&data=eq.${ap.data}&select=id,tipo,momento`);
+          const sa=arr.find(x=>x.tipo==='saida_almoco'), ra=arr.find(x=>x.tipo==='retorno_almoco');
+          if(sa && ra){
+            const novo=new Date(new Date(sa.momento).getTime()+min*60000).toISOString();
+            await sbPatch('batidas',`id=eq.${ra.id}`,{momento:novo});
+          }
+        }
+        json(res,200,ap); return true;
       }
 
       if (method==='GET' && p==='/ponto/admin/lancamentos') {
