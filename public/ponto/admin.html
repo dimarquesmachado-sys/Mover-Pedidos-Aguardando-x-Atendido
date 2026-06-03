@@ -50,6 +50,15 @@
   .slot span{font-size:10.5px;color:var(--mut);text-transform:uppercase;letter-spacing:.4px;font-weight:600}
   .slot input[type=time]{background:#1a1e27;border:1px solid var(--line);border-radius:9px;color:var(--txt);font:700 15px 'Archivo';padding:9px 11px}
   .slot input[type=time]:focus{border-color:var(--accent)}
+  .jornGrid{display:flex;gap:10px;flex-wrap:wrap}
+  .jd{display:flex;flex-direction:column;gap:4px;align-items:stretch}
+  .jd span{font-size:10.5px;color:var(--mut);text-transform:uppercase;letter-spacing:.4px;font-weight:600;text-align:center}
+  .jd input[type=time]{background:#1a1e27;border:1px solid var(--line);border-radius:9px;color:var(--txt);font:700 14px 'Archivo';padding:8px 9px;width:94px}
+  .jd input[type=time]:focus{border-color:var(--accent)}
+  .jd button{margin-top:2px;background:transparent;border:1px solid var(--line);color:var(--mut);border-radius:7px;font:600 10px 'Archivo';padding:4px 0;cursor:pointer}
+  .chkGrid{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px}
+  .chkGrid label{display:flex;align-items:center;gap:7px;background:#10131a;border:1px solid var(--line);border-radius:9px;padding:9px 13px;font-size:13px;font-weight:600;color:var(--txt);text-transform:none;letter-spacing:0;margin:0;cursor:pointer}
+  .chkGrid input{width:16px;height:16px;padding:0}
 </style>
 </head>
 <body>
@@ -73,6 +82,7 @@
     <div class="tab" data-t="bat" onclick="tab('bat')">Batidas</div>
     <div class="tab" data-t="lanc" onclick="tab('lanc')">Lançamentos</div>
     <div class="tab" data-t="func" onclick="tab('func')">Funcionários</div>
+    <div class="tab" data-t="esc" onclick="tab('esc')">Escalas</div>
   </div>
 
   <div id="aprov" class="card">
@@ -140,6 +150,40 @@
     </div>
     <div id="funcBox"></div>
   </div>
+
+  <div id="esc" class="card hide">
+    <h3 style="margin-bottom:6px">Cadastrar / editar escala</h3>
+    <p class="hint" style="margin-bottom:16px">Defina a jornada esperada por dia da semana (deixe em branco / Folga onde não trabalha). É isso que define a previsão de horas e o que vira hora extra.</p>
+    <div class="form-inline" style="margin-bottom:14px">
+      <div><label>Nome da escala</label><input id="eNome" style="width:300px" placeholder="Ex.: Padrão 44h"></div>
+      <div><label>Tolerância (min/dia)</label><input id="eTol" type="number" value="10" style="width:120px"></div>
+    </div>
+    <div class="jornGrid" id="jornGrid"></div>
+    <p style="margin:14px 0;font-weight:700">Totalizador semanal: <span id="eTot" class="tagb">00:00</span></p>
+    <button class="btn" onclick="salvarEscala()" id="eSalvar">Salvar escala</button>
+    <button class="btn ghost hide" id="eCancel" onclick="cancelarEscala()" style="margin-left:8px">Cancelar edição</button>
+    <div id="escBox" style="margin-top:22px"></div>
+
+    <hr style="border:none;border-top:1px solid var(--line);margin:26px 0 22px">
+
+    <h3 style="margin-bottom:6px">Atribuir escala a funcionários</h3>
+    <p class="hint" style="margin-bottom:14px">Selecione a escala, marque um ou mais funcionários e a data de início. Vale a partir dessa data — pode ser hoje, retroativa ou futura (ex.: dia 1º do mês que vem). A escala anterior continua valendo nos dias antes da nova vigência.</p>
+    <div class="form-inline" style="margin-bottom:12px">
+      <div><label>Escala</label><select id="atrEscala" style="width:300px"></select></div>
+      <div><label>A partir de (vigência)</label><input id="atrData" type="date"></div>
+      <button class="btn" onclick="atribuir()">Atribuir</button>
+    </div>
+    <label>Funcionários</label>
+    <div id="atrFuncs" class="chkGrid"></div>
+
+    <hr style="border:none;border-top:1px solid var(--line);margin:26px 0 22px">
+
+    <h3 style="margin-bottom:10px">Escalas por funcionário</h3>
+    <div class="form-inline" style="margin-bottom:14px">
+      <div><label>Funcionário</label><select id="atrVerFunc" onchange="carregarAtribuicoes()" style="width:300px"></select></div>
+    </div>
+    <div id="atrBox"></div>
+  </div>
 </div>
 
 <script>
@@ -170,14 +214,16 @@ function abrir(){
   $('batIni').value = ymd(new Date(hoje.getFullYear(), hoje.getMonth(), 1));
   $('batFim').value = ymd(new Date(hoje.getFullYear(), hoje.getMonth()+1, 0));
   $('lIni').value = ymd(hoje);
+  $('atrData').value = ymd(hoje);
   carregarFuncionarios(); carregarAprovacoes();
 }
 function tab(t){
-  ['aprov','relat','bat','lanc','func'].forEach(x=>$(x).classList.toggle('hide',x!==t));
+  ['aprov','relat','bat','lanc','func','esc'].forEach(x=>$(x).classList.toggle('hide',x!==t));
   document.querySelectorAll('.tab').forEach(el=>el.classList.toggle('on',el.dataset.t===t));
   if(t==='relat' && !ultimoRelatorio) carregarRelatorio();
   if(t==='bat') carregarBatidas();
   if(t==='lanc') carregarLancamentos();
+  if(t==='esc') carregarEscalas();
 }
 
 async function carregarAprovacoes(){
@@ -294,6 +340,8 @@ async function carregarFuncionarios(){
   const opts = listaFunc.map(f=>`<option value="${f.id}">${esc(f.nome)}</option>`).join('');
   $('batFunc').innerHTML = opts;
   $('lFunc').innerHTML = opts;
+  $('atrVerFunc').innerHTML = opts;
+  $('atrFuncs').innerHTML = listaFunc.map(f=>`<label><input type="checkbox" value="${f.id}"> ${esc(f.nome)}</label>`).join('');
   renderFuncionarios();
 }
 function renderFuncionarios(){
@@ -344,6 +392,90 @@ async function addFunc(){
 async function resetSenha(id,nome){
   if(!confirm(`Resetar a senha de ${nome}? Ele vai precisar criar uma senha nova no próximo acesso.`)) return;
   await fetch(`${API}/admin/funcionarios/${id}/reset-senha`,{method:'POST',headers:H()}); carregarFuncionarios();
+}
+
+// ───────── ESCALAS ─────────
+let escalas=[]; let editEscalaId=null;
+const DIASEM=['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+function montarJornGrid(){
+  $('jornGrid').innerHTML = DIASEM.map((d,i)=>`<div class="jd"><span>${d}</span>
+    <input type="time" id="jd_${i}" oninput="totJorn()">
+    <button type="button" onclick="folgaJorn(${i})">Folga</button></div>`).join('');
+}
+function folgaJorn(i){ $('jd_'+i).value=''; totJorn(); }
+function minFromHHMM(v){ if(!v) return 0; const [h,m]=v.split(':').map(Number); return (h||0)*60+(m||0); }
+function hhmmFromMin(min){ min=min||0; return String(Math.floor(min/60)).padStart(2,'0')+':'+String(min%60).padStart(2,'0'); }
+function totJorn(){ let t=0; for(let i=0;i<7;i++) t+=minFromHHMM($('jd_'+i).value); $('eTot').textContent=hhmm(t); }
+function preencherJorn(j){ for(let i=0;i<7;i++){ const m=(j&&j[String(i)])||0; $('jd_'+i).value = m? hhmmFromMin(m):''; } totJorn(); }
+function resumoJorn(j){ let t=0,dt=0; for(let i=0;i<7;i++){ const m=(j&&j[String(i)])||0; t+=m; if(m>0) dt++; } return `${dt} dia(s) · ${hhmm(t)}/sem`; }
+
+async function carregarEscalas(){
+  if(!$('jd_0')) montarJornGrid();
+  const r=await fetch(API+'/admin/escalas',{headers:H()});
+  escalas=await r.json();
+  $('atrEscala').innerHTML = escalas.map(e=>`<option value="${e.id}">${esc(e.nome)}</option>`).join('');
+  renderEscalas();
+  if($('atrVerFunc').value) carregarAtribuicoes();
+}
+function renderEscalas(){
+  if(!escalas.length){ $('escBox').innerHTML='<p class="hint">Nenhuma escala cadastrada ainda.</p>'; return; }
+  $('escBox').innerHTML = `<table><thead><tr><th>Escala</th><th>Resumo</th><th>Tolerância</th><th></th></tr></thead><tbody>${
+    escalas.map(e=>`<tr><td>${esc(e.nome)}</td><td>${resumoJorn(e.jornada_min)}</td><td>${e.tolerancia_min} min</td>
+      <td style="white-space:nowrap">
+        <button class="btn sm ghost" onclick="editarEscala(${e.id})">Editar</button>
+        <button class="btn sm danger" onclick="excluirEscala(${e.id},'${(e.nome||'').replace(/'/g,'')}')">Excluir</button>
+      </td></tr>`).join('')}</tbody></table>`;
+}
+function editarEscala(id){
+  const e=escalas.find(x=>x.id===id); if(!e) return;
+  editEscalaId=id; $('eNome').value=e.nome; $('eTol').value=e.tolerancia_min; preencherJorn(e.jornada_min);
+  $('eSalvar').textContent='Salvar alterações'; $('eCancel').classList.remove('hide');
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+function cancelarEscala(){
+  editEscalaId=null; $('eNome').value=''; $('eTol').value=10; preencherJorn(null);
+  $('eSalvar').textContent='Salvar escala'; $('eCancel').classList.add('hide');
+}
+async function salvarEscala(){
+  const nome=$('eNome').value.trim(); if(!nome) return alert('Dê um nome à escala.');
+  const jornada_min={}; for(let i=0;i<7;i++) jornada_min[String(i)]=minFromHHMM($('jd_'+i).value);
+  const tol=parseInt($('eTol').value,10);
+  const body={nome,jornada_min,tolerancia_min:isNaN(tol)?10:tol};
+  const url = editEscalaId ? `${API}/admin/escalas/${editEscalaId}` : `${API}/admin/escalas`;
+  const r=await fetch(url,{method:'POST',headers:H(),body:JSON.stringify(body)});
+  const j=await r.json(); if(!r.ok) return alert(j.erro||'Erro ao salvar.');
+  cancelarEscala(); ultimoRelatorio=null; carregarEscalas();
+}
+async function excluirEscala(id,nome){
+  if(!confirm(`Excluir a escala "${nome}"? As atribuições dela aos funcionários também serão removidas.`)) return;
+  await fetch(`${API}/admin/escalas/${id}`,{method:'DELETE',headers:H()});
+  ultimoRelatorio=null; carregarEscalas();
+}
+async function atribuir(){
+  const escala_id=$('atrEscala').value, vigencia_inicio=$('atrData').value;
+  const ids=[...document.querySelectorAll('#atrFuncs input:checked')].map(c=>Number(c.value));
+  if(!escala_id) return alert('Cadastre e selecione uma escala primeiro.');
+  if(!ids.length) return alert('Marque ao menos um funcionário.');
+  if(!vigencia_inicio) return alert('Escolha a data de início (vigência).');
+  const r=await fetch(`${API}/admin/atribuicoes`,{method:'POST',headers:H(),body:JSON.stringify({funcionario_ids:ids,escala_id:Number(escala_id),vigencia_inicio})});
+  const j=await r.json(); if(!r.ok) return alert(j.erro||'Erro.');
+  document.querySelectorAll('#atrFuncs input:checked').forEach(c=>c.checked=false);
+  ultimoRelatorio=null; alert(`Escala atribuída a ${j.total} funcionário(s), a partir de ${br(vigencia_inicio)}.`);
+  if($('atrVerFunc').value) carregarAtribuicoes();
+}
+async function carregarAtribuicoes(){
+  const fid=$('atrVerFunc').value; if(!fid){ $('atrBox').innerHTML=''; return; }
+  const r=await fetch(`${API}/admin/atribuicoes?funcionario_id=${fid}`,{headers:H()});
+  const lista=await r.json();
+  if(!lista.length){ $('atrBox').innerHTML='<p class="hint">Sem escala atribuída — usa a jornada padrão do sistema.</p>'; return; }
+  $('atrBox').innerHTML = `<table><thead><tr><th>A partir de</th><th>Escala</th><th></th></tr></thead><tbody>${
+    lista.map(a=>`<tr><td>${br(a.vigencia_inicio)}</td><td>${esc(a.escalas?.nome||'—')}</td>
+      <td><button class="btn sm danger" onclick="removerAtribuicao(${a.id})">Remover</button></td></tr>`).join('')}</tbody></table>`;
+}
+async function removerAtribuicao(id){
+  if(!confirm('Remover esta atribuição?')) return;
+  await fetch(`${API}/admin/atribuicoes/${id}`,{method:'DELETE',headers:H()});
+  ultimoRelatorio=null; carregarAtribuicoes();
 }
 
 if(TOKEN) abrir();
