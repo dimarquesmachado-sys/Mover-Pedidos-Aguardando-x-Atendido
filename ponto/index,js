@@ -1,0 +1,367 @@
+'use strict';
+
+/**
+ * Módulo Ponto — registro de ponto por celular (geolocalização, trava de almoço,
+ * relatório de horas extras, lançamentos e login do funcionário por email+senha).
+ *
+ * Padrão igual aos outros módulos: exporta routes(readBody) -> handle(req,res,urlObj).
+ * Serve frontend em /ponto/ (funcionário) e /ponto/admin.html (gestor).
+ * Banco: Supabase próprio (REST), via variáveis PONTO_*.
+ *
+ * Variáveis de ambiente no Render:
+ *   PONTO_SUPABASE_URL          (Project Settings > API)
+ *   PONTO_SUPABASE_SERVICE_KEY  (service_role — secret)
+ *   PONTO_ADMIN_TOKEN           (senha do painel admin)
+ *   PONTO_SESSION_SECRET        (opcional; se não setar, usa o PONTO_ADMIN_TOKEN)
+ *
+ * Não tem cron nem dependência nova (usa node-fetch + crypto nativo).
+ */
+
+const fs     = require('fs');
+const path   = require('path');
+const crypto = require('crypto');
+const fetch  = require('node-fetch');
+
+const ADMIN_TOKEN    = process.env.PONTO_ADMIN_TOKEN || 'troque-este-token';
+const SESSION_SECRET = process.env.PONTO_SESSION_SECRET || ADMIN_TOKEN;
+const SB_URL = (process.env.PONTO_SUPABASE_URL || '').replace(/\/+$/, '');
+const SB_KEY = process.env.PONTO_SUPABASE_SERVICE_KEY || '';
+
+// ── Helpers HTTP locais ───────────────────────────────────────────────
+function json(res, code, body){ res.writeHead(code,{'Content-Type':'application/json'}); res.end(JSON.stringify(body)); }
+function notFound(res){ return json(res, 404, { error: 'not found' }); }
+
+const PUBLIC_DIR = path.join(__dirname, '..', 'public', 'ponto');
+function servir(res, relPath){
+  const ext = path.extname(relPath).toLowerCase();
+  const mime = { '.html':'text/html; charset=utf-8', '.js':'application/javascript; charset=utf-8',
+    '.css':'text/css; charset=utf-8', '.png':'image/png', '.svg':'image/svg+xml', '.ico':'image/x-icon' }[ext] || 'application/octet-stream';
+  const full = path.join(PUBLIC_DIR, relPath);
+  if (!full.startsWith(PUBLIC_DIR)) return notFound(res);
+  if (!fs.existsSync(full) || !fs.statSync(full).isFile()) return notFound(res);
+  res.writeHead(200, { 'Content-Type': mime });
+  fs.createReadStream(full).pipe(res);
+}
+
+// ── Supabase REST ─────────────────────────────────────────────────────
+const enc = encodeURIComponent;
+function sbHeaders(extra){ return { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, 'Content-Type': 'application/json', ...(extra||{}) }; }
+async function sbGet(q){
+  const r = await fetch(`${SB_URL}/rest/v1/${q}`, { headers: sbHeaders() });
+  if (!r.ok) throw new Error(`Supabase GET ${q}: ${r.status} ${await r.text()}`);
+  return r.json();
+}
+async function sbInsert(table, body, prefer){
+  const r = await fetch(`${SB_URL}/rest/v1/${table}`, { method:'POST', headers: sbHeaders({ Prefer: prefer || 'return=representation' }), body: JSON.stringify(body) });
+  if (!r.ok) throw new Error(`Supabase POST ${table}: ${r.status} ${await r.text()}`);
+  const t = await r.text(); return t ? JSON.parse(t) : null;
+}
+async function sbPatch(table, q, body){
+  const r = await fetch(`${SB_URL}/rest/v1/${table}?${q}`, { method:'PATCH', headers: sbHeaders({ Prefer:'return=representation' }), body: JSON.stringify(body) });
+  if (!r.ok) throw new Error(`Supabase PATCH ${table}: ${r.status} ${await r.text()}`);
+  const t = await r.text(); return t ? JSON.parse(t) : null;
+}
+async function sbDelete(table, q){
+  const r = await fetch(`${SB_URL}/rest/v1/${table}?${q}`, { method:'DELETE', headers: sbHeaders() });
+  if (!r.ok) throw new Error(`Supabase DELETE ${table}: ${r.status} ${await r.text()}`);
+  return true;
+}
+async function sbUpsert(table, onConflict, rows){
+  const r = await fetch(`${SB_URL}/rest/v1/${table}?on_conflict=${onConflict}`, {
+    method:'POST', headers: sbHeaders({ Prefer:'resolution=ignore-duplicates,return=minimal' }), body: JSON.stringify(rows) });
+  if (!r.ok) throw new Error(`Supabase UPSERT ${table}: ${r.status} ${await r.text()}`);
+  return true;
+}
+
+// ── Helpers de cálculo ────────────────────────────────────────────────
+function dataSP(d = new Date()){ return d.toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' }); }
+function diaSemana(s){ const [y,m,d] = s.split('-').map(Number); return new Date(Date.UTC(y, m-1, d)).getUTCDay(); }
+function diffMin(a,b){ return Math.round((new Date(b) - new Date(a)) / 60000); }
+function haversine(lat1,lon1,lat2,lon2){
+  const R=6371000, rad=x=>x*Math.PI/180;
+  const dLat=rad(lat2-lat1), dLon=rad(lon2-lon1);
+  const a=Math.sin(dLat/2)**2+Math.cos(rad(lat1))*Math.cos(rad(lat2))*Math.sin(dLon/2)**2;
+  return Math.round(R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a)));
+}
+function limitesMes(ano,mes){
+  const inicio=`${ano}-${String(mes).padStart(2,'0')}-01`;
+  const ultimo=new Date(Date.UTC(ano,mes,0)).getUTCDate();
+  const fim=`${ano}-${String(mes).padStart(2,'0')}-${String(ultimo).padStart(2,'0')}`;
+  return { inicio, fim };
+}
+const ORDEM=['entrada','saida_almoco','retorno_almoco','saida'];
+const ROTULO={ entrada:'Entrada', saida_almoco:'Saída p/ almoço', retorno_almoco:'Retorno do almoço', saida:'Saída (fim do dia)' };
+const TIPO_LABEL={ ferias:'Férias', folga:'Folga', atestado:'Atestado', completar:'Completado (escala)' };
+const TIPO_LANC=['ferias','folga','atestado','completar'];
+
+function minutosDia(bs){
+  const g=t=>bs.find(b=>b.tipo===t);
+  const ent=g('entrada'), sa=g('saida_almoco'), ra=g('retorno_almoco'), sai=g('saida');
+  let trab=0, almoco=0;
+  if(ent&&sa) trab+=diffMin(ent.momento,sa.momento);
+  if(ra&&sai) trab+=diffMin(ra.momento,sai.momento);
+  if(ent&&sai&&!sa&&!ra) trab=diffMin(ent.momento,sai.momento);
+  if(sa&&ra) almoco=diffMin(sa.momento,ra.momento);
+  return { trab, almoco, completo: !!(ent&&sai) };
+}
+function agregar(batidasPorDia, lancPorData, jornada, tol, almocoMin){
+  const datas=new Set([...Object.keys(batidasPorDia), ...Object.keys(lancPorData)]);
+  let trabTotal=0, espTotal=0, extras=0, deficit=0, extrasSabado=0, almocosCurtos=0;
+  const detalhe=[];
+  for(const dia of [...datas].sort()){
+    const dow=diaSemana(dia), esp=jornada[String(dow)] ?? 0, abono=lancPorData[dia];
+    let trab, almoco=0, completo=true, saldo;
+    if(abono){ trab=esp; saldo=0; }
+    else { const m=minutosDia(batidasPorDia[dia]||[]); trab=m.trab; almoco=m.almoco; completo=m.completo; saldo=trab-esp; }
+    trabTotal+=trab; espTotal+=esp;
+    if(!abono){
+      if(saldo>tol) extras+=saldo; else if(saldo<-tol) deficit+=saldo;
+      if(dow===6) extrasSabado+=trab;
+      if(almoco>0 && almoco<almocoMin) almocosCurtos++;
+    }
+    detalhe.push({ data:dia, dow, trabalhado:trab, esperado:esp, saldo, almoco, completo, abono: abono?TIPO_LABEL[abono]:null });
+  }
+  return { detalhe, trabalhado:trabTotal, esperado:espTotal, saldo:trabTotal-espTotal, extras, deficit, extras_sabado:extrasSabado, almocos_curtos:almocosCurtos };
+}
+
+// ── Senha (scrypt) e token de sessão ──────────────────────────────────
+function hashSenha(senha){
+  const salt=crypto.randomBytes(16).toString('hex');
+  return `${salt}:${crypto.scryptSync(String(senha),salt,32).toString('hex')}`;
+}
+function conferirSenha(senha, armazenado){
+  if(!armazenado || !armazenado.includes(':')) return false;
+  const [salt,h]=armazenado.split(':');
+  const c=crypto.scryptSync(String(senha),salt,32).toString('hex');
+  try{ return crypto.timingSafeEqual(Buffer.from(h,'hex'),Buffer.from(c,'hex')); }catch{ return false; }
+}
+function gerarToken(id){
+  const p=`${id}.${Date.now()+1000*60*60*24*30}`;
+  const sig=crypto.createHmac('sha256',SESSION_SECRET).update(p).digest('hex');
+  return Buffer.from(p).toString('base64')+'.'+sig;
+}
+function verificarToken(token){
+  try{
+    const [b64,sig]=String(token).split('.');
+    const p=Buffer.from(b64,'base64').toString();
+    const e=crypto.createHmac('sha256',SESSION_SECRET).update(p).digest('hex');
+    if(sig!==e) return null;
+    const [id,exp]=p.split('.');
+    if(Date.now()>Number(exp)) return null;
+    return Number(id);
+  }catch{ return null; }
+}
+
+// ── Acessos ao banco ──────────────────────────────────────────────────
+async function getConfig(){ const a=await sbGet('config?id=eq.1&select=*'); return a[0]; }
+async function buscarPorEmail(email){ const a=await sbGet(`funcionarios?email=ilike.${enc(email)}&ativo=eq.true&select=*`); return a[0]||null; }
+async function funcionarioDoToken(token){ const id=verificarToken(token); if(!id) return null; const a=await sbGet(`funcionarios?id=eq.${id}&ativo=eq.true&select=*`); return a[0]||null; }
+function adminOk(req){ return req.headers['x-admin-token']===ADMIN_TOKEN; }
+function naoAutorizado(res){ json(res,401,{erro:'Não autorizado.'}); return true; }
+
+// ── Rotas ─────────────────────────────────────────────────────────────
+function routes(readBody){
+  return async function handle(req, res, urlObj){
+    const { method } = req;
+    const p = urlObj.pathname;
+    if (!p.startsWith('/ponto')) return false;
+
+    // Frontend estático
+    if (method==='GET' && (p==='/ponto' || p==='/ponto/')) { servir(res,'index.html'); return true; }
+    if (method==='GET' && (p==='/ponto/admin' || p==='/ponto/admin.html')) { servir(res,'admin.html'); return true; }
+
+    try {
+      // ───────── FUNCIONÁRIO ─────────
+      if (method==='POST' && p==='/ponto/login') {
+        const b=await readBody(req); const email=String(b.email||'').trim().toLowerCase();
+        if(!email){ json(res,400,{erro:'Informe o email.'}); return true; }
+        const f=await buscarPorEmail(email);
+        if(!f){ json(res,401,{erro:'Email não encontrado. Confirme com o gestor.'}); return true; }
+        if(!f.senha_definida || !f.senha_hash){ json(res,200,{precisa_criar_senha:true,nome:f.nome}); return true; }
+        if(!b.senha){ json(res,400,{erro:'Informe a senha.'}); return true; }
+        if(!conferirSenha(b.senha,f.senha_hash)){ json(res,401,{erro:'Senha incorreta.'}); return true; }
+        json(res,200,{ok:true,token:gerarToken(f.id),nome:f.nome,cargo:f.cargo,setor:f.setor}); return true;
+      }
+
+      if (method==='POST' && p==='/ponto/criar-senha') {
+        const b=await readBody(req); const email=String(b.email||'').trim().toLowerCase(); const senha=String(b.senha||'');
+        if(senha.length<4){ json(res,400,{erro:'A senha precisa ter pelo menos 4 caracteres.'}); return true; }
+        const f=await buscarPorEmail(email);
+        if(!f){ json(res,401,{erro:'Email não encontrado. Confirme com o gestor.'}); return true; }
+        if(f.senha_definida){ json(res,409,{erro:'Senha já criada. Faça login.'}); return true; }
+        await sbPatch('funcionarios',`id=eq.${f.id}`,{senha_hash:hashSenha(senha),senha_definida:true});
+        json(res,200,{ok:true,token:gerarToken(f.id),nome:f.nome,cargo:f.cargo,setor:f.setor}); return true;
+      }
+
+      if (method==='POST' && p==='/ponto/minhas-batidas') {
+        const b=await readBody(req); const f=await funcionarioDoToken(b.token);
+        if(!f){ json(res,401,{erro:'Sessão expirada. Faça login de novo.'}); return true; }
+        const data=b.data||dataSP();
+        const bs=await sbGet(`batidas?funcionario_id=eq.${f.id}&data=eq.${data}&select=*&order=momento.asc`);
+        const cfg=await getConfig();
+        const proximo=ORDEM[bs.length]||null;
+        json(res,200,{batidas:bs,proximo,rotulo:proximo?ROTULO[proximo]:null,almoco_minimo:cfg?cfg.almoco_minimo:60}); return true;
+      }
+
+      if (method==='POST' && p==='/ponto/bater-ponto') {
+        const b=await readBody(req); const f=await funcionarioDoToken(b.token);
+        if(!f){ json(res,401,{erro:'Sessão expirada. Faça login de novo.'}); return true; }
+        const { latitude, longitude, justificativa } = b;
+        if(typeof latitude!=='number'||typeof longitude!=='number'){ json(res,400,{erro:'Localização não recebida. Ative o GPS e tente de novo.'}); return true; }
+        const cfg=await getConfig();
+        if(!cfg){ json(res,500,{erro:'Local de trabalho não configurado (tabela config).'}); return true; }
+        const dist=haversine(latitude,longitude,cfg.latitude,cfg.longitude);
+        if(dist>cfg.raio_metros){ json(res,403,{erro:`Você está a ${dist} m do trabalho. É preciso estar a no máximo ${cfg.raio_metros} m para bater o ponto.`,distancia:dist}); return true; }
+        const data=dataSP();
+        const bs=await sbGet(`batidas?funcionario_id=eq.${f.id}&data=eq.${data}&select=*&order=momento.asc`);
+        const idx=bs.length, tipo=ORDEM[idx];
+        if(!tipo){ json(res,409,{erro:'Os 4 pontos de hoje já foram registrados.'}); return true; }
+        const agora=new Date().toISOString();
+        let justUsada=null;
+        if(tipo==='retorno_almoco'){
+          const sa=bs.find(x=>x.tipo==='saida_almoco');
+          if(sa){
+            const lunch=diffMin(sa.momento,agora);
+            if(lunch<cfg.almoco_minimo){
+              if(!justificativa){ json(res,422,{requer_justificativa:true,minutos:lunch,minimo:cfg.almoco_minimo,erro:`O almoço teria só ${lunch} min (mínimo ${cfg.almoco_minimo} min). Justifique para registrar.`}); return true; }
+              if(String(justificativa).trim().length<30){ json(res,400,{erro:'A justificativa precisa ter pelo menos 30 caracteres.'}); return true; }
+              justUsada=String(justificativa).trim();
+              await sbInsert('aprovacoes',{funcionario_id:f.id,data,minutos_almoco:lunch,justificativa:justUsada,status:'pendente'},'return=minimal');
+            }
+          }
+        }
+        await sbInsert('batidas',{funcionario_id:f.id,tipo,momento:agora,data,latitude,longitude,distancia_metros:dist,justificativa:justUsada},'return=minimal');
+        const prox=ORDEM[idx+1]||null;
+        json(res,200,{ok:true,tipo,rotulo:ROTULO[tipo],distancia:dist,pendente_aprovacao:!!justUsada,proximo:prox,proximo_rotulo:prox?ROTULO[prox]:null}); return true;
+      }
+
+      if (method==='POST' && p==='/ponto/meu-historico') {
+        const b=await readBody(req); const f=await funcionarioDoToken(b.token);
+        if(!f){ json(res,401,{erro:'Sessão expirada. Faça login de novo.'}); return true; }
+        const { inicio, fim }=limitesMes(+b.ano,+b.mes);
+        const cfg=await getConfig();
+        const bs=await sbGet(`batidas?funcionario_id=eq.${f.id}&data=gte.${inicio}&data=lte.${fim}&select=*&order=momento.asc`);
+        const lancs=await sbGet(`lancamentos?funcionario_id=eq.${f.id}&data=gte.${inicio}&data=lte.${fim}&select=data,tipo`);
+        const porDia={}; for(const x of bs)(porDia[x.data]=porDia[x.data]||[]).push(x);
+        const lmap={}; for(const l of lancs) lmap[l.data]=l.tipo;
+        const r=agregar(porDia,lmap,cfg.jornada_min,cfg.tolerancia_min||0,cfg.almoco_minimo);
+        json(res,200,{inicio,fim,...r}); return true;
+      }
+
+      // ───────── ADMIN ─────────
+      if (method==='POST' && p==='/ponto/admin/login') {
+        const b=await readBody(req);
+        if(b.token===ADMIN_TOKEN){ json(res,200,{ok:true}); return true; }
+        json(res,401,{erro:'Token inválido.'}); return true;
+      }
+
+      if (method==='GET' && p==='/ponto/admin/funcionarios') {
+        if(!adminOk(req)) return naoAutorizado(res);
+        const data=await sbGet('funcionarios?select=id,nome,matricula,email,cargo,setor,ativo,senha_definida&order=nome.asc');
+        json(res,200,data); return true;
+      }
+
+      if (method==='POST' && p==='/ponto/admin/funcionarios') {
+        if(!adminOk(req)) return naoAutorizado(res);
+        const b=await readBody(req); const { nome, matricula, email, cargo, setor }=b;
+        if(!nome||!matricula||!email){ json(res,400,{erro:'Nome, matrícula e email são obrigatórios.'}); return true; }
+        try{
+          const ins=await sbInsert('funcionarios',{nome,matricula:String(matricula),email:String(email).trim().toLowerCase(),cargo,setor,senha_definida:false});
+          json(res,200,Array.isArray(ins)?ins[0]:ins);
+        }catch(e){ json(res,400,{erro:'Não foi possível cadastrar (matrícula ou email já cadastrados?).'}); }
+        return true;
+      }
+
+      if (method==='POST' && /^\/ponto\/admin\/funcionarios\/[^/]+\/reset-senha$/.test(p)) {
+        if(!adminOk(req)) return naoAutorizado(res);
+        const id=p.split('/')[4];
+        await sbPatch('funcionarios',`id=eq.${enc(id)}`,{senha_hash:null,senha_definida:false});
+        json(res,200,{ok:true}); return true;
+      }
+
+      if (method==='GET' && p==='/ponto/admin/batidas') {
+        if(!adminOk(req)) return naoAutorizado(res);
+        const ini=urlObj.searchParams.get('inicio'), fim=urlObj.searchParams.get('fim'), fid=urlObj.searchParams.get('funcionario_id');
+        let q=`batidas?select=*,funcionarios(nome,matricula)&data=gte.${ini}&data=lte.${fim}&order=data.asc,momento.asc`;
+        if(fid) q+=`&funcionario_id=eq.${fid}`;
+        json(res,200,await sbGet(q)); return true;
+      }
+
+      if (method==='GET' && p==='/ponto/admin/aprovacoes') {
+        if(!adminOk(req)) return naoAutorizado(res);
+        json(res,200,await sbGet('aprovacoes?select=*,funcionarios(nome,matricula)&status=eq.pendente&order=criado_em.asc')); return true;
+      }
+
+      if (method==='POST' && /^\/ponto\/admin\/aprovacoes\/[^/]+$/.test(p)) {
+        if(!adminOk(req)) return naoAutorizado(res);
+        const id=p.split('/')[4]; const b=await readBody(req);
+        if(!['aprovado','rejeitado'].includes(b.status)){ json(res,400,{erro:'Status inválido.'}); return true; }
+        const upd=await sbPatch('aprovacoes',`id=eq.${enc(id)}`,{status:b.status,decidido_em:new Date().toISOString()});
+        json(res,200,Array.isArray(upd)?upd[0]:upd); return true;
+      }
+
+      if (method==='GET' && p==='/ponto/admin/lancamentos') {
+        if(!adminOk(req)) return naoAutorizado(res);
+        const ini=urlObj.searchParams.get('inicio'), fim=urlObj.searchParams.get('fim');
+        let q='lancamentos?select=*,funcionarios(nome,matricula)&order=data.desc';
+        if(ini) q+=`&data=gte.${ini}`; if(fim) q+=`&data=lte.${fim}`;
+        json(res,200,await sbGet(q)); return true;
+      }
+
+      if (method==='POST' && p==='/ponto/admin/lancamentos') {
+        if(!adminOk(req)) return naoAutorizado(res);
+        const b=await readBody(req); const { funcionario_id, inicio, fim, tipo, observacao }=b;
+        if(!funcionario_id||!inicio||!tipo){ json(res,400,{erro:'Funcionário, data e tipo são obrigatórios.'}); return true; }
+        if(!TIPO_LANC.includes(tipo)){ json(res,400,{erro:'Tipo inválido.'}); return true; }
+        const rows=[]; let d=new Date(inicio+'T12:00:00Z'); const fdt=new Date((fim||inicio)+'T12:00:00Z');
+        while(d<=fdt){ rows.push({funcionario_id,data:d.toISOString().slice(0,10),tipo,observacao:observacao||null}); d.setUTCDate(d.getUTCDate()+1); }
+        await sbUpsert('lancamentos','funcionario_id,data,tipo',rows);
+        json(res,200,{ok:true,dias:rows.length}); return true;
+      }
+
+      if (method==='DELETE' && /^\/ponto\/admin\/lancamentos\/[^/]+$/.test(p)) {
+        if(!adminOk(req)) return naoAutorizado(res);
+        const id=p.split('/')[4];
+        await sbDelete('lancamentos',`id=eq.${enc(id)}`);
+        json(res,200,{ok:true}); return true;
+      }
+
+      if (method==='GET' && p==='/ponto/admin/relatorio') {
+        if(!adminOk(req)) return naoAutorizado(res);
+        const ano=+urlObj.searchParams.get('ano'), mes=+urlObj.searchParams.get('mes');
+        const { inicio, fim }=limitesMes(ano,mes);
+        const cfg=await getConfig(); const tol=cfg.tolerancia_min||0;
+        const funcs=await sbGet('funcionarios?select=id,nome,matricula');
+        const fmap={}; funcs.forEach(f=>fmap[f.id]=f);
+        const bs=await sbGet(`batidas?select=*&data=gte.${inicio}&data=lte.${fim}&order=momento.asc`);
+        const lancs=await sbGet(`lancamentos?select=funcionario_id,data,tipo&data=gte.${inicio}&data=lte.${fim}`);
+        const bat={}; for(const x of bs){ (bat[x.funcionario_id]=bat[x.funcionario_id]||{}); (bat[x.funcionario_id][x.data]=bat[x.funcionario_id][x.data]||[]).push(x); }
+        const lmap={}; for(const l of lancs)(lmap[l.funcionario_id]=lmap[l.funcionario_id]||{})[l.data]=l.tipo;
+        const fids=new Set([...Object.keys(bat), ...Object.keys(lmap)].map(Number));
+        const relatorio=[];
+        for(const fid of fids){
+          const f=fmap[fid]||{nome:'(removido)',matricula:''};
+          const r=agregar(bat[fid]||{}, lmap[fid]||{}, cfg.jornada_min, tol, cfg.almoco_minimo);
+          relatorio.push({funcionario_id:fid,nome:f.nome,matricula:f.matricula,...r});
+        }
+        relatorio.sort((a,b)=>(a.nome||'').localeCompare(b.nome||''));
+        json(res,200,{inicio,fim,tolerancia:tol,relatorio}); return true;
+      }
+
+    } catch (e) {
+      console.error('[ponto] erro:', e.message);
+      json(res,500,{erro:e.message}); return true;
+    }
+
+    return false; // /ponto/* desconhecido → cai no 404 global
+  };
+}
+
+// ── Interface compatível com config/empresas ─────────────────────────
+module.exports = {
+  id: 'ponto',
+  nome: 'Ponto (Registro)',
+  rotinas: {},
+  routes,
+  crons: {}
+};
