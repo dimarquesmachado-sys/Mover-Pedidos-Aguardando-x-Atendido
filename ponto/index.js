@@ -106,12 +106,13 @@ function minutosDia(bs){
   if(sa&&ra) almoco=diffMin(sa.momento,ra.momento);
   return { trab, almoco, completo: !!(ent&&sai) };
 }
-function agregar(batidasPorDia, lancPorData, jornada, tol, almocoMin){
+function agregar(batidasPorDia, lancPorData, escalaDe, almocoMin){
   const datas=new Set([...Object.keys(batidasPorDia), ...Object.keys(lancPorData)]);
   let trabTotal=0, espTotal=0, extras=0, deficit=0, extrasSabado=0, almocosCurtos=0;
   const detalhe=[];
   for(const dia of [...datas].sort()){
-    const dow=diaSemana(dia), esp=jornada[String(dow)] ?? 0, abono=lancPorData[dia];
+    const dow=diaSemana(dia), abono=lancPorData[dia];
+    const esc=escalaDe(dia); const esp=esc.jornada_min[String(dow)] ?? 0; const tol=esc.tolerancia_min ?? 0;
     let trab, almoco=0, completo=true, saldo;
     if(abono){ trab=esp; saldo=0; }
     else { const m=minutosDia(batidasPorDia[dia]||[]); trab=m.trab; almoco=m.almoco; completo=m.completo; saldo=trab-esp; }
@@ -156,6 +157,21 @@ function verificarToken(token){
 
 // ── Acessos ao banco ──────────────────────────────────────────────────
 async function getConfig(){ const a=await sbGet('config?id=eq.1&select=*'); return a[0]; }
+// Resolve a escala vigente de cada funcionário numa data (pega a atribuição com vigência <= data mais recente)
+async function montarEscalas(funcIds){
+  const escalas=await sbGet('escalas?select=*');
+  const emap={}; escalas.forEach(e=>emap[e.id]=e);
+  let q='escala_funcionario?select=*&order=vigencia_inicio.asc';
+  if(funcIds && funcIds.length) q+=`&funcionario_id=in.(${funcIds.join(',')})`;
+  const atrs=await sbGet(q);
+  const byFunc={}; atrs.forEach(a=>(byFunc[a.funcionario_id]=byFunc[a.funcionario_id]||[]).push(a));
+  return (funcId, dia, fallback)=>{
+    const list=byFunc[funcId]||[]; let chosen=null;
+    for(const a of list){ if(String(a.vigencia_inicio)<=dia) chosen=a; }
+    const e=chosen && emap[chosen.escala_id];
+    return e ? { jornada_min:e.jornada_min, tolerancia_min:e.tolerancia_min ?? 0 } : fallback;
+  };
+}
 async function buscarPorEmail(email){ const a=await sbGet(`funcionarios?email=ilike.${enc(email)}&ativo=eq.true&select=*`); return a[0]||null; }
 async function funcionarioDoToken(token){ const id=verificarToken(token); if(!id) return null; const a=await sbGet(`funcionarios?id=eq.${id}&ativo=eq.true&select=*`); return a[0]||null; }
 function adminOk(req){ return req.headers['x-admin-token']===ADMIN_TOKEN; }
@@ -243,11 +259,13 @@ function routes(readBody){
         if(!f){ json(res,401,{erro:'Sessão expirada. Faça login de novo.'}); return true; }
         const { inicio, fim }=limitesMes(+b.ano,+b.mes);
         const cfg=await getConfig();
+        const fb={jornada_min:cfg.jornada_min, tolerancia_min:cfg.tolerancia_min||0};
         const bs=await sbGet(`batidas?funcionario_id=eq.${f.id}&data=gte.${inicio}&data=lte.${fim}&select=*&order=momento.asc`);
         const lancs=await sbGet(`lancamentos?funcionario_id=eq.${f.id}&data=gte.${inicio}&data=lte.${fim}&select=data,tipo`);
         const porDia={}; for(const x of bs)(porDia[x.data]=porDia[x.data]||[]).push(x);
         const lmap={}; for(const l of lancs) lmap[l.data]=l.tipo;
-        const r=agregar(porDia,lmap,cfg.jornada_min,cfg.tolerancia_min||0,cfg.almoco_minimo);
+        const escDe=await montarEscalas([f.id]);
+        const r=agregar(porDia,lmap,(dia)=>escDe(f.id,dia,fb),cfg.almoco_minimo);
         json(res,200,{inicio,fim,...r}); return true;
       }
 
@@ -316,13 +334,15 @@ function routes(readBody){
         const ini=urlObj.searchParams.get('inicio'), fim=urlObj.searchParams.get('fim');
         if(!fid){ json(res,400,{erro:'Selecione um funcionário.'}); return true; }
         const cfg=await getConfig();
+        const fb={jornada_min:cfg.jornada_min, tolerancia_min:cfg.tolerancia_min||0};
+        const escDe=await montarEscalas([fid]);
         const bs=await sbGet(`batidas?funcionario_id=eq.${fid}&data=gte.${ini}&data=lte.${fim}&select=*&order=momento.asc`);
         const lancs=await sbGet(`lancamentos?funcionario_id=eq.${fid}&data=gte.${ini}&data=lte.${fim}&select=data,tipo`);
         const porDia={}; for(const x of bs)(porDia[x.data]=porDia[x.data]||[]).push(x);
         const lmap={}; for(const l of lancs) lmap[l.data]=l.tipo;
         const datas=[...new Set([...Object.keys(porDia), ...Object.keys(lmap)])].sort();
         const dias=datas.map(data=>{
-          const dow=diaSemana(data), esp=cfg.jornada_min[String(dow)] ?? 0, abono=lmap[data];
+          const dow=diaSemana(data), esp=escDe(fid,data,fb).jornada_min[String(dow)] ?? 0, abono=lmap[data];
           const arr=porDia[data]||[];
           const horarios={}; for(const t of ORDEM){ const b=arr.find(x=>x.tipo===t); horarios[t]=b?horaSP(b.momento):''; }
           let trab, saldo;
@@ -392,11 +412,63 @@ function routes(readBody){
         json(res,200,{ok:true}); return true;
       }
 
+      // ───────── ESCALAS ─────────
+      if (method==='GET' && p==='/ponto/admin/escalas') {
+        if(!adminOk(req)) return naoAutorizado(res);
+        json(res,200,await sbGet('escalas?select=*&order=nome.asc')); return true;
+      }
+      if (method==='POST' && p==='/ponto/admin/escalas') {
+        if(!adminOk(req)) return naoAutorizado(res);
+        const b=await readBody(req);
+        if(!b.nome || !b.jornada_min){ json(res,400,{erro:'Nome e jornada são obrigatórios.'}); return true; }
+        const ins=await sbInsert('escalas',{ nome:b.nome, jornada_min:b.jornada_min, tolerancia_min: b.tolerancia_min ?? 10 });
+        json(res,200,Array.isArray(ins)?ins[0]:ins); return true;
+      }
+      if (method==='POST' && /^\/ponto\/admin\/escalas\/[^/]+$/.test(p)) {
+        if(!adminOk(req)) return naoAutorizado(res);
+        const id=p.split('/')[4]; const b=await readBody(req); const patch={};
+        ['nome','jornada_min','tolerancia_min'].forEach(k=>{ if(b[k]!==undefined) patch[k]=b[k]; });
+        const upd=await sbPatch('escalas',`id=eq.${enc(id)}`,patch);
+        json(res,200,Array.isArray(upd)?upd[0]:upd); return true;
+      }
+      if (method==='DELETE' && /^\/ponto\/admin\/escalas\/[^/]+$/.test(p)) {
+        if(!adminOk(req)) return naoAutorizado(res);
+        const id=p.split('/')[4];
+        await sbDelete('escala_funcionario',`escala_id=eq.${enc(id)}`);
+        await sbDelete('escalas',`id=eq.${enc(id)}`);
+        json(res,200,{ok:true}); return true;
+      }
+
+      // ───────── ATRIBUIÇÕES (escala vigente por funcionário) ─────────
+      if (method==='GET' && p==='/ponto/admin/atribuicoes') {
+        if(!adminOk(req)) return naoAutorizado(res);
+        const fid=urlObj.searchParams.get('funcionario_id');
+        let q='escala_funcionario?select=*,escalas(nome),funcionarios(nome)&order=vigencia_inicio.desc';
+        if(fid) q+=`&funcionario_id=eq.${fid}`;
+        json(res,200,await sbGet(q)); return true;
+      }
+      if (method==='POST' && p==='/ponto/admin/atribuicoes') {
+        if(!adminOk(req)) return naoAutorizado(res);
+        const b=await readBody(req); const { funcionario_ids, escala_id, vigencia_inicio }=b;
+        if(!Array.isArray(funcionario_ids) || !funcionario_ids.length || !escala_id || !vigencia_inicio){
+          json(res,400,{erro:'Selecione a escala, ao menos um funcionário e a data de início.'}); return true; }
+        const rows=funcionario_ids.map(x=>({ funcionario_id:x, escala_id, vigencia_inicio }));
+        await sbInsert('escala_funcionario',rows,'return=minimal');
+        json(res,200,{ok:true,total:rows.length}); return true;
+      }
+      if (method==='DELETE' && /^\/ponto\/admin\/atribuicoes\/[^/]+$/.test(p)) {
+        if(!adminOk(req)) return naoAutorizado(res);
+        const id=p.split('/')[4];
+        await sbDelete('escala_funcionario',`id=eq.${enc(id)}`);
+        json(res,200,{ok:true}); return true;
+      }
+
       if (method==='GET' && p==='/ponto/admin/relatorio') {
         if(!adminOk(req)) return naoAutorizado(res);
         const ano=+urlObj.searchParams.get('ano'), mes=+urlObj.searchParams.get('mes');
         const { inicio, fim }=limitesMes(ano,mes);
         const cfg=await getConfig(); const tol=cfg.tolerancia_min||0;
+        const fb={jornada_min:cfg.jornada_min, tolerancia_min:tol};
         const funcs=await sbGet('funcionarios?select=id,nome,matricula');
         const fmap={}; funcs.forEach(f=>fmap[f.id]=f);
         const bs=await sbGet(`batidas?select=*&data=gte.${inicio}&data=lte.${fim}&order=momento.asc`);
@@ -404,10 +476,11 @@ function routes(readBody){
         const bat={}; for(const x of bs){ (bat[x.funcionario_id]=bat[x.funcionario_id]||{}); (bat[x.funcionario_id][x.data]=bat[x.funcionario_id][x.data]||[]).push(x); }
         const lmap={}; for(const l of lancs)(lmap[l.funcionario_id]=lmap[l.funcionario_id]||{})[l.data]=l.tipo;
         const fids=new Set([...Object.keys(bat), ...Object.keys(lmap)].map(Number));
+        const escDe=await montarEscalas([...fids]);
         const relatorio=[];
         for(const fid of fids){
           const f=fmap[fid]||{nome:'(removido)',matricula:''};
-          const r=agregar(bat[fid]||{}, lmap[fid]||{}, cfg.jornada_min, tol, cfg.almoco_minimo);
+          const r=agregar(bat[fid]||{}, lmap[fid]||{}, (dia)=>escDe(fid,dia,fb), cfg.almoco_minimo);
           relatorio.push({funcionario_id:fid,nome:f.nome,matricula:f.matricula,...r});
         }
         relatorio.sort((a,b)=>(a.nome||'').localeCompare(b.nome||''));
