@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Admin · Ponto GOOD Import</title>
+<link rel="icon" type="image/png" href="/ponto/favicon.png">
+<link rel="apple-touch-icon" href="/ponto/favicon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800&display=swap" rel="stylesheet">
 <style>
@@ -146,12 +148,14 @@ async function login(){
 }
 function abrir(){
   $('login').classList.add('hide'); $('app').classList.remove('hide');
-  const hoje=new Date(); const iso=d=>d.toISOString().slice(0,10);
+  const hoje=new Date();
+  const ymd=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
   $('relMes').innerHTML = mesesNome.map((m,i)=>`<option value="${i+1}" ${i===hoje.getMonth()?'selected':''}>${m}</option>`).join('');
   $('relAno').value = hoje.getFullYear();
-  $('batFim').value = iso(hoje);
-  $('batIni').value = iso(new Date(hoje.getTime()-6*864e5));
-  $('lIni').value = iso(hoje);
+  // Batidas: mês corrente inteiro (dia 1 → último dia do mês)
+  $('batIni').value = ymd(new Date(hoje.getFullYear(), hoje.getMonth(), 1));
+  $('batFim').value = ymd(new Date(hoje.getFullYear(), hoje.getMonth()+1, 0));
+  $('lIni').value = ymd(hoje);
   carregarFuncionarios(); carregarAprovacoes();
 }
 function tab(t){
@@ -235,16 +239,55 @@ async function carregarLancamentos(){
 }
 async function delLancamento(id){ if(!confirm('Remover este lançamento?')) return; await fetch(API+'/admin/lancamentos/'+id,{method:'DELETE',headers:H()}); carregarLancamentos(); ultimoRelatorio=null; }
 
+let listaFunc = [];
+let editandoId = null;
+function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
+
 async function carregarFuncionarios(){
   const r = await fetch(API+'/admin/funcionarios',{headers:H()});
-  const lista = await r.json();
-  const opts = lista.map(f=>`<option value="${f.id}">${f.nome}</option>`).join('');
+  listaFunc = await r.json();
+  const opts = listaFunc.map(f=>`<option value="${f.id}">${esc(f.nome)}</option>`).join('');
   $('batFunc').innerHTML = '<option value="">Todos</option>' + opts;
   $('lFunc').innerHTML = opts;
-  $('funcBox').innerHTML = `<table><thead><tr><th>Nome</th><th>Matrícula</th><th>Email</th><th>Cargo</th><th>Senha criada?</th><th></th></tr></thead><tbody>${
-    lista.map(f=>`<tr><td>${f.nome}</td><td>${f.matricula}</td><td>${f.email||'—'}</td><td>${f.cargo||'—'}</td>
-      <td><span class="pill ${f.senha_definida?'ok':'no'}">${f.senha_definida?'Sim':'Não'}</span></td>
-      <td>${f.senha_definida?`<button class="btn sm ghost" onclick="resetSenha(${f.id},'${(f.nome||'').replace(/'/g,'')}')">Resetar senha</button>`:''}</td></tr>`).join('')}</tbody></table>`;
+  renderFuncionarios();
+}
+function renderFuncionarios(){
+  const linhas = listaFunc.map(f=>{
+    if(f.id===editandoId){
+      return `<tr>
+        <td><input id="ed_nome" value="${esc(f.nome)}" style="width:160px"></td>
+        <td><input id="ed_mat" value="${esc(f.matricula)}" style="width:70px"></td>
+        <td><input id="ed_email" value="${esc(f.email)}" style="width:185px"></td>
+        <td><input id="ed_cargo" value="${esc(f.cargo)}" style="width:105px"></td>
+        <td><input id="ed_setor" value="${esc(f.setor)}" style="width:105px"></td>
+        <td><select id="ed_ativo"><option value="1" ${f.ativo?'selected':''}>Ativo</option><option value="0" ${!f.ativo?'selected':''}>Inativo</option></select></td>
+        <td style="white-space:nowrap">
+          <button class="btn sm" onclick="salvarEd(${f.id})">Salvar</button>
+          <button class="btn sm ghost" onclick="cancelarEd()">Cancelar</button>
+        </td></tr>`;
+    }
+    return `<tr>
+      <td>${esc(f.nome)}</td><td>${esc(f.matricula)}</td><td>${esc(f.email)||'—'}</td>
+      <td>${esc(f.cargo)||'—'}</td><td>${esc(f.setor)||'—'}</td>
+      <td><span class="pill ${f.senha_definida?'ok':'no'}">${f.senha_definida?'Senha OK':'Sem senha'}</span>${f.ativo?'':' <span class="pill no">inativo</span>'}</td>
+      <td style="white-space:nowrap">
+        <button class="btn sm ghost" onclick="editar(${f.id})">Editar</button>
+        ${f.senha_definida?`<button class="btn sm ghost" onclick="resetSenha(${f.id},'${(f.nome||'').replace(/'/g,'')}')">Resetar senha</button>`:''}
+      </td></tr>`;
+  }).join('');
+  $('funcBox').innerHTML = `<table><thead><tr><th>Nome</th><th>Matrícula</th><th>Email</th><th>Cargo</th><th>Setor</th><th>Situação</th><th></th></tr></thead><tbody>${linhas}</tbody></table>`;
+}
+function editar(id){ editandoId=id; renderFuncionarios(); }
+function cancelarEd(){ editandoId=null; renderFuncionarios(); }
+async function salvarEd(id){
+  const body={
+    nome:$('ed_nome').value.trim(), matricula:$('ed_mat').value.trim(), email:$('ed_email').value.trim(),
+    cargo:$('ed_cargo').value.trim(), setor:$('ed_setor').value.trim(), ativo: $('ed_ativo').value==='1'
+  };
+  if(!body.nome||!body.matricula||!body.email) return alert('Nome, matrícula e email são obrigatórios.');
+  const r = await fetch(`${API}/admin/funcionarios/${id}`,{method:'POST',headers:H(),body:JSON.stringify(body)});
+  const j = await r.json(); if(!r.ok) return alert(j.erro);
+  editandoId=null; carregarFuncionarios();
 }
 async function addFunc(){
   const body={nome:$('fNome').value.trim(),matricula:$('fMat').value.trim(),email:$('fEmail').value.trim(),cargo:$('fCargo').value.trim(),setor:$('fSetor').value.trim()};
