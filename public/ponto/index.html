@@ -24,9 +24,11 @@
   .topo small{display:block;color:var(--mut);font-weight:500;font-size:11px;letter-spacing:.6px;text-transform:uppercase}
   .card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:20px;margin-bottom:14px}
   label{display:block;font-size:12px;color:var(--mut);text-transform:uppercase;letter-spacing:.6px;margin:0 0 6px 2px;font-weight:600}
-  input{width:100%;background:#10131a;border:1px solid var(--line);border-radius:12px;color:var(--txt);
+  input,select{width:100%;background:#10131a;border:1px solid var(--line);border-radius:12px;color:var(--txt);
         font:600 17px 'Archivo';padding:14px 16px;margin-bottom:14px;outline:none}
-  input:focus{border-color:var(--accent)}
+  input:focus,select:focus{border-color:var(--accent)}
+  input[type=date],input[type=time]{color-scheme:light}
+  input[type=date]::-webkit-calendar-picker-indicator{filter:invert(1);opacity:.75;cursor:pointer}
   .btn{width:100%;border:none;border-radius:14px;padding:16px;font:800 16px 'Archivo';letter-spacing:.4px;
        cursor:pointer;color:#03110c;background:var(--accent);transition:transform .06s,opacity .2s}
   .btn:active{transform:scale(.98)}
@@ -142,6 +144,8 @@
     <div class="card">
       <label>Pontos de hoje</label>
       <div class="steps" id="steps"></div>
+      <div id="solList"></div>
+      <button class="btn ghost" style="margin-top:14px" onclick="abrirEsq()">Esqueci de bater um ponto</button>
     </div>
   </div>
 
@@ -165,6 +169,28 @@
 </div>
 
 <!-- MODAL JUSTIFICATIVA -->
+<div id="modalEsq" class="overlay hide">
+  <div class="modal">
+    <h3>Lançar ponto esquecido</h3>
+    <p style="color:var(--mut);font-size:13.5px;line-height:1.5;margin-bottom:16px">Use se você esqueceu de bater. Pode lançar mesmo longe do trabalho — será <b>enviado ao gestor para aprovação</b>.</p>
+    <label style="display:block;font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.6px;margin:0 0 6px 2px">Qual ponto?</label>
+    <select id="esqTipo">
+      <option value="entrada">Entrada</option>
+      <option value="saida_almoco">Saída p/ almoço</option>
+      <option value="retorno_almoco">Retorno do almoço</option>
+      <option value="saida">Saída (fim do dia)</option>
+    </select>
+    <label style="display:block;font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.6px;margin:0 0 6px 2px">Dia</label>
+    <input id="esqData" type="date">
+    <label style="display:block;font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.6px;margin:0 0 6px 2px">Hora (ex.: 0800)</label>
+    <input id="esqHora" type="text" inputmode="numeric" maxlength="5" placeholder="--:--" oninput="maskEsq(this)">
+    <label style="display:block;font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.6px;margin:0 0 6px 2px">Motivo (mínimo 10 caracteres)</label>
+    <textarea id="esqMotivo" placeholder="Ex.: esqueci de bater a saída ontem..."></textarea>
+    <button class="btn" onclick="enviarEsq()">Enviar para aprovação</button>
+    <button class="btn ghost" style="margin-top:10px" onclick="fecharEsq()">Cancelar</button>
+  </div>
+</div>
+
 <div id="modal" class="overlay hide">
   <div class="modal erro">
     <div class="erro-ico">!</div>
@@ -272,7 +298,16 @@ async function carregar(){
   if(!r.ok){ if(r.status===401){ sair(); } return; }
   if(j.almoco_minimo) almocoMin = j.almoco_minimo;
   renderSteps(j.batidas, j.proximo, j.aprovacao_status);
+  renderSol(j.solicitacoes||[]);
   atualizarContador(j.batidas, j.proximo);
+}
+function renderSol(sols){
+  const el=$('solList'); if(!el) return;
+  if(!sols.length){ el.innerHTML=''; return; }
+  el.innerHTML = '<div style="margin:12px 0 6px;font-size:12px;color:var(--mut)">Solicitações enviadas (aguardando gestor):</div>' +
+    sols.map(s=>{ const h=new Date(s.momento).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
+      return `<div class="step pend"><div class="dot">⏳</div><div class="nome">${LABELS[s.tipo]||s.tipo} · ${h}</div><div class="hora">em aprovação</div></div>`;
+    }).join('');
 }
 
 function renderSteps(batidas, proximo, apStatus){
@@ -371,6 +406,24 @@ function enviarJust(){ baterPonto($('just').value.trim()); }
 function irPasso2(){ $('modalPasso1').classList.add('hide'); $('modalPasso2').classList.remove('hide'); $('just').focus(); }
 function voltarPasso1(){ $('modalPasso2').classList.add('hide'); $('modalPasso1').classList.remove('hide'); }
 function fecharModal(){ $('modal').classList.add('hide'); $('modalPasso1').classList.remove('hide'); $('modalPasso2').classList.add('hide'); }
+
+function maskEsq(el){ const d=el.value.replace(/\D/g,'').slice(0,4); el.value = d.length<=2?d:d.slice(0,2)+':'+d.slice(2); }
+function abrirEsq(){
+  const h=new Date();
+  $('esqData').value = `${h.getFullYear()}-${String(h.getMonth()+1).padStart(2,'0')}-${String(h.getDate()).padStart(2,'0')}`;
+  $('esqTipo').value='entrada'; $('esqHora').value=''; $('esqMotivo').value='';
+  $('modalEsq').classList.remove('hide');
+}
+function fecharEsq(){ $('modalEsq').classList.add('hide'); }
+async function enviarEsq(){
+  const data=$('esqData').value, tipo=$('esqTipo').value, hora=$('esqHora').value, justificativa=$('esqMotivo').value.trim();
+  if(!data) return alert('Escolha o dia.');
+  if(!/^\d{1,2}:\d{2}$/.test(hora)) return alert('Digite a hora (ex.: 0800).');
+  if(justificativa.length<10) return alert('Explique o motivo (mínimo 10 caracteres).');
+  const r=await fetch(API+'/solicitar-batida',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:sess.token,data,tipo,hora,justificativa})});
+  const j=await r.json(); if(!r.ok){ alert(j.erro||'Erro ao enviar.'); return; }
+  fecharEsq(); showResult('Solicitação enviada para aprovação do gestor.','ok'); carregar();
+}
 
 // ---------- HISTORICO ----------
 function mudarMes(delta){ histRef.setMonth(histRef.getMonth()+delta); carregarHistorico(); }
