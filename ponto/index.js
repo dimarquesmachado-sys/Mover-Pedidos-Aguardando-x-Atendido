@@ -113,11 +113,13 @@ function agregar(batidasPorDia, lancPorData, escalaDe, almocoMin, todasDatas){
   for(const dia of base){
     const dow=diaSemana(dia), abono=lancPorData[dia];
     const esc=escalaDe(dia); const esp=esc.jornada_min[String(dow)] ?? 0; const tol=esc.tolerancia_min ?? 0;
-    const temBatida=!!(batidasPorDia[dia] && batidasPorDia[dia].length);
+    const arr=batidasPorDia[dia]||[];
+    const temBatida=arr.length>0;
     const real = temBatida || !!abono;
+    const horarios={}; for(const t of ORDEM){ const x=arr.find(y=>y.tipo===t); horarios[t]=x?horaSP(x.momento):''; }
     let trab=0, almoco=0, completo=true, saldo=0;
     if(abono){ trab=esp; saldo=0; }
-    else if(temBatida){ const m=minutosDia(batidasPorDia[dia]); trab=m.trab; almoco=m.almoco; completo=m.completo; saldo=trab-esp; }
+    else if(temBatida){ const m=minutosDia(arr); trab=m.trab; almoco=m.almoco; completo=m.completo; saldo=trab-esp; }
     if(real){
       trabTotal+=trab; espTotal+=esp;
       if(!abono){
@@ -126,7 +128,7 @@ function agregar(batidasPorDia, lancPorData, escalaDe, almocoMin, todasDatas){
         if(almoco>0 && almoco<almocoMin) almocosCurtos++;
       }
     }
-    detalhe.push({ data:dia, dow, vazio:!real, trabalhado:trab, esperado:esp, saldo, almoco, completo, abono: abono?TIPO_LABEL[abono]:null });
+    detalhe.push({ data:dia, dow, vazio:!real, trabalhado:trab, esperado:esp, saldo, almoco, completo, horarios, abono: abono?TIPO_LABEL[abono]:null });
   }
   return { detalhe, trabalhado:trabTotal, esperado:espTotal, saldo:trabTotal-espTotal, extras, deficit, extras_sabado:extrasSabado, almocos_curtos:almocosCurtos };
 }
@@ -282,7 +284,9 @@ function routes(readBody){
         const porDia={}; for(const x of bs)(porDia[x.data]=porDia[x.data]||[]).push(x);
         const lmap={}; for(const l of lancs) lmap[l.data]=l.tipo;
         const escDe=await montarEscalas([f.id]);
-        const r=agregar(porDia,lmap,(dia)=>escDe(f.id,dia,fb),cfg.almoco_minimo);
+        const todasDatas=[]; let dd=new Date(inicio+'T12:00:00Z'); const fdd=new Date(fim+'T12:00:00Z');
+        while(dd<=fdd){ todasDatas.push(dd.toISOString().slice(0,10)); dd.setUTCDate(dd.getUTCDate()+1); }
+        const r=agregar(porDia,lmap,(dia)=>escDe(f.id,dia,fb),cfg.almoco_minimo,todasDatas);
         json(res,200,{inicio,fim,...r}); return true;
       }
 
