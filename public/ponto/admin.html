@@ -185,7 +185,7 @@
       <div><label>A partir de (vigência)</label><input id="atrData" type="date"></div>
       <button class="btn" onclick="atribuir()">Atribuir</button>
     </div>
-    <label>Funcionários</label>
+    <label>Funcionários <a href="#" onclick="marcarTodos(event)" style="color:var(--blue);text-transform:none;letter-spacing:0;font-weight:700;margin-left:6px">marcar todos / limpar</a></label>
     <div id="atrFuncs" class="chkGrid"></div>
 
     <hr style="border:none;border-top:1px solid var(--line);margin:26px 0 22px">
@@ -512,6 +512,12 @@ async function excluirEscala(id,nome){
   if(!confirm(`Excluir a escala "${nome}"? As atribuições dela aos funcionários também serão removidas.`)) return;
   await fetch(`${API}/admin/escalas/${id}`,{method:'DELETE',headers:H()});
   ultimoRelatorio=null; carregarEscalas();
+}
+function marcarTodos(ev){
+  if(ev) ev.preventDefault();
+  const cks=[...document.querySelectorAll('#atrFuncs input')];
+  const todos=cks.length && cks.every(c=>c.checked);
+  cks.forEach(c=>c.checked=!todos);
 }
 async function atribuir(){
   const escala_id=$('atrEscala').value, vigencia_inicio=$('atrData').value;
