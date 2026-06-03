@@ -41,6 +41,15 @@
   details{margin-top:8px}summary{cursor:pointer;color:var(--blue);font-weight:700;font-size:13px}
   .form-inline{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
   .hint{color:var(--mut);font-size:12px;margin-top:6px}
+  .diaCard{background:#10131a;border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px}
+  .diaHead{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:12px}
+  .diaHead .dlabel{font-weight:800;font-size:15px}
+  .diaHead .dres{font-size:13px;color:var(--mut);font-weight:600}
+  .slots{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+  .slot{display:flex;flex-direction:column;gap:4px}
+  .slot span{font-size:10.5px;color:var(--mut);text-transform:uppercase;letter-spacing:.4px;font-weight:600}
+  .slot input[type=time]{background:#1a1e27;border:1px solid var(--line);border-radius:9px;color:var(--txt);font:700 15px 'Archivo';padding:9px 11px}
+  .slot input[type=time]:focus{border-color:var(--accent)}
 </style>
 </head>
 <body>
@@ -84,11 +93,16 @@
 
   <div id="bat" class="card hide">
     <div class="filtros">
+      <div><label>Funcionário</label><select id="batFunc"></select></div>
       <div><label>Início</label><input id="batIni" type="date"></div>
       <div><label>Fim</label><input id="batFim" type="date"></div>
-      <div><label>Funcionário</label><select id="batFunc"><option value="">Todos</option></select></div>
-      <button class="btn" onclick="carregarBatidas()">Filtrar</button>
+      <button class="btn" onclick="carregarBatidas()">Ver / tratar</button>
     </div>
+    <div class="filtros" style="margin-bottom:14px">
+      <div><label>Lançar registro em outro dia</label><input id="addDia" type="date"></div>
+      <button class="btn ghost" onclick="adicionarDia()">+ Adicionar dia</button>
+    </div>
+    <p class="hint" id="batInfo"></p>
     <div id="batBox"></div>
   </div>
 
@@ -209,16 +223,47 @@ function exportCSV(){
   a.download=`horas_${$('relAno').value}_${$('relMes').value}.csv`; a.click();
 }
 
+let diasCache = [];
+const SLOT_LABEL = { entrada:'Entrada', saida_almoco:'Saída almoço', retorno_almoco:'Retorno', saida:'Saída' };
+const SLOT_ORDEM = ['entrada','saida_almoco','retorno_almoco','saida'];
+
 async function carregarBatidas(){
-  const ini=$('batIni').value, fim=$('batFim').value, f=$('batFunc').value;
-  const r = await fetch(`${API}/admin/batidas?inicio=${ini}&fim=${fim}${f?'&funcionario_id='+f:''}`,{headers:H()});
-  const lista = await r.json();
-  if(!lista.length){ $('batBox').innerHTML='<p style="color:var(--mut)">Sem batidas no período.</p>'; return; }
-  const LB={entrada:'Entrada',saida_almoco:'Saída almoço',retorno_almoco:'Retorno',saida:'Saída'};
-  $('batBox').innerHTML = `<table><thead><tr><th>Funcionário</th><th>Data</th><th>Tipo</th><th>Hora</th><th>Distância</th><th>Obs.</th></tr></thead><tbody>${
-    lista.map(b=>`<tr><td>${b.funcionarios?.nome||''}</td><td>${br(b.data)}</td><td>${LB[b.tipo]}</td>
-      <td>${new Date(b.momento).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}</td>
-      <td>${b.distancia_metros??'—'} m</td><td class="${b.justificativa?'tagw':''}">${b.justificativa||''}</td></tr>`).join('')}</tbody></table>`;
+  const fid=$('batFunc').value;
+  if(!fid){ $('batBox').innerHTML='<p class="hint">Selecione um funcionário acima.</p>'; $('batInfo').textContent=''; return; }
+  $('batInfo').textContent='Edite os horários e clique em "Salvar dia". Para excluir uma batida, apague o horário e salve.';
+  const ini=$('batIni').value, fim=$('batFim').value;
+  const r=await fetch(`${API}/admin/dias?funcionario_id=${fid}&inicio=${ini}&fim=${fim}`,{headers:H()});
+  const j=await r.json();
+  if(!r.ok){ $('batBox').innerHTML='<p class="hint">'+(j.erro||'Erro ao carregar.')+'</p>'; return; }
+  diasCache=j.dias; renderDias();
+}
+function renderDias(){
+  if(!diasCache.length){ $('batBox').innerHTML='<p class="hint">Sem registros no período. Use "Adicionar dia" para lançar.</p>'; return; }
+  $('batBox').innerHTML = diasCache.map(d=>{
+    const dow = d.dow!=null ? d.dow : new Date(d.data+'T12:00:00').getDay();
+    const res = d.novo
+      ? '<span class="dres">novo — preencha e salve</span>'
+      : `<span class="dres">Trabalhado ${hhmm(d.trabalhado)} · Previsto ${hhmm(d.esperado)} · Saldo <span class="${d.saldo>=0?'pos':'neg'}">${hhmm(d.saldo)}</span>${d.abono?` · <span class="tagb">${d.abono}</span>`:''}</span>`;
+    const slots = SLOT_ORDEM.map(t=>`<div class="slot"><span>${SLOT_LABEL[t]}</span>
+      <input type="time" id="t_${d.data}_${t}" value="${(d.horarios&&d.horarios[t])||''}"></div>`).join('');
+    return `<div class="diaCard">
+      <div class="diaHead"><div class="dlabel">${dias[dow]} · ${br(d.data)}</div>${res}</div>
+      <div class="slots">${slots}</div>
+      <button class="btn sm" onclick="salvarDia('${d.data}')">Salvar dia</button>
+    </div>`;
+  }).join('');
+}
+async function salvarDia(data){
+  const horarios={}; SLOT_ORDEM.forEach(t=>{ horarios[t]=$(`t_${data}_${t}`).value; });
+  const r=await fetch(`${API}/admin/dia`,{method:'POST',headers:H(),body:JSON.stringify({funcionario_id:$('batFunc').value,data,horarios})});
+  const j=await r.json(); if(!r.ok) return alert(j.erro||'Erro ao salvar.');
+  ultimoRelatorio=null; carregarBatidas();
+}
+function adicionarDia(){
+  const d=$('addDia').value; if(!d) return alert('Escolha a data.');
+  if(diasCache.some(x=>x.data===d)) return alert('Esse dia já está na lista abaixo.');
+  diasCache.unshift({ data:d, dow:new Date(d+'T12:00:00').getDay(), abono:null, horarios:{}, novo:true });
+  renderDias();
 }
 
 async function addLancamento(){
@@ -247,7 +292,7 @@ async function carregarFuncionarios(){
   const r = await fetch(API+'/admin/funcionarios',{headers:H()});
   listaFunc = await r.json();
   const opts = listaFunc.map(f=>`<option value="${f.id}">${esc(f.nome)}</option>`).join('');
-  $('batFunc').innerHTML = '<option value="">Todos</option>' + opts;
+  $('batFunc').innerHTML = opts;
   $('lFunc').innerHTML = opts;
   renderFuncionarios();
 }
