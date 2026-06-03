@@ -212,11 +212,44 @@
   </div>
 </div>
 
+<div id="camOverlay" class="overlay hide">
+  <div class="modal">
+    <h3>Selfie rápida</h3>
+    <p style="color:var(--mut);font-size:13.5px;line-height:1.5;margin-bottom:14px;text-align:center">Confirmação aleatória. Encaixe o rosto e toque em <b>Tirar e bater</b>.</p>
+    <video id="camVideo" playsinline autoplay muted style="width:100%;border-radius:14px;background:#000;aspect-ratio:3/4;object-fit:cover"></video>
+    <canvas id="camCanvas" style="display:none"></canvas>
+    <button class="btn" id="camCapturar" style="margin-top:14px">📷 Tirar e bater</button>
+    <button class="btn ghost" id="camPular" style="margin-top:10px">Não consigo tirar agora</button>
+  </div>
+</div>
+
 <script>
 const API = '/ponto';
 let sess = JSON.parse(localStorage.getItem('ponto_sess') || 'null');  // {token, nome, cargo, setor}
 let emailDigitado = '';
 let pendente = null;
+let fotoRequerida = false;
+let fotoPendente;   // undefined = não tentou · null = pulou/erro · string = dataURL
+function tirarSelfie(){
+  return new Promise(async (resolve, reject)=>{
+    const ov=$('camOverlay'), video=$('camVideo'), canvas=$('camCanvas');
+    let stream=null;
+    function fechar(){ try{ if(stream) stream.getTracks().forEach(t=>t.stop()); }catch(e){} ov.classList.add('hide'); }
+    $('camCapturar').onclick=()=>{
+      const w=video.videoWidth, h=video.videoHeight;
+      if(!w){ fechar(); return reject('sem-video'); }
+      const alvo=360, k=alvo/w; canvas.width=alvo; canvas.height=Math.round(h*k);
+      canvas.getContext('2d').drawImage(video,0,0,canvas.width,canvas.height);
+      let url; try{ url=canvas.toDataURL('image/jpeg',0.5); }catch(e){ fechar(); return reject(e); }
+      fechar(); resolve(url);
+    };
+    $('camPular').onclick=()=>{ fechar(); reject('pulou'); };
+    try{
+      stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user'},audio:false});
+      video.srcObject=stream; ov.classList.remove('hide'); await video.play();
+    }catch(e){ fechar(); reject(e); }
+  });
+}
 let almocoMin = 60;
 let tickInt = null;
 let histRef = new Date();
@@ -298,6 +331,7 @@ async function carregar(){
   const j = await r.json();
   if(!r.ok){ if(r.status===401){ sair(); } return; }
   if(j.almoco_minimo) almocoMin = j.almoco_minimo;
+  fotoRequerida = !!j.foto_requerida; fotoPendente = undefined;
   renderSteps(j.batidas, j.proximo, j.aprovacao_status);
   renderSol(j.solicitacoes||[]);
   atualizarContador(j.batidas, j.proximo);
@@ -376,9 +410,16 @@ async function baterPonto(justificativa){
   try{
     const loc = pendente || await pegarLocal();
     pendente = loc;
+    if(fotoRequerida && fotoPendente===undefined){
+      showResult('Confirmação por foto...','warn');
+      try{ fotoPendente = await tirarSelfie(); }
+      catch(e){ fotoPendente = null; }   // pulou ou deu erro → segue sem travar
+    }
+    const foto = fotoRequerida ? fotoPendente : null;
+    const foto_pulada = fotoRequerida && !fotoPendente;
     showResult('Registrando ponto...','warn');
     const r = await fetch(API+'/bater-ponto',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({token:sess.token, ...loc, justificativa})});
+      body:JSON.stringify({token:sess.token, ...loc, justificativa, foto, foto_pulada})});
     const j = await r.json();
     if(r.status===401){ pendente=null; sair(); return; }
     if(r.status===422 && j.requer_justificativa){
