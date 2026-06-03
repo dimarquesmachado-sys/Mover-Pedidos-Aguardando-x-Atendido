@@ -262,13 +262,15 @@ async function carregarRelatorio(){
     html += `<tr><td>${f.nome}</td><td>${hhmm(f.trabalhado)}</td><td>${hhmm(f.esperado)}</td>
       <td class="${f.saldo>=0?'pos':'neg'}">${hhmm(f.saldo)}</td><td class="pos"><b>${hhmm(f.extras)}</b></td>
       <td class="pos">${hhmm(f.extras_sabado)}</td><td class="${f.almocos_curtos?'tagw':''}">${f.almocos_curtos}</td></tr>
-    <tr><td colspan="7" style="border:none;padding:0 12px 10px"><details><summary>Ver dia a dia</summary>
-      <table style="margin-top:8px"><thead><tr><th>Data</th><th>Dia</th><th>Trabalhado</th><th>Previsto</th><th>Saldo</th><th>Almoço</th></tr></thead><tbody>${
-      f.detalhe.map(d=>`<tr><td>${br(d.data)}</td><td>${dias[d.dow]}</td>
+    <tr><td colspan="7" style="border:none;padding:0 12px 14px">
+      <table style="margin-top:4px"><thead><tr><th>Data</th><th>Dia</th><th>Trabalhado</th><th>Previsto</th><th>Saldo</th><th>Almoço</th></tr></thead><tbody>${
+      f.detalhe.map(d=> d.vazio
+        ? `<tr style="opacity:.45"><td>${br(d.data)}</td><td>${dias[d.dow]}</td><td>—</td><td>${hhmm(d.esperado)}</td><td>—</td><td>—</td></tr>`
+        : `<tr><td>${br(d.data)}</td><td>${dias[d.dow]}</td>
         <td>${d.abono?`<span class="tagb">${d.abono}</span>`:hhmm(d.trabalhado)+(d.completo?'':' ⚠')}</td>
         <td>${hhmm(d.esperado)}</td><td class="${d.saldo>=0?'pos':'neg'}">${hhmm(d.saldo)}</td>
         <td class="${d.almoco>0&&d.almoco<60?'tagw':''}">${d.almoco?d.almoco+' min':'—'}</td></tr>`).join('')}</tbody></table>
-      </details></td></tr>`;
+      </td></tr>`;
   }
   $('relBox').innerHTML = html + '</tbody></table>';
 }
@@ -447,7 +449,13 @@ function montarJornGrid(){
       <div class="jturno"><input type="time" id="e_${i}_e2" oninput="totDia(${i})"><span class="jas">às</span><input type="time" id="e_${i}_s2" oninput="totDia(${i})"></div>
       <div class="jtot">= <b id="dtot_${i}">00:00</b></div>
       <button type="button" class="jfolga" onclick="folgaDia(${i})">Folga</button>
+      ${i<6?`<button type="button" class="jfolga" onclick="copiarAbaixo(${i})">Copiar ↓</button>`:''}
     </div>`).join('');
+}
+function copiarAbaixo(i){
+  const vals=['e1','s1','e2','s2'].map(k=>$(`e_${i}_${k}`).value);
+  for(let j=i+1;j<7;j++){ ['e1','s1','e2','s2'].forEach((k,idx)=>{ $(`e_${j}_${k}`).value=vals[idx]; }); totDia(j); }
+  totJorn();
 }
 function minFromHHMM(v){ if(!v||!/^\d{1,2}:\d{2}$/.test(v)) return 0; const [h,m]=v.split(':').map(Number); return (h||0)*60+(m||0); }
 function parPair(i,n){ const a=minFromHHMM($(`e_${i}_e${n}`).value), b=minFromHHMM($(`e_${i}_s${n}`).value); return (a&&b&&b>a)? b-a : 0; }
