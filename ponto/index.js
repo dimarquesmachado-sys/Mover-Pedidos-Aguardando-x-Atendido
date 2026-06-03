@@ -128,7 +128,8 @@ function agregar(batidasPorDia, lancPorData, escalaDe, almocoMin, todasDatas){
         if(almoco>0 && almoco<almocoMin) almocosCurtos++;
       }
     }
-    detalhe.push({ data:dia, dow, vazio:!real, trabalhado:trab, esperado:esp, saldo, almoco, completo, horarios, abono: abono?TIPO_LABEL[abono]:null });
+    const saldoEf = (!real) ? 0 : (Math.abs(saldo)<=tol ? 0 : saldo);
+    detalhe.push({ data:dia, dow, vazio:!real, trabalhado:trab, esperado:esp, saldo, saldo_efetivo:saldoEf, tol, almoco, completo, horarios, abono: abono?TIPO_LABEL[abono]:null });
   }
   return { detalhe, trabalhado:trabTotal, esperado:espTotal, saldo:trabTotal-espTotal, extras, deficit, extras_sabado:extrasSabado, almocos_curtos:almocosCurtos };
 }
@@ -370,15 +371,17 @@ function routes(readBody){
         while(dt<=fdt){ datas.push(dt.toISOString().slice(0,10)); dt.setUTCDate(dt.getUTCDate()+1); }
         const dias=datas.map(data=>{
           const esc=escDe(fid,data,fb);
-          const dow=diaSemana(data), esp=esc.jornada_min[String(dow)] ?? 0, abono=lmap[data];
+          const dow=diaSemana(data), esp=esc.jornada_min[String(dow)] ?? 0, tol=esc.tolerancia_min ?? 0, abono=lmap[data];
           const arr=porDia[data]||[];
           const horarios={}; for(const t of ORDEM){ const b=arr.find(x=>x.tipo===t); horarios[t]=b?horaSP(b.momento):''; }
           let trab, saldo;
           if(abono){ trab=esp; saldo=0; } else { const mm=minutosDia(arr); trab=mm.trab; saldo=trab-esp; }
+          const vazio=(arr.length===0 && !abono);
+          const saldoEf = vazio ? 0 : (Math.abs(saldo)<=tol ? 0 : saldo);
           return { data, dow, escala:esc.nome, turnos:(esc.turnos&&esc.turnos[String(dow)])||null,
-                   vazio:(arr.length===0 && !abono), abono_tipo:abono||null, abono: abono?TIPO_LABEL[abono]:null,
+                   vazio, abono_tipo:abono||null, abono: abono?TIPO_LABEL[abono]:null,
                    aprovacao: apMap[data]||null, solicitacao: solSet.has(data),
-                   horarios, trabalhado:trab, esperado:esp, saldo };
+                   horarios, trabalhado:trab, esperado:esp, saldo, saldo_efetivo:saldoEf, tol };
         });
         json(res,200,{dias}); return true;
       }
