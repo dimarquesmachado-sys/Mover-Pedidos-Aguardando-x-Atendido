@@ -59,6 +59,10 @@
   .chkGrid{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px}
   .chkGrid label{display:flex;align-items:center;gap:7px;background:#10131a;border:1px solid var(--line);border-radius:9px;padding:9px 13px;font-size:13px;font-weight:600;color:var(--txt);text-transform:none;letter-spacing:0;margin:0;cursor:pointer}
   .chkGrid input{width:16px;height:16px;padding:0}
+  .periodoBox{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:18px}
+  .periodoBox .pb{background:#10131a;border:1px solid var(--line);border-radius:12px;padding:12px 18px;min-width:118px}
+  .periodoBox .pb span{display:block;font-size:10.5px;color:var(--mut);text-transform:uppercase;letter-spacing:.4px;font-weight:600;margin-bottom:4px}
+  .periodoBox .pb b{font-size:20px;font-weight:800}
 </style>
 </head>
 <body>
@@ -285,19 +289,28 @@ async function carregarBatidas(){
 }
 function renderDias(){
   if(!diasCache.length){ $('batBox').innerHTML='<p class="hint">Sem registros no período. Use "Adicionar dia" para lançar.</p>'; return; }
-  $('batBox').innerHTML = diasCache.map(d=>{
+  const reais=diasCache.filter(d=>!d.novo);
+  const tT=reais.reduce((s,d)=>s+(d.trabalhado||0),0), tP=reais.reduce((s,d)=>s+(d.esperado||0),0), tS=reais.reduce((s,d)=>s+(d.saldo||0),0);
+  const header=`<div class="periodoBox">
+    <div class="pb"><span>Trabalhado</span><b>${hhmm(tT)}</b></div>
+    <div class="pb"><span>Previsto</span><b>${hhmm(tP)}</b></div>
+    <div class="pb"><span>Saldo do período</span><b class="${tS>=0?'pos':'neg'}">${hhmm(tS)}</b></div>
+  </div>`;
+  const cards = diasCache.map(d=>{
     const dow = d.dow!=null ? d.dow : new Date(d.data+'T12:00:00').getDay();
     const res = d.novo
       ? '<span class="dres">novo — preencha e salve</span>'
       : `<span class="dres">Trabalhado ${hhmm(d.trabalhado)} · Previsto ${hhmm(d.esperado)} · Saldo <span class="${d.saldo>=0?'pos':'neg'}">${hhmm(d.saldo)}</span>${d.abono?` · <span class="tagb">${d.abono}</span>`:''}</span>`;
+    const escTag = d.escala ? ` · <span class="tagb">${esc(d.escala)}</span>` : '';
     const slots = SLOT_ORDEM.map(t=>`<div class="slot"><span>${SLOT_LABEL[t]}</span>
       <input type="time" id="t_${d.data}_${t}" value="${(d.horarios&&d.horarios[t])||''}"></div>`).join('');
     return `<div class="diaCard">
-      <div class="diaHead"><div class="dlabel">${dias[dow]} · ${br(d.data)}</div>${res}</div>
+      <div class="diaHead"><div class="dlabel">${dias[dow]} · ${br(d.data)}${escTag}</div>${res}</div>
       <div class="slots">${slots}</div>
       <button class="btn sm" onclick="salvarDia('${d.data}')">Salvar dia</button>
     </div>`;
   }).join('');
+  $('batBox').innerHTML = header + cards;
 }
 async function salvarDia(data){
   const horarios={}; SLOT_ORDEM.forEach(t=>{ horarios[t]=$(`t_${data}_${t}`).value; });
