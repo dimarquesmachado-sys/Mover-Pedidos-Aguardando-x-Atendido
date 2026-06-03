@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Admin · Ponto GOOD Import</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{--bg:#0f1115;--card:#171a21;--line:#262b36;--txt:#f3f5f8;--mut:#8a93a3;
+        --accent:#22d3a6;--warn:#f6b73c;--danger:#ff5a5f;--blue:#4f8cff}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Archivo',system-ui,sans-serif;background:var(--bg);color:var(--txt);padding:22px;max-width:1200px;margin:0 auto}
+  .topo{display:flex;align-items:center;gap:11px;margin-bottom:22px}
+  .logo{width:40px;height:40px;border-radius:12px;background:linear-gradient(135deg,var(--accent),#15b48c);display:grid;place-items:center;font-weight:800;color:#03110c;font-size:19px}
+  h1{font-size:18px}.topo small{display:block;color:var(--mut);font-size:11px;letter-spacing:.6px;text-transform:uppercase}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px;margin-bottom:16px}
+  label{display:block;font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.6px;margin:0 0 6px 2px;font-weight:600}
+  input,select{background:#10131a;border:1px solid var(--line);border-radius:10px;color:var(--txt);font:600 14px 'Archivo';padding:11px 13px;outline:none}
+  input:focus,select:focus{border-color:var(--accent)}
+  .btn{border:none;border-radius:11px;padding:12px 18px;font:700 14px 'Archivo';cursor:pointer;color:#03110c;background:var(--accent)}
+  .btn.sm{padding:8px 12px;font-size:13px}
+  .btn.ghost{background:transparent;border:1px solid var(--line);color:var(--txt)}
+  .btn.warn{background:var(--warn)}.btn.danger{background:var(--danger);color:#fff}.btn.blue{background:var(--blue);color:#fff}
+  .hide{display:none!important}
+  .tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+  .tab{padding:10px 16px;border-radius:11px;border:1px solid var(--line);background:var(--card);color:var(--mut);font-weight:700;cursor:pointer;font-size:14px}
+  .tab.on{background:var(--accent);color:#03110c;border-color:var(--accent)}
+  .filtros{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:18px}
+  table{width:100%;border-collapse:collapse;font-size:13.5px}
+  th{text-align:left;color:var(--mut);font-size:11px;text-transform:uppercase;letter-spacing:.5px;padding:10px 12px;border-bottom:1px solid var(--line)}
+  td{padding:11px 12px;border-bottom:1px solid #1d212b;font-weight:600}
+  tr:hover td{background:#10131a}
+  .pos{color:var(--accent)}.neg{color:var(--danger)}.tagw{color:var(--warn)}.tagb{color:var(--blue)}
+  .pill{display:inline-block;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:700;background:#10131a;border:1px solid var(--line)}
+  .pill.ok{color:var(--accent);border-color:rgba(34,211,166,.4)}.pill.no{color:var(--warn);border-color:rgba(246,183,60,.4)}
+  .msg{padding:12px 14px;border-radius:11px;font-weight:600;font-size:14px;margin-top:10px}
+  .msg.err{background:rgba(255,90,95,.1);color:var(--danger)}.msg.ok{background:rgba(34,211,166,.12);color:var(--accent)}
+  details{margin-top:8px}summary{cursor:pointer;color:var(--blue);font-weight:700;font-size:13px}
+  .form-inline{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
+  .hint{color:var(--mut);font-size:12px;margin-top:6px}
+</style>
+</head>
+<body>
+
+<div class="topo">
+  <div class="logo">G</div>
+  <div><h1>Painel de Ponto</h1><small>GOOD Import · Admin</small></div>
+</div>
+
+<div id="login" class="card" style="max-width:380px">
+  <label>Token de administrador</label>
+  <input id="token" type="password" placeholder="ADMIN_TOKEN" style="width:100%;margin-bottom:12px">
+  <button class="btn" style="width:100%" onclick="login()">Entrar</button>
+  <div id="loginMsg"></div>
+</div>
+
+<div id="app" class="hide">
+  <div class="tabs">
+    <div class="tab on" data-t="aprov" onclick="tab('aprov')">Aprovações <span id="badge" class="pill"></span></div>
+    <div class="tab" data-t="relat" onclick="tab('relat')">Horas extras</div>
+    <div class="tab" data-t="bat" onclick="tab('bat')">Batidas</div>
+    <div class="tab" data-t="lanc" onclick="tab('lanc')">Lançamentos</div>
+    <div class="tab" data-t="func" onclick="tab('func')">Funcionários</div>
+  </div>
+
+  <div id="aprov" class="card">
+    <h3 style="margin-bottom:14px">Almoços abaixo de 1h — pendentes</h3>
+    <div id="aprovBox">Carregando...</div>
+  </div>
+
+  <div id="relat" class="card hide">
+    <div class="filtros">
+      <div><label>Mês</label><select id="relMes"></select></div>
+      <div><label>Ano</label><input id="relAno" type="number" style="width:100px"></div>
+      <button class="btn" onclick="carregarRelatorio()">Gerar</button>
+      <button class="btn ghost" onclick="exportCSV()">Exportar CSV</button>
+    </div>
+    <div class="hint" id="relTol"></div>
+    <div id="relBox"></div>
+  </div>
+
+  <div id="bat" class="card hide">
+    <div class="filtros">
+      <div><label>Início</label><input id="batIni" type="date"></div>
+      <div><label>Fim</label><input id="batFim" type="date"></div>
+      <div><label>Funcionário</label><select id="batFunc"><option value="">Todos</option></select></div>
+      <button class="btn" onclick="carregarBatidas()">Filtrar</button>
+    </div>
+    <div id="batBox"></div>
+  </div>
+
+  <div id="lanc" class="card hide">
+    <h3 style="margin-bottom:6px">Lançar férias / folga / atestado / completar dia</h3>
+    <p class="hint" style="margin-bottom:16px">Zera o saldo do dia (sem hora extra, sem desconto). "Completar (escala)" preenche o dia com a carga da escala.</p>
+    <div class="form-inline" style="margin-bottom:8px">
+      <div><label>Funcionário</label><select id="lFunc"></select></div>
+      <div><label>Tipo</label>
+        <select id="lTipo">
+          <option value="ferias">Férias</option>
+          <option value="folga">Folga</option>
+          <option value="atestado">Atestado médico</option>
+          <option value="completar">Completar (escala)</option>
+        </select></div>
+      <div><label>De</label><input id="lIni" type="date"></div>
+      <div><label>Até</label><input id="lFim" type="date"></div>
+      <div style="flex:1;min-width:180px"><label>Observação (opcional)</label><input id="lObs" style="width:100%"></div>
+      <button class="btn" onclick="addLancamento()">Lançar</button>
+    </div>
+    <p class="hint" style="margin-bottom:16px">Para um único dia, deixe "Até" igual a "De" (ou em branco).</p>
+    <div id="lancBox"></div>
+  </div>
+
+  <div id="func" class="card hide">
+    <h3 style="margin-bottom:6px">Cadastrar funcionário</h3>
+    <p class="hint" style="margin-bottom:16px">Cadastre com o email da pessoa. Ela cria a própria senha no primeiro acesso (digita o email e clica em Entrar na tela do funcionário).</p>
+    <div class="form-inline" style="margin-bottom:18px">
+      <div><label>Nome</label><input id="fNome" style="width:200px"></div>
+      <div><label>Matrícula</label><input id="fMat" style="width:80px"></div>
+      <div><label>Email</label><input id="fEmail" type="email" style="width:210px"></div>
+      <div><label>Cargo</label><input id="fCargo" style="width:120px"></div>
+      <div><label>Setor</label><input id="fSetor" style="width:120px"></div>
+      <button class="btn" onclick="addFunc()">Adicionar</button>
+    </div>
+    <div id="funcBox"></div>
+  </div>
+</div>
+
+<script>
+const API = '/ponto';
+let TOKEN = sessionStorage.getItem('admin_token') || '';
+let ultimoRelatorio = null;
+const $ = id => document.getElementById(id);
+const H = () => ({'Content-Type':'application/json','x-admin-token':TOKEN});
+function hhmm(min){const s=min<0?'-':'';min=Math.abs(min);return s+String(Math.floor(min/60)).padStart(2,'0')+':'+String(min%60).padStart(2,'0');}
+function br(d){return d.split('-').reverse().join('/');}
+const dias=['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+const mesesNome=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+const TIPO_BR={ferias:'Férias',folga:'Folga',atestado:'Atestado',completar:'Completado (escala)'};
+
+async function login(){
+  TOKEN = $('token').value.trim();
+  const r = await fetch(API+'/admin/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:TOKEN})});
+  if(!r.ok){ $('loginMsg').className='msg err'; $('loginMsg').textContent='Token inválido.'; return; }
+  sessionStorage.setItem('admin_token', TOKEN); abrir();
+}
+function abrir(){
+  $('login').classList.add('hide'); $('app').classList.remove('hide');
+  const hoje=new Date(); const iso=d=>d.toISOString().slice(0,10);
+  $('relMes').innerHTML = mesesNome.map((m,i)=>`<option value="${i+1}" ${i===hoje.getMonth()?'selected':''}>${m}</option>`).join('');
+  $('relAno').value = hoje.getFullYear();
+  $('batFim').value = iso(hoje);
+  $('batIni').value = iso(new Date(hoje.getTime()-6*864e5));
+  $('lIni').value = iso(hoje);
+  carregarFuncionarios(); carregarAprovacoes();
+}
+function tab(t){
+  ['aprov','relat','bat','lanc','func'].forEach(x=>$(x).classList.toggle('hide',x!==t));
+  document.querySelectorAll('.tab').forEach(el=>el.classList.toggle('on',el.dataset.t===t));
+  if(t==='relat' && !ultimoRelatorio) carregarRelatorio();
+  if(t==='bat') carregarBatidas();
+  if(t==='lanc') carregarLancamentos();
+}
+
+async function carregarAprovacoes(){
+  const r = await fetch(API+'/admin/aprovacoes',{headers:H()});
+  const lista = await r.json();
+  $('badge').textContent = lista.length || '';
+  if(!lista.length){ $('aprovBox').innerHTML='<p style="color:var(--mut)">Nenhuma aprovação pendente.</p>'; return; }
+  $('aprovBox').innerHTML = `<table><thead><tr><th>Funcionário</th><th>Data</th><th>Almoço</th><th>Justificativa</th><th></th></tr></thead><tbody>${
+    lista.map(a=>`<tr><td>${a.funcionarios?.nome||''}</td><td>${br(a.data)}</td>
+      <td class="tagw">${a.minutos_almoco} min</td><td style="max-width:360px">${a.justificativa}</td>
+      <td style="white-space:nowrap">
+        <button class="btn sm" onclick="decidir(${a.id},'aprovado')">Aprovar</button>
+        <button class="btn sm danger" onclick="decidir(${a.id},'rejeitado')">Rejeitar</button></td></tr>`).join('')}</tbody></table>`;
+}
+async function decidir(id,status){ await fetch(API+'/admin/aprovacoes/'+id,{method:'POST',headers:H(),body:JSON.stringify({status})}); carregarAprovacoes(); }
+
+async function carregarRelatorio(){
+  const r = await fetch(`${API}/admin/relatorio?ano=${$('relAno').value}&mes=${$('relMes').value}`,{headers:H()});
+  const j = await r.json(); ultimoRelatorio=j;
+  $('relTol').textContent = `Tolerância aplicada: ${j.tolerancia} min/dia. Só conta como hora extra o que passar disso.`;
+  if(!j.relatorio.length){ $('relBox').innerHTML='<p style="color:var(--mut)">Sem dados nesse mês.</p>'; return; }
+  let html = `<table><thead><tr><th>Funcionário</th><th>Trabalhado</th><th>Previsto</th><th>Saldo</th><th>Horas extras</th><th>Sábado (rodízio)</th><th>Almoços curtos</th></tr></thead><tbody>`;
+  for(const f of j.relatorio){
+    html += `<tr><td>${f.nome}</td><td>${hhmm(f.trabalhado)}</td><td>${hhmm(f.esperado)}</td>
+      <td class="${f.saldo>=0?'pos':'neg'}">${hhmm(f.saldo)}</td><td class="pos"><b>${hhmm(f.extras)}</b></td>
+      <td class="pos">${hhmm(f.extras_sabado)}</td><td class="${f.almocos_curtos?'tagw':''}">${f.almocos_curtos}</td></tr>
+    <tr><td colspan="7" style="border:none;padding:0 12px 10px"><details><summary>Ver dia a dia</summary>
+      <table style="margin-top:8px"><thead><tr><th>Data</th><th>Dia</th><th>Trabalhado</th><th>Previsto</th><th>Saldo</th><th>Almoço</th></tr></thead><tbody>${
+      f.detalhe.map(d=>`<tr><td>${br(d.data)}</td><td>${dias[d.dow]}</td>
+        <td>${d.abono?`<span class="tagb">${d.abono}</span>`:hhmm(d.trabalhado)+(d.completo?'':' ⚠')}</td>
+        <td>${hhmm(d.esperado)}</td><td class="${d.saldo>=0?'pos':'neg'}">${hhmm(d.saldo)}</td>
+        <td class="${d.almoco>0&&d.almoco<60?'tagw':''}">${d.almoco?d.almoco+' min':'—'}</td></tr>`).join('')}</tbody></table>
+      </details></td></tr>`;
+  }
+  $('relBox').innerHTML = html + '</tbody></table>';
+}
+function exportCSV(){
+  if(!ultimoRelatorio) return;
+  let linhas=[['Funcionario','Matricula','Trabalhado','Previsto','Saldo','HorasExtras','ExtrasSabado','AlmocosCurtos']];
+  for(const f of ultimoRelatorio.relatorio) linhas.push([f.nome,f.matricula,hhmm(f.trabalhado),hhmm(f.esperado),hhmm(f.saldo),hhmm(f.extras),hhmm(f.extras_sabado),f.almocos_curtos]);
+  const csv = linhas.map(l=>l.map(c=>`"${c}"`).join(';')).join('\n');
+  const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob(["\ufeff"+csv],{type:'text/csv'}));
+  a.download=`horas_${$('relAno').value}_${$('relMes').value}.csv`; a.click();
+}
+
+async function carregarBatidas(){
+  const ini=$('batIni').value, fim=$('batFim').value, f=$('batFunc').value;
+  const r = await fetch(`${API}/admin/batidas?inicio=${ini}&fim=${fim}${f?'&funcionario_id='+f:''}`,{headers:H()});
+  const lista = await r.json();
+  if(!lista.length){ $('batBox').innerHTML='<p style="color:var(--mut)">Sem batidas no período.</p>'; return; }
+  const LB={entrada:'Entrada',saida_almoco:'Saída almoço',retorno_almoco:'Retorno',saida:'Saída'};
+  $('batBox').innerHTML = `<table><thead><tr><th>Funcionário</th><th>Data</th><th>Tipo</th><th>Hora</th><th>Distância</th><th>Obs.</th></tr></thead><tbody>${
+    lista.map(b=>`<tr><td>${b.funcionarios?.nome||''}</td><td>${br(b.data)}</td><td>${LB[b.tipo]}</td>
+      <td>${new Date(b.momento).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}</td>
+      <td>${b.distancia_metros??'—'} m</td><td class="${b.justificativa?'tagw':''}">${b.justificativa||''}</td></tr>`).join('')}</tbody></table>`;
+}
+
+async function addLancamento(){
+  const body={funcionario_id:$('lFunc').value, tipo:$('lTipo').value, inicio:$('lIni').value, fim:$('lFim').value || $('lIni').value, observacao:$('lObs').value.trim()};
+  if(!body.funcionario_id || !body.inicio) return alert('Escolha funcionário e data.');
+  const r = await fetch(API+'/admin/lancamentos',{method:'POST',headers:H(),body:JSON.stringify(body)});
+  const j = await r.json(); if(!r.ok) return alert(j.erro);
+  $('lObs').value=''; carregarLancamentos(); ultimoRelatorio=null;
+}
+async function carregarLancamentos(){
+  const r = await fetch(API+'/admin/lancamentos',{headers:H()});
+  const lista = await r.json();
+  if(!lista.length){ $('lancBox').innerHTML='<p style="color:var(--mut)">Nenhum lançamento.</p>'; return; }
+  $('lancBox').innerHTML = `<table><thead><tr><th>Funcionário</th><th>Data</th><th>Tipo</th><th>Observação</th><th></th></tr></thead><tbody>${
+    lista.map(l=>`<tr><td>${l.funcionarios?.nome||''}</td><td>${br(l.data)}</td>
+      <td><span class="tagb">${TIPO_BR[l.tipo]}</span></td><td>${l.observacao||'—'}</td>
+      <td><button class="btn sm danger" onclick="delLancamento(${l.id})">Remover</button></td></tr>`).join('')}</tbody></table>`;
+}
+async function delLancamento(id){ if(!confirm('Remover este lançamento?')) return; await fetch(API+'/admin/lancamentos/'+id,{method:'DELETE',headers:H()}); carregarLancamentos(); ultimoRelatorio=null; }
+
+async function carregarFuncionarios(){
+  const r = await fetch(API+'/admin/funcionarios',{headers:H()});
+  const lista = await r.json();
+  const opts = lista.map(f=>`<option value="${f.id}">${f.nome}</option>`).join('');
+  $('batFunc').innerHTML = '<option value="">Todos</option>' + opts;
+  $('lFunc').innerHTML = opts;
+  $('funcBox').innerHTML = `<table><thead><tr><th>Nome</th><th>Matrícula</th><th>Email</th><th>Cargo</th><th>Senha criada?</th><th></th></tr></thead><tbody>${
+    lista.map(f=>`<tr><td>${f.nome}</td><td>${f.matricula}</td><td>${f.email||'—'}</td><td>${f.cargo||'—'}</td>
+      <td><span class="pill ${f.senha_definida?'ok':'no'}">${f.senha_definida?'Sim':'Não'}</span></td>
+      <td>${f.senha_definida?`<button class="btn sm ghost" onclick="resetSenha(${f.id},'${(f.nome||'').replace(/'/g,'')}')">Resetar senha</button>`:''}</td></tr>`).join('')}</tbody></table>`;
+}
+async function addFunc(){
+  const body={nome:$('fNome').value.trim(),matricula:$('fMat').value.trim(),email:$('fEmail').value.trim(),cargo:$('fCargo').value.trim(),setor:$('fSetor').value.trim()};
+  if(!body.nome||!body.matricula||!body.email) return alert('Preencha nome, matrícula e email.');
+  const r = await fetch(API+'/admin/funcionarios',{method:'POST',headers:H(),body:JSON.stringify(body)});
+  const j = await r.json(); if(!r.ok) return alert(j.erro);
+  ['fNome','fMat','fEmail','fCargo','fSetor'].forEach(id=>$(id).value=''); carregarFuncionarios();
+}
+async function resetSenha(id,nome){
+  if(!confirm(`Resetar a senha de ${nome}? Ele vai precisar criar uma senha nova no próximo acesso.`)) return;
+  await fetch(`${API}/admin/funcionarios/${id}/reset-senha`,{method:'POST',headers:H()}); carregarFuncionarios();
+}
+
+if(TOKEN) abrir();
+</script>
+</body>
+</html>
