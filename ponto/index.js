@@ -422,13 +422,13 @@ function routes(readBody){
         if(!adminOk(req)) return naoAutorizado(res);
         const b=await readBody(req);
         if(!b.nome || !b.jornada_min){ json(res,400,{erro:'Nome e jornada são obrigatórios.'}); return true; }
-        const ins=await sbInsert('escalas',{ nome:b.nome, jornada_min:b.jornada_min, tolerancia_min: b.tolerancia_min ?? 10 });
+        const ins=await sbInsert('escalas',{ nome:b.nome, jornada_min:b.jornada_min, tolerancia_min: b.tolerancia_min ?? 10, turnos: b.turnos ?? null });
         json(res,200,Array.isArray(ins)?ins[0]:ins); return true;
       }
       if (method==='POST' && /^\/ponto\/admin\/escalas\/[^/]+$/.test(p)) {
         if(!adminOk(req)) return naoAutorizado(res);
         const id=p.split('/')[4]; const b=await readBody(req); const patch={};
-        ['nome','jornada_min','tolerancia_min'].forEach(k=>{ if(b[k]!==undefined) patch[k]=b[k]; });
+        ['nome','jornada_min','tolerancia_min','turnos'].forEach(k=>{ if(b[k]!==undefined) patch[k]=b[k]; });
         const upd=await sbPatch('escalas',`id=eq.${enc(id)}`,patch);
         json(res,200,Array.isArray(upd)?upd[0]:upd); return true;
       }
