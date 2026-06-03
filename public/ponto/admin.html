@@ -82,6 +82,14 @@
   .fcard{background:#10131a;border:1px solid var(--line);border-radius:10px;padding:9px 16px;font-size:13px;font-weight:700;color:var(--txt);cursor:pointer}
   .fcard.on{background:var(--accent);color:#03110c;border-color:var(--accent)}
   @media print{ .tabs,.filtros,.funcCards,.diaAcoes{display:none!important} .diaCard{break-inside:avoid} body{padding:0} }
+  .ovl{position:fixed;inset:0;background:rgba(0,0,0,.72);display:flex;align-items:center;justify-content:center;z-index:50;padding:20px}
+  .ovl.hide{display:none}
+  .ovlBox{background:var(--card);border:1px solid var(--line);border-radius:16px;max-width:420px;width:100%;max-height:90vh;overflow:auto;padding:18px}
+  .fotoIco{background:transparent;border:0;cursor:pointer;font-size:15px;line-height:1;padding:0 4px;opacity:.85}
+  .fotoIco:hover{opacity:1}
+  .fotoItem{margin-bottom:14px}
+  .fotoItem img{width:100%;border-radius:12px;display:block;background:#000}
+  .fotoCap{font-size:12px;color:var(--mut);margin-top:5px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 </style>
 </head>
 <body>
@@ -176,6 +184,12 @@
       <button class="btn" onclick="addFunc()">Adicionar</button>
     </div>
     <div id="funcBox"></div>
+    <div style="border-top:1px solid var(--line);margin-top:24px;padding-top:18px">
+      <h3 style="margin-bottom:6px">Rede do galpão (anti-GPS falso)</h3>
+      <p class="hint" style="margin-bottom:12px">Abra este painel <b>conectado ao WiFi do galpão</b> e clique em registrar. As batidas feitas nessa rede ganham o selo "✓ rede do galpão". Não bloqueia quem usa dados móveis — só marca, pra você revisar.</p>
+      <div id="redeBox" class="hint">Carregando…</div>
+      <button class="btn sm" style="margin-top:12px" onclick="registrarRede()">Registrar esta rede como o galpão</button>
+    </div>
   </div>
 
   <div id="esc" class="card hide">
@@ -210,6 +224,16 @@
       <div><label>Funcionário</label><select id="atrVerFunc" onchange="carregarAtribuicoes()" style="width:300px"></select></div>
     </div>
     <div id="atrBox"></div>
+  </div>
+</div>
+
+<div id="fotoOvl" class="ovl hide" onclick="if(event.target===this)this.classList.add('hide')">
+  <div class="ovlBox">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <h3 id="fotoTit" style="margin:0">Fotos da batida</h3>
+      <button class="btn sm ghost" onclick="$('fotoOvl').classList.add('hide')">Fechar</button>
+    </div>
+    <div id="fotoBox"></div>
   </div>
 </div>
 
@@ -251,6 +275,43 @@ function tab(t){
   if(t==='bat') carregarBatidas();
   if(t==='lanc') carregarLancamentos();
   if(t==='esc') carregarEscalas();
+  if(t==='func') carregarRede();
+}
+async function verFotos(data){
+  const d=diasCache.find(x=>x.data===data); if(!d||!d.fotos||!d.fotos.length) return;
+  $('fotoTit').textContent=`Fotos · ${br(data)}`;
+  $('fotoBox').innerHTML='<p class="hint">Carregando…</p>';
+  $('fotoOvl').classList.remove('hide');
+  const partes=[];
+  for(const f of d.fotos){
+    let img='<p class="hint">(foto não encontrada)</p>';
+    try{ const r=await fetch(`${API}/admin/foto/${f.id}`,{headers:H()}); if(r.ok){ const j=await r.json(); img=`<img src="${j.imagem}" alt="">`; } }catch(e){}
+    const rede = f.na_rede ? `<span class="pos">✓ rede do galpão</span>` : `<span style="opacity:.6">fora da rede (4G/outra)</span>`;
+    partes.push(`<div class="fotoItem">${img}<div class="fotoCap"><b>${SLOT_LABEL[f.tipo]||f.tipo}</b> ${f.hora||''} · ${rede}</div></div>`);
+  }
+  $('fotoBox').innerHTML=partes.join('');
+}
+async function carregarRede(){
+  try{
+    const r=await fetch(`${API}/admin/rede`,{headers:H()}); const j=await r.json();
+    const lista = (j.ips&&j.ips.length)
+      ? j.ips.map(ip=>`<div style="display:flex;align-items:center;gap:8px;margin:4px 0"><code class="tagb">${ip}</code><a href="#" onclick="removerRede('${ip}');return false" style="color:var(--danger);font-weight:700">remover</a></div>`).join('')
+      : '<i>Nenhuma rede registrada ainda.</i>';
+    const atual = j.registrado
+      ? `<span class="pos">Esta rede (${j.ip_atual}) já está registrada ✓</span>`
+      : `Esta rede agora: <code class="tagb">${j.ip_atual||'?'}</code> — ainda não registrada.`;
+    $('redeBox').innerHTML = `<div style="margin-bottom:10px">${atual}</div>${lista}`;
+  }catch(e){ $('redeBox').innerHTML='<span class="neg">Erro ao carregar.</span>'; }
+}
+async function registrarRede(){
+  const r=await fetch(`${API}/admin/rede`,{method:'POST',headers:H()}); const j=await r.json();
+  if(!r.ok){ alert(j.erro||'Erro.'); return; }
+  carregarRede();
+}
+async function removerRede(ip){
+  if(!confirm(`Remover a rede ${ip}?`)) return;
+  await fetch(`${API}/admin/rede-remover`,{method:'POST',headers:H(),body:JSON.stringify({ip})});
+  carregarRede();
 }
 
 const LBT={entrada:'Entrada',saida_almoco:'Saída p/ almoço',retorno_almoco:'Retorno do almoço',saida:'Saída'};
@@ -381,7 +442,7 @@ function renderDias(){
     let cls=d.abono_tipo?'diaCard abonado':(d.vazio?'diaCard vazio':'diaCard');
     if(d.solicitacao) cls+=' solicit';
     return `<div class="${cls}" onfocusout="cardBlur(event,'${d.data}')">
-      <div class="diaHead"><div class="dlabel">${dias[dow]} · ${br(d.data)}${escTag}</div><span id="res_${d.data}">${buildRes(d)}</span></div>
+      <div class="diaHead"><div class="dlabel">${dias[dow]} · ${br(d.data)}${escTag}${(d.fotos&&d.fotos.length)?` <button class="fotoIco" title="Ver foto da batida" onclick="verFotos('${d.data}')">📷</button>`:''}</div><span id="res_${d.data}">${buildRes(d)}</span></div>
       <div class="diaBody">
         <div class="slots">${slots}</div>
         <div class="diaAcoes">
