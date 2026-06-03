@@ -50,12 +50,15 @@
   .slot span{font-size:10.5px;color:var(--mut);text-transform:uppercase;letter-spacing:.4px;font-weight:600}
   .slot input[type=time]{background:#1a1e27;border:1px solid var(--line);border-radius:9px;color:var(--txt);font:700 15px 'Archivo';padding:9px 11px}
   .slot input[type=time]:focus{border-color:var(--accent)}
-  .jornGrid{display:flex;gap:10px;flex-wrap:wrap}
-  .jd{display:flex;flex-direction:column;gap:4px;align-items:stretch}
-  .jd span{font-size:10.5px;color:var(--mut);text-transform:uppercase;letter-spacing:.4px;font-weight:600;text-align:center}
-  .jd input[type=time]{background:#1a1e27;border:1px solid var(--line);border-radius:9px;color:var(--txt);font:700 14px 'Archivo';padding:8px 9px;width:94px}
-  .jd input[type=time]:focus{border-color:var(--accent)}
-  .jd button{margin-top:2px;background:transparent;border:1px solid var(--line);color:var(--mut);border-radius:7px;font:600 10px 'Archivo';padding:4px 0;cursor:pointer}
+  .jornGrid{display:flex;flex-direction:column}
+  .jrow{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:10px 0;border-bottom:1px solid var(--line)}
+  .jday{width:42px;font-weight:700;color:var(--mut);text-transform:uppercase;font-size:12px;letter-spacing:.5px}
+  .jturno{display:flex;align-items:center;gap:6px}
+  .jturno input[type=time]{background:#1a1e27;border:1px solid var(--line);border-radius:9px;color:var(--txt);font:700 14px 'Archivo';padding:8px 9px;width:108px}
+  .jturno input[type=time]:focus{border-color:var(--accent)}
+  .jas{color:var(--mut);font-size:12px}
+  .jtot{font-size:13px;color:var(--mut);min-width:78px}.jtot b{color:var(--txt);font-size:15px}
+  .jfolga{background:transparent;border:1px solid var(--line);color:var(--mut);border-radius:8px;font:600 11px 'Archivo';padding:7px 12px;cursor:pointer}
   .chkGrid{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px}
   .chkGrid label{display:flex;align-items:center;gap:7px;background:#10131a;border:1px solid var(--line);border-radius:9px;padding:9px 13px;font-size:13px;font-weight:600;color:var(--txt);text-transform:none;letter-spacing:0;margin:0;cursor:pointer}
   .chkGrid input{width:16px;height:16px;padding:0}
@@ -411,19 +414,33 @@ async function resetSenha(id,nome){
 let escalas=[]; let editEscalaId=null;
 const DIASEM=['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
 function montarJornGrid(){
-  $('jornGrid').innerHTML = DIASEM.map((d,i)=>`<div class="jd"><span>${d}</span>
-    <input type="time" id="jd_${i}" oninput="totJorn()">
-    <button type="button" onclick="folgaJorn(${i})">Folga</button></div>`).join('');
+  $('jornGrid').innerHTML = DIASEM.map((d,i)=>`
+    <div class="jrow">
+      <div class="jday">${d}</div>
+      <div class="jturno"><input type="time" id="e_${i}_e1" oninput="totDia(${i})"><span class="jas">às</span><input type="time" id="e_${i}_s1" oninput="totDia(${i})"></div>
+      <div class="jturno"><input type="time" id="e_${i}_e2" oninput="totDia(${i})"><span class="jas">às</span><input type="time" id="e_${i}_s2" oninput="totDia(${i})"></div>
+      <div class="jtot">= <b id="dtot_${i}">00:00</b></div>
+      <button type="button" class="jfolga" onclick="folgaDia(${i})">Folga</button>
+    </div>`).join('');
 }
-function folgaJorn(i){ $('jd_'+i).value=''; totJorn(); }
-function minFromHHMM(v){ if(!v) return 0; const [h,m]=v.split(':').map(Number); return (h||0)*60+(m||0); }
-function hhmmFromMin(min){ min=min||0; return String(Math.floor(min/60)).padStart(2,'0')+':'+String(min%60).padStart(2,'0'); }
-function totJorn(){ let t=0; for(let i=0;i<7;i++) t+=minFromHHMM($('jd_'+i).value); $('eTot').textContent=hhmm(t); }
-function preencherJorn(j){ for(let i=0;i<7;i++){ const m=(j&&j[String(i)])||0; $('jd_'+i).value = m? hhmmFromMin(m):''; } totJorn(); }
+function minFromHHMM(v){ if(!v||!/^\d{1,2}:\d{2}$/.test(v)) return 0; const [h,m]=v.split(':').map(Number); return (h||0)*60+(m||0); }
+function parPair(i,n){ const a=minFromHHMM($(`e_${i}_e${n}`).value), b=minFromHHMM($(`e_${i}_s${n}`).value); return (a&&b&&b>a)? b-a : 0; }
+function minDia(i){ return parPair(i,1)+parPair(i,2); }
+function totDia(i){ $('dtot_'+i).textContent=hhmm(minDia(i)); totJorn(); }
+function totJorn(){ let t=0; for(let i=0;i<7;i++) t+=minDia(i); $('eTot').textContent=hhmm(t); }
+function folgaDia(i){ ['e1','s1','e2','s2'].forEach(k=>{ $(`e_${i}_${k}`).value=''; }); totDia(i); }
+function preencherJorn(turnos){
+  for(let i=0;i<7;i++){
+    const ts=(turnos&&turnos[String(i)])||[];
+    $(`e_${i}_e1`).value=(ts[0]&&ts[0][0])||''; $(`e_${i}_s1`).value=(ts[0]&&ts[0][1])||'';
+    $(`e_${i}_e2`).value=(ts[1]&&ts[1][0])||''; $(`e_${i}_s2`).value=(ts[1]&&ts[1][1])||'';
+    totDia(i);
+  }
+}
 function resumoJorn(j){ let t=0,dt=0; for(let i=0;i<7;i++){ const m=(j&&j[String(i)])||0; t+=m; if(m>0) dt++; } return `${dt} dia(s) · ${hhmm(t)}/sem`; }
 
 async function carregarEscalas(){
-  if(!$('jd_0')) montarJornGrid();
+  if(!$('e_0_e1')) montarJornGrid();
   const r=await fetch(API+'/admin/escalas',{headers:H()});
   escalas=await r.json();
   $('atrEscala').innerHTML = escalas.map(e=>`<option value="${e.id}">${esc(e.nome)}</option>`).join('');
@@ -441,7 +458,7 @@ function renderEscalas(){
 }
 function editarEscala(id){
   const e=escalas.find(x=>x.id===id); if(!e) return;
-  editEscalaId=id; $('eNome').value=e.nome; $('eTol').value=e.tolerancia_min; preencherJorn(e.jornada_min);
+  editEscalaId=id; $('eNome').value=e.nome; $('eTol').value=e.tolerancia_min; preencherJorn(e.turnos);
   $('eSalvar').textContent='Salvar alterações'; $('eCancel').classList.remove('hide');
   window.scrollTo({top:0,behavior:'smooth'});
 }
@@ -451,9 +468,15 @@ function cancelarEscala(){
 }
 async function salvarEscala(){
   const nome=$('eNome').value.trim(); if(!nome) return alert('Dê um nome à escala.');
-  const jornada_min={}; for(let i=0;i<7;i++) jornada_min[String(i)]=minFromHHMM($('jd_'+i).value);
+  const turnos={}, jornada_min={}; let semana=0;
+  for(let i=0;i<7;i++){
+    const pares=[];
+    [['e1','s1'],['e2','s2']].forEach(([a,b])=>{ const ev=$(`e_${i}_${a}`).value, sv=$(`e_${i}_${b}`).value; if(ev&&sv) pares.push([ev,sv]); });
+    turnos[String(i)]=pares; jornada_min[String(i)]=minDia(i); semana+=minDia(i);
+  }
+  if(semana===0 && !confirm('A escala está toda como Folga (0h). Salvar assim mesmo?')) return;
   const tol=parseInt($('eTol').value,10);
-  const body={nome,jornada_min,tolerancia_min:isNaN(tol)?10:tol};
+  const body={nome,turnos,jornada_min,tolerancia_min:isNaN(tol)?10:tol};
   const url = editEscalaId ? `${API}/admin/escalas/${editEscalaId}` : `${API}/admin/escalas`;
   const r=await fetch(url,{method:'POST',headers:H(),body:JSON.stringify(body)});
   const j=await r.json(); if(!r.ok) return alert(j.erro||'Erro ao salvar.');
