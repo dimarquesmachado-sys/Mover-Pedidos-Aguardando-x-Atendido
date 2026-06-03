@@ -93,8 +93,8 @@ function montarMomento(data, hhmm){ return new Date(`${data}T${hhmm}:00-03:00`).
 function horaSP(m){ return new Date(m).toLocaleTimeString('pt-BR',{ timeZone:'America/Sao_Paulo', hour:'2-digit', minute:'2-digit' }); }
 const ORDEM=['entrada','saida_almoco','retorno_almoco','saida'];
 const ROTULO={ entrada:'Entrada', saida_almoco:'Saída p/ almoço', retorno_almoco:'Retorno do almoço', saida:'Saída (fim do dia)' };
-const TIPO_LABEL={ ferias:'Férias', folga:'Folga', atestado:'Atestado', completar:'Completado (escala)' };
-const TIPO_LANC=['ferias','folga','atestado','completar'];
+const TIPO_LABEL={ ferias:'Férias', folga:'Folga', atestado:'Atestado', feriado:'Feriado', completar:'Completado (escala)' };
+const TIPO_LANC=['ferias','folga','atestado','feriado','completar'];
 
 function minutosDia(bs){
   const g=t=>bs.find(b=>b.tipo===t);
@@ -169,7 +169,7 @@ async function montarEscalas(funcIds){
     const list=byFunc[funcId]||[]; let chosen=null;
     for(const a of list){ if(String(a.vigencia_inicio)<=dia) chosen=a; }
     const e=chosen && emap[chosen.escala_id];
-    return e ? { jornada_min:e.jornada_min, tolerancia_min:e.tolerancia_min ?? 0, nome:e.nome } : fallback;
+    return e ? { jornada_min:e.jornada_min, tolerancia_min:e.tolerancia_min ?? 0, nome:e.nome, turnos:e.turnos } : fallback;
   };
 }
 async function buscarPorEmail(email){ const a=await sbGet(`funcionarios?email=ilike.${enc(email)}&ativo=eq.true&select=*`); return a[0]||null; }
@@ -334,13 +334,15 @@ function routes(readBody){
         const ini=urlObj.searchParams.get('inicio'), fim=urlObj.searchParams.get('fim');
         if(!fid){ json(res,400,{erro:'Selecione um funcionário.'}); return true; }
         const cfg=await getConfig();
-        const fb={jornada_min:cfg.jornada_min, tolerancia_min:cfg.tolerancia_min||0, nome:'Padrão (sistema)'};
+        const fb={jornada_min:cfg.jornada_min, tolerancia_min:cfg.tolerancia_min||0, nome:'Padrão (sistema)', turnos:null};
         const escDe=await montarEscalas([fid]);
         const bs=await sbGet(`batidas?funcionario_id=eq.${fid}&data=gte.${ini}&data=lte.${fim}&select=*&order=momento.asc`);
         const lancs=await sbGet(`lancamentos?funcionario_id=eq.${fid}&data=gte.${ini}&data=lte.${fim}&select=data,tipo`);
         const porDia={}; for(const x of bs)(porDia[x.data]=porDia[x.data]||[]).push(x);
         const lmap={}; for(const l of lancs) lmap[l.data]=l.tipo;
-        const datas=[...new Set([...Object.keys(porDia), ...Object.keys(lmap)])].sort();
+        // todos os dias do intervalo
+        const datas=[]; let dt=new Date(ini+'T12:00:00Z'); const fdt=new Date(fim+'T12:00:00Z');
+        while(dt<=fdt){ datas.push(dt.toISOString().slice(0,10)); dt.setUTCDate(dt.getUTCDate()+1); }
         const dias=datas.map(data=>{
           const esc=escDe(fid,data,fb);
           const dow=diaSemana(data), esp=esc.jornada_min[String(dow)] ?? 0, abono=lmap[data];
@@ -348,7 +350,9 @@ function routes(readBody){
           const horarios={}; for(const t of ORDEM){ const b=arr.find(x=>x.tipo===t); horarios[t]=b?horaSP(b.momento):''; }
           let trab, saldo;
           if(abono){ trab=esp; saldo=0; } else { const mm=minutosDia(arr); trab=mm.trab; saldo=trab-esp; }
-          return { data, dow, escala:esc.nome, abono: abono?TIPO_LABEL[abono]:null, horarios, trabalhado:trab, esperado:esp, saldo };
+          return { data, dow, escala:esc.nome, turnos:(esc.turnos&&esc.turnos[String(dow)])||null,
+                   vazio:(arr.length===0 && !abono), abono_tipo:abono||null, abono: abono?TIPO_LABEL[abono]:null,
+                   horarios, trabalhado:trab, esperado:esp, saldo };
         });
         json(res,200,{dias}); return true;
       }
@@ -410,6 +414,19 @@ function routes(readBody){
         if(!adminOk(req)) return naoAutorizado(res);
         const id=p.split('/')[4];
         await sbDelete('lancamentos',`id=eq.${enc(id)}`);
+        json(res,200,{ok:true}); return true;
+      }
+
+      // Abono de um único dia (usado pelo card do tratamento). tipo vazio = remover.
+      if (method==='POST' && p==='/ponto/admin/lancamento-dia') {
+        if(!adminOk(req)) return naoAutorizado(res);
+        const b=await readBody(req); const { funcionario_id, data, tipo }=b;
+        if(!funcionario_id || !data){ json(res,400,{erro:'Dados incompletos.'}); return true; }
+        await sbDelete('lancamentos',`funcionario_id=eq.${funcionario_id}&data=eq.${data}`);
+        if(tipo){
+          if(!TIPO_LANC.includes(tipo)){ json(res,400,{erro:'Tipo inválido.'}); return true; }
+          await sbInsert('lancamentos',{funcionario_id,data,tipo,observacao:null},'return=minimal');
+        }
         json(res,200,{ok:true}); return true;
       }
 
