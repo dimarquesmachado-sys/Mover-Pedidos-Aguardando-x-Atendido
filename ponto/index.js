@@ -27,9 +27,35 @@ const SESSION_SECRET = process.env.PONTO_SESSION_SECRET || ADMIN_TOKEN;
 const SB_URL = (process.env.PONTO_SUPABASE_URL || '').replace(/\/+$/, '');
 const SB_KEY = process.env.PONTO_SUPABASE_SERVICE_KEY || '';
 
+// Foto aleatória (anti-GPS falso). Probabilidade por tipo de batida.
+const FOTO_PROB_ENTRADA = parseFloat(process.env.PONTO_FOTO_PROB_ENTRADA || '0.6');
+const FOTO_PROB_OUTROS  = parseFloat(process.env.PONTO_FOTO_PROB_OUTROS  || '0.25');
+const FOTO_SEED = process.env.PONTO_FOTO_SEED || SESSION_SECRET;
+const FOTO_MAX_BYTES = 350 * 1024; // teto da foto recebida (~350KB)
+
 // ── Helpers HTTP locais ───────────────────────────────────────────────
 function json(res, code, body){ res.writeHead(code,{'Content-Type':'application/json'}); res.end(JSON.stringify(body)); }
 function notFound(res){ return json(res, 404, { error: 'not found' }); }
+
+// IP real de quem fez a requisição (Render fica atrás de proxy → x-forwarded-for).
+function ipDe(req){
+  const xff = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+  return xff || req.headers['x-real-ip'] || (req.socket && req.socket.remoteAddress) || '';
+}
+// Decide de forma DETERMINÍSTICA se uma batida pede foto.
+// Mesmo (funcionário, dia, tipo) sempre dá o mesmo resultado → não dá pra recarregar e escapar.
+function precisaFoto(fid, data, tipo){
+  if(!tipo) return false;
+  const h = crypto.createHash('sha256').update(`${fid}|${data}|${tipo}|${FOTO_SEED}`).digest();
+  const r = h.readUInt32BE(0) / 0xFFFFFFFF; // 0..1 estável
+  const prob = tipo === 'entrada' ? FOTO_PROB_ENTRADA : FOTO_PROB_OUTROS;
+  return r < prob;
+}
+// IP está na lista da rede do galpão?
+function naRede(ip, cfg){
+  if(!ip || !cfg || !cfg.ips_galpao) return false;
+  return cfg.ips_galpao.split(',').map(s=>s.trim()).filter(Boolean).includes(ip);
+}
 
 const PUBLIC_DIR = path.join(__dirname, '..', 'public', 'ponto');
 function servir(res, relPath){
@@ -228,7 +254,7 @@ function routes(readBody){
         const ap=await sbGet(`aprovacoes?funcionario_id=eq.${f.id}&data=eq.${data}&select=status&order=criado_em.desc&limit=1`);
         const sols=await sbGet(`solicitacoes_batida?funcionario_id=eq.${f.id}&data=eq.${data}&status=eq.pendente&select=tipo,momento`);
         const proximo=ORDEM[bs.length]||null;
-        json(res,200,{batidas:bs,proximo,rotulo:proximo?ROTULO[proximo]:null,almoco_minimo:cfg?cfg.almoco_minimo:60,aprovacao_status:ap[0]?ap[0].status:null,solicitacoes:sols}); return true;
+        json(res,200,{batidas:bs,proximo,rotulo:proximo?ROTULO[proximo]:null,almoco_minimo:cfg?cfg.almoco_minimo:60,aprovacao_status:ap[0]?ap[0].status:null,solicitacoes:sols,foto_requerida:proximo?precisaFoto(f.id,data,proximo):false}); return true;
       }
 
       // Funcionário lança uma batida que esqueceu (sujeita a aprovação; ignora GPS/raio)
@@ -269,7 +295,13 @@ function routes(readBody){
             }
           }
         }
-        await sbInsert('batidas',{funcionario_id:f.id,tipo,momento:agora,data,latitude,longitude,distancia_metros:dist,justificativa:justUsada},'return=minimal');
+        const fotoReq = precisaFoto(f.id, data, tipo);
+        const ip = ipDe(req);
+        const temFoto = fotoReq && typeof b.foto==='string' && b.foto.startsWith('data:image') && b.foto.length <= FOTO_MAX_BYTES;
+        const ins = await sbInsert('batidas',{funcionario_id:f.id,tipo,momento:agora,data,latitude,longitude,distancia_metros:dist,justificativa:justUsada,
+          ip, na_rede:naRede(ip,cfg), tem_foto:temFoto, foto_pulada: fotoReq && !temFoto},'return=representation');
+        const novaId = Array.isArray(ins) && ins[0] ? ins[0].id : (ins && ins.id);
+        if(temFoto && novaId){ try{ await sbInsert('fotos_batida',{batida_id:novaId,imagem:b.foto},'return=minimal'); }catch(e){ /* foto é best-effort, não trava o ponto */ } }
         const prox=ORDEM[idx+1]||null;
         json(res,200,{ok:true,tipo,rotulo:ROTULO[tipo],distancia:dist,pendente_aprovacao:!!justUsada,proximo:prox,proximo_rotulo:prox?ROTULO[prox]:null}); return true;
       }
@@ -378,10 +410,11 @@ function routes(readBody){
           if(abono){ trab=esp; saldo=0; } else { const mm=minutosDia(arr); trab=mm.trab; saldo=trab-esp; }
           const vazio=(arr.length===0 && !abono);
           const saldoEf = vazio ? 0 : (Math.abs(saldo)<=tol ? 0 : saldo);
+          const fotos = arr.filter(x=>x.tem_foto).map(x=>({tipo:x.tipo, id:x.id, na_rede:!!x.na_rede, hora:horarios[x.tipo]||''}));
           return { data, dow, escala:esc.nome, turnos:(esc.turnos&&esc.turnos[String(dow)])||null,
                    vazio, abono_tipo:abono||null, abono: abono?TIPO_LABEL[abono]:null,
                    aprovacao: apMap[data]||null, solicitacao: solSet.has(data),
-                   horarios, trabalhado:trab, esperado:esp, saldo, saldo_efetivo:saldoEf, tol };
+                   horarios, trabalhado:trab, esperado:esp, saldo, saldo_efetivo:saldoEf, tol, fotos };
         });
         json(res,200,{dias}); return true;
       }
@@ -476,7 +509,42 @@ function routes(readBody){
         json(res,200,{ok:true}); return true;
       }
 
-      // Abono de um único dia (usado pelo card do tratamento). tipo vazio = remover.
+      // ───────── REDE DO GALPÃO (anti-GPS falso) ─────────
+      if (method==='GET' && p==='/ponto/admin/rede') {
+        if(!adminOk(req)) return naoAutorizado(res);
+        const cfg=await getConfig();
+        const ips=(cfg.ips_galpao||'').split(',').map(s=>s.trim()).filter(Boolean);
+        const atual=ipDe(req);
+        json(res,200,{ ips, ip_atual:atual, registrado: ips.includes(atual) }); return true;
+      }
+      if (method==='POST' && p==='/ponto/admin/rede') {
+        if(!adminOk(req)) return naoAutorizado(res);
+        const cfg=await getConfig();
+        const ips=(cfg.ips_galpao||'').split(',').map(s=>s.trim()).filter(Boolean);
+        const atual=ipDe(req);
+        if(!atual){ json(res,400,{erro:'Não consegui ler o IP desta conexão.'}); return true; }
+        if(!ips.includes(atual)) ips.push(atual);
+        await sbPatch('config',`id=eq.1`,{ips_galpao:ips.join(',')});
+        json(res,200,{ ok:true, ips, ip_atual:atual }); return true;
+      }
+      if (method==='POST' && p==='/ponto/admin/rede-remover') {
+        if(!adminOk(req)) return naoAutorizado(res);
+        const b=await readBody(req); const alvo=String(b.ip||'').trim();
+        const cfg=await getConfig();
+        const ips=(cfg.ips_galpao||'').split(',').map(s=>s.trim()).filter(Boolean).filter(x=>x!==alvo);
+        await sbPatch('config',`id=eq.1`,{ips_galpao:ips.join(',')});
+        json(res,200,{ ok:true, ips }); return true;
+      }
+      // Foto de uma batida (miniatura/ampliar no admin)
+      if (method==='GET' && /^\/ponto\/admin\/foto\/[^/]+$/.test(p)) {
+        if(!adminOk(req)) return naoAutorizado(res);
+        const id=p.split('/')[4];
+        const r=await sbGet(`fotos_batida?batida_id=eq.${enc(id)}&select=imagem,criado_em`);
+        if(!r[0]){ json(res,404,{erro:'Foto não encontrada.'}); return true; }
+        json(res,200,{ imagem:r[0].imagem, criado_em:r[0].criado_em }); return true;
+      }
+
+
       if (method==='POST' && p==='/ponto/admin/lancamento-dia') {
         if(!adminOk(req)) return naoAutorizado(res);
         const b=await readBody(req); const { funcionario_id, data, tipo }=b;
