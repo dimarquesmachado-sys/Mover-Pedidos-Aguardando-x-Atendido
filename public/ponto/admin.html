@@ -54,6 +54,10 @@
   .slot span{font-size:10.5px;color:var(--mut);text-transform:uppercase;letter-spacing:.4px;font-weight:600}
   .slot input{background:#1a1e27;border:1px solid var(--line);border-radius:9px;color:var(--txt);font:700 16px 'Archivo';padding:9px 8px;width:86px;text-align:center;letter-spacing:1.5px}
   .slot input:focus{border-color:var(--accent);background:#222838}
+  .slot input.editado{border-color:var(--blue)!important;box-shadow:0 0 0 2px rgba(79,140,255,.35)}
+  .slot .orig{display:block;color:var(--danger);font-size:10.5px;margin-top:3px;cursor:pointer;font-weight:700;text-align:center}
+  .slot .orig s{opacity:.95}
+  .slot .novo{display:block;color:var(--blue);font-size:9.5px;margin-top:3px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;text-align:center}
   .jornGrid{display:flex;flex-direction:column}
   .jrow{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:10px 0;border-bottom:1px solid var(--line)}
   .jday{width:42px;font-weight:700;color:var(--mut);text-transform:uppercase;font-size:12px;letter-spacing:.5px}
@@ -228,7 +232,7 @@
   </div>
 </div>
 
-<div class="versao">Painel de Ponto v1.0 · 03/06/2026</div>
+<div class="versao">Painel de Ponto v1.1 · 03/06/2026</div>
 
 <div id="fotoOvl" class="ovl hide" onclick="if(event.target===this)this.classList.add('hide')">
   <div class="ovlBox">
@@ -435,19 +439,37 @@ function buildRes(d){
   }
   return `<span class="dres">${inner}${apTag(d)}</span>`;
 }
+function buildSlots(d){
+  const corr=d.correcoes||{};
+  return SLOT_ORDEM.map((t,idx)=>{
+    const cur=(d.horarios&&d.horarios[t])||'';
+    const temCorr=Object.prototype.hasOwnProperty.call(corr,t);
+    const orig=temCorr?corr[t]:null;
+    let marca='';
+    if(temCorr){
+      if(orig) marca=`<span class="orig" title="Original: ${orig} — clique para voltar" onclick="restaurar('${d.data}','${t}','${orig}')"><s>${orig}</s> ↩</span>`;
+      else marca=`<span class="novo">add. gestor</span>`;
+    }
+    return `<div class="slot"><span>${SLOT_LABEL[t]}</span><input type="text" inputmode="numeric" maxlength="5" placeholder="--:--" id="t_${d.data}_${t}" value="${cur}" class="${temCorr?'editado':''}" oninput="maskTime(this,'${d.data}',${idx})" onfocus="this.select()">${marca}</div>`;
+  }).join('');
+}
+function restaurar(data,tipo,orig){
+  const el=$(`t_${data}_${tipo}`); if(el) el.value=orig;
+  salvarDiaSilencioso(data);
+}
 function renderDias(){
   if(!diasCache.length){ $('batBox').innerHTML='<p class="hint">Sem dados no período.</p>'; return; }
   const cards=diasCache.map(d=>{
     const dow=d.dow!=null?d.dow:new Date(d.data+'T12:00:00').getDay();
     const escTag=d.escala?` · <span class="tagb">${esc(d.escala)}</span>`:'';
-    const slots=SLOT_ORDEM.map((t,idx)=>`<div class="slot"><span>${SLOT_LABEL[t]}</span><input type="text" inputmode="numeric" maxlength="5" placeholder="--:--" id="t_${d.data}_${t}" value="${(d.horarios&&d.horarios[t])||''}" oninput="maskTime(this,'${d.data}',${idx})" onfocus="this.select()"></div>`).join('');
+    const slots=buildSlots(d);
     const abonoSel=`<select class="abonoSel" onchange="setAbono('${d.data}',this.value)">${ABONOS.map(([v,l])=>`<option value="${v}" ${(d.abono_tipo||'')===v?'selected':''}>${l}</option>`).join('')}</select>`;
     let cls=d.abono_tipo?'diaCard abonado':(d.vazio?'diaCard vazio':'diaCard');
     if(d.solicitacao) cls+=' solicit';
     return `<div class="${cls}" onfocusout="cardBlur(event,'${d.data}')">
       <div class="diaHead"><div class="dlabel">${dias[dow]} · ${br(d.data)}${escTag}${(d.fotos&&d.fotos.length)?` <button class="fotoIco" title="Ver foto da batida" onclick="verFotos('${d.data}')">📷</button>`:''}</div><span id="res_${d.data}">${buildRes(d)}</span></div>
       <div class="diaBody">
-        <div class="slots">${slots}</div>
+        <div class="slots" id="slots_${d.data}">${slots}</div>
         <div class="diaAcoes">
           <button class="btn sm ghost" onclick="autoEscala('${d.data}')">Pela escala</button>
           <span class="abonoWrap">Abono: ${abonoSel}</span>
@@ -481,11 +503,14 @@ function cardBlur(ev, data){
 async function salvarDiaSilencioso(data){
   const d=diasCache.find(x=>x.data===data); if(!d) return;
   const horarios={}; SLOT_ORDEM.forEach(t=>{ horarios[t]=$(`t_${data}_${t}`)?$(`t_${data}_${t}`).value:''; });
+  let resp={};
   try{
     const r=await fetch(`${API}/admin/dia`,{method:'POST',headers:H(),body:JSON.stringify({funcionario_id:$('batFunc').value,data,horarios})});
     if(!r.ok) return;
+    try{ resp=await r.json(); }catch(e){}
   }catch(e){ return; }
   d.horarios={...horarios};
+  d.correcoes = resp.correcoes || {};
   if(!d.abono_tipo){
     const trab=calcDia(horarios);
     const temAlgum=SLOT_ORDEM.some(t=>/^\d{1,2}:\d{2}$/.test(horarios[t]||''));
@@ -493,6 +518,7 @@ async function salvarDiaSilencioso(data){
     const tol=d.tol||0; d.saldo_efetivo = d.vazio ? 0 : (Math.abs(d.saldo)<=tol ? 0 : d.saldo);
   }
   ultimoRelatorio=null;
+  const slotsEl=$(`slots_${data}`); if(slotsEl) slotsEl.innerHTML=buildSlots(d);
   const resEl=$(`res_${data}`); if(resEl) resEl.innerHTML=buildRes(d);
   const topo=$('topoBox'); if(topo) topo.innerHTML=buildHeader();
 }
