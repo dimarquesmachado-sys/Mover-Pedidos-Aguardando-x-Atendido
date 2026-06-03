@@ -168,13 +168,20 @@
 <div id="modal" class="overlay hide">
   <div class="modal erro">
     <div class="erro-ico">!</div>
-    <h3>Almoço abaixo de 1h</h3>
-    <p id="modalTxt">—</p>
-    <label>Justificativa (mínimo 30 caracteres)</label>
-    <textarea id="just" oninput="contaJust()" placeholder="Explique o motivo do almoço reduzido..."></textarea>
-    <div class="conta"><span id="qtd">0</span>/30</div>
-    <button class="btn" id="btnJust" onclick="enviarJust()" disabled>Enviar para aprovação</button>
-    <button class="btn ghost" style="margin-top:10px" onclick="fecharModal()">Cancelar</button>
+    <h3>Almoço com menos de 1 hora</h3>
+    <div id="modalPasso1">
+      <p id="modalTxt">—</p>
+      <button class="btn" onclick="irPasso2()">Bater ponto fora de horário?</button>
+      <button class="btn ghost" style="margin-top:10px" onclick="fecharModal()">Cancelar</button>
+    </div>
+    <div id="modalPasso2" class="hide">
+      <p style="color:var(--mut);font-size:13.5px;line-height:1.5;margin-bottom:14px;text-align:center">Descreva o motivo abaixo. O registro será feito e <b>enviado ao gestor para aprovação</b>. Se não for aprovado, o almoço será contado como 1 hora.</p>
+      <label>Motivo (mínimo 30 caracteres)</label>
+      <textarea id="just" oninput="contaJust()" placeholder="Ex.: precisei voltar antes para receber uma carga urgente..."></textarea>
+      <div class="conta"><span id="qtd">0</span>/30</div>
+      <button class="btn" id="btnJust" onclick="enviarJust()" disabled>Registrar e enviar para aprovação</button>
+      <button class="btn ghost" style="margin-top:10px" onclick="voltarPasso1()">Voltar</button>
+    </div>
   </div>
 </div>
 
@@ -264,19 +271,25 @@ async function carregar(){
   const j = await r.json();
   if(!r.ok){ if(r.status===401){ sair(); } return; }
   if(j.almoco_minimo) almocoMin = j.almoco_minimo;
-  renderSteps(j.batidas, j.proximo);
+  renderSteps(j.batidas, j.proximo, j.aprovacao_status);
   atualizarContador(j.batidas, j.proximo);
 }
 
-function renderSteps(batidas, proximo){
+function renderSteps(batidas, proximo, apStatus){
   const cont = $('steps'); cont.innerHTML='';
   ORDEM.forEach((tipo,i)=>{
     const b = batidas.find(x=>x.tipo===tipo);
     const div = document.createElement('div');
     div.className = 'step' + (b?' done':'') + (tipo===proximo?' next':'') + (b&&b.justificativa?' pend':'');
     const hora = b ? new Date(b.momento).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) : '';
+    let tag='';
+    if(b&&b.justificativa){
+      tag = apStatus==='aprovado'  ? ' · almoço aprovado ✓'
+          : apStatus==='rejeitado' ? ' · ajustado p/ 1h ✱'
+          : ' · em aprovação ⏳';
+    }
     div.innerHTML = `<div class="dot">${b?'✓':i+1}</div>
-      <div class="nome">${LABELS[tipo]}${b&&b.justificativa?' · em aprovação':''}</div>
+      <div class="nome">${LABELS[tipo]}${tag}</div>
       <div class="hora">${hora}</div>`;
     cont.appendChild(div);
   });
@@ -333,9 +346,10 @@ async function baterPonto(justificativa){
     const j = await r.json();
     if(r.status===401){ pendente=null; sair(); return; }
     if(r.status===422 && j.requer_justificativa){
-      $('modalTxt').textContent = j.erro;
-      $('modal').classList.remove('hide');
+      $('modalTxt').innerHTML = `O intervalo de almoço (intrajornada) é obrigatório e deve ser de <b>no mínimo 1 hora</b>. Você está voltando com apenas <b>${j.minutos} min</b>. Não é permitido bater o retorno com menos de 1 hora de almoço.`;
       $('just').value=''; contaJust();
+      $('modalPasso1').classList.remove('hide'); $('modalPasso2').classList.add('hide');
+      $('modal').classList.remove('hide');
       btn.disabled=false; btn.textContent=original; showResult('','');
       return;
     }
@@ -354,7 +368,9 @@ async function baterPonto(justificativa){
 }
 function contaJust(){ const n=$('just').value.trim().length; $('qtd').textContent=n; $('btnJust').disabled=n<30; }
 function enviarJust(){ baterPonto($('just').value.trim()); }
-function fecharModal(){ $('modal').classList.add('hide'); }
+function irPasso2(){ $('modalPasso1').classList.add('hide'); $('modalPasso2').classList.remove('hide'); $('just').focus(); }
+function voltarPasso1(){ $('modalPasso2').classList.add('hide'); $('modalPasso1').classList.remove('hide'); }
+function fecharModal(){ $('modal').classList.add('hide'); $('modalPasso1').classList.remove('hide'); $('modalPasso2').classList.add('hide'); }
 
 // ---------- HISTORICO ----------
 function mudarMes(delta){ histRef.setMonth(histRef.getMonth()+delta); carregarHistorico(); }
