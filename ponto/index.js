@@ -169,7 +169,7 @@ async function montarEscalas(funcIds){
     const list=byFunc[funcId]||[]; let chosen=null;
     for(const a of list){ if(String(a.vigencia_inicio)<=dia) chosen=a; }
     const e=chosen && emap[chosen.escala_id];
-    return e ? { jornada_min:e.jornada_min, tolerancia_min:e.tolerancia_min ?? 0 } : fallback;
+    return e ? { jornada_min:e.jornada_min, tolerancia_min:e.tolerancia_min ?? 0, nome:e.nome } : fallback;
   };
 }
 async function buscarPorEmail(email){ const a=await sbGet(`funcionarios?email=ilike.${enc(email)}&ativo=eq.true&select=*`); return a[0]||null; }
@@ -334,7 +334,7 @@ function routes(readBody){
         const ini=urlObj.searchParams.get('inicio'), fim=urlObj.searchParams.get('fim');
         if(!fid){ json(res,400,{erro:'Selecione um funcionário.'}); return true; }
         const cfg=await getConfig();
-        const fb={jornada_min:cfg.jornada_min, tolerancia_min:cfg.tolerancia_min||0};
+        const fb={jornada_min:cfg.jornada_min, tolerancia_min:cfg.tolerancia_min||0, nome:'Padrão (sistema)'};
         const escDe=await montarEscalas([fid]);
         const bs=await sbGet(`batidas?funcionario_id=eq.${fid}&data=gte.${ini}&data=lte.${fim}&select=*&order=momento.asc`);
         const lancs=await sbGet(`lancamentos?funcionario_id=eq.${fid}&data=gte.${ini}&data=lte.${fim}&select=data,tipo`);
@@ -342,12 +342,13 @@ function routes(readBody){
         const lmap={}; for(const l of lancs) lmap[l.data]=l.tipo;
         const datas=[...new Set([...Object.keys(porDia), ...Object.keys(lmap)])].sort();
         const dias=datas.map(data=>{
-          const dow=diaSemana(data), esp=escDe(fid,data,fb).jornada_min[String(dow)] ?? 0, abono=lmap[data];
+          const esc=escDe(fid,data,fb);
+          const dow=diaSemana(data), esp=esc.jornada_min[String(dow)] ?? 0, abono=lmap[data];
           const arr=porDia[data]||[];
           const horarios={}; for(const t of ORDEM){ const b=arr.find(x=>x.tipo===t); horarios[t]=b?horaSP(b.momento):''; }
           let trab, saldo;
           if(abono){ trab=esp; saldo=0; } else { const mm=minutosDia(arr); trab=mm.trab; saldo=trab-esp; }
-          return { data, dow, abono: abono?TIPO_LABEL[abono]:null, horarios, trabalhado:trab, esperado:esp, saldo };
+          return { data, dow, escala:esc.nome, abono: abono?TIPO_LABEL[abono]:null, horarios, trabalhado:trab, esperado:esp, saldo };
         });
         json(res,200,{dias}); return true;
       }
