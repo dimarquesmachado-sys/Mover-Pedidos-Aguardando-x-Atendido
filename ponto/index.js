@@ -398,6 +398,8 @@ function routes(readBody){
         const apMap={}; for(const a of aprovs) apMap[a.data]=a.status;
         const sols=await sbGet(`solicitacoes_batida?funcionario_id=eq.${fid}&data=gte.${ini}&data=lte.${fim}&status=eq.pendente&select=data`);
         const solSet=new Set(sols.map(x=>x.data));
+        const corrs=await sbGet(`correcoes_ponto?funcionario_id=eq.${fid}&data=gte.${ini}&data=lte.${fim}&select=data,tipo,hora_original`);
+        const corrPorDia={}; for(const c of corrs){ (corrPorDia[c.data]=corrPorDia[c.data]||{})[c.tipo]=c.hora_original; }
         // todos os dias do intervalo
         const datas=[]; let dt=new Date(ini+'T12:00:00Z'); const fdt=new Date(fim+'T12:00:00Z');
         while(dt<=fdt){ datas.push(dt.toISOString().slice(0,10)); dt.setUTCDate(dt.getUTCDate()+1); }
@@ -414,7 +416,7 @@ function routes(readBody){
           return { data, dow, escala:esc.nome, turnos:(esc.turnos&&esc.turnos[String(dow)])||null,
                    vazio, abono_tipo:abono||null, abono: abono?TIPO_LABEL[abono]:null,
                    aprovacao: apMap[data]||null, solicitacao: solSet.has(data),
-                   horarios, trabalhado:trab, esperado:esp, saldo, saldo_efetivo:saldoEf, tol, fotos };
+                   horarios, trabalhado:trab, esperado:esp, saldo, saldo_efetivo:saldoEf, tol, fotos, correcoes: corrPorDia[data]||{} };
         });
         json(res,200,{dias}); return true;
       }
@@ -424,20 +426,34 @@ function routes(readBody){
         if(!adminOk(req)) return naoAutorizado(res);
         const b=await readBody(req); const { funcionario_id, data, horarios }=b;
         if(!funcionario_id || !data || !horarios){ json(res,400,{erro:'Dados incompletos.'}); return true; }
-        const atuais=await sbGet(`batidas?funcionario_id=eq.${funcionario_id}&data=eq.${data}&select=id,tipo`);
+        const atuais=await sbGet(`batidas?funcionario_id=eq.${funcionario_id}&data=eq.${data}&select=id,tipo,momento`);
         const mapAtual={}; atuais.forEach(x=>mapAtual[x.tipo]=x);
+        const corrs=await sbGet(`correcoes_ponto?funcionario_id=eq.${funcionario_id}&data=eq.${data}&select=tipo,hora_original`);
+        const corrMap={}; corrs.forEach(c=>corrMap[c.tipo]=c.hora_original);
         for(const tipo of ORDEM){
-          const val=String(horarios[tipo]||'').trim();
+          const raw=String(horarios[tipo]||'').trim();
+          let val=''; if(/^\d{1,2}:\d{2}$/.test(raw)){ const [hh,mm]=raw.split(':'); val=`${hh.padStart(2,'0')}:${mm}`; }
           const ex=mapAtual[tipo];
-          if(val && /^\d{1,2}:\d{2}$/.test(val)){
+          const oldHora = ex ? horaSP(ex.momento) : '';
+          // aplica na tabela de batidas
+          if(val){
             const momento=montarMomento(data,val);
             if(ex) await sbPatch('batidas',`id=eq.${ex.id}`,{momento});
             else   await sbInsert('batidas',{funcionario_id,tipo,momento,data},'return=minimal');
           } else if(ex){
             await sbDelete('batidas',`id=eq.${ex.id}`);
           }
+          // registro de alteração (antigo vermelho / novo azul)
+          const temCorr = Object.prototype.hasOwnProperty.call(corrMap,tipo);
+          const original = temCorr ? corrMap[tipo] : oldHora;   // 1ª edição: original = valor batido
+          if(val === original){
+            if(temCorr){ await sbDelete('correcoes_ponto',`funcionario_id=eq.${funcionario_id}&data=eq.${data}&tipo=eq.${tipo}`); delete corrMap[tipo]; }
+          } else if(!temCorr){
+            await sbInsert('correcoes_ponto',{funcionario_id,data,tipo,hora_original:original},'return=minimal');
+            corrMap[tipo]=original;
+          }
         }
-        json(res,200,{ok:true}); return true;
+        json(res,200,{ok:true, correcoes:corrMap}); return true;
       }
 
       if (method==='GET' && p==='/ponto/admin/aprovacoes') {
