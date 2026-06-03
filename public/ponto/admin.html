@@ -76,6 +76,10 @@
   .diaAcoes{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
   .abonoWrap{font-size:12px;color:var(--mut);display:flex;align-items:center;gap:6px}
   .abonoSel{padding:7px 10px;font-size:13px}
+  .funcCards{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0 16px}
+  .fcard{background:#10131a;border:1px solid var(--line);border-radius:10px;padding:9px 16px;font-size:13px;font-weight:700;color:var(--txt);cursor:pointer}
+  .fcard.on{background:var(--accent);color:#03110c;border-color:var(--accent)}
+  @media print{ .tabs,.filtros,.funcCards,.diaAcoes{display:none!important} .diaCard{break-inside:avoid} body{padding:0} }
 </style>
 </head>
 <body>
@@ -94,15 +98,15 @@
 
 <div id="app" class="hide">
   <div class="tabs">
-    <div class="tab on" data-t="aprov" onclick="tab('aprov')">Aprovações <span id="badge" class="pill"></span></div>
+    <div class="tab on" data-t="bat" onclick="tab('bat')">Batidas</div>
     <div class="tab" data-t="relat" onclick="tab('relat')">Horas extras</div>
-    <div class="tab" data-t="bat" onclick="tab('bat')">Batidas</div>
+    <div class="tab" data-t="aprov" onclick="tab('aprov')">Aprovações <span id="badge" class="pill"></span></div>
     <div class="tab" data-t="lanc" onclick="tab('lanc')">Lançamentos</div>
     <div class="tab" data-t="func" onclick="tab('func')">Funcionários</div>
     <div class="tab" data-t="esc" onclick="tab('esc')">Escalas</div>
   </div>
 
-  <div id="aprov" class="card">
+  <div id="aprov" class="card hide">
     <h3 style="margin-bottom:14px">Almoços abaixo de 1h — pendentes</h3>
     <div id="aprovBox">Carregando...</div>
   </div>
@@ -119,12 +123,15 @@
     <div id="relBox"></div>
   </div>
 
-  <div id="bat" class="card hide">
+  <div id="bat" class="card">
+    <label>Funcionário</label>
+    <div id="funcCards" class="funcCards"></div>
     <div class="filtros">
-      <div><label>Funcionário</label><select id="batFunc"></select></div>
+      <div><label>Funcionário (lista)</label><select id="batFunc" onchange="selecionarFunc(this.value)"></select></div>
       <div><label>Início</label><input id="batIni" type="date"></div>
       <div><label>Fim</label><input id="batFim" type="date"></div>
       <button class="btn" onclick="carregarBatidas()">Ver / tratar</button>
+      <button class="btn ghost" onclick="imprimirBatidas()">Imprimir / PDF</button>
     </div>
     <div class="filtros" style="margin-bottom:14px">
       <div><label>Lançar registro em outro dia</label><input id="addDia" type="date"></div>
@@ -326,15 +333,26 @@ function buildHeader(){
     <div class="pb"><span>Saldo do período</span><b class="${tS>=0?'pos':'neg'}">${hhmm(tS)}</b></div>
   </div><p class="hint" style="margin-bottom:14px">Mês inteiro. Clique num campo de hora e digite os 4 números (ex.: <b>0800</b> = 08:00) — ele pula sozinho pro próximo e salva ao sair do dia. <b class="pos">Verde</b> = hora extra · <b class="neg">vermelho</b> = o que faltou.</p>`;
 }
+function apTag(d){
+  if(!d.aprovacao) return '';
+  if(d.aprovacao==='pendente')  return ` · <span class="tagw">⏳ em aprovação</span>`;
+  if(d.aprovacao==='aprovado')  return ` · <span class="pos">✓ almoço aprovado</span>`;
+  if(d.aprovacao==='rejeitado') return ` · <span class="neg">✱ almoço ajustado p/ 1h</span>`;
+  return '';
+}
 function buildRes(d){
-  if(d.novo) return '<span class="dres">novo — preencha</span>';
-  if(d.abono_tipo) return `<span class="dres">Previsto ${hhmm(d.esperado)} · <span class="tagb">${d.abono}</span></span>`;
-  if(d.vazio) return `<span class="dres" style="opacity:.6">Previsto ${hhmm(d.esperado)} · sem batidas</span>`;
-  const s=d.saldo||0;
-  const fim = s>0 ? `Extra <span class="pos">+${hhmm(s)}</span>`
-            : s<0 ? `Débito <span class="neg">${hhmm(s)}</span>`
-            : `<span class="pos">Em dia (00:00)</span>`;
-  return `<span class="dres">Trab ${hhmm(d.trabalhado)} · Prev ${hhmm(d.esperado)} · ${fim}</span>`;
+  let inner;
+  if(d.novo) inner='novo — preencha';
+  else if(d.abono_tipo) inner=`Previsto ${hhmm(d.esperado)} · <span class="tagb">${d.abono}</span>`;
+  else if(d.vazio) inner=`<span style="opacity:.6">Previsto ${hhmm(d.esperado)} · sem batidas</span>`;
+  else {
+    const s=d.saldo||0;
+    const fim = s>0 ? `Extra <span class="pos">+${hhmm(s)}</span>`
+              : s<0 ? `Débito <span class="neg">${hhmm(s)}</span>`
+              : `<span class="pos">Em dia (00:00)</span>`;
+    inner=`Trab ${hhmm(d.trabalhado)} · Prev ${hhmm(d.esperado)} · ${fim}`;
+  }
+  return `<span class="dres">${inner}${apTag(d)}</span>`;
 }
 function renderDias(){
   if(!diasCache.length){ $('batBox').innerHTML='<p class="hint">Sem dados no período.</p>'; return; }
@@ -464,8 +482,16 @@ async function carregarFuncionarios(){
   $('atrVerFunc').innerHTML = opts;
   $('relFunc').innerHTML = '<option value="">Todos</option>' + opts;
   $('atrFuncs').innerHTML = listaFunc.map(f=>`<label><input type="checkbox" value="${f.id}"> ${esc(f.nome)}</label>`).join('');
+  renderFuncCards();
   renderFuncionarios();
+  if(!$('bat').classList.contains('hide')) carregarBatidas();
 }
+function renderFuncCards(){
+  const sel=$('batFunc').value;
+  $('funcCards').innerHTML = listaFunc.map(f=>`<div class="fcard ${String(f.id)===String(sel)?'on':''}" onclick="selecionarFunc('${f.id}')">${esc(f.nome)}</div>`).join('');
+}
+function selecionarFunc(id){ $('batFunc').value=id; renderFuncCards(); carregarBatidas(); }
+function imprimirBatidas(){ window.print(); }
 function renderFuncionarios(){
   const linhas = listaFunc.map(f=>{
     if(f.id===editandoId){
