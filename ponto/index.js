@@ -169,6 +169,7 @@ function routes(readBody){
     // Frontend estático
     if (method==='GET' && (p==='/ponto' || p==='/ponto/')) { servir(res,'index.html'); return true; }
     if (method==='GET' && (p==='/ponto/admin' || p==='/ponto/admin.html')) { servir(res,'admin.html'); return true; }
+    if (method==='GET' && (p==='/ponto/favicon.png' || p==='/ponto/favicon.ico')) { servir(res,'favicon.png'); return true; }
 
     try {
       // ───────── FUNCIONÁRIO ─────────
@@ -277,6 +278,25 @@ function routes(readBody){
         const id=p.split('/')[4];
         await sbPatch('funcionarios',`id=eq.${enc(id)}`,{senha_hash:null,senha_definida:false});
         json(res,200,{ok:true}); return true;
+      }
+
+      // Editar cadastro existente (nome, matrícula, email, cargo, setor, ativo)
+      if (method==='POST' && /^\/ponto\/admin\/funcionarios\/[^/]+$/.test(p)) {
+        if(!adminOk(req)) return naoAutorizado(res);
+        const id=p.split('/')[4]; const b=await readBody(req);
+        const upd={};
+        if(b.nome!==undefined)      upd.nome      = b.nome;
+        if(b.matricula!==undefined) upd.matricula = String(b.matricula);
+        if(b.email!==undefined)     upd.email     = String(b.email).trim().toLowerCase();
+        if(b.cargo!==undefined)     upd.cargo     = b.cargo;
+        if(b.setor!==undefined)     upd.setor     = b.setor;
+        if(b.ativo!==undefined)     upd.ativo     = !!b.ativo;
+        if(!Object.keys(upd).length){ json(res,400,{erro:'Nada para atualizar.'}); return true; }
+        try{
+          const r=await sbPatch('funcionarios',`id=eq.${enc(id)}`,upd);
+          json(res,200,Array.isArray(r)?r[0]:r);
+        }catch(e){ json(res,400,{erro:'Não foi possível salvar (matrícula ou email já em uso?).'}); }
+        return true;
       }
 
       if (method==='GET' && p==='/ponto/admin/batidas') {
