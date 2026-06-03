@@ -67,6 +67,11 @@
   .modal{background:var(--card);border:1px solid var(--line);border-radius:20px;padding:22px;max-width:440px;width:100%}
   .modal h3{font-size:18px;margin-bottom:6px}
   .modal p{color:var(--mut);font-size:13.5px;line-height:1.5;margin-bottom:16px}
+  .modal.erro{border-color:rgba(255,90,95,.5);box-shadow:0 0 0 4px rgba(255,90,95,.08)}
+  .modal.erro h3{color:var(--danger);text-align:center;font-size:21px}
+  .modal.erro p{text-align:center}
+  .erro-ico{width:66px;height:66px;border-radius:50%;background:rgba(255,90,95,.15);border:2px solid var(--danger);color:var(--danger);font:800 42px 'Archivo';display:grid;place-items:center;margin:2px auto 14px;animation:pulseErr 1.4s ease-in-out infinite}
+  @keyframes pulseErr{0%,100%{box-shadow:0 0 0 0 rgba(255,90,95,.4)}50%{box-shadow:0 0 0 10px rgba(255,90,95,0)}}
   .totais{display:flex;gap:10px;margin-bottom:14px}
   .tot{flex:1;background:#10131a;border:1px solid var(--line);border-radius:13px;padding:13px;text-align:center}
   .tot .v{font-size:22px;font-weight:800;font-variant-numeric:tabular-nums}
@@ -159,7 +164,8 @@
 
 <!-- MODAL JUSTIFICATIVA -->
 <div id="modal" class="overlay hide">
-  <div class="modal">
+  <div class="modal erro">
+    <div class="erro-ico">!</div>
     <h3>Almoço abaixo de 1h</h3>
     <p id="modalTxt">—</p>
     <label>Justificativa (mínimo 30 caracteres)</label>
