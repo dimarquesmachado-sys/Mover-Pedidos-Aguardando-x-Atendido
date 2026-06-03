@@ -106,23 +106,27 @@ function minutosDia(bs){
   if(sa&&ra) almoco=diffMin(sa.momento,ra.momento);
   return { trab, almoco, completo: !!(ent&&sai) };
 }
-function agregar(batidasPorDia, lancPorData, escalaDe, almocoMin){
-  const datas=new Set([...Object.keys(batidasPorDia), ...Object.keys(lancPorData)]);
+function agregar(batidasPorDia, lancPorData, escalaDe, almocoMin, todasDatas){
+  const base = (todasDatas && todasDatas.length) ? todasDatas : [...new Set([...Object.keys(batidasPorDia), ...Object.keys(lancPorData)])].sort();
   let trabTotal=0, espTotal=0, extras=0, deficit=0, extrasSabado=0, almocosCurtos=0;
   const detalhe=[];
-  for(const dia of [...datas].sort()){
+  for(const dia of base){
     const dow=diaSemana(dia), abono=lancPorData[dia];
     const esc=escalaDe(dia); const esp=esc.jornada_min[String(dow)] ?? 0; const tol=esc.tolerancia_min ?? 0;
-    let trab, almoco=0, completo=true, saldo;
+    const temBatida=!!(batidasPorDia[dia] && batidasPorDia[dia].length);
+    const real = temBatida || !!abono;
+    let trab=0, almoco=0, completo=true, saldo=0;
     if(abono){ trab=esp; saldo=0; }
-    else { const m=minutosDia(batidasPorDia[dia]||[]); trab=m.trab; almoco=m.almoco; completo=m.completo; saldo=trab-esp; }
-    trabTotal+=trab; espTotal+=esp;
-    if(!abono){
-      if(saldo>tol) extras+=saldo; else if(saldo<-tol) deficit+=saldo;
-      if(dow===6) extrasSabado+=trab;
-      if(almoco>0 && almoco<almocoMin) almocosCurtos++;
+    else if(temBatida){ const m=minutosDia(batidasPorDia[dia]); trab=m.trab; almoco=m.almoco; completo=m.completo; saldo=trab-esp; }
+    if(real){
+      trabTotal+=trab; espTotal+=esp;
+      if(!abono){
+        if(saldo>tol) extras+=saldo; else if(saldo<-tol) deficit+=saldo;
+        if(dow===6) extrasSabado+=trab;
+        if(almoco>0 && almoco<almocoMin) almocosCurtos++;
+      }
     }
-    detalhe.push({ data:dia, dow, trabalhado:trab, esperado:esp, saldo, almoco, completo, abono: abono?TIPO_LABEL[abono]:null });
+    detalhe.push({ data:dia, dow, vazio:!real, trabalhado:trab, esperado:esp, saldo, almoco, completo, abono: abono?TIPO_LABEL[abono]:null });
   }
   return { detalhe, trabalhado:trabTotal, esperado:espTotal, saldo:trabTotal-espTotal, extras, deficit, extras_sabado:extrasSabado, almocos_curtos:almocosCurtos };
 }
@@ -495,10 +499,12 @@ function routes(readBody){
         const lmap={}; for(const l of lancs)(lmap[l.funcionario_id]=lmap[l.funcionario_id]||{})[l.data]=l.tipo;
         const fids=new Set([...Object.keys(bat), ...Object.keys(lmap)].map(Number));
         const escDe=await montarEscalas([...fids]);
+        const todasDatas=[]; let dd=new Date(inicio+'T12:00:00Z'); const fdd=new Date(fim+'T12:00:00Z');
+        while(dd<=fdd){ todasDatas.push(dd.toISOString().slice(0,10)); dd.setUTCDate(dd.getUTCDate()+1); }
         const relatorio=[];
         for(const fid of fids){
           const f=fmap[fid]||{nome:'(removido)',matricula:''};
-          const r=agregar(bat[fid]||{}, lmap[fid]||{}, (dia)=>escDe(fid,dia,fb), cfg.almoco_minimo);
+          const r=agregar(bat[fid]||{}, lmap[fid]||{}, (dia)=>escDe(fid,dia,fb), cfg.almoco_minimo, todasDatas);
           relatorio.push({funcionario_id:fid,nome:f.nome,matricula:f.matricula,...r});
         }
         relatorio.sort((a,b)=>(a.nome||'').localeCompare(b.nome||''));
