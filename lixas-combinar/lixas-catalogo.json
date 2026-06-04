@@ -1,65 +1,64 @@
 {
   "_descricao": "Mapeamento dos SKUs A COMBINAR para o produto pai das variacoes filhas correspondente.",
-  "_atualizado_em": "2026-05-30",
+  "_atualizado_em": "2026-06-04",
   "_observacao": "Quando um cliente compra um anuncio A COMBINAR no ML, o sistema usa este mapa para descobrir quais variacoes filhas estao disponiveis em estoque para oferecer ao cliente.",
   "_campos": {
     "pai_10_lixas_codigo": "SKU do produto pai cujas variacoes serao listadas (apesar do nome, pode ser pai de pacotes de 1, 10 ou outro tamanho)",
     "lixas_por_kit": "Total de lixas no kit que o cliente comprou (ex: 100 lixas no kit A COMBINAR)",
     "unidades_por_pacote": "Quantas lixas tem cada pacote filho. Padrao 10 (pacote de 10 lixas). Caso especial: 1 (lixas d'agua avulsas)"
   },
-
   "catalogo": {
     "A-COMBINAR-100-lisa-125mm": {
-      "descricao": "5 polegadas - LISA",
+      "descricao": "5 polegadas Lisa",
       "pai_10_lixas_codigo": "10-lisa-125mm-PAI-X",
       "lixas_por_kit": 100,
       "unidades_por_pacote": 10,
       "ativo": true
     },
     "A-COMBINAR-100-lisa-180mm": {
-      "descricao": "7 polegadas - LISA",
+      "descricao": "7 polegadas Lisa",
       "pai_10_lixas_codigo": "10-lisa-180mm-PAI",
       "lixas_por_kit": 100,
       "unidades_por_pacote": 10,
       "ativo": true
     },
     "A-COMBINAR-furo-125mm": {
-      "descricao": "5 polegadas - FURO",
+      "descricao": "5 polegadas Furo",
       "pai_10_lixas_codigo": "10-furo-125mm-PAI",
       "lixas_por_kit": 100,
       "unidades_por_pacote": 10,
       "ativo": true
     },
     "A-COMBINAR-furo-180mm": {
-      "descricao": "7 polegadas - FURO",
+      "descricao": "7 polegadas Furo",
       "pai_10_lixas_codigo": "10-furo-180mm-PAI",
       "lixas_por_kit": 100,
       "unidades_por_pacote": 10,
       "ativo": true
     },
     "100-lisa-225mm-A-COMBINAR": {
-      "descricao": "9 polegadas - LISA",
+      "descricao": "9 polegadas Lisa",
       "pai_10_lixas_codigo": "10-lisa-225mm-PAI",
       "lixas_por_kit": 100,
       "unidades_por_pacote": 10,
       "ativo": true
     },
     "100-6furos-225mm-ACOMBINAR": {
-      "descricao": "9 polegadas - 6 FUROS",
+      "descricao": "9 polegadas 6 Furos",
       "pai_10_lixas_codigo": "10-6furo-225mm-PAI",
       "lixas_por_kit": 100,
       "unidades_por_pacote": 10,
       "ativo": true
     },
     "100-folhas-ACOMBINAR-225x275mm": {
-      "descricao": "FOLHAS d'Água 225x275mm",
+      "descricao": "Folhas d'Água 225x275mm",
       "pai_10_lixas_codigo": "1-folha-225x275mm-PAI",
       "lixas_por_kit": 100,
       "unidades_por_pacote": 1,
       "ativo": true
     },
     "100-AE-8F-180mm-KIT97": {
-      "descricao": "7 polegadas - ANTI-EMPASTAMENTO 8 FUROS",
+      "descricao": "7 polegadas Anti-Empastamento 8 Furos",
       "pai_10_lixas_codigo": "10-AE-8F-180mm-PAI",
       "lixas_por_kit": 100,
       "unidades_por_pacote": 10,
