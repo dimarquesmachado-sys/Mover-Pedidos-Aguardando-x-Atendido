@@ -53,8 +53,8 @@ CLASSIFIQUE em UMA destas 4 categorias:
    AÇÃO: Confirme de forma DECLARATIVA que o pedido foi registrado e JA VAI SEGUIR,
    listando EXATAMENTE os itens entendidos, e ENCERRE a conversa avisando da postagem.
    NAO pergunte se esta correto, NAO convide o cliente a mudar/ajustar nada, NAO
-   termine com pergunta.
-   Ex de tom: "Olá! Pedido confirmado: [itens] — total ${totalLixas} lixas. Será postado em breve, dentro do prazo de entrega do seu CEP no anúncio. Obrigado!"
+   termine com pergunta. Se houver muitos itens, abrevie (ex: "10x grão 40") pra caber nos 350 chars.
+   Ex de tom: "Olá! Pedido confirmado: [itens] — total ${totalLixas} lixas. Será postado em breve e todo acompanhamento e rastreamento da entrega você acompanha dentro da sua compra no MercadoLivre. Obrigado! 😊"
 
 2. "ambiguo" - Cliente listou graos mas SEM quantidades, ou quantidades nao fecham
    Ex: "40 60 80 100 150" SEM contexto previo de loja sugerindo qtds
