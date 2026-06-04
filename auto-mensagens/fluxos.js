@@ -61,7 +61,7 @@ const REENVIO_TEXTO = process.env.LIXAS_REENVIO_TEXTO ||              // fallbac
 // pro painel (humano), pois com NF emitida qualquer mudanca precisa de gente.
 const FECHAMENTO_HABILITADO = (process.env.LIXAS_FECHAMENTO_HABILITADO || 'true').toLowerCase() === 'true';
 const FECHAMENTO_TEXTO = process.env.LIXAS_FECHAMENTO_TEXTO ||
-  'Obrigado! Seu pedido está confirmado e será postado em breve, dentro do prazo de entrega para o seu CEP informado no anúncio.';
+  'Obrigado! Seu pedido está confirmado e será postado em breve — todo acompanhamento e rastreamento da entrega você acompanha dentro da sua compra no MercadoLivre. 😊';
 const FECHAMENTO_DIAS = Number(process.env.LIXAS_FECHAMENTO_DIAS || 3); // janela de vendas processadas a vigiar
 
 const AFIRMACOES_SIMPLES = ['sim', 'ok', 'okay', 'blz', 'beleza', 'obrigado', 'obrigada', 'obg', 'valeu', 'vlw',
