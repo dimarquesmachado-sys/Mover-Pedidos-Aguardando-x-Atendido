@@ -54,6 +54,25 @@ const REENVIO_MAX = Number(process.env.LIXAS_REENVIO_MAX || 1);       // quantos
 const REENVIO_TEXTO = process.env.LIXAS_REENVIO_TEXTO ||              // fallback se nao der pra reenviar a pergunta original
   'Olá! Ainda precisamos da sua resposta (quantidades e grãos) para fechar e enviar seu pedido. Pode nos responder por aqui? Obrigado!';
 
+// ── FECHAMENTO pos-processado ────────────────────────────────────────
+// Quando o cliente manda msg DEPOIS do pedido ja processado (ex: "Sim", "ok"),
+// responde UMA unica vez com o texto de fechamento e encerra — sem convidar
+// mais conversa. Mensagem que NAO for simples confirmacao/agradecimento vai
+// pro painel (humano), pois com NF emitida qualquer mudanca precisa de gente.
+const FECHAMENTO_HABILITADO = (process.env.LIXAS_FECHAMENTO_HABILITADO || 'true').toLowerCase() === 'true';
+const FECHAMENTO_TEXTO = process.env.LIXAS_FECHAMENTO_TEXTO ||
+  'Obrigado! Seu pedido está confirmado e será postado em breve, dentro do prazo de entrega para o seu CEP informado no anúncio.';
+const FECHAMENTO_DIAS = Number(process.env.LIXAS_FECHAMENTO_DIAS || 3); // janela de vendas processadas a vigiar
+
+const AFIRMACOES_SIMPLES = ['sim', 'ok', 'okay', 'blz', 'beleza', 'obrigado', 'obrigada', 'obg', 'valeu', 'vlw',
+  'perfeito', 'isso', 'isso mesmo', 'certo', 'correto', 'pode ser', 'show', 'top', 'joia', 'jóia',
+  '👍', '👍🏻', 'ta bom', 'tá bom', 'tudo certo', 'confirmado', 'fechado', 'fechou', 'sim!', 'ok!'];
+function ehAfirmacaoSimples(texto) {
+  const t = String(texto || '').trim().toLowerCase().replace(/[!.…\s]+$/g, '').trim();
+  if (!t) return false;
+  return AFIRMACOES_SIMPLES.includes(t);
+}
+
 // Contador in-memory (zera a cada dia / a cada restart do Render — proposital,
 // eh so um freio leve, nao precisa de persistencia).
 let _autoEmitidasHoje = { data: '', count: 0 };
@@ -127,12 +146,14 @@ async function montarMensagemInteligente(detalhe) {
     function montar(graosArr) {
       const graosStr = graosArr.join(', ');
       const exemplo = gerarExemplo(totalLixas, unidades, graosArr);
-      return `Olá! Sua compra de ${totalLixas} lixas ${r.descricao}.
+      return `Olá! INFORME a combinação de lixas e grãos do seu pedido.
 
-GRÃOS DISPONÍVEIS: ${graosStr}
+GRÃOS DISPONÍVEIS: ${graosStr}.
 
-Responda com QUANTIDADE + GRÃO. MÚLTIPLOS de ${unidades}. Total ${totalLixas} lixas.
-${exemplo}`;
+⚠️ ATENÇÃO: responda QUANTIDADE + GRÃO (múltiplos de ${unidades}, total ${totalLixas}).
+${exemplo}
+
+Quanto antes responder, mais rápido postaremos!`;
     }
 
     let graosArr = r.graos.map(g => g.grao);
@@ -336,7 +357,7 @@ async function rotinaLerRespostas() {
   _lendoRespostas = true;
 
   const inicio = Date.now();
-  const stats = { lidas: 0, novasRespostas: 0, semNovidade: 0, erros: 0, iaProcessadas: 0, iaEscalonadas: 0, iaErros: 0, lembretesEnviados: 0, autoEmitidas: 0, autoPuladasConfianca: 0, autoFalhas: 0 };
+  const stats = { lidas: 0, novasRespostas: 0, semNovidade: 0, erros: 0, iaProcessadas: 0, iaEscalonadas: 0, iaErros: 0, lembretesEnviados: 0, fechamentosEnviados: 0, posProcessadoEscalados: 0, autoEmitidas: 0, autoPuladasConfianca: 0, autoFalhas: 0 };
 
   // IA opcional
   let ia = null;
@@ -612,6 +633,72 @@ async function rotinaLerRespostas() {
       } catch (e) {
         stats.erros++;
         console.error(`[lixas-combinar lerRespostas] erro order ${venda.order_id}: ${e.message}`);
+      }
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    // FASE 2 — FECHAMENTO POS-PROCESSADO
+    // Vendas ja 'processado' (NF emitida) onde o cliente mandou msg DEPOIS
+    // da nossa ultima (ex: respondeu "Sim" a uma confirmacao antiga):
+    //   - afirmacao simples ("sim","ok","obrigado"...) -> responde UMA vez
+    //     com FECHAMENTO_TEXTO e encerra (nunca repete o fechamento)
+    //   - qualquer outra coisa -> painel (humano), pois com NF emitida
+    //     mudanca de pedido precisa de gente
+    // ════════════════════════════════════════════════════════════════
+    if (FECHAMENTO_HABILITADO) {
+      try {
+        const lcp = require('./lixasCombinarPendentes');
+        const listaP = await lcp.listarPendentes({ dias: FECHAMENTO_DIAS, status: 'processado', limit: 50 });
+        const processadas = (listaP.ok && Array.isArray(listaP.data)) ? listaP.data : [];
+        if (processadas.length > 0) {
+          const sellerIdF = String(require('./mlTokenManager').getUserId() || '');
+          for (const venda of processadas) {
+            try {
+              const conv = await ml.consultarConversa({ packId: venda.pack_id, orderId: venda.order_id, markAsRead: true });
+              if (!conv.ok) continue;
+              const msgs = Array.isArray(conv.messages) ? conv.messages : [];
+              const ehLoja = (m) => String(m.from_user_id || m.from?.user_id || '') === sellerIdF;
+              const tsF = (m) => new Date(m.date_created || m.date || 0).getTime();
+              const cliMsgs = msgs.filter(m => !ehLoja(m)).sort((a, b) => tsF(b) - tsF(a));
+              const ultCli = cliMsgs[0];
+              const ultLojaTs = msgs.filter(ehLoja).reduce((mx, m) => Math.max(mx, tsF(m)), 0);
+              // So age se a ULTIMA palavra eh do cliente (mandou depois da loja)
+              if (!ultCli || tsF(ultCli) <= ultLojaTs) continue;
+
+              const textoCli = ultCli.text || ultCli.message || '';
+              const jaFechou = msgs.some(m => ehLoja(m) && String(m.text || '').startsWith(FECHAMENTO_TEXTO.slice(0, 40)));
+
+              if (ehAfirmacaoSimples(textoCli)) {
+                if (jaFechou) continue; // fechamento ja foi enviado uma vez — silencio
+                const r = await ml.enviarMensagemDireta({
+                  packId: venda.pack_id, orderId: venda.order_id, buyerId: venda.buyer_id, texto: FECHAMENTO_TEXTO
+                });
+                if (r.ok) {
+                  stats.fechamentosEnviados++;
+                  console.log(`[lixas-combinar fechamento] ✅ Order ${venda.order_id} cliente confirmou ("${textoCli.slice(0, 30)}") — fechamento enviado`);
+                } else {
+                  console.error(`[lixas-combinar fechamento] order ${venda.order_id} falhou envio: ${r.status} ${r.erro?.slice(0, 150)}`);
+                }
+              } else {
+                // Msg real pos-NF -> humano (com a msg gravada pro painel)
+                stats.posProcessadoEscalados++;
+                try {
+                  await lcp.marcarRespostaCliente(venda.order_id, {
+                    texto: textoCli,
+                    dataResposta: ultCli.date_created || ultCli.date || new Date().toISOString(),
+                    totalMsgsCliente: conv.totalCliente || 0
+                  });
+                } catch (e2) { /* nao bloqueia a escalada */ }
+                await lcp.atualizarVenda(venda.order_id, { status: 'precisa_atencao_humano' });
+                console.log(`[lixas-combinar fechamento] 🚨 Order ${venda.order_id} msg POS-NF escalada pro painel: "${textoCli.slice(0, 60)}"`);
+              }
+            } catch (e) {
+              console.error(`[lixas-combinar fechamento] erro order ${venda.order_id}: ${e.message}`);
+            }
+          }
+        }
+      } catch (e) {
+        console.error('[lixas-combinar fechamento] erro fase 2:', e.message);
       }
     }
 
