@@ -249,12 +249,12 @@ function routes(readBody){
         const b=await readBody(req); const f=await funcionarioDoToken(b.token);
         if(!f){ json(res,401,{erro:'Sessão expirada. Faça login de novo.'}); return true; }
         const data=b.data||dataSP();
-        const bs=await sbGet(`batidas?funcionario_id=eq.${f.id}&data=eq.${data}&select=*&order=momento.asc`);
+        const bs=await sbGet(`batidas?funcionario_id=eq.${f.id}&data=eq.${data}&correcao_pendente=is.false&select=*&order=momento.asc`);
         const cfg=await getConfig();
         const ap=await sbGet(`aprovacoes?funcionario_id=eq.${f.id}&data=eq.${data}&select=status&order=criado_em.desc&limit=1`);
-        const sols=await sbGet(`solicitacoes_batida?funcionario_id=eq.${f.id}&data=eq.${data}&status=eq.pendente&select=tipo,momento`);
-        const proximo=ORDEM[bs.length]||null;
-        json(res,200,{batidas:bs,proximo,rotulo:proximo?ROTULO[proximo]:null,almoco_minimo:cfg?cfg.almoco_minimo:60,aprovacao_status:ap[0]?ap[0].status:null,solicitacoes:sols,foto_requerida:proximo?precisaFoto(f.id,data,proximo):false}); return true;
+        const sols=await sbGet(`solicitacoes_batida?funcionario_id=eq.${f.id}&data=eq.${data}&status=eq.pendente&select=tipo,momento,acao`);
+        const proximo=ORDEM.find(t=>!bs.some(x=>x.tipo===t))||null;
+        json(res,200,{batidas:bs,proximo,rotulo:proximo?ROTULO[proximo]:null,almoco_minimo:cfg?cfg.almoco_minimo:60,aprovacao_status:ap[0]?ap[0].status:null,solicitacoes:sols,foto_requerida:proximo?precisaFoto(f.id,data,proximo):false,hoje:data}); return true;
       }
 
       // Funcionário lança uma batida que esqueceu (sujeita a aprovação; ignora GPS/raio)
@@ -264,7 +264,21 @@ function routes(readBody){
         const { data, tipo, hora, justificativa } = b;
         if(!data || !ORDEM.includes(tipo) || !/^\d{1,2}:\d{2}$/.test(hora||'')){ json(res,400,{erro:'Preencha data, tipo e hora corretamente.'}); return true; }
         if(!justificativa || String(justificativa).trim().length<10){ json(res,400,{erro:'Explique o motivo (mínimo 10 caracteres).'}); return true; }
-        await sbInsert('solicitacoes_batida',{funcionario_id:f.id,data,tipo,momento:montarMomento(data,hora),justificativa:String(justificativa).trim(),status:'pendente'},'return=minimal');
+        await sbInsert('solicitacoes_batida',{funcionario_id:f.id,data,tipo,momento:montarMomento(data,hora),justificativa:String(justificativa).trim(),status:'pendente',acao:'adicionar'},'return=minimal');
+        json(res,200,{ok:true}); return true;
+      }
+
+      if (method==='POST' && p==='/ponto/sinalizar-batida') {
+        const b=await readBody(req); const f=await funcionarioDoToken(b.token);
+        if(!f){ json(res,401,{erro:'Sessão expirada. Faça login de novo.'}); return true; }
+        const { data, tipo, justificativa } = b;
+        if(!data || !ORDEM.includes(tipo)){ json(res,400,{erro:'Dados incompletos.'}); return true; }
+        if(!justificativa || String(justificativa).trim().length<5){ json(res,400,{erro:'Diga rapidinho o que houve (mínimo 5 caracteres).'}); return true; }
+        const ex=await sbGet(`batidas?funcionario_id=eq.${f.id}&data=eq.${data}&tipo=eq.${tipo}&correcao_pendente=is.false&select=id,momento&order=momento.desc&limit=1`);
+        if(!ex[0]){ json(res,400,{erro:'Não encontrei essa batida pra corrigir.'}); return true; }
+        const bid=ex[0].id, momento=ex[0].momento;
+        await sbPatch('batidas',`id=eq.${bid}`,{correcao_pendente:true});
+        await sbInsert('solicitacoes_batida',{funcionario_id:f.id,data,tipo,momento,justificativa:String(justificativa).trim(),status:'pendente',acao:'remover',batida_id:bid},'return=minimal');
         json(res,200,{ok:true}); return true;
       }
 
@@ -278,8 +292,9 @@ function routes(readBody){
         const dist=haversine(latitude,longitude,cfg.latitude,cfg.longitude);
         if(dist>cfg.raio_metros){ json(res,403,{erro:`Você está a ${dist} m do trabalho. É preciso estar a no máximo ${cfg.raio_metros} m para bater o ponto.`,distancia:dist}); return true; }
         const data=dataSP();
-        const bs=await sbGet(`batidas?funcionario_id=eq.${f.id}&data=eq.${data}&select=*&order=momento.asc`);
-        const idx=bs.length, tipo=ORDEM[idx];
+        const bs=await sbGet(`batidas?funcionario_id=eq.${f.id}&data=eq.${data}&correcao_pendente=is.false&select=*&order=momento.asc`);
+        const temT = t => bs.some(x=>x.tipo===t);
+        const tipo = ORDEM.find(t=>!temT(t));
         if(!tipo){ json(res,409,{erro:'Os 4 pontos de hoje já foram registrados.'}); return true; }
         const agora=new Date().toISOString();
         let justUsada=null;
@@ -302,7 +317,7 @@ function routes(readBody){
           ip, na_rede:naRede(ip,cfg), tem_foto:temFoto, foto_pulada: fotoReq && !temFoto},'return=representation');
         const novaId = Array.isArray(ins) && ins[0] ? ins[0].id : (ins && ins.id);
         if(temFoto && novaId){ try{ await sbInsert('fotos_batida',{batida_id:novaId,imagem:b.foto},'return=minimal'); }catch(e){ /* foto é best-effort, não trava o ponto */ } }
-        const prox=ORDEM[idx+1]||null;
+        const prox=ORDEM.find(t=>t!==tipo && !temT(t))||null;
         json(res,200,{ok:true,tipo,rotulo:ROTULO[tipo],distancia:dist,pendente_aprovacao:!!justUsada,proximo:prox,proximo_rotulo:prox?ROTULO[prox]:null}); return true;
       }
 
@@ -312,7 +327,7 @@ function routes(readBody){
         const { inicio, fim }=limitesMes(+b.ano,+b.mes);
         const cfg=await getConfig();
         const fb={jornada_min:cfg.jornada_min, tolerancia_min:cfg.tolerancia_min||0};
-        const bs=await sbGet(`batidas?funcionario_id=eq.${f.id}&data=gte.${inicio}&data=lte.${fim}&select=*&order=momento.asc`);
+        const bs=await sbGet(`batidas?funcionario_id=eq.${f.id}&data=gte.${inicio}&data=lte.${fim}&correcao_pendente=is.false&select=*&order=momento.asc`);
         const lancs=await sbGet(`lancamentos?funcionario_id=eq.${f.id}&data=gte.${inicio}&data=lte.${fim}&select=data,tipo`);
         const porDia={}; for(const x of bs)(porDia[x.data]=porDia[x.data]||[]).push(x);
         const lmap={}; for(const l of lancs) lmap[l.data]=l.tipo;
@@ -392,12 +407,14 @@ function routes(readBody){
         const escDe=await montarEscalas([fid]);
         const bs=await sbGet(`batidas?funcionario_id=eq.${fid}&data=gte.${ini}&data=lte.${fim}&select=*&order=momento.asc`);
         const lancs=await sbGet(`lancamentos?funcionario_id=eq.${fid}&data=gte.${ini}&data=lte.${fim}&select=data,tipo`);
-        const porDia={}; for(const x of bs)(porDia[x.data]=porDia[x.data]||[]).push(x);
+        const porDia={}; for(const x of bs){ if(x.correcao_pendente) continue; (porDia[x.data]=porDia[x.data]||[]).push(x); }
         const lmap={}; for(const l of lancs) lmap[l.data]=l.tipo;
         const aprovs=await sbGet(`aprovacoes?funcionario_id=eq.${fid}&data=gte.${ini}&data=lte.${fim}&select=data,status`);
         const apMap={}; for(const a of aprovs) apMap[a.data]=a.status;
         const sols=await sbGet(`solicitacoes_batida?funcionario_id=eq.${fid}&data=gte.${ini}&data=lte.${fim}&status=eq.pendente&select=data`);
         const solSet=new Set(sols.map(x=>x.data));
+        const solRem=await sbGet(`solicitacoes_batida?funcionario_id=eq.${fid}&data=gte.${ini}&data=lte.${fim}&status=eq.pendente&acao=eq.remover&select=id,data,tipo,momento,justificativa`);
+        const remPorDia={}; for(const s of solRem){ (remPorDia[s.data]=remPorDia[s.data]||[]).push({id:s.id,tipo:s.tipo,hora:horaSP(s.momento),justificativa:s.justificativa}); }
         const corrs=await sbGet(`correcoes_ponto?funcionario_id=eq.${fid}&data=gte.${ini}&data=lte.${fim}&select=data,tipo,hora_original`);
         const corrPorDia={}; for(const c of corrs){ (corrPorDia[c.data]=corrPorDia[c.data]||{})[c.tipo]=c.hora_original; }
         // todos os dias do intervalo
@@ -416,7 +433,7 @@ function routes(readBody){
           return { data, dow, escala:esc.nome, turnos:(esc.turnos&&esc.turnos[String(dow)])||null,
                    vazio, abono_tipo:abono||null, abono: abono?TIPO_LABEL[abono]:null,
                    aprovacao: apMap[data]||null, solicitacao: solSet.has(data),
-                   horarios, trabalhado:trab, esperado:esp, saldo, saldo_efetivo:saldoEf, tol, fotos, correcoes: corrPorDia[data]||{} };
+                   horarios, trabalhado:trab, esperado:esp, saldo, saldo_efetivo:saldoEf, tol, fotos, correcoes: corrPorDia[data]||{}, correcoes_pendentes: remPorDia[data]||[] };
         });
         json(res,200,{dias}); return true;
       }
@@ -426,7 +443,7 @@ function routes(readBody){
         if(!adminOk(req)) return naoAutorizado(res);
         const b=await readBody(req); const { funcionario_id, data, horarios }=b;
         if(!funcionario_id || !data || !horarios){ json(res,400,{erro:'Dados incompletos.'}); return true; }
-        const atuais=await sbGet(`batidas?funcionario_id=eq.${funcionario_id}&data=eq.${data}&select=id,tipo,momento`);
+        const atuais=await sbGet(`batidas?funcionario_id=eq.${funcionario_id}&data=eq.${data}&correcao_pendente=is.false&select=id,tipo,momento`);
         const mapAtual={}; atuais.forEach(x=>mapAtual[x.tipo]=x);
         const corrs=await sbGet(`correcoes_ponto?funcionario_id=eq.${funcionario_id}&data=eq.${data}&select=tipo,hora_original`);
         const corrMap={}; corrs.forEach(c=>corrMap[c.tipo]=c.hora_original);
@@ -472,10 +489,20 @@ function routes(readBody){
         if(!['aprovado','rejeitado'].includes(b.status)){ json(res,400,{erro:'Status inválido.'}); return true; }
         const upd=await sbPatch('solicitacoes_batida',`id=eq.${enc(id)}`,{status:b.status,decidido_em:new Date().toISOString()});
         const s=Array.isArray(upd)?upd[0]:upd;
-        if(b.status==='aprovado' && s){
-          const ex=await sbGet(`batidas?funcionario_id=eq.${s.funcionario_id}&data=eq.${s.data}&tipo=eq.${s.tipo}&select=id`);
-          if(ex[0]) await sbPatch('batidas',`id=eq.${ex[0].id}`,{momento:s.momento});
-          else await sbInsert('batidas',{funcionario_id:s.funcionario_id,tipo:s.tipo,momento:s.momento,data:s.data,justificativa:'lançado pelo funcionário (aprovado)'},'return=minimal');
+        if(s){
+          if(s.acao==='remover'){
+            if(b.status==='aprovado' && s.batida_id){
+              await sbDelete('batidas',`id=eq.${s.batida_id}`);                       // confirma a remoção
+            } else if(b.status==='rejeitado' && s.batida_id){
+              const ativos=await sbGet(`batidas?funcionario_id=eq.${s.funcionario_id}&data=eq.${s.data}&tipo=eq.${s.tipo}&correcao_pendente=is.false&select=id`);
+              if(ativos[0]) await sbDelete('batidas',`id=eq.${s.batida_id}`);          // já bateu de novo → descarta a antiga
+              else await sbPatch('batidas',`id=eq.${s.batida_id}`,{correcao_pendente:false}); // não bateu → restaura a antiga
+            }
+          } else if(b.status==='aprovado'){
+            const ex=await sbGet(`batidas?funcionario_id=eq.${s.funcionario_id}&data=eq.${s.data}&tipo=eq.${s.tipo}&correcao_pendente=is.false&select=id`);
+            if(ex[0]) await sbPatch('batidas',`id=eq.${ex[0].id}`,{momento:s.momento});
+            else await sbInsert('batidas',{funcionario_id:s.funcionario_id,tipo:s.tipo,momento:s.momento,data:s.data,justificativa:'lançado pelo funcionário (aprovado)'},'return=minimal');
+          }
         }
         json(res,200,s); return true;
       }
@@ -489,7 +516,7 @@ function routes(readBody){
         // Rejeitado: o almoço passa a contar como o mínimo (1h) — empurra o retorno
         if(b.status==='rejeitado' && ap){
           const cfg=await getConfig(); const min=cfg.almoco_minimo||60;
-          const arr=await sbGet(`batidas?funcionario_id=eq.${ap.funcionario_id}&data=eq.${ap.data}&select=id,tipo,momento`);
+          const arr=await sbGet(`batidas?funcionario_id=eq.${ap.funcionario_id}&data=eq.${ap.data}&correcao_pendente=is.false&select=id,tipo,momento`);
           const sa=arr.find(x=>x.tipo==='saida_almoco'), ra=arr.find(x=>x.tipo==='retorno_almoco');
           if(sa && ra){
             const novo=new Date(new Date(sa.momento).getTime()+min*60000).toISOString();
@@ -632,7 +659,7 @@ function routes(readBody){
         const fb={jornada_min:cfg.jornada_min, tolerancia_min:tol};
         const funcs=await sbGet('funcionarios?select=id,nome,matricula');
         const fmap={}; funcs.forEach(f=>fmap[f.id]=f);
-        const bs=await sbGet(`batidas?select=*&data=gte.${inicio}&data=lte.${fim}&order=momento.asc`);
+        const bs=await sbGet(`batidas?select=*&correcao_pendente=is.false&data=gte.${inicio}&data=lte.${fim}&order=momento.asc`);
         const lancs=await sbGet(`lancamentos?select=funcionario_id,data,tipo&data=gte.${inicio}&data=lte.${fim}`);
         const bat={}; for(const x of bs){ (bat[x.funcionario_id]=bat[x.funcionario_id]||{}); (bat[x.funcionario_id][x.data]=bat[x.funcionario_id][x.data]||[]).push(x); }
         const lmap={}; for(const l of lancs)(lmap[l.funcionario_id]=lmap[l.funcionario_id]||{})[l.data]=l.tipo;
