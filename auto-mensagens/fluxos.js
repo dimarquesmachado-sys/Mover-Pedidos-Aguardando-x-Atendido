@@ -73,6 +73,30 @@ function ehAfirmacaoSimples(texto) {
   return AFIRMACOES_SIMPLES.includes(t);
 }
 
+// ── COOLDOWN de envio (anti-duplicata por atraso do ML) ──────────────
+// O ML demora alguns minutos pra "mostrar" na conversa uma msg recem-enviada
+// (moderacao/indexacao). Nesse vao a trava por conversa fica cega e pode
+// duplicar (caso 05/06 15:30->15:32). Solucao: memoria local do ultimo envio
+// por order — bloqueia reavaliacao/envio pro mesmo order dentro da janela.
+const ENVIO_COOLDOWN_MIN = Number(process.env.LIXAS_ENVIO_COOLDOWN_MIN || 5);
+const _ultimoEnvioPorOrder = new Map();
+function registrarEnvio(orderId) { _ultimoEnvioPorOrder.set(String(orderId), Date.now()); }
+function emCooldownEnvio(orderId) {
+  const t = _ultimoEnvioPorOrder.get(String(orderId));
+  return !!t && (Date.now() - t) < ENVIO_COOLDOWN_MIN * 60 * 1000;
+}
+
+// ── TRAVA POR MENSAGEM (memoria local) ───────────────────────────────
+// Versao em memoria da trava do banco (ia_processado_em): guarda o timestamp
+// da ULTIMA msg do cliente que JA respondemos. Msg nova passa NA HORA (zero
+// atraso); a mesma msg nunca eh respondida duas vezes.
+const _ultimaMsgProcessadaPorOrder = new Map();
+function registrarMsgProcessada(orderId, tsMsgCliente) { _ultimaMsgProcessadaPorOrder.set(String(orderId), tsMsgCliente); }
+function msgJaProcessada(orderId, tsMsgCliente) {
+  const t = _ultimaMsgProcessadaPorOrder.get(String(orderId));
+  return !!t && tsMsgCliente <= t;
+}
+
 // Contador in-memory (zera a cada dia / a cada restart do Render — proposital,
 // eh so um freio leve, nao precisa de persistencia).
 let _autoEmitidasHoje = { data: '', count: 0 };
@@ -411,6 +435,14 @@ async function rotinaLerRespostas() {
         if (conv.totalCliente > 0 && conv.ultimaCliente) {
           const textoCliente = conv.ultimaCliente.text || conv.ultimaCliente.message || '';
           const dataResposta = conv.ultimaCliente.date_created || conv.ultimaCliente.date || new Date().toISOString();
+          const _tsRespAtual = new Date(dataResposta).getTime();
+
+          // TRAVA POR MENSAGEM: se ESTA msg do cliente ja foi respondida por
+          // este processo, pula. Msg nova do cliente passa direto, sem atraso.
+          if (msgJaProcessada(venda.order_id, _tsRespAtual)) {
+            stats.semNovidade++;
+            continue;
+          }
 
           // ════════════════════════════════════════════════════════
           // ANTI-SPAM ROBUSTO (fix urgente 31/05) — NAO depende do banco.
@@ -435,13 +467,14 @@ async function rotinaLerRespostas() {
               const horasDesdeLoja = (Date.now() - _ultLoja) / 3600000;
               const lojaAposCliente = _msgs.filter(m => _ehLoja(m) && _ts(m) > _ultCliente).sort((a, b) => _ts(a) - _ts(b));
               const lembretesFeitos = Math.max(0, lojaAposCliente.length - 1); // -1 = a pergunta original
-              if (REENVIO_HABILITADO && _ultCliente > 0 && horasDesdeLoja >= REENVIO_HORAS && lembretesFeitos < REENVIO_MAX) {
+              if (REENVIO_HABILITADO && _ultCliente > 0 && horasDesdeLoja >= REENVIO_HORAS && lembretesFeitos < REENVIO_MAX && !emCooldownEnvio(venda.order_id)) {
                 const textoLembrete = (lojaAposCliente[0]?.text || '').slice(0, 350) || REENVIO_TEXTO;
                 const lemb = await ml.enviarMensagemDireta({
                   packId: venda.pack_id, orderId: venda.order_id, buyerId: venda.buyer_id, texto: textoLembrete
                 });
                 if (lemb.ok) {
                   stats.lembretesEnviados++;
+                  registrarEnvio(venda.order_id);
                   console.log(`[lixas-combinar lerRespostas] 🔔 Order ${venda.order_id} LEMBRETE #${lembretesFeitos + 1}/${REENVIO_MAX} enviado (silencio ${horasDesdeLoja.toFixed(1)}h)`);
                 } else {
                   console.error(`[lixas-combinar lerRespostas] order ${venda.order_id} falhou lembrete: ${lemb.status} ${lemb.erro?.slice(0, 150)}`);
@@ -562,6 +595,8 @@ async function rotinaLerRespostas() {
 
                 if (envR.ok) {
                   stats.iaProcessadas++;
+                  registrarMsgProcessada(venda.order_id, _tsRespAtual);
+                  registrarEnvio(venda.order_id);
 
                   // SESSAO 7: define status conforme categoria + confianca.
                   // IMPORTANTE: com a auto-emissao DESLIGADA, o comportamento eh
@@ -654,6 +689,7 @@ async function rotinaLerRespostas() {
           const sellerIdF = String(require('./mlTokenManager').getUserId() || '');
           for (const venda of processadas) {
             try {
+              if (emCooldownEnvio(venda.order_id)) continue; // espera ML refletir envio recente
               const conv = await ml.consultarConversa({ packId: venda.pack_id, orderId: venda.order_id, markAsRead: true });
               if (!conv.ok) continue;
               const msgs = Array.isArray(conv.messages) ? conv.messages : [];
@@ -675,6 +711,7 @@ async function rotinaLerRespostas() {
                 });
                 if (r.ok) {
                   stats.fechamentosEnviados++;
+                  registrarEnvio(venda.order_id);
                   console.log(`[lixas-combinar fechamento] ✅ Order ${venda.order_id} cliente confirmou ("${textoCli.slice(0, 30)}") — fechamento enviado`);
                 } else {
                   console.error(`[lixas-combinar fechamento] order ${venda.order_id} falhou envio: ${r.status} ${r.erro?.slice(0, 150)}`);
