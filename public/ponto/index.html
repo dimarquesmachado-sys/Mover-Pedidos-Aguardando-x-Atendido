@@ -63,6 +63,8 @@
   .msg.ok{background:rgba(34,211,166,.12);color:var(--accent);border:1px solid rgba(34,211,166,.3)}
   .msg.err{background:rgba(255,90,95,.1);color:var(--danger);border:1px solid rgba(255,90,95,.3)}
   .msg.warn{background:rgba(246,183,60,.1);color:var(--warn);border:1px solid rgba(246,183,60,.3)}
+  .flagBtn{background:transparent;border:1px solid rgba(255,90,95,.4);color:var(--danger);font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:7px;margin-left:8px;cursor:pointer;vertical-align:middle}
+  .flagBtn:hover{background:rgba(255,90,95,.12)}
   textarea{width:100%;background:#10131a;border:1px solid var(--line);border-radius:12px;color:var(--txt);
            font:600 15px 'Archivo';padding:14px;min-height:110px;resize:vertical;outline:none;margin-bottom:8px}
   textarea:focus{border-color:var(--warn)}
@@ -171,9 +173,20 @@
 
 </div>
 
-<div class="versao">Ponto v1.1 · 03/06/2026</div>
+<div class="versao">Ponto v1.4 · 04/06/2026</div>
 
 <!-- MODAL JUSTIFICATIVA -->
+<div id="modalErro" class="overlay hide">
+  <div class="modal">
+    <h3>Pedir correção dessa batida</h3>
+    <p style="color:var(--mut);font-size:13.5px;line-height:1.5;margin-bottom:16px">Tem certeza que quer pedir correção do ponto <b id="erroAlvo"></b>? Ele <b>sai da conta na hora</b> e libera você pra bater de novo. A batida vai pro gestor — ele confere e confirma a remoção.</p>
+    <label style="display:block;font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.6px;margin:0 0 6px 2px">O que houve? (mínimo 5 caracteres)</label>
+    <textarea id="erroMotivo" placeholder="Ex.: bati a saída sem querer / dupliquei o ponto..."></textarea>
+    <button class="btn" onclick="enviarErro()">Enviar pro gestor</button>
+    <button class="btn ghost" style="margin-top:10px" onclick="fecharErro()">Cancelar</button>
+  </div>
+</div>
+
 <div id="modalEsq" class="overlay hide">
   <div class="modal">
     <h3>Lançar ponto esquecido</h3>
@@ -232,6 +245,7 @@ const API = '/ponto';
 let sess = JSON.parse(localStorage.getItem('ponto_sess') || 'null');  // {token, nome, cargo, setor}
 let emailDigitado = '';
 let pendente = null;
+let hojeData = '';
 let fotoRequerida = false;
 let fotoPendente;   // undefined = não tentou · null = pulou/erro · string = dataURL
 function tirarSelfie(){
@@ -335,6 +349,7 @@ async function carregar(){
   const j = await r.json();
   if(!r.ok){ if(r.status===401){ sair(); } return; }
   if(j.almoco_minimo) almocoMin = j.almoco_minimo;
+  if(j.hoje) hojeData = j.hoje;
   fotoRequerida = !!j.foto_requerida; fotoPendente = undefined;
   renderSteps(j.batidas, j.proximo, j.aprovacao_status);
   renderSol(j.solicitacoes||[]);
@@ -345,8 +360,29 @@ function renderSol(sols){
   if(!sols.length){ el.innerHTML=''; return; }
   el.innerHTML = '<div style="margin:12px 0 6px;font-size:12px;color:var(--mut)">Solicitações enviadas (aguardando gestor):</div>' +
     sols.map(s=>{ const h=new Date(s.momento).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
-      return `<div class="step pend"><div class="dot">⏳</div><div class="nome">${LABELS[s.tipo]||s.tipo} · ${h}</div><div class="hora">em aprovação</div></div>`;
+      const acao = s.acao==='remover' ? 'remover' : 'lançar';
+      const txt = s.acao==='remover' ? `Remover ${LABELS[s.tipo]||s.tipo} · ${h}` : `${LABELS[s.tipo]||s.tipo} · ${h}`;
+      return `<div class="step pend"><div class="dot">⏳</div><div class="nome">${txt}</div><div class="hora">em aprovação</div></div>`;
     }).join('');
+}
+let erroTipo=null;
+function sinalizarErro(tipo){
+  erroTipo=tipo;
+  $('erroAlvo').textContent = LABELS[tipo]||tipo;
+  $('erroMotivo').value='';
+  $('modalErro').classList.remove('hide');
+}
+function fecharErro(){ $('modalErro').classList.add('hide'); }
+async function enviarErro(){
+  const justificativa=$('erroMotivo').value.trim();
+  if(justificativa.length<5){ alert('Diga rapidinho o que houve (mínimo 5 caracteres).'); return; }
+  const r=await fetch(API+'/sinalizar-batida',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({token:sess.token,data:hojeData,tipo:erroTipo,justificativa})});
+  const j=await r.json();
+  if(!r.ok){ alert(j.erro||'Erro ao enviar.'); return; }
+  fecharErro();
+  showResult('Aviso enviado ao gestor. A batida será revista por ele.','ok');
+  carregar();
 }
 
 function renderSteps(batidas, proximo, apStatus){
@@ -364,7 +400,7 @@ function renderSteps(batidas, proximo, apStatus){
     }
     div.innerHTML = `<div class="dot">${b?'✓':i+1}</div>
       <div class="nome">${LABELS[tipo]}${tag}</div>
-      <div class="hora">${hora}</div>`;
+      <div class="hora">${hora}${b?` <button class="flagBtn" title="Pedir correção dessa batida" onclick="sinalizarErro('${tipo}')">🚩 erro</button>`:''}</div>`;
     cont.appendChild(div);
   });
   const btn = $('btnBater');
