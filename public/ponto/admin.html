@@ -63,6 +63,8 @@
   .abonoBanner.ab-atestado{background:rgba(246,183,60,.12);border-color:rgba(246,183,60,.55);color:var(--warn)}
   .abonoBanner.ab-feriado{background:rgba(34,211,166,.12);border-color:rgba(34,211,166,.55);color:var(--accent)}
   .abonoBanner.ab-folga{background:rgba(255,255,255,.05);border-color:var(--line);color:var(--mut)}
+  .corrPend{margin-top:10px;padding:9px 12px;border-radius:10px;background:rgba(255,90,95,.1);border:1px solid rgba(255,90,95,.4);font-size:13px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .corrPend .corrBtns{margin-left:auto;display:flex;gap:8px;white-space:nowrap}
   .jornGrid{display:flex;flex-direction:column}
   .jrow{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:10px 0;border-bottom:1px solid var(--line)}
   .jday{width:42px;font-weight:700;color:var(--mut);text-transform:uppercase;font-size:12px;letter-spacing:.5px}
@@ -237,7 +239,7 @@
   </div>
 </div>
 
-<div class="versao">Painel de Ponto v1.2 · 03/06/2026</div>
+<div class="versao">Painel de Ponto v1.4 · 04/06/2026</div>
 
 <div id="fotoOvl" class="ovl hide" onclick="if(event.target===this)this.classList.add('hide')">
   <div class="ovlBox">
@@ -340,14 +342,16 @@ async function carregarAprovacoes(){
       <td style="white-space:nowrap">
         <button class="btn sm" onclick="decidir(${a.id},'aprovado')">Aprovar</button>
         <button class="btn sm danger" onclick="decidir(${a.id},'rejeitado')">Rejeitar</button></td></tr>`).join('')}</tbody></table>`;
-  html += `<h3 style="margin:22px 0 10px;font-size:15px">Pontos esquecidos (lançados pelo funcionário)</h3>`;
+  html += `<h3 style="margin:22px 0 10px;font-size:15px">Solicitações do funcionário (lançar / remover ponto)</h3>`;
   if(!sols.length){ html += '<p style="color:var(--mut)">Nenhuma pendente.</p>'; }
-  else html += `<table><thead><tr><th>Funcionário</th><th>Data</th><th>Ponto</th><th>Hora</th><th>Motivo</th><th></th></tr></thead><tbody>${
+  else html += `<table><thead><tr><th>Funcionário</th><th>Data</th><th>Ação</th><th>Ponto</th><th>Hora</th><th>Motivo</th><th></th></tr></thead><tbody>${
     sols.map(s=>{ const h=new Date(s.momento).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
-      return `<tr><td>${s.funcionarios?.nome||''}</td><td>${br(s.data)}</td><td class="tagb">${LBT[s.tipo]||s.tipo}</td><td>${h}</td>
+      const rem = s.acao==='remover';
+      const acaoTag = rem ? '<span class="tagw" style="color:var(--danger)">Remover</span>' : '<span class="tagb">Adicionar</span>';
+      return `<tr><td>${s.funcionarios?.nome||''}</td><td>${br(s.data)}</td><td>${acaoTag}</td><td class="tagb">${LBT[s.tipo]||s.tipo}</td><td>${h}</td>
       <td style="max-width:300px">${esc(s.justificativa)}</td>
       <td style="white-space:nowrap">
-        <button class="btn sm" onclick="decidirSol(${s.id},'aprovado')">Aprovar</button>
+        <button class="btn sm" onclick="decidirSol(${s.id},'aprovado')">${rem?'Aprovar (remove)':'Aprovar'}</button>
         <button class="btn sm danger" onclick="decidirSol(${s.id},'rejeitado')">Rejeitar</button></td></tr>`; }).join('')}</tbody></table>`;
   $('aprovBox').innerHTML = html;
 }
@@ -485,6 +489,10 @@ function renderDias(){
           <span class="abonoWrap">Abono: ${abonoSel}</span>
         </div>
       </div>
+      ${(d.correcoes_pendentes&&d.correcoes_pendentes.length)? d.correcoes_pendentes.map(c=>
+        `<div class="corrPend">🚩 <b>Correção pedida:</b> ${SLOT_LABEL[c.tipo]||c.tipo} · ${c.hora} — <span style="opacity:.85">${esc(c.justificativa)}</span>
+          <span class="corrBtns"><button class="btn sm" onclick="decidirSol(${c.id},'aprovado')">✓ remover</button><button class="btn sm danger" onclick="decidirSol(${c.id},'rejeitado')">✗ manter</button></span>
+        </div>`).join(''):''}
     </div>`;
   }).join('');
   $('batBox').innerHTML=`<div id="topoBox">${buildHeader()}</div>`+cards;
