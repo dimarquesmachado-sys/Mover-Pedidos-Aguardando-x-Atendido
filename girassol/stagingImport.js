@@ -3,11 +3,12 @@
 // Importador automático de pedidos parados no staging do Bling (MLIVRE).
 //
 // Dispara a importação NATIVA do Bling (importarPedidoSelecionado), via
-// cookie de sessão, a partir do Render. Roda em cron a cada 30min.
+// cookie de sessão, a partir do Render. Roda em cron (ver girassol/index.js).
 //
 // • Só importa pedidos que ficaram parados por >X min (dá tempo do Bling
 //   tentar sozinho primeiro). Default 20 min (IMPORT_MIN_IDADE_MIN).
-// • Detecta cookie vencido e alerta (Telegram, se configurado).
+// • Detecta cookie vencido e alerta — agora GUARDANDO a amostra da
+//   resposta do Bling pra diagnóstico (log + /debug/staging-list).
 // • Alerta se um pedido falhar 3x (provável produto sem vínculo).
 //
 // Cookie: colado pela página /cookie-setup. Fallback: env BLING_COOKIE.
@@ -64,7 +65,7 @@ function lerCookie() {
   return process.env.BLING_COOKIE || '';
 }
 
-// ── Alerta (Telegram opcional) ────────────────────────────────────────
+// ── Alerta (WhatsApp/Telegram, se configurados) ───────────────────────
 async function sendAlerta(msg) {
   console.log('[ALERTA]', msg);
   // WhatsApp via CallMeBot
@@ -152,9 +153,12 @@ async function obterPendentes() {
 
   const resp = await fetch(`${BASE}?f=obterListaDePedidos`, { method: 'POST', headers: headersBling(cookie), body: params.toString() });
   const texto = await resp.text();
-  if (ehLogin(texto)) return { ok: false, sessaoExpirada: true };
+  if (ehLogin(texto)) {
+    // guarda a PROVA do que o Bling devolveu (login? cloudflare? rate limit?)
+    return { ok: false, sessaoExpirada: true, httpStatus: resp.status, amostra: texto.slice(0, 300) };
+  }
   let json = null; try { json = JSON.parse(texto); } catch (e) {}
-  if (!json || !Array.isArray(json.data)) return { ok: false, respInesperada: texto.slice(0, 200) };
+  if (!json || !Array.isArray(json.data)) return { ok: false, httpStatus: resp.status, respInesperada: texto.slice(0, 300) };
   const pendentes = json.data.filter(d => String(d.idImportado) === '0').map(d => String(d.numero));
   return { ok: true, total: json.data.length, pendentes };
 }
@@ -176,7 +180,7 @@ async function importarUm(numero) {
 
   const resp = await fetch(`${BASE}?f=importarPedidoSelecionado`, { method: 'POST', headers: headersBling(cookie), body: params.toString() });
   const texto = await resp.text();
-  if (ehLogin(texto)) return { ok: false, motivo: 'SESSAO_EXPIRADA', amostra: texto.slice(0, 200) };
+  if (ehLogin(texto)) return { ok: false, motivo: 'SESSAO_EXPIRADA', httpStatus: resp.status, amostra: texto.slice(0, 300) };
   const m = texto.match(/vendas\.php#edit\/(\d+)/);
   const jaImportado = /j(á|a) importado/i.test(texto) || !!m;
   return {
@@ -194,10 +198,12 @@ async function rotinaImportStaging(opts = {}) {
     return { ok: false, motivo: 'sem cookie' };
   }
   if (r.sessaoExpirada) {
+    // loga a amostra: é a PROVA do que o Bling devolveu nesse momento
+    console.warn('[importStaging] sessão expirada? http=' + r.httpStatus + ' | amostra:', JSON.stringify(r.amostra));
     if (!_cookieAvisado) { await sendAlerta('🔴 Cookie do Bling (Girassol) venceu. Recole em /cookie-setup pra voltar a importar sozinho.'); _cookieAvisado = true; }
-    return { ok: false, motivo: 'sessão expirada' };
+    return { ok: false, motivo: 'sessão expirada', httpStatus: r.httpStatus, amostra: r.amostra };
   }
-  if (!r.ok) { console.warn('[importStaging] lista falhou:', r); return { ok: false, motivo: 'lista falhou' }; }
+  if (!r.ok) { console.warn('[importStaging] lista falhou:', JSON.stringify(r)); return { ok: false, motivo: 'lista falhou', detalhe: r }; }
   _cookieAvisado = false;
 
   const agora = Date.now();
@@ -213,6 +219,7 @@ async function rotinaImportStaging(opts = {}) {
 
     const res = await importarUm(numero);
     if (res.motivo === 'SESSAO_EXPIRADA') {
+      console.warn('[importStaging] sessão expirada no meio. http=' + res.httpStatus + ' | amostra:', JSON.stringify(res.amostra));
       await sendAlerta('🔴 Cookie venceu no meio da importação. Recole em /cookie-setup.');
       _cookieAvisado = true;
       break;
@@ -226,7 +233,7 @@ async function rotinaImportStaging(opts = {}) {
       const n = (_falhas.get(numero) || 0) + 1;
       _falhas.set(numero, n);
       falhados.push(numero);
-      console.warn(`[importStaging] ⚠️ ${numero} falhou (${n}x)`);
+      console.warn(`[importStaging] ⚠️ ${numero} falhou (${n}x) | http=${res.httpStatus} | amostra:`, JSON.stringify((res.amostra || '').slice(0, 200)));
       if (n === 3) await sendAlerta(`⚠️ Pedido ${numero} não importa há 3 tentativas (provável produto sem vínculo no Bling). Importa na mão.`);
     }
     await sleep(1500);
@@ -266,7 +273,7 @@ function paginaSetup(msg) {
 async function listarStaging() {
   const r = await obterPendentes();
   if (r.semCookie)      return { veredicto: '❌ sem cookie — abra /cookie-setup' };
-  if (r.sessaoExpirada) return { veredicto: '❌ sessão expirada — recole o cookie em /cookie-setup' };
+  if (r.sessaoExpirada) return { veredicto: '❌ sessão expirada — recole o cookie em /cookie-setup', httpStatus: r.httpStatus, amostraRespostaBling: r.amostra };
   if (!r.ok)            return { veredicto: '❌ resposta inesperada', detalhe: r };
   return { veredicto: '✅ PASSOU', totalNaLista: r.total, pedidosNaoImportados: r.pendentes.length, exemplos: r.pendentes.slice(0, 8) };
 }
