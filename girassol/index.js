@@ -20,7 +20,7 @@ const crons = {
                 '*/15 6-23 * * *'],                           // F2 a cada 15 min diurno
   corrigirNFs: '*/5 6-23 * * *',                              // Corrigir-NFs a cada 5 min
   nfeMl:       '0,10,20,30,40,50 6-23 * * *',                 // F3 NF-e→ML a cada 10 min
-  importStaging: '*/30 6-23 * * *'                            // Importa parados do staging a cada 30 min
+  importStaging: '13,43 6-23 * * *'                           // Importa parados do staging — :13/:43, FORA do pico de crons (evita 429)
 };
 
 // ── Helpers HTTP locais ───────────────────────────────────────────────
