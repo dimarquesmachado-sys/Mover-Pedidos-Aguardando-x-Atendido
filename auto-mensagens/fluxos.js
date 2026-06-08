@@ -97,6 +97,128 @@ function msgJaProcessada(orderId, tsMsgCliente) {
   return !!t && tsMsgCliente <= t;
 }
 
+// ─────────────────────────────────────────────────────────────────────
+// RETRY de emissao + RECONCILIACAO com Bling + RE-ENGAJAMENTO
+// ─────────────────────────────────────────────────────────────────────
+
+// (Feature 2) RETRY quando o pedido ainda nao foi importado no Bling.
+// Caso real: cliente responde poucos minutos apos a venda, antes do Bling
+// importar o pedido do ML. Em vez de jogar pra atencao humana na hora, guarda
+// os dados (a MESMA classificacao ja confirmada ao cliente — NAO re-roda a IA)
+// e tenta de novo nos proximos ciclos. A importacao costuma resolver em minutos.
+const RETRY_BLING_MAX = Number(process.env.LIXAS_RETRY_BLING_MAX || 8);
+const RETRY_BLING_IDADE_MIN = Number(process.env.LIXAS_RETRY_BLING_IDADE_MIN || 30);
+const _retryBling = new Map(); // orderId -> { venda, iaResult, graosResult, attempts, since }
+
+async function _agendarOuEscalarRetry({ orderId, venda, iaResult, graosResult, lcp, erro }) {
+  const k = String(orderId);
+  const ex = _retryBling.get(k);
+  const attempts = ex ? ex.attempts : 0;
+  const since = ex ? ex.since : Date.now();
+  const idadeMin = (Date.now() - since) / 60000;
+  if (attempts >= RETRY_BLING_MAX || idadeMin >= RETRY_BLING_IDADE_MIN) {
+    _retryBling.delete(k);
+    await lcp.atualizarVenda(orderId, {
+      status: 'precisa_atencao_humano',
+      bling_erro: `auto: pedido nao encontrado no Bling apos ${attempts} tentativas (${(erro || '').slice(0, 150)})`
+    });
+    console.warn(`[retry-bling] order ${orderId} desistiu apos ${attempts} tentativas — humano`);
+    return { falha: true, motivo: 'pedido_nao_encontrado_max' };
+  }
+  _retryBling.set(k, { venda, iaResult, graosResult, attempts: attempts + 1, since });
+  await lcp.atualizarVenda(orderId, {
+    status: 'aguardando_bling',
+    bling_erro: `auto: pedido ainda nao importado no Bling — retry ${attempts + 1}/${RETRY_BLING_MAX}`
+  });
+  console.log(`[retry-bling] order ${orderId} agendado pra retry (${attempts + 1}/${RETRY_BLING_MAX})`);
+  return { retry: true, motivo: 'pedido_nao_encontrado' };
+}
+
+// Processa a fila de retry: re-tenta editar+emitir com os MESMOS dados ja
+// confirmados ao cliente. Roda no inicio de cada ciclo de leitura.
+async function retentarEmissoesBling({ lcp }) {
+  if (_retryBling.size === 0) return;
+  console.log(`[retry-bling] ${_retryBling.size} venda(s) na fila de retry`);
+  for (const [orderId, entry] of Array.from(_retryBling.entries())) {
+    try {
+      await processarAutoEmissao({ venda: entry.venda, iaResult: entry.iaResult, graosResult: entry.graosResult, lcp });
+    } catch (e) {
+      console.error(`[retry-bling] order ${orderId} erro no retry: ${e.message}`);
+    }
+  }
+}
+
+// (Features 1 + 3) Revisa vendas em 'precisa_atencao_humano':
+//  1) RECONCILIA com o Bling: se o pedido ja foi faturado/despachado (situacao
+//     concluida) ou cancelado la, fecha aqui — mata o desencontro do painel.
+//  2) RE-ENGAJA: se o cliente mandou mensagem NOVA depois de cair em atencao
+//     humana, devolve a venda pra fila normal pra IA tratar (sem deixar no vacuo).
+async function revisarAtencaoHumana({ lcp }) {
+  const bp = require('../lixas-combinar/blingPedidos');
+  const SIT_CONCLUIDAS = String(process.env.LIXAS_BLING_SITUACOES_CONCLUIDAS || '9')
+    .split(',').map(s => Number(s.trim())).filter(n => !isNaN(n));
+  const SIT_CANCELADAS = String(process.env.LIXAS_BLING_SITUACOES_CANCELADAS || '12')
+    .split(',').map(s => Number(s.trim())).filter(n => !isNaN(n));
+
+  let lista;
+  try { lista = await lcp.listarPendentes({ dias: 7, status: 'precisa_atencao_humano', limit: 50 }); }
+  catch (e) { console.error(`[revisar] erro listando atencao humana: ${e.message}`); return; }
+  const vendas = (lista && lista.ok && Array.isArray(lista.data)) ? lista.data : [];
+  if (vendas.length === 0) return;
+
+  const sellerId = String(require('./mlTokenManager').getUserId() || '');
+
+  for (const venda of vendas) {
+    try {
+      // (1) Reconciliar com o Bling
+      const idBusca = venda.pack_id || venda.order_id;
+      const dataVenda = venda.data_venda ? String(venda.data_venda).split('T')[0] : null;
+      let dIni, dFim;
+      if (dataVenda) {
+        const d = new Date(dataVenda);
+        const a = new Date(d); a.setDate(a.getDate() - 3);
+        const b = new Date(d); b.setDate(b.getDate() + 3);
+        dIni = a.toISOString().split('T')[0];
+        dFim = b.toISOString().split('T')[0];
+      }
+      const busca = await bp.buscarPedidoPorOrderId(idBusca, dIni, dFim);
+      if (busca.ok) {
+        const sit = Number(busca.situacaoId);
+        if (SIT_CANCELADAS.includes(sit)) {
+          await lcp.atualizarVenda(venda.order_id, { status: 'cancelado', bling_erro: null, nf_erro: null });
+          console.log(`[revisar] order ${venda.order_id} cancelado no Bling (situacao ${sit}) — reconciliado`);
+          continue;
+        }
+        if (SIT_CONCLUIDAS.includes(sit)) {
+          await lcp.atualizarVenda(venda.order_id, {
+            status: 'processado', bling_pedido_id: String(busca.pedidoId), bling_erro: null, nf_erro: null
+          });
+          console.log(`[revisar] order ${venda.order_id} ja concluido no Bling (situacao ${sit}) — reconciliado p/ processado`);
+          continue;
+        }
+      }
+
+      // (2) Re-engajar se o cliente respondeu de novo
+      const conv = await ml.consultarConversa({ packId: venda.pack_id, orderId: venda.order_id, markAsRead: false });
+      if (conv && conv.ok && conv.totalCliente > 0 && conv.ultimaCliente) {
+        let ultLoja = 0, ultCli = 0;
+        for (const m of (conv.messages || [])) {
+          const ts = new Date(m.date_created || m.date || 0).getTime();
+          if (String(m.from_user_id) === sellerId) ultLoja = Math.max(ultLoja, ts);
+          else ultCli = Math.max(ultCli, ts);
+        }
+        const tsCli = new Date(conv.ultimaCliente.date_created || conv.ultimaCliente.date || 0).getTime();
+        if (ultCli > ultLoja && !msgJaProcessada(venda.order_id, tsCli)) {
+          await lcp.atualizarVenda(venda.order_id, { status: 'aguardando_resposta' });
+          console.log(`[revisar] order ${venda.order_id} cliente respondeu apos atencao humana — re-engajado`);
+        }
+      }
+    } catch (e) {
+      console.error(`[revisar] order ${venda.order_id} erro: ${e.message}`);
+    }
+  }
+}
+
 // Contador in-memory (zera a cada dia / a cada restart do Render — proposital,
 // eh so um freio leve, nao precisa de persistencia).
 let _autoEmitidasHoje = { data: '', count: 0 };
@@ -397,6 +519,12 @@ async function rotinaLerRespostas() {
       console.log('[lixas-combinar lerRespostas] supabase nao configurado, pulando');
       return { skipped: 'supabase_nao_configurado' };
     }
+
+    // Passos previos (rodam SEMPRE, antes da fila principal):
+    //  - retry de emissoes que falharam por "pedido ainda nao importado no Bling"
+    //  - reconciliacao com Bling + re-engajamento de vendas em atencao humana
+    try { await retentarEmissoesBling({ lcp }); } catch (e) { console.error('[retry-bling] falhou:', e.message); }
+    try { await revisarAtencaoHumana({ lcp }); } catch (e) { console.error('[revisar] falhou:', e.message); }
 
     // Lista pendentes aguardando resposta (ultimos 7 dias)
     const lista = await lcp.listarPendentes({
@@ -775,7 +903,16 @@ async function rotinaLerRespostas() {
  *
  * @returns {object} { emitida? , puladaConfianca? , falha? , motivo? }
  */
-async function processarAutoEmissao({ venda, iaResult, graosResult, lcp }) {
+// Wrapper: gerencia a fila de retry do Bling em volta da emissao.
+// Se o desfecho NAO for "segura pra retry", limpa a entrada da fila.
+async function processarAutoEmissao(args) {
+  const orderIdW = String(args.venda.order_id);
+  const r = await _processarAutoEmissaoInner(args);
+  if (!r || !r.retry) _retryBling.delete(orderIdW);
+  return r;
+}
+
+async function _processarAutoEmissaoInner({ venda, iaResult, graosResult, lcp }) {
   const orderId = venda.order_id;
   const bp = require('../lixas-combinar/blingPedidos');
 
@@ -864,9 +1001,9 @@ async function processarAutoEmissao({ venda, iaResult, graosResult, lcp }) {
     }
     const busca = await bp.buscarPedidoPorOrderId(idBuscaBling, dIni, dFim);
     if (!busca.ok) {
-      await lcp.atualizarVenda(orderId, { status: 'precisa_atencao_humano', bling_erro: `auto: pedido nao encontrado no Bling (${(busca.erro || '').slice(0, 200)})` });
-      console.warn(`[auto-emissao] order ${orderId} pedido nao achado no Bling — humano`);
-      return { falha: true, motivo: 'pedido_nao_encontrado' };
+      // Pode ser corrida: Bling ainda nao importou o pedido do ML. Agenda retry
+      // (nos proximos ciclos) em vez de escalar na hora. Reusa a MESMA classificacao.
+      return await _agendarOuEscalarRetry({ orderId, venda, iaResult, graosResult, lcp, erro: busca.erro });
     }
     if (busca.aviso) {
       // duplicidade = mais de um pedido com o mesmo numeroLoja (carrinho)
