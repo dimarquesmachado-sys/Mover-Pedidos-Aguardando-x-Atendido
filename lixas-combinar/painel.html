@@ -350,7 +350,7 @@ function renderCard(v) {
   let botoesBling = '';
   if (v.ia_categoria === 'claro' && v.ia_pedido_estruturado && !v.bling_editado_em) {
     botoesBling = `
-      <button class="btn-dry" onclick="testarBling('${v.order_id}', true)">🧪 Dry Run</button>
+      <button class="btn-dry" onclick="testarBling('${v.order_id}', true)">🧪 Preview</button>
       <button class="btn-full" onclick="montarComNF('${v.order_id}')">🚀 Montar Pedido + NF Bling</button>
     `;
   }
