@@ -19,8 +19,13 @@ const crons = {
   manha:       ['0 6 * * *', '30 6 * * *', '0 7 * * *',       // F2 às 06:00, 06:30, 07:00
                 '*/15 6-23 * * *'],                           // F2 a cada 15 min diurno
   corrigirNFs: '*/5 6-23 * * *',                              // Corrigir-NFs a cada 5 min
-  nfeMl:       '0,10,20,30,40,50 6-23 * * *',                 // F3 NF-e→ML a cada 10 min
-  importStaging: '13,43 6-23 * * *'                           // Importa parados do staging — :13/:43, FORA do pico de crons (evita 429)
+  nfeMl:       '0,10,20,30,40,50 6-23 * * *'                  // F3 NF-e→ML a cada 10 min
+  // importStaging DESLIGADO no Render (08/06/2026): o cookie residencial
+  // NAO funciona do datacenter (sempre da 'sessao expirada'). A importacao
+  // agora e feita pelo robo LOCAL nos notebooks (IP residencial). As rotas
+  // /cookie-setup, /debug/staging-list e /debug/run-import continuam ativas
+  // pra teste manual; so o CRON automatico foi removido (era inocuo).
+  // importStaging: '13,43 6-23 * * *'
 };
 
 // ── Helpers HTTP locais ───────────────────────────────────────────────
