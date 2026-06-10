@@ -10,7 +10,6 @@ const { gerarTokenInicial, garantirToken } = require('./tokenManager');
 const { gerarTokenInicialNF, garantirTokenNF } = require('./nfTokenManager');
 const { trocarCodigoPorToken, gerarUrlAutorizacao, garantirTokenML } = require('./mlTokenManager');
 const { rotinaNFeML, enviarNFeUnica } = require('./nfeMlFluxo');
-const { rotinaImportStaging } = require('./stagingImport');
 
 // ── Crons do Girassol ─────────────────────────────────────────────────
 const crons = {
@@ -20,12 +19,6 @@ const crons = {
                 '*/15 6-23 * * *'],                           // F2 a cada 15 min diurno
   corrigirNFs: '*/5 6-23 * * *',                              // Corrigir-NFs a cada 5 min
   nfeMl:       '0,10,20,30,40,50 6-23 * * *'                  // F3 NF-e→ML a cada 10 min
-  // importStaging DESLIGADO no Render (08/06/2026): o cookie residencial
-  // NAO funciona do datacenter (sempre da 'sessao expirada'). A importacao
-  // agora e feita pelo robo LOCAL nos notebooks (IP residencial). As rotas
-  // /cookie-setup, /debug/staging-list e /debug/run-import continuam ativas
-  // pra teste manual; so o CRON automatico foi removido (era inocuo).
-  // importStaging: '13,43 6-23 * * *'
 };
 
 // ── Helpers HTTP locais ───────────────────────────────────────────────
@@ -127,6 +120,21 @@ function routes(readBody) {
     // Debug — estado do retry SEFAZ em memória
     if (method === 'GET' && p === '/debug/retry-sefaz') {
       json(res, 200, getEstadoRetrySEFAZ());
+      return true;
+    }
+
+    // Robô local: lista NFs em "Consultar situação" (sit=0) pra validar via UI interna
+    if (method === 'GET' && p === '/robo/nfs-consultar-situacao') {
+      try {
+        const { getNFsSituacaoConsulta } = require('./nfBlingApi');
+        const token = await garantirTokenNF();
+        const nfs = await getNFsSituacaoConsulta(token);
+        json(res, 200, {
+          empresa: 'girassol',
+          total: nfs.length,
+          nfs: nfs.map(n => ({ id: n.id, numero: n.numero, dataEmissao: n.dataEmissao }))
+        });
+      } catch (e) { json(res, 500, { error: e.message }); }
       return true;
     }
 
@@ -250,81 +258,6 @@ function routes(readBody) {
       return true;
     }
 
-    // TESTE — importar pedido do ML via API (dry-run por padrão; ?confirmar=1 cria)
-    if (method === 'GET' && p.startsWith('/debug/teste-importar/')) {
-      const numeroML = p.split('/').pop();
-      const confirmar = urlObj.searchParams.get('confirmar') === '1';
-      try {
-        const { testarImportarPedido } = require('./importarPedido');
-        const resultado = await testarImportarPedido(numeroML, confirmar);
-        json(res, 200, resultado);
-      } catch (e) { json(res, 500, { error: e.message }); }
-      return true;
-    }
-
-    // PROBE — testa se o Render fala com a API interna do Bling via cookie (somente leitura)
-    if (method === 'GET' && p === '/debug/staging-list') {
-      try {
-        const { listarStaging } = require('./stagingImport');
-        const resultado = await listarStaging();
-        json(res, 200, resultado);
-      } catch (e) { json(res, 500, { error: e.message }); }
-      return true;
-    }
-
-    // Página pra colar o cURL e salvar o cookie do Bling
-    if (method === 'GET' && p === '/cookie-setup') {
-      const { paginaSetup } = require('./stagingImport');
-      html(res, 200, paginaSetup());
-      return true;
-    }
-    if (method === 'POST' && p === '/cookie-setup') {
-      try {
-        const body = await readBody(req);
-        const { extrairCookie, salvarCookie } = require('./stagingImport');
-        const cookie = extrairCookie(body.curl || '');
-        if (!cookie || cookie.length < 20) { json(res, 400, { ok: false, erro: 'Não consegui extrair um cookie válido do texto colado' }); return true; }
-        salvarCookie(cookie);
-        json(res, 200, { ok: true, tamanho: cookie.length });
-      } catch (e) { json(res, 500, { ok: false, erro: e.message }); }
-      return true;
-    }
-
-    // TESTE — importa UM pedido do staging via importação nativa do Bling (write)
-    if (method === 'GET' && p.startsWith('/debug/importar-um/')) {
-      const numeroML = p.split('/').pop();
-      try {
-        const { importarUm } = require('./stagingImport');
-        const r = await importarUm(numeroML);
-        json(res, 200, r);
-      } catch (e) { json(res, 500, { error: e.message }); }
-      return true;
-    }
-
-    // Rodar importador do staging manualmente (espera e devolve resumo)
-    if (method === 'GET' && p === '/debug/run-import') {
-      try {
-        const forcarAgora = urlObj.searchParams.get('agora') === '1';
-        const resumo = await rotinaImportStaging({ forcarAgora });
-        json(res, 200, resumo);
-      } catch (e) { json(res, 500, { error: e.message }); }
-      return true;
-    }
-    if (method === 'POST' && p === '/run/import-staging') {
-      rotinaImportStaging().catch(console.error);
-      json(res, 202, { queued: 'rotinaImportStaging' });
-      return true;
-    }
-
-    // Testa o alerta no WhatsApp (CallMeBot)
-    if (method === 'GET' && p === '/debug/test-alerta') {
-      try {
-        const { testarAlerta } = require('./stagingImport');
-        json(res, 200, await testarAlerta());
-      } catch (e) { json(res, 500, { error: e.message }); }
-      return true;
-    }
-
     return false; // não tratou
   };
 }
@@ -337,8 +270,7 @@ module.exports = {
     rotinaVirada,
     rotinaManha,
     corrigirNFs: corrigirNFsPendentes,
-    nfeMl: rotinaNFeML,
-    importStaging: rotinaImportStaging
+    nfeMl: rotinaNFeML
   },
   routes,
   crons
