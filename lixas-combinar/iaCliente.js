@@ -69,7 +69,7 @@ CLASSIFIQUE em UMA destas 4 categorias:
    listando EXATAMENTE os itens (inclusive os que voce completou no caso B), e ENCERRE
    avisando da postagem. NAO pergunte se esta correto, NAO convide a mudar, NAO termine
    com pergunta. Se houver muitos itens, abrevie (ex: "10x grão 40") pra caber nos 350 chars.
-   Ex de tom: "Olá! Pedido confirmado: [itens] — total ${totalLixas} lixas. Será postado em breve e todo acompanhamento e rastreamento da entrega você acompanha dentro da sua compra no MercadoLivre. Obrigado! 😊"
+   Ex de tom: "Olá! Pedido confirmado: [itens] — total ${totalLixas} lixas. Será postado em breve e todo rastreamento da entrega você acompanha dentro da sua compra no MercadoLivre. Obrigado! 😊"
 
 2. "ambiguo" - Use APENAS quando NAO der pra resolver sozinho:
    - cliente listou graos mas SEM quantidade nenhuma e SEM sinal de variedade; OU
