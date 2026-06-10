@@ -1,17 +1,17 @@
 'use strict';
 
 // ──────────────────────────────────────────────────────────────────────
-// API Bling NF da AMBTotal (Corrigir-NFs)
+// API Bling NF da GOOD Import (Corrigir-NFs)
 // ──────────────────────────────────────────────────────────────────────
 
 const fetch = require('node-fetch');
 const { aplicarCorrecaoCidade, fallbackPorCEP } = require('../lib/correcoesCidades');
 
 const BLING_API = 'https://api.bling.com.br/Api/v3';
-const PAUSA_MS = parseInt(process.env.AMB_NF_PAUSA_MS || '700');
+const PAUSA_MS = parseInt(process.env.GOOD_NF_PAUSA_MS || '700');
 const SINTEGRA_TOKEN = process.env.SINTEGRA_TOKEN || '';
-const NF_INTERMEDIADOR_CNPJ = process.env.AMB_NF_INTERMEDIADOR_CNPJ || '03007331000141';
-const NF_INTERMEDIADOR_NOME = process.env.AMB_NF_INTERMEDIADOR_NOME || 'AMBTOTAL';
+const NF_INTERMEDIADOR_CNPJ = process.env.GOOD_NF_INTERMEDIADOR_CNPJ || '03007331000141';
+const NF_INTERMEDIADOR_NOME = process.env.GOOD_NF_INTERMEDIADOR_NOME || 'GIMPO';
 // Janela de dias pra trás na busca de NFs a corrigir (padrão 7 dias)
 const NF_JANELA_DIAS = parseInt(process.env.NF_JANELA_DIAS || '7');
 
@@ -34,25 +34,25 @@ async function fetchComRetryNF(url, options, ctx, tentativas = 4) {
       resp = await fetch(url, options);
     } catch (e) {
       ultimoErro = e;
-      console.error(`[AMB nfBlingApi] Erro de rede em ${ctx} (tentativa ${t}/${tentativas}):`, e.message);
-      if (t === tentativas) throw new Error(`API Bling NF AMB (${ctx}) erro de rede: ${e.message}`);
+      console.error(`[GOOD nfBlingApi] Erro de rede em ${ctx} (tentativa ${t}/${tentativas}):`, e.message);
+      if (t === tentativas) throw new Error(`API Bling NF GOOD (${ctx}) erro de rede: ${e.message}`);
       await sleepNF(1000 * t);
       continue;
     }
     if (resp.status >= 200 && resp.status < 300) return resp;
     if (resp.status === 401) throw Object.assign(new Error('TOKEN_EXPIRADO'), { code: 401 });
     if (resp.status === 429) {
-      console.warn(`[AMB nfBlingApi] HTTP 429 em ${ctx} (tentativa ${t}/${tentativas}) — aguardando`);
-      if (t === tentativas) throw new Error(`API Bling NF AMB (${ctx}) HTTP 429 após ${tentativas} tentativas`);
+      console.warn(`[GOOD nfBlingApi] HTTP 429 em ${ctx} (tentativa ${t}/${tentativas}) — aguardando`);
+      if (t === tentativas) throw new Error(`API Bling NF GOOD (${ctx}) HTTP 429 após ${tentativas} tentativas`);
       await sleepNF(2000 * t);
       continue;
     }
     const txt = await resp.text();
-    console.error(`[AMB nfBlingApi] HTTP ${resp.status} em ${ctx}:`, txt.slice(0, 300));
-    if (t === tentativas) throw new Error(`API Bling NF AMB (${ctx}) HTTP ${resp.status}`);
+    console.error(`[GOOD nfBlingApi] HTTP ${resp.status} em ${ctx}:`, txt.slice(0, 300));
+    if (t === tentativas) throw new Error(`API Bling NF GOOD (${ctx}) HTTP ${resp.status}`);
     await sleepNF(1000 * t);
   }
-  throw new Error(`API Bling NF AMB (${ctx}) falhou após ${tentativas} tentativas${ultimoErro ? ': ' + ultimoErro.message : ''}`);
+  throw new Error(`API Bling NF GOOD (${ctx}) falhou após ${tentativas} tentativas${ultimoErro ? ': ' + ultimoErro.message : ''}`);
 }
 
 // Listar NFs candidatas a corrigir (situacoes 1=pendente, 4=rejeitada, 5=denegada)
@@ -75,7 +75,7 @@ async function getNFsParaCorrigir(token) {
     });
     todas = todas.concat(recentes);
   }
-  console.log(`[AMB nfBlingApi] getNFsParaCorrigir: ${todas.length} NFs nos últimos ${NF_JANELA_DIAS}d`);
+  console.log(`[GOOD nfBlingApi] getNFsParaCorrigir: ${todas.length} NFs nos últimos ${NF_JANELA_DIAS}d`);
   return todas;
 }
 
@@ -95,7 +95,7 @@ async function getNFsSituacaoConsulta(token) {
     const dataEmissao = new Date(nf.dataEmissao || nf.data);
     return dataEmissao >= dataLimite;
   });
-  console.log(`[AMB nfBlingApi] getNFsSituacaoConsulta: ${recentes.length} NFs sit=0 nos últimos ${NF_JANELA_DIAS}d`);
+  console.log(`[GOOD nfBlingApi] getNFsSituacaoConsulta: ${recentes.length} NFs sit=0 nos últimos ${NF_JANELA_DIAS}d`);
   return recentes;
 }
 
@@ -131,13 +131,13 @@ async function salvarNF(token, idNF, detalhe) {
     body
   });
   if (resp.status >= 200 && resp.status < 300) {
-    console.log(`[AMB nfBlingApi] NF ${idNF} salva`);
+    console.log(`[GOOD nfBlingApi] NF ${idNF} salva`);
     return;
   }
   if (resp.status === 401) throw Object.assign(new Error('TOKEN_EXPIRADO'), { code: 401 });
   const txt = await resp.text();
-  console.error(`[AMB nfBlingApi] HTTP ${resp.status} em salvar NF=${idNF}:`, txt.slice(0, 300));
-  throw new Error(`API Bling NF AMB (salvar NF=${idNF}) HTTP ${resp.status}`);
+  console.error(`[GOOD nfBlingApi] HTTP ${resp.status} em salvar NF=${idNF}:`, txt.slice(0, 300));
+  throw new Error(`API Bling NF GOOD (salvar NF=${idNF}) HTTP ${resp.status}`);
 }
 
 async function enviarNF(token, idNF) {
@@ -153,13 +153,13 @@ async function enviarNF(token, idNF) {
     body
   });
   if (resp.status >= 200 && resp.status < 300) {
-    console.log(`[AMB nfBlingApi] NF ${idNF} enviada para SEFAZ`);
+    console.log(`[GOOD nfBlingApi] NF ${idNF} enviada para SEFAZ`);
     return;
   }
   if (resp.status === 401) throw Object.assign(new Error('TOKEN_EXPIRADO'), { code: 401 });
   const txt = await resp.text();
-  console.error(`[AMB nfBlingApi] HTTP ${resp.status} em enviar NF=${idNF}:`, txt.slice(0, 300));
-  throw new Error(`API Bling NF AMB (enviar NF=${idNF}) HTTP ${resp.status}`);
+  console.error(`[GOOD nfBlingApi] HTTP ${resp.status} em enviar NF=${idNF}:`, txt.slice(0, 300));
+  throw new Error(`API Bling NF GOOD (enviar NF=${idNF}) HTTP ${resp.status}`);
 }
 
 async function getContato(token, idContato) {
@@ -185,7 +185,7 @@ async function atualizarIEContato(token, idContato, contatoCompleto, ie, contrib
     },
     `atualizar IE contato=${idContato}`
   );
-  console.log(`[AMB nfBlingApi] Contato ${idContato} IE="${ie}" contribuinte=${contribuinte}`);
+  console.log(`[GOOD nfBlingApi] Contato ${idContato} IE="${ie}" contribuinte=${contribuinte}`);
 }
 
 // Consulta BrasilAPI (2ª fonte) — retorna município oficial IBGE
@@ -197,10 +197,10 @@ async function getCidadeBrasilAPI(cepLimpo) {
     const municipio = data.city || null;
     const uf = data.state || null;
     if (!municipio || !uf) return null;
-    console.log(`[AMB nfBlingApi] BrasilAPI CEP=${cepLimpo} -> ${municipio}/${uf}`);
+    console.log(`[GOOD nfBlingApi] BrasilAPI CEP=${cepLimpo} -> ${municipio}/${uf}`);
     return aplicarCorrecaoCidade(municipio, uf);
   } catch (e) {
-    console.error('[AMB nfBlingApi] Erro BrasilAPI:', e.message);
+    console.error('[GOOD nfBlingApi] Erro BrasilAPI:', e.message);
     return null;
   }
 }
@@ -226,23 +226,23 @@ async function getCidadePorCEP(cep) {
     }
     return aplicarCorrecaoCidade(municipio, uf);
   } catch (e) {
-    console.error('[AMB nfBlingApi] Erro ao buscar CEP:', e.message);
+    console.error('[GOOD nfBlingApi] Erro ao buscar CEP:', e.message);
     return (await getCidadeBrasilAPI(cepLimpo)) || fallbackPorCEP(cepLimpo);
   }
 }
 
-async function getIEPorCNPJ(cnpj, uf) {
+// ── IE: fonte 1 = SintegraWS (tempo real, depende da SEFAZ) ──────────
+async function _ieViaSintegra(cnpjLimpo, uf) {
   if (!SINTEGRA_TOKEN) {
-    console.log('[AMB nfBlingApi] SINTEGRA_TOKEN não configurado');
+    console.log('[GOOD nfBlingApi] SINTEGRA_TOKEN não configurado — pulando SintegraWS');
     return null;
   }
-  const cnpjLimpo = String(cnpj).replace(/\D/g, '');
   try {
     const url = `https://www.sintegraws.com.br/api/v1/execute-api.php?token=${SINTEGRA_TOKEN}&cnpj=${cnpjLimpo}&plugin=ST`;
     const resp = await fetch(url);
-    if (!resp.ok) { console.log(`[AMB nfBlingApi] SintegraWS HTTP ${resp.status}`); return null; }
+    if (!resp.ok) { console.log(`[GOOD nfBlingApi] SintegraWS HTTP ${resp.status}`); return null; }
     const data = await resp.json();
-    console.log(`[AMB nfBlingApi] SintegraWS CNPJ=${cnpjLimpo} UF=${uf}:`, JSON.stringify(data).slice(0, 200));
+    console.log(`[GOOD nfBlingApi] SintegraWS CNPJ=${cnpjLimpo} UF=${uf}:`, JSON.stringify(data).slice(0, 200));
     if (data && data.inscricoes_estaduais) {
       const ieEstado = data.inscricoes_estaduais.find(i => i.uf === uf);
       if (ieEstado && ieEstado.inscricao_estadual && ieEstado.inscricao_estadual !== 'ISENTO') {
@@ -258,9 +258,60 @@ async function getIEPorCNPJ(cnpj, uf) {
     }
     return null;
   } catch (e) {
-    console.error('[AMB nfBlingApi] Erro SintegraWS:', e.message);
+    console.error('[GOOD nfBlingApi] Erro SintegraWS:', e.message);
     return null;
   }
+}
+
+// ── IE: fonte 2 = CNPJá (base cacheada ~45d, NÃO depende da SEFAZ no ato) ──
+// Endpoint público: https://open.cnpja.com/office/{cnpj}
+// IE vem em registrations[]: { state: 'SP', number: '...', enabled: bool }
+async function _ieViaCNPJa(cnpjLimpo, uf) {
+  try {
+    const resp = await fetch(`https://open.cnpja.com/office/${cnpjLimpo}`, {
+      headers: { 'Accept': 'application/json' }
+    });
+    if (!resp.ok) { console.log(`[GOOD nfBlingApi] CNPJá HTTP ${resp.status}`); return null; }
+    const data = await resp.json();
+    const regs = Array.isArray(data.registrations) ? data.registrations : [];
+    if (regs.length === 0) {
+      console.log(`[GOOD nfBlingApi] CNPJá CNPJ=${cnpjLimpo}: sem registrations (IE)`);
+      return null;
+    }
+    // Prioriza a IE da UF do destinatário; senão, primeira habilitada
+    let reg = regs.find(r => r.state === uf && r.enabled) ||
+              regs.find(r => r.state === uf) ||
+              regs.find(r => r.enabled) ||
+              regs[0];
+    if (!reg || !reg.number) {
+      console.log(`[GOOD nfBlingApi] CNPJá CNPJ=${cnpjLimpo} UF=${uf}: registration sem number`);
+      return null;
+    }
+    const ieLimpa = String(reg.number).replace(/\D/g, '');
+    console.log(`[GOOD nfBlingApi] CNPJá CNPJ=${cnpjLimpo} UF=${uf} -> IE=${ieLimpa} (state=${reg.state} enabled=${reg.enabled})`);
+    if (!ieLimpa) return null;
+    return { ie: ieLimpa, contribuinte: 1 };
+  } catch (e) {
+    console.error('[GOOD nfBlingApi] Erro CNPJá:', e.message);
+    return null;
+  }
+}
+
+// Cascata de IE: SintegraWS (tempo real) -> CNPJá (base cacheada).
+// A CNPJá é o backup que salva quando a SEFAZ do estado está fora do ar
+// (caso em que o SintegraWS falha por timeout).
+async function getIEPorCNPJ(cnpj, uf) {
+  const cnpjLimpo = String(cnpj).replace(/\D/g, '');
+  if (cnpjLimpo.length !== 14) return null;
+
+  const viaSintegra = await _ieViaSintegra(cnpjLimpo, uf);
+  if (viaSintegra) return viaSintegra;
+
+  console.log(`[GOOD nfBlingApi] IE não veio do SintegraWS — tentando CNPJá (CNPJ=${cnpjLimpo})`);
+  const viaCNPJa = await _ieViaCNPJa(cnpjLimpo, uf);
+  if (viaCNPJa) return viaCNPJa;
+
+  return null;
 }
 
 module.exports = {
