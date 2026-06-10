@@ -44,12 +44,30 @@ const RETRY_BACKOFF_MS = [
 const RETRY_MAX_TENTATIVAS = RETRY_BACKOFF_MS.length;     // 8
 const RETRY_LIMPEZA_MS     = 24 * 60 * 60 * 1000;          // limpa registros >24h
 
+// ── Cooldown por NF ───────────────────────────────────────────────────
+// Evita re-buscar o detalhe (chamada Bling) toda rodada de NFs que NAO
+// precisaram de acao: autorizada (2), denegada (5), retry SEFAZ bloqueado,
+// ou que deram erro/429. Sem isso o corrigirNFs martela o Bling a cada 5 min
+// nas mesmas NFs presas -> HTTP 429 em loop. Cooldown padrao 30 min (env).
+const NF_COOLDOWN_MIN = Number(process.env.GIRASSOL_NF_COOLDOWN_MIN || 30);
+const _nfCooldown = new Map(); // idNF -> ts (ms) ate quando pular
+function _emCooldownNF(idNF) {
+  const ate = _nfCooldown.get(idNF);
+  return !!ate && Date.now() < ate;
+}
+function _cooldownNF(idNF) {
+  _nfCooldown.set(idNF, Date.now() + NF_COOLDOWN_MIN * 60 * 1000);
+}
+
 function _limparRetriesAntigos() {
   const agora = Date.now();
   for (const [id, info] of _retrySEFAZ.entries()) {
     if (agora - info.ultimaTentativaTs > RETRY_LIMPEZA_MS) {
       _retrySEFAZ.delete(id);
     }
+  }
+  for (const [id, ate] of _nfCooldown.entries()) {
+    if (agora > ate) _nfCooldown.delete(id);
   }
 }
 
@@ -100,6 +118,7 @@ async function corrigirNFsPendentes() {
     const agora = new Date();
 
     for (const nf of nfs) {
+      let acaoTomada = false;
       try {
         // Filtra NFs com menos de 5 minutos
         const dataEmissao = new Date(nf.dataEmissao || nf.data);
@@ -110,11 +129,14 @@ async function corrigirNFsPendentes() {
           continue;
         }
 
+        // Cooldown: NF checada ha pouco sem precisar de acao -> pula (nao bate no Bling)
+        if (_emCooldownNF(nf.id)) { ignoradas++; continue; }
+
         const detalhe = await getNFDetalhe(token, nf.id);
         if (!detalhe) { ignoradas++; continue; }
 
         // Se NF já autorizada (situacao=2) — ignora
-        if (detalhe.situacao === 2) { ignoradas++; continue; }
+        if (detalhe.situacao === 2) { _cooldownNF(nf.id); ignoradas++; continue; }
         // NOTA: NÃO checar detalhe.xml — Bling gera XML local mesmo em NF rejeitada
 
         const idContato = detalhe.contato?.id;
@@ -179,6 +201,7 @@ async function corrigirNFsPendentes() {
           await sleepNF(500);
           await enviarNF(token, nf.id);
           corrigidas++;
+          acaoTomada = true;
           // Correção real "zera" o histórico de retry — começou do zero
           _retrySEFAZ.delete(nf.id);
         } else {
@@ -197,6 +220,7 @@ async function corrigirNFsPendentes() {
                 await enviarNF(token, nf.id);
                 _registrarTentativaSEFAZ(nf.id);
                 reenviadasSEFAZ++;
+                acaoTomada = true;
               } catch (e) {
                 _registrarTentativaSEFAZ(nf.id);
                 throw e; // cai no catch externo pra contar como erro
@@ -211,6 +235,9 @@ async function corrigirNFsPendentes() {
         console.error(`[corrigirNFs] Erro na NF ${nf.id}:`, e.message);
         erros++;
       }
+      // NF que nao precisou de acao (autorizada/denegada/retry bloqueado/erro)
+      // entra em cooldown pra nao re-buscar o detalhe dela a cada 5 min (alivia 429).
+      if (!acaoTomada) _cooldownNF(nf.id);
       await sleepNF(300);
     }
 
