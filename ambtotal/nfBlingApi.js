@@ -79,6 +79,26 @@ async function getNFsParaCorrigir(token) {
   return todas;
 }
 
+
+// Lista NFs em "Consultar situação" (situacao=0) na janela — usada pelo robô local
+// que dispara a consulta de recibo na UI interna do Bling (getEnvelopeSituacao).
+async function getNFsSituacaoConsulta(token) {
+  const dataLimite = new Date(Date.now() - NF_JANELA_DIAS * 24*60*60*1000);
+  const url = `${BLING_API}/nfe?situacao=0&limite=100&pagina=1`;
+  const resp = await fetchComRetryNF(
+    url,
+    { headers: { Authorization: `Bearer ${token}` } },
+    'listar NFs situacao=0'
+  );
+  const data = await resp.json();
+  const recentes = (data.data || []).filter(nf => {
+    const dataEmissao = new Date(nf.dataEmissao || nf.data);
+    return dataEmissao >= dataLimite;
+  });
+  console.log(`[AMB nfBlingApi] getNFsSituacaoConsulta: ${recentes.length} NFs sit=0 nos últimos ${NF_JANELA_DIAS}d`);
+  return recentes;
+}
+
 async function getNFDetalhe(token, idNF) {
   const url = `${BLING_API}/nfe/${idNF}`;
   const resp = await fetchComRetryNF(
@@ -171,7 +191,7 @@ async function atualizarIEContato(token, idContato, contatoCompleto, ie, contrib
 // Consulta BrasilAPI (2ª fonte) — retorna município oficial IBGE
 async function getCidadeBrasilAPI(cepLimpo) {
   try {
-    const resp = await fetch(`https://brasilapi.com.br/api/cep/v2/${cepLimpo}`, { timeout: 5000 });
+    const resp = await fetch(`https://brasilapi.com.br/api/cep/v2/${cepLimpo}`);
     if (!resp.ok) return null;
     const data = await resp.json();
     const municipio = data.city || null;
@@ -187,38 +207,28 @@ async function getCidadeBrasilAPI(cepLimpo) {
 
 // Retorna { municipio, uf } com correções aplicadas (usa mapa compartilhado)
 // Ordem: ViaCEP -> BrasilAPI -> mapa manual FALLBACK_POR_CEP
-// Consulta ViaCEP (2ª fonte) — com timeout pra nao travar quando o servico cai
-async function getCidadeViaCEP(cepLimpo) {
-  try {
-    const resp = await fetch(`https://viacep.com.br/ws/${cepLimpo}/json/`, { timeout: 5000 });
-    if (!resp.ok) return null;
-    const data = await resp.json();
-    if (data.erro) return null;
-    const municipio = data.localidade || null;
-    const uf = data.uf || null;
-    if (!municipio || !uf) return null;
-    console.log(`[AMB nfBlingApi] ViaCEP CEP=${cepLimpo} -> ${municipio}/${uf}`);
-    return aplicarCorrecaoCidade(municipio, uf);
-  } catch (e) {
-    console.error('[AMB nfBlingApi] Erro ViaCEP:', e.message);
-    return null;
-  }
-}
-
-// Cache de CEP em memoria (cidade de um CEP nao muda) — corta chamadas repetidas
-const _cepCache = new Map(); // cepLimpo -> { municipio, uf }
-
-// Ordem nova: cache -> BrasilAPI -> ViaCEP -> mapa manual FALLBACK_POR_CEP
-// (BrasilAPI primeiro: o ViaCEP esta inacessivel a partir do servidor — ver logs)
 async function getCidadePorCEP(cep) {
   const cepLimpo = String(cep).replace(/\D/g, '');
   if (cepLimpo.length !== 8) return null;
-  if (_cepCache.has(cepLimpo)) return _cepCache.get(cepLimpo);
-  const res = (await getCidadeBrasilAPI(cepLimpo))
-    || (await getCidadeViaCEP(cepLimpo))
-    || fallbackPorCEP(cepLimpo);
-  if (res) _cepCache.set(cepLimpo, res); // so cacheia sucesso (falha pode ser transitoria)
-  return res;
+  try {
+    const resp = await fetch(`https://viacep.com.br/ws/${cepLimpo}/json/`);
+    if (!resp.ok) {
+      return (await getCidadeBrasilAPI(cepLimpo)) || fallbackPorCEP(cepLimpo);
+    }
+    const data = await resp.json();
+    if (data.erro) {
+      return (await getCidadeBrasilAPI(cepLimpo)) || fallbackPorCEP(cepLimpo);
+    }
+    const municipio = data.localidade || null;
+    const uf = data.uf || null;
+    if (!municipio || !uf) {
+      return (await getCidadeBrasilAPI(cepLimpo)) || fallbackPorCEP(cepLimpo);
+    }
+    return aplicarCorrecaoCidade(municipio, uf);
+  } catch (e) {
+    console.error('[AMB nfBlingApi] Erro ao buscar CEP:', e.message);
+    return (await getCidadeBrasilAPI(cepLimpo)) || fallbackPorCEP(cepLimpo);
+  }
 }
 
 async function getIEPorCNPJ(cnpj, uf) {
@@ -255,7 +265,7 @@ async function getIEPorCNPJ(cnpj, uf) {
 
 module.exports = {
   sleepNF,
-  getNFsParaCorrigir, getNFDetalhe, salvarNF, enviarNF,
+  getNFsParaCorrigir, getNFsSituacaoConsulta, getNFDetalhe, salvarNF, enviarNF,
   getContato, atualizarIEContato,
   getCidadePorCEP, getIEPorCNPJ
 };
