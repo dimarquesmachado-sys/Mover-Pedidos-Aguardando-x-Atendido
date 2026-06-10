@@ -142,6 +142,22 @@ function routes(readBody) {
       json(res, 200, getEstadoRetrySEFAZ());
       return true;
     }
+
+    // Robô local: lista NFs em "Consultar situação" (sit=0) pra validar via UI interna
+    if (method === 'GET' && p === '/good/robo/nfs-consultar-situacao') {
+      try {
+        const { getNFsSituacaoConsulta } = require('./nfBlingApi');
+        const token = await garantirTokenNF();
+        const nfs = await getNFsSituacaoConsulta(token);
+        json(res, 200, {
+          empresa: 'good',
+          total: nfs.length,
+          nfs: nfs.map(n => ({ id: n.id, numero: n.numero, dataEmissao: n.dataEmissao }))
+        });
+      } catch (e) { json(res, 500, { error: e.message }); }
+      return true;
+    }
+
     if (method === 'GET' && p === '/good/debug/token') {
       try {
         const token = await garantirToken();
@@ -199,6 +215,21 @@ function routes(readBody) {
           observacao: resultado
             ? `IE encontrada: "${resultado.ie}" (contribuinte=${resultado.contribuinte})`
             : 'IE não encontrada — SintegraWS pode ter falhado ou retornou vazio. Veja os logs do servidor.'
+        });
+      } catch (e) { json(res, 500, { error: e.message }); }
+      return true;
+    }
+    // Debug CEP (paridade com Girassol): GET /good/debug/cep/:cep
+    if (method === 'GET' && p.startsWith('/good/debug/cep/')) {
+      const cep = p.split('/').pop();
+      try {
+        const { getCidadePorCEP } = require('./nfBlingApi');
+        const resultado = await getCidadePorCEP(cep);
+        json(res, 200, {
+          cep, resultado,
+          observacao: resultado
+            ? 'Este é o que seria gravado na NF (municipio + uf)'
+            : 'CEP inválido ou nenhuma fonte retornou dados'
         });
       } catch (e) { json(res, 500, { error: e.message }); }
       return true;
