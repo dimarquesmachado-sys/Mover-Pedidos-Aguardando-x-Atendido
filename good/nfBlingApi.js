@@ -168,26 +168,46 @@ async function atualizarIEContato(token, idContato, contatoCompleto, ie, contrib
   console.log(`[GOOD nfBlingApi] Contato ${idContato} IE="${ie}" contribuinte=${contribuinte}`);
 }
 
+// Consulta BrasilAPI (2ª fonte) — retorna município oficial IBGE
+async function getCidadeBrasilAPI(cepLimpo) {
+  try {
+    const resp = await fetch(`https://brasilapi.com.br/api/cep/v2/${cepLimpo}`);
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    const municipio = data.city || null;
+    const uf = data.state || null;
+    if (!municipio || !uf) return null;
+    console.log(`[GOOD nfBlingApi] BrasilAPI CEP=${cepLimpo} -> ${municipio}/${uf}`);
+    return aplicarCorrecaoCidade(municipio, uf);
+  } catch (e) {
+    console.error('[GOOD nfBlingApi] Erro BrasilAPI:', e.message);
+    return null;
+  }
+}
+
 // Retorna { municipio, uf } com correções aplicadas (usa mapa compartilhado)
+// Ordem: ViaCEP -> BrasilAPI -> mapa manual FALLBACK_POR_CEP
 async function getCidadePorCEP(cep) {
   const cepLimpo = String(cep).replace(/\D/g, '');
   if (cepLimpo.length !== 8) return null;
   try {
     const resp = await fetch(`https://viacep.com.br/ws/${cepLimpo}/json/`);
     if (!resp.ok) {
-      return fallbackPorCEP(cepLimpo);
+      return (await getCidadeBrasilAPI(cepLimpo)) || fallbackPorCEP(cepLimpo);
     }
     const data = await resp.json();
     if (data.erro) {
-      return fallbackPorCEP(cepLimpo);
+      return (await getCidadeBrasilAPI(cepLimpo)) || fallbackPorCEP(cepLimpo);
     }
     const municipio = data.localidade || null;
     const uf = data.uf || null;
-    if (!municipio || !uf) return fallbackPorCEP(cepLimpo);
+    if (!municipio || !uf) {
+      return (await getCidadeBrasilAPI(cepLimpo)) || fallbackPorCEP(cepLimpo);
+    }
     return aplicarCorrecaoCidade(municipio, uf);
   } catch (e) {
     console.error('[GOOD nfBlingApi] Erro ao buscar CEP:', e.message);
-    return fallbackPorCEP(cepLimpo);
+    return (await getCidadeBrasilAPI(cepLimpo)) || fallbackPorCEP(cepLimpo);
   }
 }
 
