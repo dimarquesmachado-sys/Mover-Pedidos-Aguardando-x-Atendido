@@ -170,30 +170,47 @@ async function atualizarIEContato(token, idContato, contatoCompleto, ie, contrib
   console.log(`[nfBlingApi] Contato ${idContato} IE="${ie}" contribuinte=${contribuinte}`);
 }
 
+// Consulta BrasilAPI (2ª fonte) — retorna município oficial IBGE
+async function getCidadeBrasilAPI(cepLimpo) {
+  try {
+    const resp = await fetch(`https://brasilapi.com.br/api/cep/v2/${cepLimpo}`);
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    const municipio = data.city || null;
+    const uf = data.state || null;
+    if (!municipio || !uf) return null;
+    console.log(`[nfBlingApi] BrasilAPI CEP=${cepLimpo} -> ${municipio}/${uf}`);
+    return aplicarCorrecaoCidade(municipio, uf);
+  } catch (e) {
+    console.error('[nfBlingApi] Erro BrasilAPI:', e.message);
+    return null;
+  }
+}
+
 // Retorna { municipio, uf } com correções aplicadas
+// Ordem: ViaCEP -> BrasilAPI -> mapa manual FALLBACK_POR_CEP
 async function getCidadePorCEP(cep) {
   const cepLimpo = String(cep).replace(/\D/g, '');
   if (cepLimpo.length !== 8) return null;
   try {
     const resp = await fetch(`https://viacep.com.br/ws/${cepLimpo}/json/`);
     if (!resp.ok) {
-      // ViaCEP fora ou erro — tenta fallback
-      return fallbackPorCEP(cepLimpo);
+      return (await getCidadeBrasilAPI(cepLimpo)) || fallbackPorCEP(cepLimpo);
     }
     const data = await resp.json();
     if (data.erro) {
-      // CEP não cadastrado no ViaCEP — tenta fallback
-      return fallbackPorCEP(cepLimpo);
+      return (await getCidadeBrasilAPI(cepLimpo)) || fallbackPorCEP(cepLimpo);
     }
     const municipio = data.localidade || null;
     const uf = data.uf || null;
-    if (!municipio || !uf) return fallbackPorCEP(cepLimpo);
+    if (!municipio || !uf) {
+      return (await getCidadeBrasilAPI(cepLimpo)) || fallbackPorCEP(cepLimpo);
+    }
     // Aplica correção manual se houver (usa mapa compartilhado em lib/)
     return aplicarCorrecaoCidade(municipio, uf);
   } catch (e) {
     console.error('[nfBlingApi] Erro ao buscar CEP:', e.message);
-    // Em caso de exceção (ViaCEP fora), tenta fallback
-    return fallbackPorCEP(cepLimpo);
+    return (await getCidadeBrasilAPI(cepLimpo)) || fallbackPorCEP(cepLimpo);
   }
 }
 
