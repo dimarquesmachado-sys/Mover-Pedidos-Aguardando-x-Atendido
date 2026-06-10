@@ -234,12 +234,12 @@ async function getCidadePorCEP(cep) {
   }
 }
 
-async function getIEPorCNPJ(cnpj, uf) {
+// ── IE: fonte 1 = SintegraWS (tempo real, depende da SEFAZ) ──────────
+async function _ieViaSintegra(cnpjLimpo, uf) {
   if (!SINTEGRA_TOKEN) {
-    console.log('[nfBlingApi] SINTEGRA_TOKEN não configurado');
+    console.log('[nfBlingApi] SINTEGRA_TOKEN não configurado — pulando SintegraWS');
     return null;
   }
-  const cnpjLimpo = String(cnpj).replace(/\D/g, '');
   try {
     const url = `https://www.sintegraws.com.br/api/v1/execute-api.php?token=${SINTEGRA_TOKEN}&cnpj=${cnpjLimpo}&plugin=ST`;
     const resp = await fetch(url);
@@ -264,6 +264,57 @@ async function getIEPorCNPJ(cnpj, uf) {
     console.error('[nfBlingApi] Erro SintegraWS:', e.message);
     return null;
   }
+}
+
+// ── IE: fonte 2 = CNPJá (base cacheada ~45d, NÃO depende da SEFAZ no ato) ──
+// Endpoint público: https://open.cnpja.com/office/{cnpj}
+// IE vem em registrations[]: { state: 'SP', number: '...', enabled: bool }
+async function _ieViaCNPJa(cnpjLimpo, uf) {
+  try {
+    const resp = await fetch(`https://open.cnpja.com/office/${cnpjLimpo}`, {
+      headers: { 'Accept': 'application/json' }
+    });
+    if (!resp.ok) { console.log(`[nfBlingApi] CNPJá HTTP ${resp.status}`); return null; }
+    const data = await resp.json();
+    const regs = Array.isArray(data.registrations) ? data.registrations : [];
+    if (regs.length === 0) {
+      console.log(`[nfBlingApi] CNPJá CNPJ=${cnpjLimpo}: sem registrations (IE)`);
+      return null;
+    }
+    // Prioriza a IE da UF do destinatário; senão, primeira habilitada
+    let reg = regs.find(r => r.state === uf && r.enabled) ||
+              regs.find(r => r.state === uf) ||
+              regs.find(r => r.enabled) ||
+              regs[0];
+    if (!reg || !reg.number) {
+      console.log(`[nfBlingApi] CNPJá CNPJ=${cnpjLimpo} UF=${uf}: registration sem number`);
+      return null;
+    }
+    const ieLimpa = String(reg.number).replace(/\D/g, '');
+    console.log(`[nfBlingApi] CNPJá CNPJ=${cnpjLimpo} UF=${uf} -> IE=${ieLimpa} (state=${reg.state} enabled=${reg.enabled})`);
+    if (!ieLimpa) return null;
+    return { ie: ieLimpa, contribuinte: 1 };
+  } catch (e) {
+    console.error('[nfBlingApi] Erro CNPJá:', e.message);
+    return null;
+  }
+}
+
+// Cascata de IE: SintegraWS (tempo real) -> CNPJá (base cacheada).
+// A CNPJá é o backup que salva quando a SEFAZ do estado está fora do ar
+// (caso em que o SintegraWS falha por timeout).
+async function getIEPorCNPJ(cnpj, uf) {
+  const cnpjLimpo = String(cnpj).replace(/\D/g, '');
+  if (cnpjLimpo.length !== 14) return null;
+
+  const viaSintegra = await _ieViaSintegra(cnpjLimpo, uf);
+  if (viaSintegra) return viaSintegra;
+
+  console.log(`[nfBlingApi] IE não veio do SintegraWS — tentando CNPJá (CNPJ=${cnpjLimpo})`);
+  const viaCNPJa = await _ieViaCNPJa(cnpjLimpo, uf);
+  if (viaCNPJa) return viaCNPJa;
+
+  return null;
 }
 
 module.exports = {
