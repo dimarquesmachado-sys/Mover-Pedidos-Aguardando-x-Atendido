@@ -15,6 +15,15 @@
  *      - se o ML já tiver os dados, pula sem erro.
  * 3. Marca como processada para não reenviar.
  *
+ * IMPORTANTE (fix jun/2026): quando o ML responde "não é invoice_pending",
+ * NÃO marcamos a NF como processada de primeira. Vendas cross-docking/agência
+ * ficam um tempo em estados anteriores (ex: buffered) e só DEPOIS viram
+ * invoice_pending — se marcássemos logo, o F3 nunca mais tentaria e a venda
+ * ficava eternamente "pendente de dados fiscais" no ML. Agora damos até
+ * MAX_CHECAGENS_PENDENCIA tentativas (~3h de ciclos de 10min) antes de
+ * desistir e marcar como ok (caso em que os dados já foram preenchidos por
+ * outra via). Estado em memória — zera no restart, sem problema.
+ *
  * Trava de segurança: só NF com situacao=5 E com link de XML é enviada.
  */
 
@@ -34,6 +43,13 @@ const MAX_NFE = parseInt(process.env.GOOD_MAX_NFE_ML || '60');
 // Janela PRÓPRIA do F3 — curta, porque NF travada no ML é sempre recente.
 // Não usa o getPeriodo() do blingApi (que é a janela longa do F1/F2).
 const NF_JANELA_DIAS = parseInt(process.env.GOOD_NF_JANELA_DIAS || '5');
+
+// Quantas vezes re-checar uma NF cujo shipment "não está invoice_pending"
+// antes de desistir e marcar como processada. 18 ciclos de 10min ≈ 3h.
+const MAX_CHECAGENS_PENDENCIA = parseInt(process.env.GOOD_F3_MAX_CHECAGENS || '18');
+
+// nfeId -> nº de checagens "sem pendência" (em memória)
+const _semPendenciaCount = new Map();
 
 function getPeriodoNF() {
   const hoje = new Date();
@@ -111,12 +127,23 @@ async function _fluxoNFeML(tokenBling) {
       console.log(`[GOOD F3-NFeML] ✅ NF ${nf.numero} (pedido ML ${numeroPedidoLoja}) enviada`);
       enviadas++;
       marcarProcessado('F3', nfeId);
+      _semPendenciaCount.delete(nfeId);
     } catch (e) {
       const msg = e.message || '';
       if (msg.includes('não é invoice_pending') || msg.includes('invoice_pending')) {
-        console.log(`[GOOD F3-NFeML] NF ${nf.numero} (pedido ML ${numeroPedidoLoja}) — ML não está pendente, nada a fazer`);
+        // Shipment não está aguardando NF AGORA — mas pode estar a caminho
+        // (cross-docking fica em buffered antes de virar invoice_pending).
+        // Re-checa nos próximos ciclos até MAX_CHECAGENS_PENDENCIA.
+        const tent = (_semPendenciaCount.get(nfeId) || 0) + 1;
+        _semPendenciaCount.set(nfeId, tent);
+        if (tent >= MAX_CHECAGENS_PENDENCIA) {
+          console.log(`[GOOD F3-NFeML] NF ${nf.numero} (pedido ML ${numeroPedidoLoja}) — sem pendência após ${tent} checagens, marcando como ok`);
+          marcarProcessado('F3', nfeId);
+          _semPendenciaCount.delete(nfeId);
+        } else {
+          console.log(`[GOOD F3-NFeML] NF ${nf.numero} (pedido ML ${numeroPedidoLoja}) — ML não está pendente (checagem ${tent}/${MAX_CHECAGENS_PENDENCIA}), re-checa no próximo ciclo`);
+        }
         semPendencia++;
-        marcarProcessado('F3', nfeId);
       } else {
         console.error(`[GOOD F3-NFeML] Erro ao enviar NF ${nf.numero} (pedido ML ${numeroPedidoLoja}):`, msg);
         erros++;
@@ -125,7 +152,7 @@ async function _fluxoNFeML(tokenBling) {
   }
 
   console.log(
-    `[GOOD F3-NFeML] enviadas=${enviadas} | já-ok=${semPendencia} | ignoradas=${ignoradas} ` +
+    `[GOOD F3-NFeML] enviadas=${enviadas} | sem-pendência=${semPendencia} | ignoradas=${ignoradas} ` +
     `| já-processadas=${puladas} | erros=${erros}`
   );
 }
@@ -153,6 +180,7 @@ async function enviarNFeUnica(nfeId) {
     const mlToken = await garantirTokenML();
     const result = await enviarNFeParaML(mlToken, nf.numeroPedidoLoja, nf);
     marcarProcessado('F3', nfeId);
+    _semPendenciaCount.delete(nfeId);
     return { ok: true, nfeId, numero: nf.numero, numeroPedidoLoja: nf.numeroPedidoLoja, result };
   });
 }
