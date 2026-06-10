@@ -171,7 +171,7 @@ async function atualizarIEContato(token, idContato, contatoCompleto, ie, contrib
 // Consulta BrasilAPI (2ª fonte) — retorna município oficial IBGE
 async function getCidadeBrasilAPI(cepLimpo) {
   try {
-    const resp = await fetch(`https://brasilapi.com.br/api/cep/v2/${cepLimpo}`);
+    const resp = await fetch(`https://brasilapi.com.br/api/cep/v2/${cepLimpo}`, { timeout: 5000 });
     if (!resp.ok) return null;
     const data = await resp.json();
     const municipio = data.city || null;
@@ -187,28 +187,38 @@ async function getCidadeBrasilAPI(cepLimpo) {
 
 // Retorna { municipio, uf } com correções aplicadas (usa mapa compartilhado)
 // Ordem: ViaCEP -> BrasilAPI -> mapa manual FALLBACK_POR_CEP
+// Consulta ViaCEP (2ª fonte) — com timeout pra nao travar quando o servico cai
+async function getCidadeViaCEP(cepLimpo) {
+  try {
+    const resp = await fetch(`https://viacep.com.br/ws/${cepLimpo}/json/`, { timeout: 5000 });
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    if (data.erro) return null;
+    const municipio = data.localidade || null;
+    const uf = data.uf || null;
+    if (!municipio || !uf) return null;
+    console.log(`[GOOD nfBlingApi] ViaCEP CEP=${cepLimpo} -> ${municipio}/${uf}`);
+    return aplicarCorrecaoCidade(municipio, uf);
+  } catch (e) {
+    console.error('[GOOD nfBlingApi] Erro ViaCEP:', e.message);
+    return null;
+  }
+}
+
+// Cache de CEP em memoria (cidade de um CEP nao muda) — corta chamadas repetidas
+const _cepCache = new Map(); // cepLimpo -> { municipio, uf }
+
+// Ordem nova: cache -> BrasilAPI -> ViaCEP -> mapa manual FALLBACK_POR_CEP
+// (BrasilAPI primeiro: o ViaCEP esta inacessivel a partir do servidor — ver logs)
 async function getCidadePorCEP(cep) {
   const cepLimpo = String(cep).replace(/\D/g, '');
   if (cepLimpo.length !== 8) return null;
-  try {
-    const resp = await fetch(`https://viacep.com.br/ws/${cepLimpo}/json/`);
-    if (!resp.ok) {
-      return (await getCidadeBrasilAPI(cepLimpo)) || fallbackPorCEP(cepLimpo);
-    }
-    const data = await resp.json();
-    if (data.erro) {
-      return (await getCidadeBrasilAPI(cepLimpo)) || fallbackPorCEP(cepLimpo);
-    }
-    const municipio = data.localidade || null;
-    const uf = data.uf || null;
-    if (!municipio || !uf) {
-      return (await getCidadeBrasilAPI(cepLimpo)) || fallbackPorCEP(cepLimpo);
-    }
-    return aplicarCorrecaoCidade(municipio, uf);
-  } catch (e) {
-    console.error('[GOOD nfBlingApi] Erro ao buscar CEP:', e.message);
-    return (await getCidadeBrasilAPI(cepLimpo)) || fallbackPorCEP(cepLimpo);
-  }
+  if (_cepCache.has(cepLimpo)) return _cepCache.get(cepLimpo);
+  const res = (await getCidadeBrasilAPI(cepLimpo))
+    || (await getCidadeViaCEP(cepLimpo))
+    || fallbackPorCEP(cepLimpo);
+  if (res) _cepCache.set(cepLimpo, res); // so cacheia sucesso (falha pode ser transitoria)
+  return res;
 }
 
 async function getIEPorCNPJ(cnpj, uf) {
