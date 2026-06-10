@@ -526,18 +526,27 @@ async function rotinaLerRespostas() {
     try { await retentarEmissoesBling({ lcp }); } catch (e) { console.error('[retry-bling] falhou:', e.message); }
     try { await revisarAtencaoHumana({ lcp }); } catch (e) { console.error('[revisar] falhou:', e.message); }
 
-    // Lista pendentes aguardando resposta (ultimos 7 dias)
-    const lista = await lcp.listarPendentes({
-      dias: 7,
-      status: 'aguardando_resposta',
-      limit: 50
-    });
-    if (!lista.ok) {
-      console.error(`[lixas-combinar lerRespostas] erro listando: ${JSON.stringify(lista.data).slice(0,200)}`);
+    // Lista pendentes a processar (ultimos 7 dias).
+    // IMPORTANTE: inclui TANTO 'aguardando_resposta' QUANTO 'cliente_respondeu'.
+    // O 'cliente_respondeu' eh setado quando o cliente escreve ANTES da nossa msg
+    // inicial sair (corrida). Sem isso, essas vendas ficavam orfas e a IA nunca rodava.
+    const listaAg = await lcp.listarPendentes({ dias: 7, status: 'aguardando_resposta', limit: 50 });
+    const listaResp = await lcp.listarPendentes({ dias: 7, status: 'cliente_respondeu', limit: 50 });
+    if (!listaAg.ok && !listaResp.ok) {
+      console.error(`[lixas-combinar lerRespostas] erro listando: ${JSON.stringify((listaAg.data || listaResp.data)).slice(0,200)}`);
       return { ok: false, erro: 'erro_listar', stats };
     }
 
-    const pendentes = Array.isArray(lista.data) ? lista.data : [];
+    const _arrAg = (listaAg.ok && Array.isArray(listaAg.data)) ? listaAg.data : [];
+    const _arrResp = (listaResp.ok && Array.isArray(listaResp.data)) ? listaResp.data : [];
+    const _vistos = new Set();
+    const pendentes = [];
+    for (const v of [..._arrAg, ..._arrResp]) {
+      const k = String(v.order_id);
+      if (_vistos.has(k)) continue;
+      _vistos.add(k);
+      pendentes.push(v);
+    }
     stats.lidas = pendentes.length;
     if (pendentes.length === 0) {
       console.log('[lixas-combinar lerRespostas] sem pendentes pra checar');
