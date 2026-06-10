@@ -200,6 +200,20 @@ function routes(readBody) {
       return true;
     }
     // Debug SintegraWS: GET /debug/sintegra/:cnpj/:uf
+    // Debug CNPJá (fonte 2 de IE): GET /debug/cnpja/:cnpj/:uf
+    if (method === 'GET' && p.startsWith('/debug/cnpja/')) {
+      const partes = p.split('/');
+      const cnpj = partes[3];
+      const uf = partes[4];
+      if (!cnpj || !uf) { json(res, 400, { ok: false, erro: 'Uso: /debug/cnpja/:cnpj/:uf' }); return true; }
+      try {
+        const resp = await fetch(`https://open.cnpja.com/office/${String(cnpj).replace(/\D/g,'')}`, { headers: { 'Accept': 'application/json' } });
+        const data = resp.ok ? await resp.json() : null;
+        const regs = (data && Array.isArray(data.registrations)) ? data.registrations : [];
+        json(res, 200, { cnpj, uf, httpStatus: resp.status, registrations: regs });
+      } catch (e) { json(res, 500, { error: e.message }); }
+      return true;
+    }
     if (method === 'GET' && p.startsWith('/debug/sintegra/')) {
       const partes = p.split('/');
       const cnpj = partes[3];
