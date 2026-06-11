@@ -532,6 +532,153 @@ async function editarPedidoComGraos({
 }
 
 /**
+ * MULTI-KIT: edita um pedido com VARIAS linhas A COMBINAR (carrinho com 2+
+ * anuncios A COMBINAR diferentes, ex: kit 5pol lisa + kit 7pol furos).
+ *
+ * INPUT:
+ *   orderId: ML order_id (ou pack_id)
+ *   kits: [{
+ *     skuACombinar,        // codigo EXATO da linha no pedido (obrigatorio aqui)
+ *     graosEscolhidos,     // [{grao, quantidade}] em LIXAS, ja validado pra ESTE kit
+ *     graosDisponiveis,    // do lixasService pra ESTE kit
+ *     unidadesPorPacote,
+ *     descricaoBase
+ *   }, ...]
+ *   dataVenda, dryRun: como no editarPedidoComGraos
+ *
+ * REGRAS:
+ *   - Cada kit casa com EXATAMENTE UMA linha do pedido (match exato de codigo).
+ *   - Linhas que nao sao alvo ficam INTOCADAS.
+ *   - Rateio por linha: cada kit rateia SO o valor da sua linha (valor x qtd).
+ *   - Ajustes de centavo dos kits sao SOMADOS (liquido) em desconto/outras despesas.
+ *   - Validacao final: total do pedido tem que continuar IGUAL ao original
+ *     (= valor do ML). Divergiu -> RESTAURA o pedido e retorna erro.
+ */
+async function editarPedidoComGraosMulti({ orderId, kits, dataVenda, dryRun }) {
+  if (!Array.isArray(kits) || kits.length === 0) {
+    return { ok: false, etapa: 'input', erro: 'kits vazio' };
+  }
+  for (const k of kits) {
+    if (!k.skuACombinar) return { ok: false, etapa: 'input', erro: 'todo kit precisa de skuACombinar (match exato no multi-kit)' };
+  }
+
+  // 1. Busca pedido (mesma janela do single)
+  let dataInicial, dataFinal;
+  if (dataVenda) {
+    const d = new Date(dataVenda);
+    const iniD = new Date(d); iniD.setDate(iniD.getDate() - 2);
+    const fimD = new Date(d); fimD.setDate(fimD.getDate() + 2);
+    dataInicial = iniD.toISOString().split('T')[0];
+    dataFinal = fimD.toISOString().split('T')[0];
+  }
+  const buscar = await buscarPedidoPorOrderId(orderId, dataInicial, dataFinal);
+  if (!buscar.ok) return { ok: false, etapa: 'buscar', ...buscar };
+
+  const detalhe = await obterPedidoCompleto(buscar.pedidoId);
+  if (!detalhe.ok) return { ok: false, etapa: 'detalhe', ...detalhe };
+
+  const pedido = detalhe.pedido;
+  const totalOriginalPedido = Number(pedido.total);
+  const situacaoId = pedido.situacao?.id;
+  if ([12].includes(Number(situacaoId))) {
+    return { ok: false, etapa: 'validar_status', erro: `Pedido ${buscar.pedidoId} cancelado (situacao ${situacaoId})`, pedidoId: buscar.pedidoId };
+  }
+
+  const itensPedido = Array.isArray(pedido.itens) ? pedido.itens : [];
+
+  // 2. Casa cada kit com sua linha (match exato de codigo, sem ambiguidade)
+  const usados = new Set();
+  const planos = []; // { kit, linha }
+  for (const kit of kits) {
+    const matches = itensPedido.filter(it =>
+      String(it.codigo || '').trim() === String(kit.skuACombinar).trim() && !usados.has(it)
+    );
+    if (matches.length !== 1) {
+      return {
+        ok: false, etapa: 'carrinho_multi',
+        erro: `kit ${kit.skuACombinar}: ${matches.length} linha(s) no pedido (esperado exatamente 1)`,
+        pedidoId: buscar.pedidoId
+      };
+    }
+    usados.add(matches[0]);
+    planos.push({ kit, linha: matches[0] });
+  }
+  const outrosItens = itensPedido.filter(it => !usados.has(it));
+
+  // 3. Rateio por kit, sobre o valor DA SUA linha
+  const todasLinhasGraos = [];
+  const rateios = [];
+  let netAjuste = 0; // >0 = acrescimo liquido, <0 = desconto liquido
+  for (const { kit, linha } of planos) {
+    const valorBase = arredondar2(Number(linha.valor) * Number(linha.quantidade || 1));
+    const rateio = calcularRateio({
+      valorTotalPedido: valorBase,
+      graosEscolhidos: kit.graosEscolhidos,
+      graosDisponiveis: kit.graosDisponiveis,
+      unidadesPorPacote: kit.unidadesPorPacote,
+      descricaoBase: kit.descricaoBase
+    });
+    if (!rateio.ok) return { ok: false, etapa: 'rateio', erro: `kit ${kit.skuACombinar}: ${rateio.erro}`, pedidoId: buscar.pedidoId };
+    rateios.push({ sku: kit.skuACombinar, ...rateio });
+    if (rateio.ajuste) netAjuste += (rateio.ajuste.tipo === 'acrescimo' ? 1 : -1) * rateio.ajuste.valor;
+    for (const l of rateio.linhas) {
+      todasLinhasGraos.push({
+        produto: l.produto, codigo: l.codigo, descricao: l.descricao,
+        unidade: l.unidade, quantidade: l.quantidade, valor: l.valor
+      });
+    }
+  }
+  netAjuste = arredondar2(netAjuste);
+
+  // 4. Body: preservados + todas as linhas de graos; ajuste liquido SOMA ao original
+  const body = JSON.parse(JSON.stringify(pedido));
+  delete body.id;
+  const preservados = outrosItens.map(it => {
+    const o = {
+      produto: it.produto?.id ? { id: it.produto.id } : undefined,
+      codigo: it.codigo, descricao: it.descricao, unidade: it.unidade,
+      quantidade: it.quantidade, valor: it.valor
+    };
+    if (it.descricaoDetalhada) o.descricaoDetalhada = it.descricaoDetalhada;
+    if (it.desconto) o.desconto = it.desconto;
+    return o;
+  });
+  body.itens = [...preservados, ...todasLinhasGraos];
+  if (netAjuste > 0) {
+    body.outrasDespesas = arredondar2(Number(body.outrasDespesas || 0) + netAjuste);
+  } else if (netAjuste < 0) {
+    const atual = Number(body.desconto?.valor || 0);
+    body.desconto = { valor: arredondar2(atual + Math.abs(netAjuste)), unidade: 'REAL' };
+  }
+  const stamp = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+  body.observacoesInternas = ((body.observacoesInternas || '') + `\n\n🤖 IA multi-kit editou em ${stamp}: ${kits.length} kits | ajuste liquido R$${netAjuste}`).slice(-1500);
+
+  if (dryRun) {
+    return { ok: true, dryRun: true, pedidoId: buscar.pedidoId, rateios, netAjuste, preview_body: body };
+  }
+
+  // 5. PUT + validacao de total + restauracao
+  const upd = await atualizarPedido(buscar.pedidoId, body);
+  if (!upd.ok) return { ok: false, etapa: 'put', pedidoId: buscar.pedidoId, ...upd };
+
+  const conf = await obterPedidoCompleto(buscar.pedidoId);
+  const totalNovo = conf.ok ? Number(conf.pedido?.total) : NaN;
+  if (!Number.isFinite(totalNovo) || Math.abs(totalNovo - totalOriginalPedido) >= 0.01) {
+    const restaura = JSON.parse(JSON.stringify(pedido));
+    delete restaura.id;
+    const volta = await atualizarPedido(buscar.pedidoId, restaura);
+    return {
+      ok: false, etapa: 'validar_total',
+      erro: `multi-kit: total divergiu (Bling R$${totalNovo} vs original R$${totalOriginalPedido}) — pedido ${volta.ok ? 'RESTAURADO' : 'NAO RESTAURADO, conferir no Bling!'} — tratar manual`,
+      pedidoId: buscar.pedidoId
+    };
+  }
+  console.log(`[blingPedidos] MULTI-KIT: ${kits.length} kits editados, total validado OK (R$${totalNovo})`);
+
+  return { ok: true, pedidoId: buscar.pedidoId, numero: buscar.numero, rateios, netAjuste, multiKit: true, raw: upd.raw };
+}
+
+/**
  * Emite NF-e a partir de um pedido de venda.
  * Bling endpoint: POST /pedidos/vendas/{idPedidoVenda}/gerar-nfe
  *
@@ -575,6 +722,7 @@ module.exports = {
   montarBodyPUT,
   atualizarPedido,
   editarPedidoComGraos,
+  editarPedidoComGraosMulti,
   gerarNFe,
   truncarDecimais
 };
