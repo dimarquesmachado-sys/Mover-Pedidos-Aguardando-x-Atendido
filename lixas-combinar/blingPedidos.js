@@ -293,15 +293,14 @@ function calcularRateio({ valorTotalPedido, graosEscolhidos, graosDisponiveis, u
  * MONTA o body completo pra PUT pedido. Preserva tudo do pedido original
  * (cliente, frete, parcelas, etc) e SUBSTITUI apenas o array itens.
  */
-function montarBodyPUT({ pedidoOriginal, rateio, observacaoExtra }) {
+function montarBodyPUT({ pedidoOriginal, rateio, observacaoExtra, outrosItens = null }) {
   // Clona o pedido original e troca apenas o que precisa
   const body = JSON.parse(JSON.stringify(pedidoOriginal));
 
   // Remove campos somente-leitura que Bling nao aceita no PUT
   delete body.id;
 
-  // Substitui itens
-  body.itens = rateio.linhas.map(l => ({
+  const linhasGraos = rateio.linhas.map(l => ({
     produto: l.produto,
     codigo: l.codigo,
     descricao: l.descricao,
@@ -310,21 +309,55 @@ function montarBodyPUT({ pedidoOriginal, rateio, observacaoExtra }) {
     valor: l.valor
   }));
 
-  // Ajuste de desconto/acrescimo (se necessario)
-  if (rateio.ajuste) {
-    if (rateio.ajuste.tipo === 'desconto') {
-      body.desconto = {
-        valor: rateio.ajuste.valor,
-        unidade: 'REAL'
+  if (Array.isArray(outrosItens) && outrosItens.length > 0) {
+    // ── MODO CARRINHO ──────────────────────────────────────────────
+    // Preserva os demais itens do pedido (intocados) e injeta os graos
+    // NO LUGAR da linha A COMBINAR. Ajuste de centavo SOMA ao desconto/
+    // outras despesas originais (nao sobrescreve nada do pedido).
+    const preservados = outrosItens.map(it => {
+      const o = {
+        produto: it.produto?.id ? { id: it.produto.id } : undefined,
+        codigo: it.codigo,
+        descricao: it.descricao,
+        unidade: it.unidade,
+        quantidade: it.quantidade,
+        valor: it.valor
       };
-    } else {
-      // Acrescimo via "outras despesas" ou "outrasDespesas"
-      body.outrasDespesas = rateio.ajuste.valor;
+      if (it.descricaoDetalhada) o.descricaoDetalhada = it.descricaoDetalhada;
+      if (it.desconto) o.desconto = it.desconto;
+      return o;
+    });
+    body.itens = [...preservados, ...linhasGraos];
+
+    if (rateio.ajuste) {
+      if (rateio.ajuste.tipo === 'desconto') {
+        const atual = Number(body.desconto?.valor || 0);
+        body.desconto = { valor: arredondar2(atual + rateio.ajuste.valor), unidade: 'REAL' };
+      } else {
+        const atual = Number(body.outrasDespesas || 0);
+        body.outrasDespesas = arredondar2(atual + rateio.ajuste.valor);
+      }
     }
+    // sem ajuste: NAO mexe em desconto/outrasDespesas (mantem o original do pedido)
   } else {
-    // Zera desconto e outras despesas se estavam preenchidos
-    body.desconto = { valor: 0, unidade: 'REAL' };
-    body.outrasDespesas = 0;
+    // ── MODO PADRAO (pedido de 1 item) — comportamento identico ao de sempre ──
+    body.itens = linhasGraos;
+
+    if (rateio.ajuste) {
+      if (rateio.ajuste.tipo === 'desconto') {
+        body.desconto = {
+          valor: rateio.ajuste.valor,
+          unidade: 'REAL'
+        };
+      } else {
+        // Acrescimo via "outras despesas" ou "outrasDespesas"
+        body.outrasDespesas = rateio.ajuste.valor;
+      }
+    } else {
+      // Zera desconto e outras despesas se estavam preenchidos
+      body.desconto = { valor: 0, unidade: 'REAL' };
+      body.outrasDespesas = 0;
+    }
   }
 
   // Anexa observacao interna marcando edicao automatica
@@ -368,7 +401,8 @@ async function atualizarPedido(pedidoId, body) {
 async function editarPedidoComGraos({
   orderId, graosEscolhidos, graosDisponiveis,
   unidadesPorPacote, descricaoBase, dryRun,
-  dataVenda // opcional - YYYY-MM-DD da venda ML, usado pra estreitar busca
+  dataVenda, // opcional - YYYY-MM-DD da venda ML, usado pra estreitar busca
+  skuACombinar // opcional - SKU do anuncio A COMBINAR (melhora deteccao no carrinho)
 }) {
   // 1. Busca pedido com janela centrada na data da venda (se conhecida)
   let dataInicial, dataFinal;
@@ -387,8 +421,37 @@ async function editarPedidoComGraos({
   if (!detalhe.ok) return { ok: false, etapa: 'detalhe', ...detalhe };
 
   const pedido = detalhe.pedido;
-  const valorTotalPedido = Number(pedido.total);
+  const totalOriginalPedido = Number(pedido.total);
   const situacaoId = pedido.situacao?.id;
+
+  // ── Deteccao de CARRINHO ────────────────────────────────────────────
+  // Pedido com 1 item: comportamento padrao (rateia o total do pedido).
+  // Pedido com 2+ itens: acha a UNICA linha A COMBINAR (pelo SKU da venda
+  // ou pelo codigo/descricao contendo "A COMBINAR"), rateia SO o valor dela
+  // e preserva os demais itens intocados.
+  const itensPedido = Array.isArray(pedido.itens) ? pedido.itens : [];
+  let outrosItens = null;
+  let valorTotalPedido = totalOriginalPedido;
+  if (itensPedido.length > 1) {
+    const rx = /A-?\s?COMBINAR/i;
+    const alvos = itensPedido.filter(it =>
+      (skuACombinar && String(it.codigo || '').trim() === String(skuACombinar).trim())
+      || rx.test(String(it.codigo || ''))
+      || rx.test(String(it.descricao || ''))
+    );
+    if (alvos.length !== 1) {
+      return {
+        ok: false,
+        etapa: 'carrinho',
+        erro: `carrinho: ${alvos.length} linha(s) A COMBINAR no pedido (esperado exatamente 1) — tratar manual`,
+        pedidoId: buscar.pedidoId
+      };
+    }
+    const alvo = alvos[0];
+    outrosItens = itensPedido.filter(it => it !== alvo);
+    valorTotalPedido = arredondar2(Number(alvo.valor) * Number(alvo.quantidade || 1));
+    console.log(`[blingPedidos] CARRINHO: rateando so a linha ${alvo.codigo} (R$${valorTotalPedido}) e preservando ${outrosItens.length} item(ns)`);
+  }
 
   // 3. Status info (so loga, nao bloqueia - deixa Bling decidir)
   const STATUS_BLOQUEADOS_ESTRITO = [12]; // 12=Cancelado (sempre bloquear)
@@ -419,7 +482,8 @@ async function editarPedidoComGraos({
   const body = montarBodyPUT({
     pedidoOriginal: pedido,
     rateio,
-    observacaoExtra: null
+    observacaoExtra: null,
+    outrosItens
   });
 
   // 6. Dry run: nao envia, apenas retorna preview
@@ -437,11 +501,32 @@ async function editarPedidoComGraos({
   const upd = await atualizarPedido(buscar.pedidoId, body);
   if (!upd.ok) return { ok: false, etapa: 'put', pedidoId: buscar.pedidoId, ...upd };
 
+  // 8. VALIDACAO (so no carrinho): o total do pedido NAO pode mudar — tem que
+  // continuar batendo com o valor do ML. Se divergir 1 centavo, RESTAURA o
+  // pedido original e escala pra humano (nada de NF com total errado).
+  if (outrosItens) {
+    const conf = await obterPedidoCompleto(buscar.pedidoId);
+    const totalNovo = conf.ok ? Number(conf.pedido?.total) : NaN;
+    if (!Number.isFinite(totalNovo) || Math.abs(totalNovo - totalOriginalPedido) >= 0.01) {
+      const restaura = JSON.parse(JSON.stringify(pedido));
+      delete restaura.id;
+      const volta = await atualizarPedido(buscar.pedidoId, restaura);
+      return {
+        ok: false,
+        etapa: 'validar_total',
+        erro: `carrinho: total divergiu apos edicao (Bling R$${totalNovo} vs original R$${totalOriginalPedido}) — pedido ${volta.ok ? 'RESTAURADO ao estado original' : 'NAO PODE SER RESTAURADO, conferir no Bling!'} — tratar manual`,
+        pedidoId: buscar.pedidoId
+      };
+    }
+    console.log(`[blingPedidos] CARRINHO: total validado OK (R$${totalNovo} == R$${totalOriginalPedido})`);
+  }
+
   return {
     ok: true,
     pedidoId: buscar.pedidoId,
     numero: buscar.numero,
     rateio,
+    carrinho: !!outrosItens,
     raw: upd.raw
   };
 }
