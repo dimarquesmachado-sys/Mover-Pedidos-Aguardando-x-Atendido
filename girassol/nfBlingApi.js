@@ -25,6 +25,9 @@ const NF_JANELA_DIAS = parseInt(process.env.NF_JANELA_DIAS || '7');
 const fs = require('fs');
 const path = require('path');
 const IE_CACHE_TTL_MS = parseInt(process.env.IE_CACHE_TTL_DIAS || '7') * 24 * 60 * 60 * 1000;
+// Resultado NEGATIVO (sem IE) expira mais rápido: empresa nova pode ganhar IE
+// nas bases a qualquer momento (caso Ronin). 24h ainda corta o loop (288/dia -> 1/dia).
+const IE_CACHE_NEG_TTL_MS = parseInt(process.env.IE_CACHE_NEG_HORAS || '24') * 60 * 60 * 1000;
 const IE_CACHE_DIR = process.env.IE_CACHE_DIR || '/data/girassol';
 const IE_CACHE_FILE = path.join(IE_CACHE_DIR, 'ie-cache.json');
 
@@ -306,12 +309,15 @@ async function _ieViaCNPJa(cnpjLimpo, uf) {
       console.log(`[nfBlingApi] CNPJá CNPJ=${cnpjLimpo}: sem registrations (IE)`);
       return null;
     }
-    // Prioriza a IE da UF do destinatário; senão, primeira habilitada
-    let reg = regs.find(r => r.state === uf && r.enabled) ||
-              regs.find(r => r.state === uf) ||
-              regs.find(r => r.enabled) ||
-              regs[0];
-    if (!reg || !reg.number) {
+    // SÓ aceita IE da UF do destinatário — IE de outra UF gravada no
+    // contato causaria rejeição SEFAZ ("IE não vinculada à UF"), pior que nada.
+    const reg = regs.find(r => r.state === uf && r.enabled) ||
+                regs.find(r => r.state === uf);
+    if (!reg) {
+      console.log(`[nfBlingApi] CNPJá CNPJ=${cnpjLimpo}: tem IE mas nenhuma na UF ${uf} — não usar`);
+      return null;
+    }
+    if (!reg.number) {
       console.log(`[nfBlingApi] CNPJá CNPJ=${cnpjLimpo} UF=${uf}: registration sem number`);
       return null;
     }
@@ -325,9 +331,9 @@ async function _ieViaCNPJa(cnpjLimpo, uf) {
   }
 }
 
-// Cascata de IE: SintegraWS (tempo real) -> CNPJá (base cacheada).
-// A CNPJá é o backup que salva quando a SEFAZ do estado está fora do ar
-// (caso em que o SintegraWS falha por timeout).
+// Cascata de IE: CNPJá (grátis, base cacheada ~45d) -> SintegraWS (PAGO,
+// tempo real via SEFAZ). Grátis primeiro pra economizar créditos; o Sintegra
+// é o último recurso (e também falha quando a SEFAZ do estado está fora).
 async function getIEPorCNPJ(cnpj, uf) {
   const cnpjLimpo = String(cnpj).replace(/\D/g, '');
   if (cnpjLimpo.length !== 14) return null;
@@ -335,7 +341,8 @@ async function getIEPorCNPJ(cnpj, uf) {
   const chave = `${cnpjLimpo}|${uf}`;
   const cache = _carregarIECache();
   const hit = cache[chave];
-  if (hit && (Date.now() - hit.ts) < IE_CACHE_TTL_MS) {
+  const ttl = (hit && hit.resultado) ? IE_CACHE_TTL_MS : IE_CACHE_NEG_TTL_MS;
+  if (hit && (Date.now() - hit.ts) < ttl) {
     // resultado pode ser objeto {ie,...} ou null (negativo cacheado)
     if (hit.resultado) {
       console.log(`[nfBlingApi] IE do cache: ${chave} -> ${hit.resultado.ie}`);
@@ -346,10 +353,12 @@ async function getIEPorCNPJ(cnpj, uf) {
   }
 
   // Não está no cache (ou expirou): consulta a cascata
-  let resultado = await _ieViaSintegra(cnpjLimpo, uf);
+  // ORDEM: CNPJá primeiro (GRÁTIS, base cacheada) -> SintegraWS por último (PAGO,
+  // tempo real). O Sintegra só é acionado quando a CNPJá não tem a IE da UF.
+  let resultado = await _ieViaCNPJa(cnpjLimpo, uf);
   if (!resultado) {
-    console.log(`[nfBlingApi] IE não veio do SintegraWS — tentando CNPJá (CNPJ=${cnpjLimpo})`);
-    resultado = await _ieViaCNPJa(cnpjLimpo, uf);
+    console.log(`[nfBlingApi] IE não veio da CNPJá — tentando SintegraWS [PAGO] (CNPJ=${cnpjLimpo})`);
+    resultado = await _ieViaSintegra(cnpjLimpo, uf);
   }
 
   // Grava no cache (inclusive negativo, pra não re-consultar e queimar crédito)
