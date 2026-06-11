@@ -235,8 +235,183 @@ async function interpretarRespostaCliente({
   }
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// MULTI-KIT (dormente ate o fluxos ligar): carrinho com 2+ anuncios
+// A COMBINAR diferentes (ex: kit 5pol lisa + kit 7pol furos).
+// A funcao single-kit acima permanece INTOCADA.
+// ═══════════════════════════════════════════════════════════════════
+
+function montarSystemPromptMulti({ kits }) {
+  // kits: [{ sku, descricaoProduto, totalLixas, unidadesPorPacote, graosDisponiveis }]
+  const blocosKits = kits.map((k, i) => `
+KIT ${i + 1} — "${k.descricaoProduto}" (sku interno: ${k.sku})
+- Total comprado NESTE kit: ${k.totalLixas} lixas
+- Quantidades em MULTIPLOS DE ${k.unidadesPorPacote}
+- Graos disponiveis NESTE kit: ${k.graosDisponiveis.join(', ')}
+- Soma das quantidades DESTE kit deve dar EXATAMENTE ${k.totalLixas} lixas`).join('\n');
+
+  return `Voce eh atendente de pos-venda de uma loja de lixas no Mercado Livre.
+O cliente comprou ${kits.length} KITS DIFERENTES de lixas "A COMBINAR" na MESMA compra,
+e precisa informar a combinacao de graos DE CADA KIT.
+
+${blocosKits}
+
+SUA TAREFA: interpretar a resposta do cliente e montar o pedido DE CADA KIT.
+
+CLASSIFIQUE em UMA destas 4 categorias (a categoria eh GLOBAL, do conjunto):
+
+1. "claro" - SOMENTE quando TODOS os kits ficam resolvidos, cada um com pedido
+   valido (graos da lista DAQUELE kit, quantidades multiplas DAQUELE kit, soma
+   EXATAMENTE o total DAQUELE kit). Valem as mesmas regras do atendimento:
+   - cliente especificou tudo de um kit -> ok;
+   - cliente pediu VARIEDADE/"X de cada" num kit que nao fecha -> voce PODE
+     completar a distribuicao DAQUELE kit ate fechar o total dele;
+   - se o cliente nao disser a qual kit pertence uma lista, use o bom senso
+     (tamanho/polegadas citados, ordem das listas, graos que so existem num kit).
+     So assuma se a atribuicao for INEQUIVOCA — na duvida, eh "ambiguo".
+   ACAO: confirmacao DECLARATIVA por kit, ABREVIADA pra caber em 350 chars.
+   Formato: "Olá! Confirmado — Kit 5pol: 30x g40, 70x g80. Kit 7pol: 20x g100, 80x g240. Será postado em breve e todo rastreamento da entrega você acompanha dentro da sua compra no MercadoLivre. Obrigado! 😊"
+   NUNCA pergunte "esta correto?", NUNCA convide a mudar, NUNCA termine com pergunta.
+
+2. "ambiguo" - Qualquer kit sem resolucao: faltou a lista de um kit, quantidades
+   especificas que nao fecham o total daquele kit (NAO complete nem corte),
+   quantidade que nao eh multiplo daquele kit, grao inexistente naquele kit, ou
+   nao da pra saber qual lista eh de qual kit.
+   ACAO: pergunte SO o que falta, identificando o kit pelo nome (ex: "Pro kit de
+   7 polegadas, faltou..."). Se um kit ja fechou, DIGA que ele esta ok e peca so o outro.
+
+3. "pergunta_graos" - Cliente pergunta quais graos tem disponiveis (de um ou de todos).
+   ACAO: responda os graos do(s) kit(s) perguntado(s), identificando cada um.
+
+4. "fora_escopo" - Assunto nao relacionado a escolha de graos (frete, prazo, cancelamento).
+   ACAO: nao responda; deixe pro humano.
+
+REGRAS RIGIDAS:
+- NUNCA invente graos fora da lista DO KIT correspondente
+- NUNCA misture: cada quantidade pertence a UM kit; a soma de CADA kit fecha o total DELE
+- Voce PODE completar distribuicao num kit quando o cliente pedir variedade/"X de cada" NAQUELE kit
+- NUNCA sobrescreva quantidades especificas que o cliente deu
+- NUNCA classifique "claro" se QUALQUER kit nao fechar exatamente
+- Mensagem pro cliente: max 350 caracteres, cordial, "Olá!" no inicio, max 1 emoji
+
+FORMATO DE RESPOSTA (JSON puro, sem markdown):
+{
+  "categoria": "claro" | "ambiguo" | "pergunta_graos" | "fora_escopo",
+  "confianca": 0-100,
+  "interpretacao": "frase curta",
+  "pedidos_por_kit": [{"sku": "<sku interno do kit>", "itens": [{"grao": "24", "quantidade": 30}]}] ou null,
+  "msg_pra_cliente": "texto" ou null
+}
+"pedidos_por_kit" so quando "claro": UM objeto por kit, TODOS os kits presentes, sku EXATO como informado.`;
+}
+
+/**
+ * MULTI-KIT: interpreta a resposta do cliente pra 2+ kits A COMBINAR.
+ * Mesma API/modelo/parse da single-kit. Retorna { ok, categoria, confianca,
+ * interpretacao, pedidos_por_kit, msg_pra_cliente, ... }.
+ */
+async function interpretarRespostaClienteMultiKit({ mensagemCliente, kits, historicoConversa }) {
+  if (!configurado()) {
+    return { ok: false, erro: 'IA nao configurada (env ANTHROPIC_API_KEY_LIXAS_IA ausente)' };
+  }
+  if (!mensagemCliente) return { ok: false, erro: 'mensagem do cliente vazia' };
+  if (!Array.isArray(kits) || kits.length < 2) {
+    return { ok: false, erro: 'multi-kit requer 2+ kits (use interpretarRespostaCliente pra 1)' };
+  }
+
+  const apiKey = process.env[API_KEY_VAR];
+  const systemPrompt = montarSystemPromptMulti({ kits });
+
+  let userText = '';
+  if (Array.isArray(historicoConversa) && historicoConversa.length > 0) {
+    userText += 'HISTORICO DA CONVERSA (mais antiga primeiro):\n';
+    for (const m of historicoConversa) {
+      const quem = m.role === 'seller' ? 'Loja' : 'Cliente';
+      userText += `${quem}: "${m.text}"\n`;
+    }
+    userText += '\n';
+  }
+  userText += 'ULTIMA MENSAGEM DO CLIENTE (foco da interpretacao):\n"""' + mensagemCliente + '"""\n\nAnalise considerando o historico e responda em JSON puro.';
+
+  const body = {
+    model: MODELO,
+    max_tokens: MAX_TOKENS,
+    system: systemPrompt,
+    messages: [{ role: 'user', content: userText }]
+  };
+
+  const controller = new AbortController();
+  const tId = setTimeout(() => controller.abort(), TIMEOUT_MS);
+
+  try {
+    const r = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01'
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal
+    });
+    clearTimeout(tId);
+
+    const data = await r.json();
+    if (!r.ok) {
+      return { ok: false, erro: `Anthropic HTTP ${r.status}: ${JSON.stringify(data).slice(0, 300)}` };
+    }
+
+    const textoCompleto = (data.content || [])
+      .filter(c => c.type === 'text')
+      .map(c => c.text)
+      .join('\n');
+
+    let cleaned = textoCompleto.trim();
+    cleaned = cleaned.replace(/^```json\s*/, '').replace(/^```\s*/, '').replace(/```\s*$/, '');
+
+    let parsed;
+    try {
+      parsed = JSON.parse(cleaned);
+    } catch (e) {
+      return { ok: false, erro: 'IA nao retornou JSON valido', raw: textoCompleto.slice(0, 500) };
+    }
+
+    const categoriasValidas = ['claro', 'ambiguo', 'pergunta_graos', 'fora_escopo'];
+    if (!categoriasValidas.includes(parsed.categoria)) {
+      return { ok: false, erro: `categoria invalida: ${parsed.categoria}`, raw: parsed };
+    }
+
+    // Validacao estrutural do claro multi-kit: TODOS os kits presentes, sku batendo
+    if (parsed.categoria === 'claro') {
+      const completo = Array.isArray(parsed.pedidos_por_kit)
+        && parsed.pedidos_por_kit.length === kits.length
+        && kits.every(k => parsed.pedidos_por_kit.some(p => String(p.sku) === String(k.sku) && Array.isArray(p.itens) && p.itens.length > 0));
+      if (!completo) {
+        return { ok: false, erro: 'claro multi-kit sem pedidos_por_kit completo (todos os kits + sku exato)', raw: parsed };
+      }
+    }
+
+    if (parsed.msg_pra_cliente && parsed.msg_pra_cliente.length > 350) {
+      console.warn(`[ia-multi] msg_pra_cliente ultrapassou 350 chars (${parsed.msg_pra_cliente.length}) — truncando`);
+      parsed.msg_pra_cliente = parsed.msg_pra_cliente.slice(0, 347) + '...';
+    }
+
+    return {
+      ok: true,
+      ...parsed,
+      _modelo: MODELO,
+      _tokens_in: data.usage?.input_tokens,
+      _tokens_out: data.usage?.output_tokens
+    };
+  } catch (e) {
+    clearTimeout(tId);
+    return { ok: false, erro: e.message };
+  }
+}
+
 module.exports = {
   configurado,
   interpretarRespostaCliente,
+  interpretarRespostaClienteMultiKit,
   MODELO
 };
