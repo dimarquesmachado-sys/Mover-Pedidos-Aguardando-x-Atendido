@@ -108,22 +108,22 @@ async function getNFsParaCorrigir(token) {
 }
 
 
-// Lista NFs em "Consultar situação" (situacao=0) na janela — usada pelo robô local
+// Lista NFs em "Consultar situação" (situacao=10) na janela — usada pelo robô local
 // que dispara a consulta de recibo na UI interna do Bling (getEnvelopeSituacao).
 async function getNFsSituacaoConsulta(token) {
   const dataLimite = new Date(Date.now() - NF_JANELA_DIAS * 24*60*60*1000);
-  const url = `${BLING_API}/nfe?situacao=0&limite=100&pagina=1`;
+  const url = `${BLING_API}/nfe?situacao=10&limite=100&pagina=1`;
   const resp = await fetchComRetryNF(
     url,
     { headers: { Authorization: `Bearer ${token}` } },
-    'listar NFs situacao=0'
+    'listar NFs situacao=10 (Consulta situação)'
   );
   const data = await resp.json();
   const recentes = (data.data || []).filter(nf => {
     const dataEmissao = new Date(nf.dataEmissao || nf.data);
     return dataEmissao >= dataLimite;
   });
-  console.log(`[GOOD nfBlingApi] getNFsSituacaoConsulta: ${recentes.length} NFs sit=0 nos últimos ${NF_JANELA_DIAS}d`);
+  console.log(`[GOOD nfBlingApi] getNFsSituacaoConsulta: ${recentes.length} NFs em Consulta situação (sit=10) nos últimos ${NF_JANELA_DIAS}d`);
   return recentes;
 }
 
