@@ -988,7 +988,8 @@ async function _processarAutoEmissaoInner({ venda, iaResult, graosResult, lcp })
     graosDisponiveis: graosResult.graos,
     unidadesPorPacote: graosResult.unidades_por_pacote,
     descricaoBase: graosResult.descricao,
-    dataVenda
+    dataVenda,
+    skuACombinar: venda.sku_a_combinar || null
   };
 
   // ── Guarda 5 — CARRINHO / pedido multi-item ──────────────────────────
@@ -1021,11 +1022,28 @@ async function _processarAutoEmissaoInner({ venda, iaResult, graosResult, lcp })
       return { falha: true, motivo: 'carrinho_multi_pedido' };
     }
     const det = await bp.obterPedidoCompleto(busca.pedidoId);
-    const nItens = (det.ok && Array.isArray(det.pedido?.itens)) ? det.pedido.itens.length : null;
-    if (nItens !== 1) {
-      await lcp.atualizarVenda(orderId, { status: 'precisa_atencao_humano', bling_erro: `auto: carrinho/pedido multi-item (${nItens} itens) — auto-emissao so trata 1 item, tratar manual` });
-      console.warn(`[auto-emissao] order ${orderId} pedido com ${nItens} itens (carrinho?) — humano`);
-      return { falha: true, motivo: 'carrinho_multi_item' };
+    const itensPed = (det.ok && Array.isArray(det.pedido?.itens)) ? det.pedido.itens : null;
+    if (!itensPed || itensPed.length === 0) {
+      await lcp.atualizarVenda(orderId, { status: 'precisa_atencao_humano', bling_erro: 'auto: nao consegui ler os itens do pedido no Bling — tratar manual' });
+      console.warn(`[auto-emissao] order ${orderId} sem itens legiveis — humano`);
+      return { falha: true, motivo: 'itens_ilegiveis' };
+    }
+    if (itensPed.length > 1) {
+      // CARRINHO com 1 linha A COMBINAR: o editarPedidoComGraos sabe tratar
+      // (preserva os outros itens, rateia so a linha A COMBINAR e valida o
+      // total no final). So escala pra humano se 0 ou 2+ linhas A COMBINAR.
+      const rx = /A-?\s?COMBINAR/i;
+      const alvos = itensPed.filter(it =>
+        (venda.sku_a_combinar && String(it.codigo || '').trim() === String(venda.sku_a_combinar).trim())
+        || rx.test(String(it.codigo || ''))
+        || rx.test(String(it.descricao || ''))
+      );
+      if (alvos.length !== 1) {
+        await lcp.atualizarVenda(orderId, { status: 'precisa_atencao_humano', bling_erro: `auto: carrinho com ${alvos.length} linha(s) A COMBINAR (esperado 1) — tratar manual` });
+        console.warn(`[auto-emissao] order ${orderId} carrinho com ${alvos.length} linhas A COMBINAR — humano`);
+        return { falha: true, motivo: 'carrinho_ambiguo' };
+      }
+      console.log(`[auto-emissao] order ${orderId} CARRINHO com 1 linha A COMBINAR (${itensPed.length} itens) — seguindo com edicao preservadora`);
     }
   } catch (e) {
     // Se o pre-check falhar por erro inesperado, NAO arrisca: manda pro humano.
