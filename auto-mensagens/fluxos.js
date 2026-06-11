@@ -1130,12 +1130,29 @@ async function forcarOrder(idEntrada) {
         stats.tipo_id = 'pack_tentativa';
         const packInfo = await ml.getPackInfo(idEntrada);
         if (packInfo?.orders?.length > 0) {
-          orderId = String(packInfo.orders[0].id);
+          // CARRINHO: um pack pode ter VARIOS orders (um por anuncio).
+          // Varre TODOS e escolhe o que tem A COMBINAR (antes pegava o
+          // primeiro as cegas — podia cair no order do outro produto).
           packIdDescoberto = idEntrada;
           stats.tipo_id = 'pack';
+          stats.orders_no_pack = packInfo.orders.length;
+          let achou = null;
+          for (const o of packInfo.orders) {
+            const det = await ml.getOrderDetalhe(String(o.id));
+            if (ml.temVariacaoACombinar(det)) { achou = { id: String(o.id), det }; break; }
+            if (!achou) achou = null;
+          }
+          if (achou) {
+            orderId = achou.id;
+            detalhe = achou.det;
+          } else {
+            // nenhum order do pack tem A COMBINAR — usa o primeiro (vai falhar
+            // na checagem adiante com o erro correto)
+            orderId = String(packInfo.orders[0].id);
+            detalhe = await ml.getOrderDetalhe(orderId);
+          }
           stats.order_id_real = orderId;
           stats.pack_id_real = packIdDescoberto;
-          detalhe = await ml.getOrderDetalhe(orderId);
         } else {
           return { ok: false, erro: `Pack ${idEntrada} sem orders dentro`, stats };
         }
