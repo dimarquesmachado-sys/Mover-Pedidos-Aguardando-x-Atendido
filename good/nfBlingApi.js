@@ -15,6 +15,31 @@ const NF_INTERMEDIADOR_NOME = process.env.GOOD_NF_INTERMEDIADOR_NOME || 'GIMPO';
 // Janela de dias pra trás na busca de NFs a corrigir (padrão 7 dias)
 const NF_JANELA_DIAS = parseInt(process.env.NF_JANELA_DIAS || '7');
 
+// ── Cache de IE em disco (evita queimar créditos do SintegraWS/CNPJá) ──
+// PROBLEMA que isto resolve: o cron de corrigir-NFs roda a cada 5 min; sem
+// cache, cada ciclo re-consulta a IE do mesmo CNPJ. Uma NF de PJ presa por
+// 1 dia gerava ~288 consultas. Em 1-2/jun isso queimou todos os créditos.
+// Agora: consulta 1x, guarda em disco (inclusive resultado NEGATIVO), e nos
+// próximos ciclos lê do cache. TTL configurável (padrão 7 dias).
+const fs = require('fs');
+const path = require('path');
+const IE_CACHE_TTL_MS = parseInt(process.env.IE_CACHE_TTL_DIAS || '7') * 24 * 60 * 60 * 1000;
+const IE_CACHE_DIR = process.env.IE_CACHE_DIR || '/data/good';
+const IE_CACHE_FILE = path.join(IE_CACHE_DIR, 'ie-cache.json');
+
+function _carregarIECache() {
+  try {
+    if (fs.existsSync(IE_CACHE_FILE)) return JSON.parse(fs.readFileSync(IE_CACHE_FILE, 'utf8'));
+  } catch (e) { console.error('[GOOD nfBlingApi] Erro lendo ie-cache:', e.message); }
+  return {};
+}
+function _salvarIECache(cache) {
+  try {
+    if (!fs.existsSync(IE_CACHE_DIR)) fs.mkdirSync(IE_CACHE_DIR, { recursive: true });
+    fs.writeFileSync(IE_CACHE_FILE, JSON.stringify(cache));
+  } catch (e) { console.error('[GOOD nfBlingApi] Erro salvando ie-cache:', e.message); }
+}
+
 let _ultimaReqNF = 0;
 function sleepNF(ms) { return new Promise(r => setTimeout(r, ms)); }
 
@@ -304,14 +329,31 @@ async function getIEPorCNPJ(cnpj, uf) {
   const cnpjLimpo = String(cnpj).replace(/\D/g, '');
   if (cnpjLimpo.length !== 14) return null;
 
-  const viaSintegra = await _ieViaSintegra(cnpjLimpo, uf);
-  if (viaSintegra) return viaSintegra;
+  const chave = `${cnpjLimpo}|${uf}`;
+  const cache = _carregarIECache();
+  const hit = cache[chave];
+  if (hit && (Date.now() - hit.ts) < IE_CACHE_TTL_MS) {
+    // resultado pode ser objeto {ie,...} ou null (negativo cacheado)
+    if (hit.resultado) {
+      console.log(`[GOOD nfBlingApi] IE do cache: ${chave} -> ${hit.resultado.ie}`);
+    } else {
+      console.log(`[GOOD nfBlingApi] IE do cache: ${chave} -> sem IE (negativo, não reconsulta)`);
+    }
+    return hit.resultado;
+  }
 
-  console.log(`[GOOD nfBlingApi] IE não veio do SintegraWS — tentando CNPJá (CNPJ=${cnpjLimpo})`);
-  const viaCNPJa = await _ieViaCNPJa(cnpjLimpo, uf);
-  if (viaCNPJa) return viaCNPJa;
+  // Não está no cache (ou expirou): consulta a cascata
+  let resultado = await _ieViaSintegra(cnpjLimpo, uf);
+  if (!resultado) {
+    console.log(`[GOOD nfBlingApi] IE não veio do SintegraWS — tentando CNPJá (CNPJ=${cnpjLimpo})`);
+    resultado = await _ieViaCNPJa(cnpjLimpo, uf);
+  }
 
-  return null;
+  // Grava no cache (inclusive negativo, pra não re-consultar e queimar crédito)
+  cache[chave] = { ts: Date.now(), resultado: resultado || null };
+  _salvarIECache(cache);
+
+  return resultado || null;
 }
 
 module.exports = {
