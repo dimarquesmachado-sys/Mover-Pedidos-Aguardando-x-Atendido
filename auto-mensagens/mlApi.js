@@ -126,6 +126,38 @@ function extrairSkuACombinar(order) {
 }
 
 /**
+ * MULTI-KIT: extrai TODOS os itens A COMBINAR da venda (carrinho com 2+
+ * anuncios A COMBINAR diferentes, ex: kit 5pol lisa + kit 7pol furos).
+ * Retorna ARRAY de { sku, quantidade, titulo } (vazio se nenhum).
+ * Aditivo: nao altera o comportamento de extrairSkuACombinar (que segue
+ * retornando o primeiro, pra compatibilidade com o fluxo atual).
+ */
+function extrairSkusACombinar(order) {
+  if (!order?.order_items) return [];
+  const ALVO = 'A COMBINAR';
+  const out = [];
+  for (const item of order.order_items) {
+    const attrs = item.item?.variation_attributes || [];
+    let ehACombinar = attrs.some(a => {
+      const val = String(a.value_name || '').toUpperCase().trim();
+      return val === ALVO || val.includes(ALVO);
+    });
+    // fallback: titulo (mesma logica do temVariacaoACombinar)
+    if (!ehACombinar) {
+      const titulo = String(item.item?.title || '').toUpperCase();
+      if (titulo.includes(ALVO)) ehACombinar = true;
+    }
+    if (!ehACombinar) continue;
+    out.push({
+      sku: item.item?.seller_sku || item.item?.seller_custom_field || null,
+      quantidade: Number(item.quantity) || 1,
+      titulo: item.item?.title
+    });
+  }
+  return out;
+}
+
+/**
  * Envia mensagem pro comprador via API ML
  *
  * IMPORTANTE: ML BR exige que vendedor escolha um motivo (option_id) pra iniciar conversa
@@ -298,6 +330,7 @@ module.exports = {
   getPackInfo,
   temVariacaoACombinar,
   extrairSkuACombinar,
+  extrairSkusACombinar,
   enviarMensagem,
   consultarConversa,
   enviarMensagemDireta,
