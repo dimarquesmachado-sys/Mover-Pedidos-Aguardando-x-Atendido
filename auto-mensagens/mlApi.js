@@ -79,6 +79,13 @@ async function getPackInfo(packId) {
  *   - order_items[].item.variation_attributes[].value_name
  *   - order_items[].item.title (fallback)
  */
+// Normaliza pra comparacao: maiusculas + REMOVE ACENTOS.
+// Necessario porque ha anuncios com a variacao grafada "À COMBINAR" (com crase),
+// e 'À' !== 'A' — sem normalizar, a deteccao pulava a venda (bug 10/06).
+function _normalizarACombinar(s) {
+  return String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
+}
+
 function temVariacaoACombinar(order) {
   if (!order?.order_items) return false;
   const ALVO = 'A COMBINAR';
@@ -86,11 +93,11 @@ function temVariacaoACombinar(order) {
     // 1) Atributos de variação
     const attrs = item.item?.variation_attributes || [];
     for (const a of attrs) {
-      const val = String(a.value_name || '').toUpperCase().trim();
+      const val = _normalizarACombinar(a.value_name);
       if (val === ALVO || val.includes(ALVO)) return true;
     }
     // 2) Fallback: título do item (caso ML retorne a variação no título)
-    const titulo = String(item.item?.title || '').toUpperCase();
+    const titulo = _normalizarACombinar(item.item?.title);
     if (titulo.includes(ALVO)) return true;
   }
   return false;
@@ -109,7 +116,7 @@ function extrairSkuACombinar(order) {
   for (const item of order.order_items) {
     const attrs = item.item?.variation_attributes || [];
     const ehACombinar = attrs.some(a => {
-      const val = String(a.value_name || '').toUpperCase().trim();
+      const val = _normalizarACombinar(a.value_name);
       return val === ALVO || val.includes(ALVO);
     });
     if (!ehACombinar) continue;
@@ -139,12 +146,12 @@ function extrairSkusACombinar(order) {
   for (const item of order.order_items) {
     const attrs = item.item?.variation_attributes || [];
     let ehACombinar = attrs.some(a => {
-      const val = String(a.value_name || '').toUpperCase().trim();
+      const val = _normalizarACombinar(a.value_name);
       return val === ALVO || val.includes(ALVO);
     });
     // fallback: titulo (mesma logica do temVariacaoACombinar)
     if (!ehACombinar) {
-      const titulo = String(item.item?.title || '').toUpperCase();
+      const titulo = _normalizarACombinar(item.item?.title);
       if (titulo.includes(ALVO)) ehACombinar = true;
     }
     if (!ehACombinar) continue;
