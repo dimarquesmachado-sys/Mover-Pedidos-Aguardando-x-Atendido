@@ -99,6 +99,10 @@ function temVariacaoACombinar(order) {
     // 2) Fallback: título do item (caso ML retorne a variação no título)
     const titulo = _normalizarACombinar(item.item?.title);
     if (titulo.includes(ALVO)) return true;
+    // 3) Fallback: SKU do vendedor (anuncios de catalogo podem vir SEM
+    //    variation_attributes no pedido; o SKU "A-COMBINAR-..." denuncia)
+    const sku = _normalizarACombinar(item.item?.seller_sku || item.item?.seller_custom_field);
+    if (sku.includes('COMBINAR')) return true;
   }
   return false;
 }
@@ -115,10 +119,14 @@ function extrairSkuACombinar(order) {
   const ALVO = 'A COMBINAR';
   for (const item of order.order_items) {
     const attrs = item.item?.variation_attributes || [];
-    const ehACombinar = attrs.some(a => {
+    let ehACombinar = attrs.some(a => {
       const val = _normalizarACombinar(a.value_name);
       return val === ALVO || val.includes(ALVO);
     });
+    if (!ehACombinar) {
+      const skuNorm = _normalizarACombinar(item.item?.seller_sku || item.item?.seller_custom_field);
+      if (skuNorm.includes('COMBINAR')) ehACombinar = true;
+    }
     if (!ehACombinar) continue;
 
     // Pegou um item A COMBINAR — extrai SKU
@@ -153,6 +161,11 @@ function extrairSkusACombinar(order) {
     if (!ehACombinar) {
       const titulo = _normalizarACombinar(item.item?.title);
       if (titulo.includes(ALVO)) ehACombinar = true;
+    }
+    // fallback: SKU (anuncios de catalogo podem vir sem variation_attributes)
+    if (!ehACombinar) {
+      const skuNorm = _normalizarACombinar(item.item?.seller_sku || item.item?.seller_custom_field);
+      if (skuNorm.includes('COMBINAR')) ehACombinar = true;
     }
     if (!ehACombinar) continue;
     out.push({
