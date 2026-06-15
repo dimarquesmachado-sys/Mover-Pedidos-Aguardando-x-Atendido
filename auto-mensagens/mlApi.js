@@ -344,9 +344,74 @@ async function marcarConversaLida({ packId, orderId, sellerId }) {
   return consultarConversa({ packId, orderId, sellerId, markAsRead: true });
 }
 
+/**
+ * SONDA (read-only) — descobre o prazo limite de POSTAGEM do pedido no ML.
+ *
+ * O handling limit (data ate quando o vendedor precisa postar) NAO vem no
+ * /orders/{id} — mora no SHIPMENT. Esta funcao busca o pedido, acha o
+ * shipping.id e puxa /shipments/{id}, devolvendo TANTO os campos candidatos
+ * mais provaveis QUANTO o objeto bruto, pra travarmos o nome real do campo.
+ *
+ * Uso so de diagnostico (rota GET /auto-mensagens/debug/prazo/:orderId).
+ * NAO altera, NAO envia, NAO emite nada.
+ */
+async function getPrazoPostagem(orderId) {
+  const order = await getOrderDetalhe(orderId);
+  const shippingId = order?.shipping?.id || order?.shipping_id || null;
+
+  const out = {
+    order_id: orderId,
+    pack_id: order?.pack_id || null,
+    order_status: order?.status || null,
+    order_date_created: order?.date_created || null,
+    order_date_closed: order?.date_closed || null,
+    shipping_do_order: order?.shipping || null,   // o que vem dentro do /orders/{id}
+    shipping_id: shippingId
+  };
+
+  if (!shippingId) {
+    out.aviso = 'order sem shipping.id — pode ser pack (carrinho) ou retirada. Veja shipping_do_order, ou tente passar o pack_id.';
+    return out;
+  }
+
+  const r = await mlFetch('GET', `/shipments/${shippingId}`);
+  out.shipment_http_status = r.status;
+  if (!r.ok) {
+    out.erro_shipment = typeof r.data === 'string' ? r.data.slice(0, 300) : r.data;
+    if (r.status === 401 || r.status === 403) {
+      out.dica = 'Token sem permissao de leitura de shipments — pode precisar de scope/reautorizacao do app ML.';
+    }
+    return out;
+  }
+
+  const s  = r.data || {};
+  const lt = s.lead_time || {};
+
+  // Campos candidatos mais provaveis pro "ate quando postar":
+  out.candidatos_handling_limit = {
+    'lead_time.estimated_handling_limit.date':      lt?.estimated_handling_limit?.date || null,
+    'lead_time.estimated_delivery_limit.date':      lt?.estimated_delivery_limit?.date || null,
+    'shipping_option.estimated_handling_limit.date': s?.shipping_option?.estimated_handling_limit?.date || null,
+    'date_first_printed':                            s?.date_first_printed || null
+  };
+  out.shipment_resumo = {
+    status:        s.status || null,
+    substatus:     s.substatus || null,
+    mode:          s.mode || null,
+    logistic_type: s.logistic_type || s?.shipping_option?.shipping_method_type || null,
+    date_created:  s.date_created || null,
+    last_updated:  s.last_updated || null,
+    lead_time:     lt   // objeto inteiro — quase sempre e aqui que mora o prazo
+  };
+  out.shipment_bruto = s;   // tudo, pra nao perder nada na primeira sonda
+
+  return out;
+}
+
 module.exports = {
   buscarVendasPagas,
   getOrderDetalhe,
+  getPrazoPostagem,
   getPackInfo,
   temVariacaoACombinar,
   extrairSkuACombinar,
