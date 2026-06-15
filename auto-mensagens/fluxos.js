@@ -79,6 +79,9 @@ function ehAfirmacaoSimples(texto) {
 // duplicar (caso 05/06 15:30->15:32). Solucao: memoria local do ultimo envio
 // por order — bloqueia reavaliacao/envio pro mesmo order dentro da janela.
 const ENVIO_COOLDOWN_MIN = Number(process.env.LIXAS_ENVIO_COOLDOWN_MIN || 5);
+// Cooldown PERSISTENTE (banco) entre envios da IA pra mesma venda. Fecha o
+// loop infinito que vivia no ponto cego de 2-4 min do ML refletir mensagens.
+const IA_ENVIO_COOLDOWN_MIN = Number(process.env.LIXAS_IA_ENVIO_COOLDOWN_MIN || 8);
 const _ultimoEnvioPorOrder = new Map();
 function registrarEnvio(orderId) { _ultimoEnvioPorOrder.set(String(orderId), Date.now()); }
 function emCooldownEnvio(orderId) {
@@ -574,6 +577,37 @@ async function rotinaLerRespostas() {
           const dataResposta = conv.ultimaCliente.date_created || conv.ultimaCliente.date || new Date().toISOString();
           const _tsRespAtual = new Date(dataResposta).getTime();
 
+          // ════════════════════════════════════════════════════════
+          // TRAVA DE COOLDOWN PERSISTENTE (fix loop infinito 15/06)
+          // Independe de memoria (Map zera em restart) E da conversa do ML
+          // refletir o envio (ML demora 2-4 min, criando ponto cego onde a
+          // IA reenviava infinitamente — caso kely anacleto 09:04/06/09/10).
+          // Regra dura: se a IA gravou ia_processado_em ha menos de
+          // IA_ENVIO_COOLDOWN_MIN, NAO faz NADA nesta venda neste ciclo.
+          // O banco eh instantaneo e sobrevive a restart -> fecha o loop.
+          // ════════════════════════════════════════════════════════
+          if (venda.ia_processado_em) {
+            const minDesdeIA = (Date.now() - new Date(venda.ia_processado_em).getTime()) / 60000;
+            if (minDesdeIA < IA_ENVIO_COOLDOWN_MIN) {
+              stats.semNovidade++;
+              console.log(`[lixas-combinar lerRespostas] 🛑 order ${venda.order_id} cooldown persistente (${minDesdeIA.toFixed(1)}min < ${IA_ENVIO_COOLDOWN_MIN}min desde ultimo envio IA) — pula`);
+              continue;
+            }
+          }
+
+          // TRAVA "MESMA MENSAGEM" PERSISTENTE: se a IA ja tratou uma msg do
+          // cliente com timestamp >= a atual, a bola esta com o cliente. So
+          // volta a agir quando chegar msg ESTRITAMENTE mais nova. Usa
+          // ultima_resposta_em (gravado no banco) — nao depende de memoria.
+          if (venda.ia_processado_em && venda.ultima_resposta_em) {
+            const tsTratada = new Date(venda.ultima_resposta_em).getTime();
+            if (_tsRespAtual <= tsTratada) {
+              stats.semNovidade++;
+              console.log(`[lixas-combinar lerRespostas] 🔒 order ${venda.order_id} msg do cliente nao mudou desde ultimo tratamento IA — pula (anti-loop)`);
+              continue;
+            }
+          }
+
           // TRAVA POR MENSAGEM: se ESTA msg do cliente ja foi respondida por
           // este processo, pula. Msg nova do cliente passa direto, sem atraso.
           if (msgJaProcessada(venda.order_id, _tsRespAtual)) {
@@ -757,6 +791,9 @@ async function rotinaLerRespostas() {
                     ia_msg_enviada: msgIA,
                     ia_pedido_estruturado: iaResult.pedido_estruturado ? JSON.stringify(iaResult.pedido_estruturado) : null,
                     ia_processado_em: new Date().toISOString(),
+                    // grava a msg do cliente que acabou de ser tratada, pra trava
+                    // anti-loop saber que ja respondemos ESTA mensagem
+                    ultima_resposta_em: new Date(_tsRespAtual).toISOString(),
                     status: statusInicial
                   });
                   console.log(`[ia] ✅ order ${venda.order_id} respondida auto: ${msgIA.length} chars, msg_id=${envR.message_id}`);
