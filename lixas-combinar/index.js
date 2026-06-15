@@ -288,6 +288,98 @@ function routes(readBody) {
       return true;
     }
 
+    // POST /lixas-combinar/api/pedido/:orderId/ia-instrucao
+    //   Body: { instrucao: "manda 20 do 150 e 10 do 180 pra completar" }
+    //   A IA rele a conversa do cliente + sua instrucao e devolve o pedido
+    //   estruturado (NAO monta ainda). Salva em ia_pedido_estruturado pra o
+    //   botao "Pedido OK + Emitir NF" usar. NAO manda nada pro cliente no ML.
+    if (method === 'POST' && p.startsWith('/lixas-combinar/api/pedido/') && p.endsWith('/ia-instrucao')) {
+      const sessao = requerAuth();
+      if (!sessao.ok) { json(res, 401, { ok: false, erro: 'nao_autenticado' }); return true; }
+
+      const orderId = p.replace('/lixas-combinar/api/pedido/', '').replace('/ia-instrucao', '');
+      try {
+        const corpo = await readBody(req);
+        let payload = {};
+        try { payload = JSON.parse(corpo || '{}'); } catch (_) { payload = {}; }
+        const instrucao = String(payload.instrucao || '').trim();
+        if (!instrucao) { json(res, 400, { ok: false, erro: 'instrucao_vazia' }); return true; }
+
+        const lcp = require('../auto-mensagens/lixasCombinarPendentes');
+        const venda = await lcp.buscar(orderId);
+        if (!venda.ok || !venda.data) { json(res, 404, { ok: false, erro: 'venda_nao_encontrada', orderId }); return true; }
+        const v = venda.data;
+
+        // graos disponiveis do SKU
+        const graosResult = await lixasService.getGraosDisponiveisPorSkuACombinar(v.sku_a_combinar);
+        if (!graosResult.ok || !graosResult.graos || graosResult.graos.length === 0) {
+          json(res, 500, { ok: false, erro: 'erro_consultar_graos_bling', detalhe: graosResult.erro }); return true;
+        }
+        const graosDisponiveis = graosResult.graos.map(g => g.grao);
+        const totalLixas = graosResult.lixas_por_kit;
+        const unidadesPorPacote = graosResult.unidades_por_pacote || 10;
+
+        // rele a conversa do ML (mesma fonte do automatico)
+        const ml = require('../auto-mensagens/mlApi');
+        let historicoConversa = [];
+        try {
+          const conv = await ml.consultarConversa({ packId: v.pack_id, orderId, markAsRead: false });
+          const sellerId = String(require('../auto-mensagens/mlTokenManager').getUserId() || '');
+          historicoConversa = (conv.messages || []).slice(-10).map(m => {
+            const fromId = String(m.from?.user_id || m.from_user_id || '');
+            return { role: fromId === sellerId ? 'seller' : 'buyer', text: m.text || m.message || '' };
+          }).filter(m => m.text);
+        } catch (e) {
+          console.warn(`[ia-instrucao] nao consegui ler conversa (segue so com a instrucao): ${e.message}`);
+        }
+
+        // A instrucao do admin entra como a "mensagem do cliente" a interpretar,
+        // mas deixamos explicito que eh uma ORDEM do vendedor (autoritativa).
+        const mensagemAdmin = `[INSTRUCAO DO VENDEDOR — autoritativa, pode completar/decidir] ${instrucao}`;
+
+        const ia = require('./iaCliente');
+        const iaResult = await ia.interpretarRespostaCliente({
+          mensagemCliente: mensagemAdmin,
+          descricaoProduto: graosResult.descricao,
+          totalLixas,
+          unidadesPorPacote,
+          graosDisponiveis,
+          historicoConversa
+        });
+
+        if (!iaResult.ok) { json(res, 502, { ok: false, erro: 'ia_falhou', detalhe: iaResult.erro }); return true; }
+
+        // Se a IA entendeu claro, salva o pedido estruturado pra o botao montar usar.
+        let salvo = false;
+        if (iaResult.categoria === 'claro' && Array.isArray(iaResult.pedido_estruturado) && iaResult.pedido_estruturado.length > 0) {
+          await lcp.atualizarVenda(orderId, {
+            ia_categoria: 'claro',
+            ia_confianca: iaResult.confianca,
+            ia_interpretacao: (iaResult.interpretacao || '').slice(0, 300),
+            ia_pedido_estruturado: JSON.stringify(iaResult.pedido_estruturado),
+            ia_processado_em: new Date().toISOString()
+          });
+          salvo = true;
+        }
+
+        json(res, 200, {
+          ok: true,
+          categoria: iaResult.categoria,
+          confianca: iaResult.confianca,
+          interpretacao: iaResult.interpretacao || '',
+          pedido_estruturado: iaResult.pedido_estruturado || null,
+          msg_ia: iaResult.msg_pra_cliente || null,
+          pronto_pra_montar: salvo,
+          total_interpretado: Array.isArray(iaResult.pedido_estruturado)
+            ? iaResult.pedido_estruturado.reduce((s, g) => s + (Number(g.quantidade) || 0), 0)
+            : null
+        });
+      } catch (e) {
+        json(res, 500, { ok: false, erro: e.message });
+      }
+      return true;
+    }
+
     // POST /lixas-combinar/api/pedido/:orderId/editar-bling  → edita pedido Bling
     //   Body: { graos: [{grao:"24", quantidade:20}, ...], dryRun?: true }
     //   Aceita query ?dryRun=1 pra so previsualizar sem enviar
