@@ -29,7 +29,7 @@
 
 const tokenMgr = require('./mlTokenManager');
 const tracker  = require('./supabaseTracker');
-const { rotinaACombinar, rotinaLerRespostas, forcarOrder } = require('./fluxos');
+const { rotinaACombinar, rotinaLerRespostas, forcarOrder, recuperarPendentes } = require('./fluxos');
 
 // ── Helpers HTTP ──────────────────────────────────────────────────────
 function json(res, code, body) {
@@ -168,14 +168,29 @@ function routes(readBody) {
       return true;
     }
 
+    // GET/POST /run/recuperar → re-registra na tabela as vendas A COMBINAR dos
+    // ultimos N dias (default 7) SEM reenviar mensagem. Recupera pendentes que
+    // foram apagadas ou ficaram pra tras da janela de 30min. ?dias=N opcional.
+    if ((method === 'GET' || method === 'POST') && p === '/auto-mensagens/run/recuperar') {
+      try {
+        const dias = Number(urlObj.searchParams.get('dias')) || 7;
+        const r = await recuperarPendentes(dias);
+        json(res, 200, r);
+      } catch (e) {
+        json(res, 500, { ok: false, erro: e.message });
+      }
+      return true;
+    }
+
     // GET/POST /run/tudo → processa GERAL: primeiro registra vendas novas e
     // manda iniciais (rotinaACombinar), depois lê respostas + IA + monta pedido
     // (rotinaLerRespostas). Um clique pra rodar o ciclo completo agora.
     if ((method === 'GET' || method === 'POST') && p === '/auto-mensagens/run/tudo') {
       try {
-        const r1 = await rotinaACombinar();
-        const r2 = await rotinaLerRespostas();
-        json(res, 200, { ok: true, aCombinar: r1, lerRespostas: r2 });
+        const r0 = await recuperarPendentes(7);   // recupera antigas/apagadas
+        const r1 = await rotinaACombinar();        // registra novas + iniciais
+        const r2 = await rotinaLerRespostas();     // le respostas + IA + monta
+        json(res, 200, { ok: true, recuperar: r0, aCombinar: r1, lerRespostas: r2 });
       } catch (e) {
         json(res, 500, { ok: false, erro: e.message });
       }
