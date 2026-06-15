@@ -89,6 +89,7 @@
   .bling-block-erro { background: #fef2f2; border-left: 3px solid #ef4444; padding: 8px;
     border-radius: 4px; font-size: 12px; margin-top: 8px; color: #7f1d1d; }
   .btn-dry { background: #6366f1 !important; color: #fff !important; }
+  .btn-sub { background: #0891b2 !important; color: #fff !important; }
   .btn-real { background: #059669 !important; color: #fff !important; }
   .btn-nf { background: #d97706 !important; color: #fff !important; }
   .btn-full { background: #2563eb !important; color: #fff !important; }
@@ -383,6 +384,7 @@ function renderCard(v) {
           <textarea id="instr-${v.order_id}" class="iainstr-input" rows="2" placeholder="sua instrução pra IA..."></textarea>
           <div class="iainstr-btns">
             <button class="btn-dry" onclick="iaInterpretar('${v.order_id}')">🧠 Interpretar</button>
+            <button class="btn-sub" onclick="substituirPreview('${v.order_id}')">🔧 Substituir indisponíveis</button>
           </div>
           <div id="instr-result-${v.order_id}" class="iainstr-result"></div>
         </div>
@@ -568,18 +570,69 @@ async function iaInterpretar(orderId) {
   }
 }
 
-async function montarComNF(orderId) {
-  if (!confirm(`Vai MONTAR o pedido ${orderId} no Bling E emitir a NF-e em seguida.\n\nA NF sera transmitida pra SEFAZ. Confirmar?`)) return;
-
-  const btns = document.querySelectorAll('.btn-dry, .btn-real, .btn-nf, .btn-full');
-  btns.forEach(b => b.disabled = true);
-
+// ── SUBSTITUIR INDISPONÍVEIS (determinístico, sem IA) ──────────────
+// Lê o pedido literal do cliente, troca grãos sem estoque pelo mais próximo
+// disponível, mostra o preview com as trocas, e só então libera Montar+NF.
+window._subPendentes = window._subPendentes || {};
+async function substituirPreview(orderId) {
+  const resultDiv = document.getElementById('instr-result-' + orderId);
+  if (resultDiv) resultDiv.innerHTML = '<div class="instr-loading">🔧 Lendo pedido do cliente e checando estoque real...</div>';
   try {
-    // Passo 1 — monta os itens no pedido (editar-bling real)
-    const r1 = await fetch(`${API_BASE}/api/pedido/${orderId}/editar-bling`, {
+    const r = await fetch(`${API_BASE}/api/pedido/${orderId}/substituir-preview`, {
       method: 'POST',
       headers: { 'X-Session-Token': token(), 'Content-Type': 'application/json' },
       body: '{}'
+    });
+    if (r.status === 401) { logout(); return; }
+    const d = await r.json();
+
+    if (d.erro === 'nao_consegui_ler_pedido') {
+      if (resultDiv) resultDiv.innerHTML = `<div class="instr-erro">❌ Não consegui ler o pedido do cliente automaticamente.<div class="instr-hint2">Texto lido: "${esc(d.texto || '')}". Use o "🧠 Interpretar" digitando os grãos na mão.</div></div>`;
+      return;
+    }
+    if (d.erro) {
+      if (resultDiv) resultDiv.innerHTML = `<div class="instr-erro">❌ ${esc(d.erro)} ${d.detalhe ? '— ' + esc(d.detalhe) : ''}</div>`;
+      return;
+    }
+
+    window._subPendentes[orderId] = d.pedidoFinal;
+    const cli = (d.pedidoCliente || []).map(g => `${g.quantidade}x ${g.grao}`).join(', ');
+    const fin = (d.pedidoFinal || []).map(g => `${g.quantidade}x grão ${g.grao}`).join(', ');
+    const trocasHtml = (d.trocas || []).length
+      ? d.trocas.map(t => `&nbsp;&nbsp;grão ${t.de} → <b>${t.para}</b> (${t.qtd} un · dist ${t.dist})`).join('<br>')
+      : '&nbsp;&nbsp;nenhuma — todos os grãos pedidos têm estoque';
+    const graosHtml = (d.graosDisponiveis || []).map(g => `${g.grao}(${g.estoque})`).join(', ');
+    const podeMontar = !!d.ok;
+
+    if (resultDiv) resultDiv.innerHTML = `
+      <div class="${podeMontar ? 'instr-ok' : 'instr-duvida'}">
+        <div><b>Cliente pediu:</b> ${esc(cli)}</div>
+        <div style="margin-top:4px"><b>Trocas:</b><br>${trocasHtml}</div>
+        <div style="margin-top:4px"><b>Pedido final:</b> ${esc(fin)} — <b>total ${d.total}</b> ${podeMontar ? '✅' : '❌'}</div>
+        ${(d.avisos && d.avisos.length) ? `<div class="instr-hint2">⚠️ ${esc(d.avisos.join(' · '))}</div>` : ''}
+        <div class="instr-hint2">Estoque atual (pacotes): ${esc(graosHtml)}</div>
+        ${podeMontar
+          ? `<button class="btn-full" style="margin-top:8px;width:100%" onclick="montarComNF('${orderId}', window._subPendentes['${orderId}'])">🚀 Montar c/ substituição + Emitir NF</button>`
+          : `<div class="instr-hint2">Total não fecha ${d.totalEsperado} (ou tem quantidade fora do múltiplo). Ajuste pelo "🧠 Interpretar" antes de emitir.</div>`}
+      </div>`;
+  } catch (e) {
+    if (resultDiv) resultDiv.innerHTML = `<div class="instr-erro">❌ ${esc(e.message)}</div>`;
+  }
+}
+
+async function montarComNF(orderId, graos) {
+  if (!confirm(`Vai MONTAR o pedido ${orderId} no Bling E emitir a NF-e em seguida.\n\nA NF sera transmitida pra SEFAZ. Confirmar?`)) return;
+
+  const btns = document.querySelectorAll('.btn-dry, .btn-real, .btn-nf, .btn-full, .btn-sub');
+  btns.forEach(b => b.disabled = true);
+
+  try {
+    // Passo 1 — monta os itens no pedido (editar-bling real).
+    // Se vier "graos" explicito (ex: pedido ja substituido), manda ele; senao usa o ia_pedido_estruturado salvo.
+    const r1 = await fetch(`${API_BASE}/api/pedido/${orderId}/editar-bling`, {
+      method: 'POST',
+      headers: { 'X-Session-Token': token(), 'Content-Type': 'application/json' },
+      body: JSON.stringify(Array.isArray(graos) && graos.length ? { graos } : {})
     });
     if (r1.status === 401) { logout(); return; }
     const d1 = await r1.json();
