@@ -156,6 +156,32 @@ function routes(readBody) {
       return true;
     }
 
+    // GET/POST /run/ler-respostas → roda a leitura de respostas + IA + montagem
+    // (a mesma coisa que o cron de 2min faz, mas sob demanda)
+    if ((method === 'GET' || method === 'POST') && p === '/auto-mensagens/run/ler-respostas') {
+      try {
+        const r = await rotinaLerRespostas();
+        json(res, 200, r);
+      } catch (e) {
+        json(res, 500, { ok: false, erro: e.message });
+      }
+      return true;
+    }
+
+    // GET/POST /run/tudo → processa GERAL: primeiro registra vendas novas e
+    // manda iniciais (rotinaACombinar), depois lê respostas + IA + monta pedido
+    // (rotinaLerRespostas). Um clique pra rodar o ciclo completo agora.
+    if ((method === 'GET' || method === 'POST') && p === '/auto-mensagens/run/tudo') {
+      try {
+        const r1 = await rotinaACombinar();
+        const r2 = await rotinaLerRespostas();
+        json(res, 200, { ok: true, aCombinar: r1, lerRespostas: r2 });
+      } catch (e) {
+        json(res, 500, { ok: false, erro: e.message });
+      }
+      return true;
+    }
+
     // Debug NOVO Sessao 3: testa a funcao consultarConversa do mlApi
     // GET /auto-mensagens/debug/consultar/:packId
     if (method === 'GET' && p.startsWith('/auto-mensagens/debug/consultar/')) {
