@@ -49,7 +49,7 @@
   .stat .num { font-size: 24px; font-weight: 700; color: #d97706; }
   .stat .label { font-size: 12px; color: #666; margin-top: 2px; }
 
-  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 12px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
   .card {
     background: #fff; padding: 14px; border-radius: 8px; border: 1px solid #e5e5e5;
     box-shadow: 0 1px 3px rgba(0,0,0,0.04);
@@ -157,7 +157,7 @@
   .iainstr-hint { font-size:11px; color:#6b7280; margin-bottom:6px; }
   .iainstr-hint code { background:#f3f4f6; padding:1px 4px; border-radius:3px; display:inline-block; margin:1px 0; }
   .iainstr-input { width:100%; padding:8px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px; box-sizing:border-box; margin-bottom:6px; font-family:inherit; resize:vertical; }
-  .iainstr-btns { display:flex; gap:6px; }
+  .iainstr-btns { display:flex; gap:6px; flex-wrap:wrap; }
   .iainstr-result { margin-top:8px; }
   .instr-loading { font-size:13px; color:#6b7280; padding:6px; }
   .instr-ok { background:#f0fdf4; border:1px solid #bbf7d0; border-radius:6px; padding:10px; font-size:13px; color:#166534; }
@@ -182,7 +182,7 @@
 
 <div id="app" style="display:none">
 <header>
-  <h1>🌻 Lixas A COMBINAR <span class="badge">Pendentes</span></h1>
+  <h1>🌻 Lixas A COMBINAR <span class="badge">Pendentes</span><span class="ver" style="font-size:11px;font-weight:normal;color:#9ca3af;margin-left:8px;font-family:monospace;">v15/06 · subst-3</span></h1>
   <div class="toolbar">
     <select id="filtro-status" onchange="recarregar()">
       <option value="">Todos os status</option>
@@ -377,7 +377,7 @@ function renderCard(v) {
   let iaInstrBlock = '';
   if (!v.bling_editado_em) {
     iaInstrBlock = `
-      <details class="iainstr">
+      <details class="iainstr" open>
         <summary>🤖 Instruir a IA (montar na mão via IA)</summary>
         <div class="iainstr-body">
           <div class="iainstr-hint">Escreva em português. A IA relê a conversa com o cliente + sua instrução e monta o pedido. Ex: <code>completa com 20 do 150 e 10 do 180</code> · <code>manda 50 do 24, 30 do 120 e 20 do 100</code></div>
@@ -416,7 +416,7 @@ function renderCard(v) {
       ${iaBlock}
       ${blingBlock}
       ${v.msg_inicial_enviada ? `
-        <details>
+        <details open>
           <summary style="cursor:pointer;font-size:12px;color:#666;margin-top:6px">Ver msg inicial enviada</summary>
           <div class="card-msg">${esc(v.msg_inicial_enviada)}</div>
         </details>
@@ -595,7 +595,7 @@ async function substituirPreview(orderId) {
       return;
     }
 
-    window._subPendentes[orderId] = d.pedidoFinal;
+    window._subPendentes[orderId] = { graos: d.pedidoFinal, msg: d.msgCliente };
     const cli = (d.pedidoCliente || []).map(g => `${g.quantidade}x ${g.grao}`).join(', ');
     const fin = (d.pedidoFinal || []).map(g => `${g.quantidade}x grão ${g.grao}`).join(', ');
     const trocasHtml = (d.trocas || []).length
@@ -612,11 +612,67 @@ async function substituirPreview(orderId) {
         ${(d.avisos && d.avisos.length) ? `<div class="instr-hint2">⚠️ ${esc(d.avisos.join(' · '))}</div>` : ''}
         <div class="instr-hint2">Estoque atual (pacotes): ${esc(graosHtml)}</div>
         ${podeMontar
-          ? `<button class="btn-full" style="margin-top:8px;width:100%" onclick="montarComNF('${orderId}', window._subPendentes['${orderId}'])">🚀 Montar c/ substituição + Emitir NF</button>`
+          ? `<div class="instr-hint2" style="margin-top:6px;padding:6px;background:#eef2ff;border-radius:6px"><b>📨 Mensagem que vai pro cliente:</b><br>${esc(d.msgCliente || '(nenhuma — sem troca)')}</div>
+             <button class="btn-full" style="margin-top:8px;width:100%" onclick="montarSubstituirAvisar('${orderId}')">🚀 Montar + Emitir NF + avisar cliente</button>`
           : `<div class="instr-hint2">Total não fecha ${d.totalEsperado} (ou tem quantidade fora do múltiplo). Ajuste pelo "🧠 Interpretar" antes de emitir.</div>`}
       </div>`;
   } catch (e) {
     if (resultDiv) resultDiv.innerHTML = `<div class="instr-erro">❌ ${esc(e.message)}</div>`;
+  }
+}
+
+// Fluxo da substituição: monta itens → emite NF → avisa o cliente da troca.
+// O aviso ao cliente NÃO bloqueia o sucesso da NF (se falhar, NF já saiu, dá pra reenviar).
+async function montarSubstituirAvisar(orderId) {
+  const sub = window._subPendentes[orderId];
+  if (!sub || !Array.isArray(sub.graos) || !sub.graos.length) { alert('Roda o preview (🔧) de novo primeiro.'); return; }
+  if (!confirm(`Vai MONTAR o pedido ${orderId} no Bling, emitir a NF-e E avisar o cliente da substituição.\n\nA NF vai pra SEFAZ. Confirmar?`)) return;
+
+  const sel = '.btn-dry, .btn-real, .btn-nf, .btn-full, .btn-sub';
+  document.querySelectorAll(sel).forEach(b => b.disabled = true);
+  try {
+    // 1 — monta os itens (com os grãos já substituídos)
+    const r1 = await fetch(`${API_BASE}/api/pedido/${orderId}/editar-bling`, {
+      method: 'POST', headers: { 'X-Session-Token': token(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ graos: sub.graos })
+    });
+    if (r1.status === 401) { logout(); return; }
+    const d1 = await r1.json();
+    if (!d1.ok) { mostrarModal('❌ Erro ao montar', `${d1.erro || ''}\n\n${JSON.stringify(d1, null, 2)}`, true); return; }
+
+    // 2 — emite a NF
+    const r2 = await fetch(`${API_BASE}/api/pedido/${orderId}/emitir-nf`, {
+      method: 'POST', headers: { 'X-Session-Token': token(), 'Content-Type': 'application/json' }, body: '{}'
+    });
+    if (r2.status === 401) { logout(); return; }
+    const d2 = await r2.json();
+    if (!d2.ok) {
+      mostrarModal('⚠️ Montou, mas NF falhou', `Itens montados no pedido ${d1.pedidoId}, mas a NF NÃO saiu. Use "📄 Emitir NF" pra tentar de novo.\n\n${JSON.stringify(d2.detalhe || d2, null, 2)}`, true);
+      await recarregar();
+      return;
+    }
+
+    // 3 — avisa o cliente (best-effort, não derruba o sucesso da NF)
+    let avisoTxt = '';
+    if (sub.msg) {
+      try {
+        const r3 = await fetch(`${API_BASE}/api/pedido/${orderId}/avisar-substituicao`, {
+          method: 'POST', headers: { 'X-Session-Token': token(), 'Content-Type': 'application/json' },
+          body: JSON.stringify({ msg: sub.msg })
+        });
+        const d3 = await r3.json();
+        avisoTxt = d3.ok
+          ? `\n\n📨 Cliente avisado da substituição (${d3.via}).`
+          : `\n\n⚠️ NF saiu, mas o aviso ao cliente FALHOU: ${d3.erro || ''}. Você pode mandar manual no ML.`;
+      } catch (e) { avisoTxt = `\n\n⚠️ NF saiu, mas o aviso ao cliente falhou: ${e.message}`; }
+    }
+
+    mostrarModal('✅ Pedido + NF + cliente', `✅ MONTADO + NF EMITIDA!\n\nPedido ID: ${d1.pedidoId}\nNF: ${d2.numero || '?'} / chave ${d2.chave || '(aguardando SEFAZ)'}${avisoTxt}`, false);
+    await recarregar();
+  } catch (e) {
+    mostrarModal('❌ Erro', e.message, true);
+  } finally {
+    document.querySelectorAll(sel).forEach(b => b.disabled = false);
   }
 }
 
