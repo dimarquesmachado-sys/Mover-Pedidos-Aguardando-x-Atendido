@@ -199,6 +199,21 @@ function routes(readBody) {
 
     // Debug NOVO Sessao 3: testa a funcao consultarConversa do mlApi
     // GET /auto-mensagens/debug/consultar/:packId
+    // SONDA (read-only): GET /auto-mensagens/debug/prazo/:orderId
+    // Mostra o prazo-limite de POSTAGEM real do ML (handling limit) pra travarmos
+    // o nome exato do campo antes de construir a escada. Nao altera/envia/emite nada.
+    if (method === 'GET' && p.startsWith('/auto-mensagens/debug/prazo/')) {
+      const id = p.replace('/auto-mensagens/debug/prazo/', '');
+      try {
+        const ml = require('./mlApi');
+        const r = await ml.getPrazoPostagem(id);
+        json(res, 200, { ok: true, ...r });
+      } catch (e) {
+        json(res, 500, { ok: false, erro: e.message, stack: e.stack });
+      }
+      return true;
+    }
+
     if (method === 'GET' && p.startsWith('/auto-mensagens/debug/consultar/')) {
       const id = p.replace('/auto-mensagens/debug/consultar/', '');
       try {
