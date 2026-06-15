@@ -439,8 +439,60 @@ function routes(readBody) {
           totalEsperado: resolvido.totalEsperado,
           multiplosOk: resolvido.multiplosOk,
           avisos: resolvido.avisos,
+          msgCliente: sub.montarMsgSubstituicao(resolvido.trocas, resolvido.pedidoFinal, resolvido.total),
           graosDisponiveis: graosResult.graos.map(g => ({ grao: g.grao, estoque: g.estoque_pacotes }))
         });
+      } catch (e) {
+        json(res, 500, { ok: false, erro: e.message, stack: e.stack });
+      }
+      return true;
+    }
+
+    // POST /lixas-combinar/api/pedido/:orderId/avisar-substituicao
+    //   Manda a mensagem de FECHAMENTO pro cliente avisando a substituição feita.
+    //   Body: { msg } — o texto que o admin viu/aprovou no preview.
+    //   Usa enviarMensagemDireta (conversa já iniciada); fallback action_guide OTHER.
+    if (method === 'POST' && p.startsWith('/lixas-combinar/api/pedido/') && p.endsWith('/avisar-substituicao')) {
+      const sessao = requerAuth();
+      if (!sessao.ok) { json(res, 401, { ok: false, erro: 'nao_autenticado' }); return true; }
+
+      const orderId = p.replace('/lixas-combinar/api/pedido/', '').replace('/avisar-substituicao', '');
+      try {
+        const lcp = require('../auto-mensagens/lixasCombinarPendentes');
+        const venda = await lcp.buscar(orderId);
+        if (!venda.ok || !venda.data) { json(res, 404, { ok: false, erro: 'venda_nao_encontrada', orderId }); return true; }
+        const v = venda.data;
+
+        const corpo = await readBody(req);
+        let payload;
+        if (corpo && typeof corpo === 'object') { payload = corpo; }
+        else { try { payload = JSON.parse(corpo || '{}'); } catch (_) { payload = {}; } }
+        if (!payload || typeof payload !== 'object') payload = {};
+
+        const texto = String(payload.msg || '').trim();
+        if (!texto) { json(res, 400, { ok: false, erro: 'msg_vazia' }); return true; }
+        if (texto.length > 350) { json(res, 400, { ok: false, erro: 'msg_muito_longa', tamanho: texto.length }); return true; }
+
+        const ml = require('../auto-mensagens/mlApi');
+        // enviarMensagemDireta precisa do buyerId — pega do detalhe do pedido
+        let buyerId = null;
+        try { const od = await ml.getOrderDetalhe(orderId); buyerId = od?.buyer?.id || null; } catch (_) {}
+
+        let r = buyerId
+          ? await ml.enviarMensagemDireta({ packId: v.pack_id, orderId, buyerId, texto })
+          : { ok: false, erro: 'sem_buyerId' };
+
+        if (!r || !r.ok) {
+          // fallback: conversa virgem / falha na direta → action_guide OTHER
+          const r2 = await ml.enviarMensagem({ packId: v.pack_id, orderId, buyerId, texto });
+          if (r2 && r2.ok) {
+            json(res, 200, { ok: true, via: 'action_guide', message_id: r2.message_id, moderation_status: r2.moderation_status });
+          } else {
+            json(res, 502, { ok: false, erro: 'falha_envio_ml', direta: r, action_guide: r2 });
+          }
+          return true;
+        }
+        json(res, 200, { ok: true, via: 'direta', message_id: r.message_id, moderation_status: r.moderation_status });
       } catch (e) {
         json(res, 500, { ok: false, erro: e.message, stack: e.stack });
       }
