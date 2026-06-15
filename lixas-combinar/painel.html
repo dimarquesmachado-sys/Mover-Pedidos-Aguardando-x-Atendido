@@ -182,7 +182,7 @@
 
 <div id="app" style="display:none">
 <header>
-  <h1>🌻 Lixas A COMBINAR <span class="badge">Pendentes</span><span class="ver" style="font-size:11px;font-weight:normal;color:#9ca3af;margin-left:8px;font-family:monospace;">v15/06 · subst-4</span></h1>
+  <h1>🌻 Lixas A COMBINAR <span class="badge">Pendentes</span><span class="ver" style="font-size:11px;font-weight:normal;color:#9ca3af;margin-left:8px;font-family:monospace;">v15/06 · subst-5</span></h1>
   <div class="toolbar">
     <select id="filtro-status" onchange="recarregar()">
       <option value="">Todos os status</option>
@@ -211,6 +211,16 @@
     <div class="loading">Carregando pendentes…</div>
   </div>
 </main>
+
+  <footer style="max-width:1400px; margin:32px auto 24px; padding:16px 18px; background:#f9fafb; border:1px solid #eef0f3; border-radius:10px; font-size:13px; color:#555; line-height:1.6;">
+    <div style="font-weight:700; color:#333; margin-bottom:8px;">📘 Como usar este painel</div>
+    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:10px 24px;">
+      <div><b style="color:#0891b2;">🔧 Substituir indisponíveis</b> — <b>Automático.</b> Lê o pedido do cliente sozinho, troca o grão sem estoque pelo mais próximo disponível, monta no Bling, emite a NF e avisa o cliente. É o do dia a dia.</div>
+      <div><b style="color:#6366f1;">🧠 Interpretar</b> — <b>Manual.</b> Você digita os grãos (ex: <code>manda 50 do 24, 30 do 120 e 20 do 100</code> ou <code>completa com 20 do 150</code>). Pra pedidos estranhos em que você quer ditar. <b>Não</b> faz substituição por regra.</div>
+      <div><b style="color:#059669;">🚀 Montar + Emitir NF</b> — Confirma e executa: monta os itens no Bling e emite a NF-e (transmite pra SEFAZ).</div>
+      <div><b>💡 Mudou algo e não apareceu?</b> Dê <b>Ctrl+Shift+R</b> (refresh forçado). A versão que está no ar aparece no topo, ao lado do título.</div>
+    </div>
+  </footer>
 </div>
 
 <script>
