@@ -109,37 +109,88 @@ function msgJaProcessada(orderId, tsMsgCliente) {
 // importar o pedido do ML. Em vez de jogar pra atencao humana na hora, guarda
 // os dados (a MESMA classificacao ja confirmada ao cliente — NAO re-roda a IA)
 // e tenta de novo nos proximos ciclos. A importacao costuma resolver em minutos.
-const RETRY_BLING_MAX = Number(process.env.LIXAS_RETRY_BLING_MAX || 8);
-const RETRY_BLING_IDADE_MIN = Number(process.env.LIXAS_RETRY_BLING_IDADE_MIN || 30);
-const _retryBling = new Map(); // orderId -> { venda, iaResult, graosResult, attempts, since }
+// Janela de paciencia pro Bling importar o pedido do ML. A ancora de idade e a
+// ultima_resposta_em (PERSISTENTE no banco), entao sobrevive a restart/deploy:
+// a fila e RELIDA DO BANCO a cada ciclo e a idade conta o tempo real de espera.
+const AGUARDANDO_BLING_MAX_MIN = Number(process.env.LIXAS_AGUARDANDO_BLING_MAX_MIN || 180); // 3h: tolera atraso/queda do Bling
+const _retryBling = new Map(); // cache em memoria: orderId -> { venda, iaResult, graosResult, attempts, since }
+
+// Idade (min) desde que comecamos a esperar o Bling — ancorada num timestamp do banco.
+function _idadeEsperaBlingMin(venda, fallbackSince) {
+  const ancora = (venda && (venda.ultima_resposta_em || venda.data_venda)) || null;
+  const t = ancora ? new Date(ancora).getTime() : (fallbackSince || Date.now());
+  return (Date.now() - t) / 60000;
+}
 
 async function _agendarOuEscalarRetry({ orderId, venda, iaResult, graosResult, lcp, erro }) {
   const k = String(orderId);
   const ex = _retryBling.get(k);
-  const attempts = ex ? ex.attempts : 0;
   const since = ex ? ex.since : Date.now();
-  const idadeMin = (Date.now() - since) / 60000;
-  if (attempts >= RETRY_BLING_MAX || idadeMin >= RETRY_BLING_IDADE_MIN) {
+  const idadeMin = _idadeEsperaBlingMin(venda, since);
+
+  if (idadeMin >= AGUARDANDO_BLING_MAX_MIN) {
     _retryBling.delete(k);
     await lcp.atualizarVenda(orderId, {
       status: 'precisa_atencao_humano',
-      bling_erro: `auto: pedido nao encontrado no Bling apos ${attempts} tentativas (${(erro || '').slice(0, 150)})`
+      bling_erro: `auto: pedido nao encontrado no Bling apos ${Math.round(idadeMin)} min de espera (${(erro || '').slice(0, 130)})`
     });
-    console.warn(`[retry-bling] order ${orderId} desistiu apos ${attempts} tentativas — humano`);
+    console.warn(`[retry-bling] order ${orderId} desistiu apos ${Math.round(idadeMin)} min — humano`);
     return { falha: true, motivo: 'pedido_nao_encontrado_max' };
   }
-  _retryBling.set(k, { venda, iaResult, graosResult, attempts: attempts + 1, since });
+
+  const attempts = ex ? ex.attempts + 1 : 1;
+  _retryBling.set(k, { venda, iaResult, graosResult, attempts, since });
   await lcp.atualizarVenda(orderId, {
     status: 'aguardando_bling',
-    bling_erro: `auto: pedido ainda nao importado no Bling — retry ${attempts + 1}/${RETRY_BLING_MAX}`
+    bling_erro: `auto: aguardando Bling importar o pedido (${Math.round(idadeMin)} min de espera, tentativa ${attempts})`
   });
-  console.log(`[retry-bling] order ${orderId} agendado pra retry (${attempts + 1}/${RETRY_BLING_MAX})`);
+  console.log(`[retry-bling] order ${orderId} aguardando Bling (${Math.round(idadeMin)}min / max ${AGUARDANDO_BLING_MAX_MIN})`);
   return { retry: true, motivo: 'pedido_nao_encontrado' };
+}
+
+// Reidrata a fila a partir do BANCO (status='aguardando_bling'). Faz a fila
+// SOBREVIVER a restart/deploy do Render: os dados ja confirmados ao cliente
+// (ia_pedido_estruturado) ficam salvos, entao reconstruimos iaResult e re-buscamos
+// o estoque fresco — sem re-rodar a IA nem re-conversar com o cliente.
+async function _rehidratarFilaDoBanco({ lcp }) {
+  let lista;
+  try { lista = await lcp.listarPendentes({ dias: 2, status: 'aguardando_bling', limit: 50 }); }
+  catch (e) { console.warn(`[retry-bling] erro lendo aguardando_bling do banco: ${e.message}`); return; }
+  if (!lista || !lista.ok || !Array.isArray(lista.data) || lista.data.length === 0) return;
+
+  const lixasService = require('../lixas-combinar/lixasService');
+  for (const v of lista.data) {
+    const k = String(v.order_id);
+    if (_retryBling.has(k)) continue; // ja esta na fila em memoria
+
+    let pedido_estruturado = null;
+    try { pedido_estruturado = v.ia_pedido_estruturado ? JSON.parse(v.ia_pedido_estruturado) : null; } catch (_) {}
+    if (!Array.isArray(pedido_estruturado) || pedido_estruturado.length === 0) continue; // sem estrutura: nao da pra auto
+
+    const iaResult = {
+      categoria: v.ia_categoria || 'claro',
+      confianca: Number(v.ia_confianca || 0),
+      pedido_estruturado,
+      interpretacao: v.ia_interpretacao || null,
+      msg_pra_cliente: v.ia_msg_enviada || null
+    };
+
+    let graosResult;
+    try { graosResult = await lixasService.getGraosDisponiveisPorSkuACombinar(v.sku_a_combinar); }
+    catch (e) { console.warn(`[retry-bling] rehidratar order ${k}: erro estoque ${e.message}`); continue; }
+    if (!graosResult || !graosResult.ok) continue;
+
+    const ancora = v.ultima_resposta_em || v.data_venda || null;
+    const since = ancora ? new Date(ancora).getTime() : Date.now();
+    _retryBling.set(k, { venda: v, iaResult, graosResult, attempts: 0, since });
+    console.log(`[retry-bling] order ${k} re-hidratado do banco (aguardando_bling, ${Math.round(_idadeEsperaBlingMin(v, since))}min de espera)`);
+  }
 }
 
 // Processa a fila de retry: re-tenta editar+emitir com os MESMOS dados ja
 // confirmados ao cliente. Roda no inicio de cada ciclo de leitura.
 async function retentarEmissoesBling({ lcp }) {
+  await _rehidratarFilaDoBanco({ lcp }); // pega orfaos deixados por restart/deploy
   if (_retryBling.size === 0) return;
   console.log(`[retry-bling] ${_retryBling.size} venda(s) na fila de retry`);
   for (const [orderId, entry] of Array.from(_retryBling.entries())) {
