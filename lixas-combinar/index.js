@@ -300,8 +300,13 @@ function routes(readBody) {
       const orderId = p.replace('/lixas-combinar/api/pedido/', '').replace('/ia-instrucao', '');
       try {
         const corpo = await readBody(req);
-        let payload = {};
-        try { payload = JSON.parse(corpo || '{}'); } catch (_) { payload = {}; }
+        let payload;
+        if (corpo && typeof corpo === 'object') {
+          payload = corpo;                                  // readBody ja devolve objeto parseado (mesmo formato do login)
+        } else {
+          try { payload = JSON.parse(corpo || '{}'); } catch (_) { payload = {}; }
+        }
+        if (!payload || typeof payload !== 'object') payload = {};
         const instrucao = String(payload.instrucao || '').trim();
         if (!instrucao) { json(res, 400, { ok: false, erro: 'instrucao_vazia' }); return true; }
 
@@ -390,8 +395,13 @@ function routes(readBody) {
       const orderId = p.replace('/lixas-combinar/api/pedido/', '').replace('/editar-bling', '');
       try {
         const corpo = await readBody(req);
-        let payload = {};
-        try { payload = JSON.parse(corpo || '{}'); } catch (_) { payload = {}; }
+        let payload;
+        if (corpo && typeof corpo === 'object') {
+          payload = corpo;                                  // readBody ja devolve objeto parseado (mesmo formato do login)
+        } else {
+          try { payload = JSON.parse(corpo || '{}'); } catch (_) { payload = {}; }
+        }
+        if (!payload || typeof payload !== 'object') payload = {};
 
         const dryRun = urlObj.searchParams.get('dryRun') === '1' || !!payload.dryRun;
         const lcp = require('../auto-mensagens/lixasCombinarPendentes');
