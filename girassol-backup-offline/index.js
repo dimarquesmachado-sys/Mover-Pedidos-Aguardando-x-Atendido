@@ -31,7 +31,7 @@ const path  = require('path');
 const fetch = require('node-fetch');
 const { garantirToken } = require('../girassol/tokenManager');
 
-const VERSAO     = 'girassol-backup-offline v15/06 b2';
+const VERSAO     = 'girassol-backup-offline v15/06 b3';
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 
 // ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
@@ -133,10 +133,7 @@ async function detalhePedido(id) {
   return data && data.data;
 }
 
-async function nfDoPedido(id) {
-  const { data } = await blingGet(`/pedidos/vendas/${id}/nfe`);
-  let nf = data && data.data;
-  if (Array.isArray(nf)) nf = nf[0];
+function parseNF(nf) {
   if (!nf) return null;
   return {
     id: nf.id || null,
@@ -144,6 +141,41 @@ async function nfDoPedido(id) {
     chave: nf.chaveAcesso || nf.chave || null,
     situacao: (nf.situacao && (nf.situacao.id || nf.situacao)) || null
   };
+}
+
+// método mandado pelo Diego: pagina /nfe (sem filtro) e acha a NF com id
+// entre pedidoId e pedidoId+2000 (ids sequenciais). /nfe vem desc por id.
+async function acharNFporRange(pedidoId) {
+  const pid = Number(pedidoId);
+  if (!pid) return null;
+  const teto = pid + 2000;
+  let melhor = null;
+  for (let pagina = 1; pagina <= 12; pagina++) {
+    const { ok, data } = await blingGet(`/nfe?limite=100&pagina=${pagina}`);
+    const lista = (data && data.data) || [];
+    if (!ok || lista.length === 0) break;
+    let menorIdPagina = Infinity;
+    for (const nf of lista) {
+      const nid = Number(nf.id) || 0;
+      if (nid && nid < menorIdPagina) menorIdPagina = nid;
+      if (nid >= pid && nid <= teto && (!melhor || nid < Number(melhor.id))) melhor = nf;
+    }
+    if (menorIdPagina < pid) break; // já passou abaixo do pedido → não acha mais
+    await sleep(PAUSA_MS);
+  }
+  return parseNF(melhor);
+}
+
+async function nfDoPedido(id) {
+  // 1) tenta o endpoint direto (barato)
+  const r = await blingGet(`/pedidos/vendas/${id}/nfe`);
+  if (r.ok) {
+    let nf = r.data && r.data.data;
+    if (Array.isArray(nf)) nf = nf[0];
+    if (nf) return parseNF(nf);
+  }
+  // 2) fallback: range de ID no /nfe
+  return await acharNFporRange(id);
 }
 
 // EAN: produto por id → produto por SKU. Cacheia por SKU.
@@ -167,7 +199,7 @@ async function eanDoItem(produtoId, sku, cacheEan) {
 
 // baixa a etiqueta de envio (link do Bling Logísticas) e devolve o conteúdo
 async function baixarEtiqueta(blingId) {
-  const { ok, data } = await blingGet(`/logisticas/etiquetas?formato=${ETIQ_FORMATO}&idsVendas=${blingId}`);
+  const { ok, data } = await blingGet(`/logisticas/etiquetas?formato=${ETIQ_FORMATO}&idsVendas[]=${blingId}`);
   const item = ok && data && data.data && data.data[0];
   const link = item && item.link;
   if (!link) return null;
@@ -335,14 +367,18 @@ function routes(readBody) {
         } : ped.data;
 
         const nfe = await blingGet(`/pedidos/vendas/${id}/nfe`);
-        out.nfe_status = nfe.status;
-        out.nfe_raw = nfe.data;
+        out.nfe_direto_status = nfe.status;
+        out.nfe_direto_raw = nfe.data;
+        out.nf_por_range = await acharNFporRange(id);
 
-        const etq = await blingGet(`/logisticas/etiquetas?formato=${ETIQ_FORMATO}&idsVendas=${id}`);
-        out.etiqueta_status = etq.status;
-        out.etiqueta_raw = etq.data;
+        // testa as 2 formas do parâmetro de etiqueta p/ cravar qual o Bling aceita
+        const etqA = await blingGet(`/logisticas/etiquetas?formato=${ETIQ_FORMATO}&idsVendas[]=${id}`);
+        out.etiqueta_bracket = { status: etqA.status, raw: etqA.data };
+        const etqB = await blingGet(`/logisticas/etiquetas?formato=${ETIQ_FORMATO}&idsVendas%5B%5D=${id}`);
+        out.etiqueta_encoded = { status: etqB.status, raw: etqB.data };
 
-        const link = etq.data && etq.data.data && etq.data.data[0] && etq.data.data[0].link;
+        const bom = (etqA.ok && etqA.data) ? etqA : (etqB.ok ? etqB : null);
+        const link = bom && bom.data && bom.data.data && bom.data.data[0] && bom.data.data[0].link;
         out.etiqueta_link = link || null;
         if (link) {
           try {
