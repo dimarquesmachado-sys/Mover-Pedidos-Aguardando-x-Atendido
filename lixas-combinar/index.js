@@ -385,6 +385,68 @@ function routes(readBody) {
       return true;
     }
 
+    // POST /lixas-combinar/api/pedido/:orderId/substituir-preview
+    //   Lê o pedido LITERAL do cliente (ultima_resposta_cliente, ou body.texto se o
+    //   admin quiser sobrescrever), troca grãos SEM estoque pelo mais próximo DISPONÍVEL
+    //   (motor determinístico, sem IA), funde repetidos e valida o total.
+    //   NÃO monta no Bling, NÃO emite NF. Só devolve o preview + as trocas.
+    if (method === 'POST' && p.startsWith('/lixas-combinar/api/pedido/') && p.endsWith('/substituir-preview')) {
+      const sessao = requerAuth();
+      if (!sessao.ok) { json(res, 401, { ok: false, erro: 'nao_autenticado' }); return true; }
+
+      const orderId = p.replace('/lixas-combinar/api/pedido/', '').replace('/substituir-preview', '');
+      try {
+        const lcp = require('../auto-mensagens/lixasCombinarPendentes');
+        const venda = await lcp.buscar(orderId);
+        if (!venda.ok || !venda.data) { json(res, 404, { ok: false, erro: 'venda_nao_encontrada', orderId }); return true; }
+        const v = venda.data;
+
+        // Body opcional: admin pode mandar { texto } pra sobrescrever (palavra do vendedor vale)
+        const corpo = await readBody(req);
+        let payload;
+        if (corpo && typeof corpo === 'object') { payload = corpo; }
+        else { try { payload = JSON.parse(corpo || '{}'); } catch (_) { payload = {}; } }
+        if (!payload || typeof payload !== 'object') payload = {};
+
+        const textoCliente = String(payload.texto || v.ultima_resposta_cliente || '').trim();
+
+        const sub = require('./substituicao');
+        const parsed = sub.parsePedidoLiteral(textoCliente);
+        if (!parsed.ok) {
+          json(res, 422, { ok: false, erro: 'nao_consegui_ler_pedido', texto: textoCliente, motivo: parsed.motivo });
+          return true;
+        }
+
+        const graosResult = await lixasService.getGraosDisponiveisPorSkuACombinar(v.sku_a_combinar);
+        if (!graosResult.ok || !Array.isArray(graosResult.graos) || graosResult.graos.length === 0) {
+          json(res, 500, { ok: false, erro: 'erro_consultar_graos_bling', detalhe: graosResult.erro });
+          return true;
+        }
+
+        const resolvido = sub.resolverPedidoComSubstituicao(
+          parsed.itens,
+          graosResult.graos,
+          graosResult.lixas_por_kit,
+          graosResult.unidades_por_pacote || 10
+        );
+
+        json(res, 200, {
+          ok: resolvido.ok,
+          pedidoCliente: parsed.itens,
+          trocas: resolvido.trocas,
+          pedidoFinal: resolvido.pedidoFinal,
+          total: resolvido.total,
+          totalEsperado: resolvido.totalEsperado,
+          multiplosOk: resolvido.multiplosOk,
+          avisos: resolvido.avisos,
+          graosDisponiveis: graosResult.graos.map(g => ({ grao: g.grao, estoque: g.estoque_pacotes }))
+        });
+      } catch (e) {
+        json(res, 500, { ok: false, erro: e.message, stack: e.stack });
+      }
+      return true;
+    }
+
     // POST /lixas-combinar/api/pedido/:orderId/editar-bling  → edita pedido Bling
     //   Body: { graos: [{grao:"24", quantidade:20}, ...], dryRun?: true }
     //   Aceita query ?dryRun=1 pra so previsualizar sem enviar
