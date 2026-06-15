@@ -148,20 +148,36 @@ async function _agendarOuEscalarRetry({ orderId, venda, iaResult, graosResult, l
   return { retry: true, motivo: 'pedido_nao_encontrado' };
 }
 
-// Reidrata a fila a partir do BANCO (status='aguardando_bling'). Faz a fila
-// SOBREVIVER a restart/deploy do Render: os dados ja confirmados ao cliente
-// (ia_pedido_estruturado) ficam salvos, entao reconstruimos iaResult e re-buscamos
-// o estoque fresco — sem re-rodar a IA nem re-conversar com o cliente.
+// Reidrata a fila a partir do BANCO. Faz a fila SOBREVIVER a restart/deploy:
+// os dados ja confirmados ao cliente (ia_pedido_estruturado) ficam salvos, entao
+// reconstruimos iaResult e re-buscamos o estoque — sem re-rodar a IA.
+//   (1) status 'aguardando_bling': re-tenta normal.
+//   (2) status 'precisa_atencao_humano': REPESCA so os que escalaram por TIMING do
+//       Bling (erro "nao encontrado no Bling"), ainda NAO montados e dentro da janela.
+//       Estoque/soma/IA escalonada NAO sao repescados (sao problema real, precisam de humano).
 async function _rehidratarFilaDoBanco({ lcp }) {
+  await _rehidratarStatus({ lcp, status: 'aguardando_bling', repescar: false });
+  await _rehidratarStatus({ lcp, status: 'precisa_atencao_humano', repescar: true });
+}
+
+async function _rehidratarStatus({ lcp, status, repescar }) {
   let lista;
-  try { lista = await lcp.listarPendentes({ dias: 2, status: 'aguardando_bling', limit: 50 }); }
-  catch (e) { console.warn(`[retry-bling] erro lendo aguardando_bling do banco: ${e.message}`); return; }
+  try { lista = await lcp.listarPendentes({ dias: 2, status, limit: 50 }); }
+  catch (e) { console.warn(`[retry-bling] erro lendo ${status} do banco: ${e.message}`); return; }
   if (!lista || !lista.ok || !Array.isArray(lista.data) || lista.data.length === 0) return;
 
   const lixasService = require('../lixas-combinar/lixasService');
   for (const v of lista.data) {
     const k = String(v.order_id);
     if (_retryBling.has(k)) continue; // ja esta na fila em memoria
+
+    if (repescar) {
+      // GUARDAS pra repescar de atencao humana so o que faz sentido:
+      const erroFoiTiming = String(v.bling_erro || '').includes('encontrado no Bling'); // pegou old + new format
+      if (!erroFoiTiming) continue;                                     // 1) so timing do Bling
+      if (v.bling_editado_em) continue;                                 // 2) ja montado: nao mexe
+      if (_idadeEsperaBlingMin(v) >= AGUARDANDO_BLING_MAX_MIN) continue; // 3) velho demais: deixa pro humano
+    }
 
     let pedido_estruturado = null;
     try { pedido_estruturado = v.ia_pedido_estruturado ? JSON.parse(v.ia_pedido_estruturado) : null; } catch (_) {}
@@ -183,7 +199,14 @@ async function _rehidratarFilaDoBanco({ lcp }) {
     const ancora = v.ultima_resposta_em || v.data_venda || null;
     const since = ancora ? new Date(ancora).getTime() : Date.now();
     _retryBling.set(k, { venda: v, iaResult, graosResult, attempts: 0, since });
-    console.log(`[retry-bling] order ${k} re-hidratado do banco (aguardando_bling, ${Math.round(_idadeEsperaBlingMin(v, since))}min de espera)`);
+
+    if (repescar) {
+      // devolve pro status de espera, pra ficar coerente (e nao ser re-listado como humano)
+      await lcp.atualizarVenda(k, { status: 'aguardando_bling', bling_erro: 'auto: repescado de atencao humana (timing Bling) — re-tentando' });
+      console.log(`[retry-bling] order ${k} REPESCADO de atencao humana (timing Bling, ${Math.round(_idadeEsperaBlingMin(v, since))}min) -> aguardando_bling`);
+    } else {
+      console.log(`[retry-bling] order ${k} re-hidratado do banco (aguardando_bling, ${Math.round(_idadeEsperaBlingMin(v, since))}min de espera)`);
+    }
   }
 }
 
