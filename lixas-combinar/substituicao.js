@@ -138,4 +138,38 @@ function resolverPedidoComSubstituicao(pedidoCliente, graosDisponiveis, totalEsp
   };
 }
 
-module.exports = { parsePedidoLiteral, escolherGraoSubstituto, resolverPedidoComSubstituicao };
+/**
+ * Monta a mensagem de FECHAMENTO pro cliente quando houve substituição de grão.
+ * Determinística, ≤350 chars (limite do ML), cita os grãos exatos. Tom: cordial,
+ * benefício do cliente (não atrasar o envio) — sem citar penalidade interna do ML.
+ * Retorna null se não houve troca (aí não manda nada).
+ *
+ * @param {Array}  trocas       [{de, para, qtd, dist}]
+ * @param {Array}  pedidoFinal  [{grao, quantidade}]
+ * @param {Number} totalLixas
+ */
+function montarMsgSubstituicao(trocas, pedidoFinal, totalLixas) {
+  if (!Array.isArray(trocas) || trocas.length === 0) return null;
+
+  let fraseTroca;
+  if (trocas.length === 1) {
+    const t = trocas[0];
+    fraseTroca = `O grão ${t.de} estava sem estoque e não recebemos sua escolha a tempo. Para não atrasar o envio do seu pedido, substituímos pelo grão ${t.para}, o mais próximo disponível.`;
+  } else {
+    const des = trocas.map(t => t.de).join(', ');
+    const par = trocas.map(t => `${t.de}→${t.para}`).join(', ');
+    fraseTroca = `Os grãos ${des} estavam sem estoque e não recebemos sua escolha a tempo. Para não atrasar o envio, substituímos pelos mais próximos disponíveis: ${par}.`;
+  }
+
+  const comp = (pedidoFinal || []).map(g => `${g.quantidade}x${g.grao}`).join(', ');
+
+  let msg = `Olá! ${fraseTroca} Seu pedido segue: ${comp} = ${totalLixas} lixas, já a caminho. Qualquer dúvida, estamos à disposição!`;
+  if (msg.length > 350) {
+    // Versão sem a composição detalhada (caso muitos grãos estourem o limite)
+    msg = `Olá! ${fraseTroca} Seu pedido (${totalLixas} lixas) já está a caminho. Qualquer dúvida, estamos à disposição!`;
+  }
+  if (msg.length > 350) msg = msg.slice(0, 347) + '...';
+  return msg;
+}
+
+module.exports = { parsePedidoLiteral, escolherGraoSubstituto, resolverPedidoComSubstituicao, montarMsgSubstituicao };
