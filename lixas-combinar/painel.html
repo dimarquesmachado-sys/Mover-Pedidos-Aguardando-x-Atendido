@@ -150,13 +150,20 @@
     main { padding: 10px; }
     .cards { grid-template-columns: 1fr; }
   }
-  .override { margin-top:8px; border-top:1px dashed #d1d5db; padding-top:8px; }
-  .override summary { cursor:pointer; font-size:13px; color:#4338ca; font-weight:600; }
-  .override-body { margin-top:8px; }
-  .override-hint { font-size:11px; color:#6b7280; margin-bottom:6px; }
-  .override-hint code { background:#f3f4f6; padding:1px 4px; border-radius:3px; }
-  .override-input { width:100%; padding:8px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px; box-sizing:border-box; margin-bottom:6px; }
-  .override-btns { display:flex; gap:6px; }
+  .iainstr { margin-top:8px; border-top:1px dashed #d1d5db; padding-top:8px; }
+  .iainstr summary { cursor:pointer; font-size:13px; color:#4338ca; font-weight:600; }
+  .iainstr-body { margin-top:8px; }
+  .iainstr-hint { font-size:11px; color:#6b7280; margin-bottom:6px; }
+  .iainstr-hint code { background:#f3f4f6; padding:1px 4px; border-radius:3px; display:inline-block; margin:1px 0; }
+  .iainstr-input { width:100%; padding:8px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px; box-sizing:border-box; margin-bottom:6px; font-family:inherit; resize:vertical; }
+  .iainstr-btns { display:flex; gap:6px; }
+  .iainstr-result { margin-top:8px; }
+  .instr-loading { font-size:13px; color:#6b7280; padding:6px; }
+  .instr-ok { background:#f0fdf4; border:1px solid #bbf7d0; border-radius:6px; padding:10px; font-size:13px; color:#166534; }
+  .instr-duvida { background:#fffbeb; border:1px solid #fde68a; border-radius:6px; padding:10px; font-size:13px; color:#92400e; }
+  .instr-erro { background:#fef2f2; border:1px solid #fecaca; border-radius:6px; padding:10px; font-size:13px; color:#991b1b; }
+  .instr-interp { margin-top:4px; font-style:italic; opacity:0.85; }
+  .instr-hint2 { margin-top:6px; font-size:11px; opacity:0.8; }
 </style>
 </head>
 <body>
@@ -362,22 +369,22 @@ function renderCard(v) {
     `;
   }
 
-  // OVERRIDE MANUAL — disponivel em QUALQUER card que ainda nao foi montado.
-  // Voce digita os graos na mao (ex: "20x100, 20x150, 10x320") quando o cliente
-  // ficou indeciso ou a IA travou. Usa a MESMA montagem (rateio + carrinho +
-  // validacao de total + NF) — so pula a interpretacao da IA.
-  let overrideBlock = '';
+  // INSTRUÇÃO PRA IA (linguagem natural) — disponivel em QUALQUER card nao montado.
+  // Voce escreve em portugues (ex: "manda 20 do 150 e 10 do 180 pra completar"),
+  // a IA rele a conversa do cliente + sua instrucao e devolve o pedido entendido.
+  // Voce confere e clica "Pedido OK + Emitir NF". NAO manda nada pro cliente no ML.
+  let iaInstrBlock = '';
   if (!v.bling_editado_em) {
-    overrideBlock = `
-      <details class="override">
-        <summary>✍️ Montar na mão (override)</summary>
-        <div class="override-body">
-          <div class="override-hint">Formato: <code>20x100, 20x150, 10x320</code> ou <code>20 100, 20 150</code> (qtd × grão). Total tem que fechar 100 por kit.</div>
-          <input type="text" id="ov-${v.order_id}" class="override-input" placeholder="ex: 20x100, 20x150, 20x180, 20x240, 10x320, 10x600">
-          <div class="override-btns">
-            <button class="btn-dry" onclick="overrideManual('${v.order_id}', true)">🧪 Preview</button>
-            <button class="btn-full" onclick="overrideManual('${v.order_id}', false)">🚀 Montar + NF</button>
+    iaInstrBlock = `
+      <details class="iainstr">
+        <summary>🤖 Instruir a IA (montar na mão via IA)</summary>
+        <div class="iainstr-body">
+          <div class="iainstr-hint">Escreva em português. A IA relê a conversa com o cliente + sua instrução e monta o pedido. Ex: <code>completa com 20 do 150 e 10 do 180</code> · <code>manda 50 do 24, 30 do 120 e 20 do 100</code></div>
+          <textarea id="instr-${v.order_id}" class="iainstr-input" rows="2" placeholder="sua instrução pra IA..."></textarea>
+          <div class="iainstr-btns">
+            <button class="btn-dry" onclick="iaInterpretar('${v.order_id}')">🧠 Interpretar</button>
           </div>
+          <div id="instr-result-${v.order_id}" class="iainstr-result"></div>
         </div>
       </details>
     `;
@@ -418,7 +425,7 @@ function renderCard(v) {
         ${botoesBling}
         ${v.status !== 'processado' ? `<button class="processed" onclick="marcarProcessado('${v.order_id}')">✓ Processado</button>` : ''}
       </div>
-      ${overrideBlock}
+      ${iaInstrBlock}
     </div>
   `;
 }
@@ -515,88 +522,49 @@ async function emitirNF(orderId) {
 }
 
 
-// ── OVERRIDE MANUAL ────────────────────────────────────────────────
-// Parser: aceita "20x100, 20x150", "20 x 100; 20 x 150", "20 100 / 20 150".
-// Regra: em cada par, o PRIMEIRO numero eh a QUANTIDADE, o segundo eh o GRAO.
-function parseGraosManual(txt) {
-  if (!txt || !txt.trim()) return { ok: false, erro: 'vazio' };
-  // separa em pares por virgula, ponto-e-virgula ou barra
-  const pares = txt.split(/[,;/\n]+/).map(s => s.trim()).filter(Boolean);
-  const out = [];
-  for (const p of pares) {
-    // dois numeros separados por x, ×, '*' ou espaco
-    const m = p.match(/(\d+)\s*[x×*\s]\s*(\d+)/i);
-    if (!m) return { ok: false, erro: `nao entendi "${p}" — use QTDxGRAO, ex 20x100` };
-    const quantidade = parseInt(m[1], 10);
-    const grao = String(parseInt(m[2], 10));
-    if (!quantidade || !grao) return { ok: false, erro: `valores invalidos em "${p}"` };
-    out.push({ grao, quantidade });
-  }
-  if (out.length === 0) return { ok: false, erro: 'nenhum par valido' };
-  const total = out.reduce((s, g) => s + g.quantidade, 0);
-  return { ok: true, graos: out, total };
-}
+// ── INSTRUIR A IA (linguagem natural) ──────────────────────────────
+async function iaInterpretar(orderId) {
+  const ta = document.getElementById('instr-' + orderId);
+  const instrucao = ta ? ta.value.trim() : '';
+  const resultDiv = document.getElementById('instr-result-' + orderId);
+  if (!instrucao) { if (resultDiv) resultDiv.innerHTML = '<div class="instr-erro">Escreva uma instrução primeiro.</div>'; return; }
 
-async function overrideManual(orderId, dryRun) {
-  const inp = document.getElementById('ov-' + orderId);
-  const txt = inp ? inp.value : '';
-  const parsed = parseGraosManual(txt);
-  if (!parsed.ok) {
-    mostrarModal('❌ Formato invalido', parsed.erro + '\n\nExemplos validos:\n  20x100, 20x150, 20x180, 20x240, 10x320, 10x600\n  20 100, 20 150', true);
-    return;
-  }
-
-  const resumo = parsed.graos.map(g => `${g.quantidade}x grao ${g.grao}`).join(', ');
-  if (!dryRun) {
-    if (!confirm(`OVERRIDE MANUAL do pedido ${orderId}:\n\n${resumo}\nTotal: ${parsed.total} lixas\n\nVai MONTAR no Bling e EMITIR a NF-e (transmite pra SEFAZ). Confirmar?`)) return;
-  }
-
-  const btns = document.querySelectorAll('.btn-dry, .btn-real, .btn-nf, .btn-full');
-  btns.forEach(b => b.disabled = true);
+  if (resultDiv) resultDiv.innerHTML = '<div class="instr-loading">🤖 IA lendo a conversa e interpretando...</div>';
 
   try {
-    // Passo 1 — edita o pedido no Bling com os graos digitados (envia no body)
-    const url1 = `${API_BASE}/api/pedido/${orderId}/editar-bling${dryRun ? '?dryRun=1' : ''}`;
-    const r1 = await fetch(url1, {
+    const r = await fetch(`${API_BASE}/api/pedido/${orderId}/ia-instrucao`, {
       method: 'POST',
       headers: { 'X-Session-Token': token(), 'Content-Type': 'application/json' },
-      body: JSON.stringify({ graos: parsed.graos })
+      body: JSON.stringify({ instrucao })
     });
-    if (r1.status === 401) { logout(); return; }
-    const d1 = await r1.json();
+    if (r.status === 401) { logout(); return; }
+    const d = await r.json();
 
-    if (!d1.ok) {
-      mostrarModal('❌ Erro ao montar', `(${d1.etapa || '?'}) ${d1.erro || ''}\n\n${JSON.stringify(d1, null, 2)}`, true);
+    if (!d.ok) {
+      if (resultDiv) resultDiv.innerHTML = `<div class="instr-erro">❌ ${esc(d.erro || 'falha')} ${d.detalhe ? '— ' + esc(d.detalhe) : ''}</div>`;
       return;
     }
 
-    if (dryRun) {
-      const rateio = d1.rateio || {};
-      const linhas = (rateio.linhas || []).map(l => `  ${l.codigo} | ${l.quantidade} × R$ ${l.valor} = R$ ${(l.quantidade * l.valor).toFixed(2)}`).join('\n');
-      const ajusteTxt = rateio.ajuste ? `\n${rateio.ajuste.tipo}: R$ ${rateio.ajuste.valor}` : '\n(sem ajuste — bateu exato)';
-      mostrarModal('✅ PREVIEW (override)', `Pedido Bling ID ${d1.pedidoId}\n\n${resumo}\nTotal: ${parsed.total} lixas\n\nLinhas:\n${linhas}${ajusteTxt}\n\nSoma: R$ ${rateio.somaSubtotais} | Valor pedido: R$ ${rateio.valorTotalPedido}`, false);
-      return;
-    }
-
-    // Passo 2 — emite a NF
-    const r2 = await fetch(`${API_BASE}/api/pedido/${orderId}/emitir-nf`, {
-      method: 'POST',
-      headers: { 'X-Session-Token': token(), 'Content-Type': 'application/json' },
-      body: '{}'
-    });
-    if (r2.status === 401) { logout(); return; }
-    const d2 = await r2.json();
-
-    if (d2.ok) {
-      mostrarModal('✅ Pedido + NF prontos (override)', `Pedido ID: ${d1.pedidoId}\nNF: ${d2.numero || '?'} / serie ${d2.serie || '?'}\nChave: ${d2.chave || '(aguardando SEFAZ)'}\n\n${resumo}`, false);
+    if (d.categoria === 'claro' && d.pronto_pra_montar && Array.isArray(d.pedido_estruturado)) {
+      const linhas = d.pedido_estruturado.map(g => `${g.quantidade}x grão ${g.grao}`).join(', ');
+      if (resultDiv) resultDiv.innerHTML = `
+        <div class="instr-ok">
+          ✅ <b>IA entendeu:</b> ${esc(linhas)} — <b>total ${d.total_interpretado} lixas</b>
+          ${d.interpretacao ? `<div class="instr-interp">${esc(d.interpretacao)}</div>` : ''}
+          <button class="btn-full" style="margin-top:8px;width:100%" onclick="montarComNF('${orderId}')">✅ Pedido OK + Emitir NF</button>
+        </div>`;
+    } else if (d.categoria === 'ambiguo' || d.categoria === 'pergunta_graos') {
+      if (resultDiv) resultDiv.innerHTML = `
+        <div class="instr-duvida">
+          🤔 <b>IA ficou em dúvida:</b> ${esc(d.interpretacao || '')}
+          ${d.msg_ia ? `<div class="instr-interp">💬 ${esc(d.msg_ia)}</div>` : ''}
+          <div class="instr-hint2">Reescreva a instrução com mais detalhe (quantidades exatas por grão) e clique Interpretar de novo.</div>
+        </div>`;
     } else {
-      mostrarModal('⚠️ Montou, NF falhou', `Itens montados no pedido ${d1.pedidoId}, mas a NF nao saiu:\n${d2.erro || ''}\n\nUse "📄 Emitir NF" pra tentar de novo.`, true);
+      if (resultDiv) resultDiv.innerHTML = `<div class="instr-erro">IA classificou como <b>${esc(d.categoria)}</b> — ${esc(d.interpretacao || 'não dá pra montar com isso')}. Tente reformular.</div>`;
     }
-    await recarregar();
   } catch (e) {
-    mostrarModal('❌ Erro', e.message, true);
-  } finally {
-    btns.forEach(b => b.disabled = false);
+    if (resultDiv) resultDiv.innerHTML = `<div class="instr-erro">❌ ${esc(e.message)}</div>`;
   }
 }
 
