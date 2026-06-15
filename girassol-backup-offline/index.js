@@ -31,7 +31,7 @@ const path  = require('path');
 const fetch = require('node-fetch');
 const { garantirToken } = require('../girassol/tokenManager');
 
-const VERSAO     = 'girassol-backup-offline v15/06 b1';
+const VERSAO     = 'girassol-backup-offline v15/06 b2';
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 
 // ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
@@ -314,6 +314,50 @@ function routes(readBody) {
         semEtiqueta: ids.filter(i => !man[i].tem_etiqueta).length,
         pedidos: ids.map(i => ({ id: i, ...man[i] }))
       });
+      return true;
+    }
+
+    // DEBUG: dumpa as respostas cruas do Bling p/ um pedido (diagnóstico NF/etiqueta)
+    if (method === 'GET' && p.startsWith('/girassol-backup-offline/debug/')) {
+      const id = p.split('/').filter(Boolean).pop();
+      const out = { id, versao: VERSAO };
+      try {
+        const ped = await blingGet(`/pedidos/vendas/${id}`);
+        out.pedido_status = ped.status;
+        const d = ped.data && ped.data.data;
+        out.pedido = d ? {
+          numero: d.numero,
+          situacao: d.situacao,
+          loja: d.loja,
+          numeroLoja: d.numeroLoja,
+          contato: d.contato && { nome: d.contato.nome },
+          itens: (d.itens || []).map(it => ({ codigo: it.codigo, quantidade: it.quantidade, produto: it.produto }))
+        } : ped.data;
+
+        const nfe = await blingGet(`/pedidos/vendas/${id}/nfe`);
+        out.nfe_status = nfe.status;
+        out.nfe_raw = nfe.data;
+
+        const etq = await blingGet(`/logisticas/etiquetas?formato=${ETIQ_FORMATO}&idsVendas=${id}`);
+        out.etiqueta_status = etq.status;
+        out.etiqueta_raw = etq.data;
+
+        const link = etq.data && etq.data.data && etq.data.data[0] && etq.data.data[0].link;
+        out.etiqueta_link = link || null;
+        if (link) {
+          try {
+            const r = await fetch(link);
+            const body = await r.text();
+            out.etiqueta_download = {
+              status: r.status,
+              contentType: r.headers.get('content-type'),
+              tamanho: body.length,
+              inicio: body.slice(0, 120)
+            };
+          } catch (e) { out.etiqueta_download = { erro: e.message }; }
+        }
+      } catch (e) { out.erro = e.message; }
+      json(res, 200, out);
       return true;
     }
 
