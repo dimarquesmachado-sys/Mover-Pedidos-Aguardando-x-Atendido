@@ -162,11 +162,16 @@ function montarMsgSubstituicao(trocas, pedidoFinal, totalLixas) {
   }
 
   const comp = (pedidoFinal || []).map(g => `${g.quantidade}x${g.grao}`).join(', ');
+  const rastreio = 'O rastreamento do envio você acompanha dentro da sua compra no Mercado Livre.';
 
-  let msg = `Olá! ${fraseTroca} Seu pedido segue: ${comp} = ${totalLixas} lixas, já a caminho. Qualquer dúvida, estamos à disposição!`;
+  let msg = `Olá! ${fraseTroca} Seu pedido: ${comp} = ${totalLixas} lixas. ${rastreio} Qualquer dúvida, estamos à disposição!`;
   if (msg.length > 350) {
-    // Versão sem a composição detalhada (caso muitos grãos estourem o limite)
-    msg = `Olá! ${fraseTroca} Seu pedido (${totalLixas} lixas) já está a caminho. Qualquer dúvida, estamos à disposição!`;
+    // sem a composicao detalhada (caso muitos graos estourem o limite)
+    msg = `Olá! ${fraseTroca} ${rastreio} Qualquer dúvida, estamos à disposição!`;
+  }
+  if (msg.length > 350) {
+    // sem o "qualquer duvida"
+    msg = `Olá! ${fraseTroca} ${rastreio}`;
   }
   if (msg.length > 350) msg = msg.slice(0, 347) + '...';
   return msg;
