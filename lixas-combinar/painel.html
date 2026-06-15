@@ -182,7 +182,7 @@
 
 <div id="app" style="display:none">
 <header>
-  <h1>🌻 Lixas A COMBINAR <span class="badge">Pendentes</span><span class="ver" style="font-size:11px;font-weight:normal;color:#9ca3af;margin-left:8px;font-family:monospace;">v15/06 · subst-5</span></h1>
+  <h1>🌻 Lixas A COMBINAR <span class="badge">Pendentes</span><span class="ver" style="font-size:11px;font-weight:normal;color:#9ca3af;margin-left:8px;font-family:monospace;">v15/06 · subst-6</span></h1>
   <div class="toolbar">
     <select id="filtro-status" onchange="recarregar()">
       <option value="">Todos os status</option>
@@ -217,6 +217,7 @@
     <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:10px 24px;">
       <div><b style="color:#0891b2;">🔧 Substituir indisponíveis</b> — <b>Automático.</b> Lê o pedido do cliente sozinho, troca o grão sem estoque pelo mais próximo disponível, monta no Bling, emite a NF e avisa o cliente. É o do dia a dia.</div>
       <div><b style="color:#6366f1;">🧠 Interpretar</b> — <b>Manual.</b> Você digita os grãos (ex: <code>manda 50 do 24, 30 do 120 e 20 do 100</code> ou <code>completa com 20 do 150</code>). Pra pedidos estranhos em que você quer ditar. <b>Não</b> faz substituição por regra.</div>
+      <div><b style="color:#6366f1;">🧪 Preview</b> — <b>Ensaio.</b> Testa a montagem no Bling sem emitir nada (confere produtos, quantidades e valores). É o "dry-run" antes do 🚀.</div>
       <div><b style="color:#059669;">🚀 Montar + Emitir NF</b> — Confirma e executa: monta os itens no Bling e emite a NF-e (transmite pra SEFAZ).</div>
       <div><b>💡 Mudou algo e não apareceu?</b> Dê <b>Ctrl+Shift+R</b> (refresh forçado). A versão que está no ar aparece no topo, ao lado do título.</div>
     </div>
@@ -375,8 +376,8 @@ function renderCard(v) {
   let botoesBling = '';
   if (v.ia_categoria === 'claro' && v.ia_pedido_estruturado && !v.bling_editado_em) {
     botoesBling = `
-      <button class="btn-dry" onclick="testarBling('${v.order_id}', true)">🧪 Preview</button>
-      <button class="btn-full" onclick="montarComNF('${v.order_id}')">🚀 Montar Pedido + NF Bling</button>
+      <button class="btn-dry" title="Ensaio (dry-run): testa a montagem no Bling SEM emitir nada — confere se acha os produtos, se as quantidades batem e se os valores/rateio fecham" onclick="testarBling('${v.order_id}', true)">🧪 Preview</button>
+      <button class="btn-full" title="Monta os itens no Bling (usando o pedido que a IA entendeu) e emite a NF-e — transmite pra SEFAZ" onclick="montarComNF('${v.order_id}')">🚀 Montar Pedido + NF Bling</button>
     `;
   }
 
@@ -393,8 +394,8 @@ function renderCard(v) {
           <div class="iainstr-hint">Escreva em português. A IA relê a conversa com o cliente + sua instrução e monta o pedido. Ex: <code>completa com 20 do 150 e 10 do 180</code> · <code>manda 50 do 24, 30 do 120 e 20 do 100</code></div>
           <textarea id="instr-${v.order_id}" class="iainstr-input" rows="2" placeholder="sua instrução pra IA..."></textarea>
           <div class="iainstr-btns">
-            <button class="btn-dry" onclick="iaInterpretar('${v.order_id}')">🧠 Interpretar</button>
-            <button class="btn-sub" onclick="substituirPreview('${v.order_id}')">🔧 Substituir indisponíveis</button>
+            <button class="btn-dry" title="MANUAL: você digita os grãos (ex: 'manda 50 do 24, 30 do 120') e a IA monta o pedido. NÃO faz substituição por regra" onclick="iaInterpretar('${v.order_id}')">🧠 Interpretar</button>
+            <button class="btn-sub" title="AUTOMÁTICO: lê o pedido do cliente, troca grão sem estoque pelo mais próximo, e mostra o preview pra montar + NF + avisar o cliente" onclick="substituirPreview('${v.order_id}')">🔧 Substituir indisponíveis</button>
           </div>
           <div id="instr-result-${v.order_id}" class="iainstr-result"></div>
         </div>
@@ -432,10 +433,10 @@ function renderCard(v) {
         </details>
       ` : ''}
       <div class="card-actions">
-        <a href="${msgLink}" target="_blank">💬 Abrir ML</a>
-        <a href="${orderLink}" target="_blank">🛒 Venda</a>
+        <a href="${msgLink}" target="_blank" title="Abre a conversa com o cliente no Mercado Livre">💬 Abrir ML</a>
+        <a href="${orderLink}" target="_blank" title="Abre o detalhe da venda no Mercado Livre">🛒 Venda</a>
         ${botoesBling}
-        ${v.status !== 'processado' ? `<button class="processed" onclick="marcarProcessado('${v.order_id}')">✓ Processado</button>` : ''}
+        ${v.status !== 'processado' ? `<button class="processed" title="Marca como resolvido na mão (tira da lista de pendentes). Use quando você já tratou esse pedido por fora" onclick="marcarProcessado('${v.order_id}')">✓ Processado</button>` : ''}
       </div>
       ${iaInstrBlock}
     </div>
