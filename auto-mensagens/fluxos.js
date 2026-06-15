@@ -486,7 +486,86 @@ async function rotinaACombinar() {
   }
 }
 
-module.exports = { rotinaACombinar, rotinaLerRespostas, forcarOrder, processarAutoEmissao, HABILITADO, TEXTO };
+module.exports = { rotinaACombinar, rotinaLerRespostas, forcarOrder, processarAutoEmissao, recuperarPendentes, HABILITADO, TEXTO };
+
+/**
+ * RECUPERAR PENDENTES — re-registra na tabela lixas_combinar_pendentes todas
+ * as vendas A COMBINAR de uma janela maior (default 7 dias), SEM reenviar
+ * mensagem inicial (so recoloca no radar pra lerRespostas processar).
+ * Util quando registros foram apagados da tabela ou ficaram pra tras da
+ * janela de 30min da rotinaACombinar. Varre packs multi-order corretamente.
+ *
+ * @param {number} dias - quantos dias pra tras buscar (default 7)
+ * @returns {object} stats
+ */
+async function recuperarPendentes(dias = 7) {
+  const stats = { dias, vendasNaJanela: 0, aCombinar: 0, registradas: 0, jaTinham: 0, semACombinar: 0, erros: 0, detalhes: [] };
+  const lcp = require('./lixasCombinarPendentes');
+  if (!lcp.configurado()) return { ok: false, erro: 'supabase_nao_configurado', stats };
+
+  const desde = new Date(Date.now() - dias * 24 * 60 * 60 * 1000);
+  console.log(`[recuperar] buscando vendas A COMBINAR desde ${desde.toISOString()} (${dias} dias)`);
+
+  let vendas;
+  try {
+    vendas = await ml.buscarVendasPagas(desde);
+  } catch (e) {
+    return { ok: false, erro: `buscarVendasPagas falhou: ${e.message}`, stats };
+  }
+  stats.vendasNaJanela = vendas.length;
+
+  for (const venda of vendas) {
+    try {
+      const orderId = String(venda.id);
+      const detalhe = await ml.getOrderDetalhe(orderId);
+      if (!ml.temVariacaoACombinar(detalhe)) { stats.semACombinar++; continue; }
+      stats.aCombinar++;
+
+      // ja esta na tabela?
+      const existente = await lcp.buscar(orderId);
+      if (existente.ok && existente.data) { stats.jaTinham++; continue; }
+
+      // le a conversa pra saber se o cliente ja respondeu (define status)
+      const packId = detalhe.pack_id;
+      const buyerId = detalhe.buyer?.id;
+      let respostasCliente = null;
+      let totalMsgsCliente = 0;
+      try {
+        const conv = await ml.consultarConversa({ packId, orderId, markAsRead: false });
+        if (conv.ok) {
+          totalMsgsCliente = conv.totalCliente || 0;
+          respostasCliente = (conv.totalCliente > 0) ? conv.ultimaCliente : null;
+        }
+      } catch (_) { /* segue sem conversa */ }
+
+      const sku = ml.extrairSkuACombinar(detalhe);
+      await lcp.upsertPendente({
+        orderId, packId, buyerId,
+        buyerNome: detalhe.buyer?.nickname || `${detalhe.buyer?.first_name || ''} ${detalhe.buyer?.last_name || ''}`.trim(),
+        skuACombinar: sku?.sku || null,
+        descricaoProduto: sku?.titulo || null,
+        quantidadeLixas: null,
+        dataVenda: detalhe.date_created || new Date().toISOString(),
+        msgInicialEnviada: null,           // NAO reenvia — so recupera
+        msgInicialEnviadaEm: null,
+        clienteRespondeu: !!respostasCliente,
+        ultimaRespostaCliente: respostasCliente?.text || null,
+        ultimaRespostaEm: respostasCliente?.date_created || null,
+        totalMsgsCliente,
+        status: respostasCliente ? 'cliente_respondeu' : 'aguardando_resposta',
+        viaEndpoint: 'recuperado'
+      });
+      stats.registradas++;
+      stats.detalhes.push({ orderId, buyer: detalhe.buyer?.nickname, sku: sku?.sku, respondeu: !!respostasCliente });
+    } catch (e) {
+      stats.erros++;
+      console.error(`[recuperar] erro na venda ${venda.id}: ${e.message}`);
+    }
+  }
+
+  console.log(`[recuperar] fim: ${stats.registradas} registradas, ${stats.jaTinham} ja tinham, ${stats.aCombinar} A COMBINAR de ${stats.vendasNaJanela} vendas`);
+  return { ok: true, stats };
+}
 
 /**
  * NOVO (Sessao 3): rotinaLerRespostas
