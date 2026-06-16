@@ -2,7 +2,7 @@
 
 // ════════════════════════════════════════════════════════════════════════
 //  GIRASSOL · CHECKOUT OFFLINE — FASE 1 (poller) + FASE 2 (bipagem)   (Mover-Pedidos)
-//  girassol-backup-offline v16/06 b19   (a versão real é a const VERSAO abaixo)
+//  girassol-backup-offline v16/06 b20   (a versão real é a const VERSAO abaixo)
 // ════════════════════════════════════════════════════════════════════════
 //  Módulo do orquestrador unificado (HTTP-native, sem Express).
 //  Reaproveita o token Bling da Girassol via ../girassol/tokenManager.
@@ -32,7 +32,7 @@ const fetch = require('node-fetch');
 const AdmZip = require('adm-zip');
 const { garantirToken } = require('../girassol/tokenManager');
 
-const VERSAO     = 'girassol-backup-offline v16/06 b19';
+const VERSAO     = 'girassol-backup-offline v16/06 b20';
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 
 // ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
@@ -619,25 +619,34 @@ function routes(readBody) {
       return true;
     }
 
-    // serve o DANFE (PDF) cacheado — p/ abrir no navegador ou o QZ imprimir
+    // serve o DANFE (PDF) — usa o cache; se faltar, gera na hora pelo Bling
     if (method === 'GET' && p.startsWith('/girassol-backup-offline/danfe/')) {
       const id = p.split('/').filter(Boolean).pop();
-      try {
-        const pdf = fs.readFileSync(path.join(CACHE_DIR, String(id), 'danfe.pdf'));
-        res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': 'inline; filename="danfe.pdf"' });
-        res.end(pdf);
-      } catch (e) { json(res, 404, { erro: 'danfe não cacheada' }); }
+      const dir = path.join(CACHE_DIR, String(id));
+      let pdf = null;
+      try { pdf = fs.readFileSync(path.join(dir, 'danfe.pdf')); } catch (e) {}
+      if (!pdf) { // não cacheado → gera agora (precisa do Bling online)
+        const snap = readJson(path.join(dir, 'pedido.json'), null);
+        const nfId = snap && snap.nf && snap.nf.id;
+        if (nfId) { pdf = await baixarDanfe(nfId); if (pdf) { try { ensureDir(dir); fs.writeFileSync(path.join(dir, 'danfe.pdf'), pdf); } catch (e) {} } }
+      }
+      if (pdf) { res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': 'inline; filename="danfe.pdf"' }); res.end(pdf); }
+      else json(res, 404, { erro: 'DANFE indisponível (sem cache e Bling não respondeu)' });
       return true;
     }
 
-    // serve a ETIQUETA em PDF cacheada — p/ o modo A4 imprimir na laser
+    // serve a ETIQUETA em PDF — usa o cache; se faltar, gera na hora pelo Bling
     if (method === 'GET' && p.startsWith('/girassol-backup-offline/etiqueta-pdf/')) {
       const id = p.split('/').filter(Boolean).pop();
-      try {
-        const pdf = fs.readFileSync(path.join(CACHE_DIR, String(id), 'etiqueta.pdf'));
-        res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': 'inline; filename="etiqueta.pdf"' });
-        res.end(pdf);
-      } catch (e) { json(res, 404, { erro: 'etiqueta pdf não cacheada (ainda)' }); }
+      const dir = path.join(CACHE_DIR, String(id));
+      let pdf = null;
+      try { pdf = fs.readFileSync(path.join(dir, 'etiqueta.pdf')); } catch (e) {}
+      if (!pdf) { // não cacheado → gera agora (precisa do Bling online)
+        pdf = await baixarEtiquetaPDF(id);
+        if (pdf) { try { ensureDir(dir); fs.writeFileSync(path.join(dir, 'etiqueta.pdf'), pdf); } catch (e) {} }
+      }
+      if (pdf) { res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': 'inline; filename="etiqueta.pdf"' }); res.end(pdf); }
+      else json(res, 404, { erro: 'etiqueta PDF indisponível (sem cache e Bling não respondeu)' });
       return true;
     }
 
