@@ -146,7 +146,7 @@
 <div class="modal" id="modal"></div>
 
 <script>
-const UI_BUILD = 'b15';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b16';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#ff9900'}, magalu:{n:'Magalu',c:'#0086ff'}, outro:{n:'Outro',c:'#94a3b8'}
@@ -241,8 +241,13 @@ async function imprimirPDF(url){
   await conectarQZ();
   const printer = await getImpressoraNF();
   if(!printer) throw new Error('Nenhuma impressora encontrada');
+  const resp = await fetch(url);
+  if(!resp.ok) throw new Error('PDF '+resp.status);
+  const bytes = new Uint8Array(await resp.arrayBuffer());
+  let bin=''; for(let i=0;i<bytes.length;i++) bin+=String.fromCharCode(bytes[i]);
+  const b64 = btoa(bin);
   const cfg = qz.configs.create(printer);
-  await qz.print(cfg, [{ type:'pixel', format:'pdf', flavor:'file', data: url }]);
+  await qz.print(cfg, [{ type:'pixel', format:'pdf', flavor:'base64', data: b64 }]);
 }
 
 // ── API ──
@@ -342,7 +347,7 @@ function renderDetail(){
     ? 'NF <b>'+esc(p.nf.numero||'?')+'</b>'+(temDanfe?' <span class="nfok">PDF ✓</span>':'')+'<div class="chave">'+esc(p.nf.chave||'')+'</div>'
     : '<span class="noean">⚠ NF não cacheada (segue só com a etiqueta)</span>';
   const nfBar = temDanfe
-    ? '<div class="nfbar clic" title="abrir DANFE em PDF" onclick="abrirDanfe(\''+esc(p.id)+'\')">'+nfMiolo+'</div>'
+    ? '<div class="nfbar clic" title="abrir DANFE em PDF" onclick="abrirDanfe(\''+esc(p.bling_id)+'\')">'+nfMiolo+'</div>'
     : '<div class="nfbar">'+nfMiolo+'</div>';
   $('detail').innerHTML =
     '<div class="dhead">'+
@@ -432,7 +437,7 @@ async function imprimirAtual(){ try{ await imprimirZPL(zplAtual); toast('🖨 et
 function abrirDanfe(id){ window.open('/girassol-backup-offline/danfe/'+id, '_blank'); }
 async function imprimirNFAtual(){
   try{
-    const id = pedidoAtual && pedidoAtual.id;
+    const id = pedidoAtual && pedidoAtual.bling_id;
     if(!id) return;
     await imprimirPDF(location.origin+'/girassol-backup-offline/danfe/'+id);
     toast('🧾 NF enviada');
