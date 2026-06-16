@@ -451,7 +451,15 @@ async function editarPedidoComGraos({
   // e preserva os demais itens intocados.
   const itensPedido = Array.isArray(pedido.itens) ? pedido.itens : [];
   let outrosItens = null;
-  let valorTotalPedido = totalOriginalPedido;
+  // MODO PADRAO (1 item): rateia o valor dos PRODUTOS (soma dos itens), NUNCA o
+  // pedido.total — porque o total INCLUI O FRETE. Se ratear o total-com-frete nos
+  // itens, o frete fica contado em dobro (itens + frete) e o Bling rejeita a venda
+  // ("somatorio das parcelas difere do total"). Assim frete/desconto ficam intactos
+  // e o total volta a fechar: itens(produtos) + frete = total = parcelas.
+  const totalProdutos = arredondar2(
+    itensPedido.reduce((s, it) => s + Number(it.valor || 0) * Number(it.quantidade || 0), 0)
+  );
+  let valorTotalPedido = totalProdutos > 0 ? totalProdutos : totalOriginalPedido;
   if (itensPedido.length > 1) {
     const rx = /A-?\s?COMBINAR/i;
     const alvos = itensPedido.filter(it =>
