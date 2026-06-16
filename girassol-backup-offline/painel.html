@@ -67,6 +67,12 @@
   .hint{font-size:12px;color:var(--mut);text-align:center;margin-top:5px}
   .item{display:flex;align-items:center;gap:12px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 13px;margin-bottom:8px}
   .item.full{border-color:var(--ok);background:#15241a}
+  .kitwrap{border:1px solid var(--line);border-radius:11px;margin-bottom:10px;overflow:hidden;background:#171b24}
+  .kitwrap.full{border-color:var(--ok)}
+  .kithead{padding:10px 13px;background:#202634;font-size:14px;border-bottom:1px solid var(--line)}
+  .ktag{display:inline-block;font-size:10px;font-weight:800;background:var(--warn);color:#1a1205;padding:2px 7px;border-radius:5px;margin-right:6px;vertical-align:middle}
+  .comps{padding:8px 8px 1px}
+  .item.comp{margin-left:14px;border-left:3px solid #3a4657}
   .icount{font-size:19px;font-weight:800;min-width:60px;text-align:center}
   .icount .b{color:var(--ok)}
   .idesc{flex:1}
@@ -230,12 +236,29 @@ async function selecionar(id){
   try{
     const ped = await api('/girassol-backup-offline/pedido/'+id);
     if(ped.erro){ toast(ped.erro); return; }
-    ped.itens = (ped.itens||[]).map(it=>({ ...it, bipado:0 }));
+    prepararPedido(ped);
     pedidoAtual = ped;
     zplAtual = await fetch('/girassol-backup-offline/etiqueta/'+id).then(r=>r.text());
     renderDetail();
     renderLista(); // atualiza highlight
   }catch(e){ toast('Erro: '+e.message); }
+}
+
+// grupos = exibição (kit vira cabeçalho + componentes; senão item simples)
+// unidades = lista PLANA do que se bipa (componentes p/ kit, o próprio item p/ leaf)
+function prepararPedido(ped){
+  const grupos = [], unidades = [];
+  let uid = 0;
+  const novaUnid = (o)=>{ const u={ _id:uid++, sku:o.sku||'', ean:o.ean||null, descricao:o.descricao||'', qtd:Number(o.qtd||0), bipado:0 }; unidades.push(u); return u; };
+  for(const it of (ped.itens||[])){
+    if(it.tipo==='kit' && Array.isArray(it.componentes) && it.componentes.length){
+      const comps = it.componentes.map(c=>novaUnid(c));
+      grupos.push({ tipo:'kit', sku:it.sku, descricao:it.descricao, ean:it.ean, qtd:Number(it.qtd||0), comps });
+    } else {
+      grupos.push({ tipo:'leaf', unit:novaUnid(it) });
+    }
+  }
+  ped.grupos = grupos; ped.unidades = unidades;
 }
 
 function renderDetail(){
@@ -253,7 +276,7 @@ function renderDetail(){
     '<div class="cli">'+esc(p.cliente||'')+'</div>'+
     '<div class="nfbar">'+nfHtml+'</div>'+
     '<div class="scanbox"><input id="scan" autocomplete="off" placeholder="bipe o código de barras do item…"/>'+
-      '<div class="hint">o leitor sem fio funciona como teclado — é só bipar</div></div>'+
+      '<div class="hint">o leitor sem fio funciona como teclado — kit conta os componentes</div></div>'+
     '<div id="bItens"></div>'+
     '<div class="dbtns">'+
       '<button class="btn warn" onclick="imprimirAtual()">🖨 Só imprimir etiqueta</button>'+
@@ -266,32 +289,44 @@ function renderDetail(){
   setTimeout(()=>scan.focus(),60);
 }
 
+function unitRow(u, isComp){
+  const full = u.bipado>=u.qtd;
+  return '<div class="item '+(isComp?'comp ':'')+(full?'full':'')+'">'+
+    '<div class="icount"><span class="'+(full?'b':'')+'">'+u.bipado+'</span>/'+u.qtd+'</div>'+
+    '<div class="idesc"><div class="d">'+esc(u.descricao||u.sku||'item')+'</div>'+
+      '<div class="e">SKU '+esc(u.sku||'—')+' · EAN '+(u.ean?esc(u.ean):'<span class="noean">sem EAN</span>')+'</div></div>'+
+    (full?'':'<button class="miniok" onclick="manualUnit('+u._id+')">+1</button>')+
+  '</div>';
+}
+
 function renderItens(){
   if(!pedidoAtual) return;
-  const its = pedidoAtual.itens;
-  const total = its.reduce((s,i)=>s+Number(i.qtd||0),0);
-  const feito = its.reduce((s,i)=>s+i.bipado,0);
+  const un = pedidoAtual.unidades;
+  const total = un.reduce((s,u)=>s+u.qtd,0);
+  const feito = un.reduce((s,u)=>s+u.bipado,0);
   const pe = $('bProg'); if(pe) pe.innerHTML = '<span class="'+(feito>=total&&total>0?'done':'')+'">'+feito+'</span>/'+total;
-  const box = $('bItens'); if(box) box.innerHTML = its.map((it,idx)=>{
-    const full = it.bipado>=it.qtd;
-    return '<div class="item '+(full?'full':'')+'">'+
-      '<div class="icount"><span class="'+(full?'b':'')+'">'+it.bipado+'</span>/'+it.qtd+'</div>'+
-      '<div class="idesc"><div class="d">'+esc(it.descricao||it.sku||'item')+'</div>'+
-        '<div class="e">SKU '+esc(it.sku||'—')+' · EAN '+(it.ean?esc(it.ean):'<span class="noean">sem EAN</span>')+'</div></div>'+
-      (full?'':'<button class="miniok" onclick="manual('+idx+')">+1 manual</button>')+
-    '</div>';
+  const box = $('bItens'); if(box) box.innerHTML = pedidoAtual.grupos.map(g=>{
+    if(g.tipo==='kit'){
+      const done = g.comps.every(c=>c.bipado>=c.qtd);
+      return '<div class="kitwrap '+(done?'full':'')+'">'+
+        '<div class="kithead"><span class="ktag">KIT · NF</span> '+esc(g.descricao||g.sku)+
+          '<div class="e">SKU '+esc(g.sku||'—')+' · EAN '+(g.ean?esc(g.ean):'—')+' · '+g.comps.length+' componentes p/ bipar</div></div>'+
+        '<div class="comps">'+g.comps.map(c=>unitRow(c,true)).join('')+'</div>'+
+      '</div>';
+    }
+    return unitRow(g.unit,false);
   }).join('');
   const fb = $('bFinalizar'); if(fb) fb.disabled = !(feito>=total && total>0);
 }
 
-function manual(idx){ const it=pedidoAtual.itens[idx]; if(it.bipado<it.qtd){ it.bipado++; beep(true); renderItens(); } }
+function manualUnit(id){ const u=pedidoAtual.unidades.find(x=>x._id===id); if(u && u.bipado<u.qtd){ u.bipado++; beep(true); renderItens(); } }
 
 function onScan(code){
   code = norm(code);
   if(!code || !pedidoAtual) return;
-  let item = pedidoAtual.itens.find(it=> it.ean && norm(it.ean)===code && it.bipado<it.qtd);
-  if(!item) item = pedidoAtual.itens.find(it=> it.sku && norm(it.sku).toUpperCase()===code.toUpperCase() && it.bipado<it.qtd);
-  if(item){ item.bipado++; beep(true); renderItens(); }
+  let u = pedidoAtual.unidades.find(x=> x.ean && norm(x.ean)===code && x.bipado<x.qtd);
+  if(!u) u = pedidoAtual.unidades.find(x=> x.sku && norm(x.sku).toUpperCase()===code.toUpperCase() && x.bipado<x.qtd);
+  if(u){ u.bipado++; beep(true); renderItens(); }
   else { beep(false); const s=$('scan'); if(s){ s.classList.add('err'); setTimeout(()=>s.classList.remove('err'),300);} toast('código não confere: '+code); }
 }
 
