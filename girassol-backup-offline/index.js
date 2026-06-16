@@ -2,7 +2,7 @@
 
 // ════════════════════════════════════════════════════════════════════════
 //  GIRASSOL · CHECKOUT OFFLINE — FASE 1 (poller) + FASE 2 (bipagem)   (Mover-Pedidos)
-//  girassol-backup-offline v16/06 b6   (a versão real é a const VERSAO abaixo)
+//  girassol-backup-offline v16/06 b7   (a versão real é a const VERSAO abaixo)
 // ════════════════════════════════════════════════════════════════════════
 //  Módulo do orquestrador unificado (HTTP-native, sem Express).
 //  Reaproveita o token Bling da Girassol via ../girassol/tokenManager.
@@ -32,7 +32,7 @@ const fetch = require('node-fetch');
 const AdmZip = require('adm-zip');
 const { garantirToken } = require('../girassol/tokenManager');
 
-const VERSAO     = 'girassol-backup-offline v16/06 b6';
+const VERSAO     = 'girassol-backup-offline v16/06 b7';
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 
 // ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
@@ -48,7 +48,7 @@ const MANIFEST_FILE = path.join(CACHE_DIR, 'manifest.json');
 const SKU_EAN_FILE  = path.join(CACHE_DIR, 'sku-ean.json');
 const CONFERIDOS_FILE = path.join(CACHE_DIR, 'conferidos.json');
 const KIT_CACHE_FILE  = path.join(CACHE_DIR, 'kit-estrutura.json');  // kits já resolvidos
-const SCHEMA = 2;  // versão do snapshot — bump força re-cache dos pedidos antigos
+const SCHEMA = 3;  // versão do snapshot — bump força re-cache dos pedidos antigos
 
 // loja → marketplace (mesmo mapa do checkout Girassol)
 const LOJA_MKT = {
@@ -88,6 +88,17 @@ function getPossiveisGtins(obj) {
 function primeiroEan(produto) {
   const g = getPossiveisGtins(produto);
   return g.find(x => /^\d{8,14}$/.test(x)) || g[0] || null;
+}
+
+// 1ª imagem do produto (lista traz imagemURL; detalhe traz midia.imagens.externas[].link)
+function primeiraImagem(prod) {
+  if (!prod) return null;
+  if (prod.imagemURL) return prod.imagemURL;
+  const ext = prod.midia && prod.midia.imagens && prod.midia.imagens.externas;
+  if (ext && ext[0] && ext[0].link) return ext[0].link;
+  const url = prod.midia && prod.midia.imagens && prod.midia.imagens.imagensURL;
+  if (url && url[0] && (url[0].link || url[0])) return url[0].link || url[0];
+  return null;
 }
 
 // ─── estado do módulo ───────────────────────────────────────────────────
@@ -247,14 +258,14 @@ async function produtoDetalhe(id) {
   return prod;
 }
 
-// {sku, ean, descricao} de um produto por id (usa cacheEan por SKU)
+// {sku, ean, descricao, img} de um produto por id (usa cacheEan por SKU)
 async function infoProduto(id, cacheEan) {
   const prod = await produtoDetalhe(id);
   await sleep(PAUSA_MS);
   const sku = (prod && prod.codigo) || '';
   let ean = prod ? primeiroEan(prod) : null;
   if (sku) { if (ean) cacheEan[sku] = ean; else if (cacheEan[sku]) ean = cacheEan[sku]; }
-  return { sku, ean, descricao: (prod && prod.nome) || '' };
+  return { sku, ean, descricao: (prod && prod.nome) || '', img: primeiraImagem(prod) };
 }
 
 // baixa a etiqueta de envio. O Bling devolve um ZIP (com "Etiqueta de envio.txt"
@@ -304,6 +315,7 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache) {
     const eanItem = prod ? primeiroEan(prod) : await eanDoItem(prodId, sku, cacheEan);
     if (sku && eanItem) cacheEan[sku] = eanItem;
     const descr   = it.descricao || (prod && prod.nome) || '';
+    const imgItem = primeiraImagem(prod);
 
     const comps = (prod && prod.estrutura && Array.isArray(prod.estrutura.componentes))
       ? prod.estrutura.componentes : [];
@@ -316,16 +328,16 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache) {
         base = [];
         for (const c of comps) {
           const info = await infoProduto(c.produto && c.produto.id, cacheEan);
-          base.push({ sku: info.sku, ean: info.ean, descricao: info.descricao, qtd: Number(c.quantidade || 1) });
+          base.push({ sku: info.sku, ean: info.ean, descricao: info.descricao, img: info.img, qtd: Number(c.quantidade || 1) });
         }
         if (kitCache) kitCache[prodId] = base;
       }
       // qtd final = qtd do componente no kit × qtd do kit no pedido
-      const componentes = base.map(c => ({ sku: c.sku, ean: c.ean, descricao: c.descricao, qtd: c.qtd * (itemQty || 1) }));
-      itens.push({ sku, ean: eanItem, descricao: descr, qtd: itemQty, tipo: 'kit', componentes });
+      const componentes = base.map(c => ({ sku: c.sku, ean: c.ean, descricao: c.descricao, img: c.img, qtd: c.qtd * (itemQty || 1) }));
+      itens.push({ sku, ean: eanItem, descricao: descr, img: imgItem, qtd: itemQty, tipo: 'kit', componentes });
     } else {
       const tipo = (prod && prod.variacao && prod.variacao.produtoPai) ? 'variacao' : 'simples';
-      itens.push({ sku, ean: eanItem, descricao: descr, qtd: itemQty, tipo });
+      itens.push({ sku, ean: eanItem, descricao: descr, img: imgItem, qtd: itemQty, tipo });
     }
   }
 
@@ -374,7 +386,8 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
   if (rodando) { console.log('[GIRABKP] ciclo já em andamento — pulei'); return ultimoResumo; }
   rodando = true;
   _prodCache = new Map();                       // zera cache de produto por ciclo
-  const kitCache = readJson(KIT_CACHE_FILE, {}); // kits já resolvidos (persistente)
+  const _kc = readJson(KIT_CACHE_FILE, {});
+  const kitCache = (_kc && _kc._schema === SCHEMA && _kc.kits) ? _kc.kits : {}; // invalida se schema mudou
   const t0 = Date.now();
   let novos = 0, erros = 0;
   try {
@@ -418,7 +431,7 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
         if (!ja) novos++;
         salvarManifest(man);
         salvarSkuEan(cacheEan);
-        writeJson(KIT_CACHE_FILE, kitCache);
+        writeJson(KIT_CACHE_FILE, { _schema: SCHEMA, kits: kitCache });
       } catch (e) { erros++; console.error(`[GIRABKP] erro pedido ${id}:`, e.message); }
       await sleep(PAUSA_MS);
     }
