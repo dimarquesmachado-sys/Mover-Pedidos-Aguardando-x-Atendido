@@ -2,7 +2,7 @@
 
 // ════════════════════════════════════════════════════════════════════════
 //  GIRASSOL · CHECKOUT OFFLINE — FASE 1 (poller) + FASE 2 (bipagem)   (Mover-Pedidos)
-//  girassol-backup-offline v16/06 b23   (a versão real é a const VERSAO abaixo)
+//  girassol-backup-offline v16/06 b24   (a versão real é a const VERSAO abaixo)
 // ════════════════════════════════════════════════════════════════════════
 //  Módulo do orquestrador unificado (HTTP-native, sem Express).
 //  Reaproveita o token Bling da Girassol via ../girassol/tokenManager.
@@ -38,7 +38,7 @@ const { garantirToken } = require('../girassol/tokenManager');
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v16/06 b23';
+const VERSAO     = 'girassol-backup-offline v16/06 b24';
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 
 // ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
@@ -348,6 +348,33 @@ async function baixarEtiquetaPDF(blingId) {
     if (buf.slice(0, 4).toString('latin1') !== '%PDF') return null;
     return buf;
   } catch (e) { return null; }
+}
+
+// converte ZPL → PDF via Labelary (serviço externo). Usado SÓ sob demanda p/ não-ML.
+async function zplParaPdf(zpl) {
+  if (!zpl || zpl.indexOf('^XA') < 0) return null; // não parece ZPL
+  try {
+    const r = await fetch('https://api.labelary.com/v1/printers/8dpmm/labels/4x6/0/', {
+      method: 'POST',
+      headers: { 'Accept': 'application/pdf', 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: zpl
+    });
+    if (!r.ok) return null;
+    const buf = Buffer.from(await r.arrayBuffer());
+    if (buf.slice(0, 4).toString('latin1') !== '%PDF') return null;
+    return buf;
+  } catch (e) { return null; }
+}
+
+// etiqueta em PDF: tenta o PDF do Bling (ML); se vier ZPL (não-ML), converte via Labelary.
+async function etiquetaPdf(blingId, dir) {
+  const direto = await baixarEtiquetaPDF(blingId);
+  if (direto) return direto;
+  let zpl = null;
+  if (dir) { try { zpl = fs.readFileSync(path.join(dir, `etiqueta.${ETIQ_FORMATO.toLowerCase()}`), 'utf8'); } catch (e) {} }
+  if (!zpl) { try { zpl = await baixarEtiqueta(blingId); } catch (e) {} }
+  if (!zpl) return null;
+  return await zplParaPdf(zpl);
 }
 
 async function cachearPedido(ped, cacheEan, nfs, kitCache) {
@@ -701,12 +728,12 @@ function routes(readBody) {
       const dir = path.join(CACHE_DIR, String(id));
       let pdf = null;
       try { pdf = fs.readFileSync(path.join(dir, 'etiqueta.pdf')); } catch (e) {}
-      if (!pdf) { // não cacheado → gera agora (precisa do Bling online)
-        pdf = await baixarEtiquetaPDF(id);
+      if (!pdf) { // não cacheado → gera agora: PDF do Bling (ML) ou ZPL→PDF via Labelary (não-ML)
+        pdf = await etiquetaPdf(id, dir);
         if (pdf) { try { ensureDir(dir); fs.writeFileSync(path.join(dir, 'etiqueta.pdf'), pdf); } catch (e) {} }
       }
       if (pdf) { res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': 'inline; filename="etiqueta.pdf"' }); res.end(pdf); }
-      else json(res, 404, { erro: 'etiqueta PDF indisponível (sem cache e Bling não respondeu)' });
+      else json(res, 404, { erro: 'etiqueta PDF indisponível' });
       return true;
     }
 
