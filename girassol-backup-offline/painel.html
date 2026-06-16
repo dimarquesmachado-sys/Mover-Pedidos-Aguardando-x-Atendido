@@ -58,6 +58,9 @@
   .prog .done{color:var(--ok)}
   .cli{color:var(--mut);font-size:14px;margin:2px 0 8px}
   .nfbar{background:var(--card2);border:1px solid var(--line);border-radius:9px;padding:9px 12px;margin:8px 0;font-size:13px}
+  .nfbar.clic{cursor:pointer}
+  .nfbar.clic:hover{border-color:var(--ok);background:#0c2118}
+  .nfok{color:var(--ok);font-size:11px;font-weight:700;margin-left:4px}
   .nfbar .chave{font-family:ui-monospace,monospace;font-size:11px;color:var(--mut);word-break:break-all}
   .noean{color:var(--warn)}
   .scanrow{display:flex;gap:8px;align-items:stretch;margin:12px 0 4px}
@@ -120,7 +123,8 @@
   <aside class="sidebar">
     <div class="sbtools">
       <button class="btn sec sm" onclick="carregarLista()">↻ Atualizar</button>
-      <button class="btn sec sm" onclick="escolherImpressora()">🖨 Impressora</button>
+      <button class="btn sec sm" onclick="escolherImpressora()">🖨 Etiqueta</button>
+      <button class="btn sec sm" onclick="escolherImpressoraNF()">🧾 NF</button>
     </div>
     <div id="listaPedidos"><div class="empty">carregando…</div></div>
   </aside>
@@ -135,6 +139,7 @@
 <div class="modal" id="modal"></div>
 
 <script>
+const UI_BUILD = 'b12';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#ff9900'}, magalu:{n:'Magalu',c:'#0086ff'}, outro:{n:'Outro',c:'#94a3b8'}
@@ -203,13 +208,42 @@ async function imprimirZPL(zpl){
   await qz.print(cfg, [{ type:'raw', format:'command', flavor:'plain', data: zpl }]);
 }
 
+// ── impressora da NF (DANFE = A4, impressora comum, NÃO a Zebra) ──
+async function getImpressoraNF(){
+  let p = localStorage.getItem('gbkp_printer_nf');
+  if(p) return p;
+  const lista = await qz.printers.find();
+  p = (lista||[]).find(n=>!/zebra|zdesigner|zpl|\bzd\b|\bgk\b|\bgc\b/i.test(n)) || (lista||[])[0];
+  if(p) localStorage.setItem('gbkp_printer_nf', p);
+  return p;
+}
+async function escolherImpressoraNF(){
+  try{
+    await conectarQZ();
+    const lista = await qz.printers.find();
+    if(!lista||!lista.length){ toast('Nenhuma impressora no QZ'); return; }
+    const atual = localStorage.getItem('gbkp_printer_nf')||'';
+    const msg = 'Impressoras:\n\n'+lista.map((n,i)=>(i+1)+') '+n+(n===atual?'  ← atual':'')).join('\n')+'\n\nNº da impressora da NF (A4):';
+    const r = prompt(msg, lista.indexOf(atual)>=0?String(lista.indexOf(atual)+1):'1');
+    const idx = parseInt(r,10)-1;
+    if(idx>=0&&idx<lista.length){ localStorage.setItem('gbkp_printer_nf', lista[idx]); toast('Impressora NF: '+lista[idx]); }
+  }catch(e){ toast('Erro: '+e.message); }
+}
+async function imprimirPDF(url){
+  await conectarQZ();
+  const printer = await getImpressoraNF();
+  if(!printer) throw new Error('Nenhuma impressora encontrada');
+  const cfg = qz.configs.create(printer);
+  await qz.print(cfg, [{ type:'pixel', format:'pdf', flavor:'file', data: url }]);
+}
+
 // ── API ──
 const api = (u,opt) => fetch(u,opt).then(r=>r.json());
 
 async function carregarLista(){
   try{
     const d = await api('/girassol-backup-offline/lista');
-    $('ver').textContent = d.versao ? d.versao.replace('girassol-backup-offline ','') : 'v?';
+    $('ver').textContent = (d.versao ? d.versao.replace('girassol-backup-offline ','') : 'v?') + ' · ui ' + UI_BUILD;
     $('stats').innerHTML =
       '<span><b>'+d.prontos+'</b> prontos</span>'+
       '<span><b>'+d.conferidos+'</b> conferidos</span>'+
@@ -278,9 +312,13 @@ function prepararPedido(ped){
 function renderDetail(){
   const p = pedidoAtual;
   const m = MKT[p.marketplace]||MKT.outro;
-  const nfHtml = p.nf
-    ? 'NF <b>'+esc(p.nf.numero||'?')+'</b><div class="chave">'+esc(p.nf.chave||'')+'</div>'
+  const temDanfe = !!p.tem_danfe;
+  const nfMiolo = p.nf
+    ? 'NF <b>'+esc(p.nf.numero||'?')+'</b>'+(temDanfe?' <span class="nfok">PDF ✓</span>':'')+'<div class="chave">'+esc(p.nf.chave||'')+'</div>'
     : '<span class="noean">⚠ NF não cacheada (segue só com a etiqueta)</span>';
+  const nfBar = temDanfe
+    ? '<div class="nfbar clic" title="abrir DANFE em PDF" onclick="abrirDanfe(\''+esc(p.id)+'\')">'+nfMiolo+'</div>'
+    : '<div class="nfbar">'+nfMiolo+'</div>';
   $('detail').innerHTML =
     '<div class="dhead">'+
       '<button class="btn sec sm" onclick="voltarLista()">← Voltar</button>'+
@@ -289,7 +327,7 @@ function renderDetail(){
       '<span class="prog" id="bProg">0/0</span>'+
     '</div>'+
     '<div class="cli">'+esc(p.cliente||'')+'</div>'+
-    '<div class="nfbar">'+nfHtml+'</div>'+
+    nfBar+
     '<div class="scanrow">'+
       '<div class="qtdwrap"><label>Qtd</label><input id="qtdConf" type="number" value="1" min="1" max="999"/></div>'+
       '<input id="scan" autocomplete="off" placeholder="bipe o código de barras do item…"/>'+
@@ -297,7 +335,8 @@ function renderDetail(){
     '<div class="hint">opcional: digite a <b>Qtd</b> (ex: 100) e bipe 1× — senão soma 1 por bipada · kit conta os componentes</div>'+
     '<div id="bItens"></div>'+
     '<div class="dbtns">'+
-      '<button class="btn warn" onclick="imprimirAtual()">🖨 Só imprimir etiqueta</button>'+
+      '<button class="btn warn" onclick="imprimirAtual()">🖨 Só etiqueta</button>'+
+      (temDanfe ? '<button class="btn warn" onclick="imprimirNFAtual()">🧾 Imprimir NF</button>' : '')+
       '<span class="grow"></span>'+
       '<button class="btn ok" id="bFinalizar" onclick="finalizar()" disabled>✓ Imprimir + Finalizar</button>'+
     '</div>';
@@ -365,6 +404,15 @@ function onScan(code){
 }
 
 async function imprimirAtual(){ try{ await imprimirZPL(zplAtual); toast('🖨 etiqueta enviada'); }catch(e){ toast('Falha: '+e.message); } }
+function abrirDanfe(id){ window.open('/girassol-backup-offline/danfe/'+id, '_blank'); }
+async function imprimirNFAtual(){
+  try{
+    const id = pedidoAtual && pedidoAtual.id;
+    if(!id) return;
+    await imprimirPDF(location.origin+'/girassol-backup-offline/danfe/'+id);
+    toast('🧾 NF enviada');
+  }catch(e){ toast('Falha NF: '+e.message); }
+}
 
 // volta pra lista SEM finalizar (não marca conferido)
 function voltarLista(){
