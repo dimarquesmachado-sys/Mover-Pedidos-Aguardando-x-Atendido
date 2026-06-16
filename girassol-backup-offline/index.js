@@ -2,7 +2,7 @@
 
 // ════════════════════════════════════════════════════════════════════════
 //  GIRASSOL · CHECKOUT OFFLINE — FASE 1 (poller) + FASE 2 (bipagem)   (Mover-Pedidos)
-//  girassol-backup-offline v16/06 b8   (a versão real é a const VERSAO abaixo)
+//  girassol-backup-offline v16/06 b10   (a versão real é a const VERSAO abaixo)
 // ════════════════════════════════════════════════════════════════════════
 //  Módulo do orquestrador unificado (HTTP-native, sem Express).
 //  Reaproveita o token Bling da Girassol via ../girassol/tokenManager.
@@ -32,7 +32,7 @@ const fetch = require('node-fetch');
 const AdmZip = require('adm-zip');
 const { garantirToken } = require('../girassol/tokenManager');
 
-const VERSAO     = 'girassol-backup-offline v16/06 b8';
+const VERSAO     = 'girassol-backup-offline v16/06 b10';
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 
 // ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
@@ -699,6 +699,25 @@ function routes(readBody) {
         dica: 'pegue um "id" e abra /girassol-backup-offline/debug-estrutura/{id}',
         pedidos: achados
       });
+      return true;
+    }
+
+    // DEBUG: dumpa o objeto NF completo (p/ ver se tem link de DANFE/PDF/XML)
+    if (method === 'GET' && p === '/girassol-backup-offline/debug-nf') {
+      const out = { versao: VERSAO };
+      try {
+        const r = await blingGet(`/nfe?limite=1`);
+        out.lista_status = r.status;
+        const nf0 = r.data && r.data.data && r.data.data[0];
+        out.nf_lista_campos = nf0 ? Object.keys(nf0) : r.data;
+        if (nf0 && nf0.id) {
+          await sleep(PAUSA_MS);
+          const det = await blingGet(`/nfe/${nf0.id}`);
+          out.detalhe_status = det.status;
+          out.nf_detalhe = det.data && det.data.data;   // objeto completo → ver linkDanfe/xml/pdf
+        }
+      } catch (e) { out.erro = e.message; }
+      json(res, 200, out);
       return true;
     }
 
