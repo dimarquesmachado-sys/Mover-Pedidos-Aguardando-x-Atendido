@@ -2,7 +2,7 @@
 
 // ════════════════════════════════════════════════════════════════════════
 //  GIRASSOL · CHECKOUT OFFLINE — FASE 1 (poller) + FASE 2 (bipagem)   (Mover-Pedidos)
-//  girassol-backup-offline v16/06 b10   (a versão real é a const VERSAO abaixo)
+//  girassol-backup-offline v16/06 b11   (a versão real é a const VERSAO abaixo)
 // ════════════════════════════════════════════════════════════════════════
 //  Módulo do orquestrador unificado (HTTP-native, sem Express).
 //  Reaproveita o token Bling da Girassol via ../girassol/tokenManager.
@@ -32,7 +32,7 @@ const fetch = require('node-fetch');
 const AdmZip = require('adm-zip');
 const { garantirToken } = require('../girassol/tokenManager');
 
-const VERSAO     = 'girassol-backup-offline v16/06 b10';
+const VERSAO     = 'girassol-backup-offline v16/06 b11';
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 
 // ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
@@ -702,19 +702,36 @@ function routes(readBody) {
       return true;
     }
 
-    // DEBUG: dumpa o objeto NF completo (p/ ver se tem link de DANFE/PDF/XML)
+    // DEBUG: dumpa o objeto NF + TESTA baixar o DANFE em PDF (linkPDF) de dentro do Render
     if (method === 'GET' && p === '/girassol-backup-offline/debug-nf') {
       const out = { versao: VERSAO };
       try {
         const r = await blingGet(`/nfe?limite=1`);
         out.lista_status = r.status;
         const nf0 = r.data && r.data.data && r.data.data[0];
-        out.nf_lista_campos = nf0 ? Object.keys(nf0) : r.data;
         if (nf0 && nf0.id) {
           await sleep(PAUSA_MS);
           const det = await blingGet(`/nfe/${nf0.id}`);
-          out.detalhe_status = det.status;
-          out.nf_detalhe = det.data && det.data.data;   // objeto completo → ver linkDanfe/xml/pdf
+          const nf = det.data && det.data.data;
+          out.numero = nf && nf.numero;
+          out.tem_linkPDF = !!(nf && nf.linkPDF);
+          out.tem_linkDanfe = !!(nf && nf.linkDanfe);
+          out.tem_xml = !!(nf && nf.xml);
+          if (nf && nf.linkPDF) {
+            try {
+              const resp = await fetch(nf.linkPDF, { redirect: 'follow' });
+              const buf = Buffer.from(await resp.arrayBuffer());
+              const head = buf.slice(0, 8).toString('latin1');
+              out.download_pdf = {
+                status: resp.status,
+                content_type: resp.headers.get('content-type'),
+                tamanho_bytes: buf.length,
+                primeiros_bytes: head,
+                eh_pdf: head.startsWith('%PDF'),
+                parece_bloqueio: /^<|html|cloudflare/i.test(head)
+              };
+            } catch (e) { out.download_pdf = { erro: e.message }; }
+          }
         }
       } catch (e) { out.erro = e.message; }
       json(res, 200, out);
