@@ -101,6 +101,7 @@
     .main{flex-direction:column}
     .sidebar{width:auto;flex:0 0 auto;max-height:38vh;border-right:0;border-bottom:1px solid var(--line)}
   }
+  @media print{ html,body{display:none!important} }   /* a página nunca se imprime — só a Zebra via QZ Tray */
 </style>
 </head>
 <body>
@@ -411,6 +412,10 @@ async function confirmarFinalizar(){
 
 // mantém foco no scan (menos quando digita Qtd/operador ou o modal está aberto)
 setInterval(()=>{ const s=$('scan'); const q=$('qtdConf'); if(s && !modalAberto() && document.activeElement!==s && document.activeElement!==opIn && document.activeElement!==q) s.focus(); }, 1500);
+
+// a página NUNCA se imprime — toda impressão é via QZ Tray → Zebra
+window.print = function(){ toast('A impressão é pela Zebra (QZ Tray), não pela página'); };
+document.addEventListener('keydown', e=>{ if((e.ctrlKey||e.metaKey) && (e.key==='p'||e.key==='P')){ e.preventDefault(); e.stopPropagation(); toast('A impressão é pela Zebra (QZ Tray)'); } }, true);
 
 // boot
 setupQZ();
