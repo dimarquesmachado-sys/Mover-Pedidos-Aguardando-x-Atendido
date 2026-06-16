@@ -90,6 +90,12 @@
   .toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:#000;border:1px solid var(--line);padding:10px 18px;border-radius:24px;font-size:14px;opacity:0;transition:.2s;pointer-events:none;z-index:50}
   .toast.show{opacity:1}
   .foot{flex:0 0 auto;text-align:center;color:var(--mut);font-size:11px;padding:6px;border-top:1px solid var(--line)}
+  .modal{position:fixed;inset:0;background:rgba(0,0,0,.65);display:none;align-items:center;justify-content:center;z-index:100}
+  .modal.show{display:flex}
+  .mbox{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:22px;max-width:460px;width:90%}
+  .mtit{font-size:19px;font-weight:700;margin-bottom:8px}
+  .msub{font-size:14px;color:var(--mut);margin-bottom:18px;line-height:1.45}
+  .mbtns{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
 
   @media(max-width:720px){
     .main{flex-direction:column}
@@ -125,6 +131,7 @@
 
 <div class="foot">cache local · se a tela não mudar após deploy, dê <b>Ctrl+Shift+R</b></div>
 <div class="toast" id="toast"></div>
+<div class="modal" id="modal"></div>
 
 <script>
 const MKT = {
@@ -275,6 +282,7 @@ function renderDetail(){
     : '<span class="noean">⚠ NF não cacheada (segue só com a etiqueta)</span>';
   $('detail').innerHTML =
     '<div class="dhead">'+
+      '<button class="btn sec sm" onclick="voltarLista()">← Voltar</button>'+
       '<span class="badge" style="background:'+m.c+'">'+m.n+'</span>'+
       '<span class="num big">#'+esc(p.numero)+'</span>'+
       '<span class="prog" id="bProg">0/0</span>'+
@@ -339,7 +347,10 @@ function renderItens(){
 
 function manualUnit(id){ const u=pedidoAtual.unidades.find(x=>x._id===id); if(u && u.bipado<u.qtd){ u.bipado++; beep(true); renderItens(); } }
 
+function modalAberto(){ const md=$('modal'); return md && md.classList.contains('show'); }
+
 function onScan(code){
+  if(modalAberto()) return;            // ignora bipada com o modal aberto
   code = norm(code);
   if(!code || !pedidoAtual) return;
   let q = parseInt(($('qtdConf')||{}).value,10); if(!q || q<1 || q>999) q=1;
@@ -354,22 +365,52 @@ function onScan(code){
 
 async function imprimirAtual(){ try{ await imprimirZPL(zplAtual); toast('🖨 etiqueta enviada'); }catch(e){ toast('Falha: '+e.message); } }
 
+// volta pra lista SEM finalizar (não marca conferido)
+function voltarLista(){
+  pedidoAtual=null; zplAtual=null;
+  $('detail').innerHTML='<div class="placeholder">← selecione um pedido à esquerda</div>';
+  renderLista();
+}
+
+// FINALIZAR = imprime e SÓ marca conferido depois que o estoquista confirma que saiu certo.
 async function finalizar(){
+  try{ await imprimirZPL(zplAtual); }
+  catch(e){ toast('Falha na impressão: '+e.message); return; }
+  abrirConfirmacao();
+}
+
+function abrirConfirmacao(){
+  const md=$('modal');
+  md.innerHTML =
+    '<div class="mbox">'+
+      '<div class="mtit">A etiqueta saiu certa?</div>'+
+      '<div class="msub">Confira a impressora. Só finalize se a etiqueta imprimiu OK — assim, se der problema, o pedido <b>continua na tela</b> e você reimprime sem perder.</div>'+
+      '<div class="mbtns">'+
+        '<button class="btn warn" onclick="reimprimirModal()">🖨 Reimprimir</button>'+
+        '<button class="btn sec" onclick="fecharConfirmacao()">✗ Ainda não</button>'+
+        '<button class="btn ok" onclick="confirmarFinalizar()">✓ Sim, finalizar</button>'+
+      '</div>'+
+    '</div>';
+  md.classList.add('show');
+}
+function fecharConfirmacao(){ const md=$('modal'); md.classList.remove('show'); md.innerHTML=''; setTimeout(()=>{const s=$('scan'); if(s) s.focus();},60); }
+async function reimprimirModal(){ try{ await imprimirZPL(zplAtual); toast('🖨 reenviado'); }catch(e){ toast('Falha: '+e.message); } }
+async function confirmarFinalizar(){
   try{
-    await imprimirZPL(zplAtual);
     await api('/girassol-backup-offline/conferido', {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ id: pedidoAtual.bling_id, user: opIn.value })
     });
-    toast('✓ #'+pedidoAtual.numero+' conferido e impresso');
+    toast('✓ #'+pedidoAtual.numero+' finalizado');
+    fecharConfirmacao();
     pedidoAtual=null; zplAtual=null;
     $('detail').innerHTML='<div class="placeholder">← selecione um pedido à esquerda</div>';
     carregarLista();
-  }catch(e){ toast('Falha: '+e.message); }
+  }catch(e){ toast('Falha ao finalizar: '+e.message); }
 }
 
-// mantém foco no scan
-setInterval(()=>{ const s=$('scan'); const q=$('qtdConf'); if(s && document.activeElement!==s && document.activeElement!==opIn && document.activeElement!==q) s.focus(); }, 1500);
+// mantém foco no scan (menos quando digita Qtd/operador ou o modal está aberto)
+setInterval(()=>{ const s=$('scan'); const q=$('qtdConf'); if(s && !modalAberto() && document.activeElement!==s && document.activeElement!==opIn && document.activeElement!==q) s.focus(); }, 1500);
 
 // boot
 setupQZ();
