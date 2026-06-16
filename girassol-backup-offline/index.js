@@ -2,7 +2,7 @@
 
 // ════════════════════════════════════════════════════════════════════════
 //  GIRASSOL · CHECKOUT OFFLINE — FASE 1 (poller) + FASE 2 (bipagem)   (Mover-Pedidos)
-//  girassol-backup-offline v16/06 b22   (a versão real é a const VERSAO abaixo)
+//  girassol-backup-offline v16/06 b23   (a versão real é a const VERSAO abaixo)
 // ════════════════════════════════════════════════════════════════════════
 //  Módulo do orquestrador unificado (HTTP-native, sem Express).
 //  Reaproveita o token Bling da Girassol via ../girassol/tokenManager.
@@ -30,9 +30,15 @@ const fs    = require('fs');
 const path  = require('path');
 const fetch = require('node-fetch');
 const AdmZip = require('adm-zip');
+const crypto = require('crypto');
 const { garantirToken } = require('../girassol/tokenManager');
 
-const VERSAO     = 'girassol-backup-offline v16/06 b22';
+// Certificado/chave do QZ Tray p/ assinar as impressões (mata o popup "Untrusted").
+// Configure no Render: GIRABKP_QZ_CERT (digital-certificate.txt) e GIRABKP_QZ_PRIVKEY (private-key.pem).
+const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
+const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
+
+const VERSAO     = 'girassol-backup-offline v16/06 b23';
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 
 // ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
@@ -587,6 +593,27 @@ function routes(readBody) {
       const forcar = /[?&]force=1\b/.test(urlObj.search || '');
       rodarCiclo(forcar ? 'manual-force' : 'manual', forcar);
       json(res, 200, { mensagem: `Ciclo${forcar ? ' (FORCE — re-cacheia tudo)' : ''} iniciado. Veja /girassol-backup-offline/status.`, versao: VERSAO });
+      return true;
+    }
+
+    // ─── QZ Tray: assinatura (mata o popup "Untrusted") ───
+    // serve o certificado público p/ o QZ confiar
+    if (method === 'GET' && p === '/girassol-backup-offline/qz-cert') {
+      res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end(QZ_CERT || '');
+      return true;
+    }
+    // assina a requisição do QZ com a chave privada (RSA-SHA512)
+    if (method === 'GET' && p === '/girassol-backup-offline/qz-sign') {
+      let toSign = '';
+      try { toSign = (urlObj.searchParams && urlObj.searchParams.get('request')) || ''; } catch (e) {}
+      if (!toSign) { const m = /[?&]request=([^&]*)/.exec(urlObj.search || ''); toSign = m ? decodeURIComponent(m[1]) : ''; }
+      if (!QZ_PRIVKEY) { res.writeHead(200, { 'Content-Type': 'text/plain' }); res.end(''); return true; }
+      try {
+        const s = crypto.createSign('RSA-SHA512'); s.update(toSign);
+        res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+        res.end(s.sign(QZ_PRIVKEY, 'base64'));
+      } catch (e) { res.writeHead(200, { 'Content-Type': 'text/plain' }); res.end(''); }
       return true;
     }
 
