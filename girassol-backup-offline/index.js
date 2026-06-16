@@ -1,8 +1,8 @@
 'use strict';
 
 // ════════════════════════════════════════════════════════════════════════
-//  GIRASSOL · CHECKOUT OFFLINE — FASE 1: POLLER DE CACHE   (Mover-Pedidos)
-//  girassol-backup-offline v15/06 b1
+//  GIRASSOL · CHECKOUT OFFLINE — FASE 1 (poller) + FASE 2 (bipagem)   (Mover-Pedidos)
+//  girassol-backup-offline v16/06 b3   (a versão real é a const VERSAO abaixo)
 // ════════════════════════════════════════════════════════════════════════
 //  Módulo do orquestrador unificado (HTTP-native, sem Express).
 //  Reaproveita o token Bling da Girassol via ../girassol/tokenManager.
