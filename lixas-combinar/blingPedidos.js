@@ -230,8 +230,12 @@ function calcularRateio({ valorTotalPedido, graosEscolhidos, graosDisponiveis, u
   // 2. Preco unitario por LIXA (max 10 decimais)
   const precoUnitLixa = truncarDecimais(valorTotalPedido / totalLixas, MAX_DECIMAIS);
 
-  // 3. Preco unitario por PACOTE (= preco por LIXA × mult)
-  const precoUnitPacote = truncarDecimais(precoUnitLixa * mult, MAX_DECIMAIS);
+  // 3. Preco unitario por PACOTE (= preco por LIXA × mult), em 2 CASAS.
+  // CRITICO: manter 2 casas faz o total que o Bling calcula (valor × qtd, qtd inteira)
+  // bater EXATO com o nosso — senao o arredondamento do Bling diverge por centavos e
+  // a venda nao salva ("somatorio das parcelas difere do total"). A sobra de centavo
+  // (se houver) e absorvida no ajuste (desconto/outrasDespesas) mais abaixo.
+  const precoUnitPacote = arredondar2(precoUnitLixa * mult);
 
   // 4. Monta linhas - mapeia grao → produto Bling
   const linhas = [];
@@ -365,6 +369,22 @@ function montarBodyPUT({ pedidoOriginal, rateio, observacaoExtra, outrosItens = 
   const stamp = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
   const novaObs = `🤖 IA editou em ${stamp}: ${rateio.linhas.length} graos | total ${rateio.totalLixas} lixas | R$${rateio.valorTotalPedido}`;
   body.observacoesInternas = (obsAtual + '\n\n' + novaObs).slice(-1500);
+
+  // SINCRONIZA AS PARCELAS COM O TOTAL.
+  // O Bling valida que soma(parcelas) == total da venda (code 22). Como a edicao
+  // PRESERVA o total original (itens rateados somam o total; o frete/desconto nao
+  // muda o total liquido), o alvo das parcelas e o total ORIGINAL do pedido.
+  // Ajusta a ULTIMA parcela pra absorver qualquer centavo, sem mexer no resto.
+  const totalAlvoParc = arredondar2(Number(pedidoOriginal.total) || 0);
+  if (totalAlvoParc > 0 && Array.isArray(body.parcelas) && body.parcelas.length > 0) {
+    const somaParc = arredondar2(body.parcelas.reduce((s, p) => s + Number(p.valor || 0), 0));
+    const diffParc = arredondar2(totalAlvoParc - somaParc);
+    if (Math.abs(diffParc) >= 0.01) {
+      const ult = body.parcelas[body.parcelas.length - 1];
+      ult.valor = arredondar2(Number(ult.valor || 0) + diffParc);
+      console.log(`[blingPedidos] parcelas ajustadas: soma ${somaParc} -> ${totalAlvoParc} (diff ${diffParc} na ultima)`);
+    }
+  }
 
   return body;
 }
