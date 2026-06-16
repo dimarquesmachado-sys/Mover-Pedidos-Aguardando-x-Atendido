@@ -631,6 +631,23 @@ function routes(readBody) {
         const r = await bp.gerarNFe(v.bling_pedido_id);
 
         if (!r.ok) {
+          // Bling code 74 = "Esta venda possui nota fiscal referenciada" → a NF JA EXISTE
+          // (saiu por fora do painel: emissao direta no Bling, F3, etc). Trata como
+          // JA-EMITIDA (idempotente): grava nf_emitida_em pra o botao sumir, em vez de
+          // mostrar erro ou tentar emitir de novo (o Bling nunca deixaria duplicar mesmo).
+          const campos = (r.detalhe && r.detalhe.error && r.detalhe.error.fields) || [];
+          const jaTemNF = Array.isArray(campos) && campos.some(f =>
+            Number(f.code) === 74 || /nota fiscal referenciada/i.test(String(f.msg || ''))
+          );
+          if (jaTemNF) {
+            await lcp.atualizarVenda(orderId, {
+              nf_emitida_em: new Date().toISOString(),
+              nf_erro: null
+            });
+            console.log(`[lixas-combinar emitir-nf] orderId=${orderId} JA possuia NF referenciada (code 74) — marcado como emitida`);
+            json(res, 200, { ok: true, jaEmitida: true, mensagem: 'Esta venda ja possui NF-e referenciada no Bling. Registrado como emitida.' });
+            return true;
+          }
           await lcp.atualizarVenda(orderId, {
             nf_erro: `${r.status || ''}: ${r.erro || JSON.stringify(r.detalhe || {}).slice(0,200)}`.slice(0,500)
           });
