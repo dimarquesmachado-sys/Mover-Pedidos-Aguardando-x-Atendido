@@ -32,7 +32,7 @@ const fetch = require('node-fetch');
 const AdmZip = require('adm-zip');
 const { garantirToken } = require('../girassol/tokenManager');
 
-const VERSAO     = 'girassol-backup-offline v16/06 b1';
+const VERSAO     = 'girassol-backup-offline v16/06 b2';
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 
 // ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
@@ -589,6 +589,38 @@ function routes(readBody) {
         }
       } catch (e) { out.erro = e.message; }
       json(res, 200, out);
+      return true;
+    }
+
+    // DEBUG: acha pedidos no cache que parecem KIT/composição (p/ inspecionar a estrutura)
+    if (method === 'GET' && p === '/girassol-backup-offline/debug-buscar-kit') {
+      const man = manifest();
+      const achados = [];
+      for (const id of Object.keys(man)) {
+        const ped = readJson(path.join(CACHE_DIR, String(id), 'pedido.json'), null);
+        if (!ped) continue;
+        const suspeito = (ped.itens || []).some(it =>
+          /kit|combo|conjunto/i.test(it.sku || '') ||
+          /kit|combo|conjunto/i.test(it.descricao || '') ||
+          (!it.ean && (it.descricao || it.sku))   // sem EAN = provável kit/composição (NF sem GTIN)
+        );
+        if (suspeito) {
+          achados.push({
+            id,
+            numero: ped.numero,
+            cliente: ped.cliente,
+            marketplace: ped.marketplace,
+            itens: (ped.itens || []).map(i => ({ sku: i.sku, ean: i.ean, qtd: i.qtd, descricao: (i.descricao || '').slice(0, 60) }))
+          });
+        }
+        if (achados.length >= 15) break;
+      }
+      json(res, 200, {
+        versao: VERSAO,
+        encontrados: achados.length,
+        dica: 'pegue um "id" e abra /girassol-backup-offline/debug-estrutura/{id}',
+        pedidos: achados
+      });
       return true;
     }
 
