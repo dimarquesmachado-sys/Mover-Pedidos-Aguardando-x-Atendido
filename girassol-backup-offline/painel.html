@@ -155,7 +155,7 @@
 <div class="modal" id="modal"></div>
 
 <script>
-const UI_BUILD = 'b22';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b23';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#ff9900'}, magalu:{n:'Magalu',c:'#0086ff'}, outro:{n:'Outro',c:'#94a3b8'}
@@ -186,10 +186,24 @@ function beep(ok){
 }
 
 // ── QZ Tray ──
-function setupQZ(){
+async function setupQZ(){
   if(!window.qz){ qzUI(false,'lib não carregou'); return; }
   qz.api.setPromiseType(r => new Promise(r));
   if(window.sha256) qz.api.setSha256Type(d => sha256(d));
+  // assinatura → mata o popup "Untrusted". Só ativa se houver certificado configurado no servidor.
+  try{
+    const cert = await fetch('/girassol-backup-offline/qz-cert', {cache:'no-store'}).then(r=>r.text());
+    if(cert && cert.indexOf('BEGIN CERTIFICATE')>=0){
+      qz.security.setCertificatePromise(function(resolve){ resolve(cert); });
+      qz.security.setSignatureAlgorithm('SHA512');
+      qz.security.setSignaturePromise(function(toSign){
+        return function(resolve, reject){
+          fetch('/girassol-backup-offline/qz-sign?request='+encodeURIComponent(toSign), {cache:'no-store'})
+            .then(function(r){ return r.text(); }).then(resolve).catch(reject);
+        };
+      });
+    }
+  }catch(e){}
 }
 function qzUI(on, txt){ const el=$('qzStatus'); el.className='qz '+(on?'on':'off'); el.textContent='QZ: '+(txt||(on?'conectado':'desconectado')); }
 async function conectarQZ(){
@@ -575,8 +589,7 @@ window.print = function(){ toast('A impressão é pela impressora (QZ Tray), nã
 document.addEventListener('keydown', e=>{ if((e.ctrlKey||e.metaKey) && (e.key==='p'||e.key==='P')){ e.preventDefault(); e.stopPropagation(); toast('A impressão é pelos botões (QZ Tray)'); } }, true);
 
 // boot
-setupQZ();
-reconectarQZ();
+(async function(){ await setupQZ(); reconectarQZ(); })();
 aplicarModoLabel();
 carregarLista();
 setInterval(()=>{ if(!pedidoAtual) carregarLista(); }, 60000);
