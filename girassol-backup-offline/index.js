@@ -31,7 +31,7 @@ const path  = require('path');
 const fetch = require('node-fetch');
 const { garantirToken } = require('../girassol/tokenManager');
 
-const VERSAO     = 'girassol-backup-offline v15/06 b3';
+const VERSAO     = 'girassol-backup-offline v15/06 b4';
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 
 // ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
@@ -394,6 +394,23 @@ function routes(readBody) {
         }
       } catch (e) { out.erro = e.message; }
       json(res, 200, out);
+      return true;
+    }
+
+    // DEBUG: lista vendas ML recentes (loja 203146903) p/ achar uma pra testar etiqueta
+    if (method === 'GET' && p === '/girassol-backup-offline/debug-ml') {
+      const { data } = await blingGet(`/pedidos/vendas?idLoja=203146903&limite=20&pagina=1`);
+      const lista = (data && data.data) || [];
+      json(res, 200, {
+        versao: VERSAO,
+        total: lista.length,
+        pedidos: lista.map(o => ({
+          id: o.id,
+          numero: o.numero,
+          situacao: o.situacao && o.situacao.id,
+          data: o.data
+        }))
+      });
       return true;
     }
 
