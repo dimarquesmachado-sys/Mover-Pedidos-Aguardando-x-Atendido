@@ -310,7 +310,7 @@ function renderItens(){
       const done = g.comps.every(c=>c.bipado>=c.qtd);
       return '<div class="kitwrap '+(done?'full':'')+'">'+
         '<div class="kithead"><span class="ktag">KIT · NF</span> '+esc(g.descricao||g.sku)+
-          '<div class="e">SKU '+esc(g.sku||'—')+' · bipe os '+g.comps.length+' componentes abaixo (o kit não se bipa)</div></div>'+
+          '<div class="e">SKU '+esc(g.sku||'—')+'</div></div>'+
         '<div class="comps">'+g.comps.map(c=>unitRow(c,true)).join('')+'</div>'+
       '</div>';
     }
