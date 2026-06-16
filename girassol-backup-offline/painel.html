@@ -130,9 +130,8 @@
   <aside class="sidebar">
     <div class="sbtools">
       <button class="btn sec sm" id="btnSync" onclick="sincronizar()">↻ Atualizar</button>
-      <button class="btn sec sm" onclick="escolherImpressora()">🖨 Etiqueta</button>
-      <button class="btn sec sm" onclick="escolherImpressoraNF()">🧾 NF</button>
-      <button class="btn sec sm" id="modoBtn" onclick="trocarModo()" title="alterna entre etiqueta na Zebra (ZPL) ou na A4 (PDF)">🖨️ Etiq: Zebra</button>
+      <button class="btn sec sm" onclick="escolherImpressora()">🖨 Zebra</button>
+      <button class="btn sec sm" id="modoBtn" onclick="trocarModo()" title="alterna entre etiqueta na Zebra (ZPL) ou abrir PDF p/ imprimir no navegador">🖨️ Etiq: Zebra</button>
     </div>
     <input class="busca" id="busca" placeholder="🔎 buscar: nº pedido, NF, cliente…" oninput="onBusca(this.value)" autocomplete="off" />
     <div id="listaPedidos"><div class="empty">carregando…</div></div>
@@ -148,7 +147,7 @@
 <div class="modal" id="modal"></div>
 
 <script>
-const UI_BUILD = 'b19';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b20';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#ff9900'}, magalu:{n:'Magalu',c:'#0086ff'}, outro:{n:'Outro',c:'#94a3b8'}
@@ -256,10 +255,10 @@ async function imprimirPDF(url){
 function modoEtiqueta(){ return localStorage.getItem('gbkp_modo_etiq')==='a4' ? 'a4' : 'zebra'; }
 async function imprimirEtiqueta(id, zpl){
   if(modoEtiqueta()==='a4'){
-    await imprimirPDF(location.origin+'/girassol-backup-offline/etiqueta-pdf/'+id);  // vai na impressora A4 (a da NF)
+    window.open(location.origin+'/girassol-backup-offline/etiqueta-pdf/'+id, '_blank');  // abre o PDF — você imprime pelo navegador
   }else{
     const z = zpl || await fetch('/girassol-backup-offline/etiqueta/'+id).then(r=>r.text());
-    await imprimirZPL(z);  // vai na Zebra
+    await imprimirZPL(z);  // Zebra (QZ Tray)
   }
 }
 function aplicarModoLabel(){
@@ -272,7 +271,7 @@ function trocarModo(){
   const novo = modoEtiqueta()==='a4' ? 'zebra' : 'a4';
   localStorage.setItem('gbkp_modo_etiq', novo);
   aplicarModoLabel();
-  toast(novo==='a4' ? 'Etiqueta agora pela A4 (PDF) — sai na impressora da NF' : 'Etiqueta agora pela Zebra (ZPL)');
+  toast(novo==='a4' ? 'Etiqueta agora abre em PDF — imprima pelo navegador' : 'Etiqueta agora pela Zebra (ZPL/QZ)');
 }
 
 // ── API ──
@@ -342,8 +341,9 @@ function renderLista(){
 }
 
 async function reimprimir(id){
-  try{ toast('imprimindo etiqueta…');
-    await imprimirEtiqueta(id); toast('🖨 etiqueta enviada');
+  try{
+    await imprimirEtiqueta(id);
+    toast(modoEtiqueta()==='a4'?'📄 etiqueta aberta':'🖨 etiqueta enviada');
   }catch(e){ toast('Falha: '+e.message); }
 }
 
@@ -403,8 +403,8 @@ function renderDetail(){
     '<div class="hint">opcional: digite a <b>Qtd</b> (ex: 100) e bipe 1× — senão soma 1 por bipada · kit conta os componentes</div>'+
     '<div id="bItens"></div>'+
     '<div class="dbtns">'+
-      '<button class="btn warn" onclick="imprimirAtual()">🖨 Só etiqueta</button>'+
-      (temDanfe ? '<button class="btn warn" onclick="imprimirNFAtual()">🧾 Imprimir NF</button>' : '')+
+      '<button class="btn warn" onclick="imprimirAtual()">'+(modoEtiqueta()==='a4'?'📄 Abrir etiqueta':'🖨 Só etiqueta')+'</button>'+
+      (temDanfe ? '<button class="btn warn" onclick="imprimirNFAtual()">🧾 Abrir NF</button>' : '')+
       '<span class="grow"></span>'+
       '<button class="btn ok" id="bFinalizar" onclick="finalizar()" disabled>✓ Imprimir + Finalizar</button>'+
     '</div>';
@@ -471,15 +471,12 @@ function onScan(code){
   } else { beep(false); const s=$('scan'); if(s){ s.classList.add('err'); setTimeout(()=>s.classList.remove('err'),300);} toast('código não confere: '+code); }
 }
 
-async function imprimirAtual(){ try{ await imprimirEtiqueta(pedidoAtual.bling_id, zplAtual); toast('🖨 etiqueta enviada'); }catch(e){ toast('Falha: '+e.message); } }
+async function imprimirAtual(){ try{ await imprimirEtiqueta(pedidoAtual.bling_id, zplAtual); toast(modoEtiqueta()==='a4'?'📄 etiqueta aberta — imprima pelo navegador':'🖨 etiqueta enviada'); }catch(e){ toast('Falha: '+e.message); } }
 function abrirDanfe(id){ window.open('/girassol-backup-offline/danfe/'+id, '_blank'); }
-async function imprimirNFAtual(){
-  try{
-    const id = pedidoAtual && pedidoAtual.bling_id;
-    if(!id) return;
-    await imprimirPDF(location.origin+'/girassol-backup-offline/danfe/'+id);
-    toast('🧾 NF enviada');
-  }catch(e){ toast('Falha NF: '+e.message); }
+function imprimirNFAtual(){
+  const id = pedidoAtual && pedidoAtual.bling_id;
+  if(!id) return;
+  window.open(location.origin+'/girassol-backup-offline/danfe/'+id, '_blank');  // abre o PDF da NF — você imprime pelo navegador
 }
 
 // volta pra lista SEM finalizar (não marca conferido)
