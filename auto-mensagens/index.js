@@ -44,7 +44,12 @@ function html(res, code, body) {
 // ── Crons ─────────────────────────────────────────────────────────────
 const crons = {
   girassolACombinar: '*/2 * * * *',          // a cada 2 min - envio msg auto
-  girassolLerRespostas: '*/2 * * * *'        // a cada 2 min - le respostas dos clientes (Sessao 3)
+  girassolLerRespostas: '*/2 * * * *',       // a cada 2 min - le respostas dos clientes (Sessao 3)
+  // de hora em hora - rede de seguranca: pesca pedidos A COMBINAR que escaparam da
+  // janela de 30min do rotinaACombinar (msg inicial enviada na mao, robo fora do ar,
+  // etc) e nunca entraram na tabela. Cria o registro lendo a conversa; o ciclo de
+  // leitura (2min) processa em seguida. Intervalo/janela ajustaveis por env.
+  girassolRecuperar: process.env.LIXAS_RECUPERAR_CRON || '0 * * * *'
 };
 
 // ── Rotas ─────────────────────────────────────────────────────────────
@@ -496,7 +501,8 @@ module.exports = {
   nome: 'Auto Mensagens ML',
   rotinas: {
     girassolACombinar: rotinaACombinar,
-    girassolLerRespostas: rotinaLerRespostas
+    girassolLerRespostas: rotinaLerRespostas,
+    girassolRecuperar: () => recuperarPendentes(Number(process.env.LIXAS_RECUPERAR_DIAS) || 1)
   },
   routes,
   crons,
