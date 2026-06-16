@@ -32,7 +32,7 @@ const fetch = require('node-fetch');
 const AdmZip = require('adm-zip');
 const { garantirToken } = require('../girassol/tokenManager');
 
-const VERSAO     = 'girassol-backup-offline v16/06 b2';
+const VERSAO     = 'girassol-backup-offline v16/06 b3';
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 
 // ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
@@ -561,30 +561,36 @@ function routes(readBody) {
       const id = p.split('/').filter(Boolean).pop();
       const out = { pedido: id, versao: VERSAO, itens: [] };
       try {
+        // probe: o escopo Produtos funciona? (lista 1 produto)
+        const probe = await blingGet(`/produtos?limite=1`);
+        out.probe_produtos = {
+          status: probe.status, ok: probe.ok,
+          corpo: probe.data && probe.data.data && probe.data.data[0]
+            ? { campos: Object.keys(probe.data.data[0]) }
+            : probe.data
+        };
+        await sleep(PAUSA_MS);
+
         const ped = await blingGet(`/pedidos/vendas/${id}`);
         const d = ped.data && ped.data.data;
         out.numero = d && d.numero;
         for (const it of ((d && d.itens) || [])) {
           const prodId = it.produto && it.produto.id;
-          let prod = null;
+          let status = null, raw = null;
           if (prodId) {
             const r = await blingGet(`/produtos/${prodId}`);
-            prod = r.data && r.data.data;
+            status = r.status;
+            raw = r.data;               // corpo CRU do /produtos/{id}
             await sleep(PAUSA_MS);
           }
           out.itens.push({
             item_descricao: it.descricao,
             item_codigo: it.codigo,
             item_qtd: it.quantidade,
+            item_produto: it.produto,   // o que vem dentro do item do pedido
             produto_id: prodId,
-            produto_nome: prod && prod.nome,
-            formato: prod && prod.formato,         // S=simples, V=variação (provável)
-            tipo: prod && prod.tipo,
-            variacao: prod && prod.variacao,        // se for variação, atributos aqui
-            gtins: prod ? getPossiveisGtins(prod) : [],
-            tem_estrutura: !!(prod && prod.estrutura),
-            estrutura: prod && prod.estrutura,      // componentes do kit/composição
-            _campos_produto: prod ? Object.keys(prod) : []  // p/ eu ver o que o Bling devolve
+            produtos_status: status,    // HTTP status do /produtos/{id}
+            produtos_raw: raw           // corpo cru (aqui vejo formato/estrutura/erro)
           });
         }
       } catch (e) { out.erro = e.message; }
