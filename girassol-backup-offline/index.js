@@ -2,7 +2,7 @@
 
 // ════════════════════════════════════════════════════════════════════════
 //  GIRASSOL · CHECKOUT OFFLINE — FASE 1 (poller) + FASE 2 (bipagem)   (Mover-Pedidos)
-//  girassol-backup-offline v16/06 b17   (a versão real é a const VERSAO abaixo)
+//  girassol-backup-offline v16/06 b18   (a versão real é a const VERSAO abaixo)
 // ════════════════════════════════════════════════════════════════════════
 //  Módulo do orquestrador unificado (HTTP-native, sem Express).
 //  Reaproveita o token Bling da Girassol via ../girassol/tokenManager.
@@ -32,7 +32,7 @@ const fetch = require('node-fetch');
 const AdmZip = require('adm-zip');
 const { garantirToken } = require('../girassol/tokenManager');
 
-const VERSAO     = 'girassol-backup-offline v16/06 b17';
+const VERSAO     = 'girassol-backup-offline v16/06 b18';
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 
 // ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
@@ -314,6 +314,21 @@ async function baixarDanfe(nfId) {
   } catch (e) { return null; }
 }
 
+// baixa a ETIQUETA em PDF (formato=PDF) — p/ modo A4 / fallback se a Zebra morrer
+async function baixarEtiquetaPDF(blingId) {
+  const { ok, data } = await blingGet(`/logisticas/etiquetas?formato=PDF&idsVendas[]=${blingId}`);
+  const item = ok && data && data.data && data.data[0];
+  const link = item && item.link;
+  if (!link) return null;
+  try {
+    const r = await fetch(link);
+    if (!r.ok) return null;
+    const buf = Buffer.from(await r.arrayBuffer());
+    if (buf.slice(0, 4).toString('latin1') !== '%PDF') return null;
+    return buf;
+  } catch (e) { return null; }
+}
+
 async function cachearPedido(ped, cacheEan, nfs, kitCache) {
   const id  = ped.id;
   const dir = path.join(CACHE_DIR, String(id));
@@ -472,6 +487,18 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
     if (danfesNovos) salvarManifest(man);
     console.log(`[GIRABKP] DANFE: ${danfesNovos} novos, ${danfesFalha} falha, ${danfesSemId} sem nf.id`);
 
+    // passo: baixa a ETIQUETA em PDF (p/ modo A4 / fallback Zebra) — só de quem já tem ZPL
+    let etqPdfNovos = 0;
+    const extEtq = ETIQ_FORMATO.toLowerCase();
+    for (const ped of atendidos) {
+      const dir = path.join(CACHE_DIR, String(ped.id));
+      if (fs.existsSync(path.join(dir, 'etiqueta.pdf'))) continue;
+      if (!fs.existsSync(path.join(dir, `etiqueta.${extEtq}`))) continue;
+      const pdf = await baixarEtiquetaPDF(ped.id); await sleep(PAUSA_MS);
+      if (pdf) { fs.writeFileSync(path.join(dir, 'etiqueta.pdf'), pdf); etqPdfNovos++; }
+    }
+    if (etqPdfNovos) console.log(`[GIRABKP] ${etqPdfNovos} etiqueta(s) PDF cacheadas`);
+
     purgar(man);
     salvarManifest(man);
 
@@ -583,6 +610,17 @@ function routes(readBody) {
         res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': 'inline; filename="danfe.pdf"' });
         res.end(pdf);
       } catch (e) { json(res, 404, { erro: 'danfe não cacheada' }); }
+      return true;
+    }
+
+    // serve a ETIQUETA em PDF cacheada — p/ o modo A4 imprimir na laser
+    if (method === 'GET' && p.startsWith('/girassol-backup-offline/etiqueta-pdf/')) {
+      const id = p.split('/').filter(Boolean).pop();
+      try {
+        const pdf = fs.readFileSync(path.join(CACHE_DIR, String(id), 'etiqueta.pdf'));
+        res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': 'inline; filename="etiqueta.pdf"' });
+        res.end(pdf);
+      } catch (e) { json(res, 404, { erro: 'etiqueta pdf não cacheada (ainda)' }); }
       return true;
     }
 
