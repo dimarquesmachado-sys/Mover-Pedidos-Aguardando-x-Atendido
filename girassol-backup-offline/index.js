@@ -2,7 +2,7 @@
 
 // ════════════════════════════════════════════════════════════════════════
 //  GIRASSOL · CHECKOUT OFFLINE — FASE 1 (poller) + FASE 2 (bipagem)   (Mover-Pedidos)
-//  girassol-backup-offline v16/06 b13   (a versão real é a const VERSAO abaixo)
+//  girassol-backup-offline v16/06 b15   (a versão real é a const VERSAO abaixo)
 // ════════════════════════════════════════════════════════════════════════
 //  Módulo do orquestrador unificado (HTTP-native, sem Express).
 //  Reaproveita o token Bling da Girassol via ../girassol/tokenManager.
@@ -32,7 +32,7 @@ const fetch = require('node-fetch');
 const AdmZip = require('adm-zip');
 const { garantirToken } = require('../girassol/tokenManager');
 
-const VERSAO     = 'girassol-backup-offline v16/06 b13';
+const VERSAO     = 'girassol-backup-offline v16/06 b15';
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 
 // ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
@@ -441,6 +441,7 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
         const snap = await cachearPedido(det, cacheEan, nfs, kitCache);
         man[id] = {
           numero: snap.numero, marketplace: snap.marketplace,
+          cliente: snap.cliente || '', nf_numero: (snap.nf && snap.nf.numero) || null,
           tem_nf: snap.tem_nf, tem_kit: snap.tem_kit, tem_etiqueta: snap.tem_etiqueta,
           tem_danfe: !!(ja && ja.tem_danfe),
           itens: snap.itens.length, schema: snap.schema, cacheado_em: snap.cacheado_em
@@ -498,6 +499,13 @@ function routes(readBody) {
     const { method } = req;
     const p = urlObj.pathname;
 
+    // raiz do módulo → manda pro painel (evita "not found" ao abrir a URL base)
+    if (method === 'GET' && (p === '/girassol-backup-offline' || p === '/girassol-backup-offline/')) {
+      res.writeHead(302, { Location: '/girassol-backup-offline/painel' });
+      res.end();
+      return true;
+    }
+
     if ((method === 'POST' || method === 'GET') && p === '/girassol-backup-offline/run') {
       const forcar = /[?&]force=1\b/.test(urlObj.search || '');
       rodarCiclo(forcar ? 'manual-force' : 'manual', forcar);
@@ -520,6 +528,18 @@ function routes(readBody) {
       const man = manifest();
       const conf = readJson(CONFERIDOS_FILE, {});
       const ids = Object.keys(man);
+      // backfill cliente + nº NF p/ busca (lê snapshot só de quem ainda não tem; persiste 1x)
+      let mexeu = false;
+      for (const i of ids) {
+        const m = man[i];
+        if (m && (m.cliente === undefined || m.nf_numero === undefined)) {
+          const snap = readJson(path.join(CACHE_DIR, String(i), 'pedido.json'), null);
+          if (snap) { m.cliente = snap.cliente || ''; m.nf_numero = (snap.nf && snap.nf.numero) || null; }
+          else { m.cliente = m.cliente || ''; m.nf_numero = m.nf_numero || null; }
+          mexeu = true;
+        }
+      }
+      if (mexeu) salvarManifest(man);
       const prontos = ids
         .filter(i => man[i].tem_etiqueta)
         .map(i => ({ id: i, ...man[i], conferido: conf[i] || null }))
