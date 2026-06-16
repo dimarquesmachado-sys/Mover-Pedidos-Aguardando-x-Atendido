@@ -2,7 +2,7 @@
 
 // ════════════════════════════════════════════════════════════════════════
 //  GIRASSOL · CHECKOUT OFFLINE — FASE 1 (poller) + FASE 2 (bipagem)   (Mover-Pedidos)
-//  girassol-backup-offline v16/06 b11   (a versão real é a const VERSAO abaixo)
+//  girassol-backup-offline v16/06 b12   (a versão real é a const VERSAO abaixo)
 // ════════════════════════════════════════════════════════════════════════
 //  Módulo do orquestrador unificado (HTTP-native, sem Express).
 //  Reaproveita o token Bling da Girassol via ../girassol/tokenManager.
@@ -32,7 +32,7 @@ const fetch = require('node-fetch');
 const AdmZip = require('adm-zip');
 const { garantirToken } = require('../girassol/tokenManager');
 
-const VERSAO     = 'girassol-backup-offline v16/06 b11';
+const VERSAO     = 'girassol-backup-offline v16/06 b12';
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 
 // ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
@@ -298,6 +298,22 @@ async function baixarEtiqueta(blingId) {
   } catch (e) { return null; }
 }
 
+// baixa o DANFE em PDF da NF (via /nfe/{id} → linkPDF). Retorna Buffer ou null.
+async function baixarDanfe(nfId) {
+  if (!nfId) return null;
+  try {
+    const det = await blingGet(`/nfe/${nfId}`);
+    const nf = det.data && det.data.data;
+    const link = nf && nf.linkPDF;
+    if (!link) return null;
+    const resp = await fetch(link, { redirect: 'follow' });
+    if (!resp.ok) return null;
+    const buf = Buffer.from(await resp.arrayBuffer());
+    if (buf.slice(0, 4).toString('latin1') !== '%PDF') return null; // não veio PDF (bloqueio?)
+    return buf;
+  } catch (e) { return null; }
+}
+
 async function cachearPedido(ped, cacheEan, nfs, kitCache) {
   const id  = ped.id;
   const dir = path.join(CACHE_DIR, String(id));
@@ -426,6 +442,7 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
         man[id] = {
           numero: snap.numero, marketplace: snap.marketplace,
           tem_nf: snap.tem_nf, tem_kit: snap.tem_kit, tem_etiqueta: snap.tem_etiqueta,
+          tem_danfe: !!(ja && ja.tem_danfe),
           itens: snap.itens.length, schema: snap.schema, cacheado_em: snap.cacheado_em
         };
         if (!ja) novos++;
@@ -435,6 +452,24 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
       } catch (e) { erros++; console.error(`[GIRABKP] erro pedido ${id}:`, e.message); }
       await sleep(PAUSA_MS);
     }
+
+    // passo leve: baixa o DANFE que falta (~30 por ciclo, espalha a carga p/ offline)
+    let danfesNovos = 0;
+    for (const ped of atendidos) {
+      if (danfesNovos >= 30) break;
+      const dir = path.join(CACHE_DIR, String(ped.id));
+      if (fs.existsSync(path.join(dir, 'danfe.pdf'))) continue;
+      const snap = readJson(path.join(dir, 'pedido.json'), null);
+      if (!snap || !snap.nf || !snap.nf.id) continue;
+      const pdf = await baixarDanfe(snap.nf.id); await sleep(PAUSA_MS);
+      if (pdf) {
+        fs.writeFileSync(path.join(dir, 'danfe.pdf'), pdf);
+        snap.tem_danfe = true; writeJson(path.join(dir, 'pedido.json'), snap);
+        if (man[ped.id]) man[ped.id].tem_danfe = true;
+        danfesNovos++;
+      }
+    }
+    if (danfesNovos) { salvarManifest(man); console.log(`[GIRABKP] ${danfesNovos} DANFE(s) cacheados`); }
 
     purgar(man);
     salvarManifest(man);
@@ -517,6 +552,17 @@ function routes(readBody) {
         res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
         res.end(zpl);
       } catch (e) { json(res, 404, { erro: 'etiqueta não cacheada' }); }
+      return true;
+    }
+
+    // serve o DANFE (PDF) cacheado — p/ abrir no navegador ou o QZ imprimir
+    if (method === 'GET' && p.startsWith('/girassol-backup-offline/danfe/')) {
+      const id = p.split('/').filter(Boolean).pop();
+      try {
+        const pdf = fs.readFileSync(path.join(CACHE_DIR, String(id), 'danfe.pdf'));
+        res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': 'inline; filename="danfe.pdf"' });
+        res.end(pdf);
+      } catch (e) { json(res, 404, { erro: 'danfe não cacheada' }); }
       return true;
     }
 
