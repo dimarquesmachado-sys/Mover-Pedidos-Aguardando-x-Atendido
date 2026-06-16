@@ -60,16 +60,22 @@
   .nfbar{background:var(--card2);border:1px solid var(--line);border-radius:9px;padding:9px 12px;margin:8px 0;font-size:13px}
   .nfbar .chave{font-family:ui-monospace,monospace;font-size:11px;color:var(--mut);word-break:break-all}
   .noean{color:var(--warn)}
-  .scanbox{margin:12px 0}
-  .scanbox input{width:100%;background:#0b0d12;border:2px solid var(--ac);color:var(--tx);border-radius:11px;padding:15px;font-size:19px;font-family:ui-monospace,monospace;text-align:center}
-  .scanbox input.err{border-color:var(--err);animation:shake .25s}
+  .scanrow{display:flex;gap:8px;align-items:stretch;margin:12px 0 4px}
+  .scanrow #scan{flex:1;background:#0b0d12;border:2px solid var(--ac);color:var(--tx);border-radius:11px;padding:15px;font-size:19px;font-family:ui-monospace,monospace;text-align:center}
+  .scanrow #scan.err{border-color:var(--err);animation:shake .25s}
+  .qtdwrap{display:flex;flex-direction:column;justify-content:center;align-items:center;background:#0b0d12;border:2px solid var(--line);border-radius:11px;padding:3px 10px}
+  .qtdwrap label{font-size:9px;color:var(--mut);text-transform:uppercase;letter-spacing:.5px}
+  .qtdwrap input{width:58px;background:transparent;border:0;color:var(--tx);font-size:20px;font-family:ui-monospace,monospace;text-align:center;outline:none}
+  .thumb{width:46px;height:46px;border-radius:7px;object-fit:cover;background:#0b0d12;border:1px solid var(--line);flex:0 0 46px}
+  .thumb.noimg{display:flex;align-items:center;justify-content:center;color:var(--mut);font-size:16px}
   @keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-6px)}75%{transform:translateX(6px)}}
   .hint{font-size:12px;color:var(--mut);text-align:center;margin-top:5px}
   .item{display:flex;align-items:center;gap:12px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 13px;margin-bottom:8px}
   .item.full{border-color:var(--ok);background:#15241a}
   .kitwrap{border:1px solid var(--line);border-radius:11px;margin-bottom:10px;overflow:hidden;background:#171b24}
   .kitwrap.full{border-color:var(--ok)}
-  .kithead{padding:10px 13px;background:#202634;font-size:14px;border-bottom:1px solid var(--line)}
+  .kithead{display:flex;gap:10px;align-items:center;padding:10px 13px;background:#202634;font-size:14px;border-bottom:1px solid var(--line)}
+  .kh-txt{flex:1}
   .ktag{display:inline-block;font-size:10px;font-weight:800;background:var(--warn);color:#1a1205;padding:2px 7px;border-radius:5px;margin-right:6px;vertical-align:middle}
   .comps{padding:8px 8px 1px}
   .item.comp{margin-left:14px;border-left:3px solid #3a4657}
@@ -249,11 +255,11 @@ async function selecionar(id){
 function prepararPedido(ped){
   const grupos = [], unidades = [];
   let uid = 0;
-  const novaUnid = (o)=>{ const u={ _id:uid++, sku:o.sku||'', ean:o.ean||null, descricao:o.descricao||'', qtd:Number(o.qtd||0), bipado:0 }; unidades.push(u); return u; };
+  const novaUnid = (o)=>{ const u={ _id:uid++, sku:o.sku||'', ean:o.ean||null, descricao:o.descricao||'', img:o.img||null, qtd:Number(o.qtd||0), bipado:0 }; unidades.push(u); return u; };
   for(const it of (ped.itens||[])){
     if(it.tipo==='kit' && Array.isArray(it.componentes) && it.componentes.length){
       const comps = it.componentes.map(c=>novaUnid(c));
-      grupos.push({ tipo:'kit', sku:it.sku, descricao:it.descricao, ean:it.ean, qtd:Number(it.qtd||0), comps });
+      grupos.push({ tipo:'kit', sku:it.sku, descricao:it.descricao, ean:it.ean, img:it.img, qtd:Number(it.qtd||0), comps });
     } else {
       grupos.push({ tipo:'leaf', unit:novaUnid(it) });
     }
@@ -275,8 +281,11 @@ function renderDetail(){
     '</div>'+
     '<div class="cli">'+esc(p.cliente||'')+'</div>'+
     '<div class="nfbar">'+nfHtml+'</div>'+
-    '<div class="scanbox"><input id="scan" autocomplete="off" placeholder="bipe o código de barras do item…"/>'+
-      '<div class="hint">o leitor sem fio funciona como teclado — kit conta os componentes</div></div>'+
+    '<div class="scanrow">'+
+      '<div class="qtdwrap"><label>Qtd</label><input id="qtdConf" type="number" value="1" min="1" max="999"/></div>'+
+      '<input id="scan" autocomplete="off" placeholder="bipe o código de barras do item…"/>'+
+    '</div>'+
+    '<div class="hint">opcional: digite a <b>Qtd</b> (ex: 100) e bipe 1× — senão soma 1 por bipada · kit conta os componentes</div>'+
     '<div id="bItens"></div>'+
     '<div class="dbtns">'+
       '<button class="btn warn" onclick="imprimirAtual()">🖨 Só imprimir etiqueta</button>'+
@@ -286,17 +295,26 @@ function renderDetail(){
   renderItens();
   const scan = $('scan');
   scan.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); const v=scan.value; scan.value=''; onScan(v); }});
+  const qtd = $('qtdConf');
+  qtd.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); if((qtd.value||'').length>3) qtd.value='1'; scan.focus(); }});
+  qtd.addEventListener('focus', ()=>qtd.select());
   setTimeout(()=>scan.focus(),60);
 }
 
 function unitRow(u, isComp){
   const full = u.bipado>=u.qtd;
   return '<div class="item '+(isComp?'comp ':'')+(full?'full':'')+'">'+
+    thumb(u.img)+
     '<div class="icount"><span class="'+(full?'b':'')+'">'+u.bipado+'</span>/'+u.qtd+'</div>'+
     '<div class="idesc"><div class="d">'+esc(u.descricao||u.sku||'item')+'</div>'+
       '<div class="e">SKU '+esc(u.sku||'—')+' · EAN '+(u.ean?esc(u.ean):'<span class="noean">sem EAN</span>')+'</div></div>'+
     (full?'':'<button class="miniok" onclick="manualUnit('+u._id+')">+1</button>')+
   '</div>';
+}
+
+function thumb(src){
+  if(!src) return '<div class="thumb noimg">📦</div>';
+  return '<img class="thumb" src="'+esc(src)+'" loading="lazy" referrerpolicy="no-referrer" onerror="this.outerHTML=\'<div class=&quot;thumb noimg&quot;>📦</div>\'"/>';
 }
 
 function renderItens(){
@@ -309,8 +327,8 @@ function renderItens(){
     if(g.tipo==='kit'){
       const done = g.comps.every(c=>c.bipado>=c.qtd);
       return '<div class="kitwrap '+(done?'full':'')+'">'+
-        '<div class="kithead"><span class="ktag">KIT · NF</span> '+esc(g.descricao||g.sku)+
-          '<div class="e">SKU '+esc(g.sku||'—')+'</div></div>'+
+        '<div class="kithead">'+thumb(g.img)+'<div class="kh-txt"><span class="ktag">KIT · NF</span> '+esc(g.descricao||g.sku)+
+          '<div class="e">SKU '+esc(g.sku||'—')+'</div></div></div>'+
         '<div class="comps">'+g.comps.map(c=>unitRow(c,true)).join('')+'</div>'+
       '</div>';
     }
@@ -324,10 +342,14 @@ function manualUnit(id){ const u=pedidoAtual.unidades.find(x=>x._id===id); if(u 
 function onScan(code){
   code = norm(code);
   if(!code || !pedidoAtual) return;
+  let q = parseInt(($('qtdConf')||{}).value,10); if(!q || q<1 || q>999) q=1;
   let u = pedidoAtual.unidades.find(x=> x.ean && norm(x.ean)===code && x.bipado<x.qtd);
   if(!u) u = pedidoAtual.unidades.find(x=> x.sku && norm(x.sku).toUpperCase()===code.toUpperCase() && x.bipado<x.qtd);
-  if(u){ u.bipado++; beep(true); renderItens(); }
-  else { beep(false); const s=$('scan'); if(s){ s.classList.add('err'); setTimeout(()=>s.classList.remove('err'),300);} toast('código não confere: '+code); }
+  if(u){
+    const add = Math.min(q, u.qtd - u.bipado);
+    u.bipado += add; beep(true); renderItens();
+    const qi=$('qtdConf'); if(qi) qi.value='1';
+  } else { beep(false); const s=$('scan'); if(s){ s.classList.add('err'); setTimeout(()=>s.classList.remove('err'),300);} toast('código não confere: '+code); }
 }
 
 async function imprimirAtual(){ try{ await imprimirZPL(zplAtual); toast('🖨 etiqueta enviada'); }catch(e){ toast('Falha: '+e.message); } }
@@ -347,7 +369,7 @@ async function finalizar(){
 }
 
 // mantém foco no scan
-setInterval(()=>{ const s=$('scan'); if(s && document.activeElement!==s && document.activeElement!==opIn) s.focus(); }, 1500);
+setInterval(()=>{ const s=$('scan'); const q=$('qtdConf'); if(s && document.activeElement!==s && document.activeElement!==opIn && document.activeElement!==q) s.focus(); }, 1500);
 
 // boot
 setupQZ();
