@@ -2,7 +2,7 @@
 
 // ════════════════════════════════════════════════════════════════════════
 //  GIRASSOL · CHECKOUT OFFLINE — FASE 1 (poller) + FASE 2 (bipagem)   (Mover-Pedidos)
-//  girassol-backup-offline v16/06 b16   (a versão real é a const VERSAO abaixo)
+//  girassol-backup-offline v16/06 b17   (a versão real é a const VERSAO abaixo)
 // ════════════════════════════════════════════════════════════════════════
 //  Módulo do orquestrador unificado (HTTP-native, sem Express).
 //  Reaproveita o token Bling da Girassol via ../girassol/tokenManager.
@@ -32,7 +32,7 @@ const fetch = require('node-fetch');
 const AdmZip = require('adm-zip');
 const { garantirToken } = require('../girassol/tokenManager');
 
-const VERSAO     = 'girassol-backup-offline v16/06 b16';
+const VERSAO     = 'girassol-backup-offline v16/06 b17';
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 
 // ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
@@ -841,6 +841,40 @@ function routes(readBody) {
               out.salvou = true;
             }
           }
+        }
+      } catch (e) { out.erro = e.message; }
+      json(res, 200, out);
+      return true;
+    }
+
+    // testa se o Bling devolve a ETIQUETA em PDF (vs ZPL) p/ um pedido
+    // uso: /girassol-backup-offline/debug-etiqueta-fmt/{idDoPedido}
+    if (method === 'GET' && p.startsWith('/girassol-backup-offline/debug-etiqueta-fmt/')) {
+      const id = p.split('/').filter(Boolean).pop();
+      const out = { pedido: id, versao: VERSAO };
+      try {
+        for (const fmt of ['PDF', 'ZPL']) {
+          const r = await blingGet(`/logisticas/etiquetas?formato=${fmt}&idsVendas[]=${id}`); await sleep(PAUSA_MS);
+          const item = r.data && r.data.data && r.data.data[0];
+          const link = item && item.link;
+          const info = { api_ok: r.ok, api_status: r.status, tem_link: !!link };
+          if (!link && r.data) info.resposta = JSON.stringify(r.data).slice(0, 300);
+          if (link) {
+            try {
+              const resp = await fetch(link); await sleep(PAUSA_MS);
+              const buf = Buffer.from(await resp.arrayBuffer());
+              const head = buf.slice(0, 8).toString('latin1');
+              info.download = {
+                status: resp.status,
+                content_type: resp.headers.get('content-type'),
+                tamanho: buf.length,
+                primeiros: head,
+                eh_pdf: head.startsWith('%PDF'),
+                eh_zip: head.charCodeAt(0) === 0x50 && head.charCodeAt(1) === 0x4B
+              };
+            } catch (e) { info.download = { erro: e.message }; }
+          }
+          out[fmt] = info;
         }
       } catch (e) { out.erro = e.message; }
       json(res, 200, out);
