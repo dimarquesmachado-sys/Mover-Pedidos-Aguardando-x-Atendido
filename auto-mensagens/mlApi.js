@@ -42,12 +42,33 @@ async function buscarVendasPagas(desde) {
   const dateFrom = desde.toISOString();
   // ML aceita formato ISO sem ms: 2026-05-29T20:00:00.000-03:00 ou com Z
   // /orders/search documentado: order.date_created.from=DATE_FROM&order.date_created.to=DATE_TO
-  const path = `/orders/search?seller=${sellerId}&order.date_created.from=${encodeURIComponent(dateFrom)}&order.status=paid&sort=date_desc&limit=50`;
-  const r = await mlFetch('GET', path);
-  if (!r.ok) {
-    throw new Error(`ML buscar vendas ${r.status}: ${JSON.stringify(r.data).slice(0, 300)}`);
+  //
+  // PAGINA ate cobrir a janela inteira. ANTES pegava so as 50 mais recentes (limit=50
+  // sem offset) — entao num seller com >50 vendas/janela, os pedidos A COMBINAR mais
+  // ANTIGOS nunca eram alcancados (recuperar achava 0, como aconteceu). O teto do
+  // /orders/search do ML e offset+limit <= 1000, entao paramos em 1000 (ou antes, na
+  // ultima pagina).
+  const LIMIT = 50;
+  const MAX_OFFSET = 1000;
+  const base = `/orders/search?seller=${sellerId}&order.date_created.from=${encodeURIComponent(dateFrom)}&order.status=paid&sort=date_desc&limit=${LIMIT}`;
+  let offset = 0;
+  let total = Infinity;
+  const todas = [];
+
+  while (offset < total && offset < MAX_OFFSET) {
+    const r = await mlFetch('GET', `${base}&offset=${offset}`);
+    if (!r.ok) {
+      if (todas.length > 0) break; // ja peguei algumas paginas: retorna o que tem
+      throw new Error(`ML buscar vendas ${r.status}: ${JSON.stringify(r.data).slice(0, 300)}`);
+    }
+    const pagina = Array.isArray(r.data?.results) ? r.data.results : [];
+    todas.push(...pagina);
+    const t = Number(r.data?.paging?.total);
+    total = Number.isFinite(t) ? t : todas.length; // sem paging: para
+    if (pagina.length < LIMIT) break;               // ultima pagina
+    offset += LIMIT;
   }
-  return r.data?.results || [];
+  return todas;
 }
 
 /**
