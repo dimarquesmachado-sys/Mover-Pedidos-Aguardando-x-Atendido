@@ -2,7 +2,7 @@
 
 // ════════════════════════════════════════════════════════════════════════
 //  GIRASSOL · CHECKOUT OFFLINE — FASE 1 (poller) + FASE 2 (bipagem)   (Mover-Pedidos)
-//  girassol-backup-offline v16/06 b3   (a versão real é a const VERSAO abaixo)
+//  girassol-backup-offline v16/06 b4   (a versão real é a const VERSAO abaixo)
 // ════════════════════════════════════════════════════════════════════════
 //  Módulo do orquestrador unificado (HTTP-native, sem Express).
 //  Reaproveita o token Bling da Girassol via ../girassol/tokenManager.
@@ -32,7 +32,7 @@ const fetch = require('node-fetch');
 const AdmZip = require('adm-zip');
 const { garantirToken } = require('../girassol/tokenManager');
 
-const VERSAO     = 'girassol-backup-offline v16/06 b3';
+const VERSAO     = 'girassol-backup-offline v16/06 b4';
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 
 // ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
@@ -47,6 +47,8 @@ const CRON_EXPR     = process.env.GIRABKP_CRON || '5,15,25,35,45,55 6-23 * * *';
 const MANIFEST_FILE = path.join(CACHE_DIR, 'manifest.json');
 const SKU_EAN_FILE  = path.join(CACHE_DIR, 'sku-ean.json');
 const CONFERIDOS_FILE = path.join(CACHE_DIR, 'conferidos.json');
+const KIT_CACHE_FILE  = path.join(CACHE_DIR, 'kit-estrutura.json');  // kits já resolvidos
+const SCHEMA = 2;  // versão do snapshot — bump força re-cache dos pedidos antigos
 
 // loja → marketplace (mesmo mapa do checkout Girassol)
 const LOJA_MKT = {
@@ -231,6 +233,30 @@ async function eanDoItem(produtoId, sku, cacheEan) {
   return ean;
 }
 
+// detalhe completo do produto (/produtos/{id}) com cache por ciclo
+let _prodCache = new Map();
+async function produtoDetalhe(id) {
+  if (!id) return null;
+  if (_prodCache.has(id)) return _prodCache.get(id);
+  let prod = null;
+  try {
+    const r = await blingGet(`/produtos/${id}`);
+    prod = (r.ok && r.data && r.data.data) ? r.data.data : null;
+  } catch (e) {}
+  _prodCache.set(id, prod);
+  return prod;
+}
+
+// {sku, ean, descricao} de um produto por id (usa cacheEan por SKU)
+async function infoProduto(id, cacheEan) {
+  const prod = await produtoDetalhe(id);
+  await sleep(PAUSA_MS);
+  const sku = (prod && prod.codigo) || '';
+  let ean = prod ? primeiroEan(prod) : null;
+  if (sku) { if (ean) cacheEan[sku] = ean; else if (cacheEan[sku]) ean = cacheEan[sku]; }
+  return { sku, ean, descricao: (prod && prod.nome) || '' };
+}
+
 // baixa a etiqueta de envio. O Bling devolve um ZIP (com "Etiqueta de envio.txt"
 // dentro = o ZPL), mesmo pedindo formato=ZPL. Então: baixa binário → descompacta.
 async function baixarEtiqueta(blingId) {
@@ -261,7 +287,7 @@ async function baixarEtiqueta(blingId) {
   } catch (e) { return null; }
 }
 
-async function cachearPedido(ped, cacheEan, nfs) {
+async function cachearPedido(ped, cacheEan, nfs, kitCache) {
   const id  = ped.id;
   const dir = path.join(CACHE_DIR, String(id));
   ensureDir(dir);
@@ -269,11 +295,38 @@ async function cachearPedido(ped, cacheEan, nfs) {
   const lojaId = String((ped.loja && ped.loja.id) || '');
 
   const itens = [];
+  let temKit = false;
   for (const it of (ped.itens || [])) {
-    const sku = it.codigo || (it.produto && it.produto.codigo) || '';
-    const ean = await eanDoItem(it.produto && it.produto.id, sku, cacheEan);
-    await sleep(PAUSA_MS);
-    itens.push({ sku, ean, descricao: it.descricao || '', qtd: Number(it.quantidade || 0) });
+    const itemQty = Number(it.quantidade || 0);
+    const prodId  = it.produto && it.produto.id;
+    const prod    = await produtoDetalhe(prodId); await sleep(PAUSA_MS);
+    const sku     = it.codigo || (prod && prod.codigo) || (it.produto && it.produto.codigo) || '';
+    const eanItem = prod ? primeiroEan(prod) : await eanDoItem(prodId, sku, cacheEan);
+    if (sku && eanItem) cacheEan[sku] = eanItem;
+    const descr   = it.descricao || (prod && prod.nome) || '';
+
+    const comps = (prod && prod.estrutura && Array.isArray(prod.estrutura.componentes))
+      ? prod.estrutura.componentes : [];
+
+    if (comps.length) {
+      // KIT / composição → explode nos componentes (com cache por produto-pai)
+      temKit = true;
+      let base = kitCache && kitCache[prodId];
+      if (!base) {
+        base = [];
+        for (const c of comps) {
+          const info = await infoProduto(c.produto && c.produto.id, cacheEan);
+          base.push({ sku: info.sku, ean: info.ean, descricao: info.descricao, qtd: Number(c.quantidade || 1) });
+        }
+        if (kitCache) kitCache[prodId] = base;
+      }
+      // qtd final = qtd do componente no kit × qtd do kit no pedido
+      const componentes = base.map(c => ({ sku: c.sku, ean: c.ean, descricao: c.descricao, qtd: c.qtd * (itemQty || 1) }));
+      itens.push({ sku, ean: eanItem, descricao: descr, qtd: itemQty, tipo: 'kit', componentes });
+    } else {
+      const tipo = (prod && prod.variacao && prod.variacao.produtoPai) ? 'variacao' : 'simples';
+      itens.push({ sku, ean: eanItem, descricao: descr, qtd: itemQty, tipo });
+    }
   }
 
   const nf = acharNFnaLista(id, nfs || []);
@@ -296,8 +349,10 @@ async function cachearPedido(ped, cacheEan, nfs) {
     nf,
     itens,
     tem_nf: !!nf,
+    tem_kit: temKit,
     tem_etiqueta: temEtiqueta,
     etiqueta_formato: temEtiqueta ? ETIQ_FORMATO : null,
+    schema: SCHEMA,
     cacheado_em: new Date().toISOString()
   };
   writeJson(path.join(dir, 'pedido.json'), snapshot);
@@ -315,23 +370,26 @@ function purgar(man) {
   }
 }
 
-async function rodarCiclo(motivo = 'cron') {
+async function rodarCiclo(motivo = 'cron', forcar = false) {
   if (rodando) { console.log('[GIRABKP] ciclo já em andamento — pulei'); return ultimoResumo; }
   rodando = true;
+  _prodCache = new Map();                       // zera cache de produto por ciclo
+  const kitCache = readJson(KIT_CACHE_FILE, {}); // kits já resolvidos (persistente)
   const t0 = Date.now();
   let novos = 0, erros = 0;
   try {
     ensureDir(CACHE_DIR);
-    console.log(`[GIRABKP] ▶ ciclo (${motivo})`);
+    console.log(`[GIRABKP] ▶ ciclo (${motivo})${forcar ? ' [FORCE]' : ''}`);
     const man      = manifest();
     const cacheEan = skuEanCache();
     const atendidos = await listarAtendidos();
     console.log(`[GIRABKP] ${atendidos.length} pedido(s) ATENDIDO(${SIT_ATENDIDO}) na janela de ${JANELA_DIAS}d`);
 
-    // só (re)processa quem ainda não tem etiqueta cacheada
+    // (re)processa quem não tem etiqueta OU está num schema antigo (ganha EAN+kit)
     const aProcessar = atendidos.filter(ped => {
+      if (forcar) return true;
       const ja = man[ped.id];
-      return !(ja && ja.tem_etiqueta);
+      return !(ja && ja.tem_etiqueta && ja.schema === SCHEMA);
     });
     console.log(`[GIRABKP] ${aProcessar.length} a (re)processar`);
 
@@ -351,15 +409,16 @@ async function rodarCiclo(motivo = 'cron') {
       try {
         const det = await detalhePedido(id); await sleep(PAUSA_MS);
         if (!det) { erros++; continue; }
-        const snap = await cachearPedido(det, cacheEan, nfs);
+        const snap = await cachearPedido(det, cacheEan, nfs, kitCache);
         man[id] = {
           numero: snap.numero, marketplace: snap.marketplace,
-          tem_nf: snap.tem_nf, tem_etiqueta: snap.tem_etiqueta,
-          itens: snap.itens.length, cacheado_em: snap.cacheado_em
+          tem_nf: snap.tem_nf, tem_kit: snap.tem_kit, tem_etiqueta: snap.tem_etiqueta,
+          itens: snap.itens.length, schema: snap.schema, cacheado_em: snap.cacheado_em
         };
         if (!ja) novos++;
         salvarManifest(man);
         salvarSkuEan(cacheEan);
+        writeJson(KIT_CACHE_FILE, kitCache);
       } catch (e) { erros++; console.error(`[GIRABKP] erro pedido ${id}:`, e.message); }
       await sleep(PAUSA_MS);
     }
@@ -392,8 +451,9 @@ function routes(readBody) {
     const p = urlObj.pathname;
 
     if (method === 'POST' && p === '/girassol-backup-offline/run') {
-      rodarCiclo('manual');
-      json(res, 200, { mensagem: 'Ciclo de cache iniciado. Veja os logs ou /girassol-backup-offline/status.', versao: VERSAO });
+      const forcar = /[?&]force=1\b/.test(urlObj.search || '');
+      rodarCiclo(forcar ? 'manual-force' : 'manual', forcar);
+      json(res, 200, { mensagem: `Ciclo${forcar ? ' (FORCE — re-cacheia tudo)' : ''} iniciado. Veja /girassol-backup-offline/status.`, versao: VERSAO });
       return true;
     }
 
@@ -415,8 +475,7 @@ function routes(readBody) {
       const prontos = ids
         .filter(i => man[i].tem_etiqueta)
         .map(i => ({ id: i, ...man[i], conferido: conf[i] || null }))
-        .sort((a, b) => Number(b.numero || 0) - Number(a.numero || 0));
-      json(res, 200, {
+        .sort((a, b) => Number(b.numero || 0) - Number(a.numero || 0));      json(res, 200, {
         versao: VERSAO,
         prontos: prontos.length,
         sem_etiqueta: ids.filter(i => !man[i].tem_etiqueta).length,
