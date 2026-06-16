@@ -2,7 +2,7 @@
 
 // ════════════════════════════════════════════════════════════════════════
 //  GIRASSOL · CHECKOUT OFFLINE — FASE 1 (poller) + FASE 2 (bipagem)   (Mover-Pedidos)
-//  girassol-backup-offline v16/06 b12   (a versão real é a const VERSAO abaixo)
+//  girassol-backup-offline v16/06 b13   (a versão real é a const VERSAO abaixo)
 // ════════════════════════════════════════════════════════════════════════
 //  Módulo do orquestrador unificado (HTTP-native, sem Express).
 //  Reaproveita o token Bling da Girassol via ../girassol/tokenManager.
@@ -32,7 +32,7 @@ const fetch = require('node-fetch');
 const AdmZip = require('adm-zip');
 const { garantirToken } = require('../girassol/tokenManager');
 
-const VERSAO     = 'girassol-backup-offline v16/06 b12';
+const VERSAO     = 'girassol-backup-offline v16/06 b13';
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 
 // ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
@@ -453,23 +453,23 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
       await sleep(PAUSA_MS);
     }
 
-    // passo leve: baixa o DANFE que falta (~30 por ciclo, espalha a carga p/ offline)
-    let danfesNovos = 0;
+    // passo: baixa o DANFE que falta (TODOS — fica pronto p/ offline rápido)
+    let danfesNovos = 0, danfesFalha = 0, danfesSemId = 0;
     for (const ped of atendidos) {
-      if (danfesNovos >= 30) break;
       const dir = path.join(CACHE_DIR, String(ped.id));
       if (fs.existsSync(path.join(dir, 'danfe.pdf'))) continue;
       const snap = readJson(path.join(dir, 'pedido.json'), null);
-      if (!snap || !snap.nf || !snap.nf.id) continue;
+      if (!snap || !snap.nf || !snap.nf.id) { danfesSemId++; continue; }
       const pdf = await baixarDanfe(snap.nf.id); await sleep(PAUSA_MS);
       if (pdf) {
         fs.writeFileSync(path.join(dir, 'danfe.pdf'), pdf);
         snap.tem_danfe = true; writeJson(path.join(dir, 'pedido.json'), snap);
         if (man[ped.id]) man[ped.id].tem_danfe = true;
         danfesNovos++;
-      }
+      } else { danfesFalha++; }
     }
-    if (danfesNovos) { salvarManifest(man); console.log(`[GIRABKP] ${danfesNovos} DANFE(s) cacheados`); }
+    if (danfesNovos) salvarManifest(man);
+    console.log(`[GIRABKP] DANFE: ${danfesNovos} novos, ${danfesFalha} falha, ${danfesSemId} sem nf.id`);
 
     purgar(man);
     salvarManifest(man);
@@ -777,6 +777,49 @@ function routes(readBody) {
                 parece_bloqueio: /^<|html|cloudflare/i.test(head)
               };
             } catch (e) { out.download_pdf = { erro: e.message }; }
+          }
+        }
+      } catch (e) { out.erro = e.message; }
+      json(res, 200, out);
+      return true;
+    }
+
+    // testa o caminho do DANFE p/ UM pedido (id do pedido) e cacheia se der certo
+    // uso: /girassol-backup-offline/debug-danfe/{idDoPedido}
+    if (method === 'GET' && p.startsWith('/girassol-backup-offline/debug-danfe/')) {
+      const id = p.split('/').filter(Boolean).pop();
+      const out = { pedido: id, versao: VERSAO };
+      try {
+        const dir = path.join(CACHE_DIR, String(id));
+        out.dir_existe = fs.existsSync(dir);
+        out.danfe_ja_cacheado = fs.existsSync(path.join(dir, 'danfe.pdf'));
+        const snap = readJson(path.join(dir, 'pedido.json'), null);
+        out.snapshot_existe = !!snap;
+        out.nf_no_snapshot = (snap && snap.nf) || null;
+        let nfId = snap && snap.nf && snap.nf.id;
+        out.nf_id_snapshot = nfId || null;
+        if (!nfId) { // fallback: tenta achar a NF do pedido na hora
+          const nf = await nfDoPedido(id); await sleep(PAUSA_MS);
+          out.nf_via_fallback = nf;
+          nfId = nf && nf.id;
+        }
+        out.nf_id_usado = nfId || null;
+        if (nfId) {
+          const det = await blingGet(`/nfe/${nfId}`);
+          out.nfe_get_ok = det.ok; out.nfe_get_status = det.status;
+          const nf = det.data && det.data.data;
+          out.tem_linkPDF = !!(nf && nf.linkPDF);
+          if (nf && nf.linkPDF) {
+            const resp = await fetch(nf.linkPDF, { redirect: 'follow' });
+            const buf = Buffer.from(await resp.arrayBuffer());
+            const head = buf.slice(0, 8).toString('latin1');
+            out.download = { status: resp.status, tamanho: buf.length, primeiros: head, eh_pdf: head.startsWith('%PDF') };
+            if (head.startsWith('%PDF')) {
+              fs.writeFileSync(path.join(dir, 'danfe.pdf'), buf);
+              if (snap) { snap.tem_danfe = true; writeJson(path.join(dir, 'pedido.json'), snap); }
+              const man = manifest(); if (man[id]) { man[id].tem_danfe = true; salvarManifest(man); }
+              out.salvou = true;
+            }
           }
         }
       } catch (e) { out.erro = e.message; }
