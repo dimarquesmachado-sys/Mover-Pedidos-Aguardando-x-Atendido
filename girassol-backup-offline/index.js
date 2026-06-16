@@ -32,7 +32,7 @@ const fetch = require('node-fetch');
 const AdmZip = require('adm-zip');
 const { garantirToken } = require('../girassol/tokenManager');
 
-const VERSAO     = 'girassol-backup-offline v15/06 b5';
+const VERSAO     = 'girassol-backup-offline v15/06 b6';
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 
 // ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
@@ -46,6 +46,7 @@ const CRON_EXPR     = process.env.GIRABKP_CRON || '5,15,25,35,45,55 6-23 * * *';
 
 const MANIFEST_FILE = path.join(CACHE_DIR, 'manifest.json');
 const SKU_EAN_FILE  = path.join(CACHE_DIR, 'sku-ean.json');
+const CONFERIDOS_FILE = path.join(CACHE_DIR, 'conferidos.json');
 
 // loja → marketplace (mesmo mapa do checkout Girassol)
 const LOJA_MKT = {
@@ -63,6 +64,7 @@ function writeJson(file, obj) {
 }
 function dataISO(d) { return d.toISOString().slice(0, 10); }
 function json(res, code, body) { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(body)); }
+function html(res, code, body) { res.writeHead(code, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(body); }
 
 // EAN robusto — varre todos os nomes de campo que o Bling usa pro GTIN
 function getPossiveisGtins(obj) {
@@ -392,6 +394,69 @@ function routes(readBody) {
     if (method === 'POST' && p === '/girassol-backup-offline/run') {
       rodarCiclo('manual');
       json(res, 200, { mensagem: 'Ciclo de cache iniciado. Veja os logs ou /girassol-backup-offline/status.', versao: VERSAO });
+      return true;
+    }
+
+    // ─── FASE 2: tela de bipagem ───
+    // serve a página
+    if (method === 'GET' && p === '/girassol-backup-offline/painel') {
+      try {
+        const htmlContent = fs.readFileSync(path.join(__dirname, 'painel.html'), 'utf8');
+        html(res, 200, htmlContent);
+      } catch (e) { json(res, 500, { erro: 'painel.html: ' + e.message }); }
+      return true;
+    }
+
+    // lista os pedidos PRONTOS (com etiqueta) + estado de conferido
+    if (method === 'GET' && p === '/girassol-backup-offline/lista') {
+      const man = manifest();
+      const conf = readJson(CONFERIDOS_FILE, {});
+      const ids = Object.keys(man);
+      const prontos = ids
+        .filter(i => man[i].tem_etiqueta)
+        .map(i => ({ id: i, ...man[i], conferido: conf[i] || null }))
+        .sort((a, b) => Number(b.numero || 0) - Number(a.numero || 0));
+      json(res, 200, {
+        versao: VERSAO,
+        prontos: prontos.length,
+        sem_etiqueta: ids.filter(i => !man[i].tem_etiqueta).length,
+        conferidos: prontos.filter(p2 => p2.conferido).length,
+        pedidos: prontos
+      });
+      return true;
+    }
+
+    // detalhe do pedido cacheado (itens + EAN + NF)
+    if (method === 'GET' && p.startsWith('/girassol-backup-offline/pedido/')) {
+      const id = p.split('/').filter(Boolean).pop();
+      const ped = readJson(path.join(CACHE_DIR, String(id), 'pedido.json'), null);
+      if (!ped) { json(res, 404, { erro: 'pedido não cacheado' }); return true; }
+      const conf = readJson(CONFERIDOS_FILE, {});
+      ped.conferido = conf[id] || null;
+      json(res, 200, ped);
+      return true;
+    }
+
+    // serve o ZPL cacheado (texto puro) p/ o QZ Tray imprimir
+    if (method === 'GET' && p.startsWith('/girassol-backup-offline/etiqueta/')) {
+      const id = p.split('/').filter(Boolean).pop();
+      try {
+        const zpl = fs.readFileSync(path.join(CACHE_DIR, String(id), `etiqueta.${ETIQ_FORMATO.toLowerCase()}`), 'utf8');
+        res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+        res.end(zpl);
+      } catch (e) { json(res, 404, { erro: 'etiqueta não cacheada' }); }
+      return true;
+    }
+
+    // marca pedido como conferido offline (entra na fila p/ sync na Fase 3)
+    if (method === 'POST' && p === '/girassol-backup-offline/conferido') {
+      const body = await readBody(req);
+      const id = String(body.id || '');
+      if (!id) { json(res, 400, { erro: 'id obrigatório' }); return true; }
+      const conf = readJson(CONFERIDOS_FILE, {});
+      conf[id] = { user: body.user || '', conferido_em: new Date().toISOString(), sincronizado: false };
+      writeJson(CONFERIDOS_FILE, conf);
+      json(res, 200, { ok: true, id });
       return true;
     }
 
