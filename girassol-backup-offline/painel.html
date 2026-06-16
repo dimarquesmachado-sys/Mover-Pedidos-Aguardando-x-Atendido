@@ -35,6 +35,13 @@
   .busca:focus{outline:none;border-color:var(--ac)}
   .busca::placeholder{color:var(--mut)}
   .scount{font-size:11px;color:var(--mut);margin:0 2px 8px}
+  .chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+  .chip{background:var(--card);border:1px solid var(--line);border-radius:999px;padding:5px 10px;color:var(--mut);font-size:12px;cursor:pointer;display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
+  .chip b{color:var(--tx)}
+  .chip:hover{border-color:var(--mut)}
+  .chip.on{border-color:var(--ac);color:var(--tx);background:#13243f}
+  .chip.flex.on{border-color:var(--warn);background:#2a1f08}
+  .cdot{width:8px;height:8px;border-radius:50%;display:inline-block}
 
   .btn{background:var(--ac);color:#fff;border:0;border-radius:9px;padding:9px 14px;font-size:14px;font-weight:600;cursor:pointer}
   .btn:disabled{opacity:.4;cursor:not-allowed}
@@ -134,6 +141,7 @@
       <button class="btn sec sm" id="modoBtn" onclick="trocarModo()" title="alterna entre etiqueta na Zebra (ZPL) ou abrir PDF p/ imprimir no navegador">🖨️ Etiq: Zebra</button>
     </div>
     <input class="busca" id="busca" placeholder="🔎 buscar: nº pedido, NF, cliente…" oninput="onBusca(this.value)" autocomplete="off" />
+    <div id="chips" class="chips"></div>
     <div id="listaPedidos"><div class="empty">carregando…</div></div>
   </aside>
 
@@ -147,7 +155,7 @@
 <div class="modal" id="modal"></div>
 
 <script>
-const UI_BUILD = 'b20';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b21';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#ff9900'}, magalu:{n:'Magalu',c:'#0086ff'}, outro:{n:'Outro',c:'#94a3b8'}
@@ -156,6 +164,7 @@ let pedidoAtual = null;   // {bling_id,numero,cliente,nf,marketplace,itens:[{sku
 let zplAtual = null;
 let listaCache = [];
 let filtroBusca = '';
+let filtroMkt = null;   // null=todos | 'ml'|'shopee'|... | 'flex'
 
 const $ = id => document.getElementById(id);
 const norm = c => String(c||'').trim().replace(/\s+/g,'');
@@ -286,6 +295,7 @@ async function carregarLista(){
       '<span><b>'+d.conferidos+'</b> conferidos</span>'+
       '<span><b>'+d.sem_etiqueta+'</b> sem etiqueta</span>';
     listaCache = d.pedidos||[];
+    renderChips();
     renderLista();
   }catch(e){ $('listaPedidos').innerHTML='<div class="empty">erro: '+esc(e.message)+'</div>'; }
 }
@@ -306,16 +316,39 @@ async function sincronizar(){
 
 function onBusca(v){ filtroBusca = (v||'').trim().toLowerCase(); renderLista(); }
 function filtrar(lista){
-  if(!filtroBusca) return lista;
-  const q = filtroBusca;
-  return lista.filter(p=>{
-    const mkt = (MKT[p.marketplace]||MKT.outro).n.toLowerCase();
-    return String(p.numero||'').includes(q)
+  let l = lista;
+  if(filtroMkt==='flex') l = l.filter(p=>p.flex);
+  else if(filtroMkt) l = l.filter(p=>p.marketplace===filtroMkt);
+  if(filtroBusca){
+    const q = filtroBusca;
+    l = l.filter(p=>
+      String(p.numero||'').includes(q)
       || String(p.nf_numero||'').toLowerCase().includes(q)
       || (p.cliente||'').toLowerCase().includes(q)
-      || mkt.includes(q)
-      || String(p.id||'').includes(q);
-  });
+      || (MKT[p.marketplace]||MKT.outro).n.toLowerCase().includes(q)
+      || String(p.id||'').includes(q)
+    );
+  }
+  return l;
+}
+
+// ── chips de marketplace + FLEX ──
+const MKT_ORDEM = ['ml','shopee','tiktok','magalu','amazon','outro'];
+function setFiltroMkt(v){ filtroMkt = v; renderChips(); renderLista(); }
+function chipBtn(label, n, val, cor){
+  const ativo = (filtroMkt===val);
+  const dot = cor ? '<span class="cdot" style="background:'+cor+'"></span>' : '';
+  const fx = val==='flex' ? ' flex' : '';
+  return '<button class="chip'+fx+(ativo?' on':'')+'" onclick="setFiltroMkt('+(val===null?'null':("'"+val+"'"))+')">'+dot+esc(label)+' <b>'+n+'</b></button>';
+}
+function renderChips(){
+  const box = $('chips'); if(!box) return;
+  const cont = {}; let flexN = 0;
+  listaCache.forEach(p=>{ cont[p.marketplace] = (cont[p.marketplace]||0)+1; if(p.flex) flexN++; });
+  let html = chipBtn('Todos', listaCache.length, null);
+  MKT_ORDEM.forEach(mk=>{ if(cont[mk]) html += chipBtn((MKT[mk]||MKT.outro).n, cont[mk], mk, (MKT[mk]||MKT.outro).c); });
+  html += chipBtn('⚡ FLEX', flexN, 'flex');
+  box.innerHTML = html;
 }
 function renderLista(){
   const box = $('listaPedidos');
