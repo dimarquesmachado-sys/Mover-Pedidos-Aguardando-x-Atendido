@@ -2,79 +2,94 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Checkout Offline · Girassol</title>
-<!-- QZ Tray (mesmo que o Bling usa). Carrega da CDN; precisa de internet (só o Bling cai). -->
 <script src="https://cdn.jsdelivr.net/npm/js-sha256@0.11.0/src/sha256.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qz-tray@2.2.6/qz-tray.js"></script>
 <style>
   :root{
     --bg:#0f1115; --card:#1a1e26; --card2:#232834; --line:#2c333f;
     --tx:#e8edf4; --mut:#8b96a8; --ac:#3b82f6; --ok:#22c55e; --warn:#f59e0b; --err:#ef4444;
-    --ml:#ffe600; --shopee:#ee4d2d; --tiktok:#69c9d0; --amazon:#ff9900; --magalu:#0086ff; --outro:#94a3b8;
   }
   *{box-sizing:border-box}
-  body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--tx);font-size:16px}
-  header{position:sticky;top:0;z-index:10;background:#141821;border-bottom:1px solid var(--line);padding:10px 14px}
+  html,body{height:100%}
+  body{margin:0;display:flex;flex-direction:column;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--tx);font-size:15px}
+  header{background:#141821;border-bottom:1px solid var(--line);padding:9px 14px;flex:0 0 auto}
   .htop{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
-  .htop h1{font-size:17px;margin:0;font-weight:700}
+  .htop h1{font-size:16px;margin:0;font-weight:700}
   .ver{font-size:12px;color:var(--mut);font-family:ui-monospace,monospace}
   .grow{flex:1}
   .qz{font-size:13px;padding:4px 10px;border-radius:20px;border:1px solid var(--line);cursor:pointer;white-space:nowrap}
-  .qz.on{color:var(--ok);border-color:var(--ok)}
-  .qz.off{color:var(--err);border-color:var(--err)}
-  .stats{display:flex;gap:14px;margin-top:8px;font-size:13px;color:var(--mut);flex-wrap:wrap}
-  .stats b{color:var(--tx)}
+  .qz.on{color:var(--ok);border-color:var(--ok)} .qz.off{color:var(--err);border-color:var(--err)}
   input.op{background:var(--card2);border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:5px 9px;font-size:13px;width:120px}
-  .wrap{padding:14px;max-width:780px;margin:0 auto}
-  .btn{background:var(--ac);color:#fff;border:0;border-radius:10px;padding:11px 16px;font-size:15px;font-weight:600;cursor:pointer}
+  .stats{display:flex;gap:14px;margin-top:7px;font-size:13px;color:var(--mut);flex-wrap:wrap}
+  .stats b{color:var(--tx)}
+
+  /* layout 2 colunas */
+  .main{flex:1 1 auto;display:flex;min-height:0}
+  .sidebar{width:340px;flex:0 0 340px;border-right:1px solid var(--line);overflow-y:auto;padding:10px;background:#12161e}
+  .detail{flex:1 1 auto;overflow-y:auto;padding:18px 22px}
+  .sbtools{display:flex;gap:8px;margin-bottom:10px}
+
+  .btn{background:var(--ac);color:#fff;border:0;border-radius:9px;padding:9px 14px;font-size:14px;font-weight:600;cursor:pointer}
   .btn:disabled{opacity:.4;cursor:not-allowed}
   .btn.sec{background:var(--card2);color:var(--tx);border:1px solid var(--line)}
   .btn.ok{background:var(--ok)} .btn.warn{background:var(--warn);color:#1a1205}
-  .row{display:flex;gap:8px;flex-wrap:wrap}
+  .btn.sm{padding:6px 10px;font-size:13px}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 
-  /* lista */
-  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:10px}
-  .card.done{opacity:.55}
-  .cl1{display:flex;align-items:center;gap:10px}
-  .badge{font-size:11px;font-weight:700;padding:3px 8px;border-radius:6px;color:#0b0d12;text-transform:uppercase}
-  .num{font-size:18px;font-weight:700}
-  .cli{color:var(--mut);font-size:14px;margin:5px 0}
-  .meta{font-size:12px;color:var(--mut);font-family:ui-monospace,monospace}
-  .cbtns{display:flex;gap:8px;margin-top:10px}
-  .donetag{margin-left:auto;color:var(--ok);font-size:12px;font-weight:700}
+  /* card lateral */
+  .scard{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:9px 11px;margin-bottom:8px;cursor:pointer}
+  .scard:hover{border-color:#3a4657}
+  .scard.sel{border-color:var(--ac);background:#16202e}
+  .scard.done{opacity:.5}
+  .scl1{display:flex;align-items:center;gap:8px}
+  .badge{font-size:10px;font-weight:700;padding:2px 7px;border-radius:5px;color:#0b0d12;text-transform:uppercase}
+  .num{font-size:16px;font-weight:700}
+  .smeta{font-size:11px;color:var(--mut);font-family:ui-monospace,monospace;margin-top:3px}
+  .donetag{margin-left:auto;color:var(--ok);font-size:11px;font-weight:700}
+  .scard .rep{margin-top:7px}
 
-  /* bipagem */
-  .bighead{display:flex;align-items:center;gap:10px;margin-bottom:6px}
-  .prog{font-size:34px;font-weight:800;letter-spacing:1px}
+  /* detalhe / bipagem */
+  .placeholder{height:100%;display:flex;align-items:center;justify-content:center;color:var(--mut);font-size:15px}
+  .dhead{display:flex;align-items:center;gap:10px;margin-bottom:4px}
+  .num.big{font-size:22px}
+  .prog{margin-left:auto;font-size:30px;font-weight:800}
   .prog .done{color:var(--ok)}
+  .cli{color:var(--mut);font-size:14px;margin:2px 0 8px}
+  .nfbar{background:var(--card2);border:1px solid var(--line);border-radius:9px;padding:9px 12px;margin:8px 0;font-size:13px}
+  .nfbar .chave{font-family:ui-monospace,monospace;font-size:11px;color:var(--mut);word-break:break-all}
+  .noean{color:var(--warn)}
   .scanbox{margin:12px 0}
-  .scanbox input{width:100%;background:#0b0d12;border:2px solid var(--ac);color:var(--tx);border-radius:12px;padding:16px;font-size:20px;font-family:ui-monospace,monospace;text-align:center}
+  .scanbox input{width:100%;background:#0b0d12;border:2px solid var(--ac);color:var(--tx);border-radius:11px;padding:15px;font-size:19px;font-family:ui-monospace,monospace;text-align:center}
   .scanbox input.err{border-color:var(--err);animation:shake .25s}
   @keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-6px)}75%{transform:translateX(6px)}}
   .hint{font-size:12px;color:var(--mut);text-align:center;margin-top:5px}
-  .item{display:flex;align-items:center;gap:12px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:11px 13px;margin-bottom:8px}
+  .item{display:flex;align-items:center;gap:12px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 13px;margin-bottom:8px}
   .item.full{border-color:var(--ok);background:#15241a}
-  .icount{font-size:20px;font-weight:800;min-width:64px;text-align:center}
+  .icount{font-size:19px;font-weight:800;min-width:60px;text-align:center}
   .icount .b{color:var(--ok)}
   .idesc{flex:1}
   .idesc .d{font-size:14px}
   .idesc .e{font-size:12px;color:var(--mut);font-family:ui-monospace,monospace;margin-top:2px}
-  .noean{color:var(--warn)}
   .miniok{background:var(--card2);border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:7px 11px;font-size:13px;cursor:pointer}
-  .nfbar{background:var(--card2);border:1px solid var(--line);border-radius:10px;padding:10px 13px;margin:10px 0;font-size:13px}
-  .nfbar .chave{font-family:ui-monospace,monospace;font-size:11px;color:var(--mut);word-break:break-all}
+  .dbtns{display:flex;gap:8px;margin-top:14px;align-items:center}
+  .empty{text-align:center;color:var(--mut);padding:30px 0}
   .toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:#000;border:1px solid var(--line);padding:10px 18px;border-radius:24px;font-size:14px;opacity:0;transition:.2s;pointer-events:none;z-index:50}
   .toast.show{opacity:1}
-  .empty{text-align:center;color:var(--mut);padding:40px 0}
-  .footer{text-align:center;color:var(--mut);font-size:11px;padding:18px 0}
+  .foot{flex:0 0 auto;text-align:center;color:var(--mut);font-size:11px;padding:6px;border-top:1px solid var(--line)}
+
+  @media(max-width:720px){
+    .main{flex-direction:column}
+    .sidebar{width:auto;flex:0 0 auto;max-height:38vh;border-right:0;border-bottom:1px solid var(--line)}
+  }
 </style>
 </head>
 <body>
 <header>
   <div class="htop">
     <h1>📦 Checkout Offline</h1>
-    <span class="ver" id="ver">v15/06 b6</span>
+    <span class="ver" id="ver">v16/06 b1</span>
     <span class="grow"></span>
     <input class="op" id="operador" placeholder="operador" />
     <span class="qz off" id="qzStatus" onclick="reconectarQZ()">QZ: …</span>
@@ -82,69 +97,42 @@
   <div class="stats" id="stats">carregando…</div>
 </header>
 
-<div class="wrap">
-  <!-- LISTA -->
-  <div id="vLista">
-    <div class="row" style="margin-bottom:12px">
-      <button class="btn sec" onclick="carregarLista()">↻ Atualizar lista</button>
-      <button class="btn sec" onclick="escolherImpressora()">🖨 Impressora</button>
+<div class="main">
+  <aside class="sidebar">
+    <div class="sbtools">
+      <button class="btn sec sm" onclick="carregarLista()">↻ Atualizar</button>
+      <button class="btn sec sm" onclick="escolherImpressora()">🖨 Impressora</button>
     </div>
-    <div id="listaPedidos"><div class="empty">carregando pedidos…</div></div>
-  </div>
+    <div id="listaPedidos"><div class="empty">carregando…</div></div>
+  </aside>
 
-  <!-- BIPAGEM -->
-  <div id="vBipagem" style="display:none">
-    <button class="btn sec" onclick="voltarLista(false)">← Voltar</button>
-    <div class="bighead" style="margin-top:12px">
-      <span class="badge" id="bBadge"></span>
-      <span class="num" id="bNum"></span>
-      <span class="grow"></span>
-      <span class="prog" id="bProg">0/0</span>
-    </div>
-    <div class="cli" id="bCli"></div>
-    <div class="nfbar" id="bNF"></div>
-
-    <div class="scanbox">
-      <input id="scan" autocomplete="off" placeholder="bipe o código de barras do item…" />
-      <div class="hint">o leitor sem fio funciona como teclado — é só bipar</div>
-    </div>
-
-    <div id="bItens"></div>
-
-    <div class="row" style="margin-top:14px">
-      <button class="btn warn" onclick="imprimirAtual()">🖨 Só imprimir etiqueta</button>
-      <span class="grow"></span>
-      <button class="btn ok" id="bFinalizar" onclick="finalizar()" disabled>✓ Imprimir + Finalizar</button>
-    </div>
-  </div>
+  <section class="detail" id="detail">
+    <div class="placeholder">← selecione um pedido à esquerda</div>
+  </section>
 </div>
 
-<div class="footer">
-  cache local · se a tela não mudar após deploy, dê <b>Ctrl+Shift+R</b> (hard refresh)
-</div>
-
+<div class="foot">cache local · se a tela não mudar após deploy, dê <b>Ctrl+Shift+R</b></div>
 <div class="toast" id="toast"></div>
 
 <script>
-// ════════ CONFIG / ESTADO ════════
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#ff9900'}, magalu:{n:'Magalu',c:'#0086ff'}, outro:{n:'Outro',c:'#94a3b8'}
 };
-let vista = 'lista';
-let pedidoAtual = null;     // {bling_id, numero, cliente, nf, itens:[{sku,ean,descricao,qtd,bipado}]}
+let pedidoAtual = null;   // {bling_id,numero,cliente,nf,marketplace,itens:[{sku,ean,descricao,qtd,bipado}]}
 let zplAtual = null;
+let listaCache = [];
 
 const $ = id => document.getElementById(id);
 const norm = c => String(c||'').trim().replace(/\s+/g,'');
-function toast(msg){ const t=$('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(t._t); t._t=setTimeout(()=>t.classList.remove('show'),1800); }
+const esc = s => String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+function toast(m){ const t=$('toast'); t.textContent=m; t.classList.add('show'); clearTimeout(t._t); t._t=setTimeout(()=>t.classList.remove('show'),1800); }
 
-// operador (lembrado)
 const opIn = $('operador');
 opIn.value = localStorage.getItem('gbkp_op') || '';
 opIn.addEventListener('input', ()=>localStorage.setItem('gbkp_op', opIn.value));
 
-// ════════ ÁUDIO ════════
+// ── áudio ──
 let actx;
 function beep(ok){
   try{ actx = actx || new (window.AudioContext||window.webkitAudioContext)();
@@ -154,25 +142,19 @@ function beep(ok){
   }catch(e){}
 }
 
-// ════════ QZ TRAY ════════
+// ── QZ Tray ──
 function setupQZ(){
   if(!window.qz){ qzUI(false,'lib não carregou'); return; }
   qz.api.setPromiseType(r => new Promise(r));
   if(window.sha256) qz.api.setSha256Type(d => sha256(d));
 }
-function qzUI(on, txt){
-  const el=$('qzStatus'); el.className='qz '+(on?'on':'off');
-  el.textContent = 'QZ: '+(txt || (on?'conectado':'desconectado'));
-}
+function qzUI(on, txt){ const el=$('qzStatus'); el.className='qz '+(on?'on':'off'); el.textContent='QZ: '+(txt||(on?'conectado':'desconectado')); }
 async function conectarQZ(){
   if(!window.qz) throw new Error('Biblioteca QZ não carregou (sem internet?)');
   if(!qz.websocket.isActive()){ await qz.websocket.connect(); }
   qzUI(true); return true;
 }
-async function reconectarQZ(){
-  try{ await conectarQZ(); toast('QZ Tray conectado'); }
-  catch(e){ qzUI(false); toast('QZ Tray não conectou — ele está aberto?'); }
-}
+async function reconectarQZ(){ try{ await conectarQZ(); toast('QZ Tray conectado'); }catch(e){ qzUI(false); toast('QZ Tray não conectou — ele está aberto?'); } }
 async function getImpressora(){
   let p = localStorage.getItem('gbkp_printer');
   if(p) return p;
@@ -185,12 +167,12 @@ async function escolherImpressora(){
   try{
     await conectarQZ();
     const lista = await qz.printers.find();
-    if(!lista || !lista.length){ toast('Nenhuma impressora no QZ'); return; }
-    const atual = localStorage.getItem('gbkp_printer') || '';
-    const msg = 'Impressoras encontradas:\n\n'+lista.map((n,i)=>(i+1)+') '+n+(n===atual?'  ← atual':'')).join('\n')+'\n\nDigite o número da Zebra:';
-    const r = prompt(msg, lista.indexOf(atual)>=0 ? String(lista.indexOf(atual)+1) : '1');
+    if(!lista||!lista.length){ toast('Nenhuma impressora no QZ'); return; }
+    const atual = localStorage.getItem('gbkp_printer')||'';
+    const msg = 'Impressoras:\n\n'+lista.map((n,i)=>(i+1)+') '+n+(n===atual?'  ← atual':'')).join('\n')+'\n\nNº da Zebra:';
+    const r = prompt(msg, lista.indexOf(atual)>=0?String(lista.indexOf(atual)+1):'1');
     const idx = parseInt(r,10)-1;
-    if(idx>=0 && idx<lista.length){ localStorage.setItem('gbkp_printer', lista[idx]); toast('Impressora: '+lista[idx]); }
+    if(idx>=0&&idx<lista.length){ localStorage.setItem('gbkp_printer', lista[idx]); toast('Impressora: '+lista[idx]); }
   }catch(e){ toast('Erro: '+e.message); }
 }
 async function imprimirZPL(zpl){
@@ -201,7 +183,7 @@ async function imprimirZPL(zpl){
   await qz.print(cfg, [{ type:'raw', format:'command', flavor:'plain', data: zpl }]);
 }
 
-// ════════ API ════════
+// ── API ──
 const api = (u,opt) => fetch(u,opt).then(r=>r.json());
 
 async function carregarLista(){
@@ -212,96 +194,108 @@ async function carregarLista(){
       '<span><b>'+d.prontos+'</b> prontos</span>'+
       '<span><b>'+d.conferidos+'</b> conferidos</span>'+
       '<span><b>'+d.sem_etiqueta+'</b> sem etiqueta</span>';
-    renderLista(d.pedidos||[]);
-  }catch(e){ $('listaPedidos').innerHTML='<div class="empty">erro ao carregar: '+e.message+'</div>'; }
+    listaCache = d.pedidos||[];
+    renderLista();
+  }catch(e){ $('listaPedidos').innerHTML='<div class="empty">erro: '+esc(e.message)+'</div>'; }
 }
 
-function renderLista(peds){
+function renderLista(){
   const box = $('listaPedidos');
-  if(!peds.length){ box.innerHTML='<div class="empty">nenhum pedido pronto no cache ainda</div>'; return; }
-  box.innerHTML = peds.map(p=>{
+  if(!listaCache.length){ box.innerHTML='<div class="empty">nenhum pedido pronto no cache</div>'; return; }
+  const selId = pedidoAtual ? String(pedidoAtual.bling_id) : '';
+  box.innerHTML = listaCache.map(p=>{
     const m = MKT[p.marketplace]||MKT.outro;
-    const done = p.conferido ? 'done' : '';
-    return '<div class="card '+done+'">'+
-      '<div class="cl1">'+
+    const cls = (p.conferido?'done ':'') + (String(p.id)===selId?'sel':'');
+    return '<div class="scard '+cls+'" onclick="selecionar(\''+p.id+'\')">'+
+      '<div class="scl1">'+
         '<span class="badge" style="background:'+m.c+'">'+m.n+'</span>'+
-        '<span class="num">#'+p.numero+'</span>'+
-        (p.conferido?'<span class="donetag">✓ conferido</span>':'')+
+        '<span class="num">#'+esc(p.numero)+'</span>'+
+        (p.conferido?'<span class="donetag">✓</span>':'')+
       '</div>'+
-      '<div class="meta">'+(p.itens||0)+' item(s) · NF '+(p.tem_nf?'ok':'—')+'</div>'+
-      '<div class="cbtns">'+
-        '<button class="btn warn" onclick="reimprimir(\''+p.id+'\')">🖨 Imprimir</button>'+
-        '<button class="btn" onclick="abrirBipagem(\''+p.id+'\')">📋 Conferir</button>'+
-      '</div>'+
+      '<div class="smeta">'+(p.itens||0)+' item(s) · NF '+(p.tem_nf?'ok':'—')+'</div>'+
+      '<div class="rep"><button class="btn warn sm" onclick="event.stopPropagation();reimprimir(\''+p.id+'\')">🖨 Imprimir</button></div>'+
     '</div>';
   }).join('');
 }
 
 async function reimprimir(id){
-  try{
-    toast('buscando etiqueta…');
+  try{ toast('buscando etiqueta…');
     const zpl = await fetch('/girassol-backup-offline/etiqueta/'+id).then(r=>r.text());
-    await imprimirZPL(zpl);
-    toast('🖨 etiqueta enviada');
+    await imprimirZPL(zpl); toast('🖨 etiqueta enviada');
   }catch(e){ toast('Falha: '+e.message); }
 }
 
-// ════════ BIPAGEM ════════
-async function abrirBipagem(id){
+// ── detalhe / bipagem (centro) ──
+async function selecionar(id){
   try{
     const ped = await api('/girassol-backup-offline/pedido/'+id);
     if(ped.erro){ toast(ped.erro); return; }
     ped.itens = (ped.itens||[]).map(it=>({ ...it, bipado:0 }));
     pedidoAtual = ped;
     zplAtual = await fetch('/girassol-backup-offline/etiqueta/'+id).then(r=>r.text());
-    const m = MKT[ped.marketplace]||MKT.outro;
-    $('bBadge').style.background=m.c; $('bBadge').textContent=m.n;
-    $('bNum').textContent='#'+ped.numero;
-    $('bCli').textContent= ped.cliente||'';
-    $('bNF').innerHTML = ped.nf
-      ? 'NF <b>'+(ped.nf.numero||'?')+'</b><div class="chave">'+(ped.nf.chave||'')+'</div>'
-      : '<span class="noean">⚠ NF não cacheada (segue só com a etiqueta)</span>';
-    trocarVista('bipagem');
-    renderBipagem();
-    setTimeout(()=>$('scan').focus(),100);
+    renderDetail();
+    renderLista(); // atualiza highlight
   }catch(e){ toast('Erro: '+e.message); }
 }
 
-function renderBipagem(){
+function renderDetail(){
+  const p = pedidoAtual;
+  const m = MKT[p.marketplace]||MKT.outro;
+  const nfHtml = p.nf
+    ? 'NF <b>'+esc(p.nf.numero||'?')+'</b><div class="chave">'+esc(p.nf.chave||'')+'</div>'
+    : '<span class="noean">⚠ NF não cacheada (segue só com a etiqueta)</span>';
+  $('detail').innerHTML =
+    '<div class="dhead">'+
+      '<span class="badge" style="background:'+m.c+'">'+m.n+'</span>'+
+      '<span class="num big">#'+esc(p.numero)+'</span>'+
+      '<span class="prog" id="bProg">0/0</span>'+
+    '</div>'+
+    '<div class="cli">'+esc(p.cliente||'')+'</div>'+
+    '<div class="nfbar">'+nfHtml+'</div>'+
+    '<div class="scanbox"><input id="scan" autocomplete="off" placeholder="bipe o código de barras do item…"/>'+
+      '<div class="hint">o leitor sem fio funciona como teclado — é só bipar</div></div>'+
+    '<div id="bItens"></div>'+
+    '<div class="dbtns">'+
+      '<button class="btn warn" onclick="imprimirAtual()">🖨 Só imprimir etiqueta</button>'+
+      '<span class="grow"></span>'+
+      '<button class="btn ok" id="bFinalizar" onclick="finalizar()" disabled>✓ Imprimir + Finalizar</button>'+
+    '</div>';
+  renderItens();
+  const scan = $('scan');
+  scan.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); const v=scan.value; scan.value=''; onScan(v); }});
+  setTimeout(()=>scan.focus(),60);
+}
+
+function renderItens(){
+  if(!pedidoAtual) return;
   const its = pedidoAtual.itens;
   const total = its.reduce((s,i)=>s+Number(i.qtd||0),0);
   const feito = its.reduce((s,i)=>s+i.bipado,0);
-  $('bProg').innerHTML = '<span class="'+(feito>=total&&total>0?'done':'')+'">'+feito+'</span>/'+total;
-  $('bItens').innerHTML = its.map((it,idx)=>{
+  const pe = $('bProg'); if(pe) pe.innerHTML = '<span class="'+(feito>=total&&total>0?'done':'')+'">'+feito+'</span>/'+total;
+  const box = $('bItens'); if(box) box.innerHTML = its.map((it,idx)=>{
     const full = it.bipado>=it.qtd;
     return '<div class="item '+(full?'full':'')+'">'+
       '<div class="icount"><span class="'+(full?'b':'')+'">'+it.bipado+'</span>/'+it.qtd+'</div>'+
-      '<div class="idesc"><div class="d">'+(it.descricao||it.sku||'item')+'</div>'+
-        '<div class="e">SKU '+(it.sku||'—')+' · EAN '+(it.ean?it.ean:'<span class="noean">sem EAN</span>')+'</div></div>'+
+      '<div class="idesc"><div class="d">'+esc(it.descricao||it.sku||'item')+'</div>'+
+        '<div class="e">SKU '+esc(it.sku||'—')+' · EAN '+(it.ean?esc(it.ean):'<span class="noean">sem EAN</span>')+'</div></div>'+
       (full?'':'<button class="miniok" onclick="manual('+idx+')">+1 manual</button>')+
     '</div>';
   }).join('');
-  $('bFinalizar').disabled = !(feito>=total && total>0);
+  const fb = $('bFinalizar'); if(fb) fb.disabled = !(feito>=total && total>0);
 }
 
-function manual(idx){
-  const it = pedidoAtual.itens[idx];
-  if(it.bipado<it.qtd){ it.bipado++; beep(true); renderBipagem(); }
-}
+function manual(idx){ const it=pedidoAtual.itens[idx]; if(it.bipado<it.qtd){ it.bipado++; beep(true); renderItens(); } }
 
 function onScan(code){
   code = norm(code);
   if(!code || !pedidoAtual) return;
   let item = pedidoAtual.itens.find(it=> it.ean && norm(it.ean)===code && it.bipado<it.qtd);
   if(!item) item = pedidoAtual.itens.find(it=> it.sku && norm(it.sku).toUpperCase()===code.toUpperCase() && it.bipado<it.qtd);
-  if(item){ item.bipado++; beep(true); renderBipagem(); }
-  else { beep(false); const s=$('scan'); s.classList.add('err'); setTimeout(()=>s.classList.remove('err'),300); toast('código não confere: '+code); }
+  if(item){ item.bipado++; beep(true); renderItens(); }
+  else { beep(false); const s=$('scan'); if(s){ s.classList.add('err'); setTimeout(()=>s.classList.remove('err'),300);} toast('código não confere: '+code); }
 }
 
-async function imprimirAtual(){
-  try{ await imprimirZPL(zplAtual); toast('🖨 etiqueta enviada'); }
-  catch(e){ toast('Falha: '+e.message); }
-}
+async function imprimirAtual(){ try{ await imprimirZPL(zplAtual); toast('🖨 etiqueta enviada'); }catch(e){ toast('Falha: '+e.message); } }
 
 async function finalizar(){
   try{
@@ -311,25 +305,20 @@ async function finalizar(){
       body: JSON.stringify({ id: pedidoAtual.bling_id, user: opIn.value })
     });
     toast('✓ #'+pedidoAtual.numero+' conferido e impresso');
-    voltarLista(true);
+    pedidoAtual=null; zplAtual=null;
+    $('detail').innerHTML='<div class="placeholder">← selecione um pedido à esquerda</div>';
+    carregarLista();
   }catch(e){ toast('Falha: '+e.message); }
 }
 
-// ════════ NAV ════════
-function trocarVista(v){ vista=v; $('vLista').style.display = v==='lista'?'':'none'; $('vBipagem').style.display = v==='bipagem'?'':'none'; }
-function voltarLista(recarrega){ pedidoAtual=null; zplAtual=null; trocarVista('lista'); if(recarrega) carregarLista(); }
+// mantém foco no scan
+setInterval(()=>{ const s=$('scan'); if(s && document.activeElement!==s && document.activeElement!==opIn) s.focus(); }, 1500);
 
-// scan input sempre focado durante bipagem
-const scan = $('scan');
-scan.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); const v=scan.value; scan.value=''; onScan(v); }});
-document.addEventListener('click', ()=>{ if(vista==='bipagem') scan.focus(); });
-setInterval(()=>{ if(vista==='bipagem' && document.activeElement!==scan) scan.focus(); }, 1500);
-
-// ════════ BOOT ════════
+// boot
 setupQZ();
 reconectarQZ();
 carregarLista();
-setInterval(()=>{ if(vista==='lista') carregarLista(); }, 60000);
+setInterval(()=>{ if(!pedidoAtual) carregarLista(); }, 60000);
 </script>
 </body>
 </html>
