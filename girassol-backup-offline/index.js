@@ -2,7 +2,7 @@
 
 // ════════════════════════════════════════════════════════════════════════
 //  GIRASSOL · CHECKOUT OFFLINE — FASE 1 (poller) + FASE 2 (bipagem)   (Mover-Pedidos)
-//  girassol-backup-offline v16/06 b20   (a versão real é a const VERSAO abaixo)
+//  girassol-backup-offline v16/06 b21   (a versão real é a const VERSAO abaixo)
 // ════════════════════════════════════════════════════════════════════════
 //  Módulo do orquestrador unificado (HTTP-native, sem Express).
 //  Reaproveita o token Bling da Girassol via ../girassol/tokenManager.
@@ -32,7 +32,7 @@ const fetch = require('node-fetch');
 const AdmZip = require('adm-zip');
 const { garantirToken } = require('../girassol/tokenManager');
 
-const VERSAO     = 'girassol-backup-offline v16/06 b20';
+const VERSAO     = 'girassol-backup-offline v16/06 b21';
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 
 // ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
@@ -55,6 +55,19 @@ const LOJA_MKT = {
   '203146903': 'ml', '203583169': 'shopee', '203967708': 'amazon',
   '203262016': 'magalu', '205523707': 'tiktok'
 };
+
+// FLEX = entrega por motoboy (etiqueta sempre disponível). Mesma lógica do checkout-expedição.
+const FLEX_KEYWORDS = ['mercado envios flex', 'entrega local', 'vapt', 'shopee entrega direta'];
+function servicoDoPedido(det) {
+  if (!det) return '';
+  const t = det.transporte || {};
+  const vol = (t.volumes && t.volumes[0]) || {};
+  return String(vol.servico || t.servico || '').trim();
+}
+function ehFlex(servico) {
+  const s = String(servico || '').toLowerCase();
+  return FLEX_KEYWORDS.some(k => s.includes(k));
+}
 
 // ─── helpers genéricos ──────────────────────────────────────────────────
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -383,12 +396,15 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache) {
     temEtiqueta = true;
   }
 
+  const _servico = servicoDoPedido(ped);
   const snapshot = {
     bling_id: id,
     numero: ped.numero || null,
     numero_loja: ped.numeroLoja || null,
     loja_id: lojaId || null,
     marketplace: LOJA_MKT[lojaId] || 'outro',
+    servico: _servico,
+    flex: ehFlex(_servico),
     situacao_id: (ped.situacao && ped.situacao.id) || SIT_ATENDIDO,
     cliente: (ped.contato && ped.contato.nome) || '',
     nf,
@@ -473,6 +489,7 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
         const snap = await cachearPedido(det, cacheEan, nfs, kitCache);
         man[id] = {
           numero: snap.numero, marketplace: snap.marketplace,
+          servico: snap.servico || '', flex: !!snap.flex,
           cliente: snap.cliente || '', nf_numero: (snap.nf && snap.nf.numero) || null,
           tem_nf: snap.tem_nf, tem_kit: snap.tem_kit, tem_etiqueta: snap.tem_etiqueta,
           tem_danfe: !!(ja && ja.tem_danfe),
@@ -515,6 +532,22 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
       if (pdf) { fs.writeFileSync(path.join(dir, 'etiqueta.pdf'), pdf); etqPdfNovos++; }
     }
     if (etqPdfNovos) console.log(`[GIRABKP] ${etqPdfNovos} etiqueta(s) PDF cacheadas`);
+
+    // passo: garante servico + flex no manifest (p/ filtro marketplace/FLEX) — lê detalhe só de quem falta
+    let svcNovos = 0;
+    for (const ped of atendidos) {
+      const m = man[ped.id];
+      if (!m || m.servico !== undefined) continue;
+      const det = await detalhePedido(ped.id); await sleep(PAUSA_MS);
+      const svc = servicoDoPedido(det);
+      m.servico = svc; m.flex = ehFlex(svc);
+      // aproveita p/ preencher o snapshot também
+      const snapPath = path.join(CACHE_DIR, String(ped.id), 'pedido.json');
+      const snap = readJson(snapPath, null);
+      if (snap) { snap.servico = svc; snap.flex = ehFlex(svc); writeJson(snapPath, snap); }
+      svcNovos++;
+    }
+    if (svcNovos) { salvarManifest(man); console.log(`[GIRABKP] ${svcNovos} servico/flex preenchidos`); }
 
     purgar(man);
     salvarManifest(man);
