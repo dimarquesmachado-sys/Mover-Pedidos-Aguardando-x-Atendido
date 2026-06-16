@@ -29,9 +29,10 @@
 const fs    = require('fs');
 const path  = require('path');
 const fetch = require('node-fetch');
+const AdmZip = require('adm-zip');
 const { garantirToken } = require('../girassol/tokenManager');
 
-const VERSAO     = 'girassol-backup-offline v15/06 b4';
+const VERSAO     = 'girassol-backup-offline v15/06 b5';
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 
 // ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
@@ -178,6 +179,37 @@ async function nfDoPedido(id) {
   return await acharNFporRange(id);
 }
 
+// ── NF em LOTE (eficiente p/ o ciclo): pagina /nfe UMA vez até cobrir o
+//    menor id de pedido do lote, e casa todos em memória. /nfe vem desc por id.
+async function carregarNFs(idMinimo) {
+  const nfs = [];
+  for (let pagina = 1; pagina <= 40; pagina++) {
+    const { ok, data } = await blingGet(`/nfe?limite=100&pagina=${pagina}`);
+    const lista = (data && data.data) || [];
+    if (!ok || lista.length === 0) break;
+    let menor = Infinity;
+    for (const nf of lista) {
+      const nid = Number(nf.id) || 0;
+      nfs.push(nf);
+      if (nid && nid < menor) menor = nid;
+    }
+    if (menor < idMinimo) break; // já cobriu o lote
+    await sleep(PAUSA_MS);
+  }
+  return nfs;
+}
+function acharNFnaLista(pedidoId, nfs) {
+  const pid = Number(pedidoId);
+  if (!pid) return null;
+  const teto = pid + 2000;
+  let melhor = null;
+  for (const nf of nfs) {
+    const nid = Number(nf.id) || 0;
+    if (nid >= pid && nid <= teto && (!melhor || nid < Number(melhor.id))) melhor = nf;
+  }
+  return parseNF(melhor);
+}
+
 // EAN: produto por id → produto por SKU. Cacheia por SKU.
 async function eanDoItem(produtoId, sku, cacheEan) {
   if (sku && Object.prototype.hasOwnProperty.call(cacheEan, sku)) return cacheEan[sku];
@@ -197,7 +229,8 @@ async function eanDoItem(produtoId, sku, cacheEan) {
   return ean;
 }
 
-// baixa a etiqueta de envio (link do Bling Logísticas) e devolve o conteúdo
+// baixa a etiqueta de envio. O Bling devolve um ZIP (com "Etiqueta de envio.txt"
+// dentro = o ZPL), mesmo pedindo formato=ZPL. Então: baixa binário → descompacta.
 async function baixarEtiqueta(blingId) {
   const { ok, data } = await blingGet(`/logisticas/etiquetas?formato=${ETIQ_FORMATO}&idsVendas[]=${blingId}`);
   const item = ok && data && data.data && data.data[0];
@@ -206,13 +239,27 @@ async function baixarEtiqueta(blingId) {
   try {
     const r = await fetch(link);
     if (!r.ok) return null;
-    const body = await r.text(); // ZPL é texto. (Pra PDF: trocar p/ buffer.)
-    if (!body || /<html|not\s*found|erro/i.test(body.slice(0, 200))) return null;
-    return body;
+    const buf = await r.buffer();
+    if (!buf || buf.length < 4) return null;
+    // 'PK' (0x50 0x4B) = arquivo ZIP → descompacta e pega o conteúdo
+    if (buf[0] === 0x50 && buf[1] === 0x4B) {
+      try {
+        const zip = new AdmZip(buf);
+        const entries = zip.getEntries();
+        if (!entries.length) return null;
+        const ent = entries.find(e => /\.(txt|zpl)$/i.test(e.entryName)) || entries[0];
+        const conteudo = ent.getData().toString('utf8');
+        return conteudo || null;
+      } catch (e) { return null; }
+    }
+    // não-zip: assume conteúdo direto (ZPL/texto)
+    const txt = buf.toString('utf8');
+    if (!txt || /<html|not\s*found/i.test(txt.slice(0, 200))) return null;
+    return txt;
   } catch (e) { return null; }
 }
 
-async function cachearPedido(ped, cacheEan) {
+async function cachearPedido(ped, cacheEan, nfs) {
   const id  = ped.id;
   const dir = path.join(CACHE_DIR, String(id));
   ensureDir(dir);
@@ -227,7 +274,7 @@ async function cachearPedido(ped, cacheEan) {
     itens.push({ sku, ean, descricao: it.descricao || '', qtd: Number(it.quantidade || 0) });
   }
 
-  const nf = await nfDoPedido(id); await sleep(PAUSA_MS);
+  const nf = acharNFnaLista(id, nfs || []);
 
   const conteudoEtiqueta = await baixarEtiqueta(id); await sleep(PAUSA_MS);
   let temEtiqueta = false;
@@ -279,14 +326,30 @@ async function rodarCiclo(motivo = 'cron') {
     const atendidos = await listarAtendidos();
     console.log(`[GIRABKP] ${atendidos.length} pedido(s) ATENDIDO(${SIT_ATENDIDO}) na janela de ${JANELA_DIAS}d`);
 
-    for (const ped of atendidos) {
+    // só (re)processa quem ainda não tem etiqueta cacheada
+    const aProcessar = atendidos.filter(ped => {
+      const ja = man[ped.id];
+      return !(ja && ja.tem_etiqueta);
+    });
+    console.log(`[GIRABKP] ${aProcessar.length} a (re)processar`);
+
+    // carrega as NFs recentes UMA vez (cobre o menor id do lote) e casa em memória
+    let nfs = [];
+    if (aProcessar.length) {
+      const idMin = Math.min(...aProcessar.map(p => Number(p.id) || Infinity));
+      if (Number.isFinite(idMin)) {
+        nfs = await carregarNFs(idMin - 5);
+        console.log(`[GIRABKP] ${nfs.length} NF(s) recentes carregadas p/ casar`);
+      }
+    }
+
+    for (const ped of aProcessar) {
       const id = ped.id;
       const ja = man[id];
-      if (ja && ja.tem_etiqueta) continue; // já completo → pula (sem etiqueta re-tenta)
       try {
         const det = await detalhePedido(id); await sleep(PAUSA_MS);
         if (!det) { erros++; continue; }
-        const snap = await cachearPedido(det, cacheEan);
+        const snap = await cachearPedido(det, cacheEan, nfs);
         man[id] = {
           numero: snap.numero, marketplace: snap.marketplace,
           tem_nf: snap.tem_nf, tem_etiqueta: snap.tem_etiqueta,
@@ -379,16 +442,29 @@ function routes(readBody) {
 
         const bom = (etqA.ok && etqA.data) ? etqA : (etqB.ok ? etqB : null);
         const link = bom && bom.data && bom.data.data && bom.data.data[0] && bom.data.data[0].link;
-        out.etiqueta_link = link || null;
+        out.etiqueta_link = link ? link.slice(0, 90) + '...' : null;
         if (link) {
           try {
             const r = await fetch(link);
-            const body = await r.text();
+            const buf = await r.buffer();
+            const ehZip = buf && buf.length >= 2 && buf[0] === 0x50 && buf[1] === 0x4B;
+            let zpl = null, arquivos = null;
+            if (ehZip) {
+              const zip = new AdmZip(buf);
+              arquivos = zip.getEntries().map(e => e.entryName);
+              const ent = zip.getEntries().find(e => /\.(txt|zpl)$/i.test(e.entryName)) || zip.getEntries()[0];
+              zpl = ent ? ent.getData().toString('utf8') : null;
+            } else {
+              zpl = buf.toString('utf8');
+            }
             out.etiqueta_download = {
               status: r.status,
               contentType: r.headers.get('content-type'),
-              tamanho: body.length,
-              inicio: body.slice(0, 120)
+              tamanho_zip: buf ? buf.length : 0,
+              eh_zip: ehZip,
+              arquivos_no_zip: arquivos,
+              zpl_tamanho: zpl ? zpl.length : 0,
+              zpl_inicio: zpl ? zpl.slice(0, 200) : null
             };
           } catch (e) { out.etiqueta_download = { erro: e.message }; }
         }
