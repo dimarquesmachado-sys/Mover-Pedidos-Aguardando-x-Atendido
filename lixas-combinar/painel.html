@@ -182,7 +182,7 @@
 
 <div id="app" style="display:none">
 <header>
-  <h1>🌻 Lixas A COMBINAR <span class="badge">Pendentes</span><span class="ver" style="font-size:11px;font-weight:normal;color:#9ca3af;margin-left:8px;font-family:monospace;">v15/06 · subst-6</span></h1>
+  <h1>🌻 Lixas A COMBINAR <span class="badge">Pendentes</span><span class="ver" style="font-size:11px;font-weight:normal;color:#9ca3af;margin-left:8px;font-family:monospace;">v15/06 · subst-7</span></h1>
   <div class="toolbar">
     <select id="filtro-status" onchange="recarregar()">
       <option value="">Todos os status</option>
@@ -520,8 +520,12 @@ async function emitirNF(orderId) {
     const d = await r.json();
 
     if (d.ok) {
-      const texto = `✅ NF-e EMITIDA!\n\nNF ID: ${d.nfeId || '?'}\nNumero: ${d.numero || '?'}\nSerie: ${d.serie || '?'}\nChave: ${d.chave || '(aguardando SEFAZ)'}\n\nConfira no Bling.`;
-      mostrarModal('✅ NF emitida', texto, false);
+      if (d.jaEmitida) {
+        mostrarModal('ℹ️ NF já estava emitida', (d.mensagem || 'Esta venda já possui NF-e no Bling.') + '\n\nRegistrado — o botão Emitir NF vai sumir deste card.', false);
+      } else {
+        const texto = `✅ NF-e EMITIDA!\n\nNF ID: ${d.nfeId || '?'}\nNumero: ${d.numero || '?'}\nSerie: ${d.serie || '?'}\nChave: ${d.chave || '(aguardando SEFAZ)'}\n\nConfira no Bling.`;
+        mostrarModal('✅ NF emitida', texto, false);
+      }
       await recarregar();
     } else {
       const texto = `❌ ERRO ao emitir NF:\n\nStatus HTTP: ${d.status || '?'}\nErro: ${d.erro || '(sem msg)'}\n\nDetalhe:\n${JSON.stringify(d.detalhe || d, null, 2)}`;
