@@ -2,7 +2,7 @@
 
 // ════════════════════════════════════════════════════════════════════════
 //  GIRASSOL · CHECKOUT OFFLINE — FASE 1 (poller) + FASE 2 (bipagem)   (Mover-Pedidos)
-//  girassol-backup-offline v16/06 b18   (a versão real é a const VERSAO abaixo)
+//  girassol-backup-offline v16/06 b19   (a versão real é a const VERSAO abaixo)
 // ════════════════════════════════════════════════════════════════════════
 //  Módulo do orquestrador unificado (HTTP-native, sem Express).
 //  Reaproveita o token Bling da Girassol via ../girassol/tokenManager.
@@ -32,7 +32,7 @@ const fetch = require('node-fetch');
 const AdmZip = require('adm-zip');
 const { garantirToken } = require('../girassol/tokenManager');
 
-const VERSAO     = 'girassol-backup-offline v16/06 b18';
+const VERSAO     = 'girassol-backup-offline v16/06 b19';
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 
 // ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
@@ -133,15 +133,17 @@ async function listarAtendidos() {
   const ini  = new Date(hoje); ini.setDate(ini.getDate() - JANELA_DIAS);
   const qs = `idSituacao=${SIT_ATENDIDO}&dataEmissaoInicial=${dataISO(ini)}&dataEmissaoFinal=${dataISO(hoje)}`;
   const out = [];
+  let fetchOk = false;
   for (let pagina = 1; pagina <= 50; pagina++) {
     const { ok, data } = await blingGet(`/pedidos/vendas?${qs}&pagina=${pagina}&limite=100`);
+    if (pagina === 1) fetchOk = ok;        // marca se o Bling respondeu (p/ não limpar cache offline)
     const lista = (data && data.data) || [];
     if (!ok || lista.length === 0) break;
     out.push(...lista);
     if (lista.length < 100) break;
     await sleep(PAUSA_MS);
   }
-  return out;
+  return { ok: fetchOk, pedidos: out };
 }
 
 async function detalhePedido(id) {
@@ -426,8 +428,23 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
     console.log(`[GIRABKP] ▶ ciclo (${motivo})${forcar ? ' [FORCE]' : ''}`);
     const man      = manifest();
     const cacheEan = skuEanCache();
-    const atendidos = await listarAtendidos();
-    console.log(`[GIRABKP] ${atendidos.length} pedido(s) ATENDIDO(${SIT_ATENDIDO}) na janela de ${JANELA_DIAS}d`);
+    const { ok: listaOk, pedidos: atendidos } = await listarAtendidos();
+    console.log(`[GIRABKP] ${atendidos.length} pedido(s) ATENDIDO(${SIT_ATENDIDO}) na janela de ${JANELA_DIAS}d (bling ok=${listaOk})`);
+
+    // RECONCILIAÇÃO: remove do cache quem NÃO está mais em ATENDIDO (enviado/processado).
+    // Só roda se o Bling respondeu E veio algo — assim, se o Bling cair, o cache offline é preservado.
+    if (listaOk && atendidos.length > 0) {
+      const idsAtuais = new Set(atendidos.map(p => String(p.id)));
+      let removidos = 0;
+      for (const id of Object.keys(man)) {
+        if (!idsAtuais.has(String(id))) {
+          try { fs.rmSync(path.join(CACHE_DIR, String(id)), { recursive: true, force: true }); } catch (e) {}
+          delete man[id];
+          removidos++;
+        }
+      }
+      if (removidos) { salvarManifest(man); console.log(`[GIRABKP] reconciliação: ${removidos} pedido(s) saíram do ATENDIDO e foram removidos do cache`); }
+    }
 
     // (re)processa quem não tem etiqueta OU está num schema antigo (ganha EAN+kit)
     const aProcessar = atendidos.filter(ped => {
