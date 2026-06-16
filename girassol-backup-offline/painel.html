@@ -155,7 +155,7 @@
 <div class="modal" id="modal"></div>
 
 <script>
-const UI_BUILD = 'b21';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b22';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#ff9900'}, magalu:{n:'Magalu',c:'#0086ff'}, outro:{n:'Outro',c:'#94a3b8'}
@@ -521,7 +521,18 @@ function voltarLista(){
 
 // FINALIZAR = imprime e SÓ marca conferido depois que o estoquista confirma que saiu certo.
 async function finalizar(){
-  try{ await imprimirEtiqueta(pedidoAtual.bling_id, zplAtual); }
+  const id = pedidoAtual.bling_id;
+  const temNf = !!pedidoAtual.nf;
+  if(modoEtiqueta()==='a4'){
+    // A4: abre os 2 PDFs de forma SÍNCRONA (no clique) p/ o navegador não bloquear a 2ª aba
+    window.open(location.origin+'/girassol-backup-offline/etiqueta-pdf/'+id, '_blank');
+    if(temNf) window.open(location.origin+'/girassol-backup-offline/danfe/'+id, '_blank');
+    abrirConfirmacao();
+    return;
+  }
+  // Zebra: abre a NF (síncrono) e imprime a etiqueta no QZ
+  if(temNf) window.open(location.origin+'/girassol-backup-offline/danfe/'+id, '_blank');
+  try{ await imprimirZPL(zplAtual); }
   catch(e){ toast('Falha na impressão: '+e.message); return; }
   abrirConfirmacao();
 }
@@ -530,8 +541,8 @@ function abrirConfirmacao(){
   const md=$('modal');
   md.innerHTML =
     '<div class="mbox">'+
-      '<div class="mtit">A etiqueta saiu certa?</div>'+
-      '<div class="msub">Confira a impressora. Só finalize se a etiqueta imprimiu OK — assim, se der problema, o pedido <b>continua na tela</b> e você reimprime sem perder.</div>'+
+      '<div class="mtit">Etiqueta e NF saíram certas?</div>'+
+      '<div class="msub">Confira a impressora/abas. Só finalize se saiu OK — assim, se der problema, o pedido <b>continua na tela</b> e você reimprime sem perder.</div>'+
       '<div class="mbtns">'+
         '<button class="btn warn" onclick="reimprimirModal()">🖨 Reimprimir</button>'+
         '<button class="btn sec" onclick="fecharConfirmacao()">✗ Ainda não</button>'+
