@@ -960,10 +960,27 @@ async function rotinaLerRespostas() {
                         bling_erro: `auto: limite diario de ${AUTO_MAX_POR_DIA} auto-emissoes atingido`
                       });
                     } else {
-                      const auto = await processarAutoEmissao({ venda, iaResult, graosResult, lcp });
-                      if (auto.emitida) { stats.autoEmitidas++; incrementarAutoEmitida(); }
-                      else if (auto.puladaConfianca) stats.autoPuladasConfianca++;
-                      else stats.autoFalhas++;
+                      // BLINDAGEM: sem este try/catch, uma excecao aqui dentro subia pro
+                      // catch externo (que so faz console.error) e o pedido ficava PRESO em
+                      // 'cliente_confirmou_pedido' (status setado na linha de cima, ANTES da
+                      // emissao) — invisivel como falha. Agora qualquer excecao manda pra
+                      // 'aguardando_bling': a fila de retry re-tenta sozinha (auto-cura erro
+                      // transiente; se persistir, vira humano em 3h com o erro registrado).
+                      try {
+                        const auto = await processarAutoEmissao({ venda, iaResult, graosResult, lcp });
+                        if (auto.emitida) { stats.autoEmitidas++; incrementarAutoEmitida(); }
+                        else if (auto.puladaConfianca) stats.autoPuladasConfianca++;
+                        else stats.autoFalhas++;
+                      } catch (eAuto) {
+                        stats.autoFalhas++;
+                        console.error(`[auto-emissao] order ${venda.order_id} EXCECAO -> aguardando_bling pra retry: ${eAuto.message}`);
+                        try {
+                          await lcp.atualizarVenda(venda.order_id, {
+                            status: 'aguardando_bling',
+                            bling_erro: `auto: excecao na emissao (${String(eAuto.message || eAuto).slice(0,200)}) — re-tentando`
+                          });
+                        } catch (_) {}
+                      }
                     }
                   } else if (ehClaro && AUTO_EMITIR_HABILITADO && !confOk) {
                     console.log(`[auto-emissao] order ${venda.order_id} claro mas confianca ${iaResult.confianca}% < ${LIMIAR_CONFIANCA_AUTO}% — humano (nao emite)`);
