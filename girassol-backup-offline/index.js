@@ -32,7 +32,7 @@ const fetch = require('node-fetch');
 const AdmZip = require('adm-zip');
 const { garantirToken } = require('../girassol/tokenManager');
 
-const VERSAO     = 'girassol-backup-offline v15/06 b6';
+const VERSAO     = 'girassol-backup-offline v16/06 b1';
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 
 // ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
@@ -552,6 +552,43 @@ function routes(readBody) {
           data: o.data
         }))
       });
+      return true;
+    }
+
+    // DEBUG: dumpa a ESTRUTURA dos produtos de um pedido (variação / composição / kit)
+    // uso: /girassol-backup-offline/debug-estrutura/{idDoPedido}
+    if (method === 'GET' && p.startsWith('/girassol-backup-offline/debug-estrutura/')) {
+      const id = p.split('/').filter(Boolean).pop();
+      const out = { pedido: id, versao: VERSAO, itens: [] };
+      try {
+        const ped = await blingGet(`/pedidos/vendas/${id}`);
+        const d = ped.data && ped.data.data;
+        out.numero = d && d.numero;
+        for (const it of ((d && d.itens) || [])) {
+          const prodId = it.produto && it.produto.id;
+          let prod = null;
+          if (prodId) {
+            const r = await blingGet(`/produtos/${prodId}`);
+            prod = r.data && r.data.data;
+            await sleep(PAUSA_MS);
+          }
+          out.itens.push({
+            item_descricao: it.descricao,
+            item_codigo: it.codigo,
+            item_qtd: it.quantidade,
+            produto_id: prodId,
+            produto_nome: prod && prod.nome,
+            formato: prod && prod.formato,         // S=simples, V=variação (provável)
+            tipo: prod && prod.tipo,
+            variacao: prod && prod.variacao,        // se for variação, atributos aqui
+            gtins: prod ? getPossiveisGtins(prod) : [],
+            tem_estrutura: !!(prod && prod.estrutura),
+            estrutura: prod && prod.estrutura,      // componentes do kit/composição
+            _campos_produto: prod ? Object.keys(prod) : []  // p/ eu ver o que o Bling devolve
+          });
+        }
+      } catch (e) { out.erro = e.message; }
+      json(res, 200, out);
       return true;
     }
 
