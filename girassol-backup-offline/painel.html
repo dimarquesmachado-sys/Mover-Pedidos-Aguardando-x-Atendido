@@ -29,7 +29,8 @@
   .main{flex:1 1 auto;display:flex;min-height:0}
   .sidebar{width:340px;flex:0 0 340px;border-right:1px solid var(--line);overflow-y:auto;padding:10px;background:#12161e}
   .detail{flex:1 1 auto;overflow-y:auto;padding:18px 22px}
-  .sbtools{display:flex;gap:8px;margin-bottom:10px}
+  .sbtools{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px}
+  #modoBtn.on{border-color:var(--ac);color:var(--ac)}
   .busca{width:100%;box-sizing:border-box;background:var(--card);border:1px solid var(--line);border-radius:9px;padding:9px 11px;color:var(--tx);font-size:13px;margin-bottom:10px}
   .busca:focus{outline:none;border-color:var(--ac)}
   .busca::placeholder{color:var(--mut)}
@@ -131,6 +132,7 @@
       <button class="btn sec sm" onclick="carregarLista()">↻ Atualizar</button>
       <button class="btn sec sm" onclick="escolherImpressora()">🖨 Etiqueta</button>
       <button class="btn sec sm" onclick="escolherImpressoraNF()">🧾 NF</button>
+      <button class="btn sec sm" id="modoBtn" onclick="trocarModo()" title="alterna entre etiqueta na Zebra (ZPL) ou na A4 (PDF)">🖨️ Etiq: Zebra</button>
     </div>
     <input class="busca" id="busca" placeholder="🔎 buscar: nº pedido, NF, cliente…" oninput="onBusca(this.value)" autocomplete="off" />
     <div id="listaPedidos"><div class="empty">carregando…</div></div>
@@ -146,7 +148,7 @@
 <div class="modal" id="modal"></div>
 
 <script>
-const UI_BUILD = 'b17';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b18';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#ff9900'}, magalu:{n:'Magalu',c:'#0086ff'}, outro:{n:'Outro',c:'#94a3b8'}
@@ -250,6 +252,29 @@ async function imprimirPDF(url){
   await qz.print(cfg, [{ type:'pixel', format:'pdf', flavor:'base64', data: b64 }]);
 }
 
+// ── chave Zebra(ZPL) ↔ A4(PDF) p/ a ETIQUETA (a NF é sempre A4) ──
+function modoEtiqueta(){ return localStorage.getItem('gbkp_modo_etiq')==='a4' ? 'a4' : 'zebra'; }
+async function imprimirEtiqueta(id, zpl){
+  if(modoEtiqueta()==='a4'){
+    await imprimirPDF(location.origin+'/girassol-backup-offline/etiqueta-pdf/'+id);  // vai na impressora A4 (a da NF)
+  }else{
+    const z = zpl || await fetch('/girassol-backup-offline/etiqueta/'+id).then(r=>r.text());
+    await imprimirZPL(z);  // vai na Zebra
+  }
+}
+function aplicarModoLabel(){
+  const b=$('modoBtn'); if(!b) return;
+  const a4 = modoEtiqueta()==='a4';
+  b.textContent = a4 ? '📄 Etiq: A4' : '🖨️ Etiq: Zebra';
+  b.classList.toggle('on', a4);
+}
+function trocarModo(){
+  const novo = modoEtiqueta()==='a4' ? 'zebra' : 'a4';
+  localStorage.setItem('gbkp_modo_etiq', novo);
+  aplicarModoLabel();
+  toast(novo==='a4' ? 'Etiqueta agora pela A4 (PDF) — sai na impressora da NF' : 'Etiqueta agora pela Zebra (ZPL)');
+}
+
 // ── API ──
 const api = (u,opt) => fetch(u,opt).then(r=>r.json());
 
@@ -303,9 +328,8 @@ function renderLista(){
 }
 
 async function reimprimir(id){
-  try{ toast('buscando etiqueta…');
-    const zpl = await fetch('/girassol-backup-offline/etiqueta/'+id).then(r=>r.text());
-    await imprimirZPL(zpl); toast('🖨 etiqueta enviada');
+  try{ toast('imprimindo etiqueta…');
+    await imprimirEtiqueta(id); toast('🖨 etiqueta enviada');
   }catch(e){ toast('Falha: '+e.message); }
 }
 
@@ -433,7 +457,7 @@ function onScan(code){
   } else { beep(false); const s=$('scan'); if(s){ s.classList.add('err'); setTimeout(()=>s.classList.remove('err'),300);} toast('código não confere: '+code); }
 }
 
-async function imprimirAtual(){ try{ await imprimirZPL(zplAtual); toast('🖨 etiqueta enviada'); }catch(e){ toast('Falha: '+e.message); } }
+async function imprimirAtual(){ try{ await imprimirEtiqueta(pedidoAtual.bling_id, zplAtual); toast('🖨 etiqueta enviada'); }catch(e){ toast('Falha: '+e.message); } }
 function abrirDanfe(id){ window.open('/girassol-backup-offline/danfe/'+id, '_blank'); }
 async function imprimirNFAtual(){
   try{
@@ -453,7 +477,7 @@ function voltarLista(){
 
 // FINALIZAR = imprime e SÓ marca conferido depois que o estoquista confirma que saiu certo.
 async function finalizar(){
-  try{ await imprimirZPL(zplAtual); }
+  try{ await imprimirEtiqueta(pedidoAtual.bling_id, zplAtual); }
   catch(e){ toast('Falha na impressão: '+e.message); return; }
   abrirConfirmacao();
 }
@@ -473,7 +497,7 @@ function abrirConfirmacao(){
   md.classList.add('show');
 }
 function fecharConfirmacao(){ const md=$('modal'); md.classList.remove('show'); md.innerHTML=''; setTimeout(()=>{const s=$('scan'); if(s) s.focus();},60); }
-async function reimprimirModal(){ try{ await imprimirZPL(zplAtual); toast('🖨 reenviado'); }catch(e){ toast('Falha: '+e.message); } }
+async function reimprimirModal(){ try{ await imprimirEtiqueta(pedidoAtual.bling_id, zplAtual); toast('🖨 reenviado'); }catch(e){ toast('Falha: '+e.message); } }
 async function confirmarFinalizar(){
   try{
     await api('/girassol-backup-offline/conferido', {
@@ -491,13 +515,14 @@ async function confirmarFinalizar(){
 // mantém foco no scan (menos quando digita Qtd/operador ou o modal está aberto)
 setInterval(()=>{ const s=$('scan'); const q=$('qtdConf'); if(s && !modalAberto() && document.activeElement!==s && document.activeElement!==opIn && document.activeElement!==q) s.focus(); }, 1500);
 
-// a página NUNCA se imprime — toda impressão é via QZ Tray → Zebra
-window.print = function(){ toast('A impressão é pela Zebra (QZ Tray), não pela página'); };
-document.addEventListener('keydown', e=>{ if((e.ctrlKey||e.metaKey) && (e.key==='p'||e.key==='P')){ e.preventDefault(); e.stopPropagation(); toast('A impressão é pela Zebra (QZ Tray)'); } }, true);
+// a página NUNCA se imprime — toda impressão é via QZ Tray (Zebra ou A4)
+window.print = function(){ toast('A impressão é pela impressora (QZ Tray), não pela página'); };
+document.addEventListener('keydown', e=>{ if((e.ctrlKey||e.metaKey) && (e.key==='p'||e.key==='P')){ e.preventDefault(); e.stopPropagation(); toast('A impressão é pelos botões (QZ Tray)'); } }, true);
 
 // boot
 setupQZ();
 reconectarQZ();
+aplicarModoLabel();
 carregarLista();
 setInterval(()=>{ if(!pedidoAtual) carregarLista(); }, 60000);
 </script>
