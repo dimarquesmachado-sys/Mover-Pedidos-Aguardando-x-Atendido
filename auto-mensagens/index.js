@@ -29,7 +29,7 @@
 
 const tokenMgr = require('./mlTokenManager');
 const tracker  = require('./supabaseTracker');
-const { rotinaACombinar, rotinaLerRespostas, forcarOrder, recuperarPendentes, recuperarFalsosProcessados } = require('./fluxos');
+const { rotinaACombinar, rotinaLerRespostas, forcarOrder, recuperarPendentes, recuperarFalsosProcessados, rotinaEscadaIndisponivel } = require('./fluxos');
 
 // ── Helpers HTTP ──────────────────────────────────────────────────────
 function json(res, code, body) {
@@ -54,7 +54,12 @@ const crons = {
   // falsos-processados (vendas marcadas 'processado' SEM NF, claro/estruturado) e
   // emite sozinho. Garante que nada fique preso sem nota durante a viagem (China),
   // sem precisar rodar a recuperacao na mao. Checa NF real no Bling antes de emitir.
-  girassolRecuperarSemNF: process.env.LIXAS_RECUPERAR_SEMNF_CRON || '15 * * * *'
+  girassolRecuperarSemNF: process.env.LIXAS_RECUPERAR_SEMNF_CRON || '15 * * * *',
+  // a cada 30 min - ESCADA: pedidos travados em grao indisponivel que estao chegando
+  // no prazo-limite de postagem real do ML -> troca pelo grao valido mais proximo +
+  // monta + emite NF + avisa a cliente. Evita penalidade por atraso. So age PERTO do
+  // prazo (deixa cliente/humano resolver antes). Margem/intervalo ajustaveis por env.
+  girassolEscada: process.env.LIXAS_ESCADA_CRON || '*/30 * * * *'
 };
 
 // ── Rotas ─────────────────────────────────────────────────────────────
@@ -200,6 +205,37 @@ function routes(readBody) {
       try {
         const dias = Number(urlObj.searchParams.get('dias')) || 30;
         const r = await recuperarFalsosProcessados({ dias });
+        json(res, 200, r);
+      } catch (e) {
+        json(res, 500, { ok: false, erro: e.message });
+      }
+      return true;
+    }
+
+    // GET/POST /run/escada → roda a ESCADA agora (REAL): pedidos travados em grao
+    // indisponivel que estao chegando no prazo -> troca + monta + emite + avisa.
+    // ?margem=H (horas antes do prazo, default env/6) · ?dias=N (default 30).
+    if ((method === 'GET' || method === 'POST') && p === '/auto-mensagens/run/escada') {
+      try {
+        const margemHoras = Number(urlObj.searchParams.get('margem')) || undefined;
+        const dias = Number(urlObj.searchParams.get('dias')) || undefined;
+        const r = await rotinaEscadaIndisponivel({ margemHoras, dias });
+        json(res, 200, r);
+      } catch (e) {
+        json(res, 500, { ok: false, erro: e.message });
+      }
+      return true;
+    }
+
+    // DEBUG (seguro): GET /auto-mensagens/debug/escada → roda a escada em dryRun.
+    // Calcula prazo + o que SERIA trocado/emitido, SEM montar/emitir/avisar nada.
+    // ?margem=H pra simular com uma margem maior (ex.: ?margem=240 = 10 dias, pra
+    // ver o que ela faria mesmo nos pedidos com prazo folgado). ?dias=N (default 30).
+    if (method === 'GET' && p === '/auto-mensagens/debug/escada') {
+      try {
+        const margemHoras = Number(urlObj.searchParams.get('margem')) || undefined;
+        const dias = Number(urlObj.searchParams.get('dias')) || undefined;
+        const r = await rotinaEscadaIndisponivel({ dryRun: true, margemHoras, dias });
         json(res, 200, r);
       } catch (e) {
         json(res, 500, { ok: false, erro: e.message });
@@ -709,7 +745,8 @@ module.exports = {
     girassolACombinar: rotinaACombinar,
     girassolLerRespostas: rotinaLerRespostas,
     girassolRecuperar: () => recuperarPendentes(Number(process.env.LIXAS_RECUPERAR_DIAS) || 1),
-    girassolRecuperarSemNF: () => recuperarFalsosProcessados({ dias: Number(process.env.LIXAS_RECUPERAR_SEMNF_DIAS) || 30 })
+    girassolRecuperarSemNF: () => recuperarFalsosProcessados({ dias: Number(process.env.LIXAS_RECUPERAR_SEMNF_DIAS) || 30 }),
+    girassolEscada: () => rotinaEscadaIndisponivel()
   },
   routes,
   crons,
