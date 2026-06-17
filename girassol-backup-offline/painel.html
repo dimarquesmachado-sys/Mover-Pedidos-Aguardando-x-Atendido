@@ -113,7 +113,7 @@
   .idesc .d{font-size:14px}
   .idesc .e{font-size:12px;color:var(--mut);font-family:ui-monospace,monospace;margin-top:2px}
   .miniok{background:var(--card2);border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:7px 11px;font-size:13px;cursor:pointer}
-  .dbtns{display:flex;gap:8px;margin-top:14px;align-items:center}
+  .dbtns{display:flex;gap:8px;margin-top:14px;align-items:center;flex-wrap:wrap}
   .empty{text-align:center;color:var(--mut);padding:30px 0}
   .toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:#000;border:1px solid var(--line);padding:10px 18px;border-radius:24px;font-size:14px;opacity:0;transition:.2s;pointer-events:none;z-index:50}
   .toast.show{opacity:1}
@@ -222,7 +222,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b40';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b41';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#ff9900'}, magalu:{n:'Magalu',c:'#0086ff'}, outro:{n:'Outro',c:'#94a3b8'}
@@ -339,6 +339,23 @@ async function imprimirPDF(url){
   let bin=''; for(let i=0;i<bytes.length;i++) bin+=String.fromCharCode(bytes[i]);
   const b64 = btoa(bin);
   const cfg = qz.configs.create(printer);
+  await qz.print(cfg, [{ type:'pixel', format:'pdf', flavor:'base64', data: b64 }]);
+}
+
+// ── DANFE SIMPLIFICADO (PDF 10x15) → impresso NA ZEBRA via QZ (pixel/pdf) ──
+async function imprimirSimplificadoZebra(id){
+  await conectarQZ();
+  const printer = await getImpressora();   // a MESMA Zebra da etiqueta
+  if(!printer) throw new Error('Nenhuma impressora encontrada');
+  const resp = await fetch(location.origin+'/girassol-backup-offline/danfe-simp/'+id);
+  if(!resp.ok) throw new Error('DANFE-simp '+resp.status);
+  const bytes = new Uint8Array(await resp.arrayBuffer());
+  let bin=''; for(let i=0;i<bytes.length;i++) bin+=String.fromCharCode(bytes[i]);
+  const b64 = btoa(bin);
+  const cfg = qz.configs.create(printer, {
+    size:{ width:100, height:150 }, units:'mm',
+    density:203, scaleContent:true, rasterize:true, colorType:'blackwhite', margins:0
+  });
   await qz.print(cfg, [{ type:'pixel', format:'pdf', flavor:'base64', data: b64 }]);
 }
 
@@ -553,9 +570,11 @@ function renderDetail(){
     '<div id="bItens"></div>'+
     '<div class="dbtns">'+
       '<button class="btn warn" onclick="imprimirAtual()">'+(modoEtiqueta()==='a4'?'📄 Abrir etiqueta':'🖨 Só etiqueta')+'</button>'+
-      (temDanfe ? '<button class="btn warn" onclick="imprimirNFAtual()">🧾 Abrir NF</button>' : '')+
+      (temDanfe ? '<button class="btn warn" onclick="imprimirSimpAtual()">🏷️ Só DANFE</button>' : '')+
+      (temDanfe ? '<button class="btn sec" onclick="imprimirNFAtual()">🧾 Ver NF A4</button>' : '')+
       '<span class="grow"></span>'+
-      '<button class="btn ok" id="bFinalizar" onclick="finalizar()" disabled>✓ Imprimir + Finalizar</button>'+
+      (temDanfe ? '<button class="btn" id="bFinalizarA4" onclick="finalizar(\'a4\')" disabled>✓ Etiq + NF A4</button>' : '')+
+      '<button class="btn ok" id="bFinalizar" onclick="finalizar(\'simp\')" disabled>✓ Etiq + DANFE 10x15</button>'+
     '</div>';
   renderItens();
   const scan = $('scan');
@@ -599,7 +618,9 @@ function renderItens(){
     }
     return unitRow(g.unit,false);
   }).join('');
-  const fb = $('bFinalizar'); if(fb) fb.disabled = !(feito>=total && total>0);
+  const pronto = (feito>=total && total>0);
+  const fb = $('bFinalizar'); if(fb) fb.disabled = !pronto;
+  const fb2 = $('bFinalizarA4'); if(fb2) fb2.disabled = !pronto;
 }
 
 function manualUnit(id){ const u=pedidoAtual.unidades.find(x=>x._id===id); if(u && u.bipado<u.qtd){ u.bipado++; beep(true); renderItens(); } }
@@ -627,6 +648,12 @@ function imprimirNFAtual(){
   if(!id) return;
   window.open(location.origin+'/girassol-backup-offline/danfe/'+id, '_blank');  // abre o PDF da NF — você imprime pelo navegador
 }
+async function imprimirSimpAtual(){
+  const id = pedidoAtual && pedidoAtual.bling_id;
+  if(!id) return;
+  try{ await imprimirSimplificadoZebra(id); toast('🏷️ DANFE 10x15 enviado p/ Zebra'); }
+  catch(e){ toast('Falha DANFE: '+e.message); }
+}
 
 // volta pra lista SEM finalizar (não marca conferido)
 function voltarLista(){
@@ -636,19 +663,27 @@ function voltarLista(){
 }
 
 // FINALIZAR = imprime e SÓ marca conferido depois que o estoquista confirma que saiu certo.
-async function finalizar(){
+// modo: 'simp' = etiqueta + DANFE simplificado (10x15) na Zebra | 'a4' = etiqueta + NF completa (A4)
+let modoFinalizando = 'simp';
+async function finalizar(modo){
+  modoFinalizando = (modo==='a4') ? 'a4' : 'simp';
   const id = pedidoAtual.bling_id;
   const temNf = !!pedidoAtual.nf;
   if(modoEtiqueta()==='a4'){
-    // A4: UMA aba só com etiqueta + NF mescladas (o navegador bloqueava a 2ª aba)
+    // ETIQUETA em modo A4: UMA aba só com etiqueta + NF mescladas (o navegador bloqueava a 2ª aba)
     window.open(location.origin+'/girassol-backup-offline/imprimir/'+id, '_blank');
     abrirConfirmacao();
     return;
   }
-  // Zebra: abre a NF (1 aba, sem bloqueio) e imprime a etiqueta no QZ
-  if(temNf) window.open(location.origin+'/girassol-backup-offline/danfe/'+id, '_blank');
+  // Zebra: 1º a ETIQUETA (ZPL)
   try{ await imprimirZPL(zplAtual); }
-  catch(e){ toast('Falha na impressão: '+e.message); return; }
+  catch(e){ toast('Falha na etiqueta: '+e.message); return; }
+  // 2º a NF — simplificada NA ZEBRA (10x15) ou completa em A4 no navegador
+  if(modoFinalizando==='simp'){
+    if(temNf){ try{ await imprimirSimplificadoZebra(id); }catch(e){ toast('Etiqueta saiu, mas o DANFE falhou: '+e.message); } }
+  }else{
+    if(temNf) window.open(location.origin+'/girassol-backup-offline/danfe/'+id, '_blank');
+  }
   abrirConfirmacao();
 }
 
@@ -670,7 +705,12 @@ function fecharConfirmacao(){ const md=$('modal'); md.classList.remove('show'); 
 async function reimprimirModal(){
   const id = pedidoAtual.bling_id;
   if(modoEtiqueta()==='a4'){ window.open(location.origin+'/girassol-backup-offline/imprimir/'+id, '_blank'); toast('🖨 reenviado'); return; }
-  try{ await imprimirEtiqueta(id, zplAtual); toast('🖨 reenviado'); }catch(e){ toast('Falha: '+e.message); }
+  try{
+    await imprimirEtiqueta(id, zplAtual);
+    if(modoFinalizando==='simp'){ if(pedidoAtual.nf){ await imprimirSimplificadoZebra(id); } }
+    else if(pedidoAtual.nf){ window.open(location.origin+'/girassol-backup-offline/danfe/'+id, '_blank'); }
+    toast('🖨 reenviado');
+  }catch(e){ toast('Falha: '+e.message); }
 }
 async function confirmarFinalizar(){
   try{
