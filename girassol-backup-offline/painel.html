@@ -222,7 +222,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b37';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b38';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#ff9900'}, magalu:{n:'Magalu',c:'#0086ff'}, outro:{n:'Outro',c:'#94a3b8'}
@@ -456,7 +456,7 @@ function renderLista(){
       return '<div class="scard semetiq" onclick="avisoSemEtiqueta(\''+esc(p.numero||p.id)+'\')">'+
         '<div class="scl1">'+
           '<span class="badge" style="background:'+m.c+'">'+m.n+'</span>'+
-          '<span class="num">#'+esc(p.numero||p.id)+'</span>'+
+          '<span class="num">'+esc(p.numero||p.id)+'</span>'+
           '<span class="setag">⚠️ sem etiqueta</span>'+
         '</div>'+
         (p.cliente?'<div class="scli">'+esc(p.cliente)+'</div>':'')+
@@ -475,7 +475,7 @@ function renderLista(){
     return '<div class="scard '+cls+'" onclick="selecionar(\''+p.id+'\')">'+
       '<div class="scl1">'+
         '<span class="badge" style="background:'+m.c+'">'+m.n+'</span>'+
-        '<span class="num">#'+esc(p.numero)+'</span>'+
+        '<span class="num">'+esc(p.numero)+'</span>'+
         (p.conferido?'<span class="donetag">✓</span>':'')+
       '</div>'+
       (p.cliente?'<div class="scli">'+esc(p.cliente)+'</div>':'')+
@@ -486,7 +486,7 @@ function renderLista(){
 }
 
 function avisoSemEtiqueta(num){
-  toast('⚠️ Pedido #'+num+' está SEM ETIQUETA — não dá pra processar aqui. Confira a emissão da etiqueta no Bling.');
+  toast('⚠️ Pedido '+num+' está SEM ETIQUETA — não dá pra processar aqui. Confira a emissão da etiqueta no Bling.');
 }
 
 async function reimprimir(id){
@@ -540,7 +540,7 @@ function renderDetail(){
     '<div class="dhead">'+
       '<button class="btn sec sm" onclick="voltarLista()">← Voltar</button>'+
       '<span class="badge" style="background:'+m.c+'">'+m.n+'</span>'+
-      '<span class="num big">#'+esc(p.numero)+'</span>'+
+      '<span class="num big">'+esc(p.numero)+'</span>'+
       '<span class="prog" id="bProg">0/0</span>'+
     '</div>'+
     '<div class="cli">'+esc(p.cliente||'')+'</div>'+
@@ -678,9 +678,9 @@ async function confirmarFinalizar(){
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ id: pedidoAtual.bling_id, user: opIn.value })
     });
-    if(r && r.sincronizado)      toast('✓ #'+pedidoAtual.numero+' finalizado → VERIFICADO');
-    else if(r && r.bling_offline) toast('✓ #'+pedidoAtual.numero+' finalizado · Bling offline, sincroniza ao voltar');
-    else                          toast('✓ #'+pedidoAtual.numero+' finalizado');
+    if(r && r.sincronizado)      toast('✓ '+pedidoAtual.numero+' finalizado → VERIFICADO');
+    else if(r && r.bling_offline) toast('✓ '+pedidoAtual.numero+' finalizado · Bling offline, sincroniza ao voltar');
+    else                          toast('✓ '+pedidoAtual.numero+' finalizado');
     fecharConfirmacao();
     pedidoAtual=null; zplAtual=null;
     $('detail').innerHTML='<div class="placeholder">← selecione um pedido à esquerda</div>';
@@ -708,7 +708,7 @@ async function abrirHistorico(){
       return '<div class="histrow">'+
         (mk?'<span class="hmk" style="background:'+mk.c+'"></span>':'')+
         '<div class="hmeta">'+
-          '<div class="hnum">#'+esc(h.numero||h.id)+(h.cliente?' · '+esc(h.cliente):'')+'</div>'+
+          '<div class="hnum">'+esc(h.numero||h.id)+(h.cliente?' · '+esc(h.cliente):'')+'</div>'+
           '<div class="hsub">'+dt+(h.user?(' · '+esc(h.user)):'')+'</div>'+
         '</div>'+
         tag+
@@ -790,7 +790,11 @@ function imprimirSeparacao(){
 }
 
 // mantém foco no scan (menos quando digita Qtd/operador ou o modal está aberto)
-setInterval(()=>{ const s=$('scan'); const q=$('qtdConf'); if(s && !modalAberto() && document.activeElement!==s && document.activeElement!==opIn && document.activeElement!==q) s.focus(); }, 1500);
+setInterval(()=>{
+  const sel = window.getSelection && window.getSelection().toString();
+  if(sel) return;   // está selecionando texto (ex: copiar o código) → não rouba o foco
+  const s=$('scan'); const q=$('qtdConf'); if(s && !modalAberto() && document.activeElement!==s && document.activeElement!==opIn && document.activeElement!==q) s.focus();
+}, 1500);
 
 // a página NUNCA se imprime — toda impressão é via QZ Tray (Zebra ou A4)
 window.print = function(){ toast('A impressão é pela impressora (QZ Tray), não pela página'); };
