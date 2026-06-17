@@ -225,6 +225,31 @@ function routes(readBody) {
         }
         pendentes = pendentes.slice(0, 100);
 
+        // Confere a NF REAL no Bling pros cards que mostrariam o botao "Emitir/Recuperar
+        // NF" mas tem nf_emitida_em vazio (campo desatualizado). Se a nota existe no
+        // Bling, cura o campo aqui -> o botao some sozinho. Limitado a 20 checagens pra
+        // nao pesar a listagem (so os poucos com campo desatualizado entram nisso).
+        try {
+          const bp = require('./blingPedidos');
+          let _checados = 0;
+          for (const v of pendentes) {
+            if (_checados >= 20) break;
+            const mostrariaBotaoNF = (v.bling_editado_em || v.status === 'processado') && !v.nf_emitida_em && v.bling_pedido_id;
+            if (!mostrariaBotaoNF) continue;
+            _checados++;
+            try {
+              const det = await bp.obterPedidoCompleto(v.bling_pedido_id);
+              const nf = (det && det.ok) ? det.pedido?.notaFiscal : null;
+              const nfId = (nf && typeof nf === 'object') ? nf.id : nf;
+              if (Number(nfId) > 0) {
+                const quando = new Date().toISOString();
+                await lcp.atualizarVenda(v.order_id, { nf_emitida_em: quando });
+                v.nf_emitida_em = quando; // reflete ja nesta resposta (botao some)
+              }
+            } catch (_) { /* checagem falhou: mantem o botao (melhor pecar por mostrar) */ }
+          }
+        } catch (_) { /* sem bp disponivel: segue sem curar */ }
+
         const stats = {
           total: todos.length,
           aguardando: todos.filter(v => v.status === 'aguardando_resposta').length,
@@ -584,12 +609,14 @@ function routes(readBody) {
         }
 
         // Sucesso (ou dryRun)
+        // IMPORTANTE: montar NAO fecha o pedido. So gravamos que foi editado no Bling.
+        // O status 'processado' so e setado quando a NF for REALMENTE emitida (rota emitir-nf).
+        // Assim o card continua na lista de pendentes com o botao "Emitir NF" visivel.
         if (!dryRun) {
           await lcp.atualizarVenda(orderId, {
             bling_pedido_id: String(r.pedidoId),
             bling_editado_em: new Date().toISOString(),
-            bling_erro: null,
-            status: 'processado'
+            bling_erro: null
           });
         }
 
@@ -642,7 +669,8 @@ function routes(readBody) {
           if (jaTemNF) {
             await lcp.atualizarVenda(orderId, {
               nf_emitida_em: new Date().toISOString(),
-              nf_erro: null
+              nf_erro: null,
+              status: 'processado'
             });
             console.log(`[lixas-combinar emitir-nf] orderId=${orderId} JA possuia NF referenciada (code 74) — marcado como emitida`);
             json(res, 200, { ok: true, jaEmitida: true, mensagem: 'Esta venda ja possui NF-e referenciada no Bling. Registrado como emitida.' });
@@ -655,19 +683,136 @@ function routes(readBody) {
           return true;
         }
 
-        // Sucesso - grava na Supabase
+        // Sucesso - grava na Supabase. NF emitida = pedido REALMENTE concluido.
         await lcp.atualizarVenda(orderId, {
           nf_emitida_em: new Date().toISOString(),
           nf_id: r.nfeId,
           nf_numero: r.numero,
           nf_serie: r.serie,
           nf_chave: r.chave || null,
-          nf_erro: null
+          nf_erro: null,
+          status: 'processado'
         });
 
         json(res, 200, { ok: true, ...r });
       } catch (e) {
         console.error('[lixas-combinar emitir-nf]', e);
+        json(res, 500, { ok: false, erro: e.message });
+      }
+      return true;
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    // POST /lixas-combinar/api/pedido/:orderId/recuperar-nf
+    //   RECUPERACAO: pedidos que ficaram presos em 'processado' SEM NF
+    //   (marcados na mao pelo botao "Processado", ou pelo bug antigo do montar).
+    //   Monta (se ainda nao montou) + emite a NF, e so fecha como processado
+    //   quando a NF sair de verdade. Idempotente (code 74 = ja tem NF → fecha).
+    if (method === 'POST' && p.startsWith('/lixas-combinar/api/pedido/') && p.endsWith('/recuperar-nf')) {
+      const sessao = requerAuth();
+      if (!sessao.ok) { json(res, 401, { ok: false, erro: 'nao_autenticado' }); return true; }
+
+      const orderId = p.replace('/lixas-combinar/api/pedido/', '').replace('/recuperar-nf', '');
+      try {
+        const lcp = require('../auto-mensagens/lixasCombinarPendentes');
+        const bp = require('./blingPedidos');
+        const venda = await lcp.buscar(orderId);
+        if (!venda.ok || !venda.data) {
+          json(res, 404, { ok: false, erro: 'venda_nao_encontrada', orderId });
+          return true;
+        }
+        const v = venda.data;
+
+        // Ja tem NF? nada a fazer.
+        if (v.nf_emitida_em) {
+          json(res, 200, { ok: true, jaEmitida: true, mensagem: 'Pedido ja tem NF emitida.' });
+          return true;
+        }
+
+        let pedidoBlingId = v.bling_pedido_id;
+
+        // ETAPA 1 — montar, se ainda nao foi montado
+        if (!v.bling_editado_em) {
+          let graosEscolhidos;
+          if (v.ia_pedido_estruturado) {
+            try { graosEscolhidos = JSON.parse(v.ia_pedido_estruturado); }
+            catch (_) { json(res, 400, { ok: false, etapa: 'montar', erro: 'ia_pedido_estruturado invalido — trate manual' }); return true; }
+          }
+          if (!Array.isArray(graosEscolhidos) || graosEscolhidos.length === 0) {
+            json(res, 400, { ok: false, etapa: 'montar', erro: 'sem graos estruturados — trate manual' });
+            return true;
+          }
+          const lixasService = require('./lixasService');
+          const graosResult = await lixasService.getGraosDisponiveisPorSkuACombinar(v.sku_a_combinar);
+          if (!graosResult.ok) {
+            json(res, 500, { ok: false, etapa: 'montar', erro: 'erro_consultar_graos_bling', detalhe: graosResult.erro });
+            return true;
+          }
+          let dataVenda = null;
+          if (v.data_venda) dataVenda = String(v.data_venda).split('T')[0];
+          const idBuscaBling = v.pack_id || orderId;
+
+          const edit = await bp.editarPedidoComGraos({
+            orderId: idBuscaBling,
+            graosEscolhidos,
+            graosDisponiveis: graosResult.graos,
+            unidadesPorPacote: graosResult.unidades_por_pacote,
+            descricaoBase: graosResult.descricao,
+            dataVenda,
+            dryRun: false
+          });
+          if (!edit.ok) {
+            await lcp.atualizarVenda(orderId, {
+              status: 'precisa_atencao_humano',
+              bling_erro: `recuperar montar ${edit.etapa || ''}: ${edit.erro || ''}`.slice(0, 500)
+            });
+            json(res, 500, { ok: false, etapa: 'montar', ...edit });
+            return true;
+          }
+          pedidoBlingId = edit.pedidoId;
+          await lcp.atualizarVenda(orderId, {
+            bling_pedido_id: String(edit.pedidoId),
+            bling_editado_em: new Date().toISOString(),
+            bling_erro: null
+          });
+        }
+
+        // ETAPA 2 — emitir a NF
+        if (!pedidoBlingId) {
+          json(res, 400, { ok: false, etapa: 'nf', erro: 'sem bling_pedido_id apos montar' });
+          return true;
+        }
+        const nf = await bp.gerarNFe(pedidoBlingId);
+        if (!nf.ok) {
+          const campos = (nf.detalhe && nf.detalhe.error && nf.detalhe.error.fields) || [];
+          const jaTemNF = Array.isArray(campos) && campos.some(f =>
+            Number(f.code) === 74 || /nota fiscal referenciada/i.test(String(f.msg || ''))
+          );
+          if (jaTemNF) {
+            await lcp.atualizarVenda(orderId, {
+              nf_emitida_em: new Date().toISOString(), nf_erro: null, status: 'processado'
+            });
+            json(res, 200, { ok: true, jaEmitida: true, mensagem: 'Bling ja tinha NF referenciada — registrado como emitida.' });
+            return true;
+          }
+          await lcp.atualizarVenda(orderId, {
+            status: 'precisa_atencao_humano',
+            nf_erro: `recuperar nf ${nf.status || ''}: ${nf.erro || JSON.stringify(nf.detalhe || {}).slice(0,200)}`.slice(0, 500)
+          });
+          json(res, 200, { ok: false, etapa: 'nf', ...nf });
+          return true;
+        }
+
+        // Sucesso total
+        await lcp.atualizarVenda(orderId, {
+          nf_emitida_em: new Date().toISOString(),
+          nf_id: nf.nfeId, nf_numero: nf.numero, nf_serie: nf.serie,
+          nf_chave: nf.chave || null, nf_erro: null,
+          status: 'processado'
+        });
+        json(res, 200, { ok: true, recuperado: true, pedidoId: pedidoBlingId, nfNumero: nf.numero, nfSerie: nf.serie });
+      } catch (e) {
+        console.error('[lixas-combinar recuperar-nf]', e);
         json(res, 500, { ok: false, erro: e.message });
       }
       return true;
