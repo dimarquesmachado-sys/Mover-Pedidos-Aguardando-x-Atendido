@@ -144,6 +144,17 @@
   .sepfoot{display:flex;gap:8px;padding:12px 16px;border-top:1px solid var(--line)}
   .sepfoot .btn{flex:1}
   .sepempty{color:var(--mut);text-align:center;padding:30px 10px}
+
+  /* Histórico (no modal) */
+  .histbody{max-height:60vh;overflow:auto;margin:8px 0 4px;text-align:left}
+  .histrow{display:flex;align-items:center;gap:10px;padding:9px 2px;border-bottom:1px solid var(--line)}
+  .histrow .hmk{flex:0 0 auto;width:9px;height:9px;border-radius:50%}
+  .histrow .hmeta{flex:1;min-width:0}
+  .histrow .hnum{font-size:14px;font-weight:700;color:var(--tx);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .histrow .hsub{font-size:11px;color:var(--mut)}
+  .hsync{flex:0 0 auto;font-size:11px;font-weight:700;border-radius:999px;padding:3px 8px}
+  .hsync.ok{color:var(--ok);background:#0e2a1a}
+  .hsync.wait{color:var(--warn);background:#2a1f08}
 </style>
 </head>
 <body>
@@ -163,6 +174,7 @@
     <div class="sbtools">
       <button class="btn sec sm" id="btnSync" onclick="sincronizar()">↻ Atualizar</button>
       <button class="btn sec sm" onclick="abrirSeparacao()" title="lista de produtos a separar (somados por SKU)">📋 Separar</button>
+      <button class="btn sec sm" onclick="abrirHistorico()" title="últimos pedidos finalizados">🕘 Histórico</button>
       <button class="btn sec sm" onclick="escolherImpressora()">🖨 Zebra</button>
       <button class="btn sec sm" id="modoBtn" onclick="trocarModo()" title="alterna entre etiqueta na Zebra (ZPL) ou abrir PDF p/ imprimir no navegador">🖨️ Etiq: Zebra</button>
     </div>
@@ -197,7 +209,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b28';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b29';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#ff9900'}, magalu:{n:'Magalu',c:'#0086ff'}, outro:{n:'Outro',c:'#94a3b8'}
@@ -347,8 +359,8 @@ async function carregarLista(){
     const d = await api('/girassol-backup-offline/lista');
     $('ver').textContent = (d.versao ? d.versao.replace('girassol-backup-offline ','') : 'v?') + ' · ui ' + UI_BUILD;
     $('stats').innerHTML =
-      '<span><b>'+d.prontos+'</b> prontos</span>'+
-      '<span><b>'+d.conferidos+'</b> conferidos</span>'+
+      '<span><b>'+d.prontos+'</b> a separar</span>'+
+      '<span><b>'+(d.finalizados_hoje||0)+'</b> finalizados hoje</span>'+
       '<span><b>'+d.sem_etiqueta+'</b> sem etiqueta</span>';
     listaCache = d.pedidos||[];
     renderChips();
@@ -623,6 +635,35 @@ async function confirmarFinalizar(){
     $('detail').innerHTML='<div class="placeholder">← selecione um pedido à esquerda</div>';
     carregarLista();
   }catch(e){ toast('Falha ao finalizar: '+e.message); }
+}
+
+// ─── Histórico dos últimos finalizados (modal) ─────────────────────────────
+async function abrirHistorico(){
+  const md=$('modal');
+  md.innerHTML =
+    '<div class="mbox" style="max-width:580px;width:92vw">'+
+      '<div class="mtit">🕘 Últimos pedidos finalizados</div>'+
+      '<div id="histBody" class="histbody">carregando…</div>'+
+      '<div class="mbtns"><button class="btn sec" onclick="fecharConfirmacao()">Fechar</button></div>'+
+    '</div>';
+  md.classList.add('show');
+  try{
+    const d = await api('/girassol-backup-offline/historico');
+    if(!d.itens || !d.itens.length){ $('histBody').innerHTML='<div class="sepempty">Nenhum pedido finalizado ainda.</div>'; return; }
+    $('histBody').innerHTML = d.itens.map(h=>{
+      const dt = h.conferido_em ? new Date(h.conferido_em).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '';
+      const mk = h.marketplace ? (MKT[h.marketplace]||MKT.outro) : null;
+      const tag = h.sincronizado ? '<span class="hsync ok">✓ VERIFICADO</span>' : '<span class="hsync wait">⏳ na fila</span>';
+      return '<div class="histrow">'+
+        (mk?'<span class="hmk" style="background:'+mk.c+'"></span>':'')+
+        '<div class="hmeta">'+
+          '<div class="hnum">#'+esc(h.numero||h.id)+(h.cliente?' · '+esc(h.cliente):'')+'</div>'+
+          '<div class="hsub">'+dt+(h.user?(' · '+esc(h.user)):'')+'</div>'+
+        '</div>'+
+        tag+
+      '</div>';
+    }).join('');
+  }catch(e){ $('histBody').innerHTML='<div class="sepempty">Falha: '+esc(e.message)+'</div>'; }
 }
 
 // ─── Lista de Separação (gaveta lateral direita) ───────────────────────────
