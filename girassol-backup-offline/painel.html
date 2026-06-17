@@ -222,7 +222,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b41';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b42';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#ff9900'}, magalu:{n:'Magalu',c:'#0086ff'}, outro:{n:'Outro',c:'#94a3b8'}
@@ -648,11 +648,13 @@ function imprimirNFAtual(){
   if(!id) return;
   window.open(location.origin+'/girassol-backup-offline/danfe/'+id, '_blank');  // abre o PDF da NF — você imprime pelo navegador
 }
-async function imprimirSimpAtual(){
+function imprimirSimpAtual(){
   const id = pedidoAtual && pedidoAtual.bling_id;
-  if(!id) return;
-  try{ await imprimirSimplificadoZebra(id); toast('🏷️ DANFE 10x15 enviado p/ Zebra'); }
-  catch(e){ toast('Falha DANFE: '+e.message); }
+  if(!id){ toast('pedido sem ID'); return; }
+  toast('🏷️ Gerando DANFE 10x15… (uns segundos)');   // feedback IMEDIATO
+  imprimirSimplificadoZebra(id)                       // dispara SEM travar a tela
+    .then(()=> toast('🏷️ DANFE enviado p/ Zebra'))
+    .catch(e=> toast('Falha DANFE: '+e.message));
 }
 
 // volta pra lista SEM finalizar (não marca conferido)
@@ -680,11 +682,16 @@ async function finalizar(modo){
   catch(e){ toast('Falha na etiqueta: '+e.message); return; }
   // 2º a NF — simplificada NA ZEBRA (10x15) ou completa em A4 no navegador
   if(modoFinalizando==='simp'){
-    if(temNf){ try{ await imprimirSimplificadoZebra(id); }catch(e){ toast('Etiqueta saiu, mas o DANFE falhou: '+e.message); } }
+    if(temNf){
+      toast('🏷️ Gerando DANFE 10x15…');
+      imprimirSimplificadoZebra(id)                   // dispara SEM travar (o QZ pixel demora alguns seg)
+        .then(()=> toast('🏷️ DANFE enviado p/ Zebra'))
+        .catch(e=> toast('Etiqueta saiu, mas o DANFE falhou: '+e.message));
+    }
   }else{
     if(temNf) window.open(location.origin+'/girassol-backup-offline/danfe/'+id, '_blank');
   }
-  abrirConfirmacao();
+  abrirConfirmacao();   // abre JÁ — não espera o DANFE terminar de imprimir
 }
 
 function abrirConfirmacao(){
@@ -705,12 +712,14 @@ function fecharConfirmacao(){ const md=$('modal'); md.classList.remove('show'); 
 async function reimprimirModal(){
   const id = pedidoAtual.bling_id;
   if(modoEtiqueta()==='a4'){ window.open(location.origin+'/girassol-backup-offline/imprimir/'+id, '_blank'); toast('🖨 reenviado'); return; }
-  try{
-    await imprimirEtiqueta(id, zplAtual);
-    if(modoFinalizando==='simp'){ if(pedidoAtual.nf){ await imprimirSimplificadoZebra(id); } }
-    else if(pedidoAtual.nf){ window.open(location.origin+'/girassol-backup-offline/danfe/'+id, '_blank'); }
-    toast('🖨 reenviado');
-  }catch(e){ toast('Falha: '+e.message); }
+  try{ await imprimirEtiqueta(id, zplAtual); }catch(e){ toast('Falha etiqueta: '+e.message); return; }
+  if(modoFinalizando==='simp' && pedidoAtual.nf){
+    toast('🏷️ Gerando DANFE 10x15…');
+    imprimirSimplificadoZebra(id).then(()=> toast('🏷️ DANFE reenviado')).catch(e=> toast('DANFE falhou: '+e.message));
+  }else{
+    if(pedidoAtual.nf) window.open(location.origin+'/girassol-backup-offline/danfe/'+id, '_blank');
+    toast('🖨 etiqueta reenviada');
+  }
 }
 async function confirmarFinalizar(){
   try{
