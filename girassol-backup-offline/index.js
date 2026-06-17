@@ -2,7 +2,7 @@
 
 // ════════════════════════════════════════════════════════════════════════
 //  GIRASSOL · CHECKOUT OFFLINE — FASE 1 (poller) + FASE 2 (bipagem)   (Mover-Pedidos)
-//  girassol-backup-offline v16/06 b28   (a versão real é a const VERSAO abaixo)
+//  girassol-backup-offline v16/06 b29   (a versão real é a const VERSAO abaixo)
 // ════════════════════════════════════════════════════════════════════════
 //  Módulo do orquestrador unificado (HTTP-native, sem Express).
 //  Reaproveita o token Bling da Girassol via ../girassol/tokenManager.
@@ -38,7 +38,7 @@ const { garantirToken } = require('../girassol/tokenManager');
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v16/06 b28';
+const VERSAO     = 'girassol-backup-offline v16/06 b29';
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 
 // ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
@@ -522,6 +522,19 @@ function purgar(man) {
   }
 }
 
+// limpa do histórico os finalizados JÁ sincronizados com +30 dias (não mexe nos pendentes de sync)
+function purgarConferidos() {
+  const conf = readJson(CONFERIDOS_FILE, {});
+  const limite = Date.now() - 30 * 24 * 60 * 60 * 1000;
+  let mudou = false;
+  for (const id of Object.keys(conf)) {
+    const c = conf[id];
+    const t = Date.parse((c && c.conferido_em) || 0) || 0;
+    if (c && c.sincronizado && t && t < limite) { delete conf[id]; mudou = true; }
+  }
+  if (mudou) writeJson(CONFERIDOS_FILE, conf);
+}
+
 async function rodarCiclo(motivo = 'cron', forcar = false) {
   if (rodando) { console.log('[GIRABKP] ciclo já em andamento — pulei'); return ultimoResumo; }
   rodando = true;
@@ -648,6 +661,7 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
     }
 
     purgar(man);
+    purgarConferidos();
     salvarManifest(man);
 
     const ids = Object.keys(man);
@@ -773,13 +787,16 @@ function routes(readBody) {
       }
       if (mexeu) salvarManifest(man);
       const prontos = ids
-        .filter(i => man[i].tem_etiqueta)
-        .map(i => ({ id: i, ...man[i], conferido: conf[i] || null }))
-        .sort((a, b) => Number(b.numero || 0) - Number(a.numero || 0));      json(res, 200, {
+        .filter(i => man[i].tem_etiqueta && !conf[i])                          // SÓ ATENDIDO ainda NÃO finalizado
+        .map(i => ({ id: i, ...man[i] }))
+        .sort((a, b) => Number(a.numero || 0) - Number(b.numero || 0));        // mais ANTIGOS (menor nº) em cima
+      const hoje = new Date().toISOString().slice(0, 10);
+      const finalizadosHoje = Object.values(conf).filter(c => c && String(c.conferido_em || '').slice(0, 10) === hoje).length;
+      json(res, 200, {
         versao: VERSAO,
         prontos: prontos.length,
         sem_etiqueta: ids.filter(i => !man[i].tem_etiqueta).length,
-        conferidos: prontos.filter(p2 => p2.conferido).length,
+        finalizados_hoje: finalizadosHoje,
         pedidos: prontos
       });
       return true;
@@ -789,6 +806,16 @@ function routes(readBody) {
     if (method === 'GET' && p === '/girassol-backup-offline/separacao') {
       const mkt = urlObj.searchParams.get('mkt');
       json(res, 200, montarSeparacao(mkt && mkt !== 'todos' ? mkt : null));
+      return true;
+    }
+
+    // HISTÓRICO — últimos pedidos finalizados (do conferidos.json), mais recentes primeiro
+    if (method === 'GET' && p === '/girassol-backup-offline/historico') {
+      const conf = readJson(CONFERIDOS_FILE, {});
+      const itens = Object.keys(conf).map(id => ({ id, ...conf[id] }))
+        .sort((a, b) => String(b.conferido_em || '').localeCompare(String(a.conferido_em || '')))
+        .slice(0, 80);
+      json(res, 200, { ok: true, total: Object.keys(conf).length, itens });
       return true;
     }
 
@@ -850,8 +877,16 @@ function routes(readBody) {
       const body = await readBody(req);
       const id = String(body.id || '');
       if (!id) { json(res, 400, { erro: 'id obrigatório' }); return true; }
+      const snapC = readJson(path.join(CACHE_DIR, String(id), 'pedido.json'), null);
       const conf = readJson(CONFERIDOS_FILE, {});
-      conf[id] = { user: body.user || '', conferido_em: new Date().toISOString(), sincronizado: false };
+      conf[id] = {
+        user: body.user || '',
+        conferido_em: new Date().toISOString(),
+        sincronizado: false,
+        numero: snapC ? snapC.numero : (body.numero || null),
+        cliente: snapC ? (snapC.cliente || '') : '',
+        marketplace: snapC ? (snapC.marketplace || null) : null
+      };
       writeJson(CONFERIDOS_FILE, conf);            // grava na fila primeiro — nunca perde
 
       // ESPELHO EM TEMPO REAL: se o sync tá ligado e o Bling responde, move p/ VERIFICADO já.
