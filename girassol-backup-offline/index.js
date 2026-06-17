@@ -2,7 +2,7 @@
 
 // ════════════════════════════════════════════════════════════════════════
 //  GIRASSOL · CHECKOUT OFFLINE — FASE 1 (poller) + FASE 2 (bipagem)   (Mover-Pedidos)
-//  girassol-backup-offline v16/06 b34   (a versão real é a const VERSAO abaixo)
+//  girassol-backup-offline v16/06 b35   (a versão real é a const VERSAO abaixo)
 // ════════════════════════════════════════════════════════════════════════
 //  Módulo do orquestrador unificado (HTTP-native, sem Express).
 //  Reaproveita o token Bling da Girassol via ../girassol/tokenManager.
@@ -38,7 +38,7 @@ const { garantirToken } = require('../girassol/tokenManager');
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v16/06 b34';
+const VERSAO     = 'girassol-backup-offline v16/06 b35';
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 
 // ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
@@ -1130,6 +1130,27 @@ function routes(readBody) {
           situacao: o.situacao && o.situacao.id,
           data: o.data
         }))
+      });
+      return true;
+    }
+
+    // DEBUG: dumpa o produto CRU por SKU — vê formato + estrutura/componentes da composição
+    // uso: /girassol-backup-offline/debug-produto/{SKU}
+    if (method === 'GET' && p.startsWith('/girassol-backup-offline/debug-produto/')) {
+      const sku = decodeURIComponent(p.split('/').filter(Boolean).pop() || '');
+      const lista = await blingGet(`/produtos?codigo=${encodeURIComponent(sku)}&limite=1`);
+      const item = lista.data && lista.data.data && lista.data.data[0];
+      let raw = null, detStatus = null;
+      if (item && item.id) { const r = await blingGet(`/produtos/${item.id}`); detStatus = r.status; raw = (r.data && r.data.data) || null; await sleep(PAUSA_MS); }
+      json(res, 200, {
+        sku,
+        da_lista: item ? { id: item.id, formato: item.formato, idProdutoPai: item.idProdutoPai } : null,
+        detalhe_status: detStatus,
+        campos_detalhe: raw ? Object.keys(raw) : null,
+        formato_detalhe: raw && raw.formato,
+        tem_estrutura: !!(raw && raw.estrutura),
+        estrutura: (raw && raw.estrutura) || null,
+        variacao: (raw && raw.variacao) || null
       });
       return true;
     }
