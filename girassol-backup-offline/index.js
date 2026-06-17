@@ -2,7 +2,7 @@
 
 // ════════════════════════════════════════════════════════════════════════
 //  GIRASSOL · CHECKOUT OFFLINE — FASE 1 (poller) + FASE 2 (bipagem)   (Mover-Pedidos)
-//  girassol-backup-offline v16/06 b35   (a versão real é a const VERSAO abaixo)
+//  girassol-backup-offline v16/06 b36   (a versão real é a const VERSAO abaixo)
 // ════════════════════════════════════════════════════════════════════════
 //  Módulo do orquestrador unificado (HTTP-native, sem Express).
 //  Reaproveita o token Bling da Girassol via ../girassol/tokenManager.
@@ -38,7 +38,7 @@ const { garantirToken } = require('../girassol/tokenManager');
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v16/06 b35';
+const VERSAO     = 'girassol-backup-offline v16/06 b36';
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 
 // ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
@@ -57,7 +57,7 @@ const SKU_EAN_FILE  = path.join(CACHE_DIR, 'sku-ean.json');
 const CONFERIDOS_FILE = path.join(CACHE_DIR, 'conferidos.json');
 const KIT_CACHE_FILE  = path.join(CACHE_DIR, 'kit-estrutura.json');  // kits já resolvidos
 const LOC_FILE        = path.join(CACHE_DIR, 'sku-localizacao.json'); // localização (depósito) por SKU
-const SCHEMA = 3;  // versão do snapshot — bump força re-cache dos pedidos antigos
+const SCHEMA = 4;  // versão do snapshot — bump força re-cache dos pedidos antigos (b36: re-explode composições/variações)
 
 // loja → marketplace (mesmo mapa do checkout Girassol)
 const LOJA_MKT = {
@@ -504,11 +504,14 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC) {
 
   const nf = acharNFnaLista(id, nfs || []);
 
-  const conteudoEtiqueta = await baixarEtiqueta(id); await sleep(PAUSA_MS);
-  let temEtiqueta = false;
-  if (conteudoEtiqueta) {
-    fs.writeFileSync(path.join(dir, `etiqueta.${ETIQ_FORMATO.toLowerCase()}`), conteudoEtiqueta);
-    temEtiqueta = true;
+  const _etqPath = path.join(dir, `etiqueta.${ETIQ_FORMATO.toLowerCase()}`);
+  let temEtiqueta = fs.existsSync(_etqPath);   // etiqueta é imutável → se já tem, não re-baixa (re-cache leve)
+  if (!temEtiqueta) {
+    const conteudoEtiqueta = await baixarEtiqueta(id); await sleep(PAUSA_MS);
+    if (conteudoEtiqueta) {
+      fs.writeFileSync(_etqPath, conteudoEtiqueta);
+      temEtiqueta = true;
+    }
   }
 
   const _servico = servicoDoPedido(ped);
