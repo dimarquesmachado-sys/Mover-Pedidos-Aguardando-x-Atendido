@@ -582,7 +582,137 @@ async function rotinaACombinar() {
   }
 }
 
-module.exports = { rotinaACombinar, rotinaLerRespostas, forcarOrder, processarAutoEmissao, recuperarPendentes, HABILITADO, TEXTO };
+module.exports = { rotinaACombinar, rotinaLerRespostas, forcarOrder, processarAutoEmissao, recuperarPendentes, recuperarFalsosProcessados, HABILITADO, TEXTO };
+
+/**
+ * RECUPERAR FALSOS PROCESSADOS — conserta vendas que foram marcadas como
+ * 'processado' NA MAO (botao "✓ Processado" do painel) SEM nunca terem sido
+ * montadas/emitidas. Sintoma: status=processado, bling_editado_em=null,
+ * nf_emitida_em=null, pedido ABERTO no Bling, sem NF. (O botao manual so troca
+ * o status — nao monta nem emite; se clicado por engano, esconde o card e o
+ * pedido fica sem NF pra sempre porque 'processado' eh terminal.)
+ *
+ * Alvo (todas as condicoes): status=processado, bling_editado_em null,
+ *   nf_emitida_em null, IA categoria 'claro', confianca >= LIMIAR, com
+ *   pedido_estruturado valido salvo.
+ *
+ * TRAVA DE SEGURANCA: antes de re-emitir, confirma no Bling que o pedido ainda
+ *   esta ABERTO (situacao NAO concluida e NAO cancelada). Assim nunca tocamos
+ *   num pedido legitimamente finalizado (ex.: alguem que emitiu a NF por fora e
+ *   marcou processado de propria — esse fica concluido no Bling e eh PULADO).
+ *
+ * Reusa processarAutoEmissao (mesma logica/guardas/rateio do fluxo normal); a
+ * idempotencia do code-74 protege caso ja exista NF.
+ *
+ * @param {object} opts { dias = 30 } janela (por msg_inicial_enviada_em)
+ * @returns {object} relatorio por pedido
+ */
+async function recuperarFalsosProcessados({ dias = 30 } = {}) {
+  const lcp = require('./lixasCombinarPendentes');
+  const lixasService = require('../lixas-combinar/lixasService');
+  const bp = require('../lixas-combinar/blingPedidos');
+
+  const SIT_CONCLUIDAS = String(process.env.LIXAS_BLING_SITUACOES_CONCLUIDAS || '9')
+    .split(',').map(s => Number(s.trim())).filter(n => !isNaN(n));
+  const SIT_CANCELADAS = String(process.env.LIXAS_BLING_SITUACOES_CANCELADAS || '12')
+    .split(',').map(s => Number(s.trim())).filter(n => !isNaN(n));
+  const PAUSA_MS = Number(process.env.LIXAS_RECUPERAR_PAUSA_MS) || 1500;
+
+  const out = {
+    ok: true, dias, analisados: 0, candidatos: 0, emitidos: 0,
+    emitidosLista: [], pulados: [], erros: []
+  };
+
+  let lista;
+  try { lista = await lcp.listarPendentes({ dias, status: 'processado', limit: 200 }); }
+  catch (e) { return { ok: false, erro: `listar processado: ${e.message}` }; }
+  const vendas = (lista && lista.ok && Array.isArray(lista.data)) ? lista.data : [];
+  out.analisados = vendas.length;
+
+  for (const v of vendas) {
+    const oid = String(v.order_id);
+    const nome = v.buyer_nome || '';
+
+    // (1) Filtro — so os FALSOS (marcados na mao, sem montar/emitir)
+    if (v.bling_editado_em) continue;                                   // ja montado de verdade
+    if (v.nf_emitida_em) continue;                                      // ja tem NF registrada
+    if (String(v.ia_categoria || '') !== 'claro') continue;            // ambiguo: nao auto
+    if (Number(v.ia_confianca || 0) < LIMIAR_CONFIANCA_AUTO) continue; // confianca baixa: nao auto
+
+    let pedido_estruturado = null;
+    try { pedido_estruturado = v.ia_pedido_estruturado ? JSON.parse(v.ia_pedido_estruturado) : null; } catch (_) {}
+    if (!Array.isArray(pedido_estruturado) || pedido_estruturado.length === 0) continue;
+
+    out.candidatos++;
+
+    // (2) TRAVA — confirma que o pedido ainda esta ABERTO no Bling
+    try {
+      const idBusca = v.pack_id || v.order_id;
+      const dataVenda = v.data_venda ? String(v.data_venda).split('T')[0] : null;
+      let dIni, dFim;
+      if (dataVenda) {
+        const d = new Date(dataVenda);
+        const a = new Date(d); a.setDate(a.getDate() - 3);
+        const b = new Date(d); b.setDate(b.getDate() + 3);
+        dIni = a.toISOString().split('T')[0];
+        dFim = b.toISOString().split('T')[0];
+      }
+      const busca = await bp.buscarPedidoPorOrderId(idBusca, dIni, dFim);
+      if (!busca || !busca.ok) {
+        out.pulados.push({ order_id: oid, nome, motivo: 'nao achei o pedido no Bling — conferir na mao' });
+        continue;
+      }
+      const sit = Number(busca.situacaoId);
+      if (SIT_CONCLUIDAS.includes(sit)) {
+        out.pulados.push({ order_id: oid, nome, motivo: `Bling ja concluido (situacao ${sit}) — conferir se tem NF na mao` });
+        continue;
+      }
+      if (SIT_CANCELADAS.includes(sit)) {
+        out.pulados.push({ order_id: oid, nome, motivo: `Bling cancelado (situacao ${sit}) — ignorado` });
+        continue;
+      }
+    } catch (e) {
+      out.pulados.push({ order_id: oid, nome, motivo: `erro checando Bling: ${e.message}` });
+      continue;
+    }
+
+    // (3) Reconstroi contexto (mesmo padrao do retry) e re-emite montar + NF
+    const iaResult = {
+      categoria: v.ia_categoria || 'claro',
+      confianca: Number(v.ia_confianca || 0),
+      pedido_estruturado,
+      interpretacao: v.ia_interpretacao || null,
+      msg_pra_cliente: v.ia_msg_enviada || null
+    };
+    let graosResult;
+    try { graosResult = await lixasService.getGraosDisponiveisPorSkuACombinar(v.sku_a_combinar); }
+    catch (e) { out.erros.push({ order_id: oid, nome, erro: `estoque: ${e.message}` }); continue; }
+    if (!graosResult || !graosResult.ok) { out.erros.push({ order_id: oid, nome, erro: 'estoque indisponivel no Bling' }); continue; }
+
+    try {
+      const r = await processarAutoEmissao({ venda: v, iaResult, graosResult, lcp });
+      if (r && r.emitida) {
+        out.emitidos++;
+        out.emitidosLista.push({ order_id: oid, nome });
+      } else {
+        // processarAutoEmissao ja gravou o erro e pos em precisa_atencao_humano:
+        // le de volta pra reportar o motivo exato.
+        let motivo = (r && r.motivo) || 'falha — ver painel';
+        try {
+          const re = await lcp.buscar(oid);
+          if (re && re.ok && re.data) motivo = re.data.nf_erro || re.data.bling_erro || motivo;
+        } catch (_) {}
+        out.erros.push({ order_id: oid, nome, erro: motivo });
+      }
+    } catch (e) {
+      out.erros.push({ order_id: oid, nome, erro: e.message });
+    }
+
+    await new Promise(r => setTimeout(r, PAUSA_MS)); // respira: rate limit Bling
+  }
+
+  return out;
+}
 
 /**
  * RECUPERAR PENDENTES — re-registra na tabela lixas_combinar_pendentes todas
