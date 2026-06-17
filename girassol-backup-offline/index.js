@@ -39,7 +39,7 @@ const { gerarDanfeSimplificado, gerarDanfeSimplificadoZPL } = require('./danfe-s
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v17/06 b44';
+const VERSAO     = 'girassol-backup-offline v17/06 b45';
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 
 // ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
@@ -1127,6 +1127,25 @@ function routes(readBody) {
       const r = lerReservas();
       if (r[id]) { delete r[id]; writeJson(RESERVAS_FILE, r); }
       json(res, 200, { ok: true });
+      return true;
+    }
+
+    // REABRIR um pedido finalizado por engano: tira da fila de conferidos → volta pra lista.
+    // Aceita o bling_id OU o número visível. Se já tinha ido pra VERIFICADO, devolve pra ATENDIDO no Bling.
+    if ((method === 'GET' || method === 'POST') && p.startsWith('/girassol-backup-offline/reabrir/')) {
+      const arg = decodeURIComponent(p.split('/').pop() || '');
+      const conf = readJson(CONFERIDOS_FILE, {});
+      const id = conf[arg] ? arg : (Object.keys(conf).find(k => String(conf[k] && conf[k].numero) === String(arg)) || null);
+      if (!id) { json(res, 200, { ok: false, erro: 'pedido não está na fila de finalizados', arg }); return true; }
+      const eraSync = !!(conf[id] && conf[id].sincronizado);
+      delete conf[id];
+      writeJson(CONFERIDOS_FILE, conf);
+      let revertido = false;
+      if (eraSync) { const mv = await moverSituacao(id, SIT_ATENDIDO); revertido = !!(mv && mv.ok); }   // VERIFICADO → volta pra ATENDIDO
+      const rsv = lerReservas(); if (rsv[id]) { delete rsv[id]; writeJson(RESERVAS_FILE, rsv); }
+      rodarCiclo('reabrir').catch(() => {});   // re-cacheia em background → reaparece na lista se estiver ATENDIDO
+      console.log(`[GIRABKP] reaberto ${id} (era sync=${eraSync}, revertido p/ ATENDIDO=${revertido})`);
+      json(res, 200, { ok: true, id, removido_da_fila: true, revertido_p_atendido: revertido });
       return true;
     }
 
