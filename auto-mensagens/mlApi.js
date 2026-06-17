@@ -406,25 +406,68 @@ async function getPrazoPostagem(orderId) {
   }
 
   const s  = r.data || {};
-  const lt = s.lead_time || {};
+  let lt = s.lead_time || {};
 
-  // Campos candidatos mais provaveis pro "ate quando postar":
+  // O lead_time embutido no shipment AS VEZES vem vazio ({}). O endpoint dedicado
+  // /shipments/{id}/lead_time costuma trazer o estimated_handling_limit mesmo assim.
+  if (!lt || Object.keys(lt).length === 0) {
+    const rl = await mlFetch('GET', `/shipments/${shippingId}/lead_time`);
+    out.lead_time_http_status = rl.status;
+    if (rl.ok && rl.data && typeof rl.data === 'object') {
+      lt = rl.data;
+      out.lead_time_via_endpoint_dedicado = true;
+    } else {
+      out.lead_time_erro = typeof rl.data === 'string' ? rl.data.slice(0, 200) : rl.data;
+    }
+  }
+
+  const so  = s.shipping_option || {};
+  const edt = so.estimated_delivery_time || {};
+
+  // Campos candidatos pro "ate quando postar" (handling limit):
   out.candidatos_handling_limit = {
-    'lead_time.estimated_handling_limit.date':      lt?.estimated_handling_limit?.date || null,
-    'lead_time.estimated_delivery_limit.date':      lt?.estimated_delivery_limit?.date || null,
-    'shipping_option.estimated_handling_limit.date': s?.shipping_option?.estimated_handling_limit?.date || null,
+    'lead_time.estimated_handling_limit.date':       lt?.estimated_handling_limit?.date || null,
+    'lead_time.estimated_handling_time.date':        lt?.estimated_handling_time?.date || null,
+    'lead_time.estimated_delivery_limit.date':       lt?.estimated_delivery_limit?.date || null,
+    'shipping_option.estimated_handling_limit.date': so?.estimated_handling_limit?.date || null,
+    'shipping_option.estimated_schedule_limit.date': so?.estimated_schedule_limit?.date || null,
+    'estimated_delivery_time.pay_before':            edt?.pay_before || null,
     'date_first_printed':                            s?.date_first_printed || null
   };
+
+  // Fallback DERIVADO: quando nao ha data explicita de handling, estimamos a partir de
+  // quando o pedido entrou em handling + a janela de handling (em horas).
+  const dateHandling  = s?.status_history?.date_handling || s?.date_created || null;
+  const handlingHoras = Number(edt?.handling) || null;
+  if (dateHandling && handlingHoras) {
+    const base = new Date(dateHandling);
+    if (!isNaN(base.getTime())) {
+      out.handling_limit_DERIVADO = {
+        base_date_handling: dateHandling,
+        handling_horas:     handlingHoras,
+        limite_estimado:    new Date(base.getTime() + handlingHoras * 3600 * 1000).toISOString()
+      };
+    }
+  }
+
   out.shipment_resumo = {
     status:        s.status || null,
     substatus:     s.substatus || null,
     mode:          s.mode || null,
-    logistic_type: s.logistic_type || s?.shipping_option?.shipping_method_type || null,
+    logistic_type: s.logistic_type || so?.shipping_method_type || null,
     date_created:  s.date_created || null,
+    date_handling: dateHandling,
     last_updated:  s.last_updated || null,
-    lead_time:     lt   // objeto inteiro — quase sempre e aqui que mora o prazo
+    lead_time:     lt,   // objeto inteiro (embutido OU do endpoint dedicado)
+    estimated_delivery_limit: so?.estimated_delivery_limit?.date || null,
+    estimated_delivery_time_resumo: {
+      date:       edt?.date || null,
+      handling:   edt?.handling || null,
+      shipping:   edt?.shipping || null,
+      pay_before: edt?.pay_before || null
+    }
   };
-  out.shipment_bruto = s;   // tudo, pra nao perder nada na primeira sonda
+  out.shipment_bruto = s;   // tudo, pra nao perder nada
 
   return out;
 }
