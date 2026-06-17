@@ -63,6 +63,21 @@ function wrap(texto, maxChars) {
   return linhas;
 }
 
+// igual ao wrap, mas a 1ª linha usa largura menor (deixa espaço pro valor à direita) e as demais a largura cheia
+function wrapItem(texto, larguraCheia, largura1a) {
+  const palavras = String(texto || '').split(/\s+/);
+  const linhas = []; let atual = '';
+  const lim = () => (linhas.length === 0 ? largura1a : larguraCheia);
+  for (const p of palavras) {
+    if (!atual) { atual = p; }
+    else if ((atual + ' ' + p).length <= lim()) { atual += ' ' + p; }
+    else { linhas.push(atual); atual = p; }
+    while (atual.length > lim()) { linhas.push(atual.slice(0, lim())); atual = atual.slice(lim()); }
+  }
+  if (atual) linhas.push(atual);
+  return linhas;
+}
+
 // ─── gera o PDF (Buffer) ───
 // dados = { emitente:{razao,cnpj,ie,endereco}, chave, protocolo, dataProtocolo, tipo, numero, serie,
 //           dataEmissao, itens:[{codigo,descricao,qtd,valorUnit,valorTotal,detalhe}], qtdTotal,
@@ -75,7 +90,8 @@ async function gerarDanfeSimplificado(dados) {
   const font = await pdf.embedFont(StandardFonts.Courier);
   const fontB = await pdf.embedFont(StandardFonts.CourierBold);
   const preto = rgb(0, 0, 0);
-  const CPL = Math.floor(cw / 5.0);
+  const charW = font.widthOfTextAtSize('0', 6.5);   // largura real de 1 caractere (Courier é monoespaçada)
+  const CPL = Math.floor(cw / charW) - 1;            // chars na largura cheia (com folga de 1)
 
   let page, y;
   const txt = (s, opt = {}) => {
@@ -103,7 +119,7 @@ async function gerarDanfeSimplificado(dados) {
   novaPagina(false);
   txt(dados.emitente.razao, { size: 7, bold: true }); nl(8);
   txt('CNPJ: ' + fmtCpfCnpj(dados.emitente.cnpj) + '   IE: ' + fmtIE(dados.emitente.ie), { size: 6.5 }); nl(8);
-  for (const l of wrap(dados.emitente.endereco, CPL + 4)) { txt(l, { size: 6.5 }); nl(8); }
+  for (const l of wrap(dados.emitente.endereco, CPL)) { txt(l, { size: 6.5 }); nl(8); }
   nl(2);
   desenharCode128(page, ML + 8, y - 26, cw - 16, 26, onlyDigits(dados.chave));
   y -= 30;
@@ -119,11 +135,12 @@ async function gerarDanfeSimplificado(dados) {
   txt('VL. ITEM', { size: 6.5, bold: true, right: true }); nl(9);
   for (const it of (dados.itens || [])) {
     const desc = (it.codigo ? it.codigo + ' - ' : '') + (it.descricao || '');
-    const linhasDesc = wrap(desc, CPL - 8);
+    const valTxt = fmtMoeda(it.valorTotal != null ? it.valorTotal : it.valorUnit);
+    const linhasDesc = wrapItem(desc, CPL, CPL - (valTxt.length + 2));   // 1ª linha deixa espaço pro valor
     const altura = 8 + Math.max(0, linhasDesc.length - 1) * 7 + (it.detalhe ? 7 : 0) + 1;
     espaco(altura + 4);
     txt(linhasDesc[0] || '', { size: 6.5 });
-    txt(fmtMoeda(it.valorTotal != null ? it.valorTotal : it.valorUnit), { size: 6.5, right: true }); nl(8);
+    txt(valTxt, { size: 6.5, right: true }); nl(8);
     for (let i = 1; i < linhasDesc.length; i++) { txt(linhasDesc[i], { size: 6.5 }); nl(7); }
     if (it.detalhe) { txt('  ' + it.detalhe, { size: 6 }); nl(7); }
     nl(1);
