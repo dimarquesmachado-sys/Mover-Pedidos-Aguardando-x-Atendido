@@ -202,9 +202,46 @@ function routes(readBody) {
       return true;
     }
 
-    // Debug NOVO Sessao 3: testa a funcao consultarConversa do mlApi
-    // GET /auto-mensagens/debug/consultar/:packId
-    // SONDA (read-only): GET /auto-mensagens/debug/prazo/:orderId
+    // DIAGNOSTICO (read-only): GET /auto-mensagens/debug/diag
+    // Mostra os flags no RUNTIME + os pedidos presos em 'cliente_confirmou_pedido'
+    // com os campos que a repesca checa. Nao altera/emite nada. Serve pra saber por
+    // que os presos nao estao sendo emitidos: flag off? guarda falhando?
+    if (method === 'GET' && p === '/auto-mensagens/debug/diag') {
+      try {
+        const lcp = require('./lixasCombinarPendentes');
+        const rawAuto = process.env.LIXAS_AUTO_EMITIR_NF_HABILITADO;
+        const confirmou = await lcp.listarPendentes({ dias: 7, status: 'cliente_confirmou_pedido', limit: 50 });
+        const orders = ((confirmou && confirmou.data) || []).map(v => ({
+          order_id: v.order_id,
+          buyer: v.buyer_nome || v.buyer_id || null,
+          status: v.status,
+          ia_categoria: v.ia_categoria || null,
+          ia_confianca: v.ia_confianca,
+          tem_estruturado: !!v.ia_pedido_estruturado,
+          bling_editado_em: v.bling_editado_em || null,
+          bling_pedido_id: v.bling_pedido_id || null,
+          nf_emitida_em: v.nf_emitida_em || null,
+          sku: v.sku_a_combinar || null,
+          data_venda: v.data_venda || null,
+          ia_processado_em: v.ia_processado_em || null
+        }));
+        json(res, 200, {
+          ok: true,
+          flags: {
+            AUTO_EMITIR_HABILITADO: String(rawAuto || 'false').toLowerCase() === 'true',
+            raw_AUTO_EMITIR: JSON.stringify(rawAuto), // aspas revelam espaco sobrando, ex "true "
+            LIMIAR_CONFIANCA_AUTO: Number(process.env.LIXAS_AUTO_CONFIANCA_MIN || 95),
+            AUTO_MAX_POR_DIA: Number(process.env.LIXAS_AUTO_MAX_POR_DIA || 999),
+            raw_REPESCA_DIAS: JSON.stringify(process.env.LIXAS_REPESCA_CONFIRMOU_DIAS)
+          },
+          confirmou_pedido_count: orders.length,
+          confirmou_pedido: orders
+        });
+      } catch (e) {
+        json(res, 500, { ok: false, erro: e.message });
+      }
+      return true;
+    }
     // Mostra o prazo-limite de POSTAGEM real do ML (handling limit) pra travarmos
     // o nome exato do campo antes de construir a escada. Nao altera/envia/emite nada.
     if (method === 'GET' && p.startsWith('/auto-mensagens/debug/prazo/')) {
