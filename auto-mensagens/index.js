@@ -314,6 +314,45 @@ function routes(readBody) {
       return true;
     }
 
+    // DEBUG (read-only): GET /auto-mensagens/debug/conversa/:orderId
+    // Resolve o pack_id certo (pela tabela) e despeja a estrutura das mensagens do
+    // ML, destacando message_date (campo real da data) vs date_created (que NAO
+    // existe). Serve pra confirmar que o helper _tsMensagemML le a data certa.
+    if (method === 'GET' && p.startsWith('/auto-mensagens/debug/conversa/')) {
+      try {
+        const orderId = p.replace('/auto-mensagens/debug/conversa/', '');
+        const lcp = require('./lixasCombinarPendentes');
+        const ml = require('./mlApi');
+        const re = await lcp.buscar(orderId).catch(() => null);
+        const v = (re && re.ok && re.data) ? re.data : null;
+        const packId = (v && v.pack_id) ? v.pack_id : orderId;
+        const conv = await ml.consultarConversa({ packId, orderId, markAsRead: false });
+        if (!conv || !conv.ok) {
+          json(res, 200, { ok: false, order_id: orderId, packId_usado: packId, pack_id_tabela: v ? v.pack_id : null, conv });
+          return true;
+        }
+        const amostra = (conv.messages || []).slice(-6).map(m => ({
+          from: String(m.from?.user_id || m.from_user_id || ''),
+          text: String(m.text || m.message || '').slice(0, 35),
+          message_date: m.message_date || null,       // <- campo real da data
+          date_created_top: m.date_created || null,    // <- deve vir null (nao existe)
+          keys: Object.keys(m)
+        }));
+        json(res, 200, {
+          ok: true, order_id: orderId, packId_usado: packId, pack_id_tabela: v ? v.pack_id : null,
+          totalCliente: conv.totalCliente, totalLoja: conv.totalLoja,
+          ultima_resposta_em_tabela: v ? v.ultima_resposta_em : null,
+          ia_processado_em_tabela: v ? v.ia_processado_em : null,
+          ultimaCliente_message_date: conv.ultimaCliente ? (conv.ultimaCliente.message_date || null) : null,
+          ultimaCliente_date_created_top: conv.ultimaCliente ? (conv.ultimaCliente.date_created || null) : null,
+          amostra
+        });
+      } catch (e) {
+        json(res, 500, { ok: false, erro: e.message });
+      }
+      return true;
+    }
+
     // DIAGNOSTICO (read-only): GET /auto-mensagens/debug/diag
     // Mostra os flags no RUNTIME + os pedidos presos em 'cliente_confirmou_pedido'
     // com os campos que a repesca checa. Nao altera/emite nada. Serve pra saber por
