@@ -2,7 +2,7 @@
 
 // ════════════════════════════════════════════════════════════════════════
 //  GIRASSOL · CHECKOUT OFFLINE — FASE 1 (poller) + FASE 2 (bipagem)   (Mover-Pedidos)
-//  girassol-backup-offline v16/06 b31   (a versão real é a const VERSAO abaixo)
+//  girassol-backup-offline v16/06 b32   (a versão real é a const VERSAO abaixo)
 // ════════════════════════════════════════════════════════════════════════
 //  Módulo do orquestrador unificado (HTTP-native, sem Express).
 //  Reaproveita o token Bling da Girassol via ../girassol/tokenManager.
@@ -38,7 +38,7 @@ const { garantirToken } = require('../girassol/tokenManager');
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v16/06 b31';
+const VERSAO     = 'girassol-backup-offline v16/06 b32';
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 
 // ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
@@ -939,6 +939,43 @@ function routes(readBody) {
       }
       if (pdf) { res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': 'inline; filename="etiqueta.pdf"' }); res.end(pdf); }
       else json(res, 404, { erro: 'etiqueta PDF indisponível' });
+      return true;
+    }
+
+    // IMPRESSÃO A4: etiqueta + NF (DANFE) MESCLADAS num PDF só — evita o navegador bloquear a 2ª aba
+    if (method === 'GET' && p.startsWith('/girassol-backup-offline/imprimir/')) {
+      const id = p.split('/').filter(Boolean).pop();
+      const dir = path.join(CACHE_DIR, String(id));
+      // etiqueta em PDF (ML cacheada; não-ML via Labelary on-demand)
+      let etqBuf = null;
+      try { etqBuf = fs.readFileSync(path.join(dir, 'etiqueta.pdf')); } catch (e) {}
+      if (!etqBuf) { etqBuf = await etiquetaPdf(id, dir); if (etqBuf) { try { ensureDir(dir); fs.writeFileSync(path.join(dir, 'etiqueta.pdf'), etqBuf); } catch (e) {} } }
+      // NF (DANFE) em PDF (cacheada ou baixa do Bling)
+      let nfBuf = null;
+      try { nfBuf = fs.readFileSync(path.join(dir, 'danfe.pdf')); } catch (e) {}
+      if (!nfBuf) {
+        const snap = readJson(path.join(dir, 'pedido.json'), null);
+        if (snap && snap.nf && snap.nf.id) { nfBuf = await baixarDanfe(snap.nf.id); if (nfBuf) { try { fs.writeFileSync(path.join(dir, 'danfe.pdf'), nfBuf); } catch (e) {} } }
+      }
+      const partes = [etqBuf, nfBuf].filter(Boolean);
+      if (!partes.length) { json(res, 404, { erro: 'sem etiqueta nem NF' }); return true; }
+      try {
+        const { PDFDocument } = require('pdf-lib');
+        const out = await PDFDocument.create();
+        for (const buf of partes) {
+          try {
+            const src = await PDFDocument.load(buf);
+            const pgs = await out.copyPages(src, src.getPageIndices());
+            pgs.forEach(pg => out.addPage(pg));
+          } catch (e) { /* pula PDF inválido, segue com os outros */ }
+        }
+        const merged = Buffer.from(await out.save());
+        res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': 'inline; filename="etiqueta-nf.pdf"' });
+        res.end(merged);
+      } catch (e) { // pdf-lib indisponível → fallback: devolve só a etiqueta
+        if (etqBuf) { res.writeHead(200, { 'Content-Type': 'application/pdf' }); res.end(etqBuf); }
+        else json(res, 500, { erro: 'merge falhou: ' + e.message });
+      }
       return true;
     }
 
