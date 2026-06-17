@@ -55,6 +55,9 @@
   .scard:hover{border-color:#3a4657}
   .scard.sel{border-color:var(--ac);background:#16202e}
   .scard.done{opacity:.5}
+  .scard.resv{border-color:#b06a16;background:#241a0e}
+  .scard.resv:hover{background:#2d2010}
+  .resvtag{margin-left:auto;color:#f0a23a;font-size:11px;font-weight:700;white-space:nowrap}
   .scl1{display:flex;align-items:center;gap:8px}
   .badge{font-size:10px;font-weight:700;padding:2px 7px;border-radius:5px;color:#0b0d12;text-transform:uppercase}
   .num{font-size:18px;font-weight:700}
@@ -222,7 +225,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b43';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b44';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#ff9900'}, magalu:{n:'Magalu',c:'#0086ff'}, outro:{n:'Outro',c:'#94a3b8'}
@@ -374,6 +377,13 @@ function trocarModo(){
 
 // ── API ──
 const api = (u,opt) => fetch(u,opt).then(r=>r.json());
+// ── presença/reserva entre PCs ──
+function opAtual(){ return ((opIn && opIn.value) || localStorage.getItem('gbkp_op') || '').trim(); }
+function postJson(path, obj){ return api(path, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(obj)}); }
+let hbTimer = null;
+function iniciarHeartbeat(id){ pararHeartbeat(); hbTimer = setInterval(()=>{ postJson('/girassol-backup-offline/reservar', {id, user:opAtual()}).catch(()=>{}); }, 120000); }
+function pararHeartbeat(){ if(hbTimer){ clearInterval(hbTimer); hbTimer=null; } }
+function liberarReserva(id){ if(id) postJson('/girassol-backup-offline/liberar', {id}).catch(()=>{}); }
 
 async function carregarLista(){
   try{
@@ -478,11 +488,14 @@ function renderLista(){
   if(!lista.length){ box.innerHTML = cnt+'<div class="empty">nada encontrado p/ "'+esc(filtroBusca)+'"</div>'; return; }
   box.innerHTML = cnt + lista.map(p=>{
     const m = MKT[p.marketplace]||MKT.outro;
-    const cls = (p.conferido?'done ':'') + (String(p.id)===selId?'sel':'');
+    const opMe = opAtual();
+    const resvOutro = (p.reservado_por && p.reservado_por!==opMe) ? p.reservado_por : '';
+    const cls = (p.conferido?'done ':'') + (resvOutro?'resv ':'') + (String(p.id)===selId?'sel':'');
     return '<div class="scard '+cls+'" onclick="selecionar(\''+p.id+'\')">'+
       '<div class="scl1">'+
         '<span class="badge" style="background:'+m.c+'">'+m.n+'</span>'+
         '<span class="num">'+esc(p.numero)+'</span>'+
+        (resvOutro?'<span class="resvtag">🟠 '+esc(resvOutro)+'</span>':'')+
         (p.conferido?'<span class="donetag">✓</span>':'')+
       '</div>'+
       (p.cliente?'<div class="scli">'+esc(p.cliente)+'</div>':'')+
@@ -506,13 +519,30 @@ async function reimprimir(id){
 // ── detalhe / bipagem (centro) ──
 async function selecionar(id){
   try{
+    // trocou de pedido? solta a reserva do anterior
+    if(pedidoAtual && String(pedidoAtual.bling_id)!==String(id)){ liberarReserva(pedidoAtual.bling_id); pararHeartbeat(); }
     const ped = await api('/girassol-backup-offline/pedido/'+id);
     if(ped.erro){ toast(ped.erro); return; }
+    // MINI-CONFERÊNCIA: já finalizado em outro PC? tira da tela e nem abre.
+    if(ped.conferido){
+      toast('✓ '+(ped.numero||id)+' já finalizado'+(ped.conferido.user?' por '+ped.conferido.user:'')+' — saiu da lista');
+      listaCache = listaCache.filter(x=>String(x.id)!==String(id));
+      pedidoAtual=null; renderLista(); return;
+    }
+    // RESERVA: marca esse operador como dono (presença entre PCs)
+    const op = opAtual();
+    let rv = await postJson('/girassol-backup-offline/reservar', {id, user:op});
+    if(rv && rv.ok===false && rv.reservado_por){
+      const mins = rv.em ? Math.max(0, Math.round((Date.now()-Date.parse(rv.em))/60000)) : 0;
+      if(!confirm('⚠️ '+rv.reservado_por+' está separando esse pedido'+(mins?' há '+mins+' min':'')+'.\n\nAssumir mesmo assim?')){ carregarLista(); return; }
+      rv = await postJson('/girassol-backup-offline/reservar', {id, user:op, forcar:true});
+    }
     prepararPedido(ped);
     pedidoAtual = ped;
     zplAtual = await fetch('/girassol-backup-offline/etiqueta/'+id).then(r=>r.text());
     renderDetail();
     renderLista(); // atualiza highlight
+    iniciarHeartbeat(id);
   }catch(e){ toast('Erro: '+e.message); }
 }
 
@@ -649,6 +679,8 @@ function imprimirSimpAtual(){
 
 // volta pra lista SEM finalizar (não marca conferido)
 function voltarLista(){
+  if(pedidoAtual){ liberarReserva(pedidoAtual.bling_id); }
+  pararHeartbeat();
   pedidoAtual=null; zplAtual=null;
   $('detail').innerHTML='<div class="placeholder">← selecione um pedido à esquerda</div>';
   renderLista();
@@ -713,13 +745,12 @@ async function reimprimirModal(){
 }
 async function confirmarFinalizar(){
   try{
-    const r = await api('/girassol-backup-offline/conferido', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ id: pedidoAtual.bling_id, user: opIn.value })
-    });
-    if(r && r.sincronizado)      toast('✓ '+pedidoAtual.numero+' finalizado → VERIFICADO');
+    const r = await postJson('/girassol-backup-offline/conferido', { id: pedidoAtual.bling_id, user: opAtual() });
+    if(r && r.ja_finalizado)      toast('⚠️ '+pedidoAtual.numero+' já tinha sido finalizado'+(r.por?' por '+r.por:'')+' — não refeito');
+    else if(r && r.sincronizado)  toast('✓ '+pedidoAtual.numero+' finalizado → VERIFICADO');
     else if(r && r.bling_offline) toast('✓ '+pedidoAtual.numero+' finalizado · Bling offline, sincroniza ao voltar');
     else                          toast('✓ '+pedidoAtual.numero+' finalizado');
+    pararHeartbeat();
     fecharConfirmacao();
     pedidoAtual=null; zplAtual=null;
     $('detail').innerHTML='<div class="placeholder">← selecione um pedido à esquerda</div>';
@@ -843,7 +874,7 @@ document.addEventListener('keydown', e=>{ if((e.ctrlKey||e.metaKey) && (e.key===
 (async function(){ await setupQZ(); reconectarQZ(); })();
 aplicarModoLabel();
 carregarLista();
-setInterval(()=>{ if(!pedidoAtual) carregarLista(); }, 60000);
+setInterval(()=>{ if(!pedidoAtual) carregarLista(); }, 20000);
 </script>
 </body>
 </html>
