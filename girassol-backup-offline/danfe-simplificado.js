@@ -171,4 +171,108 @@ async function gerarDanfeSimplificado(dados) {
   return Buffer.from(bytes);
 }
 
-module.exports = { gerarDanfeSimplificado, code128c };
+// ═══ DANFE simplificado em ZPL NATIVO (texto + ^BC) p/ Zebra 8 dots/mm (203dpi) ═══
+//  Mesmo conteúdo do PDF, mas em comandos ZPL → imprime CRU (igual a etiqueta), instantâneo.
+//  Coordenadas em dots: etiqueta 10x15cm = 800 x 1200 dots.
+function gerarDanfeSimplificadoZPL(dados) {
+  const W = 800, ML = 16, MR = 16, BOT = 1150;   // dots; BOT = limite antes de quebrar p/ nova etiqueta
+  const cw = W - ML - MR;                          // 768
+  const z = [];
+  let y = 16;
+
+  const esc = (s) => String(s == null ? '' : s).replace(/\\/g, ' ').replace(/\^/g, ' ').replace(/~/g, '-');
+  const cpl = (h) => Math.max(8, Math.floor(cw / (h * 0.60)));   // chars/linha p/ altura h (conservador, fonte proporcional)
+
+  // texto numa linha (just: L/C/R) — já pré-quebrado, não deve estourar a largura
+  function lin(s, h, just) {
+    h = h || 22; just = just || 'L';
+    z.push('^FO' + ML + ',' + y + '^A0N,' + h + ',' + h + '^FB' + cw + ',1,0,' + just + ',0^FD' + esc(s) + '^FS');
+  }
+  // esquerda + direita na MESMA linha (esq. encostada à esquerda, dir. à direita)
+  function linLR(sL, sR, h) {
+    h = h || 22;
+    z.push('^FO' + ML + ',' + y + '^A0N,' + h + ',' + h + '^FD' + esc(sL) + '^FS');
+    z.push('^FO' + ML + ',' + y + '^A0N,' + h + ',' + h + '^FB' + cw + ',1,0,R,0^FD' + esc(sR) + '^FS');
+  }
+  const nl = (g) => { y += (g || 28); };
+  function hr() { y += 4; z.push('^FO' + ML + ',' + y + '^GB' + cw + ',2,2^FS'); y += 12; }
+
+  function abrir(cont) {
+    z.push('^XA', '^CI28', '^PW' + W, '^LH0,0', '^LT0');
+    y = 16;
+    lin('DANFE Simplificado' + (cont ? ' (cont.)' : ''), 30, 'C'); nl(38);
+    if (cont) { lin('NFe ' + dados.numero + '   Serie ' + (dados.serie || '1'), 20, 'C'); nl(26); hr(); }
+  }
+  function fechar() { z.push('^XZ'); }
+  function espaco(h) { if (y + h > BOT) { fechar(); abrir(true); } }   // sem espaço → fecha e abre nova etiqueta
+
+  // bloco multi-linha (quebra por palavra) — avança y por linha, paginando se precisar
+  function bloco(s, h, just) {
+    h = h || 20; just = just || 'L';
+    for (const ln of wrap(s, cpl(h))) { espaco(h + 8); lin(ln, h, just); nl(h + 8); }
+  }
+
+  // ─── PÁGINA 1: emitente + chave + protocolo ───
+  abrir(false);
+  lin(dados.emitente.razao, 26, 'L'); nl(34);
+  lin('CNPJ ' + fmtCpfCnpj(dados.emitente.cnpj) + '   IE ' + fmtIE(dados.emitente.ie), 20, 'L'); nl(28);
+  bloco(dados.emitente.endereco, 20, 'L');
+  nl(8);
+
+  // código de barras Code128 da chave (centralizado)
+  const chaveDig = onlyDigits(dados.chave);
+  if (chaveDig.length >= 2) {
+    const byW = 2;
+    const nPares = Math.ceil(chaveDig.length / 2);
+    const modulos = 11 * (nPares + 2) + 13;        // start + dados + check (11 cada) + stop (13)
+    const bcW = modulos * byW;
+    const bcX = Math.max(ML, Math.round(ML + (cw - bcW) / 2));
+    espaco(130);
+    z.push('^FO' + bcX + ',' + y + '^BY' + byW + '^BCN,90,N,N,N,A^FD' + chaveDig + '^FS');
+    y += 98;
+    lin(fmtChave(dados.chave), 18, 'C'); nl(26);
+  }
+  hr();
+  if (dados.protocolo) { lin('Protocolo ' + dados.protocolo + '  ' + fmtData(dados.dataProtocolo), 18, 'C'); nl(24); }
+  lin('TIPO ' + (String(dados.tipo) === '0' ? '0-Entrada' : '1-Saida') + '   NFe ' + dados.numero + '   Serie ' + (dados.serie || '1'), 18, 'C'); nl(24);
+  lin('Emissao ' + fmtData(dados.dataEmissao), 18, 'C'); nl(22);
+  hr();
+
+  // ─── ITENS ───
+  linLR('ITEM', 'VL. ITEM', 20); nl(28);
+  for (const it of (dados.itens || [])) {
+    const desc = (it.codigo ? it.codigo + ' - ' : '') + (it.descricao || '');
+    const valTxt = fmtMoeda(it.valorTotal != null ? it.valorTotal : it.valorUnit);
+    const linhas = wrapItem(desc, cpl(20), cpl(20) - (valTxt.length + 2));   // 1ª linha deixa espaço pro valor
+    espaco(64);
+    // 1ª linha: descrição (1º trecho) + valor à direita
+    z.push('^FO' + ML + ',' + y + '^A0N,20,20^FD' + esc(linhas[0] || '') + '^FS');
+    z.push('^FO' + ML + ',' + y + '^A0N,20,20^FB' + cw + ',1,0,R,0^FD' + esc(valTxt) + '^FS');
+    nl(26);
+    for (let i = 1; i < linhas.length; i++) { espaco(26); lin(linhas[i], 20, 'L'); nl(26); }
+    if (it.detalhe) { espaco(24); lin('  ' + it.detalhe, 18, 'L'); nl(24); }
+    nl(4);
+  }
+
+  // ─── bloco final (QTD + consumidor + info) ───
+  espaco(70); hr();
+  linLR('QTD. TOTAL DE ITENS', String(dados.qtdTotal != null ? dados.qtdTotal : (dados.itens || []).length), 20); nl(28);
+  hr();
+  lin('CONSUMIDOR', 24, 'C'); nl(32);
+  if (dados.consumidor) {
+    const nome = (dados.consumidor.nome || '').replace(/\s*\([^)]*\)\s*$/, '');   // tira "(nick do marketplace)"
+    const doc = dados.consumidor.doc ? fmtCpfCnpj(dados.consumidor.doc) + '  ' : '';
+    bloco(doc + nome, 20, 'L');
+    bloco(dados.consumidor.endereco, 18, 'L');
+  }
+  hr();
+  lin('INFORMACOES ADICIONAIS', 20, 'C'); nl(26);
+  if (dados.numeroPedido) { espaco(24); lin('Numero do Pedido: ' + dados.numeroPedido, 18, 'L'); nl(24); }
+  if (dados.tributos) bloco(dados.tributos, 17, 'L');
+  if (dados.numeroPedidoLoja) { espaco(24); lin('NF Pedido Loja: ' + dados.numeroPedidoLoja, 18, 'L'); nl(24); }
+
+  fechar();
+  return z.join('\n');
+}
+
+module.exports = { gerarDanfeSimplificado, gerarDanfeSimplificadoZPL, code128c };
