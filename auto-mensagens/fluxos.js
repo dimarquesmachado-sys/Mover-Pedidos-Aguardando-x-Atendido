@@ -326,14 +326,16 @@ async function revisarAtencaoHumana({ lcp }) {
             continue;
           }
 
-          // Situacao 9 mas SEM NF: NAO fecha. Se o pedido esta claro+estruturado e
-          // a auto-emissao esta ligada, manda pra 'cliente_confirmou_pedido' (a
-          // repesca monta+emite sozinha). Senao, deixa em atencao humana (visivel
-          // no painel pra montar na mao). Em ambos os casos, registra o pedido Bling.
+          // Situacao 9 mas SEM NF: NAO fecha. Se o pedido esta claro+estruturado, a
+          // auto-emissao esta ligada, e NAO falhou antes (sem bling_erro), manda pra
+          // 'cliente_confirmou_pedido' (a repesca monta+emite sozinha). Se ja tem
+          // bling_erro (ex.: grao indisponivel — falha PERMANENTE), NAO re-roteia: isso
+          // criaria loop (humano<->confirmou). Deixa em atencao humana pro painel resolver.
           const claroEstrut = String(venda.ia_categoria || '') === 'claro'
             && !!venda.ia_pedido_estruturado
             && Number(venda.ia_confianca || 0) >= LIMIAR_CONFIANCA_AUTO
-            && !venda.bling_editado_em;
+            && !venda.bling_editado_em
+            && !venda.bling_erro;
           if (claroEstrut && AUTO_EMITIR_HABILITADO) {
             await lcp.atualizarVenda(venda.order_id, {
               status: 'cliente_confirmou_pedido', bling_pedido_id: String(busca.pedidoId)
@@ -341,7 +343,7 @@ async function revisarAtencaoHumana({ lcp }) {
             console.log(`[revisar] order ${venda.order_id} situacao ${sit} SEM NF — claro/estruturado, mandado p/ auto-emissao (repesca)`);
           } else {
             await lcp.atualizarVenda(venda.order_id, { bling_pedido_id: String(busca.pedidoId) });
-            console.log(`[revisar] order ${venda.order_id} situacao ${sit} SEM NF — mantido p/ revisao humana (painel)`);
+            console.log(`[revisar] order ${venda.order_id} situacao ${sit} SEM NF (erro=${venda.bling_erro || 'nenhum'}) — mantido p/ revisao humana (painel)`);
           }
           continue;
         }
