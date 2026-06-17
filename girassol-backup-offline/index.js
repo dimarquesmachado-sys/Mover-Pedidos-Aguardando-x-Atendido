@@ -2,7 +2,7 @@
 
 // ════════════════════════════════════════════════════════════════════════
 //  GIRASSOL · CHECKOUT OFFLINE — FASE 1 (poller) + FASE 2 (bipagem)   (Mover-Pedidos)
-//  girassol-backup-offline v16/06 b40   (a versão real é a const VERSAO abaixo)
+//  girassol-backup-offline v17/06 b41   (a versão real é a const VERSAO abaixo)
 // ════════════════════════════════════════════════════════════════════════
 //  Módulo do orquestrador unificado (HTTP-native, sem Express).
 //  Reaproveita o token Bling da Girassol via ../girassol/tokenManager.
@@ -39,7 +39,7 @@ const { gerarDanfeSimplificado } = require('./danfe-simplificado');
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v16/06 b40';
+const VERSAO     = 'girassol-backup-offline v17/06 b41';
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 
 // ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
@@ -727,6 +727,22 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
     if (danfesNovos || danfesReparo) salvarManifest(man);
     console.log(`[GIRABKP] DANFE: ${danfesNovos} novos, ${danfesReparo} reparados, ${danfesFalha} falha, ${danfesSemId} sem nf.id`);
 
+    // passo: cacheia os DADOS do DANFE SIMPLIFICADO (p/ imprimir 10x15 na Zebra OFFLINE)
+    //        guarda o parsed (nf-simp.json) — o PDF é gerado na hora pela rota /danfe-simp
+    let simpNovos = 0, simpFalha = 0, simpSemId = 0;
+    for (const ped of atendidos) {
+      const dir = path.join(CACHE_DIR, String(ped.id));
+      if (fs.existsSync(path.join(dir, 'nf-simp.json'))) continue;   // já tem
+      const snap = readJson(path.join(dir, 'pedido.json'), null);
+      if (!snap || !snap.nf || !snap.nf.id) { simpSemId++; continue; }
+      try {
+        const ds = await dadosNFSimp(snap.nf.id, snap.numero); await sleep(PAUSA_MS);
+        if (ds) { writeJson(path.join(dir, 'nf-simp.json'), ds); simpNovos++; }
+        else simpFalha++;
+      } catch (e) { simpFalha++; }
+    }
+    console.log(`[GIRABKP] DANFE-simp: ${simpNovos} novos, ${simpFalha} falha, ${simpSemId} sem nf.id`);
+
     // passo: baixa a ETIQUETA em PDF (p/ modo A4 / fallback Zebra) — só de quem já tem ZPL
     let etqPdfNovos = 0;
     const extEtq = ETIQ_FORMATO.toLowerCase();
@@ -1362,6 +1378,37 @@ function routes(readBody) {
       catch (e) { json(res, 502, { erro: 'falha ao montar dados', detalhe: e.message }); return true; }
       if (!dados) { json(res, 502, { erro: 'NF não retornou dados' }); return true; }
       if (/[?&]json=1/.test(urlObj.search || '')) { json(res, 200, dados); return true; }
+      try {
+        const pdf = await gerarDanfeSimplificado(dados);
+        res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': 'inline; filename="danfe-simplificado.pdf"' });
+        res.end(pdf);
+      } catch (e) { json(res, 500, { erro: 'falha ao gerar PDF', detalhe: e.message }); }
+      return true;
+    }
+
+    // PRODUÇÃO: gera/serve o DANFE SIMPLIFICADO (10x15) p/ imprimir na Zebra.
+    //   cache-first (nf-simp.json gravado pelo cron → funciona OFFLINE);
+    //   se não tiver no cache, busca ao vivo e cacheia.
+    // uso: /girassol-backup-offline/danfe-simp/{idOuNumero}
+    if (method === 'GET' && p.startsWith('/girassol-backup-offline/danfe-simp/')) {
+      const pedidoId = p.split('/').filter(Boolean).pop();
+      let dir = path.join(CACHE_DIR, String(pedidoId));
+      let snap = readJson(path.join(dir, 'pedido.json'), null);
+      if (!snap) {  // talvez seja o NÚMERO do pedido (o que aparece na tela)
+        const man = manifest();
+        const achado = Object.keys(man).find(k => String(man[k].numero) === String(pedidoId));
+        if (achado) { dir = path.join(CACHE_DIR, String(achado)); snap = readJson(path.join(dir, 'pedido.json'), null); }
+      }
+      if (!snap || !snap.nf || !snap.nf.id) { json(res, 404, { erro: 'pedido sem NF cacheada', pedido: pedidoId }); return true; }
+      // 1) cache
+      let dados = readJson(path.join(dir, 'nf-simp.json'), null);
+      // 2) fallback ao vivo (e cacheia p/ as próximas)
+      if (!dados) {
+        try { dados = await dadosNFSimp(snap.nf.id, snap.numero); }
+        catch (e) { json(res, 502, { erro: 'falha ao montar dados', detalhe: e.message }); return true; }
+        if (dados) { try { writeJson(path.join(dir, 'nf-simp.json'), dados); } catch (e) {} }
+      }
+      if (!dados) { json(res, 502, { erro: 'NF não retornou dados' }); return true; }
       try {
         const pdf = await gerarDanfeSimplificado(dados);
         res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': 'inline; filename="danfe-simplificado.pdf"' });
