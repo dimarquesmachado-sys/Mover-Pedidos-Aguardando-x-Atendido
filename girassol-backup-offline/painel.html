@@ -27,9 +27,9 @@
 
   /* layout 2 colunas */
   .main{flex:1 1 auto;display:flex;min-height:0}
-  .sidebar{width:340px;flex:0 0 340px;border-right:1px solid var(--line);overflow-y:auto;padding:10px;background:#12161e}
+  .sidebar{width:410px;flex:0 0 410px;border-right:1px solid var(--line);overflow-y:auto;padding:10px;background:#12161e}
   .detail{flex:1 1 auto;overflow-y:auto;padding:18px 22px}
-  .sbtools{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px}
+  .sbtools{display:flex;flex-wrap:wrap;gap:8px}
   #modoBtn.on{border-color:var(--ac);color:var(--ac)}
   .busca{width:100%;box-sizing:border-box;background:var(--card);border:1px solid var(--line);border-radius:9px;padding:9px 11px;color:var(--tx);font-size:13px;margin-bottom:10px}
   .busca:focus{outline:none;border-color:var(--ac)}
@@ -57,9 +57,9 @@
   .scard.done{opacity:.5}
   .scl1{display:flex;align-items:center;gap:8px}
   .badge{font-size:10px;font-weight:700;padding:2px 7px;border-radius:5px;color:#0b0d12;text-transform:uppercase}
-  .num{font-size:16px;font-weight:700}
-  .smeta{font-size:11px;color:var(--mut);font-family:ui-monospace,monospace;margin-top:3px}
-  .scli{font-size:12px;color:var(--tx);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .num{font-size:18px;font-weight:700}
+  .smeta{font-size:13px;color:var(--mut);font-family:ui-monospace,monospace;margin-top:4px}
+  .scli{font-size:14px;color:var(--tx);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .pdfok{color:var(--ok);font-weight:700}
   .donetag{margin-left:auto;color:var(--ok);font-size:11px;font-weight:700}
 
@@ -71,6 +71,11 @@
   .pcard:hover{background:#371820}
   .pcard .pwarn{display:inline-block;background:var(--err);color:#fff;font-size:11px;font-weight:800;letter-spacing:.3px;padding:3px 9px;border-radius:6px;margin-bottom:8px;animation:blink 1.1s step-start infinite}
   .pcard .scl1{display:flex;align-items:center;gap:8px}
+  .pcard .pitem{display:flex;align-items:center;gap:8px;padding:7px 0;border-top:1px solid rgba(239,68,68,.25);cursor:pointer}
+  .pcard .pitem:hover{opacity:.75}
+  .pcard .pnum{font-weight:700;color:var(--tx);font-size:15px}
+  .pcard .pcli{color:var(--mut);font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+  .pcard .psub{font-size:12px;color:var(--mut);margin-top:8px}
   .pcard.flash{animation:flashnow .5s ease-in-out 2}
   @keyframes probpulse{0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,0)}50%{box-shadow:0 0 0 4px rgba(239,68,68,.22)}}
   @keyframes blink{50%{opacity:.35}}
@@ -178,6 +183,13 @@
     <h1>📦 Checkout Offline</h1>
     <span class="ver" id="ver">carregando…</span>
     <span class="grow"></span>
+    <div class="sbtools">
+      <button class="btn sec sm" id="btnSync" onclick="sincronizar()">↻ Atualizar</button>
+      <button class="btn sec sm" onclick="abrirSeparacao()" title="lista de produtos a separar (somados por SKU)">📋 Separar</button>
+      <button class="btn sec sm" onclick="abrirHistorico()" title="últimos pedidos finalizados">🕘 Histórico</button>
+      <button class="btn sec sm" onclick="escolherImpressora()">🖨 Zebra</button>
+      <button class="btn sec sm" id="modoBtn" onclick="trocarModo()" title="alterna entre etiqueta na Zebra (ZPL) ou abrir PDF p/ imprimir no navegador">🖨️ Etiq: Zebra</button>
+    </div>
     <input class="op" id="operador" placeholder="operador" />
     <span class="qz off" id="qzStatus" onclick="reconectarQZ()">QZ: …</span>
   </div>
@@ -186,13 +198,6 @@
 
 <div class="main">
   <aside class="sidebar">
-    <div class="sbtools">
-      <button class="btn sec sm" id="btnSync" onclick="sincronizar()">↻ Atualizar</button>
-      <button class="btn sec sm" onclick="abrirSeparacao()" title="lista de produtos a separar (somados por SKU)">📋 Separar</button>
-      <button class="btn sec sm" onclick="abrirHistorico()" title="últimos pedidos finalizados">🕘 Histórico</button>
-      <button class="btn sec sm" onclick="escolherImpressora()">🖨 Zebra</button>
-      <button class="btn sec sm" id="modoBtn" onclick="trocarModo()" title="alterna entre etiqueta na Zebra (ZPL) ou abrir PDF p/ imprimir no navegador">🖨️ Etiq: Zebra</button>
-    </div>
     <input class="busca" id="busca" placeholder="🔎 buscar: nº pedido, NF, cliente…" oninput="onBusca(this.value)" autocomplete="off" />
     <div id="chips" class="chips"></div>
     <div id="listaPedidos"><div class="empty">carregando…</div></div>
@@ -224,7 +229,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b32';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b33';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#ff9900'}, magalu:{n:'Magalu',c:'#0086ff'}, outro:{n:'Outro',c:'#94a3b8'}
@@ -422,7 +427,15 @@ function filtrar(lista){
 
 // ── chips de marketplace + FLEX ──
 const MKT_ORDEM = ['ml','shopee','tiktok','magalu','amazon','outro'];
-function setFiltroMkt(v){ filtroMkt = v; renderChips(); renderLista(); }
+function setFiltroMkt(v){
+  filtroMkt = v;
+  // se o pedido aberto sumir da lista filtrada, limpa a tela (não deixa o pedido de outro marketplace persistindo)
+  if(pedidoAtual){
+    const vis = filtrar(listaCache).some(p => String(p.id)===String(pedidoAtual.bling_id));
+    if(!vis){ pedidoAtual=null; zplAtual=null; $('detail').innerHTML='<div class="placeholder">← selecione um pedido à esquerda</div>'; }
+  }
+  renderChips(); renderLista();
+}
 function chipBtn(label, n, val, cor){
   const ativo = (filtroMkt===val);
   const dot = cor ? '<span class="cdot" style="background:'+cor+'"></span>' : '';
@@ -441,16 +454,21 @@ function renderChips(){
 function renderLista(){
   const box = $('listaPedidos');
   const selId = pedidoAtual ? String(pedidoAtual.bling_id) : '';
-  // cards de PROBLEMA (sem etiqueta) — sempre no topo, vermelho pulsante, independente de filtro/busca
-  const probHTML = (semEtiqCache||[]).map(p=>{
-    const m = MKT[p.marketplace]||MKT.outro;
-    return '<div class="pcard" id="prob-'+esc(p.id)+'" onclick="avisoSemEtiqueta(\''+esc(p.numero||p.id)+'\')">'+
-      '<div class="pwarn">⚠️ SEM ETIQUETA</div>'+
-      '<div class="scl1"><span class="badge" style="background:'+m.c+'">'+m.n+'</span><span class="num">#'+esc(p.numero||p.id)+'</span></div>'+
-      (p.cliente?'<div class="scli">'+esc(p.cliente)+'</div>':'')+
-      '<div class="smeta">NF '+(p.nf_numero?esc(p.nf_numero):'—')+' · não dá pra processar — confira no Bling</div>'+
-    '</div>';
-  }).join('');
+  // UM card só pras sem etiqueta (compacto, não empurra a fila) — sempre no topo, vermelho pulsante
+  const probHTML = (semEtiqCache||[]).length ? (
+    '<div class="pcard">'+
+      '<div class="pwarn">⚠️ '+semEtiqCache.length+' SEM ETIQUETA</div>'+
+      semEtiqCache.map(p=>{
+        const m = MKT[p.marketplace]||MKT.outro;
+        return '<div class="pitem" onclick="avisoSemEtiqueta(\''+esc(p.numero||p.id)+'\')">'+
+          '<span class="badge" style="background:'+m.c+'">'+m.n+'</span>'+
+          '<span class="pnum">#'+esc(p.numero||p.id)+'</span>'+
+          (p.cliente?'<span class="pcli">'+esc(p.cliente)+'</span>':'')+
+        '</div>';
+      }).join('')+
+      '<div class="psub">não dá pra processar — confira no Bling</div>'+
+    '</div>'
+  ) : '';
   if(!listaCache.length && !probHTML){ box.innerHTML='<div class="empty">nenhum pedido pronto no cache</div>'; return; }
   const lista = filtrar(listaCache);
   const cnt = filtroBusca ? '<div class="scount">'+lista.length+' de '+listaCache.length+'</div>' : '';
