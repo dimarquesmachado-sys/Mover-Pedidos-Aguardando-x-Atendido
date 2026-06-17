@@ -2,7 +2,7 @@
 
 // ════════════════════════════════════════════════════════════════════════
 //  GIRASSOL · CHECKOUT OFFLINE — FASE 1 (poller) + FASE 2 (bipagem)   (Mover-Pedidos)
-//  girassol-backup-offline v16/06 b29   (a versão real é a const VERSAO abaixo)
+//  girassol-backup-offline v16/06 b30   (a versão real é a const VERSAO abaixo)
 // ════════════════════════════════════════════════════════════════════════
 //  Módulo do orquestrador unificado (HTTP-native, sem Express).
 //  Reaproveita o token Bling da Girassol via ../girassol/tokenManager.
@@ -38,7 +38,7 @@ const { garantirToken } = require('../girassol/tokenManager');
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v16/06 b29';
+const VERSAO     = 'girassol-backup-offline v16/06 b30';
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 
 // ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
@@ -56,6 +56,7 @@ const MANIFEST_FILE = path.join(CACHE_DIR, 'manifest.json');
 const SKU_EAN_FILE  = path.join(CACHE_DIR, 'sku-ean.json');
 const CONFERIDOS_FILE = path.join(CACHE_DIR, 'conferidos.json');
 const KIT_CACHE_FILE  = path.join(CACHE_DIR, 'kit-estrutura.json');  // kits já resolvidos
+const LOC_FILE        = path.join(CACHE_DIR, 'sku-localizacao.json'); // localização (depósito) por SKU
 const SCHEMA = 3;  // versão do snapshot — bump força re-cache dos pedidos antigos
 
 // loja → marketplace (mesmo mapa do checkout Girassol)
@@ -122,6 +123,25 @@ function primeiraImagem(prod) {
   return null;
 }
 
+// localização (depósito/prateleira) do produto — fica em estoque.localizacao no /produtos/{id}
+function localizacaoDeProduto(prod) {
+  if (!prod) return '';
+  const e = prod.estoque || {};
+  return String(e.localizacao || prod.localizacao || '').trim();
+}
+
+// busca a localização de um SKU (p/ pedidos antigos sem cache): lista por código → se não vier, detalhe
+async function localizacaoPorSku(sku) {
+  try {
+    const { ok, data } = await blingGet(`/produtos?codigo=${encodeURIComponent(sku)}&limite=1`);
+    const item = ok && data && data.data && data.data[0];
+    if (!item) return '';
+    let loc = localizacaoDeProduto(item);
+    if (!loc && item.id) { const det = await produtoDetalhe(item.id); loc = localizacaoDeProduto(det); }
+    return loc || '';
+  } catch (e) { return ''; }
+}
+
 // ─── estado do módulo ───────────────────────────────────────────────────
 let rodando = false;
 let ultimoResumo = { rodouEm: null, total: 0, comEtiqueta: 0, semEtiqueta: 0, novos: 0, erros: 0 };
@@ -130,6 +150,8 @@ let ultimoSync = { em: null, pendentes: 0, ok: 0, falhas: 0 };
 const manifest       = () => readJson(MANIFEST_FILE, {});
 const salvarManifest = (m) => writeJson(MANIFEST_FILE, m);
 const skuEanCache    = () => readJson(SKU_EAN_FILE, {});
+const locCache       = () => readJson(LOC_FILE, {});
+const salvarLoc      = (m) => writeJson(LOC_FILE, m);
 const salvarSkuEan   = (m) => writeJson(SKU_EAN_FILE, m);
 
 // GET autenticado no Bling Girassol (token via tokenManager + retry 429)
@@ -338,7 +360,7 @@ async function infoProduto(id, cacheEan) {
   const sku = (prod && prod.codigo) || '';
   let ean = prod ? primeiroEan(prod) : null;
   if (sku) { if (ean) cacheEan[sku] = ean; else if (cacheEan[sku]) ean = cacheEan[sku]; }
-  return { sku, ean, descricao: (prod && prod.nome) || '', img: primeiraImagem(prod) };
+  return { sku, ean, descricao: (prod && prod.nome) || '', img: primeiraImagem(prod), loc: localizacaoDeProduto(prod) };
 }
 
 // baixa a etiqueta de envio. O Bling devolve um ZIP (com "Etiqueta de envio.txt"
@@ -435,7 +457,7 @@ async function etiquetaPdf(blingId, dir) {
   return await zplParaPdf(zpl);
 }
 
-async function cachearPedido(ped, cacheEan, nfs, kitCache) {
+async function cachearPedido(ped, cacheEan, nfs, kitCache, locC) {
   const id  = ped.id;
   const dir = path.join(CACHE_DIR, String(id));
   ensureDir(dir);
@@ -451,6 +473,7 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache) {
     const sku     = it.codigo || (prod && prod.codigo) || (it.produto && it.produto.codigo) || '';
     const eanItem = prod ? primeiroEan(prod) : await eanDoItem(prodId, sku, cacheEan);
     if (sku && eanItem) cacheEan[sku] = eanItem;
+    if (sku && locC) locC[sku] = localizacaoDeProduto(prod);     // localização do produto principal
     const descr   = it.descricao || (prod && prod.nome) || '';
     const imgItem = primeiraImagem(prod);
 
@@ -465,10 +488,11 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache) {
         base = [];
         for (const c of comps) {
           const info = await infoProduto(c.produto && c.produto.id, cacheEan);
-          base.push({ sku: info.sku, ean: info.ean, descricao: info.descricao, img: info.img, qtd: Number(c.quantidade || 1) });
+          base.push({ sku: info.sku, ean: info.ean, descricao: info.descricao, img: info.img, loc: info.loc, qtd: Number(c.quantidade || 1) });
         }
         if (kitCache) kitCache[prodId] = base;
       }
+      if (locC) base.forEach(c => { if (c.sku) locC[c.sku] = c.loc || locC[c.sku] || ''; }); // localização dos componentes
       // qtd final = qtd do componente no kit × qtd do kit no pedido
       const componentes = base.map(c => ({ sku: c.sku, ean: c.ean, descricao: c.descricao, img: c.img, qtd: c.qtd * (itemQty || 1) }));
       itens.push({ sku, ean: eanItem, descricao: descr, img: imgItem, qtd: itemQty, tipo: 'kit', componentes });
@@ -548,6 +572,7 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
     console.log(`[GIRABKP] ▶ ciclo (${motivo})${forcar ? ' [FORCE]' : ''}`);
     const man      = manifest();
     const cacheEan = skuEanCache();
+    const locC     = locCache();
     const { ok: listaOk, pedidos: atendidos } = await listarAtendidos();
     console.log(`[GIRABKP] ${atendidos.length} pedido(s) ATENDIDO(${SIT_ATENDIDO}) na janela de ${JANELA_DIAS}d (bling ok=${listaOk})`);
 
@@ -590,7 +615,7 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
       try {
         const det = await detalhePedido(id); await sleep(PAUSA_MS);
         if (!det) { erros++; continue; }
-        const snap = await cachearPedido(det, cacheEan, nfs, kitCache);
+        const snap = await cachearPedido(det, cacheEan, nfs, kitCache, locC);
         man[id] = {
           numero: snap.numero, marketplace: snap.marketplace,
           servico: snap.servico || '', flex: !!snap.flex,
@@ -602,6 +627,7 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
         if (!ja) novos++;
         salvarManifest(man);
         salvarSkuEan(cacheEan);
+        salvarLoc(locC);
         writeJson(KIT_CACHE_FILE, { _schema: SCHEMA, kits: kitCache });
       } catch (e) { erros++; console.error(`[GIRABKP] erro pedido ${id}:`, e.message); }
       await sleep(PAUSA_MS);
@@ -653,6 +679,20 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
     }
     if (svcNovos) { salvarManifest(man); console.log(`[GIRABKP] ${svcNovos} servico/flex preenchidos`); }
 
+    // passo: aquece as LOCALIZAÇÕES que faltam (SKUs a separar) — teto por ciclo (mais alto no force)
+    if (listaOk) {
+      const sepSkus = montarSeparacao(null).linhas
+        .map(l => l.sku).filter(s => s && s !== '(sem SKU)' && !(s in locC));
+      const tetoLoc = forcar ? 80 : 25;
+      let locNovas = 0;
+      for (const sku of sepSkus) {
+        if (locNovas >= tetoLoc) break;
+        locC[sku] = await localizacaoPorSku(sku); await sleep(PAUSA_MS);
+        locNovas++;
+      }
+      if (locNovas) { salvarLoc(locC); console.log(`[GIRABKP] ${locNovas} localização(ões) aquecidas`); }
+    }
+
     // FASE 3: Bling respondeu (listaOk) → drena a fila de conferidos offline p/ VERIFICADO (24)
     // só roda automático se GIRABKP_SYNC_ON=1 (trava de segurança até você testar)
     if (listaOk && SYNC_ON) {
@@ -687,7 +727,8 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
 function montarSeparacao(mktFiltro) {
   const man = manifest();
   const conf = readJson(CONFERIDOS_FILE, {});
-  const mapa = {};       // sku -> { sku, descricao, ean, qtd }
+  const loc = locCache();
+  const mapa = {};       // sku -> { sku, descricao, ean, loc, qtd }
   const counts = {};     // marketplace -> nº de pedidos (não-finalizados)
   let pedidos = 0;
   for (const id of Object.keys(man)) {
@@ -700,7 +741,7 @@ function montarSeparacao(mktFiltro) {
     pedidos++;
     const add = (sku, ean, descricao, qtd) => {
       const k = sku || '(sem SKU)';
-      if (!mapa[k]) mapa[k] = { sku: k, descricao: descricao || '', ean: ean || '', qtd: 0 };
+      if (!mapa[k]) mapa[k] = { sku: k, descricao: descricao || '', ean: ean || '', loc: loc[k] || '', qtd: 0 };
       mapa[k].qtd += Number(qtd || 0);
       if (!mapa[k].ean && ean) mapa[k].ean = ean;
       if (!mapa[k].descricao && descricao) mapa[k].descricao = descricao;
@@ -713,7 +754,14 @@ function montarSeparacao(mktFiltro) {
       }
     }
   }
-  const linhas = Object.values(mapa).sort((a, b) => String(a.sku).localeCompare(String(b.sku)));
+  // ordena por LOCALIZAÇÃO (ordem de picking; vazias por último), depois por SKU
+  const linhas = Object.values(mapa).sort((a, b) => {
+    const la = a.loc || '', lb = b.loc || '';
+    if (!la && lb) return 1;
+    if (la && !lb) return -1;
+    if (la !== lb) return la.localeCompare(lb, 'pt', { numeric: true });
+    return String(a.sku).localeCompare(String(b.sku));
+  });
   const total_itens = linhas.reduce((s, l) => s + l.qtd, 0);
   return { ok: true, mkt: mktFiltro || null, pedidos, total_skus: linhas.length, total_itens, counts, linhas };
 }
@@ -816,6 +864,23 @@ function routes(readBody) {
         .sort((a, b) => String(b.conferido_em || '').localeCompare(String(a.conferido_em || '')))
         .slice(0, 80);
       json(res, 200, { ok: true, total: Object.keys(conf).length, itens });
+      return true;
+    }
+
+    // DEBUG — mostra onde o Bling guarda a localização de um SKU (confirma o campo)
+    // uso: /girassol-backup-offline/debug-loc/{SKU}
+    if (method === 'GET' && p.startsWith('/girassol-backup-offline/debug-loc/')) {
+      const sku = decodeURIComponent(p.split('/').pop() || '');
+      const { ok, data } = await blingGet(`/produtos?codigo=${encodeURIComponent(sku)}&limite=1`);
+      const item = ok && data && data.data && data.data[0];
+      let det = null;
+      if (item && item.id) det = await produtoDetalhe(item.id);
+      json(res, 200, {
+        sku,
+        da_lista: { estoque: (item && item.estoque) || null, localizacao_raiz: (item && item.localizacao) || null },
+        do_detalhe: { estoque: (det && det.estoque) || null, localizacao_raiz: (det && det.localizacao) || null },
+        extraido: localizacaoDeProduto(det || item)
+      });
       return true;
     }
 
