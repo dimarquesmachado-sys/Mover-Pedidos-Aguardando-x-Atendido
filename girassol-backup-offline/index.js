@@ -2,7 +2,7 @@
 
 // ════════════════════════════════════════════════════════════════════════
 //  GIRASSOL · CHECKOUT OFFLINE — FASE 1 (poller) + FASE 2 (bipagem)   (Mover-Pedidos)
-//  girassol-backup-offline v17/06 b41   (a versão real é a const VERSAO abaixo)
+//  girassol-backup-offline v17/06 b42   (a versão real é a const VERSAO abaixo)
 // ════════════════════════════════════════════════════════════════════════
 //  Módulo do orquestrador unificado (HTTP-native, sem Express).
 //  Reaproveita o token Bling da Girassol via ../girassol/tokenManager.
@@ -39,7 +39,7 @@ const { gerarDanfeSimplificado } = require('./danfe-simplificado');
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v17/06 b41';
+const VERSAO     = 'girassol-backup-offline v17/06 b42';
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 
 // ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
@@ -568,7 +568,8 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC) {
     }
   }
 
-  const nf = acharNFnaLista(id, nfs || []);
+  let nf = acharNFnaLista(id, nfs || []);
+  if (!nf || !nf.id) { nf = await nfDoPedido(id); await sleep(PAUSA_MS); }   // fora do range do lote → acha pelo link direto pedido→NF
 
   const _etqPath = path.join(dir, `etiqueta.${ETIQ_FORMATO.toLowerCase()}`);
   let temEtiqueta = fs.existsSync(_etqPath);   // etiqueta é imutável → se já tem, não re-baixa (re-cache leve)
@@ -729,19 +730,33 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
 
     // passo: cacheia os DADOS do DANFE SIMPLIFICADO (p/ imprimir 10x15 na Zebra OFFLINE)
     //        guarda o parsed (nf-simp.json) — o PDF é gerado na hora pela rota /danfe-simp
-    let simpNovos = 0, simpFalha = 0, simpSemId = 0;
+    let simpNovos = 0, simpFalha = 0, simpSemId = 0, simpCurados = 0;
     for (const ped of atendidos) {
       const dir = path.join(CACHE_DIR, String(ped.id));
       if (fs.existsSync(path.join(dir, 'nf-simp.json'))) continue;   // já tem
       const snap = readJson(path.join(dir, 'pedido.json'), null);
-      if (!snap || !snap.nf || !snap.nf.id) { simpSemId++; continue; }
+      if (!snap) { simpSemId++; continue; }
+      let nfId = snap.nf && snap.nf.id;
+      if (!nfId) {   // re-cache antigo pode ter perdido o nf.id → acha ao vivo e CURA o snapshot
+        try {
+          const nf = await nfDoPedido(ped.id); await sleep(PAUSA_MS);
+          if (nf && nf.id) {
+            nfId = nf.id; snap.nf = nf; snap.tem_nf = true;
+            writeJson(path.join(dir, 'pedido.json'), snap);
+            if (man[ped.id]) { man[ped.id].tem_nf = true; man[ped.id].nf_numero = nf.numero || null; }
+            simpCurados++;
+          }
+        } catch (e) {}
+      }
+      if (!nfId) { simpSemId++; continue; }
       try {
-        const ds = await dadosNFSimp(snap.nf.id, snap.numero); await sleep(PAUSA_MS);
+        const ds = await dadosNFSimp(nfId, snap.numero); await sleep(PAUSA_MS);
         if (ds) { writeJson(path.join(dir, 'nf-simp.json'), ds); simpNovos++; }
         else simpFalha++;
       } catch (e) { simpFalha++; }
     }
-    console.log(`[GIRABKP] DANFE-simp: ${simpNovos} novos, ${simpFalha} falha, ${simpSemId} sem nf.id`);
+    if (simpCurados) salvarManifest(man);
+    console.log(`[GIRABKP] DANFE-simp: ${simpNovos} novos, ${simpCurados} curados, ${simpFalha} falha, ${simpSemId} sem nf`);
 
     // passo: baixa a ETIQUETA em PDF (p/ modo A4 / fallback Zebra) — só de quem já tem ZPL
     let etqPdfNovos = 0;
@@ -1399,12 +1414,21 @@ function routes(readBody) {
         const achado = Object.keys(man).find(k => String(man[k].numero) === String(pedidoId));
         if (achado) { dir = path.join(CACHE_DIR, String(achado)); snap = readJson(path.join(dir, 'pedido.json'), null); }
       }
-      if (!snap || !snap.nf || !snap.nf.id) { json(res, 404, { erro: 'pedido sem NF cacheada', pedido: pedidoId }); return true; }
-      // 1) cache
+      if (!snap) { json(res, 404, { erro: 'pedido não cacheado', pedido: pedidoId }); return true; }
+      const blingId = path.basename(dir);
+      // 1) cache de dados (nf-simp.json gravado pelo cron)
       let dados = readJson(path.join(dir, 'nf-simp.json'), null);
-      // 2) fallback ao vivo (e cacheia p/ as próximas)
       if (!dados) {
-        try { dados = await dadosNFSimp(snap.nf.id, snap.numero); }
+        // acha a NF: do snapshot, ou ao vivo (re-cache antigo pode ter perdido o nf.id) → e CURA o snapshot
+        let nfId = snap.nf && snap.nf.id;
+        if (!nfId) {
+          try {
+            const nf = await nfDoPedido(blingId);
+            if (nf && nf.id) { nfId = nf.id; snap.nf = nf; snap.tem_nf = true; writeJson(path.join(dir, 'pedido.json'), snap); }
+          } catch (e) {}
+        }
+        if (!nfId) { json(res, 404, { erro: 'pedido sem NF', pedido: pedidoId }); return true; }
+        try { dados = await dadosNFSimp(nfId, snap.numero); }
         catch (e) { json(res, 502, { erro: 'falha ao montar dados', detalhe: e.message }); return true; }
         if (dados) { try { writeJson(path.join(dir, 'nf-simp.json'), dados); } catch (e) {} }
       }
