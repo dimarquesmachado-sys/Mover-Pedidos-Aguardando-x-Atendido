@@ -177,4 +177,75 @@ function montarMsgSubstituicao(trocas, pedidoFinal, totalLixas) {
   return msg;
 }
 
-module.exports = { parsePedidoLiteral, escolherGraoSubstituto, resolverPedidoComSubstituicao, montarMsgSubstituicao };
+/**
+ * Lista os grãos do pedido que estão INDISPONÍVEIS (sem estoque / inexistentes).
+ * @returns [{grao}]
+ */
+function graosIndisponiveisDoPedido(pedidoCliente, graosDisponiveis) {
+  const disp = new Set((graosDisponiveis || []).filter(g => Number(g.estoque_pacotes) > 0).map(g => Number(g.grao)));
+  const vistos = new Set();
+  const out = [];
+  for (const item of (pedidoCliente || [])) {
+    const g = Number(item.grao);
+    if (!Number.isFinite(g) || disp.has(g) || vistos.has(g)) continue;
+    vistos.add(g);
+    out.push({ grao: g });
+  }
+  return out;
+}
+
+/**
+ * Sugere os N grãos disponíveis (com estoque) mais próximos de um grão alvo.
+ * @returns [grao, ...]
+ */
+function sugerirGraosProximos(grao, graosDisponiveis, n = 2) {
+  const alvo = Number(grao);
+  return (graosDisponiveis || [])
+    .filter(g => Number(g.estoque_pacotes) > 0)
+    .map(g => Number(g.grao))
+    .sort((a, b) => Math.abs(a - alvo) - Math.abs(b - alvo) || a - b)
+    .slice(0, n);
+}
+
+/**
+ * Mensagem de REENGAJAMENTO (escada): dá à cliente a chance de escolher um grão
+ * válido ANTES da substituição automática. Escalonada por nível (1/2/3).
+ * Determinística, ≤350 chars. Retorna null se não há grão indisponível.
+ *
+ * @param {Array}  indisponiveis [{grao, sugestoes:[a,b]}] — grãos sem estoque do pedido
+ * @param {Number} nivel 1=primeiro aviso · 2=reforço · 3=última chamada (avisa que vai trocar)
+ */
+function montarMsgReengajamento(indisponiveis, nivel = 1) {
+  if (!Array.isArray(indisponiveis) || indisponiveis.length === 0) return null;
+  const umGrao = indisponiveis.length === 1;
+
+  const listaGraos = umGrao
+    ? `o grão ${indisponiveis[0].grao}`
+    : `os grãos ${indisponiveis.map(i => i.grao).join(', ')}`;
+
+  // sugestões agregadas, sem repetir (ordem de proximidade vem pronta do chamador)
+  const sug = [];
+  for (const i of indisponiveis) for (const s of (i.sugestoes || [])) if (s != null && !sug.includes(s)) sug.push(s);
+  const A = sug[0];
+  const listaSug = sug.length >= 2
+    ? `${sug.slice(0, -1).join(', ')} ou ${sug[sug.length - 1]}`
+    : (sug.length === 1 ? `${sug[0]}` : '');
+
+  let msg;
+  if (nivel >= 3) {
+    const escolhido = A != null ? `o grão ${A} (o mais próximo)` : 'o grão mais próximo disponível';
+    msg = `Última chamada sobre seu pedido de lixas: ${listaGraos} segue sem estoque. Pra não atrasar seu envio, se não recebermos sua escolha em breve enviaremos ${escolhido}. Se preferir outro, é só avisar! 🙂`;
+  } else if (nivel === 2) {
+    const onde = listaSug ? `entre ${listaSug}` : 'outro grão da lista';
+    msg = `Oi! Reforçando sobre seu pedido de lixas: ${listaGraos} segue sem estoque. Pode escolher ${onde} no lugar? Assim garantimos o envio no prazo. 🙂`;
+  } else {
+    const quais = listaSug ? ` Os mais próximos disponíveis são ${listaSug}.` : '';
+    msg = `Oi! Sobre seu pedido de lixas: ${listaGraos} que você pediu está sem estoque no momento.${quais} Qual prefere no lugar? É só responder por aqui que ajustamos pra você. 🙂`;
+  }
+
+  if (msg.length > 350) msg = msg.replace(' É só responder por aqui que ajustamos pra você.', ' É só responder por aqui.');
+  if (msg.length > 350) msg = msg.slice(0, 347) + '...';
+  return msg;
+}
+
+module.exports = { parsePedidoLiteral, escolherGraoSubstituto, resolverPedidoComSubstituicao, montarMsgSubstituicao, graosIndisponiveisDoPedido, sugerirGraosProximos, montarMsgReengajamento };
