@@ -1,1139 +1,600 @@
-'use strict';
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Checkout Offline · Girassol</title>
+<script src="https://cdn.jsdelivr.net/npm/js-sha256@0.11.0/src/sha256.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qz-tray@2.2.6/qz-tray.js"></script>
+<style>
+  :root{
+    --bg:#0f1115; --card:#1a1e26; --card2:#232834; --line:#2c333f;
+    --tx:#e8edf4; --mut:#8b96a8; --ac:#3b82f6; --ok:#22c55e; --warn:#f59e0b; --err:#ef4444;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;display:flex;flex-direction:column;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--tx);font-size:15px}
+  header{background:#141821;border-bottom:1px solid var(--line);padding:9px 14px;flex:0 0 auto}
+  .htop{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  .htop h1{font-size:16px;margin:0;font-weight:700}
+  .ver{font-size:12px;color:var(--mut);font-family:ui-monospace,monospace}
+  .grow{flex:1}
+  .qz{font-size:13px;padding:4px 10px;border-radius:20px;border:1px solid var(--line);cursor:pointer;white-space:nowrap}
+  .qz.on{color:var(--ok);border-color:var(--ok)} .qz.off{color:var(--err);border-color:var(--err)}
+  input.op{background:var(--card2);border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:5px 9px;font-size:13px;width:120px}
+  .stats{display:flex;gap:14px;margin-top:7px;font-size:13px;color:var(--mut);flex-wrap:wrap}
+  .stats b{color:var(--tx)}
 
-// ════════════════════════════════════════════════════════════════════════
-//  GIRASSOL · CHECKOUT OFFLINE — FASE 1 (poller) + FASE 2 (bipagem)   (Mover-Pedidos)
-//  girassol-backup-offline v16/06 b26   (a versão real é a const VERSAO abaixo)
-// ════════════════════════════════════════════════════════════════════════
-//  Módulo do orquestrador unificado (HTTP-native, sem Express).
-//  Reaproveita o token Bling da Girassol via ../girassol/tokenManager.
-//
-//  A cada ciclo (cron backupCache):
-//    1) lista pedidos ATENDIDO (situação 9) da janela de emissão;
-//    2) pra cada pedido ainda NÃO cacheado por completo:
-//         - detalhe (cliente + itens com SKU/qtd);
-//         - EAN de cada item (produto, getPossiveisGtins robusto);
-//         - NF (nº + chave) via /pedidos/vendas/{id}/nfe;
-//         - ETIQUETA (ZPL) via /logisticas/etiquetas → baixa o link p/ /data;
-//    3) purga o cache fora da janela de retenção.
-//
-//  Cache no disco /data do PRÓPRIO serviço Mover-Pedidos. A tela offline
-//  (Fase 2) também morará aqui (mesmo serviço = mesmo disco = mesmo cache).
-//
-//  ⚠ PRÉ-REQUISITO de scope no app Bling da Girassol (Mover-Pedidos):
-//     • Logísticas (leitura)  → necessário p/ /logisticas/etiquetas
-//     • Produtos  (leitura)   → necessário p/ resolver EAN por produto
-//     Se faltar: o pedido ainda é cacheado, mas vem sem etiqueta / sem EAN.
-//     Adiciona os scopes e re-autoriza pelo /setup (cola o auth_code).
-// ════════════════════════════════════════════════════════════════════════
+  /* layout 2 colunas */
+  .main{flex:1 1 auto;display:flex;min-height:0}
+  .sidebar{width:340px;flex:0 0 340px;border-right:1px solid var(--line);overflow-y:auto;padding:10px;background:#12161e}
+  .detail{flex:1 1 auto;overflow-y:auto;padding:18px 22px}
+  .sbtools{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px}
+  #modoBtn.on{border-color:var(--ac);color:var(--ac)}
+  .busca{width:100%;box-sizing:border-box;background:var(--card);border:1px solid var(--line);border-radius:9px;padding:9px 11px;color:var(--tx);font-size:13px;margin-bottom:10px}
+  .busca:focus{outline:none;border-color:var(--ac)}
+  .busca::placeholder{color:var(--mut)}
+  .scount{font-size:11px;color:var(--mut);margin:0 2px 8px}
+  .chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+  .chip{background:var(--card);border:1px solid var(--line);border-radius:999px;padding:5px 10px;color:var(--mut);font-size:12px;cursor:pointer;display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
+  .chip b{color:var(--tx)}
+  .chip:hover{border-color:var(--mut)}
+  .chip.on{border-color:var(--ac);color:var(--tx);background:#13243f}
+  .chip.flex.on{border-color:var(--warn);background:#2a1f08}
+  .cdot{width:8px;height:8px;border-radius:50%;display:inline-block}
 
-const fs    = require('fs');
-const path  = require('path');
-const fetch = require('node-fetch');
-const AdmZip = require('adm-zip');
-const crypto = require('crypto');
-const { garantirToken } = require('../girassol/tokenManager');
+  .btn{background:var(--ac);color:#fff;border:0;border-radius:9px;padding:9px 14px;font-size:14px;font-weight:600;cursor:pointer}
+  .btn:disabled{opacity:.4;cursor:not-allowed}
+  .btn.sec{background:var(--card2);color:var(--tx);border:1px solid var(--line)}
+  .btn.ok{background:var(--ok)} .btn.warn{background:var(--warn);color:#1a1205}
+  .btn.sm{padding:6px 10px;font-size:13px}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 
-// Certificado/chave do QZ Tray p/ assinar as impressões (mata o popup "Untrusted").
-// Configure no Render: GIRABKP_QZ_CERT (digital-certificate.txt) e GIRABKP_QZ_PRIVKEY (private-key.pem).
-const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
-const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
+  /* card lateral */
+  .scard{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:9px 11px;margin-bottom:8px;cursor:pointer}
+  .scard:hover{border-color:#3a4657}
+  .scard.sel{border-color:var(--ac);background:#16202e}
+  .scard.done{opacity:.5}
+  .scl1{display:flex;align-items:center;gap:8px}
+  .badge{font-size:10px;font-weight:700;padding:2px 7px;border-radius:5px;color:#0b0d12;text-transform:uppercase}
+  .num{font-size:16px;font-weight:700}
+  .smeta{font-size:11px;color:var(--mut);font-family:ui-monospace,monospace;margin-top:3px}
+  .scli{font-size:12px;color:var(--tx);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .pdfok{color:var(--ok);font-weight:700}
+  .donetag{margin-left:auto;color:var(--ok);font-size:11px;font-weight:700}
+  .scard .rep{margin-top:7px}
 
-const VERSAO     = 'girassol-backup-offline v16/06 b26';
-const BLING_BASE = 'https://api.bling.com.br/Api/v3';
+  /* detalhe / bipagem */
+  .placeholder{height:100%;display:flex;align-items:center;justify-content:center;color:var(--mut);font-size:15px}
+  .dhead{display:flex;align-items:center;gap:10px;margin-bottom:4px}
+  .num.big{font-size:22px}
+  .prog{margin-left:auto;font-size:30px;font-weight:800}
+  .prog .done{color:var(--ok)}
+  .cli{color:var(--mut);font-size:14px;margin:2px 0 8px}
+  .nfbar{background:var(--card2);border:1px solid var(--line);border-radius:9px;padding:9px 12px;margin:8px 0;font-size:13px}
+  .nfbar.clic{cursor:pointer}
+  .nfbar.clic:hover{border-color:var(--ok);background:#0c2118}
+  .nfok{color:var(--ok);font-size:11px;font-weight:700;margin-left:4px}
+  .nfbar .chave{font-family:ui-monospace,monospace;font-size:11px;color:var(--mut);word-break:break-all}
+  .noean{color:var(--warn)}
+  .scanrow{display:flex;gap:8px;align-items:stretch;margin:12px 0 4px}
+  .scanrow #scan{flex:1;background:#0b0d12;border:2px solid var(--ac);color:var(--tx);border-radius:11px;padding:15px;font-size:19px;font-family:ui-monospace,monospace;text-align:center}
+  .scanrow #scan.err{border-color:var(--err);animation:shake .25s}
+  .qtdwrap{display:flex;flex-direction:column;justify-content:center;align-items:center;background:#0b0d12;border:2px solid var(--line);border-radius:11px;padding:3px 10px}
+  .qtdwrap label{font-size:9px;color:var(--mut);text-transform:uppercase;letter-spacing:.5px}
+  .qtdwrap input{width:58px;background:transparent;border:0;color:var(--tx);font-size:20px;font-family:ui-monospace,monospace;text-align:center;outline:none}
+  .thumb{width:46px;height:46px;border-radius:7px;object-fit:cover;background:#0b0d12;border:1px solid var(--line);flex:0 0 46px}
+  .thumb.noimg{display:flex;align-items:center;justify-content:center;color:var(--mut);font-size:16px}
+  @keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-6px)}75%{transform:translateX(6px)}}
+  .hint{font-size:12px;color:var(--mut);text-align:center;margin-top:5px}
+  .item{display:flex;align-items:center;gap:12px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 13px;margin-bottom:8px}
+  .item.full{border-color:var(--ok);background:#15241a}
+  .kitwrap{border:1px solid var(--line);border-radius:11px;margin-bottom:10px;overflow:hidden;background:#171b24}
+  .kitwrap.full{border-color:var(--ok)}
+  .kithead{display:flex;gap:10px;align-items:center;padding:10px 13px;background:#202634;font-size:14px;border-bottom:1px solid var(--line)}
+  .kh-txt{flex:1}
+  .ktag{display:inline-block;font-size:10px;font-weight:800;background:var(--warn);color:#1a1205;padding:2px 7px;border-radius:5px;margin-right:6px;vertical-align:middle}
+  .comps{padding:8px 8px 1px}
+  .item.comp{margin-left:14px;border-left:3px solid #3a4657}
+  .icount{font-size:19px;font-weight:800;min-width:60px;text-align:center}
+  .icount .b{color:var(--ok)}
+  .idesc{flex:1}
+  .idesc .d{font-size:14px}
+  .idesc .e{font-size:12px;color:var(--mut);font-family:ui-monospace,monospace;margin-top:2px}
+  .miniok{background:var(--card2);border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:7px 11px;font-size:13px;cursor:pointer}
+  .dbtns{display:flex;gap:8px;margin-top:14px;align-items:center}
+  .empty{text-align:center;color:var(--mut);padding:30px 0}
+  .toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:#000;border:1px solid var(--line);padding:10px 18px;border-radius:24px;font-size:14px;opacity:0;transition:.2s;pointer-events:none;z-index:50}
+  .toast.show{opacity:1}
+  .foot{flex:0 0 auto;text-align:center;color:var(--mut);font-size:11px;padding:6px;border-top:1px solid var(--line)}
+  .modal{position:fixed;inset:0;background:rgba(0,0,0,.65);display:none;align-items:center;justify-content:center;z-index:100}
+  .modal.show{display:flex}
+  .mbox{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:22px;max-width:460px;width:90%}
+  .mtit{font-size:19px;font-weight:700;margin-bottom:8px}
+  .msub{font-size:14px;color:var(--mut);margin-bottom:18px;line-height:1.45}
+  .mbtns{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
 
-// ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
-const CACHE_DIR     = process.env.GIRABKP_CACHE_DIR    || '/data/cache-offline/girassol';
-const SIT_ATENDIDO  = Number(process.env.GIRABKP_SIT_ATENDIDO  || 9);              // ATENDIDO
-const SIT_VERIFICADO = Number(process.env.GIRABKP_SIT_VERIFICADO || 24);           // VERIFICADO (destino do sync Fase 3)
-const SYNC_ON       = process.env.GIRABKP_SYNC_ON === '1';                          // liga o sync automático no cron (Fase 3)
-const JANELA_DIAS   = Number(process.env.GIRABKP_JANELA_DIAS   || 5);
-const PAUSA_MS      = Number(process.env.GIRABKP_PAUSA_MS      || 350);            // ~3 req/s
-const RETENCAO_DIAS = Number(process.env.GIRABKP_RETENCAO_DIAS || 7);
-const ETIQ_FORMATO  = (process.env.GIRABKP_ETIQ_FORMATO || 'ZPL').toUpperCase();   // ZPL | PDF
-const CRON_EXPR     = process.env.GIRABKP_CRON || '5,15,25,35,45,55 6-23 * * *';   // off do F3
+  @media(max-width:720px){
+    .main{flex-direction:column}
+    .sidebar{width:auto;flex:0 0 auto;max-height:38vh;border-right:0;border-bottom:1px solid var(--line)}
+  }
+  @media print{ html,body{display:none!important} }   /* a página nunca se imprime — só a Zebra via QZ Tray */
+</style>
+</head>
+<body>
+<header>
+  <div class="htop">
+    <h1>📦 Checkout Offline</h1>
+    <span class="ver" id="ver">carregando…</span>
+    <span class="grow"></span>
+    <input class="op" id="operador" placeholder="operador" />
+    <span class="qz off" id="qzStatus" onclick="reconectarQZ()">QZ: …</span>
+  </div>
+  <div class="stats" id="stats">carregando…</div>
+</header>
 
-const MANIFEST_FILE = path.join(CACHE_DIR, 'manifest.json');
-const SKU_EAN_FILE  = path.join(CACHE_DIR, 'sku-ean.json');
-const CONFERIDOS_FILE = path.join(CACHE_DIR, 'conferidos.json');
-const KIT_CACHE_FILE  = path.join(CACHE_DIR, 'kit-estrutura.json');  // kits já resolvidos
-const SCHEMA = 3;  // versão do snapshot — bump força re-cache dos pedidos antigos
+<div class="main">
+  <aside class="sidebar">
+    <div class="sbtools">
+      <button class="btn sec sm" id="btnSync" onclick="sincronizar()">↻ Atualizar</button>
+      <button class="btn sec sm" onclick="escolherImpressora()">🖨 Zebra</button>
+      <button class="btn sec sm" id="modoBtn" onclick="trocarModo()" title="alterna entre etiqueta na Zebra (ZPL) ou abrir PDF p/ imprimir no navegador">🖨️ Etiq: Zebra</button>
+    </div>
+    <input class="busca" id="busca" placeholder="🔎 buscar: nº pedido, NF, cliente…" oninput="onBusca(this.value)" autocomplete="off" />
+    <div id="chips" class="chips"></div>
+    <div id="listaPedidos"><div class="empty">carregando…</div></div>
+  </aside>
 
-// loja → marketplace (mesmo mapa do checkout Girassol)
-const LOJA_MKT = {
-  '203146903': 'ml', '203583169': 'shopee', '203967708': 'amazon',
-  '203262016': 'magalu', '205523707': 'tiktok'
+  <section class="detail" id="detail">
+    <div class="placeholder">← selecione um pedido à esquerda</div>
+  </section>
+</div>
+
+<div class="foot">cache local · se a tela não mudar após deploy, dê <b>Ctrl+Shift+R</b></div>
+<div class="toast" id="toast"></div>
+<div class="modal" id="modal"></div>
+
+<script>
+const UI_BUILD = 'b27';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const MKT = {
+  ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
+  amazon:{n:'Amazon',c:'#ff9900'}, magalu:{n:'Magalu',c:'#0086ff'}, outro:{n:'Outro',c:'#94a3b8'}
 };
+let pedidoAtual = null;   // {bling_id,numero,cliente,nf,marketplace,itens:[{sku,ean,descricao,qtd,bipado}]}
+let zplAtual = null;
+let listaCache = [];
+let filtroBusca = '';
+let filtroMkt = null;   // null=todos | 'ml'|'shopee'|... | 'flex'
 
-// FLEX = entrega por motoboy (etiqueta sempre disponível). Mesma lógica do checkout-expedição.
-const FLEX_KEYWORDS = ['mercado envios flex', 'entrega local', 'vapt', 'shopee entrega direta'];
-function servicoDoPedido(det) {
-  if (!det) return '';
-  const t = det.transporte || {};
-  const vol = (t.volumes && t.volumes[0]) || {};
-  return String(vol.servico || t.servico || '').trim();
-}
-function ehFlex(servico) {
-  const s = String(servico || '').toLowerCase();
-  return FLEX_KEYWORDS.some(k => s.includes(k));
-}
+const $ = id => document.getElementById(id);
+const norm = c => String(c||'').trim().replace(/\s+/g,'');
+const esc = s => String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+function toast(m){ const t=$('toast'); t.textContent=m; t.classList.add('show'); clearTimeout(t._t); t._t=setTimeout(()=>t.classList.remove('show'),1800); }
 
-// ─── helpers genéricos ──────────────────────────────────────────────────
-const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-function ensureDir(d) { try { fs.mkdirSync(d, { recursive: true }); } catch (e) {} }
-function readJson(file, fb) { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { return fb; } }
-function writeJson(file, obj) {
-  try { fs.writeFileSync(file, JSON.stringify(obj, null, 2)); }
-  catch (e) { console.error('[GIRABKP] write', file, e.message); }
-}
-function dataISO(d) { return d.toISOString().slice(0, 10); }
-function json(res, code, body) { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(body)); }
-function html(res, code, body) { res.writeHead(code, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(body); }
+const opIn = $('operador');
+opIn.value = localStorage.getItem('gbkp_op') || '';
+opIn.addEventListener('input', ()=>localStorage.setItem('gbkp_op', opIn.value));
 
-// EAN robusto — varre todos os nomes de campo que o Bling usa pro GTIN
-function getPossiveisGtins(obj) {
-  if (!obj) return [];
-  const c = [
-    obj.gtin, obj.ean, obj.codigoBarras, obj.gtinEan, obj.gtinTributario,
-    obj.codigo_barras, obj.codigoDeBarras, obj.codBarras, obj.codigobarras,
-    obj.gtinEmbalagem, obj.gtin_embalagem, obj.codigoBarrasTributario,
-    obj.eanTributario, obj.gtinEanTributario,
-    obj.tributavel && obj.tributavel.gtin, obj.tributavel && obj.tributavel.ean,
-    obj.tributacao && obj.tributacao.gtin, obj.tributacao && obj.tributacao.ean,
-    obj.tributario && obj.tributario.gtin, obj.tributario && obj.tributario.ean
-  ];
-  if (obj.tributacao) {
-    Object.values(obj.tributacao).forEach(v => { if (typeof v === 'string' && v.length >= 8) c.push(v); });
-  }
-  return c.filter(Boolean).map(String);
-}
-function primeiroEan(produto) {
-  const g = getPossiveisGtins(produto);
-  return g.find(x => /^\d{8,14}$/.test(x)) || g[0] || null;
+// ── áudio ──
+let actx;
+function beep(ok){
+  try{ actx = actx || new (window.AudioContext||window.webkitAudioContext)();
+    const o=actx.createOscillator(), g=actx.createGain(); o.connect(g); g.connect(actx.destination);
+    o.type='square'; o.frequency.value = ok?900:200; g.gain.value=0.12;
+    o.start(); o.stop(actx.currentTime + (ok?0.07:0.28));
+  }catch(e){}
 }
 
-// 1ª imagem do produto (lista traz imagemURL; detalhe traz midia.imagens.externas[].link)
-function primeiraImagem(prod) {
-  if (!prod) return null;
-  if (prod.imagemURL) return prod.imagemURL;
-  const ext = prod.midia && prod.midia.imagens && prod.midia.imagens.externas;
-  if (ext && ext[0] && ext[0].link) return ext[0].link;
-  const url = prod.midia && prod.midia.imagens && prod.midia.imagens.imagensURL;
-  if (url && url[0] && (url[0].link || url[0])) return url[0].link || url[0];
-  return null;
-}
-
-// ─── estado do módulo ───────────────────────────────────────────────────
-let rodando = false;
-let ultimoResumo = { rodouEm: null, total: 0, comEtiqueta: 0, semEtiqueta: 0, novos: 0, erros: 0 };
-let ultimoSync = { em: null, pendentes: 0, ok: 0, falhas: 0 };
-
-const manifest       = () => readJson(MANIFEST_FILE, {});
-const salvarManifest = (m) => writeJson(MANIFEST_FILE, m);
-const skuEanCache    = () => readJson(SKU_EAN_FILE, {});
-const salvarSkuEan   = (m) => writeJson(SKU_EAN_FILE, m);
-
-// GET autenticado no Bling Girassol (token via tokenManager + retry 429)
-async function blingGet(pathUrl, tentativas = 3) {
-  let token;
-  try { token = await garantirToken(); }
-  catch (e) { return { ok: false, status: 401, data: null, erro: 'token: ' + e.message }; }
-  for (let t = 0; t < tentativas; t++) {
-    let r;
-    try {
-      r = await fetch(BLING_BASE + pathUrl, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } });
-    } catch (e) { await sleep(800); continue; }
-    if (r.status === 429) { await sleep(1500 * (t + 1)); continue; }
-    const txt = await r.text();
-    let data = null; try { data = JSON.parse(txt); } catch (e) {}
-    return { ok: r.ok, status: r.status, data };
-  }
-  return { ok: false, status: 429, data: null };
-}
-
-// escrita no Bling (PATCH/POST/PUT) — mesmo cuidado do blingGet (token + retry 429)
-async function blingWrite(method, pathUrl, body) {
-  let token;
-  try { token = await garantirToken(); }
-  catch (e) { return { ok: false, status: 401, data: null, erro: 'token: ' + e.message }; }
-  for (let t = 0; t < 3; t++) {
-    const opts = { method, headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } };
-    if (body !== undefined && body !== null) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
-    let r;
-    try { r = await fetch(BLING_BASE + pathUrl, opts); }
-    catch (e) { await sleep(800); continue; }
-    if (r.status === 429) { await sleep(1500 * (t + 1)); continue; }
-    const txt = await r.text();
-    let data = null; try { data = JSON.parse(txt); } catch (e) {}
-    return { ok: r.ok, status: r.status, data, raw: (txt || '').slice(0, 300) };
-  }
-  return { ok: false, status: 429, data: null };
-}
-
-// muda a situação de um pedido de venda (precisa do escopo "Gerenciar situações")
-async function moverSituacao(blingId, idSituacao) {
-  return await blingWrite('PATCH', `/pedidos/vendas/${blingId}/situacoes/${idSituacao}`, null);
-}
-
-// FASE 3: empurra os pedidos conferidos offline (sincronizado:false) p/ VERIFICADO no Bling
-async function sincronizarConferidos() {
-  const conf = readJson(CONFERIDOS_FILE, {});
-  const ids = Object.keys(conf).filter(id => conf[id] && !conf[id].sincronizado);
-  let ok = 0, falhas = 0;
-  for (const id of ids) {
-    const r = await moverSituacao(id, SIT_VERIFICADO);
-    if (r.ok) {
-      conf[id].sincronizado = true;
-      conf[id].sincronizado_em = new Date().toISOString();
-      delete conf[id].sync_erro;
-      ok++;
-      console.log(`[GIRABKP] sync ${id} → ${SIT_VERIFICADO} OK`);
-    } else {
-      conf[id].sync_erro = String(r.status || 'err');
-      falhas++;
-      console.log(`[GIRABKP] sync ${id} FALHOU (${r.status}) ${r.raw || ''}`);
-    }
-    await sleep(PAUSA_MS);
-  }
-  if (ids.length) writeJson(CONFERIDOS_FILE, conf);
-  ultimoSync = { em: new Date().toISOString(), pendentes: ids.length, ok, falhas };
-  return ultimoSync;
-}
-
-async function listarAtendidos() {
-  const hoje = new Date();
-  const ini  = new Date(hoje); ini.setDate(ini.getDate() - JANELA_DIAS);
-  const qs = `idSituacao=${SIT_ATENDIDO}&dataEmissaoInicial=${dataISO(ini)}&dataEmissaoFinal=${dataISO(hoje)}`;
-  const out = [];
-  let fetchOk = false;
-  for (let pagina = 1; pagina <= 50; pagina++) {
-    const { ok, data } = await blingGet(`/pedidos/vendas?${qs}&pagina=${pagina}&limite=100`);
-    if (pagina === 1) fetchOk = ok;        // marca se o Bling respondeu (p/ não limpar cache offline)
-    const lista = (data && data.data) || [];
-    if (!ok || lista.length === 0) break;
-    out.push(...lista);
-    if (lista.length < 100) break;
-    await sleep(PAUSA_MS);
-  }
-  return { ok: fetchOk, pedidos: out };
-}
-
-async function detalhePedido(id) {
-  const { data } = await blingGet(`/pedidos/vendas/${id}`);
-  return data && data.data;
-}
-
-function parseNF(nf) {
-  if (!nf) return null;
-  return {
-    id: nf.id || null,
-    numero: nf.numero || null,
-    chave: nf.chaveAcesso || nf.chave || null,
-    situacao: (nf.situacao && (nf.situacao.id || nf.situacao)) || null
-  };
-}
-
-// método mandado pelo Diego: pagina /nfe (sem filtro) e acha a NF com id
-// entre pedidoId e pedidoId+2000 (ids sequenciais). /nfe vem desc por id.
-async function acharNFporRange(pedidoId) {
-  const pid = Number(pedidoId);
-  if (!pid) return null;
-  const teto = pid + 2000;
-  let melhor = null;
-  for (let pagina = 1; pagina <= 12; pagina++) {
-    const { ok, data } = await blingGet(`/nfe?limite=100&pagina=${pagina}`);
-    const lista = (data && data.data) || [];
-    if (!ok || lista.length === 0) break;
-    let menorIdPagina = Infinity;
-    for (const nf of lista) {
-      const nid = Number(nf.id) || 0;
-      if (nid && nid < menorIdPagina) menorIdPagina = nid;
-      if (nid >= pid && nid <= teto && (!melhor || nid < Number(melhor.id))) melhor = nf;
-    }
-    if (menorIdPagina < pid) break; // já passou abaixo do pedido → não acha mais
-    await sleep(PAUSA_MS);
-  }
-  return parseNF(melhor);
-}
-
-async function nfDoPedido(id) {
-  // 1) tenta o endpoint direto (barato)
-  const r = await blingGet(`/pedidos/vendas/${id}/nfe`);
-  if (r.ok) {
-    let nf = r.data && r.data.data;
-    if (Array.isArray(nf)) nf = nf[0];
-    if (nf) return parseNF(nf);
-  }
-  // 2) fallback: range de ID no /nfe
-  return await acharNFporRange(id);
-}
-
-// ── NF em LOTE (eficiente p/ o ciclo): pagina /nfe UMA vez até cobrir o
-//    menor id de pedido do lote, e casa todos em memória. /nfe vem desc por id.
-async function carregarNFs(idMinimo) {
-  const nfs = [];
-  for (let pagina = 1; pagina <= 40; pagina++) {
-    const { ok, data } = await blingGet(`/nfe?limite=100&pagina=${pagina}`);
-    const lista = (data && data.data) || [];
-    if (!ok || lista.length === 0) break;
-    let menor = Infinity;
-    for (const nf of lista) {
-      const nid = Number(nf.id) || 0;
-      nfs.push(nf);
-      if (nid && nid < menor) menor = nid;
-    }
-    if (menor < idMinimo) break; // já cobriu o lote
-    await sleep(PAUSA_MS);
-  }
-  return nfs;
-}
-function acharNFnaLista(pedidoId, nfs) {
-  const pid = Number(pedidoId);
-  if (!pid) return null;
-  const teto = pid + 2000;
-  let melhor = null;
-  for (const nf of nfs) {
-    const nid = Number(nf.id) || 0;
-    if (nid >= pid && nid <= teto && (!melhor || nid < Number(melhor.id))) melhor = nf;
-  }
-  return parseNF(melhor);
-}
-
-// EAN: produto por id → produto por SKU. Cacheia por SKU.
-async function eanDoItem(produtoId, sku, cacheEan) {
-  if (sku && Object.prototype.hasOwnProperty.call(cacheEan, sku)) return cacheEan[sku];
-  let ean = null;
-  try {
-    if (produtoId) {
-      const { data } = await blingGet(`/produtos/${produtoId}`);
-      ean = primeiroEan(data && data.data);
-    }
-    if (!ean && sku) {
-      await sleep(PAUSA_MS);
-      const { data } = await blingGet(`/produtos?codigo=${encodeURIComponent(sku)}&limite=1`);
-      ean = primeiroEan(data && data.data && data.data[0]);
-    }
-  } catch (e) { /* sem scope Produtos → ean=null */ }
-  if (sku) cacheEan[sku] = ean;
-  return ean;
-}
-
-// detalhe completo do produto (/produtos/{id}) com cache por ciclo
-let _prodCache = new Map();
-async function produtoDetalhe(id) {
-  if (!id) return null;
-  if (_prodCache.has(id)) return _prodCache.get(id);
-  let prod = null;
-  try {
-    const r = await blingGet(`/produtos/${id}`);
-    prod = (r.ok && r.data && r.data.data) ? r.data.data : null;
-  } catch (e) {}
-  _prodCache.set(id, prod);
-  return prod;
-}
-
-// {sku, ean, descricao, img} de um produto por id (usa cacheEan por SKU)
-async function infoProduto(id, cacheEan) {
-  const prod = await produtoDetalhe(id);
-  await sleep(PAUSA_MS);
-  const sku = (prod && prod.codigo) || '';
-  let ean = prod ? primeiroEan(prod) : null;
-  if (sku) { if (ean) cacheEan[sku] = ean; else if (cacheEan[sku]) ean = cacheEan[sku]; }
-  return { sku, ean, descricao: (prod && prod.nome) || '', img: primeiraImagem(prod) };
-}
-
-// baixa a etiqueta de envio. O Bling devolve um ZIP (com "Etiqueta de envio.txt"
-// dentro = o ZPL), mesmo pedindo formato=ZPL. Então: baixa binário → descompacta.
-async function baixarEtiqueta(blingId) {
-  const { ok, data } = await blingGet(`/logisticas/etiquetas?formato=${ETIQ_FORMATO}&idsVendas[]=${blingId}`);
-  const item = ok && data && data.data && data.data[0];
-  const link = item && item.link;
-  if (!link) return null;
-  try {
-    const r = await fetch(link);
-    if (!r.ok) return null;
-    const buf = await r.buffer();
-    if (!buf || buf.length < 4) return null;
-    // 'PK' (0x50 0x4B) = arquivo ZIP → descompacta e pega o conteúdo
-    if (buf[0] === 0x50 && buf[1] === 0x4B) {
-      try {
-        const zip = new AdmZip(buf);
-        const entries = zip.getEntries();
-        if (!entries.length) return null;
-        const ent = entries.find(e => /\.(txt|zpl)$/i.test(e.entryName)) || entries[0];
-        const conteudo = ent.getData().toString('utf8');
-        return conteudo || null;
-      } catch (e) { return null; }
-    }
-    // não-zip: assume conteúdo direto (ZPL/texto)
-    const txt = buf.toString('utf8');
-    if (!txt || /<html|not\s*found/i.test(txt.slice(0, 200))) return null;
-    return txt;
-  } catch (e) { return null; }
-}
-
-// baixa o DANFE em PDF da NF (via /nfe/{id} → linkPDF). Retorna Buffer ou null.
-async function baixarDanfe(nfId) {
-  if (!nfId) return null;
-  try {
-    const det = await blingGet(`/nfe/${nfId}`);
-    const nf = det.data && det.data.data;
-    const link = nf && nf.linkPDF;
-    if (!link) return null;
-    const resp = await fetch(link, { redirect: 'follow' });
-    if (!resp.ok) return null;
-    const buf = Buffer.from(await resp.arrayBuffer());
-    if (buf.slice(0, 4).toString('latin1') !== '%PDF') return null; // não veio PDF (bloqueio?)
-    return buf;
-  } catch (e) { return null; }
-}
-
-// baixa a ETIQUETA em PDF (formato=PDF) — p/ modo A4 / fallback se a Zebra morrer
-async function baixarEtiquetaPDF(blingId) {
-  const { ok, data } = await blingGet(`/logisticas/etiquetas?formato=PDF&idsVendas[]=${blingId}`);
-  const item = ok && data && data.data && data.data[0];
-  const link = item && item.link;
-  if (!link) return null;
-  try {
-    const r = await fetch(link);
-    if (!r.ok) return null;
-    const buf = Buffer.from(await r.arrayBuffer());
-    if (buf.slice(0, 4).toString('latin1') !== '%PDF') return null;
-    return buf;
-  } catch (e) { return null; }
-}
-
-// converte ZPL → PDF via Labelary (serviço externo). Usado SÓ sob demanda p/ não-ML.
-async function zplParaPdf(zpl) {
-  if (!zpl || zpl.indexOf('^XA') < 0) return null; // não parece ZPL
-  try {
-    const r = await fetch('https://api.labelary.com/v1/printers/8dpmm/labels/4x6/0/', {
-      method: 'POST',
-      headers: { 'Accept': 'application/pdf', 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: zpl
-    });
-    if (!r.ok) return null;
-    const buf = Buffer.from(await r.arrayBuffer());
-    if (buf.slice(0, 4).toString('latin1') !== '%PDF') return null;
-    return buf;
-  } catch (e) { return null; }
-}
-
-// etiqueta em PDF: ML usa o PDF nativo do Bling; não-ML usa o ZPL cacheado → Labelary
-// (não-ML NÃO depende do Bling — funciona mesmo com o Bling fora do ar)
-async function etiquetaPdf(blingId, dir) {
-  let mkt = null;
-  try { mkt = JSON.parse(fs.readFileSync(path.join(dir, 'pedido.json'), 'utf8')).marketplace; } catch (e) {}
-  if (mkt === 'ml' || mkt === null) { // ML (ou desconhecido): tenta o PDF do Bling
-    const direto = await baixarEtiquetaPDF(blingId);
-    if (direto) return direto;
-  }
-  // não-ML (ou ML sem PDF): ZPL cacheado em disco → Labelary
-  let zpl = null;
-  if (dir) { try { zpl = fs.readFileSync(path.join(dir, `etiqueta.${ETIQ_FORMATO.toLowerCase()}`), 'utf8'); } catch (e) {} }
-  if (!zpl) { try { zpl = await baixarEtiqueta(blingId); } catch (e) {} }
-  if (!zpl) return null;
-  return await zplParaPdf(zpl);
-}
-
-async function cachearPedido(ped, cacheEan, nfs, kitCache) {
-  const id  = ped.id;
-  const dir = path.join(CACHE_DIR, String(id));
-  ensureDir(dir);
-
-  const lojaId = String((ped.loja && ped.loja.id) || '');
-
-  const itens = [];
-  let temKit = false;
-  for (const it of (ped.itens || [])) {
-    const itemQty = Number(it.quantidade || 0);
-    const prodId  = it.produto && it.produto.id;
-    const prod    = await produtoDetalhe(prodId); await sleep(PAUSA_MS);
-    const sku     = it.codigo || (prod && prod.codigo) || (it.produto && it.produto.codigo) || '';
-    const eanItem = prod ? primeiroEan(prod) : await eanDoItem(prodId, sku, cacheEan);
-    if (sku && eanItem) cacheEan[sku] = eanItem;
-    const descr   = it.descricao || (prod && prod.nome) || '';
-    const imgItem = primeiraImagem(prod);
-
-    const comps = (prod && prod.estrutura && Array.isArray(prod.estrutura.componentes))
-      ? prod.estrutura.componentes : [];
-
-    if (comps.length) {
-      // KIT / composição → explode nos componentes (com cache por produto-pai)
-      temKit = true;
-      let base = kitCache && kitCache[prodId];
-      if (!base) {
-        base = [];
-        for (const c of comps) {
-          const info = await infoProduto(c.produto && c.produto.id, cacheEan);
-          base.push({ sku: info.sku, ean: info.ean, descricao: info.descricao, img: info.img, qtd: Number(c.quantidade || 1) });
-        }
-        if (kitCache) kitCache[prodId] = base;
-      }
-      // qtd final = qtd do componente no kit × qtd do kit no pedido
-      const componentes = base.map(c => ({ sku: c.sku, ean: c.ean, descricao: c.descricao, img: c.img, qtd: c.qtd * (itemQty || 1) }));
-      itens.push({ sku, ean: eanItem, descricao: descr, img: imgItem, qtd: itemQty, tipo: 'kit', componentes });
-    } else {
-      const tipo = (prod && prod.variacao && prod.variacao.produtoPai) ? 'variacao' : 'simples';
-      itens.push({ sku, ean: eanItem, descricao: descr, img: imgItem, qtd: itemQty, tipo });
-    }
-  }
-
-  const nf = acharNFnaLista(id, nfs || []);
-
-  const conteudoEtiqueta = await baixarEtiqueta(id); await sleep(PAUSA_MS);
-  let temEtiqueta = false;
-  if (conteudoEtiqueta) {
-    fs.writeFileSync(path.join(dir, `etiqueta.${ETIQ_FORMATO.toLowerCase()}`), conteudoEtiqueta);
-    temEtiqueta = true;
-  }
-
-  const _servico = servicoDoPedido(ped);
-  const snapshot = {
-    bling_id: id,
-    numero: ped.numero || null,
-    numero_loja: ped.numeroLoja || null,
-    loja_id: lojaId || null,
-    marketplace: LOJA_MKT[lojaId] || 'outro',
-    servico: _servico,
-    flex: ehFlex(_servico),
-    situacao_id: (ped.situacao && ped.situacao.id) || SIT_ATENDIDO,
-    cliente: (ped.contato && ped.contato.nome) || '',
-    nf,
-    itens,
-    tem_nf: !!nf,
-    tem_kit: temKit,
-    tem_etiqueta: temEtiqueta,
-    etiqueta_formato: temEtiqueta ? ETIQ_FORMATO : null,
-    schema: SCHEMA,
-    cacheado_em: new Date().toISOString()
-  };
-  writeJson(path.join(dir, 'pedido.json'), snapshot);
-  return snapshot;
-}
-
-function purgar(man) {
-  const limite = Date.now() - RETENCAO_DIAS * 24 * 60 * 60 * 1000;
-  for (const id of Object.keys(man)) {
-    const t = Date.parse(man[id].cacheado_em || 0) || 0;
-    if (t && t < limite) {
-      try { fs.rmSync(path.join(CACHE_DIR, String(id)), { recursive: true, force: true }); } catch (e) {}
-      delete man[id];
-    }
-  }
-}
-
-async function rodarCiclo(motivo = 'cron', forcar = false) {
-  if (rodando) { console.log('[GIRABKP] ciclo já em andamento — pulei'); return ultimoResumo; }
-  rodando = true;
-  _prodCache = new Map();                       // zera cache de produto por ciclo
-  const _kc = readJson(KIT_CACHE_FILE, {});
-  const kitCache = (_kc && _kc._schema === SCHEMA && _kc.kits) ? _kc.kits : {}; // invalida se schema mudou
-  const t0 = Date.now();
-  let novos = 0, erros = 0;
-  try {
-    ensureDir(CACHE_DIR);
-    console.log(`[GIRABKP] ▶ ciclo (${motivo})${forcar ? ' [FORCE]' : ''}`);
-    const man      = manifest();
-    const cacheEan = skuEanCache();
-    const { ok: listaOk, pedidos: atendidos } = await listarAtendidos();
-    console.log(`[GIRABKP] ${atendidos.length} pedido(s) ATENDIDO(${SIT_ATENDIDO}) na janela de ${JANELA_DIAS}d (bling ok=${listaOk})`);
-
-    // RECONCILIAÇÃO: remove do cache quem NÃO está mais em ATENDIDO (enviado/processado).
-    // Só roda se o Bling respondeu E veio algo — assim, se o Bling cair, o cache offline é preservado.
-    if (listaOk && atendidos.length > 0) {
-      const idsAtuais = new Set(atendidos.map(p => String(p.id)));
-      let removidos = 0;
-      for (const id of Object.keys(man)) {
-        if (!idsAtuais.has(String(id))) {
-          try { fs.rmSync(path.join(CACHE_DIR, String(id)), { recursive: true, force: true }); } catch (e) {}
-          delete man[id];
-          removidos++;
-        }
-      }
-      if (removidos) { salvarManifest(man); console.log(`[GIRABKP] reconciliação: ${removidos} pedido(s) saíram do ATENDIDO e foram removidos do cache`); }
-    }
-
-    // (re)processa quem não tem etiqueta OU está num schema antigo (ganha EAN+kit)
-    const aProcessar = atendidos.filter(ped => {
-      if (forcar) return true;
-      const ja = man[ped.id];
-      return !(ja && ja.tem_etiqueta && ja.schema === SCHEMA);
-    });
-    console.log(`[GIRABKP] ${aProcessar.length} a (re)processar`);
-
-    // carrega as NFs recentes UMA vez (cobre o menor id do lote) e casa em memória
-    let nfs = [];
-    if (aProcessar.length) {
-      const idMin = Math.min(...aProcessar.map(p => Number(p.id) || Infinity));
-      if (Number.isFinite(idMin)) {
-        nfs = await carregarNFs(idMin - 5);
-        console.log(`[GIRABKP] ${nfs.length} NF(s) recentes carregadas p/ casar`);
-      }
-    }
-
-    for (const ped of aProcessar) {
-      const id = ped.id;
-      const ja = man[id];
-      try {
-        const det = await detalhePedido(id); await sleep(PAUSA_MS);
-        if (!det) { erros++; continue; }
-        const snap = await cachearPedido(det, cacheEan, nfs, kitCache);
-        man[id] = {
-          numero: snap.numero, marketplace: snap.marketplace,
-          servico: snap.servico || '', flex: !!snap.flex,
-          cliente: snap.cliente || '', nf_numero: (snap.nf && snap.nf.numero) || null,
-          tem_nf: snap.tem_nf, tem_kit: snap.tem_kit, tem_etiqueta: snap.tem_etiqueta,
-          tem_danfe: !!(ja && ja.tem_danfe),
-          itens: snap.itens.length, schema: snap.schema, cacheado_em: snap.cacheado_em
+// ── QZ Tray ──
+async function setupQZ(){
+  if(!window.qz){ qzUI(false,'lib não carregou'); return; }
+  qz.api.setPromiseType(r => new Promise(r));
+  if(window.sha256) qz.api.setSha256Type(d => sha256(d));
+  // assinatura → mata o popup "Untrusted". Só ativa se houver certificado configurado no servidor.
+  try{
+    const cert = await fetch('/girassol-backup-offline/qz-cert', {cache:'no-store'}).then(r=>r.text());
+    if(cert && cert.indexOf('BEGIN CERTIFICATE')>=0){
+      qz.security.setCertificatePromise(function(resolve){ resolve(cert); });
+      qz.security.setSignatureAlgorithm('SHA512');
+      qz.security.setSignaturePromise(function(toSign){
+        return function(resolve, reject){
+          fetch('/girassol-backup-offline/qz-sign?request='+encodeURIComponent(toSign), {cache:'no-store'})
+            .then(function(r){ return r.text(); }).then(resolve).catch(reject);
         };
-        if (!ja) novos++;
-        salvarManifest(man);
-        salvarSkuEan(cacheEan);
-        writeJson(KIT_CACHE_FILE, { _schema: SCHEMA, kits: kitCache });
-      } catch (e) { erros++; console.error(`[GIRABKP] erro pedido ${id}:`, e.message); }
-      await sleep(PAUSA_MS);
+      });
     }
+  }catch(e){}
+}
+function qzUI(on, txt){ const el=$('qzStatus'); el.className='qz '+(on?'on':'off'); el.textContent='QZ: '+(txt||(on?'conectado':'desconectado')); }
+async function conectarQZ(){
+  if(!window.qz) throw new Error('Biblioteca QZ não carregou (sem internet?)');
+  if(!qz.websocket.isActive()){ await qz.websocket.connect(); }
+  qzUI(true); return true;
+}
+async function reconectarQZ(){ try{ await conectarQZ(); toast('QZ Tray conectado'); }catch(e){ qzUI(false); toast('QZ Tray não conectou — ele está aberto?'); } }
+async function getImpressora(){
+  let p = localStorage.getItem('gbkp_printer');
+  if(p) return p;
+  const lista = await qz.printers.find();
+  p = (lista||[]).find(n=>/zebra|zdesigner|zpl|\bzd\b|\bgk\b|\bgc\b/i.test(n)) || (lista||[])[0];
+  if(p) localStorage.setItem('gbkp_printer', p);
+  return p;
+}
+async function escolherImpressora(){
+  try{
+    await conectarQZ();
+    const lista = await qz.printers.find();
+    if(!lista||!lista.length){ toast('Nenhuma impressora no QZ'); return; }
+    const atual = localStorage.getItem('gbkp_printer')||'';
+    const msg = 'Impressoras:\n\n'+lista.map((n,i)=>(i+1)+') '+n+(n===atual?'  ← atual':'')).join('\n')+'\n\nNº da Zebra:';
+    const r = prompt(msg, lista.indexOf(atual)>=0?String(lista.indexOf(atual)+1):'1');
+    const idx = parseInt(r,10)-1;
+    if(idx>=0&&idx<lista.length){ localStorage.setItem('gbkp_printer', lista[idx]); toast('Impressora: '+lista[idx]); }
+  }catch(e){ toast('Erro: '+e.message); }
+}
+async function imprimirZPL(zpl){
+  await conectarQZ();
+  const printer = await getImpressora();
+  if(!printer) throw new Error('Nenhuma impressora encontrada');
+  const cfg = qz.configs.create(printer);
+  await qz.print(cfg, [{ type:'raw', format:'command', flavor:'plain', data: zpl }]);
+}
 
-    // passo: baixa o DANFE que falta (TODOS — fica pronto p/ offline rápido)
-    let danfesNovos = 0, danfesFalha = 0, danfesSemId = 0;
-    for (const ped of atendidos) {
-      const dir = path.join(CACHE_DIR, String(ped.id));
-      if (fs.existsSync(path.join(dir, 'danfe.pdf'))) continue;
-      const snap = readJson(path.join(dir, 'pedido.json'), null);
-      if (!snap || !snap.nf || !snap.nf.id) { danfesSemId++; continue; }
-      const pdf = await baixarDanfe(snap.nf.id); await sleep(PAUSA_MS);
-      if (pdf) {
-        fs.writeFileSync(path.join(dir, 'danfe.pdf'), pdf);
-        snap.tem_danfe = true; writeJson(path.join(dir, 'pedido.json'), snap);
-        if (man[ped.id]) man[ped.id].tem_danfe = true;
-        danfesNovos++;
-      } else { danfesFalha++; }
-    }
-    if (danfesNovos) salvarManifest(man);
-    console.log(`[GIRABKP] DANFE: ${danfesNovos} novos, ${danfesFalha} falha, ${danfesSemId} sem nf.id`);
+// ── impressora da NF (DANFE = A4, impressora comum, NÃO a Zebra) ──
+async function getImpressoraNF(){
+  let p = localStorage.getItem('gbkp_printer_nf');
+  if(p) return p;
+  const lista = await qz.printers.find();
+  p = (lista||[]).find(n=>!/zebra|zdesigner|zpl|\bzd\b|\bgk\b|\bgc\b/i.test(n)) || (lista||[])[0];
+  if(p) localStorage.setItem('gbkp_printer_nf', p);
+  return p;
+}
+async function escolherImpressoraNF(){
+  try{
+    await conectarQZ();
+    const lista = await qz.printers.find();
+    if(!lista||!lista.length){ toast('Nenhuma impressora no QZ'); return; }
+    const atual = localStorage.getItem('gbkp_printer_nf')||'';
+    const msg = 'Impressoras:\n\n'+lista.map((n,i)=>(i+1)+') '+n+(n===atual?'  ← atual':'')).join('\n')+'\n\nNº da impressora da NF (A4):';
+    const r = prompt(msg, lista.indexOf(atual)>=0?String(lista.indexOf(atual)+1):'1');
+    const idx = parseInt(r,10)-1;
+    if(idx>=0&&idx<lista.length){ localStorage.setItem('gbkp_printer_nf', lista[idx]); toast('Impressora NF: '+lista[idx]); }
+  }catch(e){ toast('Erro: '+e.message); }
+}
+async function imprimirPDF(url){
+  await conectarQZ();
+  const printer = await getImpressoraNF();
+  if(!printer) throw new Error('Nenhuma impressora encontrada');
+  const resp = await fetch(url);
+  if(!resp.ok) throw new Error('PDF '+resp.status);
+  const bytes = new Uint8Array(await resp.arrayBuffer());
+  let bin=''; for(let i=0;i<bytes.length;i++) bin+=String.fromCharCode(bytes[i]);
+  const b64 = btoa(bin);
+  const cfg = qz.configs.create(printer);
+  await qz.print(cfg, [{ type:'pixel', format:'pdf', flavor:'base64', data: b64 }]);
+}
 
-    // passo: baixa a ETIQUETA em PDF (p/ modo A4 / fallback Zebra) — só de quem já tem ZPL
-    let etqPdfNovos = 0;
-    const extEtq = ETIQ_FORMATO.toLowerCase();
-    for (const ped of atendidos) {
-      const dir = path.join(CACHE_DIR, String(ped.id));
-      if (fs.existsSync(path.join(dir, 'etiqueta.pdf'))) continue;
-      if (!fs.existsSync(path.join(dir, `etiqueta.${extEtq}`))) continue;
-      const pdf = await baixarEtiquetaPDF(ped.id); await sleep(PAUSA_MS);
-      if (pdf) { fs.writeFileSync(path.join(dir, 'etiqueta.pdf'), pdf); etqPdfNovos++; }
-    }
-    if (etqPdfNovos) console.log(`[GIRABKP] ${etqPdfNovos} etiqueta(s) PDF cacheadas`);
-
-    // passo: garante servico + flex no manifest (p/ filtro marketplace/FLEX) — lê detalhe só de quem falta
-    let svcNovos = 0;
-    for (const ped of atendidos) {
-      const m = man[ped.id];
-      if (!m || m.servico !== undefined) continue;
-      const det = await detalhePedido(ped.id); await sleep(PAUSA_MS);
-      const svc = servicoDoPedido(det);
-      m.servico = svc; m.flex = ehFlex(svc);
-      // aproveita p/ preencher o snapshot também
-      const snapPath = path.join(CACHE_DIR, String(ped.id), 'pedido.json');
-      const snap = readJson(snapPath, null);
-      if (snap) { snap.servico = svc; snap.flex = ehFlex(svc); writeJson(snapPath, snap); }
-      svcNovos++;
-    }
-    if (svcNovos) { salvarManifest(man); console.log(`[GIRABKP] ${svcNovos} servico/flex preenchidos`); }
-
-    // FASE 3: Bling respondeu (listaOk) → drena a fila de conferidos offline p/ VERIFICADO (24)
-    // só roda automático se GIRABKP_SYNC_ON=1 (trava de segurança até você testar)
-    if (listaOk && SYNC_ON) {
-      const sync = await sincronizarConferidos();
-      if (sync.pendentes) console.log(`[GIRABKP] sync conferidos→${SIT_VERIFICADO}: ${sync.ok} ok, ${sync.falhas} falha(s) de ${sync.pendentes}`);
-    }
-
-    purgar(man);
-    salvarManifest(man);
-
-    const ids = Object.keys(man);
-    ultimoResumo = {
-      rodouEm: new Date().toISOString(),
-      duracaoSeg: Math.round((Date.now() - t0) / 1000),
-      total: ids.length,
-      comEtiqueta: ids.filter(i => man[i].tem_etiqueta).length,
-      semEtiqueta: ids.filter(i => !man[i].tem_etiqueta).length,
-      novos, erros
-    };
-    console.log('[GIRABKP] ✔ ciclo:', JSON.stringify(ultimoResumo));
-  } catch (e) {
-    console.error('[GIRABKP] ciclo falhou:', e.message);
-  } finally {
-    rodando = false;
+// ── chave Zebra(ZPL) ↔ A4(PDF) p/ a ETIQUETA (a NF é sempre A4) ──
+function modoEtiqueta(){ return localStorage.getItem('gbkp_modo_etiq')==='a4' ? 'a4' : 'zebra'; }
+async function imprimirEtiqueta(id, zpl){
+  if(modoEtiqueta()==='a4'){
+    window.open(location.origin+'/girassol-backup-offline/etiqueta-pdf/'+id, '_blank');  // abre o PDF — você imprime pelo navegador
+  }else{
+    const z = zpl || await fetch('/girassol-backup-offline/etiqueta/'+id).then(r=>r.text());
+    await imprimirZPL(z);  // Zebra (QZ Tray)
   }
-  return ultimoResumo;
+}
+function aplicarModoLabel(){
+  const b=$('modoBtn'); if(!b) return;
+  const a4 = modoEtiqueta()==='a4';
+  b.textContent = a4 ? '📄 Etiq: A4' : '🖨️ Etiq: Zebra';
+  b.classList.toggle('on', a4);
+}
+function trocarModo(){
+  const novo = modoEtiqueta()==='a4' ? 'zebra' : 'a4';
+  localStorage.setItem('gbkp_modo_etiq', novo);
+  aplicarModoLabel();
+  toast(novo==='a4' ? 'Etiqueta agora abre em PDF — imprima pelo navegador' : 'Etiqueta agora pela Zebra (ZPL/QZ)');
 }
 
-// ─── Rotas HTTP (namespaced) ────────────────────────────────────────────
-function routes(readBody) {
-  return async function handle(req, res, urlObj) {
-    const { method } = req;
-    const p = urlObj.pathname;
+// ── API ──
+const api = (u,opt) => fetch(u,opt).then(r=>r.json());
 
-    // raiz do módulo → manda pro painel (evita "not found" ao abrir a URL base)
-    if (method === 'GET' && (p === '/girassol-backup-offline' || p === '/girassol-backup-offline/')) {
-      res.writeHead(302, { Location: '/girassol-backup-offline/painel' });
-      res.end();
-      return true;
-    }
-
-    if ((method === 'POST' || method === 'GET') && p === '/girassol-backup-offline/run') {
-      const forcar = /[?&]force=1\b/.test(urlObj.search || '');
-      rodarCiclo(forcar ? 'manual-force' : 'manual', forcar);
-      json(res, 200, { mensagem: `Ciclo${forcar ? ' (FORCE — re-cacheia tudo)' : ''} iniciado. Veja /girassol-backup-offline/status.`, versao: VERSAO });
-      return true;
-    }
-
-    // ─── QZ Tray: assinatura (mata o popup "Untrusted") ───
-    // serve o certificado público p/ o QZ confiar
-    if (method === 'GET' && p === '/girassol-backup-offline/qz-cert') {
-      res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
-      res.end(QZ_CERT || '');
-      return true;
-    }
-    // assina a requisição do QZ com a chave privada (RSA-SHA512)
-    if (method === 'GET' && p === '/girassol-backup-offline/qz-sign') {
-      let toSign = '';
-      try { toSign = (urlObj.searchParams && urlObj.searchParams.get('request')) || ''; } catch (e) {}
-      if (!toSign) { const m = /[?&]request=([^&]*)/.exec(urlObj.search || ''); toSign = m ? decodeURIComponent(m[1]) : ''; }
-      if (!QZ_PRIVKEY) { res.writeHead(200, { 'Content-Type': 'text/plain' }); res.end(''); return true; }
-      try {
-        const s = crypto.createSign('RSA-SHA512'); s.update(toSign);
-        res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
-        res.end(s.sign(QZ_PRIVKEY, 'base64'));
-      } catch (e) { res.writeHead(200, { 'Content-Type': 'text/plain' }); res.end(''); }
-      return true;
-    }
-
-    // ─── FASE 2: tela de bipagem ───
-    // serve a página
-    if (method === 'GET' && p === '/girassol-backup-offline/painel') {
-      try {
-        const htmlContent = fs.readFileSync(path.join(__dirname, 'painel.html'), 'utf8');
-        html(res, 200, htmlContent);
-      } catch (e) { json(res, 500, { erro: 'painel.html: ' + e.message }); }
-      return true;
-    }
-
-    // lista os pedidos PRONTOS (com etiqueta) + estado de conferido
-    if (method === 'GET' && p === '/girassol-backup-offline/lista') {
-      const man = manifest();
-      const conf = readJson(CONFERIDOS_FILE, {});
-      const ids = Object.keys(man);
-      // backfill cliente + nº NF p/ busca (lê snapshot só de quem ainda não tem; persiste 1x)
-      let mexeu = false;
-      for (const i of ids) {
-        const m = man[i];
-        if (m && (m.cliente === undefined || m.nf_numero === undefined)) {
-          const snap = readJson(path.join(CACHE_DIR, String(i), 'pedido.json'), null);
-          if (snap) { m.cliente = snap.cliente || ''; m.nf_numero = (snap.nf && snap.nf.numero) || null; }
-          else { m.cliente = m.cliente || ''; m.nf_numero = m.nf_numero || null; }
-          mexeu = true;
-        }
-      }
-      if (mexeu) salvarManifest(man);
-      const prontos = ids
-        .filter(i => man[i].tem_etiqueta)
-        .map(i => ({ id: i, ...man[i], conferido: conf[i] || null }))
-        .sort((a, b) => Number(b.numero || 0) - Number(a.numero || 0));      json(res, 200, {
-        versao: VERSAO,
-        prontos: prontos.length,
-        sem_etiqueta: ids.filter(i => !man[i].tem_etiqueta).length,
-        conferidos: prontos.filter(p2 => p2.conferido).length,
-        pedidos: prontos
-      });
-      return true;
-    }
-
-    // detalhe do pedido cacheado (itens + EAN + NF)
-    if (method === 'GET' && p.startsWith('/girassol-backup-offline/pedido/')) {
-      const id = p.split('/').filter(Boolean).pop();
-      const ped = readJson(path.join(CACHE_DIR, String(id), 'pedido.json'), null);
-      if (!ped) { json(res, 404, { erro: 'pedido não cacheado' }); return true; }
-      const conf = readJson(CONFERIDOS_FILE, {});
-      ped.conferido = conf[id] || null;
-      json(res, 200, ped);
-      return true;
-    }
-
-    // serve o ZPL cacheado (texto puro) p/ o QZ Tray imprimir
-    if (method === 'GET' && p.startsWith('/girassol-backup-offline/etiqueta/')) {
-      const id = p.split('/').filter(Boolean).pop();
-      try {
-        const zpl = fs.readFileSync(path.join(CACHE_DIR, String(id), `etiqueta.${ETIQ_FORMATO.toLowerCase()}`), 'utf8');
-        res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
-        res.end(zpl);
-      } catch (e) { json(res, 404, { erro: 'etiqueta não cacheada' }); }
-      return true;
-    }
-
-    // serve o DANFE (PDF) — usa o cache; se faltar, gera na hora pelo Bling
-    if (method === 'GET' && p.startsWith('/girassol-backup-offline/danfe/')) {
-      const id = p.split('/').filter(Boolean).pop();
-      const dir = path.join(CACHE_DIR, String(id));
-      let pdf = null;
-      try { pdf = fs.readFileSync(path.join(dir, 'danfe.pdf')); } catch (e) {}
-      if (!pdf) { // não cacheado → gera agora (precisa do Bling online)
-        const snap = readJson(path.join(dir, 'pedido.json'), null);
-        const nfId = snap && snap.nf && snap.nf.id;
-        if (nfId) { pdf = await baixarDanfe(nfId); if (pdf) { try { ensureDir(dir); fs.writeFileSync(path.join(dir, 'danfe.pdf'), pdf); } catch (e) {} } }
-      }
-      if (pdf) { res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': 'inline; filename="danfe.pdf"' }); res.end(pdf); }
-      else json(res, 404, { erro: 'DANFE indisponível (sem cache e Bling não respondeu)' });
-      return true;
-    }
-
-    // serve a ETIQUETA em PDF — usa o cache; se faltar, gera na hora pelo Bling
-    if (method === 'GET' && p.startsWith('/girassol-backup-offline/etiqueta-pdf/')) {
-      const id = p.split('/').filter(Boolean).pop();
-      const dir = path.join(CACHE_DIR, String(id));
-      let pdf = null;
-      try { pdf = fs.readFileSync(path.join(dir, 'etiqueta.pdf')); } catch (e) {}
-      if (!pdf) { // não cacheado → gera agora: PDF do Bling (ML) ou ZPL→PDF via Labelary (não-ML)
-        pdf = await etiquetaPdf(id, dir);
-        if (pdf) { try { ensureDir(dir); fs.writeFileSync(path.join(dir, 'etiqueta.pdf'), pdf); } catch (e) {} }
-      }
-      if (pdf) { res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': 'inline; filename="etiqueta.pdf"' }); res.end(pdf); }
-      else json(res, 404, { erro: 'etiqueta PDF indisponível' });
-      return true;
-    }
-
-    // marca pedido como conferido offline (entra na fila p/ sync na Fase 3)
-    if (method === 'POST' && p === '/girassol-backup-offline/conferido') {
-      const body = await readBody(req);
-      const id = String(body.id || '');
-      if (!id) { json(res, 400, { erro: 'id obrigatório' }); return true; }
-      const conf = readJson(CONFERIDOS_FILE, {});
-      conf[id] = { user: body.user || '', conferido_em: new Date().toISOString(), sincronizado: false };
-      writeJson(CONFERIDOS_FILE, conf);
-      json(res, 200, { ok: true, id });
-      return true;
-    }
-
-    // FASE 3 — força o sync da fila de conferidos → VERIFICADO (24). Botão "Sincronizar" / manual.
-    if ((method === 'POST' || method === 'GET') && p === '/girassol-backup-offline/sincronizar') {
-      const r = await sincronizarConferidos();
-      json(res, 200, { ok: true, ...r });
-      return true;
-    }
-
-    // DEBUG — testa mover UM pedido p/ VERIFICADO (ou outro id via ?situacao=). Mostra resposta crua do Bling.
-    // uso: /girassol-backup-offline/debug-mover/{idDoPedido}
-    if (method === 'GET' && p.startsWith('/girassol-backup-offline/debug-mover/')) {
-      const id = p.split('/').pop();
-      const sit = Number(urlObj.searchParams.get('situacao') || SIT_VERIFICADO);
-      const r = await moverSituacao(id, sit);
-      json(res, 200, { pedido: id, situacao_destino: sit, resultado: r });
-      return true;
-    }
-
-    if (method === 'GET' && p === '/girassol-backup-offline/status') {
-      const man = manifest();
-      const ids = Object.keys(man);
-      const conf = readJson(CONFERIDOS_FILE, {});
-      const confIds = Object.keys(conf);
-      json(res, 200, {
-        versao: VERSAO,
-        resumo: ultimoResumo,
-        cacheDir: CACHE_DIR,
-        situacaoAtendido: SIT_ATENDIDO,
-        situacaoVerificado: SIT_VERIFICADO,
-        formato: ETIQ_FORMATO,
-        total: ids.length,
-        comEtiqueta: ids.filter(i => man[i].tem_etiqueta).length,
-        semEtiqueta: ids.filter(i => !man[i].tem_etiqueta).length,
-        sync: { ...ultimoSync, ligado: SYNC_ON, conferidos: confIds.length, pendentes: confIds.filter(i => !conf[i].sincronizado).length },
-        pedidos: ids.map(i => ({ id: i, ...man[i] }))
-      });
-      return true;
-    }
-
-    // DEBUG: dumpa as respostas cruas do Bling p/ um pedido (diagnóstico NF/etiqueta)
-    if (method === 'GET' && p.startsWith('/girassol-backup-offline/debug/')) {
-      const id = p.split('/').filter(Boolean).pop();
-      const out = { id, versao: VERSAO };
-      try {
-        const ped = await blingGet(`/pedidos/vendas/${id}`);
-        out.pedido_status = ped.status;
-        const d = ped.data && ped.data.data;
-        out.pedido = d ? {
-          numero: d.numero,
-          situacao: d.situacao,
-          loja: d.loja,
-          numeroLoja: d.numeroLoja,
-          contato: d.contato && { nome: d.contato.nome },
-          itens: (d.itens || []).map(it => ({ codigo: it.codigo, quantidade: it.quantidade, produto: it.produto }))
-        } : ped.data;
-
-        const nfe = await blingGet(`/pedidos/vendas/${id}/nfe`);
-        out.nfe_direto_status = nfe.status;
-        out.nfe_direto_raw = nfe.data;
-        out.nf_por_range = await acharNFporRange(id);
-
-        // testa as 2 formas do parâmetro de etiqueta p/ cravar qual o Bling aceita
-        const etqA = await blingGet(`/logisticas/etiquetas?formato=${ETIQ_FORMATO}&idsVendas[]=${id}`);
-        out.etiqueta_bracket = { status: etqA.status, raw: etqA.data };
-        const etqB = await blingGet(`/logisticas/etiquetas?formato=${ETIQ_FORMATO}&idsVendas%5B%5D=${id}`);
-        out.etiqueta_encoded = { status: etqB.status, raw: etqB.data };
-
-        const bom = (etqA.ok && etqA.data) ? etqA : (etqB.ok ? etqB : null);
-        const link = bom && bom.data && bom.data.data && bom.data.data[0] && bom.data.data[0].link;
-        out.etiqueta_link = link ? link.slice(0, 90) + '...' : null;
-        if (link) {
-          try {
-            const r = await fetch(link);
-            const buf = await r.buffer();
-            const ehZip = buf && buf.length >= 2 && buf[0] === 0x50 && buf[1] === 0x4B;
-            let zpl = null, arquivos = null;
-            if (ehZip) {
-              const zip = new AdmZip(buf);
-              arquivos = zip.getEntries().map(e => e.entryName);
-              const ent = zip.getEntries().find(e => /\.(txt|zpl)$/i.test(e.entryName)) || zip.getEntries()[0];
-              zpl = ent ? ent.getData().toString('utf8') : null;
-            } else {
-              zpl = buf.toString('utf8');
-            }
-            out.etiqueta_download = {
-              status: r.status,
-              contentType: r.headers.get('content-type'),
-              tamanho_zip: buf ? buf.length : 0,
-              eh_zip: ehZip,
-              arquivos_no_zip: arquivos,
-              zpl_tamanho: zpl ? zpl.length : 0,
-              zpl_inicio: zpl ? zpl.slice(0, 200) : null
-            };
-          } catch (e) { out.etiqueta_download = { erro: e.message }; }
-        }
-      } catch (e) { out.erro = e.message; }
-      json(res, 200, out);
-      return true;
-    }
-
-    // DEBUG: lista vendas ML recentes (loja 203146903) p/ achar uma pra testar etiqueta
-    if (method === 'GET' && p === '/girassol-backup-offline/debug-ml') {
-      const { data } = await blingGet(`/pedidos/vendas?idLoja=203146903&limite=20&pagina=1`);
-      const lista = (data && data.data) || [];
-      json(res, 200, {
-        versao: VERSAO,
-        total: lista.length,
-        pedidos: lista.map(o => ({
-          id: o.id,
-          numero: o.numero,
-          situacao: o.situacao && o.situacao.id,
-          data: o.data
-        }))
-      });
-      return true;
-    }
-
-    // DEBUG: dumpa a ESTRUTURA dos produtos de um pedido (variação / composição / kit)
-    // uso: /girassol-backup-offline/debug-estrutura/{idDoPedido}
-    if (method === 'GET' && p.startsWith('/girassol-backup-offline/debug-estrutura/')) {
-      const id = p.split('/').filter(Boolean).pop();
-      const out = { pedido: id, versao: VERSAO, itens: [] };
-      try {
-        // probe: o escopo Produtos funciona? (lista 1 produto)
-        const probe = await blingGet(`/produtos?limite=1`);
-        out.probe_produtos = {
-          status: probe.status, ok: probe.ok,
-          corpo: probe.data && probe.data.data && probe.data.data[0]
-            ? { campos: Object.keys(probe.data.data[0]) }
-            : probe.data
-        };
-        await sleep(PAUSA_MS);
-
-        const ped = await blingGet(`/pedidos/vendas/${id}`);
-        const d = ped.data && ped.data.data;
-        out.numero = d && d.numero;
-        for (const it of ((d && d.itens) || [])) {
-          const prodId = it.produto && it.produto.id;
-          let status = null, raw = null;
-          if (prodId) {
-            const r = await blingGet(`/produtos/${prodId}`);
-            status = r.status;
-            raw = r.data;               // corpo CRU do /produtos/{id}
-            await sleep(PAUSA_MS);
-          }
-          out.itens.push({
-            item_descricao: it.descricao,
-            item_codigo: it.codigo,
-            item_qtd: it.quantidade,
-            item_produto: it.produto,   // o que vem dentro do item do pedido
-            produto_id: prodId,
-            produtos_status: status,    // HTTP status do /produtos/{id}
-            produtos_raw: raw           // corpo cru (aqui vejo formato/estrutura/erro)
-          });
-        }
-      } catch (e) { out.erro = e.message; }
-      json(res, 200, out);
-      return true;
-    }
-
-    // DEBUG: acha pedidos no cache que parecem KIT/composição (p/ inspecionar a estrutura)
-    if (method === 'GET' && p === '/girassol-backup-offline/debug-buscar-kit') {
-      const man = manifest();
-      const achados = [];
-      for (const id of Object.keys(man)) {
-        const ped = readJson(path.join(CACHE_DIR, String(id), 'pedido.json'), null);
-        if (!ped) continue;
-        const suspeito = (ped.itens || []).some(it =>
-          /kit|combo|conjunto/i.test(it.sku || '') ||
-          /kit|combo|conjunto/i.test(it.descricao || '') ||
-          (!it.ean && (it.descricao || it.sku))   // sem EAN = provável kit/composição (NF sem GTIN)
-        );
-        if (suspeito) {
-          achados.push({
-            id,
-            numero: ped.numero,
-            cliente: ped.cliente,
-            marketplace: ped.marketplace,
-            itens: (ped.itens || []).map(i => ({ sku: i.sku, ean: i.ean, qtd: i.qtd, descricao: (i.descricao || '').slice(0, 60) }))
-          });
-        }
-        if (achados.length >= 15) break;
-      }
-      json(res, 200, {
-        versao: VERSAO,
-        encontrados: achados.length,
-        dica: 'pegue um "id" e abra /girassol-backup-offline/debug-estrutura/{id}',
-        pedidos: achados
-      });
-      return true;
-    }
-
-    // DEBUG: dumpa o objeto NF + TESTA baixar o DANFE em PDF (linkPDF) de dentro do Render
-    if (method === 'GET' && p === '/girassol-backup-offline/debug-nf') {
-      const out = { versao: VERSAO };
-      try {
-        const r = await blingGet(`/nfe?limite=1`);
-        out.lista_status = r.status;
-        const nf0 = r.data && r.data.data && r.data.data[0];
-        if (nf0 && nf0.id) {
-          await sleep(PAUSA_MS);
-          const det = await blingGet(`/nfe/${nf0.id}`);
-          const nf = det.data && det.data.data;
-          out.numero = nf && nf.numero;
-          out.tem_linkPDF = !!(nf && nf.linkPDF);
-          out.tem_linkDanfe = !!(nf && nf.linkDanfe);
-          out.tem_xml = !!(nf && nf.xml);
-          if (nf && nf.linkPDF) {
-            try {
-              const resp = await fetch(nf.linkPDF, { redirect: 'follow' });
-              const buf = Buffer.from(await resp.arrayBuffer());
-              const head = buf.slice(0, 8).toString('latin1');
-              out.download_pdf = {
-                status: resp.status,
-                content_type: resp.headers.get('content-type'),
-                tamanho_bytes: buf.length,
-                primeiros_bytes: head,
-                eh_pdf: head.startsWith('%PDF'),
-                parece_bloqueio: /^<|html|cloudflare/i.test(head)
-              };
-            } catch (e) { out.download_pdf = { erro: e.message }; }
-          }
-        }
-      } catch (e) { out.erro = e.message; }
-      json(res, 200, out);
-      return true;
-    }
-
-    // testa o caminho do DANFE p/ UM pedido (id do pedido) e cacheia se der certo
-    // uso: /girassol-backup-offline/debug-danfe/{idDoPedido}
-    if (method === 'GET' && p.startsWith('/girassol-backup-offline/debug-danfe/')) {
-      const id = p.split('/').filter(Boolean).pop();
-      const out = { pedido: id, versao: VERSAO };
-      try {
-        const dir = path.join(CACHE_DIR, String(id));
-        out.dir_existe = fs.existsSync(dir);
-        out.danfe_ja_cacheado = fs.existsSync(path.join(dir, 'danfe.pdf'));
-        const snap = readJson(path.join(dir, 'pedido.json'), null);
-        out.snapshot_existe = !!snap;
-        out.nf_no_snapshot = (snap && snap.nf) || null;
-        let nfId = snap && snap.nf && snap.nf.id;
-        out.nf_id_snapshot = nfId || null;
-        if (!nfId) { // fallback: tenta achar a NF do pedido na hora
-          const nf = await nfDoPedido(id); await sleep(PAUSA_MS);
-          out.nf_via_fallback = nf;
-          nfId = nf && nf.id;
-        }
-        out.nf_id_usado = nfId || null;
-        if (nfId) {
-          const det = await blingGet(`/nfe/${nfId}`);
-          out.nfe_get_ok = det.ok; out.nfe_get_status = det.status;
-          const nf = det.data && det.data.data;
-          out.tem_linkPDF = !!(nf && nf.linkPDF);
-          if (nf && nf.linkPDF) {
-            const resp = await fetch(nf.linkPDF, { redirect: 'follow' });
-            const buf = Buffer.from(await resp.arrayBuffer());
-            const head = buf.slice(0, 8).toString('latin1');
-            out.download = { status: resp.status, tamanho: buf.length, primeiros: head, eh_pdf: head.startsWith('%PDF') };
-            if (head.startsWith('%PDF')) {
-              fs.writeFileSync(path.join(dir, 'danfe.pdf'), buf);
-              if (snap) { snap.tem_danfe = true; writeJson(path.join(dir, 'pedido.json'), snap); }
-              const man = manifest(); if (man[id]) { man[id].tem_danfe = true; salvarManifest(man); }
-              out.salvou = true;
-            }
-          }
-        }
-      } catch (e) { out.erro = e.message; }
-      json(res, 200, out);
-      return true;
-    }
-
-    // testa se o Bling devolve a ETIQUETA em PDF (vs ZPL) p/ um pedido
-    // uso: /girassol-backup-offline/debug-etiqueta-fmt/{idDoPedido}
-    if (method === 'GET' && p.startsWith('/girassol-backup-offline/debug-etiqueta-fmt/')) {
-      const id = p.split('/').filter(Boolean).pop();
-      const out = { pedido: id, versao: VERSAO };
-      try {
-        for (const fmt of ['PDF', 'ZPL']) {
-          const r = await blingGet(`/logisticas/etiquetas?formato=${fmt}&idsVendas[]=${id}`); await sleep(PAUSA_MS);
-          const item = r.data && r.data.data && r.data.data[0];
-          const link = item && item.link;
-          const info = { api_ok: r.ok, api_status: r.status, tem_link: !!link };
-          if (!link && r.data) info.resposta = JSON.stringify(r.data).slice(0, 300);
-          if (link) {
-            try {
-              const resp = await fetch(link); await sleep(PAUSA_MS);
-              const buf = Buffer.from(await resp.arrayBuffer());
-              const head = buf.slice(0, 8).toString('latin1');
-              info.download = {
-                status: resp.status,
-                content_type: resp.headers.get('content-type'),
-                tamanho: buf.length,
-                primeiros: head,
-                eh_pdf: head.startsWith('%PDF'),
-                eh_zip: head.charCodeAt(0) === 0x50 && head.charCodeAt(1) === 0x4B
-              };
-            } catch (e) { info.download = { erro: e.message }; }
-          }
-          out[fmt] = info;
-        }
-      } catch (e) { out.erro = e.message; }
-      json(res, 200, out);
-      return true;
-    }
-
-    return false; // não tratou
-  };
+async function carregarLista(){
+  try{
+    const d = await api('/girassol-backup-offline/lista');
+    $('ver').textContent = (d.versao ? d.versao.replace('girassol-backup-offline ','') : 'v?') + ' · ui ' + UI_BUILD;
+    $('stats').innerHTML =
+      '<span><b>'+d.prontos+'</b> prontos</span>'+
+      '<span><b>'+d.conferidos+'</b> conferidos</span>'+
+      '<span><b>'+d.sem_etiqueta+'</b> sem etiqueta</span>';
+    listaCache = d.pedidos||[];
+    renderChips();
+    renderLista();
+  }catch(e){ $('listaPedidos').innerHTML='<div class="empty">erro: '+esc(e.message)+'</div>'; }
 }
 
-// roda 1 ciclo logo após o boot do serviço
-function bootstrap() {
-  ensureDir(CACHE_DIR);
-  console.log(`[GIRABKP] ${VERSAO} ativo — ATENDIDO=${SIT_ATENDIDO}, janela=${JANELA_DIAS}d, cron="${CRON_EXPR}", formato=${ETIQ_FORMATO}`);
-  setTimeout(() => rodarCiclo('boot'), 20000);
+// força uma sincronia real com o Bling (roda 1 ciclo → reconcilia o que saiu do ATENDIDO)
+async function sincronizar(){
+  const b = $('btnSync');
+  const orig = b ? b.textContent : '';
+  if(b){ b.textContent='⏳ Sincronizando…'; b.disabled = true; }
+  try{
+    await fetch('/girassol-backup-offline/run', { method:'POST' });
+    await new Promise(r=>setTimeout(r, 4000)); await carregarLista();
+    await new Promise(r=>setTimeout(r, 4000)); await carregarLista();
+    toast('Sincronizado com o Bling');
+  }catch(e){ toast('Falha ao sincronizar: '+e.message); }
+  finally{ if(b){ b.textContent = orig || '↻ Atualizar'; b.disabled = false; } }
 }
 
-module.exports = {
-  id: 'girassol-backup-offline',
-  nome: 'Girassol Backup Offline',
-  rotinas: { backupCache: () => rodarCiclo('cron') },
-  routes,
-  crons: { backupCache: CRON_EXPR },
-  bootstrap
-};
+function onBusca(v){ filtroBusca = (v||'').trim().toLowerCase(); renderLista(); }
+function filtrar(lista){
+  let l = lista;
+  if(filtroMkt==='flex') l = l.filter(p=>p.flex);
+  else if(filtroMkt) l = l.filter(p=>p.marketplace===filtroMkt);
+  if(filtroBusca){
+    const q = filtroBusca;
+    l = l.filter(p=>
+      String(p.numero||'').includes(q)
+      || String(p.nf_numero||'').toLowerCase().includes(q)
+      || (p.cliente||'').toLowerCase().includes(q)
+      || (MKT[p.marketplace]||MKT.outro).n.toLowerCase().includes(q)
+      || String(p.id||'').includes(q)
+    );
+  }
+  return l;
+}
+
+// ── chips de marketplace + FLEX ──
+const MKT_ORDEM = ['ml','shopee','tiktok','magalu','amazon','outro'];
+function setFiltroMkt(v){ filtroMkt = v; renderChips(); renderLista(); }
+function chipBtn(label, n, val, cor){
+  const ativo = (filtroMkt===val);
+  const dot = cor ? '<span class="cdot" style="background:'+cor+'"></span>' : '';
+  const fx = val==='flex' ? ' flex' : '';
+  return '<button class="chip'+fx+(ativo?' on':'')+'" onclick="setFiltroMkt('+(val===null?'null':("'"+val+"'"))+')">'+dot+esc(label)+' <b>'+n+'</b></button>';
+}
+function renderChips(){
+  const box = $('chips'); if(!box) return;
+  const cont = {}; let flexN = 0;
+  listaCache.forEach(p=>{ cont[p.marketplace] = (cont[p.marketplace]||0)+1; if(p.flex) flexN++; });
+  let html = chipBtn('Todos', listaCache.length, null);
+  MKT_ORDEM.forEach(mk=>{ if(cont[mk]) html += chipBtn((MKT[mk]||MKT.outro).n, cont[mk], mk, (MKT[mk]||MKT.outro).c); });
+  html += chipBtn('⚡ FLEX', flexN, 'flex');
+  box.innerHTML = html;
+}
+function renderLista(){
+  const box = $('listaPedidos');
+  if(!listaCache.length){ box.innerHTML='<div class="empty">nenhum pedido pronto no cache</div>'; return; }
+  const selId = pedidoAtual ? String(pedidoAtual.bling_id) : '';
+  const lista = filtrar(listaCache);
+  const cnt = filtroBusca ? '<div class="scount">'+lista.length+' de '+listaCache.length+'</div>' : '';
+  if(!lista.length){ box.innerHTML = cnt+'<div class="empty">nada encontrado p/ "'+esc(filtroBusca)+'"</div>'; return; }
+  box.innerHTML = cnt + lista.map(p=>{
+    const m = MKT[p.marketplace]||MKT.outro;
+    const cls = (p.conferido?'done ':'') + (String(p.id)===selId?'sel':'');
+    return '<div class="scard '+cls+'" onclick="selecionar(\''+p.id+'\')">'+
+      '<div class="scl1">'+
+        '<span class="badge" style="background:'+m.c+'">'+m.n+'</span>'+
+        '<span class="num">#'+esc(p.numero)+'</span>'+
+        (p.conferido?'<span class="donetag">✓</span>':'')+
+      '</div>'+
+      (p.cliente?'<div class="scli">'+esc(p.cliente)+'</div>':'')+
+      '<div class="smeta">'+(p.itens||0)+' item(s) · NF '+(p.nf_numero?esc(p.nf_numero):(p.tem_nf?'ok':'—'))+(p.tem_danfe?' · <span class="pdfok">PDF✓</span>':'')+'</div>'+
+      '<div class="rep"><button class="btn warn sm" onclick="event.stopPropagation();reimprimir(\''+p.id+'\')">🖨 Imprimir</button></div>'+
+    '</div>';
+  }).join('');
+}
+
+async function reimprimir(id){
+  try{
+    await imprimirEtiqueta(id);
+    toast(modoEtiqueta()==='a4'?'📄 etiqueta aberta':'🖨 etiqueta enviada');
+  }catch(e){ toast('Falha: '+e.message); }
+}
+
+// ── detalhe / bipagem (centro) ──
+async function selecionar(id){
+  try{
+    const ped = await api('/girassol-backup-offline/pedido/'+id);
+    if(ped.erro){ toast(ped.erro); return; }
+    prepararPedido(ped);
+    pedidoAtual = ped;
+    zplAtual = await fetch('/girassol-backup-offline/etiqueta/'+id).then(r=>r.text());
+    renderDetail();
+    renderLista(); // atualiza highlight
+  }catch(e){ toast('Erro: '+e.message); }
+}
+
+// grupos = exibição (kit vira cabeçalho + componentes; senão item simples)
+// unidades = lista PLANA do que se bipa (componentes p/ kit, o próprio item p/ leaf)
+function prepararPedido(ped){
+  const grupos = [], unidades = [];
+  let uid = 0;
+  const novaUnid = (o)=>{ const u={ _id:uid++, sku:o.sku||'', ean:o.ean||null, descricao:o.descricao||'', img:o.img||null, qtd:Number(o.qtd||0), bipado:0 }; unidades.push(u); return u; };
+  for(const it of (ped.itens||[])){
+    if(it.tipo==='kit' && Array.isArray(it.componentes) && it.componentes.length){
+      const comps = it.componentes.map(c=>novaUnid(c));
+      grupos.push({ tipo:'kit', sku:it.sku, descricao:it.descricao, ean:it.ean, img:it.img, qtd:Number(it.qtd||0), comps });
+    } else {
+      grupos.push({ tipo:'leaf', unit:novaUnid(it) });
+    }
+  }
+  ped.grupos = grupos; ped.unidades = unidades;
+}
+
+function renderDetail(){
+  const p = pedidoAtual;
+  const m = MKT[p.marketplace]||MKT.outro;
+  const temDanfe = !!p.tem_danfe;
+  const nfMiolo = p.nf
+    ? 'NF <b>'+esc(p.nf.numero||'?')+'</b>'+(temDanfe?' <span class="nfok">PDF ✓</span>':'')+'<div class="chave">'+esc(p.nf.chave||'')+'</div>'
+    : '<span class="noean">⚠ NF não cacheada (segue só com a etiqueta)</span>';
+  const nfBar = temDanfe
+    ? '<div class="nfbar clic" title="abrir DANFE em PDF" onclick="abrirDanfe(\''+esc(p.bling_id)+'\')">'+nfMiolo+'</div>'
+    : '<div class="nfbar">'+nfMiolo+'</div>';
+  $('detail').innerHTML =
+    '<div class="dhead">'+
+      '<button class="btn sec sm" onclick="voltarLista()">← Voltar</button>'+
+      '<span class="badge" style="background:'+m.c+'">'+m.n+'</span>'+
+      '<span class="num big">#'+esc(p.numero)+'</span>'+
+      '<span class="prog" id="bProg">0/0</span>'+
+    '</div>'+
+    '<div class="cli">'+esc(p.cliente||'')+'</div>'+
+    nfBar+
+    '<div class="scanrow">'+
+      '<div class="qtdwrap"><label>Qtd</label><input id="qtdConf" type="number" value="1" min="1" max="999"/></div>'+
+      '<input id="scan" autocomplete="off" placeholder="bipe o código de barras do item…"/>'+
+    '</div>'+
+    '<div class="hint">opcional: digite a <b>Qtd</b> (ex: 100) e bipe 1× — senão soma 1 por bipada · kit conta os componentes</div>'+
+    '<div id="bItens"></div>'+
+    '<div class="dbtns">'+
+      '<button class="btn warn" onclick="imprimirAtual()">'+(modoEtiqueta()==='a4'?'📄 Abrir etiqueta':'🖨 Só etiqueta')+'</button>'+
+      (temDanfe ? '<button class="btn warn" onclick="imprimirNFAtual()">🧾 Abrir NF</button>' : '')+
+      '<span class="grow"></span>'+
+      '<button class="btn ok" id="bFinalizar" onclick="finalizar()" disabled>✓ Imprimir + Finalizar</button>'+
+    '</div>';
+  renderItens();
+  const scan = $('scan');
+  scan.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); const v=scan.value; scan.value=''; onScan(v); }});
+  const qtd = $('qtdConf');
+  qtd.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); if((qtd.value||'').length>3) qtd.value='1'; scan.focus(); }});
+  qtd.addEventListener('focus', ()=>qtd.select());
+  setTimeout(()=>scan.focus(),60);
+}
+
+function unitRow(u, isComp){
+  const full = u.bipado>=u.qtd;
+  return '<div class="item '+(isComp?'comp ':'')+(full?'full':'')+'">'+
+    thumb(u.img)+
+    '<div class="icount"><span class="'+(full?'b':'')+'">'+u.bipado+'</span>/'+u.qtd+'</div>'+
+    '<div class="idesc"><div class="d">'+esc(u.descricao||u.sku||'item')+'</div>'+
+      '<div class="e">SKU '+esc(u.sku||'—')+' · EAN '+(u.ean?esc(u.ean):'<span class="noean">sem EAN</span>')+'</div></div>'+
+    (full?'':'<button class="miniok" onclick="manualUnit('+u._id+')">+1</button>')+
+  '</div>';
+}
+
+function thumb(src){
+  if(!src) return '<div class="thumb noimg">📦</div>';
+  return '<img class="thumb" src="'+esc(src)+'" loading="lazy" referrerpolicy="no-referrer" onerror="this.outerHTML=\'<div class=&quot;thumb noimg&quot;>📦</div>\'"/>';
+}
+
+function renderItens(){
+  if(!pedidoAtual) return;
+  const un = pedidoAtual.unidades;
+  const total = un.reduce((s,u)=>s+u.qtd,0);
+  const feito = un.reduce((s,u)=>s+u.bipado,0);
+  const pe = $('bProg'); if(pe) pe.innerHTML = '<span class="'+(feito>=total&&total>0?'done':'')+'">'+feito+'</span>/'+total;
+  const box = $('bItens'); if(box) box.innerHTML = pedidoAtual.grupos.map(g=>{
+    if(g.tipo==='kit'){
+      const done = g.comps.every(c=>c.bipado>=c.qtd);
+      return '<div class="kitwrap '+(done?'full':'')+'">'+
+        '<div class="kithead">'+thumb(g.img)+'<div class="kh-txt"><span class="ktag">KIT · NF</span> '+esc(g.descricao||g.sku)+
+          '<div class="e">SKU '+esc(g.sku||'—')+'</div></div></div>'+
+        '<div class="comps">'+g.comps.map(c=>unitRow(c,true)).join('')+'</div>'+
+      '</div>';
+    }
+    return unitRow(g.unit,false);
+  }).join('');
+  const fb = $('bFinalizar'); if(fb) fb.disabled = !(feito>=total && total>0);
+}
+
+function manualUnit(id){ const u=pedidoAtual.unidades.find(x=>x._id===id); if(u && u.bipado<u.qtd){ u.bipado++; beep(true); renderItens(); } }
+
+function modalAberto(){ const md=$('modal'); return md && md.classList.contains('show'); }
+
+function onScan(code){
+  if(modalAberto()) return;            // ignora bipada com o modal aberto
+  code = norm(code);
+  if(!code || !pedidoAtual) return;
+  let q = parseInt(($('qtdConf')||{}).value,10); if(!q || q<1 || q>999) q=1;
+  let u = pedidoAtual.unidades.find(x=> x.ean && norm(x.ean)===code && x.bipado<x.qtd);
+  if(!u) u = pedidoAtual.unidades.find(x=> x.sku && norm(x.sku).toUpperCase()===code.toUpperCase() && x.bipado<x.qtd);
+  if(u){
+    const add = Math.min(q, u.qtd - u.bipado);
+    u.bipado += add; beep(true); renderItens();
+    const qi=$('qtdConf'); if(qi) qi.value='1';
+  } else { beep(false); const s=$('scan'); if(s){ s.classList.add('err'); setTimeout(()=>s.classList.remove('err'),300);} toast('código não confere: '+code); }
+}
+
+async function imprimirAtual(){ try{ await imprimirEtiqueta(pedidoAtual.bling_id, zplAtual); toast(modoEtiqueta()==='a4'?'📄 etiqueta aberta — imprima pelo navegador':'🖨 etiqueta enviada'); }catch(e){ toast('Falha: '+e.message); } }
+function abrirDanfe(id){ window.open('/girassol-backup-offline/danfe/'+id, '_blank'); }
+function imprimirNFAtual(){
+  const id = pedidoAtual && pedidoAtual.bling_id;
+  if(!id) return;
+  window.open(location.origin+'/girassol-backup-offline/danfe/'+id, '_blank');  // abre o PDF da NF — você imprime pelo navegador
+}
+
+// volta pra lista SEM finalizar (não marca conferido)
+function voltarLista(){
+  pedidoAtual=null; zplAtual=null;
+  $('detail').innerHTML='<div class="placeholder">← selecione um pedido à esquerda</div>';
+  renderLista();
+}
+
+// FINALIZAR = imprime e SÓ marca conferido depois que o estoquista confirma que saiu certo.
+async function finalizar(){
+  const id = pedidoAtual.bling_id;
+  const temNf = !!pedidoAtual.nf;
+  if(modoEtiqueta()==='a4'){
+    // A4: abre os 2 PDFs de forma SÍNCRONA (no clique) p/ o navegador não bloquear a 2ª aba
+    window.open(location.origin+'/girassol-backup-offline/etiqueta-pdf/'+id, '_blank');
+    if(temNf) window.open(location.origin+'/girassol-backup-offline/danfe/'+id, '_blank');
+    abrirConfirmacao();
+    return;
+  }
+  // Zebra: abre a NF (síncrono) e imprime a etiqueta no QZ
+  if(temNf) window.open(location.origin+'/girassol-backup-offline/danfe/'+id, '_blank');
+  try{ await imprimirZPL(zplAtual); }
+  catch(e){ toast('Falha na impressão: '+e.message); return; }
+  abrirConfirmacao();
+}
+
+function abrirConfirmacao(){
+  const md=$('modal');
+  md.innerHTML =
+    '<div class="mbox">'+
+      '<div class="mtit">Etiqueta e NF saíram certas?</div>'+
+      '<div class="msub">Confira a impressora/abas. Só finalize se saiu OK — assim, se der problema, o pedido <b>continua na tela</b> e você reimprime sem perder.</div>'+
+      '<div class="mbtns">'+
+        '<button class="btn warn" onclick="reimprimirModal()">🖨 Reimprimir</button>'+
+        '<button class="btn sec" onclick="fecharConfirmacao()">✗ Ainda não</button>'+
+        '<button class="btn ok" onclick="confirmarFinalizar()">✓ Sim, finalizar</button>'+
+      '</div>'+
+    '</div>';
+  md.classList.add('show');
+}
+function fecharConfirmacao(){ const md=$('modal'); md.classList.remove('show'); md.innerHTML=''; setTimeout(()=>{const s=$('scan'); if(s) s.focus();},60); }
+async function reimprimirModal(){ try{ await imprimirEtiqueta(pedidoAtual.bling_id, zplAtual); toast('🖨 reenviado'); }catch(e){ toast('Falha: '+e.message); } }
+async function confirmarFinalizar(){
+  try{
+    const r = await api('/girassol-backup-offline/conferido', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ id: pedidoAtual.bling_id, user: opIn.value })
+    });
+    if(r && r.sincronizado)      toast('✓ #'+pedidoAtual.numero+' finalizado → VERIFICADO');
+    else if(r && r.bling_offline) toast('✓ #'+pedidoAtual.numero+' finalizado · Bling offline, sincroniza ao voltar');
+    else                          toast('✓ #'+pedidoAtual.numero+' finalizado');
+    fecharConfirmacao();
+    pedidoAtual=null; zplAtual=null;
+    $('detail').innerHTML='<div class="placeholder">← selecione um pedido à esquerda</div>';
+    carregarLista();
+  }catch(e){ toast('Falha ao finalizar: '+e.message); }
+}
+
+// mantém foco no scan (menos quando digita Qtd/operador ou o modal está aberto)
+setInterval(()=>{ const s=$('scan'); const q=$('qtdConf'); if(s && !modalAberto() && document.activeElement!==s && document.activeElement!==opIn && document.activeElement!==q) s.focus(); }, 1500);
+
+// a página NUNCA se imprime — toda impressão é via QZ Tray (Zebra ou A4)
+window.print = function(){ toast('A impressão é pela impressora (QZ Tray), não pela página'); };
+document.addEventListener('keydown', e=>{ if((e.ctrlKey||e.metaKey) && (e.key==='p'||e.key==='P')){ e.preventDefault(); e.stopPropagation(); toast('A impressão é pelos botões (QZ Tray)'); } }, true);
+
+// boot
+(async function(){ await setupQZ(); reconectarQZ(); })();
+aplicarModoLabel();
+carregarLista();
+setInterval(()=>{ if(!pedidoAtual) carregarLista(); }, 60000);
+</script>
+</body>
+</html>
