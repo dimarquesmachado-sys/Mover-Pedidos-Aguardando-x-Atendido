@@ -2,7 +2,7 @@
 
 // ════════════════════════════════════════════════════════════════════════
 //  GIRASSOL · CHECKOUT OFFLINE — FASE 1 (poller) + FASE 2 (bipagem)   (Mover-Pedidos)
-//  girassol-backup-offline v17/06 b42   (a versão real é a const VERSAO abaixo)
+//  girassol-backup-offline v17/06 b43   (a versão real é a const VERSAO abaixo)
 // ════════════════════════════════════════════════════════════════════════
 //  Módulo do orquestrador unificado (HTTP-native, sem Express).
 //  Reaproveita o token Bling da Girassol via ../girassol/tokenManager.
@@ -32,14 +32,14 @@ const fetch = require('node-fetch');
 const AdmZip = require('adm-zip');
 const crypto = require('crypto');
 const { garantirToken } = require('../girassol/tokenManager');
-const { gerarDanfeSimplificado } = require('./danfe-simplificado');
+const { gerarDanfeSimplificado, gerarDanfeSimplificadoZPL } = require('./danfe-simplificado');
 
 // Certificado/chave do QZ Tray p/ assinar as impressões (mata o popup "Untrusted").
 // Configure no Render: GIRABKP_QZ_CERT (digital-certificate.txt) e GIRABKP_QZ_PRIVKEY (private-key.pem).
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v17/06 b42';
+const VERSAO     = 'girassol-backup-offline v17/06 b43';
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 
 // ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
@@ -1433,11 +1433,24 @@ function routes(readBody) {
         if (dados) { try { writeJson(path.join(dir, 'nf-simp.json'), dados); } catch (e) {} }
       }
       if (!dados) { json(res, 502, { erro: 'NF não retornou dados' }); return true; }
+      const q = urlObj.search || '';
+      // ?zpl=1 → ZPL CRU (o que a Zebra imprime); ?preview=1 → ZPL renderizado p/ PDF via Labelary (ver no note); senão → PDF nativo
       try {
-        const pdf = await gerarDanfeSimplificado(dados);
-        res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': 'inline; filename="danfe-simplificado.pdf"' });
-        res.end(pdf);
-      } catch (e) { json(res, 500, { erro: 'falha ao gerar PDF', detalhe: e.message }); }
+        if (/[?&]zpl=1/.test(q)) {
+          const zpl = gerarDanfeSimplificadoZPL(dados);
+          res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+          res.end(zpl);
+        } else if (/[?&]preview=1/.test(q)) {
+          const zpl = gerarDanfeSimplificadoZPL(dados);
+          const pdf = await zplParaPdf(zpl);
+          if (pdf) { res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': 'inline; filename="danfe-zpl-preview.pdf"' }); res.end(pdf); }
+          else json(res, 502, { erro: 'Labelary nao converteu o ZPL (tente de novo)' });
+        } else {
+          const pdf = await gerarDanfeSimplificado(dados);
+          res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': 'inline; filename="danfe-simplificado.pdf"' });
+          res.end(pdf);
+        }
+      } catch (e) { json(res, 500, { erro: 'falha ao gerar', detalhe: e.message }); }
       return true;
     }
 
