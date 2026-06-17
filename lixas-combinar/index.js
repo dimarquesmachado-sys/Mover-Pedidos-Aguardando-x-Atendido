@@ -363,18 +363,18 @@ function routes(readBody) {
           console.warn(`[ia-instrucao] nao consegui ler conversa (segue so com a instrucao): ${e.message}`);
         }
 
-        // A instrucao do admin entra como a "mensagem do cliente" a interpretar,
-        // mas deixamos explicito que eh uma ORDEM do vendedor (autoritativa).
-        const mensagemAdmin = `[INSTRUCAO DO VENDEDOR — autoritativa, pode completar/decidir] ${instrucao}`;
-
+        // Modo vendedor: a instrucao e uma ORDEM autoritativa do vendedor (nao mensagem
+        // de cliente). O classificador entra em modoVendedor — nunca cai em fora_escopo;
+        // a palavra do vendedor prevalece sobre a conversa do cliente (que vira so contexto).
         const ia = require('./iaCliente');
         const iaResult = await ia.interpretarRespostaCliente({
-          mensagemCliente: mensagemAdmin,
+          mensagemCliente: instrucao,
           descricaoProduto: graosResult.descricao,
           totalLixas,
           unidadesPorPacote,
           graosDisponiveis,
-          historicoConversa
+          historicoConversa,
+          modoVendedor: true
         });
 
         if (!iaResult.ok) { json(res, 502, { ok: false, erro: 'ia_falhou', detalhe: iaResult.erro }); return true; }
