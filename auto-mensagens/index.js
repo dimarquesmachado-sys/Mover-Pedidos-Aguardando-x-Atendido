@@ -49,7 +49,12 @@ const crons = {
   // janela de 30min do rotinaACombinar (msg inicial enviada na mao, robo fora do ar,
   // etc) e nunca entraram na tabela. Cria o registro lendo a conversa; o ciclo de
   // leitura (2min) processa em seguida. Intervalo/janela ajustaveis por env.
-  girassolRecuperar: process.env.LIXAS_RECUPERAR_CRON || '0 * * * *'
+  girassolRecuperar: process.env.LIXAS_RECUPERAR_CRON || '0 * * * *',
+  // de hora em hora (em :15, deslocado do outro) - REDE DE SEGURANCA: varre os
+  // falsos-processados (vendas marcadas 'processado' SEM NF, claro/estruturado) e
+  // emite sozinho. Garante que nada fique preso sem nota durante a viagem (China),
+  // sem precisar rodar a recuperacao na mao. Checa NF real no Bling antes de emitir.
+  girassolRecuperarSemNF: process.env.LIXAS_RECUPERAR_SEMNF_CRON || '15 * * * *'
 };
 
 // ── Rotas ─────────────────────────────────────────────────────────────
@@ -703,7 +708,8 @@ module.exports = {
   rotinas: {
     girassolACombinar: rotinaACombinar,
     girassolLerRespostas: rotinaLerRespostas,
-    girassolRecuperar: () => recuperarPendentes(Number(process.env.LIXAS_RECUPERAR_DIAS) || 1)
+    girassolRecuperar: () => recuperarPendentes(Number(process.env.LIXAS_RECUPERAR_DIAS) || 1),
+    girassolRecuperarSemNF: () => recuperarFalsosProcessados({ dias: Number(process.env.LIXAS_RECUPERAR_SEMNF_DIAS) || 30 })
   },
   routes,
   crons,
