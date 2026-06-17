@@ -39,7 +39,7 @@ const { gerarDanfeSimplificado, gerarDanfeSimplificadoZPL } = require('./danfe-s
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v17/06 b43';
+const VERSAO     = 'girassol-backup-offline v17/06 b44';
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 
 // ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
@@ -56,6 +56,20 @@ const CRON_EXPR     = process.env.GIRABKP_CRON || '5,15,25,35,45,55 6-23 * * *';
 const MANIFEST_FILE = path.join(CACHE_DIR, 'manifest.json');
 const SKU_EAN_FILE  = path.join(CACHE_DIR, 'sku-ean.json');
 const CONFERIDOS_FILE = path.join(CACHE_DIR, 'conferidos.json');
+const RESERVAS_FILE   = path.join(CACHE_DIR, 'reservas.json');
+const RESERVA_TTL_MS  = 8 * 60 * 1000;   // reserva expira em 8 min sem heartbeat (PC largado libera o pedido sozinho)
+// presença entre PCs: quem está separando cada pedido. Limpa reservas vencidas a cada leitura.
+function lerReservas() {
+  const r = readJson(RESERVAS_FILE, {});
+  const agora = Date.now();
+  let mudou = false;
+  for (const id of Object.keys(r)) {
+    const t = Date.parse(r[id] && r[id].em) || 0;
+    if (!t || agora - t > RESERVA_TTL_MS) { delete r[id]; mudou = true; }
+  }
+  if (mudou) writeJson(RESERVAS_FILE, r);
+  return r;
+}
 const KIT_CACHE_FILE  = path.join(CACHE_DIR, 'kit-estrutura.json');  // kits já resolvidos
 const LOC_FILE        = path.join(CACHE_DIR, 'sku-localizacao.json'); // localização (depósito) por SKU
 const SCHEMA = 4;  // versão do snapshot — bump força re-cache dos pedidos antigos (b36: re-explode composições/variações)
@@ -929,6 +943,7 @@ function routes(readBody) {
     if (method === 'GET' && p === '/girassol-backup-offline/lista') {
       const man = manifest();
       const conf = readJson(CONFERIDOS_FILE, {});
+      const rsv = lerReservas();
       const ids = Object.keys(man);
       // backfill cliente + nº NF p/ busca (lê snapshot só de quem ainda não tem; persiste 1x)
       let mexeu = false;
@@ -944,7 +959,7 @@ function routes(readBody) {
       if (mexeu) salvarManifest(man);
       const prontos = ids
         .filter(i => man[i].tem_etiqueta && !conf[i])                          // SÓ ATENDIDO ainda NÃO finalizado
-        .map(i => ({ id: i, ...man[i] }))
+        .map(i => ({ id: i, ...man[i], reservado_por: (rsv[i] && rsv[i].user) || null, reservado_em: (rsv[i] && rsv[i].em) || null }))
         .sort((a, b) => Number(a.numero || 0) - Number(b.numero || 0));        // mais ANTIGOS (menor nº) em cima
       const semEtiq = ids
         .filter(i => !man[i].tem_etiqueta && !conf[i])                         // ATENDIDO mas SEM etiqueta = problema
@@ -1087,6 +1102,34 @@ function routes(readBody) {
       return true;
     }
 
+    // RESERVA um pedido p/ um operador (presença entre PCs — quadradinho colorido tipo Bling)
+    if (method === 'POST' && p === '/girassol-backup-offline/reservar') {
+      const body = await readBody(req);
+      const id = String(body.id || '');
+      const user = String(body.user || '').trim();
+      if (!id) { json(res, 400, { erro: 'id obrigatório' }); return true; }
+      const r = lerReservas();
+      const dono = r[id] && r[id].user;
+      if (dono && user && dono !== user && !body.forcar) {   // já tem OUTRO operador nesse pedido
+        json(res, 200, { ok: false, reservado_por: dono, em: r[id].em });
+        return true;
+      }
+      r[id] = { user, em: new Date().toISOString() };
+      writeJson(RESERVAS_FILE, r);
+      json(res, 200, { ok: true });
+      return true;
+    }
+
+    // LIBERA a reserva (ao voltar pra lista / finalizar)
+    if (method === 'POST' && p === '/girassol-backup-offline/liberar') {
+      const body = await readBody(req);
+      const id = String(body.id || '');
+      const r = lerReservas();
+      if (r[id]) { delete r[id]; writeJson(RESERVAS_FILE, r); }
+      json(res, 200, { ok: true });
+      return true;
+    }
+
     // marca pedido como conferido offline (entra na fila p/ sync na Fase 3)
     if (method === 'POST' && p === '/girassol-backup-offline/conferido') {
       const body = await readBody(req);
@@ -1094,6 +1137,10 @@ function routes(readBody) {
       if (!id) { json(res, 400, { erro: 'id obrigatório' }); return true; }
       const snapC = readJson(path.join(CACHE_DIR, String(id), 'pedido.json'), null);
       const conf = readJson(CONFERIDOS_FILE, {});
+      if (conf[id]) {   // JÁ finalizado por alguém → não refaz, não reimprime, não re-sincroniza
+        json(res, 200, { ok: false, ja_finalizado: true, por: conf[id].user || '', em: conf[id].conferido_em });
+        return true;
+      }
       conf[id] = {
         user: body.user || '',
         conferido_em: new Date().toISOString(),
@@ -1103,6 +1150,7 @@ function routes(readBody) {
         marketplace: snapC ? (snapC.marketplace || null) : null
       };
       writeJson(CONFERIDOS_FILE, conf);            // grava na fila primeiro — nunca perde
+      { const rsvF = lerReservas(); if (rsvF[id]) { delete rsvF[id]; writeJson(RESERVAS_FILE, rsvF); } }   // finalizou → solta a reserva
 
       // ESPELHO EM TEMPO REAL: se o sync tá ligado e o Bling responde, move p/ VERIFICADO já.
       // Se o Bling estiver fora, fica na fila e o cron sincroniza quando ele voltar.
