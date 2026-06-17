@@ -47,6 +47,7 @@ function fmtCpfCnpj(doc) {
   if (d.length === 14) return d.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, '$1.$2.$3/$4-$5');
   return doc || '';
 }
+function fmtIE(ie) { const d = onlyDigits(ie); if (d.length === 12) return d.replace(/(\d{3})(\d{3})(\d{3})(\d{3})/, '$1.$2.$3.$4'); return ie || ''; }
 
 // quebra texto em linhas que cabem na largura (fonte monospace)
 function wrap(texto, maxChars) {
@@ -68,17 +69,15 @@ function wrap(texto, maxChars) {
 //           consumidor:{doc,nome,endereco}, numeroPedido, numeroPedidoLoja, tributos }
 async function gerarDanfeSimplificado(dados) {
   const W = 283.46, H = 425.20;     // 10x15 cm em pt
-  const ML = 10, MR = 10;           // margens laterais
+  const ML = 10, MR = 10, MB = 14;  // margens (MB = rodapé mínimo)
   const cw = W - ML - MR;           // largura útil
   const pdf = await PDFDocument.create();
-  const page = pdf.addPage([W, H]);
   const font = await pdf.embedFont(StandardFonts.Courier);
   const fontB = await pdf.embedFont(StandardFonts.CourierBold);
-
-  let y = H - 12;
   const preto = rgb(0, 0, 0);
-  const CPL = Math.floor(cw / 5.0);  // ~chars por linha na fonte 8.3 (Courier: ~0.6*size de largura)
+  const CPL = Math.floor(cw / 5.0);
 
+  let page, y;
   const txt = (s, opt = {}) => {
     const size = opt.size || 7;
     const f = opt.bold ? fontB : font;
@@ -89,58 +88,63 @@ async function gerarDanfeSimplificado(dados) {
     else if (opt.x != null) x = opt.x;
     page.drawText(String(s), { x, y, size, font: f, color: preto });
   };
-  const linha = () => { y -= 4; page.drawLine({ start: { x: ML, y }, end: { x: W - MR, y }, thickness: 0.6, color: preto }); y -= 11; };
   const nl = (gap) => { y -= (gap || 9); };
+  const linha = () => { y -= 4; page.drawLine({ start: { x: ML, y }, end: { x: W - MR, y }, thickness: 0.6, color: preto }); y -= 11; };
 
-  // cabeçalho
-  txt('DANFE Simplificado - Etiqueta', { size: 8, bold: true, center: true }); nl(11);
+  // cabeçalho de cada página (na continuação, repete o nº da NFe pra identificar a etiqueta)
+  function cabecalho(cont) {
+    txt('DANFE Simplificado - Etiqueta' + (cont ? ' (cont.)' : ''), { size: 8, bold: true, center: true }); nl(11);
+    if (cont) { txt('NFe: ' + dados.numero + '   SERIE: ' + (dados.serie || '1'), { size: 6.5, center: true }); nl(7); linha(); }
+  }
+  function novaPagina(cont) { page = pdf.addPage([W, H]); y = H - 12; cabecalho(cont); }
+  const espaco = (h) => { if (y - h < MB) novaPagina(true); };  // garante espaço; senão abre nova etiqueta
 
-  // emitente
+  // ── PÁGINA 1: emitente + chave + protocolo ──
+  novaPagina(false);
   txt(dados.emitente.razao, { size: 7, bold: true }); nl(8);
-  txt('CNPJ: ' + fmtCpfCnpj(dados.emitente.cnpj) + '   IE: ' + (dados.emitente.ie || ''), { size: 6.5 }); nl(8);
+  txt('CNPJ: ' + fmtCpfCnpj(dados.emitente.cnpj) + '   IE: ' + fmtIE(dados.emitente.ie), { size: 6.5 }); nl(8);
   for (const l of wrap(dados.emitente.endereco, CPL + 4)) { txt(l, { size: 6.5 }); nl(8); }
-
-  // chave + código de barras
   nl(2);
   desenharCode128(page, ML + 8, y - 26, cw - 16, 26, onlyDigits(dados.chave));
   y -= 30;
   txt(fmtChave(dados.chave), { size: 6, center: true }); nl(9);
-
-  // protocolo + identificação da nota
   linha();
   if (dados.protocolo) { txt('Protocolo: ' + dados.protocolo + '  ' + fmtData(dados.dataProtocolo), { size: 6.5, center: true }); nl(8); }
   txt('TIPO: ' + (String(dados.tipo) === '0' ? '0-Entrada' : '1-Saida') + '   NFe: ' + dados.numero + '   SERIE: ' + (dados.serie || '1'), { size: 6.5, center: true }); nl(8);
   txt('Emissao: ' + fmtData(dados.dataEmissao), { size: 6.5, center: true }); nl(6);
   linha();
 
-  // itens
+  // ── ITENS (paginados — quebra em nova etiqueta quando enche) ──
   txt('ITEM', { size: 6.5, bold: true });
   txt('VL. ITEM', { size: 6.5, bold: true, right: true }); nl(9);
   for (const it of (dados.itens || [])) {
     const desc = (it.codigo ? it.codigo + ' - ' : '') + (it.descricao || '');
     const linhasDesc = wrap(desc, CPL - 8);
-    // primeira linha do item + valor à direita
+    const altura = 8 + Math.max(0, linhasDesc.length - 1) * 7 + (it.detalhe ? 7 : 0) + 1;
+    espaco(altura + 4);
     txt(linhasDesc[0] || '', { size: 6.5 });
     txt(fmtMoeda(it.valorTotal != null ? it.valorTotal : it.valorUnit), { size: 6.5, right: true }); nl(8);
     for (let i = 1; i < linhasDesc.length; i++) { txt(linhasDesc[i], { size: 6.5 }); nl(7); }
     if (it.detalhe) { txt('  ' + it.detalhe, { size: 6 }); nl(7); }
     nl(1);
   }
+
+  // ── bloco final (mantém junto: não quebra QTD/consumidor no meio) ──
+  espaco(100);
   linha();
   txt('QTD. TOTAL DE ITENS', { size: 6.5, bold: true });
   txt(String(dados.qtdTotal != null ? dados.qtdTotal : (dados.itens || []).length), { size: 6.5, bold: true, right: true }); nl(8);
   linha();
-
-  // consumidor
   txt('CONSUMIDOR', { size: 7, bold: true, center: true }); nl(8);
   if (dados.consumidor) {
+    const nome = (dados.consumidor.nome || '').replace(/\s*\([^)]*\)\s*$/, '');  // tira "(nick do marketplace)"
     const doc = dados.consumidor.doc ? fmtCpfCnpj(dados.consumidor.doc) + '  ' : '';
-    for (const l of wrap(doc + (dados.consumidor.nome || ''), CPL)) { txt(l, { size: 6.5 }); nl(8); }
+    for (const l of wrap(doc + nome, CPL)) { txt(l, { size: 6.5 }); nl(8); }
     for (const l of wrap(dados.consumidor.endereco, CPL)) { txt(l, { size: 6 }); nl(7); }
   }
   linha();
 
-  // informações adicionais
+  // ── informações adicionais ──
   txt('INFORMACOES ADICIONAIS', { size: 6.5, bold: true, center: true }); nl(8);
   if (dados.numeroPedido) { txt('Numero do Pedido: ' + dados.numeroPedido, { size: 6 }); nl(7); }
   if (dados.tributos) { for (const l of wrap(dados.tributos, CPL)) { txt(l, { size: 5.8 }); nl(6.5); } }
