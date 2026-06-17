@@ -2,7 +2,7 @@
 
 // ════════════════════════════════════════════════════════════════════════
 //  GIRASSOL · CHECKOUT OFFLINE — FASE 1 (poller) + FASE 2 (bipagem)   (Mover-Pedidos)
-//  girassol-backup-offline v16/06 b25   (a versão real é a const VERSAO abaixo)
+//  girassol-backup-offline v16/06 b26   (a versão real é a const VERSAO abaixo)
 // ════════════════════════════════════════════════════════════════════════
 //  Módulo do orquestrador unificado (HTTP-native, sem Express).
 //  Reaproveita o token Bling da Girassol via ../girassol/tokenManager.
@@ -38,12 +38,14 @@ const { garantirToken } = require('../girassol/tokenManager');
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v16/06 b25';
+const VERSAO     = 'girassol-backup-offline v16/06 b26';
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 
 // ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
 const CACHE_DIR     = process.env.GIRABKP_CACHE_DIR    || '/data/cache-offline/girassol';
 const SIT_ATENDIDO  = Number(process.env.GIRABKP_SIT_ATENDIDO  || 9);              // ATENDIDO
+const SIT_VERIFICADO = Number(process.env.GIRABKP_SIT_VERIFICADO || 24);           // VERIFICADO (destino do sync Fase 3)
+const SYNC_ON       = process.env.GIRABKP_SYNC_ON === '1';                          // liga o sync automático no cron (Fase 3)
 const JANELA_DIAS   = Number(process.env.GIRABKP_JANELA_DIAS   || 5);
 const PAUSA_MS      = Number(process.env.GIRABKP_PAUSA_MS      || 350);            // ~3 req/s
 const RETENCAO_DIAS = Number(process.env.GIRABKP_RETENCAO_DIAS || 7);
@@ -123,6 +125,7 @@ function primeiraImagem(prod) {
 // ─── estado do módulo ───────────────────────────────────────────────────
 let rodando = false;
 let ultimoResumo = { rodouEm: null, total: 0, comEtiqueta: 0, semEtiqueta: 0, novos: 0, erros: 0 };
+let ultimoSync = { em: null, pendentes: 0, ok: 0, falhas: 0 };
 
 const manifest       = () => readJson(MANIFEST_FILE, {});
 const salvarManifest = (m) => writeJson(MANIFEST_FILE, m);
@@ -145,6 +148,55 @@ async function blingGet(pathUrl, tentativas = 3) {
     return { ok: r.ok, status: r.status, data };
   }
   return { ok: false, status: 429, data: null };
+}
+
+// escrita no Bling (PATCH/POST/PUT) — mesmo cuidado do blingGet (token + retry 429)
+async function blingWrite(method, pathUrl, body) {
+  let token;
+  try { token = await garantirToken(); }
+  catch (e) { return { ok: false, status: 401, data: null, erro: 'token: ' + e.message }; }
+  for (let t = 0; t < 3; t++) {
+    const opts = { method, headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } };
+    if (body !== undefined && body !== null) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
+    let r;
+    try { r = await fetch(BLING_BASE + pathUrl, opts); }
+    catch (e) { await sleep(800); continue; }
+    if (r.status === 429) { await sleep(1500 * (t + 1)); continue; }
+    const txt = await r.text();
+    let data = null; try { data = JSON.parse(txt); } catch (e) {}
+    return { ok: r.ok, status: r.status, data, raw: (txt || '').slice(0, 300) };
+  }
+  return { ok: false, status: 429, data: null };
+}
+
+// muda a situação de um pedido de venda (precisa do escopo "Gerenciar situações")
+async function moverSituacao(blingId, idSituacao) {
+  return await blingWrite('PATCH', `/pedidos/vendas/${blingId}/situacoes/${idSituacao}`, null);
+}
+
+// FASE 3: empurra os pedidos conferidos offline (sincronizado:false) p/ VERIFICADO no Bling
+async function sincronizarConferidos() {
+  const conf = readJson(CONFERIDOS_FILE, {});
+  const ids = Object.keys(conf).filter(id => conf[id] && !conf[id].sincronizado);
+  let ok = 0, falhas = 0;
+  for (const id of ids) {
+    const r = await moverSituacao(id, SIT_VERIFICADO);
+    if (r.ok) {
+      conf[id].sincronizado = true;
+      conf[id].sincronizado_em = new Date().toISOString();
+      delete conf[id].sync_erro;
+      ok++;
+      console.log(`[GIRABKP] sync ${id} → ${SIT_VERIFICADO} OK`);
+    } else {
+      conf[id].sync_erro = String(r.status || 'err');
+      falhas++;
+      console.log(`[GIRABKP] sync ${id} FALHOU (${r.status}) ${r.raw || ''}`);
+    }
+    await sleep(PAUSA_MS);
+  }
+  if (ids.length) writeJson(CONFERIDOS_FILE, conf);
+  ultimoSync = { em: new Date().toISOString(), pendentes: ids.length, ok, falhas };
+  return ultimoSync;
 }
 
 async function listarAtendidos() {
@@ -588,6 +640,13 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
     }
     if (svcNovos) { salvarManifest(man); console.log(`[GIRABKP] ${svcNovos} servico/flex preenchidos`); }
 
+    // FASE 3: Bling respondeu (listaOk) → drena a fila de conferidos offline p/ VERIFICADO (24)
+    // só roda automático se GIRABKP_SYNC_ON=1 (trava de segurança até você testar)
+    if (listaOk && SYNC_ON) {
+      const sync = await sincronizarConferidos();
+      if (sync.pendentes) console.log(`[GIRABKP] sync conferidos→${SIT_VERIFICADO}: ${sync.ok} ok, ${sync.falhas} falha(s) de ${sync.pendentes}`);
+    }
+
     purgar(man);
     salvarManifest(man);
 
@@ -755,18 +814,39 @@ function routes(readBody) {
       return true;
     }
 
+    // FASE 3 — força o sync da fila de conferidos → VERIFICADO (24). Botão "Sincronizar" / manual.
+    if ((method === 'POST' || method === 'GET') && p === '/girassol-backup-offline/sincronizar') {
+      const r = await sincronizarConferidos();
+      json(res, 200, { ok: true, ...r });
+      return true;
+    }
+
+    // DEBUG — testa mover UM pedido p/ VERIFICADO (ou outro id via ?situacao=). Mostra resposta crua do Bling.
+    // uso: /girassol-backup-offline/debug-mover/{idDoPedido}
+    if (method === 'GET' && p.startsWith('/girassol-backup-offline/debug-mover/')) {
+      const id = p.split('/').pop();
+      const sit = Number(urlObj.searchParams.get('situacao') || SIT_VERIFICADO);
+      const r = await moverSituacao(id, sit);
+      json(res, 200, { pedido: id, situacao_destino: sit, resultado: r });
+      return true;
+    }
+
     if (method === 'GET' && p === '/girassol-backup-offline/status') {
       const man = manifest();
       const ids = Object.keys(man);
+      const conf = readJson(CONFERIDOS_FILE, {});
+      const confIds = Object.keys(conf);
       json(res, 200, {
         versao: VERSAO,
         resumo: ultimoResumo,
         cacheDir: CACHE_DIR,
         situacaoAtendido: SIT_ATENDIDO,
+        situacaoVerificado: SIT_VERIFICADO,
         formato: ETIQ_FORMATO,
         total: ids.length,
         comEtiqueta: ids.filter(i => man[i].tem_etiqueta).length,
         semEtiqueta: ids.filter(i => !man[i].tem_etiqueta).length,
+        sync: { ...ultimoSync, ligado: SYNC_ON, conferidos: confIds.length, pendentes: confIds.filter(i => !conf[i].sincronizado).length },
         pedidos: ids.map(i => ({ id: i, ...man[i] }))
       });
       return true;
