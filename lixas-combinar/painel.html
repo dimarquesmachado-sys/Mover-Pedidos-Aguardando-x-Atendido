@@ -182,11 +182,11 @@
 
 <div id="app" style="display:none">
 <header>
-  <h1>🌻 Lixas A COMBINAR <span class="badge">Pendentes</span><span class="ver" style="font-size:11px;font-weight:normal;color:#9ca3af;margin-left:8px;font-family:monospace;">v15/06 · subst-7</span></h1>
+  <h1>🌻 Lixas A COMBINAR <span class="badge">Pendentes</span><span class="ver" style="font-size:11px;font-weight:normal;color:#9ca3af;margin-left:8px;font-family:monospace;">v17/06 · recup-2</span></h1>
   <div class="toolbar">
     <select id="filtro-status" onchange="recarregar()">
-      <option value="">Todos os status</option>
-      <option value="aguardando_resposta" selected>Aguardando resposta</option>
+      <option value="" selected>Todos os status</option>
+      <option value="aguardando_resposta">Aguardando resposta</option>
       <option value="cliente_respondeu">Cliente respondeu</option>
       <option value="cliente_confirmou_pedido">Confirmou pedido</option>
       <option value="precisa_atencao_humano">🚨 Precisa atenção</option>
@@ -410,11 +410,19 @@ function renderCard(v) {
     `;
   }
 
+  // RECUPERACAO — pedido marcado 'processado' mas SEM NF (preso pelo botao manual
+  // ou pelo bug antigo). Mostra aviso + botao que monta (se preciso) + emite a NF.
+  if (v.status === 'processado' && !v.nf_emitida_em) {
+    botoesBling += `
+      <button class="btn-nf" data-recup="${v.order_id}" title="Este pedido está como 'processado' mas SEM nota fiscal. Clica pra montar (se preciso) e emitir a NF agora." onclick="recuperarNF('${v.order_id}')" style="background:#dc2626">🔧 Recuperar NF</button>
+    `;
+  }
+
   return `
     <div class="card">
       <div class="card-header">
         <div class="card-titulo">${esc(v.descricao_produto || v.sku_a_combinar || 'Sem desc')}</div>
-        <div class="card-status ${statusCls}">${statusLabel}</div>
+        <div class="card-status ${statusCls}">${statusLabel}${v.status === 'processado' && !v.nf_emitida_em ? ' <span style="background:#dc2626;color:#fff;padding:1px 5px;border-radius:4px;font-size:10px;margin-left:4px">⚠️ SEM NF</span>' : ''}</div>
       </div>
       <div class="card-info">📦 SKU: <b>${esc(v.sku_a_combinar || '-')}</b></div>
       <div class="card-info">👤 ${esc(v.buyer_nome || '-')} ${v.total_msgs_cliente ? `(${v.total_msgs_cliente} msg${v.total_msgs_cliente > 1 ? 's' : ''})` : ''}</div>
@@ -444,7 +452,13 @@ function renderCard(v) {
 }
 
 async function marcarProcessado(orderId) {
-  if (!confirm('Marcar venda ' + orderId + ' como PROCESSADO?')) return;
+  if (!confirm(
+    '⚠️ ATENÇÃO\n\n' +
+    'Isso marca a venda ' + orderId + ' como RESOLVIDA, mas NÃO emite nota fiscal.\n\n' +
+    'Só use se você JÁ emitiu a NF por fora (direto no Bling).\n\n' +
+    'Se ainda falta a NF, use "🚀 Montar" + "📄 Emitir NF", não este botão.\n\n' +
+    'Confirmar mesmo assim?'
+  )) return;
   try {
     const r = await fetch(`${API_BASE}/api/pendentes/${orderId}/marcar-processado`, {
       method: 'POST',
@@ -456,6 +470,31 @@ async function marcarProcessado(orderId) {
     else { alert('Erro: ' + (d.erro || 'desconhecido')); }
   } catch (e) {
     alert('Erro: ' + e.message);
+  }
+}
+
+// Recupera pedido preso em 'processado' SEM NF: monta (se preciso) + emite a NF.
+async function recuperarNF(orderId) {
+  if (!confirm('Recuperar a venda ' + orderId + ':\n\nVai MONTAR (se ainda não montou) e EMITIR a NF no Bling.\n\nConfirmar?')) return;
+  const btns = document.querySelectorAll(`button[data-recup="${orderId}"]`);
+  btns.forEach(b => { b.disabled = true; b.textContent = '⏳ Recuperando...'; });
+  try {
+    const r = await fetch(`${API_BASE}/api/pedido/${orderId}/recuperar-nf`, {
+      method: 'POST',
+      headers: { 'X-Session-Token': token() }
+    });
+    if (r.status === 401) { logout(); return; }
+    const d = await r.json();
+    if (d.ok && (d.recuperado || d.jaEmitida)) {
+      alert(d.jaEmitida ? 'ℹ️ Já tinha NF — registrado como emitida.' : `✅ Recuperado! NF ${d.nfNumero}/${d.nfSerie} emitida.`);
+      await recarregar();
+    } else {
+      alert(`❌ Falhou na etapa "${d.etapa || '?'}":\n\n${d.erro || JSON.stringify(d).slice(0,300)}\n\nO pedido foi movido pra "precisa atenção humana".`);
+      await recarregar();
+    }
+  } catch (e) {
+    alert('Erro: ' + e.message);
+    btns.forEach(b => { b.disabled = false; b.textContent = '🔧 Recuperar NF'; });
   }
 }
 
