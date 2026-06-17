@@ -2,7 +2,7 @@
 
 // ════════════════════════════════════════════════════════════════════════
 //  GIRASSOL · CHECKOUT OFFLINE — FASE 1 (poller) + FASE 2 (bipagem)   (Mover-Pedidos)
-//  girassol-backup-offline v16/06 b36   (a versão real é a const VERSAO abaixo)
+//  girassol-backup-offline v16/06 b37   (a versão real é a const VERSAO abaixo)
 // ════════════════════════════════════════════════════════════════════════
 //  Módulo do orquestrador unificado (HTTP-native, sem Express).
 //  Reaproveita o token Bling da Girassol via ../girassol/tokenManager.
@@ -38,7 +38,7 @@ const { garantirToken } = require('../girassol/tokenManager');
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v16/06 b36';
+const VERSAO     = 'girassol-backup-offline v16/06 b37';
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 
 // ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
@@ -736,6 +736,7 @@ function montarSeparacao(mktFiltro) {
   let pedidos = 0;
   for (const id of Object.keys(man)) {
     if (conf[id]) continue;                              // já finalizado → fora da separação
+    if (!man[id].tem_etiqueta) continue;                 // sem etiqueta → fora da separação (não dá pra despachar)
     const snap = readJson(path.join(CACHE_DIR, String(id), 'pedido.json'), null);
     if (!snap) continue;
     const mkt = snap.marketplace || 'outro';
