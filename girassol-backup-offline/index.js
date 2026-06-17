@@ -2,7 +2,7 @@
 
 // ════════════════════════════════════════════════════════════════════════
 //  GIRASSOL · CHECKOUT OFFLINE — FASE 1 (poller) + FASE 2 (bipagem)   (Mover-Pedidos)
-//  girassol-backup-offline v16/06 b37   (a versão real é a const VERSAO abaixo)
+//  girassol-backup-offline v16/06 b38   (a versão real é a const VERSAO abaixo)
 // ════════════════════════════════════════════════════════════════════════
 //  Módulo do orquestrador unificado (HTTP-native, sem Express).
 //  Reaproveita o token Bling da Girassol via ../girassol/tokenManager.
@@ -38,7 +38,7 @@ const { garantirToken } = require('../girassol/tokenManager');
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v16/06 b37';
+const VERSAO     = 'girassol-backup-offline v16/06 b38';
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 
 // ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
@@ -528,6 +528,7 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC) {
     nf,
     itens,
     tem_nf: !!nf,
+    tem_danfe: fs.existsSync(path.join(dir, 'danfe.pdf')),   // por existência do arquivo → sobrevive a re-cache
     tem_kit: temKit,
     tem_etiqueta: temEtiqueta,
     etiqueta_formato: temEtiqueta ? ETIQ_FORMATO : null,
@@ -637,10 +638,16 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
     }
 
     // passo: baixa o DANFE que falta (TODOS — fica pronto p/ offline rápido)
-    let danfesNovos = 0, danfesFalha = 0, danfesSemId = 0;
+    let danfesNovos = 0, danfesFalha = 0, danfesSemId = 0, danfesReparo = 0;
     for (const ped of atendidos) {
       const dir = path.join(CACHE_DIR, String(ped.id));
-      if (fs.existsSync(path.join(dir, 'danfe.pdf'))) continue;
+      if (fs.existsSync(path.join(dir, 'danfe.pdf'))) {
+        // já tem o PDF — garante o flag tem_danfe (re-cache pode ter limpado o campo)
+        const s = readJson(path.join(dir, 'pedido.json'), null);
+        if (s && !s.tem_danfe) { s.tem_danfe = true; writeJson(path.join(dir, 'pedido.json'), s); danfesReparo++; }
+        if (man[ped.id] && !man[ped.id].tem_danfe) { man[ped.id].tem_danfe = true; danfesReparo++; }
+        continue;
+      }
       const snap = readJson(path.join(dir, 'pedido.json'), null);
       if (!snap || !snap.nf || !snap.nf.id) { danfesSemId++; continue; }
       const pdf = await baixarDanfe(snap.nf.id); await sleep(PAUSA_MS);
@@ -651,8 +658,8 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
         danfesNovos++;
       } else { danfesFalha++; }
     }
-    if (danfesNovos) salvarManifest(man);
-    console.log(`[GIRABKP] DANFE: ${danfesNovos} novos, ${danfesFalha} falha, ${danfesSemId} sem nf.id`);
+    if (danfesNovos || danfesReparo) salvarManifest(man);
+    console.log(`[GIRABKP] DANFE: ${danfesNovos} novos, ${danfesReparo} reparados, ${danfesFalha} falha, ${danfesSemId} sem nf.id`);
 
     // passo: baixa a ETIQUETA em PDF (p/ modo A4 / fallback Zebra) — só de quem já tem ZPL
     let etqPdfNovos = 0;
