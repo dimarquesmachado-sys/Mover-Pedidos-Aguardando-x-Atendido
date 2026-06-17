@@ -1730,8 +1730,10 @@ async function rotinaEscadaIndisponivel(opts = {}) {
   const dryRun = !!opts.dryRun;
   const MARGEM_HORAS = Number(opts.margemHoras ?? process.env.LIXAS_ESCADA_MARGEM_HORAS) || 6;
   const DIAS = Number(opts.dias ?? process.env.LIXAS_ESCADA_DIAS) || 30;
+  const MAX_AVISOS = Number(process.env.LIXAS_ESCADA_MAX_AVISOS) || 3;
+  const INTERVALO_AVISO_HORAS = Number(process.env.LIXAS_ESCADA_AVISO_INTERVALO_HORAS) || 24;
 
-  const stats = { dryRun, margem_horas: MARGEM_HORAS, verificados: 0, aguardando_prazo: 0, substituidos: 0, erros: 0, pulados: 0, lista: [] };
+  const stats = { dryRun, margem_horas: MARGEM_HORAS, verificados: 0, avisados: 0, aguardando_prazo: 0, substituidos: 0, erros: 0, pulados: 0, lista: [] };
   if (!tracker.configurado()) { stats.desligada = 'supabase_nao_configurado'; return stats; }
 
   const ESCADA_HABILITADA = (process.env.LIXAS_ESCADA_HABILITADO || 'true').toLowerCase() === 'true';
@@ -1745,10 +1747,26 @@ async function rotinaEscadaIndisponivel(opts = {}) {
   const sub = require('../lixas-combinar/substituicao');
   const prazoMod = require('./prazoPostagem');
 
-  // candidatos: travados no erro de INDISPONIVEL, ainda sem NF
-  const lista = await lcp.listarPendentes({ dias: DIAS, status: 'precisa_atencao_humano', limit: 100 });
-  const candidatos = (lista.ok && Array.isArray(lista.data) ? lista.data : [])
-    .filter(v => /indispon/i.test(String(v.bling_erro || '')) && !v.nf_emitida_em);
+  // candidatos: travados no erro de INDISPONIVEL, ainda sem NF.
+  // Busca em DOIS status: precisa_atencao_humano (acabou de travar, ainda nao avisado)
+  // E aguardando_resposta (a escada ja avisou -> esperando a cliente escolher; o
+  // lerRespostas trata a resposta dela, a escada so reforca o aviso e trava no prazo).
+  const [listaHumano, listaAguard] = await Promise.all([
+    lcp.listarPendentes({ dias: DIAS, status: 'precisa_atencao_humano', limit: 100 }),
+    lcp.listarPendentes({ dias: DIAS, status: 'aguardando_resposta', limit: 100 })
+  ]);
+  const _vistos = new Set();
+  const candidatos = [];
+  for (const v of [
+    ...(listaHumano.ok && Array.isArray(listaHumano.data) ? listaHumano.data : []),
+    ...(listaAguard.ok && Array.isArray(listaAguard.data) ? listaAguard.data : [])
+  ]) {
+    if (!/indispon/i.test(String(v.bling_erro || '')) || v.nf_emitida_em) continue;
+    const k = String(v.order_id);
+    if (_vistos.has(k)) continue;
+    _vistos.add(k);
+    candidatos.push(v);
+  }
 
   for (const v of candidatos) {
     const orderId = v.order_id;
@@ -1780,10 +1798,78 @@ async function rotinaEscadaIndisponivel(opts = {}) {
       }
       const horas = (new Date(prazo.prazo_postagem).getTime() - Date.now()) / 3600e3;
 
-      // 4. ainda sobra tempo? deixa quieto (cliente/humano ainda pode resolver)
+      // 4. ainda sobra tempo -> REENGAJA a cliente (escada de avisos) antes de trocar.
+      //    Da a chance dela escolher um grao valido; so troca sozinha perto do prazo.
       if (horas > MARGEM_HORAS) {
-        stats.aguardando_prazo++;
-        stats.lista.push({ order_id: orderId, acao: 'aguardando', horas_ate_prazo: Math.round(horas * 10) / 10, prazo: prazo.prazo_postagem, metodo: prazo.metodo });
+        // sem as colunas de controle (escada_avisado_em/escada_avisos) NAO avisa — sem
+        // dedup viraria spam. Degrada pro v1 (so trava no prazo) e sinaliza pro Diego.
+        const temColunasEscada = (v.escada_avisos !== undefined) || (v.escada_avisado_em !== undefined);
+        if (!temColunasEscada) {
+          stats.faltam_colunas_escada = true;
+          stats.aguardando_prazo++;
+          stats.lista.push({ order_id: orderId, acao: 'aguardando', motivo: 'colunas_escada_ausentes_so_trava', horas_ate_prazo: Math.round(horas * 10) / 10 });
+          continue;
+        }
+
+        const avisos = Number(v.escada_avisos) || 0;
+        // respeita TANTO o ultimo aviso da escada QUANTO o ultimo da IA (lerRespostas),
+        // pra nunca mandar duas mensagens "escolha um grao" coladas.
+        const ultimoAvisoTs = Math.max(
+          v.escada_avisado_em ? new Date(v.escada_avisado_em).getTime() : 0,
+          v.ia_processado_em  ? new Date(v.ia_processado_em).getTime()  : 0
+        );
+        const horasDesdeAviso = ultimoAvisoTs ? (Date.now() - ultimoAvisoTs) / 3600e3 : Infinity;
+        const podeAvisar = avisos < MAX_AVISOS && horasDesdeAviso >= INTERVALO_AVISO_HORAS;
+
+        if (!podeAvisar) {
+          stats.aguardando_prazo++;
+          stats.lista.push({ order_id: orderId, acao: 'aguardando', avisos, horas_ate_prazo: Math.round(horas * 10) / 10, prazo: prazo.prazo_postagem });
+          continue;
+        }
+
+        // monta o aviso escalonado (nivel = avisos+1) com graos indisponiveis + sugestoes
+        const indispo = sub.graosIndisponiveisDoPedido(pedidoEstruturado, graosResult.graos)
+          .map(x => ({ grao: x.grao, sugestoes: sub.sugerirGraosProximos(x.grao, graosResult.graos, 2) }));
+        const nivel = avisos + 1;
+        const msg = sub.montarMsgReengajamento(indispo, nivel);
+        if (!msg) {  // estoque do grao voltou -> nada a avisar; deixa o prazo decidir
+          stats.aguardando_prazo++;
+          stats.lista.push({ order_id: orderId, acao: 'aguardando', motivo: 'sem_grao_indisponivel_agora', horas_ate_prazo: Math.round(horas * 10) / 10 });
+          continue;
+        }
+
+        if (dryRun) {
+          stats.avisados++;
+          stats.lista.push({ order_id: orderId, acao: 'avisaria', nivel, horas_ate_prazo: Math.round(horas * 10) / 10, indisponiveis: indispo, msg });
+          continue;
+        }
+
+        // envia o aviso pra cliente
+        let buyerId = null;
+        try { const od = await ml.getOrderDetalhe(orderId); buyerId = od && od.buyer ? od.buyer.id : null; } catch (_) {}
+        let r = buyerId ? await ml.enviarMensagemDireta({ packId: v.pack_id, orderId, buyerId, texto: msg }) : { ok: false };
+        if (!r || !r.ok) r = await ml.enviarMensagem({ packId: v.pack_id, orderId, buyerId, texto: msg });
+
+        if (!r || !r.ok) {
+          stats.erros++;
+          stats.lista.push({ order_id: orderId, acao: 'erro', motivo: 'falha_envio_aviso' });
+          continue;
+        }
+
+        // aviso OK -> passa pra aguardando_resposta (lerRespostas trata a escolha da cliente)
+        // e registra o aviso. Defensivo: se escada_* falhar na escrita, grava so o status.
+        let upd = await lcp.atualizarVenda(orderId, {
+          status: 'aguardando_resposta',
+          escada_avisado_em: new Date().toISOString(),
+          escada_avisos: avisos + 1
+        });
+        if (!upd || !upd.ok) {
+          console.warn(`[escada] order ${orderId} aviso enviado mas nao gravei escada_* (colunas?). Gravando so status.`);
+          await lcp.atualizarVenda(orderId, { status: 'aguardando_resposta' });
+        }
+        stats.avisados++;
+        stats.lista.push({ order_id: orderId, acao: 'avisado', nivel, horas_ate_prazo: Math.round(horas * 10) / 10 });
+        console.log(`[escada] order ${orderId} aviso nivel ${nivel} enviado (grãos ${indispo.map(i => i.grao).join(',')}), faltavam ${Math.round(horas)}h`);
         continue;
       }
 
@@ -1867,7 +1953,7 @@ async function rotinaEscadaIndisponivel(opts = {}) {
   }
 
   if (stats.verificados > 0) {
-    console.log(`[escada]${dryRun ? ' (dryRun)' : ''} verificados=${stats.verificados} aguardando_prazo=${stats.aguardando_prazo} ${dryRun ? 'substituiria' : 'substituidos'}=${stats.substituidos} erros=${stats.erros} pulados=${stats.pulados}`);
+    console.log(`[escada]${dryRun ? ' (dryRun)' : ''} verificados=${stats.verificados} ${dryRun ? 'avisaria' : 'avisados'}=${stats.avisados} aguardando=${stats.aguardando_prazo} ${dryRun ? 'substituiria' : 'substituidos'}=${stats.substituidos} erros=${stats.erros} pulados=${stats.pulados}`);
   }
   return stats;
 }
