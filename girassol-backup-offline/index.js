@@ -2,7 +2,7 @@
 
 // ════════════════════════════════════════════════════════════════════════
 //  GIRASSOL · CHECKOUT OFFLINE — FASE 1 (poller) + FASE 2 (bipagem)   (Mover-Pedidos)
-//  girassol-backup-offline v16/06 b38   (a versão real é a const VERSAO abaixo)
+//  girassol-backup-offline v16/06 b39   (a versão real é a const VERSAO abaixo)
 // ════════════════════════════════════════════════════════════════════════
 //  Módulo do orquestrador unificado (HTTP-native, sem Express).
 //  Reaproveita o token Bling da Girassol via ../girassol/tokenManager.
@@ -38,7 +38,7 @@ const { garantirToken } = require('../girassol/tokenManager');
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v16/06 b38';
+const VERSAO     = 'girassol-backup-offline v16/06 b39';
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 
 // ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
@@ -1256,6 +1256,8 @@ function routes(readBody) {
           out.tem_linkPDF = !!(nf && nf.linkPDF);
           out.tem_linkDanfe = !!(nf && nf.linkDanfe);
           out.tem_xml = !!(nf && nf.xml);
+          out.campos_nf = nf ? Object.keys(nf) : null;
+          out.links_e_danfe = nf ? Object.keys(nf).filter(k => /link|danfe|pdf|simpl|etiq|impress/i.test(k)).reduce((o, k) => { o[k] = nf[k]; return o; }, {}) : null;
           if (nf && nf.linkPDF) {
             try {
               const resp = await fetch(nf.linkPDF, { redirect: 'follow' });
