@@ -210,33 +210,46 @@ function routes(readBody) {
       try {
         const lcp = require('./lixasCombinarPendentes');
         const rawAuto = process.env.LIXAS_AUTO_EMITIR_NF_HABILITADO;
-        const confirmou = await lcp.listarPendentes({ dias: 7, status: 'cliente_confirmou_pedido', limit: 50 });
-        const orders = ((confirmou && confirmou.data) || []).map(v => ({
-          order_id: v.order_id,
-          buyer: v.buyer_nome || v.buyer_id || null,
-          status: v.status,
-          ia_categoria: v.ia_categoria || null,
-          ia_confianca: v.ia_confianca,
-          tem_estruturado: !!v.ia_pedido_estruturado,
-          bling_editado_em: v.bling_editado_em || null,
-          bling_pedido_id: v.bling_pedido_id || null,
-          nf_emitida_em: v.nf_emitida_em || null,
-          sku: v.sku_a_combinar || null,
-          data_venda: v.data_venda || null,
-          ia_processado_em: v.ia_processado_em || null
-        }));
-        json(res, 200, {
-          ok: true,
-          flags: {
-            AUTO_EMITIR_HABILITADO: String(rawAuto || 'false').toLowerCase() === 'true',
-            raw_AUTO_EMITIR: JSON.stringify(rawAuto), // aspas revelam espaco sobrando, ex "true "
-            LIMIAR_CONFIANCA_AUTO: Number(process.env.LIXAS_AUTO_CONFIANCA_MIN || 95),
-            AUTO_MAX_POR_DIA: Number(process.env.LIXAS_AUTO_MAX_POR_DIA || 999),
-            raw_REPESCA_DIAS: JSON.stringify(process.env.LIXAS_REPESCA_CONFIRMOU_DIAS)
-          },
-          confirmou_pedido_count: orders.length,
-          confirmou_pedido: orders
-        });
+        const flags = {
+          AUTO_EMITIR_HABILITADO: String(rawAuto || 'false').toLowerCase() === 'true',
+          raw_AUTO_EMITIR: JSON.stringify(rawAuto),
+          LIMIAR_CONFIANCA_AUTO: Number(process.env.LIXAS_AUTO_CONFIANCA_MIN || 95),
+          AUTO_MAX_POR_DIA: Number(process.env.LIXAS_AUTO_MAX_POR_DIA || 999)
+        };
+
+        // Contagem por TODOS os status (pra achar onde os presos realmente estao)
+        const STATUSES = ['aguardando_resposta','cliente_respondeu','cliente_confirmou_pedido','aguardando_bling','precisa_atencao_humano','processado','cancelado'];
+        const counts = {};
+        for (const s of STATUSES) {
+          try { const r = await lcp.listarPendentes({ dias: 14, status: s, limit: 100 }); counts[s] = (((r && r.data) || []).length); }
+          catch (e) { counts[s] = `erro: ${e.message}`; }
+        }
+
+        // Lookup de um pedido especifico: /debug/diag?order=ID
+        const orderQ = urlObj.searchParams.get('order');
+        let pedido = null;
+        if (orderQ) {
+          try {
+            const b = await lcp.buscar(orderQ);
+            const v = (b && b.data) ? b.data : b;
+            pedido = v ? {
+              order_id: v.order_id, status: v.status,
+              ia_categoria: v.ia_categoria, ia_confianca: v.ia_confianca,
+              tem_estruturado: !!v.ia_pedido_estruturado,
+              ia_msg_enviada: !!v.ia_msg_enviada,
+              bling_editado_em: v.bling_editado_em || null,
+              bling_pedido_id: v.bling_pedido_id || null,
+              nf_emitida_em: v.nf_emitida_em || null,
+              bling_erro: v.bling_erro || null, nf_erro: v.nf_erro || null,
+              sku: v.sku_a_combinar || null,
+              data_venda: v.data_venda || null,
+              ultima_resposta_em: v.ultima_resposta_em || null,
+              ia_processado_em: v.ia_processado_em || null
+            } : { nao_encontrado: orderQ };
+          } catch (e) { pedido = { erro: e.message }; }
+        }
+
+        json(res, 200, { ok: true, flags, counts_por_status: counts, pedido });
       } catch (e) {
         json(res, 500, { ok: false, erro: e.message });
       }
