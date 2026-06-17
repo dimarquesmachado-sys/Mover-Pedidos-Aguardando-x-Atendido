@@ -203,6 +203,103 @@ function routes(readBody) {
     }
 
 
+    // DEBUG (read-only): GET /auto-mensagens/debug/dry-emit/:orderId
+    // Roda editarPedidoComGraos em dryRun (NAO salva) e devolve um raio-x
+    // financeiro: itens/parcelas/desconto/frete ORIGINAL vs o que SERIA enviado.
+    // Serve pra achar por que o code-22 (parcelas != total) ocorre num pedido.
+    if (method === 'GET' && p.startsWith('/auto-mensagens/debug/dry-emit/')) {
+      try {
+        const orderId = p.replace('/auto-mensagens/debug/dry-emit/', '');
+        const lcp = require('./lixasCombinarPendentes');
+        const lixasService = require('../lixas-combinar/lixasService');
+        const bp = require('../lixas-combinar/blingPedidos');
+
+        const re = await lcp.buscar(orderId);
+        if (!re || !re.ok || !re.data) { json(res, 404, { ok: false, erro: 'venda nao encontrada na tabela' }); return true; }
+        const v = re.data;
+
+        let pedido_estruturado = null;
+        try { pedido_estruturado = v.ia_pedido_estruturado ? JSON.parse(v.ia_pedido_estruturado) : null; } catch (_) {}
+        if (!Array.isArray(pedido_estruturado) || pedido_estruturado.length === 0) {
+          json(res, 400, { ok: false, erro: 'sem ia_pedido_estruturado valido' }); return true;
+        }
+
+        const graosResult = await lixasService.getGraosDisponiveisPorSkuACombinar(v.sku_a_combinar);
+        if (!graosResult || !graosResult.ok) { json(res, 400, { ok: false, erro: 'estoque indisponivel' }); return true; }
+
+        const idBusca = v.pack_id || v.order_id;
+        const dataVenda = v.data_venda ? String(v.data_venda).split('T')[0] : null;
+        let dIni, dFim;
+        if (dataVenda) {
+          const d = new Date(dataVenda);
+          const a = new Date(d); a.setDate(a.getDate() - 3);
+          const b = new Date(d); b.setDate(b.getDate() + 3);
+          dIni = a.toISOString().split('T')[0]; dFim = b.toISOString().split('T')[0];
+        }
+        const busca = await bp.buscarPedidoPorOrderId(idBusca, dIni, dFim);
+        if (!busca || !busca.ok) { json(res, 404, { ok: false, erro: 'pedido nao achado no Bling', busca }); return true; }
+        const detOrig = await bp.obterPedidoCompleto(busca.pedidoId);
+        const orig = detOrig.ok ? detOrig.pedido : {};
+
+        const dry = await bp.editarPedidoComGraos({
+          orderId: idBusca,
+          graosEscolhidos: pedido_estruturado,
+          graosDisponiveis: graosResult.graos,
+          unidadesPorPacote: graosResult.unidades_por_pacote,
+          descricaoBase: graosResult.descricao,
+          dataVenda,
+          skuACombinar: v.sku_a_combinar || null,
+          dryRun: true
+        });
+
+        const r2 = (n) => Number(Number(n || 0).toFixed(2));
+        const somaParc = (arr) => r2((arr || []).reduce((s, x) => s + Number(x.valor || 0), 0));
+        const somaItens = (arr) => r2((arr || []).reduce((s, it) => s + Number(it.valor || 0) * Number(it.quantidade || 0), 0));
+        const body = dry && dry.preview_body ? dry.preview_body : {};
+
+        const previtens = somaItens(body.itens);
+        const prevDesc = r2(body.desconto?.valor || 0);
+        const prevOutras = r2(body.outrasDespesas || 0);
+        const prevFrete = r2(body.transporte?.frete || orig.transporte?.frete || 0);
+        const totalCalcPreview = r2(previtens + prevFrete + prevOutras - prevDesc);
+        const prevParcSoma = somaParc(body.parcelas);
+
+        json(res, 200, {
+          ok: true,
+          order_id: orderId,
+          situacao: orig.situacao?.id,
+          original: {
+            total: orig.total,
+            desconto: orig.desconto,
+            outrasDespesas: orig.outrasDespesas,
+            frete: orig.transporte?.frete,
+            itens: (orig.itens || []).map(it => ({ codigo: it.codigo, valor: it.valor, qtd: it.quantidade })),
+            itens_soma: somaItens(orig.itens),
+            parcelas: (orig.parcelas || []).map(x => x.valor),
+            parcelas_soma: somaParc(orig.parcelas)
+          },
+          preview: {
+            desconto: body.desconto,
+            outrasDespesas: body.outrasDespesas,
+            frete: body.transporte?.frete,
+            itens: (body.itens || []).map(it => ({ codigo: it.codigo, valor: it.valor, qtd: it.quantidade })),
+            itens_soma: previtens,
+            parcelas: (body.parcelas || []).map(x => x.valor),
+            parcelas_soma: prevParcSoma,
+            total_calculado: totalCalcPreview,
+            bate_parcelas_x_total: Math.abs(totalCalcPreview - prevParcSoma) < 0.01
+          },
+          rateio_ajuste: dry && dry.rateio ? dry.rateio.ajuste : null,
+          dry_ok: !!(dry && dry.ok),
+          dry_erro: (dry && dry.ok) ? null : dry
+        });
+      } catch (e) {
+        json(res, 500, { ok: false, erro: e.message });
+      }
+      return true;
+    }
+
+    // GET/POST /run/tudo → processa GERAL: primeiro registra vendas novas e
     // manda iniciais (rotinaACombinar), depois lê respostas + IA + monta pedido
     // (rotinaLerRespostas). Um clique pra rodar o ciclo completo agora.
     if ((method === 'GET' || method === 'POST') && p === '/auto-mensagens/run/tudo') {
