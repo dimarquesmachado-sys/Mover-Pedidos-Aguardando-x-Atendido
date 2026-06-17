@@ -381,6 +381,7 @@ async function getPrazoPostagem(orderId) {
   const shippingId = order?.shipping?.id || order?.shipping_id || null;
 
   const out = {
+    _sonda_versao: 'prazo-v2 (dedicado+derivado)',
     order_id: orderId,
     pack_id: order?.pack_id || null,
     order_status: order?.status || null,
