@@ -620,7 +620,7 @@ async function recuperarFalsosProcessados({ dias = 30 } = {}) {
 
   const out = {
     ok: true, dias, analisados: 0, candidatos: 0, emitidos: 0,
-    emitidosLista: [], pulados: [], erros: []
+    emitidosLista: [], pulados: [], erros: [], diag: []
   };
 
   let lista;
@@ -645,7 +645,13 @@ async function recuperarFalsosProcessados({ dias = 30 } = {}) {
 
     out.candidatos++;
 
-    // (2) TRAVA — confirma que o pedido ainda esta ABERTO no Bling
+    // (2) TRAVA — decide pela NF DE VERDADE, nao pela situacao. A integracao
+    // nativa do Bling fica movendo o pedido entre "Em aberto" e "Atendido"
+    // (bounce) quando a NF automatica falha, entao a situacao nao eh confiavel.
+    // O que importa: TEM NF vinculada? Se sim, eh legitimo -> pula. Se nao (e nao
+    // estiver cancelado), recupera — mesmo em situacao 9 (editarPedidoComGraos
+    // ja sabe editar pedido "Atendido").
+    let pedSituacao = null, pedNotaRaw;
     try {
       const idBusca = v.pack_id || v.order_id;
       const dataVenda = v.data_venda ? String(v.data_venda).split('T')[0] : null;
@@ -662,15 +668,29 @@ async function recuperarFalsosProcessados({ dias = 30 } = {}) {
         out.pulados.push({ order_id: oid, nome, motivo: 'nao achei o pedido no Bling — conferir na mao' });
         continue;
       }
-      const sit = Number(busca.situacaoId);
-      if (SIT_CONCLUIDAS.includes(sit)) {
-        out.pulados.push({ order_id: oid, nome, motivo: `Bling ja concluido (situacao ${sit}) — conferir se tem NF na mao` });
+      const det = await bp.obterPedidoCompleto(busca.pedidoId);
+      if (!det || !det.ok) {
+        out.pulados.push({ order_id: oid, nome, motivo: `nao li o detalhe do pedido ${busca.pedidoId} no Bling` });
         continue;
       }
-      if (SIT_CANCELADAS.includes(sit)) {
-        out.pulados.push({ order_id: oid, nome, motivo: `Bling cancelado (situacao ${sit}) — ignorado` });
+      const ped = det.pedido || {};
+      pedSituacao = Number(ped.situacao?.id);
+      pedNotaRaw = ped.notaFiscal; // Bling v3: { id } quando ha NF vinculada
+      const nfId = (pedNotaRaw && typeof pedNotaRaw === 'object') ? pedNotaRaw.id : pedNotaRaw;
+      const temNF = Number(nfId) > 0;
+
+      // diag: deixa visivel o que o Bling devolveu (pra eu confirmar o campo da NF)
+      out.diag.push({ order_id: oid, nome, situacao: pedSituacao, notaFiscal: pedNotaRaw ?? null });
+
+      if (SIT_CANCELADAS.includes(pedSituacao)) {
+        out.pulados.push({ order_id: oid, nome, motivo: `Bling cancelado (situacao ${pedSituacao}) — ignorado` });
         continue;
       }
+      if (temNF) {
+        out.pulados.push({ order_id: oid, nome, motivo: `ja tem NF no Bling (id ${nfId}, situacao ${pedSituacao}) — legitimo, nao mexo` });
+        continue;
+      }
+      // sem NF e nao cancelado -> recupera (segue pro montar+emitir abaixo)
     } catch (e) {
       out.pulados.push({ order_id: oid, nome, motivo: `erro checando Bling: ${e.message}` });
       continue;
