@@ -344,24 +344,25 @@ function montarBodyPUT({ pedidoOriginal, rateio, observacaoExtra, outrosItens = 
     }
     // sem ajuste: NAO mexe em desconto/outrasDespesas (mantem o original do pedido)
   } else {
-    // ── MODO PADRAO (pedido de 1 item) — comportamento identico ao de sempre ──
+    // ── MODO PADRAO (pedido de 1 item) ──
+    // Substitui os itens pelos graos e PRESERVA o desconto/outrasDespesas
+    // ORIGINAIS do pedido (cupom do ML etc), apenas SOMANDO o ajuste de centavo
+    // do rateio. Antes isso SOBRESCREVIA o desconto, apagando o cupom -> o total
+    // mudava e as parcelas (presas no total original) nao fechavam (Bling code 22).
+    // Ex.: Rangel tinha desconto 7,65; ao zerar, o total saltava 145,40 -> 153,05.
+    // Mesma logica do modo carrinho: mantem o original e acumula o ajuste.
     body.itens = linhasGraos;
 
     if (rateio.ajuste) {
       if (rateio.ajuste.tipo === 'desconto') {
-        body.desconto = {
-          valor: rateio.ajuste.valor,
-          unidade: 'REAL'
-        };
+        const atual = Number(body.desconto?.valor || 0);
+        body.desconto = { valor: arredondar2(atual + rateio.ajuste.valor), unidade: 'REAL' };
       } else {
-        // Acrescimo via "outras despesas" ou "outrasDespesas"
-        body.outrasDespesas = rateio.ajuste.valor;
+        const atual = Number(body.outrasDespesas || 0);
+        body.outrasDespesas = arredondar2(atual + rateio.ajuste.valor);
       }
-    } else {
-      // Zera desconto e outras despesas se estavam preenchidos
-      body.desconto = { valor: 0, unidade: 'REAL' };
-      body.outrasDespesas = 0;
     }
+    // sem ajuste: NAO mexe em desconto/outrasDespesas (mantem o original do pedido)
   }
 
   // Anexa observacao interna marcando edicao automatica
