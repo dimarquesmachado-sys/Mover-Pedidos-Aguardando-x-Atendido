@@ -2,7 +2,7 @@
 
 // ════════════════════════════════════════════════════════════════════════
 //  GIRASSOL · CHECKOUT OFFLINE — FASE 1 (poller) + FASE 2 (bipagem)   (Mover-Pedidos)
-//  girassol-backup-offline v16/06 b24   (a versão real é a const VERSAO abaixo)
+//  girassol-backup-offline v16/06 b25   (a versão real é a const VERSAO abaixo)
 // ════════════════════════════════════════════════════════════════════════
 //  Módulo do orquestrador unificado (HTTP-native, sem Express).
 //  Reaproveita o token Bling da Girassol via ../girassol/tokenManager.
@@ -38,7 +38,7 @@ const { garantirToken } = require('../girassol/tokenManager');
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v16/06 b24';
+const VERSAO     = 'girassol-backup-offline v16/06 b25';
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 
 // ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
@@ -366,10 +366,16 @@ async function zplParaPdf(zpl) {
   } catch (e) { return null; }
 }
 
-// etiqueta em PDF: tenta o PDF do Bling (ML); se vier ZPL (não-ML), converte via Labelary.
+// etiqueta em PDF: ML usa o PDF nativo do Bling; não-ML usa o ZPL cacheado → Labelary
+// (não-ML NÃO depende do Bling — funciona mesmo com o Bling fora do ar)
 async function etiquetaPdf(blingId, dir) {
-  const direto = await baixarEtiquetaPDF(blingId);
-  if (direto) return direto;
+  let mkt = null;
+  try { mkt = JSON.parse(fs.readFileSync(path.join(dir, 'pedido.json'), 'utf8')).marketplace; } catch (e) {}
+  if (mkt === 'ml' || mkt === null) { // ML (ou desconhecido): tenta o PDF do Bling
+    const direto = await baixarEtiquetaPDF(blingId);
+    if (direto) return direto;
+  }
+  // não-ML (ou ML sem PDF): ZPL cacheado em disco → Labelary
   let zpl = null;
   if (dir) { try { zpl = fs.readFileSync(path.join(dir, `etiqueta.${ETIQ_FORMATO.toLowerCase()}`), 'utf8'); } catch (e) {} }
   if (!zpl) { try { zpl = await baixarEtiqueta(blingId); } catch (e) {} }
