@@ -222,7 +222,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b42';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b43';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#ff9900'}, magalu:{n:'Magalu',c:'#0086ff'}, outro:{n:'Outro',c:'#94a3b8'}
@@ -342,21 +342,11 @@ async function imprimirPDF(url){
   await qz.print(cfg, [{ type:'pixel', format:'pdf', flavor:'base64', data: b64 }]);
 }
 
-// ── DANFE SIMPLIFICADO (PDF 10x15) → impresso NA ZEBRA via QZ (pixel/pdf) ──
+// ── DANFE SIMPLIFICADO em ZPL NATIVO → impresso CRU na Zebra (mesmo cano da etiqueta, instantâneo) ──
 async function imprimirSimplificadoZebra(id){
-  await conectarQZ();
-  const printer = await getImpressora();   // a MESMA Zebra da etiqueta
-  if(!printer) throw new Error('Nenhuma impressora encontrada');
-  const resp = await fetch(location.origin+'/girassol-backup-offline/danfe-simp/'+id);
-  if(!resp.ok) throw new Error('DANFE-simp '+resp.status);
-  const bytes = new Uint8Array(await resp.arrayBuffer());
-  let bin=''; for(let i=0;i<bytes.length;i++) bin+=String.fromCharCode(bytes[i]);
-  const b64 = btoa(bin);
-  const cfg = qz.configs.create(printer, {
-    size:{ width:100, height:150 }, units:'mm',
-    density:203, scaleContent:true, rasterize:true, colorType:'blackwhite', margins:0
-  });
-  await qz.print(cfg, [{ type:'pixel', format:'pdf', flavor:'base64', data: b64 }]);
+  const zpl = await fetch(location.origin+'/girassol-backup-offline/danfe-simp/'+id+'?zpl=1')
+    .then(r=>{ if(!r.ok) throw new Error('DANFE '+r.status); return r.text(); });
+  await imprimirZPL(zpl);   // raw ZPL — igual a etiqueta que já funciona
 }
 
 // ── chave Zebra(ZPL) ↔ A4(PDF) p/ a ETIQUETA (a NF é sempre A4) ──
