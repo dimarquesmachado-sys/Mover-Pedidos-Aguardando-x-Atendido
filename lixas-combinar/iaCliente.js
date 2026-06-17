@@ -139,6 +139,66 @@ FORMATO DE RESPOSTA (JSON puro, sem markdown, sem comentario):
 }
 
 /**
+ * Prompt do MODO VENDEDOR: a entrada e uma ORDEM autoritativa do dono da loja,
+ * NAO uma mensagem de cliente. Nunca classifica fora_escopo/pergunta_graos —
+ * o vendedor sempre esta mandando montar um pedido. A conversa do cliente vira
+ * so contexto e a palavra do vendedor prevalece.
+ */
+function montarSystemPromptVendedor({ descricaoProduto, totalLixas, unidadesPorPacote, graosDisponiveis }) {
+  return `Voce processa uma ORDEM AUTORITATIVA do VENDEDOR (dono da loja Magazine Girassol) para montar um pedido de lixas A COMBINAR. ISTO NAO EH mensagem de cliente final — eh o vendedor te dando a palavra FINAL sobre o pedido.
+
+CONTEXTO DA VENDA:
+- Produto: ${descricaoProduto}
+- Total: ${totalLixas} lixas
+- Quantidades em MULTIPLOS DE ${unidadesPorPacote}
+- Graos disponiveis no Bling AGORA: ${graosDisponiveis.join(', ')}
+- A soma das quantidades deve dar EXATAMENTE ${totalLixas} lixas
+
+REGRA PRINCIPAL — A PALAVRA DO VENDEDOR E FINAL:
+A instrucao do vendedor E o pedido a montar. Monte EXATAMENTE o que ele mandou.
+A conversa com o cliente (se houver no historico) eh APENAS contexto — pra resolver
+referencias do vendedor (ex.: "completa o resto", "mantem o que o cliente pediu e troca
+o 100 por 120"). Se a instrucao do vendedor conflitar com o que o cliente disse,
+PREVALECE O VENDEDOR.
+
+NUNCA classifique como "fora_escopo" nem "pergunta_graos". O vendedor SEMPRE esta te
+passando um pedido pra montar — inclusive quando a instrucao fala em "substituir",
+"trocar", "no lugar de", "o cliente queria X". Isso NAO eh fora de escopo: e a ordem
+de montagem. Interprete e monte.
+
+VALIDACAO (aplique sobre a ordem do vendedor):
+- Todos os graos devem estar na lista de disponiveis acima.
+- Todas as quantidades multiplas de ${unidadesPorPacote}.
+- A soma deve dar EXATAMENTE ${totalLixas}.
+
+CLASSIFIQUE em UMA destas 2 categorias:
+1. "claro" - a ordem do vendedor fechou: graos validos, quantidades multiplas de
+   ${unidadesPorPacote}, soma ${totalLixas}. Monte o pedido_estruturado.
+   Se o vendedor pediu pra completar/decidir ("completa variado", "voce escolhe o resto",
+   "distribui o que falta"), voce PODE distribuir o restante nos graos disponiveis ate
+   fechar ${totalLixas}.
+2. "ambiguo" - a ordem do vendedor NAO fecha: nao soma ${totalLixas}, cita grao fora da
+   lista de disponiveis, ou tem quantidade nao-multipla de ${unidadesPorPacote}, e voce
+   NAO consegue resolver sozinho. AÇÃO: diga AO VENDEDOR (em msg_pra_cliente) o que falta
+   ou esta errado pra ele corrigir a instrucao. NUNCA peca nada ao cliente neste modo.
+
+REGRAS:
+- NUNCA invente graos fora da lista de disponiveis.
+- Em "claro", msg_pra_cliente eh uma CONFIRMACAO curta e cordial do pedido (sera mostrada
+  e pode ser enviada ao cliente): liste os itens montados de forma declarativa.
+- Em "ambiguo", msg_pra_cliente eh a observacao PRO VENDEDOR (o que ajustar).
+
+FORMATO DE RESPOSTA (JSON puro, sem markdown, sem comentario):
+{
+  "categoria": "claro" | "ambiguo",
+  "confianca": 0-100,
+  "interpretacao": "frase curta do que o vendedor mandou montar",
+  "pedido_estruturado": [{"grao": "120", "quantidade": 30}] ou null,
+  "msg_pra_cliente": "confirmacao do pedido (claro) OU o que ajustar (ambiguo)" ou null
+}`;
+}
+
+/**
  * Interpreta a mensagem do cliente usando Claude API.
  * Retorna o JSON estruturado.
  *
@@ -151,7 +211,8 @@ async function interpretarRespostaCliente({
   totalLixas,
   unidadesPorPacote,
   graosDisponiveis,
-  historicoConversa
+  historicoConversa,
+  modoVendedor   // true => a instrucao e ORDEM autoritativa do vendedor (nunca fora_escopo)
 }) {
   if (!configurado()) {
     return { ok: false, erro: 'IA nao configurada (env ANTHROPIC_API_KEY_LIXAS_IA ausente)' };
@@ -161,25 +222,40 @@ async function interpretarRespostaCliente({
   }
 
   const apiKey = process.env[API_KEY_VAR];
-  const systemPrompt = montarSystemPrompt({
-    descricaoProduto, totalLixas, unidadesPorPacote, graosDisponiveis
-  });
+  const systemPrompt = modoVendedor
+    ? montarSystemPromptVendedor({ descricaoProduto, totalLixas, unidadesPorPacote, graosDisponiveis })
+    : montarSystemPrompt({ descricaoProduto, totalLixas, unidadesPorPacote, graosDisponiveis });
 
-  // Monta texto da mensagem do user com historico (se disponivel) + msg atual
+  // Monta texto da mensagem do user com historico (se disponivel) + msg/ordem atual
   let userText = '';
-  if (Array.isArray(historicoConversa) && historicoConversa.length > 0) {
-    userText += 'HISTORICO DA CONVERSA (mais antiga primeiro):\n';
-    for (const m of historicoConversa) {
-      const quem = m.role === 'seller' ? 'Loja' : 'Cliente';
-      userText += `${quem}: "${m.text}"\n`;
+  if (modoVendedor) {
+    if (Array.isArray(historicoConversa) && historicoConversa.length > 0) {
+      userText += 'CONVERSA COM O CLIENTE (apenas contexto, mais antiga primeiro):\n';
+      for (const m of historicoConversa) {
+        const quem = m.role === 'seller' ? 'Loja' : 'Cliente';
+        userText += `${quem}: "${m.text}"\n`;
+      }
+      userText += '\n';
     }
-    userText += '\n';
+    userText += `ORDEM DO VENDEDOR (autoritativa — monte EXATAMENTE isto):\n"""${mensagemCliente}"""\n\n` +
+      `Monte o pedido_estruturado seguindo a ORDEM DO VENDEDOR. A conversa acima e so contexto. ` +
+      `A palavra do vendedor e FINAL e prevalece sobre o que o cliente disse. ` +
+      `NUNCA classifique como fora_escopo nem pergunta_graos. Responda em JSON puro.`;
+  } else {
+    if (Array.isArray(historicoConversa) && historicoConversa.length > 0) {
+      userText += 'HISTORICO DA CONVERSA (mais antiga primeiro):\n';
+      for (const m of historicoConversa) {
+        const quem = m.role === 'seller' ? 'Loja' : 'Cliente';
+        userText += `${quem}: "${m.text}"\n`;
+      }
+      userText += '\n';
+    }
+    userText += `MENSAGEM MAIS RECENTE DO CLIENTE:\n"""${mensagemCliente}"""\n\n` +
+      `Monte o pedido com TODAS as mensagens do CLIENTE juntas (nao so a mais recente). ` +
+      `Se a mensagem recente for um ajuste/correcao, aplique-a POR CIMA da lista anterior do cliente ` +
+      `(troca so os graos citados, mantem o resto). So peca mais info se, juntando tudo, ainda faltar pro total. ` +
+      `Responda em JSON puro.`;
   }
-  userText += `MENSAGEM MAIS RECENTE DO CLIENTE:\n"""${mensagemCliente}"""\n\n` +
-    `Monte o pedido com TODAS as mensagens do CLIENTE juntas (nao so a mais recente). ` +
-    `Se a mensagem recente for um ajuste/correcao, aplique-a POR CIMA da lista anterior do cliente ` +
-    `(troca so os graos citados, mantem o resto). So peca mais info se, juntando tudo, ainda faltar pro total. ` +
-    `Responda em JSON puro.`;
 
   const body = {
     model: MODELO,
