@@ -1,556 +1,121 @@
 'use strict';
 
 /**
- * Módulo /auto-mensagens — Auto-mensagens pós-venda Mercado Livre
+ * Módulo /lixas-combinar — Consulta estoque de grãos disponíveis pra vendas A COMBINAR
  *
- * Hoje: Girassol "A COMBINAR" → manda mensagem automática 1x por venda
+ * Sessão 1 do projeto Lixas A COMBINAR: catalogar e listar variações filhas
+ * de 10 lixas com estoque, a partir de um SKU A COMBINAR de 100 lixas.
  *
- * Env vars:
- *   AUTO_MSG_GIRASSOL_ML_CLIENT_ID
- *   AUTO_MSG_GIRASSOL_ML_CLIENT_SECRET
- *   AUTO_MSG_GIRASSOL_HABILITADO       = 'true' | 'false'
- *   AUTO_MSG_GIRASSOL_TEXTO_A_COMBINAR (max 350 chars)
- *   AUTO_MSG_GIRASSOL_SUPABASE_URL
- *   AUTO_MSG_GIRASSOL_SUPABASE_KEY     (service_role)
- *   AUTO_MSG_JANELA_MIN                (opcional, default 30)
- *   AUTO_MSG_DATA_DIR                  (opcional, default /data/auto-mensagens)
+ * Não envia mensagens nem edita pedidos — só consulta.
  *
  * Rotas:
- *   GET  /auto-mensagens/health         → status do módulo
- *   GET  /auto-mensagens/setup          → URL de autorização ML
- *   GET  /auto-mensagens/oauth/callback → recebe code do ML e gera token
- *   POST /auto-mensagens/setup          → recebe { auth_code } e gera token
- *   POST /auto-mensagens/run/girassol   → roda fluxo manualmente
- *   GET  /auto-mensagens/stats          → últimas mensagens enviadas (Supabase)
- *
- * Cron:
- *   girassol-a-combinar: a cada 5 min (6h-23h)
+ *   GET  /lixas-combinar/health                 → status do módulo
+ *   GET  /lixas-combinar/catalogo               → mostra o JSON catalogo
+ *   GET  /lixas-combinar/setup                  → página com botão "Autorizar Bling"
+ *   GET  /lixas-combinar/oauth/callback         → recebe code Bling e troca por tokens
+ *   GET  /lixas-combinar/graos/:sku             → função principal: lista grãos disponíveis
+ *   GET  /lixas-combinar/debug/produto/:codigo  → debug: busca produto Bling pelo código
  */
 
-const tokenMgr = require('./mlTokenManager');
-const tracker  = require('./supabaseTracker');
-const { rotinaACombinar, rotinaLerRespostas, forcarOrder, recuperarPendentes, recuperarFalsosProcessados } = require('./fluxos');
+const tokenMgr = require('./tokenManager');
+const lixasService = require('./lixasService');
 
-// ── Helpers HTTP ──────────────────────────────────────────────────────
+// ── Helpers HTTP ─────────────────────────────────────────────────────
 function json(res, code, body) {
-  res.writeHead(code, { 'Content-Type': 'application/json' });
-  res.end(JSON.stringify(body));
+  res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' });
+  res.end(JSON.stringify(body, null, 2));
 }
+
 function html(res, code, body) {
   res.writeHead(code, { 'Content-Type': 'text/html; charset=utf-8' });
   res.end(body);
 }
 
-// ── Crons ─────────────────────────────────────────────────────────────
-const crons = {
-  girassolACombinar: '*/2 * * * *',          // a cada 2 min - envio msg auto
-  girassolLerRespostas: '*/2 * * * *',       // a cada 2 min - le respostas dos clientes (Sessao 3)
-  // de hora em hora - rede de seguranca: pesca pedidos A COMBINAR que escaparam da
-  // janela de 30min do rotinaACombinar (msg inicial enviada na mao, robo fora do ar,
-  // etc) e nunca entraram na tabela. Cria o registro lendo a conversa; o ciclo de
-  // leitura (2min) processa em seguida. Intervalo/janela ajustaveis por env.
-  girassolRecuperar: process.env.LIXAS_RECUPERAR_CRON || '0 * * * *',
-  // de hora em hora (em :15, deslocado do outro) - REDE DE SEGURANCA: varre os
-  // falsos-processados (vendas marcadas 'processado' SEM NF, claro/estruturado) e
-  // emite sozinho. Garante que nada fique preso sem nota durante a viagem (China),
-  // sem precisar rodar a recuperacao na mao. Checa NF real no Bling antes de emitir.
-  girassolRecuperarSemNF: process.env.LIXAS_RECUPERAR_SEMNF_CRON || '15 * * * *'
-};
-
-// ── Rotas ─────────────────────────────────────────────────────────────
+// ── Router (interface esperada pelo orquestrador raiz) ───────────────
 function routes(readBody) {
   return async function handle(req, res, urlObj) {
-    const { method } = req;
     const p = urlObj.pathname;
+    const method = req.method;
 
-    if (p !== '/auto-mensagens' && !p.startsWith('/auto-mensagens/')) return false;
+    // Filtro: só responde rotas do módulo
+    if (p !== '/lixas-combinar' && !p.startsWith('/lixas-combinar/')) return false;
 
-    // Health
-    if (method === 'GET' && p === '/auto-mensagens/health') {
-      const t = tokenMgr.temTokens();
+    // health
+    if (method === 'GET' && p === '/lixas-combinar/health') {
       json(res, 200, {
         ok: true,
-        modulo: 'auto-mensagens',
-        girassol: {
-          habilitado: (process.env.AUTO_MSG_GIRASSOL_HABILITADO || 'false').toLowerCase() === 'true',
-          ml_client_configurado: tokenMgr.configurado(),
-          ml_tokens_ok: t,
-          supabase_configurado: tracker.configurado(),
-          texto_configurado: !!process.env.AUTO_MSG_GIRASSOL_TEXTO_A_COMBINAR,
-          texto_tamanho: (process.env.AUTO_MSG_GIRASSOL_TEXTO_A_COMBINAR || '').length
-        },
+        modulo: 'lixas-combinar',
+        bling: tokenMgr.getStatus(),
+        catalogo_skus: Object.keys(lixasService.listarCatalogo()),
         ts: Date.now()
       });
       return true;
     }
 
-    // OAuth - GET /setup → gera URL e mostra
-    if (method === 'GET' && p === '/auto-mensagens/setup') {
-      if (!tokenMgr.configurado()) {
-        html(res, 400, '<h2>❌ Client ID/Secret não configurados nas env vars</h2>');
+    // catalogo
+    if (method === 'GET' && p === '/lixas-combinar/catalogo') {
+      json(res, 200, { ok: true, catalogo: lixasService.listarCatalogo() });
+      return true;
+    }
+
+    // setup (OAuth start)
+    if (method === 'GET' && p === '/lixas-combinar/setup') {
+      const clientId = process.env.LIXAS_BLING_CLIENT_ID;
+      if (!clientId) {
+        html(res, 500, '<h1>Erro</h1><p>LIXAS_BLING_CLIENT_ID não configurado no Render.</p>');
         return true;
       }
-      const url = tokenMgr.gerarUrlAutorizacao();
+      const redirect = encodeURIComponent(tokenMgr.getRedirectUri());
+      const state = Math.random().toString(36).slice(2, 15);
+      const authUrl = `https://www.bling.com.br/Api/v3/oauth/authorize?response_type=code&client_id=${clientId}&state=${state}&redirect_uri=${redirect}`;
       html(res, 200, `
-        <html><body style="font-family:sans-serif;max-width:680px;margin:40px auto;padding:20px;">
-        <h2>🔐 Autorização ML — Auto Mensagens Girassol</h2>
-        <p>Clique no link abaixo (já logado na conta <b>MAGAZINEGIRASSOL</b>):</p>
-        <p><a href="${url}" target="_blank" style="background:#2563eb;color:white;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block;">Autorizar app</a></p>
-        <p>Após autorizar, o ML vai redirecionar pra esta página automaticamente — o token será salvo no servidor.</p>
-        <hr>
-        <p><small>Se não funcionar, copie a URL manualmente:</small></p>
-        <code style="word-break:break-all;background:#f5f5f5;padding:8px;display:block;">${url}</code>
+        <!doctype html>
+        <html><head><meta charset="utf-8"><title>Setup Lixas A COMBINAR</title></head>
+        <body style="font-family:system-ui;max-width:600px;margin:40px auto;padding:20px;">
+          <h2>🪨 Setup — Lixas A COMBINAR (Bling)</h2>
+          <p>Clique no botão abaixo para autorizar este app no Bling.</p>
+          <p>⚠️ Faça login na conta <b>Magazine Girassol</b> antes de clicar.</p>
+          <p><a href="${authUrl}" style="display:inline-block;padding:12px 24px;background:#3490dc;color:#fff;text-decoration:none;border-radius:6px;font-weight:600;">Autorizar no Bling</a></p>
+          <hr>
+          <p style="font-size:13px;color:#666;">Redirect URI configurado: <code>${tokenMgr.getRedirectUri()}</code></p>
         </body></html>
       `);
       return true;
     }
 
-    // OAuth - GET /oauth/callback (ML redireciona aqui após autorização)
-    if (method === 'GET' && p === '/auto-mensagens/oauth/callback') {
+    // oauth callback
+    if (method === 'GET' && p === '/lixas-combinar/oauth/callback') {
       const code = urlObj.searchParams.get('code');
       if (!code) {
-        html(res, 400, '<h2>❌ Código não encontrado na URL</h2>');
+        html(res, 400, '<h1>Erro</h1><p>Code não recebido na callback.</p>');
         return true;
       }
       try {
-        const t = await tokenMgr.trocarCodigoPorToken(code);
+        await tokenMgr.trocarCodePorTokens(code);
         html(res, 200, `
-          <html><body style="font-family:sans-serif;max-width:680px;margin:40px auto;padding:20px;">
-          <h2>✅ Token ML obtido com sucesso!</h2>
-          <p>Seller user_id: <code>${t.user_id}</code></p>
-          <p>Você pode fechar esta aba.</p>
-          <hr>
-          <p>Próximos passos:</p>
-          <ol>
-            <li>Conferir status: <a href="/auto-mensagens/health">/auto-mensagens/health</a></li>
-            <li>Testar manual: POST /auto-mensagens/run/girassol</li>
-            <li>Ligar produção: alterar AUTO_MSG_GIRASSOL_HABILITADO=true no Render</li>
-          </ol>
+          <!doctype html>
+          <html><head><meta charset="utf-8"><title>Sucesso</title></head>
+          <body style="font-family:system-ui;max-width:600px;margin:40px auto;padding:20px;">
+            <h2>✅ Token Bling obtido com sucesso!</h2>
+            <p>Pode fechar esta aba.</p>
+            <p><strong>Próximos passos:</strong></p>
+            <ol>
+              <li>Conferir status: <a href="/lixas-combinar/health">/lixas-combinar/health</a></li>
+              <li>Testar: <a href="/lixas-combinar/graos/A-COMBINAR-100-lisa-125mm">/lixas-combinar/graos/A-COMBINAR-100-lisa-125mm</a></li>
+            </ol>
           </body></html>
         `);
       } catch (e) {
-        html(res, 500, `<h2>❌ Erro: ${e.message}</h2>`);
+        html(res, 500, `<h1>Erro</h1><pre>${e.message}</pre>`);
       }
       return true;
     }
 
-    // OAuth - POST /setup (alternativa via JSON)
-    if (method === 'POST' && p === '/auto-mensagens/setup') {
-      const body = await readBody(req);
+    // graos/:sku — função principal
+    if (method === 'GET' && p.startsWith('/lixas-combinar/graos/')) {
+      const sku = decodeURIComponent(p.replace('/lixas-combinar/graos/', ''));
       try {
-        const t = await tokenMgr.trocarCodigoPorToken(body.auth_code);
-        json(res, 200, { ok: true, user_id: t.user_id });
-      } catch (e) {
-        json(res, 400, { ok: false, erro: e.message });
-      }
-      return true;
-    }
-
-    // Run manual — dispara rotina imediata
-    if (method === 'POST' && p === '/auto-mensagens/run/girassol') {
-      rotinaACombinar()
-        .then(r => console.log('[auto-mensagens] run manual:', JSON.stringify(r)))
-        .catch(e => console.error('[auto-mensagens] run manual erro:', e.message));
-      json(res, 202, { queued: 'rotinaACombinar Girassol' });
-      return true;
-    }
-
-    // GET /run/girassol também aceito (pra testar pelo browser)
-    if (method === 'GET' && p === '/auto-mensagens/run/girassol') {
-      try {
-        const r = await rotinaACombinar();
-        json(res, 200, r);
-      } catch (e) {
-        json(res, 500, { ok: false, erro: e.message });
-      }
-      return true;
-    }
-
-    // GET/POST /run/ler-respostas → roda a leitura de respostas + IA + montagem
-    // (a mesma coisa que o cron de 2min faz, mas sob demanda)
-    if ((method === 'GET' || method === 'POST') && p === '/auto-mensagens/run/ler-respostas') {
-      try {
-        const r = await rotinaLerRespostas();
-        json(res, 200, r);
-      } catch (e) {
-        json(res, 500, { ok: false, erro: e.message });
-      }
-      return true;
-    }
-
-    // GET/POST /run/recuperar → re-registra na tabela as vendas A COMBINAR dos
-    // ultimos N dias (default 7) SEM reenviar mensagem. Recupera pendentes que
-    // foram apagadas ou ficaram pra tras da janela de 30min. ?dias=N opcional.
-    if ((method === 'GET' || method === 'POST') && p === '/auto-mensagens/run/recuperar') {
-      try {
-        const dias = Number(urlObj.searchParams.get('dias')) || 7;
-        const r = await recuperarPendentes(dias);
-        json(res, 200, r);
-      } catch (e) {
-        json(res, 500, { ok: false, erro: e.message });
-      }
-      return true;
-    }
-
-    // GET/POST /run/recuperar-sem-nf → CONSERTA os "falsos processados": vendas
-    // marcadas na mao como 'processado' (botao ✓) que nunca foram montadas/emitidas
-    // e seguem ABERTAS no Bling sem NF. Refaz montar + NF em cada uma, com trava de
-    // seguranca (pula qualquer pedido ja concluido/cancelado no Bling). ?dias=N (30).
-    if ((method === 'GET' || method === 'POST') && p === '/auto-mensagens/run/recuperar-sem-nf') {
-      try {
-        const dias = Number(urlObj.searchParams.get('dias')) || 30;
-        const r = await recuperarFalsosProcessados({ dias });
-        json(res, 200, r);
-      } catch (e) {
-        json(res, 500, { ok: false, erro: e.message });
-      }
-      return true;
-    }
-
-
-    // DEBUG (read-only): GET /auto-mensagens/debug/dry-emit/:orderId
-    // Roda editarPedidoComGraos em dryRun (NAO salva) e devolve um raio-x
-    // financeiro: itens/parcelas/desconto/frete ORIGINAL vs o que SERIA enviado.
-    // Serve pra achar por que o code-22 (parcelas != total) ocorre num pedido.
-    if (method === 'GET' && p.startsWith('/auto-mensagens/debug/dry-emit/')) {
-      try {
-        const orderId = p.replace('/auto-mensagens/debug/dry-emit/', '');
-        const lcp = require('./lixasCombinarPendentes');
-        const lixasService = require('../lixas-combinar/lixasService');
-        const bp = require('../lixas-combinar/blingPedidos');
-
-        const re = await lcp.buscar(orderId);
-        if (!re || !re.ok || !re.data) { json(res, 404, { ok: false, erro: 'venda nao encontrada na tabela' }); return true; }
-        const v = re.data;
-
-        let pedido_estruturado = null;
-        try { pedido_estruturado = v.ia_pedido_estruturado ? JSON.parse(v.ia_pedido_estruturado) : null; } catch (_) {}
-        if (!Array.isArray(pedido_estruturado) || pedido_estruturado.length === 0) {
-          json(res, 400, { ok: false, erro: 'sem ia_pedido_estruturado valido' }); return true;
-        }
-
-        const graosResult = await lixasService.getGraosDisponiveisPorSkuACombinar(v.sku_a_combinar);
-        if (!graosResult || !graosResult.ok) { json(res, 400, { ok: false, erro: 'estoque indisponivel' }); return true; }
-
-        const idBusca = v.pack_id || v.order_id;
-        const dataVenda = v.data_venda ? String(v.data_venda).split('T')[0] : null;
-        let dIni, dFim;
-        if (dataVenda) {
-          const d = new Date(dataVenda);
-          const a = new Date(d); a.setDate(a.getDate() - 3);
-          const b = new Date(d); b.setDate(b.getDate() + 3);
-          dIni = a.toISOString().split('T')[0]; dFim = b.toISOString().split('T')[0];
-        }
-        const busca = await bp.buscarPedidoPorOrderId(idBusca, dIni, dFim);
-        if (!busca || !busca.ok) { json(res, 404, { ok: false, erro: 'pedido nao achado no Bling', busca }); return true; }
-        const detOrig = await bp.obterPedidoCompleto(busca.pedidoId);
-        const orig = detOrig.ok ? detOrig.pedido : {};
-
-        const dry = await bp.editarPedidoComGraos({
-          orderId: idBusca,
-          graosEscolhidos: pedido_estruturado,
-          graosDisponiveis: graosResult.graos,
-          unidadesPorPacote: graosResult.unidades_por_pacote,
-          descricaoBase: graosResult.descricao,
-          dataVenda,
-          skuACombinar: v.sku_a_combinar || null,
-          dryRun: true
-        });
-
-        const r2 = (n) => Number(Number(n || 0).toFixed(2));
-        const somaParc = (arr) => r2((arr || []).reduce((s, x) => s + Number(x.valor || 0), 0));
-        const somaItens = (arr) => r2((arr || []).reduce((s, it) => s + Number(it.valor || 0) * Number(it.quantidade || 0), 0));
-        const body = dry && dry.preview_body ? dry.preview_body : {};
-
-        const previtens = somaItens(body.itens);
-        const prevDesc = r2(body.desconto?.valor || 0);
-        const prevOutras = r2(body.outrasDespesas || 0);
-        const prevFrete = r2(body.transporte?.frete || orig.transporte?.frete || 0);
-        const totalCalcPreview = r2(previtens + prevFrete + prevOutras - prevDesc);
-        const prevParcSoma = somaParc(body.parcelas);
-
-        json(res, 200, {
-          ok: true,
-          order_id: orderId,
-          situacao: orig.situacao?.id,
-          original: {
-            total: orig.total,
-            desconto: orig.desconto,
-            outrasDespesas: orig.outrasDespesas,
-            frete: orig.transporte?.frete,
-            itens: (orig.itens || []).map(it => ({ codigo: it.codigo, valor: it.valor, qtd: it.quantidade })),
-            itens_soma: somaItens(orig.itens),
-            parcelas: (orig.parcelas || []).map(x => x.valor),
-            parcelas_soma: somaParc(orig.parcelas)
-          },
-          preview: {
-            desconto: body.desconto,
-            outrasDespesas: body.outrasDespesas,
-            frete: body.transporte?.frete,
-            itens: (body.itens || []).map(it => ({ codigo: it.codigo, valor: it.valor, qtd: it.quantidade })),
-            itens_soma: previtens,
-            parcelas: (body.parcelas || []).map(x => x.valor),
-            parcelas_soma: prevParcSoma,
-            total_calculado: totalCalcPreview,
-            bate_parcelas_x_total: Math.abs(totalCalcPreview - prevParcSoma) < 0.01
-          },
-          rateio_ajuste: dry && dry.rateio ? dry.rateio.ajuste : null,
-          dry_ok: !!(dry && dry.ok),
-          dry_erro: (dry && dry.ok) ? null : dry
-        });
-      } catch (e) {
-        json(res, 500, { ok: false, erro: e.message });
-      }
-      return true;
-    }
-
-    // GET/POST /run/tudo → processa GERAL: primeiro registra vendas novas e
-    // manda iniciais (rotinaACombinar), depois lê respostas + IA + monta pedido
-    // (rotinaLerRespostas). Um clique pra rodar o ciclo completo agora.
-    if ((method === 'GET' || method === 'POST') && p === '/auto-mensagens/run/tudo') {
-      try {
-        const r0 = await recuperarPendentes(7);   // recupera antigas/apagadas
-        const r1 = await rotinaACombinar();        // registra novas + iniciais
-        const r2 = await rotinaLerRespostas();     // le respostas + IA + monta
-        json(res, 200, { ok: true, recuperar: r0, aCombinar: r1, lerRespostas: r2 });
-      } catch (e) {
-        json(res, 500, { ok: false, erro: e.message });
-      }
-      return true;
-    }
-
-    // DEBUG (read-only): GET /auto-mensagens/debug/conversa/:orderId
-    // Resolve o pack_id certo (pela tabela) e despeja a estrutura das mensagens do
-    // ML, destacando message_date (campo real da data) vs date_created (que NAO
-    // existe). Serve pra confirmar que o helper _tsMensagemML le a data certa.
-    if (method === 'GET' && p.startsWith('/auto-mensagens/debug/conversa/')) {
-      try {
-        const orderId = p.replace('/auto-mensagens/debug/conversa/', '');
-        const lcp = require('./lixasCombinarPendentes');
-        const ml = require('./mlApi');
-        const re = await lcp.buscar(orderId).catch(() => null);
-        const v = (re && re.ok && re.data) ? re.data : null;
-        const packId = (v && v.pack_id) ? v.pack_id : orderId;
-        const conv = await ml.consultarConversa({ packId, orderId, markAsRead: false });
-        if (!conv || !conv.ok) {
-          json(res, 200, { ok: false, order_id: orderId, packId_usado: packId, pack_id_tabela: v ? v.pack_id : null, conv });
-          return true;
-        }
-        const amostra = (conv.messages || []).slice(-6).map(m => ({
-          from: String(m.from?.user_id || m.from_user_id || ''),
-          text: String(m.text || m.message || '').slice(0, 35),
-          message_date: m.message_date || null,       // <- campo real da data
-          date_created_top: m.date_created || null,    // <- deve vir null (nao existe)
-          keys: Object.keys(m)
-        }));
-        json(res, 200, {
-          ok: true, order_id: orderId, packId_usado: packId, pack_id_tabela: v ? v.pack_id : null,
-          totalCliente: conv.totalCliente, totalLoja: conv.totalLoja,
-          ultima_resposta_em_tabela: v ? v.ultima_resposta_em : null,
-          ia_processado_em_tabela: v ? v.ia_processado_em : null,
-          ultimaCliente_message_date: conv.ultimaCliente ? (conv.ultimaCliente.message_date || null) : null,
-          ultimaCliente_date_created_top: conv.ultimaCliente ? (conv.ultimaCliente.date_created || null) : null,
-          amostra
-        });
-      } catch (e) {
-        json(res, 500, { ok: false, erro: e.message });
-      }
-      return true;
-    }
-
-    // DIAGNOSTICO (read-only): GET /auto-mensagens/debug/diag
-    // Mostra os flags no RUNTIME + os pedidos presos em 'cliente_confirmou_pedido'
-    // com os campos que a repesca checa. Nao altera/emite nada. Serve pra saber por
-    // que os presos nao estao sendo emitidos: flag off? guarda falhando?
-    if (method === 'GET' && p === '/auto-mensagens/debug/diag') {
-      try {
-        const lcp = require('./lixasCombinarPendentes');
-        const rawAuto = process.env.LIXAS_AUTO_EMITIR_NF_HABILITADO;
-        const flags = {
-          AUTO_EMITIR_HABILITADO: String(rawAuto || 'false').toLowerCase() === 'true',
-          raw_AUTO_EMITIR: JSON.stringify(rawAuto),
-          LIMIAR_CONFIANCA_AUTO: Number(process.env.LIXAS_AUTO_CONFIANCA_MIN || 95),
-          AUTO_MAX_POR_DIA: Number(process.env.LIXAS_AUTO_MAX_POR_DIA || 999)
-        };
-
-        // Contagem por TODOS os status (pra achar onde os presos realmente estao)
-        const STATUSES = ['aguardando_resposta','cliente_respondeu','cliente_confirmou_pedido','aguardando_bling','precisa_atencao_humano','processado','cancelado'];
-        const counts = {};
-        for (const s of STATUSES) {
-          try { const r = await lcp.listarPendentes({ dias: 14, status: s, limit: 100 }); counts[s] = (((r && r.data) || []).length); }
-          catch (e) { counts[s] = `erro: ${e.message}`; }
-        }
-
-        // Lookup de um pedido especifico: /debug/diag?order=ID
-        const orderQ = urlObj.searchParams.get('order');
-        let pedido = null;
-        if (orderQ) {
-          try {
-            const b = await lcp.buscar(orderQ);
-            const v = (b && b.data) ? b.data : b;
-            pedido = v ? {
-              order_id: v.order_id, status: v.status,
-              ia_categoria: v.ia_categoria, ia_confianca: v.ia_confianca,
-              tem_estruturado: !!v.ia_pedido_estruturado,
-              ia_msg_enviada: !!v.ia_msg_enviada,
-              bling_editado_em: v.bling_editado_em || null,
-              bling_pedido_id: v.bling_pedido_id || null,
-              nf_emitida_em: v.nf_emitida_em || null,
-              bling_erro: v.bling_erro || null, nf_erro: v.nf_erro || null,
-              sku: v.sku_a_combinar || null,
-              data_venda: v.data_venda || null,
-              ultima_resposta_em: v.ultima_resposta_em || null,
-              ia_processado_em: v.ia_processado_em || null
-            } : { nao_encontrado: orderQ };
-          } catch (e) { pedido = { erro: e.message }; }
-        }
-
-        json(res, 200, { ok: true, flags, counts_por_status: counts, pedido });
-      } catch (e) {
-        json(res, 500, { ok: false, erro: e.message });
-      }
-      return true;
-    }
-    // Mostra o prazo-limite de POSTAGEM real do ML (handling limit) pra travarmos
-    // o nome exato do campo antes de construir a escada. Nao altera/envia/emite nada.
-    if (method === 'GET' && p.startsWith('/auto-mensagens/debug/prazo/')) {
-      const id = p.replace('/auto-mensagens/debug/prazo/', '');
-      try {
-        const ml = require('./mlApi');
-        const r = await ml.getPrazoPostagem(id);
-        json(res, 200, { ok: true, ...r });
-      } catch (e) {
-        json(res, 500, { ok: false, erro: e.message, stack: e.stack });
-      }
-      return true;
-    }
-
-    if (method === 'GET' && p.startsWith('/auto-mensagens/debug/consultar/')) {
-      const id = p.replace('/auto-mensagens/debug/consultar/', '');
-      try {
-        const ml = require('./mlApi');
-        // Testa consultarConversa com markAsRead=false (nao marca como lida)
-        const r = await ml.consultarConversa({ packId: id, markAsRead: false });
-        json(res, 200, {
-          ok: true,
-          id_entrada: id,
-          resultado_consultarConversa: r,
-          // Tambem mostra o sellerId pra ver se ta certo
-          seller_id_atual: tokenMgr.getUserId()
-        });
-      } catch (e) {
-        json(res, 500, { ok: false, erro: e.message, stack: e.stack });
-      }
-      return true;
-    }
-
-    // Debug: inspeciona status da conversação ML antes de enviar (sem enviar nada)
-    if (method === 'GET' && p.startsWith('/auto-mensagens/debug/conversation/')) {
-      const id = p.replace('/auto-mensagens/debug/conversation/', '');
-      try {
-        const token = await tokenMgr.garantirTokenML();
-        const sellerId = tokenMgr.getUserId();
-
-        const out = { id, seller_id_salvo: sellerId, tentativas: {} };
-
-        // 1) Status da conversa /messages/packs/{id}/sellers/{seller_id}?mark_as_read=false
-        const r1 = await fetch(
-          `https://api.mercadolibre.com/messages/packs/${id}/sellers/${sellerId}?mark_as_read=false`,
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
-        const txt1 = await r1.text();
-        out.tentativas.conversa_status = {
-          status: r1.status,
-          body: txt1.slice(0, 1500)
-        };
-
-        // 2) Dados do seller atual (pra confirmar que o user_id está correto)
-        const r2 = await fetch(
-          `https://api.mercadolibre.com/users/me`,
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
-        const txt2 = await r2.text();
-        out.tentativas.users_me = {
-          status: r2.status,
-          body: txt2.slice(0, 800)
-        };
-
-        // 3) Detalhe do pack pra ver buyer e estado
-        const r3 = await fetch(
-          `https://api.mercadolibre.com/packs/${id}`,
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
-        const txt3 = await r3.text();
-        out.tentativas.pack = {
-          status: r3.status,
-          body: txt3.slice(0, 800)
-        };
-
-        json(res, 200, out);
-      } catch (e) {
-        json(res, 500, { erro: e.message });
-      }
-      return true;
-    }
-
-    // Debug: tenta acessar um ID como pack E como order, retorna o que achar
-    if (method === 'GET' && p.startsWith('/auto-mensagens/debug/lookup/')) {
-      const id = p.replace('/auto-mensagens/debug/lookup/', '');
-      const resultados = { id, tentativas: {} };
-
-      // Tenta como pack
-      try {
-        const ml = require('./mlApi');
-        const token = await tokenMgr.garantirTokenML();
-        // 1) Como pack
-        const r1 = await fetch(`https://api.mercadolibre.com/packs/${id}`, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
-        const txt1 = await r1.text();
-        resultados.tentativas.pack = {
-          status: r1.status,
-          body: txt1.slice(0, 500)
-        };
-
-        // 2) Como order direto
-        const r2 = await fetch(`https://api.mercadolibre.com/orders/${id}`, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
-        const txt2 = await r2.text();
-        resultados.tentativas.order = {
-          status: r2.status,
-          body: txt2.slice(0, 500)
-        };
-
-        // 3) Buscar via /orders/search com pack_id
-        const sellerId = tokenMgr.getUserId();
-        const r3 = await fetch(
-          `https://api.mercadolibre.com/orders/search?seller=${sellerId}&pack_id=${id}`,
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
-        const txt3 = await r3.text();
-        resultados.tentativas.search_by_pack = {
-          status: r3.status,
-          body: txt3.slice(0, 800)
-        };
-
-        json(res, 200, resultados);
-      } catch (e) {
-        json(res, 500, { erro: e.message, parcial: resultados });
-      }
-      return true;
-    }
-
-    // Forçar envio de UMA venda específica (ignora janela de tempo)
-    // GET ou POST /auto-mensagens/forcar/:orderId
-    if ((method === 'GET' || method === 'POST') && p.startsWith('/auto-mensagens/forcar/')) {
-      const orderId = p.replace('/auto-mensagens/forcar/', '');
-      if (!orderId) {
-        json(res, 400, { ok: false, erro: 'orderId obrigatorio' });
-        return true;
-      }
-      try {
-        const r = await forcarOrder(orderId);
+        const r = await lixasService.getGraosDisponiveisPorSkuACombinar(sku);
         json(res, r.ok ? 200 : 400, r);
       } catch (e) {
         json(res, 500, { ok: false, erro: e.message });
@@ -558,109 +123,22 @@ function routes(readBody) {
       return true;
     }
 
-    // Debug: preview da mensagem que SERIA enviada (sem enviar nada)
-    // GET /auto-mensagens/preview/:orderId  (aceita order_id OU pack_id)
-    if (method === 'GET' && p.startsWith('/auto-mensagens/preview/')) {
-      const idEntrada = p.replace('/auto-mensagens/preview/', '');
+    // debug — produto por codigo
+    if (method === 'GET' && p.startsWith('/lixas-combinar/debug/produto/')) {
+      const codigo = decodeURIComponent(p.replace('/lixas-combinar/debug/produto/', ''));
       try {
-        const ml = require('./mlApi');
-        // Resolver pack vs order (igual forcarOrder)
-        let orderId = idEntrada;
-        let detalhe = null;
-        let packIdDescoberto = null;
-        try {
-          detalhe = await ml.getOrderDetalhe(idEntrada);
-        } catch (e) {
-          if (e.message.includes('404') || e.message.includes('order_not_found')) {
-            const packInfo = await ml.getPackInfo(idEntrada);
-            if (packInfo?.orders?.length > 0) {
-              orderId = String(packInfo.orders[0].id);
-              packIdDescoberto = idEntrada;
-              detalhe = await ml.getOrderDetalhe(orderId);
-            } else {
-              json(res, 404, { ok: false, erro: 'pack sem orders dentro' });
-              return true;
-            }
-          } else {
-            json(res, 500, { ok: false, erro: e.message });
-            return true;
-          }
+        const blingProdutos = require('./blingProdutos');
+        const produto = await blingProdutos.buscarProdutoPorCodigo(codigo);
+        if (!produto) {
+          json(res, 404, { ok: false, erro: 'Produto não encontrado', codigo });
+          return true;
         }
-
-        const temACombinar = ml.temVariacaoACombinar(detalhe);
-        const skuInfo = ml.extrairSkuACombinar(detalhe);
-
-        // Importa fluxos pra usar montarMensagemInteligente
-        const fluxos = require('./fluxos');
-        let textoFinal = null;
-        // Truque: re-implementar so a parte de montar (nao expomos a funcao)
-        // Em vez disso, vamos chamar via require do lixasService direto
-        let lixasService = null;
-        try { lixasService = require('../lixas-combinar/lixasService'); } catch {}
-
-        const TEXTO_ENV = process.env.AUTO_MSG_GIRASSOL_TEXTO_A_COMBINAR || '';
-
-        if (lixasService && skuInfo?.sku) {
-          try {
-            const r = await lixasService.getGraosDisponiveisPorSkuACombinar(skuInfo.sku);
-            if (r.ok && r.graos && r.graos.length > 0) {
-              const totalLixas = r.lixas_por_kit * (skuInfo.quantidade || 1);
-              const unidades = r.unidades_por_pacote || 10;
-
-              function gerarExemplo(total, unidades, graosArr) {
-                if (graosArr.length === 0) return `Ex: ${total} do grão desejado.`;
-                if (graosArr.length === 1) return `Ex: ${total} do grão ${graosArr[0]}.`;
-                const grao1 = graosArr[0];
-                const idx2 = Math.min(2, graosArr.length - 1);
-                const grao2 = graosArr[idx2];
-                const parte1 = Math.round(total * 0.3 / unidades) * unidades;
-                const parte2 = total - parte1;
-                return `Ex: ${parte1} do grão ${grao1}; ${parte2} do grão ${grao2}.`;
-              }
-
-              function montar(graosArr) {
-                const graosStr = graosArr.join(', ');
-                const exemplo = gerarExemplo(totalLixas, unidades, graosArr);
-                return `Olá! Sua compra de ${totalLixas} lixas ${r.descricao}.\n\nGRÃOS DISPONÍVEIS: ${graosStr}\n\nResponda com QUANTIDADE + GRÃO. MÚLTIPLOS de ${unidades}. Total ${totalLixas} lixas.\n${exemplo}`;
-              }
-
-              let graosArr = r.graos.map(g => g.grao);
-              let msg = montar(graosArr);
-
-              if (msg.length > 350) {
-                while (graosArr.length > 3 && msg.length > 350) {
-                  graosArr.pop();
-                  msg = montar(graosArr);
-                }
-                if (msg.length <= 350) {
-                  graosArr[graosArr.length - 1] = graosArr[graosArr.length - 1] + ' ...';
-                  msg = montar(graosArr);
-                }
-              }
-
-              textoFinal = msg.length <= 350 ? msg : TEXTO_ENV;
-            } else {
-              textoFinal = TEXTO_ENV;
-            }
-          } catch (e) {
-            textoFinal = TEXTO_ENV;
-          }
-        } else {
-          textoFinal = TEXTO_ENV;
-        }
-
+        const detalhe = await blingProdutos.buscarProdutoPorId(produto.id);
         json(res, 200, {
           ok: true,
-          id_entrada: idEntrada,
-          tipo_id: packIdDescoberto ? 'pack' : 'order',
-          order_id_real: orderId,
-          tem_a_combinar: temACombinar,
-          sku_detectado: skuInfo?.sku || null,
-          quantidade: skuInfo?.quantidade || null,
-          titulo_item: skuInfo?.titulo || null,
-          mensagem_que_seria_enviada: textoFinal,
-          mensagem_chars: textoFinal.length,
-          eh_inteligente: lixasService && skuInfo?.sku ? 'tentou' : 'fallback'
+          codigo,
+          produto_basico: produto,
+          detalhe_completo: detalhe
         });
       } catch (e) {
         json(res, 500, { ok: false, erro: e.message });
@@ -668,21 +146,684 @@ function routes(readBody) {
       return true;
     }
 
-    // Stats (últimas mensagens enviadas, do Supabase)
-    if (method === 'GET' && p === '/auto-mensagens/stats') {
-      const s = await tracker.stats();
-      json(res, 200, s);
+    // ════════════════════════════════════════════════════════════════
+    // SESSAO 3: PAINEL PENDENTES
+    // ════════════════════════════════════════════════════════════════
+
+    // GET /lixas-combinar/painel → serve o painel.html
+    if (method === 'GET' && p === '/lixas-combinar/painel') {
+      try {
+        const fs = require('fs');
+        const path = require('path');
+        const htmlContent = fs.readFileSync(path.join(__dirname, 'painel.html'), 'utf8');
+        html(res, 200, htmlContent);
+      } catch (e) {
+        json(res, 500, { ok: false, erro: 'erro lendo painel.html: ' + e.message });
+      }
       return true;
     }
 
-    // Debug token (só pra inspeção)
-    if (method === 'GET' && p === '/auto-mensagens/debug/token') {
+    // POST /lixas-combinar/login → JWT login
+    if (method === 'POST' && p === '/lixas-combinar/login') {
       try {
-        const tok = await tokenMgr.garantirTokenML();
-        json(res, 200, { ok: true, prefixo: tok.slice(0, 20) + '...', user_id: tokenMgr.getUserId() });
+        const body = await readBody(req);
+        const { usuario, senha } = body || {};
+        const auth = require('./auth');
+
+        // 1) Autentica usuario+senha
+        const autR = auth.autenticar(usuario, senha);
+        if (!autR.ok) { json(res, 401, autR); return true; }
+
+        // 2) Cria sessao e retorna token
+        const token = auth.criarSessao(autR.usuario, autR.perfil);
+        console.log(`[lixas-combinar LOGIN] ${autR.usuario} (${autR.perfil})`);
+
+        json(res, 200, {
+          ok: true,
+          token,
+          usuario: autR.usuario,
+          perfil: autR.perfil
+        });
+      } catch (e) {
+        console.error(`[lixas-combinar LOGIN] erro: ${e.message}`);
+        json(res, 400, { ok: false, erro: e.message });
+      }
+      return true;
+    }
+
+    // ── A partir daqui, todas rotas exigem token ────────────────────
+    function requerAuth() {
+      const auth = require('./auth');
+      const token = req.headers['x-session-token'] || '';
+      const sess = auth.validarSessao(token);
+      return sess ? { ok: true, sessao: sess } : { ok: false };
+    }
+
+    // GET /lixas-combinar/api/pendentes → lista vendas pendentes
+    if (method === 'GET' && p === '/lixas-combinar/api/pendentes') {
+      const sessao = requerAuth();
+      if (!sessao.ok) { json(res, 401, { ok: false, erro: 'nao_autenticado' }); return true; }
+
+      try {
+        const lcp = require('../auto-mensagens/lixasCombinarPendentes');
+        if (!lcp.configurado()) {
+          json(res, 200, { ok: true, pendentes: [], stats: {}, aviso: 'supabase_nao_configurado' });
+          return true;
+        }
+        const status = urlObj.searchParams.get('status') || null;
+
+        // Busca TODOS uma vez so e filtra em memoria (evita 2 chamadas Supabase)
+        const todosR = await lcp.listarPendentes({ dias: 7, limit: 500 });
+        const todos = todosR.ok && Array.isArray(todosR.data) ? todosR.data : [];
+
+        // Aplica filtro - "cliente_respondeu" cobre ambos os status (respondeu E confirmou)
+        let pendentes = todos;
+        if (status === 'cliente_respondeu') {
+          pendentes = todos.filter(v => v.status === 'cliente_respondeu' || v.status === 'cliente_confirmou_pedido');
+        } else if (status) {
+          pendentes = todos.filter(v => v.status === status);
+        }
+        pendentes = pendentes.slice(0, 100);
+
+        // Confere a NF REAL no Bling pros cards que mostrariam o botao "Emitir/Recuperar
+        // NF" mas tem nf_emitida_em vazio (campo desatualizado). Se a nota existe no
+        // Bling, cura o campo aqui -> o botao some sozinho. Limitado a 20 checagens pra
+        // nao pesar a listagem (so os poucos com campo desatualizado entram nisso).
+        try {
+          const bp = require('./blingPedidos');
+          let _checados = 0;
+          for (const v of pendentes) {
+            if (_checados >= 20) break;
+            const mostrariaBotaoNF = (v.bling_editado_em || v.status === 'processado') && !v.nf_emitida_em && v.bling_pedido_id;
+            if (!mostrariaBotaoNF) continue;
+            _checados++;
+            try {
+              const det = await bp.obterPedidoCompleto(v.bling_pedido_id);
+              const nf = (det && det.ok) ? det.pedido?.notaFiscal : null;
+              const nfId = (nf && typeof nf === 'object') ? nf.id : nf;
+              if (Number(nfId) > 0) {
+                const quando = new Date().toISOString();
+                await lcp.atualizarVenda(v.order_id, { nf_emitida_em: quando });
+                v.nf_emitida_em = quando; // reflete ja nesta resposta (botao some)
+              }
+            } catch (_) { /* checagem falhou: mantem o botao (melhor pecar por mostrar) */ }
+          }
+        } catch (_) { /* sem bp disponivel: segue sem curar */ }
+
+        const stats = {
+          total: todos.length,
+          aguardando: todos.filter(v => v.status === 'aguardando_resposta').length,
+          respondeu: todos.filter(v => v.status === 'cliente_respondeu' || v.status === 'cliente_confirmou_pedido').length,
+          atencao: todos.filter(v => v.status === 'precisa_atencao_humano' || v.ia_escalou_humano).length,
+          processado: todos.filter(v => v.status === 'processado').length
+        };
+
+        json(res, 200, { ok: true, pendentes, stats });
       } catch (e) {
         json(res, 500, { ok: false, erro: e.message });
       }
+      return true;
+    }
+
+    // GET /lixas-combinar/api/debug-buscar-bling?orderId=XXX&data=YYYY-MM-DD  → busca pedido
+    // SEM AUTH - so leitura, util pra diagnostico via navegador direto
+    if (method === 'GET' && p === '/lixas-combinar/api/debug-buscar-bling') {
+      const orderId = urlObj.searchParams.get('orderId');
+      const dataParam = urlObj.searchParams.get('data');
+      if (!orderId) { json(res, 400, { ok: false, erro: 'orderId obrigatorio' }); return true; }
+
+      try {
+        const bp = require('./blingPedidos');
+        // Define janela de busca - se data informada, ±15 dias dela (mais ampla pra debug)
+        let dataInicial, dataFinal;
+        if (dataParam) {
+          const d = new Date(dataParam);
+          const iniD = new Date(d); iniD.setDate(iniD.getDate() - 15);
+          const fimD = new Date(d); fimD.setDate(fimD.getDate() + 15);
+          dataInicial = iniD.toISOString().split('T')[0];
+          dataFinal = fimD.toISOString().split('T')[0];
+        }
+
+        const r = await bp.buscarPedidoPorOrderId(orderId, dataInicial, dataFinal);
+        json(res, 200, {
+          orderId_buscado: orderId,
+          janela: { dataInicial: dataInicial || '(default -30d)', dataFinal: dataFinal || '(default hoje+1)' },
+          resultado: r
+        });
+      } catch (e) {
+        json(res, 500, { ok: false, erro: e.message });
+      }
+      return true;
+    }
+
+    // POST /lixas-combinar/api/pendentes/:orderId/marcar-processado
+    if (method === 'POST' && p.startsWith('/lixas-combinar/api/pendentes/') && p.endsWith('/marcar-processado')) {
+      const sessao = requerAuth();
+      if (!sessao.ok) { json(res, 401, { ok: false, erro: 'nao_autenticado' }); return true; }
+
+      const orderId = p.replace('/lixas-combinar/api/pendentes/', '').replace('/marcar-processado', '');
+      try {
+        const lcp = require('../auto-mensagens/lixasCombinarPendentes');
+        const r = await lcp.atualizarVenda(orderId, { status: 'processado' });
+        if (!r.ok) { json(res, 500, { ok: false, erro: 'erro_atualizar', data: r.data }); return true; }
+        json(res, 200, { ok: true, orderId });
+      } catch (e) {
+        json(res, 500, { ok: false, erro: e.message });
+      }
+      return true;
+    }
+
+    // POST /lixas-combinar/api/pedido/:orderId/ia-instrucao
+    //   Body: { instrucao: "manda 20 do 150 e 10 do 180 pra completar" }
+    //   A IA rele a conversa do cliente + sua instrucao e devolve o pedido
+    //   estruturado (NAO monta ainda). Salva em ia_pedido_estruturado pra o
+    //   botao "Pedido OK + Emitir NF" usar. NAO manda nada pro cliente no ML.
+    if (method === 'POST' && p.startsWith('/lixas-combinar/api/pedido/') && p.endsWith('/ia-instrucao')) {
+      const sessao = requerAuth();
+      if (!sessao.ok) { json(res, 401, { ok: false, erro: 'nao_autenticado' }); return true; }
+
+      const orderId = p.replace('/lixas-combinar/api/pedido/', '').replace('/ia-instrucao', '');
+      try {
+        const corpo = await readBody(req);
+        let payload;
+        if (corpo && typeof corpo === 'object') {
+          payload = corpo;                                  // readBody ja devolve objeto parseado (mesmo formato do login)
+        } else {
+          try { payload = JSON.parse(corpo || '{}'); } catch (_) { payload = {}; }
+        }
+        if (!payload || typeof payload !== 'object') payload = {};
+        const instrucao = String(payload.instrucao || '').trim();
+        if (!instrucao) { json(res, 400, { ok: false, erro: 'instrucao_vazia' }); return true; }
+
+        const lcp = require('../auto-mensagens/lixasCombinarPendentes');
+        const venda = await lcp.buscar(orderId);
+        if (!venda.ok || !venda.data) { json(res, 404, { ok: false, erro: 'venda_nao_encontrada', orderId }); return true; }
+        const v = venda.data;
+
+        // graos disponiveis do SKU
+        const graosResult = await lixasService.getGraosDisponiveisPorSkuACombinar(v.sku_a_combinar);
+        if (!graosResult.ok || !graosResult.graos || graosResult.graos.length === 0) {
+          json(res, 500, { ok: false, erro: 'erro_consultar_graos_bling', detalhe: graosResult.erro }); return true;
+        }
+        const graosDisponiveis = graosResult.graos.map(g => g.grao);
+        const totalLixas = graosResult.lixas_por_kit;
+        const unidadesPorPacote = graosResult.unidades_por_pacote || 10;
+
+        // rele a conversa do ML (mesma fonte do automatico)
+        const ml = require('../auto-mensagens/mlApi');
+        let historicoConversa = [];
+        try {
+          const conv = await ml.consultarConversa({ packId: v.pack_id, orderId, markAsRead: false });
+          const sellerId = String(require('../auto-mensagens/mlTokenManager').getUserId() || '');
+          historicoConversa = (conv.messages || []).slice(-10).map(m => {
+            const fromId = String(m.from?.user_id || m.from_user_id || '');
+            return { role: fromId === sellerId ? 'seller' : 'buyer', text: m.text || m.message || '' };
+          }).filter(m => m.text);
+        } catch (e) {
+          console.warn(`[ia-instrucao] nao consegui ler conversa (segue so com a instrucao): ${e.message}`);
+        }
+
+        // Modo vendedor: a instrucao e uma ORDEM autoritativa do vendedor (nao mensagem
+        // de cliente). O classificador entra em modoVendedor — nunca cai em fora_escopo;
+        // a palavra do vendedor prevalece sobre a conversa do cliente (que vira so contexto).
+        const ia = require('./iaCliente');
+        const iaResult = await ia.interpretarRespostaCliente({
+          mensagemCliente: instrucao,
+          descricaoProduto: graosResult.descricao,
+          totalLixas,
+          unidadesPorPacote,
+          graosDisponiveis,
+          historicoConversa,
+          modoVendedor: true
+        });
+
+        if (!iaResult.ok) { json(res, 502, { ok: false, erro: 'ia_falhou', detalhe: iaResult.erro }); return true; }
+
+        // Se a IA entendeu claro, salva o pedido estruturado pra o botao montar usar.
+        let salvo = false;
+        if (iaResult.categoria === 'claro' && Array.isArray(iaResult.pedido_estruturado) && iaResult.pedido_estruturado.length > 0) {
+          await lcp.atualizarVenda(orderId, {
+            ia_categoria: 'claro',
+            ia_confianca: iaResult.confianca,
+            ia_interpretacao: (iaResult.interpretacao || '').slice(0, 300),
+            ia_pedido_estruturado: JSON.stringify(iaResult.pedido_estruturado),
+            ia_processado_em: new Date().toISOString()
+          });
+          salvo = true;
+        }
+
+        json(res, 200, {
+          ok: true,
+          categoria: iaResult.categoria,
+          confianca: iaResult.confianca,
+          interpretacao: iaResult.interpretacao || '',
+          pedido_estruturado: iaResult.pedido_estruturado || null,
+          msg_ia: iaResult.msg_pra_cliente || null,
+          pronto_pra_montar: salvo,
+          total_interpretado: Array.isArray(iaResult.pedido_estruturado)
+            ? iaResult.pedido_estruturado.reduce((s, g) => s + (Number(g.quantidade) || 0), 0)
+            : null
+        });
+      } catch (e) {
+        json(res, 500, { ok: false, erro: e.message });
+      }
+      return true;
+    }
+
+    // POST /lixas-combinar/api/pedido/:orderId/substituir-preview
+    //   Lê o pedido LITERAL do cliente (ultima_resposta_cliente, ou body.texto se o
+    //   admin quiser sobrescrever), troca grãos SEM estoque pelo mais próximo DISPONÍVEL
+    //   (motor determinístico, sem IA), funde repetidos e valida o total.
+    //   NÃO monta no Bling, NÃO emite NF. Só devolve o preview + as trocas.
+    if (method === 'POST' && p.startsWith('/lixas-combinar/api/pedido/') && p.endsWith('/substituir-preview')) {
+      const sessao = requerAuth();
+      if (!sessao.ok) { json(res, 401, { ok: false, erro: 'nao_autenticado' }); return true; }
+
+      const orderId = p.replace('/lixas-combinar/api/pedido/', '').replace('/substituir-preview', '');
+      try {
+        const lcp = require('../auto-mensagens/lixasCombinarPendentes');
+        const venda = await lcp.buscar(orderId);
+        if (!venda.ok || !venda.data) { json(res, 404, { ok: false, erro: 'venda_nao_encontrada', orderId }); return true; }
+        const v = venda.data;
+
+        // Body opcional: admin pode mandar { texto } pra sobrescrever (palavra do vendedor vale)
+        const corpo = await readBody(req);
+        let payload;
+        if (corpo && typeof corpo === 'object') { payload = corpo; }
+        else { try { payload = JSON.parse(corpo || '{}'); } catch (_) { payload = {}; } }
+        if (!payload || typeof payload !== 'object') payload = {};
+
+        const textoCliente = String(payload.texto || v.ultima_resposta_cliente || '').trim();
+
+        const sub = require('./substituicao');
+        const parsed = sub.parsePedidoLiteral(textoCliente);
+        if (!parsed.ok) {
+          json(res, 422, { ok: false, erro: 'nao_consegui_ler_pedido', texto: textoCliente, motivo: parsed.motivo });
+          return true;
+        }
+
+        const graosResult = await lixasService.getGraosDisponiveisPorSkuACombinar(v.sku_a_combinar);
+        if (!graosResult.ok || !Array.isArray(graosResult.graos) || graosResult.graos.length === 0) {
+          json(res, 500, { ok: false, erro: 'erro_consultar_graos_bling', detalhe: graosResult.erro });
+          return true;
+        }
+
+        const resolvido = sub.resolverPedidoComSubstituicao(
+          parsed.itens,
+          graosResult.graos,
+          graosResult.lixas_por_kit,
+          graosResult.unidades_por_pacote || 10
+        );
+
+        json(res, 200, {
+          ok: resolvido.ok,
+          pedidoCliente: parsed.itens,
+          trocas: resolvido.trocas,
+          pedidoFinal: resolvido.pedidoFinal,
+          total: resolvido.total,
+          totalEsperado: resolvido.totalEsperado,
+          multiplosOk: resolvido.multiplosOk,
+          avisos: resolvido.avisos,
+          msgCliente: sub.montarMsgSubstituicao(resolvido.trocas, resolvido.pedidoFinal, resolvido.total),
+          graosDisponiveis: graosResult.graos.map(g => ({ grao: g.grao, estoque: g.estoque_pacotes }))
+        });
+      } catch (e) {
+        json(res, 500, { ok: false, erro: e.message, stack: e.stack });
+      }
+      return true;
+    }
+
+    // POST /lixas-combinar/api/pedido/:orderId/avisar-substituicao
+    //   Manda a mensagem de FECHAMENTO pro cliente avisando a substituição feita.
+    //   Body: { msg } — o texto que o admin viu/aprovou no preview.
+    //   Usa enviarMensagemDireta (conversa já iniciada); fallback action_guide OTHER.
+    if (method === 'POST' && p.startsWith('/lixas-combinar/api/pedido/') && p.endsWith('/avisar-substituicao')) {
+      const sessao = requerAuth();
+      if (!sessao.ok) { json(res, 401, { ok: false, erro: 'nao_autenticado' }); return true; }
+
+      const orderId = p.replace('/lixas-combinar/api/pedido/', '').replace('/avisar-substituicao', '');
+      try {
+        const lcp = require('../auto-mensagens/lixasCombinarPendentes');
+        const venda = await lcp.buscar(orderId);
+        if (!venda.ok || !venda.data) { json(res, 404, { ok: false, erro: 'venda_nao_encontrada', orderId }); return true; }
+        const v = venda.data;
+
+        const corpo = await readBody(req);
+        let payload;
+        if (corpo && typeof corpo === 'object') { payload = corpo; }
+        else { try { payload = JSON.parse(corpo || '{}'); } catch (_) { payload = {}; } }
+        if (!payload || typeof payload !== 'object') payload = {};
+
+        const texto = String(payload.msg || '').trim();
+        if (!texto) { json(res, 400, { ok: false, erro: 'msg_vazia' }); return true; }
+        if (texto.length > 350) { json(res, 400, { ok: false, erro: 'msg_muito_longa', tamanho: texto.length }); return true; }
+
+        const ml = require('../auto-mensagens/mlApi');
+        // enviarMensagemDireta precisa do buyerId — pega do detalhe do pedido
+        let buyerId = null;
+        try { const od = await ml.getOrderDetalhe(orderId); buyerId = od?.buyer?.id || null; } catch (_) {}
+
+        let r = buyerId
+          ? await ml.enviarMensagemDireta({ packId: v.pack_id, orderId, buyerId, texto })
+          : { ok: false, erro: 'sem_buyerId' };
+
+        if (!r || !r.ok) {
+          // fallback: conversa virgem / falha na direta → action_guide OTHER
+          const r2 = await ml.enviarMensagem({ packId: v.pack_id, orderId, buyerId, texto });
+          if (r2 && r2.ok) {
+            json(res, 200, { ok: true, via: 'action_guide', message_id: r2.message_id, moderation_status: r2.moderation_status });
+          } else {
+            json(res, 502, { ok: false, erro: 'falha_envio_ml', direta: r, action_guide: r2 });
+          }
+          return true;
+        }
+        json(res, 200, { ok: true, via: 'direta', message_id: r.message_id, moderation_status: r.moderation_status });
+      } catch (e) {
+        json(res, 500, { ok: false, erro: e.message, stack: e.stack });
+      }
+      return true;
+    }
+
+    // POST /lixas-combinar/api/pedido/:orderId/editar-bling  → edita pedido Bling
+    //   Body: { graos: [{grao:"24", quantidade:20}, ...], dryRun?: true }
+    //   Aceita query ?dryRun=1 pra so previsualizar sem enviar
+    if (method === 'POST' && p.startsWith('/lixas-combinar/api/pedido/') && p.endsWith('/editar-bling')) {
+      const sessao = requerAuth();
+      if (!sessao.ok) { json(res, 401, { ok: false, erro: 'nao_autenticado' }); return true; }
+
+      const orderId = p.replace('/lixas-combinar/api/pedido/', '').replace('/editar-bling', '');
+      try {
+        const corpo = await readBody(req);
+        let payload;
+        if (corpo && typeof corpo === 'object') {
+          payload = corpo;                                  // readBody ja devolve objeto parseado (mesmo formato do login)
+        } else {
+          try { payload = JSON.parse(corpo || '{}'); } catch (_) { payload = {}; }
+        }
+        if (!payload || typeof payload !== 'object') payload = {};
+
+        const dryRun = urlObj.searchParams.get('dryRun') === '1' || !!payload.dryRun;
+        const lcp = require('../auto-mensagens/lixasCombinarPendentes');
+        const venda = await lcp.buscar(orderId);
+
+        if (!venda.ok || !venda.data) {
+          json(res, 404, { ok: false, erro: 'venda_nao_encontrada', orderId });
+          return true;
+        }
+
+        const v = venda.data;
+        let graosEscolhidos = payload.graos;
+
+        // Se nao veio body, tenta usar o pedido_estruturado que IA salvou
+        if (!Array.isArray(graosEscolhidos) || graosEscolhidos.length === 0) {
+          if (v.ia_pedido_estruturado) {
+            try {
+              graosEscolhidos = JSON.parse(v.ia_pedido_estruturado);
+            } catch (_) {
+              json(res, 400, { ok: false, erro: 'ia_pedido_estruturado invalido na tabela' });
+              return true;
+            }
+          } else {
+            json(res, 400, { ok: false, erro: 'precisa fornecer graos no body OU venda precisa ter ia_pedido_estruturado' });
+            return true;
+          }
+        }
+
+        // Consulta graos disponiveis no Bling
+        const lixasService = require('./lixasService');
+        const graosResult = await lixasService.getGraosDisponiveisPorSkuACombinar(v.sku_a_combinar);
+        if (!graosResult.ok) {
+          json(res, 500, { ok: false, erro: 'erro_consultar_graos_bling', detalhe: graosResult.erro });
+          return true;
+        }
+
+        // Edita pedido
+        const bp = require('./blingPedidos');
+        // Extrai data da venda (formato YYYY-MM-DD) do timestamp
+        let dataVenda = null;
+        if (v.data_venda) {
+          dataVenda = String(v.data_venda).split('T')[0];
+        }
+        // IMPORTANTE: Bling armazena pack_id em numeroLoja (nao order_id).
+        // Se a venda tem pack_id, usa ele pra buscar no Bling. Fallback pro order_id.
+        const idBuscaBling = v.pack_id || orderId;
+        console.log(`[lixas-combinar editar-bling] buscando Bling com numeroLoja=${idBuscaBling} (pack_id=${v.pack_id || 'null'}, order_id=${orderId})`);
+
+        const r = await bp.editarPedidoComGraos({
+          orderId: idBuscaBling,
+          graosEscolhidos,
+          graosDisponiveis: graosResult.graos,
+          unidadesPorPacote: graosResult.unidades_por_pacote,
+          descricaoBase: graosResult.descricao,
+          dataVenda,
+          dryRun
+        });
+
+        if (!r.ok) {
+          // Atualiza tabela com erro
+          await lcp.atualizarVenda(orderId, {
+            bling_erro: `${r.etapa}: ${r.erro || JSON.stringify(r).slice(0,200)}`.slice(0, 500)
+          });
+          json(res, 500, { ok: false, ...r });
+          return true;
+        }
+
+        // Sucesso (ou dryRun)
+        // IMPORTANTE: montar NAO fecha o pedido. So gravamos que foi editado no Bling.
+        // O status 'processado' so e setado quando a NF for REALMENTE emitida (rota emitir-nf).
+        // Assim o card continua na lista de pendentes com o botao "Emitir NF" visivel.
+        if (!dryRun) {
+          await lcp.atualizarVenda(orderId, {
+            bling_pedido_id: String(r.pedidoId),
+            bling_editado_em: new Date().toISOString(),
+            bling_erro: null
+          });
+        }
+
+        json(res, 200, { ok: true, ...r });
+      } catch (e) {
+        console.error('[lixas-combinar editar-bling]', e);
+        json(res, 500, { ok: false, erro: e.message });
+      }
+      return true;
+    }
+
+    // POST /lixas-combinar/api/pedido/:orderId/emitir-nf  → gera NF-e do pedido
+    // Pode ser chamado manualmente (botao painel) ou automaticamente apos edicao OK
+    if (method === 'POST' && p.startsWith('/lixas-combinar/api/pedido/') && p.endsWith('/emitir-nf')) {
+      const sessao = requerAuth();
+      if (!sessao.ok) { json(res, 401, { ok: false, erro: 'nao_autenticado' }); return true; }
+
+      const orderId = p.replace('/lixas-combinar/api/pedido/', '').replace('/emitir-nf', '');
+      try {
+        const lcp = require('../auto-mensagens/lixasCombinarPendentes');
+        const venda = await lcp.buscar(orderId);
+        if (!venda.ok || !venda.data) {
+          json(res, 404, { ok: false, erro: 'venda_nao_encontrada', orderId });
+          return true;
+        }
+
+        const v = venda.data;
+        if (!v.bling_pedido_id) {
+          json(res, 400, {
+            ok: false,
+            erro: 'pedido_bling_nao_identificado',
+            mensagem: 'Edite o pedido no Bling primeiro (botao Editar Bling) - precisamos do bling_pedido_id salvo.'
+          });
+          return true;
+        }
+
+        const bp = require('./blingPedidos');
+        console.log(`[lixas-combinar emitir-nf] orderId=${orderId} pedidoBling=${v.bling_pedido_id}`);
+        const r = await bp.gerarNFe(v.bling_pedido_id);
+
+        if (!r.ok) {
+          // Bling code 74 = "Esta venda possui nota fiscal referenciada" → a NF JA EXISTE
+          // (saiu por fora do painel: emissao direta no Bling, F3, etc). Trata como
+          // JA-EMITIDA (idempotente): grava nf_emitida_em pra o botao sumir, em vez de
+          // mostrar erro ou tentar emitir de novo (o Bling nunca deixaria duplicar mesmo).
+          const campos = (r.detalhe && r.detalhe.error && r.detalhe.error.fields) || [];
+          const jaTemNF = Array.isArray(campos) && campos.some(f =>
+            Number(f.code) === 74 || /nota fiscal referenciada/i.test(String(f.msg || ''))
+          );
+          if (jaTemNF) {
+            await lcp.atualizarVenda(orderId, {
+              nf_emitida_em: new Date().toISOString(),
+              nf_erro: null,
+              status: 'processado'
+            });
+            console.log(`[lixas-combinar emitir-nf] orderId=${orderId} JA possuia NF referenciada (code 74) — marcado como emitida`);
+            json(res, 200, { ok: true, jaEmitida: true, mensagem: 'Esta venda ja possui NF-e referenciada no Bling. Registrado como emitida.' });
+            return true;
+          }
+          await lcp.atualizarVenda(orderId, {
+            nf_erro: `${r.status || ''}: ${r.erro || JSON.stringify(r.detalhe || {}).slice(0,200)}`.slice(0,500)
+          });
+          json(res, 200, { ok: false, ...r });
+          return true;
+        }
+
+        // Sucesso - grava na Supabase. NF emitida = pedido REALMENTE concluido.
+        await lcp.atualizarVenda(orderId, {
+          nf_emitida_em: new Date().toISOString(),
+          nf_id: r.nfeId,
+          nf_numero: r.numero,
+          nf_serie: r.serie,
+          nf_chave: r.chave || null,
+          nf_erro: null,
+          status: 'processado'
+        });
+
+        json(res, 200, { ok: true, ...r });
+      } catch (e) {
+        console.error('[lixas-combinar emitir-nf]', e);
+        json(res, 500, { ok: false, erro: e.message });
+      }
+      return true;
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    // POST /lixas-combinar/api/pedido/:orderId/recuperar-nf
+    //   RECUPERACAO: pedidos que ficaram presos em 'processado' SEM NF
+    //   (marcados na mao pelo botao "Processado", ou pelo bug antigo do montar).
+    //   Monta (se ainda nao montou) + emite a NF, e so fecha como processado
+    //   quando a NF sair de verdade. Idempotente (code 74 = ja tem NF → fecha).
+    if (method === 'POST' && p.startsWith('/lixas-combinar/api/pedido/') && p.endsWith('/recuperar-nf')) {
+      const sessao = requerAuth();
+      if (!sessao.ok) { json(res, 401, { ok: false, erro: 'nao_autenticado' }); return true; }
+
+      const orderId = p.replace('/lixas-combinar/api/pedido/', '').replace('/recuperar-nf', '');
+      try {
+        const lcp = require('../auto-mensagens/lixasCombinarPendentes');
+        const bp = require('./blingPedidos');
+        const venda = await lcp.buscar(orderId);
+        if (!venda.ok || !venda.data) {
+          json(res, 404, { ok: false, erro: 'venda_nao_encontrada', orderId });
+          return true;
+        }
+        const v = venda.data;
+
+        // Ja tem NF? nada a fazer.
+        if (v.nf_emitida_em) {
+          json(res, 200, { ok: true, jaEmitida: true, mensagem: 'Pedido ja tem NF emitida.' });
+          return true;
+        }
+
+        let pedidoBlingId = v.bling_pedido_id;
+
+        // ETAPA 1 — montar, se ainda nao foi montado
+        if (!v.bling_editado_em) {
+          let graosEscolhidos;
+          if (v.ia_pedido_estruturado) {
+            try { graosEscolhidos = JSON.parse(v.ia_pedido_estruturado); }
+            catch (_) { json(res, 400, { ok: false, etapa: 'montar', erro: 'ia_pedido_estruturado invalido — trate manual' }); return true; }
+          }
+          if (!Array.isArray(graosEscolhidos) || graosEscolhidos.length === 0) {
+            json(res, 400, { ok: false, etapa: 'montar', erro: 'sem graos estruturados — trate manual' });
+            return true;
+          }
+          const lixasService = require('./lixasService');
+          const graosResult = await lixasService.getGraosDisponiveisPorSkuACombinar(v.sku_a_combinar);
+          if (!graosResult.ok) {
+            json(res, 500, { ok: false, etapa: 'montar', erro: 'erro_consultar_graos_bling', detalhe: graosResult.erro });
+            return true;
+          }
+          let dataVenda = null;
+          if (v.data_venda) dataVenda = String(v.data_venda).split('T')[0];
+          const idBuscaBling = v.pack_id || orderId;
+
+          const edit = await bp.editarPedidoComGraos({
+            orderId: idBuscaBling,
+            graosEscolhidos,
+            graosDisponiveis: graosResult.graos,
+            unidadesPorPacote: graosResult.unidades_por_pacote,
+            descricaoBase: graosResult.descricao,
+            dataVenda,
+            dryRun: false
+          });
+          if (!edit.ok) {
+            await lcp.atualizarVenda(orderId, {
+              status: 'precisa_atencao_humano',
+              bling_erro: `recuperar montar ${edit.etapa || ''}: ${edit.erro || ''}`.slice(0, 500)
+            });
+            json(res, 500, { ok: false, etapa: 'montar', ...edit });
+            return true;
+          }
+          pedidoBlingId = edit.pedidoId;
+          await lcp.atualizarVenda(orderId, {
+            bling_pedido_id: String(edit.pedidoId),
+            bling_editado_em: new Date().toISOString(),
+            bling_erro: null
+          });
+        }
+
+        // ETAPA 2 — emitir a NF
+        if (!pedidoBlingId) {
+          json(res, 400, { ok: false, etapa: 'nf', erro: 'sem bling_pedido_id apos montar' });
+          return true;
+        }
+        const nf = await bp.gerarNFe(pedidoBlingId);
+        if (!nf.ok) {
+          const campos = (nf.detalhe && nf.detalhe.error && nf.detalhe.error.fields) || [];
+          const jaTemNF = Array.isArray(campos) && campos.some(f =>
+            Number(f.code) === 74 || /nota fiscal referenciada/i.test(String(f.msg || ''))
+          );
+          if (jaTemNF) {
+            await lcp.atualizarVenda(orderId, {
+              nf_emitida_em: new Date().toISOString(), nf_erro: null, status: 'processado'
+            });
+            json(res, 200, { ok: true, jaEmitida: true, mensagem: 'Bling ja tinha NF referenciada — registrado como emitida.' });
+            return true;
+          }
+          await lcp.atualizarVenda(orderId, {
+            status: 'precisa_atencao_humano',
+            nf_erro: `recuperar nf ${nf.status || ''}: ${nf.erro || JSON.stringify(nf.detalhe || {}).slice(0,200)}`.slice(0, 500)
+          });
+          json(res, 200, { ok: false, etapa: 'nf', ...nf });
+          return true;
+        }
+
+        // Sucesso total
+        await lcp.atualizarVenda(orderId, {
+          nf_emitida_em: new Date().toISOString(),
+          nf_id: nf.nfeId, nf_numero: nf.numero, nf_serie: nf.serie,
+          nf_chave: nf.chave || null, nf_erro: null,
+          status: 'processado'
+        });
+        json(res, 200, { ok: true, recuperado: true, pedidoId: pedidoBlingId, nfNumero: nf.numero, nfSerie: nf.serie });
+      } catch (e) {
+        console.error('[lixas-combinar recuperar-nf]', e);
+        json(res, 500, { ok: false, erro: e.message });
+      }
+      return true;
+    }
+
+    // ════════════════════════════════════════════════════════════════
+
+    // Rota /lixas-combinar (raiz) → redireciona pra setup
+    if (method === 'GET' && p === '/lixas-combinar') {
+      res.writeHead(302, { Location: '/lixas-combinar/setup' });
+      res.end();
       return true;
     }
 
@@ -690,28 +831,25 @@ function routes(readBody) {
   };
 }
 
-// ── Bootstrap ─────────────────────────────────────────────────────────
+// ── Bootstrap ────────────────────────────────────────────────────────
 function bootstrap() {
   setTimeout(() => {
-    const habilitado = (process.env.AUTO_MSG_GIRASSOL_HABILITADO || 'false').toLowerCase() === 'true';
-    console.log(`[auto-mensagens] Pronto. Girassol habilitado=${habilitado}, client=${tokenMgr.configurado()}, tokens=${tokenMgr.temTokens()}, supabase=${tracker.configurado()}`);
-    if (!tokenMgr.configurado()) console.warn('[auto-mensagens] ⚠️ AUTO_MSG_GIRASSOL_ML_CLIENT_ID/SECRET não configurados');
-    if (!tracker.configurado()) console.warn('[auto-mensagens] ⚠️ Supabase não configurado');
-    if (habilitado && !tokenMgr.temTokens()) console.warn('[auto-mensagens] ⚠️ HABILITADO=true mas SEM TOKEN ML — acesse /auto-mensagens/setup');
+    const st = tokenMgr.getStatus();
+    console.log(`[lixas-combinar] Pronto. Bling configurado=${st.configurado} tokens_ok=${st.tokens_ok}`);
+    if (!st.configurado) {
+      console.warn('[lixas-combinar] ⚠️ Defina LIXAS_BLING_CLIENT_ID e LIXAS_BLING_CLIENT_SECRET no Render');
+    } else if (!st.tokens_ok) {
+      console.warn('[lixas-combinar] ⚠️ Tokens Bling não obtidos — acessar /lixas-combinar/setup');
+    }
   }, 3000);
 }
 
-// ── Exporta ───────────────────────────────────────────────────────────
+// ── Exporta (interface igual respostas-rapidas) ──────────────────────
 module.exports = {
-  id: 'auto-mensagens',
-  nome: 'Auto Mensagens ML',
-  rotinas: {
-    girassolACombinar: rotinaACombinar,
-    girassolLerRespostas: rotinaLerRespostas,
-    girassolRecuperar: () => recuperarPendentes(Number(process.env.LIXAS_RECUPERAR_DIAS) || 1),
-    girassolRecuperarSemNF: () => recuperarFalsosProcessados({ dias: Number(process.env.LIXAS_RECUPERAR_SEMNF_DIAS) || 30 })
-  },
+  id: 'lixas-combinar',
+  nome: 'Lixas A COMBINAR',
+  rotinas: {},
   routes,
-  crons,
+  crons: {},
   bootstrap
 };
