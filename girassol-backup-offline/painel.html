@@ -119,6 +119,31 @@
     .sidebar{width:auto;flex:0 0 auto;max-height:38vh;border-right:0;border-bottom:1px solid var(--line)}
   }
   @media print{ html,body{display:none!important} }   /* a página nunca se imprime — só a Zebra via QZ Tray */
+
+  /* Gaveta: Lista de Separação */
+  .sepback{position:fixed;inset:0;background:rgba(0,0,0,.5);opacity:0;pointer-events:none;transition:opacity .15s;z-index:60}
+  .sepback.on{opacity:1;pointer-events:auto}
+  .sep{position:fixed;top:0;right:0;height:100%;width:440px;max-width:92vw;background:var(--bg);border-left:1px solid var(--line);
+       box-shadow:-8px 0 24px rgba(0,0,0,.4);transform:translateX(100%);transition:transform .18s;z-index:61;display:flex;flex-direction:column}
+  .sep.on{transform:translateX(0)}
+  .sephead{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--line)}
+  .septtl{font-size:16px;font-weight:700;color:var(--tx)}
+  .sepx{background:var(--card);border:1px solid var(--line);color:var(--mut);border-radius:8px;width:32px;height:32px;font-size:15px;cursor:pointer}
+  .sepx:hover{color:var(--tx);border-color:var(--mut)}
+  .sepchips{display:flex;flex-wrap:wrap;gap:6px;padding:12px 16px 4px}
+  .sepinfo{padding:4px 16px 10px;color:var(--mut);font-size:13px}
+  .sepinfo b{color:var(--tx)}
+  .seplist{flex:1;overflow:auto;padding:0 16px 12px}
+  .seprow{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--line)}
+  .seprow .qtd{flex:0 0 auto;min-width:44px;height:44px;border-radius:10px;background:var(--card2);border:1px solid var(--line);
+       display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:800;color:var(--tx)}
+  .seprow .meta{min-width:0;flex:1}
+  .seprow .sku{font-size:15px;font-weight:700;color:var(--tx);font-family:ui-monospace,monospace}
+  .seprow .ds{font-size:12px;color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .seprow .ean{font-size:11px;color:var(--mut);font-family:ui-monospace,monospace}
+  .sepfoot{display:flex;gap:8px;padding:12px 16px;border-top:1px solid var(--line)}
+  .sepfoot .btn{flex:1}
+  .sepempty{color:var(--mut);text-align:center;padding:30px 10px}
 </style>
 </head>
 <body>
@@ -137,6 +162,7 @@
   <aside class="sidebar">
     <div class="sbtools">
       <button class="btn sec sm" id="btnSync" onclick="sincronizar()">↻ Atualizar</button>
+      <button class="btn sec sm" onclick="abrirSeparacao()" title="lista de produtos a separar (somados por SKU)">📋 Separar</button>
       <button class="btn sec sm" onclick="escolherImpressora()">🖨 Zebra</button>
       <button class="btn sec sm" id="modoBtn" onclick="trocarModo()" title="alterna entre etiqueta na Zebra (ZPL) ou abrir PDF p/ imprimir no navegador">🖨️ Etiq: Zebra</button>
     </div>
@@ -154,8 +180,24 @@
 <div class="toast" id="toast"></div>
 <div class="modal" id="modal"></div>
 
+<!-- GAVETA: Lista de Separação -->
+<div class="sepback" id="sepback" onclick="fecharSeparacao()"></div>
+<aside class="sep" id="sep">
+  <div class="sephead">
+    <div class="septtl">📋 Lista de Separação</div>
+    <button class="sepx" onclick="fecharSeparacao()">✕</button>
+  </div>
+  <div class="sepchips" id="sepChips"></div>
+  <div class="sepinfo" id="sepInfo">carregando…</div>
+  <div class="seplist" id="sepList"></div>
+  <div class="sepfoot">
+    <button class="btn sec sm" onclick="carregarSeparacao()">↻ Atualizar</button>
+    <button class="btn" onclick="imprimirSeparacao()">🖨️ Imprimir</button>
+  </div>
+</aside>
+
 <script>
-const UI_BUILD = 'b26';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b28';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#ff9900'}, magalu:{n:'Magalu',c:'#0086ff'}, outro:{n:'Outro',c:'#94a3b8'}
@@ -569,16 +611,87 @@ function fecharConfirmacao(){ const md=$('modal'); md.classList.remove('show'); 
 async function reimprimirModal(){ try{ await imprimirEtiqueta(pedidoAtual.bling_id, zplAtual); toast('🖨 reenviado'); }catch(e){ toast('Falha: '+e.message); } }
 async function confirmarFinalizar(){
   try{
-    await api('/girassol-backup-offline/conferido', {
+    const r = await api('/girassol-backup-offline/conferido', {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ id: pedidoAtual.bling_id, user: opIn.value })
     });
-    toast('✓ #'+pedidoAtual.numero+' finalizado');
+    if(r && r.sincronizado)      toast('✓ #'+pedidoAtual.numero+' finalizado → VERIFICADO');
+    else if(r && r.bling_offline) toast('✓ #'+pedidoAtual.numero+' finalizado · Bling offline, sincroniza ao voltar');
+    else                          toast('✓ #'+pedidoAtual.numero+' finalizado');
     fecharConfirmacao();
     pedidoAtual=null; zplAtual=null;
     $('detail').innerHTML='<div class="placeholder">← selecione um pedido à esquerda</div>';
     carregarLista();
   }catch(e){ toast('Falha ao finalizar: '+e.message); }
+}
+
+// ─── Lista de Separação (gaveta lateral direita) ───────────────────────────
+let sepMkt = null;     // filtro de marketplace na separação
+let sepData = null;    // último resultado /separacao
+
+function abrirSeparacao(){ $('sep').classList.add('on'); $('sepback').classList.add('on'); carregarSeparacao(); }
+function fecharSeparacao(){ $('sep').classList.remove('on'); $('sepback').classList.remove('on'); }
+function setSepMkt(v){ sepMkt = v; carregarSeparacao(); }
+
+async function carregarSeparacao(){
+  $('sepInfo').textContent = 'carregando…';
+  $('sepList').innerHTML = '';
+  try{
+    const d = await api('/girassol-backup-offline/separacao' + (sepMkt ? ('?mkt='+sepMkt) : ''));
+    sepData = d;
+    renderSepChips(d.counts || {});
+    $('sepInfo').innerHTML = '<b>'+d.total_skus+'</b> SKU(s) &middot; <b>'+d.total_itens+'</b> a separar &middot; '+d.pedidos+' pedido(s)';
+    if(!d.linhas || !d.linhas.length){
+      $('sepList').innerHTML = '<div class="sepempty">Nada a separar'+(sepMkt?' nesse filtro':'')+' 🎉</div>';
+      return;
+    }
+    $('sepList').innerHTML = d.linhas.map(l =>
+      '<div class="seprow">'+
+        '<div class="qtd">'+l.qtd+'</div>'+
+        '<div class="meta">'+
+          '<div class="sku">'+esc(l.sku)+'</div>'+
+          (l.descricao?'<div class="ds" title="'+esc(l.descricao)+'">'+esc(l.descricao)+'</div>':'')+
+          (l.ean?'<div class="ean">'+esc(l.ean)+'</div>':'')+
+        '</div>'+
+      '</div>'
+    ).join('');
+  }catch(e){ $('sepInfo').textContent = 'Falha ao carregar: '+e.message; }
+}
+
+function renderSepChips(counts){
+  const tot = Object.values(counts).reduce((s,n)=>s+n,0);
+  let html = sepChip('Todos', tot, null, '#94a3b8');
+  MKT_ORDEM.forEach(mk=>{ if(counts[mk]) html += sepChip((MKT[mk]||MKT.outro).n, counts[mk], mk, (MKT[mk]||MKT.outro).c); });
+  $('sepChips').innerHTML = html;
+}
+function sepChip(label, n, val, cor){
+  const on = (sepMkt===val);
+  return '<span class="chip'+(on?' on':'')+'" onclick="setSepMkt('+(val?("'"+val+"'"):'null')+')">'+
+         '<span style="width:8px;height:8px;border-radius:50%;background:'+cor+';display:inline-block"></span>'+
+         label+' <b>'+n+'</b></span>';
+}
+
+// imprime a lista numa janela nova (não passa pelo bloqueio de impressão do painel)
+function imprimirSeparacao(){
+  if(!sepData || !sepData.linhas || !sepData.linhas.length){ toast('Nada a imprimir'); return; }
+  const agora = new Date().toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
+  const filtroNome = sepMkt ? (MKT[sepMkt]||MKT.outro).n : 'Todas as lojas';
+  const linhas = sepData.linhas.map(l =>
+    '<tr><td class="q">'+l.qtd+'</td><td class="s">'+esc(l.sku)+'</td><td>'+esc(l.descricao||'')+'</td><td class="e">'+esc(l.ean||'')+'</td></tr>'
+  ).join('');
+  const html = '<!doctype html><html><head><meta charset="utf-8"><title>Lista de Separação</title>'+
+    '<style>body{font-family:Arial,Helvetica,sans-serif;margin:18px;color:#111}'+
+    'h1{font-size:18px;margin:0}.sub{font-size:12px;color:#444;margin:2px 0 10px}'+
+    'table{width:100%;border-collapse:collapse}th,td{border:1px solid #bbb;padding:6px 8px;font-size:13px;text-align:left}'+
+    'th{background:#eee}.q{width:46px;text-align:center;font-weight:bold;font-size:15px}.s{font-family:monospace;font-weight:bold}'+
+    '.e{font-family:monospace;color:#555;width:130px}tr:nth-child(even) td{background:#f7f7f7}</style></head><body>'+
+    '<div style="display:flex;justify-content:space-between;align-items:baseline"><h1>Lista de Separação</h1><div class="sub">'+agora+'</div></div>'+
+    '<div class="sub"><b>'+filtroNome+'</b> &middot; '+sepData.total_skus+' SKU(s) &middot; '+sepData.total_itens+' a separar &middot; '+sepData.pedidos+' pedido(s)</div>'+
+    '<table><thead><tr><th class="q">Qtd</th><th>SKU</th><th>Produto</th><th>EAN</th></tr></thead><tbody>'+linhas+'</tbody></table>'+
+    '<scr'+'ipt>window.onload=function(){window.print()}<\/scr'+'ipt></body></html>';
+  const w = window.open('', '_blank');
+  if(!w){ toast('Pop-up bloqueado — libera no navegador'); return; }
+  w.document.write(html); w.document.close();
 }
 
 // mantém foco no scan (menos quando digita Qtd/operador ou o modal está aberto)
