@@ -41,9 +41,22 @@ do cliente. Por exemplo, se a loja perguntou "quantos de cada grao?" e o cliente
 respondeu "20 de cada", junte com os graos que JA foram mencionados pela loja ou cliente
 anteriormente. Cliente curto eh normal — interprete usando contexto.
 
-SUA UNICA TAREFA:
-Interpretar a ULTIMA mensagem do cliente sobre QUAIS graos e QUANTAS lixas de cada quer.
-Considere TODO o historico ao interpretar.
+SUA TAREFA:
+Montar o pedido COMPLETO do cliente (quais graos e quantas lixas de cada) juntando
+TODAS as mensagens do CLIENTE no historico — nao apenas a ultima. A ultima mensagem eh
+a mais recente, mas muitas vezes eh um AJUSTE/CORRECAO sobre o que o cliente ja disse,
+e NAO o pedido inteiro.
+
+CORRECOES / AJUSTES (regra critica):
+Quando o cliente manda uma LISTA e depois um AJUSTE (ex.: "corrige; 20 grao 150, 10 grao 180",
+"troca o 150 por 20", "na verdade 10 do 240"), APLIQUE o ajuste POR CIMA da lista:
+substitua SO as linhas dos graos citados no ajuste e MANTENHA todas as outras linhas da
+lista original. O ajuste quase nunca eh o pedido inteiro — eh um patch sobre o que ja foi dito.
+NAO volte a perguntar os graos que ja estavam na lista.
+  Ex: lista "10 do 80, 20 do 100, 30 do 120, 15 do 150, 15 do 180, 10 do 240"
+      + ajuste "corrige; 20 do 150, 10 do 180"
+      => pedido final "10 do 80, 20 do 100, 30 do 120, 20 do 150, 10 do 180, 10 do 240" (=100) ✅
+  (so as linhas de 150 e 180 mudaram; o resto continua igual)
 
 CLASSIFIQUE em UMA destas 4 categorias:
 
@@ -153,7 +166,11 @@ async function interpretarRespostaCliente({
     }
     userText += '\n';
   }
-  userText += `ULTIMA MENSAGEM DO CLIENTE (foco da interpretacao):\n"""${mensagemCliente}"""\n\nAnalise considerando o historico e responda em JSON puro.`;
+  userText += `MENSAGEM MAIS RECENTE DO CLIENTE:\n"""${mensagemCliente}"""\n\n` +
+    `Monte o pedido com TODAS as mensagens do CLIENTE juntas (nao so a mais recente). ` +
+    `Se a mensagem recente for um ajuste/correcao, aplique-a POR CIMA da lista anterior do cliente ` +
+    `(troca so os graos citados, mantem o resto). So peca mais info se, juntando tudo, ainda faltar pro total. ` +
+    `Responda em JSON puro.`;
 
   const body = {
     model: MODELO,
