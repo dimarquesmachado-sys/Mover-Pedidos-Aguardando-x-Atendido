@@ -67,19 +67,12 @@
   .stwarn{cursor:pointer;color:var(--err)}
   .stwarn b{color:var(--err)}
   .stwarn:hover{text-decoration:underline}
-  .pcard{background:#2a1216;border:2px solid var(--err);border-radius:11px;padding:11px;margin-bottom:12px;cursor:pointer;position:relative;animation:probpulse 1.7s ease-in-out infinite}
-  .pcard:hover{background:#371820}
-  .pcard .pwarn{display:inline-block;background:var(--err);color:#fff;font-size:11px;font-weight:800;letter-spacing:.3px;padding:3px 9px;border-radius:6px;margin-bottom:8px;animation:blink 1.1s step-start infinite}
-  .pcard .scl1{display:flex;align-items:center;gap:8px}
-  .pcard .pitem{display:flex;align-items:center;gap:8px;padding:7px 0;border-top:1px solid rgba(239,68,68,.25);cursor:pointer}
-  .pcard .pitem:hover{opacity:.75}
-  .pcard .pnum{font-weight:700;color:var(--tx);font-size:15px}
-  .pcard .pcli{color:var(--mut);font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
-  .pcard .psub{font-size:12px;color:var(--mut);margin-top:8px}
-  .pcard.flash{animation:flashnow .5s ease-in-out 2}
-  @keyframes probpulse{0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,0)}50%{box-shadow:0 0 0 4px rgba(239,68,68,.22)}}
-  @keyframes blink{50%{opacity:.35}}
-  @keyframes flashnow{0%,100%{transform:scale(1)}50%{transform:scale(1.03);box-shadow:0 0 0 7px rgba(239,68,68,.45)}}
+  .chip.serr{border-color:rgba(239,68,68,.5);color:#ffb4b4}
+  .chip.serr .cdot{display:none}
+  .chip.serr.on{border-color:var(--err);color:#fff;background:#2a1216}
+  .scard.semetiq{border:2px solid var(--err);background:#2a1216}
+  .scard.semetiq:hover{background:#371820}
+  .setag{margin-left:auto;background:var(--err);color:#fff;font-size:10px;font-weight:800;padding:2px 7px;border-radius:5px;text-transform:uppercase}
   .scard .rep{margin-top:7px}
 
   /* detalhe / bipagem */
@@ -229,7 +222,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b33';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b34';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#ff9900'}, magalu:{n:'Magalu',c:'#0086ff'}, outro:{n:'Outro',c:'#94a3b8'}
@@ -384,7 +377,7 @@ async function carregarLista(){
       '<span><b>'+d.prontos+'</b> a separar</span>'+
       '<span><b>'+(d.finalizados_hoje||0)+'</b> finalizados hoje</span>'+
       (semN
-        ? '<span class="stwarn" onclick="irParaProblemas()" title="ver pedido(s) sem etiqueta"><b>'+semN+'</b> sem etiqueta ⚠️</span>'
+        ? '<span class="stwarn" onclick="setFiltroMkt(\'semetiqueta\')" title="ver pedidos sem etiqueta"><b>'+semN+'</b> sem etiqueta ⚠️</span>'
         : '<span><b>0</b> sem etiqueta</span>');
     listaCache = d.pedidos||[];
     semEtiqCache = d.sem_etiqueta_pedidos||[];
@@ -439,7 +432,7 @@ function setFiltroMkt(v){
 function chipBtn(label, n, val, cor){
   const ativo = (filtroMkt===val);
   const dot = cor ? '<span class="cdot" style="background:'+cor+'"></span>' : '';
-  const fx = val==='flex' ? ' flex' : '';
+  const fx = val==='flex' ? ' flex' : (val==='semetiqueta' ? ' serr' : '');
   return '<button class="chip'+fx+(ativo?' on':'')+'" onclick="setFiltroMkt('+(val===null?'null':("'"+val+"'"))+')">'+dot+esc(label)+' <b>'+n+'</b></button>';
 }
 function renderChips(){
@@ -449,30 +442,34 @@ function renderChips(){
   let html = chipBtn('Todos', listaCache.length, null);
   MKT_ORDEM.forEach(mk=>{ if(cont[mk]) html += chipBtn((MKT[mk]||MKT.outro).n, cont[mk], mk, (MKT[mk]||MKT.outro).c); });
   html += chipBtn('⚡ FLEX', flexN, 'flex');
+  if((semEtiqCache||[]).length) html += chipBtn('⚠️ Sem etiqueta', semEtiqCache.length, 'semetiqueta');
   box.innerHTML = html;
 }
 function renderLista(){
   const box = $('listaPedidos');
   const selId = pedidoAtual ? String(pedidoAtual.bling_id) : '';
-  // UM card só pras sem etiqueta (compacto, não empurra a fila) — sempre no topo, vermelho pulsante
-  const probHTML = (semEtiqCache||[]).length ? (
-    '<div class="pcard">'+
-      '<div class="pwarn">⚠️ '+semEtiqCache.length+' SEM ETIQUETA</div>'+
-      semEtiqCache.map(p=>{
-        const m = MKT[p.marketplace]||MKT.outro;
-        return '<div class="pitem" onclick="avisoSemEtiqueta(\''+esc(p.numero||p.id)+'\')">'+
+  // chip "sem etiqueta" ativo → mostra SÓ os pedidos com problema (vermelhos, não processáveis)
+  if(filtroMkt==='semetiqueta'){
+    if(!(semEtiqCache||[]).length){ box.innerHTML='<div class="empty">nenhum pedido sem etiqueta 🎉</div>'; return; }
+    box.innerHTML = semEtiqCache.map(p=>{
+      const m = MKT[p.marketplace]||MKT.outro;
+      return '<div class="scard semetiq" onclick="avisoSemEtiqueta(\''+esc(p.numero||p.id)+'\')">'+
+        '<div class="scl1">'+
           '<span class="badge" style="background:'+m.c+'">'+m.n+'</span>'+
-          '<span class="pnum">#'+esc(p.numero||p.id)+'</span>'+
-          (p.cliente?'<span class="pcli">'+esc(p.cliente)+'</span>':'')+
-        '</div>';
-      }).join('')+
-      '<div class="psub">não dá pra processar — confira no Bling</div>'+
-    '</div>'
-  ) : '';
-  if(!listaCache.length && !probHTML){ box.innerHTML='<div class="empty">nenhum pedido pronto no cache</div>'; return; }
+          '<span class="num">#'+esc(p.numero||p.id)+'</span>'+
+          '<span class="setag">⚠️ sem etiqueta</span>'+
+        '</div>'+
+        (p.cliente?'<div class="scli">'+esc(p.cliente)+'</div>':'')+
+        '<div class="smeta">NF '+(p.nf_numero?esc(p.nf_numero):'—')+' · não dá pra processar — confira no Bling</div>'+
+      '</div>';
+    }).join('');
+    return;
+  }
+  if(!listaCache.length){ box.innerHTML='<div class="empty">nenhum pedido pronto no cache</div>'; return; }
   const lista = filtrar(listaCache);
   const cnt = filtroBusca ? '<div class="scount">'+lista.length+' de '+listaCache.length+'</div>' : '';
-  const normalHTML = lista.map(p=>{
+  if(!lista.length){ box.innerHTML = cnt+'<div class="empty">nada encontrado p/ "'+esc(filtroBusca)+'"</div>'; return; }
+  box.innerHTML = cnt + lista.map(p=>{
     const m = MKT[p.marketplace]||MKT.outro;
     const cls = (p.conferido?'done ':'') + (String(p.id)===selId?'sel':'');
     return '<div class="scard '+cls+'" onclick="selecionar(\''+p.id+'\')">'+
@@ -486,16 +483,10 @@ function renderLista(){
       '<div class="rep"><button class="btn warn sm" onclick="event.stopPropagation();reimprimir(\''+p.id+'\')">🖨 Imprimir</button></div>'+
     '</div>';
   }).join('');
-  const corpo = lista.length ? normalHTML : (filtroBusca ? '<div class="empty">nada encontrado p/ "'+esc(filtroBusca)+'"</div>' : '');
-  box.innerHTML = probHTML + cnt + corpo;
 }
 
 function avisoSemEtiqueta(num){
   toast('⚠️ Pedido #'+num+' está SEM ETIQUETA — não dá pra processar aqui. Confira a emissão da etiqueta no Bling.');
-}
-function irParaProblemas(){
-  const box = $('listaPedidos'); if(box) box.scrollTop = 0;
-  document.querySelectorAll('.pcard').forEach(el=>{ el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash'); });
 }
 
 async function reimprimir(id){
