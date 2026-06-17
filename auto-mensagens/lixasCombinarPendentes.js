@@ -80,7 +80,10 @@ async function listarPendentes({ dias = 7, status = null, limit = 100 } = {}) {
   if (!configurado()) return { ok: false, erro: 'supabase_nao_configurado' };
 
   const desde = new Date(Date.now() - dias * 24 * 60 * 60 * 1000).toISOString();
-  let query = `${TABELA}?msg_inicial_enviada_em=gte.${desde}&order=msg_inicial_enviada_em.desc&limit=${limit}`;
+  // Janela por data_venda (sempre preenchido). Antes era msg_inicial_enviada_em,
+  // que fica VAZIO em vendas registradas via recuperar (cliente ja tinha respondido,
+  // nao recebeu msg inicial) — essas sumiam do painel E da recuperacao.
+  let query = `${TABELA}?data_venda=gte.${desde}&order=data_venda.desc&limit=${limit}`;
   if (status) query += `&status=eq.${encodeURIComponent(status)}`;
 
   return supabaseFetch(query, { method: 'GET' });
