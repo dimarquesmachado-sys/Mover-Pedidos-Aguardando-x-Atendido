@@ -29,7 +29,7 @@
 
 const tokenMgr = require('./mlTokenManager');
 const tracker  = require('./supabaseTracker');
-const { rotinaACombinar, rotinaLerRespostas, forcarOrder, recuperarPendentes } = require('./fluxos');
+const { rotinaACombinar, rotinaLerRespostas, forcarOrder, recuperarPendentes, recuperarFalsosProcessados } = require('./fluxos');
 
 // ── Helpers HTTP ──────────────────────────────────────────────────────
 function json(res, code, body) {
@@ -187,7 +187,22 @@ function routes(readBody) {
       return true;
     }
 
-    // GET/POST /run/tudo → processa GERAL: primeiro registra vendas novas e
+    // GET/POST /run/recuperar-sem-nf → CONSERTA os "falsos processados": vendas
+    // marcadas na mao como 'processado' (botao ✓) que nunca foram montadas/emitidas
+    // e seguem ABERTAS no Bling sem NF. Refaz montar + NF em cada uma, com trava de
+    // seguranca (pula qualquer pedido ja concluido/cancelado no Bling). ?dias=N (30).
+    if ((method === 'GET' || method === 'POST') && p === '/auto-mensagens/run/recuperar-sem-nf') {
+      try {
+        const dias = Number(urlObj.searchParams.get('dias')) || 30;
+        const r = await recuperarFalsosProcessados({ dias });
+        json(res, 200, r);
+      } catch (e) {
+        json(res, 500, { ok: false, erro: e.message });
+      }
+      return true;
+    }
+
+
     // manda iniciais (rotinaACombinar), depois lê respostas + IA + monta pedido
     // (rotinaLerRespostas). Um clique pra rodar o ciclo completo agora.
     if ((method === 'GET' || method === 'POST') && p === '/auto-mensagens/run/tudo') {
