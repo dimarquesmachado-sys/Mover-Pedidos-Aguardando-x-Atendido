@@ -89,6 +89,23 @@ function emCooldownEnvio(orderId) {
   return !!t && (Date.now() - t) < ENVIO_COOLDOWN_MIN * 60 * 1000;
 }
 
+// ── DATA REAL de uma mensagem do ML ──────────────────────────────────
+// A API de mensagens do ML traz a data em message_date (objeto:
+// received/created/available/...), NAO em date_created (que vinha undefined).
+// Antes o codigo usava `m.date_created || m.date || agora`, e o fallback "agora"
+// fazia _tsRespAtual ficar sempre no presente -> as travas anti-loop (#2 e #4)
+// achavam que sempre havia msg nova do cliente e a IA reenviava em loop.
+// Retorna timestamp em ms, ou 0 se realmente nao houver data (fallback seguro:
+// 0 faz a trava #2 segurar em vez de reenviar).
+function _tsMensagemML(m) {
+  if (!m) return 0;
+  const md = m.message_date || {};
+  const d = md.received || md.created || md.available || md.notified
+    || m.date_created || m.date || m.created_at || null;
+  const t = d ? new Date(d).getTime() : 0;
+  return isNaN(t) ? 0 : t;
+}
+
 // ── TRAVA POR MENSAGEM (memoria local) ───────────────────────────────
 // Versao em memoria da trava do banco (ia_processado_em): guarda o timestamp
 // da ULTIMA msg do cliente que JA respondemos. Msg nova passa NA HORA (zero
@@ -302,11 +319,11 @@ async function revisarAtencaoHumana({ lcp }) {
       if (conv && conv.ok && conv.totalCliente > 0 && conv.ultimaCliente) {
         let ultLoja = 0, ultCli = 0;
         for (const m of (conv.messages || [])) {
-          const ts = new Date(m.date_created || m.date || 0).getTime();
+          const ts = _tsMensagemML(m);
           if (String(m.from_user_id) === sellerId) ultLoja = Math.max(ultLoja, ts);
           else ultCli = Math.max(ultCli, ts);
         }
-        const tsCli = new Date(conv.ultimaCliente.date_created || conv.ultimaCliente.date || 0).getTime();
+        const tsCli = _tsMensagemML(conv.ultimaCliente);
         if (ultCli > ultLoja && !msgJaProcessada(venda.order_id, tsCli)) {
           await lcp.atualizarVenda(venda.order_id, { status: 'aguardando_resposta' });
           console.log(`[revisar] order ${venda.order_id} cliente respondeu apos atencao humana — re-engajado`);
@@ -899,8 +916,8 @@ async function rotinaLerRespostas() {
 
         if (conv.totalCliente > 0 && conv.ultimaCliente) {
           const textoCliente = conv.ultimaCliente.text || conv.ultimaCliente.message || '';
-          const dataResposta = conv.ultimaCliente.date_created || conv.ultimaCliente.date || new Date().toISOString();
-          const _tsRespAtual = new Date(dataResposta).getTime();
+          const _tsRespAtual = _tsMensagemML(conv.ultimaCliente);
+          const dataResposta = _tsRespAtual ? new Date(_tsRespAtual).toISOString() : new Date().toISOString();
 
           // ════════════════════════════════════════════════════════
           // TRAVA DE COOLDOWN PERSISTENTE (fix loop infinito 15/06)
@@ -952,7 +969,7 @@ async function rotinaLerRespostas() {
             const _sellerId = String(require('./mlTokenManager').getUserId() || '');
             const _msgs = Array.isArray(conv.messages) ? conv.messages : [];
             const _ehLoja = (m) => String(m.from_user_id || m.from?.user_id || '') === _sellerId;
-            const _ts = (m) => new Date(m.date_created || m.date || 0).getTime();
+            const _ts = (m) => _tsMensagemML(m);
             const _ultCliente = _msgs.filter(m => !_ehLoja(m)).reduce((mx, m) => Math.max(mx, _ts(m)), 0);
             const _ultLoja = _msgs.filter(_ehLoja).reduce((mx, m) => Math.max(mx, _ts(m)), 0);
             if (_sellerId && _ultLoja && _ultLoja >= _ultCliente) {
@@ -1210,7 +1227,7 @@ async function rotinaLerRespostas() {
               if (!conv.ok) continue;
               const msgs = Array.isArray(conv.messages) ? conv.messages : [];
               const ehLoja = (m) => String(m.from_user_id || m.from?.user_id || '') === sellerIdF;
-              const tsF = (m) => new Date(m.date_created || m.date || 0).getTime();
+              const tsF = (m) => _tsMensagemML(m);
               const cliMsgs = msgs.filter(m => !ehLoja(m)).sort((a, b) => tsF(b) - tsF(a));
               const ultCli = cliMsgs[0];
               const ultLojaTs = msgs.filter(ehLoja).reduce((mx, m) => Math.max(mx, tsF(m)), 0);
@@ -1238,7 +1255,7 @@ async function rotinaLerRespostas() {
                 try {
                   await lcp.marcarRespostaCliente(venda.order_id, {
                     texto: textoCli,
-                    dataResposta: ultCli.date_created || ultCli.date || new Date().toISOString(),
+                    dataResposta: (() => { const t = _tsMensagemML(ultCli); return t ? new Date(t).toISOString() : new Date().toISOString(); })(),
                     totalMsgsCliente: conv.totalCliente || 0
                   });
                 } catch (e2) { /* nao bloqueia a escalada */ }
