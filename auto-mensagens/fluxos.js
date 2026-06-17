@@ -634,7 +634,7 @@ async function rotinaACombinar() {
   }
 }
 
-module.exports = { rotinaACombinar, rotinaLerRespostas, forcarOrder, processarAutoEmissao, recuperarPendentes, recuperarFalsosProcessados, HABILITADO, TEXTO };
+module.exports = { rotinaACombinar, rotinaLerRespostas, forcarOrder, processarAutoEmissao, recuperarPendentes, recuperarFalsosProcessados, rotinaEscadaIndisponivel, HABILITADO, TEXTO };
 
 /**
  * RECUPERAR FALSOS PROCESSADOS — conserta vendas que foram marcadas como
@@ -1700,4 +1700,174 @@ async function forcarOrder(idEntrada) {
   } catch (e) {
     return { ok: false, erro: e.message, stats };
   }
+}
+
+/**
+ * ════════════════════════════════════════════════════════════════════════
+ * ESCADA — auto-substituicao de grao indisponivel com TRAVA DE PRAZO.
+ * ════════════════════════════════════════════════════════════════════════
+ *
+ * Problema: pedido A-COMBINAR cujo cliente escolheu um grao SEM estoque/inexistente
+ * trava em precisa_atencao_humano (bling_erro "grao X indisponivel") e fica parado.
+ * Se ninguem resolver, atrasa a postagem -> PENALIDADE no Mercado Livre.
+ *
+ * Esta rotina, a cada ciclo:
+ *   1. Pega os pedidos travados nesse erro (precisa_atencao_humano + "indispon").
+ *   2. Calcula o PRAZO-LIMITE DE POSTAGEM real do pedido (prazoPostagem.calcular*
+ *      sobre o shipment do ML — cobre Expresso/handling e Normal/buffered).
+ *   3. Enquanto SOBRA tempo (> MARGEM horas): NAO mexe — deixa cliente/humano resolver.
+ *   4. Quando o prazo esta CHEGANDO (faltam <= MARGEM horas): TROCA sozinha o grao
+ *      indisponivel pelo mais proximo COM estoque (motor substituicao), MONTA + EMITE
+ *      a NF (idempotente no code-74) e AVISA a cliente. Nunca atrasa -> sem penalidade.
+ *
+ * Seguranca: so age no erro de indisponivel; preserva cupom/desconto (logica do
+ * editarPedidoComGraos); se nao consegue resolver, deixa em atencao humana com nota.
+ * dryRun=true => calcula e diz o que FARIA, sem montar/emitir/avisar nada.
+ *
+ * @param {Object} opts { dryRun?:boolean, margemHoras?:number, dias?:number }
+ */
+async function rotinaEscadaIndisponivel(opts = {}) {
+  const dryRun = !!opts.dryRun;
+  const MARGEM_HORAS = Number(opts.margemHoras ?? process.env.LIXAS_ESCADA_MARGEM_HORAS) || 6;
+  const DIAS = Number(opts.dias ?? process.env.LIXAS_ESCADA_DIAS) || 30;
+
+  const stats = { dryRun, margem_horas: MARGEM_HORAS, verificados: 0, aguardando_prazo: 0, substituidos: 0, erros: 0, pulados: 0, lista: [] };
+  if (!tracker.configurado()) { stats.desligada = 'supabase_nao_configurado'; return stats; }
+
+  const ESCADA_HABILITADA = (process.env.LIXAS_ESCADA_HABILITADO || 'true').toLowerCase() === 'true';
+  if (!ESCADA_HABILITADA) { stats.desligada = 'LIXAS_ESCADA_HABILITADO=false'; return stats; }
+  // a escada EMITE NF -> respeita o mesmo portao da auto-emissao
+  if (!AUTO_EMITIR_HABILITADO) { stats.desligada = 'AUTO_EMITIR_HABILITADO=false'; return stats; }
+
+  const lcp = require('./lixasCombinarPendentes');
+  const lixasService = require('../lixas-combinar/lixasService');
+  const bp = require('../lixas-combinar/blingPedidos');
+  const sub = require('../lixas-combinar/substituicao');
+  const prazoMod = require('./prazoPostagem');
+
+  // candidatos: travados no erro de INDISPONIVEL, ainda sem NF
+  const lista = await lcp.listarPendentes({ dias: DIAS, status: 'precisa_atencao_humano', limit: 100 });
+  const candidatos = (lista.ok && Array.isArray(lista.data) ? lista.data : [])
+    .filter(v => /indispon/i.test(String(v.bling_erro || '')) && !v.nf_emitida_em);
+
+  for (const v of candidatos) {
+    const orderId = v.order_id;
+    stats.verificados++;
+    try {
+      // 1. pedido estruturado (contem o grao indisponivel)
+      let pedidoEstruturado = null;
+      try { pedidoEstruturado = JSON.parse(v.ia_pedido_estruturado || 'null'); } catch (_) {}
+      if (!Array.isArray(pedidoEstruturado) || pedidoEstruturado.length === 0) {
+        stats.pulados++; stats.lista.push({ order_id: orderId, acao: 'pulado', motivo: 'sem_pedido_estruturado' }); continue;
+      }
+
+      // 2. graos disponiveis no Bling
+      const graosResult = await lixasService.getGraosDisponiveisPorSkuACombinar(v.sku_a_combinar);
+      if (!graosResult.ok || !Array.isArray(graosResult.graos) || graosResult.graos.length === 0) {
+        stats.pulados++; stats.lista.push({ order_id: orderId, acao: 'pulado', motivo: 'sem_graos_bling' }); continue;
+      }
+
+      // 3. PRAZO de postagem real (via shipment do ML)
+      let prazo = null;
+      try {
+        const info = await ml.getPrazoPostagem(orderId);
+        prazo = prazoMod.calcularPrazoPostagem(info && info.shipment_bruto ? info.shipment_bruto : {});
+      } catch (e) {
+        stats.pulados++; stats.lista.push({ order_id: orderId, acao: 'pulado', motivo: 'sem_prazo: ' + e.message }); continue;
+      }
+      if (!prazo || !prazo.ok || !prazo.prazo_postagem) {
+        stats.pulados++; stats.lista.push({ order_id: orderId, acao: 'pulado', motivo: 'prazo_indeterminado' }); continue;
+      }
+      const horas = (new Date(prazo.prazo_postagem).getTime() - Date.now()) / 3600e3;
+
+      // 4. ainda sobra tempo? deixa quieto (cliente/humano ainda pode resolver)
+      if (horas > MARGEM_HORAS) {
+        stats.aguardando_prazo++;
+        stats.lista.push({ order_id: orderId, acao: 'aguardando', horas_ate_prazo: Math.round(horas * 10) / 10, prazo: prazo.prazo_postagem, metodo: prazo.metodo });
+        continue;
+      }
+
+      // 5. PRAZO CHEGANDO -> resolve por substituicao (total = soma do pedido do cliente)
+      const totalLixas = pedidoEstruturado.reduce((s, g) => s + Number(g.quantidade || 0), 0);
+      const resolvido = sub.resolverPedidoComSubstituicao(
+        pedidoEstruturado, graosResult.graos, totalLixas, graosResult.unidades_por_pacote || 10
+      );
+      if (!resolvido.ok || !Array.isArray(resolvido.pedidoFinal) || resolvido.pedidoFinal.length === 0) {
+        if (!dryRun) await lcp.atualizarVenda(orderId, { bling_erro: `escada: nao resolvi por substituicao (${resolvido.erro || 'total nao fecha'})`.slice(0, 500) });
+        stats.erros++; stats.lista.push({ order_id: orderId, acao: 'erro', motivo: 'substituicao_nao_resolveu', detalhe: resolvido.erro || resolvido.avisos });
+        continue;
+      }
+
+      // dryRun: so reporta o que FARIA
+      if (dryRun) {
+        stats.substituidos++;
+        stats.lista.push({ order_id: orderId, acao: 'substituiria', horas_ate_prazo: Math.round(horas * 10) / 10, prazo: prazo.prazo_postagem, trocas: resolvido.trocas, pedido_final: resolvido.pedidoFinal });
+        continue;
+      }
+
+      // 6. MONTA no Bling (preserva cupom/desconto)
+      const idBuscaBling = v.pack_id || orderId;
+      const dataVenda = v.data_venda ? String(v.data_venda).split('T')[0] : null;
+      const edit = await bp.editarPedidoComGraos({
+        orderId: idBuscaBling, graosEscolhidos: resolvido.pedidoFinal, graosDisponiveis: graosResult.graos,
+        unidadesPorPacote: graosResult.unidades_por_pacote, descricaoBase: graosResult.descricao,
+        dataVenda, skuACombinar: v.sku_a_combinar || null, dryRun: false
+      });
+      if (!edit.ok) {
+        await lcp.atualizarVenda(orderId, { bling_erro: `escada edit ${edit.etapa || ''}: ${edit.erro || ''}`.slice(0, 500) });
+        stats.erros++; stats.lista.push({ order_id: orderId, acao: 'erro', motivo: 'edit_falhou', etapa: edit.etapa }); continue;
+      }
+      await lcp.atualizarVenda(orderId, {
+        bling_pedido_id: String(edit.pedidoId), bling_editado_em: new Date().toISOString(),
+        ia_pedido_estruturado: JSON.stringify(resolvido.pedidoFinal), bling_erro: null
+      });
+
+      // 7. EMITE a NF (idempotente: code 74 = ja tem NF -> trata como emitida)
+      const nf = await bp.gerarNFe(edit.pedidoId);
+      let nfOk = nf.ok;
+      if (!nf.ok) {
+        const campos = (nf.detalhe && nf.detalhe.error && nf.detalhe.error.fields) || [];
+        if (Array.isArray(campos) && campos.some(f => Number(f.code) === 74 || /nota fiscal referenciada/i.test(String(f.msg || '')))) nfOk = true;
+      }
+      if (!nfOk) {
+        await lcp.atualizarVenda(orderId, { status: 'precisa_atencao_humano', nf_erro: `${nf.status || ''}: ${nf.erro || JSON.stringify(nf.detalhe || {}).slice(0, 200)}`.slice(0, 500) });
+        stats.erros++; stats.lista.push({ order_id: orderId, acao: 'erro', motivo: 'nf_falhou', pedidoId: edit.pedidoId }); continue;
+      }
+      await lcp.atualizarVenda(orderId, {
+        nf_emitida_em: new Date().toISOString(), nf_id: nf.nfeId || null, nf_numero: nf.numero || null,
+        nf_serie: nf.serie || null, nf_chave: nf.chave || null, nf_erro: null, status: 'processado'
+      });
+
+      // 8. AVISA a cliente da troca (best-effort; NF ja emitida, nao reverte se falhar)
+      let avisoEnviado = false;
+      try {
+        const texto = sub.montarMsgSubstituicao(resolvido.trocas, resolvido.pedidoFinal, totalLixas);
+        if (texto) {
+          let buyerId = null;
+          try { const od = await ml.getOrderDetalhe(orderId); buyerId = od && od.buyer ? od.buyer.id : null; } catch (_) {}
+          let r = buyerId ? await ml.enviarMensagemDireta({ packId: v.pack_id, orderId, buyerId, texto }) : { ok: false };
+          if (!r || !r.ok) r = await ml.enviarMensagem({ packId: v.pack_id, orderId, buyerId, texto });
+          avisoEnviado = !!(r && r.ok);
+        }
+      } catch (e) {
+        console.warn(`[escada] order ${orderId} aviso ao cliente falhou (NF ja emitida): ${e.message}`);
+      }
+
+      stats.substituidos++;
+      stats.lista.push({
+        order_id: orderId, acao: 'substituido', horas_ate_prazo: Math.round(horas * 10) / 10,
+        trocas: resolvido.trocas, pedido_final: resolvido.pedidoFinal,
+        nf: nf.numero || 'ja_existia', aviso_cliente: avisoEnviado
+      });
+      console.log(`[escada] ✅ order ${orderId} substituido (${(resolvido.trocas || []).map(t => t.de + '→' + t.para).join(', ')}), NF ${nf.numero || 'ja existia'}, aviso=${avisoEnviado}, faltavam ${Math.round(horas * 10) / 10}h`);
+    } catch (e) {
+      stats.erros++; stats.lista.push({ order_id: orderId, acao: 'erro', motivo: e.message });
+      console.error(`[escada] order ${orderId} erro: ${e.message}`);
+    }
+  }
+
+  if (stats.verificados > 0) {
+    console.log(`[escada]${dryRun ? ' (dryRun)' : ''} verificados=${stats.verificados} aguardando_prazo=${stats.aguardando_prazo} ${dryRun ? 'substituiria' : 'substituidos'}=${stats.substituidos} erros=${stats.erros} pulados=${stats.pulados}`);
+  }
+  return stats;
 }
