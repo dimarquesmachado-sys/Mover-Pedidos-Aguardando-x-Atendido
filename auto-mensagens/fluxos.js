@@ -167,7 +167,10 @@ async function _rehidratarFilaDoBanco({ lcp }) {
 
 async function _rehidratarStatus({ lcp, status, modo }) {
   let lista;
-  try { lista = await lcp.listarPendentes({ dias: 2, status, limit: 50 }); }
+  // confirmou-strand pode ser BACKLOG (dias atras), entao janela maior; os demais
+  // (aguardando_bling, humano-timing) sao recentes, 2 dias basta.
+  const diasJanela = (modo === 'confirmou-strand') ? (Number(process.env.LIXAS_REPESCA_CONFIRMOU_DIAS) || 7) : 2;
+  try { lista = await lcp.listarPendentes({ dias: diasJanela, status, limit: 50 }); }
   catch (e) { console.warn(`[retry-bling] erro lendo ${status} do banco: ${e.message}`); return; }
   if (!lista || !lista.ok || !Array.isArray(lista.data) || lista.data.length === 0) return;
 
