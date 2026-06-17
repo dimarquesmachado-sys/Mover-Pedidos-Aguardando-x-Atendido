@@ -1,880 +1,110 @@
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Checkout Offline · Girassol</title>
-<script src="https://cdn.jsdelivr.net/npm/js-sha256@0.11.0/src/sha256.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/qz-tray@2.2.6/qz-tray.js"></script>
-<style>
-  :root{
-    --bg:#0f1115; --card:#1a1e26; --card2:#232834; --line:#2c333f;
-    --tx:#e8edf4; --mut:#8b96a8; --ac:#3b82f6; --ok:#22c55e; --warn:#f59e0b; --err:#ef4444;
-  }
-  *{box-sizing:border-box}
-  html,body{height:100%}
-  body{margin:0;display:flex;flex-direction:column;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--tx);font-size:15px}
-  header{background:#141821;border-bottom:1px solid var(--line);padding:9px 14px;flex:0 0 auto}
-  .htop{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
-  .htop h1{font-size:16px;margin:0;font-weight:700}
-  .ver{font-size:12px;color:var(--mut);font-family:ui-monospace,monospace}
-  .grow{flex:1}
-  .qz{font-size:13px;padding:4px 10px;border-radius:20px;border:1px solid var(--line);cursor:pointer;white-space:nowrap}
-  .qz.on{color:var(--ok);border-color:var(--ok)} .qz.off{color:var(--err);border-color:var(--err)}
-  input.op{background:var(--card2);border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:5px 9px;font-size:13px;width:120px}
-  .stats{display:flex;gap:14px;margin-top:7px;font-size:13px;color:var(--mut);flex-wrap:wrap}
-  .stats b{color:var(--tx)}
+'use strict';
+/**
+ * prazoPostagem.js — calcula o PRAZO-LIMITE DE POSTAGEM (ship-by) de um pedido ML.
+ *
+ * Descoberta (via sonda /auto-mensagens/debug/prazo): o ML NAO expoe uma data de
+ * "handling limit" direta — nem no shipment, nem no endpoint dedicado de lead_time
+ * (estimated_handling_limit.date sempre veio null). O que da pra usar:
+ *
+ *   - estimated_delivery_time.handling : janela de manuseio em HORAS (ex.: 24 no Expresso, 0 no Normal)
+ *   - estimated_delivery_time.shipping : transito em HORAS (ex.: 24 Expresso, 96 Normal)
+ *   - status_history.date_handling     : quando o pedido entrou em manuseio
+ *   - estimated_delivery_limit.date    : data-limite de ENTREGA
+ *   - buffering.date                   : quando o buffer (coleta agrupada) libera
+ *
+ * Regra (em ordem de preferencia):
+ *   1) handling > 0  -> ship_by = date_handling + handling horas        (Expresso/rapido)
+ *   2) handling 0/ausente, mas tem delivery_limit + shipping
+ *                    -> ship_by = delivery_limit - shipping horas       (Normal/buffered)
+ *   3) so tem buffering.date -> ship_by = buffering.date
+ *   4) fallback conservador -> date_handling + 48h
+ *
+ * Recebe o objeto shipment (o `shipment_bruto` da sonda serve: tem shipping_option
+ * com estimated_delivery_time mesmo quando o lead_time embutido vem vazio).
+ */
 
-  /* layout 2 colunas */
-  .main{flex:1 1 auto;display:flex;min-height:0}
-  .sidebar{width:410px;flex:0 0 410px;border-right:1px solid var(--line);overflow-y:auto;padding:10px;background:#12161e}
-  .detail{flex:1 1 auto;overflow-y:auto;padding:18px 22px}
-  .sbtools{display:flex;flex-wrap:wrap;gap:8px}
-  #modoBtn.on{border-color:var(--ac);color:var(--ac)}
-  .busca{width:100%;box-sizing:border-box;background:var(--card);border:1px solid var(--line);border-radius:9px;padding:9px 11px;color:var(--tx);font-size:13px;margin-bottom:10px}
-  .busca:focus{outline:none;border-color:var(--ac)}
-  .busca::placeholder{color:var(--mut)}
-  .scount{font-size:11px;color:var(--mut);margin:0 2px 8px}
-  .chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
-  .chip{background:var(--card);border:1px solid var(--line);border-radius:999px;padding:5px 10px;color:var(--mut);font-size:12px;cursor:pointer;display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
-  .chip b{color:var(--tx)}
-  .chip:hover{border-color:var(--mut)}
-  .chip.on{border-color:var(--ac);color:var(--tx);background:#13243f}
-  .chip.flex.on{border-color:var(--warn);background:#2a1f08}
-  .cdot{width:8px;height:8px;border-radius:50%;display:inline-block}
-
-  .btn{background:var(--ac);color:#fff;border:0;border-radius:9px;padding:9px 14px;font-size:14px;font-weight:600;cursor:pointer}
-  .btn:disabled{opacity:.4;cursor:not-allowed}
-  .btn.sec{background:var(--card2);color:var(--tx);border:1px solid var(--line)}
-  .btn.ok{background:var(--ok)} .btn.warn{background:var(--warn);color:#1a1205}
-  .btn.sm{padding:6px 10px;font-size:13px}
-  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-
-  /* card lateral */
-  .scard{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:9px 11px;margin-bottom:8px;cursor:pointer}
-  .scard:hover{border-color:#3a4657}
-  .scard.sel{border-color:var(--ac);background:#16202e}
-  .scard.done{opacity:.5}
-  .scard.resv{border-color:#b06a16;background:#241a0e}
-  .scard.resv:hover{background:#2d2010}
-  .resvtag{margin-left:auto;color:#f0a23a;font-size:11px;font-weight:700;white-space:nowrap}
-  .scl1{display:flex;align-items:center;gap:8px}
-  .badge{font-size:10px;font-weight:700;padding:2px 7px;border-radius:5px;color:#0b0d12;text-transform:uppercase}
-  .num{font-size:18px;font-weight:700}
-  .smeta{font-size:13px;color:var(--mut);font-family:ui-monospace,monospace;margin-top:4px}
-  .scli{font-size:14px;color:var(--tx);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .pdfok{color:var(--ok);font-weight:700}
-  .donetag{margin-left:auto;color:var(--ok);font-size:11px;font-weight:700}
-
-  /* pedido SEM ETIQUETA (problema) */
-  .stwarn{cursor:pointer;color:var(--err)}
-  .stwarn b{color:var(--err)}
-  .stwarn:hover{text-decoration:underline}
-  .chip.serr{border-color:rgba(239,68,68,.5);color:#ffb4b4}
-  .chip.serr .cdot{display:none}
-  .chip.serr.on{border-color:var(--err);color:#fff;background:#2a1216}
-  .scard.semetiq{border:2px solid var(--err);background:#2a1216}
-  .scard.semetiq:hover{background:#371820}
-  .setag{margin-left:auto;background:var(--err);color:#fff;font-size:10px;font-weight:800;padding:2px 7px;border-radius:5px;text-transform:uppercase}
-  .scard .rep{margin-top:7px}
-
-  /* detalhe / bipagem */
-  .placeholder{height:100%;display:flex;align-items:center;justify-content:center;color:var(--mut);font-size:15px}
-  .dhead{display:flex;align-items:center;gap:10px;margin-bottom:4px}
-  .num.big{font-size:22px}
-  .prog{margin-left:auto;font-size:30px;font-weight:800}
-  .prog .done{color:var(--ok)}
-  .cli{color:var(--mut);font-size:14px;margin:2px 0 8px}
-  .nfbar{background:var(--card2);border:1px solid var(--line);border-radius:9px;padding:9px 12px;margin:8px 0;font-size:13px}
-  .nfbar.clic{cursor:pointer}
-  .nfbar.clic:hover{border-color:var(--ok);background:#0c2118}
-  .nfok{color:var(--ok);font-size:11px;font-weight:700;margin-left:4px}
-  .nfbar .chave{font-family:ui-monospace,monospace;font-size:11px;color:var(--mut);word-break:break-all}
-  .noean{color:var(--warn)}
-  .scanrow{display:flex;gap:8px;align-items:stretch;margin:12px 0 4px}
-  .scanrow #scan{flex:1;background:#0b0d12;border:2px solid var(--ac);color:var(--tx);border-radius:11px;padding:15px;font-size:19px;font-family:ui-monospace,monospace;text-align:center}
-  .scanrow #scan.err{border-color:var(--err);animation:shake .25s}
-  .qtdwrap{display:flex;flex-direction:column;justify-content:center;align-items:center;background:#0b0d12;border:2px solid var(--line);border-radius:11px;padding:3px 10px}
-  .qtdwrap label{font-size:9px;color:var(--mut);text-transform:uppercase;letter-spacing:.5px}
-  .qtdwrap input{width:58px;background:transparent;border:0;color:var(--tx);font-size:20px;font-family:ui-monospace,monospace;text-align:center;outline:none}
-  .thumb{width:46px;height:46px;border-radius:7px;object-fit:cover;background:#0b0d12;border:1px solid var(--line);flex:0 0 46px}
-  .thumb.noimg{display:flex;align-items:center;justify-content:center;color:var(--mut);font-size:16px}
-  @keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-6px)}75%{transform:translateX(6px)}}
-  .hint{font-size:12px;color:var(--mut);text-align:center;margin-top:5px}
-  .item{display:flex;align-items:center;gap:12px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 13px;margin-bottom:8px}
-  .item.full{border-color:var(--ok);background:#15241a}
-  .kitwrap{border:1px solid var(--line);border-radius:11px;margin-bottom:10px;overflow:hidden;background:#171b24}
-  .kitwrap.full{border-color:var(--ok)}
-  .kithead{display:flex;gap:10px;align-items:center;padding:10px 13px;background:#202634;font-size:14px;border-bottom:1px solid var(--line)}
-  .kh-txt{flex:1}
-  .ktag{display:inline-block;font-size:10px;font-weight:800;background:var(--warn);color:#1a1205;padding:2px 7px;border-radius:5px;margin-right:6px;vertical-align:middle}
-  .comps{padding:8px 8px 1px}
-  .item.comp{margin-left:14px;border-left:3px solid #3a4657}
-  .icount{font-size:19px;font-weight:800;min-width:60px;text-align:center}
-  .icount .b{color:var(--ok)}
-  .idesc{flex:1}
-  .idesc .d{font-size:14px}
-  .idesc .e{font-size:12px;color:var(--mut);font-family:ui-monospace,monospace;margin-top:2px}
-  .miniok{background:var(--card2);border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:7px 11px;font-size:13px;cursor:pointer}
-  .dbtns{display:flex;gap:8px;margin-top:14px;align-items:center;flex-wrap:wrap}
-  .empty{text-align:center;color:var(--mut);padding:30px 0}
-  .toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:#000;border:1px solid var(--line);padding:10px 18px;border-radius:24px;font-size:14px;opacity:0;transition:.2s;pointer-events:none;z-index:50}
-  .toast.show{opacity:1}
-  .foot{flex:0 0 auto;text-align:center;color:var(--mut);font-size:11px;padding:6px;border-top:1px solid var(--line)}
-  .modal{position:fixed;inset:0;background:rgba(0,0,0,.65);display:none;align-items:center;justify-content:center;z-index:100}
-  .modal.show{display:flex}
-  .mbox{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:22px;max-width:460px;width:90%}
-  .mtit{font-size:19px;font-weight:700;margin-bottom:8px}
-  .msub{font-size:14px;color:var(--mut);margin-bottom:18px;line-height:1.45}
-  .mbtns{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
-
-  @media(max-width:720px){
-    .main{flex-direction:column}
-    .sidebar{width:auto;flex:0 0 auto;max-height:38vh;border-right:0;border-bottom:1px solid var(--line)}
-  }
-  @media print{ html,body{display:none!important} }   /* a página nunca se imprime — só a Zebra via QZ Tray */
-
-  /* Gaveta: Lista de Separação */
-  .sepback{position:fixed;inset:0;background:rgba(0,0,0,.5);opacity:0;pointer-events:none;transition:opacity .15s;z-index:60}
-  .sepback.on{opacity:1;pointer-events:auto}
-  .sep{position:fixed;top:0;right:0;height:100%;width:440px;max-width:92vw;background:var(--bg);border-left:1px solid var(--line);
-       box-shadow:-8px 0 24px rgba(0,0,0,.4);transform:translateX(100%);transition:transform .18s;z-index:61;display:flex;flex-direction:column}
-  .sep.on{transform:translateX(0)}
-  .sephead{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--line)}
-  .septtl{font-size:16px;font-weight:700;color:var(--tx)}
-  .sepx{background:var(--card);border:1px solid var(--line);color:var(--mut);border-radius:8px;width:32px;height:32px;font-size:15px;cursor:pointer}
-  .sepx:hover{color:var(--tx);border-color:var(--mut)}
-  .sepchips{display:flex;flex-wrap:wrap;gap:6px;padding:12px 16px 4px}
-  .sepinfo{padding:4px 16px 10px;color:var(--mut);font-size:13px}
-  .sepinfo b{color:var(--tx)}
-  .seplist{flex:1;overflow:auto;padding:0 16px 12px}
-  .seprow{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--line)}
-  .seprow .loc{flex:0 0 auto;min-width:54px;padding:6px;border-radius:9px;background:#13243f;border:1px solid var(--ac);color:#cfe0ff;font-size:13px;font-weight:800;text-align:center;font-family:ui-monospace,monospace;line-height:1.1}
-  .seprow .loc.vazia{background:var(--card);border-color:var(--line);color:var(--mut);font-weight:600}
-  .seprow .qtd{flex:0 0 auto;min-width:44px;height:44px;border-radius:10px;background:var(--card2);border:1px solid var(--line);
-       display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:800;color:var(--tx)}
-  .seprow .meta{min-width:0;flex:1}
-  .seprow .sku{font-size:15px;font-weight:700;color:var(--tx);font-family:ui-monospace,monospace}
-  .seprow .ds{font-size:12px;color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .seprow .ean{font-size:11px;color:var(--mut);font-family:ui-monospace,monospace}
-  .sepfoot{display:flex;gap:8px;padding:12px 16px;border-top:1px solid var(--line)}
-  .sepfoot .btn{flex:1}
-  .sepempty{color:var(--mut);text-align:center;padding:30px 10px}
-
-  /* Histórico (no modal) */
-  .histbody{max-height:60vh;overflow:auto;margin:8px 0 4px;text-align:left}
-  .histrow{display:flex;align-items:center;gap:10px;padding:9px 2px;border-bottom:1px solid var(--line)}
-  .histrow .hmk{flex:0 0 auto;width:9px;height:9px;border-radius:50%}
-  .histrow .hmeta{flex:1;min-width:0}
-  .histrow .hnum{font-size:14px;font-weight:700;color:var(--tx);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .histrow .hsub{font-size:11px;color:var(--mut)}
-  .hsync{flex:0 0 auto;font-size:11px;font-weight:700;border-radius:999px;padding:3px 8px}
-  .hsync.ok{color:var(--ok);background:#0e2a1a}
-  .hsync.wait{color:var(--warn);background:#2a1f08}
-</style>
-</head>
-<body>
-<header>
-  <div class="htop">
-    <h1>📦 Checkout Offline</h1>
-    <span class="ver" id="ver">carregando…</span>
-    <span class="grow"></span>
-    <div class="sbtools">
-      <button class="btn sec sm" id="btnSync" onclick="sincronizar()">↻ Atualizar</button>
-      <button class="btn sec sm" onclick="abrirSeparacao()" title="lista de produtos a separar (somados por SKU)">📋 Separar</button>
-      <button class="btn sec sm" onclick="abrirHistorico()" title="últimos pedidos finalizados">🕘 Histórico</button>
-      <button class="btn sec sm" onclick="escolherImpressora()">🖨 Zebra</button>
-      <button class="btn sec sm" id="modoBtn" onclick="trocarModo()" title="alterna entre etiqueta na Zebra (ZPL) ou abrir PDF p/ imprimir no navegador">🖨️ Etiq: Zebra</button>
-    </div>
-    <input class="op" id="operador" placeholder="operador" />
-    <span class="qz off" id="qzStatus" onclick="reconectarQZ()">QZ: …</span>
-  </div>
-  <div class="stats" id="stats">carregando…</div>
-</header>
-
-<div class="main">
-  <aside class="sidebar">
-    <input class="busca" id="busca" placeholder="🔎 buscar: nº pedido, NF, cliente…" oninput="onBusca(this.value)" autocomplete="off" />
-    <div id="chips" class="chips"></div>
-    <div id="listaPedidos"><div class="empty">carregando…</div></div>
-  </aside>
-
-  <section class="detail" id="detail">
-    <div class="placeholder">← selecione um pedido à esquerda</div>
-  </section>
-</div>
-
-<div class="foot">cache local · se a tela não mudar após deploy, dê <b>Ctrl+Shift+R</b></div>
-<div class="toast" id="toast"></div>
-<div class="modal" id="modal"></div>
-
-<!-- GAVETA: Lista de Separação -->
-<div class="sepback" id="sepback" onclick="fecharSeparacao()"></div>
-<aside class="sep" id="sep">
-  <div class="sephead">
-    <div class="septtl">📋 Lista de Separação</div>
-    <button class="sepx" onclick="fecharSeparacao()">✕</button>
-  </div>
-  <div class="sepchips" id="sepChips"></div>
-  <div class="sepinfo" id="sepInfo">carregando…</div>
-  <div class="seplist" id="sepList"></div>
-  <div class="sepfoot">
-    <button class="btn sec sm" onclick="carregarSeparacao()">↻ Atualizar</button>
-    <button class="btn" onclick="imprimirSeparacao()">🖨️ Imprimir</button>
-  </div>
-</aside>
-
-<script>
-const UI_BUILD = 'b44';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
-const MKT = {
-  ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
-  amazon:{n:'Amazon',c:'#ff9900'}, magalu:{n:'Magalu',c:'#0086ff'}, outro:{n:'Outro',c:'#94a3b8'}
-};
-let pedidoAtual = null;   // {bling_id,numero,cliente,nf,marketplace,itens:[{sku,ean,descricao,qtd,bipado}]}
-let zplAtual = null;
-let listaCache = [];
-let semEtiqCache = [];   // pedidos ATENDIDO sem etiqueta (problema)
-let filtroBusca = '';
-let filtroMkt = null;   // null=todos | 'ml'|'shopee'|... | 'flex'
-
-const $ = id => document.getElementById(id);
-const norm = c => String(c||'').trim().replace(/\s+/g,'');
-const esc = s => String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-function toast(m){ const t=$('toast'); t.textContent=m; t.classList.add('show'); clearTimeout(t._t); t._t=setTimeout(()=>t.classList.remove('show'),1800); }
-
-const opIn = $('operador');
-opIn.value = localStorage.getItem('gbkp_op') || '';
-opIn.addEventListener('input', ()=>localStorage.setItem('gbkp_op', opIn.value));
-
-// ── áudio ──
-let actx;
-function beep(ok){
-  try{ actx = actx || new (window.AudioContext||window.webkitAudioContext)();
-    const o=actx.createOscillator(), g=actx.createGain(); o.connect(g); g.connect(actx.destination);
-    o.type='square'; o.frequency.value = ok?900:200; g.gain.value=0.12;
-    o.start(); o.stop(actx.currentTime + (ok?0.07:0.28));
-  }catch(e){}
+function _data(s) {
+  if (!s) return null;
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? null : d;
 }
 
-// ── QZ Tray ──
-async function setupQZ(){
-  if(!window.qz){ qzUI(false,'lib não carregou'); return; }
-  qz.api.setPromiseType(r => new Promise(r));
-  if(window.sha256) qz.api.setSha256Type(d => sha256(d));
-  // assinatura → mata o popup "Untrusted". Só ativa se houver certificado configurado no servidor.
-  try{
-    const cert = await fetch('/girassol-backup-offline/qz-cert', {cache:'no-store'}).then(r=>r.text());
-    if(cert && cert.indexOf('BEGIN CERTIFICATE')>=0){
-      qz.security.setCertificatePromise(function(resolve){ resolve(cert); });
-      qz.security.setSignatureAlgorithm('SHA512');
-      qz.security.setSignaturePromise(function(toSign){
-        return function(resolve, reject){
-          fetch('/girassol-backup-offline/qz-sign?request='+encodeURIComponent(toSign), {cache:'no-store'})
-            .then(function(r){ return r.text(); }).then(resolve).catch(reject);
-        };
-      });
+function calcularPrazoPostagem(shipment) {
+  if (!shipment || typeof shipment !== 'object') {
+    return { ok: false, motivo: 'shipment_vazio' };
+  }
+
+  const lt  = shipment.lead_time || {};
+  const so  = shipment.shipping_option || {};
+  const sh  = shipment.status_history || {};
+  // estimated_delivery_time pode estar no lead_time (endpoint dedicado) OU no shipping_option
+  const edt = (lt.estimated_delivery_time && Object.keys(lt.estimated_delivery_time).length)
+    ? lt.estimated_delivery_time
+    : (so.estimated_delivery_time || {});
+
+  const dateHandling  = _data(sh.date_handling) || _data(shipment.date_created);
+  const handlingHoras = Number(edt.handling);           // 0 eh valido (NAO tratar como ausente)
+  const shippingHoras = Number(edt.shipping) || null;
+  const deliveryLimit = _data(lt?.estimated_delivery_limit?.date || so?.estimated_delivery_limit?.date);
+  const bufferingDate = _data(lt?.buffering?.date || so?.buffering?.date);
+
+  const out = {
+    ok: true,
+    metodo:     so.shipping_method?.name || lt.shipping_method?.name || null,
+    tipo_envio: so.shipping_method?.type || lt.shipping_method?.type || null,
+    status:     shipment.status || null,
+    substatus:  shipment.substatus || null,
+    buffered:   shipment.substatus === 'buffered' || !!bufferingDate,
+    base: {
+      date_handling:  dateHandling  ? dateHandling.toISOString()  : null,
+      handling_horas: Number.isFinite(handlingHoras) ? handlingHoras : null,
+      shipping_horas: shippingHoras,
+      delivery_limit: deliveryLimit ? deliveryLimit.toISOString() : null,
+      buffering_date: bufferingDate ? bufferingDate.toISOString() : null
     }
-  }catch(e){}
-}
-function qzUI(on, txt){ const el=$('qzStatus'); el.className='qz '+(on?'on':'off'); el.textContent='QZ: '+(txt||(on?'conectado':'desconectado')); }
-async function conectarQZ(){
-  if(!window.qz) throw new Error('Biblioteca QZ não carregou (sem internet?)');
-  if(!qz.websocket.isActive()){ await qz.websocket.connect(); }
-  qzUI(true); return true;
-}
-async function reconectarQZ(){ try{ await conectarQZ(); toast('QZ Tray conectado'); }catch(e){ qzUI(false); toast('QZ Tray não conectou — ele está aberto?'); } }
-async function getImpressora(){
-  let p = localStorage.getItem('gbkp_printer');
-  if(p) return p;
-  const lista = await qz.printers.find();
-  p = (lista||[]).find(n=>/zebra|zdesigner|zpl|\bzd\b|\bgk\b|\bgc\b/i.test(n)) || (lista||[])[0];
-  if(p) localStorage.setItem('gbkp_printer', p);
-  return p;
-}
-async function escolherImpressora(){
-  try{
-    await conectarQZ();
-    const lista = await qz.printers.find();
-    if(!lista||!lista.length){ toast('Nenhuma impressora no QZ'); return; }
-    const atual = localStorage.getItem('gbkp_printer')||'';
-    const msg = 'Impressoras:\n\n'+lista.map((n,i)=>(i+1)+') '+n+(n===atual?'  ← atual':'')).join('\n')+'\n\nNº da Zebra:';
-    const r = prompt(msg, lista.indexOf(atual)>=0?String(lista.indexOf(atual)+1):'1');
-    const idx = parseInt(r,10)-1;
-    if(idx>=0&&idx<lista.length){ localStorage.setItem('gbkp_printer', lista[idx]); toast('Impressora: '+lista[idx]); }
-  }catch(e){ toast('Erro: '+e.message); }
-}
-async function imprimirZPL(zpl){
-  await conectarQZ();
-  const printer = await getImpressora();
-  if(!printer) throw new Error('Nenhuma impressora encontrada');
-  const cfg = qz.configs.create(printer);
-  await qz.print(cfg, [{ type:'raw', format:'command', flavor:'plain', data: zpl }]);
-}
+  };
 
-// ── impressora da NF (DANFE = A4, impressora comum, NÃO a Zebra) ──
-async function getImpressoraNF(){
-  let p = localStorage.getItem('gbkp_printer_nf');
-  if(p) return p;
-  const lista = await qz.printers.find();
-  p = (lista||[]).find(n=>!/zebra|zdesigner|zpl|\bzd\b|\bgk\b|\bgc\b/i.test(n)) || (lista||[])[0];
-  if(p) localStorage.setItem('gbkp_printer_nf', p);
-  return p;
-}
-async function escolherImpressoraNF(){
-  try{
-    await conectarQZ();
-    const lista = await qz.printers.find();
-    if(!lista||!lista.length){ toast('Nenhuma impressora no QZ'); return; }
-    const atual = localStorage.getItem('gbkp_printer_nf')||'';
-    const msg = 'Impressoras:\n\n'+lista.map((n,i)=>(i+1)+') '+n+(n===atual?'  ← atual':'')).join('\n')+'\n\nNº da impressora da NF (A4):';
-    const r = prompt(msg, lista.indexOf(atual)>=0?String(lista.indexOf(atual)+1):'1');
-    const idx = parseInt(r,10)-1;
-    if(idx>=0&&idx<lista.length){ localStorage.setItem('gbkp_printer_nf', lista[idx]); toast('Impressora NF: '+lista[idx]); }
-  }catch(e){ toast('Erro: '+e.message); }
-}
-async function imprimirPDF(url){
-  await conectarQZ();
-  const printer = await getImpressoraNF();
-  if(!printer) throw new Error('Nenhuma impressora encontrada');
-  const resp = await fetch(url);
-  if(!resp.ok) throw new Error('PDF '+resp.status);
-  const bytes = new Uint8Array(await resp.arrayBuffer());
-  let bin=''; for(let i=0;i<bytes.length;i++) bin+=String.fromCharCode(bytes[i]);
-  const b64 = btoa(bin);
-  const cfg = qz.configs.create(printer);
-  await qz.print(cfg, [{ type:'pixel', format:'pdf', flavor:'base64', data: b64 }]);
-}
-
-// ── DANFE SIMPLIFICADO em ZPL NATIVO → impresso CRU na Zebra (mesmo cano da etiqueta, instantâneo) ──
-async function imprimirSimplificadoZebra(id){
-  const zpl = await fetch(location.origin+'/girassol-backup-offline/danfe-simp/'+id+'?zpl=1')
-    .then(r=>{ if(!r.ok) throw new Error('DANFE '+r.status); return r.text(); });
-  await imprimirZPL(zpl);   // raw ZPL — igual a etiqueta que já funciona
-}
-
-// ── chave Zebra(ZPL) ↔ A4(PDF) p/ a ETIQUETA (a NF é sempre A4) ──
-function modoEtiqueta(){ return localStorage.getItem('gbkp_modo_etiq')==='a4' ? 'a4' : 'zebra'; }
-async function imprimirEtiqueta(id, zpl){
-  if(modoEtiqueta()==='a4'){
-    window.open(location.origin+'/girassol-backup-offline/etiqueta-pdf/'+id, '_blank');  // abre o PDF — você imprime pelo navegador
-  }else{
-    const z = zpl || await fetch('/girassol-backup-offline/etiqueta/'+id).then(r=>r.text());
-    await imprimirZPL(z);  // Zebra (QZ Tray)
+  // 1) Janela de handling positiva -> Expresso/rapido
+  if (dateHandling && Number.isFinite(handlingHoras) && handlingHoras > 0) {
+    out.prazo_postagem = new Date(dateHandling.getTime() + handlingHoras * 3600e3).toISOString();
+    out.origem = 'handling (date_handling + handling horas)';
+    return out;
   }
-}
-function aplicarModoLabel(){
-  const b=$('modoBtn'); if(!b) return;
-  const a4 = modoEtiqueta()==='a4';
-  b.textContent = a4 ? '📄 Etiq: A4' : '🖨️ Etiq: Zebra';
-  b.classList.toggle('on', a4);
-}
-function trocarModo(){
-  const novo = modoEtiqueta()==='a4' ? 'zebra' : 'a4';
-  localStorage.setItem('gbkp_modo_etiq', novo);
-  aplicarModoLabel();
-  toast(novo==='a4' ? 'Etiqueta agora abre em PDF — imprima pelo navegador' : 'Etiqueta agora pela Zebra (ZPL/QZ)');
-}
 
-// ── API ──
-const api = (u,opt) => fetch(u,opt).then(r=>r.json());
-// ── presença/reserva entre PCs ──
-function opAtual(){ return ((opIn && opIn.value) || localStorage.getItem('gbkp_op') || '').trim(); }
-function postJson(path, obj){ return api(path, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(obj)}); }
-let hbTimer = null;
-function iniciarHeartbeat(id){ pararHeartbeat(); hbTimer = setInterval(()=>{ postJson('/girassol-backup-offline/reservar', {id, user:opAtual()}).catch(()=>{}); }, 120000); }
-function pararHeartbeat(){ if(hbTimer){ clearInterval(hbTimer); hbTimer=null; } }
-function liberarReserva(id){ if(id) postJson('/girassol-backup-offline/liberar', {id}).catch(()=>{}); }
-
-async function carregarLista(){
-  try{
-    const d = await api('/girassol-backup-offline/lista');
-    $('ver').textContent = (d.versao ? d.versao.replace('girassol-backup-offline ','') : 'v?') + ' · ui ' + UI_BUILD;
-    const semN = d.sem_etiqueta||0;
-    $('stats').innerHTML =
-      '<span><b>'+d.prontos+'</b> a separar</span>'+
-      '<span><b>'+(d.finalizados_hoje||0)+'</b> finalizados hoje</span>'+
-      (semN
-        ? '<span class="stwarn" onclick="setFiltroMkt(\'semetiqueta\')" title="ver pedidos sem etiqueta"><b>'+semN+'</b> sem etiqueta ⚠️</span>'
-        : '<span><b>0</b> sem etiqueta</span>');
-    listaCache = d.pedidos||[];
-    semEtiqCache = d.sem_etiqueta_pedidos||[];
-    renderChips();
-    renderLista();
-  }catch(e){ $('listaPedidos').innerHTML='<div class="empty">erro: '+esc(e.message)+'</div>'; }
-}
-
-// força uma sincronia real com o Bling (roda 1 ciclo → reconcilia o que saiu do ATENDIDO)
-async function sincronizar(){
-  const b = $('btnSync');
-  const orig = b ? b.textContent : '';
-  if(b){ b.textContent='⏳ Sincronizando…'; b.disabled = true; }
-  try{
-    await fetch('/girassol-backup-offline/run', { method:'POST' });
-    await new Promise(r=>setTimeout(r, 4000)); await carregarLista();
-    await new Promise(r=>setTimeout(r, 4000)); await carregarLista();
-    toast('Sincronizado com o Bling');
-  }catch(e){ toast('Falha ao sincronizar: '+e.message); }
-  finally{ if(b){ b.textContent = orig || '↻ Atualizar'; b.disabled = false; } }
-}
-
-function onBusca(v){ filtroBusca = (v||'').trim().toLowerCase(); renderLista(); }
-function filtrar(lista){
-  let l = lista;
-  if(filtroMkt==='flex') l = l.filter(p=>p.flex);
-  else if(filtroMkt) l = l.filter(p=>p.marketplace===filtroMkt);
-  if(filtroBusca){
-    const q = filtroBusca;
-    l = l.filter(p=>
-      String(p.numero||'').includes(q)
-      || String(p.nf_numero||'').toLowerCase().includes(q)
-      || (p.cliente||'').toLowerCase().includes(q)
-      || (MKT[p.marketplace]||MKT.outro).n.toLowerCase().includes(q)
-      || String(p.id||'').includes(q)
-    );
+  // 2) handling 0/ausente -> trabalha de tras pra frente do delivery limit
+  if (deliveryLimit && shippingHoras) {
+    out.prazo_postagem = new Date(deliveryLimit.getTime() - shippingHoras * 3600e3).toISOString();
+    out.origem = 'delivery_limit - shipping horas';
+    return out;
   }
-  return l;
-}
 
-// ── chips de marketplace + FLEX ──
-const MKT_ORDEM = ['ml','shopee','tiktok','magalu','amazon','outro'];
-function setFiltroMkt(v){
-  filtroMkt = v;
-  // se o pedido aberto sumir da lista filtrada, limpa a tela (não deixa o pedido de outro marketplace persistindo)
-  if(pedidoAtual){
-    const vis = filtrar(listaCache).some(p => String(p.id)===String(pedidoAtual.bling_id));
-    if(!vis){ pedidoAtual=null; zplAtual=null; $('detail').innerHTML='<div class="placeholder">← selecione um pedido à esquerda</div>'; }
+  // 2b) so buffering
+  if (bufferingDate) {
+    out.prazo_postagem = bufferingDate.toISOString();
+    out.origem = 'buffering.date';
+    return out;
   }
-  renderChips(); renderLista();
-}
-function chipBtn(label, n, val, cor){
-  const ativo = (filtroMkt===val);
-  const dot = cor ? '<span class="cdot" style="background:'+cor+'"></span>' : '';
-  const fx = val==='flex' ? ' flex' : (val==='semetiqueta' ? ' serr' : '');
-  return '<button class="chip'+fx+(ativo?' on':'')+'" onclick="setFiltroMkt('+(val===null?'null':("'"+val+"'"))+')">'+dot+esc(label)+' <b>'+n+'</b></button>';
-}
-function renderChips(){
-  const box = $('chips'); if(!box) return;
-  const cont = {}; let flexN = 0;
-  listaCache.forEach(p=>{ cont[p.marketplace] = (cont[p.marketplace]||0)+1; if(p.flex) flexN++; });
-  let html = chipBtn('Todos', listaCache.length, null);
-  MKT_ORDEM.forEach(mk=>{ if(cont[mk]) html += chipBtn((MKT[mk]||MKT.outro).n, cont[mk], mk, (MKT[mk]||MKT.outro).c); });
-  html += chipBtn('⚡ FLEX', flexN, 'flex');
-  if((semEtiqCache||[]).length) html += chipBtn('⚠️ Sem etiqueta', semEtiqCache.length, 'semetiqueta');
-  box.innerHTML = html;
-}
-function renderLista(){
-  const box = $('listaPedidos');
-  const selId = pedidoAtual ? String(pedidoAtual.bling_id) : '';
-  // chip "sem etiqueta" ativo → mostra SÓ os pedidos com problema (vermelhos, não processáveis)
-  if(filtroMkt==='semetiqueta'){
-    if(!(semEtiqCache||[]).length){ box.innerHTML='<div class="empty">nenhum pedido sem etiqueta 🎉</div>'; return; }
-    box.innerHTML = semEtiqCache.map(p=>{
-      const m = MKT[p.marketplace]||MKT.outro;
-      return '<div class="scard semetiq" onclick="avisoSemEtiqueta(\''+esc(p.numero||p.id)+'\')">'+
-        '<div class="scl1">'+
-          '<span class="badge" style="background:'+m.c+'">'+m.n+'</span>'+
-          '<span class="num">'+esc(p.numero||p.id)+'</span>'+
-          '<span class="setag">⚠️ sem etiqueta</span>'+
-        '</div>'+
-        (p.cliente?'<div class="scli">'+esc(p.cliente)+'</div>':'')+
-        '<div class="smeta">NF '+(p.nf_numero?esc(p.nf_numero):'—')+' · não dá pra processar — confira no Bling</div>'+
-      '</div>';
-    }).join('');
-    return;
+
+  // 3) fallback conservador
+  if (dateHandling) {
+    out.prazo_postagem = new Date(dateHandling.getTime() + 48 * 3600e3).toISOString();
+    out.origem = 'fallback (date_handling + 48h)';
+    return out;
   }
-  if(!listaCache.length){ box.innerHTML='<div class="empty">nenhum pedido pronto no cache</div>'; return; }
-  const lista = filtrar(listaCache);
-  const cnt = filtroBusca ? '<div class="scount">'+lista.length+' de '+listaCache.length+'</div>' : '';
-  if(!lista.length){ box.innerHTML = cnt+'<div class="empty">nada encontrado p/ "'+esc(filtroBusca)+'"</div>'; return; }
-  box.innerHTML = cnt + lista.map(p=>{
-    const m = MKT[p.marketplace]||MKT.outro;
-    const opMe = opAtual();
-    const resvOutro = (p.reservado_por && p.reservado_por!==opMe) ? p.reservado_por : '';
-    const cls = (p.conferido?'done ':'') + (resvOutro?'resv ':'') + (String(p.id)===selId?'sel':'');
-    return '<div class="scard '+cls+'" onclick="selecionar(\''+p.id+'\')">'+
-      '<div class="scl1">'+
-        '<span class="badge" style="background:'+m.c+'">'+m.n+'</span>'+
-        '<span class="num">'+esc(p.numero)+'</span>'+
-        (resvOutro?'<span class="resvtag">🟠 '+esc(resvOutro)+'</span>':'')+
-        (p.conferido?'<span class="donetag">✓</span>':'')+
-      '</div>'+
-      (p.cliente?'<div class="scli">'+esc(p.cliente)+'</div>':'')+
-      '<div class="smeta">'+(p.itens||0)+' item(s) · NF '+(p.nf_numero?esc(p.nf_numero):(p.tem_nf?'ok':'—'))+(p.tem_danfe?' · <span class="pdfok">PDF✓</span>':'')+'</div>'+
-      '<div class="rep"><button class="btn warn sm" onclick="event.stopPropagation();reimprimir(\''+p.id+'\')">🖨 Imprimir</button></div>'+
-    '</div>';
-  }).join('');
+
+  out.ok = false;
+  out.motivo = 'sem_dados_suficientes';
+  return out;
 }
 
-function avisoSemEtiqueta(num){
-  toast('⚠️ Pedido '+num+' está SEM ETIQUETA — não dá pra processar aqui. Confira a emissão da etiqueta no Bling.');
+/**
+ * Quantas horas FALTAM ate o prazo de postagem (a partir de agora).
+ * Negativo = ja passou. null = sem prazo calculavel.
+ */
+function horasAtePrazo(shipment, agora = new Date()) {
+  const r = calcularPrazoPostagem(shipment);
+  if (!r.ok || !r.prazo_postagem) return null;
+  return (new Date(r.prazo_postagem).getTime() - agora.getTime()) / 3600e3;
 }
 
-async function reimprimir(id){
-  try{
-    await imprimirEtiqueta(id);
-    toast(modoEtiqueta()==='a4'?'📄 etiqueta aberta':'🖨 etiqueta enviada');
-  }catch(e){ toast('Falha: '+e.message); }
-}
-
-// ── detalhe / bipagem (centro) ──
-async function selecionar(id){
-  try{
-    // trocou de pedido? solta a reserva do anterior
-    if(pedidoAtual && String(pedidoAtual.bling_id)!==String(id)){ liberarReserva(pedidoAtual.bling_id); pararHeartbeat(); }
-    const ped = await api('/girassol-backup-offline/pedido/'+id);
-    if(ped.erro){ toast(ped.erro); return; }
-    // MINI-CONFERÊNCIA: já finalizado em outro PC? tira da tela e nem abre.
-    if(ped.conferido){
-      toast('✓ '+(ped.numero||id)+' já finalizado'+(ped.conferido.user?' por '+ped.conferido.user:'')+' — saiu da lista');
-      listaCache = listaCache.filter(x=>String(x.id)!==String(id));
-      pedidoAtual=null; renderLista(); return;
-    }
-    // RESERVA: marca esse operador como dono (presença entre PCs)
-    const op = opAtual();
-    let rv = await postJson('/girassol-backup-offline/reservar', {id, user:op});
-    if(rv && rv.ok===false && rv.reservado_por){
-      const mins = rv.em ? Math.max(0, Math.round((Date.now()-Date.parse(rv.em))/60000)) : 0;
-      if(!confirm('⚠️ '+rv.reservado_por+' está separando esse pedido'+(mins?' há '+mins+' min':'')+'.\n\nAssumir mesmo assim?')){ carregarLista(); return; }
-      rv = await postJson('/girassol-backup-offline/reservar', {id, user:op, forcar:true});
-    }
-    prepararPedido(ped);
-    pedidoAtual = ped;
-    zplAtual = await fetch('/girassol-backup-offline/etiqueta/'+id).then(r=>r.text());
-    renderDetail();
-    renderLista(); // atualiza highlight
-    iniciarHeartbeat(id);
-  }catch(e){ toast('Erro: '+e.message); }
-}
-
-// grupos = exibição (kit vira cabeçalho + componentes; senão item simples)
-// unidades = lista PLANA do que se bipa (componentes p/ kit, o próprio item p/ leaf)
-function prepararPedido(ped){
-  const grupos = [], unidades = [];
-  let uid = 0;
-  const novaUnid = (o)=>{ const u={ _id:uid++, sku:o.sku||'', ean:o.ean||null, descricao:o.descricao||'', img:o.img||null, qtd:Number(o.qtd||0), bipado:0 }; unidades.push(u); return u; };
-  for(const it of (ped.itens||[])){
-    if(it.tipo==='kit' && Array.isArray(it.componentes) && it.componentes.length){
-      const comps = it.componentes.map(c=>novaUnid(c));
-      grupos.push({ tipo:'kit', sku:it.sku, descricao:it.descricao, ean:it.ean, img:it.img, qtd:Number(it.qtd||0), comps });
-    } else {
-      grupos.push({ tipo:'leaf', unit:novaUnid(it) });
-    }
-  }
-  ped.grupos = grupos; ped.unidades = unidades;
-}
-
-function renderDetail(){
-  const p = pedidoAtual;
-  const m = MKT[p.marketplace]||MKT.outro;
-  const temDanfe = !!p.tem_danfe;
-  const nfMiolo = p.nf
-    ? 'NF <b>'+esc(p.nf.numero||'?')+'</b>'+(temDanfe?' <span class="nfok">PDF ✓</span>':'')+'<div class="chave">'+esc(p.nf.chave||'')+'</div>'
-    : '<span class="noean">⚠ NF não cacheada (segue só com a etiqueta)</span>';
-  const nfBar = temDanfe
-    ? '<div class="nfbar clic" title="abrir DANFE em PDF" onclick="abrirDanfe(\''+esc(p.bling_id)+'\')">'+nfMiolo+'</div>'
-    : '<div class="nfbar">'+nfMiolo+'</div>';
-  $('detail').innerHTML =
-    '<div class="dhead">'+
-      '<button class="btn sec sm" onclick="voltarLista()">← Voltar</button>'+
-      '<span class="badge" style="background:'+m.c+'">'+m.n+'</span>'+
-      '<span class="num big">'+esc(p.numero)+'</span>'+
-      '<span class="prog" id="bProg">0/0</span>'+
-    '</div>'+
-    '<div class="cli">'+esc(p.cliente||'')+'</div>'+
-    nfBar+
-    '<div class="scanrow">'+
-      '<div class="qtdwrap"><label>Qtd</label><input id="qtdConf" type="number" value="1" min="1" max="999"/></div>'+
-      '<input id="scan" autocomplete="off" placeholder="bipe o código de barras do item…"/>'+
-    '</div>'+
-    '<div class="hint">opcional: digite a <b>Qtd</b> (ex: 100) e bipe 1× — senão soma 1 por bipada · kit conta os componentes</div>'+
-    '<div id="bItens"></div>'+
-    '<div class="dbtns">'+
-      '<button class="btn warn" onclick="imprimirAtual()">'+(modoEtiqueta()==='a4'?'📄 Abrir etiqueta':'🖨 Só etiqueta')+'</button>'+
-      (temDanfe ? '<button class="btn warn" onclick="imprimirSimpAtual()">🏷️ Só DANFE</button>' : '')+
-      (temDanfe ? '<button class="btn sec" onclick="imprimirNFAtual()">🧾 Ver NF A4</button>' : '')+
-      '<span class="grow"></span>'+
-      (temDanfe ? '<button class="btn" id="bFinalizarA4" onclick="finalizar(\'a4\')" disabled>✓ Etiq + NF A4</button>' : '')+
-      '<button class="btn ok" id="bFinalizar" onclick="finalizar(\'simp\')" disabled>✓ Etiq + DANFE 10x15</button>'+
-    '</div>';
-  renderItens();
-  const scan = $('scan');
-  scan.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); const v=scan.value; scan.value=''; onScan(v); }});
-  const qtd = $('qtdConf');
-  qtd.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); if((qtd.value||'').length>3) qtd.value='1'; scan.focus(); }});
-  qtd.addEventListener('focus', ()=>qtd.select());
-  setTimeout(()=>scan.focus(),60);
-}
-
-function unitRow(u, isComp){
-  const full = u.bipado>=u.qtd;
-  return '<div class="item '+(isComp?'comp ':'')+(full?'full':'')+'">'+
-    thumb(u.img)+
-    '<div class="icount"><span class="'+(full?'b':'')+'">'+u.bipado+'</span>/'+u.qtd+'</div>'+
-    '<div class="idesc"><div class="d">'+esc(u.descricao||u.sku||'item')+'</div>'+
-      '<div class="e">SKU '+esc(u.sku||'—')+' · EAN '+(u.ean?esc(u.ean):'<span class="noean">sem EAN</span>')+'</div></div>'+
-    (full?'':'<button class="miniok" onclick="manualUnit('+u._id+')">+1</button>')+
-  '</div>';
-}
-
-function thumb(src){
-  if(!src) return '<div class="thumb noimg">📦</div>';
-  return '<img class="thumb" src="'+esc(src)+'" loading="lazy" referrerpolicy="no-referrer" onerror="this.outerHTML=\'<div class=&quot;thumb noimg&quot;>📦</div>\'"/>';
-}
-
-function renderItens(){
-  if(!pedidoAtual) return;
-  const un = pedidoAtual.unidades;
-  const total = un.reduce((s,u)=>s+u.qtd,0);
-  const feito = un.reduce((s,u)=>s+u.bipado,0);
-  const pe = $('bProg'); if(pe) pe.innerHTML = '<span class="'+(feito>=total&&total>0?'done':'')+'">'+feito+'</span>/'+total;
-  const box = $('bItens'); if(box) box.innerHTML = pedidoAtual.grupos.map(g=>{
-    if(g.tipo==='kit'){
-      const done = g.comps.every(c=>c.bipado>=c.qtd);
-      return '<div class="kitwrap '+(done?'full':'')+'">'+
-        '<div class="kithead">'+thumb(g.img)+'<div class="kh-txt"><span class="ktag">KIT · NF</span> '+esc(g.descricao||g.sku)+
-          '<div class="e">SKU '+esc(g.sku||'—')+'</div></div></div>'+
-        '<div class="comps">'+g.comps.map(c=>unitRow(c,true)).join('')+'</div>'+
-      '</div>';
-    }
-    return unitRow(g.unit,false);
-  }).join('');
-  const pronto = (feito>=total && total>0);
-  const fb = $('bFinalizar'); if(fb) fb.disabled = !pronto;
-  const fb2 = $('bFinalizarA4'); if(fb2) fb2.disabled = !pronto;
-}
-
-function manualUnit(id){ const u=pedidoAtual.unidades.find(x=>x._id===id); if(u && u.bipado<u.qtd){ u.bipado++; beep(true); renderItens(); } }
-
-function modalAberto(){ const md=$('modal'); return md && md.classList.contains('show'); }
-
-function onScan(code){
-  if(modalAberto()) return;            // ignora bipada com o modal aberto
-  code = norm(code);
-  if(!code || !pedidoAtual) return;
-  let q = parseInt(($('qtdConf')||{}).value,10); if(!q || q<1 || q>999) q=1;
-  let u = pedidoAtual.unidades.find(x=> x.ean && norm(x.ean)===code && x.bipado<x.qtd);
-  if(!u) u = pedidoAtual.unidades.find(x=> x.sku && norm(x.sku).toUpperCase()===code.toUpperCase() && x.bipado<x.qtd);
-  if(u){
-    const add = Math.min(q, u.qtd - u.bipado);
-    u.bipado += add; beep(true); renderItens();
-    const qi=$('qtdConf'); if(qi) qi.value='1';
-  } else { beep(false); const s=$('scan'); if(s){ s.classList.add('err'); setTimeout(()=>s.classList.remove('err'),300);} toast('código não confere: '+code); }
-}
-
-async function imprimirAtual(){ try{ await imprimirEtiqueta(pedidoAtual.bling_id, zplAtual); toast(modoEtiqueta()==='a4'?'📄 etiqueta aberta — imprima pelo navegador':'🖨 etiqueta enviada'); }catch(e){ toast('Falha: '+e.message); } }
-function abrirDanfe(id){ window.open('/girassol-backup-offline/danfe/'+id, '_blank'); }
-function imprimirNFAtual(){
-  const id = pedidoAtual && pedidoAtual.bling_id;
-  if(!id) return;
-  window.open(location.origin+'/girassol-backup-offline/danfe/'+id, '_blank');  // abre o PDF da NF — você imprime pelo navegador
-}
-function imprimirSimpAtual(){
-  const id = pedidoAtual && pedidoAtual.bling_id;
-  if(!id){ toast('pedido sem ID'); return; }
-  toast('🏷️ Gerando DANFE 10x15… (uns segundos)');   // feedback IMEDIATO
-  imprimirSimplificadoZebra(id)                       // dispara SEM travar a tela
-    .then(()=> toast('🏷️ DANFE enviado p/ Zebra'))
-    .catch(e=> toast('Falha DANFE: '+e.message));
-}
-
-// volta pra lista SEM finalizar (não marca conferido)
-function voltarLista(){
-  if(pedidoAtual){ liberarReserva(pedidoAtual.bling_id); }
-  pararHeartbeat();
-  pedidoAtual=null; zplAtual=null;
-  $('detail').innerHTML='<div class="placeholder">← selecione um pedido à esquerda</div>';
-  renderLista();
-}
-
-// FINALIZAR = imprime e SÓ marca conferido depois que o estoquista confirma que saiu certo.
-// modo: 'simp' = etiqueta + DANFE simplificado (10x15) na Zebra | 'a4' = etiqueta + NF completa (A4)
-let modoFinalizando = 'simp';
-async function finalizar(modo){
-  modoFinalizando = (modo==='a4') ? 'a4' : 'simp';
-  const id = pedidoAtual.bling_id;
-  const temNf = !!pedidoAtual.nf;
-  if(modoEtiqueta()==='a4'){
-    // ETIQUETA em modo A4: UMA aba só com etiqueta + NF mescladas (o navegador bloqueava a 2ª aba)
-    window.open(location.origin+'/girassol-backup-offline/imprimir/'+id, '_blank');
-    abrirConfirmacao();
-    return;
-  }
-  // Zebra: 1º a ETIQUETA (ZPL)
-  try{ await imprimirZPL(zplAtual); }
-  catch(e){ toast('Falha na etiqueta: '+e.message); return; }
-  // 2º a NF — simplificada NA ZEBRA (10x15) ou completa em A4 no navegador
-  if(modoFinalizando==='simp'){
-    if(temNf){
-      toast('🏷️ Gerando DANFE 10x15…');
-      imprimirSimplificadoZebra(id)                   // dispara SEM travar (o QZ pixel demora alguns seg)
-        .then(()=> toast('🏷️ DANFE enviado p/ Zebra'))
-        .catch(e=> toast('Etiqueta saiu, mas o DANFE falhou: '+e.message));
-    }
-  }else{
-    if(temNf) window.open(location.origin+'/girassol-backup-offline/danfe/'+id, '_blank');
-  }
-  abrirConfirmacao();   // abre JÁ — não espera o DANFE terminar de imprimir
-}
-
-function abrirConfirmacao(){
-  const md=$('modal');
-  md.innerHTML =
-    '<div class="mbox">'+
-      '<div class="mtit">Etiqueta e NF saíram certas?</div>'+
-      '<div class="msub">Confira a impressora/abas. Só finalize se saiu OK — assim, se der problema, o pedido <b>continua na tela</b> e você reimprime sem perder.</div>'+
-      '<div class="mbtns">'+
-        '<button class="btn warn" onclick="reimprimirModal()">🖨 Reimprimir</button>'+
-        '<button class="btn sec" onclick="fecharConfirmacao()">✗ Ainda não</button>'+
-        '<button class="btn ok" onclick="confirmarFinalizar()">✓ Sim, finalizar</button>'+
-      '</div>'+
-    '</div>';
-  md.classList.add('show');
-}
-function fecharConfirmacao(){ const md=$('modal'); md.classList.remove('show'); md.innerHTML=''; setTimeout(()=>{const s=$('scan'); if(s) s.focus();},60); }
-async function reimprimirModal(){
-  const id = pedidoAtual.bling_id;
-  if(modoEtiqueta()==='a4'){ window.open(location.origin+'/girassol-backup-offline/imprimir/'+id, '_blank'); toast('🖨 reenviado'); return; }
-  try{ await imprimirEtiqueta(id, zplAtual); }catch(e){ toast('Falha etiqueta: '+e.message); return; }
-  if(modoFinalizando==='simp' && pedidoAtual.nf){
-    toast('🏷️ Gerando DANFE 10x15…');
-    imprimirSimplificadoZebra(id).then(()=> toast('🏷️ DANFE reenviado')).catch(e=> toast('DANFE falhou: '+e.message));
-  }else{
-    if(pedidoAtual.nf) window.open(location.origin+'/girassol-backup-offline/danfe/'+id, '_blank');
-    toast('🖨 etiqueta reenviada');
-  }
-}
-async function confirmarFinalizar(){
-  try{
-    const r = await postJson('/girassol-backup-offline/conferido', { id: pedidoAtual.bling_id, user: opAtual() });
-    if(r && r.ja_finalizado)      toast('⚠️ '+pedidoAtual.numero+' já tinha sido finalizado'+(r.por?' por '+r.por:'')+' — não refeito');
-    else if(r && r.sincronizado)  toast('✓ '+pedidoAtual.numero+' finalizado → VERIFICADO');
-    else if(r && r.bling_offline) toast('✓ '+pedidoAtual.numero+' finalizado · Bling offline, sincroniza ao voltar');
-    else                          toast('✓ '+pedidoAtual.numero+' finalizado');
-    pararHeartbeat();
-    fecharConfirmacao();
-    pedidoAtual=null; zplAtual=null;
-    $('detail').innerHTML='<div class="placeholder">← selecione um pedido à esquerda</div>';
-    carregarLista();
-  }catch(e){ toast('Falha ao finalizar: '+e.message); }
-}
-
-// ─── Histórico dos últimos finalizados (modal) ─────────────────────────────
-async function abrirHistorico(){
-  const md=$('modal');
-  md.innerHTML =
-    '<div class="mbox" style="max-width:580px;width:92vw">'+
-      '<div class="mtit">🕘 Últimos pedidos finalizados</div>'+
-      '<div id="histBody" class="histbody">carregando…</div>'+
-      '<div class="mbtns"><button class="btn sec" onclick="fecharConfirmacao()">Fechar</button></div>'+
-    '</div>';
-  md.classList.add('show');
-  try{
-    const d = await api('/girassol-backup-offline/historico');
-    if(!d.itens || !d.itens.length){ $('histBody').innerHTML='<div class="sepempty">Nenhum pedido finalizado ainda.</div>'; return; }
-    $('histBody').innerHTML = d.itens.map(h=>{
-      const dt = h.conferido_em ? new Date(h.conferido_em).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '';
-      const mk = h.marketplace ? (MKT[h.marketplace]||MKT.outro) : null;
-      const tag = h.sincronizado ? '<span class="hsync ok">✓ VERIFICADO</span>' : '<span class="hsync wait">⏳ na fila</span>';
-      return '<div class="histrow">'+
-        (mk?'<span class="hmk" style="background:'+mk.c+'"></span>':'')+
-        '<div class="hmeta">'+
-          '<div class="hnum">'+esc(h.numero||h.id)+(h.cliente?' · '+esc(h.cliente):'')+'</div>'+
-          '<div class="hsub">'+dt+(h.user?(' · '+esc(h.user)):'')+'</div>'+
-        '</div>'+
-        tag+
-      '</div>';
-    }).join('');
-  }catch(e){ $('histBody').innerHTML='<div class="sepempty">Falha: '+esc(e.message)+'</div>'; }
-}
-
-// ─── Lista de Separação (gaveta lateral direita) ───────────────────────────
-let sepMkt = null;     // filtro de marketplace na separação
-let sepData = null;    // último resultado /separacao
-
-function abrirSeparacao(){ $('sep').classList.add('on'); $('sepback').classList.add('on'); carregarSeparacao(); }
-function fecharSeparacao(){ $('sep').classList.remove('on'); $('sepback').classList.remove('on'); }
-function setSepMkt(v){ sepMkt = v; carregarSeparacao(); }
-
-async function carregarSeparacao(){
-  $('sepInfo').textContent = 'carregando…';
-  $('sepList').innerHTML = '';
-  try{
-    const d = await api('/girassol-backup-offline/separacao' + (sepMkt ? ('?mkt='+sepMkt) : ''));
-    sepData = d;
-    renderSepChips(d.counts || {});
-    const semLoc = (d.linhas||[]).filter(l=>!l.loc).length;
-    $('sepInfo').innerHTML = '<b>'+d.total_skus+'</b> SKU(s) &middot; <b>'+d.total_itens+'</b> a separar &middot; '+d.pedidos+' pedido(s)'+
-      (semLoc?(' &middot; <span style="color:var(--warn)">'+semLoc+' sem local</span>'):'');
-    if(!d.linhas || !d.linhas.length){
-      $('sepList').innerHTML = '<div class="sepempty">Nada a separar'+(sepMkt?' nesse filtro':'')+' 🎉</div>';
-      return;
-    }
-    $('sepList').innerHTML = d.linhas.map(l =>
-      '<div class="seprow">'+
-        '<div class="loc'+(l.loc?'':' vazia')+'">'+(l.loc?esc(l.loc):'—')+'</div>'+
-        '<div class="qtd">'+l.qtd+'</div>'+
-        '<div class="meta">'+
-          '<div class="sku">'+esc(l.sku)+'</div>'+
-          (l.descricao?'<div class="ds" title="'+esc(l.descricao)+'">'+esc(l.descricao)+'</div>':'')+
-          (l.ean?'<div class="ean">'+esc(l.ean)+'</div>':'')+
-        '</div>'+
-      '</div>'
-    ).join('');
-  }catch(e){ $('sepInfo').textContent = 'Falha ao carregar: '+e.message; }
-}
-
-function renderSepChips(counts){
-  const tot = Object.values(counts).reduce((s,n)=>s+n,0);
-  let html = sepChip('Todos', tot, null, '#94a3b8');
-  MKT_ORDEM.forEach(mk=>{ if(counts[mk]) html += sepChip((MKT[mk]||MKT.outro).n, counts[mk], mk, (MKT[mk]||MKT.outro).c); });
-  $('sepChips').innerHTML = html;
-}
-function sepChip(label, n, val, cor){
-  const on = (sepMkt===val);
-  return '<span class="chip'+(on?' on':'')+'" onclick="setSepMkt('+(val?("'"+val+"'"):'null')+')">'+
-         '<span style="width:8px;height:8px;border-radius:50%;background:'+cor+';display:inline-block"></span>'+
-         label+' <b>'+n+'</b></span>';
-}
-
-// imprime a lista numa janela nova (não passa pelo bloqueio de impressão do painel)
-function imprimirSeparacao(){
-  if(!sepData || !sepData.linhas || !sepData.linhas.length){ toast('Nada a imprimir'); return; }
-  const agora = new Date().toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
-  const filtroNome = sepMkt ? (MKT[sepMkt]||MKT.outro).n : 'Todas as lojas';
-  const linhas = sepData.linhas.map(l =>
-    '<tr><td class="l">'+esc(l.loc||'—')+'</td><td class="q">'+l.qtd+'</td><td class="s">'+esc(l.sku)+'</td><td>'+esc(l.descricao||'')+'</td><td class="e">'+esc(l.ean||'')+'</td></tr>'
-  ).join('');
-  const html = '<!doctype html><html><head><meta charset="utf-8"><title>Lista de Separação</title>'+
-    '<style>body{font-family:Arial,Helvetica,sans-serif;margin:18px;color:#111}'+
-    'h1{font-size:18px;margin:0}.sub{font-size:12px;color:#444;margin:2px 0 10px}'+
-    'table{width:100%;border-collapse:collapse}th,td{border:1px solid #bbb;padding:6px 8px;font-size:13px;text-align:left}'+
-    'th{background:#eee}.l{width:64px;font-family:monospace;font-weight:bold}.q{width:46px;text-align:center;font-weight:bold;font-size:15px}.s{font-family:monospace;font-weight:bold}'+
-    '.e{font-family:monospace;color:#555;width:130px}tr:nth-child(even) td{background:#f7f7f7}</style></head><body>'+
-    '<div style="display:flex;justify-content:space-between;align-items:baseline"><h1>Lista de Separação</h1><div class="sub">'+agora+'</div></div>'+
-    '<div class="sub"><b>'+filtroNome+'</b> &middot; '+sepData.total_skus+' SKU(s) &middot; '+sepData.total_itens+' a separar &middot; '+sepData.pedidos+' pedido(s)</div>'+
-    '<table><thead><tr><th class="l">Local</th><th class="q">Qtd</th><th>SKU</th><th>Produto</th><th>EAN</th></tr></thead><tbody>'+linhas+'</tbody></table>'+
-    '<scr'+'ipt>window.onload=function(){window.print()}<\/scr'+'ipt></body></html>';
-  const w = window.open('', '_blank');
-  if(!w){ toast('Pop-up bloqueado — libera no navegador'); return; }
-  w.document.write(html); w.document.close();
-}
-
-// mantém foco no scan (menos quando digita Qtd/operador ou o modal está aberto)
-setInterval(()=>{
-  const sel = window.getSelection && window.getSelection().toString();
-  if(sel) return;   // está selecionando texto (ex: copiar o código) → não rouba o foco
-  const s=$('scan'); const q=$('qtdConf'); if(s && !modalAberto() && document.activeElement!==s && document.activeElement!==opIn && document.activeElement!==q) s.focus();
-}, 1500);
-
-// a página NUNCA se imprime — toda impressão é via QZ Tray (Zebra ou A4)
-window.print = function(){ toast('A impressão é pela impressora (QZ Tray), não pela página'); };
-document.addEventListener('keydown', e=>{ if((e.ctrlKey||e.metaKey) && (e.key==='p'||e.key==='P')){ e.preventDefault(); e.stopPropagation(); toast('A impressão é pelos botões (QZ Tray)'); } }, true);
-
-// boot
-(async function(){ await setupQZ(); reconectarQZ(); })();
-aplicarModoLabel();
-carregarLista();
-setInterval(()=>{ if(!pedidoAtual) carregarLista(); }, 20000);
-</script>
-</body>
-</html>
+module.exports = { calcularPrazoPostagem, horasAtePrazo };
