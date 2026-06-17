@@ -306,10 +306,43 @@ async function revisarAtencaoHumana({ lcp }) {
           continue;
         }
         if (SIT_CONCLUIDAS.includes(sit)) {
-          await lcp.atualizarVenda(venda.order_id, {
-            status: 'processado', bling_pedido_id: String(busca.pedidoId), bling_erro: null, nf_erro: null
-          });
-          console.log(`[revisar] order ${venda.order_id} ja concluido no Bling (situacao ${sit}) — reconciliado p/ processado`);
+          // So fecha como 'processado' se houver NF DE VERDADE no Bling. A
+          // integracao nativa bounceia o pedido pra situacao 9 (Atendido) MESMO
+          // sem NF — marcar processado aqui mascarava a NF faltante (casos
+          // Rangel/Danieli: ficavam "prontos" sem nota). Agora checa a NF real.
+          let temNF = false;
+          try {
+            const det = await bp.obterPedidoCompleto(busca.pedidoId);
+            const nf = (det && det.ok) ? det.pedido?.notaFiscal : null;
+            const nfId = (nf && typeof nf === 'object') ? nf.id : nf;
+            temNF = Number(nfId) > 0;
+          } catch (_) { /* na duvida, NAO fecha como processado */ }
+
+          if (temNF) {
+            await lcp.atualizarVenda(venda.order_id, {
+              status: 'processado', bling_pedido_id: String(busca.pedidoId), bling_erro: null, nf_erro: null
+            });
+            console.log(`[revisar] order ${venda.order_id} concluido COM NF (situacao ${sit}) — reconciliado p/ processado`);
+            continue;
+          }
+
+          // Situacao 9 mas SEM NF: NAO fecha. Se o pedido esta claro+estruturado e
+          // a auto-emissao esta ligada, manda pra 'cliente_confirmou_pedido' (a
+          // repesca monta+emite sozinha). Senao, deixa em atencao humana (visivel
+          // no painel pra montar na mao). Em ambos os casos, registra o pedido Bling.
+          const claroEstrut = String(venda.ia_categoria || '') === 'claro'
+            && !!venda.ia_pedido_estruturado
+            && Number(venda.ia_confianca || 0) >= LIMIAR_CONFIANCA_AUTO
+            && !venda.bling_editado_em;
+          if (claroEstrut && AUTO_EMITIR_HABILITADO) {
+            await lcp.atualizarVenda(venda.order_id, {
+              status: 'cliente_confirmou_pedido', bling_pedido_id: String(busca.pedidoId)
+            });
+            console.log(`[revisar] order ${venda.order_id} situacao ${sit} SEM NF — claro/estruturado, mandado p/ auto-emissao (repesca)`);
+          } else {
+            await lcp.atualizarVenda(venda.order_id, { bling_pedido_id: String(busca.pedidoId) });
+            console.log(`[revisar] order ${venda.order_id} situacao ${sit} SEM NF — mantido p/ revisao humana (painel)`);
+          }
           continue;
         }
       }
