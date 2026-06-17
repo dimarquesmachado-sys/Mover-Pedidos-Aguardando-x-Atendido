@@ -88,12 +88,17 @@ CLASSIFIQUE em UMA destas 4 categorias:
    - cliente listou graos mas SEM quantidade nenhuma e SEM sinal de variedade; OU
    - cliente deu quantidades ESPECIFICAS e DIFERENTES por grao que nao fecham
      ${totalLixas} (nesse caso NAO complete nem corte — peça o ajuste); OU
-   - alguma quantidade NAO eh multiplo de ${unidadesPorPacote} (nao da meio pacote).
+   - alguma quantidade NAO eh multiplo de ${unidadesPorPacote} (nao da meio pacote); OU
+   - cliente pediu um grao que NAO esta na lista de disponiveis (ex.: pediu "100" mas a
+     lista vai de 80 direto pra 120 — o 100 nao existe). NUNCA troque por conta propria.
    Ex: "40 60 80 100 150" SEM contexto previo de loja sugerindo qtds
    Ex: "40 do 120, 40 do 240, 10 do 320, 10 do 400, 10 do 1500" (=110, especifico e nao fecha)
    Ex: "5 do 400 e 5 do 1500" (5 nao eh multiplo de ${unidadesPorPacote})
+   Ex: "20 do 100" quando 100 NAO esta na lista de disponiveis (grao inexistente)
    AÇÃO: Peça/ajuste de forma clara, com exemplo. Se for nao-multiplo de ${unidadesPorPacote},
-   explique que as quantidades precisam ser multiplas de ${unidadesPorPacote}.
+   explique que as quantidades precisam ser multiplas de ${unidadesPorPacote}. Se o grao pedido
+   NAO existe na lista, avise que aquele grao nao esta disponivel e liste os disponiveis mais
+   proximos pra ele escolher (ex.: "o grao 100 nao esta disponivel; temos 80 e 120, qual prefere?").
 
 3. "pergunta_graos" - Cliente esta perguntando QUAIS graos estao disponiveis
    Ex: "quais graos vcs tem?"
@@ -104,7 +109,11 @@ CLASSIFIQUE em UMA destas 4 categorias:
    AÇÃO: NAO responda nada. Marque como escalonamento humano.
 
 REGRAS RIGIDAS:
-- NUNCA invente graos que nao estao na lista de disponiveis
+- NUNCA invente nem ACEITE graos que nao estao na lista de disponiveis. Confira CADA grao
+  do pedido — inclusive os que o cliente digitou explicitamente (ex.: "20 do 100") — contra
+  a lista de disponiveis. Se QUALQUER grao pedido nao estiver na lista, o pedido NAO eh
+  "claro": classifique como "ambiguo", avise que aquele grao nao existe e liste os
+  disponiveis mais proximos. NUNCA troque um grao invalido por outro por conta propria.
 - Voce PODE completar/montar a distribuicao quando o cliente pede VARIEDADE ou um
   pedido UNIFORME ("X de cada") que nao fecha — sempre em multiplos de ${unidadesPorPacote}
   e somando EXATAMENTE ${totalLixas}, usando so graos disponiveis.
