@@ -2,7 +2,7 @@
 
 // ════════════════════════════════════════════════════════════════════════
 //  GIRASSOL · CHECKOUT OFFLINE — FASE 1 (poller) + FASE 2 (bipagem)   (Mover-Pedidos)
-//  girassol-backup-offline v16/06 b39   (a versão real é a const VERSAO abaixo)
+//  girassol-backup-offline v16/06 b40   (a versão real é a const VERSAO abaixo)
 // ════════════════════════════════════════════════════════════════════════
 //  Módulo do orquestrador unificado (HTTP-native, sem Express).
 //  Reaproveita o token Bling da Girassol via ../girassol/tokenManager.
@@ -32,13 +32,14 @@ const fetch = require('node-fetch');
 const AdmZip = require('adm-zip');
 const crypto = require('crypto');
 const { garantirToken } = require('../girassol/tokenManager');
+const { gerarDanfeSimplificado } = require('./danfe-simplificado');
 
 // Certificado/chave do QZ Tray p/ assinar as impressões (mata o popup "Untrusted").
 // Configure no Render: GIRABKP_QZ_CERT (digital-certificate.txt) e GIRABKP_QZ_PRIVKEY (private-key.pem).
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v16/06 b39';
+const VERSAO     = 'girassol-backup-offline v16/06 b40';
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 
 // ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
@@ -409,7 +410,72 @@ async function baixarDanfe(nfId) {
   } catch (e) { return null; }
 }
 
-// baixa a ETIQUETA em PDF (formato=PDF) — p/ modo A4 / fallback se a Zebra morrer
+// ─── DANFE Simplificado: enriquecimento de dados (detalhe da NF + XML) ───
+const EMITENTE_FALLBACK = { razao: 'Magazine Girassol Ltda', cnpj: '27548456000147', ie: '675.374.241.113', endereco: 'Rua Jose Ruscitto, 150, BOX 1 - Galpao, Taboao da Serra - SP' };
+
+function _xmlTag(xml, tag) { const m = xml && xml.match(new RegExp('<' + tag + '>([\\s\\S]*?)<\\/' + tag + '>')); return m ? m[1].trim() : ''; }
+function _xmlBloco(xml, tag) { const m = xml && xml.match(new RegExp('<' + tag + '[\\s>][\\s\\S]*?<\\/' + tag + '>')); return m ? m[0] : ''; }
+function _ender(bloco) {
+  const lgr = _xmlTag(bloco, 'xLgr'), nro = _xmlTag(bloco, 'nro'), cpl = _xmlTag(bloco, 'xCpl');
+  const bai = _xmlTag(bloco, 'xBairro'), mun = _xmlTag(bloco, 'xMun'), uf = _xmlTag(bloco, 'UF'), cep = _xmlTag(bloco, 'CEP');
+  return [lgr, nro, cpl, bai, (mun ? mun + (uf ? ' - ' + uf : '') : uf), (cep ? 'CEP ' + cep : '')].filter(Boolean).join(', ');
+}
+function parseXmlNF(xml) {
+  if (!xml) return {};
+  const emit = _xmlBloco(xml, 'emit'), dest = _xmlBloco(xml, 'dest'), prot = _xmlBloco(xml, 'infProt');
+  const cpl = _xmlTag(xml, 'infCpl');
+  const trib = (cpl.match(/Val(?:or)?\s*[Aa]prox[\s\S]*?IBPT\.?/i) || cpl.match(/[Tt]ribut[\s\S]*?IBPT\.?/i) || [])[0] || '';
+  return {
+    emit: { razao: _xmlTag(emit, 'xNome'), cnpj: _xmlTag(emit, 'CNPJ') || _xmlTag(emit, 'CPF'), ie: _xmlTag(emit, 'IE'), endereco: _ender(_xmlBloco(emit, 'enderEmit')) },
+    destEndereco: _ender(_xmlBloco(dest, 'enderDest')),
+    protocolo: _xmlTag(prot, 'nProt'),
+    dataProtocolo: _xmlTag(prot, 'dhRecbto'),
+    tributos: trib.replace(/\s+/g, ' ').trim()
+  };
+}
+async function baixarXmlNF(nf) {
+  let url = nf && nf.xml;
+  if (url && typeof url === 'object') url = url.link || url.url || url.href || '';
+  if (!url) return '';
+  try { const r = await fetch(url, { redirect: 'follow' }); if (!r.ok) return ''; return await r.text(); }
+  catch (e) { return ''; }
+}
+// monta o objeto de dados p/ o gerador, a partir do id da NF (Bling) + nº do pedido
+async function dadosNFSimp(nfId, numeroPedido) {
+  const det = await blingGet(`/nfe/${nfId}`);
+  const nf = det.data && det.data.data;
+  if (!nf) return null;
+  const xml = await baixarXmlNF(nf);
+  const x = parseXmlNF(xml);
+  const itens = (nf.itens || []).map(it => {
+    const qtd = Number(it.quantidade || it.qtd || 1);
+    const vUnit = Number(it.valor || it.valorUnitario || it.valorUnit || 0);
+    const fm = (n) => Number(n).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return {
+      codigo: it.codigo || (it.produto && it.produto.codigo) || '',
+      descricao: it.descricao || (it.produto && it.produto.nome) || '',
+      qtd, valorUnit: vUnit, valorTotal: vUnit * qtd,
+      detalhe: fm(qtd) + ' UN X ' + fm(vUnit)
+    };
+  });
+  const c = nf.contato || {};
+  return {
+    emitente: (x.emit && x.emit.razao) ? x.emit : EMITENTE_FALLBACK,
+    chave: nf.chaveAcesso || nf.chave || '',
+    protocolo: x.protocolo || '',
+    dataProtocolo: x.dataProtocolo || '',
+    tipo: (nf.tipo != null ? nf.tipo : 1),
+    numero: nf.numero || '',
+    serie: nf.serie || '1',
+    dataEmissao: nf.dataEmissao || '',
+    itens,
+    qtdTotal: itens.length,
+    consumidor: { doc: c.numeroDocumento || c.documento || '', nome: c.nome || '', endereco: x.destEndereco || '' },
+    numeroPedido: numeroPedido || '',
+    numeroPedidoLoja: nf.numeroPedidoLoja || '',
+    tributos: x.tributos || ''
+  };
+}
 async function baixarEtiquetaPDF(blingId) {
   const { ok, data } = await blingGet(`/logisticas/etiquetas?formato=PDF&idsVendas[]=${blingId}`);
   const item = ok && data && data.data && data.data[0];
@@ -1276,6 +1342,31 @@ function routes(readBody) {
         }
       } catch (e) { out.erro = e.message; }
       json(res, 200, out);
+      return true;
+    }
+
+    // DEBUG/PREVIEW: gera o DANFE Simplificado 10x15 de um pedido REAL (pra ver e validar)
+    // uso: /girassol-backup-offline/debug-nf-simp/{idDoPedido}        → abre o PDF
+    //      /girassol-backup-offline/debug-nf-simp/{idDoPedido}?json=1 → mostra os dados extraídos
+    if (method === 'GET' && p.startsWith('/girassol-backup-offline/debug-nf-simp/')) {
+      const pedidoId = p.split('/').filter(Boolean).pop();
+      let snap = readJson(path.join(CACHE_DIR, String(pedidoId), 'pedido.json'), null);
+      if (!snap) {  // talvez seja o NÚMERO do pedido (o que você vê na tela) → procura no manifest
+        const man = manifest();
+        const achado = Object.keys(man).find(k => String(man[k].numero) === String(pedidoId));
+        if (achado) snap = readJson(path.join(CACHE_DIR, String(achado), 'pedido.json'), null);
+      }
+      if (!snap || !snap.nf || !snap.nf.id) { json(res, 404, { erro: 'pedido sem NF cacheada', pedido: pedidoId }); return true; }
+      let dados;
+      try { dados = await dadosNFSimp(snap.nf.id, snap.numero); }
+      catch (e) { json(res, 502, { erro: 'falha ao montar dados', detalhe: e.message }); return true; }
+      if (!dados) { json(res, 502, { erro: 'NF não retornou dados' }); return true; }
+      if (/[?&]json=1/.test(urlObj.search || '')) { json(res, 200, dados); return true; }
+      try {
+        const pdf = await gerarDanfeSimplificado(dados);
+        res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': 'inline; filename="danfe-simplificado.pdf"' });
+        res.end(pdf);
+      } catch (e) { json(res, 500, { erro: 'falha ao gerar PDF', detalhe: e.message }); }
       return true;
     }
 
