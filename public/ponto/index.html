@@ -173,7 +173,7 @@
 
 </div>
 
-<div class="versao">Ponto v1.4 · 04/06/2026</div>
+<div class="versao" id="versaoBox">Ponto front v18/06 · back …</div>
 
 <!-- MODAL JUSTIFICATIVA -->
 <div id="modalErro" class="overlay hide">
@@ -577,6 +577,11 @@ function showResult(txt,tipo){ const el=$('resultado'); el.innerHTML = txt?`<div
 
 // auto-login
 if(sess && sess.token) abrirPainel();
+
+// versão (front fixa + back buscada do servidor)
+fetch(API+'/versao').then(r=>r.json()).then(j=>{
+  const el=$('versaoBox'); if(el) el.textContent='Ponto front v18/06 · '+(j.versao||'back ?');
+}).catch(()=>{ const el=$('versaoBox'); if(el) el.textContent='Ponto front v18/06 · back (sem resposta)'; });
 </script>
 </body>
 </html>
