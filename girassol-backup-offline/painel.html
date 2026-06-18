@@ -248,7 +248,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b47';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b48';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#ff9900'}, magalu:{n:'Magalu',c:'#0086ff'}, outro:{n:'Outro',c:'#94a3b8'}
@@ -655,11 +655,11 @@ function renderDetail(){
     '<div class="hint">opcional: digite a <b>Qtd</b> (ex: 100) e bipe 1× — senão soma 1 por bipada · kit conta os componentes</div>'+
     '<div id="bItens"></div>'+
     '<div class="dbtns">'+
-      '<button class="btn warn" onclick="imprimirAtual()">'+(modoEtiqueta()==='a4'?'📄 Abrir etiqueta':'🖨 Só etiqueta')+'</button>'+
-      (temDanfe ? '<button class="btn warn" onclick="imprimirSimpAtual()">🏷️ Só DANFE</button>' : '')+
-      (temDanfe ? '<button class="btn sec" onclick="imprimirNFAtual()">🧾 Ver NF A4</button>' : '')+
+      (souAdmin() ? '<button class="btn warn" onclick="imprimirAtual()">'+(modoEtiqueta()==='a4'?'📄 Abrir etiqueta':'🖨 Só etiqueta')+'</button>' : '')+
+      (souAdmin() && temDanfe ? '<button class="btn warn" onclick="imprimirSimpAtual()">🏷️ Só DANFE</button>' : '')+
+      (souAdmin() && temDanfe ? '<button class="btn sec" onclick="imprimirNFAtual()">🧾 Ver NF A4</button>' : '')+
       '<span class="grow"></span>'+
-      (temDanfe ? '<button class="btn" id="bFinalizarA4" onclick="finalizar(\'a4\')" disabled>✓ Etiq + NF A4</button>' : '')+
+      (souAdmin() && temDanfe ? '<button class="btn" id="bFinalizarA4" onclick="finalizar(\'a4\')" disabled>✓ Etiq + NF A4</button>' : '')+
       '<button class="btn ok" id="bFinalizar" onclick="finalizar(\'simp\')" disabled>✓ Etiq + DANFE 10x15</button>'+
     '</div>';
   renderItens();
