@@ -189,8 +189,8 @@
     <div class="loginttl">📦 Checkout Offline</div>
     <div class="loginsub" id="loginSub">verificando…</div>
     <div id="loginForm" style="display:none">
-      <select class="loginfld" id="loginNome"></select>
-      <input class="loginfld" id="loginSenha" type="password" inputmode="numeric" placeholder="senha" onkeydown="if(event.key==='Enter')fazerLogin()" />
+      <select class="loginfld" id="loginNome" autocomplete="off"></select>
+      <input class="loginfld" id="loginSenha" type="password" inputmode="numeric" autocomplete="off" placeholder="senha" onkeydown="if(event.key==='Enter')fazerLogin()" />
       <button class="btn ok loginbtn" id="loginBtn" onclick="fazerLogin()">Entrar</button>
       <div class="loginerr" id="loginErr"></div>
     </div>
@@ -248,7 +248,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b48';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b49';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#ff9900'}, magalu:{n:'Magalu',c:'#0086ff'}, outro:{n:'Outro',c:'#94a3b8'}
@@ -941,11 +941,16 @@ function imprimirSeparacao(){
   w.document.write(html); w.document.close();
 }
 
-// mantém foco no scan (menos quando digita Qtd/operador ou o modal está aberto)
+// mantém o foco no campo de bipar — mas SÓ dentro de um pedido aberto, e NUNCA rouba o foco
+// se um diálogo está aberto, se você já está em qualquer campo, ou se está selecionando texto.
 setInterval(()=>{
+  if(!pedidoAtual) return;                                          // fora de um pedido (ex: login, lista) → não toca no foco
+  if(modalAberto()) return;                                         // diálogo de confirmação aberto
+  const ae = document.activeElement;
+  if(ae && /^(INPUT|SELECT|TEXTAREA)$/.test(ae.tagName)) return;    // já está digitando em algum campo → não rouba
   const sel = window.getSelection && window.getSelection().toString();
-  if(sel) return;   // está selecionando texto (ex: copiar o código) → não rouba o foco
-  const s=$('scan'); const q=$('qtdConf'); if(s && !modalAberto() && document.activeElement!==s && document.activeElement!==opIn && document.activeElement!==q) s.focus();
+  if(sel) return;                                                   // selecionando texto (ex: copiar código) → não rouba
+  const s=$('scan'); if(s) s.focus();
 }, 1500);
 
 // a página NUNCA se imprime — toda impressão é via QZ Tray (Zebra ou A4)
