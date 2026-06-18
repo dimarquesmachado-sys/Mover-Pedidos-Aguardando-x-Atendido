@@ -39,7 +39,7 @@ const { gerarDanfeSimplificado, gerarDanfeSimplificadoZPL } = require('./danfe-s
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v17/06 b46';
+const VERSAO     = 'girassol-backup-offline v17/06 b47';
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 
 // ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
@@ -688,6 +688,18 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
         }
       }
       if (removidos) { salvarManifest(man); console.log(`[GIRABKP] reconciliação: ${removidos} pedido(s) saíram do ATENDIDO e foram removidos do cache`); }
+    }
+
+    // ESPELHO DO BLING: pedido que estava finalizado+sincronizado aqui mas VOLTOU pra ATENDIDO no Bling
+    // (alguém reverteu lá) → desfinaliza aqui pra ele reaparecer na lista. Espelha a virada do Bling.
+    if (listaOk && atendidos.length > 0) {
+      const idsAtend = new Set(atendidos.map(p => String(p.id)));
+      const conf = readJson(CONFERIDOS_FILE, {});
+      let reabertos = 0;
+      for (const id of Object.keys(conf)) {
+        if (conf[id] && conf[id].sincronizado && idsAtend.has(String(id))) { delete conf[id]; reabertos++; }
+      }
+      if (reabertos) { writeJson(CONFERIDOS_FILE, conf); console.log(`[GIRABKP] espelho Bling: ${reabertos} pedido(s) voltaram pra ATENDIDO → desfinalizados (reaparecem na lista)`); }
     }
 
     // (re)processa quem não tem etiqueta OU está num schema antigo (ganha EAN+kit)
