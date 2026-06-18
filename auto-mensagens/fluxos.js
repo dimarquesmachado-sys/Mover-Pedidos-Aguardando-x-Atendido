@@ -1728,12 +1728,21 @@ async function forcarOrder(idEntrada) {
  */
 async function rotinaEscadaIndisponivel(opts = {}) {
   const dryRun = !!opts.dryRun;
-  const MARGEM_HORAS = Number(opts.margemHoras ?? process.env.LIXAS_ESCADA_MARGEM_HORAS) || 6;
-  const DIAS = Number(opts.dias ?? process.env.LIXAS_ESCADA_DIAS) || 30;
+  // Régua de tempo ADAPTATIVA: a margem de troca e o intervalo entre avisos são
+  // proporcionais à JANELA de cada pedido (da venda até o prazo de postagem). Assim a
+  // escada encaixa tanto em envio same-day / dia-seguinte quanto em prazo de vários
+  // dias. Os valores de env viram o TETO (prazo longo) e o piso (prazo curto).
+  const MARGEM_MAX = Number(process.env.LIXAS_ESCADA_MARGEM_HORAS) || 6;          // teto do colchão antes do prazo
+  const MARGEM_MIN = Number(process.env.LIXAS_ESCADA_MARGEM_MIN_HORAS) || 1;      // piso (same-day: troca ~1h antes)
+  const FRACAO_MARGEM = Number(process.env.LIXAS_ESCADA_MARGEM_FRACAO) || 0.25;   // margem = 25% da janela (entre piso e teto)
   const MAX_AVISOS = Number(process.env.LIXAS_ESCADA_MAX_AVISOS) || 3;
-  const INTERVALO_AVISO_HORAS = Number(process.env.LIXAS_ESCADA_AVISO_INTERVALO_HORAS) || 24;
+  const INTERVALO_MAX = Number(process.env.LIXAS_ESCADA_AVISO_INTERVALO_HORAS) || 24;     // teto entre avisos (prazo longo)
+  const INTERVALO_MIN = Number(process.env.LIXAS_ESCADA_AVISO_INTERVALO_MIN_HORAS) || 1;  // piso entre avisos (prazo curto)
+  const DIAS = Number(opts.dias ?? process.env.LIXAS_ESCADA_DIAS) || 30;
+  // override manual de margem (só debug/run ?margem=H): pula o cálculo adaptativo
+  const margemOverride = (opts.margemHoras != null && Number(opts.margemHoras) > 0) ? Number(opts.margemHoras) : null;
 
-  const stats = { dryRun, margem_horas: MARGEM_HORAS, verificados: 0, avisados: 0, aguardando_prazo: 0, substituidos: 0, erros: 0, pulados: 0, lista: [] };
+  const stats = { dryRun, margem_max: MARGEM_MAX, margem_min: MARGEM_MIN, margem_override: margemOverride, verificados: 0, avisados: 0, aguardando_prazo: 0, substituidos: 0, erros: 0, pulados: 0, lista: [] };
   if (!tracker.configurado()) { stats.desligada = 'supabase_nao_configurado'; return stats; }
 
   const ESCADA_HABILITADA = (process.env.LIXAS_ESCADA_HABILITADO || 'true').toLowerCase() === 'true';
@@ -1798,9 +1807,22 @@ async function rotinaEscadaIndisponivel(opts = {}) {
       }
       const horas = (new Date(prazo.prazo_postagem).getTime() - Date.now()) / 3600e3;
 
+      // RÉGUA ADAPTATIVA deste pedido: janela = da venda até o prazo de postagem.
+      //   margem de troca   = 25% da janela, entre piso (1h) e teto (6h)
+      //   intervalo p/ avisos = (janela - margem)/3, entre piso (1h) e teto (24h)
+      // Same-day -> janela curta -> margem ~1h + avisos colados (escada comprimida);
+      // prazo longo -> margem 6h + avisos a cada 24h. ?margem manual pula isso.
+      let janelaH = v.data_venda
+        ? (new Date(prazo.prazo_postagem).getTime() - new Date(v.data_venda).getTime()) / 3600e3
+        : NaN;
+      if (!Number.isFinite(janelaH) || janelaH <= 0) janelaH = Math.max(horas, MARGEM_MAX * 2);
+      const MARGEM = margemOverride != null ? margemOverride : Math.min(MARGEM_MAX, Math.max(MARGEM_MIN, janelaH * FRACAO_MARGEM));
+      const INTERVALO = Math.min(INTERVALO_MAX, Math.max(INTERVALO_MIN, (janelaH - MARGEM) / MAX_AVISOS));
+      const _reg = { margem_h: Math.round(MARGEM * 10) / 10, intervalo_h: Math.round(INTERVALO * 10) / 10, janela_h: Math.round(janelaH * 10) / 10 };
+
       // 4. ainda sobra tempo -> REENGAJA a cliente (escada de avisos) antes de trocar.
       //    Da a chance dela escolher um grao valido; so troca sozinha perto do prazo.
-      if (horas > MARGEM_HORAS) {
+      if (horas > MARGEM) {
         // sem as colunas de controle (escada_avisado_em/escada_avisos) NAO avisa — sem
         // dedup viraria spam. Degrada pro v1 (so trava no prazo) e sinaliza pro Diego.
         const temColunasEscada = (v.escada_avisos !== undefined) || (v.escada_avisado_em !== undefined);
@@ -1819,11 +1841,11 @@ async function rotinaEscadaIndisponivel(opts = {}) {
           v.ia_processado_em  ? new Date(v.ia_processado_em).getTime()  : 0
         );
         const horasDesdeAviso = ultimoAvisoTs ? (Date.now() - ultimoAvisoTs) / 3600e3 : Infinity;
-        const podeAvisar = avisos < MAX_AVISOS && horasDesdeAviso >= INTERVALO_AVISO_HORAS;
+        const podeAvisar = avisos < MAX_AVISOS && horasDesdeAviso >= INTERVALO;
 
         if (!podeAvisar) {
           stats.aguardando_prazo++;
-          stats.lista.push({ order_id: orderId, acao: 'aguardando', avisos, horas_ate_prazo: Math.round(horas * 10) / 10, prazo: prazo.prazo_postagem });
+          stats.lista.push({ order_id: orderId, acao: 'aguardando', avisos, horas_ate_prazo: Math.round(horas * 10) / 10, ..._reg, prazo: prazo.prazo_postagem });
           continue;
         }
 
@@ -1840,7 +1862,7 @@ async function rotinaEscadaIndisponivel(opts = {}) {
 
         if (dryRun) {
           stats.avisados++;
-          stats.lista.push({ order_id: orderId, acao: 'avisaria', nivel, horas_ate_prazo: Math.round(horas * 10) / 10, indisponiveis: indispo, msg });
+          stats.lista.push({ order_id: orderId, acao: 'avisaria', nivel, horas_ate_prazo: Math.round(horas * 10) / 10, ..._reg, indisponiveis: indispo, msg });
           continue;
         }
 
@@ -1887,7 +1909,7 @@ async function rotinaEscadaIndisponivel(opts = {}) {
       // dryRun: so reporta o que FARIA
       if (dryRun) {
         stats.substituidos++;
-        stats.lista.push({ order_id: orderId, acao: 'substituiria', horas_ate_prazo: Math.round(horas * 10) / 10, prazo: prazo.prazo_postagem, trocas: resolvido.trocas, pedido_final: resolvido.pedidoFinal });
+        stats.lista.push({ order_id: orderId, acao: 'substituiria', horas_ate_prazo: Math.round(horas * 10) / 10, ..._reg, trocas: resolvido.trocas, pedido_final: resolvido.pedidoFinal });
         continue;
       }
 
