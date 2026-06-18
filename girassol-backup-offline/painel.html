@@ -22,6 +22,16 @@
   .qz{font-size:13px;padding:4px 10px;border-radius:20px;border:1px solid var(--line);cursor:pointer;white-space:nowrap}
   .qz.on{color:var(--ok);border-color:var(--ok)} .qz.off{color:var(--err);border-color:var(--err)}
   input.op{background:var(--card2);border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:5px 9px;font-size:13px;width:120px}
+  input.op[readonly]{opacity:.85;cursor:default;border-color:var(--ok)}
+  .loginback{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;z-index:9999}
+  .loginback.hide{display:none}
+  .loginbox{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:30px 26px;width:300px;max-width:90vw;text-align:center;box-shadow:0 12px 44px rgba(0,0,0,.55)}
+  .loginttl{font-size:20px;font-weight:800;margin-bottom:5px}
+  .loginsub{font-size:13px;color:var(--mut);margin-bottom:20px}
+  .loginfld{width:100%;box-sizing:border-box;padding:11px 12px;margin-bottom:11px;background:#0e1620;border:1px solid var(--line);border-radius:9px;color:var(--tx);font-size:15px}
+  .loginfld:focus{outline:none;border-color:var(--ac)}
+  .loginbtn{width:100%;padding:12px;font-size:15px;margin-top:3px}
+  .loginerr{color:var(--err);font-size:13px;margin-top:11px;min-height:16px}
   .stats{display:flex;gap:14px;margin-top:7px;font-size:13px;color:var(--mut);flex-wrap:wrap}
   .stats b{color:var(--tx)}
 
@@ -174,6 +184,18 @@
 </style>
 </head>
 <body>
+<div class="loginback" id="loginback">
+  <div class="loginbox">
+    <div class="loginttl">📦 Checkout Offline</div>
+    <div class="loginsub" id="loginSub">verificando…</div>
+    <div id="loginForm" style="display:none">
+      <select class="loginfld" id="loginNome"></select>
+      <input class="loginfld" id="loginSenha" type="password" inputmode="numeric" placeholder="senha" onkeydown="if(event.key==='Enter')fazerLogin()" />
+      <button class="btn ok loginbtn" id="loginBtn" onclick="fazerLogin()">Entrar</button>
+      <div class="loginerr" id="loginErr"></div>
+    </div>
+  </div>
+</div>
 <header>
   <div class="htop">
     <h1>📦 Checkout Offline</h1>
@@ -187,6 +209,7 @@
       <button class="btn sec sm" id="modoBtn" onclick="trocarModo()" title="alterna entre etiqueta na Zebra (ZPL) ou abrir PDF p/ imprimir no navegador">🖨️ Etiq: Zebra</button>
     </div>
     <input class="op" id="operador" placeholder="operador" />
+    <button class="btn sec sm" id="btnSair" style="display:none" onclick="sair()">⎋ Sair</button>
     <span class="qz off" id="qzStatus" onclick="reconectarQZ()">QZ: …</span>
   </div>
   <div class="stats" id="stats">carregando…</div>
@@ -225,7 +248,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b45';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b46';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#ff9900'}, magalu:{n:'Magalu',c:'#0086ff'}, outro:{n:'Outro',c:'#94a3b8'}
@@ -245,6 +268,45 @@ function toast(m){ const t=$('toast'); t.textContent=m; t.classList.add('show');
 const opIn = $('operador');
 opIn.value = localStorage.getItem('gbkp_op') || '';
 opIn.addEventListener('input', ()=>localStorage.setItem('gbkp_op', opIn.value));
+
+// ── LOGIN (só ativa se GIRABKP_OPERADORES estiver configurada no servidor) ──
+let loginAtivo = false;
+async function checarLogin(){
+  try{
+    const d = await api('/girassol-backup-offline/operadores');
+    loginAtivo = !!(d && d.login_ativo);
+    if(!loginAtivo){ $('loginback').classList.add('hide'); carregarLista(); return; }   // sem operadores → painel livre
+    const logado = localStorage.getItem('gbkp_logado')==='1' && (localStorage.getItem('gbkp_op')||'').trim();
+    if(logado){ aplicarLogado(); }
+    else { mostrarLogin(d.operadores||[]); }
+  }catch(e){ $('loginback').classList.add('hide'); carregarLista(); }   // se a checagem falhar, não tranca ninguém
+}
+function mostrarLogin(nomes){
+  const sel=$('loginNome');
+  sel.innerHTML = (nomes||[]).map(n=>'<option value="'+esc(n)+'">'+esc(n)+'</option>').join('');
+  $('loginSub').textContent='Entre com seu nome e senha';
+  $('loginForm').style.display='';
+  $('loginSenha').value=''; $('loginErr').textContent='';
+  $('loginback').classList.remove('hide');
+  setTimeout(()=>$('loginSenha').focus(),100);
+}
+async function fazerLogin(){
+  const nome=$('loginNome').value, senha=$('loginSenha').value;
+  $('loginErr').textContent='';
+  try{
+    const r = await postJson('/girassol-backup-offline/login', {nome, senha});
+    if(r && r.ok){ localStorage.setItem('gbkp_op', r.nome); localStorage.setItem('gbkp_logado','1'); aplicarLogado(); }
+    else { $('loginErr').textContent=(r&&r.erro)||'nome ou senha inválidos'; $('loginSenha').select(); }
+  }catch(e){ $('loginErr').textContent='falha ao entrar: '+e.message; }
+}
+function aplicarLogado(){
+  $('loginback').classList.add('hide');
+  opIn.value = localStorage.getItem('gbkp_op')||'';
+  opIn.setAttribute('readonly','readonly');
+  $('btnSair').style.display='';
+  carregarLista();
+}
+function sair(){ localStorage.removeItem('gbkp_logado'); opIn.removeAttribute('readonly'); $('btnSair').style.display='none'; checarLogin(); }
 
 // ── áudio ──
 let actx;
@@ -889,8 +951,8 @@ document.addEventListener('keydown', e=>{ if((e.ctrlKey||e.metaKey) && (e.key===
 // boot
 (async function(){ await setupQZ(); reconectarQZ(); })();
 aplicarModoLabel();
-carregarLista();
-setInterval(()=>{ if(!pedidoAtual) carregarLista(); }, 20000);
+checarLogin();   // gate de login → ele carrega a lista assim que liberar
+setInterval(()=>{ if(!pedidoAtual && (!loginAtivo || localStorage.getItem('gbkp_logado')==='1')) carregarLista(); }, 20000);
 </script>
 </body>
 </html>
