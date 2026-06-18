@@ -1,5 +1,11 @@
 'use strict';
 
+// Resolve IPv4 antes de IPv6 em TODO o processo. O Render às vezes tenta IPv6
+// pra hosts atrás de Cloudflare (Supabase, BrasilAPI) e a conexão morre no meio
+// ("Premature close"). Forçando IPv4 primeiro, essas chamadas voltam a fechar.
+// Mantém IPv6 como fallback caso o IPv4 falhe. (Bling já usa IPv4, não muda nada.)
+try { require('dns').setDefaultResultOrder('ipv4first'); } catch (e) { console.warn('dns ipv4first indisponível:', e.message); }
+
 const http = require('http');
 const cron = require('node-cron');
 const { json, readBody } = require('./lib/http');
