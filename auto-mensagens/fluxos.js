@@ -1712,14 +1712,17 @@ async function forcarOrder(idEntrada) {
  * Se ninguem resolver, atrasa a postagem -> PENALIDADE no Mercado Livre.
  *
  * Esta rotina, a cada ciclo:
- *   1. Pega os pedidos travados nesse erro (precisa_atencao_humano + "indispon").
- *   2. Calcula o PRAZO-LIMITE DE POSTAGEM real do pedido (prazoPostagem.calcular*
- *      sobre o shipment do ML — cobre Expresso/handling e Normal/buffered).
- *   3. Enquanto SOBRA tempo (> MARGEM horas): NAO mexe — deixa cliente/humano resolver.
- *   4. Quando o prazo esta CHEGANDO (faltam <= MARGEM horas): TROCA sozinha o grao
- *      indisponivel pelo mais proximo COM estoque (motor substituicao), MONTA + EMITE
- *      a NF (idempotente no code-74) e AVISA a cliente. Nunca atrasa -> sem penalidade.
+ *   1. Pega os pedidos travados nesse erro (precisa_atencao_humano/aguardando_resposta).
+ *   2. Calcula o PRAZO-LIMITE DE POSTAGEM real do ML (prazoPostagem.calcular* sobre o
+ *      shipment) e dele o CORTE DE COLETA: a ultima coleta (seg-sab, horario SP) que
+ *      ainda cumpre o prazo, menos a folga de preparo. E quando a troca tem que sair.
+ *   3. Enquanto NAO chegou no corte: vai AVISANDO a cliente (escada escalonada de ate
+ *      MAX_AVISOS), espalhados pela janela ate o corte. Da a chance dela escolher.
+ *   4. Ao chegar no corte (e sem resposta valida): TROCA o grao indisponivel pelo mais
+ *      proximo COM estoque, MONTA + EMITE a NF (idempotente no code-74) e AVISA da troca.
+ *      Nunca perde a coleta -> sem atraso -> sem penalidade.
  *
+ * Coleta (SP): seg-sex CORTE_SEMANA_HORA (12h), sab CORTE_SABADO_HORA (9h), dom sem coleta.
  * Seguranca: so age no erro de indisponivel; preserva cupom/desconto (logica do
  * editarPedidoComGraos); se nao consegue resolver, deixa em atencao humana com nota.
  * dryRun=true => calcula e diz o que FARIA, sem montar/emitir/avisar nada.
@@ -1728,21 +1731,24 @@ async function forcarOrder(idEntrada) {
  */
 async function rotinaEscadaIndisponivel(opts = {}) {
   const dryRun = !!opts.dryRun;
-  // Régua de tempo ADAPTATIVA: a margem de troca e o intervalo entre avisos são
-  // proporcionais à JANELA de cada pedido (da venda até o prazo de postagem). Assim a
-  // escada encaixa tanto em envio same-day / dia-seguinte quanto em prazo de vários
-  // dias. Os valores de env viram o TETO (prazo longo) e o piso (prazo curto).
-  const MARGEM_MAX = Number(process.env.LIXAS_ESCADA_MARGEM_HORAS) || 6;          // teto do colchão antes do prazo
-  const MARGEM_MIN = Number(process.env.LIXAS_ESCADA_MARGEM_MIN_HORAS) || 1;      // piso (same-day: troca ~1h antes)
-  const FRACAO_MARGEM = Number(process.env.LIXAS_ESCADA_MARGEM_FRACAO) || 0.25;   // margem = 25% da janela (entre piso e teto)
-  const MAX_AVISOS = Number(process.env.LIXAS_ESCADA_MAX_AVISOS) || 3;
-  const INTERVALO_MAX = Number(process.env.LIXAS_ESCADA_AVISO_INTERVALO_HORAS) || 24;     // teto entre avisos (prazo longo)
-  const INTERVALO_MIN = Number(process.env.LIXAS_ESCADA_AVISO_INTERVALO_MIN_HORAS) || 1;  // piso entre avisos (prazo curto)
-  const DIAS = Number(opts.dias ?? process.env.LIXAS_ESCADA_DIAS) || 30;
-  // override manual de margem (só debug/run ?margem=H): pula o cálculo adaptativo
-  const margemOverride = (opts.margemHoras != null && Number(opts.margemHoras) > 0) ? Number(opts.margemHoras) : null;
+  // CORTE = a hora da COLETA do dia (não "X h antes do prazo do ML"). A escada acha a
+  // última coleta que ainda cumpre o prazo do ML e faz a troca+NF um pouco antes dela
+  // (folga de preparo). Os avisos à cliente se espalham até esse corte. Coletas em SP:
+  // seg–sex no CORTE_SEMANA_HORA, sáb no CORTE_SABADO_HORA, domingo sem coleta.
+  const CORTE_SEMANA_HORA = Number(process.env.LIXAS_ESCADA_CORTE_SEMANA_HORA) || 12;  // seg–sex (meio-dia)
+  const CORTE_SABADO_HORA = Number(process.env.LIXAS_ESCADA_CORTE_SABADO_HORA) || 9;   // sábado (9h)
+  const COLETA_LEAD_MIN   = Number(process.env.LIXAS_ESCADA_COLETA_LEAD_MIN) || 60;    // folga de preparo antes da coleta (min)
+  const TZ_OFFSET_H       = Number(process.env.LIXAS_ESCADA_TZ_OFFSET ?? -3);          // fuso SP
+  const MARGEM_EXTRA_H    = Number(process.env.LIXAS_ESCADA_MARGEM_EXTRA_HORAS) || 0;  // colchão extra antes do corte (opcional)
+  const MAX_AVISOS        = Number(process.env.LIXAS_ESCADA_MAX_AVISOS) || 3;
+  const INTERVALO_MAX     = Number(process.env.LIXAS_ESCADA_AVISO_INTERVALO_HORAS) || 24;     // teto entre avisos (prazo longo)
+  const INTERVALO_MIN     = Number(process.env.LIXAS_ESCADA_AVISO_INTERVALO_MIN_HORAS) || 1;  // piso entre avisos (prazo curto)
+  const DIAS              = Number(opts.dias ?? process.env.LIXAS_ESCADA_DIAS) || 30;
+  // ?margem=H (debug): troca quando faltam <= H horas pro corte (preview). Sem isso, usa MARGEM_EXTRA_H.
+  const limiarCorteH = (opts.margemHoras != null && Number(opts.margemHoras) > 0) ? Number(opts.margemHoras) : MARGEM_EXTRA_H;
+  const corteCfg = { corteSemanaHora: CORTE_SEMANA_HORA, corteSabadoHora: CORTE_SABADO_HORA, leadMin: COLETA_LEAD_MIN, tzOffsetH: TZ_OFFSET_H };
 
-  const stats = { dryRun, margem_max: MARGEM_MAX, margem_min: MARGEM_MIN, margem_override: margemOverride, verificados: 0, avisados: 0, aguardando_prazo: 0, substituidos: 0, erros: 0, pulados: 0, lista: [] };
+  const stats = { dryRun, corte_semana_hora: CORTE_SEMANA_HORA, corte_sabado_hora: CORTE_SABADO_HORA, limiar_corte_h: limiarCorteH, verificados: 0, avisados: 0, aguardando_prazo: 0, substituidos: 0, erros: 0, pulados: 0, lista: [] };
   if (!tracker.configurado()) { stats.desligada = 'supabase_nao_configurado'; return stats; }
 
   const ESCADA_HABILITADA = (process.env.LIXAS_ESCADA_HABILITADO || 'true').toLowerCase() === 'true';
@@ -1807,22 +1813,25 @@ async function rotinaEscadaIndisponivel(opts = {}) {
       }
       const horas = (new Date(prazo.prazo_postagem).getTime() - Date.now()) / 3600e3;
 
-      // RÉGUA ADAPTATIVA deste pedido: janela = da venda até o prazo de postagem.
-      //   margem de troca   = 25% da janela, entre piso (1h) e teto (6h)
-      //   intervalo p/ avisos = (janela - margem)/3, entre piso (1h) e teto (24h)
-      // Same-day -> janela curta -> margem ~1h + avisos colados (escada comprimida);
-      // prazo longo -> margem 6h + avisos a cada 24h. ?margem manual pula isso.
-      let janelaH = v.data_venda
-        ? (new Date(prazo.prazo_postagem).getTime() - new Date(v.data_venda).getTime()) / 3600e3
-        : NaN;
-      if (!Number.isFinite(janelaH) || janelaH <= 0) janelaH = Math.max(horas, MARGEM_MAX * 2);
-      const MARGEM = margemOverride != null ? margemOverride : Math.min(MARGEM_MAX, Math.max(MARGEM_MIN, janelaH * FRACAO_MARGEM));
-      const INTERVALO = Math.min(INTERVALO_MAX, Math.max(INTERVALO_MIN, (janelaH - MARGEM) / MAX_AVISOS));
-      const _reg = { margem_h: Math.round(MARGEM * 10) / 10, intervalo_h: Math.round(INTERVALO * 10) / 10, janela_h: Math.round(janelaH * 10) / 10 };
+      // CORTE de coleta deste pedido: a última coleta (seg–sáb) que ainda cumpre o
+      // prazo do ML, menos a folga de preparo. É QUANDO a troca+NF tem que estar pronta.
+      const corte = prazoMod.calcularCorteColeta(prazo.prazo_postagem, corteCfg);
+      if (!corte.ok) {
+        stats.pulados++;
+        stats.lista.push({ order_id: orderId, acao: 'pulado', motivo: 'corte_indeterminado: ' + (corte.motivo || ''), prazo_ml: prazo.prazo_postagem });
+        continue;
+      }
+      const corteMs = new Date(corte.corte_iso).getTime();
+      const horasAteCorte = (corteMs - Date.now()) / 3600e3;   // tempo até ter que trocar (negativo = já passou)
+      // janela pra espalhar os avisos: da venda até o corte de coleta
+      let janelaH = v.data_venda ? (corteMs - new Date(v.data_venda).getTime()) / 3600e3 : horasAteCorte;
+      if (!Number.isFinite(janelaH) || janelaH <= 0) janelaH = Math.max(horasAteCorte, 1);
+      const INTERVALO = Math.min(INTERVALO_MAX, Math.max(INTERVALO_MIN, janelaH / MAX_AVISOS));
+      const _reg = { corte: corte.corte_iso, coleta: corte.coleta_iso, dia_coleta: corte.dia_coleta, faltam_corte_h: Math.round(horasAteCorte * 10) / 10, intervalo_h: Math.round(INTERVALO * 10) / 10 };
 
-      // 4. ainda sobra tempo -> REENGAJA a cliente (escada de avisos) antes de trocar.
-      //    Da a chance dela escolher um grao valido; so troca sozinha perto do prazo.
-      if (horas > MARGEM) {
+      // 4. ainda NÃO chegou no corte de coleta -> REENGAJA a cliente (escada de avisos)
+      //    antes de trocar. Dá a chance dela escolher; só troca sozinha no corte.
+      if (horasAteCorte > limiarCorteH) {
         // sem as colunas de controle (escada_avisado_em/escada_avisos) NAO avisa — sem
         // dedup viraria spam. Degrada pro v1 (so trava no prazo) e sinaliza pro Diego.
         const temColunasEscada = (v.escada_avisos !== undefined) || (v.escada_avisado_em !== undefined);
