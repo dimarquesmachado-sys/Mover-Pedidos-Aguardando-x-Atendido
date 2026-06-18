@@ -248,7 +248,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b46';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b47';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#ff9900'}, magalu:{n:'Magalu',c:'#0086ff'}, outro:{n:'Outro',c:'#94a3b8'}
@@ -271,10 +271,12 @@ opIn.addEventListener('input', ()=>localStorage.setItem('gbkp_op', opIn.value));
 
 // ── LOGIN (só ativa se GIRABKP_OPERADORES estiver configurada no servidor) ──
 let loginAtivo = false;
+window.ADMINS = [];
 async function checarLogin(){
   try{
     const d = await api('/girassol-backup-offline/operadores');
     loginAtivo = !!(d && d.login_ativo);
+    window.ADMINS = (d && d.admins) || [];
     if(!loginAtivo){ $('loginback').classList.add('hide'); carregarLista(); return; }   // sem operadores → painel livre
     const logado = localStorage.getItem('gbkp_logado')==='1' && (localStorage.getItem('gbkp_op')||'').trim();
     if(logado){ aplicarLogado(); }
@@ -307,6 +309,8 @@ function aplicarLogado(){
   carregarLista();
 }
 function sair(){ localStorage.removeItem('gbkp_logado'); opIn.removeAttribute('readonly'); $('btnSair').style.display='none'; checarLogin(); }
+// só admin (env GIRABKP_ADMIN) pode reabrir/reverter. Lista vazia = todo mundo pode (comportamento antigo).
+function souAdmin(){ const a = window.ADMINS || []; return a.length===0 || a.includes(opAtual().toLowerCase()); }
 
 // ── áudio ──
 let actx;
@@ -844,7 +848,7 @@ async function abrirHistorico(){
           '<div class="hsub">'+dt+(h.user?(' · '+esc(h.user)):'')+'</div>'+
         '</div>'+
         tag+
-        '<button class="btn warn sm" onclick="reabrirPedido(\''+h.id+'\',\''+esc(h.numero||h.id)+'\')">↩ Reabrir</button>'+
+        (souAdmin()?'<button class="btn warn sm" onclick="reabrirPedido(\''+h.id+'\',\''+esc(h.numero||h.id)+'\')">↩ Reabrir</button>':'')+
       '</div>';
     }).join('');
   }catch(e){ $('histBody').innerHTML='<div class="sepempty">Falha: '+esc(e.message)+'</div>'; }
@@ -854,13 +858,13 @@ async function abrirHistorico(){
 async function reabrirPedido(id, numero){
   if(!confirm('Reabrir o pedido '+numero+'?\n\nEle sai dos finalizados e volta pra lista de separação. Se já tinha ido pra VERIFICADO, volta pra ATENDIDO no Bling.')) return;
   try{
-    const r = await api('/girassol-backup-offline/reabrir/'+encodeURIComponent(id));
+    const r = await api('/girassol-backup-offline/reabrir/'+encodeURIComponent(id)+'?op='+encodeURIComponent(opAtual()));
     if(r && r.ok){
       toast('↩ '+numero+' reaberto'+(r.revertido_p_atendido?' (voltou pra ATENDIDO)':'')+' — reaparece na lista em alguns segundos');
       abrirHistorico();                 // recarrega o modal (some o reaberto)
       setTimeout(carregarLista, 3000);  // re-cache roda em background → atualiza a lista
     } else {
-      toast('Não deu pra reabrir: '+((r&&r.erro)||'erro'));
+      toast(r&&r.precisa_admin ? '🔒 Só o admin pode reabrir pedidos' : ('Não deu pra reabrir: '+((r&&r.erro)||'erro')));
     }
   }catch(e){ toast('Falha ao reabrir: '+e.message); }
 }
