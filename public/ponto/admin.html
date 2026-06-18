@@ -239,7 +239,7 @@
   </div>
 </div>
 
-<div class="versao">Painel de Ponto v1.5 · 05/06/2026</div>
+<div class="versao" id="versaoBox">Painel de Ponto front v18/06 · back …</div>
 
 <div id="fotoOvl" class="ovl hide" onclick="if(event.target===this)this.classList.add('hide')">
   <div class="ovlBox">
@@ -825,6 +825,11 @@ async function removerAtribuicao(id){
 }
 
 if(TOKEN) abrir();
+
+// versão (front fixa + back buscada do servidor)
+fetch(API+'/versao').then(r=>r.json()).then(j=>{
+  const el=document.getElementById('versaoBox'); if(el) el.textContent='Painel de Ponto front v18/06 · '+(j.versao||'back ?');
+}).catch(()=>{ const el=document.getElementById('versaoBox'); if(el) el.textContent='Painel de Ponto front v18/06 · back (sem resposta)'; });
 </script>
 </body>
 </html>
