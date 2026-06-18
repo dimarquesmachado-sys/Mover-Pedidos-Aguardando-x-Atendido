@@ -50,7 +50,7 @@ async function sbFetch(url, opts = {}, tentativas = 3){
   throw ultimoErro;
 }
 
-const VERSAO_BACK    = 'back v18/06 b2';  // ↑ suba a cada deploy do ponto/index.js
+const VERSAO_BACK    = 'back v18/06 b3';  // ↑ suba a cada deploy do ponto/index.js
 
 const ADMIN_TOKEN    = process.env.PONTO_ADMIN_TOKEN || 'troque-este-token';
 const SESSION_SECRET = process.env.PONTO_SESSION_SECRET || ADMIN_TOKEN;
@@ -252,6 +252,27 @@ function routes(readBody){
     if (method==='GET' && (p==='/ponto/admin' || p==='/ponto/admin.html')) { servir(res,'admin.html'); return true; }
     if (method==='GET' && (p==='/ponto/favicon.png' || p==='/ponto/favicon.ico')) { servir(res,'favicon.png'); return true; }
     if (method==='GET' && p==='/ponto/versao') { json(res,200,{versao:VERSAO_BACK}); return true; }
+    if (method==='GET' && p==='/ponto/diag') {
+      const alvos = [
+        ['BrasilAPI', 'https://brasilapi.com.br/api/cep/v2/01001000'],
+        ['Supabase',  `${SB_URL}/rest/v1/`],
+        ['ViaCEP',    'https://viacep.com.br/ws/01001000/json/'],
+        ['Bling',     'https://api.bling.com.br/Api/v3/'],
+      ];
+      async function testar(url, family){
+        const t0 = Date.now();
+        try {
+          const r = await fetch(url, { agent: new https.Agent({ family }), timeout: 15000 });
+          return { ok:true, status:r.status, ms:Date.now()-t0 };
+        } catch(e){ return { ok:false, erro:e.message, ms:Date.now()-t0 }; }
+      }
+      const resultado = [];
+      for (const [nome, url] of alvos){
+        resultado.push({ alvo:nome, ipv4: await testar(url,4), ipv6: await testar(url,6) });
+      }
+      json(res, 200, { node: process.version, versao: VERSAO_BACK, resultado });
+      return true;
+    }
 
     try {
       // ───────── FUNCIONÁRIO ─────────
