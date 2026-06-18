@@ -107,4 +107,59 @@ function horasAtePrazo(shipment, agora = new Date()) {
   return (new Date(r.prazo_postagem).getTime() - agora.getTime()) / 3600e3;
 }
 
-module.exports = { calcularPrazoPostagem, horasAtePrazo };
+/**
+ * CORTE DE COLETA — dado o prazo-limite de postagem do ML, devolve o momento real
+ * em que a escada precisa ter feito a troca + emitido a NF: o horario da ULTIMA
+ * COLETA que ainda cumpre o prazo do ML, menos uma folga de preparo (leadMin).
+ *
+ * Coletas (horario de Sao Paulo, UTC-3, sem horario de verao):
+ *   Seg–Sex -> corteSemanaHora (padrao 12h)
+ *   Sabado  -> corteSabadoHora (padrao 9h)
+ *   Domingo -> nao tem coleta
+ *
+ * Ex.: prazo ML = qua 23:00 -> ultima coleta = qua 12:00 -> corte = qua 11:15.
+ *      prazo ML = dom 15:00 -> ultima coleta = sab 09:00 -> corte = sab 08:15.
+ *      prazo ML = sab 07:00 -> sab 9h ja passou do prazo -> sex 12:00 -> corte = sex 11:15.
+ *
+ * @param {string} prazoMlISO  prazo de postagem do ML (ISO)
+ * @param {Object} cfg { corteSemanaHora=12, corteSabadoHora=9, leadMin=45, tzOffsetH=-3 }
+ * @returns {ok, corte_iso, coleta_iso, dia_coleta, hora_coleta} | {ok:false, motivo}
+ */
+function calcularCorteColeta(prazoMlISO, cfg = {}) {
+  const corteSemanaHora = Number(cfg.corteSemanaHora ?? 12);
+  const corteSabadoHora = Number(cfg.corteSabadoHora ?? 9);
+  const leadMin = Number(cfg.leadMin ?? 45);
+  const TZ = Number(cfg.tzOffsetH ?? -3) * 3600e3;
+  const DIAS = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sab'];
+
+  const prazoMs = new Date(prazoMlISO).getTime();
+  if (!Number.isFinite(prazoMs)) return { ok: false, motivo: 'prazo_invalido' };
+
+  // componentes da DATA em SP do prazo (desloca o UTC pra ler getUTC* como local SP)
+  const sp = new Date(prazoMs + TZ);
+  let y = sp.getUTCFullYear(), mo = sp.getUTCMonth(), da = sp.getUTCDate();
+
+  for (let i = 0; i < 14; i++) {
+    const dow = new Date(Date.UTC(y, mo, da)).getUTCDay(); // 0=dom .. 6=sab
+    if (dow !== 0) { // domingo nao coleta
+      const h = dow === 6 ? corteSabadoHora : corteSemanaHora;
+      // timestamp UTC correspondente a (y,mo,da, h:mm) no horario de SP
+      const coletaMs = Date.UTC(y, mo, da, Math.floor(h), Math.round((h % 1) * 60), 0) - TZ;
+      if (coletaMs <= prazoMs) {
+        return {
+          ok: true,
+          corte_iso: new Date(coletaMs - leadMin * 60000).toISOString(),
+          coleta_iso: new Date(coletaMs).toISOString(),
+          dia_coleta: DIAS[dow],
+          hora_coleta: h
+        };
+      }
+    }
+    // volta um dia de calendario
+    const ant = new Date(Date.UTC(y, mo, da) - 86400e3);
+    y = ant.getUTCFullYear(); mo = ant.getUTCMonth(); da = ant.getUTCDate();
+  }
+  return { ok: false, motivo: 'sem_coleta_encontrada' };
+}
+
+module.exports = { calcularPrazoPostagem, horasAtePrazo, calcularCorteColeta };
