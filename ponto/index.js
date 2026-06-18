@@ -50,6 +50,8 @@ async function sbFetch(url, opts = {}, tentativas = 3){
   throw ultimoErro;
 }
 
+const VERSAO_BACK    = 'back v18/06 b2';  // ↑ suba a cada deploy do ponto/index.js
+
 const ADMIN_TOKEN    = process.env.PONTO_ADMIN_TOKEN || 'troque-este-token';
 const SESSION_SECRET = process.env.PONTO_SESSION_SECRET || ADMIN_TOKEN;
 const SB_URL = (process.env.PONTO_SUPABASE_URL || '').replace(/\/+$/, '');
@@ -249,6 +251,7 @@ function routes(readBody){
     if (method==='GET' && (p==='/ponto' || p==='/ponto/')) { servir(res,'index.html'); return true; }
     if (method==='GET' && (p==='/ponto/admin' || p==='/ponto/admin.html')) { servir(res,'admin.html'); return true; }
     if (method==='GET' && (p==='/ponto/favicon.png' || p==='/ponto/favicon.ico')) { servir(res,'favicon.png'); return true; }
+    if (method==='GET' && p==='/ponto/versao') { json(res,200,{versao:VERSAO_BACK}); return true; }
 
     try {
       // ───────── FUNCIONÁRIO ─────────
