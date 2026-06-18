@@ -21,6 +21,34 @@ const fs     = require('fs');
 const path   = require('path');
 const crypto = require('crypto');
 const fetch  = require('node-fetch');
+const http   = require('http');
+const https  = require('https');
+
+// keepAlive reaproveita conexões TCP -> reduz drasticamente "Premature close".
+const _httpAgent  = new http.Agent({  keepAlive: true, maxSockets: 20 });
+const _httpsAgent = new https.Agent({ keepAlive: true, maxSockets: 20 });
+const _agent = (u) => (String(u).startsWith('https') ? _httpsAgent : _httpAgent);
+
+// Wrapper com retry: repete em erro de rede (Premature close, ECONNRESET,
+// socket hang up, timeout) e em 5xx, com pequeno backoff. Mantém o app de pé
+// quando a Supabase/rede dá uma piscada — essencial p/ rodar desassistido.
+async function sbFetch(url, opts = {}, tentativas = 3){
+  let ultimoErro;
+  for (let i = 0; i < tentativas; i++){
+    try {
+      const r = await fetch(url, { agent: _agent(url), timeout: 15000, ...opts });
+      if (r.status >= 500 && r.status < 600 && i < tentativas - 1){
+        await new Promise(s => setTimeout(s, 400 * (i + 1)));
+        continue;
+      }
+      return r;
+    } catch (e){
+      ultimoErro = e;
+      if (i < tentativas - 1) await new Promise(s => setTimeout(s, 400 * (i + 1)));
+    }
+  }
+  throw ultimoErro;
+}
 
 const ADMIN_TOKEN    = process.env.PONTO_ADMIN_TOKEN || 'troque-este-token';
 const SESSION_SECRET = process.env.PONTO_SESSION_SECRET || ADMIN_TOKEN;
@@ -73,27 +101,27 @@ function servir(res, relPath){
 const enc = encodeURIComponent;
 function sbHeaders(extra){ return { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, 'Content-Type': 'application/json', ...(extra||{}) }; }
 async function sbGet(q){
-  const r = await fetch(`${SB_URL}/rest/v1/${q}`, { headers: sbHeaders() });
+  const r = await sbFetch(`${SB_URL}/rest/v1/${q}`, { headers: sbHeaders() });
   if (!r.ok) throw new Error(`Supabase GET ${q}: ${r.status} ${await r.text()}`);
   return r.json();
 }
 async function sbInsert(table, body, prefer){
-  const r = await fetch(`${SB_URL}/rest/v1/${table}`, { method:'POST', headers: sbHeaders({ Prefer: prefer || 'return=representation' }), body: JSON.stringify(body) });
+  const r = await sbFetch(`${SB_URL}/rest/v1/${table}`, { method:'POST', headers: sbHeaders({ Prefer: prefer || 'return=representation' }), body: JSON.stringify(body) });
   if (!r.ok) throw new Error(`Supabase POST ${table}: ${r.status} ${await r.text()}`);
   const t = await r.text(); return t ? JSON.parse(t) : null;
 }
 async function sbPatch(table, q, body){
-  const r = await fetch(`${SB_URL}/rest/v1/${table}?${q}`, { method:'PATCH', headers: sbHeaders({ Prefer:'return=representation' }), body: JSON.stringify(body) });
+  const r = await sbFetch(`${SB_URL}/rest/v1/${table}?${q}`, { method:'PATCH', headers: sbHeaders({ Prefer:'return=representation' }), body: JSON.stringify(body) });
   if (!r.ok) throw new Error(`Supabase PATCH ${table}: ${r.status} ${await r.text()}`);
   const t = await r.text(); return t ? JSON.parse(t) : null;
 }
 async function sbDelete(table, q){
-  const r = await fetch(`${SB_URL}/rest/v1/${table}?${q}`, { method:'DELETE', headers: sbHeaders() });
+  const r = await sbFetch(`${SB_URL}/rest/v1/${table}?${q}`, { method:'DELETE', headers: sbHeaders() });
   if (!r.ok) throw new Error(`Supabase DELETE ${table}: ${r.status} ${await r.text()}`);
   return true;
 }
 async function sbUpsert(table, onConflict, rows){
-  const r = await fetch(`${SB_URL}/rest/v1/${table}?on_conflict=${onConflict}`, {
+  const r = await sbFetch(`${SB_URL}/rest/v1/${table}?on_conflict=${onConflict}`, {
     method:'POST', headers: sbHeaders({ Prefer:'resolution=ignore-duplicates,return=minimal' }), body: JSON.stringify(rows) });
   if (!r.ok) throw new Error(`Supabase UPSERT ${table}: ${r.status} ${await r.text()}`);
   return true;
