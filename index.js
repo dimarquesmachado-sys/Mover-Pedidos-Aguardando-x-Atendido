@@ -1,10 +1,13 @@
 'use strict';
 
-// Resolve IPv4 antes de IPv6 em TODO o processo. O Render às vezes tenta IPv6
-// pra hosts atrás de Cloudflare (Supabase, BrasilAPI) e a conexão morre no meio
-// ("Premature close"). Forçando IPv4 primeiro, essas chamadas voltam a fechar.
-// Mantém IPv6 como fallback caso o IPv4 falhe. (Bling já usa IPv4, não muda nada.)
+// Rede de saída: esta instância NÃO tem rota IPv6 (ENETUNREACH em tudo).
+// 1) ipv4first: coloca o IPv4 na frente na resolução de DNS.
+// 2) autoSelectFamily(false): desliga o "Happy Eyeballs" do Node, que tentava
+//    IPv4 e IPv6 em paralelo — o IPv6 quebrado matava a conexão no meio
+//    ("Premature close"). Sem ele, o Node usa só IPv4, que funciona (testado:
+//    Supabase 401, BrasilAPI 200, Bling 200 por IPv4). Vale p/ TODO o processo.
 try { require('dns').setDefaultResultOrder('ipv4first'); } catch (e) { console.warn('dns ipv4first indisponível:', e.message); }
+try { require('net').setDefaultAutoSelectFamily(false); } catch (e) { console.warn('autoSelectFamily indisponível:', e.message); }
 
 const http = require('http');
 const cron = require('node-cron');
