@@ -39,7 +39,7 @@ const { gerarDanfeSimplificado, gerarDanfeSimplificadoZPL } = require('./danfe-s
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v17/06 b45';
+const VERSAO     = 'girassol-backup-offline v17/06 b46';
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 
 // ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
@@ -69,6 +69,20 @@ function lerReservas() {
   }
   if (mudou) writeJson(RESERVAS_FILE, r);
   return r;
+}
+// operadores p/ login (env GIRABKP_OPERADORES = "Nome:senha,Nome:senha"). Vazio = login DESLIGADO.
+function lerOperadores() {
+  const raw = process.env.GIRABKP_OPERADORES || '';
+  const map = {};
+  raw.split(',').forEach(par => {
+    const i = par.indexOf(':');
+    if (i > 0) {
+      const nome = par.slice(0, i).trim();
+      const senha = par.slice(i + 1).trim();
+      if (nome) map[nome] = senha;
+    }
+  });
+  return map;
 }
 const KIT_CACHE_FILE  = path.join(CACHE_DIR, 'kit-estrutura.json');  // kits já resolvidos
 const LOC_FILE        = path.join(CACHE_DIR, 'sku-localizacao.json'); // localização (depósito) por SKU
@@ -1098,6 +1112,27 @@ function routes(readBody) {
       } catch (e) { // pdf-lib indisponível → fallback: devolve só a etiqueta
         if (etqBuf) { res.writeHead(200, { 'Content-Type': 'application/pdf' }); res.end(etqBuf); }
         else json(res, 500, { erro: 'merge falhou: ' + e.message });
+      }
+      return true;
+    }
+
+    // LOGIN: lista os NOMES dos operadores (sem senha) — o painel decide se mostra a tela de login
+    if (method === 'GET' && p === '/girassol-backup-offline/operadores') {
+      const nomes = Object.keys(lerOperadores());
+      json(res, 200, { operadores: nomes, login_ativo: nomes.length > 0 });
+      return true;
+    }
+
+    // LOGIN: valida nome + senha contra a env GIRABKP_OPERADORES
+    if (method === 'POST' && p === '/girassol-backup-offline/login') {
+      const body = await readBody(req);
+      const nome = String(body.nome || '').trim();
+      const senha = String(body.senha || '').trim();
+      const ops = lerOperadores();
+      if (ops[nome] !== undefined && String(ops[nome]) === senha) {
+        json(res, 200, { ok: true, nome });
+      } else {
+        json(res, 200, { ok: false, erro: 'nome ou senha inválidos' });
       }
       return true;
     }
