@@ -24,9 +24,11 @@ const fetch  = require('node-fetch');
 const http   = require('http');
 const https  = require('https');
 
-// keepAlive reaproveita conexões TCP -> reduz drasticamente "Premature close".
-const _httpAgent  = new http.Agent({  keepAlive: true, maxSockets: 20 });
-const _httpsAgent = new https.Agent({ keepAlive: true, maxSockets: 20 });
+// IPv6 está morto nesta instância (ENETUNREACH). Forçamos IPv4 direto no agent
+// — é a config que o /ponto/diag provou funcionar (Supabase respondeu 401 por
+// IPv4). Sem keepAlive de propósito: evita reusar socket que a Cloudflare fecha.
+const _httpAgent  = new http.Agent({  family: 4 });
+const _httpsAgent = new https.Agent({ family: 4 });
 const _agent = (u) => (String(u).startsWith('https') ? _httpsAgent : _httpAgent);
 
 // Wrapper com retry: repete em erro de rede (Premature close, ECONNRESET,
@@ -50,7 +52,7 @@ async function sbFetch(url, opts = {}, tentativas = 3){
   throw ultimoErro;
 }
 
-const VERSAO_BACK    = 'back v18/06 b3';  // ↑ suba a cada deploy do ponto/index.js
+const VERSAO_BACK    = 'back v18/06 b4';  // ↑ suba a cada deploy do ponto/index.js
 
 const ADMIN_TOKEN    = process.env.PONTO_ADMIN_TOKEN || 'troque-este-token';
 const SESSION_SECRET = process.env.PONTO_SESSION_SECRET || ADMIN_TOKEN;
@@ -266,11 +268,20 @@ function routes(readBody){
           return { ok:true, status:r.status, ms:Date.now()-t0 };
         } catch(e){ return { ok:false, erro:e.message, ms:Date.now()-t0 }; }
       }
+      async function testarPadrao(url){
+        const t0 = Date.now();
+        try {
+          const r = await fetch(url, { timeout: 15000 }); // caminho normal do app
+          return { ok:true, status:r.status, ms:Date.now()-t0 };
+        } catch(e){ return { ok:false, erro:e.message, ms:Date.now()-t0 }; }
+      }
+      let autoFam = 'n/d';
+      try { autoFam = require('net').getDefaultAutoSelectFamily(); } catch(e){ autoFam = 'sem-funcao'; }
       const resultado = [];
       for (const [nome, url] of alvos){
-        resultado.push({ alvo:nome, ipv4: await testar(url,4), ipv6: await testar(url,6) });
+        resultado.push({ alvo:nome, padrao: await testarPadrao(url), ipv4: await testar(url,4), ipv6: await testar(url,6) });
       }
-      json(res, 200, { node: process.version, versao: VERSAO_BACK, resultado });
+      json(res, 200, { node: process.version, versao: VERSAO_BACK, autoSelectFamily: autoFam, resultado });
       return true;
     }
 
