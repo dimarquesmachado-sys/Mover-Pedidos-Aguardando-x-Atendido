@@ -84,6 +84,14 @@ function lerOperadores() {
   });
   return map;
 }
+// quem pode REABRIR/reverter pedido (env GIRABKP_ADMIN = "Diego" ou "Diego,Angelica"). Vazio = sem restrição (todo mundo pode).
+function lerAdmins() {
+  return (process.env.GIRABKP_ADMIN || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+}
+function ehAdmin(nome) {
+  const a = lerAdmins();
+  return a.length === 0 || a.includes(String(nome || '').trim().toLowerCase());
+}
 const KIT_CACHE_FILE  = path.join(CACHE_DIR, 'kit-estrutura.json');  // kits já resolvidos
 const LOC_FILE        = path.join(CACHE_DIR, 'sku-localizacao.json'); // localização (depósito) por SKU
 const SCHEMA = 4;  // versão do snapshot — bump força re-cache dos pedidos antigos (b36: re-explode composições/variações)
@@ -1131,7 +1139,7 @@ function routes(readBody) {
     // LOGIN: lista os NOMES dos operadores (sem senha) — o painel decide se mostra a tela de login
     if (method === 'GET' && p === '/girassol-backup-offline/operadores') {
       const nomes = Object.keys(lerOperadores());
-      json(res, 200, { operadores: nomes, login_ativo: nomes.length > 0 });
+      json(res, 200, { operadores: nomes, login_ativo: nomes.length > 0, admins: lerAdmins() });
       return true;
     }
 
@@ -1180,6 +1188,10 @@ function routes(readBody) {
     // REABRIR um pedido finalizado por engano: tira da fila de conferidos → volta pra lista.
     // Aceita o bling_id OU o número visível. Se já tinha ido pra VERIFICADO, devolve pra ATENDIDO no Bling.
     if ((method === 'GET' || method === 'POST') && p.startsWith('/girassol-backup-offline/reabrir/')) {
+      let op = '';
+      try { op = (urlObj.searchParams && urlObj.searchParams.get('op')) || ''; } catch (e) {}
+      if (!op && method === 'POST') { try { const b = await readBody(req); op = String(b.op || ''); } catch (e) {} }
+      if (!ehAdmin(op)) { json(res, 200, { ok: false, erro: 'apenas o admin pode reabrir/reverter pedidos', precisa_admin: true }); return true; }
       const arg = decodeURIComponent(p.split('/').pop() || '');
       const conf = readJson(CONFERIDOS_FILE, {});
       const id = conf[arg] ? arg : (Object.keys(conf).find(k => String(conf[k] && conf[k].numero) === String(arg)) || null);
