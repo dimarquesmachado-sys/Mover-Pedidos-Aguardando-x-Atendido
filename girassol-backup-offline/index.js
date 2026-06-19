@@ -39,7 +39,7 @@ const { gerarDanfeSimplificado, gerarDanfeSimplificadoZPL } = require('./danfe-s
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v17/06 b49';
+const VERSAO     = 'girassol-backup-offline v17/06 b50';
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 
 // ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
@@ -382,11 +382,14 @@ async function produtoDetalhe(id) {
   if (!id) return null;
   if (_prodCache.has(id)) return _prodCache.get(id);
   let prod = null;
-  try {
-    const r = await blingGet(`/produtos/${id}`);
-    prod = (r.ok && r.data && r.data.data) ? r.data.data : null;
-  } catch (e) {}
-  _prodCache.set(id, prod);
+  for (let tent = 0; tent < 2 && !prod; tent++) {       // 2 tentativas: drible de rate-limit transitório
+    if (tent) await sleep(PAUSA_MS * 3);
+    try {
+      const r = await blingGet(`/produtos/${id}`);
+      prod = (r.ok && r.data && r.data.data) ? r.data.data : null;
+    } catch (e) {}
+  }
+  if (prod) _prodCache.set(id, prod);                   // só cacheia SUCESSO — nunca fixa uma falha (vazio)
   return prod;
 }
 
@@ -586,13 +589,16 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC) {
       // KIT / composição → explode nos componentes (com cache por produto-pai)
       temKit = true;
       let base = kitCache && kitCache[prodId];
+      if (base && base.some(c => !c.sku)) base = null;   // cache tinha componente vazio (falha anterior) → resolve de novo
       if (!base) {
         base = [];
+        let incompleto = false;
         for (const c of comps) {
           const info = await infoProduto(c.produto && c.produto.id, cacheEan);
+          if (!info.sku) incompleto = true;
           base.push({ sku: info.sku, ean: info.ean, descricao: info.descricao, img: info.img, loc: info.loc, qtd: Number(c.quantidade || 1) });
         }
-        if (kitCache) kitCache[prodId] = base;
+        if (kitCache && !incompleto) kitCache[prodId] = base;   // SÓ grava se TODOS resolveram (não fixa falha transitória)
       }
       if (locC) base.forEach(c => { if (c.sku) locC[c.sku] = c.loc || locC[c.sku] || ''; }); // localização dos componentes
       // qtd final = qtd do componente no kit × qtd do kit no pedido
@@ -666,6 +672,13 @@ function purgarConferidos() {
   if (mudou) writeJson(CONFERIDOS_FILE, conf);
 }
 
+// detecta pedido cacheado com kit incompleto (algum componente sem SKU) → sinal pra re-resolver
+function kitIncompletoNoCache(id) {
+  const snap = readJson(path.join(CACHE_DIR, String(id), 'pedido.json'), null);
+  if (!snap || !Array.isArray(snap.itens)) return false;
+  return snap.itens.some(it => it.tipo === 'kit' && Array.isArray(it.componentes) && it.componentes.some(c => !c.sku));
+}
+
 async function rodarCiclo(motivo = 'cron', forcar = false) {
   if (rodando) { console.log('[GIRABKP] ciclo já em andamento — pulei'); return ultimoResumo; }
   rodando = true;
@@ -710,10 +723,11 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
       if (reabertos) { writeJson(CONFERIDOS_FILE, conf); console.log(`[GIRABKP] espelho Bling: ${reabertos} pedido(s) voltaram pra ATENDIDO → desfinalizados (reaparecem na lista)`); }
     }
 
-    // (re)processa quem não tem etiqueta OU está num schema antigo (ganha EAN+kit)
+    // (re)processa quem não tem etiqueta OU está num schema antigo (ganha EAN+kit) OU tem kit incompleto no cache
     const aProcessar = atendidos.filter(ped => {
       if (forcar) return true;
       const ja = man[ped.id];
+      if (ja && ja.tem_kit && kitIncompletoNoCache(ped.id)) return true;   // kit com componente vazio → re-resolve sozinho
       return !(ja && ja.tem_etiqueta && ja.schema === SCHEMA);
     });
     console.log(`[GIRABKP] ${aProcessar.length} a (re)processar`);
