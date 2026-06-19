@@ -39,7 +39,7 @@ const { gerarDanfeSimplificado, gerarDanfeSimplificadoZPL } = require('./danfe-s
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v17/06 b50';
+const VERSAO     = 'girassol-backup-offline v17/06 b51';
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 
 // ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
@@ -94,6 +94,7 @@ function ehAdmin(nome) {
 }
 const KIT_CACHE_FILE  = path.join(CACHE_DIR, 'kit-estrutura.json');  // kits já resolvidos
 const LOC_FILE        = path.join(CACHE_DIR, 'sku-localizacao.json'); // localização (depósito) por SKU
+const LOC_LOG_FILE    = path.join(CACHE_DIR, 'localizacao-log.json'); // auditoria: quem editou localização, de→para, quando
 const SCHEMA = 4;  // versão do snapshot — bump força re-cache dos pedidos antigos (b36: re-explode composições/variações)
 
 // loja → marketplace (mesmo mapa do checkout Girassol)
@@ -953,6 +954,38 @@ function routes(readBody) {
       const forcar = /[?&]force=1\b/.test(urlObj.search || '');
       rodarCiclo(forcar ? 'manual-force' : 'manual', forcar);
       json(res, 200, { mensagem: `Ciclo${forcar ? ' (FORCE — re-cacheia tudo)' : ''} iniciado. Veja /girassol-backup-offline/status.`, versao: VERSAO });
+      return true;
+    }
+
+    // salva a localização de um SKU no Bling (PATCH /produtos/{id}) + atualiza o cache + registra quem editou
+    if (method === 'POST' && p === '/girassol-backup-offline/salvar-localizacao') {
+      let body = {};
+      try { body = await readBody(req); } catch (e) {}
+      const sku = String(body.sku || '').trim();
+      const localizacao = String(body.localizacao == null ? '' : body.localizacao).trim();
+      const op = String(body.op || '').trim();
+      if (!sku || sku === '(sem SKU)') { json(res, 200, { ok: false, erro: 'SKU inválido' }); return true; }
+      const busca = await blingGet(`/produtos?codigo=${encodeURIComponent(sku)}&limite=1`);
+      const item = busca.ok && busca.data && busca.data.data && busca.data.data[0];
+      if (!item || !item.id) { json(res, 200, { ok: false, erro: 'produto não encontrado p/ SKU ' + sku }); return true; }
+      const patch = await blingWrite('PATCH', `/produtos/${item.id}`, { estoque: { localizacao } });
+      if (!patch.ok) { json(res, 200, { ok: false, erro: (patch.data && patch.data.error && (patch.data.error.description || patch.data.error.type)) || ('erro Bling ' + patch.status) }); return true; }
+      const locC = locCache();
+      const locAntiga = locC[sku] || localizacaoDeProduto(item) || '';
+      locC[sku] = localizacao; salvarLoc(locC);
+      const log = readJson(LOC_LOG_FILE, []);
+      log.push({ op: op || '?', sku, de: locAntiga, para: localizacao, em: new Date().toISOString() });
+      if (log.length > 3000) log.splice(0, log.length - 3000);    // mantém os últimos 3000
+      writeJson(LOC_LOG_FILE, log);
+      console.log(`[GIRABKP] localização ${sku}: "${locAntiga}" → "${localizacao}" por ${op || '?'}`);
+      json(res, 200, { ok: true, sku, localizacao, de: locAntiga });
+      return true;
+    }
+
+    // auditoria: log de edições de localização (quem mudou o quê e quando). uso: /localizacoes-log
+    if (method === 'GET' && p === '/girassol-backup-offline/localizacoes-log') {
+      const log = readJson(LOC_LOG_FILE, []);
+      json(res, 200, { ok: true, total: log.length, log: log.slice(-500).reverse() });
       return true;
     }
 
