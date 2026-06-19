@@ -167,6 +167,9 @@
   .seprow .sku{font-size:15px;font-weight:700;color:var(--tx);font-family:ui-monospace,monospace}
   .seprow .ds{font-size:12px;color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .seprow .ean{font-size:11px;color:var(--mut);font-family:ui-monospace,monospace}
+  .seprow .sepedit{flex:0 0 auto;background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:7px 9px;cursor:pointer;font-size:14px;line-height:1}
+  .seprow .sepedit:hover{border-color:var(--ac)}
+  .seprow .locedit{flex:1;min-width:0;padding:9px;border-radius:9px;background:var(--card);border:1px solid var(--ac);color:var(--tx);font-size:15px;font-weight:700;font-family:ui-monospace,monospace;text-transform:uppercase}
   .sepfoot{display:flex;gap:8px;padding:12px 16px;border-top:1px solid var(--line)}
   .sepfoot .btn{flex:1}
   .sepempty{color:var(--mut);text-align:center;padding:30px 10px}
@@ -248,7 +251,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b49';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b51';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#ff9900'}, magalu:{n:'Magalu',c:'#0086ff'}, outro:{n:'Outro',c:'#94a3b8'}
@@ -871,6 +874,7 @@ async function reabrirPedido(id, numero){
 
 // ─── Lista de Separação (gaveta lateral direita) ───────────────────────────
 let sepMkt = null;     // filtro de marketplace na separação
+let sepLinhas = [];    // linhas atuais da separação (p/ editar localização inline)
 let sepData = null;    // último resultado /separacao
 
 function abrirSeparacao(){ $('sep').classList.add('on'); $('sepback').classList.add('on'); carregarSeparacao(); }
@@ -891,9 +895,11 @@ async function carregarSeparacao(){
       $('sepList').innerHTML = '<div class="sepempty">Nada a separar'+(sepMkt?' nesse filtro':'')+' 🎉</div>';
       return;
     }
-    $('sepList').innerHTML = d.linhas.map(l =>
-      '<div class="seprow">'+
+    sepLinhas = d.linhas || [];
+    $('sepList').innerHTML = d.linhas.map((l,i) =>
+      '<div class="seprow" id="seprow-'+i+'">'+
         '<div class="loc'+(l.loc?'':' vazia')+'">'+(l.loc?esc(l.loc):'—')+'</div>'+
+        '<button class="sepedit" onclick="editarLoc('+i+')" title="editar localização">✏️</button>'+
         '<div class="qtd">'+l.qtd+'</div>'+
         '<div class="meta">'+
           '<div class="sku">'+esc(l.sku)+'</div>'+
@@ -903,6 +909,29 @@ async function carregarSeparacao(){
       '</div>'
     ).join('');
   }catch(e){ $('sepInfo').textContent = 'Falha ao carregar: '+e.message; }
+}
+
+// edição de localização inline (lápis) — qualquer funcionário pode; o servidor registra quem editou
+function editarLoc(i){
+  const l = sepLinhas[i]; if(!l) return;
+  if(!l.sku || l.sku === '(sem SKU)'){ toast('Esse item não tem SKU pra editar'); return; }
+  const row = $('seprow-'+i); if(!row) return;
+  row.innerHTML =
+    '<input class="locedit" id="locinp-'+i+'" value="'+esc(l.loc||'')+'" placeholder="localização" autocomplete="off" />'+
+    '<button class="btn ok sm" onclick="salvarLoc('+i+')">✓</button>'+
+    '<button class="btn sec sm" onclick="carregarSeparacao()">✗</button>'+
+    '<div class="meta"><div class="sku">'+esc(l.sku)+'</div></div>';
+  const inp = $('locinp-'+i); inp.focus(); inp.select();
+  inp.onkeydown = e => { if(e.key==='Enter'){ e.preventDefault(); salvarLoc(i); } if(e.key==='Escape') carregarSeparacao(); };
+}
+async function salvarLoc(i){
+  const l = sepLinhas[i]; if(!l) return;
+  const inp = $('locinp-'+i); if(!inp) return;
+  const nova = inp.value.trim().toUpperCase();
+  inp.disabled = true;
+  const r = await postJson('/girassol-backup-offline/salvar-localizacao', { sku: l.sku, localizacao: nova, op: opAtual() }).catch(()=>null);
+  if(r && r.ok){ toast('✓ '+l.sku+' → '+(nova||'(vazio)')); carregarSeparacao(); }
+  else { toast('Não salvou: '+((r&&r.erro)||'erro')); inp.disabled = false; inp.focus(); }
 }
 
 function renderSepChips(counts){
