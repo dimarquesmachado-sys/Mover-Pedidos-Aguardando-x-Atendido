@@ -39,7 +39,7 @@ const { gerarDanfeSimplificado, gerarDanfeSimplificadoZPL } = require('./danfe-s
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v17/06 b55';
+const VERSAO     = 'girassol-backup-offline v17/06 b57';
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 
 // ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
@@ -1050,9 +1050,14 @@ function routes(readBody) {
       const pareceEan = dig.length >= 8 && dig.length <= 14 && /^\d+$/.test(q.replace(/\s/g, ''));
       let prod = null;
       const porSku = async (codigo) => {
-        const r = await blingGet(`/produtos?codigo=${encodeURIComponent(codigo)}&limite=1`);
-        const it = r.ok && r.data && r.data.data && r.data.data[0];
-        return (it && it.id) ? await produtoDetalhe(it.id) : null;
+        const base = String(codigo || '').trim();
+        const variantes = [...new Set([base, base.toUpperCase(), base.toLowerCase()])];
+        for (const v of variantes) {                           // ?codigo= do Bling é case-sensitive → tenta as 3 caixas
+          const r = await blingGet(`/produtos?codigo=${encodeURIComponent(v)}&limite=1`);
+          const it = r.ok && r.data && r.data.data && r.data.data[0];
+          if (it && it.id) return await produtoDetalhe(it.id);
+        }
+        return null;
       };
       if (!pareceEan) prod = await porSku(q);                 // SKU é o caminho 100%
       if (!prod && dig.length >= 8) {                          // EAN: cache reverso → API do Bling
@@ -1081,14 +1086,38 @@ function routes(readBody) {
       if (!prod) { json(res, 200, { ok: false, erro: 'nada encontrado p/ "' + q + '"' }); return true; }
       salvarNoIndiceEan(prod);                                 // alimenta o índice — toda resolução entra no cache
       const est = prod.estoque || {};
+      let localizacao = localizacaoDeProduto(prod);            // 1º: Bling (fonte da verdade)
+      if (!localizacao) {                                      // 2º: cache local (localização editada pelo painel)
+        const lc = locCache(); const sk = prod.codigo || '';
+        localizacao = lc[sk] || lc[sk.toUpperCase()] || lc[sk.toLowerCase()] || '';
+      }
       json(res, 200, { ok: true, produto: {
         sku: prod.codigo || '',
         nome: prod.nome || '',
         ean: getPossiveisGtins(prod)[0] || '',
         estoque: (est.saldoVirtualTotal != null ? est.saldoVirtualTotal : (est.saldoVirtual != null ? est.saldoVirtual : null)),
-        localizacao: localizacaoDeProduto(prod),
+        localizacao: localizacao,
         img: primeiraImagem(prod)
       } });
+      return true;
+    }
+
+    // ─── debug: onde o Bling guarda a localização de um SKU ───
+    if (method === 'GET' && p === '/girassol-backup-offline/debug-produto') {
+      const q = String(urlObj.searchParams.get('q') || '').trim();
+      let prod = null;
+      for (const v of [...new Set([q, q.toUpperCase(), q.toLowerCase()])]) {
+        const r = await blingGet(`/produtos?codigo=${encodeURIComponent(v)}&limite=1`);
+        const it = r.ok && r.data && r.data.data && r.data.data[0];
+        if (it && it.id) { prod = await produtoDetalhe(it.id); break; }
+      }
+      json(res, 200, {
+        ok: !!prod,
+        sku: prod && prod.codigo,
+        estoque: prod && prod.estoque,                 // <- onde deve estar localizacao
+        localizacaoRoot: prod && prod.localizacao,     // <- ou aqui
+        cacheLocal: locCache()[q] || locCache()[String(q).toUpperCase()] || null
+      });
       return true;
     }
 
