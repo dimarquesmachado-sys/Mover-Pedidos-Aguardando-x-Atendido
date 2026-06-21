@@ -39,7 +39,7 @@ const { gerarDanfeSimplificado, gerarDanfeSimplificadoZPL } = require('./danfe-s
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v17/06 b52';
+const VERSAO     = 'girassol-backup-offline v17/06 b53';
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 
 // ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
@@ -986,6 +986,51 @@ function routes(readBody) {
     if (method === 'GET' && p === '/girassol-backup-offline/localizacoes-log') {
       const log = readJson(LOC_LOG_FILE, []);
       json(res, 200, { ok: true, total: log.length, log: log.slice(-500).reverse() });
+      return true;
+    }
+
+    // busca um produto por SKU ou EAN (telinha de consulta/edição de localização do estoquista)
+    if (method === 'GET' && p === '/girassol-backup-offline/buscar-produto') {
+      const q = String(urlObj.searchParams.get('q') || '').trim();
+      if (!q) { json(res, 200, { ok: false, erro: 'busca vazia' }); return true; }
+      const dig = q.replace(/\D/g, '');
+      const pareceEan = dig.length >= 8 && dig.length <= 14 && /^\d+$/.test(q.replace(/\s/g, ''));
+      let prod = null;
+      const porSku = async (codigo) => {
+        const r = await blingGet(`/produtos?codigo=${encodeURIComponent(codigo)}&limite=1`);
+        const it = r.ok && r.data && r.data.data && r.data.data[0];
+        return (it && it.id) ? await produtoDetalhe(it.id) : null;
+      };
+      if (!pareceEan) prod = await porSku(q);                 // SKU é o caminho 100%
+      if (!prod && dig.length >= 8) {                          // EAN: cache reverso → API do Bling
+        const se = skuEanCache();
+        let achou = null;
+        for (const sku of Object.keys(se)) { if (String(se[sku]).replace(/\D/g, '') === dig) { achou = sku; break; } }
+        if (achou) prod = await porSku(achou);
+        if (!prod) {
+          for (const campo of ['gtin', 'gtinTributario', 'ean', 'codigoBarras']) {
+            const r = await blingGet(`/produtos?${campo}=${encodeURIComponent(q)}&limite=5`);
+            const itens = (r.ok && r.data && r.data.data) || [];
+            for (const it of itens) {
+              if (!it.id) continue;
+              const det = await produtoDetalhe(it.id);
+              if (det && getPossiveisGtins(det).some(e => String(e).replace(/\D/g, '') === dig)) { prod = det; break; }
+            }
+            if (prod) break;
+          }
+        }
+      }
+      if (!prod && pareceEan) prod = await porSku(q);          // às vezes o código É o número digitado
+      if (!prod) { json(res, 200, { ok: false, erro: 'nada encontrado p/ "' + q + '"' }); return true; }
+      const est = prod.estoque || {};
+      json(res, 200, { ok: true, produto: {
+        sku: prod.codigo || '',
+        nome: prod.nome || '',
+        ean: getPossiveisGtins(prod)[0] || '',
+        estoque: (est.saldoVirtualTotal != null ? est.saldoVirtualTotal : (est.saldoVirtual != null ? est.saldoVirtual : null)),
+        localizacao: localizacaoDeProduto(prod),
+        img: primeiraImagem(prod)
+      } });
       return true;
     }
 
