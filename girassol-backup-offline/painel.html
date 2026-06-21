@@ -170,6 +170,14 @@
   .seprow .sepedit{flex:0 0 auto;background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:7px 9px;cursor:pointer;font-size:14px;line-height:1}
   .seprow .sepedit:hover{border-color:var(--ac)}
   .seprow .locedit{flex:1;min-width:0;padding:9px;border-radius:9px;background:var(--card);border:1px solid var(--ac);color:var(--tx);font-size:15px;font-weight:700;font-family:ui-monospace,monospace;text-transform:uppercase}
+  .bcard{display:flex;gap:12px;align-items:center;padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--card2);margin-bottom:12px}
+  .bcard .bimg{flex:0 0 auto;width:56px;height:56px;border-radius:10px;object-fit:cover;background:var(--card);border:1px solid var(--line)}
+  .bcard .bimg.vazio{display:flex;align-items:center;justify-content:center;font-size:24px}
+  .bcard .bnome{font-size:14px;font-weight:700;color:var(--tx);line-height:1.25;margin-bottom:3px}
+  .bcard .bsku{font-size:13px;font-weight:700;color:#cfe0ff;font-family:ui-monospace,monospace}
+  .bcard .bsub{font-size:12px;color:var(--mut);font-family:ui-monospace,monospace;margin-top:2px}
+  .bloc label{display:block;font-size:12px;color:var(--mut);margin-bottom:6px}
+  .buscafld{flex:1;min-width:0;padding:11px;border-radius:10px;background:var(--card);border:1px solid var(--ac);color:var(--tx);font-size:16px;font-family:ui-monospace,monospace}
   .sepfoot{display:flex;gap:8px;padding:12px 16px;border-top:1px solid var(--line)}
   .sepfoot .btn{flex:1}
   .sepempty{color:var(--mut);text-align:center;padding:30px 10px}
@@ -208,6 +216,7 @@
       <button class="btn sec sm" id="btnSync" onclick="sincronizar()">↻ Atualizar</button>
       <button class="btn sec sm" onclick="abrirSeparacao()" title="lista de produtos a separar (somados por SKU)">📋 Separar</button>
       <button class="btn sec sm" onclick="abrirHistorico()" title="últimos pedidos finalizados">🕘 Histórico</button>
+      <button class="btn sec sm" onclick="abrirBusca()" title="buscar produto por SKU/EAN, ver estoque e editar localização">🔎 Produto</button>
       <button class="btn sec sm" onclick="escolherImpressora()">🖨 Zebra</button>
       <button class="btn sec sm" id="modoBtn" onclick="trocarModo()" title="alterna entre etiqueta na Zebra (ZPL) ou abrir PDF p/ imprimir no navegador">🖨️ Etiq: Zebra</button>
     </div>
@@ -251,7 +260,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b51';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b53';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#ff9900'}, magalu:{n:'Magalu',c:'#0086ff'}, outro:{n:'Outro',c:'#94a3b8'}
@@ -932,6 +941,56 @@ async function salvarLoc(i){
   const r = await postJson('/girassol-backup-offline/salvar-localizacao', { sku: l.sku, localizacao: nova, op: opAtual() }).catch(()=>null);
   if(r && r.ok){ toast('✓ '+l.sku+' → '+(nova||'(vazio)')); carregarSeparacao(); }
   else { toast('Não salvou: '+((r&&r.erro)||'erro')); inp.disabled = false; inp.focus(); }
+}
+
+// ── BUSCA DE PRODUTO (consulta SKU/EAN, estoque, localização + editar localização) ──
+let buscaProd = null;
+function abrirBusca(){
+  const md=$('modal');
+  md.innerHTML =
+    '<div class="mbox" style="max-width:460px;width:92vw">'+
+      '<div class="mtit">🔎 Buscar produto</div>'+
+      '<div style="display:flex;gap:8px;margin-bottom:12px">'+
+        '<input id="buscaInp" class="buscafld" placeholder="bipe ou digite SKU / EAN" autocomplete="off" onkeydown="if(event.key===\'Enter\')fazerBusca()" />'+
+        '<button class="btn ok" onclick="fazerBusca()">Buscar</button>'+
+      '</div>'+
+      '<div id="buscaRes"></div>'+
+      '<div class="mbtns"><button class="btn sec" onclick="fecharConfirmacao()">Fechar</button></div>'+
+    '</div>';
+  md.classList.add('show');
+  buscaProd = null;
+  setTimeout(()=>{ const b=$('buscaInp'); if(b) b.focus(); }, 80);
+}
+async function fazerBusca(){
+  const q = ($('buscaInp').value||'').trim(); if(!q) return;
+  $('buscaRes').innerHTML = '<div class="sepempty">buscando…</div>';
+  const r = await api('/girassol-backup-offline/buscar-produto?q='+encodeURIComponent(q)).catch(()=>null);
+  if(!r || !r.ok){ $('buscaRes').innerHTML = '<div class="sepempty">'+esc((r&&r.erro)||'não encontrado')+'</div>'; buscaProd=null; return; }
+  const p = r.produto; buscaProd = p;
+  $('buscaRes').innerHTML =
+    '<div class="bcard">'+
+      (p.img?'<img class="bimg" src="'+esc(p.img)+'" onerror="this.style.display=\'none\'" />':'<div class="bimg vazio">📦</div>')+
+      '<div>'+
+        '<div class="bnome">'+esc(p.nome||'(sem nome)')+'</div>'+
+        '<div class="bsku">SKU '+esc(p.sku||'—')+'</div>'+
+        '<div class="bsub">EAN '+esc(p.ean||'—')+' · estoque <b>'+(p.estoque!=null?p.estoque:'?')+'</b></div>'+
+      '</div>'+
+    '</div>'+
+    '<div class="bloc">'+
+      '<label>Localização (edita e salva no Bling)</label>'+
+      '<div style="display:flex;gap:8px">'+
+        '<input id="buscaLoc" class="buscafld" style="text-transform:uppercase" value="'+esc(p.localizacao||'')+'" placeholder="localização" autocomplete="off" onkeydown="if(event.key===\'Enter\')salvarLocBusca()" />'+
+        '<button class="btn ok" onclick="salvarLocBusca()">✓ Salvar</button>'+
+      '</div>'+
+    '</div>';
+  const b=$('buscaInp'); if(b) b.select();
+}
+async function salvarLocBusca(){
+  if(!buscaProd || !buscaProd.sku){ toast('Busca um produto primeiro'); return; }
+  const nova = (($('buscaLoc')||{}).value||'').trim().toUpperCase();
+  const r = await postJson('/girassol-backup-offline/salvar-localizacao', { sku: buscaProd.sku, localizacao: nova, op: opAtual() }).catch(()=>null);
+  if(r && r.ok){ toast('✓ '+buscaProd.sku+' → '+(nova||'(vazio)')); buscaProd.localizacao = nova; }
+  else { toast('Não salvou: '+((r&&r.erro)||'erro')); }
 }
 
 function renderSepChips(counts){
