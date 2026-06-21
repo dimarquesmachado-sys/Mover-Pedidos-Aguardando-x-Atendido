@@ -39,7 +39,7 @@ const { gerarDanfeSimplificado, gerarDanfeSimplificadoZPL } = require('./danfe-s
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v17/06 b58';
+const VERSAO     = 'girassol-backup-offline v17/06 b59';
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 
 // ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
@@ -990,6 +990,36 @@ function montarSeparacao(mktFiltro) {
   return { ok: true, mkt: mktFiltro || null, pedidos, total_skus: linhas.length, total_itens, counts, linhas };
 }
 
+// 2ª visão: separação POR PEDIDO (cada pedido com seus itens; itens podem repetir entre pedidos — OK, é pra uso raro)
+function montarSeparacaoPorPedido(mktFiltro) {
+  const man = manifest();
+  const conf = readJson(CONFERIDOS_FILE, {});
+  const loc = locCache();
+  const lista = [];
+  const counts = {};
+  for (const id of Object.keys(man)) {
+    if (conf[id]) continue;                                // já finalizado → fora
+    if (!man[id].tem_etiqueta) continue;                   // sem etiqueta → fora (não despacha)
+    const snap = readJson(path.join(CACHE_DIR, String(id), 'pedido.json'), null);
+    if (!snap) continue;
+    const mkt = snap.marketplace || 'outro';
+    counts[mkt] = (counts[mkt] || 0) + 1;
+    if (mktFiltro && mkt !== mktFiltro) continue;
+    const itens = [];
+    const add = (sku, ean, descricao, qtd) => itens.push({ sku: sku || '(sem SKU)', ean: ean || '', descricao: descricao || '', loc: loc[sku] || '', qtd: Number(qtd || 0) });
+    for (const it of (snap.itens || [])) {
+      if (it.tipo === 'kit' && Array.isArray(it.componentes) && it.componentes.length) {
+        for (const c of it.componentes) add(c.sku, c.ean, c.descricao, c.qtd);
+      } else { add(it.sku, it.ean, it.descricao, it.qtd); }
+    }
+    itens.sort((a, b) => { const la = a.loc || '', lb = b.loc || ''; if (!la && lb) return 1; if (la && !lb) return -1; return la.localeCompare(lb, 'pt', { numeric: true }); });
+    lista.push({ numero: snap.numero || id, marketplace: mkt, cliente: snap.cliente || '', nf: (snap.nf && snap.nf.numero) || '', itens });
+  }
+  lista.sort((a, b) => String(a.numero).localeCompare(String(b.numero), 'pt', { numeric: true }));
+  const total_itens = lista.reduce((s, p) => s + p.itens.reduce((ss, i) => ss + i.qtd, 0), 0);
+  return { ok: true, mkt: mktFiltro || null, total_pedidos: lista.length, total_itens, counts, pedidos: lista };
+}
+
 // ─── Rotas HTTP (namespaced) ────────────────────────────────────────────
 function routes(readBody) {
   return async function handle(req, res, urlObj) {
@@ -1209,6 +1239,11 @@ function routes(readBody) {
     if (method === 'GET' && p === '/girassol-backup-offline/separacao') {
       const mkt = urlObj.searchParams.get('mkt');
       json(res, 200, montarSeparacao(mkt && mkt !== 'todos' ? mkt : null));
+      return true;
+    }
+    if (method === 'GET' && p === '/girassol-backup-offline/separacao-por-pedido') {
+      const mkt = urlObj.searchParams.get('mkt');
+      json(res, 200, montarSeparacaoPorPedido(mkt && mkt !== 'todos' ? mkt : null));
       return true;
     }
 
