@@ -260,7 +260,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b53';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b54';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#ff9900'}, magalu:{n:'Magalu',c:'#0086ff'}, outro:{n:'Outro',c:'#94a3b8'}
@@ -982,6 +982,10 @@ async function fazerBusca(){
         '<input id="buscaLoc" class="buscafld" style="text-transform:uppercase" value="'+esc(p.localizacao||'')+'" placeholder="localização" autocomplete="off" onkeydown="if(event.key===\'Enter\')salvarLocBusca()" />'+
         '<button class="btn ok" onclick="salvarLocBusca()">✓ Salvar</button>'+
       '</div>'+
+    '</div>'+
+    '<div style="display:flex;gap:8px;margin-top:10px">'+
+      '<button class="btn warn" style="flex:1" onclick="imprimirEtiquetaProduto()">🏷️ Imprimir etiqueta</button>'+
+      '<button class="btn sec sm" onclick="escolherImpressoraEtiqueta()" title="escolher a impressora da etiqueta 4x2,5cm">🖨</button>'+
     '</div>';
   const b=$('buscaInp'); if(b) b.select();
 }
@@ -991,6 +995,55 @@ async function salvarLocBusca(){
   const r = await postJson('/girassol-backup-offline/salvar-localizacao', { sku: buscaProd.sku, localizacao: nova, op: opAtual() }).catch(()=>null);
   if(r && r.ok){ toast('✓ '+buscaProd.sku+' → '+(nova||'(vazio)')); buscaProd.localizacao = nova; }
   else { toast('Não salvou: '+((r&&r.erro)||'erro')); }
+}
+
+// ── ETIQUETA DE PRODUTO (cód de barras 4x2,5cm na Zebra, via QZ Tray — gerada por nós, não puxada do Bling) ──
+async function getImpressoraEtiqueta(){
+  let p = localStorage.getItem('gbkp_printer_etq');
+  if(p) return p;
+  p = localStorage.getItem('gbkp_printer');     // cai na Zebra da postagem se não tiver uma separada
+  if(p) return p;
+  const lista = await qz.printers.find();
+  return (lista||[]).find(n=>/zebra|zdesigner|zpl|\bzd\b|\bgk\b|\bgc\b/i.test(n)) || (lista||[])[0];
+}
+async function escolherImpressoraEtiqueta(){
+  try{
+    await conectarQZ();
+    const lista = await qz.printers.find();
+    if(!lista||!lista.length){ toast('Nenhuma impressora no QZ'); return; }
+    const atual = localStorage.getItem('gbkp_printer_etq')||'';
+    const msg = 'Impressoras:\n\n'+lista.map((n,i)=>(i+1)+') '+n+(n===atual?'  ← atual':'')).join('\n')+'\n\nNº da impressora da ETIQUETA de produto (4x2,5cm):';
+    const r = prompt(msg, lista.indexOf(atual)>=0?String(lista.indexOf(atual)+1):'1');
+    const idx = parseInt(r,10)-1;
+    if(idx>=0&&idx<lista.length){ localStorage.setItem('gbkp_printer_etq', lista[idx]); toast('Impressora etiqueta: '+lista[idx]); }
+  }catch(e){ toast('Erro: '+e.message); }
+}
+// 40x25mm @ 203dpi = 320x200 dots. Título até 3 linhas, SKU, código de barras Code128 do EAN + número embaixo.
+function montarZplEtiqueta(p){
+  const clean = s => String(s||'').replace(/[\^~]/g,' ');
+  const titulo = clean(p.nome).slice(0,120);
+  const sku = clean(p.sku);
+  const ean = String(p.ean||'').replace(/\D/g,'');
+  const dados = ean || sku.replace(/[^\x20-\x7E]/g,'');     // barras: EAN; se não tiver, o SKU
+  if(!dados) return null;
+  return ['^XA','^CI28','^PW320','^LL200','^LH0,0',
+    '^FO8,8^A0N,17,17^FB306,3,3,L^FD'+titulo+'^FS',         // título (até 3 linhas)
+    '^FO8,72^A0N,23,23^FD'+sku+'^FS',                       // SKU
+    '^FO12,102^BY2,2^BCN,62,Y,N,N^FD'+dados+'^FS',          // código de barras + número embaixo
+    '^XZ'].join('');
+}
+async function imprimirEtiquetaProduto(){
+  if(!buscaProd){ toast('Busca um produto primeiro'); return; }
+  const zpl = montarZplEtiqueta(buscaProd);
+  if(!zpl){ toast('Produto sem EAN nem SKU pra etiqueta'); return; }
+  try{
+    await conectarQZ();
+    const printer = await getImpressoraEtiqueta();
+    if(!printer){ toast('Sem impressora — clica no 🖨 pra escolher'); return; }
+    const cfg = qz.configs.create(printer);
+    await qz.print(cfg, [{ type:'raw', format:'command', flavor:'plain', data: zpl }]);
+    toast('🏷️ etiqueta enviada → '+printer);
+  }catch(e){ toast('Erro na impressão: '+e.message); }
 }
 
 function renderSepChips(counts){
