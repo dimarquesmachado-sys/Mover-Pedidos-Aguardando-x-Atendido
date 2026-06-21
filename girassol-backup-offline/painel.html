@@ -147,7 +147,7 @@
   /* Gaveta: Lista de Separação */
   .sepback{position:fixed;inset:0;background:rgba(0,0,0,.5);opacity:0;pointer-events:none;transition:opacity .15s;z-index:60}
   .sepback.on{opacity:1;pointer-events:auto}
-  .sep{position:fixed;top:0;right:0;height:100%;width:440px;max-width:92vw;background:var(--bg);border-left:1px solid var(--line);
+  .sep{position:fixed;top:0;right:0;height:100%;width:570px;max-width:94vw;background:var(--bg);border-left:1px solid var(--line);
        box-shadow:-8px 0 24px rgba(0,0,0,.4);transform:translateX(100%);transition:transform .18s;z-index:61;display:flex;flex-direction:column}
   .sep.on{transform:translateX(0)}
   .sephead{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--line)}
@@ -260,7 +260,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b54';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b55';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#ff9900'}, magalu:{n:'Magalu',c:'#0086ff'}, outro:{n:'Outro',c:'#94a3b8'}
@@ -909,6 +909,7 @@ async function carregarSeparacao(){
       '<div class="seprow" id="seprow-'+i+'">'+
         '<div class="loc'+(l.loc?'':' vazia')+'">'+(l.loc?esc(l.loc):'—')+'</div>'+
         '<button class="sepedit" onclick="editarLoc('+i+')" title="editar localização">✏️</button>'+
+        '<button class="sepedit" onclick="imprimirEtiquetaLinha('+i+')" title="imprimir etiqueta de código de barras">🏷️</button>'+
         '<div class="qtd">'+l.qtd+'</div>'+
         '<div class="meta">'+
           '<div class="sku">'+esc(l.sku)+'</div>'+
@@ -955,11 +956,16 @@ function abrirBusca(){
         '<button class="btn ok" onclick="fazerBusca()">Buscar</button>'+
       '</div>'+
       '<div id="buscaRes"></div>'+
-      '<div class="mbtns"><button class="btn sec" onclick="fecharConfirmacao()">Fechar</button></div>'+
+      '<div id="idxStatus" style="font-size:11px;color:var(--mut);margin-top:10px;min-height:14px"></div>'+
+      '<div class="mbtns">'+
+        (souAdmin()?'<button class="btn sec sm" onclick="indexarCatalogo()" title="varre todo o catálogo p/ achar qualquer EAN na hora (roda 1x)">🔄 Indexar catálogo</button>':'')+
+        '<button class="btn sec" onclick="fecharConfirmacao()">Fechar</button>'+
+      '</div>'+
     '</div>';
   md.classList.add('show');
   buscaProd = null;
   setTimeout(()=>{ const b=$('buscaInp'); if(b) b.focus(); }, 80);
+  if(souAdmin()) pollIndexar();
 }
 async function fazerBusca(){
   const q = ($('buscaInp').value||'').trim(); if(!q) return;
@@ -1019,22 +1025,31 @@ async function escolherImpressoraEtiqueta(){
   }catch(e){ toast('Erro: '+e.message); }
 }
 // 40x25mm @ 203dpi = 320x200 dots. Título até 3 linhas, SKU, código de barras Code128 do EAN + número embaixo.
-function montarZplEtiqueta(p){
+function montarZplEtiqueta(p, copias){
   const clean = s => String(s||'').replace(/[\^~]/g,' ');
   const titulo = clean(p.nome).slice(0,120);
   const sku = clean(p.sku);
   const ean = String(p.ean||'').replace(/\D/g,'');
   const dados = ean || sku.replace(/[^\x20-\x7E]/g,'');     // barras: EAN; se não tiver, o SKU
   if(!dados) return null;
-  return ['^XA','^CI28','^PW320','^LL200','^LH0,0',
+  const z = ['^XA','^CI28','^PW320','^LL200','^LH0,0',
     '^FO8,8^A0N,17,17^FB306,3,3,L^FD'+titulo+'^FS',         // título (até 3 linhas)
     '^FO8,72^A0N,23,23^FD'+sku+'^FS',                       // SKU
-    '^FO12,102^BY2,2^BCN,62,Y,N,N^FD'+dados+'^FS',          // código de barras + número embaixo
-    '^XZ'].join('');
+    '^FO12,102^BY2,2^BCN,62,Y,N,N^FD'+dados+'^FS'];         // código de barras + número embaixo
+  if(copias && copias>1) z.push('^PQ'+copias+',0,0,N');     // nº de cópias
+  z.push('^XZ');
+  return z.join('');
 }
-async function imprimirEtiquetaProduto(){
-  if(!buscaProd){ toast('Busca um produto primeiro'); return; }
-  const zpl = montarZplEtiqueta(buscaProd);
+// prod opcional (cai no buscaProd); copias opcional (pergunta se não vier)
+async function imprimirEtiquetaProduto(prod, copias){
+  const p = prod || buscaProd;
+  if(!p){ toast('Busca um produto primeiro'); return; }
+  if(copias == null){
+    const r = prompt('Quantas cópias da etiqueta?', '1');
+    if(r === null) return;                                  // cancelou
+    copias = Math.max(1, Math.min(50, parseInt(r,10)||1));
+  }
+  const zpl = montarZplEtiqueta(p, copias);
   if(!zpl){ toast('Produto sem EAN nem SKU pra etiqueta'); return; }
   try{
     await conectarQZ();
@@ -1042,8 +1057,37 @@ async function imprimirEtiquetaProduto(){
     if(!printer){ toast('Sem impressora — clica no 🖨 pra escolher'); return; }
     const cfg = qz.configs.create(printer);
     await qz.print(cfg, [{ type:'raw', format:'command', flavor:'plain', data: zpl }]);
-    toast('🏷️ etiqueta enviada → '+printer);
+    toast('🏷️ '+copias+'x enviada(s) → '+printer);
   }catch(e){ toast('Erro na impressão: '+e.message); }
+}
+// botão 🏷️ da linha de separação
+function imprimirEtiquetaLinha(i){
+  const l = sepLinhas[i]; if(!l) return;
+  if(!l.sku || l.sku === '(sem SKU)'){ toast('Esse item não tem SKU pra etiqueta'); return; }
+  imprimirEtiquetaProduto({ nome: l.descricao, sku: l.sku, ean: l.ean });
+}
+
+// ── indexação total do catálogo (admin) — deixa todo EAN achável na hora ──
+let pollIdxTimer = null;
+async function indexarCatalogo(){
+  if(!souAdmin()){ toast('Só admin'); return; }
+  if(!confirm('Indexar o catálogo inteiro?\n\nVarre todos os produtos pra que qualquer EAN passe a achar na hora. Pode levar alguns minutos e roda em segundo plano — pode fechar a janela.')) return;
+  const r = await api('/girassol-backup-offline/indexar-catalogo?op='+encodeURIComponent(opAtual())).catch(()=>null);
+  if(!r || !r.ok){ toast('Não iniciou: '+((r&&r.erro)||'erro')); return; }
+  toast('Indexação iniciada…');
+  pollIndexar();
+}
+async function pollIndexar(){
+  clearTimeout(pollIdxTimer);
+  const r = await api('/girassol-backup-offline/indexar-status').catch(()=>null);
+  const st = r && r.status, el = $('idxStatus');
+  if(!st || !el) return;
+  if(st.rodando){
+    el.textContent = '⏳ indexando… '+st.feitos+' produtos · '+st.eans+' EANs';
+    pollIdxTimer = setTimeout(pollIndexar, 2500);
+  } else if(st.em){
+    el.textContent = '✅ índice pronto: '+st.feitos+' produtos · '+st.eans+' EANs'+(st.erro?(' (erro: '+st.erro+')'):'');
+  }
 }
 
 function renderSepChips(counts){
