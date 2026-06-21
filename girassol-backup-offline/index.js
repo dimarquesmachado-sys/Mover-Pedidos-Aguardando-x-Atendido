@@ -39,7 +39,7 @@ const { gerarDanfeSimplificado, gerarDanfeSimplificadoZPL } = require('./danfe-s
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v17/06 b53';
+const VERSAO     = 'girassol-backup-offline v17/06 b55';
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 
 // ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
@@ -95,6 +95,7 @@ function ehAdmin(nome) {
 const KIT_CACHE_FILE  = path.join(CACHE_DIR, 'kit-estrutura.json');  // kits já resolvidos
 const LOC_FILE        = path.join(CACHE_DIR, 'sku-localizacao.json'); // localização (depósito) por SKU
 const LOC_LOG_FILE    = path.join(CACHE_DIR, 'localizacao-log.json'); // auditoria: quem editou localização, de→para, quando
+const EAN_INDEX_FILE  = path.join(CACHE_DIR, 'ean-indice.json');      // índice EAN→{sku,nome,id} que cresce sozinho + indexação total
 const SCHEMA = 4;  // versão do snapshot — bump força re-cache dos pedidos antigos (b36: re-explode composições/variações)
 
 // loja → marketplace (mesmo mapa do checkout Girassol)
@@ -191,6 +192,58 @@ const skuEanCache    = () => readJson(SKU_EAN_FILE, {});
 const locCache       = () => readJson(LOC_FILE, {});
 const salvarLoc      = (m) => writeJson(LOC_FILE, m);
 const salvarSkuEan   = (m) => writeJson(SKU_EAN_FILE, m);
+
+// ─── índice de EAN (cresce sozinho: todo produto resolvido entra aqui) ───
+const lerIndiceEan = () => readJson(EAN_INDEX_FILE, {});
+function salvarNoIndiceEan(prod) {
+  try {
+    if (!prod || !prod.id) return;
+    const eans = getPossiveisGtins(prod).map(e => String(e).replace(/\D/g, '')).filter(e => e.length >= 8);
+    if (!eans.length) return;
+    const idx = lerIndiceEan();
+    let mudou = false;
+    for (const e of eans) {
+      const novo = { sku: prod.codigo || '', nome: prod.nome || '', id: prod.id };
+      if (JSON.stringify(idx[e]) !== JSON.stringify(novo)) { idx[e] = novo; mudou = true; }
+    }
+    if (mudou) writeJson(EAN_INDEX_FILE, idx);
+  } catch (e) {}
+}
+
+// ─── indexação total do catálogo (roda 1x; deixa todo EAN achável na hora) ───
+let idxStatus = { rodando: false, feitos: 0, eans: 0, em: null, fim: null, erro: null };
+async function indexarCatalogoCompleto() {
+  if (idxStatus.rodando) return;
+  idxStatus = { rodando: true, feitos: 0, eans: 0, em: new Date().toISOString(), fim: null, erro: null };
+  const novo = lerIndiceEan();                       // parte do que já existe
+  const PAUSA = Number(process.env.GIRABKP_PAUSA_MS || 700);
+  try {
+    let pagina = 1;
+    while (pagina <= 500) {                           // trava de segurança
+      const r = await blingGet(`/produtos?pagina=${pagina}&limite=100`);
+      const itens = (r.ok && r.data && r.data.data) || [];
+      if (!itens.length) break;
+      for (const it of itens) {
+        idxStatus.feitos++;
+        if (!it.id) continue;
+        let eans = getPossiveisGtins(it).map(e => String(e).replace(/\D/g, '')).filter(e => e.length >= 8);
+        let nome = it.nome, sku = it.codigo;
+        if (!eans.length) {                            // lista não trouxe GTIN → busca no detalhe
+          const det = await produtoDetalhe(it.id);
+          await sleep(PAUSA);
+          if (det) { eans = getPossiveisGtins(det).map(e => String(e).replace(/\D/g, '')).filter(e => e.length >= 8); nome = det.nome || nome; sku = det.codigo || sku; }
+        }
+        for (const e of eans) { if (!novo[e]) idxStatus.eans++; novo[e] = { sku: sku || '', nome: nome || '', id: it.id }; }
+      }
+      writeJson(EAN_INDEX_FILE, novo);                 // salva a cada página (resiliente a queda)
+      await sleep(PAUSA);
+      pagina++;
+    }
+  } catch (e) { idxStatus.erro = String(e && e.message || e); }
+  writeJson(EAN_INDEX_FILE, novo);
+  idxStatus.rodando = false;
+  idxStatus.fim = new Date().toISOString();
+}
 
 // GET autenticado no Bling Girassol (token via tokenManager + retry 429)
 async function blingGet(pathUrl, tentativas = 3) {
@@ -1007,7 +1060,11 @@ function routes(readBody) {
         let achou = null;
         for (const sku of Object.keys(se)) { if (String(se[sku]).replace(/\D/g, '') === dig) { achou = sku; break; } }
         if (achou) prod = await porSku(achou);
-        if (!prod) {
+        if (!prod) {                                           // índice de EAN (cresce sozinho / indexação total) — rápido e confiável
+          const hit = lerIndiceEan()[dig];
+          if (hit && hit.id) prod = await produtoDetalhe(hit.id);
+        }
+        if (!prod) {                                           // último recurso: filtro do Bling (lento, pouco confiável)
           for (const campo of ['gtin', 'gtinTributario', 'ean', 'codigoBarras']) {
             const r = await blingGet(`/produtos?${campo}=${encodeURIComponent(q)}&limite=5`);
             const itens = (r.ok && r.data && r.data.data) || [];
@@ -1022,6 +1079,7 @@ function routes(readBody) {
       }
       if (!prod && pareceEan) prod = await porSku(q);          // às vezes o código É o número digitado
       if (!prod) { json(res, 200, { ok: false, erro: 'nada encontrado p/ "' + q + '"' }); return true; }
+      salvarNoIndiceEan(prod);                                 // alimenta o índice — toda resolução entra no cache
       const est = prod.estoque || {};
       json(res, 200, { ok: true, produto: {
         sku: prod.codigo || '',
@@ -1031,6 +1089,20 @@ function routes(readBody) {
         localizacao: localizacaoDeProduto(prod),
         img: primeiraImagem(prod)
       } });
+      return true;
+    }
+
+    // ─── indexar catálogo inteiro (1x; deixa todo EAN achável na hora) — só admin ───
+    if (method === 'GET' && p === '/girassol-backup-offline/indexar-catalogo') {
+      const op = String(urlObj.searchParams.get('op') || '');
+      if (!ehAdmin(op)) { json(res, 200, { ok: false, precisa_admin: true, erro: 'só admin pode indexar' }); return true; }
+      if (idxStatus.rodando) { json(res, 200, { ok: true, started: false, jaRodando: true, status: idxStatus }); return true; }
+      indexarCatalogoCompleto();                       // dispara em background (não aguarda)
+      json(res, 200, { ok: true, started: true });
+      return true;
+    }
+    if (method === 'GET' && p === '/girassol-backup-offline/indexar-status') {
+      json(res, 200, { ok: true, status: idxStatus });
       return true;
     }
 
