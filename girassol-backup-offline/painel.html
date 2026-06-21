@@ -176,6 +176,9 @@
   .bcard .bnome{font-size:14px;font-weight:700;color:var(--tx);line-height:1.25;margin-bottom:3px}
   .bcard .bsku{font-size:13px;font-weight:700;color:#cfe0ff;font-family:ui-monospace,monospace}
   .bcard .bsub{font-size:12px;color:var(--mut);font-family:ui-monospace,monospace;margin-top:2px}
+  .bloc-atual{display:flex;align-items:center;gap:9px;margin-bottom:12px;padding:12px 15px;border-radius:12px;background:#13243f;border:1px solid var(--ac);font-size:15px;color:#cfe0ff}
+  .bloc-atual b{font-family:ui-monospace,monospace;font-weight:800;font-size:20px;letter-spacing:.5px}
+  .bloc-atual .semloc{color:var(--mut);font-style:italic;font-weight:600;font-size:14px}
   .bloc label{display:block;font-size:12px;color:var(--mut);margin-bottom:6px}
   .buscafld{flex:1;min-width:0;padding:11px;border-radius:10px;background:var(--card);border:1px solid var(--ac);color:var(--tx);font-size:16px;font-family:ui-monospace,monospace}
   .sepfoot{display:flex;gap:8px;padding:12px 16px;border-top:1px solid var(--line)}
@@ -260,7 +263,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b55';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b57';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#ff9900'}, magalu:{n:'Magalu',c:'#0086ff'}, outro:{n:'Outro',c:'#94a3b8'}
@@ -982,10 +985,13 @@ async function fazerBusca(){
         '<div class="bsub">EAN '+esc(p.ean||'—')+' · estoque <b>'+(p.estoque!=null?p.estoque:'?')+'</b></div>'+
       '</div>'+
     '</div>'+
+    '<div class="bloc-atual" id="blocAtual">📍 Localização atual: '+
+      (p.localizacao ? '<b>'+esc(p.localizacao)+'</b>' : '<span class="semloc">sem localização cadastrada</span>')+
+    '</div>'+
     '<div class="bloc">'+
-      '<label>Localização (edita e salva no Bling)</label>'+
+      '<label>✏️ Editar localização (salva no Bling)</label>'+
       '<div style="display:flex;gap:8px">'+
-        '<input id="buscaLoc" class="buscafld" style="text-transform:uppercase" value="'+esc(p.localizacao||'')+'" placeholder="localização" autocomplete="off" onkeydown="if(event.key===\'Enter\')salvarLocBusca()" />'+
+        '<input id="buscaLoc" class="buscafld" style="text-transform:uppercase" value="'+esc(p.localizacao||'')+'" placeholder="nova localização" autocomplete="off" onkeydown="if(event.key===\'Enter\')salvarLocBusca()" />'+
         '<button class="btn ok" onclick="salvarLocBusca()">✓ Salvar</button>'+
       '</div>'+
     '</div>'+
@@ -999,7 +1005,11 @@ async function salvarLocBusca(){
   if(!buscaProd || !buscaProd.sku){ toast('Busca um produto primeiro'); return; }
   const nova = (($('buscaLoc')||{}).value||'').trim().toUpperCase();
   const r = await postJson('/girassol-backup-offline/salvar-localizacao', { sku: buscaProd.sku, localizacao: nova, op: opAtual() }).catch(()=>null);
-  if(r && r.ok){ toast('✓ '+buscaProd.sku+' → '+(nova||'(vazio)')); buscaProd.localizacao = nova; }
+  if(r && r.ok){
+    toast('✓ '+buscaProd.sku+' → '+(nova||'(vazio)')); buscaProd.localizacao = nova;
+    const ba = $('blocAtual');
+    if(ba) ba.innerHTML = '📍 Localização atual: '+(nova ? '<b>'+esc(nova)+'</b>' : '<span class="semloc">sem localização cadastrada</span>');
+  }
   else { toast('Não salvou: '+((r&&r.erro)||'erro')); }
 }
 
