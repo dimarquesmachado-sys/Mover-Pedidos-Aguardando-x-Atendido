@@ -25,15 +25,91 @@ function configurado() {
   return !!(key && key.startsWith('sk-ant-'));
 }
 
-function montarSystemPrompt({ descricaoProduto, totalLixas, unidadesPorPacote, graosDisponiveis }) {
+// Bloco que deixa o TOTAL explicito e impede a IA de "ancorar" no numero do NOME
+// do produto (ex.: "100 Lixas") quando o cliente comprou varias unidades (4x100=400).
+function _blocoTotal(lixasPorKit, qtdKits, totalLixas) {
+  const lpk = Number(lixasPorKit) || null;
+  const qk = Number(qtdKits) || null;
+  if (lpk && qk && qk > 1) {
+    return `- ⚠️ TOTAL DO PEDIDO = ${totalLixas} LIXAS. O cliente comprou ${qk} unidades deste anuncio, e cada unidade = ${lpk} lixas: ${lpk} × ${qk} = ${totalLixas}. Use SEMPRE ${totalLixas} como total.
+- ⚠️ O numero no NOME do produto (ex.: "${lpk} Lixas...") e a quantidade POR UNIDADE, NAO o total. Como o cliente comprou ${qk} unidades, NUNCA use ${lpk} como total — o total e ${totalLixas}.`;
+  }
+  return `- TOTAL DO PEDIDO = ${totalLixas} lixas. Use SEMPRE ${totalLixas} como total (ignore qualquer outro numero que apareca no nome do produto).`;
+}
+
+// Regras de FORMATO da mensagem ao cliente: "g" no grao + "un" na quantidade, e
+// PROIBIDO sequencia de numeros somados (o ML bloqueia achando que e telefone).
+function _blocoFormatoMsg(totalLixas) {
+  return `COMO ESCREVER GRAOS E QUANTIDADES NA MENSAGEM AO CLIENTE (formato OBRIGATORIO):
+- GRAO sempre com "g" na frente: g24, g40, g80, g120, g240 (pro cliente nao confundir grao com quantidade de lixa).
+- QUANTIDADE com "un": 20un, 100un. Um item fica "20un de g40" (= 20 unidades do grao 40).
+- PROIBIDO escrever numeros somados tipo "50+100+100+100+50" ou lista de numeros soltos "20, 30, 30, 10": o Mercado Livre BLOQUEIA a mensagem achando que e telefone. SEMPRE quebre os numeros com "un"/"g".
+- PROIBIDO terminar com "= ${totalLixas}". Escreva "(total ${totalLixas} lixas)" no lugar.
+- Modelo de confirmacao: "Olá! Pedido confirmado: 20un de g40, 30un de g80, 30un de g120, 10un de g180, 10un de g240 (total ${totalLixas} lixas). Será postado em breve e o rastreio você acompanha na sua compra no Mercado Livre. Obrigado! 😊"`;
+}
+
+// Gera a mensagem de CONFIRMACAO deterministica (formato g/un, sem somas) quando o
+// pedido foi revalidado pelo codigo. Nao depende da LLM (que as vezes escreve uma msg
+// de "ajuste" por engano ao ancorar no numero do nome). Respeita o limite de 350 do ML.
+function _montarMsgConfirmacao(itens, totalLixas) {
+  const lista = itens
+    .map(it => `${Number(it.quantidade)}un de g${String(it.grao).trim()}`)
+    .join(', ');
+  const full = `Olá! Pedido confirmado: ${lista} (total ${totalLixas} lixas). Será postado em breve e o rastreio você acompanha na sua compra no Mercado Livre. Obrigado!`;
+  if (full.length <= 350) return full;
+  const medio = `Olá! Pedido confirmado: ${lista} (total ${totalLixas} lixas). Será postado em breve. Obrigado!`;
+  if (medio.length <= 350) return medio;
+  return `Olá! Pedido confirmado (total ${totalLixas} lixas). Será postado em breve. Obrigado!`;
+}
+
+// SAFETY NET anti-anchoring: revalida NO CODIGO se o pedido_estruturado da LLM fecha
+// EXATAMENTE totalLixas, com graos validos e quantidades multiplas de unidadesPorPacote.
+// Se fecha mas a LLM classificou como "ambiguo"/"pergunta_graos" (tipico quando ela
+// "ancora" no numero do NOME do produto — ex.: ve "100 Lixas" e acha que o total e 100,
+// nao 400), PROMOVE para "claro" e troca a msg por uma confirmacao deterministica.
+// NUNCA rebaixa: se ja era "claro", ou se o pedido nao fecha, deixa exatamente como esta.
+function _revalidarPedido(parsed, { graosDisponiveis, unidadesPorPacote, totalLixas }) {
+  const itens = Array.isArray(parsed.pedido_estruturado) ? parsed.pedido_estruturado : null;
+  if (!itens || itens.length === 0) return parsed;
+
+  const total = Number(totalLixas) || 0;
+  const upp = Number(unidadesPorPacote) || 0;
+  if (!total) return parsed;
+
+  const disp = (graosDisponiveis || []).map(g => String(g).trim());
+  let soma = 0;
+  let todosValidos = true;
+  for (const it of itens) {
+    const grao = String(it && it.grao != null ? it.grao : '').trim();
+    const qtd = Number(it && it.quantidade);
+    if (!grao || !disp.includes(grao)) { todosValidos = false; break; }
+    if (!Number.isFinite(qtd) || qtd <= 0) { todosValidos = false; break; }
+    if (upp > 0 && qtd % upp !== 0) { todosValidos = false; break; }
+    soma += qtd;
+  }
+
+  const fechaCerto = todosValidos && soma === total;
+  if (fechaCerto && parsed.categoria !== 'claro') {
+    console.warn(`[ia] safety-net anti-anchoring: pedido fecha ${soma}=${total} com graos validos, mas LLM classificou "${parsed.categoria}". Promovendo para "claro".`);
+    parsed.categoria = 'claro';
+    parsed.msg_pra_cliente = _montarMsgConfirmacao(itens, total);
+    parsed.interpretacao = `Pedido fecha ${soma} lixas com grãos disponíveis (revalidado pelo sistema).`;
+    parsed._safety_net = true;
+    parsed._safety_net_soma = soma;
+    if (typeof parsed.confianca !== 'number' || parsed.confianca < 95) parsed.confianca = 99;
+  }
+  return parsed;
+}
+
+function montarSystemPrompt({ descricaoProduto, totalLixas, unidadesPorPacote, graosDisponiveis, lixasPorKit, qtdKits }) {
   return `Voce eh assistente de atendimento da Magazine Girassol no Mercado Livre, especializado em vendas de lixas A COMBINAR.
 
 CONTEXTO DA VENDA ATUAL:
 - Produto: ${descricaoProduto}
-- Total comprado: ${totalLixas} lixas
+${_blocoTotal(lixasPorKit, qtdKits, totalLixas)}
 - Cliente deve escolher quantidades em MULTIPLOS DE ${unidadesPorPacote}
 - Graos disponiveis em estoque AGORA: ${graosDisponiveis.join(', ')}
-- Soma das quantidades escolhidas deve dar EXATAMENTE ${totalLixas} lixas
+- A soma das quantidades escolhidas deve dar EXATAMENTE ${totalLixas} lixas
 
 IMPORTANTE - CONTEXTO DA CONVERSA:
 Voce vera o HISTORICO da conversa. Use-o para interpretar mensagens curtas ou ambiguas
@@ -82,7 +158,7 @@ CLASSIFIQUE em UMA destas 4 categorias:
    listando EXATAMENTE os itens (inclusive os que voce completou no caso B), e ENCERRE
    avisando da postagem. NAO pergunte se esta correto, NAO convide a mudar, NAO termine
    com pergunta. Se houver muitos itens, abrevie (ex: "10x grão 40") pra caber nos 350 chars.
-   Ex de tom: "Olá! Pedido confirmado: [itens] — total ${totalLixas} lixas. Será postado em breve e todo rastreamento da entrega você acompanha dentro da sua compra no MercadoLivre. Obrigado! 😊"
+   Ex de tom (siga o FORMATO de baixo): "Olá! Pedido confirmado: 20un de g40, 30un de g80, 30un de g120, 10un de g180, 10un de g240 (total ${totalLixas} lixas). Será postado em breve e o rastreio você acompanha na sua compra no Mercado Livre. Obrigado! 😊"
 
 2. "ambiguo" - Use APENAS quando NAO der pra resolver sozinho:
    - cliente listou graos mas SEM quantidade nenhuma e SEM sinal de variedade; OU
@@ -98,7 +174,7 @@ CLASSIFIQUE em UMA destas 4 categorias:
    AÇÃO: Peça/ajuste de forma clara, com exemplo. Se for nao-multiplo de ${unidadesPorPacote},
    explique que as quantidades precisam ser multiplas de ${unidadesPorPacote}. Se o grao pedido
    NAO existe na lista, avise que aquele grao nao esta disponivel e liste os disponiveis mais
-   proximos pra ele escolher (ex.: "o grao 100 nao esta disponivel; temos 80 e 120, qual prefere?").
+   proximos pra ele escolher (ex.: "o grao g100 nao esta disponivel; temos g80 e g120, qual prefere?").
 
 3. "pergunta_graos" - Cliente esta perguntando QUAIS graos estao disponiveis
    Ex: "quais graos vcs tem?"
@@ -107,6 +183,8 @@ CLASSIFIQUE em UMA destas 4 categorias:
 
 4. "fora_escopo" - QUALQUER outro assunto (preço, desconto, frete, troca, garantia, outros produtos, reclamacao, agradecimento simples, etc)
    AÇÃO: NAO responda nada. Marque como escalonamento humano.
+
+${_blocoFormatoMsg(totalLixas)}
 
 REGRAS RIGIDAS:
 - NUNCA invente nem ACEITE graos que nao estao na lista de disponiveis. Confira CADA grao
@@ -133,9 +211,12 @@ FORMATO DE RESPOSTA (JSON puro, sem markdown, sem comentario):
   "categoria": "claro" | "ambiguo" | "pergunta_graos" | "fora_escopo",
   "confianca": 0-100,
   "interpretacao": "frase curta explicando o que cliente quer",
-  "pedido_estruturado": [{"grao": "24", "quantidade": 30}] ou null,
+  "pedido_estruturado": [{"grao": "24", "quantidade": 30}] (preencha SEMPRE que houver itens) ou null,
   "msg_pra_cliente": "texto resposta" ou null se fora_escopo
-}`;
+}
+LEMBRE: SEMPRE preencha pedido_estruturado com os itens (grao+quantidade) que conseguiu
+extrair, MESMO em "ambiguo" (ex.: quando voce acha que nao fecha o total). So deixe null
+em "pergunta_graos" e "fora_escopo". O sistema revalida a soma por conta propria.`;
 }
 
 /**
@@ -144,12 +225,12 @@ FORMATO DE RESPOSTA (JSON puro, sem markdown, sem comentario):
  * o vendedor sempre esta mandando montar um pedido. A conversa do cliente vira
  * so contexto e a palavra do vendedor prevalece.
  */
-function montarSystemPromptVendedor({ descricaoProduto, totalLixas, unidadesPorPacote, graosDisponiveis }) {
+function montarSystemPromptVendedor({ descricaoProduto, totalLixas, unidadesPorPacote, graosDisponiveis, lixasPorKit, qtdKits }) {
   return `Voce processa uma ORDEM AUTORITATIVA do VENDEDOR (dono da loja Magazine Girassol) para montar um pedido de lixas A COMBINAR. ISTO NAO EH mensagem de cliente final — eh o vendedor te dando a palavra FINAL sobre o pedido.
 
 CONTEXTO DA VENDA:
 - Produto: ${descricaoProduto}
-- Total: ${totalLixas} lixas
+${_blocoTotal(lixasPorKit, qtdKits, totalLixas)}
 - Quantidades em MULTIPLOS DE ${unidadesPorPacote}
 - Graos disponiveis no Bling AGORA: ${graosDisponiveis.join(', ')}
 - A soma das quantidades deve dar EXATAMENTE ${totalLixas} lixas
@@ -188,14 +269,18 @@ REGRAS:
   e pode ser enviada ao cliente): liste os itens montados de forma declarativa.
 - Em "ambiguo", msg_pra_cliente eh a observacao PRO VENDEDOR (o que ajustar).
 
+${_blocoFormatoMsg(totalLixas)}
+
 FORMATO DE RESPOSTA (JSON puro, sem markdown, sem comentario):
 {
   "categoria": "claro" | "ambiguo",
   "confianca": 0-100,
   "interpretacao": "frase curta do que o vendedor mandou montar",
-  "pedido_estruturado": [{"grao": "120", "quantidade": 30}] ou null,
+  "pedido_estruturado": [{"grao": "120", "quantidade": 30}] (preencha SEMPRE que houver itens) ou null,
   "msg_pra_cliente": "confirmacao do pedido (claro) OU o que ajustar (ambiguo)" ou null
-}`;
+}
+LEMBRE: SEMPRE preencha pedido_estruturado com os itens que o vendedor mandou montar,
+MESMO se voce achar que nao fecha. O sistema revalida a soma por conta propria.`;
 }
 
 /**
@@ -212,7 +297,9 @@ async function interpretarRespostaCliente({
   unidadesPorPacote,
   graosDisponiveis,
   historicoConversa,
-  modoVendedor   // true => a instrucao e ORDEM autoritativa do vendedor (nunca fora_escopo)
+  modoVendedor,   // true => a instrucao e ORDEM autoritativa do vendedor (nunca fora_escopo)
+  lixasPorKit,    // lixas por unidade do anuncio (ex.: 100)
+  qtdKits         // quantas unidades o cliente comprou (ex.: 4) -> total = lixasPorKit*qtdKits
 }) {
   if (!configurado()) {
     return { ok: false, erro: 'IA nao configurada (env ANTHROPIC_API_KEY_LIXAS_IA ausente)' };
@@ -223,8 +310,8 @@ async function interpretarRespostaCliente({
 
   const apiKey = process.env[API_KEY_VAR];
   const systemPrompt = modoVendedor
-    ? montarSystemPromptVendedor({ descricaoProduto, totalLixas, unidadesPorPacote, graosDisponiveis })
-    : montarSystemPrompt({ descricaoProduto, totalLixas, unidadesPorPacote, graosDisponiveis });
+    ? montarSystemPromptVendedor({ descricaoProduto, totalLixas, unidadesPorPacote, graosDisponiveis, lixasPorKit, qtdKits })
+    : montarSystemPrompt({ descricaoProduto, totalLixas, unidadesPorPacote, graosDisponiveis, lixasPorKit, qtdKits });
 
   // Monta texto da mensagem do user com historico (se disponivel) + msg/ordem atual
   let userText = '';
@@ -317,6 +404,11 @@ async function interpretarRespostaCliente({
         raw: parsed
       };
     }
+
+    // SAFETY NET anti-anchoring: revalida a soma no codigo (neutraliza a ancoragem da
+    // LLM no numero do NOME do produto). Promove ambiguo->claro quando o pedido fecha
+    // certo (graos validos + multiplos + soma == totalLixas) e gera msg de confirmacao.
+    _revalidarPedido(parsed, { graosDisponiveis, unidadesPorPacote, totalLixas });
 
     // msg_pra_cliente max 350 chars (validacao extra)
     if (parsed.msg_pra_cliente && parsed.msg_pra_cliente.length > 350) {
@@ -515,5 +607,8 @@ module.exports = {
   configurado,
   interpretarRespostaCliente,
   interpretarRespostaClienteMultiKit,
-  MODELO
+  MODELO,
+  // expostos para teste (uso interno; sem efeito em producao)
+  _revalidarPedido,
+  _montarMsgConfirmacao
 };
