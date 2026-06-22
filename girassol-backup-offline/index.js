@@ -39,7 +39,7 @@ const { gerarDanfeSimplificado, gerarDanfeSimplificadoZPL } = require('./danfe-s
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v17/06 b64';
+const VERSAO     = 'girassol-backup-offline v17/06 b65';
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 
 // ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
@@ -1617,6 +1617,22 @@ function routes(readBody) {
       const pdf = nf && nf.id ? await baixarDanfe(nf.id) : null;
       if (pdf) { res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': `inline; filename="danfe-${id}.pdf"` }); res.end(pdf); }
       else json(res, 404, { ok: false, erro: 'DANFE indisponível (pedido sem NF ou Bling não respondeu)', nf: nf || null });
+      return true;
+    }
+    // DEBUG: mostra a resposta crua do Bling pra entender como buscar pedido (filtro funciona? 116856 é numero ou numeroLoja?)
+    if (method === 'GET' && p === '/girassol-backup-offline/debug-busca') {
+      const q = String(urlObj.searchParams.get('q') || '').trim();
+      const amostra = (d) => (d && Array.isArray(d.data)) ? d.data.slice(0, 5).map(x => ({ id: x.id, numero: x.numero, numeroLoja: x.numeroLoja })) : (d || null);
+      const out = { q };
+      const a = await blingGet(`/pedidos/vendas?limite=5`); await sleep(PAUSA_MS);
+      out.sem_filtro = { ok: a.ok, status: a.status, qtd: (a.data && a.data.data) ? a.data.data.length : null, amostra: amostra(a.data) };
+      const b = await blingGet(`/pedidos/vendas?numero=${encodeURIComponent(q)}&limite=10`); await sleep(PAUSA_MS);
+      out.por_numero = { ok: b.ok, status: b.status, qtd: (b.data && b.data.data) ? b.data.data.length : null, amostra: amostra(b.data) };
+      const c = await blingGet(`/pedidos/vendas?numeroLoja=${encodeURIComponent(q)}&limite=10`); await sleep(PAUSA_MS);
+      out.por_numeroLoja = { ok: c.ok, status: c.status, qtd: (c.data && c.data.data) ? c.data.data.length : null, amostra: amostra(c.data) };
+      const d = await blingGet(`/pedidos/vendas/${encodeURIComponent(q)}`);
+      out.por_id = { ok: d.ok, status: d.status, achou: !!(d.data && d.data.data), numero: d.data && d.data.data && d.data.data.numero };
+      json(res, 200, out);
       return true;
     }
 
