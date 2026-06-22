@@ -39,7 +39,7 @@ const { gerarDanfeSimplificado, gerarDanfeSimplificadoZPL } = require('./danfe-s
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v17/06 b63';
+const VERSAO     = 'girassol-backup-offline v17/06 b64';
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 
 // ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
@@ -1569,6 +1569,54 @@ function routes(readBody) {
         problemas,
         avisos
       });
+      return true;
+    }
+
+    // BUSCAR PEDIDO por número (ou ID) em QUALQUER status — ao vivo no Bling.
+    // Pra achar a NF de um pedido que não passou pelo Checkout Offline.
+    if (method === 'GET' && p === '/girassol-backup-offline/buscar-pedido') {
+      const q = String(urlObj.searchParams.get('q') || '').trim();
+      if (!q) { json(res, 400, { ok: false, erro: 'use ?q=NUMERO' }); return true; }
+      let ids = [], via = null;
+      // 1) tenta filtrar por número — e confiro no código (caso o Bling ignore o filtro, igual no /nfe)
+      const r1 = await blingGet(`/pedidos/vendas?numero=${encodeURIComponent(q)}&limite=20`);
+      if (r1.ok && r1.data && Array.isArray(r1.data.data)) {
+        const match = r1.data.data.filter(p => String(p.numero) === String(q));
+        if (match.length) { ids = match.map(p => p.id); via = 'numero'; }
+      }
+      // 2) fallback: trata q como ID interno do Bling
+      if (!ids.length) {
+        const r2 = await blingGet(`/pedidos/vendas/${encodeURIComponent(q)}`);
+        if (r2.ok && r2.data && r2.data.data && String(r2.data.data.id) === String(q)) { ids = [r2.data.data.id]; via = 'id'; }
+      }
+      const pedidos = [];
+      for (const id of ids.slice(0, 10)) {
+        const det = await detalhePedido(id);
+        if (!det) continue;
+        const nf = await nfDoPedido(id);
+        pedidos.push({
+          id: det.id,
+          numero: det.numero || null,
+          data: det.data || null,
+          situacao_id: (det.situacao && (det.situacao.id || det.situacao)) || null,
+          cliente: (det.contato && det.contato.nome) || '',
+          total: det.total || null,
+          loja_id: (det.loja && det.loja.id) || null,
+          itens: Array.isArray(det.itens) ? det.itens.map(it => ({ descricao: it.descricao || (it.produto && it.produto.nome) || '', sku: it.codigo || (it.produto && it.produto.codigo) || '', qtd: it.quantidade || 0 })) : [],
+          nf: nf ? { id: nf.id, numero: nf.numero, chave: nf.chave } : null
+        });
+        await sleep(PAUSA_MS);
+      }
+      json(res, 200, { ok: pedidos.length > 0, via, q, total: pedidos.length, pedidos });
+      return true;
+    }
+    // baixa o DANFE (PDF) de QUALQUER pedido ao vivo (acha a NF na hora) — não precisa estar no cache
+    if (method === 'GET' && p.startsWith('/girassol-backup-offline/nf-danfe-live/')) {
+      const id = p.split('/').filter(Boolean).pop();
+      const nf = await nfDoPedido(id);
+      const pdf = nf && nf.id ? await baixarDanfe(nf.id) : null;
+      if (pdf) { res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': `inline; filename="danfe-${id}.pdf"` }); res.end(pdf); }
+      else json(res, 404, { ok: false, erro: 'DANFE indisponível (pedido sem NF ou Bling não respondeu)', nf: nf || null });
       return true;
     }
 
