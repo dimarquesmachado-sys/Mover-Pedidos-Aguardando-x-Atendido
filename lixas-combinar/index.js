@@ -31,6 +31,57 @@ function html(res, code, body) {
   res.end(body);
 }
 
+// Envia ao cliente a confirmacao do pedido (formato g/un, sem somas) apos a NF emitir.
+// REGRAS:
+//  - so dispara em pedido CLARO (ia_categoria === 'claro'). No caso de substituicao a
+//    categoria nao e 'claro' e a msg de substituicao JA confirma o pedido final — entao
+//    aqui nao manda nada (evita confirmar com os graos antigos por cima).
+//  - idempotente: se a ULTIMA msg enviada ao cliente JA e exatamente esta confirmacao,
+//    nao reenvia (evita duplicar quando clica emitir/recuperar de novo, code 74 etc).
+//  - best-effort: NUNCA lanca. A NF ja saiu; confirmar o cliente nao pode quebrar a rota.
+async function enviarConfirmacaoPedido(v, orderId) {
+  try {
+    if (!v || v.ia_categoria !== 'claro') return { ok: false, motivo: 'nao_claro_sem_confirmacao' };
+
+    let itens = [];
+    try { itens = JSON.parse(v.ia_pedido_estruturado || '[]'); } catch (_) { itens = []; }
+    if (!Array.isArray(itens) || itens.length === 0) return { ok: false, motivo: 'sem_pedido_estruturado' };
+
+    const totalLixas = itens.reduce((s, g) => s + (Number(g.quantidade) || 0), 0);
+    const ia = require('./iaCliente');
+    const texto = ia._montarMsgConfirmacao(itens, totalLixas);
+
+    // idempotencia: ja enviamos exatamente esta confirmacao? nao repete.
+    if ((v.ia_msg_enviada || '').trim() === texto.trim()) {
+      return { ok: true, jaConfirmado: true, texto };
+    }
+
+    const ml = require('../auto-mensagens/mlApi');
+    let buyerId = null;
+    try { const od = await ml.getOrderDetalhe(orderId); buyerId = od && od.buyer ? od.buyer.id : null; } catch (_) {}
+
+    let r = buyerId
+      ? await ml.enviarMensagemDireta({ packId: v.pack_id, orderId, buyerId, texto })
+      : { ok: false, erro: 'sem_buyerId' };
+    let via = 'direta';
+    if (!r || !r.ok) {
+      const r2 = await ml.enviarMensagem({ packId: v.pack_id, orderId, buyerId, texto });
+      if (r2 && r2.ok) { r = r2; via = 'action_guide'; }
+      else return { ok: false, motivo: 'falha_envio_ml', direta: r, action_guide: r2 };
+    }
+
+    // marca a confirmacao enviada (pra idempotencia futura)
+    try {
+      const lcp = require('../auto-mensagens/lixasCombinarPendentes');
+      await lcp.atualizarVenda(orderId, { ia_msg_enviada: texto });
+    } catch (_) {}
+
+    return { ok: true, via, texto, message_id: r.message_id, moderation_status: r.moderation_status };
+  } catch (e) {
+    return { ok: false, motivo: e.message };
+  }
+}
+
 // ── Router (interface esperada pelo orquestrador raiz) ───────────────
 function routes(readBody) {
   return async function handle(req, res, urlObj) {
@@ -684,7 +735,8 @@ function routes(readBody) {
               status: 'processado'
             });
             console.log(`[lixas-combinar emitir-nf] orderId=${orderId} JA possuia NF referenciada (code 74) — marcado como emitida`);
-            json(res, 200, { ok: true, jaEmitida: true, mensagem: 'Esta venda ja possui NF-e referenciada no Bling. Registrado como emitida.' });
+            const confJa = await enviarConfirmacaoPedido(v, orderId);
+            json(res, 200, { ok: true, jaEmitida: true, mensagem: 'Esta venda ja possui NF-e referenciada no Bling. Registrado como emitida.', confirmacao_cliente: confJa });
             return true;
           }
           await lcp.atualizarVenda(orderId, {
@@ -705,7 +757,8 @@ function routes(readBody) {
           status: 'processado'
         });
 
-        json(res, 200, { ok: true, ...r });
+        const conf = await enviarConfirmacaoPedido(v, orderId);
+        json(res, 200, { ok: true, ...r, confirmacao_cliente: conf });
       } catch (e) {
         console.error('[lixas-combinar emitir-nf]', e);
         json(res, 500, { ok: false, erro: e.message });
@@ -803,7 +856,8 @@ function routes(readBody) {
             await lcp.atualizarVenda(orderId, {
               nf_emitida_em: new Date().toISOString(), nf_erro: null, status: 'processado'
             });
-            json(res, 200, { ok: true, jaEmitida: true, mensagem: 'Bling ja tinha NF referenciada — registrado como emitida.' });
+            const confR1 = await enviarConfirmacaoPedido(v, orderId);
+            json(res, 200, { ok: true, jaEmitida: true, mensagem: 'Bling ja tinha NF referenciada — registrado como emitida.', confirmacao_cliente: confR1 });
             return true;
           }
           await lcp.atualizarVenda(orderId, {
@@ -821,7 +875,8 @@ function routes(readBody) {
           nf_chave: nf.chave || null, nf_erro: null,
           status: 'processado'
         });
-        json(res, 200, { ok: true, recuperado: true, pedidoId: pedidoBlingId, nfNumero: nf.numero, nfSerie: nf.serie });
+        const confR2 = await enviarConfirmacaoPedido(v, orderId);
+        json(res, 200, { ok: true, recuperado: true, pedidoId: pedidoBlingId, nfNumero: nf.numero, nfSerie: nf.serie, confirmacao_cliente: confR2 });
       } catch (e) {
         console.error('[lixas-combinar recuperar-nf]', e);
         json(res, 500, { ok: false, erro: e.message });
