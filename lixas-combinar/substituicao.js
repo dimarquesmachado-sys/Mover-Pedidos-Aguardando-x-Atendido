@@ -154,17 +154,17 @@ function montarMsgSubstituicao(trocas, pedidoFinal, totalLixas) {
   let fraseTroca;
   if (trocas.length === 1) {
     const t = trocas[0];
-    fraseTroca = `O grão ${t.de} estava sem estoque e não recebemos sua escolha a tempo. Para não atrasar o envio do seu pedido, substituímos pelo grão ${t.para}, o mais próximo disponível.`;
+    fraseTroca = `O grão g${t.de} estava sem estoque e não recebemos sua escolha a tempo. Para não atrasar o envio do seu pedido, substituímos pelo grão g${t.para}, o mais próximo disponível.`;
   } else {
-    const des = trocas.map(t => t.de).join(', ');
-    const par = trocas.map(t => `${t.de}→${t.para}`).join(', ');
+    const des = trocas.map(t => `g${t.de}`).join(', ');
+    const par = trocas.map(t => `g${t.de} por g${t.para}`).join(', ');
     fraseTroca = `Os grãos ${des} estavam sem estoque e não recebemos sua escolha a tempo. Para não atrasar o envio, substituímos pelos mais próximos disponíveis: ${par}.`;
   }
 
-  const comp = (pedidoFinal || []).map(g => `${g.quantidade}x${g.grao}`).join(', ');
+  const comp = (pedidoFinal || []).map(g => `${g.quantidade}un de g${g.grao}`).join(', ');
   const rastreio = 'O rastreamento do envio você acompanha dentro da sua compra no Mercado Livre.';
 
-  let msg = `Olá! ${fraseTroca} Seu pedido: ${comp} = ${totalLixas} lixas. ${rastreio} Qualquer dúvida, estamos à disposição!`;
+  let msg = `Olá! ${fraseTroca} Seu pedido: ${comp} (total ${totalLixas} lixas). ${rastreio} Qualquer dúvida, estamos à disposição!`;
   if (msg.length > 350) {
     // sem a composicao detalhada (caso muitos graos estourem o limite)
     msg = `Olá! ${fraseTroca} ${rastreio} Qualquer dúvida, estamos à disposição!`;
@@ -220,20 +220,21 @@ function montarMsgReengajamento(indisponiveis, nivel = 1) {
   const umGrao = indisponiveis.length === 1;
 
   const listaGraos = umGrao
-    ? `o grão ${indisponiveis[0].grao}`
-    : `os grãos ${indisponiveis.map(i => i.grao).join(', ')}`;
+    ? `o grão g${indisponiveis[0].grao}`
+    : `os grãos ${indisponiveis.map(i => 'g' + i.grao).join(', ')}`;
 
   // sugestões agregadas, sem repetir (ordem de proximidade vem pronta do chamador)
   const sug = [];
   for (const i of indisponiveis) for (const s of (i.sugestoes || [])) if (s != null && !sug.includes(s)) sug.push(s);
   const A = sug[0];
-  const listaSug = sug.length >= 2
-    ? `${sug.slice(0, -1).join(', ')} ou ${sug[sug.length - 1]}`
-    : (sug.length === 1 ? `${sug[0]}` : '');
+  const sugG = sug.map(s => 'g' + s);
+  const listaSug = sugG.length >= 2
+    ? `${sugG.slice(0, -1).join(', ')} ou ${sugG[sugG.length - 1]}`
+    : (sugG.length === 1 ? `${sugG[0]}` : '');
 
   let msg;
   if (nivel >= 3) {
-    const escolhido = A != null ? `o grão ${A} (o mais próximo)` : 'o grão mais próximo disponível';
+    const escolhido = A != null ? `o grão g${A} (o mais próximo)` : 'o grão mais próximo disponível';
     msg = `Última chamada sobre seu pedido de lixas: ${listaGraos} segue sem estoque. Pra não atrasar seu envio, se não recebermos sua escolha em breve enviaremos ${escolhido}. Se preferir outro, é só avisar! 🙂`;
   } else if (nivel === 2) {
     const onde = listaSug ? `entre ${listaSug}` : 'outro grão da lista';
