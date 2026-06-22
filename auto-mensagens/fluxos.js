@@ -429,19 +429,19 @@ async function montarMensagemInteligente(detalhe) {
 
     // Gera exemplo DINÂMICO que SOMA até o total real
     function gerarExemplo(total, unidades, graosArr) {
-      if (graosArr.length === 0) return `Ex: ${total} do grão desejado.`;
-      if (graosArr.length === 1) return `Ex: ${total} do grão ${graosArr[0]}.`;
+      if (graosArr.length === 0) return `Ex: ${total}un do grão desejado.`;
+      if (graosArr.length === 1) return `Ex: ${total}un de g${graosArr[0]}.`;
       const grao1 = graosArr[0];
       const idx2 = Math.min(2, graosArr.length - 1);
       const grao2 = graosArr[idx2];
       const parte1 = Math.round(total * 0.3 / unidades) * unidades;
       const parte2 = total - parte1;
-      return `Ex: ${parte1} do grão ${grao1}; ${parte2} do grão ${grao2}.`;
+      return `Ex: ${parte1}un de g${grao1}; ${parte2}un de g${grao2}.`;
     }
 
     // Monta mensagem desenhada (com acentos, MAIUSCULO nos pontos chave)
     function montar(graosArr) {
-      const graosStr = graosArr.join(', ');
+      const graosStr = graosArr.map(g => 'g' + g).join(', ');
       const exemplo = gerarExemplo(totalLixas, unidades, graosArr);
       return `Olá! INFORME a combinação de lixas e grãos do seu pedido.
 
@@ -1075,7 +1075,19 @@ async function rotinaLerRespostas() {
               }
 
               const graosDisponiveis = graosResult.graos.map(g => g.grao);
-              const totalLixas = graosResult.lixas_por_kit; // 100 por padrao (quantidade comprada armazenada na venda)
+              // total REAL = lixas_por_kit x quantidade comprada (1 unidade do anuncio = 1 kit).
+              // CRITICO p/ multi-kit: se a cliente comprou 4 kits de 100, o total e 400, nao 100.
+              // Le a quantity do ML pelo MESMO helper da auto-emissao (extrairSkuACombinar).
+              let qtdKitsResp = 1;
+              try {
+                const detResp = await ml.getOrderDetalhe(venda.order_id);
+                const infoResp = ml.extrairSkuACombinar(detResp);
+                if (infoResp && Number(infoResp.quantidade) > 0) qtdKitsResp = Number(infoResp.quantidade);
+              } catch (e) {
+                console.warn(`[ia] order ${venda.order_id} nao li a quantidade do ML — assumindo 1 kit: ${e.message}`);
+              }
+              const totalLixas = Number(graosResult.lixas_por_kit) * qtdKitsResp;
+              if (qtdKitsResp !== 1) console.log(`[ia] order ${venda.order_id} qtd_kits=${qtdKitsResp} -> total_lixas=${totalLixas}`);
               const unidadesPorPacote = graosResult.unidades_por_pacote || 10;
 
               // Monta historico da conversa pro contexto (max 10 ultimas msgs)
@@ -1098,7 +1110,9 @@ async function rotinaLerRespostas() {
                 totalLixas,
                 unidadesPorPacote,
                 graosDisponiveis,
-                historicoConversa
+                historicoConversa,
+                lixasPorKit: graosResult.lixas_por_kit,
+                qtdKits: qtdKitsResp
               });
 
               if (!iaResult.ok) {
