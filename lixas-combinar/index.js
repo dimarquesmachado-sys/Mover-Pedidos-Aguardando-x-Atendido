@@ -346,11 +346,20 @@ function routes(readBody) {
           json(res, 500, { ok: false, erro: 'erro_consultar_graos_bling', detalhe: graosResult.erro }); return true;
         }
         const graosDisponiveis = graosResult.graos.map(g => g.grao);
-        const totalLixas = graosResult.lixas_por_kit;
         const unidadesPorPacote = graosResult.unidades_por_pacote || 10;
+        const ml = require('../auto-mensagens/mlApi');
+        // total REAL = lixas_por_kit x quantidade comprada (multi-kit: 4 kits de 100 = 400)
+        let qtdKits = 1;
+        try {
+          const det = await ml.getOrderDetalhe(orderId);
+          const info = ml.extrairSkuACombinar(det);
+          if (info && Number(info.quantidade) > 0) qtdKits = Number(info.quantidade);
+        } catch (e) {
+          console.warn(`[ia-instrucao] order ${orderId} nao li a quantidade do ML — assumindo 1 kit: ${e.message}`);
+        }
+        const totalLixas = Number(graosResult.lixas_por_kit) * qtdKits;
 
         // rele a conversa do ML (mesma fonte do automatico)
-        const ml = require('../auto-mensagens/mlApi');
         let historicoConversa = [];
         try {
           const conv = await ml.consultarConversa({ packId: v.pack_id, orderId, markAsRead: false });
@@ -374,7 +383,9 @@ function routes(readBody) {
           unidadesPorPacote,
           graosDisponiveis,
           historicoConversa,
-          modoVendedor: true
+          modoVendedor: true,
+          lixasPorKit: graosResult.lixas_por_kit,
+          qtdKits
         });
 
         if (!iaResult.ok) { json(res, 502, { ok: false, erro: 'ia_falhou', detalhe: iaResult.erro }); return true; }
