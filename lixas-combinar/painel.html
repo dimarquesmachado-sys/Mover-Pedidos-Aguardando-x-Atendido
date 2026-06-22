@@ -182,7 +182,7 @@
 
 <div id="app" style="display:none">
 <header>
-  <h1>🌻 Lixas A COMBINAR <span class="badge">Pendentes</span><span class="ver" style="font-size:11px;font-weight:normal;color:#9ca3af;margin-left:8px;font-family:monospace;">v17/06 · recup-2</span></h1>
+  <h1>🌻 Lixas A COMBINAR <span class="badge">Pendentes</span><span class="ver" style="font-size:11px;font-weight:normal;color:#9ca3af;margin-left:8px;font-family:monospace;">v21/06 · confirma-cliente</span></h1>
   <div class="toolbar">
     <select id="filtro-status" onchange="recarregar()">
       <option value="" selected>Todos os status</option>
@@ -418,6 +418,15 @@ function renderCard(v) {
     `;
   }
 
+  // CONFIRMAR CLIENTE — pedido claro (interpretado/montado) já com NF: reenvia ao
+  // cliente a confirmação "pedido confirmado, será postado em breve...". Útil pros
+  // casos já processados, onde não há mais botão de NF pra disparar a confirmação.
+  if (v.ia_categoria === 'claro' && v.ia_pedido_estruturado && v.nf_emitida_em) {
+    botoesBling += `
+      <button class="btn-sub" title="Envia (ou reenvia) ao cliente a confirmação do pedido no Mercado Livre" onclick="confirmarCliente('${v.order_id}')">✅ Confirmar cliente</button>
+    `;
+  }
+
   return `
     <div class="card">
       <div class="card-header">
@@ -569,6 +578,43 @@ async function emitirNF(orderId) {
     } else {
       const texto = `❌ ERRO ao emitir NF:\n\nStatus HTTP: ${d.status || '?'}\nErro: ${d.erro || '(sem msg)'}\n\nDetalhe:\n${JSON.stringify(d.detalhe || d, null, 2)}`;
       mostrarModal('❌ Erro NF', texto, true);
+    }
+  } catch (e) {
+    mostrarModal('❌ Erro', e.message + '\n\n' + (e.stack || ''), true);
+  } finally {
+    btns.forEach(b => b.disabled = false);
+  }
+}
+
+
+// ── CONFIRMAR CLIENTE (envia/reenvia a confirmação do pedido no ML) ──
+async function confirmarCliente(orderId) {
+  if (!confirm(`Enviar ao cliente a confirmação do pedido ${orderId}?\n\n("Pedido confirmado, será postado em breve...")`)) return;
+
+  const btns = document.querySelectorAll('.btn-sub');
+  btns.forEach(b => b.disabled = true);
+
+  try {
+    const r = await fetch(`${API_BASE}/api/pedido/${orderId}/confirmar-cliente`, {
+      method: 'POST',
+      headers: { 'X-Session-Token': token(), 'Content-Type': 'application/json' },
+      body: '{}'
+    });
+    if (r.status === 401) { logout(); return; }
+    const d = await r.json();
+
+    if (d.ok) {
+      if (d.jaConfirmado) {
+        mostrarModal('ℹ️ Já confirmado', 'A confirmação enviada ao cliente já era exatamente esta — não reenviei pra não duplicar.', false);
+      } else {
+        mostrarModal('✅ Confirmação enviada', `Mensagem enviada ao cliente (via ${d.via || '?'}):\n\n${d.texto || ''}`, false);
+      }
+    } else {
+      const motivo = d.motivo || d.erro || 'falha';
+      let dica = '';
+      if (motivo === 'nao_claro_sem_confirmacao') dica = '\n\nEste pedido não está como "claro" (pode ter sido substituição). A confirmação automática só vale pra pedido claro.';
+      if (motivo === 'sem_pedido_estruturado') dica = '\n\nNão há pedido estruturado salvo neste card.';
+      mostrarModal('❌ Não enviou', `Motivo: ${motivo}${dica}`, true);
     }
   } catch (e) {
     mostrarModal('❌ Erro', e.message + '\n\n' + (e.stack || ''), true);
