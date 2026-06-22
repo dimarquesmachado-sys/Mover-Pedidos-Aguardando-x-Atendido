@@ -39,7 +39,7 @@ const { gerarDanfeSimplificado, gerarDanfeSimplificadoZPL } = require('./danfe-s
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v17/06 b59';
+const VERSAO     = 'girassol-backup-offline v17/06 b61';
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 
 // ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
@@ -185,6 +185,22 @@ async function localizacaoPorSku(sku) {
 let rodando = false;
 let ultimoResumo = { rodouEm: null, total: 0, comEtiqueta: 0, semEtiqueta: 0, novos: 0, erros: 0 };
 let ultimoSync = { em: null, pendentes: 0, ok: 0, falhas: 0 };
+
+// o cron roda só dentro de uma faixa de horas (ex: 6-23). Isso evita o /saude dar alarme falso de madrugada.
+// lê a faixa do próprio CRON_EXPR e usa a hora local do servidor (mesma base do cron) — robusto a fuso.
+function cronDeveriaTerRodado() {
+  try {
+    const horas = (CRON_EXPR.trim().split(/\s+/)[1] || '*');
+    if (horas === '*') return true;
+    const m = horas.match(/^(\d+)-(\d+)$/);
+    if (!m) return true;                                 // formato inesperado → não bloqueia o check
+    const ini = Number(m[1]), fim = Number(m[2]);
+    const now = new Date(), h = now.getHours();
+    if (h < ini || h > fim) return false;                // fora da janela → cron não roda
+    if (h === ini && now.getMinutes() < 20) return false; // 1º slot do dia — dá folga até ini:20
+    return true;
+  } catch (e) { return true; }
+}
 
 const manifest       = () => readJson(MANIFEST_FILE, {});
 const salvarManifest = (m) => writeJson(MANIFEST_FILE, m);
@@ -931,6 +947,7 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
     ultimoResumo = {
       rodouEm: new Date().toISOString(),
       duracaoSeg: Math.round((Date.now() - t0) / 1000),
+      blingOk: listaOk,                            // o Bling respondeu neste ciclo? (p/ o /saude)
       total: ids.length,
       comEtiqueta: ids.filter(i => man[i].tem_etiqueta).length,
       semEtiqueta: ids.filter(i => !man[i].tem_etiqueta).length,
@@ -1514,6 +1531,40 @@ function routes(readBody) {
         semEtiqueta: ids.filter(i => !man[i].tem_etiqueta).length,
         sync: { ...ultimoSync, ligado: SYNC_ON, conferidos: confIds.length, pendentes: confIds.filter(i => !conf[i].sincronizado).length },
         pedidos: ids.map(i => ({ id: i, ...man[i] }))
+      });
+      return true;
+    }
+
+    // SAÚDE: para monitor externo (UptimeRobot). 200 = tudo OK · 503 = algo quebrou (dispara o alerta).
+    if (method === 'GET' && p === '/girassol-backup-offline/saude') {
+      const agora = Date.now();
+      const conf = readJson(CONFERIDOS_FILE, {});
+      const pendentes = Object.keys(conf).filter(i => conf[i] && !conf[i].sincronizado);
+      const rodouEm = ultimoResumo.rodouEm ? new Date(ultimoResumo.rodouEm).getTime() : 0;
+      const minDesdeCiclo = rodouEm ? Math.round((agora - rodouEm) / 60000) : null;
+      const problemas = [], avisos = [];
+      // 1) ciclo parado — só vale DENTRO da janela ativa do cron (evita alarme falso de madrugada)
+      if (!rodouEm) avisos.push('ainda não rodou o 1º ciclo (boot recente?)');
+      else if (cronDeveriaTerRodado() && minDesdeCiclo > 30) problemas.push('o ciclo não roda há ' + minDesdeCiclo + ' min no horário ativo (esperado ~10 min)');
+      // 2) Bling inalcançável no último ciclo (auth ou conexão)
+      if (ultimoResumo.blingOk === false) problemas.push('o último ciclo NÃO conseguiu falar com o Bling (auth/conexão)');
+      // 3) sync-back falhando
+      if (SYNC_ON && ultimoSync && ultimoSync.falhas > 0) problemas.push('o sync pro Bling falhou em ' + ultimoSync.falhas + ' pedido(s) no último ciclo');
+      // avisos (não derrubam o status, só informam)
+      if (!SYNC_ON) avisos.push('GIRABKP_SYNC_ON desligado — finalizados não voltam pro Bling sozinhos');
+      if (pendentes.length > 0) avisos.push(pendentes.length + ' finalizado(s) ainda não sincronizado(s)');
+      const ok = problemas.length === 0;
+      json(res, ok ? 200 : 503, {
+        ok,
+        versao: VERSAO,
+        em: new Date().toISOString(),
+        ultimo_ciclo: ultimoResumo.rodouEm,
+        min_desde_ciclo: minDesdeCiclo,
+        bling_ok: ultimoResumo.blingOk !== false,
+        pedidos_no_cache: Object.keys(manifest()).length,
+        sync: { ligado: SYNC_ON, pendentes: pendentes.length, ...(ultimoSync || {}) },
+        problemas,
+        avisos
       });
       return true;
     }
