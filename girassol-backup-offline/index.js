@@ -39,7 +39,7 @@ const { gerarDanfeSimplificado, gerarDanfeSimplificadoZPL } = require('./danfe-s
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v17/06 b61';
+const VERSAO     = 'girassol-backup-offline v17/06 b62';
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 
 // ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
@@ -1566,6 +1566,51 @@ function routes(readBody) {
         problemas,
         avisos
       });
+      return true;
+    }
+
+    // BACKUP: baixa um JSON com o estado que NÃO vem do Bling (fila + localizações + índice + log). Só admin.
+    if (method === 'GET' && p === '/girassol-backup-offline/backup') {
+      const op = String(urlObj.searchParams.get('op') || '');
+      if (!ehAdmin(op)) { json(res, 200, { ok: false, precisa_admin: true, erro: 'só admin — use ?op=SEUNOME' }); return true; }
+      const dump = {
+        versao: VERSAO,
+        gerado_em: new Date().toISOString(),
+        conferidos: readJson(CONFERIDOS_FILE, {}),
+        localizacoes: readJson(LOC_FILE, {}),
+        indice_ean: readJson(EAN_INDEX_FILE, {}),
+        localizacoes_log: readJson(LOC_LOG_FILE, [])
+      };
+      const nome = 'backup-girassol-offline-' + new Date().toISOString().slice(0, 10) + '.json';
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Disposition': 'attachment; filename="' + nome + '"' });
+      res.end(JSON.stringify(dump, null, 2));
+      return true;
+    }
+    // RESTAURAR (página): cola o JSON do backup e restaura. Só admin (?op=SEUNOME).
+    if (method === 'GET' && p === '/girassol-backup-offline/restaurar') {
+      const op = String(urlObj.searchParams.get('op') || '');
+      if (!ehAdmin(op)) { html(res, 200, '<meta charset=utf-8><p style="font-family:Arial;margin:40px">Acesso só pra admin. Use <b>?op=SEUNOME</b> no fim da URL.</p>'); return true; }
+      const pg = '<!doctype html><meta charset=utf-8><title>Restaurar backup</title>' +
+        '<style>body{font-family:Arial;max-width:720px;margin:40px auto;padding:0 16px;color:#111}textarea{width:100%;height:300px;font-family:monospace;font-size:12px;box-sizing:border-box}button{padding:10px 20px;font-size:15px;font-weight:700;background:#f59e0b;border:0;border-radius:8px;cursor:pointer;margin-top:12px}#r{margin-top:14px;font-weight:700}</style>' +
+        '<h2>Restaurar backup — Checkout Offline</h2>' +
+        '<p>Cola o conteúdo do arquivo de backup (JSON) e clica em Restaurar. <b style="color:#c00">Isso sobrescreve o estado atual.</b></p>' +
+        '<textarea id=j placeholder="cola aqui o JSON do backup"></textarea>' +
+        '<button onclick="rest()">Restaurar</button><div id=r></div>' +
+        '<script>async function rest(){var el=document.getElementById("r");var o;try{o=JSON.parse(document.getElementById("j").value)}catch(e){el.textContent="JSON inválido: "+e.message;return}o.op=' + JSON.stringify(op) + ';try{var x=await fetch("/girassol-backup-offline/restaurar",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(o)});x=await x.json();el.textContent=x.ok?("\\u2713 Restaurado: "+x.restaurados.join(", ")):("Falhou: "+(x.erro||"erro"))}catch(e){el.textContent="Erro: "+e.message}}<\/script>';
+      html(res, 200, pg);
+      return true;
+    }
+    // RESTAURAR (ação): grava de volta só o que veio no corpo. Só admin.
+    if (method === 'POST' && p === '/girassol-backup-offline/restaurar') {
+      let body = {};
+      try { body = await readBody(req); } catch (e) {}
+      if (!ehAdmin(String(body.op || ''))) { json(res, 200, { ok: false, precisa_admin: true, erro: 'só admin' }); return true; }
+      const restaurados = [];
+      if (body.conferidos && typeof body.conferidos === 'object') { writeJson(CONFERIDOS_FILE, body.conferidos); restaurados.push('fila finalizados (' + Object.keys(body.conferidos).length + ')'); }
+      if (body.localizacoes && typeof body.localizacoes === 'object') { writeJson(LOC_FILE, body.localizacoes); restaurados.push('localizações (' + Object.keys(body.localizacoes).length + ')'); }
+      if (body.indice_ean && typeof body.indice_ean === 'object') { writeJson(EAN_INDEX_FILE, body.indice_ean); restaurados.push('índice EAN (' + Object.keys(body.indice_ean).length + ')'); }
+      if (Array.isArray(body.localizacoes_log)) { writeJson(LOC_LOG_FILE, body.localizacoes_log); restaurados.push('log (' + body.localizacoes_log.length + ')'); }
+      json(res, 200, { ok: restaurados.length > 0, restaurados });
       return true;
     }
 
