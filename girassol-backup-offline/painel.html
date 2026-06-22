@@ -282,7 +282,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b59';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b60';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#ff9900'}, magalu:{n:'Magalu',c:'#0086ff'}, outro:{n:'Outro',c:'#94a3b8'}
@@ -1061,7 +1061,7 @@ async function fazerBusca(){
       '</div>'+
     '</div>'+
     '<div style="display:flex;gap:8px;margin-top:10px">'+
-      '<button class="btn warn" style="flex:1" onclick="imprimirEtiquetaProduto()">🏷️ Imprimir etiqueta</button>'+
+      '<button class="btn warn sm" onclick="imprimirEtiquetaProduto()">🏷️ Imprimir etiqueta</button>'+
       '<button class="btn sec sm" onclick="escolherImpressoraEtiqueta()" title="escolher a impressora da etiqueta 4x2,5cm">🖨</button>'+
     '</div>';
   const b=$('buscaInp'); if(b) b.select();
