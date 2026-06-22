@@ -39,7 +39,7 @@ const { gerarDanfeSimplificado, gerarDanfeSimplificadoZPL } = require('./danfe-s
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v17/06 b62';
+const VERSAO     = 'girassol-backup-offline v17/06 b63';
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 
 // ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
@@ -1536,7 +1536,7 @@ function routes(readBody) {
     }
 
     // SAÚDE: para monitor externo (UptimeRobot). 200 = tudo OK · 503 = algo quebrou (dispara o alerta).
-    if (method === 'GET' && p === '/girassol-backup-offline/saude') {
+    if ((method === 'GET' || method === 'HEAD') && p === '/girassol-backup-offline/saude') {
       const agora = Date.now();
       const conf = readJson(CONFERIDOS_FILE, {});
       const pendentes = Object.keys(conf).filter(i => conf[i] && !conf[i].sincronizado);
@@ -1554,7 +1554,10 @@ function routes(readBody) {
       if (!SYNC_ON) avisos.push('GIRABKP_SYNC_ON desligado — finalizados não voltam pro Bling sozinhos');
       if (pendentes.length > 0) avisos.push(pendentes.length + ' finalizado(s) ainda não sincronizado(s)');
       const ok = problemas.length === 0;
-      json(res, ok ? 200 : 503, {
+      const code = ok ? 200 : 503;
+      // UptimeRobot (plano grátis) checa via HEAD — responde só o status, sem corpo. GET segue com o JSON completo.
+      if (method === 'HEAD') { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(); return true; }
+      json(res, code, {
         ok,
         versao: VERSAO,
         em: new Date().toISOString(),
