@@ -767,6 +767,31 @@ function routes(readBody) {
     }
 
     // ════════════════════════════════════════════════════════════════
+    // POST /lixas-combinar/api/pedido/:orderId/confirmar-cliente
+    //   Reenvia (ou envia) ao cliente a confirmacao do pedido — usado pelo botao
+    //   "Confirmar cliente" do painel, pros casos ja processados onde nao ha mais
+    //   botao de NF. Reusa o mesmo helper da emissao (so dispara em pedido claro,
+    //   idempotente, best-effort).
+    if (method === 'POST' && p.startsWith('/lixas-combinar/api/pedido/') && p.endsWith('/confirmar-cliente')) {
+      const sessao = requerAuth();
+      if (!sessao.ok) { json(res, 401, { ok: false, erro: 'nao_autenticado' }); return true; }
+
+      const orderId = p.replace('/lixas-combinar/api/pedido/', '').replace('/confirmar-cliente', '');
+      try {
+        const lcp = require('../auto-mensagens/lixasCombinarPendentes');
+        const venda = await lcp.buscar(orderId);
+        if (!venda.ok || !venda.data) { json(res, 404, { ok: false, erro: 'venda_nao_encontrada', orderId }); return true; }
+
+        const conf = await enviarConfirmacaoPedido(venda.data, orderId);
+        json(res, 200, conf);
+      } catch (e) {
+        console.error('[lixas-combinar confirmar-cliente]', e);
+        json(res, 500, { ok: false, erro: e.message });
+      }
+      return true;
+    }
+
+    // ════════════════════════════════════════════════════════════════
     // POST /lixas-combinar/api/pedido/:orderId/recuperar-nf
     //   RECUPERACAO: pedidos que ficaram presos em 'processado' SEM NF
     //   (marcados na mao pelo botao "Processado", ou pelo bug antigo do montar).
