@@ -39,7 +39,7 @@ const { gerarDanfeSimplificado, gerarDanfeSimplificadoZPL } = require('./danfe-s
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v17/06 b67';
+const VERSAO     = 'girassol-backup-offline v17/06 b70';
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 
 // ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
@@ -96,6 +96,13 @@ const KIT_CACHE_FILE  = path.join(CACHE_DIR, 'kit-estrutura.json');  // kits já
 const LOC_FILE        = path.join(CACHE_DIR, 'sku-localizacao.json'); // localização (depósito) por SKU
 const LOC_LOG_FILE    = path.join(CACHE_DIR, 'localizacao-log.json'); // auditoria: quem editou localização, de→para, quando
 const EAN_INDEX_FILE  = path.join(CACHE_DIR, 'ean-indice.json');      // índice EAN→{sku,nome,id} que cresce sozinho + indexação total
+const ARQUIVO_DIR   = process.env.GIRABKP_ARQUIVO_DIR  || '/data/arquivo-girassol';   // etiqueta+meta dos FINALIZADOS (reimprimir/reenviar) — separado do cache, NÃO é limpo pela reconciliação
+const ARQUIVO_DIAS  = parseInt(process.env.GIRABKP_ARQUIVO_DIAS || '45', 10);          // retenção do arquivo (dias)
+const SMTP_HOST  = process.env.GIRABKP_SMTP_HOST || 'mail.magazinegirassol.com.br';
+const SMTP_PORT  = parseInt(process.env.GIRABKP_SMTP_PORT || '465', 10);
+const EMAIL_USER = process.env.GIRABKP_EMAIL_USER || '';   // conta @magazinegirassol que ENVIA (login)
+const EMAIL_PASS = process.env.GIRABKP_EMAIL_PASS || '';   // senha normal dessa conta
+const EMAIL_DEST = process.env.GIRABKP_EMAIL_DEST || 'estoque@magazinegirassol.com.br';   // destino (estoquista)
 const SCHEMA = 4;  // versão do snapshot — bump força re-cache dos pedidos antigos (b36: re-explode composições/variações)
 
 // loja → marketplace (mesmo mapa do checkout Girassol)
@@ -729,6 +736,71 @@ function purgar(man) {
   }
 }
 
+// arquiva etiqueta + meta de um pedido FINALIZADO num lugar separado do cache (a etiqueta não dá p/ rebaixar depois; DANFE re-gera pelo nf.id)
+function arquivarFinalizado(id) {
+  try {
+    const src = path.join(CACHE_DIR, String(id));
+    const dst = path.join(ARQUIVO_DIR, String(id));
+    ensureDir(dst);
+    const fmt = ETIQ_FORMATO.toLowerCase();
+    const etq = path.join(src, `etiqueta.${fmt}`);
+    if (fs.existsSync(etq)) fs.copyFileSync(etq, path.join(dst, `etiqueta.${fmt}`));
+    const ped = path.join(src, 'pedido.json');
+    if (fs.existsSync(ped)) fs.copyFileSync(ped, path.join(dst, 'pedido.json'));
+  } catch (e) { console.log('[GIRABKP] falha ao arquivar', id, e.message); }
+}
+// remove do arquivo os finalizados mais velhos que ARQUIVO_DIAS
+function purgarArquivo() {
+  try {
+    if (!fs.existsSync(ARQUIVO_DIR)) return;
+    const limite = Date.now() - ARQUIVO_DIAS * 86400000;
+    for (const d of fs.readdirSync(ARQUIVO_DIR)) {
+      const dir = path.join(ARQUIVO_DIR, d);
+      try { const st = fs.statSync(dir); if (st.isDirectory() && st.mtimeMs < limite) fs.rmSync(dir, { recursive: true, force: true }); } catch (e) {}
+    }
+  } catch (e) {}
+}
+
+// envia etiqueta + DANFE de um pedido finalizado pro estoque por email (Parte B)
+async function enviarEmailDocs(id, quem) {
+  let nodemailer;
+  try { nodemailer = require('nodemailer'); } catch (e) { return { ok: false, erro: 'nodemailer não instalado — atualize o package.json e redeploy' }; }
+  if (!EMAIL_USER || !EMAIL_PASS) return { ok: false, erro: 'email não configurado (faltam GIRABKP_EMAIL_USER / GIRABKP_EMAIL_PASS no Render)' };
+  const ped = readJson(path.join(ARQUIVO_DIR, String(id), 'pedido.json'), null);
+  if (!ped) return { ok: false, erro: 'pedido não está arquivado (só finalizados POR AQUI têm arquivo)' };
+  const anexos = [];
+  try {
+    const etqPath = path.join(ARQUIVO_DIR, String(id), `etiqueta.${ETIQ_FORMATO.toLowerCase()}`);
+    let etqPdf = null;
+    if (ETIQ_FORMATO === 'PDF') etqPdf = fs.readFileSync(etqPath);
+    else { const zpl = fs.readFileSync(etqPath, 'utf8'); etqPdf = await zplParaPdf(zpl); }
+    if (etqPdf) anexos.push({ filename: `etiqueta-${ped.numero || id}.pdf`, content: etqPdf });
+  } catch (e) {}
+  try {
+    const nfId = ped.nf && ped.nf.id;
+    if (nfId) { const dPdf = await baixarDanfe(nfId); if (dPdf) anexos.push({ filename: `danfe-${(ped.nf && ped.nf.numero) || id}.pdf`, content: dPdf }); }
+  } catch (e) {}
+  if (!anexos.length) return { ok: false, erro: 'sem documentos pra enviar (etiqueta nem DANFE disponíveis)' };
+  try {
+    const transporter = nodemailer.createTransport({ host: SMTP_HOST, port: SMTP_PORT, secure: SMTP_PORT === 465, auth: { user: EMAIL_USER, pass: EMAIL_PASS } });
+    const corpo = 'Reimpressão solicitada pelo Checkout Offline.\n\n'
+      + 'Pedido: ' + (ped.numero || id) + '\n'
+      + 'Cliente: ' + (ped.cliente || '—') + '\n'
+      + 'Marketplace: ' + (ped.marketplace || '—') + '\n'
+      + (ped.nf ? 'NF: ' + (ped.nf.numero || '') + '\n' : '')
+      + '\nSeguem em anexo a etiqueta e o DANFE pra imprimir e despachar.\n\n'
+      + '(solicitado por ' + (quem || 'admin') + ' em ' + new Date().toLocaleString('pt-BR') + ')';
+    await transporter.sendMail({
+      from: EMAIL_USER,
+      to: EMAIL_DEST,
+      subject: '📦 Reimprimir pedido ' + (ped.numero || id) + (ped.cliente ? ' — ' + ped.cliente : ''),
+      text: corpo,
+      attachments: anexos
+    });
+    return { ok: true, enviado_para: EMAIL_DEST, anexos: anexos.length };
+  } catch (e) { return { ok: false, erro: 'falha no envio SMTP: ' + e.message }; }
+}
+
 // limpa do histórico os finalizados JÁ sincronizados com +30 dias (não mexe nos pendentes de sync)
 function purgarConferidos() {
   const conf = readJson(CONFERIDOS_FILE, {});
@@ -940,6 +1012,7 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
     }
 
     purgar(man);
+    purgarArquivo();
     purgarConferidos();
     salvarManifest(man);
 
@@ -1473,6 +1546,7 @@ function routes(readBody) {
         marketplace: snapC ? (snapC.marketplace || null) : null
       };
       writeJson(CONFERIDOS_FILE, conf);            // grava na fila primeiro — nunca perde
+      arquivarFinalizado(id);                       // arquiva etiqueta + meta p/ reimprimir/reenviar depois (Parte A)
       { const rsvF = lerReservas(); if (rsvF[id]) { delete rsvF[id]; writeJson(RESERVAS_FILE, rsvF); } }   // finalizou → solta a reserva
 
       // ESPELHO EM TEMPO REAL: se o sync tá ligado e o Bling responde, move p/ VERIFICADO já.
@@ -1651,6 +1725,58 @@ function routes(readBody) {
       const xml = nf ? await baixarXmlNF(nf) : '';
       if (xml) { res.writeHead(200, { 'Content-Type': 'application/xml; charset=utf-8', 'Content-Disposition': `attachment; filename="nf-${(nf && nf.numero) || nfId}.xml"` }); res.end(xml); }
       else json(res, 404, { ok: false, erro: 'XML indisponível' });
+      return true;
+    }
+    // ARQUIVO: info de um pedido finalizado (existe arquivo? meta)
+    if (method === 'GET' && p.startsWith('/girassol-backup-offline/arq-info/')) {
+      const id = p.split('/').filter(Boolean).pop();
+      const ped = readJson(path.join(ARQUIVO_DIR, String(id), 'pedido.json'), null);
+      const etqPath = path.join(ARQUIVO_DIR, String(id), `etiqueta.${ETIQ_FORMATO.toLowerCase()}`);
+      json(res, 200, { id, arquivado: !!ped, tem_etiqueta: fs.existsSync(etqPath), numero: ped && ped.numero, cliente: ped && ped.cliente, nf: ped && ped.nf });
+      return true;
+    }
+    // ARQUIVO: etiqueta arquivada → PDF (converte ZPL se preciso)
+    if (method === 'GET' && p.startsWith('/girassol-backup-offline/arq-etiqueta-pdf/')) {
+      const id = p.split('/').filter(Boolean).pop();
+      const etqPath = path.join(ARQUIVO_DIR, String(id), `etiqueta.${ETIQ_FORMATO.toLowerCase()}`);
+      let pdf = null;
+      try { if (ETIQ_FORMATO === 'PDF') pdf = fs.readFileSync(etqPath); else { const zpl = fs.readFileSync(etqPath, 'utf8'); pdf = await zplParaPdf(zpl); } } catch (e) {}
+      if (pdf) { res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': `inline; filename="etiqueta-${id}.pdf"` }); res.end(pdf); }
+      else json(res, 404, { ok: false, erro: 'etiqueta não arquivada (pedido finalizado antes desse recurso?)' });
+      return true;
+    }
+    // ARQUIVO: DANFE de um pedido arquivado → gera na hora pelo nf.id guardado
+    if (method === 'GET' && p.startsWith('/girassol-backup-offline/arq-danfe/')) {
+      const id = p.split('/').filter(Boolean).pop();
+      const ped = readJson(path.join(ARQUIVO_DIR, String(id), 'pedido.json'), null);
+      const nfId = ped && ped.nf && ped.nf.id;
+      const pdf = nfId ? await baixarDanfe(nfId) : null;
+      if (pdf) { res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': `inline; filename="danfe-${id}.pdf"` }); res.end(pdf); }
+      else json(res, 404, { ok: false, erro: 'DANFE indisponível (sem nf.id arquivado ou Bling fora)' });
+      return true;
+    }
+    // ENVIAR pro estoque: etiqueta + DANFE por email (Parte B)
+    if (method === 'POST' && p.startsWith('/girassol-backup-offline/enviar-docs/')) {
+      let op = '';
+      try { op = (urlObj.searchParams && urlObj.searchParams.get('op')) || ''; } catch (e) {}
+      if (!op) { try { const b = await readBody(req); op = String(b.op || ''); } catch (e) {} }
+      const id = decodeURIComponent(p.split('/').filter(Boolean).pop() || '');
+      const r = await enviarEmailDocs(id, op);
+      console.log(`[GIRABKP] enviar-docs ${id} → ${r.ok ? 'OK (' + r.anexos + ' anexos)' : 'FALHA: ' + r.erro}`);
+      json(res, 200, r);
+      return true;
+    }
+    // DEBUG: por que a NF do pedido não veio? mostra a resposta crua do link pedido→nota + campos do pedido
+    if (method === 'GET' && p.startsWith('/girassol-backup-offline/debug-nfped/')) {
+      const id = p.split('/').filter(Boolean).pop();
+      const out = { id };
+      const r = await blingGet(`/pedidos/vendas/${id}/nfe`); await sleep(PAUSA_MS);
+      out.endpoint_pedido_nfe = { ok: r.ok, status: r.status, data: r.data };
+      const det = await detalhePedido(id);
+      out.pedido_keys = det ? Object.keys(det) : null;
+      out.pedido_situacao = det ? det.situacao : null;
+      out.pedido_campos_nf = det ? { notaFiscal: det.notaFiscal, nfe: det.nfe, notasFiscais: det.notasFiscais, idNotaFiscal: det.idNotaFiscal } : null;
+      json(res, 200, out);
       return true;
     }
     // DEBUG: mostra a resposta crua do Bling pra entender como buscar pedido (filtro funciona? 116856 é numero ou numeroLoja?)
