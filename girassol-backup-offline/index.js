@@ -39,7 +39,7 @@ const { gerarDanfeSimplificado, gerarDanfeSimplificadoZPL } = require('./danfe-s
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v17/06 b73';
+const VERSAO     = 'girassol-backup-offline v17/06 b74';
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 
 // ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
@@ -623,21 +623,18 @@ async function zplParaPdf(zpl) {
   } catch (e) { return null; }
 }
 
-// etiqueta em PDF: ML usa o PDF nativo do Bling; não-ML usa o ZPL cacheado → Labelary
-// (não-ML NÃO depende do Bling — funciona mesmo com o Bling fora do ar)
+// etiqueta em PDF. 1º tenta o PDF nativo do Bling (vale p/ QUALQUER marketplace — ML, Shopee, Amazon...;
+// precisa do Bling no ar). 2º fallback offline: ZPL cacheado em disco → Labelary (não depende do Bling).
 async function etiquetaPdf(blingId, dir) {
-  let mkt = null;
-  try { mkt = JSON.parse(fs.readFileSync(path.join(dir, 'pedido.json'), 'utf8')).marketplace; } catch (e) {}
-  if (mkt === 'ml' || mkt === null) { // ML (ou desconhecido): tenta o PDF do Bling
-    const direto = await baixarEtiquetaPDF(blingId);
-    if (direto) return direto;
-  }
-  // não-ML (ou ML sem PDF): ZPL cacheado em disco → Labelary
+  // 1) PDF nativo do Bling — o Bling gera o PDF da etiqueta de qualquer marketplace
+  const direto = await baixarEtiquetaPDF(blingId);
+  if (direto) return direto;
+  // 2) fallback offline: ZPL cacheado → Labelary
   let zpl = null;
   if (dir) { try { zpl = fs.readFileSync(path.join(dir, `etiqueta.${ETIQ_FORMATO.toLowerCase()}`), 'utf8'); } catch (e) {} }
   if (!zpl) { try { zpl = await baixarEtiqueta(blingId); } catch (e) {} }
-  if (!zpl) return null;
-  return await zplParaPdf(zpl);
+  if (zpl && zpl.indexOf('^XA') >= 0) return await zplParaPdf(zpl);
+  return null;
 }
 
 async function cachearPedido(ped, cacheEan, nfs, kitCache, locC) {
