@@ -199,6 +199,13 @@ REGRAS RIGIDAS:
   em estoque AGORA" desta conversa. Antes de citar qualquer "gN" como disponivel, confira que
   esse N esta na lista acima. Se nao estiver, NAO cite. NUNCA repita numeros de grao que vieram
   de exemplos deste prompt — use sempre os numeros REAIS da lista desta venda.
+- A lista de disponiveis e a VERDADE ABSOLUTA sobre estoque. Se um grao APARECE na lista, ele
+  ESTA disponivel — NUNCA, em hipotese alguma, diga que um grao que esta na lista esta
+  indisponivel ou sem estoque. Se um grao NAO aparece na lista, ele NAO existe pra esta venda.
+- Ao montar o pedido_estruturado, INCLUA todos os graos que o cliente pediu que ESTAO na lista,
+  com as quantidades que ele deu — MESMO que a soma nao feche ${totalLixas}. NAO remova um grao
+  valido do pedido_estruturado so porque o total ficou errado (o sistema confere a soma sozinho;
+  se voce tirar um grao valido, voce quebra essa conferencia e trava um pedido que estava certo).
 - Voce PODE completar/montar a distribuicao quando o cliente pede VARIEDADE ou um
   pedido UNIFORME ("X de cada") que nao fecha — sempre em multiplos de ${unidadesPorPacote}
   e somando EXATAMENTE ${totalLixas}, usando so graos disponiveis.
