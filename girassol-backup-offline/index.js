@@ -39,7 +39,7 @@ const { gerarDanfeSimplificado, gerarDanfeSimplificadoZPL } = require('./danfe-s
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v17/06 b71';
+const VERSAO     = 'girassol-backup-offline v17/06 b72';
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 
 // ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
@@ -110,6 +110,7 @@ const LOJA_MKT = {
   '203146903': 'ml', '203583169': 'shopee', '203967708': 'amazon',
   '203262016': 'magalu', '205523707': 'tiktok'
 };
+const MKT_NOME = { ml: 'Mercado Livre', shopee: 'Shopee', amazon: 'Amazon', magalu: 'Magalu', tiktok: 'TikTok Shop', outro: 'Outro' };
 
 // FLEX = entrega por motoboy (etiqueta sempre disponível). Mesma lógica do checkout-expedição.
 const FLEX_KEYWORDS = ['mercado envios flex', 'entrega local', 'vapt', 'shopee entrega direta'];
@@ -747,6 +748,8 @@ function arquivarFinalizado(id) {
     if (fs.existsSync(etq)) fs.copyFileSync(etq, path.join(dst, `etiqueta.${fmt}`));
     const ped = path.join(src, 'pedido.json');
     if (fs.existsSync(ped)) fs.copyFileSync(ped, path.join(dst, 'pedido.json'));
+    const nfs = path.join(src, 'nf-simp.json');   // dados do DANFE simplificado (se já gerado) → email usa sem re-buscar
+    if (fs.existsSync(nfs)) fs.copyFileSync(nfs, path.join(dst, 'nf-simp.json'));
   } catch (e) { console.log('[GIRABKP] falha ao arquivar', id, e.message); }
 }
 // remove do arquivo os finalizados mais velhos que ARQUIVO_DIAS
@@ -769,26 +772,34 @@ async function enviarEmailDocs(id, quem) {
   const ped = readJson(path.join(ARQUIVO_DIR, String(id), 'pedido.json'), null);
   if (!ped) return { ok: false, erro: 'pedido não está arquivado (só finalizados POR AQUI têm arquivo)' };
   const anexos = [];
+  let temEtq = false, temDanfe = false;
+  // ETIQUETA (ZPL → PDF) — exatamente como vai pra Zebra
   try {
     const etqPath = path.join(ARQUIVO_DIR, String(id), `etiqueta.${ETIQ_FORMATO.toLowerCase()}`);
     let etqPdf = null;
     if (ETIQ_FORMATO === 'PDF') etqPdf = fs.readFileSync(etqPath);
     else { const zpl = fs.readFileSync(etqPath, 'utf8'); etqPdf = await zplParaPdf(zpl); }
-    if (etqPdf) anexos.push({ filename: `etiqueta-${ped.numero || id}.pdf`, content: etqPdf });
+    if (etqPdf) { anexos.push({ filename: `etiqueta-${ped.numero || id}.pdf`, content: etqPdf }); temEtq = true; }
   } catch (e) {}
+  // DANFE SIMPLIFICADO (igual ao que imprime no checkout) — usa o nf-simp.json arquivado, ou gera na hora
   try {
+    let dados = readJson(path.join(ARQUIVO_DIR, String(id), 'nf-simp.json'), null);
     const nfId = ped.nf && ped.nf.id;
-    if (nfId) { const dPdf = await baixarDanfe(nfId); if (dPdf) anexos.push({ filename: `danfe-${(ped.nf && ped.nf.numero) || id}.pdf`, content: dPdf }); }
+    if (!dados && nfId) dados = await dadosNFSimp(nfId, ped.numero);
+    const simpPdf = dados ? await gerarDanfeSimplificado(dados) : null;
+    if (simpPdf) { anexos.push({ filename: `danfe-simplificado-${(ped.nf && ped.nf.numero) || id}.pdf`, content: simpPdf }); temDanfe = true; }
   } catch (e) {}
   if (!anexos.length) return { ok: false, erro: 'sem documentos pra enviar (etiqueta nem DANFE disponíveis)' };
   try {
     const transporter = nodemailer.createTransport({ host: SMTP_HOST, port: SMTP_PORT, secure: SMTP_PORT === 465, auth: { user: EMAIL_USER, pass: EMAIL_PASS } });
+    const mktNome = MKT_NOME[ped.marketplace] || ped.marketplace || '—';
+    const oQueVai = [temEtq ? 'etiqueta' : null, temDanfe ? 'DANFE simplificado' : null].filter(Boolean).join(' + ');
     const corpo = 'Reimpressão solicitada pelo Checkout Offline.\n\n'
       + 'Pedido: ' + (ped.numero || id) + '\n'
       + 'Cliente: ' + (ped.cliente || '—') + '\n'
-      + 'Marketplace: ' + (ped.marketplace || '—') + '\n'
+      + 'Marketplace: ' + mktNome + '\n'
       + (ped.nf ? 'NF: ' + (ped.nf.numero || '') + '\n' : '')
-      + '\nSeguem em anexo a etiqueta e o DANFE pra imprimir e despachar.\n\n'
+      + '\nSeguem em anexo: ' + oQueVai + ' (pra imprimir e despachar).\n\n'
       + '(solicitado por ' + (quem || 'admin') + ' em ' + new Date().toLocaleString('pt-BR') + ')';
     await transporter.sendMail({
       from: EMAIL_USER,
@@ -797,7 +808,7 @@ async function enviarEmailDocs(id, quem) {
       text: corpo,
       attachments: anexos
     });
-    return { ok: true, enviado_para: EMAIL_DEST, anexos: anexos.length };
+    return { ok: true, enviado_para: EMAIL_DEST, anexos: anexos.length, etiqueta: temEtq, danfe: temDanfe };
   } catch (e) { return { ok: false, erro: 'falha no envio SMTP: ' + e.message }; }
 }
 
