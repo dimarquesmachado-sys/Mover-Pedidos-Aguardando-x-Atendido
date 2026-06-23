@@ -40,7 +40,7 @@ const { gerarDanfeSimplificado, gerarDanfeSimplificadoZPL } = require('./danfe-s
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v17/06 b78';
+const VERSAO     = 'girassol-backup-offline v17/06 b79';
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 
 // ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
@@ -791,8 +791,9 @@ async function enviarEmailDocs(id, quem) {
   if (!ped) return { ok: false, erro: 'pedido não está arquivado (só finalizados POR AQUI têm arquivo)' };
   const anexos = [];
   let temEtq = false, temDanfe = false;
-  // se o snapshot não tem NF (ou veio sem id), busca fresca no Bling — reimpressão é sempre com Bling no ar
-  if (!ped.nf || !ped.nf.id) {
+  const ehShopee = ped.marketplace === 'shopee';   // Shopee: a etiqueta já vem com a DANFE embaixo → não anexa DANFE separado
+  // se o snapshot não tem NF (ou veio sem id), busca fresca no Bling — reimpressão é sempre com Bling no ar (Shopee não precisa)
+  if (!ehShopee && (!ped.nf || !ped.nf.id)) {
     try { const nf = await nfDoPedido(id); if (nf && nf.id) ped.nf = nf; } catch (e) {}
   }
   // ETIQUETA em PDF — função canônica (ML: PDF nativo do Bling; não-ML: ZPL cacheado → Labelary)
@@ -800,19 +801,23 @@ async function enviarEmailDocs(id, quem) {
     const etqPdf = await etiquetaPdf(id, path.join(ARQUIVO_DIR, String(id)));
     if (etqPdf) { anexos.push({ filename: `etiqueta-${ped.numero || id}.pdf`, content: etqPdf }); temEtq = true; }
   } catch (e) {}
-  // DANFE SIMPLIFICADO (igual ao que imprime no checkout) — usa o nf-simp.json arquivado, ou gera na hora
-  try {
-    let dados = readJson(path.join(ARQUIVO_DIR, String(id), 'nf-simp.json'), null);
-    const nfId = ped.nf && ped.nf.id;
-    if (!dados && nfId) dados = await dadosNFSimp(nfId, ped.numero);
-    const simpPdf = dados ? await gerarDanfeSimplificado(dados) : null;
-    if (simpPdf) { anexos.push({ filename: `danfe-simplificado-${(ped.nf && ped.nf.numero) || id}.pdf`, content: simpPdf }); temDanfe = true; }
-  } catch (e) {}
+  // DANFE SIMPLIFICADO (igual ao que imprime no checkout) — Shopee NÃO precisa (já vem embaixo da etiqueta)
+  if (!ehShopee) {
+    try {
+      let dados = readJson(path.join(ARQUIVO_DIR, String(id), 'nf-simp.json'), null);
+      const nfId = ped.nf && ped.nf.id;
+      if (!dados && nfId) dados = await dadosNFSimp(nfId, ped.numero);
+      const simpPdf = dados ? await gerarDanfeSimplificado(dados) : null;
+      if (simpPdf) { anexos.push({ filename: `danfe-simplificado-${(ped.nf && ped.nf.numero) || id}.pdf`, content: simpPdf }); temDanfe = true; }
+    } catch (e) {}
+  }
   if (!anexos.length) return { ok: false, erro: 'sem documentos pra enviar (etiqueta nem DANFE disponíveis)' };
   try {
     const transporter = nodemailer.createTransport({ host: SMTP_HOST, port: SMTP_PORT, secure: SMTP_PORT === 465, auth: { user: EMAIL_USER, pass: EMAIL_PASS } });
     const mktNome = MKT_NOME[ped.marketplace] || ped.marketplace || '—';
-    const oQueVai = [temEtq ? 'etiqueta' : null, temDanfe ? 'DANFE simplificado' : null].filter(Boolean).join(' + ');
+    const oQueVai = (ehShopee && temEtq)
+      ? 'etiqueta de postagem (já inclui a DANFE embaixo)'
+      : [temEtq ? 'etiqueta' : null, temDanfe ? 'DANFE simplificado' : null].filter(Boolean).join(' + ');
     const corpo = 'Reimpressão solicitada pelo Checkout Offline.\n\n'
       + 'Pedido: ' + (ped.numero || id) + '\n'
       + 'Cliente: ' + (ped.cliente || '—') + '\n'
@@ -1371,8 +1376,7 @@ function routes(readBody) {
     if (method === 'GET' && p === '/girassol-backup-offline/historico') {
       const conf = readJson(CONFERIDOS_FILE, {});
       const itens = Object.keys(conf).map(id => ({ id, ...conf[id] }))
-        .sort((a, b) => String(b.conferido_em || '').localeCompare(String(a.conferido_em || '')))
-        .slice(0, 80);
+        .sort((a, b) => String(b.conferido_em || '').localeCompare(String(a.conferido_em || '')));
       json(res, 200, { ok: true, total: Object.keys(conf).length, itens });
       return true;
     }
