@@ -39,7 +39,7 @@ const { gerarDanfeSimplificado, gerarDanfeSimplificadoZPL } = require('./danfe-s
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v17/06 b66';
+const VERSAO     = 'girassol-backup-offline v17/06 b67';
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 
 // ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
@@ -1607,7 +1607,23 @@ function routes(readBody) {
         });
         await sleep(PAUSA_MS);
       }
-      json(res, 200, { ok: pedidos.length > 0, via, q, total: pedidos.length, pedidos });
+      // também busca NOTAS FISCAIS por número (a NF tem numeração própria, diferente do pedido)
+      const notas = [];
+      const rnf = await blingGet(`/nfe?numero=${encodeURIComponent(q)}&limite=10`);
+      if (rnf.ok && rnf.data && Array.isArray(rnf.data.data)) {
+        for (const n of rnf.data.data.filter(x => String(x.numero) === String(q)).slice(0, 10)) {
+          notas.push({
+            id: n.id,
+            numero: n.numero,
+            chave: n.chaveAcesso || n.chave || null,
+            cliente: (n.contato && n.contato.nome) || '',
+            situacao_id: (n.situacao && (n.situacao.id || n.situacao)) || null,
+            data: n.dataEmissao || n.data || null,
+            valor: n.valorNota || n.valor || null
+          });
+        }
+      }
+      json(res, 200, { ok: pedidos.length > 0 || notas.length > 0, via, q, pedidos, notas });
       return true;
     }
     // baixa o DANFE (PDF) de QUALQUER pedido ao vivo (acha a NF na hora) — não precisa estar no cache
@@ -1617,6 +1633,24 @@ function routes(readBody) {
       const pdf = nf && nf.id ? await baixarDanfe(nf.id) : null;
       if (pdf) { res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': `inline; filename="danfe-${id}.pdf"` }); res.end(pdf); }
       else json(res, 404, { ok: false, erro: 'DANFE indisponível (pedido sem NF ou Bling não respondeu)', nf: nf || null });
+      return true;
+    }
+    // baixa o DANFE (PDF) direto pelo ID da NOTA (pra resultados de busca por NF)
+    if (method === 'GET' && p.startsWith('/girassol-backup-offline/danfe-nf/')) {
+      const nfId = p.split('/').filter(Boolean).pop();
+      const pdf = await baixarDanfe(nfId);
+      if (pdf) { res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': `inline; filename="danfe-nf-${nfId}.pdf"` }); res.end(pdf); }
+      else json(res, 404, { ok: false, erro: 'DANFE indisponível (NF sem PDF ou Bling não respondeu)' });
+      return true;
+    }
+    // baixa o XML da NOTA pelo ID
+    if (method === 'GET' && p.startsWith('/girassol-backup-offline/xml-nf/')) {
+      const nfId = p.split('/').filter(Boolean).pop();
+      const det = await blingGet(`/nfe/${nfId}`);
+      const nf = det.data && det.data.data;
+      const xml = nf ? await baixarXmlNF(nf) : '';
+      if (xml) { res.writeHead(200, { 'Content-Type': 'application/xml; charset=utf-8', 'Content-Disposition': `attachment; filename="nf-${(nf && nf.numero) || nfId}.xml"` }); res.end(xml); }
+      else json(res, 404, { ok: false, erro: 'XML indisponível' });
       return true;
     }
     // DEBUG: mostra a resposta crua do Bling pra entender como buscar pedido (filtro funciona? 116856 é numero ou numeroLoja?)
