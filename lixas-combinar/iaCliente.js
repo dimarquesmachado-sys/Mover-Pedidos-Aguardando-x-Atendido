@@ -171,10 +171,13 @@ CLASSIFIQUE em UMA destas 4 categorias:
    Ex: "40 do 120, 40 do 240, 10 do 320, 10 do 400, 10 do 1500" (=110, especifico e nao fecha)
    Ex: "5 do 400 e 5 do 1500" (5 nao eh multiplo de ${unidadesPorPacote})
    Ex: "20 do 100" quando 100 NAO esta na lista de disponiveis (grao inexistente)
-   AÇÃO: Peça/ajuste de forma clara, com exemplo. Se for nao-multiplo de ${unidadesPorPacote},
+   AÇÃO: Peça/ajuste de forma clara. Se for nao-multiplo de ${unidadesPorPacote},
    explique que as quantidades precisam ser multiplas de ${unidadesPorPacote}. Se o grao pedido
-   NAO existe na lista, avise que aquele grao nao esta disponivel e liste os disponiveis mais
-   proximos pra ele escolher (ex.: "o grao g100 nao esta disponivel; temos g80 e g120, qual prefere?").
+   NAO existe na lista de disponiveis, avise que aquele grao especifico nao esta disponivel e
+   ofereca como alternativa SOMENTE graos que estao LITERALMENTE na lista de "Graos disponiveis
+   em estoque AGORA" desta conversa — os numericamente mais proximos do que ele pediu. JAMAIS
+   cite um grao que nao esteja nessa lista (nem como sugestao). Use os numeros REAIS da lista,
+   nunca numeros de exemplo.
 
 3. "pergunta_graos" - Cliente esta perguntando QUAIS graos estao disponiveis
    Ex: "quais graos vcs tem?"
@@ -192,6 +195,10 @@ REGRAS RIGIDAS:
   a lista de disponiveis. Se QUALQUER grao pedido nao estiver na lista, o pedido NAO eh
   "claro": classifique como "ambiguo", avise que aquele grao nao existe e liste os
   disponiveis mais proximos. NUNCA troque um grao invalido por outro por conta propria.
+- AO SUGERIR ALTERNATIVAS: toda sugestao de grao TEM que existir na lista "Graos disponiveis
+  em estoque AGORA" desta conversa. Antes de citar qualquer "gN" como disponivel, confira que
+  esse N esta na lista acima. Se nao estiver, NAO cite. NUNCA repita numeros de grao que vieram
+  de exemplos deste prompt — use sempre os numeros REAIS da lista desta venda.
 - Voce PODE completar/montar a distribuicao quando o cliente pede VARIEDADE ou um
   pedido UNIFORME ("X de cada") que nao fecha — sempre em multiplos de ${unidadesPorPacote}
   e somando EXATAMENTE ${totalLixas}, usando so graos disponiveis.
