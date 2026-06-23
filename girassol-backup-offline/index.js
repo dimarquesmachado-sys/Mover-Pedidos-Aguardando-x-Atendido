@@ -39,7 +39,7 @@ const { gerarDanfeSimplificado, gerarDanfeSimplificadoZPL } = require('./danfe-s
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v17/06 b72';
+const VERSAO     = 'girassol-backup-offline v17/06 b73';
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 
 // ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
@@ -773,12 +773,9 @@ async function enviarEmailDocs(id, quem) {
   if (!ped) return { ok: false, erro: 'pedido não está arquivado (só finalizados POR AQUI têm arquivo)' };
   const anexos = [];
   let temEtq = false, temDanfe = false;
-  // ETIQUETA (ZPL → PDF) — exatamente como vai pra Zebra
+  // ETIQUETA em PDF — função canônica (ML: PDF nativo do Bling; não-ML: ZPL cacheado → Labelary)
   try {
-    const etqPath = path.join(ARQUIVO_DIR, String(id), `etiqueta.${ETIQ_FORMATO.toLowerCase()}`);
-    let etqPdf = null;
-    if (ETIQ_FORMATO === 'PDF') etqPdf = fs.readFileSync(etqPath);
-    else { const zpl = fs.readFileSync(etqPath, 'utf8'); etqPdf = await zplParaPdf(zpl); }
+    const etqPdf = await etiquetaPdf(id, path.join(ARQUIVO_DIR, String(id)));
     if (etqPdf) { anexos.push({ filename: `etiqueta-${ped.numero || id}.pdf`, content: etqPdf }); temEtq = true; }
   } catch (e) {}
   // DANFE SIMPLIFICADO (igual ao que imprime no checkout) — usa o nf-simp.json arquivado, ou gera na hora
@@ -1114,7 +1111,7 @@ function montarSeparacaoPorPedido(mktFiltro) {
       } else { add(it.sku, it.ean, it.descricao, it.qtd); }
     }
     itens.sort((a, b) => { const la = a.loc || '', lb = b.loc || ''; if (!la && lb) return 1; if (la && !lb) return -1; return la.localeCompare(lb, 'pt', { numeric: true }); });
-    lista.push({ numero: snap.numero || id, marketplace: mkt, cliente: snap.cliente || '', nf: (snap.nf && snap.nf.numero) || '', itens });
+    lista.push({ numero: snap.numero || id, marketplace: mkt, cliente: snap.cliente || '', nf: (snap.nf && snap.nf.numero) || '', tem_etiqueta: true, tem_nf: !!(snap.nf && snap.nf.numero), itens });
   }
   lista.sort((a, b) => String(a.numero).localeCompare(String(b.numero), 'pt', { numeric: true }));
   const total_itens = lista.reduce((s, p) => s + p.itens.reduce((ss, i) => ss + i.qtd, 0), 0);
@@ -1749,11 +1746,10 @@ function routes(readBody) {
     // ARQUIVO: etiqueta arquivada → PDF (converte ZPL se preciso)
     if (method === 'GET' && p.startsWith('/girassol-backup-offline/arq-etiqueta-pdf/')) {
       const id = p.split('/').filter(Boolean).pop();
-      const etqPath = path.join(ARQUIVO_DIR, String(id), `etiqueta.${ETIQ_FORMATO.toLowerCase()}`);
       let pdf = null;
-      try { if (ETIQ_FORMATO === 'PDF') pdf = fs.readFileSync(etqPath); else { const zpl = fs.readFileSync(etqPath, 'utf8'); pdf = await zplParaPdf(zpl); } } catch (e) {}
+      try { pdf = await etiquetaPdf(id, path.join(ARQUIVO_DIR, String(id))); } catch (e) {}
       if (pdf) { res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': `inline; filename="etiqueta-${id}.pdf"` }); res.end(pdf); }
-      else json(res, 404, { ok: false, erro: 'etiqueta não arquivada (pedido finalizado antes desse recurso?)' });
+      else json(res, 404, { ok: false, erro: 'etiqueta não disponível (pedido finalizado antes desse recurso, ou ML postado)' });
       return true;
     }
     // ARQUIVO: DANFE de um pedido arquivado → gera na hora pelo nf.id guardado
