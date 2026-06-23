@@ -282,7 +282,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b60';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b61';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#ff9900'}, magalu:{n:'Magalu',c:'#0086ff'}, outro:{n:'Outro',c:'#94a3b8'}
@@ -859,33 +859,44 @@ async function confirmarFinalizar(){
 }
 
 // ─── Histórico dos últimos finalizados (modal) ─────────────────────────────
+let histItens = [];
 async function abrirHistorico(){
   const md=$('modal');
   md.innerHTML =
     '<div class="mbox" style="max-width:580px;width:92vw">'+
       '<div class="mtit">🕘 Últimos pedidos finalizados</div>'+
+      '<input id="histBusca" class="buscafld" style="margin-bottom:10px" placeholder="🔎 filtrar por nº do pedido ou cliente" autocomplete="off" oninput="filtrarHist()" />'+
       '<div id="histBody" class="histbody">carregando…</div>'+
       '<div class="mbtns"><button class="btn sec" onclick="fecharConfirmacao()">Fechar</button></div>'+
     '</div>';
   md.classList.add('show');
   try{
     const d = await api('/girassol-backup-offline/historico');
-    if(!d.itens || !d.itens.length){ $('histBody').innerHTML='<div class="sepempty">Nenhum pedido finalizado ainda.</div>'; return; }
-    $('histBody').innerHTML = d.itens.map(h=>{
-      const dt = h.conferido_em ? new Date(h.conferido_em).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '';
-      const mk = h.marketplace ? (MKT[h.marketplace]||MKT.outro) : null;
-      const tag = h.sincronizado ? '<span class="hsync ok">✓ VERIFICADO</span>' : '<span class="hsync wait">⏳ na fila</span>';
-      return '<div class="histrow">'+
-        (mk?'<span class="hmk" style="background:'+mk.c+'"></span>':'')+
-        '<div class="hmeta">'+
-          '<div class="hnum">'+esc(h.numero||h.id)+(h.cliente?' · '+esc(h.cliente):'')+'</div>'+
-          '<div class="hsub">'+dt+(h.user?(' · '+esc(h.user)):'')+'</div>'+
-        '</div>'+
-        tag+
-        (souAdmin()?'<button class="btn warn sm" onclick="reabrirPedido(\''+h.id+'\',\''+esc(h.numero||h.id)+'\')">↩ Reabrir</button>':'')+
-      '</div>';
-    }).join('');
+    histItens = (d && d.itens) || [];
+    renderHist(histItens);
   }catch(e){ $('histBody').innerHTML='<div class="sepempty">Falha: '+esc(e.message)+'</div>'; }
+}
+function filtrarHist(){
+  const q = (($('histBusca')||{}).value||'').trim().toLowerCase();
+  const lista = q ? histItens.filter(h => (String(h.numero||h.id)+' '+(h.cliente||'')).toLowerCase().includes(q)) : histItens;
+  renderHist(lista);
+}
+function renderHist(lista){
+  if(!lista.length){ $('histBody').innerHTML='<div class="sepempty">'+(histItens.length?'Nenhum resultado pro filtro.':'Nenhum pedido finalizado ainda.')+'</div>'; return; }
+  $('histBody').innerHTML = lista.map(h=>{
+    const dt = h.conferido_em ? new Date(h.conferido_em).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '';
+    const mk = h.marketplace ? (MKT[h.marketplace]||MKT.outro) : null;
+    const tag = h.sincronizado ? '<span class="hsync ok">✓ VERIFICADO</span>' : '<span class="hsync wait">⏳ na fila</span>';
+    return '<div class="histrow">'+
+      (mk?'<span class="hmk" style="background:'+mk.c+'"></span>':'')+
+      '<div class="hmeta">'+
+        '<div class="hnum">'+esc(h.numero||h.id)+(h.cliente?' · '+esc(h.cliente):'')+'</div>'+
+        '<div class="hsub">'+dt+(h.user?(' · '+esc(h.user)):'')+'</div>'+
+      '</div>'+
+      tag+
+      (souAdmin()?'<button class="btn warn sm" onclick="reabrirPedido(\''+h.id+'\',\''+esc(h.numero||h.id)+'\')">↩ Reabrir</button>':'')+
+    '</div>';
+  }).join('');
 }
 
 // reabre um pedido finalizado por engano → volta pra lista (e devolve pra ATENDIDO no Bling se já tinha sido verificado)
@@ -1026,6 +1037,8 @@ function abrirBusca(){
       '<div id="buscaRes"></div>'+
       '<div id="idxStatus" style="font-size:11px;color:var(--mut);margin-top:10px;min-height:14px"></div>'+
       '<div class="mbtns">'+
+        '<button class="btn warn sm" onclick="imprimirEtiquetaProduto()">🏷️ Imprimir etiqueta</button>'+
+        '<button class="btn sec sm" onclick="escolherImpressoraEtiqueta()" title="escolher a impressora da etiqueta 4x2,5cm">🖨</button>'+
         (souAdmin()?'<button class="btn sec sm" onclick="indexarCatalogo()" title="varre todo o catálogo p/ achar qualquer EAN na hora (roda 1x)">🔄 Indexar catálogo</button>':'')+
         '<button class="btn sec" onclick="fecharConfirmacao()">Fechar</button>'+
       '</div>'+
@@ -1059,10 +1072,6 @@ async function fazerBusca(){
         '<input id="buscaLoc" class="buscafld" style="text-transform:uppercase" value="'+esc(p.localizacao||'')+'" placeholder="nova localização" autocomplete="off" onkeydown="if(event.key===\'Enter\')salvarLocBusca()" />'+
         '<button class="btn ok" onclick="salvarLocBusca()">✓ Salvar</button>'+
       '</div>'+
-    '</div>'+
-    '<div style="display:flex;gap:8px;margin-top:10px">'+
-      '<button class="btn warn sm" onclick="imprimirEtiquetaProduto()">🏷️ Imprimir etiqueta</button>'+
-      '<button class="btn sec sm" onclick="escolherImpressoraEtiqueta()" title="escolher a impressora da etiqueta 4x2,5cm">🖨</button>'+
     '</div>';
   const b=$('buscaInp'); if(b) b.select();
 }
