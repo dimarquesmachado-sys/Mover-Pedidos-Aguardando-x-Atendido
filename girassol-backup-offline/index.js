@@ -40,7 +40,7 @@ const { gerarDanfeSimplificado, gerarDanfeSimplificadoZPL } = require('./danfe-s
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v17/06 b77';
+const VERSAO     = 'girassol-backup-offline v17/06 b78';
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 
 // ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
@@ -791,6 +791,10 @@ async function enviarEmailDocs(id, quem) {
   if (!ped) return { ok: false, erro: 'pedido não está arquivado (só finalizados POR AQUI têm arquivo)' };
   const anexos = [];
   let temEtq = false, temDanfe = false;
+  // se o snapshot não tem NF (ou veio sem id), busca fresca no Bling — reimpressão é sempre com Bling no ar
+  if (!ped.nf || !ped.nf.id) {
+    try { const nf = await nfDoPedido(id); if (nf && nf.id) ped.nf = nf; } catch (e) {}
+  }
   // ETIQUETA em PDF — função canônica (ML: PDF nativo do Bling; não-ML: ZPL cacheado → Labelary)
   try {
     const etqPdf = await etiquetaPdf(id, path.join(ARQUIVO_DIR, String(id)));
