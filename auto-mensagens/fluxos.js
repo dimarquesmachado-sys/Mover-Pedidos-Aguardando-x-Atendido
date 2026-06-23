@@ -45,6 +45,13 @@ const LIMIAR_CONFIANCA_AUTO = Number(process.env.LIXAS_AUTO_CONFIANCA_MIN || 95)
 // Default 999 = praticamente sem limite. Sugestao: LIXAS_AUTO_MAX_POR_DIA=5 na 1a semana.
 const AUTO_MAX_POR_DIA = Number(process.env.LIXAS_AUTO_MAX_POR_DIA || 999);
 
+// FREIO DO LOOP: se o cliente ja mandou MUITAS mensagens e a IA ainda nao fechou o pedido
+// (categoria != 'claro'), para de responder automatico e ESCALA pra humano — evita o
+// cliente ficar preso num vai-e-volta infinito com a IA. Default 5 mensagens do cliente.
+const IA_MAX_RODADAS = Number(process.env.LIXAS_IA_MAX_RODADAS || 5);
+const IA_MSG_ESCALA_LOOP = process.env.LIXAS_IA_MSG_ESCALA_LOOP ||
+  'Olá! Vou verificar seu pedido pessoalmente com a equipe e retorno aqui em breve com a confirmação. Obrigado pela paciência! 😊';
+
 // ── LEMBRETE controlado (reenvio apos X horas de silencio) ──────────
 // So age em conversa que o cliente JA abriu (ML so permite enviar nesses casos).
 // NASCE DESLIGADO. Manda no MAXIMO REENVIO_MAX lembretes, espacados de REENVIO_HORAS.
@@ -1128,6 +1135,37 @@ async function rotinaLerRespostas() {
               }
 
               console.log(`[ia] order ${venda.order_id} categoria=${iaResult.categoria} confianca=${iaResult.confianca}`);
+
+              // ════════════════════════════════════════════════════════
+              // FREIO DO LOOP: se o cliente ja mandou muitas mensagens e a IA AINDA nao
+              // fechou (categoria != 'claro'), para de responder automatico e escala pra
+              // humano. Evita o vai-e-volta infinito que faz o cliente desistir.
+              // ════════════════════════════════════════════════════════
+              if (iaResult.categoria !== 'claro' && Number(conv.totalCliente) >= IA_MAX_RODADAS) {
+                console.warn(`[ia] order ${venda.order_id} 🔁 LOOP: ${conv.totalCliente} msgs do cliente sem fechar (categoria=${iaResult.categoria}) — ESCALANDO pra humano`);
+                let avisouLoop = false;
+                if ((venda.ia_msg_enviada || '').trim() !== IA_MSG_ESCALA_LOOP.trim()) {
+                  try {
+                    const envLoop = await ml.enviarMensagemDireta({
+                      packId: venda.pack_id, orderId: venda.order_id, buyerId: venda.buyer_id, texto: IA_MSG_ESCALA_LOOP
+                    });
+                    avisouLoop = !!(envLoop && envLoop.ok);
+                  } catch (_) {}
+                }
+                stats.iaEscalonadas++;
+                await lcp.atualizarVenda(venda.order_id, {
+                  ia_categoria: iaResult.categoria,
+                  ia_confianca: iaResult.confianca,
+                  ia_interpretacao: (`[loop ${conv.totalCliente} msgs do cliente] ` + (iaResult.interpretacao || '')).slice(0, 300),
+                  ia_escalou_humano: true,
+                  ia_msg_enviada: avisouLoop ? IA_MSG_ESCALA_LOOP : (venda.ia_msg_enviada || null),
+                  ia_processado_em: new Date().toISOString(),
+                  ultima_resposta_em: new Date(_tsRespAtual).toISOString(),
+                  status: 'precisa_atencao_humano'
+                });
+                registrarMsgProcessada(venda.order_id, _tsRespAtual);
+                continue;
+              }
 
               // 4 categorias possiveis
               if (iaResult.categoria === 'fora_escopo') {
