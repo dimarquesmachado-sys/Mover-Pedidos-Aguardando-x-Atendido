@@ -178,6 +178,10 @@
   .sep-ped{border:1px solid var(--line);border-radius:12px;margin-bottom:12px;overflow:hidden;background:var(--card2)}
   .sep-ped .sph{display:flex;align-items:center;gap:8px;padding:10px 12px;background:var(--card);border-bottom:1px solid var(--line);flex-wrap:wrap}
   .sep-ped .sph .num{font-size:16px;font-weight:800;color:var(--tx);font-family:ui-monospace,monospace}
+  .sep-ped .sph .chk{display:inline-flex;align-items:center;gap:1px;font-size:14px;padding:2px 6px 2px 5px;border-radius:7px;background:#0f2e1a;border:1px solid #1f7a44;line-height:1}
+  .sep-ped .sph .chk i{font-style:normal;font-size:11px;font-weight:800;color:#7ee0a0}
+  .sep-ped .sph .chk.off{background:var(--card);border-color:var(--line)}
+  .sep-ped .sph .chk.off i{color:var(--mut)}
   .sep-ped .sph .cli{font-size:13px;color:var(--mut);flex:1;min-width:60px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .sep-ped .sit{display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid var(--line)}
   .sep-ped .sit:last-child{border-bottom:none}
@@ -284,7 +288,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b65';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b66';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#ff9900'}, magalu:{n:'Magalu',c:'#0086ff'}, outro:{n:'Outro',c:'#94a3b8'}
@@ -995,6 +999,8 @@ async function carregarSepPedido(){
       const mk = MKT[p.marketplace] || MKT.outro;
       return '<div class="sep-ped">'+
         '<div class="sph">'+
+          '<span class="chk'+(p.tem_etiqueta?'':' off')+'" title="Etiqueta '+(p.tem_etiqueta?'pronta':'faltando')+'">🏷️<i>'+(p.tem_etiqueta?'✓':'✗')+'</i></span>'+
+          '<span class="chk'+(p.tem_nf?'':' off')+'" title="Nota Fiscal '+(p.tem_nf?'pronta':'faltando')+'">🧾<i>'+(p.tem_nf?'✓':'✗')+'</i></span>'+
           '<span class="num">'+esc(String(p.numero))+'</span>'+
           '<span style="font-size:11px;font-weight:800;padding:3px 8px;border-radius:7px;background:'+mk.c+'22;color:'+mk.c+';border:1px solid '+mk.c+'55">'+mk.n+'</span>'+
           '<span class="cli">'+esc(p.cliente||'')+'</span>'+
