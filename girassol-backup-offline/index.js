@@ -31,6 +31,7 @@ const path  = require('path');
 const fetch = require('node-fetch');
 const AdmZip = require('adm-zip');
 const crypto = require('crypto');
+const https = require('https');
 const { garantirToken } = require('../girassol/tokenManager');
 const { gerarDanfeSimplificado, gerarDanfeSimplificadoZPL } = require('./danfe-simplificado');
 
@@ -39,7 +40,7 @@ const { gerarDanfeSimplificado, gerarDanfeSimplificadoZPL } = require('./danfe-s
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v17/06 b76';
+const VERSAO     = 'girassol-backup-offline v17/06 b77';
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 
 // ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
@@ -607,20 +608,40 @@ async function baixarEtiquetaPDF(blingId) {
   } catch (e) { return null; }
 }
 
-// converte ZPL → PDF via Labelary (serviço externo). Usado SÓ sob demanda p/ não-ML.
+// POST ao Labelary usando o módulo https nativo — lê a resposta binária de forma confiável
+// (o node-fetch às vezes corta respostas grandes com "Premature close")
+function labelaryPost(zpl) {
+  return new Promise((resolve) => {
+    let data;
+    try { data = Buffer.from(zpl, 'utf8'); } catch (e) { return resolve({ status: 0, buf: null }); }
+    const req = https.request({
+      hostname: 'api.labelary.com',
+      path: '/v1/printers/8dpmm/labels/4x6/0/',
+      method: 'POST',
+      headers: { 'Accept': 'application/pdf', 'Content-Type': 'application/x-www-form-urlencoded', 'Content-Length': data.length }
+    }, (resp) => {
+      const chunks = [];
+      resp.on('data', (c) => chunks.push(c));
+      resp.on('end', () => resolve({ status: resp.statusCode || 0, buf: Buffer.concat(chunks) }));
+      resp.on('error', () => resolve({ status: 0, buf: null }));
+    });
+    req.on('error', () => resolve({ status: 0, buf: null }));
+    req.setTimeout(25000, () => { try { req.destroy(); } catch (e) {} resolve({ status: 0, buf: null }); });
+    req.write(data);
+    req.end();
+  });
+}
+
+// converte ZPL → PDF via Labelary (com retry — trata rate limit 429 e quedas de conexão). Usado p/ não-ML.
 async function zplParaPdf(zpl) {
   if (!zpl || zpl.indexOf('^XA') < 0) return null; // não parece ZPL
-  try {
-    const r = await fetch('https://api.labelary.com/v1/printers/8dpmm/labels/4x6/0/', {
-      method: 'POST',
-      headers: { 'Accept': 'application/pdf', 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: zpl
-    });
-    if (!r.ok) return null;
-    const buf = Buffer.from(await r.arrayBuffer());
-    if (buf.slice(0, 4).toString('latin1') !== '%PDF') return null;
-    return buf;
-  } catch (e) { return null; }
+  for (let t = 0; t < 4; t++) {
+    const r = await labelaryPost(zpl);
+    if (r.status === 200 && r.buf && r.buf.slice(0, 4).toString('latin1') === '%PDF') return r.buf;
+    if (r.status === 429) { await sleep(1500 + t * 1200); continue; }   // rate limit → espera mais
+    await sleep(700 + t * 500);   // queda/resposta estranha → espera e retenta
+  }
+  return null;
 }
 
 // etiqueta em PDF. 1º tenta o PDF nativo do Bling (vale p/ QUALQUER marketplace — ML, Shopee, Amazon...;
@@ -1800,20 +1821,16 @@ function routes(readBody) {
         o.pos_DG = zpl.indexOf('~DG');
         o.tem_GFB = zpl.indexOf('^GFB') >= 0;
         o.inicio = zpl.slice(0, 60).replace(/[^\x20-\x7e]/g, '.');
-        try {
-          const lr = await fetch('https://api.labelary.com/v1/printers/8dpmm/labels/4x6/0/', { method: 'POST', headers: { 'Accept': 'application/pdf', 'Content-Type': 'application/x-www-form-urlencoded' }, body: zpl });
-          o.labelary_status = lr.status;
-          o.labelary_ct = lr.headers.get('content-type') || '';
-          const lb = Buffer.from(await lr.arrayBuffer());
-          o.labelary_size = lb.length;
-          o.labelary_pdf = lb.slice(0, 4).toString('latin1') === '%PDF';
-          if (!o.labelary_pdf) o.labelary_erro = lb.slice(0, 250).toString('latin1').replace(/[^\x20-\x7e]/g, '.');
-        } catch (e) { o.labelary_fetch_erro = String((e && e.message) || e); }
+        const lr = await labelaryPost(zpl);
+        o.labelary_status = lr.status;
+        o.labelary_size = lr.buf ? lr.buf.length : 0;
+        o.labelary_pdf = !!(lr.buf && lr.buf.slice(0, 4).toString('latin1') === '%PDF');
+        if (!o.labelary_pdf && lr.buf) o.labelary_resp = lr.buf.slice(0, 250).toString('latin1').replace(/[^\x20-\x7e]/g, '.');
         return o;
       }
       let zCache = null;
       try { zCache = fs.readFileSync(path.join(ARQUIVO_DIR, String(id), `etiqueta.${ETIQ_FORMATO.toLowerCase()}`), 'utf8'); } catch (e) {}
-      out.cache = await infoZpl(zCache, 'cache'); await sleep(PAUSA_MS);
+      out.cache = await infoZpl(zCache, 'cache'); await sleep(2500);
       let zFresh = null;
       try { zFresh = await baixarEtiqueta(id); } catch (e) {}
       out.fresco = await infoZpl(zFresh, 'fresco_bling');
