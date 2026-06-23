@@ -39,7 +39,7 @@ const { gerarDanfeSimplificado, gerarDanfeSimplificadoZPL } = require('./danfe-s
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v17/06 b65';
+const VERSAO     = 'girassol-backup-offline v17/06 b66';
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 
 // ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
@@ -1632,6 +1632,25 @@ function routes(readBody) {
       out.por_numeroLoja = { ok: c.ok, status: c.status, qtd: (c.data && c.data.data) ? c.data.data.length : null, amostra: amostra(c.data) };
       const d = await blingGet(`/pedidos/vendas/${encodeURIComponent(q)}`);
       out.por_id = { ok: d.ok, status: d.status, achou: !!(d.data && d.data.data), numero: d.data && d.data.data && d.data.data.numero };
+      json(res, 200, out);
+      return true;
+    }
+    // DEBUG 2: testa buscar NF por número e contato por nome (pra saber quais buscas a API permite)
+    if (method === 'GET' && p === '/girassol-backup-offline/debug-busca2') {
+      const nf = String(urlObj.searchParams.get('nf') || '').trim();
+      const nome = String(urlObj.searchParams.get('nome') || '').trim();
+      const out = {};
+      const amNfe = (dd) => (dd && Array.isArray(dd.data)) ? dd.data.slice(0, 5).map(x => ({ id: x.id, numero: x.numero, nome: x.contato && x.contato.nome })) : (dd || null);
+      if (nf) {
+        const a = await blingGet(`/nfe?numero=${encodeURIComponent(nf)}&limite=10`); await sleep(PAUSA_MS);
+        out.nfe_por_numero = { ok: a.ok, status: a.status, qtd: (a.data && a.data.data) ? a.data.data.length : null, amostra: amNfe(a.data) };
+        const b = await blingGet(`/nfe?limite=5`); await sleep(PAUSA_MS);
+        out.nfe_sem_filtro = { ok: b.ok, status: b.status, qtd: (b.data && b.data.data) ? b.data.data.length : null, amostra: amNfe(b.data) };
+      }
+      if (nome) {
+        const c = await blingGet(`/contatos?pesquisa=${encodeURIComponent(nome)}&limite=5`); await sleep(PAUSA_MS);
+        out.contato_pesquisa = { ok: c.ok, status: c.status, qtd: (c.data && c.data.data) ? c.data.data.length : null, amostra: (c.data && Array.isArray(c.data.data)) ? c.data.data.slice(0, 5).map(x => ({ id: x.id, nome: x.nome })) : (c.data || null) };
+      }
       json(res, 200, out);
       return true;
     }
