@@ -39,7 +39,7 @@ const { gerarDanfeSimplificado, gerarDanfeSimplificadoZPL } = require('./danfe-s
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v17/06 b75';
+const VERSAO     = 'girassol-backup-offline v17/06 b76';
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 
 // ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
@@ -1778,6 +1778,45 @@ function routes(readBody) {
       try { const buf = fs.readFileSync(etqPath); ci.existe = true; ci.size = buf.length; ci.bytes_hex = buf.slice(0, 8).toString('hex'); ci.eh_pdf = buf.slice(0, 4).toString('latin1') === '%PDF'; ci.eh_zpl = buf.slice(0, 400).toString('latin1').indexOf('^XA') >= 0; }
       catch (e) { ci.existe = false; }
       out.cache_arquivo = ci;
+      json(res, 200, out);
+      return true;
+    }
+    // TESTE de conversão ZPL→PDF (Labelary) — compara o ZPL do cache vs o fresco do Bling
+    if (method === 'GET' && p === '/girassol-backup-offline/etq-test2') {
+      let op = ''; try { op = urlObj.searchParams.get('op') || ''; } catch (e) {}
+      if (!ehAdmin(op)) { json(res, 200, { ok: false, erro: 'só admin' }); return true; }
+      const numero = String(urlObj.searchParams.get('numero') || '').trim();
+      if (!numero) { json(res, 400, { ok: false, erro: 'falta ?numero=' }); return true; }
+      const r1 = await blingGet(`/pedidos/vendas?numero=${encodeURIComponent(numero)}`);
+      const ped = r1.ok && r1.data && r1.data.data && r1.data.data[0];
+      if (!ped) { json(res, 200, { erro: 'pedido não encontrado por número' }); return true; }
+      const id = ped.id;
+      const out = { numero, blingId: id };
+      async function infoZpl(zpl, tag) {
+        const o = { fonte: tag };
+        if (!zpl) { o.vazio = true; return o; }
+        o.tamanho = zpl.length;
+        o.pos_XA = zpl.indexOf('^XA');
+        o.pos_DG = zpl.indexOf('~DG');
+        o.tem_GFB = zpl.indexOf('^GFB') >= 0;
+        o.inicio = zpl.slice(0, 60).replace(/[^\x20-\x7e]/g, '.');
+        try {
+          const lr = await fetch('https://api.labelary.com/v1/printers/8dpmm/labels/4x6/0/', { method: 'POST', headers: { 'Accept': 'application/pdf', 'Content-Type': 'application/x-www-form-urlencoded' }, body: zpl });
+          o.labelary_status = lr.status;
+          o.labelary_ct = lr.headers.get('content-type') || '';
+          const lb = Buffer.from(await lr.arrayBuffer());
+          o.labelary_size = lb.length;
+          o.labelary_pdf = lb.slice(0, 4).toString('latin1') === '%PDF';
+          if (!o.labelary_pdf) o.labelary_erro = lb.slice(0, 250).toString('latin1').replace(/[^\x20-\x7e]/g, '.');
+        } catch (e) { o.labelary_fetch_erro = String((e && e.message) || e); }
+        return o;
+      }
+      let zCache = null;
+      try { zCache = fs.readFileSync(path.join(ARQUIVO_DIR, String(id), `etiqueta.${ETIQ_FORMATO.toLowerCase()}`), 'utf8'); } catch (e) {}
+      out.cache = await infoZpl(zCache, 'cache'); await sleep(PAUSA_MS);
+      let zFresh = null;
+      try { zFresh = await baixarEtiqueta(id); } catch (e) {}
+      out.fresco = await infoZpl(zFresh, 'fresco_bling');
       json(res, 200, out);
       return true;
     }
