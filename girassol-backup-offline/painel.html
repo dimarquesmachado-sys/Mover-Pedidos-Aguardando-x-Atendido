@@ -284,7 +284,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b62';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b63';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#ff9900'}, magalu:{n:'Magalu',c:'#0086ff'}, outro:{n:'Outro',c:'#94a3b8'}
@@ -897,9 +897,19 @@ function renderHist(lista){
         '<div class="hsub">'+dt+(h.user?(' · '+esc(h.user)):'')+'</div>'+
       '</div>'+
       tag+
+      '<button class="btn sec sm" onclick="enviarDocs(\''+h.id+'\',\''+esc(h.numero||h.id)+'\')" title="enviar etiqueta + NF pro estoque imprimir na Zebra">📧</button>'+
       (souAdmin()?'<button class="btn warn sm" onclick="reabrirPedido(\''+h.id+'\',\''+esc(h.numero||h.id)+'\')">↩ Reabrir</button>':'')+
     '</div>';
   }).join('');
+}
+async function enviarDocs(id, numero){
+  if(!confirm('Enviar etiqueta + NF do pedido '+numero+' pro estoque ('+'estoque@magazinegirassol.com.br'+') imprimir e despachar?')) return;
+  toast('📧 Enviando pro estoque…');
+  try{
+    const r = await postJson('/girassol-backup-offline/enviar-docs/'+encodeURIComponent(id), { op: opAtual() }).catch(()=>null);
+    if(r && r.ok) toast('✓ Enviado pro estoque ('+r.anexos+' anexo'+(r.anexos>1?'s':'')+')');
+    else toast('Não enviou: '+((r&&r.erro)||'erro'));
+  }catch(e){ toast('Falha: '+e.message); }
 }
 
 // reabre um pedido finalizado por engano → volta pra lista (e devolve pra ATENDIDO no Bling se já tinha sido verificado)
