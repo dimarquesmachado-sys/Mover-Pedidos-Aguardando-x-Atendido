@@ -284,7 +284,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b64';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b65';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#ff9900'}, magalu:{n:'Magalu',c:'#0086ff'}, outro:{n:'Outro',c:'#94a3b8'}
@@ -907,8 +907,10 @@ async function enviarDocs(id, numero){
   toast('📧 Enviando pro estoque…');
   try{
     const r = await postJson('/girassol-backup-offline/enviar-docs/'+encodeURIComponent(id), { op: opAtual() }).catch(()=>null);
-    if(r && r.ok) toast('✓ Enviado pro estoque ('+r.anexos+' anexo'+(r.anexos>1?'s':'')+')');
-    else toast('Não enviou: '+((r&&r.erro)||'erro'));
+    if(r && r.ok){
+      const oque = [r.etiqueta?'etiqueta':null, r.danfe?'DANFE':null].filter(Boolean).join(' + ');
+      toast('✓ Enviado pro estoque ('+oque+')'+(r.etiqueta?'':' ⚠️ sem etiqueta!'));
+    } else toast('Não enviou: '+((r&&r.erro)||'erro'));
   }catch(e){ toast('Falha: '+e.message); }
 }
 
