@@ -39,7 +39,7 @@ const { gerarDanfeSimplificado, gerarDanfeSimplificadoZPL } = require('./danfe-s
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v17/06 b74';
+const VERSAO     = 'girassol-backup-offline v17/06 b75';
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 
 // ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
@@ -1733,6 +1733,54 @@ function routes(readBody) {
       return true;
     }
     // ARQUIVO: info de um pedido finalizado (existe arquivo? meta)
+    // DIAGNÓSTICO de etiqueta — mostra o que o Bling devolve (PDF e ZPL) p/ um pedido + o que tá no cache
+    if (method === 'GET' && p === '/girassol-backup-offline/etq-debug') {
+      let op = ''; try { op = urlObj.searchParams.get('op') || ''; } catch (e) {}
+      if (!ehAdmin(op)) { json(res, 200, { ok: false, erro: 'só admin', precisa_admin: true }); return true; }
+      const numero = String(urlObj.searchParams.get('numero') || '').trim();
+      if (!numero) { json(res, 400, { ok: false, erro: 'falta ?numero=' }); return true; }
+      const out = { numero };
+      const r1 = await blingGet(`/pedidos/vendas?numero=${encodeURIComponent(numero)}`);
+      const ped = r1.ok && r1.data && r1.data.data && r1.data.data[0];
+      if (!ped) { json(res, 200, Object.assign(out, { erro: 'pedido não encontrado por número' })); return true; }
+      const id = ped.id;
+      out.blingId = id;
+      out.situacao = (ped.situacao && (ped.situacao.id || ped.situacao)) || null;
+      async function diag(fmt) {
+        const o = { formato: fmt };
+        const rr = await blingGet(`/logisticas/etiquetas?formato=${fmt}&idsVendas[]=${id}`);
+        o.api_ok = rr.ok; o.api_status = rr.status;
+        const item = rr.ok && rr.data && rr.data.data && rr.data.data[0];
+        o.tem_item = !!item;
+        o.link = (item && item.link) || null;
+        if (!o.link && rr.data) { try { o.resposta = JSON.stringify(rr.data).slice(0, 300); } catch (e) {} }
+        if (o.link) {
+          try {
+            const f = await fetch(o.link);
+            o.fetch_ok = f.ok; o.fetch_status = f.status;
+            o.content_type = f.headers.get('content-type') || '';
+            const buf = Buffer.from(await f.arrayBuffer());
+            o.size = buf.length;
+            o.bytes_hex = buf.slice(0, 8).toString('hex');
+            o.eh_pdf = buf.slice(0, 4).toString('latin1') === '%PDF';
+            o.eh_zip = buf[0] === 0x50 && buf[1] === 0x4B;
+            const txt = buf.slice(0, 400).toString('latin1');
+            o.eh_zpl = txt.indexOf('^XA') >= 0;
+            o.trecho = txt.replace(/[^\x20-\x7e]/g, '.').slice(0, 140);
+          } catch (e) { o.fetch_erro = String((e && e.message) || e); }
+        }
+        return o;
+      }
+      out.pdf = await diag('PDF'); await sleep(PAUSA_MS);
+      out.zpl = await diag('ZPL');
+      const etqPath = path.join(ARQUIVO_DIR, String(id), `etiqueta.${ETIQ_FORMATO.toLowerCase()}`);
+      const ci = { path: etqPath };
+      try { const buf = fs.readFileSync(etqPath); ci.existe = true; ci.size = buf.length; ci.bytes_hex = buf.slice(0, 8).toString('hex'); ci.eh_pdf = buf.slice(0, 4).toString('latin1') === '%PDF'; ci.eh_zpl = buf.slice(0, 400).toString('latin1').indexOf('^XA') >= 0; }
+      catch (e) { ci.existe = false; }
+      out.cache_arquivo = ci;
+      json(res, 200, out);
+      return true;
+    }
     if (method === 'GET' && p.startsWith('/girassol-backup-offline/arq-info/')) {
       const id = p.split('/').filter(Boolean).pop();
       const ped = readJson(path.join(ARQUIVO_DIR, String(id), 'pedido.json'), null);
