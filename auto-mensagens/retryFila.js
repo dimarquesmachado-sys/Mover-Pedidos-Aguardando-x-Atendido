@@ -16,6 +16,7 @@
  */
 
 const ml = require('./mlApi');
+const { msgJaProcessada } = require('./travaMsgProcessada'); // mesma trava usada pelo lerRespostas (re-engajamento pós-atenção-humana)
 
 const AUTO_EMITIR_HABILITADO = (process.env.LIXAS_AUTO_EMITIR_NF_HABILITADO || 'false').toLowerCase() === 'true';
 const LIMIAR_CONFIANCA_AUTO = Number(process.env.LIXAS_AUTO_CONFIANCA_MIN || 95);
