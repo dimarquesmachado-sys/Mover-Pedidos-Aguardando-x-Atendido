@@ -153,3 +153,7 @@ server.listen(PORT, () => {
 
 process.on('SIGTERM', () => { server.close(); process.exit(0); });
 process.on('SIGINT',  () => { server.close(); process.exit(0); });
+
+// Rede de segurança p/ operacao desassistida: uma promise rejeitada nao tratada
+// NAO derruba mais o processo (Node 22 mataria) — so loga e o servico segue de pe.
+process.on('unhandledRejection', (e) => { console.error('[server] unhandledRejection (ignorado p/ nao derrubar):', (e && e.message) || e); });
