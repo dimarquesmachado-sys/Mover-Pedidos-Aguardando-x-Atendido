@@ -142,7 +142,20 @@
 
   @media(max-width:720px){
     .main{flex-direction:column}
-    .sidebar{width:auto;flex:0 0 auto;max-height:38vh;border-right:0;border-bottom:1px solid var(--line)}
+    /* sem pedido aberto: a lista ocupa a tela toda */
+    .sidebar{width:auto;flex:1 1 auto;max-height:none;border-right:0;border-bottom:0;padding:8px}
+    .detail{display:none}
+    /* pedido aberto: o detalhe ocupa a tela toda, a lista some (volta pelo "← Voltar") */
+    body.peddet .sidebar{display:none}
+    body.peddet .detail{display:block;padding:12px 14px}
+    /* cabeçalho compacto: a barra de botões rola na horizontal em vez de empilhar várias linhas */
+    header{padding:8px 10px}
+    .grow{display:none}
+    .htop{gap:8px}
+    .htop h1{font-size:15px}
+    .sbtools{flex:1 1 100%;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:3px}
+    .sbtools .btn{flex:0 0 auto;white-space:nowrap}
+    input.op{width:88px}
   }
   @media print{ html,body{display:none!important} }   /* a página nunca se imprime — só a Zebra via QZ Tray */
 
@@ -292,7 +305,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b69';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b70';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#ff9900'}, magalu:{n:'Magalu',c:'#0086ff'}, outro:{n:'Outro',c:'#94a3b8'}
@@ -552,7 +565,7 @@ function setFiltroMkt(v){
   // se o pedido aberto sumir da lista filtrada, limpa a tela (não deixa o pedido de outro marketplace persistindo)
   if(pedidoAtual){
     const vis = filtrar(listaCache).some(p => String(p.id)===String(pedidoAtual.bling_id));
-    if(!vis){ pedidoAtual=null; zplAtual=null; $('detail').innerHTML='<div class="placeholder">← selecione um pedido à esquerda</div>'; }
+    if(!vis){ pedidoAtual=null; zplAtual=null; mostrarPlaceholder(); }
   }
   renderChips(); renderLista();
 }
@@ -684,6 +697,7 @@ function renderDetail(){
   const nfBar = temDanfe
     ? '<div class="nfbar clic" title="abrir DANFE em PDF" onclick="abrirDanfe(\''+esc(p.bling_id)+'\')">'+nfMiolo+'</div>'
     : '<div class="nfbar">'+nfMiolo+'</div>';
+  document.body.classList.add('peddet');   // celular: esconde a lista, mostra o pedido em tela cheia
   $('detail').innerHTML =
     '<div class="dhead">'+
       '<button class="btn sec sm" onclick="voltarLista()">← Voltar</button>'+
@@ -789,11 +803,13 @@ function imprimirSimpAtual(){
 }
 
 // volta pra lista SEM finalizar (não marca conferido)
+// volta pra lista: tira a classe (no celular faz a lista reaparecer) e mostra o placeholder
+function mostrarPlaceholder(){ document.body.classList.remove('peddet'); $('detail').innerHTML='<div class="placeholder">← selecione um pedido à esquerda</div>'; }
 function voltarLista(){
   if(pedidoAtual){ liberarReserva(pedidoAtual.bling_id); }
   pararHeartbeat();
   pedidoAtual=null; zplAtual=null;
-  $('detail').innerHTML='<div class="placeholder">← selecione um pedido à esquerda</div>';
+  mostrarPlaceholder();
   renderLista();
 }
 
@@ -864,7 +880,7 @@ async function confirmarFinalizar(){
     pararHeartbeat();
     fecharConfirmacao();
     pedidoAtual=null; zplAtual=null;
-    $('detail').innerHTML='<div class="placeholder">← selecione um pedido à esquerda</div>';
+    mostrarPlaceholder();
     carregarLista();
   }catch(e){ toast('Falha ao finalizar: '+e.message); }
 }
