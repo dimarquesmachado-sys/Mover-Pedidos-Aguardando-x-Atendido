@@ -40,78 +40,22 @@ const { gerarDanfeSimplificado, gerarDanfeSimplificadoZPL } = require('./danfe-s
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v17/06 b79';
-const BLING_BASE = 'https://api.bling.com.br/Api/v3';
+const VERSAO     = 'girassol-backup-offline v17/06 b80';
+
+// ─── Módulos extraídos (Fase 1: base + nf + etiquetas) ───────────────────
+const base = require('./base');
+const { BLING_BASE, CACHE_DIR, SIT_ATENDIDO, SIT_VERIFICADO, SYNC_ON, JANELA_DIAS, PAUSA_MS, RETENCAO_DIAS, ETIQ_FORMATO, CRON_EXPR,
+  MANIFEST_FILE, SKU_EAN_FILE, CONFERIDOS_FILE, RESERVAS_FILE, RESERVA_TTL_MS, KIT_CACHE_FILE, LOC_FILE, LOC_LOG_FILE, EAN_INDEX_FILE,
+  ARQUIVO_DIR, ARQUIVO_DIAS, SMTP_HOST, SMTP_PORT, EMAIL_USER, EMAIL_PASS, EMAIL_DEST, SCHEMA, LOJA_MKT, MKT_NOME,
+  sleep, ensureDir, readJson, writeJson, dataISO, json, html, manifest, salvarManifest, skuEanCache, locCache, salvarLoc,
+  salvarSkuEan, lerIndiceEan, lerReservas, lerOperadores, lerAdmins, ehAdmin, blingGet, blingWrite, moverSituacao } = base;
+const { parseNF, acharNFporRange, nfDoPedido, carregarNFs, acharNFnaLista, baixarDanfe, parseXmlNF, baixarXmlNF, dadosNFSimp } = require('./nf');
+const { baixarEtiqueta, baixarEtiquetaPDF, labelaryPost, zplParaPdf, etiquetaPdf } = require('./etiquetas');
 
 // ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
-const CACHE_DIR     = process.env.GIRABKP_CACHE_DIR    || '/data/cache-offline/girassol';
-const SIT_ATENDIDO  = Number(process.env.GIRABKP_SIT_ATENDIDO  || 9);              // ATENDIDO
-const SIT_VERIFICADO = Number(process.env.GIRABKP_SIT_VERIFICADO || 24);           // VERIFICADO (destino do sync Fase 3)
-const SYNC_ON       = process.env.GIRABKP_SYNC_ON === '1';                          // liga o sync automático no cron (Fase 3)
-const JANELA_DIAS   = Number(process.env.GIRABKP_JANELA_DIAS   || 5);
-const PAUSA_MS      = Number(process.env.GIRABKP_PAUSA_MS      || 350);            // ~3 req/s
-const RETENCAO_DIAS = Number(process.env.GIRABKP_RETENCAO_DIAS || 7);
-const ETIQ_FORMATO  = (process.env.GIRABKP_ETIQ_FORMATO || 'ZPL').toUpperCase();   // ZPL | PDF
-const CRON_EXPR     = process.env.GIRABKP_CRON || '5,15,25,35,45,55 6-23 * * *';   // off do F3
-
-const MANIFEST_FILE = path.join(CACHE_DIR, 'manifest.json');
-const SKU_EAN_FILE  = path.join(CACHE_DIR, 'sku-ean.json');
-const CONFERIDOS_FILE = path.join(CACHE_DIR, 'conferidos.json');
-const RESERVAS_FILE   = path.join(CACHE_DIR, 'reservas.json');
-const RESERVA_TTL_MS  = 8 * 60 * 1000;   // reserva expira em 8 min sem heartbeat (PC largado libera o pedido sozinho)
 // presença entre PCs: quem está separando cada pedido. Limpa reservas vencidas a cada leitura.
-function lerReservas() {
-  const r = readJson(RESERVAS_FILE, {});
-  const agora = Date.now();
-  let mudou = false;
-  for (const id of Object.keys(r)) {
-    const t = Date.parse(r[id] && r[id].em) || 0;
-    if (!t || agora - t > RESERVA_TTL_MS) { delete r[id]; mudou = true; }
-  }
-  if (mudou) writeJson(RESERVAS_FILE, r);
-  return r;
-}
 // operadores p/ login (env GIRABKP_OPERADORES = "Nome:senha,Nome:senha"). Vazio = login DESLIGADO.
-function lerOperadores() {
-  const raw = process.env.GIRABKP_OPERADORES || '';
-  const map = {};
-  raw.split(',').forEach(par => {
-    const i = par.indexOf(':');
-    if (i > 0) {
-      const nome = par.slice(0, i).trim();
-      const senha = par.slice(i + 1).trim();
-      if (nome) map[nome] = senha;
-    }
-  });
-  return map;
-}
 // quem pode REABRIR/reverter pedido (env GIRABKP_ADMIN = "Diego" ou "Diego,Angelica"). Vazio = sem restrição (todo mundo pode).
-function lerAdmins() {
-  return (process.env.GIRABKP_ADMIN || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
-}
-function ehAdmin(nome) {
-  const a = lerAdmins();
-  return a.length === 0 || a.includes(String(nome || '').trim().toLowerCase());
-}
-const KIT_CACHE_FILE  = path.join(CACHE_DIR, 'kit-estrutura.json');  // kits já resolvidos
-const LOC_FILE        = path.join(CACHE_DIR, 'sku-localizacao.json'); // localização (depósito) por SKU
-const LOC_LOG_FILE    = path.join(CACHE_DIR, 'localizacao-log.json'); // auditoria: quem editou localização, de→para, quando
-const EAN_INDEX_FILE  = path.join(CACHE_DIR, 'ean-indice.json');      // índice EAN→{sku,nome,id} que cresce sozinho + indexação total
-const ARQUIVO_DIR   = process.env.GIRABKP_ARQUIVO_DIR  || '/data/arquivo-girassol';   // etiqueta+meta dos FINALIZADOS (reimprimir/reenviar) — separado do cache, NÃO é limpo pela reconciliação
-const ARQUIVO_DIAS  = parseInt(process.env.GIRABKP_ARQUIVO_DIAS || '45', 10);          // retenção do arquivo (dias)
-const SMTP_HOST  = process.env.GIRABKP_SMTP_HOST || 'mail.magazinegirassol.com.br';
-const SMTP_PORT  = parseInt(process.env.GIRABKP_SMTP_PORT || '465', 10);
-const EMAIL_USER = process.env.GIRABKP_EMAIL_USER || '';   // conta @magazinegirassol que ENVIA (login)
-const EMAIL_PASS = process.env.GIRABKP_EMAIL_PASS || '';   // senha normal dessa conta
-const EMAIL_DEST = process.env.GIRABKP_EMAIL_DEST || 'estoque@magazinegirassol.com.br';   // destino (estoquista)
-const SCHEMA = 4;  // versão do snapshot — bump força re-cache dos pedidos antigos (b36: re-explode composições/variações)
-
-// loja → marketplace (mesmo mapa do checkout Girassol)
-const LOJA_MKT = {
-  '203146903': 'ml', '203583169': 'shopee', '203967708': 'amazon',
-  '203262016': 'magalu', '205523707': 'tiktok'
-};
-const MKT_NOME = { ml: 'Mercado Livre', shopee: 'Shopee', amazon: 'Amazon', magalu: 'Magalu', tiktok: 'TikTok Shop', outro: 'Outro' };
 
 // FLEX = entrega por motoboy (etiqueta sempre disponível). Mesma lógica do checkout-expedição.
 const FLEX_KEYWORDS = ['mercado envios flex', 'entrega local', 'vapt', 'shopee entrega direta'];
@@ -127,16 +71,6 @@ function ehFlex(servico) {
 }
 
 // ─── helpers genéricos ──────────────────────────────────────────────────
-const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-function ensureDir(d) { try { fs.mkdirSync(d, { recursive: true }); } catch (e) {} }
-function readJson(file, fb) { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { return fb; } }
-function writeJson(file, obj) {
-  try { fs.writeFileSync(file, JSON.stringify(obj, null, 2)); }
-  catch (e) { console.error('[GIRABKP] write', file, e.message); }
-}
-function dataISO(d) { return d.toISOString().slice(0, 10); }
-function json(res, code, body) { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(body)); }
-function html(res, code, body) { res.writeHead(code, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store, no-cache, must-revalidate', 'Pragma': 'no-cache', 'Expires': '0' }); res.end(body); }
 
 // EAN robusto — varre todos os nomes de campo que o Bling usa pro GTIN
 function getPossiveisGtins(obj) {
@@ -211,15 +145,8 @@ function cronDeveriaTerRodado() {
   } catch (e) { return true; }
 }
 
-const manifest       = () => readJson(MANIFEST_FILE, {});
-const salvarManifest = (m) => writeJson(MANIFEST_FILE, m);
-const skuEanCache    = () => readJson(SKU_EAN_FILE, {});
-const locCache       = () => readJson(LOC_FILE, {});
-const salvarLoc      = (m) => writeJson(LOC_FILE, m);
-const salvarSkuEan   = (m) => writeJson(SKU_EAN_FILE, m);
 
 // ─── índice de EAN (cresce sozinho: todo produto resolvido entra aqui) ───
-const lerIndiceEan = () => readJson(EAN_INDEX_FILE, {});
 function salvarNoIndiceEan(prod) {
   try {
     if (!prod || !prod.id) return;
@@ -271,46 +198,10 @@ async function indexarCatalogoCompleto() {
 }
 
 // GET autenticado no Bling Girassol (token via tokenManager + retry 429)
-async function blingGet(pathUrl, tentativas = 3) {
-  let token;
-  try { token = await garantirToken(); }
-  catch (e) { return { ok: false, status: 401, data: null, erro: 'token: ' + e.message }; }
-  for (let t = 0; t < tentativas; t++) {
-    let r;
-    try {
-      r = await fetch(BLING_BASE + pathUrl, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } });
-    } catch (e) { await sleep(800); continue; }
-    if (r.status === 429) { await sleep(1500 * (t + 1)); continue; }
-    const txt = await r.text();
-    let data = null; try { data = JSON.parse(txt); } catch (e) {}
-    return { ok: r.ok, status: r.status, data };
-  }
-  return { ok: false, status: 429, data: null };
-}
 
 // escrita no Bling (PATCH/POST/PUT) — mesmo cuidado do blingGet (token + retry 429)
-async function blingWrite(method, pathUrl, body) {
-  let token;
-  try { token = await garantirToken(); }
-  catch (e) { return { ok: false, status: 401, data: null, erro: 'token: ' + e.message }; }
-  for (let t = 0; t < 3; t++) {
-    const opts = { method, headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } };
-    if (body !== undefined && body !== null) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
-    let r;
-    try { r = await fetch(BLING_BASE + pathUrl, opts); }
-    catch (e) { await sleep(800); continue; }
-    if (r.status === 429) { await sleep(1500 * (t + 1)); continue; }
-    const txt = await r.text();
-    let data = null; try { data = JSON.parse(txt); } catch (e) {}
-    return { ok: r.ok, status: r.status, data, raw: (txt || '').slice(0, 300) };
-  }
-  return { ok: false, status: 429, data: null };
-}
 
 // muda a situação de um pedido de venda (precisa do escopo "Gerenciar situações")
-async function moverSituacao(blingId, idSituacao) {
-  return await blingWrite('PATCH', `/pedidos/vendas/${blingId}/situacoes/${idSituacao}`, null);
-}
 
 // FASE 3: empurra os pedidos conferidos offline (sincronizado:false) p/ VERIFICADO no Bling
 async function sincronizarConferidos() {
@@ -360,81 +251,13 @@ async function detalhePedido(id) {
   return data && data.data;
 }
 
-function parseNF(nf) {
-  if (!nf) return null;
-  return {
-    id: nf.id || null,
-    numero: nf.numero || null,
-    chave: nf.chaveAcesso || nf.chave || null,
-    situacao: (nf.situacao && (nf.situacao.id || nf.situacao)) || null
-  };
-}
 
 // método mandado pelo Diego: pagina /nfe (sem filtro) e acha a NF com id
 // entre pedidoId e pedidoId+2000 (ids sequenciais). /nfe vem desc por id.
-async function acharNFporRange(pedidoId) {
-  const pid = Number(pedidoId);
-  if (!pid) return null;
-  const teto = pid + 2000;
-  let melhor = null;
-  for (let pagina = 1; pagina <= 12; pagina++) {
-    const { ok, data } = await blingGet(`/nfe?limite=100&pagina=${pagina}`);
-    const lista = (data && data.data) || [];
-    if (!ok || lista.length === 0) break;
-    let menorIdPagina = Infinity;
-    for (const nf of lista) {
-      const nid = Number(nf.id) || 0;
-      if (nid && nid < menorIdPagina) menorIdPagina = nid;
-      if (nid >= pid && nid <= teto && (!melhor || nid < Number(melhor.id))) melhor = nf;
-    }
-    if (menorIdPagina < pid) break; // já passou abaixo do pedido → não acha mais
-    await sleep(PAUSA_MS);
-  }
-  return parseNF(melhor);
-}
 
-async function nfDoPedido(id) {
-  // 1) tenta o endpoint direto (barato)
-  const r = await blingGet(`/pedidos/vendas/${id}/nfe`);
-  if (r.ok) {
-    let nf = r.data && r.data.data;
-    if (Array.isArray(nf)) nf = nf[0];
-    if (nf) return parseNF(nf);
-  }
-  // 2) fallback: range de ID no /nfe
-  return await acharNFporRange(id);
-}
 
 // ── NF em LOTE (eficiente p/ o ciclo): pagina /nfe UMA vez até cobrir o
 //    menor id de pedido do lote, e casa todos em memória. /nfe vem desc por id.
-async function carregarNFs(idMinimo) {
-  const nfs = [];
-  for (let pagina = 1; pagina <= 40; pagina++) {
-    const { ok, data } = await blingGet(`/nfe?limite=100&pagina=${pagina}`);
-    const lista = (data && data.data) || [];
-    if (!ok || lista.length === 0) break;
-    let menor = Infinity;
-    for (const nf of lista) {
-      const nid = Number(nf.id) || 0;
-      nfs.push(nf);
-      if (nid && nid < menor) menor = nid;
-    }
-    if (menor < idMinimo) break; // já cobriu o lote
-    await sleep(PAUSA_MS);
-  }
-  return nfs;
-}
-function acharNFnaLista(pedidoId, nfs) {
-  const pid = Number(pedidoId);
-  if (!pid) return null;
-  const teto = pid + 2000;
-  let melhor = null;
-  for (const nf of nfs) {
-    const nid = Number(nf.id) || 0;
-    if (nid >= pid && nid <= teto && (!melhor || nid < Number(melhor.id))) melhor = nf;
-  }
-  return parseNF(melhor);
-}
 
 // EAN: produto por id → produto por SKU. Cacheia por SKU.
 async function eanDoItem(produtoId, sku, cacheEan) {
@@ -484,179 +307,20 @@ async function infoProduto(id, cacheEan) {
 
 // baixa a etiqueta de envio. O Bling devolve um ZIP (com "Etiqueta de envio.txt"
 // dentro = o ZPL), mesmo pedindo formato=ZPL. Então: baixa binário → descompacta.
-async function baixarEtiqueta(blingId) {
-  const { ok, data } = await blingGet(`/logisticas/etiquetas?formato=${ETIQ_FORMATO}&idsVendas[]=${blingId}`);
-  const item = ok && data && data.data && data.data[0];
-  const link = item && item.link;
-  if (!link) return null;
-  try {
-    const r = await fetch(link);
-    if (!r.ok) return null;
-    const buf = await r.buffer();
-    if (!buf || buf.length < 4) return null;
-    // 'PK' (0x50 0x4B) = arquivo ZIP → descompacta e pega o conteúdo
-    if (buf[0] === 0x50 && buf[1] === 0x4B) {
-      try {
-        const zip = new AdmZip(buf);
-        const entries = zip.getEntries();
-        if (!entries.length) return null;
-        const ent = entries.find(e => /\.(txt|zpl)$/i.test(e.entryName)) || entries[0];
-        const conteudo = ent.getData().toString('utf8');
-        return conteudo || null;
-      } catch (e) { return null; }
-    }
-    // não-zip: assume conteúdo direto (ZPL/texto)
-    const txt = buf.toString('utf8');
-    if (!txt || /<html|not\s*found/i.test(txt.slice(0, 200))) return null;
-    return txt;
-  } catch (e) { return null; }
-}
 
 // baixa o DANFE em PDF da NF (via /nfe/{id} → linkPDF). Retorna Buffer ou null.
-async function baixarDanfe(nfId) {
-  if (!nfId) return null;
-  try {
-    const det = await blingGet(`/nfe/${nfId}`);
-    const nf = det.data && det.data.data;
-    const link = nf && nf.linkPDF;
-    if (!link) return null;
-    const resp = await fetch(link, { redirect: 'follow' });
-    if (!resp.ok) return null;
-    const buf = Buffer.from(await resp.arrayBuffer());
-    if (buf.slice(0, 4).toString('latin1') !== '%PDF') return null; // não veio PDF (bloqueio?)
-    return buf;
-  } catch (e) { return null; }
-}
 
 // ─── DANFE Simplificado: enriquecimento de dados (detalhe da NF + XML) ───
-const EMITENTE_FALLBACK = { razao: 'Magazine Girassol Ltda', cnpj: '27548456000147', ie: '675.374.241.113', endereco: 'Rua Jose Ruscitto, 150, BOX 1 - Galpao, Taboao da Serra - SP' };
 
-function _xmlTag(xml, tag) { const m = xml && xml.match(new RegExp('<' + tag + '>([\\s\\S]*?)<\\/' + tag + '>')); return m ? m[1].trim() : ''; }
-function _xmlBloco(xml, tag) { const m = xml && xml.match(new RegExp('<' + tag + '[\\s>][\\s\\S]*?<\\/' + tag + '>')); return m ? m[0] : ''; }
-function _ender(bloco) {
-  const lgr = _xmlTag(bloco, 'xLgr'), nro = _xmlTag(bloco, 'nro'), cpl = _xmlTag(bloco, 'xCpl');
-  const bai = _xmlTag(bloco, 'xBairro'), mun = _xmlTag(bloco, 'xMun'), uf = _xmlTag(bloco, 'UF'), cep = _xmlTag(bloco, 'CEP');
-  return [lgr, nro, cpl, bai, (mun ? mun + (uf ? ' - ' + uf : '') : uf), (cep ? 'CEP ' + cep : '')].filter(Boolean).join(', ');
-}
-function parseXmlNF(xml) {
-  if (!xml) return {};
-  const emit = _xmlBloco(xml, 'emit'), dest = _xmlBloco(xml, 'dest'), prot = _xmlBloco(xml, 'infProt');
-  const cpl = _xmlTag(xml, 'infCpl');
-  const trib = (cpl.match(/Val(?:or)?\s*[Aa]prox[\s\S]*?IBPT\.?/i) || cpl.match(/[Tt]ribut[\s\S]*?IBPT\.?/i) || [])[0] || '';
-  return {
-    emit: { razao: _xmlTag(emit, 'xNome'), cnpj: _xmlTag(emit, 'CNPJ') || _xmlTag(emit, 'CPF'), ie: _xmlTag(emit, 'IE'), endereco: _ender(_xmlBloco(emit, 'enderEmit')) },
-    destEndereco: _ender(_xmlBloco(dest, 'enderDest')),
-    protocolo: _xmlTag(prot, 'nProt'),
-    dataProtocolo: _xmlTag(prot, 'dhRecbto'),
-    tributos: trib.replace(/\s+/g, ' ').trim()
-  };
-}
-async function baixarXmlNF(nf) {
-  let url = nf && nf.xml;
-  if (url && typeof url === 'object') url = url.link || url.url || url.href || '';
-  if (!url) return '';
-  try { const r = await fetch(url, { redirect: 'follow' }); if (!r.ok) return ''; return await r.text(); }
-  catch (e) { return ''; }
-}
 // monta o objeto de dados p/ o gerador, a partir do id da NF (Bling) + nº do pedido
-async function dadosNFSimp(nfId, numeroPedido) {
-  const det = await blingGet(`/nfe/${nfId}`);
-  const nf = det.data && det.data.data;
-  if (!nf) return null;
-  const xml = await baixarXmlNF(nf);
-  const x = parseXmlNF(xml);
-  const itens = (nf.itens || []).map(it => {
-    const qtd = Number(it.quantidade || it.qtd || 1);
-    const vUnit = Number(it.valor || it.valorUnitario || it.valorUnit || 0);
-    const fm = (n) => Number(n).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    return {
-      codigo: it.codigo || (it.produto && it.produto.codigo) || '',
-      descricao: it.descricao || (it.produto && it.produto.nome) || '',
-      qtd, valorUnit: vUnit, valorTotal: vUnit * qtd,
-      detalhe: fm(qtd) + ' UN X ' + fm(vUnit)
-    };
-  });
-  const c = nf.contato || {};
-  return {
-    emitente: (x.emit && x.emit.razao) ? x.emit : EMITENTE_FALLBACK,
-    chave: nf.chaveAcesso || nf.chave || '',
-    protocolo: x.protocolo || '',
-    dataProtocolo: x.dataProtocolo || '',
-    tipo: (nf.tipo != null ? nf.tipo : 1),
-    numero: nf.numero || '',
-    serie: nf.serie || '1',
-    dataEmissao: nf.dataEmissao || '',
-    itens,
-    qtdTotal: itens.length,
-    consumidor: { doc: c.numeroDocumento || c.documento || '', nome: c.nome || '', endereco: x.destEndereco || '' },
-    numeroPedido: numeroPedido || '',
-    numeroPedidoLoja: nf.numeroPedidoLoja || '',
-    tributos: x.tributos || ''
-  };
-}
-async function baixarEtiquetaPDF(blingId) {
-  const { ok, data } = await blingGet(`/logisticas/etiquetas?formato=PDF&idsVendas[]=${blingId}`);
-  const item = ok && data && data.data && data.data[0];
-  const link = item && item.link;
-  if (!link) return null;
-  try {
-    const r = await fetch(link);
-    if (!r.ok) return null;
-    const buf = Buffer.from(await r.arrayBuffer());
-    if (buf.slice(0, 4).toString('latin1') !== '%PDF') return null;
-    return buf;
-  } catch (e) { return null; }
-}
 
 // POST ao Labelary usando o módulo https nativo — lê a resposta binária de forma confiável
 // (o node-fetch às vezes corta respostas grandes com "Premature close")
-function labelaryPost(zpl) {
-  return new Promise((resolve) => {
-    let data;
-    try { data = Buffer.from(zpl, 'utf8'); } catch (e) { return resolve({ status: 0, buf: null }); }
-    const req = https.request({
-      hostname: 'api.labelary.com',
-      path: '/v1/printers/8dpmm/labels/4x6/0/',
-      method: 'POST',
-      headers: { 'Accept': 'application/pdf', 'Content-Type': 'application/x-www-form-urlencoded', 'Content-Length': data.length }
-    }, (resp) => {
-      const chunks = [];
-      resp.on('data', (c) => chunks.push(c));
-      resp.on('end', () => resolve({ status: resp.statusCode || 0, buf: Buffer.concat(chunks) }));
-      resp.on('error', () => resolve({ status: 0, buf: null }));
-    });
-    req.on('error', () => resolve({ status: 0, buf: null }));
-    req.setTimeout(25000, () => { try { req.destroy(); } catch (e) {} resolve({ status: 0, buf: null }); });
-    req.write(data);
-    req.end();
-  });
-}
 
 // converte ZPL → PDF via Labelary (com retry — trata rate limit 429 e quedas de conexão). Usado p/ não-ML.
-async function zplParaPdf(zpl) {
-  if (!zpl || zpl.indexOf('^XA') < 0) return null; // não parece ZPL
-  for (let t = 0; t < 4; t++) {
-    const r = await labelaryPost(zpl);
-    if (r.status === 200 && r.buf && r.buf.slice(0, 4).toString('latin1') === '%PDF') return r.buf;
-    if (r.status === 429) { await sleep(1500 + t * 1200); continue; }   // rate limit → espera mais
-    await sleep(700 + t * 500);   // queda/resposta estranha → espera e retenta
-  }
-  return null;
-}
 
 // etiqueta em PDF. 1º tenta o PDF nativo do Bling (vale p/ QUALQUER marketplace — ML, Shopee, Amazon...;
 // precisa do Bling no ar). 2º fallback offline: ZPL cacheado em disco → Labelary (não depende do Bling).
-async function etiquetaPdf(blingId, dir) {
-  // 1) PDF nativo do Bling — o Bling gera o PDF da etiqueta de qualquer marketplace
-  const direto = await baixarEtiquetaPDF(blingId);
-  if (direto) return direto;
-  // 2) fallback offline: ZPL cacheado → Labelary
-  let zpl = null;
-  if (dir) { try { zpl = fs.readFileSync(path.join(dir, `etiqueta.${ETIQ_FORMATO.toLowerCase()}`), 'utf8'); } catch (e) {} }
-  if (!zpl) { try { zpl = await baixarEtiqueta(blingId); } catch (e) {} }
-  if (zpl && zpl.indexOf('^XA') >= 0) return await zplParaPdf(zpl);
-  return null;
-}
 
 async function cachearPedido(ped, cacheEan, nfs, kitCache, locC) {
   const id  = ped.id;
