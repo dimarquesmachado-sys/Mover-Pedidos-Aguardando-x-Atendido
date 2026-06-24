@@ -40,7 +40,7 @@ const { gerarDanfeSimplificado, gerarDanfeSimplificadoZPL } = require('./danfe-s
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v17/06 b80';
+const VERSAO     = 'girassol-backup-offline v17/06 b81';
 
 // ─── Módulos extraídos (Fase 1: base + nf + etiquetas) ───────────────────
 const base = require('./base');
@@ -923,6 +923,7 @@ function routes(readBody) {
 
     // ─── debug: onde o Bling guarda a localização de um SKU ───
     if (method === 'GET' && p === '/girassol-backup-offline/debug-produto') {
+      if (!ehAdmin((urlObj.searchParams && urlObj.searchParams.get('op')) || '')) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
       const q = String(urlObj.searchParams.get('q') || '').trim();
       let prod = null;
       for (const v of [...new Set([q, q.toUpperCase(), q.toLowerCase()])]) {
@@ -1048,6 +1049,7 @@ function routes(readBody) {
     // DEBUG — mostra onde o Bling guarda a localização de um SKU (confirma o campo)
     // uso: /girassol-backup-offline/debug-loc/{SKU}
     if (method === 'GET' && p.startsWith('/girassol-backup-offline/debug-loc/')) {
+      if (!ehAdmin((urlObj.searchParams && urlObj.searchParams.get('op')) || '')) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
       const sku = decodeURIComponent(p.split('/').pop() || '');
       const { ok, data } = await blingGet(`/produtos?codigo=${encodeURIComponent(sku)}&limite=1`);
       const item = ok && data && data.data && data.data[0];
@@ -1279,6 +1281,7 @@ function routes(readBody) {
     // DEBUG — testa mover UM pedido p/ VERIFICADO (ou outro id via ?situacao=). Mostra resposta crua do Bling.
     // uso: /girassol-backup-offline/debug-mover/{idDoPedido}
     if (method === 'GET' && p.startsWith('/girassol-backup-offline/debug-mover/')) {
+      if (!ehAdmin((urlObj.searchParams && urlObj.searchParams.get('op')) || '')) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
       const id = p.split('/').pop();
       const sit = Number(urlObj.searchParams.get('situacao') || SIT_VERIFICADO);
       const r = await moverSituacao(id, sit);
@@ -1427,88 +1430,7 @@ function routes(readBody) {
     }
     // ARQUIVO: info de um pedido finalizado (existe arquivo? meta)
     // DIAGNÓSTICO de etiqueta — mostra o que o Bling devolve (PDF e ZPL) p/ um pedido + o que tá no cache
-    if (method === 'GET' && p === '/girassol-backup-offline/etq-debug') {
-      let op = ''; try { op = urlObj.searchParams.get('op') || ''; } catch (e) {}
-      if (!ehAdmin(op)) { json(res, 200, { ok: false, erro: 'só admin', precisa_admin: true }); return true; }
-      const numero = String(urlObj.searchParams.get('numero') || '').trim();
-      if (!numero) { json(res, 400, { ok: false, erro: 'falta ?numero=' }); return true; }
-      const out = { numero };
-      const r1 = await blingGet(`/pedidos/vendas?numero=${encodeURIComponent(numero)}`);
-      const ped = r1.ok && r1.data && r1.data.data && r1.data.data[0];
-      if (!ped) { json(res, 200, Object.assign(out, { erro: 'pedido não encontrado por número' })); return true; }
-      const id = ped.id;
-      out.blingId = id;
-      out.situacao = (ped.situacao && (ped.situacao.id || ped.situacao)) || null;
-      async function diag(fmt) {
-        const o = { formato: fmt };
-        const rr = await blingGet(`/logisticas/etiquetas?formato=${fmt}&idsVendas[]=${id}`);
-        o.api_ok = rr.ok; o.api_status = rr.status;
-        const item = rr.ok && rr.data && rr.data.data && rr.data.data[0];
-        o.tem_item = !!item;
-        o.link = (item && item.link) || null;
-        if (!o.link && rr.data) { try { o.resposta = JSON.stringify(rr.data).slice(0, 300); } catch (e) {} }
-        if (o.link) {
-          try {
-            const f = await fetch(o.link);
-            o.fetch_ok = f.ok; o.fetch_status = f.status;
-            o.content_type = f.headers.get('content-type') || '';
-            const buf = Buffer.from(await f.arrayBuffer());
-            o.size = buf.length;
-            o.bytes_hex = buf.slice(0, 8).toString('hex');
-            o.eh_pdf = buf.slice(0, 4).toString('latin1') === '%PDF';
-            o.eh_zip = buf[0] === 0x50 && buf[1] === 0x4B;
-            const txt = buf.slice(0, 400).toString('latin1');
-            o.eh_zpl = txt.indexOf('^XA') >= 0;
-            o.trecho = txt.replace(/[^\x20-\x7e]/g, '.').slice(0, 140);
-          } catch (e) { o.fetch_erro = String((e && e.message) || e); }
-        }
-        return o;
-      }
-      out.pdf = await diag('PDF'); await sleep(PAUSA_MS);
-      out.zpl = await diag('ZPL');
-      const etqPath = path.join(ARQUIVO_DIR, String(id), `etiqueta.${ETIQ_FORMATO.toLowerCase()}`);
-      const ci = { path: etqPath };
-      try { const buf = fs.readFileSync(etqPath); ci.existe = true; ci.size = buf.length; ci.bytes_hex = buf.slice(0, 8).toString('hex'); ci.eh_pdf = buf.slice(0, 4).toString('latin1') === '%PDF'; ci.eh_zpl = buf.slice(0, 400).toString('latin1').indexOf('^XA') >= 0; }
-      catch (e) { ci.existe = false; }
-      out.cache_arquivo = ci;
-      json(res, 200, out);
-      return true;
-    }
     // TESTE de conversão ZPL→PDF (Labelary) — compara o ZPL do cache vs o fresco do Bling
-    if (method === 'GET' && p === '/girassol-backup-offline/etq-test2') {
-      let op = ''; try { op = urlObj.searchParams.get('op') || ''; } catch (e) {}
-      if (!ehAdmin(op)) { json(res, 200, { ok: false, erro: 'só admin' }); return true; }
-      const numero = String(urlObj.searchParams.get('numero') || '').trim();
-      if (!numero) { json(res, 400, { ok: false, erro: 'falta ?numero=' }); return true; }
-      const r1 = await blingGet(`/pedidos/vendas?numero=${encodeURIComponent(numero)}`);
-      const ped = r1.ok && r1.data && r1.data.data && r1.data.data[0];
-      if (!ped) { json(res, 200, { erro: 'pedido não encontrado por número' }); return true; }
-      const id = ped.id;
-      const out = { numero, blingId: id };
-      async function infoZpl(zpl, tag) {
-        const o = { fonte: tag };
-        if (!zpl) { o.vazio = true; return o; }
-        o.tamanho = zpl.length;
-        o.pos_XA = zpl.indexOf('^XA');
-        o.pos_DG = zpl.indexOf('~DG');
-        o.tem_GFB = zpl.indexOf('^GFB') >= 0;
-        o.inicio = zpl.slice(0, 60).replace(/[^\x20-\x7e]/g, '.');
-        const lr = await labelaryPost(zpl);
-        o.labelary_status = lr.status;
-        o.labelary_size = lr.buf ? lr.buf.length : 0;
-        o.labelary_pdf = !!(lr.buf && lr.buf.slice(0, 4).toString('latin1') === '%PDF');
-        if (!o.labelary_pdf && lr.buf) o.labelary_resp = lr.buf.slice(0, 250).toString('latin1').replace(/[^\x20-\x7e]/g, '.');
-        return o;
-      }
-      let zCache = null;
-      try { zCache = fs.readFileSync(path.join(ARQUIVO_DIR, String(id), `etiqueta.${ETIQ_FORMATO.toLowerCase()}`), 'utf8'); } catch (e) {}
-      out.cache = await infoZpl(zCache, 'cache'); await sleep(2500);
-      let zFresh = null;
-      try { zFresh = await baixarEtiqueta(id); } catch (e) {}
-      out.fresco = await infoZpl(zFresh, 'fresco_bling');
-      json(res, 200, out);
-      return true;
-    }
     if (method === 'GET' && p.startsWith('/girassol-backup-offline/arq-info/')) {
       const id = p.split('/').filter(Boolean).pop();
       const ped = readJson(path.join(ARQUIVO_DIR, String(id), 'pedido.json'), null);
@@ -1549,6 +1471,7 @@ function routes(readBody) {
     }
     // DEBUG: por que a NF do pedido não veio? mostra a resposta crua do link pedido→nota + campos do pedido
     if (method === 'GET' && p.startsWith('/girassol-backup-offline/debug-nfped/')) {
+      if (!ehAdmin((urlObj.searchParams && urlObj.searchParams.get('op')) || '')) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
       const id = p.split('/').filter(Boolean).pop();
       const out = { id };
       const r = await blingGet(`/pedidos/vendas/${id}/nfe`); await sleep(PAUSA_MS);
@@ -1561,40 +1484,7 @@ function routes(readBody) {
       return true;
     }
     // DEBUG: mostra a resposta crua do Bling pra entender como buscar pedido (filtro funciona? 116856 é numero ou numeroLoja?)
-    if (method === 'GET' && p === '/girassol-backup-offline/debug-busca') {
-      const q = String(urlObj.searchParams.get('q') || '').trim();
-      const amostra = (d) => (d && Array.isArray(d.data)) ? d.data.slice(0, 5).map(x => ({ id: x.id, numero: x.numero, numeroLoja: x.numeroLoja })) : (d || null);
-      const out = { q };
-      const a = await blingGet(`/pedidos/vendas?limite=5`); await sleep(PAUSA_MS);
-      out.sem_filtro = { ok: a.ok, status: a.status, qtd: (a.data && a.data.data) ? a.data.data.length : null, amostra: amostra(a.data) };
-      const b = await blingGet(`/pedidos/vendas?numero=${encodeURIComponent(q)}&limite=10`); await sleep(PAUSA_MS);
-      out.por_numero = { ok: b.ok, status: b.status, qtd: (b.data && b.data.data) ? b.data.data.length : null, amostra: amostra(b.data) };
-      const c = await blingGet(`/pedidos/vendas?numeroLoja=${encodeURIComponent(q)}&limite=10`); await sleep(PAUSA_MS);
-      out.por_numeroLoja = { ok: c.ok, status: c.status, qtd: (c.data && c.data.data) ? c.data.data.length : null, amostra: amostra(c.data) };
-      const d = await blingGet(`/pedidos/vendas/${encodeURIComponent(q)}`);
-      out.por_id = { ok: d.ok, status: d.status, achou: !!(d.data && d.data.data), numero: d.data && d.data.data && d.data.data.numero };
-      json(res, 200, out);
-      return true;
-    }
     // DEBUG 2: testa buscar NF por número e contato por nome (pra saber quais buscas a API permite)
-    if (method === 'GET' && p === '/girassol-backup-offline/debug-busca2') {
-      const nf = String(urlObj.searchParams.get('nf') || '').trim();
-      const nome = String(urlObj.searchParams.get('nome') || '').trim();
-      const out = {};
-      const amNfe = (dd) => (dd && Array.isArray(dd.data)) ? dd.data.slice(0, 5).map(x => ({ id: x.id, numero: x.numero, nome: x.contato && x.contato.nome })) : (dd || null);
-      if (nf) {
-        const a = await blingGet(`/nfe?numero=${encodeURIComponent(nf)}&limite=10`); await sleep(PAUSA_MS);
-        out.nfe_por_numero = { ok: a.ok, status: a.status, qtd: (a.data && a.data.data) ? a.data.data.length : null, amostra: amNfe(a.data) };
-        const b = await blingGet(`/nfe?limite=5`); await sleep(PAUSA_MS);
-        out.nfe_sem_filtro = { ok: b.ok, status: b.status, qtd: (b.data && b.data.data) ? b.data.data.length : null, amostra: amNfe(b.data) };
-      }
-      if (nome) {
-        const c = await blingGet(`/contatos?pesquisa=${encodeURIComponent(nome)}&limite=5`); await sleep(PAUSA_MS);
-        out.contato_pesquisa = { ok: c.ok, status: c.status, qtd: (c.data && c.data.data) ? c.data.data.length : null, amostra: (c.data && Array.isArray(c.data.data)) ? c.data.data.slice(0, 5).map(x => ({ id: x.id, nome: x.nome })) : (c.data || null) };
-      }
-      json(res, 200, out);
-      return true;
-    }
 
     // BACKUP: baixa um JSON com o estado que NÃO vem do Bling (fila + localizações + índice + log). Só admin.
     if (method === 'GET' && p === '/girassol-backup-offline/backup') {
@@ -1704,6 +1594,7 @@ function routes(readBody) {
 
     // DEBUG: lista vendas ML recentes (loja 203146903) p/ achar uma pra testar etiqueta
     if (method === 'GET' && p === '/girassol-backup-offline/debug-ml') {
+      if (!ehAdmin((urlObj.searchParams && urlObj.searchParams.get('op')) || '')) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
       const { data } = await blingGet(`/pedidos/vendas?idLoja=203146903&limite=20&pagina=1`);
       const lista = (data && data.data) || [];
       json(res, 200, {
@@ -1722,6 +1613,7 @@ function routes(readBody) {
     // DEBUG: dumpa o produto CRU por SKU — vê formato + estrutura/componentes da composição
     // uso: /girassol-backup-offline/debug-produto/{SKU}
     if (method === 'GET' && p.startsWith('/girassol-backup-offline/debug-produto/')) {
+      if (!ehAdmin((urlObj.searchParams && urlObj.searchParams.get('op')) || '')) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
       const sku = decodeURIComponent(p.split('/').filter(Boolean).pop() || '');
       const lista = await blingGet(`/produtos?codigo=${encodeURIComponent(sku)}&limite=1`);
       const item = lista.data && lista.data.data && lista.data.data[0];
@@ -1743,6 +1635,7 @@ function routes(readBody) {
     // DEBUG: dumpa a ESTRUTURA dos produtos de um pedido (variação / composição / kit)
     // uso: /girassol-backup-offline/debug-estrutura/{idDoPedido}
     if (method === 'GET' && p.startsWith('/girassol-backup-offline/debug-estrutura/')) {
+      if (!ehAdmin((urlObj.searchParams && urlObj.searchParams.get('op')) || '')) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
       const id = p.split('/').filter(Boolean).pop();
       const out = { pedido: id, versao: VERSAO, itens: [] };
       try {
@@ -1784,39 +1677,10 @@ function routes(readBody) {
     }
 
     // DEBUG: acha pedidos no cache que parecem KIT/composição (p/ inspecionar a estrutura)
-    if (method === 'GET' && p === '/girassol-backup-offline/debug-buscar-kit') {
-      const man = manifest();
-      const achados = [];
-      for (const id of Object.keys(man)) {
-        const ped = readJson(path.join(CACHE_DIR, String(id), 'pedido.json'), null);
-        if (!ped) continue;
-        const suspeito = (ped.itens || []).some(it =>
-          /kit|combo|conjunto/i.test(it.sku || '') ||
-          /kit|combo|conjunto/i.test(it.descricao || '') ||
-          (!it.ean && (it.descricao || it.sku))   // sem EAN = provável kit/composição (NF sem GTIN)
-        );
-        if (suspeito) {
-          achados.push({
-            id,
-            numero: ped.numero,
-            cliente: ped.cliente,
-            marketplace: ped.marketplace,
-            itens: (ped.itens || []).map(i => ({ sku: i.sku, ean: i.ean, qtd: i.qtd, descricao: (i.descricao || '').slice(0, 60) }))
-          });
-        }
-        if (achados.length >= 15) break;
-      }
-      json(res, 200, {
-        versao: VERSAO,
-        encontrados: achados.length,
-        dica: 'pegue um "id" e abra /girassol-backup-offline/debug-estrutura/{id}',
-        pedidos: achados
-      });
-      return true;
-    }
 
     // DEBUG: dumpa o objeto NF + TESTA baixar o DANFE em PDF (linkPDF) de dentro do Render
     if (method === 'GET' && p === '/girassol-backup-offline/debug-nf') {
+      if (!ehAdmin((urlObj.searchParams && urlObj.searchParams.get('op')) || '')) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
       const out = { versao: VERSAO };
       try {
         const r = await blingGet(`/nfe?limite=1`);
@@ -1857,6 +1721,7 @@ function routes(readBody) {
     // uso: /girassol-backup-offline/debug-nf-simp/{idDoPedido}        → abre o PDF
     //      /girassol-backup-offline/debug-nf-simp/{idDoPedido}?json=1 → mostra os dados extraídos
     if (method === 'GET' && p.startsWith('/girassol-backup-offline/debug-nf-simp/')) {
+      if (!ehAdmin((urlObj.searchParams && urlObj.searchParams.get('op')) || '')) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
       const pedidoId = p.split('/').filter(Boolean).pop();
       let snap = readJson(path.join(CACHE_DIR, String(pedidoId), 'pedido.json'), null);
       if (!snap) {  // talvez seja o NÚMERO do pedido (o que você vê na tela) → procura no manifest
@@ -1934,6 +1799,7 @@ function routes(readBody) {
     // testa o caminho do DANFE p/ UM pedido (id do pedido) e cacheia se der certo
     // uso: /girassol-backup-offline/debug-danfe/{idDoPedido}
     if (method === 'GET' && p.startsWith('/girassol-backup-offline/debug-danfe/')) {
+      if (!ehAdmin((urlObj.searchParams && urlObj.searchParams.get('op')) || '')) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
       const id = p.split('/').filter(Boolean).pop();
       const out = { pedido: id, versao: VERSAO };
       try {
@@ -1977,6 +1843,7 @@ function routes(readBody) {
     // testa se o Bling devolve a ETIQUETA em PDF (vs ZPL) p/ um pedido
     // uso: /girassol-backup-offline/debug-etiqueta-fmt/{idDoPedido}
     if (method === 'GET' && p.startsWith('/girassol-backup-offline/debug-etiqueta-fmt/')) {
+      if (!ehAdmin((urlObj.searchParams && urlObj.searchParams.get('op')) || '')) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
       const id = p.split('/').filter(Boolean).pop();
       const out = { pedido: id, versao: VERSAO };
       try {
