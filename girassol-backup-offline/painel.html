@@ -156,6 +156,23 @@
     .sbtools{flex:1 1 100%;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:3px}
     .sbtools .btn{flex:0 0 auto;white-space:nowrap}
     input.op{width:88px}
+    /* gaveta de separação no celular: caixas menores → mais espaço pro nome/SKU */
+    .seplist{padding:0 10px 10px}
+    .sepchips{padding:10px 10px 4px}
+    .sepinfo{padding:4px 10px 8px}
+    .sepviews{padding:0 10px 6px}
+    .seprow{gap:8px;padding:9px 0}
+    .seprow .loc{min-width:40px;padding:5px 3px;font-size:12px}
+    .seprow .qtd{min-width:34px;width:34px;height:34px;font-size:16px}
+    .seprow .sku{font-size:14px}
+    .seprow .ds{font-size:12px}
+    .seprow .ean{font-size:10px}
+    .seprow .sepedit{padding:6px 7px;font-size:13px}
+    .sep-ped .sph{gap:6px;padding:9px 10px}
+    .sep-ped .sit{gap:8px;padding:7px 10px}
+    .sep-ped .sit .l{min-width:40px;font-size:11px}
+    .sep-ped .sit .q{min-width:32px;width:32px;height:32px;font-size:14px}
+    .sep-ped .sit .m .sku{font-size:13px}
   }
   @media print{ html,body{display:none!important} }   /* a página nunca se imprime — só a Zebra via QZ Tray */
 
@@ -305,7 +322,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b70';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b71';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#ff9900'}, magalu:{n:'Magalu',c:'#0086ff'}, outro:{n:'Outro',c:'#94a3b8'}
