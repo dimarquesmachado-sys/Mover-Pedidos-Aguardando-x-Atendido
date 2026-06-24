@@ -83,12 +83,8 @@ function _tsMensagemML(m) {
 // Versao em memoria da trava do banco (ia_processado_em): guarda o timestamp
 // da ULTIMA msg do cliente que JA respondemos. Msg nova passa NA HORA (zero
 // atraso); a mesma msg nunca eh respondida duas vezes.
-const _ultimaMsgProcessadaPorOrder = new Map();
-function registrarMsgProcessada(orderId, tsMsgCliente) { _ultimaMsgProcessadaPorOrder.set(String(orderId), tsMsgCliente); }
-function msgJaProcessada(orderId, tsMsgCliente) {
-  const t = _ultimaMsgProcessadaPorOrder.get(String(orderId));
-  return !!t && tsMsgCliente <= t;
-}
+// COMPARTILHADO com retryFila.js (revisarAtencaoHumana lê o mesmo Map) -> lib própria.
+const { registrarMsgProcessada, msgJaProcessada } = require('./travaMsgProcessada');
 
 
 // Contador in-memory (zera a cada dia / a cada restart do Render — proposital,
