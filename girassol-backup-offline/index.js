@@ -2,7 +2,7 @@
 
 // ════════════════════════════════════════════════════════════════════════
 //  GIRASSOL · CHECKOUT OFFLINE — FASE 1 (poller) + FASE 2 (bipagem)   (Mover-Pedidos)
-//  girassol-backup-offline v17/06 b43   (a versão real é a const VERSAO abaixo)
+//  girassol-backup-offline v17/06 b82   (a versão real é a const VERSAO abaixo)
 // ════════════════════════════════════════════════════════════════════════
 //  Módulo do orquestrador unificado (HTTP-native, sem Express).
 //  Reaproveita o token Bling da Girassol via ../girassol/tokenManager.
@@ -34,13 +34,14 @@ const crypto = require('crypto');
 const https = require('https');
 const { garantirToken } = require('../girassol/tokenManager');
 const { gerarDanfeSimplificado, gerarDanfeSimplificadoZPL } = require('./danfe-simplificado');
+const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 
 // Certificado/chave do QZ Tray p/ assinar as impressões (mata o popup "Untrusted").
 // Configure no Render: GIRABKP_QZ_CERT (digital-certificate.txt) e GIRABKP_QZ_PRIVKEY (private-key.pem).
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v17/06 b81';
+const VERSAO     = 'girassol-backup-offline v17/06 b82';
 
 // ─── Módulos extraídos (Fase 1: base + nf + etiquetas) ───────────────────
 const base = require('./base');
@@ -1793,6 +1794,55 @@ function routes(readBody) {
           res.end(pdf);
         }
       } catch (e) { json(res, 500, { erro: 'falha ao gerar', detalhe: e.message }); }
+      return true;
+    }
+
+    // ETIQUETA de postagem + tira da DANFE numa etiqueta só (ML / Amazon / Magalu / TikTok)
+    // Shopee NÃO usa — já vem fundida nativa pela própria API.
+    // ?info=1 → mostra os números da fusão (fator, se cabe) SEM imprimir, p/ diagnóstico.
+    // uso: /girassol-backup-offline/etiqueta-fundida/{idOuNumero}
+    if (method === 'GET' && p.startsWith('/girassol-backup-offline/etiqueta-fundida/')) {
+      const pedidoId = p.split('/').filter(Boolean).pop();
+      let dir = path.join(CACHE_DIR, String(pedidoId));
+      let snap = readJson(path.join(dir, 'pedido.json'), null);
+      if (!snap) {  // talvez seja o NÚMERO do pedido (o que aparece na tela)
+        const man = manifest();
+        const achado = Object.keys(man).find(k => String(man[k].numero) === String(pedidoId));
+        if (achado) { dir = path.join(CACHE_DIR, String(achado)); snap = readJson(path.join(dir, 'pedido.json'), null); }
+      }
+      if (!snap) { json(res, 404, { erro: 'pedido não cacheado', pedido: pedidoId }); return true; }
+      const blingId = path.basename(dir);
+      // 1) etiqueta ZPL do cache (precisa ser ZPL — não funde PDF)
+      let zplEtq = null;
+      try { zplEtq = fs.readFileSync(path.join(dir, `etiqueta.${ETIQ_FORMATO.toLowerCase()}`), 'utf8'); }
+      catch (e) { json(res, 404, { erro: 'etiqueta não cacheada', pedido: pedidoId }); return true; }
+      if (!/\^XA/.test(zplEtq)) { json(res, 422, { erro: 'etiqueta não é ZPL', formato: ETIQ_FORMATO }); return true; }
+      // 2) dados da NF (igual /danfe-simp: cache nf-simp.json, ou monta ao vivo e cura o snapshot)
+      let dados = readJson(path.join(dir, 'nf-simp.json'), null);
+      if (!dados) {
+        let nfId = snap.nf && snap.nf.id;
+        if (!nfId) {
+          try {
+            const nf = await nfDoPedido(blingId);
+            if (nf && nf.id) { nfId = nf.id; snap.nf = nf; snap.tem_nf = true; writeJson(path.join(dir, 'pedido.json'), snap); }
+          } catch (e) {}
+        }
+        if (!nfId) { json(res, 404, { erro: 'pedido sem NF', pedido: pedidoId }); return true; }
+        try { dados = await dadosNFSimp(nfId, snap.numero); }
+        catch (e) { json(res, 502, { erro: 'falha ao montar dados', detalhe: e.message }); return true; }
+        if (dados) { try { writeJson(path.join(dir, 'nf-simp.json'), dados); } catch (e) {} }
+      }
+      if (!dados) { json(res, 502, { erro: 'NF não retornou dados' }); return true; }
+      // 3) funde etiqueta + tira da DANFE → ZPL único pra Zebra
+      try {
+        const r = fundirEtiquetaComDanfe(zplEtq, dados);
+        if (/[?&]info=1/.test(urlObj.search || '')) {   // diagnóstico, não imprime
+          json(res, 200, { pedido: pedidoId, encolheu: r.fator < 1, fator: Number(r.fator.toFixed(3)), conteudo_ate: r.maxY, conteudo_escalado: r.novoMaxY, tira_altura: r.stripH, fundo_final: r.fundoFinal, cabe_10x15: r.fundoFinal <= 1185 });
+          return true;
+        }
+        res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+        res.end(r.zpl);
+      } catch (e) { json(res, 500, { erro: 'falha ao fundir', detalhe: e.message }); }
       return true;
     }
 
