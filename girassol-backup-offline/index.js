@@ -2,7 +2,7 @@
 
 // ════════════════════════════════════════════════════════════════════════
 //  GIRASSOL · CHECKOUT OFFLINE — FASE 1 (poller) + FASE 2 (bipagem)   (Mover-Pedidos)
-//  girassol-backup-offline v17/06 b83   (a versão real é a const VERSAO abaixo)
+//  girassol-backup-offline v17/06 b84   (a versão real é a const VERSAO abaixo)
 // ════════════════════════════════════════════════════════════════════════
 //  Módulo do orquestrador unificado (HTTP-native, sem Express).
 //  Reaproveita o token Bling da Girassol via ../girassol/tokenManager.
@@ -41,7 +41,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v17/06 b83';
+const VERSAO     = 'girassol-backup-offline v17/06 b84';
 
 // ─── Módulos extraídos (Fase 1: base + nf + etiquetas) ───────────────────
 const base = require('./base');
@@ -1837,8 +1837,14 @@ function routes(readBody) {
       // 3) funde etiqueta + tira da DANFE → ZPL único pra Zebra
       try {
         const r = fundirEtiquetaComDanfe(zplEtq, dados);
+        // etiqueta-imagem (raster, ex: TikTok) → não fundível; chamador mantém 2 etiquetas
+        if (r.raster) {
+          if (/[?&]info=1/.test(urlObj.search || '')) { json(res, 200, { pedido: pedidoId, fundivel: false, raster: true, imagem_altura: r.maxGfaH, motivo: r.motivo }); return true; }
+          json(res, 409, { erro: 'etiqueta é imagem (raster) — não fundível', motivo: r.motivo, dica: 'mantenha etiqueta + DANFE em 2 etiquetas' });
+          return true;
+        }
         if (/[?&]info=1/.test(urlObj.search || '')) {   // diagnóstico, não imprime
-          json(res, 200, { pedido: pedidoId, encolheu: r.fator < 1, fator: Number(r.fator.toFixed(3)), conteudo_ate: r.maxY, conteudo_escalado: r.novoMaxY, tira_altura: r.stripH, fundo_final: r.fundoFinal, cabe_10x15: r.fundoFinal <= 1185 });
+          json(res, 200, { pedido: pedidoId, fundivel: true, raster: false, encolheu: r.fator < 1, fator: Number(r.fator.toFixed(3)), conteudo_ate: r.maxY, conteudo_escalado: r.novoMaxY, tira_altura: r.stripH, fundo_final: r.fundoFinal, cabe_10x15: r.fundoFinal <= 1185 });
           return true;
         }
         if (/[?&]pdf=1/.test(urlObj.search || '')) {   // PDF p/ imprimir em qualquer impressora (testar à distância)
