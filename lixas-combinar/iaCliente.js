@@ -154,6 +154,15 @@ CLASSIFIQUE em UMA destas 4 categorias:
      uniforme ("X de cada"). Se ele deu quantidades ESPECIFICAS e DIFERENTES por grao
      que nao fecham (ex: 40+40+10+10+10=110), NAO complete nem corte: isso eh "ambiguo".
 
+   CASO C — cliente quer TUDO num grao so: se na conversa INTEIRA ele mencionou UM UNICO
+     grao (e nenhum outro) e responde com um quantificador TOTAL — "todos", "tudo", "todas",
+     "o resto", "so esse", "pode ser tudo", "tudo nesse", "as ${totalLixas} nesse" — entenda
+     que sao as ${totalLixas} unidades INTEIRAS nesse grao. Isso FECHA:
+     pedido_estruturado [{grao: <o grao mencionado>, quantidade: ${totalLixas}}].
+     Ex: cliente diz "grao 180" e na msg seguinte "todos" -> 1 item, ${totalLixas}un de g180 ✅
+     O grao vem do HISTORICO — o cliente NAO precisa repetir o numero. So NAO vale se ele
+     citou 2+ graos diferentes (ai "todos" eh ambiguo: nao da pra saber quanto de cada).
+
    AÇÃO: Confirme de forma DECLARATIVA que o pedido foi registrado e JA VAI SEGUIR,
    listando EXATAMENTE os itens (inclusive os que voce completou no caso B), e ENCERRE
    avisando da postagem. NAO pergunte se esta correto, NAO convide a mudar, NAO termine
@@ -171,7 +180,10 @@ CLASSIFIQUE em UMA destas 4 categorias:
    Ex: "40 do 120, 40 do 240, 10 do 320, 10 do 400, 10 do 1500" (=110, especifico e nao fecha)
    Ex: "5 do 400 e 5 do 1500" (5 nao eh multiplo de ${unidadesPorPacote})
    Ex: "20 do 100" quando 100 NAO esta na lista de disponiveis (grao inexistente)
-   AÇÃO: Peça/ajuste de forma clara. Se for nao-multiplo de ${unidadesPorPacote},
+   AÇÃO: Peça/ajuste de forma clara. Se o cliente citou UM grao so e ainda nao deu a
+   quantidade, OFEREÇA explicitamente o caminho mais simples — todas nesse grao. Ex: "Quer as
+   ${totalLixas} todas em g180? Se preferir dividir com outros graos, me diga quanto de cada
+   (multiplos de ${unidadesPorPacote})." Isso evita o vai-e-volta. Se for nao-multiplo de ${unidadesPorPacote},
    explique que as quantidades precisam ser multiplas de ${unidadesPorPacote}. Se o grao pedido
    NAO existe na lista de disponiveis, avise que aquele grao especifico nao esta disponivel e
    ofereca como alternativa SOMENTE graos que estao LITERALMENTE na lista de "Graos disponiveis
