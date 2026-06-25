@@ -322,7 +322,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b74';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b75';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#ff9900'}, magalu:{n:'Magalu',c:'#0086ff'}, outro:{n:'Outro',c:'#94a3b8'}
@@ -490,6 +490,24 @@ async function imprimirSimplificadoZebra(id){
   const zpl = await fetch(location.origin+'/girassol-backup-offline/danfe-simp/'+id+'?zpl=1')
     .then(r=>{ if(!r.ok) throw new Error('DANFE '+r.status); return r.text(); });
   await imprimirZPL(zpl);   // raw ZPL — igual a etiqueta que já funciona
+}
+
+// ── ETIQUETA FUNDIDA: etiqueta + DANFE numa etiqueta só, com REDE DE SEGURANÇA ──
+// Shopee / ML-combinado / sem NF → a etiqueta já basta (imprime direto).
+// Senão tenta /etiqueta-fundida (1 etiqueta). Se a fusão declinar (raster que enche
+// tudo) ou der qualquer erro → cai no jeito antigo (etiqueta + DANFE separada = 2).
+// Nunca deixa o funcionário sem imprimir.
+async function imprimirEtiquetaZebra(id){
+  const temNf = !!(pedidoAtual && pedidoAtual.nf);
+  const jaTem = etiquetaJaTemDanfe(pedidoAtual && pedidoAtual.marketplace, zplAtual, pedidoAtual && pedidoAtual.nf);
+  if(!temNf || jaTem){ await imprimirZPL(zplAtual); return { fundida:false, duas:false }; }
+  try{
+    const resp = await fetch('/girassol-backup-offline/etiqueta-fundida/'+id);
+    if(resp.ok){ await imprimirZPL(await resp.text()); return { fundida:true, duas:false }; }
+  }catch(e){ /* cai no fallback abaixo */ }
+  await imprimirZPL(zplAtual);                 // jeito antigo, seguro
+  imprimirSimplificadoZebra(id).catch(()=>{}); // DANFE separada (2 etiquetas)
+  return { fundida:false, duas:true };
 }
 
 // ── chave Zebra(ZPL) ↔ A4(PDF) p/ a ETIQUETA (a NF é sempre A4) ──
@@ -862,20 +880,20 @@ async function finalizar(modo){
     abrirConfirmacao();
     return;
   }
-  // Zebra: 1º a ETIQUETA (ZPL)
-  try{ await imprimirZPL(zplAtual); }
-  catch(e){ toast('Falha na etiqueta: '+e.message); return; }
-  // 2º a NF — simplificada NA ZEBRA (10x15) ou completa em A4 no navegador
+  // Zebra
   if(modoFinalizando==='simp'){
-    if(temNf && !etiquetaJaTemDanfe(pedidoAtual.marketplace, zplAtual, pedidoAtual.nf)){
-      toast('🏷️ Gerando DANFE 10x15…');
-      imprimirSimplificadoZebra(id)                   // dispara SEM travar (o QZ pixel demora alguns seg)
-        .then(()=> toast('🏷️ DANFE enviado p/ Zebra'))
-        .catch(e=> toast('Etiqueta saiu, mas o DANFE falhou: '+e.message));
-    }else if(temNf){
-      toast('✓ DANFE já vem junto na etiqueta deste marketplace');
-    }
+    // etiqueta + DANFE → FUNDE numa etiqueta só (fallback p/ 2 se não der)
+    toast('🏷️ Imprimindo etiqueta…');
+    let res;
+    try{ res = await imprimirEtiquetaZebra(id); }
+    catch(e){ toast('Falha na etiqueta: '+e.message); return; }
+    if(res.fundida)   toast('🏷️ etiqueta + DANFE fundidas — 1 etiqueta só ✓');
+    else if(res.duas) toast('🏷️ etiqueta + DANFE (2 etiquetas)');
+    else              toast('🖨 etiqueta enviada'+(temNf?' · DANFE já vem junto':''));
   }else{
+    // etiqueta na Zebra + NF completa em A4 no navegador
+    try{ await imprimirZPL(zplAtual); }
+    catch(e){ toast('Falha na etiqueta: '+e.message); return; }
     if(temNf) window.open(location.origin+'/girassol-backup-offline/danfe/'+id, '_blank');
   }
   abrirConfirmacao();   // abre JÁ — não espera o DANFE terminar de imprimir
@@ -899,15 +917,14 @@ function fecharConfirmacao(){ const md=$('modal'); md.classList.remove('show'); 
 async function reimprimirModal(){
   const id = pedidoAtual.bling_id;
   if(modoEtiqueta()==='a4'){ window.open(location.origin+'/girassol-backup-offline/imprimir/'+id, '_blank'); toast('🖨 reenviado'); return; }
-  try{ await imprimirEtiqueta(id, zplAtual); }catch(e){ toast('Falha etiqueta: '+e.message); return; }
   if(modoFinalizando==='simp'){
-    if(pedidoAtual.nf && !etiquetaJaTemDanfe(pedidoAtual.marketplace, zplAtual, pedidoAtual.nf)){
-      toast('🏷️ Gerando DANFE 10x15…');
-      imprimirSimplificadoZebra(id).then(()=> toast('🏷️ DANFE reenviado')).catch(e=> toast('DANFE falhou: '+e.message));
-    }else{
-      toast('🖨 etiqueta reenviada'+(pedidoAtual.nf?' · DANFE já vem junto':''));
-    }
+    let res;
+    try{ res = await imprimirEtiquetaZebra(id); }catch(e){ toast('Falha etiqueta: '+e.message); return; }
+    if(res.fundida)   toast('🖨 etiqueta + DANFE reenviadas (1 só) ✓');
+    else if(res.duas) toast('🖨 etiqueta + DANFE reenviadas (2)');
+    else              toast('🖨 etiqueta reenviada'+(pedidoAtual.nf?' · DANFE já vem junto':''));
   }else{
+    try{ await imprimirEtiqueta(id, zplAtual); }catch(e){ toast('Falha etiqueta: '+e.message); return; }
     if(pedidoAtual.nf) window.open(location.origin+'/girassol-backup-offline/danfe/'+id, '_blank');
     toast('🖨 etiqueta reenviada');
   }
