@@ -322,7 +322,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b72';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b74';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#ff9900'}, magalu:{n:'Magalu',c:'#0086ff'}, outro:{n:'Outro',c:'#94a3b8'}
@@ -833,10 +833,24 @@ function voltarLista(){
 // FINALIZAR = imprime e SÓ marca conferido depois que o estoquista confirma que saiu certo.
 // modo: 'simp' = etiqueta + DANFE simplificado (10x15) na Zebra | 'a4' = etiqueta + NF completa (A4)
 let modoFinalizando = 'simp';
-// ── Marketplaces cuja ETIQUETA já traz a DANFE embaixo (não imprime DANFE separada) ──
-// Shopee manda etiqueta + DANFE numa coisa só. Pra adicionar outro, basta pôr o código aqui (minúsculo).
-const MKT_ETIQUETA_COM_DANFE = ['shopee'];
-function etiquetaJaTemDanfe(mkt){ return MKT_ETIQUETA_COM_DANFE.includes(String(mkt||'').toLowerCase()); }
+// ── DANFE já vem COMPLETA na etiqueta? então não imprime a separada ──
+// Shopee: sempre manda a DANFE completa junto → pula sempre.
+// ML: combinado recém-ativado; enquanto uns pedidos vêm combinados e outros não, detecta POR
+//     pedido (se o ZPL da etiqueta já contém a chave da NF, 44 díg). Quando TODO ML vier
+//     combinado, é só mover 'ml' pra MKT_DANFE_SEMPRE.
+// Amazon / Magalu / TikTok: NÃO mandam a DANFE completa (TikTok manda só o código de barras,
+//     sem nº/série/data) → sempre imprime a DANFE completa separada.
+const MKT_DANFE_SEMPRE   = ['shopee'];   // etiqueta sempre traz a DANFE completa
+const MKT_DANFE_DETECTAR = ['ml'];       // combinado em transição → confirma por pedido pela chave
+function etiquetaJaTemDanfe(mkt, zpl, nf){
+  const m = String(mkt||'').toLowerCase();
+  if(MKT_DANFE_SEMPRE.includes(m)) return true;
+  if(MKT_DANFE_DETECTAR.includes(m)){
+    const chave = (nf && nf.chave) ? String(nf.chave).replace(/\D/g,'') : '';
+    return chave.length >= 40 && !!zpl && String(zpl).replace(/\D/g,'').includes(chave);
+  }
+  return false;   // Amazon, Magalu, TikTok e qualquer outro → imprime a DANFE completa
+}
 
 async function finalizar(modo){
   modoFinalizando = (modo==='a4') ? 'a4' : 'simp';
@@ -853,7 +867,7 @@ async function finalizar(modo){
   catch(e){ toast('Falha na etiqueta: '+e.message); return; }
   // 2º a NF — simplificada NA ZEBRA (10x15) ou completa em A4 no navegador
   if(modoFinalizando==='simp'){
-    if(temNf && !etiquetaJaTemDanfe(pedidoAtual.marketplace)){
+    if(temNf && !etiquetaJaTemDanfe(pedidoAtual.marketplace, zplAtual, pedidoAtual.nf)){
       toast('🏷️ Gerando DANFE 10x15…');
       imprimirSimplificadoZebra(id)                   // dispara SEM travar (o QZ pixel demora alguns seg)
         .then(()=> toast('🏷️ DANFE enviado p/ Zebra'))
@@ -887,7 +901,7 @@ async function reimprimirModal(){
   if(modoEtiqueta()==='a4'){ window.open(location.origin+'/girassol-backup-offline/imprimir/'+id, '_blank'); toast('🖨 reenviado'); return; }
   try{ await imprimirEtiqueta(id, zplAtual); }catch(e){ toast('Falha etiqueta: '+e.message); return; }
   if(modoFinalizando==='simp'){
-    if(pedidoAtual.nf && !etiquetaJaTemDanfe(pedidoAtual.marketplace)){
+    if(pedidoAtual.nf && !etiquetaJaTemDanfe(pedidoAtual.marketplace, zplAtual, pedidoAtual.nf)){
       toast('🏷️ Gerando DANFE 10x15…');
       imprimirSimplificadoZebra(id).then(()=> toast('🏷️ DANFE reenviado')).catch(e=> toast('DANFE falhou: '+e.message));
     }else{
