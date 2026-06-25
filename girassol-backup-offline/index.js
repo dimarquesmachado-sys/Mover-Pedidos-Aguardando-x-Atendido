@@ -2,7 +2,7 @@
 
 // ════════════════════════════════════════════════════════════════════════
 //  GIRASSOL · CHECKOUT OFFLINE — FASE 1 (poller) + FASE 2 (bipagem)   (Mover-Pedidos)
-//  girassol-backup-offline v17/06 b85   (a versão real é a const VERSAO abaixo)
+//  girassol-backup-offline v17/06 b86   (a versão real é a const VERSAO abaixo)
 // ════════════════════════════════════════════════════════════════════════
 //  Módulo do orquestrador unificado (HTTP-native, sem Express).
 //  Reaproveita o token Bling da Girassol via ../girassol/tokenManager.
@@ -41,7 +41,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v17/06 b85';
+const VERSAO     = 'girassol-backup-offline v17/06 b86';
 
 // ─── Módulos extraídos (Fase 1: base + nf + etiquetas) ───────────────────
 const base = require('./base');
@@ -461,28 +461,53 @@ async function enviarEmailDocs(id, quem) {
   if (!ehShopee && (!ped.nf || !ped.nf.id)) {
     try { const nf = await nfDoPedido(id); if (nf && nf.id) ped.nf = nf; } catch (e) {}
   }
-  // ETIQUETA em PDF — função canônica (ML: PDF nativo do Bling; não-ML: ZPL cacheado → Labelary)
-  try {
-    const etqPdf = await etiquetaPdf(id, path.join(ARQUIVO_DIR, String(id)));
-    if (etqPdf) { anexos.push({ filename: `etiqueta-${ped.numero || id}.pdf`, content: etqPdf }); temEtq = true; }
-  } catch (e) {}
-  // DANFE SIMPLIFICADO (igual ao que imprime no checkout) — Shopee NÃO precisa (já vem embaixo da etiqueta)
-  if (!ehShopee) {
+  // 1º TENTA FUNDIR etiqueta + DANFE num PDF só (mesma fusão da impressão) — não-Shopee, com NF
+  let fundiu = false;
+  if (!ehShopee && ped.nf) {
     try {
-      let dados = readJson(path.join(ARQUIVO_DIR, String(id), 'nf-simp.json'), null);
-      const nfId = ped.nf && ped.nf.id;
-      if (!dados && nfId) dados = await dadosNFSimp(nfId, ped.numero);
-      const simpPdf = dados ? await gerarDanfeSimplificado(dados) : null;
-      if (simpPdf) { anexos.push({ filename: `danfe-simplificado-${(ped.nf && ped.nf.numero) || id}.pdf`, content: simpPdf }); temDanfe = true; }
+      const dir = path.join(ARQUIVO_DIR, String(id));
+      const zplEtq = fs.readFileSync(path.join(dir, `etiqueta.${ETIQ_FORMATO.toLowerCase()}`), 'utf8');
+      if (/\^XA/.test(zplEtq)) {
+        let dados = readJson(path.join(dir, 'nf-simp.json'), null);
+        const nfId = ped.nf && ped.nf.id;
+        if (!dados && nfId) dados = await dadosNFSimp(nfId, ped.numero);
+        if (dados) {
+          const r = fundirEtiquetaComDanfe(zplEtq, dados);
+          if (r.modo !== 'declinou') {
+            const fundPdf = await zplParaPdf(r.zpl);
+            if (fundPdf) { anexos.push({ filename: `etiqueta-${ped.numero || id}.pdf`, content: fundPdf }); temEtq = true; temDanfe = true; fundiu = true; }
+          }
+        }
+      }
     } catch (e) {}
+  }
+  // se NÃO fundiu → jeito antigo: etiqueta PDF + DANFE PDF separados (fallback seguro)
+  if (!fundiu) {
+    // ETIQUETA em PDF — função canônica (ML: PDF nativo do Bling; não-ML: ZPL cacheado → Labelary)
+    try {
+      const etqPdf = await etiquetaPdf(id, path.join(ARQUIVO_DIR, String(id)));
+      if (etqPdf) { anexos.push({ filename: `etiqueta-${ped.numero || id}.pdf`, content: etqPdf }); temEtq = true; }
+    } catch (e) {}
+    // DANFE SIMPLIFICADO (igual ao que imprime no checkout) — Shopee NÃO precisa (já vem embaixo da etiqueta)
+    if (!ehShopee) {
+      try {
+        let dados = readJson(path.join(ARQUIVO_DIR, String(id), 'nf-simp.json'), null);
+        const nfId = ped.nf && ped.nf.id;
+        if (!dados && nfId) dados = await dadosNFSimp(nfId, ped.numero);
+        const simpPdf = dados ? await gerarDanfeSimplificado(dados) : null;
+        if (simpPdf) { anexos.push({ filename: `danfe-simplificado-${(ped.nf && ped.nf.numero) || id}.pdf`, content: simpPdf }); temDanfe = true; }
+      } catch (e) {}
+    }
   }
   if (!anexos.length) return { ok: false, erro: 'sem documentos pra enviar (etiqueta nem DANFE disponíveis)' };
   try {
     const transporter = nodemailer.createTransport({ host: SMTP_HOST, port: SMTP_PORT, secure: SMTP_PORT === 465, auth: { user: EMAIL_USER, pass: EMAIL_PASS } });
     const mktNome = MKT_NOME[ped.marketplace] || ped.marketplace || '—';
-    const oQueVai = (ehShopee && temEtq)
-      ? 'etiqueta de postagem (já inclui a DANFE embaixo)'
-      : [temEtq ? 'etiqueta' : null, temDanfe ? 'DANFE simplificado' : null].filter(Boolean).join(' + ');
+    const oQueVai = fundiu
+      ? 'etiqueta + DANFE numa folha só (1 etiqueta)'
+      : (ehShopee && temEtq)
+        ? 'etiqueta de postagem (já inclui a DANFE embaixo)'
+        : [temEtq ? 'etiqueta' : null, temDanfe ? 'DANFE simplificado' : null].filter(Boolean).join(' + ');
     const corpo = 'Reimpressão solicitada pelo Checkout Offline.\n\n'
       + 'Pedido: ' + (ped.numero || id) + '\n'
       + 'Cliente: ' + (ped.cliente || '—') + '\n'
