@@ -50,6 +50,7 @@ function medirAlturaZPL(zpl) {
   const m = String(zpl).match(/\^XA[\s\S]*?\^XZ/);
   const corpo = m ? m[0] : String(zpl);
   let maxY = 0;
+  let curBY = 2;   // ^BY corrente (largura de módulo) — afeta o comprimento de barcode girado
   const re = /\^FO(\d+),(\d+)([\s\S]*?)(?=\^FO|\^XZ|$)/g;
   let g;
   while ((g = re.exec(corpo))) {
@@ -73,6 +74,10 @@ function medirAlturaZPL(zpl) {
     if (bc) alt = parseInt(bc[1], 10);
     const gb = bloco.match(/\^GB(\d+),(\d+)/);
     if (gb) alt = Math.max(parseInt(gb[2], 10), 2);
+    // barcode GIRADO (vertical): a extensão p/ baixo é o COMPRIMENTO (dados × módulos × ^BY)
+    const byB = bloco.match(/\^BY(\d+)/); if (byB) curBY = parseInt(byB[1], 10);
+    if (/\^B3[RB]/.test(bloco) && fd) alt = Math.max(alt, (fd[1].replace(/\s/g, '').length + 2) * 16 * curBY);  // Code39 girado
+    if (/\^BC[RB]/.test(bloco) && fd) alt = Math.max(alt, fd[1].replace(/\s/g, '').length * 11 * curBY + 35);    // Code128 girado
     if (y + alt > maxY) maxY = y + alt;
   }
   return maxY;
@@ -91,6 +96,8 @@ function escalarEtiquetaZPL(zpl, f) {
   label = label.replace(/\^BQN,(\d+),(\d+)/g, (s, mo, mg) =>
     '^BQN,' + mo + ',' + Math.min(parseInt(mg, 10), Math.max(5, r(mg))));
   label = label.replace(/\^BCN,(\d+)/g, (s, h) => '^BCN,' + Math.max(50, r(h)));
+  // ^BY (largura de módulo): encolher ENCURTA o barcode girado (vertical). Min 2 p/ não sumir.
+  label = label.replace(/\^BY(\d+)/g, (s, w) => '^BY' + Math.max(2, r(w)));
   label = label.replace(/\^GB(\d+),(\d+),(\d+)/g, (s, w, h, t) =>
     '^GB' + w + ',' + r(h) + ',' + t);
   return label + resto;
