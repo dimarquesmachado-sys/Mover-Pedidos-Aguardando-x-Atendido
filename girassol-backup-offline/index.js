@@ -2,7 +2,7 @@
 
 // ════════════════════════════════════════════════════════════════════════
 //  GIRASSOL · CHECKOUT OFFLINE — FASE 1 (poller) + FASE 2 (bipagem)   (Mover-Pedidos)
-//  girassol-backup-offline v17/06 b82   (a versão real é a const VERSAO abaixo)
+//  girassol-backup-offline v17/06 b83   (a versão real é a const VERSAO abaixo)
 // ════════════════════════════════════════════════════════════════════════
 //  Módulo do orquestrador unificado (HTTP-native, sem Express).
 //  Reaproveita o token Bling da Girassol via ../girassol/tokenManager.
@@ -41,7 +41,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v17/06 b82';
+const VERSAO     = 'girassol-backup-offline v17/06 b83';
 
 // ─── Módulos extraídos (Fase 1: base + nf + etiquetas) ───────────────────
 const base = require('./base');
@@ -1800,6 +1800,7 @@ function routes(readBody) {
     // ETIQUETA de postagem + tira da DANFE numa etiqueta só (ML / Amazon / Magalu / TikTok)
     // Shopee NÃO usa — já vem fundida nativa pela própria API.
     // ?info=1 → mostra os números da fusão (fator, se cabe) SEM imprimir, p/ diagnóstico.
+    // ?pdf=1  → devolve um PDF da etiqueta fundida (imprime em qualquer impressora; testar à distância).
     // uso: /girassol-backup-offline/etiqueta-fundida/{idOuNumero}
     if (method === 'GET' && p.startsWith('/girassol-backup-offline/etiqueta-fundida/')) {
       const pedidoId = p.split('/').filter(Boolean).pop();
@@ -1838,6 +1839,12 @@ function routes(readBody) {
         const r = fundirEtiquetaComDanfe(zplEtq, dados);
         if (/[?&]info=1/.test(urlObj.search || '')) {   // diagnóstico, não imprime
           json(res, 200, { pedido: pedidoId, encolheu: r.fator < 1, fator: Number(r.fator.toFixed(3)), conteudo_ate: r.maxY, conteudo_escalado: r.novoMaxY, tira_altura: r.stripH, fundo_final: r.fundoFinal, cabe_10x15: r.fundoFinal <= 1185 });
+          return true;
+        }
+        if (/[?&]pdf=1/.test(urlObj.search || '')) {   // PDF p/ imprimir em qualquer impressora (testar à distância)
+          const pdf = await zplParaPdf(r.zpl);
+          if (pdf) { res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': 'inline; filename="etiqueta-fundida.pdf"' }); res.end(pdf); }
+          else json(res, 502, { erro: 'Labelary não converteu o ZPL (tente de novo)' });
           return true;
         }
         res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
