@@ -157,6 +157,7 @@ async function dadosNFSimp(nfId, numeroPedido) {
     numero: nf.numero || '',
     serie: nf.serie || '1',
     dataEmissao: nf.dataEmissao || '',
+    natureza: nf.naturezaOperacao || nf.natureza || '',
     itens,
     qtdTotal: itens.length,
     consumidor: { doc: c.numeroDocumento || c.documento || '', nome: c.nome || '', endereco: x.destEndereco || '' },
