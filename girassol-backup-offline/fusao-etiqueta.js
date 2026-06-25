@@ -122,14 +122,23 @@ function tiraDanfeZPL(d, yBase) {
   return { zpl: z.join('\n'), alturaTotal: y - yBase };
 }
 
-// ═══ LINHA da NF p/ etiqueta-imagem (raster) — só texto, sem barcode ═══
+// ═══ natureza pode vir como objeto {id,descricao} do Bling → extrai o texto ═══
+function natTxt(n) {
+  if (n == null) return 'Venda';
+  if (typeof n === 'object') return n.descricao || n.nome || 'Venda';
+  const s = String(n).trim();
+  return s || 'Venda';
+}
+
+// ═══ LINHA da NF p/ etiqueta-imagem (raster) — cabeçalho + 1 linha, sem barcode ═══
 //     (a chave + código de barras já vêm na imagem do TikTok)
 function linhaNFRasterZPL(d, fimImagem) {
-  const nat = esc(d.natureza || 'Venda').slice(0, 30);
-  const txt = 'NF-e ' + (d.numero || '') + '   Serie ' + (d.serie || '1') +
+  const nat = esc(natTxt(d.natureza)).slice(0, 30);
+  const info = 'NF-e ' + (d.numero || '') + '   Serie ' + (d.serie || '1') +
     '   ' + fmtData(d.dataEmissao) + '   ' + nat;
-  return '^FO16,' + (fimImagem + 6) + '^GB768,2,2^FS\n' +
-    '^FO16,' + (fimImagem + 12) + '^A0N,19,19^FB768,2,0,C,0^FD' + esc(txt) + '^FS';
+  return '^FO16,' + (fimImagem + 3)  + '^GB768,2,2^FS\n' +
+    '^FO16,' + (fimImagem + 8)  + '^A0N,18,18^FB768,1,0,C,0^FDDANFE - NF-e SIMPLIFICADA^FS\n' +
+    '^FO16,' + (fimImagem + 28) + '^A0N,16,16^FB768,1,0,C,0^FD' + esc(info) + '^FS';
 }
 
 // ═══ FUNDE — escolhe o modo automático pelo tipo da etiqueta ═══
