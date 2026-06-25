@@ -148,6 +148,18 @@ function tiraDanfeZPL(d, yBase) {
 function fundirEtiquetaComDanfe(zplEtiqueta, dados) {
   const amostra = tiraDanfeZPL(dados, 0);
   const stripH = amostra.alturaTotal;
+  // ROBUSTEZ: se a etiqueta é uma IMAGEM grande (^GFA raster — ex: TikTok),
+  // não dá pra encolher via ZPL → DECLINA a fusão (o chamador mantém 2 etiquetas).
+  // Pega qualquer marketplace que mande etiqueta como figura, hoje ou no futuro.
+  let maxGfaH = 0;
+  for (const gm of String(zplEtiqueta).matchAll(/\^GFA,\d+,(\d+),(\d+)/g)) {
+    const h = Math.floor(parseInt(gm[1], 10) / parseInt(gm[2], 10));
+    if (h > maxGfaH) maxGfaH = h;
+  }
+  if (maxGfaH + GAP + stripH > CONTENT_MAX) {
+    return { raster: true, zpl: String(zplEtiqueta), maxGfaH,
+      motivo: 'etiqueta é imagem (raster) — não dá pra fundir sem perder qualidade; manter as 2 etiquetas' };
+  }
   let maxY = medirAlturaZPL(zplEtiqueta);                  // relativo ao ^LH
   maxY = Math.min(maxY, CONTENT_MAX);                      // TRAVA: nunca além da etiqueta física
   const mLH = String(zplEtiqueta).match(/\^LH\d+,(\d+)/);
