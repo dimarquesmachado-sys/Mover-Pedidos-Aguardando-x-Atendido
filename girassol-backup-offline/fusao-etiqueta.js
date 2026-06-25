@@ -92,9 +92,9 @@ function escalarEtiquetaZPL(zpl, f) {
   label = label.replace(/\^FO(\d+),(\d+)/g, (s, x, y) => '^FO' + x + ',' + r(y));
   label = label.replace(/\^A0N,(\d+),(\d+)/g, (s, h, w) =>
     '^A0N,' + Math.max(14, r(h)) + ',' + Math.max(14, r(w)));
-  // QR: encolhe proporcional, NUNCA aumenta (cap no original), piso 5 p/ bipar
+  // QR: encolhe proporcional (acompanha o layout p/ não sobrepor), piso 3 p/ continuar bipável
   label = label.replace(/\^BQN,(\d+),(\d+)/g, (s, mo, mg) =>
-    '^BQN,' + mo + ',' + Math.min(parseInt(mg, 10), Math.max(5, r(mg))));
+    '^BQN,' + mo + ',' + Math.max(3, r(mg)));
   label = label.replace(/\^BCN,(\d+)/g, (s, h) => '^BCN,' + Math.max(50, r(h)));
   // ^BY (largura de módulo): encolher ENCURTA o barcode girado (vertical). Min 2 p/ não sumir.
   label = label.replace(/\^BY(\d+)/g, (s, w) => '^BY' + Math.max(2, r(w)));
