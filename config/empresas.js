@@ -25,6 +25,7 @@ const empresas = [
   require('../amb-drive-imagens'),
   require('../ponto'),
   require('../girassol-backup-offline'),
+  require('../good-checkout-offline'),
 ];
 
 // Filtra empresas marcadas como inativas via env var (ex: SKIP_EMPRESAS=girassol,good)
