@@ -27,6 +27,7 @@ const empresas = [
   require('../girassol-backup-offline'),
   require('../good-checkout-offline'),
   require('../good-mm-diag'),
+  require('../good-mm-etiquetas'),
 ];
 
 // Filtra empresas marcadas como inativas via env var (ex: SKIP_EMPRESAS=girassol,good)
