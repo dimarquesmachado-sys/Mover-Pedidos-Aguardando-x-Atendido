@@ -2,32 +2,51 @@
 
 /**
  * Módulo /good-mm-diag — DIAGNÓSTICO da API do Madeira Madeira (GOOD Import)
- * v3: adiciona teste de URL arbitrária com o TOKENMM, pra descobrir se a API
- * INTERNA do Portal (painelmarketplace / envios) aceita o token (e não só a
- * sessão de login). Tudo abaixo é LEITURA.
+ * v4: VARREDURA sistemática. Dispara uma bateria de endpoints candidatos nos
+ *     hosts "envios" e público, todos GET (só leitura), com o TOKENMM, e
+ *     resume o veredito de cada um. Inclui sondagem das rotas de GERAR via GET:
+ *     se a rota responder 405 (Method Not Allowed), ela EXISTE e espera POST —
+ *     ouro, sem precisar postar nada de verdade.
+ *     Também corrige o falso-positivo: o MM responde HTTP 200 com
+ *     {"status":false} quando recusa; agora isso NÃO conta como sucesso.
  *
- * Descobertas da captura do Portal:
- *  - GERAR (interna, sessão): POST painelmarketplace.../painel/v2/api/mm-envios/lote/etiquetas
+ * Mapa confirmado nas capturas do Portal (F12):
+ *  - GERAR  (sessão): POST painelmarketplace.../painel/v2/api/mm-envios/lote/etiquetas
  *      corpo: {etiqueta_tipo:1, lote_tipo:1, pedidos:{"<pedido>":[["<item>"],...]}, transportadora:null}
- *  - LISTAR lotes (interna): GET  painelmarketplace.../painel/v2/api/mm-envios/lotes
- *      retorna [{batch, orders, objects:[SRO], file:"<url pdf>", status:1|2, ...}]
- *  - BAIXAR pdf (interna):    GET  envios.../api/v1/lote/<batch>/imprimir-pdf
+ *      resposta: {"success":true,"message":"Lote criado com sucesso"}  (NÃO devolve o batch)
+ *  - LISTAR (sessão): GET  painelmarketplace.../painel/v2/api/mm-envios/lotes
+ *      -> [{batch, orders:[{order_id,status}], objects:[SRO], file:"<url pdf>", status:1|2, expiration_date}]
+ *      (usa COOKIE de sessão -> recusa o token no Render)
+ *  - BAIXAR (token):  GET  envios.../api/v1/lote/<batch>/imprimir-pdf   ✅ funciona com TOKENMM
+ *
+ * Falta achar: LISTAR e GERAR no host "envios" (que aceita token). É o que a
+ * varredura procura.
  *
  * TEMPORÁRIO. Não toca na integração do Bling.
  *
- * Env: GOOD_MM_TOKEN (obrigatório), GOOD_MM_BASE (opcional), GOOD_MM_DIAG_KEY (opcional)
+ * Env: GOOD_MM_TOKEN (obrigatório), GOOD_MM_BASE (opcional),
+ *      GOOD_MM_SELLER (opcional, default 25379), GOOD_MM_DIAG_KEY (opcional)
  */
 
 const https = require('https');
 
-const VERSAO = 'good-mm-diag v27/06 a3';
+const VERSAO = 'good-mm-diag v27/06 a4';
 
 const MM_BASE = (process.env.GOOD_MM_BASE || 'https://marketplace.madeiramadeira.com.br').replace(/\/+$/, '');
 const MM_VERSAO = '/v1';
+const SELLER = (process.env.GOOD_MM_SELLER || '25379').trim();
+
+// Host de logística (aceita TOKENMM no download confirmado)
+const ENVIOS = 'https://envios.madeiramadeira.com.br';
 
 // URLs internas descobertas na captura (host do Portal)
 const URL_LOTES = 'https://painelmarketplace.madeiramadeira.com.br/painel/v2/api/mm-envios/lotes';
-const URL_PDF_288348 = 'https://envios.madeiramadeira.com.br/api/v1/lote/288348/imprimir-pdf';
+const URL_PDF_288348 = ENVIOS + '/api/v1/lote/288348/imprimir-pdf';
+
+// Valores do pedido de teste (já confirmados): MM 9768374 / lote 288348 / SRO AP115902313BR
+const TESTE_BATCH = '288348';
+const TESTE_SRO = 'AP115902313BR';
+const TESTE_PEDIDO = '9768374';
 
 const agent = new https.Agent({ family: 4, keepAlive: false });
 
@@ -42,7 +61,7 @@ function reqRaw(method, fullUrl, { body = null } = {}) {
     const token = process.env.GOOD_MM_TOKEN || '';
     if (!token) return resolve({ ok: false, erro: 'GOOD_MM_TOKEN não configurado no Render' });
     const payload = body ? Buffer.from(JSON.stringify(body), 'utf8') : null;
-    const headers = { 'TOKENMM': token, 'Accept': '*/*', 'User-Agent': 'good-mm-diag/3.0' };
+    const headers = { 'TOKENMM': token, 'Accept': '*/*', 'User-Agent': 'good-mm-diag/4.0' };
     if (payload) { headers['Content-Type'] = 'application/json'; headers['Content-Length'] = payload.length; }
     let req;
     try {
@@ -56,7 +75,8 @@ function reqRaw(method, fullUrl, { body = null } = {}) {
           const ehZPL = buf.slice(0, 3).toString('latin1') === '^XA';
           let parsed = null;
           if (ct.includes('json')) { try { parsed = JSON.parse(buf.toString('utf8')); } catch (e) {} }
-          const jsonFalhou = parsed && parsed.success === false;
+          // MM devolve HTTP 200 com {status:false} OU {success:false} quando recusa.
+          const jsonFalhou = parsed && (parsed.success === false || parsed.status === false);
           const out = {
             ok: (resp.statusCode >= 200 && resp.statusCode < 300) && !jsonFalhou,
             statusCode: resp.statusCode, contentType: resp.headers['content-type'] || null,
@@ -113,8 +133,72 @@ function chaveOk(urlObj) {
 function interpretaAuth(r) {
   if (r.erro) return 'Erro de rede: ' + r.erro;
   if (r.ok) return '✅ FUNCIONOU com o TOKENMM (status ' + r.statusCode + '). A API interna aceita o token — dá pra automatizar no Render! 🎉';
+  if (r.statusCode === 405) return '🎯 405 — a ROTA EXISTE mas espera POST (não GET). Forte candidata a GERAR.';
   if (r.statusCode === 401 || r.statusCode === 403) return '🔒 ' + r.statusCode + ' — a API interna NÃO aceita o TOKENMM (precisa da sessão de login). Esse caminho não serve pro Render.';
+  if (r.json && (r.json.status === false || r.json.success === false)) return '❌ HTTP ' + r.statusCode + ' mas corpo {status:false} — token aceito no host, mas SEM permissão ou rota errada. Mensagem: "' + (r.json.message || '') + '".';
   return 'Resposta ' + r.statusCode + ' — veja o corpo. (Não é o 200 esperado nem o 401/403 claro.)';
+}
+
+// ── Varredura sistemática (todas GET, só leitura) ────────────────────
+// Bateria de URLs candidatas. Em "gerar?" mandamos GET de propósito: se vier
+// 405, a rota existe e espera POST (= provável endpoint de gerar).
+function montarBateria({ batch, sro, pedidoMM }) {
+  const E = ENVIOS;
+  const P = MM_BASE; // marketplace.madeiramadeira.com.br
+  return [
+    // CONTROLES (sabidamente OK) — confirmam que o token + a varredura funcionam
+    { grupo: 'controle', alvo: 'baixar PDF do lote (sabemos que funciona)', url: `${E}/api/v1/lote/${batch}/imprimir-pdf` },
+    { grupo: 'controle', alvo: 'pedido público por id', url: `${P}/v1/pedido/id/${pedidoMM}` },
+
+    // LISTAR no host envios — achar como descobrir o batch sem sessão
+    { grupo: 'listar', alvo: 'lotes', url: `${E}/api/v1/lotes` },
+    { grupo: 'listar', alvo: 'lotes?seller', url: `${E}/api/v1/lotes?seller=${SELLER}` },
+    { grupo: 'listar', alvo: 'lotes?id_seller', url: `${E}/api/v1/lotes?id_seller=${SELLER}` },
+    { grupo: 'listar', alvo: 'mm-envios/lotes', url: `${E}/api/v1/mm-envios/lotes` },
+    { grupo: 'listar', alvo: 'seller/{id}/lotes', url: `${E}/api/v1/seller/${SELLER}/lotes` },
+
+    // DETALHE — batch a partir do pedido
+    { grupo: 'detalhe', alvo: 'lote?order_id', url: `${E}/api/v1/lote?order_id=${pedidoMM}` },
+    { grupo: 'detalhe', alvo: 'lote?pedido', url: `${E}/api/v1/lote?pedido=${pedidoMM}` },
+    { grupo: 'detalhe', alvo: 'lote/{batch}', url: `${E}/api/v1/lote/${batch}` },
+    { grupo: 'detalhe', alvo: 'lote/{batch}/objetos', url: `${E}/api/v1/lote/${batch}/objetos` },
+    { grupo: 'detalhe', alvo: 'pedido/{id}', url: `${E}/api/v1/pedido/${pedidoMM}` },
+    { grupo: 'detalhe', alvo: 'pedido/id/{id}', url: `${E}/api/v1/pedido/id/${pedidoMM}` },
+
+    // BAIXAR por SRO (alternativa: baixar sem saber o batch)
+    { grupo: 'baixar-sro', alvo: 'etiqueta/{sro}', url: `${E}/api/v1/etiqueta/${sro}` },
+    { grupo: 'baixar-sro', alvo: 'etiqueta/{sro}/imprimir-pdf', url: `${E}/api/v1/etiqueta/${sro}/imprimir-pdf` },
+    { grupo: 'baixar-sro', alvo: 'objeto/{sro}/imprimir-pdf', url: `${E}/api/v1/objeto/${sro}/imprimir-pdf` },
+
+    // GERAR sondado via GET (405 = a rota existe e quer POST = OURO)
+    { grupo: 'gerar?', alvo: 'lote/etiquetas (sonda GET)', url: `${E}/api/v1/lote/etiquetas` },
+    { grupo: 'gerar?', alvo: 'lote (sonda GET)', url: `${E}/api/v1/lote` },
+    { grupo: 'gerar?', alvo: 'etiquetas (sonda GET)', url: `${E}/api/v1/etiquetas` },
+    { grupo: 'gerar?', alvo: 'mm-envios/lote/etiquetas (sonda GET)', url: `${E}/api/v1/mm-envios/lote/etiquetas` },
+
+    // Host público — família madeiraenvios
+    { grupo: 'publico', alvo: 'madeiraenvios/lotes', url: `${P}/v1/madeiraenvios/lotes` },
+    { grupo: 'publico', alvo: 'madeiraenvios/lote/{batch}', url: `${P}/v1/madeiraenvios/lote/${batch}` }
+  ];
+}
+
+function veredito(r) {
+  if (r.erro) return { txt: '⚠️ rede: ' + r.erro, prom: false, tag: 'rede' };
+  if (r.parece_PDF) return { txt: '✅✅ PDF — baixou de verdade!', prom: true, tag: 'pdf' };
+  if (r.parece_ZPL) return { txt: '✅✅ ZPL — baixou de verdade!', prom: true, tag: 'zpl' };
+  const sc = r.statusCode;
+  const j = r.json;
+  const statusFalse = j && (j.status === false || j.success === false);
+  if (sc === 405) return { txt: '🎯 405 — ROTA EXISTE, espera POST (provável GERAR!)', prom: true, tag: '405' };
+  if (statusFalse) return { txt: '❌ status:false — "' + ((j && j.message) || 'sem msg') + '"', prom: false, tag: 'false' };
+  if (sc === 401 || sc === 403) return { txt: '🔒 ' + sc + ' — token recusado (precisa sessão)', prom: false, tag: 'auth' };
+  if (sc === 404) return { txt: '— 404 (rota não existe)', prom: false, tag: '404' };
+  if (sc >= 200 && sc < 300) {
+    if (Array.isArray(j)) return { txt: '✅ LISTA com ' + j.length + ' item(ns)' + (j.length ? ' — PROMISSOR!' : ' (vazia)'), prom: j.length > 0, tag: 'lista' };
+    if (j && typeof j === 'object') return { txt: '✅ JSON ok (chaves: ' + Object.keys(j).slice(0, 6).join(', ') + ') — olhar', prom: true, tag: 'json' };
+    return { txt: '200 mas corpo estranho', prom: false, tag: '2xx' };
+  }
+  return { txt: '? status ' + sc, prom: false, tag: 'outro' };
 }
 
 // ── Página HTML ──────────────────────────────────────────────────────
@@ -122,6 +206,7 @@ function paginaHtml() {
   const temToken = !!process.env.GOOD_MM_TOKEN;
   const temKey = !!process.env.GOOD_MM_DIAG_KEY;
   const ks = temKey ? '&k=SUA_CHAVE' : '';
+  const ks1 = temKey ? '?k=SUA_CHAVE' : '';
   const askKey = temKey ? "var k=prompt('Chave (k):','');if(k)url+='&k='+encodeURIComponent(k);else return;" : '';
   const enc = encodeURIComponent;
   return `<!doctype html><html lang="pt-br"><head>
@@ -133,23 +218,32 @@ function paginaHtml() {
   .card{border:1px solid #e3e3e3;border-radius:10px;padding:14px 16px;margin:12px 0}
   code{background:#f4f4f5;padding:2px 6px;border-radius:5px;font-size:12px;word-break:break-all}
   a.btn{display:inline-block;margin:6px 8px 6px 0;padding:9px 14px;background:#EF5B25;color:#fff;text-decoration:none;border-radius:7px;font-weight:600;font-size:14px;cursor:pointer}
-  a.btn.blue{background:#1677ff}a.btn.danger{background:#c0392b}
-  .hi{background:#eef6ff;border-color:#9cc3f5}.danger-box{background:#fdecea;border-color:#e6736a}
+  a.btn.blue{background:#1677ff}a.btn.green{background:#157347}a.btn.danger{background:#c0392b}
+  .hi{background:#eef6ff;border-color:#9cc3f5}.star{background:#f0fff4;border-color:#86d99e}.danger-box{background:#fdecea;border-color:#e6736a}
   .ok{color:#157347;font-weight:600}.no{color:#b02a37;font-weight:600}
-  input{padding:8px;border:1px solid #ccc;border-radius:6px;width:220px}label{font-size:13px;color:#444}
+  input{padding:8px;border:1px solid #ccc;border-radius:6px;width:200px}label{font-size:13px;color:#444}
 </style></head><body>
 <h1>🩺 Diagnóstico Madeira Madeira — GOOD Import</h1>
-<div class="v">${VERSAO} · pública <code>${MM_BASE}${MM_VERSAO}</code></div>
+<div class="v">${VERSAO} · pública <code>${MM_BASE}${MM_VERSAO}</code> · seller <code>${SELLER}</code></div>
 
 <div class="card ${temToken ? '' : 'danger-box'}">
   Token: ${temToken ? '<span class="ok">configurado</span>' : '<span class="no">FALTA</span>'} · Chave: ${temKey ? '<span class="ok">ativa</span>' : 'desativada'}
 </div>
 
-<div class="card hi">
-  <b>★ Teste decisivo — a API interna aceita o TOKENMM?</b> &nbsp;[só leitura]<br>
-  Estes são os endpoints reais do Portal. Se responderem 200 com o token, dá pra automatizar tudo no Render.
+<div class="card star">
+  <b>★★ VARREDURA completa — 1 clique</b> &nbsp;[só leitura / GET]<br>
+  Dispara ~22 endpoints candidatos nos hosts <code>envios</code> e público com o token e resume tudo.
+  Procura o "listar" e o "gerar" que aceitem token. <b>405</b> numa rota de gerar = ela existe e quer POST.
   <div style="margin-top:8px">
-    <a class="btn blue" href="/good-mm-diag/raw?url=${enc(URL_LOTES)}${ks}">Interna: listar lotes</a>
+    <a class="btn green" href="/good-mm-diag/varredura${ks1}">▶ Rodar varredura</a>
+    <span style="font-size:12px;color:#666">usa o pedido-teste 9768374 / lote 288348 / SRO AP115902313BR</span>
+  </div>
+</div>
+
+<div class="card hi">
+  <b>Testes pontuais</b> &nbsp;[só leitura]<br>
+  <div style="margin-top:8px">
+    <a class="btn blue" href="/good-mm-diag/raw?url=${enc(URL_LOTES)}${ks}">Interna: listar lotes (sessão)</a>
     <a class="btn blue" href="/good-mm-diag/raw?url=${enc(URL_PDF_288348)}${ks}">Interna: baixar PDF do lote 288348</a>
   </div>
   <div style="margin-top:8px">
@@ -193,12 +287,42 @@ function routes(/* readBody */) {
     if (p === '/good-mm-diag' || p === '/good-mm-diag/') { html(res, 200, paginaHtml()); return true; }
 
     if (p === '/good-mm-diag/health') {
-      json(res, 200, { ok: true, modulo: 'good-mm-diag', versao: VERSAO, base: MM_BASE + MM_VERSAO,
+      json(res, 200, { ok: true, modulo: 'good-mm-diag', versao: VERSAO, base: MM_BASE + MM_VERSAO, seller: SELLER,
         tokenConfigurado: !!process.env.GOOD_MM_TOKEN, chaveExigida: !!process.env.GOOD_MM_DIAG_KEY, ts: Date.now() });
       return true;
     }
 
     if (!chaveOk(urlObj)) { json(res, 401, { erro: 'chave inválida ou ausente (?k=)' }); return true; }
+
+    // ★★ VARREDURA sistemática (todas GET, read-only)
+    if (p === '/good-mm-diag/varredura') {
+      const batch = (urlObj.searchParams.get('batch') || TESTE_BATCH).trim();
+      const sro = (urlObj.searchParams.get('sro') || TESTE_SRO).trim();
+      const pedidoMM = (urlObj.searchParams.get('pedido') || TESTE_PEDIDO).trim();
+      const bateria = montarBateria({ batch, sro, pedidoMM });
+      const linhas = [];
+      for (const item of bateria) {
+        const r = await reqRaw('GET', item.url);
+        const v = veredito(r);
+        const mostrarCorpo = (v.tag === 'json' || v.tag === 'lista' || v.tag === 'false');
+        linhas.push({
+          grupo: item.grupo, alvo: item.alvo, url: item.url,
+          status: r.statusCode ?? null, tipo: r.contentType || null, bytes: r.length ?? null,
+          veredito: v.txt, promissor: v.prom,
+          corpo: mostrarCorpo ? (r.json ?? (r.text ? r.text.slice(0, 400) : null)) : null
+        });
+        await sleep(350);
+      }
+      const promissores = linhas.filter(l => l.promissor);
+      json(res, 200, {
+        varredura: VERSAO,
+        parametros: { batch, sro, pedidoMM, seller: SELLER },
+        aviso: 'Tudo GET (só leitura). 405 numa rota de GERAR = ela existe e quer POST. Os "controle" devem dar ✅ (provam que token+varredura funcionam).',
+        PROMISSORES: promissores.length ? promissores : '(nenhum endpoint promissor — reforça que o gerar/listar via token talvez só venha pelo suporte)',
+        todos: linhas
+      });
+      return true;
+    }
 
     // ★ TESTE DE URL ARBITRÁRIA com TOKENMM (read-only) — só http(s)
     if (p === '/good-mm-diag/raw') {
