@@ -30,7 +30,7 @@
 
 const https = require('https');
 
-const VERSAO = 'good-mm-diag v27/06 a5';
+const VERSAO = 'good-mm-diag v27/06 a6';
 
 const MM_BASE = (process.env.GOOD_MM_BASE || 'https://marketplace.madeiramadeira.com.br').replace(/\/+$/, '');
 const MM_VERSAO = '/v1';
@@ -339,11 +339,14 @@ function routes(/* readBody */) {
       if (!/^https?:\/\//i.test(alvo)) { json(res, 400, { erro: 'url inválida' }); return true; }
       const pedidoMM = (urlObj.searchParams.get('pedido') || TESTE_PEDIDO).trim();
       const batch = (urlObj.searchParams.get('batch') || TESTE_BATCH).trim();
+      const FAKE = '999999999'; // pedido inexistente: estrutura pode ser válida, mas é IMPOSSÍVEL gerar
       const corpos = [
         { rotulo: 'vazio {}', body: {} },
-        { rotulo: 'por batch', body: { batch: Number(batch) || batch } },
-        { rotulo: 'por order_id', body: { order_id: pedidoMM } },
-        { rotulo: 'por pedido', body: { pedido: pedidoMM } }
+        { rotulo: 'painel-keys + pedidos VAZIO', body: { etiqueta_tipo: 1, lote_tipo: 1, transportadora: null, pedidos: {} } },
+        { rotulo: 'painel-keys + pedido FAKE', body: { etiqueta_tipo: 1, lote_tipo: 1, transportadora: null, pedidos: { [FAKE]: [[FAKE]] } } },
+        { rotulo: 'só pedidos FAKE (sem tipos)', body: { pedidos: { [FAKE]: [[FAKE]] } } },
+        { rotulo: 'consulta por batch', body: { batch: Number(batch) || batch } },
+        { rotulo: 'consulta por order_id', body: { order_id: pedidoMM } }
       ];
       const resultados = [];
       for (const c of corpos) {
@@ -358,7 +361,7 @@ function routes(/* readBody */) {
       }
       json(res, 200, {
         sonda_post: VERSAO, alvo,
-        seguranca: 'Nenhum corpo contém pedidos:{...}; logo NÃO há como gerar etiqueta aqui. No máximo: erro de validação (revela os campos) ou dados de consulta.',
+        seguranca: 'Os corpos têm pedidos VAZIO ou um pedido FAKE inexistente (999999999). Mesmo se /api/v1/lote for o GERAR, é impossível criar etiqueta sem um pedido real. No máximo: erro de validação (revela o formato) ou dados de consulta.',
         objetivo: 'Descobrir se POST /api/v1/lote é GERAR (e quais campos exige) ou CONSULTA (e devolve o lote/batch/file).',
         resultados
       });
