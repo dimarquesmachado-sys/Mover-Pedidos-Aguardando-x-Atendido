@@ -94,7 +94,20 @@ async function etiquetaPdf(blingId, dir) {
   let zpl = null;
   if (dir) { try { zpl = fs.readFileSync(path.join(dir, `etiqueta.${ETIQ_FORMATO.toLowerCase()}`), 'utf8'); } catch (e) {} }
   if (!zpl) { try { zpl = await baixarEtiqueta(blingId); } catch (e) {} }
-  if (zpl && zpl.indexOf('^XA') >= 0) return await zplParaPdf(zpl);
+  if (zpl && zpl.indexOf('^XA') >= 0) { const p = await zplParaPdf(zpl); if (p) return p; }
+  // 3) MADEIRA MADEIRA: não tem etiqueta no Bling. Lê o snapshot (pedido.json), acha o
+  //    batch no mapa (sincronizado pela extensão) e baixa o PDF direto do MM com o token.
+  try {
+    const snap = dir ? readJson(path.join(dir, 'pedido.json'), null) : null;
+    if (snap && snap.marketplace === 'madeira') {
+      const mm = require('../good-mm-etiquetas');
+      const chaves = [snap.numero_loja, snap.nf && snap.nf.numero].filter(Boolean);
+      for (const c of chaves) {
+        const reg = mm.acharLote(c);
+        if (reg && reg.batch) { const pdf = await mm.pdfPorBatch(reg.batch); if (pdf) return pdf; }
+      }
+    }
+  } catch (e) {}
   return null;
 }
 
