@@ -30,7 +30,7 @@
 
 const https = require('https');
 
-const VERSAO = 'good-mm-diag v27/06 a4';
+const VERSAO = 'good-mm-diag v27/06 a5';
 
 const MM_BASE = (process.env.GOOD_MM_BASE || 'https://marketplace.madeiramadeira.com.br').replace(/\/+$/, '');
 const MM_VERSAO = '/v1';
@@ -190,7 +190,9 @@ function veredito(r) {
   const j = r.json;
   const statusFalse = j && (j.status === false || j.success === false);
   if (sc === 405) return { txt: '🎯 405 — ROTA EXISTE, espera POST (provável GERAR!)', prom: true, tag: '405' };
-  if (statusFalse) return { txt: '❌ status:false — "' + ((j && j.message) || 'sem msg') + '"', prom: false, tag: 'false' };
+  const msg = (j && j.message) || '';
+  if (/method is not supported|supported methods/i.test(msg)) return { txt: '🎯 ROTA EXISTE — só aceita POST: "' + msg + '"', prom: true, tag: '405' };
+  if (statusFalse) return { txt: '❌ status:false — "' + (msg || 'sem msg') + '"', prom: false, tag: 'false' };
   if (sc === 401 || sc === 403) return { txt: '🔒 ' + sc + ' — token recusado (precisa sessão)', prom: false, tag: 'auth' };
   if (sc === 404) return { txt: '— 404 (rota não existe)', prom: false, tag: '404' };
   if (sc >= 200 && sc < 300) {
@@ -237,6 +239,10 @@ function paginaHtml() {
   <div style="margin-top:8px">
     <a class="btn green" href="/good-mm-diag/varredura${ks1}">▶ Rodar varredura</a>
     <span style="font-size:12px;color:#666">usa o pedido-teste 9768374 / lote 288348 / SRO AP115902313BR</span>
+  </div>
+  <div style="margin-top:8px">
+    <a class="btn blue" href="/good-mm-diag/sonda-post${ks1}">▶ Sonda POST /api/v1/lote (segura)</a>
+    <span style="font-size:12px;color:#666">descobre o schema do POST sem gerar nada</span>
   </div>
 </div>
 
@@ -320,6 +326,41 @@ function routes(/* readBody */) {
         aviso: 'Tudo GET (só leitura). 405 numa rota de GERAR = ela existe e quer POST. Os "controle" devem dar ✅ (provam que token+varredura funcionam).',
         PROMISSORES: promissores.length ? promissores : '(nenhum endpoint promissor — reforça que o gerar/listar via token talvez só venha pelo suporte)',
         todos: linhas
+      });
+      return true;
+    }
+
+    // ★ SONDA POST (segura) — descobre o que é o POST /api/v1/lote.
+    // IMPORTANTE: nenhum corpo aqui contém "pedidos:{...}", então o endpoint de
+    // GERAR NÃO consegue criar etiqueta — ele só pode devolver erro de validação
+    // (que revela os campos exigidos) ou, se for rota de CONSULTA, os dados do lote.
+    if (p === '/good-mm-diag/sonda-post') {
+      const alvo = (urlObj.searchParams.get('url') || (ENVIOS + '/api/v1/lote')).trim();
+      if (!/^https?:\/\//i.test(alvo)) { json(res, 400, { erro: 'url inválida' }); return true; }
+      const pedidoMM = (urlObj.searchParams.get('pedido') || TESTE_PEDIDO).trim();
+      const batch = (urlObj.searchParams.get('batch') || TESTE_BATCH).trim();
+      const corpos = [
+        { rotulo: 'vazio {}', body: {} },
+        { rotulo: 'por batch', body: { batch: Number(batch) || batch } },
+        { rotulo: 'por order_id', body: { order_id: pedidoMM } },
+        { rotulo: 'por pedido', body: { pedido: pedidoMM } }
+      ];
+      const resultados = [];
+      for (const c of corpos) {
+        const r = await reqRaw('POST', alvo, { body: c.body });
+        resultados.push({
+          corpo_enviado: c.rotulo, body: c.body,
+          status: r.statusCode ?? null, tipo: r.contentType || null, bytes: r.length ?? null,
+          parece_PDF: r.parece_PDF ?? null,
+          resposta: r.json ?? (r.text ? r.text.slice(0, 700) : null), erro: r.erro || null
+        });
+        await sleep(350);
+      }
+      json(res, 200, {
+        sonda_post: VERSAO, alvo,
+        seguranca: 'Nenhum corpo contém pedidos:{...}; logo NÃO há como gerar etiqueta aqui. No máximo: erro de validação (revela os campos) ou dados de consulta.',
+        objetivo: 'Descobrir se POST /api/v1/lote é GERAR (e quais campos exige) ou CONSULTA (e devolve o lote/batch/file).',
+        resultados
       });
       return true;
     }
