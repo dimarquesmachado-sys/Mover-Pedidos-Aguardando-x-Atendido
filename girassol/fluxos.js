@@ -79,6 +79,15 @@ async function _fluxo1(token) {
     const rastreio = getCodigoRastreio(pDetalhe);
     const isFlex = String(pDetalhe?.transporte?.volumes?.[0]?.servico || '').toUpperCase().includes('FLEX');
     console.log(`[F1] Pedido ${p.id} | loja=${p.loja?.id} | rastreio="${rastreio}" | flex=${isFlex}`);
+
+    // PROTEÇÃO: só move se ainda estiver em ATENDIDO no detalhe atualizado
+    // Defende contra pedidos que mudaram de situação entre a listagem e o detalhe
+    if (pDetalhe?.situacao?.id !== SITUACAO_ATENDIDO) {
+      console.log(`[F1] Pedido ${p.id} já não está em ATENDIDO (situação atual: ${pDetalhe?.situacao?.id}) — pulando`);
+      ignorados++;
+      continue;
+    }
+
     if (isFlex) { ignorados++; continue; }
     if (rastreio !== '') { ignorados++; continue; }
     // Sem rastreio no Bling → confirma no ML
@@ -128,7 +137,15 @@ async function _fluxo2(token) {
     const rastreio = getCodigoRastreio(pDetalhe);
     const isFlex = String(pDetalhe?.transporte?.volumes?.[0]?.servico || '').toUpperCase().includes('FLEX');
     console.log(`[F2] Pedido ${p.id} | loja=${p.loja?.id} | rastreio="${rastreio}" | flex=${isFlex}`);
-    if (p.situacao?.id !== SITUACAO_AGUARDANDO) continue;
+
+    // FIX BUG (27/06/2026): usar pDetalhe (atualizado) em vez de p (lista inicial, dado velho)
+    // Antes era: if (p.situacao?.id !== SITUACAO_AGUARDANDO) continue;
+    // O dado da lista pode ter minutos de defasagem, e o pedido pode ter sido CANCELADO no Bling
+    if (pDetalhe?.situacao?.id !== SITUACAO_AGUARDANDO) {
+      console.log(`[F2] Pedido ${p.id} já não está em AGUARDANDO (situação atual: ${pDetalhe?.situacao?.id}) — pulando`);
+      continue;
+    }
+
     let deveAtender = false;
     if (isFlex) {
       deveAtender = true;
@@ -143,6 +160,21 @@ async function _fluxo2(token) {
       }
     }
     if (!deveAtender) continue;
+
+    // PROTEÇÃO EXTRA: re-checa situação IMEDIATAMENTE antes do PATCH
+    // Defende contra mudanças que aconteceram durante o temEtiquetaML (que demora 1-2s)
+    try {
+      const pFresh = await getPedidoDetalhe(token, p.id);
+      if (pFresh?.situacao?.id !== SITUACAO_AGUARDANDO) {
+        console.log(`[F2] ⚠️ Pedido ${p.id} mudou de situação durante processamento (agora ${pFresh?.situacao?.id}) — ABORTANDO move por segurança`);
+        continue;
+      }
+    } catch (e) {
+      if (e.code === 401 || e.message === 'TOKEN_EXPIRADO') throw e;
+      console.error(`[F2] Erro na re-checagem ${p.id}:`, e.message, '— por segurança NÃO vou mover');
+      continue;
+    }
+
     try {
       await alterarSituacao(token, p.id, SITUACAO_ATENDIDO);
       movidos++;
