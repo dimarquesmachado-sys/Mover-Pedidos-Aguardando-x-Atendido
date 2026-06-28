@@ -351,7 +351,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b9';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b10';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#b3b9c4'}, magalu:{n:'Magalu',c:'#0086ff'},
@@ -999,8 +999,10 @@ function abrirPopupLocalizacao(modo){
   const md = $('modal');
   md.innerHTML =
     '<div class="mbox">'+
-      '<div class="mtit">📍 Falta localização</div>'+
-      '<div class="msub">'+faltam.length+' produto(s) sem local cadastrado. Você está pegando agora — anote onde está na prateleira (mín. 2 caracteres). Fica salvo p/ a próxima separação já vir com o local.</div>'+
+      '<div class="mtit">📍 Preencha a localização!</div>'+
+      '<div class="msub">'+(faltam.length===1
+        ? 'Este produto ainda não tem localização cadastrada. Informe em qual prateleira/posição ele ficará armazenado (mín. 2 caracteres). Assim, nas próximas separações o sistema já mostrará o local automaticamente.'
+        : 'Estes '+faltam.length+' produtos ainda não têm localização cadastrada. Informe em qual prateleira/posição cada um ficará armazenado (mín. 2 caracteres). Assim, nas próximas separações o sistema já mostrará o local automaticamente.')+'</div>'+
       '<div class="locforce">'+
         faltam.map((u,i)=>
           '<div class="lfrow">'+
