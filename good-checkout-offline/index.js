@@ -2,7 +2,7 @@
 
 // ════════════════════════════════════════════════════════════════════════
 //  GOOD · CHECKOUT OFFLINE — FASE 1 (poller) + FASE 2 (bipagem)   (Mover-Pedidos)
-//  good-checkout-offline v28/06 b4   (a versão real é a const VERSAO abaixo)
+//  good-checkout-offline v28/06 b5   (a versão real é a const VERSAO abaixo)
 // ════════════════════════════════════════════════════════════════════════
 //  Módulo do orquestrador unificado (HTTP-native, sem Express).
 //  Reaproveita o token Bling da GOOD via ../good/tokenManager.
@@ -52,6 +52,13 @@ const { BLING_BASE, CACHE_DIR, SIT_ATENDIDO, SIT_VERIFICADO, SYNC_ON, JANELA_DIA
   salvarSkuEan, lerIndiceEan, lerReservas, lerOperadores, lerAdmins, ehAdmin, blingGet, blingWrite, moverSituacao } = base;
 const { parseNF, acharNFporRange, nfDoPedido, carregarNFs, acharNFnaLista, baixarDanfe, parseXmlNF, baixarXmlNF, dadosNFSimp } = require('./nf');
 const { baixarEtiqueta, baixarEtiquetaPDF, labelaryPost, zplParaPdf, etiquetaPdf } = require('./etiquetas');
+// ─── Módulos extraídos (Lote 1: comum/produtos/arquivo/separacao/email-docs) ────────
+const { servicoDoPedido, ehFlex, cronDeveriaTerRodado, kitIncompletoNoCache, zplEscape, bannerVolumeZpl } = require('./comum');
+const { getPossiveisGtins, primeiroEan, primeiraImagem, localizacaoDeProduto, localizacaoPorSku, salvarNoIndiceEan, eanDoItem, produtoDetalhe, infoProduto, limparProdCache } = require('./produtos');
+const { purgar, arquivarFinalizado, purgarArquivo, purgarConferidos } = require('./arquivo');
+const { montarSeparacao, montarSeparacaoPorPedido } = require('./separacao');
+const { enviarEmailDocs } = require('./email-docs');
+const { listarAtendidos, detalhePedido, sincronizarConferidos, indexarCatalogoCompleto, cachearPedido, rodarCiclo, getUltimoResumo, getUltimoSync, getIdxStatus } = require('./ciclo');
 
 // ─── Config (env prefixo GOODBKP_, defaults sãos) ───────────────────────
 // presença entre PCs: quem está separando cada pedido. Limpa reservas vencidas a cada leitura.
@@ -60,143 +67,26 @@ const { baixarEtiqueta, baixarEtiquetaPDF, labelaryPost, zplParaPdf, etiquetaPdf
 
 // FLEX = entrega por motoboy (etiqueta sempre disponível). Mesma lógica do checkout-expedição.
 const FLEX_KEYWORDS = ['mercado envios flex', 'entrega local', 'vapt', 'shopee entrega direta'];
-function servicoDoPedido(det) {
-  if (!det) return '';
-  const t = det.transporte || {};
-  const vol = (t.volumes && t.volumes[0]) || {};
-  return String(vol.servico || t.servico || '').trim();
-}
-function ehFlex(servico) {
-  const s = String(servico || '').toLowerCase();
-  return FLEX_KEYWORDS.some(k => s.includes(k));
-}
 
 // ─── helpers genéricos ──────────────────────────────────────────────────
 
 // EAN robusto — varre todos os nomes de campo que o Bling usa pro GTIN
-function getPossiveisGtins(obj) {
-  if (!obj) return [];
-  const c = [
-    obj.gtin, obj.ean, obj.codigoBarras, obj.gtinEan, obj.gtinTributario,
-    obj.codigo_barras, obj.codigoDeBarras, obj.codBarras, obj.codigobarras,
-    obj.gtinEmbalagem, obj.gtin_embalagem, obj.codigoBarrasTributario,
-    obj.eanTributario, obj.gtinEanTributario,
-    obj.tributavel && obj.tributavel.gtin, obj.tributavel && obj.tributavel.ean,
-    obj.tributacao && obj.tributacao.gtin, obj.tributacao && obj.tributacao.ean,
-    obj.tributario && obj.tributario.gtin, obj.tributario && obj.tributario.ean
-  ];
-  if (obj.tributacao) {
-    Object.values(obj.tributacao).forEach(v => { if (typeof v === 'string' && v.length >= 8) c.push(v); });
-  }
-  return c.filter(Boolean).map(String);
-}
-function primeiroEan(produto) {
-  const g = getPossiveisGtins(produto);
-  return g.find(x => /^\d{8,14}$/.test(x)) || g[0] || null;
-}
 
 // 1ª imagem do produto (lista traz imagemURL; detalhe traz midia.imagens.externas[].link)
-function primeiraImagem(prod) {
-  if (!prod) return null;
-  if (prod.imagemURL) return prod.imagemURL;
-  const ext = prod.midia && prod.midia.imagens && prod.midia.imagens.externas;
-  if (ext && ext[0] && ext[0].link) return ext[0].link;
-  const url = prod.midia && prod.midia.imagens && prod.midia.imagens.imagensURL;
-  if (url && url[0] && (url[0].link || url[0])) return url[0].link || url[0];
-  return null;
-}
 
 // localização (depósito/prateleira) do produto — fica em estoque.localizacao no /produtos/{id}
-function localizacaoDeProduto(prod) {
-  if (!prod) return '';
-  const e = prod.estoque || {};
-  return String(e.localizacao || prod.localizacao || '').trim();
-}
 
 // busca a localização de um SKU (p/ pedidos antigos sem cache): lista por código → se não vier, detalhe
-async function localizacaoPorSku(sku) {
-  try {
-    const { ok, data } = await blingGet(`/produtos?codigo=${encodeURIComponent(sku)}&limite=1`);
-    const item = ok && data && data.data && data.data[0];
-    if (!item) return '';
-    let loc = localizacaoDeProduto(item);
-    if (!loc && item.id) { const det = await produtoDetalhe(item.id); loc = localizacaoDeProduto(det); }
-    return loc || '';
-  } catch (e) { return ''; }
-}
 
 // ─── estado do módulo ───────────────────────────────────────────────────
-let rodando = false;
-let ultimoResumo = { rodouEm: null, total: 0, comEtiqueta: 0, semEtiqueta: 0, novos: 0, erros: 0 };
-let ultimoSync = { em: null, pendentes: 0, ok: 0, falhas: 0 };
 
 // o cron roda só dentro de uma faixa de horas (ex: 6-23). Isso evita o /saude dar alarme falso de madrugada.
 // lê a faixa do próprio CRON_EXPR e usa a hora local do servidor (mesma base do cron) — robusto a fuso.
-function cronDeveriaTerRodado() {
-  try {
-    const horas = (CRON_EXPR.trim().split(/\s+/)[1] || '*');
-    if (horas === '*') return true;
-    const m = horas.match(/^(\d+)-(\d+)$/);
-    if (!m) return true;                                 // formato inesperado → não bloqueia o check
-    const ini = Number(m[1]), fim = Number(m[2]);
-    const now = new Date(), h = now.getHours();
-    if (h < ini || h > fim) return false;                // fora da janela → cron não roda
-    if (h === ini && now.getMinutes() < 20) return false; // 1º slot do dia — dá folga até ini:20
-    return true;
-  } catch (e) { return true; }
-}
 
 
 // ─── índice de EAN (cresce sozinho: todo produto resolvido entra aqui) ───
-function salvarNoIndiceEan(prod) {
-  try {
-    if (!prod || !prod.id) return;
-    const eans = getPossiveisGtins(prod).map(e => String(e).replace(/\D/g, '')).filter(e => e.length >= 8);
-    if (!eans.length) return;
-    const idx = lerIndiceEan();
-    let mudou = false;
-    for (const e of eans) {
-      const novo = { sku: prod.codigo || '', nome: prod.nome || '', id: prod.id };
-      if (JSON.stringify(idx[e]) !== JSON.stringify(novo)) { idx[e] = novo; mudou = true; }
-    }
-    if (mudou) writeJson(EAN_INDEX_FILE, idx);
-  } catch (e) {}
-}
 
 // ─── indexação total do catálogo (roda 1x; deixa todo EAN achável na hora) ───
-let idxStatus = { rodando: false, feitos: 0, eans: 0, em: null, fim: null, erro: null };
-async function indexarCatalogoCompleto() {
-  if (idxStatus.rodando) return;
-  idxStatus = { rodando: true, feitos: 0, eans: 0, em: new Date().toISOString(), fim: null, erro: null };
-  const novo = lerIndiceEan();                       // parte do que já existe
-  const PAUSA = Number(process.env.GOODBKP_PAUSA_MS || 700);
-  try {
-    let pagina = 1;
-    while (pagina <= 500) {                           // trava de segurança
-      const r = await blingGet(`/produtos?pagina=${pagina}&limite=100`);
-      const itens = (r.ok && r.data && r.data.data) || [];
-      if (!itens.length) break;
-      for (const it of itens) {
-        idxStatus.feitos++;
-        if (!it.id) continue;
-        let eans = getPossiveisGtins(it).map(e => String(e).replace(/\D/g, '')).filter(e => e.length >= 8);
-        let nome = it.nome, sku = it.codigo;
-        if (!eans.length) {                            // lista não trouxe GTIN → busca no detalhe
-          const det = await produtoDetalhe(it.id);
-          await sleep(PAUSA);
-          if (det) { eans = getPossiveisGtins(det).map(e => String(e).replace(/\D/g, '')).filter(e => e.length >= 8); nome = det.nome || nome; sku = det.codigo || sku; }
-        }
-        for (const e of eans) { if (!novo[e]) idxStatus.eans++; novo[e] = { sku: sku || '', nome: nome || '', id: it.id }; }
-      }
-      writeJson(EAN_INDEX_FILE, novo);                 // salva a cada página (resiliente a queda)
-      await sleep(PAUSA);
-      pagina++;
-    }
-  } catch (e) { idxStatus.erro = String(e && e.message || e); }
-  writeJson(EAN_INDEX_FILE, novo);
-  idxStatus.rodando = false;
-  idxStatus.fim = new Date().toISOString();
-}
 
 // GET autenticado no Bling GOOD (token via tokenManager + retry 429)
 
@@ -205,52 +95,8 @@ async function indexarCatalogoCompleto() {
 // muda a situação de um pedido de venda (precisa do escopo "Gerenciar situações")
 
 // FASE 3: empurra os pedidos conferidos offline (sincronizado:false) p/ VERIFICADO no Bling
-async function sincronizarConferidos() {
-  const conf = readJson(CONFERIDOS_FILE, {});
-  const ids = Object.keys(conf).filter(id => conf[id] && !conf[id].sincronizado);
-  let ok = 0, falhas = 0;
-  for (const id of ids) {
-    const r = await moverSituacao(id, SIT_VERIFICADO);
-    if (r.ok) {
-      conf[id].sincronizado = true;
-      conf[id].sincronizado_em = new Date().toISOString();
-      delete conf[id].sync_erro;
-      ok++;
-      console.log(`[GOODBKP] sync ${id} → ${SIT_VERIFICADO} OK`);
-    } else {
-      conf[id].sync_erro = String(r.status || 'err');
-      falhas++;
-      console.log(`[GOODBKP] sync ${id} FALHOU (${r.status}) ${r.raw || ''}`);
-    }
-    await sleep(PAUSA_MS);
-  }
-  if (ids.length) writeJson(CONFERIDOS_FILE, conf);
-  ultimoSync = { em: new Date().toISOString(), pendentes: ids.length, ok, falhas };
-  return ultimoSync;
-}
 
-async function listarAtendidos() {
-  const hoje = new Date();
-  const ini  = new Date(hoje); ini.setDate(ini.getDate() - JANELA_DIAS);
-  const qs = `idSituacao=${SIT_ATENDIDO}&dataEmissaoInicial=${dataISO(ini)}&dataEmissaoFinal=${dataISO(hoje)}`;
-  const out = [];
-  let fetchOk = false;
-  for (let pagina = 1; pagina <= 50; pagina++) {
-    const { ok, data } = await blingGet(`/pedidos/vendas?${qs}&pagina=${pagina}&limite=100`);
-    if (pagina === 1) fetchOk = ok;        // marca se o Bling respondeu (p/ não limpar cache offline)
-    const lista = (data && data.data) || [];
-    if (!ok || lista.length === 0) break;
-    out.push(...lista);
-    if (lista.length < 100) break;
-    await sleep(PAUSA_MS);
-  }
-  return { ok: fetchOk, pedidos: out };
-}
 
-async function detalhePedido(id) {
-  const { data } = await blingGet(`/pedidos/vendas/${id}`);
-  return data && data.data;
-}
 
 
 // método mandado pelo Diego: pagina /nfe (sem filtro) e acha a NF com id
@@ -261,50 +107,10 @@ async function detalhePedido(id) {
 //    menor id de pedido do lote, e casa todos em memória. /nfe vem desc por id.
 
 // EAN: produto por id → produto por SKU. Cacheia por SKU.
-async function eanDoItem(produtoId, sku, cacheEan) {
-  if (sku && Object.prototype.hasOwnProperty.call(cacheEan, sku)) return cacheEan[sku];
-  let ean = null;
-  try {
-    if (produtoId) {
-      const { data } = await blingGet(`/produtos/${produtoId}`);
-      ean = primeiroEan(data && data.data);
-    }
-    if (!ean && sku) {
-      await sleep(PAUSA_MS);
-      const { data } = await blingGet(`/produtos?codigo=${encodeURIComponent(sku)}&limite=1`);
-      ean = primeiroEan(data && data.data && data.data[0]);
-    }
-  } catch (e) { /* sem scope Produtos → ean=null */ }
-  if (sku) cacheEan[sku] = ean;
-  return ean;
-}
 
 // detalhe completo do produto (/produtos/{id}) com cache por ciclo
-let _prodCache = new Map();
-async function produtoDetalhe(id) {
-  if (!id) return null;
-  if (_prodCache.has(id)) return _prodCache.get(id);
-  let prod = null;
-  for (let tent = 0; tent < 2 && !prod; tent++) {       // 2 tentativas: drible de rate-limit transitório
-    if (tent) await sleep(PAUSA_MS * 3);
-    try {
-      const r = await blingGet(`/produtos/${id}`);
-      prod = (r.ok && r.data && r.data.data) ? r.data.data : null;
-    } catch (e) {}
-  }
-  if (prod) _prodCache.set(id, prod);                   // só cacheia SUCESSO — nunca fixa uma falha (vazio)
-  return prod;
-}
 
 // {sku, ean, descricao, img} de um produto por id (usa cacheEan por SKU)
-async function infoProduto(id, cacheEan) {
-  const prod = await produtoDetalhe(id);
-  await sleep(PAUSA_MS);
-  const sku = (prod && prod.codigo) || '';
-  let ean = prod ? primeiroEan(prod) : null;
-  if (sku) { if (ean) cacheEan[sku] = ean; else if (cacheEan[sku]) ean = cacheEan[sku]; }
-  return { sku, ean, descricao: (prod && prod.nome) || '', img: primeiraImagem(prod), loc: localizacaoDeProduto(prod) };
-}
 
 // baixa a etiqueta de envio. O Bling devolve um ZIP (com "Etiqueta de envio.txt"
 // dentro = o ZPL), mesmo pedindo formato=ZPL. Então: baixa binário → descompacta.
@@ -323,571 +129,26 @@ async function infoProduto(id, cacheEan) {
 // etiqueta em PDF. 1º tenta o PDF nativo do Bling (vale p/ QUALQUER marketplace — ML, Shopee, Amazon...;
 // precisa do Bling no ar). 2º fallback offline: ZPL cacheado em disco → Labelary (não depende do Bling).
 
-async function cachearPedido(ped, cacheEan, nfs, kitCache, locC) {
-  const id  = ped.id;
-  const dir = path.join(CACHE_DIR, String(id));
-  ensureDir(dir);
 
-  const lojaId = String((ped.loja && ped.loja.id) || '');
-  const mkt = LOJA_MKT[lojaId] || 'outro';   // marketplace (usado p/ etiqueta MM e snapshot)
-
-  const itens = [];
-  let temKit = false;
-  for (const it of (ped.itens || [])) {
-    const itemQty = Number(it.quantidade || 0);
-    const prodId  = it.produto && it.produto.id;
-    const prod    = await produtoDetalhe(prodId); await sleep(PAUSA_MS);
-    const sku     = it.codigo || (prod && prod.codigo) || (it.produto && it.produto.codigo) || '';
-    const eanItem = prod ? primeiroEan(prod) : await eanDoItem(prodId, sku, cacheEan);
-    if (sku && eanItem) cacheEan[sku] = eanItem;
-    if (sku && locC) locC[sku] = localizacaoDeProduto(prod);     // localização do produto principal
-    const descr   = it.descricao || (prod && prod.nome) || '';
-    const imgItem = primeiraImagem(prod);
-
-    const comps = (prod && prod.estrutura && Array.isArray(prod.estrutura.componentes))
-      ? prod.estrutura.componentes : [];
-
-    if (comps.length) {
-      // KIT / composição → explode nos componentes (com cache por produto-pai)
-      temKit = true;
-      let base = kitCache && kitCache[prodId];
-      if (base && base.some(c => !c.sku)) base = null;   // cache tinha componente vazio (falha anterior) → resolve de novo
-      if (!base) {
-        base = [];
-        let incompleto = false;
-        for (const c of comps) {
-          const info = await infoProduto(c.produto && c.produto.id, cacheEan);
-          if (!info.sku) incompleto = true;
-          base.push({ sku: info.sku, ean: info.ean, descricao: info.descricao, img: info.img, loc: info.loc, qtd: Number(c.quantidade || 1) });
-        }
-        if (kitCache && !incompleto) kitCache[prodId] = base;   // SÓ grava se TODOS resolveram (não fixa falha transitória)
-      }
-      if (locC) base.forEach(c => { if (c.sku) locC[c.sku] = c.loc || locC[c.sku] || ''; }); // localização dos componentes
-      // qtd final = qtd do componente no kit × qtd do kit no pedido
-      const componentes = base.map(c => ({ sku: c.sku, ean: c.ean, descricao: c.descricao, img: c.img, qtd: c.qtd * (itemQty || 1) }));
-      itens.push({ sku, ean: eanItem, descricao: descr, img: imgItem, qtd: itemQty, tipo: 'kit', componentes });
-    } else {
-      const tipo = (prod && prod.variacao && prod.variacao.produtoPai) ? 'variacao' : 'simples';
-      itens.push({ sku, ean: eanItem, descricao: descr, img: imgItem, qtd: itemQty, tipo });
-    }
-  }
-
-  let nf = acharNFnaLista(id, nfs || []);
-  if (!nf || !nf.id) { nf = await nfDoPedido(id); await sleep(PAUSA_MS); }   // fora do range do lote → acha pelo link direto pedido→NF
-
-  const _etqPath = path.join(dir, `etiqueta.${ETIQ_FORMATO.toLowerCase()}`);
-  const _etqPdfPath = path.join(dir, 'etiqueta.pdf');
-  let temEtiqueta = fs.existsSync(_etqPath);   // etiqueta ZPL imutável → se já tem, não re-baixa (re-cache leve)
-  let etqEhPdf = false;
-  if (temEtiqueta) {
-    try { if (fs.readFileSync(_etqPath, 'utf8').indexOf('^XA') < 0) etqEhPdf = true; } catch (e) {}   // arquivo salvo não é ZPL → etiqueta PDF
-  } else if (fs.existsSync(_etqPdfPath) && mkt !== 'madeira') {
-    temEtiqueta = true; etqEhPdf = true;          // já tem só o PDF cacheado (Amazon etc) — Madeira tem bloco próprio abaixo
-  } else {
-    const conteudoEtiqueta = await baixarEtiqueta(id); await sleep(PAUSA_MS);
-    if (conteudoEtiqueta && conteudoEtiqueta.indexOf('^XA') >= 0) {       // ZPL de verdade (ML, Shopee...)
-      fs.writeFileSync(_etqPath, conteudoEtiqueta); temEtiqueta = true;
-    } else if (conteudoEtiqueta || mkt === 'amazon') {                    // veio não-ZPL, OU é Amazon (cujo link ZPL vem nulo) → etiqueta é PDF
-      // captura o PDF nativo do Bling AGORA (ele ainda serve); depois do despacho ele para de servir e o email ficaria sem etiqueta.
-      // o "|| mkt==='amazon'" pega o caso da Amazon (sem ZPL); ML/Shopee com falha transitória NÃO caem aqui (ficam p/ o próximo ciclo).
-      try { const pdf = await baixarEtiquetaPDF(id); await sleep(PAUSA_MS); if (pdf && pdf.length) { fs.writeFileSync(_etqPdfPath, pdf); temEtiqueta = true; etqEhPdf = true; } } catch (e) {}
-    }
-  }
-  // MADEIRA MADEIRA não tem etiqueta no Bling. Se a etiqueta já está no mapa MM
-  // (gerada por nós e sincronizada pela extensão), conta o pedido como PRONTO.
-  let etiquetaMM = false, volumesMM = 1;
-  if (!temEtiqueta && mkt === 'madeira') {
-    const _mmPdf = path.join(dir, 'etiqueta.pdf');
-    try {
-      let bufMM = null;
-      if (fs.existsSync(_mmPdf)) { bufMM = fs.readFileSync(_mmPdf); }   // já cacheado → reaproveita (não re-baixa)
-      else {
-        const mmEtq = require('../good-mm-etiquetas');
-        let regMM = null;
-        for (const c of [ped.numeroLoja, nf && nf.numero].filter(Boolean)) { regMM = mmEtq.acharLote(c); if (regMM) break; }
-        if (regMM && regMM.batch) {
-          bufMM = await mmEtq.pdfPorBatch(regMM.batch);                 // 1 pedido = TODAS as etiquetas num PDF só
-          if (bufMM && bufMM.length) { try { fs.writeFileSync(_mmPdf, bufMM); } catch (e) {} }   // cacheia p/ impressão offline rápida
-        }
-      }
-      if (bufMM && bufMM.length) {
-        etiquetaMM = true;
-        try { const { PDFDocument } = require('pdf-lib'); volumesMM = (await PDFDocument.load(bufMM)).getPageCount() || 1; } catch (e) {}   // volumes = nº de etiquetas (1 a 5)
-      }
-    } catch (e) {}
-  }
-
-  const _servico = servicoDoPedido(ped);
-  const snapshot = {
-    bling_id: id,
-    numero: ped.numero || null,
-    numero_loja: ped.numeroLoja || null,
-    loja_id: lojaId || null,
-    marketplace: mkt,
-    servico: _servico,
-    flex: ehFlex(_servico),
-    situacao_id: (ped.situacao && ped.situacao.id) || SIT_ATENDIDO,
-    cliente: (ped.contato && ped.contato.nome) || '',
-    nf,
-    itens,
-    tem_nf: !!nf,
-    tem_danfe: fs.existsSync(path.join(dir, 'danfe.pdf')),   // por existência do arquivo → sobrevive a re-cache
-    tem_kit: temKit,
-    tem_etiqueta: temEtiqueta || etiquetaMM,
-    etiqueta_formato: (etiquetaMM || etqEhPdf) ? 'PDF' : (temEtiqueta ? ETIQ_FORMATO : null),
-    etiqueta_mm: etiquetaMM,
-    etiqueta_pdf: !!(etiquetaMM || etqEhPdf),   // etiqueta é PDF (Madeira, Amazon...) → impressão/email usam o caminho PDF
-    volumes: etiquetaMM ? volumesMM : 1,
-    schema: SCHEMA,
-    cacheado_em: new Date().toISOString()
-  };
-  writeJson(path.join(dir, 'pedido.json'), snapshot);
-  return snapshot;
-}
-
-function purgar(man) {
-  const limite = Date.now() - RETENCAO_DIAS * 24 * 60 * 60 * 1000;
-  for (const id of Object.keys(man)) {
-    const t = Date.parse(man[id].cacheado_em || 0) || 0;
-    if (t && t < limite) {
-      try { fs.rmSync(path.join(CACHE_DIR, String(id)), { recursive: true, force: true }); } catch (e) {}
-      delete man[id];
-    }
-  }
-}
 
 // arquiva etiqueta + meta de um pedido FINALIZADO num lugar separado do cache (a etiqueta não dá p/ rebaixar depois; DANFE re-gera pelo nf.id)
-function arquivarFinalizado(id) {
-  try {
-    const src = path.join(CACHE_DIR, String(id));
-    const dst = path.join(ARQUIVO_DIR, String(id));
-    ensureDir(dst);
-    const fmt = ETIQ_FORMATO.toLowerCase();
-    const etq = path.join(src, `etiqueta.${fmt}`);
-    if (fs.existsSync(etq)) fs.copyFileSync(etq, path.join(dst, `etiqueta.${fmt}`));
-    const etqPdf = path.join(src, 'etiqueta.pdf');   // etiqueta PDF (Amazon/Madeira) — capturada cedo; email usa mesmo após despacho
-    if (fs.existsSync(etqPdf)) fs.copyFileSync(etqPdf, path.join(dst, 'etiqueta.pdf'));
-    const ped = path.join(src, 'pedido.json');
-    if (fs.existsSync(ped)) fs.copyFileSync(ped, path.join(dst, 'pedido.json'));
-    const nfs = path.join(src, 'nf-simp.json');   // dados do DANFE simplificado (se já gerado) → email usa sem re-buscar
-    if (fs.existsSync(nfs)) fs.copyFileSync(nfs, path.join(dst, 'nf-simp.json'));
-  } catch (e) { console.log('[GOODBKP] falha ao arquivar', id, e.message); }
-}
 // remove do arquivo os finalizados mais velhos que ARQUIVO_DIAS
-function purgarArquivo() {
-  try {
-    if (!fs.existsSync(ARQUIVO_DIR)) return;
-    const limite = Date.now() - ARQUIVO_DIAS * 86400000;
-    for (const d of fs.readdirSync(ARQUIVO_DIR)) {
-      const dir = path.join(ARQUIVO_DIR, d);
-      try { const st = fs.statSync(dir); if (st.isDirectory() && st.mtimeMs < limite) fs.rmSync(dir, { recursive: true, force: true }); } catch (e) {}
-    }
-  } catch (e) {}
-}
 
 // envia etiqueta + DANFE de um pedido finalizado pro estoque por email (Parte B)
-async function enviarEmailDocs(id, quem) {
-  let nodemailer;
-  try { nodemailer = require('nodemailer'); } catch (e) { return { ok: false, erro: 'nodemailer não instalado — atualize o package.json e redeploy' }; }
-  if (!EMAIL_USER || !EMAIL_PASS) return { ok: false, erro: 'email não configurado (faltam GOODBKP_EMAIL_USER / GOODBKP_EMAIL_PASS no Render)' };
-  const ped = readJson(path.join(ARQUIVO_DIR, String(id), 'pedido.json'), null);
-  if (!ped) return { ok: false, erro: 'pedido não está arquivado (só finalizados POR AQUI têm arquivo)' };
-  const anexos = [];
-  let temEtq = false, temDanfe = false;
-  const ehShopee = ped.marketplace === 'shopee';   // Shopee: a etiqueta já vem com a DANFE embaixo → não anexa DANFE separado
-  // se o snapshot não tem NF (ou veio sem id), busca fresca no Bling — reimpressão é sempre com Bling no ar (Shopee não precisa)
-  if (!ehShopee && (!ped.nf || !ped.nf.id)) {
-    try { const nf = await nfDoPedido(id); if (nf && nf.id) ped.nf = nf; } catch (e) {}
-  }
-  // 1º TENTA FUNDIR etiqueta + DANFE num PDF só (mesma fusão da impressão) — não-Shopee, com NF
-  let fundiu = false;
-  if (!ehShopee && ped.nf) {
-    try {
-      const dir = path.join(ARQUIVO_DIR, String(id));
-      const zplEtq = fs.readFileSync(path.join(dir, `etiqueta.${ETIQ_FORMATO.toLowerCase()}`), 'utf8');
-      if (/\^XA/.test(zplEtq)) {
-        let dados = readJson(path.join(dir, 'nf-simp.json'), null);
-        const nfId = ped.nf && ped.nf.id;
-        if (!dados && nfId) dados = await dadosNFSimp(nfId, ped.numero);
-        if (dados) {
-          const r = fundirEtiquetaComDanfe(zplEtq, dados);
-          if (r.modo !== 'declinou') {
-            const fundPdf = await zplParaPdf(r.zpl);
-            if (fundPdf) { anexos.push({ filename: `etiqueta-${ped.numero || id}.pdf`, content: fundPdf }); temEtq = true; temDanfe = true; fundiu = true; }
-          }
-        }
-      }
-    } catch (e) {}
-  }
-  // se NÃO fundiu → jeito antigo: etiqueta PDF + DANFE PDF separados (fallback seguro)
-  if (!fundiu) {
-    // ETIQUETA em PDF — função canônica (ML: PDF nativo do Bling; não-ML: ZPL cacheado → Labelary)
-    try {
-      const etqPdf = await etiquetaPdf(id, path.join(ARQUIVO_DIR, String(id)));
-      if (etqPdf) { anexos.push({ filename: `etiqueta-${ped.numero || id}.pdf`, content: etqPdf }); temEtq = true; }
-    } catch (e) {}
-    // DANFE SIMPLIFICADO (igual ao que imprime no checkout) — Shopee NÃO precisa (já vem embaixo da etiqueta)
-    if (!ehShopee) {
-      try {
-        let dados = readJson(path.join(ARQUIVO_DIR, String(id), 'nf-simp.json'), null);
-        const nfId = ped.nf && ped.nf.id;
-        if (!dados && nfId) dados = await dadosNFSimp(nfId, ped.numero);
-        const simpPdf = dados ? await gerarDanfeSimplificado(dados) : null;
-        if (simpPdf) { anexos.push({ filename: `danfe-simplificado-${(ped.nf && ped.nf.numero) || id}.pdf`, content: simpPdf }); temDanfe = true; }
-      } catch (e) {}
-    }
-  }
-  if (!anexos.length) return { ok: false, erro: 'sem documentos pra enviar (etiqueta nem DANFE disponíveis)' };
-  try {
-    const transporter = nodemailer.createTransport({ host: SMTP_HOST, port: SMTP_PORT, secure: SMTP_PORT === 465, auth: { user: EMAIL_USER, pass: EMAIL_PASS } });
-    const mktNome = MKT_NOME[ped.marketplace] || ped.marketplace || '—';
-    const oQueVai = fundiu
-      ? 'etiqueta + DANFE numa folha só (1 etiqueta)'
-      : (ehShopee && temEtq)
-        ? 'etiqueta de postagem (já inclui a DANFE embaixo)'
-        : [temEtq ? 'etiqueta' : null, temDanfe ? 'DANFE simplificado' : null].filter(Boolean).join(' + ');
-    const corpo = 'Reimpressão solicitada pelo Checkout Offline.\n\n'
-      + 'Pedido: ' + (ped.numero || id) + '\n'
-      + 'Cliente: ' + (ped.cliente || '—') + '\n'
-      + 'Marketplace: ' + mktNome + '\n'
-      + (ped.nf ? 'NF: ' + (ped.nf.numero || '') + '\n' : '')
-      + '\nSeguem em anexo: ' + oQueVai + ' (pra imprimir e despachar).\n\n'
-      + '(solicitado por ' + (quem || 'admin') + ' em ' + new Date().toLocaleString('pt-BR') + ')';
-    await transporter.sendMail({
-      from: EMAIL_USER,
-      to: EMAIL_DEST,
-      subject: '📦 Reimprimir pedido ' + (ped.numero || id) + (ped.cliente ? ' — ' + ped.cliente : ''),
-      text: corpo,
-      attachments: anexos
-    });
-    return { ok: true, enviado_para: EMAIL_DEST, anexos: anexos.length, etiqueta: temEtq, danfe: temDanfe };
-  } catch (e) { return { ok: false, erro: 'falha no envio SMTP: ' + e.message }; }
-}
 
 // limpa do histórico os finalizados JÁ sincronizados com +30 dias (não mexe nos pendentes de sync)
-function purgarConferidos() {
-  const conf = readJson(CONFERIDOS_FILE, {});
-  const limite = Date.now() - 30 * 24 * 60 * 60 * 1000;
-  let mudou = false;
-  for (const id of Object.keys(conf)) {
-    const c = conf[id];
-    const t = Date.parse((c && c.conferido_em) || 0) || 0;
-    if (c && c.sincronizado && t && t < limite) { delete conf[id]; mudou = true; }
-  }
-  if (mudou) writeJson(CONFERIDOS_FILE, conf);
-}
 
 // detecta pedido cacheado com kit incompleto (algum componente sem SKU) → sinal pra re-resolver
-function kitIncompletoNoCache(id) {
-  const snap = readJson(path.join(CACHE_DIR, String(id), 'pedido.json'), null);
-  if (!snap || !Array.isArray(snap.itens)) return false;
-  return snap.itens.some(it => it.tipo === 'kit' && Array.isArray(it.componentes) && it.componentes.some(c => !c.sku));
-}
 
-async function rodarCiclo(motivo = 'cron', forcar = false) {
-  if (rodando) { console.log('[GOODBKP] ciclo já em andamento — pulei'); return ultimoResumo; }
-  rodando = true;
-  _prodCache = new Map();                       // zera cache de produto por ciclo
-  const _kc = readJson(KIT_CACHE_FILE, {});
-  const kitCache = (_kc && _kc._schema === SCHEMA && _kc.kits) ? _kc.kits : {}; // invalida se schema mudou
-  const t0 = Date.now();
-  let novos = 0, erros = 0;
-  try {
-    ensureDir(CACHE_DIR);
-    console.log(`[GOODBKP] ▶ ciclo (${motivo})${forcar ? ' [FORCE]' : ''}`);
-    const man      = manifest();
-    const cacheEan = skuEanCache();
-    const locC     = locCache();
-    const { ok: listaOk, pedidos: atendidos } = await listarAtendidos();
-    console.log(`[GOODBKP] ${atendidos.length} pedido(s) ATENDIDO(${SIT_ATENDIDO}) na janela de ${JANELA_DIAS}d (bling ok=${listaOk})`);
-
-    // RECONCILIAÇÃO: remove do cache quem NÃO está mais em ATENDIDO (enviado/processado).
-    // Só roda se o Bling respondeu E veio algo — assim, se o Bling cair, o cache offline é preservado.
-    if (listaOk && atendidos.length > 0) {
-      const idsAtuais = new Set(atendidos.map(p => String(p.id)));
-      let removidos = 0;
-      for (const id of Object.keys(man)) {
-        if (!idsAtuais.has(String(id))) {
-          try { fs.rmSync(path.join(CACHE_DIR, String(id)), { recursive: true, force: true }); } catch (e) {}
-          delete man[id];
-          removidos++;
-        }
-      }
-      if (removidos) { salvarManifest(man); console.log(`[GOODBKP] reconciliação: ${removidos} pedido(s) saíram do ATENDIDO e foram removidos do cache`); }
-    }
-
-    // ESPELHO DO BLING: pedido que estava finalizado+sincronizado aqui mas VOLTOU pra ATENDIDO no Bling
-    // (alguém reverteu lá) → desfinaliza aqui pra ele reaparecer na lista. Espelha a virada do Bling.
-    if (listaOk && atendidos.length > 0) {
-      const idsAtend = new Set(atendidos.map(p => String(p.id)));
-      const conf = readJson(CONFERIDOS_FILE, {});
-      let reabertos = 0;
-      for (const id of Object.keys(conf)) {
-        if (conf[id] && conf[id].sincronizado && idsAtend.has(String(id))) { delete conf[id]; reabertos++; }
-      }
-      if (reabertos) { writeJson(CONFERIDOS_FILE, conf); console.log(`[GOODBKP] espelho Bling: ${reabertos} pedido(s) voltaram pra ATENDIDO → desfinalizados (reaparecem na lista)`); }
-    }
-
-    // (re)processa quem não tem etiqueta OU está num schema antigo (ganha EAN+kit) OU tem kit incompleto no cache
-    const aProcessar = atendidos.filter(ped => {
-      if (forcar) return true;
-      const ja = man[ped.id];
-      if (ja && ja.tem_kit && kitIncompletoNoCache(ped.id)) return true;   // kit com componente vazio → re-resolve sozinho
-      return !(ja && ja.tem_etiqueta && ja.schema === SCHEMA);
-    });
-    console.log(`[GOODBKP] ${aProcessar.length} a (re)processar`);
-
-    // carrega as NFs recentes UMA vez (cobre o menor id do lote) e casa em memória
-    let nfs = [];
-    if (aProcessar.length) {
-      const idMin = Math.min(...aProcessar.map(p => Number(p.id) || Infinity));
-      if (Number.isFinite(idMin)) {
-        nfs = await carregarNFs(idMin - 5);
-        console.log(`[GOODBKP] ${nfs.length} NF(s) recentes carregadas p/ casar`);
-      }
-    }
-
-    for (const ped of aProcessar) {
-      const id = ped.id;
-      const ja = man[id];
-      try {
-        const det = await detalhePedido(id); await sleep(PAUSA_MS);
-        if (!det) { erros++; continue; }
-        const snap = await cachearPedido(det, cacheEan, nfs, kitCache, locC);
-        man[id] = {
-          numero: snap.numero, marketplace: snap.marketplace,
-          servico: snap.servico || '', flex: !!snap.flex,
-          cliente: snap.cliente || '', nf_numero: (snap.nf && snap.nf.numero) || null,
-          tem_nf: snap.tem_nf, tem_kit: snap.tem_kit, tem_etiqueta: snap.tem_etiqueta,
-          tem_danfe: !!(ja && ja.tem_danfe),
-          itens: snap.itens.length, schema: snap.schema, volumes: snap.volumes || 1, cacheado_em: snap.cacheado_em
-        };
-        if (!ja) novos++;
-        salvarManifest(man);
-        salvarSkuEan(cacheEan);
-        salvarLoc(locC);
-        writeJson(KIT_CACHE_FILE, { _schema: SCHEMA, kits: kitCache });
-      } catch (e) { erros++; console.error(`[GOODBKP] erro pedido ${id}:`, e.message); }
-      await sleep(PAUSA_MS);
-    }
-
-    // passo: baixa o DANFE que falta (TODOS — fica pronto p/ offline rápido)
-    let danfesNovos = 0, danfesFalha = 0, danfesSemId = 0, danfesReparo = 0;
-    for (const ped of atendidos) {
-      const dir = path.join(CACHE_DIR, String(ped.id));
-      if (fs.existsSync(path.join(dir, 'danfe.pdf'))) {
-        // já tem o PDF — garante o flag tem_danfe (re-cache pode ter limpado o campo)
-        const s = readJson(path.join(dir, 'pedido.json'), null);
-        if (s && !s.tem_danfe) { s.tem_danfe = true; writeJson(path.join(dir, 'pedido.json'), s); danfesReparo++; }
-        if (man[ped.id] && !man[ped.id].tem_danfe) { man[ped.id].tem_danfe = true; danfesReparo++; }
-        continue;
-      }
-      const snap = readJson(path.join(dir, 'pedido.json'), null);
-      if (!snap || !snap.nf || !snap.nf.id) { danfesSemId++; continue; }
-      const pdf = await baixarDanfe(snap.nf.id); await sleep(PAUSA_MS);
-      if (pdf) {
-        fs.writeFileSync(path.join(dir, 'danfe.pdf'), pdf);
-        snap.tem_danfe = true; writeJson(path.join(dir, 'pedido.json'), snap);
-        if (man[ped.id]) man[ped.id].tem_danfe = true;
-        danfesNovos++;
-      } else { danfesFalha++; }
-    }
-    if (danfesNovos || danfesReparo) salvarManifest(man);
-    console.log(`[GOODBKP] DANFE: ${danfesNovos} novos, ${danfesReparo} reparados, ${danfesFalha} falha, ${danfesSemId} sem nf.id`);
-
-    // passo: cacheia os DADOS do DANFE SIMPLIFICADO (p/ imprimir 10x15 na Zebra OFFLINE)
-    //        guarda o parsed (nf-simp.json) — o PDF é gerado na hora pela rota /danfe-simp
-    let simpNovos = 0, simpFalha = 0, simpSemId = 0, simpCurados = 0;
-    for (const ped of atendidos) {
-      const dir = path.join(CACHE_DIR, String(ped.id));
-      if (fs.existsSync(path.join(dir, 'nf-simp.json'))) continue;   // já tem
-      const snap = readJson(path.join(dir, 'pedido.json'), null);
-      if (!snap) { simpSemId++; continue; }
-      let nfId = snap.nf && snap.nf.id;
-      if (!nfId) {   // re-cache antigo pode ter perdido o nf.id → acha ao vivo e CURA o snapshot
-        try {
-          const nf = await nfDoPedido(ped.id); await sleep(PAUSA_MS);
-          if (nf && nf.id) {
-            nfId = nf.id; snap.nf = nf; snap.tem_nf = true;
-            writeJson(path.join(dir, 'pedido.json'), snap);
-            if (man[ped.id]) { man[ped.id].tem_nf = true; man[ped.id].nf_numero = nf.numero || null; }
-            simpCurados++;
-          }
-        } catch (e) {}
-      }
-      if (!nfId) { simpSemId++; continue; }
-      try {
-        const ds = await dadosNFSimp(nfId, snap.numero); await sleep(PAUSA_MS);
-        if (ds) { writeJson(path.join(dir, 'nf-simp.json'), ds); simpNovos++; }
-        else simpFalha++;
-      } catch (e) { simpFalha++; }
-    }
-    if (simpCurados) salvarManifest(man);
-    console.log(`[GOODBKP] DANFE-simp: ${simpNovos} novos, ${simpCurados} curados, ${simpFalha} falha, ${simpSemId} sem nf`);
-
-    // passo: baixa a ETIQUETA em PDF (p/ modo A4 / fallback Zebra) — só de quem já tem ZPL
-    let etqPdfNovos = 0;
-    const extEtq = ETIQ_FORMATO.toLowerCase();
-    for (const ped of atendidos) {
-      const dir = path.join(CACHE_DIR, String(ped.id));
-      if (fs.existsSync(path.join(dir, 'etiqueta.pdf'))) continue;
-      if (!fs.existsSync(path.join(dir, `etiqueta.${extEtq}`))) continue;
-      const pdf = await baixarEtiquetaPDF(ped.id); await sleep(PAUSA_MS);
-      if (pdf) { fs.writeFileSync(path.join(dir, 'etiqueta.pdf'), pdf); etqPdfNovos++; }
-    }
-    if (etqPdfNovos) console.log(`[GOODBKP] ${etqPdfNovos} etiqueta(s) PDF cacheadas`);
-
-    // passo: garante servico + flex no manifest (p/ filtro marketplace/FLEX) — lê detalhe só de quem falta
-    let svcNovos = 0;
-    for (const ped of atendidos) {
-      const m = man[ped.id];
-      if (!m || m.servico !== undefined) continue;
-      const det = await detalhePedido(ped.id); await sleep(PAUSA_MS);
-      const svc = servicoDoPedido(det);
-      m.servico = svc; m.flex = ehFlex(svc);
-      // aproveita p/ preencher o snapshot também
-      const snapPath = path.join(CACHE_DIR, String(ped.id), 'pedido.json');
-      const snap = readJson(snapPath, null);
-      if (snap) { snap.servico = svc; snap.flex = ehFlex(svc); writeJson(snapPath, snap); }
-      svcNovos++;
-    }
-    if (svcNovos) { salvarManifest(man); console.log(`[GOODBKP] ${svcNovos} servico/flex preenchidos`); }
-
-    // passo: aquece as LOCALIZAÇÕES que faltam (SKUs a separar) — teto por ciclo (mais alto no force)
-    if (listaOk) {
-      const sepSkus = montarSeparacao(null).linhas
-        .map(l => l.sku).filter(s => s && s !== '(sem SKU)' && !(s in locC));
-      const tetoLoc = forcar ? 80 : 25;
-      let locNovas = 0;
-      for (const sku of sepSkus) {
-        if (locNovas >= tetoLoc) break;
-        locC[sku] = await localizacaoPorSku(sku); await sleep(PAUSA_MS);
-        locNovas++;
-      }
-      if (locNovas) { salvarLoc(locC); console.log(`[GOODBKP] ${locNovas} localização(ões) aquecidas`); }
-    }
-
-    // FASE 3: Bling respondeu (listaOk) → drena a fila de conferidos offline p/ VERIFICADO (24)
-    // só roda automático se GOODBKP_SYNC_ON=1 (trava de segurança até você testar)
-    if (listaOk && SYNC_ON) {
-      const sync = await sincronizarConferidos();
-      if (sync.pendentes) console.log(`[GOODBKP] sync conferidos→${SIT_VERIFICADO}: ${sync.ok} ok, ${sync.falhas} falha(s) de ${sync.pendentes}`);
-    }
-
-    purgar(man);
-    purgarArquivo();
-    purgarConferidos();
-    salvarManifest(man);
-
-    const ids = Object.keys(man);
-    ultimoResumo = {
-      rodouEm: new Date().toISOString(),
-      duracaoSeg: Math.round((Date.now() - t0) / 1000),
-      blingOk: listaOk,                            // o Bling respondeu neste ciclo? (p/ o /saude)
-      total: ids.length,
-      comEtiqueta: ids.filter(i => man[i].tem_etiqueta).length,
-      semEtiqueta: ids.filter(i => !man[i].tem_etiqueta).length,
-      novos, erros
-    };
-    console.log('[GOODBKP] ✔ ciclo:', JSON.stringify(ultimoResumo));
-  } catch (e) {
-    console.error('[GOODBKP] ciclo falhou:', e.message);
-  } finally {
-    rodando = false;
-  }
-  return ultimoResumo;
-}
 
 // LISTA DE SEPARAÇÃO — agrega os itens de TODOS os pedidos cacheados (não-finalizados),
 // explodindo kits em componentes e somando a quantidade por SKU. Tudo do cache → funciona offline.
-function montarSeparacao(mktFiltro) {
-  const man = manifest();
-  const conf = readJson(CONFERIDOS_FILE, {});
-  const loc = locCache();
-  const mapa = {};       // sku -> { sku, descricao, ean, loc, qtd }
-  const counts = {};     // marketplace -> nº de pedidos (não-finalizados)
-  let pedidos = 0;
-  for (const id of Object.keys(man)) {
-    if (conf[id]) continue;                              // já finalizado → fora da separação
-    if (!man[id].tem_etiqueta) continue;                 // sem etiqueta → fora da separação (não dá pra despachar)
-    const snap = readJson(path.join(CACHE_DIR, String(id), 'pedido.json'), null);
-    if (!snap) continue;
-    const mkt = snap.marketplace || 'outro';
-    counts[mkt] = (counts[mkt] || 0) + 1;
-    if (mktFiltro && mkt !== mktFiltro) continue;
-    pedidos++;
-    const add = (sku, ean, descricao, qtd) => {
-      const k = sku || '(sem SKU)';
-      if (!mapa[k]) mapa[k] = { sku: k, descricao: descricao || '', ean: ean || '', loc: loc[k] || '', qtd: 0 };
-      mapa[k].qtd += Number(qtd || 0);
-      if (!mapa[k].ean && ean) mapa[k].ean = ean;
-      if (!mapa[k].descricao && descricao) mapa[k].descricao = descricao;
-    };
-    for (const it of (snap.itens || [])) {
-      if (it.tipo === 'kit' && Array.isArray(it.componentes) && it.componentes.length) {
-        for (const c of it.componentes) add(c.sku, c.ean, c.descricao, c.qtd);
-      } else {
-        add(it.sku, it.ean, it.descricao, it.qtd);
-      }
-    }
-  }
-  // ordena por LOCALIZAÇÃO (ordem de picking; vazias por último), depois por SKU
-  const linhas = Object.values(mapa).sort((a, b) => {
-    const la = a.loc || '', lb = b.loc || '';
-    if (!la && lb) return 1;
-    if (la && !lb) return -1;
-    if (la !== lb) return la.localeCompare(lb, 'pt', { numeric: true });
-    return String(a.sku).localeCompare(String(b.sku));
-  });
-  const total_itens = linhas.reduce((s, l) => s + l.qtd, 0);
-  return { ok: true, mkt: mktFiltro || null, pedidos, total_skus: linhas.length, total_itens, counts, linhas };
-}
 
 // 2ª visão: separação POR PEDIDO (cada pedido com seus itens; itens podem repetir entre pedidos — OK, é pra uso raro)
-function montarSeparacaoPorPedido(mktFiltro) {
-  const man = manifest();
-  const conf = readJson(CONFERIDOS_FILE, {});
-  const loc = locCache();
-  const lista = [];
-  const counts = {};
-  for (const id of Object.keys(man)) {
-    if (conf[id]) continue;                                // já finalizado → fora
-    if (!man[id].tem_etiqueta) continue;                   // sem etiqueta → fora (não despacha)
-    const snap = readJson(path.join(CACHE_DIR, String(id), 'pedido.json'), null);
-    if (!snap) continue;
-    const mkt = snap.marketplace || 'outro';
-    counts[mkt] = (counts[mkt] || 0) + 1;
-    if (mktFiltro && mkt !== mktFiltro) continue;
-    const itens = [];
-    const add = (sku, ean, descricao, qtd) => itens.push({ sku: sku || '(sem SKU)', ean: ean || '', descricao: descricao || '', loc: loc[sku] || '', qtd: Number(qtd || 0) });
-    for (const it of (snap.itens || [])) {
-      if (it.tipo === 'kit' && Array.isArray(it.componentes) && it.componentes.length) {
-        for (const c of it.componentes) add(c.sku, c.ean, c.descricao, c.qtd);
-      } else { add(it.sku, it.ean, it.descricao, it.qtd); }
-    }
-    itens.sort((a, b) => { const la = a.loc || '', lb = b.loc || ''; if (!la && lb) return 1; if (la && !lb) return -1; return la.localeCompare(lb, 'pt', { numeric: true }); });
-    lista.push({ numero: snap.numero || id, marketplace: mkt, cliente: snap.cliente || '', nf: (snap.nf && snap.nf.numero) || '', tem_etiqueta: true, tem_nf: !!(snap.nf && snap.nf.numero), itens });
-  }
-  lista.sort((a, b) => String(a.numero).localeCompare(String(b.numero), 'pt', { numeric: true }));
-  const total_itens = lista.reduce((s, p) => s + p.itens.reduce((ss, i) => ss + i.qtd, 0), 0);
-  return { ok: true, mkt: mktFiltro || null, total_pedidos: lista.length, total_itens, counts, pedidos: lista };
-}
 
 // ─── Adesivo "VOLUME i/N" (ZPL 10x15) — impresso ANTES de cada etiqueta Madeira ──
 // Sem ^PW/^LL de propósito: usa a config da impressora (não trunca a etiqueta dos
 // Correios que vem depois). Centralizado via ^FB. Layout AJUSTÁVEL após teste real.
-function zplEscape(s) {
-  return String(s == null ? '' : s).replace(/[\^~]/g, ' ').replace(/[\x00-\x1f]/g, '').trim();
-}
-function bannerVolumeZpl(vol, total, numero, cliente) {
-  const c = zplEscape(cliente);
-  return '^XA\n^CI28\n'
-    + '^FO40,290^GB736,520,8^FS\n'
-    + '^FO40,340^A0N,140,140^FB736,2,0,C^FDVOLUME ' + vol + '/' + total + '^FS\n'
-    + '^FO40,650^A0N,50,50^FB736,1,0,C^FDPedido ' + zplEscape(numero) + '^FS\n'
-    + (c ? '^FO40,720^A0N,40,40^FB736,1,0,C^FD' + c + '^FS\n' : '')
-    + '^XZ\n';
-}
 
 // ─── Rotas HTTP (namespaced) ────────────────────────────────────────────
 function routes(readBody) {
@@ -1025,13 +286,13 @@ function routes(readBody) {
     if (method === 'GET' && p === '/good-checkout-offline/indexar-catalogo') {
       const op = String(urlObj.searchParams.get('op') || '');
       if (!ehAdmin(op)) { json(res, 200, { ok: false, precisa_admin: true, erro: 'só admin pode indexar' }); return true; }
-      if (idxStatus.rodando) { json(res, 200, { ok: true, started: false, jaRodando: true, status: idxStatus }); return true; }
+      if (getIdxStatus().rodando) { json(res, 200, { ok: true, started: false, jaRodando: true, status: getIdxStatus() }); return true; }
       indexarCatalogoCompleto();                       // dispara em background (não aguarda)
       json(res, 200, { ok: true, started: true });
       return true;
     }
     if (method === 'GET' && p === '/good-checkout-offline/indexar-status') {
-      json(res, 200, { ok: true, status: idxStatus });
+      json(res, 200, { ok: true, status: getIdxStatus() });
       return true;
     }
 
@@ -1407,7 +668,7 @@ function routes(readBody) {
       const confIds = Object.keys(conf);
       json(res, 200, {
         versao: VERSAO,
-        resumo: ultimoResumo,
+        resumo: getUltimoResumo(),
         cacheDir: CACHE_DIR,
         situacaoAtendido: SIT_ATENDIDO,
         situacaoVerificado: SIT_VERIFICADO,
@@ -1415,7 +676,7 @@ function routes(readBody) {
         total: ids.length,
         comEtiqueta: ids.filter(i => man[i].tem_etiqueta).length,
         semEtiqueta: ids.filter(i => !man[i].tem_etiqueta).length,
-        sync: { ...ultimoSync, ligado: SYNC_ON, conferidos: confIds.length, pendentes: confIds.filter(i => !conf[i].sincronizado).length },
+        sync: { ...getUltimoSync(), ligado: SYNC_ON, conferidos: confIds.length, pendentes: confIds.filter(i => !conf[i].sincronizado).length },
         pedidos: ids.map(i => ({ id: i, ...man[i] }))
       });
       return true;
@@ -1426,16 +687,16 @@ function routes(readBody) {
       const agora = Date.now();
       const conf = readJson(CONFERIDOS_FILE, {});
       const pendentes = Object.keys(conf).filter(i => conf[i] && !conf[i].sincronizado);
-      const rodouEm = ultimoResumo.rodouEm ? new Date(ultimoResumo.rodouEm).getTime() : 0;
+      const rodouEm = getUltimoResumo().rodouEm ? new Date(getUltimoResumo().rodouEm).getTime() : 0;
       const minDesdeCiclo = rodouEm ? Math.round((agora - rodouEm) / 60000) : null;
       const problemas = [], avisos = [];
       // 1) ciclo parado — só vale DENTRO da janela ativa do cron (evita alarme falso de madrugada)
       if (!rodouEm) avisos.push('ainda não rodou o 1º ciclo (boot recente?)');
       else if (cronDeveriaTerRodado() && minDesdeCiclo > 30) problemas.push('o ciclo não roda há ' + minDesdeCiclo + ' min no horário ativo (esperado ~10 min)');
       // 2) Bling inalcançável no último ciclo (auth ou conexão)
-      if (ultimoResumo.blingOk === false) problemas.push('o último ciclo NÃO conseguiu falar com o Bling (auth/conexão)');
+      if (getUltimoResumo().blingOk === false) problemas.push('o último ciclo NÃO conseguiu falar com o Bling (auth/conexão)');
       // 3) sync-back falhando
-      if (SYNC_ON && ultimoSync && ultimoSync.falhas > 0) problemas.push('o sync pro Bling falhou em ' + ultimoSync.falhas + ' pedido(s) no último ciclo');
+      if (SYNC_ON && getUltimoSync() && getUltimoSync().falhas > 0) problemas.push('o sync pro Bling falhou em ' + getUltimoSync().falhas + ' pedido(s) no último ciclo');
       // avisos (não derrubam o status, só informam)
       if (!SYNC_ON) avisos.push('GOODBKP_SYNC_ON desligado — finalizados não voltam pro Bling sozinhos');
       if (pendentes.length > 0) avisos.push(pendentes.length + ' finalizado(s) ainda não sincronizado(s)');
@@ -1447,11 +708,11 @@ function routes(readBody) {
         ok,
         versao: VERSAO,
         em: new Date().toISOString(),
-        ultimo_ciclo: ultimoResumo.rodouEm,
+        ultimo_ciclo: getUltimoResumo().rodouEm,
         min_desde_ciclo: minDesdeCiclo,
-        bling_ok: ultimoResumo.blingOk !== false,
+        bling_ok: getUltimoResumo().blingOk !== false,
         pedidos_no_cache: Object.keys(manifest()).length,
-        sync: { ligado: SYNC_ON, pendentes: pendentes.length, ...(ultimoSync || {}) },
+        sync: { ligado: SYNC_ON, pendentes: pendentes.length, ...(getUltimoSync() || {}) },
         problemas,
         avisos
       });
