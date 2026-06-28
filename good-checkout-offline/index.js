@@ -2,7 +2,7 @@
 
 // ════════════════════════════════════════════════════════════════════════
 //  GOOD · CHECKOUT OFFLINE — FASE 1 (poller) + FASE 2 (bipagem)   (Mover-Pedidos)
-//  good-checkout-offline v28/06 b3   (a versão real é a const VERSAO abaixo)
+//  good-checkout-offline v28/06 b4   (a versão real é a const VERSAO abaixo)
 // ════════════════════════════════════════════════════════════════════════
 //  Módulo do orquestrador unificado (HTTP-native, sem Express).
 //  Reaproveita o token Bling da GOOD via ../good/tokenManager.
@@ -41,7 +41,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.GOODBKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GOODBKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'good-checkout-offline v28/06 b3';
+const VERSAO     = 'good-checkout-offline v28/06 b4';
 
 // ─── Módulos extraídos (Fase 1: base + nf + etiquetas) ───────────────────
 const base = require('./base');
@@ -376,12 +376,20 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC) {
   if (!nf || !nf.id) { nf = await nfDoPedido(id); await sleep(PAUSA_MS); }   // fora do range do lote → acha pelo link direto pedido→NF
 
   const _etqPath = path.join(dir, `etiqueta.${ETIQ_FORMATO.toLowerCase()}`);
-  let temEtiqueta = fs.existsSync(_etqPath);   // etiqueta é imutável → se já tem, não re-baixa (re-cache leve)
-  if (!temEtiqueta) {
+  const _etqPdfPath = path.join(dir, 'etiqueta.pdf');
+  let temEtiqueta = fs.existsSync(_etqPath);   // etiqueta ZPL imutável → se já tem, não re-baixa (re-cache leve)
+  let etqEhPdf = false;
+  if (temEtiqueta) {
+    try { if (fs.readFileSync(_etqPath, 'utf8').indexOf('^XA') < 0) etqEhPdf = true; } catch (e) {}   // arquivo salvo não é ZPL → etiqueta PDF
+  } else if (fs.existsSync(_etqPdfPath) && mkt !== 'madeira') {
+    temEtiqueta = true; etqEhPdf = true;          // já tem só o PDF cacheado (Amazon etc) — Madeira tem bloco próprio abaixo
+  } else {
     const conteudoEtiqueta = await baixarEtiqueta(id); await sleep(PAUSA_MS);
-    if (conteudoEtiqueta) {
-      fs.writeFileSync(_etqPath, conteudoEtiqueta);
-      temEtiqueta = true;
+    if (conteudoEtiqueta && conteudoEtiqueta.indexOf('^XA') >= 0) {       // ZPL de verdade (ML, Shopee...)
+      fs.writeFileSync(_etqPath, conteudoEtiqueta); temEtiqueta = true;
+    } else if (conteudoEtiqueta) {                                        // veio conteúdo mas NÃO é ZPL → etiqueta PDF (Amazon)
+      // captura o PDF nativo do Bling AGORA (ele ainda serve); depois do despacho ele para de servir e o email ficaria sem etiqueta
+      try { const pdf = await baixarEtiquetaPDF(id); await sleep(PAUSA_MS); if (pdf && pdf.length) { fs.writeFileSync(_etqPdfPath, pdf); temEtiqueta = true; etqEhPdf = true; } } catch (e) {}
     }
   }
   // MADEIRA MADEIRA não tem etiqueta no Bling. Se a etiqueta já está no mapa MM
@@ -425,8 +433,9 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC) {
     tem_danfe: fs.existsSync(path.join(dir, 'danfe.pdf')),   // por existência do arquivo → sobrevive a re-cache
     tem_kit: temKit,
     tem_etiqueta: temEtiqueta || etiquetaMM,
-    etiqueta_formato: temEtiqueta ? ETIQ_FORMATO : (etiquetaMM ? 'PDF' : null),
+    etiqueta_formato: (etiquetaMM || etqEhPdf) ? 'PDF' : (temEtiqueta ? ETIQ_FORMATO : null),
     etiqueta_mm: etiquetaMM,
+    etiqueta_pdf: !!(etiquetaMM || etqEhPdf),   // etiqueta é PDF (Madeira, Amazon...) → impressão/email usam o caminho PDF
     volumes: etiquetaMM ? volumesMM : 1,
     schema: SCHEMA,
     cacheado_em: new Date().toISOString()
@@ -455,6 +464,8 @@ function arquivarFinalizado(id) {
     const fmt = ETIQ_FORMATO.toLowerCase();
     const etq = path.join(src, `etiqueta.${fmt}`);
     if (fs.existsSync(etq)) fs.copyFileSync(etq, path.join(dst, `etiqueta.${fmt}`));
+    const etqPdf = path.join(src, 'etiqueta.pdf');   // etiqueta PDF (Amazon/Madeira) — capturada cedo; email usa mesmo após despacho
+    if (fs.existsSync(etqPdf)) fs.copyFileSync(etqPdf, path.join(dst, 'etiqueta.pdf'));
     const ped = path.join(src, 'pedido.json');
     if (fs.existsSync(ped)) fs.copyFileSync(ped, path.join(dst, 'pedido.json'));
     const nfs = path.join(src, 'nf-simp.json');   // dados do DANFE simplificado (se já gerado) → email usa sem re-buscar
