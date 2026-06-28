@@ -9,6 +9,9 @@
  *  3. Configura as env vars correspondentes no Render
  *
  * Para desativar uma empresa temporariamente: comenta a linha aqui.
+ *
+ * rev 27/06/2026 — good-checkout-offline restaurado (tinha sido sobrescrito)
+ *                  + good-mm-etiquetas (uma vez só).
  */
 
 const empresas = [
