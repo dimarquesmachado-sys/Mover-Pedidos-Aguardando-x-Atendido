@@ -2,7 +2,7 @@
 
 // ════════════════════════════════════════════════════════════════════════
 //  GOOD · CHECKOUT OFFLINE — FASE 1 (poller) + FASE 2 (bipagem)   (Mover-Pedidos)
-//  good-checkout-offline v26/06 b1   (a versão real é a const VERSAO abaixo)
+//  good-checkout-offline v28/06 b3   (a versão real é a const VERSAO abaixo)
 // ════════════════════════════════════════════════════════════════════════
 //  Módulo do orquestrador unificado (HTTP-native, sem Express).
 //  Reaproveita o token Bling da GOOD via ../good/tokenManager.
@@ -41,7 +41,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.GOODBKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GOODBKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'good-checkout-offline v26/06 b1';
+const VERSAO     = 'good-checkout-offline v28/06 b3';
 
 // ─── Módulos extraídos (Fase 1: base + nf + etiquetas) ───────────────────
 const base = require('./base');
@@ -386,12 +386,24 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC) {
   }
   // MADEIRA MADEIRA não tem etiqueta no Bling. Se a etiqueta já está no mapa MM
   // (gerada por nós e sincronizada pela extensão), conta o pedido como PRONTO.
-  let etiquetaMM = false;
+  let etiquetaMM = false, volumesMM = 1;
   if (!temEtiqueta && mkt === 'madeira') {
+    const _mmPdf = path.join(dir, 'etiqueta.pdf');
     try {
-      const mmEtq = require('../good-mm-etiquetas');
-      for (const c of [ped.numeroLoja, nf && nf.numero].filter(Boolean)) {
-        if (mmEtq.acharLote(c)) { etiquetaMM = true; break; }
+      let bufMM = null;
+      if (fs.existsSync(_mmPdf)) { bufMM = fs.readFileSync(_mmPdf); }   // já cacheado → reaproveita (não re-baixa)
+      else {
+        const mmEtq = require('../good-mm-etiquetas');
+        let regMM = null;
+        for (const c of [ped.numeroLoja, nf && nf.numero].filter(Boolean)) { regMM = mmEtq.acharLote(c); if (regMM) break; }
+        if (regMM && regMM.batch) {
+          bufMM = await mmEtq.pdfPorBatch(regMM.batch);                 // 1 pedido = TODAS as etiquetas num PDF só
+          if (bufMM && bufMM.length) { try { fs.writeFileSync(_mmPdf, bufMM); } catch (e) {} }   // cacheia p/ impressão offline rápida
+        }
+      }
+      if (bufMM && bufMM.length) {
+        etiquetaMM = true;
+        try { const { PDFDocument } = require('pdf-lib'); volumesMM = (await PDFDocument.load(bufMM)).getPageCount() || 1; } catch (e) {}   // volumes = nº de etiquetas (1 a 5)
       }
     } catch (e) {}
   }
@@ -415,6 +427,7 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC) {
     tem_etiqueta: temEtiqueta || etiquetaMM,
     etiqueta_formato: temEtiqueta ? ETIQ_FORMATO : (etiquetaMM ? 'PDF' : null),
     etiqueta_mm: etiquetaMM,
+    volumes: etiquetaMM ? volumesMM : 1,
     schema: SCHEMA,
     cacheado_em: new Date().toISOString()
   };
@@ -635,7 +648,7 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
           cliente: snap.cliente || '', nf_numero: (snap.nf && snap.nf.numero) || null,
           tem_nf: snap.tem_nf, tem_kit: snap.tem_kit, tem_etiqueta: snap.tem_etiqueta,
           tem_danfe: !!(ja && ja.tem_danfe),
-          itens: snap.itens.length, schema: snap.schema, cacheado_em: snap.cacheado_em
+          itens: snap.itens.length, schema: snap.schema, volumes: snap.volumes || 1, cacheado_em: snap.cacheado_em
         };
         if (!ja) novos++;
         salvarManifest(man);
@@ -1174,14 +1187,45 @@ function routes(readBody) {
       const partes = [etqBuf, nfBuf].filter(Boolean);
       if (!partes.length) { json(res, 404, { erro: 'sem etiqueta nem NF' }); return true; }
       try {
-        const { PDFDocument } = require('pdf-lib');
+        const { PDFDocument, StandardFonts, rgb } = require('pdf-lib');
         const out = await PDFDocument.create();
-        for (const buf of partes) {
-          try {
-            const src = await PDFDocument.load(buf);
-            const pgs = await out.copyPages(src, src.getPageIndices());
-            pgs.forEach(pg => out.addPage(pg));
-          } catch (e) { /* pula PDF inválido, segue com os outros */ }
+        // MADEIRA multi-volume: o PDF da etiqueta tem N páginas (1 por caixa). Intercala
+        // [etiqueta i][DANFE carimbada "VOLUME i/N"] p/ cada caixa sair autossuficiente e numerada.
+        const _snapImp = readJson(path.join(dir, 'pedido.json'), null);
+        const _ehMadeira = !!(_snapImp && (_snapImp.etiqueta_mm || _snapImp.marketplace === 'madeira'));
+        let _etqDoc = null, _nVol = 1;
+        if (etqBuf) { try { _etqDoc = await PDFDocument.load(etqBuf); _nVol = _etqDoc.getPageCount() || 1; } catch (e) {} }
+
+        if (_ehMadeira && _etqDoc && nfBuf && _nVol > 1) {
+          const fonte = await out.embedFont(StandardFonts.HelveticaBold);
+          const danfeDoc = await PDFDocument.load(nfBuf);
+          const danfeIdx = danfeDoc.getPageIndices();
+          for (let i = 0; i < _nVol; i++) {
+            try { const [pgEtq] = await out.copyPages(_etqDoc, [i]); out.addPage(pgEtq); } catch (e) {}  // etiqueta da caixa i
+            try {
+              const copias = await out.copyPages(danfeDoc, danfeIdx);                                    // cópia fresca da NF p/ esta caixa
+              copias.forEach((pg, k) => {
+                out.addPage(pg);
+                if (k === 0) {                                                                           // carimba só a 1ª página da DANFE
+                  const { width, height } = pg.getSize();
+                  const txt = 'VOLUME ' + (i + 1) + '/' + _nVol;
+                  const sz = 15, padX = 9, boxH = 23;
+                  const tw = fonte.widthOfTextAtSize(txt, sz);
+                  const bx = width - tw - padX * 2 - 12, by = height - boxH - 12;
+                  pg.drawRectangle({ x: bx, y: by, width: tw + padX * 2, height: boxH, color: rgb(0.05, 0.05, 0.05) });
+                  pg.drawText(txt, { x: bx + padX, y: by + 6, size: sz, font: fonte, color: rgb(1, 1, 1) });
+                }
+              });
+            } catch (e) {}
+          }
+        } else {
+          for (const buf of partes) {                                                                   // normal: [etiqueta(s)...][DANFE]
+            try {
+              const src = await PDFDocument.load(buf);
+              const pgs = await out.copyPages(src, src.getPageIndices());
+              pgs.forEach(pg => out.addPage(pg));
+            } catch (e) { /* pula PDF inválido, segue com os outros */ }
+          }
         }
         const merged = Buffer.from(await out.save());
         res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': 'inline; filename="etiqueta-nf.pdf"' });
