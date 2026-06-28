@@ -188,7 +188,7 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC) {
       let bufMM = null;
       if (fs.existsSync(_mmPdf)) { bufMM = fs.readFileSync(_mmPdf); }   // já cacheado → reaproveita (não re-baixa)
       else {
-        const mmEtq = require('../good-mm-etiquetas');
+        const mmEtq = require('../girassol-mm-etiquetas');
         let regMM = null;
         for (const c of [ped.numeroLoja, nf && nf.numero].filter(Boolean)) { regMM = mmEtq.acharLote(c); if (regMM) break; }
         if (regMM && regMM.batch) {
