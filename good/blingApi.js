@@ -10,6 +10,7 @@ const SITUACAO_AGUARDANDO = parseInt(process.env.GOOD_SITUACAO_AGUARDANDO || '35
 const ME_LOJA_IDS = (process.env.GOOD_ME_LOJA_IDS || '203296034').split(',').map(Number);
 const JANELA_DIAS = parseInt(process.env.GOOD_JANELA_ULTIMOS_DIAS || '20');
 const MAX_PAGINAS = parseInt(process.env.GOOD_MAX_PAGINAS || '5');
+const MAX_PAGINAS_NFE = parseInt(process.env.GOOD_MAX_PAGINAS_NFE || '8');
 const PAUSA_MS    = parseInt(process.env.GOOD_PAUSA_MS || '700');
 const GET_PAUSA_MS = parseInt(process.env.GOOD_GET_PAUSA_MS || '500');
 
@@ -134,7 +135,8 @@ async function alterarSituacao(token, idPedido, novaSituacao) {
 // ─── F3: NF-e ────────────────────────────────────────────────────────────────
 async function getNFesAutorizadas(token, dataInicial, dataFinal) {
   const todos = [];
-  for (let pag = 1; pag <= MAX_PAGINAS; pag++) {
+  let truncado = true;
+  for (let pag = 1; pag <= MAX_PAGINAS_NFE; pag++) {
     const url =
       `${BLING_API}/nfe?situacao=5` +
       `&dataEmissaoInicial=${dataInicial}&dataEmissaoFinal=${dataFinal}` +
@@ -148,7 +150,10 @@ async function getNFesAutorizadas(token, dataInicial, dataFinal) {
     const lista = data.data || [];
     console.log(`[GOOD blingApi] NFs autorizadas pag=${pag} → ${lista.length}`);
     todos.push(...lista);
-    if (lista.length < 100) break;
+    if (lista.length < 100) { truncado = false; break; }
+  }
+  if (truncado) {
+    console.warn(`[GOOD blingApi] ⚠️ getNFesAutorizadas parou no teto de ${MAX_PAGINAS_NFE} páginas (${todos.length} NFs) — pode haver NF recente FORA do fetch. Reduza GOOD_NF_JANELA_DIAS ou aumente GOOD_MAX_PAGINAS_NFE.`);
   }
   return todos;
 }
