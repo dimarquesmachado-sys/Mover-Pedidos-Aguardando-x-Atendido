@@ -40,9 +40,10 @@ const SCHEMA = 4;  // versão do snapshot — bump força re-cache dos pedidos a
 // loja → marketplace (mesmo mapa do checkout Girassol)
 const LOJA_MKT = {
   '203146903': 'ml', '203583169': 'shopee', '203967708': 'amazon',
-  '203262016': 'magalu', '205523707': 'tiktok'
+  '203262016': 'magalu', '205523707': 'tiktok',
+  '204822410': 'shein', '203330464': 'leroy', '203429780': 'madeira'
 };
-const MKT_NOME = { ml: 'Mercado Livre', shopee: 'Shopee', amazon: 'Amazon', magalu: 'Magalu', tiktok: 'TikTok Shop', outro: 'Outro' };
+const MKT_NOME = { ml: 'Mercado Livre', shopee: 'Shopee', amazon: 'Amazon', magalu: 'Magalu', tiktok: 'TikTok Shop', shein: 'Shein', leroy: 'Leroy Merlin', madeira: 'Madeira Madeira', outro: 'Outro' };
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
