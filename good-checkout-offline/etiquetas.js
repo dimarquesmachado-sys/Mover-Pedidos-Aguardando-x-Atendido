@@ -88,13 +88,12 @@ async function zplParaPdf(zpl) {
 
 async function etiquetaPdf(blingId, dir) {
   // 1) PDF nativo do Bling — o Bling gera o PDF da etiqueta de qualquer marketplace
-  const direto = await baixarEtiquetaPDF(blingId);
-  if (direto) return direto;
+  try { const direto = await baixarEtiquetaPDF(blingId); if (direto) return direto; } catch (e) {}
   // 2) fallback offline: ZPL cacheado → Labelary
   let zpl = null;
   if (dir) { try { zpl = fs.readFileSync(path.join(dir, `etiqueta.${ETIQ_FORMATO.toLowerCase()}`), 'utf8'); } catch (e) {} }
   if (!zpl) { try { zpl = await baixarEtiqueta(blingId); } catch (e) {} }
-  if (zpl && zpl.indexOf('^XA') >= 0) { const p = await zplParaPdf(zpl); if (p) return p; }
+  if (zpl && zpl.indexOf('^XA') >= 0) { try { const p = await zplParaPdf(zpl); if (p) return p; } catch (e) {} }
   // 3) MADEIRA MADEIRA: não tem etiqueta no Bling. Lê o snapshot (pedido.json), acha o
   //    batch no mapa (sincronizado pela extensão) e baixa o PDF direto do MM com o token.
   try {
