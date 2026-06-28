@@ -2,7 +2,7 @@
 
 // ════════════════════════════════════════════════════════════════════════
 //  GOOD · CHECKOUT OFFLINE — FASE 1 (poller) + FASE 2 (bipagem)   (Mover-Pedidos)
-//  good-checkout-offline v28/06 b6   (a versão real é a const VERSAO abaixo)
+//  good-checkout-offline v28/06 b7   (a versão real é a const VERSAO abaixo)
 // ════════════════════════════════════════════════════════════════════════
 //  Módulo do orquestrador unificado (HTTP-native, sem Express).
 //  Reaproveita o token Bling da GOOD via ../good/tokenManager.
@@ -41,7 +41,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.GOODBKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GOODBKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'good-checkout-offline v28/06 b6';
+const VERSAO     = 'good-checkout-offline v28/06 b7';
 
 // ─── Módulos extraídos (Fase 1: base + nf + etiquetas) ───────────────────
 const base = require('./base');
@@ -431,6 +431,44 @@ function routes(readBody) {
         });
       } catch (e) {}
       json(res, 200, ped);
+      return true;
+    }
+
+    // estoque AO VIVO dos itens de um pedido (saldoVirtualTotal do Bling).
+    // como a NF já baixou o estoque ANTES do pedido chegar no checkout, esse saldo JÁ está
+    // descontado dos pedidos na fila → é o estoque real restante (não desconta de novo).
+    // separado da abertura do pedido (a tela chama async) → não trava o checkout offline.
+    // Bling fora do ar = saldos nulos → a tela mostra "—".
+    if (method === 'GET' && p.startsWith('/good-checkout-offline/estoque-pedido/')) {
+      const id = p.split('/').filter(Boolean).pop();
+      const ped = readJson(path.join(CACHE_DIR, String(id), 'pedido.json'), null);
+      if (!ped) { json(res, 404, { ok: false, erro: 'pedido não cacheado' }); return true; }
+      const skus = new Set();
+      (ped.itens || []).forEach(it => {
+        if (it.sku) skus.add(String(it.sku).trim());
+        (it.componentes || []).forEach(c => { if (c.sku) skus.add(String(c.sku).trim()); });
+      });
+      const porSku = async (codigo) => {                       // mesma lógica da busca de produto
+        const base0 = String(codigo || '').trim();
+        if (!base0) return null;
+        const variantes = [...new Set([base0, base0.toUpperCase(), base0.toLowerCase()])];
+        for (const v of variantes) {
+          const r = await blingGet(`/produtos?codigo=${encodeURIComponent(v)}&limite=1`);
+          const it = r.ok && r.data && r.data.data && r.data.data[0];
+          if (it && it.id) return await produtoDetalhe(it.id);
+        }
+        return null;
+      };
+      const saldos = {};
+      for (const sku of skus) {
+        if (!sku) continue;
+        try {
+          const prod = await porSku(sku);
+          const est = (prod && prod.estoque) || {};
+          saldos[sku] = (est.saldoVirtualTotal != null ? est.saldoVirtualTotal : (est.saldoVirtual != null ? est.saldoVirtual : null));
+        } catch (e) { saldos[sku] = null; }
+      }
+      json(res, 200, { ok: true, saldos: saldos });
       return true;
     }
 
