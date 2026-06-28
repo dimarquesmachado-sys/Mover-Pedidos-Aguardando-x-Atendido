@@ -166,10 +166,12 @@
   /* localização no row da bipagem — visual rápido de tem/não tem */
   .idesc .e .loctag{background:#13243f;border:1px solid var(--ac);color:#cfe0ff;border-radius:6px;padding:1px 6px;font-weight:700;white-space:nowrap}
   .idesc .e .locsem{background:#3a2a10;border:1px solid var(--warn);color:#ffd9a8;border-radius:6px;padding:1px 6px;font-weight:700;white-space:nowrap}
-  .idesc .e .esttag{border-radius:6px;padding:1px 6px;font-weight:700;white-space:nowrap}
-  .idesc .e .esttag.estok{background:#0f2a17;border:1px solid var(--ok);color:#b6f0c8}
-  .idesc .e .esttag.estzero{background:#3a1212;border:1px solid var(--err);color:#ffb4b4}
-  .idesc .e .esttag.estunk,.idesc .e .esttag.estload{background:var(--card2);border:1px solid var(--line);color:var(--mut)}
+  .idesc .estoque{margin-top:3px;display:flex;flex-wrap:wrap;gap:5px}
+  .idesc .estoque .esttag{border-radius:6px;padding:1px 7px;font-weight:700;white-space:nowrap;font-size:.92em;cursor:help}
+  .idesc .estoque .esttag.estok{background:#0f2a17;border:1px solid var(--ok);color:#b6f0c8}
+  .idesc .estoque .esttag.estzero{background:#3a1212;border:1px solid var(--err);color:#ffb4b4}
+  .idesc .estoque .esttag.estunk,.idesc .estoque .esttag.estload{background:var(--card2);border:1px solid var(--line);color:var(--mut)}
+  .idesc .estoque .esttag.estchk{background:#1c2433;border:1px solid #3a4658;color:#aebacb}
 
   @media(max-width:720px){
     .main{flex-direction:column}
@@ -355,7 +357,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b11';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b12';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#b3b9c4'}, magalu:{n:'Magalu',c:'#0086ff'},
@@ -369,6 +371,7 @@ let listaCache = [];
 let semEtiqCache = [];   // pedidos ATENDIDO sem etiqueta (problema)
 let filtroBusca = '';
 let estoqueSaldos = {};      // sku → saldoVirtual do Bling (estoque restante), carregado async ao abrir o pedido
+let estoqueCheckout = {};    // sku → quanto desse produto está em pedidos no checkout agora (info, não subtrai)
 let estoqueCarregado = false; // já tentou buscar? false=mostra "…", true=mostra número/"—"
 let filtroMkt = null;   // null=todos | 'ml'|'shopee'|... | 'flex'
 
@@ -761,7 +764,7 @@ async function selecionar(id){
     prepararPedido(ped);
     pedidoAtual = ped;
     zplAtual = await fetch('/good-checkout-offline/etiqueta/'+id).then(r=>r.text());
-    estoqueSaldos = {}; estoqueCarregado = false;   // reset: estoque do pedido novo (renderiza "…" até chegar)
+    estoqueSaldos = {}; estoqueCheckout = {}; estoqueCarregado = false;   // reset: estoque do pedido novo (renderiza "…" até chegar)
     renderDetail();
     renderLista(); // atualiza highlight
     iniciarHeartbeat(id);
@@ -836,20 +839,29 @@ async function carregarEstoque(id){
   try{
     const r = await fetch('/good-checkout-offline/estoque-pedido/'+id).then(x=>x.json());
     if(!pedidoAtual || String(pedidoAtual.bling_id)!==String(id)) return; // trocou de pedido enquanto carregava
-    if(r && r.ok && r.saldos) estoqueSaldos = r.saldos;
-  }catch(e){ /* Bling offline → estoqueSaldos vazio → mostra "—" */ }
+    if(r && r.ok){ if(r.saldos) estoqueSaldos = r.saldos; if(r.checkout) estoqueCheckout = r.checkout; }
+  }catch(e){ /* Bling offline → mapas vazios → saldo mostra "—" */ }
   if(!pedidoAtual || String(pedidoAtual.bling_id)!==String(id)) return;
   estoqueCarregado = true;
   renderItens();
 }
 
-// pill do estoque restante: verde >0, vermelho ≤0 (venda a descoberto), "…" carregando, "—" sem dado (Bling fora).
-function estTag(sku){
-  if(!estoqueCarregado) return '<span class="esttag estload">📦 …</span>';
-  const s = estoqueSaldos[String(sku||'').trim()];
-  if(s==null) return '<span class="esttag estunk" title="estoque indisponível (Bling fora?)">📦 —</span>';
-  const n = Number(s);
-  return '<span class="esttag '+(n>0?'estok':'estzero')+'" title="estoque restante no Bling">📦 '+n+'</span>';
+// dois números por item: 📦 Saldo Bling (verde/vermelho — o que SOBRA após o checkout) + 🛒 Em checkout (info, não subtrai).
+function estTags(sku){
+  if(!estoqueCarregado) return '<span class="esttag estload">📦 Saldo …</span>';
+  const k = String(sku||'').trim();
+  const s = estoqueSaldos[k];
+  let saldoPill;
+  if(s==null){
+    saldoPill = '<span class="esttag estunk" title="estoque indisponível (Bling fora do ar?)">📦 Saldo —</span>';
+  } else {
+    const n = Number(s);
+    saldoPill = '<span class="esttag '+(n>0?'estok':'estzero')+'" title="Saldo Bling: o que vai SOBRAR no estoque depois que os pedidos do checkout saírem (já está descontado da NF). Vermelho = estoque furado / venda a descoberto.">📦 Saldo Bling: '+n+'</span>';
+  }
+  const c = estoqueCheckout[k];
+  const cn = (c==null ? 0 : Number(c));
+  const chkPill = '<span class="esttag estchk" title="Quanto deste produto está em pedidos no checkout AGORA (este pedido + os outros da fila). É só informação — NÃO desconta do Saldo Bling, porque o saldo já considera isso.">🛒 Em checkout: '+cn+'</span>';
+  return saldoPill+' '+chkPill;
 }
 
 function unitRow(u, isComp){
@@ -858,7 +870,8 @@ function unitRow(u, isComp){
     thumb(u.img)+
     '<div class="icount"><span class="'+(full?'b':'')+'">'+u.bipado+'</span>/'+u.qtd+'</div>'+
     '<div class="idesc"><div class="d">'+esc(u.descricao||u.sku||'item')+'</div>'+
-      '<div class="e">SKU '+esc(u.sku||'—')+' · EAN '+(u.ean?esc(u.ean):'<span class="noean">sem EAN</span>')+' · '+((u.loc||'').trim()?'<span class="loctag">📍 '+esc(u.loc)+'</span>':'<span class="locsem">📍 sem local</span>')+' · '+estTag(u.sku)+'</div></div>'+
+      '<div class="e">SKU '+esc(u.sku||'—')+' · EAN '+(u.ean?esc(u.ean):'<span class="noean">sem EAN</span>')+' · '+((u.loc||'').trim()?'<span class="loctag">📍 '+esc(u.loc)+'</span>':'<span class="locsem">📍 sem local</span>')+'</div>'+
+      '<div class="estoque">'+estTags(u.sku)+'</div></div>'+
     (full?'':'<button class="miniok" onclick="manualUnit('+u._id+')">+1</button>')+
   '</div>';
 }
