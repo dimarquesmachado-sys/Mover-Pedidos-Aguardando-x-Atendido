@@ -2,7 +2,7 @@
 
 // ════════════════════════════════════════════════════════════════════════
 //  GOOD · CHECKOUT OFFLINE — FASE 1 (poller) + FASE 2 (bipagem)   (Mover-Pedidos)
-//  good-checkout-offline v28/06 b7   (a versão real é a const VERSAO abaixo)
+//  good-checkout-offline v28/06 b8   (a versão real é a const VERSAO abaixo)
 // ════════════════════════════════════════════════════════════════════════
 //  Módulo do orquestrador unificado (HTTP-native, sem Express).
 //  Reaproveita o token Bling da GOOD via ../good/tokenManager.
@@ -41,7 +41,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.GOODBKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GOODBKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'good-checkout-offline v28/06 b7';
+const VERSAO     = 'good-checkout-offline v28/06 b8';
 
 // ─── Módulos extraídos (Fase 1: base + nf + etiquetas) ───────────────────
 const base = require('./base');
@@ -448,6 +448,16 @@ function routes(readBody) {
         if (it.sku) skus.add(String(it.sku).trim());
         (it.componentes || []).forEach(c => { if (c.sku) skus.add(String(c.sku).trim()); });
       });
+      // EM CHECKOUT: quanto de cada SKU está comprometido na fila agora — reusa a agregação da separação
+      // (soma por SKU em todos os pedidos prontos, kits explodidos). É INFO, NÃO desconta do saldo Bling:
+      // o saldoVirtual já vem descontado da NF, então subtrair de novo seria conta errada.
+      const checkout = {};
+      try {
+        const sep = montarSeparacao();
+        const mapaSep = {};
+        (sep.linhas || []).forEach(l => { mapaSep[String(l.sku || '').trim()] = l.qtd; });
+        for (const sku of skus) { checkout[sku] = mapaSep[sku] || 0; }
+      } catch (e) {}
       const porSku = async (codigo) => {                       // mesma lógica da busca de produto
         const base0 = String(codigo || '').trim();
         if (!base0) return null;
@@ -468,7 +478,7 @@ function routes(readBody) {
           saldos[sku] = (est.saldoVirtualTotal != null ? est.saldoVirtualTotal : (est.saldoVirtual != null ? est.saldoVirtual : null));
         } catch (e) { saldos[sku] = null; }
       }
-      json(res, 200, { ok: true, saldos: saldos });
+      json(res, 200, { ok: true, saldos: saldos, checkout: checkout });
       return true;
     }
 
