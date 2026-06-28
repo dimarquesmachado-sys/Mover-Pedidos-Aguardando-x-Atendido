@@ -87,6 +87,8 @@ async function zplParaPdf(zpl) {
 }
 
 async function etiquetaPdf(blingId, dir) {
+  // 0) PDF já cacheado nesta pasta → usa direto (offline; não depende do Bling re-servir, ex: Amazon pós-despacho)
+  if (dir) { try { const c = fs.readFileSync(path.join(dir, 'etiqueta.pdf')); if (c && c.length && c.slice(0, 4).toString('latin1') === '%PDF') return c; } catch (e) {} }
   // 1) PDF nativo do Bling — o Bling gera o PDF da etiqueta de qualquer marketplace
   try { const direto = await baixarEtiquetaPDF(blingId); if (direto) return direto; } catch (e) {}
   // 2) fallback offline: ZPL cacheado → Labelary
