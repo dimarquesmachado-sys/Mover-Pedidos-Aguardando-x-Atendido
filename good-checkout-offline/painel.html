@@ -250,7 +250,7 @@
   .sepempty{color:var(--mut);text-align:center;padding:30px 10px}
 
   /* Histórico (no modal) */
-  .histbody{max-height:60vh;overflow:auto;margin:8px 0 4px;text-align:left}
+  .histbody{max-height:60vh;overflow:auto;margin:8px 0 16px;padding-right:6px;text-align:left}
   .histrow{display:flex;align-items:center;gap:10px;padding:9px 2px;border-bottom:1px solid var(--line)}
   .histrow .hmk{flex:0 0 auto;width:9px;height:9px;border-radius:50%}
   .histrow .hmeta{flex:1;min-width:0}
@@ -332,10 +332,10 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b5';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b6';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
-  amazon:{n:'Amazon',c:'#ff9900'}, magalu:{n:'Magalu',c:'#0086ff'},
+  amazon:{n:'Amazon',c:'#b3b9c4'}, magalu:{n:'Magalu',c:'#0086ff'},
   madeira:{n:'Madeira',c:'#8a5a2b'}, leroy:{n:'Leroy Merlin',c:'#78be20'}, carrefour:{n:'Carrefour',c:'#0653a3'},
   olist:{n:'Olist',c:'#7b3ff2'}, b2w:{n:'Americanas',c:'#ed1c24'}, mercadoshops:{n:'MercadoShops',c:'#2d3277'},
   outro:{n:'Outro',c:'#94a3b8'}
