@@ -157,6 +157,9 @@
   .lfs{font-size:11px;color:var(--mut);font-family:ui-monospace,monospace;margin-top:2px}
   .lfinp{flex:0 0 104px;width:104px;padding:9px 8px;border-radius:9px;background:var(--bg);border:2px solid var(--ac);color:#fff;font-size:16px;font-weight:800;text-align:center;font-family:ui-monospace,monospace}
   .lfinp:focus{outline:none;border-color:var(--ok)}
+  /* localização no row da bipagem — visual rápido de tem/não tem */
+  .idesc .e .loctag{background:#13243f;border:1px solid var(--ac);color:#cfe0ff;border-radius:6px;padding:1px 6px;font-weight:700;white-space:nowrap}
+  .idesc .e .locsem{background:#3a2a10;border:1px solid var(--warn);color:#ffd9a8;border-radius:6px;padding:1px 6px;font-weight:700;white-space:nowrap}
 
   @media(max-width:720px){
     .main{flex-direction:column}
@@ -341,7 +344,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b7';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b8';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#b3b9c4'}, magalu:{n:'Magalu',c:'#0086ff'},
@@ -818,7 +821,7 @@ function unitRow(u, isComp){
     thumb(u.img)+
     '<div class="icount"><span class="'+(full?'b':'')+'">'+u.bipado+'</span>/'+u.qtd+'</div>'+
     '<div class="idesc"><div class="d">'+esc(u.descricao||u.sku||'item')+'</div>'+
-      '<div class="e">SKU '+esc(u.sku||'—')+' · EAN '+(u.ean?esc(u.ean):'<span class="noean">sem EAN</span>')+'</div></div>'+
+      '<div class="e">SKU '+esc(u.sku||'—')+' · EAN '+(u.ean?esc(u.ean):'<span class="noean">sem EAN</span>')+' · '+((u.loc||'').trim()?'<span class="loctag">📍 '+esc(u.loc)+'</span>':'<span class="locsem">📍 sem local</span>')+'</div></div>'+
     (full?'':'<button class="miniok" onclick="manualUnit('+u._id+')">+1</button>')+
   '</div>';
 }
