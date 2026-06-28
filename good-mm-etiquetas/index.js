@@ -34,6 +34,7 @@ const VERSAO = 'good-mm-etiquetas v27/06 b2';
 
 const ENVIOS = 'https://envios.madeiramadeira.com.br';
 const MM_PUB = 'https://marketplace.madeiramadeira.com.br/v1'; // API pública (token) p/ enriquecer NF + pedido_mm
+const PORTAL = 'https://painelmarketplace.madeiramadeira.com.br'; // Portal (ZPL térmico 10x15 — PÚBLICO, sem token/sessão)
 const agent = new https.Agent({ family: 4, keepAlive: false });
 
 const DATA_FILE = (process.env.GOOD_MM_DATA || path.join(os.tmpdir(), 'good-mm-mapa.json'));
@@ -169,6 +170,46 @@ async function pdfPorBatch(batch) {
   return null;
 }
 
+// ── Download do ZPL térmico (10x15) pelo lote ────────────────────────
+// Endpoint PÚBLICO do Portal MM: sem TOKENMM, sem sessão (confirmado — retorna
+// application/zpl só com o lote_id). Por isso usa um fetch próprio (não o
+// baixarPorUrl, que manda token + exige %PDF). Retorna o ZPL cru:
+// N blocos ^XA...^XZ, 1 por volume, cada um uma imagem ~816x1218 = 10x15.
+function baixarZplPorUrl(fullUrl) {
+  return new Promise((resolve) => {
+    const headers = { 'Accept': 'application/zpl, text/plain, */*', 'User-Agent': 'good-mm-etiquetas/1.0' };
+    let req;
+    try {
+      req = https.request(fullUrl, { method: 'GET', agent, headers, timeout: 30000 }, (resp) => {
+        const chunks = [];
+        resp.on('data', c => chunks.push(c));
+        resp.on('end', () => {
+          const txt = Buffer.concat(chunks).toString('utf8');
+          const temZpl = txt.indexOf('^XA') !== -1 && txt.indexOf('^XZ') !== -1;
+          resolve({ ok: resp.statusCode >= 200 && resp.statusCode < 300 && temZpl,
+            statusCode: resp.statusCode, contentType: resp.headers['content-type'] || null,
+            temZpl, length: txt.length, zpl: txt, url: fullUrl });
+        });
+      });
+    } catch (e) { return resolve({ ok: false, erro: 'URL inválida: ' + e.message }); }
+    req.on('timeout', () => { req.destroy(); resolve({ ok: false, erro: 'timeout (30s)' }); });
+    req.on('error', (e) => resolve({ ok: false, erro: e.message }));
+    req.end();
+  });
+}
+
+// Baixa o ZPL de um lote, com 1 retentativa.
+async function zplPorBatch(batch) {
+  if (!batch) return null;
+  const url = PORTAL + '/painel/v2/api/mm-envios/lotes/imprimir/etiquetas?lote_id=' + encodeURIComponent(batch) + '&format=zpl';
+  for (let t = 0; t < 2; t++) {
+    const r = await baixarZplPorUrl(url);
+    if (r.ok && r.zpl) return r.zpl;
+    await sleep(600);
+  }
+  return null;
+}
+
 // Acha o registro do lote no mapa por uma chave de busca (order_id MM, ou NF).
 // chave pode ser string/number; testa byOrder direto e por NF.
 function acharLote(chave) {
@@ -294,6 +335,7 @@ module.exports = {
   routes,
   // exportado p/ o checkout usar no passo 3 do etiquetaPdf:
   pdfPorBatch,
+  zplPorBatch,
   acharLote,
   etiquetaMmPdf
 };
