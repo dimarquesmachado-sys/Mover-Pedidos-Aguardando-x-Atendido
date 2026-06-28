@@ -30,9 +30,10 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
-const VERSAO = 'good-mm-etiquetas v27/06 b1';
+const VERSAO = 'good-mm-etiquetas v27/06 b2';
 
 const ENVIOS = 'https://envios.madeiramadeira.com.br';
+const MM_PUB = 'https://marketplace.madeiramadeira.com.br/v1'; // API pública (token) p/ enriquecer NF + pedido_mm
 const agent = new https.Agent({ family: 4, keepAlive: false });
 
 const DATA_FILE = (process.env.GOOD_MM_DATA || path.join(os.tmpdir(), 'good-mm-mapa.json'));
@@ -58,13 +59,45 @@ function salvarMapa(m) {
   catch (e) { return false; }
 }
 
+// GET na API pública do MM (host marketplace) com o token. Resolve null em erro.
+function mmPublicGet(pathRel) {
+  return new Promise((resolve) => {
+    const token = process.env.GOOD_MM_TOKEN || '';
+    if (!token) return resolve(null);
+    const headers = { 'TOKENMM': token, 'Accept': 'application/json', 'User-Agent': 'good-mm-etiquetas/1.0' };
+    let req;
+    try {
+      req = https.request(MM_PUB + pathRel, { method: 'GET', agent, headers, timeout: 20000 }, (resp) => {
+        const chunks = [];
+        resp.on('data', c => chunks.push(c));
+        resp.on('end', () => { try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8'))); } catch (e) { resolve(null); } });
+      });
+    } catch (e) { return resolve(null); }
+    req.on('timeout', () => { req.destroy(); resolve(null); });
+    req.on('error', () => resolve(null));
+    req.end();
+  });
+}
+
+// Busca NF (número) + pedido_mm de um pedido MM (id_pedido) pela API pública.
+async function enriquecerPedido(orderId) {
+  const j = await mmPublicGet('/pedido/id/' + encodeURIComponent(orderId));
+  const d = j && (j.data || (Array.isArray(j) ? j[0] : null));
+  if (!d) return null;
+  let nf = null;
+  if (Array.isArray(d.faturamento) && d.faturamento[0] && d.faturamento[0].numero != null) nf = String(d.faturamento[0].numero);
+  const pedidoMm = d.pedido_mm != null ? String(d.pedido_mm) : null;
+  return { nf, pedidoMm };
+}
+
 // Recebe a lista de lotes da extensão e atualiza o mapa.
-// Cada lote esperado: { batch, status, order_id|orders:[{order_id}], objects:[sro], file, nf? }
-// Só guarda lotes PRONTOS (status 2 e com batch).
-function aplicarLotes(lotes) {
+// Cada lote esperado: { batch, status, order_id|orders:[{order_id}], objects:[sro], file }
+// Só guarda lotes PRONTOS (status 2 e com batch). Enriquece com NF + pedido_mm (1x por pedido)
+// pra o checkout poder casar por numeroLoja OU NF OU pedido_mm.
+async function aplicarLotes(lotes) {
   const m = lerMapa();
   if (!m.byOrder) m.byOrder = {};
-  let novos = 0, atualizados = 0;
+  let novos = 0, atualizados = 0, enriquecidos = 0;
   for (const lote of (Array.isArray(lotes) ? lotes : [])) {
     if (!lote) continue;
     const batch = lote.batch ?? lote.lote ?? null;
@@ -79,16 +112,23 @@ function aplicarLotes(lotes) {
     else if (lote.order_id != null) orderIds = [String(lote.order_id)];
     for (let i = 0; i < orderIds.length; i++) {
       const oid = orderIds[i];
+      const ant = m.byOrder[oid] || null;
       const reg = { batch: String(batch), sro: sros[i] || sros[0] || null, file, status: 2,
-        nf: lote.nf != null ? String(lote.nf) : (m.byOrder[oid] && m.byOrder[oid].nf) || null, ts: Date.now() };
-      if (m.byOrder[oid]) atualizados++; else novos++;
+        nf: (ant && ant.nf) || (lote.nf != null ? String(lote.nf) : null),
+        pedido_mm: (ant && ant.pedido_mm) || null, ts: Date.now() };
+      // enriquece (NF + pedido_mm) só se ainda faltar algo — 1x por pedido
+      if (!reg.nf || !reg.pedido_mm) {
+        try { const ex = await enriquecerPedido(oid); if (ex) { reg.nf = reg.nf || ex.nf; reg.pedido_mm = reg.pedido_mm || ex.pedidoMm; enriquecidos++; } } catch (e) {}
+        await sleep(250);
+      }
+      if (ant) atualizados++; else novos++;
       m.byOrder[oid] = reg;
     }
   }
   m.updatedAt = Date.now();
   m.total = Object.keys(m.byOrder).length;
   salvarMapa(m);
-  return { novos, atualizados, total: m.total };
+  return { novos, atualizados, enriquecidos, total: m.total };
 }
 
 // ── Download do PDF pelo batch (host envios + TOKENMM) ────────────────
@@ -140,7 +180,7 @@ function acharLote(chave) {
   if (m.byOrder) {
     for (const oid of Object.keys(m.byOrder)) {
       const r = m.byOrder[oid];
-      if (r && r.nf && String(r.nf) === k) return r;
+      if (r && ((r.nf && String(r.nf) === k) || (r.pedido_mm && String(r.pedido_mm) === k))) return r;
     }
   }
   return null;
@@ -210,9 +250,9 @@ function routes(/* readBody */) {
       if (!autorizado(req, urlObj, body && body.key)) { res.writeHead(401, corsHeaders()); res.end(JSON.stringify({ erro: 'chave inválida (X-MM-Key / ?k= / body.key)' })); return true; }
       if (!body) { res.writeHead(400, corsHeaders()); res.end(JSON.stringify({ erro: 'JSON inválido' })); return true; }
       const lotes = body.lotes || body.data || (Array.isArray(body) ? body : []);
-      const r = aplicarLotes(lotes);
+      const r = await aplicarLotes(lotes);
       res.writeHead(200, Object.assign({ 'Content-Type': 'application/json; charset=utf-8' }, corsHeaders()));
-      res.end(JSON.stringify({ ok: true, recebidos: Array.isArray(lotes) ? lotes.length : 0, novos: r.novos, atualizados: r.atualizados, total_no_mapa: r.total }, null, 2));
+      res.end(JSON.stringify({ ok: true, recebidos: Array.isArray(lotes) ? lotes.length : 0, novos: r.novos, atualizados: r.atualizados, enriquecidos: r.enriquecidos, total_no_mapa: r.total }, null, 2));
       return true;
     }
 
