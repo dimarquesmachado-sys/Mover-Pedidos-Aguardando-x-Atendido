@@ -78,8 +78,19 @@ async function comTokenRenewable(fn) {
 async function _fluxoNFeML(tokenBling) {
   const { inicial, final } = getPeriodoNF();
   const lista = await getNFesAutorizadas(tokenBling, inicial, final);
-  const batch = lista.slice(0, MAX_NFE);
-  console.log(`[GOOD F3-NFeML] janela ${NF_JANELA_DIAS}d (${inicial}→${final}) | ${lista.length} NF autorizadas | processando ${batch.length}`);
+
+  // A lista vem da MAIS ANTIGA para a mais NOVA. Uma NF que o Bling não enviou
+  // ao ML é SEMPRE recente. Por isso: (1) descartamos as já resolvidas hoje e
+  // (2) priorizamos as MAIS NOVAS antes de cortar em MAX_NFE.
+  // Antes era lista.slice(0, MAX_NFE) = as 60 mais ANTIGAS (já resolvidas);
+  // as recentes ficavam fora do lote e o F3 automático nunca as pegava — só
+  // funcionava o disparo manual por NF (/run/nfe-ml/:id).
+  const pendentes = lista
+    .filter(nf => !jaProcessado('F3', nf.id))
+    .sort((a, b) => Number(b.id) - Number(a.id)); // id maior = mais recente
+  const batch = pendentes.slice(0, MAX_NFE);
+
+  console.log(`[GOOD F3-NFeML] janela ${NF_JANELA_DIAS}d (${inicial}→${final}) | ${lista.length} autorizadas | ${pendentes.length} pendentes | processando ${batch.length} (mais recentes)`);
 
   let mlToken = null;
   try {
