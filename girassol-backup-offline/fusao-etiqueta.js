@@ -151,6 +151,11 @@ function linhaNFRasterZPL(d, fimImagem) {
 // ═══ FUNDE — escolhe o modo automático pelo tipo da etiqueta ═══
 function fundirEtiquetaComDanfe(zplEtiqueta, dados) {
   const z = String(zplEtiqueta);
+  // PROTECAO: se a etiqueta JA traz a chave da NF (ex: Shopee vem fundida), nao funde de novo.
+  const _chaveNF = onlyDigits(dados && dados.chave);
+  if (_chaveNF.length === 44 && onlyDigits(z).includes(_chaveNF)) {
+    return { modo: 'ja-fundida', zpl: z };
+  }
   const amostra = tiraDanfeZPL(dados, 0);
   const stripH = amostra.alturaTotal;
   // maior imagem ^GFA (não encolhe via ZPL)
