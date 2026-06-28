@@ -90,6 +90,11 @@
   .scard.semetiq{border:2px solid var(--err);background:#2a1216}
   .scard.semetiq:hover{background:#371820}
   .setag{margin-left:auto;background:var(--err);color:#fff;font-size:10px;font-weight:800;padding:2px 7px;border-radius:5px;text-transform:uppercase}
+  .voltag{background:#7a3e12;color:#ffd9a8;border:1px solid #c47a2e;font-size:10px;font-weight:800;padding:2px 7px;border-radius:5px;white-space:nowrap}
+  .dvol{background:#3a1d08;border:2px solid #c47a2e;border-radius:11px;padding:11px 14px;margin:10px 0;color:#ffd9a8;font-size:14px;font-weight:700;line-height:1.4}
+  .dvol b{color:#ffb259;font-size:16px}
+  .mvol{background:#3a1d08;border:2px solid #c47a2e;border-radius:11px;padding:13px 15px;margin-bottom:16px;color:#ffd9a8;font-size:17px;font-weight:800;text-align:center;line-height:1.35}
+  .mvol span{display:block;margin-top:5px;font-size:13px;font-weight:600;color:#e8c79f}
   .scard .rep{margin-top:7px}
 
   /* detalhe / bipagem */
@@ -327,7 +332,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b2';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b3';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#ff9900'}, magalu:{n:'Magalu',c:'#0086ff'},
@@ -346,6 +351,19 @@ const $ = id => document.getElementById(id);
 const norm = c => String(c||'').trim().replace(/\s+/g,'');
 const esc = s => String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 function toast(m){ const t=$('toast'); t.textContent=m; t.classList.add('show'); clearTimeout(t._t); t._t=setTimeout(()=>t.classList.remove('show'),1800); }
+
+// ── Madeira Madeira: etiqueta é PDF (não passa por ZPL) e pode ter 2+ volumes ──
+function ehPedidoMadeira(id){
+  const p = (listaCache||[]).find(x=>String(x.id)===String(id));
+  if(p) return p.marketplace==='madeira' || !!p.etiqueta_mm;
+  return !!(pedidoAtual && String(pedidoAtual.bling_id)===String(id) && (pedidoAtual.marketplace==='madeira' || pedidoAtual.etiqueta_mm));
+}
+function volumesDoPedido(id){
+  const p = (listaCache||[]).find(x=>String(x.id)===String(id));
+  if(p && p.volumes) return p.volumes;
+  if(pedidoAtual && String(pedidoAtual.bling_id)===String(id) && pedidoAtual.volumes) return pedidoAtual.volumes;
+  return 1;
+}
 
 const opIn = $('operador');
 opIn.value = localStorage.getItem('gbkp_op') || '';
@@ -521,8 +539,8 @@ async function imprimirEtiquetaZebra(id){
 // ── chave Zebra(ZPL) ↔ A4(PDF) p/ a ETIQUETA (a NF é sempre A4) ──
 function modoEtiqueta(){ return localStorage.getItem('gbkp_modo_etiq')==='a4' ? 'a4' : 'zebra'; }
 async function imprimirEtiqueta(id, zpl){
-  if(modoEtiqueta()==='a4'){
-    window.open(location.origin+'/good-checkout-offline/etiqueta-pdf/'+id, '_blank');  // abre o PDF — você imprime pelo navegador
+  if(modoEtiqueta()==='a4' || ehPedidoMadeira(id)){
+    window.open(location.origin+'/good-checkout-offline/etiqueta-pdf/'+id, '_blank');  // PDF (Madeira ou modo A4) — imprime pelo navegador
   }else{
     const z = zpl || await fetch('/good-checkout-offline/etiqueta/'+id).then(r=>r.text());
     await imprimirZPL(z);  // Zebra (QZ Tray)
@@ -663,6 +681,7 @@ function renderLista(){
         '<span class="chk'+((p.tem_nf||p.nf_numero)?'':' off')+'" title="Nota Fiscal">🧾<i>'+((p.tem_nf||p.nf_numero)?'✓':'✗')+'</i></span>'+
         '<span class="badge" style="background:'+m.c+'">'+m.n+'</span>'+
         '<span class="num">'+esc(p.numero)+'</span>'+
+        (p.volumes>1?'<span class="voltag">📦 '+p.volumes+' vol</span>':'')+
         (resvOutro?'<span class="resvtag">🟠 '+esc(resvOutro)+'</span>':'')+
         (p.conferido?'<span class="donetag">✓</span>':'')+
       '</div>'+
@@ -750,6 +769,7 @@ function renderDetail(){
     '</div>'+
     '<div class="cli">'+esc(p.cliente||'')+'</div>'+
     nfBar+
+    (volumesDoPedido(p.bling_id)>1 ? '<div class="dvol">📦 <b>'+volumesDoPedido(p.bling_id)+' VOLUMES</b> — este pedido sai em '+volumesDoPedido(p.bling_id)+' caixas. Vão imprimir '+volumesDoPedido(p.bling_id)+' etiquetas (1 por caixa) + a NF marcada VOLUME 1/'+volumesDoPedido(p.bling_id)+', 2/'+volumesDoPedido(p.bling_id)+'…</div>' : '')+
     '<div class="scanrow">'+
       '<div class="qtdwrap"><label>Qtd</label><input id="qtdConf" type="number" value="1" min="1" max="999"/></div>'+
       '<input id="scan" autocomplete="off" placeholder="bipe o código de barras do item…"/>'+
@@ -882,8 +902,8 @@ async function finalizar(modo){
   modoFinalizando = (modo==='a4') ? 'a4' : 'simp';
   const id = pedidoAtual.bling_id;
   const temNf = !!pedidoAtual.nf;
-  if(modoEtiqueta()==='a4'){
-    // ETIQUETA em modo A4: UMA aba só com etiqueta + NF mescladas (o navegador bloqueava a 2ª aba)
+  if(modoEtiqueta()==='a4' || ehPedidoMadeira(id)){
+    // Madeira (PDF) ou modo A4: UMA aba só com etiqueta(s) + NF fundidas — Madeira multi-volume vem intercalado e carimbado
     window.open(location.origin+'/good-checkout-offline/imprimir/'+id, '_blank');
     abrirConfirmacao();
     return;
@@ -909,8 +929,11 @@ async function finalizar(modo){
 
 function abrirConfirmacao(){
   const md=$('modal');
+  const _id = pedidoAtual ? pedidoAtual.bling_id : '';
+  const _vol = volumesDoPedido(_id);
   md.innerHTML =
     '<div class="mbox">'+
+      (_vol>1 ? '<div class="mvol">📦 ATENÇÃO: '+_vol+' VOLUMES<span>Monte '+_vol+' caixas e cole 1 etiqueta em cada. Cada caixa leva sua via da NF carimbada (VOLUME 1/'+_vol+', 2/'+_vol+'…).</span></div>' : '')+
       '<div class="mtit">Etiqueta e NF saíram certas?</div>'+
       '<div class="msub">Confira a impressora/abas. Só finalize se saiu OK — assim, se der problema, o pedido <b>continua na tela</b> e você reimprime sem perder.</div>'+
       '<div class="mbtns">'+
@@ -924,7 +947,7 @@ function abrirConfirmacao(){
 function fecharConfirmacao(){ const md=$('modal'); md.classList.remove('show'); md.innerHTML=''; setTimeout(()=>{const s=$('scan'); if(s) s.focus();},60); }
 async function reimprimirModal(){
   const id = pedidoAtual.bling_id;
-  if(modoEtiqueta()==='a4'){ window.open(location.origin+'/good-checkout-offline/imprimir/'+id, '_blank'); toast('🖨 reenviado'); return; }
+  if(modoEtiqueta()==='a4' || ehPedidoMadeira(id)){ window.open(location.origin+'/good-checkout-offline/imprimir/'+id, '_blank'); toast('🖨 reenviado'); return; }
   if(modoFinalizando==='simp'){
     let res;
     try{ res = await imprimirEtiquetaZebra(id); }catch(e){ toast('Falha etiqueta: '+e.message); return; }
