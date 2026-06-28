@@ -387,8 +387,9 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC) {
     const conteudoEtiqueta = await baixarEtiqueta(id); await sleep(PAUSA_MS);
     if (conteudoEtiqueta && conteudoEtiqueta.indexOf('^XA') >= 0) {       // ZPL de verdade (ML, Shopee...)
       fs.writeFileSync(_etqPath, conteudoEtiqueta); temEtiqueta = true;
-    } else if (conteudoEtiqueta) {                                        // veio conteúdo mas NÃO é ZPL → etiqueta PDF (Amazon)
-      // captura o PDF nativo do Bling AGORA (ele ainda serve); depois do despacho ele para de servir e o email ficaria sem etiqueta
+    } else if (conteudoEtiqueta || mkt === 'amazon') {                    // veio não-ZPL, OU é Amazon (cujo link ZPL vem nulo) → etiqueta é PDF
+      // captura o PDF nativo do Bling AGORA (ele ainda serve); depois do despacho ele para de servir e o email ficaria sem etiqueta.
+      // o "|| mkt==='amazon'" pega o caso da Amazon (sem ZPL); ML/Shopee com falha transitória NÃO caem aqui (ficam p/ o próximo ciclo).
       try { const pdf = await baixarEtiquetaPDF(id); await sleep(PAUSA_MS); if (pdf && pdf.length) { fs.writeFileSync(_etqPdfPath, pdf); temEtiqueta = true; etqEhPdf = true; } } catch (e) {}
     }
   }
