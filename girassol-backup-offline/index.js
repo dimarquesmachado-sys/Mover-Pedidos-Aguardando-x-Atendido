@@ -1261,7 +1261,7 @@ function routes(readBody) {
       try {
         if (fs.existsSync(_zplFile)) zplMM = fs.readFileSync(_zplFile, 'utf8');
         else {
-          const mmEtq = require('../good-mm-etiquetas');
+          const mmEtq = require('../girassol-mm-etiquetas');
           let regMM = null;
           for (const c of [snap.numero_loja, snap.nf && snap.nf.numero].filter(Boolean)) { regMM = mmEtq.acharLote(c); if (regMM) break; }
           if (regMM && regMM.batch) {
