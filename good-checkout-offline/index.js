@@ -41,7 +41,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.GOODBKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GOODBKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'good-checkout-offline v28/06 b4';
+const VERSAO     = 'good-checkout-offline v28/06 b5';
 
 // ─── Módulos extraídos (Fase 1: base + nf + etiquetas) ───────────────────
 const base = require('./base');
@@ -870,6 +870,22 @@ function montarSeparacaoPorPedido(mktFiltro) {
   lista.sort((a, b) => String(a.numero).localeCompare(String(b.numero), 'pt', { numeric: true }));
   const total_itens = lista.reduce((s, p) => s + p.itens.reduce((ss, i) => ss + i.qtd, 0), 0);
   return { ok: true, mkt: mktFiltro || null, total_pedidos: lista.length, total_itens, counts, pedidos: lista };
+}
+
+// ─── Adesivo "VOLUME i/N" (ZPL 10x15) — impresso ANTES de cada etiqueta Madeira ──
+// Sem ^PW/^LL de propósito: usa a config da impressora (não trunca a etiqueta dos
+// Correios que vem depois). Centralizado via ^FB. Layout AJUSTÁVEL após teste real.
+function zplEscape(s) {
+  return String(s == null ? '' : s).replace(/[\^~]/g, ' ').replace(/[\x00-\x1f]/g, '').trim();
+}
+function bannerVolumeZpl(vol, total, numero, cliente) {
+  const c = zplEscape(cliente);
+  return '^XA\n^CI28\n'
+    + '^FO40,290^GB736,520,8^FS\n'
+    + '^FO40,340^A0N,140,140^FB736,2,0,C^FDVOLUME ' + vol + '/' + total + '^FS\n'
+    + '^FO40,650^A0N,50,50^FB736,1,0,C^FDPedido ' + zplEscape(numero) + '^FS\n'
+    + (c ? '^FO40,720^A0N,40,40^FB736,1,0,C^FD' + c + '^FS\n' : '')
+    + '^XZ\n';
 }
 
 // ─── Rotas HTTP (namespaced) ────────────────────────────────────────────
@@ -1887,6 +1903,72 @@ function routes(readBody) {
           res.end(pdf);
         }
       } catch (e) { json(res, 500, { erro: 'falha ao gerar', detalhe: e.message }); }
+      return true;
+    }
+
+    // ETIQUETA MADEIRA na ZEBRA (10x15 térmico). Monta, POR VOLUME:
+    //   [adesivo VOLUME i/N] + [etiqueta Correios 10x15] + [DANFE-simplificada].
+    // O ZPL do Madeira é PÚBLICO (zplPorBatch — sem token/sessão); cacheia em
+    // etiqueta-correios.zpl p/ reimpressão. A DANFE-simp reaproveita gerarDanfeSimplificadoZPL.
+    // uso: /good-checkout-offline/etiqueta-madeira-zpl/{idOuNumero}   (?nodanfe=1 → só etiqueta+adesivo)
+    if (method === 'GET' && p.startsWith('/good-checkout-offline/etiqueta-madeira-zpl/')) {
+      const pedidoId = p.split('/').filter(Boolean).pop();
+      let dir = path.join(CACHE_DIR, String(pedidoId));
+      let snap = readJson(path.join(dir, 'pedido.json'), null);
+      if (!snap) {
+        const man = manifest();
+        const achado = Object.keys(man).find(k => String(man[k].numero) === String(pedidoId));
+        if (achado) { dir = path.join(CACHE_DIR, String(achado)); snap = readJson(path.join(dir, 'pedido.json'), null); }
+      }
+      if (!snap) { json(res, 404, { erro: 'pedido não cacheado', pedido: pedidoId }); return true; }
+
+      // 1) ZPL do Madeira (etiquetas dos Correios — 1 bloco ^XA..^XZ por volume). Cache → ou baixa (público).
+      let zplMM = null;
+      const _zplFile = path.join(dir, 'etiqueta-correios.zpl');
+      try {
+        if (fs.existsSync(_zplFile)) zplMM = fs.readFileSync(_zplFile, 'utf8');
+        else {
+          const mmEtq = require('../good-mm-etiquetas');
+          let regMM = null;
+          for (const c of [snap.numero_loja, snap.nf && snap.nf.numero].filter(Boolean)) { regMM = mmEtq.acharLote(c); if (regMM) break; }
+          if (regMM && regMM.batch) {
+            zplMM = await mmEtq.zplPorBatch(regMM.batch);
+            if (zplMM && zplMM.indexOf('^XA') !== -1) { try { fs.writeFileSync(_zplFile, zplMM); } catch (e) {} }
+          }
+        }
+      } catch (e) {}
+      if (!zplMM) { json(res, 502, { erro: 'ZPL do Madeira indisponível (lote não está no mapa, ou Portal fora do ar)' }); return true; }
+      const blocos = zplMM.match(/\^XA[\s\S]*?\^XZ/g) || [];
+      if (!blocos.length) { json(res, 502, { erro: 'ZPL do Madeira sem etiquetas (^XA...^XZ)' }); return true; }
+      const N = blocos.length;
+
+      // 2) DANFE-simplificada em ZPL (mesmo padrão da /danfe-simp: cache nf-simp.json → ou ao vivo)
+      let danfeZpl = '';
+      if (!/[?&]nodanfe=1/.test(urlObj.search || '')) {
+        try {
+          let dados = readJson(path.join(dir, 'nf-simp.json'), null);
+          if (!dados) {
+            let nfId = snap.nf && snap.nf.id;
+            if (!nfId) {   // re-cache antigo pode ter perdido o nf.id → re-busca e CURA o snapshot (igual /danfe-simp)
+              try { const _nf = await nfDoPedido(path.basename(dir)); if (_nf && _nf.id) { nfId = _nf.id; snap.nf = _nf; snap.tem_nf = true; writeJson(path.join(dir, 'pedido.json'), snap); } } catch (e) {}
+            }
+            if (nfId) { dados = await dadosNFSimp(nfId, snap.numero); if (dados) { try { writeJson(path.join(dir, 'nf-simp.json'), dados); } catch (e) {} } }
+          }
+          if (dados) danfeZpl = gerarDanfeSimplificadoZPL(dados) || '';
+        } catch (e) {}
+      }
+
+      // 3) monta: [adesivo i/N] + [Correios i] + [DANFE-simp]  por volume
+      const cliente = (snap.cliente || '').slice(0, 28);
+      const numero = snap.numero || pedidoId;
+      let out = '';
+      for (let i = 0; i < N; i++) {
+        out += bannerVolumeZpl(i + 1, N, numero, cliente);
+        out += blocos[i] + '\n';
+        if (danfeZpl) out += danfeZpl + '\n';
+      }
+      res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end(out);
       return true;
     }
 
