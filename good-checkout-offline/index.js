@@ -2,7 +2,7 @@
 
 // ════════════════════════════════════════════════════════════════════════
 //  GOOD · CHECKOUT OFFLINE — FASE 1 (poller) + FASE 2 (bipagem)   (Mover-Pedidos)
-//  good-checkout-offline v28/06 b5   (a versão real é a const VERSAO abaixo)
+//  good-checkout-offline v28/06 b6   (a versão real é a const VERSAO abaixo)
 // ════════════════════════════════════════════════════════════════════════
 //  Módulo do orquestrador unificado (HTTP-native, sem Express).
 //  Reaproveita o token Bling da GOOD via ../good/tokenManager.
@@ -41,7 +41,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.GOODBKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GOODBKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'good-checkout-offline v28/06 b5';
+const VERSAO     = 'good-checkout-offline v28/06 b6';
 
 // ─── Módulos extraídos (Fase 1: base + nf + etiquetas) ───────────────────
 const base = require('./base');
@@ -412,6 +412,24 @@ function routes(readBody) {
       if (!ped) { json(res, 404, { erro: 'pedido não cacheado' }); return true; }
       const conf = readJson(CONFERIDOS_FILE, {});
       ped.conferido = conf[id] || null;
+      // localização FRESCA: sobrescreve o loc congelado no snapshot pelo cache de localização ATUAL.
+      // assim, um produto recém-localizado em OUTRO pedido não volta a pedir localização aqui.
+      try {
+        const lc = locCache();
+        const fresco = (sku, atual) => {
+          const s = String(sku || '').trim();
+          if (s) {
+            if (lc[s] != null) return lc[s];
+            if (lc[s.toUpperCase()] != null) return lc[s.toUpperCase()];
+            if (lc[s.toLowerCase()] != null) return lc[s.toLowerCase()];
+          }
+          return atual || '';
+        };
+        (ped.itens || []).forEach(it => {
+          it.loc = fresco(it.sku, it.loc);
+          (it.componentes || []).forEach(c => { c.loc = fresco(c.sku, c.loc); });
+        });
+      } catch (e) {}
       json(res, 200, ped);
       return true;
     }
