@@ -2,7 +2,7 @@
 
 // ════════════════════════════════════════════════════════════════════════
 //  GOOD · CHECKOUT OFFLINE — FASE 1 (poller) + FASE 2 (bipagem)   (Mover-Pedidos)
-//  good-checkout-offline v28/06 b8   (a versão real é a const VERSAO abaixo)
+//  good-checkout-offline v28/06 b9   (a versão real é a const VERSAO abaixo)
 // ════════════════════════════════════════════════════════════════════════
 //  Módulo do orquestrador unificado (HTTP-native, sem Express).
 //  Reaproveita o token Bling da GOOD via ../good/tokenManager.
@@ -41,7 +41,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.GOODBKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GOODBKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'good-checkout-offline v28/06 b8';
+const VERSAO     = 'good-checkout-offline v28/06 b9';
 
 // ─── Módulos extraídos (Fase 1: base + nf + etiquetas) ───────────────────
 const base = require('./base');
@@ -458,14 +458,19 @@ function routes(readBody) {
         (sep.linhas || []).forEach(l => { mapaSep[String(l.sku || '').trim()] = l.qtd; });
         for (const sku of skus) { checkout[sku] = mapaSep[sku] || 0; }
       } catch (e) {}
-      const porSku = async (codigo) => {                       // mesma lógica da busca de produto
+      const porSku = async (codigo) => {                       // estoque AO VIVO — NÃO usa produtoDetalhe (tem cache do ciclo)
         const base0 = String(codigo || '').trim();
         if (!base0) return null;
         const variantes = [...new Set([base0, base0.toUpperCase(), base0.toLowerCase()])];
         for (const v of variantes) {
           const r = await blingGet(`/produtos?codigo=${encodeURIComponent(v)}&limite=1`);
           const it = r.ok && r.data && r.data.data && r.data.data[0];
-          if (it && it.id) return await produtoDetalhe(it.id);
+          if (it && it.id) {
+            // se a busca já trouxe o saldo, usa (1 call); senão, pega o detalhe AO VIVO (sem cache) → saldo sempre fresco
+            if (it.estoque && (it.estoque.saldoVirtualTotal != null || it.estoque.saldoVirtual != null)) return it;
+            const d = await blingGet(`/produtos/${it.id}`);
+            return (d.ok && d.data && d.data.data) ? d.data.data : null;
+          }
         }
         return null;
       };
