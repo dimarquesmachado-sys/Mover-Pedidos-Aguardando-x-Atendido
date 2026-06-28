@@ -142,6 +142,12 @@
   .foot{flex:0 0 auto;text-align:center;color:var(--mut);font-size:11px;padding:6px;border-top:1px solid var(--line)}
   .modal{position:fixed;inset:0;background:rgba(0,0,0,.65);display:none;align-items:center;justify-content:center;z-index:100}
   .modal.show{display:flex}
+  /* lightbox: foto do produto em tamanho cheio ao clicar no thumb */
+  .lightbox{position:fixed;inset:0;background:rgba(0,0,0,.85);display:none;align-items:center;justify-content:center;z-index:200;cursor:zoom-out;padding:20px;box-sizing:border-box}
+  .lightbox.show{display:flex}
+  .lightbox img{max-width:92vw;max-height:88vh;object-fit:contain;border-radius:10px;background:#fff;box-shadow:0 12px 48px rgba(0,0,0,.6)}
+  .imgclose{position:absolute;top:14px;right:18px;width:44px;height:44px;border-radius:50%;background:rgba(0,0,0,.55);color:#fff;font-size:22px;display:flex;align-items:center;justify-content:center;cursor:pointer}
+  img.thumb{cursor:zoom-in}
   .mbox{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:22px;max-width:460px;width:90%;position:relative}
   .mx{position:absolute;top:14px;right:14px;background:var(--card2);border:1px solid var(--line);color:var(--mut);border-radius:8px;width:30px;height:30px;font-size:15px;cursor:pointer;line-height:1}
   .mx:hover{color:var(--tx);border-color:var(--mut)}
@@ -322,6 +328,7 @@
 <div class="foot">cache local · se a tela não mudar após deploy, dê <b>Ctrl+Shift+R</b></div>
 <div class="toast" id="toast"></div>
 <div class="modal" id="modal"></div>
+<div class="lightbox" id="lightbox" onclick="fecharImagem()"></div>
 
 <!-- GAVETA: Lista de Separação -->
 <div class="sepback" id="sepback" onclick="fecharSeparacao()"></div>
@@ -344,7 +351,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b8';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b9';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#b3b9c4'}, magalu:{n:'Magalu',c:'#0086ff'},
@@ -828,8 +835,17 @@ function unitRow(u, isComp){
 
 function thumb(src){
   if(!src) return '<div class="thumb noimg">📦</div>';
-  return '<img class="thumb" src="'+esc(src)+'" loading="lazy" referrerpolicy="no-referrer" onerror="this.outerHTML=\'<div class=&quot;thumb noimg&quot;>📦</div>\'"/>';
+  return '<img class="thumb" src="'+esc(src)+'" loading="lazy" referrerpolicy="no-referrer" onclick="abrirImagem(this.src)" onerror="this.outerHTML=\'<div class=&quot;thumb noimg&quot;>📦</div>\'"/>';
 }
+
+// ── 🔍 LIGHTBOX: clicar na foto do produto abre a imagem inteira (sem corte) ──
+function abrirImagem(src){
+  if(!src) return;
+  const lb = $('lightbox'); if(!lb) return;
+  lb.innerHTML = '<img src="'+esc(src)+'" referrerpolicy="no-referrer"/><div class="imgclose">✕</div>';
+  lb.classList.add('show');
+}
+function fecharImagem(){ const lb=$('lightbox'); if(!lb) return; lb.classList.remove('show'); lb.innerHTML=''; setTimeout(()=>{const s=$('scan'); if(s) s.focus();},60); }
 
 function renderItens(){
   if(!pedidoAtual) return;
