@@ -332,7 +332,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b3';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b5';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#ff9900'}, magalu:{n:'Magalu',c:'#0086ff'},
@@ -536,11 +536,21 @@ async function imprimirEtiquetaZebra(id){
   return { fundida:false, duas:true };
 }
 
+// ── Madeira na ZEBRA: adesivo VOLUME i/N + etiqueta Correios 10x15 + DANFE-simp ──
+// O servidor monta o ZPL: [adesivo][Correios 10x15][DANFE-simp] por volume.
+// A etiqueta dos Correios é PÚBLICA (baixada por lote) → imprime nativa na térmica.
+async function imprimirMadeiraZebra(id){
+  const z = await fetch(location.origin+'/good-checkout-offline/etiqueta-madeira-zpl/'+id)
+    .then(r=>{ if(!r.ok) throw new Error('servidor '+r.status); return r.text(); });
+  await imprimirZPL(z);
+}
+
 // ── chave Zebra(ZPL) ↔ A4(PDF) p/ a ETIQUETA (a NF é sempre A4) ──
 function modoEtiqueta(){ return localStorage.getItem('gbkp_modo_etiq')==='a4' ? 'a4' : 'zebra'; }
 async function imprimirEtiqueta(id, zpl){
+  if(ehPedidoMadeira(id) && modoEtiqueta()!=='a4'){ await imprimirMadeiraZebra(id); return; }   // Madeira na Zebra: ZPL montado (adesivo+Correios+DANFE)
   if(modoEtiqueta()==='a4' || ehPedidoMadeira(id)){
-    window.open(location.origin+'/good-checkout-offline/etiqueta-pdf/'+id, '_blank');  // PDF (Madeira ou modo A4) — imprime pelo navegador
+    window.open(location.origin+'/good-checkout-offline/etiqueta-pdf/'+id, '_blank');  // Madeira em A4, ou modo A4 — imprime pelo navegador
   }else{
     const z = zpl || await fetch('/good-checkout-offline/etiqueta/'+id).then(r=>r.text());
     await imprimirZPL(z);  // Zebra (QZ Tray)
@@ -902,6 +912,14 @@ async function finalizar(modo){
   modoFinalizando = (modo==='a4') ? 'a4' : 'simp';
   const id = pedidoAtual.bling_id;
   const temNf = !!pedidoAtual.nf;
+  // Madeira na ZEBRA: adesivo VOLUME i/N + etiqueta Correios 10x15 + DANFE-simp (ZPL montado no servidor)
+  if(ehPedidoMadeira(id) && modoEtiqueta()!=='a4'){
+    toast('🏷️ Imprimindo etiqueta(s) Madeira…');
+    try{ await imprimirMadeiraZebra(id); }
+    catch(e){ toast('Falha etiqueta Madeira: '+e.message); return; }
+    abrirConfirmacao();
+    return;
+  }
   if(modoEtiqueta()==='a4' || ehPedidoMadeira(id)){
     // Madeira (PDF) ou modo A4: UMA aba só com etiqueta(s) + NF fundidas — Madeira multi-volume vem intercalado e carimbado
     window.open(location.origin+'/good-checkout-offline/imprimir/'+id, '_blank');
@@ -947,6 +965,10 @@ function abrirConfirmacao(){
 function fecharConfirmacao(){ const md=$('modal'); md.classList.remove('show'); md.innerHTML=''; setTimeout(()=>{const s=$('scan'); if(s) s.focus();},60); }
 async function reimprimirModal(){
   const id = pedidoAtual.bling_id;
+  if(ehPedidoMadeira(id) && modoEtiqueta()!=='a4'){   // Madeira na Zebra: reenvia o ZPL montado (adesivo+Correios+DANFE)
+    try{ await imprimirMadeiraZebra(id); }catch(e){ toast('Falha etiqueta Madeira: '+e.message); return; }
+    toast('🖨 reenviado'); return;
+  }
   if(modoEtiqueta()==='a4' || ehPedidoMadeira(id)){ window.open(location.origin+'/good-checkout-offline/imprimir/'+id, '_blank'); toast('🖨 reenviado'); return; }
   if(modoFinalizando==='simp'){
     let res;
