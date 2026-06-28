@@ -148,6 +148,15 @@
   .mtit{font-size:19px;font-weight:700;margin-bottom:8px}
   .msub{font-size:14px;color:var(--mut);margin-bottom:18px;line-height:1.45}
   .mbtns{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+  /* pop-up de localização obrigatória no checkout */
+  .locforce{max-height:46vh;overflow:auto;margin:6px 0 16px;padding-right:6px;display:flex;flex-direction:column;gap:8px}
+  .lfrow{display:flex;align-items:center;gap:10px;background:var(--card2);border:1px solid var(--line);border-radius:10px;padding:8px}
+  .lfrow .thumb{width:38px;height:38px;flex:0 0 38px;border-radius:7px}
+  .lfinfo{flex:1;min-width:0}
+  .lfd{font-size:13px;font-weight:700;color:var(--tx);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .lfs{font-size:11px;color:var(--mut);font-family:ui-monospace,monospace;margin-top:2px}
+  .lfinp{flex:0 0 104px;width:104px;padding:9px 8px;border-radius:9px;background:var(--bg);border:2px solid var(--ac);color:#fff;font-size:16px;font-weight:800;text-align:center;font-family:ui-monospace,monospace}
+  .lfinp:focus{outline:none;border-color:var(--ok)}
 
   @media(max-width:720px){
     .main{flex-direction:column}
@@ -332,7 +341,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b6';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b7';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#b3b9c4'}, magalu:{n:'Magalu',c:'#0086ff'},
@@ -747,7 +756,7 @@ async function selecionar(id){
 function prepararPedido(ped){
   const grupos = [], unidades = [];
   let uid = 0;
-  const novaUnid = (o)=>{ const u={ _id:uid++, sku:o.sku||'', ean:o.ean||null, descricao:o.descricao||'', img:o.img||null, qtd:Number(o.qtd||0), bipado:0 }; unidades.push(u); return u; };
+  const novaUnid = (o)=>{ const u={ _id:uid++, sku:o.sku||'', ean:o.ean||null, descricao:o.descricao||'', img:o.img||null, qtd:Number(o.qtd||0), bipado:0, loc:o.loc||'' }; unidades.push(u); return u; };
   for(const it of (ped.itens||[])){
     if(it.tipo==='kit' && Array.isArray(it.componentes) && it.componentes.length){
       const comps = it.componentes.map(c=>novaUnid(c));
@@ -909,6 +918,9 @@ function etiquetaJaTemDanfe(mkt, zpl, nf){
 }
 
 async function finalizar(modo){
+  // 📍 BLOQUEIO: itens sem localização precisam ser cadastrados antes de imprimir
+  // (cadastro incremental — a próxima separação já vem com o local)
+  if(faltaLocalizacao()){ abrirPopupLocalizacao(modo); return; }
   modoFinalizando = (modo==='a4') ? 'a4' : 'simp';
   const id = pedidoAtual.bling_id;
   const temNf = !!pedidoAtual.nf;
@@ -943,6 +955,70 @@ async function finalizar(modo){
     if(temNf) window.open(location.origin+'/good-checkout-offline/danfe/'+id, '_blank');
   }
   abrirConfirmacao();   // abre JÁ — não espera o DANFE terminar de imprimir
+}
+
+// ── 📍 LOCALIZAÇÃO OBRIGATÓRIA NO CHECKOUT ──────────────────────────────
+// Se algum item do pedido está sem localização, obriga o estoquista a
+// cadastrar (mín. 2 caracteres) antes de imprimir. Salva no Bling + cache
+// via /salvar-localizacao — assim a próxima separação já vem com o local.
+function unidadesSemLoc(){
+  if(!pedidoAtual || !Array.isArray(pedidoAtual.unidades)) return [];
+  const vistos = {}, out = [];
+  for(const u of pedidoAtual.unidades){
+    const sku = (u.sku||'').trim();
+    if(!sku) continue;                       // sem SKU não dá pra salvar no Bling
+    if((u.loc||'').trim()) continue;          // já tem localização
+    if(vistos[sku]) continue;                 // não repete o mesmo SKU
+    vistos[sku] = true; out.push(u);
+  }
+  return out;
+}
+function faltaLocalizacao(){ return unidadesSemLoc().length > 0; }
+
+function abrirPopupLocalizacao(modo){
+  const faltam = unidadesSemLoc();
+  const md = $('modal');
+  md.innerHTML =
+    '<div class="mbox">'+
+      '<div class="mtit">📍 Falta localização</div>'+
+      '<div class="msub">'+faltam.length+' produto(s) sem local cadastrado. Você está pegando agora — anote onde está na prateleira (mín. 2 caracteres). Fica salvo p/ a próxima separação já vir com o local.</div>'+
+      '<div class="locforce">'+
+        faltam.map((u,i)=>
+          '<div class="lfrow">'+
+            thumb(u.img)+
+            '<div class="lfinfo"><div class="lfd">'+esc(u.descricao||u.sku)+'</div><div class="lfs">SKU '+esc(u.sku)+'</div></div>'+
+            '<input class="lfinp" id="lf-'+i+'" data-sku="'+esc(u.sku)+'" maxlength="20" style="text-transform:uppercase" placeholder="ex: A12" autocomplete="off" oninput="validarLocForce()" onkeydown="if(event.key===\'Enter\'){event.preventDefault();var n=document.getElementById(\'lf-\'+('+(i+1)+'));if(n){n.focus();}else{salvarLocForce(\''+modo+'\');}}" />'+
+          '</div>'
+        ).join('')+
+      '</div>'+
+      '<div class="mbtns">'+
+        '<button class="btn sec" onclick="fecharPopupLocalizacao()">✗ Cancelar</button>'+
+        '<button class="btn ok" id="lfok" onclick="salvarLocForce(\''+modo+'\')" disabled>✓ Salvar e imprimir</button>'+
+      '</div>'+
+    '</div>';
+  md.classList.add('show');
+  setTimeout(()=>{ const f=$('lf-0'); if(f) f.focus(); }, 60);
+}
+function validarLocForce(){
+  let ok = true;
+  document.querySelectorAll('.lfinp').forEach(inp=>{ if((inp.value||'').trim().length < 2) ok = false; });
+  const b = $('lfok'); if(b) b.disabled = !ok;
+}
+function fecharPopupLocalizacao(){ const md=$('modal'); md.classList.remove('show'); md.innerHTML=''; setTimeout(()=>{const s=$('scan'); if(s) s.focus();},60); }
+async function salvarLocForce(modo){
+  const inps = Array.from(document.querySelectorAll('.lfinp'));
+  for(const inp of inps){ if((inp.value||'').trim().length < 2){ toast('Preencha todas as localizações (mín. 2 caracteres)'); return; } }
+  const b = $('lfok'); if(b){ b.disabled = true; b.textContent = 'Salvando…'; }
+  for(const inp of inps){
+    const sku = inp.getAttribute('data-sku');
+    const loc = (inp.value||'').trim().toUpperCase();
+    const r = await postJson('/good-checkout-offline/salvar-localizacao', { sku, localizacao: loc, op: opAtual() }).catch(()=>null);
+    if(!r || r.ok===false){ toast('Falha ao salvar '+sku+' — tente de novo'); if(b){ b.disabled=false; b.textContent='✓ Salvar e imprimir'; } return; }
+    if(pedidoAtual && Array.isArray(pedidoAtual.unidades)) pedidoAtual.unidades.forEach(u=>{ if((u.sku||'')===sku) u.loc = loc; });
+  }
+  toast('✓ Localização(ões) salva(s)');
+  fecharPopupLocalizacao();
+  finalizar(modo);   // agora passa no bloqueio e segue pra impressão
 }
 
 function abrirConfirmacao(){
