@@ -172,6 +172,7 @@
   .idesc .estoque .esttag.estzero{background:#3a1212;border:1px solid var(--err);color:#ffb4b4}
   .idesc .estoque .esttag.estunk,.idesc .estoque .esttag.estload{background:var(--card2);border:1px solid var(--line);color:var(--mut)}
   .idesc .estoque .esttag.estchk{background:#1c2433;border:1px solid #3a4658;color:#aebacb}
+  .estbar{display:flex;justify-content:flex-end;margin:2px 0 6px}
 
   @media(max-width:720px){
     .main{flex-direction:column}
@@ -357,7 +358,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b12';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b13';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#b3b9c4'}, magalu:{n:'Magalu',c:'#0086ff'},
@@ -815,6 +816,7 @@ function renderDetail(){
       '<input id="scan" autocomplete="off" placeholder="bipe o código de barras do item…"/>'+
     '</div>'+
     '<div class="hint">opcional: digite a <b>Qtd</b> (ex: 100) e bipe 1× — senão soma 1 por bipada · kit conta os componentes</div>'+
+    '<div class="estbar"><button class="btn sec sm" onclick="atualizarEstoque()" title="rebuscar o saldo de estoque do Bling, ao vivo">🔄 Atualizar estoque</button></div>'+
     '<div id="bItens"></div>'+
     '<div class="dbtns">'+
       (souAdmin() ? '<button class="btn warn" onclick="imprimirAtual()">'+(modoEtiqueta()==='a4'?'📄 Abrir etiqueta':'🖨 Só etiqueta')+'</button>' : '')+
@@ -856,12 +858,20 @@ function estTags(sku){
     saldoPill = '<span class="esttag estunk" title="estoque indisponível (Bling fora do ar?)">📦 Saldo —</span>';
   } else {
     const n = Number(s);
-    saldoPill = '<span class="esttag '+(n>0?'estok':'estzero')+'" title="Saldo Bling: o que vai SOBRAR no estoque depois que os pedidos do checkout saírem (já está descontado da NF). Vermelho = estoque furado / venda a descoberto.">📦 Saldo Bling: '+n+'</span>';
+    saldoPill = '<span class="esttag '+(n>0?'estok':'estzero')+'" title="Saldo Bling: o que vai SOBRAR no estoque depois que os pedidos do checkout saírem.">📦 Saldo Bling: '+n+'</span>';
   }
   const c = estoqueCheckout[k];
   const cn = (c==null ? 0 : Number(c));
-  const chkPill = '<span class="esttag estchk" title="Quanto deste produto está em pedidos no checkout AGORA (este pedido + os outros da fila). É só informação — NÃO desconta do Saldo Bling, porque o saldo já considera isso.">🛒 Em checkout: '+cn+'</span>';
+  const chkPill = '<span class="esttag estchk" title="Quanto deste produto está em pedidos no checkout AGORA (este pedido + os outros da fila). NÃO desconta do Saldo Bling.">🛒 Em checkout: '+cn+'</span>';
   return saldoPill+' '+chkPill;
+}
+
+// 🔄 rebusca o saldo de estoque do Bling ao vivo (sem fechar/reabrir o pedido)
+function atualizarEstoque(){
+  if(!pedidoAtual) return;
+  estoqueSaldos = {}; estoqueCheckout = {}; estoqueCarregado = false;   // zera + mostra "…" enquanto rebusca (falha → "—")
+  renderItens();
+  carregarEstoque(pedidoAtual.bling_id);
 }
 
 function unitRow(u, isComp){
