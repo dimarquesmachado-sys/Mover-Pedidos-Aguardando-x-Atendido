@@ -12,7 +12,7 @@ const { BLING_BASE, CACHE_DIR, SIT_ATENDIDO, SIT_VERIFICADO, SYNC_ON, JANELA_DIA
   sleep, ensureDir, readJson, writeJson, dataISO, json, html, manifest, salvarManifest, skuEanCache, locCache, salvarLoc,
   salvarSkuEan, lerIndiceEan, lerReservas, lerOperadores, lerAdmins, ehAdmin, blingGet, blingWrite, moverSituacao } = base;
 
-const FLEX_KEYWORDS = ['mercado envios flex', 'entrega local', 'vapt', 'shopee entrega direta'];
+const FLEX_KEYWORDS = ['mercado envios flex', 'entrega local', 'vapt', 'entrega direta'];
 
 function servicoDoPedido(det) {
   if (!det) return '';
