@@ -275,8 +275,8 @@ function gerarDanfeSimplificadoZPL(dados) {
   return z.join('\n');
 }
 
-// tira COMPACTA da NF (só o essencial: cabeçalho + NF-e/Série/data/natureza + barcode + chave)
-// é o que vai EMBAIXO da etiqueta Melhor Envio (não a DANFE inteira)
+// tira COMPACTA da NF em PDF — REPRODUZ o mesmo conteúdo do tiraDanfeZPL (a DANFE reduzida que JÁ EXISTE),
+// só que em PDF, porque a etiqueta Melhor Envio é IMAGEM e a fusão tem que ser no nível do PDF (ZPL não encolhe imagem).
 async function gerarTiraNF(dados) {
   const W = 283.46;                 // 10 cm em pt
   const ML = 10, MR = 10;
@@ -293,11 +293,9 @@ async function gerarTiraNF(dados) {
     const tw = f.widthOfTextAtSize(String(s), size);
     page.drawText(String(s), { x: ML + (cw - tw) / 2, y, size, font: f, color: preto });
   };
-  const nat = (typeof dados.natureza === 'object')
-    ? (dados.natureza.descricao || dados.natureza.nome || 'Venda')
-    : (String(dados.natureza || '').trim() || 'Venda');
-  put('DANFE Simplificado - Etiqueta', 8, true); y -= 13;
-  put('NF-e ' + dados.numero + '   Serie ' + (dados.serie || '1') + '   ' + fmtData(dados.dataEmissao) + '   ' + nat, 6.5, false); y -= 10;
+  const tipo = String(dados.tipo) === '0' ? '0-Entrada' : '1-Saida';   // idêntico ao tiraDanfeZPL
+  put('DANFE SIMPLIFICADO - ETIQUETA', 8, true); y -= 13;
+  put(tipo + '   NFe ' + (dados.numero || '') + '   Serie ' + (dados.serie || '1') + '   ' + fmtData(dados.dataEmissao), 6.5, false); y -= 10;
   desenharCode128(page, ML + 8, y - 26, cw - 16, 26, onlyDigits(dados.chave)); y -= 30;
   put(fmtChave(dados.chave), 6, false);
   return Buffer.from(await pdf.save());
