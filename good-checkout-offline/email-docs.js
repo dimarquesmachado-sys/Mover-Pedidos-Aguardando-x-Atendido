@@ -17,6 +17,20 @@ const { dadosNFSimp, nfDoPedido } = require('./nf');
 const { gerarDanfeSimplificado } = require('./danfe-simplificado');
 const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 
+// junta vários PDFs num PDF só (cada um vira uma página) — usado p/ etiqueta + DANFE com barcode
+async function mesclarPdfs(buffers) {
+  try {
+    const { PDFDocument } = require('pdf-lib');
+    const out = await PDFDocument.create();
+    for (const buf of buffers) {
+      const src = await PDFDocument.load(buf);
+      const pgs = await out.copyPages(src, src.getPageIndices());
+      pgs.forEach(p => out.addPage(p));
+    }
+    return Buffer.from(await out.save());
+  } catch (e) { return null; }
+}
+
 async function enviarEmailDocs(id, quem) {
   let nodemailer;
   try { nodemailer = require('nodemailer'); } catch (e) { return { ok: false, erro: 'nodemailer não instalado — atualize o package.json e redeploy' }; }
@@ -31,7 +45,7 @@ async function enviarEmailDocs(id, quem) {
     try { const nf = await nfDoPedido(id); if (nf && nf.id) ped.nf = nf; } catch (e) {}
   }
   // 1º TENTA FUNDIR etiqueta + DANFE num PDF só (mesma fusão da impressão) — não-Shopee, com NF
-  let fundiu = false;
+  let fundiu = false, duasPaginas = false;
   if (!ehShopee && ped.nf) {
     try {
       const dir = path.join(ARQUIVO_DIR, String(id));
@@ -42,7 +56,15 @@ async function enviarEmailDocs(id, quem) {
         if (!dados && nfId) dados = await dadosNFSimp(nfId, ped.numero);
         if (dados) {
           const r = fundirEtiquetaComDanfe(zplEtq, dados);
-          if (r.modo !== 'declinou') {
+          // RASTER que perde a chave (ex.: etiqueta Melhor Envio): a tira mínima vem SEM o barcode, e a
+          // imagem (diferente do TikTok) NÃO traz a chave da NF → manda etiqueta (pág 1) + DANFE completa COM barcode (pág 2).
+          const rasterSemChave = (r.modo === 'linha-raster' || r.modo === 'declinou') && ped.marketplace !== 'tiktok';
+          if (rasterSemChave) {
+            const etqPdf = await etiquetaPdf(id, dir);
+            const simpPdf = await gerarDanfeSimplificado(dados);
+            const merged = (etqPdf && simpPdf) ? await mesclarPdfs([etqPdf, simpPdf]) : null;
+            if (merged) { anexos.push({ filename: `etiqueta-${ped.numero || id}.pdf`, content: merged }); temEtq = true; temDanfe = true; fundiu = true; duasPaginas = true; }
+          } else if (r.modo !== 'declinou') {
             const fundPdf = await zplParaPdf(r.zpl);
             if (fundPdf) { anexos.push({ filename: `etiqueta-${ped.numero || id}.pdf`, content: fundPdf }); temEtq = true; temDanfe = true; fundiu = true; }
           }
@@ -72,11 +94,13 @@ async function enviarEmailDocs(id, quem) {
   try {
     const transporter = nodemailer.createTransport({ host: SMTP_HOST, port: SMTP_PORT, secure: SMTP_PORT === 465, auth: { user: EMAIL_USER, pass: EMAIL_PASS } });
     const mktNome = MKT_NOME[ped.marketplace] || ped.marketplace || '—';
-    const oQueVai = fundiu
-      ? 'etiqueta + DANFE numa folha só (1 etiqueta)'
-      : (ehShopee && temEtq)
-        ? 'etiqueta de postagem (já inclui a DANFE embaixo)'
-        : [temEtq ? 'etiqueta' : null, temDanfe ? 'DANFE simplificado' : null].filter(Boolean).join(' + ');
+    const oQueVai = duasPaginas
+      ? 'etiqueta + DANFE simplificada com a chave (PDF de 2 páginas)'
+      : fundiu
+        ? 'etiqueta + DANFE numa folha só (1 etiqueta)'
+        : (ehShopee && temEtq)
+          ? 'etiqueta de postagem (já inclui a DANFE embaixo)'
+          : [temEtq ? 'etiqueta' : null, temDanfe ? 'DANFE simplificado' : null].filter(Boolean).join(' + ');
     const corpo = 'Reimpressão solicitada pelo Checkout Offline.\n\n'
       + 'Pedido: ' + (ped.numero || id) + '\n'
       + 'Cliente: ' + (ped.cliente || '—') + '\n'
