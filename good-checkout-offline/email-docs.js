@@ -17,16 +17,23 @@ const { dadosNFSimp, nfDoPedido } = require('./nf');
 const { gerarDanfeSimplificado } = require('./danfe-simplificado');
 const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 
-// junta vários PDFs num PDF só (cada um vira uma página) — usado p/ etiqueta + DANFE com barcode
-async function mesclarPdfs(buffers) {
+// junta etiqueta + DANFE numa ÚNICA página: etiqueta encolhida no topo, DANFE embaixo
+async function fundirNumaPagina(etqBuf, danfeBuf) {
   try {
     const { PDFDocument } = require('pdf-lib');
     const out = await PDFDocument.create();
-    for (const buf of buffers) {
-      const src = await PDFDocument.load(buf);
-      const pgs = await out.copyPages(src, src.getPageIndices());
-      pgs.forEach(p => out.addPage(p));
-    }
+    const [etq] = await out.embedPdf(etqBuf);
+    const [dan] = await out.embedPdf(danfeBuf);
+    const ew = etq.width, eh = etq.height, dw = dan.width, dh = dan.height;
+    const W = ew, H = eh, GAP = 6;
+    const dMaxH = H * 0.42;                            // DANFE ocupa até 42% de baixo
+    const dScale = Math.min(W / dw, dMaxH / dh);
+    const dW = dw * dScale, dH = dh * dScale;
+    const eScale = Math.min(1, (H - dH - GAP) / eh);  // etiqueta encolhe pra caber no resto
+    const eW = ew * eScale, eH = eh * eScale;
+    const page = out.addPage([W, H]);
+    page.drawPage(etq, { x: (W - eW) / 2, y: H - eH, width: eW, height: eH });   // etiqueta no topo
+    page.drawPage(dan, { x: (W - dW) / 2, y: 0,       width: dW, height: dH });  // DANFE embaixo
     return Buffer.from(await out.save());
   } catch (e) { return null; }
 }
@@ -45,7 +52,7 @@ async function enviarEmailDocs(id, quem) {
     try { const nf = await nfDoPedido(id); if (nf && nf.id) ped.nf = nf; } catch (e) {}
   }
   // 1º TENTA FUNDIR etiqueta + DANFE num PDF só (mesma fusão da impressão) — não-Shopee, com NF
-  let fundiu = false, duasPaginas = false;
+  let fundiu = false, umaFolha = false;
   if (!ehShopee && ped.nf) {
     try {
       const dir = path.join(ARQUIVO_DIR, String(id));
@@ -62,8 +69,8 @@ async function enviarEmailDocs(id, quem) {
           if (rasterSemChave) {
             const etqPdf = await etiquetaPdf(id, dir);
             const simpPdf = await gerarDanfeSimplificado(dados);
-            const merged = (etqPdf && simpPdf) ? await mesclarPdfs([etqPdf, simpPdf]) : null;
-            if (merged) { anexos.push({ filename: `etiqueta-${ped.numero || id}.pdf`, content: merged }); temEtq = true; temDanfe = true; fundiu = true; duasPaginas = true; }
+            const merged = (etqPdf && simpPdf) ? await fundirNumaPagina(etqPdf, simpPdf) : null;
+            if (merged) { anexos.push({ filename: `etiqueta-${ped.numero || id}.pdf`, content: merged }); temEtq = true; temDanfe = true; fundiu = true; umaFolha = true; }
           } else if (r.modo !== 'declinou') {
             const fundPdf = await zplParaPdf(r.zpl);
             if (fundPdf) { anexos.push({ filename: `etiqueta-${ped.numero || id}.pdf`, content: fundPdf }); temEtq = true; temDanfe = true; fundiu = true; }
@@ -94,8 +101,8 @@ async function enviarEmailDocs(id, quem) {
   try {
     const transporter = nodemailer.createTransport({ host: SMTP_HOST, port: SMTP_PORT, secure: SMTP_PORT === 465, auth: { user: EMAIL_USER, pass: EMAIL_PASS } });
     const mktNome = MKT_NOME[ped.marketplace] || ped.marketplace || '—';
-    const oQueVai = duasPaginas
-      ? 'etiqueta + DANFE simplificada com a chave (PDF de 2 páginas)'
+    const oQueVai = umaFolha
+      ? 'etiqueta + DANFE numa folha só, com o código da chave'
       : fundiu
         ? 'etiqueta + DANFE numa folha só (1 etiqueta)'
         : (ehShopee && temEtq)
