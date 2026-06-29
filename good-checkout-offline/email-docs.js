@@ -14,7 +14,7 @@ const { BLING_BASE, CACHE_DIR, SIT_ATENDIDO, SIT_VERIFICADO, SYNC_ON, JANELA_DIA
 
 const { etiquetaPdf, zplParaPdf } = require('./etiquetas');
 const { dadosNFSimp, nfDoPedido } = require('./nf');
-const { gerarDanfeSimplificado } = require('./danfe-simplificado');
+const { gerarDanfeSimplificado, gerarTiraNF } = require('./danfe-simplificado');
 const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 
 // junta etiqueta + DANFE numa ÚNICA página: etiqueta encolhida no topo, DANFE embaixo
@@ -67,9 +67,9 @@ async function enviarEmailDocs(id, quem) {
           // imagem (diferente do TikTok) NÃO traz a chave da NF → manda etiqueta (pág 1) + DANFE completa COM barcode (pág 2).
           const rasterSemChave = (r.modo === 'linha-raster' || r.modo === 'declinou') && ped.marketplace !== 'tiktok';
           if (rasterSemChave) {
-            const etqPdf = await etiquetaPdf(id, dir);
-            const simpPdf = await gerarDanfeSimplificado(dados);
-            const merged = (etqPdf && simpPdf) ? await fundirNumaPagina(etqPdf, simpPdf) : null;
+            const etqPdf  = await etiquetaPdf(id, dir);
+            const tiraPdf = await gerarTiraNF(dados);   // só a tira compacta (NF + barcode + chave), NÃO a DANFE inteira
+            const merged  = (etqPdf && tiraPdf) ? await fundirNumaPagina(etqPdf, tiraPdf) : null;
             if (merged) { anexos.push({ filename: `etiqueta-${ped.numero || id}.pdf`, content: merged }); temEtq = true; temDanfe = true; fundiu = true; umaFolha = true; }
           } else if (r.modo !== 'declinou') {
             const fundPdf = await zplParaPdf(r.zpl);
