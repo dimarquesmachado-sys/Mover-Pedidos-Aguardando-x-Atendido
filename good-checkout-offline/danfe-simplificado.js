@@ -275,4 +275,32 @@ function gerarDanfeSimplificadoZPL(dados) {
   return z.join('\n');
 }
 
-module.exports = { gerarDanfeSimplificado, gerarDanfeSimplificadoZPL, code128c };
+// tira COMPACTA da NF (só o essencial: cabeçalho + NF-e/Série/data/natureza + barcode + chave)
+// é o que vai EMBAIXO da etiqueta Melhor Envio (não a DANFE inteira)
+async function gerarTiraNF(dados) {
+  const W = 283.46;                 // 10 cm em pt
+  const ML = 10, MR = 10;
+  const cw = W - ML - MR;
+  const pdf = await PDFDocument.create();
+  const font  = await pdf.embedFont(StandardFonts.Courier);
+  const fontB = await pdf.embedFont(StandardFonts.CourierBold);
+  const preto = rgb(0, 0, 0);
+  const H = 82;
+  const page = pdf.addPage([W, H]);
+  let y = H - 12;
+  const put = (s, size, bold) => {
+    const f = bold ? fontB : font;
+    const tw = f.widthOfTextAtSize(String(s), size);
+    page.drawText(String(s), { x: ML + (cw - tw) / 2, y, size, font: f, color: preto });
+  };
+  const nat = (typeof dados.natureza === 'object')
+    ? (dados.natureza.descricao || dados.natureza.nome || 'Venda')
+    : (String(dados.natureza || '').trim() || 'Venda');
+  put('DANFE Simplificado - Etiqueta', 8, true); y -= 13;
+  put('NF-e ' + dados.numero + '   Serie ' + (dados.serie || '1') + '   ' + fmtData(dados.dataEmissao) + '   ' + nat, 6.5, false); y -= 10;
+  desenharCode128(page, ML + 8, y - 26, cw - 16, 26, onlyDigits(dados.chave)); y -= 30;
+  put(fmtChave(dados.chave), 6, false);
+  return Buffer.from(await pdf.save());
+}
+
+module.exports = { gerarDanfeSimplificado, gerarDanfeSimplificadoZPL, code128c, gerarTiraNF };
