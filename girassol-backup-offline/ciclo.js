@@ -400,6 +400,22 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
     }
     if (svcNovos) { salvarManifest(man); console.log(`[GIRABKP] ${svcNovos} servico/flex preenchidos`); }
 
+    // recalcula o flex de quem JÁ tem servico em cache (barato, sem Bling) — pega mudança nas FLEX_KEYWORDS
+    let flexFix = 0;
+    for (const ped of atendidos) {
+      const m = man[ped.id];
+      if (!m || m.servico === undefined) continue;
+      const nf = ehFlex(m.servico);
+      if (m.flex !== nf) {
+        m.flex = nf;
+        const sp = path.join(CACHE_DIR, String(ped.id), 'pedido.json');
+        const sn = readJson(sp, null);
+        if (sn) { sn.flex = nf; writeJson(sp, sn); }
+        flexFix++;
+      }
+    }
+    if (flexFix) { salvarManifest(man); console.log(`[GIRABKP] ${flexFix} flex recalculado`); }
+
     // passo: aquece as LOCALIZAÇÕES que faltam (SKUs a separar) — teto por ciclo (mais alto no force)
     if (listaOk) {
       const sepSkus = montarSeparacao(null).linhas
