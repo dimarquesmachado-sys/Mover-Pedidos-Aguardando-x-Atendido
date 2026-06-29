@@ -358,7 +358,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b78';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b79';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#b3b9c4'}, magalu:{n:'Magalu',c:'#0086ff'}, shein:{n:'Shein',c:'#e0e0e0'},
@@ -565,13 +565,31 @@ async function imprimirEtiquetaZebra(id){
   return { fundida:false, duas:true };
 }
 
-// ── Madeira na ZEBRA: adesivo VOLUME i/N + etiqueta Correios 10x15 + DANFE-simp ──
-// O servidor monta o ZPL: [adesivo][Correios 10x15][DANFE-simp] por volume.
-// A etiqueta dos Correios é PÚBLICA (baixada por lote) → imprime nativa na térmica.
+// imprime um PDF (ex.: etiqueta Melhor Envio do Bling) NA ZEBRA, rasterizado — mesmo cano da etiqueta nativa
+async function imprimirPdfNaZebra(url){
+  await conectarQZ();
+  const printer = await getImpressora();   // a Zebra (térmica)
+  if(!printer) throw new Error('Nenhuma impressora encontrada');
+  const resp = await fetch(url);
+  if(!resp.ok) throw new Error('PDF '+resp.status);
+  const bytes = new Uint8Array(await resp.arrayBuffer());
+  let bin=''; for(let i=0;i<bytes.length;i++) bin+=String.fromCharCode(bytes[i]);
+  const b64 = btoa(bin);
+  const cfg = qz.configs.create(printer);
+  await qz.print(cfg, [{ type:'pixel', format:'pdf', flavor:'base64', data: b64 }]);
+}
+
+// ── Madeira na ZEBRA ──
+// Madeira Envios  → ZPL montado pelo servidor: [adesivo VOLUME i/N][etiqueta Correios 10x15][DANFE-simp].
+// Frete do VENDEDOR (ex.: Melhor Envio) → não tem lote no mapa Madeira (502); a etiqueta está no Bling.
+//   Nesse caso puxa a etiqueta do Bling (PDF) e imprime na Zebra (rasterizada) + a DANFE-simplificada.
 async function imprimirMadeiraZebra(id){
-  const z = await fetch(location.origin+'/girassol-backup-offline/etiqueta-madeira-zpl/'+id)
-    .then(r=>{ if(!r.ok) throw new Error('servidor '+r.status); return r.text(); });
-  await imprimirZPL(z);
+  let r=null;
+  try{ r = await fetch(location.origin+'/girassol-backup-offline/etiqueta-madeira-zpl/'+id); }catch(e){ r=null; }
+  if(r && r.ok){ await imprimirZPL(await r.text()); return; }   // Madeira Envios: ZPL montado (adesivo+Correios+DANFE)
+  // 502/sem lote no mapa = frete do vendedor (Melhor Envio etc.) → etiqueta no Bling, não no Madeira.
+  await imprimirPdfNaZebra(location.origin+'/girassol-backup-offline/etiqueta-pdf/'+id);
+  try{ await imprimirSimplificadoZebra(id); }catch(e){}   // + DANFE-simp, igual ao combo Madeira
 }
 
 // ── chave Zebra(ZPL) ↔ A4(PDF) p/ a ETIQUETA (a NF é sempre A4) ──
