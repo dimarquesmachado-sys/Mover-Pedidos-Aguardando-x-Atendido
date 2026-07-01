@@ -10,6 +10,26 @@ async function getShipmentInfo(token, numeroPedidoLoja) {
     `${ML_API}/orders/${numeroPedidoLoja}`,
     { headers: { Authorization: `Bearer ${token}` } }
   );
+  // Caso PACK (venda multi-item / carrinho): o Bling grava o pack_id como
+  // "número do pedido na loja", e /orders/{pack_id} responde 404 —
+  // comportamento documentado do ML. Aí o shipment vem do /packs/{pack_id}
+  // (todas as ordens do pack compartilham o mesmo shipment).
+  if (resp.status === 404) {
+    const packResp = await fetch(
+      `${ML_API}/packs/${numeroPedidoLoja}`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    if (packResp.ok) {
+      const pack = await packResp.json();
+      const shipmentIdPack = pack?.shipment?.id;
+      if (shipmentIdPack) {
+        console.log(`[AMB mlApi] ${numeroPedidoLoja} é PACK (carrinho) → shipment_id=${shipmentIdPack} via /packs`);
+        return shipmentIdPack;
+      }
+      throw new Error(`AMB ML: pack ${numeroPedidoLoja} sem shipment_id ainda (orders=${(pack?.orders || []).map(o => o.id).join(',') || '—'})`);
+    }
+  }
+
   if (!resp.ok) {
     const txt = await resp.text();
     throw new Error(`AMB ML busca pedido ${numeroPedidoLoja} erro ${resp.status}: ${txt.slice(0, 200)}`);
