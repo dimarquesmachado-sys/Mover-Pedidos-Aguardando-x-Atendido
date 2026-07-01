@@ -169,12 +169,18 @@ async function getNFeDetalhe(token, nfeId) {
 
 async function enviarNFeParaLojaVirtual(token, nfeId) {
   const url = `${BLING_API}/nfe/${nfeId}/enviar-loja-virtual`;
-  await fetchComRetry(
-    url,
-    { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } },
-    `enviar NF=${nfeId} loja virtual`
-  );
-  console.log(`[blingApi] NF ${nfeId} → loja virtual ✓`);
+  await esperarSlot(PAUSA_MS);
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'application/json' }
+  });
+  const data = await resp.json().catch(() => ({}));
+  console.log(`[blingApi] NF ${nfeId} → enviar-loja-virtual HTTP ${resp.status} ${JSON.stringify(data).slice(0, 400)}`);
+  if (resp.status === 401) throw Object.assign(new Error('TOKEN_EXPIRADO'), { code: 401 });
+  if (!(resp.status >= 200 && resp.status < 300)) {
+    throw new Error(`Bling enviar-loja-virtual NF=${nfeId} HTTP ${resp.status}: ${JSON.stringify(data).slice(0, 400)}`);
+  }
+  return { httpStatus: resp.status, data };
 }
 
 // ─── Memória do dia ───────────────────────────────────────────────────────────
