@@ -49,7 +49,22 @@ async function nfDoPedido(id) {
     if (Array.isArray(nf)) nf = nf[0];
     if (nf) return parseNF(nf);
   }
-  // 2) fallback: range de ID no /nfe
+  // 2) vinculo no detalhe do pedido (Bling v3: det.notaFiscal = { id } quando ha NF vinculada).
+  //    Pega NF emitida MUITO depois do pedido (id fora da faixa do passo 3 — ex: dados fiscais corrigidos a mao).
+  try {
+    await sleep(PAUSA_MS);
+    const d = await blingGet(`/pedidos/vendas/${id}`);
+    const det = d && d.data && d.data.data;
+    const raw = det ? (det.notaFiscal != null ? det.notaFiscal : det.nfe) : null;
+    const nfId = (raw && typeof raw === 'object') ? raw.id : raw;
+    if (Number(nfId) > 0) {
+      await sleep(PAUSA_MS);
+      const nd = await blingGet(`/nfe/${nfId}`);
+      const nf = nd && nd.data && nd.data.data;
+      if (nf) return parseNF(nf);
+    }
+  } catch (e) {}
+  // 3) fallback: range de ID no /nfe
   return await acharNFporRange(id);
 }
 
