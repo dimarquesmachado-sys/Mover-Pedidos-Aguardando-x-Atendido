@@ -101,7 +101,7 @@ async function etiquetaPdf(blingId, dir) {
   try {
     const snap = dir ? readJson(path.join(dir, 'pedido.json'), null) : null;
     if (snap && snap.marketplace === 'madeira') {
-      const mm = require('../good-mm-etiquetas');
+      const mm = require('../' + path.basename(__dirname).split('-')[0] + '-mm-etiquetas');  // deriva a empresa da pasta (good/girassol/amb) -> a prova de copy-paste
       const chaves = [snap.numero_loja, snap.nf && snap.nf.numero].filter(Boolean);
       for (const c of chaves) {
         const reg = mm.acharLote(c);
