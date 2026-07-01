@@ -179,6 +179,38 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC) {
       try { const pdf = await baixarEtiquetaPDF(id); await sleep(PAUSA_MS); if (pdf && pdf.length) { fs.writeFileSync(_etqPdfPath, pdf); temEtiqueta = true; etqEhPdf = true; } } catch (e) {}
     }
   }
+  // FALLBACK ML: Bling sem logística cadastrada (ex: pedido que ficou dias travado no ML sem NF —
+  // o Bling não registra o envio e o /logisticas/etiquetas dá 404 pra sempre).
+  // → baixa a etiqueta ZPL direto do Mercado Livre (shipment_labels) com o token ML da empresa.
+  if (!temEtiqueta && mkt === 'ml' && ped.numeroLoja) {
+    try {
+      const { garantirTokenML } = require('../good/mlTokenManager');
+      const { getShipmentInfo } = require('../good/mlApi');
+      const tokenML = await garantirTokenML();
+      const shipmentId = await getShipmentInfo(tokenML, ped.numeroLoja);
+      const r = await fetch(`https://api.mercadolibre.com/shipment_labels?shipment_ids=${shipmentId}&response_type=zpl2`, { headers: { Authorization: `Bearer ${tokenML}` } });
+      if (r.ok) {
+        const buf = await r.buffer();
+        let zpl = null;
+        if (buf && buf.length >= 2 && buf[0] === 0x50 && buf[1] === 0x4B) {   // veio ZIP → extrai o .txt/.zpl de dentro
+          const AdmZip = require('adm-zip');
+          const zip = new AdmZip(buf);
+          const ent = zip.getEntries().find(e => /\.(txt|zpl)$/i.test(e.entryName)) || zip.getEntries()[0];
+          zpl = ent ? ent.getData().toString('utf8') : null;
+        } else if (buf) {
+          zpl = buf.toString('utf8');
+        }
+        if (zpl && zpl.indexOf('^XA') >= 0) {
+          fs.writeFileSync(_etqPath, zpl); temEtiqueta = true;
+          console.log(`[GOODBKP] etiqueta ${ped.numero} baixada DIRETO do ML (fallback, shipment ${shipmentId})`);
+        } else {
+          console.log(`[GOODBKP] fallback ML ${ped.numero}: resposta sem ZPL (etiqueta ainda não liberada no ML?)`);
+        }
+      } else {
+        console.log(`[GOODBKP] fallback ML ${ped.numero}: shipment_labels HTTP ${r.status}`);
+      }
+    } catch (e) { console.log(`[GOODBKP] fallback ML ${ped.numero}: ${String(e.message || e).slice(0, 160)}`); }
+  }
   // MADEIRA MADEIRA não tem etiqueta no Bling. Se a etiqueta já está no mapa MM
   // (gerada por nós e sincronizada pela extensão), conta o pedido como PRONTO.
   let etiquetaMM = false, volumesMM = 1;
