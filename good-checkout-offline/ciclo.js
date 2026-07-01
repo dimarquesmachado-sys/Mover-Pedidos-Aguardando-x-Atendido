@@ -185,7 +185,7 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC) {
   if (!temEtiqueta && mkt === 'ml' && ped.numeroLoja) {
     try {
       const { garantirTokenML } = require('../good/mlTokenManager');
-      const { getShipmentInfo } = require('../good/mlApi');
+      const { getShipmentInfo, getShipmentSubstatus } = require('../good/mlApi');
       const tokenML = await garantirTokenML();
       const shipmentId = await getShipmentInfo(tokenML, ped.numeroLoja);
       const r = await fetch(`https://api.mercadolibre.com/shipment_labels?shipment_ids=${shipmentId}&response_type=zpl2`, { headers: { Authorization: `Bearer ${tokenML}` } });
@@ -207,7 +207,9 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC) {
           console.log(`[GOODBKP] fallback ML ${ped.numero}: resposta sem ZPL (etiqueta ainda não liberada no ML?)`);
         }
       } else {
-        console.log(`[GOODBKP] fallback ML ${ped.numero}: shipment_labels HTTP ${r.status}`);
+        let det400 = ''; try { det400 = (await r.text()).slice(0, 220).replace(/\s+/g, ' '); } catch (e) {}
+        let sub400 = ''; try { const st = await getShipmentSubstatus(tokenML, shipmentId); sub400 = `${st.status}/${st.substatus}`; } catch (e) {}
+        console.log(`[GOODBKP] fallback ML ${ped.numero}: shipment_labels HTTP ${r.status} shipment=${sub400 || '?'} motivo=${det400}`);
       }
     } catch (e) { console.log(`[GOODBKP] fallback ML ${ped.numero}: ${String(e.message || e).slice(0, 160)}`); }
   }
