@@ -34,7 +34,8 @@ const {
   getNFeDetalhe,
   ME_LOJA_IDS,
   jaProcessado,
-  marcarProcessado
+  marcarProcessado,
+  enviarNFeParaLojaVirtual
 } = require('./blingApi');
 const { enviarNFeParaML } = require('./mlApi');
 
@@ -187,13 +188,33 @@ async function enviarNFeUnica(nfeId) {
     const nf = await getNFeDetalhe(tokenBling, nfeId);
     if (!nf) throw new Error(`NF ${nfeId} não encontrada`);
     if (!nf.xml) throw new Error(`NF ${nfeId} (nº ${nf.numero}) sem XML — não está autorizada`);
-    if (!nf.numeroPedidoLoja) throw new Error(`NF ${nfeId} (nº ${nf.numero}) sem numeroPedidoLoja`);
 
-    const mlToken = await garantirTokenML();
-    const result = await enviarNFeParaML(mlToken, nf.numeroPedidoLoja, nf);
-    marcarProcessado('F3', nfeId);
-    _semPendenciaCount.delete(nfeId);
-    return { ok: true, nfeId, numero: nf.numero, numeroPedidoLoja: nf.numeroPedidoLoja, result };
+    // 1ª tentativa: envio NATIVO do Bling → marketplace ("enviar os dados do
+    // Bling"). O Bling é integrador oficial do ML e faz o handshake fiscal
+    // que o push cru de XML não faz — é o caminho correto.
+    try {
+      const result = await enviarNFeParaLojaVirtual(tokenBling, nfeId);
+      marcarProcessado('F3', nfeId);
+      _semPendenciaCount.delete(nfeId);
+      return { ok: true, via: 'bling-loja-virtual', nfeId, numero: nf.numero, result };
+    } catch (eBling) {
+      if (eBling.code === 401 || eBling.message === 'TOKEN_EXPIRADO') throw eBling;
+      console.warn(`[F3-NFeML] envio nativo Bling falhou NF ${nfeId}: ${eBling.message} — tentando push direto no ML`);
+
+      // Fallback: push direto no ML via XML (o método antigo).
+      if (!nf.numeroPedidoLoja) {
+        throw new Error(`Bling enviar-loja-virtual falhou (${eBling.message}) e NF sem numeroPedidoLoja pro fallback`);
+      }
+      const mlToken = await garantirTokenML();
+      try {
+        const result = await enviarNFeParaML(mlToken, nf.numeroPedidoLoja, nf);
+        marcarProcessado('F3', nfeId);
+        _semPendenciaCount.delete(nfeId);
+        return { ok: true, via: 'ml-direto (bling falhou)', nfeId, numero: nf.numero, numeroPedidoLoja: nf.numeroPedidoLoja, result };
+      } catch (eML) {
+        throw new Error(`Ambos falharam — Bling: [${eBling.message}] | ML: [${eML.message}]`);
+      }
+    }
   });
 }
 
