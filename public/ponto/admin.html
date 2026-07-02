@@ -81,6 +81,10 @@
   .periodoBox .pb{background:#10131a;border:1px solid var(--line);border-radius:12px;padding:12px 18px;min-width:118px}
   .periodoBox .pb span{display:block;font-size:10.5px;color:var(--mut);text-transform:uppercase;letter-spacing:.4px;font-weight:600;margin-bottom:4px}
   .periodoBox .pb b{font-size:20px;font-weight:800}
+  .legenda{background:#10131a;border:1px solid var(--line);border-radius:12px;padding:14px 18px;margin-bottom:16px;font-size:12.5px;color:var(--txt);line-height:1.55}
+  .legenda ul{margin:8px 0 0;padding-left:18px}
+  .legenda li{margin-bottom:3px}
+  .legenda .legNota{display:block;margin-top:10px;color:var(--mut);font-style:italic}
   .diaCard.abonado{border-color:rgba(79,140,255,.45)}
   .diaCard.solicit{border-color:#8b6cff;box-shadow:0 0 0 3px rgba(139,108,255,.12)}
   .solTag{color:#a98bff;font-weight:700}
@@ -239,7 +243,7 @@
   </div>
 </div>
 
-<div class="versao" id="versaoBox">Painel de Ponto front v18/06-fer · back …</div>
+<div class="versao" id="versaoBox">Painel de Ponto front v18/06-fer2 · back …</div>
 
 <div id="fotoOvl" class="ovl hide" onclick="if(event.target===this)this.classList.add('hide')">
   <div class="ovlBox">
@@ -416,10 +420,11 @@ async function carregarBatidas(){
 const ABONOS=[['','Normal'],['ferias','Férias'],['folga','Folga'],['atestado','Atestado'],['feriado','Feriado'],['completar','Completar (escala)']];
 function buildHeader(){
   const reais=diasCache.filter(d=>!d.novo && !d.vazio);
-  let tT=0,tP=0,tExtra=0,tDeb=0,tFer=0;
+  let tT=0,tP=0,tExtra=0,tDeb=0,tFer=0,tSab=0;
   reais.forEach(d=>{
     if(d.feriado_trab){ tFer+=d.feriado_trabalhado||0; return; } // fora da extra/previsto
     tT+=d.trabalhado||0; tP+=d.esperado||0; const s=d.saldo_efetivo||0; if(s>0) tExtra+=s; else if(s<0) tDeb+=s;
+    if(d.dow===6 && !d.abono_tipo) tSab+=d.trabalhado||0; // horas de sábado (rodízio)
   });
   const tS=tExtra+tDeb;
   return `<div class="periodoBox">
@@ -428,8 +433,23 @@ function buildHeader(){
     <div class="pb"><span>Horas extras</span><b class="pos">${hhmm(tExtra)}</b></div>
     <div class="pb"><span>Débito (faltou)</span><b class="neg">${hhmm(tDeb)}</b></div>
     <div class="pb"><span>Saldo do período</span><b class="${tS>=0?'pos':'neg'}">${hhmm(tS)}</b></div>
+    <div class="pb"><span>Extras sábado</span><b class="pos">${hhmm(tSab)}</b></div>
     ${tFer>0?`<div class="pb"><span>Feriado trab. (dobro)</span><b class="tagw">${hhmm(tFer)}</b></div>`:''}
-  </div><p class="hint" style="margin-bottom:14px">Mês inteiro. Clique num campo de hora e digite os 4 números (ex.: <b>0800</b> = 08:00) — ele pula sozinho pro próximo e salva ao sair do dia. <b class="pos">Verde</b> = hora extra · <b class="neg">vermelho</b> = o que faltou.</p>`;
+  </div>
+  <div class="legenda">
+    <b>Como ler este resumo (referência p/ contabilidade):</b>
+    <ul>
+      <li><b>Trabalhado</b>: horas efetivamente trabalhadas no período.</li>
+      <li><b>Previsto</b>: carga da jornada esperada no período.</li>
+      <li><b>Horas extras</b>: o que passou da jornada, além da tolerância de 10 min/dia (Súmula 366). Já <b>sem</b> o feriado.</li>
+      <li><b>Débito (faltou)</b>: horas abaixo da jornada nos dias que ficaram devendo.</li>
+      <li><b>Saldo do período</b>: diferença líquida (extras − débito).</li>
+      <li><b>Extras sábado</b>: horas trabalhadas em sábado (rodízio). Estão <b>dentro</b> das horas extras — destacadas caso a convenção pague percentual diferente.</li>
+      <li><b>Feriado trab. (dobro)</b>: horas em feriado trabalhado, <b>separadas</b> das extras, para pagamento em dobro (sem risco de pagar em duplicidade).</li>
+    </ul>
+    <span class="legNota">Percentuais e tratamento fiscal (dobro, DSR, adicional de sábado, etc.) conforme a convenção da categoria — definição do contador.</span>
+  </div>
+  <p class="hint" style="margin-bottom:14px">Mês inteiro. Clique num campo de hora e digite os 4 números (ex.: <b>0800</b> = 08:00) — ele pula sozinho pro próximo e salva ao sair do dia. <b class="pos">Verde</b> = hora extra · <b class="neg">vermelho</b> = o que faltou.</p>`;
 }
 function apTag(d){
   let t='';
@@ -834,8 +854,8 @@ if(TOKEN) abrir();
 
 // versão (front fixa + back buscada do servidor)
 fetch(API+'/versao').then(r=>r.json()).then(j=>{
-  const el=document.getElementById('versaoBox'); if(el) el.textContent='Painel de Ponto front v18/06-fer · '+(j.versao||'back ?');
-}).catch(()=>{ const el=document.getElementById('versaoBox'); if(el) el.textContent='Painel de Ponto front v18/06-fer · back (sem resposta)'; });
+  const el=document.getElementById('versaoBox'); if(el) el.textContent='Painel de Ponto front v18/06-fer2 · '+(j.versao||'back ?');
+}).catch(()=>{ const el=document.getElementById('versaoBox'); if(el) el.textContent='Painel de Ponto front v18/06-fer2 · back (sem resposta)'; });
 </script>
 </body>
 </html>
