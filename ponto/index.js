@@ -52,7 +52,7 @@ async function sbFetch(url, opts = {}, tentativas = 3){
   throw ultimoErro;
 }
 
-const VERSAO_BACK    = 'back v18/06 b4';  // ↑ suba a cada deploy do ponto/index.js
+const VERSAO_BACK    = 'back v18/06 b5';  // ↑ suba a cada deploy do ponto/index.js
 
 const ADMIN_TOKEN    = process.env.PONTO_ADMIN_TOKEN || 'troque-este-token';
 const SESSION_SECRET = process.env.PONTO_SESSION_SECRET || ADMIN_TOKEN;
@@ -166,7 +166,7 @@ function minutosDia(bs){
 }
 function agregar(batidasPorDia, lancPorData, escalaDe, almocoMin, todasDatas){
   const base = (todasDatas && todasDatas.length) ? todasDatas : [...new Set([...Object.keys(batidasPorDia), ...Object.keys(lancPorData)])].sort();
-  let trabTotal=0, espTotal=0, extras=0, deficit=0, extrasSabado=0, almocosCurtos=0;
+  let trabTotal=0, espTotal=0, extras=0, deficit=0, extrasSabado=0, feriadoTrab=0, almocosCurtos=0;
   const detalhe=[];
   for(const dia of base){
     const dow=diaSemana(dia), abono=lancPorData[dia];
@@ -174,22 +174,30 @@ function agregar(batidasPorDia, lancPorData, escalaDe, almocoMin, todasDatas){
     const arr=batidasPorDia[dia]||[];
     const temBatida=arr.length>0;
     const real = temBatida || !!abono;
+    // Feriado COM ponto batido = feriado trabalhado: horas pagas em dobro,
+    // vão pra balde separado e NÃO entram na extra comum nem no previsto.
+    const ehFeriadoTrab = (abono==='feriado' && temBatida);
     const horarios={}; for(const t of ORDEM){ const x=arr.find(y=>y.tipo===t); horarios[t]=x?horaSP(x.momento):''; }
     let trab=0, almoco=0, completo=true, saldo=0;
-    if(abono){ trab=esp; saldo=0; }
+    if(ehFeriadoTrab){ const m=minutosDia(arr); trab=m.trab; almoco=m.almoco; completo=m.completo; }
+    else if(abono){ trab=esp; saldo=0; }
     else if(temBatida){ const m=minutosDia(arr); trab=m.trab; almoco=m.almoco; completo=m.completo; saldo=trab-esp; }
     if(real){
-      trabTotal+=trab; espTotal+=esp;
-      if(!abono){
-        if(saldo>tol) extras+=saldo; else if(saldo<-tol) deficit+=saldo;
-        if(dow===6) extrasSabado+=trab;
-        if(almoco>0 && almoco<almocoMin) almocosCurtos++;
+      if(ehFeriadoTrab){
+        feriadoTrab += trab; // balde próprio; fora de trabalhado/previsto/extra
+      } else {
+        trabTotal+=trab; espTotal+=esp;
+        if(!abono){
+          if(saldo>tol) extras+=saldo; else if(saldo<-tol) deficit+=saldo;
+          if(dow===6) extrasSabado+=trab;
+          if(almoco>0 && almoco<almocoMin) almocosCurtos++;
+        }
       }
     }
-    const saldoEf = (!real) ? 0 : (Math.abs(saldo)<=tol ? 0 : saldo);
-    detalhe.push({ data:dia, dow, vazio:!real, trabalhado:trab, esperado:esp, saldo, saldo_efetivo:saldoEf, tol, almoco, completo, horarios, abono: abono?TIPO_LABEL[abono]:null });
+    const saldoEf = (!real || ehFeriadoTrab) ? 0 : (Math.abs(saldo)<=tol ? 0 : saldo);
+    detalhe.push({ data:dia, dow, vazio:!real, trabalhado:trab, esperado: ehFeriadoTrab?0:esp, saldo, saldo_efetivo:saldoEf, tol, almoco, completo, horarios, feriado_trabalhado: ehFeriadoTrab?trab:0, abono: ehFeriadoTrab?'Feriado trabalhado':(abono?TIPO_LABEL[abono]:null) });
   }
-  return { detalhe, trabalhado:trabTotal, esperado:espTotal, saldo:trabTotal-espTotal, extras, deficit, extras_sabado:extrasSabado, almocos_curtos:almocosCurtos };
+  return { detalhe, trabalhado:trabTotal, esperado:espTotal, saldo:trabTotal-espTotal, extras, deficit, extras_sabado:extrasSabado, feriado_trabalhado:feriadoTrab, almocos_curtos:almocosCurtos };
 }
 
 // ── Senha (scrypt) e token de sessão ──────────────────────────────────
@@ -487,16 +495,19 @@ function routes(readBody){
           const esc=escDe(fid,data,fb);
           const dow=diaSemana(data), esp=esc.jornada_min[String(dow)] ?? 0, tol=esc.tolerancia_min ?? 0, abono=lmap[data];
           const arr=porDia[data]||[];
+          const ehFeriadoTrab=(abono==='feriado' && arr.length>0);
           const horarios={}; for(const t of ORDEM){ const b=arr.find(x=>x.tipo===t); horarios[t]=b?horaSP(b.momento):''; }
           let trab, saldo;
-          if(abono){ trab=esp; saldo=0; } else { const mm=minutosDia(arr); trab=mm.trab; saldo=trab-esp; }
+          if(ehFeriadoTrab){ const mm=minutosDia(arr); trab=mm.trab; saldo=0; }
+          else if(abono){ trab=esp; saldo=0; } else { const mm=minutosDia(arr); trab=mm.trab; saldo=trab-esp; }
           const vazio=(arr.length===0 && !abono);
-          const saldoEf = vazio ? 0 : (Math.abs(saldo)<=tol ? 0 : saldo);
+          const saldoEf = (vazio || ehFeriadoTrab) ? 0 : (Math.abs(saldo)<=tol ? 0 : saldo);
           const fotos = arr.filter(x=>x.tem_foto).map(x=>({tipo:x.tipo, id:x.id, na_rede:!!x.na_rede, hora:horarios[x.tipo]||''}));
           return { data, dow, escala:esc.nome, turnos:(esc.turnos&&esc.turnos[String(dow)])||null,
-                   vazio, abono_tipo:abono||null, abono: abono?TIPO_LABEL[abono]:null,
+                   vazio, abono_tipo:abono||null, abono: ehFeriadoTrab?'Feriado trabalhado':(abono?TIPO_LABEL[abono]:null),
+                   feriado_trab: ehFeriadoTrab, feriado_trabalhado: ehFeriadoTrab?trab:0,
                    aprovacao: apMap[data]||null, solicitacao: solSet.has(data),
-                   horarios, trabalhado:trab, esperado:esp, saldo, saldo_efetivo:saldoEf, tol, fotos, correcoes: corrPorDia[data]||{}, correcoes_pendentes: remPorDia[data]||[] };
+                   horarios, trabalhado:trab, esperado: ehFeriadoTrab?0:esp, saldo, saldo_efetivo:saldoEf, tol, fotos, correcoes: corrPorDia[data]||{}, correcoes_pendentes: remPorDia[data]||[] };
         });
         json(res,200,{dias}); return true;
       }
