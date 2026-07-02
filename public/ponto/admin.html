@@ -239,7 +239,7 @@
   </div>
 </div>
 
-<div class="versao" id="versaoBox">Painel de Ponto front v18/06 · back …</div>
+<div class="versao" id="versaoBox">Painel de Ponto front v18/06-fer · back …</div>
 
 <div id="fotoOvl" class="ovl hide" onclick="if(event.target===this)this.classList.add('hide')">
   <div class="ovlBox">
@@ -372,10 +372,11 @@ function relFiltrado(){
 function renderRelatorio(){
   const lista=relFiltrado();
   if(!lista.length){ $('relBox').innerHTML='<p style="color:var(--mut)">Sem dados nesse mês.</p>'; return; }
-  let html = `<table><thead><tr><th>Funcionário</th><th>Trabalhado</th><th>Previsto</th><th>Saldo</th><th>Horas extras</th><th>Sábado (rodízio)</th><th>Almoços curtos</th></tr></thead><tbody>`;
+  let html = `<table><thead><tr><th>Funcionário</th><th>Trabalhado</th><th>Previsto</th><th>Saldo</th><th>Horas extras</th><th>Feriado trab.</th><th>Sábado (rodízio)</th><th>Almoços curtos</th></tr></thead><tbody>`;
   for(const f of lista){
     html += `<tr><td>${f.nome}</td><td>${hhmm(f.trabalhado)}</td><td>${hhmm(f.esperado)}</td>
       <td class="${f.saldo>=0?'pos':'neg'}">${hhmm(f.saldo)}</td><td class="pos"><b>${hhmm(f.extras)}</b></td>
+      <td class="${f.feriado_trabalhado?'tagw':''}"><b>${hhmm(f.feriado_trabalhado||0)}</b></td>
       <td class="pos">${hhmm(f.extras_sabado)}</td><td class="${f.almocos_curtos?'tagw':''}">${f.almocos_curtos}</td></tr>
     <tr><td colspan="7" style="border:none;padding:0 12px 14px">
       <table style="margin-top:4px"><thead><tr><th>Data</th><th>Dia</th><th>Trabalhado</th><th>Previsto</th><th>Saldo</th><th>Almoço</th></tr></thead><tbody>${
@@ -391,8 +392,8 @@ function renderRelatorio(){
 }
 function exportCSV(){
   if(!ultimoRelatorio) return;
-  let linhas=[['Funcionario','Matricula','Trabalhado','Previsto','Saldo','HorasExtras','ExtrasSabado','AlmocosCurtos']];
-  for(const f of relFiltrado()) linhas.push([f.nome,f.matricula,hhmm(f.trabalhado),hhmm(f.esperado),hhmm(f.saldo),hhmm(f.extras),hhmm(f.extras_sabado),f.almocos_curtos]);
+  let linhas=[['Funcionario','Matricula','Trabalhado','Previsto','Saldo','HorasExtras','FeriadoTrabalhado_pagar_em_dobro','ExtrasSabado','AlmocosCurtos']];
+  for(const f of relFiltrado()) linhas.push([f.nome,f.matricula,hhmm(f.trabalhado),hhmm(f.esperado),hhmm(f.saldo),hhmm(f.extras),hhmm(f.feriado_trabalhado||0),hhmm(f.extras_sabado),f.almocos_curtos]);
   const csv = linhas.map(l=>l.map(c=>`"${c}"`).join(';')).join('\n');
   const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob(["\ufeff"+csv],{type:'text/csv'}));
   a.download=`horas_${$('relAno').value}_${$('relMes').value}.csv`; a.click();
@@ -415,8 +416,11 @@ async function carregarBatidas(){
 const ABONOS=[['','Normal'],['ferias','Férias'],['folga','Folga'],['atestado','Atestado'],['feriado','Feriado'],['completar','Completar (escala)']];
 function buildHeader(){
   const reais=diasCache.filter(d=>!d.novo && !d.vazio);
-  let tT=0,tP=0,tExtra=0,tDeb=0;
-  reais.forEach(d=>{ tT+=d.trabalhado||0; tP+=d.esperado||0; const s=d.saldo_efetivo||0; if(s>0) tExtra+=s; else if(s<0) tDeb+=s; });
+  let tT=0,tP=0,tExtra=0,tDeb=0,tFer=0;
+  reais.forEach(d=>{
+    if(d.feriado_trab){ tFer+=d.feriado_trabalhado||0; return; } // fora da extra/previsto
+    tT+=d.trabalhado||0; tP+=d.esperado||0; const s=d.saldo_efetivo||0; if(s>0) tExtra+=s; else if(s<0) tDeb+=s;
+  });
   const tS=tExtra+tDeb;
   return `<div class="periodoBox">
     <div class="pb"><span>Trabalhado</span><b>${hhmm(tT)}</b></div>
@@ -424,6 +428,7 @@ function buildHeader(){
     <div class="pb"><span>Horas extras</span><b class="pos">${hhmm(tExtra)}</b></div>
     <div class="pb"><span>Débito (faltou)</span><b class="neg">${hhmm(tDeb)}</b></div>
     <div class="pb"><span>Saldo do período</span><b class="${tS>=0?'pos':'neg'}">${hhmm(tS)}</b></div>
+    ${tFer>0?`<div class="pb"><span>Feriado trab. (dobro)</span><b class="tagw">${hhmm(tFer)}</b></div>`:''}
   </div><p class="hint" style="margin-bottom:14px">Mês inteiro. Clique num campo de hora e digite os 4 números (ex.: <b>0800</b> = 08:00) — ele pula sozinho pro próximo e salva ao sair do dia. <b class="pos">Verde</b> = hora extra · <b class="neg">vermelho</b> = o que faltou.</p>`;
 }
 function apTag(d){
@@ -437,6 +442,7 @@ function apTag(d){
 function buildRes(d){
   let inner;
   if(d.novo) inner='novo — preencha';
+  else if(d.feriado_trab) inner=`Trab ${hhmm(d.trabalhado)} · <span class="tagw"><b>Feriado trabalhado</b> (pago em dobro)</span>`;
   else if(d.abono_tipo) inner=`Previsto ${hhmm(d.esperado)} · <span class="tagb">${d.abono}</span>`;
   else if(d.vazio) inner=`<span style="opacity:.6">Previsto ${hhmm(d.esperado)} · sem batidas</span>`;
   else {
@@ -476,9 +482,9 @@ function renderDias(){
   const cards=diasCache.map(d=>{
     const dow=d.dow!=null?d.dow:new Date(d.data+'T12:00:00').getDay();
     const escTag=d.escala?` · <span class="tagb">${esc(d.escala)}</span>`:'';
-    const slots = d.abono_tipo ? buildAbonoBanner(d) : buildSlots(d);
+    const slots = (d.abono_tipo && !d.feriado_trab) ? buildAbonoBanner(d) : buildSlots(d);
     const abonoSel=`<select class="abonoSel" onchange="setAbono('${d.data}',this.value)">${ABONOS.map(([v,l])=>`<option value="${v}" ${(d.abono_tipo||'')===v?'selected':''}>${l}</option>`).join('')}</select>`;
-    let cls=d.abono_tipo?'diaCard abonado':(d.vazio?'diaCard vazio':'diaCard');
+    let cls=(d.abono_tipo && !d.feriado_trab)?'diaCard abonado':(d.vazio?'diaCard vazio':'diaCard');
     if(d.solicitacao) cls+=' solicit';
     return `<div class="${cls}" onfocusout="cardBlur(event,'${d.data}')">
       <div class="diaHead"><div class="dlabel">${dias[dow]} · ${br(d.data)}${escTag}${(d.fotos&&d.fotos.length)?` <button class="fotoIco" title="Ver foto da batida" onclick="verFotos('${d.data}')">📷</button>`:''}</div><span id="res_${d.data}">${buildRes(d)}</span></div>
@@ -828,8 +834,8 @@ if(TOKEN) abrir();
 
 // versão (front fixa + back buscada do servidor)
 fetch(API+'/versao').then(r=>r.json()).then(j=>{
-  const el=document.getElementById('versaoBox'); if(el) el.textContent='Painel de Ponto front v18/06 · '+(j.versao||'back ?');
-}).catch(()=>{ const el=document.getElementById('versaoBox'); if(el) el.textContent='Painel de Ponto front v18/06 · back (sem resposta)'; });
+  const el=document.getElementById('versaoBox'); if(el) el.textContent='Painel de Ponto front v18/06-fer · '+(j.versao||'back ?');
+}).catch(()=>{ const el=document.getElementById('versaoBox'); if(el) el.textContent='Painel de Ponto front v18/06-fer · back (sem resposta)'; });
 </script>
 </body>
 </html>
