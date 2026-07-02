@@ -358,7 +358,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b80';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b81';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#b3b9c4'}, magalu:{n:'Magalu',c:'#0086ff'}, shein:{n:'Shein',c:'#e0e0e0'},
@@ -900,7 +900,6 @@ function unitRow(u, isComp){
     '<div class="idesc"><div class="d">'+esc(u.descricao||u.sku||'item')+'</div>'+
       '<div class="e">SKU '+esc(u.sku||'—')+' · EAN '+(u.ean?esc(u.ean):'<span class="noean">sem EAN</span>')+' · '+((u.loc||'').trim()?'<span class="loctag">📍 '+esc(u.loc)+'</span>':'<span class="locsem">📍 sem local</span>')+'</div>'+
       '<div class="estoque">'+estTags(u.sku)+'</div></div>'+
-    (full?'':'<button class="miniok" onclick="manualUnit('+u._id+')">+1</button>')+
   '</div>';
 }
 
@@ -940,7 +939,6 @@ function renderItens(){
   const fb2 = $('bFinalizarA4'); if(fb2) fb2.disabled = !pronto;
 }
 
-function manualUnit(id){ const u=pedidoAtual.unidades.find(x=>x._id===id); if(u && u.bipado<u.qtd){ u.bipado++; beep(true); renderItens(); } }
 
 function modalAberto(){ const md=$('modal'); return md && md.classList.contains('show'); }
 
