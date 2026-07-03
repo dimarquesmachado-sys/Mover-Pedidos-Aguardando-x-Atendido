@@ -358,7 +358,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b20';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b21';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#b3b9c4'}, magalu:{n:'Magalu',c:'#0086ff'},
@@ -1462,7 +1462,7 @@ function montarZplEtiqueta(p, copias){
   const z = ['^XA','^CI28','^PW320','^LL200','^LH0,0',
     '^FO20,24^A0N,14,14^FB260,3,2,L^FD'+titulo+'^FS',       // título (letra menor, até 3 linhas)
     '^FO20,80^A0N,24,'+wSku+'^FD'+sku+'^FS',                // SKU
-    '^FO20,112^BY2,2^BCN,56,N,N,N^FD'+dados+'^FS',          // código de barras (mais alto)
+    '^FO20,112^BY2,2^BCN,56,N,N,N,A^FD'+dados+'^FS',        // código de barras (modo A = compacto, ~30% mais estreito)
     '^FO20,171^A0N,17,17^FB260,1,0,C^FD'+dados+'^FS'];      // número embaixo, centralizado
   if(copias && copias>1) z.push('^PQ'+copias+',0,0,N');     // nº de cópias
   z.push('^XZ');
