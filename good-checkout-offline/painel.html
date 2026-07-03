@@ -358,7 +358,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b19';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b20';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#b3b9c4'}, magalu:{n:'Magalu',c:'#0086ff'},
@@ -1452,18 +1452,18 @@ async function escolherImpressoraEtiqueta(){
 // 40x25mm @ 203dpi = 320x200 dots. Título até 3 linhas, SKU, código de barras Code128 do EAN + número embaixo.
 function montarZplEtiqueta(p, copias){
   const clean = s => String(s||'').replace(/[\^~]/g,' ');
-  const titulo = clean(p.nome).slice(0,120);
+  const titulo = clean(p.nome).slice(0,72);          // 72 chars garantem no máx. 3 linhas (ZPL sobrepõe o excesso na última linha!)
   const sku = clean(p.sku);
   const ean = String(p.ean||'').replace(/\D/g,'');
   const dados = ean || sku.replace(/[^\x20-\x7E]/g,'');     // barras: EAN; se não tiver, o SKU
   if(!dados) return null;
-  // margens: 3mm esq/topo, ~4,5mm dir (compensa offset físico), ~1,5mm baixo
-  const wSku = Math.max(10, Math.min(24, Math.floor(370/Math.max(sku.length,1))));  // SKU auto-encolhe pra caber na largura
+  // margens: 2,5mm esq/topo, ~5mm dir (compensa offset físico), ~1,5mm baixo
+  const wSku = Math.max(10, Math.min(24, Math.floor(320/Math.max(sku.length,1))));  // SKU auto-encolhe pra caber na largura
   const z = ['^XA','^CI28','^PW320','^LL200','^LH0,0',
-    '^FO24,24^A0N,16,16^FB260,3,2,L^FD'+titulo+'^FS',       // título (até 3 linhas)
-    '^FO24,82^A0N,24,'+wSku+'^FD'+sku+'^FS',                // SKU
-    '^FO24,112^BY2,2^BCN,56,N,N,N^FD'+dados+'^FS',          // código de barras (mais alto)
-    '^FO24,171^A0N,17,17^FB260,1,0,C^FD'+dados+'^FS'];      // número embaixo, centralizado
+    '^FO20,24^A0N,14,14^FB260,3,2,L^FD'+titulo+'^FS',       // título (letra menor, até 3 linhas)
+    '^FO20,80^A0N,24,'+wSku+'^FD'+sku+'^FS',                // SKU
+    '^FO20,112^BY2,2^BCN,56,N,N,N^FD'+dados+'^FS',          // código de barras (mais alto)
+    '^FO20,171^A0N,17,17^FB260,1,0,C^FD'+dados+'^FS'];      // número embaixo, centralizado
   if(copias && copias>1) z.push('^PQ'+copias+',0,0,N');     // nº de cópias
   z.push('^XZ');
   return z.join('');
