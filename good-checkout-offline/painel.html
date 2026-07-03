@@ -358,7 +358,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b18';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b19';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#b3b9c4'}, magalu:{n:'Magalu',c:'#0086ff'},
@@ -1457,12 +1457,13 @@ function montarZplEtiqueta(p, copias){
   const ean = String(p.ean||'').replace(/\D/g,'');
   const dados = ean || sku.replace(/[^\x20-\x7E]/g,'');     // barras: EAN; se não tiver, o SKU
   if(!dados) return null;
-  // margem de ~3mm (24 dots) nos 4 lados — a impressão não encosta mais na borda
+  // margens: 3mm esq/topo, ~4,5mm dir (compensa offset físico), ~1,5mm baixo
+  const wSku = Math.max(10, Math.min(24, Math.floor(370/Math.max(sku.length,1))));  // SKU auto-encolhe pra caber na largura
   const z = ['^XA','^CI28','^PW320','^LL200','^LH0,0',
-    '^FO24,24^A0N,16,16^FB272,3,2,L^FD'+titulo+'^FS',       // título (até 3 linhas)
-    '^FO24,82^A0N,22,22^FD'+sku+'^FS',                      // SKU
-    '^FO24,110^BY2,2^BCN,44,N,N,N^FD'+dados+'^FS',          // código de barras
-    '^FO24,158^A0N,18,18^FB272,1,0,C^FD'+dados+'^FS'];      // número embaixo, centralizado
+    '^FO24,24^A0N,16,16^FB260,3,2,L^FD'+titulo+'^FS',       // título (até 3 linhas)
+    '^FO24,82^A0N,24,'+wSku+'^FD'+sku+'^FS',                // SKU
+    '^FO24,112^BY2,2^BCN,56,N,N,N^FD'+dados+'^FS',          // código de barras (mais alto)
+    '^FO24,171^A0N,17,17^FB260,1,0,C^FD'+dados+'^FS'];      // número embaixo, centralizado
   if(copias && copias>1) z.push('^PQ'+copias+',0,0,N');     // nº de cópias
   z.push('^XZ');
   return z.join('');
