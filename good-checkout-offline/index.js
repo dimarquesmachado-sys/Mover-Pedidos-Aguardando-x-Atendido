@@ -183,6 +183,7 @@ function routes(readBody) {
     // central do index.js (ADMIN_KEY: /run,/setup,/debug,/robo,/forcar) passam.
     // Todo o RESTO (dados de pedido, DANFE, XML, separação, ações) exige sessão.
     {
+      const _meu = p.startsWith('/good-checkout-offline'); // guarda só age nas rotas DESTE módulo
       const _pub = (
         p === '/good-checkout-offline' || p === '/good-checkout-offline/' ||
         p === '/good-checkout-offline/painel' || p === '/good-checkout-offline/login' ||
@@ -194,7 +195,7 @@ function routes(readBody) {
         p.includes('/run') || p.includes('/setup') || p.includes('/robo') ||
         p.includes('/forcar') || /debug/i.test(p)
       );
-      if (!_pub && !_central) {
+      if (_meu && !_pub && !_central) {
         const _op = validarSessao(req.headers['cookie']);
         if (!_op) { json(res, 401, { ok: false, erro: 'Sessão necessária. Faça login.' }); return true; }
         req._op = _op;
