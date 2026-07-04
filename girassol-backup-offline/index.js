@@ -43,6 +43,28 @@ const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').
 
 const VERSAO     = 'girassol-backup-offline v28/06 b9';
 
+// ── SESSÃO DE OPERADOR (cookie assinado HMAC) — protege rotas de dados/ação ──
+// Segredo estável entre restarts. Usa ADMIN_KEY (já configurada no Render) como base.
+const SESS_SECRET = process.env.ADMIN_KEY || process.env.SESSION_SECRET || 'bkp-sess-2026';
+const SESS_TTL = 14 * 60 * 60 * 1000; // 14h (cobre o turno)
+const SESS_COOKIE = 'bkp_sess';
+function assinarSessao(nome) {
+  const pl = Buffer.from(JSON.stringify({ n: nome, exp: Date.now() + SESS_TTL })).toString('base64url');
+  const sig = require('crypto').createHmac('sha256', SESS_SECRET).update(pl).digest('base64url');
+  return pl + '.' + sig;
+}
+function validarSessao(cookieHeader) {
+  const m = new RegExp('(?:^|;\\s*)' + SESS_COOKIE + '=([^;]+)').exec(cookieHeader || '');
+  if (!m) return null;
+  const parts = m[1].split('.');
+  if (parts.length !== 2) return null;
+  const esp = require('crypto').createHmac('sha256', SESS_SECRET).update(parts[0]).digest('base64url');
+  if (parts[1] !== esp) return null;
+  let pl; try { pl = JSON.parse(Buffer.from(parts[0], 'base64url').toString()); } catch (e) { return null; }
+  if (!pl.exp || Date.now() > pl.exp) return null;
+  return pl.n;
+}
+
 // ─── Módulos extraídos (Fase 1: base + nf + etiquetas) ───────────────────
 const base = require('./base');
 const { BLING_BASE, CACHE_DIR, SIT_ATENDIDO, SIT_VERIFICADO, SYNC_ON, JANELA_DIAS, PAUSA_MS, RETENCAO_DIAS, ETIQ_FORMATO, CRON_EXPR,
@@ -155,6 +177,29 @@ function routes(readBody) {
   return async function handle(req, res, urlObj) {
     const { method } = req;
     const p = urlObj.pathname;
+
+    // ── GUARDA DE SESSÃO ────────────────────────────────────────────────
+    // Rotas públicas (tela de login precisa delas) e as já cobertas pela trava
+    // central do index.js (ADMIN_KEY: /run,/setup,/debug,/robo,/forcar) passam.
+    // Todo o RESTO (dados de pedido, DANFE, XML, separação, ações) exige sessão.
+    {
+      const _pub = (
+        p === '/girassol-backup-offline' || p === '/girassol-backup-offline/' ||
+        p === '/girassol-backup-offline/painel' || p === '/girassol-backup-offline/login' ||
+        p === '/girassol-backup-offline/operadores' || p === '/girassol-backup-offline/health' ||
+        p === '/girassol-backup-offline/saude' || p.includes('/callback') ||
+        p === '/girassol-backup-offline/qz-cert' || p === '/girassol-backup-offline/qz-sign'
+      );
+      const _central = (
+        p.includes('/run') || p.includes('/setup') || p.includes('/robo') ||
+        p.includes('/forcar') || /debug/i.test(p)
+      );
+      if (!_pub && !_central) {
+        const _op = validarSessao(req.headers['cookie']);
+        if (!_op) { json(res, 401, { ok: false, erro: 'Sessão necessária. Faça login.' }); return true; }
+        req._op = _op;
+      }
+    }
 
     // raiz do módulo → manda pro painel (evita "not found" ao abrir a URL base)
     if (method === 'GET' && (p === '/girassol-backup-offline' || p === '/girassol-backup-offline/')) {
@@ -611,6 +656,7 @@ function routes(readBody) {
       const senha = String(body.senha || '').trim();
       const ops = lerOperadores();
       if (ops[nome] !== undefined && String(ops[nome]) === senha) {
+        res.setHeader('Set-Cookie', SESS_COOKIE + '=' + assinarSessao(nome) + '; Path=/girassol-backup-offline; HttpOnly; SameSite=Lax; Max-Age=' + Math.floor(SESS_TTL/1000));
         json(res, 200, { ok: true, nome });
       } else {
         json(res, 200, { ok: false, erro: 'nome ou senha inválidos' });
