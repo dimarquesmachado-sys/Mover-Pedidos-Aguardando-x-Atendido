@@ -65,7 +65,7 @@ async function indexarCatalogoCompleto() {
 async function sincronizarConferidos() {
   const conf = readJson(CONFERIDOS_FILE, {});
   const ids = Object.keys(conf).filter(id => conf[id] && !conf[id].sincronizado);
-  let ok = 0, falhas = 0;
+  let ok = 0, falhas = 0, jaAvancados = 0;
   for (const id of ids) {
     const r = await moverSituacao(id, SIT_VERIFICADO);
     if (r.ok) {
@@ -75,14 +75,32 @@ async function sincronizarConferidos() {
       ok++;
       console.log(`[GOODBKP] sync ${id} → ${SIT_VERIFICADO} OK`);
     } else {
-      conf[id].sync_erro = String(r.status || 'err');
-      falhas++;
-      console.log(`[GOODBKP] sync ${id} FALHOU (${r.status}) ${r.raw || ''}`);
+      // Falha ao mover: confere se o pedido JÁ AVANÇOU (saiu de ATENDIDO por outro
+      // processo — despachado/faturado). Se não está mais em ATENDIDO, o sync já não
+      // é necessário: marca como resolvido em vez de "falha" (evita ruído no /saude).
+      let situAtual = null;
+      try {
+        const g = await blingGet(`/pedidos/vendas/${id}`);
+        const ped = g && g.data && (g.data.data || g.data);
+        situAtual = ped && ped.situacao && Number(ped.situacao.id);
+      } catch (e) {}
+      if (situAtual && situAtual !== SIT_ATENDIDO) {
+        conf[id].sincronizado = true;
+        conf[id].sincronizado_em = new Date().toISOString();
+        conf[id].sync_resolvido = 'ja-avancado:' + situAtual;
+        delete conf[id].sync_erro;
+        jaAvancados++;
+        console.log(`[GOODBKP] sync ${id}: já avançou p/ situacao ${situAtual} (resolvido, sem mover)`);
+      } else {
+        conf[id].sync_erro = String(r.status || 'err');
+        falhas++;
+        console.log(`[GOODBKP] sync ${id} FALHOU (${r.status}) ${r.raw || ''}`);
+      }
     }
     await sleep(PAUSA_MS);
   }
   if (ids.length) writeJson(CONFERIDOS_FILE, conf);
-  ultimoSync = { em: new Date().toISOString(), pendentes: ids.length, ok, falhas };
+  ultimoSync = { em: new Date().toISOString(), pendentes: ids.length, ok, falhas, jaAvancados };
   return ultimoSync;
 }
 
