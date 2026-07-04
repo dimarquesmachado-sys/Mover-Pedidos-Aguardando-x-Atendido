@@ -110,6 +110,18 @@ const server = http.createServer(async (req, res) => {
   const urlObj = new URL(url, 'http://localhost');
   const path = urlObj.pathname;
 
+  // ── TRAVA CENTRAL DE SEGURANÇA (04/07/2026) ─────────────────────────
+  // Gatilhos manuais (/run/...) disparam rotinas reais (F1/F2/F3, corrigirNFs
+  // etc). Estavam abertos p/ internet. Agora exigem ?k=ADMIN_KEY na URL.
+  // Sem a env ADMIN_KEY no Render, ficam DESLIGADOS (404) — seguro por padrão.
+  // Cobre TODOS os módulos de uma vez (toda requisição passa por aqui).
+  const ADMIN_KEY = process.env.ADMIN_KEY || '';
+  if (path.includes('/run/')) {
+    if (!ADMIN_KEY || urlObj.searchParams.get('k') !== ADMIN_KEY) {
+      return json(res, 404, { error: 'not found', path });
+    }
+  }
+
   // Rota global de health
   if (path === '/health' || path === '/') {
     return json(res, 200, {
