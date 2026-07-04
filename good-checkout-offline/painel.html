@@ -406,11 +406,11 @@ async function checarLogin(){
     const d = await api('/good-checkout-offline/operadores');
     loginAtivo = !!(d && d.login_ativo);
     window.ADMINS = (d && d.admins) || [];
-    if(!loginAtivo){ $('loginback').classList.add('hide'); carregarLista(); return; }   // sem operadores → painel livre
+    if(!loginAtivo){ mostrarLogin([]); $('loginSub').textContent='Operadores não configurados — avise o admin'; return; }   // proteção obrigatória: sem operadores, sem acesso
     const logado = localStorage.getItem('gbkp_logado')==='1' && (localStorage.getItem('gbkp_op')||'').trim();
     if(logado){ aplicarLogado(); }
     else { mostrarLogin(d.operadores||[]); }
-  }catch(e){ $('loginback').classList.add('hide'); carregarLista(); }   // se a checagem falhar, não tranca ninguém
+  }catch(e){ mostrarLogin([]); $('loginSub').textContent='Erro ao verificar login — recarregue'; }
 }
 function mostrarLogin(nomes){
   const sel=$('loginNome');
@@ -617,7 +617,12 @@ function trocarModo(){
 }
 
 // ── API ──
-const api = (u,opt) => fetch(u,opt).then(r=>r.json());
+const api = (u,opt) => fetch(u,opt).then(r=>{
+  if(r.status===401){ try{localStorage.removeItem('gbkp_logado');}catch(e){}
+    if(typeof checarLogin==='function'){ checarLogin(); }
+    return {ok:false, erro:'Sessão expirada — entre de novo'}; }
+  return r.json();
+});
 // ── presença/reserva entre PCs ──
 function opAtual(){ return ((opIn && opIn.value) || localStorage.getItem('gbkp_op') || '').trim(); }
 function postJson(path, obj){ return api(path, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(obj)}); }
