@@ -110,13 +110,22 @@ const server = http.createServer(async (req, res) => {
   const urlObj = new URL(url, 'http://localhost');
   const path = urlObj.pathname;
 
-  // ── TRAVA CENTRAL DE SEGURANÇA (04/07/2026) ─────────────────────────
-  // Gatilhos manuais (/run/...) disparam rotinas reais (F1/F2/F3, corrigirNFs
-  // etc). Estavam abertos p/ internet. Agora exigem ?k=ADMIN_KEY na URL.
-  // Sem a env ADMIN_KEY no Render, ficam DESLIGADOS (404) — seguro por padrão.
-  // Cobre TODOS os módulos de uma vez (toda requisição passa por aqui).
+  // ── TRAVA CENTRAL DE SEGURANÇA (ampliada 04/07/2026) ────────────────
+  // Rotas administrativas que disparam rotinas reais (/run, /robo, /forcar),
+  // trocam tokens (/setup*) ou VAZAM credenciais/dados (/debug*). Estavam
+  // abertas p/ internet nos módulos fiscais (girassol/amb/good, auth=0) e no
+  // auto-mensagens. Agora exigem ?k=ADMIN_KEY. Sem a env, ficam 404 (seguro).
+  // NÃO afeta: callbacks OAuth (Bling/ML/Shopee redirecionam pra cá) nem o
+  // login/painéis dos módulos com autenticação própria (ponto, estoque, etc).
   const ADMIN_KEY = process.env.ADMIN_KEY || '';
-  if (path.includes('/run/')) {
+  const ehCallback = path.includes('/callback'); // OAuth — nunca trancar
+  let ehAdmin =
+    path.includes('/run/')   || path.endsWith('/run')   ||
+    path.includes('/robo/')  ||
+    path.includes('/forcar/')||
+    path.includes('/setup')  ||
+    path.includes('/debug/') || path.includes('/debug-') || path.endsWith('/debug');
+  if (ehAdmin && !ehCallback) {
     if (!ADMIN_KEY || urlObj.searchParams.get('k') !== ADMIN_KEY) {
       return json(res, 404, { error: 'not found', path });
     }
