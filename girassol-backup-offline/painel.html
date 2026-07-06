@@ -260,7 +260,7 @@
   .sep-ped .sit .m .sku{font-size:14px;font-weight:700;color:var(--tx);font-family:ui-monospace,monospace}
   .sep-ped .sit .m .ds{font-size:12px;color:var(--mut);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.3}
   .bcard{display:flex;gap:12px;align-items:center;padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--card2);margin-bottom:12px}
-  .bcard .bimg{flex:0 0 auto;width:56px;height:56px;border-radius:10px;object-fit:cover;background:var(--card);border:1px solid var(--line)}
+  .bcard .bimg{flex:0 0 auto;width:56px;height:56px;border-radius:10px;object-fit:cover;background:var(--card);border:1px solid var(--line);cursor:zoom-in}
   .bcard .bimg.vazio{display:flex;align-items:center;justify-content:center;font-size:24px}
   .bcard .bnome{font-size:14px;font-weight:700;color:var(--tx);line-height:1.25;margin-bottom:3px}
   .bcard .bsku{font-size:13px;font-weight:700;color:#cfe0ff;font-family:ui-monospace,monospace}
@@ -358,7 +358,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b88';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b89';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#b3b9c4'}, magalu:{n:'Magalu',c:'#0086ff'}, shein:{n:'Shein',c:'#e0e0e0'},
@@ -1402,7 +1402,7 @@ async function fazerBusca(){
   const p = r.produto; buscaProd = p;
   $('buscaRes').innerHTML =
     '<div class="bcard">'+
-      (p.img?'<img class="bimg" src="'+esc(p.img)+'" onerror="this.style.display=\'none\'" />':'<div class="bimg vazio">📦</div>')+
+      (p.img?'<img class="bimg" src="'+esc(p.img)+'" onclick="abrirImagem(this.src)" onerror="this.style.display=\'none\'" />':'<div class="bimg vazio">📦</div>')+
       '<div>'+
         '<div class="bnome">'+esc(p.nome||'(sem nome)')+'</div>'+
         '<div class="bsku">SKU '+esc(p.sku||'—')+'</div>'+
