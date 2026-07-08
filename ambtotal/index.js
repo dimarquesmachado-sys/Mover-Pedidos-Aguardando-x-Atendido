@@ -1,10 +1,10 @@
 'use strict';
 
 /**
- * Módulo AMBTotal — Mover Pedidos + Corrigir-NFs
+ * Módulo AMBTotal — Mover Pedidos + Corrigir-NFs + F3 NF-e → ML
  *
  * Expõe a interface padrão usada pelo orquestrador raiz:
- *   - rotinas: { rotinaExpediente, rotinaVirada, rotinaManha, corrigirNFs }
+ *   - rotinas: { rotinaExpediente, rotinaVirada, rotinaManha, corrigirNFs, nfeMl }
  *   - routes:  função que registra as rotas HTTP da empresa
  *   - crons:   configuração dos crons (timing)
  */
@@ -16,6 +16,7 @@ const { gerarTokenInicialNF, garantirTokenNF } = require('./nfTokenManager');
 const { garantirTokenML, trocarCodigoPorToken,
         gerarUrlAutorizacao } = require('./mlTokenManager');
 const { getPedidoDetalhe } = require('./blingApi');
+const { rotinaNFeML, enviarNFeUnica } = require('./nfeMlFluxo');
 
 // ── Crons da AMBTotal ─────────────────────────────────────────────────
 const crons = {
@@ -23,7 +24,8 @@ const crons = {
   virada:      '10 0 * * *',                                  // F2 às 00:10
   manha:       ['0 6 * * *', '30 6 * * *', '0 7 * * *',       // F2 às 06:00, 06:30, 07:00
                 '*/15 6-23 * * *'],                           // F2 a cada 15 min diurno
-  corrigirNFs: '*/5 6-23 * * *'                               // Corrigir-NFs a cada 5 min
+  corrigirNFs: '*/5 6-23 * * *',                              // Corrigir-NFs a cada 5 min
+  nfeMl:       '2,12,22,32,42,52 6-23 * * *'                  // F3 NF-e→ML a cada 10 min (escalonado: Girassol :0, AMB :2, GOOD :4)
 };
 
 // ── Helpers HTTP locais ───────────────────────────────────────────────
@@ -123,6 +125,20 @@ function routes(readBody) {
         json(res, 202, { queued: 'AMB corrigirNFsPendentes' });
         return true;
       }
+      if (p === '/amb/run/nfe-ml') {
+        rotinaNFeML().catch(console.error);
+        json(res, 202, { queued: 'AMB rotinaNFeML' });
+        return true;
+      }
+      // Envio manual de UMA NF específica: POST /amb/run/nfe-ml/:idNfe
+      if (p.startsWith('/amb/run/nfe-ml/')) {
+        const idNfe = p.split('/').pop();
+        try {
+          const resultado = await enviarNFeUnica(idNfe);
+          json(res, 200, resultado);
+        } catch (e) { json(res, 500, { ok: false, error: e.message }); }
+        return true;
+      }
       // Retry manual de UMA NF rejeitada por SEFAZ: POST /amb/run/retry-nf/:id
       if (p.startsWith('/amb/run/retry-nf/')) {
         const idNF = p.split('/').pop();
@@ -185,6 +201,15 @@ function routes(readBody) {
         const token = await garantirToken();
         const detalhe = await getPedidoDetalhe(token, idPedido);
         json(res, 200, detalhe);
+      } catch (e) { json(res, 500, { error: e.message }); }
+      return true;
+    }
+    // Envio único de NF-e → ML (debug/manual via GET — pode abrir no navegador)
+    if (method === 'GET' && p.startsWith('/amb/debug/enviar-nfe/')) {
+      const nfeId = p.split('/').pop();
+      try {
+        const resultado = await enviarNFeUnica(nfeId);
+        json(res, 200, resultado);
       } catch (e) { json(res, 500, { error: e.message }); }
       return true;
     }
@@ -260,7 +285,8 @@ module.exports = {
     rotinaExpediente,
     rotinaVirada,
     rotinaManha,
-    corrigirNFs: corrigirNFsPendentes
+    corrigirNFs: corrigirNFsPendentes,
+    nfeMl: rotinaNFeML
   },
   routes,
   crons
