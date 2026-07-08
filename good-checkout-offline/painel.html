@@ -358,7 +358,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b24';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b25';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#b3b9c4'}, magalu:{n:'Magalu',c:'#0086ff'},
@@ -664,9 +664,18 @@ async function sincronizar(){
 }
 
 function onBusca(v){ filtroBusca = (v||'').trim().toLowerCase(); renderLista(); }
+// ── serviço Shopee não reconhecido (rótulo novo do Bling) → conferir se é FLEX ou ponto de coleta ──
+const SHOPEE_SERVICOS_OK = ['shopee xpress', 'shopee entrega direta', 'entrega direta', 'logistica shopee'];
+function servicoDesconhecido(p){
+  if(!p || String(p.marketplace||'').toLowerCase()!=='shopee') return false;
+  const s = String(p.servico||'').toLowerCase().trim();
+  if(!s) return true;
+  return !SHOPEE_SERVICOS_OK.some(k=>s.includes(k));
+}
 function filtrar(lista){
   let l = lista;
   if(filtroMkt==='flex') l = l.filter(p=>p.flex);
+  else if(filtroMkt==='serviconovo') l = l.filter(servicoDesconhecido);
   else if(filtroMkt) l = l.filter(p=>p.marketplace===filtroMkt);
   if(filtroBusca){
     const q = filtroBusca;
@@ -695,7 +704,7 @@ function setFiltroMkt(v){
 function chipBtn(label, n, val, cor){
   const ativo = (filtroMkt===val);
   const dot = cor ? '<span class="cdot" style="background:'+cor+'"></span>' : '';
-  const fx = val==='flex' ? ' flex' : (val==='semetiqueta' ? ' serr' : '');
+  const fx = val==='flex' ? ' flex' : ((val==='semetiqueta'||val==='serviconovo') ? ' serr' : '');
   return '<button class="chip'+fx+(ativo?' on':'')+'" onclick="setFiltroMkt('+(val===null?'null':("'"+val+"'"))+')">'+dot+esc(label)+' <b>'+n+'</b></button>';
 }
 function renderChips(){
@@ -706,6 +715,8 @@ function renderChips(){
   MKT_ORDEM.forEach(mk=>{ if(cont[mk]) html += chipBtn((MKT[mk]||MKT.outro).n, cont[mk], mk, (MKT[mk]||MKT.outro).c); });
   html += chipBtn('⚡ FLEX', flexN, 'flex');
   if((semEtiqCache||[]).length) html += chipBtn('⚠️ Sem etiqueta', semEtiqCache.length, 'semetiqueta');
+  const servNovoN = listaCache.filter(servicoDesconhecido).length;
+  if(servNovoN) html += chipBtn('⚠️ Serviço a conferir', servNovoN, 'serviconovo');
   box.innerHTML = html;
 }
 function renderLista(){
@@ -746,6 +757,7 @@ function renderLista(){
         (p.volumes>1?'<span class="voltag">📦 '+p.volumes+' vol</span>':'')+
         (resvOutro?'<span class="resvtag">🟠 '+esc(resvOutro)+'</span>':'')+
         (p.conferido?'<span class="donetag">✓</span>':'')+
+        (servicoDesconhecido(p)?'<span class="voltag" style="background:#b45309;color:#fff" title="Serviço Shopee não reconhecido — confira se é FLEX ou ponto de coleta">⚠️ serviço?</span>':'')+
       '</div>'+
       (p.cliente?'<div class="scli">'+esc(p.cliente)+'</div>':'')+
       '<div class="smeta">'+(p.itens||0)+' item(s) · NF '+(p.nf_numero?esc(p.nf_numero):(p.tem_nf?'ok':'—'))+(p.tem_danfe?' · <span class="pdfok">PDF✓</span>':'')+'</div>'+
