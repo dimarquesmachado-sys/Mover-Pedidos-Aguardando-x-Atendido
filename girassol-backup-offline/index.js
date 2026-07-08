@@ -1037,6 +1037,8 @@ function routes(readBody) {
           contato: d.contato && { nome: d.contato.nome },
           itens: (d.itens || []).map(it => ({ codigo: it.codigo, quantidade: it.quantidade, produto: it.produto }))
         } : ped.data;
+        out.servico = d ? servicoDoPedido(d) : null;       // o campo que o checkout usa pra decidir FLEX
+        out.seria_flex = d ? ehFlex(servicoDoPedido(d)) : null;
 
         const nfe = await blingGet(`/pedidos/vendas/${id}/nfe`);
         out.nfe_direto_status = nfe.status;
@@ -1073,7 +1075,13 @@ function routes(readBody) {
               eh_zip: ehZip,
               arquivos_no_zip: arquivos,
               zpl_tamanho: zpl ? zpl.length : 0,
-              zpl_inicio: zpl ? zpl.slice(0, 200) : null
+              zpl_inicio: zpl ? zpl.slice(0, 200) : null,
+              zpl_marcadores: zpl ? {                        // desempate coleta vs entrega direta
+                retirada_pelo_comprador: /RETIRADA\s+PELO\s+COMPRADOR/i.test(zpl),
+                coleta: /COLETA/i.test(zpl),
+                entrega_direta: /ENTREGA\s+DIRETA/i.test(zpl),
+                blocos_grafico_gfa: (zpl.match(/\^GFA/g) || []).length
+              } : null
             };
           } catch (e) { out.etiqueta_download = { erro: e.message }; }
         }
