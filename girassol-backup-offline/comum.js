@@ -12,7 +12,18 @@ const { BLING_BASE, CACHE_DIR, SIT_ATENDIDO, SIT_VERIFICADO, SYNC_ON, JANELA_DIA
   sleep, ensureDir, readJson, writeJson, dataISO, json, html, manifest, salvarManifest, skuEanCache, locCache, salvarLoc,
   salvarSkuEan, lerIndiceEan, lerReservas, lerOperadores, lerAdmins, ehAdmin, blingGet, blingWrite, moverSituacao } = base;
 
-const FLEX_KEYWORDS = ['mercado envios flex', 'entrega local', 'vapt', 'entrega direta', 'logistica shopee'];
+// Keywords que marcam um pedido como FLEX (seller/motoboy entrega). Comparação por trecho, minúsculo.
+// ⚠️ "logistica shopee" é AMBÍGUO entre empresas por causa da migração de rótulos do Bling:
+//   • Girassol (JÁ migrou): Entrega Direta chega como "Shopee Entrega Direta" (pega em 'entrega direta').
+//     "Logistica Shopee" na Girassol = PONTO DE COLETA (retirada pelo comprador) → NÃO é flex.
+//   • GOOD (AINDA NÃO migrou): Entrega Direta chega como "Logistica Shopee" → PRECISA da keyword.
+// Por isso 'logistica shopee' só entra nas empresas listadas na env SHOPEE_LOGISTICA_FLEX_EMPRESAS
+// (hoje: "good"). Arquivo idêntico nas duas empresas. Quando a GOOD migrar → apaga a env, zero código.
+const _empresaFlex = String(CACHE_DIR || '').split('/').filter(Boolean).pop() || '';   // 'girassol' | 'good' | 'amb'
+const _logisticaShopeeEhFlex = (process.env.SHOPEE_LOGISTICA_FLEX_EMPRESAS || '')
+  .split(',').map(s => s.trim().toLowerCase()).filter(Boolean).includes(_empresaFlex.toLowerCase());
+const FLEX_KEYWORDS = ['mercado envios flex', 'entrega local', 'vapt', 'entrega direta']
+  .concat(_logisticaShopeeEhFlex ? ['logistica shopee'] : []);
 
 function servicoDoPedido(det) {
   if (!det) return '';
