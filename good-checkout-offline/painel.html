@@ -379,7 +379,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b33';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b35';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#b3b9c4'}, magalu:{n:'Magalu',c:'#0086ff'},
@@ -1224,7 +1224,7 @@ async function abrirHistorico(){
       '<button class="mx" onclick="fecharConfirmacao()" title="fechar">✕</button>'+
       '<div class="mtit">🕘 Últimos pedidos finalizados</div>'+
       '<input id="histBusca" class="buscafld" style="margin-bottom:8px" placeholder="🔎 filtrar por nº do pedido ou cliente" autocomplete="off" oninput="filtrarHist()" />'+
-      '<div style="margin:-2px 0 8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap"><button class="chip flex" id="histFlexBtn" onclick="toggleHistFlex()">⚡ Só FLEX</button><button class="chip" id="histPendBtn" onclick="toggleHistPend()" style="display:none">📨 Pendentes</button><button class="chip" id="histExpBtn" onclick="toggleHistExpand()">▼ Expandir tudo</button><span id="histReeInfo" style="font-size:12px;color:#dc2626;font-weight:700"></span></div>'+
+      '<div style="margin:-2px 0 8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap"><button class="chip flex" id="histFlexBtn" onclick="toggleHistFlex()">⚡ Só FLEX</button><button class="chip" id="histExpBtn" onclick="toggleHistExpand()">▼ Expandir tudo</button><button id="histPendBtn" onclick="toggleHistPend()" title="pedido(s) que o estoquista sinalizou pra reenvio — clique pra ver só eles e enviar" style="display:none;background:#dc2626;color:#fff;border:1px solid #dc2626;border-radius:999px;padding:7px 14px;font-size:13px;font-weight:800;cursor:pointer"></button></div>'+
       '<select id="histMktSel" class="buscafld" style="margin-bottom:10px" onchange="histMkt=this.value;filtrarHist()"><option value="">Todos os marketplaces</option></select>'+
       '<div id="histBody" class="histbody">carregando…</div>'+
       '<div class="mbtns"><button class="btn sec" onclick="fecharConfirmacao()">Fechar</button></div>'+
@@ -1277,12 +1277,19 @@ async function pedirReenvio(id, numero){
   }catch(e){ toast('Falha: '+e.message); }
   abrirHistorico();
 }
+let enviandoReenvio = false;
 async function resolverReenvio(id, enviar){
+  if(enviar){
+    if(enviandoReenvio){ toast('⏳ Já estou enviando, aguarde…'); return; }   // trava anti-duplicação
+    enviandoReenvio = true;
+    toast('📧 Enviando etiqueta + NF pro estoque… aguarde uns segundos');   // feedback imediato
+  }
   try{
     const r = await postJson('/good-checkout-offline/reenvio-resolver/'+encodeURIComponent(id), { op: opAtual(), enviar: !!enviar });
-    if(enviar) toast(r && r.ok ? '📧 Enviado pro estoque!' : 'Falha: '+((r&&r.erro)||'?'));
+    if(enviar) toast(r && r.ok ? '✅ Enviado pro estoque!' : 'Falha: '+((r&&r.erro)||'?'));
     else toast('Solicitação descartada.');
   }catch(e){ toast('Falha: '+e.message); }
+  enviandoReenvio = false;
   abrirHistorico();
 }
 function renderHist(lista){
@@ -1290,8 +1297,7 @@ function renderHist(lista){
   if(histPendOnly) lista = lista.filter(h=>histReenvios && histReenvios[h.id]);
   lista = lista.slice().sort((a,b)=>{ const fa=(histReenvios&&histReenvios[a.id])?1:0, fb=(histReenvios&&histReenvios[b.id])?1:0; return fa!==fb ? fb-fa : String(b.conferido_em||'').localeCompare(String(a.conferido_em||'')); });
   const pend = Object.keys(histReenvios||{}).length;
-  const ri = $('histReeInfo'); if(ri) ri.textContent = pend ? ('📨 '+pend+' aguardando seu envio') : '';
-  const pb = $('histPendBtn'); if(pb){ pb.textContent = '📨 Pendentes'+(pend?' ('+pend+')':''); pb.style.display = pend? '' : 'none'; }
+  const pb = $('histPendBtn'); if(pb){ pb.textContent = (histPendOnly?'✕ ':'⚠️ ')+pend+' PENDENTE'+(pend>1?'S':'')+' DE ENVIO'; pb.style.display = pend? 'inline-block' : 'none'; }
   if(!lista.length){ $('histBody').innerHTML='<div class="sepempty">'+(histItens.length?'Nenhum resultado pro filtro.':'Nenhum pedido finalizado ainda.')+'</div>'; return; }
   $('histBody').innerHTML = lista.map(h=>{
     const dt = h.conferido_em ? new Date(h.conferido_em).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '';
