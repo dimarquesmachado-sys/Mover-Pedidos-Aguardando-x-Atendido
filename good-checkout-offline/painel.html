@@ -213,6 +213,8 @@
   .ordseg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;vertical-align:middle}
   .ordseg button{background:transparent;color:#94a3b8;border:none;padding:7px 12px;font-size:13px;cursor:pointer;font-weight:700;white-space:nowrap}
   .ordseg button.on{background:#2563eb;color:#fff}
+  .histrow.reepend{border-left:3px solid #dc2626;background:rgba(220,38,38,.09);padding-left:7px;border-radius:6px}
+  .reebadge{background:#dc2626;color:#fff;font-size:11px;padding:3px 8px;border-radius:6px;font-weight:800;white-space:nowrap}
   @media(max-width:720px){
     .num{font-size:22px;letter-spacing:.3px}
     .scard{padding:12px 10px}
@@ -374,7 +376,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b30';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b31';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#b3b9c4'}, magalu:{n:'Magalu',c:'#0086ff'},
@@ -1219,7 +1221,7 @@ async function abrirHistorico(){
       '<button class="mx" onclick="fecharConfirmacao()" title="fechar">✕</button>'+
       '<div class="mtit">🕘 Últimos pedidos finalizados</div>'+
       '<input id="histBusca" class="buscafld" style="margin-bottom:8px" placeholder="🔎 filtrar por nº do pedido ou cliente" autocomplete="off" oninput="filtrarHist()" />'+
-      '<div style="margin:-2px 0 8px"><button class="chip flex" id="histFlexBtn" onclick="toggleHistFlex()">⚡ Só FLEX</button><span id="histReeInfo" style="margin-left:10px;font-size:12px;color:#eab308;font-weight:700"></span></div>'+
+      '<div style="margin:-2px 0 8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap"><button class="chip flex" id="histFlexBtn" onclick="toggleHistFlex()">⚡ Só FLEX</button><button class="chip" id="histPendBtn" onclick="toggleHistPend()" style="display:none">📨 Pendentes</button><span id="histReeInfo" style="font-size:12px;color:#dc2626;font-weight:700"></span></div>'+
       '<select id="histMktSel" class="buscafld" style="margin-bottom:10px" onchange="histMkt=this.value;filtrarHist()"><option value="">Todos os marketplaces</option></select>'+
       '<div id="histBody" class="histbody">carregando…</div>'+
       '<div class="mbtns"><button class="btn sec" onclick="fecharConfirmacao()">Fechar</button></div>'+
@@ -1255,11 +1257,13 @@ function filtrarHist(){
 }
 let histFlexOnly = false;
 function toggleHistFlex(){ histFlexOnly = !histFlexOnly; const b=$('histFlexBtn'); if(b) b.classList.toggle('on', histFlexOnly); filtrarHist(); }
+let histPendOnly = false;
+function toggleHistPend(){ histPendOnly = !histPendOnly; const b=$('histPendBtn'); if(b) b.classList.toggle('on', histPendOnly); filtrarHist(); }
 let histAberto = null;   // pedido com dropdown de detalhes aberto
 function toggleHistDet(id){ histAberto = (histAberto===id) ? null : id; filtrarHist(); }
 let histReenvios = {};   // solicitações de reenvio pendentes (id → {por, em})
 async function pedirReenvio(id, numero){
-  if(!confirm('Sinalizar que a etiqueta/NF do pedido '+numero+' precisa de REENVIO?\n\nA solicitação fica registrada e o admin envia pro e-mail do estoque.')) return;
+  if(!confirm('Marcar o pedido '+numero+' como PRECISA DE REENVIO (etiqueta/NF rasgada/suja)?\n\nEle fica sinalizado em VERMELHO no histórico. O admin recebe o aviso e reenvia os documentos. Você só sinaliza — não envia nada.')) return;
   try{
     const r = await postJson('/good-checkout-offline/pedir-reenvio/'+encodeURIComponent(id), { op: opAtual() });
     if(r && r.direto) toast(r.ok ? '📧 Enviado pro e-mail do estoque!' : 'Falha: '+(r.erro||'?'));
@@ -1278,8 +1282,11 @@ async function resolverReenvio(id, enviar){
 }
 function renderHist(lista){
   if(histFlexOnly) lista = lista.filter(h=>!!h.flex);
+  if(histPendOnly) lista = lista.filter(h=>histReenvios && histReenvios[h.id]);
+  lista = lista.slice().sort((a,b)=>{ const fa=(histReenvios&&histReenvios[a.id])?1:0, fb=(histReenvios&&histReenvios[b.id])?1:0; return fa!==fb ? fb-fa : String(b.conferido_em||'').localeCompare(String(a.conferido_em||'')); });
   const pend = Object.keys(histReenvios||{}).length;
-  const ri = $('histReeInfo'); if(ri) ri.textContent = pend ? ('📨 '+pend+' aguardando reenvio') : '';
+  const ri = $('histReeInfo'); if(ri) ri.textContent = pend ? ('📨 '+pend+' aguardando seu envio') : '';
+  const pb = $('histPendBtn'); if(pb){ pb.textContent = '📨 Pendentes'+(pend?' ('+pend+')':''); pb.style.display = pend? '' : 'none'; }
   if(!lista.length){ $('histBody').innerHTML='<div class="sepempty">'+(histItens.length?'Nenhum resultado pro filtro.':'Nenhum pedido finalizado ainda.')+'</div>'; return; }
   $('histBody').innerHTML = lista.map(h=>{
     const dt = h.conferido_em ? new Date(h.conferido_em).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '';
@@ -1300,13 +1307,13 @@ function renderHist(lista){
           : '<div class="histit" style="opacity:.6">sem detalhes de itens (pedido finalizado antes desta atualização)</div>')+
       '</div>';
     }
-    return '<div class="histrow" style="cursor:pointer" onclick="toggleHistDet(\''+esc(h.id)+'\')">'+
+    return '<div class="histrow'+(ree?' reepend':'')+'" style="cursor:pointer" onclick="toggleHistDet(\''+esc(h.id)+'\')">'+
       (mk?'<span class="hmk" style="background:'+mk.c+'"></span>':'')+
       '<div class="hmeta">'+
         '<div class="hnum">'+(h.flex?'⚡ ':'')+esc(h.numero||h.id)+(h.cliente?' · '+esc(h.cliente):'')+'</div>'+
         '<div class="hsub">'+resumo+dt+(h.user?(' · '+esc(h.user)):'')+' · '+(aberto?'▲ fechar':'▼ detalhes')+'</div>'+
       '</div>'+
-      (ree?'<span class="hsync wait" title="solicitado em '+esc((ree.em||'').slice(0,16).replace('T',' '))+'">📨 '+esc(ree.por||'?')+'</span>':'')+
+      (ree?'<span class="reebadge" title="solicitado por '+esc(ree.por||'?')+' em '+esc((ree.em||'').slice(0,16).replace('T',' '))+'">📨 REENVIO</span>':'')+
       tag+
       (!ree?'<button class="btn sec sm" onclick="event.stopPropagation();pedirReenvio(\''+h.id+'\',\''+esc(h.numero||h.id)+'\')" title="etiqueta rasgou/sujou? sinaliza que este pedido precisa de reenvio">📨</button>':'')+
       (ree&&souAdmin()?'<button class="btn sec sm" onclick="event.stopPropagation();resolverReenvio(\''+h.id+'\',true)" title="enviar etiqueta+NF pro e-mail do estoque e baixar a solicitação">✉ Enviar</button>':'')+
