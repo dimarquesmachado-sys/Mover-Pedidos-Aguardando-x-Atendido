@@ -210,6 +210,9 @@
   }
   .histdet{margin:2px 0 10px 14px;padding:8px 10px;background:#0d1117;border:1px solid var(--line);border-radius:8px;font-size:13px;display:flex;flex-direction:column;gap:4px}
   .histit{font-family:ui-monospace,monospace;font-size:12.5px}
+  .ordseg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;vertical-align:middle}
+  .ordseg button{background:transparent;color:#94a3b8;border:none;padding:7px 12px;font-size:13px;cursor:pointer;font-weight:700;white-space:nowrap}
+  .ordseg button.on{background:#2563eb;color:#fff}
   @media(max-width:720px){
     .num{font-size:22px;letter-spacing:.3px}
     .scard{padding:12px 10px}
@@ -371,7 +374,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b29';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b30';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#b3b9c4'}, magalu:{n:'Magalu',c:'#0086ff'},
@@ -389,7 +392,10 @@ let estoqueCheckout = {};    // sku → quanto desse produto está em pedidos no
 let estoqueCarregado = false; // já tentou buscar? false=mostra "…", true=mostra número/"—"
 let filtroMkt = null;   // null=todos | 'ml'|'shopee'|... | 'flex'
 let ordenacao = 'numero';   // 'numero' (mais antigos) | 'produto' (agrupa pedidos do mesmo SKU p/ picking mais rapido)
-function toggleOrdenacao(){ ordenacao = (ordenacao==='numero')?'produto':'numero'; renderChips(); renderLista(); }
+function setOrdenacao(v){ ordenacao = v; renderChips(); renderLista(); }
+// chave de agrupamento por produto: SKUs distintos ordenados e juntados. "so SKU-A" ("a") vem ANTES de
+// "SKU-A + SKU-B" ("a|b"), que vem antes de "so SKU-B" ("b") — pedidos puros primeiro, depois os combinados.
+function skuKeyPedido(p){ const u=[...new Set((p.skus||[]).map(s=>String(s).toLowerCase()))].sort(); return u.length?u.join('|'):'~~~'; }
 
 const $ = id => document.getElementById(id);
 const norm = c => String(c||'').trim().replace(/\s+/g,'');
@@ -726,7 +732,10 @@ function renderChips(){
   const box = $('chips'); if(!box) return;
   const cont = {}; let flexN = 0;
   listaCache.forEach(p=>{ cont[p.marketplace] = (cont[p.marketplace]||0)+1; if(p.flex) flexN++; });
-  let html = '<button class="chip" onclick="toggleOrdenacao()" title="alterna entre ordenar por numero (mais antigos primeiro) ou agrupar pedidos do mesmo produto para o picking">'+(ordenacao==='produto'?'📦 Produto':'🔢 Nº')+'</button>';
+  let html = '<span class="ordseg" title="ordena a fila: por numero do pedido, ou agrupando os pedidos do mesmo produto (picking)">'+
+    '<button class="'+(ordenacao==='numero'?'on':'')+'" onclick="setOrdenacao(\'numero\')">🔢 Nº</button>'+
+    '<button class="'+(ordenacao==='produto'?'on':'')+'" onclick="setOrdenacao(\'produto\')">📦 Produto</button>'+
+  '</span>';
   html += chipBtn('Todos', listaCache.length, null);
   MKT_ORDEM.forEach(mk=>{ if(cont[mk]) html += chipBtn((MKT[mk]||MKT.outro).n, cont[mk], mk, (MKT[mk]||MKT.outro).c); });
   html += chipBtn('⚡ FLEX', flexN, 'flex');
@@ -757,7 +766,7 @@ function renderLista(){
   }
   if(!listaCache.length){ box.innerHTML='<div class="empty">nenhum pedido pronto no cache</div>'; return; }
   let lista = filtrar(listaCache);
-  if(ordenacao==='produto') lista = lista.slice().sort((a,b)=>{ const sa=((a.skus&&a.skus[0])||'~~~').toLowerCase(), sb=((b.skus&&b.skus[0])||'~~~').toLowerCase(); return sa!==sb ? sa.localeCompare(sb) : Number(a.numero||0)-Number(b.numero||0); });
+  if(ordenacao==='produto') lista = lista.slice().sort((a,b)=>{ const ka=skuKeyPedido(a), kb=skuKeyPedido(b); return ka!==kb ? ka.localeCompare(kb) : Number(a.numero||0)-Number(b.numero||0); });
   const cnt = filtroBusca ? '<div class="scount">'+lista.length+' de '+listaCache.length+'</div>' : '';
   if(!lista.length){ box.innerHTML = cnt+'<div class="empty">nada encontrado p/ "'+esc(filtroBusca)+'"</div>'; return; }
   box.innerHTML = cnt + lista.map(p=>{
