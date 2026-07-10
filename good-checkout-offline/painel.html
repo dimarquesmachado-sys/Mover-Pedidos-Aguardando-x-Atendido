@@ -208,6 +208,19 @@
     .sep-ped .sit .q{min-width:32px;width:32px;height:32px;font-size:14px}
     .sep-ped .sit .m .sku{font-size:13px}
   }
+  .histdet{margin:2px 0 10px 14px;padding:8px 10px;background:#0d1117;border:1px solid var(--line);border-radius:8px;font-size:13px;display:flex;flex-direction:column;gap:4px}
+  .histit{font-family:ui-monospace,monospace;font-size:12.5px}
+  @media(max-width:720px){
+    .num{font-size:22px;letter-spacing:.3px}
+    .scard{padding:12px 10px}
+    .scl1{flex-wrap:wrap;row-gap:4px}
+    .scli{font-size:13px}
+    .smeta{font-size:12px}
+    .chips{overflow-x:auto;flex-wrap:nowrap;-webkit-overflow-scrolling:touch;padding-bottom:4px}
+    .chips .chip{flex:0 0 auto;white-space:nowrap;padding:8px 12px;font-size:13px}
+    .stats{flex-wrap:wrap;gap:6px;font-size:12px}
+    input.busca{font-size:16px;padding:10px}
+  }
   @media print{ html,body{display:none!important} }   /* a página nunca se imprime — só a Zebra via QZ Tray */
 
   /* Gaveta: Lista de Separação */
@@ -358,7 +371,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b25';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b29';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#b3b9c4'}, magalu:{n:'Magalu',c:'#0086ff'},
@@ -375,6 +388,8 @@ let estoqueSaldos = {};      // sku → saldoVirtual do Bling (estoque restante)
 let estoqueCheckout = {};    // sku → quanto desse produto está em pedidos no checkout agora (info, não subtrai)
 let estoqueCarregado = false; // já tentou buscar? false=mostra "…", true=mostra número/"—"
 let filtroMkt = null;   // null=todos | 'ml'|'shopee'|... | 'flex'
+let ordenacao = 'numero';   // 'numero' (mais antigos) | 'produto' (agrupa pedidos do mesmo SKU p/ picking mais rapido)
+function toggleOrdenacao(){ ordenacao = (ordenacao==='numero')?'produto':'numero'; renderChips(); renderLista(); }
 
 const $ = id => document.getElementById(id);
 const norm = c => String(c||'').trim().replace(/\s+/g,'');
@@ -711,7 +726,8 @@ function renderChips(){
   const box = $('chips'); if(!box) return;
   const cont = {}; let flexN = 0;
   listaCache.forEach(p=>{ cont[p.marketplace] = (cont[p.marketplace]||0)+1; if(p.flex) flexN++; });
-  let html = chipBtn('Todos', listaCache.length, null);
+  let html = '<button class="chip" onclick="toggleOrdenacao()" title="alterna entre ordenar por numero (mais antigos primeiro) ou agrupar pedidos do mesmo produto para o picking">'+(ordenacao==='produto'?'📦 Produto':'🔢 Nº')+'</button>';
+  html += chipBtn('Todos', listaCache.length, null);
   MKT_ORDEM.forEach(mk=>{ if(cont[mk]) html += chipBtn((MKT[mk]||MKT.outro).n, cont[mk], mk, (MKT[mk]||MKT.outro).c); });
   html += chipBtn('⚡ FLEX', flexN, 'flex');
   if((semEtiqCache||[]).length) html += chipBtn('⚠️ Sem etiqueta', semEtiqCache.length, 'semetiqueta');
@@ -740,7 +756,8 @@ function renderLista(){
     return;
   }
   if(!listaCache.length){ box.innerHTML='<div class="empty">nenhum pedido pronto no cache</div>'; return; }
-  const lista = filtrar(listaCache);
+  let lista = filtrar(listaCache);
+  if(ordenacao==='produto') lista = lista.slice().sort((a,b)=>{ const sa=((a.skus&&a.skus[0])||'~~~').toLowerCase(), sb=((b.skus&&b.skus[0])||'~~~').toLowerCase(); return sa!==sb ? sa.localeCompare(sb) : Number(a.numero||0)-Number(b.numero||0); });
   const cnt = filtroBusca ? '<div class="scount">'+lista.length+' de '+listaCache.length+'</div>' : '';
   if(!lista.length){ box.innerHTML = cnt+'<div class="empty">nada encontrado p/ "'+esc(filtroBusca)+'"</div>'; return; }
   box.innerHTML = cnt + lista.map(p=>{
@@ -760,7 +777,7 @@ function renderLista(){
         (servicoDesconhecido(p)?'<span class="voltag" style="background:#b45309;color:#fff" title="Serviço Shopee não reconhecido — confira se é FLEX ou ponto de coleta">⚠️ serviço?</span>':'')+
       '</div>'+
       (p.cliente?'<div class="scli">'+esc(p.cliente)+'</div>':'')+
-      '<div class="smeta">'+(p.itens||0)+' item(s) · NF '+(p.nf_numero?esc(p.nf_numero):(p.tem_nf?'ok':'—'))+(p.tem_danfe?' · <span class="pdfok">PDF✓</span>':'')+'</div>'+
+      '<div class="smeta">'+((p.skus&&p.skus[0])?'📦 <b>'+esc(p.skus[0])+'</b>'+(p.skus.length>1?' +'+(p.skus.length-1):'')+' · ':'')+(p.itens||0)+' item(s) · NF '+(p.nf_numero?esc(p.nf_numero):(p.tem_nf?'ok':'—'))+(p.tem_danfe?' · <span class="pdfok">PDF✓</span>':'')+'</div>'+
     '</div>';
   }).join('');
 }
@@ -1193,6 +1210,7 @@ async function abrirHistorico(){
       '<button class="mx" onclick="fecharConfirmacao()" title="fechar">✕</button>'+
       '<div class="mtit">🕘 Últimos pedidos finalizados</div>'+
       '<input id="histBusca" class="buscafld" style="margin-bottom:8px" placeholder="🔎 filtrar por nº do pedido ou cliente" autocomplete="off" oninput="filtrarHist()" />'+
+      '<div style="margin:-2px 0 8px"><button class="chip flex" id="histFlexBtn" onclick="toggleHistFlex()">⚡ Só FLEX</button><span id="histReeInfo" style="margin-left:10px;font-size:12px;color:#eab308;font-weight:700"></span></div>'+
       '<select id="histMktSel" class="buscafld" style="margin-bottom:10px" onchange="histMkt=this.value;filtrarHist()"><option value="">Todos os marketplaces</option></select>'+
       '<div id="histBody" class="histbody">carregando…</div>'+
       '<div class="mbtns"><button class="btn sec" onclick="fecharConfirmacao()">Fechar</button></div>'+
@@ -1201,6 +1219,7 @@ async function abrirHistorico(){
   try{
     const d = await api('/good-checkout-offline/historico');
     histItens = (d && d.itens) || [];
+    histReenvios = (d && d.reenvios) || {};
     montarFiltroMkt();
     renderHist(histItens);
   }catch(e){ $('histBody').innerHTML='<div class="sepempty">Falha: '+esc(e.message)+'</div>'; }
@@ -1225,22 +1244,67 @@ function filtrarHist(){
   if(q) lista = lista.filter(h => (String(h.numero||h.id)+' '+(h.cliente||'')).toLowerCase().includes(q));
   renderHist(lista);
 }
+let histFlexOnly = false;
+function toggleHistFlex(){ histFlexOnly = !histFlexOnly; const b=$('histFlexBtn'); if(b) b.classList.toggle('on', histFlexOnly); filtrarHist(); }
+let histAberto = null;   // pedido com dropdown de detalhes aberto
+function toggleHistDet(id){ histAberto = (histAberto===id) ? null : id; filtrarHist(); }
+let histReenvios = {};   // solicitações de reenvio pendentes (id → {por, em})
+async function pedirReenvio(id, numero){
+  if(!confirm('Sinalizar que a etiqueta/NF do pedido '+numero+' precisa de REENVIO?\n\nA solicitação fica registrada e o admin envia pro e-mail do estoque.')) return;
+  try{
+    const r = await postJson('/good-checkout-offline/pedir-reenvio/'+encodeURIComponent(id), { op: opAtual() });
+    if(r && r.direto) toast(r.ok ? '📧 Enviado pro e-mail do estoque!' : 'Falha: '+(r.erro||'?'));
+    else if(r && r.ok) toast('📨 Solicitação registrada — o admin envia em seguida.');
+    else toast('Falha: '+((r&&r.erro)||'?'));
+  }catch(e){ toast('Falha: '+e.message); }
+  abrirHistorico();
+}
+async function resolverReenvio(id, enviar){
+  try{
+    const r = await postJson('/good-checkout-offline/reenvio-resolver/'+encodeURIComponent(id), { op: opAtual(), enviar: !!enviar });
+    if(enviar) toast(r && r.ok ? '📧 Enviado pro estoque!' : 'Falha: '+((r&&r.erro)||'?'));
+    else toast('Solicitação descartada.');
+  }catch(e){ toast('Falha: '+e.message); }
+  abrirHistorico();
+}
 function renderHist(lista){
+  if(histFlexOnly) lista = lista.filter(h=>!!h.flex);
+  const pend = Object.keys(histReenvios||{}).length;
+  const ri = $('histReeInfo'); if(ri) ri.textContent = pend ? ('📨 '+pend+' aguardando reenvio') : '';
   if(!lista.length){ $('histBody').innerHTML='<div class="sepempty">'+(histItens.length?'Nenhum resultado pro filtro.':'Nenhum pedido finalizado ainda.')+'</div>'; return; }
   $('histBody').innerHTML = lista.map(h=>{
     const dt = h.conferido_em ? new Date(h.conferido_em).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '';
     const mk = h.marketplace ? (MKT[h.marketplace]||MKT.outro) : null;
     const tag = h.sincronizado ? '<span class="hsync ok">✓ VERIFICADO</span>' : '<span class="hsync wait">⏳ na fila</span>';
-    return '<div class="histrow">'+
+    const aberto = (histAberto===h.id);
+    const ree = histReenvios && histReenvios[h.id];
+    const its0 = h.itens||[];
+    const resumo = (h.nf_numero?('NF '+esc(h.nf_numero)+' · '):'')+(its0.length?((its0[0].qtd||1)+'× '+esc(its0[0].sku||'?')+(its0.length>1?' +'+(its0.length-1):'')+' · '):'');
+    let det = '';
+    if(aberto){
+      const its = h.itens||[];
+      det = '<div class="histdet">'+
+        '<div>'+(mk?esc(mk.n):'')+(h.servico?' · '+esc(h.servico):'')+(h.flex?' · <b>⚡ FLEX</b>':'')+(h.nf_numero?' · NF '+esc(h.nf_numero):'')+'</div>'+
+        (h.cliente?'<div>👤 '+esc(h.cliente)+'</div>':'')+
+        (its.length
+          ? its.map(it=>'<div class="histit"><b>'+(it.qtd||1)+'×</b> '+esc(it.sku||'?')+(it.descricao?' — '+esc(it.descricao):'')+'</div>').join('')
+          : '<div class="histit" style="opacity:.6">sem detalhes de itens (pedido finalizado antes desta atualização)</div>')+
+      '</div>';
+    }
+    return '<div class="histrow" style="cursor:pointer" onclick="toggleHistDet(\''+esc(h.id)+'\')">'+
       (mk?'<span class="hmk" style="background:'+mk.c+'"></span>':'')+
       '<div class="hmeta">'+
-        '<div class="hnum">'+esc(h.numero||h.id)+(h.cliente?' · '+esc(h.cliente):'')+'</div>'+
-        '<div class="hsub">'+dt+(h.user?(' · '+esc(h.user)):'')+'</div>'+
+        '<div class="hnum">'+(h.flex?'⚡ ':'')+esc(h.numero||h.id)+(h.cliente?' · '+esc(h.cliente):'')+'</div>'+
+        '<div class="hsub">'+resumo+dt+(h.user?(' · '+esc(h.user)):'')+' · '+(aberto?'▲ fechar':'▼ detalhes')+'</div>'+
       '</div>'+
+      (ree?'<span class="hsync wait" title="solicitado em '+esc((ree.em||'').slice(0,16).replace('T',' '))+'">📨 '+esc(ree.por||'?')+'</span>':'')+
       tag+
-      (souAdmin()?'<button class="btn sec sm" onclick="enviarDocs(\''+h.id+'\',\''+esc(h.numero||h.id)+'\')" title="enviar etiqueta + NF pro estoque imprimir na Zebra">📧</button>':'')+
-      (souAdmin()?'<button class="btn warn sm" onclick="reabrirPedido(\''+h.id+'\',\''+esc(h.numero||h.id)+'\')">↩ Reabrir</button>':'')+
-    '</div>';
+      (!ree?'<button class="btn sec sm" onclick="event.stopPropagation();pedirReenvio(\''+h.id+'\',\''+esc(h.numero||h.id)+'\')" title="etiqueta rasgou/sujou? sinaliza que este pedido precisa de reenvio">📨</button>':'')+
+      (ree&&souAdmin()?'<button class="btn sec sm" onclick="event.stopPropagation();resolverReenvio(\''+h.id+'\',true)" title="enviar etiqueta+NF pro e-mail do estoque e baixar a solicitação">✉ Enviar</button>':'')+
+      (ree&&souAdmin()?'<button class="btn sec sm" onclick="event.stopPropagation();resolverReenvio(\''+h.id+'\',false)" title="descartar a solicitação sem enviar">✕</button>':'')+
+      (souAdmin()?'<button class="btn sec sm" onclick="event.stopPropagation();enviarDocs(\''+h.id+'\',\''+esc(h.numero||h.id)+'\')" title="ADMIN: enviar etiqueta + NF pro e-mail do estoque agora">📧</button>':'')+
+      (souAdmin()?'<button class="btn warn sm" onclick="event.stopPropagation();reabrirPedido(\''+h.id+'\',\''+esc(h.numero||h.id)+'\')">↩ Reabrir</button>':'')+
+    '</div>'+det;
   }).join('');
 }
 async function enviarDocs(id, numero){
