@@ -294,7 +294,10 @@
 
   /* Histórico (no modal) */
   .histbody{max-height:60vh;overflow:auto;margin:8px 0 16px;padding-right:6px;text-align:left}
-  .histrow{display:flex;align-items:center;gap:10px;padding:9px 2px;border-bottom:1px solid var(--line)}
+  .histrow{display:flex;flex-direction:column;gap:7px;padding:11px 4px;border-bottom:1px solid var(--line);cursor:pointer}
+  .histrow .htop{display:flex;align-items:center;gap:10px}
+  .hactions{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+  .hactions .btn.sm{padding:6px 11px}
   .histrow .hmk{flex:0 0 auto;width:9px;height:9px;border-radius:50%}
   .histrow .hmeta{flex:1;min-width:0}
   .histrow .hnum{font-size:14px;font-weight:700;color:var(--tx);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -376,7 +379,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b32';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b33';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#b3b9c4'}, magalu:{n:'Magalu',c:'#0086ff'},
@@ -1221,7 +1224,7 @@ async function abrirHistorico(){
       '<button class="mx" onclick="fecharConfirmacao()" title="fechar">✕</button>'+
       '<div class="mtit">🕘 Últimos pedidos finalizados</div>'+
       '<input id="histBusca" class="buscafld" style="margin-bottom:8px" placeholder="🔎 filtrar por nº do pedido ou cliente" autocomplete="off" oninput="filtrarHist()" />'+
-      '<div style="margin:-2px 0 8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap"><button class="chip flex" id="histFlexBtn" onclick="toggleHistFlex()">⚡ Só FLEX</button><button class="chip" id="histPendBtn" onclick="toggleHistPend()" style="display:none">📨 Pendentes</button><span id="histReeInfo" style="font-size:12px;color:#dc2626;font-weight:700"></span></div>'+
+      '<div style="margin:-2px 0 8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap"><button class="chip flex" id="histFlexBtn" onclick="toggleHistFlex()">⚡ Só FLEX</button><button class="chip" id="histPendBtn" onclick="toggleHistPend()" style="display:none">📨 Pendentes</button><button class="chip" id="histExpBtn" onclick="toggleHistExpand()">▼ Expandir tudo</button><span id="histReeInfo" style="font-size:12px;color:#dc2626;font-weight:700"></span></div>'+
       '<select id="histMktSel" class="buscafld" style="margin-bottom:10px" onchange="histMkt=this.value;filtrarHist()"><option value="">Todos os marketplaces</option></select>'+
       '<div id="histBody" class="histbody">carregando…</div>'+
       '<div class="mbtns"><button class="btn sec" onclick="fecharConfirmacao()">Fechar</button></div>'+
@@ -1259,6 +1262,8 @@ let histFlexOnly = false;
 function toggleHistFlex(){ histFlexOnly = !histFlexOnly; const b=$('histFlexBtn'); if(b) b.classList.toggle('on', histFlexOnly); filtrarHist(); }
 let histPendOnly = false;
 function toggleHistPend(){ histPendOnly = !histPendOnly; const b=$('histPendBtn'); if(b) b.classList.toggle('on', histPendOnly); filtrarHist(); }
+let histExpandAll = false;
+function toggleHistExpand(){ histExpandAll = !histExpandAll; const b=$('histExpBtn'); if(b){ b.classList.toggle('on', histExpandAll); b.textContent = histExpandAll?'▲ Recolher tudo':'▼ Expandir tudo'; } filtrarHist(); }
 let histAberto = null;   // pedido com dropdown de detalhes aberto
 function toggleHistDet(id){ histAberto = (histAberto===id) ? null : id; filtrarHist(); }
 let histReenvios = {};   // solicitações de reenvio pendentes (id → {por, em})
@@ -1292,7 +1297,7 @@ function renderHist(lista){
     const dt = h.conferido_em ? new Date(h.conferido_em).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '';
     const mk = h.marketplace ? (MKT[h.marketplace]||MKT.outro) : null;
     const tag = h.sincronizado ? '<span class="hsync ok">✓ VERIFICADO</span>' : '<span class="hsync wait">⏳ na fila</span>';
-    const aberto = (histAberto===h.id);
+    const aberto = histExpandAll || (histAberto===h.id);
     const ree = histReenvios && histReenvios[h.id];
     const its0 = h.itens||[];
     const resumo = (h.nf_numero?('NF '+esc(h.nf_numero)+' · '):'')+(its0.length?((its0[0].qtd||1)+'× '+esc(its0[0].sku||'?')+(its0.length>1?' +'+(its0.length-1):'')+' · '):'');
@@ -1308,11 +1313,13 @@ function renderHist(lista){
       '</div>';
     }
     return '<div class="histrow'+(ree?' reepend':'')+'" style="cursor:pointer" onclick="toggleHistDet(\''+esc(h.id)+'\')">'+
+      '<div class="htop">'+
       (mk?'<span class="hmk" style="background:'+mk.c+'"></span>':'')+
       '<div class="hmeta">'+
         '<div class="hnum">'+(h.flex?'⚡ ':'')+esc(h.numero||h.id)+(h.cliente?' · '+esc(h.cliente):'')+'</div>'+
         '<div class="hsub">'+resumo+dt+(h.user?(' · '+esc(h.user)):'')+' · '+(aberto?'▲ fechar':'▼ detalhes')+'</div>'+
       '</div>'+
+      '</div><div class="hactions">'+
       (ree?'<span class="reebadge" title="solicitado por '+esc(ree.por||'?')+' em '+esc((ree.em||'').slice(0,16).replace('T',' '))+'">📨 REENVIO</span>':'')+
       tag+
       (!ree?'<button class="btn sec sm" onclick="event.stopPropagation();pedirReenvio(\''+h.id+'\',\''+esc(h.numero||h.id)+'\')" title="etiqueta rasgou/sujou? sinaliza que este pedido precisa de reenvio">📨</button>':'')+
@@ -1320,6 +1327,7 @@ function renderHist(lista){
       (ree&&souAdmin()?'<button class="btn sec sm" onclick="event.stopPropagation();resolverReenvio(\''+h.id+'\',false)" title="descartar a solicitação sem enviar">✕</button>':'')+
       (souAdmin()?'<button class="btn sec sm" onclick="event.stopPropagation();enviarDocs(\''+h.id+'\',\''+esc(h.numero||h.id)+'\')" title="ADMIN: enviar etiqueta + NF pro e-mail do estoque agora">📧</button>':'')+
       (souAdmin()?'<button class="btn warn sm" onclick="event.stopPropagation();reabrirPedido(\''+h.id+'\',\''+esc(h.numero||h.id)+'\')">↩ Reabrir</button>':'')+
+      '</div>'+
     '</div>'+det;
   }).join('');
 }
