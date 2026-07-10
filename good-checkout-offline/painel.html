@@ -379,7 +379,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b35';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b36';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#b3b9c4'}, magalu:{n:'Magalu',c:'#0086ff'},
@@ -1328,7 +1328,7 @@ function renderHist(lista){
       '</div><div class="hactions">'+
       (ree?'<span class="reebadge" title="solicitado por '+esc(ree.por||'?')+' em '+esc((ree.em||'').slice(0,16).replace('T',' '))+'">📨 REENVIO</span>':'')+
       tag+
-      (!ree?'<button class="btn sec sm" onclick="event.stopPropagation();pedirReenvio(\''+h.id+'\',\''+esc(h.numero||h.id)+'\')" title="etiqueta rasgou/sujou? sinaliza que este pedido precisa de reenvio">📨</button>':'')+
+      (!ree?'<button class="btn sec sm" onclick="event.stopPropagation();pedirReenvio(\''+h.id+'\',\''+esc(h.numero||h.id)+'\')" title="etiqueta rasgou ou sujou? avise o admin que este pedido precisa de reenvio" style="background:#b45309;color:#fff;border-color:#b45309">⚠️ Avisar</button>':'')+
       (ree&&souAdmin()?'<button class="btn sec sm" onclick="event.stopPropagation();resolverReenvio(\''+h.id+'\',true)" title="enviar etiqueta+NF pro e-mail do estoque e baixar a solicitação">✉ Enviar</button>':'')+
       (ree&&souAdmin()?'<button class="btn sec sm" onclick="event.stopPropagation();resolverReenvio(\''+h.id+'\',false)" title="descartar a solicitação sem enviar">✕</button>':'')+
       (souAdmin()?'<button class="btn sec sm" onclick="event.stopPropagation();enviarDocs(\''+h.id+'\',\''+esc(h.numero||h.id)+'\')" title="ADMIN: enviar etiqueta + NF pro e-mail do estoque agora">📧</button>':'')+
