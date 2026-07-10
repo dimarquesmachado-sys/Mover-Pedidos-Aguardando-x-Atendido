@@ -376,7 +376,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b96';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b97';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#b3b9c4'}, magalu:{n:'Magalu',c:'#0086ff'}, shein:{n:'Shein',c:'#e0e0e0'},
@@ -397,7 +397,7 @@ let ordenacao = 'numero';   // 'numero' (mais antigos) | 'produto' (agrupa pedid
 function setOrdenacao(v){ ordenacao = v; renderChips(); renderLista(); }
 // chave de agrupamento por produto: SKUs distintos ordenados e juntados. "so SKU-A" ("a") vem ANTES de
 // "SKU-A + SKU-B" ("a|b"), que vem antes de "so SKU-B" ("b") — pedidos puros primeiro, depois os combinados.
-function skuKeyPedido(p){ const u=[...new Set((p.skus||[]).map(s=>String(s).toLowerCase()))].sort(); return u.length?u.join('|'):'~~~'; }
+function skuKeyPedido(p){ const arr=(p.skus_pick&&p.skus_pick.length)?p.skus_pick:(p.skus||[]); const u=[...new Set(arr.map(s=>String(s).toLowerCase()))].sort(); return u.length?u.join('|'):'~~~'; }
 
 const $ = id => document.getElementById(id);
 const norm = c => String(c||'').trim().replace(/\s+/g,'');
