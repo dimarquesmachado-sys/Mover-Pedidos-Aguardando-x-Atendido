@@ -359,7 +359,7 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
           cliente: snap.cliente || '', nf_numero: (snap.nf && snap.nf.numero) || null,
           tem_nf: snap.tem_nf, tem_kit: snap.tem_kit, tem_etiqueta: snap.tem_etiqueta,
           tem_danfe: !!(ja && ja.tem_danfe),
-          itens: snap.itens.length, schema: snap.schema, volumes: snap.volumes || 1, cacheado_em: snap.cacheado_em
+          itens: snap.itens.length, skus: (snap.itens || []).map(it => it.sku).filter(Boolean), schema: snap.schema, volumes: snap.volumes || 1, cacheado_em: snap.cacheado_em
         };
         if (!ja) novos++;
         salvarManifest(man);
