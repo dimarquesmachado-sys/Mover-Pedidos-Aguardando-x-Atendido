@@ -429,7 +429,8 @@ function routes(readBody) {
       const conf = readJson(CONFERIDOS_FILE, {});
       const itens = Object.keys(conf).map(id => ({ id, ...conf[id] }))
         .sort((a, b) => String(b.conferido_em || '').localeCompare(String(a.conferido_em || '')));
-      json(res, 200, { ok: true, total: Object.keys(conf).length, itens });
+      const reenvios = readJson(CONFERIDOS_FILE.replace('conferidos.json', 'reenvios.json'), {});
+      json(res, 200, { ok: true, total: Object.keys(conf).length, itens, reenvios });
       return true;
     }
 
@@ -733,7 +734,11 @@ function routes(readBody) {
         sincronizado: false,
         numero: snapC ? snapC.numero : (body.numero || null),
         cliente: snapC ? (snapC.cliente || '') : '',
-        marketplace: snapC ? (snapC.marketplace || null) : null
+        marketplace: snapC ? (snapC.marketplace || null) : null,
+        flex: !!(snapC && snapC.flex),
+        servico: snapC ? (snapC.servico || '') : '',
+        nf_numero: (snapC && snapC.nf && snapC.nf.numero) || null,
+        itens: snapC ? (snapC.itens || []).map(it => ({ sku: it.sku || '', descricao: String(it.descricao || '').slice(0, 90), qtd: it.qtd || 1 })) : []
       };
       writeJson(CONFERIDOS_FILE, conf);            // grava na fila primeiro — nunca perde
       arquivarFinalizado(id);                       // arquiva etiqueta + meta p/ reimprimir/reenviar depois (Parte A)
@@ -948,6 +953,46 @@ function routes(readBody) {
       return true;
     }
     // ENVIAR pro estoque: etiqueta + DANFE por email (Parte B)
+    // ── REENVIO DE DOCS: o estoquista SINALIZA (etiqueta rasgou / NF com problema) e o ADMIN decide enviar ──
+    // Futuro: env CHECKOUT_REENVIO_DIRETO_EMPRESAS ("girassol,good") → nas empresas listadas o pedido do
+    // estoquista já dispara o e-mail direto, sem esperar o admin. Sem a env (padrão) = só sinaliza.
+    if (method === 'POST' && p.startsWith('/girassol-backup-offline/pedir-reenvio/')) {
+      let op = '';
+      try { const b = await readBody(req); op = String(b.op || ''); } catch (e) {}
+      if (!op) { json(res, 200, { ok: false, erro: 'identifique o operador (faça login no painel)' }); return true; }
+      const id = decodeURIComponent(p.split('/').filter(Boolean).pop() || '');
+      const confR = readJson(CONFERIDOS_FILE, {});
+      const c = confR[id] || {};
+      const direto = String(process.env.CHECKOUT_REENVIO_DIRETO_EMPRESAS || '').toLowerCase().split(',').map(s => s.trim()).includes('girassol');
+      if (direto) {
+        const r = await enviarEmailDocs(id, op);
+        console.log(`[GIRABKP] 📨 reenvio DIRETO pedido ${c.numero || id} por ${op} → ${r.ok ? 'enviado' : 'FALHA: ' + r.erro}`);
+        json(res, 200, { ...r, direto: true });
+        return true;
+      }
+      const REENVIOS_FILE = CONFERIDOS_FILE.replace('conferidos.json', 'reenvios.json');
+      const ree = readJson(REENVIOS_FILE, {});
+      ree[id] = { numero: c.numero || null, cliente: c.cliente || '', por: op, em: new Date().toISOString() };
+      writeJson(REENVIOS_FILE, ree);
+      console.log(`[GIRABKP] 📨 REENVIO SOLICITADO — pedido ${c.numero || id} por ${op} (admin envia pelo Histórico)`);
+      json(res, 200, { ok: true, solicitado: true });
+      return true;
+    }
+    // admin resolve a solicitação: {enviar:true} manda o e-mail e baixa; {enviar:false} só descarta
+    if (method === 'POST' && p.startsWith('/girassol-backup-offline/reenvio-resolver/')) {
+      let op = '', enviar = false;
+      try { const b = await readBody(req); op = String(b.op || ''); enviar = !!b.enviar; } catch (e) {}
+      if (!ehAdmin(op)) { json(res, 200, { ok: false, erro: 'apenas o admin' }); return true; }
+      const id = decodeURIComponent(p.split('/').filter(Boolean).pop() || '');
+      const REENVIOS_FILE = CONFERIDOS_FILE.replace('conferidos.json', 'reenvios.json');
+      let r = { ok: true, enviado: false };
+      if (enviar) { const e = await enviarEmailDocs(id, op); r = { ...e, enviado: !!e.ok }; if (!e.ok) { json(res, 200, r); return true; } }
+      const ree = readJson(REENVIOS_FILE, {});
+      delete ree[id]; writeJson(REENVIOS_FILE, ree);
+      console.log(`[GIRABKP] 📨 reenvio ${id} ${enviar ? 'ENVIADO' : 'descartado'} por ${op}`);
+      json(res, 200, r);
+      return true;
+    }
     if (method === 'POST' && p.startsWith('/girassol-backup-offline/enviar-docs/')) {
       let op = '';
       try { op = (urlObj.searchParams && urlObj.searchParams.get('op')) || ''; } catch (e) {}
@@ -955,7 +1000,7 @@ function routes(readBody) {
       if (!ehAdmin(op)) { json(res, 200, { ok: false, erro: 'apenas o admin pode enviar documentos', precisa_admin: true }); return true; }
       const id = decodeURIComponent(p.split('/').filter(Boolean).pop() || '');
       const r = await enviarEmailDocs(id, op);
-      console.log(`[GIRABKP] enviar-docs ${id} → ${r.ok ? 'OK (' + r.anexos + ' anexos)' : 'FALHA: ' + r.erro}`);
+      console.log(`[GIRABKP] enviar-docs ${id} (por ${op}) → ${r.ok ? 'OK (' + r.anexos + ' anexos)' : 'FALHA: ' + r.erro}`);
       json(res, 200, r);
       return true;
     }
