@@ -379,7 +379,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b101';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b102';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#b3b9c4'}, magalu:{n:'Magalu',c:'#0086ff'}, shein:{n:'Shein',c:'#e0e0e0'},
@@ -771,7 +771,18 @@ function renderLista(){
   }
   if(!listaCache.length){ box.innerHTML='<div class="empty">nenhum pedido pronto no cache</div>'; return; }
   let lista = filtrar(listaCache);
-  if(ordenacao==='produto') lista = lista.slice().sort((a,b)=>{ const ka=skuKeyPedido(a), kb=skuKeyPedido(b); return ka!==kb ? ka.localeCompare(kb) : Number(a.numero||0)-Number(b.numero||0); });
+  if(ordenacao==='produto'){
+    // agrupa por SKU (kit explodido nos componentes) e coloca os GRUPOS MAIORES PRIMEIRO:
+    // o estoquista mata o lote de 30 do SKU-A, depois os 20 do SKU-B, etc. Empate → alfabético.
+    const cnt = {};
+    lista.forEach(p=>{ const k=skuKeyPedido(p); cnt[k]=(cnt[k]||0)+1; });
+    lista = lista.slice().sort((a,b)=>{
+      const ka=skuKeyPedido(a), kb=skuKeyPedido(b);
+      if(ka===kb) return Number(a.numero||0)-Number(b.numero||0);      // dentro do grupo: mais antigos primeiro
+      if(cnt[kb]!==cnt[ka]) return cnt[kb]-cnt[ka];                    // grupo maior primeiro
+      return ka.localeCompare(kb);                                     // empate: alfabético (ordem estável)
+    });
+  }
   const cnt = filtroBusca ? '<div class="scount">'+lista.length+' de '+listaCache.length+'</div>' : '';
   if(!lista.length){ box.innerHTML = cnt+'<div class="empty">nada encontrado p/ "'+esc(filtroBusca)+'"</div>'; return; }
   box.innerHTML = cnt + lista.map(p=>{
