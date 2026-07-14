@@ -29,6 +29,7 @@ const empresas = [
   require('../ponto'),
   require('../girassol-backup-offline'),
   require('../good-checkout-offline'),
+  require('../amb-checkout-offline'),
   require('../good-mm-diag'),
   require('../good-mm-etiquetas'),
   require('../girassol-mm-etiquetas'),
