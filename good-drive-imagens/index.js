@@ -261,6 +261,28 @@ function routes(readBody) {
   };
 }
 
+// ── Renovação proativa do token Bling ────────────────────────────────
+// O refresh token do Bling expira após ~30 dias SEM USO. Este cron renova
+// o token diariamente, mantendo o refresh token sempre "fresco" — assim o
+// sistema nunca pede reautorização, mesmo ficando meses sem ninguém usar.
+async function renovarTokenBling() {
+  const st = tokenMgr.getStatus();
+  if (!st.configurado) {
+    console.log('[good-drive-imagens] renovarTokenBling: Bling não configurado — pulando');
+    return;
+  }
+  if (!st.refresh_ok) {
+    console.warn('[good-drive-imagens] renovarTokenBling: sem refresh_token — autorize em /good-drive-imagens/setup');
+    return;
+  }
+  try {
+    await tokenMgr.refreshTokens();
+    console.log('[good-drive-imagens] renovarTokenBling: token renovado proativamente ✓');
+  } catch (e) {
+    console.error('[good-drive-imagens] renovarTokenBling: falha —', e.message);
+  }
+}
+
 // ── Bootstrap ────────────────────────────────────────────────────────
 function bootstrap() {
   setTimeout(() => {
@@ -274,8 +296,8 @@ function bootstrap() {
 module.exports = {
   id: 'good-drive-imagens',
   nome: 'GOOD Imagens (Drive x Bling)',
-  rotinas: {},
+  rotinas: { renovarTokenBling },
   routes,
-  crons: {},
+  crons: { renovarTokenBling: '17 3 * * *' },
   bootstrap
 };
