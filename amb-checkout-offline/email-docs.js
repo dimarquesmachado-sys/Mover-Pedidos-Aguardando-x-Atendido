@@ -42,8 +42,11 @@ async function enviarEmailDocs(id, quem) {
   let nodemailer;
   try { nodemailer = require('nodemailer'); } catch (e) { return { ok: false, erro: 'nodemailer não instalado — atualize o package.json e redeploy' }; }
   if (!EMAIL_USER || !EMAIL_PASS) return { ok: false, erro: 'email não configurado (faltam AMBBKP_EMAIL_USER / AMBBKP_EMAIL_PASS no Render)' };
-  const ped = readJson(path.join(ARQUIVO_DIR, String(id), 'pedido.json'), null);
-  if (!ped) return { ok: false, erro: 'pedido não está arquivado (só finalizados POR AQUI têm arquivo)' };
+  // pedido FINALIZADO mora no arquivo; pedido AINDA NA FILA mora no cache ativo (mesma estrutura de pasta).
+  // Assim o admin consegue mandar etiqueta+NF por e-mail direto do card, antes mesmo de finalizar.
+  const BASE = fs.existsSync(path.join(ARQUIVO_DIR, String(id), 'pedido.json')) ? ARQUIVO_DIR : CACHE_DIR;
+  const ped = readJson(path.join(BASE, String(id), 'pedido.json'), null);
+  if (!ped) return { ok: false, erro: 'pedido não encontrado (nem no arquivo de finalizados, nem no cache ativo)' };
   const anexos = [];
   let temEtq = false, temDanfe = false;
   const ehShopee = ped.marketplace === 'shopee';   // Shopee: a etiqueta já vem com a DANFE embaixo → não anexa DANFE separado
@@ -55,7 +58,7 @@ async function enviarEmailDocs(id, quem) {
   let fundiu = false, umaFolha = false;
   if (!ehShopee && ped.nf) {
     try {
-      const dir = path.join(ARQUIVO_DIR, String(id));
+      const dir = path.join(BASE, String(id));
       const zplEtq = fs.readFileSync(path.join(dir, `etiqueta.${ETIQ_FORMATO.toLowerCase()}`), 'utf8');
       if (/\^XA/.test(zplEtq)) {
         let dados = readJson(path.join(dir, 'nf-simp.json'), null);
@@ -83,13 +86,13 @@ async function enviarEmailDocs(id, quem) {
   if (!fundiu) {
     // ETIQUETA em PDF — função canônica (ML: PDF nativo do Bling; não-ML: ZPL cacheado → Labelary)
     try {
-      const etqPdf = await etiquetaPdf(id, path.join(ARQUIVO_DIR, String(id)));
+      const etqPdf = await etiquetaPdf(id, path.join(BASE, String(id)));
       if (etqPdf) { anexos.push({ filename: `etiqueta-${ped.numero || id}.pdf`, content: etqPdf }); temEtq = true; }
     } catch (e) {}
     // DANFE SIMPLIFICADO (igual ao que imprime no checkout) — Shopee NÃO precisa (já vem embaixo da etiqueta)
     if (!ehShopee) {
       try {
-        let dados = readJson(path.join(ARQUIVO_DIR, String(id), 'nf-simp.json'), null);
+        let dados = readJson(path.join(BASE, String(id), 'nf-simp.json'), null);
         const nfId = ped.nf && ped.nf.id;
         if (!dados && nfId) dados = await dadosNFSimp(nfId, ped.numero);
         const simpPdf = dados ? await gerarDanfeSimplificado(dados) : null;
