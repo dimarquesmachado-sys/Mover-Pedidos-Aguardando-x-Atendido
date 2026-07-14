@@ -315,7 +315,7 @@
     <div class="loginsub" id="loginSub">verificando…</div>
     <div id="loginForm" style="display:none">
       <select class="loginfld" id="loginNome" autocomplete="off"></select>
-      <input class="loginfld" id="loginSenha" type="password" inputmode="numeric" autocomplete="off" placeholder="senha" onkeydown="if(event.key==='Enter')fazerLogin()" />
+      <input class="loginfld" id="loginSenha" type="password" autocomplete="off" placeholder="senha" onkeydown="if(event.key==='Enter')fazerLogin()" />
       <button class="btn ok loginbtn" id="loginBtn" onclick="fazerLogin()">Entrar</button>
       <div class="loginerr" id="loginErr"></div>
     </div>
@@ -379,7 +379,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b102';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b103';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#b3b9c4'}, magalu:{n:'Magalu',c:'#0086ff'}, shein:{n:'Shein',c:'#e0e0e0'},
