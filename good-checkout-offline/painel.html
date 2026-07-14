@@ -379,7 +379,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b38';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b39';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#b3b9c4'}, magalu:{n:'Magalu',c:'#0086ff'},
@@ -899,6 +899,8 @@ function renderDetail(){
       (souAdmin() ? '<button class="btn warn" onclick="imprimirAtual()">'+(modoEtiqueta()==='a4'?'📄 Abrir etiqueta':'🖨 Só etiqueta')+'</button>' : '')+
       (souAdmin() && temDanfe ? '<button class="btn warn" onclick="imprimirSimpAtual()">🏷️ Só DANFE</button>' : '')+
       (souAdmin() && temDanfe ? '<button class="btn sec" onclick="imprimirNFAtual()">🧾 Ver NF A4</button>' : '')+
+      (souAdmin() ? '<button class="btn sec" onclick="enviarDocs(pedidoAtual.bling_id, pedidoAtual.numero)" title="ADMIN: manda etiqueta + NF pro e-mail do estoque agora (sem finalizar o pedido)">📧 E-mail</button>' : '')+
+      (souAdmin() ? '<button class="btn warn" onclick="forcarVerificado()" title="ADMIN: marca VERIFICADO no Bling SEM bipar — só pra quando não der pra conferir bipando">✓ VERIFICADO</button>' : '')+
       '<span class="grow"></span>'+
       (souAdmin() && temDanfe ? '<button class="btn" id="bFinalizarA4" onclick="finalizar(\'a4\')" disabled>✓ Etiq + NF A4</button>' : '')+
       '<button class="btn ok" id="bFinalizar" onclick="finalizar(\'simp\')" disabled>✓ Etiq + DANFE 10x15</button>'+
@@ -1347,6 +1349,21 @@ function renderHist(lista){
       '</div>'+
     '</div>'+det;
   }).join('');
+}
+// ADMIN — finaliza o pedido SEM bipar: move a situação no Bling p/ VERIFICADO, arquiva os documentos
+// (etiqueta/NF ficam disponíveis pra reenvio) e solta a reserva. Mesma rota do fluxo normal (/conferido),
+// só que sem a trava de bipagem da tela. Fica registrado no histórico QUEM finalizou.
+async function forcarVerificado(){
+  if(!souAdmin() || !pedidoAtual) return;
+  const n = pedidoAtual.numero || pedidoAtual.bling_id;
+  if(!confirm('ADMIN — marcar o pedido '+n+' como VERIFICADO no Bling SEM bipar os itens?\n\nIsso finaliza o pedido e muda a situação no Bling. Use só quando não der pra conferir bipando (produto sem EAN, código danificado, pedido despachado à mão).')) return;
+  try{
+    const r = await postJson('/good-checkout-offline/conferido', { id: pedidoAtual.bling_id, user: opAtual() });
+    if(r && r.ja_finalizado){ toast('Já finalizado por '+(r.por||'?')); }
+    else if(r && r.ok){ toast(r.sincronizado ? '✓ VERIFICADO no Bling' : '✓ finalizado — Bling na fila'); }
+    else { toast('Falha: '+((r&&r.erro)||'?')); return; }
+  }catch(e){ toast('Falha: '+e.message); return; }
+  voltarLista(); carregarLista();
 }
 async function enviarDocs(id, numero){
   if(!confirm('Enviar etiqueta + NF do pedido '+numero+' pro e-mail do estoque imprimir e despachar?')) return;
