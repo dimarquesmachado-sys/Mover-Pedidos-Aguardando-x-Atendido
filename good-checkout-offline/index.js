@@ -430,7 +430,8 @@ function routes(readBody) {
       const itens = Object.keys(conf).map(id => ({ id, ...conf[id] }))
         .sort((a, b) => String(b.conferido_em || '').localeCompare(String(a.conferido_em || '')));
       const reenvios = readJson(CONFERIDOS_FILE.replace('conferidos.json', 'reenvios.json'), {});
-      json(res, 200, { ok: true, total: Object.keys(conf).length, itens, reenvios });
+      const reenvioDireto = String(process.env.CHECKOUT_REENVIO_DIRETO_EMPRESAS || '').toLowerCase().split(',').map(s => s.trim()).includes('good');
+      json(res, 200, { ok: true, total: Object.keys(conf).length, itens, reenvios, reenvio_direto: reenvioDireto });
       return true;
     }
 
@@ -966,6 +967,11 @@ function routes(readBody) {
       const direto = String(process.env.CHECKOUT_REENVIO_DIRETO_EMPRESAS || '').toLowerCase().split(',').map(s => s.trim()).includes('good');
       if (direto) {
         const r = await enviarEmailDocs(id, op);
+        if (r.ok && confR[id]) {   // flag visível no histórico: quem reenviou e quando
+          confR[id].reenvios = (confR[id].reenvios || 0) + 1;
+          confR[id].ultimo_reenvio = { por: op, em: new Date().toISOString() };
+          writeJson(CONFERIDOS_FILE, confR);
+        }
         console.log(`[GOODBKP] 📨 reenvio DIRETO pedido ${c.numero || id} por ${op} → ${r.ok ? 'enviado' : 'FALHA: ' + r.erro}`);
         json(res, 200, { ...r, direto: true });
         return true;
@@ -987,6 +993,7 @@ function routes(readBody) {
       const REENVIOS_FILE = CONFERIDOS_FILE.replace('conferidos.json', 'reenvios.json');
       let r = { ok: true, enviado: false };
       if (enviar) { const e = await enviarEmailDocs(id, op); r = { ...e, enviado: !!e.ok }; if (!e.ok) { json(res, 200, r); return true; } }
+      if (enviar) { const cE = readJson(CONFERIDOS_FILE, {}); if (cE[id]) { cE[id].reenvios = (cE[id].reenvios || 0) + 1; cE[id].ultimo_reenvio = { por: op, em: new Date().toISOString() }; writeJson(CONFERIDOS_FILE, cE); } }
       const ree = readJson(REENVIOS_FILE, {});
       delete ree[id]; writeJson(REENVIOS_FILE, ree);
       console.log(`[GOODBKP] 📨 reenvio ${id} ${enviar ? 'ENVIADO' : 'descartado'} por ${op}`);
@@ -1000,6 +1007,7 @@ function routes(readBody) {
       if (!ehAdmin(op)) { json(res, 200, { ok: false, erro: 'apenas o admin pode enviar documentos', precisa_admin: true }); return true; }
       const id = decodeURIComponent(p.split('/').filter(Boolean).pop() || '');
       const r = await enviarEmailDocs(id, op);
+      if (r.ok) { const cD = readJson(CONFERIDOS_FILE, {}); if (cD[id]) { cD[id].reenvios = (cD[id].reenvios || 0) + 1; cD[id].ultimo_reenvio = { por: op, em: new Date().toISOString() }; writeJson(CONFERIDOS_FILE, cD); } }
       console.log(`[GOODBKP] enviar-docs ${id} (por ${op}) → ${r.ok ? 'OK (' + r.anexos + ' anexos)' : 'FALHA: ' + r.erro}`);
       json(res, 200, r);
       return true;
