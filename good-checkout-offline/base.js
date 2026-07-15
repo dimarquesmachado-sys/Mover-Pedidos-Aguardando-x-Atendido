@@ -5,19 +5,19 @@
 const fs    = require('fs');
 const path  = require('path');
 const fetch = require('node-fetch');
-const { garantirToken } = require('../girassol/tokenManager');
+const { garantirToken } = require('../good/tokenManager');
 
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 
-const CACHE_DIR     = process.env.GIRABKP_CACHE_DIR    || '/data/cache-offline/girassol';
-const SIT_ATENDIDO  = Number(process.env.GIRABKP_SIT_ATENDIDO  || 9);              // ATENDIDO
-const SIT_VERIFICADO = Number(process.env.GIRABKP_SIT_VERIFICADO || 24);           // VERIFICADO (destino do sync Fase 3)
-const SYNC_ON       = process.env.GIRABKP_SYNC_ON === '1';                          // liga o sync automático no cron (Fase 3)
-const JANELA_DIAS   = Number(process.env.GIRABKP_JANELA_DIAS   || 5);
-const PAUSA_MS      = Number(process.env.GIRABKP_PAUSA_MS      || 350);            // ~3 req/s
-const RETENCAO_DIAS = Number(process.env.GIRABKP_RETENCAO_DIAS || 7);
-const ETIQ_FORMATO  = (process.env.GIRABKP_ETIQ_FORMATO || 'ZPL').toUpperCase();   // ZPL | PDF
-const CRON_EXPR     = process.env.GIRABKP_CRON || '5,15,25,35,45,55 6-23 * * *';   // off do F3
+const CACHE_DIR     = process.env.GOODBKP_CACHE_DIR    || '/data/cache-offline/good';
+const SIT_ATENDIDO  = Number(process.env.GOODBKP_SIT_ATENDIDO  || 9);              // ATENDIDO
+const SIT_VERIFICADO = Number(process.env.GOODBKP_SIT_VERIFICADO || 24);           // VERIFICADO (destino do sync Fase 3)
+const SYNC_ON       = process.env.GOODBKP_SYNC_ON === '1';                          // liga o sync automático no cron (Fase 3)
+const JANELA_DIAS   = Number(process.env.GOODBKP_JANELA_DIAS   || 5);
+const PAUSA_MS      = Number(process.env.GOODBKP_PAUSA_MS      || 350);            // ~3 req/s
+const RETENCAO_DIAS = Number(process.env.GOODBKP_RETENCAO_DIAS || 7);
+const ETIQ_FORMATO  = (process.env.GOODBKP_ETIQ_FORMATO || 'ZPL').toUpperCase();   // ZPL | PDF
+const CRON_EXPR     = process.env.GOODBKP_CRON || '5,15,25,35,45,55 6-23 * * *';   // off do F3
 
 const MANIFEST_FILE = path.join(CACHE_DIR, 'manifest.json');
 const SKU_EAN_FILE  = path.join(CACHE_DIR, 'sku-ean.json');
@@ -28,22 +28,39 @@ const KIT_CACHE_FILE  = path.join(CACHE_DIR, 'kit-estrutura.json');  // kits já
 const LOC_FILE        = path.join(CACHE_DIR, 'sku-localizacao.json'); // localização (depósito) por SKU
 const LOC_LOG_FILE    = path.join(CACHE_DIR, 'localizacao-log.json'); // auditoria: quem editou localização, de→para, quando
 const EAN_INDEX_FILE  = path.join(CACHE_DIR, 'ean-indice.json');      // índice EAN→{sku,nome,id} que cresce sozinho + indexação total
-const ARQUIVO_DIR   = process.env.GIRABKP_ARQUIVO_DIR  || '/data/arquivo-girassol';   // etiqueta+meta dos FINALIZADOS (reimprimir/reenviar) — separado do cache, NÃO é limpo pela reconciliação
-const ARQUIVO_DIAS  = parseInt(process.env.GIRABKP_ARQUIVO_DIAS || '45', 10);          // retenção do arquivo (dias)
-const SMTP_HOST  = process.env.GIRABKP_SMTP_HOST || 'mail.magazinegirassol.com.br';
-const SMTP_PORT  = parseInt(process.env.GIRABKP_SMTP_PORT || '465', 10);
-const EMAIL_USER = process.env.GIRABKP_EMAIL_USER || '';   // conta @magazinegirassol que ENVIA (login)
-const EMAIL_PASS = process.env.GIRABKP_EMAIL_PASS || '';   // senha normal dessa conta
-const EMAIL_DEST = process.env.GIRABKP_EMAIL_DEST || '';   // destino (estoquista) — SEM padrão cravado: configure a env no Render (aceita lista com vírgula)
+const ARQUIVO_DIR   = process.env.GOODBKP_ARQUIVO_DIR  || '/data/arquivo-good';   // etiqueta+meta dos FINALIZADOS (reimprimir/reenviar) — separado do cache, NÃO é limpo pela reconciliação
+const ARQUIVO_DIAS  = parseInt(process.env.GOODBKP_ARQUIVO_DIAS || '45', 10);          // retenção do arquivo (dias)
+const SMTP_HOST  = process.env.GOODBKP_SMTP_HOST || '';
+const SMTP_PORT  = parseInt(process.env.GOODBKP_SMTP_PORT || '465', 10);
+const EMAIL_USER = process.env.GOODBKP_EMAIL_USER || '';   // conta da GOOD que ENVIA (login)
+const EMAIL_PASS = process.env.GOODBKP_EMAIL_PASS || '';   // senha normal dessa conta
+const EMAIL_DEST = process.env.GOODBKP_EMAIL_DEST || '';   // destino (estoquista) — SEM padrão cravado: configure a env no Render (aceita lista com vírgula)
 const SCHEMA = 4;  // versão do snapshot — bump força re-cache dos pedidos antigos (b36: re-explode composições/variações)
 
-// loja → marketplace (mesmo mapa do checkout Girassol)
-const LOJA_MKT = {
-  '203146903': 'ml', '203583169': 'shopee', '203967708': 'amazon',
-  '203262016': 'magalu', '205523707': 'tiktok',
-  '204822410': 'shein', '203330464': 'leroy', '203429780': 'madeira'
-};
-const MKT_NOME = { ml: 'Mercado Livre', shopee: 'Shopee', amazon: 'Amazon', magalu: 'Magalu', tiktok: 'TikTok Shop', shein: 'Shein', leroy: 'Leroy Merlin', madeira: 'Madeira Madeira', outro: 'Outro' };
+// loja → marketplace (GOOD Import). Lojas confirmadas via diagnostico.
+// Pode adicionar/sobrescrever por env GOODBKP_LOJA_MKT no formato "idLoja:mkt,idLoja:mkt".
+const LOJA_MKT = (function () {
+  const map = {
+    '203296034': 'ml',
+    '203583539': 'shopee',
+    '203764162': 'amazon',
+    '203381869': 'magalu',
+    '205773174': 'tiktok',
+    '205557785': 'madeira',
+    '205594320': 'leroy',
+    '203344795': 'carrefour',
+    '203402885': 'olist',
+    '203345742': 'b2w',
+    '204349867': 'mercadoshops'
+  };
+  (process.env.GOODBKP_LOJA_MKT || '').split(',').forEach(function (par) {
+    const kv = par.split(':');
+    const id = (kv[0] || '').trim(), mkt = (kv[1] || '').trim().toLowerCase();
+    if (id && mkt) map[id] = mkt;
+  });
+  return map;
+})();
+const MKT_NOME = { ml: 'Mercado Livre', shopee: 'Shopee', amazon: 'Amazon', magalu: 'Magalu', tiktok: 'TikTok Shop', madeira: 'Madeira Madeira', leroy: 'Leroy Merlin', carrefour: 'Carrefour', olist: 'Olist', b2w: 'Americanas', mercadoshops: 'MercadoShops', outro: 'Outro' };
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
@@ -53,7 +70,7 @@ function readJson(file, fb) { try { return JSON.parse(fs.readFileSync(file, 'utf
 
 function writeJson(file, obj) {
   try { fs.writeFileSync(file, JSON.stringify(obj, null, 2)); }
-  catch (e) { console.error('[GIRABKP] write', file, e.message); }
+  catch (e) { console.error('[GOODBKP] write', file, e.message); }
 }
 
 function dataISO(d) { return d.toISOString().slice(0, 10); }
@@ -85,7 +102,7 @@ function lerReservas() {
 }
 
 function lerOperadores() {
-  const raw = process.env.GIRABKP_OPERADORES || '';
+  const raw = process.env.GOODBKP_OPERADORES || '';
   const map = {};
   raw.split(',').forEach(par => {
     const i = par.indexOf(':');
@@ -99,7 +116,7 @@ function lerOperadores() {
 }
 
 function lerAdmins() {
-  return (process.env.GIRABKP_ADMIN || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+  return (process.env.GOODBKP_ADMIN || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
 }
 
 function ehAdmin(nome) {
