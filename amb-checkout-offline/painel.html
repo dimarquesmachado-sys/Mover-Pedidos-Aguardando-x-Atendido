@@ -381,7 +381,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b103';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b104';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#b3b9c4'}, magalu:{n:'Magalu',c:'#0086ff'}, shein:{n:'Shein',c:'#e0e0e0'},
@@ -1238,6 +1238,7 @@ async function abrirHistorico(){
     const d = await api('/amb-checkout-offline/historico');
     histItens = (d && d.itens) || [];
     histReenvios = (d && d.reenvios) || {};
+    histReenvioDireto = !!(d && d.reenvio_direto);
     montarFiltroMkt();
     renderHist(histItens);
   }catch(e){ $('histBody').innerHTML='<div class="sepempty">Falha: '+esc(e.message)+'</div>'; }
@@ -1271,8 +1272,13 @@ function toggleHistExpand(){ histExpandAll = !histExpandAll; const b=$('histExpB
 let histAberto = null;   // pedido com dropdown de detalhes aberto
 function toggleHistDet(id){ histAberto = (histAberto===id) ? null : id; filtrarHist(); }
 let histReenvios = {};   // solicitações de reenvio pendentes (id → {por, em})
+let histReenvioDireto = false;   // empresa no modo reenvio direto (env CHECKOUT_REENVIO_DIRETO_EMPRESAS)
 async function pedirReenvio(id, numero){
-  if(!confirm('Marcar o pedido '+numero+' como PRECISA DE REENVIO (etiqueta/NF rasgada/suja)?\n\nEle fica sinalizado em VERMELHO no histórico. O admin recebe o aviso e reenvia os documentos. Você só sinaliza — não envia nada.')) return;
+  const msg = histReenvioDireto
+    ? ('Reenviar a etiqueta + NF do pedido '+numero+' pro e-mail do estoque AGORA?\n\n(etiqueta rasgou ou sujou? ela chega no e-mail prontinha pra reimprimir)')
+    : ('Marcar o pedido '+numero+' como PRECISA DE REENVIO (etiqueta/NF rasgada/suja)?\n\nEle fica sinalizado em VERMELHO no histórico. O admin recebe o aviso e reenvia os documentos. Você só sinaliza — não envia nada.');
+  if(!confirm(msg)) return;
+  if(histReenvioDireto) toast('📧 Enviando etiqueta + NF… aguarde uns segundos');
   try{
     const r = await postJson('/amb-checkout-offline/pedir-reenvio/'+encodeURIComponent(id), { op: opAtual() });
     if(r && r.direto) toast(r.ok ? '📧 Enviado pro e-mail do estoque!' : 'Falha: '+(r.erro||'?'));
@@ -1331,8 +1337,9 @@ function renderHist(lista){
       '</div>'+
       '</div><div class="hactions">'+
       (ree?'<span class="reebadge" title="solicitado por '+esc(ree.por||'?')+' em '+esc((ree.em||'').slice(0,16).replace('T',' '))+'">📨 REENVIO</span>':'')+
+      (h.ultimo_reenvio?'<span class="hsync" style="background:#1e3a8a;color:#bfdbfe" title="reenviado por '+esc(h.ultimo_reenvio.por||'?')+' em '+esc(String(h.ultimo_reenvio.em||'').slice(0,16).replace('T',' '))+'">📧 '+((h.reenvios||1)>1?((h.reenvios)+'× '):'')+esc(h.ultimo_reenvio.por||'?')+'</span>':'')+
       tag+
-      (!ree?'<button class="btn sec sm" onclick="event.stopPropagation();pedirReenvio(\''+h.id+'\',\''+esc(h.numero||h.id)+'\')" title="etiqueta rasgou ou sujou? avise o admin que este pedido precisa de reenvio" style="background:#b45309;color:#fff;border-color:#b45309">⚠️ Avisar</button>':'')+
+      (!ree?'<button class="btn sec sm" onclick="event.stopPropagation();pedirReenvio(\''+h.id+'\',\''+esc(h.numero||h.id)+'\')" title="'+(histReenvioDireto?'etiqueta rasgou ou sujou? reenvia etiqueta + NF pro e-mail do estoque agora':'etiqueta rasgou ou sujou? avise o admin que este pedido precisa de reenvio')+'" style="background:'+(histReenvioDireto?'#1d4ed8':'#b45309')+';color:#fff;border-color:'+(histReenvioDireto?'#1d4ed8':'#b45309')+'">'+(histReenvioDireto?'📧 Reenviar':'⚠️ Avisar')+'</button>':'')+
       (ree&&souAdmin()?'<button class="btn sec sm" onclick="event.stopPropagation();resolverReenvio(\''+h.id+'\',true)" title="enviar etiqueta+NF pro e-mail do estoque e baixar a solicitação">✉ Enviar</button>':'')+
       (ree&&souAdmin()?'<button class="btn sec sm" onclick="event.stopPropagation();resolverReenvio(\''+h.id+'\',false)" title="descartar a solicitação sem enviar">✕</button>':'')+
       (souAdmin()?'<button class="btn sec sm" onclick="event.stopPropagation();enviarDocs(\''+h.id+'\',\''+esc(h.numero||h.id)+'\')" title="ADMIN: enviar etiqueta + NF pro e-mail do estoque agora">📧</button>':'')+
