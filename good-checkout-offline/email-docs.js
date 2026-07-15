@@ -117,12 +117,13 @@ async function enviarEmailDocs(id, quem) {
       + 'Cliente: ' + (ped.cliente || '—') + '\n'
       + 'Marketplace: ' + mktNome + '\n'
       + (ped.nf ? 'NF: ' + (ped.nf.numero || '') + '\n' : '')
+      + 'SOLICITADO POR: ' + (quem || 'admin') + '\n'
       + '\nSeguem em anexo: ' + oQueVai + ' (pra imprimir e despachar).\n\n'
-      + '(solicitado por ' + (quem || 'admin') + ' em ' + new Date().toLocaleString('pt-BR') + ')';
+      + '(em ' + new Date().toLocaleString('pt-BR') + ')';
     await transporter.sendMail({
       from: EMAIL_USER,
       to: EMAIL_DEST,
-      subject: '📦 Reimprimir pedido ' + (ped.numero || id) + (ped.cliente ? ' — ' + ped.cliente : ''),
+      subject: '📦 Reimprimir pedido ' + (ped.numero || id) + (ped.cliente ? ' — ' + ped.cliente : '') + ' (por ' + (quem || 'admin') + ')',
       text: corpo,
       attachments: anexos
     });
