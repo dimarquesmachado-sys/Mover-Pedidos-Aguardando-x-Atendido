@@ -1,0 +1,85 @@
+{
+  "modulos": [
+    "girassol-backup-offline",
+    "good-checkout-offline",
+    "amb-checkout-offline"
+  ],
+  "tokens": [
+    [
+      "GIRABKP|GOODBKP|AMBBKP",
+      "__TAG__"
+    ],
+    [
+      "girassol-backup-offline|good-checkout-offline|amb-checkout-offline",
+      "__MOD__"
+    ],
+    [
+      "BACKUP OFFLINE|CHECKOUT OFFLINE",
+      "__TIPO__"
+    ],
+    [
+      "Backup Offline|Checkout Offline",
+      "__Tipo__"
+    ],
+    [
+      "magazinegirassol|ambtotal",
+      "__DOM__"
+    ],
+    [
+      "girassol|good|amb",
+      "__EMP__"
+    ]
+  ],
+  "ignorar_linhas": {
+    "nf.js": [
+      "^const EMITENTE_FALLBACK"
+    ],
+    "painel.html": [
+      "base64,",
+      "<title>",
+      "MKT_ORDEM",
+      "shein|SHEIN|Shein"
+    ],
+    "index.js": [
+      "idLoja=\\d+",
+      "loja:\\s*\\{?\\s*id"
+    ]
+  },
+  "identicos": [
+    "comum.js",
+    "produtos.js",
+    "nf.js",
+    "etiquetas.js",
+    "email-docs.js",
+    "danfe-simplificado.js",
+    "fusao-etiqueta.js"
+  ],
+  "identicos_gir_good": [
+    "ciclo.js",
+    "index.js"
+  ],
+  "assinaturas": {
+    "painel.html": [
+      "function souAdmin",
+      "skus_pick",
+      "pedirReenvio",
+      "forcarVerificado",
+      "histReenvioDireto",
+      "BCN,56,N,N,N,A",
+      "toggleHistExpand",
+      "servicoDesconhecido",
+      "UI_BUILD = 'b"
+    ],
+    "base.js": [
+      "function blingGet",
+      "EMAIL_DEST = process.env",
+      "SIT_VERIFICADO",
+      "garantirToken"
+    ],
+    "ciclo.js": [
+      "skus_pick",
+      "shipment_labels",
+      "servicoDoPedido"
+    ]
+  }
+}
