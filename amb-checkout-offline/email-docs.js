@@ -42,6 +42,7 @@ async function enviarEmailDocs(id, quem) {
   let nodemailer;
   try { nodemailer = require('nodemailer'); } catch (e) { return { ok: false, erro: 'nodemailer não instalado — atualize o package.json e redeploy' }; }
   if (!EMAIL_USER || !EMAIL_PASS) return { ok: false, erro: 'email não configurado (faltam AMBBKP_EMAIL_USER / AMBBKP_EMAIL_PASS no Render)' };
+  if (!EMAIL_DEST) return { ok: false, erro: 'destinatário não configurado — crie a env AMBBKP_EMAIL_DEST no Render (aceita vários e-mails separados por vírgula)' };
   // pedido FINALIZADO mora no arquivo; pedido AINDA NA FILA mora no cache ativo (mesma estrutura de pasta).
   // Assim o admin consegue mandar etiqueta+NF por e-mail direto do card, antes mesmo de finalizar.
   const BASE = fs.existsSync(path.join(ARQUIVO_DIR, String(id), 'pedido.json')) ? ARQUIVO_DIR : CACHE_DIR;
