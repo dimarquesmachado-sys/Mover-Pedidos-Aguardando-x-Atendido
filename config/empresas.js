@@ -33,7 +33,7 @@ const empresas = [
   require('../good-mm-diag'),
   require('../good-mm-etiquetas'),
   require('../girassol-mm-etiquetas'),
-  require('../backup-drive'),
+  require('../backup-github'),
 ];
 
 // Filtra empresas marcadas como inativas via env var (ex: SKIP_EMPRESAS=girassol,good)
