@@ -329,7 +329,7 @@
     <div class="sbtools">
       <button class="btn sec sm" id="btnSync" onclick="sincronizar()">↻ Atualizar</button>
       <button class="btn sec sm" onclick="abrirSeparacao()" title="lista de produtos a separar (somados por SKU)">📋 Separar</button>
-      <button class="btn sec sm" onclick="abrirHistorico()" title="últimos pedidos finalizados">🕘 Histórico</button>
+      <button class="btn sec sm" onclick="abrirHistorico()" title="últimos pedidos finalizados">🕘 Histórico</button><button class="btn sec sm" id="btnRelatorio" onclick="abrirRelatorio()" title="ADMIN: relatório de pedidos por canal, FLEX e curva A de produtos" style="display:none">📊 Relatório</button>
       <button class="btn sec sm" onclick="abrirBusca()" title="buscar produto por SKU/EAN, ver estoque e editar localização">🔎 Produto</button>
       <button class="btn sec sm" onclick="escolherImpressora()">🖨 Zebra</button>
       <button class="btn sec sm" id="modoBtn" onclick="trocarModo()" title="alterna entre etiqueta na Zebra (ZPL) ou abrir PDF p/ imprimir no navegador">🖨️ Etiq: Zebra</button>
@@ -379,7 +379,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b41';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b43';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#b3b9c4'}, magalu:{n:'Magalu',c:'#0086ff'},
@@ -657,7 +657,9 @@ function iniciarHeartbeat(id){ pararHeartbeat(); hbTimer = setInterval(()=>{ pos
 function pararHeartbeat(){ if(hbTimer){ clearInterval(hbTimer); hbTimer=null; } }
 function liberarReserva(id){ if(id) postJson('/good-checkout-offline/liberar', {id}).catch(()=>{}); }
 
+function _revelaRelatorio(){ const b=document.getElementById('btnRelatorio'); if(b) b.style.display = souAdmin()? '' : 'none'; }
 async function carregarLista(){
+  _revelaRelatorio();
   try{
     const d = await api('/good-checkout-offline/lista');
     $('ver').textContent = (d.versao ? d.versao.replace('good-checkout-offline ','') : 'v?') + ' · ui ' + UI_BUILD;
@@ -1229,7 +1231,123 @@ async function confirmarFinalizar(){
 // ─── Histórico dos últimos finalizados (modal) ─────────────────────────────
 let histItens = [];
 let histMkt = '';
+let relPeriodo = 'mes';   // dia | semana | mes | custom
+let relDe = '', relAte = '';
+
+async function abrirRelatorio(){
+  if(!souAdmin()) return;
+  const md=$('modal');
+  md.innerHTML =
+    '<div class="mbox" style="max-width:680px;width:94vw">'+
+      '<button class="mx" onclick="fecharConfirmacao()" title="fechar">✕</button>'+
+      '<div class="mtit">📊 Relatório de pedidos</div>'+
+      '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">'+
+        '<button class="chip" id="relBtnDia" onclick="setRelPeriodo(\'dia\')">Hoje</button>'+
+        '<button class="chip" id="relBtnSemana" onclick="setRelPeriodo(\'semana\')">7 dias</button>'+
+        '<button class="chip" id="relBtnMes" onclick="setRelPeriodo(\'mes\')">Mês</button>'+
+        '<button class="chip" id="relBtnCustom" onclick="setRelPeriodo(\'custom\')">Período…</button>'+
+      '</div>'+
+      '<div id="relCustomBox" style="display:none;gap:8px;margin-bottom:10px;align-items:center;flex-wrap:wrap">'+
+        '<label style="font-size:13px;color:var(--mut)">De <input type="date" id="relDe" class="buscafld" style="width:auto;display:inline-block" onchange="relDe=this.value;calcRelatorio()"></label>'+
+        '<label style="font-size:13px;color:var(--mut)">até <input type="date" id="relAte" class="buscafld" style="width:auto;display:inline-block" onchange="relAte=this.value;calcRelatorio()"></label>'+
+      '</div>'+
+      '<div id="relBody">carregando…</div>'+
+      '<div class="mbtns"><button class="btn sec" onclick="fecharConfirmacao()">Fechar</button></div>'+
+    '</div>';
+  // garante que os dados do histórico estão carregados (mesma fonte)
+  try{ const d = await api('/good-checkout-offline/historico'); histItens = (d && d.itens) || []; }catch(e){ histItens = histItens || []; }   // sempre dados frescos; se a rede falhar, usa o que tiver
+  setRelPeriodo(relPeriodo);
+}
+
+function setRelPeriodo(p){
+  relPeriodo = p;
+  ['dia','semana','mes','custom'].forEach(x=>{ const b=$('relBtn'+x.charAt(0).toUpperCase()+x.slice(1)); if(b) b.classList.toggle('on', x===p); });
+  const cb=$('relCustomBox'); if(cb) cb.style.display = (p==='custom')?'flex':'none';
+  calcRelatorio();
+}
+
+function _intervaloRel(){
+  const agora = new Date();
+  const fmt = d => d.toLocaleString('sv-SE',{timeZone:'America/Sao_Paulo'}).slice(0,10);
+  let de, ate = fmt(agora);
+  if(relPeriodo==='dia'){ de = fmt(agora); }
+  else if(relPeriodo==='semana'){ const d=new Date(agora.getTime()-6*86400000); de=fmt(d); }
+  else if(relPeriodo==='mes'){ de = fmt(agora).slice(0,8)+'01'; }
+  else { de = relDe || '2000-01-01'; ate = relAte || fmt(agora); }
+  return { de, ate };
+}
+
+function calcRelatorio(){
+  const body=$('relBody'); if(!body) return;
+  const { de, ate } = _intervaloRel();
+  // filtra os finalizados no período (pela data de conferência, fuso SP)
+  const noPeriodo = (histItens||[]).filter(h=>{
+    if(!h.conferido_em) return false;
+    let d = '';
+    try{ d = new Date(h.conferido_em).toLocaleString('sv-SE',{timeZone:'America/Sao_Paulo'}).slice(0,10); }  // dia REAL em SP (conferido_em é UTC!)
+    catch(e){ d = String(h.conferido_em).slice(0,10); }
+    return d >= de && d <= ate;
+  });
+  const MKT_NOME = { mercadolivre:'Mercado Livre', shopee:'Shopee', magalu:'Magalu', amazon:'Amazon', tiktok:'TikTok', outro:'Outro' };
+  const total = noPeriodo.length;
+  if(!total){ body.innerHTML = '<div style="color:var(--mut);padding:20px;text-align:center">Nenhum pedido finalizado nesse período.<br><small>('+de+' a '+ate+')</small></div>'; return; }
+
+  // por marketplace + flex por canal
+  const porMkt = {}, flexPorMkt = {}; let totFlex = 0;
+  noPeriodo.forEach(h=>{
+    const m = (h.marketplace||'outro').toLowerCase();
+    porMkt[m] = (porMkt[m]||0)+1;
+    if(h.flex){ flexPorMkt[m]=(flexPorMkt[m]||0)+1; totFlex++; }
+  });
+  const mktOrdenado = Object.keys(porMkt).sort((a,b)=>porMkt[b]-porMkt[a]);
+
+  // curva A de produtos (soma qtd por SKU)
+  const prod = {};
+  noPeriodo.forEach(h=>{ (h.itens||[]).forEach(it=>{
+    const sku = it.sku || '(sem SKU)';
+    if(!prod[sku]) prod[sku] = { sku, desc: it.descricao||'', qtd:0 };
+    prod[sku].qtd += Number(it.qtd||1);
+  }); });
+  const curva = Object.values(prod).sort((a,b)=>b.qtd-a.qtd);
+  const totUnid = curva.reduce((s,p)=>s+p.qtd,0);
+
+  let html = '';
+  // resumo
+  html += '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">'+
+    '<div style="background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 14px;flex:1;min-width:120px"><div style="font-size:24px;font-weight:800">'+total+'</div><div style="font-size:12px;color:var(--mut)">pedidos</div></div>'+
+    '<div style="background:var(--card);border:1px solid #f59e0b55;border-radius:10px;padding:10px 14px;flex:1;min-width:120px"><div style="font-size:24px;font-weight:800;color:#f59e0b">⚡ '+totFlex+'</div><div style="font-size:12px;color:var(--mut)">FLEX enviados</div></div>'+
+    '<div style="background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 14px;flex:1;min-width:120px"><div style="font-size:24px;font-weight:800">'+totUnid+'</div><div style="font-size:12px;color:var(--mut)">unidades</div></div>'+
+  '</div>';
+  // por marketplace
+  html += '<div style="font-weight:700;margin:6px 0 8px">📦 Por marketplace</div>';
+  mktOrdenado.forEach(m=>{
+    const n = porMkt[m], pct = Math.round(n/total*100), fx = flexPorMkt[m]||0;
+    html += '<div style="margin-bottom:7px">'+
+      '<div style="display:flex;justify-content:space-between;font-size:14px"><span>'+(MKT_NOME[m]||m)+(fx?' <span style="color:#f59e0b;font-size:12px">(⚡'+fx+' flex)</span>':'')+'</span><b>'+n+' · '+pct+'%</b></div>'+
+      '<div style="background:var(--line);border-radius:4px;height:7px;margin-top:3px"><div style="background:#2563eb;height:7px;border-radius:4px;width:'+pct+'%"></div></div>'+
+    '</div>';
+  });
+  // curva A
+  html += '<div style="font-weight:700;margin:16px 0 8px">🏆 Curva A — mais vendidos ('+curva.length+' SKUs)</div>';
+  html += '<div style="max-height:280px;overflow:auto">';
+  curva.slice(0,50).forEach((p,i)=>{
+    const pct = totUnid? Math.round(p.qtd/totUnid*100):0;
+    html += '<div style="display:flex;gap:8px;align-items:center;padding:5px 0;border-bottom:1px solid var(--line)">'+
+      '<div style="width:22px;text-align:right;color:var(--mut);font-size:12px">'+(i+1)+'</div>'+
+      '<div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:600">'+esc(p.sku)+'</div><div style="font-size:11px;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(p.desc)+'</div></div>'+
+      '<div style="text-align:right"><b>'+p.qtd+'</b><div style="font-size:11px;color:var(--mut)">'+pct+'%</div></div>'+
+    '</div>';
+  });
+  html += '</div>';
+  if(curva.length>50) html += '<div style="font-size:12px;color:var(--mut);margin-top:6px">…mostrando top 50 de '+curva.length+'</div>';
+  const semDetalhe = noPeriodo.filter(h=>!(h.itens&&h.itens.length)).length;
+  if(semDetalhe) html += '<div style="font-size:12px;color:#f59e0b;margin-top:10px">⚠️ '+semDetalhe+' pedido(s) finalizados antes da atualização não têm canal/itens gravados — entram no total, aparecem como "Outro" e ficam fora da curva A/unidades.</div>';
+  html += '<div style="font-size:11px;color:var(--mut);margin-top:12px">Período: '+de+' a '+ate+' (datas no horário de São Paulo) · fonte: pedidos finalizados no checkout · kits contam pelo SKU do kit (sem explodir componentes)</div>';
+  body.innerHTML = html;
+}
+
 async function abrirHistorico(){
+
   histMkt = '';
   const md=$('modal');
   md.innerHTML =
