@@ -327,7 +327,7 @@
     <span class="ver" id="ver">carregando…</span>
     <span class="grow"></span>
     <div class="sbtools">
-      <button class="btn sec sm" id="btnSync" onclick="sincronizar()">↻ Atualizar</button>
+      <button class="btn sec sm" id="btnSync" onclick="sincronizar()">↻ Atualizar</button><button class="btn sec sm" id="btnBlingAgora" onclick="blingAgora()" title="ADMIN: consulta o Bling AGORA, sem esperar o ciclo de 10 em 10 min" style="display:none">🔄 Bling agora</button>
       <button class="btn sec sm" onclick="abrirSeparacao()" title="lista de produtos a separar (somados por SKU)">📋 Separar</button>
       <button class="btn sec sm" onclick="abrirHistorico()" title="últimos pedidos finalizados">🕘 Histórico</button><button class="btn sec sm" id="btnRelatorio" onclick="abrirRelatorio()" title="ADMIN: relatório de pedidos por canal, FLEX e curva A de produtos" style="display:none">📊 Relatório</button>
       <button class="btn sec sm" onclick="abrirBusca()" title="buscar produto por SKU/EAN, ver estoque e editar localização">🔎 Produto</button>
@@ -379,7 +379,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b110';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b112';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#b3b9c4'}, magalu:{n:'Magalu',c:'#0086ff'}, shein:{n:'Shein',c:'#e0e0e0'},
@@ -657,7 +657,17 @@ function iniciarHeartbeat(id){ pararHeartbeat(); hbTimer = setInterval(()=>{ pos
 function pararHeartbeat(){ if(hbTimer){ clearInterval(hbTimer); hbTimer=null; } }
 function liberarReserva(id){ if(id) postJson('/girassol-backup-offline/liberar', {id}).catch(()=>{}); }
 
-function _revelaRelatorio(){ const b=document.getElementById('btnRelatorio'); if(b) b.style.display = souAdmin()? '' : 'none'; }
+function _revelaRelatorio(){ const b=document.getElementById('btnRelatorio'); if(b) b.style.display = souAdmin()? '' : 'none'; const b2=document.getElementById('btnBlingAgora'); if(b2) b2.style.display = souAdmin()? '' : 'none'; }
+async function blingAgora(){
+  if(!souAdmin()) return;
+  const b=$('btnBlingAgora'); if(b) b.disabled=true;
+  toast('🔄 Consultando o Bling agora… (~30-60s, a lista atualiza sozinha)');
+  try{
+    const r = await postJson('/girassol-backup-offline/ciclo-agora', {});
+    if(!(r&&r.ok)){ toast((r&&r.erro)||'falha ao disparar'); if(b) b.disabled=false; return; }
+  }catch(e){ toast('falha: '+e.message); if(b) b.disabled=false; return; }
+  setTimeout(()=>{ carregarLista(); toast('✓ lista atualizada com o Bling'); if(b) b.disabled=false; }, 45000);
+}
 async function carregarLista(){
   _revelaRelatorio();
   try{
@@ -1254,7 +1264,7 @@ async function abrirRelatorio(){
       '<div id="relBody">carregando…</div>'+
       '<div class="mbtns"><button class="btn sec" onclick="fecharConfirmacao()">Fechar</button></div>'+
     '</div>';
-  // garante que os dados do histórico estão carregados (mesma fonte)
+  md.classList.add('show');   // ← sem isso o modal fica montado porém invisível (display:none)
   try{ const d = await api('/girassol-backup-offline/historico'); histItens = (d && d.itens) || []; }catch(e){ histItens = histItens || []; }   // sempre dados frescos; se a rede falhar, usa o que tiver
   setRelPeriodo(relPeriodo);
 }
