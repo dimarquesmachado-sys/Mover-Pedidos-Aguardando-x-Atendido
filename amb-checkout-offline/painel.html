@@ -381,7 +381,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b107';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b108';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#b3b9c4'}, magalu:{n:'Magalu',c:'#0086ff'}, shein:{n:'Shein',c:'#e0e0e0'},
@@ -1229,7 +1229,7 @@ async function abrirRelatorio(){
   if(!souAdmin()) return;
   const md=$('modal');
   md.innerHTML =
-    '<div class="mbox" style="max-width:680px;width:94vw">'+
+    '<div class="mbox" style="max-width:680px;width:94vw;max-height:90vh;overflow:auto">'+
       '<button class="mx" onclick="fecharConfirmacao()" title="fechar">✕</button>'+
       '<div class="mtit">📊 Relatório de pedidos</div>'+
       '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">'+
@@ -1320,7 +1320,7 @@ function calcRelatorio(){
   });
   // curva A
   html += '<div style="font-weight:700;margin:16px 0 8px">🏆 Curva A — mais vendidos ('+curva.length+' SKUs)</div>';
-  html += '<div style="max-height:280px;overflow:auto">';
+  html += '<div>';   // sem rolagem interna: no celular o modal inteiro rola (uma rolagem só, melhor no dedo)
   curva.slice(0,50).forEach((p,i)=>{
     const pct = totUnid? Math.round(p.qtd/totUnid*100):0;
     html += '<div style="display:flex;gap:8px;align-items:center;padding:5px 0;border-bottom:1px solid var(--line)">'+
