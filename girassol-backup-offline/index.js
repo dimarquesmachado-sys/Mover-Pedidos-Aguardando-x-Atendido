@@ -739,6 +739,7 @@ function routes(readBody) {
         flex: !!(snapC && snapC.flex),
         servico: snapC ? (snapC.servico || '') : '',
         nf_numero: (snapC && snapC.nf && snapC.nf.numero) || null,
+        valor: (snapC && snapC.total != null) ? Number(snapC.total) : null,   // faturamento (total do pedido)
         itens: snapC ? (snapC.itens || []).map(it => ({ sku: it.sku || '', descricao: String(it.descricao || '').slice(0, 90), qtd: it.qtd || 1 })) : []
       };
       writeJson(CONFERIDOS_FILE, conf);            // grava na fila primeiro — nunca perde
