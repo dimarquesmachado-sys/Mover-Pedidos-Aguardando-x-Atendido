@@ -78,6 +78,7 @@ const { baixarEtiqueta, baixarEtiquetaPDF, labelaryPost, zplParaPdf, etiquetaPdf
 const { servicoDoPedido, ehFlex, cronDeveriaTerRodado, kitIncompletoNoCache, zplEscape, bannerVolumeZpl } = require('./comum');
 const { getPossiveisGtins, primeiroEan, primeiraImagem, localizacaoDeProduto, localizacaoPorSku, salvarNoIndiceEan, eanDoItem, produtoDetalhe, infoProduto, limparProdCache } = require('./produtos');
 const { purgar, arquivarFinalizado, purgarArquivo, purgarConferidos } = require('./arquivo');
+let _ultimoCicloAgora = 0;   // trava anti-spam do botão 'Bling agora' (1 disparo/min)
 const { montarSeparacao, montarSeparacaoPorPedido } = require('./separacao');
 const { enviarEmailDocs } = require('./email-docs');
 const { listarAtendidos, detalhePedido, sincronizarConferidos, indexarCatalogoCompleto, cachearPedido, rodarCiclo, getUltimoResumo, getUltimoSync, getIdxStatus } = require('./ciclo');
@@ -206,6 +207,18 @@ function routes(readBody) {
     if (method === 'GET' && (p === '/good-checkout-offline' || p === '/good-checkout-offline/')) {
       res.writeHead(302, { Location: '/good-checkout-offline/painel' });
       res.end();
+      return true;
+    }
+
+    // ADMIN (por sessão): dispara o ciclo AGORA — consulta o Bling sem esperar os 10 min do cron
+    if (method === 'POST' && p === '/good-checkout-offline/ciclo-agora') {
+      const opSess = validarSessao(req.headers['cookie']);
+      if (!opSess || !ehAdmin(opSess)) { json(res, 403, { ok: false, erro: 'apenas admin' }); return true; }
+      const agora = Date.now();
+      if (agora - _ultimoCicloAgora < 60000) { json(res, 200, { ok: false, erro: '⏳ ciclo já disparado há menos de 1 min — aguarde' }); return true; }
+      _ultimoCicloAgora = agora;
+      rodarCiclo('painel-admin').catch(() => {});
+      json(res, 200, { ok: true, mensagem: 'consultando o Bling agora (~30-60s)' });
       return true;
     }
 
