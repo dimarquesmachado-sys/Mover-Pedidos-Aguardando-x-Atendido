@@ -79,6 +79,7 @@ const { servicoDoPedido, ehFlex, cronDeveriaTerRodado, kitIncompletoNoCache, zpl
 const { getPossiveisGtins, primeiroEan, primeiraImagem, localizacaoDeProduto, localizacaoPorSku, salvarNoIndiceEan, eanDoItem, produtoDetalhe, infoProduto, limparProdCache } = require('./produtos');
 const { purgar, arquivarFinalizado, purgarArquivo, purgarConferidos } = require('./arquivo');
 let _ultimoCicloAgora = 0;   // trava anti-spam do botão 'Bling agora' (1 disparo/min)
+let _bf = { rodando: false, feitos: 0, total: 0, ok: 0, falhas: 0, iniciado_em: null };   // status do backfill de valores
 const { montarSeparacao, montarSeparacaoPorPedido } = require('./separacao');
 const { enviarEmailDocs } = require('./email-docs');
 const { listarAtendidos, detalhePedido, sincronizarConferidos, indexarCatalogoCompleto, cachearPedido, rodarCiclo, getUltimoResumo, getUltimoSync, getIdxStatus } = require('./ciclo');
@@ -219,6 +220,51 @@ function routes(readBody) {
       _ultimoCicloAgora = agora;
       rodarCiclo('painel-admin').catch(() => {});
       json(res, 200, { ok: true, mensagem: 'consultando o Bling agora (~30-60s)' });
+      return true;
+    }
+
+    // ADMIN (?k=): BACKFILL DE VALORES — busca no Bling o total dos pedidos JÁ FINALIZADOS
+    // que não têm valor gravado (finalizados antes da atualização do faturamento) e preenche
+    // retroativamente. Uso: /good-checkout-offline/backfill-valores?k=ADMIN_KEY&dias=31
+    // Roda em background (~400ms por pedido, respeitando o rate limit). Chame de novo p/ ver o progresso.
+    if ((method === 'POST' || method === 'GET') && p === '/good-checkout-offline/backfill-valores') {
+      const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      if (!process.env.ADMIN_KEY || k !== process.env.ADMIN_KEY) { json(res, 404, { error: 'not found' }); return true; }
+      if (_bf.rodando) { json(res, 200, { ok: true, rodando: true, progresso: _bf.feitos + '/' + _bf.total, ok_ate_agora: _bf.ok, falhas: _bf.falhas, iniciado_em: _bf.iniciado_em }); return true; }
+      const dias = Math.max(1, Math.min(120, Number(urlObj.searchParams.get('dias') || 31)));
+      const corte = Date.now() - dias * 86400000;
+      const confIni = readJson(CONFERIDOS_FILE, {});
+      const alvos = Object.keys(confIni).filter(id => {
+        const c = confIni[id];
+        return c && (c.valor == null) && c.conferido_em && new Date(c.conferido_em).getTime() >= corte;
+      });
+      if (!alvos.length) { json(res, 200, { ok: true, mensagem: 'nada a preencher — todos os finalizados dos últimos ' + dias + ' dias já têm valor' }); return true; }
+      _bf = { rodando: true, feitos: 0, total: alvos.length, ok: 0, falhas: 0, iniciado_em: new Date().toISOString() };
+      json(res, 200, { ok: true, iniciado: true, pedidos_sem_valor: alvos.length, dias, mensagem: 'backfill rodando em background (~' + Math.ceil(alvos.length * 0.5 / 60) + ' min) — chame esta URL de novo pra ver o progresso' });
+      (async () => {
+        const dorme = ms => new Promise(r => setTimeout(r, ms));
+        const pendentes = {};
+        const salvar = () => {
+          if (!Object.keys(pendentes).length) return;
+          const c2 = readJson(CONFERIDOS_FILE, {});
+          for (const [id, v] of Object.entries(pendentes)) { if (c2[id]) c2[id].valor = v; }
+          writeJson(CONFERIDOS_FILE, c2);
+          for (const id of Object.keys(pendentes)) delete pendentes[id];
+        };
+        for (const id of alvos) {
+          try {
+            const det = await detalhePedido(id);
+            if (det && det.total != null && isFinite(Number(det.total))) { pendentes[id] = Number(det.total); _bf.ok++; }
+            else _bf.falhas++;
+          } catch (e) { _bf.falhas++; }
+          _bf.feitos++;
+          if (_bf.feitos % 15 === 0) { salvar(); console.log(`[BACKFILL] ${_bf.feitos}/${_bf.total} (ok=${_bf.ok} falhas=${_bf.falhas})`); }
+          await dorme(400);
+        }
+        salvar();
+        _bf.rodando = false;
+        console.log(`[BACKFILL] ✔ concluído: ${_bf.ok} valor(es) preenchido(s), ${_bf.falhas} falha(s) de ${_bf.total}`);
+      })().catch(e => { _bf.rodando = false; console.log('[BACKFILL] ✗ ' + e.message); });
       return true;
     }
 
