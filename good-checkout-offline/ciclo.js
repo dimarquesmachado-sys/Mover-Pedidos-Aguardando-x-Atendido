@@ -266,6 +266,7 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC) {
     flex: ehFlex(_servico),
     situacao_id: (ped.situacao && ped.situacao.id) || SIT_ATENDIDO,
     cliente: (ped.contato && ped.contato.nome) || '',
+    total: (ped.total != null ? Number(ped.total) : null),   // valor total do pedido (p/ faturamento no relatório)
     nf,
     itens,
     tem_nf: !!nf,
