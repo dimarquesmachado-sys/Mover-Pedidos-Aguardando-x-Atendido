@@ -379,7 +379,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b40';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b41';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#b3b9c4'}, magalu:{n:'Magalu',c:'#0086ff'},
@@ -691,7 +691,7 @@ async function sincronizar(){
 
 function onBusca(v){ filtroBusca = (v||'').trim().toLowerCase(); renderLista(); }
 // ── serviço Shopee não reconhecido (rótulo novo do Bling) → conferir se é FLEX ou ponto de coleta ──
-const SHOPEE_SERVICOS_OK = ['shopee xpress', 'shopee entrega direta', 'entrega direta', 'logistica shopee'];
+const SHOPEE_SERVICOS_OK = ['shopee xpress', 'shopee entrega direta', 'entrega direta', 'logistica shopee', 'retirada pelo comprador'];
 function servicoDesconhecido(p){
   if(!p || String(p.marketplace||'').toLowerCase()!=='shopee') return false;
   const s = String(p.servico||'').toLowerCase().trim();
