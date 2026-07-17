@@ -385,6 +385,34 @@ function routes(readBody) {
       return true;
     }
 
+    // ADMIN (?k=): BACKFILL-NF — 100% LOCAL (lê nf-simp.json do cache/arquivo; ZERO chamadas ao Bling).
+    // Preenche vprod_nf (Σ itens da NOTA) nos finalizados → produtos EXATO + frete EXATO (valor − vprod_nf), retroativo.
+    // Uso: /amb-checkout-offline/backfill-nf?k=ADMIN_KEY&dias=45   (roda em segundos)
+    if ((method === 'POST' || method === 'GET') && p === '/amb-checkout-offline/backfill-nf') {
+      const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      if (!process.env.ADMIN_KEY || k !== process.env.ADMIN_KEY) { json(res, 404, { error: 'not found' }); return true; }
+      const dias = Math.max(1, Math.min(120, Number(urlObj.searchParams.get('dias') || 45)));
+      const corte = Date.now() - dias * 86400000;
+      const conf2 = readJson(CONFERIDOS_FILE, {});
+      let alvo = 0, comSimp = 0, semSimp = 0;
+      for (const [cid, c] of Object.entries(conf2)) {
+        if (!c || !c.conferido_em || new Date(c.conferido_em).getTime() < corte) continue;
+        if (c.vprod_nf != null) continue;
+        alvo++;
+        let ds = readJson(path.join(CACHE_DIR, String(cid), 'nf-simp.json'), null);
+        if (!ds) ds = readJson(path.join(ARQUIVO_DIR, String(cid), 'nf-simp.json'), null);
+        if (ds && Array.isArray(ds.itens) && ds.itens.length) {
+          const s2 = ds.itens.reduce((a, i) => a + (Number(i.valorTotal) || 0), 0);
+          if (isFinite(s2) && s2 > 0) { c.vprod_nf = Math.round(s2 * 100) / 100; comSimp++; continue; }
+        }
+        semSimp++;
+      }
+      if (comSimp) writeJson(CONFERIDOS_FILE, conf2);
+      json(res, 200, { ok: true, dias, candidatos: alvo, preenchidos_pela_nf: comSimp, sem_nf_simp_no_disco: semSimp,
+        mensagem: comSimp ? ('✓ ' + comSimp + ' pedido(s) ganharam produtos/frete EXATOS da nota (leitura local, sem API)') : 'nada novo a preencher' });
+      return true;
+    }
+
     if ((method === 'POST' || method === 'GET') && p === '/amb-checkout-offline/run') {
       const forcar = /[?&]force=1\b/.test(urlObj.search || '');
       rodarCiclo(forcar ? 'manual-force' : 'manual', forcar);
@@ -917,6 +945,10 @@ function routes(readBody) {
         nf_numero: (snapC && snapC.nf && snapC.nf.numero) || null,
         valor: (snapC && snapC.total != null) ? Number(snapC.total) : null,   // faturamento (total do pedido)
         uf: (snapC && snapC.uf) || null,
+        vprod_nf: (function(){ try {   // Σ itens da NOTA (fonte fiscal) → produtos EXATO; frete = valor − vprod_nf
+          const ds = readJson(path.join(CACHE_DIR, String(id), 'nf-simp.json'), null);
+          if (ds && Array.isArray(ds.itens) && ds.itens.length) { const s2 = ds.itens.reduce((a,i)=>a+(Number(i.valorTotal)||0),0); return isFinite(s2)&&s2>0 ? Math.round(s2*100)/100 : null; }
+        } catch (e) {} return null; })(),
         municipio: (snapC && snapC.municipio) || null,
         itens: snapC ? (snapC.itens || []).map(it => ({ sku: it.sku || '', descricao: String(it.descricao || '').slice(0, 90), qtd: it.qtd || 1, valor_unit: (it.valor_unit != null ? it.valor_unit : null), valor_total: (it.valor_total != null ? it.valor_total : null) })) : []
       };
