@@ -53,10 +53,15 @@
 </div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd2';
+const DASH_BUILD = 'd3';
 let DADOS = [];                    // conferidos (do /historico)
 let periodo = 'mes', pDe = '', pAte = '';
-let tabProd = 'fat';               // fat | uni
+let sortProd = { col: 'fat', dir: -1 };    // ordenação clicável do Top produtos
+let sortProj = { col: 'qtd14', dir: -1 };  // ordenação clicável da Projeção
+function setSortProd(c){ sortProd = { col: c, dir: (sortProd.col===c ? -sortProd.dir : -1) }; render(); }
+function setSortProj(c){ sortProj = { col: c, dir: (sortProj.col===c ? -sortProj.dir : -1) }; renderProjecao(); }
+function seta(st,c){ return st.col===c ? (st.dir<0?' ↓':' ↑') : ''; }
+function cmpNull(a,b,dir){ const an=(a==null||!isFinite(a)), bn=(b==null||!isFinite(b)); if(an&&bn)return 0; if(an)return 1; if(bn)return -1; return (a-b)*dir; }
 let SKUINFO = {};                  // sku → {saldo, preco, custo}
 let skuInfoCarregado = false;
 
@@ -108,21 +113,21 @@ function montar(){
     '<label class="mut">até <input type="date" id="pAte" onclick="this.showPicker&&this.showPicker()" onchange="pAte=this.value;render()"></label></div>'+
     '<div id="cover" class="sub"></div>'+
     '<div class="cards" id="cards"></div>'+
-    '<div class="sec"><h2>📈 Evolução por dia <span class="badge">azul = pedidos · verde = faturamento</span></h2><div class="diaschart" id="porDia"></div></div>'+
+    '<div class="sec"><h2>📈 Pedidos por dia</h2><div class="diaschart" id="porDiaPed"></div></div>'+
+    '<div class="sec"><h2>💰 Faturamento por dia</h2><div class="diaschart" id="porDiaFat"></div></div>'+
     '<div class="sec"><h2>🛒 Por canal</h2><div style="overflow-x:auto"><table id="porCanal"></table></div></div>'+
-    '<div class="sec"><h2>🏆 Top produtos</h2><div class="tabs">'+
-      '<button class="chip" id="tabFat" onclick="tabProd=\'fat\';render()">💰 por faturamento</button>'+
-      '<button class="chip" id="tabUni" onclick="tabProd=\'uni\';render()">📦 por unidades</button></div>'+
+    '<div class="sec"><h2>🏆 Top produtos <span class="badge">clique nos títulos p/ ordenar ↑↓</span></h2>'+
       '<div style="overflow-x:auto"><table id="topProd"></table></div><div id="topProdAviso"></div></div>'+
     '<div class="sec"><h2>🗺️ Por estado (UF)</h2><div style="overflow-x:auto"><table id="porUF"></table></div><div id="ufAviso"></div></div>'+
-    '<div class="sec"><h2>📦 Projeção de estoque & margem <span class="badge">últimos 14 dias de ritmo</span></h2>'+
-      '<div id="projBox"><button class="btn" id="btnProj" onclick="carregarSkuInfo()">Carregar saldo, preço e custo do Bling (top 40 SKUs)</button>'+
-      '<div class="nota">consulta o Bling por SKU (com cache de 6h) — leva ~30-60s na primeira vez</div></div>'+
+    '<div class="sec"><h2>📦 Projeção de estoque & margem <span class="badge">ritmo: 14 dias · clique nos títulos p/ ordenar</span></h2>'+
+      '<div id="projBox"><span class="mut" id="projStatus">⏳ carregando saldo/preço/custo do Bling automaticamente… (~30-60s na 1ª vez)</span> '+
+      '<button class="btn" id="btnProj" onclick="carregarSkuInfo()" style="display:none">↻ recarregar do Bling</button></div>'+
       '<div style="overflow-x:auto"><table id="projTab"></table></div><div id="projAviso"></div></div>'+
     '<div class="nota">Regras deste dashboard: datas no horário de São Paulo · kits contam pelo SKU do kit · '+
       'faturamento = total do pedido no Bling · margem = <b>bruta estimada</b> (preço − custo do cadastro Bling), '+
       '<b>sem</b> frete e taxas de marketplace · só entram pedidos finalizados no checkout offline. <b>Comparando com o Jodda:</b> lá a data é a da VENDA aprovada no marketplace; aqui é a da EXPEDIÇÃO no checkout — e o "faturamento total" daqui inclui frete (use o card 🛍 produtos pra comparar).</div>';
   render();
+  setTimeout(()=>{ if(!skuInfoCarregado) carregarSkuInfo(); }, 500);   // auto-carrega saldo/custo do Bling (sem precisar clicar)
 }
 
 function render(){
@@ -180,16 +185,16 @@ function render(){
     '<div class="cardk"><div class="v warn">⚡ '+fmtN(flex)+'</div><div class="l">FLEX enviados</div></div>'+
     '<div class="cardk" id="cardMargem"><div class="v mut">—</div><div class="l">margem bruta (carregue custos ↓)</div></div>';
 
-  // por dia
+  // por dia — DOIS gráficos (pedidos | faturamento), cada um na sua escala
   const dias = Object.keys(porDia).sort();
   const maxP = Math.max(1,...dias.map(d=>porDia[d].ped));
   const maxF = Math.max(1,...dias.map(d=>porDia[d].fat));
-  $('porDia').innerHTML = dias.map(d=>{
-    const o=porDia[d];
-    return '<div class="diacol" title="'+d+' · '+o.ped+' pedido(s) · '+fmtBRL(o.fat)+'">'+
-      '<div class="f" style="height:'+Math.round(o.fat/maxF*46)+'px"></div>'+
-      '<div class="b" style="height:'+Math.max(2,Math.round(o.ped/maxP*46))+'px"></div>'+
-      '<div class="d">'+d.slice(8,10)+'/'+d.slice(5,7)+'</div></div>';
+  const rot = d => d.slice(8,10)+'/'+d.slice(5,7);
+  $('porDiaPed').innerHTML = dias.map(d=>{const o=porDia[d];
+    return '<div class="diacol" title="'+d+' · '+o.ped+' pedido(s)"><div class="b" style="height:'+Math.max(2,Math.round(o.ped/maxP*92))+'px"></div><div class="d">'+rot(d)+'</div></div>';
+  }).join('') || '<div class="mut">sem dados no período</div>';
+  $('porDiaFat').innerHTML = dias.map(d=>{const o=porDia[d];
+    return '<div class="diacol" title="'+d+' · '+fmtBRL(o.fat)+'"><div class="f" style="height:'+Math.max(2,Math.round(o.fat/maxF*92))+'px"></div><div class="d">'+rot(d)+'</div></div>';
   }).join('') || '<div class="mut">sem dados no período</div>';
 
   // por canal
@@ -202,18 +207,20 @@ function render(){
       '<td class="num">'+(c.comValor?fmtBRL(c.fat/c.comValor):'<span class="mut">—</span>')+'</td>'+
       '<td class="num">'+(c.flex||'')+'</td><td><div class="bar"><i style="width:'+p+'%"></i></div></td></tr>';}).join('');
 
-  // top produtos
-  $('tabFat').className='chip'+(tabProd==='fat'?' on':''); $('tabUni').className='chip'+(tabProd==='uni'?' on':'');
+  // top produtos — ordenação clicável (↑↓) por unidades ou faturamento
   const prods = Object.values(porProd);
-  const ord = tabProd==='fat' ? prods.filter(p=>p.fat>0).sort((a,b)=>b.fat-a.fat) : prods.sort((a,b)=>b.qtd-a.qtd);
+  const ord = prods.slice().sort((a,b)=> sortProd.col==='fat' ? cmpNull(a.fat||0,b.fat||0,sortProd.dir) : cmpNull(a.qtd,b.qtd,sortProd.dir));
   const fatTot = prods.reduce((s,p)=>s+p.fat,0)||1;
-  $('topProd').innerHTML = '<tr><th>#</th><th>Produto</th><th class="num">Unid.</th><th class="num">Faturamento</th><th class="num">% fat.</th><th style="width:22%"></th></tr>'+
+  $('topProd').innerHTML = '<tr><th>#</th><th>Produto</th>'+
+    '<th class="num" style="cursor:pointer" onclick="setSortProd(\'qtd\')">Unid.'+seta(sortProd,'qtd')+'</th>'+
+    '<th class="num" style="cursor:pointer" onclick="setSortProd(\'fat\')">Faturamento'+seta(sortProd,'fat')+'</th>'+
+    '<th class="num">% fat.</th><th style="width:22%"></th></tr>'+
     ord.slice(0,30).map((p,i)=>{const pf=Math.round(p.fat/fatTot*100);
       return '<tr><td class="mut">'+(i+1)+'</td><td><b>'+esc(p.sku)+'</b><div class="mut" style="font-size:11px;max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(p.desc)+'</div></td>'+
       '<td class="num">'+fmtN(p.qtd)+'</td><td class="num ok">'+(p.fat?fmtBRL(p.fat):'<span class="mut">—</span>')+'</td>'+
       '<td class="num">'+(p.fat?pf+'%':'<span class="mut">—</span>')+'</td><td><div class="bar"><i class="g" style="width:'+pf+'%"></i></div></td></tr>';}).join('');
   const semFat = prods.length - prods.filter(p=>p.fat>0).length;
-  $('topProdAviso').innerHTML = (tabProd==='fat' && semFat) ? '<div class="aviso">⚠️ '+semFat+' SKU(s) sem valor por item (pedidos antigos) — aparecem só na aba unidades. Rode o backfill de detalhes.</div>' : '';
+  $('topProdAviso').innerHTML = semFat ? '<div class="aviso">⚠️ '+semFat+' SKU(s) com faturamento incompleto (pedidos antigos sem valor por item) — o total do produto SOMA só o que tem valor. Complete o backfill de detalhes p/ o retroativo.</div>' : '';
 
   // por UF
   const ufs = Object.keys(porUF).sort((a,b)=>porUF[b].ped-porUF[a].ped);
@@ -245,36 +252,54 @@ function topSkus14(){
   return Object.values(agg).sort((a,b)=>b.qtd-a.qtd).slice(0,40);
 }
 
+let _skuLoading = false;
 async function carregarSkuInfo(){
-  const btn=$('btnProj'); btn.disabled=true; btn.textContent='consultando o Bling…';
+  if(_skuLoading) return; _skuLoading = true;
+  const st=$('projStatus'), btn=$('btnProj');
+  if(st) st.textContent='⏳ consultando o Bling (saldo/preço/custo)… ~30-60s na 1ª vez';
+  if(btn){ btn.style.display='none'; }
   const top = topSkus14();
   const skus = top.map(t=>t.sku);
   try{
     for(let i=0;i<skus.length;i+=40){
       const r = await fetch(MOD+'/sku-info',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({skus:skus.slice(i,i+40)})});
+      if(r.status===403){ if(st) st.innerHTML='🔒 sessão de admin expirou — <a href="'+MOD+'/painel">faça login no painel</a> e recarregue'; _skuLoading=false; return; }
       const d = await r.json();
       if(d && d.skus) Object.assign(SKUINFO, d.skus);
     }
     skuInfoCarregado = true;
-    $('projBox').innerHTML = '<div class="mut" style="font-size:12px">dados do Bling carregados ✓ (cache de 6h no servidor)</div>';
-  }catch(e){ btn.disabled=false; btn.textContent='falhou — tentar de novo'; }
+    if(st) st.textContent='✓ dados do Bling carregados (cache de 6h no servidor)';
+    if(btn){ btn.style.display=''; btn.disabled=false; btn.textContent='↻ recarregar do Bling'; }
+  }catch(e){
+    if(st) st.textContent='✗ falha ao consultar o Bling: '+e.message;
+    if(btn){ btn.style.display=''; btn.disabled=false; btn.textContent='↻ tentar de novo'; }
+  }
+  _skuLoading = false;
   renderProjecao();
 }
 
 function renderProjecao(){
-  const top = topSkus14();
-  if(!top.length){ $('projTab').innerHTML='<tr><td class="mut">sem vendas nos últimos 14 dias</td></tr>'; return; }
+  const base = topSkus14();
+  if(!base.length){ $('projTab').innerHTML='<tr><td class="mut">sem vendas nos últimos 14 dias</td></tr>'; return; }
+  // enriquece cada linha com os campos calculados (pra ordenar por qualquer coluna)
+  const linhas = base.map(t=>{
+    const info = SKUINFO[t.sku]||{};
+    const md = t.qtd/14;
+    const saldo = (info.saldo!=null && isFinite(Number(info.saldo))) ? Number(info.saldo) : null;
+    const diasR = (saldo!=null && md>0) ? saldo/md : null;
+    const compra = (saldo!=null) ? Math.max(0, Math.ceil(md*30 - saldo)) : null;
+    const precoMed = t.qtd ? t.fat/t.qtd : null;
+    const custo = (info.custo!=null && isFinite(Number(info.custo))) ? Number(info.custo) : null;
+    const mUn = (precoMed!=null && precoMed>0 && custo!=null) ? precoMed - custo : null;
+    return { ...t, qtd14:t.qtd, md, saldo, diasR, compra, custo, mUn };
+  });
+  const dir = sortProj.dir, c = sortProj.col;
+  linhas.sort((a,b)=>cmpNull(a[c],b[c],dir));
   let margemTot=0, margemCob=0, margemBase=0;
-  $('projTab').innerHTML = '<tr><th>SKU</th><th class="num">14d</th><th class="num">média/dia</th><th class="num">saldo</th><th class="num">acaba em</th><th class="num">comprar p/ 30d</th><th class="num">custo</th><th class="num">margem un.</th></tr>'+
-    top.map(t=>{
-      const info = SKUINFO[t.sku]||{};
-      const md = t.qtd/14;
-      const saldo = info.saldo;
-      const diasR = (saldo!=null && md>0) ? saldo/md : null;
-      const compra = (saldo!=null) ? Math.max(0, Math.ceil(md*30 - saldo)) : null;
-      const precoMed = t.qtd? t.fat/t.qtd : null;
-      const custo = info.custo;
-      const mUn = (precoMed!=null && custo!=null) ? precoMed - custo : null;
+  const th=(col,lbl)=>'<th class="num" style="cursor:pointer" onclick="setSortProj(\''+col+'\')">'+lbl+seta(sortProj,col)+'</th>';
+  $('projTab').innerHTML = '<tr><th>SKU</th>'+th('qtd14','14d')+th('md','média/dia')+th('saldo','saldo')+th('diasR','acaba em')+th('compra','comprar p/ 30d')+th('custo','custo')+th('mUn','margem un.')+'</tr>'+
+    linhas.map(t=>{
+      const { md, saldo, diasR, compra, custo, mUn } = t;
       if(mUn!=null){ margemTot += mUn*t.qtd; margemCob++; }
       margemBase++;
       const cor = diasR==null?'mut':(diasR<7?'bad':(diasR<15?'warn':'ok'));
