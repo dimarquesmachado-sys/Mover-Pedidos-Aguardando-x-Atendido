@@ -80,6 +80,8 @@ const { getPossiveisGtins, primeiroEan, primeiraImagem, localizacaoDeProduto, lo
 const { purgar, arquivarFinalizado, purgarArquivo, purgarConferidos } = require('./arquivo');
 let _ultimoCicloAgora = 0;   // trava anti-spam do botão 'Bling agora' (1 disparo/min)
 let _bf = { rodando: false, feitos: 0, total: 0, ok: 0, falhas: 0, iniciado_em: null };   // status do backfill de valores
+let _bfd = { rodando: false, feitos: 0, total: 0, ok: 0, falhas: 0, iniciado_em: null };   // status do backfill de DETALHES (uf + valor por item)
+let _skuInfoCache = null;   // cache em memória do sku-info (saldo/preço/custo)
 const { montarSeparacao, montarSeparacaoPorPedido } = require('./separacao');
 const { enviarEmailDocs } = require('./email-docs');
 const { listarAtendidos, detalhePedido, sincronizarConferidos, indexarCatalogoCompleto, cachearPedido, rodarCiclo, getUltimoResumo, getUltimoSync, getIdxStatus } = require('./ciclo');
@@ -265,6 +267,121 @@ function routes(readBody) {
         _bf.rodando = false;
         console.log(`[BACKFILL] ✔ concluído: ${_bf.ok} valor(es) preenchido(s), ${_bf.falhas} falha(s) de ${_bf.total}`);
       })().catch(e => { _bf.rodando = false; console.log('[BACKFILL] ✗ ' + e.message); });
+      return true;
+    }
+
+    // ADMIN (?k=): BACKFILL DE DETALHES — preenche UF + valor POR ITEM dos já finalizados
+    // Uso: /girassol-backup-offline/backfill-detalhes?k=ADMIN_KEY&dias=31
+    if ((method === 'POST' || method === 'GET') && p === '/girassol-backup-offline/backfill-detalhes') {
+      const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      if (!process.env.ADMIN_KEY || k !== process.env.ADMIN_KEY) { json(res, 404, { error: 'not found' }); return true; }
+      if (_bfd.rodando) { json(res, 200, { ok: true, rodando: true, progresso: _bfd.feitos + '/' + _bfd.total, ok_ate_agora: _bfd.ok, falhas: _bfd.falhas, iniciado_em: _bfd.iniciado_em }); return true; }
+      const dias = Math.max(1, Math.min(120, Number(urlObj.searchParams.get('dias') || 31)));
+      const corte = Date.now() - dias * 86400000;
+      const confIni = readJson(CONFERIDOS_FILE, {});
+      const alvos = Object.keys(confIni).filter(id => {
+        const c = confIni[id];
+        if (!c || !c.conferido_em || new Date(c.conferido_em).getTime() < corte) return false;
+        const semItemValor = Array.isArray(c.itens) && c.itens.length && c.itens.some(it => it.valor_total == null);
+        return c.uf == null || c.valor == null || semItemValor;
+      });
+      if (!alvos.length) { json(res, 200, { ok: true, mensagem: 'nada a preencher — últimos ' + dias + ' dias já têm UF e valores por item' }); return true; }
+      _bfd = { rodando: true, feitos: 0, total: alvos.length, ok: 0, falhas: 0, iniciado_em: new Date().toISOString() };
+      json(res, 200, { ok: true, iniciado: true, pedidos_a_detalhar: alvos.length, dias, mensagem: 'backfill de detalhes rodando (~' + Math.ceil(alvos.length * 0.5 / 60) + ' min) — chame de novo pra ver o progresso' });
+      (async () => {
+        const dorme = ms => new Promise(r => setTimeout(r, ms));
+        const pend = {};
+        const salvar = () => {
+          if (!Object.keys(pend).length) return;
+          const c2 = readJson(CONFERIDOS_FILE, {});
+          for (const [id, d] of Object.entries(pend)) {
+            if (!c2[id]) continue;
+            if (d.valor != null && c2[id].valor == null) c2[id].valor = d.valor;
+            if (d.uf) c2[id].uf = d.uf;
+            if (d.municipio) c2[id].municipio = d.municipio;
+            if (d.porSku && Array.isArray(c2[id].itens)) {
+              c2[id].itens.forEach(it => {
+                const v = d.porSku[String(it.sku || '').trim()];
+                if (v != null && it.valor_total == null) { it.valor_unit = v; it.valor_total = v * Number(it.qtd || 1); }
+              });
+            }
+          }
+          writeJson(CONFERIDOS_FILE, c2);
+          for (const id of Object.keys(pend)) delete pend[id];
+        };
+        for (const id of alvos) {
+          try {
+            const det = await detalhePedido(id);
+            if (det) {
+              const porSku = {};
+              (det.itens || []).forEach(it => { const c = String(it.codigo || (it.produto && it.produto.codigo) || '').trim(); if (c && it.valor != null) porSku[c] = Number(it.valor); });
+              pend[id] = {
+                valor: (det.total != null ? Number(det.total) : null),
+                uf: (det.transporte && det.transporte.etiqueta && det.transporte.etiqueta.uf) || null,
+                municipio: (det.transporte && det.transporte.etiqueta && det.transporte.etiqueta.municipio) || null,
+                porSku
+              };
+              _bfd.ok++;
+            } else _bfd.falhas++;
+          } catch (e) { _bfd.falhas++; }
+          _bfd.feitos++;
+          if (_bfd.feitos % 15 === 0) { salvar(); console.log(`[BACKFILL-DET] ${_bfd.feitos}/${_bfd.total}`); }
+          await dorme(400);
+        }
+        salvar(); _bfd.rodando = false;
+        console.log(`[BACKFILL-DET] ✔ concluído: ${_bfd.ok} ok, ${_bfd.falhas} falha(s) de ${_bfd.total}`);
+      })().catch(e => { _bfd.rodando = false; console.log('[BACKFILL-DET] ✗ ' + e.message); });
+      return true;
+    }
+
+    // DASHBOARD (sessão admin): saldo/preço/custo por SKU, cache 6h em disco — alimenta a projeção de estoque
+    if (method === 'POST' && p === '/girassol-backup-offline/sku-info') {
+      const opSess = validarSessao(req.headers['cookie']);
+      if (!opSess || !ehAdmin(opSess)) { json(res, 403, { ok: false, erro: 'apenas admin' }); return true; }
+      let body = {}; try { body = JSON.parse(await readBody(req) || '{}'); } catch (e) {}
+      const skus = Array.isArray(body.skus) ? body.skus.map(x => String(x || '').trim()).filter(Boolean).slice(0, 40) : [];
+      if (!skus.length) { json(res, 200, { ok: true, skus: {} }); return true; }
+      const CACHE_SKUINFO = path.join(CACHE_DIR, '_skus-info.json');
+      if (!_skuInfoCache) _skuInfoCache = readJson(CACHE_SKUINFO, {});
+      const TTL = 6 * 3600 * 1000;
+      const out = {}; const faltam = [];
+      for (const sku of skus) {
+        const c = _skuInfoCache[sku];
+        if (c && (Date.now() - (c.ts || 0)) < TTL) out[sku] = c; else faltam.push(sku);
+      }
+      const dorme = ms => new Promise(r => setTimeout(r, ms));
+      for (const sku of faltam) {
+        try {
+          let prod = null;
+          for (const v of [...new Set([sku, sku.toUpperCase(), sku.toLowerCase()])]) {
+            const r = await blingGet(`/produtos?codigo=${encodeURIComponent(v)}&limite=1`);
+            const it = r.ok && r.data && r.data.data && r.data.data[0];
+            if (it && it.id) { const d = await blingGet(`/produtos/${it.id}`); prod = (d.ok && d.data && d.data.data) || it; break; }
+          }
+          const est = (prod && prod.estoque) || {};
+          const forn = (prod && prod.fornecedor) || {};
+          const custoCand = [forn.precoCusto, forn.precoCompra, prod && prod.precoCusto, prod && prod.custo].map(Number).filter(v => isFinite(v) && v > 0);
+          const info = {
+            saldo: (est.saldoVirtualTotal != null ? est.saldoVirtualTotal : (est.saldoVirtual != null ? est.saldoVirtual : null)),
+            preco: (prod && prod.preco != null && isFinite(Number(prod.preco))) ? Number(prod.preco) : null,
+            custo: custoCand.length ? custoCand[0] : null,
+            ts: Date.now()
+          };
+          _skuInfoCache[sku] = info; out[sku] = info;
+        } catch (e) { out[sku] = { saldo: null, preco: null, custo: null, ts: Date.now() }; }
+        await dorme(250);
+      }
+      if (faltam.length) { try { writeJson(CACHE_SKUINFO, _skuInfoCache); } catch (e) {} }
+      json(res, 200, { ok: true, skus: out, consultados_agora: faltam.length });
+      return true;
+    }
+
+    // DASHBOARD — página (dashboard.html do módulo; por ora só a Girassol tem o arquivo)
+    if (method === 'GET' && p === '/girassol-backup-offline/dashboard') {
+      const fdash = path.join(__dirname, 'dashboard.html');
+      if (!fs.existsSync(fdash)) { json(res, 404, { ok: false, erro: 'dashboard ainda não habilitado nesta empresa' }); return true; }
+      try { const htmlContent = fs.readFileSync(fdash, 'utf8'); res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(htmlContent); }
+      catch (e) { json(res, 500, { erro: 'dashboard.html: ' + e.message }); }
       return true;
     }
 
@@ -799,7 +916,9 @@ function routes(readBody) {
         servico: snapC ? (snapC.servico || '') : '',
         nf_numero: (snapC && snapC.nf && snapC.nf.numero) || null,
         valor: (snapC && snapC.total != null) ? Number(snapC.total) : null,   // faturamento (total do pedido)
-        itens: snapC ? (snapC.itens || []).map(it => ({ sku: it.sku || '', descricao: String(it.descricao || '').slice(0, 90), qtd: it.qtd || 1 })) : []
+        uf: (snapC && snapC.uf) || null,
+        municipio: (snapC && snapC.municipio) || null,
+        itens: snapC ? (snapC.itens || []).map(it => ({ sku: it.sku || '', descricao: String(it.descricao || '').slice(0, 90), qtd: it.qtd || 1, valor_unit: (it.valor_unit != null ? it.valor_unit : null), valor_total: (it.valor_total != null ? it.valor_total : null) })) : []
       };
       writeJson(CONFERIDOS_FILE, conf);            // grava na fila primeiro — nunca perde
       arquivarFinalizado(id);                       // arquiva etiqueta + meta p/ reimprimir/reenviar depois (Parte A)
