@@ -86,16 +86,32 @@ async function carregarNFs(idMinimo) {
   return nfs;
 }
 
-function acharNFnaLista(pedidoId, nfs) {
+function acharNFnaLista(pedidoId, nfs, opts) {
   const pid = Number(pedidoId);
   if (!pid) return null;
-  const teto = pid + 2000;
-  let melhor = null;
-  for (const nf of nfs) {
-    const nid = Number(nf.id) || 0;
-    if (nid >= pid && nid <= teto && (!melhor || nid < Number(melhor.id))) melhor = nf;
+  const o = opts || {};
+  const nLoja = (o.numeroLoja != null && String(o.numeroLoja).trim()) ? String(o.numeroLoja).trim() : '';
+  // 1) vínculo EXATO pelo nº do pedido na loja (quando a listagem /nfe traz numeroPedidoLoja) — sem heurística
+  if (nLoja) {
+    const exato = (nfs || []).find(nf => nf && nf.numeroPedidoLoja != null && String(nf.numeroPedidoLoja).trim() === nLoja);
+    if (exato) { const p = parseNF(exato); if (p) p._criterio = 'exato'; return p; }
   }
-  return parseNF(melhor);
+  // 2) faixa de id (heurística) COM EXCLUSIVIDADE: uma NF nunca casa com dois pedidos.
+  //    Bug real corrigido: comprador com 3 pedidos quase juntos fazia os 3 casarem com a MESMA NF (a menor da faixa)
+  //    → 3 etiquetas com a mesma DANFE embaixo. Agora cada NF só casa uma vez; disputa → vínculo direto.
+  const teto = pid + 2000;
+  let melhor = null, houveConflito = false;
+  for (const nf of (nfs || [])) {
+    const nid = Number(nf.id) || 0;
+    if (!(nid >= pid && nid <= teto)) continue;
+    if (o.usadasIds && o.usadasIds.has(nid)) { houveConflito = true; continue; }          // já casada com outro pedido NESTE lote
+    const dono = (o.donoPorNumero && nf.numero != null) ? o.donoPorNumero[String(nf.numero)] : null;
+    if (dono && String(dono) !== String(pedidoId)) { houveConflito = true; continue; }    // já pertence a outro pedido no manifest
+    if (!melhor || nid < Number(melhor.id)) melhor = nf;
+  }
+  if (!melhor) return houveConflito ? { _ambigua: true } : null;   // ambíguo → quem chamou cai pro vínculo direto (nfDoPedido)
+  const p = parseNF(melhor); if (p) p._criterio = 'faixa';
+  return p;
 }
 
 async function baixarDanfe(nfId) {
