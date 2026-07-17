@@ -53,7 +53,7 @@
 </div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd1';
+const DASH_BUILD = 'd2';
 let DADOS = [];                    // conferidos (do /historico)
 let periodo = 'mes', pDe = '', pAte = '';
 let tabProd = 'fat';               // fat | uni
@@ -89,6 +89,8 @@ function intervalo(){
   const hoje = hojeSP();
   let de, ate = hoje;
   if(periodo==='dia') de = hoje;
+  else if(periodo==='ontem'){ const o = new Date(Date.now()-86400000).toLocaleString('sv-SE',{timeZone:'America/Sao_Paulo'}).slice(0,10); de = o; ate = o; }
+  else if(periodo==='mesant'){ const [Y,M] = hoje.split('-').map(Number); const pm = new Date(Y, M-1-1, 1); const y2=pm.getFullYear(), m2=String(pm.getMonth()+1).padStart(2,'0'); de = y2+'-'+m2+'-01'; ate = y2+'-'+m2+'-'+String(new Date(Y, M-1, 0).getDate()).padStart(2,'0'); }
   else if(periodo==='7') de = new Date(Date.now()-6*86400000).toLocaleString('sv-SE',{timeZone:'America/Sao_Paulo'}).slice(0,10);
   else if(periodo==='30') de = new Date(Date.now()-29*86400000).toLocaleString('sv-SE',{timeZone:'America/Sao_Paulo'}).slice(0,10);
   else if(periodo==='mes') de = hoje.slice(0,8)+'01';
@@ -102,8 +104,8 @@ function montar(){
     '<h1>🌻 Dashboard · Magazine Girassol <span class="badge">'+DASH_BUILD+'</span></h1>'+
     '<div class="sub">fonte: pedidos finalizados no checkout offline · <a href="'+MOD+'/painel">← voltar ao checkout</a></div>'+
     '<div class="chips" id="chips"></div>'+
-    '<div id="custom" style="display:none;margin:-4px 0 8px"><label class="mut">De <input type="date" id="pDe" onchange="pDe=this.value;render()"></label> '+
-    '<label class="mut">até <input type="date" id="pAte" onchange="pAte=this.value;render()"></label></div>'+
+    '<div id="custom" style="display:none;margin:-4px 0 8px"><label class="mut">De <input type="date" id="pDe" onclick="this.showPicker&&this.showPicker()" onchange="pDe=this.value;render()"></label> '+
+    '<label class="mut">até <input type="date" id="pAte" onclick="this.showPicker&&this.showPicker()" onchange="pAte=this.value;render()"></label></div>'+
     '<div id="cover" class="sub"></div>'+
     '<div class="cards" id="cards"></div>'+
     '<div class="sec"><h2>📈 Evolução por dia <span class="badge">azul = pedidos · verde = faturamento</span></h2><div class="diaschart" id="porDia"></div></div>'+
@@ -119,13 +121,13 @@ function montar(){
       '<div style="overflow-x:auto"><table id="projTab"></table></div><div id="projAviso"></div></div>'+
     '<div class="nota">Regras deste dashboard: datas no horário de São Paulo · kits contam pelo SKU do kit · '+
       'faturamento = total do pedido no Bling · margem = <b>bruta estimada</b> (preço − custo do cadastro Bling), '+
-      '<b>sem</b> frete e taxas de marketplace · só entram pedidos finalizados no checkout offline.</div>';
+      '<b>sem</b> frete e taxas de marketplace · só entram pedidos finalizados no checkout offline. <b>Comparando com o Jodda:</b> lá a data é a da VENDA aprovada no marketplace; aqui é a da EXPEDIÇÃO no checkout — e o "faturamento total" daqui inclui frete (use o card 🛍 produtos pra comparar).</div>';
   render();
 }
 
 function render(){
   // chips
-  const defs = [['dia','Hoje'],['7','7 dias'],['30','30 dias'],['mes','Mês'],['custom','Período…']];
+  const defs = [['dia','Hoje'],['ontem','Ontem'],['7','7 dias'],['30','30 dias'],['mes','Mês'],['mesant','Mês anterior'],['custom','Período…']];
   $('chips').innerHTML = defs.map(([k,l])=>'<button class="chip'+(periodo===k?' on':'')+'" onclick="setPeriodo(\''+k+'\')">'+l+'</button>').join('');
   $('custom').style.display = periodo==='custom' ? '' : 'none';
 
@@ -133,7 +135,7 @@ function render(){
   const PER = DADOS.filter(h => { if(!h.conferido_em) return false; const d = diaSP(h.conferido_em); return d>=de && d<=ate; });
 
   // agregados
-  let fat=0, comValor=0, semValor=0, flex=0, unid=0, itensTot=0, itensComValor=0, comUF=0;
+  let fat=0, comValor=0, semValor=0, flex=0, unid=0, itensTot=0, itensComValor=0, comUF=0, fatProd=0, freteEmb=0, fretePed=0;
   const porDia={}, porCanal={}, porProd={}, porUF={};
   PER.forEach(h=>{
     const d = diaSP(h.conferido_em);
@@ -146,13 +148,16 @@ function render(){
     if(h.valor!=null && isFinite(Number(h.valor))){ const v=Number(h.valor); fat+=v; comValor++; porDia[d].fat+=v; porCanal[mk].fat+=v; porCanal[mk].comValor++; }
     else semValor++;
     if(h.uf){ comUF++; const u=String(h.uf).toUpperCase(); if(!porUF[u]) porUF[u]={ped:0,fat:0}; porUF[u].ped++; if(h.valor!=null) porUF[u].fat+=Number(h.valor)||0; }
+    let _iv=0, _todos=true, _nIt=0;
     (h.itens||[]).forEach(it=>{
-      const q=Number(it.qtd||1); unid+=q; itensTot++;
+      const q=Number(it.qtd||1); unid+=q; itensTot++; _nIt++;
       const sku=it.sku||'(sem SKU)';
       if(!porProd[sku]) porProd[sku]={sku,desc:it.descricao||'',qtd:0,fat:0,comV:0};
       porProd[sku].qtd+=q;
-      if(it.valor_total!=null && isFinite(Number(it.valor_total))){ porProd[sku].fat+=Number(it.valor_total); porProd[sku].comV++; itensComValor++; }
+      if(it.valor_total!=null && isFinite(Number(it.valor_total))){ const vt=Number(it.valor_total); porProd[sku].fat+=vt; porProd[sku].comV++; itensComValor++; _iv+=vt; } else _todos=false;
     });
+    fatProd += _iv;
+    if(h.valor!=null && _nIt && _todos){ const fr = Number(h.valor)-_iv; if(isFinite(fr)){ freteEmb += fr; fretePed++; } }
   });
   const ticket = comValor ? fat/comValor : 0;
 
@@ -167,7 +172,9 @@ function render(){
   // cards
   $('cards').innerHTML =
     '<div class="cardk"><div class="v">'+fmtN(PER.length)+'</div><div class="l">pedidos</div></div>'+
-    '<div class="cardk"><div class="v ok">'+fmtBRL(fat)+'</div><div class="l">faturamento'+(semValor?' (parcial)':'')+'</div></div>'+
+    '<div class="cardk"><div class="v ok">'+fmtBRL(fat)+'</div><div class="l">faturamento total (pedidos, c/ frete)'+(semValor?' · parcial':'')+'</div></div>'+
+    '<div class="cardk"><div class="v ok">'+fmtBRL(fatProd)+'</div><div class="l">🛍 produtos (sem frete) — comparável ao Jodda</div></div>'+
+    '<div class="cardk"><div class="v">'+(fretePed?fmtBRL(freteEmb):'—')+'</div><div class="l">🚚 frete embutido (est., '+fretePed+' ped.)</div></div>'+
     '<div class="cardk"><div class="v">'+fmtBRL(ticket)+'</div><div class="l">ticket médio</div></div>'+
     '<div class="cardk"><div class="v">'+fmtN(unid)+'</div><div class="l">unidades</div></div>'+
     '<div class="cardk"><div class="v warn">⚡ '+fmtN(flex)+'</div><div class="l">FLEX enviados</div></div>'+
