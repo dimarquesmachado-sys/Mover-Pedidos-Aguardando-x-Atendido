@@ -169,10 +169,10 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC) {
       if (locC) base.forEach(c => { if (c.sku) locC[c.sku] = c.loc || locC[c.sku] || ''; }); // localização dos componentes
       // qtd final = qtd do componente no kit × qtd do kit no pedido
       const componentes = base.map(c => ({ sku: c.sku, ean: c.ean, descricao: c.descricao, img: c.img, qtd: c.qtd * (itemQty || 1) }));
-      itens.push({ sku, ean: eanItem, descricao: descr, img: imgItem, qtd: itemQty, tipo: 'kit', componentes });
+      itens.push({ sku, ean: eanItem, descricao: descr, img: imgItem, qtd: itemQty, valor_unit: (it.valor != null ? Number(it.valor) : null), valor_total: (it.valor != null ? Number(it.valor) * (itemQty || 1) : null), tipo: 'kit', componentes });
     } else {
       const tipo = (prod && prod.variacao && prod.variacao.produtoPai) ? 'variacao' : 'simples';
-      itens.push({ sku, ean: eanItem, descricao: descr, img: imgItem, qtd: itemQty, tipo });
+      itens.push({ sku, ean: eanItem, descricao: descr, img: imgItem, qtd: itemQty, valor_unit: (it.valor != null ? Number(it.valor) : null), valor_total: (it.valor != null ? Number(it.valor) * (itemQty || 1) : null), tipo });
     }
   }
 
@@ -273,6 +273,8 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC) {
     situacao_id: (ped.situacao && ped.situacao.id) || SIT_ATENDIDO,
     cliente: (ped.contato && ped.contato.nome) || '',
     total: (ped.total != null ? Number(ped.total) : null),   // valor total do pedido (p/ faturamento no relatório)
+    uf: (ped.transporte && ped.transporte.etiqueta && ped.transporte.etiqueta.uf) || null,           // estado do destinatário (dashboard: vendas por UF)
+    municipio: (ped.transporte && ped.transporte.etiqueta && ped.transporte.etiqueta.municipio) || null,
     nf,
     itens,
     tem_nf: !!nf,
