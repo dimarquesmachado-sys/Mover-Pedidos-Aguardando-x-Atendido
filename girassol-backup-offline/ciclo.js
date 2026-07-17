@@ -127,7 +127,7 @@ async function detalhePedido(id) {
   return data && data.data;
 }
 
-async function cachearPedido(ped, cacheEan, nfs, kitCache, locC) {
+async function cachearPedido(ped, cacheEan, nfs, kitCache, locC, nfCtx) {
   const id  = ped.id;
   const dir = path.join(CACHE_DIR, String(id));
   ensureDir(dir);
@@ -176,8 +176,22 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC) {
     }
   }
 
-  let nf = acharNFnaLista(id, nfs || []);
-  if (!nf || !nf.id) { nf = await nfDoPedido(id); await sleep(PAUSA_MS); }   // fora do range do lote → acha pelo link direto pedido→NF
+  let nf = acharNFnaLista(id, nfs || [], { numeroLoja: ped.numeroLoja, usadasIds: nfCtx && nfCtx.usadasIds, donoPorNumero: nfCtx && nfCtx.donoPorNumero });
+  if (nf && nf._ambigua) { console.log(`[NF-CASA] pedido ${id}: faixa ambígua (NF disputada por outro pedido) → usando vínculo direto`); nf = null; }
+  if (!nf || !nf.id) { nf = await nfDoPedido(id); await sleep(PAUSA_MS); }   // fora do range do lote (ou ambíguo) → vínculo direto pedido→NF
+  if (nf && nf.id && nfCtx) {
+    if (nfCtx.usadasIds) nfCtx.usadasIds.add(Number(nf.id));
+    if (nfCtx.donoPorNumero && nf.numero != null) nfCtx.donoPorNumero[String(nf.numero)] = String(id);
+  }
+  // AUTO-CURA: se a NF deste pedido MUDOU vs cache anterior, DANFE/nf-simp antigas são de OUTRA nota → descarta p/ re-baixar as certas
+  try {
+    const _snapAnt = readJson(path.join(dir, 'pedido.json'), null);
+    const _antId = _snapAnt && _snapAnt.nf && _snapAnt.nf.id;
+    if (_antId && (!nf || Number(nf.id) !== Number(_antId))) {
+      for (const fdel of ['danfe.pdf', 'nf-simp.json']) { try { fs.unlinkSync(path.join(dir, fdel)); } catch (e) {} }
+      console.log(`[NF-CASA] pedido ${id}: NF corrigida (${_antId} → ${(nf && nf.id) || 'nenhuma'}) — DANFE antiga descartada`);
+    }
+  } catch (e) {}
 
   const _etqPath = path.join(dir, `etiqueta.${ETIQ_FORMATO.toLowerCase()}`);
   const _etqPdfPath = path.join(dir, 'etiqueta.pdf');
@@ -349,13 +363,19 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
       }
     }
 
+    // ordem ASC por id: essencial p/ a exclusividade casar 1º pedido ↔ 1ª NF, 2º ↔ 2ª... (Bling emite em sequência)
+    aProcessar.sort((a, b) => Number(a.id) - Number(b.id));
+    // contexto anti-duplicidade do casamento NF×pedido (uma NF nunca em dois pedidos)
+    const nfCtx = { usadasIds: new Set(), donoPorNumero: {} };
+    for (const [mid, mm] of Object.entries(man)) { if (mm && mm.nf_numero != null) nfCtx.donoPorNumero[String(mm.nf_numero)] = String(mid); }
+
     for (const ped of aProcessar) {
       const id = ped.id;
       const ja = man[id];
       try {
         const det = await detalhePedido(id); await sleep(PAUSA_MS);
         if (!det) { erros++; continue; }
-        const snap = await cachearPedido(det, cacheEan, nfs, kitCache, locC);
+        const snap = await cachearPedido(det, cacheEan, nfs, kitCache, locC, nfCtx);
         man[id] = {
           numero: snap.numero, marketplace: snap.marketplace,
           servico: snap.servico || '', flex: !!snap.flex,
