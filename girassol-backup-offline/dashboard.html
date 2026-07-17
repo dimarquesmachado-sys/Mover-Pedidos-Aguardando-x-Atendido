@@ -3,74 +3,127 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Dashboard · Girassol</title>
+<title>Inteligência de Vendas · Girassol</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
-  :root{--bg:#0f172a;--card:#1e293b;--line:#334155;--tx:#e2e8f0;--mut:#94a3b8;--ac:#2563eb;--ok:#10b981;--warn:#f59e0b;--bad:#ef4444}
+  :root{
+    --bg:#0a0e1a; --bg2:#0d1326; --card:#131a30; --card2:#182138;
+    --line:#232d4a; --line2:#2d3a5e;
+    --tx:#e7ecf6; --mut:#8b96b3; --dim:#5a6485;
+    --ac:#6366f1; --ac2:#818cf8; --ok:#22c55e; --ok2:#4ade80;
+    --warn:#f59e0b; --bad:#ef4444; --cy:#22d3ee;
+    --r:14px;
+  }
   *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--tx);font:14px/1.45 system-ui,Segoe UI,Roboto,sans-serif;padding:14px}
-  a{color:#60a5fa;text-decoration:none}
-  .wrap{max-width:1100px;margin:0 auto}
-  h1{font-size:19px;margin:0 0 2px}
-  .sub{color:var(--mut);font-size:12px;margin-bottom:14px}
-  .chips{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0}
-  .chip{background:var(--card);border:1px solid var(--line);color:var(--mut);border-radius:999px;padding:7px 14px;font-size:13px;cursor:pointer}
-  .chip.on{border-color:var(--ac);color:var(--tx);background:#13243f}
-  .cards{display:flex;gap:10px;flex-wrap:wrap;margin:12px 0}
-  .cardk{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px;flex:1;min-width:140px}
-  .cardk .v{font-size:22px;font-weight:800}
-  .cardk .l{font-size:12px;color:var(--mut)}
-  .sec{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin:12px 0}
-  .sec h2{font-size:15px;margin:0 0 10px}
-  table{width:100%;border-collapse:collapse;font-size:13px}
-  th{color:var(--mut);text-align:left;font-weight:600;padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
-  td{padding:6px 8px;border-bottom:1px solid #24324a;vertical-align:top}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:radial-gradient(1200px 500px at 70% -100px,#151d3a 0%,var(--bg) 55%);color:var(--tx);
+       font:14px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Inter,sans-serif;padding:0 16px 40px}
+  a{color:var(--ac2);text-decoration:none}
+  .wrap{max-width:1180px;margin:0 auto}
+
+  /* header fixo */
+  .hdr{position:sticky;top:0;z-index:50;background:linear-gradient(180deg,rgba(10,14,26,.97) 70%,rgba(10,14,26,0));
+       padding:14px 0 10px;margin:0 -16px;padding-left:16px;padding-right:16px}
+  .hrow{max-width:1180px;margin:0 auto;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  h1{font-size:17px;font-weight:800;margin:0;letter-spacing:-.02em;display:flex;align-items:center;gap:8px}
+  h1 .logo{width:30px;height:30px;border-radius:9px;background:linear-gradient(135deg,#fbbf24,#f59e0b);
+           display:inline-flex;align-items:center;justify-content:center;font-size:16px}
+  .badge{font-size:10px;font-weight:700;color:var(--dim);border:1px solid var(--line);border-radius:5px;padding:1px 6px;letter-spacing:.05em}
+  .hlinks{margin-left:auto;font-size:12px;color:var(--mut)}
+
+  .chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+  .chip{background:var(--card);border:1px solid var(--line);color:var(--mut);border-radius:999px;
+        padding:7px 15px;font-size:12.5px;font-weight:600;cursor:pointer;transition:all .15s}
+  .chip:hover{border-color:var(--line2);color:var(--tx)}
+  .chip.on{border-color:var(--ac);color:#fff;background:linear-gradient(135deg,#1e2650,#232d5e);box-shadow:0 0 0 1px var(--ac) inset}
+  .custom{display:none;gap:8px;margin-top:8px;align-items:center;flex-wrap:wrap;font-size:12.5px;color:var(--mut)}
+  input[type=date]{background:var(--card);border:1px solid var(--line);color:var(--tx);border-radius:9px;padding:7px 10px;font-size:12.5px}
+
+  .cover{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px;font-size:11.5px;color:var(--mut)}
+  .pill{border:1px solid var(--line);border-radius:999px;padding:3px 10px;background:var(--card)}
+  .pill b{font-weight:800}
+  .pill.g b{color:var(--ok)} .pill.w{border-color:#f59e0b44} .pill.w b{color:var(--warn)}
+
+  /* KPIs */
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(158px,1fr));gap:12px;margin:18px 0}
+  .kpi{background:linear-gradient(160deg,var(--card2),var(--card));border:1px solid var(--line);border-radius:var(--r);
+       padding:14px 16px;position:relative;overflow:hidden;transition:transform .15s,border-color .15s}
+  .kpi:hover{transform:translateY(-2px);border-color:var(--line2)}
+  .kpi::before{content:'';position:absolute;inset:0 0 auto 0;height:3px;background:var(--kc,var(--ac));opacity:.9}
+  .kpi .ic{font-size:15px;opacity:.9}
+  .kpi .l{font-size:11px;color:var(--mut);font-weight:600;letter-spacing:.02em;margin-top:2px}
+  .kpi .v{font-size:21px;font-weight:800;letter-spacing:-.02em;margin-top:3px;font-variant-numeric:tabular-nums}
+  .kpi .s{font-size:10.5px;color:var(--dim);margin-top:2px}
+
+  /* seções */
+  .sec{background:linear-gradient(170deg,var(--card2),var(--card));border:1px solid var(--line);border-radius:var(--r);
+       padding:18px;margin:14px 0}
+  .sec h2{font-size:14px;font-weight:800;margin:0 0 14px;letter-spacing:-.01em;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .sec h2 .hint{font-size:10.5px;font-weight:600;color:var(--dim);margin-left:auto}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:860px){ .grid2{grid-template-columns:1fr} }
+  .chartbox{position:relative;height:230px}
+
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  th{color:var(--mut);text-align:left;font-weight:700;font-size:11px;letter-spacing:.04em;text-transform:uppercase;
+     padding:8px 10px;border-bottom:1px solid var(--line2);white-space:nowrap;user-select:none}
+  th.sort{cursor:pointer} th.sort:hover{color:var(--tx)}
+  td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:middle}
+  tbody tr{transition:background .12s}
+  tbody tr:hover{background:#ffffff08}
   tr:last-child td{border-bottom:none}
   .num{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
-  .bar{background:#24324a;border-radius:4px;height:8px;overflow:hidden}
-  .bar>i{display:block;height:8px;background:var(--ac)}
-  .bar>i.g{background:var(--ok)}
-  .mut{color:var(--mut)}.ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}
-  .tabs{display:flex;gap:6px;margin-bottom:10px}
-  .tabs .chip.on{border-color:var(--ok);background:#0c2a20;color:var(--tx)}
-  .diaschart{display:flex;align-items:flex-end;gap:3px;height:120px;padding-top:6px;overflow-x:auto}
-  .diacol{display:flex;flex-direction:column;align-items:center;gap:3px;min-width:26px;flex:1}
-  .diacol .b{width:100%;max-width:30px;background:var(--ac);border-radius:3px 3px 0 0;min-height:2px}
-  .diacol .f{width:100%;max-width:30px;background:var(--ok);border-radius:3px 3px 0 0;min-height:0}
-  .diacol .d{font-size:10px;color:var(--mut);white-space:nowrap}
-  .aviso{font-size:12px;color:var(--warn);margin-top:8px}
-  .nota{font-size:11px;color:var(--mut);margin-top:10px}
-  .btn{background:var(--ac);border:none;color:#fff;border-radius:9px;padding:9px 14px;font-size:13px;font-weight:700;cursor:pointer}
-  .btn[disabled]{opacity:.5;cursor:default}
-  .badge{display:inline-block;background:#13243f;border:1px solid var(--line);border-radius:6px;padding:1px 7px;font-size:11px;color:var(--mut)}
-  .loginbox{max-width:460px;margin:60px auto;text-align:center}
-  input[type=date]{background:#0b1220;border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:6px 8px}
-  @media(max-width:720px){ body{padding:8px} .cardk{min-width:46%} th,td{padding:5px 6px} }
+  .bar{background:#ffffff10;border-radius:99px;height:7px;overflow:hidden;min-width:60px}
+  .bar>i{display:block;height:7px;border-radius:99px;background:linear-gradient(90deg,var(--ac),var(--ac2))}
+  .bar>i.g{background:linear-gradient(90deg,#16a34a,var(--ok2))}
+  .rank{display:inline-flex;width:24px;height:24px;border-radius:8px;align-items:center;justify-content:center;
+        font-size:11px;font-weight:800;background:#ffffff0d;color:var(--mut)}
+  .rank.r1{background:linear-gradient(135deg,#fbbf24,#d97706);color:#1a1204}
+  .rank.r2{background:linear-gradient(135deg,#e2e8f0,#94a3b8);color:#1e293b}
+  .rank.r3{background:linear-gradient(135deg,#f6ad7b,#c2703d);color:#2d1505}
+  .sku{font-weight:700} .desc{font-size:11px;color:var(--mut);max-width:330px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .mut{color:var(--mut)} .dim{color:var(--dim)} .ok{color:var(--ok)} .warn{color:var(--warn)} .bad{color:var(--bad)}
+  .cvg{font-size:10px;color:var(--warn);background:#f59e0b14;border:1px solid #f59e0b33;border-radius:5px;padding:1px 5px;margin-left:6px;white-space:nowrap}
+  .st{display:inline-block;font-size:10.5px;font-weight:700;border-radius:6px;padding:2px 8px}
+  .st.ok{background:#22c55e1a;color:var(--ok2);border:1px solid #22c55e33}
+  .st.w{background:#f59e0b1a;color:var(--warn);border:1px solid #f59e0b33}
+  .st.b{background:#ef44441a;color:#f87171;border:1px solid #ef444433}
+  .aviso{font-size:12px;color:var(--warn);margin-top:10px;background:#f59e0b0d;border:1px solid #f59e0b26;border-radius:9px;padding:8px 12px}
+  .nota{font-size:11px;color:var(--dim);margin-top:14px;line-height:1.6}
+  .btn{background:linear-gradient(135deg,var(--ac),#4f46e5);border:none;color:#fff;border-radius:10px;padding:9px 16px;
+       font-size:12.5px;font-weight:700;cursor:pointer;transition:filter .15s}
+  .btn:hover{filter:brightness(1.15)} .btn[disabled]{opacity:.5;cursor:default}
+  .loginbox{max-width:440px;margin:80px auto;text-align:center;background:var(--card);border:1px solid var(--line);
+            border-radius:16px;padding:40px 30px}
+  .skel{color:var(--dim);text-align:center;padding:30px}
+  ::-webkit-scrollbar{height:8px;width:8px} ::-webkit-scrollbar-thumb{background:var(--line2);border-radius:99px}
+  @media(max-width:720px){ body{padding:0 10px 30px} .sec{padding:14px} .desc{max-width:180px} .kpi .v{font-size:18px} }
 </style>
 </head>
 <body>
-<div class="wrap" id="app">
-  <div class="loginbox" id="carregando">⏳ carregando dados…</div>
-</div>
+<div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd3';
-let DADOS = [];                    // conferidos (do /historico)
+const DASH_BUILD = 'd4';
+let DADOS = [];
 let periodo = 'mes', pDe = '', pAte = '';
-let sortProd = { col: 'fat', dir: -1 };    // ordenação clicável do Top produtos
-let sortProj = { col: 'qtd14', dir: -1 };  // ordenação clicável da Projeção
-function setSortProd(c){ sortProd = { col: c, dir: (sortProd.col===c ? -sortProd.dir : -1) }; render(); }
-function setSortProj(c){ sortProj = { col: c, dir: (sortProj.col===c ? -sortProj.dir : -1) }; renderProjecao(); }
-function seta(st,c){ return st.col===c ? (st.dir<0?' ↓':' ↑') : ''; }
-function cmpNull(a,b,dir){ const an=(a==null||!isFinite(a)), bn=(b==null||!isFinite(b)); if(an&&bn)return 0; if(an)return 1; if(bn)return -1; return (a-b)*dir; }
-let SKUINFO = {};                  // sku → {saldo, preco, custo}
-let skuInfoCarregado = false;
+let SKUINFO = {}, skuInfoCarregado = false, _skuLoading = false;
+let sortProd = { col: 'fat', dir: -1 };
+let sortProj = { col: 'qtd14', dir: -1 };
+let chPed = null, chFat = null;
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const fmtBRL = v => 'R$ ' + (Math.round(v*100)/100).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
-const fmtN = v => Number(v).toLocaleString('pt-BR');
+const BRL = v => 'R$ ' + (Math.round(v*100)/100).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+const BRLk = v => v>=1000 ? 'R$ '+(v/1000).toLocaleString('pt-BR',{maximumFractionDigits:1})+'k' : BRL(v);
+const N = v => Number(v).toLocaleString('pt-BR');
 const diaSP = iso => { try{ return new Date(iso).toLocaleString('sv-SE',{timeZone:'America/Sao_Paulo'}).slice(0,10); }catch(e){ return String(iso||'').slice(0,10); } };
 const hojeSP = () => new Date().toLocaleString('sv-SE',{timeZone:'America/Sao_Paulo'}).slice(0,10);
+const spDate = ms => new Date(ms).toLocaleString('sv-SE',{timeZone:'America/Sao_Paulo'}).slice(0,10);
+function setSortProd(c){ sortProd = { col:c, dir:(sortProd.col===c ? -sortProd.dir : -1) }; render(); }
+function setSortProj(c){ sortProj = { col:c, dir:(sortProj.col===c ? -sortProj.dir : -1) }; renderProjecao(); }
+const seta = (st,c)=> st.col===c ? (st.dir<0?' ↓':' ↑') : '';
+function cmpNull(a,b,dir){ const an=(a==null||!isFinite(a)), bn=(b==null||!isFinite(b)); if(an&&bn)return 0; if(an)return 1; if(bn)return -1; return (a-b)*dir; }
 
 async function boot(){
   try{
@@ -85,20 +138,22 @@ async function boot(){
   }
 }
 function semLogin(){
-  $('app').innerHTML = '<div class="loginbox">🔒 Este dashboard usa a sessão de <b>admin</b> do checkout.<br><br>'+
+  $('app').innerHTML = '<div class="loginbox">🔒 <b>Sessão de admin necessária</b><br><span class="mut" style="font-size:12px">o dashboard usa o login do checkout</span><br><br>'+
     '<a href="'+MOD+'/painel"><button class="btn">Fazer login no painel</button></a>'+
-    '<div class="nota">depois de logar, volte aqui e recarregue</div></div>';
+    '<div class="nota">depois de logar, volte e recarregue esta página</div></div>';
 }
 
 function intervalo(){
   const hoje = hojeSP();
   let de, ate = hoje;
   if(periodo==='dia') de = hoje;
-  else if(periodo==='ontem'){ const o = new Date(Date.now()-86400000).toLocaleString('sv-SE',{timeZone:'America/Sao_Paulo'}).slice(0,10); de = o; ate = o; }
-  else if(periodo==='mesant'){ const [Y,M] = hoje.split('-').map(Number); const pm = new Date(Y, M-1-1, 1); const y2=pm.getFullYear(), m2=String(pm.getMonth()+1).padStart(2,'0'); de = y2+'-'+m2+'-01'; ate = y2+'-'+m2+'-'+String(new Date(Y, M-1, 0).getDate()).padStart(2,'0'); }
-  else if(periodo==='7') de = new Date(Date.now()-6*86400000).toLocaleString('sv-SE',{timeZone:'America/Sao_Paulo'}).slice(0,10);
-  else if(periodo==='30') de = new Date(Date.now()-29*86400000).toLocaleString('sv-SE',{timeZone:'America/Sao_Paulo'}).slice(0,10);
+  else if(periodo==='ontem'){ const o = spDate(Date.now()-86400000); de=o; ate=o; }
+  else if(periodo==='7') de = spDate(Date.now()-6*86400000);
+  else if(periodo==='30') de = spDate(Date.now()-29*86400000);
   else if(periodo==='mes') de = hoje.slice(0,8)+'01';
+  else if(periodo==='mesant'){ const [Y,M]=hoje.split('-').map(Number); const pm=new Date(Y,M-2,1);
+    const y2=pm.getFullYear(), m2=String(pm.getMonth()+1).padStart(2,'0');
+    de=y2+'-'+m2+'-01'; ate=y2+'-'+m2+'-'+String(new Date(Y,M-1,0).getDate()).padStart(2,'0'); }
   else { de = pDe || '2000-01-01'; ate = pAte || hoje; }
   return {de, ate};
 }
@@ -106,40 +161,45 @@ function setPeriodo(p){ periodo=p; render(); }
 
 function montar(){
   $('app').innerHTML =
-    '<h1>🌻 Dashboard · Magazine Girassol <span class="badge">'+DASH_BUILD+'</span></h1>'+
-    '<div class="sub">fonte: pedidos finalizados no checkout offline · <a href="'+MOD+'/painel">← voltar ao checkout</a></div>'+
-    '<div class="chips" id="chips"></div>'+
-    '<div id="custom" style="display:none;margin:-4px 0 8px"><label class="mut">De <input type="date" id="pDe" onclick="this.showPicker&&this.showPicker()" onchange="pDe=this.value;render()"></label> '+
-    '<label class="mut">até <input type="date" id="pAte" onclick="this.showPicker&&this.showPicker()" onchange="pAte=this.value;render()"></label></div>'+
-    '<div id="cover" class="sub"></div>'+
-    '<div class="cards" id="cards"></div>'+
-    '<div class="sec"><h2>📈 Pedidos por dia</h2><div class="diaschart" id="porDiaPed"></div></div>'+
-    '<div class="sec"><h2>💰 Faturamento por dia</h2><div class="diaschart" id="porDiaFat"></div></div>'+
-    '<div class="sec"><h2>🛒 Por canal</h2><div style="overflow-x:auto"><table id="porCanal"></table></div></div>'+
-    '<div class="sec"><h2>🏆 Top produtos <span class="badge">clique nos títulos p/ ordenar ↑↓</span></h2>'+
-      '<div style="overflow-x:auto"><table id="topProd"></table></div><div id="topProdAviso"></div></div>'+
-    '<div class="sec"><h2>🗺️ Por estado (UF)</h2><div style="overflow-x:auto"><table id="porUF"></table></div><div id="ufAviso"></div></div>'+
-    '<div class="sec"><h2>📦 Projeção de estoque & margem <span class="badge">ritmo: 14 dias · clique nos títulos p/ ordenar</span></h2>'+
-      '<div id="projBox"><span class="mut" id="projStatus">⏳ carregando saldo/preço/custo do Bling automaticamente… (~30-60s na 1ª vez)</span> '+
+  '<div class="hdr"><div class="hrow">'+
+    '<h1><span class="logo">🌻</span> Inteligência de Vendas · Girassol <span class="badge">'+DASH_BUILD+'</span></h1>'+
+    '<div class="hlinks"><a href="'+MOD+'/painel">← checkout</a></div>'+
+  '</div>'+
+  '<div class="wrap"><div class="chips" id="chips"></div>'+
+  '<div class="custom" id="custom">De <input type="date" id="pDe" onclick="this.showPicker&&this.showPicker()" onchange="pDe=this.value;render()"> '+
+  'até <input type="date" id="pAte" onclick="this.showPicker&&this.showPicker()" onchange="pAte=this.value;render()"></div>'+
+  '<div class="cover" id="cover"></div></div></div>'+
+  '<div class="wrap">'+
+    '<div class="kpis" id="kpis"></div>'+
+    '<div class="grid2">'+
+      '<div class="sec"><h2>📈 Pedidos por dia</h2><div class="chartbox"><canvas id="cPed"></canvas></div></div>'+
+      '<div class="sec"><h2>💰 Faturamento por dia</h2><div class="chartbox"><canvas id="cFat"></canvas></div></div>'+
+    '</div>'+
+    '<div class="sec"><h2>🛒 Por canal</h2><div style="overflow-x:auto"><table id="tCanal"></table></div></div>'+
+    '<div class="sec"><h2>🏆 Top produtos <span class="hint">clique nos títulos p/ ordenar ↑↓ · faturamento = SOMA de todos os pedidos do SKU no período</span></h2>'+
+      '<div style="overflow-x:auto"><table id="tProd"></table></div><div id="prodAviso"></div></div>'+
+    '<div class="sec"><h2>🗺️ Vendas por estado</h2><div style="overflow-x:auto"><table id="tUF"></table></div><div id="ufAviso"></div></div>'+
+    '<div class="sec"><h2>📦 Projeção de estoque &amp; margem <span class="hint">ritmo dos últimos 14 dias · clique p/ ordenar</span></h2>'+
+      '<div id="projBox" style="margin-bottom:10px;font-size:12px"><span class="mut" id="projStatus">⏳ carregando saldo/preço/custo do Bling… (~30-60s na 1ª vez)</span> '+
       '<button class="btn" id="btnProj" onclick="carregarSkuInfo()" style="display:none">↻ recarregar do Bling</button></div>'+
-      '<div style="overflow-x:auto"><table id="projTab"></table></div><div id="projAviso"></div></div>'+
-    '<div class="nota">Regras deste dashboard: datas no horário de São Paulo · kits contam pelo SKU do kit · '+
-      'faturamento = total do pedido no Bling · margem = <b>bruta estimada</b> (preço − custo do cadastro Bling), '+
-      '<b>sem</b> frete e taxas de marketplace · só entram pedidos finalizados no checkout offline. <b>Comparando com o Jodda:</b> lá a data é a da VENDA aprovada no marketplace; aqui é a da EXPEDIÇÃO no checkout — e o "faturamento total" daqui inclui frete (use o card 🛍 produtos pra comparar).</div>';
+      '<div style="overflow-x:auto"><table id="tProj"></table></div><div id="projAviso"></div></div>'+
+    '<div class="nota"><b>Regras deste painel</b> · datas no horário de São Paulo · kits contam pelo SKU do kit · '+
+      'faturamento por produto = soma de (preço do item × qtd) em CADA pedido do período (preços diferentes por anúncio/canal entram cada um com o seu) · '+
+      'margem = bruta estimada (venda − custo do cadastro Bling), sem frete e sem taxas de marketplace · '+
+      'só entram pedidos finalizados no checkout offline. <b>vs Jodda:</b> lá conta a data da VENDA; aqui a da EXPEDIÇÃO — e use o card 🛍 produtos p/ comparar (o total c/ frete inclui frete embutido).</div>'+
+  '</div>';
   render();
-  setTimeout(()=>{ if(!skuInfoCarregado) carregarSkuInfo(); }, 500);   // auto-carrega saldo/custo do Bling (sem precisar clicar)
+  setTimeout(()=>{ if(!skuInfoCarregado) carregarSkuInfo(); }, 400);
 }
 
 function render(){
-  // chips
   const defs = [['dia','Hoje'],['ontem','Ontem'],['7','7 dias'],['30','30 dias'],['mes','Mês'],['mesant','Mês anterior'],['custom','Período…']];
   $('chips').innerHTML = defs.map(([k,l])=>'<button class="chip'+(periodo===k?' on':'')+'" onclick="setPeriodo(\''+k+'\')">'+l+'</button>').join('');
-  $('custom').style.display = periodo==='custom' ? '' : 'none';
+  $('custom').style.display = periodo==='custom' ? 'flex' : 'none';
 
   const {de, ate} = intervalo();
   const PER = DADOS.filter(h => { if(!h.conferido_em) return false; const d = diaSP(h.conferido_em); return d>=de && d<=ate; });
 
-  // agregados
   let fat=0, comValor=0, semValor=0, flex=0, unid=0, itensTot=0, itensComValor=0, comUF=0, fatProd=0, freteEmb=0, fretePed=0;
   const porDia={}, porCanal={}, porProd={}, porUF={};
   PER.forEach(h=>{
@@ -157,86 +217,112 @@ function render(){
     (h.itens||[]).forEach(it=>{
       const q=Number(it.qtd||1); unid+=q; itensTot++; _nIt++;
       const sku=it.sku||'(sem SKU)';
-      if(!porProd[sku]) porProd[sku]={sku,desc:it.descricao||'',qtd:0,fat:0,comV:0};
+      if(!porProd[sku]) porProd[sku]={sku,desc:it.descricao||'',qtd:0,fat:0,qtdV:0};
       porProd[sku].qtd+=q;
-      if(it.valor_total!=null && isFinite(Number(it.valor_total))){ const vt=Number(it.valor_total); porProd[sku].fat+=vt; porProd[sku].comV++; itensComValor++; _iv+=vt; } else _todos=false;
+      if(it.valor_total!=null && isFinite(Number(it.valor_total))){ const vt=Number(it.valor_total); porProd[sku].fat+=vt; porProd[sku].qtdV+=q; itensComValor++; _iv+=vt; }
+      else _todos=false;
     });
     fatProd += _iv;
-    if(h.valor!=null && _nIt && _todos){ const fr = Number(h.valor)-_iv; if(isFinite(fr)){ freteEmb += fr; fretePed++; } }
+    if(h.valor!=null && _nIt && _todos){ const fr=Number(h.valor)-_iv; if(isFinite(fr)){ freteEmb+=fr; fretePed++; } }
   });
   const ticket = comValor ? fat/comValor : 0;
-
-  // cobertura
   const pc = (a,b)=> b? Math.round(a/b*100) : 0;
-  $('cover').innerHTML = 'Período <b>'+de+'</b> a <b>'+ate+'</b> · cobertura: '+
-    '<span class="'+(pc(comValor,PER.length)>=95?'ok':'warn')+'">valor '+pc(comValor,PER.length)+'%</span> · '+
-    '<span class="'+(pc(itensComValor,itensTot)>=95?'ok':'warn')+'">valor/item '+pc(itensComValor,itensTot)+'%</span> · '+
-    '<span class="'+(pc(comUF,PER.length)>=95?'ok':'warn')+'">UF '+pc(comUF,PER.length)+'%</span>'+
-    ((semValor||itensTot-itensComValor||PER.length-comUF)?' — <span class="mut">rode os backfills p/ completar o retroativo</span>':'');
+  const cVal = pc(comValor,PER.length), cItem = pc(itensComValor,itensTot), cUF = pc(comUF,PER.length);
 
-  // cards
-  $('cards').innerHTML =
-    '<div class="cardk"><div class="v">'+fmtN(PER.length)+'</div><div class="l">pedidos</div></div>'+
-    '<div class="cardk"><div class="v ok">'+fmtBRL(fat)+'</div><div class="l">faturamento total (pedidos, c/ frete)'+(semValor?' · parcial':'')+'</div></div>'+
-    '<div class="cardk"><div class="v ok">'+fmtBRL(fatProd)+'</div><div class="l">🛍 produtos (sem frete) — comparável ao Jodda</div></div>'+
-    '<div class="cardk"><div class="v">'+(fretePed?fmtBRL(freteEmb):'—')+'</div><div class="l">🚚 frete embutido (est., '+fretePed+' ped.)</div></div>'+
-    '<div class="cardk"><div class="v">'+fmtBRL(ticket)+'</div><div class="l">ticket médio</div></div>'+
-    '<div class="cardk"><div class="v">'+fmtN(unid)+'</div><div class="l">unidades</div></div>'+
-    '<div class="cardk"><div class="v warn">⚡ '+fmtN(flex)+'</div><div class="l">FLEX enviados</div></div>'+
-    '<div class="cardk" id="cardMargem"><div class="v mut">—</div><div class="l">margem bruta (carregue custos ↓)</div></div>';
+  $('cover').innerHTML =
+    '<span class="dim">'+de+' → '+ate+'</span>'+
+    '<span class="pill '+(cVal>=95?'g':'w')+'">valor <b>'+cVal+'%</b></span>'+
+    '<span class="pill '+(cItem>=95?'g':'w')+'">valor/item <b>'+cItem+'%</b></span>'+
+    '<span class="pill '+(cUF>=95?'g':'w')+'">UF <b>'+cUF+'%</b></span>'+
+    ((cVal<95||cItem<95||cUF<95)?'<span class="warn" style="font-size:11px">← cobertura baixa: rode os backfills p/ o retroativo</span>':'');
 
-  // por dia — DOIS gráficos (pedidos | faturamento), cada um na sua escala
+  const kpi=(kc,ic,l,v,s)=>'<div class="kpi" style="--kc:'+kc+'"><span class="ic">'+ic+'</span><div class="l">'+l+'</div><div class="v">'+v+'</div>'+(s?'<div class="s">'+s+'</div>':'')+'</div>';
+  $('kpis').innerHTML =
+    kpi('var(--ac)','📦','Pedidos', N(PER.length), N(unid)+' unidades') +
+    kpi('var(--ok)','🛍','Faturamento produtos', BRL(fatProd), 'sem frete — comparável ao Jodda'+(cItem<95?' · <span class="warn">'+cItem+'% cobertura</span>':'')) +
+    kpi('var(--cy)','💰','Total dos pedidos', BRL(fat), 'com frete embutido'+(semValor?' · <span class="warn">'+semValor+' sem valor</span>':'')) +
+    kpi('#a78bfa','🚚','Frete embutido (est.)', fretePed?BRL(freteEmb):'—', fretePed?('sobre '+N(fretePed)+' pedidos 100% valorados'):'aguardando cobertura') +
+    kpi('var(--warn)','🎯','Ticket médio', BRL(ticket), 'por pedido (total c/ frete)') +
+    kpi('#f97316','⚡','FLEX enviados', N(flex), 'confronto c/ motoboy') +
+    '<div class="kpi" id="kMargem" style="--kc:var(--ok)"><span class="ic">📊</span><div class="l">Margem bruta 14d</div><div class="v dim">—</div><div class="s">carregando custos do Bling…</div></div>';
+
+  // gráficos
   const dias = Object.keys(porDia).sort();
-  const maxP = Math.max(1,...dias.map(d=>porDia[d].ped));
-  const maxF = Math.max(1,...dias.map(d=>porDia[d].fat));
-  const rot = d => d.slice(8,10)+'/'+d.slice(5,7);
-  $('porDiaPed').innerHTML = dias.map(d=>{const o=porDia[d];
-    return '<div class="diacol" title="'+d+' · '+o.ped+' pedido(s)"><div class="b" style="height:'+Math.max(2,Math.round(o.ped/maxP*92))+'px"></div><div class="d">'+rot(d)+'</div></div>';
-  }).join('') || '<div class="mut">sem dados no período</div>';
-  $('porDiaFat').innerHTML = dias.map(d=>{const o=porDia[d];
-    return '<div class="diacol" title="'+d+' · '+fmtBRL(o.fat)+'"><div class="f" style="height:'+Math.max(2,Math.round(o.fat/maxF*92))+'px"></div><div class="d">'+rot(d)+'</div></div>';
-  }).join('') || '<div class="mut">sem dados no período</div>';
+  const labels = dias.map(d=>d.slice(8,10)+'/'+d.slice(5,7));
+  desenharCharts(labels, dias.map(d=>porDia[d].ped), dias.map(d=>Math.round(porDia[d].fat*100)/100));
 
   // por canal
   const canais = Object.keys(porCanal).sort((a,b)=>porCanal[b].ped-porCanal[a].ped);
-  const NOME = {mercadolivre:'Mercado Livre',shopee:'Shopee',magalu:'Magalu',amazon:'Amazon',tiktok:'TikTok',madeira:'MadeiraMadeira',leroy:'Leroy Merlin',outro:'Outro'};
-  $('porCanal').innerHTML = '<tr><th>Canal</th><th class="num">Pedidos</th><th class="num">%</th><th class="num">Faturamento</th><th class="num">Ticket</th><th class="num">⚡FLEX</th><th style="width:26%"></th></tr>'+
+  const NOME = {mercadolivre:'Mercado Livre',ml:'Mercado Livre',shopee:'Shopee',magalu:'Magalu',amazon:'Amazon',tiktok:'TikTok',madeira:'MadeiraMadeira',leroy:'Leroy Merlin',outro:'Outro'};
+  $('tCanal').innerHTML = '<tr><th>Canal</th><th class="num">Pedidos</th><th class="num">%</th><th class="num">Faturamento</th><th class="num">Ticket</th><th class="num">⚡ Flex</th><th style="width:24%"></th></tr>'+
     canais.map(mk=>{const c=porCanal[mk];const p=pc(c.ped,PER.length);
-      return '<tr><td>'+esc(NOME[mk]||mk)+'</td><td class="num">'+fmtN(c.ped)+'</td><td class="num">'+p+'%</td>'+
-      '<td class="num ok">'+(c.fat?fmtBRL(c.fat):'<span class="mut">—</span>')+'</td>'+
-      '<td class="num">'+(c.comValor?fmtBRL(c.fat/c.comValor):'<span class="mut">—</span>')+'</td>'+
-      '<td class="num">'+(c.flex||'')+'</td><td><div class="bar"><i style="width:'+p+'%"></i></div></td></tr>';}).join('');
+      return '<tr><td><b>'+esc(NOME[mk]||mk)+'</b></td><td class="num">'+N(c.ped)+'</td><td class="num dim">'+p+'%</td>'+
+      '<td class="num ok">'+(c.fat?BRL(c.fat):'<span class="dim">—</span>')+'</td>'+
+      '<td class="num">'+(c.comValor?BRL(c.fat/c.comValor):'<span class="dim">—</span>')+'</td>'+
+      '<td class="num">'+(c.flex?'<span class="warn">'+c.flex+'</span>':'<span class="dim">·</span>')+'</td>'+
+      '<td><div class="bar"><i style="width:'+p+'%"></i></div></td></tr>';}).join('');
 
-  // top produtos — ordenação clicável (↑↓) por unidades ou faturamento
+  // top produtos — FATURAMENTO = SOMA de todos os pedidos do SKU (preços diferentes por anúncio entram cada um com o seu)
   const prods = Object.values(porProd);
   const ord = prods.slice().sort((a,b)=> sortProd.col==='fat' ? cmpNull(a.fat||0,b.fat||0,sortProd.dir) : cmpNull(a.qtd,b.qtd,sortProd.dir));
   const fatTot = prods.reduce((s,p)=>s+p.fat,0)||1;
-  $('topProd').innerHTML = '<tr><th>#</th><th>Produto</th>'+
-    '<th class="num" style="cursor:pointer" onclick="setSortProd(\'qtd\')">Unid.'+seta(sortProd,'qtd')+'</th>'+
-    '<th class="num" style="cursor:pointer" onclick="setSortProd(\'fat\')">Faturamento'+seta(sortProd,'fat')+'</th>'+
-    '<th class="num">% fat.</th><th style="width:22%"></th></tr>'+
-    ord.slice(0,30).map((p,i)=>{const pf=Math.round(p.fat/fatTot*100);
-      return '<tr><td class="mut">'+(i+1)+'</td><td><b>'+esc(p.sku)+'</b><div class="mut" style="font-size:11px;max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(p.desc)+'</div></td>'+
-      '<td class="num">'+fmtN(p.qtd)+'</td><td class="num ok">'+(p.fat?fmtBRL(p.fat):'<span class="mut">—</span>')+'</td>'+
-      '<td class="num">'+(p.fat?pf+'%':'<span class="mut">—</span>')+'</td><td><div class="bar"><i class="g" style="width:'+pf+'%"></i></div></td></tr>';}).join('');
-  const semFat = prods.length - prods.filter(p=>p.fat>0).length;
-  $('topProdAviso').innerHTML = semFat ? '<div class="aviso">⚠️ '+semFat+' SKU(s) com faturamento incompleto (pedidos antigos sem valor por item) — o total do produto SOMA só o que tem valor. Complete o backfill de detalhes p/ o retroativo.</div>' : '';
+  $('tProd').innerHTML = '<tr><th>#</th><th>Produto</th>'+
+    '<th class="num sort" onclick="setSortProd(\'qtd\')">Unid.'+seta(sortProd,'qtd')+'</th>'+
+    '<th class="num sort" onclick="setSortProd(\'fat\')">Faturamento'+seta(sortProd,'fat')+'</th>'+
+    '<th class="num">% fat.</th><th style="width:18%"></th></tr>'+
+    ord.slice(0,50).map((p,i)=>{
+      const pf=Math.round(p.fat/fatTot*100);
+      const parcial = p.qtdV < p.qtd;   // nem todas as unidades têm valor gravado → sinaliza NA LINHA
+      const rk = i<3 ? 'rank r'+(i+1) : 'rank';
+      return '<tr><td><span class="'+rk+'">'+(i+1)+'</span></td>'+
+      '<td><div class="sku">'+esc(p.sku)+'</div><div class="desc">'+esc(p.desc)+'</div></td>'+
+      '<td class="num">'+N(p.qtd)+'</td>'+
+      '<td class="num ok">'+(p.fat?BRL(p.fat):'<span class="dim">—</span>')+(parcial&&p.fat?'<span class="cvg">'+N(p.qtdV)+'/'+N(p.qtd)+' un. c/ valor</span>':'')+'</td>'+
+      '<td class="num dim">'+(p.fat?pf+'%':'—')+'</td>'+
+      '<td><div class="bar"><i class="g" style="width:'+pf+'%"></i></div></td></tr>';
+    }).join('');
+  const semFatUn = prods.reduce((s,p)=>s+(p.qtd-p.qtdV),0);
+  $('prodAviso').innerHTML = semFatUn ? '<div class="aviso">⚠️ <b>'+N(semFatUn)+' unidades</b> vendidas no período ainda sem valor gravado (pedidos antigos) — o faturamento por produto soma só as valoradas (por isso a etiqueta âmbar "x/y un."). Complete o <b>backfill de detalhes</b> pra fechar o retroativo.</div>' : '';
 
   // por UF
   const ufs = Object.keys(porUF).sort((a,b)=>porUF[b].ped-porUF[a].ped);
-  $('porUF').innerHTML = '<tr><th>UF</th><th class="num">Pedidos</th><th class="num">%</th><th class="num">Faturamento</th><th style="width:30%"></th></tr>'+
-    ufs.slice(0,15).map(u=>{const c=porUF[u];const p=pc(c.ped,comUF||1);
-      return '<tr><td><b>'+esc(u)+'</b></td><td class="num">'+fmtN(c.ped)+'</td><td class="num">'+p+'%</td>'+
-      '<td class="num ok">'+(c.fat?fmtBRL(c.fat):'<span class="mut">—</span>')+'</td><td><div class="bar"><i style="width:'+p+'%"></i></div></td></tr>';}).join('')
-    || '<tr><td class="mut">nenhum pedido com UF no período</td></tr>';
-  $('ufAviso').innerHTML = (PER.length-comUF) ? '<div class="aviso">⚠️ '+(PER.length-comUF)+' pedido(s) sem UF — rode o backfill de detalhes p/ preencher o retroativo.</div>' : '';
+  $('tUF').innerHTML = '<tr><th>UF</th><th class="num">Pedidos</th><th class="num">%</th><th class="num">Faturamento</th><th style="width:26%"></th></tr>'+
+    (ufs.slice(0,15).map(u=>{const c=porUF[u];const p=pc(c.ped,comUF||1);
+      return '<tr><td><b>'+esc(u)+'</b></td><td class="num">'+N(c.ped)+'</td><td class="num dim">'+p+'%</td>'+
+      '<td class="num ok">'+(c.fat?BRL(c.fat):'<span class="dim">—</span>')+'</td>'+
+      '<td><div class="bar"><i style="width:'+p+'%"></i></div></td></tr>';}).join('')
+    || '<tr><td class="dim" colspan="5">nenhum pedido com UF no período</td></tr>');
+  $('ufAviso').innerHTML = (PER.length-comUF) ? '<div class="aviso">⚠️ '+N(PER.length-comUF)+' pedido(s) sem UF — o backfill de detalhes preenche o retroativo.</div>' : '';
 
   renderProjecao();
 }
 
-// ── projeção de estoque (ritmo fixo: últimos 14 dias) ──────────────────────
+function desenharCharts(labels, sPed, sFat){
+  if(!window.Chart){   // CDN falhou → não quebra o resto
+    $('cPed').parentElement.innerHTML='<div class="dim" style="padding:30px;text-align:center">gráfico indisponível (CDN bloqueado)</div>';
+    return;
+  }
+  const gopts = (fmt) => ({
+    responsive:true, maintainAspectRatio:false,
+    plugins:{ legend:{display:false},
+      tooltip:{backgroundColor:'#0d1326',borderColor:'#2d3a5e',borderWidth:1,titleColor:'#e7ecf6',bodyColor:'#8b96b3',
+               callbacks:{ label: ctx => fmt(ctx.parsed.y) } } },
+    scales:{ x:{ grid:{color:'#ffffff08'}, ticks:{color:'#5a6485',font:{size:10},maxRotation:0,autoSkip:true} },
+             y:{ grid:{color:'#ffffff0a'}, ticks:{color:'#5a6485',font:{size:10}, callback:v=>fmt(v)}, beginAtZero:true } }
+  });
+  if(chPed) chPed.destroy();
+  chPed = new Chart($('cPed'), { type:'bar',
+    data:{ labels, datasets:[{ data:sPed, backgroundColor:'#6366f1cc', hoverBackgroundColor:'#818cf8', borderRadius:5, maxBarThickness:26 }] },
+    options: gopts(v=>N(v)+' ped.') });
+  if(chFat) chFat.destroy();
+  chFat = new Chart($('cFat'), { type:'line',
+    data:{ labels, datasets:[{ data:sFat, borderColor:'#22c55e', backgroundColor:'#22c55e22', fill:true, tension:.35,
+                               pointRadius:2.5, pointBackgroundColor:'#22c55e', borderWidth:2 }] },
+    options: gopts(v=>BRLk(Number(v))) });
+}
+
 function topSkus14(){
-  const corte = new Date(Date.now()-13*86400000).toLocaleString('sv-SE',{timeZone:'America/Sao_Paulo'}).slice(0,10);
+  const corte = spDate(Date.now()-13*86400000);
   const hoje = hojeSP();
   const agg = {};
   DADOS.forEach(h=>{
@@ -244,31 +330,29 @@ function topSkus14(){
     const d = diaSP(h.conferido_em); if(d<corte || d>hoje) return;
     (h.itens||[]).forEach(it=>{
       const sku=it.sku; if(!sku) return;
-      if(!agg[sku]) agg[sku]={sku,desc:it.descricao||'',qtd:0,fat:0};
+      if(!agg[sku]) agg[sku]={sku,desc:it.descricao||'',qtd:0,fat:0,qtdV:0};
       agg[sku].qtd+=Number(it.qtd||1);
-      if(it.valor_total!=null) agg[sku].fat+=Number(it.valor_total)||0;
+      if(it.valor_total!=null){ agg[sku].fat+=Number(it.valor_total)||0; agg[sku].qtdV+=Number(it.qtd||1); }
     });
   });
   return Object.values(agg).sort((a,b)=>b.qtd-a.qtd).slice(0,40);
 }
 
-let _skuLoading = false;
 async function carregarSkuInfo(){
   if(_skuLoading) return; _skuLoading = true;
   const st=$('projStatus'), btn=$('btnProj');
   if(st) st.textContent='⏳ consultando o Bling (saldo/preço/custo)… ~30-60s na 1ª vez';
-  if(btn){ btn.style.display='none'; }
-  const top = topSkus14();
-  const skus = top.map(t=>t.sku);
+  if(btn) btn.style.display='none';
+  const skus = topSkus14().map(t=>t.sku);
   try{
     for(let i=0;i<skus.length;i+=40){
       const r = await fetch(MOD+'/sku-info',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({skus:skus.slice(i,i+40)})});
-      if(r.status===403){ if(st) st.innerHTML='🔒 sessão de admin expirou — <a href="'+MOD+'/painel">faça login no painel</a> e recarregue'; _skuLoading=false; return; }
+      if(r.status===403){ if(st) st.innerHTML='🔒 sessão de admin expirou — <a href="'+MOD+'/painel">faça login</a> e recarregue'; _skuLoading=false; return; }
       const d = await r.json();
       if(d && d.skus) Object.assign(SKUINFO, d.skus);
     }
     skuInfoCarregado = true;
-    if(st) st.textContent='✓ dados do Bling carregados (cache de 6h no servidor)';
+    if(st) st.textContent='✓ dados do Bling carregados (cache de 6h)';
     if(btn){ btn.style.display=''; btn.disabled=false; btn.textContent='↻ recarregar do Bling'; }
   }catch(e){
     if(st) st.textContent='✗ falha ao consultar o Bling: '+e.message;
@@ -280,41 +364,43 @@ async function carregarSkuInfo(){
 
 function renderProjecao(){
   const base = topSkus14();
-  if(!base.length){ $('projTab').innerHTML='<tr><td class="mut">sem vendas nos últimos 14 dias</td></tr>'; return; }
-  // enriquece cada linha com os campos calculados (pra ordenar por qualquer coluna)
+  if(!base.length){ $('tProj').innerHTML='<tr><td class="dim">sem vendas nos últimos 14 dias</td></tr>'; return; }
   const linhas = base.map(t=>{
     const info = SKUINFO[t.sku]||{};
     const md = t.qtd/14;
     const saldo = (info.saldo!=null && isFinite(Number(info.saldo))) ? Number(info.saldo) : null;
     const diasR = (saldo!=null && md>0) ? saldo/md : null;
     const compra = (saldo!=null) ? Math.max(0, Math.ceil(md*30 - saldo)) : null;
-    const precoMed = t.qtd ? t.fat/t.qtd : null;
+    const precoMed = (t.qtdV>0) ? t.fat/t.qtdV : null;   // preço médio REAL de venda (só unidades valoradas)
     const custo = (info.custo!=null && isFinite(Number(info.custo))) ? Number(info.custo) : null;
     const mUn = (precoMed!=null && precoMed>0 && custo!=null) ? precoMed - custo : null;
     return { ...t, qtd14:t.qtd, md, saldo, diasR, compra, custo, mUn };
   });
-  const dir = sortProj.dir, c = sortProj.col;
-  linhas.sort((a,b)=>cmpNull(a[c],b[c],dir));
-  let margemTot=0, margemCob=0, margemBase=0;
-  const th=(col,lbl)=>'<th class="num" style="cursor:pointer" onclick="setSortProj(\''+col+'\')">'+lbl+seta(sortProj,col)+'</th>';
-  $('projTab').innerHTML = '<tr><th>SKU</th>'+th('qtd14','14d')+th('md','média/dia')+th('saldo','saldo')+th('diasR','acaba em')+th('compra','comprar p/ 30d')+th('custo','custo')+th('mUn','margem un.')+'</tr>'+
+  linhas.sort((a,b)=>cmpNull(a[sortProj.col], b[sortProj.col], sortProj.dir));
+  let margemTot=0, margemCob=0;
+  const th=(col,lbl)=>'<th class="num sort" onclick="setSortProj(\''+col+'\')">'+lbl+seta(sortProj,col)+'</th>';
+  $('tProj').innerHTML = '<tr><th>SKU</th>'+th('qtd14','Vendas 14d')+th('md','média/dia')+th('saldo','Saldo')+th('diasR','Acaba em')+th('compra','Comprar p/ 30d')+th('custo','Custo')+th('mUn','Margem un.')+'</tr>'+
     linhas.map(t=>{
-      const { md, saldo, diasR, compra, custo, mUn } = t;
-      if(mUn!=null){ margemTot += mUn*t.qtd; margemCob++; }
-      margemBase++;
-      const cor = diasR==null?'mut':(diasR<7?'bad':(diasR<15?'warn':'ok'));
-      return '<tr><td><b>'+esc(t.sku)+'</b><div class="mut" style="font-size:11px;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(t.desc)+'</div></td>'+
-        '<td class="num">'+fmtN(t.qtd)+'</td><td class="num">'+md.toFixed(1)+'</td>'+
-        '<td class="num">'+(saldo!=null?fmtN(saldo):'<span class="mut">?</span>')+'</td>'+
-        '<td class="num '+cor+'">'+(diasR!=null?(diasR>=99?'99+':diasR.toFixed(0))+' d':'<span class="mut">—</span>')+'</td>'+
-        '<td class="num">'+(compra!=null?(compra?fmtN(compra):'<span class="ok">ok</span>'):'<span class="mut">—</span>')+'</td>'+
-        '<td class="num">'+(custo!=null?fmtBRL(custo):'<span class="mut">—</span>')+'</td>'+
-        '<td class="num '+(mUn!=null?(mUn>0?'ok':'bad'):'mut')+'">'+(mUn!=null?fmtBRL(mUn):'—')+'</td></tr>';
+      if(t.mUn!=null){ margemTot += t.mUn*t.qtdV; margemCob++; }
+      const stt = t.diasR==null ? '<span class="dim">—</span>'
+        : t.diasR<7 ? '<span class="st b">'+t.diasR.toFixed(0)+' dias</span>'
+        : t.diasR<15 ? '<span class="st w">'+t.diasR.toFixed(0)+' dias</span>'
+        : '<span class="st ok">'+(t.diasR>=99?'99+':t.diasR.toFixed(0))+' dias</span>';
+      return '<tr><td><div class="sku">'+esc(t.sku)+'</div><div class="desc">'+esc(t.desc)+'</div></td>'+
+      '<td class="num">'+N(t.qtd)+'</td><td class="num dim">'+t.md.toFixed(1)+'</td>'+
+      '<td class="num">'+(t.saldo!=null?N(t.saldo):'<span class="dim">?</span>')+'</td>'+
+      '<td class="num">'+stt+'</td>'+
+      '<td class="num">'+(t.compra!=null?(t.compra?'<b>'+N(t.compra)+'</b>':'<span class="ok">ok</span>'):'<span class="dim">—</span>')+'</td>'+
+      '<td class="num">'+(t.custo!=null?BRL(t.custo):'<span class="dim">—</span>')+'</td>'+
+      '<td class="num '+(t.mUn!=null?(t.mUn>0?'ok':'bad'):'dim')+'">'+(t.mUn!=null?BRL(t.mUn):'—')+'</td></tr>';
     }).join('');
   if(skuInfoCarregado){
-    const cob = margemBase? Math.round(margemCob/margemBase*100):0;
-    $('cardMargem').innerHTML = '<div class="v '+(margemTot>=0?'ok':'bad')+'">'+fmtBRL(margemTot)+'</div><div class="l">margem bruta 14d (top 40 · '+cob+'% c/ custo)</div>';
-    $('projAviso').innerHTML = (cob<100)?'<div class="aviso">⚠️ '+(margemBase-margemCob)+' SKU(s) sem custo cadastrado no Bling (campo fornecedor) — margem parcial. Cadastre o custo lá ou me peça a importação por planilha.</div>':'';
+    const cob = Math.round(margemCob/linhas.length*100);
+    const k = $('kMargem');
+    if(k) k.innerHTML = '<span class="ic">📊</span><div class="l">Margem bruta 14d (top 40)</div>'+
+      '<div class="v '+(margemTot>=0?'ok':'bad')+'">'+BRL(margemTot)+'</div>'+
+      '<div class="s">'+cob+'% dos SKUs com custo no Bling</div>';
+    $('projAviso').innerHTML = (cob<100)?'<div class="aviso">⚠️ '+(linhas.length-margemCob)+' SKU(s) sem custo cadastrado no Bling (campo fornecedor) — margem parcial. Cadastre lá, ou me peça a importação por planilha (Excel da esteira).</div>':'';
   }
 }
 
