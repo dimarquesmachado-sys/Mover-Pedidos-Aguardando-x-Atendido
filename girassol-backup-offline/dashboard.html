@@ -104,7 +104,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd4';
+const DASH_BUILD = 'd5';
 let DADOS = [];
 let periodo = 'mes', pDe = '', pAte = '';
 let SKUINFO = {}, skuInfoCarregado = false, _skuLoading = false;
@@ -185,7 +185,7 @@ function montar(){
       '<div style="overflow-x:auto"><table id="tProj"></table></div><div id="projAviso"></div></div>'+
     '<div class="nota"><b>Regras deste painel</b> · datas no horário de São Paulo · kits contam pelo SKU do kit · '+
       'faturamento por produto = soma de (preço do item × qtd) em CADA pedido do período (preços diferentes por anúncio/canal entram cada um com o seu) · '+
-      'margem = bruta estimada (venda − custo do cadastro Bling), sem frete e sem taxas de marketplace · '+
+      'produtos/frete usam a NOTA FISCAL do pedido quando disponível (fonte fiscal exata; senão, soma dos itens) · margem = bruta estimada (venda − custo do cadastro Bling), sem frete e sem taxas de marketplace · '+
       'só entram pedidos finalizados no checkout offline. <b>vs Jodda:</b> lá conta a data da VENDA; aqui a da EXPEDIÇÃO — e use o card 🛍 produtos p/ comparar (o total c/ frete inclui frete embutido).</div>'+
   '</div>';
   render();
@@ -201,6 +201,7 @@ function render(){
   const PER = DADOS.filter(h => { if(!h.conferido_em) return false; const d = diaSP(h.conferido_em); return d>=de && d<=ate; });
 
   let fat=0, comValor=0, semValor=0, flex=0, unid=0, itensTot=0, itensComValor=0, comUF=0, fatProd=0, freteEmb=0, fretePed=0;
+  let fatNF=0, pedNF=0, freteNF=0, fretePedNF=0;   // fonte NOTA FISCAL (vprod_nf): produtos e frete EXATOS
   const porDia={}, porCanal={}, porProd={}, porUF={};
   PER.forEach(h=>{
     const d = diaSP(h.conferido_em);
@@ -224,6 +225,8 @@ function render(){
     });
     fatProd += _iv;
     if(h.valor!=null && _nIt && _todos){ const fr=Number(h.valor)-_iv; if(isFinite(fr)){ freteEmb+=fr; fretePed++; } }
+    const vNF = (h.vprod_nf!=null && isFinite(Number(h.vprod_nf))) ? Number(h.vprod_nf) : null;
+    if(vNF!=null){ fatNF+=vNF; pedNF++; if(h.valor!=null){ const frN=Number(h.valor)-vNF; if(isFinite(frN)){ freteNF+=frN; fretePedNF++; } } }
   });
   const ticket = comValor ? fat/comValor : 0;
   const pc = (a,b)=> b? Math.round(a/b*100) : 0;
@@ -234,14 +237,15 @@ function render(){
     '<span class="pill '+(cVal>=95?'g':'w')+'">valor <b>'+cVal+'%</b></span>'+
     '<span class="pill '+(cItem>=95?'g':'w')+'">valor/item <b>'+cItem+'%</b></span>'+
     '<span class="pill '+(cUF>=95?'g':'w')+'">UF <b>'+cUF+'%</b></span>'+
+    '<span class="pill '+(pc(pedNF,PER.length)>=95?'g':'w')+'">nota fiscal <b>'+pc(pedNF,PER.length)+'%</b></span>'+
     ((cVal<95||cItem<95||cUF<95)?'<span class="warn" style="font-size:11px">← cobertura baixa: rode os backfills p/ o retroativo</span>':'');
 
   const kpi=(kc,ic,l,v,s)=>'<div class="kpi" style="--kc:'+kc+'"><span class="ic">'+ic+'</span><div class="l">'+l+'</div><div class="v">'+v+'</div>'+(s?'<div class="s">'+s+'</div>':'')+'</div>';
   $('kpis').innerHTML =
     kpi('var(--ac)','📦','Pedidos', N(PER.length), N(unid)+' unidades') +
-    kpi('var(--ok)','🛍','Faturamento produtos', BRL(fatProd), 'sem frete — comparável ao Jodda'+(cItem<95?' · <span class="warn">'+cItem+'% cobertura</span>':'')) +
+    kpi('var(--ok)','🛍','Faturamento produtos', BRL(pedNF?fatNF:fatProd), pedNF?('pela NOTA FISCAL ('+pc(pedNF,PER.length)+'% dos pedidos) — comparável ao Jodda'):('pelos itens do pedido'+(cItem<95?' · <span class="warn">'+cItem+'% cobertura</span>':''))) +
     kpi('var(--cy)','💰','Total dos pedidos', BRL(fat), 'com frete embutido'+(semValor?' · <span class="warn">'+semValor+' sem valor</span>':'')) +
-    kpi('#a78bfa','🚚','Frete embutido (est.)', fretePed?BRL(freteEmb):'—', fretePed?('sobre '+N(fretePed)+' pedidos 100% valorados'):'aguardando cobertura') +
+    kpi('#a78bfa','🚚','Frete embutido', fretePedNF?BRL(freteNF):(fretePed?BRL(freteEmb):'—'), fretePedNF?('EXATO pela nota · '+N(fretePedNF)+' pedidos'):(fretePed?('estimado · '+N(fretePed)+' ped.'):'aguardando cobertura')) +
     kpi('var(--warn)','🎯','Ticket médio', BRL(ticket), 'por pedido (total c/ frete)') +
     kpi('#f97316','⚡','FLEX enviados', N(flex), 'confronto c/ motoboy') +
     '<div class="kpi" id="kMargem" style="--kc:var(--ok)"><span class="ic">📊</span><div class="l">Margem bruta 14d</div><div class="v dim">—</div><div class="s">carregando custos do Bling…</div></div>';
