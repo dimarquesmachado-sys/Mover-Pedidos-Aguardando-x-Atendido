@@ -1994,19 +1994,45 @@ async function mlSyncFees(dias) {
   for (const cid of alvos) {
     try {
       const nl = String((conf0[cid] && conf0[cid].numero_loja) || '').replace(/\D/g, '');
-      const r = await fetch('https://api.mercadolibre.com/orders/' + nl, { headers: { Authorization: 'Bearer ' + tokenML } });
-      const d = await r.json().catch(() => null);
-      if (r.ok && d) {
-        let fee = 0; for (const it of (d.order_items || [])) { const q = Number(it.quantity || 1); const sf = Number(it.sale_fee || 0); if (isFinite(sf)) fee += sf * q; }
-        const reg = { fee: Math.round(fee * 100) / 100, frete: null, venda: (d.date_created || null) };   // hora REAL da venda no ML
-        const shipId = d.shipping && d.shipping.id;
+      const H = { headers: { Authorization: 'Bearer ' + tokenML } };
+      let r = await fetch('https://api.mercadolibre.com/orders/' + nl, H);
+      let d = await r.json().catch(() => null);
+      let ords = null;   // 1 order normal; N orders quando o Bling gravou o PACK id (carrinho)
+      if (r.ok && d) ords = [d];
+      else if (r.status === 404) {
+        // "Order do not exists" com id 2000...: é PACK (carrinho) — abre o pack e pega as orders de dentro
+        try {
+          const rp = await fetch('https://api.mercadolibre.com/packs/' + nl, H);
+          const dp = await rp.json().catch(() => null);
+          if (rp.ok && dp && Array.isArray(dp.orders) && dp.orders.length) {
+            ords = [];
+            for (const oq of dp.orders) {
+              try {
+                const ro = await fetch('https://api.mercadolibre.com/orders/' + (oq.id || oq), H);
+                const doo = await ro.json().catch(() => null);
+                if (ro.ok && doo) ords.push(doo);
+              } catch (e3) {}
+              await dorme(150);
+            }
+            if (!ords.length) ords = null;
+          }
+        } catch (e2) {}
+      }
+      if (ords && ords.length) {
+        let fee = 0, venda = null, shipId = null;
+        for (const od of ords) {
+          for (const it of (od.order_items || [])) { const q = Number(it.quantity || 1); const sf = Number(it.sale_fee || 0); if (isFinite(sf)) fee += sf * q; }
+          if (!venda && od.date_created) venda = od.date_created;
+          if (!shipId && od.shipping && od.shipping.id) shipId = od.shipping.id;
+        }
+        const reg = { fee: Math.round(fee * 100) / 100, frete: null, venda: venda, _orders: ords.length };
         if (shipId) {
           try {
-            const rs = await fetch('https://api.mercadolibre.com/shipments/' + shipId, { headers: { Authorization: 'Bearer ' + tokenML } });
+            const rs = await fetch('https://api.mercadolibre.com/shipments/' + shipId, H);
             const ds = await rs.json().catch(() => null);
             if (rs.ok && ds) {
-              const lc = Number(ds.list_cost), cc = Number(ds.cost);   // list_cost = custo cheio do frete; cost = pago pelo comprador
-              if (isFinite(lc) && isFinite(cc) && lc >= cc) reg.frete = Math.round((lc - cc) * 100) / 100;   // parte do VENDEDOR
+              const lc = Number(ds.list_cost), cc = Number(ds.cost);
+              if (isFinite(lc) && isFinite(cc) && lc >= cc) reg.frete = Math.round((lc - cc) * 100) / 100;
             }
           } catch (e) {}
           await dorme(200);
@@ -2014,7 +2040,7 @@ async function mlSyncFees(dias) {
         pend[cid] = reg; _mls.ok++;
       } else {
         _mls.falhas++;
-        const stc = String(r.status), em = ((d && (d.message || d.error)) || '').slice(0, 140);
+        const stc = String(r.status), em = (((d && (d.message || d.error)) || '') + (r.status === 404 ? ' [nem order nem pack]' : '')).slice(0, 140);
         _mls.erros[stc] = (_mls.erros[stc] || 0) + 1;
         if (_mls.amostras.length < 3) { _mls.amostras.push({ pedido: cid, numero_loja: nl, status: r.status, msg: em }); }
         if ((_mls.erros[stc] || 0) === 1) console.log('[ML-FEES] falha ' + r.status + ' no pedido ' + cid + ' (venda ' + nl + '): ' + em);
