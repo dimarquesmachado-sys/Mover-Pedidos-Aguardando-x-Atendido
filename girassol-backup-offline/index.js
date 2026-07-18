@@ -90,15 +90,25 @@ function backfillNFLocal(dias) {
   dias = Math.max(1, Math.min(120, Number(dias || 45)));
   const corte = Date.now() - dias * 86400000;
   const conf2 = readJson(CONFERIDOS_FILE, {});
-  let alvo = 0, comSimp = 0, semSimp = 0;
+  let alvo = 0, comSimp = 0, semSimp = 0, ufN = 0;
   for (const [cid, c] of Object.entries(conf2)) {
     if (!c || !c.conferido_em || new Date(c.conferido_em).getTime() < corte) continue;
-    if (c.vprod_nf != null && c.numero_loja != null) continue;
+    if (c.vprod_nf != null && c.numero_loja != null && c.uf != null) continue;
     alvo++;
     let ds = readJson(path.join(CACHE_DIR, String(cid), 'nf-simp.json'), null);
     if (!ds) ds = readJson(path.join(ARQUIVO_DIR, String(cid), 'nf-simp.json'), null);
     if (ds) {
       if (c.numero_loja == null && ds.numeroPedidoLoja) c.numero_loja = String(ds.numeroPedidoLoja);
+      // UF/município: dos campos novos do nf-simp, ou garimpado do endereço dos antigos ("..., Cidade - UF, CEP ...")
+      if (c.uf == null) {
+        let _u = ds.uf || null, _m = ds.municipio || null;
+        if (!_u && ds.consumidor && ds.consumidor.endereco) {
+          const seg = String(ds.consumidor.endereco).split(',').map(t => t.trim()).reverse().find(t => / - [A-Z]{2}$/.test(t));
+          const mm = seg && seg.match(/^(.*) - ([A-Z]{2})$/);
+          if (mm) { _m = _m || mm[1]; _u = mm[2]; }
+        }
+        if (_u) { c.uf = _u; if (_m && c.municipio == null) c.municipio = _m; ufN++; }
+      }
       if (Array.isArray(ds.itens) && ds.itens.length) {
         const s2 = ds.itens.reduce((a, i) => a + (Number(i.valorTotal) || 0), 0);
         if (isFinite(s2) && s2 > 0) { if (c.vprod_nf == null) { c.vprod_nf = Math.round(s2 * 100) / 100; comSimp++; } continue; }
@@ -106,9 +116,9 @@ function backfillNFLocal(dias) {
     }
     semSimp++;
   }
-  if (comSimp) writeJson(CONFERIDOS_FILE, conf2);
+  if (comSimp || ufN) writeJson(CONFERIDOS_FILE, conf2);
   if (comSimp || semSimp) console.log(`[BACKFILL-NF] ${comSimp} preenchido(s) pela nota, ${semSimp} sem nf-simp no disco (janela ${dias}d)`);
-  return { candidatos: alvo, preenchidos_pela_nf: comSimp, sem_nf_simp_no_disco: semSimp, dias };
+  return { candidatos: alvo, preenchidos_pela_nf: comSimp, uf_preenchidas: ufN, sem_nf_simp_no_disco: semSimp, dias };
 }
 const { montarSeparacao, montarSeparacaoPorPedido } = require('./separacao');
 const { enviarEmailDocs } = require('./email-docs');
@@ -378,6 +388,8 @@ function routes(readBody) {
         if (c && (Date.now() - (c.ts || 0)) < TTL) out[sku] = c; else faltam.push(sku);
       }
       const dorme = ms => new Promise(r => setTimeout(r, ms));
+      // 1) resolve SKU → produto (id, preço, custo do próprio detalhe quando vier)
+      const ids = {};
       for (const sku of faltam) {
         try {
           let prod = null;
@@ -386,18 +398,47 @@ function routes(readBody) {
             const it = r.ok && r.data && r.data.data && r.data.data[0];
             if (it && it.id) { const d = await blingGet(`/produtos/${it.id}`); prod = (d.ok && d.data && d.data.data) || it; break; }
           }
-          const est = (prod && prod.estoque) || {};
-          const forn = (prod && prod.fornecedor) || {};
-          const custoCand = [forn.precoCusto, forn.precoCompra, prod && prod.precoCusto, prod && prod.custo].map(Number).filter(v => isFinite(v) && v > 0);
-          const info = {
-            saldo: (est.saldoVirtualTotal != null ? est.saldoVirtualTotal : (est.saldoVirtual != null ? est.saldoVirtual : null)),
-            preco: (prod && prod.preco != null && isFinite(Number(prod.preco))) ? Number(prod.preco) : null,
-            custo: custoCand.length ? custoCand[0] : null,
-            ts: Date.now()
-          };
-          _skuInfoCache[sku] = info; out[sku] = info;
-        } catch (e) { out[sku] = { saldo: null, preco: null, custo: null, ts: Date.now() }; }
-        await dorme(250);
+          if (prod && prod.id) {
+            const forn = prod.fornecedor || {};
+            const cand = [forn.precoCusto, forn.precoCompra, prod.precoCusto, prod.custo].map(Number).filter(v => isFinite(v) && v > 0);
+            ids[sku] = { id: prod.id, preco: (prod.preco != null && isFinite(Number(prod.preco))) ? Number(prod.preco) : null, custo: cand.length ? cand[0] : null };
+          } else ids[sku] = null;
+        } catch (e) { ids[sku] = null; }
+        await dorme(220);
+      }
+      // 2) SALDO em LOTE — no Bling v3 o saldo vem de /estoques/saldos, não do detalhe do produto
+      const saldos = {};
+      const todosIds = Object.values(ids).filter(Boolean).map(o => o.id);
+      for (let i = 0; i < todosIds.length; i += 40) {
+        try {
+          const qs = todosIds.slice(i, i + 40).map(pid => 'idsProdutos[]=' + pid).join('&');
+          const r = await blingGet('/estoques/saldos?' + qs);
+          const arr = (r.ok && r.data && r.data.data) || [];
+          for (const e2 of arr) {
+            const pid = e2 && e2.produto && e2.produto.id;
+            const sv = e2 && (e2.saldoVirtualTotal != null ? e2.saldoVirtualTotal : e2.saldoFisicoTotal);
+            if (pid != null && sv != null && isFinite(Number(sv))) saldos[pid] = Number(sv);
+          }
+        } catch (e) {}
+        await dorme(300);
+      }
+      // 3) custo: quem ficou sem, tenta o endpoint de fornecedores do produto
+      for (const [sku2, o2] of Object.entries(ids)) {
+        if (!o2 || o2.custo != null) continue;
+        try {
+          const r = await blingGet(`/produtos/fornecedores?idProduto=${o2.id}&limite=5`);
+          const arr = (r.ok && r.data && r.data.data) || [];
+          const pref = arr.find(x => x && x.padrao) || arr[0];
+          const cand = pref ? [pref.precoCusto, pref.precoCompra].map(Number).filter(v => isFinite(v) && v > 0) : [];
+          if (cand.length) o2.custo = cand[0];
+        } catch (e) {}
+        await dorme(220);
+      }
+      for (const sku of faltam) {
+        const o2 = ids[sku];
+        const info = o2 ? { saldo: (saldos[o2.id] != null ? saldos[o2.id] : null), preco: o2.preco, custo: o2.custo, ts: Date.now() }
+                        : { saldo: null, preco: null, custo: null, ts: Date.now() };
+        _skuInfoCache[sku] = info; out[sku] = info;
       }
       if (faltam.length) { try { writeJson(CACHE_SKUINFO, _skuInfoCache); } catch (e) {} }
       json(res, 200, { ok: true, skus: out, consultados_agora: faltam.length });
@@ -426,7 +467,8 @@ function routes(readBody) {
     // Uso: /girassol-backup-offline/backfill-nf?k=ADMIN_KEY&dias=45   (roda em segundos)
     if ((method === 'POST' || method === 'GET') && p === '/girassol-backup-offline/backfill-nf') {
       const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
-      if (!process.env.ADMIN_KEY || k !== process.env.ADMIN_KEY) { json(res, 404, { error: 'not found' }); return true; }
+      const sessB = validarSessao(req.headers['cookie']);
+      if (!((process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || (sessB && ehAdmin(sessB)))) { json(res, 404, { error: 'not found' }); return true; }
       const r = backfillNFLocal(urlObj.searchParams.get('dias'));
       json(res, 200, { ok: true, ...r,
         mensagem: r.preenchidos_pela_nf ? ('✓ ' + r.preenchidos_pela_nf + ' pedido(s) ganharam produtos/frete EXATOS da nota (leitura local, sem API)') : 'nada novo a preencher' });
@@ -478,11 +520,36 @@ function routes(readBody) {
     // Uso: /girassol-backup-offline/ml-sync-fees?k=ADMIN_KEY&dias=31 — chame de novo p/ ver o progresso
     if ((method === 'POST' || method === 'GET') && p === '/girassol-backup-offline/ml-sync-fees') {
       const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
-      if (!process.env.ADMIN_KEY || k !== process.env.ADMIN_KEY) { json(res, 404, { error: 'not found' }); return true; }
-      if (_mls.rodando) { json(res, 200, { ok: true, rodando: true, progresso: _mls.feitos + '/' + _mls.total, ok_ate_agora: _mls.ok, falhas: _mls.falhas }); return true; }
+      const sessA = validarSessao(req.headers['cookie']);
+      const autorizado = (process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || (sessA && ehAdmin(sessA));
+      if (!autorizado) { json(res, 404, { error: 'not found' }); return true; }
+      const soStatus = (urlObj.searchParams && urlObj.searchParams.get('status')) === '1';
+      if (_mls.rodando || soStatus) { json(res, 200, { ok: true, rodando: !!_mls.rodando, progresso: _mls.feitos + '/' + _mls.total, ok_ate_agora: _mls.ok, falhas: _mls.falhas, ultimo_inicio: _mls.iniciado_em }); return true; }
       const dias = Number(urlObj.searchParams.get('dias') || 14);
       mlSyncFees(dias).catch(() => {});
       json(res, 200, { ok: true, iniciado: true, dias, mensagem: 'pesca ML rodando em background — chame de novo p/ ver o progresso' });
+      return true;
+    }
+
+    // ADMIN (?k= ou sessão): RAIO-X da cobertura por mês — onde estão os buracos de valor/UF
+    if (method === 'GET' && p === '/girassol-backup-offline/debug-cobertura') {
+      const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const sessX = validarSessao(req.headers['cookie']);
+      if (!((process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || (sessX && ehAdmin(sessX)))) { json(res, 404, { error: 'not found' }); return true; }
+      const confX = readJson(CONFERIDOS_FILE, {});
+      const porMes = {}; const exemplos = [];
+      for (const [cid, c] of Object.entries(confX)) {
+        if (!c || !c.conferido_em) continue;
+        const mes = new Date(c.conferido_em).toLocaleString('sv-SE', { timeZone: 'America/Sao_Paulo' }).slice(0, 7);
+        if (!porMes[mes]) porMes[mes] = { pedidos: 0, sem_uf: 0, sem_vprod_nf: 0, unidades: 0, unid_sem_valor: 0 };
+        const g = porMes[mes]; g.pedidos++;
+        if (c.uf == null) g.sem_uf++;
+        if (c.vprod_nf == null) g.sem_vprod_nf++;
+        let semV = 0;
+        for (const it of (c.itens || [])) { const q = Number(it.qtd || 1); g.unidades += q; if (it.valor_total == null) { g.unid_sem_valor += q; semV += q; } }
+        if (semV && exemplos.length < 8) exemplos.push({ id: cid, mes, numero: c.numero, skus: (c.itens || []).filter(i => i.valor_total == null).map(i => i.sku) });
+      }
+      json(res, 200, { ok: true, por_mes: porMes, exemplos_itens_sem_valor: exemplos });
       return true;
     }
 
