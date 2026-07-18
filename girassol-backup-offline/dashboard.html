@@ -95,7 +95,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd6';
+const DASH_BUILD = 'd7';
 let DADOS = [];
 let periodo = 'mes', pDe = '', pAte = '';
 let SKUINFO = {}, skuInfoCarregado = false, _skuLoading = false;
@@ -206,7 +206,7 @@ function render(){
   const {de, ate} = intervalo();
   const PER = DADOS.filter(h => { if(!h.conferido_em) return false; const d = diaSP(h.conferido_em); return d>=de && d<=ate; });
 
-  let fat=0, comValor=0, semValor=0, flex=0, unid=0, itensTot=0, itensComValor=0, comUF=0, fatProd=0, freteEmb=0, fretePed=0;
+  let fat=0, comValor=0, semValor=0, flex=0, unid=0, itensTot=0, itensComValor=0, comUF=0, fatProd=0, freteEmb=0, fretePed=0, pedML=0, pedMLr=0;
   let fatNF=0, pedNF=0, freteNF=0, fretePedNF=0;   // fonte NOTA FISCAL (vprod_nf)
   const porDia={}, porCanal={}, porProd={}, porUF={};
   PER.forEach(h=>{
@@ -217,6 +217,7 @@ function render(){
     if(!porCanal[mk]) porCanal[mk]={ped:0,fat:0,flex:0,comValor:0};
     porCanal[mk].ped++;
     if(h.flex){ flex++; porCanal[mk].flex++; }
+    if(canalKey(mk)==='ml'){ pedML++; if(h.tarifa_ml!=null) pedMLr++; }
     if(h.valor!=null && isFinite(Number(h.valor))){ const v=Number(h.valor); fat+=v; comValor++; porDia[d].fat+=v; porCanal[mk].fat+=v; porCanal[mk].comValor++; }
     else semValor++;
     if(h.uf){ comUF++; const u=String(h.uf).toUpperCase(); if(!porUF[u]) porUF[u]={ped:0,fat:0}; porUF[u].ped++; if(h.valor!=null) porUF[u].fat+=Number(h.valor)||0; }
@@ -244,6 +245,7 @@ function render(){
     '<span class="pill '+(cItem>=95?'g':'w')+'">valor/item <b>'+cItem+'%</b></span>'+
     '<span class="pill '+(cUF>=95?'g':'w')+'">UF <b>'+cUF+'%</b></span>'+
     '<span class="pill '+(pc(pedNF,PER.length)>=95?'g':'w')+'">nota fiscal <b>'+pc(pedNF,PER.length)+'%</b></span>'+
+    (pedML?'<span class="pill '+(pc(pedMLr,pedML)>=95?'g':'w')+'">tarifa ML real <b>'+pc(pedMLr,pedML)+'%</b></span>':'')+
     ((cVal<95||cItem<95||cUF<95)?'<span class="warn" style="font-size:11px">← cobertura baixa: rode os backfills p/ o retroativo</span>':'');
 
   const kpi=(kc,ic,l,v,s)=>'<div class="kpi" style="--kc:'+kc+'"><span class="ic">'+ic+'</span><div class="l">'+l+'</div><div class="v">'+v+'</div>'+(s?'<div class="s">'+s+'</div>':'')+'</div>';
@@ -256,23 +258,26 @@ function render(){
     kpi('#f97316','⚡','FLEX enviados', N(flex), 'confronto c/ motoboy') +
     '<div class="kpi" id="kMargem" style="--kc:var(--ok)"><span class="ic">📊</span><div class="l">Margem bruta 14d</div><div class="v dim">—</div><div class="s">carregando custos do Bling…</div></div>' +
     (function(){   // 💎 margem de CONTRIBUIÇÃO do período: produtos − imposto − tarifa% − custo
-      let rec=0, imp=0, tar=0, cus=0, pedOk=0, semCfg=0, cusUn=0, unTot=0;
+      let rec=0, imp=0, tar=0, cus=0, pedOk=0, semCfg=0, cusUn=0, unTot=0, tReais=0, frV=0;
       PER.forEach(h=>{
         const rp = (h.vprod_nf!=null&&isFinite(Number(h.vprod_nf))) ? Number(h.vprod_nf) : null;
         if(rp==null) return;
         const aliq = CFG.aliquotas[diaSP(h.conferido_em).slice(0,7)];
+        const tReal = (h.tarifa_ml!=null && isFinite(Number(h.tarifa_ml))) ? Number(h.tarifa_ml) : null;
         const tx = CFG.taxas[canalKey(h.marketplace)];
-        if(aliq==null || tx==null){ semCfg++; return; }
+        if(aliq==null || (tReal==null && tx==null)){ semCfg++; return; }
         const tot = (h.valor!=null&&isFinite(Number(h.valor))) ? Number(h.valor) : rp;
-        rec+=rp; imp+=tot*aliq/100; tar+=rp*tx/100; pedOk++;
+        rec+=rp; imp+=tot*aliq/100; tar+=(tReal!=null ? tReal : rp*tx/100); pedOk++;
+        if(tReal!=null) tReais++;
+        if(h.frete_ml!=null && isFinite(Number(h.frete_ml))) frV+=Number(h.frete_ml);
         (h.itens||[]).forEach(it=>{ const q=Number(it.qtd||1); unTot+=q; const info=SKUINFO[it.sku]; if(info&&info.custo!=null){ cus+=info.custo*q; cusUn+=q; } });
       });
       if(!Object.keys(CFG.aliquotas).length && !Object.keys(CFG.taxas).length)
         return '<div class="kpi" style="--kc:#64748b;cursor:pointer" onclick="document.getElementById(\'cfgBox\').scrollIntoView({behavior:\'smooth\'})"><span class="ic">💎</span><div class="l">Margem de contribuição</div><div class="v dim">—</div><div class="s warn">⚙️ configure alíquota &amp; taxas abaixo</div></div>';
-      const mc = rec-imp-tar-cus;
+      const mc = rec-imp-tar-cus-frV;
       return '<div class="kpi" style="--kc:#14b8a6"><span class="ic">💎</span><div class="l">Margem de contribuição (est.)</div>'+
         '<div class="v '+(mc>=0?'ok':'bad')+'">'+BRL(mc)+'</div>'+
-        '<div class="s">'+N(pedOk)+' ped. · custo em '+pc(cusUn,unTot)+'% das un.'+(semCfg?' · <span class="warn">'+semCfg+' fora (config)</span>':'')+'</div></div>';
+        '<div class="s">'+N(pedOk)+' ped.'+(tReais?' · '+N(tReais)+' c/ tarifa REAL ML':'')+(frV>0?' · frete vendedor ML deduzido':'')+' · custo em '+pc(cusUn,unTot)+'% das un.'+(semCfg?' · <span class="warn">'+semCfg+' fora (config)</span>':'')+'</div></div>';
     })();
 
   const dias = Object.keys(porDia).sort();
@@ -411,14 +416,15 @@ function renderPL(h){
   const frete = (tot!=null&&rp!=null)?tot-rp:null;
   const aliq = CFG.aliquotas[mes];
   const imposto = (aliq!=null&&tot!=null)?tot*aliq/100:null;
-  const feeReal = _plMLFee[h.id];
+  const feeReal = (h.tarifa_ml!=null&&isFinite(Number(h.tarifa_ml)))?Number(h.tarifa_ml):_plMLFee[h.id];
   const tx = CFG.taxas[ck];
   const tarifa = (feeReal!=null)?feeReal:((tx!=null&&rp!=null)?rp*tx/100:null);
   let custo=0, cusUn=0, unTot=0;
   (h.itens||[]).forEach(it=>{ const q=Number(it.qtd||1); unTot+=q; const inf=SKUINFO[it.sku]; if(inf&&inf.custo!=null){ custo+=inf.custo*q; cusUn+=q; } });
   const custoOk = cusUn===unTot && unTot>0;
+  const frV = (ck==='ml' && h.frete_ml!=null && isFinite(Number(h.frete_ml))) ? Number(h.frete_ml) : null;
   const completo = [rp,imposto,tarifa].every(v=>v!=null) && custoOk;
-  const mc = completo? rp-imposto-tarifa-custo : null;
+  const mc = completo? rp-imposto-tarifa-custo-(frV||0) : null;
   const linha=(l,v,extra)=>'<tr><td>'+l+'</td><td class="num">'+(v!=null?BRL(v):'<span class="dim">—</span>')+(extra||'')+'</td></tr>';
   card.innerHTML =
     '<div class="sec" style="margin-top:12px;background:linear-gradient(160deg,#14201a,#131a30);border-color:#14b8a655">'+
@@ -431,10 +437,11 @@ function renderPL(h){
     linha('🏪 Tarifa '+ (feeReal!=null?'<span class="ok">REAL (ML)</span>':(tx!=null?tx+'% est.':'<span class="warn">configure ⚙️</span>')), tarifa!=null?-tarifa:null,
       (ck==='ml'&&h.numero_loja&&feeReal==null?' <button class="btn" style="padding:3px 10px;font-size:10.5px" onclick="pegarFeeML(\''+h.id+'\',\''+esc(h.numero_loja)+'\')">buscar real</button>':''))+
     linha('📦 Custo ('+cusUn+'/'+unTot+' un. c/ custo)', (cusUn?-custo:null))+
+    (ck==='ml' ? linha('🚛 Frete vendedor <span class="ok">(real ML)</span>', frV!=null?-frV:null) : '')+
     '<tr><td style="border-top:2px solid var(--line2);font-weight:800">💎 Margem de contribuição</td>'+
     '<td class="num" style="border-top:2px solid var(--line2);font-weight:800">'+
       (mc!=null?('<span class="'+(mc>=0?'ok':'bad')+'">'+BRL(mc)+'</span><span class="dim" style="font-size:11px"> · '+(rp?Math.round(mc/rp*100):0)+'%</span>'):'<span class="warn">incompleto — resolva os "—" acima</span>')+'</td></tr>'+
-    '</table><div class="nota">frete recebido ≈ frete pago (não deduzido) · imposto sobre o total do pedido · tarifa sobre produtos</div></div>';
+    '</table><div class="nota">ML: tarifa e frete do vendedor REAIS (pescados da API) quando disponíveis; demais canais: tarifa % configurada e frete recebido ≈ pago · imposto sobre o total do pedido</div></div>';
 }
 async function pegarFeeML(id, numeroLoja){
   try{
