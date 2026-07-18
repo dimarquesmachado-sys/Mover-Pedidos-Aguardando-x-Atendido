@@ -385,7 +385,7 @@ function routes(readBody) {
       const out = {}; const faltam = [];
       for (const sku of skus) {
         const c = _skuInfoCache[sku];
-        if (c && (Date.now() - (c.ts || 0)) < TTL) out[sku] = c; else faltam.push(sku);
+        if (!body.fresh && c && (Date.now() - (c.ts || 0)) < TTL) out[sku] = c; else faltam.push(sku);
       }
       const dorme = ms => new Promise(r => setTimeout(r, ms));
       // 1) resolve SKU → produto (id, preço, custo do próprio detalhe quando vier)
