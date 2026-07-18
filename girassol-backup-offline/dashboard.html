@@ -95,7 +95,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd11';
+const DASH_BUILD = 'd12';
 let DADOS = [];
 let periodo = 'mes', pDe = '', pAte = '';
 let SKUINFO = {}, skuInfoCarregado = false, _skuLoading = false;
@@ -109,7 +109,7 @@ let sortProd = { col: 'fat', dir: -1 };
 let sortProj = { col: 'qtd14', dir: -1 };
 let chPed = null, chFat = null;
 let _plMLFee = {};   // tarifa real ML por pedido (sob demanda)
-let anPage=0, anCanal='', _anLoading=false;   // 📋 análise de vendas
+let anPage=0, anCanal='', anSku='', anPer='mes', anPDe='', anPAte='', _anLoading=false;   // 📋 análise de vendas
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -176,9 +176,11 @@ function montar(){
       'style="width:100%;background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:10px;padding:11px 14px;font-size:13px" '+
       'oninput="buscarPed(this.value)">'+
       '<div id="buscaRes" style="margin-top:10px"></div><div id="plCard"></div></div>'+
-    '<div class="sec"><h2>📋 Análise de vendas — margem por pedido <span class="hint">estilo MercadoTurbo · usa o período dos filtros lá de cima</span></h2>'+
+    '<div class="sec"><h2>📋 Análise de vendas — margem por pedido <span class="hint">mais novas em cima (ordem de criação do pedido) · filtros próprios abaixo</span></h2>'+
+      '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px"><span id="anPerChips" style="display:flex;gap:6px;flex-wrap:wrap"></span><span id="anPerDatas"></span></div>'+
       '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">'+
       '<select id="anCanalSel" onchange="anCanal=this.value;anPage=0;renderAnalise()" style="background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:9px;padding:7px 10px;font-size:12.5px"></select>'+
+      '<input id="anSkuInp" placeholder="🔎 filtrar por SKU…" oninput="anSku=this.value;anPage=0;renderAnalise()" style="background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:9px;padding:7px 10px;font-size:12.5px;width:170px">'+
       '<span id="anInfo" class="mut" style="font-size:12px"></span>'+
       '<span style="margin-left:auto"></span>'+
       '<button class="chip" onclick="if(anPage>0){anPage--;renderAnalise();}">← Anterior</button>'+
@@ -510,15 +512,37 @@ async function rodarBackfillNF(){
 }
 
 // ── 📋 análise de vendas (margem por pedido, estilo MercadoTurbo) ───────────
+function setAnPer(p){ anPer=p; anPage=0; renderAnalise(); }
+function anIntervalo(){
+  const hoje = hojeSP();
+  let de, ate = hoje;
+  if(anPer==='dia') de = hoje;
+  else if(anPer==='ontem'){ const o = spDate(Date.now()-86400000); de=o; ate=o; }
+  else if(anPer==='7') de = spDate(Date.now()-6*86400000);
+  else if(anPer==='mes') de = hoje.slice(0,8)+'01';
+  else if(anPer==='mesant'){ const [Y,M]=hoje.split('-').map(Number); const pm=new Date(Y,M-2,1);
+    const y2=pm.getFullYear(), m2=String(pm.getMonth()+1).padStart(2,'0');
+    de=y2+'-'+m2+'-01'; ate=y2+'-'+m2+'-'+String(new Date(Y,M-1,0).getDate()).padStart(2,'0'); }
+  else { de = anPDe || '2000-01-01'; ate = anPAte || hoje; }
+  return {de, ate};
+}
 function renderAnalise(){
   const sel=$('anCanalSel'); if(!sel) return;
-  const iv=intervalo();
+  const pr=$('anPerChips'), pd=$('anPerDatas');
+  if(pr){ const defs=[['dia','Hoje'],['ontem','Ontem'],['7','Semana'],['mes','Mês'],['mesant','Mês passado'],['custom','Período…']];
+    pr.innerHTML = defs.map(([k,l])=>'<button class="chip'+(anPer===k?' on':'')+'" onclick="setAnPer(\''+k+'\')">'+l+'</button>').join(''); }
+  if(pd){ pd.innerHTML = anPer==='custom' ? ' <input type="date" value="'+anPDe+'" onclick="this.showPicker&&this.showPicker()" onchange="anPDe=this.value;anPage=0;renderAnalise()"> <input type="date" value="'+anPAte+'" onclick="this.showPicker&&this.showPicker()" onchange="anPAte=this.value;anPage=0;renderAnalise()">' : ''; }
+  const iv=anIntervalo();
   let L = DADOS.filter(h=>{ if(!h.conferido_em) return false; const d=diaSP(h.conferido_em); return d>=iv.de && d<=iv.ate; });
   const cnt={}; L.forEach(h=>{ const k=canalKey(h.marketplace); cnt[k]=(cnt[k]||0)+1; });
   const opts='<option value="">Todos os canais ('+L.length+')</option>'+Object.keys(cnt).sort().map(k=>'<option value="'+k+'"'+(anCanal===k?' selected':'')+'>'+k+' ('+cnt[k]+')</option>').join('');
   if(sel.innerHTML!==opts) sel.innerHTML=opts;
   if(anCanal) L=L.filter(h=>canalKey(h.marketplace)===anCanal);
-  L.sort((a,b)=>String(b.conferido_em||'').localeCompare(String(a.conferido_em||'')));
+  const q = String(anSku||'').trim().toLowerCase();
+  if(q) L=L.filter(h=>(h.itens||[]).some(it=>String(it.sku||'').toLowerCase().includes(q)));
+  // mais novas em cima, pela CRIAÇÃO do pedido no Bling (id cresce na ordem em que as vendas chegam) —
+  // a bipagem acontece em ondas por marketplace, então ordenar pelo conferido_em criava "bolsões" por canal
+  L.sort((a,b)=> ((Number(b.id)||0)-(Number(a.id)||0)) || String(b.conferido_em||'').localeCompare(String(a.conferido_em||'')));
   const PAG=25, maxP=Math.max(0,Math.ceil(L.length/PAG)-1);
   if(anPage>maxP) anPage=maxP; if(anPage<0) anPage=0;
   const pag=L.slice(anPage*PAG, anPage*PAG+PAG);
