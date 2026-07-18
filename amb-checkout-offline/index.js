@@ -82,6 +82,7 @@ let _ultimoCicloAgora = 0;   // trava anti-spam do botão 'Bling agora' (1 dispa
 let _bf = { rodando: false, feitos: 0, total: 0, ok: 0, falhas: 0, iniciado_em: null };   // status do backfill de valores
 let _bfd = { rodando: false, feitos: 0, total: 0, ok: 0, falhas: 0, iniciado_em: null };   // status do backfill de DETALHES (uf + valor por item)
 let _skuInfoCache = null;   // cache em memória do sku-info (saldo/preço/custo)
+let _mls = { rodando: false, feitos: 0, total: 0, ok: 0, falhas: 0, iniciado_em: null };   // pesca de tarifas/frete REAIS do ML
 
 // BACKFILL-NF LOCAL: lê nf-simp.json (cache/arquivo) e preenche vprod_nf nos conferidos sem ele.
 // 100% disco, zero API — seguro pra rodar no cron diário e ao abrir o dashboard.
@@ -470,6 +471,18 @@ function routes(readBody) {
         writeJson(FEE_FILE, cacheF);
         json(res, 200, { ok: true, fee, itens: nIt, fonte: 'ml' });
       } catch (e) { json(res, 200, { ok: false, erro: 'ML indisponível: ' + String(e.message || e).slice(0, 120) }); }
+      return true;
+    }
+
+    // ADMIN (?k=): PESCA de tarifas/frete REAIS do ML agora (também roda sozinha todo dia às 04:40)
+    // Uso: /amb-checkout-offline/ml-sync-fees?k=ADMIN_KEY&dias=31 — chame de novo p/ ver o progresso
+    if ((method === 'POST' || method === 'GET') && p === '/amb-checkout-offline/ml-sync-fees') {
+      const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      if (!process.env.ADMIN_KEY || k !== process.env.ADMIN_KEY) { json(res, 404, { error: 'not found' }); return true; }
+      if (_mls.rodando) { json(res, 200, { ok: true, rodando: true, progresso: _mls.feitos + '/' + _mls.total, ok_ate_agora: _mls.ok, falhas: _mls.falhas }); return true; }
+      const dias = Number(urlObj.searchParams.get('dias') || 14);
+      mlSyncFees(dias).catch(() => {});
+      json(res, 200, { ok: true, iniciado: true, dias, mensagem: 'pesca ML rodando em background — chame de novo p/ ver o progresso' });
       return true;
     }
 
@@ -1840,11 +1853,76 @@ function bootstrap() {
   setTimeout(() => rodarCiclo('boot'), 20000);
 }
 
+// ═══ PESCA POSTERIOR (ML): busca tarifa REAL (sale_fee) e frete do vendedor nos pedidos ML
+// recentes e grava no conferido (tarifa_ml / frete_ml). Roda no cron diário e sob demanda.
+// Re-checa os finalizados dos últimos 3 dias mesmo se já têm tarifa (o ML pode ajustar depois).
+async function mlSyncFees(dias) {
+  dias = Math.max(1, Math.min(60, Number(dias || 14)));
+  if (_mls.rodando) return _mls;
+  const corte = Date.now() - dias * 86400000;
+  const recheck = Date.now() - 3 * 86400000;
+  const conf0 = readJson(CONFERIDOS_FILE, {});
+  const alvos = Object.entries(conf0).filter(([cid, c]) => {
+    if (!c || !c.conferido_em) return false;
+    const t = new Date(c.conferido_em).getTime();
+    if (t < corte) return false;
+    const mk = String(c.marketplace || '').toLowerCase();
+    if (mk !== 'ml' && mk !== 'mercadolivre') return false;
+    if (!c.numero_loja) return false;
+    return c.tarifa_ml == null || t >= recheck;
+  }).map(([cid]) => cid);
+  if (!alvos.length) { console.log('[ML-FEES] nada a pescar (' + dias + 'd)'); return { ok: true, nada: true }; }
+  _mls = { rodando: true, feitos: 0, total: alvos.length, ok: 0, falhas: 0, iniciado_em: new Date().toISOString() };
+  console.log('[ML-FEES] pescando tarifas de ' + alvos.length + ' pedido(s) ML...');
+  const dorme = ms => new Promise(r => setTimeout(r, ms));
+  let tokenML = null;
+  try { const { garantirTokenML } = require('../ambtotal/mlTokenManager'); tokenML = await garantirTokenML(); }
+  catch (e) { _mls.rodando = false; console.log('[ML-FEES] ✗ sem token ML: ' + e.message); return _mls; }
+  const pend = {};
+  const salvar = () => {
+    if (!Object.keys(pend).length) return;
+    const c2 = readJson(CONFERIDOS_FILE, {});
+    for (const [cid, d] of Object.entries(pend)) { if (!c2[cid]) continue; if (d.fee != null) c2[cid].tarifa_ml = d.fee; if (d.frete != null) c2[cid].frete_ml = d.frete; }
+    writeJson(CONFERIDOS_FILE, c2);
+    for (const cid of Object.keys(pend)) delete pend[cid];
+  };
+  for (const cid of alvos) {
+    try {
+      const nl = String((conf0[cid] && conf0[cid].numero_loja) || '').replace(/\D/g, '');
+      const r = await fetch('https://api.mercadolibre.com/orders/' + nl, { headers: { Authorization: 'Bearer ' + tokenML } });
+      const d = await r.json().catch(() => null);
+      if (r.ok && d) {
+        let fee = 0; for (const it of (d.order_items || [])) { const q = Number(it.quantity || 1); const sf = Number(it.sale_fee || 0); if (isFinite(sf)) fee += sf * q; }
+        const reg = { fee: Math.round(fee * 100) / 100, frete: null };
+        const shipId = d.shipping && d.shipping.id;
+        if (shipId) {
+          try {
+            const rs = await fetch('https://api.mercadolibre.com/shipments/' + shipId, { headers: { Authorization: 'Bearer ' + tokenML } });
+            const ds = await rs.json().catch(() => null);
+            if (rs.ok && ds) {
+              const lc = Number(ds.list_cost), cc = Number(ds.cost);   // list_cost = custo cheio do frete; cost = pago pelo comprador
+              if (isFinite(lc) && isFinite(cc) && lc >= cc) reg.frete = Math.round((lc - cc) * 100) / 100;   // parte do VENDEDOR
+            }
+          } catch (e) {}
+          await dorme(200);
+        }
+        pend[cid] = reg; _mls.ok++;
+      } else _mls.falhas++;
+    } catch (e) { _mls.falhas++; }
+    _mls.feitos++;
+    if (_mls.feitos % 15 === 0) { salvar(); console.log('[ML-FEES] ' + _mls.feitos + '/' + _mls.total); }
+    await dorme(350);
+  }
+  salvar(); _mls.rodando = false;
+  console.log('[ML-FEES] ✔ ' + _mls.ok + ' ok, ' + _mls.falhas + ' falha(s) de ' + _mls.total);
+  return _mls;
+}
+
 module.exports = {
   id: 'amb-checkout-offline',
   nome: 'AMBTotal Checkout Offline',
-  rotinas: { backupCache: () => rodarCiclo('cron'), backfillNF: () => backfillNFLocal(45) },
+  rotinas: { backupCache: () => rodarCiclo('cron'), backfillNF: () => backfillNFLocal(45), mlSyncFees: () => mlSyncFees(14) },
   routes,
-  crons: { backupCache: CRON_EXPR, backfillNF: '15 4 * * *' },
+  crons: { backupCache: CRON_EXPR, backfillNF: '15 4 * * *', mlSyncFees: '40 4 * * *' },
   bootstrap
 };
