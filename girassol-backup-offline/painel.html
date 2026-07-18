@@ -379,7 +379,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b112';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b113';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#b3b9c4'}, magalu:{n:'Magalu',c:'#0086ff'}, shein:{n:'Shein',c:'#e0e0e0'},
@@ -1371,6 +1371,7 @@ async function abrirHistorico(){
       '<div class="mtit">🕘 Últimos pedidos finalizados</div>'+
       '<input id="histBusca" class="buscafld" style="margin-bottom:8px" placeholder="🔎 filtrar por nº do pedido ou cliente" autocomplete="off" oninput="filtrarHist()" />'+
       '<div style="margin:-2px 0 8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap"><button class="chip flex" id="histFlexBtn" onclick="toggleHistFlex()">⚡ Só FLEX</button><button class="chip" id="histExpBtn" onclick="toggleHistExpand()">▼ Expandir tudo</button><button id="histPendBtn" onclick="toggleHistPend()" title="pedido(s) que o estoquista sinalizou pra reenvio — clique pra ver só eles e enviar" style="display:none;background:#dc2626;color:#fff;border:1px solid #dc2626;border-radius:999px;padding:7px 14px;font-size:13px;font-weight:800;cursor:pointer"></button></div>'+
+      '<div id="histPerRow" style="margin:-2px 0 8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap"></div>'+
       '<select id="histMktSel" class="buscafld" style="margin-bottom:10px" onchange="histMkt=this.value;filtrarHist()"><option value="">Todos os marketplaces</option></select>'+
       '<div id="histBody" class="histbody">carregando…</div>'+
       '<div class="mbtns"><button class="btn sec" onclick="fecharConfirmacao()">Fechar</button></div>'+
@@ -1444,10 +1445,33 @@ async function resolverReenvio(id, enviar){
   enviandoReenvio = false;
   abrirHistorico();
 }
+let histPer='todos', histPDe='', histPAte='';
+const hDiaSP = iso => { try{ return new Date(iso).toLocaleString('sv-SE',{timeZone:'America/Sao_Paulo'}).slice(0,10); }catch(e){ return String(iso||'').slice(0,10); } };
+const hHoje = () => new Date().toLocaleString('sv-SE',{timeZone:'America/Sao_Paulo'}).slice(0,10);
+function histIntervalo(){
+  const hoje=hHoje(); let de='2000-01-01', ate=hoje;
+  if(histPer==='hoje') de=hoje;
+  else if(histPer==='ontem'){ const o=new Date(Date.now()-86400000).toLocaleString('sv-SE',{timeZone:'America/Sao_Paulo'}).slice(0,10); de=o; ate=o; }
+  else if(histPer==='7') de=new Date(Date.now()-6*86400000).toLocaleString('sv-SE',{timeZone:'America/Sao_Paulo'}).slice(0,10);
+  else if(histPer==='mes') de=hoje.slice(0,8)+'01';
+  else if(histPer==='custom'){ de=histPDe||'2000-01-01'; ate=histPAte||hoje; }
+  return {de,ate};
+}
+function histPerOk(h){ if(histPer==='todos') return true; if(!h.conferido_em) return false; const d=hDiaSP(h.conferido_em); const iv=histIntervalo(); return d>=iv.de && d<=iv.ate; }
+function setHistPer(p){ histPer=p; filtrarHist(); }
+
 function renderHist(lista){
   if(histFlexOnly) lista = lista.filter(h=>!!h.flex);
   if(histPendOnly) lista = lista.filter(h=>histReenvios && histReenvios[h.id]);
+  lista = lista.filter(histPerOk);
   lista = lista.slice().sort((a,b)=>{ const fa=(histReenvios&&histReenvios[a.id])?1:0, fb=(histReenvios&&histReenvios[b.id])?1:0; return fa!==fb ? fb-fa : String(b.conferido_em||'').localeCompare(String(a.conferido_em||'')); });
+  const perRow = $('histPerRow');
+  if(perRow){
+    const defs=[['todos','Todos'],['hoje','Hoje'],['ontem','Ontem'],['7','Semana'],['mes','M\u00eas'],['custom','Per\u00edodo\u2026']];
+    perRow.innerHTML = defs.map(function(d2){ return '<button class="chip" style="'+(histPer===d2[0]?'background:#1d4ed8;color:#fff;border-color:#1d4ed8':'')+'" onclick="setHistPer(\''+d2[0]+'\')">'+d2[1]+'</button>'; }).join('')
+      + (histPer==='custom' ? ' <input type="date" value="'+histPDe+'" onclick="this.showPicker&&this.showPicker()" onchange="histPDe=this.value;filtrarHist()" style="padding:6px 8px;border-radius:8px;border:1px solid #94a3b8"> <input type="date" value="'+histPAte+'" onclick="this.showPicker&&this.showPicker()" onchange="histPAte=this.value;filtrarHist()" style="padding:6px 8px;border-radius:8px;border:1px solid #94a3b8">' : '')
+      + '<b style="margin-left:auto;font-size:13px">'+lista.length+' pedido(s)</b>';
+  }
   const pend = Object.keys(histReenvios||{}).length;
   const pb = $('histPendBtn'); if(pb){ pb.textContent = (histPendOnly?'✕ ':'⚠️ ')+pend+' PENDENTE'+(pend>1?'S':'')+' DE ENVIO'; pb.style.display = pend? 'inline-block' : 'none'; }
   if(!lista.length){ $('histBody').innerHTML='<div class="sepempty">'+(histItens.length?'Nenhum resultado pro filtro.':'Nenhum pedido finalizado ainda.')+'</div>'; return; }
@@ -1481,10 +1505,9 @@ function renderHist(lista){
       (ree?'<span class="reebadge" title="solicitado por '+esc(ree.por||'?')+' em '+esc((ree.em||'').slice(0,16).replace('T',' '))+'">📨 REENVIO</span>':'')+
       (h.ultimo_reenvio?'<span class="hsync" style="background:#1e3a8a;color:#bfdbfe" title="reenviado por '+esc(h.ultimo_reenvio.por||'?')+' em '+esc(String(h.ultimo_reenvio.em||'').slice(0,16).replace('T',' '))+'">📧 '+((h.reenvios||1)>1?((h.reenvios)+'× '):'')+esc(h.ultimo_reenvio.por||'?')+'</span>':'')+
       tag+
-      (!ree?'<button class="btn sec sm" onclick="event.stopPropagation();pedirReenvio(\''+h.id+'\',\''+esc(h.numero||h.id)+'\')" title="'+(histReenvioDireto?'etiqueta rasgou ou sujou? reenvia etiqueta + NF pro e-mail do estoque agora':'etiqueta rasgou ou sujou? avise o admin que este pedido precisa de reenvio')+'" style="background:'+(histReenvioDireto?'#1d4ed8':'#b45309')+';color:#fff;border-color:'+(histReenvioDireto?'#1d4ed8':'#b45309')+'">'+(histReenvioDireto?'📧 Reenviar':'⚠️ Avisar')+'</button>':'')+
+      (!ree?'<button class="btn sec sm" onclick="event.stopPropagation();pedirReenvio(\''+h.id+'\',\''+esc(h.numero||h.id)+'\')" title="'+(histReenvioDireto?'etiqueta rasgou ou sujou? reenvia etiqueta + NF pro e-mail do estoque agora':'etiqueta rasgou ou sujou? avise o admin que este pedido precisa de reenvio')+'" style="background:'+(histReenvioDireto?'#1d4ed8':'#b45309')+';color:#fff;border-color:'+(histReenvioDireto?'#1d4ed8':'#b45309')+'">'+(histReenvioDireto?'📧 Etiqueta + NF por EMAIL':'⚠️ Avisar')+'</button>':'')+
       (ree&&souAdmin()?'<button class="btn sec sm" onclick="event.stopPropagation();resolverReenvio(\''+h.id+'\',true)" title="enviar etiqueta+NF pro e-mail do estoque e baixar a solicitação">✉ Enviar</button>':'')+
       (ree&&souAdmin()?'<button class="btn sec sm" onclick="event.stopPropagation();resolverReenvio(\''+h.id+'\',false)" title="descartar a solicitação sem enviar">✕</button>':'')+
-      (souAdmin()?'<button class="btn sec sm" onclick="event.stopPropagation();enviarDocs(\''+h.id+'\',\''+esc(h.numero||h.id)+'\')" title="ADMIN: enviar etiqueta + NF pro e-mail do estoque agora">📧</button>':'')+
       (souAdmin()?'<button class="btn warn sm" onclick="event.stopPropagation();reabrirPedido(\''+h.id+'\',\''+esc(h.numero||h.id)+'\')">↩ Reabrir</button>':'')+
       '</div>'+
     '</div>'+det;
