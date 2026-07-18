@@ -1936,7 +1936,7 @@ async function mlSyncFees(dias) {
     const mk = String(c.marketplace || '').toLowerCase();
     if (mk !== 'ml' && mk !== 'mercadolivre') return false;
     if (!c.numero_loja) return false;
-    return c.tarifa_ml == null || t >= recheck;
+    return c.tarifa_ml == null || c.venda_em == null || t >= recheck;
   }).map(([cid]) => cid);
   if (!alvos.length) { console.log('[ML-FEES] nada a pescar (' + dias + 'd)'); return { ok: true, nada: true }; }
   _mls = { rodando: true, feitos: 0, total: alvos.length, ok: 0, falhas: 0, iniciado_em: new Date().toISOString() };
@@ -1949,7 +1949,7 @@ async function mlSyncFees(dias) {
   const salvar = () => {
     if (!Object.keys(pend).length) return;
     const c2 = readJson(CONFERIDOS_FILE, {});
-    for (const [cid, d] of Object.entries(pend)) { if (!c2[cid]) continue; if (d.fee != null) c2[cid].tarifa_ml = d.fee; if (d.frete != null) c2[cid].frete_ml = d.frete; }
+    for (const [cid, d] of Object.entries(pend)) { if (!c2[cid]) continue; if (d.fee != null) c2[cid].tarifa_ml = d.fee; if (d.frete != null) c2[cid].frete_ml = d.frete; if (d.venda) c2[cid].venda_em = d.venda; }
     writeJson(CONFERIDOS_FILE, c2);
     for (const cid of Object.keys(pend)) delete pend[cid];
   };
@@ -1960,7 +1960,7 @@ async function mlSyncFees(dias) {
       const d = await r.json().catch(() => null);
       if (r.ok && d) {
         let fee = 0; for (const it of (d.order_items || [])) { const q = Number(it.quantity || 1); const sf = Number(it.sale_fee || 0); if (isFinite(sf)) fee += sf * q; }
-        const reg = { fee: Math.round(fee * 100) / 100, frete: null };
+        const reg = { fee: Math.round(fee * 100) / 100, frete: null, venda: (d.date_created || null) };   // hora REAL da venda no ML
         const shipId = d.shipping && d.shipping.id;
         if (shipId) {
           try {
