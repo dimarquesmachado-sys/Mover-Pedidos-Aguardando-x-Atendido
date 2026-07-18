@@ -83,27 +83,31 @@ let _bf = { rodando: false, feitos: 0, total: 0, ok: 0, falhas: 0, iniciado_em: 
 let _bfd = { rodando: false, feitos: 0, total: 0, ok: 0, falhas: 0, iniciado_em: null };   // status do backfill de DETALHES (uf + valor por item)
 let _skuInfoCache = null;   // cache em memória do sku-info (saldo/preço/custo)
 
-// ── varredura LOCAL da fonte-NF: preenche vprod_nf lendo nf-simp.json do cache/arquivo (zero API) ──
-// Reutilizada por: rota manual (?k=), rota do dashboard (sessão) e cron diário.
-function varreduraNF(dias, origem) {
-  const corte = Date.now() - (dias || 7) * 86400000;
+// BACKFILL-NF LOCAL: lê nf-simp.json (cache/arquivo) e preenche vprod_nf nos conferidos sem ele.
+// 100% disco, zero API — seguro pra rodar no cron diário e ao abrir o dashboard.
+function backfillNFLocal(dias) {
+  dias = Math.max(1, Math.min(120, Number(dias || 45)));
+  const corte = Date.now() - dias * 86400000;
   const conf2 = readJson(CONFERIDOS_FILE, {});
   let alvo = 0, comSimp = 0, semSimp = 0;
   for (const [cid, c] of Object.entries(conf2)) {
     if (!c || !c.conferido_em || new Date(c.conferido_em).getTime() < corte) continue;
-    if (c.vprod_nf != null) continue;
+    if (c.vprod_nf != null && c.numero_loja != null) continue;
     alvo++;
     let ds = readJson(path.join(CACHE_DIR, String(cid), 'nf-simp.json'), null);
     if (!ds) ds = readJson(path.join(ARQUIVO_DIR, String(cid), 'nf-simp.json'), null);
-    if (ds && Array.isArray(ds.itens) && ds.itens.length) {
-      const s2 = ds.itens.reduce((a, i) => a + (Number(i.valorTotal) || 0), 0);
-      if (isFinite(s2) && s2 > 0) { c.vprod_nf = Math.round(s2 * 100) / 100; comSimp++; continue; }
+    if (ds) {
+      if (c.numero_loja == null && ds.numeroPedidoLoja) c.numero_loja = String(ds.numeroPedidoLoja);
+      if (Array.isArray(ds.itens) && ds.itens.length) {
+        const s2 = ds.itens.reduce((a, i) => a + (Number(i.valorTotal) || 0), 0);
+        if (isFinite(s2) && s2 > 0) { if (c.vprod_nf == null) { c.vprod_nf = Math.round(s2 * 100) / 100; comSimp++; } continue; }
+      }
     }
     semSimp++;
   }
   if (comSimp) writeJson(CONFERIDOS_FILE, conf2);
-  if (comSimp || origem === 'cron') console.log('[NF-SWEEP] (' + (origem || '?') + ') ' + comSimp + ' preenchido(s) pela nota, ' + semSimp + ' sem nf-simp, janela ' + (dias || 7) + 'd');
-  return { candidatos: alvo, preenchidos_pela_nf: comSimp, sem_nf_simp_no_disco: semSimp };
+  if (comSimp || semSimp) console.log(`[BACKFILL-NF] ${comSimp} preenchido(s) pela nota, ${semSimp} sem nf-simp no disco (janela ${dias}d)`);
+  return { candidatos: alvo, preenchidos_pela_nf: comSimp, sem_nf_simp_no_disco: semSimp, dias };
 }
 const { montarSeparacao, montarSeparacaoPorPedido } = require('./separacao');
 const { enviarEmailDocs } = require('./email-docs');
@@ -408,24 +412,64 @@ function routes(readBody) {
       return true;
     }
 
+    // DASHBOARD (sessão admin): dispara o backfill-NF local ao abrir o dashboard — mantém os números sempre frescos
+    if (method === 'POST' && p === '/amb-checkout-offline/backfill-nf-auto') {
+      const opSess = validarSessao(req.headers['cookie']);
+      if (!opSess || !ehAdmin(opSess)) { json(res, 403, { ok: false, erro: 'apenas admin' }); return true; }
+      json(res, 200, { ok: true, ...backfillNFLocal(45) });
+      return true;
+    }
+
     // ADMIN (?k=): BACKFILL-NF — 100% LOCAL (lê nf-simp.json do cache/arquivo; ZERO chamadas ao Bling).
     // Preenche vprod_nf (Σ itens da NOTA) nos finalizados → produtos EXATO + frete EXATO (valor − vprod_nf), retroativo.
     // Uso: /amb-checkout-offline/backfill-nf?k=ADMIN_KEY&dias=45   (roda em segundos)
     if ((method === 'POST' || method === 'GET') && p === '/amb-checkout-offline/backfill-nf') {
       const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
       if (!process.env.ADMIN_KEY || k !== process.env.ADMIN_KEY) { json(res, 404, { error: 'not found' }); return true; }
-      const dias = Math.max(1, Math.min(120, Number(urlObj.searchParams.get('dias') || 45)));
-      const r = varreduraNF(dias, 'manual');
-      json(res, 200, { ok: true, dias, ...r,
+      const r = backfillNFLocal(urlObj.searchParams.get('dias'));
+      json(res, 200, { ok: true, ...r,
         mensagem: r.preenchidos_pela_nf ? ('✓ ' + r.preenchidos_pela_nf + ' pedido(s) ganharam produtos/frete EXATOS da nota (leitura local, sem API)') : 'nada novo a preencher' });
       return true;
     }
 
-    // DASHBOARD (sessão admin): varredura NF rápida — o dashboard chama sozinho ao abrir
-    if (method === 'POST' && p === '/amb-checkout-offline/nf-sweep') {
+    // DASHBOARD (sessão admin): CONFIG FISCAL — alíquota do Simples POR MÊS + taxa % por canal
+    if ((method === 'GET' || method === 'POST') && p === '/amb-checkout-offline/config-fiscal') {
       const opSess = validarSessao(req.headers['cookie']);
       if (!opSess || !ehAdmin(opSess)) { json(res, 403, { ok: false, erro: 'apenas admin' }); return true; }
-      json(res, 200, { ok: true, ...varreduraNF(7, 'dashboard') });
+      const CFG_FILE = path.join(CACHE_DIR, '_config-fiscal.json');
+      if (method === 'GET') { json(res, 200, { ok: true, config: readJson(CFG_FILE, { aliquotas: {}, taxas: {} }) }); return true; }
+      let body = {}; try { body = JSON.parse(await readBody(req) || '{}'); } catch (e) {}
+      const atual = readJson(CFG_FILE, { aliquotas: {}, taxas: {} });
+      if (body.aliquotas && typeof body.aliquotas === 'object') for (const [k2, v2] of Object.entries(body.aliquotas)) { const n2 = Number(v2); if (/^\d{4}-\d{2}$/.test(k2) && isFinite(n2) && n2 >= 0 && n2 <= 40) atual.aliquotas[k2] = n2; else if (v2 === null) delete atual.aliquotas[k2]; }
+      if (body.taxas && typeof body.taxas === 'object') for (const [k2, v2] of Object.entries(body.taxas)) { const n2 = Number(v2); if (isFinite(n2) && n2 >= 0 && n2 <= 50) atual.taxas[String(k2).toLowerCase()] = n2; else if (v2 === null) delete atual.taxas[String(k2).toLowerCase()]; }
+      writeJson(CFG_FILE, atual);
+      json(res, 200, { ok: true, config: atual });
+      return true;
+    }
+
+    // DASHBOARD (sessão admin): TARIFA REAL do Mercado Livre p/ um pedido (sale_fee da API), com cache permanente
+    if (method === 'POST' && p === '/amb-checkout-offline/ml-fee') {
+      const opSess = validarSessao(req.headers['cookie']);
+      if (!opSess || !ehAdmin(opSess)) { json(res, 403, { ok: false, erro: 'apenas admin' }); return true; }
+      let body = {}; try { body = JSON.parse(await readBody(req) || '{}'); } catch (e) {}
+      const orderId = String(body.numeroLoja || '').replace(/\D/g, '');
+      if (!orderId) { json(res, 200, { ok: false, erro: 'numeroLoja vazio' }); return true; }
+      const FEE_FILE = path.join(CACHE_DIR, '_mlfees.json');
+      const cacheF = readJson(FEE_FILE, {});
+      if (cacheF[orderId] && cacheF[orderId].fee != null) { json(res, 200, { ok: true, fee: cacheF[orderId].fee, itens: cacheF[orderId].itens, fonte: 'cache' }); return true; }
+      try {
+        const { garantirTokenML } = require('../ambtotal/mlTokenManager');
+        const tokenML = await garantirTokenML();
+        const r = await fetch('https://api.mercadolibre.com/orders/' + orderId, { headers: { Authorization: 'Bearer ' + tokenML } });
+        const d = await r.json().catch(() => null);
+        if (!r.ok || !d) { json(res, 200, { ok: false, erro: 'ML respondeu ' + r.status + (d && d.message ? ': ' + d.message : '') }); return true; }
+        let fee = 0, nIt = 0;
+        for (const it of (d.order_items || [])) { const q = Number(it.quantity || 1); const sf = Number(it.sale_fee || 0); if (isFinite(sf)) { fee += sf * q; nIt++; } }
+        fee = Math.round(fee * 100) / 100;
+        cacheF[orderId] = { fee, itens: nIt, ts: Date.now() };
+        writeJson(FEE_FILE, cacheF);
+        json(res, 200, { ok: true, fee, itens: nIt, fonte: 'ml' });
+      } catch (e) { json(res, 200, { ok: false, erro: 'ML indisponível: ' + String(e.message || e).slice(0, 120) }); }
       return true;
     }
 
@@ -966,6 +1010,7 @@ function routes(readBody) {
           if (ds && Array.isArray(ds.itens) && ds.itens.length) { const s2 = ds.itens.reduce((a,i)=>a+(Number(i.valorTotal)||0),0); return isFinite(s2)&&s2>0 ? Math.round(s2*100)/100 : null; }
         } catch (e) {} return null; })(),
         municipio: (snapC && snapC.municipio) || null,
+        numero_loja: (snapC && snapC.numero_loja) || null,
         itens: snapC ? (snapC.itens || []).map(it => ({ sku: it.sku || '', descricao: String(it.descricao || '').slice(0, 90), qtd: it.qtd || 1, valor_unit: (it.valor_unit != null ? it.valor_unit : null), valor_total: (it.valor_total != null ? it.valor_total : null) })) : []
       };
       writeJson(CONFERIDOS_FILE, conf);            // grava na fila primeiro — nunca perde
@@ -1798,8 +1843,8 @@ function bootstrap() {
 module.exports = {
   id: 'amb-checkout-offline',
   nome: 'AMBTotal Checkout Offline',
-  rotinas: { backupCache: () => rodarCiclo('cron'), sweepNF: () => varreduraNF(7, 'cron') },
+  rotinas: { backupCache: () => rodarCiclo('cron'), backfillNF: () => backfillNFLocal(45) },
   routes,
-  crons: { backupCache: CRON_EXPR, sweepNF: '20 3 * * *' },
+  crons: { backupCache: CRON_EXPR, backfillNF: '15 4 * * *' },
   bootstrap
 };
