@@ -82,7 +82,7 @@ let _ultimoCicloAgora = 0;   // trava anti-spam do botão 'Bling agora' (1 dispa
 let _bf = { rodando: false, feitos: 0, total: 0, ok: 0, falhas: 0, iniciado_em: null };   // status do backfill de valores
 let _bfd = { rodando: false, feitos: 0, total: 0, ok: 0, falhas: 0, iniciado_em: null };   // status do backfill de DETALHES (uf + valor por item)
 let _skuInfoCache = null;   // cache em memória do sku-info (saldo/preço/custo)
-let _mls = { rodando: false, feitos: 0, total: 0, ok: 0, falhas: 0, iniciado_em: null };   // pesca de tarifas/frete REAIS do ML
+let _mls = { rodando: false, feitos: 0, total: 0, ok: 0, falhas: 0, iniciado_em: null, erros: {}, amostras: [] };   // pesca de tarifas/frete REAIS do ML
 
 // BACKFILL-NF LOCAL: lê nf-simp.json (cache/arquivo) e preenche vprod_nf nos conferidos sem ele.
 // 100% disco, zero API — seguro pra rodar no cron diário e ao abrir o dashboard.
@@ -524,7 +524,7 @@ function routes(readBody) {
       const autorizado = (process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || (sessA && ehAdmin(sessA));
       if (!autorizado) { json(res, 404, { error: 'not found' }); return true; }
       const soStatus = (urlObj.searchParams && urlObj.searchParams.get('status')) === '1';
-      if (_mls.rodando || soStatus) { json(res, 200, { ok: true, rodando: !!_mls.rodando, progresso: _mls.feitos + '/' + _mls.total, ok_ate_agora: _mls.ok, falhas: _mls.falhas, ultimo_inicio: _mls.iniciado_em }); return true; }
+      if (_mls.rodando || soStatus) { json(res, 200, { ok: true, rodando: !!_mls.rodando, progresso: _mls.feitos + '/' + _mls.total, ok_ate_agora: _mls.ok, falhas: _mls.falhas, ultimo_inicio: _mls.iniciado_em, erros: _mls.erros || {}, amostras: _mls.amostras || [] }); return true; }
       const dias = Number(urlObj.searchParams.get('dias') || 14);
       mlSyncFees(dias).catch(() => {});
       json(res, 200, { ok: true, iniciado: true, dias, mensagem: 'pesca ML rodando em background — chame de novo p/ ver o progresso' });
@@ -1977,7 +1977,7 @@ async function mlSyncFees(dias) {
     return c.tarifa_ml == null || c.venda_em == null || t >= recheck;
   }).map(([cid]) => cid);
   if (!alvos.length) { console.log('[ML-FEES] nada a pescar (' + dias + 'd)'); return { ok: true, nada: true }; }
-  _mls = { rodando: true, feitos: 0, total: alvos.length, ok: 0, falhas: 0, iniciado_em: new Date().toISOString() };
+  _mls = { rodando: true, feitos: 0, total: alvos.length, ok: 0, falhas: 0, iniciado_em: new Date().toISOString(), erros: {}, amostras: [] };
   console.log('[ML-FEES] pescando tarifas de ' + alvos.length + ' pedido(s) ML...');
   const dorme = ms => new Promise(r => setTimeout(r, ms));
   let tokenML = null;
@@ -2012,8 +2012,19 @@ async function mlSyncFees(dias) {
           await dorme(200);
         }
         pend[cid] = reg; _mls.ok++;
-      } else _mls.falhas++;
-    } catch (e) { _mls.falhas++; }
+      } else {
+        _mls.falhas++;
+        const stc = String(r.status), em = ((d && (d.message || d.error)) || '').slice(0, 140);
+        _mls.erros[stc] = (_mls.erros[stc] || 0) + 1;
+        if (_mls.amostras.length < 3) { _mls.amostras.push({ pedido: cid, numero_loja: nl, status: r.status, msg: em }); }
+        if ((_mls.erros[stc] || 0) === 1) console.log('[ML-FEES] falha ' + r.status + ' no pedido ' + cid + ' (venda ' + nl + '): ' + em);
+      }
+    } catch (e) {
+      _mls.falhas++;
+      _mls.erros.exc = (_mls.erros.exc || 0) + 1;
+      if (_mls.amostras.length < 3) { _mls.amostras.push({ pedido: cid, status: 'exc', msg: String(e.message || e).slice(0, 140) }); }
+      if (_mls.erros.exc === 1) console.log('[ML-FEES] exceção no pedido ' + cid + ': ' + (e.message || e));
+    }
     _mls.feitos++;
     if (_mls.feitos % 15 === 0) { salvar(); console.log('[ML-FEES] ' + _mls.feitos + '/' + _mls.total); }
     await dorme(350);
