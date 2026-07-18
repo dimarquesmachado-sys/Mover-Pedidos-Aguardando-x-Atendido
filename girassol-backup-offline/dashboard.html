@@ -19,10 +19,10 @@
   body{margin:0;background:radial-gradient(1200px 500px at 70% -100px,#151d3a 0%,var(--bg) 55%);color:var(--tx);
        font:14px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Inter,sans-serif;padding:0 16px 40px}
   a{color:var(--ac2);text-decoration:none}
-  .wrap{max-width:1180px;margin:0 auto}
+  .wrap{max-width:min(1720px,96vw);margin:0 auto}
   .hdr{position:sticky;top:0;z-index:50;background:linear-gradient(180deg,rgba(10,14,26,.97) 70%,rgba(10,14,26,0));
        padding:14px 0 10px;margin:0 -16px;padding-left:16px;padding-right:16px}
-  .hrow{max-width:1180px;margin:0 auto;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  .hrow{max-width:min(1720px,96vw);margin:0 auto;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
   h1{font-size:17px;font-weight:800;margin:0;letter-spacing:-.02em;display:flex;align-items:center;gap:8px}
   h1 .logo{width:30px;height:30px;border-radius:9px;background:linear-gradient(135deg,#fbbf24,#f59e0b);
            display:inline-flex;align-items:center;justify-content:center;font-size:16px}
@@ -95,7 +95,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd12';
+const DASH_BUILD = 'd13';
 let DADOS = [];
 let periodo = 'mes', pDe = '', pAte = '';
 let SKUINFO = {}, skuInfoCarregado = false, _skuLoading = false;
@@ -119,6 +119,8 @@ const N = v => Number(v).toLocaleString('pt-BR');
 const diaSP = iso => { try{ return new Date(iso).toLocaleString('sv-SE',{timeZone:'America/Sao_Paulo'}).slice(0,10); }catch(e){ return String(iso||'').slice(0,10); } };
 const hojeSP = () => new Date().toLocaleString('sv-SE',{timeZone:'America/Sao_Paulo'}).slice(0,10);
 const spDate = ms => new Date(ms).toLocaleString('sv-SE',{timeZone:'America/Sao_Paulo'}).slice(0,10);
+const dtBR = iso => { try{ return new Date(iso).toLocaleString('pt-BR',{timeZone:'America/Sao_Paulo',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}).replace(',',''); }catch(e){ return ''; } };
+const tMs = h => { const v = h.venda_em || h.conferido_em || ''; const n = Date.parse(v); return isFinite(n) ? n : 0; };
 function setSortProd(c){ sortProd = { col:c, dir:(sortProd.col===c ? -sortProd.dir : -1) }; render(); }
 function setSortProj(c){ sortProj = { col:c, dir:(sortProj.col===c ? -sortProj.dir : -1) }; renderProjecao(); }
 const seta = (st,c)=> st.col===c ? (st.dir<0?' ↓':' ↑') : '';
@@ -540,9 +542,9 @@ function renderAnalise(){
   if(anCanal) L=L.filter(h=>canalKey(h.marketplace)===anCanal);
   const q = String(anSku||'').trim().toLowerCase();
   if(q) L=L.filter(h=>(h.itens||[]).some(it=>String(it.sku||'').toLowerCase().includes(q)));
-  // mais novas em cima, pela CRIAÇÃO do pedido no Bling (id cresce na ordem em que as vendas chegam) —
-  // a bipagem acontece em ondas por marketplace, então ordenar pelo conferido_em criava "bolsões" por canal
-  L.sort((a,b)=> ((Number(b.id)||0)-(Number(a.id)||0)) || String(b.conferido_em||'').localeCompare(String(a.conferido_em||'')));
+  // mais novas em cima pela HORA REAL: ML usa a hora da venda (pescada da API); demais canais usam a
+  // hora da conferência até termos as APIs deles (Bling não guarda hora da venda; importa em lotes por canal)
+  L.sort((a,b)=> tMs(b)-tMs(a));
   const PAG=25, maxP=Math.max(0,Math.ceil(L.length/PAG)-1);
   if(anPage>maxP) anPage=maxP; if(anPage<0) anPage=0;
   const pag=L.slice(anPage*PAG, anPage*PAG+PAG);
@@ -571,7 +573,7 @@ function renderAnalise(){
     const it0=(h.itens||[])[0]||{};
     const pmc = (P.mc!=null&&P.rp)?Math.round(P.mc/P.rp*100):null;
     return '<tr>'+
-      '<td class="dim" style="white-space:nowrap">'+diaSP(h.conferido_em).slice(5)+'</td>'+
+      '<td class="dim" style="white-space:nowrap" title="'+(h.venda_em?('venda: '+dtBR(h.venda_em)+' · '):'')+'conferido: '+dtBR(h.conferido_em)+'">'+dtBR(h.venda_em||h.conferido_em)+(h.venda_em?'':' <span style="font-size:9px" title="hora da conferência (canal ainda sem API de hora da venda)">🕘</span>')+'</td>'+
       '<td><b>'+esc(h.numero||h.id)+'</b>'+(carrinho?' <span class="badge" title="'+unid+' unidades">🛒 '+unid+'</span>':'')+
         (h.nf_numero?'<div class="desc">NF '+esc(h.nf_numero)+'</div>':'')+'</td>'+
       '<td class="dim" style="font-size:11px;max-width:135px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+esc(h.numero_loja||'')+'">'+esc(h.numero_loja||'—')+'</td>'+
@@ -587,7 +589,7 @@ function renderAnalise(){
     '</tr>';
   }).join('');
   $('tAnalise').innerHTML =
-    '<tr><th>Data</th><th>Pedido</th><th>Venda (mkt)</th><th>Canal</th><th>Produto</th><th class="num">Un.</th>'+
+    '<tr><th>Data/hora</th><th>Pedido</th><th>Venda (mkt)</th><th>Canal</th><th>Produto</th><th class="num">Un.</th>'+
     '<th class="num">Venda</th><th class="num">Prod. NF</th><th class="num">Custo (−)</th><th class="num">Imposto (−)</th>'+
     '<th class="num">Tarifa (−)</th><th class="num">Frete vend. (−)</th><th class="num">💎 M.C.</th><th class="num">MC %</th></tr>'+
     (linhas || '<tr><td class="dim" colspan="14">sem vendas no período</td></tr>')+
