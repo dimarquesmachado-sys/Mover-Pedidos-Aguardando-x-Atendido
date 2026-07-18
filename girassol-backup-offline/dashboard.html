@@ -95,11 +95,14 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd10';
+const DASH_BUILD = 'd11';
 let DADOS = [];
 let periodo = 'mes', pDe = '', pAte = '';
 let SKUINFO = {}, skuInfoCarregado = false, _skuLoading = false;
 let CFG = { aliquotas:{}, taxas:{} };   // alíquota Simples por mês (YYYY-MM: %) + tarifa % por canal
+// Alíquotas 2026 da GIRASSOL vindas de fábrica (editáveis no ⚙️; o que você salvar SOBREPÕE estas):
+const DEFAULT_ALIQ = { '2026-01':11.409280, '2026-02':11.3254, '2026-03':12.3402, '2026-04':13.6001, '2026-05':13.9149, '2026-06':14.056, '2026-07':14.1 };
+const aliqDe = mes => (CFG.aliquotas[mes] != null ? CFG.aliquotas[mes] : (DEFAULT_ALIQ[mes] != null ? DEFAULT_ALIQ[mes] : null));
 const CANAIS_CFG = ['ml','shopee','magalu','amazon','tiktok','madeira','leroy','outro'];
 const canalKey = mk => { mk=(mk||'outro').toLowerCase(); return mk==='mercadolivre'?'ml':(CANAIS_CFG.includes(mk)?mk:'outro'); };
 let sortProd = { col: 'fat', dir: -1 };
@@ -276,7 +279,7 @@ function render(){
       PER.forEach(h=>{
         const rp = (h.vprod_nf!=null&&isFinite(Number(h.vprod_nf))) ? Number(h.vprod_nf) : null;
         if(rp==null) return;
-        const aliq = CFG.aliquotas[diaSP(h.conferido_em).slice(0,7)];
+        const aliq = aliqDe(diaSP(h.conferido_em).slice(0,7));
         const tReal = (h.tarifa_ml!=null && isFinite(Number(h.tarifa_ml))) ? Number(h.tarifa_ml) : null;
         const tx = CFG.taxas[canalKey(h.marketplace)];
         if(aliq==null || (tReal==null && tx==null)){ semCfg++; return; }
@@ -286,8 +289,8 @@ function render(){
         if(h.frete_ml!=null && isFinite(Number(h.frete_ml))) frV+=Number(h.frete_ml);
         (h.itens||[]).forEach(it=>{ const q=Number(it.qtd||1); unTot+=q; const info=SKUINFO[it.sku]; if(info&&info.custo!=null){ cus+=info.custo*q; cusUn+=q; } });
       });
-      if(!Object.keys(CFG.aliquotas).length && !Object.keys(CFG.taxas).length)
-        return '<div class="kpi" style="--kc:#64748b;cursor:pointer" onclick="document.getElementById(\'cfgBox\').scrollIntoView({behavior:\'smooth\'})"><span class="ic">💎</span><div class="l">Margem de contribuição</div><div class="v dim">—</div><div class="s warn">⚙️ configure alíquota &amp; taxas abaixo</div></div>';
+      if(!Object.keys(CFG.taxas).length)
+        return '<div class="kpi" style="--kc:#64748b;cursor:pointer" onclick="document.getElementById(\'cfgBox\').scrollIntoView({behavior:\'smooth\'})"><span class="ic">💎</span><div class="l">Margem de contribuição</div><div class="v dim">—</div><div class="s warn">⚙️ configure as taxas por canal abaixo (alíquotas já vêm de fábrica)</div></div>';
       const mc = rec-imp-tar-cus-frV;
       return '<div class="kpi" style="--kc:#14b8a6"><span class="ic">💎</span><div class="l">Margem de contribuição (est.)</div>'+
         '<div class="v '+(mc>=0?'ok':'bad')+'">'+BRL(mc)+'</div>'+
@@ -368,18 +371,23 @@ function desenharCharts(labels, sPed, sFat){
 }
 
 // ── ⚙️ config fiscal ────────────────────────────────────────────────────────
-function mesesRecentes(){
-  const set = new Set([hojeSP().slice(0,7)]);
-  DADOS.forEach(h=>{ if(h.conferido_em) set.add(diaSP(h.conferido_em).slice(0,7)); });
-  return [...set].sort().reverse().slice(0,6);
+function mesesAno(){
+  const y = hojeSP().slice(0,4);
+  return Array.from({length:12},(_,i)=> y+'-'+String(i+1).padStart(2,'0'));
 }
 function renderCfg(){
   const box=$('cfgBox'); if(!box) return;
   const NOMEC={ml:'Mercado Livre',shopee:'Shopee',magalu:'Magalu',amazon:'Amazon',tiktok:'TikTok',madeira:'MadeiraMadeira',leroy:'Leroy',outro:'Outro'};
   box.innerHTML =
-    '<div style="font-size:12px;color:var(--mut);margin-bottom:6px">📅 Alíquota do Simples por mês (%)</div>'+
-    '<div style="display:flex;gap:10px;flex-wrap:wrap">'+ mesesRecentes().map(m=>
-      '<label style="font-size:12px;color:var(--mut)">'+m+'<br><input type="number" step="0.01" min="0" max="40" data-aliq="'+m+'" value="'+(CFG.aliquotas[m]!=null?CFG.aliquotas[m]:'')+'" placeholder="ex 8.3" style="width:86px"></label>').join('')+'</div>'+
+    '<div style="font-size:12px;color:var(--mut);margin-bottom:6px">📅 Alíquota do Simples por mês (%) — os 12 meses de '+hojeSP().slice(0,4)+' · valores em cinza = de fábrica (edite e salve p/ sobrepor; o cálculo recalcula sozinho)</div>'+
+    '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px 14px">'+ mesesAno().map(m=>{
+      const NM=['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'][Number(m.slice(5,7))-1];
+      const salvo = CFG.aliquotas[m], padrao = (typeof DEFAULT_ALIQ!=='undefined' && DEFAULT_ALIQ[m]!=null)? DEFAULT_ALIQ[m] : null;
+      const val = salvo!=null? salvo : (padrao!=null? padrao : '');
+      return '<label style="font-size:12px;color:var(--mut);display:flex;align-items:center;gap:6px;justify-content:space-between"><b style="min-width:56px">'+NM+'/'+m.slice(2,4)+'</b>'+
+        '<input type="number" step="0.0001" min="0" max="40" data-aliq="'+m+'" value="'+val+'" placeholder="%" '+
+        'style="width:96px'+(salvo==null&&padrao!=null?';color:#8b96b3':'')+'" title="'+(salvo!=null?'valor salvo por você':(padrao!=null?'de fábrica ('+padrao+'%) — edite p/ sobrepor':'sem alíquota'))+'"></label>';
+    }).join('')+'</div>'+
     '<div style="font-size:12px;color:var(--mut);margin:14px 0 6px">🏪 Tarifa por canal (% sobre produtos) — estimativa p/ o agregado; na busca, ML usa a REAL</div>'+
     '<div style="display:flex;gap:10px;flex-wrap:wrap">'+ CANAIS_CFG.map(c=>
       '<label style="font-size:12px;color:var(--mut)">'+NOMEC[c]+'<br><input type="number" step="0.1" min="0" max="50" data-taxa="'+c+'" value="'+(CFG.taxas[c]!=null?CFG.taxas[c]:'')+'" placeholder="%" style="width:86px"></label>').join('')+'</div>';
@@ -404,7 +412,7 @@ function calcPL(h){
   const rp = (h.vprod_nf!=null&&isFinite(Number(h.vprod_nf)))?Number(h.vprod_nf):(((h.itens||[]).reduce((a,i)=>a+(Number(i.valor_total)||0),0))||null);
   const tot = (h.valor!=null&&isFinite(Number(h.valor)))?Number(h.valor):null;
   const frete = (tot!=null&&rp!=null)?tot-rp:null;
-  const aliq = CFG.aliquotas[mes];
+  const aliq = aliqDe(mes);
   const imposto = (aliq!=null&&tot!=null)?tot*aliq/100:null;
   const feeReal = (h.tarifa_ml!=null&&isFinite(Number(h.tarifa_ml)))?Number(h.tarifa_ml):_plMLFee[h.id];
   const tx = CFG.taxas[ck];
@@ -518,9 +526,14 @@ function renderAnalise(){
   const faltam=[...new Set(pag.flatMap(h=>(h.itens||[]).map(i=>i.sku)).filter(sk=>sk && !SKUINFO[sk]))];
   if(faltam.length && !_anLoading){
     _anLoading=true;
-    fetch(MOD+'/sku-info',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({skus:faltam.slice(0,40)})})
-      .then(r=>r.json()).then(d=>{ if(d&&d.skus) Object.assign(SKUINFO,d.skus); }).catch(()=>{})
-      .finally(()=>{ _anLoading=false; renderAnalise(); });
+    (async()=>{
+      for(let i=0;i<faltam.length && i<40;i+=8){
+        try{
+          const r=await fetch(MOD+'/sku-info',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({skus:faltam.slice(i,i+8)})});
+          const d=await r.json(); if(d&&d.skus) Object.assign(SKUINFO,d.skus);
+        }catch(e){}
+      }
+    })().finally(()=>{ _anLoading=false; renderAnalise(); });
   }
   const T={tot:0,rp:0,imp:0,tar:0,cus:0,frv:0,mc:0,mcN:0};
   const cel=(v,cls)=>'<td class="num'+(cls?' '+cls:'')+'">'+(v!=null?BRL(v):'<span class="dim">—</span>')+'</td>';
@@ -583,22 +596,23 @@ async function carregarSkuInfo(fresh){
   if(st) st.textContent='⏳ consultando o Bling (saldo/preço/custo)… ~30-60s na 1ª vez';
   if(btn) btn.style.display='none';
   const skus = topSkus14().map(t=>t.sku);
-  try{
-    for(let i=0;i<skus.length;i+=40){
-      const r = await fetch(MOD+'/sku-info',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({skus:skus.slice(i,i+40), fresh: !!fresh})});
+  let feitos = 0, falhas = 0;
+  for(let i=0;i<skus.length;i+=8){   // fatias de 8: cada chamada responde em ~20s (40 de uma vez estourava o timeout do servidor)
+    try{
+      const r = await fetch(MOD+'/sku-info',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({skus:skus.slice(i,i+8), fresh: !!fresh})});
       if(r.status===403){ if(st) st.innerHTML='🔒 sessão de admin expirou — <a href="'+MOD+'/painel">faça login</a> e recarregue'; _skuLoading=false; return; }
       const d = await r.json();
       if(d && d.skus) Object.assign(SKUINFO, d.skus);
-    }
-    skuInfoCarregado = true;
-    if(st) st.textContent='✓ dados do Bling carregados (cache de 6h)';
-    if(btn){ btn.style.display=''; btn.disabled=false; btn.textContent='↻ recarregar do Bling'; }
-  }catch(e){
-    if(st) st.textContent='✗ falha ao consultar o Bling: '+e.message;
-    if(btn){ btn.style.display=''; btn.disabled=false; btn.textContent='↻ tentar de novo'; }
+    }catch(e){ falhas++; }
+    feitos = Math.min(skus.length, i+8);
+    if(st) st.textContent='⏳ consultando o Bling… '+feitos+'/'+skus.length+(falhas?' ('+falhas+' fatia(s) falharam)':'');
+    renderProjecao();   // vai mostrando o que já chegou
   }
+  skuInfoCarregado = true;
+  if(st) st.textContent = falhas? ('✓ parcial — '+falhas+' fatia(s) falharam; clique ↻ p/ completar') : '✓ dados do Bling carregados (cache de 6h)';
+  if(btn){ btn.style.display=''; btn.disabled=false; btn.textContent='↻ recarregar do Bling (ignora cache)'; }
   _skuLoading = false;
-  render();   // re-render completo: projeção + KPI margem bruta + margem de contribuição (custos agora existem)
+  render();   // re-render completo: projeção + KPI margem bruta + margem de contribuição
 }
 function renderProjecao(){
   const base = topSkus14();
