@@ -553,6 +553,40 @@ function routes(readBody) {
       return true;
     }
 
+    // ADMIN (?k= ou sessão): RAIO-X DO PEDIDO CRU do Bling — mostra TODAS as chaves e qualquer campo
+    // com cara de data/hora, pra decidirmos com o payload real se o Bling guarda a hora da venda.
+    // Uso: /girassol-backup-offline/debug-pedido?id=116063  (o nº que aparece na coluna Pedido)
+    if (method === 'GET' && p === '/girassol-backup-offline/debug-pedido') {
+      const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const sessP = validarSessao(req.headers['cookie']);
+      if (!((process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || (sessP && ehAdmin(sessP)))) { json(res, 404, { error: 'not found' }); return true; }
+      const idQ = String(urlObj.searchParams.get('id') || '').trim();
+      if (!idQ) { json(res, 200, { ok: false, erro: 'passe ?id=NUMERO (nº do pedido) ou ?id=ID_BLING' }); return true; }
+      // aceita nº do pedido (procura no conferidos) ou id do Bling direto
+      let alvoId = idQ;
+      const confP = readJson(CONFERIDOS_FILE, {});
+      for (const [cid, c] of Object.entries(confP)) { if (c && String(c.numero) === idQ) { alvoId = cid; break; } }
+      try {
+        const det = await detalhePedido(alvoId);
+        if (!det) { json(res, 200, { ok: false, erro: 'pedido não encontrado no Bling (id ' + alvoId + ')' }); return true; }
+        const comHora = {};
+        const varre = (obj, pref) => {
+          for (const [k2, v2] of Object.entries(obj || {})) {
+            const cam = pref ? pref + '.' + k2 : k2;
+            if (v2 && typeof v2 === 'object' && !Array.isArray(v2)) { varre(v2, cam); continue; }
+            const sv = String(v2 == null ? '' : v2);
+            if (/data|hora|date|time/i.test(k2) || /\d{4}-\d{2}-\d{2}/.test(sv) || /\d{2}:\d{2}/.test(sv)) comHora[cam] = v2;
+          }
+        };
+        varre(det, '');
+        json(res, 200, { ok: true, id_bling: alvoId, numero: det.numero,
+          chaves_do_pedido: Object.keys(det),
+          todos_os_campos_com_data_ou_hora: comHora,
+          veredito: (Object.values(comHora).some(v => /\d{2}:\d{2}/.test(String(v))) ? 'TEM campo com HORA — cola aqui que eu implemento' : 'só DATAS (sem hora) — o Bling não guarda a hora da venda') });
+      } catch (e) { json(res, 200, { ok: false, erro: String(e.message || e).slice(0, 200) }); }
+      return true;
+    }
+
     if ((method === 'POST' || method === 'GET') && p === '/girassol-backup-offline/run') {
       const forcar = /[?&]force=1\b/.test(urlObj.search || '');
       rodarCiclo(forcar ? 'manual-force' : 'manual', forcar);
