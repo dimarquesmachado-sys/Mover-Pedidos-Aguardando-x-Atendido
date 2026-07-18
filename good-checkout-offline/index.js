@@ -553,6 +553,40 @@ function routes(readBody) {
       return true;
     }
 
+    // ADMIN (?k= ou sessão): RAIO-X DO PEDIDO CRU do Bling — mostra TODAS as chaves e qualquer campo
+    // com cara de data/hora, pra decidirmos com o payload real se o Bling guarda a hora da venda.
+    // Uso: /good-checkout-offline/debug-pedido?id=116063  (o nº que aparece na coluna Pedido)
+    if (method === 'GET' && p === '/good-checkout-offline/debug-pedido') {
+      const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const sessP = validarSessao(req.headers['cookie']);
+      if (!((process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || (sessP && ehAdmin(sessP)))) { json(res, 404, { error: 'not found' }); return true; }
+      const idQ = String(urlObj.searchParams.get('id') || '').trim();
+      if (!idQ) { json(res, 200, { ok: false, erro: 'passe ?id=NUMERO (nº do pedido) ou ?id=ID_BLING' }); return true; }
+      // aceita nº do pedido (procura no conferidos) ou id do Bling direto
+      let alvoId = idQ;
+      const confP = readJson(CONFERIDOS_FILE, {});
+      for (const [cid, c] of Object.entries(confP)) { if (c && String(c.numero) === idQ) { alvoId = cid; break; } }
+      try {
+        const det = await detalhePedido(alvoId);
+        if (!det) { json(res, 200, { ok: false, erro: 'pedido não encontrado no Bling (id ' + alvoId + ')' }); return true; }
+        const comHora = {};
+        const varre = (obj, pref) => {
+          for (const [k2, v2] of Object.entries(obj || {})) {
+            const cam = pref ? pref + '.' + k2 : k2;
+            if (v2 && typeof v2 === 'object' && !Array.isArray(v2)) { varre(v2, cam); continue; }
+            const sv = String(v2 == null ? '' : v2);
+            if (/data|hora|date|time/i.test(k2) || /\d{4}-\d{2}-\d{2}/.test(sv) || /\d{2}:\d{2}/.test(sv)) comHora[cam] = v2;
+          }
+        };
+        varre(det, '');
+        json(res, 200, { ok: true, id_bling: alvoId, numero: det.numero,
+          chaves_do_pedido: Object.keys(det),
+          todos_os_campos_com_data_ou_hora: comHora,
+          veredito: (Object.values(comHora).some(v => /\d{2}:\d{2}/.test(String(v))) ? 'TEM campo com HORA — cola aqui que eu implemento' : 'só DATAS (sem hora) — o Bling não guarda a hora da venda') });
+      } catch (e) { json(res, 200, { ok: false, erro: String(e.message || e).slice(0, 200) }); }
+      return true;
+    }
+
     if ((method === 'POST' || method === 'GET') && p === '/good-checkout-offline/run') {
       const forcar = /[?&]force=1\b/.test(urlObj.search || '');
       rodarCiclo(forcar ? 'manual-force' : 'manual', forcar);
@@ -1915,6 +1949,10 @@ function routes(readBody) {
 
 // roda 1 ciclo logo após o boot do serviço
 function bootstrap() {
+  // PESCA AUTOMÁTICA PÓS-DEPLOY: todo deploy mata a pesca em andamento; aqui ela renasce sozinha
+  // 90s depois do boot (após o ciclo inicial). Com dias=14 só re-checa os recentes — barato e idempotente.
+  setTimeout(() => { try { console.log('[ML-FEES] pesca automática pós-deploy iniciando…'); mlSyncFees(14).catch(() => {}); } catch (e) {} }, 90 * 1000);
+
   ensureDir(CACHE_DIR);
   console.log(`[GOODBKP] ${VERSAO} ativo — ATENDIDO=${SIT_ATENDIDO}, janela=${JANELA_DIAS}d, cron="${CRON_EXPR}", formato=${ETIQ_FORMATO}`);
   setTimeout(() => rodarCiclo('boot'), 20000);
@@ -1936,7 +1974,7 @@ async function mlSyncFees(dias) {
     const mk = String(c.marketplace || '').toLowerCase();
     if (mk !== 'ml' && mk !== 'mercadolivre') return false;
     if (!c.numero_loja) return false;
-    return c.tarifa_ml == null || t >= recheck;
+    return c.tarifa_ml == null || c.venda_em == null || t >= recheck;
   }).map(([cid]) => cid);
   if (!alvos.length) { console.log('[ML-FEES] nada a pescar (' + dias + 'd)'); return { ok: true, nada: true }; }
   _mls = { rodando: true, feitos: 0, total: alvos.length, ok: 0, falhas: 0, iniciado_em: new Date().toISOString() };
@@ -1949,7 +1987,7 @@ async function mlSyncFees(dias) {
   const salvar = () => {
     if (!Object.keys(pend).length) return;
     const c2 = readJson(CONFERIDOS_FILE, {});
-    for (const [cid, d] of Object.entries(pend)) { if (!c2[cid]) continue; if (d.fee != null) c2[cid].tarifa_ml = d.fee; if (d.frete != null) c2[cid].frete_ml = d.frete; }
+    for (const [cid, d] of Object.entries(pend)) { if (!c2[cid]) continue; if (d.fee != null) c2[cid].tarifa_ml = d.fee; if (d.frete != null) c2[cid].frete_ml = d.frete; if (d.venda) c2[cid].venda_em = d.venda; }
     writeJson(CONFERIDOS_FILE, c2);
     for (const cid of Object.keys(pend)) delete pend[cid];
   };
@@ -1960,7 +1998,7 @@ async function mlSyncFees(dias) {
       const d = await r.json().catch(() => null);
       if (r.ok && d) {
         let fee = 0; for (const it of (d.order_items || [])) { const q = Number(it.quantity || 1); const sf = Number(it.sale_fee || 0); if (isFinite(sf)) fee += sf * q; }
-        const reg = { fee: Math.round(fee * 100) / 100, frete: null };
+        const reg = { fee: Math.round(fee * 100) / 100, frete: null, venda: (d.date_created || null) };   // hora REAL da venda no ML
         const shipId = d.shipping && d.shipping.id;
         if (shipId) {
           try {
