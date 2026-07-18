@@ -147,6 +147,8 @@ function parseXmlNF(xml) {
   return {
     emit: { razao: _xmlTag(emit, 'xNome'), cnpj: _xmlTag(emit, 'CNPJ') || _xmlTag(emit, 'CPF'), ie: _xmlTag(emit, 'IE'), endereco: _ender(_xmlBloco(emit, 'enderEmit')) },
     destEndereco: _ender(_xmlBloco(dest, 'enderDest')),
+    destUF: _xmlTag(_xmlBloco(dest, 'enderDest'), 'UF') || null,
+    destMun: _xmlTag(_xmlBloco(dest, 'enderDest'), 'xMun') || null,
     protocolo: _xmlTag(prot, 'nProt'),
     dataProtocolo: _xmlTag(prot, 'dhRecbto'),
     tributos: trib.replace(/\s+/g, ' ').trim()
@@ -194,6 +196,7 @@ async function dadosNFSimp(nfId, numeroPedido) {
     itens,
     qtdTotal: itens.length,
     consumidor: { doc: c.numeroDocumento || c.documento || '', nome: c.nome || '', endereco: x.destEndereco || '' },
+    uf: x.destUF || null, municipio: x.destMun || null,
     numeroPedido: numeroPedido || '',
     numeroPedidoLoja: nf.numeroPedidoLoja || '',
     tributos: x.tributos || ''
