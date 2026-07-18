@@ -95,7 +95,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd7';
+const DASH_BUILD = 'd8';
 let DADOS = [];
 let periodo = 'mes', pDe = '', pAte = '';
 let SKUINFO = {}, skuInfoCarregado = false, _skuLoading = false;
@@ -186,7 +186,11 @@ function montar(){
       '<div style="overflow-x:auto"><table id="tProj"></table></div><div id="projAviso"></div></div>'+
     '<div class="sec"><h2>⚙️ Impostos &amp; taxas <span class="hint">alíquota do Simples varia mês a mês · taxas de marketplace em % (estimativa; ML tem a REAL por pedido na busca)</span></h2>'+
       '<div id="cfgBox"></div>'+
-      '<div style="margin-top:12px"><button class="btn" onclick="salvarCfg()">💾 Salvar</button> <span id="cfgMsg" class="mut" style="font-size:12px;margin-left:8px"></span></div></div>'+
+      '<div style="margin-top:12px"><button class="btn" onclick="salvarCfg()">💾 Salvar</button> <span id="cfgMsg" class="mut" style="font-size:12px;margin-left:8px"></span></div>'+
+      '<div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line)"><div style="font-size:12px;color:var(--mut);margin-bottom:8px">🔧 Manutenção <span class="dim">(rodam sozinhas de madrugada — use só se quiser AGORA)</span></div>'+
+      '<button class="btn" onclick="rodarPescaML()">🎣 Pescar tarifas ML agora</button> '+
+      '<button class="btn" onclick="rodarBackfillNF()" style="background:linear-gradient(135deg,#0d9488,#0f766e)">🧾 Backfill NF agora</button> '+
+      '<span id="manutMsg" class="mut" style="font-size:12px;margin-left:8px"></span></div></div>'+
     '<div class="nota"><b>Regras deste painel</b> · datas no horário de São Paulo · kits contam pelo SKU do kit · '+
       'faturamento por produto = soma de (preço do item × qtd) em CADA pedido do período · '+
       'produtos/frete usam a NOTA FISCAL do pedido quando disponível (fonte fiscal exata) · '+
@@ -450,6 +454,36 @@ async function pegarFeeML(id, numeroLoja){
     if(d&&d.ok&&d.fee!=null){ _plMLFee[id]=Number(d.fee); const h=DADOS.find(x=>String(x.id)===String(id)); if(h) renderPL(h); }
     else alert('Tarifa ML: '+((d&&d.erro)||'não disponível'));
   }catch(e){ alert('Tarifa ML: '+e.message); }
+}
+
+// ── 🔧 manutenção (sessão admin — sem chave na URL) ─────────────────────────
+async function rodarPescaML(){
+  const msg=$('manutMsg'); msg.textContent='🎣 iniciando pesca ML…';
+  try{
+    const r=await fetch(MOD+'/ml-sync-fees?dias=14',{method:'POST',credentials:'same-origin'});
+    if(r.status===404){ msg.textContent='✗ atualize o index.js no GitHub (rota antiga)'; return; }
+    const d=await r.json();
+    if(d&&(d.iniciado||d.rodando)) pollPesca();
+    else msg.textContent=(d&&d.mensagem)||'nada a pescar';
+  }catch(e){ msg.textContent='✗ '+e.message; }
+}
+async function pollPesca(){
+  const msg=$('manutMsg');
+  try{
+    const r=await fetch(MOD+'/ml-sync-fees?status=1',{credentials:'same-origin'});
+    const d=await r.json();
+    if(d&&d.rodando){ msg.textContent='🎣 pescando… '+d.progresso+' (✓'+d.ok_ate_agora+' ✗'+d.falhas+')'; setTimeout(pollPesca,4000); }
+    else{ msg.textContent='✓ pesca concluída ('+(d&&d.progresso||'')+') — recarregue a página p/ ver as tarifas'; }
+  }catch(e){ msg.textContent='✗ '+e.message; }
+}
+async function rodarBackfillNF(){
+  const msg=$('manutMsg'); msg.textContent='🧾 lendo notas do disco…';
+  try{
+    const r=await fetch(MOD+'/backfill-nf?dias=45',{method:'POST',credentials:'same-origin'});
+    if(r.status===404){ msg.textContent='✗ atualize o index.js no GitHub (rota antiga)'; return; }
+    const d=await r.json();
+    msg.textContent=(d&&d.mensagem)?('✓ '+d.mensagem+' — recarregue a página'):'✓ feito';
+  }catch(e){ msg.textContent='✗ '+e.message; }
 }
 
 // ── 📦 projeção ─────────────────────────────────────────────────────────────
