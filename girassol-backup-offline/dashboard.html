@@ -95,7 +95,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd9';
+const DASH_BUILD = 'd10';
 let DADOS = [];
 let periodo = 'mes', pDe = '', pAte = '';
 let SKUINFO = {}, skuInfoCarregado = false, _skuLoading = false;
@@ -192,7 +192,7 @@ function montar(){
     '<div class="sec"><h2>🗺️ Vendas por estado</h2><div style="overflow-x:auto"><table id="tUF"></table></div><div id="ufAviso"></div></div>'+
     '<div class="sec"><h2>📦 Projeção de estoque &amp; margem <span class="hint">ritmo dos últimos 14 dias · clique p/ ordenar</span></h2>'+
       '<div id="projBox" style="margin-bottom:10px;font-size:12px"><span class="mut" id="projStatus">⏳ carregando saldo/preço/custo do Bling… (~30-60s na 1ª vez)</span> '+
-      '<button class="btn" id="btnProj" onclick="carregarSkuInfo()" style="display:none">↻ recarregar do Bling</button></div>'+
+      '<button class="btn" id="btnProj" onclick="carregarSkuInfo(true)" style="display:none">↻ recarregar do Bling (ignora cache)</button></div>'+
       '<div style="overflow-x:auto"><table id="tProj"></table></div><div id="projAviso"></div></div>'+
     '<div class="sec"><h2>⚙️ Impostos &amp; taxas <span class="hint">alíquota do Simples varia mês a mês · taxas de marketplace em % (estimativa; ML tem a REAL por pedido na busca)</span></h2>'+
       '<div id="cfgBox"></div>'+
@@ -537,6 +537,7 @@ function renderAnalise(){
       '<td class="dim" style="white-space:nowrap">'+diaSP(h.conferido_em).slice(5)+'</td>'+
       '<td><b>'+esc(h.numero||h.id)+'</b>'+(carrinho?' <span class="badge" title="'+unid+' unidades">🛒 '+unid+'</span>':'')+
         (h.nf_numero?'<div class="desc">NF '+esc(h.nf_numero)+'</div>':'')+'</td>'+
+      '<td class="dim" style="font-size:11px;max-width:135px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+esc(h.numero_loja||'')+'">'+esc(h.numero_loja||'—')+'</td>'+
       '<td>'+esc(P.ck)+'</td>'+
       '<td><div class="desc" style="max-width:200px">'+esc(it0.sku||'')+((h.itens||[]).length>1?' +'+((h.itens||[]).length-1):'')+'</div></td>'+
       '<td class="num">'+N(unid)+'</td>'+
@@ -549,11 +550,11 @@ function renderAnalise(){
     '</tr>';
   }).join('');
   $('tAnalise').innerHTML =
-    '<tr><th>Data</th><th>Pedido</th><th>Canal</th><th>Produto</th><th class="num">Un.</th>'+
+    '<tr><th>Data</th><th>Pedido</th><th>Venda (mkt)</th><th>Canal</th><th>Produto</th><th class="num">Un.</th>'+
     '<th class="num">Venda</th><th class="num">Prod. NF</th><th class="num">Custo (−)</th><th class="num">Imposto (−)</th>'+
     '<th class="num">Tarifa (−)</th><th class="num">Frete vend. (−)</th><th class="num">💎 M.C.</th><th class="num">MC %</th></tr>'+
-    (linhas || '<tr><td class="dim" colspan="13">sem vendas no período</td></tr>')+
-    (pag.length?('<tr style="border-top:2px solid var(--line2)"><td colspan="5" style="font-weight:800">Σ desta página</td>'+
+    (linhas || '<tr><td class="dim" colspan="14">sem vendas no período</td></tr>')+
+    (pag.length?('<tr style="border-top:2px solid var(--line2)"><td colspan="6" style="font-weight:800">Σ desta página</td>'+
       cel(T.tot)+cel(T.rp,'ok')+cel(T.cus)+cel(T.imp)+cel(T.tar)+cel(T.frv)+
       '<td class="num" style="font-weight:800"><span class="'+(T.mc>=0?'ok':'bad')+'">'+BRL(T.mc)+'</span></td>'+
       '<td class="num dim">'+T.mcN+'/'+pag.length+' compl.</td></tr>'):'');
@@ -576,7 +577,7 @@ function topSkus14(){
   });
   return Object.values(agg).sort((a,b)=>b.qtd-a.qtd).slice(0,40);
 }
-async function carregarSkuInfo(){
+async function carregarSkuInfo(fresh){
   if(_skuLoading) return; _skuLoading = true;
   const st=$('projStatus'), btn=$('btnProj');
   if(st) st.textContent='⏳ consultando o Bling (saldo/preço/custo)… ~30-60s na 1ª vez';
@@ -584,7 +585,7 @@ async function carregarSkuInfo(){
   const skus = topSkus14().map(t=>t.sku);
   try{
     for(let i=0;i<skus.length;i+=40){
-      const r = await fetch(MOD+'/sku-info',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({skus:skus.slice(i,i+40)})});
+      const r = await fetch(MOD+'/sku-info',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({skus:skus.slice(i,i+40), fresh: !!fresh})});
       if(r.status===403){ if(st) st.innerHTML='🔒 sessão de admin expirou — <a href="'+MOD+'/painel">faça login</a> e recarregue'; _skuLoading=false; return; }
       const d = await r.json();
       if(d && d.skus) Object.assign(SKUINFO, d.skus);
