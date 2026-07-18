@@ -20,8 +20,6 @@
        font:14px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Inter,sans-serif;padding:0 16px 40px}
   a{color:var(--ac2);text-decoration:none}
   .wrap{max-width:1180px;margin:0 auto}
-
-  /* header fixo */
   .hdr{position:sticky;top:0;z-index:50;background:linear-gradient(180deg,rgba(10,14,26,.97) 70%,rgba(10,14,26,0));
        padding:14px 0 10px;margin:0 -16px;padding-left:16px;padding-right:16px}
   .hrow{max-width:1180px;margin:0 auto;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
@@ -30,21 +28,17 @@
            display:inline-flex;align-items:center;justify-content:center;font-size:16px}
   .badge{font-size:10px;font-weight:700;color:var(--dim);border:1px solid var(--line);border-radius:5px;padding:1px 6px;letter-spacing:.05em}
   .hlinks{margin-left:auto;font-size:12px;color:var(--mut)}
-
   .chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
   .chip{background:var(--card);border:1px solid var(--line);color:var(--mut);border-radius:999px;
         padding:7px 15px;font-size:12.5px;font-weight:600;cursor:pointer;transition:all .15s}
   .chip:hover{border-color:var(--line2);color:var(--tx)}
   .chip.on{border-color:var(--ac);color:#fff;background:linear-gradient(135deg,#1e2650,#232d5e);box-shadow:0 0 0 1px var(--ac) inset}
   .custom{display:none;gap:8px;margin-top:8px;align-items:center;flex-wrap:wrap;font-size:12.5px;color:var(--mut)}
-  input[type=date]{background:var(--card);border:1px solid var(--line);color:var(--tx);border-radius:9px;padding:7px 10px;font-size:12.5px}
-
+  input[type=date],input[type=number]{background:var(--card);border:1px solid var(--line);color:var(--tx);border-radius:9px;padding:7px 10px;font-size:12.5px}
   .cover{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px;font-size:11.5px;color:var(--mut)}
   .pill{border:1px solid var(--line);border-radius:999px;padding:3px 10px;background:var(--card)}
   .pill b{font-weight:800}
   .pill.g b{color:var(--ok)} .pill.w{border-color:#f59e0b44} .pill.w b{color:var(--warn)}
-
-  /* KPIs */
   .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(158px,1fr));gap:12px;margin:18px 0}
   .kpi{background:linear-gradient(160deg,var(--card2),var(--card));border:1px solid var(--line);border-radius:var(--r);
        padding:14px 16px;position:relative;overflow:hidden;transition:transform .15s,border-color .15s}
@@ -54,8 +48,6 @@
   .kpi .l{font-size:11px;color:var(--mut);font-weight:600;letter-spacing:.02em;margin-top:2px}
   .kpi .v{font-size:21px;font-weight:800;letter-spacing:-.02em;margin-top:3px;font-variant-numeric:tabular-nums}
   .kpi .s{font-size:10.5px;color:var(--dim);margin-top:2px}
-
-  /* seções */
   .sec{background:linear-gradient(170deg,var(--card2),var(--card));border:1px solid var(--line);border-radius:var(--r);
        padding:18px;margin:14px 0}
   .sec h2{font-size:14px;font-weight:800;margin:0 0 14px;letter-spacing:-.01em;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
@@ -63,7 +55,6 @@
   .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
   @media(max-width:860px){ .grid2{grid-template-columns:1fr} }
   .chartbox{position:relative;height:230px}
-
   table{width:100%;border-collapse:collapse;font-size:12.5px}
   th{color:var(--mut);text-align:left;font-weight:700;font-size:11px;letter-spacing:.04em;text-transform:uppercase;
      padding:8px 10px;border-bottom:1px solid var(--line2);white-space:nowrap;user-select:none}
@@ -108,9 +99,13 @@ const DASH_BUILD = 'd6';
 let DADOS = [];
 let periodo = 'mes', pDe = '', pAte = '';
 let SKUINFO = {}, skuInfoCarregado = false, _skuLoading = false;
+let CFG = { aliquotas:{}, taxas:{} };   // alíquota Simples por mês (YYYY-MM: %) + tarifa % por canal
+const CANAIS_CFG = ['ml','shopee','magalu','amazon','tiktok','madeira','leroy','outro'];
+const canalKey = mk => { mk=(mk||'outro').toLowerCase(); return mk==='mercadolivre'?'ml':(CANAIS_CFG.includes(mk)?mk:'outro'); };
 let sortProd = { col: 'fat', dir: -1 };
 let sortProj = { col: 'qtd14', dir: -1 };
 let chPed = null, chFat = null;
+let _plMLFee = {};   // tarifa real ML por pedido (sob demanda)
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -127,12 +122,12 @@ function cmpNull(a,b,dir){ const an=(a==null||!isFinite(a)), bn=(b==null||!isFin
 
 async function boot(){
   try{
-    try{ await fetch(MOD + '/nf-sweep', { method:'POST', credentials:'same-origin' }); }catch(e){}   // varredura NF automática (local, segundos)
     const r = await fetch(MOD + '/historico', { credentials:'same-origin' });
     if(r.status === 401 || r.status === 403){ semLogin(); return; }
     const d = await r.json();
     if(!d || !Array.isArray(d.itens)){ semLogin(); return; }
     DADOS = d.itens;
+    try{ const rc = await fetch(MOD+'/config-fiscal',{credentials:'same-origin'}); const dc = await rc.json(); if(dc&&dc.config) CFG = { aliquotas: dc.config.aliquotas||{}, taxas: dc.config.taxas||{} }; }catch(e){}
     montar();
   }catch(e){
     $('app').innerHTML = '<div class="loginbox">✗ falha ao carregar: '+esc(e.message)+'<br><br><a href="'+MOD+'/dashboard">tentar de novo</a></div>';
@@ -164,7 +159,7 @@ function montar(){
   $('app').innerHTML =
   '<div class="hdr"><div class="hrow">'+
     '<h1><span class="logo">🌻</span> Inteligência de Vendas · Girassol <span class="badge">'+DASH_BUILD+'</span></h1>'+
-    '<div class="hlinks"><a href="#" onclick="location.reload();return false" title="atualiza tudo (varredura NF + dados + Bling)">↻ atualizar</a> &nbsp;·&nbsp; <a href="'+MOD+'/painel">← checkout</a></div>'+
+    '<div class="hlinks"><a href="'+MOD+'/painel">← checkout</a></div>'+
   '</div>'+
   '<div class="wrap"><div class="chips" id="chips"></div>'+
   '<div class="custom" id="custom">De <input type="date" id="pDe" onclick="this.showPicker&&this.showPicker()" onchange="pDe=this.value;render()"> '+
@@ -172,6 +167,11 @@ function montar(){
   '<div class="cover" id="cover"></div></div></div>'+
   '<div class="wrap">'+
     '<div class="kpis" id="kpis"></div>'+
+    '<div class="sec"><h2>🔍 Buscar pedido &amp; lucro <span class="hint">nº do pedido · NF · nº da venda no marketplace · SKU · parte do título</span></h2>'+
+      '<input id="qBusca" placeholder="ex.: 73620 · 076265 · 2000017436578280 · 6376-220v · tosquiadeira" '+
+      'style="width:100%;background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:10px;padding:11px 14px;font-size:13px" '+
+      'oninput="buscarPed(this.value)">'+
+      '<div id="buscaRes" style="margin-top:10px"></div><div id="plCard"></div></div>'+
     '<div class="grid2">'+
       '<div class="sec"><h2>📈 Pedidos por dia</h2><div class="chartbox"><canvas id="cPed"></canvas></div></div>'+
       '<div class="sec"><h2>💰 Faturamento por dia</h2><div class="chartbox"><canvas id="cFat"></canvas></div></div>'+
@@ -184,10 +184,15 @@ function montar(){
       '<div id="projBox" style="margin-bottom:10px;font-size:12px"><span class="mut" id="projStatus">⏳ carregando saldo/preço/custo do Bling… (~30-60s na 1ª vez)</span> '+
       '<button class="btn" id="btnProj" onclick="carregarSkuInfo()" style="display:none">↻ recarregar do Bling</button></div>'+
       '<div style="overflow-x:auto"><table id="tProj"></table></div><div id="projAviso"></div></div>'+
+    '<div class="sec"><h2>⚙️ Impostos &amp; taxas <span class="hint">alíquota do Simples varia mês a mês · taxas de marketplace em % (estimativa; ML tem a REAL por pedido na busca)</span></h2>'+
+      '<div id="cfgBox"></div>'+
+      '<div style="margin-top:12px"><button class="btn" onclick="salvarCfg()">💾 Salvar</button> <span id="cfgMsg" class="mut" style="font-size:12px;margin-left:8px"></span></div></div>'+
     '<div class="nota"><b>Regras deste painel</b> · datas no horário de São Paulo · kits contam pelo SKU do kit · '+
-      'faturamento por produto = soma de (preço do item × qtd) em CADA pedido do período (preços diferentes por anúncio/canal entram cada um com o seu) · '+
-      'produtos/frete usam a NOTA FISCAL do pedido quando disponível (fonte fiscal exata; senão, soma dos itens) · margem = bruta estimada (venda − custo do cadastro Bling), sem frete e sem taxas de marketplace · '+
-      'só entram pedidos finalizados no checkout offline. <b>vs Jodda:</b> lá conta a data da VENDA; aqui a da EXPEDIÇÃO — e use o card 🛍 produtos p/ comparar (o total c/ frete inclui frete embutido).</div>'+
+      'faturamento por produto = soma de (preço do item × qtd) em CADA pedido do período · '+
+      'produtos/frete usam a NOTA FISCAL do pedido quando disponível (fonte fiscal exata) · '+
+      '<b>margem de contribuição</b> = produtos(NF) − imposto(alíquota do mês × total) − tarifa do canal (ML: real por pedido; demais: % configurada) − custo (Bling); o frete recebido aproxima o frete pago e não entra na conta · '+
+      'margem bruta = venda − custo, sem frete/taxas · só entram pedidos finalizados no checkout offline. '+
+      '<b>vs Jodda:</b> lá conta a data da VENDA; aqui a da EXPEDIÇÃO — use o card 🛍 produtos p/ comparar.</div>'+
   '</div>';
   render();
   setTimeout(()=>{ if(!skuInfoCarregado) carregarSkuInfo(); }, 400);
@@ -202,7 +207,7 @@ function render(){
   const PER = DADOS.filter(h => { if(!h.conferido_em) return false; const d = diaSP(h.conferido_em); return d>=de && d<=ate; });
 
   let fat=0, comValor=0, semValor=0, flex=0, unid=0, itensTot=0, itensComValor=0, comUF=0, fatProd=0, freteEmb=0, fretePed=0;
-  let fatNF=0, pedNF=0, freteNF=0, fretePedNF=0;   // fonte NOTA FISCAL (vprod_nf): produtos e frete EXATOS
+  let fatNF=0, pedNF=0, freteNF=0, fretePedNF=0;   // fonte NOTA FISCAL (vprod_nf)
   const porDia={}, porCanal={}, porProd={}, porUF={};
   PER.forEach(h=>{
     const d = diaSP(h.conferido_em);
@@ -249,14 +254,31 @@ function render(){
     kpi('#a78bfa','🚚','Frete embutido', fretePedNF?BRL(freteNF):(fretePed?BRL(freteEmb):'—'), fretePedNF?('EXATO pela nota · '+N(fretePedNF)+' pedidos'):(fretePed?('estimado · '+N(fretePed)+' ped.'):'aguardando cobertura')) +
     kpi('var(--warn)','🎯','Ticket médio', BRL(ticket), 'por pedido (total c/ frete)') +
     kpi('#f97316','⚡','FLEX enviados', N(flex), 'confronto c/ motoboy') +
-    '<div class="kpi" id="kMargem" style="--kc:var(--ok)"><span class="ic">📊</span><div class="l">Margem bruta 14d</div><div class="v dim">—</div><div class="s">carregando custos do Bling…</div></div>';
+    '<div class="kpi" id="kMargem" style="--kc:var(--ok)"><span class="ic">📊</span><div class="l">Margem bruta 14d</div><div class="v dim">—</div><div class="s">carregando custos do Bling…</div></div>' +
+    (function(){   // 💎 margem de CONTRIBUIÇÃO do período: produtos − imposto − tarifa% − custo
+      let rec=0, imp=0, tar=0, cus=0, pedOk=0, semCfg=0, cusUn=0, unTot=0;
+      PER.forEach(h=>{
+        const rp = (h.vprod_nf!=null&&isFinite(Number(h.vprod_nf))) ? Number(h.vprod_nf) : null;
+        if(rp==null) return;
+        const aliq = CFG.aliquotas[diaSP(h.conferido_em).slice(0,7)];
+        const tx = CFG.taxas[canalKey(h.marketplace)];
+        if(aliq==null || tx==null){ semCfg++; return; }
+        const tot = (h.valor!=null&&isFinite(Number(h.valor))) ? Number(h.valor) : rp;
+        rec+=rp; imp+=tot*aliq/100; tar+=rp*tx/100; pedOk++;
+        (h.itens||[]).forEach(it=>{ const q=Number(it.qtd||1); unTot+=q; const info=SKUINFO[it.sku]; if(info&&info.custo!=null){ cus+=info.custo*q; cusUn+=q; } });
+      });
+      if(!Object.keys(CFG.aliquotas).length && !Object.keys(CFG.taxas).length)
+        return '<div class="kpi" style="--kc:#64748b;cursor:pointer" onclick="document.getElementById(\'cfgBox\').scrollIntoView({behavior:\'smooth\'})"><span class="ic">💎</span><div class="l">Margem de contribuição</div><div class="v dim">—</div><div class="s warn">⚙️ configure alíquota &amp; taxas abaixo</div></div>';
+      const mc = rec-imp-tar-cus;
+      return '<div class="kpi" style="--kc:#14b8a6"><span class="ic">💎</span><div class="l">Margem de contribuição (est.)</div>'+
+        '<div class="v '+(mc>=0?'ok':'bad')+'">'+BRL(mc)+'</div>'+
+        '<div class="s">'+N(pedOk)+' ped. · custo em '+pc(cusUn,unTot)+'% das un.'+(semCfg?' · <span class="warn">'+semCfg+' fora (config)</span>':'')+'</div></div>';
+    })();
 
-  // gráficos
   const dias = Object.keys(porDia).sort();
   const labels = dias.map(d=>d.slice(8,10)+'/'+d.slice(5,7));
   desenharCharts(labels, dias.map(d=>porDia[d].ped), dias.map(d=>Math.round(porDia[d].fat*100)/100));
 
-  // por canal
   const canais = Object.keys(porCanal).sort((a,b)=>porCanal[b].ped-porCanal[a].ped);
   const NOME = {mercadolivre:'Mercado Livre',ml:'Mercado Livre',shopee:'Shopee',magalu:'Magalu',amazon:'Amazon',tiktok:'TikTok',madeira:'MadeiraMadeira',leroy:'Leroy Merlin',outro:'Outro'};
   $('tCanal').innerHTML = '<tr><th>Canal</th><th class="num">Pedidos</th><th class="num">%</th><th class="num">Faturamento</th><th class="num">Ticket</th><th class="num">⚡ Flex</th><th style="width:24%"></th></tr>'+
@@ -267,7 +289,6 @@ function render(){
       '<td class="num">'+(c.flex?'<span class="warn">'+c.flex+'</span>':'<span class="dim">·</span>')+'</td>'+
       '<td><div class="bar"><i style="width:'+p+'%"></i></div></td></tr>';}).join('');
 
-  // top produtos — FATURAMENTO = SOMA de todos os pedidos do SKU (preços diferentes por anúncio entram cada um com o seu)
   const prods = Object.values(porProd);
   const ord = prods.slice().sort((a,b)=> sortProd.col==='fat' ? cmpNull(a.fat||0,b.fat||0,sortProd.dir) : cmpNull(a.qtd,b.qtd,sortProd.dir));
   const fatTot = prods.reduce((s,p)=>s+p.fat,0)||1;
@@ -277,7 +298,7 @@ function render(){
     '<th class="num">% fat.</th><th style="width:18%"></th></tr>'+
     ord.slice(0,50).map((p,i)=>{
       const pf=Math.round(p.fat/fatTot*100);
-      const parcial = p.qtdV < p.qtd;   // nem todas as unidades têm valor gravado → sinaliza NA LINHA
+      const parcial = p.qtdV < p.qtd;
       const rk = i<3 ? 'rank r'+(i+1) : 'rank';
       return '<tr><td><span class="'+rk+'">'+(i+1)+'</span></td>'+
       '<td><div class="sku">'+esc(p.sku)+'</div><div class="desc">'+esc(p.desc)+'</div></td>'+
@@ -287,9 +308,8 @@ function render(){
       '<td><div class="bar"><i class="g" style="width:'+pf+'%"></i></div></td></tr>';
     }).join('');
   const semFatUn = prods.reduce((s,p)=>s+(p.qtd-p.qtdV),0);
-  $('prodAviso').innerHTML = semFatUn ? '<div class="aviso">⚠️ <b>'+N(semFatUn)+' unidades</b> vendidas no período ainda sem valor gravado (pedidos antigos) — o faturamento por produto soma só as valoradas (por isso a etiqueta âmbar "x/y un."). Complete o <b>backfill de detalhes</b> pra fechar o retroativo.</div>' : '';
+  $('prodAviso').innerHTML = semFatUn ? '<div class="aviso">⚠️ <b>'+N(semFatUn)+' unidades</b> do período ainda sem valor gravado — o faturamento por produto soma só as valoradas (etiqueta âmbar "x/y un."). Complete o <b>backfill de detalhes</b>.</div>' : '';
 
-  // por UF
   const ufs = Object.keys(porUF).sort((a,b)=>porUF[b].ped-porUF[a].ped);
   $('tUF').innerHTML = '<tr><th>UF</th><th class="num">Pedidos</th><th class="num">%</th><th class="num">Faturamento</th><th style="width:26%"></th></tr>'+
     (ufs.slice(0,15).map(u=>{const c=porUF[u];const p=pc(c.ped,comUF||1);
@@ -300,11 +320,12 @@ function render(){
   $('ufAviso').innerHTML = (PER.length-comUF) ? '<div class="aviso">⚠️ '+N(PER.length-comUF)+' pedido(s) sem UF — o backfill de detalhes preenche o retroativo.</div>' : '';
 
   renderProjecao();
+  renderCfg();
 }
 
 function desenharCharts(labels, sPed, sFat){
-  if(!window.Chart){   // CDN falhou → não quebra o resto
-    $('cPed').parentElement.innerHTML='<div class="dim" style="padding:30px;text-align:center">gráfico indisponível (CDN bloqueado)</div>';
+  if(!window.Chart){
+    const c1=$('cPed'); if(c1&&c1.parentElement) c1.parentElement.innerHTML='<div class="dim" style="padding:30px;text-align:center">gráfico indisponível (CDN bloqueado)</div>';
     return;
   }
   const gopts = (fmt) => ({
@@ -326,6 +347,105 @@ function desenharCharts(labels, sPed, sFat){
     options: gopts(v=>BRLk(Number(v))) });
 }
 
+// ── ⚙️ config fiscal ────────────────────────────────────────────────────────
+function mesesRecentes(){
+  const set = new Set([hojeSP().slice(0,7)]);
+  DADOS.forEach(h=>{ if(h.conferido_em) set.add(diaSP(h.conferido_em).slice(0,7)); });
+  return [...set].sort().reverse().slice(0,6);
+}
+function renderCfg(){
+  const box=$('cfgBox'); if(!box) return;
+  const NOMEC={ml:'Mercado Livre',shopee:'Shopee',magalu:'Magalu',amazon:'Amazon',tiktok:'TikTok',madeira:'MadeiraMadeira',leroy:'Leroy',outro:'Outro'};
+  box.innerHTML =
+    '<div style="font-size:12px;color:var(--mut);margin-bottom:6px">📅 Alíquota do Simples por mês (%)</div>'+
+    '<div style="display:flex;gap:10px;flex-wrap:wrap">'+ mesesRecentes().map(m=>
+      '<label style="font-size:12px;color:var(--mut)">'+m+'<br><input type="number" step="0.01" min="0" max="40" data-aliq="'+m+'" value="'+(CFG.aliquotas[m]!=null?CFG.aliquotas[m]:'')+'" placeholder="ex 8.3" style="width:86px"></label>').join('')+'</div>'+
+    '<div style="font-size:12px;color:var(--mut);margin:14px 0 6px">🏪 Tarifa por canal (% sobre produtos) — estimativa p/ o agregado; na busca, ML usa a REAL</div>'+
+    '<div style="display:flex;gap:10px;flex-wrap:wrap">'+ CANAIS_CFG.map(c=>
+      '<label style="font-size:12px;color:var(--mut)">'+NOMEC[c]+'<br><input type="number" step="0.1" min="0" max="50" data-taxa="'+c+'" value="'+(CFG.taxas[c]!=null?CFG.taxas[c]:'')+'" placeholder="%" style="width:86px"></label>').join('')+'</div>';
+}
+async function salvarCfg(){
+  const aliquotas={}, taxas={};
+  document.querySelectorAll('[data-aliq]').forEach(i=>{ aliquotas[i.dataset.aliq] = i.value===''?null:Number(i.value); });
+  document.querySelectorAll('[data-taxa]').forEach(i=>{ taxas[i.dataset.taxa] = i.value===''?null:Number(i.value); });
+  const msg=$('cfgMsg'); msg.textContent='salvando…';
+  try{
+    const r = await fetch(MOD+'/config-fiscal',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({aliquotas,taxas})});
+    const d = await r.json();
+    if(d&&d.ok){ CFG={aliquotas:d.config.aliquotas||{},taxas:d.config.taxas||{}}; msg.textContent='✓ salvo'; render(); }
+    else msg.textContent='✗ '+((d&&d.erro)||'falhou');
+  }catch(e){ msg.textContent='✗ '+e.message; }
+}
+
+// ── 🔍 busca & P&L por pedido ───────────────────────────────────────────────
+function buscarPed(q){
+  q = String(q||'').trim().toLowerCase();
+  const res=$('buscaRes'), card=$('plCard'); card.innerHTML='';
+  if(q.length<2){ res.innerHTML=''; return; }
+  const hits = DADOS.filter(h=>{
+    if(String(h.numero||'').toLowerCase()===q) return true;
+    if(String(h.nf_numero||'').toLowerCase().includes(q)) return true;
+    if(String(h.numero_loja||'').toLowerCase().includes(q)) return true;
+    return (h.itens||[]).some(it=> String(it.sku||'').toLowerCase().includes(q) || String(it.descricao||'').toLowerCase().includes(q));
+  }).slice(0,15);
+  if(!hits.length){ res.innerHTML='<div class="dim" style="padding:8px">nada encontrado</div>'; return; }
+  res.innerHTML = '<table><tr><th>Data</th><th>Pedido</th><th>Canal</th><th>Cliente</th><th class="num">Total</th><th></th></tr>'+
+    hits.map(h=>'<tr><td class="dim">'+diaSP(h.conferido_em)+'</td><td><b>'+esc(h.numero||h.id)+'</b>'+(h.nf_numero?'<div class="desc">NF '+esc(h.nf_numero)+'</div>':'')+'</td>'+
+      '<td>'+esc(canalKey(h.marketplace))+'</td><td class="desc" style="max-width:200px">'+esc(h.cliente||'')+'</td>'+
+      '<td class="num">'+(h.valor!=null?BRL(Number(h.valor)):'<span class="dim">—</span>')+'</td>'+
+      '<td><button class="btn" style="padding:5px 12px;font-size:11px" onclick="abrirPL(\''+h.id+'\')">💎 lucro</button></td></tr>').join('')+'</table>';
+}
+async function abrirPL(id){
+  const h = DADOS.find(x=>String(x.id)===String(id)); if(!h) return;
+  const skus=(h.itens||[]).map(i=>i.sku).filter(Boolean);
+  const faltam=skus.filter(sk=>!SKUINFO[sk]);
+  if(faltam.length){ try{ const r=await fetch(MOD+'/sku-info',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({skus:faltam})}); const d=await r.json(); if(d&&d.skus) Object.assign(SKUINFO,d.skus); }catch(e){} }
+  renderPL(h);
+}
+function renderPL(h){
+  const card=$('plCard');
+  const mes = diaSP(h.conferido_em).slice(0,7);
+  const ck = canalKey(h.marketplace);
+  const rp = (h.vprod_nf!=null&&isFinite(Number(h.vprod_nf)))?Number(h.vprod_nf):(((h.itens||[]).reduce((a,i)=>a+(Number(i.valor_total)||0),0))||null);
+  const tot = (h.valor!=null&&isFinite(Number(h.valor)))?Number(h.valor):null;
+  const frete = (tot!=null&&rp!=null)?tot-rp:null;
+  const aliq = CFG.aliquotas[mes];
+  const imposto = (aliq!=null&&tot!=null)?tot*aliq/100:null;
+  const feeReal = _plMLFee[h.id];
+  const tx = CFG.taxas[ck];
+  const tarifa = (feeReal!=null)?feeReal:((tx!=null&&rp!=null)?rp*tx/100:null);
+  let custo=0, cusUn=0, unTot=0;
+  (h.itens||[]).forEach(it=>{ const q=Number(it.qtd||1); unTot+=q; const inf=SKUINFO[it.sku]; if(inf&&inf.custo!=null){ custo+=inf.custo*q; cusUn+=q; } });
+  const custoOk = cusUn===unTot && unTot>0;
+  const completo = [rp,imposto,tarifa].every(v=>v!=null) && custoOk;
+  const mc = completo? rp-imposto-tarifa-custo : null;
+  const linha=(l,v,extra)=>'<tr><td>'+l+'</td><td class="num">'+(v!=null?BRL(v):'<span class="dim">—</span>')+(extra||'')+'</td></tr>';
+  card.innerHTML =
+    '<div class="sec" style="margin-top:12px;background:linear-gradient(160deg,#14201a,#131a30);border-color:#14b8a655">'+
+    '<h2>💎 Pedido '+esc(h.numero||h.id)+' · '+esc(ck)+' · '+diaSP(h.conferido_em)+
+    (h.numero_loja?' <span class="badge">venda '+esc(h.numero_loja)+'</span>':'')+(h.nf_numero?' <span class="badge">NF '+esc(h.nf_numero)+'</span>':'')+'</h2>'+
+    '<table>'+
+    linha('🛍 Produtos (nota fiscal)', rp)+
+    linha('🚚 Frete embutido (receita)', frete)+
+    linha('🏛 Imposto ('+(aliq!=null?aliq+'% de '+mes:'<span class="warn">configure ⚙️ '+mes+'</span>')+')', imposto!=null?-imposto:null)+
+    linha('🏪 Tarifa '+ (feeReal!=null?'<span class="ok">REAL (ML)</span>':(tx!=null?tx+'% est.':'<span class="warn">configure ⚙️</span>')), tarifa!=null?-tarifa:null,
+      (ck==='ml'&&h.numero_loja&&feeReal==null?' <button class="btn" style="padding:3px 10px;font-size:10.5px" onclick="pegarFeeML(\''+h.id+'\',\''+esc(h.numero_loja)+'\')">buscar real</button>':''))+
+    linha('📦 Custo ('+cusUn+'/'+unTot+' un. c/ custo)', (cusUn?-custo:null))+
+    '<tr><td style="border-top:2px solid var(--line2);font-weight:800">💎 Margem de contribuição</td>'+
+    '<td class="num" style="border-top:2px solid var(--line2);font-weight:800">'+
+      (mc!=null?('<span class="'+(mc>=0?'ok':'bad')+'">'+BRL(mc)+'</span><span class="dim" style="font-size:11px"> · '+(rp?Math.round(mc/rp*100):0)+'%</span>'):'<span class="warn">incompleto — resolva os "—" acima</span>')+'</td></tr>'+
+    '</table><div class="nota">frete recebido ≈ frete pago (não deduzido) · imposto sobre o total do pedido · tarifa sobre produtos</div></div>';
+}
+async function pegarFeeML(id, numeroLoja){
+  try{
+    const r=await fetch(MOD+'/ml-fee',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({numeroLoja})});
+    const d=await r.json();
+    if(d&&d.ok&&d.fee!=null){ _plMLFee[id]=Number(d.fee); const h=DADOS.find(x=>String(x.id)===String(id)); if(h) renderPL(h); }
+    else alert('Tarifa ML: '+((d&&d.erro)||'não disponível'));
+  }catch(e){ alert('Tarifa ML: '+e.message); }
+}
+
+// ── 📦 projeção ─────────────────────────────────────────────────────────────
 function topSkus14(){
   const corte = spDate(Date.now()-13*86400000);
   const hoje = hojeSP();
@@ -342,7 +462,6 @@ function topSkus14(){
   });
   return Object.values(agg).sort((a,b)=>b.qtd-a.qtd).slice(0,40);
 }
-
 async function carregarSkuInfo(){
   if(_skuLoading) return; _skuLoading = true;
   const st=$('projStatus'), btn=$('btnProj');
@@ -364,9 +483,8 @@ async function carregarSkuInfo(){
     if(btn){ btn.style.display=''; btn.disabled=false; btn.textContent='↻ tentar de novo'; }
   }
   _skuLoading = false;
-  renderProjecao();
+  render();   // re-render completo: projeção + KPI margem bruta + margem de contribuição (custos agora existem)
 }
-
 function renderProjecao(){
   const base = topSkus14();
   if(!base.length){ $('tProj').innerHTML='<tr><td class="dim">sem vendas nos últimos 14 dias</td></tr>'; return; }
@@ -376,7 +494,7 @@ function renderProjecao(){
     const saldo = (info.saldo!=null && isFinite(Number(info.saldo))) ? Number(info.saldo) : null;
     const diasR = (saldo!=null && md>0) ? saldo/md : null;
     const compra = (saldo!=null) ? Math.max(0, Math.ceil(md*30 - saldo)) : null;
-    const precoMed = (t.qtdV>0) ? t.fat/t.qtdV : null;   // preço médio REAL de venda (só unidades valoradas)
+    const precoMed = (t.qtdV>0) ? t.fat/t.qtdV : null;
     const custo = (info.custo!=null && isFinite(Number(info.custo))) ? Number(info.custo) : null;
     const mUn = (precoMed!=null && precoMed>0 && custo!=null) ? precoMed - custo : null;
     return { ...t, qtd14:t.qtd, md, saldo, diasR, compra, custo, mUn };
@@ -405,7 +523,7 @@ function renderProjecao(){
     if(k) k.innerHTML = '<span class="ic">📊</span><div class="l">Margem bruta 14d (top 40)</div>'+
       '<div class="v '+(margemTot>=0?'ok':'bad')+'">'+BRL(margemTot)+'</div>'+
       '<div class="s">'+cob+'% dos SKUs com custo no Bling</div>';
-    $('projAviso').innerHTML = (cob<100)?'<div class="aviso">⚠️ '+(linhas.length-margemCob)+' SKU(s) sem custo cadastrado no Bling (campo fornecedor) — margem parcial. Cadastre lá, ou me peça a importação por planilha (Excel da esteira).</div>':'';
+    $('projAviso').innerHTML = (cob<100)?'<div class="aviso">⚠️ '+(linhas.length-margemCob)+' SKU(s) sem custo cadastrado no Bling (campo fornecedor) — margem parcial. Cadastre lá, ou me peça a importação por planilha.</div>':'';
   }
 }
 
