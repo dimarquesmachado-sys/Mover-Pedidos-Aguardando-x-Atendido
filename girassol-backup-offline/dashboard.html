@@ -95,7 +95,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd13';
+const DASH_BUILD = 'd14';
 let DADOS = [];
 let periodo = 'mes', pDe = '', pAte = '';
 let SKUINFO = {}, skuInfoCarregado = false, _skuLoading = false;
@@ -178,7 +178,7 @@ function montar(){
       'style="width:100%;background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:10px;padding:11px 14px;font-size:13px" '+
       'oninput="buscarPed(this.value)">'+
       '<div id="buscaRes" style="margin-top:10px"></div><div id="plCard"></div></div>'+
-    '<div class="sec"><h2>📋 Análise de vendas — margem por pedido <span class="hint">mais novas em cima (ordem de criação do pedido) · filtros próprios abaixo</span></h2>'+
+    '<div class="sec"><h2>📋 Análise de vendas — margem por pedido <span class="hint">mais novas em cima · hora da VENDA quando o canal fornece; 🕘 = hora da conferência</span></h2>'+
       '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px"><span id="anPerChips" style="display:flex;gap:6px;flex-wrap:wrap"></span><span id="anPerDatas"></span></div>'+
       '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">'+
       '<select id="anCanalSel" onchange="anCanal=this.value;anPage=0;renderAnalise()" style="background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:9px;padding:7px 10px;font-size:12.5px"></select>'+
@@ -188,7 +188,7 @@ function montar(){
       '<button class="chip" onclick="if(anPage>0){anPage--;renderAnalise();}">← Anterior</button>'+
       '<button class="chip" onclick="anPage++;renderAnalise()">Próxima →</button></div>'+
       '<div style="overflow-x:auto"><table id="tAnalise"></table></div>'+
-      '<div class="nota">colunas (−) são deduções · tarifa <span class="ok">REAL</span> = pescada da API do ML; sem tag = % configurada · custo carrega sob demanda por página · 🛒 = compra com mais de 1 item/unidade</div></div>'+
+      '<div class="nota"><b>Sobre a hora:</b> ML mostra a hora REAL da venda (vem da pesca); TikTok/Shopee o Bling não guarda hora — o 🕘 marca que ali está a hora da <b>conferência</b> (a hora da venda desses canais chega quando plugarmos as APIs deles) · colunas (−) são deduções · tarifa <span class="ok">REAL</span> = pescada do ML; sem tag = % configurada · custo carrega sob demanda por página · 🛒 = mais de 1 item/unidade</div></div>'+
     '<div class="grid2">'+
       '<div class="sec"><h2>📈 Pedidos por dia</h2><div class="chartbox"><canvas id="cPed"></canvas></div></div>'+
       '<div class="sec"><h2>💰 Faturamento por dia</h2><div class="chartbox"><canvas id="cFat"></canvas></div></div>'+
