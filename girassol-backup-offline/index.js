@@ -82,6 +82,29 @@ let _ultimoCicloAgora = 0;   // trava anti-spam do botão 'Bling agora' (1 dispa
 let _bf = { rodando: false, feitos: 0, total: 0, ok: 0, falhas: 0, iniciado_em: null };   // status do backfill de valores
 let _bfd = { rodando: false, feitos: 0, total: 0, ok: 0, falhas: 0, iniciado_em: null };   // status do backfill de DETALHES (uf + valor por item)
 let _skuInfoCache = null;   // cache em memória do sku-info (saldo/preço/custo)
+
+// ── varredura LOCAL da fonte-NF: preenche vprod_nf lendo nf-simp.json do cache/arquivo (zero API) ──
+// Reutilizada por: rota manual (?k=), rota do dashboard (sessão) e cron diário.
+function varreduraNF(dias, origem) {
+  const corte = Date.now() - (dias || 7) * 86400000;
+  const conf2 = readJson(CONFERIDOS_FILE, {});
+  let alvo = 0, comSimp = 0, semSimp = 0;
+  for (const [cid, c] of Object.entries(conf2)) {
+    if (!c || !c.conferido_em || new Date(c.conferido_em).getTime() < corte) continue;
+    if (c.vprod_nf != null) continue;
+    alvo++;
+    let ds = readJson(path.join(CACHE_DIR, String(cid), 'nf-simp.json'), null);
+    if (!ds) ds = readJson(path.join(ARQUIVO_DIR, String(cid), 'nf-simp.json'), null);
+    if (ds && Array.isArray(ds.itens) && ds.itens.length) {
+      const s2 = ds.itens.reduce((a, i) => a + (Number(i.valorTotal) || 0), 0);
+      if (isFinite(s2) && s2 > 0) { c.vprod_nf = Math.round(s2 * 100) / 100; comSimp++; continue; }
+    }
+    semSimp++;
+  }
+  if (comSimp) writeJson(CONFERIDOS_FILE, conf2);
+  if (comSimp || origem === 'cron') console.log('[NF-SWEEP] (' + (origem || '?') + ') ' + comSimp + ' preenchido(s) pela nota, ' + semSimp + ' sem nf-simp, janela ' + (dias || 7) + 'd');
+  return { candidatos: alvo, preenchidos_pela_nf: comSimp, sem_nf_simp_no_disco: semSimp };
+}
 const { montarSeparacao, montarSeparacaoPorPedido } = require('./separacao');
 const { enviarEmailDocs } = require('./email-docs');
 const { listarAtendidos, detalhePedido, sincronizarConferidos, indexarCatalogoCompleto, cachearPedido, rodarCiclo, getUltimoResumo, getUltimoSync, getIdxStatus } = require('./ciclo');
@@ -392,24 +415,17 @@ function routes(readBody) {
       const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
       if (!process.env.ADMIN_KEY || k !== process.env.ADMIN_KEY) { json(res, 404, { error: 'not found' }); return true; }
       const dias = Math.max(1, Math.min(120, Number(urlObj.searchParams.get('dias') || 45)));
-      const corte = Date.now() - dias * 86400000;
-      const conf2 = readJson(CONFERIDOS_FILE, {});
-      let alvo = 0, comSimp = 0, semSimp = 0;
-      for (const [cid, c] of Object.entries(conf2)) {
-        if (!c || !c.conferido_em || new Date(c.conferido_em).getTime() < corte) continue;
-        if (c.vprod_nf != null) continue;
-        alvo++;
-        let ds = readJson(path.join(CACHE_DIR, String(cid), 'nf-simp.json'), null);
-        if (!ds) ds = readJson(path.join(ARQUIVO_DIR, String(cid), 'nf-simp.json'), null);
-        if (ds && Array.isArray(ds.itens) && ds.itens.length) {
-          const s2 = ds.itens.reduce((a, i) => a + (Number(i.valorTotal) || 0), 0);
-          if (isFinite(s2) && s2 > 0) { c.vprod_nf = Math.round(s2 * 100) / 100; comSimp++; continue; }
-        }
-        semSimp++;
-      }
-      if (comSimp) writeJson(CONFERIDOS_FILE, conf2);
-      json(res, 200, { ok: true, dias, candidatos: alvo, preenchidos_pela_nf: comSimp, sem_nf_simp_no_disco: semSimp,
-        mensagem: comSimp ? ('✓ ' + comSimp + ' pedido(s) ganharam produtos/frete EXATOS da nota (leitura local, sem API)') : 'nada novo a preencher' });
+      const r = varreduraNF(dias, 'manual');
+      json(res, 200, { ok: true, dias, ...r,
+        mensagem: r.preenchidos_pela_nf ? ('✓ ' + r.preenchidos_pela_nf + ' pedido(s) ganharam produtos/frete EXATOS da nota (leitura local, sem API)') : 'nada novo a preencher' });
+      return true;
+    }
+
+    // DASHBOARD (sessão admin): varredura NF rápida — o dashboard chama sozinho ao abrir
+    if (method === 'POST' && p === '/girassol-backup-offline/nf-sweep') {
+      const opSess = validarSessao(req.headers['cookie']);
+      if (!opSess || !ehAdmin(opSess)) { json(res, 403, { ok: false, erro: 'apenas admin' }); return true; }
+      json(res, 200, { ok: true, ...varreduraNF(7, 'dashboard') });
       return true;
     }
 
@@ -1782,8 +1798,8 @@ function bootstrap() {
 module.exports = {
   id: 'girassol-backup-offline',
   nome: 'Girassol Backup Offline',
-  rotinas: { backupCache: () => rodarCiclo('cron') },
+  rotinas: { backupCache: () => rodarCiclo('cron'), sweepNF: () => varreduraNF(7, 'cron') },
   routes,
-  crons: { backupCache: CRON_EXPR },
+  crons: { backupCache: CRON_EXPR, sweepNF: '20 3 * * *' },
   bootstrap
 };
