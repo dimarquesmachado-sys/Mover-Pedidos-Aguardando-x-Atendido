@@ -95,7 +95,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd8';
+const DASH_BUILD = 'd9';
 let DADOS = [];
 let periodo = 'mes', pDe = '', pAte = '';
 let SKUINFO = {}, skuInfoCarregado = false, _skuLoading = false;
@@ -106,6 +106,7 @@ let sortProd = { col: 'fat', dir: -1 };
 let sortProj = { col: 'qtd14', dir: -1 };
 let chPed = null, chFat = null;
 let _plMLFee = {};   // tarifa real ML por pedido (sob demanda)
+let anPage=0, anCanal='', _anLoading=false;   // 📋 análise de vendas
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -172,6 +173,15 @@ function montar(){
       'style="width:100%;background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:10px;padding:11px 14px;font-size:13px" '+
       'oninput="buscarPed(this.value)">'+
       '<div id="buscaRes" style="margin-top:10px"></div><div id="plCard"></div></div>'+
+    '<div class="sec"><h2>📋 Análise de vendas — margem por pedido <span class="hint">estilo MercadoTurbo · usa o período dos filtros lá de cima</span></h2>'+
+      '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">'+
+      '<select id="anCanalSel" onchange="anCanal=this.value;anPage=0;renderAnalise()" style="background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:9px;padding:7px 10px;font-size:12.5px"></select>'+
+      '<span id="anInfo" class="mut" style="font-size:12px"></span>'+
+      '<span style="margin-left:auto"></span>'+
+      '<button class="chip" onclick="if(anPage>0){anPage--;renderAnalise();}">← Anterior</button>'+
+      '<button class="chip" onclick="anPage++;renderAnalise()">Próxima →</button></div>'+
+      '<div style="overflow-x:auto"><table id="tAnalise"></table></div>'+
+      '<div class="nota">colunas (−) são deduções · tarifa <span class="ok">REAL</span> = pescada da API do ML; sem tag = % configurada · custo carrega sob demanda por página · 🛒 = compra com mais de 1 item/unidade</div></div>'+
     '<div class="grid2">'+
       '<div class="sec"><h2>📈 Pedidos por dia</h2><div class="chartbox"><canvas id="cPed"></canvas></div></div>'+
       '<div class="sec"><h2>💰 Faturamento por dia</h2><div class="chartbox"><canvas id="cFat"></canvas></div></div>'+
@@ -330,6 +340,7 @@ function render(){
 
   renderProjecao();
   renderCfg();
+  renderAnalise();
 }
 
 function desenharCharts(labels, sPed, sFat){
@@ -387,6 +398,25 @@ async function salvarCfg(){
 }
 
 // ── 🔍 busca & P&L por pedido ───────────────────────────────────────────────
+function calcPL(h){
+  const mes = diaSP(h.conferido_em).slice(0,7);
+  const ck = canalKey(h.marketplace);
+  const rp = (h.vprod_nf!=null&&isFinite(Number(h.vprod_nf)))?Number(h.vprod_nf):(((h.itens||[]).reduce((a,i)=>a+(Number(i.valor_total)||0),0))||null);
+  const tot = (h.valor!=null&&isFinite(Number(h.valor)))?Number(h.valor):null;
+  const frete = (tot!=null&&rp!=null)?tot-rp:null;
+  const aliq = CFG.aliquotas[mes];
+  const imposto = (aliq!=null&&tot!=null)?tot*aliq/100:null;
+  const feeReal = (h.tarifa_ml!=null&&isFinite(Number(h.tarifa_ml)))?Number(h.tarifa_ml):_plMLFee[h.id];
+  const tx = CFG.taxas[ck];
+  const tarifa = (feeReal!=null)?feeReal:((tx!=null&&rp!=null)?rp*tx/100:null);
+  let custo=0, cusUn=0, unTot=0;
+  (h.itens||[]).forEach(it=>{ const q=Number(it.qtd||1); unTot+=q; const inf=SKUINFO[it.sku]; if(inf&&inf.custo!=null){ custo+=inf.custo*q; cusUn+=q; } });
+  const custoOk = cusUn===unTot && unTot>0;
+  const frV = (ck==='ml' && h.frete_ml!=null && isFinite(Number(h.frete_ml))) ? Number(h.frete_ml) : null;
+  const completo = [rp,imposto,tarifa].every(v=>v!=null) && custoOk;
+  const mc = completo? rp-imposto-tarifa-custo-(frV||0) : null;
+  return {mes,ck,rp,tot,frete,aliq,imposto,feeReal,tx,tarifa,custo,cusUn,unTot,custoOk,frV,completo,mc};
+}
 function buscarPed(q){
   q = String(q||'').trim().toLowerCase();
   const res=$('buscaRes'), card=$('plCard'); card.innerHTML='';
@@ -413,22 +443,7 @@ async function abrirPL(id){
 }
 function renderPL(h){
   const card=$('plCard');
-  const mes = diaSP(h.conferido_em).slice(0,7);
-  const ck = canalKey(h.marketplace);
-  const rp = (h.vprod_nf!=null&&isFinite(Number(h.vprod_nf)))?Number(h.vprod_nf):(((h.itens||[]).reduce((a,i)=>a+(Number(i.valor_total)||0),0))||null);
-  const tot = (h.valor!=null&&isFinite(Number(h.valor)))?Number(h.valor):null;
-  const frete = (tot!=null&&rp!=null)?tot-rp:null;
-  const aliq = CFG.aliquotas[mes];
-  const imposto = (aliq!=null&&tot!=null)?tot*aliq/100:null;
-  const feeReal = (h.tarifa_ml!=null&&isFinite(Number(h.tarifa_ml)))?Number(h.tarifa_ml):_plMLFee[h.id];
-  const tx = CFG.taxas[ck];
-  const tarifa = (feeReal!=null)?feeReal:((tx!=null&&rp!=null)?rp*tx/100:null);
-  let custo=0, cusUn=0, unTot=0;
-  (h.itens||[]).forEach(it=>{ const q=Number(it.qtd||1); unTot+=q; const inf=SKUINFO[it.sku]; if(inf&&inf.custo!=null){ custo+=inf.custo*q; cusUn+=q; } });
-  const custoOk = cusUn===unTot && unTot>0;
-  const frV = (ck==='ml' && h.frete_ml!=null && isFinite(Number(h.frete_ml))) ? Number(h.frete_ml) : null;
-  const completo = [rp,imposto,tarifa].every(v=>v!=null) && custoOk;
-  const mc = completo? rp-imposto-tarifa-custo-(frV||0) : null;
+  const {mes,ck,rp,tot,frete,aliq,imposto,feeReal,tx,tarifa,custo,cusUn,unTot,frV,completo,mc} = calcPL(h);
   const linha=(l,v,extra)=>'<tr><td>'+l+'</td><td class="num">'+(v!=null?BRL(v):'<span class="dim">—</span>')+(extra||'')+'</td></tr>';
   card.innerHTML =
     '<div class="sec" style="margin-top:12px;background:linear-gradient(160deg,#14201a,#131a30);border-color:#14b8a655">'+
@@ -484,6 +499,64 @@ async function rodarBackfillNF(){
     const d=await r.json();
     msg.textContent=(d&&d.mensagem)?('✓ '+d.mensagem+' — recarregue a página'):'✓ feito';
   }catch(e){ msg.textContent='✗ '+e.message; }
+}
+
+// ── 📋 análise de vendas (margem por pedido, estilo MercadoTurbo) ───────────
+function renderAnalise(){
+  const sel=$('anCanalSel'); if(!sel) return;
+  const iv=intervalo();
+  let L = DADOS.filter(h=>{ if(!h.conferido_em) return false; const d=diaSP(h.conferido_em); return d>=iv.de && d<=iv.ate; });
+  const cnt={}; L.forEach(h=>{ const k=canalKey(h.marketplace); cnt[k]=(cnt[k]||0)+1; });
+  const opts='<option value="">Todos os canais ('+L.length+')</option>'+Object.keys(cnt).sort().map(k=>'<option value="'+k+'"'+(anCanal===k?' selected':'')+'>'+k+' ('+cnt[k]+')</option>').join('');
+  if(sel.innerHTML!==opts) sel.innerHTML=opts;
+  if(anCanal) L=L.filter(h=>canalKey(h.marketplace)===anCanal);
+  L.sort((a,b)=>String(b.conferido_em||'').localeCompare(String(a.conferido_em||'')));
+  const PAG=25, maxP=Math.max(0,Math.ceil(L.length/PAG)-1);
+  if(anPage>maxP) anPage=maxP; if(anPage<0) anPage=0;
+  const pag=L.slice(anPage*PAG, anPage*PAG+PAG);
+  $('anInfo').textContent = L.length ? ((anPage*PAG+1)+'–'+(anPage*PAG+pag.length)+' de '+L.length+' venda(s)') : 'sem vendas no período';
+  const faltam=[...new Set(pag.flatMap(h=>(h.itens||[]).map(i=>i.sku)).filter(sk=>sk && !SKUINFO[sk]))];
+  if(faltam.length && !_anLoading){
+    _anLoading=true;
+    fetch(MOD+'/sku-info',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({skus:faltam.slice(0,40)})})
+      .then(r=>r.json()).then(d=>{ if(d&&d.skus) Object.assign(SKUINFO,d.skus); }).catch(()=>{})
+      .finally(()=>{ _anLoading=false; renderAnalise(); });
+  }
+  const T={tot:0,rp:0,imp:0,tar:0,cus:0,frv:0,mc:0,mcN:0};
+  const cel=(v,cls)=>'<td class="num'+(cls?' '+cls:'')+'">'+(v!=null?BRL(v):'<span class="dim">—</span>')+'</td>';
+  const linhas = pag.map(h=>{
+    const P=calcPL(h);
+    const unid=(h.itens||[]).reduce((a,i)=>a+Number(i.qtd||1),0);
+    const carrinho=((h.itens||[]).length>1)||unid>1;
+    if(P.tot!=null)T.tot+=P.tot; if(P.rp!=null)T.rp+=P.rp; if(P.imposto!=null)T.imp+=P.imposto;
+    if(P.tarifa!=null)T.tar+=P.tarifa; if(P.custoOk)T.cus+=P.custo; if(P.frV!=null)T.frv+=P.frV;
+    if(P.mc!=null){ T.mc+=P.mc; T.mcN++; }
+    const it0=(h.itens||[])[0]||{};
+    const pmc = (P.mc!=null&&P.rp)?Math.round(P.mc/P.rp*100):null;
+    return '<tr>'+
+      '<td class="dim" style="white-space:nowrap">'+diaSP(h.conferido_em).slice(5)+'</td>'+
+      '<td><b>'+esc(h.numero||h.id)+'</b>'+(carrinho?' <span class="badge" title="'+unid+' unidades">🛒 '+unid+'</span>':'')+
+        (h.nf_numero?'<div class="desc">NF '+esc(h.nf_numero)+'</div>':'')+'</td>'+
+      '<td>'+esc(P.ck)+'</td>'+
+      '<td><div class="desc" style="max-width:200px">'+esc(it0.sku||'')+((h.itens||[]).length>1?' +'+((h.itens||[]).length-1):'')+'</div></td>'+
+      '<td class="num">'+N(unid)+'</td>'+
+      cel(P.tot)+cel(P.rp,'ok')+
+      cel(P.custoOk?P.custo:null)+cel(P.imposto)+
+      '<td class="num">'+(P.tarifa!=null?BRL(P.tarifa)+(P.feeReal!=null?' <span class="st ok" style="font-size:9px">REAL</span>':''):'<span class="dim">—</span>')+'</td>'+
+      cel(P.frV)+
+      '<td class="num" style="font-weight:800">'+(P.mc!=null?('<span class="'+(P.mc>=0?'ok':'bad')+'">'+BRL(P.mc)+'</span>'):'<span class="warn" title="falta config/custo">—</span>')+'</td>'+
+      '<td class="num '+(pmc!=null?(pmc>=0?'ok':'bad'):'dim')+'">'+(pmc!=null?pmc+'%':'—')+'</td>'+
+    '</tr>';
+  }).join('');
+  $('tAnalise').innerHTML =
+    '<tr><th>Data</th><th>Pedido</th><th>Canal</th><th>Produto</th><th class="num">Un.</th>'+
+    '<th class="num">Venda</th><th class="num">Prod. NF</th><th class="num">Custo (−)</th><th class="num">Imposto (−)</th>'+
+    '<th class="num">Tarifa (−)</th><th class="num">Frete vend. (−)</th><th class="num">💎 M.C.</th><th class="num">MC %</th></tr>'+
+    (linhas || '<tr><td class="dim" colspan="13">sem vendas no período</td></tr>')+
+    (pag.length?('<tr style="border-top:2px solid var(--line2)"><td colspan="5" style="font-weight:800">Σ desta página</td>'+
+      cel(T.tot)+cel(T.rp,'ok')+cel(T.cus)+cel(T.imp)+cel(T.tar)+cel(T.frv)+
+      '<td class="num" style="font-weight:800"><span class="'+(T.mc>=0?'ok':'bad')+'">'+BRL(T.mc)+'</span></td>'+
+      '<td class="num dim">'+T.mcN+'/'+pag.length+' compl.</td></tr>'):'');
 }
 
 // ── 📦 projeção ─────────────────────────────────────────────────────────────
