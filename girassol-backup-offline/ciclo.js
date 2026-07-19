@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════════════════
-//  good-checkout-offline · módulo ciclo  (motor de sincronização — Lote 2)
+//  girassol-backup-offline · módulo ciclo  (motor de sincronização — Lote 2)
 //  Dono do estado: rodando / ultimoResumo / ultimoSync / idxStatus.
 //  As rotas leem esse estado pelos getters exportados (getUltimoResumo, etc.).
 // ════════════════════════════════════════════════════════════════════════
@@ -33,7 +33,7 @@ async function indexarCatalogoCompleto() {
   if (idxStatus.rodando) return;
   idxStatus = { rodando: true, feitos: 0, eans: 0, em: new Date().toISOString(), fim: null, erro: null };
   const novo = lerIndiceEan();                       // parte do que já existe
-  const PAUSA = Number(process.env.GOODBKP_PAUSA_MS || 700);
+  const PAUSA = Number(process.env.GIRABKP_PAUSA_MS || 700);
   try {
     let pagina = 1;
     while (pagina <= 500) {                           // trava de segurança
@@ -73,7 +73,7 @@ async function sincronizarConferidos() {
       conf[id].sincronizado_em = new Date().toISOString();
       delete conf[id].sync_erro;
       ok++;
-      console.log(`[GOODBKP] sync ${id} → ${SIT_VERIFICADO} OK`);
+      console.log(`[GIRABKP] sync ${id} → ${SIT_VERIFICADO} OK`);
     } else {
       // Falha ao mover: confere se o pedido JÁ AVANÇOU (saiu de ATENDIDO por outro
       // processo — despachado/faturado). Se não está mais em ATENDIDO, o sync já não
@@ -90,11 +90,11 @@ async function sincronizarConferidos() {
         conf[id].sync_resolvido = 'ja-avancado:' + situAtual;
         delete conf[id].sync_erro;
         jaAvancados++;
-        console.log(`[GOODBKP] sync ${id}: já avançou p/ situacao ${situAtual} (resolvido, sem mover)`);
+        console.log(`[GIRABKP] sync ${id}: já avançou p/ situacao ${situAtual} (resolvido, sem mover)`);
       } else {
         conf[id].sync_erro = String(r.status || 'err');
         falhas++;
-        console.log(`[GOODBKP] sync ${id} FALHOU (${r.status}) ${r.raw || ''}`);
+        console.log(`[GIRABKP] sync ${id} FALHOU (${r.status}) ${r.raw || ''}`);
       }
     }
     await sleep(PAUSA_MS);
@@ -216,8 +216,8 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC, nfCtx) {
   // → baixa a etiqueta ZPL direto do Mercado Livre (shipment_labels) com o token ML da empresa.
   if (!temEtiqueta && mkt === 'ml' && ped.numeroLoja) {
     try {
-      const { garantirTokenML } = require('../good/mlTokenManager');
-      const { getShipmentInfo, getShipmentSubstatus } = require('../good/mlApi');
+      const { garantirTokenML } = require('../girassol/mlTokenManager');
+      const { getShipmentInfo, getShipmentSubstatus } = require('../girassol/mlApi');
       const tokenML = await garantirTokenML();
       const shipmentId = await getShipmentInfo(tokenML, ped.numeroLoja);
       const r = await fetch(`https://api.mercadolibre.com/shipment_labels?shipment_ids=${shipmentId}&response_type=zpl2`, { headers: { Authorization: `Bearer ${tokenML}` } });
@@ -234,16 +234,16 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC, nfCtx) {
         }
         if (zpl && zpl.indexOf('^XA') >= 0) {
           fs.writeFileSync(_etqPath, zpl); temEtiqueta = true;
-          console.log(`[GOODBKP] etiqueta ${ped.numero} baixada DIRETO do ML (fallback, shipment ${shipmentId})`);
+          console.log(`[GIRABKP] etiqueta ${ped.numero} baixada DIRETO do ML (fallback, shipment ${shipmentId})`);
         } else {
-          console.log(`[GOODBKP] fallback ML ${ped.numero}: resposta sem ZPL (etiqueta ainda não liberada no ML?)`);
+          console.log(`[GIRABKP] fallback ML ${ped.numero}: resposta sem ZPL (etiqueta ainda não liberada no ML?)`);
         }
       } else {
         let det400 = ''; try { det400 = (await r.text()).slice(0, 220).replace(/\s+/g, ' '); } catch (e) {}
         let sub400 = ''; try { const st = await getShipmentSubstatus(tokenML, shipmentId); sub400 = `${st.status}/${st.substatus}`; } catch (e) {}
-        console.log(`[GOODBKP] fallback ML ${ped.numero}: shipment_labels HTTP ${r.status} shipment=${sub400 || '?'} motivo=${det400}`);
+        console.log(`[GIRABKP] fallback ML ${ped.numero}: shipment_labels HTTP ${r.status} shipment=${sub400 || '?'} motivo=${det400}`);
       }
-    } catch (e) { console.log(`[GOODBKP] fallback ML ${ped.numero}: ${String(e.message || e).slice(0, 160)}`); }
+    } catch (e) { console.log(`[GIRABKP] fallback ML ${ped.numero}: ${String(e.message || e).slice(0, 160)}`); }
   }
   // MADEIRA MADEIRA não tem etiqueta no Bling. Se a etiqueta já está no mapa MM
   // (gerada por nós e sincronizada pela extensão), conta o pedido como PRONTO.
@@ -254,7 +254,7 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC, nfCtx) {
       let bufMM = null;
       if (fs.existsSync(_mmPdf)) { bufMM = fs.readFileSync(_mmPdf); }   // já cacheado → reaproveita (não re-baixa)
       else {
-        const mmEtq = require('../good-mm-etiquetas');
+        const mmEtq = require('../girassol-mm-etiquetas');
         let regMM = null;
         for (const c of [ped.numeroLoja, nf && nf.numero].filter(Boolean)) { regMM = mmEtq.acharLote(c); if (regMM) break; }
         if (regMM && regMM.batch) {
@@ -303,7 +303,7 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC, nfCtx) {
 }
 
 async function rodarCiclo(motivo = 'cron', forcar = false) {
-  if (rodando) { console.log('[GOODBKP] ciclo já em andamento — pulei'); return ultimoResumo; }
+  if (rodando) { console.log('[GIRABKP] ciclo já em andamento — pulei'); return ultimoResumo; }
   rodando = true;
   limparProdCache();                       // zera cache de produto por ciclo
   const _kc = readJson(KIT_CACHE_FILE, {});
@@ -312,12 +312,12 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
   let novos = 0, erros = 0;
   try {
     ensureDir(CACHE_DIR);
-    console.log(`[GOODBKP] ▶ ciclo (${motivo})${forcar ? ' [FORCE]' : ''}`);
+    console.log(`[GIRABKP] ▶ ciclo (${motivo})${forcar ? ' [FORCE]' : ''}`);
     const man      = manifest();
     const cacheEan = skuEanCache();
     const locC     = locCache();
     const { ok: listaOk, pedidos: atendidos } = await listarAtendidos();
-    console.log(`[GOODBKP] ${atendidos.length} pedido(s) ATENDIDO(${SIT_ATENDIDO}) na janela de ${JANELA_DIAS}d (bling ok=${listaOk})`);
+    console.log(`[GIRABKP] ${atendidos.length} pedido(s) ATENDIDO(${SIT_ATENDIDO}) na janela de ${JANELA_DIAS}d (bling ok=${listaOk})`);
 
     // RECONCILIAÇÃO: remove do cache quem NÃO está mais em ATENDIDO (enviado/processado).
     // Só roda se o Bling respondeu E veio algo — assim, se o Bling cair, o cache offline é preservado.
@@ -331,7 +331,7 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
           removidos++;
         }
       }
-      if (removidos) { salvarManifest(man); console.log(`[GOODBKP] reconciliação: ${removidos} pedido(s) saíram do ATENDIDO e foram removidos do cache`); }
+      if (removidos) { salvarManifest(man); console.log(`[GIRABKP] reconciliação: ${removidos} pedido(s) saíram do ATENDIDO e foram removidos do cache`); }
     }
 
     // ESPELHO DO BLING: pedido que estava finalizado+sincronizado aqui mas VOLTOU pra ATENDIDO no Bling
@@ -343,7 +343,7 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
       for (const id of Object.keys(conf)) {
         if (conf[id] && conf[id].sincronizado && idsAtend.has(String(id))) { delete conf[id]; reabertos++; }
       }
-      if (reabertos) { writeJson(CONFERIDOS_FILE, conf); console.log(`[GOODBKP] espelho Bling: ${reabertos} pedido(s) voltaram pra ATENDIDO → desfinalizados (reaparecem na lista)`); }
+      if (reabertos) { writeJson(CONFERIDOS_FILE, conf); console.log(`[GIRABKP] espelho Bling: ${reabertos} pedido(s) voltaram pra ATENDIDO → desfinalizados (reaparecem na lista)`); }
     }
 
     // (re)processa quem não tem etiqueta OU está num schema antigo (ganha EAN+kit) OU tem kit incompleto no cache
@@ -353,7 +353,7 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
       if (ja && ja.tem_kit && kitIncompletoNoCache(ped.id)) return true;   // kit com componente vazio → re-resolve sozinho
       return !(ja && ja.tem_etiqueta && ja.schema === SCHEMA);
     });
-    console.log(`[GOODBKP] ${aProcessar.length} a (re)processar`);
+    console.log(`[GIRABKP] ${aProcessar.length} a (re)processar`);
 
     // carrega as NFs recentes UMA vez (cobre o menor id do lote) e casa em memória
     let nfs = [];
@@ -361,7 +361,7 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
       const idMin = Math.min(...aProcessar.map(p => Number(p.id) || Infinity));
       if (Number.isFinite(idMin)) {
         nfs = await carregarNFs(idMin - 5);
-        console.log(`[GOODBKP] ${nfs.length} NF(s) recentes carregadas p/ casar`);
+        console.log(`[GIRABKP] ${nfs.length} NF(s) recentes carregadas p/ casar`);
       }
     }
 
@@ -394,7 +394,7 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
         salvarSkuEan(cacheEan);
         salvarLoc(locC);
         writeJson(KIT_CACHE_FILE, { _schema: SCHEMA, kits: kitCache });
-      } catch (e) { erros++; console.error(`[GOODBKP] erro pedido ${id}:`, e.message); }
+      } catch (e) { erros++; console.error(`[GIRABKP] erro pedido ${id}:`, e.message); }
       await sleep(PAUSA_MS);
     }
 
@@ -420,7 +420,7 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
       } else { danfesFalha++; }
     }
     if (danfesNovos || danfesReparo) salvarManifest(man);
-    console.log(`[GOODBKP] DANFE: ${danfesNovos} novos, ${danfesReparo} reparados, ${danfesFalha} falha, ${danfesSemId} sem nf.id`);
+    console.log(`[GIRABKP] DANFE: ${danfesNovos} novos, ${danfesReparo} reparados, ${danfesFalha} falha, ${danfesSemId} sem nf.id`);
 
     // passo: cacheia os DADOS do DANFE SIMPLIFICADO (p/ imprimir 10x15 na Zebra OFFLINE)
     //        guarda o parsed (nf-simp.json) — o PDF é gerado na hora pela rota /danfe-simp
@@ -450,7 +450,7 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
       } catch (e) { simpFalha++; }
     }
     if (simpCurados) salvarManifest(man);
-    console.log(`[GOODBKP] DANFE-simp: ${simpNovos} novos, ${simpCurados} curados, ${simpFalha} falha, ${simpSemId} sem nf`);
+    console.log(`[GIRABKP] DANFE-simp: ${simpNovos} novos, ${simpCurados} curados, ${simpFalha} falha, ${simpSemId} sem nf`);
 
     // passo: baixa a ETIQUETA em PDF (p/ modo A4 / fallback Zebra) — só de quem já tem ZPL
     let etqPdfNovos = 0;
@@ -462,7 +462,7 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
       const pdf = await baixarEtiquetaPDF(ped.id); await sleep(PAUSA_MS);
       if (pdf) { fs.writeFileSync(path.join(dir, 'etiqueta.pdf'), pdf); etqPdfNovos++; }
     }
-    if (etqPdfNovos) console.log(`[GOODBKP] ${etqPdfNovos} etiqueta(s) PDF cacheadas`);
+    if (etqPdfNovos) console.log(`[GIRABKP] ${etqPdfNovos} etiqueta(s) PDF cacheadas`);
 
     // passo: garante servico + flex no manifest (p/ filtro marketplace/FLEX) — lê detalhe só de quem falta
     let svcNovos = 0;
@@ -478,7 +478,7 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
       if (snap) { snap.servico = svc; snap.flex = ehFlex(svc); writeJson(snapPath, snap); }
       svcNovos++;
     }
-    if (svcNovos) { salvarManifest(man); console.log(`[GOODBKP] ${svcNovos} servico/flex preenchidos`); }
+    if (svcNovos) { salvarManifest(man); console.log(`[GIRABKP] ${svcNovos} servico/flex preenchidos`); }
 
     // recalcula o flex de quem JÁ tem servico em cache (barato, sem Bling) — pega mudança nas FLEX_KEYWORDS
     let flexFix = 0;
@@ -494,7 +494,7 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
         flexFix++;
       }
     }
-    if (flexFix) { salvarManifest(man); console.log(`[GOODBKP] ${flexFix} flex recalculado`); }
+    if (flexFix) { salvarManifest(man); console.log(`[GIRABKP] ${flexFix} flex recalculado`); }
 
     // passo: aquece as LOCALIZAÇÕES que faltam (SKUs a separar) — teto por ciclo (mais alto no force)
     if (listaOk) {
@@ -507,14 +507,14 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
         locC[sku] = await localizacaoPorSku(sku); await sleep(PAUSA_MS);
         locNovas++;
       }
-      if (locNovas) { salvarLoc(locC); console.log(`[GOODBKP] ${locNovas} localização(ões) aquecidas`); }
+      if (locNovas) { salvarLoc(locC); console.log(`[GIRABKP] ${locNovas} localização(ões) aquecidas`); }
     }
 
     // FASE 3: Bling respondeu (listaOk) → drena a fila de conferidos offline p/ VERIFICADO (24)
-    // só roda automático se GOODBKP_SYNC_ON=1 (trava de segurança até você testar)
+    // só roda automático se GIRABKP_SYNC_ON=1 (trava de segurança até você testar)
     if (listaOk && SYNC_ON) {
       const sync = await sincronizarConferidos();
-      if (sync.pendentes) console.log(`[GOODBKP] sync conferidos→${SIT_VERIFICADO}: ${sync.ok} ok, ${sync.falhas} falha(s) de ${sync.pendentes}`);
+      if (sync.pendentes) console.log(`[GIRABKP] sync conferidos→${SIT_VERIFICADO}: ${sync.ok} ok, ${sync.falhas} falha(s) de ${sync.pendentes}`);
     }
 
     purgar(man);
@@ -532,9 +532,9 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
       semEtiqueta: ids.filter(i => !man[i].tem_etiqueta).length,
       novos, erros
     };
-    console.log('[GOODBKP] ✔ ciclo:', JSON.stringify(ultimoResumo));
+    console.log('[GIRABKP] ✔ ciclo:', JSON.stringify(ultimoResumo));
   } catch (e) {
-    console.error('[GOODBKP] ciclo falhou:', e.message);
+    console.error('[GIRABKP] ciclo falhou:', e.message);
   } finally {
     rodando = false;
   }
