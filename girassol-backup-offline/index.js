@@ -591,7 +591,8 @@ function routes(readBody) {
           intermediador: det.intermediador || null,
           totais: { totalProdutos: det.totalProdutos, total: det.total, desconto: det.desconto, outrasDespesas: det.outrasDespesas },
           itens_do_bling: (det.itens || []).map(i => ({ codigo: i.codigo || null, codigo_produto: (i.produto && i.produto.codigo) || null, descricao: String(i.descricao || '').slice(0, 60), qtd: i.quantidade, valor: i.valor })),
-          itens_do_conferido: ((confP[alvoId] && confP[alvoId].itens) || []).map(i => ({ sku: i.sku, qtd: i.qtd, valor_total: i.valor_total })) });
+          itens_do_conferido: ((confP[alvoId] && confP[alvoId].itens) || []).map(i => ({ sku: i.sku, qtd: i.qtd, valor_total: i.valor_total })),
+          conferido_campos: (function(){ const c = confP[alvoId] || {}; return { tarifa_ml: c.tarifa_ml != null ? c.tarifa_ml : null, frete_ml: c.frete_ml != null ? c.frete_ml : null, venda_em: c.venda_em || null, taxa_mkt: c.taxa_mkt != null ? c.taxa_mkt : null, frete_mkt: c.frete_mkt != null ? c.frete_mkt : null, vprod_nf: c.vprod_nf != null ? c.vprod_nf : null, numero_loja: c.numero_loja || null, marketplace: c.marketplace || null }; })() });
       } catch (e) { json(res, 200, { ok: false, erro: String(e.message || e).slice(0, 200) }); }
       return true;
     }
