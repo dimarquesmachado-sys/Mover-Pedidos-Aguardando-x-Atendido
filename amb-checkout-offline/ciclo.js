@@ -288,6 +288,8 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC, nfCtx) {
     cliente: (ped.contato && ped.contato.nome) || '',
     total: (ped.total != null ? Number(ped.total) : null),   // valor total do pedido (p/ faturamento no relatório)
     uf: (ped.transporte && ped.transporte.etiqueta && ped.transporte.etiqueta.uf) || null,           // estado do destinatário (dashboard: vendas por UF)
+    taxa_mkt: (ped.taxas && isFinite(Number(ped.taxas.taxaComissao)) && Number(ped.taxas.taxaComissao) > 0) ? Math.round(Number(ped.taxas.taxaComissao) * 100) / 100 : null,   // 💎 comissão que o Bling importa do marketplace (TikTok/Shopee/Magalu…)
+    frete_mkt: (ped.taxas && isFinite(Number(ped.taxas.custoFrete)) && Number(ped.taxas.custoFrete) > 0) ? Math.round(Number(ped.taxas.custoFrete) * 100) / 100 : null,        // frete informado pelo canal via Bling
     municipio: (ped.transporte && ped.transporte.etiqueta && ped.transporte.etiqueta.municipio) || null,
     nf,
     itens,
