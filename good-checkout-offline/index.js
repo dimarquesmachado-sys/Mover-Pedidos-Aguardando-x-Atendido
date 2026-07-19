@@ -337,6 +337,8 @@ function routes(readBody) {
             if (d.valor != null && c2[id].valor == null) c2[id].valor = d.valor;
             if (d.uf) c2[id].uf = d.uf;
             if (d.municipio) c2[id].municipio = d.municipio;
+            if (d.taxa_mkt != null && c2[id].taxa_mkt == null) c2[id].taxa_mkt = d.taxa_mkt;
+            if (d.frete_mkt != null && c2[id].frete_mkt == null) c2[id].frete_mkt = d.frete_mkt;
             if (d.porSku && Array.isArray(c2[id].itens)) {
               c2[id].itens.forEach(it => {
                 const v = d.porSku[String(it.sku || '').trim()];
@@ -357,6 +359,8 @@ function routes(readBody) {
                 valor: (det.total != null ? Number(det.total) : null),
                 uf: (det.transporte && det.transporte.etiqueta && det.transporte.etiqueta.uf) || null,
                 municipio: (det.transporte && det.transporte.etiqueta && det.transporte.etiqueta.municipio) || null,
+                taxa_mkt: (det.taxas && isFinite(Number(det.taxas.taxaComissao)) && Number(det.taxas.taxaComissao) > 0) ? Math.round(Number(det.taxas.taxaComissao) * 100) / 100 : null,
+                frete_mkt: (det.taxas && isFinite(Number(det.taxas.custoFrete)) && Number(det.taxas.custoFrete) > 0) ? Math.round(Number(det.taxas.custoFrete) * 100) / 100 : null,
                 porSku
               };
               _bfd.ok++;
@@ -1130,6 +1134,8 @@ function routes(readBody) {
         } catch (e) {} return null; })(),
         municipio: (snapC && snapC.municipio) || null,
         numero_loja: (snapC && snapC.numero_loja) || null,
+        taxa_mkt: (snapC && snapC.taxa_mkt) || null,
+        frete_mkt: (snapC && snapC.frete_mkt) || null,
         itens: snapC ? (snapC.itens || []).map(it => ({ sku: it.sku || '', descricao: String(it.descricao || '').slice(0, 90), qtd: it.qtd || 1, valor_unit: (it.valor_unit != null ? it.valor_unit : null), valor_total: (it.valor_total != null ? it.valor_total : null) })) : []
       };
       writeJson(CONFERIDOS_FILE, conf);            // grava na fila primeiro — nunca perde
