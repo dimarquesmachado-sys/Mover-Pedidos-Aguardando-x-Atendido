@@ -95,9 +95,9 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd15';
+const DASH_BUILD = 'd16';
 let DADOS = [];
-let periodo = 'mes', pDe = '', pAte = '';
+let periodo = 'dia', pDe = '', pAte = '';   // abre no DIA (pedido do Diego)
 let SKUINFO = {}, skuInfoCarregado = false, _skuLoading = false;
 let CFG = { aliquotas:{}, taxas:{} };   // alíquota Simples por mês (YYYY-MM: %) + tarifa % por canal
 // Alíquotas 2026 da GIRASSOL vindas de fábrica (editáveis no ⚙️; o que você salvar SOBREPÕE estas):
@@ -109,7 +109,7 @@ let sortProd = { col: 'fat', dir: -1 };
 let sortProj = { col: 'qtd14', dir: -1 };
 let chPed = null, chFat = null;
 let _plMLFee = {};   // tarifa real ML por pedido (sob demanda)
-let anPage=0, anCanal='', anSku='', anPer='mes', anPDe='', anPAte='', _anLoading=false;   // 📋 análise de vendas
+let anPage=0, anCanal='', anSku='', anPer='dia', anPDe='', anPAte='', _anLoading=false;   // 📋 análise de vendas (abre no DIA)
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
