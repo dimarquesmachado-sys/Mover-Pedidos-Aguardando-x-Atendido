@@ -95,6 +95,53 @@ async function getPackInfo(packId) {
 }
 
 /**
+ * SESSAO 8 — status do pedido no ML, versao LEVE e que NUNCA joga excecao.
+ *
+ * Por que nao usar o getOrderDetalhe: ele joga Error em qualquer falha. Esta
+ * funcao roda em LOTE dentro do cron rotinaChecarCanceladasML — se um pedido
+ * der 404/500/timeout, os outros 39 da rodada nao podem morrer junto. Entao
+ * aqui todo erro vira { ok:false } e o chamador decide.
+ *
+ * status possiveis do ML:
+ *   confirmed | payment_required | payment_in_process | partially_paid
+ *   paid | cancelled | invalid
+ */
+function _txtStatusDetail(sd) {
+  if (!sd) return null;
+  if (typeof sd === 'string') return sd;
+  if (typeof sd === 'object') return sd.description || sd.code || JSON.stringify(sd).slice(0, 120);
+  return String(sd);
+}
+
+async function getOrderStatusResumo(orderId) {
+  try {
+    const r = await mlFetch('GET', `/orders/${orderId}`);
+    if (!r.ok) {
+      return {
+        ok: false,
+        httpStatus: r.status,
+        erro: `ML ${r.status}: ${JSON.stringify(r.data).slice(0, 200)}`
+      };
+    }
+    const d = r.data || {};
+    const st = String(d.status || '').toLowerCase();
+    return {
+      ok: true,
+      httpStatus: r.status,
+      status: d.status || null,
+      statusDetail: _txtStatusDetail(d.status_detail),
+      // 'invalid' tambem conta como morta: o ML usa pra pedido fraudulento/anulado.
+      cancelada: st === 'cancelled' || st === 'invalid',
+      tags: Array.isArray(d.tags) ? d.tags : [],
+      packId: d.pack_id ? String(d.pack_id) : null,
+      dataFechamento: d.date_closed || null
+    };
+  } catch (e) {
+    return { ok: false, erro: e.message };
+  }
+}
+
+/**
  * Detecta se o pedido tem variação "A COMBINAR" em qualquer item
  * Procura em:
  *   - order_items[].item.variation_attributes[].value_name
@@ -476,6 +523,7 @@ async function getPrazoPostagem(orderId) {
 module.exports = {
   buscarVendasPagas,
   getOrderDetalhe,
+  getOrderStatusResumo,
   getPrazoPostagem,
   getPackInfo,
   temVariacaoACombinar,
