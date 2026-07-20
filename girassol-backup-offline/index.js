@@ -391,7 +391,7 @@ function routes(readBody) {
       const out = {}; const faltam = [];
       for (const sku of skus) {
         const c = _skuInfoCache[sku];
-        if (!body.fresh && c && (Date.now() - (c.ts || 0)) < TTL) out[sku] = c; else faltam.push(sku);
+        if (!body.fresh && c && (Date.now() - (c.ts || 0)) < TTL && (c.custo != null || c.saldo != null)) out[sku] = c; else faltam.push(sku);   // cache de nulls nao vale — refaz sozinho
       }
       const dorme = ms => new Promise(r => setTimeout(r, ms));
       // 1) resolve SKU → produto (id, preço, custo do próprio detalhe quando vier)
@@ -599,6 +599,37 @@ function routes(readBody) {
           itens_do_bling: (det.itens || []).map(i => ({ codigo: i.codigo || null, codigo_produto: (i.produto && i.produto.codigo) || null, descricao: String(i.descricao || '').slice(0, 60), qtd: i.quantidade, valor: i.valor })),
           itens_do_conferido: ((confP[alvoId] && confP[alvoId].itens) || []).map(i => ({ sku: i.sku, qtd: i.qtd, valor_total: i.valor_total })),
           conferido_campos: (function(){ const c = confP[alvoId] || {}; return { tarifa_ml: c.tarifa_ml != null ? c.tarifa_ml : null, frete_ml: c.frete_ml != null ? c.frete_ml : null, venda_em: c.venda_em || null, taxa_mkt: c.taxa_mkt != null ? c.taxa_mkt : null, frete_mkt: c.frete_mkt != null ? c.frete_mkt : null, vprod_nf: c.vprod_nf != null ? c.vprod_nf : null, numero_loja: c.numero_loja || null, marketplace: c.marketplace || null }; })() });
+      } catch (e) { json(res, 200, { ok: false, erro: String(e.message || e).slice(0, 200) }); }
+      return true;
+    }
+
+    // ADMIN (?k= obrigatorio — trava central intercepta rotas 'debug'): RAIO-X DO PRODUTO no Bling.
+    // Mostra TODAS as chaves do produto + campos de preco/custo + o que /estoques/saldos e /produtos/fornecedores devolvem.
+    // Uso: /girassol-backup-offline/debug-sku?sku=KP16&k=SUA_CHAVE
+    if (method === 'GET' && p === '/girassol-backup-offline/debug-sku') {
+      const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const sessP = validarSessao(req.headers['cookie']);
+      if (!((process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || (sessP && ehAdmin(sessP)))) { json(res, 404, { error: 'not found' }); return true; }
+      const skuQ = String(urlObj.searchParams.get('sku') || '').trim();
+      if (!skuQ) { json(res, 200, { ok: false, erro: 'passe ?sku=CODIGO' }); return true; }
+      try {
+        const rb = await blingGet('/produtos?codigo=' + encodeURIComponent(skuQ) + '&criterio=5');
+        const p0 = rb && rb.data && rb.data[0];
+        if (!p0) { json(res, 200, { ok: false, erro: 'produto nao encontrado por codigo ' + skuQ }); return true; }
+        const rd = await blingGet('/produtos/' + p0.id);
+        const det = (rd && rd.data) || {};
+        const precos = {};
+        const cata = (obj, pref) => { for (const [k2, v2] of Object.entries(obj || {})) { const cam = pref ? pref + '.' + k2 : k2; if (v2 && typeof v2 === 'object' && !Array.isArray(v2)) { cata(v2, cam); continue; } if (/pre[cç]o|custo|cost|price/i.test(k2)) precos[cam] = v2; } };
+        cata(det, '');
+        let saldos = null, fornecedores = null;
+        try { const rs = await blingGet('/estoques/saldos?idsProdutos[]=' + p0.id); saldos = (rs && rs.data) || rs; } catch (e) { saldos = { erro: String(e.message || e).slice(0, 120) }; }
+        try { const rf = await blingGet('/produtos/fornecedores?idProduto=' + p0.id); fornecedores = (rf && rf.data) || rf; } catch (e) { fornecedores = { erro: String(e.message || e).slice(0, 120) }; }
+        json(res, 200, { ok: true, sku: skuQ, id_produto: p0.id,
+          chaves_do_produto: Object.keys(det),
+          todos_os_campos_de_preco_ou_custo: precos,
+          saldo_estoques: saldos,
+          endpoint_fornecedores: fornecedores,
+          veredito: (precos.precoCusto != null && Number(precos.precoCusto) > 0) ? 'precoCusto EXISTE no produto — vou ler daqui' : 'sem precoCusto no detalhe — olhar os outros campos acima' });
       } catch (e) { json(res, 200, { ok: false, erro: String(e.message || e).slice(0, 200) }); }
       return true;
     }
