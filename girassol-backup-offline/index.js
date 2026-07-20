@@ -394,23 +394,26 @@ function routes(readBody) {
         if (!body.fresh && c && (Date.now() - (c.ts || 0)) < TTL && (c.custo != null || c.saldo != null)) out[sku] = c; else faltam.push(sku);   // cache de nulls nao vale — refaz sozinho
       }
       const dorme = ms => new Promise(r => setTimeout(r, ms));
+      const bg = async (pth) => { for (let t = 0; t < 3; t++) { const r = await blingGet(pth); if (r && r.ok) return r; await dorme(1100 + t * 500); } return await blingGet(pth); };   // anti-429: re-tenta com pausa crescente
+      let resolveFalhas = 0;
       // 1) resolve SKU → produto (id, preço, custo do próprio detalhe quando vier)
       const ids = {};
       for (const sku of faltam) {
         try {
           let prod = null;
           for (const v of [...new Set([sku, sku.toUpperCase(), sku.toLowerCase()])]) {
-            const r = await blingGet(`/produtos?codigo=${encodeURIComponent(v)}&limite=1`);
+            const r = await bg(`/produtos?codigo=${encodeURIComponent(v)}&limite=1&criterio=5`);
             const it = r.ok && r.data && r.data.data && r.data.data[0];
-            if (it && it.id) { const d = await blingGet(`/produtos/${it.id}`); prod = (d.ok && d.data && d.data.data) || it; break; }
+            if (it && it.id) { const d = await bg(`/produtos/${it.id}`); prod = (d.ok && d.data && d.data.data) || it; break; }
+            await dorme(300);
           }
           if (prod && prod.id) {
             const forn = prod.fornecedor || {};
             const cand = [forn.precoCusto, forn.precoCompra, prod.precoCusto, prod.custo].map(Number).filter(v => isFinite(v) && v > 0);
             ids[sku] = { id: prod.id, preco: (prod.preco != null && isFinite(Number(prod.preco))) ? Number(prod.preco) : null, custo: cand.length ? cand[0] : null };
-          } else ids[sku] = null;
-        } catch (e) { ids[sku] = null; }
-        await dorme(220);
+          } else { ids[sku] = null; if (resolveFalhas < 3) console.log('[SKU-INFO] nao resolveu', sku); resolveFalhas++; }
+        } catch (e) { ids[sku] = null; if (resolveFalhas < 3) console.log('[SKU-INFO] erro em', sku, String(e.message || e).slice(0, 80)); resolveFalhas++; }
+        await dorme(400);
       }
       // 2) SALDO em LOTE — no Bling v3 o saldo vem de /estoques/saldos, não do detalhe do produto
       const saldos = {};
@@ -418,7 +421,7 @@ function routes(readBody) {
       for (let i = 0; i < todosIds.length; i += 40) {
         try {
           const qs = todosIds.slice(i, i + 40).map(pid => 'idsProdutos[]=' + pid).join('&');
-          const r = await blingGet('/estoques/saldos?' + qs);
+          const r = await bg('/estoques/saldos?' + qs);
           const arr = (r.ok && r.data && r.data.data) || [];
           for (const e2 of arr) {
             const pid = e2 && e2.produto && e2.produto.id;
@@ -432,7 +435,7 @@ function routes(readBody) {
       for (const [sku2, o2] of Object.entries(ids)) {
         if (!o2 || o2.custo != null) continue;
         try {
-          const r = await blingGet(`/produtos/fornecedores?idProduto=${o2.id}&limite=5`);
+          const r = await bg(`/produtos/fornecedores?idProduto=${o2.id}&limite=5`);
           const arr = (r.ok && r.data && r.data.data) || [];
           const pref = arr.find(x => x && x.padrao) || arr[0];
           const cand = pref ? [pref.precoCusto, pref.precoCompra].map(Number).filter(v => isFinite(v) && v > 0) : [];
@@ -447,7 +450,7 @@ function routes(readBody) {
         _skuInfoCache[sku] = info; out[sku] = info;
       }
       if (faltam.length) { try { writeJson(CACHE_SKUINFO, _skuInfoCache); } catch (e) {} }
-      json(res, 200, { ok: true, skus: out, consultados_agora: faltam.length });
+      json(res, 200, { ok: true, skus: out, consultados_agora: faltam.length, resolvidos: Object.keys(ids).filter(k2 => ids[k2]).length, nao_resolvidos: resolveFalhas });
       return true;
     }
 
