@@ -396,9 +396,17 @@ function routes(readBody) {
       const dorme = ms => new Promise(r => setTimeout(r, ms));
       const bg = async (pth) => { for (let t = 0; t < 3; t++) { const r = await blingGet(pth); if (r && r.ok) return r; await dorme(1100 + t * 500); } return await blingGet(pth); };   // anti-429: re-tenta com pausa crescente
       let resolveFalhas = 0;
-      // 1) resolve SKU → produto (id, preço, custo do próprio detalhe quando vier)
+      // 0) cache PERMANENTE de custos (_custos.json, populado pelo custo-sync em background)
+      const _ccAll = readJson(path.join(CACHE_DIR, '_custos.json'), {});
       const ids = {};
+      const aResolver = [];
       for (const sku of faltam) {
+        const k2 = _ccAll[sku];
+        if (k2 && k2.id && (Date.now() - (k2.ts || 0)) < 7 * 24 * 3600 * 1000) { ids[sku] = { id: k2.id, preco: (k2.preco != null ? k2.preco : null), custo: (k2.custo != null ? k2.custo : null) }; }
+        else aResolver.push(sku);
+      }
+      // 1) resolve SKU → produto — só quem NÃO está no cache permanente
+      for (const sku of aResolver) {
         try {
           let prod = null;
           for (const v of [...new Set([sku, sku.toUpperCase(), sku.toLowerCase()])]) {
@@ -634,6 +642,18 @@ function routes(readBody) {
           endpoint_fornecedores: fornecedores,
           veredito: (precos.precoCusto != null && Number(precos.precoCusto) > 0) ? 'precoCusto EXISTE no produto — vou ler daqui' : 'sem precoCusto no detalhe — olhar os outros campos acima' });
       } catch (e) { json(res, 200, { ok: false, erro: String(e.message || e).slice(0, 200) }); }
+      return true;
+    }
+
+    // ADMIN (sessão ou ?k=): sincronizador de custos em background. ?status=1 mostra progresso.
+    if (method === 'GET' && p === '/girassol-backup-offline/custo-sync') {
+      const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const sessC = validarSessao(req.headers['cookie']);
+      if (!((process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || (sessC && ehAdmin(sessC)))) { json(res, 404, { error: 'not found' }); return true; }
+      if (urlObj.searchParams.get('status')) { json(res, 200, { ok: true, rodando: !!_cst.rodando, progresso: _cst.feitos + '/' + _cst.total, ok_ate_agora: _cst.ok, falhas: _cst.falhas, inicio: _cst.inicio }); return true; }
+      if (_cst.rodando) { json(res, 200, { ok: true, ja_rodando: true, progresso: _cst.feitos + '/' + _cst.total }); return true; }
+      custoSync(!!urlObj.searchParams.get('fresh')).catch(() => {});
+      json(res, 200, { ok: true, iniciado: true, mensagem: 'custo-sync rodando em background (tartaruga anti-429) — ?status=1 p/ acompanhar' });
       return true;
     }
 
@@ -2001,10 +2021,59 @@ function routes(readBody) {
 }
 
 // roda 1 ciclo logo após o boot do serviço
+// ═══ CUSTO-SYNC (background): resolve custo/preço de TODOS os SKUs vendidos, devagar (anti-429),
+// e grava em cache PERMANENTE em disco (_custos.json, validade 7d). O sku-info lê daqui — instantâneo.
+let _cst = { rodando: false, feitos: 0, total: 0, ok: 0, falhas: 0, inicio: null };
+async function custoSync(fresh) {
+  if (_cst.rodando) return;
+  const CUSTO_FILE = path.join(CACHE_DIR, '_custos.json');
+  const cc = readJson(CUSTO_FILE, {});
+  const conf = readJson(CONFERIDOS_FILE, {});
+  const todos = new Set();
+  for (const c of Object.values(conf)) { for (const it of ((c && c.itens) || [])) { if (it && it.sku) todos.add(String(it.sku)); } }
+  const SETE_D = 7 * 24 * 3600 * 1000;
+  const alvos = [...todos].filter(sk => { const k = cc[sk]; return fresh || !k || !k.id || (Date.now() - (k.ts || 0)) > SETE_D || k.custo == null; });
+  _cst = { rodando: true, feitos: 0, total: alvos.length, ok: 0, falhas: 0, inicio: new Date().toISOString() };
+  console.log('[CUSTO] sync iniciando — ' + alvos.length + ' SKU(s) a resolver (tartaruga: ~1,2s/chamada)');
+  const dorme = ms => new Promise(r => setTimeout(r, ms));
+  const bg2 = async (pth) => { for (let t = 0; t < 4; t++) { const r = await blingGet(pth); if (r && r.ok) return r; await dorme(1500 + t * 700); } return await blingGet(pth); };
+  let desdeGravei = 0;
+  for (const sku of alvos) {
+    try {
+      let prod = null;
+      for (const v of [...new Set([sku, sku.toUpperCase(), sku.toLowerCase()])]) {
+        const r = await bg2(`/produtos?codigo=${encodeURIComponent(v)}&limite=1&criterio=5`);
+        const it = r.ok && r.data && r.data.data && r.data.data[0];
+        if (it && it.id) { const d = await bg2(`/produtos/${it.id}`); prod = (d.ok && d.data && d.data.data) || it; break; }
+        await dorme(600);
+      }
+      if (prod && prod.id) {
+        const forn = prod.fornecedor || {};
+        let cand = [forn.precoCusto, forn.precoCompra, prod.precoCusto, prod.custo].map(Number).filter(v => isFinite(v) && v > 0);
+        if (!cand.length) {
+          const rf = await bg2(`/produtos/fornecedores?idProduto=${prod.id}&limite=5`);
+          const arr = (rf.ok && rf.data && rf.data.data) || [];
+          const pref = arr.find(x => x && x.padrao) || arr[0];
+          if (pref) cand = [pref.precoCusto, pref.precoCompra].map(Number).filter(v => isFinite(v) && v > 0);
+        }
+        cc[sku] = { id: prod.id, preco: (prod.preco != null && isFinite(Number(prod.preco))) ? Number(prod.preco) : null, custo: cand.length ? Math.round(cand[0] * 10000) / 10000 : null, ts: Date.now() };
+        _cst.ok++;
+      } else { _cst.falhas++; }
+    } catch (e) { _cst.falhas++; }
+    _cst.feitos++; desdeGravei++;
+    if (desdeGravei >= 10) { desdeGravei = 0; try { writeJson(path.join(CACHE_DIR, '_custos.json'), cc); } catch (e) {} }
+    await dorme(1200);
+  }
+  try { writeJson(path.join(CACHE_DIR, '_custos.json'), cc); } catch (e) {}
+  _cst.rodando = false;
+  console.log('[CUSTO] sync concluiu — ok=' + _cst.ok + ' falhas=' + _cst.falhas + ' de ' + _cst.total);
+}
+
 function bootstrap() {
   // PESCA AUTOMÁTICA PÓS-DEPLOY: todo deploy mata a pesca em andamento; aqui ela renasce sozinha
   // 90s depois do boot (após o ciclo inicial). Com dias=14 só re-checa os recentes — barato e idempotente.
   setTimeout(() => { try { console.log('[ML-FEES] pesca automática pós-deploy iniciando…'); mlSyncFees(14).catch(() => {}); } catch (e) {} }, 90 * 1000);
+  setTimeout(() => { try { custoSync(false).catch(() => {}); } catch (e) {} }, 240 * 1000);   // custos: tartaruga pós-boot, só o que falta
 
   ensureDir(CACHE_DIR);
   console.log(`[GIRABKP] ${VERSAO} ativo — ATENDIDO=${SIT_ATENDIDO}, janela=${JANELA_DIAS}d, cron="${CRON_EXPR}", formato=${ETIQ_FORMATO}`);

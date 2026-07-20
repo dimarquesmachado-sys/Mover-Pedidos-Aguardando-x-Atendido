@@ -95,7 +95,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd20';
+const DASH_BUILD = 'd21';
 let DADOS = [];
 let periodo = 'dia', pDe = '', pAte = '';   // abre no DIA (pedido do Diego)
 let SKUINFO = {}, skuInfoCarregado = false, _skuLoading = false;
@@ -206,7 +206,7 @@ function montar(){
     '<div class="sec"><h2>🗺️ Vendas por estado</h2><div style="overflow-x:auto"><table id="tUF"></table></div><div id="ufAviso"></div></div>'+
     '<div class="sec"><h2>📦 Projeção de estoque &amp; margem <span class="hint">ritmo dos últimos 14 dias · clique p/ ordenar</span></h2>'+
       '<div id="projBox" style="margin-bottom:10px;font-size:12px"><span class="mut" id="projStatus">⏳ carregando saldo/preço/custo do Bling… (~30-60s na 1ª vez)</span> '+
-      '<button class="btn" id="btnProj" onclick="carregarSkuInfo(true)" style="display:none">↻ recarregar do Bling (ignora cache)</button></div>'+
+      '<button class="btn" id="btnProj" onclick="carregarSkuInfo(true)" style="display:none">↻ recarregar do Bling (ignora cache)</button> <button class="btn sec" onclick="sincCustos()" title="resolve TODOS os custos em background, devagar, sem estourar o limite do Bling — e grava em cache permanente">🐢 sincronizar custos (fundo)</button></div>'+
       '<div style="overflow-x:auto"><table id="tProj"></table></div><div id="projAviso"></div></div>'+
     '<div class="sec"><h2>⚙️ Impostos &amp; taxas <span class="hint">alíquota do Simples varia mês a mês · taxas de marketplace em % (estimativa; ML tem a REAL por pedido na busca)</span></h2>'+
       '<div id="cfgBox"></div>'+
@@ -679,6 +679,12 @@ function topSkus14(){
     });
   });
   return Object.values(agg).sort((a,b)=>b.qtd-a.qtd).slice(0,40);
+}
+function sincCustos(){
+  const st = $('projStatus');
+  fetch(MOD+'/custo-sync',{credentials:'same-origin'}).then(r=>r.json()).then(d=>{
+    if(st) st.textContent = d && d.ja_rodando ? ('🐢 já sincronizando… ('+d.progresso+')') : '🐢 sincronizando custos em background (~alguns minutos) — depois clica ↻';
+  }).catch(()=>{ if(st) st.textContent='✗ não consegui iniciar o custo-sync'; });
 }
 async function carregarSkuInfo(fresh){
   if(_skuLoading) return; _skuLoading = true;
