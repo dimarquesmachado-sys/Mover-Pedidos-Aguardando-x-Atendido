@@ -389,9 +389,15 @@ function routes(readBody) {
       if (!_skuInfoCache) _skuInfoCache = readJson(CACHE_SKUINFO, {});
       const TTL = 6 * 3600 * 1000;
       const out = {}; const faltam = [];
+      let _ccTop = null;   // cache permanente de custos, carregado sob demanda
       for (const sku of skus) {
         const c = _skuInfoCache[sku];
-        if (!body.fresh && c && (Date.now() - (c.ts || 0)) < TTL && (c.custo != null || c.saldo != null)) out[sku] = c; else faltam.push(sku);   // cache de nulls nao vale — refaz sozinho
+        if (!body.fresh && c && (Date.now() - (c.ts || 0)) < TTL && (c.custo != null || c.saldo != null)) {
+          // OVERLAY: o custo do cache PERMANENTE sobrepõe qualquer null do cache de 6h (era o que segurava o custo na tela)
+          if (!_ccTop) _ccTop = readJson(path.join(CACHE_DIR, '_custos.json'), {});
+          const k9 = _ccTop[sku];
+          out[sku] = (k9 && k9.custo != null && c.custo == null) ? Object.assign({}, c, { custo: k9.custo, preco: (c.preco != null ? c.preco : k9.preco) }) : c;
+        } else faltam.push(sku);
       }
       const dorme = ms => new Promise(r => setTimeout(r, ms));
       const bg = async (pth) => { for (let t = 0; t < 3; t++) { const r = await blingGet(pth); if (r && r.ok) return r; await dorme(1100 + t * 500); } return await blingGet(pth); };   // anti-429: re-tenta com pausa crescente
