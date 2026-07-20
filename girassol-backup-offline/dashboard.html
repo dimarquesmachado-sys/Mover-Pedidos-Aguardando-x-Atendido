@@ -95,7 +95,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd22';
+const DASH_BUILD = 'd23';
 let DADOS = [];
 let periodo = 'dia', pDe = '', pAte = '';   // abre no DIA (pedido do Diego)
 let SKUINFO = {}, skuInfoCarregado = false, _skuLoading = false;
@@ -223,7 +223,12 @@ function montar(){
       '<b>datas pelo DIA DA VENDA (igual ao Jodda) — o pedido aparece após a bipagem no checkout, mas cai no dia em que foi vendido.</b></div>'+
   '</div>';
   render();
-  setTimeout(()=>{ if(!skuInfoCarregado) carregarSkuInfo(); }, 400);
+  const bootSku = () => {   // espera os pedidos carregarem — antes disparava aos 400ms sobre DADOS vazio e marcava "✓" sem carregar nada
+    if (skuInfoCarregado) return;
+    if (!DADOS || !DADOS.length) { const st0=$('projStatus'); if(st0) st0.textContent='⏳ esperando os pedidos carregarem…'; setTimeout(bootSku, 500); return; }
+    carregarSkuInfo();
+  };
+  setTimeout(bootSku, 400);
 }
 
 function render(){
@@ -620,7 +625,7 @@ function renderAnalise(){
       for(let i=0;i<faltam.length && i<40;i+=8){
         try{
           const r=await fetch(MOD+'/sku-info',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({skus:faltam.slice(i,i+8)})});
-          const d=await r.json(); if(d&&d.skus) Object.assign(SKUINFO,d.skus);
+          const d=await r.json(); if(d&&d.skus){ Object.assign(SKUINFO,d.skus); console.log('[AN] pedi',faltam.slice(i,i+8).length,'· veio',Object.keys(d.skus).length); }
         }catch(e){}
       }
     })().finally(()=>{ _anLoading=false; renderAnalise(); });
@@ -692,21 +697,25 @@ async function carregarSkuInfo(fresh){
   const st=$('projStatus'), btn=$('btnProj');
   if(st) st.textContent='⏳ consultando o Bling (saldo/preço/custo)… ~30-60s na 1ª vez';
   if(btn) btn.style.display='none';
-  const skus = topSkus14().map(t=>t.sku);
-  let feitos = 0, falhas = 0;
+  const skus = topSkus14().map(t=>t.sku).filter(Boolean);
+  if(!skus.length){ _skuLoading=false; const st1=$('projStatus'); if(st1) st1.textContent='⏳ sem SKUs ainda — re-tento quando os pedidos chegarem…'; setTimeout(()=>{ if(!skuInfoCarregado) carregarSkuInfo(fresh); }, 1500); return; }
+  let feitos = 0, falhas = 0, _ultResp = '—';
   for(let i=0;i<skus.length;i+=8){   // fatias de 8: cada chamada responde em ~20s (40 de uma vez estourava o timeout do servidor)
     try{
       const r = await fetch(MOD+'/sku-info',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({skus:skus.slice(i,i+8), fresh: !!fresh})});
       if(r.status===403){ if(st) st.innerHTML='🔒 sessão de admin expirou — <a href="'+MOD+'/painel">faça login</a> e recarregue'; _skuLoading=false; return; }
       const d = await r.json();
-      if(d && d.skus) Object.assign(SKUINFO, d.skus);
-    }catch(e){ falhas++; }
+      let nResp = 0;
+      if(d && d.skus){ Object.assign(SKUINFO, d.skus); nResp = Object.keys(d.skus).length; }
+      _ultResp = nResp;
+    }catch(e){ falhas++; _ultResp = 'erro'; }
     feitos = Math.min(skus.length, i+8);
-    if(st) st.textContent='⏳ consultando o Bling… '+feitos+'/'+skus.length+(falhas?' ('+falhas+' fatia(s) falharam)':'');
+    if(st) st.textContent='⏳ Bling… '+feitos+'/'+skus.length+' · última fatia devolveu '+_ultResp+' SKU(s)'+(falhas?' · '+falhas+' falha(s)':'');
     if(!selAtiva()) renderProjecao();   // mostra o que chegou — sem apagar seleção de texto
   }
   skuInfoCarregado = true;
-  if(st) st.textContent = falhas? ('✓ parcial — '+falhas+' fatia(s) falharam; clique ↻ p/ completar') : '✓ dados do Bling carregados (cache de 6h)';
+  const _comCusto = Object.values(SKUINFO).filter(x=>x&&x.custo!=null).length;
+  if(st) st.textContent = (falhas? ('✓ parcial — '+falhas+' falha(s) · '):'✓ ')+Object.keys(SKUINFO).length+' SKU(s) carregados · '+_comCusto+' com custo';
   if(btn){ btn.style.display=''; btn.disabled=false; btn.textContent='↻ recarregar do Bling (ignora cache)'; }
   _skuLoading = false;
   renderSafe();   // re-render completo — espera você terminar de copiar, se estiver selecionando
