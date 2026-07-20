@@ -256,7 +256,186 @@ async function rotinaACombinar() {
   }
 }
 
-module.exports = { rotinaACombinar, rotinaLerRespostas, forcarOrder, processarAutoEmissao, recuperarPendentes, recuperarFalsosProcessados, rotinaEscadaIndisponivel, HABILITADO, TEXTO };
+// ════════════════════════════════════════════════════════════════════════════
+// SESSAO 8 — CHECAGEM DE VENDA CANCELADA NO ML
+//
+// Problema real: o cliente cancela a compra no ML DEPOIS que a gente ja montou
+// o pedido no Bling e/ou emitiu a NF. Sem essa checagem o robo continua
+// conversando com ele, a venda segue no painel como se estivesse viva, e o
+// pacote chega a ser preparado e levado ao posto — onde a etiqueta nao passa.
+//
+// De hora em hora pega um LOTE de vendas ainda vivas e pergunta pro ML "esse
+// pedido ainda esta pago?". Se voltou 'cancelled' (ou 'invalid'):
+//   - grava venda_cancelada_em + status 'venda_cancelada'
+//   - se a venda JA tinha bling_editado_em ou nf_emitida_em -> grava tambem
+//     alerta_pos_venda, e o painel mostra a faixa vermelha gritante.
+//
+// POR QUE O STATUS 'venda_cancelada' JA BASTA PRA PARAR TUDO:
+// rotinaLerRespostas, rotinaEscadaIndisponivel e recuperarFalsosProcessados
+// filtram por status EXPLICITO ('aguardando_resposta' / 'cliente_respondeu' /
+// 'precisa_atencao_humano' / 'processado'). Assim que a venda vira
+// 'venda_cancelada' ela some de todas — nao recebe mais mensagem, nao entra na
+// escada, nao ganha NF automatica. E recuperarPendentes nao ressuscita: ele pula
+// qualquer order que ja exista na tabela (lcp.buscar antes do upsert),
+// independente do status. Ou seja: nao precisei mexer em nenhuma outra rotina.
+//
+// ANTI-SPAM no ML (2 travas, as duas ajustaveis por env):
+//   1. so olha venda com mais de LIXAS_CANCELADAS_IDADE_MIN_HORAS de vida (24h).
+//   2. cada venda so e reconsultada a cada LIXAS_CANCELADAS_REPESCAR_HORAS (6h).
+//      Com cron de 1h isso dilui a carga: cada rodada pega so quem "venceu", em
+//      ordem de ml_status_atualizado_em ASC (nunca-checado primeiro).
+// ════════════════════════════════════════════════════════════════════════════
+
+const CANCELADAS_STATUS = (
+  process.env.LIXAS_CANCELADAS_STATUS ||
+  'aguardando_resposta,cliente_respondeu,cliente_confirmou_pedido,precisa_atencao_humano,processado'
+).split(',').map(s => s.trim()).filter(Boolean);
+const CANCELADAS_DIAS        = Number(process.env.LIXAS_CANCELADAS_DIAS) || 7;
+const CANCELADAS_IDADE_MIN_H = Number(process.env.LIXAS_CANCELADAS_IDADE_MIN_HORAS) || 24;
+const CANCELADAS_REPESCAR_H  = Number(process.env.LIXAS_CANCELADAS_REPESCAR_HORAS) || 6;
+const CANCELADAS_MAX         = Number(process.env.LIXAS_CANCELADAS_MAX_POR_RODADA) || 40;
+const CANCELADAS_PAUSA_MS    = Number(process.env.LIXAS_CANCELADAS_PAUSA_MS) || 350;
+
+function _fmtBR(iso) {
+  if (!iso) return '';
+  try { return new Date(iso).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }); }
+  catch (e) { return String(iso); }
+}
+
+/**
+ * @param {object} opts
+ *   { orderId }  -> checa UMA venda so, ignorando idade/repescagem (botao do painel)
+ *   { dias, max, idadeMinHoras, repescarHoras } -> sobrescreve os defaults do cron
+ */
+async function rotinaChecarCanceladasML(opts = {}) {
+  const lcp = require('./lixasCombinarPendentes');
+  const out = { checadas: 0, canceladas: 0, alertas: 0, candidatas: 0, erros: [], detalhes: [] };
+
+  if (!lcp.configurado()) { out.erro = 'supabase_nao_configurado'; return out; }
+
+  // ── Monta a lista de alvos ────────────────────────────────────────────
+  let alvos = [];
+
+  if (opts.orderId) {
+    // Modo "1 venda" (botao 🔄 Verificar ML). Sem filtro de idade/repescagem:
+    // voce clicou, entao consulta o ML agora.
+    const r = await lcp.buscar(String(opts.orderId));
+    if (!r.ok || !r.data) { out.erro = 'venda_nao_encontrada'; return out; }
+    alvos = [r.data];
+  } else {
+    const dias = Number(opts.dias) || CANCELADAS_DIAS;
+    const listaR = await lcp.listarPendentes({ dias, limit: 500 });
+    const lista = (listaR.ok && Array.isArray(listaR.data)) ? listaR.data : [];
+
+    const agora = Date.now();
+    // Checagem explicita de undefined (e nao `||`) pra que ?idadeMinHoras=0 e
+    // ?repescarHoras=0 funcionem de verdade: 0 significa "sem trava, checa tudo
+    // agora". Com `||` o zero cairia no default e a rota nao obedeceria.
+    const idadeMinMs = (opts.idadeMinHoras !== undefined && !Number.isNaN(Number(opts.idadeMinHoras))
+      ? Number(opts.idadeMinHoras) : CANCELADAS_IDADE_MIN_H) * 3600 * 1000;
+    const repescarMs = (opts.repescarHoras !== undefined && !Number.isNaN(Number(opts.repescarHoras))
+      ? Number(opts.repescarHoras) : CANCELADAS_REPESCAR_H) * 3600 * 1000;
+
+    alvos = lista.filter(v => {
+      if (v.venda_cancelada_em) return false;                                  // ja sabemos que morreu
+      if (!CANCELADAS_STATUS.includes(String(v.status || ''))) return false;
+      const nasceu = v.data_venda ? new Date(v.data_venda).getTime() : 0;
+      if (!nasceu || (agora - nasceu) < idadeMinMs) return false;              // nova demais
+      if (v.ml_status_atualizado_em) {
+        const ultima = new Date(v.ml_status_atualizado_em).getTime();
+        if (ultima && (agora - ultima) < repescarMs) return false;             // checada ha pouco
+      }
+      return true;
+    });
+
+    // Nunca-checado primeiro (timestamp 0); depois o checado ha mais tempo.
+    alvos.sort((a, b) => {
+      const ta = a.ml_status_atualizado_em ? new Date(a.ml_status_atualizado_em).getTime() : 0;
+      const tb = b.ml_status_atualizado_em ? new Date(b.ml_status_atualizado_em).getTime() : 0;
+      return ta - tb;
+    });
+
+    alvos = alvos.slice(0, Number(opts.max) || CANCELADAS_MAX);
+  }
+
+  out.candidatas = alvos.length;
+  if (alvos.length === 0) return out;
+
+  // ── Consulta o ML, uma venda por vez ──────────────────────────────────
+  for (const v of alvos) {
+    const oid = String(v.order_id);
+    const agoraIso = new Date().toISOString();
+
+    // getOrderStatusResumo ja e a prova de excecao; o try aqui e cinto+suspensorio
+    // pra garantir que UMA venda problematica nunca derrube a rodada inteira.
+    let st;
+    try { st = await ml.getOrderStatusResumo(oid); }
+    catch (e) { st = { ok: false, erro: e.message }; }
+
+    out.checadas++;
+
+    if (!st.ok) {
+      out.erros.push({ order_id: oid, erro: st.erro });
+      console.warn(`[canceladas] order ${oid} nao consegui checar: ${st.erro}`);
+      await new Promise(r => setTimeout(r, CANCELADAS_PAUSA_MS));
+      continue;
+    }
+
+    if (!st.cancelada) {
+      // Viva. So carimba a checagem pra ela sair da fila pelas proximas 6h.
+      await lcp.atualizarVenda(oid, { ml_status: st.status, ml_status_atualizado_em: agoraIso });
+      out.detalhes.push({ order_id: oid, ml_status: st.status, cancelada: false });
+      await new Promise(r => setTimeout(r, CANCELADAS_PAUSA_MS));
+      continue;
+    }
+
+    // ── CANCELADA ───────────────────────────────────────────────────────
+    const jaFeito = [];
+    if (v.nf_emitida_em) jaFeito.push(`NF ${v.nf_numero || '?'}/${v.nf_serie || '?'} emitida em ${_fmtBR(v.nf_emitida_em)}`);
+    if (v.bling_editado_em) jaFeito.push(`pedido Bling ${v.bling_pedido_id || '?'} montado em ${_fmtBR(v.bling_editado_em)}`);
+
+    const campos = {
+      status: 'venda_cancelada',
+      ml_status: st.status,
+      ml_status_atualizado_em: agoraIso,
+      venda_cancelada_em: agoraIso
+    };
+
+    if (jaFeito.length > 0) {
+      campos.alerta_pos_venda = (
+        `CANCELADA NO ML DEPOIS DE: ${jaFeito.join(' + ')}. NAO DESPACHAR. ` +
+        `Conferir a NF (cancelar/estornar) e o pedido no Bling.` +
+        (st.statusDetail ? ` Motivo ML: ${st.statusDetail}.` : '')
+      ).slice(0, 500);
+      out.alertas++;
+      console.error(`[canceladas] 🚨🚨 order ${oid} CANCELADA APOS ${jaFeito.join(' + ')} — cliente ${v.buyer_nome || '?'}`);
+    } else {
+      console.log(`[canceladas] order ${oid} cancelada no ML (nada montado/emitido ainda) — cliente ${v.buyer_nome || '?'}`);
+    }
+
+    const upd = await lcp.atualizarVenda(oid, campos);
+    if (!upd.ok) out.erros.push({ order_id: oid, erro: 'falhou gravar o cancelamento no Supabase' });
+
+    out.canceladas++;
+    out.detalhes.push({
+      order_id: oid,
+      ml_status: st.status,
+      cancelada: true,
+      alerta: campos.alerta_pos_venda || null,
+      buyer: v.buyer_nome || null
+    });
+
+    await new Promise(r => setTimeout(r, CANCELADAS_PAUSA_MS));
+  }
+
+  if (out.canceladas > 0 || out.alertas > 0 || out.erros.length > 0) {
+    console.log(`[canceladas] rodada: ${out.checadas} checadas · ${out.canceladas} canceladas · ${out.alertas} COM ALERTA · ${out.erros.length} erro(s)`);
+  }
+  return out;
+}
+
+
+module.exports = { rotinaACombinar, rotinaLerRespostas, forcarOrder, processarAutoEmissao, recuperarPendentes, recuperarFalsosProcessados, rotinaEscadaIndisponivel, rotinaChecarCanceladasML, HABILITADO, TEXTO };
 
 
 /**
