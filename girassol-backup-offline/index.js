@@ -382,7 +382,7 @@ function routes(readBody) {
     if (method === 'POST' && p === '/girassol-backup-offline/sku-info') {
       const opSess = validarSessao(req.headers['cookie']);
       if (!opSess || !ehAdmin(opSess)) { json(res, 403, { ok: false, erro: 'apenas admin' }); return true; }
-      let body = {}; try { body = JSON.parse(await readBody(req) || '{}'); } catch (e) {}
+      let body = {}; try { const _rb = await readBody(req); body = (_rb && typeof _rb === 'object') ? _rb : JSON.parse(_rb || '{}'); } catch (e) {}   // tolerante: lib/http passou a devolver objeto ja parseado
       const skus = Array.isArray(body.skus) ? body.skus.map(x => String(x || '').trim()).filter(Boolean).slice(0, 40) : [];
       if (!skus.length) { json(res, 200, { ok: true, skus: {} }); return true; }
       const CACHE_SKUINFO = path.join(CACHE_DIR, '_skus-info.json');
@@ -504,10 +504,11 @@ function routes(readBody) {
       if (!opSess || !ehAdmin(opSess)) { json(res, 403, { ok: false, erro: 'apenas admin' }); return true; }
       const CFG_FILE = path.join(CACHE_DIR, '_config-fiscal.json');
       if (method === 'GET') { json(res, 200, { ok: true, config: readJson(CFG_FILE, { aliquotas: {}, taxas: {} }) }); return true; }
-      let body = {}; try { body = JSON.parse(await readBody(req) || '{}'); } catch (e) {}
+      let body = {}; try { const _rb = await readBody(req); body = (_rb && typeof _rb === 'object') ? _rb : JSON.parse(_rb || '{}'); } catch (e) {}   // tolerante: lib/http passou a devolver objeto ja parseado
       const atual = readJson(CFG_FILE, { aliquotas: {}, taxas: {} });
       if (body.aliquotas && typeof body.aliquotas === 'object') for (const [k2, v2] of Object.entries(body.aliquotas)) { const n2 = Number(v2); if (/^\d{4}-\d{2}$/.test(k2) && isFinite(n2) && n2 >= 0 && n2 <= 40) atual.aliquotas[k2] = n2; else if (v2 === null) delete atual.aliquotas[k2]; }
       if (body.taxas && typeof body.taxas === 'object') for (const [k2, v2] of Object.entries(body.taxas)) { const n2 = Number(v2); if (isFinite(n2) && n2 >= 0 && n2 <= 50) atual.taxas[String(k2).toLowerCase()] = n2; else if (v2 === null) delete atual.taxas[String(k2).toLowerCase()]; }
+      if (body.flex && typeof body.flex === 'object') { atual.flex = atual.flex || {}; for (const [k2, v2] of Object.entries(body.flex)) { const n2 = Number(v2); if ((k2 === 'geral' || k2 === 'shopee') && isFinite(n2) && n2 >= 0 && n2 <= 100) atual.flex[k2] = n2; else if (v2 === null) delete atual.flex[k2]; } }
       writeJson(CFG_FILE, atual);
       json(res, 200, { ok: true, config: atual });
       return true;
@@ -517,7 +518,7 @@ function routes(readBody) {
     if (method === 'POST' && p === '/girassol-backup-offline/ml-fee') {
       const opSess = validarSessao(req.headers['cookie']);
       if (!opSess || !ehAdmin(opSess)) { json(res, 403, { ok: false, erro: 'apenas admin' }); return true; }
-      let body = {}; try { body = JSON.parse(await readBody(req) || '{}'); } catch (e) {}
+      let body = {}; try { const _rb = await readBody(req); body = (_rb && typeof _rb === 'object') ? _rb : JSON.parse(_rb || '{}'); } catch (e) {}   // tolerante: lib/http passou a devolver objeto ja parseado
       const orderId = String(body.numeroLoja || '').replace(/\D/g, '');
       if (!orderId) { json(res, 200, { ok: false, erro: 'numeroLoja vazio' }); return true; }
       const FEE_FILE = path.join(CACHE_DIR, '_mlfees.json');
