@@ -95,7 +95,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd18';
+const DASH_BUILD = 'd19';
 let DADOS = [];
 let periodo = 'dia', pDe = '', pAte = '';   // abre no DIA (pedido do Diego)
 let SKUINFO = {}, skuInfoCarregado = false, _skuLoading = false;
@@ -120,7 +120,8 @@ const diaSP = iso => { try{ return new Date(iso).toLocaleString('sv-SE',{timeZon
 const hojeSP = () => new Date().toLocaleString('sv-SE',{timeZone:'America/Sao_Paulo'}).slice(0,10);
 const spDate = ms => new Date(ms).toLocaleString('sv-SE',{timeZone:'America/Sao_Paulo'}).slice(0,10);
 const dtBR = iso => { try{ return new Date(iso).toLocaleString('pt-BR',{timeZone:'America/Sao_Paulo',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}).replace(',',''); }catch(e){ return ''; } };
-const tMs = h => { const v = h.venda_em || h.conferido_em || ''; const n = Date.parse(v); return isFinite(n) ? n : 0; };
+const diaVenda = h => { if (h.venda_em) return diaSP(h.venda_em); if (h.venda_dia) return String(h.venda_dia).slice(0,10); return h && h.conferido_em ? new Date(h.conferido_em).toLocaleString('sv-SE',{timeZone:'America/Sao_Paulo'}).slice(0,10) : ''; };   // DIA DA VENDA: hora real (ML) > data da venda (Bling) > conferência
+const tMs = h => { const v = h.venda_em || (h.venda_dia ? (String(h.venda_dia).slice(0,10)+'T12:00:00-03:00') : '') || h.conferido_em || ''; const n = Date.parse(v); return isFinite(n) ? n : 0; };
 function setSortProd(c){ sortProd = { col:c, dir:(sortProd.col===c ? -sortProd.dir : -1) }; render(); }
 function setSortProj(c){ sortProj = { col:c, dir:(sortProj.col===c ? -sortProj.dir : -1) }; renderProjecao(); }
 const seta = (st,c)=> st.col===c ? (st.dir<0?' ↓':' ↑') : '';
@@ -218,7 +219,7 @@ function montar(){
       'produtos/frete usam a NOTA FISCAL do pedido quando disponível (fonte fiscal exata) · '+
       '<b>margem de contribuição</b> = produtos(NF) − imposto(alíquota do mês × total) − tarifa do canal (ML: real por pedido; demais: % configurada) − custo (Bling); o frete recebido aproxima o frete pago e não entra na conta · '+
       'margem bruta = venda − custo, sem frete/taxas · só entram pedidos finalizados no checkout offline. '+
-      '<b>vs Jodda:</b> lá conta a data da VENDA; aqui a da EXPEDIÇÃO — use o card 🛍 produtos p/ comparar.</div>'+
+      '<b>datas pelo DIA DA VENDA (igual ao Jodda) — o pedido aparece após a bipagem no checkout, mas cai no dia em que foi vendido.</b> lá conta a data da VENDA; aqui a da EXPEDIÇÃO — use o card 🛍 produtos p/ comparar.</div>'+
   '</div>';
   render();
   setTimeout(()=>{ if(!skuInfoCarregado) carregarSkuInfo(); }, 400);
@@ -230,13 +231,13 @@ function render(){
   $('custom').style.display = periodo==='custom' ? 'flex' : 'none';
 
   const {de, ate} = intervalo();
-  const PER = DADOS.filter(h => { if(!h.conferido_em) return false; const d = diaSP(h.conferido_em); return d>=de && d<=ate; });
+  const PER = DADOS.filter(h => { if(!h.conferido_em) return false; const d = diaVenda(h); return d>=de && d<=ate; });
 
   let fat=0, comValor=0, semValor=0, flex=0, unid=0, itensTot=0, itensComValor=0, comUF=0, fatProd=0, freteEmb=0, fretePed=0, pedML=0, pedMLr=0, pedTarReal=0;
   let fatNF=0, pedNF=0, freteNF=0, fretePedNF=0;   // fonte NOTA FISCAL (vprod_nf)
   const porDia={}, porCanal={}, porProd={}, porUF={};
   PER.forEach(h=>{
-    const d = diaSP(h.conferido_em);
+    const d = diaVenda(h);
     if(!porDia[d]) porDia[d]={ped:0,fat:0};
     porDia[d].ped++;
     const mk=(h.marketplace||'outro').toLowerCase();
@@ -267,7 +268,7 @@ function render(){
   const cVal = pc(comValor,PER.length), cItem = pc(itensComValor,itensTot), cUF = pc(comUF,PER.length);
 
   $('cover').innerHTML = PER.length === 0 ?
-    ('<span class="dim">'+de+' → '+ate+'</span><span class="dim">0 expedições neste período — domingo/feriado? clica em <b>Ontem</b> ou <b>Mês</b> 😉 · a busca de pedido lá embaixo funciona independente do período</span>') :
+    ('<span class="dim">'+de+' → '+ate+'</span><span class="dim">0 vendas atribuídas a este período — vendas de fim de semana entram assim que forem bipadas (caem no dia CERTO) · clica em <b>Ontem</b> ou <b>Mês</b> 😉 · a busca de pedido lá embaixo funciona independente do período</span>') :
     '<span class="dim">'+de+' → '+ate+'</span>'+
     '<span class="pill '+(cVal>=95?'g':'w')+'">valor <b>'+cVal+'%</b></span>'+
     '<span class="pill '+(cItem>=95?'g':'w')+'">valor/item <b>'+cItem+'%</b></span>'+
@@ -290,7 +291,7 @@ function render(){
       PER.forEach(h=>{
         const rp = (h.vprod_nf!=null&&isFinite(Number(h.vprod_nf))) ? Number(h.vprod_nf) : null;
         if(rp==null) return;
-        const aliq = aliqDe(diaSP(h.conferido_em).slice(0,7));
+        const aliq = aliqDe(diaVenda(h).slice(0,7));
         const tReal = (h.tarifa_ml!=null && isFinite(Number(h.tarifa_ml))) ? Number(h.tarifa_ml) : ((h.taxa_mkt!=null && isFinite(Number(h.taxa_mkt)) && Number(h.taxa_mkt)>0) ? Number(h.taxa_mkt) : null);
         const tx = CFG.taxas[canalKey(h.marketplace)];
         if(aliq==null || (tReal==null && tx==null)){ semCfg++; return; }
@@ -420,7 +421,7 @@ async function salvarCfg(){
 
 // ── 🔍 busca & P&L por pedido ───────────────────────────────────────────────
 function calcPL(h){
-  const mes = diaSP(h.conferido_em).slice(0,7);
+  const mes = diaVenda(h).slice(0,7);
   const ck = canalKey(h.marketplace);
   const rp = (h.vprod_nf!=null&&isFinite(Number(h.vprod_nf)))?Number(h.vprod_nf):(((h.itens||[]).reduce((a,i)=>a+(Number(i.valor_total)||0),0))||null);
   const tot = (h.valor!=null&&isFinite(Number(h.valor)))?Number(h.valor):null;
@@ -451,7 +452,7 @@ function buscarPed(q){
   }).slice(0,15);
   if(!hits.length){ res.innerHTML='<div class="dim" style="padding:8px">nada encontrado</div>'; return; }
   res.innerHTML = '<table><tr><th>Data</th><th>Pedido</th><th>Canal</th><th>Cliente</th><th class="num">Total</th><th></th></tr>'+
-    hits.map(h=>'<tr><td class="dim">'+diaSP(h.conferido_em)+'</td><td><b>'+esc(h.numero||h.id)+'</b>'+(h.nf_numero?'<div class="desc">NF '+esc(h.nf_numero)+'</div>':'')+'</td>'+
+    hits.map(h=>'<tr><td class="dim">'+diaVenda(h)+'</td><td><b>'+esc(h.numero||h.id)+'</b>'+(h.nf_numero?'<div class="desc">NF '+esc(h.nf_numero)+'</div>':'')+'</td>'+
       '<td>'+esc(canalKey(h.marketplace))+'</td><td class="desc" style="max-width:200px">'+esc(h.cliente||'')+'</td>'+
       '<td class="num">'+(h.valor!=null?BRL(Number(h.valor)):'<span class="dim">—</span>')+'</td>'+
       '<td><button class="btn" style="padding:5px 12px;font-size:11px" onclick="abrirPL(\''+h.id+'\')">💎 lucro</button></td></tr>').join('')+'</table>';
@@ -469,7 +470,7 @@ function renderPL(h){
   const linha=(l,v,extra)=>'<tr><td>'+l+'</td><td class="num">'+(v!=null?BRL(v):'<span class="dim">—</span>')+(extra||'')+'</td></tr>';
   card.innerHTML =
     '<div class="sec" style="margin-top:12px;background:linear-gradient(160deg,#14201a,#131a30);border-color:#14b8a655">'+
-    '<h2>💎 Pedido '+esc(h.numero||h.id)+' · '+esc(ck)+' · '+diaSP(h.conferido_em)+
+    '<h2>💎 Pedido '+esc(h.numero||h.id)+' · '+esc(ck)+' · '+diaVenda(h)+
     (h.numero_loja?' <span class="badge">venda '+esc(h.numero_loja)+'</span>':'')+(h.nf_numero?' <span class="badge">NF '+esc(h.nf_numero)+'</span>':'')+'</h2>'+
     '<table>'+
     linha('🛍 Produtos (nota fiscal)', rp)+
@@ -529,7 +530,7 @@ function renderGrafico(){
   const iv=intervalo();
   const dias={};
   DADOS.forEach(h=>{
-    if(!h.conferido_em) return; const d=diaSP(h.conferido_em); if(d<iv.de||d>iv.ate) return;
+    if(!h.conferido_em) return; const d=diaVenda(h); if(d<iv.de||d>iv.ate) return;
     const P=calcPL(h);
     const o=dias[d]||(dias[d]={mc:0,imp:0,tar:0,frv:0});
     if(P.mc!=null)o.mc+=P.mc; if(P.imposto!=null)o.imp+=P.imposto;
@@ -582,7 +583,7 @@ function renderAnalise(){
     pr.innerHTML = defs.map(([k,l])=>'<button class="chip'+(anPer===k?' on':'')+'" onclick="setAnPer(\''+k+'\')">'+l+'</button>').join(''); }
   if(pd){ pd.innerHTML = anPer==='custom' ? ' <input type="date" value="'+anPDe+'" onclick="this.showPicker&&this.showPicker()" onchange="anPDe=this.value;anPage=0;renderAnalise()"> <input type="date" value="'+anPAte+'" onclick="this.showPicker&&this.showPicker()" onchange="anPAte=this.value;anPage=0;renderAnalise()">' : ''; }
   const iv=anIntervalo();
-  let L = DADOS.filter(h=>{ if(!h.conferido_em) return false; const d=diaSP(h.conferido_em); return d>=iv.de && d<=iv.ate; });
+  let L = DADOS.filter(h=>{ if(!h.conferido_em) return false; const d=diaVenda(h); return d>=iv.de && d<=iv.ate; });
   const cnt={}; L.forEach(h=>{ const k=canalKey(h.marketplace); cnt[k]=(cnt[k]||0)+1; });
   const opts='<option value="">Todos os canais ('+L.length+')</option>'+Object.keys(cnt).sort().map(k=>'<option value="'+k+'"'+(anCanal===k?' selected':'')+'>'+k+' ('+cnt[k]+')</option>').join('');
   if(sel.innerHTML!==opts) sel.innerHTML=opts;
@@ -628,7 +629,7 @@ function renderAnalise(){
     const it0=(h.itens||[])[0]||{};
     const pmc = (P.mc!=null&&P.rp)?Math.round(P.mc/P.rp*100):null;
     return '<tr>'+
-      '<td class="dim" style="white-space:nowrap" title="'+(h.venda_em?('venda: '+dtBR(h.venda_em)+' · '):'')+'conferido: '+dtBR(h.conferido_em)+'">'+dtBR(h.venda_em||h.conferido_em)+(h.venda_em?'':' <span style="font-size:9px" title="hora da conferência (canal ainda sem API de hora da venda)">🕘</span>')+'</td>'+
+      '<td class="dim" style="white-space:nowrap" title="'+(h.venda_em?('venda: '+dtBR(h.venda_em)+' · '):(h.venda_dia?('venda: '+String(h.venda_dia).slice(8,10)+'/'+String(h.venda_dia).slice(5,7)+' · '):''))+'conferido: '+dtBR(h.conferido_em)+'">'+(h.venda_em?dtBR(h.venda_em):(h.venda_dia?(String(h.venda_dia).slice(8,10)+'/'+String(h.venda_dia).slice(5,7)+' <span style="font-size:9px" title="dia da venda (Bling) — hora só com a API do canal">🕘</span>'):(dtBR(h.conferido_em)+' <span style="font-size:9px" title="hora da conferência">🕘</span>')))+'</td>'+
       '<td><b>'+esc(h.numero||h.id)+'</b>'+(carrinho?' <span class="badge" title="'+unid+' unidades">🛒 '+unid+'</span>':'')+
         (h.nf_numero?'<div class="desc">NF '+esc(h.nf_numero)+'</div>':'')+'</td>'+
       '<td class="dim" style="font-size:11px;max-width:135px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+esc(h.numero_loja||'')+'">'+esc(h.numero_loja||'—')+'</td>'+
@@ -661,7 +662,7 @@ function topSkus14(){
   const agg = {};
   DADOS.forEach(h=>{
     if(!h.conferido_em) return;
-    const d = diaSP(h.conferido_em); if(d<corte || d>hoje) return;
+    const d = diaVenda(h); if(d<corte || d>hoje) return;
     (h.itens||[]).forEach(it=>{
       const sku=it.sku; if(!sku) return;
       if(!agg[sku]) agg[sku]={sku,desc:it.descricao||'',qtd:0,fat:0,qtdV:0};

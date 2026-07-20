@@ -338,6 +338,7 @@ function routes(readBody) {
             if (d.uf) c2[id].uf = d.uf;
             if (d.municipio) c2[id].municipio = d.municipio;
             if (d.taxa_mkt != null && c2[id].taxa_mkt == null) c2[id].taxa_mkt = d.taxa_mkt;
+            if (d.venda_dia && !c2[id].venda_dia) c2[id].venda_dia = d.venda_dia;
             if (d.frete_mkt != null && c2[id].frete_mkt == null) c2[id].frete_mkt = d.frete_mkt;
             if (d.porSku && Array.isArray(c2[id].itens)) {
               c2[id].itens.forEach(it => {
@@ -359,6 +360,7 @@ function routes(readBody) {
                 valor: (det.total != null ? Number(det.total) : null),
                 uf: (det.transporte && det.transporte.etiqueta && det.transporte.etiqueta.uf) || null,
                 municipio: (det.transporte && det.transporte.etiqueta && det.transporte.etiqueta.municipio) || null,
+                venda_dia: (det.data ? String(det.data).slice(0, 10) : null),
                 taxa_mkt: (det.taxas && isFinite(Number(det.taxas.taxaComissao)) && Number(det.taxas.taxaComissao) > 0) ? Math.round(Number(det.taxas.taxaComissao) * 100) / 100 : null,
                 frete_mkt: (det.taxas && isFinite(Number(det.taxas.custoFrete)) && Number(det.taxas.custoFrete) > 0) ? Math.round(Number(det.taxas.custoFrete) * 100) / 100 : null,
                 porSku
@@ -567,9 +569,13 @@ function routes(readBody) {
       const idQ = String(urlObj.searchParams.get('id') || '').trim();
       if (!idQ) { json(res, 200, { ok: false, erro: 'passe ?id=NUMERO (nº do pedido) ou ?id=ID_BLING' }); return true; }
       // aceita nº do pedido (procura no conferidos) ou id do Bling direto
-      let alvoId = idQ;
+      const idClean = idQ.replace(/\D/g, '');   // aceita nº do pedido, nº da venda no marketplace ou id do Bling (limpa sufixos tipo _ML)
+      let alvoId = idClean || idQ;
       const confP = readJson(CONFERIDOS_FILE, {});
-      for (const [cid, c] of Object.entries(confP)) { if (c && String(c.numero) === idQ) { alvoId = cid; break; } }
+      for (const [cid, c] of Object.entries(confP)) {
+        if (!c) continue;
+        if (String(c.numero) === idClean || (c.numero_loja && String(c.numero_loja) === idClean)) { alvoId = cid; break; }
+      }
       try {
         const det = await detalhePedido(alvoId);
         if (!det) { json(res, 200, { ok: false, erro: 'pedido não encontrado no Bling (id ' + alvoId + ')' }); return true; }
@@ -1135,6 +1141,7 @@ function routes(readBody) {
         } catch (e) {} return null; })(),
         municipio: (snapC && snapC.municipio) || null,
         numero_loja: (snapC && snapC.numero_loja) || null,
+        venda_dia: (snapC && snapC.venda_dia) || null,
         taxa_mkt: (snapC && snapC.taxa_mkt) || null,
         frete_mkt: (snapC && snapC.frete_mkt) || null,
         itens: snapC ? (snapC.itens || []).map(it => ({ sku: it.sku || '', descricao: String(it.descricao || '').slice(0, 90), qtd: it.qtd || 1, valor_unit: (it.valor_unit != null ? it.valor_unit : null), valor_total: (it.valor_total != null ? it.valor_total : null) })) : []
