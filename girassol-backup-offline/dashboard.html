@@ -95,7 +95,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd19';
+const DASH_BUILD = 'd20';
 let DADOS = [];
 let periodo = 'dia', pDe = '', pAte = '';   // abre no DIA (pedido do Diego)
 let SKUINFO = {}, skuInfoCarregado = false, _skuLoading = false;
@@ -110,6 +110,7 @@ let sortProj = { col: 'qtd14', dir: -1 };
 let chPed = null, chFat = null;
 let _plMLFee = {};   // tarifa real ML por pedido (sob demanda)
 let anPage=0, anCanal='', anSku='', anPer='dia', anPDe='', anPAte='', anLP='', _anLoading=false;   // 📋 análise de vendas (abre no DIA)
+let _anTried = {};   // SKUs ja tentados no on-demand — evita loop de recarga que apagava seleção
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -525,6 +526,10 @@ async function rodarBackfillNF(){
 }
 
 // ── 📋 análise de vendas (margem por pedido, estilo MercadoTurbo) ───────────
+const selAtiva = () => { try { const s2 = window.getSelection && window.getSelection(); return !!(s2 && String(s2).length); } catch (e) { return false; } };
+let _selT = null;
+const renderSafe = () => { if (selAtiva()) { clearTimeout(_selT); _selT = setTimeout(renderSafe, 2500); return; } render(); };   // nunca redesenha por cima de uma seleção de texto
+function copiaNL(el){ const v = el.getAttribute('data-nl') || ''; try { navigator.clipboard && navigator.clipboard.writeText(v); } catch (e) {} el.style.color = '#34d399'; setTimeout(() => { el.style.color = ''; }, 700); }
 function renderGrafico(){
   const el=$('grafProg'); if(!el) return;
   const iv=intervalo();
@@ -578,6 +583,8 @@ function anIntervalo(){
 }
 function renderAnalise(){
   const sel=$('anCanalSel'); if(!sel) return;
+  if(window._anPintou && selAtiva()){ clearTimeout(window._selT2); window._selT2=setTimeout(renderAnalise,2500); return; }
+  window._anPintou = true;
   const pr=$('anPerChips'), pd=$('anPerDatas');
   if(pr){ const defs=[['dia','Hoje'],['ontem','Ontem'],['7','Semana'],['mes','Mês'],['mesant','Mês passado'],['custom','Período…']];
     pr.innerHTML = defs.map(([k,l])=>'<button class="chip'+(anPer===k?' on':'')+'" onclick="setAnPer(\''+k+'\')">'+l+'</button>').join(''); }
@@ -605,8 +612,9 @@ function renderAnalise(){
   const pagPL=LP.slice(anPage*PAG, anPage*PAG+PAG);
   const pag=pagPL.map(x=>x.h);
   $('anInfo').textContent = LP.length ? ((anPage*PAG+1)+'–'+(anPage*PAG+pagPL.length)+' de '+LP.length+' venda(s)') : 'sem vendas no período';
-  const faltam=[...new Set(pag.flatMap(h=>(h.itens||[]).map(i=>i.sku)).filter(sk=>sk && !SKUINFO[sk]))];
+  const faltam=[...new Set(pag.flatMap(h=>(h.itens||[]).map(i=>i.sku)).filter(sk=>sk && !SKUINFO[sk] && !_anTried[sk]))];
   if(faltam.length && !_anLoading){
+    faltam.forEach(sk=>{ _anTried[sk]=1; });
     _anLoading=true;
     (async()=>{
       for(let i=0;i<faltam.length && i<40;i+=8){
@@ -632,7 +640,7 @@ function renderAnalise(){
       '<td class="dim" style="white-space:nowrap" title="'+(h.venda_em?('venda: '+dtBR(h.venda_em)+' · '):(h.venda_dia?('venda: '+String(h.venda_dia).slice(8,10)+'/'+String(h.venda_dia).slice(5,7)+' · '):''))+'conferido: '+dtBR(h.conferido_em)+'">'+(h.venda_em?dtBR(h.venda_em):(h.venda_dia?(String(h.venda_dia).slice(8,10)+'/'+String(h.venda_dia).slice(5,7)+' <span style="font-size:9px" title="dia da venda (Bling) — hora só com a API do canal">🕘</span>'):(dtBR(h.conferido_em)+' <span style="font-size:9px" title="hora da conferência">🕘</span>')))+'</td>'+
       '<td><b>'+esc(h.numero||h.id)+'</b>'+(carrinho?' <span class="badge" title="'+unid+' unidades">🛒 '+unid+'</span>':'')+
         (h.nf_numero?'<div class="desc">NF '+esc(h.nf_numero)+'</div>':'')+'</td>'+
-      '<td class="dim" style="font-size:11px;max-width:135px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+esc(h.numero_loja||'')+'">'+esc(h.numero_loja||'—')+'</td>'+
+      '<td class="dim" data-nl="'+esc(h.numero_loja||'')+'" onclick="copiaNL(this)" style="font-size:11px;max-width:135px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer" title="clique = copiar · '+esc(h.numero_loja||'')+'">'+esc(h.numero_loja||'—')+'</td>'+
       '<td>'+esc(P.ck)+'</td>'+
       '<td><div class="desc" style="max-width:200px">'+esc(it0.sku||'')+((h.itens||[]).length>1?' +'+((h.itens||[]).length-1):'')+'</div></td>'+
       '<td class="num">'+N(unid)+'</td>'+
@@ -674,6 +682,7 @@ function topSkus14(){
 }
 async function carregarSkuInfo(fresh){
   if(_skuLoading) return; _skuLoading = true;
+  if(fresh) _anTried = {};
   const st=$('projStatus'), btn=$('btnProj');
   if(st) st.textContent='⏳ consultando o Bling (saldo/preço/custo)… ~30-60s na 1ª vez';
   if(btn) btn.style.display='none';
@@ -688,13 +697,13 @@ async function carregarSkuInfo(fresh){
     }catch(e){ falhas++; }
     feitos = Math.min(skus.length, i+8);
     if(st) st.textContent='⏳ consultando o Bling… '+feitos+'/'+skus.length+(falhas?' ('+falhas+' fatia(s) falharam)':'');
-    renderProjecao();   // vai mostrando o que já chegou
+    if(!selAtiva()) renderProjecao();   // mostra o que chegou — sem apagar seleção de texto
   }
   skuInfoCarregado = true;
   if(st) st.textContent = falhas? ('✓ parcial — '+falhas+' fatia(s) falharam; clique ↻ p/ completar') : '✓ dados do Bling carregados (cache de 6h)';
   if(btn){ btn.style.display=''; btn.disabled=false; btn.textContent='↻ recarregar do Bling (ignora cache)'; }
   _skuLoading = false;
-  render();   // re-render completo: projeção + KPI margem bruta + margem de contribuição
+  renderSafe();   // re-render completo — espera você terminar de copiar, se estiver selecionando
 }
 function renderProjecao(){
   const base = topSkus14();
