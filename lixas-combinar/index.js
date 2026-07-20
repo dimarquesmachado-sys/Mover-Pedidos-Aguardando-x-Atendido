@@ -306,7 +306,14 @@ function routes(readBody) {
           aguardando: todos.filter(v => v.status === 'aguardando_resposta').length,
           respondeu: todos.filter(v => v.status === 'cliente_respondeu' || v.status === 'cliente_confirmou_pedido').length,
           atencao: todos.filter(v => v.status === 'precisa_atencao_humano' || v.ia_escalou_humano).length,
-          processado: todos.filter(v => v.status === 'processado').length
+          processado: todos.filter(v => v.status === 'processado').length,
+          // SESSAO 8 — canceladas no ML. Conta pelo venda_cancelada_em tambem
+          // (nao so pelo status) pra pegar registro antigo caso alguem mexa no
+          // status na mao depois.
+          canceladas: todos.filter(v => v.status === 'venda_cancelada' || v.venda_cancelada_em).length,
+          // alertas = cancelou DEPOIS que a gente ja montou/emitiu. E o numero
+          // que importa: cada um desses e pacote que nao pode ser despachado.
+          alertas: todos.filter(v => v.alerta_pos_venda).length
         };
 
         json(res, 200, { ok: true, pendentes, stats });
@@ -358,6 +365,38 @@ function routes(readBody) {
         const r = await lcp.atualizarVenda(orderId, { status: 'processado' });
         if (!r.ok) { json(res, 500, { ok: false, erro: 'erro_atualizar', data: r.data }); return true; }
         json(res, 200, { ok: true, orderId });
+      } catch (e) {
+        json(res, 500, { ok: false, erro: e.message });
+      }
+      return true;
+    }
+
+    // POST /lixas-combinar/api/pendentes/:orderId/atualizar-status-ml
+    // SESSAO 8 — botao "\uD83D\uDD04 Verificar ML" do card. Pergunta AGORA pro Mercado
+    // Livre se essa venda continua paga, sem esperar o cron de :40. Reusa a MESMA
+    // rotina do cron no modo 1-venda (opts.orderId), que ignora as travas de
+    // idade minima e de repescagem — voce clicou, entao checa na hora.
+    if (method === 'POST' && p.startsWith('/lixas-combinar/api/pendentes/') && p.endsWith('/atualizar-status-ml')) {
+      const sessao = requerAuth();
+      if (!sessao.ok) { json(res, 401, { ok: false, erro: 'nao_autenticado' }); return true; }
+
+      const orderId = p.replace('/lixas-combinar/api/pendentes/', '').replace('/atualizar-status-ml', '');
+      try {
+        // require tardio (dentro do handler): evita ciclo com fluxos.js, que por
+        // sua vez requer ../lixas-combinar/blingPedidos. Na hora do clique os dois
+        // modulos ja estao carregados.
+        const { rotinaChecarCanceladasML } = require('../auto-mensagens/fluxos');
+        const r = await rotinaChecarCanceladasML({ orderId });
+        if (r.erro) { json(res, 404, { ok: false, erro: r.erro }); return true; }
+        const d = (Array.isArray(r.detalhes) && r.detalhes[0]) || {};
+        json(res, 200, {
+          ok: true,
+          orderId,
+          ml_status: d.ml_status || null,
+          cancelada: !!d.cancelada,
+          alerta: d.alerta || null,
+          erros: r.erros || []
+        });
       } catch (e) {
         json(res, 500, { ok: false, erro: e.message });
       }
