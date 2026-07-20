@@ -29,7 +29,7 @@
 
 const tokenMgr = require('./mlTokenManager');
 const tracker  = require('./supabaseTracker');
-const { rotinaACombinar, rotinaLerRespostas, forcarOrder, recuperarPendentes, recuperarFalsosProcessados, rotinaEscadaIndisponivel } = require('./fluxos');
+const { rotinaACombinar, rotinaLerRespostas, forcarOrder, recuperarPendentes, recuperarFalsosProcessados, rotinaEscadaIndisponivel, rotinaChecarCanceladasML } = require('./fluxos');
 
 // ── Helpers HTTP ──────────────────────────────────────────────────────
 function json(res, code, body) {
@@ -59,7 +59,13 @@ const crons = {
   // no prazo-limite de postagem real do ML -> troca pelo grao valido mais proximo +
   // monta + emite NF + avisa a cliente. Evita penalidade por atraso. So age PERTO do
   // prazo (deixa cliente/humano resolver antes). Margem/intervalo ajustaveis por env.
-  girassolEscada: process.env.LIXAS_ESCADA_CRON || '*/30 * * * *'
+  girassolEscada: process.env.LIXAS_ESCADA_CRON || '*/30 * * * *',
+  // SESSAO 8 — de hora em hora (em :40, deslocado do :00 do recuperar e do :15 do
+  // recuperar-sem-nf, pra nao competirem por rate limit). Pergunta pro ML se as
+  // vendas ainda vivas continuam pagas; as canceladas viram status
+  // 'venda_cancelada' e saem de TODAS as outras rotinas sozinhas. Se a venda ja
+  // tinha NF/pedido montado, grava alerta_pos_venda (faixa vermelha no painel).
+  girassolChecarCanceladas: process.env.LIXAS_CANCELADAS_CRON || '40 * * * *'
 };
 
 // ── Rotas ─────────────────────────────────────────────────────────────
@@ -215,6 +221,26 @@ function routes(readBody) {
     // GET/POST /run/escada → roda a ESCADA agora (REAL): pedidos travados em grao
     // indisponivel que estao chegando no prazo -> troca + monta + emite + avisa.
     // ?margem=H (horas antes do prazo, default env/6) · ?dias=N (default 30).
+    // GET/POST /run/canceladas  → SESSAO 8: pergunta pro ML quais vendas vivas
+    // foram canceladas. Query opcional: ?dias=N &max=N &idadeMinHoras=N
+    // &repescarHoras=0 (zera a trava de 6h e re-checa tudo agora).
+    // Protegida pela trava central de ADMIN_KEY (o path tem /run/).
+    if ((method === 'GET' || method === 'POST') && p === '/auto-mensagens/run/canceladas') {
+      try {
+        const q = (k) => urlObj.searchParams.has(k) ? Number(urlObj.searchParams.get(k)) : undefined;
+        const r = await rotinaChecarCanceladasML({
+          dias: q('dias'),
+          max: q('max'),
+          idadeMinHoras: q('idadeMinHoras'),
+          repescarHoras: q('repescarHoras')
+        });
+        json(res, 200, r);
+      } catch (e) {
+        json(res, 500, { ok: false, erro: e.message });
+      }
+      return true;
+    }
+
     if ((method === 'GET' || method === 'POST') && p === '/auto-mensagens/run/escada') {
       try {
         const margemHoras = Number(urlObj.searchParams.get('margem')) || undefined;
@@ -746,7 +772,8 @@ module.exports = {
     girassolLerRespostas: rotinaLerRespostas,
     girassolRecuperar: () => recuperarPendentes(Number(process.env.LIXAS_RECUPERAR_DIAS) || 1),
     girassolRecuperarSemNF: () => recuperarFalsosProcessados({ dias: Number(process.env.LIXAS_RECUPERAR_SEMNF_DIAS) || 30 }),
-    girassolEscada: () => rotinaEscadaIndisponivel()
+    girassolEscada: () => rotinaEscadaIndisponivel(),
+    girassolChecarCanceladas: () => rotinaChecarCanceladasML()
   },
   routes,
   crons,
