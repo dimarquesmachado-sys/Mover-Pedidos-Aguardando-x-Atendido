@@ -69,6 +69,16 @@
   .status-atencao { background: #fee2e2; color: #991b1b; animation: pulsa 1.6s ease-in-out infinite; }
   .status-processado { background: #e0e7ff; color: #3730a3; }
   .status-cancelado { background: #f3f4f6; color: #6b7280; }
+  /* SESSAO 8 — venda cancelada no ML */
+  .status-venda-cancelada { background: #fee2e2; color: #991b1b; }
+  .btn-ml { background: #475569 !important; color: #fff !important; }
+  /* faixa GRITANTE: cancelou depois que ja montamos/emitimos. E o caso que da
+     prejuizo (pacote pronto, etiqueta morta no posto). Fica no topo do card. */
+  .alerta-pos-venda { background: #dc2626; color: #fff; font-weight: 700; padding: 10px 12px;
+    border-radius: 8px; margin: 0 0 10px; font-size: 13px; line-height: 1.45;
+    box-shadow: 0 0 0 3px rgba(220,38,38,.18); }
+  .cancelada-block { background: #f3f4f6; border-left: 3px solid #9ca3af; padding: 8px;
+    border-radius: 6px; margin-bottom: 8px; font-size: 12px; color: #4b5563; }
 
   @keyframes pulsa { 0%,100%{opacity:1} 50%{opacity:.65} }
 
@@ -182,7 +192,7 @@
 
 <div id="app" style="display:none">
 <header>
-  <h1>🌻 Lixas A COMBINAR <span class="badge">Pendentes</span><span class="ver" style="font-size:11px;font-weight:normal;color:#9ca3af;margin-left:8px;font-family:monospace;">v21/06 · confirma-cliente</span></h1>
+  <h1>🌻 Lixas A COMBINAR <span class="badge">Pendentes</span><span class="ver" style="font-size:11px;font-weight:normal;color:#9ca3af;margin-left:8px;font-family:monospace;">v20/07 · canceladas-ML</span></h1>
   <div class="toolbar">
     <select id="filtro-status" onchange="recarregar()">
       <option value="" selected>Todos os status</option>
@@ -191,6 +201,7 @@
       <option value="cliente_confirmou_pedido">Confirmou pedido</option>
       <option value="precisa_atencao_humano">🚨 Precisa atenção</option>
       <option value="processado">Processado</option>
+      <option value="venda_cancelada">❌ Cancelada no ML</option>
     </select>
     <button onclick="recarregar()">🔄 Atualizar</button>
     <span class="user-info" id="user-info"></span>
@@ -205,6 +216,7 @@
     <div class="stat" onclick="filtrarPor('cliente_respondeu')" data-filtro="cliente_respondeu"><div class="num" id="stat-respondeu">0</div><div class="label">Cliente respondeu</div></div>
     <div class="stat" onclick="filtrarPor('precisa_atencao_humano')" data-filtro="precisa_atencao_humano"><div class="num" id="stat-atencao" style="color:#dc2626">0</div><div class="label">🚨 Atenção humana</div></div>
     <div class="stat" onclick="filtrarPor('processado')" data-filtro="processado"><div class="num" id="stat-processado">0</div><div class="label">Processado</div></div>
+    <div class="stat" onclick="filtrarPor('venda_cancelada')" data-filtro="venda_cancelada"><div class="num" id="stat-canceladas" style="color:#991b1b">0</div><div class="label">❌ Canceladas ML</div></div>
   </div>
 
   <div id="cards" class="cards">
@@ -317,6 +329,12 @@ function renderStats(s) {
   document.getElementById('stat-respondeu').textContent = s.respondeu || 0;
   document.getElementById('stat-atencao').textContent = s.atencao || 0;
   document.getElementById('stat-processado').textContent = s.processado || 0;
+  const elC = document.getElementById('stat-canceladas');
+  if (elC) {
+    // Mostra "3 (2!)" quando ha alerta pos-venda: o numero entre parenteses e o
+    // que voce precisa olhar hoje — cancelamento depois de NF/pedido montado.
+    elC.textContent = (s.canceladas || 0) + (s.alertas ? ` (${s.alertas}!)` : '');
+  }
 }
 
 function renderCard(v) {
@@ -326,7 +344,8 @@ function renderCard(v) {
     'cliente_confirmou_pedido': '✓ Confirmou pedido',
     'precisa_atencao_humano': '🚨 Atenção humana',
     'processado': 'Processado',
-    'cancelado': 'Cancelado'
+    'cancelado': 'Cancelado',
+    'venda_cancelada': '❌ Cancelada no ML'
   }[v.status] || v.status;
   const statusCls = {
     'aguardando_resposta': 'status-aguardando',
@@ -334,7 +353,8 @@ function renderCard(v) {
     'cliente_confirmou_pedido': 'status-confirmou',
     'precisa_atencao_humano': 'status-atencao',
     'processado': 'status-processado',
-    'cancelado': 'status-cancelado'
+    'cancelado': 'status-cancelado',
+    'venda_cancelada': 'status-venda-cancelada'
   }[v.status] || 'status-aguardando';
 
   const dataVenda = v.data_venda ? new Date(v.data_venda).toLocaleString('pt-BR') : '';
@@ -427,8 +447,26 @@ function renderCard(v) {
     `;
   }
 
+  // SESSAO 8 — faixa do topo. alerta_pos_venda so existe quando a venda foi
+  // cancelada DEPOIS de montar o pedido / emitir a NF.
+  let alertaBlock = '';
+  if (v.alerta_pos_venda) {
+    alertaBlock = `<div class="alerta-pos-venda">🚨 ${esc(v.alerta_pos_venda)}</div>`;
+  } else if (v.venda_cancelada_em || v.status === 'venda_cancelada') {
+    const dtc = v.venda_cancelada_em ? new Date(v.venda_cancelada_em).toLocaleString('pt-BR') : '';
+    alertaBlock = `<div class="cancelada-block">❌ <b>Venda cancelada no Mercado Livre</b>${dtc ? ` · detectado em ${dtc}` : ''} — saiu do fluxo automático (não recebe mais mensagem nem NF).</div>`;
+  }
+
+  // Botao em TODOS os cards: pergunta na hora pro ML, sem esperar o cron de :40.
+  const botaoML = `<button class="btn-ml" title="Pergunta agora pro Mercado Livre se essa venda continua paga ou se foi cancelada" onclick="verificarML('${v.order_id}')">🔄 Verificar ML</button>`;
+
+  const checadoEm = v.ml_status_atualizado_em
+    ? `<div class="card-info" style="font-size:11px;color:#9ca3af">🔎 ML checado em ${new Date(v.ml_status_atualizado_em).toLocaleString('pt-BR')}${v.ml_status ? ` · ${esc(v.ml_status)}` : ''}</div>`
+    : '';
+
   return `
     <div class="card">
+      ${alertaBlock}
       <div class="card-header">
         <div class="card-titulo">${esc(v.descricao_produto || v.sku_a_combinar || 'Sem desc')}</div>
         <div class="card-status ${statusCls}">${statusLabel}${v.status === 'processado' && !v.nf_emitida_em ? ' <span style="background:#dc2626;color:#fff;padding:1px 5px;border-radius:4px;font-size:10px;margin-left:4px">⚠️ SEM NF</span>' : ''}</div>
@@ -436,6 +474,7 @@ function renderCard(v) {
       <div class="card-info">📦 SKU: <b>${esc(v.sku_a_combinar || '-')}</b></div>
       <div class="card-info">👤 ${esc(v.buyer_nome || '-')} ${v.total_msgs_cliente ? `(${v.total_msgs_cliente} msg${v.total_msgs_cliente > 1 ? 's' : ''})` : ''}</div>
       <div class="card-info">🛒 Venda: ${dataVenda}</div>
+      ${checadoEm}
       ${v.ultima_resposta_cliente ? `
         <div class="card-resposta">💬 <b>${esc(v.ultima_resposta_cliente).slice(0, 300)}</b>
           <div style="font-size:11px;color:#047857;margin-top:4px">em ${tempoResp}</div>
@@ -452,12 +491,44 @@ function renderCard(v) {
       <div class="card-actions">
         <a href="${msgLink}" target="_blank" title="Abre a conversa com o cliente no Mercado Livre">💬 Abrir ML</a>
         <a href="${orderLink}" target="_blank" title="Abre o detalhe da venda no Mercado Livre">🛒 Venda</a>
+        ${botaoML}
         ${botoesBling}
         ${v.status !== 'processado' ? `<button class="processed" title="Marca como resolvido na mão (tira da lista de pendentes). Use quando você já tratou esse pedido por fora" onclick="marcarProcessado('${v.order_id}')">✓ Processado</button>` : ''}
       </div>
       ${iaInstrBlock}
     </div>
   `;
+}
+
+// SESSAO 8 — botao 🔄 Verificar ML. Reusa a mesma rotina do cron no modo 1-venda.
+async function verificarML(orderId) {
+  document.querySelectorAll('.btn-ml').forEach(b => b.disabled = true);
+  try {
+    const r = await fetch(`${API_BASE}/api/pendentes/${orderId}/atualizar-status-ml`, {
+      method: 'POST',
+      headers: { 'X-Session-Token': token() }
+    });
+    if (r.status === 401) { logout(); return; }
+    const d = await r.json();
+    if (!d.ok) { alert('Erro: ' + (d.erro || 'desconhecido')); return; }
+
+    if (d.cancelada) {
+      mostrarModal(
+        '❌ Venda CANCELADA no ML',
+        (d.alerta ? '🚨 ' + d.alerta + '\n\n' : '') +
+        `Status no Mercado Livre: ${d.ml_status || '?'}\n\n` +
+        'A venda saiu do fluxo automático: não recebe mais mensagem, não entra na escada e não ganha NF automática.',
+        true
+      );
+    } else {
+      mostrarModal('✅ Venda ativa', `Status no Mercado Livre: ${d.ml_status || '?'}\n\nSegue normal.`, false);
+    }
+    await recarregar();
+  } catch (e) {
+    alert('Erro: ' + e.message);
+  } finally {
+    document.querySelectorAll('.btn-ml').forEach(b => b.disabled = false);
+  }
 }
 
 async function marcarProcessado(orderId) {
@@ -728,7 +799,7 @@ async function montarSubstituirAvisar(orderId) {
   if (!sub || !Array.isArray(sub.graos) || !sub.graos.length) { alert('Roda o preview (🔧) de novo primeiro.'); return; }
   if (!confirm(`Vai MONTAR o pedido ${orderId} no Bling, emitir a NF-e E avisar o cliente da substituição.\n\nA NF vai pra SEFAZ. Confirmar?`)) return;
 
-  const sel = '.btn-dry, .btn-real, .btn-nf, .btn-full, .btn-sub';
+  const sel = '.btn-dry, .btn-real, .btn-nf, .btn-full, .btn-sub, .btn-ml';
   document.querySelectorAll(sel).forEach(b => b.disabled = true);
   try {
     // 1 — monta os itens (com os grãos já substituídos)
@@ -779,7 +850,7 @@ async function montarSubstituirAvisar(orderId) {
 async function montarComNF(orderId, graos) {
   if (!confirm(`Vai MONTAR o pedido ${orderId} no Bling E emitir a NF-e em seguida.\n\nA NF sera transmitida pra SEFAZ. Confirmar?`)) return;
 
-  const btns = document.querySelectorAll('.btn-dry, .btn-real, .btn-nf, .btn-full, .btn-sub');
+  const btns = document.querySelectorAll('.btn-dry, .btn-real, .btn-nf, .btn-full, .btn-sub, .btn-ml');
   btns.forEach(b => b.disabled = true);
 
   try {
