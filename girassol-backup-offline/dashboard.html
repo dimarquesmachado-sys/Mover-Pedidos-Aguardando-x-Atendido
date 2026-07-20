@@ -95,7 +95,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd23';
+const DASH_BUILD = 'd24';
 let DADOS = [];
 let periodo = 'dia', pDe = '', pAte = '';   // abre no DIA (pedido do Diego)
 let SKUINFO = {}, skuInfoCarregado = false, _skuLoading = false;
@@ -103,6 +103,8 @@ let CFG = { aliquotas:{}, taxas:{} };   // alíquota Simples por mês (YYYY-MM: 
 // Alíquotas 2026 da GIRASSOL vindas de fábrica (editáveis no ⚙️; o que você salvar SOBREPÕE estas):
 const DEFAULT_ALIQ = { '2026-01':11.409280, '2026-02':11.3254, '2026-03':12.3402, '2026-04':13.6001, '2026-05':13.9149, '2026-06':14.056, '2026-07':14.1 };
 const aliqDe = mes => (CFG.aliquotas[mes] != null ? CFG.aliquotas[mes] : (DEFAULT_ALIQ[mes] != null ? DEFAULT_ALIQ[mes] : null));
+const DEFAULT_FLEX = { geral: 12, shopee: 9 };   // frete FLEX pago pela loja: R$ 12 todos os canais, R$ 9 Shopee (editável no ⚙️)
+const flexDe = ck => { const fx = (CFG.flex || {}); const k = (ck === 'shopee' ? 'shopee' : 'geral'); return (fx[k] != null ? fx[k] : DEFAULT_FLEX[k]); };
 const CANAIS_CFG = ['ml','shopee','magalu','amazon','tiktok','madeira','leroy','outro'];
 const canalKey = mk => { mk=(mk||'outro').toLowerCase(); return mk==='mercadolivre'?'ml':(CANAIS_CFG.includes(mk)?mk:'outro'); };
 let sortProd = { col: 'fat', dir: -1 };
@@ -135,7 +137,7 @@ async function boot(){
     const d = await r.json();
     if(!d || !Array.isArray(d.itens)){ semLogin(); return; }
     DADOS = d.itens;
-    try{ const rc = await fetch(MOD+'/config-fiscal',{credentials:'same-origin'}); const dc = await rc.json(); if(dc&&dc.config) CFG = { aliquotas: dc.config.aliquotas||{}, taxas: dc.config.taxas||{} }; }catch(e){}
+    try{ const rc = await fetch(MOD+'/config-fiscal',{credentials:'same-origin'}); const dc = await rc.json(); if(dc&&dc.config) CFG = { aliquotas: dc.config.aliquotas||{}, taxas: dc.config.taxas||{}, flex: dc.config.flex||{} }; }catch(e){}
     montar();
   }catch(e){
     $('app').innerHTML = '<div class="loginbox">✗ falha ao carregar: '+esc(e.message)+'<br><br><a href="'+MOD+'/dashboard">tentar de novo</a></div>';
@@ -210,7 +212,12 @@ function montar(){
       '<div style="overflow-x:auto"><table id="tProj"></table></div><div id="projAviso"></div></div>'+
     '<div class="sec"><h2>⚙️ Impostos &amp; taxas <span class="hint">alíquota do Simples varia mês a mês · taxas de marketplace em % (estimativa; ML tem a REAL por pedido na busca)</span></h2>'+
       '<div id="cfgBox"></div>'+
-      '<div style="margin-top:12px"><button class="btn" onclick="salvarCfg()">💾 Salvar</button> <span id="cfgMsg" class="mut" style="font-size:12px;margin-left:8px"></span></div>'+
+      '<div style="font-size:12px;color:var(--mut);margin:14px 0 6px">🚛 Frete FLEX pago pela loja (R$) — de fábrica: R$ 12 geral · R$ 9 Shopee · usado quando o pedido é FLEX e o canal não informa frete real</div>'+
+    '<div style="display:flex;gap:14px;flex-wrap:wrap">'+
+      '<label style="font-size:12px;color:var(--mut)">Todos os canais<br><input type="number" step="0.5" min="0" max="100" data-flex="geral" value="'+((CFG.flex&&CFG.flex.geral!=null)?CFG.flex.geral:DEFAULT_FLEX.geral)+'" style="width:86px'+((CFG.flex&&CFG.flex.geral!=null)?'':';color:#8b96b3')+'"></label>'+
+      '<label style="font-size:12px;color:var(--mut)">Shopee<br><input type="number" step="0.5" min="0" max="100" data-flex="shopee" value="'+((CFG.flex&&CFG.flex.shopee!=null)?CFG.flex.shopee:DEFAULT_FLEX.shopee)+'" style="width:86px'+((CFG.flex&&CFG.flex.shopee!=null)?'':';color:#8b96b3')+'"></label>'+
+    '</div>'+
+    '<div style="margin-top:12px"><button class="btn" onclick="salvarCfg()">💾 Salvar</button> <span id="cfgMsg" class="mut" style="font-size:12px;margin-left:8px"></span></div>'+
       '<div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line)"><div style="font-size:12px;color:var(--mut);margin-bottom:8px">🔧 Manutenção <span class="dim">(rodam sozinhas de madrugada — use só se quiser AGORA)</span></div>'+
       '<button class="btn" onclick="rodarPescaML()">🎣 Pescar tarifas ML agora</button> '+
       '<button class="btn" onclick="rodarBackfillNF()" style="background:linear-gradient(135deg,#0d9488,#0f766e)">🧾 Backfill NF agora</button> '+
@@ -306,6 +313,7 @@ function render(){
         if(tReal!=null) tReais++;
         if(h.frete_ml!=null && isFinite(Number(h.frete_ml))) frV+=Number(h.frete_ml);
         else if(h.frete_mkt!=null && isFinite(Number(h.frete_mkt)) && Number(h.frete_mkt)>0) frV+=Number(h.frete_mkt);
+        else if(h.flex){ const fx=flexDe(canalKey(mk)); if(fx!=null && fx>0) frV+=fx; }
         (h.itens||[]).forEach(it=>{ const q=Number(it.qtd||1); unTot+=q; const info=SKUINFO[it.sku]; if(info&&info.custo!=null){ cus+=info.custo*q; cusUn+=q; } });
       });
       if(!Object.keys(CFG.taxas).length)
@@ -416,11 +424,12 @@ async function salvarCfg(){
   const aliquotas={}, taxas={};
   document.querySelectorAll('[data-aliq]').forEach(i=>{ aliquotas[i.dataset.aliq] = i.value===''?null:Number(i.value); });
   document.querySelectorAll('[data-taxa]').forEach(i=>{ taxas[i.dataset.taxa] = i.value===''?null:Number(i.value); });
+  const flex={}; document.querySelectorAll('[data-flex]').forEach(i=>{ flex[i.dataset.flex] = i.value===''?null:Number(i.value); });
   const msg=$('cfgMsg'); msg.textContent='salvando…';
   try{
-    const r = await fetch(MOD+'/config-fiscal',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({aliquotas,taxas})});
+    const r = await fetch(MOD+'/config-fiscal',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({aliquotas,taxas,flex})});
     const d = await r.json();
-    if(d&&d.ok){ CFG={aliquotas:d.config.aliquotas||{},taxas:d.config.taxas||{}}; msg.textContent='✓ salvo'; render(); }
+    if(d&&d.ok){ CFG={aliquotas:d.config.aliquotas||{},taxas:d.config.taxas||{},flex:d.config.flex||{}}; msg.textContent='✓ salvo'; render(); }
     else msg.textContent='✗ '+((d&&d.erro)||'falhou');
   }catch(e){ msg.textContent='✗ '+e.message; }
 }
@@ -441,10 +450,13 @@ function calcPL(h){
   let custo=0, cusUn=0, unTot=0;
   (h.itens||[]).forEach(it=>{ const q=Number(it.qtd||1); unTot+=q; const inf=SKUINFO[it.sku]; if(inf&&inf.custo!=null){ custo+=inf.custo*q; cusUn+=q; } });
   const custoOk = cusUn===unTot && unTot>0;
-  const frV = (h.frete_ml!=null&&isFinite(Number(h.frete_ml)))?Number(h.frete_ml):((h.frete_mkt!=null&&isFinite(Number(h.frete_mkt))&&Number(h.frete_mkt)>0)?Number(h.frete_mkt):null);
+  let frV = null, frFonte = null;
+  if (h.frete_ml!=null && isFinite(Number(h.frete_ml))) { frV = Number(h.frete_ml); frFonte = 'ml'; }
+  else if (h.frete_mkt!=null && isFinite(Number(h.frete_mkt)) && Number(h.frete_mkt)>0) { frV = Number(h.frete_mkt); frFonte = 'bling'; }
+  else if (h.flex) { const fx = flexDe(ck); if (fx!=null && fx>0) { frV = fx; frFonte = 'flex'; } }
   const completo = [rp,imposto,tarifa].every(v=>v!=null) && custoOk;
   const mc = completo? rp-imposto-tarifa-custo-(frV||0) : null;
-  return {mes,ck,rp,tot,frete,aliq,imposto,feeReal,feeBling,tx,tarifa,custo,cusUn,unTot,custoOk,frV,completo,mc};
+  return {mes,ck,rp,tot,frete,aliq,imposto,feeReal,feeBling,tx,tarifa,custo,cusUn,unTot,custoOk,frV,frFonte,completo,mc};
 }
 function buscarPed(q){
   q = String(q||'').trim().toLowerCase();
@@ -472,7 +484,7 @@ async function abrirPL(id){
 }
 function renderPL(h){
   const card=$('plCard');
-  const {mes,ck,rp,tot,frete,aliq,imposto,feeReal,feeBling,tx,tarifa,custo,cusUn,unTot,frV,completo,mc} = calcPL(h);
+  const {mes,ck,rp,tot,frete,aliq,imposto,feeReal,feeBling,tx,tarifa,custo,cusUn,unTot,frV,frFonte,completo,mc} = calcPL(h);
   const linha=(l,v,extra)=>'<tr><td>'+l+'</td><td class="num">'+(v!=null?BRL(v):'<span class="dim">—</span>')+(extra||'')+'</td></tr>';
   card.innerHTML =
     '<div class="sec" style="margin-top:12px;background:linear-gradient(160deg,#14201a,#131a30);border-color:#14b8a655">'+
@@ -485,7 +497,7 @@ function renderPL(h){
     linha('🏪 Tarifa '+ (feeReal!=null?'<span class="ok">REAL (ML)</span>':(feeBling!=null?'<span class="ok">REAL (Bling)</span>':(tx!=null?tx+'% est.':'<span class="warn">configure ⚙️</span>'))), tarifa!=null?-tarifa:null,
       (ck==='ml'&&h.numero_loja&&feeReal==null?' <button class="btn" style="padding:3px 10px;font-size:10.5px" onclick="pegarFeeML(\''+h.id+'\',\''+esc(h.numero_loja)+'\')">buscar real</button>':''))+
     linha('📦 Custo ('+cusUn+'/'+unTot+' un. c/ custo)', (cusUn?-custo:null))+
-    (frV!=null ? linha('🚛 Frete vendedor <span class="ok">('+(h.frete_ml!=null?'real ML':'Bling')+')</span>', -frV) : (ck==='ml' ? linha('🚛 Frete vendedor <span class="ok">(real ML)</span>', null) : ''))+
+    (frV!=null ? linha('🚛 Frete vendedor <span class="ok">('+(frFonte==='ml'?'real ML':(frFonte==='bling'?'Bling':'FLEX ⚙️'))+')</span>', -frV) : (ck==='ml' ? linha('🚛 Frete vendedor <span class="ok">(real ML)</span>', null) : ''))+
     '<tr><td style="border-top:2px solid var(--line2);font-weight:800">💎 Margem de contribuição</td>'+
     '<td class="num" style="border-top:2px solid var(--line2);font-weight:800">'+
       (mc!=null?('<span class="'+(mc>=0?'ok':'bad')+'">'+BRL(mc)+'</span><span class="dim" style="font-size:11px"> · '+(rp?Math.round(mc/rp*100):0)+'%</span>'):'<span class="warn">incompleto — resolva os "—" acima</span>')+'</td></tr>'+
@@ -652,7 +664,7 @@ function renderAnalise(){
       cel(P.tot)+cel(P.rp,'ok')+
       cel(P.custoOk?P.custo:null)+cel(P.imposto)+
       '<td class="num">'+(P.tarifa!=null?BRL(P.tarifa)+(P.feeReal!=null?' <span class="st ok" style="font-size:9px">REAL</span>':(P.feeBling!=null?' <span class="st ok" style="font-size:9px">BLING</span>':''))+(P.rp?'<div class="desc">'+Math.round(P.tarifa/P.rp*100)+'%</div>':''):'<span class="dim">—</span>')+'</td>'+
-      cel(P.frV)+
+      '<td class="num">'+(P.frV!=null?BRL(P.frV)+(P.frFonte==='flex'?' <span class="st warn" style="font-size:9px">FLEX</span>':''):'<span class="dim">—</span>')+'</td>'+
       '<td class="num" style="font-weight:800">'+(P.mc!=null?('<span class="'+(P.mc>=0?'ok':'bad')+'">'+BRL(P.mc)+'</span>'):'<span class="warn" title="falta config/custo">—</span>')+'</td>'+
       '<td class="num '+(pmc!=null?(pmc>=0?'ok':'bad'):'dim')+'">'+(pmc!=null?pmc+'%':'—')+'</td>'+
     '</tr>';
