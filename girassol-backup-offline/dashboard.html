@@ -95,7 +95,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd21';
+const DASH_BUILD = 'd22';
 let DADOS = [];
 let periodo = 'dia', pDe = '', pAte = '';   // abre no DIA (pedido do Diego)
 let SKUINFO = {}, skuInfoCarregado = false, _skuLoading = false;
@@ -220,7 +220,7 @@ function montar(){
       'produtos/frete usam a NOTA FISCAL do pedido quando disponível (fonte fiscal exata) · '+
       '<b>margem de contribuição</b> = produtos(NF) − imposto(alíquota do mês × total) − tarifa do canal (ML: real por pedido; demais: % configurada) − custo (Bling); o frete recebido aproxima o frete pago e não entra na conta · '+
       'margem bruta = venda − custo, sem frete/taxas · só entram pedidos finalizados no checkout offline. '+
-      '<b>datas pelo DIA DA VENDA (igual ao Jodda) — o pedido aparece após a bipagem no checkout, mas cai no dia em que foi vendido.</b> lá conta a data da VENDA; aqui a da EXPEDIÇÃO — use o card 🛍 produtos p/ comparar.</div>'+
+      '<b>datas pelo DIA DA VENDA (igual ao Jodda) — o pedido aparece após a bipagem no checkout, mas cai no dia em que foi vendido.</b></div>'+
   '</div>';
   render();
   setTimeout(()=>{ if(!skuInfoCarregado) carregarSkuInfo(); }, 400);
