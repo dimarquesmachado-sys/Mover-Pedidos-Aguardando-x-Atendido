@@ -614,16 +614,16 @@ function routes(readBody) {
       if (!skuQ) { json(res, 200, { ok: false, erro: 'passe ?sku=CODIGO' }); return true; }
       try {
         const rb = await blingGet('/produtos?codigo=' + encodeURIComponent(skuQ) + '&criterio=5');
-        const p0 = rb && rb.data && rb.data[0];
+        const p0 = rb && rb.ok && rb.data && rb.data.data && rb.data.data[0];   // envelope do blingGet: {ok, data:{data:[...]}}
         if (!p0) { json(res, 200, { ok: false, erro: 'produto nao encontrado por codigo ' + skuQ }); return true; }
         const rd = await blingGet('/produtos/' + p0.id);
-        const det = (rd && rd.data) || {};
+        const det = (rd && rd.ok && rd.data && rd.data.data) || {};
         const precos = {};
         const cata = (obj, pref) => { for (const [k2, v2] of Object.entries(obj || {})) { const cam = pref ? pref + '.' + k2 : k2; if (v2 && typeof v2 === 'object' && !Array.isArray(v2)) { cata(v2, cam); continue; } if (/pre[cç]o|custo|cost|price/i.test(k2)) precos[cam] = v2; } };
         cata(det, '');
         let saldos = null, fornecedores = null;
-        try { const rs = await blingGet('/estoques/saldos?idsProdutos[]=' + p0.id); saldos = (rs && rs.data) || rs; } catch (e) { saldos = { erro: String(e.message || e).slice(0, 120) }; }
-        try { const rf = await blingGet('/produtos/fornecedores?idProduto=' + p0.id); fornecedores = (rf && rf.data) || rf; } catch (e) { fornecedores = { erro: String(e.message || e).slice(0, 120) }; }
+        try { const rs = await blingGet('/estoques/saldos?idsProdutos[]=' + p0.id); saldos = (rs && rs.data && rs.data.data) || (rs && rs.data) || rs; } catch (e) { saldos = { erro: String(e.message || e).slice(0, 120) }; }
+        try { const rf = await blingGet('/produtos/fornecedores?idProduto=' + p0.id); fornecedores = (rf && rf.data && rf.data.data) || (rf && rf.data) || rf; } catch (e) { fornecedores = { erro: String(e.message || e).slice(0, 120) }; }
         json(res, 200, { ok: true, sku: skuQ, id_produto: p0.id,
           chaves_do_produto: Object.keys(det),
           todos_os_campos_de_preco_ou_custo: precos,
