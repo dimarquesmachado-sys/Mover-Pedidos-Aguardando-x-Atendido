@@ -59,6 +59,11 @@
   th{color:var(--mut);text-align:left;font-weight:700;font-size:11px;letter-spacing:.04em;text-transform:uppercase;
      padding:8px 10px;border-bottom:1px solid var(--line2);white-space:nowrap;user-select:none}
   th.sort{cursor:pointer} th.sort:hover{color:var(--tx)}
+  /* cabecalho congelado: o wrapper .tw rola por dentro e o <th> gruda no topo dele */
+  .tw{overflow:auto;max-height:76vh;border-radius:10px}
+  .tw th{position:sticky;top:0;z-index:3;background:#141b33;box-shadow:0 1px 0 var(--line2)}
+  .tw thead th{top:0}
+  @media(max-width:720px){ .tw{max-height:70vh} }
   td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:middle}
   tbody tr{transition:background .12s}
   tbody tr:hover{background:#ffffff08}
@@ -95,7 +100,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd29';
+const DASH_BUILD = 'd31';
 let DADOS = [];
 let periodo = 'dia', pDe = '', pAte = '';   // abre no DIA (pedido do Diego)
 let SKUINFO = {}, skuInfoCarregado = false, _skuLoading = false;
@@ -210,20 +215,20 @@ function montar(){
       '<span style="margin-left:auto"></span>'+
       '<button class="chip" onclick="if(anPage>0){anPage--;renderAnalise();}">← Anterior</button>'+
       '<button class="chip" onclick="anPage++;renderAnalise()">Próxima →</button></div>'+
-      '<div style="overflow-x:auto"><table id="tAnalise"></table></div>'+
+      '<div class="tw"><table id="tAnalise"></table></div>'+
       '<div class="nota"><b>Sobre a ordem:</b> dentro de cada dia, ML aparece na hora REAL da venda; TikTok/Shopee/Magalu/Amazon aparecem na hora em que foram <b>bipados</b> (🕘) — por isso saem em blocos: o estoque bipa um canal de cada vez. A hora real da venda desses canais <b>só existe na API do próprio canal</b>. Pra confrontar com o Jodda, use o ⬇︎ CSV e case pelo <b>número da venda no marketplace</b>. · ML mostra a hora REAL da venda (vem da pesca); TikTok/Shopee o Bling não guarda hora — o 🕘 marca que ali está a hora da <b>conferência</b> (a hora da venda desses canais chega quando plugarmos as APIs deles) · colunas (−) são deduções e (+) é crédito · <b>Estorno</b> = compensação de envio que o ML devolve pra loja (típica do Flex), somada na M.C. · tarifa <span class="ok">REAL</span> = pescada do ML · <span class="ok">BLING</span> = comissão que o Bling importou do canal (TikTok/Shopee/Magalu) · sem tag = % configurada · custo carrega sob demanda por página · 🛒 = mais de 1 item/unidade</div></div>'+
     '<div class="grid2">'+
       '<div class="sec"><h2>📈 Pedidos por dia</h2><div class="chartbox"><canvas id="cPed"></canvas></div></div>'+
       '<div class="sec"><h2>💰 Faturamento por dia</h2><div class="chartbox"><canvas id="cFat"></canvas></div></div>'+
     '</div>'+
-    '<div class="sec"><h2>🛒 Por canal</h2><div style="overflow-x:auto"><table id="tCanal"></table></div></div>'+
+    '<div class="sec"><h2>🛒 Por canal</h2><div class="tw"><table id="tCanal"></table></div></div>'+
     '<div class="sec"><h2>🏆 Top produtos <span class="hint">clique nos títulos p/ ordenar ↑↓ · faturamento = SOMA de todos os pedidos do SKU no período</span></h2>'+
-      '<div style="overflow-x:auto"><table id="tProd"></table></div><div id="prodAviso"></div></div>'+
-    '<div class="sec"><h2>🗺️ Vendas por estado</h2><div style="overflow-x:auto"><table id="tUF"></table></div><div id="ufAviso"></div></div>'+
+      '<div class="tw"><table id="tProd"></table></div><div id="prodAviso"></div></div>'+
+    '<div class="sec"><h2>🗺️ Vendas por estado</h2><div class="tw"><table id="tUF"></table></div><div id="ufAviso"></div></div>'+
     '<div class="sec"><h2>📦 Projeção de estoque &amp; margem <span class="hint">ritmo dos últimos 14 dias · clique p/ ordenar</span></h2>'+
       '<div id="projBox" style="margin-bottom:10px;font-size:12px"><span class="mut" id="projStatus">⏳ carregando saldo/preço/custo do Bling… (~30-60s na 1ª vez)</span> '+
       '<button class="btn" id="btnProj" onclick="carregarSkuInfo(true)" style="display:none">↻ recarregar do Bling (ignora cache)</button> <button class="btn sec" onclick="sincCustos()" title="resolve TODOS os custos em background, devagar, sem estourar o limite do Bling — e grava em cache permanente">🐢 sincronizar custos (fundo)</button></div>'+
-      '<div style="overflow-x:auto"><table id="tProj"></table></div><div id="projAviso"></div></div>'+
+      '<div class="tw"><table id="tProj"></table></div><div id="projAviso"></div></div>'+
     '<div class="sec"><h2>⚙️ Impostos &amp; taxas <span class="hint">alíquota do Simples varia mês a mês · taxas de marketplace em % (estimativa; ML tem a REAL por pedido na busca)</span></h2>'+
       '<div id="cfgBox"></div>'+
       '<div style="font-size:12px;color:var(--mut);margin:14px 0 6px">🚛 Frete FLEX pago pela loja (R$) — de fábrica: R$ 12 geral · R$ 9 Shopee · usado quando o pedido é FLEX e o canal não informa frete real</div>'+
@@ -505,7 +510,7 @@ function renderPL(h){
   card.innerHTML =
     '<div class="sec" style="margin-top:12px;background:linear-gradient(160deg,#14201a,#131a30);border-color:#14b8a655">'+
     '<h2>💎 Pedido '+esc(h.numero||h.id)+' · '+esc(ck)+' · '+diaVenda(h)+
-    (h.numero_loja?' <span class="badge">venda '+esc(h.numero_loja)+'</span>':'')+(h.nf_numero?' <span class="badge">NF '+esc(h.nf_numero)+'</span>':'')+'</h2>'+
+    (h.numero_loja?' <span class="badge">venda '+esc(h.numero_loja)+(linkMkt(h)?' <a href="'+linkMkt(h)+'" target="_blank" rel="noopener" style="text-decoration:none" title="abrir esta venda no Mercado Livre">↗</a>':'')+'</span>':'')+(h.nf_numero?' <span class="badge">NF '+esc(h.nf_numero)+'</span>':'')+'</h2>'+
     '<table>'+
     linha('🛍 Produtos (nota fiscal)', rp)+
     linha('🚚 Frete embutido (receita)', frete)+
@@ -563,6 +568,15 @@ async function rodarBackfillNF(){
 const selAtiva = () => { try { const s2 = window.getSelection && window.getSelection(); return !!(s2 && String(s2).length); } catch (e) { return false; } };
 let _selT = null;
 const renderSafe = () => { if (selAtiva()) { clearTimeout(_selT); _selT = setTimeout(renderSafe, 2500); return; } render(); };   // nunca redesenha por cima de uma seleção de texto
+const linkMkt = h => {
+  // ML: https://www.mercadolivre.com.br/vendas/{id}/detalhe — o callbackUrl da URL do navegador
+  // é só estado da tela anterior (no exemplo do Diego o id do caminho nem batia com o do search).
+  const nl = String((h && h.numero_loja) || '').replace(/\D/g, '');
+  if (!nl) return '';
+  const ck = canalKey(h.marketplace);
+  if (ck === 'ml') return 'https://www.mercadolivre.com.br/vendas/' + nl + '/detalhe';
+  return '';   // demais canais: falta a URL de cada seller center — basta o Diego colar um exemplo
+};
 function copiaNL(el){ const v = el.getAttribute('data-nl') || ''; try { navigator.clipboard && navigator.clipboard.writeText(v); } catch (e) {} el.style.color = '#34d399'; setTimeout(() => { el.style.color = ''; }, 700); }
 function renderGrafico(){
   const el=$('grafProg'); if(!el) return;
@@ -722,7 +736,10 @@ function renderAnalise(){
       '<td class="dim" style="white-space:nowrap" title="'+(h.venda_em?('venda: '+dtBR(h.venda_em)+' · '):(h.venda_dia?('venda: '+String(h.venda_dia).slice(8,10)+'/'+String(h.venda_dia).slice(5,7)+' · '):''))+'conferido: '+dtBR(h.conferido_em)+'">'+(h.venda_em?dtBR(h.venda_em):(h.venda_dia?(String(h.venda_dia).slice(8,10)+'/'+String(h.venda_dia).slice(5,7)+' <span style="font-size:9px" title="dia da venda (Bling) — hora só com a API do canal">🕘</span>'):(dtBR(h.conferido_em)+' <span style="font-size:9px" title="hora da conferência">🕘</span>')))+'</td>'+
       '<td><b>'+esc(h.numero||h.id)+'</b>'+(carrinho?' <span class="badge" title="'+unid+' unidades">🛒 '+unid+'</span>':'')+
         (h.nf_numero?'<div class="desc">NF '+esc(h.nf_numero)+'</div>':'')+'</td>'+
-      '<td class="dim" data-nl="'+esc(h.numero_loja||'')+'" onclick="copiaNL(this)" style="font-size:11px;max-width:135px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer" title="clique = copiar · '+esc(h.numero_loja||'')+'">'+esc(h.numero_loja||'—')+'</td>'+
+      '<td class="dim" style="font-size:11px;max-width:160px;white-space:nowrap">'+(h.numero_loja?(
+          '<span data-nl="'+esc(h.numero_loja)+'" onclick="copiaNL(this)" style="cursor:pointer;display:inline-block;max-width:118px;overflow:hidden;text-overflow:ellipsis;vertical-align:middle" title="clique = copiar · '+esc(h.numero_loja)+'">'+esc(h.numero_loja)+'</span>'+
+          (linkMkt(h)?' <a href="'+linkMkt(h)+'" target="_blank" rel="noopener" style="text-decoration:none;font-size:12px" title="abrir esta venda no Mercado Livre">↗</a>':'')
+        ):'—')+'</td>'+
       '<td>'+esc(P.ck)+'</td>'+
       '<td><div class="desc" style="max-width:200px">'+esc(it0.sku||'')+((h.itens||[]).length>1?' +'+((h.itens||[]).length-1):'')+'</div></td>'+
       '<td class="num">'+N(unid)+'</td>'+
