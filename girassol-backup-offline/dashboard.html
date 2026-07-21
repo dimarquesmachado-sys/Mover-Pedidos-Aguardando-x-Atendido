@@ -100,7 +100,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd37';
+const DASH_BUILD = 'd38';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -162,7 +162,8 @@ function prepararVendas(){
   const _nums = new Set((DADOS||[]).map(h=>String(h.numero)));
   SINT = (VENDAS||[]).filter(v=>v&&v.numero!=null&&!_nums.has(String(v.numero))).map(v=>({
     sintetico:true, id:'s'+v.id, numero:v.numero, numero_loja:v.numero_loja||'', marketplace:v.marketplace||'outro',
-    venda_dia:v.data||null, valor:(v.total!=null?Number(v.total):null), cliente:v.cliente||'', itens:[],
+    venda_dia:v.data||null, valor:(v.total!=null?Number(v.total):null), cliente:v.cliente||'',
+    itens:(v.it||[]).map(i2=>({sku:i2.sku,qtd:i2.qtd,valor_total:i2.vt})), taxa_mkt:(v.taxa_mkt!=null?v.taxa_mkt:null), frete_mkt:(v.frete_mkt!=null?v.frete_mkt:null),
     _sit:v.situacao||null, _cancelado:/cancel/i.test(String(v.situacao||''))
   }));
 }
@@ -725,6 +726,11 @@ function renderAnalise(){
   const q = String(anSku||'').trim().toLowerCase();
   if(q) L=L.filter(anBuscaOk(q));
   let LP = L.map(h=>({h:h, P:calcPL(h)}));
+  // vendas do Bling ainda NÃO bipadas: entram com margem calculada (itens/tarifa/frete do sincronizador)
+  const LS = (SINT||[]).filter(h=>{ const d2=diaVenda(h); return d2>=iv.de&&d2<=iv.ate; })
+    .filter(h=>!anCanal||canalKey(h.marketplace)===anCanal)
+    .filter(h=>!q||anBuscaOk(q)(h));
+  LP = LP.concat(LS.map(h=>({h:h,P:calcPL(h)})));
   const nLucro = LP.filter(x=>x.P.mc!=null&&x.P.mc>0&&!x.h._cancelado).length, nPrej = LP.filter(x=>x.P.mc!=null&&x.P.mc<0&&!x.h._cancelado).length;
   const nInc = LP.filter(x=>x.P.mc==null).length;
   const lpEl=$('anLPChips');
@@ -736,15 +742,8 @@ function renderAnalise(){
   if(anLP==='lucro') LP=LP.filter(x=>x.P.mc!=null&&x.P.mc>0);
   else if(anLP==='prej') LP=LP.filter(x=>x.P.mc!=null&&x.P.mc<0);
   else if(anLP==='inc') LP=LP.filter(x=>x.P.mc==null);
-  // vendas do Bling ainda NÃO bipadas: entram na lista (aba Todos) — canceladas em cinza, fora dos totais
-  if(anLP===''){
-    const LS = (SINT||[]).filter(h=>{ const d2=diaVenda(h); return d2>=iv.de&&d2<=iv.ate; })
-      .filter(h=>!anCanal||canalKey(h.marketplace)===anCanal)
-      .filter(h=>!q||anBuscaOk(q)(h));
-    LP = LP.concat(LS.map(h=>({h:h,P:calcPL(h)})));
-  }
   LP.sort((a,b)=> tMs(b.h)-tMs(a.h));
-  const PAG=25, maxP=Math.max(0,Math.ceil(LP.length/PAG)-1);
+  const PAG=100, maxP=Math.max(0,Math.ceil(LP.length/PAG)-1);
   if(anPage>maxP) anPage=maxP; if(anPage<0) anPage=0;
   const pagPL=LP.slice(anPage*PAG, anPage*PAG+PAG);
   const pag=pagPL.map(x=>x.h);
@@ -766,7 +765,7 @@ function renderAnalise(){
   const T={tot:0,rp:0,imp:0,tar:0,cus:0,frv:0,cre:0,mc:0,mcN:0};
   const cel=(v,cls)=>'<td class="num'+(cls?' '+cls:'')+'">'+(v!=null?BRL(v):'<span class="dim">—</span>')+'</td>';
   const totDia = {};   // totais por dia (da lista filtrada inteira, nao so da pagina)
-  LP.forEach(x=>{ if(x.h._cancelado||x.h.sintetico) return; const d2=diaVenda(x.h); const t=totDia[d2]||(totDia[d2]={n:0,rp:0,mc:0,mcN:0});
+  LP.forEach(x=>{ if(x.h._cancelado) return; const d2=diaVenda(x.h); const t=totDia[d2]||(totDia[d2]={n:0,rp:0,mc:0,mcN:0});
     t.n++; if(x.P.rp!=null)t.rp+=x.P.rp; if(x.P.mc!=null){t.mc+=x.P.mc;t.mcN++;} });
   let _diaAnt = null;
   const linhas = pagPL.map(x=>{
@@ -782,14 +781,14 @@ function renderAnalise(){
     }
     const unid=(h.itens||[]).reduce((a,i)=>a+Number(i.qtd||1),0);
     const carrinho=((h.itens||[]).length>1)||unid>1;
-    if(!(h._cancelado||h.sintetico)){   // cancelada/não-bipada aparecem na lista mas FORA do Σ
+    if(!h._cancelado){   // só CANCELADA fica fora do Σ; não-bipada com margem calculada CONTA
       if(P.tot!=null)T.tot+=P.tot; if(P.rp!=null)T.rp+=P.rp; if(P.imposto!=null)T.imp+=P.imposto;
       if(P.tarifa!=null)T.tar+=P.tarifa; if(P.custoOk)T.cus+=P.custo; if(P.frV!=null)T.frv+=P.frV; if(P.credito!=null)T.cre+=P.credito;
       if(P.mc!=null){ T.mc+=P.mc; T.mcN++; }
     }
     const it0=(h.itens||[])[0]||{};
     const pmc = (P.mc!=null&&P.rp)?Math.round(P.mc/P.rp*100):null;
-    if(h.sintetico){
+    if(h.sintetico && !((h.itens||[]).length)){   // detalhe ainda não chegou — linha resumida
       const dtx = _d ? (_d.slice(8,10)+'/'+_d.slice(5,7)) : '—';
       const tag = h._cancelado ? '<span class="st bad">CANCELADA</span>' : '<span class="st warn" title="a venda já existe no Bling; margem fecha quando for bipada (NF + custo)">aguardando bipagem</span>';
       return sep + '<tr style="opacity:'+(h._cancelado?'.38':'.72')+'">'+
@@ -806,7 +805,7 @@ function renderAnalise(){
     }
     return sep + '<tr'+(h._cancelado?' style="opacity:.38" title="pedido CANCELADO no Bling — fora dos totais"':'')+'>'+
       '<td class="dim" style="white-space:nowrap" title="'+(h.venda_em?('venda: '+dtBR(h.venda_em)+' · '):(h.venda_dia?('venda: '+String(h.venda_dia).slice(8,10)+'/'+String(h.venda_dia).slice(5,7)+' · '):''))+'conferido: '+dtBR(h.conferido_em)+'">'+(h.venda_em?dtBR(h.venda_em):(h.venda_dia?(String(h.venda_dia).slice(8,10)+'/'+String(h.venda_dia).slice(5,7)+' <span style="font-size:9px" title="dia da venda (Bling) — hora só com a API do canal">🕘</span>'):(dtBR(h.conferido_em)+' <span style="font-size:9px" title="hora da conferência">🕘</span>')))+'</td>'+
-      '<td><b>'+esc(h.numero||h.id)+'</b>'+(carrinho?' <span class="badge" title="'+unid+' unidades">🛒 '+unid+'</span>':'')+
+      '<td>'+(h._cancelado?'<span title="CANCELADO no Bling — fora dos totais">⚪</span> ':(h.sintetico?'<span title="venda no Bling, ainda NÃO bipada — margem já calculada; NF entra na bipagem">🟠</span> ':'<span title="bipado no checkout">🟢</span> '))+'<b>'+esc(h.numero||h.id)+'</b>'+(carrinho?' <span class="badge" title="'+unid+' unidades">🛒 '+unid+'</span>':'')+
         (h.nf_numero?'<div class="desc">NF '+esc(h.nf_numero)+'</div>':'')+'</td>'+
       (function(){
         const nlV = String(h.numero_loja||'');

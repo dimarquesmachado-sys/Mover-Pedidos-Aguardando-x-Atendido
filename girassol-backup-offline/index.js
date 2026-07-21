@@ -2159,6 +2159,24 @@ async function vendasSync() {
       if (lista.length < 100) break;
       await new Promise(r2 => setTimeout(r2, 450));
     }
+    // fase 2: DETALHE dos ainda não-bipados (itens → custo/R$ produtos; taxas → tarifa/frete) — margem antes da bipagem
+    try {
+      const confS = readJson(CONFERIDOS_FILE, {});
+      const bipN = new Set(Object.values(confS).map(c => String(c && c.numero)));
+      const alvosDet = Object.values(atual).filter(v => v && !v.det && v.numero != null && !bipN.has(String(v.numero)) && !/cancel/i.test(String(v.situacao || ''))).slice(0, 60);
+      for (const v of alvosDet) {
+        const rd = await blingGet('/pedidos/vendas/' + v.id);
+        const det = (rd && rd.ok && rd.data && rd.data.data) || null;
+        if (det) {
+          v.it = (det.itens || []).map(i2 => ({ sku: (i2.codigo || (i2.produto && i2.produto.codigo) || '').trim() || null, qtd: Number(i2.quantidade || 1), vt: Math.round(Number(i2.valor || 0) * Number(i2.quantidade || 1) * 100) / 100 }));
+          const tc = det.taxas && Number(det.taxas.taxaComissao); if (isFinite(tc) && tc > 0) v.taxa_mkt = Math.round(tc * 100) / 100;
+          const cf = det.taxas && Number(det.taxas.custoFrete); if (isFinite(cf) && cf > 0) v.frete_mkt = Math.round(cf * 100) / 100;
+          if (det.situacao && (det.situacao.valor || det.situacao.nome)) v.situacao = det.situacao.valor || det.situacao.nome;
+          v.det = 1;
+        }
+        await new Promise(r3 => setTimeout(r3, 450));
+      }
+    } catch (e) {}
     // poda: fora da janela de 6 dias sai do arquivo (o histórico de verdade vive nos conferidos)
     const corte = new Date(hoje); corte.setDate(corte.getDate() - 6);
     const corteS = isoD(corte);
