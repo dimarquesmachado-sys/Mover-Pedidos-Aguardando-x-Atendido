@@ -922,7 +922,7 @@ function routes(readBody) {
         .sort((a, b) => Number(a.numero || 0) - Number(b.numero || 0));        // mais ANTIGOS (menor nº) em cima
       const semEtiq = ids
         .filter(i => !man[i].tem_etiqueta && !conf[i])                         // ATENDIDO mas SEM etiqueta = problema
-        .map(i => ({ id: i, numero: man[i].numero, cliente: man[i].cliente || '', nf_numero: man[i].nf_numero || null, marketplace: man[i].marketplace || 'outro' }))
+        .map(i => ({ id: i, numero: man[i].numero, cliente: man[i].cliente || '', nf_numero: man[i].nf_numero || null, nf_emissao: man[i].nf_emissao || null, marketplace: man[i].marketplace || 'outro' }))
         .sort((a, b) => Number(a.numero || 0) - Number(b.numero || 0));
       const hoje = new Date().toISOString().slice(0, 10);
       const finalizadosHoje = Object.values(conf).filter(c => c && String(c.conferido_em || '').slice(0, 10) === hoje).length;
@@ -957,6 +957,9 @@ function routes(readBody) {
         .sort((a, b) => String(b.conferido_em || '').localeCompare(String(a.conferido_em || '')));
       const reenvios = readJson(CONFERIDOS_FILE.replace('conferidos.json', 'reenvios.json'), {});
       const reenvioDireto = String(process.env.CHECKOUT_REENVIO_DIRETO_EMPRESAS || '').toLowerCase().split(',').map(s => s.trim()).includes('girassol');
+      let _mudouNF=false;
+      for (const [cid2,c3] of Object.entries(conf)) { if (c3 && c3.nf_emissao === undefined) { const sn2 = readJson(path.join(CACHE_DIR, String(cid2), 'pedido.json'), null); c3.nf_emissao = (sn2 && sn2.nf && sn2.nf.dataEmissao) || null; _mudouNF=true; } }
+      if (_mudouNF) { try { writeJson(CONFERIDOS_FILE, conf); } catch(e){} }
       const vendasB = Object.values(readJson(path.join(CACHE_DIR, '_vendas_dia.json'), {}));
       json(res, 200, { ok: true, total: Object.keys(conf).length, itens, reenvios, reenvio_direto: reenvioDireto, vendas_bling: vendasB });
       return true;
@@ -2163,6 +2166,7 @@ async function vendasSync() {
     try {
       const confS = readJson(CONFERIDOS_FILE, {});
       const bipN = new Set(Object.values(confS).map(c => String(c && c.numero)));
+      let _tkV=null; try{ const {garantirTokenML:_g2}=require('../girassol/mlTokenManager'); _tkV=await _g2(); }catch(e){}   // hora real do ML nas não-bipadas
       const alvosDet = Object.values(atual).filter(v => v && !v.det && v.numero != null && !bipN.has(String(v.numero)) && !/cancel/i.test(String(v.situacao || ''))).slice(0, 60);
       for (const v of alvosDet) {
         const rd = await blingGet('/pedidos/vendas/' + v.id);
@@ -2173,6 +2177,15 @@ async function vendasSync() {
           const cf = det.taxas && Number(det.taxas.custoFrete); if (isFinite(cf) && cf > 0) v.frete_mkt = Math.round(cf * 100) / 100;
           if (det.situacao && (det.situacao.valor || det.situacao.nome)) v.situacao = det.situacao.valor || det.situacao.nome;
           v.det = 1;
+          if (_tkV && v.marketplace === 'ml' && v.numero_loja && !v.venda_em) {
+            try {
+              const nlm = String(v.numero_loja).replace(/\D/g, '');
+              let rml = await fetch('https://api.mercadolibre.com/orders/' + nlm, { headers: { Authorization: 'Bearer ' + _tkV } });
+              let dml = await rml.json().catch(() => null);
+              if (!rml.ok) { rml = await fetch('https://api.mercadolibre.com/packs/' + nlm, { headers: { Authorization: 'Bearer ' + _tkV } }); const dp3 = await rml.json().catch(() => null); const o1 = dp3 && dp3.orders && dp3.orders[0]; if (rml.ok && o1) { rml = await fetch('https://api.mercadolibre.com/orders/' + (o1.id || o1), { headers: { Authorization: 'Bearer ' + _tkV } }); dml = await rml.json().catch(() => null); } }
+              if (rml.ok && dml && dml.date_created) v.venda_em = dml.date_created;
+            } catch (e) {}
+          }
         }
         await new Promise(r3 => setTimeout(r3, 450));
       }

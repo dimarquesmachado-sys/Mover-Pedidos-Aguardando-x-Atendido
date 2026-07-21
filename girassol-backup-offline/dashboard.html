@@ -100,7 +100,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd38';
+const DASH_BUILD = 'd40';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -111,6 +111,8 @@ let CFG = { aliquotas:{}, taxas:{} };   // alíquota Simples por mês (YYYY-MM: 
 const DEFAULT_ALIQ = { '2026-01':11.409280, '2026-02':11.3254, '2026-03':12.3402, '2026-04':13.6001, '2026-05':13.9149, '2026-06':14.056, '2026-07':14.1 };
 const aliqDe = mes => (CFG.aliquotas[mes] != null ? CFG.aliquotas[mes] : (DEFAULT_ALIQ[mes] != null ? DEFAULT_ALIQ[mes] : null));
 const DEFAULT_FLEX = { ml: 12, shopee: 9, outros: 9 };   // motoboy do FLEX pago pela loja — ML R$ 12 · Shopee e demais R$ 9 (editável no ⚙️)
+const NOME_CANAL={ml:'MercadoLivre',tiktok:'TikTok',magalu:'MagaLu',shopee:'Shopee',amazon:'Amazon',madeira:'MadeiraMadeira',outro:'Outro'};
+const nomeCanal=k=>NOME_CANAL[k]||String(k||'').charAt(0).toUpperCase()+String(k||'').slice(1);
 const flexDe = ck => {
   const fx = (CFG.flex || {});
   const k = (ck === 'ml' || ck === 'shopee') ? ck : 'outros';
@@ -143,7 +145,7 @@ const tMs = h => {
   // hora da bipagem — dois eixos no mesmo sort = ordem embaralhada. Agora: hora REAL quando o canal fornece
   // (ML); senao, DIA da venda + relógio da conferência (um só eixo, coerente dentro do dia).
   if (h.venda_em) { const n1 = Date.parse(h.venda_em); if (isFinite(n1)) return n1; }
-  const nc = Date.parse(h.conferido_em || '');
+  const nc = Date.parse((h.nf_emissao ? String(h.nf_emissao).replace(' ','T') : '') || h.conferido_em || '');
   if (h.venda_dia) {
     const hora = isFinite(nc) ? new Date(nc).toLocaleString('sv-SE', { timeZone: 'America/Sao_Paulo' }).slice(11, 19) : '12:00:00';
     const n2 = Date.parse(String(h.venda_dia).slice(0, 10) + 'T' + hora + '-03:00');
@@ -162,7 +164,7 @@ function prepararVendas(){
   const _nums = new Set((DADOS||[]).map(h=>String(h.numero)));
   SINT = (VENDAS||[]).filter(v=>v&&v.numero!=null&&!_nums.has(String(v.numero))).map(v=>({
     sintetico:true, id:'s'+v.id, numero:v.numero, numero_loja:v.numero_loja||'', marketplace:v.marketplace||'outro',
-    venda_dia:v.data||null, valor:(v.total!=null?Number(v.total):null), cliente:v.cliente||'',
+    venda_em:v.venda_em||null, venda_dia:v.data||null, valor:(v.total!=null?Number(v.total):null), cliente:v.cliente||'',
     itens:(v.it||[]).map(i2=>({sku:i2.sku,qtd:i2.qtd,valor_total:i2.vt})), taxa_mkt:(v.taxa_mkt!=null?v.taxa_mkt:null), frete_mkt:(v.frete_mkt!=null?v.frete_mkt:null),
     _sit:v.situacao||null, _cancelado:/cancel/i.test(String(v.situacao||''))
   }));
@@ -720,7 +722,7 @@ function renderAnalise(){
   const iv=anIntervalo();
   let L = DADOS.filter(h=>{ if(!h.conferido_em) return false; const d=diaVenda(h); return d>=iv.de && d<=iv.ate; });
   const cnt={}; L.forEach(h=>{ const k=canalKey(h.marketplace); cnt[k]=(cnt[k]||0)+1; });
-  const opts='<option value="">Todos os canais ('+L.length+')</option>'+Object.keys(cnt).sort().map(k=>'<option value="'+k+'"'+(anCanal===k?' selected':'')+'>'+k+' ('+cnt[k]+')</option>').join('');
+  const opts='<option value="">Todos os canais ('+L.length+')</option>'+Object.keys(cnt).sort().map(k=>'<option value="'+k+'"'+(anCanal===k?' selected':'')+'>'+nomeCanal(k)+' ('+cnt[k]+')</option>').join('');
   if(sel.innerHTML!==opts) sel.innerHTML=opts;
   if(anCanal) L=L.filter(h=>canalKey(h.marketplace)===anCanal);
   const q = String(anSku||'').trim().toLowerCase();
@@ -795,7 +797,7 @@ function renderAnalise(){
         '<td class="dim">'+dtx+'</td>'+
         '<td><b>'+esc(h.numero)+'</b><br><span class="dim" style="font-size:10px">'+esc(h._sit||'')+'</span></td>'+
         '<td class="dim" style="font-size:11px;max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(h.numero_loja?esc(h.numero_loja)+(linkMkt(h)?' <a href="'+linkMkt(h)+'" target="_blank" rel="noopener" style="text-decoration:none">↗</a>':''):'—')+'</td>'+
-        '<td>'+esc(P.ck)+'</td>'+
+        '<td>'+esc(nomeCanal(P.ck))+'</td>'+
         '<td><div class="desc" style="max-width:200px">'+esc(h.cliente||'')+'</div></td>'+
         '<td class="num dim">—</td>'+
         '<td class="num'+(h._cancelado?' dim':'')+'" title="total do pedido no Bling (NF ainda não emitida)">'+(h.valor!=null?BRL(h.valor):'—')+'</td>'+
@@ -804,7 +806,7 @@ function renderAnalise(){
       '</tr>';
     }
     return sep + '<tr'+(h._cancelado?' style="opacity:.38" title="pedido CANCELADO no Bling — fora dos totais"':'')+'>'+
-      '<td class="dim" style="white-space:nowrap" title="'+(h.venda_em?('venda: '+dtBR(h.venda_em)+' · '):(h.venda_dia?('venda: '+String(h.venda_dia).slice(8,10)+'/'+String(h.venda_dia).slice(5,7)+' · '):''))+'conferido: '+dtBR(h.conferido_em)+'">'+(h.venda_em?dtBR(h.venda_em):(h.venda_dia?(String(h.venda_dia).slice(8,10)+'/'+String(h.venda_dia).slice(5,7)+' <span style="font-size:9px" title="dia da venda (Bling) — hora só com a API do canal">🕘</span>'):(dtBR(h.conferido_em)+' <span style="font-size:9px" title="hora da conferência">🕘</span>')))+'</td>'+
+      '<td class="dim" style="white-space:nowrap" title="'+(h.venda_em?('venda: '+dtBR(h.venda_em)+' · '):(h.venda_dia?('venda: '+String(h.venda_dia).slice(8,10)+'/'+String(h.venda_dia).slice(5,7)+' · '):''))+'conferido: '+dtBR(h.conferido_em)+'">'+(h.venda_em?dtBR(h.venda_em):(h.venda_dia?(String(h.venda_dia).slice(8,10)+'/'+String(h.venda_dia).slice(5,7)+(h.nf_emissao?(' '+String(h.nf_emissao).replace(' ','T').slice(11,16)+' <span style="font-size:9px" title="hora da EMISSÃO da NF no Bling — a hora exata da venda só a API do canal dá">🧾</span>'):' <span style="font-size:9px" title="dia da venda (Bling) — hora só com a API do canal">🕘</span>')):(dtBR(h.conferido_em)+' <span style="font-size:9px" title="hora da conferência">🕘</span>')))+'</td>'+
       '<td>'+(h._cancelado?'<span title="CANCELADO no Bling — fora dos totais">⚪</span> ':(h.sintetico?'<span title="venda no Bling, ainda NÃO bipada — margem já calculada; NF entra na bipagem">🟠</span> ':'<span title="bipado no checkout">🟢</span> '))+'<b>'+esc(h.numero||h.id)+'</b>'+(carrinho?' <span class="badge" title="'+unid+' unidades">🛒 '+unid+'</span>':'')+
         (h.nf_numero?'<div class="desc">NF '+esc(h.nf_numero)+'</div>':'')+'</td>'+
       (function(){
@@ -816,7 +818,7 @@ function renderAnalise(){
           (par?'<br>'+um(par,true):'')
         ):'—')+'</td>';
       })()+
-      '<td>'+esc(P.ck)+'</td>'+
+      '<td>'+esc(nomeCanal(P.ck))+'</td>'+
       '<td><div class="desc" style="max-width:200px">'+(((h.itens||[]).length?(h.itens||[]).map(function(ix){var q2=Number(ix.qtd||1);return (q2>1?q2+'× ':'')+esc(ix.sku||'');}).join('<br>'):esc(it0.sku||'')))+'</div></td>'+
       '<td class="num">'+N(unid)+'</td>'+
       cel(P.tot)+cel(P.rp,'ok')+
