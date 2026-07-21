@@ -60,10 +60,10 @@
      padding:8px 10px;border-bottom:1px solid var(--line2);white-space:nowrap;user-select:none}
   th.sort{cursor:pointer} th.sort:hover{color:var(--tx)}
   /* cabecalho congelado: o wrapper .tw rola por dentro e o <th> gruda no topo dele */
-  .tw{overflow:auto;max-height:76vh;border-radius:10px}
-  .tw th{position:sticky;top:0;z-index:3;background:#141b33;box-shadow:0 1px 0 var(--line2)}
+  .tw{border-radius:10px}
+  .tw th{position:sticky;top:var(--hdrH,104px);z-index:3;background:#141b33;box-shadow:0 1px 0 var(--line2)}
   .tw thead th{top:0}
-  @media(max-width:720px){ .tw{max-height:70vh} }
+
   td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:middle}
   tbody tr{transition:background .12s}
   tbody tr:hover{background:#ffffff08}
@@ -100,7 +100,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd31';
+const DASH_BUILD = 'd32';
 let DADOS = [];
 let periodo = 'dia', pDe = '', pAte = '';   // abre no DIA (pedido do Diego)
 let SKUINFO = {}, skuInfoCarregado = false, _skuLoading = false;
@@ -391,6 +391,7 @@ function render(){
   renderCfg();
   renderGrafico();
   renderAnalise();
+  ajustaSticky();
 }
 
 function desenharCharts(labels, sPed, sFat){
@@ -577,6 +578,11 @@ const linkMkt = h => {
   if (ck === 'ml') return 'https://www.mercadolivre.com.br/vendas/' + nl + '/detalhe';
   return '';   // demais canais: falta a URL de cada seller center — basta o Diego colar um exemplo
 };
+function ajustaSticky(){
+  const hd = document.querySelector('.hdr');
+  if (hd) document.documentElement.style.setProperty('--hdrH', Math.max(0, hd.offsetHeight - 2) + 'px');
+}
+window.addEventListener('resize', ajustaSticky);
 function copiaNL(el){ const v = el.getAttribute('data-nl') || ''; try { navigator.clipboard && navigator.clipboard.writeText(v); } catch (e) {} el.style.color = '#34d399'; setTimeout(() => { el.style.color = ''; }, 700); }
 function renderGrafico(){
   const el=$('grafProg'); if(!el) return;
