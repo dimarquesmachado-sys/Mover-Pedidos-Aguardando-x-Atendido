@@ -380,7 +380,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b118';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b119';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#b3b9c4'}, magalu:{n:'Magalu',c:'#0086ff'}, shein:{n:'Shein',c:'#e0e0e0'},
@@ -820,7 +820,7 @@ function renderLista(){
         '<span class="chk'+((p.tem_nf||p.nf_numero)?'':' off')+'" title="Nota Fiscal">🧾<i>'+((p.tem_nf||p.nf_numero)?'✓':'✗')+'</i></span>'+
         '<span class="badge" style="background:'+m.c+'">'+m.n+'</span>'+
         '<span class="num">'+esc(p.numero)+'</span>'+
-        ((souAdmin() && p.numero_loja && /shopee/i.test(String(p.marketplace||'')))?'<a href="https://seller.shopee.com.br/portal/sale/order?searchKeyword='+encodeURIComponent(String(p.numero_loja).trim())+'" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="buscar esta venda no seller center da Shopee (admin)" style="text-decoration:none;font-size:13px;color:#38bdf8">↗</a>':'')+((souAdmin() && p.numero_loja && /ml|merc/i.test(String(p.marketplace||'')))?'<a href="https://www.mercadolivre.com.br/vendas/'+String(p.numero_loja).replace(/\D/g,'')+'/detalhe" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="abrir a venda no Mercado Livre (só admin vê)" style="text-decoration:none;font-size:13px;color:#38bdf8">↗</a>':'')+
+        ((souAdmin() && p.numero_loja && /tiktok/i.test(String(p.marketplace||'')))?'<a href="https://seller-br.tiktok.com/order/detail?order_no='+String(p.numero_loja).replace(/\D/g,'')+'&shop_region=BR" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="abrir a venda no seller center do TikTok (admin)" style="text-decoration:none;font-size:13px;color:#38bdf8">↗</a>':'')+((souAdmin() && p.numero_loja && /shopee/i.test(String(p.marketplace||'')))?'<a href="https://seller.shopee.com.br/portal/sale/order?searchKeyword='+encodeURIComponent(String(p.numero_loja).trim())+'" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="buscar esta venda no seller center da Shopee (admin)" style="text-decoration:none;font-size:13px;color:#38bdf8">↗</a>':'')+((souAdmin() && p.numero_loja && /ml|merc/i.test(String(p.marketplace||'')))?'<a href="https://www.mercadolivre.com.br/vendas/'+String(p.numero_loja).replace(/\D/g,'')+'/detalhe" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="abrir a venda no Mercado Livre (só admin vê)" style="text-decoration:none;font-size:13px;color:#38bdf8">↗</a>':'')+
         (p.volumes>1?'<span class="voltag">📦 '+p.volumes+' vol</span>':'')+
         (resvOutro?'<span class="resvtag">🟠 '+esc(resvOutro)+'</span>':'')+
         (p.conferido?'<span class="donetag">✓</span>':'')+
