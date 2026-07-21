@@ -95,7 +95,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd28';
+const DASH_BUILD = 'd29';
 let DADOS = [];
 let periodo = 'dia', pDe = '', pAte = '';   // abre no DIA (pedido do Diego)
 let SKUINFO = {}, skuInfoCarregado = false, _skuLoading = false;
@@ -203,7 +203,7 @@ function montar(){
       '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px"><span id="anPerChips" style="display:flex;gap:6px;flex-wrap:wrap"></span><span id="anPerDatas"></span></div>'+
       '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">'+
       '<select id="anCanalSel" onchange="anCanal=this.value;anPage=0;renderAnalise()" style="background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:9px;padding:7px 10px;font-size:12.5px"></select>'+
-      '<input id="anSkuInp" placeholder="🔎 filtrar por SKU…" oninput="anSku=this.value;anPage=0;renderAnalise()" style="background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:9px;padding:7px 10px;font-size:12.5px;width:170px">'+
+      '<input id="anSkuInp" placeholder="🔎 pedido, NF, venda ou SKU…" oninput="anSku=this.value;anPage=0;renderAnalise()" style="background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:9px;padding:7px 10px;font-size:12.5px;width:210px">'+
       '<span id="anLPChips" style="display:flex;gap:6px"></span>'+
       '<button class="chip" onclick="baixarCSV()" title="baixa TODAS as vendas do filtro atual — abre no Excel, ideal p/ confrontar com o Jodda linha a linha">⬇︎ CSV</button>'+
       '<span id="anInfo" class="mut" style="font-size:12px"></span>'+
@@ -629,6 +629,12 @@ function baixarCSV(){
   a.download = 'analise-vendas-'+hojeSP()+'.csv';
   document.body.appendChild(a); a.click(); a.remove();
 }
+const anBuscaOk = q => h => {
+  // casa com: nº do pedido, nº da NF, nº da venda no marketplace, id do Bling ou SKU (pedaço serve)
+  const alvos = [h.numero, h.nf_numero, h.numero_loja, h.id];
+  for (const a of alvos) { if (a != null && String(a).toLowerCase().includes(q)) return true; }
+  return (h.itens || []).some(it => String(it.sku || '').toLowerCase().includes(q));
+};
 function setAnPer(p){ anPer=p; anPage=0; renderAnalise(); }
 function anIntervalo(){
   const hoje = hojeSP();
@@ -658,7 +664,7 @@ function renderAnalise(){
   if(sel.innerHTML!==opts) sel.innerHTML=opts;
   if(anCanal) L=L.filter(h=>canalKey(h.marketplace)===anCanal);
   const q = String(anSku||'').trim().toLowerCase();
-  if(q) L=L.filter(h=>(h.itens||[]).some(it=>String(it.sku||'').toLowerCase().includes(q)));
+  if(q) L=L.filter(anBuscaOk(q));
   let LP = L.map(h=>({h:h, P:calcPL(h)}));
   const nLucro = LP.filter(x=>x.P.mc!=null&&x.P.mc>0).length, nPrej = LP.filter(x=>x.P.mc!=null&&x.P.mc<0).length;
   const lpEl=$('anLPChips');
