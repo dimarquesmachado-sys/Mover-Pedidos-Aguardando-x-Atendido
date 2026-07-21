@@ -666,6 +666,62 @@ function routes(readBody) {
       return true;
     }
 
+    // ADMIN (?k=): RAIO-X DO DINHEIRO NO ML — order + shipment + /costs crus, p/ mapear estorno/tarifas.
+    // Uso: /girassol-backup-offline/debug-ml?id=116454&k=SUA_CHAVE   (nº do pedido, da venda ou id Bling)
+    if (method === 'GET' && p === '/girassol-backup-offline/debug-ml') {
+      const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const sessM = validarSessao(req.headers['cookie']);
+      if (!((process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || (sessM && ehAdmin(sessM)))) { json(res, 404, { error: 'not found' }); return true; }
+      const q0 = String(urlObj.searchParams.get('id') || '').replace(/\D/g, '');
+      if (!q0) { json(res, 200, { ok: false, erro: 'passe ?id=NUMERO' }); return true; }
+      const confM = readJson(CONFERIDOS_FILE, {});
+      let alvo = null, cidM = null;
+      for (const [cid, c] of Object.entries(confM)) {
+        if (!c) continue;
+        if (String(c.numero) === q0 || (c.numero_loja && String(c.numero_loja) === q0) || cid === q0) { alvo = c; cidM = cid; break; }
+      }
+      if (!alvo) { json(res, 200, { ok: false, erro: 'pedido nao encontrado no conferido' }); return true; }
+      const tk = await garantirTokenML().catch(() => null);
+      if (!tk) { json(res, 200, { ok: false, erro: 'sem token ML' }); return true; }
+      const H2 = { headers: { Authorization: 'Bearer ' + tk } };
+      const nl2 = String(alvo.numero_loja || '').replace(/\D/g, '');
+      const out2 = { ok: true, pedido: alvo.numero, numero_loja: nl2, conferido: { tarifa_ml: alvo.tarifa_ml, frete_ml: alvo.frete_ml, credito_ml: alvo.credito_ml, venda_em: alvo.venda_em, flex: !!alvo.flex } };
+      try {
+        let ords2 = null;
+        const r1 = await fetch('https://api.mercadolibre.com/orders/' + nl2, H2);
+        const d1 = await r1.json().catch(() => null);
+        if (r1.ok && d1) ords2 = [d1];
+        else {
+          const rp2 = await fetch('https://api.mercadolibre.com/packs/' + nl2, H2);
+          const dp2 = await rp2.json().catch(() => null);
+          out2.pack = rp2.ok ? { orders: (dp2 && dp2.orders) || null } : { erro: rp2.status };
+          if (rp2.ok && dp2 && Array.isArray(dp2.orders)) {
+            ords2 = [];
+            for (const oq of dp2.orders) { const ro = await fetch('https://api.mercadolibre.com/orders/' + (oq.id || oq), H2); const doo = await ro.json().catch(() => null); if (ro.ok && doo) ords2.push(doo); }
+          }
+        }
+        if (!ords2 || !ords2.length) { out2.erro_order = 'nem order nem pack'; json(res, 200, out2); return true; }
+        out2.orders = ords2.map(od => ({
+          id: od.id, date_created: od.date_created, total_amount: od.total_amount, paid_amount: od.paid_amount,
+          itens: (od.order_items || []).map(it => ({ sku: (it.item && (it.item.seller_sku || it.item.id)) || null, qtd: it.quantity, preco: it.unit_price, sale_fee: it.sale_fee, listing_type: it.listing_type_id })),
+          taxes: od.taxes || null,
+          payments: (od.payments || []).map(pg => ({ status: pg.status, transaction_amount: pg.transaction_amount, shipping_cost: pg.shipping_cost, overpaid_amount: pg.overpaid_amount, marketplace_fee: pg.marketplace_fee, total_paid_amount: pg.total_paid_amount })),
+          shipping_id: (od.shipping && od.shipping.id) || null
+        }));
+        const shId = out2.orders.map(o3 => o3.shipping_id).filter(Boolean)[0];
+        if (shId) {
+          const rs2 = await fetch('https://api.mercadolibre.com/shipments/' + shId, H2);
+          const ds2 = await rs2.json().catch(() => null);
+          if (rs2.ok && ds2) out2.shipment = { id: ds2.id, logistic_type: (ds2.logistic && ds2.logistic.type) || ds2.logistic_type || null, mode: ds2.mode, status: ds2.status, cost: ds2.cost, base_cost: ds2.base_cost, list_cost: ds2.list_cost, shipping_option: ds2.shipping_option || null };
+          const rc2 = await fetch('https://api.mercadolibre.com/shipments/' + shId + '/costs', H2);
+          const dc2 = await rc2.json().catch(() => null);
+          out2.shipment_costs = rc2.ok ? dc2 : { erro: rc2.status, msg: (dc2 && (dc2.message || dc2.error)) || null };
+        }
+      } catch (e) { out2.erro = String(e.message || e).slice(0, 200); }
+      json(res, 200, out2);
+      return true;
+    }
+
     if ((method === 'POST' || method === 'GET') && p === '/girassol-backup-offline/run') {
       const forcar = /[?&]force=1\b/.test(urlObj.search || '');
       rodarCiclo(forcar ? 'manual-force' : 'manual', forcar);
@@ -2126,7 +2182,7 @@ async function mlSyncFees(dias) {
     const mk = String(c.marketplace || '').toLowerCase();
     if (mk !== 'ml' && mk !== 'mercadolivre') return false;
     if (!c.numero_loja) return false;
-    return c.tarifa_ml == null || c.venda_em == null || t >= recheck;
+    return c.tarifa_ml == null || c.venda_em == null || t >= recheck;   // credito_ml vem junto na mesma passada
   }).map(([cid]) => cid);
   if (!alvos.length) { console.log('[ML-FEES] nada a pescar (' + dias + 'd)'); return { ok: true, nada: true }; }
   _mls = { rodando: true, feitos: 0, total: alvos.length, ok: 0, falhas: 0, iniciado_em: new Date().toISOString(), erros: {}, amostras: [] };
@@ -2139,7 +2195,7 @@ async function mlSyncFees(dias) {
   const salvar = () => {
     if (!Object.keys(pend).length) return;
     const c2 = readJson(CONFERIDOS_FILE, {});
-    for (const [cid, d] of Object.entries(pend)) { if (!c2[cid]) continue; if (d.fee != null) c2[cid].tarifa_ml = d.fee; if (d.frete != null) c2[cid].frete_ml = d.frete; if (d.venda) c2[cid].venda_em = d.venda; }
+    for (const [cid, d] of Object.entries(pend)) { if (!c2[cid]) continue; if (d.fee != null) c2[cid].tarifa_ml = d.fee; if (d.frete != null) c2[cid].frete_ml = d.frete; if (d.venda) c2[cid].venda_em = d.venda; if (d.credito != null) c2[cid].credito_ml = d.credito; }
     writeJson(CONFERIDOS_FILE, c2);
     for (const cid of Object.keys(pend)) delete pend[cid];
   };
@@ -2185,6 +2241,24 @@ async function mlSyncFees(dias) {
             if (rs.ok && ds) {
               const lc = Number(ds.list_cost), cc = Number(ds.cost);
               if (isFinite(lc) && isFinite(cc) && lc >= cc) reg.frete = Math.round((lc - cc) * 100) / 100;
+            }
+          } catch (e) {}
+          await dorme(200);
+          // ESTORNO / COMPENSACAO (Flex): /shipments/{id}/costs traz senders[] com "compensation" (campo antigo)
+          // e "compensations[]" com {amount, reason} (formato novo). O que o ML credita de volta pro vendedor.
+          try {
+            const rc = await fetch('https://api.mercadolibre.com/shipments/' + shipId + '/costs', H);
+            const dc = await rc.json().catch(() => null);
+            if (rc.ok && dc && Array.isArray(dc.senders)) {
+              let cred = 0;
+              for (const sd of dc.senders) {
+                const c1 = Number(sd && sd.compensation);
+                if (isFinite(c1) && c1 > 0) cred += c1;
+                if (sd && Array.isArray(sd.compensations)) {
+                  for (const cx of sd.compensations) { const c2 = Number(cx && cx.amount); if (isFinite(c2) && c2 > 0) cred += c2; }
+                }
+              }
+              if (cred > 0) reg.credito = Math.round(cred * 100) / 100;
             }
           } catch (e) {}
           await dorme(200);

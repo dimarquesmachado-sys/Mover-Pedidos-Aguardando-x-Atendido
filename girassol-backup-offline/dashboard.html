@@ -95,7 +95,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd26';
+const DASH_BUILD = 'd27';
 let DADOS = [];
 let periodo = 'dia', pDe = '', pAte = '';   // abre no DIA (pedido do Diego)
 let SKUINFO = {}, skuInfoCarregado = false, _skuLoading = false;
@@ -211,7 +211,7 @@ function montar(){
       '<button class="chip" onclick="if(anPage>0){anPage--;renderAnalise();}">← Anterior</button>'+
       '<button class="chip" onclick="anPage++;renderAnalise()">Próxima →</button></div>'+
       '<div style="overflow-x:auto"><table id="tAnalise"></table></div>'+
-      '<div class="nota"><b>Sobre a ordem:</b> dentro de cada dia, ML aparece na hora REAL da venda; TikTok/Shopee/Magalu/Amazon aparecem na hora em que foram <b>bipados</b> (🕘) — por isso saem em blocos: o estoque bipa um canal de cada vez. A hora real da venda desses canais <b>só existe na API do próprio canal</b>. Pra confrontar com o Jodda, use o ⬇︎ CSV e case pelo <b>número da venda no marketplace</b>. · ML mostra a hora REAL da venda (vem da pesca); TikTok/Shopee o Bling não guarda hora — o 🕘 marca que ali está a hora da <b>conferência</b> (a hora da venda desses canais chega quando plugarmos as APIs deles) · colunas (−) são deduções · tarifa <span class="ok">REAL</span> = pescada do ML · <span class="ok">BLING</span> = comissão que o Bling importou do canal (TikTok/Shopee/Magalu) · sem tag = % configurada · custo carrega sob demanda por página · 🛒 = mais de 1 item/unidade</div></div>'+
+      '<div class="nota"><b>Sobre a ordem:</b> dentro de cada dia, ML aparece na hora REAL da venda; TikTok/Shopee/Magalu/Amazon aparecem na hora em que foram <b>bipados</b> (🕘) — por isso saem em blocos: o estoque bipa um canal de cada vez. A hora real da venda desses canais <b>só existe na API do próprio canal</b>. Pra confrontar com o Jodda, use o ⬇︎ CSV e case pelo <b>número da venda no marketplace</b>. · ML mostra a hora REAL da venda (vem da pesca); TikTok/Shopee o Bling não guarda hora — o 🕘 marca que ali está a hora da <b>conferência</b> (a hora da venda desses canais chega quando plugarmos as APIs deles) · colunas (−) são deduções e (+) é crédito · <b>Estorno</b> = compensação de envio que o ML devolve pra loja (típica do Flex), somada na M.C. · tarifa <span class="ok">REAL</span> = pescada do ML · <span class="ok">BLING</span> = comissão que o Bling importou do canal (TikTok/Shopee/Magalu) · sem tag = % configurada · custo carrega sob demanda por página · 🛒 = mais de 1 item/unidade</div></div>'+
     '<div class="grid2">'+
       '<div class="sec"><h2>📈 Pedidos por dia</h2><div class="chartbox"><canvas id="cPed"></canvas></div></div>'+
       '<div class="sec"><h2>💰 Faturamento por dia</h2><div class="chartbox"><canvas id="cFat"></canvas></div></div>'+
@@ -469,8 +469,10 @@ function calcPL(h){
   else if (h.frete_mkt!=null && isFinite(Number(h.frete_mkt)) && Number(h.frete_mkt)>0) { frV = Number(h.frete_mkt); frFonte = 'bling'; }
   else if (h.flex) { const fx = flexDe(ck); if (fx!=null && fx>0) { frV = fx; frFonte = 'flex'; } }
   const completo = [rp,imposto,tarifa].every(v=>v!=null) && custoOk;
-  const mc = completo? rp-imposto-tarifa-custo-(frV||0) : null;
-  return {mes,ck,rp,tot,frete,aliq,imposto,feeReal,feeBling,tx,tarifa,custo,cusUn,unTot,custoOk,frV,frFonte,completo,mc};
+  // ESTORNO do ML (compensação de envio, típica do Flex): crédito que o ML devolve pra loja — SOMA na M.C.
+  const credito = (h.credito_ml!=null && isFinite(Number(h.credito_ml)) && Number(h.credito_ml)>0) ? Number(h.credito_ml) : null;
+  const mc = completo? rp-imposto-tarifa-custo-(frV||0)+(credito||0) : null;
+  return {mes,ck,rp,tot,frete,aliq,imposto,feeReal,feeBling,tx,tarifa,custo,cusUn,unTot,custoOk,frV,frFonte,credito,completo,mc};
 }
 function buscarPed(q){
   q = String(q||'').trim().toLowerCase();
@@ -498,7 +500,7 @@ async function abrirPL(id){
 }
 function renderPL(h){
   const card=$('plCard');
-  const {mes,ck,rp,tot,frete,aliq,imposto,feeReal,feeBling,tx,tarifa,custo,cusUn,unTot,frV,frFonte,completo,mc} = calcPL(h);
+  const {mes,ck,rp,tot,frete,aliq,imposto,feeReal,feeBling,tx,tarifa,custo,cusUn,unTot,frV,frFonte,credito,completo,mc} = calcPL(h);
   const linha=(l,v,extra)=>'<tr><td>'+l+'</td><td class="num">'+(v!=null?BRL(v):'<span class="dim">—</span>')+(extra||'')+'</td></tr>';
   card.innerHTML =
     '<div class="sec" style="margin-top:12px;background:linear-gradient(160deg,#14201a,#131a30);border-color:#14b8a655">'+
@@ -512,6 +514,7 @@ function renderPL(h){
       (ck==='ml'&&h.numero_loja&&feeReal==null?' <button class="btn" style="padding:3px 10px;font-size:10.5px" onclick="pegarFeeML(\''+h.id+'\',\''+esc(h.numero_loja)+'\')">buscar real</button>':''))+
     linha('📦 Custo ('+cusUn+'/'+unTot+' un. c/ custo)', (cusUn?-custo:null))+
     (frV!=null ? linha('🚛 Frete vendedor <span class="ok">('+(frFonte==='ml'?'real ML':(frFonte==='bling'?'Bling':'FLEX ⚙️'))+')</span>', -frV) : (ck==='ml' ? linha('🚛 Frete vendedor <span class="ok">(real ML)</span>', null) : ''))+
+    (credito!=null ? linha('💵 Estorno do ML <span class="ok">(compensação de envio)</span>', credito) : '')+
     '<tr><td style="border-top:2px solid var(--line2);font-weight:800">💎 Margem de contribuição</td>'+
     '<td class="num" style="border-top:2px solid var(--line2);font-weight:800">'+
       (mc!=null?('<span class="'+(mc>=0?'ok':'bad')+'">'+BRL(mc)+'</span><span class="dim" style="font-size:11px"> · '+(rp?Math.round(mc/rp*100):0)+'%</span>'):'<span class="warn">incompleto — resolva os "—" acima</span>')+'</td></tr>'+
@@ -602,7 +605,7 @@ function baixarCSV(){
   if(!_anLP || !_anLP.length){ alert('sem vendas no filtro atual'); return; }
   const br = v => (v==null||!isFinite(v)) ? '' : String(Number(v).toFixed(2)).replace('.',',');   // decimal BR p/ o Excel
   const q = t => '"'+String(t==null?'':t).replace(/"/g,'""')+'"';
-  const cab = ['Dia da venda','Hora','Fonte da hora','Pedido','NF','Venda no marketplace','Canal','SKUs','Unidades','Venda','Produtos NF','Custo','Imposto','Tarifa','Fonte da tarifa','Frete vendedor','Fonte do frete','Margem de contribuicao','MC %'];
+  const cab = ['Dia da venda','Hora','Fonte da hora','Pedido','NF','Venda no marketplace','Canal','SKUs','Unidades','Venda','Produtos NF','Custo','Imposto','Tarifa','Fonte da tarifa','Frete vendedor','Fonte do frete','Estorno ML (credito)','Margem de contribuicao','MC %'];
   const linhas = _anLP.map(x=>{
     const h=x.h, P=x.P;
     const unid=(h.itens||[]).reduce((a,i)=>a+Number(i.qtd||1),0);
@@ -616,6 +619,7 @@ function baixarCSV(){
       br(P.tot), br(P.rp), br(P.custoOk?P.custo:null), br(P.imposto), br(P.tarifa),
       q(P.feeReal!=null?'REAL (ML)':(P.feeBling!=null?'Bling':(P.tx!=null?'% configurada':''))),
       br(P.frV), q(P.frFonte==='ml'?'real ML':(P.frFonte==='bling'?'Bling':(P.frFonte==='flex'?'FLEX (config)':''))),
+      br(P.credito),
       br(P.mc), (P.mc!=null&&P.rp)?Math.round(P.mc/P.rp*100):''
     ].join(';');
   });
@@ -684,7 +688,7 @@ function renderAnalise(){
       }
     })().finally(()=>{ _anLoading=false; renderAnalise(); });
   }
-  const T={tot:0,rp:0,imp:0,tar:0,cus:0,frv:0,mc:0,mcN:0};
+  const T={tot:0,rp:0,imp:0,tar:0,cus:0,frv:0,cre:0,mc:0,mcN:0};
   const cel=(v,cls)=>'<td class="num'+(cls?' '+cls:'')+'">'+(v!=null?BRL(v):'<span class="dim">—</span>')+'</td>';
   const totDia = {};   // totais por dia (da lista filtrada inteira, nao so da pagina)
   LP.forEach(x=>{ const d2=diaVenda(x.h); const t=totDia[d2]||(totDia[d2]={n:0,rp:0,mc:0,mcN:0});
@@ -699,12 +703,12 @@ function renderAnalise(){
       const t = totDia[_d] || {n:0,rp:0,mc:0,mcN:0};
       sep = '<tr style="background:var(--bg2)"><td colspan="6" style="font-weight:800;padding:7px 8px">\uD83D\uDCC5 '+(_d?(_d.slice(8,10)+'/'+_d.slice(5,7)+'/'+_d.slice(0,4)):'sem data')+' <span class="mut" style="font-weight:400;font-size:11px">'+t.n+' venda(s) no filtro</span></td>'+
         '<td colspan="4" class="num mut" style="font-size:11px">produtos '+BRL(t.rp)+'</td>'+
-        '<td colspan="4" class="num" style="font-size:11px;font-weight:700">\uD83D\uDC8E '+BRL(t.mc)+' <span class="mut" style="font-weight:400">('+t.mcN+'/'+t.n+')</span></td></tr>';
+        '<td colspan="5" class="num" style="font-size:11px;font-weight:700">\uD83D\uDC8E '+BRL(t.mc)+' <span class="mut" style="font-weight:400">('+t.mcN+'/'+t.n+')</span></td></tr>';
     }
     const unid=(h.itens||[]).reduce((a,i)=>a+Number(i.qtd||1),0);
     const carrinho=((h.itens||[]).length>1)||unid>1;
     if(P.tot!=null)T.tot+=P.tot; if(P.rp!=null)T.rp+=P.rp; if(P.imposto!=null)T.imp+=P.imposto;
-    if(P.tarifa!=null)T.tar+=P.tarifa; if(P.custoOk)T.cus+=P.custo; if(P.frV!=null)T.frv+=P.frV;
+    if(P.tarifa!=null)T.tar+=P.tarifa; if(P.custoOk)T.cus+=P.custo; if(P.frV!=null)T.frv+=P.frV; if(P.credito!=null)T.cre+=P.credito;
     if(P.mc!=null){ T.mc+=P.mc; T.mcN++; }
     const it0=(h.itens||[])[0]||{};
     const pmc = (P.mc!=null&&P.rp)?Math.round(P.mc/P.rp*100):null;
@@ -720,6 +724,7 @@ function renderAnalise(){
       cel(P.custoOk?P.custo:null)+cel(P.imposto)+
       '<td class="num">'+(P.tarifa!=null?BRL(P.tarifa)+(P.feeReal!=null?' <span class="st ok" style="font-size:9px">REAL</span>':(P.feeBling!=null?' <span class="st ok" style="font-size:9px">BLING</span>':''))+(P.rp?'<div class="desc">'+Math.round(P.tarifa/P.rp*100)+'%</div>':''):'<span class="dim">—</span>')+'</td>'+
       '<td class="num">'+(P.frV!=null?BRL(P.frV)+(P.frFonte==='flex'?' <span class="st warn" style="font-size:9px">FLEX</span>':''):'<span class="dim">—</span>')+'</td>'+
+      '<td class="num">'+(P.credito!=null?'<span class="ok">+'+BRL(P.credito)+'</span>':'<span class="dim">—</span>')+'</td>'+
       '<td class="num" style="font-weight:800">'+(P.mc!=null?('<span class="'+(P.mc>=0?'ok':'bad')+'">'+BRL(P.mc)+'</span>'):'<span class="warn" title="falta config/custo">—</span>')+'</td>'+
       '<td class="num '+(pmc!=null?(pmc>=0?'ok':'bad'):'dim')+'">'+(pmc!=null?pmc+'%':'—')+'</td>'+
     '</tr>';
@@ -727,10 +732,10 @@ function renderAnalise(){
   $('tAnalise').innerHTML =
     '<tr><th>Data/hora</th><th>Pedido</th><th>Venda (mkt)</th><th>Canal</th><th>Produto</th><th class="num">Un.</th>'+
     '<th class="num">Venda</th><th class="num">Prod. NF</th><th class="num">Custo (−)</th><th class="num">Imposto (−)</th>'+
-    '<th class="num">Tarifa (−)</th><th class="num">Frete vend. (−)</th><th class="num">💎 M.C.</th><th class="num">MC %</th></tr>'+
-    (linhas || '<tr><td class="dim" colspan="14">sem vendas no período</td></tr>')+
+    '<th class="num">Tarifa (−)</th><th class="num">Frete vend. (−)</th><th class="num">Estorno (+)</th><th class="num">💎 M.C.</th><th class="num">MC %</th></tr>'+
+    (linhas || '<tr><td class="dim" colspan="15">sem vendas no período</td></tr>')+
     (pag.length?('<tr style="border-top:2px solid var(--line2)"><td colspan="6" style="font-weight:800">Σ desta página</td>'+
-      cel(T.tot)+cel(T.rp,'ok')+cel(T.cus)+cel(T.imp)+cel(T.tar)+cel(T.frv)+
+      cel(T.tot)+cel(T.rp,'ok')+cel(T.cus)+cel(T.imp)+cel(T.tar)+cel(T.frv)+cel(T.cre,'ok')+
       '<td class="num" style="font-weight:800"><span class="'+(T.mc>=0?'ok':'bad')+'">'+BRL(T.mc)+'</span></td>'+
       '<td class="num dim">'+T.mcN+'/'+pag.length+' compl.</td></tr>'):'');
 }
