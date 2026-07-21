@@ -681,7 +681,8 @@ function routes(readBody) {
         if (String(c.numero) === q0 || (c.numero_loja && String(c.numero_loja) === q0) || cid === q0) { alvo = c; cidM = cid; break; }
       }
       if (!alvo) { json(res, 200, { ok: false, erro: 'pedido nao encontrado no conferido' }); return true; }
-      const tk = await garantirTokenML().catch(() => null);
+      const { garantirTokenML: _gtok } = require('../girassol/mlTokenManager');   // require local, igual aos outros blocos deste arquivo
+      const tk = await _gtok().catch(() => null);
       if (!tk) { json(res, 200, { ok: false, erro: 'sem token ML' }); return true; }
       const H2 = { headers: { Authorization: 'Bearer ' + tk } };
       const nl2 = String(alvo.numero_loja || '').replace(/\D/g, '');
