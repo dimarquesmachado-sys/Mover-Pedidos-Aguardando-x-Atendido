@@ -860,6 +860,7 @@ function routes(readBody) {
       const finalizadosHoje = Object.values(conf).filter(c => c && String(c.conferido_em || '').slice(0, 10) === hoje).length;
       json(res, 200, {
         versao: VERSAO,
+        ciclo_rodou_em: (getUltimoResumo() || {}).rodouEm || null,   // p/ o painel mostrar há quanto tempo o Bling foi consultado
         prontos: prontos.length,
         sem_etiqueta: semEtiq.length,
         sem_etiqueta_pedidos: semEtiq,
@@ -1117,7 +1118,19 @@ function routes(readBody) {
       const ops = lerOperadores();
       if (ops[nome] !== undefined && String(ops[nome]) === senha) {
         res.setHeader('Set-Cookie', SESS_COOKIE + '=' + assinarSessao(nome) + '; Path=/girassol-backup-offline; HttpOnly; SameSite=Lax; Max-Age=' + Math.floor(SESS_TTL/1000));
-        json(res, 200, { ok: true, nome });
+        // LOGIN DISPARA O BLING: se a última consulta foi há mais de 3 min, roda em background — assim
+        // ninguém abre a lista com etiqueta velha. Vários logins seguidos = 1 ciclo só (trava de intervalo).
+        let _cicloDisparado = false;
+        try {
+          const _ur = getUltimoResumo() || {};
+          const _idade = _ur.rodouEm ? (Date.now() - new Date(_ur.rodouEm).getTime()) : Infinity;
+          if (_idade > 3 * 60 * 1000) {
+            _cicloDisparado = true;
+            console.log('[CICLO-LOGIN] ' + nome + ' entrou \u2014 \u00faltima consulta ao Bling h\u00e1 ' + (isFinite(_idade) ? Math.round(_idade / 60000) + ' min' : 'nunca') + ' \u2192 ciclo em background');
+            rodarCiclo('login').catch(() => {});
+          }
+        } catch (e) {}
+        json(res, 200, { ok: true, nome, ciclo_disparado: _cicloDisparado });
       } else {
         json(res, 200, { ok: false, erro: 'nome ou senha inválidos' });
       }
@@ -2083,6 +2096,14 @@ function bootstrap() {
   // 90s depois do boot (após o ciclo inicial). Com dias=14 só re-checa os recentes — barato e idempotente.
   setTimeout(() => { try { console.log('[ML-FEES] pesca automática pós-deploy iniciando…'); mlSyncFees(14).catch(() => {}); } catch (e) {} }, 90 * 1000);
   setTimeout(() => { try { custoSync(false).catch(() => {}); } catch (e) {} }, 240 * 1000);   // custos: tartaruga pós-boot, só o que falta
+  // ETIQUETA PARADA: enquanto existir pedido sem etiqueta, tenta de novo a cada 5 min (o cron normal é 10/10).
+  // Em dia limpo (0 sem etiqueta) NADA extra roda — custo zero. Cobre etiqueta que o canal demora a gerar.
+  setInterval(() => {
+    try {
+      const r = getUltimoResumo();
+      if (r && r.semEtiqueta > 0) { console.log('[CICLO-EXTRA] ' + r.semEtiqueta + ' pedido(s) sem etiqueta \u2014 rodando ciclo extra'); rodarCiclo('auto-etiqueta').catch(() => {}); }
+    } catch (e) {}
+  }, 5 * 60 * 1000);
 
   ensureDir(CACHE_DIR);
   console.log(`[GIRABKP] ${VERSAO} ativo — ATENDIDO=${SIT_ATENDIDO}, janela=${JANELA_DIAS}d, cron="${CRON_EXPR}", formato=${ETIQ_FORMATO}`);

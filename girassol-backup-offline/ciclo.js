@@ -22,6 +22,7 @@ const { montarSeparacao, montarSeparacaoPorPedido } = require('./separacao');
 
 // ─── estado do ciclo (mutável; lido pelas rotas via getters) ───
 let rodando = false;
+let rodandoDesde = 0;   // watchdog: se um ciclo pendurar (fetch sem resposta), a flag ficava presa e TODO cron seguinte era pulado em silencio
 let ultimoResumo = { rodouEm: null, total: 0, comEtiqueta: 0, semEtiqueta: 0, novos: 0, erros: 0 };
 let ultimoSync = { em: null, pendentes: 0, ok: 0, falhas: 0 };
 let idxStatus = { rodando: false, feitos: 0, eans: 0, em: null, fim: null, erro: null };
@@ -304,8 +305,13 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC, nfCtx) {
 }
 
 async function rodarCiclo(motivo = 'cron', forcar = false) {
+  if (rodando && rodandoDesde && (Date.now() - rodandoDesde) > 15 * 60 * 1000) {
+    console.log('[CICLO] WATCHDOG: ciclo anterior pendurado h\u00e1 ' + Math.round((Date.now() - rodandoDesde) / 60000) + ' min \u2014 destravando e seguindo');
+    rodando = false;
+  }
   if (rodando) { console.log('[GIRABKP] ciclo já em andamento — pulei'); return ultimoResumo; }
   rodando = true;
+  rodandoDesde = Date.now();
   limparProdCache();                       // zera cache de produto por ciclo
   const _kc = readJson(KIT_CACHE_FILE, {});
   const kitCache = (_kc && _kc._schema === SCHEMA && _kc.kits) ? _kc.kits : {}; // invalida se schema mudou

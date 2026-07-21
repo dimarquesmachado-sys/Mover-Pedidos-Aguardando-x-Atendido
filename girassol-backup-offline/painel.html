@@ -379,7 +379,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b113';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b115';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#b3b9c4'}, magalu:{n:'Magalu',c:'#0086ff'}, shein:{n:'Shein',c:'#e0e0e0'},
@@ -452,7 +452,12 @@ async function fazerLogin(){
   $('loginErr').textContent='';
   try{
     const r = await postJson('/girassol-backup-offline/login', {nome, senha});
-    if(r && r.ok){ localStorage.setItem('gbkp_op', r.nome); localStorage.setItem('gbkp_logado','1'); aplicarLogado(); }
+    if(r && r.ok){ localStorage.setItem('gbkp_op', r.nome); localStorage.setItem('gbkp_logado','1'); aplicarLogado();
+      if(r.ciclo_disparado){
+        toast('\uD83D\uDD04 Buscando as etiquetas novas no Bling\u2026 a lista se completa sozinha em ~1 min');
+        setTimeout(()=>{ carregarLista(); }, 50000);
+      }
+    }
     else { $('loginErr').textContent=(r&&r.erro)||'nome ou senha inválidos'; $('loginSenha').select(); }
   }catch(e){ $('loginErr').textContent='falha ao entrar: '+e.message; }
 }
@@ -672,7 +677,13 @@ async function carregarLista(){
   _revelaRelatorio();
   try{
     const d = await api('/girassol-backup-offline/lista');
-    $('ver').textContent = (d.versao ? d.versao.replace('girassol-backup-offline ','') : 'v?') + ' · ui ' + UI_BUILD;
+    (function(){
+      const _min = d.ciclo_rodou_em ? Math.round((Date.now() - new Date(d.ciclo_rodou_em).getTime())/60000) : null;
+      const _vs  = d.versao ? String(d.versao).split(' ').pop() : 'v?';
+      $('ver').innerHTML = _vs + ' \u00b7 ui ' + UI_BUILD
+        + (_min!=null ? ' \u00b7 <span style="color:'+(_min>25?'#f87171':'#94a3b8')+'" title="\u00faltima consulta ao Bling (o ciclo roda sozinho de 10 em 10 min)">\u23f1 '+_min+' min</span>' : '')
+        + (d.sem_etiqueta>0 ? ' \u00b7 <span style="color:#fbbf24" title="pedidos sem etiqueta \u2014 o servidor tenta de novo sozinho a cada 5 min">\u26a0 '+d.sem_etiqueta+' s/ etiqueta</span>' : '');
+    })();
     const semN = d.sem_etiqueta||0;
     $('stats').innerHTML =
       '<span><b>'+d.prontos+'</b> a separar</span>'+

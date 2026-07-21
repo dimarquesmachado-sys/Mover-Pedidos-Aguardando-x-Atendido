@@ -95,7 +95,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd25';
+const DASH_BUILD = 'd26';
 let DADOS = [];
 let periodo = 'dia', pDe = '', pAte = '';   // abre no DIA (pedido do Diego)
 let SKUINFO = {}, skuInfoCarregado = false, _skuLoading = false;
@@ -113,6 +113,7 @@ let chPed = null, chFat = null;
 let _plMLFee = {};   // tarifa real ML por pedido (sob demanda)
 let anPage=0, anCanal='', anSku='', anPer='dia', anPDe='', anPAte='', anLP='', _anLoading=false;   // 📋 análise de vendas (abre no DIA)
 let _anTried = {};   // SKUs ja tentados no on-demand — evita loop de recarga que apagava seleção
+let _anLP = [];   // última lista filtrada da Análise — fonte do export CSV
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -124,7 +125,19 @@ const hojeSP = () => new Date().toLocaleString('sv-SE',{timeZone:'America/Sao_Pa
 const spDate = ms => new Date(ms).toLocaleString('sv-SE',{timeZone:'America/Sao_Paulo'}).slice(0,10);
 const dtBR = iso => { try{ return new Date(iso).toLocaleString('pt-BR',{timeZone:'America/Sao_Paulo',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}).replace(',',''); }catch(e){ return ''; } };
 const diaVenda = h => { if (h.venda_em) return diaSP(h.venda_em); if (h.venda_dia) return String(h.venda_dia).slice(0,10); return h && h.conferido_em ? new Date(h.conferido_em).toLocaleString('sv-SE',{timeZone:'America/Sao_Paulo'}).slice(0,10) : ''; };   // DIA DA VENDA: hora real (ML) > data da venda (Bling) > conferência
-const tMs = h => { const v = h.venda_em || (h.venda_dia ? (String(h.venda_dia).slice(0,10)+'T12:00:00-03:00') : '') || h.conferido_em || ''; const n = Date.parse(v); return isFinite(n) ? n : 0; };
+const tMs = h => {
+  // EIXO UNICO de tempo. Antes: quem tinha venda_dia era carimbado ao MEIO-DIA e quem nao tinha usava a
+  // hora da bipagem — dois eixos no mesmo sort = ordem embaralhada. Agora: hora REAL quando o canal fornece
+  // (ML); senao, DIA da venda + relógio da conferência (um só eixo, coerente dentro do dia).
+  if (h.venda_em) { const n1 = Date.parse(h.venda_em); if (isFinite(n1)) return n1; }
+  const nc = Date.parse(h.conferido_em || '');
+  if (h.venda_dia) {
+    const hora = isFinite(nc) ? new Date(nc).toLocaleString('sv-SE', { timeZone: 'America/Sao_Paulo' }).slice(11, 19) : '12:00:00';
+    const n2 = Date.parse(String(h.venda_dia).slice(0, 10) + 'T' + hora + '-03:00');
+    if (isFinite(n2)) return n2;
+  }
+  return isFinite(nc) ? nc : 0;
+};
 function setSortProd(c){ sortProd = { col:c, dir:(sortProd.col===c ? -sortProd.dir : -1) }; render(); }
 function setSortProj(c){ sortProj = { col:c, dir:(sortProj.col===c ? -sortProj.dir : -1) }; renderProjecao(); }
 const seta = (st,c)=> st.col===c ? (st.dir<0?' ↓':' ↑') : '';
@@ -192,12 +205,13 @@ function montar(){
       '<select id="anCanalSel" onchange="anCanal=this.value;anPage=0;renderAnalise()" style="background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:9px;padding:7px 10px;font-size:12.5px"></select>'+
       '<input id="anSkuInp" placeholder="🔎 filtrar por SKU…" oninput="anSku=this.value;anPage=0;renderAnalise()" style="background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:9px;padding:7px 10px;font-size:12.5px;width:170px">'+
       '<span id="anLPChips" style="display:flex;gap:6px"></span>'+
+      '<button class="chip" onclick="baixarCSV()" title="baixa TODAS as vendas do filtro atual — abre no Excel, ideal p/ confrontar com o Jodda linha a linha">⬇︎ CSV</button>'+
       '<span id="anInfo" class="mut" style="font-size:12px"></span>'+
       '<span style="margin-left:auto"></span>'+
       '<button class="chip" onclick="if(anPage>0){anPage--;renderAnalise();}">← Anterior</button>'+
       '<button class="chip" onclick="anPage++;renderAnalise()">Próxima →</button></div>'+
       '<div style="overflow-x:auto"><table id="tAnalise"></table></div>'+
-      '<div class="nota"><b>Sobre a hora:</b> ML mostra a hora REAL da venda (vem da pesca); TikTok/Shopee o Bling não guarda hora — o 🕘 marca que ali está a hora da <b>conferência</b> (a hora da venda desses canais chega quando plugarmos as APIs deles) · colunas (−) são deduções · tarifa <span class="ok">REAL</span> = pescada do ML · <span class="ok">BLING</span> = comissão que o Bling importou do canal (TikTok/Shopee/Magalu) · sem tag = % configurada · custo carrega sob demanda por página · 🛒 = mais de 1 item/unidade</div></div>'+
+      '<div class="nota"><b>Sobre a ordem:</b> dentro de cada dia, ML aparece na hora REAL da venda; TikTok/Shopee/Magalu/Amazon aparecem na hora em que foram <b>bipados</b> (🕘) — por isso saem em blocos: o estoque bipa um canal de cada vez. A hora real da venda desses canais <b>só existe na API do próprio canal</b>. Pra confrontar com o Jodda, use o ⬇︎ CSV e case pelo <b>número da venda no marketplace</b>. · ML mostra a hora REAL da venda (vem da pesca); TikTok/Shopee o Bling não guarda hora — o 🕘 marca que ali está a hora da <b>conferência</b> (a hora da venda desses canais chega quando plugarmos as APIs deles) · colunas (−) são deduções · tarifa <span class="ok">REAL</span> = pescada do ML · <span class="ok">BLING</span> = comissão que o Bling importou do canal (TikTok/Shopee/Magalu) · sem tag = % configurada · custo carrega sob demanda por página · 🛒 = mais de 1 item/unidade</div></div>'+
     '<div class="grid2">'+
       '<div class="sec"><h2>📈 Pedidos por dia</h2><div class="chartbox"><canvas id="cPed"></canvas></div></div>'+
       '<div class="sec"><h2>💰 Faturamento por dia</h2><div class="chartbox"><canvas id="cFat"></canvas></div></div>'+
@@ -584,6 +598,33 @@ function renderGrafico(){
   el.innerHTML=svg;
   $('grafLeg').innerHTML = series.map(sr=>'<span style="color:'+sr[1]+'">\u25CF</span> '+sr[2]).join(' &nbsp; ')+' \u00b7 somas di\u00e1rias \u00b7 M.C. s\u00f3 dos pedidos completos \u00b7 passa o mouse nos pontos';
 }
+function baixarCSV(){
+  if(!_anLP || !_anLP.length){ alert('sem vendas no filtro atual'); return; }
+  const br = v => (v==null||!isFinite(v)) ? '' : String(Number(v).toFixed(2)).replace('.',',');   // decimal BR p/ o Excel
+  const q = t => '"'+String(t==null?'':t).replace(/"/g,'""')+'"';
+  const cab = ['Dia da venda','Hora','Fonte da hora','Pedido','NF','Venda no marketplace','Canal','SKUs','Unidades','Venda','Produtos NF','Custo','Imposto','Tarifa','Fonte da tarifa','Frete vendedor','Fonte do frete','Margem de contribuicao','MC %'];
+  const linhas = _anLP.map(x=>{
+    const h=x.h, P=x.P;
+    const unid=(h.itens||[]).reduce((a,i)=>a+Number(i.qtd||1),0);
+    const skus=(h.itens||[]).map(i=>i.sku).join(' | ');
+    const d2=diaVenda(h);
+    return [
+      q(d2?(d2.slice(8,10)+'/'+d2.slice(5,7)+'/'+d2.slice(0,4)):''),
+      q(h.venda_em?dtBR(h.venda_em).slice(6):''),
+      q(h.venda_em?'venda (API do canal)':'sem hora do canal'),
+      q(h.numero||h.id), q(h.nf_numero||''), q(h.numero_loja||''), q(P.ck), q(skus), unid,
+      br(P.tot), br(P.rp), br(P.custoOk?P.custo:null), br(P.imposto), br(P.tarifa),
+      q(P.feeReal!=null?'REAL (ML)':(P.feeBling!=null?'Bling':(P.tx!=null?'% configurada':''))),
+      br(P.frV), q(P.frFonte==='ml'?'real ML':(P.frFonte==='bling'?'Bling':(P.frFonte==='flex'?'FLEX (config)':''))),
+      br(P.mc), (P.mc!=null&&P.rp)?Math.round(P.mc/P.rp*100):''
+    ].join(';');
+  });
+  const txt = '\uFEFF' + cab.map(q).join(';') + '\n' + linhas.join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([txt], {type:'text/csv;charset=utf-8'}));
+  a.download = 'analise-vendas-'+hojeSP()+'.csv';
+  document.body.appendChild(a); a.click(); a.remove();
+}
 function setAnPer(p){ anPer=p; anPage=0; renderAnalise(); }
 function anIntervalo(){
   const hoje = hojeSP();
@@ -628,6 +669,7 @@ function renderAnalise(){
   if(anPage>maxP) anPage=maxP; if(anPage<0) anPage=0;
   const pagPL=LP.slice(anPage*PAG, anPage*PAG+PAG);
   const pag=pagPL.map(x=>x.h);
+  _anLP = LP;   // lista filtrada completa (usada pelo ⬇︎ CSV)
   $('anInfo').textContent = LP.length ? ((anPage*PAG+1)+'–'+(anPage*PAG+pagPL.length)+' de '+LP.length+' venda(s)') : 'sem vendas no período';
   const faltam=[...new Set(pag.flatMap(h=>(h.itens||[]).map(i=>i.sku)).filter(sk=>sk && !SKUINFO[sk] && !_anTried[sk]))];
   if(faltam.length && !_anLoading){
@@ -644,8 +686,21 @@ function renderAnalise(){
   }
   const T={tot:0,rp:0,imp:0,tar:0,cus:0,frv:0,mc:0,mcN:0};
   const cel=(v,cls)=>'<td class="num'+(cls?' '+cls:'')+'">'+(v!=null?BRL(v):'<span class="dim">—</span>')+'</td>';
+  const totDia = {};   // totais por dia (da lista filtrada inteira, nao so da pagina)
+  LP.forEach(x=>{ const d2=diaVenda(x.h); const t=totDia[d2]||(totDia[d2]={n:0,rp:0,mc:0,mcN:0});
+    t.n++; if(x.P.rp!=null)t.rp+=x.P.rp; if(x.P.mc!=null){t.mc+=x.P.mc;t.mcN++;} });
+  let _diaAnt = null;
   const linhas = pagPL.map(x=>{
     const h=x.h, P=x.P;
+    const _d = diaVenda(h);
+    let sep = '';
+    if(_d !== _diaAnt){
+      _diaAnt = _d;
+      const t = totDia[_d] || {n:0,rp:0,mc:0,mcN:0};
+      sep = '<tr style="background:var(--bg2)"><td colspan="6" style="font-weight:800;padding:7px 8px">\uD83D\uDCC5 '+(_d?(_d.slice(8,10)+'/'+_d.slice(5,7)+'/'+_d.slice(0,4)):'sem data')+' <span class="mut" style="font-weight:400;font-size:11px">'+t.n+' venda(s) no filtro</span></td>'+
+        '<td colspan="4" class="num mut" style="font-size:11px">produtos '+BRL(t.rp)+'</td>'+
+        '<td colspan="4" class="num" style="font-size:11px;font-weight:700">\uD83D\uDC8E '+BRL(t.mc)+' <span class="mut" style="font-weight:400">('+t.mcN+'/'+t.n+')</span></td></tr>';
+    }
     const unid=(h.itens||[]).reduce((a,i)=>a+Number(i.qtd||1),0);
     const carrinho=((h.itens||[]).length>1)||unid>1;
     if(P.tot!=null)T.tot+=P.tot; if(P.rp!=null)T.rp+=P.rp; if(P.imposto!=null)T.imp+=P.imposto;
@@ -653,7 +708,7 @@ function renderAnalise(){
     if(P.mc!=null){ T.mc+=P.mc; T.mcN++; }
     const it0=(h.itens||[])[0]||{};
     const pmc = (P.mc!=null&&P.rp)?Math.round(P.mc/P.rp*100):null;
-    return '<tr>'+
+    return sep + '<tr>'+
       '<td class="dim" style="white-space:nowrap" title="'+(h.venda_em?('venda: '+dtBR(h.venda_em)+' · '):(h.venda_dia?('venda: '+String(h.venda_dia).slice(8,10)+'/'+String(h.venda_dia).slice(5,7)+' · '):''))+'conferido: '+dtBR(h.conferido_em)+'">'+(h.venda_em?dtBR(h.venda_em):(h.venda_dia?(String(h.venda_dia).slice(8,10)+'/'+String(h.venda_dia).slice(5,7)+' <span style="font-size:9px" title="dia da venda (Bling) — hora só com a API do canal">🕘</span>'):(dtBR(h.conferido_em)+' <span style="font-size:9px" title="hora da conferência">🕘</span>')))+'</td>'+
       '<td><b>'+esc(h.numero||h.id)+'</b>'+(carrinho?' <span class="badge" title="'+unid+' unidades">🛒 '+unid+'</span>':'')+
         (h.nf_numero?'<div class="desc">NF '+esc(h.nf_numero)+'</div>':'')+'</td>'+
