@@ -100,7 +100,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd35';
+const DASH_BUILD = 'd36';
 let DADOS = [];
 let periodo = 'dia', pDe = '', pAte = '';   // abre no DIA (pedido do Diego)
 let SKUINFO = {}, skuInfoCarregado = false, _skuLoading = false;
@@ -581,7 +581,7 @@ const renderSafe = () => { if (selAtiva()) { clearTimeout(_selT); _selT = setTim
 const linkMkt = h => {
   // ML: https://www.mercadolivre.com.br/vendas/{id}/detalhe — o callbackUrl da URL do navegador
   // é só estado da tela anterior (no exemplo do Diego o id do caminho nem batia com o do search).
-  const nl = String((h && h.numero_loja) || '').replace(/\D/g, '');
+  const nl = String((h && h.ml_pack) || (h && h.numero_loja) || '').replace(/\D/g, '');   // pack quando existe — e o que a tela do ML abre
   if (!nl) return '';
   const ck = canalKey(h.marketplace);
   if (ck === 'ml') return 'https://www.mercadolivre.com.br/vendas/' + nl + '/detalhe';
@@ -634,7 +634,7 @@ function baixarCSV(){
   if(!_anLP || !_anLP.length){ alert('sem vendas no filtro atual'); return; }
   const br = v => (v==null||!isFinite(v)) ? '' : String(Number(v).toFixed(2)).replace('.',',');   // decimal BR p/ o Excel
   const q = t => '"'+String(t==null?'':t).replace(/"/g,'""')+'"';
-  const cab = ['Dia da venda','Hora','Fonte da hora','Pedido','NF','Venda no marketplace','Canal','SKUs','Unidades','Venda','Produtos NF','Custo','Imposto','Tarifa','Fonte da tarifa','Frete vendedor','Fonte do frete','Estorno ML (credito)','Margem de contribuicao','MC %'];
+  const cab = ['Dia da venda','Hora','Fonte da hora','Pedido','NF','Venda no marketplace','Pack ML','Order ML','Canal','SKUs','Unidades','Venda NF','R$ Produtos','Custo','Imposto','Tarifa','Fonte da tarifa','Frete vendedor','Fonte do frete','Estorno ML (credito)','Margem de contribuicao','MC %'];
   const linhas = _anLP.map(x=>{
     const h=x.h, P=x.P;
     const unid=(h.itens||[]).reduce((a,i)=>a+Number(i.qtd||1),0);
@@ -644,7 +644,7 @@ function baixarCSV(){
       q(d2?(d2.slice(8,10)+'/'+d2.slice(5,7)+'/'+d2.slice(0,4)):''),
       q(h.venda_em?dtBR(h.venda_em).slice(6):''),
       q(h.venda_em?'venda (API do canal)':'sem hora do canal'),
-      q(h.numero||h.id), q(h.nf_numero||''), q(h.numero_loja||''), q(P.ck), q(skus), unid,
+      q(h.numero||h.id), q(h.nf_numero||''), q(h.numero_loja||''), q(h.ml_pack||''), q(h.ml_order||''), q(P.ck), q(skus), unid,
       br(P.tot), br(P.rp), br(P.custoOk?P.custo:null), br(P.imposto), br(P.tarifa),
       q(P.feeReal!=null?'REAL (ML)':(P.feeBling!=null?'Bling':(P.tx!=null?'% configurada':''))),
       br(P.frV), q(P.frFonte==='ml'?'real ML':(P.frFonte==='bling'?'Bling':(P.frFonte==='flex'?'FLEX (config)':''))),
@@ -660,7 +660,7 @@ function baixarCSV(){
 }
 const anBuscaOk = q => h => {
   // casa com: nº do pedido, nº da NF, nº da venda no marketplace, id do Bling ou SKU (pedaço serve)
-  const alvos = [h.numero, h.nf_numero, h.numero_loja, h.id];
+  const alvos = [h.numero, h.nf_numero, h.numero_loja, h.ml_pack, h.ml_order, h.id];
   for (const a of alvos) { if (a != null && String(a).toLowerCase().includes(q)) return true; }
   return (h.itens || []).some(it => String(it.sku || '').toLowerCase().includes(q));
 };
@@ -696,13 +696,16 @@ function renderAnalise(){
   if(q) L=L.filter(anBuscaOk(q));
   let LP = L.map(h=>({h:h, P:calcPL(h)}));
   const nLucro = LP.filter(x=>x.P.mc!=null&&x.P.mc>0).length, nPrej = LP.filter(x=>x.P.mc!=null&&x.P.mc<0).length;
+  const nInc = LP.filter(x=>x.P.mc==null).length;
   const lpEl=$('anLPChips');
   if(lpEl) lpEl.innerHTML =
     '<button class="chip'+(anLP===''?' on':'')+'" onclick="anLP=\'\';anPage=0;renderAnalise()">Todos</button>'+
     '<button class="chip" style="'+(anLP==='lucro'?'background:#065f46;border-color:#065f46;color:#fff':'color:#34d399;border-color:#34d399')+'" onclick="anLP=\'lucro\';anPage=0;renderAnalise()">Lucro ('+nLucro+')</button>'+
-    '<button class="chip" style="'+(anLP==='prej'?'background:#7f1d1d;border-color:#7f1d1d;color:#fff':'color:#f87171;border-color:#f87171')+'" onclick="anLP=\'prej\';anPage=0;renderAnalise()">Preju\u00edzo ('+nPrej+')</button>';
+    '<button class="chip" style="'+(anLP==='prej'?'background:#7f1d1d;border-color:#7f1d1d;color:#fff':'color:#f87171;border-color:#f87171')+'" onclick="anLP=\'prej\';anPage=0;renderAnalise()">Preju\u00edzo ('+nPrej+')</button>'+
+    (nInc?'<button class="chip" style="'+(anLP==='inc'?'background:#78350f;border-color:#78350f;color:#fff':'color:#fbbf24;border-color:#fbbf24')+'" onclick="anLP=\'inc\';anPage=0;renderAnalise()" title="vendas sem margem fechada — falta custo no Bling, NF ou tarifa">Incompletas ('+nInc+')</button>':'');
   if(anLP==='lucro') LP=LP.filter(x=>x.P.mc!=null&&x.P.mc>0);
   else if(anLP==='prej') LP=LP.filter(x=>x.P.mc!=null&&x.P.mc<0);
+  else if(anLP==='inc') LP=LP.filter(x=>x.P.mc==null);
   LP.sort((a,b)=> tMs(b.h)-tMs(a.h));
   const PAG=25, maxP=Math.max(0,Math.ceil(LP.length/PAG)-1);
   if(anPage>maxP) anPage=maxP; if(anPage<0) anPage=0;
@@ -751,12 +754,17 @@ function renderAnalise(){
       '<td class="dim" style="white-space:nowrap" title="'+(h.venda_em?('venda: '+dtBR(h.venda_em)+' · '):(h.venda_dia?('venda: '+String(h.venda_dia).slice(8,10)+'/'+String(h.venda_dia).slice(5,7)+' · '):''))+'conferido: '+dtBR(h.conferido_em)+'">'+(h.venda_em?dtBR(h.venda_em):(h.venda_dia?(String(h.venda_dia).slice(8,10)+'/'+String(h.venda_dia).slice(5,7)+' <span style="font-size:9px" title="dia da venda (Bling) — hora só com a API do canal">🕘</span>'):(dtBR(h.conferido_em)+' <span style="font-size:9px" title="hora da conferência">🕘</span>')))+'</td>'+
       '<td><b>'+esc(h.numero||h.id)+'</b>'+(carrinho?' <span class="badge" title="'+unid+' unidades">🛒 '+unid+'</span>':'')+
         (h.nf_numero?'<div class="desc">NF '+esc(h.nf_numero)+'</div>':'')+'</td>'+
-      '<td class="dim" style="font-size:11px;max-width:160px;white-space:nowrap">'+(h.numero_loja?(
-          '<span data-nl="'+esc(h.numero_loja)+'" onclick="copiaNL(this)" style="cursor:pointer;display:inline-block;max-width:118px;overflow:hidden;text-overflow:ellipsis;vertical-align:middle" title="clique = copiar · '+esc(h.numero_loja)+'">'+esc(h.numero_loja)+'</span>'+
-          (linkMkt(h)?' <a href="'+linkMkt(h)+'" target="_blank" rel="noopener" style="text-decoration:none;font-size:12px" title="abrir esta venda no Mercado Livre">↗</a>':'')
-        ):'—')+'</td>'+
+      (function(){
+        const nlV = String(h.numero_loja||'');
+        const par = [h.ml_pack, h.ml_order].map(x=>x!=null?String(x):null).find(x=>x && x!==nlV) || null;
+        const um = (v,dim)=>'<span data-nl="'+esc(v)+'" onclick="copiaNL(this)" style="cursor:pointer;display:inline-block;max-width:126px;overflow:hidden;text-overflow:ellipsis;vertical-align:middle'+(dim?';opacity:.55;font-size:10px':'')+'" title="clique = copiar · '+esc(v)+'">'+esc(v)+'</span>';
+        return '<td class="dim" style="font-size:11px;max-width:170px;white-space:nowrap">'+(nlV?(
+          um(nlV,false)+(linkMkt(h)?' <a href="'+linkMkt(h)+'" target="_blank" rel="noopener" style="text-decoration:none;font-size:12px" title="abrir esta venda no Mercado Livre">↗</a>':'')+
+          (par?'<br>'+um(par,true):'')
+        ):'—')+'</td>';
+      })()+
       '<td>'+esc(P.ck)+'</td>'+
-      '<td><div class="desc" style="max-width:200px">'+esc(it0.sku||'')+((h.itens||[]).length>1?' +'+((h.itens||[]).length-1):'')+'</div></td>'+
+      '<td><div class="desc" style="max-width:200px">'+(((h.itens||[]).length?(h.itens||[]).map(function(ix){var q2=Number(ix.qtd||1);return (q2>1?q2+'× ':'')+esc(ix.sku||'');}).join('<br>'):esc(it0.sku||'')))+'</div></td>'+
       '<td class="num">'+N(unid)+'</td>'+
       cel(P.tot)+cel(P.rp,'ok')+
       cel(P.custoOk?P.custo:null)+cel(P.imposto)+
@@ -769,7 +777,7 @@ function renderAnalise(){
   }).join('');
   $('tAnalise').innerHTML =
     '<tr><th>Data/hora</th><th>Pedido</th><th>Venda (mkt)</th><th>Canal</th><th>Produto</th><th class="num">Un.</th>'+
-    '<th class="num">Venda</th><th class="num">Prod. NF</th><th class="num">Custo (−)</th><th class="num">Imposto (−)</th>'+
+    '<th class="num" title="total da NOTA FISCAL (com frete embutido, quando o canal lança)">Venda NF</th><th class="num" title="só os produtos: preço × quantidade">R$ Produtos</th><th class="num">Custo (−)</th><th class="num">Imposto (−)</th>'+
     '<th class="num">Tarifa (−)</th><th class="num">Frete vend. (−)</th><th class="num">Estorno (+)</th><th class="num">💎 M.C.</th><th class="num">MC %</th></tr>'+
     (linhas || '<tr><td class="dim" colspan="15">sem vendas no período</td></tr>')+
     (pag.length?('<tr style="border-top:2px solid var(--line2)"><td colspan="6" style="font-weight:800">Σ desta página</td>'+

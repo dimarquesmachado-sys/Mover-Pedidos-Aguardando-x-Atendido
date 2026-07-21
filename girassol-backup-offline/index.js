@@ -2183,7 +2183,7 @@ async function mlSyncFees(dias) {
     const mk = String(c.marketplace || '').toLowerCase();
     if (mk !== 'ml' && mk !== 'mercadolivre') return false;
     if (!c.numero_loja) return false;
-    return c.tarifa_ml == null || c.venda_em == null || !c.ml_costs_v3 || t >= recheck;   // !ml_costs_v2 = ainda nao passou pelo /costs (frete real + estorno) — vale uma passada
+    return c.tarifa_ml == null || c.venda_em == null || !c.ml_costs_v3 || c.ml_order == null || t >= recheck;   // ml_order==null: ainda sem o par pack/order — uma passada preenche   // !ml_costs_v2 = ainda nao passou pelo /costs (frete real + estorno) — vale uma passada
   }).map(([cid]) => cid);
   if (!alvos.length) { console.log('[ML-FEES] nada a pescar (' + dias + 'd)'); return { ok: true, nada: true }; }
   _mls = { rodando: true, feitos: 0, total: alvos.length, ok: 0, falhas: 0, iniciado_em: new Date().toISOString(), erros: {}, amostras: [] };
@@ -2196,7 +2196,7 @@ async function mlSyncFees(dias) {
   const salvar = () => {
     if (!Object.keys(pend).length) return;
     const c2 = readJson(CONFERIDOS_FILE, {});
-    for (const [cid, d] of Object.entries(pend)) { if (!c2[cid]) continue; if (d.fee != null) c2[cid].tarifa_ml = d.fee; if (d.frete != null) c2[cid].frete_ml = d.frete; if (d.venda) c2[cid].venda_em = d.venda; if (d.credito != null) c2[cid].credito_ml = d.credito; if (d.credito_fonte) c2[cid].credito_fonte = d.credito_fonte; if (d.logistica) c2[cid].logistica_ml = d.logistica; if (d.costs_ok) { c2[cid].ml_costs_v3 = 1; if (d.credito == null) delete c2[cid].credito_ml; if (d.frete == null) delete c2[cid].frete_ml; } }
+    for (const [cid, d] of Object.entries(pend)) { if (!c2[cid]) continue; if (d.fee != null) c2[cid].tarifa_ml = d.fee; if (d.frete != null) c2[cid].frete_ml = d.frete; if (d.venda) c2[cid].venda_em = d.venda; if (d.credito != null) c2[cid].credito_ml = d.credito; if (d.credito_fonte) c2[cid].credito_fonte = d.credito_fonte; if (d.logistica) c2[cid].logistica_ml = d.logistica; if (d.pack) c2[cid].ml_pack = d.pack; if (d.order) c2[cid].ml_order = d.order; if (d.costs_ok) { c2[cid].ml_costs_v3 = 1; if (d.credito == null) delete c2[cid].credito_ml; if (d.frete == null) delete c2[cid].frete_ml; } }
     writeJson(CONFERIDOS_FILE, c2);
     for (const cid of Object.keys(pend)) delete pend[cid];
   };
@@ -2234,7 +2234,12 @@ async function mlSyncFees(dias) {
           if (!venda && od.date_created) venda = od.date_created;
           if (!shipId && od.shipping && od.shipping.id) shipId = od.shipping.id;
         }
-        const reg = { fee: Math.round(fee * 100) / 100, frete: null, venda: venda, _orders: ords.length };
+        // PAR de números do ML: toda venda tem order_id; carrinho tem também pack_id (e a tela/NF do ML usam o pack).
+        // Se o /orders respondeu direto, nl era a ORDER e o pack vem no payload; se caímos no /packs, nl era o PACK.
+        const _ord0 = (ords[0] && ords[0].id != null) ? String(ords[0].id) : null;
+        const _viaPack = !!(_ord0 && _ord0 !== nl);
+        const _packId = _viaPack ? nl : ((ords[0] && ords[0].pack_id != null) ? String(ords[0].pack_id) : null);
+        const reg = { fee: Math.round(fee * 100) / 100, frete: null, venda: venda, _orders: ords.length, pack: _packId, order: _ord0 };
         if (shipId) {
           let ehFlex = false, baseCost = null;
           try {
