@@ -338,6 +338,7 @@ function routes(readBody) {
             if (d.uf) c2[id].uf = d.uf;
             if (d.municipio) c2[id].municipio = d.municipio;
             if (d.taxa_mkt != null && c2[id].taxa_mkt == null) c2[id].taxa_mkt = d.taxa_mkt;
+            if (d.venda_dia && !c2[id].venda_dia) c2[id].venda_dia = d.venda_dia;
             if (d.frete_mkt != null && c2[id].frete_mkt == null) c2[id].frete_mkt = d.frete_mkt;
             if (d.porSku && Array.isArray(c2[id].itens)) {
               c2[id].itens.forEach(it => {
@@ -359,6 +360,7 @@ function routes(readBody) {
                 valor: (det.total != null ? Number(det.total) : null),
                 uf: (det.transporte && det.transporte.etiqueta && det.transporte.etiqueta.uf) || null,
                 municipio: (det.transporte && det.transporte.etiqueta && det.transporte.etiqueta.municipio) || null,
+                venda_dia: (det.data ? String(det.data).slice(0, 10) : null),
                 taxa_mkt: (det.taxas && isFinite(Number(det.taxas.taxaComissao)) && Number(det.taxas.taxaComissao) > 0) ? Math.round(Number(det.taxas.taxaComissao) * 100) / 100 : null,
                 frete_mkt: (det.taxas && isFinite(Number(det.taxas.custoFrete)) && Number(det.taxas.custoFrete) > 0) ? Math.round(Number(det.taxas.custoFrete) * 100) / 100 : null,
                 porSku
@@ -380,35 +382,52 @@ function routes(readBody) {
     if (method === 'POST' && p === '/good-checkout-offline/sku-info') {
       const opSess = validarSessao(req.headers['cookie']);
       if (!opSess || !ehAdmin(opSess)) { json(res, 403, { ok: false, erro: 'apenas admin' }); return true; }
-      let body = {}; try { body = JSON.parse(await readBody(req) || '{}'); } catch (e) {}
+      let body = {}; try { const _rb = await readBody(req); body = (_rb && typeof _rb === 'object') ? _rb : JSON.parse(_rb || '{}'); } catch (e) {}   // tolerante: lib/http passou a devolver objeto ja parseado
       const skus = Array.isArray(body.skus) ? body.skus.map(x => String(x || '').trim()).filter(Boolean).slice(0, 40) : [];
       if (!skus.length) { json(res, 200, { ok: true, skus: {} }); return true; }
       const CACHE_SKUINFO = path.join(CACHE_DIR, '_skus-info.json');
       if (!_skuInfoCache) _skuInfoCache = readJson(CACHE_SKUINFO, {});
       const TTL = 6 * 3600 * 1000;
       const out = {}; const faltam = [];
+      let _ccTop = null;   // cache permanente de custos, carregado sob demanda
       for (const sku of skus) {
         const c = _skuInfoCache[sku];
-        if (!body.fresh && c && (Date.now() - (c.ts || 0)) < TTL) out[sku] = c; else faltam.push(sku);
+        if (!body.fresh && c && (Date.now() - (c.ts || 0)) < TTL && (c.custo != null || c.saldo != null)) {
+          // OVERLAY: o custo do cache PERMANENTE sobrepõe qualquer null do cache de 6h (era o que segurava o custo na tela)
+          if (!_ccTop) _ccTop = readJson(path.join(CACHE_DIR, '_custos.json'), {});
+          const k9 = _ccTop[sku];
+          out[sku] = (k9 && k9.custo != null && c.custo == null) ? Object.assign({}, c, { custo: k9.custo, preco: (c.preco != null ? c.preco : k9.preco) }) : c;
+        } else faltam.push(sku);
       }
       const dorme = ms => new Promise(r => setTimeout(r, ms));
-      // 1) resolve SKU → produto (id, preço, custo do próprio detalhe quando vier)
+      const bg = async (pth) => { for (let t = 0; t < 3; t++) { const r = await blingGet(pth); if (r && r.ok) return r; await dorme(1100 + t * 500); } return await blingGet(pth); };   // anti-429: re-tenta com pausa crescente
+      let resolveFalhas = 0;
+      // 0) cache PERMANENTE de custos (_custos.json, populado pelo custo-sync em background)
+      const _ccAll = readJson(path.join(CACHE_DIR, '_custos.json'), {});
       const ids = {};
+      const aResolver = [];
       for (const sku of faltam) {
+        const k2 = _ccAll[sku];
+        if (k2 && k2.id && (Date.now() - (k2.ts || 0)) < 7 * 24 * 3600 * 1000) { ids[sku] = { id: k2.id, preco: (k2.preco != null ? k2.preco : null), custo: (k2.custo != null ? k2.custo : null) }; }
+        else aResolver.push(sku);
+      }
+      // 1) resolve SKU → produto — só quem NÃO está no cache permanente
+      for (const sku of aResolver) {
         try {
           let prod = null;
           for (const v of [...new Set([sku, sku.toUpperCase(), sku.toLowerCase()])]) {
-            const r = await blingGet(`/produtos?codigo=${encodeURIComponent(v)}&limite=1`);
+            const r = await bg(`/produtos?codigo=${encodeURIComponent(v)}&limite=1&criterio=5`);
             const it = r.ok && r.data && r.data.data && r.data.data[0];
-            if (it && it.id) { const d = await blingGet(`/produtos/${it.id}`); prod = (d.ok && d.data && d.data.data) || it; break; }
+            if (it && it.id) { const d = await bg(`/produtos/${it.id}`); prod = (d.ok && d.data && d.data.data) || it; break; }
+            await dorme(300);
           }
           if (prod && prod.id) {
             const forn = prod.fornecedor || {};
             const cand = [forn.precoCusto, forn.precoCompra, prod.precoCusto, prod.custo].map(Number).filter(v => isFinite(v) && v > 0);
             ids[sku] = { id: prod.id, preco: (prod.preco != null && isFinite(Number(prod.preco))) ? Number(prod.preco) : null, custo: cand.length ? cand[0] : null };
-          } else ids[sku] = null;
-        } catch (e) { ids[sku] = null; }
-        await dorme(220);
+          } else { ids[sku] = null; if (resolveFalhas < 3) console.log('[SKU-INFO] nao resolveu', sku); resolveFalhas++; }
+        } catch (e) { ids[sku] = null; if (resolveFalhas < 3) console.log('[SKU-INFO] erro em', sku, String(e.message || e).slice(0, 80)); resolveFalhas++; }
+        await dorme(400);
       }
       // 2) SALDO em LOTE — no Bling v3 o saldo vem de /estoques/saldos, não do detalhe do produto
       const saldos = {};
@@ -416,7 +435,7 @@ function routes(readBody) {
       for (let i = 0; i < todosIds.length; i += 40) {
         try {
           const qs = todosIds.slice(i, i + 40).map(pid => 'idsProdutos[]=' + pid).join('&');
-          const r = await blingGet('/estoques/saldos?' + qs);
+          const r = await bg('/estoques/saldos?' + qs);
           const arr = (r.ok && r.data && r.data.data) || [];
           for (const e2 of arr) {
             const pid = e2 && e2.produto && e2.produto.id;
@@ -430,7 +449,7 @@ function routes(readBody) {
       for (const [sku2, o2] of Object.entries(ids)) {
         if (!o2 || o2.custo != null) continue;
         try {
-          const r = await blingGet(`/produtos/fornecedores?idProduto=${o2.id}&limite=5`);
+          const r = await bg(`/produtos/fornecedores?idProduto=${o2.id}&limite=5`);
           const arr = (r.ok && r.data && r.data.data) || [];
           const pref = arr.find(x => x && x.padrao) || arr[0];
           const cand = pref ? [pref.precoCusto, pref.precoCompra].map(Number).filter(v => isFinite(v) && v > 0) : [];
@@ -445,7 +464,7 @@ function routes(readBody) {
         _skuInfoCache[sku] = info; out[sku] = info;
       }
       if (faltam.length) { try { writeJson(CACHE_SKUINFO, _skuInfoCache); } catch (e) {} }
-      json(res, 200, { ok: true, skus: out, consultados_agora: faltam.length });
+      json(res, 200, { ok: true, skus: out, consultados_agora: faltam.length, resolvidos: Object.keys(ids).filter(k2 => ids[k2]).length, nao_resolvidos: resolveFalhas });
       return true;
     }
 
@@ -485,10 +504,11 @@ function routes(readBody) {
       if (!opSess || !ehAdmin(opSess)) { json(res, 403, { ok: false, erro: 'apenas admin' }); return true; }
       const CFG_FILE = path.join(CACHE_DIR, '_config-fiscal.json');
       if (method === 'GET') { json(res, 200, { ok: true, config: readJson(CFG_FILE, { aliquotas: {}, taxas: {} }) }); return true; }
-      let body = {}; try { body = JSON.parse(await readBody(req) || '{}'); } catch (e) {}
+      let body = {}; try { const _rb = await readBody(req); body = (_rb && typeof _rb === 'object') ? _rb : JSON.parse(_rb || '{}'); } catch (e) {}   // tolerante: lib/http passou a devolver objeto ja parseado
       const atual = readJson(CFG_FILE, { aliquotas: {}, taxas: {} });
       if (body.aliquotas && typeof body.aliquotas === 'object') for (const [k2, v2] of Object.entries(body.aliquotas)) { const n2 = Number(v2); if (/^\d{4}-\d{2}$/.test(k2) && isFinite(n2) && n2 >= 0 && n2 <= 40) atual.aliquotas[k2] = n2; else if (v2 === null) delete atual.aliquotas[k2]; }
       if (body.taxas && typeof body.taxas === 'object') for (const [k2, v2] of Object.entries(body.taxas)) { const n2 = Number(v2); if (isFinite(n2) && n2 >= 0 && n2 <= 50) atual.taxas[String(k2).toLowerCase()] = n2; else if (v2 === null) delete atual.taxas[String(k2).toLowerCase()]; }
+      if (body.flex && typeof body.flex === 'object') { atual.flex = atual.flex || {}; for (const [k2, v2] of Object.entries(body.flex)) { const n2 = Number(v2); if ((k2 === 'geral' || k2 === 'shopee') && isFinite(n2) && n2 >= 0 && n2 <= 100) atual.flex[k2] = n2; else if (v2 === null) delete atual.flex[k2]; } }
       writeJson(CFG_FILE, atual);
       json(res, 200, { ok: true, config: atual });
       return true;
@@ -498,7 +518,7 @@ function routes(readBody) {
     if (method === 'POST' && p === '/good-checkout-offline/ml-fee') {
       const opSess = validarSessao(req.headers['cookie']);
       if (!opSess || !ehAdmin(opSess)) { json(res, 403, { ok: false, erro: 'apenas admin' }); return true; }
-      let body = {}; try { body = JSON.parse(await readBody(req) || '{}'); } catch (e) {}
+      let body = {}; try { const _rb = await readBody(req); body = (_rb && typeof _rb === 'object') ? _rb : JSON.parse(_rb || '{}'); } catch (e) {}   // tolerante: lib/http passou a devolver objeto ja parseado
       const orderId = String(body.numeroLoja || '').replace(/\D/g, '');
       if (!orderId) { json(res, 200, { ok: false, erro: 'numeroLoja vazio' }); return true; }
       const FEE_FILE = path.join(CACHE_DIR, '_mlfees.json');
@@ -567,9 +587,13 @@ function routes(readBody) {
       const idQ = String(urlObj.searchParams.get('id') || '').trim();
       if (!idQ) { json(res, 200, { ok: false, erro: 'passe ?id=NUMERO (nº do pedido) ou ?id=ID_BLING' }); return true; }
       // aceita nº do pedido (procura no conferidos) ou id do Bling direto
-      let alvoId = idQ;
+      const idClean = idQ.replace(/\D/g, '');   // aceita nº do pedido, nº da venda no marketplace ou id do Bling (limpa sufixos tipo _ML)
+      let alvoId = idClean || idQ;
       const confP = readJson(CONFERIDOS_FILE, {});
-      for (const [cid, c] of Object.entries(confP)) { if (c && String(c.numero) === idQ) { alvoId = cid; break; } }
+      for (const [cid, c] of Object.entries(confP)) {
+        if (!c) continue;
+        if (String(c.numero) === idClean || (c.numero_loja && String(c.numero_loja) === idClean)) { alvoId = cid; break; }
+      }
       try {
         const det = await detalhePedido(alvoId);
         if (!det) { json(res, 200, { ok: false, erro: 'pedido não encontrado no Bling (id ' + alvoId + ')' }); return true; }
@@ -594,6 +618,51 @@ function routes(readBody) {
           itens_do_conferido: ((confP[alvoId] && confP[alvoId].itens) || []).map(i => ({ sku: i.sku, qtd: i.qtd, valor_total: i.valor_total })),
           conferido_campos: (function(){ const c = confP[alvoId] || {}; return { tarifa_ml: c.tarifa_ml != null ? c.tarifa_ml : null, frete_ml: c.frete_ml != null ? c.frete_ml : null, venda_em: c.venda_em || null, taxa_mkt: c.taxa_mkt != null ? c.taxa_mkt : null, frete_mkt: c.frete_mkt != null ? c.frete_mkt : null, vprod_nf: c.vprod_nf != null ? c.vprod_nf : null, numero_loja: c.numero_loja || null, marketplace: c.marketplace || null }; })() });
       } catch (e) { json(res, 200, { ok: false, erro: String(e.message || e).slice(0, 200) }); }
+      return true;
+    }
+
+    // ADMIN (?k= obrigatorio — trava central intercepta rotas 'debug'): RAIO-X DO PRODUTO no Bling.
+    // Mostra TODAS as chaves do produto + campos de preco/custo + o que /estoques/saldos e /produtos/fornecedores devolvem.
+    // Uso: /good-checkout-offline/debug-sku?sku=KP16&k=SUA_CHAVE
+    if (method === 'GET' && p === '/good-checkout-offline/debug-sku') {
+      const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const sessP = validarSessao(req.headers['cookie']);
+      if (!((process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || (sessP && ehAdmin(sessP)))) { json(res, 404, { error: 'not found' }); return true; }
+      const skuQ = String(urlObj.searchParams.get('sku') || '').trim();
+      if (!skuQ) { json(res, 200, { ok: false, erro: 'passe ?sku=CODIGO' }); return true; }
+      try {
+        const rb = await blingGet('/produtos?codigo=' + encodeURIComponent(skuQ) + '&criterio=5');
+        const p0 = rb && rb.ok && rb.data && rb.data.data && rb.data.data[0];   // envelope do blingGet: {ok, data:{data:[...]}}
+        if (!p0) { json(res, 200, { ok: false, erro: 'produto nao encontrado por codigo ' + skuQ }); return true; }
+        const rd = await blingGet('/produtos/' + p0.id);
+        const det = (rd && rd.ok && rd.data && rd.data.data) || {};
+        const precos = {};
+        const cata = (obj, pref) => { for (const [k2, v2] of Object.entries(obj || {})) { const cam = pref ? pref + '.' + k2 : k2; if (v2 && typeof v2 === 'object' && !Array.isArray(v2)) { cata(v2, cam); continue; } if (/pre[cç]o|custo|cost|price/i.test(k2)) precos[cam] = v2; } };
+        cata(det, '');
+        let saldos = null, fornecedores = null;
+        try { const rs = await blingGet('/estoques/saldos?idsProdutos[]=' + p0.id); saldos = (rs && rs.data && rs.data.data) || (rs && rs.data) || rs; } catch (e) { saldos = { erro: String(e.message || e).slice(0, 120) }; }
+        try { const rf = await blingGet('/produtos/fornecedores?idProduto=' + p0.id); fornecedores = (rf && rf.data && rf.data.data) || (rf && rf.data) || rf; } catch (e) { fornecedores = { erro: String(e.message || e).slice(0, 120) }; }
+        json(res, 200, { ok: true, sku: skuQ, id_produto: p0.id,
+          chaves_do_produto: Object.keys(det),
+          todos_os_campos_de_preco_ou_custo: precos,
+          saldo_estoques: saldos,
+          endpoint_fornecedores: fornecedores,
+          veredito: (precos.precoCusto != null && Number(precos.precoCusto) > 0) ? 'precoCusto EXISTE no produto — vou ler daqui' : 'sem precoCusto no detalhe — olhar os outros campos acima' });
+      } catch (e) { json(res, 200, { ok: false, erro: String(e.message || e).slice(0, 200) }); }
+      return true;
+    }
+
+    // ADMIN (sessão ou ?k=): sincronizador de custos em background. ?status=1 mostra progresso.
+    if (method === 'GET' && p === '/good-checkout-offline/custo-sync') {
+      const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const sessC = validarSessao(req.headers['cookie']);
+      if (!((process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || (sessC && ehAdmin(sessC)))) { json(res, 404, { error: 'not found' }); return true; }
+      if (urlObj.searchParams.get('status')) { json(res, 200, { ok: true, rodando: !!_cst.rodando, progresso: _cst.feitos + '/' + _cst.total, ok_ate_agora: _cst.ok, falhas: _cst.falhas, inicio: _cst.inicio }); return true; }
+      const skuProbe = urlObj.searchParams.get('sku');
+      if (skuProbe) { const ccP = readJson(path.join(CACHE_DIR, '_custos.json'), {}); json(res, 200, { ok: true, sku: skuProbe, no_cache_permanente: ccP[skuProbe] || null, total_no_cache: Object.keys(ccP).length }); return true; }
+      if (_cst.rodando) { json(res, 200, { ok: true, ja_rodando: true, progresso: _cst.feitos + '/' + _cst.total }); return true; }
+      custoSync(!!urlObj.searchParams.get('fresh')).catch(() => {});
+      json(res, 200, { ok: true, iniciado: true, mensagem: 'custo-sync rodando em background (tartaruga anti-429) — ?status=1 p/ acompanhar' });
       return true;
     }
 
@@ -791,6 +860,7 @@ function routes(readBody) {
       const finalizadosHoje = Object.values(conf).filter(c => c && String(c.conferido_em || '').slice(0, 10) === hoje).length;
       json(res, 200, {
         versao: VERSAO,
+        ciclo_rodou_em: (getUltimoResumo() || {}).rodouEm || null,   // p/ o painel mostrar há quanto tempo o Bling foi consultado
         prontos: prontos.length,
         sem_etiqueta: semEtiq.length,
         sem_etiqueta_pedidos: semEtiq,
@@ -1048,7 +1118,19 @@ function routes(readBody) {
       const ops = lerOperadores();
       if (ops[nome] !== undefined && String(ops[nome]) === senha) {
         res.setHeader('Set-Cookie', SESS_COOKIE + '=' + assinarSessao(nome) + '; Path=/good-checkout-offline; HttpOnly; SameSite=Lax; Max-Age=' + Math.floor(SESS_TTL/1000));
-        json(res, 200, { ok: true, nome });
+        // LOGIN DISPARA O BLING: se a última consulta foi há mais de 3 min, roda em background — assim
+        // ninguém abre a lista com etiqueta velha. Vários logins seguidos = 1 ciclo só (trava de intervalo).
+        let _cicloDisparado = false;
+        try {
+          const _ur = getUltimoResumo() || {};
+          const _idade = _ur.rodouEm ? (Date.now() - new Date(_ur.rodouEm).getTime()) : Infinity;
+          if (_idade > 3 * 60 * 1000) {
+            _cicloDisparado = true;
+            console.log('[CICLO-LOGIN] ' + nome + ' entrou \u2014 \u00faltima consulta ao Bling h\u00e1 ' + (isFinite(_idade) ? Math.round(_idade / 60000) + ' min' : 'nunca') + ' \u2192 ciclo em background');
+            rodarCiclo('login').catch(() => {});
+          }
+        } catch (e) {}
+        json(res, 200, { ok: true, nome, ciclo_disparado: _cicloDisparado });
       } else {
         json(res, 200, { ok: false, erro: 'nome ou senha inválidos' });
       }
@@ -1135,6 +1217,7 @@ function routes(readBody) {
         } catch (e) {} return null; })(),
         municipio: (snapC && snapC.municipio) || null,
         numero_loja: (snapC && snapC.numero_loja) || null,
+        venda_dia: (snapC && snapC.venda_dia) || null,
         taxa_mkt: (snapC && snapC.taxa_mkt) || null,
         frete_mkt: (snapC && snapC.frete_mkt) || null,
         itens: snapC ? (snapC.itens || []).map(it => ({ sku: it.sku || '', descricao: String(it.descricao || '').slice(0, 90), qtd: it.qtd || 1, valor_unit: (it.valor_unit != null ? it.valor_unit : null), valor_total: (it.valor_total != null ? it.valor_total : null) })) : []
@@ -1960,10 +2043,67 @@ function routes(readBody) {
 }
 
 // roda 1 ciclo logo após o boot do serviço
+// ═══ CUSTO-SYNC (background): resolve custo/preço de TODOS os SKUs vendidos, devagar (anti-429),
+// e grava em cache PERMANENTE em disco (_custos.json, validade 7d). O sku-info lê daqui — instantâneo.
+let _cst = { rodando: false, feitos: 0, total: 0, ok: 0, falhas: 0, inicio: null };
+async function custoSync(fresh) {
+  if (_cst.rodando) return;
+  const CUSTO_FILE = path.join(CACHE_DIR, '_custos.json');
+  const cc = readJson(CUSTO_FILE, {});
+  const conf = readJson(CONFERIDOS_FILE, {});
+  const todos = new Set();
+  for (const c of Object.values(conf)) { for (const it of ((c && c.itens) || [])) { if (it && it.sku) todos.add(String(it.sku)); } }
+  const SETE_D = 7 * 24 * 3600 * 1000;
+  const alvos = [...todos].filter(sk => { const k = cc[sk]; return fresh || !k || !k.id || (Date.now() - (k.ts || 0)) > SETE_D || k.custo == null; });
+  _cst = { rodando: true, feitos: 0, total: alvos.length, ok: 0, falhas: 0, inicio: new Date().toISOString() };
+  console.log('[CUSTO] sync iniciando — ' + alvos.length + ' SKU(s) a resolver (tartaruga: ~1,2s/chamada)');
+  const dorme = ms => new Promise(r => setTimeout(r, ms));
+  const bg2 = async (pth) => { for (let t = 0; t < 4; t++) { const r = await blingGet(pth); if (r && r.ok) return r; await dorme(1500 + t * 700); } return await blingGet(pth); };
+  let desdeGravei = 0;
+  for (const sku of alvos) {
+    try {
+      let prod = null;
+      for (const v of [...new Set([sku, sku.toUpperCase(), sku.toLowerCase()])]) {
+        const r = await bg2(`/produtos?codigo=${encodeURIComponent(v)}&limite=1&criterio=5`);
+        const it = r.ok && r.data && r.data.data && r.data.data[0];
+        if (it && it.id) { const d = await bg2(`/produtos/${it.id}`); prod = (d.ok && d.data && d.data.data) || it; break; }
+        await dorme(600);
+      }
+      if (prod && prod.id) {
+        const forn = prod.fornecedor || {};
+        let cand = [forn.precoCusto, forn.precoCompra, prod.precoCusto, prod.custo].map(Number).filter(v => isFinite(v) && v > 0);
+        if (!cand.length) {
+          const rf = await bg2(`/produtos/fornecedores?idProduto=${prod.id}&limite=5`);
+          const arr = (rf.ok && rf.data && rf.data.data) || [];
+          const pref = arr.find(x => x && x.padrao) || arr[0];
+          if (pref) cand = [pref.precoCusto, pref.precoCompra].map(Number).filter(v => isFinite(v) && v > 0);
+        }
+        cc[sku] = { id: prod.id, preco: (prod.preco != null && isFinite(Number(prod.preco))) ? Number(prod.preco) : null, custo: cand.length ? Math.round(cand[0] * 10000) / 10000 : null, ts: Date.now() };
+        _cst.ok++;
+      } else { _cst.falhas++; }
+    } catch (e) { _cst.falhas++; }
+    _cst.feitos++; desdeGravei++;
+    if (desdeGravei >= 10) { desdeGravei = 0; try { writeJson(path.join(CACHE_DIR, '_custos.json'), cc); } catch (e) {} }
+    await dorme(1200);
+  }
+  try { writeJson(path.join(CACHE_DIR, '_custos.json'), cc); } catch (e) {}
+  _cst.rodando = false;
+  console.log('[CUSTO] sync concluiu — ok=' + _cst.ok + ' falhas=' + _cst.falhas + ' de ' + _cst.total);
+}
+
 function bootstrap() {
   // PESCA AUTOMÁTICA PÓS-DEPLOY: todo deploy mata a pesca em andamento; aqui ela renasce sozinha
   // 90s depois do boot (após o ciclo inicial). Com dias=14 só re-checa os recentes — barato e idempotente.
   setTimeout(() => { try { console.log('[ML-FEES] pesca automática pós-deploy iniciando…'); mlSyncFees(14).catch(() => {}); } catch (e) {} }, 90 * 1000);
+  setTimeout(() => { try { custoSync(false).catch(() => {}); } catch (e) {} }, 240 * 1000);   // custos: tartaruga pós-boot, só o que falta
+  // ETIQUETA PARADA: enquanto existir pedido sem etiqueta, tenta de novo a cada 5 min (o cron normal é 10/10).
+  // Em dia limpo (0 sem etiqueta) NADA extra roda — custo zero. Cobre etiqueta que o canal demora a gerar.
+  setInterval(() => {
+    try {
+      const r = getUltimoResumo();
+      if (r && r.semEtiqueta > 0) { console.log('[CICLO-EXTRA] ' + r.semEtiqueta + ' pedido(s) sem etiqueta \u2014 rodando ciclo extra'); rodarCiclo('auto-etiqueta').catch(() => {}); }
+    } catch (e) {}
+  }, 5 * 60 * 1000);
 
   ensureDir(CACHE_DIR);
   console.log(`[GOODBKP] ${VERSAO} ativo — ATENDIDO=${SIT_ATENDIDO}, janela=${JANELA_DIAS}d, cron="${CRON_EXPR}", formato=${ETIQ_FORMATO}`);
