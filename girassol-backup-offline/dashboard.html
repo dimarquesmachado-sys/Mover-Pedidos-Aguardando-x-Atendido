@@ -95,7 +95,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd27';
+const DASH_BUILD = 'd28';
 let DADOS = [];
 let periodo = 'dia', pDe = '', pAte = '';   // abre no DIA (pedido do Diego)
 let SKUINFO = {}, skuInfoCarregado = false, _skuLoading = false;
@@ -465,7 +465,7 @@ function calcPL(h){
   (h.itens||[]).forEach(it=>{ const q=Number(it.qtd||1); unTot+=q; const inf=SKUINFO[it.sku]; if(inf&&inf.custo!=null){ custo+=inf.custo*q; cusUn+=q; } });
   const custoOk = cusUn===unTot && unTot>0;
   let frV = null, frFonte = null;
-  if (h.frete_ml!=null && isFinite(Number(h.frete_ml))) { frV = Number(h.frete_ml); frFonte = 'ml'; }
+  if (h.frete_ml!=null && isFinite(Number(h.frete_ml)) && Number(h.frete_ml)>0) { frV = Number(h.frete_ml); frFonte = 'ml'; }   // 0 nao e frete real: deixa cair no Bling/FLEX (senao o custo do motoboy sumia)
   else if (h.frete_mkt!=null && isFinite(Number(h.frete_mkt)) && Number(h.frete_mkt)>0) { frV = Number(h.frete_mkt); frFonte = 'bling'; }
   else if (h.flex) { const fx = flexDe(ck); if (fx!=null && fx>0) { frV = fx; frFonte = 'flex'; } }
   const completo = [rp,imposto,tarifa].every(v=>v!=null) && custoOk;
