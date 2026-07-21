@@ -100,7 +100,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd44';
+const DASH_BUILD = 'd45';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -160,7 +160,7 @@ function cmpNull(a,b,dir){ const an=(a==null||!isFinite(a)), bn=(b==null||!isFin
 
 function prepararVendas(){
   const _sit = {}; (VENDAS||[]).forEach(v=>{ if(v&&v.numero!=null) _sit[String(v.numero)]=v; });
-  (DADOS||[]).forEach(h=>{ const v=_sit[String(h.numero)]; if(v){ h._sit=v.situacao||null; h._cancelado=/cancel/i.test(String(v.situacao||'')); } });
+  (DADOS||[]).forEach(h=>{ const v=_sit[String(h.numero)]; if(v){ h._sit=v.situacao||null; h._cancelado=/cancel/i.test(String(v.situacao||'')); if(v.data && !h.venda_dia) h.venda_dia=v.data; if(v.venda_em && !h.venda_em) h.venda_em=v.venda_em; } });   // d45: bipada herda dia/hora da venda casada
   const _nums = new Set((DADOS||[]).map(h=>String(h.numero)));
   SINT = (VENDAS||[]).filter(v=>v&&v.numero!=null&&!_nums.has(String(v.numero))).map(v=>({
     sintetico:true, id:'s'+v.id, numero:v.numero, numero_loja:v.numero_loja||'', marketplace:v.marketplace||'outro',
@@ -237,7 +237,7 @@ function montar(){
       'style="width:100%;background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:10px;padding:11px 14px;font-size:13px" '+
       'oninput="buscarPed(this.value)">'+
       '<div id="buscaRes" style="margin-top:10px"></div><div id="plCard"></div></div>'+
-    '<div class="sec"><h2>📋 Análise de vendas — margem por pedido <span class="hint">mais novas em cima · hora da VENDA quando o canal fornece; 🕘 = hora da conferência</span></h2>'+
+    '<div class="sec"><h2>📋 Análise de vendas — margem por pedido <span class="hint">mais novas em cima · hora da VENDA quando o canal fornece · 🧾 = hora da NF · 🕘 = hora da conferência</span></h2>'+
       '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px"><span id="anPerChips" style="display:flex;gap:6px;flex-wrap:wrap"></span><span id="anPerDatas"></span></div>'+
       '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">'+
       '<select id="anCanalSel" onchange="anCanal=this.value;anPage=0;renderAnalise()" style="background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:9px;padding:7px 10px;font-size:12.5px"></select>'+
@@ -250,7 +250,7 @@ function montar(){
       '<button class="chip" onclick="if(anPage>0){anPage--;renderAnalise();}">← Anterior</button>'+
       '<button class="chip" onclick="anPage++;renderAnalise()">Próxima →</button></div>'+
       '<div class="tw"><table id="tAnalise"></table></div>'+
-      '<div class="nota"><b>Sobre a ordem:</b> dentro de cada dia, ML aparece na hora REAL da venda; TikTok/Shopee/Magalu/Amazon aparecem na hora em que foram <b>bipados</b> (🕘) — por isso saem em blocos: o estoque bipa um canal de cada vez. A hora real da venda desses canais <b>só existe na API do próprio canal</b>. Pra confrontar com o Jodda, use o ⬇︎ CSV e case pelo <b>número da venda no marketplace</b>. · ML mostra a hora REAL da venda (vem da pesca); TikTok/Shopee o Bling não guarda hora — o 🕘 marca que ali está a hora da <b>conferência</b> (a hora da venda desses canais chega quando plugarmos as APIs deles) · colunas (−) são deduções e (+) é crédito · <b>Estorno</b> = o valor exato da linha "Estorno" da venda no ML (no Flex ele já vem líquido: bonificação menos o frete cobrado), somado na M.C. · no Flex o custo do frete é o <b>motoboy</b> configurado no ⚙️ · tarifa <span class="ok">REAL</span> = pescada do ML · <span class="ok">BLING</span> = comissão que o Bling importou do canal (TikTok/Shopee/Magalu) · sem tag = % configurada · custo carrega sob demanda por página · 🛒 = mais de 1 item/unidade</div></div>'+
+      '<div class="nota"><b>Sobre a ordem:</b> dentro de cada dia, ML aparece na hora REAL da venda; TikTok/Shopee/Magalu/Amazon entram pela hora da <b>EMISSÃO da NF</b> (🧾), que acompanha a venda de perto — acabaram os blocos por canal. O 🕘 (hora da conferência) só aparece quando a linha ainda não tem NF. A hora exata da venda desses canais continua existindo <b>só na API do próprio canal</b>. Pra confrontar com o Jodda, use o ⬇︎ CSV e case pelo <b>número da venda no marketplace</b>. · ML mostra a hora REAL da venda (vem da pesca); TikTok/Shopee o Bling não guarda hora — o 🕘 marca que ali está a hora da <b>conferência</b> (a hora da venda desses canais chega quando plugarmos as APIs deles) · colunas (−) são deduções e (+) é crédito · <b>Estorno</b> = o valor exato da linha "Estorno" da venda no ML (no Flex ele já vem líquido: bonificação menos o frete cobrado), somado na M.C. · no Flex o custo do frete é o <b>motoboy</b> configurado no ⚙️ · tarifa <span class="ok">REAL</span> = pescada do ML · <span class="ok">BLING</span> = comissão que o Bling importou do canal (TikTok/Shopee/Magalu) · sem tag = % configurada · custo carrega sob demanda por página · 🛒 = mais de 1 item/unidade</div></div>'+
     '<div class="grid2">'+
       '<div class="sec"><h2>📈 Pedidos por dia</h2><div class="chartbox"><canvas id="cPed"></canvas></div></div>'+
       '<div class="sec"><h2>💰 Faturamento por dia</h2><div class="chartbox"><canvas id="cFat"></canvas></div></div>'+
@@ -810,7 +810,7 @@ function renderAnalise(){
       '</tr>';
     }
     return sep + '<tr'+(h._cancelado?' style="opacity:.38" title="pedido CANCELADO no Bling — fora dos totais"':'')+'>'+
-      '<td class="dim" style="white-space:nowrap" title="'+(h.venda_em?('venda: '+dtBR(h.venda_em)+' · '):(h.venda_dia?('venda: '+String(h.venda_dia).slice(8,10)+'/'+String(h.venda_dia).slice(5,7)+' · '):''))+'conferido: '+dtBR(h.conferido_em)+'">'+(h.venda_em?dtBR(h.venda_em):(h.venda_dia?(String(h.venda_dia).slice(8,10)+'/'+String(h.venda_dia).slice(5,7)+(h.nf_emissao?(' '+String(h.nf_emissao).replace(' ','T').slice(11,16)+' <span style="font-size:9px" title="hora da EMISSÃO da NF no Bling — a hora exata da venda só a API do canal dá">🧾</span>'):' <span style="font-size:9px" title="dia da venda (Bling) — hora só com a API do canal">🕘</span>')):(dtBR(h.conferido_em)+' <span style="font-size:9px" title="hora da conferência">🕘</span>')))+'</td>'+
+      '<td class="dim" style="white-space:nowrap" title="'+(h.venda_em?('venda: '+dtBR(h.venda_em)+' · '):(h.venda_dia?('venda: '+String(h.venda_dia).slice(8,10)+'/'+String(h.venda_dia).slice(5,7)+' · '):''))+'conferido: '+dtBR(h.conferido_em)+'">'+(h.venda_em?dtBR(h.venda_em):(h.venda_dia?(String(h.venda_dia).slice(8,10)+'/'+String(h.venda_dia).slice(5,7)+(h.nf_emissao?(' '+String(h.nf_emissao).replace(' ','T').slice(11,16)+' <span style="font-size:9px" title="hora da EMISSÃO da NF no Bling — a hora exata da venda só a API do canal dá">🧾</span>'):' <span style="font-size:9px" title="dia da venda (Bling) — hora só com a API do canal">🕘</span>')):(h.nf_emissao?(String(h.nf_emissao).slice(8,10)+'/'+String(h.nf_emissao).slice(5,7)+' '+String(h.nf_emissao).replace(' ','T').slice(11,16)+' <span style="font-size:9px" title="hora da EMISSÃO da NF no Bling — a hora exata da venda só a API do canal dá">🧾</span>'):(dtBR(h.conferido_em)+' <span style="font-size:9px" title="hora da conferência">🕘</span>'))))+'</td>'+
       '<td>'+(h._cancelado?'<span title="CANCELADO no Bling — fora dos totais">⚪</span> ':(h.sintetico?'<span title="venda no Bling, ainda NÃO bipada — margem já calculada; NF entra na bipagem">🟠</span> ':'<span title="bipado no checkout">🟢</span> '))+'<b>'+esc(h.numero||h.id)+'</b>'+(carrinho?' <span class="badge" title="'+unid+' unidades">🛒 '+unid+'</span>':'')+
         (h.nf_numero?'<div class="desc">NF '+esc(h.nf_numero)+'</div>':'')+'</td>'+
       (function(){

@@ -41,7 +41,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v28/06 b9';
+const VERSAO     = 'girassol-backup-offline v21/07 b10';
 
 // ── SESSÃO DE OPERADOR (cookie assinado HMAC) — protege rotas de dados/ação ──
 // Segredo estável entre restarts. Usa ADMIN_KEY (já configurada no Render) como base.
@@ -953,13 +953,15 @@ function routes(readBody) {
     // HISTÓRICO — últimos pedidos finalizados (do conferidos.json), mais recentes primeiro
     if (method === 'GET' && p === '/girassol-backup-offline/historico') {
       const conf = readJson(CONFERIDOS_FILE, {});
+      // BUGFIX d45: o backfill de nf_emissao rodava DEPOIS do map — a resposta do 1º carregamento saía sem a hora
+      // da NF (só o 2º F5 pegava). Agora completa o conf ANTES de montar os itens.
+      let _mudouNF=false;
+      for (const [cid2,c3] of Object.entries(conf)) { if (c3 && c3.nf_emissao === undefined) { const sn2 = readJson(path.join(CACHE_DIR, String(cid2), 'pedido.json'), null); c3.nf_emissao = (sn2 && sn2.nf && sn2.nf.dataEmissao) || null; _mudouNF=true; } }
+      if (_mudouNF) { try { writeJson(CONFERIDOS_FILE, conf); } catch(e){} }
       const itens = Object.keys(conf).map(id => ({ id, ...conf[id] }))
         .sort((a, b) => String(b.conferido_em || '').localeCompare(String(a.conferido_em || '')));
       const reenvios = readJson(CONFERIDOS_FILE.replace('conferidos.json', 'reenvios.json'), {});
       const reenvioDireto = String(process.env.CHECKOUT_REENVIO_DIRETO_EMPRESAS || '').toLowerCase().split(',').map(s => s.trim()).includes('girassol');
-      let _mudouNF=false;
-      for (const [cid2,c3] of Object.entries(conf)) { if (c3 && c3.nf_emissao === undefined) { const sn2 = readJson(path.join(CACHE_DIR, String(cid2), 'pedido.json'), null); c3.nf_emissao = (sn2 && sn2.nf && sn2.nf.dataEmissao) || null; _mudouNF=true; } }
-      if (_mudouNF) { try { writeJson(CONFERIDOS_FILE, conf); } catch(e){} }
       const vendasB = Object.values(readJson(path.join(CACHE_DIR, '_vendas_dia.json'), {}));
       json(res, 200, { ok: true, total: Object.keys(conf).length, itens, reenvios, reenvio_direto: reenvioDireto, vendas_bling: vendasB });
       return true;
@@ -2146,10 +2148,11 @@ async function vendasSync() {
       paginas++;
       for (const p of lista) {
         if (!p || p.id == null) continue;
-        const nl = p.numeroPedidoLoja || null;
+        const nl = p.numeroPedidoLoja || p.numeroLoja || null;   // a LISTAGEM do Bling manda numeroLoja (o detalhe manda numeroPedidoLoja)
+        const ljId = String((p.loja && p.loja.id) || '');
         atual[String(p.id)] = {
           id: p.id, numero: p.numero != null ? p.numero : null,
-          numero_loja: nl, marketplace: _inferCanal(nl),
+          numero_loja: nl, marketplace: LOJA_MKT[ljId] || _inferCanal(nl),   // canal OFICIAL pela loja do Bling; formato do nº é só fallback
           data: (p.data || '').slice(0, 10) || null,
           total: (p.total != null && isFinite(Number(p.total))) ? Number(p.total) : null,
           cliente: (p.contato && p.contato.nome) || '',
@@ -2172,6 +2175,8 @@ async function vendasSync() {
         const rd = await blingGet('/pedidos/vendas/' + v.id);
         const det = (rd && rd.ok && rd.data && rd.data.data) || null;
         if (det) {
+          if (!v.numero_loja && det.numeroPedidoLoja) v.numero_loja = det.numeroPedidoLoja;   // detalhe traz numeroPedidoLoja
+          if (!v.marketplace || v.marketplace === 'outro') { const lj2 = String((det.loja && det.loja.id) || ''); v.marketplace = LOJA_MKT[lj2] || _inferCanal(v.numero_loja); }
           v.it = (det.itens || []).map(i2 => ({ sku: (i2.codigo || (i2.produto && i2.produto.codigo) || '').trim() || null, qtd: Number(i2.quantidade || 1), vt: Math.round(Number(i2.valor || 0) * Number(i2.quantidade || 1) * 100) / 100 }));
           const tc = det.taxas && Number(det.taxas.taxaComissao); if (isFinite(tc) && tc > 0) v.taxa_mkt = Math.round(tc * 100) / 100;
           const cf = det.taxas && Number(det.taxas.custoFrete); if (isFinite(cf) && cf > 0) v.frete_mkt = Math.round(cf * 100) / 100;
