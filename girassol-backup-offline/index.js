@@ -508,7 +508,7 @@ function routes(readBody) {
       const atual = readJson(CFG_FILE, { aliquotas: {}, taxas: {} });
       if (body.aliquotas && typeof body.aliquotas === 'object') for (const [k2, v2] of Object.entries(body.aliquotas)) { const n2 = Number(v2); if (/^\d{4}-\d{2}$/.test(k2) && isFinite(n2) && n2 >= 0 && n2 <= 40) atual.aliquotas[k2] = n2; else if (v2 === null) delete atual.aliquotas[k2]; }
       if (body.taxas && typeof body.taxas === 'object') for (const [k2, v2] of Object.entries(body.taxas)) { const n2 = Number(v2); if (isFinite(n2) && n2 >= 0 && n2 <= 50) atual.taxas[String(k2).toLowerCase()] = n2; else if (v2 === null) delete atual.taxas[String(k2).toLowerCase()]; }
-      if (body.flex && typeof body.flex === 'object') { atual.flex = atual.flex || {}; for (const [k2, v2] of Object.entries(body.flex)) { const n2 = Number(v2); if ((k2 === 'geral' || k2 === 'shopee') && isFinite(n2) && n2 >= 0 && n2 <= 100) atual.flex[k2] = n2; else if (v2 === null) delete atual.flex[k2]; } }
+      if (body.flex && typeof body.flex === 'object') { atual.flex = atual.flex || {}; for (const [k2, v2] of Object.entries(body.flex)) { const n2 = Number(v2); if (['ml', 'shopee', 'outros', 'geral'].indexOf(k2) >= 0 && isFinite(n2) && n2 >= 0 && n2 <= 100) atual.flex[k2] = n2; else if (v2 === null) delete atual.flex[k2]; } }
       writeJson(CFG_FILE, atual);
       json(res, 200, { ok: true, config: atual });
       return true;
@@ -2183,7 +2183,7 @@ async function mlSyncFees(dias) {
     const mk = String(c.marketplace || '').toLowerCase();
     if (mk !== 'ml' && mk !== 'mercadolivre') return false;
     if (!c.numero_loja) return false;
-    return c.tarifa_ml == null || c.venda_em == null || !c.ml_costs_v2 || t >= recheck;   // !ml_costs_v2 = ainda nao passou pelo /costs (frete real + estorno) — vale uma passada
+    return c.tarifa_ml == null || c.venda_em == null || !c.ml_costs_v3 || t >= recheck;   // !ml_costs_v2 = ainda nao passou pelo /costs (frete real + estorno) — vale uma passada
   }).map(([cid]) => cid);
   if (!alvos.length) { console.log('[ML-FEES] nada a pescar (' + dias + 'd)'); return { ok: true, nada: true }; }
   _mls = { rodando: true, feitos: 0, total: alvos.length, ok: 0, falhas: 0, iniciado_em: new Date().toISOString(), erros: {}, amostras: [] };
@@ -2196,7 +2196,7 @@ async function mlSyncFees(dias) {
   const salvar = () => {
     if (!Object.keys(pend).length) return;
     const c2 = readJson(CONFERIDOS_FILE, {});
-    for (const [cid, d] of Object.entries(pend)) { if (!c2[cid]) continue; if (d.fee != null) c2[cid].tarifa_ml = d.fee; if (d.frete != null) c2[cid].frete_ml = d.frete; if (d.venda) c2[cid].venda_em = d.venda; if (d.credito != null) c2[cid].credito_ml = d.credito; if (d.credito_fonte) c2[cid].credito_fonte = d.credito_fonte; if (d.logistica) c2[cid].logistica_ml = d.logistica; if (d.costs_ok) c2[cid].ml_costs_v2 = 1; }
+    for (const [cid, d] of Object.entries(pend)) { if (!c2[cid]) continue; if (d.fee != null) c2[cid].tarifa_ml = d.fee; if (d.frete != null) c2[cid].frete_ml = d.frete; if (d.venda) c2[cid].venda_em = d.venda; if (d.credito != null) c2[cid].credito_ml = d.credito; if (d.credito_fonte) c2[cid].credito_fonte = d.credito_fonte; if (d.logistica) c2[cid].logistica_ml = d.logistica; if (d.costs_ok) { c2[cid].ml_costs_v3 = 1; if (d.credito == null) delete c2[cid].credito_ml; if (d.frete == null) delete c2[cid].frete_ml; } }
     writeJson(CONFERIDOS_FILE, c2);
     for (const cid of Object.keys(pend)) delete pend[cid];
   };
@@ -2236,7 +2236,7 @@ async function mlSyncFees(dias) {
         }
         const reg = { fee: Math.round(fee * 100) / 100, frete: null, venda: venda, _orders: ords.length };
         if (shipId) {
-          let ehFlex = false;
+          let ehFlex = false, baseCost = null;
           try {
             const rs = await fetch('https://api.mercadolibre.com/shipments/' + shipId, H);
             const ds = await rs.json().catch(() => null);
@@ -2244,36 +2244,44 @@ async function mlSyncFees(dias) {
               const logi = (ds.logistic && ds.logistic.type) || ds.logistic_type || null;
               if (logi) reg.logistica = logi;
               ehFlex = (logi === 'self_service');   // self_service = Mercado Envios FLEX (quem entrega e o vendedor)
+              const bc = Number(ds.base_cost);
+              if (isFinite(bc) && bc > 0) baseCost = bc;   // bonificacao que o ML paga pela entrega Flex
               const so = ds.shipping_option || {};
               const lc = Number(so.list_cost != null ? so.list_cost : ds.list_cost);
               const cc = Number(so.cost != null ? so.cost : ds.cost);
               // SO grava frete quando o vendedor realmente paga algo. Gravar 0 fazia o painel achar que
               // "0 e o valor real" e ignorar o custo configurado do FLEX (o motoboy) -> margem inflada.
-              if (isFinite(lc) && isFinite(cc) && lc > cc) reg.frete = Math.round((lc - cc) * 100) / 100;
+              if (!ehFlex && isFinite(lc) && isFinite(cc) && lc > cc) reg.frete = Math.round((lc - cc) * 100) / 100;
             }
           } catch (e) {}
           await dorme(200);
-          // /shipments/{id}/costs = a verdade do frete e do ESTORNO:
-          //  - senders[0].cost ....... o que o VENDEDOR paga de frete pro ML (autoritativo)
-          //  - compensation / compensations[] ... compensacoes explicitas (avaria, dimensao errada etc.)
-          //  - FLEX (self_service): quem entrega e o vendedor, entao o ML repassa o valor do frete
-          //    (gross_amount) como CREDITO. Conferido no pedido 116454: 34,90 - 12,58 + 11,00 = 33,32.
+          // /shipments/{id}/costs + base_cost = o ESTORNO exatamente como o ML mostra na tela da venda.
+          //  - senders[0].cost .... frete que o ML COBRA do vendedor
+          //  - base_cost .......... bonificacao que o ML PAGA pela entrega Flex
+          //  - FLEX: o ML nao mostra as duas pontas, mostra o LIQUIDO (base_cost - cost). Conferido:
+          //      116454 -> 11,00 - 0,00 = 11,00   |   116462 -> 11,00 - 9,90 = 1,10
+          //    Por isso, no Flex, o frete cobrado NAO entra como custo separado (ja esta liquido aqui);
+          //    o custo real do Flex e o motoboy, configurado no painel por canal.
           try {
             const rc = await fetch('https://api.mercadolibre.com/shipments/' + shipId + '/costs', H);
             const dc = await rc.json().catch(() => null);
             if (rc.ok && dc) {
               reg.costs_ok = true;
               const sd0 = Array.isArray(dc.senders) ? dc.senders[0] : null;
-              const sc = Number(sd0 && sd0.cost);
-              if (isFinite(sc) && sc > 0) reg.frete = Math.round(sc * 100) / 100;   // sobrepoe a conta do shipment
-              let cred = 0;
-              if (sd0) {
+              const scost = Number(sd0 && sd0.cost);
+              const scOk = isFinite(scost) && scost > 0;
+              let cred = 0, fonte = null;
+              if (sd0) {   // compensacoes explicitas (avaria, dimensao errada...) vem primeiro
                 const c1 = Number(sd0.compensation);
-                if (isFinite(c1) && c1 > 0) cred += c1;
-                for (const cx of (sd0.compensations || [])) { const c2 = Number(cx && cx.amount); if (isFinite(c2) && c2 > 0) cred += c2; }
+                if (isFinite(c1) && c1 > 0) { cred += c1; fonte = 'compensation'; }
+                for (const cx of (sd0.compensations || [])) { const c2 = Number(cx && cx.amount); if (isFinite(c2) && c2 > 0) { cred += c2; fonte = 'compensation'; } }
               }
-              if (cred === 0 && ehFlex) { const ga = Number(dc.gross_amount); if (isFinite(ga) && ga > 0) cred = ga; }
-              if (cred > 0) { reg.credito = Math.round(cred * 100) / 100; reg.credito_fonte = (ehFlex ? 'flex_gross' : 'compensation'); }
+              if (cred === 0 && ehFlex && baseCost != null) {
+                cred = Math.round((baseCost - (scOk ? scost : 0)) * 100) / 100;   // LIQUIDO, igual a tela do ML
+                fonte = 'flex_liquido';
+              }
+              if (cred !== 0) { reg.credito = Math.round(cred * 100) / 100; reg.credito_fonte = fonte; }
+              if (!ehFlex && scOk) reg.frete = Math.round(scost * 100) / 100;   // fora do Flex o frete e custo de verdade
             }
           } catch (e) {}
           await dorme(200);

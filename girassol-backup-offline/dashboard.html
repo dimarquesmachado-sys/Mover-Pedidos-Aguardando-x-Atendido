@@ -100,7 +100,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd34';
+const DASH_BUILD = 'd35';
 let DADOS = [];
 let periodo = 'dia', pDe = '', pAte = '';   // abre no DIA (pedido do Diego)
 let SKUINFO = {}, skuInfoCarregado = false, _skuLoading = false;
@@ -108,8 +108,14 @@ let CFG = { aliquotas:{}, taxas:{} };   // alíquota Simples por mês (YYYY-MM: 
 // Alíquotas 2026 da GIRASSOL vindas de fábrica (editáveis no ⚙️; o que você salvar SOBREPÕE estas):
 const DEFAULT_ALIQ = { '2026-01':11.409280, '2026-02':11.3254, '2026-03':12.3402, '2026-04':13.6001, '2026-05':13.9149, '2026-06':14.056, '2026-07':14.1 };
 const aliqDe = mes => (CFG.aliquotas[mes] != null ? CFG.aliquotas[mes] : (DEFAULT_ALIQ[mes] != null ? DEFAULT_ALIQ[mes] : null));
-const DEFAULT_FLEX = { geral: 12, shopee: 9 };   // frete FLEX pago pela loja: R$ 12 todos os canais, R$ 9 Shopee (editável no ⚙️)
-const flexDe = ck => { const fx = (CFG.flex || {}); const k = (ck === 'shopee' ? 'shopee' : 'geral'); return (fx[k] != null ? fx[k] : DEFAULT_FLEX[k]); };
+const DEFAULT_FLEX = { ml: 12, shopee: 9, outros: 9 };   // motoboy do FLEX pago pela loja — ML R$ 12 · Shopee e demais R$ 9 (editável no ⚙️)
+const flexDe = ck => {
+  const fx = (CFG.flex || {});
+  const k = (ck === 'ml' || ck === 'shopee') ? ck : 'outros';
+  if (fx[k] != null) return fx[k];
+  if (k === 'outros' && fx.geral != null) return fx.geral;   // compatibilidade com a config antiga
+  return DEFAULT_FLEX[k];
+};
 const CANAIS_CFG = ['ml','shopee','magalu','amazon','tiktok','madeira','leroy','outro'];
 const canalKey = mk => { mk=(mk||'outro').toLowerCase(); return mk==='mercadolivre'?'ml':(CANAIS_CFG.includes(mk)?mk:'outro'); };
 let sortProd = { col: 'fat', dir: -1 };
@@ -216,7 +222,7 @@ function montar(){
       '<button class="chip" onclick="if(anPage>0){anPage--;renderAnalise();}">← Anterior</button>'+
       '<button class="chip" onclick="anPage++;renderAnalise()">Próxima →</button></div>'+
       '<div class="tw"><table id="tAnalise"></table></div>'+
-      '<div class="nota"><b>Sobre a ordem:</b> dentro de cada dia, ML aparece na hora REAL da venda; TikTok/Shopee/Magalu/Amazon aparecem na hora em que foram <b>bipados</b> (🕘) — por isso saem em blocos: o estoque bipa um canal de cada vez. A hora real da venda desses canais <b>só existe na API do próprio canal</b>. Pra confrontar com o Jodda, use o ⬇︎ CSV e case pelo <b>número da venda no marketplace</b>. · ML mostra a hora REAL da venda (vem da pesca); TikTok/Shopee o Bling não guarda hora — o 🕘 marca que ali está a hora da <b>conferência</b> (a hora da venda desses canais chega quando plugarmos as APIs deles) · colunas (−) são deduções e (+) é crédito · <b>Estorno</b> = compensação de envio que o ML devolve pra loja (típica do Flex), somada na M.C. · tarifa <span class="ok">REAL</span> = pescada do ML · <span class="ok">BLING</span> = comissão que o Bling importou do canal (TikTok/Shopee/Magalu) · sem tag = % configurada · custo carrega sob demanda por página · 🛒 = mais de 1 item/unidade</div></div>'+
+      '<div class="nota"><b>Sobre a ordem:</b> dentro de cada dia, ML aparece na hora REAL da venda; TikTok/Shopee/Magalu/Amazon aparecem na hora em que foram <b>bipados</b> (🕘) — por isso saem em blocos: o estoque bipa um canal de cada vez. A hora real da venda desses canais <b>só existe na API do próprio canal</b>. Pra confrontar com o Jodda, use o ⬇︎ CSV e case pelo <b>número da venda no marketplace</b>. · ML mostra a hora REAL da venda (vem da pesca); TikTok/Shopee o Bling não guarda hora — o 🕘 marca que ali está a hora da <b>conferência</b> (a hora da venda desses canais chega quando plugarmos as APIs deles) · colunas (−) são deduções e (+) é crédito · <b>Estorno</b> = o valor exato da linha "Estorno" da venda no ML (no Flex ele já vem líquido: bonificação menos o frete cobrado), somado na M.C. · no Flex o custo do frete é o <b>motoboy</b> configurado no ⚙️ · tarifa <span class="ok">REAL</span> = pescada do ML · <span class="ok">BLING</span> = comissão que o Bling importou do canal (TikTok/Shopee/Magalu) · sem tag = % configurada · custo carrega sob demanda por página · 🛒 = mais de 1 item/unidade</div></div>'+
     '<div class="grid2">'+
       '<div class="sec"><h2>📈 Pedidos por dia</h2><div class="chartbox"><canvas id="cPed"></canvas></div></div>'+
       '<div class="sec"><h2>💰 Faturamento por dia</h2><div class="chartbox"><canvas id="cFat"></canvas></div></div>'+
@@ -231,10 +237,13 @@ function montar(){
       '<div class="tw"><table id="tProj"></table></div><div id="projAviso"></div></div>'+
     '<div class="sec"><h2>⚙️ Impostos &amp; taxas <span class="hint">alíquota do Simples varia mês a mês · taxas de marketplace em % (estimativa; ML tem a REAL por pedido na busca)</span></h2>'+
       '<div id="cfgBox"></div>'+
-      '<div style="font-size:12px;color:var(--mut);margin:14px 0 6px">🚛 Frete FLEX pago pela loja (R$) — de fábrica: R$ 12 geral · R$ 9 Shopee · usado quando o pedido é FLEX e o canal não informa frete real</div>'+
+      '<div style="font-size:12px;color:var(--mut);margin:14px 0 6px">🚛 Motoboy do FLEX pago pela loja (R$) — de fábrica: <b>ML R$ 12</b> · <b>Shopee R$ 9</b> · <b>demais R$ 9</b>. Entra como custo quando o pedido é FLEX.</div>'+
     '<div style="display:flex;gap:14px;flex-wrap:wrap">'+
-      '<label style="font-size:12px;color:var(--mut)">Todos os canais<br><input type="number" step="0.5" min="0" max="100" data-flex="geral" value="'+((CFG.flex&&CFG.flex.geral!=null)?CFG.flex.geral:DEFAULT_FLEX.geral)+'" style="width:86px'+((CFG.flex&&CFG.flex.geral!=null)?'':';color:#8b96b3')+'"></label>'+
-      '<label style="font-size:12px;color:var(--mut)">Shopee<br><input type="number" step="0.5" min="0" max="100" data-flex="shopee" value="'+((CFG.flex&&CFG.flex.shopee!=null)?CFG.flex.shopee:DEFAULT_FLEX.shopee)+'" style="width:86px'+((CFG.flex&&CFG.flex.shopee!=null)?'':';color:#8b96b3')+'"></label>'+
+      [['ml','Mercado Livre'],['shopee','Shopee'],['outros','Demais canais']].map(function(fx){
+        var salvo = (CFG.flex && CFG.flex[fx[0]] != null) ? CFG.flex[fx[0]] : null;
+        var val = salvo != null ? salvo : DEFAULT_FLEX[fx[0]];
+        return '<label style="font-size:12px;color:var(--mut)">'+fx[1]+'<br><input type="number" step="0.5" min="0" max="100" data-flex="'+fx[0]+'" value="'+val+'" style="width:96px'+(salvo!=null?'':';color:#8b96b3')+'" title="'+(salvo!=null?'valor salvo por você':'de fábrica (R$ '+DEFAULT_FLEX[fx[0]]+') — edite p/ sobrepor')+'"></label>';
+      }).join('')+
     '</div>'+
     '<div style="margin-top:12px"><button class="btn" onclick="salvarCfg()">💾 Salvar</button> <span id="cfgMsg" class="mut" style="font-size:12px;margin-left:8px"></span></div>'+
       '<div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line)"><div style="font-size:12px;color:var(--mut);margin-bottom:8px">🔧 Manutenção <span class="dim">(rodam sozinhas de madrugada — use só se quiser AGORA)</span></div>'+
@@ -476,7 +485,7 @@ function calcPL(h){
   else if (h.flex) { const fx = flexDe(ck); if (fx!=null && fx>0) { frV = fx; frFonte = 'flex'; } }
   const completo = [rp,imposto,tarifa].every(v=>v!=null) && custoOk;
   // ESTORNO do ML (compensação de envio, típica do Flex): crédito que o ML devolve pra loja — SOMA na M.C.
-  const credito = (h.credito_ml!=null && isFinite(Number(h.credito_ml)) && Number(h.credito_ml)>0) ? Number(h.credito_ml) : null;
+  const credito = (h.credito_ml!=null && isFinite(Number(h.credito_ml)) && Number(h.credito_ml)!==0) ? Number(h.credito_ml) : null;
   const mc = completo? rp-imposto-tarifa-custo-(frV||0)+(credito||0) : null;
   return {mes,ck,rp,tot,frete,aliq,imposto,feeReal,feeBling,tx,tarifa,custo,cusUn,unTot,custoOk,frV,frFonte,credito,completo,mc};
 }
@@ -753,7 +762,7 @@ function renderAnalise(){
       cel(P.custoOk?P.custo:null)+cel(P.imposto)+
       '<td class="num">'+(P.tarifa!=null?BRL(P.tarifa)+(P.feeReal!=null?' <span class="st ok" style="font-size:9px">REAL</span>':(P.feeBling!=null?' <span class="st ok" style="font-size:9px">BLING</span>':''))+(P.rp?'<div class="desc">'+Math.round(P.tarifa/P.rp*100)+'%</div>':''):'<span class="dim">—</span>')+'</td>'+
       '<td class="num">'+(P.frV!=null?BRL(P.frV)+(P.frFonte==='flex'?' <span class="st warn" style="font-size:9px">FLEX</span>':''):'<span class="dim">—</span>')+'</td>'+
-      '<td class="num">'+(P.credito!=null?'<span class="ok">+'+BRL(P.credito)+'</span>':'<span class="dim">—</span>')+'</td>'+
+      '<td class="num">'+(P.credito!=null?('<span class="'+(P.credito>=0?'ok':'bad')+'">'+(P.credito>=0?'+':'')+BRL(P.credito)+'</span>'):'<span class="dim">—</span>')+'</td>'+
       '<td class="num" style="font-weight:800">'+(P.mc!=null?('<span class="'+(P.mc>=0?'ok':'bad')+'">'+BRL(P.mc)+'</span>'):'<span class="warn" title="falta config/custo">—</span>')+'</td>'+
       '<td class="num '+(pmc!=null?(pmc>=0?'ok':'bad'):'dim')+'">'+(pmc!=null?pmc+'%':'—')+'</td>'+
     '</tr>';
