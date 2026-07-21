@@ -100,7 +100,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd41';
+const DASH_BUILD = 'd42';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -618,6 +618,7 @@ const linkMkt = h => {
   if (!nl) return '';
   const ck = canalKey(h.marketplace);
   if (ck === 'ml') return 'https://www.mercadolivre.com.br/vendas/' + nl + '/detalhe';
+  if (ck === 'tiktok' && h.numero_loja) return 'https://seller-br.tiktok.com/order/detail?order_no=' + encodeURIComponent(String(h.numero_loja).replace(/\D/g,'')) + '&shop_region=BR';   // order_no = o próprio número que temos — link direto
   if (ck === 'shopee' && h.numero_loja) return 'https://seller.shopee.com.br/portal/sale/order?searchKeyword=' + encodeURIComponent(String(h.numero_loja).trim());   // abre o seller center filtrado no ID do pedido (o id interno da URL direta só vem com o app)
   return '';   // demais canais: falta a URL de cada seller center — basta o Diego colar um exemplo
 };
