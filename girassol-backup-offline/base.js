@@ -35,7 +35,7 @@ const SMTP_PORT  = parseInt(process.env.GIRABKP_SMTP_PORT || '465', 10);
 const EMAIL_USER = process.env.GIRABKP_EMAIL_USER || '';   // conta @magazinegirassol que ENVIA (login)
 const EMAIL_PASS = process.env.GIRABKP_EMAIL_PASS || '';   // senha normal dessa conta
 const EMAIL_DEST = process.env.GIRABKP_EMAIL_DEST || '';   // destino (estoquista) — SEM padrão cravado: configure a env no Render (aceita lista com vírgula)
-const SCHEMA = 4;  // versão do snapshot — bump força re-cache dos pedidos antigos (b36: re-explode composições/variações)
+const SCHEMA = 5;  // versão do snapshot — bump força re-cache dos pedidos antigos (b11: nf.dataEmissao entra no snapshot)
 
 // loja → marketplace (mesmo mapa do checkout Girassol)
 const LOJA_MKT = {
