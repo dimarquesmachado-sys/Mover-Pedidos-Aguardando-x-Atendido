@@ -76,6 +76,7 @@
   .badge{font-size:10px;font-weight:700;padding:2px 7px;border-radius:5px;color:#0b0d12;text-transform:uppercase}
   .num{font-size:18px;font-weight:700}
   .smeta{font-size:13px;color:var(--mut);font-family:ui-monospace,monospace;margin-top:4px}
+  .stime{font-size:10px;opacity:.55;margin-top:2px}
   .scli{font-size:14px;color:var(--tx);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .pdfok{color:var(--ok);font-weight:700}
   .donetag{margin-left:auto;color:var(--ok);font-size:11px;font-weight:700}
@@ -379,7 +380,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b115';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b116';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#b3b9c4'}, magalu:{n:'Magalu',c:'#0086ff'}, shein:{n:'Shein',c:'#e0e0e0'},
@@ -819,6 +820,7 @@ function renderLista(){
         '<span class="chk'+((p.tem_nf||p.nf_numero)?'':' off')+'" title="Nota Fiscal">🧾<i>'+((p.tem_nf||p.nf_numero)?'✓':'✗')+'</i></span>'+
         '<span class="badge" style="background:'+m.c+'">'+m.n+'</span>'+
         '<span class="num">'+esc(p.numero)+'</span>'+
+        ((souAdmin() && p.numero_loja && /ml|merc/i.test(String(p.marketplace||'')))?'<a href="https://www.mercadolivre.com.br/vendas/'+String(p.numero_loja).replace(/\D/g,'')+'/detalhe" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="abrir a venda no Mercado Livre (só admin vê)" style="text-decoration:none;font-size:13px">↗</a>':'')+
         (p.volumes>1?'<span class="voltag">📦 '+p.volumes+' vol</span>':'')+
         (resvOutro?'<span class="resvtag">🟠 '+esc(resvOutro)+'</span>':'')+
         (p.conferido?'<span class="donetag">✓</span>':'')+
@@ -826,6 +828,12 @@ function renderLista(){
       '</div>'+
       (p.cliente?'<div class="scli">'+esc(p.cliente)+'</div>':'')+
       '<div class="smeta">'+((p.skus&&p.skus[0])?'📦 <b>'+esc(p.skus[0])+'</b>'+(p.skus.length>1?' +'+(p.skus.length-1):'')+' · ':'')+(p.itens||0)+' item(s) · NF '+(p.nf_numero?esc(p.nf_numero):(p.tem_nf?'ok':'—'))+(p.tem_danfe?' · <span class="pdfok">PDF✓</span>':'')+'</div>'+
+      (function(){
+        var dt = p.nf_emissao || p.visto_em; if(!dt) return '';
+        var d2 = new Date(String(dt).replace(' ','T')); if(isNaN(d2)) return '';
+        var f2 = ('0'+d2.getDate()).slice(-2)+'/'+('0'+(d2.getMonth()+1)).slice(-2)+' '+('0'+d2.getHours()).slice(-2)+':'+('0'+d2.getMinutes()).slice(-2);
+        return '<div class="stime" title="'+(p.nf_emissao?'data e hora da EMISSÃO da NF no Bling':'quando este pedido apareceu pro sistema (o Bling não dá a hora do pedido)')+'">🕓 '+(p.nf_emissao?'NF ':'no Bling ~')+f2+'</div>';
+      })()+
     '</div>';
   }).join('');
 }
