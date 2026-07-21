@@ -723,6 +723,17 @@ function routes(readBody) {
       return true;
     }
 
+    // ADMIN/sessão: sincronizador de vendas do Bling (todas as situações). ?status=1 mostra o estado.
+    if (method === 'GET' && p === '/girassol-backup-offline/vendas-sync') {
+      const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const sessV = validarSessao(req.headers['cookie']);
+      if (!((process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || sessV)) { json(res, 404, { error: 'not found' }); return true; }
+      if (urlObj.searchParams.get('status')) { json(res, 200, { ok: true, rodando: _vsy.rodando, vendas_na_janela: _vsy.total, atualizado_em: _vsy.atualizado_em, erro: _vsy.erro }); return true; }
+      vendasSync().catch(() => {});
+      json(res, 200, { ok: true, iniciado: true });
+      return true;
+    }
+
     if ((method === 'POST' || method === 'GET') && p === '/girassol-backup-offline/run') {
       const forcar = /[?&]force=1\b/.test(urlObj.search || '');
       rodarCiclo(forcar ? 'manual-force' : 'manual', forcar);
@@ -946,7 +957,8 @@ function routes(readBody) {
         .sort((a, b) => String(b.conferido_em || '').localeCompare(String(a.conferido_em || '')));
       const reenvios = readJson(CONFERIDOS_FILE.replace('conferidos.json', 'reenvios.json'), {});
       const reenvioDireto = String(process.env.CHECKOUT_REENVIO_DIRETO_EMPRESAS || '').toLowerCase().split(',').map(s => s.trim()).includes('girassol');
-      json(res, 200, { ok: true, total: Object.keys(conf).length, itens, reenvios, reenvio_direto: reenvioDireto });
+      const vendasB = Object.values(readJson(path.join(CACHE_DIR, '_vendas_dia.json'), {}));
+      json(res, 200, { ok: true, total: Object.keys(conf).length, itens, reenvios, reenvio_direto: reenvioDireto, vendas_bling: vendasB });
       return true;
     }
 
@@ -2100,6 +2112,64 @@ function routes(readBody) {
 }
 
 // roda 1 ciclo logo após o boot do serviço
+// ═══ VENDAS-SYNC (background): TODAS as vendas do Bling por data, em QUALQUER situação —
+// independe de bipagem. Roda a cada 5 min + boot + botão. Cancelada vem com a situação marcada.
+let _vsy = { rodando: false, total: 0, atualizado_em: null, erro: null };
+function _inferCanal(nl) {
+  const s = String(nl || '');
+  if (!s) return 'outro';
+  if (s.indexOf('-') >= 0) return 'amazon';
+  if (/[a-z]/i.test(s)) return 'shopee';
+  if (/^200/.test(s)) return 'ml';
+  if (/^585/.test(s)) return 'tiktok';
+  if (/^15/.test(s)) return 'magalu';
+  return 'outro';
+}
+async function vendasSync() {
+  if (_vsy.rodando) return;
+  _vsy.rodando = true; _vsy.erro = null;
+  try {
+    const isoD = dt => dt.toISOString().slice(0, 10);
+    const hoje = new Date();
+    const ini = new Date(hoje); ini.setDate(ini.getDate() - 3);
+    const fim = new Date(hoje); fim.setDate(fim.getDate() + 1);   // janela [hoje-3, hoje+1] — evita o bug do mesmo-dia do Bling
+    const F = path.join(CACHE_DIR, '_vendas_dia.json');
+    const atual = readJson(F, {});
+    let paginas = 0;
+    for (let pg = 1; pg <= 20; pg++) {
+      const r = await blingGet('/pedidos/vendas?dataEmissaoInicial=' + isoD(ini) + '&dataEmissaoFinal=' + isoD(fim) + '&pagina=' + pg + '&limite=100');
+      const lista = (r && r.ok && r.data && r.data.data) || [];
+      if (!lista.length) break;
+      paginas++;
+      for (const p of lista) {
+        if (!p || p.id == null) continue;
+        const nl = p.numeroPedidoLoja || null;
+        atual[String(p.id)] = {
+          id: p.id, numero: p.numero != null ? p.numero : null,
+          numero_loja: nl, marketplace: _inferCanal(nl),
+          data: (p.data || '').slice(0, 10) || null,
+          total: (p.total != null && isFinite(Number(p.total))) ? Number(p.total) : null,
+          cliente: (p.contato && p.contato.nome) || '',
+          situacao: (p.situacao && (p.situacao.valor || p.situacao.nome)) || null,
+          situacao_id: (p.situacao && p.situacao.id) || null,
+          loja_id: (p.loja && p.loja.id) || null,
+          atualizado_em: new Date().toISOString()
+        };
+      }
+      if (lista.length < 100) break;
+      await new Promise(r2 => setTimeout(r2, 450));
+    }
+    // poda: fora da janela de 6 dias sai do arquivo (o histórico de verdade vive nos conferidos)
+    const corte = new Date(hoje); corte.setDate(corte.getDate() - 6);
+    const corteS = isoD(corte);
+    for (const [k, v] of Object.entries(atual)) { if (!v || !v.data || v.data < corteS) delete atual[k]; }
+    writeJson(F, atual);
+    _vsy.total = Object.keys(atual).length; _vsy.atualizado_em = new Date().toISOString();
+    console.log('[VENDAS-SYNC] ok — ' + _vsy.total + ' venda(s) na janela (' + paginas + ' página(s))');
+  } catch (e) { _vsy.erro = String(e.message || e).slice(0, 140); console.log('[VENDAS-SYNC] falhou: ' + _vsy.erro); }
+  _vsy.rodando = false;
+}
+
 // ═══ CUSTO-SYNC (background): resolve custo/preço de TODOS os SKUs vendidos, devagar (anti-429),
 // e grava em cache PERMANENTE em disco (_custos.json, validade 7d). O sku-info lê daqui — instantâneo.
 let _cst = { rodando: false, feitos: 0, total: 0, ok: 0, falhas: 0, inicio: null };
@@ -2153,6 +2223,8 @@ function bootstrap() {
   // 90s depois do boot (após o ciclo inicial). Com dias=14 só re-checa os recentes — barato e idempotente.
   setTimeout(() => { try { console.log('[ML-FEES] pesca automática pós-deploy iniciando…'); mlSyncFees(14).catch(() => {}); } catch (e) {} }, 90 * 1000);
   setTimeout(() => { try { custoSync(false).catch(() => {}); } catch (e) {} }, 240 * 1000);   // custos: tartaruga pós-boot, só o que falta
+  setTimeout(() => { try { vendasSync().catch(() => {}); } catch (e) {} }, 150 * 1000);
+  setInterval(() => { try { vendasSync().catch(() => {}); } catch (e) {} }, 5 * 60 * 1000);   // vendas do Bling: análise quase em tempo real
   // ETIQUETA PARADA: enquanto existir pedido sem etiqueta, tenta de novo a cada 5 min (o cron normal é 10/10).
   // Em dia limpo (0 sem etiqueta) NADA extra roda — custo zero. Cobre etiqueta que o canal demora a gerar.
   setInterval(() => {
