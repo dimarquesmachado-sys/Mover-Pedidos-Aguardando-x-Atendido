@@ -20,7 +20,7 @@
        font:14px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Inter,sans-serif;padding:0 16px 40px}
   a{color:var(--ac2);text-decoration:none}
   .wrap{max-width:min(1720px,96vw);margin:0 auto}
-  .hdr{background:linear-gradient(180deg,rgba(10,14,26,.97) 70%,rgba(10,14,26,0));
+  .hdr{position:sticky;top:0;z-index:50;background:linear-gradient(180deg,rgba(10,14,26,.97) 70%,rgba(10,14,26,0));
        padding:14px 0 10px;margin:0 -16px;padding-left:16px;padding-right:16px}
   .hrow{max-width:min(1720px,96vw);margin:0 auto;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
   h1{font-size:17px;font-weight:800;margin:0;letter-spacing:-.02em;display:flex;align-items:center;gap:8px}
@@ -61,7 +61,7 @@
   th.sort{cursor:pointer} th.sort:hover{color:var(--tx)}
   /* cabecalho congelado: o wrapper .tw rola por dentro e o <th> gruda no topo dele */
   .tw{border-radius:10px}
-  .tw th{position:sticky;top:0;z-index:3;background:#141b33;box-shadow:0 2px 6px rgba(0,0,0,.45)}
+  .tw th{position:sticky;top:var(--hdrH,104px);z-index:3;background:#141b33;box-shadow:0 2px 6px rgba(0,0,0,.45)}
   .tw thead th{top:0}
 
   td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:middle}
@@ -100,7 +100,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd33';
+const DASH_BUILD = 'd34';
 let DADOS = [];
 let periodo = 'dia', pDe = '', pAte = '';   // abre no DIA (pedido do Diego)
 let SKUINFO = {}, skuInfoCarregado = false, _skuLoading = false;
@@ -391,6 +391,7 @@ function render(){
   renderCfg();
   renderGrafico();
   renderAnalise();
+  ajustaSticky();
 }
 
 function desenharCharts(labels, sPed, sFat){
@@ -577,6 +578,11 @@ const linkMkt = h => {
   if (ck === 'ml') return 'https://www.mercadolivre.com.br/vendas/' + nl + '/detalhe';
   return '';   // demais canais: falta a URL de cada seller center — basta o Diego colar um exemplo
 };
+function ajustaSticky(){
+  const hd = document.querySelector('.hdr');
+  if (hd) document.documentElement.style.setProperty('--hdrH', Math.max(0, hd.offsetHeight - 2) + 'px');
+}
+window.addEventListener('resize', ajustaSticky);
 function copiaNL(el){ const v = el.getAttribute('data-nl') || ''; try { navigator.clipboard && navigator.clipboard.writeText(v); } catch (e) {} el.style.color = '#34d399'; setTimeout(() => { el.style.color = ''; }, 700); }
 function renderGrafico(){
   const el=$('grafProg'); if(!el) return;
