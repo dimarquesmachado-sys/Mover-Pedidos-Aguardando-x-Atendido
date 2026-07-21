@@ -2183,7 +2183,7 @@ async function mlSyncFees(dias) {
     const mk = String(c.marketplace || '').toLowerCase();
     if (mk !== 'ml' && mk !== 'mercadolivre') return false;
     if (!c.numero_loja) return false;
-    return c.tarifa_ml == null || c.venda_em == null || t >= recheck;   // credito_ml vem junto na mesma passada
+    return c.tarifa_ml == null || c.venda_em == null || !c.ml_costs_v2 || t >= recheck;   // !ml_costs_v2 = ainda nao passou pelo /costs (frete real + estorno) — vale uma passada
   }).map(([cid]) => cid);
   if (!alvos.length) { console.log('[ML-FEES] nada a pescar (' + dias + 'd)'); return { ok: true, nada: true }; }
   _mls = { rodando: true, feitos: 0, total: alvos.length, ok: 0, falhas: 0, iniciado_em: new Date().toISOString(), erros: {}, amostras: [] };
@@ -2196,7 +2196,7 @@ async function mlSyncFees(dias) {
   const salvar = () => {
     if (!Object.keys(pend).length) return;
     const c2 = readJson(CONFERIDOS_FILE, {});
-    for (const [cid, d] of Object.entries(pend)) { if (!c2[cid]) continue; if (d.fee != null) c2[cid].tarifa_ml = d.fee; if (d.frete != null) c2[cid].frete_ml = d.frete; if (d.venda) c2[cid].venda_em = d.venda; if (d.credito != null) c2[cid].credito_ml = d.credito; }
+    for (const [cid, d] of Object.entries(pend)) { if (!c2[cid]) continue; if (d.fee != null) c2[cid].tarifa_ml = d.fee; if (d.frete != null) c2[cid].frete_ml = d.frete; if (d.venda) c2[cid].venda_em = d.venda; if (d.credito != null) c2[cid].credito_ml = d.credito; if (d.credito_fonte) c2[cid].credito_fonte = d.credito_fonte; if (d.logistica) c2[cid].logistica_ml = d.logistica; if (d.costs_ok) c2[cid].ml_costs_v2 = 1; }
     writeJson(CONFERIDOS_FILE, c2);
     for (const cid of Object.keys(pend)) delete pend[cid];
   };
@@ -2236,30 +2236,44 @@ async function mlSyncFees(dias) {
         }
         const reg = { fee: Math.round(fee * 100) / 100, frete: null, venda: venda, _orders: ords.length };
         if (shipId) {
+          let ehFlex = false;
           try {
             const rs = await fetch('https://api.mercadolibre.com/shipments/' + shipId, H);
             const ds = await rs.json().catch(() => null);
             if (rs.ok && ds) {
-              const lc = Number(ds.list_cost), cc = Number(ds.cost);
-              if (isFinite(lc) && isFinite(cc) && lc >= cc) reg.frete = Math.round((lc - cc) * 100) / 100;
+              const logi = (ds.logistic && ds.logistic.type) || ds.logistic_type || null;
+              if (logi) reg.logistica = logi;
+              ehFlex = (logi === 'self_service');   // self_service = Mercado Envios FLEX (quem entrega e o vendedor)
+              const so = ds.shipping_option || {};
+              const lc = Number(so.list_cost != null ? so.list_cost : ds.list_cost);
+              const cc = Number(so.cost != null ? so.cost : ds.cost);
+              // SO grava frete quando o vendedor realmente paga algo. Gravar 0 fazia o painel achar que
+              // "0 e o valor real" e ignorar o custo configurado do FLEX (o motoboy) -> margem inflada.
+              if (isFinite(lc) && isFinite(cc) && lc > cc) reg.frete = Math.round((lc - cc) * 100) / 100;
             }
           } catch (e) {}
           await dorme(200);
-          // ESTORNO / COMPENSACAO (Flex): /shipments/{id}/costs traz senders[] com "compensation" (campo antigo)
-          // e "compensations[]" com {amount, reason} (formato novo). O que o ML credita de volta pro vendedor.
+          // /shipments/{id}/costs = a verdade do frete e do ESTORNO:
+          //  - senders[0].cost ....... o que o VENDEDOR paga de frete pro ML (autoritativo)
+          //  - compensation / compensations[] ... compensacoes explicitas (avaria, dimensao errada etc.)
+          //  - FLEX (self_service): quem entrega e o vendedor, entao o ML repassa o valor do frete
+          //    (gross_amount) como CREDITO. Conferido no pedido 116454: 34,90 - 12,58 + 11,00 = 33,32.
           try {
             const rc = await fetch('https://api.mercadolibre.com/shipments/' + shipId + '/costs', H);
             const dc = await rc.json().catch(() => null);
-            if (rc.ok && dc && Array.isArray(dc.senders)) {
+            if (rc.ok && dc) {
+              reg.costs_ok = true;
+              const sd0 = Array.isArray(dc.senders) ? dc.senders[0] : null;
+              const sc = Number(sd0 && sd0.cost);
+              if (isFinite(sc) && sc > 0) reg.frete = Math.round(sc * 100) / 100;   // sobrepoe a conta do shipment
               let cred = 0;
-              for (const sd of dc.senders) {
-                const c1 = Number(sd && sd.compensation);
+              if (sd0) {
+                const c1 = Number(sd0.compensation);
                 if (isFinite(c1) && c1 > 0) cred += c1;
-                if (sd && Array.isArray(sd.compensations)) {
-                  for (const cx of sd.compensations) { const c2 = Number(cx && cx.amount); if (isFinite(c2) && c2 > 0) cred += c2; }
-                }
+                for (const cx of (sd0.compensations || [])) { const c2 = Number(cx && cx.amount); if (isFinite(c2) && c2 > 0) cred += c2; }
               }
-              if (cred > 0) reg.credito = Math.round(cred * 100) / 100;
+              if (cred === 0 && ehFlex) { const ga = Number(dc.gross_amount); if (isFinite(ga) && ga > 0) cred = ga; }
+              if (cred > 0) { reg.credito = Math.round(cred * 100) / 100; reg.credito_fonte = (ehFlex ? 'flex_gross' : 'compensation'); }
             }
           } catch (e) {}
           await dorme(200);
