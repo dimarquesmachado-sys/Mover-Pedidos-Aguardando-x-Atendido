@@ -41,7 +41,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v21/07 b10';
+const VERSAO     = 'girassol-backup-offline v21/07 b11';
 
 // ── SESSÃO DE OPERADOR (cookie assinado HMAC) — protege rotas de dados/ação ──
 // Segredo estável entre restarts. Usa ADMIN_KEY (já configurada no Render) como base.
@@ -724,6 +724,17 @@ function routes(readBody) {
     }
 
     // ADMIN/sessão: sincronizador de vendas do Bling (todas as situações). ?status=1 mostra o estado.
+    // DEBUG (?k=): 3 itens CRUS da listagem /pedidos/vendas — confirma se o Bling manda loja.id e numeroLoja
+    if (method === 'GET' && p === '/girassol-backup-offline/debug-vendas-raw') {
+      const kD = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      if (!process.env.ADMIN_KEY || kD !== process.env.ADMIN_KEY) { json(res, 404, { error: 'not found' }); return true; }
+      const isoDD = dt => dt.toISOString().slice(0, 10);
+      const hjD = new Date(); const inD = new Date(hjD); inD.setDate(inD.getDate() - 3); const fiD = new Date(hjD); fiD.setDate(fiD.getDate() + 1);
+      const rD = await blingGet('/pedidos/vendas?dataEmissaoInicial=' + isoDD(inD) + '&dataEmissaoFinal=' + isoDD(fiD) + '&pagina=1&limite=3');
+      json(res, 200, { ok: !!(rD && rD.ok), itens_crus: (rD && rD.data && rD.data.data) || [], loja_mkt_mapa: LOJA_MKT });
+      return true;
+    }
+
     if (method === 'GET' && p === '/girassol-backup-offline/vendas-sync') {
       const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
       const sessV = validarSessao(req.headers['cookie']);
@@ -1283,6 +1294,7 @@ function routes(readBody) {
         flex: !!(snapC && snapC.flex),
         servico: snapC ? (snapC.servico || '') : '',
         nf_numero: (snapC && snapC.nf && snapC.nf.numero) || null,
+        nf_emissao: (snapC && snapC.nf && snapC.nf.dataEmissao) || null,   // b11: hora da NF já entra na bipagem (dashboard ordena por ela)
         valor: (snapC && snapC.total != null) ? Number(snapC.total) : null,   // faturamento (total do pedido)
         uf: (snapC && snapC.uf) || null,
         vprod_nf: (function(){ try {   // Σ itens da NOTA (fonte fiscal) → produtos EXATO; frete = valor − vprod_nf
@@ -2193,6 +2205,35 @@ async function vendasSync() {
           }
         }
         await new Promise(r3 => setTimeout(r3, 450));
+      }
+    } catch (e) {}
+    // fase 3: nf_emissao dos conferidos RECENTES (🧾 do dashboard) — snapshots antigos não guardavam a hora da NF
+    // (parseNF descartava). Busca no detalhe /nfe/{id}, até 40 por rodada; quando não dá pra achar, marca '' e para de tentar.
+    try {
+      const confN = readJson(CONFERIDOS_FILE, {});
+      const corteN = Date.now() - 4 * 86400000;
+      const alvosN = Object.entries(confN)
+        .filter(([idN, cN]) => cN && cN.nf_emissao == null && cN.nf_numero && cN.conferido_em && Date.parse(cN.conferido_em) >= corteN)
+        .slice(0, 40);
+      const pendN = {};
+      for (const [idN] of alvosN) {
+        const snN = readJson(path.join(CACHE_DIR, String(idN), 'pedido.json'), null);
+        const nfIdN = snN && snN.nf && snN.nf.id;
+        if (!nfIdN) { pendN[idN] = ''; continue; }   // snapshot sumiu/sem NF → sentinela: não tenta de novo
+        const rN = await blingGet('/nfe/' + nfIdN);
+        const dN = rN && rN.ok && rN.data && rN.data.data;
+        if (dN && dN.dataEmissao) {
+          pendN[idN] = dN.dataEmissao;
+          if (snN && snN.nf) { snN.nf.dataEmissao = dN.dataEmissao; try { writeJson(path.join(CACHE_DIR, String(idN), 'pedido.json'), snN); } catch (e) {} }
+        }
+        await new Promise(r4 => setTimeout(r4, 450));
+      }
+      if (Object.keys(pendN).length) {
+        const c9 = readJson(CONFERIDOS_FILE, {});   // relê antes de gravar — não atropela bipagem que aconteceu no meio
+        let n9 = 0;
+        for (const [k9, v9] of Object.entries(pendN)) { if (c9[k9] && c9[k9].nf_emissao == null) { c9[k9].nf_emissao = v9; if (v9) n9++; } }
+        writeJson(CONFERIDOS_FILE, c9);
+        if (n9) console.log('[VENDAS-SYNC] nf_emissao preenchida em ' + n9 + ' conferido(s)');
       }
     } catch (e) {}
     // poda: fora da janela de 6 dias sai do arquivo (o histórico de verdade vive nos conferidos)
