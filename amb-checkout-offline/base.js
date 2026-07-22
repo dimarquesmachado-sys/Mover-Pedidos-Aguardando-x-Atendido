@@ -35,7 +35,7 @@ const SMTP_PORT  = parseInt(process.env.AMBBKP_SMTP_PORT || '465', 10);
 const EMAIL_USER = process.env.AMBBKP_EMAIL_USER || '';   // conta @ambtotal que ENVIA (login)
 const EMAIL_PASS = process.env.AMBBKP_EMAIL_PASS || '';   // senha normal dessa conta
 const EMAIL_DEST = process.env.AMBBKP_EMAIL_DEST || '';   // destino (estoquista) — SEM padrão cravado: configure a env no Render (aceita lista com vírgula)
-const SCHEMA = 4;  // versão do snapshot — bump força re-cache dos pedidos antigos (b36: re-explode composições/variações)
+const SCHEMA = 5;  // versão do snapshot — bump força re-cache dos pedidos antigos (b10: nf.dataEmissao entra no snapshot)
 
 // loja → marketplace (lojas da AMBTotal no Bling)
 const LOJA_MKT = {

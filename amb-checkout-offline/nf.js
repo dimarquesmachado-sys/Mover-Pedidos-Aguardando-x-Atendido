@@ -16,7 +16,8 @@ function parseNF(nf) {
     id: nf.id || null,
     numero: nf.numero || null,
     chave: nf.chaveAcesso || nf.chave || null,
-    situacao: (nf.situacao && (nf.situacao.id || nf.situacao)) || null
+    situacao: (nf.situacao && (nf.situacao.id || nf.situacao)) || null,
+    dataEmissao: nf.dataEmissao || null   // b10: hora OFICIAL da NF — antes era descartada aqui e o card 🕓 do painel nunca recebia o dado
   };
 }
 
