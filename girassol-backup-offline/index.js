@@ -41,7 +41,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v22/07 b13';
+const VERSAO     = 'girassol-backup-offline v22/07 b14';
 
 // ── SESSÃO DE OPERADOR (cookie assinado HMAC) — protege rotas de dados/ação ──
 // Segredo estável entre restarts. Usa ADMIN_KEY (já configurada no Render) como base.
@@ -739,7 +739,7 @@ function routes(readBody) {
       const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
       const sessV = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || sessV)) { json(res, 404, { error: 'not found' }); return true; }
-      if (urlObj.searchParams.get('status')) { json(res, 200, { ok: true, rodando: _vsy.rodando, vendas_na_janela: _vsy.total, atualizado_em: _vsy.atualizado_em, erro: _vsy.erro }); return true; }
+      if (urlObj.searchParams.get('status')) { json(res, 200, { ok: true, rodando: _vsy.rodando, fase: _vsy.fase || null, vendas_na_janela: _vsy.total, atualizado_em: _vsy.atualizado_em, erro: _vsy.erro }); return true; }
       vendasSync().catch(() => {});
       json(res, 200, { ok: true, iniciado: true });
       return true;
@@ -2144,7 +2144,7 @@ function _inferCanal(nl) {
 }
 async function vendasSync() {
   if (_vsy.rodando) return;
-  _vsy.rodando = true; _vsy.erro = null;
+  _vsy.rodando = true; _vsy.erro = null; _vsy.fase = 'listagem';
   try {
     const isoD = dt => dt.toISOString().slice(0, 10);
     const hoje = new Date();
@@ -2178,6 +2178,43 @@ async function vendasSync() {
       await new Promise(r2 => setTimeout(r2, 450));
     }
     writeJson(F, atual);   // b12: grava JÁ após a fase 1 — o 🔄 do dashboard espera 6s e recarrega; antes, o arquivo só era gravado no fim da rodada (~1 min) e o botão sempre mostrava a rodada anterior
+    _vsy.fase = 'nf_emissao';
+    // fase NF (rodava por último e NUNCA gravava: o processo morria no meio da rodada e o salvamento era só no fim —
+    // b14: roda logo após a listagem e salva a cada 8, então mesmo rodada interrompida deixa progresso no disco)
+    try {
+      const confN = readJson(CONFERIDOS_FILE, {});
+      const corteN = Date.now() - 4 * 86400000;
+      const alvosN = Object.entries(confN)
+        .filter(([idN, cN]) => cN && cN.nf_emissao == null && cN.nf_numero && cN.conferido_em && Date.parse(cN.conferido_em) >= corteN)
+        .sort((a, b) => String(b[1].conferido_em || '').localeCompare(String(a[1].conferido_em || '')))   // mais NOVO primeiro
+        .slice(0, 40);
+      const pendN = {};
+      const salvarN = () => {
+        if (!Object.keys(pendN).length) return;
+        const c9 = readJson(CONFERIDOS_FILE, {});   // relê antes de gravar — não atropela bipagem no meio
+        let n9 = 0;
+        for (const [k9, v9] of Object.entries(pendN)) { if (c9[k9] && c9[k9].nf_emissao == null) { c9[k9].nf_emissao = v9; if (v9) n9++; } }
+        writeJson(CONFERIDOS_FILE, c9);
+        for (const k9 of Object.keys(pendN)) delete pendN[k9];
+        if (n9) console.log('[VENDAS-SYNC] nf_emissao preenchida em ' + n9 + ' conferido(s)');
+      };
+      let cN2 = 0;
+      for (const [idN] of alvosN) {
+        const snN = readJson(path.join(CACHE_DIR, String(idN), 'pedido.json'), null);
+        const nfIdN = snN && snN.nf && snN.nf.id;
+        if (!nfIdN) { pendN[idN] = ''; continue; }   // snapshot sumiu/sem NF → sentinela: não tenta de novo
+        const rN = await blingGet('/nfe/' + nfIdN);
+        const dN = rN && rN.ok && rN.data && rN.data.data;
+        if (dN && dN.dataEmissao) {
+          pendN[idN] = dN.dataEmissao;
+          if (snN && snN.nf) { snN.nf.dataEmissao = dN.dataEmissao; try { writeJson(path.join(CACHE_DIR, String(idN), 'pedido.json'), snN); } catch (e) {} }
+        }
+        cN2++; if (cN2 % 8 === 0) salvarN();
+        await new Promise(r4 => setTimeout(r4, 450));
+      }
+      salvarN();
+    } catch (e) { console.log('[VENDAS-SYNC] fase nf_emissao falhou: ' + String(e.message || e).slice(0, 120)); }
+    _vsy.fase = 'detalhes';
     // fase 2: DETALHE dos ainda não-bipados (itens → custo/R$ produtos; taxas → tarifa/frete) — margem antes da bipagem
     try {
       const confS = readJson(CONFERIDOS_FILE, {});
@@ -2209,42 +2246,12 @@ async function vendasSync() {
       }
       writeJson(F, atual);   // b12: itens/taxas no disco antes da fase 3
     } catch (e) {}
-    // fase 3: nf_emissao dos conferidos RECENTES (🧾 do dashboard) — snapshots antigos não guardavam a hora da NF
-    // (parseNF descartava). Busca no detalhe /nfe/{id}, até 40 por rodada; quando não dá pra achar, marca '' e para de tentar.
-    try {
-      const confN = readJson(CONFERIDOS_FILE, {});
-      const corteN = Date.now() - 4 * 86400000;
-      const alvosN = Object.entries(confN)
-        .filter(([idN, cN]) => cN && cN.nf_emissao == null && cN.nf_numero && cN.conferido_em && Date.parse(cN.conferido_em) >= corteN)
-        .sort((a, b) => String(b[1].conferido_em || '').localeCompare(String(a[1].conferido_em || '')))   // b13: mais NOVO primeiro — o dia de hoje (que o Diego tá olhando) preenche na 1ª rodada
-        .slice(0, 40);
-      const pendN = {};
-      for (const [idN] of alvosN) {
-        const snN = readJson(path.join(CACHE_DIR, String(idN), 'pedido.json'), null);
-        const nfIdN = snN && snN.nf && snN.nf.id;
-        if (!nfIdN) { pendN[idN] = ''; continue; }   // snapshot sumiu/sem NF → sentinela: não tenta de novo
-        const rN = await blingGet('/nfe/' + nfIdN);
-        const dN = rN && rN.ok && rN.data && rN.data.data;
-        if (dN && dN.dataEmissao) {
-          pendN[idN] = dN.dataEmissao;
-          if (snN && snN.nf) { snN.nf.dataEmissao = dN.dataEmissao; try { writeJson(path.join(CACHE_DIR, String(idN), 'pedido.json'), snN); } catch (e) {} }
-        }
-        await new Promise(r4 => setTimeout(r4, 450));
-      }
-      if (Object.keys(pendN).length) {
-        const c9 = readJson(CONFERIDOS_FILE, {});   // relê antes de gravar — não atropela bipagem que aconteceu no meio
-        let n9 = 0;
-        for (const [k9, v9] of Object.entries(pendN)) { if (c9[k9] && c9[k9].nf_emissao == null) { c9[k9].nf_emissao = v9; if (v9) n9++; } }
-        writeJson(CONFERIDOS_FILE, c9);
-        if (n9) console.log('[VENDAS-SYNC] nf_emissao preenchida em ' + n9 + ' conferido(s)');
-      }
-    } catch (e) {}
     // poda: fora da janela de 6 dias sai do arquivo (o histórico de verdade vive nos conferidos)
     const corte = new Date(hoje); corte.setDate(corte.getDate() - 6);
     const corteS = isoD(corte);
     for (const [k, v] of Object.entries(atual)) { if (!v || !v.data || v.data < corteS) delete atual[k]; }
     writeJson(F, atual);
-    _vsy.total = Object.keys(atual).length; _vsy.atualizado_em = new Date().toISOString();
+    _vsy.total = Object.keys(atual).length; _vsy.atualizado_em = new Date().toISOString(); _vsy.fase = 'fim';
     console.log('[VENDAS-SYNC] ok — ' + _vsy.total + ' venda(s) na janela (' + paginas + ' página(s))');
   } catch (e) { _vsy.erro = String(e.message || e).slice(0, 140); console.log('[VENDAS-SYNC] falhou: ' + _vsy.erro); }
   _vsy.rodando = false;
