@@ -41,7 +41,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v22/07 b17';
+const VERSAO     = 'girassol-backup-offline v22/07 b18';
 
 // ── SESSÃO DE OPERADOR (cookie assinado HMAC) — protege rotas de dados/ação ──
 // Segredo estável entre restarts. Usa ADMIN_KEY (já configurada no Render) como base.
@@ -2265,7 +2265,7 @@ async function vendasSync() {
       const SH_KEY = process.env.SHOPEE_SYNC_KEY || '';
       if (SH_KEY) {
         const candS = Object.values(atual)
-          .filter(v => v && v.marketplace === 'shopee' && v.numero_loja && (v.venda_em == null || v.tarifa_ml == null))
+          .filter(v => v && v.marketplace === 'shopee' && v.numero_loja && (v.venda_em == null || v.tarifa_ml == null || v.frete_recebido == null))   // b18: frete_recebido também entra na fila (backfill dos que já tinham tarifa)
           .sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')))
           .slice(0, 20);
         if (candS.length) {
@@ -2283,6 +2283,10 @@ async function vendasSync() {
                 const srv = Number(es.net_service_fee != null ? es.net_service_fee : es.service_fee) || 0;
                 const tS = Math.round((com + srv) * 100) / 100;
                 if (tS > 0) v.tarifa_ml = tS;   // o dashboard exibe pela mesma via da tarifa REAL do ML
+              }
+              if (es && v.frete_recebido == null) {
+                const frB = Number(es.buyer_paid_shipping_fee) || 0;   // b18: frete que o COMPRADOR pagou (extrato: "Subtotal estimado do frete") — crédito na M.C.
+                v.frete_recebido = frB > 0 ? Math.round(frB * 100) / 100 : 0;   // 0 = confirmado sem frete do comprador (sai da fila)
               }
             }
             if (nS) console.log('[VENDAS-SYNC] shopee: hora/comissão real em ' + nS + ' venda(s)');

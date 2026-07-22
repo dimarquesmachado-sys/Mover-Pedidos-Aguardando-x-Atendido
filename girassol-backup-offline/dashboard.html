@@ -100,7 +100,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd50';
+const DASH_BUILD = 'd51';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -160,7 +160,7 @@ function cmpNull(a,b,dir){ const an=(a==null||!isFinite(a)), bn=(b==null||!isFin
 
 function prepararVendas(){
   const _sit = {}; (VENDAS||[]).forEach(v=>{ if(v&&v.numero!=null) _sit[String(v.numero)]=v; });
-  (DADOS||[]).forEach(h=>{ const v=_sit[String(h.numero)]; if(v){ h._sit=v.situacao||null; h._cancelado=/cancel/i.test(String(v.situacao||'')); if(v.data && !h.venda_dia) h.venda_dia=v.data; if(v.venda_em && !h.venda_em) h.venda_em=v.venda_em; if(v.tarifa_ml!=null && h.tarifa_ml==null) h.tarifa_ml=Number(v.tarifa_ml); } });   // d45: bipada herda dia/hora da venda casada · d50: e a tarifa REAL (Shopee via app)
+  (DADOS||[]).forEach(h=>{ const v=_sit[String(h.numero)]; if(v){ h._sit=v.situacao||null; h._cancelado=/cancel/i.test(String(v.situacao||'')); if(v.data && !h.venda_dia) h.venda_dia=v.data; if(v.venda_em && !h.venda_em) h.venda_em=v.venda_em; if(v.tarifa_ml!=null && h.tarifa_ml==null) h.tarifa_ml=Number(v.tarifa_ml); if(v.frete_recebido!=null && h.frete_recebido==null) h.frete_recebido=Number(v.frete_recebido); } });   // d45: bipada herda dia/hora da venda casada · d50: tarifa REAL · d51: frete recebido
   const _nums = new Set((DADOS||[]).map(h=>String(h.numero)));
   SINT = (VENDAS||[]).filter(v=>v&&v.numero!=null&&!_nums.has(String(v.numero))).map(v=>({
     sintetico:true, id:'s'+v.id, numero:v.numero, numero_loja:v.numero_loja||'', marketplace:v.marketplace||'outro',
@@ -375,7 +375,7 @@ function render(){
     (VENDAS.length?kpi('#38bdf8','🛰','Bling em tempo quase real', N(VBok.length)+' venda(s)', BRL(vbSoma)+' · bipadas '+N(PER.length)+(vbCanc?' · '+vbCanc+' cancelada(s)':'')+' · sincroniza a cada 5 min'):'') +
     '<div class="kpi" id="kMargem" style="--kc:var(--ok)"><span class="ic">📊</span><div class="l">Margem bruta 14d</div><div class="v dim">—</div><div class="s">carregando custos do Bling…</div></div>' +
     (function(){   // 💎 margem de CONTRIBUIÇÃO do período: produtos − imposto − tarifa% − custo
-      let rec=0, imp=0, tar=0, cus=0, pedOk=0, semCfg=0, cusUn=0, unTot=0, tReais=0, frV=0;
+      let rec=0, imp=0, tar=0, cus=0, pedOk=0, semCfg=0, cusUn=0, unTot=0, tReais=0, frV=0, fRecP=0;
       PER.forEach(h=>{
         const rp = (h.vprod_nf!=null&&isFinite(Number(h.vprod_nf))) ? Number(h.vprod_nf) : null;
         if(rp==null) return;
@@ -385,7 +385,8 @@ function render(){
         if(canalKey(h.marketplace)==='madeira' && tx==null) tx = 17.6;   // d50: padrão oficial MM
         if(aliq==null || (tReal==null && tx==null)){ semCfg++; return; }
         const tot = (h.valor!=null&&isFinite(Number(h.valor))) ? Number(h.valor) : rp;
-        rec+=rp; imp+=tot*aliq/100; tar+=(tReal!=null ? tReal : (rp*tx/100 + (canalKey(h.marketplace)==='madeira'?5:0))); pedOk++;
+        rec+=(tot<rp?tot:rp); imp+=tot*aliq/100; tar+=(tReal!=null ? tReal : (rp*tx/100 + (canalKey(h.marketplace)==='madeira'?5:0))); pedOk++;   // d51: desconto abatido da receita
+        if(h.frete_recebido!=null && isFinite(Number(h.frete_recebido)) && Number(h.frete_recebido)>0) fRecP+=Number(h.frete_recebido);
         if(tReal!=null) tReais++;
         if(h.frete_ml!=null && isFinite(Number(h.frete_ml))) frV+=Number(h.frete_ml);
         else if(h.frete_mkt!=null && isFinite(Number(h.frete_mkt)) && Number(h.frete_mkt)>0) frV+=Number(h.frete_mkt);
@@ -394,7 +395,7 @@ function render(){
       });
       if(!Object.keys(CFG.taxas).length)
         return '<div class="kpi" style="--kc:#64748b;cursor:pointer" onclick="document.getElementById(\'cfgBox\').scrollIntoView({behavior:\'smooth\'})"><span class="ic">💎</span><div class="l">Margem de contribuição</div><div class="v dim">—</div><div class="s warn">⚙️ configure as taxas por canal abaixo (alíquotas já vêm de fábrica)</div></div>';
-      const mc = rec-imp-tar-cus-frV;
+      const mc = rec-imp-tar-cus-frV+fRecP;   // d51: + frete recebido do comprador
       return '<div class="kpi" style="--kc:#14b8a6"><span class="ic">💎</span><div class="l">Margem de contribuição (est.)</div>'+
         '<div class="v '+(mc>=0?'ok':'bad')+'">'+BRL(mc)+'</div>'+
         '<div class="s">'+N(pedOk)+' ped.'+(tReais?' · '+N(tReais)+' c/ tarifa REAL ML':'')+(frV>0?' · frete vendedor ML deduzido':'')+' · custo em '+pc(cusUn,unTot)+'% das un.'+(semCfg?' · <span class="warn">'+semCfg+' fora (config)</span>':'')+'</div></div>';
@@ -536,8 +537,14 @@ function calcPL(h){
   const completo = [rp,imposto,tarifa].every(v=>v!=null) && custoOk;
   // ESTORNO do ML (compensação de envio, típica do Flex): crédito que o ML devolve pra loja — SOMA na M.C.
   const credito = (h.credito_ml!=null && isFinite(Number(h.credito_ml)) && Number(h.credito_ml)!==0) ? Number(h.credito_ml) : null;
-  const mc = completo? rp-imposto-tarifa-custo-(frV||0)+(credito||0) : null;
-  return {mes,ck,rp,tot,frete,aliq,imposto,feeReal,feeBling,tx,tarifa,custo,cusUn,unTot,custoOk,frV,frFonte,credito,completo,mc};
+  // d51: FINO no centavo (caso BRS 260722C6YRDNC0 x extrato Shopee) —
+  // (a) NF menor que a soma dos itens = DESCONTO dado ao cliente: a receita efetiva de produto é o tot (o que o comprador pagou), não o preço cheio;
+  // (b) frete que o COMPRADOR paga (capturado do escrow da Shopee, buyer_paid_shipping_fee) entra como crédito na M.C.
+  const rpEf = (tot!=null && rp!=null && tot < rp) ? tot : rp;
+  const desconto = (tot!=null && rp!=null && tot < rp) ? Math.round((rp-tot)*100)/100 : null;
+  const freteRec = (h.frete_recebido!=null && isFinite(Number(h.frete_recebido)) && Number(h.frete_recebido)>0) ? Number(h.frete_recebido) : null;
+  const mc = completo? rpEf-imposto-tarifa-custo-(frV||0)+(credito||0)+(freteRec||0) : null;
+  return {mes,ck,rp,rpEf,desconto,freteRec,tot,frete,aliq,imposto,feeReal,feeBling,tx,tarifa,custo,cusUn,unTot,custoOk,frV,frFonte,credito,completo,mc};
 }
 function buscarPed(q){
   q = String(q||'').trim().toLowerCase();
