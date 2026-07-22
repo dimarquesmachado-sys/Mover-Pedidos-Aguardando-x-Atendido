@@ -175,21 +175,36 @@ async function corrigirNFsPendentes() {
           }
         }
 
-        // ── Corrigir IE (só PJ sem IE) ────────────────────────
-        if (isPJ && !ie && uf && idContato) {
+        // ── Corrigir IE (PJ sem IE OU com IE divergente da SEFAZ) ──
+        // Antes rodava só quando `!ie` (PJ sem nenhuma IE). Resultado: cliente PJ
+        // que vem do marketplace COM uma IE errada (ex.: empresa ISENTA que o canal
+        // manda como contribuinte) nunca era corrigido — a NF era retransmitida com
+        // a mesma IE ruim e rejeitava pra sempre. Agora consulta sempre que for PJ e
+        // só age se o cadastro oficial (CNPJá → SintegraWS) divergir do que está na NF.
+        // A consulta tem cache em disco (7d positivo / 24h negativo), então na prática
+        // é no máximo 1 consulta por CNPJ por semana.
+        if (isPJ && uf && idContato) {
           const cnpjLimpo = cnpj.replace(/\D/g, '');
           const resultado = await getIEPorCNPJ(cnpjLimpo, uf);
           if (resultado) {
-            console.log(`[corrigirNFs] NF ${nf.id} | IE: "${resultado.ie}" contribuinte=${resultado.contribuinte}`);
-            const contato = await getContato(token, idContato);
-            if (contato) {
-              await atualizarIEContato(token, idContato, contato, resultado.ie, resultado.contribuinte);
+            const ieAtual = String(ie || '').trim().toUpperCase();
+            const ieOficial = String(resultado.ie || '').trim().toUpperCase();
+            const contribAtual = Number(detalhe.contato?.contribuinte || 0);
+            const contribOficial = Number(resultado.contribuinte || 0);
+            if (ieAtual !== ieOficial || contribAtual !== contribOficial) {
+              console.log(`[corrigirNFs] NF ${nf.id} | IE "${ie}" → "${resultado.ie}" | contribuinte ${contribAtual} → ${contribOficial}`);
+              const contato = await getContato(token, idContato);
+              if (contato) {
+                // Corrige o CADASTRO do contato: as próximas vendas desse cliente
+                // já nascem certas, sem passar por aqui de novo.
+                await atualizarIEContato(token, idContato, contato, resultado.ie, resultado.contribuinte);
+              }
+              detalhe.contato.ie = resultado.ie;
+              detalhe.contato.contribuinte = resultado.contribuinte;
+              corrigiu = true;
+              await sleepNF(300);
             }
-            detalhe.contato.ie = resultado.ie;
-            detalhe.contato.contribuinte = resultado.contribuinte;
-            corrigiu = true;
-            await sleepNF(300);
-          } else {
+          } else if (!ie) {
             console.log(`[corrigirNFs] NF ${nf.id} | IE não encontrada — intervenção manual`);
           }
         }
