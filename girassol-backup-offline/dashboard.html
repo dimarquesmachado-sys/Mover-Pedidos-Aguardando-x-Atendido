@@ -100,7 +100,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd47';
+const DASH_BUILD = 'd48';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -214,7 +214,15 @@ function intervalo(){
   else { de = pDe || '2000-01-01'; ate = pAte || hoje; }
   return {de, ate};
 }
-function setPeriodo(p){ periodo=p; render(); }
+function setPeriodo(p){ periodo=p; espelharPeriodoNaAnalise(); render(); renderAnalise(); }
+// d48: o seletor do TOPO é o botão MASTER — escolheu lá, a Análise de vendas obedece junto.
+// (os chips da própria Análise continuam funcionando pra quem quiser um recorte diferente só nela)
+function espelharPeriodoNaAnalise(){
+  if(periodo==='custom'){ anPer='custom'; anPDe=pDe; anPAte=pAte; }
+  else if(periodo==='30'){ const iv=intervalo(); anPer='custom'; anPDe=iv.de; anPAte=iv.ate; }   // a Análise não tem chip "30 dias" — vira Período… com as datas
+  else anPer=periodo;   // dia/ontem/7/mes/mesant existem nos dois
+  anPage=0;
+}
 
 function montar(){
   $('app').innerHTML =
@@ -223,8 +231,8 @@ function montar(){
     '<div class="hlinks"><a href="'+MOD+'/painel">← checkout</a></div>'+
   '</div>'+
   '<div class="wrap"><div class="chips" id="chips"></div>'+
-  '<div class="custom" id="custom">De <input type="date" id="pDe" onclick="this.showPicker&&this.showPicker()" onchange="pDe=this.value;render()"> '+
-  'até <input type="date" id="pAte" onclick="this.showPicker&&this.showPicker()" onchange="pAte=this.value;render()"></div>'+
+  '<div class="custom" id="custom">De <input type="date" id="pDe" onclick="this.showPicker&&this.showPicker()" onchange="pDe=this.value;setPeriodo(\'custom\')"> '+
+  'até <input type="date" id="pAte" onclick="this.showPicker&&this.showPicker()" onchange="pAte=this.value;setPeriodo(\'custom\')"></div>'+
   '<div class="cover" id="cover"></div></div></div>'+
   '<div class="wrap">'+
     '<div class="kpis" id="kpis"></div>'+
