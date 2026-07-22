@@ -100,7 +100,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd48';
+const DASH_BUILD = 'd49';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -257,6 +257,7 @@ function montar(){
       '<span style="margin-left:auto"></span>'+
       '<button class="chip" onclick="if(anPage>0){anPage--;renderAnalise();}">← Anterior</button>'+
       '<button class="chip" onclick="anPage++;renderAnalise()">Próxima →</button></div>'+
+      '<div id="anResumo"></div>'+
       '<div class="tw"><table id="tAnalise"></table></div>'+
       '<div class="nota"><b>Sobre a ordem:</b> dentro de cada dia, ML aparece na hora REAL da venda; TikTok/Shopee/Magalu/Amazon entram pela hora da <b>EMISSÃO da NF</b> (🧾), que acompanha a venda de perto — acabaram os blocos por canal. O 🕘 (hora da conferência) só aparece quando a linha ainda não tem NF. A hora exata da venda desses canais continua existindo <b>só na API do próprio canal</b>. Pra confrontar com o Jodda, use o ⬇︎ CSV e case pelo <b>número da venda no marketplace</b>. · ML mostra a hora REAL da venda (vem da pesca); TikTok/Shopee o Bling não guarda hora — o 🕘 marca que ali está a hora da <b>conferência</b> (a hora da venda desses canais chega quando plugarmos as APIs deles) · colunas (−) são deduções e (+) é crédito · <b>Estorno</b> = o valor exato da linha "Estorno" da venda no ML (no Flex ele já vem líquido: bonificação menos o frete cobrado), somado na M.C. · no Flex o custo do frete é o <b>motoboy</b> configurado no ⚙️ · tarifa <span class="ok">REAL</span> = pescada do ML · <span class="ok">BLING</span> = comissão que o Bling importou do canal (TikTok/Shopee/Magalu) · sem tag = % configurada · custo carrega sob demanda por página · 🛒 = mais de 1 item/unidade</div></div>'+
     '<div class="grid2">'+
@@ -772,6 +773,21 @@ function renderAnalise(){
   const pagPL=LP.slice(anPage*PAG, anPage*PAG+PAG);
   const pag=pagPL.map(x=>x.h);
   _anLP = LP;   // lista filtrada completa (usada pelo ⬇︎ CSV)
+  // d49: resuminho do PERÍODO/FILTRO inteiro no topo da Análise (todas as páginas; canceladas fora) — pedido do Diego
+  (function(){ const el=$('anResumo'); if(!el) return;
+    let rT=0,rI=0,rC=0,rF=0,rM=0,rMn=0,rN=0;
+    LP.forEach(x=>{ if(x.h._cancelado) return; const P=x.P; rN++;
+      if(P.tot!=null)rT+=P.tot; if(P.imposto!=null)rI+=P.imposto; if(P.tarifa!=null)rC+=P.tarifa;
+      if(P.frV!=null)rF+=P.frV; if(P.mc!=null){rM+=P.mc;rMn++;} });
+    const mini=(l,v,c)=>'<div style="background:var(--card);border:1px solid var(--line);border-radius:9px;padding:7px 11px;min-width:96px"><div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut)">'+l+'</div><div style="font-size:15px;font-weight:800'+(c?';color:'+c:'')+'">'+v+'</div></div>';
+    el.innerHTML = rN? '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">'+
+      mini('Vendido (NF c/ frete)',BRL(rT))+
+      mini('Impostos',BRL(rI),'#f87171')+
+      mini('Comiss\u00e3o',BRL(rC),'#f87171')+
+      mini('Frete vendedor',BRL(rF),'#f87171')+
+      mini('\ud83d\udc8e M.C.',BRL(rM)+' <span style="font-size:10px;color:var(--mut)">('+rMn+'/'+rN+' c/ margem)</span>', rM>=0?'#34d399':'#f87171')+
+    '</div>' : '';
+  })();
   $('anInfo').textContent = LP.length ? ((anPage*PAG+1)+'–'+(anPage*PAG+pagPL.length)+' de '+LP.length+' venda(s)') : 'sem vendas no período';
   const faltam=[...new Set(pag.flatMap(h=>(h.itens||[]).map(i=>i.sku)).filter(sk=>sk && !SKUINFO[sk] && !_anTried[sk]))];
   if(faltam.length && !_anLoading){
