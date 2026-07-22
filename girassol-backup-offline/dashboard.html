@@ -100,7 +100,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd55';
+const DASH_BUILD = 'd56';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -265,7 +265,7 @@ function montar(){
       '<div class="sec"><h2>💰 Faturamento por dia</h2><div class="chartbox"><canvas id="cFat"></canvas></div></div>'+
     '</div>'+
     '<div class="sec"><h2>🛒 Por canal</h2><div class="tw"><table id="tCanal"></table></div></div>'+
-    '<div class="sec"><h2>🏆 Top produtos <span class="hint">clique nos títulos p/ ordenar ↑↓ · faturamento = SOMA de todos os pedidos do SKU no período · 💎 M.C. = margem dos pedidos rateada por item — o rank do que dá LUCRO de verdade</span></h2>'+
+    '<div class="sec"><h2>🏆 Top produtos <span class="hint">clique nos títulos p/ ordenar ↑↓ · faturamento = SOMA de todos os pedidos do SKU no período · 💎 M.C. = margem dos pedidos rateada por item — o rank do que dá LUCRO de verdade · Curva ABC recalculada pro período pesquisado (A = 80% do faturamento)</span></h2>'+
       '<div class="tw"><table id="tProd"></table></div><div id="prodAviso"></div></div>'+
     '<div class="sec"><h2>🗺️ Vendas por estado</h2><div class="tw"><table id="tUF"></table></div><div id="ufAviso"></div></div>'+
     '<div class="sec"><h2>📦 Projeção de estoque &amp; margem <span class="hint">ritmo dos últimos 14 dias · clique p/ ordenar</span></h2>'+
@@ -431,9 +431,23 @@ function render(){
       '<td><div class="bar"><i style="width:'+p+'%"></i></div></td></tr>';}).join('');
 
   const prods = Object.values(porProd);
-  const ord = prods.slice().sort((a,b)=> sortProd.col==='fat' ? cmpNull(a.fat||0,b.fat||0,sortProd.dir) : (sortProd.col==='mc' ? cmpNull((a.mc!=null?a.mc:null),(b.mc!=null?b.mc:null),sortProd.dir) : cmpNull(a.qtd,b.qtd,sortProd.dir)));   // d55: rank por 💎
+  // d56: curva ABC do PERÍODO pesquisado — ordena por faturamento e acumula: A = até 80% do faturamento · B = 80–95% · C = o resto (sem faturamento = C)
+  (function(){
+    const pf = prods.slice().sort((a,b)=>(b.fat||0)-(a.fat||0));
+    const ft = pf.reduce((s2,p2)=>s2+(p2.fat||0),0)||1;
+    let ac = 0;
+    pf.forEach(p2=>{ ac += (p2.fat||0); const pc2 = ac/ft; p2.curva = (p2.fat>0 ? (pc2<=0.80?'A':(pc2<=0.95?'B':'C')) : 'C'); });
+  })();
+  const _cvR = {A:1,B:2,C:3};
+  const ord = prods.slice().sort((a,b)=>{
+    if(sortProd.col==='fat') return cmpNull(a.fat||0,b.fat||0,sortProd.dir);
+    if(sortProd.col==='mc') return cmpNull((a.mc!=null?a.mc:null),(b.mc!=null?b.mc:null),sortProd.dir);   // d55: rank por 💎
+    if(sortProd.col==='curva'){ const dv=(_cvR[a.curva]||9)-(_cvR[b.curva]||9); return dv!==0 ? dv*(sortProd.dir===-1?1:-1) : (b.fat||0)-(a.fat||0); }   // d56: A↔C, empate decide o faturamento
+    return cmpNull(a.qtd,b.qtd,sortProd.dir);
+  });
   const fatTot = prods.reduce((s,p)=>s+p.fat,0)||1;
   $('tProd').innerHTML = '<tr><th>#</th><th>Produto</th>'+
+    '<th class="num sort" onclick="setSortProd(\'curva\')" title="curva ABC do período pesquisado: A concentra 80% do faturamento, B até 95%, C o resto">Curva'+seta(sortProd,'curva')+'</th>'+
     '<th class="num sort" onclick="setSortProd(\'qtd\')">Unid.'+seta(sortProd,'qtd')+'</th>'+
     '<th class="num sort" onclick="setSortProd(\'fat\')">Faturamento'+seta(sortProd,'fat')+'</th>'+
     '<th class="num sort" onclick="setSortProd(\'mc\')" title="margem de contribuição rateada dos pedidos deste SKU no período">💎 M.C.'+seta(sortProd,'mc')+'</th>'+
@@ -444,6 +458,7 @@ function render(){
       const rk = i<3 ? 'rank r'+(i+1) : 'rank';
       return '<tr><td><span class="'+rk+'">'+(i+1)+'</span></td>'+
       '<td><div class="sku">'+esc(p.sku)+'</div><div class="desc">'+esc(p.desc)+'</div></td>'+
+      '<td class="num"><span style="font-weight:800;padding:1px 8px;border-radius:6px;font-size:11px;'+(p.curva==='A'?'background:#065f4633;color:#34d399;border:1px solid #34d39955':(p.curva==='B'?'background:#78350f33;color:#fbbf24;border:1px solid #fbbf2455':'background:#33415555;color:#94a3b8;border:1px solid #47556955'))+'" title="'+(p.curva==='A'?'curva A — está nos SKUs que somam 80% do faturamento do período':(p.curva==='B'?'curva B — faixa de 80% a 95% do faturamento acumulado':'curva C — cauda: últimos 5% do faturamento'))+'">'+p.curva+'</span></td>'+
       '<td class="num">'+N(p.qtd)+'</td>'+
       '<td class="num ok">'+(p.fat?BRL(p.fat):'<span class="dim">—</span>')+(parcial&&p.fat?'<span class="cvg">'+N(p.qtdV)+'/'+N(p.qtd)+' un. c/ valor</span>':'')+'</td>'+
       '<td class="num" style="font-weight:700">'+(p.mc!=null?('<span class="'+(p.mc>=0?'ok':'bad')+'">'+BRL(p.mc)+'</span>'+((p.qtdM||0)<p.qtd?'<span class="cvg">'+N(p.qtdM||0)+'/'+N(p.qtd)+' un. c/ margem</span>':'')):'<span class="dim" title="pedidos deste SKU ainda sem margem fechada (custo/tarifa)">—</span>')+'</td>'+
