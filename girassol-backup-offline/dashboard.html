@@ -100,7 +100,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd45';
+const DASH_BUILD = 'd46';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -126,7 +126,7 @@ let sortProd = { col: 'fat', dir: -1 };
 let sortProj = { col: 'qtd14', dir: -1 };
 let chPed = null, chFat = null;
 let _plMLFee = {};   // tarifa real ML por pedido (sob demanda)
-let anPage=0, anCanal='', anSku='', anPer='dia', anPDe='', anPAte='', anLP='', _anLoading=false;   // 📋 análise de vendas (abre no DIA)
+let anPage=0, anCanal='', anSku='', anPer='dia', anPDe='', anPAte='', anLP='', anAg=false, _anLoading=false;   // 📋 análise de vendas (abre no DIA) · anAg: mostrar aguardando bipagem (padrão OCULTO)
 let _anTried = {};   // SKUs ja tentados no on-demand — evita loop de recarga que apagava seleção
 let _anLP = [];   // última lista filtrada da Análise — fonte do export CSV
 
@@ -737,6 +737,10 @@ function renderAnalise(){
     .filter(h=>!anCanal||canalKey(h.marketplace)===anCanal)
     .filter(h=>!q||anBuscaOk(q)(h));
   LP = LP.concat(LS.map(h=>({h:h,P:calcPL(h)})));
+  // d46: "aguardando bipagem" (venda no Bling sem itens/margem ainda) OCULTA por padrão — a análise é de MARGEM
+  const _ehAg = x => x.h.sintetico && !((x.h.itens||[]).length);
+  const nAg = LP.filter(_ehAg).length;
+  if(!anAg) LP = LP.filter(x=>!_ehAg(x));
   const nLucro = LP.filter(x=>x.P.mc!=null&&x.P.mc>0&&!x.h._cancelado).length, nPrej = LP.filter(x=>x.P.mc!=null&&x.P.mc<0&&!x.h._cancelado).length;
   const nInc = LP.filter(x=>x.P.mc==null).length;
   const lpEl=$('anLPChips');
@@ -744,7 +748,8 @@ function renderAnalise(){
     '<button class="chip'+(anLP===''?' on':'')+'" onclick="anLP=\'\';anPage=0;renderAnalise()">Todos</button>'+
     '<button class="chip" style="'+(anLP==='lucro'?'background:#065f46;border-color:#065f46;color:#fff':'color:#34d399;border-color:#34d399')+'" onclick="anLP=\'lucro\';anPage=0;renderAnalise()">Lucro ('+nLucro+')</button>'+
     '<button class="chip" style="'+(anLP==='prej'?'background:#7f1d1d;border-color:#7f1d1d;color:#fff':'color:#f87171;border-color:#f87171')+'" onclick="anLP=\'prej\';anPage=0;renderAnalise()">Preju\u00edzo ('+nPrej+')</button>'+
-    (nInc?'<button class="chip" style="'+(anLP==='inc'?'background:#78350f;border-color:#78350f;color:#fff':'color:#fbbf24;border-color:#fbbf24')+'" onclick="anLP=\'inc\';anPage=0;renderAnalise()" title="vendas sem margem fechada — falta custo no Bling, NF ou tarifa">Incompletas ('+nInc+')</button>':'');
+    (nInc?'<button class="chip" style="'+(anLP==='inc'?'background:#78350f;border-color:#78350f;color:#fff':'color:#fbbf24;border-color:#fbbf24')+'" onclick="anLP=\'inc\';anPage=0;renderAnalise()" title="vendas sem margem fechada — falta custo no Bling, NF ou tarifa">Incompletas ('+nInc+')</button>':'')+
+    (nAg?'<button class="chip" style="'+(anAg?'background:#334155;border-color:#64748b;color:#fff':'color:#94a3b8;border-color:#475569')+'" onclick="anAg=!anAg;anPage=0;renderAnalise()" title="vendas que o Bling já registrou mas o estoque ainda NÃO bipou — sem NF e sem margem; ocultas por padrão pra análise mostrar só o que tem margem">🕐 aguardando ('+nAg+')</button>':'');
   if(anLP==='lucro') LP=LP.filter(x=>x.P.mc!=null&&x.P.mc>0);
   else if(anLP==='prej') LP=LP.filter(x=>x.P.mc!=null&&x.P.mc<0);
   else if(anLP==='inc') LP=LP.filter(x=>x.P.mc==null);

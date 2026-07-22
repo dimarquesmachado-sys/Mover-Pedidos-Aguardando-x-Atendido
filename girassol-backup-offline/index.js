@@ -41,7 +41,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v22/07 b14';
+const VERSAO     = 'girassol-backup-offline v22/07 b15';
 
 // ── SESSÃO DE OPERADOR (cookie assinado HMAC) — protege rotas de dados/ação ──
 // Segredo estável entre restarts. Usa ADMIN_KEY (já configurada no Render) como base.
@@ -724,6 +724,40 @@ function routes(readBody) {
     }
 
     // ADMIN/sessão: sincronizador de vendas do Bling (todas as situações). ?status=1 mostra o estado.
+    // DEBUG (?k=): raio-X do 🧾 — pega 3 conferidos recentes SEM hora de NF e mostra, pra cada um:
+    // o que tem no conf, o que tem no snapshot (snap.nf) e o resultado CRU da chamada /nfe/{id} feita AGORA.
+    // Revela na hora onde o preenchimento tranca: snapshot sem nf.id? Bling recusando? campo com outro nome?
+    if (method === 'GET' && p === '/girassol-backup-offline/debug-nf-emissao') {
+      const kE = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      if (!process.env.ADMIN_KEY || kE !== process.env.ADMIN_KEY) { json(res, 404, { error: 'not found' }); return true; }
+      const confE = readJson(CONFERIDOS_FILE, {});
+      const corteE = Date.now() - 4 * 86400000;
+      const alvosE = Object.entries(confE)
+        .filter(([idE, cE]) => cE && (cE.nf_emissao == null || cE.nf_emissao === '') && cE.nf_numero && cE.conferido_em && Date.parse(cE.conferido_em) >= corteE)
+        .sort((a, b) => String(b[1].conferido_em || '').localeCompare(String(a[1].conferido_em || '')))
+        .slice(0, 3);
+      const saidaE = [];
+      for (const [idE, cE] of alvosE) {
+        const snE = readJson(path.join(CACHE_DIR, String(idE), 'pedido.json'), null);
+        const item = {
+          pedido_id: idE, nf_numero: cE.nf_numero, nf_emissao_no_conf: cE.nf_emissao === '' ? '(sentinela vazia)' : cE.nf_emissao,
+          conferido_em: cE.conferido_em, marketplace: cE.marketplace || null,
+          snapshot_existe: !!snE, snap_nf: (snE && snE.nf) || null, chamada_nfe: null
+        };
+        const nfIdE = snE && snE.nf && snE.nf.id;
+        if (nfIdE) {
+          try {
+            const rE = await blingGet('/nfe/' + nfIdE);
+            item.chamada_nfe = { ok: !!(rE && rE.ok), corpo: (rE && rE.data) || null };
+          } catch (e) { item.chamada_nfe = { ok: false, erro: String(e.message || e).slice(0, 200) }; }
+          await new Promise(r5 => setTimeout(r5, 350));
+        }
+        saidaE.push(item);
+      }
+      json(res, 200, { ok: true, sem_hora_no_conf: alvosE.length, amostra: saidaE });
+      return true;
+    }
+
     // DEBUG (?k=): 3 itens CRUS da listagem /pedidos/vendas — confirma se o Bling manda loja.id e numeroLoja
     if (method === 'GET' && p === '/girassol-backup-offline/debug-vendas-raw') {
       const kD = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
