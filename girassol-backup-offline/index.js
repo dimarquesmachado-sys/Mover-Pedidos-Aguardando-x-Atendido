@@ -41,7 +41,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v22/07 b15';
+const VERSAO     = 'girassol-backup-offline v22/07 b16';
 
 // ── SESSÃO DE OPERADOR (cookie assinado HMAC) — protege rotas de dados/ação ──
 // Segredo estável entre restarts. Usa ADMIN_KEY (já configurada no Render) como base.
@@ -744,14 +744,11 @@ function routes(readBody) {
           conferido_em: cE.conferido_em, marketplace: cE.marketplace || null,
           snapshot_existe: !!snE, snap_nf: (snE && snE.nf) || null, chamada_nfe: null
         };
-        const nfIdE = snE && snE.nf && snE.nf.id;
-        if (nfIdE) {
-          try {
-            const rE = await blingGet('/nfe/' + nfIdE);
-            item.chamada_nfe = { ok: !!(rE && rE.ok), corpo: (rE && rE.data) || null };
-          } catch (e) { item.chamada_nfe = { ok: false, erro: String(e.message || e).slice(0, 200) }; }
-          await new Promise(r5 => setTimeout(r5, 350));
-        }
+        try {
+          const nfE2 = await nfDoPedido(idE);   // b16: mesmo caminho que a fase NF usa agora
+          item.chamada_nfe = { via: 'nfDoPedido', achou: !!nfE2, nf: nfE2 || null };
+        } catch (e) { item.chamada_nfe = { via: 'nfDoPedido', achou: false, erro: String(e.message || e).slice(0, 200) }; }
+        await new Promise(r5 => setTimeout(r5, 350));
         saidaE.push(item);
       }
       json(res, 200, { ok: true, sem_hora_no_conf: alvosE.length, amostra: saidaE });
@@ -2219,29 +2216,40 @@ async function vendasSync() {
       const confN = readJson(CONFERIDOS_FILE, {});
       const corteN = Date.now() - 4 * 86400000;
       const alvosN = Object.entries(confN)
-        .filter(([idN, cN]) => cN && cN.nf_emissao == null && cN.nf_numero && cN.conferido_em && Date.parse(cN.conferido_em) >= corteN)
+        .filter(([idN, cN]) => cN && (cN.nf_emissao == null || cN.nf_emissao === '') && cN.nf_numero && cN.conferido_em && Date.parse(cN.conferido_em) >= corteN)   // b16: '' (sentinela antiga) volta pra fila
         .sort((a, b) => String(b[1].conferido_em || '').localeCompare(String(a[1].conferido_em || '')))   // mais NOVO primeiro
-        .slice(0, 40);
+        .slice(0, 30);
       const pendN = {};
       const salvarN = () => {
         if (!Object.keys(pendN).length) return;
         const c9 = readJson(CONFERIDOS_FILE, {});   // relê antes de gravar — não atropela bipagem no meio
         let n9 = 0;
-        for (const [k9, v9] of Object.entries(pendN)) { if (c9[k9] && c9[k9].nf_emissao == null) { c9[k9].nf_emissao = v9; if (v9) n9++; } }
+        for (const [k9, v9] of Object.entries(pendN)) { if (c9[k9] && (c9[k9].nf_emissao == null || c9[k9].nf_emissao === '')) { c9[k9].nf_emissao = v9; if (v9) n9++; } }
         writeJson(CONFERIDOS_FILE, c9);
         for (const k9 of Object.keys(pendN)) delete pendN[k9];
         if (n9) console.log('[VENDAS-SYNC] nf_emissao preenchida em ' + n9 + ' conferido(s)');
       };
       let cN2 = 0;
       for (const [idN] of alvosN) {
+        // b16: a pasta do pedido SAI do cache quando ele finaliza (raio-X provou: snapshot_existe=false),
+        // então a fonte é o Bling PELO PEDIDO — nfDoPedido tenta /pedidos/vendas/{id}/nfe e cai pro detalhe se precisar.
         const snN = readJson(path.join(CACHE_DIR, String(idN), 'pedido.json'), null);
-        const nfIdN = snN && snN.nf && snN.nf.id;
-        if (!nfIdN) { pendN[idN] = ''; continue; }   // snapshot sumiu/sem NF → sentinela: não tenta de novo
-        const rN = await blingGet('/nfe/' + nfIdN);
-        const dN = rN && rN.ok && rN.data && rN.data.data;
-        if (dN && dN.dataEmissao) {
-          pendN[idN] = dN.dataEmissao;
-          if (snN && snN.nf) { snN.nf.dataEmissao = dN.dataEmissao; try { writeJson(path.join(CACHE_DIR, String(idN), 'pedido.json'), snN); } catch (e) {} }
+        let dtN = (snN && snN.nf && snN.nf.dataEmissao) || null;   // se o snapshot ainda viver e já tiver, aproveita de graça
+        if (!dtN) {
+          try {
+            const nfO = await nfDoPedido(idN);
+            if (nfO && nfO.dataEmissao) dtN = nfO.dataEmissao;
+            else if (nfO && nfO.id) {   // NF achada mas a resposta veio sem a data → detalhe /nfe/{id}
+              await new Promise(r4a => setTimeout(r4a, 450));
+              const rN = await blingGet('/nfe/' + nfO.id);
+              const dN = rN && rN.ok && rN.data && rN.data.data;
+              if (dN && dN.dataEmissao) dtN = dN.dataEmissao;
+            }
+          } catch (e) {}
+        }
+        if (dtN) {
+          pendN[idN] = dtN;
+          if (snN && snN.nf) { snN.nf.dataEmissao = dtN; try { writeJson(path.join(CACHE_DIR, String(idN), 'pedido.json'), snN); } catch (e) {} }
         }
         cN2++; if (cN2 % 8 === 0) salvarN();
         await new Promise(r4 => setTimeout(r4, 450));

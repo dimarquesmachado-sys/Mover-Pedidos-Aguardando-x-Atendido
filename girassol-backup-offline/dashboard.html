@@ -100,7 +100,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd46';
+const DASH_BUILD = 'd47';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -351,9 +351,14 @@ function render(){
     ((cVal<95||cItem<95||cUF<95)?'<span class="warn" style="font-size:11px">← cobertura baixa: rode os backfills p/ o retroativo</span>':'');
 
   const kpi=(kc,ic,l,v,s)=>'<div class="kpi" style="--kc:'+kc+'"><span class="ic">'+ic+'</span><div class="l">'+l+'</div><div class="v">'+v+'</div>'+(s?'<div class="s">'+s+'</div>':'')+'</div>';
+  // d47: "dia completo" = bipados do período + vendas do Bling AINDA não bipadas atribuídas ao período (canceladas fora)
+  // Este é o número comparável ao Jodda — os demais cards são só a parte JÁ BIPADA (margem fechada).
+  const AGD = (SINT||[]).filter(s=>{ if(s._cancelado) return false; const d2=diaVenda(s); return d2>=de && d2<=ate; });
+  const agdVal = AGD.reduce((s2,x)=> s2 + ((x.valor!=null&&isFinite(Number(x.valor)))?Number(x.valor):0), 0);
   $('kpis').innerHTML =
     kpi('var(--ac)','📦','Pedidos', N(PER.length), N(unid)+' unidades') +
-    kpi('var(--ok)','🛍','Faturamento produtos', BRL(pedNF?fatNF:fatProd), pedNF?('pela NOTA FISCAL ('+pc(pedNF,PER.length)+'% dos pedidos) — comparável ao Jodda'):('pelos itens do pedido'+(cItem<95?' · <span class="warn">'+cItem+'% cobertura</span>':''))) +
+    (AGD.length?kpi('#38bdf8','📅','Dia completo (Jodda)', BRL(fat+agdVal), N(PER.length+AGD.length)+' pedidos = '+N(PER.length)+' bipados + '+N(AGD.length)+' a bipar · comparável ao Faturamento Total do Jodda'):'') +
+    kpi('var(--ok)','🛍','Faturamento produtos', BRL(pedNF?fatNF:fatProd), pedNF?('pela NOTA FISCAL ('+pc(pedNF,PER.length)+'% dos pedidos) · só os JÁ BIPADOS — o dia inteiro tá no 📅'):('pelos itens do pedido'+(cItem<95?' · <span class="warn">'+cItem+'% cobertura</span>':''))) +
     kpi('var(--cy)','💰','Total dos pedidos', BRL(fat), 'com frete embutido'+(semValor?' · <span class="warn">'+semValor+' sem valor</span>':'')) +
     kpi('#a78bfa','🚚','Frete embutido', fretePedNF?BRL(freteNF):(fretePed?BRL(freteEmb):'—'), fretePedNF?('EXATO pela nota · '+N(fretePedNF)+' pedidos'):(fretePed?('estimado · '+N(fretePed)+' ped.'):'aguardando cobertura')) +
     kpi('var(--warn)','🎯','Ticket médio', BRL(ticket), 'por pedido (total c/ frete)') +
