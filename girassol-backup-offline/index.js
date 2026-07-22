@@ -41,7 +41,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v22/07 b12';
+const VERSAO     = 'girassol-backup-offline v22/07 b13';
 
 // ── SESSÃO DE OPERADOR (cookie assinado HMAC) — protege rotas de dados/ação ──
 // Segredo estável entre restarts. Usa ADMIN_KEY (já configurada no Render) como base.
@@ -2216,6 +2216,7 @@ async function vendasSync() {
       const corteN = Date.now() - 4 * 86400000;
       const alvosN = Object.entries(confN)
         .filter(([idN, cN]) => cN && cN.nf_emissao == null && cN.nf_numero && cN.conferido_em && Date.parse(cN.conferido_em) >= corteN)
+        .sort((a, b) => String(b[1].conferido_em || '').localeCompare(String(a[1].conferido_em || '')))   // b13: mais NOVO primeiro — o dia de hoje (que o Diego tá olhando) preenche na 1ª rodada
         .slice(0, 40);
       const pendN = {};
       for (const [idN] of alvosN) {
