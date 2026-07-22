@@ -41,7 +41,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v22/07 b16';
+const VERSAO     = 'girassol-backup-offline v22/07 b17';
 
 // ── SESSÃO DE OPERADOR (cookie assinado HMAC) — protege rotas de dados/ação ──
 // Segredo estável entre restarts. Usa ADMIN_KEY (já configurada no Render) como base.
@@ -2256,6 +2256,41 @@ async function vendasSync() {
       }
       salvarN();
     } catch (e) { console.log('[VENDAS-SYNC] fase nf_emissao falhou: ' + String(e.message || e).slice(0, 120)); }
+    _vsy.fase = 'shopee';
+    // fase SHOPEE (b17): hora REAL da venda (create_time) + comissão REAL (escrow) direto do app da Shopee,
+    // via a rota interna do serviço shopee-nf-sync (que guarda os tokens). Batch de até 20 order_sns por rodada.
+    // Precisa da env SHOPEE_SYNC_KEY no Render DESTE serviço (mesma chave que abriu o teste C); URL opcional em SHOPEE_SYNC_URL.
+    try {
+      const SH_URL = process.env.SHOPEE_SYNC_URL || 'https://girassol-shopee-sync-organizar-envio.onrender.com';
+      const SH_KEY = process.env.SHOPEE_SYNC_KEY || '';
+      if (SH_KEY) {
+        const candS = Object.values(atual)
+          .filter(v => v && v.marketplace === 'shopee' && v.numero_loja && (v.venda_em == null || v.tarifa_ml == null))
+          .sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')))
+          .slice(0, 20);
+        if (candS.length) {
+          const rS = await fetch(SH_URL + '/girassol/interno/margem-pedidos?k=' + encodeURIComponent(SH_KEY) + '&order_sns=' + encodeURIComponent(candS.map(v => v.numero_loja).join(',')), { timeout: 90000 });
+          const jS = await rS.json().catch(() => null);
+          if (jS && jS.ok && Array.isArray(jS.pedidos)) {
+            const porSn = {}; jS.pedidos.forEach(pS => { if (pS && pS.order_sn) porSn[pS.order_sn] = pS; });
+            let nS = 0;
+            for (const v of candS) {
+              const pS = porSn[v.numero_loja]; if (!pS) continue;
+              if (pS.create_time && v.venda_em == null) { v.venda_em = new Date(Number(pS.create_time) * 1000).toISOString(); nS++; }
+              const es = pS.escrow || null;
+              if (es && v.tarifa_ml == null) {
+                const com = Number(es.net_commission_fee != null ? es.net_commission_fee : es.commission_fee) || 0;
+                const srv = Number(es.net_service_fee != null ? es.net_service_fee : es.service_fee) || 0;
+                const tS = Math.round((com + srv) * 100) / 100;
+                if (tS > 0) v.tarifa_ml = tS;   // o dashboard exibe pela mesma via da tarifa REAL do ML
+              }
+            }
+            if (nS) console.log('[VENDAS-SYNC] shopee: hora/comissão real em ' + nS + ' venda(s)');
+            writeJson(F, atual);
+          }
+        }
+      }
+    } catch (e) { console.log('[VENDAS-SYNC] fase shopee falhou: ' + String(e.message || e).slice(0, 120)); }
     _vsy.fase = 'detalhes';
     // fase 2: DETALHE dos ainda não-bipados (itens → custo/R$ produtos; taxas → tarifa/frete) — margem antes da bipagem
     try {

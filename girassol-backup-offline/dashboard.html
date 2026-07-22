@@ -100,7 +100,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd49';
+const DASH_BUILD = 'd50';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -160,7 +160,7 @@ function cmpNull(a,b,dir){ const an=(a==null||!isFinite(a)), bn=(b==null||!isFin
 
 function prepararVendas(){
   const _sit = {}; (VENDAS||[]).forEach(v=>{ if(v&&v.numero!=null) _sit[String(v.numero)]=v; });
-  (DADOS||[]).forEach(h=>{ const v=_sit[String(h.numero)]; if(v){ h._sit=v.situacao||null; h._cancelado=/cancel/i.test(String(v.situacao||'')); if(v.data && !h.venda_dia) h.venda_dia=v.data; if(v.venda_em && !h.venda_em) h.venda_em=v.venda_em; } });   // d45: bipada herda dia/hora da venda casada
+  (DADOS||[]).forEach(h=>{ const v=_sit[String(h.numero)]; if(v){ h._sit=v.situacao||null; h._cancelado=/cancel/i.test(String(v.situacao||'')); if(v.data && !h.venda_dia) h.venda_dia=v.data; if(v.venda_em && !h.venda_em) h.venda_em=v.venda_em; if(v.tarifa_ml!=null && h.tarifa_ml==null) h.tarifa_ml=Number(v.tarifa_ml); } });   // d45: bipada herda dia/hora da venda casada · d50: e a tarifa REAL (Shopee via app)
   const _nums = new Set((DADOS||[]).map(h=>String(h.numero)));
   SINT = (VENDAS||[]).filter(v=>v&&v.numero!=null&&!_nums.has(String(v.numero))).map(v=>({
     sintetico:true, id:'s'+v.id, numero:v.numero, numero_loja:v.numero_loja||'', marketplace:v.marketplace||'outro',
@@ -381,10 +381,11 @@ function render(){
         if(rp==null) return;
         const aliq = aliqDe(diaVenda(h).slice(0,7));
         const tReal = (h.tarifa_ml!=null && isFinite(Number(h.tarifa_ml))) ? Number(h.tarifa_ml) : ((h.taxa_mkt!=null && isFinite(Number(h.taxa_mkt)) && Number(h.taxa_mkt)>0) ? Number(h.taxa_mkt) : null);
-        const tx = CFG.taxas[canalKey(h.marketplace)];
+        let tx = CFG.taxas[canalKey(h.marketplace)];
+        if(canalKey(h.marketplace)==='madeira' && tx==null) tx = 17.6;   // d50: padrão oficial MM
         if(aliq==null || (tReal==null && tx==null)){ semCfg++; return; }
         const tot = (h.valor!=null&&isFinite(Number(h.valor))) ? Number(h.valor) : rp;
-        rec+=rp; imp+=tot*aliq/100; tar+=(tReal!=null ? tReal : rp*tx/100); pedOk++;
+        rec+=rp; imp+=tot*aliq/100; tar+=(tReal!=null ? tReal : (rp*tx/100 + (canalKey(h.marketplace)==='madeira'?5:0))); pedOk++;
         if(tReal!=null) tReais++;
         if(h.frete_ml!=null && isFinite(Number(h.frete_ml))) frV+=Number(h.frete_ml);
         else if(h.frete_mkt!=null && isFinite(Number(h.frete_mkt)) && Number(h.frete_mkt)>0) frV+=Number(h.frete_mkt);
@@ -521,8 +522,10 @@ function calcPL(h){
   const imposto = (aliq!=null&&tot!=null)?tot*aliq/100:null;
   const feeReal = (h.tarifa_ml!=null&&isFinite(Number(h.tarifa_ml)))?Number(h.tarifa_ml):_plMLFee[h.id];
   const feeBling = (h.taxa_mkt!=null&&isFinite(Number(h.taxa_mkt))&&Number(h.taxa_mkt)>0)?Number(h.taxa_mkt):null;   // 💎 comissão importada pelo Bling (TikTok/Shopee/Magalu)
-  const tx = CFG.taxas[ck];
-  const tarifa = (feeReal!=null)?feeReal:(feeBling!=null?feeBling:((tx!=null&&rp!=null)?rp*tx/100:null));
+  let tx = CFG.taxas[ck];
+  if(ck==='madeira' && tx==null) tx = 17.6;   // d50: tabela oficial MM (Diego 22/07) — padrão 17,6%; categorias variam 14,5–19%
+  let tarifa = (feeReal!=null)?feeReal:(feeBling!=null?feeBling:((tx!=null&&rp!=null)?rp*tx/100:null));
+  if(ck==='madeira' && feeReal==null && feeBling==null && tarifa!=null) tarifa += 5;   // Madeira Envios: taxa fixa R$ 5,00 por pedido
   let custo=0, cusUn=0, unTot=0;
   (h.itens||[]).forEach(it=>{ const q=Number(it.qtd||1); unTot+=q; const inf=SKUINFO[it.sku]; if(inf&&inf.custo!=null){ custo+=inf.custo*q; cusUn+=q; } });
   const custoOk = cusUn===unTot && unTot>0;
