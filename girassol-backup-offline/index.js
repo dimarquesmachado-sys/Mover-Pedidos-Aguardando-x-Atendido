@@ -41,7 +41,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v22/07 b18';
+const VERSAO     = 'girassol-backup-offline v22/07 b19';
 
 // ── SESSÃO DE OPERADOR (cookie assinado HMAC) — protege rotas de dados/ação ──
 // Segredo estável entre restarts. Usa ADMIN_KEY (já configurada no Render) como base.
@@ -2265,7 +2265,7 @@ async function vendasSync() {
       const SH_KEY = process.env.SHOPEE_SYNC_KEY || '';
       if (SH_KEY) {
         const candS = Object.values(atual)
-          .filter(v => v && v.marketplace === 'shopee' && v.numero_loja && (v.venda_em == null || v.tarifa_ml == null || v.frete_recebido == null))   // b18: frete_recebido também entra na fila (backfill dos que já tinham tarifa)
+          .filter(v => v && v.marketplace === 'shopee' && v.numero_loja && (v.venda_em == null || v.tarifa_ml == null || v.frete_recebido == null || v.renda_canal == null))   // b18/b19: frete_recebido e renda_canal também entram na fila (backfill)
           .sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')))
           .slice(0, 20);
         if (candS.length) {
@@ -2287,6 +2287,12 @@ async function vendasSync() {
               if (es && v.frete_recebido == null) {
                 const frB = Number(es.buyer_paid_shipping_fee) || 0;   // b18: frete que o COMPRADOR pagou (extrato: "Subtotal estimado do frete") — crédito na M.C.
                 v.frete_recebido = frB > 0 ? Math.round(frB * 100) / 100 : 0;   // 0 = confirmado sem frete do comprador (sai da fila)
+              }
+              if (es && v.renda_canal == null) {
+                // b19: a RENDA OFICIAL do pedido (o que a Shopee deposita) — já liquida taxas, moedas Shopee,
+                // cupons (dela e teus) e frete do comprador. É a âncora da M.C. no dashboard (caso das 170 moedas = R$ 1,70 que a Shopee banca).
+                const ra = Number(es.escrow_amount_after_adjustment != null ? es.escrow_amount_after_adjustment : es.escrow_amount);
+                if (isFinite(ra) && ra > 0) v.renda_canal = Math.round(ra * 100) / 100;
               }
             }
             if (nS) console.log('[VENDAS-SYNC] shopee: hora/comissão real em ' + nS + ' venda(s)');

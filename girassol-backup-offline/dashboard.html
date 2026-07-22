@@ -100,7 +100,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd52';
+const DASH_BUILD = 'd53';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -160,7 +160,7 @@ function cmpNull(a,b,dir){ const an=(a==null||!isFinite(a)), bn=(b==null||!isFin
 
 function prepararVendas(){
   const _sit = {}; (VENDAS||[]).forEach(v=>{ if(v&&v.numero!=null) _sit[String(v.numero)]=v; });
-  (DADOS||[]).forEach(h=>{ const v=_sit[String(h.numero)]; if(v){ h._sit=v.situacao||null; h._cancelado=/cancel/i.test(String(v.situacao||'')); if(v.data && !h.venda_dia) h.venda_dia=v.data; if(v.venda_em && !h.venda_em) h.venda_em=v.venda_em; if(v.tarifa_ml!=null && h.tarifa_ml==null) h.tarifa_ml=Number(v.tarifa_ml); if(v.frete_recebido!=null && h.frete_recebido==null) h.frete_recebido=Number(v.frete_recebido); } });   // d45: bipada herda dia/hora da venda casada · d50: tarifa REAL · d51: frete recebido
+  (DADOS||[]).forEach(h=>{ const v=_sit[String(h.numero)]; if(v){ h._sit=v.situacao||null; h._cancelado=/cancel/i.test(String(v.situacao||'')); if(v.data && !h.venda_dia) h.venda_dia=v.data; if(v.venda_em && !h.venda_em) h.venda_em=v.venda_em; if(v.tarifa_ml!=null && h.tarifa_ml==null) h.tarifa_ml=Number(v.tarifa_ml); if(v.frete_recebido!=null && h.frete_recebido==null) h.frete_recebido=Number(v.frete_recebido); if(v.renda_canal!=null && h.renda_canal==null) h.renda_canal=Number(v.renda_canal); } });   // d45: bipada herda dia/hora da venda casada · d50: tarifa REAL · d51: frete recebido · d53: renda oficial
   const _nums = new Set((DADOS||[]).map(h=>String(h.numero)));
   SINT = (VENDAS||[]).filter(v=>v&&v.numero!=null&&!_nums.has(String(v.numero))).map(v=>({
     sintetico:true, id:'s'+v.id, numero:v.numero, numero_loja:v.numero_loja||'', marketplace:v.marketplace||'outro',
@@ -385,8 +385,12 @@ function render(){
         if(canalKey(h.marketplace)==='madeira' && tx==null) tx = 17.6;   // d50: padrão oficial MM
         if(aliq==null || (tReal==null && tx==null)){ semCfg++; return; }
         const tot = (h.valor!=null&&isFinite(Number(h.valor))) ? Number(h.valor) : rp;
-        rec+=(tot<rp?tot:rp); imp+=tot*aliq/100; tar+=(tReal!=null ? tReal : (rp*tx/100 + (canalKey(h.marketplace)==='madeira'?5:0))); pedOk++;   // d51: desconto abatido da receita
-        if(h.frete_recebido!=null && isFinite(Number(h.frete_recebido)) && Number(h.frete_recebido)>0) fRecP+=Number(h.frete_recebido);
+        const rCan = (h.renda_canal!=null && isFinite(Number(h.renda_canal)) && Number(h.renda_canal)>0) ? Number(h.renda_canal) : null;   // d53: renda oficial (escrow)
+        if(rCan!=null){ rec+=rCan; imp+=tot*aliq/100; pedOk++; }   // taxas/moedas/frete do comprador já liquidados dentro da renda
+        else {
+          rec+=(tot<rp?tot:rp); imp+=tot*aliq/100; tar+=(tReal!=null ? tReal : (rp*tx/100 + (canalKey(h.marketplace)==='madeira'?5:0))); pedOk++;   // d51: desconto abatido da receita
+          if(h.frete_recebido!=null && isFinite(Number(h.frete_recebido)) && Number(h.frete_recebido)>0) fRecP+=Number(h.frete_recebido);
+        }
         if(tReal!=null) tReais++;
         if(h.frete_ml!=null && isFinite(Number(h.frete_ml))) frV+=Number(h.frete_ml);
         else if(h.flex){ const fx=flexDe(canalKey(h.marketplace)); if(fx!=null && fx>0) frV+=fx; }   // d52: flex = motoboy antes do frete importado
@@ -543,8 +547,11 @@ function calcPL(h){
   const rpEf = (tot!=null && rp!=null && tot < rp) ? tot : rp;
   const desconto = (tot!=null && rp!=null && tot < rp) ? Math.round((rp-tot)*100)/100 : null;
   const freteRec = (h.frete_recebido!=null && isFinite(Number(h.frete_recebido)) && Number(h.frete_recebido)>0) ? Number(h.frete_recebido) : null;
-  const mc = completo? rpEf-imposto-tarifa-custo-(frV||0)+(credito||0)+(freteRec||0) : null;
-  return {mes,ck,rp,rpEf,desconto,freteRec,tot,frete,aliq,imposto,feeReal,feeBling,tx,tarifa,custo,cusUn,unTot,custoOk,frV,frFonte,credito,completo,mc};
+  // d53: RENDA OFICIAL do canal (escrow da Shopee) — o depósito exato: já liquida taxas, moedas Shopee, cupons e frete do comprador.
+  // Quando existe, a M.C. ancora nela (e NÃO soma tarifa/desconto/freteRec de novo — tudo já está dentro).
+  const rendaCanal = (h.renda_canal!=null && isFinite(Number(h.renda_canal)) && Number(h.renda_canal)>0) ? Number(h.renda_canal) : null;
+  const mc = completo? (rendaCanal!=null ? (rendaCanal-imposto-custo-(frV||0)+(credito||0)) : (rpEf-imposto-tarifa-custo-(frV||0)+(credito||0)+(freteRec||0))) : null;
+  return {mes,ck,rp,rpEf,desconto,freteRec,rendaCanal,tot,frete,aliq,imposto,feeReal,feeBling,tx,tarifa,custo,cusUn,unTot,custoOk,frV,frFonte,credito,completo,mc};
 }
 function buscarPed(q){
   q = String(q||'').trim().toLowerCase();
