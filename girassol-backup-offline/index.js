@@ -41,7 +41,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v21/07 b11';
+const VERSAO     = 'girassol-backup-offline v22/07 b12';
 
 // ── SESSÃO DE OPERADOR (cookie assinado HMAC) — protege rotas de dados/ação ──
 // Segredo estável entre restarts. Usa ADMIN_KEY (já configurada no Render) como base.
@@ -2177,6 +2177,7 @@ async function vendasSync() {
       if (lista.length < 100) break;
       await new Promise(r2 => setTimeout(r2, 450));
     }
+    writeJson(F, atual);   // b12: grava JÁ após a fase 1 — o 🔄 do dashboard espera 6s e recarrega; antes, o arquivo só era gravado no fim da rodada (~1 min) e o botão sempre mostrava a rodada anterior
     // fase 2: DETALHE dos ainda não-bipados (itens → custo/R$ produtos; taxas → tarifa/frete) — margem antes da bipagem
     try {
       const confS = readJson(CONFERIDOS_FILE, {});
@@ -2206,6 +2207,7 @@ async function vendasSync() {
         }
         await new Promise(r3 => setTimeout(r3, 450));
       }
+      writeJson(F, atual);   // b12: itens/taxas no disco antes da fase 3
     } catch (e) {}
     // fase 3: nf_emissao dos conferidos RECENTES (🧾 do dashboard) — snapshots antigos não guardavam a hora da NF
     // (parseNF descartava). Busca no detalhe /nfe/{id}, até 40 por rodada; quando não dá pra achar, marca '' e para de tentar.
