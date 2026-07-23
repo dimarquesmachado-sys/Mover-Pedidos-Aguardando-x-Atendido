@@ -41,7 +41,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.AMBBKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.AMBBKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'amb-checkout-offline v23/07 b17';
+const VERSAO     = 'amb-checkout-offline v23/07 b18';
 
 // ── SESSÃO DE OPERADOR (cookie assinado HMAC) — protege rotas de dados/ação ──
 // Segredo estável entre restarts. Usa ADMIN_KEY (já configurada no Render) como base.
@@ -214,6 +214,105 @@ const FLEX_KEYWORDS = ['mercado envios flex', 'entrega local', 'vapt', 'shopee e
 // Sem ^PW/^LL de propósito: usa a config da impressora (não trunca a etiqueta dos
 // Correios que vem depois). Centralizado via ^FB. Layout AJUSTÁVEL após teste real.
 
+// ── SESSÃO SHOPEE QUE SE RENOVA SOZINHA (b18) ───────────────────────────
+// O de-para order_sn → id interno só existe no endpoint que a caixa de busca do
+// Seller Center usa, e ele exige cookie de sessão. Recapturar isso na mão toda
+// vez que vence é chato — então a env var passa a ser só a SEMENTE:
+//   1) no primeiro uso ela é copiada pro disco;
+//   2) a cada resposta da Shopee a gente aproveita o `set-cookie` que ela devolve
+//      e regrava o jar — que é exatamente o que o navegador faz, e é por isso que
+//      ele fica logado por meses;
+//   3) um cron 2x ao dia faz uma chamada barata só pra manter a sessão quente,
+//      mesmo em dia que ninguém clicou em nenhum ↗.
+// Se o Diego colar uma semente NOVA na env (porque a sessão morreu de vez), ela
+// ganha do disco — detectado por hash da própria env.
+const SHOPEE_ENV_COOKIE  = 'AMBBKP_SHOPEE_COOKIE';
+const SHOPEE_SESSAO_FILE = path.join(CACHE_DIR, '_shopee-sessao.json');
+
+function _shopeeHash(s) {
+  try { return require('crypto').createHash('sha1').update(String(s)).digest('hex').slice(0, 12); }
+  catch (e) { return 'len' + String(s).length; }
+}
+
+function shopeeSessaoLer() {
+  const env  = String(process.env[SHOPEE_ENV_COOKIE] || '').trim();
+  const j    = readJson(SHOPEE_SESSAO_FILE, null) || {};
+  const envH = env ? _shopeeHash(env) : '';
+  if (env && j.semente !== envH) {          // semente nova na env → ela manda
+    const novo = { cookie: env, semente: envH, origem: 'env', atualizado: new Date().toISOString(), renovacoes: 0 };
+    try { ensureDir(CACHE_DIR); writeJson(SHOPEE_SESSAO_FILE, novo); } catch (e) {}
+    return novo;
+  }
+  if (j.cookie) return j;
+  if (env) return { cookie: env, semente: envH, origem: 'env', atualizado: null, renovacoes: 0 };
+  return { cookie: '', origem: 'nenhum', renovacoes: 0 };
+}
+
+// Pega o set-cookie da resposta e funde no jar. Devolve null se nada mudou.
+function shopeeSessaoAtualiza(resp) {
+  let lista = [];
+  try { if (resp && resp.headers && typeof resp.headers.getSetCookie === 'function') lista = resp.headers.getSetCookie() || []; } catch (e) {}
+  if (!lista.length) { try { const s = resp && resp.headers && resp.headers.get('set-cookie'); if (s) lista = [s]; } catch (e) {} }
+  if (!lista.length) return null;
+
+  const atual = shopeeSessaoLer();
+  if (!atual.cookie) return null;
+
+  const mapa = new Map();
+  String(atual.cookie).split(';').forEach(p => { const i = p.indexOf('='); if (i > 0) mapa.set(p.slice(0, i).trim(), p.slice(i + 1).trim()); });
+
+  let mudou = 0;
+  lista.forEach(sc => {
+    const par = String(sc).split(';')[0];
+    const i = par.indexOf('=');
+    if (i <= 0) return;
+    const nome = par.slice(0, i).trim();
+    const val  = par.slice(i + 1).trim();
+    if (!nome) return;
+    if (!val || val === 'deleted') { if (mapa.delete(nome)) mudou++; return; }
+    if (mapa.get(nome) !== val) { mapa.set(nome, val); mudou++; }
+  });
+  if (!mudou) return null;
+
+  const cookie = Array.from(mapa.entries()).map(([k, v]) => k + '=' + v).join('; ');
+  const novo = { cookie, semente: atual.semente || '', origem: 'renovado', atualizado: new Date().toISOString(), renovacoes: (atual.renovacoes || 0) + 1 };
+  try { ensureDir(CACHE_DIR); writeJson(SHOPEE_SESSAO_FILE, novo); } catch (e) {}
+  return { mudou, renovacoes: novo.renovacoes };
+}
+
+const SHOPEE_CAB = {
+  'Accept': 'application/json, text/plain, */*',
+  'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+  'Referer': 'https://seller.shopee.com.br/portal/sale/order',
+  'X-Api-Src-List': 'pc',
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:154.0) Gecko/20100101 Firefox/154.0'
+};
+
+function shopeeUrlBusca(cookie, termo) {
+  const cds = (String(cookie).match(/(?:^|;\s*)SPC_CDS=([^;]+)/) || [])[1] || '';
+  return 'https://seller.shopee.com.br/api/v3/order/get_order_list_search_bar_hint'
+       + '?SPC_CDS=' + encodeURIComponent(cds)
+       + '&SPC_CDS_VER=2&keyword=' + encodeURIComponent(termo)
+       + '&category=1&order_list_tab=100&entity_type=1';
+}
+
+// Chamada barata só pra Shopee renovar os cookies. Roda no cron 2x ao dia.
+async function shopeeKeepAlive() {
+  const sess = shopeeSessaoLer();
+  if (!sess.cookie) { console.log('[AMBBKP] shopee keep-alive: sem cookie (env ' + SHOPEE_ENV_COOKIE + ' vazia) — nada a fazer'); return { ok: false, motivo: 'sem cookie' }; }
+  try {
+    const r = await fetch(shopeeUrlBusca(sess.cookie, 'keepalive'), { headers: Object.assign({ 'Cookie': sess.cookie }, SHOPEE_CAB) });
+    const t = await r.text();
+    const ren = shopeeSessaoAtualiza(r);
+    const vivo = (r.status === 200 && /"code"\s*:\s*0/.test(t));
+    console.log('[AMBBKP] shopee keep-alive: HTTP ' + r.status + (vivo ? ' ✓ sessão viva' : ' ✗ sessão NÃO respondeu como logada') + (ren ? (' · ' + ren.mudou + ' cookie(s) renovado(s), total ' + ren.renovacoes) : ' · nada a renovar'));
+    return { ok: vivo, status: r.status, renovou: ren ? ren.mudou : 0, corpo: t.slice(0, 300) };
+  } catch (e) {
+    console.log('[AMBBKP] shopee keep-alive falhou: ' + ((e && e.message) || e));
+    return { ok: false, erro: String((e && e.message) || e).slice(0, 200) };
+  }
+}
+
 // ─── Rotas HTTP (namespaced) ────────────────────────────────────────────
 function routes(readBody) {
   return async function handle(req, res, urlObj) {
@@ -281,9 +380,10 @@ function routes(readBody) {
       if (idIr) passosIr.push({ passo: 'cache', order_id: idIr });
 
       try {
-        const ckIr = String(process.env.AMBBKP_SHOPEE_COOKIE || '').trim();
+        const sessIr = shopeeSessaoLer();
+        const ckIr   = sessIr.cookie;
         if (!ckIr) {
-          passosIr.push({ passo: 'cookie', erro: 'env AMBBKP_SHOPEE_COOKIE vazia ou ausente' });
+          passosIr.push({ passo: 'cookie', erro: 'sem cookie: env AMBBKP_SHOPEE_COOKIE vazia e nada gravado no disco' });
         } else {
           const cdsIr = (ckIr.match(/(?:^|;\s*)SPC_CDS=([^;]+)/) || [])[1] || '';
           const urlIr = 'https://seller.shopee.com.br/api/v3/order/get_order_list_search_bar_hint'
@@ -302,7 +402,8 @@ function routes(readBody) {
             }
           });
           const txtIr = await rIr.text();
-          passosIr.push({ passo: 'consulta', status: rIr.status, tem_cds: !!cdsIr, tam_cookie: ckIr.length, corpo: txtIr.slice(0, 700) });
+          const renIr = shopeeSessaoAtualiza(rIr);   // set-cookie da resposta → a sessão se renova sozinha
+          passosIr.push({ passo: 'consulta', status: rIr.status, tem_cds: !!cdsIr, tam_cookie: ckIr.length, origem_cookie: sessIr.origem || null, renovou: renIr ? renIr.mudou : 0, corpo: txtIr.slice(0, 700) });
 
           let jIr = null; try { jIr = JSON.parse(txtIr); } catch (e) {}
           // o resultado NÃO vem em data.list — vem em data.order_sn_result.list.
@@ -333,6 +434,29 @@ function routes(readBody) {
         return true;
       }
       vai(idIr ? ('https://seller.shopee.com.br/portal/sale/order/' + idIr) : buscaIr);
+      return true;
+    }
+
+    // SAÚDE DA SESSÃO SHOPEE (b18) — admin. Diz se o cookie está vivo, de onde ele
+    // veio (env ou renovado sozinho) e quando foi atualizado pela última vez.
+    if (method === 'GET' && p === '/amb-checkout-offline/shopee-sessao') {
+      const opSh = validarSessao(req.headers['cookie']);
+      if (!opSh || !ehAdmin(opSh)) { json(res, 403, { ok: false, erro: 'apenas admin' }); return true; }
+      const antes = shopeeSessaoLer();
+      const teste = await shopeeKeepAlive();
+      const dep   = shopeeSessaoLer();
+      json(res, 200, {
+        ok: !!teste.ok,
+        empresa: 'amb-checkout-offline',
+        env_semente: SHOPEE_ENV_COOKIE,
+        tem_cookie: !!antes.cookie,
+        tam_cookie: (antes.cookie || '').length,
+        origem: dep.origem || null,
+        atualizado: dep.atualizado || null,
+        renovacoes: dep.renovacoes || 0,
+        teste,
+        versao: VERSAO
+      });
       return true;
     }
 
@@ -2374,8 +2498,8 @@ async function mlSyncFees(dias) {
 module.exports = {
   id: 'amb-checkout-offline',
   nome: 'AMBTotal Checkout Offline',
-  rotinas: { backupCache: () => rodarCiclo('cron'), backfillNF: () => backfillNFLocal(45), mlSyncFees: () => mlSyncFees(14) },
+  rotinas: { backupCache: () => rodarCiclo('cron'), backfillNF: () => backfillNFLocal(45), mlSyncFees: () => mlSyncFees(14), shopeeKeepAlive: () => shopeeKeepAlive() },
   routes,
-  crons: { backupCache: CRON_EXPR, backfillNF: '15 4 * * *', mlSyncFees: '40 4 * * *' },
+  crons: { backupCache: CRON_EXPR, backfillNF: '15 4 * * *', mlSyncFees: '40 4 * * *', shopeeKeepAlive: '30 5,17 * * *' },
   bootstrap
 };
