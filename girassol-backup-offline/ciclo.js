@@ -246,6 +246,37 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC, nfCtx) {
       }
     } catch (e) { console.log(`[GIRABKP] fallback ML ${ped.numero}: ${String(e.message || e).slice(0, 160)}`); }
   }
+  // FALLBACK SHOPEE: quando o Bling não trouxe a etiqueta (importou o pedido depois do envio
+  // já organizado, ou a NF travou a edição → /logisticas/etiquetas 404 pra sempre), busca a etiqueta
+  // DIRETO na API oficial da Shopee, via o serviço shopee-nf-sync que guarda os tokens.
+  // Vem em ZPL (a conta imprime térmico) — mesmo formato do Bling, cai no fluxo normal de impressão.
+  // Modo &rapido=1: só baixa documento que já existe (~3s), sem create/polling, pra não travar o ciclo.
+  // Precisa da env SHOPEE_SYNC_KEY; sem ela o bloco nem tenta.
+  if (!temEtiqueta && mkt === 'shopee' && ped.numeroLoja && process.env.SHOPEE_SYNC_KEY) {
+    try {
+      const SH_URL = process.env.SHOPEE_SYNC_URL || 'https://girassol-shopee-sync-organizar-envio.onrender.com';
+      const urlEtq = SH_URL + '/girassol/interno/etiqueta?rapido=1&k=' + encodeURIComponent(process.env.SHOPEE_SYNC_KEY) + '&order_sn=' + encodeURIComponent(String(ped.numeroLoja).trim());
+      const rSh = await fetch(urlEtq, { timeout: 45000 });
+      if (rSh.ok) {
+        const bufSh = await rSh.buffer();
+        const fmtSh = String(rSh.headers.get('x-etiqueta-formato') || '').toLowerCase();
+        const ehZpl = fmtSh === 'zpl' || (bufSh && bufSh.slice(0, 400).toString('utf8').indexOf('^XA') >= 0);
+        const ehPdfSh = fmtSh === 'pdf' || (bufSh && bufSh.slice(0, 4).toString('utf8') === '%PDF');
+        if (bufSh && bufSh.length > 300 && ehZpl) {
+          fs.writeFileSync(_etqPath, bufSh); temEtiqueta = true;   // ZPL no caminho nativo — imprime igual às outras
+          console.log(`[GIRABKP] etiqueta ${ped.numero} baixada DIRETO da Shopee em ZPL (${bufSh.length} bytes)`);
+        } else if (bufSh && bufSh.length > 300 && ehPdfSh) {
+          fs.writeFileSync(_etqPdfPath, bufSh); temEtiqueta = true; etqEhPdf = true;
+          console.log(`[GIRABKP] etiqueta ${ped.numero} baixada DIRETO da Shopee em PDF (${bufSh.length} bytes)`);
+        } else {
+          console.log(`[GIRABKP] fallback Shopee ${ped.numero}: resposta sem etiqueta reconhecível`);
+        }
+      } else {
+        let detSh = ''; try { detSh = (await rSh.text()).slice(0, 200).replace(/\s+/g, ' '); } catch (e) {}
+        console.log(`[GIRABKP] fallback Shopee ${ped.numero}: HTTP ${rSh.status} ${detSh}`);
+      }
+    } catch (e) { console.log(`[GIRABKP] fallback Shopee ${ped.numero}: ${String(e.message || e).slice(0, 160)}`); }
+  }
   // MADEIRA MADEIRA não tem etiqueta no Bling. Se a etiqueta já está no mapa MM
   // (gerada por nós e sincronizada pela extensão), conta o pedido como PRONTO.
   let etiquetaMM = false, volumesMM = 1;

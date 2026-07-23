@@ -380,7 +380,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b122';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b123';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#b3b9c4'}, magalu:{n:'Magalu',c:'#0086ff'}, shein:{n:'Shein',c:'#e0e0e0'},
@@ -785,10 +785,13 @@ function renderLista(){
         '<div class="scl1">'+
           '<span class="badge" style="background:'+m.c+'">'+m.n+'</span>'+
           '<span class="num">'+esc(p.numero||p.id)+'</span>'+
+          ((souAdmin() && p.numero_loja && /amazon/i.test(String(p.marketplace||'')))?'<a href="https://sellercentral.amazon.com.br/orders-v3/order/'+encodeURIComponent(String(p.numero_loja).trim())+'" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="abrir a venda no Seller Central da Amazon (admin)" style="text-decoration:none;font-size:13px;color:#38bdf8">↗</a>':'')+((souAdmin() && p.numero_loja && /magalu/i.test(String(p.marketplace||'')))?'<a href="https://seller.magalu.com/pedidos/'+String(p.numero_loja).replace(/\D/g,'')+'" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="abrir o pedido no seller da Magalu (admin)" style="text-decoration:none;font-size:13px;color:#38bdf8">↗</a>':'')+((souAdmin() && p.numero_loja && /tiktok/i.test(String(p.marketplace||'')))?'<a href="https://seller-br.tiktok.com/order/detail?order_no='+String(p.numero_loja).replace(/\D/g,'')+'&shop_region=BR" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="abrir a venda no seller center do TikTok (admin)" style="text-decoration:none;font-size:13px;color:#38bdf8">↗</a>':'')+((souAdmin() && p.numero_loja && /shopee/i.test(String(p.marketplace||'')))?'<a href="/girassol-backup-offline/ir-shopee?sn='+encodeURIComponent(String(p.numero_loja).trim())+'" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="abrir esta venda direto no seller center da Shopee (admin)" style="text-decoration:none;font-size:13px;color:#38bdf8">↗</a>':'')+((souAdmin() && p.numero_loja && /ml|merc/i.test(String(p.marketplace||'')))?'<a href="https://www.mercadolivre.com.br/vendas/'+String(p.numero_loja).replace(/\D/g,'')+'/detalhe" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="abrir a venda no Mercado Livre (só admin vê)" style="text-decoration:none;font-size:13px;color:#38bdf8">↗</a>':'')+
+        
           '<span class="setag">⚠️ sem etiqueta</span>'+
         '</div>'+
         (p.cliente?'<div class="scli">'+esc(p.cliente)+'</div>':'')+
-        '<div class="smeta">NF '+(p.nf_numero?esc(p.nf_numero):'—')+' · não dá pra processar — confira no Bling</div>'+
+        '<div class="smeta">NF '+(p.nf_numero?esc(p.nf_numero):'—')+' · o Bling não trouxe a etiqueta deste pedido</div>'+
+        (souAdmin()?'<button class="btn sec" style="margin-top:8px;font-size:12px;padding:7px 11px" onclick="event.stopPropagation();anexarEtiqueta(\''+esc(p.id)+'\',\''+esc(p.numero||p.id)+'\')">📎 anexar etiqueta (ZPL/ZIP/PDF)</button>':'')+
       '</div>';
     }).join('');
     return;
@@ -836,6 +839,26 @@ function renderLista(){
       })()+
     '</div>';
   }).join('');
+}
+
+// ADMIN: anexa a etiqueta baixada no painel do marketplace. O estoquista não tem (nem precisa de)
+// acesso ao seller center — o admin resolve aqui e o pedido volta pra fila normal de bipagem.
+async function anexarEtiqueta(id, numero){
+  const inp = document.createElement('input');
+  inp.type = 'file'; inp.accept = '.txt,.zpl,.zip,.pdf,text/plain,application/zip,application/pdf';   // ZPL (padrão da conta), ZIP ou PDF
+  inp.onchange = async () => {
+    const f = inp.files && inp.files[0];
+    if(!f) return;
+    if(f.size > 8*1024*1024){ alert('arquivo muito grande (máx 8 MB)'); return; }
+    toast('📎 enviando etiqueta do '+numero+'…');
+    try{
+      const b64 = await new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(String(r.result).split(',')[1]); r.onerror=()=>rej(new Error('não consegui ler o arquivo')); r.readAsDataURL(f); });
+      const j = await postJson('/girassol-backup-offline/etiqueta-anexar', { id: id, pdf_base64: b64 });
+      if(j && j.ok){ toast('✅ etiqueta anexada — pedido '+numero+' liberado'); await carregarLista(); }
+      else alert('Não deu: '+((j&&j.erro)||'erro desconhecido'));
+    }catch(e){ alert('Não deu: '+(e.message||e)); }
+  };
+  inp.click();
 }
 
 function avisoSemEtiqueta(num){
