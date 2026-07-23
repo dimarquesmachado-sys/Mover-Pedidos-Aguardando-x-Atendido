@@ -246,30 +246,33 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC, nfCtx) {
       }
     } catch (e) { console.log(`[AMBBKP] fallback ML ${ped.numero}: ${String(e.message || e).slice(0, 160)}`); }
   }
-  // FALLBACK SHOPEE (b12): mesmo caso do ML — o Bling importou o pedido DEPOIS do envio já
-  // organizado na Shopee (ou a NF travou a edição antes da logística entrar), então o pedido
-  // fica SEM logística no Bling e /logisticas/etiquetas dá 404 pra sempre.
-  // → pede a etiqueta (waybill PDF) direto pra Shopee, via o serviço shopee-nf-sync que guarda os tokens.
-  // Precisa da env SHOPEE_SYNC_KEY (chave do shopee-sync); sem ela, o bloco nem tenta.
-  // DESLIGADO por padrao (23/07): o caso real que motivou o fallback era rastreio INVALIDO na Shopee
-  // (logistics.tracking_number_invalid) -- a etiqueta nao existe pra ninguem baixar, entao a consulta so
-  // gastava 60-120s do ciclo por pedido. Fica aqui pronto: liga com a env SHOPEE_ETQ_FALLBACK=1 se um dia
-  // aparecer caso em que a Shopee TEM a etiqueta e o Bling nao.
-  if (process.env.SHOPEE_ETQ_FALLBACK === '1' && !temEtiqueta && mkt === 'shopee' && ped.numeroLoja && process.env.SHOPEE_SYNC_KEY) {
+  // FALLBACK SHOPEE (b15): quando o Bling não trouxe a etiqueta (importou o pedido depois do envio
+  // já organizado, ou a NF travou a edição → /logisticas/etiquetas 404 pra sempre), busca a etiqueta
+  // DIRETO na API oficial da Shopee, via o serviço shopee-nf-sync que guarda os tokens.
+  // Vem em ZPL (a conta imprime térmico) — mesmo formato do Bling, cai no fluxo normal de impressão.
+  // Modo &rapido=1: só baixa documento que já existe (~3s), sem create/polling, pra não travar o ciclo.
+  // Precisa da env SHOPEE_SYNC_KEY; sem ela o bloco nem tenta.
+  if (!temEtiqueta && mkt === 'shopee' && ped.numeroLoja && process.env.SHOPEE_SYNC_KEY) {
     try {
       const SH_URL = process.env.SHOPEE_SYNC_URL || 'https://girassol-shopee-sync-organizar-envio.onrender.com';
-      const urlEtq = SH_URL + '/amb/interno/etiqueta?k=' + encodeURIComponent(process.env.SHOPEE_SYNC_KEY) + '&order_sn=' + encodeURIComponent(String(ped.numeroLoja).trim());
-      const rSh = await fetch(urlEtq, { timeout: 120000 });
+      const urlEtq = SH_URL + '/amb/interno/etiqueta?rapido=1&k=' + encodeURIComponent(process.env.SHOPEE_SYNC_KEY) + '&order_sn=' + encodeURIComponent(String(ped.numeroLoja).trim());
+      const rSh = await fetch(urlEtq, { timeout: 45000 });
       if (rSh.ok) {
         const bufSh = await rSh.buffer();
-        if (bufSh && bufSh.length > 500 && bufSh.slice(0, 4).toString('utf8') === '%PDF') {
+        const fmtSh = String(rSh.headers.get('x-etiqueta-formato') || '').toLowerCase();
+        const ehZpl = fmtSh === 'zpl' || (bufSh && bufSh.slice(0, 400).toString('utf8').indexOf('^XA') >= 0);
+        const ehPdfSh = fmtSh === 'pdf' || (bufSh && bufSh.slice(0, 4).toString('utf8') === '%PDF');
+        if (bufSh && bufSh.length > 300 && ehZpl) {
+          fs.writeFileSync(_etqPath, bufSh); temEtiqueta = true;   // ZPL no caminho nativo — imprime igual às outras
+          console.log(`[AMBBKP] etiqueta ${ped.numero} baixada DIRETO da Shopee em ZPL (${bufSh.length} bytes)`);
+        } else if (bufSh && bufSh.length > 300 && ehPdfSh) {
           fs.writeFileSync(_etqPdfPath, bufSh); temEtiqueta = true; etqEhPdf = true;
-          console.log(`[AMBBKP] etiqueta ${ped.numero} baixada DIRETO da Shopee (fallback, ${bufSh.length} bytes)`);
+          console.log(`[AMBBKP] etiqueta ${ped.numero} baixada DIRETO da Shopee em PDF (${bufSh.length} bytes)`);
         } else {
-          console.log(`[AMBBKP] fallback Shopee ${ped.numero}: resposta sem PDF`);
+          console.log(`[AMBBKP] fallback Shopee ${ped.numero}: resposta sem etiqueta reconhecível`);
         }
       } else {
-        let detSh = ''; try { detSh = (await rSh.text()).slice(0, 220).replace(/\s+/g, ' '); } catch (e) {}
+        let detSh = ''; try { detSh = (await rSh.text()).slice(0, 200).replace(/\s+/g, ' '); } catch (e) {}
         console.log(`[AMBBKP] fallback Shopee ${ped.numero}: HTTP ${rSh.status} ${detSh}`);
       }
     } catch (e) { console.log(`[AMBBKP] fallback Shopee ${ped.numero}: ${String(e.message || e).slice(0, 160)}`); }

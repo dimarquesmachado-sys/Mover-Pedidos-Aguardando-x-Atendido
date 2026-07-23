@@ -41,7 +41,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.AMBBKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.AMBBKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'amb-checkout-offline v23/07 b14';
+const VERSAO     = 'amb-checkout-offline v23/07 b15';
 
 // ── SESSÃO DE OPERADOR (cookie assinado HMAC) — protege rotas de dados/ação ──
 // Segredo estável entre restarts. Usa ADMIN_KEY (já configurada no Render) como base.
@@ -276,21 +276,40 @@ function routes(readBody) {
       const b64A = String(body.pdf_base64 || '').replace(/^data:[^,]*,/, '');
       if (!idA || !b64A) { json(res, 400, { ok: false, erro: 'faltou o id do pedido ou o arquivo' }); return true; }
       let bufA = null; try { bufA = Buffer.from(b64A, 'base64'); } catch (e) {}
-      if (!bufA || bufA.length < 400 || bufA.slice(0, 4).toString('utf8') !== '%PDF') { json(res, 400, { ok: false, erro: 'o arquivo não é um PDF válido' }); return true; }
+      if (!bufA || bufA.length < 200) { json(res, 400, { ok: false, erro: 'arquivo vazio ou inválido' }); return true; }
+      // b15: aceita ZPL (o padrão da conta Shopee), ZIP com o ZPL dentro, e PDF.
+      // ZPL vai pro caminho nativo (imprime igual às demais); PDF vai pro caminho alternativo.
+      const _ehZpl = b => b && b.slice(0, 400).toString('utf8').indexOf('^XA') >= 0;
+      const _ehPdf = b => b && b.slice(0, 4).toString('utf8') === '%PDF';
+      let conteudoA = null, formatoA = null;
+      if (_ehPdf(bufA)) { conteudoA = bufA; formatoA = 'pdf'; }
+      else if (_ehZpl(bufA)) { conteudoA = bufA; formatoA = 'zpl'; }
+      else if (bufA[0] === 0x50 && bufA[1] === 0x4B && bufA[2] === 0x03 && bufA[3] === 0x04) {   // ZIP "PK\x03\x04"
+        try {
+          const zlibA = require('zlib');
+          const metodoA = bufA.readUInt16LE(8), fnA = bufA.readUInt16LE(26), exA = bufA.readUInt16LE(28);
+          const dadosA = bufA.slice(30 + fnA + exA);
+          const outA = metodoA === 0 ? dadosA : zlibA.inflateRawSync(dadosA, { finishFlush: zlibA.constants.Z_SYNC_FLUSH });
+          if (_ehZpl(outA)) { conteudoA = outA; formatoA = 'zpl'; }
+          else if (_ehPdf(outA)) { conteudoA = outA; formatoA = 'pdf'; }
+        } catch (e) {}
+      }
+      if (!conteudoA) { json(res, 400, { ok: false, erro: 'não reconheci o arquivo — mande a etiqueta em ZPL (.txt), ZIP ou PDF' }); return true; }
       const dirA = path.join(CACHE_DIR, String(idA));
-      try { ensureDir(dirA); fs.writeFileSync(path.join(dirA, 'etiqueta.pdf'), bufA); }
+      const alvoA = formatoA === 'pdf' ? path.join(dirA, 'etiqueta.pdf') : path.join(dirA, 'etiqueta.' + String(ETIQ_FORMATO || 'zpl').toLowerCase());
+      try { ensureDir(dirA); fs.writeFileSync(alvoA, conteudoA); }
       catch (e) { json(res, 500, { ok: false, erro: 'não consegui salvar o arquivo' }); return true; }
       // vale JÁ (sem esperar o próximo ciclo): manifesto + snapshot
       try {
         const manA = readJson(MANIFEST_FILE, {});
-        if (manA[idA]) { manA[idA].tem_etiqueta = true; manA[idA].etiqueta_pdf = true; writeJson(MANIFEST_FILE, manA); }
+        if (manA[idA]) { manA[idA].tem_etiqueta = true; manA[idA].etiqueta_pdf = (formatoA === 'pdf'); manA[idA].etiqueta_formato = (formatoA === 'pdf' ? 'PDF' : ETIQ_FORMATO); writeJson(MANIFEST_FILE, manA); }
       } catch (e) {}
       try {
         const snapA = readJson(path.join(dirA, 'pedido.json'), null);
-        if (snapA) { snapA.tem_etiqueta = true; snapA.etiqueta_pdf = true; writeJson(path.join(dirA, 'pedido.json'), snapA); }
+        if (snapA) { snapA.tem_etiqueta = true; snapA.etiqueta_pdf = (formatoA === 'pdf'); snapA.etiqueta_formato = (formatoA === 'pdf' ? 'PDF' : ETIQ_FORMATO); writeJson(path.join(dirA, 'pedido.json'), snapA); }
       } catch (e) {}
-      console.log(`[AMBBKP] etiqueta ANEXADA na mão no pedido ${idA} (${bufA.length} bytes) por ${opSess}`);
-      json(res, 200, { ok: true, bytes: bufA.length });
+      console.log(`[AMBBKP] etiqueta ANEXADA na mão no pedido ${idA} (${formatoA.toUpperCase()}, ${conteudoA.length} bytes) por ${opSess}`);
+      json(res, 200, { ok: true, formato: formatoA, bytes: conteudoA.length });
       return true;
     }
 
