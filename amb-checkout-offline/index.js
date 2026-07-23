@@ -41,7 +41,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.AMBBKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.AMBBKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'amb-checkout-offline v23/07 b12';
+const VERSAO     = 'amb-checkout-offline v23/07 b13';
 
 // ── SESSÃO DE OPERADOR (cookie assinado HMAC) — protege rotas de dados/ação ──
 // Segredo estável entre restarts. Usa ADMIN_KEY (já configurada no Render) como base.
@@ -260,6 +260,37 @@ function routes(readBody) {
       _ultimoCicloAgora = agora;
       rodarCiclo('painel-admin').catch(() => {});
       json(res, 200, { ok: true, mensagem: 'consultando o Bling agora (~30-60s)' });
+      return true;
+    }
+
+    // ADMIN: ANEXAR ETIQUETA PDF na mão. Existe pro caso real em que o Bling fica SEM logística
+    // no pedido (importou depois do envio já organizado no canal, ou a NF travou a edição) e a
+    // etiqueta não vem nem pelo Bling nem pela API do canal. O admin baixa a etiqueta no painel do
+    // marketplace, anexa aqui, e o pedido volta a ser processável pelo estoquista — que NÃO precisa
+    // (nem deve) ter acesso ao seller center. Body: { id, pdf_base64 }.
+    if (method === 'POST' && p === '/amb-checkout-offline/etiqueta-anexar') {
+      const opSess = validarSessao(req.headers['cookie']);
+      if (!opSess || !ehAdmin(opSess)) { json(res, 403, { ok: false, erro: 'apenas admin' }); return true; }
+      let body = {}; try { const _rb = await readBody(req); body = (_rb && typeof _rb === 'object') ? _rb : JSON.parse(_rb || '{}'); } catch (e) {}
+      const idA = String(body.id || '').trim();
+      const b64A = String(body.pdf_base64 || '').replace(/^data:[^,]*,/, '');
+      if (!idA || !b64A) { json(res, 400, { ok: false, erro: 'faltou o id do pedido ou o arquivo' }); return true; }
+      let bufA = null; try { bufA = Buffer.from(b64A, 'base64'); } catch (e) {}
+      if (!bufA || bufA.length < 400 || bufA.slice(0, 4).toString('utf8') !== '%PDF') { json(res, 400, { ok: false, erro: 'o arquivo não é um PDF válido' }); return true; }
+      const dirA = path.join(CACHE_DIR, String(idA));
+      try { ensureDir(dirA); fs.writeFileSync(path.join(dirA, 'etiqueta.pdf'), bufA); }
+      catch (e) { json(res, 500, { ok: false, erro: 'não consegui salvar o arquivo' }); return true; }
+      // vale JÁ (sem esperar o próximo ciclo): manifesto + snapshot
+      try {
+        const manA = readJson(MANIFEST_FILE, {});
+        if (manA[idA]) { manA[idA].tem_etiqueta = true; manA[idA].etiqueta_pdf = true; writeJson(MANIFEST_FILE, manA); }
+      } catch (e) {}
+      try {
+        const snapA = readJson(path.join(dirA, 'pedido.json'), null);
+        if (snapA) { snapA.tem_etiqueta = true; snapA.etiqueta_pdf = true; writeJson(path.join(dirA, 'pedido.json'), snapA); }
+      } catch (e) {}
+      console.log(`[AMBBKP] etiqueta ANEXADA na mão no pedido ${idA} (${bufA.length} bytes) por ${opSess}`);
+      json(res, 200, { ok: true, bytes: bufA.length });
       return true;
     }
 

@@ -251,7 +251,11 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC, nfCtx) {
   // fica SEM logística no Bling e /logisticas/etiquetas dá 404 pra sempre.
   // → pede a etiqueta (waybill PDF) direto pra Shopee, via o serviço shopee-nf-sync que guarda os tokens.
   // Precisa da env SHOPEE_SYNC_KEY (chave do shopee-sync); sem ela, o bloco nem tenta.
-  if (!temEtiqueta && mkt === 'shopee' && ped.numeroLoja && process.env.SHOPEE_SYNC_KEY) {
+  // DESLIGADO por padrao (23/07): o caso real que motivou o fallback era rastreio INVALIDO na Shopee
+  // (logistics.tracking_number_invalid) -- a etiqueta nao existe pra ninguem baixar, entao a consulta so
+  // gastava 60-120s do ciclo por pedido. Fica aqui pronto: liga com a env SHOPEE_ETQ_FALLBACK=1 se um dia
+  // aparecer caso em que a Shopee TEM a etiqueta e o Bling nao.
+  if (process.env.SHOPEE_ETQ_FALLBACK === '1' && !temEtiqueta && mkt === 'shopee' && ped.numeroLoja && process.env.SHOPEE_SYNC_KEY) {
     try {
       const SH_URL = process.env.SHOPEE_SYNC_URL || 'https://girassol-shopee-sync-organizar-envio.onrender.com';
       const urlEtq = SH_URL + '/amb/interno/etiqueta?k=' + encodeURIComponent(process.env.SHOPEE_SYNC_KEY) + '&order_sn=' + encodeURIComponent(String(ped.numeroLoja).trim());

@@ -382,7 +382,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b115';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b116';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#b3b9c4'}, magalu:{n:'Magalu',c:'#0086ff'}, shein:{n:'Shein',c:'#e0e0e0'},
@@ -790,7 +790,8 @@ function renderLista(){
           '<span class="setag">⚠️ sem etiqueta</span>'+
         '</div>'+
         (p.cliente?'<div class="scli">'+esc(p.cliente)+'</div>':'')+
-        '<div class="smeta">NF '+(p.nf_numero?esc(p.nf_numero):'—')+' · não dá pra processar — confira no Bling</div>'+
+        '<div class="smeta">NF '+(p.nf_numero?esc(p.nf_numero):'—')+' · o Bling não trouxe a etiqueta deste pedido</div>'+
+        (souAdmin()?'<button class="btn sec" style="margin-top:8px;font-size:12px;padding:7px 11px" onclick="event.stopPropagation();anexarEtiqueta(\''+esc(p.id)+'\',\''+esc(p.numero||p.id)+'\')">📎 anexar etiqueta (PDF)</button>':'')+
       '</div>';
     }).join('');
     return;
@@ -827,6 +828,26 @@ function renderLista(){
       })()+
     '</div>';
   }).join('');
+}
+
+// ADMIN: anexa a etiqueta baixada no painel do marketplace. O estoquista não tem (nem precisa de)
+// acesso ao seller center — o admin resolve aqui e o pedido volta pra fila normal de bipagem.
+async function anexarEtiqueta(id, numero){
+  const inp = document.createElement('input');
+  inp.type = 'file'; inp.accept = 'application/pdf,.pdf';
+  inp.onchange = async () => {
+    const f = inp.files && inp.files[0];
+    if(!f) return;
+    if(f.size > 8*1024*1024){ alert('PDF muito grande (máx 8 MB)'); return; }
+    toast('📎 enviando etiqueta do '+numero+'…');
+    try{
+      const b64 = await new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(String(r.result).split(',')[1]); r.onerror=()=>rej(new Error('não consegui ler o arquivo')); r.readAsDataURL(f); });
+      const j = await postJson('/amb-checkout-offline/etiqueta-anexar', { id: id, pdf_base64: b64 });
+      if(j && j.ok){ toast('✅ etiqueta anexada — pedido '+numero+' liberado'); await carregarLista(); }
+      else alert('Não deu: '+((j&&j.erro)||'erro desconhecido'));
+    }catch(e){ alert('Não deu: '+(e.message||e)); }
+  };
+  inp.click();
 }
 
 function avisoSemEtiqueta(num){
