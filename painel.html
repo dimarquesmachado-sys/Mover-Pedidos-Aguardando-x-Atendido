@@ -1,0 +1,1934 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/png" href="data:image/png;base64,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">
+<title>Checkout Offline · GOOD</title>
+<script src="https://cdn.jsdelivr.net/npm/js-sha256@0.11.0/src/sha256.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qz-tray@2.2.6/qz-tray.js"></script>
+<style>
+  :root{
+    --bg:#0f1115; --card:#1a1e26; --card2:#232834; --line:#2c333f;
+    --tx:#e8edf4; --mut:#8b96a8; --ac:#3b82f6; --ok:#22c55e; --warn:#f59e0b; --err:#ef4444;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;display:flex;flex-direction:column;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--tx);font-size:15px}
+  header{background:#141821;border-bottom:1px solid var(--line);padding:9px 14px;flex:0 0 auto}
+  .htop{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  .htop h1{font-size:16px;margin:0;font-weight:700}
+  .logoTopo,.logoBig{background:#fff url(data:image/png;base64,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) center/82% no-repeat;box-shadow:0 1px 4px rgba(0,0,0,.45)}
+  .logoTopo{display:inline-block;width:32px;height:32px;vertical-align:middle;margin-right:9px;border-radius:8px}
+  .logoBig{display:block;width:72px;height:72px;margin:0 auto 12px;border-radius:16px}
+  .ver{font-size:12px;color:var(--mut);font-family:ui-monospace,monospace}
+  .grow{flex:1}
+  .qz{font-size:13px;padding:4px 10px;border-radius:20px;border:1px solid var(--line);cursor:pointer;white-space:nowrap}
+  .qz.on{color:var(--ok);border-color:var(--ok)} .qz.off{color:var(--err);border-color:var(--err)}
+  input.op{background:var(--card2);border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:5px 9px;font-size:13px;width:120px}
+  input.op[readonly]{opacity:.85;cursor:default;border-color:var(--ok)}
+  .loginback{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;z-index:9999}
+  .loginback.hide{display:none}
+  .loginbox{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:30px 26px;width:300px;max-width:90vw;text-align:center;box-shadow:0 12px 44px rgba(0,0,0,.55)}
+  .loginttl{font-size:20px;font-weight:800;margin-bottom:5px}
+  .loginsub{font-size:13px;color:var(--mut);margin-bottom:20px}
+  .loginfld{width:100%;box-sizing:border-box;padding:11px 12px;margin-bottom:11px;background:#0e1620;border:1px solid var(--line);border-radius:9px;color:var(--tx);font-size:15px}
+  .loginfld:focus{outline:none;border-color:var(--ac)}
+  .loginbtn{width:100%;padding:12px;font-size:15px;margin-top:3px}
+  .loginerr{color:var(--err);font-size:13px;margin-top:11px;min-height:16px}
+  .stats{display:flex;gap:14px;margin-top:7px;font-size:13px;color:var(--mut);flex-wrap:wrap}
+  .stats b{color:var(--tx)}
+
+  /* layout 2 colunas */
+  .main{flex:1 1 auto;display:flex;min-height:0}
+  .sidebar{width:410px;flex:0 0 410px;border-right:1px solid var(--line);overflow-y:auto;padding:10px;background:#12161e}
+  .detail{flex:1 1 auto;overflow-y:auto;padding:18px 22px}
+  .sbtools{display:flex;flex-wrap:wrap;gap:8px}
+  #modoBtn.on{border-color:var(--ac);color:var(--ac)}
+  .busca{width:100%;box-sizing:border-box;background:var(--card);border:1px solid var(--line);border-radius:9px;padding:9px 11px;color:var(--tx);font-size:13px;margin-bottom:10px}
+  .busca:focus{outline:none;border-color:var(--ac)}
+  .busca::placeholder{color:var(--mut)}
+  .scount{font-size:11px;color:var(--mut);margin:0 2px 8px}
+  .chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+  .chip{background:var(--card);border:1px solid var(--line);border-radius:999px;padding:5px 10px;color:var(--mut);font-size:12px;cursor:pointer;display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
+  .chip b{color:var(--tx)}
+  .chip:hover{border-color:var(--mut)}
+  .chip.on{border-color:var(--ac);color:var(--tx);background:#13243f}
+  .chip.flex.on{border-color:var(--warn);background:#2a1f08}
+  .cdot{width:8px;height:8px;border-radius:50%;display:inline-block}
+
+  .btn{background:var(--ac);color:#fff;border:0;border-radius:9px;padding:9px 14px;font-size:14px;font-weight:600;cursor:pointer}
+  .btn:disabled{opacity:.4;cursor:not-allowed}
+  .btn.sec{background:var(--card2);color:var(--tx);border:1px solid var(--line)}
+  .btn.ok{background:var(--ok)} .btn.warn{background:var(--warn);color:#1a1205}
+  .btn.sm{padding:6px 10px;font-size:13px}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+
+  /* card lateral */
+  .scard{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:9px 11px;margin-bottom:8px;cursor:pointer}
+  .scard:hover{border-color:#3a4657}
+  .scard.sel{border-color:var(--ac);background:#16202e}
+  .scard.done{opacity:.5}
+  .scard.resv{border-color:#b06a16;background:#241a0e}
+  .scard.resv:hover{background:#2d2010}
+  .resvtag{margin-left:auto;color:#f0a23a;font-size:11px;font-weight:700;white-space:nowrap}
+  .scl1{display:flex;align-items:center;gap:8px}
+  .badge{font-size:10px;font-weight:700;padding:2px 7px;border-radius:5px;color:#0b0d12;text-transform:uppercase}
+  .num{font-size:18px;font-weight:700}
+  .smeta{font-size:13px;color:var(--mut);font-family:ui-monospace,monospace;margin-top:4px}
+  .scli{font-size:14px;color:var(--tx);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .pdfok{color:var(--ok);font-weight:700}
+  .donetag{margin-left:auto;color:var(--ok);font-size:11px;font-weight:700}
+  .stime{font-size:10px;opacity:.55;margin-top:2px}
+
+  /* pedido SEM ETIQUETA (problema) */
+  .stwarn{cursor:pointer;color:var(--err)}
+  .stwarn b{color:var(--err)}
+  .stwarn:hover{text-decoration:underline}
+  .chip.serr{border-color:rgba(239,68,68,.5);color:#ffb4b4}
+  .chip.serr .cdot{display:none}
+  .chip.serr.on{border-color:var(--err);color:#fff;background:#2a1216}
+  .scard.semetiq{border:2px solid var(--err);background:#2a1216}
+  .scard.semetiq:hover{background:#371820}
+  .setag{margin-left:auto;background:var(--err);color:#fff;font-size:10px;font-weight:800;padding:2px 7px;border-radius:5px;text-transform:uppercase}
+  .voltag{background:#7a3e12;color:#ffd9a8;border:1px solid #c47a2e;font-size:10px;font-weight:800;padding:2px 7px;border-radius:5px;white-space:nowrap}
+  .dvol{background:#3a1d08;border:2px solid #c47a2e;border-radius:11px;padding:11px 14px;margin:10px 0;color:#ffd9a8;font-size:14px;font-weight:700;line-height:1.4}
+  .dvol b{color:#ffb259;font-size:16px}
+  .mvol{background:#3a1d08;border:2px solid #c47a2e;border-radius:11px;padding:13px 15px;margin-bottom:16px;color:#ffd9a8;font-size:17px;font-weight:800;text-align:center;line-height:1.35}
+  .mvol span{display:block;margin-top:5px;font-size:13px;font-weight:600;color:#e8c79f}
+  .scard .rep{margin-top:7px}
+
+  /* detalhe / bipagem */
+  .placeholder{height:100%;display:flex;align-items:center;justify-content:center;color:var(--mut);font-size:15px}
+  .dhead{display:flex;align-items:center;gap:10px;margin-bottom:4px}
+  .num.big{font-size:22px}
+  .prog{margin-left:auto;font-size:30px;font-weight:800}
+  .prog .done{color:var(--ok)}
+  .cli{color:var(--mut);font-size:14px;margin:2px 0 8px}
+  .nfbar{background:var(--card2);border:1px solid var(--line);border-radius:9px;padding:9px 12px;margin:8px 0;font-size:13px}
+  .nfbar.clic{cursor:pointer}
+  .nfbar.clic:hover{border-color:var(--ok);background:#0c2118}
+  .nfok{color:var(--ok);font-size:11px;font-weight:700;margin-left:4px}
+  .nfbar .chave{font-family:ui-monospace,monospace;font-size:11px;color:var(--mut);word-break:break-all}
+  .noean{color:var(--warn)}
+  .scanrow{display:flex;gap:8px;align-items:stretch;margin:12px 0 4px}
+  .scanrow #scan{flex:1;background:#0b0d12;border:2px solid var(--ac);color:var(--tx);border-radius:11px;padding:15px;font-size:19px;font-family:ui-monospace,monospace;text-align:center}
+  .scanrow #scan.err{border-color:var(--err);animation:shake .25s}
+  .qtdwrap{display:flex;flex-direction:column;justify-content:center;align-items:center;background:#0b0d12;border:2px solid var(--line);border-radius:11px;padding:3px 10px}
+  .qtdwrap label{font-size:9px;color:var(--mut);text-transform:uppercase;letter-spacing:.5px}
+  .qtdwrap input{width:58px;background:transparent;border:0;color:var(--tx);font-size:20px;font-family:ui-monospace,monospace;text-align:center;outline:none}
+  .thumb{width:46px;height:46px;border-radius:7px;object-fit:cover;background:#0b0d12;border:1px solid var(--line);flex:0 0 46px}
+  .thumb.noimg{display:flex;align-items:center;justify-content:center;color:var(--mut);font-size:16px}
+  @keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-6px)}75%{transform:translateX(6px)}}
+  .hint{font-size:12px;color:var(--mut);text-align:center;margin-top:5px}
+  .item{display:flex;align-items:center;gap:12px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 13px;margin-bottom:8px}
+  .item.full{border-color:var(--ok);background:#15241a}
+  .kitwrap{border:1px solid var(--line);border-radius:11px;margin-bottom:10px;overflow:hidden;background:#171b24}
+  .kitwrap.full{border-color:var(--ok)}
+  .kithead{display:flex;gap:10px;align-items:center;padding:10px 13px;background:#202634;font-size:14px;border-bottom:1px solid var(--line)}
+  .kh-txt{flex:1}
+  .ktag{display:inline-block;font-size:10px;font-weight:800;background:var(--warn);color:#1a1205;padding:2px 7px;border-radius:5px;margin-right:6px;vertical-align:middle}
+  .comps{padding:8px 8px 1px}
+  .item.comp{margin-left:14px;border-left:3px solid #3a4657}
+  .icount{font-size:19px;font-weight:800;min-width:60px;text-align:center}
+  .icount .b{color:var(--ok)}
+  .idesc{flex:1}
+  .idesc .d{font-size:14px}
+  .idesc .e{font-size:12px;color:var(--mut);font-family:ui-monospace,monospace;margin-top:2px}
+  .miniok{background:var(--card2);border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:7px 11px;font-size:13px;cursor:pointer}
+  .dbtns{display:flex;gap:8px;margin-top:14px;align-items:center;flex-wrap:wrap}
+  .empty{text-align:center;color:var(--mut);padding:30px 0}
+  .toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:#000;border:1px solid var(--line);padding:10px 18px;border-radius:24px;font-size:14px;opacity:0;transition:.2s;pointer-events:none;z-index:50}
+  .toast.show{opacity:1}
+  .foot{flex:0 0 auto;text-align:center;color:var(--mut);font-size:11px;padding:6px;border-top:1px solid var(--line)}
+  .modal{position:fixed;inset:0;background:rgba(0,0,0,.65);display:none;align-items:center;justify-content:center;z-index:100}
+  .modal.show{display:flex}
+  /* lightbox: foto do produto em tamanho cheio ao clicar no thumb */
+  .lightbox{position:fixed;inset:0;background:rgba(0,0,0,.85);display:none;align-items:center;justify-content:center;z-index:200;cursor:zoom-out;padding:20px;box-sizing:border-box}
+  .lightbox.show{display:flex}
+  .lightbox img{max-width:92vw;max-height:88vh;object-fit:contain;border-radius:10px;background:#fff;box-shadow:0 12px 48px rgba(0,0,0,.6)}
+  .imgclose{position:absolute;top:14px;right:18px;width:44px;height:44px;border-radius:50%;background:rgba(0,0,0,.55);color:#fff;font-size:22px;display:flex;align-items:center;justify-content:center;cursor:pointer}
+  img.thumb{cursor:zoom-in}
+  .mbox{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:22px;max-width:460px;width:90%;position:relative}
+  .mx{position:absolute;top:14px;right:14px;background:var(--card2);border:1px solid var(--line);color:var(--mut);border-radius:8px;width:30px;height:30px;font-size:15px;cursor:pointer;line-height:1}
+  .mx:hover{color:var(--tx);border-color:var(--mut)}
+  .mtit{font-size:19px;font-weight:700;margin-bottom:8px}
+  .msub{font-size:14px;color:var(--mut);margin-bottom:18px;line-height:1.45}
+  .mbtns{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+  /* pop-up de localização obrigatória no checkout */
+  .locforce{max-height:46vh;overflow:auto;margin:6px 0 16px;padding-right:6px;display:flex;flex-direction:column;gap:8px}
+  .lfrow{display:flex;align-items:center;gap:10px;background:var(--card2);border:1px solid var(--line);border-radius:10px;padding:8px}
+  .lfrow .thumb{width:38px;height:38px;flex:0 0 38px;border-radius:7px}
+  .lfinfo{flex:1;min-width:0}
+  .lfd{font-size:13px;font-weight:700;color:var(--tx);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .lfs{font-size:11px;color:var(--mut);font-family:ui-monospace,monospace;margin-top:2px}
+  .lfinp{flex:0 0 104px;width:104px;padding:9px 8px;border-radius:9px;background:var(--bg);border:2px solid var(--ac);color:#fff;font-size:16px;font-weight:800;text-align:center;font-family:ui-monospace,monospace}
+  .lfinp:focus{outline:none;border-color:var(--ok)}
+  /* localização no row da bipagem — visual rápido de tem/não tem */
+  .idesc .e .loctag{background:#13243f;border:1px solid var(--ac);color:#cfe0ff;border-radius:6px;padding:1px 6px;font-weight:700;white-space:nowrap}
+  .idesc .e .locsem{background:#3a2a10;border:1px solid var(--warn);color:#ffd9a8;border-radius:6px;padding:1px 6px;font-weight:700;white-space:nowrap}
+  .idesc .estoque{margin-top:3px;display:flex;flex-wrap:wrap;gap:5px}
+  .idesc .estoque .esttag{border-radius:6px;padding:1px 7px;font-weight:700;white-space:nowrap;font-size:.92em;cursor:help}
+  .idesc .estoque .esttag.estok{background:#0f2a17;border:1px solid var(--ok);color:#b6f0c8}
+  .idesc .estoque .esttag.estzero{background:#3a1212;border:1px solid var(--err);color:#ffb4b4}
+  .idesc .estoque .esttag.estunk,.idesc .estoque .esttag.estload{background:var(--card2);border:1px solid var(--line);color:var(--mut)}
+  .idesc .estoque .esttag.estchk{background:#1c2433;border:1px solid #3a4658;color:#aebacb}
+  .estbar{display:flex;justify-content:flex-end;margin:2px 0 6px}
+
+  @media(max-width:720px){
+    .main{flex-direction:column}
+    /* sem pedido aberto: a lista ocupa a tela toda */
+    .sidebar{width:auto;flex:1 1 auto;max-height:none;border-right:0;border-bottom:0;padding:8px}
+    .detail{display:none}
+    /* pedido aberto: o detalhe ocupa a tela toda, a lista some (volta pelo "← Voltar") */
+    body.peddet .sidebar{display:none}
+    body.peddet .detail{display:block;padding:12px 14px}
+    /* cabeçalho compacto: a barra de botões rola na horizontal em vez de empilhar várias linhas */
+    header{padding:8px 10px}
+    .grow{display:none}
+    .htop{gap:8px}
+    .htop h1{font-size:15px}
+    .sbtools{flex:1 1 100%;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:3px}
+    .sbtools .btn{flex:0 0 auto;white-space:nowrap}
+    input.op{width:88px}
+    /* gaveta de separação no celular: caixas menores → mais espaço pro nome/SKU */
+    .seplist{padding:0 10px 10px}
+    .sepchips{padding:10px 10px 4px}
+    .sepinfo{padding:4px 10px 8px}
+    .sepviews{padding:0 10px 6px}
+    .seprow{gap:8px;padding:9px 0}
+    .seprow .loc{min-width:40px;padding:5px 3px;font-size:12px}
+    .seprow .qtd{min-width:34px;width:34px;height:34px;font-size:16px}
+    .seprow .sku{font-size:14px}
+    .seprow .ds{font-size:12px}
+    .seprow .ean{font-size:10px}
+    .seprow .sepedit{padding:6px 7px;font-size:13px}
+    .sep-ped .sph{gap:6px;padding:9px 10px}
+    .sep-ped .sit{gap:8px;padding:7px 10px}
+    .sep-ped .sit .l{min-width:40px;font-size:11px}
+    .sep-ped .sit .q{min-width:32px;width:32px;height:32px;font-size:14px}
+    .sep-ped .sit .m .sku{font-size:13px}
+  }
+  .histdet{margin:2px 0 10px 14px;padding:8px 10px;background:#0d1117;border:1px solid var(--line);border-radius:8px;font-size:13px;display:flex;flex-direction:column;gap:4px}
+  .histit{font-family:ui-monospace,monospace;font-size:12.5px}
+  .ordseg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;vertical-align:middle}
+  .ordseg button{background:transparent;color:#94a3b8;border:none;padding:7px 12px;font-size:13px;cursor:pointer;font-weight:700;white-space:nowrap}
+  .ordseg button.on{background:#2563eb;color:#fff}
+  .histrow.reepend{border-left:3px solid #dc2626;background:rgba(220,38,38,.09);padding-left:7px;border-radius:6px}
+  .reebadge{background:#dc2626;color:#fff;font-size:11px;padding:3px 8px;border-radius:6px;font-weight:800;white-space:nowrap}
+  @media(max-width:720px){
+    .num{font-size:22px;letter-spacing:.3px}
+    .scard{padding:12px 10px}
+    .scl1{flex-wrap:wrap;row-gap:4px}
+    .scli{font-size:13px}
+    .smeta{font-size:12px}
+    .chips{overflow-x:auto;flex-wrap:nowrap;-webkit-overflow-scrolling:touch;padding-bottom:4px}
+    .chips .chip{flex:0 0 auto;white-space:nowrap;padding:8px 12px;font-size:13px}
+    .stats{flex-wrap:wrap;gap:6px;font-size:12px}
+    input.busca{font-size:16px;padding:10px}
+  }
+  @media print{ html,body{display:none!important} }   /* a página nunca se imprime — só a Zebra via QZ Tray */
+
+  /* Gaveta: Lista de Separação */
+  .sepback{position:fixed;inset:0;background:rgba(0,0,0,.5);opacity:0;pointer-events:none;transition:opacity .15s;z-index:60}
+  .sepback.on{opacity:1;pointer-events:auto}
+  .sep{position:fixed;top:0;right:0;height:100%;width:700px;max-width:95vw;background:var(--bg);border-left:1px solid var(--line);
+       box-shadow:-8px 0 24px rgba(0,0,0,.4);transform:translateX(100%);transition:transform .18s;z-index:61;display:flex;flex-direction:column}
+  .sep.on{transform:translateX(0)}
+  .sephead{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--line)}
+  .septtl{font-size:16px;font-weight:700;color:var(--tx)}
+  .sepx{background:var(--card);border:1px solid var(--line);color:var(--mut);border-radius:8px;width:32px;height:32px;font-size:15px;cursor:pointer}
+  .sepx:hover{color:var(--tx);border-color:var(--mut)}
+  .sepchips{display:flex;flex-wrap:wrap;gap:6px;padding:12px 16px 4px}
+  .sepinfo{padding:4px 16px 10px;color:var(--mut);font-size:13px}
+  .sepinfo b{color:var(--tx)}
+  .seplist{flex:1;overflow:auto;padding:0 16px 12px}
+  .seprow{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--line)}
+  .seprow .loc{flex:0 0 auto;min-width:54px;padding:6px;border-radius:9px;background:#13243f;border:1px solid var(--ac);color:#cfe0ff;font-size:13px;font-weight:800;text-align:center;font-family:ui-monospace,monospace;line-height:1.1}
+  .seprow .loc.vazia{background:var(--card);border-color:var(--line);color:var(--mut);font-weight:600}
+  .seprow .qtd{flex:0 0 auto;min-width:44px;height:44px;border-radius:10px;background:var(--card2);border:1px solid var(--line);
+       display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:800;color:var(--tx)}
+  .seprow .meta{min-width:0;flex:1}
+  .seprow .sku{font-size:15px;font-weight:700;color:var(--tx);font-family:ui-monospace,monospace}
+  .seprow .ds{font-size:13px;color:var(--mut);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.3}
+  .seprow .ean{font-size:11px;color:var(--mut);font-family:ui-monospace,monospace}
+  .seprow .sepedit{flex:0 0 auto;background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:7px 9px;cursor:pointer;font-size:14px;line-height:1}
+  .seprow .sepedit:hover{border-color:var(--ac)}
+  .seprow .locedit{flex:1;min-width:0;padding:9px;border-radius:9px;background:var(--card);border:1px solid var(--ac);color:var(--tx);font-size:15px;font-weight:700;font-family:ui-monospace,monospace;text-transform:uppercase}
+  .sepviews{display:flex;gap:6px;padding:0 16px 6px}
+  .svbtn{flex:1;padding:8px;border-radius:9px;background:var(--card2);border:1px solid var(--line);color:var(--mut);font-size:13px;font-weight:700;cursor:pointer}
+  .svbtn.on{background:#13243f;border-color:var(--ac);color:#cfe0ff}
+  .sep-ped{border:1px solid var(--line);border-radius:12px;margin-bottom:12px;overflow:hidden;background:var(--card2)}
+  .sep-ped .sph{display:flex;align-items:center;gap:8px;padding:10px 12px;background:var(--card);border-bottom:1px solid var(--line);flex-wrap:wrap}
+  .sep-ped .sph .num{font-size:16px;font-weight:800;color:var(--tx);font-family:ui-monospace,monospace}
+  .sep-ped .sph .chk{display:inline-flex;align-items:center;gap:1px;font-size:14px;padding:2px 6px 2px 5px;border-radius:7px;background:#0f2e1a;border:1px solid #1f7a44;line-height:1}
+  .sep-ped .sph .chk i{font-style:normal;font-size:11px;font-weight:800;color:#7ee0a0}
+  .sep-ped .sph .chk.off{background:var(--card);border-color:var(--line)}
+  .sep-ped .sph .chk.off i{color:var(--mut)}
+  .scard .scl1 .chk{display:inline-flex;align-items:center;gap:1px;font-size:11px;padding:1px 4px 1px 3px;border-radius:6px;background:#0f2e1a;border:1px solid #1f7a44;line-height:1;flex:0 0 auto}
+  .scard .scl1 .chk i{font-style:normal;font-size:9px;font-weight:800;color:#7ee0a0}
+  .scard .scl1 .chk.off{background:var(--card);border-color:var(--line)}
+  .scard .scl1 .chk.off i{color:var(--mut)}
+  .sep-ped .sph .cli{font-size:13px;color:var(--mut);flex:1;min-width:60px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .sep-ped .sit{display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid var(--line)}
+  .sep-ped .sit:last-child{border-bottom:none}
+  .sep-ped .sit .l{flex:0 0 auto;min-width:54px;padding:5px;border-radius:8px;background:#13243f;border:1px solid var(--ac);color:#cfe0ff;font-size:12px;font-weight:800;text-align:center;font-family:ui-monospace,monospace}
+  .sep-ped .sit .l.vazia{background:var(--card);border-color:var(--line);color:var(--mut)}
+  .sep-ped .sit .q{flex:0 0 auto;min-width:36px;height:36px;border-radius:9px;background:var(--card);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:15px}
+  .sep-ped .sit .m{min-width:0;flex:1}
+  .sep-ped .sit .m .sku{font-size:14px;font-weight:700;color:var(--tx);font-family:ui-monospace,monospace}
+  .sep-ped .sit .m .ds{font-size:12px;color:var(--mut);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.3}
+  .bcard{display:flex;gap:12px;align-items:center;padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--card2);margin-bottom:12px}
+  .bcard .bimg{flex:0 0 auto;width:56px;height:56px;border-radius:10px;object-fit:cover;background:var(--card);border:1px solid var(--line);cursor:zoom-in}
+  .bcard .bimg.vazio{display:flex;align-items:center;justify-content:center;font-size:24px}
+  .bcard .bnome{font-size:14px;font-weight:700;color:var(--tx);line-height:1.25;margin-bottom:3px}
+  .bcard .bsku{font-size:13px;font-weight:700;color:#cfe0ff;font-family:ui-monospace,monospace}
+  .bcard .bsub{font-size:12px;color:var(--mut);font-family:ui-monospace,monospace;margin-top:2px}
+  .bloc-atual{display:flex;align-items:center;gap:9px;margin-bottom:12px;padding:12px 15px;border-radius:12px;background:#13243f;border:1px solid var(--ac);font-size:15px;color:#cfe0ff}
+  .bloc-atual b{font-family:ui-monospace,monospace;font-weight:800;font-size:20px;letter-spacing:.5px}
+  .bloc-atual .semloc{color:var(--mut);font-style:italic;font-weight:600;font-size:14px}
+  .bloc label{display:block;font-size:12px;color:var(--mut);margin-bottom:6px}
+  .buscafld{flex:1;min-width:0;padding:11px;border-radius:10px;background:var(--card);border:1px solid var(--ac);color:var(--tx);font-size:16px;font-family:ui-monospace,monospace}
+  .sepfoot{display:flex;gap:8px;padding:12px 16px;border-top:1px solid var(--line)}
+  .sepfoot .btn{flex:1}
+  .sepempty{color:var(--mut);text-align:center;padding:30px 10px}
+
+  /* Histórico (no modal) */
+  .histbody{max-height:60vh;overflow:auto;margin:8px 0 16px;padding-right:6px;text-align:left}
+  .histrow{display:flex;flex-direction:column;gap:7px;padding:11px 4px;border-bottom:1px solid var(--line);cursor:pointer}
+  .histrow .htop{display:flex;align-items:center;gap:10px}
+  .hactions{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+  .hactions .btn.sm{padding:6px 11px}
+  .histrow .hmk{flex:0 0 auto;width:9px;height:9px;border-radius:50%}
+  .histrow .hmeta{flex:1;min-width:0}
+  .histrow .hnum{font-size:14px;font-weight:700;color:var(--tx);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .histrow .hsub{font-size:11px;color:var(--mut)}
+  .hsync{flex:0 0 auto;font-size:11px;font-weight:700;border-radius:999px;padding:3px 8px}
+  .hsync.ok{color:var(--ok);background:#0e2a1a}
+  .hsync.wait{color:var(--warn);background:#2a1f08}
+</style>
+</head>
+<body>
+<div class="loginback" id="loginback">
+  <div class="loginbox">
+    <div class="logoBig"></div>
+    <div class="loginttl">Checkout Offline</div>
+    <div class="loginsub" id="loginSub">verificando…</div>
+    <div id="loginForm" style="display:none">
+      <select class="loginfld" id="loginNome" autocomplete="off"></select>
+      <input class="loginfld" id="loginSenha" type="password" autocomplete="off" placeholder="senha" onkeydown="if(event.key==='Enter')fazerLogin()" />
+      <button class="btn ok loginbtn" id="loginBtn" onclick="fazerLogin()">Entrar</button>
+      <div class="loginerr" id="loginErr"></div>
+    </div>
+  </div>
+</div>
+<header>
+  <div class="htop">
+    <h1><span class="logoTopo"></span>Checkout Offline</h1>
+    <span class="ver" id="ver">carregando…</span>
+    <span class="grow"></span>
+    <div class="sbtools">
+      <button class="btn sec sm" id="btnSync" onclick="sincronizar()">↻ Atualizar</button><button class="btn sec sm" id="btnBlingAgora" onclick="blingAgora()" title="ADMIN: consulta o Bling AGORA, sem esperar o ciclo de 10 em 10 min" style="display:none">🔄 Bling agora</button>
+      <button class="btn sec sm" onclick="abrirSeparacao()" title="lista de produtos a separar (somados por SKU)">📋 Separar</button>
+      <button class="btn sec sm" onclick="abrirHistorico()" title="últimos pedidos finalizados">🕘 Histórico</button><button class="btn sec sm" id="btnRelatorio" onclick="abrirRelatorio()" title="ADMIN: relatório de pedidos por canal, FLEX e curva A de produtos" style="display:none">📊 Relatório</button>
+      <button class="btn sec sm" onclick="abrirBusca()" title="buscar produto por SKU/EAN, ver estoque e editar localização">🔎 Produto</button>
+      <button class="btn sec sm" onclick="escolherImpressora()">🖨 Zebra</button>
+      <button class="btn sec sm" id="modoBtn" onclick="trocarModo()" title="alterna entre etiqueta na Zebra (ZPL) ou abrir PDF p/ imprimir no navegador">🖨️ Etiq: Zebra</button>
+    </div>
+    <input class="op" id="operador" placeholder="operador" />
+    <button class="btn sec sm" id="btnSair" style="display:none" onclick="sair()">⎋ Sair</button>
+    <span class="qz off" id="qzStatus" onclick="reconectarQZ()">QZ: …</span>
+  </div>
+  <div class="stats" id="stats">carregando…</div>
+</header>
+
+<div class="main">
+  <aside class="sidebar">
+    <input class="busca" id="busca" placeholder="🔎 buscar: nº pedido, NF, cliente…" oninput="onBusca(this.value)" autocomplete="off" />
+    <div id="chips" class="chips"></div>
+    <div id="listaPedidos"><div class="empty">carregando…</div></div>
+  </aside>
+
+  <section class="detail" id="detail">
+    <div class="placeholder">← selecione um pedido à esquerda</div>
+  </section>
+</div>
+
+<div class="foot">cache local · se a tela não mudar após deploy, dê <b>Ctrl+Shift+R</b></div>
+<div class="toast" id="toast"></div>
+<div class="modal" id="modal"></div>
+<div class="lightbox" id="lightbox" onclick="fecharImagem()"></div>
+
+<!-- GAVETA: Lista de Separação -->
+<div class="sepback" id="sepback" onclick="fecharSeparacao()"></div>
+<aside class="sep" id="sep">
+  <div class="sephead">
+    <div class="septtl">📋 Lista de Separação</div>
+    <button class="sepx" onclick="fecharSeparacao()">✕</button>
+  </div>
+  <div class="sepchips" id="sepChips"></div>
+  <div class="sepviews">
+    <button class="svbtn on" id="svProd" onclick="setSepView('produto')">📦 Por produto</button>
+    <button class="svbtn" id="svPed" onclick="setSepView('pedido')">🧾 Por pedido</button>
+  </div>
+  <div class="sepinfo" id="sepInfo">carregando…</div>
+  <div class="seplist" id="sepList"></div>
+  <div class="sepfoot">
+    <button class="btn sec sm" onclick="carregarSeparacao()">↻ Atualizar</button>
+    <button class="btn" onclick="imprimirSeparacao()">🖨️ Imprimir</button>
+  </div>
+</aside>
+
+<script>
+const UI_BUILD = 'b52';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const MKT = {
+  ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
+  amazon:{n:'Amazon',c:'#b3b9c4'}, magalu:{n:'Magalu',c:'#0086ff'},
+  madeira:{n:'Madeira',c:'#ff7a18'}, leroy:{n:'Leroy Merlin',c:'#78be20'}, carrefour:{n:'Carrefour',c:'#0653a3'},
+  olist:{n:'Olist',c:'#7b3ff2'}, b2w:{n:'Americanas',c:'#ed1c24'}, mercadoshops:{n:'MercadoShops',c:'#2d3277'},
+  outro:{n:'Outro',c:'#94a3b8'}
+};
+let pedidoAtual = null;   // {bling_id,numero,cliente,nf,marketplace,itens:[{sku,ean,descricao,qtd,bipado}]}
+let zplAtual = null;
+let listaCache = [];
+let semEtiqCache = [];   // pedidos ATENDIDO sem etiqueta (problema)
+let filtroBusca = '';
+let estoqueSaldos = {};      // sku → saldoVirtual do Bling (estoque restante), carregado async ao abrir o pedido
+let estoqueCheckout = {};    // sku → quanto desse produto está em pedidos no checkout agora (info, não subtrai)
+let estoqueCarregado = false; // já tentou buscar? false=mostra "…", true=mostra número/"—"
+let filtroMkt = null;   // null=todos | 'ml'|'shopee'|... | 'flex'
+let ordenacao = 'numero';   // 'numero' (mais antigos) | 'produto' (agrupa pedidos do mesmo SKU p/ picking mais rapido)
+function setOrdenacao(v){ ordenacao = v; renderChips(); renderLista(); }
+// chave de agrupamento por produto: SKUs distintos ordenados e juntados. "so SKU-A" ("a") vem ANTES de
+// "SKU-A + SKU-B" ("a|b"), que vem antes de "so SKU-B" ("b") — pedidos puros primeiro, depois os combinados.
+function skuKeyPedido(p){ const arr=(p.skus_pick&&p.skus_pick.length)?p.skus_pick:(p.skus||[]); const u=[...new Set(arr.map(s=>String(s).toLowerCase()))].sort(); return u.length?u.join('|'):'~~~'; }
+
+const $ = id => document.getElementById(id);
+const norm = c => String(c||'').trim().replace(/\s+/g,'');
+const esc = s => String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+function toast(m){ const t=$('toast'); t.textContent=m; t.classList.add('show'); clearTimeout(t._t); t._t=setTimeout(()=>t.classList.remove('show'),1800); }
+
+// ── Madeira Madeira: etiqueta é PDF (não passa por ZPL) e pode ter 2+ volumes ──
+function ehPedidoMadeira(id){
+  const p = (listaCache||[]).find(x=>String(x.id)===String(id));
+  if(p) return p.marketplace==='madeira' || !!p.etiqueta_mm;
+  return !!(pedidoAtual && String(pedidoAtual.bling_id)===String(id) && (pedidoAtual.marketplace==='madeira' || pedidoAtual.etiqueta_mm));
+}
+function volumesDoPedido(id){
+  const p = (listaCache||[]).find(x=>String(x.id)===String(id));
+  if(p && p.volumes) return p.volumes;
+  if(pedidoAtual && String(pedidoAtual.bling_id)===String(id) && pedidoAtual.volumes) return pedidoAtual.volumes;
+  return 1;
+}
+
+const opIn = $('operador');
+opIn.value = localStorage.getItem('gbkp_op') || '';
+opIn.addEventListener('input', ()=>localStorage.setItem('gbkp_op', opIn.value));
+
+// ── LOGIN (só ativa se GOODBKP_OPERADORES estiver configurada no servidor) ──
+let loginAtivo = false;
+window.ADMINS = [];
+async function checarLogin(){
+  try{
+    const d = await api('/good-checkout-offline/operadores');
+    loginAtivo = !!(d && d.login_ativo);
+    window.ADMINS = (d && d.admins) || [];
+    if(!loginAtivo){ mostrarLogin([]); $('loginSub').textContent='Operadores não configurados — avise o admin'; return; }   // proteção obrigatória: sem operadores, sem acesso
+    const logado = localStorage.getItem('gbkp_logado')==='1' && (localStorage.getItem('gbkp_op')||'').trim();
+    if(logado){ aplicarLogado(); }
+    else { mostrarLogin(d.operadores||[]); }
+  }catch(e){ mostrarLogin([]); $('loginSub').textContent='Erro ao verificar login — recarregue'; }
+}
+function mostrarLogin(nomes){
+  const sel=$('loginNome');
+  sel.innerHTML = (nomes||[]).map(n=>'<option value="'+esc(n)+'">'+esc(n)+'</option>').join('');
+  $('loginSub').textContent='Entre com seu nome e senha';
+  $('loginForm').style.display='';
+  $('loginSenha').value=''; $('loginErr').textContent='';
+  $('loginback').classList.remove('hide');
+  setTimeout(()=>$('loginSenha').focus(),100);
+}
+async function fazerLogin(){
+  const nome=$('loginNome').value, senha=$('loginSenha').value;
+  $('loginErr').textContent='';
+  try{
+    const r = await postJson('/good-checkout-offline/login', {nome, senha});
+    if(r && r.ok){ localStorage.setItem('gbkp_op', r.nome); localStorage.setItem('gbkp_logado','1'); aplicarLogado();
+      if(r.ciclo_disparado){
+        toast('\uD83D\uDD04 Buscando as etiquetas novas no Bling\u2026 a lista se completa sozinha em ~1 min');
+        setTimeout(()=>{ carregarLista(); }, 50000);
+      }
+    }
+    else { $('loginErr').textContent=(r&&r.erro)||'nome ou senha inválidos'; $('loginSenha').select(); }
+  }catch(e){ $('loginErr').textContent='falha ao entrar: '+e.message; }
+}
+function aplicarLogado(){
+  $('loginback').classList.add('hide');
+  opIn.value = localStorage.getItem('gbkp_op')||'';
+  opIn.setAttribute('readonly','readonly');
+  $('btnSair').style.display='';
+  carregarLista();
+}
+function sair(){ localStorage.removeItem('gbkp_logado'); opIn.removeAttribute('readonly'); $('btnSair').style.display='none'; checarLogin(); }
+// só admin (env GOODBKP_ADMIN) pode reabrir/reverter. Lista vazia = todo mundo pode (comportamento antigo).
+function souAdmin(){ const a = window.ADMINS || []; return a.length===0 || a.includes(opAtual().toLowerCase()); }
+
+// ── áudio ──
+let actx;
+function beep(ok){
+  try{ actx = actx || new (window.AudioContext||window.webkitAudioContext)();
+    const o=actx.createOscillator(), g=actx.createGain(); o.connect(g); g.connect(actx.destination);
+    o.type='square'; o.frequency.value = ok?900:200; g.gain.value=0.12;
+    o.start(); o.stop(actx.currentTime + (ok?0.07:0.28));
+  }catch(e){}
+}
+
+// ── QZ Tray ──
+async function setupQZ(){
+  if(!window.qz){ qzUI(false,'lib não carregou'); return; }
+  qz.api.setPromiseType(r => new Promise(r));
+  if(window.sha256) qz.api.setSha256Type(d => sha256(d));
+  // assinatura → mata o popup "Untrusted". Só ativa se houver certificado configurado no servidor.
+  try{
+    const cert = await fetch('/good-checkout-offline/qz-cert', {cache:'no-store'}).then(r=>r.text());
+    if(cert && cert.indexOf('BEGIN CERTIFICATE')>=0){
+      qz.security.setCertificatePromise(function(resolve){ resolve(cert); });
+      qz.security.setSignatureAlgorithm('SHA512');
+      qz.security.setSignaturePromise(function(toSign){
+        return function(resolve, reject){
+          fetch('/good-checkout-offline/qz-sign?request='+encodeURIComponent(toSign), {cache:'no-store'})
+            .then(function(r){ return r.text(); }).then(resolve).catch(reject);
+        };
+      });
+    }
+  }catch(e){}
+}
+function qzUI(on, txt){ const el=$('qzStatus'); el.className='qz '+(on?'on':'off'); el.textContent='QZ: '+(txt||(on?'conectado':'desconectado')); }
+async function conectarQZ(){
+  if(!window.qz) throw new Error('Biblioteca QZ não carregou (sem internet?)');
+  if(!qz.websocket.isActive()){ await qz.websocket.connect(); }
+  qzUI(true); return true;
+}
+async function reconectarQZ(){ try{ await conectarQZ(); toast('QZ Tray conectado'); }catch(e){ qzUI(false); toast('QZ Tray não conectou — ele está aberto?'); } }
+async function getImpressora(){
+  let p = localStorage.getItem('gbkp_printer');
+  if(p) return p;
+  const lista = await qz.printers.find();
+  p = (lista||[]).find(n=>/zebra|zdesigner|zpl|\bzd\b|\bgk\b|\bgc\b/i.test(n)) || (lista||[])[0];
+  if(p) localStorage.setItem('gbkp_printer', p);
+  return p;
+}
+async function escolherImpressora(){
+  try{
+    await conectarQZ();
+    const lista = await qz.printers.find();
+    if(!lista||!lista.length){ toast('Nenhuma impressora no QZ'); return; }
+    const atual = localStorage.getItem('gbkp_printer')||'';
+    const msg = 'Impressoras:\n\n'+lista.map((n,i)=>(i+1)+') '+n+(n===atual?'  ← atual':'')).join('\n')+'\n\nNº da Zebra:';
+    const r = prompt(msg, lista.indexOf(atual)>=0?String(lista.indexOf(atual)+1):'1');
+    const idx = parseInt(r,10)-1;
+    if(idx>=0&&idx<lista.length){ localStorage.setItem('gbkp_printer', lista[idx]); toast('Impressora: '+lista[idx]); }
+  }catch(e){ toast('Erro: '+e.message); }
+}
+async function imprimirZPL(zpl){
+  await conectarQZ();
+  const printer = await getImpressora();
+  if(!printer) throw new Error('Nenhuma impressora encontrada');
+  const cfg = qz.configs.create(printer);
+  await qz.print(cfg, [{ type:'raw', format:'command', flavor:'plain', data: zpl }]);
+}
+
+// ── impressora da NF (DANFE = A4, impressora comum, NÃO a Zebra) ──
+async function getImpressoraNF(){
+  let p = localStorage.getItem('gbkp_printer_nf');
+  if(p) return p;
+  const lista = await qz.printers.find();
+  p = (lista||[]).find(n=>!/zebra|zdesigner|zpl|\bzd\b|\bgk\b|\bgc\b/i.test(n)) || (lista||[])[0];
+  if(p) localStorage.setItem('gbkp_printer_nf', p);
+  return p;
+}
+async function escolherImpressoraNF(){
+  try{
+    await conectarQZ();
+    const lista = await qz.printers.find();
+    if(!lista||!lista.length){ toast('Nenhuma impressora no QZ'); return; }
+    const atual = localStorage.getItem('gbkp_printer_nf')||'';
+    const msg = 'Impressoras:\n\n'+lista.map((n,i)=>(i+1)+') '+n+(n===atual?'  ← atual':'')).join('\n')+'\n\nNº da impressora da NF (A4):';
+    const r = prompt(msg, lista.indexOf(atual)>=0?String(lista.indexOf(atual)+1):'1');
+    const idx = parseInt(r,10)-1;
+    if(idx>=0&&idx<lista.length){ localStorage.setItem('gbkp_printer_nf', lista[idx]); toast('Impressora NF: '+lista[idx]); }
+  }catch(e){ toast('Erro: '+e.message); }
+}
+async function imprimirPDF(url){
+  await conectarQZ();
+  const printer = await getImpressoraNF();
+  if(!printer) throw new Error('Nenhuma impressora encontrada');
+  const resp = await fetch(url);
+  if(!resp.ok) throw new Error('PDF '+resp.status);
+  const bytes = new Uint8Array(await resp.arrayBuffer());
+  let bin=''; for(let i=0;i<bytes.length;i++) bin+=String.fromCharCode(bytes[i]);
+  const b64 = btoa(bin);
+  const cfg = qz.configs.create(printer);
+  await qz.print(cfg, [{ type:'pixel', format:'pdf', flavor:'base64', data: b64 }]);
+}
+
+// ── DANFE SIMPLIFICADO em ZPL NATIVO → impresso CRU na Zebra (mesmo cano da etiqueta, instantâneo) ──
+async function imprimirSimplificadoZebra(id){
+  const zpl = await fetch(location.origin+'/good-checkout-offline/danfe-simp/'+id+'?zpl=1')
+    .then(r=>{ if(!r.ok) throw new Error('DANFE '+r.status); return r.text(); });
+  await imprimirZPL(zpl);   // raw ZPL — igual a etiqueta que já funciona
+}
+
+// ── ETIQUETA FUNDIDA: etiqueta + DANFE numa etiqueta só, com REDE DE SEGURANÇA ──
+// Shopee / ML-combinado / sem NF → a etiqueta já basta (imprime direto).
+// Senão tenta /etiqueta-fundida (1 etiqueta). Se a fusão declinar (raster que enche
+// tudo) ou der qualquer erro → cai no jeito antigo (etiqueta + DANFE separada = 2).
+// Nunca deixa o funcionário sem imprimir.
+async function imprimirEtiquetaZebra(id){
+  const temNf = !!(pedidoAtual && pedidoAtual.nf);
+  const jaTem = etiquetaJaTemDanfe(pedidoAtual && pedidoAtual.marketplace, zplAtual, pedidoAtual && pedidoAtual.nf);
+  if(!temNf || jaTem){ await imprimirZPL(zplAtual); return { fundida:false, duas:false }; }
+  try{
+    const resp = await fetch('/good-checkout-offline/etiqueta-fundida/'+id);
+    if(resp.ok){ await imprimirZPL(await resp.text()); return { fundida:true, duas:false }; }
+  }catch(e){ /* cai no fallback abaixo */ }
+  await imprimirZPL(zplAtual);                 // jeito antigo, seguro
+  imprimirSimplificadoZebra(id).catch(()=>{}); // DANFE separada (2 etiquetas)
+  return { fundida:false, duas:true };
+}
+
+// imprime um PDF (ex.: etiqueta Melhor Envio do Bling) NA ZEBRA, rasterizado — mesmo cano da etiqueta nativa
+async function imprimirPdfNaZebra(url){
+  await conectarQZ();
+  const printer = await getImpressora();   // a Zebra (térmica)
+  if(!printer) throw new Error('Nenhuma impressora encontrada');
+  const resp = await fetch(url);
+  if(!resp.ok) throw new Error('PDF '+resp.status);
+  const bytes = new Uint8Array(await resp.arrayBuffer());
+  let bin=''; for(let i=0;i<bytes.length;i++) bin+=String.fromCharCode(bytes[i]);
+  const b64 = btoa(bin);
+  const cfg = qz.configs.create(printer);
+  await qz.print(cfg, [{ type:'pixel', format:'pdf', flavor:'base64', data: b64 }]);
+}
+
+// ── Madeira na ZEBRA ──
+// Madeira Envios  → ZPL montado pelo servidor: [adesivo VOLUME i/N][etiqueta Correios 10x15][DANFE-simp].
+// Frete do VENDEDOR (ex.: Melhor Envio) → não tem lote no mapa Madeira (502); a etiqueta está no Bling.
+//   Nesse caso puxa a etiqueta do Bling (PDF) e imprime na Zebra (rasterizada) + a DANFE-simplificada.
+async function imprimirMadeiraZebra(id){
+  let r=null;
+  try{ r = await fetch(location.origin+'/good-checkout-offline/etiqueta-madeira-zpl/'+id); }catch(e){ r=null; }
+  if(r && r.ok){ await imprimirZPL(await r.text()); return; }   // Madeira Envios: ZPL montado (adesivo+Correios+DANFE)
+  // 502/sem lote no mapa = frete do vendedor (Melhor Envio etc.) → etiqueta no Bling, não no Madeira.
+  await imprimirPdfNaZebra(location.origin+'/good-checkout-offline/etiqueta-pdf/'+id);
+  try{ await imprimirSimplificadoZebra(id); }catch(e){}   // + DANFE-simp, igual ao combo Madeira
+}
+
+// ── chave Zebra(ZPL) ↔ A4(PDF) p/ a ETIQUETA (a NF é sempre A4) ──
+function modoEtiqueta(){ return localStorage.getItem('gbkp_modo_etiq')==='a4' ? 'a4' : 'zebra'; }
+async function imprimirEtiqueta(id, zpl){
+  if(ehPedidoMadeira(id) && modoEtiqueta()!=='a4'){ await imprimirMadeiraZebra(id); return; }   // Madeira na Zebra: ZPL montado (adesivo+Correios+DANFE)
+  if(modoEtiqueta()==='a4' || ehPedidoMadeira(id)){
+    window.open(location.origin+'/good-checkout-offline/etiqueta-pdf/'+id, '_blank');  // Madeira em A4, ou modo A4 — imprime pelo navegador
+  }else{
+    const z = zpl || await fetch('/good-checkout-offline/etiqueta/'+id).then(r=>r.text());
+    await imprimirZPL(z);  // Zebra (QZ Tray)
+  }
+}
+function aplicarModoLabel(){
+  const b=$('modoBtn'); if(!b) return;
+  const a4 = modoEtiqueta()==='a4';
+  b.textContent = a4 ? '📄 Etiq: A4' : '🖨️ Etiq: Zebra';
+  b.classList.toggle('on', a4);
+}
+function trocarModo(){
+  const novo = modoEtiqueta()==='a4' ? 'zebra' : 'a4';
+  localStorage.setItem('gbkp_modo_etiq', novo);
+  aplicarModoLabel();
+  toast(novo==='a4' ? 'Etiqueta agora abre em PDF — imprima pelo navegador' : 'Etiqueta agora pela Zebra (ZPL/QZ)');
+}
+
+// ── API ──
+const api = (u,opt) => fetch(u,opt).then(r=>{
+  if(r.status===401){ try{localStorage.removeItem('gbkp_logado');}catch(e){}
+    if(typeof checarLogin==='function'){ checarLogin(); }
+    return {ok:false, erro:'Sessão expirada — entre de novo'}; }
+  return r.json();
+});
+// ── presença/reserva entre PCs ──
+function opAtual(){ return ((opIn && opIn.value) || localStorage.getItem('gbkp_op') || '').trim(); }
+function postJson(path, obj){ return api(path, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(obj)}); }
+let hbTimer = null;
+function iniciarHeartbeat(id){ pararHeartbeat(); hbTimer = setInterval(()=>{ postJson('/good-checkout-offline/reservar', {id, user:opAtual()}).catch(()=>{}); }, 120000); }
+function pararHeartbeat(){ if(hbTimer){ clearInterval(hbTimer); hbTimer=null; } }
+function liberarReserva(id){ if(id) postJson('/good-checkout-offline/liberar', {id}).catch(()=>{}); }
+
+function _revelaRelatorio(){ const b=document.getElementById('btnRelatorio'); if(b) b.style.display = souAdmin()? '' : 'none'; const b2=document.getElementById('btnBlingAgora'); if(b2) b2.style.display = souAdmin()? '' : 'none'; }
+async function blingAgora(){
+  if(!souAdmin()) return;
+  const b=$('btnBlingAgora'); if(b) b.disabled=true;
+  toast('🔄 Consultando o Bling agora… (~30-60s, a lista atualiza sozinha)');
+  try{
+    const r = await postJson('/good-checkout-offline/ciclo-agora', {});
+    if(!(r&&r.ok)){ toast((r&&r.erro)||'falha ao disparar'); if(b) b.disabled=false; return; }
+  }catch(e){ toast('falha: '+e.message); if(b) b.disabled=false; return; }
+  setTimeout(()=>{ carregarLista(); toast('✓ lista atualizada com o Bling'); if(b) b.disabled=false; }, 45000);
+}
+async function carregarLista(){
+  _revelaRelatorio();
+  try{
+    const d = await api('/good-checkout-offline/lista');
+    (function(){
+      const _min = d.ciclo_rodou_em ? Math.round((Date.now() - new Date(d.ciclo_rodou_em).getTime())/60000) : null;
+      const _vs  = d.versao ? String(d.versao).split(' ').pop() : 'v?';
+      $('ver').innerHTML = _vs + ' \u00b7 ui ' + UI_BUILD
+        + (_min!=null ? ' \u00b7 <span style="color:'+(_min>25?'#f87171':'#94a3b8')+'" title="\u00faltima consulta ao Bling (o ciclo roda sozinho de 10 em 10 min)">\u23f1 '+_min+' min</span>' : '')
+        + (d.sem_etiqueta>0 ? ' \u00b7 <span style="color:#fbbf24" title="pedidos sem etiqueta \u2014 o servidor tenta de novo sozinho a cada 5 min">\u26a0 '+d.sem_etiqueta+' s/ etiqueta</span>' : '');
+    })();
+    const semN = d.sem_etiqueta||0;
+    $('stats').innerHTML =
+      '<span><b>'+d.prontos+'</b> a separar</span>'+
+      '<span><b>'+(d.finalizados_hoje||0)+'</b> finalizados hoje</span>'+
+      (semN
+        ? '<span class="stwarn" onclick="setFiltroMkt(\'semetiqueta\')" title="ver pedidos sem etiqueta"><b>'+semN+'</b> sem etiqueta ⚠️</span>'
+        : '<span><b>0</b> sem etiqueta</span>');
+    listaCache = d.pedidos||[];
+    semEtiqCache = d.sem_etiqueta_pedidos||[];
+    renderChips();
+    renderLista();
+  }catch(e){ $('listaPedidos').innerHTML='<div class="empty">erro: '+esc(e.message)+'</div>'; }
+}
+
+// força uma sincronia real com o Bling (roda 1 ciclo → reconcilia o que saiu do ATENDIDO)
+async function sincronizar(){
+  const b = $('btnSync');
+  const orig = b ? b.textContent : '';
+  if(b){ b.textContent='⏳ Sincronizando…'; b.disabled = true; }
+  try{
+    await fetch('/good-checkout-offline/run', { method:'POST' });
+    await new Promise(r=>setTimeout(r, 4000)); await carregarLista();
+    await new Promise(r=>setTimeout(r, 4000)); await carregarLista();
+    toast('Sincronizado com o Bling');
+  }catch(e){ toast('Falha ao sincronizar: '+e.message); }
+  finally{ if(b){ b.textContent = orig || '↻ Atualizar'; b.disabled = false; } }
+}
+
+function onBusca(v){ filtroBusca = (v||'').trim().toLowerCase(); renderLista(); }
+// ── serviço Shopee não reconhecido (rótulo novo do Bling) → conferir se é FLEX ou ponto de coleta ──
+const SHOPEE_SERVICOS_OK = ['shopee xpress', 'shopee entrega direta', 'entrega direta', 'logistica shopee', 'retirada pelo comprador'];
+function servicoDesconhecido(p){
+  if(!p || String(p.marketplace||'').toLowerCase()!=='shopee') return false;
+  const s = String(p.servico||'').toLowerCase().trim();
+  if(!s) return true;
+  return !SHOPEE_SERVICOS_OK.some(k=>s.includes(k));
+}
+function filtrar(lista){
+  let l = lista;
+  if(filtroMkt==='flex') l = l.filter(p=>p.flex);
+  else if(filtroMkt==='serviconovo') l = l.filter(servicoDesconhecido);
+  else if(filtroMkt) l = l.filter(p=>p.marketplace===filtroMkt);
+  if(filtroBusca){
+    const q = filtroBusca;
+    l = l.filter(p=>
+      String(p.numero||'').includes(q)
+      || String(p.nf_numero||'').toLowerCase().includes(q)
+      || (p.cliente||'').toLowerCase().includes(q)
+      || (MKT[p.marketplace]||MKT.outro).n.toLowerCase().includes(q)
+      || String(p.id||'').includes(q)
+    );
+  }
+  return l;
+}
+
+// ── chips de marketplace + FLEX ──
+const MKT_ORDEM = ['ml','shopee','tiktok','magalu','amazon','leroy','carrefour','madeira','olist','b2w','mercadoshops','outro'];
+function setFiltroMkt(v){
+  filtroMkt = v;
+  // se o pedido aberto sumir da lista filtrada, limpa a tela (não deixa o pedido de outro marketplace persistindo)
+  if(pedidoAtual){
+    const vis = filtrar(listaCache).some(p => String(p.id)===String(pedidoAtual.bling_id));
+    if(!vis){ pedidoAtual=null; zplAtual=null; mostrarPlaceholder(); }
+  }
+  renderChips(); renderLista();
+}
+function chipBtn(label, n, val, cor){
+  const ativo = (filtroMkt===val);
+  const dot = cor ? '<span class="cdot" style="background:'+cor+'"></span>' : '';
+  const fx = val==='flex' ? ' flex' : ((val==='semetiqueta'||val==='serviconovo') ? ' serr' : '');
+  return '<button class="chip'+fx+(ativo?' on':'')+'" onclick="setFiltroMkt('+(val===null?'null':("'"+val+"'"))+')">'+dot+esc(label)+' <b>'+n+'</b></button>';
+}
+function renderChips(){
+  const box = $('chips'); if(!box) return;
+  const cont = {}; let flexN = 0;
+  listaCache.forEach(p=>{ cont[p.marketplace] = (cont[p.marketplace]||0)+1; if(p.flex) flexN++; });
+  let html = '<span class="ordseg" title="ordena a fila: por numero do pedido, ou agrupando os pedidos do mesmo produto (picking)">'+
+    '<button class="'+(ordenacao==='numero'?'on':'')+'" onclick="setOrdenacao(\'numero\')">🔢 Nº</button>'+
+    '<button class="'+(ordenacao==='produto'?'on':'')+'" onclick="setOrdenacao(\'produto\')">📦 Produto</button>'+
+  '</span>';
+  html += chipBtn('Todos', listaCache.length, null);
+  MKT_ORDEM.forEach(mk=>{ if(cont[mk]) html += chipBtn((MKT[mk]||MKT.outro).n, cont[mk], mk, (MKT[mk]||MKT.outro).c); });
+  html += chipBtn('⚡ FLEX', flexN, 'flex');
+  if((semEtiqCache||[]).length) html += chipBtn('⚠️ Sem etiqueta', semEtiqCache.length, 'semetiqueta');
+  const servNovoN = listaCache.filter(servicoDesconhecido).length;
+  if(servNovoN) html += chipBtn('⚠️ Serviço a conferir', servNovoN, 'serviconovo');
+  box.innerHTML = html;
+}
+function renderLista(){
+  const box = $('listaPedidos');
+  const selId = pedidoAtual ? String(pedidoAtual.bling_id) : '';
+  // chip "sem etiqueta" ativo → mostra SÓ os pedidos com problema (vermelhos, não processáveis)
+  if(filtroMkt==='semetiqueta'){
+    if(!(semEtiqCache||[]).length){ box.innerHTML='<div class="empty">nenhum pedido sem etiqueta 🎉</div>'; return; }
+    box.innerHTML = semEtiqCache.map(p=>{
+      const m = MKT[p.marketplace]||MKT.outro;
+      return '<div class="scard semetiq" onclick="avisoSemEtiqueta(\''+esc(p.numero||p.id)+'\')">'+
+        '<div class="scl1">'+
+          '<span class="badge" style="background:'+m.c+'">'+m.n+'</span>'+
+          '<span class="num">'+esc(p.numero||p.id)+'</span>'+
+          '<span class="setag">⚠️ sem etiqueta</span>'+
+        '</div>'+
+        (p.cliente?'<div class="scli">'+esc(p.cliente)+'</div>':'')+
+        '<div class="smeta">NF '+(p.nf_numero?esc(p.nf_numero):'—')+' · não dá pra processar — confira no Bling</div>'+
+      '</div>';
+    }).join('');
+    return;
+  }
+  if(!listaCache.length){ box.innerHTML='<div class="empty">nenhum pedido pronto no cache</div>'; return; }
+  let lista = filtrar(listaCache);
+  if(ordenacao==='produto'){
+    // agrupa por SKU (kit explodido nos componentes) e coloca os GRUPOS MAIORES PRIMEIRO:
+    // o estoquista mata o lote de 30 do SKU-A, depois os 20 do SKU-B, etc. Empate → alfabético.
+    const cnt = {};
+    lista.forEach(p=>{ const k=skuKeyPedido(p); cnt[k]=(cnt[k]||0)+1; });
+    lista = lista.slice().sort((a,b)=>{
+      const ka=skuKeyPedido(a), kb=skuKeyPedido(b);
+      if(ka===kb) return Number(a.numero||0)-Number(b.numero||0);      // dentro do grupo: mais antigos primeiro
+      if(cnt[kb]!==cnt[ka]) return cnt[kb]-cnt[ka];                    // grupo maior primeiro
+      return ka.localeCompare(kb);                                     // empate: alfabético (ordem estável)
+    });
+  }
+  const cnt = filtroBusca ? '<div class="scount">'+lista.length+' de '+listaCache.length+'</div>' : '';
+  if(!lista.length){ box.innerHTML = cnt+'<div class="empty">nada encontrado p/ "'+esc(filtroBusca)+'"</div>'; return; }
+  box.innerHTML = cnt + lista.map(p=>{
+    const m = MKT[p.marketplace]||MKT.outro;
+    const opMe = opAtual();
+    const resvOutro = (p.reservado_por && p.reservado_por!==opMe) ? p.reservado_por : '';
+    const cls = (p.conferido?'done ':'') + (resvOutro?'resv ':'') + (String(p.id)===selId?'sel':'');
+    return '<div class="scard '+cls+'" onclick="selecionar(\''+p.id+'\')">'+
+      '<div class="scl1">'+
+        '<span class="chk'+(p.tem_etiqueta?'':' off')+'" title="Etiqueta">🏷️<i>'+(p.tem_etiqueta?'✓':'✗')+'</i></span>'+
+        '<span class="chk'+((p.tem_nf||p.nf_numero)?'':' off')+'" title="Nota Fiscal">🧾<i>'+((p.tem_nf||p.nf_numero)?'✓':'✗')+'</i></span>'+
+        '<span class="badge" style="background:'+m.c+'">'+m.n+'</span>'+
+        '<span class="num">'+esc(p.numero)+'</span>'+
+        ((souAdmin() && p.numero_loja && /amazon/i.test(String(p.marketplace||'')))?'<a href="https://sellercentral.amazon.com.br/orders-v3/order/'+encodeURIComponent(String(p.numero_loja).trim())+'" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="abrir a venda no Seller Central da Amazon (admin)" style="text-decoration:none;font-size:13px;color:#38bdf8">↗</a>':'')+((souAdmin() && p.numero_loja && /magalu/i.test(String(p.marketplace||'')))?'<a href="https://seller.magalu.com/pedidos/'+String(p.numero_loja).replace(/\D/g,'')+'" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="abrir o pedido no seller da Magalu (admin)" style="text-decoration:none;font-size:13px;color:#38bdf8">↗</a>':'')+((souAdmin() && p.numero_loja && /tiktok/i.test(String(p.marketplace||'')))?'<a href="https://seller-br.tiktok.com/order/detail?order_no='+String(p.numero_loja).replace(/\D/g,'')+'&shop_region=BR" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="abrir a venda no seller center do TikTok (admin)" style="text-decoration:none;font-size:13px;color:#38bdf8">↗</a>':'')+((souAdmin() && p.numero_loja && /shopee/i.test(String(p.marketplace||'')))?'<a href="/good-checkout-offline/ir-shopee?sn='+encodeURIComponent(String(p.numero_loja).trim())+'" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="abrir esta venda direto no seller center da Shopee (admin)" style="text-decoration:none;font-size:13px;color:#38bdf8">↗</a>':'')+((souAdmin() && p.numero_loja && /ml|merc/i.test(String(p.marketplace||'')))?'<a href="https://www.mercadolivre.com.br/vendas/'+String(p.numero_loja).replace(/\D/g,'')+'/detalhe" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="abrir a venda no Mercado Livre (só admin vê)" style="text-decoration:none;font-size:13px;color:#38bdf8">↗</a>':'')+
+        (p.volumes>1?'<span class="voltag">📦 '+p.volumes+' vol</span>':'')+
+        (resvOutro?'<span class="resvtag">🟠 '+esc(resvOutro)+'</span>':'')+
+        (p.conferido?'<span class="donetag">✓</span>':'')+
+        (servicoDesconhecido(p)?'<span class="voltag" style="background:#b45309;color:#fff" title="Serviço Shopee não reconhecido — confira se é FLEX ou ponto de coleta">⚠️ serviço?</span>':'')+
+      '</div>'+
+      (p.cliente?'<div class="scli">'+esc(p.cliente)+'</div>':'')+
+      '<div class="smeta">'+((p.skus&&p.skus[0])?'📦 <b>'+esc(p.skus[0])+'</b>'+(p.skus.length>1?' +'+(p.skus.length-1):'')+' · ':'')+(p.itens||0)+' item(s) · NF '+(p.nf_numero?esc(p.nf_numero):(p.tem_nf?'ok':'—'))+(p.tem_danfe?' · <span class="pdfok">PDF✓</span>':'')+'</div>'+
+      (function(){
+        var dt = p.nf_emissao || p.visto_em; if(!dt) return '';
+        var d2 = new Date(String(dt).replace(' ','T')); if(isNaN(d2)) return '';
+        var f2 = ('0'+d2.getDate()).slice(-2)+'/'+('0'+(d2.getMonth()+1)).slice(-2)+'/'+d2.getFullYear()+' às '+('0'+d2.getHours()).slice(-2)+':'+('0'+d2.getMinutes()).slice(-2)+'h';
+        return '<div class="stime" title="'+(p.nf_emissao?'data e hora da EMISSÃO da NF no Bling':'quando este pedido apareceu pro sistema (o Bling não dá a hora do pedido)')+'">🕓 '+(p.nf_emissao?'NF ':'Bling ')+f2+'</div>';
+      })()+
+    '</div>';
+  }).join('');
+}
+
+function avisoSemEtiqueta(num){
+  toast('⚠️ Pedido '+num+' está SEM ETIQUETA — não dá pra processar aqui. Confira a emissão da etiqueta no Bling.');
+}
+
+async function reimprimir(id){
+  try{
+    await imprimirEtiqueta(id);
+    toast(modoEtiqueta()==='a4'?'📄 etiqueta aberta':'🖨 etiqueta enviada');
+  }catch(e){ toast('Falha: '+e.message); }
+}
+
+// ── detalhe / bipagem (centro) ──
+async function selecionar(id){
+  try{
+    // trocou de pedido? solta a reserva do anterior
+    if(pedidoAtual && String(pedidoAtual.bling_id)!==String(id)){ liberarReserva(pedidoAtual.bling_id); pararHeartbeat(); }
+    const ped = await api('/good-checkout-offline/pedido/'+id);
+    if(ped.erro){ toast(ped.erro); return; }
+    // MINI-CONFERÊNCIA: já finalizado em outro PC? tira da tela e nem abre.
+    if(ped.conferido){
+      toast('✓ '+(ped.numero||id)+' já finalizado'+(ped.conferido.user?' por '+ped.conferido.user:'')+' — saiu da lista');
+      listaCache = listaCache.filter(x=>String(x.id)!==String(id));
+      pedidoAtual=null; renderLista(); return;
+    }
+    // RESERVA: marca esse operador como dono (presença entre PCs)
+    const op = opAtual();
+    let rv = await postJson('/good-checkout-offline/reservar', {id, user:op});
+    if(rv && rv.ok===false && rv.reservado_por){
+      const mins = rv.em ? Math.max(0, Math.round((Date.now()-Date.parse(rv.em))/60000)) : 0;
+      if(!confirm('⚠️ '+rv.reservado_por+' está separando esse pedido'+(mins?' há '+mins+' min':'')+'.\n\nAssumir mesmo assim?')){ carregarLista(); return; }
+      rv = await postJson('/good-checkout-offline/reservar', {id, user:op, forcar:true});
+    }
+    prepararPedido(ped);
+    pedidoAtual = ped;
+    zplAtual = await fetch('/good-checkout-offline/etiqueta/'+id).then(r=>r.text());
+    estoqueSaldos = {}; estoqueCheckout = {}; estoqueCarregado = false;   // reset: estoque do pedido novo (renderiza "…" até chegar)
+    renderDetail();
+    renderLista(); // atualiza highlight
+    iniciarHeartbeat(id);
+    carregarEstoque(id);   // 📦 busca o estoque restante ao vivo (async, não trava a abertura)
+  }catch(e){ toast('Erro: '+e.message); }
+}
+
+// grupos = exibição (kit vira cabeçalho + componentes; senão item simples)
+// unidades = lista PLANA do que se bipa (componentes p/ kit, o próprio item p/ leaf)
+function prepararPedido(ped){
+  const grupos = [], unidades = [];
+  let uid = 0;
+  const novaUnid = (o)=>{ const u={ _id:uid++, sku:o.sku||'', ean:o.ean||null, descricao:o.descricao||'', img:o.img||null, qtd:Number(o.qtd||0), bipado:0, loc:o.loc||'' }; unidades.push(u); return u; };
+  for(const it of (ped.itens||[])){
+    if(it.tipo==='kit' && Array.isArray(it.componentes) && it.componentes.length){
+      const comps = it.componentes.map(c=>novaUnid(c));
+      grupos.push({ tipo:'kit', sku:it.sku, descricao:it.descricao, ean:it.ean, img:it.img, qtd:Number(it.qtd||0), comps });
+    } else {
+      grupos.push({ tipo:'leaf', unit:novaUnid(it) });
+    }
+  }
+  ped.grupos = grupos; ped.unidades = unidades;
+}
+
+function renderDetail(){
+  const p = pedidoAtual;
+  const m = MKT[p.marketplace]||MKT.outro;
+  const temDanfe = !!p.tem_danfe;
+  const nfMiolo = p.nf
+    ? 'NF <b>'+esc(p.nf.numero||'?')+'</b>'+(temDanfe?' <span class="nfok">PDF ✓</span>':'')+'<div class="chave">'+esc(p.nf.chave||'')+'</div>'
+    : '<span class="noean">⚠ NF não cacheada (segue só com a etiqueta)</span>';
+  const nfBar = temDanfe
+    ? '<div class="nfbar clic" title="abrir DANFE em PDF" onclick="abrirDanfe(\''+esc(p.bling_id)+'\')">'+nfMiolo+'</div>'
+    : '<div class="nfbar">'+nfMiolo+'</div>';
+  document.body.classList.add('peddet');   // celular: esconde a lista, mostra o pedido em tela cheia
+  $('detail').innerHTML =
+    '<div class="dhead">'+
+      '<button class="btn sec sm" onclick="voltarLista()">← Voltar</button>'+
+      '<span class="badge" style="background:'+m.c+'">'+m.n+'</span>'+
+      '<span class="num big">'+esc(p.numero)+'</span>'+
+      '<span class="prog" id="bProg">0/0</span>'+
+    '</div>'+
+    '<div class="cli">'+esc(p.cliente||'')+'</div>'+
+    nfBar+
+    (volumesDoPedido(p.bling_id)>1 ? '<div class="dvol">📦 <b>'+volumesDoPedido(p.bling_id)+' VOLUMES</b> — este pedido sai em '+volumesDoPedido(p.bling_id)+' caixas. Vão imprimir '+volumesDoPedido(p.bling_id)+' etiquetas (1 por caixa) + a NF marcada VOLUME 1/'+volumesDoPedido(p.bling_id)+', 2/'+volumesDoPedido(p.bling_id)+'…</div>' : '')+
+    '<div class="scanrow">'+
+      '<div class="qtdwrap"><label>Qtd</label><input id="qtdConf" type="number" value="1" min="1" max="999"/></div>'+
+      '<input id="scan" autocomplete="off" placeholder="bipe o código de barras do item…"/>'+
+    '</div>'+
+    '<div class="hint">opcional: digite a <b>Qtd</b> (ex: 100) e bipe 1× — senão soma 1 por bipada · kit conta os componentes</div>'+
+    '<div class="estbar"><button class="btn sec sm" onclick="atualizarEstoque()" title="rebuscar o saldo de estoque do Bling, ao vivo">🔄 Atualizar estoque</button></div>'+
+    '<div id="bItens"></div>'+
+    '<div class="dbtns">'+
+      (souAdmin() ? '<button class="btn warn" onclick="imprimirAtual()">'+(modoEtiqueta()==='a4'?'📄 Abrir etiqueta':'🖨 Só etiqueta')+'</button>' : '')+
+      (souAdmin() && temDanfe ? '<button class="btn warn" onclick="imprimirSimpAtual()">🏷️ Só DANFE</button>' : '')+
+      (souAdmin() && temDanfe ? '<button class="btn sec" onclick="imprimirNFAtual()">🧾 Ver NF A4</button>' : '')+
+      (souAdmin() ? '<button class="btn sec" onclick="enviarDocs(pedidoAtual.bling_id, pedidoAtual.numero)" title="ADMIN: manda etiqueta + NF pro e-mail do estoque agora (sem finalizar o pedido)">📧 E-mail</button>' : '')+
+      (souAdmin() ? '<button class="btn warn" onclick="forcarVerificado()" title="ADMIN: marca VERIFICADO no Bling SEM bipar — só pra quando não der pra conferir bipando">✓ VERIFICADO</button>' : '')+
+      '<span class="grow"></span>'+
+      (souAdmin() && temDanfe ? '<button class="btn" id="bFinalizarA4" onclick="finalizar(\'a4\')" disabled>✓ Etiq + NF A4</button>' : '')+
+      '<button class="btn ok" id="bFinalizar" onclick="finalizar(\'simp\')" disabled>✓ Etiq + DANFE 10x15</button>'+
+    '</div>';
+  renderItens();
+  const scan = $('scan');
+  scan.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); const v=scan.value; scan.value=''; onScan(v); }});
+  const qtd = $('qtdConf');
+  qtd.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); if((qtd.value||'').length>3) qtd.value='1'; scan.focus(); }});
+  qtd.addEventListener('focus', ()=>qtd.select());
+  setTimeout(()=>scan.focus(),60);
+}
+
+// 📦 ESTOQUE AO VIVO: busca o saldo restante do Bling p/ os itens do pedido aberto (async, não trava a tela).
+// a NF já baixou o estoque antes do checkout, então o saldoVirtual já é o restante real. Bling fora = "—".
+async function carregarEstoque(id){
+  try{
+    const r = await fetch('/good-checkout-offline/estoque-pedido/'+id).then(x=>x.json());
+    if(!pedidoAtual || String(pedidoAtual.bling_id)!==String(id)) return; // trocou de pedido enquanto carregava
+    if(r && r.ok){ if(r.saldos) estoqueSaldos = r.saldos; if(r.checkout) estoqueCheckout = r.checkout; }
+  }catch(e){ /* Bling offline → mapas vazios → saldo mostra "—" */ }
+  if(!pedidoAtual || String(pedidoAtual.bling_id)!==String(id)) return;
+  estoqueCarregado = true;
+  renderItens();
+}
+
+// dois números por item: 📦 Saldo Bling (verde/vermelho — o que SOBRA após o checkout) + 🛒 Em checkout (info, não subtrai).
+function estTags(sku){
+  if(!estoqueCarregado) return '<span class="esttag estload">📦 Saldo …</span>';
+  const k = String(sku||'').trim();
+  const s = estoqueSaldos[k];
+  let saldoPill;
+  if(s==null){
+    saldoPill = '<span class="esttag estunk" title="estoque indisponível (Bling fora do ar?)">📦 Saldo —</span>';
+  } else {
+    const n = Number(s);
+    saldoPill = '<span class="esttag '+(n>0?'estok':'estzero')+'" title="Saldo Bling: o que vai SOBRAR no estoque depois que os pedidos do checkout saírem.">📦 Saldo Bling: '+n+'</span>';
+  }
+  const c = estoqueCheckout[k];
+  const cn = (c==null ? 0 : Number(c));
+  const chkPill = '<span class="esttag estchk" title="Quanto deste produto está em pedidos no checkout AGORA (este pedido + os outros da fila). NÃO desconta do Saldo Bling.">🛒 Em checkout: '+cn+'</span>';
+  return saldoPill+' '+chkPill;
+}
+
+// 🔄 rebusca o saldo de estoque do Bling ao vivo (sem fechar/reabrir o pedido)
+function atualizarEstoque(){
+  if(!pedidoAtual) return;
+  estoqueSaldos = {}; estoqueCheckout = {}; estoqueCarregado = false;   // zera + mostra "…" enquanto rebusca (falha → "—")
+  renderItens();
+  carregarEstoque(pedidoAtual.bling_id);
+}
+
+function unitRow(u, isComp){
+  const full = u.bipado>=u.qtd;
+  return '<div class="item '+(isComp?'comp ':'')+(full?'full':'')+'">'+
+    thumb(u.img)+
+    '<div class="icount"><span class="'+(full?'b':'')+'">'+u.bipado+'</span>/'+u.qtd+'</div>'+
+    '<div class="idesc"><div class="d">'+esc(u.descricao||u.sku||'item')+'</div>'+
+      '<div class="e">SKU '+esc(u.sku||'—')+' · EAN '+(u.ean?esc(u.ean):'<span class="noean">sem EAN</span>')+' · '+((u.loc||'').trim()?'<span class="loctag">📍 '+esc(u.loc)+'</span>':'<span class="locsem">📍 sem local</span>')+'</div>'+
+      '<div class="estoque">'+estTags(u.sku)+'</div></div>'+
+    ((full||!souAdmin())?'':'<button class="miniok" onclick="manualUnit('+u._id+')">+1</button>')+
+  '</div>';
+}
+
+function thumb(src){
+  if(!src) return '<div class="thumb noimg">📦</div>';
+  return '<img class="thumb" src="'+esc(src)+'" loading="lazy" referrerpolicy="no-referrer" onclick="abrirImagem(this.src)" onerror="this.outerHTML=\'<div class=&quot;thumb noimg&quot;>📦</div>\'"/>';
+}
+
+// ── 🔍 LIGHTBOX: clicar na foto do produto abre a imagem inteira (sem corte) ──
+function abrirImagem(src){
+  if(!src) return;
+  const lb = $('lightbox'); if(!lb) return;
+  lb.innerHTML = '<img src="'+esc(src)+'" referrerpolicy="no-referrer"/><div class="imgclose">✕</div>';
+  lb.classList.add('show');
+}
+function fecharImagem(){ const lb=$('lightbox'); if(!lb) return; lb.classList.remove('show'); lb.innerHTML=''; setTimeout(()=>{const s=$('scan'); if(s) s.focus();},60); }
+
+function renderItens(){
+  if(!pedidoAtual) return;
+  const un = pedidoAtual.unidades;
+  const total = un.reduce((s,u)=>s+u.qtd,0);
+  const feito = un.reduce((s,u)=>s+u.bipado,0);
+  const pe = $('bProg'); if(pe) pe.innerHTML = '<span class="'+(feito>=total&&total>0?'done':'')+'">'+feito+'</span>/'+total;
+  const box = $('bItens'); if(box) box.innerHTML = pedidoAtual.grupos.map(g=>{
+    if(g.tipo==='kit'){
+      const done = g.comps.every(c=>c.bipado>=c.qtd);
+      return '<div class="kitwrap '+(done?'full':'')+'">'+
+        '<div class="kithead">'+thumb(g.img)+'<div class="kh-txt"><span class="ktag">KIT · NF</span> '+esc(g.descricao||g.sku)+
+          '<div class="e">SKU '+esc(g.sku||'—')+'</div></div></div>'+
+        '<div class="comps">'+g.comps.map(c=>unitRow(c,true)).join('')+'</div>'+
+      '</div>';
+    }
+    return unitRow(g.unit,false);
+  }).join('');
+  const pronto = (feito>=total && total>0);
+  const fb = $('bFinalizar'); if(fb) fb.disabled = !pronto;
+  const fb2 = $('bFinalizarA4'); if(fb2) fb2.disabled = !pronto;
+}
+
+function manualUnit(id){ if(!souAdmin()) return; const u=pedidoAtual.unidades.find(x=>x._id===id); if(u && u.bipado<u.qtd){ u.bipado++; beep(true); renderItens(); } }
+
+function modalAberto(){ const md=$('modal'); return md && md.classList.contains('show'); }
+
+function onScan(code){
+  if(modalAberto()) return;            // ignora bipada com o modal aberto
+  code = norm(code);
+  if(!code || !pedidoAtual) return;
+  let q = parseInt(($('qtdConf')||{}).value,10); if(!q || q<1 || q>999) q=1;
+  let u = pedidoAtual.unidades.find(x=> x.ean && norm(x.ean)===code && x.bipado<x.qtd);
+  if(!u) u = pedidoAtual.unidades.find(x=> x.sku && norm(x.sku).toUpperCase()===code.toUpperCase() && x.bipado<x.qtd);
+  if(u){
+    const add = Math.min(q, u.qtd - u.bipado);
+    u.bipado += add; beep(true); renderItens();
+    const qi=$('qtdConf'); if(qi) qi.value='1';
+  } else { beep(false); const s=$('scan'); if(s){ s.classList.add('err'); setTimeout(()=>s.classList.remove('err'),300);} toast('código não confere: '+code); }
+}
+
+async function imprimirAtual(){ try{ await imprimirEtiqueta(pedidoAtual.bling_id, zplAtual); toast(modoEtiqueta()==='a4'?'📄 etiqueta aberta — imprima pelo navegador':'🖨 etiqueta enviada'); }catch(e){ toast('Falha: '+e.message); } }
+function abrirDanfe(id){ window.open('/good-checkout-offline/danfe/'+id, '_blank'); }
+function imprimirNFAtual(){
+  const id = pedidoAtual && pedidoAtual.bling_id;
+  if(!id) return;
+  window.open(location.origin+'/good-checkout-offline/danfe/'+id, '_blank');  // abre o PDF da NF — você imprime pelo navegador
+}
+function imprimirSimpAtual(){
+  const id = pedidoAtual && pedidoAtual.bling_id;
+  if(!id){ toast('pedido sem ID'); return; }
+  toast('🏷️ Gerando DANFE 10x15… (uns segundos)');   // feedback IMEDIATO
+  imprimirSimplificadoZebra(id)                       // dispara SEM travar a tela
+    .then(()=> toast('🏷️ DANFE enviado p/ Zebra'))
+    .catch(e=> toast('Falha DANFE: '+e.message));
+}
+
+// volta pra lista SEM finalizar (não marca conferido)
+// volta pra lista: tira a classe (no celular faz a lista reaparecer) e mostra o placeholder
+function mostrarPlaceholder(){ document.body.classList.remove('peddet'); $('detail').innerHTML='<div class="placeholder">← selecione um pedido à esquerda</div>'; }
+function voltarLista(){
+  if(pedidoAtual){ liberarReserva(pedidoAtual.bling_id); }
+  pararHeartbeat();
+  pedidoAtual=null; zplAtual=null;
+  mostrarPlaceholder();
+  renderLista();
+}
+
+// FINALIZAR = imprime e SÓ marca conferido depois que o estoquista confirma que saiu certo.
+// modo: 'simp' = etiqueta + DANFE simplificado (10x15) na Zebra | 'a4' = etiqueta + NF completa (A4)
+let modoFinalizando = 'simp';
+// ── DANFE já vem COMPLETA na etiqueta? então não imprime a separada ──
+// Shopee: sempre manda a DANFE completa junto → pula sempre.
+// ML: combinado recém-ativado; enquanto uns pedidos vêm combinados e outros não, detecta POR
+//     pedido (se o ZPL da etiqueta já contém a chave da NF, 44 díg). Quando TODO ML vier
+//     combinado, é só mover 'ml' pra MKT_DANFE_SEMPRE.
+// Amazon / Magalu / TikTok: NÃO mandam a DANFE completa (TikTok manda só o código de barras,
+//     sem nº/série/data) → sempre imprime a DANFE completa separada.
+const MKT_DANFE_SEMPRE   = ['shopee'];   // etiqueta sempre traz a DANFE completa
+const MKT_DANFE_DETECTAR = ['ml'];       // combinado em transição → confirma por pedido pela chave
+function etiquetaJaTemDanfe(mkt, zpl, nf){
+  const m = String(mkt||'').toLowerCase();
+  if(MKT_DANFE_SEMPRE.includes(m)) return true;
+  {
+    const chave = (nf && nf.chave) ? String(nf.chave).replace(/\D/g,'') : '';
+    return chave.length >= 40 && !!zpl && String(zpl).replace(/\D/g,'').includes(chave);
+  }
+  return false;   // Amazon, Magalu, TikTok e qualquer outro → imprime a DANFE completa
+}
+
+async function finalizar(modo){
+  // 📍 BLOQUEIO: itens sem localização precisam ser cadastrados antes de imprimir
+  // (cadastro incremental — a próxima separação já vem com o local)
+  if(faltaLocalizacao()){ abrirPopupLocalizacao(modo); return; }
+  modoFinalizando = (modo==='a4') ? 'a4' : 'simp';
+  const id = pedidoAtual.bling_id;
+  const temNf = !!pedidoAtual.nf;
+  // Madeira na ZEBRA: adesivo VOLUME i/N + etiqueta Correios 10x15 + DANFE-simp (ZPL montado no servidor)
+  if(ehPedidoMadeira(id) && modoEtiqueta()!=='a4'){
+    toast('🏷️ Imprimindo etiqueta(s) Madeira…');
+    try{ await imprimirMadeiraZebra(id); }
+    catch(e){ toast('Falha etiqueta Madeira: '+e.message); return; }
+    abrirConfirmacao();
+    return;
+  }
+  if(modoEtiqueta()==='a4' || ehPedidoMadeira(id)){
+    // Madeira (PDF) ou modo A4: UMA aba só com etiqueta(s) + NF fundidas — Madeira multi-volume vem intercalado e carimbado
+    window.open(location.origin+'/good-checkout-offline/imprimir/'+id, '_blank');
+    abrirConfirmacao();
+    return;
+  }
+  // Zebra
+  if(modoFinalizando==='simp'){
+    // etiqueta + DANFE → FUNDE numa etiqueta só (fallback p/ 2 se não der)
+    toast('🏷️ Imprimindo etiqueta…');
+    let res;
+    try{ res = await imprimirEtiquetaZebra(id); }
+    catch(e){ toast('Falha na etiqueta: '+e.message); return; }
+    if(res.fundida)   toast('🏷️ etiqueta + DANFE fundidas — 1 etiqueta só ✓');
+    else if(res.duas) toast('🏷️ etiqueta + DANFE (2 etiquetas)');
+    else              toast('🖨 etiqueta enviada'+(temNf?' · DANFE já vem junto':''));
+  }else{
+    // etiqueta na Zebra + NF completa em A4 no navegador
+    try{ await imprimirZPL(zplAtual); }
+    catch(e){ toast('Falha na etiqueta: '+e.message); return; }
+    if(temNf) window.open(location.origin+'/good-checkout-offline/danfe/'+id, '_blank');
+  }
+  abrirConfirmacao();   // abre JÁ — não espera o DANFE terminar de imprimir
+}
+
+// ── 📍 LOCALIZAÇÃO OBRIGATÓRIA NO CHECKOUT ──────────────────────────────
+// Se algum item do pedido está sem localização, obriga o estoquista a
+// cadastrar (mín. 2 caracteres) antes de imprimir. Salva no Bling + cache
+// via /salvar-localizacao — assim a próxima separação já vem com o local.
+function unidadesSemLoc(){
+  if(!pedidoAtual || !Array.isArray(pedidoAtual.unidades)) return [];
+  const vistos = {}, out = [];
+  for(const u of pedidoAtual.unidades){
+    const sku = (u.sku||'').trim();
+    if(!sku) continue;                       // sem SKU não dá pra salvar no Bling
+    if((u.loc||'').trim()) continue;          // já tem localização
+    if(vistos[sku]) continue;                 // não repete o mesmo SKU
+    vistos[sku] = true; out.push(u);
+  }
+  return out;
+}
+function faltaLocalizacao(){ return unidadesSemLoc().length > 0; }
+
+function abrirPopupLocalizacao(modo){
+  const faltam = unidadesSemLoc();
+  const md = $('modal');
+  md.innerHTML =
+    '<div class="mbox">'+
+      '<div class="mtit">📍 Preencha a localização!</div>'+
+      '<div class="msub">'+(faltam.length===1
+        ? 'Este produto ainda não tem localização cadastrada. Informe em qual prateleira/posição ele ficará armazenado (mín. 2 caracteres). Assim, nas próximas separações o sistema já mostrará o local automaticamente.'
+        : 'Estes '+faltam.length+' produtos ainda não têm localização cadastrada. Informe em qual prateleira/posição cada um ficará armazenado (mín. 2 caracteres). Assim, nas próximas separações o sistema já mostrará o local automaticamente.')+'</div>'+
+      '<div class="locforce">'+
+        faltam.map((u,i)=>
+          '<div class="lfrow">'+
+            thumb(u.img)+
+            '<div class="lfinfo"><div class="lfd">'+esc(u.descricao||u.sku)+'</div><div class="lfs">SKU '+esc(u.sku)+'</div></div>'+
+            '<input class="lfinp" id="lf-'+i+'" data-sku="'+esc(u.sku)+'" maxlength="20" style="text-transform:uppercase" placeholder="ex: A12" autocomplete="off" oninput="validarLocForce()" onkeydown="if(event.key===\'Enter\'){event.preventDefault();var n=document.getElementById(\'lf-\'+('+(i+1)+'));if(n){n.focus();}else{salvarLocForce(\''+modo+'\');}}" />'+
+          '</div>'
+        ).join('')+
+      '</div>'+
+      '<div class="mbtns">'+
+        '<button class="btn sec" onclick="fecharPopupLocalizacao()">✗ Cancelar</button>'+
+        '<button class="btn ok" id="lfok" onclick="salvarLocForce(\''+modo+'\')" disabled>✓ Salvar e imprimir</button>'+
+      '</div>'+
+    '</div>';
+  md.classList.add('show');
+  setTimeout(()=>{ const f=$('lf-0'); if(f) f.focus(); }, 60);
+}
+function validarLocForce(){
+  let ok = true;
+  document.querySelectorAll('.lfinp').forEach(inp=>{ if((inp.value||'').trim().length < 2) ok = false; });
+  const b = $('lfok'); if(b) b.disabled = !ok;
+}
+function fecharPopupLocalizacao(){ const md=$('modal'); md.classList.remove('show'); md.innerHTML=''; setTimeout(()=>{const s=$('scan'); if(s) s.focus();},60); }
+async function salvarLocForce(modo){
+  const inps = Array.from(document.querySelectorAll('.lfinp'));
+  for(const inp of inps){ if((inp.value||'').trim().length < 2){ toast('Preencha todas as localizações (mín. 2 caracteres)'); return; } }
+  const b = $('lfok'); if(b){ b.disabled = true; b.textContent = 'Salvando…'; }
+  for(const inp of inps){
+    const sku = inp.getAttribute('data-sku');
+    const loc = (inp.value||'').trim().toUpperCase();
+    const r = await postJson('/good-checkout-offline/salvar-localizacao', { sku, localizacao: loc, op: opAtual() }).catch(()=>null);
+    if(!r || r.ok===false){ toast('Falha ao salvar '+sku+' — tente de novo'); if(b){ b.disabled=false; b.textContent='✓ Salvar e imprimir'; } return; }
+    if(pedidoAtual && Array.isArray(pedidoAtual.unidades)) pedidoAtual.unidades.forEach(u=>{ if((u.sku||'')===sku) u.loc = loc; });
+  }
+  toast('✓ Localização(ões) salva(s)');
+  fecharPopupLocalizacao();
+  finalizar(modo);   // agora passa no bloqueio e segue pra impressão
+}
+
+function abrirConfirmacao(){
+  const md=$('modal');
+  const _id = pedidoAtual ? pedidoAtual.bling_id : '';
+  const _vol = volumesDoPedido(_id);
+  md.innerHTML =
+    '<div class="mbox">'+
+      (_vol>1 ? '<div class="mvol">📦 ATENÇÃO: '+_vol+' VOLUMES<span>Monte '+_vol+' caixas e cole 1 etiqueta em cada. Cada caixa leva sua via da NF carimbada (VOLUME 1/'+_vol+', 2/'+_vol+'…).</span></div>' : '')+
+      '<div class="mtit">Etiqueta e NF saíram certas?</div>'+
+      '<div class="msub">Confira a impressora/abas. Só finalize se saiu OK — assim, se der problema, o pedido <b>continua na tela</b> e você reimprime sem perder.</div>'+
+      '<div class="mbtns">'+
+        '<button class="btn warn" onclick="reimprimirModal()">🖨 Reimprimir</button>'+
+        '<button class="btn sec" onclick="fecharConfirmacao()">✗ Ainda não</button>'+
+        '<button class="btn ok" onclick="confirmarFinalizar()">✓ Sim, finalizar</button>'+
+      '</div>'+
+    '</div>';
+  md.classList.add('show');
+}
+function fecharConfirmacao(){ const md=$('modal'); md.classList.remove('show'); md.innerHTML=''; setTimeout(()=>{const s=$('scan'); if(s) s.focus();},60); }
+async function reimprimirModal(){
+  const id = pedidoAtual.bling_id;
+  if(ehPedidoMadeira(id) && modoEtiqueta()!=='a4'){   // Madeira na Zebra: reenvia o ZPL montado (adesivo+Correios+DANFE)
+    try{ await imprimirMadeiraZebra(id); }catch(e){ toast('Falha etiqueta Madeira: '+e.message); return; }
+    toast('🖨 reenviado'); return;
+  }
+  if(modoEtiqueta()==='a4' || ehPedidoMadeira(id)){ window.open(location.origin+'/good-checkout-offline/imprimir/'+id, '_blank'); toast('🖨 reenviado'); return; }
+  if(modoFinalizando==='simp'){
+    let res;
+    try{ res = await imprimirEtiquetaZebra(id); }catch(e){ toast('Falha etiqueta: '+e.message); return; }
+    if(res.fundida)   toast('🖨 etiqueta + DANFE reenviadas (1 só) ✓');
+    else if(res.duas) toast('🖨 etiqueta + DANFE reenviadas (2)');
+    else              toast('🖨 etiqueta reenviada'+(pedidoAtual.nf?' · DANFE já vem junto':''));
+  }else{
+    try{ await imprimirEtiqueta(id, zplAtual); }catch(e){ toast('Falha etiqueta: '+e.message); return; }
+    if(pedidoAtual.nf) window.open(location.origin+'/good-checkout-offline/danfe/'+id, '_blank');
+    toast('🖨 etiqueta reenviada');
+  }
+}
+async function confirmarFinalizar(){
+  try{
+    const r = await postJson('/good-checkout-offline/conferido', { id: pedidoAtual.bling_id, user: opAtual() });
+    if(r && r.ja_finalizado)      toast('⚠️ '+pedidoAtual.numero+' já tinha sido finalizado'+(r.por?' por '+r.por:'')+' — não refeito');
+    else if(r && r.sincronizado)  toast('✓ '+pedidoAtual.numero+' finalizado → VERIFICADO');
+    else if(r && r.bling_offline) toast('✓ '+pedidoAtual.numero+' finalizado · Bling offline, sincroniza ao voltar');
+    else                          toast('✓ '+pedidoAtual.numero+' finalizado');
+    pararHeartbeat();
+    fecharConfirmacao();
+    pedidoAtual=null; zplAtual=null;
+    mostrarPlaceholder();
+    carregarLista();
+  }catch(e){ toast('Falha ao finalizar: '+e.message); }
+}
+
+// ─── Histórico dos últimos finalizados (modal) ─────────────────────────────
+let histItens = [];
+let histMkt = '';
+let relPeriodo = 'mes';   // dia | semana | mes | custom
+let relDe = '', relAte = '';
+
+async function abrirRelatorio(){
+  if(!souAdmin()) return;
+  const md=$('modal');
+  md.innerHTML =
+    '<div class="mbox" style="max-width:680px;width:94vw;max-height:90vh;overflow:auto">'+
+      '<button class="mx" onclick="fecharConfirmacao()" title="fechar">✕</button>'+
+      '<div class="mtit">📊 Relatório de pedidos</div>'+
+      '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">'+
+        '<button class="chip" id="relBtnDia" onclick="setRelPeriodo(\'dia\')">Hoje</button>'+
+        '<button class="chip" id="relBtnSemana" onclick="setRelPeriodo(\'semana\')">7 dias</button>'+
+        '<button class="chip" id="relBtnMes" onclick="setRelPeriodo(\'mes\')">Mês</button>'+
+        '<button class="chip" id="relBtnCustom" onclick="setRelPeriodo(\'custom\')">Período…</button>'+
+      '</div>'+
+      '<div id="relCustomBox" style="display:none;gap:8px;margin-bottom:10px;align-items:center;flex-wrap:wrap">'+
+        '<label style="font-size:13px;color:var(--mut)">De <input type="date" id="relDe" class="buscafld" style="width:auto;display:inline-block" onchange="relDe=this.value;calcRelatorio()"></label>'+
+        '<label style="font-size:13px;color:var(--mut)">até <input type="date" id="relAte" class="buscafld" style="width:auto;display:inline-block" onchange="relAte=this.value;calcRelatorio()"></label>'+
+      '</div>'+
+      '<div id="relBody">carregando…</div>'+
+      '<div class="mbtns"><button class="btn sec" onclick="fecharConfirmacao()">Fechar</button></div>'+
+    '</div>';
+  md.classList.add('show');   // ← sem isso o modal fica montado porém invisível (display:none)
+  try{ const d = await api('/good-checkout-offline/historico'); histItens = (d && d.itens) || []; }catch(e){ histItens = histItens || []; }   // sempre dados frescos; se a rede falhar, usa o que tiver
+  setRelPeriodo(relPeriodo);
+}
+
+function setRelPeriodo(p){
+  relPeriodo = p;
+  ['dia','semana','mes','custom'].forEach(x=>{ const b=$('relBtn'+x.charAt(0).toUpperCase()+x.slice(1)); if(b) b.classList.toggle('on', x===p); });
+  const cb=$('relCustomBox'); if(cb) cb.style.display = (p==='custom')?'flex':'none';
+  calcRelatorio();
+}
+
+function _intervaloRel(){
+  const agora = new Date();
+  const fmt = d => d.toLocaleString('sv-SE',{timeZone:'America/Sao_Paulo'}).slice(0,10);
+  let de, ate = fmt(agora);
+  if(relPeriodo==='dia'){ de = fmt(agora); }
+  else if(relPeriodo==='semana'){ const d=new Date(agora.getTime()-6*86400000); de=fmt(d); }
+  else if(relPeriodo==='mes'){ de = fmt(agora).slice(0,8)+'01'; }
+  else { de = relDe || '2000-01-01'; ate = relAte || fmt(agora); }
+  return { de, ate };
+}
+
+function calcRelatorio(){
+  const body=$('relBody'); if(!body) return;
+  const { de, ate } = _intervaloRel();
+  // filtra os finalizados no período (pela data de conferência, fuso SP)
+  const noPeriodo = (histItens||[]).filter(h=>{
+    if(!h.conferido_em) return false;
+    let d = '';
+    try{ d = new Date(h.conferido_em).toLocaleString('sv-SE',{timeZone:'America/Sao_Paulo'}).slice(0,10); }  // dia REAL em SP (conferido_em é UTC!)
+    catch(e){ d = String(h.conferido_em).slice(0,10); }
+    return d >= de && d <= ate;
+  });
+  const MKT_NOME = { mercadolivre:'Mercado Livre', shopee:'Shopee', magalu:'Magalu', amazon:'Amazon', tiktok:'TikTok', outro:'Outro' };
+  const total = noPeriodo.length;
+  if(!total){ body.innerHTML = '<div style="color:var(--mut);padding:20px;text-align:center">Nenhum pedido finalizado nesse período.<br><small>('+de+' a '+ate+')</small></div>'; return; }
+
+  // por marketplace + flex por canal
+  const porMkt = {}, flexPorMkt = {}, valPorMkt = {}; let totFlex = 0, totVal = 0, semValor = 0;
+  noPeriodo.forEach(h=>{
+    const m = (h.marketplace||'outro').toLowerCase();
+    porMkt[m] = (porMkt[m]||0)+1;
+    if(h.flex){ flexPorMkt[m]=(flexPorMkt[m]||0)+1; totFlex++; }
+    if(h.valor != null && isFinite(Number(h.valor))){ const v=Number(h.valor); valPorMkt[m]=(valPorMkt[m]||0)+v; totVal+=v; }
+    else semValor++;
+  });
+  const fmtBRL = v => (Math.round(v*100)/100).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+  const mktOrdenado = Object.keys(porMkt).sort((a,b)=>porMkt[b]-porMkt[a]);
+
+  // curva A de produtos (soma qtd por SKU)
+  const prod = {};
+  noPeriodo.forEach(h=>{ (h.itens||[]).forEach(it=>{
+    const sku = it.sku || '(sem SKU)';
+    if(!prod[sku]) prod[sku] = { sku, desc: it.descricao||'', qtd:0 };
+    prod[sku].qtd += Number(it.qtd||1);
+  }); });
+  const curva = Object.values(prod).sort((a,b)=>b.qtd-a.qtd);
+  const totUnid = curva.reduce((s,p)=>s+p.qtd,0);
+
+  let html = '';
+  // resumo
+  html += '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">'+
+    '<div style="background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 14px;flex:1;min-width:120px"><div style="font-size:24px;font-weight:800">'+total+'</div><div style="font-size:12px;color:var(--mut)">pedidos</div></div>'+
+    '<div style="background:var(--card);border:1px solid #f59e0b55;border-radius:10px;padding:10px 14px;flex:1;min-width:120px"><div style="font-size:24px;font-weight:800;color:#f59e0b">⚡ '+totFlex+'</div><div style="font-size:12px;color:var(--mut)">FLEX enviados</div></div>'+
+    '<div style="background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 14px;flex:1;min-width:120px"><div style="font-size:24px;font-weight:800">'+totUnid+'</div><div style="font-size:12px;color:var(--mut)">unidades</div></div>'+
+    (totVal>0?'<div style="background:var(--card);border:1px solid #10b98155;border-radius:10px;padding:10px 14px;flex:1;min-width:140px"><div style="font-size:20px;font-weight:800;color:#10b981">R$ '+fmtBRL(totVal)+'</div><div style="font-size:12px;color:var(--mut)">faturamento'+(semValor?' (parcial)':'')+'</div></div>':'')+
+  '</div>';
+  // por marketplace
+  html += '<div style="font-weight:700;margin:6px 0 8px">📦 Por marketplace</div>';
+  mktOrdenado.forEach(m=>{
+    const n = porMkt[m], pct = Math.round(n/total*100), fx = flexPorMkt[m]||0;
+    html += '<div style="margin-bottom:7px">'+
+      '<div style="display:flex;justify-content:space-between;font-size:14px"><span>'+(MKT_NOME[m]||m)+(fx?' <span style="color:#f59e0b;font-size:12px">(⚡'+fx+' flex)</span>':'')+(valPorMkt[m]?' <span style="color:#10b981;font-size:12px">R$ '+fmtBRL(valPorMkt[m])+'</span>':'')+'</span><b>'+n+' · '+pct+'%</b></div>'+
+      '<div style="background:var(--line);border-radius:4px;height:7px;margin-top:3px"><div style="background:#2563eb;height:7px;border-radius:4px;width:'+pct+'%"></div></div>'+
+    '</div>';
+  });
+  // curva A
+  html += '<div style="font-weight:700;margin:16px 0 8px">🏆 Curva A — mais vendidos ('+curva.length+' SKUs)</div>';
+  html += '<div>';   // sem rolagem interna: no celular o modal inteiro rola (uma rolagem só, melhor no dedo)
+  curva.slice(0,50).forEach((p,i)=>{
+    const pct = totUnid? Math.round(p.qtd/totUnid*100):0;
+    html += '<div style="display:flex;gap:8px;align-items:center;padding:5px 0;border-bottom:1px solid var(--line)">'+
+      '<div style="width:22px;text-align:right;color:var(--mut);font-size:12px">'+(i+1)+'</div>'+
+      '<div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:600">'+esc(p.sku)+'</div><div style="font-size:11px;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(p.desc)+'</div></div>'+
+      '<div style="text-align:right"><b>'+p.qtd+'</b><div style="font-size:11px;color:var(--mut)">'+pct+'%</div></div>'+
+    '</div>';
+  });
+  html += '</div>';
+  if(curva.length>50) html += '<div style="font-size:12px;color:var(--mut);margin-top:6px">…mostrando top 50 de '+curva.length+'</div>';
+  if(semValor && totVal>0) html += '<div style="font-size:12px;color:#f59e0b;margin-top:10px">💰 Faturamento PARCIAL: '+semValor+' pedido(s) sem valor gravado (finalizados antes desta atualização) não entram na soma.</div>';
+  const semDetalhe = noPeriodo.filter(h=>!(h.itens&&h.itens.length)).length;
+  if(semDetalhe) html += '<div style="font-size:12px;color:#f59e0b;margin-top:10px">⚠️ '+semDetalhe+' pedido(s) finalizados antes da atualização não têm canal/itens gravados — entram no total, aparecem como "Outro" e ficam fora da curva A/unidades.</div>';
+  html += '<div style="font-size:11px;color:var(--mut);margin-top:12px">Período: '+de+' a '+ate+' (datas no horário de São Paulo) · fonte: pedidos finalizados no checkout · kits contam pelo SKU do kit (sem explodir componentes)</div>';
+  body.innerHTML = html;
+}
+
+async function abrirHistorico(){
+
+  histMkt = '';
+  const md=$('modal');
+  md.innerHTML =
+    '<div class="mbox" style="max-width:580px;width:92vw">'+
+      '<button class="mx" onclick="fecharConfirmacao()" title="fechar">✕</button>'+
+      '<div class="mtit">🕘 Últimos pedidos finalizados</div>'+
+      '<input id="histBusca" class="buscafld" style="margin-bottom:8px" placeholder="🔎 filtrar por nº do pedido ou cliente" autocomplete="off" oninput="filtrarHist()" />'+
+      '<div style="margin:-2px 0 8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap"><button class="chip flex" id="histFlexBtn" onclick="toggleHistFlex()">⚡ Só FLEX</button><button class="chip" id="histExpBtn" onclick="toggleHistExpand()">▼ Expandir tudo</button><button id="histPendBtn" onclick="toggleHistPend()" title="pedido(s) que o estoquista sinalizou pra reenvio — clique pra ver só eles e enviar" style="display:none;background:#dc2626;color:#fff;border:1px solid #dc2626;border-radius:999px;padding:7px 14px;font-size:13px;font-weight:800;cursor:pointer"></button></div>'+
+      '<div id="histPerRow" style="margin:-2px 0 8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap"></div>'+
+      '<select id="histMktSel" class="buscafld" style="margin-bottom:10px" onchange="histMkt=this.value;filtrarHist()"><option value="">Todos os marketplaces</option></select>'+
+      '<div id="histBody" class="histbody">carregando…</div>'+
+      '<div class="mbtns"><button class="btn sec" onclick="fecharConfirmacao()">Fechar</button></div>'+
+    '</div>';
+  md.classList.add('show');
+  try{
+    const d = await api('/good-checkout-offline/historico');
+    histItens = (d && d.itens) || [];
+    histReenvios = (d && d.reenvios) || {};
+    histReenvioDireto = !!(d && d.reenvio_direto);
+    montarFiltroMkt();
+    renderHist(histItens);
+  }catch(e){ $('histBody').innerHTML='<div class="sepempty">Falha: '+esc(e.message)+'</div>'; }
+}
+// monta as opções do filtro de marketplace só com os que aparecem no histórico (com contagem)
+function montarFiltroMkt(){
+  const ordem = ['ml','shopee','amazon','magalu','tiktok','outro'];
+  const presentes = [...new Set(histItens.map(h => h.marketplace || 'outro'))].sort((a,b)=>ordem.indexOf(a)-ordem.indexOf(b));
+  let html = '<option value="">Todos ('+histItens.length+')</option>';
+  for(const mk of presentes){
+    const n = (MKT[mk]||MKT.outro).n;
+    const qt = histItens.filter(h=>(h.marketplace||'outro')===mk).length;
+    html += '<option value="'+mk+'">'+n+' ('+qt+')</option>';
+  }
+  const sel = $('histMktSel');
+  if(sel){ sel.innerHTML = html; sel.value = histMkt; }
+}
+function filtrarHist(){
+  const q = (($('histBusca')||{}).value||'').trim().toLowerCase();
+  let lista = histItens;
+  if(histMkt) lista = lista.filter(h => (h.marketplace||'outro')===histMkt);
+  if(q) lista = lista.filter(h => (String(h.numero||h.id)+' '+(h.cliente||'')).toLowerCase().includes(q));
+  renderHist(lista);
+}
+let histFlexOnly = false;
+function toggleHistFlex(){ histFlexOnly = !histFlexOnly; const b=$('histFlexBtn'); if(b) b.classList.toggle('on', histFlexOnly); filtrarHist(); }
+let histPendOnly = false;
+function toggleHistPend(){ histPendOnly = !histPendOnly; const b=$('histPendBtn'); if(b) b.classList.toggle('on', histPendOnly); filtrarHist(); }
+let histExpandAll = false;
+function toggleHistExpand(){ histExpandAll = !histExpandAll; const b=$('histExpBtn'); if(b){ b.classList.toggle('on', histExpandAll); b.textContent = histExpandAll?'▲ Recolher tudo':'▼ Expandir tudo'; } filtrarHist(); }
+let histAberto = null;   // pedido com dropdown de detalhes aberto
+function toggleHistDet(id){ histAberto = (histAberto===id) ? null : id; filtrarHist(); }
+let histReenvios = {};   // solicitações de reenvio pendentes (id → {por, em})
+let histReenvioDireto = false;   // empresa no modo reenvio direto (env CHECKOUT_REENVIO_DIRETO_EMPRESAS)
+async function pedirReenvio(id, numero){
+  const msg = histReenvioDireto
+    ? ('Reenviar a etiqueta + NF do pedido '+numero+' pro e-mail do estoque AGORA?\n\n(etiqueta rasgou ou sujou? ela chega no e-mail prontinha pra reimprimir)')
+    : ('Marcar o pedido '+numero+' como PRECISA DE REENVIO (etiqueta/NF rasgada/suja)?\n\nEle fica sinalizado em VERMELHO no histórico. O admin recebe o aviso e reenvia os documentos. Você só sinaliza — não envia nada.');
+  if(!confirm(msg)) return;
+  if(histReenvioDireto) toast('📧 Enviando etiqueta + NF… aguarde uns segundos');
+  try{
+    const r = await postJson('/good-checkout-offline/pedir-reenvio/'+encodeURIComponent(id), { op: opAtual() });
+    if(r && r.direto) toast(r.ok ? '📧 Enviado pro e-mail do estoque!' : 'Falha: '+(r.erro||'?'));
+    else if(r && r.ok) toast('📨 Solicitação registrada — o admin envia em seguida.');
+    else toast('Falha: '+((r&&r.erro)||'?'));
+  }catch(e){ toast('Falha: '+e.message); }
+  abrirHistorico();
+}
+let enviandoReenvio = false;
+async function resolverReenvio(id, enviar){
+  if(enviar){
+    if(enviandoReenvio){ toast('⏳ Já estou enviando, aguarde…'); return; }   // trava anti-duplicação
+    enviandoReenvio = true;
+    toast('📧 Enviando etiqueta + NF pro estoque… aguarde uns segundos');   // feedback imediato
+  }
+  try{
+    const r = await postJson('/good-checkout-offline/reenvio-resolver/'+encodeURIComponent(id), { op: opAtual(), enviar: !!enviar });
+    if(enviar) toast(r && r.ok ? '✅ Enviado pro estoque!' : 'Falha: '+((r&&r.erro)||'?'));
+    else toast('Solicitação descartada.');
+  }catch(e){ toast('Falha: '+e.message); }
+  enviandoReenvio = false;
+  abrirHistorico();
+}
+let histPer='todos', histPDe='', histPAte='';
+const hDiaSP = iso => { try{ return new Date(iso).toLocaleString('sv-SE',{timeZone:'America/Sao_Paulo'}).slice(0,10); }catch(e){ return String(iso||'').slice(0,10); } };
+const hHoje = () => new Date().toLocaleString('sv-SE',{timeZone:'America/Sao_Paulo'}).slice(0,10);
+function histIntervalo(){
+  const hoje=hHoje(); let de='2000-01-01', ate=hoje;
+  if(histPer==='hoje') de=hoje;
+  else if(histPer==='ontem'){ const o=new Date(Date.now()-86400000).toLocaleString('sv-SE',{timeZone:'America/Sao_Paulo'}).slice(0,10); de=o; ate=o; }
+  else if(histPer==='7') de=new Date(Date.now()-6*86400000).toLocaleString('sv-SE',{timeZone:'America/Sao_Paulo'}).slice(0,10);
+  else if(histPer==='mes') de=hoje.slice(0,8)+'01';
+  else if(histPer==='custom'){ de=histPDe||'2000-01-01'; ate=histPAte||hoje; }
+  return {de,ate};
+}
+function histPerOk(h){ if(histPer==='todos') return true; if(!h.conferido_em) return false; const d=hDiaSP(h.conferido_em); const iv=histIntervalo(); return d>=iv.de && d<=iv.ate; }
+function setHistPer(p){ histPer=p; filtrarHist(); }
+
+function renderHist(lista){
+  if(histFlexOnly) lista = lista.filter(h=>!!h.flex);
+  if(histPendOnly) lista = lista.filter(h=>histReenvios && histReenvios[h.id]);
+  lista = lista.filter(histPerOk);
+  lista = lista.slice().sort((a,b)=>{ const fa=(histReenvios&&histReenvios[a.id])?1:0, fb=(histReenvios&&histReenvios[b.id])?1:0; return fa!==fb ? fb-fa : String(b.conferido_em||'').localeCompare(String(a.conferido_em||'')); });
+  const perRow = $('histPerRow');
+  if(perRow){
+    const defs=[['todos','Todos'],['hoje','Hoje'],['ontem','Ontem'],['7','Semana'],['mes','M\u00eas'],['custom','Per\u00edodo\u2026']];
+    perRow.innerHTML = defs.map(function(d2){ return '<button class="chip" style="'+(histPer===d2[0]?'background:#1d4ed8;color:#fff;border-color:#1d4ed8':'')+'" onclick="setHistPer(\''+d2[0]+'\')">'+d2[1]+'</button>'; }).join('')
+      + (histPer==='custom' ? ' <input type="date" value="'+histPDe+'" onclick="this.showPicker&&this.showPicker()" onchange="histPDe=this.value;filtrarHist()" style="padding:6px 8px;border-radius:8px;border:1px solid #94a3b8"> <input type="date" value="'+histPAte+'" onclick="this.showPicker&&this.showPicker()" onchange="histPAte=this.value;filtrarHist()" style="padding:6px 8px;border-radius:8px;border:1px solid #94a3b8">' : '')
+      + '<b style="margin-left:auto;font-size:13px">'+lista.length+' pedido(s)</b>';
+  }
+  const pend = Object.keys(histReenvios||{}).length;
+  const pb = $('histPendBtn'); if(pb){ pb.textContent = (histPendOnly?'✕ ':'⚠️ ')+pend+' PENDENTE'+(pend>1?'S':'')+' DE ENVIO'; pb.style.display = pend? 'inline-block' : 'none'; }
+  if(!lista.length){ $('histBody').innerHTML='<div class="sepempty">'+(histItens.length?'Nenhum resultado pro filtro.':'Nenhum pedido finalizado ainda.')+'</div>'; return; }
+  $('histBody').innerHTML = lista.map(h=>{
+    const dt = h.conferido_em ? new Date(h.conferido_em).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '';
+    const mk = h.marketplace ? (MKT[h.marketplace]||MKT.outro) : null;
+    const tag = h.sincronizado ? '<span class="hsync ok">✓ VERIFICADO</span>' : '<span class="hsync wait">⏳ na fila</span>';
+    const aberto = histExpandAll || (histAberto===h.id);
+    const ree = histReenvios && histReenvios[h.id];
+    const its0 = h.itens||[];
+    const resumo = (h.nf_numero?('NF '+esc(h.nf_numero)+' · '):'')+(its0.length?((its0[0].qtd||1)+'× '+esc(its0[0].sku||'?')+(its0.length>1?' +'+(its0.length-1):'')+' · '):'');
+    let det = '';
+    if(aberto){
+      const its = h.itens||[];
+      det = '<div class="histdet">'+
+        '<div>'+(mk?esc(mk.n):'')+(h.servico?' · '+esc(h.servico):'')+(h.flex?' · <b>⚡ FLEX</b>':'')+(h.nf_numero?' · NF '+esc(h.nf_numero):'')+'</div>'+
+        (h.cliente?'<div>👤 '+esc(h.cliente)+'</div>':'')+
+        (its.length
+          ? its.map(it=>'<div class="histit"><b>'+(it.qtd||1)+'×</b> '+esc(it.sku||'?')+(it.descricao?' — '+esc(it.descricao):'')+'</div>').join('')
+          : '<div class="histit" style="opacity:.6">sem detalhes de itens (pedido finalizado antes desta atualização)</div>')+
+      '</div>';
+    }
+    return '<div class="histrow'+(ree?' reepend':'')+'" style="cursor:pointer" onclick="toggleHistDet(\''+esc(h.id)+'\')">'+
+      '<div class="htop">'+
+      (mk?'<span class="hmk" style="background:'+mk.c+'"></span>':'')+
+      '<div class="hmeta">'+
+        '<div class="hnum">'+(h.flex?'⚡ ':'')+esc(h.numero||h.id)+(h.cliente?' · '+esc(h.cliente):'')+'</div>'+
+        '<div class="hsub">'+resumo+dt+(h.user?(' · '+esc(h.user)):'')+' · '+(aberto?'▲ fechar':'▼ detalhes')+'</div>'+
+      '</div>'+
+      '</div><div class="hactions">'+
+      (ree?'<span class="reebadge" title="solicitado por '+esc(ree.por||'?')+' em '+esc((ree.em||'').slice(0,16).replace('T',' '))+'">📨 REENVIO</span>':'')+
+      (h.ultimo_reenvio?'<span class="hsync" style="background:#1e3a8a;color:#bfdbfe" title="reenviado por '+esc(h.ultimo_reenvio.por||'?')+' em '+esc(String(h.ultimo_reenvio.em||'').slice(0,16).replace('T',' '))+'">📧 '+((h.reenvios||1)>1?((h.reenvios)+'× '):'')+esc(h.ultimo_reenvio.por||'?')+'</span>':'')+
+      tag+
+      (!ree?'<button class="btn sec sm" onclick="event.stopPropagation();pedirReenvio(\''+h.id+'\',\''+esc(h.numero||h.id)+'\')" title="'+(histReenvioDireto?'etiqueta rasgou ou sujou? reenvia etiqueta + NF pro e-mail do estoque agora':'etiqueta rasgou ou sujou? avise o admin que este pedido precisa de reenvio')+'" style="background:'+(histReenvioDireto?'#1d4ed8':'#b45309')+';color:#fff;border-color:'+(histReenvioDireto?'#1d4ed8':'#b45309')+'">'+(histReenvioDireto?'📧 Etiqueta + NF por EMAIL':'⚠️ Avisar')+'</button>':'')+
+      (ree&&souAdmin()?'<button class="btn sec sm" onclick="event.stopPropagation();resolverReenvio(\''+h.id+'\',true)" title="enviar etiqueta+NF pro e-mail do estoque e baixar a solicitação">✉ Enviar</button>':'')+
+      (ree&&souAdmin()?'<button class="btn sec sm" onclick="event.stopPropagation();resolverReenvio(\''+h.id+'\',false)" title="descartar a solicitação sem enviar">✕</button>':'')+
+      (souAdmin()?'<button class="btn warn sm" onclick="event.stopPropagation();reabrirPedido(\''+h.id+'\',\''+esc(h.numero||h.id)+'\')">↩ Reabrir</button>':'')+
+      '</div>'+
+    '</div>'+det;
+  }).join('');
+}
+// ADMIN — finaliza o pedido SEM bipar: move a situação no Bling p/ VERIFICADO, arquiva os documentos
+// (etiqueta/NF ficam disponíveis pra reenvio) e solta a reserva. Mesma rota do fluxo normal (/conferido),
+// só que sem a trava de bipagem da tela. Fica registrado no histórico QUEM finalizou.
+async function forcarVerificado(){
+  if(!souAdmin() || !pedidoAtual) return;
+  const n = pedidoAtual.numero || pedidoAtual.bling_id;
+  if(!confirm('ADMIN — marcar o pedido '+n+' como VERIFICADO no Bling SEM bipar os itens?\n\nIsso finaliza o pedido e muda a situação no Bling. Use só quando não der pra conferir bipando (produto sem EAN, código danificado, pedido despachado à mão).')) return;
+  try{
+    const r = await postJson('/good-checkout-offline/conferido', { id: pedidoAtual.bling_id, user: opAtual() });
+    if(r && r.ja_finalizado){ toast('Já finalizado por '+(r.por||'?')); }
+    else if(r && r.ok){ toast(r.sincronizado ? '✓ VERIFICADO no Bling' : '✓ finalizado — Bling na fila'); }
+    else { toast('Falha: '+((r&&r.erro)||'?')); return; }
+  }catch(e){ toast('Falha: '+e.message); return; }
+  voltarLista(); carregarLista();
+}
+async function enviarDocs(id, numero){
+  if(!confirm('Enviar etiqueta + NF do pedido '+numero+' pro e-mail do estoque imprimir e despachar?')) return;
+  toast('📧 Enviando pro estoque…');
+  try{
+    const r = await postJson('/good-checkout-offline/enviar-docs/'+encodeURIComponent(id), { op: opAtual() }).catch(()=>null);
+    if(r && r.ok){
+      const oque = [r.etiqueta?'etiqueta':null, r.danfe?'DANFE':null].filter(Boolean).join(' + ');
+      toast('✓ Enviado pro estoque ('+oque+')'+(r.etiqueta?'':' ⚠️ sem etiqueta!'));
+    } else toast('Não enviou: '+((r&&r.erro)||'erro'));
+  }catch(e){ toast('Falha: '+e.message); }
+}
+
+// reabre um pedido finalizado por engano → volta pra lista (e devolve pra ATENDIDO no Bling se já tinha sido verificado)
+async function reabrirPedido(id, numero){
+  if(!confirm('Reabrir o pedido '+numero+'?\n\nEle sai dos finalizados e volta pra lista de separação. Se já tinha ido pra VERIFICADO, volta pra ATENDIDO no Bling.')) return;
+  try{
+    const r = await api('/good-checkout-offline/reabrir/'+encodeURIComponent(id)+'?op='+encodeURIComponent(opAtual()));
+    if(r && r.ok){
+      toast('↩ '+numero+' reaberto'+(r.revertido_p_atendido?' (voltou pra ATENDIDO)':'')+' — reaparece na lista em alguns segundos');
+      abrirHistorico();                 // recarrega o modal (some o reaberto)
+      setTimeout(carregarLista, 3000);  // re-cache roda em background → atualiza a lista
+    } else {
+      toast(r&&r.precisa_admin ? '🔒 Só o admin pode reabrir pedidos' : ('Não deu pra reabrir: '+((r&&r.erro)||'erro')));
+    }
+  }catch(e){ toast('Falha ao reabrir: '+e.message); }
+}
+
+// ─── Lista de Separação (gaveta lateral direita) ───────────────────────────
+let sepMkt = null;     // filtro de marketplace na separação
+let sepLinhas = [];    // linhas atuais da separação (p/ editar localização inline)
+let sepData = null;    // último resultado /separacao
+let sepView = 'produto'; // 'produto' (somado por SKU) ou 'pedido' (por pedido)
+
+function abrirSeparacao(){ $('sep').classList.add('on'); $('sepback').classList.add('on'); carregarSeparacao(); }
+function fecharSeparacao(){ $('sep').classList.remove('on'); $('sepback').classList.remove('on'); }
+function setSepMkt(v){ sepMkt = v; carregarSeparacao(); }
+function setSepView(v){
+  sepView = v;
+  const a=$('svProd'), b=$('svPed');
+  if(a) a.classList.toggle('on', v==='produto');
+  if(b) b.classList.toggle('on', v==='pedido');
+  carregarSeparacao();
+}
+
+async function carregarSeparacao(){
+  $('sepInfo').textContent = 'carregando…';
+  $('sepList').innerHTML = '';
+  if(sepView === 'pedido'){ return carregarSepPedido(); }
+  try{
+    const d = await api('/good-checkout-offline/separacao' + (sepMkt ? ('?mkt='+sepMkt) : ''));
+    sepData = d;
+    renderSepChips(d.counts || {});
+    const semLoc = (d.linhas||[]).filter(l=>!l.loc).length;
+    $('sepInfo').innerHTML = '<b>'+d.total_skus+'</b> SKU(s) &middot; <b>'+d.total_itens+'</b> a separar &middot; '+d.pedidos+' pedido(s)'+
+      (semLoc?(' &middot; <span style="color:var(--warn)">'+semLoc+' sem local</span>'):'');
+    if(!d.linhas || !d.linhas.length){
+      $('sepList').innerHTML = '<div class="sepempty">Nada a separar'+(sepMkt?' nesse filtro':'')+' 🎉</div>';
+      return;
+    }
+    sepLinhas = d.linhas || [];
+    $('sepList').innerHTML = d.linhas.map((l,i) =>
+      '<div class="seprow" id="seprow-'+i+'">'+
+        '<div class="loc'+(l.loc?'':' vazia')+'">'+(l.loc?esc(l.loc):'—')+'</div>'+
+        '<button class="sepedit" onclick="editarLoc('+i+')" title="editar localização">✏️</button>'+
+        '<button class="sepedit" onclick="imprimirEtiquetaLinha('+i+')" title="imprimir etiqueta de código de barras">🏷️</button>'+
+        '<div class="qtd">'+l.qtd+'</div>'+
+        '<div class="meta">'+
+          '<div class="sku">'+esc(l.sku)+'</div>'+
+          (l.descricao?'<div class="ds" title="'+esc(l.descricao)+'">'+esc(l.descricao)+'</div>':'')+
+          (l.ean?'<div class="ean">'+esc(l.ean)+'</div>':'')+
+        '</div>'+
+      '</div>'
+    ).join('');
+  }catch(e){ $('sepInfo').textContent = 'Falha ao carregar: '+e.message; }
+}
+
+// visão POR PEDIDO — cada pedido com seus itens (itens podem repetir entre pedidos)
+async function carregarSepPedido(){
+  try{
+    const d = await api('/good-checkout-offline/separacao-por-pedido' + (sepMkt ? ('?mkt='+sepMkt) : ''));
+    sepData = d;
+    renderSepChips(d.counts || {});
+    const semLoc = (d.pedidos||[]).reduce((s,p)=>s+p.itens.filter(i=>!i.loc).length,0);
+    $('sepInfo').innerHTML = '<b>'+d.total_pedidos+'</b> pedido(s) &middot; <b>'+d.total_itens+'</b> item(ns)'+
+      (semLoc?(' &middot; <span style="color:var(--warn)">'+semLoc+' sem local</span>'):'');
+    if(!d.pedidos || !d.pedidos.length){
+      $('sepList').innerHTML = '<div class="sepempty">Nada a separar'+(sepMkt?' nesse filtro':'')+' 🎉</div>';
+      return;
+    }
+    $('sepList').innerHTML = d.pedidos.map(p => {
+      const mk = MKT[p.marketplace] || MKT.outro;
+      return '<div class="sep-ped">'+
+        '<div class="sph">'+
+          '<span class="chk'+(p.tem_etiqueta?'':' off')+'" title="Etiqueta '+(p.tem_etiqueta?'pronta':'faltando')+'">🏷️<i>'+(p.tem_etiqueta?'✓':'✗')+'</i></span>'+
+          '<span class="chk'+(p.tem_nf?'':' off')+'" title="Nota Fiscal '+(p.tem_nf?'pronta':'faltando')+'">🧾<i>'+(p.tem_nf?'✓':'✗')+'</i></span>'+
+          '<span class="num">'+esc(String(p.numero))+'</span>'+
+          '<span style="font-size:11px;font-weight:800;padding:3px 8px;border-radius:7px;background:'+mk.c+'22;color:'+mk.c+';border:1px solid '+mk.c+'55">'+mk.n+'</span>'+
+          '<span class="cli">'+esc(p.cliente||'')+'</span>'+
+          (p.nf?'<span style="font-size:12px;color:var(--mut);font-family:ui-monospace,monospace">NF '+esc(String(p.nf))+'</span>':'')+
+        '</div>'+
+        p.itens.map(it =>
+          '<div class="sit">'+
+            '<div class="l'+(it.loc?'':' vazia')+'">'+(it.loc?esc(it.loc):'—')+'</div>'+
+            '<div class="q">'+it.qtd+'</div>'+
+            '<div class="m">'+
+              '<div class="sku">'+esc(it.sku)+'</div>'+
+              (it.descricao?'<div class="ds">'+esc(it.descricao)+'</div>':'')+
+            '</div>'+
+          '</div>'
+        ).join('')+
+      '</div>';
+    }).join('');
+  }catch(e){ $('sepInfo').textContent = 'Falha ao carregar: '+e.message; }
+}
+
+// edição de localização inline (lápis) — qualquer funcionário pode; o servidor registra quem editou
+function editarLoc(i){
+  const l = sepLinhas[i]; if(!l) return;
+  if(!l.sku || l.sku === '(sem SKU)'){ toast('Esse item não tem SKU pra editar'); return; }
+  const row = $('seprow-'+i); if(!row) return;
+  row.innerHTML =
+    '<input class="locedit" id="locinp-'+i+'" value="'+esc(l.loc||'')+'" placeholder="localização" autocomplete="off" />'+
+    '<button class="btn ok sm" onclick="salvarLoc('+i+')">✓</button>'+
+    '<button class="btn sec sm" onclick="carregarSeparacao()">✗</button>'+
+    '<div class="meta"><div class="sku">'+esc(l.sku)+'</div></div>';
+  const inp = $('locinp-'+i); inp.focus(); inp.select();
+  inp.onkeydown = e => { if(e.key==='Enter'){ e.preventDefault(); salvarLoc(i); } if(e.key==='Escape') carregarSeparacao(); };
+}
+async function salvarLoc(i){
+  const l = sepLinhas[i]; if(!l) return;
+  const inp = $('locinp-'+i); if(!inp) return;
+  const nova = inp.value.trim().toUpperCase();
+  inp.disabled = true;
+  const r = await postJson('/good-checkout-offline/salvar-localizacao', { sku: l.sku, localizacao: nova, op: opAtual() }).catch(()=>null);
+  if(r && r.ok){ toast('✓ '+l.sku+' → '+(nova||'(vazio)')); carregarSeparacao(); }
+  else { toast('Não salvou: '+((r&&r.erro)||'erro')); inp.disabled = false; inp.focus(); }
+}
+
+// ── BUSCA DE PRODUTO (consulta SKU/EAN, estoque, localização + editar localização) ──
+let buscaProd = null;
+function abrirBusca(){
+  const md=$('modal');
+  md.innerHTML =
+    '<div class="mbox" style="max-width:460px;width:92vw">'+
+      '<div class="mtit">🔎 Buscar produto</div>'+
+      '<div style="display:flex;gap:8px;margin-bottom:12px">'+
+        '<input id="buscaInp" class="buscafld" placeholder="bipe ou digite SKU / EAN" autocomplete="off" onkeydown="if(event.key===\'Enter\')fazerBusca()" />'+
+        '<button class="btn ok" onclick="fazerBusca()">Buscar</button>'+
+      '</div>'+
+      '<div id="buscaRes"></div>'+
+      '<div id="idxStatus" style="font-size:11px;color:var(--mut);margin-top:10px;min-height:14px"></div>'+
+      '<div class="mbtns">'+
+        '<button class="btn warn sm" onclick="imprimirEtiquetaProduto()">🏷️ Imprimir etiqueta</button>'+
+        '<button class="btn sec sm" onclick="escolherImpressoraEtiqueta()" title="escolher a impressora da etiqueta 4x2,5cm">🖨</button>'+
+        (souAdmin()?'<button class="btn sec sm" onclick="indexarCatalogo()" title="varre todo o catálogo p/ achar qualquer EAN na hora (roda 1x)">🔄 Indexar catálogo</button>':'')+
+        '<button class="btn sec" onclick="fecharConfirmacao()">Fechar</button>'+
+      '</div>'+
+    '</div>';
+  md.classList.add('show');
+  buscaProd = null;
+  setTimeout(()=>{ const b=$('buscaInp'); if(b) b.focus(); }, 80);
+  if(souAdmin()) pollIndexar();
+}
+async function fazerBusca(){
+  const q = ($('buscaInp').value||'').trim(); if(!q) return;
+  $('buscaRes').innerHTML = '<div class="sepempty">buscando…</div>';
+  const r = await api('/good-checkout-offline/buscar-produto?q='+encodeURIComponent(q)).catch(()=>null);
+  if(!r || !r.ok){ $('buscaRes').innerHTML = '<div class="sepempty">'+esc((r&&r.erro)||'não encontrado')+'</div>'; buscaProd=null; return; }
+  const p = r.produto; buscaProd = p;
+  $('buscaRes').innerHTML =
+    '<div class="bcard">'+
+      (p.img?'<img class="bimg" src="'+esc(p.img)+'" onclick="abrirImagem(this.src)" onerror="this.style.display=\'none\'" />':'<div class="bimg vazio">📦</div>')+
+      '<div>'+
+        '<div class="bnome">'+esc(p.nome||'(sem nome)')+'</div>'+
+        '<div class="bsku">SKU '+esc(p.sku||'—')+'</div>'+
+        '<div class="bsub">EAN '+esc(p.ean||'—')+' · estoque <b>'+(p.estoque!=null?p.estoque:'?')+'</b></div>'+
+      '</div>'+
+    '</div>'+
+    '<div class="bloc-atual" id="blocAtual">📍 Localização atual: '+
+      (p.localizacao ? '<b>'+esc(p.localizacao)+'</b>' : '<span class="semloc">sem localização cadastrada</span>')+
+    '</div>'+
+    '<div class="bloc">'+
+      '<label>✏️ Editar localização (salva no Bling)</label>'+
+      '<div style="display:flex;gap:8px">'+
+        '<input id="buscaLoc" class="buscafld" style="text-transform:uppercase" value="'+esc(p.localizacao||'')+'" placeholder="nova localização" autocomplete="off" onkeydown="if(event.key===\'Enter\')salvarLocBusca()" />'+
+        '<button class="btn ok" onclick="salvarLocBusca()">✓ Salvar</button>'+
+      '</div>'+
+    '</div>';
+  const b=$('buscaInp'); if(b) b.select();
+}
+async function salvarLocBusca(){
+  if(!buscaProd || !buscaProd.sku){ toast('Busca um produto primeiro'); return; }
+  const nova = (($('buscaLoc')||{}).value||'').trim().toUpperCase();
+  const r = await postJson('/good-checkout-offline/salvar-localizacao', { sku: buscaProd.sku, localizacao: nova, op: opAtual() }).catch(()=>null);
+  if(r && r.ok){
+    toast('✓ '+buscaProd.sku+' → '+(nova||'(vazio)')); buscaProd.localizacao = nova;
+    const ba = $('blocAtual');
+    if(ba) ba.innerHTML = '📍 Localização atual: '+(nova ? '<b>'+esc(nova)+'</b>' : '<span class="semloc">sem localização cadastrada</span>');
+  }
+  else { toast('Não salvou: '+((r&&r.erro)||'erro')); }
+}
+
+// ── ETIQUETA DE PRODUTO (cód de barras 4x2,5cm na Zebra, via QZ Tray — gerada por nós, não puxada do Bling) ──
+async function getImpressoraEtiqueta(){
+  let p = localStorage.getItem('gbkp_printer_etq');
+  if(p) return p;
+  p = localStorage.getItem('gbkp_printer');     // cai na Zebra da postagem se não tiver uma separada
+  if(p) return p;
+  const lista = await qz.printers.find();
+  return (lista||[]).find(n=>/zebra|zdesigner|zpl|\bzd\b|\bgk\b|\bgc\b/i.test(n)) || (lista||[])[0];
+}
+async function escolherImpressoraEtiqueta(){
+  try{
+    await conectarQZ();
+    const lista = await qz.printers.find();
+    if(!lista||!lista.length){ toast('Nenhuma impressora no QZ'); return; }
+    const atual = localStorage.getItem('gbkp_printer_etq')||'';
+    const msg = 'Impressoras:\n\n'+lista.map((n,i)=>(i+1)+') '+n+(n===atual?'  ← atual':'')).join('\n')+'\n\nNº da impressora da ETIQUETA de produto (4x2,5cm):';
+    const r = prompt(msg, lista.indexOf(atual)>=0?String(lista.indexOf(atual)+1):'1');
+    const idx = parseInt(r,10)-1;
+    if(idx>=0&&idx<lista.length){ localStorage.setItem('gbkp_printer_etq', lista[idx]); toast('Impressora etiqueta: '+lista[idx]); }
+  }catch(e){ toast('Erro: '+e.message); }
+}
+// 40x25mm @ 203dpi = 320x200 dots. Título até 3 linhas, SKU, código de barras Code128 do EAN + número embaixo.
+function montarZplEtiqueta(p, copias){
+  const clean = s => String(s||'').replace(/[\^~]/g,' ');
+  const titulo = clean(p.nome).slice(0,72);          // 72 chars garantem no máx. 3 linhas (ZPL sobrepõe o excesso na última linha!)
+  const sku = clean(p.sku);
+  const ean = String(p.ean||'').replace(/\D/g,'');
+  const dados = ean || sku.replace(/[^\x20-\x7E]/g,'');     // barras: EAN; se não tiver, o SKU
+  if(!dados) return null;
+  // margens: 2,5mm esq/topo, ~5mm dir (compensa offset físico), ~1,5mm baixo
+  const wSku = Math.max(10, Math.min(24, Math.floor(370/Math.max(sku.length,1))));  // SKU auto-encolhe pra caber na largura
+  // barras CENTRALIZADAS: Code128 não estica (só degraus de 50%) → estima a largura real e centraliza; o número alinha junto
+  const digitos = /^\d+$/.test(dados);
+  const simbolos = digitos ? (Math.floor(dados.length/2) + (dados.length%2?2:0) + 2) : (dados.length+2);
+  const wBar = (11*simbolos + 13)*2;                        // largura estimada das barras (dots)
+  const xBar = Math.max(20, 20 + Math.floor((284-wBar)/2));
+  const z = ['^XA','^CI28','^PW320','^LL200','^LH0,0',
+    '^FO20,24^A0N,14,14^FB284,3,2,L^FD'+titulo+'^FS',       // título (letra menor, até 3 linhas)
+    '^FO20,80^A0N,24,'+wSku+'^FD'+sku+'^FS',                // SKU
+    '^FO'+xBar+',112^BY2,2^BCN,56,N,N,N,A^FD'+dados+'^FS',  // código de barras (modo A, centralizado)
+    '^FO20,172^A0N,17,17^FB284,1,0,C^FD'+dados+'^FS'];      // número embaixo, centralizado
+  if(copias && copias>1) z.push('^PQ'+copias+',0,0,N');     // nº de cópias
+  z.push('^XZ');
+  return z.join('');
+}
+// prod opcional (cai no buscaProd); copias opcional (pergunta se não vier)
+async function imprimirEtiquetaProduto(prod, copias){
+  const p = prod || buscaProd;
+  if(!p){ toast('Busca um produto primeiro'); return; }
+  if(copias == null){
+    const r = prompt('Quantas cópias da etiqueta?', '1');
+    if(r === null) return;                                  // cancelou
+    copias = Math.max(1, Math.min(50, parseInt(r,10)||1));
+  }
+  const zpl = montarZplEtiqueta(p, copias);
+  if(!zpl){ toast('Produto sem EAN nem SKU pra etiqueta'); return; }
+  try{
+    await conectarQZ();
+    const printer = await getImpressoraEtiqueta();
+    if(!printer){ toast('Sem impressora — clica no 🖨 pra escolher'); return; }
+    const cfg = qz.configs.create(printer);
+    await qz.print(cfg, [{ type:'raw', format:'command', flavor:'plain', data: zpl }]);
+    toast('🏷️ '+copias+'x enviada(s) → '+printer);
+  }catch(e){ toast('Erro na impressão: '+e.message); }
+}
+// botão 🏷️ da linha de separação
+function imprimirEtiquetaLinha(i){
+  const l = sepLinhas[i]; if(!l) return;
+  if(!l.sku || l.sku === '(sem SKU)'){ toast('Esse item não tem SKU pra etiqueta'); return; }
+  imprimirEtiquetaProduto({ nome: l.descricao, sku: l.sku, ean: l.ean });
+}
+
+// ── indexação total do catálogo (admin) — deixa todo EAN achável na hora ──
+let pollIdxTimer = null;
+async function indexarCatalogo(){
+  if(!souAdmin()){ toast('Só admin'); return; }
+  if(!confirm('Indexar o catálogo inteiro?\n\nVarre todos os produtos pra que qualquer EAN passe a achar na hora. Pode levar alguns minutos e roda em segundo plano — pode fechar a janela.')) return;
+  const r = await api('/good-checkout-offline/indexar-catalogo?op='+encodeURIComponent(opAtual())).catch(()=>null);
+  if(!r || !r.ok){ toast('Não iniciou: '+((r&&r.erro)||'erro')); return; }
+  toast('Indexação iniciada…');
+  pollIndexar();
+}
+async function pollIndexar(){
+  clearTimeout(pollIdxTimer);
+  const r = await api('/good-checkout-offline/indexar-status').catch(()=>null);
+  const st = r && r.status, el = $('idxStatus');
+  if(!st || !el) return;
+  if(st.rodando){
+    el.textContent = '⏳ indexando… '+st.feitos+' produtos · '+st.eans+' EANs';
+    pollIdxTimer = setTimeout(pollIndexar, 2500);
+  } else if(st.em){
+    el.textContent = '✅ índice pronto: '+st.feitos+' produtos · '+st.eans+' EANs'+(st.erro?(' (erro: '+st.erro+')'):'');
+  }
+}
+
+function renderSepChips(counts){
+  const tot = Object.values(counts).reduce((s,n)=>s+n,0);
+  let html = sepChip('Todos', tot, null, '#94a3b8');
+  MKT_ORDEM.forEach(mk=>{ if(counts[mk]) html += sepChip((MKT[mk]||MKT.outro).n, counts[mk], mk, (MKT[mk]||MKT.outro).c); });
+  $('sepChips').innerHTML = html;
+}
+function sepChip(label, n, val, cor){
+  const on = (sepMkt===val);
+  return '<span class="chip'+(on?' on':'')+'" onclick="setSepMkt('+(val?("'"+val+"'"):'null')+')">'+
+         '<span style="width:8px;height:8px;border-radius:50%;background:'+cor+';display:inline-block"></span>'+
+         label+' <b>'+n+'</b></span>';
+}
+
+// imprime a lista numa janela nova (não passa pelo bloqueio de impressão do painel)
+function imprimirSeparacao(){
+  if(sepView === 'pedido') return imprimirSepPedido();
+  if(!sepData || !sepData.linhas || !sepData.linhas.length){ toast('Nada a imprimir'); return; }
+  const agora = new Date().toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
+  const filtroNome = sepMkt ? (MKT[sepMkt]||MKT.outro).n : 'Todas as lojas';
+  const linhas = sepData.linhas.map(l =>
+    '<tr><td class="l">'+esc(l.loc||'—')+'</td><td class="q">'+l.qtd+'</td><td class="s">'+esc(l.sku)+'</td><td>'+esc(l.descricao||'')+'</td><td class="e">'+esc(l.ean||'')+'</td></tr>'
+  ).join('');
+  const html = '<!doctype html><html><head><meta charset="utf-8"><title>Lista de Separação</title>'+
+    '<style>body{font-family:Arial,Helvetica,sans-serif;margin:18px;color:#111}'+
+    'h1{font-size:18px;margin:0}.sub{font-size:12px;color:#444;margin:2px 0 10px}'+
+    'table{width:100%;border-collapse:collapse}th,td{border:1px solid #bbb;padding:6px 8px;font-size:13px;text-align:left}'+
+    'th{background:#eee}.l{width:64px;font-family:monospace;font-weight:bold}.q{width:46px;text-align:center;font-weight:bold;font-size:15px}.s{font-family:monospace;font-weight:bold}'+
+    '.e{font-family:monospace;color:#555;width:130px}tr:nth-child(even) td{background:#f7f7f7}</style></head><body>'+
+    '<div style="display:flex;justify-content:space-between;align-items:baseline"><h1>Lista de Separação</h1><div class="sub">'+agora+'</div></div>'+
+    '<div class="sub"><b>'+filtroNome+'</b> &middot; '+sepData.total_skus+' SKU(s) &middot; '+sepData.total_itens+' a separar &middot; '+sepData.pedidos+' pedido(s)</div>'+
+    '<table><thead><tr><th class="l">Local</th><th class="q">Qtd</th><th>SKU</th><th>Produto</th><th>EAN</th></tr></thead><tbody>'+linhas+'</tbody></table>'+
+    '<scr'+'ipt>window.onload=function(){window.print()}<\/scr'+'ipt></body></html>';
+  const w = window.open('', '_blank');
+  if(!w){ toast('Pop-up bloqueado — libera no navegador'); return; }
+  w.document.write(html); w.document.close();
+}
+function imprimirSepPedido(){
+  if(!sepData || !sepData.pedidos || !sepData.pedidos.length){ toast('Nada a imprimir'); return; }
+  const agora = new Date().toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
+  const filtroNome = sepMkt ? (MKT[sepMkt]||MKT.outro).n : 'Todas as lojas';
+  const blocos = sepData.pedidos.map(p => {
+    const mk = (MKT[p.marketplace]||MKT.outro).n;
+    const itens = p.itens.map(it =>
+      '<tr><td class="l">'+esc(it.loc||'—')+'</td><td class="q">'+it.qtd+'</td><td class="s">'+esc(it.sku)+'</td><td>'+esc(it.descricao||'')+'</td></tr>'
+    ).join('');
+    return '<div class="ped"><div class="ph"><b>'+esc(String(p.numero))+'</b> &middot; '+mk+(p.cliente?(' &middot; '+esc(p.cliente)):'')+(p.nf?(' &middot; NF '+esc(String(p.nf))):'')+'</div>'+
+      '<table><tbody>'+itens+'</tbody></table></div>';
+  }).join('');
+  const html = '<!doctype html><html><head><meta charset="utf-8"><title>Separação por Pedido</title>'+
+    '<style>body{font-family:Arial,Helvetica,sans-serif;margin:18px;color:#111}'+
+    'h1{font-size:18px;margin:0}.sub{font-size:12px;color:#444;margin:2px 0 10px}'+
+    '.ped{border:1px solid #999;border-radius:6px;margin-bottom:10px;page-break-inside:avoid}'+
+    '.ph{background:#eee;padding:6px 8px;font-size:13px;border-bottom:1px solid #999}'+
+    'table{width:100%;border-collapse:collapse}td{border-top:1px solid #ddd;padding:5px 8px;font-size:13px;text-align:left}'+
+    '.l{width:64px;font-family:monospace;font-weight:bold}.q{width:40px;text-align:center;font-weight:bold;font-size:15px}.s{font-family:monospace;font-weight:bold;width:130px}</style></head><body>'+
+    '<div style="display:flex;justify-content:space-between;align-items:baseline"><h1>Separação por Pedido</h1><div class="sub">'+agora+'</div></div>'+
+    '<div class="sub"><b>'+filtroNome+'</b> &middot; '+sepData.total_pedidos+' pedido(s) &middot; '+sepData.total_itens+' item(ns)</div>'+
+    blocos+
+    '<scr'+'ipt>window.onload=function(){window.print()}<\/scr'+'ipt></body></html>';
+  const w = window.open('', '_blank');
+  if(!w){ toast('Pop-up bloqueado — libera no navegador'); return; }
+  w.document.write(html); w.document.close();
+}
+
+// mantém o foco no campo de bipar — mas SÓ dentro de um pedido aberto, e NUNCA rouba o foco
+// se um diálogo está aberto, se você já está em qualquer campo, ou se está selecionando texto.
+setInterval(()=>{
+  if(!pedidoAtual) return;                                          // fora de um pedido (ex: login, lista) → não toca no foco
+  if(modalAberto()) return;                                         // diálogo de confirmação aberto
+  const ae = document.activeElement;
+  if(ae && /^(INPUT|SELECT|TEXTAREA)$/.test(ae.tagName)) return;    // já está digitando em algum campo → não rouba
+  const sel = window.getSelection && window.getSelection().toString();
+  if(sel) return;                                                   // selecionando texto (ex: copiar código) → não rouba
+  const s=$('scan'); if(s) s.focus();
+}, 1500);
+
+// a página NUNCA se imprime — toda impressão é via QZ Tray (Zebra ou A4)
+window.print = function(){ toast('A impressão é pela impressora (QZ Tray), não pela página'); };
+document.addEventListener('keydown', e=>{ if((e.ctrlKey||e.metaKey) && (e.key==='p'||e.key==='P')){ e.preventDefault(); e.stopPropagation(); toast('A impressão é pelos botões (QZ Tray)'); } }, true);
+
+// boot
+(async function(){ await setupQZ(); reconectarQZ(); })();
+aplicarModoLabel();
+checarLogin();   // gate de login → ele carrega a lista assim que liberar
+setInterval(()=>{ if(!pedidoAtual && (!loginAtivo || localStorage.getItem('gbkp_logado')==='1')) carregarLista(); }, 20000);
+</script>
+</body>
+</html>
