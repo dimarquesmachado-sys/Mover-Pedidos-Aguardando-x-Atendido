@@ -41,7 +41,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.AMBBKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.AMBBKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'amb-checkout-offline v23/07 b16';
+const VERSAO     = 'amb-checkout-offline v23/07 b17';
 
 // ── SESSÃO DE OPERADOR (cookie assinado HMAC) — protege rotas de dados/ação ──
 // Segredo estável entre restarts. Usa ADMIN_KEY (já configurada no Render) como base.
@@ -248,6 +248,91 @@ function routes(readBody) {
     if (method === 'GET' && (p === '/amb-checkout-offline' || p === '/amb-checkout-offline/')) {
       res.writeHead(302, { Location: '/amb-checkout-offline/painel' });
       res.end();
+      return true;
+    }
+
+    // ── IR PRO PEDIDO NA SHOPEE (b17) ────────────────────────────────────
+    // O link ↗ dos cards apontava pra URL de BUSCA do Seller Center
+    // (?searchKeyword=<order_sn>), que NÃO filtra nada: cai na lista inteira.
+    // A URL que abre o pedido é /portal/sale/order/<id_interno_numerico>, e esse
+    // id é snowflake — não sai do order_sn nem de nenhuma API oficial da Shopee.
+    // Único lugar que faz o de-para é o endpoint que a caixa de busca do próprio
+    // Seller Center usa. Ele responde a um GET simples, só exigindo o cookie de
+    // sessão (env AMBBKP_SHOPEE_COOKIE), mesmo padrão do BLING_COOKIE.
+    // O id de um pedido nunca muda, então guardamos em _shopee-ids.json: resolveu
+    // uma vez, nunca mais consulta — e os links já resolvidos seguem funcionando
+    // mesmo depois que o cookie vencer.
+    // Falhou por qualquer motivo? Redireciona pra URL de busca (o comportamento
+    // de hoje). Nunca fica pior do que já era. Com &diag=1 devolve o passo a passo.
+    if (method === 'GET' && p === '/amb-checkout-offline/ir-shopee') {
+      const snIr  = String((urlObj.searchParams && urlObj.searchParams.get('sn')) || '').trim();
+      const diagIr = ((urlObj.searchParams && urlObj.searchParams.get('diag')) || '') === '1';
+      const buscaIr = 'https://seller.shopee.com.br/portal/sale/order?searchKeyword=' + encodeURIComponent(snIr);
+      const vai = destino => { res.writeHead(302, { Location: destino, 'Cache-Control': 'no-store' }); res.end(); };
+
+      if (!snIr) { if (diagIr) { json(res, 400, { ok: false, erro: 'faltou ?sn=' }); } else { vai(buscaIr); } return true; }
+
+      const ARQ_IDS = path.join(CACHE_DIR, '_shopee-ids.json');
+      const mapaIr  = readJson(ARQ_IDS, {}) || {};
+      if (mapaIr[snIr] && !diagIr) { vai('https://seller.shopee.com.br/portal/sale/order/' + mapaIr[snIr]); return true; }
+
+      const passosIr = [];
+      let idIr = mapaIr[snIr] || null;
+      if (idIr) passosIr.push({ passo: 'cache', order_id: idIr });
+
+      try {
+        const ckIr = String(process.env.AMBBKP_SHOPEE_COOKIE || '').trim();
+        if (!ckIr) {
+          passosIr.push({ passo: 'cookie', erro: 'env AMBBKP_SHOPEE_COOKIE vazia ou ausente' });
+        } else {
+          const cdsIr = (ckIr.match(/(?:^|;\s*)SPC_CDS=([^;]+)/) || [])[1] || '';
+          const urlIr = 'https://seller.shopee.com.br/api/v3/order/get_order_list_search_bar_hint'
+                      + '?SPC_CDS=' + encodeURIComponent(cdsIr)
+                      + '&SPC_CDS_VER=2'
+                      + '&keyword=' + encodeURIComponent(snIr)
+                      + '&category=1&order_list_tab=100&entity_type=1';
+          const rIr = await fetch(urlIr, {
+            headers: {
+              'Cookie': ckIr,
+              'Accept': 'application/json, text/plain, */*',
+              'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+              'Referer': 'https://seller.shopee.com.br/portal/sale/order',
+              'X-Api-Src-List': 'pc',
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:154.0) Gecko/20100101 Firefox/154.0'
+            }
+          });
+          const txtIr = await rIr.text();
+          passosIr.push({ passo: 'consulta', status: rIr.status, tem_cds: !!cdsIr, tam_cookie: ckIr.length, corpo: txtIr.slice(0, 700) });
+
+          let jIr = null; try { jIr = JSON.parse(txtIr); } catch (e) {}
+          // o resultado NÃO vem em data.list — vem em data.order_sn_result.list.
+          // Varre recursivamente qualquer "list" que tenha order_id, pra não depender do formato.
+          const achIr = [];
+          (function varre(o, prof) {
+            if (!o || typeof o !== 'object' || prof > 6) return;
+            if (Array.isArray(o.list)) o.list.forEach(x => { if (x && x.order_id) achIr.push(x); });
+            Object.keys(o).forEach(k => { if (o[k] && typeof o[k] === 'object') varre(o[k], prof + 1); });
+          })(jIr && jIr.data, 0);
+
+          const alvoIr = achIr.find(x => String(x.order_sn || '').toUpperCase() === snIr.toUpperCase()) || achIr[0];
+          if (alvoIr && alvoIr.order_id) {
+            idIr = String(alvoIr.order_id);
+            mapaIr[snIr] = idIr;
+            try { writeJson(ARQ_IDS, mapaIr); } catch (e) {}
+            passosIr.push({ passo: 'achou', order_id: idIr, order_sn: alvoIr.order_sn || null });
+          } else {
+            passosIr.push({ passo: 'nao_achou', candidatos: achIr.length, code: (jIr && (jIr.code != null ? jIr.code : jIr.error)) || null, msg: (jIr && (jIr.user_message || jIr.message)) || null });
+          }
+        }
+      } catch (e) {
+        passosIr.push({ passo: 'excecao', erro: String((e && e.message) || e).slice(0, 250) });
+      }
+
+      if (diagIr) {
+        json(res, 200, { ok: !!idIr, sn: snIr, order_id: idIr, destino: idIr ? ('https://seller.shopee.com.br/portal/sale/order/' + idIr) : buscaIr, ids_em_cache: Object.keys(mapaIr).length, versao: VERSAO, passos: passosIr });
+        return true;
+      }
+      vai(idIr ? ('https://seller.shopee.com.br/portal/sale/order/' + idIr) : buscaIr);
       return true;
     }
 
