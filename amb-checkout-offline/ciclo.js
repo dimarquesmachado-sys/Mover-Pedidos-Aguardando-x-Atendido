@@ -246,6 +246,30 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC, nfCtx) {
       }
     } catch (e) { console.log(`[AMBBKP] fallback ML ${ped.numero}: ${String(e.message || e).slice(0, 160)}`); }
   }
+  // FALLBACK SHOPEE (b12): mesmo caso do ML — o Bling importou o pedido DEPOIS do envio já
+  // organizado na Shopee (ou a NF travou a edição antes da logística entrar), então o pedido
+  // fica SEM logística no Bling e /logisticas/etiquetas dá 404 pra sempre.
+  // → pede a etiqueta (waybill PDF) direto pra Shopee, via o serviço shopee-nf-sync que guarda os tokens.
+  // Precisa da env SHOPEE_SYNC_KEY (chave do shopee-sync); sem ela, o bloco nem tenta.
+  if (!temEtiqueta && mkt === 'shopee' && ped.numeroLoja && process.env.SHOPEE_SYNC_KEY) {
+    try {
+      const SH_URL = process.env.SHOPEE_SYNC_URL || 'https://girassol-shopee-sync-organizar-envio.onrender.com';
+      const urlEtq = SH_URL + '/amb/interno/etiqueta?k=' + encodeURIComponent(process.env.SHOPEE_SYNC_KEY) + '&order_sn=' + encodeURIComponent(String(ped.numeroLoja).trim());
+      const rSh = await fetch(urlEtq, { timeout: 120000 });
+      if (rSh.ok) {
+        const bufSh = await rSh.buffer();
+        if (bufSh && bufSh.length > 500 && bufSh.slice(0, 4).toString('utf8') === '%PDF') {
+          fs.writeFileSync(_etqPdfPath, bufSh); temEtiqueta = true; etqEhPdf = true;
+          console.log(`[AMBBKP] etiqueta ${ped.numero} baixada DIRETO da Shopee (fallback, ${bufSh.length} bytes)`);
+        } else {
+          console.log(`[AMBBKP] fallback Shopee ${ped.numero}: resposta sem PDF`);
+        }
+      } else {
+        let detSh = ''; try { detSh = (await rSh.text()).slice(0, 220).replace(/\s+/g, ' '); } catch (e) {}
+        console.log(`[AMBBKP] fallback Shopee ${ped.numero}: HTTP ${rSh.status} ${detSh}`);
+      }
+    } catch (e) { console.log(`[AMBBKP] fallback Shopee ${ped.numero}: ${String(e.message || e).slice(0, 160)}`); }
+  }
   // MADEIRA MADEIRA não tem etiqueta no Bling. Se a etiqueta já está no mapa MM
   // (gerada por nós e sincronizada pela extensão), conta o pedido como PRONTO.
   let etiquetaMM = false, volumesMM = 1;
