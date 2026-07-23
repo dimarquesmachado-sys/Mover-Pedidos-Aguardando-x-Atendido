@@ -100,7 +100,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd57';
+const DASH_BUILD = 'd58';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -245,7 +245,7 @@ function montar(){
       'style="width:100%;background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:10px;padding:11px 14px;font-size:13px" '+
       'oninput="buscarPed(this.value)">'+
       '<div id="buscaRes" style="margin-top:10px"></div><div id="plCard"></div></div>'+
-    '<div class="sec"><h2>📋 Análise de vendas — margem por pedido <span class="hint">mais novas em cima · hora da VENDA quando o canal fornece · 🧾 = hora da NF · 🕘 = hora da conferência</span></h2>'+
+    '<div class="sec"><h2>📋 Análise de vendas — margem por pedido <span class="hint">mais novas em cima · ✓ verde = bipado · ✓ laranja = aguardando bipagem (margem já calculada) · 🧾 = hora da NF · 🕘 = hora da conferência</span></h2>'+
       '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px"><span id="anPerChips" style="display:flex;gap:6px;flex-wrap:wrap"></span><span id="anPerDatas"></span></div>'+
       '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">'+
       '<select id="anCanalSel" onchange="anCanal=this.value;anPage=0;renderAnalise()" style="background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:9px;padding:7px 10px;font-size:12.5px"></select>'+
@@ -808,7 +808,7 @@ function renderAnalise(){
     '<button class="chip" style="'+(anLP==='lucro'?'background:#065f46;border-color:#065f46;color:#fff':'color:#34d399;border-color:#34d399')+'" onclick="anLP=\'lucro\';anPage=0;renderAnalise()">Lucro ('+nLucro+')</button>'+
     '<button class="chip" style="'+(anLP==='prej'?'background:#7f1d1d;border-color:#7f1d1d;color:#fff':'color:#f87171;border-color:#f87171')+'" onclick="anLP=\'prej\';anPage=0;renderAnalise()">Preju\u00edzo ('+nPrej+')</button>'+
     (nInc?'<button class="chip" style="'+(anLP==='inc'?'background:#78350f;border-color:#78350f;color:#fff':'color:#fbbf24;border-color:#fbbf24')+'" onclick="anLP=\'inc\';anPage=0;renderAnalise()" title="vendas sem margem fechada — falta custo no Bling, NF ou tarifa">Incompletas ('+nInc+')</button>':'')+
-    (nAg?'<button class="chip" style="'+(anAg?'background:#334155;border-color:#64748b;color:#fff':'color:#94a3b8;border-color:#475569')+'" onclick="anAg=!anAg;anPage=0;renderAnalise()" title="vendas cujos itens o sync ainda não baixou do Bling (margem entra na próxima rodada) — clique pra ocultar/mostrar">⏳ detalhando ('+nAg+')</button>':'');
+    (nAg?'<button class="chip" style="'+(anAg?'background:#334155;border-color:#64748b;color:#fff':'color:#94a3b8;border-color:#475569')+'" onclick="anAg=!anAg;anPage=0;renderAnalise()" title="vendas ainda NÃO bipadas pelo estoque (✓ laranja na lista) — clique pra ocultar/mostrar">✓ aguardando bipagem ('+nAg+')</button>':'');
   if(anLP==='lucro') LP=LP.filter(x=>x.P.mc!=null&&x.P.mc>0);
   else if(anLP==='prej') LP=LP.filter(x=>x.P.mc!=null&&x.P.mc<0);
   else if(anLP==='inc') LP=LP.filter(x=>x.P.mc==null);
@@ -875,10 +875,10 @@ function renderAnalise(){
     const pmc = (P.mc!=null&&P.rp)?Math.round(P.mc/P.rp*100):null;
     if(h.sintetico && !((h.itens||[]).length)){   // detalhe ainda não chegou — linha resumida
       const dtx = _d ? (_d.slice(8,10)+'/'+_d.slice(5,7)) : '—';
-      const tag = h._cancelado ? '<span class="st bad">CANCELADA</span>' : '<span class="st warn" title="o sync ainda não trouxe os itens desta venda do Bling — a margem entra sozinha na próxima rodada (até 5 min), sem depender de bipagem">⏳ detalhando…</span>';
+      const tag = h._cancelado ? '<span class="st bad">CANCELADA</span>' : '<span class="dim" style="font-size:10px" title="o sync ainda não trouxe os itens desta venda do Bling — a margem entra sozinha na próxima rodada (até 5 min)">⏳</span>';
       return sep + '<tr style="opacity:'+(h._cancelado?'.38':'.72')+'">'+
         '<td class="dim">'+dtx+'</td>'+
-        '<td><b>'+esc(h.numero)+'</b><br><span class="dim" style="font-size:10px">'+esc(h._sit||'')+'</span></td>'+
+        '<td>'+(h._cancelado?'<span style="color:#64748b;font-weight:800" title="CANCELADO no Bling">✕</span> ':'<span style="color:#f59e0b;font-weight:800" title="aguardando bipagem">✓</span> ')+'<b>'+esc(h.numero)+'</b><br><span class="dim" style="font-size:10px">'+esc(h._sit||'')+'</span></td>'+
         '<td class="dim" style="font-size:11px;max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(h.numero_loja?esc(h.numero_loja)+(linkMkt(h)?' <a href="'+linkMkt(h)+'" target="_blank" rel="noopener" style="text-decoration:none">↗</a>':''):'—')+'</td>'+
         '<td>'+esc(nomeCanal(P.ck))+'</td>'+
         '<td><div class="desc" style="max-width:200px">'+esc(h.cliente||'')+'</div></td>'+
@@ -890,7 +890,7 @@ function renderAnalise(){
     }
     return sep + '<tr'+(h._cancelado?' style="opacity:.38" title="pedido CANCELADO no Bling — fora dos totais"':'')+'>'+
       '<td class="dim" style="white-space:nowrap" title="'+(h.venda_em?('venda: '+dtBR(h.venda_em)+' · '):(h.venda_dia?('venda: '+String(h.venda_dia).slice(8,10)+'/'+String(h.venda_dia).slice(5,7)+' · '):''))+'conferido: '+dtBR(h.conferido_em)+'">'+(h.venda_em?dtBR(h.venda_em):(h.venda_dia?(String(h.venda_dia).slice(8,10)+'/'+String(h.venda_dia).slice(5,7)+(h.nf_emissao?(' '+String(h.nf_emissao).replace(' ','T').slice(11,16)+' <span style="font-size:9px" title="hora da EMISSÃO da NF no Bling — a hora exata da venda só a API do canal dá">🧾</span>'):' <span style="font-size:9px" title="dia da venda (Bling) — hora só com a API do canal">🕘</span>')):(h.nf_emissao?(String(h.nf_emissao).slice(8,10)+'/'+String(h.nf_emissao).slice(5,7)+' '+String(h.nf_emissao).replace(' ','T').slice(11,16)+' <span style="font-size:9px" title="hora da EMISSÃO da NF no Bling — a hora exata da venda só a API do canal dá">🧾</span>'):(dtBR(h.conferido_em)+' <span style="font-size:9px" title="hora da conferência">🕘</span>'))))+'</td>'+
-      '<td>'+(h._cancelado?'<span title="CANCELADO no Bling — fora dos totais">⚪</span> ':(h.sintetico?'<span title="venda no Bling, ainda NÃO bipada — margem já calculada; NF entra na bipagem">🟠</span> ':'<span title="bipado no checkout">🟢</span> '))+'<b>'+esc(h.numero||h.id)+'</b>'+(carrinho?' <span class="badge" title="'+unid+' unidades">🛒 '+unid+'</span>':'')+
+      '<td>'+(h._cancelado?'<span style="color:#64748b;font-weight:800" title="CANCELADO no Bling — fora dos totais">✕</span> ':(h.sintetico?'<span style="color:#f59e0b;font-weight:800" title="aguardando bipagem — margem já calculada">✓</span> ':'<span style="color:#34d399;font-weight:800" title="bipagem confirmada">✓</span> '))+'<b>'+esc(h.numero||h.id)+'</b>'+(carrinho?' <span class="badge" title="'+unid+' unidades">🛒 '+unid+'</span>':'')+
         (h.nf_numero?'<div class="desc">NF '+esc(h.nf_numero)+'</div>':'')+'</td>'+
       (function(){
         const nlV = String(h.numero_loja||'');
