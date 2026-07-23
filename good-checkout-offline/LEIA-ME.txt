@@ -1,0 +1,17 @@
+GOOD Import — checkout offline — leva do link ↗ da Shopee
+=========================================================
+
+Os DOIS arquivos vao para a MESMA pasta:
+
+  Repositorio: dimarquesmachado-sys/Mover-Pedidos-Aguardando-x-Atendido
+  Pasta:       good-checkout-offline
+
+  1) index.js     -> good-checkout-offline/index.js     (v23/07 b11 -> b12)
+  2) painel.html  -> good-checkout-offline/painel.html  (b51 -> b52)
+
+Conferencia depois do deploy:
+  - painel deve mostrar b52 no cabecalho (Ctrl+Shift+R antes)
+  - teste: /good-checkout-offline/ir-shopee?sn=SEU_PEDIDO&diag=1
+    (precisa estar logado no painel da GOOD no mesmo navegador)
+
+Este arquivo e so um bilhete. Nao precisa subir no GitHub.
