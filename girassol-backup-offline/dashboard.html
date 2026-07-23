@@ -100,7 +100,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd58';
+const DASH_BUILD = 'd59';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -680,7 +680,7 @@ const linkMkt = h => {
   if (ck === 'tiktok' && h.numero_loja) return 'https://seller-br.tiktok.com/order/detail?order_no=' + encodeURIComponent(String(h.numero_loja).replace(/\D/g,'')) + '&shop_region=BR';   // order_no = o próprio número que temos — link direto
   if (ck === 'amazon' && h.numero_loja) return 'https://sellercentral.amazon.com.br/orders-v3/order/' + encodeURIComponent(String(h.numero_loja).trim());   // número com hífens — formato nativo
   if (ck === 'magalu' && h.numero_loja) return 'https://seller.magalu.com/pedidos/' + encodeURIComponent(String(h.numero_loja).replace(/\D/g,''));   // sem o UUID interno (só a API da Magalu dá) — teste do Diego decide
-  if (ck === 'shopee' && h.numero_loja) return 'https://seller.shopee.com.br/portal/sale/order?searchKeyword=' + encodeURIComponent(String(h.numero_loja).trim());   // abre o seller center filtrado no ID do pedido (o id interno da URL direta só vem com o app)
+  if (ck === 'shopee' && h.numero_loja) return '/girassol-backup-offline/ir-shopee?sn=' + encodeURIComponent(String(h.numero_loja).trim());   // rota nossa: resolve o id interno pelo cookie de sessão da Shopee e redireciona direto pro pedido
   return '';   // demais canais: falta a URL de cada seller center — basta o Diego colar um exemplo
 };
 function ajustaSticky(){
