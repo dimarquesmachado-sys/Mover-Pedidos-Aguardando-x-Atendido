@@ -24,6 +24,10 @@ const AUTO_EMITIR_HABILITADO = (process.env.LIXAS_AUTO_EMITIR_NF_HABILITADO || '
 const LIMIAR_CONFIANCA_AUTO = Number(process.env.LIXAS_AUTO_CONFIANCA_MIN || 95);
 const AUTO_MAX_POR_DIA = Number(process.env.LIXAS_AUTO_MAX_POR_DIA || 999);
 const IA_MAX_RODADAS = Number(process.env.LIXAS_IA_MAX_RODADAS || 5);
+// Teto ABSOLUTO de mensagens do cliente (rede de seguranca do freio novo, ver
+// bloco "FREIO DO LOOP" la embaixo). Se a conversa passar disso, escala mesmo que
+// poucas mensagens tenham numero — protege contra conversa que nunca fecha.
+const IA_MAX_MSGS_ABSOLUTO = Number(process.env.LIXAS_IA_MAX_MSGS_ABSOLUTO || (IA_MAX_RODADAS * 3));
 const IA_MSG_ESCALA_LOOP = process.env.LIXAS_IA_MSG_ESCALA_LOOP ||
   'Olá! Vou verificar seu pedido pessoalmente com a equipe e retorno aqui em breve com a confirmação. Obrigado pela paciência! 😊';
 const REENVIO_HABILITADO = (process.env.LIXAS_REENVIO_HABILITADO || 'false').toLowerCase() === 'true';
@@ -44,6 +48,31 @@ function ehAfirmacaoSimples(texto) {
   const t = String(texto || '').trim().toLowerCase().replace(/[!.…\s]+$/g, '').trim();
   if (!t) return false;
   return AFIRMACOES_SIMPLES.includes(t);
+}
+
+// ── FIX 22/07/2026 (caso PAULO_BASSO): o que conta como "tentativa de pedido" ──
+// Mensagem do cliente COM NUMERO = ele esta informando grao/quantidade.
+// "Ola", "boa tarde", "vou mudar entao", "ok" = ruido de conversa, nao tentativa.
+function _temNumero(texto) {
+  return /\d/.test(String(texto || ''));
+}
+
+// Conta as RODADAS DE PEDIDO: mensagens do CLIENTE que contem numero. E o que o
+// freio de loop deve medir — nao o total de mensagens.
+// Fallback conservador: sem sellerId ou sem a lista de mensagens nao da pra
+// separar quem falou o que, entao devolve conv.totalCliente (comportamento antigo)
+// em vez de arriscar contar mensagem da LOJA (que tem numeros de grao) como do cliente.
+function _contarRodadasPedido(conv, sellerId) {
+  const msgs = Array.isArray(conv && conv.messages) ? conv.messages : [];
+  const totalCli = Number(conv && conv.totalCliente) || 0;
+  if (!sellerId || msgs.length === 0) return totalCli;
+  let n = 0;
+  for (const m of msgs) {
+    const from = String(m.from_user_id || m.from?.user_id || '');
+    if (from === sellerId) continue;
+    if (_temNumero(m.text || m.message || '')) n++;
+  }
+  return n;
 }
 
 // ── COOLDOWN de envio (anti-duplicata por atraso do ML) ──────────────
@@ -116,7 +145,7 @@ async function rotinaLerRespostas() {
   _lendoRespostas = true;
 
   const inicio = Date.now();
-  const stats = { lidas: 0, novasRespostas: 0, semNovidade: 0, erros: 0, iaProcessadas: 0, iaEscalonadas: 0, iaErros: 0, lembretesEnviados: 0, fechamentosEnviados: 0, posProcessadoEscalados: 0, autoEmitidas: 0, autoPuladasConfianca: 0, autoFalhas: 0 };
+  const stats = { lidas: 0, novasRespostas: 0, semNovidade: 0, erros: 0, iaProcessadas: 0, iaEscalonadas: 0, iaErros: 0, ultimasChances: 0, lembretesEnviados: 0, fechamentosEnviados: 0, posProcessadoEscalados: 0, autoEmitidas: 0, autoPuladasConfianca: 0, autoFalhas: 0 };
 
   // IA opcional
   let ia = null;
@@ -363,12 +392,48 @@ async function rotinaLerRespostas() {
               console.log(`[ia] order ${venda.order_id} categoria=${iaResult.categoria} confianca=${iaResult.confianca}`);
 
               // ════════════════════════════════════════════════════════
-              // FREIO DO LOOP: se o cliente ja mandou muitas mensagens e a IA AINDA nao
-              // fechou (categoria != 'claro'), para de responder automatico e escala pra
-              // humano. Evita o vai-e-volta infinito que faz o cliente desistir.
+              // FREIO DO LOOP (revisado 22/07/2026 — caso PAULO_BASSO)
+              //
+              // Existe pra impedir o cliente de ficar preso num vai-e-volta
+              // infinito com a IA. Mas ANTES ele contava conv.totalCliente, ou
+              // seja, TODA mensagem do cliente. Na pratica:
+              //   "Ola" + pedido + pedido repetido (porque o menu foi enviado por
+              //   cima) + "vou mudar entao" + pedido novo  =  5 mensagens,
+              //   mas so 3 tentativas reais de pedido — e o freio ja estourava.
+              // Pior: ele dispara ANTES do envio, entao jogava fora a mensagem
+              // que a IA tinha acabado de gerar (ex.: "faltam 10un, de qual
+              // grao?") e mandava o texto generico de escalada no lugar.
+              //
+              // Duas mudancas:
+              //  (1) conta so mensagem do cliente COM NUMERO = tentativa de pedido;
+              //      "Ola"/"ok"/"vou mudar entao" nao queimam mais rodada.
+              //      Teto absoluto (IA_MAX_MSGS_ABSOLUTO) segura conversa que
+              //      nunca fecha mesmo sem numeros.
+              //  (2) ULTIMA CHANCE: se o freio bateu MAS a IA tem mensagem
+              //      acionavel (ambiguo com itens ja extraidos — ela sabe o que
+              //      o cliente quer, so falta o complemento), manda a mensagem
+              //      DA IA. Vale UMA vez por venda (marcado com [ultima-chance]
+              //      no ia_interpretacao); se o cliente ainda nao fechar, escala.
               // ════════════════════════════════════════════════════════
-              if (iaResult.categoria !== 'claro' && Number(conv.totalCliente) >= IA_MAX_RODADAS) {
-                console.warn(`[ia] order ${venda.order_id} 🔁 LOOP: ${conv.totalCliente} msgs do cliente sem fechar (categoria=${iaResult.categoria}) — ESCALANDO pra humano`);
+              const _rodadasPedido = _contarRodadasPedido(conv, sellerId);
+              const _estourouAbsoluto = Number(conv.totalCliente) >= IA_MAX_MSGS_ABSOLUTO;
+              const _freioBateu = iaResult.categoria !== 'claro'
+                && (_rodadasPedido >= IA_MAX_RODADAS || _estourouAbsoluto);
+
+              const _msgAcionavel = iaResult.categoria === 'ambiguo'
+                && !!iaResult.msg_pra_cliente
+                && Array.isArray(iaResult.pedido_estruturado)
+                && iaResult.pedido_estruturado.length > 0;
+              const _jaDeuUltimaChance = /\[ultima-chance\]/.test(String(venda.ia_interpretacao || ''));
+              const _daUltimaChance = _freioBateu && _msgAcionavel && !_jaDeuUltimaChance && !_estourouAbsoluto;
+
+              if (_daUltimaChance) {
+                stats.ultimasChances++;
+                console.log(`[ia] order ${venda.order_id} 🎯 freio bateu (${_rodadasPedido} tentativa(s) de pedido) MAS a IA tem msg acionavel — enviando a msg DA IA (ultima chance antes de escalar)`);
+              }
+
+              if (_freioBateu && !_daUltimaChance) {
+                console.warn(`[ia] order ${venda.order_id} 🔁 LOOP: ${_rodadasPedido} tentativa(s) de pedido sem fechar (${conv.totalCliente} msgs no total, categoria=${iaResult.categoria}) — ESCALANDO pra humano`);
                 let avisouLoop = false;
                 if ((venda.ia_msg_enviada || '').trim() !== IA_MSG_ESCALA_LOOP.trim()) {
                   try {
@@ -382,7 +447,7 @@ async function rotinaLerRespostas() {
                 await lcp.atualizarVenda(venda.order_id, {
                   ia_categoria: iaResult.categoria,
                   ia_confianca: iaResult.confianca,
-                  ia_interpretacao: (`[loop ${conv.totalCliente} msgs do cliente] ` + (iaResult.interpretacao || '')).slice(0, 300),
+                  ia_interpretacao: (`[loop ${_rodadasPedido} tentativas / ${conv.totalCliente} msgs] ` + (iaResult.interpretacao || '')).slice(0, 300),
                   ia_escalou_humano: true,
                   ia_msg_enviada: avisouLoop ? IA_MSG_ESCALA_LOOP : (venda.ia_msg_enviada || null),
                   ia_processado_em: new Date().toISOString(),
@@ -442,7 +507,9 @@ async function rotinaLerRespostas() {
                   await lcp.atualizarVenda(venda.order_id, {
                     ia_categoria: iaResult.categoria,
                     ia_confianca: iaResult.confianca,
-                    ia_interpretacao: iaResult.interpretacao?.slice(0, 300),
+                    // Marca [ultima-chance] pra que, se o cliente ainda nao fechar
+                    // na proxima mensagem, o freio escale de verdade (nao repete).
+                    ia_interpretacao: ((_daUltimaChance ? '[ultima-chance] ' : '') + (iaResult.interpretacao || '')).slice(0, 300),
                     ia_msg_enviada: msgIA,
                     ia_pedido_estruturado: iaResult.pedido_estruturado ? JSON.stringify(iaResult.pedido_estruturado) : null,
                     ia_processado_em: new Date().toISOString(),
