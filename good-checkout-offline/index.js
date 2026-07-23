@@ -41,7 +41,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.GOODBKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GOODBKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'good-checkout-offline v23/07 b13';
+const VERSAO     = 'good-checkout-offline v23/07 b14';
 
 // ── SESSÃO DE OPERADOR (cookie assinado HMAC) — protege rotas de dados/ação ──
 // Segredo estável entre restarts. Usa ADMIN_KEY (já configurada no Render) como base.
@@ -469,6 +469,79 @@ function routes(readBody) {
       _ultimoCicloAgora = agora;
       rodarCiclo('painel-admin').catch(() => {});
       json(res, 200, { ok: true, mensagem: 'consultando o Bling agora (~30-60s)' });
+      return true;
+    }
+
+    // ADMIN: ANEXAR ETIQUETA PDF na mão. Existe pro caso real em que o Bling fica SEM logística
+    // no pedido (importou depois do envio já organizado no canal, ou a NF travou a edição) e a
+    // etiqueta não vem nem pelo Bling nem pela API do canal. O admin baixa a etiqueta no painel do
+    // marketplace, anexa aqui, e o pedido volta a ser processável pelo estoquista — que NÃO precisa
+    // (nem deve) ter acesso ao seller center. Body: { id, pdf_base64 }.
+    if (method === 'POST' && p === '/good-checkout-offline/etiqueta-anexar') {
+      const opSess = validarSessao(req.headers['cookie']);
+      if (!opSess || !ehAdmin(opSess)) { json(res, 403, { ok: false, erro: 'apenas admin' }); return true; }
+      let body = {}; try { const _rb = await readBody(req); body = (_rb && typeof _rb === 'object') ? _rb : JSON.parse(_rb || '{}'); } catch (e) {}
+      const idA = String(body.id || '').trim();
+      const b64A = String(body.pdf_base64 || '').replace(/^data:[^,]*,/, '');
+      if (!idA || !b64A) { json(res, 400, { ok: false, erro: 'faltou o id do pedido ou o arquivo' }); return true; }
+      let bufA = null; try { bufA = Buffer.from(b64A, 'base64'); } catch (e) {}
+      if (!bufA || bufA.length < 200) { json(res, 400, { ok: false, erro: 'arquivo vazio ou inválido' }); return true; }
+      // b16: aceita ZPL, ZIP (com VÁRIOS arquivos dentro) e PDF.
+      // O ZIP da Shopee traz thermal_zpl_shipping_label.txt + content_declaration.pdf, e o ZPL
+      // começa com um bloco gigante de gráfico (~DGR) — o ^XA só aparece lá pelo byte 14.800.
+      // Por isso: procura os marcadores numa janela larga, olha TODAS as entradas do zip e
+      // confia no nome do arquivo. ZPL vai pro caminho nativo; PDF vai pro alternativo.
+      const _ehZpl = b => { if (!b || b.length < 50) return false; const t = b.slice(0, 30000).toString('latin1'); return t.indexOf('^XA') >= 0 || t.indexOf('~DG') >= 0 || t.indexOf('^FO') >= 0 || t.indexOf('^GF') >= 0; };
+      const _ehPdf = b => !!(b && b.length > 100 && b.slice(0, 4).toString('utf8') === '%PDF');
+      const _zipEntradas = buf => {   // lê pelo DIRETÓRIO CENTRAL (o zip vem em modo streaming, tamanhos zerados no header local)
+        const zlibA = require('zlib');
+        let eocd = -1;
+        for (let x = buf.length - 22; x >= 0 && x > buf.length - 66000; x--) { if (buf.readUInt32LE(x) === 0x06054b50) { eocd = x; break; } }
+        if (eocd < 0) return [];
+        const qtd = buf.readUInt16LE(eocd + 10);
+        let off = buf.readUInt32LE(eocd + 16);
+        const saida = [];
+        for (let k = 0; k < qtd && off + 46 < buf.length; k++) {
+          if (buf.readUInt32LE(off) !== 0x02014b50) break;
+          const metodo = buf.readUInt16LE(off + 10), tamComp = buf.readUInt32LE(off + 20);
+          const fnLen = buf.readUInt16LE(off + 28), exLen = buf.readUInt16LE(off + 30), cmLen = buf.readUInt16LE(off + 32);
+          const nome = buf.slice(off + 46, off + 46 + fnLen).toString('utf8');
+          const loc = buf.readUInt32LE(off + 42);
+          const lfn = buf.readUInt16LE(loc + 26), lex = buf.readUInt16LE(loc + 28);
+          const ini = loc + 30 + lfn + lex;
+          const dados = tamComp > 0 ? buf.slice(ini, ini + tamComp) : buf.slice(ini);
+          try { saida.push({ nome, conteudo: metodo === 0 ? dados : zlibA.inflateRawSync(dados, { finishFlush: zlibA.constants.Z_SYNC_FLUSH }) }); } catch (e) {}
+          off += 46 + fnLen + exLen + cmLen;
+        }
+        return saida;
+      };
+      let conteudoA = null, formatoA = null;
+      if (_ehPdf(bufA)) { conteudoA = bufA; formatoA = 'pdf'; }
+      else if (_ehZpl(bufA)) { conteudoA = bufA; formatoA = 'zpl'; }
+      else if (bufA[0] === 0x50 && bufA[1] === 0x4B && bufA[2] === 0x03 && bufA[3] === 0x04) {   // ZIP "PK\x03\x04"
+        try {
+          const ents = _zipEntradas(bufA);
+          const zplE = ents.find(e => /zpl/i.test(e.nome) || /\.txt$/i.test(e.nome) || _ehZpl(e.conteudo));   // a etiqueta tem prioridade
+          if (zplE) { conteudoA = zplE.conteudo; formatoA = 'zpl'; }
+          else { const pdfE = ents.find(e => _ehPdf(e.conteudo)); if (pdfE) { conteudoA = pdfE.conteudo; formatoA = 'pdf'; } }
+        } catch (e) {}
+      }
+      if (!conteudoA) { json(res, 400, { ok: false, erro: 'não reconheci o arquivo — mande a etiqueta em ZPL (.txt), ZIP ou PDF' }); return true; }
+      const dirA = path.join(CACHE_DIR, String(idA));
+      const alvoA = formatoA === 'pdf' ? path.join(dirA, 'etiqueta.pdf') : path.join(dirA, 'etiqueta.' + String(ETIQ_FORMATO || 'zpl').toLowerCase());
+      try { ensureDir(dirA); fs.writeFileSync(alvoA, conteudoA); }
+      catch (e) { json(res, 500, { ok: false, erro: 'não consegui salvar o arquivo' }); return true; }
+      // vale JÁ (sem esperar o próximo ciclo): manifesto + snapshot
+      try {
+        const manA = readJson(MANIFEST_FILE, {});
+        if (manA[idA]) { manA[idA].tem_etiqueta = true; manA[idA].etiqueta_pdf = (formatoA === 'pdf'); manA[idA].etiqueta_formato = (formatoA === 'pdf' ? 'PDF' : ETIQ_FORMATO); writeJson(MANIFEST_FILE, manA); }
+      } catch (e) {}
+      try {
+        const snapA = readJson(path.join(dirA, 'pedido.json'), null);
+        if (snapA) { snapA.tem_etiqueta = true; snapA.etiqueta_pdf = (formatoA === 'pdf'); snapA.etiqueta_formato = (formatoA === 'pdf' ? 'PDF' : ETIQ_FORMATO); writeJson(path.join(dirA, 'pedido.json'), snapA); }
+      } catch (e) {}
+      console.log(`[GOODBKP] etiqueta ANEXADA na mão no pedido ${idA} (${formatoA.toUpperCase()}, ${conteudoA.length} bytes) por ${opSess}`);
+      json(res, 200, { ok: true, formato: formatoA, bytes: conteudoA.length });
       return true;
     }
 
@@ -1063,7 +1136,7 @@ function routes(readBody) {
         .sort((a, b) => Number(a.numero || 0) - Number(b.numero || 0));        // mais ANTIGOS (menor nº) em cima
       const semEtiq = ids
         .filter(i => !man[i].tem_etiqueta && !conf[i])                         // ATENDIDO mas SEM etiqueta = problema
-        .map(i => ({ id: i, numero: man[i].numero, cliente: man[i].cliente || '', nf_numero: man[i].nf_numero || null, marketplace: man[i].marketplace || 'outro' }))
+        .map(i => ({ id: i, numero: man[i].numero, cliente: man[i].cliente || '', nf_numero: man[i].nf_numero || null, marketplace: man[i].marketplace || 'outro', numero_loja: man[i].numero_loja || null }))   // numero_loja p/ o ↗ do canal no card sem etiqueta
         .sort((a, b) => Number(a.numero || 0) - Number(b.numero || 0));
       const hoje = new Date().toISOString().slice(0, 10);
       const finalizadosHoje = Object.values(conf).filter(c => c && String(c.conferido_em || '').slice(0, 10) === hoje).length;
