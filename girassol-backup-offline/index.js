@@ -1,11 +1,11 @@
 'use strict';
 
 // ════════════════════════════════════════════════════════════════════════
-//  AMBTOTAL · CHECKOUT OFFLINE — FASE 1 (poller) + FASE 2 (bipagem)   (Mover-Pedidos)
-//  amb-checkout-offline v28/06 b9   (a versão real é a const VERSAO abaixo)
+//  GIRASSOL · BACKUP OFFLINE — FASE 1 (poller) + FASE 2 (bipagem)   (Mover-Pedidos)
+//  girassol-backup-offline v28/06 b9   (a versão real é a const VERSAO abaixo)
 // ════════════════════════════════════════════════════════════════════════
 //  Módulo do orquestrador unificado (HTTP-native, sem Express).
-//  Reaproveita o token Bling da AMBTotal via ../ambtotal/tokenManager.
+//  Reaproveita o token Bling da Girassol via ../girassol/tokenManager.
 //
 //  A cada ciclo (cron backupCache):
 //    1) lista pedidos ATENDIDO (situação 9) da janela de emissão;
@@ -19,7 +19,7 @@
 //  Cache no disco /data do PRÓPRIO serviço Mover-Pedidos. A tela offline
 //  (Fase 2) também morará aqui (mesmo serviço = mesmo disco = mesmo cache).
 //
-//  ⚠ PRÉ-REQUISITO de scope no app Bling da AMBTotal (Mover-Pedidos):
+//  ⚠ PRÉ-REQUISITO de scope no app Bling da Girassol (Mover-Pedidos):
 //     • Logísticas (leitura)  → necessário p/ /logisticas/etiquetas
 //     • Produtos  (leitura)   → necessário p/ resolver EAN por produto
 //     Se faltar: o pedido ainda é cacheado, mas vem sem etiqueta / sem EAN.
@@ -37,11 +37,11 @@ const { gerarDanfeSimplificado, gerarDanfeSimplificadoZPL } = require('./danfe-s
 const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 
 // Certificado/chave do QZ Tray p/ assinar as impressões (mata o popup "Untrusted").
-// Configure no Render: AMBBKP_QZ_CERT (digital-certificate.txt) e AMBBKP_QZ_PRIVKEY (private-key.pem).
-const QZ_CERT    = (process.env.AMBBKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
-const QZ_PRIVKEY = (process.env.AMBBKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
+// Configure no Render: GIRABKP_QZ_CERT (digital-certificate.txt) e GIRABKP_QZ_PRIVKEY (private-key.pem).
+const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
+const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'amb-checkout-offline v23/07 b13';
+const VERSAO     = 'girassol-backup-offline v23/07 b21';
 
 // ── SESSÃO DE OPERADOR (cookie assinado HMAC) — protege rotas de dados/ação ──
 // Segredo estável entre restarts. Usa ADMIN_KEY (já configurada no Render) como base.
@@ -124,10 +124,10 @@ const { montarSeparacao, montarSeparacaoPorPedido } = require('./separacao');
 const { enviarEmailDocs } = require('./email-docs');
 const { listarAtendidos, detalhePedido, sincronizarConferidos, indexarCatalogoCompleto, cachearPedido, rodarCiclo, getUltimoResumo, getUltimoSync, getIdxStatus } = require('./ciclo');
 
-// ─── Config (env prefixo AMBBKP_, defaults sãos) ───────────────────────
+// ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
 // presença entre PCs: quem está separando cada pedido. Limpa reservas vencidas a cada leitura.
-// operadores p/ login (env AMBBKP_OPERADORES = "Nome:senha,Nome:senha"). Vazio = login DESLIGADO.
-// quem pode REABRIR/reverter pedido (env AMBBKP_ADMIN = "Diego" ou "Diego,Angelica"). Vazio = sem restrição (todo mundo pode).
+// operadores p/ login (env GIRABKP_OPERADORES = "Nome:senha,Nome:senha"). Vazio = login DESLIGADO.
+// quem pode REABRIR/reverter pedido (env GIRABKP_ADMIN = "Diego" ou "Diego,Angelica"). Vazio = sem restrição (todo mundo pode).
 
 // FLEX = entrega por motoboy (etiqueta sempre disponível). Mesma lógica do checkout-expedição.
 const FLEX_KEYWORDS = ['mercado envios flex', 'entrega local', 'vapt', 'shopee entrega direta'];
@@ -152,7 +152,7 @@ const FLEX_KEYWORDS = ['mercado envios flex', 'entrega local', 'vapt', 'shopee e
 
 // ─── indexação total do catálogo (roda 1x; deixa todo EAN achável na hora) ───
 
-// GET autenticado no Bling AMBTotal (token via tokenManager + retry 429)
+// GET autenticado no Bling Girassol (token via tokenManager + retry 429)
 
 // escrita no Bling (PATCH/POST/PUT) — mesmo cuidado do blingGet (token + retry 429)
 
@@ -225,13 +225,13 @@ function routes(readBody) {
     // central do index.js (ADMIN_KEY: /run,/setup,/debug,/robo,/forcar) passam.
     // Todo o RESTO (dados de pedido, DANFE, XML, separação, ações) exige sessão.
     {
-      const _meu = p.startsWith('/amb-checkout-offline'); // guarda só age nas rotas DESTE módulo
+      const _meu = p.startsWith('/girassol-backup-offline'); // guarda só age nas rotas DESTE módulo
       const _pub = (
-        p === '/amb-checkout-offline' || p === '/amb-checkout-offline/' ||
-        p === '/amb-checkout-offline/painel' || p === '/amb-checkout-offline/login' ||
-        p === '/amb-checkout-offline/operadores' || p === '/amb-checkout-offline/health' ||
-        p === '/amb-checkout-offline/saude' || p.includes('/callback') ||
-        p === '/amb-checkout-offline/qz-cert' || p === '/amb-checkout-offline/qz-sign'
+        p === '/girassol-backup-offline' || p === '/girassol-backup-offline/' ||
+        p === '/girassol-backup-offline/painel' || p === '/girassol-backup-offline/login' ||
+        p === '/girassol-backup-offline/operadores' || p === '/girassol-backup-offline/health' ||
+        p === '/girassol-backup-offline/saude' || p.includes('/callback') ||
+        p === '/girassol-backup-offline/qz-cert' || p === '/girassol-backup-offline/qz-sign'
       );
       const _central = (
         p.includes('/run') || p.includes('/setup') || p.includes('/robo') ||
@@ -245,14 +245,14 @@ function routes(readBody) {
     }
 
     // raiz do módulo → manda pro painel (evita "not found" ao abrir a URL base)
-    if (method === 'GET' && (p === '/amb-checkout-offline' || p === '/amb-checkout-offline/')) {
-      res.writeHead(302, { Location: '/amb-checkout-offline/painel' });
+    if (method === 'GET' && (p === '/girassol-backup-offline' || p === '/girassol-backup-offline/')) {
+      res.writeHead(302, { Location: '/girassol-backup-offline/painel' });
       res.end();
       return true;
     }
 
     // ADMIN (por sessão): dispara o ciclo AGORA — consulta o Bling sem esperar os 10 min do cron
-    if (method === 'POST' && p === '/amb-checkout-offline/ciclo-agora') {
+    if (method === 'POST' && p === '/girassol-backup-offline/ciclo-agora') {
       const opSess = validarSessao(req.headers['cookie']);
       if (!opSess || !ehAdmin(opSess)) { json(res, 403, { ok: false, erro: 'apenas admin' }); return true; }
       const agora = Date.now();
@@ -263,42 +263,11 @@ function routes(readBody) {
       return true;
     }
 
-    // ADMIN: ANEXAR ETIQUETA PDF na mão. Existe pro caso real em que o Bling fica SEM logística
-    // no pedido (importou depois do envio já organizado no canal, ou a NF travou a edição) e a
-    // etiqueta não vem nem pelo Bling nem pela API do canal. O admin baixa a etiqueta no painel do
-    // marketplace, anexa aqui, e o pedido volta a ser processável pelo estoquista — que NÃO precisa
-    // (nem deve) ter acesso ao seller center. Body: { id, pdf_base64 }.
-    if (method === 'POST' && p === '/amb-checkout-offline/etiqueta-anexar') {
-      const opSess = validarSessao(req.headers['cookie']);
-      if (!opSess || !ehAdmin(opSess)) { json(res, 403, { ok: false, erro: 'apenas admin' }); return true; }
-      let body = {}; try { const _rb = await readBody(req); body = (_rb && typeof _rb === 'object') ? _rb : JSON.parse(_rb || '{}'); } catch (e) {}
-      const idA = String(body.id || '').trim();
-      const b64A = String(body.pdf_base64 || '').replace(/^data:[^,]*,/, '');
-      if (!idA || !b64A) { json(res, 400, { ok: false, erro: 'faltou o id do pedido ou o arquivo' }); return true; }
-      let bufA = null; try { bufA = Buffer.from(b64A, 'base64'); } catch (e) {}
-      if (!bufA || bufA.length < 400 || bufA.slice(0, 4).toString('utf8') !== '%PDF') { json(res, 400, { ok: false, erro: 'o arquivo não é um PDF válido' }); return true; }
-      const dirA = path.join(CACHE_DIR, String(idA));
-      try { ensureDir(dirA); fs.writeFileSync(path.join(dirA, 'etiqueta.pdf'), bufA); }
-      catch (e) { json(res, 500, { ok: false, erro: 'não consegui salvar o arquivo' }); return true; }
-      // vale JÁ (sem esperar o próximo ciclo): manifesto + snapshot
-      try {
-        const manA = readJson(MANIFEST_FILE, {});
-        if (manA[idA]) { manA[idA].tem_etiqueta = true; manA[idA].etiqueta_pdf = true; writeJson(MANIFEST_FILE, manA); }
-      } catch (e) {}
-      try {
-        const snapA = readJson(path.join(dirA, 'pedido.json'), null);
-        if (snapA) { snapA.tem_etiqueta = true; snapA.etiqueta_pdf = true; writeJson(path.join(dirA, 'pedido.json'), snapA); }
-      } catch (e) {}
-      console.log(`[AMBBKP] etiqueta ANEXADA na mão no pedido ${idA} (${bufA.length} bytes) por ${opSess}`);
-      json(res, 200, { ok: true, bytes: bufA.length });
-      return true;
-    }
-
     // ADMIN (?k=): BACKFILL DE VALORES — busca no Bling o total dos pedidos JÁ FINALIZADOS
     // que não têm valor gravado (finalizados antes da atualização do faturamento) e preenche
-    // retroativamente. Uso: /amb-checkout-offline/backfill-valores?k=ADMIN_KEY&dias=31
+    // retroativamente. Uso: /girassol-backup-offline/backfill-valores?k=ADMIN_KEY&dias=31
     // Roda em background (~400ms por pedido, respeitando o rate limit). Chame de novo p/ ver o progresso.
-    if ((method === 'POST' || method === 'GET') && p === '/amb-checkout-offline/backfill-valores') {
+    if ((method === 'POST' || method === 'GET') && p === '/girassol-backup-offline/backfill-valores') {
       const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
       if (!process.env.ADMIN_KEY || k !== process.env.ADMIN_KEY) { json(res, 404, { error: 'not found' }); return true; }
       if (_bf.rodando) { json(res, 200, { ok: true, rodando: true, progresso: _bf.feitos + '/' + _bf.total, ok_ate_agora: _bf.ok, falhas: _bf.falhas, iniciado_em: _bf.iniciado_em }); return true; }
@@ -340,8 +309,8 @@ function routes(readBody) {
     }
 
     // ADMIN (?k=): BACKFILL DE DETALHES — preenche UF + valor POR ITEM dos já finalizados
-    // Uso: /amb-checkout-offline/backfill-detalhes?k=ADMIN_KEY&dias=31
-    if ((method === 'POST' || method === 'GET') && p === '/amb-checkout-offline/backfill-detalhes') {
+    // Uso: /girassol-backup-offline/backfill-detalhes?k=ADMIN_KEY&dias=31
+    if ((method === 'POST' || method === 'GET') && p === '/girassol-backup-offline/backfill-detalhes') {
       const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
       if (!process.env.ADMIN_KEY || k !== process.env.ADMIN_KEY) { json(res, 404, { error: 'not found' }); return true; }
       if (_bfd.rodando) { json(res, 200, { ok: true, rodando: true, progresso: _bfd.feitos + '/' + _bfd.total, ok_ate_agora: _bfd.ok, falhas: _bfd.falhas, iniciado_em: _bfd.iniciado_em }); return true; }
@@ -410,7 +379,7 @@ function routes(readBody) {
     }
 
     // DASHBOARD (sessão admin): saldo/preço/custo por SKU, cache 6h em disco — alimenta a projeção de estoque
-    if (method === 'POST' && p === '/amb-checkout-offline/sku-info') {
+    if (method === 'POST' && p === '/girassol-backup-offline/sku-info') {
       const opSess = validarSessao(req.headers['cookie']);
       if (!opSess || !ehAdmin(opSess)) { json(res, 403, { ok: false, erro: 'apenas admin' }); return true; }
       let body = {}; try { const _rb = await readBody(req); body = (_rb && typeof _rb === 'object') ? _rb : JSON.parse(_rb || '{}'); } catch (e) {}   // tolerante: lib/http passou a devolver objeto ja parseado
@@ -492,6 +461,11 @@ function routes(readBody) {
         const o2 = ids[sku];
         const info = o2 ? { saldo: (saldos[o2.id] != null ? saldos[o2.id] : null), preco: o2.preco, custo: o2.custo, ts: Date.now() }
                         : { saldo: null, preco: null, custo: null, ts: Date.now() };
+        // b20: o banco PERMANENTE (_custos.json) é SOBERANO — falha de consulta (429 do Bling) nunca mais
+        // apaga um custo conhecido. Foi o que sumiu custos da tela em 22/07 (tempestade do re-cache SCHEMA 5).
+        if (info.custo == null) { const kP = _ccAll[sku]; if (kP && kP.custo != null) { info.custo = kP.custo; if (info.preco == null && kP.preco != null) info.preco = kP.preco; } }
+        const c0 = _skuInfoCache[sku];
+        if (info.custo == null && c0 && c0.custo != null) info.custo = c0.custo;   // e o valor antigo do cache de 6h também vale mais que um null novo
         _skuInfoCache[sku] = info; out[sku] = info;
       }
       if (faltam.length) { try { writeJson(CACHE_SKUINFO, _skuInfoCache); } catch (e) {} }
@@ -500,7 +474,7 @@ function routes(readBody) {
     }
 
     // DASHBOARD — página (dashboard.html do módulo; por ora só a Girassol tem o arquivo)
-    if (method === 'GET' && p === '/amb-checkout-offline/dashboard') {
+    if (method === 'GET' && p === '/girassol-backup-offline/dashboard') {
       const fdash = path.join(__dirname, 'dashboard.html');
       if (!fs.existsSync(fdash)) { json(res, 404, { ok: false, erro: 'dashboard ainda não habilitado nesta empresa' }); return true; }
       try { const htmlContent = fs.readFileSync(fdash, 'utf8'); res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(htmlContent); }
@@ -509,7 +483,7 @@ function routes(readBody) {
     }
 
     // DASHBOARD (sessão admin): dispara o backfill-NF local ao abrir o dashboard — mantém os números sempre frescos
-    if (method === 'POST' && p === '/amb-checkout-offline/backfill-nf-auto') {
+    if (method === 'POST' && p === '/girassol-backup-offline/backfill-nf-auto') {
       const opSess = validarSessao(req.headers['cookie']);
       if (!opSess || !ehAdmin(opSess)) { json(res, 403, { ok: false, erro: 'apenas admin' }); return true; }
       json(res, 200, { ok: true, ...backfillNFLocal(45) });
@@ -518,8 +492,8 @@ function routes(readBody) {
 
     // ADMIN (?k=): BACKFILL-NF — 100% LOCAL (lê nf-simp.json do cache/arquivo; ZERO chamadas ao Bling).
     // Preenche vprod_nf (Σ itens da NOTA) nos finalizados → produtos EXATO + frete EXATO (valor − vprod_nf), retroativo.
-    // Uso: /amb-checkout-offline/backfill-nf?k=ADMIN_KEY&dias=45   (roda em segundos)
-    if ((method === 'POST' || method === 'GET') && p === '/amb-checkout-offline/backfill-nf') {
+    // Uso: /girassol-backup-offline/backfill-nf?k=ADMIN_KEY&dias=45   (roda em segundos)
+    if ((method === 'POST' || method === 'GET') && p === '/girassol-backup-offline/backfill-nf') {
       const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
       const sessB = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || (sessB && ehAdmin(sessB)))) { json(res, 404, { error: 'not found' }); return true; }
@@ -530,7 +504,7 @@ function routes(readBody) {
     }
 
     // DASHBOARD (sessão admin): CONFIG FISCAL — alíquota do Simples POR MÊS + taxa % por canal
-    if ((method === 'GET' || method === 'POST') && p === '/amb-checkout-offline/config-fiscal') {
+    if ((method === 'GET' || method === 'POST') && p === '/girassol-backup-offline/config-fiscal') {
       const opSess = validarSessao(req.headers['cookie']);
       if (!opSess || !ehAdmin(opSess)) { json(res, 403, { ok: false, erro: 'apenas admin' }); return true; }
       const CFG_FILE = path.join(CACHE_DIR, '_config-fiscal.json');
@@ -539,14 +513,14 @@ function routes(readBody) {
       const atual = readJson(CFG_FILE, { aliquotas: {}, taxas: {} });
       if (body.aliquotas && typeof body.aliquotas === 'object') for (const [k2, v2] of Object.entries(body.aliquotas)) { const n2 = Number(v2); if (/^\d{4}-\d{2}$/.test(k2) && isFinite(n2) && n2 >= 0 && n2 <= 40) atual.aliquotas[k2] = n2; else if (v2 === null) delete atual.aliquotas[k2]; }
       if (body.taxas && typeof body.taxas === 'object') for (const [k2, v2] of Object.entries(body.taxas)) { const n2 = Number(v2); if (isFinite(n2) && n2 >= 0 && n2 <= 50) atual.taxas[String(k2).toLowerCase()] = n2; else if (v2 === null) delete atual.taxas[String(k2).toLowerCase()]; }
-      if (body.flex && typeof body.flex === 'object') { atual.flex = atual.flex || {}; for (const [k2, v2] of Object.entries(body.flex)) { const n2 = Number(v2); if ((k2 === 'geral' || k2 === 'shopee') && isFinite(n2) && n2 >= 0 && n2 <= 100) atual.flex[k2] = n2; else if (v2 === null) delete atual.flex[k2]; } }
+      if (body.flex && typeof body.flex === 'object') { atual.flex = atual.flex || {}; for (const [k2, v2] of Object.entries(body.flex)) { const n2 = Number(v2); if (['ml', 'shopee', 'outros', 'geral'].indexOf(k2) >= 0 && isFinite(n2) && n2 >= 0 && n2 <= 100) atual.flex[k2] = n2; else if (v2 === null) delete atual.flex[k2]; } }
       writeJson(CFG_FILE, atual);
       json(res, 200, { ok: true, config: atual });
       return true;
     }
 
     // DASHBOARD (sessão admin): TARIFA REAL do Mercado Livre p/ um pedido (sale_fee da API), com cache permanente
-    if (method === 'POST' && p === '/amb-checkout-offline/ml-fee') {
+    if (method === 'POST' && p === '/girassol-backup-offline/ml-fee') {
       const opSess = validarSessao(req.headers['cookie']);
       if (!opSess || !ehAdmin(opSess)) { json(res, 403, { ok: false, erro: 'apenas admin' }); return true; }
       let body = {}; try { const _rb = await readBody(req); body = (_rb && typeof _rb === 'object') ? _rb : JSON.parse(_rb || '{}'); } catch (e) {}   // tolerante: lib/http passou a devolver objeto ja parseado
@@ -556,7 +530,7 @@ function routes(readBody) {
       const cacheF = readJson(FEE_FILE, {});
       if (cacheF[orderId] && cacheF[orderId].fee != null) { json(res, 200, { ok: true, fee: cacheF[orderId].fee, itens: cacheF[orderId].itens, fonte: 'cache' }); return true; }
       try {
-        const { garantirTokenML } = require('../ambtotal/mlTokenManager');
+        const { garantirTokenML } = require('../girassol/mlTokenManager');
         const tokenML = await garantirTokenML();
         const r = await fetch('https://api.mercadolibre.com/orders/' + orderId, { headers: { Authorization: 'Bearer ' + tokenML } });
         const d = await r.json().catch(() => null);
@@ -572,8 +546,8 @@ function routes(readBody) {
     }
 
     // ADMIN (?k=): PESCA de tarifas/frete REAIS do ML agora (também roda sozinha todo dia às 04:40)
-    // Uso: /amb-checkout-offline/ml-sync-fees?k=ADMIN_KEY&dias=31 — chame de novo p/ ver o progresso
-    if ((method === 'POST' || method === 'GET') && p === '/amb-checkout-offline/ml-sync-fees') {
+    // Uso: /girassol-backup-offline/ml-sync-fees?k=ADMIN_KEY&dias=31 — chame de novo p/ ver o progresso
+    if ((method === 'POST' || method === 'GET') && p === '/girassol-backup-offline/ml-sync-fees') {
       const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
       const sessA = validarSessao(req.headers['cookie']);
       const autorizado = (process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || (sessA && ehAdmin(sessA));
@@ -587,7 +561,7 @@ function routes(readBody) {
     }
 
     // ADMIN (?k= ou sessão): RAIO-X da cobertura por mês — onde estão os buracos de valor/UF
-    if (method === 'GET' && p === '/amb-checkout-offline/debug-cobertura') {
+    if (method === 'GET' && p === '/girassol-backup-offline/debug-cobertura') {
       const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
       const sessX = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || (sessX && ehAdmin(sessX)))) { json(res, 404, { error: 'not found' }); return true; }
@@ -610,8 +584,8 @@ function routes(readBody) {
 
     // ADMIN (?k= ou sessão): RAIO-X DO PEDIDO CRU do Bling — mostra TODAS as chaves e qualquer campo
     // com cara de data/hora, pra decidirmos com o payload real se o Bling guarda a hora da venda.
-    // Uso: /amb-checkout-offline/debug-pedido?id=116063  (o nº que aparece na coluna Pedido)
-    if (method === 'GET' && p === '/amb-checkout-offline/debug-pedido') {
+    // Uso: /girassol-backup-offline/debug-pedido?id=116063  (o nº que aparece na coluna Pedido)
+    if (method === 'GET' && p === '/girassol-backup-offline/debug-pedido') {
       const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
       const sessP = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || (sessP && ehAdmin(sessP)))) { json(res, 404, { error: 'not found' }); return true; }
@@ -654,8 +628,8 @@ function routes(readBody) {
 
     // ADMIN (?k= obrigatorio — trava central intercepta rotas 'debug'): RAIO-X DO PRODUTO no Bling.
     // Mostra TODAS as chaves do produto + campos de preco/custo + o que /estoques/saldos e /produtos/fornecedores devolvem.
-    // Uso: /amb-checkout-offline/debug-sku?sku=KP16&k=SUA_CHAVE
-    if (method === 'GET' && p === '/amb-checkout-offline/debug-sku') {
+    // Uso: /girassol-backup-offline/debug-sku?sku=KP16&k=SUA_CHAVE
+    if (method === 'GET' && p === '/girassol-backup-offline/debug-sku') {
       const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
       const sessP = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || (sessP && ehAdmin(sessP)))) { json(res, 404, { error: 'not found' }); return true; }
@@ -684,7 +658,7 @@ function routes(readBody) {
     }
 
     // ADMIN (sessão ou ?k=): sincronizador de custos em background. ?status=1 mostra progresso.
-    if (method === 'GET' && p === '/amb-checkout-offline/custo-sync') {
+    if (method === 'GET' && p === '/girassol-backup-offline/custo-sync') {
       const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
       const sessC = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || (sessC && ehAdmin(sessC)))) { json(res, 404, { error: 'not found' }); return true; }
@@ -697,15 +671,125 @@ function routes(readBody) {
       return true;
     }
 
-    if ((method === 'POST' || method === 'GET') && p === '/amb-checkout-offline/run') {
+    // ADMIN (?k=): RAIO-X DO DINHEIRO NO ML — order + shipment + /costs crus, p/ mapear estorno/tarifas.
+    // Uso: /girassol-backup-offline/debug-ml?id=116454&k=SUA_CHAVE   (nº do pedido, da venda ou id Bling)
+    if (method === 'GET' && p === '/girassol-backup-offline/debug-ml') {
+      const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const sessM = validarSessao(req.headers['cookie']);
+      if (!((process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || (sessM && ehAdmin(sessM)))) { json(res, 404, { error: 'not found' }); return true; }
+      const q0 = String(urlObj.searchParams.get('id') || '').replace(/\D/g, '');
+      if (!q0) { json(res, 200, { ok: false, erro: 'passe ?id=NUMERO' }); return true; }
+      const confM = readJson(CONFERIDOS_FILE, {});
+      let alvo = null, cidM = null;
+      for (const [cid, c] of Object.entries(confM)) {
+        if (!c) continue;
+        if (String(c.numero) === q0 || (c.numero_loja && String(c.numero_loja) === q0) || cid === q0) { alvo = c; cidM = cid; break; }
+      }
+      if (!alvo) { json(res, 200, { ok: false, erro: 'pedido nao encontrado no conferido' }); return true; }
+      const { garantirTokenML: _gtok } = require('../girassol/mlTokenManager');   // require local, igual aos outros blocos deste arquivo
+      const tk = await _gtok().catch(() => null);
+      if (!tk) { json(res, 200, { ok: false, erro: 'sem token ML' }); return true; }
+      const H2 = { headers: { Authorization: 'Bearer ' + tk } };
+      const nl2 = String(alvo.numero_loja || '').replace(/\D/g, '');
+      const out2 = { ok: true, pedido: alvo.numero, numero_loja: nl2, conferido: { tarifa_ml: alvo.tarifa_ml, frete_ml: alvo.frete_ml, credito_ml: alvo.credito_ml, venda_em: alvo.venda_em, flex: !!alvo.flex } };
+      try {
+        let ords2 = null;
+        const r1 = await fetch('https://api.mercadolibre.com/orders/' + nl2, H2);
+        const d1 = await r1.json().catch(() => null);
+        if (r1.ok && d1) ords2 = [d1];
+        else {
+          const rp2 = await fetch('https://api.mercadolibre.com/packs/' + nl2, H2);
+          const dp2 = await rp2.json().catch(() => null);
+          out2.pack = rp2.ok ? { orders: (dp2 && dp2.orders) || null } : { erro: rp2.status };
+          if (rp2.ok && dp2 && Array.isArray(dp2.orders)) {
+            ords2 = [];
+            for (const oq of dp2.orders) { const ro = await fetch('https://api.mercadolibre.com/orders/' + (oq.id || oq), H2); const doo = await ro.json().catch(() => null); if (ro.ok && doo) ords2.push(doo); }
+          }
+        }
+        if (!ords2 || !ords2.length) { out2.erro_order = 'nem order nem pack'; json(res, 200, out2); return true; }
+        out2.orders = ords2.map(od => ({
+          id: od.id, date_created: od.date_created, total_amount: od.total_amount, paid_amount: od.paid_amount,
+          itens: (od.order_items || []).map(it => ({ sku: (it.item && (it.item.seller_sku || it.item.id)) || null, qtd: it.quantity, preco: it.unit_price, sale_fee: it.sale_fee, listing_type: it.listing_type_id })),
+          taxes: od.taxes || null,
+          payments: (od.payments || []).map(pg => ({ status: pg.status, transaction_amount: pg.transaction_amount, shipping_cost: pg.shipping_cost, overpaid_amount: pg.overpaid_amount, marketplace_fee: pg.marketplace_fee, total_paid_amount: pg.total_paid_amount })),
+          shipping_id: (od.shipping && od.shipping.id) || null
+        }));
+        const shId = out2.orders.map(o3 => o3.shipping_id).filter(Boolean)[0];
+        if (shId) {
+          const rs2 = await fetch('https://api.mercadolibre.com/shipments/' + shId, H2);
+          const ds2 = await rs2.json().catch(() => null);
+          if (rs2.ok && ds2) out2.shipment = { id: ds2.id, logistic_type: (ds2.logistic && ds2.logistic.type) || ds2.logistic_type || null, mode: ds2.mode, status: ds2.status, cost: ds2.cost, base_cost: ds2.base_cost, list_cost: ds2.list_cost, shipping_option: ds2.shipping_option || null };
+          const rc2 = await fetch('https://api.mercadolibre.com/shipments/' + shId + '/costs', H2);
+          const dc2 = await rc2.json().catch(() => null);
+          out2.shipment_costs = rc2.ok ? dc2 : { erro: rc2.status, msg: (dc2 && (dc2.message || dc2.error)) || null };
+        }
+      } catch (e) { out2.erro = String(e.message || e).slice(0, 200); }
+      json(res, 200, out2);
+      return true;
+    }
+
+    // ADMIN/sessão: sincronizador de vendas do Bling (todas as situações). ?status=1 mostra o estado.
+    // DEBUG (?k=): raio-X do 🧾 — pega 3 conferidos recentes SEM hora de NF e mostra, pra cada um:
+    // o que tem no conf, o que tem no snapshot (snap.nf) e o resultado CRU da chamada /nfe/{id} feita AGORA.
+    // Revela na hora onde o preenchimento tranca: snapshot sem nf.id? Bling recusando? campo com outro nome?
+    if (method === 'GET' && p === '/girassol-backup-offline/debug-nf-emissao') {
+      const kE = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      if (!process.env.ADMIN_KEY || kE !== process.env.ADMIN_KEY) { json(res, 404, { error: 'not found' }); return true; }
+      const confE = readJson(CONFERIDOS_FILE, {});
+      const corteE = Date.now() - 4 * 86400000;
+      const alvosE = Object.entries(confE)
+        .filter(([idE, cE]) => cE && (cE.nf_emissao == null || cE.nf_emissao === '') && cE.nf_numero && cE.conferido_em && Date.parse(cE.conferido_em) >= corteE)
+        .sort((a, b) => String(b[1].conferido_em || '').localeCompare(String(a[1].conferido_em || '')))
+        .slice(0, 3);
+      const saidaE = [];
+      for (const [idE, cE] of alvosE) {
+        const snE = readJson(path.join(CACHE_DIR, String(idE), 'pedido.json'), null);
+        const item = {
+          pedido_id: idE, nf_numero: cE.nf_numero, nf_emissao_no_conf: cE.nf_emissao === '' ? '(sentinela vazia)' : cE.nf_emissao,
+          conferido_em: cE.conferido_em, marketplace: cE.marketplace || null,
+          snapshot_existe: !!snE, snap_nf: (snE && snE.nf) || null, chamada_nfe: null
+        };
+        try {
+          const nfE2 = await nfDoPedido(idE);   // b16: mesmo caminho que a fase NF usa agora
+          item.chamada_nfe = { via: 'nfDoPedido', achou: !!nfE2, nf: nfE2 || null };
+        } catch (e) { item.chamada_nfe = { via: 'nfDoPedido', achou: false, erro: String(e.message || e).slice(0, 200) }; }
+        await new Promise(r5 => setTimeout(r5, 350));
+        saidaE.push(item);
+      }
+      json(res, 200, { ok: true, sem_hora_no_conf: alvosE.length, amostra: saidaE });
+      return true;
+    }
+
+    // DEBUG (?k=): 3 itens CRUS da listagem /pedidos/vendas — confirma se o Bling manda loja.id e numeroLoja
+    if (method === 'GET' && p === '/girassol-backup-offline/debug-vendas-raw') {
+      const kD = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      if (!process.env.ADMIN_KEY || kD !== process.env.ADMIN_KEY) { json(res, 404, { error: 'not found' }); return true; }
+      const isoDD = dt => dt.toISOString().slice(0, 10);
+      const hjD = new Date(); const inD = new Date(hjD); inD.setDate(inD.getDate() - 3); const fiD = new Date(hjD); fiD.setDate(fiD.getDate() + 1);
+      const rD = await blingGet('/pedidos/vendas?dataEmissaoInicial=' + isoDD(inD) + '&dataEmissaoFinal=' + isoDD(fiD) + '&pagina=1&limite=3');
+      json(res, 200, { ok: !!(rD && rD.ok), itens_crus: (rD && rD.data && rD.data.data) || [], loja_mkt_mapa: LOJA_MKT });
+      return true;
+    }
+
+    if (method === 'GET' && p === '/girassol-backup-offline/vendas-sync') {
+      const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const sessV = validarSessao(req.headers['cookie']);
+      if (!((process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || sessV)) { json(res, 404, { error: 'not found' }); return true; }
+      if (urlObj.searchParams.get('status')) { json(res, 200, { ok: true, rodando: _vsy.rodando, fase: _vsy.fase || null, vendas_na_janela: _vsy.total, atualizado_em: _vsy.atualizado_em, erro: _vsy.erro }); return true; }
+      vendasSync().catch(() => {});
+      json(res, 200, { ok: true, iniciado: true });
+      return true;
+    }
+
+    if ((method === 'POST' || method === 'GET') && p === '/girassol-backup-offline/run') {
       const forcar = /[?&]force=1\b/.test(urlObj.search || '');
       rodarCiclo(forcar ? 'manual-force' : 'manual', forcar);
-      json(res, 200, { mensagem: `Ciclo${forcar ? ' (FORCE — re-cacheia tudo)' : ''} iniciado. Veja /amb-checkout-offline/status.`, versao: VERSAO });
+      json(res, 200, { mensagem: `Ciclo${forcar ? ' (FORCE — re-cacheia tudo)' : ''} iniciado. Veja /girassol-backup-offline/status.`, versao: VERSAO });
       return true;
     }
 
     // salva a localização de um SKU no Bling (PATCH /produtos/{id}) + atualiza o cache + registra quem editou
-    if (method === 'POST' && p === '/amb-checkout-offline/salvar-localizacao') {
+    if (method === 'POST' && p === '/girassol-backup-offline/salvar-localizacao') {
       let body = {};
       try { body = await readBody(req); } catch (e) {}
       const sku = String(body.sku || '').trim();
@@ -724,20 +808,20 @@ function routes(readBody) {
       log.push({ op: op || '?', sku, de: locAntiga, para: localizacao, em: new Date().toISOString() });
       if (log.length > 3000) log.splice(0, log.length - 3000);    // mantém os últimos 3000
       writeJson(LOC_LOG_FILE, log);
-      console.log(`[AMBBKP] localização ${sku}: "${locAntiga}" → "${localizacao}" por ${op || '?'}`);
+      console.log(`[GIRABKP] localização ${sku}: "${locAntiga}" → "${localizacao}" por ${op || '?'}`);
       json(res, 200, { ok: true, sku, localizacao, de: locAntiga });
       return true;
     }
 
     // auditoria: log de edições de localização (quem mudou o quê e quando). uso: /localizacoes-log
-    if (method === 'GET' && p === '/amb-checkout-offline/localizacoes-log') {
+    if (method === 'GET' && p === '/girassol-backup-offline/localizacoes-log') {
       const log = readJson(LOC_LOG_FILE, []);
       json(res, 200, { ok: true, total: log.length, log: log.slice(-500).reverse() });
       return true;
     }
 
     // busca um produto por SKU ou EAN (telinha de consulta/edição de localização do estoquista)
-    if (method === 'GET' && p === '/amb-checkout-offline/buscar-produto') {
+    if (method === 'GET' && p === '/girassol-backup-offline/buscar-produto') {
       const q = String(urlObj.searchParams.get('q') || '').trim();
       if (!q) { json(res, 200, { ok: false, erro: 'busca vazia' }); return true; }
       const dig = q.replace(/\D/g, '');
@@ -797,7 +881,7 @@ function routes(readBody) {
     }
 
     // ─── debug: onde o Bling guarda a localização de um SKU ───
-    if (method === 'GET' && p === '/amb-checkout-offline/debug-produto') {
+    if (method === 'GET' && p === '/girassol-backup-offline/debug-produto') {
       if (!ehAdmin((urlObj.searchParams && urlObj.searchParams.get('op')) || '')) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
       const q = String(urlObj.searchParams.get('q') || '').trim();
       let prod = null;
@@ -817,7 +901,7 @@ function routes(readBody) {
     }
 
     // ─── indexar catálogo inteiro (1x; deixa todo EAN achável na hora) — só admin ───
-    if (method === 'GET' && p === '/amb-checkout-offline/indexar-catalogo') {
+    if (method === 'GET' && p === '/girassol-backup-offline/indexar-catalogo') {
       const op = String(urlObj.searchParams.get('op') || '');
       if (!ehAdmin(op)) { json(res, 200, { ok: false, precisa_admin: true, erro: 'só admin pode indexar' }); return true; }
       if (getIdxStatus().rodando) { json(res, 200, { ok: true, started: false, jaRodando: true, status: getIdxStatus() }); return true; }
@@ -825,20 +909,20 @@ function routes(readBody) {
       json(res, 200, { ok: true, started: true });
       return true;
     }
-    if (method === 'GET' && p === '/amb-checkout-offline/indexar-status') {
+    if (method === 'GET' && p === '/girassol-backup-offline/indexar-status') {
       json(res, 200, { ok: true, status: getIdxStatus() });
       return true;
     }
 
     // ─── QZ Tray: assinatura (mata o popup "Untrusted") ───
     // serve o certificado público p/ o QZ confiar
-    if (method === 'GET' && p === '/amb-checkout-offline/qz-cert') {
+    if (method === 'GET' && p === '/girassol-backup-offline/qz-cert') {
       res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
       res.end(QZ_CERT || '');
       return true;
     }
     // assina a requisição do QZ com a chave privada (RSA-SHA512)
-    if (method === 'GET' && p === '/amb-checkout-offline/qz-sign') {
+    if (method === 'GET' && p === '/girassol-backup-offline/qz-sign') {
       let toSign = '';
       try { toSign = (urlObj.searchParams && urlObj.searchParams.get('request')) || ''; } catch (e) {}
       if (!toSign) { const m = /[?&]request=([^&]*)/.exec(urlObj.search || ''); toSign = m ? decodeURIComponent(m[1]) : ''; }
@@ -853,7 +937,7 @@ function routes(readBody) {
 
     // ─── FASE 2: tela de bipagem ───
     // serve a página
-    if (method === 'GET' && p === '/amb-checkout-offline/painel') {
+    if (method === 'GET' && p === '/girassol-backup-offline/painel') {
       try {
         const htmlContent = fs.readFileSync(path.join(__dirname, 'painel.html'), 'utf8');
         html(res, 200, htmlContent);
@@ -862,7 +946,7 @@ function routes(readBody) {
     }
 
     // lista os pedidos PRONTOS (com etiqueta) + estado de conferido
-    if (method === 'GET' && p === '/amb-checkout-offline/lista') {
+    if (method === 'GET' && p === '/girassol-backup-offline/lista') {
       const man = manifest();
       const conf = readJson(CONFERIDOS_FILE, {});
       const rsv = lerReservas();
@@ -885,7 +969,7 @@ function routes(readBody) {
         .sort((a, b) => Number(a.numero || 0) - Number(b.numero || 0));        // mais ANTIGOS (menor nº) em cima
       const semEtiq = ids
         .filter(i => !man[i].tem_etiqueta && !conf[i])                         // ATENDIDO mas SEM etiqueta = problema
-        .map(i => ({ id: i, numero: man[i].numero, cliente: man[i].cliente || '', nf_numero: man[i].nf_numero || null, marketplace: man[i].marketplace || 'outro' }))
+        .map(i => ({ id: i, numero: man[i].numero, cliente: man[i].cliente || '', nf_numero: man[i].nf_numero || null, nf_emissao: man[i].nf_emissao || null, marketplace: man[i].marketplace || 'outro' }))
         .sort((a, b) => Number(a.numero || 0) - Number(b.numero || 0));
       const hoje = new Date().toISOString().slice(0, 10);
       const finalizadosHoje = Object.values(conf).filter(c => c && String(c.conferido_em || '').slice(0, 10) === hoje).length;
@@ -902,31 +986,37 @@ function routes(readBody) {
     }
 
     // LISTA DE SEPARAÇÃO — agregado de itens a separar (do cache). ?mkt=ml|shopee|... ou vazio = todos
-    if (method === 'GET' && p === '/amb-checkout-offline/separacao') {
+    if (method === 'GET' && p === '/girassol-backup-offline/separacao') {
       const mkt = urlObj.searchParams.get('mkt');
       json(res, 200, montarSeparacao(mkt && mkt !== 'todos' ? mkt : null));
       return true;
     }
-    if (method === 'GET' && p === '/amb-checkout-offline/separacao-por-pedido') {
+    if (method === 'GET' && p === '/girassol-backup-offline/separacao-por-pedido') {
       const mkt = urlObj.searchParams.get('mkt');
       json(res, 200, montarSeparacaoPorPedido(mkt && mkt !== 'todos' ? mkt : null));
       return true;
     }
 
     // HISTÓRICO — últimos pedidos finalizados (do conferidos.json), mais recentes primeiro
-    if (method === 'GET' && p === '/amb-checkout-offline/historico') {
+    if (method === 'GET' && p === '/girassol-backup-offline/historico') {
       const conf = readJson(CONFERIDOS_FILE, {});
+      // BUGFIX d45: o backfill de nf_emissao rodava DEPOIS do map — a resposta do 1º carregamento saía sem a hora
+      // da NF (só o 2º F5 pegava). Agora completa o conf ANTES de montar os itens.
+      let _mudouNF=false;
+      for (const [cid2,c3] of Object.entries(conf)) { if (c3 && c3.nf_emissao === undefined) { const sn2 = readJson(path.join(CACHE_DIR, String(cid2), 'pedido.json'), null); c3.nf_emissao = (sn2 && sn2.nf && sn2.nf.dataEmissao) || null; _mudouNF=true; } }
+      if (_mudouNF) { try { writeJson(CONFERIDOS_FILE, conf); } catch(e){} }
       const itens = Object.keys(conf).map(id => ({ id, ...conf[id] }))
         .sort((a, b) => String(b.conferido_em || '').localeCompare(String(a.conferido_em || '')));
       const reenvios = readJson(CONFERIDOS_FILE.replace('conferidos.json', 'reenvios.json'), {});
-      const reenvioDireto = String(process.env.CHECKOUT_REENVIO_DIRETO_EMPRESAS || '').toLowerCase().split(',').map(s => s.trim()).includes('amb');
-      json(res, 200, { ok: true, total: Object.keys(conf).length, itens, reenvios, reenvio_direto: reenvioDireto });
+      const reenvioDireto = String(process.env.CHECKOUT_REENVIO_DIRETO_EMPRESAS || '').toLowerCase().split(',').map(s => s.trim()).includes('girassol');
+      const vendasB = Object.values(readJson(path.join(CACHE_DIR, '_vendas_dia.json'), {}));
+      json(res, 200, { ok: true, total: Object.keys(conf).length, itens, reenvios, reenvio_direto: reenvioDireto, vendas_bling: vendasB });
       return true;
     }
 
     // DEBUG — mostra onde o Bling guarda a localização de um SKU (confirma o campo)
-    // uso: /amb-checkout-offline/debug-loc/{SKU}
-    if (method === 'GET' && p.startsWith('/amb-checkout-offline/debug-loc/')) {
+    // uso: /girassol-backup-offline/debug-loc/{SKU}
+    if (method === 'GET' && p.startsWith('/girassol-backup-offline/debug-loc/')) {
       if (!ehAdmin((urlObj.searchParams && urlObj.searchParams.get('op')) || '')) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
       const sku = decodeURIComponent(p.split('/').pop() || '');
       const { ok, data } = await blingGet(`/produtos?codigo=${encodeURIComponent(sku)}&limite=1`);
@@ -943,7 +1033,7 @@ function routes(readBody) {
     }
 
     // detalhe do pedido cacheado (itens + EAN + NF)
-    if (method === 'GET' && p.startsWith('/amb-checkout-offline/pedido/')) {
+    if (method === 'GET' && p.startsWith('/girassol-backup-offline/pedido/')) {
       const id = p.split('/').filter(Boolean).pop();
       const ped = readJson(path.join(CACHE_DIR, String(id), 'pedido.json'), null);
       if (!ped) { json(res, 404, { erro: 'pedido não cacheado' }); return true; }
@@ -976,7 +1066,7 @@ function routes(readBody) {
     // descontado dos pedidos na fila → é o estoque real restante (não desconta de novo).
     // separado da abertura do pedido (a tela chama async) → não trava o checkout offline.
     // Bling fora do ar = saldos nulos → a tela mostra "—".
-    if (method === 'GET' && p.startsWith('/amb-checkout-offline/estoque-pedido/')) {
+    if (method === 'GET' && p.startsWith('/girassol-backup-offline/estoque-pedido/')) {
       const id = p.split('/').filter(Boolean).pop();
       const ped = readJson(path.join(CACHE_DIR, String(id), 'pedido.json'), null);
       if (!ped) { json(res, 404, { ok: false, erro: 'pedido não cacheado' }); return true; }
@@ -1025,7 +1115,7 @@ function routes(readBody) {
     }
 
     // serve o ZPL cacheado (texto puro) p/ o QZ Tray imprimir
-    if (method === 'GET' && p.startsWith('/amb-checkout-offline/etiqueta/')) {
+    if (method === 'GET' && p.startsWith('/girassol-backup-offline/etiqueta/')) {
       const id = p.split('/').filter(Boolean).pop();
       try {
         const zpl = fs.readFileSync(path.join(CACHE_DIR, String(id), `etiqueta.${ETIQ_FORMATO.toLowerCase()}`), 'utf8');
@@ -1036,7 +1126,7 @@ function routes(readBody) {
     }
 
     // serve o DANFE (PDF) — usa o cache; se faltar, gera na hora pelo Bling
-    if (method === 'GET' && p.startsWith('/amb-checkout-offline/danfe/')) {
+    if (method === 'GET' && p.startsWith('/girassol-backup-offline/danfe/')) {
       const id = p.split('/').filter(Boolean).pop();
       const dir = path.join(CACHE_DIR, String(id));
       let pdf = null;
@@ -1052,7 +1142,7 @@ function routes(readBody) {
     }
 
     // serve a ETIQUETA em PDF — usa o cache; se faltar, gera na hora pelo Bling
-    if (method === 'GET' && p.startsWith('/amb-checkout-offline/etiqueta-pdf/')) {
+    if (method === 'GET' && p.startsWith('/girassol-backup-offline/etiqueta-pdf/')) {
       const id = p.split('/').filter(Boolean).pop();
       const dir = path.join(CACHE_DIR, String(id));
       let pdf = null;
@@ -1067,7 +1157,7 @@ function routes(readBody) {
     }
 
     // IMPRESSÃO A4: etiqueta + NF (DANFE) MESCLADAS num PDF só — evita o navegador bloquear a 2ª aba
-    if (method === 'GET' && p.startsWith('/amb-checkout-offline/imprimir/')) {
+    if (method === 'GET' && p.startsWith('/girassol-backup-offline/imprimir/')) {
       const id = p.split('/').filter(Boolean).pop();
       const dir = path.join(CACHE_DIR, String(id));
       // etiqueta em PDF (ML cacheada; não-ML via Labelary on-demand)
@@ -1135,20 +1225,20 @@ function routes(readBody) {
     }
 
     // LOGIN: lista os NOMES dos operadores (sem senha) — o painel decide se mostra a tela de login
-    if (method === 'GET' && p === '/amb-checkout-offline/operadores') {
+    if (method === 'GET' && p === '/girassol-backup-offline/operadores') {
       const nomes = Object.keys(lerOperadores());
       json(res, 200, { operadores: nomes, login_ativo: nomes.length > 0, admins: lerAdmins() });
       return true;
     }
 
-    // LOGIN: valida nome + senha contra a env AMBBKP_OPERADORES
-    if (method === 'POST' && p === '/amb-checkout-offline/login') {
+    // LOGIN: valida nome + senha contra a env GIRABKP_OPERADORES
+    if (method === 'POST' && p === '/girassol-backup-offline/login') {
       const body = await readBody(req);
       const nome = String(body.nome || '').trim();
       const senha = String(body.senha || '').trim();
       const ops = lerOperadores();
       if (ops[nome] !== undefined && String(ops[nome]) === senha) {
-        res.setHeader('Set-Cookie', SESS_COOKIE + '=' + assinarSessao(nome) + '; Path=/amb-checkout-offline; HttpOnly; SameSite=Lax; Max-Age=' + Math.floor(SESS_TTL/1000));
+        res.setHeader('Set-Cookie', SESS_COOKIE + '=' + assinarSessao(nome) + '; Path=/girassol-backup-offline; HttpOnly; SameSite=Lax; Max-Age=' + Math.floor(SESS_TTL/1000));
         // LOGIN DISPARA O BLING: se a última consulta foi há mais de 3 min, roda em background — assim
         // ninguém abre a lista com etiqueta velha. Vários logins seguidos = 1 ciclo só (trava de intervalo).
         let _cicloDisparado = false;
@@ -1169,7 +1259,7 @@ function routes(readBody) {
     }
 
     // RESERVA um pedido p/ um operador (presença entre PCs — quadradinho colorido tipo Bling)
-    if (method === 'POST' && p === '/amb-checkout-offline/reservar') {
+    if (method === 'POST' && p === '/girassol-backup-offline/reservar') {
       const body = await readBody(req);
       const id = String(body.id || '');
       const user = String(body.user || '').trim();
@@ -1187,7 +1277,7 @@ function routes(readBody) {
     }
 
     // LIBERA a reserva (ao voltar pra lista / finalizar)
-    if (method === 'POST' && p === '/amb-checkout-offline/liberar') {
+    if (method === 'POST' && p === '/girassol-backup-offline/liberar') {
       const body = await readBody(req);
       const id = String(body.id || '');
       const r = lerReservas();
@@ -1198,7 +1288,7 @@ function routes(readBody) {
 
     // REABRIR um pedido finalizado por engano: tira da fila de conferidos → volta pra lista.
     // Aceita o bling_id OU o número visível. Se já tinha ido pra VERIFICADO, devolve pra ATENDIDO no Bling.
-    if ((method === 'GET' || method === 'POST') && p.startsWith('/amb-checkout-offline/reabrir/')) {
+    if ((method === 'GET' || method === 'POST') && p.startsWith('/girassol-backup-offline/reabrir/')) {
       let op = '';
       try { op = (urlObj.searchParams && urlObj.searchParams.get('op')) || ''; } catch (e) {}
       if (!op && method === 'POST') { try { const b = await readBody(req); op = String(b.op || ''); } catch (e) {} }
@@ -1214,13 +1304,13 @@ function routes(readBody) {
       if (eraSync) { const mv = await moverSituacao(id, SIT_ATENDIDO); revertido = !!(mv && mv.ok); }   // VERIFICADO → volta pra ATENDIDO
       const rsv = lerReservas(); if (rsv[id]) { delete rsv[id]; writeJson(RESERVAS_FILE, rsv); }
       rodarCiclo('reabrir').catch(() => {});   // re-cacheia em background → reaparece na lista se estiver ATENDIDO
-      console.log(`[AMBBKP] reaberto ${id} (era sync=${eraSync}, revertido p/ ATENDIDO=${revertido})`);
+      console.log(`[GIRABKP] reaberto ${id} (era sync=${eraSync}, revertido p/ ATENDIDO=${revertido})`);
       json(res, 200, { ok: true, id, removido_da_fila: true, revertido_p_atendido: revertido });
       return true;
     }
 
     // marca pedido como conferido offline (entra na fila p/ sync na Fase 3)
-    if (method === 'POST' && p === '/amb-checkout-offline/conferido') {
+    if (method === 'POST' && p === '/girassol-backup-offline/conferido') {
       const body = await readBody(req);
       const id = String(body.id || '');
       if (!id) { json(res, 400, { erro: 'id obrigatório' }); return true; }
@@ -1240,7 +1330,7 @@ function routes(readBody) {
         flex: !!(snapC && snapC.flex),
         servico: snapC ? (snapC.servico || '') : '',
         nf_numero: (snapC && snapC.nf && snapC.nf.numero) || null,
-        nf_emissao: (snapC && snapC.nf && snapC.nf.dataEmissao) || null,   // b10: hora da NF gravada na bipagem (pronto pro dia em que o dashboard chegar aqui)
+        nf_emissao: (snapC && snapC.nf && snapC.nf.dataEmissao) || null,   // b11: hora da NF já entra na bipagem (dashboard ordena por ela)
         valor: (snapC && snapC.total != null) ? Number(snapC.total) : null,   // faturamento (total do pedido)
         uf: (snapC && snapC.uf) || null,
         vprod_nf: (function(){ try {   // Σ itens da NOTA (fonte fiscal) → produtos EXATO; frete = valor − vprod_nf
@@ -1268,11 +1358,11 @@ function routes(readBody) {
           conf[id].sincronizado_em = new Date().toISOString();
           delete conf[id].sync_erro;
           sincronizado = true;
-          console.log(`[AMBBKP] conferido ${id} → ${SIT_VERIFICADO} (espelho na hora) OK`);
+          console.log(`[GIRABKP] conferido ${id} → ${SIT_VERIFICADO} (espelho na hora) OK`);
         } else {
           conf[id].sync_erro = String(r.status || 'err');
           blingOffline = true;
-          console.log(`[AMBBKP] conferido ${id} ficou na fila (bling ${r.status}) — sincroniza depois`);
+          console.log(`[GIRABKP] conferido ${id} ficou na fila (bling ${r.status}) — sincroniza depois`);
         }
         writeJson(CONFERIDOS_FILE, conf);
       }
@@ -1281,15 +1371,15 @@ function routes(readBody) {
     }
 
     // FASE 3 — força o sync da fila de conferidos → VERIFICADO (24). Botão "Sincronizar" / manual.
-    if ((method === 'POST' || method === 'GET') && p === '/amb-checkout-offline/sincronizar') {
+    if ((method === 'POST' || method === 'GET') && p === '/girassol-backup-offline/sincronizar') {
       const r = await sincronizarConferidos();
       json(res, 200, { ok: true, ...r });
       return true;
     }
 
     // DEBUG — testa mover UM pedido p/ VERIFICADO (ou outro id via ?situacao=). Mostra resposta crua do Bling.
-    // uso: /amb-checkout-offline/debug-mover/{idDoPedido}
-    if (method === 'GET' && p.startsWith('/amb-checkout-offline/debug-mover/')) {
+    // uso: /girassol-backup-offline/debug-mover/{idDoPedido}
+    if (method === 'GET' && p.startsWith('/girassol-backup-offline/debug-mover/')) {
       if (!ehAdmin((urlObj.searchParams && urlObj.searchParams.get('op')) || '')) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
       const id = p.split('/').pop();
       const sit = Number(urlObj.searchParams.get('situacao') || SIT_VERIFICADO);
@@ -1298,7 +1388,7 @@ function routes(readBody) {
       return true;
     }
 
-    if (method === 'GET' && p === '/amb-checkout-offline/status') {
+    if (method === 'GET' && p === '/girassol-backup-offline/status') {
       const man = manifest();
       const ids = Object.keys(man);
       const conf = readJson(CONFERIDOS_FILE, {});
@@ -1320,7 +1410,7 @@ function routes(readBody) {
     }
 
     // SAÚDE: para monitor externo (UptimeRobot). 200 = tudo OK · 503 = algo quebrou (dispara o alerta).
-    if ((method === 'GET' || method === 'HEAD') && p === '/amb-checkout-offline/saude') {
+    if ((method === 'GET' || method === 'HEAD') && p === '/girassol-backup-offline/saude') {
       const agora = Date.now();
       const conf = readJson(CONFERIDOS_FILE, {});
       const pendentes = Object.keys(conf).filter(i => conf[i] && !conf[i].sincronizado);
@@ -1335,7 +1425,7 @@ function routes(readBody) {
       // 3) sync-back falhando
       if (SYNC_ON && getUltimoSync() && getUltimoSync().falhas > 0) problemas.push('o sync pro Bling falhou em ' + getUltimoSync().falhas + ' pedido(s) no último ciclo');
       // avisos (não derrubam o status, só informam)
-      if (!SYNC_ON) avisos.push('AMBBKP_SYNC_ON desligado — finalizados não voltam pro Bling sozinhos');
+      if (!SYNC_ON) avisos.push('GIRABKP_SYNC_ON desligado — finalizados não voltam pro Bling sozinhos');
       if (pendentes.length > 0) avisos.push(pendentes.length + ' finalizado(s) ainda não sincronizado(s)');
       const ok = problemas.length === 0;
       const code = ok ? 200 : 503;
@@ -1358,7 +1448,7 @@ function routes(readBody) {
 
     // BUSCAR PEDIDO por número (ou ID) em QUALQUER status — ao vivo no Bling.
     // Pra achar a NF de um pedido que não passou pelo Checkout Offline.
-    if (method === 'GET' && p === '/amb-checkout-offline/buscar-pedido') {
+    if (method === 'GET' && p === '/girassol-backup-offline/buscar-pedido') {
       const q = String(urlObj.searchParams.get('q') || '').trim();
       if (!q) { json(res, 400, { ok: false, erro: 'use ?q=NUMERO' }); return true; }
       let ids = [], via = null;
@@ -1411,7 +1501,7 @@ function routes(readBody) {
       return true;
     }
     // baixa o DANFE (PDF) de QUALQUER pedido ao vivo (acha a NF na hora) — não precisa estar no cache
-    if (method === 'GET' && p.startsWith('/amb-checkout-offline/nf-danfe-live/')) {
+    if (method === 'GET' && p.startsWith('/girassol-backup-offline/nf-danfe-live/')) {
       const id = p.split('/').filter(Boolean).pop();
       const nf = await nfDoPedido(id);
       const pdf = nf && nf.id ? await baixarDanfe(nf.id) : null;
@@ -1420,7 +1510,7 @@ function routes(readBody) {
       return true;
     }
     // baixa o DANFE (PDF) direto pelo ID da NOTA (pra resultados de busca por NF)
-    if (method === 'GET' && p.startsWith('/amb-checkout-offline/danfe-nf/')) {
+    if (method === 'GET' && p.startsWith('/girassol-backup-offline/danfe-nf/')) {
       const nfId = p.split('/').filter(Boolean).pop();
       const pdf = await baixarDanfe(nfId);
       if (pdf) { res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': `inline; filename="danfe-nf-${nfId}.pdf"` }); res.end(pdf); }
@@ -1428,7 +1518,7 @@ function routes(readBody) {
       return true;
     }
     // baixa o XML da NOTA pelo ID
-    if (method === 'GET' && p.startsWith('/amb-checkout-offline/xml-nf/')) {
+    if (method === 'GET' && p.startsWith('/girassol-backup-offline/xml-nf/')) {
       const nfId = p.split('/').filter(Boolean).pop();
       const det = await blingGet(`/nfe/${nfId}`);
       const nf = det.data && det.data.data;
@@ -1440,7 +1530,7 @@ function routes(readBody) {
     // ARQUIVO: info de um pedido finalizado (existe arquivo? meta)
     // DIAGNÓSTICO de etiqueta — mostra o que o Bling devolve (PDF e ZPL) p/ um pedido + o que tá no cache
     // TESTE de conversão ZPL→PDF (Labelary) — compara o ZPL do cache vs o fresco do Bling
-    if (method === 'GET' && p.startsWith('/amb-checkout-offline/arq-info/')) {
+    if (method === 'GET' && p.startsWith('/girassol-backup-offline/arq-info/')) {
       const id = p.split('/').filter(Boolean).pop();
       const ped = readJson(path.join(ARQUIVO_DIR, String(id), 'pedido.json'), null);
       const etqPath = path.join(ARQUIVO_DIR, String(id), `etiqueta.${ETIQ_FORMATO.toLowerCase()}`);
@@ -1448,7 +1538,7 @@ function routes(readBody) {
       return true;
     }
     // ARQUIVO: etiqueta arquivada → PDF (converte ZPL se preciso)
-    if (method === 'GET' && p.startsWith('/amb-checkout-offline/arq-etiqueta-pdf/')) {
+    if (method === 'GET' && p.startsWith('/girassol-backup-offline/arq-etiqueta-pdf/')) {
       const id = p.split('/').filter(Boolean).pop();
       let pdf = null;
       try { pdf = await etiquetaPdf(id, path.join(ARQUIVO_DIR, String(id))); } catch (e) {}
@@ -1457,7 +1547,7 @@ function routes(readBody) {
       return true;
     }
     // ARQUIVO: DANFE de um pedido arquivado → gera na hora pelo nf.id guardado
-    if (method === 'GET' && p.startsWith('/amb-checkout-offline/arq-danfe/')) {
+    if (method === 'GET' && p.startsWith('/girassol-backup-offline/arq-danfe/')) {
       const id = p.split('/').filter(Boolean).pop();
       const ped = readJson(path.join(ARQUIVO_DIR, String(id), 'pedido.json'), null);
       const nfId = ped && ped.nf && ped.nf.id;
@@ -1470,14 +1560,14 @@ function routes(readBody) {
     // ── REENVIO DE DOCS: o estoquista SINALIZA (etiqueta rasgou / NF com problema) e o ADMIN decide enviar ──
     // Futuro: env CHECKOUT_REENVIO_DIRETO_EMPRESAS ("girassol,good") → nas empresas listadas o pedido do
     // estoquista já dispara o e-mail direto, sem esperar o admin. Sem a env (padrão) = só sinaliza.
-    if (method === 'POST' && p.startsWith('/amb-checkout-offline/pedir-reenvio/')) {
+    if (method === 'POST' && p.startsWith('/girassol-backup-offline/pedir-reenvio/')) {
       let op = '';
       try { const b = await readBody(req); op = String(b.op || ''); } catch (e) {}
       if (!op) { json(res, 200, { ok: false, erro: 'identifique o operador (faça login no painel)' }); return true; }
       const id = decodeURIComponent(p.split('/').filter(Boolean).pop() || '');
       const confR = readJson(CONFERIDOS_FILE, {});
       const c = confR[id] || {};
-      const direto = String(process.env.CHECKOUT_REENVIO_DIRETO_EMPRESAS || '').toLowerCase().split(',').map(s => s.trim()).includes('amb');
+      const direto = String(process.env.CHECKOUT_REENVIO_DIRETO_EMPRESAS || '').toLowerCase().split(',').map(s => s.trim()).includes('girassol');
       if (direto) {
         const r = await enviarEmailDocs(id, op);
         if (r.ok && confR[id]) {   // flag visível no histórico: quem reenviou e quando
@@ -1485,7 +1575,7 @@ function routes(readBody) {
           confR[id].ultimo_reenvio = { por: op, em: new Date().toISOString() };
           writeJson(CONFERIDOS_FILE, confR);
         }
-        console.log(`[AMBBKP] 📨 reenvio DIRETO pedido ${c.numero || id} por ${op} → ${r.ok ? 'enviado' : 'FALHA: ' + r.erro}`);
+        console.log(`[GIRABKP] 📨 reenvio DIRETO pedido ${c.numero || id} por ${op} → ${r.ok ? 'enviado' : 'FALHA: ' + r.erro}`);
         json(res, 200, { ...r, direto: true });
         return true;
       }
@@ -1493,12 +1583,12 @@ function routes(readBody) {
       const ree = readJson(REENVIOS_FILE, {});
       ree[id] = { numero: c.numero || null, cliente: c.cliente || '', por: op, em: new Date().toISOString() };
       writeJson(REENVIOS_FILE, ree);
-      console.log(`[AMBBKP] 📨 REENVIO SOLICITADO — pedido ${c.numero || id} por ${op} (admin envia pelo Histórico)`);
+      console.log(`[GIRABKP] 📨 REENVIO SOLICITADO — pedido ${c.numero || id} por ${op} (admin envia pelo Histórico)`);
       json(res, 200, { ok: true, solicitado: true });
       return true;
     }
     // admin resolve a solicitação: {enviar:true} manda o e-mail e baixa; {enviar:false} só descarta
-    if (method === 'POST' && p.startsWith('/amb-checkout-offline/reenvio-resolver/')) {
+    if (method === 'POST' && p.startsWith('/girassol-backup-offline/reenvio-resolver/')) {
       let op = '', enviar = false;
       try { const b = await readBody(req); op = String(b.op || ''); enviar = !!b.enviar; } catch (e) {}
       if (!ehAdmin(op)) { json(res, 200, { ok: false, erro: 'apenas o admin' }); return true; }
@@ -1509,11 +1599,11 @@ function routes(readBody) {
       if (enviar) { const cE = readJson(CONFERIDOS_FILE, {}); if (cE[id]) { cE[id].reenvios = (cE[id].reenvios || 0) + 1; cE[id].ultimo_reenvio = { por: op, em: new Date().toISOString() }; writeJson(CONFERIDOS_FILE, cE); } }
       const ree = readJson(REENVIOS_FILE, {});
       delete ree[id]; writeJson(REENVIOS_FILE, ree);
-      console.log(`[AMBBKP] 📨 reenvio ${id} ${enviar ? 'ENVIADO' : 'descartado'} por ${op}`);
+      console.log(`[GIRABKP] 📨 reenvio ${id} ${enviar ? 'ENVIADO' : 'descartado'} por ${op}`);
       json(res, 200, r);
       return true;
     }
-    if (method === 'POST' && p.startsWith('/amb-checkout-offline/enviar-docs/')) {
+    if (method === 'POST' && p.startsWith('/girassol-backup-offline/enviar-docs/')) {
       let op = '';
       try { op = (urlObj.searchParams && urlObj.searchParams.get('op')) || ''; } catch (e) {}
       if (!op) { try { const b = await readBody(req); op = String(b.op || ''); } catch (e) {} }
@@ -1521,12 +1611,12 @@ function routes(readBody) {
       const id = decodeURIComponent(p.split('/').filter(Boolean).pop() || '');
       const r = await enviarEmailDocs(id, op);
       if (r.ok) { const cD = readJson(CONFERIDOS_FILE, {}); if (cD[id]) { cD[id].reenvios = (cD[id].reenvios || 0) + 1; cD[id].ultimo_reenvio = { por: op, em: new Date().toISOString() }; writeJson(CONFERIDOS_FILE, cD); } }
-      console.log(`[AMBBKP] enviar-docs ${id} (por ${op}) → ${r.ok ? 'OK (' + r.anexos + ' anexos)' : 'FALHA: ' + r.erro}`);
+      console.log(`[GIRABKP] enviar-docs ${id} (por ${op}) → ${r.ok ? 'OK (' + r.anexos + ' anexos)' : 'FALHA: ' + r.erro}`);
       json(res, 200, r);
       return true;
     }
     // DEBUG: por que a NF do pedido não veio? mostra a resposta crua do link pedido→nota + campos do pedido
-    if (method === 'GET' && p.startsWith('/amb-checkout-offline/debug-nfped/')) {
+    if (method === 'GET' && p.startsWith('/girassol-backup-offline/debug-nfped/')) {
       if (!ehAdmin((urlObj.searchParams && urlObj.searchParams.get('op')) || '')) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
       const id = p.split('/').filter(Boolean).pop();
       const out = { id };
@@ -1543,7 +1633,7 @@ function routes(readBody) {
     // DEBUG 2: testa buscar NF por número e contato por nome (pra saber quais buscas a API permite)
 
     // BACKUP: baixa um JSON com o estado que NÃO vem do Bling (fila + localizações + índice + log). Só admin.
-    if (method === 'GET' && p === '/amb-checkout-offline/backup') {
+    if (method === 'GET' && p === '/girassol-backup-offline/backup') {
       const op = String(urlObj.searchParams.get('op') || '');
       if (!ehAdmin(op)) { json(res, 200, { ok: false, precisa_admin: true, erro: 'só admin — use ?op=SEUNOME' }); return true; }
       const dump = {
@@ -1560,7 +1650,7 @@ function routes(readBody) {
       return true;
     }
     // RESTAURAR (página): cola o JSON do backup e restaura. Só admin (?op=SEUNOME).
-    if (method === 'GET' && p === '/amb-checkout-offline/restaurar') {
+    if (method === 'GET' && p === '/girassol-backup-offline/restaurar') {
       const op = String(urlObj.searchParams.get('op') || '');
       if (!ehAdmin(op)) { html(res, 200, '<meta charset=utf-8><p style="font-family:Arial;margin:40px">Acesso só pra admin. Use <b>?op=SEUNOME</b> no fim da URL.</p>'); return true; }
       const pg = '<!doctype html><meta charset=utf-8><title>Restaurar backup</title>' +
@@ -1569,12 +1659,12 @@ function routes(readBody) {
         '<p>Cola o conteúdo do arquivo de backup (JSON) e clica em Restaurar. <b style="color:#c00">Isso sobrescreve o estado atual.</b></p>' +
         '<textarea id=j placeholder="cola aqui o JSON do backup"></textarea>' +
         '<button onclick="rest()">Restaurar</button><div id=r></div>' +
-        '<script>async function rest(){var el=document.getElementById("r");var o;try{o=JSON.parse(document.getElementById("j").value)}catch(e){el.textContent="JSON inválido: "+e.message;return}o.op=' + JSON.stringify(op) + ';try{var x=await fetch("/amb-checkout-offline/restaurar",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(o)});x=await x.json();el.textContent=x.ok?("\\u2713 Restaurado: "+x.restaurados.join(", ")):("Falhou: "+(x.erro||"erro"))}catch(e){el.textContent="Erro: "+e.message}}<\/script>';
+        '<script>async function rest(){var el=document.getElementById("r");var o;try{o=JSON.parse(document.getElementById("j").value)}catch(e){el.textContent="JSON inválido: "+e.message;return}o.op=' + JSON.stringify(op) + ';try{var x=await fetch("/girassol-backup-offline/restaurar",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(o)});x=await x.json();el.textContent=x.ok?("\\u2713 Restaurado: "+x.restaurados.join(", ")):("Falhou: "+(x.erro||"erro"))}catch(e){el.textContent="Erro: "+e.message}}<\/script>';
       html(res, 200, pg);
       return true;
     }
     // RESTAURAR (ação): grava de volta só o que veio no corpo. Só admin.
-    if (method === 'POST' && p === '/amb-checkout-offline/restaurar') {
+    if (method === 'POST' && p === '/girassol-backup-offline/restaurar') {
       let body = {};
       try { body = await readBody(req); } catch (e) {}
       if (!ehAdmin(String(body.op || ''))) { json(res, 200, { ok: false, precisa_admin: true, erro: 'só admin' }); return true; }
@@ -1588,7 +1678,7 @@ function routes(readBody) {
     }
 
     // DEBUG: dumpa as respostas cruas do Bling p/ um pedido (diagnóstico NF/etiqueta)
-    if (method === 'GET' && p.startsWith('/amb-checkout-offline/debug/')) {
+    if (method === 'GET' && p.startsWith('/girassol-backup-offline/debug/')) {
       const id = p.split('/').filter(Boolean).pop();
       const out = { id, versao: VERSAO };
       try {
@@ -1657,7 +1747,7 @@ function routes(readBody) {
     }
 
     // DEBUG: lista vendas ML recentes (loja 203146903) p/ achar uma pra testar etiqueta
-    if (method === 'GET' && p === '/amb-checkout-offline/debug-ml') {
+    if (method === 'GET' && p === '/girassol-backup-offline/debug-ml') {
       if (!ehAdmin((urlObj.searchParams && urlObj.searchParams.get('op')) || '')) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
       const { data } = await blingGet(`/pedidos/vendas?idLoja=203146903&limite=20&pagina=1`);
       const lista = (data && data.data) || [];
@@ -1675,8 +1765,8 @@ function routes(readBody) {
     }
 
     // DEBUG: dumpa o produto CRU por SKU — vê formato + estrutura/componentes da composição
-    // uso: /amb-checkout-offline/debug-produto/{SKU}
-    if (method === 'GET' && p.startsWith('/amb-checkout-offline/debug-produto/')) {
+    // uso: /girassol-backup-offline/debug-produto/{SKU}
+    if (method === 'GET' && p.startsWith('/girassol-backup-offline/debug-produto/')) {
       if (!ehAdmin((urlObj.searchParams && urlObj.searchParams.get('op')) || '')) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
       const sku = decodeURIComponent(p.split('/').filter(Boolean).pop() || '');
       const lista = await blingGet(`/produtos?codigo=${encodeURIComponent(sku)}&limite=1`);
@@ -1697,8 +1787,8 @@ function routes(readBody) {
     }
 
     // DEBUG: dumpa a ESTRUTURA dos produtos de um pedido (variação / composição / kit)
-    // uso: /amb-checkout-offline/debug-estrutura/{idDoPedido}
-    if (method === 'GET' && p.startsWith('/amb-checkout-offline/debug-estrutura/')) {
+    // uso: /girassol-backup-offline/debug-estrutura/{idDoPedido}
+    if (method === 'GET' && p.startsWith('/girassol-backup-offline/debug-estrutura/')) {
       if (!ehAdmin((urlObj.searchParams && urlObj.searchParams.get('op')) || '')) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
       const id = p.split('/').filter(Boolean).pop();
       const out = { pedido: id, versao: VERSAO, itens: [] };
@@ -1743,7 +1833,7 @@ function routes(readBody) {
     // DEBUG: acha pedidos no cache que parecem KIT/composição (p/ inspecionar a estrutura)
 
     // DEBUG: dumpa o objeto NF + TESTA baixar o DANFE em PDF (linkPDF) de dentro do Render
-    if (method === 'GET' && p === '/amb-checkout-offline/debug-nf') {
+    if (method === 'GET' && p === '/girassol-backup-offline/debug-nf') {
       if (!ehAdmin((urlObj.searchParams && urlObj.searchParams.get('op')) || '')) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
       const out = { versao: VERSAO };
       try {
@@ -1782,9 +1872,9 @@ function routes(readBody) {
     }
 
     // DEBUG/PREVIEW: gera o DANFE Simplificado 10x15 de um pedido REAL (pra ver e validar)
-    // uso: /amb-checkout-offline/debug-nf-simp/{idDoPedido}        → abre o PDF
-    //      /amb-checkout-offline/debug-nf-simp/{idDoPedido}?json=1 → mostra os dados extraídos
-    if (method === 'GET' && p.startsWith('/amb-checkout-offline/debug-nf-simp/')) {
+    // uso: /girassol-backup-offline/debug-nf-simp/{idDoPedido}        → abre o PDF
+    //      /girassol-backup-offline/debug-nf-simp/{idDoPedido}?json=1 → mostra os dados extraídos
+    if (method === 'GET' && p.startsWith('/girassol-backup-offline/debug-nf-simp/')) {
       if (!ehAdmin((urlObj.searchParams && urlObj.searchParams.get('op')) || '')) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
       const pedidoId = p.split('/').filter(Boolean).pop();
       let snap = readJson(path.join(CACHE_DIR, String(pedidoId), 'pedido.json'), null);
@@ -1810,8 +1900,8 @@ function routes(readBody) {
     // PRODUÇÃO: gera/serve o DANFE SIMPLIFICADO (10x15) p/ imprimir na Zebra.
     //   cache-first (nf-simp.json gravado pelo cron → funciona OFFLINE);
     //   se não tiver no cache, busca ao vivo e cacheia.
-    // uso: /amb-checkout-offline/danfe-simp/{idOuNumero}
-    if (method === 'GET' && p.startsWith('/amb-checkout-offline/danfe-simp/')) {
+    // uso: /girassol-backup-offline/danfe-simp/{idOuNumero}
+    if (method === 'GET' && p.startsWith('/girassol-backup-offline/danfe-simp/')) {
       const pedidoId = p.split('/').filter(Boolean).pop();
       let dir = path.join(CACHE_DIR, String(pedidoId));
       let snap = readJson(path.join(dir, 'pedido.json'), null);
@@ -1864,8 +1954,8 @@ function routes(readBody) {
     //   [adesivo VOLUME i/N] + [etiqueta Correios 10x15] + [DANFE-simplificada].
     // O ZPL do Madeira é PÚBLICO (zplPorBatch — sem token/sessão); cacheia em
     // etiqueta-correios.zpl p/ reimpressão. A DANFE-simp reaproveita gerarDanfeSimplificadoZPL.
-    // uso: /amb-checkout-offline/etiqueta-madeira-zpl/{idOuNumero}   (?nodanfe=1 → só etiqueta+adesivo)
-    if (method === 'GET' && p.startsWith('/amb-checkout-offline/etiqueta-madeira-zpl/')) {
+    // uso: /girassol-backup-offline/etiqueta-madeira-zpl/{idOuNumero}   (?nodanfe=1 → só etiqueta+adesivo)
+    if (method === 'GET' && p.startsWith('/girassol-backup-offline/etiqueta-madeira-zpl/')) {
       const pedidoId = p.split('/').filter(Boolean).pop();
       let dir = path.join(CACHE_DIR, String(pedidoId));
       let snap = readJson(path.join(dir, 'pedido.json'), null);
@@ -1930,8 +2020,8 @@ function routes(readBody) {
     // Shopee NÃO usa — já vem fundida nativa pela própria API.
     // ?info=1 → mostra os números da fusão (fator, se cabe) SEM imprimir, p/ diagnóstico.
     // ?pdf=1  → devolve um PDF da etiqueta fundida (imprime em qualquer impressora; testar à distância).
-    // uso: /amb-checkout-offline/etiqueta-fundida/{idOuNumero}
-    if (method === 'GET' && p.startsWith('/amb-checkout-offline/etiqueta-fundida/')) {
+    // uso: /girassol-backup-offline/etiqueta-fundida/{idOuNumero}
+    if (method === 'GET' && p.startsWith('/girassol-backup-offline/etiqueta-fundida/')) {
       const pedidoId = p.split('/').filter(Boolean).pop();
       let dir = path.join(CACHE_DIR, String(pedidoId));
       let snap = readJson(path.join(dir, 'pedido.json'), null);
@@ -1992,8 +2082,8 @@ function routes(readBody) {
     }
 
     // testa o caminho do DANFE p/ UM pedido (id do pedido) e cacheia se der certo
-    // uso: /amb-checkout-offline/debug-danfe/{idDoPedido}
-    if (method === 'GET' && p.startsWith('/amb-checkout-offline/debug-danfe/')) {
+    // uso: /girassol-backup-offline/debug-danfe/{idDoPedido}
+    if (method === 'GET' && p.startsWith('/girassol-backup-offline/debug-danfe/')) {
       if (!ehAdmin((urlObj.searchParams && urlObj.searchParams.get('op')) || '')) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
       const id = p.split('/').filter(Boolean).pop();
       const out = { pedido: id, versao: VERSAO };
@@ -2036,8 +2126,8 @@ function routes(readBody) {
     }
 
     // testa se o Bling devolve a ETIQUETA em PDF (vs ZPL) p/ um pedido
-    // uso: /amb-checkout-offline/debug-etiqueta-fmt/{idDoPedido}
-    if (method === 'GET' && p.startsWith('/amb-checkout-offline/debug-etiqueta-fmt/')) {
+    // uso: /girassol-backup-offline/debug-etiqueta-fmt/{idDoPedido}
+    if (method === 'GET' && p.startsWith('/girassol-backup-offline/debug-etiqueta-fmt/')) {
       if (!ehAdmin((urlObj.searchParams && urlObj.searchParams.get('op')) || '')) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
       const id = p.split('/').filter(Boolean).pop();
       const out = { pedido: id, versao: VERSAO };
@@ -2075,6 +2165,193 @@ function routes(readBody) {
 }
 
 // roda 1 ciclo logo após o boot do serviço
+// ═══ VENDAS-SYNC (background): TODAS as vendas do Bling por data, em QUALQUER situação —
+// independe de bipagem. Roda a cada 5 min + boot + botão. Cancelada vem com a situação marcada.
+let _vsy = { rodando: false, total: 0, atualizado_em: null, erro: null };
+function _inferCanal(nl) {
+  const s = String(nl || '');
+  if (!s) return 'outro';
+  if (s.indexOf('-') >= 0) return 'amazon';
+  if (/[a-z]/i.test(s)) return 'shopee';
+  if (/^200/.test(s)) return 'ml';
+  if (/^585/.test(s)) return 'tiktok';
+  if (/^15/.test(s)) return 'magalu';
+  return 'outro';
+}
+async function vendasSync() {
+  if (_vsy.rodando) return;
+  _vsy.rodando = true; _vsy.erro = null; _vsy.fase = 'listagem';
+  try {
+    const isoD = dt => dt.toISOString().slice(0, 10);
+    const hoje = new Date();
+    const ini = new Date(hoje); ini.setDate(ini.getDate() - 3);
+    const fim = new Date(hoje); fim.setDate(fim.getDate() + 1);   // janela [hoje-3, hoje+1] — evita o bug do mesmo-dia do Bling
+    const F = path.join(CACHE_DIR, '_vendas_dia.json');
+    const atual = readJson(F, {});
+    let paginas = 0;
+    for (let pg = 1; pg <= 20; pg++) {
+      const r = await blingGet('/pedidos/vendas?dataEmissaoInicial=' + isoD(ini) + '&dataEmissaoFinal=' + isoD(fim) + '&pagina=' + pg + '&limite=100');
+      const lista = (r && r.ok && r.data && r.data.data) || [];
+      if (!lista.length) break;
+      paginas++;
+      for (const p of lista) {
+        if (!p || p.id == null) continue;
+        const nl = p.numeroPedidoLoja || p.numeroLoja || null;   // a LISTAGEM do Bling manda numeroLoja (o detalhe manda numeroPedidoLoja)
+        const ljId = String((p.loja && p.loja.id) || '');
+        atual[String(p.id)] = {
+          id: p.id, numero: p.numero != null ? p.numero : null,
+          numero_loja: nl, marketplace: LOJA_MKT[ljId] || _inferCanal(nl),   // canal OFICIAL pela loja do Bling; formato do nº é só fallback
+          data: (p.data || '').slice(0, 10) || null,
+          total: (p.total != null && isFinite(Number(p.total))) ? Number(p.total) : null,
+          cliente: (p.contato && p.contato.nome) || '',
+          situacao: (p.situacao && (p.situacao.valor || p.situacao.nome)) || null,
+          situacao_id: (p.situacao && p.situacao.id) || null,
+          loja_id: (p.loja && p.loja.id) || null,
+          atualizado_em: new Date().toISOString()
+        };
+      }
+      if (lista.length < 100) break;
+      await new Promise(r2 => setTimeout(r2, 450));
+    }
+    writeJson(F, atual);   // b12: grava JÁ após a fase 1 — o 🔄 do dashboard espera 6s e recarrega; antes, o arquivo só era gravado no fim da rodada (~1 min) e o botão sempre mostrava a rodada anterior
+    _vsy.fase = 'detalhes';
+    // b21: esta fase virou a PRIMEIRA depois da listagem — é ela que dá MARGEM às vendas ainda não bipadas
+    // (itens → custo/R$ produtos; taxas → tarifa). Estava por último atrás de NF/Shopee e pedido novo ficava
+    // sem margem nenhuma até o fim da rodada (ou pra sempre, se a rodada não terminasse).
+    // fase 2: DETALHE dos ainda não-bipados (itens → custo/R$ produtos; taxas → tarifa/frete) — margem antes da bipagem
+    try {
+      const confS = readJson(CONFERIDOS_FILE, {});
+      const bipN = new Set(Object.values(confS).map(c => String(c && c.numero)));
+      let _tkV=null; try{ const {garantirTokenML:_g2}=require('../girassol/mlTokenManager'); _tkV=await _g2(); }catch(e){}   // hora real do ML nas não-bipadas
+      const alvosDet = Object.values(atual).filter(v => v && !v.det && v.numero != null && !bipN.has(String(v.numero)) && !/cancel/i.test(String(v.situacao || ''))).slice(0, 90);   // b21: mais alvos por rodada — margem da não-bipada é o que o Diego abre pra ver
+      for (const v of alvosDet) {
+        const rd = await blingGet('/pedidos/vendas/' + v.id);
+        const det = (rd && rd.ok && rd.data && rd.data.data) || null;
+        if (det) {
+          if (!v.numero_loja && det.numeroPedidoLoja) v.numero_loja = det.numeroPedidoLoja;   // detalhe traz numeroPedidoLoja
+          if (!v.marketplace || v.marketplace === 'outro') { const lj2 = String((det.loja && det.loja.id) || ''); v.marketplace = LOJA_MKT[lj2] || _inferCanal(v.numero_loja); }
+          v.it = (det.itens || []).map(i2 => ({ sku: (i2.codigo || (i2.produto && i2.produto.codigo) || '').trim() || null, qtd: Number(i2.quantidade || 1), vt: Math.round(Number(i2.valor || 0) * Number(i2.quantidade || 1) * 100) / 100 }));
+          const tc = det.taxas && Number(det.taxas.taxaComissao); if (isFinite(tc) && tc > 0) v.taxa_mkt = Math.round(tc * 100) / 100;
+          const cf = det.taxas && Number(det.taxas.custoFrete); if (isFinite(cf) && cf > 0) v.frete_mkt = Math.round(cf * 100) / 100;
+          if (det.situacao && (det.situacao.valor || det.situacao.nome)) v.situacao = det.situacao.valor || det.situacao.nome;
+          v.det = 1;
+          if (_tkV && v.marketplace === 'ml' && v.numero_loja && !v.venda_em) {
+            try {
+              const nlm = String(v.numero_loja).replace(/\D/g, '');
+              let rml = await fetch('https://api.mercadolibre.com/orders/' + nlm, { headers: { Authorization: 'Bearer ' + _tkV } });
+              let dml = await rml.json().catch(() => null);
+              if (!rml.ok) { rml = await fetch('https://api.mercadolibre.com/packs/' + nlm, { headers: { Authorization: 'Bearer ' + _tkV } }); const dp3 = await rml.json().catch(() => null); const o1 = dp3 && dp3.orders && dp3.orders[0]; if (rml.ok && o1) { rml = await fetch('https://api.mercadolibre.com/orders/' + (o1.id || o1), { headers: { Authorization: 'Bearer ' + _tkV } }); dml = await rml.json().catch(() => null); } }
+              if (rml.ok && dml && dml.date_created) v.venda_em = dml.date_created;
+            } catch (e) {}
+          }
+        }
+        await new Promise(r3 => setTimeout(r3, 450));
+      }
+      writeJson(F, atual);   // itens/taxas no disco JÁ — o dashboard enxerga a margem na hora
+    } catch (e) {}
+    _vsy.fase = 'nf_emissao';
+    // fase NF (rodava por último e NUNCA gravava: o processo morria no meio da rodada e o salvamento era só no fim —
+    // b14: roda logo após a listagem e salva a cada 8, então mesmo rodada interrompida deixa progresso no disco)
+    try {
+      const confN = readJson(CONFERIDOS_FILE, {});
+      const corteN = Date.now() - 4 * 86400000;
+      const alvosN = Object.entries(confN)
+        .filter(([idN, cN]) => cN && (cN.nf_emissao == null || cN.nf_emissao === '') && cN.nf_numero && cN.conferido_em && Date.parse(cN.conferido_em) >= corteN)   // b16: '' (sentinela antiga) volta pra fila
+        .sort((a, b) => String(b[1].conferido_em || '').localeCompare(String(a[1].conferido_em || '')))   // mais NOVO primeiro
+        .slice(0, 30);
+      const pendN = {};
+      const salvarN = () => {
+        if (!Object.keys(pendN).length) return;
+        const c9 = readJson(CONFERIDOS_FILE, {});   // relê antes de gravar — não atropela bipagem no meio
+        let n9 = 0;
+        for (const [k9, v9] of Object.entries(pendN)) { if (c9[k9] && (c9[k9].nf_emissao == null || c9[k9].nf_emissao === '')) { c9[k9].nf_emissao = v9; if (v9) n9++; } }
+        writeJson(CONFERIDOS_FILE, c9);
+        for (const k9 of Object.keys(pendN)) delete pendN[k9];
+        if (n9) console.log('[VENDAS-SYNC] nf_emissao preenchida em ' + n9 + ' conferido(s)');
+      };
+      let cN2 = 0;
+      for (const [idN] of alvosN) {
+        // b16: a pasta do pedido SAI do cache quando ele finaliza (raio-X provou: snapshot_existe=false),
+        // então a fonte é o Bling PELO PEDIDO — nfDoPedido tenta /pedidos/vendas/{id}/nfe e cai pro detalhe se precisar.
+        const snN = readJson(path.join(CACHE_DIR, String(idN), 'pedido.json'), null);
+        let dtN = (snN && snN.nf && snN.nf.dataEmissao) || null;   // se o snapshot ainda viver e já tiver, aproveita de graça
+        if (!dtN) {
+          try {
+            const nfO = await nfDoPedido(idN);
+            if (nfO && nfO.dataEmissao) dtN = nfO.dataEmissao;
+            else if (nfO && nfO.id) {   // NF achada mas a resposta veio sem a data → detalhe /nfe/{id}
+              await new Promise(r4a => setTimeout(r4a, 450));
+              const rN = await blingGet('/nfe/' + nfO.id);
+              const dN = rN && rN.ok && rN.data && rN.data.data;
+              if (dN && dN.dataEmissao) dtN = dN.dataEmissao;
+            }
+          } catch (e) {}
+        }
+        if (dtN) {
+          pendN[idN] = dtN;
+          if (snN && snN.nf) { snN.nf.dataEmissao = dtN; try { writeJson(path.join(CACHE_DIR, String(idN), 'pedido.json'), snN); } catch (e) {} }
+        }
+        cN2++; if (cN2 % 8 === 0) salvarN();
+        await new Promise(r4 => setTimeout(r4, 450));
+      }
+      salvarN();
+    } catch (e) { console.log('[VENDAS-SYNC] fase nf_emissao falhou: ' + String(e.message || e).slice(0, 120)); }
+    _vsy.fase = 'shopee';
+    // fase SHOPEE (b17): hora REAL da venda (create_time) + comissão REAL (escrow) direto do app da Shopee,
+    // via a rota interna do serviço shopee-nf-sync (que guarda os tokens). Batch de até 20 order_sns por rodada.
+    // Precisa da env SHOPEE_SYNC_KEY no Render DESTE serviço (mesma chave que abriu o teste C); URL opcional em SHOPEE_SYNC_URL.
+    try {
+      const SH_URL = process.env.SHOPEE_SYNC_URL || 'https://girassol-shopee-sync-organizar-envio.onrender.com';
+      const SH_KEY = process.env.SHOPEE_SYNC_KEY || '';
+      if (SH_KEY) {
+        const candS = Object.values(atual)
+          .filter(v => v && v.marketplace === 'shopee' && v.numero_loja && (v.venda_em == null || v.tarifa_ml == null || v.frete_recebido == null || v.renda_canal == null))   // b18/b19: frete_recebido e renda_canal também entram na fila (backfill)
+          .sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')))
+          .slice(0, 20);
+        if (candS.length) {
+          const rS = await fetch(SH_URL + '/girassol/interno/margem-pedidos?k=' + encodeURIComponent(SH_KEY) + '&order_sns=' + encodeURIComponent(candS.map(v => v.numero_loja).join(',')), { timeout: 90000 });
+          const jS = await rS.json().catch(() => null);
+          if (jS && jS.ok && Array.isArray(jS.pedidos)) {
+            const porSn = {}; jS.pedidos.forEach(pS => { if (pS && pS.order_sn) porSn[pS.order_sn] = pS; });
+            let nS = 0;
+            for (const v of candS) {
+              const pS = porSn[v.numero_loja]; if (!pS) continue;
+              if (pS.create_time && v.venda_em == null) { v.venda_em = new Date(Number(pS.create_time) * 1000).toISOString(); nS++; }
+              const es = pS.escrow || null;
+              if (es && v.tarifa_ml == null) {
+                const com = Number(es.net_commission_fee != null ? es.net_commission_fee : es.commission_fee) || 0;
+                const srv = Number(es.net_service_fee != null ? es.net_service_fee : es.service_fee) || 0;
+                const tS = Math.round((com + srv) * 100) / 100;
+                if (tS > 0) v.tarifa_ml = tS;   // o dashboard exibe pela mesma via da tarifa REAL do ML
+              }
+              if (es && v.frete_recebido == null) {
+                const frB = Number(es.buyer_paid_shipping_fee) || 0;   // b18: frete que o COMPRADOR pagou (extrato: "Subtotal estimado do frete") — crédito na M.C.
+                v.frete_recebido = frB > 0 ? Math.round(frB * 100) / 100 : 0;   // 0 = confirmado sem frete do comprador (sai da fila)
+              }
+              if (es && v.renda_canal == null) {
+                // b19: a RENDA OFICIAL do pedido (o que a Shopee deposita) — já liquida taxas, moedas Shopee,
+                // cupons (dela e teus) e frete do comprador. É a âncora da M.C. no dashboard (caso das 170 moedas = R$ 1,70 que a Shopee banca).
+                const ra = Number(es.escrow_amount_after_adjustment != null ? es.escrow_amount_after_adjustment : es.escrow_amount);
+                if (isFinite(ra) && ra > 0) v.renda_canal = Math.round(ra * 100) / 100;
+              }
+            }
+            if (nS) console.log('[VENDAS-SYNC] shopee: hora/comissão real em ' + nS + ' venda(s)');
+            writeJson(F, atual);
+          }
+        }
+      }
+    } catch (e) { console.log('[VENDAS-SYNC] fase shopee falhou: ' + String(e.message || e).slice(0, 120)); }
+    // poda: fora da janela de 6 dias sai do arquivo (o histórico de verdade vive nos conferidos)
+    const corte = new Date(hoje); corte.setDate(corte.getDate() - 6);
+    const corteS = isoD(corte);
+    for (const [k, v] of Object.entries(atual)) { if (!v || !v.data || v.data < corteS) delete atual[k]; }
+    writeJson(F, atual);
+    _vsy.total = Object.keys(atual).length; _vsy.atualizado_em = new Date().toISOString(); _vsy.fase = 'fim';
+    console.log('[VENDAS-SYNC] ok — ' + _vsy.total + ' venda(s) na janela (' + paginas + ' página(s))');
+  } catch (e) { _vsy.erro = String(e.message || e).slice(0, 140); console.log('[VENDAS-SYNC] falhou: ' + _vsy.erro); }
+  _vsy.rodando = false;
+}
+
 // ═══ CUSTO-SYNC (background): resolve custo/preço de TODOS os SKUs vendidos, devagar (anti-429),
 // e grava em cache PERMANENTE em disco (_custos.json, validade 7d). O sku-info lê daqui — instantâneo.
 let _cst = { rodando: false, feitos: 0, total: 0, ok: 0, falhas: 0, inicio: null };
@@ -2128,6 +2405,9 @@ function bootstrap() {
   // 90s depois do boot (após o ciclo inicial). Com dias=14 só re-checa os recentes — barato e idempotente.
   setTimeout(() => { try { console.log('[ML-FEES] pesca automática pós-deploy iniciando…'); mlSyncFees(14).catch(() => {}); } catch (e) {} }, 90 * 1000);
   setTimeout(() => { try { custoSync(false).catch(() => {}); } catch (e) {} }, 240 * 1000);   // custos: tartaruga pós-boot, só o que falta
+  setInterval(() => { try { custoSync(false).catch(() => {}); } catch (e) {} }, 6 * 3600 * 1000);   // b20: o banco de custos se mantém completo SOZINHO (a cada 6h, só faltantes/vencidos)
+  setTimeout(() => { try { vendasSync().catch(() => {}); } catch (e) {} }, 150 * 1000);
+  setInterval(() => { try { vendasSync().catch(() => {}); } catch (e) {} }, 5 * 60 * 1000);   // vendas do Bling: análise quase em tempo real
   // ETIQUETA PARADA: enquanto existir pedido sem etiqueta, tenta de novo a cada 5 min (o cron normal é 10/10).
   // Em dia limpo (0 sem etiqueta) NADA extra roda — custo zero. Cobre etiqueta que o canal demora a gerar.
   setInterval(() => {
@@ -2138,7 +2418,7 @@ function bootstrap() {
   }, 5 * 60 * 1000);
 
   ensureDir(CACHE_DIR);
-  console.log(`[AMBBKP] ${VERSAO} ativo — ATENDIDO=${SIT_ATENDIDO}, janela=${JANELA_DIAS}d, cron="${CRON_EXPR}", formato=${ETIQ_FORMATO}`);
+  console.log(`[GIRABKP] ${VERSAO} ativo — ATENDIDO=${SIT_ATENDIDO}, janela=${JANELA_DIAS}d, cron="${CRON_EXPR}", formato=${ETIQ_FORMATO}`);
   setTimeout(() => rodarCiclo('boot'), 20000);
 }
 
@@ -2158,20 +2438,20 @@ async function mlSyncFees(dias) {
     const mk = String(c.marketplace || '').toLowerCase();
     if (mk !== 'ml' && mk !== 'mercadolivre') return false;
     if (!c.numero_loja) return false;
-    return c.tarifa_ml == null || c.venda_em == null || t >= recheck;
+    return c.tarifa_ml == null || c.venda_em == null || !c.ml_costs_v3 || c.ml_order == null || t >= recheck;   // ml_order==null: ainda sem o par pack/order — uma passada preenche   // !ml_costs_v2 = ainda nao passou pelo /costs (frete real + estorno) — vale uma passada
   }).map(([cid]) => cid);
   if (!alvos.length) { console.log('[ML-FEES] nada a pescar (' + dias + 'd)'); return { ok: true, nada: true }; }
   _mls = { rodando: true, feitos: 0, total: alvos.length, ok: 0, falhas: 0, iniciado_em: new Date().toISOString(), erros: {}, amostras: [] };
   console.log('[ML-FEES] pescando tarifas de ' + alvos.length + ' pedido(s) ML...');
   const dorme = ms => new Promise(r => setTimeout(r, ms));
   let tokenML = null;
-  try { const { garantirTokenML } = require('../ambtotal/mlTokenManager'); tokenML = await garantirTokenML(); }
+  try { const { garantirTokenML } = require('../girassol/mlTokenManager'); tokenML = await garantirTokenML(); }
   catch (e) { _mls.rodando = false; console.log('[ML-FEES] ✗ sem token ML: ' + e.message); return _mls; }
   const pend = {};
   const salvar = () => {
     if (!Object.keys(pend).length) return;
     const c2 = readJson(CONFERIDOS_FILE, {});
-    for (const [cid, d] of Object.entries(pend)) { if (!c2[cid]) continue; if (d.fee != null) c2[cid].tarifa_ml = d.fee; if (d.frete != null) c2[cid].frete_ml = d.frete; if (d.venda) c2[cid].venda_em = d.venda; }
+    for (const [cid, d] of Object.entries(pend)) { if (!c2[cid]) continue; if (d.fee != null) c2[cid].tarifa_ml = d.fee; if (d.frete != null) c2[cid].frete_ml = d.frete; if (d.venda) c2[cid].venda_em = d.venda; if (d.credito != null) c2[cid].credito_ml = d.credito; if (d.credito_fonte) c2[cid].credito_fonte = d.credito_fonte; if (d.logistica) c2[cid].logistica_ml = d.logistica; if (d.pack) c2[cid].ml_pack = d.pack; if (d.order) c2[cid].ml_order = d.order; if (d.costs_ok) { c2[cid].ml_costs_v3 = 1; if (d.credito == null) delete c2[cid].credito_ml; if (d.frete == null) delete c2[cid].frete_ml; } }
     writeJson(CONFERIDOS_FILE, c2);
     for (const cid of Object.keys(pend)) delete pend[cid];
   };
@@ -2209,14 +2489,59 @@ async function mlSyncFees(dias) {
           if (!venda && od.date_created) venda = od.date_created;
           if (!shipId && od.shipping && od.shipping.id) shipId = od.shipping.id;
         }
-        const reg = { fee: Math.round(fee * 100) / 100, frete: null, venda: venda, _orders: ords.length };
+        // PAR de números do ML: toda venda tem order_id; carrinho tem também pack_id (e a tela/NF do ML usam o pack).
+        // Se o /orders respondeu direto, nl era a ORDER e o pack vem no payload; se caímos no /packs, nl era o PACK.
+        const _ord0 = (ords[0] && ords[0].id != null) ? String(ords[0].id) : null;
+        const _viaPack = !!(_ord0 && _ord0 !== nl);
+        const _packId = _viaPack ? nl : ((ords[0] && ords[0].pack_id != null) ? String(ords[0].pack_id) : null);
+        const reg = { fee: Math.round(fee * 100) / 100, frete: null, venda: venda, _orders: ords.length, pack: _packId, order: _ord0 };
         if (shipId) {
+          let ehFlex = false, baseCost = null;
           try {
             const rs = await fetch('https://api.mercadolibre.com/shipments/' + shipId, H);
             const ds = await rs.json().catch(() => null);
             if (rs.ok && ds) {
-              const lc = Number(ds.list_cost), cc = Number(ds.cost);
-              if (isFinite(lc) && isFinite(cc) && lc >= cc) reg.frete = Math.round((lc - cc) * 100) / 100;
+              const logi = (ds.logistic && ds.logistic.type) || ds.logistic_type || null;
+              if (logi) reg.logistica = logi;
+              ehFlex = (logi === 'self_service');   // self_service = Mercado Envios FLEX (quem entrega e o vendedor)
+              const bc = Number(ds.base_cost);
+              if (isFinite(bc) && bc > 0) baseCost = bc;   // bonificacao que o ML paga pela entrega Flex
+              const so = ds.shipping_option || {};
+              const lc = Number(so.list_cost != null ? so.list_cost : ds.list_cost);
+              const cc = Number(so.cost != null ? so.cost : ds.cost);
+              // SO grava frete quando o vendedor realmente paga algo. Gravar 0 fazia o painel achar que
+              // "0 e o valor real" e ignorar o custo configurado do FLEX (o motoboy) -> margem inflada.
+              if (!ehFlex && isFinite(lc) && isFinite(cc) && lc > cc) reg.frete = Math.round((lc - cc) * 100) / 100;
+            }
+          } catch (e) {}
+          await dorme(200);
+          // /shipments/{id}/costs + base_cost = o ESTORNO exatamente como o ML mostra na tela da venda.
+          //  - senders[0].cost .... frete que o ML COBRA do vendedor
+          //  - base_cost .......... bonificacao que o ML PAGA pela entrega Flex
+          //  - FLEX: o ML nao mostra as duas pontas, mostra o LIQUIDO (base_cost - cost). Conferido:
+          //      116454 -> 11,00 - 0,00 = 11,00   |   116462 -> 11,00 - 9,90 = 1,10
+          //    Por isso, no Flex, o frete cobrado NAO entra como custo separado (ja esta liquido aqui);
+          //    o custo real do Flex e o motoboy, configurado no painel por canal.
+          try {
+            const rc = await fetch('https://api.mercadolibre.com/shipments/' + shipId + '/costs', H);
+            const dc = await rc.json().catch(() => null);
+            if (rc.ok && dc) {
+              reg.costs_ok = true;
+              const sd0 = Array.isArray(dc.senders) ? dc.senders[0] : null;
+              const scost = Number(sd0 && sd0.cost);
+              const scOk = isFinite(scost) && scost > 0;
+              let cred = 0, fonte = null;
+              if (sd0) {   // compensacoes explicitas (avaria, dimensao errada...) vem primeiro
+                const c1 = Number(sd0.compensation);
+                if (isFinite(c1) && c1 > 0) { cred += c1; fonte = 'compensation'; }
+                for (const cx of (sd0.compensations || [])) { const c2 = Number(cx && cx.amount); if (isFinite(c2) && c2 > 0) { cred += c2; fonte = 'compensation'; } }
+              }
+              if (cred === 0 && ehFlex && baseCost != null) {
+                cred = Math.round((baseCost - (scOk ? scost : 0)) * 100) / 100;   // LIQUIDO, igual a tela do ML
+                fonte = 'flex_liquido';
+              }
+              if (cred !== 0) { reg.credito = Math.round(cred * 100) / 100; reg.credito_fonte = fonte; }
+              if (!ehFlex && scOk) reg.frete = Math.round(scost * 100) / 100;   // fora do Flex o frete e custo de verdade
             }
           } catch (e) {}
           await dorme(200);
@@ -2245,8 +2570,8 @@ async function mlSyncFees(dias) {
 }
 
 module.exports = {
-  id: 'amb-checkout-offline',
-  nome: 'AMBTotal Checkout Offline',
+  id: 'girassol-backup-offline',
+  nome: 'Girassol Backup Offline',
   rotinas: { backupCache: () => rodarCiclo('cron'), backfillNF: () => backfillNFLocal(45), mlSyncFees: () => mlSyncFees(14) },
   routes,
   crons: { backupCache: CRON_EXPR, backfillNF: '15 4 * * *', mlSyncFees: '40 4 * * *' },
