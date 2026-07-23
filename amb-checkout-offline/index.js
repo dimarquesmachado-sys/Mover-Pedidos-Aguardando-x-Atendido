@@ -41,7 +41,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.AMBBKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.AMBBKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'amb-checkout-offline v22/07 b10';
+const VERSAO     = 'amb-checkout-offline v23/07 b11';
 
 // ── SESSÃO DE OPERADOR (cookie assinado HMAC) — protege rotas de dados/ação ──
 // Segredo estável entre restarts. Usa ADMIN_KEY (já configurada no Render) como base.
@@ -840,10 +840,10 @@ function routes(readBody) {
       let mexeu = false;
       for (const i of ids) {
         const m = man[i];
-        if (m && (m.cliente === undefined || m.nf_numero === undefined)) {
+        if (m && (m.cliente === undefined || m.nf_numero === undefined || m.nf_emissao === undefined)) {
           const snap = readJson(path.join(CACHE_DIR, String(i), 'pedido.json'), null);
-          if (snap) { m.cliente = snap.cliente || ''; m.nf_numero = (snap.nf && snap.nf.numero) || null; }
-          else { m.cliente = m.cliente || ''; m.nf_numero = m.nf_numero || null; }
+          if (snap) { m.cliente = snap.cliente || ''; m.nf_numero = (snap.nf && snap.nf.numero) || null; m.nf_emissao = (snap.nf && snap.nf.dataEmissao) || null; m.visto_em = snap.visto_em || snap.cacheado_em || null; m.numero_loja = m.numero_loja || snap.numero_loja || null; }
+          else { m.cliente = m.cliente || ''; m.nf_numero = m.nf_numero || null; m.nf_emissao = m.nf_emissao || null; }
           mexeu = true;
         }
       }

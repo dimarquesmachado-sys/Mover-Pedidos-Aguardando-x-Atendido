@@ -304,6 +304,7 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC, nfCtx) {
     etiqueta_pdf: !!(etiquetaMM || etqEhPdf),   // etiqueta é PDF (Madeira, Amazon...) → impressão/email usam o caminho PDF
     volumes: etiquetaMM ? volumesMM : 1,
     schema: SCHEMA,
+    visto_em: (function () { try { const a = JSON.parse(fs.readFileSync(path.join(dir, 'pedido.json'), 'utf8')); return (a && (a.visto_em || a.cacheado_em)) || new Date().toISOString(); } catch (e) { return new Date().toISOString(); } })(),   // 1ª vez que ESTE pedido apareceu pro sistema — sobrevive a re-caches
     cacheado_em: new Date().toISOString()
   };
   writeJson(path.join(dir, 'pedido.json'), snapshot);
@@ -397,6 +398,9 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
           cliente: snap.cliente || '', nf_numero: (snap.nf && snap.nf.numero) || null,
           tem_nf: snap.tem_nf, tem_kit: snap.tem_kit, tem_etiqueta: snap.tem_etiqueta,
           tem_danfe: !!(ja && ja.tem_danfe),
+          numero_loja: snap.numero_loja || null,
+          nf_emissao: (snap.nf && snap.nf.dataEmissao) || null,   // data+hora OFICIAL da NF no Bling
+          visto_em: snap.visto_em || null,
           itens: snap.itens.length, skus: (snap.itens || []).map(it => it.sku).filter(Boolean),
           // skus_pick = SKUs que o estoquista REALMENTE pega: kit/composição explode nos componentes; item normal usa o próprio SKU
           skus_pick: (snap.itens || []).flatMap(it => (it.tipo === 'kit' && Array.isArray(it.componentes) && it.componentes.length) ? it.componentes.map(c => c.sku) : [it.sku]).filter(Boolean),
