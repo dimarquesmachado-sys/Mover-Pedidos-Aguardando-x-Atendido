@@ -103,6 +103,14 @@ const FECHAMENTO_TEXTO = process.env.LIXAS_FECHAMENTO_TEXTO ||
 const FECHAMENTO_DIAS = Number(process.env.LIXAS_FECHAMENTO_DIAS || 3); // janela de vendas processadas a vigiar
 
 
+// ── FIX 22/07/2026 (caso PAULO_BASSO) ────────────────────────────────
+// "Tentativa de pedido" = mensagem em que o cliente informa grao/quantidade.
+// O sinal barato e confiavel disso e ter NUMERO no texto. "Ola", "boa tarde",
+// "vou mudar entao" nao sao tentativa de pedido — sao ruido de conversa.
+function _temNumero(texto) {
+  return /\d/.test(String(texto || ''));
+}
+
 
 let _executando = false;
 
@@ -114,7 +122,7 @@ async function rotinaACombinar() {
   _executando = true;
 
   const inicio = Date.now();
-  const stats = { lidos: 0, jaEnviados: 0, semACombinar: 0, enviados: 0, erros: 0, moderados: 0 };
+  const stats = { lidos: 0, jaEnviados: 0, semACombinar: 0, enviados: 0, erros: 0, moderados: 0, puladosClienteJaEspecificou: 0 };
 
   try {
     if (!HABILITADO) {
@@ -159,24 +167,119 @@ async function rotinaACombinar() {
           });
           continue;
         }
-        // 4. Monta mensagem (inteligente se SKU mapeado, senão genérica)
+        // 4. Dados basicos da venda
         const buyerId = detalhe.buyer?.id;
         const packId = detalhe.pack_id;
-        const textoFinal = await montarMensagemInteligente(detalhe);
 
-        // 4.5. NOVO (Sessao 3 Etapa A): consulta conversa pra decidir endpoint
+        // 4.5. Consulta a conversa ANTES de montar/enviar qualquer coisa.
         //      - virgem  → action_guide OTHER (1 uso, gasta o cap)
         //      - tem msg → POST direto (preserva o cap pra outra situacao)
         const conv = await ml.consultarConversa({ packId, orderId });
+
+        // ════════════════════════════════════════════════════════════════
+        // FIX 22/07/2026 (caso PAULO_BASSO order 2000017546667040)
+        //
+        // Se o cliente JA ESPECIFICOU o pedido antes da nossa msg inicial sair,
+        // NAO manda o menu de graos por cima. O que acontecia sem isso:
+        //   1. cliente compra e ja escreve "quero 20 do 80, 40 do 120..."
+        //   2. o cron (ate 5 min depois) manda o menu generico mesmo assim
+        //   3. o cliente acha que ninguem leu e REPETE o pedido
+        //   4. cada repeticao dessas queima uma "rodada" do freio de loop do
+        //      lerRespostas -> estoura o limite -> cai no painel com o texto
+        //      generico de escalada, sem pedido montado e sem NF.
+        //
+        // CRITERIO — cliente mandou NUMERO em alguma mensagem:
+        //   Quem so mandou "Ola"/"boa tarde" AINDA PRECISA do menu; se pulassemos
+        //   tambem nesse caso, a IA receberia um "Ola" sem contexto nenhum,
+        //   classificaria como fora_escopo e escalaria pra humano de cara.
+        //   Por isso o corte e "tem numero", nao "falou alguma coisa".
+        //
+        // AO PULAR, registra a venda com status 'cliente_respondeu' — status que
+        // o lerRespostas TAMBEM pesca (ele lista 'aguardando_resposta' E
+        // 'cliente_respondeu' e deduplica), entao a IA processa na passada
+        // seguinte, em ate 2 min. Mesmo caminho que o recuperarPendentes ja usa.
+        // ════════════════════════════════════════════════════════════════
+        {
+          const _txtsCliente = [];
+          if (Array.isArray(conv.messages) && conv.messages.length > 0) {
+            let _sellerId = '';
+            try { _sellerId = String(require('./mlTokenManager').getUserId() || ''); } catch (_) {}
+            for (const m of conv.messages) {
+              const from = String(m.from_user_id || m.from?.user_id || '');
+              if (_sellerId && from === _sellerId) continue;   // msg da loja, ignora
+              _txtsCliente.push(m.text || m.message || '');
+            }
+          }
+          // Fallback: se nao deu pra separar por remetente, olha ao menos a ultima do cliente
+          if (_txtsCliente.length === 0 && conv.ultimaCliente) {
+            _txtsCliente.push(conv.ultimaCliente.text || conv.ultimaCliente.message || '');
+          }
+          const clienteJaEspecificou = _txtsCliente.some(_temNumero);
+
+          if (conv.ok && conv.totalCliente > 0 && clienteJaEspecificou) {
+            stats.puladosClienteJaEspecificou++;
+            console.log(`[auto-mensagens] ⏭️  Order ${orderId} cliente JA especificou o pedido antes do menu (${conv.totalCliente} msg) — NAO envia msg inicial, deixa a IA responder`);
+
+            // Tracker: marca como pulado (mesmo padrao do "sem A COMBINAR" acima)
+            await tracker.registrar({
+              orderId, packId, buyerId,
+              tipo: 'a_combinar', textoEnviado: null, messageIdMl: null,
+              status: 'pulado', erroDetalhe: 'cliente_ja_especificou_antes_do_menu',
+              loja: 'GIRASSOL'
+            });
+
+            // Tabela de pendentes: SO cria se ainda nao existir. Sem esse buscar,
+            // uma segunda passada da rotina (a venda continua na janela de 30min)
+            // sobrescreveria o status de uma venda que a IA ja fez avancar — ex.:
+            // regredir 'cliente_confirmou_pedido' de volta pra 'cliente_respondeu'.
+            // Mesma protecao que o recuperarPendentes usa.
+            try {
+              const lcp = require('./lixasCombinarPendentes');
+              if (lcp.configurado()) {
+                const existente = await lcp.buscar(orderId);
+                if (existente.ok && existente.data) {
+                  console.log(`[auto-mensagens] order ${orderId} ja esta na tabela de pendentes — nao mexo no status`);
+                } else {
+                  const sku = ml.extrairSkuACombinar(detalhe);
+                  await lcp.upsertPendente({
+                    orderId, packId, buyerId,
+                    buyerNome: detalhe.buyer?.nickname || `${detalhe.buyer?.first_name || ''} ${detalhe.buyer?.last_name || ''}`.trim(),
+                    skuACombinar: sku?.sku || null,
+                    descricaoProduto: sku?.titulo || null,
+                    quantidadeLixas: null,
+                    dataVenda: detalhe.date_created || new Date().toISOString(),
+                    msgInicialEnviada: null,        // nao enviamos menu nenhum
+                    msgInicialEnviadaEm: null,
+                    clienteRespondeu: true,
+                    ultimaRespostaCliente: conv.ultimaCliente?.text || null,
+                    ultimaRespostaEm: conv.ultimaCliente?.date_created || null,
+                    totalMsgsCliente: conv.totalCliente || 0,
+                    status: 'cliente_respondeu',
+                    viaEndpoint: 'pulado_cliente_ja_especificou'
+                  });
+                }
+              }
+            } catch (e) {
+              console.error(`[auto-mensagens] erro upsert pendente (pulado): ${e.message}`);
+            }
+
+            continue;   // proxima venda — nada foi enviado ao cliente
+          }
+        }
+
+        // 5. Monta a mensagem inicial (inteligente se SKU mapeado, senão genérica)
+        const textoFinal = await montarMensagemInteligente(detalhe);
+
         let r;
         let viaEndpoint;
         let respostasCliente = null;
 
         if (conv.ok && !conv.conversaVirgem && conv.totalCliente > 0) {
-          // Cliente ja mandou msg - envia direto sem action_guide
+          // Cliente ja mandou msg (mas SEM numero — ex.: so "Ola"). Ainda faz
+          // sentido mandar o menu; envia direto pra preservar o cap do OTHER.
           viaEndpoint = 'direto';
           respostasCliente = conv.ultimaCliente;
-          console.log(`[auto-mensagens] 💬 Order ${orderId} ja tem ${conv.totalCliente} msg(s) do cliente — enviando DIRETO (preserva OTHER)`);
+          console.log(`[auto-mensagens] 💬 Order ${orderId} ja tem ${conv.totalCliente} msg(s) do cliente (sem pedido) — enviando DIRETO (preserva OTHER)`);
           r = await ml.enviarMensagemDireta({
             packId, orderId, buyerId, texto: textoFinal
           });
