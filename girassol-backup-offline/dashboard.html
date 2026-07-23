@@ -100,7 +100,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd56';
+const DASH_BUILD = 'd57';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -808,7 +808,7 @@ function renderAnalise(){
     '<button class="chip" style="'+(anLP==='lucro'?'background:#065f46;border-color:#065f46;color:#fff':'color:#34d399;border-color:#34d399')+'" onclick="anLP=\'lucro\';anPage=0;renderAnalise()">Lucro ('+nLucro+')</button>'+
     '<button class="chip" style="'+(anLP==='prej'?'background:#7f1d1d;border-color:#7f1d1d;color:#fff':'color:#f87171;border-color:#f87171')+'" onclick="anLP=\'prej\';anPage=0;renderAnalise()">Preju\u00edzo ('+nPrej+')</button>'+
     (nInc?'<button class="chip" style="'+(anLP==='inc'?'background:#78350f;border-color:#78350f;color:#fff':'color:#fbbf24;border-color:#fbbf24')+'" onclick="anLP=\'inc\';anPage=0;renderAnalise()" title="vendas sem margem fechada — falta custo no Bling, NF ou tarifa">Incompletas ('+nInc+')</button>':'')+
-    (nAg?'<button class="chip" style="'+(anAg?'background:#334155;border-color:#64748b;color:#fff':'color:#94a3b8;border-color:#475569')+'" onclick="anAg=!anAg;anPage=0;renderAnalise()" title="vendas que o Bling já registrou mas o estoque ainda NÃO bipou — clique pra ocultar/mostrar na lista">🕐 aguardando ('+nAg+')</button>':'');
+    (nAg?'<button class="chip" style="'+(anAg?'background:#334155;border-color:#64748b;color:#fff':'color:#94a3b8;border-color:#475569')+'" onclick="anAg=!anAg;anPage=0;renderAnalise()" title="vendas cujos itens o sync ainda não baixou do Bling (margem entra na próxima rodada) — clique pra ocultar/mostrar">⏳ detalhando ('+nAg+')</button>':'');
   if(anLP==='lucro') LP=LP.filter(x=>x.P.mc!=null&&x.P.mc>0);
   else if(anLP==='prej') LP=LP.filter(x=>x.P.mc!=null&&x.P.mc<0);
   else if(anLP==='inc') LP=LP.filter(x=>x.P.mc==null);
@@ -875,7 +875,7 @@ function renderAnalise(){
     const pmc = (P.mc!=null&&P.rp)?Math.round(P.mc/P.rp*100):null;
     if(h.sintetico && !((h.itens||[]).length)){   // detalhe ainda não chegou — linha resumida
       const dtx = _d ? (_d.slice(8,10)+'/'+_d.slice(5,7)) : '—';
-      const tag = h._cancelado ? '<span class="st bad">CANCELADA</span>' : '<span class="st warn" title="a venda já existe no Bling; margem fecha quando for bipada (NF + custo)">aguardando bipagem</span>';
+      const tag = h._cancelado ? '<span class="st bad">CANCELADA</span>' : '<span class="st warn" title="o sync ainda não trouxe os itens desta venda do Bling — a margem entra sozinha na próxima rodada (até 5 min), sem depender de bipagem">⏳ detalhando…</span>';
       return sep + '<tr style="opacity:'+(h._cancelado?'.38':'.72')+'">'+
         '<td class="dim">'+dtx+'</td>'+
         '<td><b>'+esc(h.numero)+'</b><br><span class="dim" style="font-size:10px">'+esc(h._sit||'')+'</span></td>'+

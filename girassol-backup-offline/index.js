@@ -41,7 +41,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v22/07 b20';
+const VERSAO     = 'girassol-backup-offline v23/07 b21';
 
 // ── SESSÃO DE OPERADOR (cookie assinado HMAC) — protege rotas de dados/ação ──
 // Segredo estável entre restarts. Usa ADMIN_KEY (já configurada no Render) como base.
@@ -2214,6 +2214,41 @@ async function vendasSync() {
       await new Promise(r2 => setTimeout(r2, 450));
     }
     writeJson(F, atual);   // b12: grava JÁ após a fase 1 — o 🔄 do dashboard espera 6s e recarrega; antes, o arquivo só era gravado no fim da rodada (~1 min) e o botão sempre mostrava a rodada anterior
+    _vsy.fase = 'detalhes';
+    // b21: esta fase virou a PRIMEIRA depois da listagem — é ela que dá MARGEM às vendas ainda não bipadas
+    // (itens → custo/R$ produtos; taxas → tarifa). Estava por último atrás de NF/Shopee e pedido novo ficava
+    // sem margem nenhuma até o fim da rodada (ou pra sempre, se a rodada não terminasse).
+    // fase 2: DETALHE dos ainda não-bipados (itens → custo/R$ produtos; taxas → tarifa/frete) — margem antes da bipagem
+    try {
+      const confS = readJson(CONFERIDOS_FILE, {});
+      const bipN = new Set(Object.values(confS).map(c => String(c && c.numero)));
+      let _tkV=null; try{ const {garantirTokenML:_g2}=require('../girassol/mlTokenManager'); _tkV=await _g2(); }catch(e){}   // hora real do ML nas não-bipadas
+      const alvosDet = Object.values(atual).filter(v => v && !v.det && v.numero != null && !bipN.has(String(v.numero)) && !/cancel/i.test(String(v.situacao || ''))).slice(0, 90);   // b21: mais alvos por rodada — margem da não-bipada é o que o Diego abre pra ver
+      for (const v of alvosDet) {
+        const rd = await blingGet('/pedidos/vendas/' + v.id);
+        const det = (rd && rd.ok && rd.data && rd.data.data) || null;
+        if (det) {
+          if (!v.numero_loja && det.numeroPedidoLoja) v.numero_loja = det.numeroPedidoLoja;   // detalhe traz numeroPedidoLoja
+          if (!v.marketplace || v.marketplace === 'outro') { const lj2 = String((det.loja && det.loja.id) || ''); v.marketplace = LOJA_MKT[lj2] || _inferCanal(v.numero_loja); }
+          v.it = (det.itens || []).map(i2 => ({ sku: (i2.codigo || (i2.produto && i2.produto.codigo) || '').trim() || null, qtd: Number(i2.quantidade || 1), vt: Math.round(Number(i2.valor || 0) * Number(i2.quantidade || 1) * 100) / 100 }));
+          const tc = det.taxas && Number(det.taxas.taxaComissao); if (isFinite(tc) && tc > 0) v.taxa_mkt = Math.round(tc * 100) / 100;
+          const cf = det.taxas && Number(det.taxas.custoFrete); if (isFinite(cf) && cf > 0) v.frete_mkt = Math.round(cf * 100) / 100;
+          if (det.situacao && (det.situacao.valor || det.situacao.nome)) v.situacao = det.situacao.valor || det.situacao.nome;
+          v.det = 1;
+          if (_tkV && v.marketplace === 'ml' && v.numero_loja && !v.venda_em) {
+            try {
+              const nlm = String(v.numero_loja).replace(/\D/g, '');
+              let rml = await fetch('https://api.mercadolibre.com/orders/' + nlm, { headers: { Authorization: 'Bearer ' + _tkV } });
+              let dml = await rml.json().catch(() => null);
+              if (!rml.ok) { rml = await fetch('https://api.mercadolibre.com/packs/' + nlm, { headers: { Authorization: 'Bearer ' + _tkV } }); const dp3 = await rml.json().catch(() => null); const o1 = dp3 && dp3.orders && dp3.orders[0]; if (rml.ok && o1) { rml = await fetch('https://api.mercadolibre.com/orders/' + (o1.id || o1), { headers: { Authorization: 'Bearer ' + _tkV } }); dml = await rml.json().catch(() => null); } }
+              if (rml.ok && dml && dml.date_created) v.venda_em = dml.date_created;
+            } catch (e) {}
+          }
+        }
+        await new Promise(r3 => setTimeout(r3, 450));
+      }
+      writeJson(F, atual);   // itens/taxas no disco JÁ — o dashboard enxerga a margem na hora
+    } catch (e) {}
     _vsy.fase = 'nf_emissao';
     // fase NF (rodava por último e NUNCA gravava: o processo morria no meio da rodada e o salvamento era só no fim —
     // b14: roda logo após a listagem e salva a cada 8, então mesmo rodada interrompida deixa progresso no disco)
@@ -2306,38 +2341,6 @@ async function vendasSync() {
         }
       }
     } catch (e) { console.log('[VENDAS-SYNC] fase shopee falhou: ' + String(e.message || e).slice(0, 120)); }
-    _vsy.fase = 'detalhes';
-    // fase 2: DETALHE dos ainda não-bipados (itens → custo/R$ produtos; taxas → tarifa/frete) — margem antes da bipagem
-    try {
-      const confS = readJson(CONFERIDOS_FILE, {});
-      const bipN = new Set(Object.values(confS).map(c => String(c && c.numero)));
-      let _tkV=null; try{ const {garantirTokenML:_g2}=require('../girassol/mlTokenManager'); _tkV=await _g2(); }catch(e){}   // hora real do ML nas não-bipadas
-      const alvosDet = Object.values(atual).filter(v => v && !v.det && v.numero != null && !bipN.has(String(v.numero)) && !/cancel/i.test(String(v.situacao || ''))).slice(0, 60);
-      for (const v of alvosDet) {
-        const rd = await blingGet('/pedidos/vendas/' + v.id);
-        const det = (rd && rd.ok && rd.data && rd.data.data) || null;
-        if (det) {
-          if (!v.numero_loja && det.numeroPedidoLoja) v.numero_loja = det.numeroPedidoLoja;   // detalhe traz numeroPedidoLoja
-          if (!v.marketplace || v.marketplace === 'outro') { const lj2 = String((det.loja && det.loja.id) || ''); v.marketplace = LOJA_MKT[lj2] || _inferCanal(v.numero_loja); }
-          v.it = (det.itens || []).map(i2 => ({ sku: (i2.codigo || (i2.produto && i2.produto.codigo) || '').trim() || null, qtd: Number(i2.quantidade || 1), vt: Math.round(Number(i2.valor || 0) * Number(i2.quantidade || 1) * 100) / 100 }));
-          const tc = det.taxas && Number(det.taxas.taxaComissao); if (isFinite(tc) && tc > 0) v.taxa_mkt = Math.round(tc * 100) / 100;
-          const cf = det.taxas && Number(det.taxas.custoFrete); if (isFinite(cf) && cf > 0) v.frete_mkt = Math.round(cf * 100) / 100;
-          if (det.situacao && (det.situacao.valor || det.situacao.nome)) v.situacao = det.situacao.valor || det.situacao.nome;
-          v.det = 1;
-          if (_tkV && v.marketplace === 'ml' && v.numero_loja && !v.venda_em) {
-            try {
-              const nlm = String(v.numero_loja).replace(/\D/g, '');
-              let rml = await fetch('https://api.mercadolibre.com/orders/' + nlm, { headers: { Authorization: 'Bearer ' + _tkV } });
-              let dml = await rml.json().catch(() => null);
-              if (!rml.ok) { rml = await fetch('https://api.mercadolibre.com/packs/' + nlm, { headers: { Authorization: 'Bearer ' + _tkV } }); const dp3 = await rml.json().catch(() => null); const o1 = dp3 && dp3.orders && dp3.orders[0]; if (rml.ok && o1) { rml = await fetch('https://api.mercadolibre.com/orders/' + (o1.id || o1), { headers: { Authorization: 'Bearer ' + _tkV } }); dml = await rml.json().catch(() => null); } }
-              if (rml.ok && dml && dml.date_created) v.venda_em = dml.date_created;
-            } catch (e) {}
-          }
-        }
-        await new Promise(r3 => setTimeout(r3, 450));
-      }
-      writeJson(F, atual);   // b12: itens/taxas no disco antes da fase 3
-    } catch (e) {}
     // poda: fora da janela de 6 dias sai do arquivo (o histórico de verdade vive nos conferidos)
     const corte = new Date(hoje); corte.setDate(corte.getDate() - 6);
     const corteS = isoD(corte);
