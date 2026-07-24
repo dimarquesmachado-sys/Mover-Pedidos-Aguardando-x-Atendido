@@ -26,7 +26,7 @@ const fs   = require('fs');
 const path = require('path');
 const { json, html } = require('../lib/http');
 
-const VERSAO = 'magalu-oauth v1 b2';
+const VERSAO = 'magalu-oauth v1 b3';
 
 const DATA_DIR = process.env.MAGALU_DATA_DIR || '/data/magalu';
 
@@ -209,6 +209,74 @@ async function tratar(req, res, urlObj) {
     } catch (e) {
       json(res, 502, { ok: false, empresa: emp, erro: String(e.message || e) });
     }
+    return true;
+  }
+
+  // /magalu/sonda?empresa=girassol[&n=NUMERO_DO_PEDIDO]  → exploração (admin).
+  // Descobre o tenant_id da empresa e busca pedidos, mostrando os campos crus
+  // que a API devolve — pra achar onde vem o UUID do pacote antes de montar o ↗.
+  if (method === 'GET' && p === '/magalu/sonda') {
+    const emp = String(q.get('empresa') || '').toLowerCase().trim();
+    if (!EMPRESAS_VALIDAS.includes(emp)) { json(res, 400, { ok: false, erro: 'empresa inválida' }); return true; }
+    const numero = String(q.get('n') || '').trim();
+    const passos = [];
+    const API = 'https://api.magalu.com';
+
+    async function chamar(nome, url, headers) {
+      try {
+        const r = await fetch(url, { headers });
+        const t = await r.text();
+        let j = null; try { j = JSON.parse(t); } catch (e) {}
+        passos.push({ passo: nome, url, status: r.status, corpo: j ? undefined : t.slice(0, 400),
+          amostra: j ? podar(j) : undefined });
+        return { r, j, t };
+      } catch (e) {
+        passos.push({ passo: nome, url, erro: String(e.message || e).slice(0, 200) });
+        return {};
+      }
+    }
+    // encurta objetos grandes pra caber na resposta: mostra chaves e um pouco de cada
+    function podar(o, prof) {
+      prof = prof || 0;
+      if (Array.isArray(o)) return { _array: o.length, _amostra: o.slice(0, 2).map(x => podar(x, prof + 1)) };
+      if (o && typeof o === 'object') {
+        if (prof > 3) return { _chaves: Object.keys(o) };
+        const out = {};
+        for (const k of Object.keys(o).slice(0, 40)) out[k] = podar(o[k], prof + 1);
+        return out;
+      }
+      if (typeof o === 'string' && o.length > 120) return o.slice(0, 120) + '…';
+      return o;
+    }
+
+    try {
+      const tok = await getAccessToken(emp);
+      const H = { 'Authorization': 'Bearer ' + tok, 'Accept': 'application/json' };
+
+      // 1) quem sou eu / tenants — pra achar o tenant_id do seller
+      const who = await chamar('whoami/tenants', API + '/account/v1/whoami/tenants', H);
+      let tenant = '';
+      try {
+        const arr = Array.isArray(who.j) ? who.j : (who.j && (who.j.tenants || who.j.results || who.j.data));
+        const sel = (arr || []).find(t => /seller/i.test(JSON.stringify(t))) || (arr || [])[0];
+        tenant = sel && (sel.uuid || sel.id || sel.tenant_id) || '';
+        passos.push({ passo: 'tenant_escolhido', tenant_id: tenant || '(não achei)' });
+      } catch (e) { passos.push({ passo: 'tenant_escolhido', erro: String(e.message) }); }
+
+      const HT = tenant ? Object.assign({ 'X-Tenant-Id': tenant }, H) : H;
+
+      // 2) listar pedidos (poucos) — ver a estrutura e onde está o UUID do pacote
+      await chamar('orders (lista)', API + '/maestro/v1/orders?_limit=2', HT);
+
+      // 3) se passou um número, tentar achar por ele
+      if (numero) {
+        await chamar('orders?q=numero', API + '/maestro/v1/orders?_limit=5&q=' + encodeURIComponent(numero), HT);
+      }
+    } catch (e) {
+      passos.push({ passo: 'ERRO', erro: String(e.message || e) });
+    }
+
+    json(res, 200, { ok: true, empresa: emp, versao: VERSAO, passos });
     return true;
   }
 
