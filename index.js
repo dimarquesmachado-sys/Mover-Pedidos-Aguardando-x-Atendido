@@ -13,6 +13,7 @@ const http = require('http');
 const cron = require('node-cron');
 const { json, readBody } = require('./lib/http');
 const empresas = require('./config/empresas');
+const magaluOauth = require('./magalu-oauth');   // handler global das rotas /magalu/*
 
 const TZ = process.env.TZ || 'America/Sao_Paulo';
 
@@ -139,6 +140,27 @@ const server = http.createServer(async (req, res) => {
       time: ts(),
       empresas: empresas.map(e => ({ id: e.id, nome: e.nome }))
     });
+  }
+
+  // ── MAGALU OAUTH (handler global /magalu/*) ─────────────────────────
+  // Conecta cada empresa à API oficial do Magalu e mantém o refresh_token.
+  // Fica ANTES dos handlers de empresa e só trata paths /magalu/*.
+  // /magalu/conectar e /magalu/status exigem ADMIN_KEY (?k=); /magalu/callback
+  // é OAuth e já passa livre pela trava (path inclui /callback).
+  if (path.startsWith('/magalu/')) {
+    const precisaAdmin = (path === '/magalu/conectar' || path === '/magalu/status' || path === '/magalu/teste');
+    if (precisaAdmin) {
+      if (!ADMIN_KEY || urlObj.searchParams.get('k') !== ADMIN_KEY) {
+        return json(res, 404, { error: 'not found', path });
+      }
+    }
+    try {
+      const tratou = await magaluOauth.tratar(req, res, urlObj);
+      if (tratou) return;
+    } catch (e) {
+      console.error('[magalu-oauth] erro:', e.message);
+      return json(res, 500, { error: e.message });
+    }
   }
 
   // Tenta cada handler de empresa
