@@ -26,12 +26,15 @@ const fs   = require('fs');
 const path = require('path');
 const { json, html } = require('../lib/http');
 
-const VERSAO = 'magalu-oauth v1 b1';
+const VERSAO = 'magalu-oauth v1 b2';
 
 const DATA_DIR = process.env.MAGALU_DATA_DIR || '/data/magalu';
 
 // Endpoints do ID Magalu (OAuth) e da API pública.
-const OAUTH_AUTHORIZE = 'https://id.magalu.com/oauth/authorize';
+// A tela de consentimento é /login (NÃO /oauth/authorize — esse devolve JSON
+// de pre-authorization em vez de renderizar a tela). choose_tenants=true faz o
+// Magalu perguntar QUAL loja autorizar — essencial pra conta que vê várias.
+const OAUTH_AUTHORIZE = 'https://id.magalu.com/login';
 const OAUTH_TOKEN     = 'https://id.magalu.com/oauth/token';
 
 // Precisa BATER com o --redirect-uris usado na criação do client no idm.
@@ -60,14 +63,21 @@ function creds() {
 }
 
 // ── troca de code/refresh por tokens ─────────────────────────────────
+// authorization_code: a doc do Magalu usa Content-Type application/json.
+// refresh_token: a doc usa application/x-www-form-urlencoded.
+// Mandamos cada um no formato que a doc especifica.
 async function trocarToken(params) {
   const { id, secret } = creds();
-  const body = new URLSearchParams(Object.assign({ client_id: id, client_secret: secret }, params));
-  const r = await fetch(OAUTH_TOKEN, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json' },
-    body: body.toString()
-  });
+  const ehCode = params.grant_type === 'authorization_code';
+  let headers, body;
+  if (ehCode) {
+    headers = { 'Content-Type': 'application/json', 'Accept': 'application/json' };
+    body = JSON.stringify(Object.assign({ client_id: id, client_secret: secret }, params));
+  } else {
+    headers = { 'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json' };
+    body = new URLSearchParams(Object.assign({ client_id: id, client_secret: secret }, params)).toString();
+  }
+  const r = await fetch(OAUTH_TOKEN, { method: 'POST', headers, body });
   const txt = await r.text();
   let j = null; try { j = JSON.parse(txt); } catch (e) {}
   return { ok: r.ok, status: r.status, json: j, corpo: txt.slice(0, 500) };
@@ -122,6 +132,7 @@ async function tratar(req, res, urlObj) {
       + '&client_id=' + encodeURIComponent(id)
       + '&redirect_uri=' + encodeURIComponent(REDIRECT_URI)
       + '&scope=' + encodeURIComponent(SCOPES)
+      + '&choose_tenants=true'   // deixa o seller escolher QUAL loja está autorizando
       + '&state=' + encodeURIComponent(emp);
     res.writeHead(302, { Location: auth, 'Cache-Control': 'no-store' });
     res.end();
