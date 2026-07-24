@@ -26,7 +26,7 @@ const fs   = require('fs');
 const path = require('path');
 const { json, html } = require('../lib/http');
 
-const VERSAO = 'magalu-oauth v1 b4';
+const VERSAO = 'magalu-oauth v1 b5';
 
 const DATA_DIR = process.env.MAGALU_DATA_DIR || '/data/magalu';
 
@@ -212,70 +212,80 @@ async function tratar(req, res, urlObj) {
     return true;
   }
 
-  // /magalu/sonda?empresa=girassol  → exploração (admin).
-  // O path de produção da API de pedidos não está claro na doc (o tutorial usa
-  // alpha.api.magalu.com/maestro/... que dá 404 em produção). Então testamos
-  // vários candidatos DE UMA VEZ e vemos qual responde 200, pra achar o certo
-  // sem subir versão a cada tentativa.
+  // /magalu/sonda?empresa=girassol[&code=NUMERO_LU]  → exploração (admin).
+  // Achamos o endpoint: GET api.magalu.com/seller/v1/orders (200). O pedido traz
+  // id (uuid do pedido), code (número LU visível) e deliveries[] (onde deve estar
+  // o uuid do pacote que falta na URL /pedidos/<code>/<uuid>). Esta sonda pega 1
+  // pedido (ou busca por code) e mostra TODOS os uuids candidatos, expandidos.
   if (method === 'GET' && p === '/magalu/sonda') {
     const emp = String(q.get('empresa') || '').toLowerCase().trim();
     if (!EMPRESAS_VALIDAS.includes(emp)) { json(res, 400, { ok: false, erro: 'empresa inválida' }); return true; }
-    const resultados = [];
-
-    function podar(o, prof) {
-      prof = prof || 0;
-      if (Array.isArray(o)) return { _array: o.length, _amostra: o.slice(0, 1).map(x => podar(x, prof + 1)) };
-      if (o && typeof o === 'object') {
-        if (prof > 3) return { _chaves: Object.keys(o) };
-        const out = {};
-        for (const k of Object.keys(o).slice(0, 30)) out[k] = podar(o[k], prof + 1);
-        return out;
-      }
-      if (typeof o === 'string' && o.length > 100) return o.slice(0, 100) + '…';
-      return o;
-    }
+    const code = String(q.get('code') || '').trim();
 
     let tok = '';
     try { tok = await getAccessToken(emp); }
     catch (e) { json(res, 502, { ok: false, erro: 'token: ' + String(e.message || e) }); return true; }
     const H = { 'Authorization': 'Bearer ' + tok, 'Accept': 'application/json' };
+    const BASE = 'https://api.magalu.com/seller/v1/orders';
 
-    // candidatos de endpoint (sem tenant ainda — primeiro achar quem responde)
-    const candidatos = [
-      'https://api.magalu.com/account/v1/whoami',
-      'https://api.magalu.com/account/v0/whoami',
-      'https://api.magalu.com/v1/account/whoami',
-      'https://api.magalu.com/seller/v1/whoami',
-      'https://api.magalu.com/order/v1/orders?_limit=1',
-      'https://api.magalu.com/orders/v1/orders?_limit=1',
-      'https://api.magalu.com/v1/orders?_limit=1',
-      'https://api.magalu.com/seller/v1/orders?_limit=1',
-      'https://api.magalu.com/order-order-seller/v1/orders?_limit=1',
-      'https://api.magalu.com/v0/orders?_limit=1',
-      'https://api.magalu.com/maestro/v1/orders?_limit=1',
-      'https://api.magalu.com/'
-    ];
-
-    for (const url of candidatos) {
-      try {
-        const r = await fetch(url, { headers: H });
-        const t = await r.text();
-        let j = null; try { j = JSON.parse(t); } catch (e) {}
-        resultados.push({
-          url,
-          status: r.status,
-          // só mostra corpo se NÃO for o 404 padrão, pra destacar o que respondeu diferente
-          nota: r.status === 200 ? '✅ RESPONDEU' : (r.status === 404 ? '404' : '⚠️ ' + r.status),
-          amostra: r.status === 200 ? (j ? podar(j) : t.slice(0, 300)) :
-                   (j && j.errorCode !== 20022 ? podar(j) : undefined)
-        });
-      } catch (e) {
-        resultados.push({ url, erro: String(e.message || e).slice(0, 150) });
-      }
+    async function pega(url) {
+      const r = await fetch(url, { headers: H });
+      const t = await r.text();
+      let j = null; try { j = JSON.parse(t); } catch (e) {}
+      return { status: r.status, j, t };
     }
 
-    json(res, 200, { ok: true, empresa: emp, versao: VERSAO,
-      dica: 'procure status 200 ou erros diferentes de 20022', resultados });
+    // extrai todos os pares (caminho → uuid) de um objeto, pra achar qual uuid é o do pacote
+    function uuids(o, base, acc) {
+      acc = acc || {};
+      base = base || '';
+      const RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      if (o && typeof o === 'object') {
+        for (const k of Object.keys(o)) {
+          const v = o[k];
+          const cam = base ? base + '.' + k : k;
+          if (typeof v === 'string' && RE.test(v)) acc[cam] = v;
+          else if (v && typeof v === 'object') uuids(v, cam, acc);
+        }
+      }
+      return acc;
+    }
+
+    try {
+      let url = BASE + '?_limit=' + (code ? '10' : '1') + (code ? ('&code=' + encodeURIComponent(code)) : '');
+      let out = await pega(url);
+      // se busca por code não achou nada, tenta sem filtro e casa pelo campo code no cliente
+      let lista = out.j && (out.j.results || out.j.data || (Array.isArray(out.j) ? out.j : []));
+      if (code && (!lista || !lista.length)) {
+        const alt = await pega(BASE + '?_limit=50');
+        const arr = alt.j && (alt.j.results || alt.j.data || []);
+        lista = (arr || []).filter(x => String(x.code || '') === code);
+        out = { status: alt.status, via: 'filtro-cliente' };
+      }
+
+      const pedido = (lista && lista[0]) || null;
+      if (!pedido) {
+        json(res, 200, { ok: true, empresa: emp, versao: VERSAO, status: out.status,
+          nota: code ? 'não achei pedido com esse code' : 'lista vazia',
+          amostra_bruta: out.j ? JSON.stringify(out.j).slice(0, 400) : (out.t || '').slice(0, 400) });
+        return true;
+      }
+
+      json(res, 200, {
+        ok: true, empresa: emp, versao: VERSAO,
+        pedido_code: pedido.code || null,
+        pedido_id: pedido.id || null,
+        status_pedido: pedido.status || null,
+        deliveries_qtd: Array.isArray(pedido.deliveries) ? pedido.deliveries.length : 0,
+        TODOS_OS_UUIDS: uuids(pedido),
+        estrutura_deliveries: Array.isArray(pedido.deliveries)
+          ? pedido.deliveries.map(d => ({ chaves: Object.keys(d), id: d.id || null,
+              code: d.code || null, packages: d.packages ? 'sim' : 'não' }))
+          : null
+      });
+    } catch (e) {
+      json(res, 500, { ok: false, erro: String(e.message || e) });
+    }
     return true;
   }
 
