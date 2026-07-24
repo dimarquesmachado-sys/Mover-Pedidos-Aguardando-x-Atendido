@@ -380,7 +380,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b53';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b55';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#b3b9c4'}, magalu:{n:'Magalu',c:'#0086ff'},
@@ -785,7 +785,7 @@ function renderLista(){
         '<div class="scl1">'+
           '<span class="badge" style="background:'+m.c+'">'+m.n+'</span>'+
           '<span class="num">'+esc(p.numero||p.id)+'</span>'+
-          ((souAdmin() && p.numero_loja && /amazon/i.test(String(p.marketplace||'')))?'<a href="https://sellercentral.amazon.com.br/orders-v3/order/'+encodeURIComponent(String(p.numero_loja).trim())+'" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="abrir a venda no Seller Central da Amazon (admin)" style="text-decoration:none;font-size:13px;color:#38bdf8">↗</a>':'')+((souAdmin() && p.numero_loja && /magalu/i.test(String(p.marketplace||'')))?'<a href="https://seller.magalu.com/pedidos/'+String(p.numero_loja).replace(/\D/g,'')+'" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="abrir o pedido no seller da Magalu (admin)" style="text-decoration:none;font-size:13px;color:#38bdf8">↗</a>':'')+((souAdmin() && p.numero_loja && /tiktok/i.test(String(p.marketplace||'')))?'<a href="https://seller-br.tiktok.com/order/detail?order_no='+String(p.numero_loja).replace(/\D/g,'')+'&shop_region=BR" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="abrir a venda no seller center do TikTok (admin)" style="text-decoration:none;font-size:13px;color:#38bdf8">↗</a>':'')+((souAdmin() && p.numero_loja && /shopee/i.test(String(p.marketplace||'')))?'<a href="/good-checkout-offline/ir-shopee?sn='+encodeURIComponent(String(p.numero_loja).trim())+'" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="abrir esta venda direto no seller center da Shopee (admin)" style="text-decoration:none;font-size:13px;color:#38bdf8">↗</a>':'')+((souAdmin() && p.numero_loja && /ml|merc/i.test(String(p.marketplace||'')))?'<a href="https://www.mercadolivre.com.br/vendas/'+String(p.numero_loja).replace(/\D/g,'')+'/detalhe" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="abrir a venda no Mercado Livre (só admin vê)" style="text-decoration:none;font-size:13px;color:#38bdf8">↗</a>':'')+
+          ((souAdmin() && p.numero_loja && /amazon/i.test(String(p.marketplace||'')))?'<a href="https://sellercentral.amazon.com.br/orders-v3/order/'+encodeURIComponent(String(p.numero_loja).trim())+'" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="abrir a venda no Seller Central da Amazon (admin)" style="text-decoration:none;font-size:13px;color:#38bdf8">↗</a>':'')+((souAdmin() && p.numero_loja && /magalu/i.test(String(p.marketplace||'')))?'<a href="/magalu/ir/good?n='+encodeURIComponent(String(p.numero_loja).trim())+'" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="abrir o pedido direto no seller da Magalu (admin)" style="text-decoration:none;font-size:13px;color:#38bdf8">↗</a>':'')+((souAdmin() && p.numero_loja && /tiktok/i.test(String(p.marketplace||'')))?'<a href="https://seller-br.tiktok.com/order/detail?order_no='+String(p.numero_loja).replace(/\D/g,'')+'&shop_region=BR" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="abrir a venda no seller center do TikTok (admin)" style="text-decoration:none;font-size:13px;color:#38bdf8">↗</a>':'')+((souAdmin() && p.numero_loja && /shopee/i.test(String(p.marketplace||'')))?'<a href="/good-checkout-offline/ir-shopee?sn='+encodeURIComponent(String(p.numero_loja).trim())+'" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="abrir esta venda direto no seller center da Shopee (admin)" style="text-decoration:none;font-size:13px;color:#38bdf8">↗</a>':'')+((souAdmin() && p.numero_loja && /ml|merc/i.test(String(p.marketplace||'')))?'<a href="https://www.mercadolivre.com.br/vendas/'+String(p.numero_loja).replace(/\D/g,'')+'/detalhe" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="abrir a venda no Mercado Livre (só admin vê)" style="text-decoration:none;font-size:13px;color:#38bdf8">↗</a>':'')+
         
           '<span class="setag">⚠️ sem etiqueta</span>'+
         '</div>'+
@@ -823,7 +823,7 @@ function renderLista(){
         '<span class="chk'+((p.tem_nf||p.nf_numero)?'':' off')+'" title="Nota Fiscal">🧾<i>'+((p.tem_nf||p.nf_numero)?'✓':'✗')+'</i></span>'+
         '<span class="badge" style="background:'+m.c+'">'+m.n+'</span>'+
         '<span class="num">'+esc(p.numero)+'</span>'+
-        ((souAdmin() && p.numero_loja && /amazon/i.test(String(p.marketplace||'')))?'<a href="https://sellercentral.amazon.com.br/orders-v3/order/'+encodeURIComponent(String(p.numero_loja).trim())+'" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="abrir a venda no Seller Central da Amazon (admin)" style="text-decoration:none;font-size:13px;color:#38bdf8">↗</a>':'')+((souAdmin() && p.numero_loja && /magalu/i.test(String(p.marketplace||'')))?'<a href="https://seller.magalu.com/pedidos/'+String(p.numero_loja).replace(/\D/g,'')+'" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="abrir o pedido no seller da Magalu (admin)" style="text-decoration:none;font-size:13px;color:#38bdf8">↗</a>':'')+((souAdmin() && p.numero_loja && /tiktok/i.test(String(p.marketplace||'')))?'<a href="https://seller-br.tiktok.com/order/detail?order_no='+String(p.numero_loja).replace(/\D/g,'')+'&shop_region=BR" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="abrir a venda no seller center do TikTok (admin)" style="text-decoration:none;font-size:13px;color:#38bdf8">↗</a>':'')+((souAdmin() && p.numero_loja && /shopee/i.test(String(p.marketplace||'')))?'<a href="/good-checkout-offline/ir-shopee?sn='+encodeURIComponent(String(p.numero_loja).trim())+'" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="abrir esta venda direto no seller center da Shopee (admin)" style="text-decoration:none;font-size:13px;color:#38bdf8">↗</a>':'')+((souAdmin() && p.numero_loja && /ml|merc/i.test(String(p.marketplace||'')))?'<a href="https://www.mercadolivre.com.br/vendas/'+String(p.numero_loja).replace(/\D/g,'')+'/detalhe" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="abrir a venda no Mercado Livre (só admin vê)" style="text-decoration:none;font-size:13px;color:#38bdf8">↗</a>':'')+
+        ((souAdmin() && p.numero_loja && /amazon/i.test(String(p.marketplace||'')))?'<a href="https://sellercentral.amazon.com.br/orders-v3/order/'+encodeURIComponent(String(p.numero_loja).trim())+'" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="abrir a venda no Seller Central da Amazon (admin)" style="text-decoration:none;font-size:13px;color:#38bdf8">↗</a>':'')+((souAdmin() && p.numero_loja && /magalu/i.test(String(p.marketplace||'')))?'<a href="/magalu/ir/good?n='+encodeURIComponent(String(p.numero_loja).trim())+'" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="abrir o pedido direto no seller da Magalu (admin)" style="text-decoration:none;font-size:13px;color:#38bdf8">↗</a>':'')+((souAdmin() && p.numero_loja && /tiktok/i.test(String(p.marketplace||'')))?'<a href="https://seller-br.tiktok.com/order/detail?order_no='+String(p.numero_loja).replace(/\D/g,'')+'&shop_region=BR" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="abrir a venda no seller center do TikTok (admin)" style="text-decoration:none;font-size:13px;color:#38bdf8">↗</a>':'')+((souAdmin() && p.numero_loja && /shopee/i.test(String(p.marketplace||'')))?'<a href="/good-checkout-offline/ir-shopee?sn='+encodeURIComponent(String(p.numero_loja).trim())+'" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="abrir esta venda direto no seller center da Shopee (admin)" style="text-decoration:none;font-size:13px;color:#38bdf8">↗</a>':'')+((souAdmin() && p.numero_loja && /ml|merc/i.test(String(p.marketplace||'')))?'<a href="https://www.mercadolivre.com.br/vendas/'+String(p.numero_loja).replace(/\D/g,'')+'/detalhe" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="abrir a venda no Mercado Livre (só admin vê)" style="text-decoration:none;font-size:13px;color:#38bdf8">↗</a>':'')+
         (p.volumes>1?'<span class="voltag">📦 '+p.volumes+' vol</span>':'')+
         (resvOutro?'<span class="resvtag">🟠 '+esc(resvOutro)+'</span>':'')+
         (p.conferido?'<span class="donetag">✓</span>':'')+
@@ -1502,6 +1502,22 @@ function histIntervalo(){
 function histPerOk(h){ if(histPer==='todos') return true; if(!h.conferido_em) return false; const d=hDiaSP(h.conferido_em); const iv=histIntervalo(); return d>=iv.de && d<=iv.ate; }
 function setHistPer(p){ histPer=p; filtrarHist(); }
 
+// ↗ dos marketplaces (admin) — abre o pedido direto no seller center. Usado nos cards
+// ativos E no histórico. 'o' precisa ter .marketplace e .numero_loja.
+function linksMkt(o){
+  if(!souAdmin() || !o || !o.numero_loja) return '';
+  var nl = String(o.numero_loja).trim();
+  var nld = nl.replace(/\D/g,'');
+  var mk = String(o.marketplace||'');
+  var st = 'text-decoration:none;font-size:13px;color:#38bdf8';
+  var a = function(href,titulo){ return '<a href="'+href+'" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="'+titulo+'" style="'+st+'">↗</a>'; };
+  if(/amazon/i.test(mk)) return a('https://sellercentral.amazon.com.br/orders-v3/order/'+encodeURIComponent(nl),'abrir a venda no Seller Central da Amazon (admin)');
+  if(/magalu/i.test(mk)) return a('/magalu/ir/good?n='+encodeURIComponent(nl),'abrir o pedido direto no seller da Magalu (admin)');
+  if(/tiktok/i.test(mk)) return a('https://seller-br.tiktok.com/order/detail?order_no='+nld+'&shop_region=BR','abrir a venda no seller center do TikTok (admin)');
+  if(/shopee/i.test(mk)) return a('/good-checkout-offline/ir-shopee?sn='+encodeURIComponent(nl),'abrir esta venda direto no seller center da Shopee (admin)');
+  if(/ml|merc/i.test(mk)) return a('https://www.mercadolivre.com.br/vendas/'+nld+'/detalhe','abrir a venda no Mercado Livre (admin)');
+  return '';
+}
 function renderHist(lista){
   if(histFlexOnly) lista = lista.filter(h=>!!h.flex);
   if(histPendOnly) lista = lista.filter(h=>histReenvios && histReenvios[h.id]);
@@ -1529,7 +1545,7 @@ function renderHist(lista){
     if(aberto){
       const its = h.itens||[];
       det = '<div class="histdet">'+
-        '<div>'+(mk?esc(mk.n):'')+(h.servico?' · '+esc(h.servico):'')+(h.flex?' · <b>⚡ FLEX</b>':'')+(h.nf_numero?' · NF '+esc(h.nf_numero):'')+'</div>'+
+        '<div>'+(mk?esc(mk.n):'')+(h.servico?' · '+esc(h.servico):'')+(h.flex?' · <b>⚡ FLEX</b>':'')+(h.nf_numero?' · NF '+esc(h.nf_numero):'')+' '+linksMkt(h)+'</div>'+
         (h.cliente?'<div>👤 '+esc(h.cliente)+'</div>':'')+
         (its.length
           ? its.map(it=>'<div class="histit"><b>'+(it.qtd||1)+'×</b> '+esc(it.sku||'?')+(it.descricao?' — '+esc(it.descricao):'')+'</div>').join('')
