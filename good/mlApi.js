@@ -76,7 +76,14 @@ async function enviarNFeParaML(token, numeroPedidoLoja, nfDetalhe) {
   console.log(`[GOOD mlApi] Shipment ${shipmentId} → status=${status} substatus=${substatus}`);
 
   if (substatus !== 'invoice_pending') {
-    throw new Error(`Shipment ${shipmentId} substatus=${substatus} (não é invoice_pending) — NF não pode ser enviada agora`);
+    // Anexa status/substatus ao erro para o F3 decidir se ainda vale re-checar.
+    // Pedido em estado final (shipped/delivered/cancelled) nunca mais vai pedir
+    // NF — com essa informação o F3 marca como resolvido já na 1ª passada, em
+    // vez de re-checar 18x à toa (principal fonte de HTTP 429 na janela de 30d).
+    throw Object.assign(
+      new Error(`Shipment ${shipmentId} status=${status} substatus=${substatus} (não é invoice_pending) — NF não pode ser enviada agora`),
+      { mlStatus: status, mlSubstatus: substatus }
+    );
   }
 
   // 3. Baixar XML da NF-e
