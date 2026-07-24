@@ -43,7 +43,13 @@ const MAX_NFE = parseInt(process.env.MAX_NFE_ML || '60');
 
 // Janela PRÓPRIA do F3 — curta, porque NF travada no ML é sempre recente.
 // Não usa o getPeriodo() do blingApi (que é a janela longa do F1/F2).
-const NF_JANELA_DIAS = parseInt(process.env.NF_JANELA_DIAS || '5');
+// ATENÇÃO: usa var PRÓPRIA (NF_JANELA_DIAS_F3), não a NF_JANELA_DIAS "pelada".
+// Motivo: NF_JANELA_DIAS é compartilhada com o Corrigir-NFs das TRÊS empresas
+// (girassol|good|ambtotal/nfBlingApi.js). Se o F3 usasse ela, aumentar a janela
+// daqui aumentaria também a janela do Corrigir-NFs, que passaria a corrigir e
+// RETRANSMITIR NFs de semanas atrás — retransmissão velha costuma ser rejeitada
+// pela SEFAZ. Com var própria, dá pra esticar o F3 sem mexer no Corrigir-NFs.
+const NF_JANELA_DIAS = parseInt(process.env.NF_JANELA_DIAS_F3 || '5');
 
 // Quantas vezes re-checar uma NF cujo shipment "não está invoice_pending"
 // antes de desistir e marcar como processada. 18 ciclos de 10min ≈ 3h.
