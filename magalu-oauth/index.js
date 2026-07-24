@@ -26,7 +26,7 @@ const fs   = require('fs');
 const path = require('path');
 const { json, html } = require('../lib/http');
 
-const VERSAO = 'magalu-oauth v1 b5';
+const VERSAO = 'magalu-oauth v1 b6';
 
 const DATA_DIR = process.env.MAGALU_DATA_DIR || '/data/magalu';
 
@@ -286,6 +286,72 @@ async function tratar(req, res, urlObj) {
     } catch (e) {
       json(res, 500, { ok: false, erro: String(e.message || e) });
     }
+    return true;
+  }
+
+  // ── IR PRO PEDIDO NO PORTAL DO MAGALU ────────────────────────────────
+  // O ↗ do Magalu apontava pra /pedidos/<numero>, que dá 404 — a URL que abre
+  // exige o UUID do PACOTE: /pedidos/<numero>/<uuid>. Esse uuid é deliveries[0].id
+  // (confirmado: deliveries[0].code = "LU-<numero>-1", o "Pacote #...-1" do portal).
+  // Buscamos o pedido pela API oficial (seller/v1/orders?code=<numero>), pegamos o
+  // uuid do pacote, guardamos em disco (nunca muda) e redirecionamos. O token
+  // renova sozinho, então não tem manutenção. &diag=1 mostra o passo a passo.
+  // empresa vem no path: /magalu/ir/<empresa>?n=<numero>
+  if (method === 'GET' && p.startsWith('/magalu/ir/')) {
+    const emp = p.slice('/magalu/ir/'.length).toLowerCase().trim();
+    const numero = String(q.get('n') || '').replace(/\D/g, '').trim();  // só dígitos (tira o "LU-")
+    const diag = q.get('diag') === '1';
+    const portalBusca = 'https://seller.magalu.com/pedidos';  // fallback: lista de pedidos
+    const vai = dest => { res.writeHead(302, { Location: dest, 'Cache-Control': 'no-store' }); res.end(); };
+
+    if (!EMPRESAS_VALIDAS.includes(emp)) {
+      if (diag) json(res, 400, { ok: false, erro: 'empresa inválida', validas: EMPRESAS_VALIDAS });
+      else vai(portalBusca);
+      return true;
+    }
+    if (!numero) { if (diag) json(res, 400, { ok: false, erro: 'faltou ?n=' }); else vai(portalBusca); return true; }
+
+    // cache: numero → uuid do pacote (nunca muda)
+    const ARQ = path.join(DATA_DIR, emp + '-pacotes.json');
+    const mapa = lerJson(ARQ, {}) || {};
+    const urlPedido = uuid => 'https://seller.magalu.com/pedidos/' + numero + '/' + uuid;
+    if (mapa[numero] && !diag) { vai(urlPedido(mapa[numero])); return true; }
+
+    const passos = [];
+    let uuid = mapa[numero] || null;
+    if (uuid) passos.push({ passo: 'cache', uuid });
+
+    try {
+      const tok = await getAccessToken(emp);
+      const r = await fetch('https://api.magalu.com/seller/v1/orders?_limit=5&code=' + encodeURIComponent(numero),
+        { headers: { 'Authorization': 'Bearer ' + tok, 'Accept': 'application/json' } });
+      const t = await r.text();
+      let j = null; try { j = JSON.parse(t); } catch (e) {}
+      let lista = j && (j.results || j.data || (Array.isArray(j) ? j : []));
+      // fallback: se o filtro por code não bateu, casa no cliente
+      let ped = (lista || []).find(x => String(x.code || '') === numero) || (lista || [])[0] || null;
+      passos.push({ passo: 'consulta', status: r.status, achou_pedido: !!ped,
+        corpo: ped ? undefined : (t || '').slice(0, 300) });
+
+      if (ped && Array.isArray(ped.deliveries) && ped.deliveries[0] && ped.deliveries[0].id) {
+        uuid = ped.deliveries[0].id;
+        mapa[numero] = uuid;
+        try { gravarJson(ARQ, mapa); } catch (e) {}
+        passos.push({ passo: 'achou', uuid, delivery_code: ped.deliveries[0].code || null });
+      } else if (ped) {
+        passos.push({ passo: 'sem_delivery', chaves_pedido: Object.keys(ped) });
+      }
+    } catch (e) {
+      passos.push({ passo: 'excecao', erro: String(e.message || e).slice(0, 250) });
+    }
+
+    if (diag) {
+      json(res, 200, { ok: !!uuid, empresa: emp, numero, uuid,
+        destino: uuid ? urlPedido(uuid) : portalBusca,
+        pacotes_em_cache: Object.keys(mapa).length, versao: VERSAO, passos });
+      return true;
+    }
+    vai(uuid ? urlPedido(uuid) : portalBusca);
     return true;
   }
 
