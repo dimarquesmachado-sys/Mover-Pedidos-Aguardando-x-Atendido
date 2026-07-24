@@ -48,6 +48,12 @@ const NF_JANELA_DIAS = parseInt(process.env.GOOD_NF_JANELA_DIAS || '5');
 // antes de desistir e marcar como processada. 18 ciclos de 10min ≈ 3h.
 const MAX_CHECAGENS_PENDENCIA = parseInt(process.env.GOOD_F3_MAX_CHECAGENS || '18');
 
+// Estados de envio em que o ML NUNCA mais vai pedir NF (já despachado, entregue
+// ou cancelado). Caindo num desses, não adianta re-checar MAX_CHECAGENS_PENDENCIA
+// vezes: marca como resolvido de primeira. Com janela de 30 dias a maioria das
+// NFs da fila está exatamente aqui — era o maior gasto de chamada de API.
+const ESTADOS_FINAIS = ['shipped', 'delivered', 'not_delivered', 'cancelled'];
+
 // nfeId -> nº de checagens "sem pendência" (em memória)
 const _semPendenciaCount = new Map();
 
@@ -145,14 +151,21 @@ async function _fluxoNFeML(tokenBling) {
         // Shipment não está aguardando NF AGORA — mas pode estar a caminho
         // (cross-docking fica em buffered antes de virar invoice_pending).
         // Re-checa nos próximos ciclos até MAX_CHECAGENS_PENDENCIA.
-        const tent = (_semPendenciaCount.get(nfeId) || 0) + 1;
-        _semPendenciaCount.set(nfeId, tent);
-        if (tent >= MAX_CHECAGENS_PENDENCIA) {
-          console.log(`[GOOD F3-NFeML] NF ${nf.numero} (pedido ML ${numeroPedidoLoja}) — sem pendência após ${tent} checagens, marcando como ok`);
+        if (ESTADOS_FINAIS.includes(String(e.mlStatus || ''))) {
+          // Envio já terminou: o ML não vai mais pedir NF pra esse pedido.
+          console.log(`[GOOD F3-NFeML] NF ${nf.numero} (pedido ML ${numeroPedidoLoja}) — envio já em "${e.mlStatus}", não pede mais NF — marcando como ok`);
           marcarProcessado('F3', nfeId);
           _semPendenciaCount.delete(nfeId);
         } else {
-          console.log(`[GOOD F3-NFeML] NF ${nf.numero} (pedido ML ${numeroPedidoLoja}) — ML não está pendente (checagem ${tent}/${MAX_CHECAGENS_PENDENCIA}), re-checa no próximo ciclo`);
+          const tent = (_semPendenciaCount.get(nfeId) || 0) + 1;
+          _semPendenciaCount.set(nfeId, tent);
+          if (tent >= MAX_CHECAGENS_PENDENCIA) {
+            console.log(`[GOOD F3-NFeML] NF ${nf.numero} (pedido ML ${numeroPedidoLoja}) — sem pendência após ${tent} checagens, marcando como ok`);
+            marcarProcessado('F3', nfeId);
+            _semPendenciaCount.delete(nfeId);
+          } else {
+            console.log(`[GOOD F3-NFeML] NF ${nf.numero} (pedido ML ${numeroPedidoLoja}) — ML não está pendente (checagem ${tent}/${MAX_CHECAGENS_PENDENCIA}), re-checa no próximo ciclo`);
+          }
         }
         semPendencia++;
       } else {
