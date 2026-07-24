@@ -380,7 +380,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b125';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b126';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#b3b9c4'}, magalu:{n:'Magalu',c:'#0086ff'}, shein:{n:'Shein',c:'#e0e0e0'},
@@ -1412,7 +1412,7 @@ async function abrirHistorico(){
       '<button class="mx" onclick="fecharConfirmacao()" title="fechar">✕</button>'+
       '<div class="mtit">🕘 Últimos pedidos finalizados</div>'+
       '<input id="histBusca" class="buscafld" style="margin-bottom:8px" placeholder="🔎 filtrar por nº do pedido ou cliente" autocomplete="off" oninput="filtrarHist()" />'+
-      '<div style="margin:-2px 0 8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap"><button class="chip flex" id="histFlexBtn" onclick="toggleHistFlex()">⚡ Só FLEX</button><button class="chip" id="histExpBtn" onclick="toggleHistExpand()">▼ Expandir tudo</button><button id="histPendBtn" onclick="toggleHistPend()" title="pedido(s) que o estoquista sinalizou pra reenvio — clique pra ver só eles e enviar" style="display:none;background:#dc2626;color:#fff;border:1px solid #dc2626;border-radius:999px;padding:7px 14px;font-size:13px;font-weight:800;cursor:pointer"></button></div>'+
+      '<div style="margin:-2px 0 8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap"><button class="chip flex" id="histFlexBtn" onclick="toggleHistFlex()">⚡ Só FLEX</button><button class="chip on" id="histExpBtn" onclick="toggleHistExpand()">▲ Recolher tudo</button><button id="histPendBtn" onclick="toggleHistPend()" title="pedido(s) que o estoquista sinalizou pra reenvio — clique pra ver só eles e enviar" style="display:none;background:#dc2626;color:#fff;border:1px solid #dc2626;border-radius:999px;padding:7px 14px;font-size:13px;font-weight:800;cursor:pointer"></button></div>'+
       '<div id="histPerRow" style="margin:-2px 0 8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap"></div>'+
       '<select id="histMktSel" class="buscafld" style="margin-bottom:10px" onchange="histMkt=this.value;filtrarHist()"><option value="">Todos os marketplaces</option></select>'+
       '<div id="histBody" class="histbody">carregando…</div>'+
@@ -1431,11 +1431,12 @@ async function abrirHistorico(){
 // monta as opções do filtro de marketplace só com os que aparecem no histórico (com contagem)
 function montarFiltroMkt(){
   const ordem = ['ml','shopee','amazon','magalu','tiktok','outro'];
-  const presentes = [...new Set(histItens.map(h => h.marketplace || 'outro'))].sort((a,b)=>ordem.indexOf(a)-ordem.indexOf(b));
-  let html = '<option value="">Todos ('+histItens.length+')</option>';
+  const base = histItens.filter(histPerOk);   // conta só o período selecionado (Hoje/Ontem/etc.), não o total geral
+  const presentes = [...new Set(base.map(h => h.marketplace || 'outro'))].sort((a,b)=>ordem.indexOf(a)-ordem.indexOf(b));
+  let html = '<option value="">Todos ('+base.length+')</option>';
   for(const mk of presentes){
     const n = (MKT[mk]||MKT.outro).n;
-    const qt = histItens.filter(h=>(h.marketplace||'outro')===mk).length;
+    const qt = base.filter(h=>(h.marketplace||'outro')===mk).length;
     html += '<option value="'+mk+'">'+n+' ('+qt+')</option>';
   }
   const sel = $('histMktSel');
@@ -1452,7 +1453,7 @@ let histFlexOnly = false;
 function toggleHistFlex(){ histFlexOnly = !histFlexOnly; const b=$('histFlexBtn'); if(b) b.classList.toggle('on', histFlexOnly); filtrarHist(); }
 let histPendOnly = false;
 function toggleHistPend(){ histPendOnly = !histPendOnly; const b=$('histPendBtn'); if(b) b.classList.toggle('on', histPendOnly); filtrarHist(); }
-let histExpandAll = false;
+let histExpandAll = true;
 function toggleHistExpand(){ histExpandAll = !histExpandAll; const b=$('histExpBtn'); if(b){ b.classList.toggle('on', histExpandAll); b.textContent = histExpandAll?'▲ Recolher tudo':'▼ Expandir tudo'; } filtrarHist(); }
 let histAberto = null;   // pedido com dropdown de detalhes aberto
 function toggleHistDet(id){ histAberto = (histAberto===id) ? null : id; filtrarHist(); }
@@ -1487,7 +1488,7 @@ async function resolverReenvio(id, enviar){
   enviandoReenvio = false;
   abrirHistorico();
 }
-let histPer='todos', histPDe='', histPAte='';
+let histPer='hoje', histPDe='', histPAte='';
 const hDiaSP = iso => { try{ return new Date(iso).toLocaleString('sv-SE',{timeZone:'America/Sao_Paulo'}).slice(0,10); }catch(e){ return String(iso||'').slice(0,10); } };
 const hHoje = () => new Date().toLocaleString('sv-SE',{timeZone:'America/Sao_Paulo'}).slice(0,10);
 function histIntervalo(){
@@ -1525,7 +1526,7 @@ function renderHist(lista){
   lista = lista.slice().sort((a,b)=>{ const fa=(histReenvios&&histReenvios[a.id])?1:0, fb=(histReenvios&&histReenvios[b.id])?1:0; return fa!==fb ? fb-fa : String(b.conferido_em||'').localeCompare(String(a.conferido_em||'')); });
   const perRow = $('histPerRow');
   if(perRow){
-    const defs=[['todos','Todos'],['hoje','Hoje'],['ontem','Ontem'],['7','Semana'],['mes','M\u00eas'],['custom','Per\u00edodo\u2026']];
+    const defs=[['hoje','Hoje'],['ontem','Ontem'],['7','Semana'],['mes','M\u00eas'],['custom','Per\u00edodo\u2026'],['todos','Todos']];
     perRow.innerHTML = defs.map(function(d2){ return '<button class="chip" style="'+(histPer===d2[0]?'background:#1d4ed8;color:#fff;border-color:#1d4ed8':'')+'" onclick="setHistPer(\''+d2[0]+'\')">'+d2[1]+'</button>'; }).join('')
       + (histPer==='custom' ? ' <input type="date" value="'+histPDe+'" onclick="this.showPicker&&this.showPicker()" onchange="histPDe=this.value;filtrarHist()" style="padding:6px 8px;border-radius:8px;border:1px solid #94a3b8"> <input type="date" value="'+histPAte+'" onclick="this.showPicker&&this.showPicker()" onchange="histPAte=this.value;filtrarHist()" style="padding:6px 8px;border-radius:8px;border:1px solid #94a3b8">' : '')
       + '<b style="margin-left:auto;font-size:13px">'+lista.length+' pedido(s)</b>';
@@ -1560,6 +1561,7 @@ function renderHist(lista){
         '<div class="hsub">'+resumo+dt+(h.user?(' · '+esc(h.user)):'')+' · '+(aberto?'▲ fechar':'▼ detalhes')+'</div>'+
       '</div>'+
       '</div><div class="hactions">'+
+      linksMkt(h)+
       (ree?'<span class="reebadge" title="solicitado por '+esc(ree.por||'?')+' em '+esc((ree.em||'').slice(0,16).replace('T',' '))+'">📨 REENVIO</span>':'')+
       (h.ultimo_reenvio?'<span class="hsync" style="background:#1e3a8a;color:#bfdbfe" title="reenviado por '+esc(h.ultimo_reenvio.por||'?')+' em '+esc(String(h.ultimo_reenvio.em||'').slice(0,16).replace('T',' '))+'">📧 '+((h.reenvios||1)>1?((h.reenvios)+'× '):'')+esc(h.ultimo_reenvio.por||'?')+'</span>':'')+
       tag+
