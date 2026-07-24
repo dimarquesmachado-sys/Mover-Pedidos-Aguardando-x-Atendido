@@ -189,19 +189,29 @@ async function corrigirNFsPendentes() {
           if (resultado) {
             const ieAtual = String(ie || '').trim().toUpperCase();
             const ieOficial = String(resultado.ie || '').trim().toUpperCase();
-            const contribAtual = Number(detalhe.contato?.contribuinte || 0);
-            const contribOficial = Number(resultado.contribuinte || 0);
-            if (ieAtual !== ieOficial || contribAtual !== contribOficial) {
-              console.log(`[corrigirNFs] NF ${nf.id} | IE "${ie}" → "${resultado.ie}" | contribuinte ${contribAtual} → ${contribOficial}`);
+            // COMPARA SÓ A IE (corrigido 24/07). Antes comparava também o campo
+            // `contribuinte`, mas ele NÃO vem no detalhe da NF — chega undefined,
+            // vira 0, e 0 !== 1 dava divergência em 100% dos PJ. Efeito colateral:
+            // PUT inútil no cadastro do contato + salvarNF numa NF já autorizada,
+            // que o Bling recusa com HTTP 400 "situação da nota não permite edição".
+            // A IE é o dado que o ML valida — é o que interessa aqui.
+            if (ieAtual !== ieOficial) {
+              console.log(`[corrigirNFs] NF ${nf.id} | IE "${ie}" → "${resultado.ie}" (contribuinte=${resultado.contribuinte})`);
               const contato = await getContato(token, idContato);
               if (contato) {
                 // Corrige o CADASTRO do contato: as próximas vendas desse cliente
-                // já nascem certas, sem passar por aqui de novo.
+                // já nascem certas. Vale mesmo quando esta NF não aceita mais edição.
                 await atualizarIEContato(token, idContato, contato, resultado.ie, resultado.contribuinte);
               }
-              detalhe.contato.ie = resultado.ie;
-              detalhe.contato.contribuinte = resultado.contribuinte;
-              corrigiu = true;
+              // A NF em si só é alterada/retransmitida se ainda aceitar edição
+              // (pendente=1 ou rejeitada=4). Autorizada recusa o PUT.
+              if (detalhe.situacao === 1 || detalhe.situacao === 4) {
+                detalhe.contato.ie = resultado.ie;
+                detalhe.contato.contribuinte = resultado.contribuinte;
+                corrigiu = true;
+              } else {
+                console.log(`[corrigirNFs] NF ${nf.id} | situacao=${detalhe.situacao} não permite edição — corrigi só o cadastro do contato`);
+              }
               await sleepNF(300);
             }
           } else if (!ie) {
