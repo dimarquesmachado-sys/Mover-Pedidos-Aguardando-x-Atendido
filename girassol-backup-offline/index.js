@@ -41,7 +41,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v25/07 b36';
+const VERSAO     = 'girassol-backup-offline v25/07 b37';
 
 // ── SESSÃO DE OPERADOR (cookie assinado HMAC) — protege rotas de dados/ação ──
 // Segredo estável entre restarts. Usa ADMIN_KEY (já configurada no Render) como base.
@@ -859,9 +859,16 @@ function routes(readBody) {
       // É NESSE app que a permissão de pós-venda/devoluções precisa ser habilitada.
       out.app_id_do_token = (String(tk).match(/APP_USR-(\d+)-/) || [])[1] || 'nao-identificado';
       try {
-        const rc = await fetch('https://api.mercadolibre.com/post-purchase/v1/claims/search?sort=last_updated:desc&limit=30', H);
+        // o /claims/search exige pelo menos 1 filtro; o ML recomenda players.user_id + players.role=respondent
+        // (o vendedor é o "respondent" da reclamação). Pega o seller_id via /users/me.
+        let sellerId = null;
+        try { const rm = await fetch('https://api.mercadolibre.com/users/me', H); const dm = await rm.json().catch(() => null); if (rm.ok && dm && dm.id) sellerId = dm.id; } catch (e) {}
+        out.seller_id = sellerId;
+        const filtro = sellerId ? ('players.user_id=' + sellerId + '&players.role=respondent&') : 'status=opened&';
+        const rc = await fetch('https://api.mercadolibre.com/post-purchase/v1/claims/search?' + filtro + 'sort=date_created:desc&limit=30', H);
         const dc = await rc.json().catch(() => null);
         out.status_busca = rc.status;
+        out.total_claims = (dc && dc.paging && dc.paging.total);   // total de reclamações/devoluções da conta
         out.claims_raw = dc;   // estrutura crua da busca (pra eu ver os campos: id, order, tipo, stage, status...)
         const lista = (dc && (dc.data || dc.results || dc.paging_data || [])) || [];
         const amostra = Array.isArray(lista) ? lista.slice(0, 3) : [];
