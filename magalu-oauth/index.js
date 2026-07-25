@@ -26,7 +26,7 @@ const fs   = require('fs');
 const path = require('path');
 const { json, html } = require('../lib/http');
 
-const VERSAO = 'magalu-oauth v1 b13';
+const VERSAO = 'magalu-oauth v1 b14';
 
 const DATA_DIR = process.env.MAGALU_DATA_DIR || '/data/magalu';
 
@@ -133,6 +133,7 @@ async function tratar(req, res, urlObj) {
       + '&redirect_uri=' + encodeURIComponent(REDIRECT_URI)
       + '&scope=' + encodeURIComponent(SCOPES)
       + '&choose_tenants=true'   // deixa o seller escolher QUAL loja está autorizando
+      + '&prompt=consent'   // FORÇA a tela de permissões mesmo se já consentiu antes — necessário pra puxar ESCOPOS NOVOS no refresh token (senão a Magalu pula a tela e o token sai com os escopos antigos)
       + '&state=' + encodeURIComponent(emp);
     res.writeHead(302, { Location: auth, 'Cache-Control': 'no-store' });
     res.end();
