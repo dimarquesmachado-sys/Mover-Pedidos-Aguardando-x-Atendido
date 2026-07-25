@@ -26,7 +26,7 @@ const fs   = require('fs');
 const path = require('path');
 const { json, html } = require('../lib/http');
 
-const VERSAO = 'magalu-oauth v1 b8';
+const VERSAO = 'magalu-oauth v1 b9';
 
 const DATA_DIR = process.env.MAGALU_DATA_DIR || '/data/magalu';
 
@@ -329,20 +329,38 @@ async function tratar(req, res, urlObj) {
     }
 
     try {
-      // 1) escolher um pedido: por code, ou por status, ou o mais recente
-      let url = BASE + '?_limit=' + (code || status ? '20' : '1');
-      if (code) url += '&code=' + encodeURIComponent(code);
-      if (status) url += '&status=' + encodeURIComponent(status);
-      let out = await pega(url);
-      let lista = out.j && (out.j.results || out.j.data || (Array.isArray(out.j) ? out.j : []));
-      if (code) lista = (lista || []).filter(x => String(x.code || '') === code);
-      const pedido = (lista && lista[0]) || null;
-
-      if (!pedido) {
-        json(res, 200, { ok: true, empresa: emp, versao: VERSAO, status_http: out.status,
-          nota: 'nenhum pedido' + (status ? ' com status=' + status : '') + (code ? ' com code=' + code : ''),
-          bruto: out.j ? JSON.stringify(out.j).slice(0, 500) : (out.t || '').slice(0, 500) });
-        return true;
+      // 1) achar o pedido certo. Se for por code, a API às vezes ignora o &code=
+      //    (pedido antigo fora da janela default), então paginamos fundo procurando.
+      let pedido = null;
+      let paginasVarridas = 0;
+      if (code) {
+        let offset = 0;
+        while (offset < 500 && !pedido) {  // varre até 500 pedidos procurando o code
+          const r = await pega(BASE + '?_limit=50&_offset=' + offset);
+          const arr = r.j && (r.j.results || r.j.data || (Array.isArray(r.j) ? r.j : [])) || [];
+          if (!arr.length) break;
+          pedido = arr.find(x => String(x.code || '') === code) || null;
+          paginasVarridas++;
+          offset += 50;
+        }
+        if (!pedido) {
+          json(res, 200, { ok: false, empresa: emp, versao: VERSAO,
+            nota: 'não achei o pedido code=' + code + ' nos últimos 500 pedidos (varri ' + paginasVarridas + ' páginas). Pode estar mais antigo — me passa um code mais recente, ou use &status=' });
+          return true;
+        }
+      } else {
+        // sem code: usa status (se veio) ou o mais recente
+        let url = BASE + '?_limit=' + (status ? '20' : '1');
+        if (status) url += '&status=' + encodeURIComponent(status);
+        const out = await pega(url);
+        const lista = out.j && (out.j.results || out.j.data || (Array.isArray(out.j) ? out.j : [])) || [];
+        pedido = lista[0] || null;
+        if (!pedido) {
+          json(res, 200, { ok: true, empresa: emp, versao: VERSAO, status_http: out.status,
+            nota: 'nenhum pedido' + (status ? ' com status=' + status : ''),
+            bruto: out.j ? JSON.stringify(out.j).slice(0, 500) : (out.t || '').slice(0, 500) });
+          return true;
+        }
       }
 
       const d0 = Array.isArray(pedido.deliveries) && pedido.deliveries[0] ? pedido.deliveries[0] : {};
