@@ -41,7 +41,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v25/07 b29';
+const VERSAO     = 'girassol-backup-offline v25/07 b30';
 
 // ── SESSÃO DE OPERADOR (cookie assinado HMAC) — protege rotas de dados/ação ──
 // Segredo estável entre restarts. Usa ADMIN_KEY (já configurada no Render) como base.
@@ -2611,7 +2611,10 @@ async function vendasSync() {
       const confS = readJson(CONFERIDOS_FILE, {});
       const bipN = new Set(Object.values(confS).map(c => String(c && c.numero)));
       let _tkV=null; try{ const {garantirTokenML:_g2}=require('../girassol/mlTokenManager'); _tkV=await _g2(); }catch(e){}   // hora real do ML nas não-bipadas
-      const alvosDet = Object.values(atual).filter(v => v && !v.det && v.numero != null && !bipN.has(String(v.numero)) && !/cancel/i.test(String(v.situacao || ''))).slice(0, 90);   // b21: mais alvos por rodada — margem da não-bipada é o que o Diego abre pra ver
+      const alvosDet = Object.values(atual)
+        .filter(v => v && !v.det && v.numero != null && !bipN.has(String(v.numero)) && !/cancel/i.test(String(v.situacao || '')))
+        .sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')) || Number(b.numero || 0) - Number(a.numero || 0))   // b30: mais RECENTES primeiro. Com 800+ vendas na janela, os recentes (que o Diego abre pra ver) ficavam no FIM da fila de inserção e nunca ganhavam detalhe/margem — agora entram primeiro.
+        .slice(0, 120);   // b30: 90→120 por rodada pra drenar o volume mais rápido
       for (const v of alvosDet) {
         const rd = await blingGet('/pedidos/vendas/' + v.id);
         const det = (rd && rd.ok && rd.data && rd.data.data) || null;
