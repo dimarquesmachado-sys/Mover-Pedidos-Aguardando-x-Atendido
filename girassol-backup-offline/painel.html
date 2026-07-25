@@ -380,7 +380,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b126';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b130';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#b3b9c4'}, magalu:{n:'Magalu',c:'#0086ff'}, shein:{n:'Shein',c:'#e0e0e0'},
@@ -397,7 +397,7 @@ let estoqueSaldos = {};      // sku → saldoVirtual do Bling (estoque restante)
 let estoqueCheckout = {};    // sku → quanto desse produto está em pedidos no checkout agora (info, não subtrai)
 let estoqueCarregado = false; // já tentou buscar? false=mostra "…", true=mostra número/"—"
 let filtroMkt = null;   // null=todos | 'ml'|'shopee'|... | 'flex'
-let ordenacao = 'numero';   // 'numero' (mais antigos) | 'produto' (agrupa pedidos do mesmo SKU p/ picking mais rapido)
+let ordenacao = 'produto';   // 'numero' (mais antigos) | 'produto' (agrupa pedidos do mesmo SKU p/ picking mais rapido)
 function setOrdenacao(v){ ordenacao = v; renderChips(); renderLista(); }
 // chave de agrupamento por produto: SKUs distintos ordenados e juntados. "so SKU-A" ("a") vem ANTES de
 // "SKU-A + SKU-B" ("a|b"), que vem antes de "so SKU-B" ("b") — pedidos puros primeiro, depois os combinados.
@@ -1431,8 +1431,10 @@ async function abrirHistorico(){
 // monta as opções do filtro de marketplace só com os que aparecem no histórico (com contagem)
 function montarFiltroMkt(){
   const ordem = ['ml','shopee','amazon','magalu','tiktok','outro'];
-  const base = histItens.filter(histPerOk);   // conta só o período selecionado (Hoje/Ontem/etc.), não o total geral
-  const presentes = [...new Set(base.map(h => h.marketplace || 'outro'))].sort((a,b)=>ordem.indexOf(a)-ordem.indexOf(b));
+  const base = histItens.filter(histPerOk);   // a CONTAGEM segue o período selecionado (Hoje/Ontem/Todos…)
+  // a LISTA de opções vem do histórico inteiro: se viesse só do período, a opção
+  // sumia quando o período não tinha aquele marketplace e o filtro ficava preso.
+  const presentes = [...new Set(histItens.map(h => h.marketplace || 'outro'))].sort((a,b)=>ordem.indexOf(a)-ordem.indexOf(b));
   let html = '<option value="">Todos ('+base.length+')</option>';
   for(const mk of presentes){
     const n = (MKT[mk]||MKT.outro).n;
@@ -1442,7 +1444,12 @@ function montarFiltroMkt(){
   const sel = $('histMktSel');
   if(sel){ sel.innerHTML = html; sel.value = histMkt; }
 }
-function filtrarHist(){
+let histLimite = 200;   // quantos cards o histórico desenha por vez ("Todos" tem milhares — paginar evita travar)
+function histMais(){ histLimite += 200; filtrarHist(true); }
+function filtrarHist(manterLimite){
+  if(!manterLimite) histLimite = 200;   // trocar filtro volta pra 1ª página; só o "mostrar mais" acumula
+  montarFiltroMkt();   // reconta o dropdown a CADA mudança (período, busca, datas do Período…).
+                       // Antes só montava ao abrir o histórico e ficava congelado no número do 1º período.
   const q = (($('histBusca')||{}).value||'').trim().toLowerCase();
   let lista = histItens;
   if(histMkt) lista = lista.filter(h => (h.marketplace||'outro')===histMkt);
@@ -1454,9 +1461,9 @@ function toggleHistFlex(){ histFlexOnly = !histFlexOnly; const b=$('histFlexBtn'
 let histPendOnly = false;
 function toggleHistPend(){ histPendOnly = !histPendOnly; const b=$('histPendBtn'); if(b) b.classList.toggle('on', histPendOnly); filtrarHist(); }
 let histExpandAll = true;
-function toggleHistExpand(){ histExpandAll = !histExpandAll; const b=$('histExpBtn'); if(b){ b.classList.toggle('on', histExpandAll); b.textContent = histExpandAll?'▲ Recolher tudo':'▼ Expandir tudo'; } filtrarHist(); }
+function toggleHistExpand(){ histExpandAll = !histExpandAll; const b=$('histExpBtn'); if(b){ b.classList.toggle('on', histExpandAll); b.textContent = histExpandAll?'▲ Recolher tudo':'▼ Expandir tudo'; } filtrarHist(true); }
 let histAberto = null;   // pedido com dropdown de detalhes aberto
-function toggleHistDet(id){ histAberto = (histAberto===id) ? null : id; filtrarHist(); }
+function toggleHistDet(id){ histAberto = (histAberto===id) ? null : id; filtrarHist(true); }
 let histReenvios = {};   // solicitações de reenvio pendentes (id → {por, em})
 let histReenvioDireto = false;   // empresa no modo reenvio direto (env CHECKOUT_REENVIO_DIRETO_EMPRESAS)
 async function pedirReenvio(id, numero){
@@ -1524,17 +1531,19 @@ function renderHist(lista){
   if(histPendOnly) lista = lista.filter(h=>histReenvios && histReenvios[h.id]);
   lista = lista.filter(histPerOk);
   lista = lista.slice().sort((a,b)=>{ const fa=(histReenvios&&histReenvios[a.id])?1:0, fb=(histReenvios&&histReenvios[b.id])?1:0; return fa!==fb ? fb-fa : String(b.conferido_em||'').localeCompare(String(a.conferido_em||'')); });
+  const totalFiltrado = lista.length;
+  const mostra = lista.slice(0, histLimite);   // desenha só a página atual
   const perRow = $('histPerRow');
   if(perRow){
     const defs=[['hoje','Hoje'],['ontem','Ontem'],['7','Semana'],['mes','M\u00eas'],['custom','Per\u00edodo\u2026'],['todos','Todos']];
     perRow.innerHTML = defs.map(function(d2){ return '<button class="chip" style="'+(histPer===d2[0]?'background:#1d4ed8;color:#fff;border-color:#1d4ed8':'')+'" onclick="setHistPer(\''+d2[0]+'\')">'+d2[1]+'</button>'; }).join('')
       + (histPer==='custom' ? ' <input type="date" value="'+histPDe+'" onclick="this.showPicker&&this.showPicker()" onchange="histPDe=this.value;filtrarHist()" style="padding:6px 8px;border-radius:8px;border:1px solid #94a3b8"> <input type="date" value="'+histPAte+'" onclick="this.showPicker&&this.showPicker()" onchange="histPAte=this.value;filtrarHist()" style="padding:6px 8px;border-radius:8px;border:1px solid #94a3b8">' : '')
-      + '<b style="margin-left:auto;font-size:13px">'+lista.length+' pedido(s)</b>';
+      + '<b style="margin-left:auto;font-size:13px">'+(mostra.length<totalFiltrado ? (mostra.length+' de '+totalFiltrado) : totalFiltrado)+' pedido(s)</b>';
   }
   const pend = Object.keys(histReenvios||{}).length;
   const pb = $('histPendBtn'); if(pb){ pb.textContent = (histPendOnly?'✕ ':'⚠️ ')+pend+' PENDENTE'+(pend>1?'S':'')+' DE ENVIO'; pb.style.display = pend? 'inline-block' : 'none'; }
   if(!lista.length){ $('histBody').innerHTML='<div class="sepempty">'+(histItens.length?'Nenhum resultado pro filtro.':'Nenhum pedido finalizado ainda.')+'</div>'; return; }
-  $('histBody').innerHTML = lista.map(h=>{
+  $('histBody').innerHTML = mostra.map(h=>{
     const dt = h.conferido_em ? new Date(h.conferido_em).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '';
     const mk = h.marketplace ? (MKT[h.marketplace]||MKT.outro) : null;
     const tag = h.sincronizado ? '<span class="hsync ok">✓ VERIFICADO</span>' : '<span class="hsync wait">⏳ na fila</span>';
@@ -1571,7 +1580,10 @@ function renderHist(lista){
       (souAdmin()?'<button class="btn warn sm" onclick="event.stopPropagation();reabrirPedido(\''+h.id+'\',\''+esc(h.numero||h.id)+'\')">↩ Reabrir</button>':'')+
       '</div>'+
     '</div>'+det;
-  }).join('');
+  }).join('')
+    + (mostra.length < totalFiltrado
+        ? '<div style="padding:16px;text-align:center"><button class="btn sec" onclick="histMais()" style="padding:11px 20px;font-weight:800">\u25bc mostrar mais 200 <span style="opacity:.65">(faltam '+(totalFiltrado-mostra.length)+')</span></button></div>'
+        : '');
 }
 // ADMIN — finaliza o pedido SEM bipar: move a situação no Bling p/ VERIFICADO, arquiva os documentos
 // (etiqueta/NF ficam disponíveis pra reenvio) e solta a reserva. Mesma rota do fluxo normal (/conferido),
