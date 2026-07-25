@@ -26,7 +26,7 @@ const fs   = require('fs');
 const path = require('path');
 const { json, html } = require('../lib/http');
 
-const VERSAO = 'magalu-oauth v1 b16';
+const VERSAO = 'magalu-oauth v1 b17';
 
 const DATA_DIR = process.env.MAGALU_DATA_DIR || '/data/magalu';
 
@@ -471,46 +471,58 @@ async function tratar(req, res, urlObj) {
 
     // candidatos de base da API financeira (o path exato não está 100% claro na doc)
     const BASE_FIN = 'https://api.magalu.com/seller/v1/financial-analysis/orders';
-    // A API exige: order_id OU um par completo de datas (purchased_at__gte/__lte).
-    // Usamos a janela de datas (&desde/&ate, default últimos 90 dias) e paginamos
-    // procurando o pedido pelo order_code no extras.
-    const ate = String(q.get('ate') || '').trim() || new Date().toISOString().slice(0, 10);
-    const dataGte = desde + 'T00:00:00Z';
-    const dataLte = ate + 'T23:59:59Z';
-    const JANELA = 'purchased_at__gte=' + encodeURIComponent(dataGte) + '&purchased_at__lte=' + encodeURIComponent(dataLte);
+    // A API exige order_id OU par de datas purchased_at__gte/__lte, e a janela
+    // não pode passar de 15 DIAS. Então varremos em janelas de 15 dias, do 'ate'
+    // pra trás até o 'desde', procurando o pedido pelo order_code.
+    const ateFull = String(q.get('ate') || '').trim() || new Date().toISOString().slice(0, 10);
+    const desdeFull = desde;  // default 2026-05-05
+    const MS_DIA = 86400000;
+    const d0 = new Date(desdeFull + 'T00:00:00Z').getTime();
+    const dN = new Date(ateFull + 'T23:59:59Z').getTime();
 
-    let alvo = null, comoAchou = '', amostra = null, diag = null;
-    let offset = 0, paginas = 0;
-    while (offset < 1000 && !alvo) {
-      const r = await pega(BASE_FIN + '?' + JANELA + '&_limit=50&_offset=' + offset);
-      if (r.status !== 200) {
-        // se a janela ainda deu erro, devolve o corpo pra diagnóstico e para
-        json(res, 200, { ok: false, empresa: emp, versao: VERSAO,
-          nota: 'a janela de datas retornou ' + r.status + ' — veja o corpo',
-          janela: JANELA, corpo: r.j || (r.t || '').slice(0, 400) });
-        return true;
+    let alvo = null, comoAchou = '', amostra = null;
+    let janelasVarridas = 0, paginasTotal = 0;
+    // do fim pro começo, blocos de 15 dias
+    let fimBloco = dN;
+    while (fimBloco > d0 && !alvo && janelasVarridas < 12) {  // até 12 janelas (180 dias)
+      const iniBloco = Math.max(d0, fimBloco - 15 * MS_DIA);
+      const gte = new Date(iniBloco).toISOString();
+      const lte = new Date(fimBloco).toISOString();
+      const JANELA = 'purchased_at__gte=' + encodeURIComponent(gte) + '&purchased_at__lte=' + encodeURIComponent(lte);
+      janelasVarridas++;
+
+      let offset = 0;
+      while (offset < 500 && !alvo) {
+        const r = await pega(BASE_FIN + '?' + JANELA + '&_limit=50&_offset=' + offset);
+        if (r.status !== 200) {
+          json(res, 200, { ok: false, empresa: emp, versao: VERSAO,
+            nota: 'a janela de datas retornou ' + r.status + ' — veja o corpo',
+            janela: JANELA, corpo: r.j || (r.t || '').slice(0, 400) });
+          return true;
+        }
+        const arr = r.j && (r.j.results || r.j.data || (Array.isArray(r.j) ? r.j : [])) || [];
+        if (!amostra && arr.length) amostra = arr[0];
+        paginasTotal++;
+        if (!arr.length) break;
+        if (code) {
+          alvo = arr.find(o => {
+            const oc = (o.extras && o.extras.order_code) || o.order_code || o.external_id || '';
+            return String(oc) === code;
+          }) || null;
+          if (alvo) comoAchou = 'janela ' + gte.slice(0, 10) + '→' + lte.slice(0, 10);
+        } else {
+          alvo = arr[0]; comoAchou = 'primeiro da janela mais recente';
+        }
+        offset += 50;
       }
-      const arr = r.j && (r.j.results || r.j.data || (Array.isArray(r.j) ? r.j : [])) || [];
-      if (!amostra && arr.length) amostra = arr[0];
-      paginas++;
-      if (!arr.length) break;
-      if (code) {
-        alvo = arr.find(o => {
-          const oc = (o.extras && o.extras.order_code) || o.order_code || o.external_id || '';
-          return String(oc) === code;
-        }) || null;
-        if (alvo) comoAchou = 'lista casando order_code em ' + paginas + ' páginas';
-      } else {
-        alvo = arr[0]; comoAchou = 'primeiro da janela';
-      }
-      offset += 50;
+      fimBloco = iniBloco - 1000;  // próximo bloco, 15 dias antes
     }
 
     if (!alvo) {
       json(res, 200, { ok: true, empresa: emp, versao: VERSAO, endpoint: '/seller/v1/financial-analysis/orders',
-        nota: 'API financeira OK (200), mas não achei o pedido' + (code ? ' code=' + code : '') + ' na janela ' + desde + ' a ' + ate,
-        paginas_varridas: paginas,
-        estrutura_de_um_pedido: amostra ? Object.keys(amostra) : 'janela vazia',
+        nota: 'API financeira OK (200), mas não achei o pedido' + (code ? ' code=' + code : '') + ' em ' + janelasVarridas + ' janelas de 15 dias (' + desdeFull + ' a ' + ateFull + ')',
+        paginas: paginasTotal,
+        estrutura_de_um_pedido: amostra ? Object.keys(amostra) : 'janelas vazias',
         amostra_extras: amostra && amostra.extras ? amostra.extras : null });
       return true;
     }
