@@ -26,7 +26,7 @@ const fs   = require('fs');
 const path = require('path');
 const { json, html } = require('../lib/http');
 
-const VERSAO = 'magalu-oauth v1 b10';
+const VERSAO = 'magalu-oauth v1 b11';
 
 const DATA_DIR = process.env.MAGALU_DATA_DIR || '/data/magalu';
 
@@ -333,23 +333,31 @@ async function tratar(req, res, urlObj) {
       //    (pedido antigo fora da janela default), então paginamos fundo procurando.
       let pedido = null;
       let paginasVarridas = 0;
-      // filtro de data opcional (&desde=YYYY-MM-DD) — mira a janela do pedido e acelera a busca.
-      // a API filtra por período de compra; sem isso ela devolve os mais recentes primeiro.
+      // &status= opcional pra mirar a categoria certa (ex.: cancelled — a API pagina
+      // "normais" por padrão e um cancelado pode não vir; então filtramos por status).
       const desde = String(q.get('desde') || '').trim();
+      const statusFiltro = String(q.get('status') || '').trim();
       const filtroData = desde ? ('&purchased_at_from=' + encodeURIComponent(desde + 'T00:00:00Z')) : '';
+      const filtroStatus = statusFiltro ? ('&status=' + encodeURIComponent(statusFiltro)) : '';
       if (code) {
-        let offset = 0;
-        while (offset < 2000 && !pedido) {  // varre até 2000 pedidos procurando o code exato
-          const r = await pega(BASE + '?_limit=50&_offset=' + offset + filtroData);
-          const arr = r.j && (r.j.results || r.j.data || (Array.isArray(r.j) ? r.j : [])) || [];
-          if (!arr.length) break;
-          pedido = arr.find(x => String(x.code || '') === code) || null;
-          paginasVarridas++;
-          offset += 50;
+        // varre em VÁRIOS status conhecidos, porque a listagem default pode omitir cancelados
+        const statusParaVarrer = statusFiltro ? [statusFiltro] : ['', 'cancelled', 'canceled', 'delivered', 'finished'];
+        for (const st of statusParaVarrer) {
+          if (pedido) break;
+          const fs = st ? ('&status=' + encodeURIComponent(st)) : '';
+          let offset = 0;
+          while (offset < 600 && !pedido) {  // 600 por status (12 páginas)
+            const r = await pega(BASE + '?_limit=50&_offset=' + offset + filtroData + fs);
+            const arr = r.j && (r.j.results || r.j.data || (Array.isArray(r.j) ? r.j : [])) || [];
+            if (!arr.length) break;
+            pedido = arr.find(x => String(x.code || '') === code) || null;
+            paginasVarridas++;
+            offset += 50;
+          }
         }
         if (!pedido) {
           json(res, 200, { ok: false, empresa: emp, versao: VERSAO,
-            nota: 'não achei o code=' + code + ' em ' + paginasVarridas + ' páginas (' + (paginasVarridas*50) + ' pedidos)' + (desde ? ' desde ' + desde : '') + '. Tente com &desde=2026-07-01 (data da compra) pra mirar a janela certa.' });
+            nota: 'não achei o code=' + code + ' varrendo ' + paginasVarridas + ' páginas em vários status. A API pode paginar diferente do portal. Tente &status=cancelled explícito, ou me diga a POSIÇÃO do pedido na lista do portal.' });
           return true;
         }
       } else {
