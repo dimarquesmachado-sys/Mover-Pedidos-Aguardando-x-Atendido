@@ -26,7 +26,7 @@ const fs   = require('fs');
 const path = require('path');
 const { json, html } = require('../lib/http');
 
-const VERSAO = 'magalu-oauth v1 b19';
+const VERSAO = 'magalu-oauth v1 b20';
 
 const DATA_DIR = process.env.MAGALU_DATA_DIR || '/data/magalu';
 
@@ -637,7 +637,17 @@ async function tratar(req, res, urlObj) {
         if (!arr.length) break;
         for (const o of arr) {
           const oc = String((o.extras && o.extras.order_code) || o.order_code || o.external_id || '');
-          if (codesPedidos.has(oc) && !achados[oc]) achados[oc] = resumir(o);
+          if (codesPedidos.has(oc) && !achados[oc]) {
+            // &cru=1: devolve TODAS as transações sem agrupar (pra ver o frete/tudo cru)
+            if (q.get('cru') === '1') {
+              achados[oc] = (o.transactions || []).map(t => ({
+                categoria: t.category, sub: t.subcategory, tipo: t.type,
+                valor: (t.value || 0) / (t.normalizer || 100), desc: t.description
+              }));
+            } else {
+              achados[oc] = resumir(o);
+            }
+          }
         }
         offset += 50;
         if (Object.keys(achados).length >= codesPedidos.size) break;
