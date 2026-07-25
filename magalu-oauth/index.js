@@ -26,7 +26,7 @@ const fs   = require('fs');
 const path = require('path');
 const { json, html } = require('../lib/http');
 
-const VERSAO = 'magalu-oauth v1 b15';
+const VERSAO = 'magalu-oauth v1 b16';
 
 const DATA_DIR = process.env.MAGALU_DATA_DIR || '/data/magalu';
 
@@ -471,74 +471,47 @@ async function tratar(req, res, urlObj) {
 
     // candidatos de base da API financeira (o path exato não está 100% claro na doc)
     const BASE_FIN = 'https://api.magalu.com/seller/v1/financial-analysis/orders';
-    // o endpoint certo (422 = escopo OK, falta parâmetro). Testamos várias combinações
-    // de query pra descobrir qual o obrigatório, e mostramos o CORPO do erro (que diz o que falta).
-    const combos = [
-      '?_limit=1',
-      '?_limit=1&_offset=0',
-      '?period_start=2026-07-01&period_end=2026-07-31',
-      '?start_date=2026-07-01&end_date=2026-07-31',
-      '?created_at_from=2026-07-01&created_at_to=2026-07-31',
-      '?transaction_at_from=2026-07-01T00:00:00Z&transaction_at_to=2026-07-31T23:59:59Z',
-      '?order_code=' + (code || '1549670115836230'),
-      '?external_id=' + (extId || ''),
-      '?_limit=1&period_start=2026-07-01&period_end=2026-07-31'
-    ];
+    // A API exige: order_id OU um par completo de datas (purchased_at__gte/__lte).
+    // Usamos a janela de datas (&desde/&ate, default últimos 90 dias) e paginamos
+    // procurando o pedido pelo order_code no extras.
+    const ate = String(q.get('ate') || '').trim() || new Date().toISOString().slice(0, 10);
+    const dataGte = desde + 'T00:00:00Z';
+    const dataLte = ate + 'T23:59:59Z';
+    const JANELA = 'purchased_at__gte=' + encodeURIComponent(dataGte) + '&purchased_at__lte=' + encodeURIComponent(dataLte);
 
-    const testes = [];
-    let baseOk = null, amostra = null, urlOk = '';
-    for (const c of combos) {
-      const r = await pega(BASE_FIN + c);
-      testes.push({
-        query: c,
-        status: r.status,
-        // mostra o corpo INTEIRO em erro (é aqui que a API diz o que falta) ou as chaves em 200
-        corpo: r.status === 200 ? (r.j ? Object.keys(r.j) : 'vazio') : (r.j || (r.t || '').slice(0, 300))
-      });
-      if (r.status === 200) { baseOk = BASE_FIN; amostra = r.j; urlOk = c; break; }
-    }
-
-    if (!baseOk) {
-      json(res, 200, { ok: false, empresa: emp, versao: VERSAO,
-        nota: 'endpoint /financial-analysis/orders existe (não é mais 403). Testei combinações de parâmetro — veja o corpo de cada 422 pra descobrir o campo obrigatório',
-        endpoint: '/seller/v1/financial-analysis/orders',
-        testes });
-      return true;
-    }
-    // se achou, ajusta as variáveis que o resto do código usa
-    const bases = [baseOk]; const achou = testes;
-
-    // achou a base — agora busca o pedido específico (por external_id do pedido, ou por code)
-    let alvo = null, comoAchou = '';
-    // 1) tenta por external_id direto (se o usuário passou o UUID do pedido)
-    if (extId) {
-      const r = await pega(baseOk + '/' + extId);
-      if (r.status === 200 && r.j) { alvo = r.j; comoAchou = 'GET /{external_id}'; }
-    }
-    // 2) senão, busca lista e casa pelo order_code no extras
-    if (!alvo) {
-      let offset = 0;
-      while (offset < 500 && !alvo) {
-        const r = await pega(baseOk + '?_limit=50&_offset=' + offset);
-        const arr = r.j && (r.j.results || r.j.data || (Array.isArray(r.j) ? r.j : [])) || [];
-        if (!arr.length) break;
-        if (code) {
-          alvo = arr.find(o => {
-            const oc = (o.extras && o.extras.order_code) || o.order_code || o.external_id || '';
-            return String(oc) === code;
-          }) || null;
-          if (alvo) comoAchou = 'lista casando order_code';
-        } else if (offset === 0) {
-          alvo = arr[0]; comoAchou = 'primeiro da lista';
-        }
-        offset += 50;
+    let alvo = null, comoAchou = '', amostra = null, diag = null;
+    let offset = 0, paginas = 0;
+    while (offset < 1000 && !alvo) {
+      const r = await pega(BASE_FIN + '?' + JANELA + '&_limit=50&_offset=' + offset);
+      if (r.status !== 200) {
+        // se a janela ainda deu erro, devolve o corpo pra diagnóstico e para
+        json(res, 200, { ok: false, empresa: emp, versao: VERSAO,
+          nota: 'a janela de datas retornou ' + r.status + ' — veja o corpo',
+          janela: JANELA, corpo: r.j || (r.t || '').slice(0, 400) });
+        return true;
       }
+      const arr = r.j && (r.j.results || r.j.data || (Array.isArray(r.j) ? r.j : [])) || [];
+      if (!amostra && arr.length) amostra = arr[0];
+      paginas++;
+      if (!arr.length) break;
+      if (code) {
+        alvo = arr.find(o => {
+          const oc = (o.extras && o.extras.order_code) || o.order_code || o.external_id || '';
+          return String(oc) === code;
+        }) || null;
+        if (alvo) comoAchou = 'lista casando order_code em ' + paginas + ' páginas';
+      } else {
+        alvo = arr[0]; comoAchou = 'primeiro da janela';
+      }
+      offset += 50;
     }
 
     if (!alvo) {
-      json(res, 200, { ok: true, empresa: emp, versao: VERSAO, base: baseOk.replace('https://api.magalu.com', ''),
-        nota: 'API financeira respondeu, mas não achei o pedido' + (code ? ' code=' + code : ''),
-        estrutura_lista: amostra ? Object.keys(amostra) : null });
+      json(res, 200, { ok: true, empresa: emp, versao: VERSAO, endpoint: '/seller/v1/financial-analysis/orders',
+        nota: 'API financeira OK (200), mas não achei o pedido' + (code ? ' code=' + code : '') + ' na janela ' + desde + ' a ' + ate,
+        paginas_varridas: paginas,
+        estrutura_de_um_pedido: amostra ? Object.keys(amostra) : 'janela vazia',
+        amostra_extras: amostra && amostra.extras ? amostra.extras : null });
       return true;
     }
 
