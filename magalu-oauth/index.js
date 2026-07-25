@@ -26,7 +26,7 @@ const fs   = require('fs');
 const path = require('path');
 const { json, html } = require('../lib/http');
 
-const VERSAO = 'magalu-oauth v1 b9';
+const VERSAO = 'magalu-oauth v1 b10';
 
 const DATA_DIR = process.env.MAGALU_DATA_DIR || '/data/magalu';
 
@@ -333,10 +333,14 @@ async function tratar(req, res, urlObj) {
       //    (pedido antigo fora da janela default), então paginamos fundo procurando.
       let pedido = null;
       let paginasVarridas = 0;
+      // filtro de data opcional (&desde=YYYY-MM-DD) — mira a janela do pedido e acelera a busca.
+      // a API filtra por período de compra; sem isso ela devolve os mais recentes primeiro.
+      const desde = String(q.get('desde') || '').trim();
+      const filtroData = desde ? ('&purchased_at_from=' + encodeURIComponent(desde + 'T00:00:00Z')) : '';
       if (code) {
         let offset = 0;
-        while (offset < 500 && !pedido) {  // varre até 500 pedidos procurando o code
-          const r = await pega(BASE + '?_limit=50&_offset=' + offset);
+        while (offset < 2000 && !pedido) {  // varre até 2000 pedidos procurando o code exato
+          const r = await pega(BASE + '?_limit=50&_offset=' + offset + filtroData);
           const arr = r.j && (r.j.results || r.j.data || (Array.isArray(r.j) ? r.j : [])) || [];
           if (!arr.length) break;
           pedido = arr.find(x => String(x.code || '') === code) || null;
@@ -345,7 +349,7 @@ async function tratar(req, res, urlObj) {
         }
         if (!pedido) {
           json(res, 200, { ok: false, empresa: emp, versao: VERSAO,
-            nota: 'não achei o pedido code=' + code + ' nos últimos 500 pedidos (varri ' + paginasVarridas + ' páginas). Pode estar mais antigo — me passa um code mais recente, ou use &status=' });
+            nota: 'não achei o code=' + code + ' em ' + paginasVarridas + ' páginas (' + (paginasVarridas*50) + ' pedidos)' + (desde ? ' desde ' + desde : '') + '. Tente com &desde=2026-07-01 (data da compra) pra mirar a janela certa.' });
           return true;
         }
       } else {
