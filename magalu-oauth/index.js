@@ -26,7 +26,7 @@ const fs   = require('fs');
 const path = require('path');
 const { json, html } = require('../lib/http');
 
-const VERSAO = 'magalu-oauth v1 b17';
+const VERSAO = 'magalu-oauth v1 b18';
 
 const DATA_DIR = process.env.MAGALU_DATA_DIR || '/data/magalu';
 
@@ -544,7 +544,7 @@ async function tratar(req, res, urlObj) {
 
     json(res, 200, {
       ok: true, empresa: emp, versao: VERSAO,
-      base: baseOk.replace('https://api.magalu.com', ''), como_achou: comoAchou,
+      base: BASE_FIN.replace('https://api.magalu.com', ''), como_achou: comoAchou,
       order_code: (alvo.extras && alvo.extras.order_code) || alvo.order_code || null,
       external_id: alvo.external_id || null,
       DEVOLUCAO: devolucao.length ? devolucao : 'nenhuma transação REFUND neste pedido',
