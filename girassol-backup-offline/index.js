@@ -41,7 +41,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v25/07 b30';
+const VERSAO     = 'girassol-backup-offline v25/07 b31';
 
 // ── SESSÃO DE OPERADOR (cookie assinado HMAC) — protege rotas de dados/ação ──
 // Segredo estável entre restarts. Usa ADMIN_KEY (já configurada no Render) como base.
@@ -2565,6 +2565,84 @@ async function magaluFreteProvisorio(v) {
   return magaluFreteTabela(d.dim, d.peso);
 }
 
+// ─── PESCA os dados REAIS de um pedido direto na API do ML (fonte primária) ──────
+// Dado o numero_loja, devolve { fee (comissão real via sale_fee), frete, venda (hora),
+// credito, credito_fonte, logistica, pack, order, costs_ok } ou null se o ML não respondeu.
+// Trata carrinho (pack), Flex (self_service: frete não é custo, é o motoboy; estorno = líquido)
+// e compensações. Reusada pela pesca dos bipados (mlSyncFees) e pela fase ml_real (não-bipados).
+async function pescarDadosML(nlRaw, tokenML, dorme) {
+  const nl = String(nlRaw || '').replace(/\D/g, '');
+  if (!nl || !tokenML) return null;
+  const H = { headers: { Authorization: 'Bearer ' + tokenML } };
+  let r = await fetch('https://api.mercadolibre.com/orders/' + nl, H);
+  let d = await r.json().catch(() => null);
+  let ords = null;
+  if (r.ok && d) ords = [d];
+  else if (r.status === 404) {   // id 2000... que dá 404 é PACK (carrinho): abre o pack e pega as orders
+    try {
+      const rp = await fetch('https://api.mercadolibre.com/packs/' + nl, H);
+      const dp = await rp.json().catch(() => null);
+      if (rp.ok && dp && Array.isArray(dp.orders) && dp.orders.length) {
+        ords = [];
+        for (const oq of dp.orders) {
+          try { const ro = await fetch('https://api.mercadolibre.com/orders/' + (oq.id || oq), H); const doo = await ro.json().catch(() => null); if (ro.ok && doo) ords.push(doo); } catch (e3) {}
+          await dorme(150);
+        }
+        if (!ords.length) ords = null;
+      }
+    } catch (e2) {}
+  }
+  if (!ords || !ords.length) return null;
+  let fee = 0, venda = null, shipId = null;
+  for (const od of ords) {
+    for (const it of (od.order_items || [])) { const q = Number(it.quantity || 1); const sf = Number(it.sale_fee || 0); if (isFinite(sf)) fee += sf * q; }
+    if (!venda && od.date_created) venda = od.date_created;
+    if (!shipId && od.shipping && od.shipping.id) shipId = od.shipping.id;
+  }
+  const _ord0 = (ords[0] && ords[0].id != null) ? String(ords[0].id) : null;
+  const _viaPack = !!(_ord0 && _ord0 !== nl);
+  const _packId = _viaPack ? nl : ((ords[0] && ords[0].pack_id != null) ? String(ords[0].pack_id) : null);
+  const reg = { fee: Math.round(fee * 100) / 100, frete: null, venda: venda, _orders: ords.length, pack: _packId, order: _ord0 };
+  if (shipId) {
+    let ehFlex = false, baseCost = null;
+    try {
+      const rs = await fetch('https://api.mercadolibre.com/shipments/' + shipId, H);
+      const ds = await rs.json().catch(() => null);
+      if (rs.ok && ds) {
+        const logi = (ds.logistic && ds.logistic.type) || ds.logistic_type || null;
+        if (logi) reg.logistica = logi;
+        ehFlex = (logi === 'self_service');
+        const bc = Number(ds.base_cost); if (isFinite(bc) && bc > 0) baseCost = bc;
+        const so = ds.shipping_option || {};
+        const lc = Number(so.list_cost != null ? so.list_cost : ds.list_cost);
+        const cc = Number(so.cost != null ? so.cost : ds.cost);
+        if (!ehFlex && isFinite(lc) && isFinite(cc) && lc > cc) reg.frete = Math.round((lc - cc) * 100) / 100;
+      }
+    } catch (e) {}
+    await dorme(200);
+    try {
+      const rc = await fetch('https://api.mercadolibre.com/shipments/' + shipId + '/costs', H);
+      const dc = await rc.json().catch(() => null);
+      if (rc.ok && dc) {
+        reg.costs_ok = true;
+        const sd0 = Array.isArray(dc.senders) ? dc.senders[0] : null;
+        const scost = Number(sd0 && sd0.cost);
+        const scOk = isFinite(scost) && scost > 0;
+        let cred = 0, fonte = null;
+        if (sd0) {
+          const c1 = Number(sd0.compensation); if (isFinite(c1) && c1 > 0) { cred += c1; fonte = 'compensation'; }
+          for (const cx of (sd0.compensations || [])) { const c2 = Number(cx && cx.amount); if (isFinite(c2) && c2 > 0) { cred += c2; fonte = 'compensation'; } }
+        }
+        if (cred === 0 && ehFlex && baseCost != null) { cred = Math.round((baseCost - (scOk ? scost : 0)) * 100) / 100; fonte = 'flex_liquido'; }
+        if (cred !== 0) { reg.credito = Math.round(cred * 100) / 100; reg.credito_fonte = fonte; }
+        if (!ehFlex && scOk) reg.frete = Math.round(scost * 100) / 100;
+      }
+    } catch (e) {}
+    await dorme(200);
+  }
+  return reg;
+}
+
 async function vendasSync() {
   if (_vsy.rodando) return;
   _vsy.rodando = true; _vsy.erro = null; _vsy.fase = 'listagem';
@@ -2639,6 +2717,42 @@ async function vendasSync() {
         await new Promise(r3 => setTimeout(r3, 450));
       }
       writeJson(F, atual);   // itens/taxas no disco JÁ — o dashboard enxerga a margem na hora
+    } catch (e) {}
+    _vsy.fase = 'ml_real';
+    // fase ML REAL (b31): pros pedidos ML NÃO-bipados, pesca comissão + frete REAIS direto da API
+    // do ML (fonte primária, mais confiável que o taxaComissao/custoFrete que o Bling importa).
+    // A fase detalhes acima já deu SKU/custo/tarifa-do-Bling; esta SOBREPÕE com o dado real do ML.
+    // Recentes primeiro, lote limitado (rate limit do ML). Quando o pedido é bipado, a mlSyncFees assume.
+    try {
+      const confR = readJson(CONFERIDOS_FILE, {});
+      const bipR = new Set(Object.values(confR).map(c => String(c && c.numero)));
+      let tkR = null;
+      try { const { garantirTokenML: _g3 } = require('../girassol/mlTokenManager'); tkR = await _g3(); } catch (e) {}
+      if (tkR) {
+        const dormeR = ms => new Promise(r4 => setTimeout(r4, ms));
+        const alvosR = Object.values(atual)
+          .filter(v => v && (v.marketplace === 'ml' || v.marketplace === 'mercadolivre') && v.numero_loja && !v.ml_real && !bipR.has(String(v.numero)) && !/cancel/i.test(String(v.situacao || '')))
+          .sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')) || Number(b.numero || 0) - Number(a.numero || 0))   // recentes primeiro
+          .slice(0, 40);   // lote por rodada — o ML tem rate limit; 40 × ~3 chamadas cada
+        for (const v of alvosR) {
+          try {
+            const reg = await pescarDadosML(v.numero_loja, tkR, dormeR);
+            if (reg) {
+              if (reg.fee != null && reg.fee > 0) v.tarifa_ml = reg.fee;   // comissão REAL do ML (sobrepõe a do Bling)
+              if (reg.frete != null) v.frete_ml = reg.frete;               // frete REAL do ML
+              if (reg.venda) v.venda_em = reg.venda;                       // hora real da venda
+              if (reg.credito != null) v.credito_ml = reg.credito;         // estorno/compensação
+              if (reg.credito_fonte) v.credito_fonte = reg.credito_fonte;
+              if (reg.logistica) v.logistica_ml = reg.logistica;
+              if (reg.order) v.ml_order = reg.order;
+              if (reg.pack) v.ml_pack = reg.pack;
+              v.ml_real = 1;   // pescado — não repesca até bipar (aí a mlSyncFees assume)
+            }
+          } catch (e) {}
+          await dormeR(350);
+        }
+        writeJson(F, atual);   // dado real do ML no disco — o dashboard já mostra "REAL"
+      }
     } catch (e) {}
     _vsy.fase = 'nf_emissao';
     // fase NF (rodava por último e NUNCA gravava: o processo morria no meio da rodada e o salvamento era só no fim —
