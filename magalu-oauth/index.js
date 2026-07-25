@@ -26,7 +26,7 @@ const fs   = require('fs');
 const path = require('path');
 const { json, html } = require('../lib/http');
 
-const VERSAO = 'magalu-oauth v1 b7';
+const VERSAO = 'magalu-oauth v1 b8';
 
 const DATA_DIR = process.env.MAGALU_DATA_DIR || '/data/magalu';
 
@@ -347,6 +347,45 @@ async function tratar(req, res, urlObj) {
 
       const d0 = Array.isArray(pedido.deliveries) && pedido.deliveries[0] ? pedido.deliveries[0] : {};
 
+      // se pediram para cavar mais fundo (&fundo=1), busca eventos/shipping/logística/RETURNS
+      let extra = null;
+      if (q.get('fundo') === '1') {
+        extra = { pedido_id: pedido.id, delivery_id: d0.id };
+        // eventos da delivery (histórico de status — cancelamento/devolução costuma vir aqui)
+        extra.eventos = d0.events || null;
+        // shipping da delivery (frete, transportadora, custo)
+        extra.shipping = d0.shipping || null;
+        // os external_id das devoluções deste pedido (o custo do frete reverso mora atrás deles)
+        const rets = (d0.returns || pedido.returns || []);
+        extra.returns_ids = rets.map(r => r.external_id || r.id).filter(Boolean);
+        const oid = pedido.id, did = d0.id;
+        const retId = extra.returns_ids[0] || null;
+        // candidatos de endpoint — inclui os de RETURNS pelo external_id (onde deve estar o frete reverso)
+        const tentativas = [
+          'https://api.magalu.com/seller/v1/orders/' + oid,
+          'https://api.magalu.com/seller/v1/orders/' + oid + '/deliveries/' + did,
+          'https://api.magalu.com/seller/v1/orders/' + oid + '/returns',
+          'https://api.magalu.com/seller/v1/orders/' + oid + '/deliveries/' + did + '/returns'
+        ];
+        if (retId) {
+          tentativas.push('https://api.magalu.com/seller/v1/returns/' + retId);
+          tentativas.push('https://api.magalu.com/seller/v1/orders/' + oid + '/returns/' + retId);
+          tentativas.push('https://api.magalu.com/seller/v1/reverse-logistics/' + retId);
+          tentativas.push('https://api.magalu.com/seller/v1/returns?_limit=5&order_id=' + oid);
+        }
+        extra.endpoints = {};
+        for (const u of tentativas) {
+          try {
+            const rr = await pega(u);
+            extra.endpoints[u.replace('https://api.magalu.com', '')] = {
+              status: rr.status,
+              // se respondeu 200, mostra a estrutura INTEIRA (é aqui que pode estar o frete reverso)
+              corpo: rr.status === 200 ? rr.j : (rr.j ? JSON.stringify(rr.j).slice(0, 150) : undefined)
+            };
+          } catch (e) { extra.endpoints[u.replace('https://api.magalu.com', '')] = { erro: String(e.message).slice(0, 100) }; }
+        }
+      }
+
       json(res, 200, {
         ok: true, empresa: emp, versao: VERSAO,
         pedido_code: pedido.code || null,
@@ -364,7 +403,9 @@ async function tratar(req, res, urlObj) {
         // varredura por qualquer campo de devolução/estorno/retorno no pedido inteiro
         CAMPOS_DEVOLUCAO: achaDevolucao(pedido),
         // chaves de topo do pedido, pra ver o que mais existe
-        chaves_topo: Object.keys(pedido)
+        chaves_topo: Object.keys(pedido),
+        // cavação profunda (só com &fundo=1)
+        EXTRA: extra
       });
     } catch (e) {
       json(res, 500, { ok: false, erro: String(e.message || e) });
