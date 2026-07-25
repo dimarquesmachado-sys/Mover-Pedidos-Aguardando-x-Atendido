@@ -1053,6 +1053,31 @@ function routes(readBody) {
       return true;
     }
 
+    // SONDA de dimensões de um produto — pra ver os nomes EXATOS dos campos (largura/altura/
+    // profundidade/peso) que o cálculo de frete Magalu vai usar.
+    // Uso: /girassol-backup-offline/debug-dimensoes?k=ADMIN_KEY&sku=KJDD-L-176
+    if (method === 'GET' && p === '/girassol-backup-offline/debug-dimensoes') {
+      const kD = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      if (!process.env.ADMIN_KEY || kD !== process.env.ADMIN_KEY) { json(res, 404, { error: 'not found' }); return true; }
+      const skuD = String((urlObj.searchParams && urlObj.searchParams.get('sku')) || '').trim();
+      if (!skuD) { json(res, 400, { ok: false, erro: 'passe &sku=' }); return true; }
+      const rb = await blingGet('/produtos?codigo=' + encodeURIComponent(skuD) + '&criterio=5');
+      const p0 = rb && rb.ok && rb.data && rb.data.data && rb.data.data[0];
+      if (!p0 || !p0.id) { json(res, 200, { ok: false, nota: 'produto não encontrado pelo SKU', bruto: rb && rb.data }); return true; }
+      const rd = await blingGet('/produtos/' + p0.id);
+      const prod = (rd && rd.ok && rd.data && rd.data.data) || null;
+      json(res, 200, {
+        ok: !!prod, sku: skuD, id: p0.id, nome: prod && prod.nome,
+        // campos que provavelmente têm as dimensões (mostro todos pra confirmar o nome exato)
+        dimensoes: prod && prod.dimensoes,
+        pesoBruto: prod && prod.pesoBruto, pesoLiquido: prod && prod.pesoLiquido,
+        // e o produto INTEIRO, pra caçar qualquer campo de dimensão com outro nome
+        CHAVES_DO_PRODUTO: prod ? Object.keys(prod) : null,
+        PRODUTO_CRU: prod
+      });
+      return true;
+    }
+
     if (method === 'GET' && p === '/girassol-backup-offline/vendas-sync') {
       const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
       const sessV = validarSessao(req.headers['cookie']);
