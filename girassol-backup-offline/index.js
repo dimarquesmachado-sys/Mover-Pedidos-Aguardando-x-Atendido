@@ -2469,6 +2469,7 @@ async function vendasSync() {
     const ini = new Date(hoje); ini.setDate(ini.getDate() - 3);
     const fim = new Date(hoje); fim.setDate(fim.getDate() + 1);   // janela [hoje-3, hoje+1] — evita o bug do mesmo-dia do Bling
     const F = path.join(CACHE_DIR, '_vendas_dia.json');
+    const MAG_EMPRESA = process.env.MAGALU_EMPRESA || 'girassol';   // qual empresa Magalu este serviço consulta (girassol/good/amb)
     const atual = readJson(F, {});
     let paginas = 0;
     for (let pg = 1; pg <= 20; pg++) {
@@ -2623,6 +2624,50 @@ async function vendasSync() {
         }
       }
     } catch (e) { console.log('[VENDAS-SYNC] fase shopee falhou: ' + String(e.message || e).slice(0, 120)); }
+    _vsy.fase = 'magalu';
+    // fase MAGALU: valores REAIS da API de Análise Financeira (comissão serviço+tech, MDR,
+    // tarifa fixa, coparticipação de frete, devolução) via a rota /magalu/financeiro-lote
+    // no MESMO serviço. A Magalu manda PRÉVIA (comissão) e substitui pelo REAL (com frete)
+    // quando o pedido é entregue/liquidado — igual o Jodda. Por isso re-consultamos os
+    // provisórios até o frete aparecer (v.mag_fin='real'). Usa a ADMIN_KEY do próprio serviço.
+    try {
+      const ADM = process.env.ADMIN_KEY || '';
+      const PORT = process.env.PORT || 3000;
+      if (ADM) {
+        // candidatos: pedidos magalu sem financeiro ainda (mag_fin ausente) OU provisórios
+        // (mag_fin='prov' — comissão veio mas falta frete). Os 'real' saem da fila.
+        const candM = Object.values(atual)
+          .filter(v => v && v.marketplace === 'magalu' && v.numero_loja && v.mag_fin !== 'real')
+          .sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')))
+          .slice(0, 30);
+        if (candM.length) {
+          const codes = candM.map(v => String(v.numero_loja)).join(',');
+          const urlM = 'http://127.0.0.1:' + PORT + '/magalu/financeiro-lote?empresa=' + MAG_EMPRESA +
+            '&k=' + encodeURIComponent(ADM) + '&dias=45&codes=' + encodeURIComponent(codes);
+          const rM = await fetch(urlM, { timeout: 90000 });
+          const jM = await rM.json().catch(() => null);
+          if (jM && jM.ok && jM.pedidos) {
+            let nM = 0;
+            for (const v of candM) {
+              const fin = jM.pedidos[String(v.numero_loja)];
+              if (!fin) continue;   // ainda não apareceu na API (não entregue) — continua na fila
+              // comissão real total da Magalu = comissão(serviço+tech+frete-comissão) + MDR + tarifa fixa + frete de coparticipação (débito)
+              const taxaReal = Math.round((Math.abs(fin.comissao) + Math.abs(fin.mdr) + Math.abs(fin.tarifa_fixa) + Math.abs(fin.frete_debito)) * 100) / 100;
+              if (taxaReal > 0) { v.tarifa_ml = taxaReal; nM++; }
+              // devolução: estorno da venda (REFUND) quando houver
+              if (fin.tem_devolucao) { v.mag_refund = Math.abs(fin.refund); v.devolvido = true; }
+              // saldo líquido oficial da Magalu (a âncora, tipo renda_canal da Shopee)
+              if (isFinite(fin.saldo_liquido)) v.renda_canal = fin.saldo_liquido;
+              // estável só quando a coparticipação de frete apareceu (frete_debito != 0),
+              // que é o sinal de que o pedido foi liquidado. Senão fica 'prov' e re-consulta.
+              v.mag_fin = (fin.frete_debito && fin.frete_debito !== 0) ? 'real' : 'prov';
+            }
+            if (nM) console.log('[VENDAS-SYNC] magalu: financeiro real em ' + nM + ' venda(s)');
+            writeJson(F, atual);
+          }
+        }
+      }
+    } catch (e) { console.log('[VENDAS-SYNC] fase magalu falhou: ' + String(e.message || e).slice(0, 120)); }
     // poda: fora da janela de 6 dias sai do arquivo (o histórico de verdade vive nos conferidos)
     const corte = new Date(hoje); corte.setDate(corte.getDate() - 6);
     const corteS = isoD(corte);
