@@ -41,7 +41,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v23/07 b24';
+const VERSAO     = 'girassol-backup-offline v25/07 b26';
 
 // ── SESSÃO DE OPERADOR (cookie assinado HMAC) — protege rotas de dados/ação ──
 // Segredo estável entre restarts. Usa ADMIN_KEY (já configurada no Render) como base.
@@ -1051,6 +1051,22 @@ function routes(readBody) {
       const rD = await blingGet('/pedidos/vendas?dataEmissaoInicial=' + isoDD(inD) + '&dataEmissaoFinal=' + isoDD(fiD) + '&pagina=1&limite=3');
       json(res, 200, { ok: !!(rD && rD.ok), itens_crus: (rD && rD.data && rD.data.data) || [], loja_mkt_mapa: LOJA_MKT });
       return true;
+    }
+
+    // NÍVEL de desconto do frete Magalu (config do ⚙️). GET lê, POST salva.
+    // Uso: GET /girassol-backup-offline/config-frete-magalu?k=ADMIN_KEY
+    //      POST mesma URL com body {nivel_desconto:'sem'|'25'|'50'}
+    if (p === '/girassol-backup-offline/config-frete-magalu') {
+      const kD = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      if (!process.env.ADMIN_KEY || kD !== process.env.ADMIN_KEY) { json(res, 404, { error: 'not found' }); return true; }
+      const CFG = path.join(CACHE_DIR, '_config-frete-magalu.json');
+      if (method === 'GET') { json(res, 200, { ok: true, config: readJson(CFG, { nivel_desconto: '50' }) }); return true; }
+      if (method === 'POST') {
+        let body = ''; await new Promise(r => { req.on('data', c => body += c); req.on('end', r); });
+        let nivel = '50'; try { const b = JSON.parse(body || '{}'); if (['sem', '25', '50'].includes(b.nivel_desconto)) nivel = b.nivel_desconto; } catch (e) {}
+        writeJson(CFG, { nivel_desconto: nivel, em: new Date().toISOString() });
+        json(res, 200, { ok: true, salvo: nivel }); return true;
+      }
     }
 
     // SONDA de dimensões de um produto — pra ver os nomes EXATOS dos campos (largura/altura/
@@ -2485,6 +2501,91 @@ function _inferCanal(nl) {
   if (/^15/.test(s)) return 'magalu';
   return 'outro';
 }
+// ─── FRETE MAGALU (coparticipação) — tabela + cubagem + banco por SKU ─────────
+// A Magalu cobra o frete por FAIXA de peso (o maior entre peso real e cubado),
+// com desconto conforme o nível de "Despacho no Prazo" do mês. A API financeira
+// só traz o frete REAL quando o pedido liquida; até lá estimamos pela tabela
+// (e, se o SKU já vendeu antes, pela média real dele — auto-corretivo).
+const MAGALU_FRETE_TABELA = [
+  // [pesoMaxKg, semDesconto, desc25 (87-97%), desc50 (>97%)]
+  [0.5, 35.90, 26.93, 17.95], [1, 40.80, 30.68, 20.45], [2, 42.90, 32.18, 21.45],
+  [5, 50.90, 38.18, 25.45], [9, 77.90, 58.43, 38.95], [13, 98.00, 74.18, 49.45],
+  [17, 111.90, 83.93, 55.95], [23, 134.90, 101.18, 67.45], [30, 148.90, 111.68, 74.45],
+  [40, 179.90, 134.93, 89.95], [50, 189.90, 142.43, 94.95], [60, 199.90, 149.93, 99.95],
+  [70, 209.90, 157.43, 104.95], [80, 219.90, 164.93, 109.95], [90, 229.90, 172.43, 114.95],
+  [100, 239.90, 179.93, 119.95], [110, 249.90, 187.43, 124.95], [120, 259.90, 194.93, 129.95],
+  [130, 269.90, 202.43, 134.95], [140, 279.90, 209.93, 139.95], [150, 289.90, 217.43, 144.95],
+  [160, 299.90, 224.93, 149.95], [170, 309.90, 232.43, 154.95], [180, 319.90, 239.93, 159.95],
+  [190, 329.90, 247.43, 164.95], [200, 339.90, 254.93, 169.95]
+];
+// nível de desconto configurável (default 50% = coluna >97%; salvo em _config-frete-magalu.json).
+// Índice na linha da tabela: 1=sem desconto, 2=desc25, 3=desc50.
+function magaluNivelColuna() {
+  try {
+    const cfg = readJson(path.join(CACHE_DIR, '_config-frete-magalu.json'), {});
+    const n = cfg.nivel_desconto;   // 'sem' | '25' | '50'
+    if (n === 'sem') return 1;
+    if (n === '25') return 2;
+    return 3;   // default 50%
+  } catch (e) { return 3; }
+}
+// peso cubado + faixa → valor da tabela pela coluna do nível. Retorna null se faltar dimensão.
+function magaluFreteTabela(dim, pesoBruto) {
+  if (!dim) return null;
+  const larg = Number(dim.largura), alt = Number(dim.altura), prof = Number(dim.profundidade);
+  if (!(larg > 0 && alt > 0 && prof > 0)) return null;
+  // unidadeMedida:1 = cm (o padrão do Bling). Converte pra metros.
+  const m3 = (larg / 100) * (alt / 100) * (prof / 100);
+  const cubado = m3 * 167;   // fator 167 (leves) — casa com o dado real; pesados (300) raros
+  const pReal = Number(pesoBruto) || 0;
+  const peso = Math.max(pReal, cubado);   // a Magalu usa o MAIOR
+  const col = magaluNivelColuna();
+  for (const linha of MAGALU_FRETE_TABELA) {
+    if (peso <= linha[0]) return Math.round(linha[col] * 100) / 100;
+  }
+  return Math.round(MAGALU_FRETE_TABELA[MAGALU_FRETE_TABELA.length - 1][col] * 100) / 100;   // acima de 200kg
+}
+// banco por SKU: média do frete REAL conforme os pedidos liquidam (fonte auto-corretiva).
+function magaluFreteSkuLer() { try { return readJson(path.join(CACHE_DIR, '_magalu_frete_sku.json'), {}); } catch (e) { return {}; } }
+function magaluFreteSkuGravar(sku, freteReal) {
+  if (!sku || !(freteReal > 0)) return;
+  try {
+    const F2 = path.join(CACHE_DIR, '_magalu_frete_sku.json');
+    const banco = readJson(F2, {});
+    const cur = banco[sku] || { soma: 0, n: 0, media: 0 };
+    cur.soma = Math.round((cur.soma + freteReal) * 100) / 100; cur.n += 1;
+    cur.media = Math.round((cur.soma / cur.n) * 100) / 100;
+    cur.ultimo = freteReal; cur.em = new Date().toISOString();
+    banco[sku] = cur; writeJson(F2, banco);
+  } catch (e) {}
+}
+// cache das dimensões por SKU (evita re-consultar o Bling toda rodada)
+const _dimCache = {};
+async function magaluDimSku(sku) {
+  if (!sku) return null;
+  if (_dimCache[sku] !== undefined) return _dimCache[sku];
+  try {
+    const rb = await blingGet('/produtos?codigo=' + encodeURIComponent(sku) + '&criterio=5');
+    const p0 = rb && rb.ok && rb.data && rb.data.data && rb.data.data[0];
+    if (!p0 || !p0.id) { _dimCache[sku] = null; return null; }
+    const rd = await blingGet('/produtos/' + p0.id);
+    const prod = (rd && rd.ok && rd.data && rd.data.data) || null;
+    const out = prod ? { dim: prod.dimensoes, peso: prod.pesoBruto } : null;
+    _dimCache[sku] = out; return out;
+  } catch (e) { _dimCache[sku] = null; return null; }
+}
+// frete provisório de um pedido: histórico do SKU (se já vendeu) senão a tabela pela dimensão.
+async function magaluFreteProvisorio(v) {
+  const it = (v.it || [])[0];   // 1º item define a faixa (a maioria dos pedidos é 1 SKU)
+  const sku = it && it.sku;
+  if (!sku) return null;
+  const banco = magaluFreteSkuLer();
+  if (banco[sku] && banco[sku].media > 0) return banco[sku].media;   // histórico real do SKU manda
+  const d = await magaluDimSku(sku);
+  if (!d) return null;
+  return magaluFreteTabela(d.dim, d.peso);
+}
+
 async function vendasSync() {
   if (_vsy.rodando) return;
   _vsy.rodando = true; _vsy.erro = null; _vsy.fase = 'listagem';
@@ -2676,16 +2777,30 @@ async function vendasSync() {
             for (const v of candM) {
               const fin = jM.pedidos[String(v.numero_loja)];
               if (!fin) continue;   // ainda não apareceu na API (não entregue) — continua na fila
-              // comissão real total da Magalu = comissão(serviço+tech+frete-comissão) + MDR + tarifa fixa + frete de coparticipação (débito)
-              const taxaReal = Math.round((Math.abs(fin.comissao) + Math.abs(fin.mdr) + Math.abs(fin.tarifa_fixa) + Math.abs(fin.frete_debito)) * 100) / 100;
-              if (taxaReal > 0) { v.tarifa_ml = taxaReal; nM++; }
+              const liquidado = !!(fin.frete_debito && fin.frete_debito !== 0);
+              // taxa base (sempre real): comissão(serviço+tech+frete-comissão) + MDR + tarifa fixa
+              const taxaBase = Math.abs(fin.comissao) + Math.abs(fin.mdr) + Math.abs(fin.tarifa_fixa);
+              let freteCopart, freteFonte;
+              if (liquidado) {
+                // LIQUIDADO: frete REAL da API + alimenta o banco por SKU (aprende pro futuro)
+                freteCopart = Math.abs(fin.frete_debito); freteFonte = 'real';
+                const it0 = (v.it || [])[0];
+                if (it0 && it0.sku) magaluFreteSkuGravar(it0.sku, freteCopart);
+              } else {
+                // PROVISÓRIO: estima o frete (histórico do SKU, senão tabela pela dimensão)
+                const est = await magaluFreteProvisorio(v);
+                freteCopart = est != null ? est : 0; freteFonte = est != null ? 'prov' : 'sem';
+              }
+              const taxaTotal = Math.round((taxaBase + freteCopart) * 100) / 100;
+              if (taxaTotal > 0) { v.tarifa_ml = taxaTotal; nM++; }
+              v.mag_frete_copart = Math.round(freteCopart * 100) / 100;   // pra exibir separado se quiser
+              v.mag_frete_fonte = freteFonte;   // 'real' | 'prov' | 'sem'
               // devolução: estorno da venda (REFUND) quando houver
               if (fin.tem_devolucao) { v.mag_refund = Math.abs(fin.refund); v.devolvido = true; }
-              // saldo líquido oficial da Magalu (a âncora, tipo renda_canal da Shopee)
-              if (isFinite(fin.saldo_liquido)) v.renda_canal = fin.saldo_liquido;
-              // estável só quando a coparticipação de frete apareceu (frete_debito != 0),
-              // que é o sinal de que o pedido foi liquidado. Senão fica 'prov' e re-consulta.
-              v.mag_fin = (fin.frete_debito && fin.frete_debito !== 0) ? 'real' : 'prov';
+              // saldo líquido oficial da Magalu (a âncora, tipo renda_canal da Shopee) — só quando liquidado
+              if (liquidado && isFinite(fin.saldo_liquido)) v.renda_canal = fin.saldo_liquido;
+              // estável só quando o frete real apareceu (liquidado). Senão fica 'prov' e re-consulta.
+              v.mag_fin = liquidado ? 'real' : 'prov';
             }
             if (nM) console.log('[VENDAS-SYNC] magalu: financeiro real em ' + nM + ' venda(s)');
             writeJson(F, atual);
