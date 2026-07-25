@@ -26,7 +26,7 @@ const fs   = require('fs');
 const path = require('path');
 const { json, html } = require('../lib/http');
 
-const VERSAO = 'magalu-oauth v1 b6';
+const VERSAO = 'magalu-oauth v1 b7';
 
 const DATA_DIR = process.env.MAGALU_DATA_DIR || '/data/magalu';
 
@@ -282,6 +282,89 @@ async function tratar(req, res, urlObj) {
           ? pedido.deliveries.map(d => ({ chaves: Object.keys(d), id: d.id || null,
               code: d.code || null, packages: d.packages ? 'sim' : 'não' }))
           : null
+      });
+    } catch (e) {
+      json(res, 500, { ok: false, erro: String(e.message || e) });
+    }
+    return true;
+  }
+
+  // /magalu/valores?empresa=girassol[&code=NUMERO][&status=canceled]  → (admin)
+  // Raio-X de VALORES pra montar a margem real: despeja amounts INTEIRO (comissão,
+  // frete, taxa, desconto), a lista de invoices, e caça QUALQUER campo com "return"
+  // /"devol"/"refund"/"reverse" no pedido (frete de retorno é o que o Diego mais quer).
+  // Sem &code pega o pedido mais recente; &status filtra (ex.: canceled/returned)
+  // pra tentar achar um pedido COM devolução e ver como ela aparece.
+  if (method === 'GET' && p === '/magalu/valores') {
+    const emp = String(q.get('empresa') || '').toLowerCase().trim();
+    if (!EMPRESAS_VALIDAS.includes(emp)) { json(res, 400, { ok: false, erro: 'empresa inválida' }); return true; }
+    const code = String(q.get('code') || '').trim();
+    const status = String(q.get('status') || '').trim();
+
+    let tok = '';
+    try { tok = await getAccessToken(emp); }
+    catch (e) { json(res, 502, { ok: false, erro: 'token: ' + String(e.message || e) }); return true; }
+    const H = { 'Authorization': 'Bearer ' + tok, 'Accept': 'application/json' };
+    const BASE = 'https://api.magalu.com/seller/v1/orders';
+
+    async function pega(url) {
+      const r = await fetch(url, { headers: H });
+      const t = await r.text();
+      let j = null; try { j = JSON.parse(t); } catch (e) {}
+      return { status: r.status, j, t };
+    }
+
+    // acha TODOS os caminhos cujo nome sugere devolução/estorno/frete-de-volta
+    function achaDevolucao(o, base, acc) {
+      acc = acc || {}; base = base || '';
+      const RE = /return|devol|refund|reverse|estorn|logistic.*reverse|reverse.*logistic/i;
+      if (o && typeof o === 'object') {
+        for (const k of Object.keys(o)) {
+          const cam = base ? base + '.' + k : k;
+          if (RE.test(k)) acc[cam] = (o[k] && typeof o[k] === 'object') ? '(objeto: ' + Object.keys(o[k]).join(',') + ')' : o[k];
+          if (o[k] && typeof o[k] === 'object') achaDevolucao(o[k], cam, acc);
+        }
+      }
+      return acc;
+    }
+
+    try {
+      // 1) escolher um pedido: por code, ou por status, ou o mais recente
+      let url = BASE + '?_limit=' + (code || status ? '20' : '1');
+      if (code) url += '&code=' + encodeURIComponent(code);
+      if (status) url += '&status=' + encodeURIComponent(status);
+      let out = await pega(url);
+      let lista = out.j && (out.j.results || out.j.data || (Array.isArray(out.j) ? out.j : []));
+      if (code) lista = (lista || []).filter(x => String(x.code || '') === code);
+      const pedido = (lista && lista[0]) || null;
+
+      if (!pedido) {
+        json(res, 200, { ok: true, empresa: emp, versao: VERSAO, status_http: out.status,
+          nota: 'nenhum pedido' + (status ? ' com status=' + status : '') + (code ? ' com code=' + code : ''),
+          bruto: out.j ? JSON.stringify(out.j).slice(0, 500) : (out.t || '').slice(0, 500) });
+        return true;
+      }
+
+      const d0 = Array.isArray(pedido.deliveries) && pedido.deliveries[0] ? pedido.deliveries[0] : {};
+
+      json(res, 200, {
+        ok: true, empresa: emp, versao: VERSAO,
+        pedido_code: pedido.code || null,
+        status_pedido: pedido.status || null,
+        // AMOUNTS inteiro do pedido (comissão, frete, taxa, desconto) — sem podar
+        amounts_pedido: pedido.amounts || null,
+        // a delivery também tem amounts próprios (por pacote)
+        amounts_delivery0: d0.amounts || null,
+        delivery0_chaves: Object.keys(d0),
+        delivery0_status: d0.status || null,
+        // invoices (nota) — pode ter valor/imposto oficial
+        invoices: (d0.invoices || pedido.invoices || null),
+        // returns/devolução se existir no corpo
+        returns_delivery0: d0.returns || null,
+        // varredura por qualquer campo de devolução/estorno/retorno no pedido inteiro
+        CAMPOS_DEVOLUCAO: achaDevolucao(pedido),
+        // chaves de topo do pedido, pra ver o que mais existe
+        chaves_topo: Object.keys(pedido)
       });
     } catch (e) {
       json(res, 500, { ok: false, erro: String(e.message || e) });
