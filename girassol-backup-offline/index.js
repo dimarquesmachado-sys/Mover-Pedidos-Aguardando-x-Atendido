@@ -41,7 +41,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v25/07 b35';
+const VERSAO     = 'girassol-backup-offline v25/07 b36';
 
 // ── SESSÃO DE OPERADOR (cookie assinado HMAC) — protege rotas de dados/ação ──
 // Segredo estável entre restarts. Usa ADMIN_KEY (já configurada no Render) como base.
@@ -855,6 +855,9 @@ function routes(readBody) {
       catch (e) { json(res, 200, { ok: false, erro: 'sem token ML: ' + String(e.message || e) }); return true; }
       const H = { headers: { Authorization: 'Bearer ' + tk } };
       const out = { ok: true, detalhes: [] };
+      // Client ID do app que gerou o token (o ML embute no token: APP_USR-{app_id}-...).
+      // É NESSE app que a permissão de pós-venda/devoluções precisa ser habilitada.
+      out.app_id_do_token = (String(tk).match(/APP_USR-(\d+)-/) || [])[1] || 'nao-identificado';
       try {
         const rc = await fetch('https://api.mercadolibre.com/post-purchase/v1/claims/search?sort=last_updated:desc&limit=30', H);
         const dc = await rc.json().catch(() => null);
