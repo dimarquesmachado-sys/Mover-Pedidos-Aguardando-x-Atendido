@@ -26,7 +26,7 @@ const fs   = require('fs');
 const path = require('path');
 const { json, html } = require('../lib/http');
 
-const VERSAO = 'magalu-oauth v1 b11';
+const VERSAO = 'magalu-oauth v1 b12';
 
 const DATA_DIR = process.env.MAGALU_DATA_DIR || '/data/magalu';
 
@@ -440,6 +440,117 @@ async function tratar(req, res, urlObj) {
     } catch (e) {
       json(res, 500, { ok: false, erro: String(e.message || e) });
     }
+    return true;
+  }
+
+  // /magalu/financeiro?empresa=good[&code=NUMERO][&external_id=UUID]  → (admin)
+  // Consulta a API de ANÁLISE FINANCEIRA (DRE) — a fonte oficial dos valores reais:
+  // comissão, tarifa, MDR, frete real, e principalmente DEVOLUÇÃO (REFUND) + frete de
+  // retorno. Só retorna pedidos Entregue/Cancelado a partir de 05/05/2026. Precisa do
+  // escopo open:order-financial-report-seller:read (já autorizado nas 3 empresas).
+  // Descobre o endpoint certo testando candidatos e mostra as transações cruas.
+  if (method === 'GET' && p === '/magalu/financeiro') {
+    const emp = String(q.get('empresa') || '').toLowerCase().trim();
+    if (!EMPRESAS_VALIDAS.includes(emp)) { json(res, 400, { ok: false, erro: 'empresa inválida' }); return true; }
+    const code = String(q.get('code') || '').trim();
+    const extId = String(q.get('external_id') || '').trim();
+    const desde = String(q.get('desde') || '2026-05-05').trim();
+
+    let tok = '';
+    try { tok = await getAccessToken(emp); }
+    catch (e) { json(res, 502, { ok: false, erro: 'token: ' + String(e.message || e) }); return true; }
+    const H = { 'Authorization': 'Bearer ' + tok, 'Accept': 'application/json' };
+
+    async function pega(url) {
+      const r = await fetch(url, { headers: H });
+      const t = await r.text();
+      let j = null; try { j = JSON.parse(t); } catch (e) {}
+      return { status: r.status, j, t };
+    }
+
+    // candidatos de base da API financeira (o path exato não está 100% claro na doc)
+    const bases = [
+      'https://api.magalu.com/seller/v1/financial-analysis/orders',
+      'https://api.magalu.com/dre/v1/seller/orders',
+      'https://api.magalu.com/financial-analysis/v1/seller/orders',
+      'https://api.magalu.com/seller/v1/dre/orders',
+      'https://api.magalu.com/seller/v1/financial/orders'
+    ];
+
+    const achou = [];
+    let baseOk = null, amostra = null;
+    for (const b of bases) {
+      const r = await pega(b + '?_limit=1');
+      achou.push({ base: b.replace('https://api.magalu.com', ''), status: r.status });
+      if (r.status === 200) { baseOk = b; amostra = r.j; break; }
+    }
+
+    if (!baseOk) {
+      json(res, 200, { ok: false, empresa: emp, versao: VERSAO,
+        nota: 'nenhum endpoint financeiro respondeu 200 — talvez precise ativar o escopo ou o path seja outro',
+        tentativas: achou });
+      return true;
+    }
+
+    // achou a base — agora busca o pedido específico (por external_id do pedido, ou por code)
+    let alvo = null, comoAchou = '';
+    // 1) tenta por external_id direto (se o usuário passou o UUID do pedido)
+    if (extId) {
+      const r = await pega(baseOk + '/' + extId);
+      if (r.status === 200 && r.j) { alvo = r.j; comoAchou = 'GET /{external_id}'; }
+    }
+    // 2) senão, busca lista e casa pelo order_code no extras
+    if (!alvo) {
+      let offset = 0;
+      while (offset < 500 && !alvo) {
+        const r = await pega(baseOk + '?_limit=50&_offset=' + offset);
+        const arr = r.j && (r.j.results || r.j.data || (Array.isArray(r.j) ? r.j : [])) || [];
+        if (!arr.length) break;
+        if (code) {
+          alvo = arr.find(o => {
+            const oc = (o.extras && o.extras.order_code) || o.order_code || o.external_id || '';
+            return String(oc) === code;
+          }) || null;
+          if (alvo) comoAchou = 'lista casando order_code';
+        } else if (offset === 0) {
+          alvo = arr[0]; comoAchou = 'primeiro da lista';
+        }
+        offset += 50;
+      }
+    }
+
+    if (!alvo) {
+      json(res, 200, { ok: true, empresa: emp, versao: VERSAO, base: baseOk.replace('https://api.magalu.com', ''),
+        nota: 'API financeira respondeu, mas não achei o pedido' + (code ? ' code=' + code : ''),
+        estrutura_lista: amostra ? Object.keys(amostra) : null });
+      return true;
+    }
+
+    // resume as transações destacando REFUND (devolução) e SHIPPING_COST (frete)
+    const txs = alvo.transactions || [];
+    const resumo = txs.map(t => ({
+      categoria: t.category, sub: t.subcategory, tipo: t.type,
+      valor: (t.value != null && t.normalizer) ? (t.value / t.normalizer) : t.value,
+      desc: t.description
+    }));
+    const devolucao = resumo.filter(r => r.categoria === 'REFUND' || /refund|penalt/i.test(String(r.sub || '')));
+    const frete = resumo.filter(r => r.categoria === 'SHIPPING_COST');
+    const saldo = txs.reduce((acc, t) => {
+      if (t.type === 'CREDIT') return acc + (t.value / (t.normalizer || 100));
+      if (t.type === 'DEBIT') return acc - (t.value / (t.normalizer || 100));
+      return acc;
+    }, 0);
+
+    json(res, 200, {
+      ok: true, empresa: emp, versao: VERSAO,
+      base: baseOk.replace('https://api.magalu.com', ''), como_achou: comoAchou,
+      order_code: (alvo.extras && alvo.extras.order_code) || alvo.order_code || null,
+      external_id: alvo.external_id || null,
+      DEVOLUCAO: devolucao.length ? devolucao : 'nenhuma transação REFUND neste pedido',
+      FRETE: frete.length ? frete : 'nenhuma transação SHIPPING_COST',
+      saldo_liquido: Math.round(saldo * 100) / 100,
+      TODAS_TRANSACOES: resumo
+    });
     return true;
   }
 
