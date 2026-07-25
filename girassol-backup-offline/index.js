@@ -41,7 +41,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v25/07 b28';
+const VERSAO     = 'girassol-backup-offline v25/07 b29';
 
 // ── SESSÃO DE OPERADOR (cookie assinado HMAC) — protege rotas de dados/ação ──
 // Segredo estável entre restarts. Usa ADMIN_KEY (já configurada no Render) como base.
@@ -2770,9 +2770,12 @@ async function vendasSync() {
                 const est = await magaluFreteProvisorio(v);
                 freteCopart = est != null ? est : 0; freteFonte = est != null ? 'prov' : 'sem';
               }
-              const taxaTotal = Math.round((taxaBase + freteCopart) * 100) / 100;
-              if (taxaTotal > 0) { v.tarifa_ml = taxaTotal; nM++; }
-              v.mag_frete_copart = Math.round(freteCopart * 100) / 100;   // pra exibir separado se quiser
+              // TARIFA = só a comissão da Magalu (serviço+tech+comissão-frete) + MDR + tarifa fixa.
+              // O frete de coparticipação vai SEPARADO em mag_frete_copart (coluna FRETE VEND.),
+              // pra não misturar comissão e frete na mesma coluna.
+              const taxaBaseR = Math.round(taxaBase * 100) / 100;
+              if (taxaBaseR > 0) { v.tarifa_ml = taxaBaseR; nM++; }
+              v.mag_frete_copart = Math.round(freteCopart * 100) / 100;   // frete: exibido na coluna FRETE VEND.
               v.mag_frete_fonte = freteFonte;   // 'real' | 'prov' | 'sem'
               // devolução: estorno da venda (REFUND) quando houver
               if (fin.tem_devolucao) { v.mag_refund = Math.abs(fin.refund); v.devolvido = true; }
