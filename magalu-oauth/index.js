@@ -26,7 +26,7 @@ const fs   = require('fs');
 const path = require('path');
 const { json, html } = require('../lib/http');
 
-const VERSAO = 'magalu-oauth v1 b14';
+const VERSAO = 'magalu-oauth v1 b15';
 
 const DATA_DIR = process.env.MAGALU_DATA_DIR || '/data/magalu';
 
@@ -470,28 +470,43 @@ async function tratar(req, res, urlObj) {
     }
 
     // candidatos de base da API financeira (o path exato não está 100% claro na doc)
-    const bases = [
-      'https://api.magalu.com/seller/v1/financial-analysis/orders',
-      'https://api.magalu.com/dre/v1/seller/orders',
-      'https://api.magalu.com/financial-analysis/v1/seller/orders',
-      'https://api.magalu.com/seller/v1/dre/orders',
-      'https://api.magalu.com/seller/v1/financial/orders'
+    const BASE_FIN = 'https://api.magalu.com/seller/v1/financial-analysis/orders';
+    // o endpoint certo (422 = escopo OK, falta parâmetro). Testamos várias combinações
+    // de query pra descobrir qual o obrigatório, e mostramos o CORPO do erro (que diz o que falta).
+    const combos = [
+      '?_limit=1',
+      '?_limit=1&_offset=0',
+      '?period_start=2026-07-01&period_end=2026-07-31',
+      '?start_date=2026-07-01&end_date=2026-07-31',
+      '?created_at_from=2026-07-01&created_at_to=2026-07-31',
+      '?transaction_at_from=2026-07-01T00:00:00Z&transaction_at_to=2026-07-31T23:59:59Z',
+      '?order_code=' + (code || '1549670115836230'),
+      '?external_id=' + (extId || ''),
+      '?_limit=1&period_start=2026-07-01&period_end=2026-07-31'
     ];
 
-    const achou = [];
-    let baseOk = null, amostra = null;
-    for (const b of bases) {
-      const r = await pega(b + '?_limit=1');
-      achou.push({ base: b.replace('https://api.magalu.com', ''), status: r.status });
-      if (r.status === 200) { baseOk = b; amostra = r.j; break; }
+    const testes = [];
+    let baseOk = null, amostra = null, urlOk = '';
+    for (const c of combos) {
+      const r = await pega(BASE_FIN + c);
+      testes.push({
+        query: c,
+        status: r.status,
+        // mostra o corpo INTEIRO em erro (é aqui que a API diz o que falta) ou as chaves em 200
+        corpo: r.status === 200 ? (r.j ? Object.keys(r.j) : 'vazio') : (r.j || (r.t || '').slice(0, 300))
+      });
+      if (r.status === 200) { baseOk = BASE_FIN; amostra = r.j; urlOk = c; break; }
     }
 
     if (!baseOk) {
       json(res, 200, { ok: false, empresa: emp, versao: VERSAO,
-        nota: 'nenhum endpoint financeiro respondeu 200 — talvez precise ativar o escopo ou o path seja outro',
-        tentativas: achou });
+        nota: 'endpoint /financial-analysis/orders existe (não é mais 403). Testei combinações de parâmetro — veja o corpo de cada 422 pra descobrir o campo obrigatório',
+        endpoint: '/seller/v1/financial-analysis/orders',
+        testes });
       return true;
     }
+    // se achou, ajusta as variáveis que o resto do código usa
+    const bases = [baseOk]; const achou = testes;
 
     // achou a base — agora busca o pedido específico (por external_id do pedido, ou por code)
     let alvo = null, comoAchou = '';
