@@ -26,7 +26,7 @@ const fs   = require('fs');
 const path = require('path');
 const { json, html } = require('../lib/http');
 
-const VERSAO = 'magalu-oauth v1 b18';
+const VERSAO = 'magalu-oauth v1 b19';
 
 const DATA_DIR = process.env.MAGALU_DATA_DIR || '/data/magalu';
 
@@ -551,6 +551,106 @@ async function tratar(req, res, urlObj) {
       FRETE: frete.length ? frete : 'nenhuma transação SHIPPING_COST',
       saldo_liquido: Math.round(saldo * 100) / 100,
       TODAS_TRANSACOES: resumo
+    });
+    return true;
+  }
+
+  // /magalu/financeiro-lote?empresa=good&codes=A,B,C[&dias=30]  → (admin)
+  // Versão em LOTE do financeiro, pro coletor (vendasSync). Recebe vários order_codes
+  // e devolve o financeiro de todos de uma vez. Aproveita que uma janela de 15 dias já
+  // traz muitos pedidos: varre de trás pra frente (até &dias, default 45) montando um
+  // índice code→transações, e casa os codes pedidos. Devolve por code: comissão real
+  // (serviço+tech), MDR, tarifa fixa, frete, devolução (REFUND), saldo líquido.
+  if (method === 'GET' && p === '/magalu/financeiro-lote') {
+    const emp = String(q.get('empresa') || '').toLowerCase().trim();
+    if (!EMPRESAS_VALIDAS.includes(emp)) { json(res, 400, { ok: false, erro: 'empresa inválida' }); return true; }
+    const codesRaw = String(q.get('codes') || '').trim();
+    if (!codesRaw) { json(res, 400, { ok: false, erro: 'passe &codes=A,B,C' }); return true; }
+    const codesPedidos = new Set(codesRaw.split(',').map(s => s.trim()).filter(Boolean));
+    const dias = Math.min(180, Math.max(15, parseInt(q.get('dias') || '45', 10) || 45));
+
+    let tok = '';
+    try { tok = await getAccessToken(emp); }
+    catch (e) { json(res, 502, { ok: false, erro: 'token: ' + String(e.message || e) }); return true; }
+    const H = { 'Authorization': 'Bearer ' + tok, 'Accept': 'application/json' };
+    const BASE_FIN = 'https://api.magalu.com/seller/v1/financial-analysis/orders';
+
+    async function pega(url) {
+      const r = await fetch(url, { headers: H });
+      const t = await r.text();
+      let j = null; try { j = JSON.parse(t); } catch (e) {}
+      return { status: r.status, j, t };
+    }
+
+    // resume as transações de um pedido nos campos que o dashboard usa
+    function resumir(alvo) {
+      const txs = alvo.transactions || [];
+      let comissao = 0, mdr = 0, tarifa = 0, freteDebito = 0, freteCredito = 0, refund = 0, sale = 0;
+      for (const t of txs) {
+        const v = (t.value || 0) / (t.normalizer || 100);
+        const cat = t.category, sub = t.subcategory, tp = t.type;
+        if (cat === 'SALE') sale += v;
+        else if (cat === 'COMMISSION') comissao += v;   // SERVICE + TECHNOLOGY + FREIGHT
+        else if (cat === 'FEES' && sub === 'PAYMENT_PROCESSING') mdr += v;
+        else if (cat === 'FEES' && sub === 'PLATFORM') tarifa += v;
+        else if (cat === 'SHIPPING_COST') { if (tp === 'DEBIT') freteDebito += v; else if (tp === 'CREDIT') freteCredito += v; }
+        else if (cat === 'REFUND') refund += v;
+      }
+      const saldo = txs.reduce((a, t) => {
+        const v = (t.value || 0) / (t.normalizer || 100);
+        return t.type === 'CREDIT' ? a + v : (t.type === 'DEBIT' ? a - v : a);
+      }, 0);
+      return {
+        sale: Math.round(sale * 100) / 100,
+        comissao: Math.round(comissao * 100) / 100,   // comissão real total (serviço+tech)
+        mdr: Math.round(mdr * 100) / 100,
+        tarifa_fixa: Math.round(tarifa * 100) / 100,
+        frete_debito: Math.round(freteDebito * 100) / 100,   // frete que a Magalu cobra (inclui reverso)
+        frete_credito: Math.round(freteCredito * 100) / 100,
+        refund: Math.round(refund * 100) / 100,   // estorno de devolução (0 = sem devolução financeira)
+        saldo_liquido: Math.round(saldo * 100) / 100,
+        tem_devolucao: refund !== 0
+      };
+    }
+
+    const MS_DIA = 86400000;
+    const agora = Date.now();
+    const limite = agora - dias * MS_DIA;
+    const achados = {};   // code → resumo
+    let fimBloco = agora, janelas = 0;
+    // varre em janelas de 15 dias até cobrir 'dias' OU achar todos os codes pedidos
+    while (fimBloco > limite && janelas < 13 && Object.keys(achados).length < codesPedidos.size) {
+      const iniBloco = Math.max(limite, fimBloco - 15 * MS_DIA);
+      const gte = new Date(iniBloco).toISOString();
+      const lte = new Date(fimBloco).toISOString();
+      const JAN = 'purchased_at__gte=' + encodeURIComponent(gte) + '&purchased_at__lte=' + encodeURIComponent(lte);
+      janelas++;
+      let offset = 0;
+      while (offset < 1000) {
+        const r = await pega(BASE_FIN + '?' + JAN + '&_limit=50&_offset=' + offset);
+        if (r.status !== 200) {
+          json(res, 200, { ok: false, empresa: emp, versao: VERSAO,
+            nota: 'janela retornou ' + r.status, corpo: r.j || (r.t || '').slice(0, 300) });
+          return true;
+        }
+        const arr = r.j && (r.j.results || r.j.data || (Array.isArray(r.j) ? r.j : [])) || [];
+        if (!arr.length) break;
+        for (const o of arr) {
+          const oc = String((o.extras && o.extras.order_code) || o.order_code || o.external_id || '');
+          if (codesPedidos.has(oc) && !achados[oc]) achados[oc] = resumir(o);
+        }
+        offset += 50;
+        if (Object.keys(achados).length >= codesPedidos.size) break;
+      }
+      fimBloco = iniBloco - 1000;
+    }
+
+    json(res, 200, {
+      ok: true, empresa: emp, versao: VERSAO,
+      pedidos: achados,   // { code: {comissao, mdr, tarifa_fixa, frete_debito, refund, saldo_liquido, tem_devolucao} }
+      achados: Object.keys(achados).length,
+      pedidos_faltando: [...codesPedidos].filter(c => !achados[c]),
+      janelas_varridas: janelas
     });
     return true;
   }
