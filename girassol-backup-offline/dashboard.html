@@ -100,7 +100,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd61';
+const DASH_BUILD = 'd62';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -577,6 +577,7 @@ function calcPL(h){
   const custoOk = cusUn===unTot && unTot>0;
   let frV = null, frFonte = null;
   if (h.frete_ml!=null && isFinite(Number(h.frete_ml)) && Number(h.frete_ml)>0) { frV = Number(h.frete_ml); frFonte = 'ml'; }   // 0 nao e frete real: deixa cair no Bling/FLEX (senao o custo do motoboy sumia)
+  else if (ck==='magalu' && h.mag_frete_copart!=null && isFinite(Number(h.mag_frete_copart)) && Number(h.mag_frete_copart)>0) { frV = Number(h.mag_frete_copart); frFonte = 'magalu'; }   // frete de coparticipação Magalu (o frete REAL desse canal — não é motoboy, é logística Magalu)
   else if (h.flex) { const fx = flexDe(ck); if (fx!=null && fx>0) { frV = fx; frFonte = 'flex'; } }   // d52: FLEX deduz o MOTOBOY da config — o "frete" que o Bling importa num flex é o frete do COMPRADOR (entra como crédito via escrow), não custo do vendedor (caso BRS 260722C6YRDNC0)
   else if (h.frete_mkt!=null && isFinite(Number(h.frete_mkt)) && Number(h.frete_mkt)>0) { frV = Number(h.frete_mkt); frFonte = 'bling'; }
   const completo = [rp,imposto,tarifa].every(v=>v!=null) && custoOk;
@@ -594,8 +595,13 @@ function calcPL(h){
   // Magalu: fonte do frete de coparticipação embutido na tarifa — 'real' (liquidado, da API),
   // 'prov' (estimado pela tabela/histórico, ainda vai mudar) ou null. Governa a cor no painel.
   const magFreteFonte = (ck==='magalu' && h.mag_frete_fonte) ? h.mag_frete_fonte : null;
-  const mc = completo? (rendaCanal!=null ? (rendaCanal-imposto-custo-(frV||0)+(credito||0)) : (rpEf-imposto-tarifa-custo-(frV||0)+(credito||0)+(freteRec||0))) : null;
-  return {mes,ck,rp,rpEf,desconto,freteRec,rendaCanal,tot,frete,aliq,imposto,feeReal,feeBling,tx,tarifa,custo,cusUn,unTot,custoOk,frV,frFonte,credito,completo,mc,magFreteFonte};
+  const magFreteCopart = (ck==='magalu' && h.mag_frete_copart!=null && isFinite(Number(h.mag_frete_copart))) ? Number(h.mag_frete_copart) : null;
+  // M.C.: quando o pedido Magalu LIQUIDOU, renda_canal (saldo líquido oficial) JÁ desconta o frete real —
+  // então o frete Magalu que aparece em frV é só pra EXIBIÇÃO e não pode ser descontado de novo (senão conta 2x).
+  // No provisório (renda_canal null), a tarifa é só comissão, então o frete de frV É descontado (correto).
+  const frVparaMC = (ck==='magalu' && frFonte==='magalu' && rendaCanal!=null) ? 0 : (frV||0);
+  const mc = completo? (rendaCanal!=null ? (rendaCanal-imposto-custo-frVparaMC+(credito||0)) : (rpEf-imposto-tarifa-custo-frVparaMC+(credito||0)+(freteRec||0))) : null;
+  return {mes,ck,rp,rpEf,desconto,freteRec,rendaCanal,tot,frete,aliq,imposto,feeReal,feeBling,tx,tarifa,custo,cusUn,unTot,custoOk,frV,frFonte,credito,completo,mc,magFreteFonte,magFreteCopart};
 }
 function buscarPed(q){
   q = String(q||'').trim().toLowerCase();
@@ -623,7 +629,7 @@ async function abrirPL(id){
 }
 function renderPL(h){
   const card=$('plCard');
-  const {mes,ck,rp,tot,frete,aliq,imposto,feeReal,feeBling,tx,tarifa,custo,cusUn,unTot,frV,frFonte,credito,completo,mc} = calcPL(h);
+  const {mes,ck,rp,tot,frete,aliq,imposto,feeReal,feeBling,tx,tarifa,custo,cusUn,unTot,frV,frFonte,credito,completo,mc,magFreteFonte} = calcPL(h);
   const linha=(l,v,extra)=>'<tr><td>'+l+'</td><td class="num">'+(v!=null?BRL(v):'<span class="dim">—</span>')+(extra||'')+'</td></tr>';
   card.innerHTML =
     '<div class="sec" style="margin-top:12px;background:linear-gradient(160deg,#14201a,#131a30);border-color:#14b8a655">'+
@@ -636,7 +642,7 @@ function renderPL(h){
     linha('🏪 Tarifa '+ (feeReal!=null?'<span class="ok">REAL (ML)</span>':(feeBling!=null?'<span class="ok">REAL (Bling)</span>':(tx!=null?tx+'% est.':'<span class="warn">configure ⚙️</span>'))), tarifa!=null?-tarifa:null,
       (ck==='ml'&&h.numero_loja&&feeReal==null?' <button class="btn" style="padding:3px 10px;font-size:10.5px" onclick="pegarFeeML(\''+h.id+'\',\''+esc(h.numero_loja)+'\')">buscar real</button>':''))+
     linha('📦 Custo ('+cusUn+'/'+unTot+' un. c/ custo)', (cusUn?-custo:null))+
-    (frV!=null ? linha('🚛 Frete vendedor <span class="ok">('+(frFonte==='ml'?'real ML':(frFonte==='bling'?'Bling':'FLEX ⚙️'))+')</span>', -frV) : (ck==='ml' ? linha('🚛 Frete vendedor <span class="ok">(real ML)</span>', null) : ''))+
+    (frV!=null ? linha('🚛 Frete vendedor <span class="'+(frFonte==='magalu'&&magFreteFonte==='prov'?'warn':'ok')+'">('+(frFonte==='ml'?'real ML':(frFonte==='magalu'?('Magalu '+(magFreteFonte==='prov'?'previsto':'real')):(frFonte==='bling'?'Bling':'FLEX ⚙️')))+')</span>', -frV) : (ck==='ml' ? linha('🚛 Frete vendedor <span class="ok">(real ML)</span>', null) : ''))+
     (credito!=null ? linha('💵 Estorno do ML <span class="ok">(compensação de envio)</span>', credito) : '')+
     '<tr><td style="border-top:2px solid var(--line2);font-weight:800">💎 Margem de contribuição</td>'+
     '<td class="num" style="border-top:2px solid var(--line2);font-weight:800">'+
@@ -759,7 +765,7 @@ function baixarCSV(){
       q(h.numero||h.id), q(h.nf_numero||''), q(h.numero_loja||''), q(h.ml_pack||''), q(h.ml_order||''), q(P.ck), q(h._sit||(h.sintetico?'nao bipada':'bipada')), q(skus), unid,
       br(P.tot), br(P.rp), br(P.custoOk?P.custo:null), br(P.imposto), br(P.tarifa),
       q(P.feeReal!=null?'REAL (ML)':(P.feeBling!=null?'Bling':(P.tx!=null?'% configurada':''))),
-      br(P.frV), q(P.frFonte==='ml'?'real ML':(P.frFonte==='bling'?'Bling':(P.frFonte==='flex'?'FLEX (config)':''))),
+      br(P.frV), q(P.frFonte==='ml'?'real ML':(P.frFonte==='magalu'?('Magalu '+(P.magFreteFonte==='prov'?'previsto':'real')):(P.frFonte==='bling'?'Bling':(P.frFonte==='flex'?'FLEX (config)':'')))),
       br(P.credito),
       br(P.mc), (P.mc!=null&&P.rp)?Math.round(P.mc/P.rp*100):''
     ].join(';');
@@ -922,12 +928,14 @@ function renderAnalise(){
       '<td class="num">'+N(unid)+'</td>'+
       cel(P.tot)+cel(P.rp,'ok')+
       cel(P.custoOk?P.custo:null)+cel(P.imposto)+
-      '<td class="num">'+(P.tarifa!=null?(
-          P.magFreteFonte==='prov'
-            ? '<span class="warn">'+BRL(P.tarifa)+'</span> <span class="st w" style="font-size:9px" title="comissão real da Magalu + frete de coparticipação ESTIMADO pela tabela (o valor final chega quando o pedido é entregue)">PREVISTO</span>'
-            : BRL(P.tarifa)+(P.feeReal!=null?(P.magFreteFonte==='real'?' <span class="st ok" style="font-size:9px" title="comissão + frete de coparticipação REAIS, da API financeira da Magalu">REAL</span>':' <span class="st ok" style="font-size:9px">REAL</span>'):(P.feeBling!=null?' <span class="st ok" style="font-size:9px">BLING</span>':''))
-        )+(P.rp?'<div class="desc">'+Math.round(P.tarifa/P.rp*100)+'%</div>':''):'<span class="dim">—</span>')+'</td>'+
-      '<td class="num">'+(P.frV!=null?BRL(P.frV)+(P.frFonte==='flex'?' <span class="st warn" style="font-size:9px">FLEX</span>':''):'<span class="dim">—</span>')+'</td>'+
+      '<td class="num">'+(P.tarifa!=null?BRL(P.tarifa)+(P.feeReal!=null?' <span class="st ok" style="font-size:9px">REAL</span>':(P.feeBling!=null?' <span class="st ok" style="font-size:9px">BLING</span>':''))+(P.rp?'<div class="desc">'+Math.round(P.tarifa/P.rp*100)+'%</div>':''):'<span class="dim">—</span>')+'</td>'+
+      '<td class="num">'+(P.frV!=null?(
+          P.frFonte==='magalu'
+            ? (P.magFreteFonte==='prov'
+                ? '<span class="warn">'+BRL(P.frV)+'</span> <span class="st w" style="font-size:9px" title="frete de coparticipação Magalu ESTIMADO pela tabela — o valor real chega quando o pedido é entregue">PREVISTO</span>'
+                : '<span class="ok">'+BRL(P.frV)+'</span> <span class="st ok" style="font-size:9px" title="frete de coparticipação REAL, da API financeira da Magalu">REAL</span>')
+            : BRL(P.frV)+(P.frFonte==='flex'?' <span class="st warn" style="font-size:9px">FLEX</span>':'')
+        ):'<span class="dim">—</span>')+'</td>'+
       '<td class="num">'+(P.credito!=null?('<span class="'+(P.credito>=0?'ok':'bad')+'">'+(P.credito>=0?'+':'')+BRL(P.credito)+'</span>'):'<span class="dim">—</span>')+'</td>'+
       '<td class="num" style="font-weight:800">'+(P.mc!=null?('<span class="'+(P.mc>=0?'ok':'bad')+'">'+BRL(P.mc)+'</span>'):'<span class="warn" title="falta config/custo">—</span>')+'</td>'+
       '<td class="num '+(pmc!=null?(pmc>=0?'ok':'bad'):'dim')+'">'+(pmc!=null?pmc+'%':'—')+'</td>'+
