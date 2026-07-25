@@ -41,7 +41,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v25/07 b26';
+const VERSAO     = 'girassol-backup-offline v25/07 b27';
 
 // ── SESSÃO DE OPERADOR (cookie assinado HMAC) — protege rotas de dados/ação ──
 // Segredo estável entre restarts. Usa ADMIN_KEY (já configurada no Render) como base.
@@ -1054,16 +1054,15 @@ function routes(readBody) {
     }
 
     // NÍVEL de desconto do frete Magalu (config do ⚙️). GET lê, POST salva.
-    // Uso: GET /girassol-backup-offline/config-frete-magalu?k=ADMIN_KEY
-    //      POST mesma URL com body {nivel_desconto:'sem'|'25'|'50'}
+    // Valida por SESSÃO admin (igual config-fiscal) — chamada pelo dashboard.
     if (p === '/girassol-backup-offline/config-frete-magalu') {
-      const kD = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
-      if (!process.env.ADMIN_KEY || kD !== process.env.ADMIN_KEY) { json(res, 404, { error: 'not found' }); return true; }
+      const opSess = validarSessao(req.headers['cookie']);
+      if (!opSess || !ehAdmin(opSess)) { json(res, 403, { ok: false, erro: 'apenas admin' }); return true; }
       const CFG = path.join(CACHE_DIR, '_config-frete-magalu.json');
       if (method === 'GET') { json(res, 200, { ok: true, config: readJson(CFG, { nivel_desconto: '50' }) }); return true; }
       if (method === 'POST') {
-        let body = ''; await new Promise(r => { req.on('data', c => body += c); req.on('end', r); });
-        let nivel = '50'; try { const b = JSON.parse(body || '{}'); if (['sem', '25', '50'].includes(b.nivel_desconto)) nivel = b.nivel_desconto; } catch (e) {}
+        let body = {}; try { const _rb = await readBody(req); body = (_rb && typeof _rb === 'object') ? _rb : JSON.parse(_rb || '{}'); } catch (e) {}
+        let nivel = '50'; if (['sem', '25', '50'].includes(body.nivel_desconto)) nivel = body.nivel_desconto;
         writeJson(CFG, { nivel_desconto: nivel, em: new Date().toISOString() });
         json(res, 200, { ok: true, salvo: nivel }); return true;
       }
