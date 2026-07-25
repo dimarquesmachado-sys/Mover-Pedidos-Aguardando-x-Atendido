@@ -26,7 +26,7 @@ const fs   = require('fs');
 const path = require('path');
 const { json, html } = require('../lib/http');
 
-const VERSAO = 'magalu-oauth v1 b12';
+const VERSAO = 'magalu-oauth v1 b13';
 
 const DATA_DIR = process.env.MAGALU_DATA_DIR || '/data/magalu';
 
@@ -43,7 +43,7 @@ const REDIRECT_URI = process.env.MAGALU_REDIRECT_URI
 
 // Escopos que o client foi criado com (leitura de pedidos e afins).
 const SCOPES = (process.env.MAGALU_SCOPES
-  || 'open:order-order-seller:read open:order-delivery-seller:read open:order-invoice-seller:read open:order-logistics-seller:read'
+  || 'open:order-order-seller:read open:order-delivery-seller:read open:order-delivery-seller:write open:order-invoice-seller:read open:order-logistics-seller:read open:order-logistics-seller:write open:order-financial-report-seller:read open:portfolio-prices-seller:read open:portfolio-prices-seller:write open:portfolio-skus-seller:read open:portfolio-skus-seller:write open:portfolio-stocks-seller:read open:portfolio-stocks-seller:write open:logistic-carrier-shippings:read'
 ).trim();
 
 const EMPRESAS_VALIDAS = ['girassol', 'good', 'amb'];
