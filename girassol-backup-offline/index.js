@@ -41,7 +41,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v25/07 b34';
+const VERSAO     = 'girassol-backup-offline v25/07 b35';
 
 // ── SESSÃO DE OPERADOR (cookie assinado HMAC) — protege rotas de dados/ação ──
 // Segredo estável entre restarts. Usa ADMIN_KEY (já configurada no Render) como base.
@@ -845,8 +845,8 @@ function routes(readBody) {
     // SONDA (sessão admin): mapeia a estrutura REAL de devoluções/claims do ML antes de integrar
     // o prejuízo. Roda /claims/search (claims do seller) e, pros primeiros, busca returns +
     // return-cost (frete de retorno). É temporária — sai depois que a integração estiver validada.
-    // Uso: /girassol-backup-offline/debug-ml-claims
-    if (method === 'GET' && p === '/girassol-backup-offline/debug-ml-claims') {
+    // Uso: /girassol-backup-offline/sonda-ml-claims
+    if (method === 'GET' && p === '/girassol-backup-offline/sonda-ml-claims') {
       const kD = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
       const sessD = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
@@ -878,8 +878,8 @@ function routes(readBody) {
     // SONDA (sessão admin): mapeia os COMPONENTES DE PAGAMENTO de vendas ML reais — cupom,
     // desconto, promoção, bônus, pagamento, carrinho — mostrando order+shipment CRUS de 2 pedidos
     // ML recentes. Pra eu ver a estrutura exata e integrar quem-paga-o-quê. Temporária.
-    // Uso: /girassol-backup-offline/debug-ml-pagamento  (opcional &nl=NUMERO_DA_VENDA pra um pedido específico)
-    if (method === 'GET' && p === '/girassol-backup-offline/debug-ml-pagamento') {
+    // Uso: /girassol-backup-offline/sonda-ml-pagamento  (opcional &nl=NUMERO_DA_VENDA pra um pedido específico)
+    if (method === 'GET' && p === '/girassol-backup-offline/sonda-ml-pagamento') {
       const kD = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
       const sessD = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
