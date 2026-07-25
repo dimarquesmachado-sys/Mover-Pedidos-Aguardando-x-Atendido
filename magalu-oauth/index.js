@@ -26,7 +26,7 @@ const fs   = require('fs');
 const path = require('path');
 const { json, html } = require('../lib/http');
 
-const VERSAO = 'magalu-oauth v1 b20';
+const VERSAO = 'magalu-oauth v1 b21';
 
 const DATA_DIR = process.env.MAGALU_DATA_DIR || '/data/magalu';
 
@@ -552,6 +552,48 @@ async function tratar(req, res, urlObj) {
       saldo_liquido: Math.round(saldo * 100) / 100,
       TODAS_TRANSACOES: resumo
     });
+    return true;
+  }
+
+  // /magalu/reputacao?empresa=good  → (admin)
+  // SONDA: tenta achar um endpoint que devolva o nível de "Despacho no Prazo" /
+  // % de coparticipação de frete do seller. Testa candidatos e mostra o status de cada
+  // (403=existe mas falta permissão · 404=não existe · 200=achamos!). Mesmo método que
+  // usamos pra achar o endpoint financeiro.
+  if (method === 'GET' && p === '/magalu/reputacao') {
+    const emp = String(q.get('empresa') || '').toLowerCase().trim();
+    if (!EMPRESAS_VALIDAS.includes(emp)) { json(res, 400, { ok: false, erro: 'empresa inválida' }); return true; }
+    let tok = '';
+    try { tok = await getAccessToken(emp); }
+    catch (e) { json(res, 502, { ok: false, erro: 'token: ' + String(e.message || e) }); return true; }
+    const H = { 'Authorization': 'Bearer ' + tok, 'Accept': 'application/json' };
+    const candidatos = [
+      'https://api.magalu.com/seller/v1/reputation',
+      'https://api.magalu.com/seller/v1/scores',
+      'https://api.magalu.com/seller/v1/portfolio-scores',
+      'https://api.magalu.com/seller/v1/seller-scores',
+      'https://api.magalu.com/seller/v1/shipping/copayment',
+      'https://api.magalu.com/seller/v1/shipping-copayment',
+      'https://api.magalu.com/seller/v1/freight/copayment',
+      'https://api.magalu.com/seller/v1/on-time-dispatch',
+      'https://api.magalu.com/portfolio/v1/seller/scores',
+      'https://api.magalu.com/logistic/v1/seller/copayment'
+    ];
+    const testes = [];
+    for (const url of candidatos) {
+      try {
+        const r = await fetch(url, { headers: H });
+        const t = await r.text();
+        let j = null; try { j = JSON.parse(t); } catch (e) {}
+        testes.push({ url: url.replace('https://api.magalu.com', ''), status: r.status,
+          corpo: r.status === 200 ? j : (r.status === 403 ? 'existe, falta permissão' : (t || '').slice(0, 150)) });
+      } catch (e) {
+        testes.push({ url: url.replace('https://api.magalu.com', ''), status: 'erro', corpo: String(e.message || e).slice(0, 100) });
+      }
+    }
+    json(res, 200, { ok: true, empresa: emp, versao: VERSAO,
+      nota: '403=existe mas falta escopo · 404=não existe · 200=achamos. Se algum der 200 ou 403, dá pra puxar o nível por API',
+      testes });
     return true;
   }
 
