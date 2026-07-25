@@ -100,13 +100,14 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd60';
+const DASH_BUILD = 'd61';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
 let periodo = 'dia', pDe = '', pAte = '';   // abre no DIA (pedido do Diego)
 let SKUINFO = {}, skuInfoCarregado = false, _skuLoading = false;
 let CFG = { aliquotas:{}, taxas:{} };   // alíquota Simples por mês (YYYY-MM: %) + tarifa % por canal
+let MAG_NIVEL = '50';   // nível de desconto do frete Magalu (coparticipação): 'sem'|'25'|'50' (default 50%)
 // Alíquotas 2026 da GIRASSOL vindas de fábrica (editáveis no ⚙️; o que você salvar SOBREPÕE estas):
 const DEFAULT_ALIQ = { '2026-01':11.409280, '2026-02':11.3254, '2026-03':12.3402, '2026-04':13.6001, '2026-05':13.9149, '2026-06':14.056, '2026-07':14.1 };
 const aliqDe = mes => (CFG.aliquotas[mes] != null ? CFG.aliquotas[mes] : (DEFAULT_ALIQ[mes] != null ? DEFAULT_ALIQ[mes] : null));
@@ -189,6 +190,7 @@ async function boot(){
     VENDAS = Array.isArray(d.vendas_bling) ? d.vendas_bling : [];
     prepararVendas();
     try{ const rc = await fetch(MOD+'/config-fiscal',{credentials:'same-origin'}); const dc = await rc.json(); if(dc&&dc.config) CFG = { aliquotas: dc.config.aliquotas||{}, taxas: dc.config.taxas||{}, flex: dc.config.flex||{} }; }catch(e){}
+    try{ const rm = await fetch(MOD+'/config-frete-magalu',{credentials:'same-origin'}); const dm = await rm.json(); if(dm&&dm.config&&dm.config.nivel_desconto) MAG_NIVEL = dm.config.nivel_desconto; }catch(e){}
     montar();
   }catch(e){
     $('app').innerHTML = '<div class="loginbox">✗ falha ao carregar: '+esc(e.message)+'<br><br><a href="'+MOD+'/dashboard">tentar de novo</a></div>';
@@ -281,6 +283,14 @@ function montar(){
         var val = salvo != null ? salvo : DEFAULT_FLEX[fx[0]];
         return '<label style="font-size:12px;color:var(--mut)">'+fx[1]+'<br><input type="number" step="0.5" min="0" max="100" data-flex="'+fx[0]+'" value="'+val+'" style="width:96px'+(salvo!=null?'':';color:#8b96b3')+'" title="'+(salvo!=null?'valor salvo por você':'de fábrica (R$ '+DEFAULT_FLEX[fx[0]]+') — edite p/ sobrepor')+'"></label>';
       }).join('')+
+    '</div>'+
+      '<div style="font-size:12px;color:var(--mut);margin:14px 0 6px">📦 Nível de desconto do frete Magalu <span class="dim">(coparticipação — veja o seu % em <a href="https://seller.magalu.com/reputacao" target="_blank" style="color:var(--ok)">seller.magalu.com/reputacao</a>)</span>. Usado só na PREVISÃO do frete; quando o pedido é entregue, o valor REAL da Magalu substitui.</div>'+
+    '<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center">'+
+      '<label style="font-size:12px;color:var(--mut)">Desconto de coparticipação<br><select id="magNivelSel" style="background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:9px;padding:7px 10px;font-size:12.5px;margin-top:3px">'+
+        '<option value="50"'+(MAG_NIVEL==='50'?' selected':'')+'>Despacho &gt;97% — 50% de desconto</option>'+
+        '<option value="25"'+(MAG_NIVEL==='25'?' selected':'')+'>Despacho 87-97% — 25% de desconto</option>'+
+        '<option value="sem"'+(MAG_NIVEL==='sem'?' selected':'')+'>Despacho &lt;87% — sem desconto</option>'+
+      '</select></label>'+
     '</div>'+
     '<div style="margin-top:12px"><button class="btn" onclick="salvarCfg()">💾 Salvar</button> <span id="cfgMsg" class="mut" style="font-size:12px;margin-left:8px"></span></div>'+
       '<div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line)"><div style="font-size:12px;color:var(--mut);margin-bottom:8px">🔧 Manutenção <span class="dim">(rodam sozinhas de madrugada — use só se quiser AGORA)</span></div>'+
@@ -539,6 +549,9 @@ async function salvarCfg(){
   try{
     const r = await fetch(MOD+'/config-fiscal',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({aliquotas,taxas,flex})});
     const d = await r.json();
+    // nível de desconto do frete Magalu — salvo na sua própria rota (não é config fiscal)
+    const magSel = $('magNivelSel');
+    if(magSel){ try{ await fetch(MOD+'/config-frete-magalu',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({nivel_desconto:magSel.value})}); }catch(e){} }
     if(d&&d.ok){ CFG={aliquotas:d.config.aliquotas||{},taxas:d.config.taxas||{},flex:d.config.flex||{}}; msg.textContent='✓ salvo'; render(); }
     else msg.textContent='✗ '+((d&&d.erro)||'falhou');
   }catch(e){ msg.textContent='✗ '+e.message; }
@@ -578,8 +591,11 @@ function calcPL(h){
   // d53: RENDA OFICIAL do canal (escrow da Shopee) — o depósito exato: já liquida taxas, moedas Shopee, cupons e frete do comprador.
   // Quando existe, a M.C. ancora nela (e NÃO soma tarifa/desconto/freteRec de novo — tudo já está dentro).
   const rendaCanal = (h.renda_canal!=null && isFinite(Number(h.renda_canal)) && Number(h.renda_canal)>0) ? Number(h.renda_canal) : null;
+  // Magalu: fonte do frete de coparticipação embutido na tarifa — 'real' (liquidado, da API),
+  // 'prov' (estimado pela tabela/histórico, ainda vai mudar) ou null. Governa a cor no painel.
+  const magFreteFonte = (ck==='magalu' && h.mag_frete_fonte) ? h.mag_frete_fonte : null;
   const mc = completo? (rendaCanal!=null ? (rendaCanal-imposto-custo-(frV||0)+(credito||0)) : (rpEf-imposto-tarifa-custo-(frV||0)+(credito||0)+(freteRec||0))) : null;
-  return {mes,ck,rp,rpEf,desconto,freteRec,rendaCanal,tot,frete,aliq,imposto,feeReal,feeBling,tx,tarifa,custo,cusUn,unTot,custoOk,frV,frFonte,credito,completo,mc};
+  return {mes,ck,rp,rpEf,desconto,freteRec,rendaCanal,tot,frete,aliq,imposto,feeReal,feeBling,tx,tarifa,custo,cusUn,unTot,custoOk,frV,frFonte,credito,completo,mc,magFreteFonte};
 }
 function buscarPed(q){
   q = String(q||'').trim().toLowerCase();
@@ -906,7 +922,11 @@ function renderAnalise(){
       '<td class="num">'+N(unid)+'</td>'+
       cel(P.tot)+cel(P.rp,'ok')+
       cel(P.custoOk?P.custo:null)+cel(P.imposto)+
-      '<td class="num">'+(P.tarifa!=null?BRL(P.tarifa)+(P.feeReal!=null?' <span class="st ok" style="font-size:9px">REAL</span>':(P.feeBling!=null?' <span class="st ok" style="font-size:9px">BLING</span>':''))+(P.rp?'<div class="desc">'+Math.round(P.tarifa/P.rp*100)+'%</div>':''):'<span class="dim">—</span>')+'</td>'+
+      '<td class="num">'+(P.tarifa!=null?(
+          P.magFreteFonte==='prov'
+            ? '<span class="warn">'+BRL(P.tarifa)+'</span> <span class="st w" style="font-size:9px" title="comissão real da Magalu + frete de coparticipação ESTIMADO pela tabela (o valor final chega quando o pedido é entregue)">PREVISTO</span>'
+            : BRL(P.tarifa)+(P.feeReal!=null?(P.magFreteFonte==='real'?' <span class="st ok" style="font-size:9px" title="comissão + frete de coparticipação REAIS, da API financeira da Magalu">REAL</span>':' <span class="st ok" style="font-size:9px">REAL</span>'):(P.feeBling!=null?' <span class="st ok" style="font-size:9px">BLING</span>':''))
+        )+(P.rp?'<div class="desc">'+Math.round(P.tarifa/P.rp*100)+'%</div>':''):'<span class="dim">—</span>')+'</td>'+
       '<td class="num">'+(P.frV!=null?BRL(P.frV)+(P.frFonte==='flex'?' <span class="st warn" style="font-size:9px">FLEX</span>':''):'<span class="dim">—</span>')+'</td>'+
       '<td class="num">'+(P.credito!=null?('<span class="'+(P.credito>=0?'ok':'bad')+'">'+(P.credito>=0?'+':'')+BRL(P.credito)+'</span>'):'<span class="dim">—</span>')+'</td>'+
       '<td class="num" style="font-weight:800">'+(P.mc!=null?('<span class="'+(P.mc>=0?'ok':'bad')+'">'+BRL(P.mc)+'</span>'):'<span class="warn" title="falta config/custo">—</span>')+'</td>'+
