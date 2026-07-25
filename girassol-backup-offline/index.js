@@ -41,7 +41,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v25/07 b31';
+const VERSAO     = 'girassol-backup-offline v25/07 b34';
 
 // ── SESSÃO DE OPERADOR (cookie assinado HMAC) — protege rotas de dados/ação ──
 // Segredo estável entre restarts. Usa ADMIN_KEY (já configurada no Render) como base.
@@ -839,6 +839,84 @@ function routes(readBody) {
       const dias = Number(urlObj.searchParams.get('dias') || 14);
       mlSyncFees(dias).catch(() => {});
       json(res, 200, { ok: true, iniciado: true, dias, mensagem: 'pesca ML rodando em background — chame de novo p/ ver o progresso' });
+      return true;
+    }
+
+    // SONDA (sessão admin): mapeia a estrutura REAL de devoluções/claims do ML antes de integrar
+    // o prejuízo. Roda /claims/search (claims do seller) e, pros primeiros, busca returns +
+    // return-cost (frete de retorno). É temporária — sai depois que a integração estiver validada.
+    // Uso: /girassol-backup-offline/debug-ml-claims
+    if (method === 'GET' && p === '/girassol-backup-offline/debug-ml-claims') {
+      const kD = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const sessD = validarSessao(req.headers['cookie']);
+      if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
+      let tk = null;
+      try { const { garantirTokenML: _g4 } = require('../girassol/mlTokenManager'); tk = await _g4(); }
+      catch (e) { json(res, 200, { ok: false, erro: 'sem token ML: ' + String(e.message || e) }); return true; }
+      const H = { headers: { Authorization: 'Bearer ' + tk } };
+      const out = { ok: true, detalhes: [] };
+      try {
+        const rc = await fetch('https://api.mercadolibre.com/post-purchase/v1/claims/search?sort=last_updated:desc&limit=30', H);
+        const dc = await rc.json().catch(() => null);
+        out.status_busca = rc.status;
+        out.claims_raw = dc;   // estrutura crua da busca (pra eu ver os campos: id, order, tipo, stage, status...)
+        const lista = (dc && (dc.data || dc.results || dc.paging_data || [])) || [];
+        const amostra = Array.isArray(lista) ? lista.slice(0, 3) : [];
+        for (const c of amostra) {
+          const cid = c && (c.id || c.claim_id || c.resource_id);
+          if (!cid) continue;
+          const det = { claim_id: cid };
+          try { const r1 = await fetch('https://api.mercadolibre.com/post-purchase/v2/claims/' + cid + '/returns', H); det.returns_status = r1.status; det.returns = await r1.json().catch(() => null); } catch (e) {}
+          try { const r2 = await fetch('https://api.mercadolibre.com/post-purchase/v1/claims/' + cid + '/charges/return-cost', H); det.return_cost_status = r2.status; det.return_cost = await r2.json().catch(() => null); } catch (e) {}
+          out.detalhes.push(det);
+        }
+      } catch (e) { out.erro = String(e.message || e); }
+      json(res, 200, out);
+      return true;
+    }
+
+    // SONDA (sessão admin): mapeia os COMPONENTES DE PAGAMENTO de vendas ML reais — cupom,
+    // desconto, promoção, bônus, pagamento, carrinho — mostrando order+shipment CRUS de 2 pedidos
+    // ML recentes. Pra eu ver a estrutura exata e integrar quem-paga-o-quê. Temporária.
+    // Uso: /girassol-backup-offline/debug-ml-pagamento  (opcional &nl=NUMERO_DA_VENDA pra um pedido específico)
+    if (method === 'GET' && p === '/girassol-backup-offline/debug-ml-pagamento') {
+      const kD = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const sessD = validarSessao(req.headers['cookie']);
+      if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
+      let tk = null;
+      try { const { garantirTokenML: _g5 } = require('../girassol/mlTokenManager'); tk = await _g5(); }
+      catch (e) { json(res, 200, { ok: false, erro: 'sem token ML: ' + String(e.message || e) }); return true; }
+      const H = { headers: { Authorization: 'Bearer ' + tk } };
+      let alvos = [];
+      const nlQ = String((urlObj.searchParams && urlObj.searchParams.get('nl')) || '').replace(/\D/g, '');
+      if (nlQ) { alvos = [{ numero: null, numero_loja: nlQ }]; }
+      else {
+        const vd = readJson(path.join(CACHE_DIR, '_vendas_dia.json'), {});
+        alvos = Object.values(vd).filter(v => v && (v.marketplace === 'ml' || v.marketplace === 'mercadolivre') && v.numero_loja)
+          .sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')))
+          .slice(0, 2);
+      }
+      const out = { ok: true, pedidos: [] };
+      for (const v of alvos) {
+        const nl = String(v.numero_loja).replace(/\D/g, '');
+        const reg = { numero: v.numero, numero_loja: nl };
+        try {
+          let r = await fetch('https://api.mercadolibre.com/orders/' + nl, H);
+          let d = await r.json().catch(() => null);
+          if (!r.ok && r.status === 404) {   // 404 = pack (carrinho): abre o pack e pega a 1ª order
+            const rp = await fetch('https://api.mercadolibre.com/packs/' + nl, H);
+            reg.pack_raw = await rp.json().catch(() => null);
+            const o1 = reg.pack_raw && reg.pack_raw.orders && reg.pack_raw.orders[0];
+            if (o1) { r = await fetch('https://api.mercadolibre.com/orders/' + (o1.id || o1), H); d = await r.json().catch(() => null); }
+          }
+          reg.order_status = r.status;
+          reg.order_raw = d;   // CRU: coupon, payments, order_items (unit_price/full_unit_price), taxes, discounts...
+          const shipId = d && d.shipping && d.shipping.id;
+          if (shipId) { try { const rs = await fetch('https://api.mercadolibre.com/shipments/' + shipId, H); reg.shipment_raw = await rs.json().catch(() => null); } catch (e) {} }
+        } catch (e) { reg.erro = String(e.message || e); }
+        out.pedidos.push(reg);
+      }
+      json(res, 200, out);
       return true;
     }
 
