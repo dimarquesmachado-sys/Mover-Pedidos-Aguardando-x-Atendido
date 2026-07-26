@@ -103,7 +103,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd73';
+const DASH_BUILD = 'd75';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -319,7 +319,7 @@ function montar(){
       '<div id="grafTot" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px"></div>'+
       '<div id="grafProg" style="overflow-x:auto"></div>'+
       '<div class="nota" id="grafLeg"></div></div>'+
-    '<div class="sec"><h2>🗺️ Vendas por estado</h2><div class="tw"><table id="tUF"></table></div><div id="ufAviso"></div></div>'+
+    '<div class="sec"><h2>🗺️ Vendas por estado</h2><div style="display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start"><div style="flex:1;min-width:320px"><div class="tw"><table id="tUF"></table></div><div id="ufAviso"></div></div><div id="ufMapa" style="flex:0 0 auto"></div></div></div>'+
     '<div class="sec"><h2>⚙️ Impostos &amp; taxas <span class="hint">alíquota do Simples varia mês a mês · taxas de marketplace em % (estimativa; ML tem a REAL por pedido na busca)</span></h2>'+
       '<div id="cfgBox"></div>'+
       '<div style="font-size:12px;color:var(--mut);margin:14px 0 6px">🚛 Motoboy do FLEX pago pela loja (R$) — de fábrica: <b>ML R$ 12</b> · <b>Shopee R$ 9</b> · <b>demais R$ 9</b>. Entra como custo quando o pedido é FLEX.</div>'+
@@ -466,9 +466,9 @@ function render(){
     (MC.temCfg
       ? '<div class="kpi" style="--kc:#14b8a6"><span class="ic">💎</span><div class="l">Lucro Bruto (M.C.)</div><div class="v '+(MC.mc>=0?'ok':'bad')+'">'+BRL(MC.mc)+'</div><div class="s">'+N(MC.pedOk)+' ped.'+(MC.tReais?' · '+N(MC.tReais)+' c/ tarifa REAL ML':'')+'</div></div>'
       : '<div class="kpi" style="--kc:#64748b;cursor:pointer" onclick="document.getElementById(\'cfgBox\').scrollIntoView({behavior:\'smooth\'})"><span class="ic">💎</span><div class="l">Lucro Bruto (M.C.)</div><div class="v dim">—</div><div class="s warn">⚙️ configure as taxas por canal abaixo</div></div>') +
-    kpi('var(--ac)','📊','Pedidos', N(totPed), N(unid)+' unidades vendidas') +
+    kpi('var(--ac)','📊','Pedidos', N(totPed), unid>0?(N(unid)+' unidades vendidas'):'detalhes carregando…') +
     kpi('var(--warn)','🎯','Ticket médio', BRL((fat+agdVal)/(totPed||1)), 'faturamento ÷ pedidos') +
-    (VENDAS.length?kpi('#38bdf8','🛰','Ao vivo', 'a cada 5 min', 'dado do Bling em tempo quase real · 🔄 força agora'):'') +
+    (VENDAS.length?'<div class="kpi" style="--kc:#38bdf8"><span class="ic">🛰</span><div class="l">Ao vivo</div><div class="v"><button onclick="sincVendas(this)" style="background:#38bdf822;border:1px solid #38bdf855;color:#7dd3fc;border-radius:8px;padding:5px 12px;cursor:pointer;font-weight:700;font-size:14px">🔄 atualizar</button></div><div class="s">'+N(VBok.length)+' vendas no Bling · sincroniza sozinho a cada 5 min</div></div>':'') +
     '<div class="kpi" id="kMargem" style="display:none"></div>';
 
   const dias = Object.keys(porDia).sort();
@@ -543,6 +543,7 @@ function render(){
       '<td class="num ok">'+(c.fat?BRL(c.fat):'<span class="dim">—</span>')+'</td>'+
       '<td><div class="bar"><i style="width:'+p+'%"></i></div></td></tr>';}).join('')
     || '<tr><td class="dim" colspan="5">nenhum pedido com UF no período</td></tr>');
+  renderMapaUF(porUF);
   $('ufAviso').innerHTML = (PER.length-comUF) ? '<div class="aviso">⚠️ '+N(PER.length-comUF)+' pedido(s) sem UF — o backfill de detalhes preenche o retroativo.</div>' : '';
 
   renderProjChips(); renderProjecao();
@@ -1066,6 +1067,26 @@ async function carregarSkuInfo(fresh){
   if(btn){ btn.style.display=''; btn.disabled=false; btn.textContent='↻ recarregar do Bling (ignora cache)'; }
   _skuLoading = false;
   renderSafe();   // re-render completo — espera você terminar de copiar, se estiver selecionando
+}
+const UF_GRID = { RR:[1,3],AP:[1,4], AM:[2,2],PA:[2,3],MA:[2,4],CE:[2,5],RN:[2,6], AC:[3,1],RO:[3,2],TO:[3,4],PI:[3,5],PB:[3,6], MT:[4,3],DF:[4,4],BA:[4,5],PE:[4,6],AL:[4,7], MS:[5,3],GO:[5,4],MG:[5,5],SE:[5,6], SP:[6,4],RJ:[6,5],ES:[6,6], PR:[7,4], SC:[8,4], RS:[9,4] };
+function corHeat(t){
+  if(t<=0) return '#1e293b';
+  const stops=[[30,64,175],[13,148,136],[245,158,11],[220,38,38]];
+  const pos=t*(stops.length-1), i=Math.floor(pos), f=pos-i;
+  const a=stops[i], b=stops[Math.min(i+1,stops.length-1)];
+  const c=a.map((v,k)=>Math.round(v+(b[k]-v)*f));
+  return 'rgb('+c[0]+','+c[1]+','+c[2]+')';
+}
+function renderMapaUF(porUF){
+  const el=$('ufMapa'); if(!el) return;
+  const vals=Object.values(porUF).map(c=>c.ped); const max=Math.max(1,...(vals.length?vals:[1]));
+  let cells='';
+  for(const uf in UF_GRID){ const r=UF_GRID[uf][0], col=UF_GRID[uf][1]; const c=porUF[uf]; const ped=c?c.ped:0; const t=ped/max;
+    const cor=ped>0?corHeat(t):'#1e293b'; const tc=(ped>0&&t>0.4)?'#fff':'#94a3b8';
+    cells+='<div title="'+uf+': '+ped+' pedidos'+(c&&c.fat?(' · '+BRL(c.fat)):'')+'" style="grid-row:'+r+';grid-column:'+col+';background:'+cor+';color:'+tc+';border-radius:5px;display:flex;flex-direction:column;align-items:center;justify-content:center;height:36px;font-size:10px;font-weight:700;line-height:1.1">'+uf+'<span style="font-size:8px;font-weight:600;opacity:.85">'+(ped||'')+'</span></div>';
+  }
+  el.innerHTML='<div style="display:grid;grid-template-columns:repeat(7,38px);grid-template-rows:repeat(9,36px);gap:3px">'+cells+'</div>'+
+    '<div style="display:flex;align-items:center;gap:6px;margin-top:10px;font-size:10px;color:var(--mut)"><span>menos</span><div style="width:90px;height:9px;border-radius:5px;background:linear-gradient(90deg,#1e40af,#0d9488,#f59e0b,#dc2626)"></div><span>mais vendas</span></div>';
 }
 function renderProjecao(){
   const base = topSkus14();
