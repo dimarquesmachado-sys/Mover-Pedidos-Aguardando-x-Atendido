@@ -41,7 +41,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v25/07 b37';
+const VERSAO     = 'girassol-backup-offline v25/07 b38';
 
 // ── SESSÃO DE OPERADOR (cookie assinado HMAC) — protege rotas de dados/ação ──
 // Segredo estável entre restarts. Usa ADMIN_KEY (já configurada no Render) como base.
@@ -864,14 +864,22 @@ function routes(readBody) {
         let sellerId = null;
         try { const rm = await fetch('https://api.mercadolibre.com/users/me', H); const dm = await rm.json().catch(() => null); if (rm.ok && dm && dm.id) sellerId = dm.id; } catch (e) {}
         out.seller_id = sellerId;
-        const filtro = sellerId ? ('players.user_id=' + sellerId + '&players.role=respondent&') : 'status=opened&';
-        const rc = await fetch('https://api.mercadolibre.com/post-purchase/v1/claims/search?' + filtro + 'sort=date_created:desc&limit=30', H);
-        const dc = await rc.json().catch(() => null);
-        out.status_busca = rc.status;
-        out.total_claims = (dc && dc.paging && dc.paging.total);   // total de reclamações/devoluções da conta
-        out.claims_raw = dc;   // estrutura crua da busca (pra eu ver os campos: id, order, tipo, stage, status...)
-        const lista = (dc && (dc.data || dc.results || dc.paging_data || [])) || [];
-        const amostra = Array.isArray(lista) ? lista.slice(0, 3) : [];
+        const base = sellerId ? ('players.user_id=' + sellerId + '&players.role=respondent&') : '';
+        // o filtro obrigatório do /claims/search é status/stage/type — players.user_id sozinho não conta.
+        // Faz 2 buscas (abertas + fechadas) pra trazer TODAS as reclamações/devoluções da conta.
+        out.buscas = {};
+        let listaAll = [];
+        for (const st of ['opened', 'closed']) {
+          try {
+            const rc = await fetch('https://api.mercadolibre.com/post-purchase/v1/claims/search?' + base + 'status=' + st + '&sort=date_created:desc&limit=30', H);
+            const dc = await rc.json().catch(() => null);
+            out.buscas[st] = { status: rc.status, total: (dc && dc.paging && dc.paging.total), raw: dc };
+            const l = (dc && (dc.data || [])) || [];
+            if (Array.isArray(l)) listaAll = listaAll.concat(l);
+          } catch (e) { out.buscas[st] = { erro: String(e.message || e) }; }
+        }
+        out.total_claims = ((out.buscas.opened && out.buscas.opened.total) || 0) + ((out.buscas.closed && out.buscas.closed.total) || 0);
+        const amostra = listaAll.slice(0, 3);
         for (const c of amostra) {
           const cid = c && (c.id || c.claim_id || c.resource_id);
           if (!cid) continue;
