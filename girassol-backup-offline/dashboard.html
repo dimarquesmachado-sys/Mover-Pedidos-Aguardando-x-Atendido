@@ -80,7 +80,7 @@
   .rank.r1{background:linear-gradient(135deg,#fbbf24,#d97706);color:#1a1204}
   .rank.r2{background:linear-gradient(135deg,#e2e8f0,#94a3b8);color:#1e293b}
   .rank.r3{background:linear-gradient(135deg,#f6ad7b,#c2703d);color:#2d1505}
-  .sku{font-weight:700} .desc{font-size:11px;color:var(--mut);max-width:330px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .sku{font-weight:700} .desc{font-size:11px;color:var(--mut);max-width:340px;white-space:normal;line-height:1.35}
   .mut{color:var(--mut)} .dim{color:var(--dim)} .ok{color:var(--ok)} .warn{color:var(--warn)} .bad{color:var(--bad)}
   .cvg{font-size:10px;color:var(--warn);background:#f59e0b14;border:1px solid #f59e0b33;border-radius:5px;padding:1px 5px;margin-left:6px;white-space:nowrap}
   .st{display:inline-block;font-size:10.5px;font-weight:700;border-radius:6px;padding:2px 8px}
@@ -103,7 +103,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd69';
+const DASH_BUILD = 'd70';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -126,7 +126,7 @@ const flexDe = ck => {
 };
 const CANAIS_CFG = ['ml','shopee','magalu','amazon','tiktok','madeira','leroy','outro'];
 const canalKey = mk => { mk=(mk||'outro').toLowerCase(); return mk==='mercadolivre'?'ml':(CANAIS_CFG.includes(mk)?mk:'outro'); };
-let sortProd = { col: 'fat', dir: -1 };
+let sortProd = { col: 'mc', dir: -1 };   // default: maior Lucro Bruto (M.C.) em cima
 let sortProj = { col: 'qtd14', dir: -1 };
 let chPed = null, chFat = null;
 let _plMLFee = {};   // tarifa real ML por pedido (sob demanda)
@@ -458,13 +458,14 @@ function render(){
 
   const canais = Object.keys(porCanal).sort((a,b)=>porCanal[b].ped-porCanal[a].ped);
   const NOME = {mercadolivre:'Mercado Livre',ml:'Mercado Livre',shopee:'Shopee',magalu:'Magalu',amazon:'Amazon',tiktok:'TikTok',madeira:'MadeiraMadeira',leroy:'Leroy Merlin',outro:'Outro'};
-  $('tCanal').innerHTML = '<tr><th>Canal</th><th class="num">Pedidos</th><th class="num">%</th><th class="num">Faturamento</th><th class="num">Ticket</th><th class="num">⚡ Flex</th><th style="width:24%"></th></tr>'+
+  $('tCanal').innerHTML = '<tr><th>Canal</th><th class="num">Pedidos</th><th class="num">%</th><th class="num">Faturamento</th><th class="num">Ticket médio</th><th class="num">⚡ Flex</th></tr>'+
     canais.map(mk=>{const c=porCanal[mk];const p=pc(c.ped,PER.length);
-      return '<tr><td><b>'+esc(NOME[mk]||mk)+'</b></td><td class="num">'+N(c.ped)+'</td><td class="num dim">'+p+'%</td>'+
+      return '<tr><td><b>'+esc(NOME[mk]||mk)+'</b></td>'+
+      '<td class="num"><div style="display:flex;align-items:center;gap:8px;justify-content:flex-end"><div class="bar" style="width:64px;flex:none"><i style="width:'+p+'%"></i></div><b>'+N(c.ped)+'</b></div></td>'+
+      '<td class="num dim">'+p+'%</td>'+
       '<td class="num ok">'+(c.fat?BRL(c.fat):'<span class="dim">—</span>')+'</td>'+
       '<td class="num">'+(c.comValor?BRL(c.fat/c.comValor):'<span class="dim">—</span>')+'</td>'+
-      '<td class="num">'+(c.flex?'<span class="warn">'+c.flex+'</span>':'<span class="dim">·</span>')+'</td>'+
-      '<td><div class="bar"><i style="width:'+p+'%"></i></div></td></tr>';}).join('');
+      '<td class="num">'+(c.flex?'<span class="warn">'+c.flex+'</span>':'<span class="dim">·</span>')+'</td></tr>';}).join('');
 
   const prods = Object.values(porProd);
   // d56: curva ABC do PERÍODO pesquisado — ordena por faturamento e acumula: A = até 80% do faturamento · B = 80–95% · C = o resto (sem faturamento = C)
@@ -491,9 +492,9 @@ function render(){
     '<th class="num sort" onclick="setSortProd(\'qtd\')">Unid.'+seta(sortProd,'qtd')+'</th>'+
     '<th class="num sort" onclick="setSortProd(\'fat\')">Faturamento'+seta(sortProd,'fat')+'</th>'+
     '<th class="num sort" onclick="setSortProd(\'custo\')" title="custo total do SKU no período (custo unitário × unidades vendidas)">Custo'+seta(sortProd,'custo')+'</th>'+
-    '<th class="num sort" onclick="setSortProd(\'mc\')" title="margem de contribuição rateada dos pedidos deste SKU no período">💎 M.C.'+seta(sortProd,'mc')+'</th>'+
+    '<th class="num sort" onclick="setSortProd(\'mc\')" title="Lucro Bruto = margem de contribuição rateada dos pedidos deste SKU no período (o que sobra depois de imposto, comissão e custo)">💎 Lucro Bruto'+seta(sortProd,'mc')+'</th>'+
     '<th class="num sort" onclick="setSortProd(\'mcpct\')" title="margem de contribuição ÷ faturamento do SKU (quanto sobra por real vendido)">M.C. %'+seta(sortProd,'mcpct')+'</th>'+
-    '<th class="num sort" onclick="setSortProd(\'mcusto\')" title="margem de contribuição ÷ custo do SKU (retorno sobre o custo)">s/ custo'+seta(sortProd,'mcusto')+'</th>'+
+    '<th class="num sort" onclick="setSortProd(\'mcusto\')" title="Retorno sobre o custo: quanto de lucro cada R$1 gasto no produto devolve. Ex.: 200% = pra cada R$1 de custo, o produto gera R$2 de lucro. Quanto maior, mais eficiente é o dinheiro parado nesse SKU">Retorno/custo'+seta(sortProd,'mcusto')+'</th>'+
     '<th class="num" title="quanto este SKU representa da M.C. total do período">% M.C.</th>'+
     '<th class="num">% fat.</th><th style="width:12%"></th></tr>'+
     ord.slice(0,50).map((p,i)=>{
