@@ -41,7 +41,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v26/07 b41';
+const VERSAO     = 'girassol-backup-offline v26/07 b43';
 
 // ── SESSÃO DE OPERADOR (cookie assinado HMAC) — protege rotas de dados/ação ──
 // Segredo estável entre restarts. Usa ADMIN_KEY (já configurada no Render) como base.
@@ -842,6 +842,29 @@ function routes(readBody) {
       return true;
     }
 
+    // TESTE de conexão com o Supabase (histórico) — grava e apaga 1 registro. Confirma antes do backfill.
+    // Uso: /girassol-backup-offline/backfill-teste
+    if (method === 'GET' && p === '/girassol-backup-offline/backfill-teste') {
+      const kD = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const sessD = validarSessao(req.headers['cookie']);
+      if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
+      const out = { ok: true };
+      const { url } = supaCfg('girassol');
+      out.url_configurada = url ? (String(url).slice(0, 30) + '…') : 'FALTANDO';
+      const marca = '__TESTE_' + Date.now();
+      const ins = await supaReq('girassol', 'POST', 'vendas_historico', [{ empresa: 'girassol', numero_pedido: marca, canal: 'teste', data_venda: '2026-01-01', sku: 'TESTE-CONEXAO', quantidade: 0, valor_produto: 0 }]);
+      out.gravar = { status: ins.status, ok: ins.ok, erro: ins.erro || null, resposta: (ins.body || '').slice(0, 200) };
+      if (ins.ok) {
+        const del = await supaReq('girassol', 'DELETE', 'vendas_historico?numero_pedido=eq.' + encodeURIComponent(marca), null);
+        out.apagar = { status: del.status, ok: del.ok };
+        out.resultado = (del.ok) ? '✅ CONEXÃO OK — gravou e apagou o registro de teste. Pode rodar o backfill.' : '⚠️ gravou mas não apagou — confira o DELETE (mas escrita funciona)';
+      } else {
+        out.resultado = '❌ FALHOU ao gravar. Confira SUPABASE_URL_VENDAS_GIRASSOL e SUPABASE_KEY_VENDAS_GIRASSOL no Render (a chave TEM que ser a service_role).';
+      }
+      json(res, 200, out);
+      return true;
+    }
+
     // SONDA (sessão OU ?k=): investiga um ID INTERNO de pedido do Bling (o que apareceu cru na Análise).
     // Uso: /girassol-backup-offline/sonda-bling-pedido?id=26341228931
     if (method === 'GET' && p === '/girassol-backup-offline/sonda-bling-pedido') {
@@ -1468,7 +1491,7 @@ function routes(readBody) {
       // BUGFIX d45: o backfill de nf_emissao rodava DEPOIS do map — a resposta do 1º carregamento saía sem a hora
       // da NF (só o 2º F5 pegava). Agora completa o conf ANTES de montar os itens.
       let _mudouNF=false;
-      for (const [cid2,c3] of Object.entries(conf)) { if (c3 && c3.nf_emissao === undefined) { const sn2 = readJson(path.join(CACHE_DIR, String(cid2), 'pedido.json'), null); c3.nf_emissao = (sn2 && sn2.nf && sn2.nf.dataEmissao) || null; _mudouNF=true; } }
+      for (const [cid2,c3] of Object.entries(conf)) { if (c3 && (c3.nf_emissao === undefined || c3.nf_id === undefined)) { const sn2 = readJson(path.join(CACHE_DIR, String(cid2), 'pedido.json'), null); if (c3.nf_emissao === undefined) c3.nf_emissao = (sn2 && sn2.nf && sn2.nf.dataEmissao) || null; if (c3.nf_id === undefined) c3.nf_id = (sn2 && sn2.nf && sn2.nf.id) || null; _mudouNF=true; } }
       if (_mudouNF) { try { writeJson(CONFERIDOS_FILE, conf); } catch(e){} }
       const itens = Object.keys(conf).map(id => ({ id, ...conf[id] }))
         .sort((a, b) => String(b.conferido_em || '').localeCompare(String(a.conferido_em || '')));
@@ -1795,6 +1818,7 @@ function routes(readBody) {
         flex: !!(snapC && snapC.flex),
         servico: snapC ? (snapC.servico || '') : '',
         nf_numero: (snapC && snapC.nf && snapC.nf.numero) || null,
+        nf_id: (snapC && snapC.nf && snapC.nf.id) || null,   // ID interno da NF — link direto pro Bling
         nf_emissao: (snapC && snapC.nf && snapC.nf.dataEmissao) || null,   // b11: hora da NF já entra na bipagem (dashboard ordena por ela)
         valor: (snapC && snapC.total != null) ? Number(snapC.total) : null,   // faturamento (total do pedido)
         uf: (snapC && snapC.uf) || null,
@@ -2804,6 +2828,23 @@ async function pescarDadosML(nlRaw, tokenML, dorme) {
     await dorme(200);
   }
   return reg;
+}
+
+// ─── Supabase (histórico de vendas) — grava via REST; empresa escolhe as env vars ────────────
+function supaCfg(empresa){
+  const E = String(empresa||'girassol').toUpperCase();
+  return { url: process.env['SUPABASE_URL_VENDAS_'+E], key: process.env['SUPABASE_KEY_VENDAS_'+E] };
+}
+async function supaReq(empresa, metodo, pathQuery, body){
+  const { url, key } = supaCfg(empresa);
+  if(!url || !key) return { ok:false, status:0, erro:'faltam SUPABASE_URL_VENDAS_'+String(empresa||'').toUpperCase()+' / SUPABASE_KEY_VENDAS_'+String(empresa||'').toUpperCase() };
+  const h = { 'apikey': key, 'Authorization': 'Bearer '+key, 'Content-Type': 'application/json' };
+  if(metodo==='POST') h['Prefer']='return=minimal';
+  try {
+    const r = await fetch(url.replace(/\/+$/,'') + '/rest/v1/' + pathQuery, { method: metodo, headers: h, body: body?JSON.stringify(body):undefined });
+    const txt = await r.text().catch(()=> '');
+    return { ok: r.ok, status: r.status, body: txt };
+  } catch(e){ return { ok:false, status:0, erro:String(e.message||e) }; }
 }
 
 // ─── Busca as DEVOLUÇÕES (type 'returns') recentes do ML + o frete de retorno de cada ──────
