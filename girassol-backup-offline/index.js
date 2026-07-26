@@ -41,7 +41,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v25/07 b39';
+const VERSAO     = 'girassol-backup-offline v26/07 b40';
 
 // ── SESSÃO DE OPERADOR (cookie assinado HMAC) — protege rotas de dados/ação ──
 // Segredo estável entre restarts. Usa ADMIN_KEY (já configurada no Render) como base.
@@ -839,6 +839,45 @@ function routes(readBody) {
       const dias = Number(urlObj.searchParams.get('dias') || 14);
       mlSyncFees(dias).catch(() => {});
       json(res, 200, { ok: true, iniciado: true, dias, mensagem: 'pesca ML rodando em background — chame de novo p/ ver o progresso' });
+      return true;
+    }
+
+    // SONDA (sessão admin OU ?k=): financeiro REAL de um pagamento no MERCADO PAGO — reembolso,
+    // estornos, taxas. Usa MP_ACCESS_TOKEN_GIRASSOL (app do MP da Girassol). Temporária.
+    // Uso: /girassol-backup-offline/sonda-mp?pid=PAYMENT_ID  (ou &nl=NUMERO_DA_VENDA pra achar o payment_id via ML)
+    if (method === 'GET' && p === '/girassol-backup-offline/sonda-mp') {
+      const kD = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const sessD = validarSessao(req.headers['cookie']);
+      if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
+      const mpTok = process.env.MP_ACCESS_TOKEN_GIRASSOL;
+      const out = { ok: true };
+      if (!mpTok) { out.ok = false; out.erro = 'falta MP_ACCESS_TOKEN_GIRASSOL no env do Render'; json(res, 200, out); return true; }
+      out.mp_token_prefixo = String(mpTok).slice(0, 8);   // confirma o token certo (deve começar com APP_USR-) sem expor
+      let pid = String((urlObj.searchParams && urlObj.searchParams.get('pid')) || '').replace(/\D/g, '');
+      const nlQ = String((urlObj.searchParams && urlObj.searchParams.get('nl')) || '').replace(/\D/g, '');
+      if (!pid && nlQ) {   // veio o nº da venda ML: busca o pedido pra achar o payment_id
+        try {
+          const { garantirTokenML: _g7 } = require('../girassol/mlTokenManager');
+          const tkML = await _g7();
+          const rr = await fetch('https://api.mercadolibre.com/orders/' + nlQ, { headers: { Authorization: 'Bearer ' + tkML } });
+          const dd = await rr.json().catch(() => null);
+          if (dd && Array.isArray(dd.payments) && dd.payments[0]) { pid = String(dd.payments[0].id).replace(/\D/g, ''); out.payment_id_do_pedido = pid; }
+        } catch (e) { out.erro_ml = String(e.message || e); }
+      }
+      if (!pid) { out.ok = false; out.erro = 'passe ?pid=PAYMENT_ID ou &nl=NUMERO_DA_VENDA'; json(res, 200, out); return true; }
+      out.payment_id = pid;
+      const H = { headers: { Authorization: 'Bearer ' + mpTok } };
+      try {
+        const rp = await fetch('https://api.mercadopago.com/v1/payments/' + pid, H);
+        out.pagamento_status = rp.status;
+        out.pagamento = await rp.json().catch(() => null);   // CRU: transaction_amount, transaction_amount_refunded, status, fee_details, charges_details, taxes_amount...
+      } catch (e) { out.erro_pag = String(e.message || e); }
+      try {
+        const rf = await fetch('https://api.mercadopago.com/v1/payments/' + pid + '/refunds', H);
+        out.refunds_status = rf.status;
+        out.refunds = await rf.json().catch(() => null);   // lista de estornos (reembolsos ao comprador)
+      } catch (e) { out.erro_ref = String(e.message || e); }
+      json(res, 200, out);
       return true;
     }
 
