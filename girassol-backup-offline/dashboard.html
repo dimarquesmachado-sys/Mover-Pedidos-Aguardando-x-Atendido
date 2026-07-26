@@ -103,7 +103,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd70';
+const DASH_BUILD = 'd72';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -128,6 +128,7 @@ const CANAIS_CFG = ['ml','shopee','magalu','amazon','tiktok','madeira','leroy','
 const canalKey = mk => { mk=(mk||'outro').toLowerCase(); return mk==='mercadolivre'?'ml':(CANAIS_CFG.includes(mk)?mk:'outro'); };
 let sortProd = { col: 'mc', dir: -1 };   // default: maior Lucro Bruto (M.C.) em cima
 let sortProj = { col: 'qtd14', dir: -1 };
+let projDias = 14;   // período do ritmo da projeção (dias)
 let chPed = null, chFat = null;
 let _plMLFee = {};   // tarifa real ML por pedido (sob demanda)
 let anPage=0, anCanal='', anSku='', anPer='dia', anPDe='', anPAte='', anLP='', anAg=true, _anLoading=false;   // 📋 análise de vendas (abre no DIA) · anAg: aguardando bipagem VISÍVEL por padrão (d54 — Diego quer a M.C. do dia inteiro, bipado ou não; o chip 🕐 esconde quando quiser)
@@ -159,6 +160,8 @@ const tMs = h => {
 };
 function setSortProd(c){ sortProd = { col:c, dir:(sortProd.col===c ? -sortProd.dir : -1) }; render(); }
 function setSortProj(c){ sortProj = { col:c, dir:(sortProj.col===c ? -sortProj.dir : -1) }; renderProjecao(); }
+function setProjDias(d){ projDias = d; renderProjChips(); renderProjecao(); }
+function renderProjChips(){ const el=document.getElementById('projChips'); if(!el) return; const ops=[[7,'7 dias'],[14,'14 dias'],[30,'30 dias'],[60,'60 dias'],[90,'90 dias']]; el.innerHTML = ops.map(function(o){ return '<button class="chip'+(projDias===o[0]?' on':'')+'" onclick="setProjDias('+o[0]+')">'+o[1]+'</button>'; }).join(''); }
 const seta = (st,c)=> st.col===c ? (st.dir<0?' ↓':' ↑') : '';
 function cmpNull(a,b,dir){ const an=(a==null||!isFinite(a)), bn=(b==null||!isFinite(b)); if(an&&bn)return 0; if(an)return 1; if(bn)return -1; return (a-b)*dir; }
 
@@ -234,7 +237,17 @@ function intervalo(){
   else { de = pDe || '2000-01-01'; ate = pAte || hoje; }
   return {de, ate};
 }
-function setPeriodo(p){ periodo=p; espelharPeriodoNaAnalise(); render(); renderAnalise(); }
+// mantém o Diego na mesma seção quando o conteúdo re-renderiza (troca de período muda o tamanho da página)
+function comAncora(fn){
+  const secs = Array.prototype.slice.call(document.querySelectorAll('.sec'));
+  let alvo=null, melhor=Infinity;
+  for(const el of secs){ const r=el.getBoundingClientRect(); if(r.bottom>40){ const d=Math.abs(r.top-70); if(d<melhor){ melhor=d; alvo=el; } } }
+  const antes = alvo ? alvo.getBoundingClientRect().top : 0;
+  fn();
+  if(alvo){ requestAnimationFrame(()=>{ const depois = alvo.getBoundingClientRect().top; const dif = depois-antes; if(Math.abs(dif)>2) window.scrollBy(0, dif); }); }
+}
+function irPra(id){ const el=document.getElementById(id); if(el) el.scrollIntoView({behavior:'smooth',block:'start'}); }
+function setPeriodo(p){ periodo=p; espelharPeriodoNaAnalise(); comAncora(()=>{ render(); renderAnalise(); }); }
 // d48: o seletor do TOPO é o botão MASTER — escolheu lá, a Análise de vendas obedece junto.
 // (os chips da própria Análise continuam funcionando pra quem quiser um recorte diferente só nela)
 function espelharPeriodoNaAnalise(){
@@ -255,13 +268,21 @@ function montar(){
   'até <input type="date" id="pAte" onclick="this.showPicker&&this.showPicker()" onchange="pAte=this.value;setPeriodo(\'custom\')"></div>'+
   '<div class="cover" id="cover"></div></div></div>'+
   '<div class="wrap">'+
-    '<div class="kpis" id="kpis"></div>'+
-    '<div class="sec"><h2>🔍 Buscar pedido &amp; lucro <span class="hint">nº do pedido · NF · nº da venda no marketplace · SKU · parte do título</span></h2>'+
+    '<div class="atalhos" style="display:flex;gap:8px;flex-wrap:wrap;margin:2px 0 14px;align-items:center">'+
+      '<span style="color:var(--mut);font-size:12px;margin-right:2px">ir para:</span>'+
+      '<button class="chip" onclick="irPra(&#39;secBusca&#39;)">🔍 Buscar pedido</button>'+
+      '<button class="chip" onclick="irPra(&#39;secAnalise&#39;)">📋 Análise de vendas</button>'+
+      '<button class="chip" onclick="irPra(&#39;secTop&#39;)">🏆 Top produtos</button>'+
+      '<button class="chip" onclick="irPra(&#39;secCanal&#39;)">🛒 Por canal</button>'+
+      '<button class="chip" onclick="irPra(&#39;secProj&#39;)">📦 Projeção de estoque</button>'+
+      '</div>'+
+      '<div class="kpis" id="kpis"></div>'+
+    '<div class="sec" id="secBusca"><h2>🔍 Buscar pedido &amp; lucro <span class="hint">nº do pedido · NF · nº da venda no marketplace · SKU · parte do título</span></h2>'+
       '<input id="qBusca" placeholder="ex.: 73620 · 076265 · 2000017436578280 · 6376-220v · tosquiadeira" '+
       'style="width:100%;background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:10px;padding:11px 14px;font-size:13px" '+
       'oninput="buscarPed(this.value)">'+
       '<div id="buscaRes" style="margin-top:10px"></div><div id="plCard"></div></div>'+
-    '<div class="sec"><h2>📋 Análise de vendas — margem por pedido <span class="hint">mais novas em cima · ✓ verde = bipado · ✓ laranja = aguardando bipagem (margem já calculada) · 🧾 = hora da NF · 🕘 = hora da conferência</span></h2>'+
+    '<div class="sec" id="secAnalise"><h2>📋 Análise de vendas — margem por pedido <span class="hint">mais novas em cima · ✓ verde = bipado · ✓ laranja = aguardando bipagem (margem já calculada) · 🧾 = hora da NF · 🕘 = hora da conferência</span></h2>'+
     '<div style="display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--mut);margin:-4px 0 10px;align-items:center"><span style="color:var(--mut)">cor da linha:</span>'+
       '<span style="display:inline-flex;align-items:center;gap:5px"><span style="width:11px;height:11px;border-radius:2px;background:#34d399;display:inline-block"></span>ativa</span>'+
       '<span style="display:inline-flex;align-items:center;gap:5px"><span style="width:11px;height:11px;border-radius:2px;background:#eab308;display:inline-block"></span>devolução em andamento</span>'+
@@ -282,14 +303,15 @@ function montar(){
       '<div id="anResumo"></div>'+
       '<div class="tw"><table id="tAnalise"></table></div>'+
       '<div class="nota"><b>Sobre a ordem:</b> dentro de cada dia, ML aparece na hora REAL da venda; TikTok/Shopee/Magalu/Amazon entram pela hora da <b>EMISSÃO da NF</b> (🧾), que acompanha a venda de perto — acabaram os blocos por canal. O 🕘 (hora da conferência) só aparece quando a linha ainda não tem NF. A hora exata da venda desses canais continua existindo <b>só na API do próprio canal</b>. Pra confrontar com o Jodda, use o ⬇︎ CSV e case pelo <b>número da venda no marketplace</b>. · ML mostra a hora REAL da venda (vem da pesca); TikTok/Shopee o Bling não guarda hora — o 🕘 marca que ali está a hora da <b>conferência</b> (a hora da venda desses canais chega quando plugarmos as APIs deles) · colunas (−) são deduções e (+) é crédito · <b>Estorno</b> = o valor exato da linha "Estorno" da venda no ML (no Flex ele já vem líquido: bonificação menos o frete cobrado), somado na M.C. · no Flex o custo do frete é o <b>motoboy</b> configurado no ⚙️ · tarifa <span class="ok">REAL</span> = pescada do ML · <span class="ok">BLING</span> = comissão que o Bling importou do canal (TikTok/Shopee/Magalu) · sem tag = % configurada · custo carrega sob demanda por página · 🛒 = mais de 1 item/unidade</div></div>'+
-    '<div class="sec"><h2>🏆 Top produtos <span class="hint">clique nos títulos p/ ordenar ↑↓ · faturamento = SOMA de todos os pedidos do SKU no período · 💎 M.C. = margem dos pedidos rateada por item — o rank do que dá LUCRO de verdade · Curva ABC recalculada pro período pesquisado (A = 80% do faturamento)</span></h2>'+
+    '<div class="sec" id="secTop"><h2>🏆 Top produtos <span class="hint">clique nos títulos p/ ordenar ↑↓ · faturamento = SOMA de todos os pedidos do SKU no período · 💎 M.C. = margem dos pedidos rateada por item — o rank do que dá LUCRO de verdade · Curva ABC recalculada pro período pesquisado (A = 80% do faturamento)</span></h2>'+
       '<div class="tw"><table id="tProd"></table></div><div id="prodAviso"></div></div>'+
-    '<div class="sec"><h2>🛒 Por canal</h2><div class="tw"><table id="tCanal"></table></div></div>'+
+    '<div class="sec" id="secCanal"><h2>🛒 Por canal</h2><div class="tw"><table id="tCanal"></table></div></div>'+
     '<div class="grid2">'+
       '<div class="sec"><h2>📈 Pedidos por dia</h2><div class="chartbox"><canvas id="cPed"></canvas></div></div>'+
       '<div class="sec"><h2>💰 Faturamento por dia</h2><div class="chartbox"><canvas id="cFat"></canvas></div></div>'+
     '</div>'+
-    '<div class="sec"><h2>📦 Projeção de estoque &amp; margem <span class="hint">ritmo dos últimos 14 dias · clique p/ ordenar</span></h2>'+
+    '<div class="sec" id="secProj"><h2>📦 Projeção de estoque &amp; margem <span class="hint">ritmo de vendas p/ prever a reposição · clique p/ ordenar</span></h2>'+
+      '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:10px"><span style="color:var(--mut);font-size:12px;margin-right:2px">ritmo:</span><span id="projChips" style="display:flex;gap:6px;flex-wrap:wrap"></span></div>'+
       '<div id="projBox" style="margin-bottom:10px;font-size:12px"><span class="mut" id="projStatus">⏳ carregando saldo/preço/custo do Bling… (~30-60s na 1ª vez)</span> '+
       '<button class="btn" id="btnProj" onclick="carregarSkuInfo(true)" style="display:none">↻ recarregar do Bling (ignora cache)</button> <button class="btn sec" onclick="sincCustos()" title="resolve TODOS os custos em background, devagar, sem estourar o limite do Bling — e grava em cache permanente">🐢 sincronizar custos (fundo)</button></div>'+
       '<div class="tw"><table id="tProj"></table></div><div id="projAviso"></div></div>'+
@@ -411,46 +433,43 @@ function render(){
   // Este é o número comparável ao Jodda — os demais cards são só a parte JÁ BIPADA (margem fechada).
   const AGD = (SINT||[]).filter(s=>{ if(s._cancelado) return false; const d2=diaVenda(s); return d2>=de && d2<=ate; });
   const agdVal = AGD.reduce((s2,x)=> s2 + ((x.valor!=null&&isFinite(Number(x.valor)))?Number(x.valor):0), 0);
+  const MC = (function(){
+    let rec=0, imp=0, tar=0, cus=0, pedOk=0, semCfg=0, cusUn=0, unTot=0, tReais=0, frV=0, fRecP=0;
+    PER.forEach(h=>{
+      const rp = (h.vprod_nf!=null&&isFinite(Number(h.vprod_nf))) ? Number(h.vprod_nf) : null;
+      if(rp==null) return;
+      const aliq = aliqDe(diaVenda(h).slice(0,7));
+      const tReal = (h.tarifa_ml!=null && isFinite(Number(h.tarifa_ml))) ? Number(h.tarifa_ml) : ((h.taxa_mkt!=null && isFinite(Number(h.taxa_mkt)) && Number(h.taxa_mkt)>0) ? Number(h.taxa_mkt) : null);
+      let tx = CFG.taxas[canalKey(h.marketplace)];
+      if(canalKey(h.marketplace)==='madeira' && tx==null) tx = 17.6;
+      if(aliq==null || (tReal==null && tx==null)){ semCfg++; return; }
+      const tot = (h.valor!=null&&isFinite(Number(h.valor))) ? Number(h.valor) : rp;
+      const rCan = (h.renda_canal!=null && isFinite(Number(h.renda_canal)) && Number(h.renda_canal)>0) ? Number(h.renda_canal) : null;
+      if(rCan!=null){ rec+=rCan; imp+=tot*aliq/100; pedOk++; }
+      else {
+        rec+=(tot<rp?tot:rp); imp+=tot*aliq/100; tar+=(tReal!=null ? tReal : (rp*tx/100 + (canalKey(h.marketplace)==='madeira'?5:0))); pedOk++;
+        if(h.frete_recebido!=null && isFinite(Number(h.frete_recebido)) && Number(h.frete_recebido)>0) fRecP+=Number(h.frete_recebido);
+      }
+      if(tReal!=null) tReais++;
+      if(h.frete_ml!=null && isFinite(Number(h.frete_ml))) frV+=Number(h.frete_ml);
+      else if(h.flex){ const fx=flexDe(canalKey(h.marketplace)); if(fx!=null && fx>0) frV+=fx; }
+      else if(h.frete_mkt!=null && isFinite(Number(h.frete_mkt)) && Number(h.frete_mkt)>0) frV+=Number(h.frete_mkt);
+      (h.itens||[]).forEach(it=>{ const q=Number(it.qtd||1); unTot+=q; const info=SKUINFO[it.sku]; if(info&&info.custo!=null){ cus+=info.custo*q; cusUn+=q; } });
+    });
+    return { rec, imp, tar, cus, pedOk, semCfg, cusUn, unTot, tReais, frV, fRecP, mc: rec-imp-tar-cus-frV+fRecP, temCfg: !!Object.keys(CFG.taxas).length };
+  })();
+  const totPed = PER.length + AGD.length;
   $('kpis').innerHTML =
-    kpi('var(--ac)','📦','Pedidos', N(PER.length), N(unid)+' unidades') +
-    (AGD.length?kpi('#38bdf8','📅','Dia completo (Jodda)', BRL(fat+agdVal), N(PER.length+AGD.length)+' pedidos = '+N(PER.length)+' bipados + '+N(AGD.length)+' a bipar · comparável ao Faturamento Total do Jodda'):'') +
-    kpi('var(--ok)','🏷️','Faturamento produtos', BRL(pedNF?fatNF:fatProd), pedNF?('pela NOTA FISCAL ('+pc(pedNF,PER.length)+'% dos pedidos) · só os JÁ BIPADOS — o dia inteiro tá no 📅'):('pelos itens do pedido'+(cItem<95?' · <span class="warn">'+cItem+'% cobertura</span>':''))) +
-    kpi('var(--cy)','💰','Total dos pedidos', BRL(fat), 'com frete embutido'+(semValor?' · <span class="warn">'+semValor+' sem valor</span>':'')) +
-    kpi('#a78bfa','🚚','Frete embutido', fretePedNF?BRL(freteNF):(fretePed?BRL(freteEmb):'—'), fretePedNF?('EXATO pela nota · '+N(fretePedNF)+' pedidos'):(fretePed?('estimado · '+N(fretePed)+' ped.'):'aguardando cobertura')) +
-    kpi('var(--warn)','🎯','Ticket médio', BRL(ticket), 'por pedido (total c/ frete)') +
-    kpi('#f97316','⚡','FLEX enviados', N(flex), 'confronto c/ motoboy') +
-    (VENDAS.length?kpi('#38bdf8','🛰','Bling em tempo quase real', N(VBok.length)+' venda(s)', BRL(vbSoma)+' · bipadas '+N(PER.length)+(vbCanc?' · '+vbCanc+' cancelada(s)':'')+' · sincroniza a cada 5 min'):'') +
-    '<div class="kpi" id="kMargem" style="--kc:var(--ok)"><span class="ic">📊</span><div class="l">Margem bruta 14d</div><div class="v dim">—</div><div class="s">carregando custos do Bling…</div></div>' +
-    (function(){   // 💎 margem de CONTRIBUIÇÃO do período: produtos − imposto − tarifa% − custo
-      let rec=0, imp=0, tar=0, cus=0, pedOk=0, semCfg=0, cusUn=0, unTot=0, tReais=0, frV=0, fRecP=0;
-      PER.forEach(h=>{
-        const rp = (h.vprod_nf!=null&&isFinite(Number(h.vprod_nf))) ? Number(h.vprod_nf) : null;
-        if(rp==null) return;
-        const aliq = aliqDe(diaVenda(h).slice(0,7));
-        const tReal = (h.tarifa_ml!=null && isFinite(Number(h.tarifa_ml))) ? Number(h.tarifa_ml) : ((h.taxa_mkt!=null && isFinite(Number(h.taxa_mkt)) && Number(h.taxa_mkt)>0) ? Number(h.taxa_mkt) : null);
-        let tx = CFG.taxas[canalKey(h.marketplace)];
-        if(canalKey(h.marketplace)==='madeira' && tx==null) tx = 17.6;   // d50: padrão oficial MM
-        if(aliq==null || (tReal==null && tx==null)){ semCfg++; return; }
-        const tot = (h.valor!=null&&isFinite(Number(h.valor))) ? Number(h.valor) : rp;
-        const rCan = (h.renda_canal!=null && isFinite(Number(h.renda_canal)) && Number(h.renda_canal)>0) ? Number(h.renda_canal) : null;   // d53: renda oficial (escrow)
-        if(rCan!=null){ rec+=rCan; imp+=tot*aliq/100; pedOk++; }   // taxas/moedas/frete do comprador já liquidados dentro da renda
-        else {
-          rec+=(tot<rp?tot:rp); imp+=tot*aliq/100; tar+=(tReal!=null ? tReal : (rp*tx/100 + (canalKey(h.marketplace)==='madeira'?5:0))); pedOk++;   // d51: desconto abatido da receita
-          if(h.frete_recebido!=null && isFinite(Number(h.frete_recebido)) && Number(h.frete_recebido)>0) fRecP+=Number(h.frete_recebido);
-        }
-        if(tReal!=null) tReais++;
-        if(h.frete_ml!=null && isFinite(Number(h.frete_ml))) frV+=Number(h.frete_ml);
-        else if(h.flex){ const fx=flexDe(canalKey(h.marketplace)); if(fx!=null && fx>0) frV+=fx; }   // d52: flex = motoboy antes do frete importado
-        else if(h.frete_mkt!=null && isFinite(Number(h.frete_mkt)) && Number(h.frete_mkt)>0) frV+=Number(h.frete_mkt);
-        (h.itens||[]).forEach(it=>{ const q=Number(it.qtd||1); unTot+=q; const info=SKUINFO[it.sku]; if(info&&info.custo!=null){ cus+=info.custo*q; cusUn+=q; } });
-      });
-      if(!Object.keys(CFG.taxas).length)
-        return '<div class="kpi" style="--kc:#64748b;cursor:pointer" onclick="document.getElementById(\'cfgBox\').scrollIntoView({behavior:\'smooth\'})"><span class="ic">💎</span><div class="l">Margem de contribuição</div><div class="v dim">—</div><div class="s warn">⚙️ configure as taxas por canal abaixo (alíquotas já vêm de fábrica)</div></div>';
-      const mc = rec-imp-tar-cus-frV+fRecP;   // d51: + frete recebido do comprador
-      return '<div class="kpi" style="--kc:#14b8a6"><span class="ic">💎</span><div class="l">Margem de contribuição (est.)</div>'+
-        '<div class="v '+(mc>=0?'ok':'bad')+'">'+BRL(mc)+'</div>'+
-        '<div class="s">'+N(pedOk)+' ped.'+(tReais?' · '+N(tReais)+' c/ tarifa REAL ML':'')+(frV>0?' · frete vendedor ML deduzido':'')+' · custo em '+pc(cusUn,unTot)+'% das un.'+(semCfg?' · <span class="warn">'+semCfg+' fora (config)</span>':'')+'</div></div>';
-    })();
+    kpi('#34d399','💰','Faturamento Total', BRL(fat+agdVal), 'vendas aprovadas no período · '+N(totPed)+' pedidos') +
+    kpi('#f59e0b','🧾','Impostos', MC.temCfg?BRL(MC.imp):'—', MC.temCfg?'do período (Simples)':'⚙️ configure abaixo') +
+    kpi('#a78bfa','📦','Custo de produtos', MC.temCfg?BRL(MC.cus):'—', MC.temCfg?('custo em '+pc(MC.cusUn,MC.unTot)+'% das unidades'):'⚙️ configure abaixo') +
+    (MC.temCfg
+      ? '<div class="kpi" style="--kc:#14b8a6"><span class="ic">💎</span><div class="l">Lucro Bruto (M.C.)</div><div class="v '+(MC.mc>=0?'ok':'bad')+'">'+BRL(MC.mc)+'</div><div class="s">'+N(MC.pedOk)+' ped.'+(MC.tReais?' · '+N(MC.tReais)+' c/ tarifa REAL ML':'')+'</div></div>'
+      : '<div class="kpi" style="--kc:#64748b;cursor:pointer" onclick="document.getElementById(\'cfgBox\').scrollIntoView({behavior:\'smooth\'})"><span class="ic">💎</span><div class="l">Lucro Bruto (M.C.)</div><div class="v dim">—</div><div class="s warn">⚙️ configure as taxas por canal abaixo</div></div>') +
+    kpi('var(--ac)','📊','Pedidos', N(totPed), N(unid)+' unidades vendidas') +
+    kpi('var(--warn)','🎯','Ticket médio', BRL((fat+agdVal)/(totPed||1)), 'faturamento ÷ pedidos') +
+    (VENDAS.length?kpi('#38bdf8','🛰','Ao vivo', 'a cada 5 min', 'dado do Bling em tempo quase real · 🔄 força agora'):'') +
+    '<div class="kpi" id="kMargem" style="display:none"></div>';
 
   const dias = Object.keys(porDia).sort();
   const labels = dias.map(d=>d.slice(8,10)+'/'+d.slice(5,7));
@@ -526,7 +545,7 @@ function render(){
     || '<tr><td class="dim" colspan="5">nenhum pedido com UF no período</td></tr>');
   $('ufAviso').innerHTML = (PER.length-comUF) ? '<div class="aviso">⚠️ '+N(PER.length-comUF)+' pedido(s) sem UF — o backfill de detalhes preenche o retroativo.</div>' : '';
 
-  renderProjecao();
+  renderProjChips(); renderProjecao();
   renderCfg();
   renderGrafico();
   renderAnalise();
@@ -823,7 +842,7 @@ const anBuscaOk = q => h => {
   for (const a of alvos) { if (a != null && String(a).toLowerCase().includes(q)) return true; }
   return (h.itens || []).some(it => String(it.sku || '').toLowerCase().includes(q));
 };
-function setAnPer(p){ anPer=p; anPage=0; renderAnalise(); }
+function setAnPer(p){ anPer=p; anPage=0; comAncora(()=>renderAnalise()); }
 function anIntervalo(){
   const hoje = hojeSP();
   let de, ate = hoje;
@@ -998,7 +1017,7 @@ function renderAnalise(){
 
 // ── 📦 projeção ─────────────────────────────────────────────────────────────
 function topSkus14(){
-  const corte = spDate(Date.now()-13*86400000);
+  const corte = spDate(Date.now()-(projDias-1)*86400000);
   const hoje = hojeSP();
   const agg = {};
   DADOS.forEach(h=>{
@@ -1050,10 +1069,10 @@ async function carregarSkuInfo(fresh){
 }
 function renderProjecao(){
   const base = topSkus14();
-  if(!base.length){ $('tProj').innerHTML='<tr><td class="dim">sem vendas nos últimos 14 dias</td></tr>'; return; }
+  if(!base.length){ $('tProj').innerHTML='<tr><td class="dim">sem vendas nos últimos '+projDias+' dias</td></tr>'; return; }
   const linhas = base.map(t=>{
     const info = SKUINFO[t.sku]||{};
-    const md = t.qtd/14;
+    const md = t.qtd/projDias;
     const saldo = (info.saldo!=null && isFinite(Number(info.saldo))) ? Number(info.saldo) : null;
     const diasR = (saldo!=null && md>0) ? saldo/md : null;
     const compra = (saldo!=null) ? Math.max(0, Math.ceil(md*30 - saldo)) : null;
@@ -1065,7 +1084,7 @@ function renderProjecao(){
   linhas.sort((a,b)=>cmpNull(a[sortProj.col], b[sortProj.col], sortProj.dir));
   let margemTot=0, margemCob=0;
   const th=(col,lbl)=>'<th class="num sort" onclick="setSortProj(\''+col+'\')">'+lbl+seta(sortProj,col)+'</th>';
-  $('tProj').innerHTML = '<tr><th>SKU</th>'+th('qtd14','Vendas 14d')+th('md','média/dia')+th('saldo','Saldo')+th('diasR','Acaba em')+th('compra','Comprar p/ 30d')+th('custo','Custo')+th('mUn','Margem un.')+'</tr>'+
+  $('tProj').innerHTML = '<tr><th>SKU</th>'+th('qtd14','Vendas '+projDias+'d')+th('md','média/dia')+th('saldo','Saldo')+th('diasR','Acaba em')+th('compra','Comprar p/ 30d')+th('custo','Custo')+th('mUn','Margem un.')+'</tr>'+
     linhas.map(t=>{
       if(t.mUn!=null){ margemTot += t.mUn*t.qtdV; margemCob++; }
       const stt = t.diasR==null ? '<span class="dim">—</span>'
