@@ -41,7 +41,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v26/07 b44';
+const VERSAO     = 'girassol-backup-offline v26/07 b45';
 
 // ── SESSÃO DE OPERADOR (cookie assinado HMAC) — protege rotas de dados/ação ──
 // Segredo estável entre restarts. Usa ADMIN_KEY (já configurada no Render) como base.
@@ -839,6 +839,35 @@ function routes(readBody) {
       const dias = Number(urlObj.searchParams.get('dias') || 14);
       mlSyncFees(dias).catch(() => {});
       json(res, 200, { ok: true, iniciado: true, dias, mensagem: 'pesca ML rodando em background — chame de novo p/ ver o progresso' });
+      return true;
+    }
+
+    // LIMPA toda a tabela (empresa girassol) — pra recomeçar o backfill do zero. Uso: /girassol-backup-offline/backfill-limpar
+    if (method === 'GET' && p === '/girassol-backup-offline/backfill-limpar') {
+      const kD = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const sessD = validarSessao(req.headers['cookie']);
+      if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
+      if (_backfill.rodando) { json(res, 200, { ok: false, msg: 'tem um backfill rodando — espere terminar (ou reinicie o serviço) antes de limpar' }); return true; }
+      const del = await supaReq('girassol', 'DELETE', 'vendas_historico?empresa=eq.girassol', null);
+      json(res, 200, { ok: del.ok, status: del.status, msg: del.ok ? '✅ tabela zerada (empresa girassol). Pode rodar o backfill do zero, mês a mês.' : '❌ falhou ao limpar: ' + ((del.body||del.erro||'')+'').slice(0,150) });
+      return true;
+    }
+
+    // CONFERE o que foi gravado no Supabase — conta registros por MÊS e por CANAL. Uso: /girassol-backup-offline/backfill-conferir
+    if (method === 'GET' && p === '/girassol-backup-offline/backfill-conferir') {
+      const kD = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const sessD = validarSessao(req.headers['cookie']);
+      if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
+      const out = { ok: true, total: null, por_mes: {}, por_canal: {} };
+      out.total = await supaCount('girassol', '');
+      for (const m of ['2026-01','2026-02','2026-03','2026-04','2026-05','2026-06','2026-07']) {
+        out.por_mes[m] = await supaCount('girassol', 'data_venda=gte.'+m+'-01&data_venda=lte.'+m+'-31');
+      }
+      for (const c of ['ml','shopee','tiktok','magalu','amazon','olist','madeira','leroy','outro']) {
+        const n = await supaCount('girassol', 'canal=eq.'+c);
+        if (n) out.por_canal[c] = n;
+      }
+      json(res, 200, out);
       return true;
     }
 
@@ -2868,6 +2897,16 @@ async function supaReq(empresa, metodo, pathQuery, body){
   } catch(e){ return { ok:false, status:0, erro:String(e.message||e) }; }
 }
 
+async function supaCount(empresa, filtro){
+  const { url, key } = supaCfg(empresa);
+  if(!url || !key) return null;
+  try {
+    const r = await fetch(url.replace(/\/+$/,'') + '/rest/v1/vendas_historico?empresa=eq.'+encodeURIComponent(empresa)+(filtro?('&'+filtro):'')+'&select=id', { method:'HEAD', headers:{ 'apikey':key, 'Authorization':'Bearer '+key, 'Prefer':'count=exact', 'Range':'0-0' } });
+    const cr = (r.headers.get('content-range')||'').split('/')[1];
+    return cr!=null ? Number(cr) : null;
+  } catch(e){ return null; }
+}
+
 // ─── Busca as DEVOLUÇÕES (type 'returns') recentes do ML + o frete de retorno de cada ──────
 // Retorna mapa { order_id(string): {claim_id, stage, aberta, data, frete_retorno, destino, dev_status} }.
 // Ignora o ruído (cancel_purchase/mediations/cancel_sale) — só devolução física que gera prejuízo.
@@ -2938,13 +2977,16 @@ async function backfillVendas(de, ate, empresa){
       else { _backfill.erros += buffer.length; _backfill.msg = 'erro Supabase status '+ins.status+' '+((ins.body||ins.erro||'')+'').slice(0,140); }
       buffer = [];
     };
+    let foraDoPeriodo = 0;
     for(let pg=1; pg<=500; pg++){
       _backfill.pagina = pg;
-      const r = await blingGet('/pedidos/vendas?dataEmissaoInicial='+de+'&dataEmissaoFinal='+ate+'&pagina='+pg+'&limite=100');
+      const r = await blingGet('/pedidos/vendas?dataInicial='+de+'&dataFinal='+ate+'&pagina='+pg+'&limite=100');
       const lista = (r && r.ok && r.data && r.data.data) || [];
       if(!lista.length) break;
       for(const p of lista){
         if(!p || p.id==null) continue;
+        const dtP = String(p.data||'').slice(0,10);
+        if(dtP && (dtP < de || dtP > ate)){ foraDoPeriodo++; continue; }   // TRAVA: só o período pedido (caso o filtro do Bling falhe)
         if(/cancel/i.test(String((p.situacao&&(p.situacao.valor||p.situacao.nome))||''))) continue;   // pula cancelados
         _backfill.pedidos++;
         let det=null;
@@ -2955,13 +2997,16 @@ async function backfillVendas(de, ate, empresa){
         if(!itens.length) continue;
         const total = Number(det.total)||0;
         const somaProd = itens.reduce((s,i)=>s+i.vt,0) || 1;
-        const comissao = Number((det.taxas&&det.taxas.taxaComissao)||0);
-        const frete = Number((det.taxas&&det.taxas.custoFrete)||0);
+        let comissao = Number((det.taxas&&det.taxas.taxaComissao)||0);
+        let frete = Number((det.taxas&&det.taxas.custoFrete)||0);
         const dataV = (String(det.dataEmissao||det.data||p.data||'').slice(0,10)) || null;
         const imposto = total * aliqBk((dataV||'').slice(0,7))/100;
         const ljId = String((det.loja&&det.loja.id)||(p.loja&&p.loja.id)||'');
-        const canal = LOJA_MKT[ljId] || _inferCanal(det.numeroPedidoLoja||p.numeroLoja);
         const nl = det.numeroPedidoLoja || p.numeroLoja || null;
+        const ehOlist = (ljId === '203301094') || /^ORD/i.test(String(nl||''));   // OLIST: loja fixa no Bling + nº começa com "ORD"
+        const canal = ehOlist ? 'olist' : (LOJA_MKT[ljId] || _inferCanal(nl));
+        if(ehOlist && (!comissao || comissao<=0)) comissao = Math.round(somaProd * 22 / 100 * 100)/100;   // OLIST cobrava ~22% (do Jodda) — o Bling não guarda a taxa dela
+        if(ehOlist && (!frete || frete<=0)) frete = 12;   // OLIST: motoboy R$12/pedido (Diego) — o Bling não tem o frete de envio dela
         const numPed = String(det.numero!=null?det.numero:(p.numero!=null?p.numero:p.id));
         for(const it of itens){
           const frac = it.vt/somaProd;
@@ -2980,6 +3025,7 @@ async function backfillVendas(de, ate, empresa){
       await dorme(300);
     }
     await flush();
+    _backfill.fora = foraDoPeriodo;
     _backfill.fase = 'concluido';
   } catch(e){ _backfill.fase='erro'; _backfill.msg = String(e.message||e); }
   _backfill.rodando = false; _backfill.fim = new Date().toISOString();
