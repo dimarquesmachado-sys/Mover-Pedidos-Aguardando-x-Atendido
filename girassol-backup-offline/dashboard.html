@@ -100,7 +100,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd64';
+const DASH_BUILD = 'd65';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -161,13 +161,14 @@ function cmpNull(a,b,dir){ const an=(a==null||!isFinite(a)), bn=(b==null||!isFin
 
 function prepararVendas(){
   const _sit = {}; (VENDAS||[]).forEach(v=>{ if(v&&v.numero!=null) _sit[String(v.numero)]=v; });
-  (DADOS||[]).forEach(h=>{ const v=_sit[String(h.numero)]; if(v){ h._sit=v.situacao||null; h._cancelado=/cancel/i.test(String(v.situacao||'')); if(v.data && !h.venda_dia) h.venda_dia=v.data; if(v.venda_em && !h.venda_em) h.venda_em=v.venda_em; if(v.tarifa_ml!=null && h.tarifa_ml==null) h.tarifa_ml=Number(v.tarifa_ml); if(v.frete_recebido!=null && h.frete_recebido==null) h.frete_recebido=Number(v.frete_recebido); if(v.renda_canal!=null && h.renda_canal==null) h.renda_canal=Number(v.renda_canal); } });   // d45: bipada herda dia/hora da venda casada · d50: tarifa REAL · d51: frete recebido · d53: renda oficial
+  (DADOS||[]).forEach(h=>{ const v=_sit[String(h.numero)]; if(v){ h._sit=v.situacao||null; h._cancelado=/cancel/i.test(String(v.situacao||'')); if(v.data && !h.venda_dia) h.venda_dia=v.data; if(v.venda_em && !h.venda_em) h.venda_em=v.venda_em; if(v.tarifa_ml!=null && h.tarifa_ml==null) h.tarifa_ml=Number(v.tarifa_ml); if(v.frete_recebido!=null && h.frete_recebido==null) h.frete_recebido=Number(v.frete_recebido); if(v.renda_canal!=null && h.renda_canal==null) h.renda_canal=Number(v.renda_canal); if(v.devolucao){ h.devolucao=1; if(v.dev_frete_retorno!=null)h.dev_frete_retorno=Number(v.dev_frete_retorno); h.dev_destino=v.dev_destino; h.dev_status=v.dev_status; h.dev_aberta=v.dev_aberta; } } });   // d45: bipada herda dia/hora · d50: tarifa REAL · d51: frete recebido · d53: renda oficial · b39: devolução
   const _nums = new Set((DADOS||[]).map(h=>String(h.numero)));
   SINT = (VENDAS||[]).filter(v=>v&&v.numero!=null&&!_nums.has(String(v.numero))).map(v=>({
     sintetico:true, id:'s'+v.id, numero:v.numero, numero_loja:v.numero_loja||'', marketplace:v.marketplace||'outro',
     venda_em:v.venda_em||null, venda_dia:v.data||null, valor:(v.total!=null?Number(v.total):null), cliente:v.cliente||'',
     itens:(v.it||[]).map(i2=>({sku:i2.sku,qtd:i2.qtd,valor_total:i2.vt})), taxa_mkt:(v.taxa_mkt!=null?v.taxa_mkt:null), frete_mkt:(v.frete_mkt!=null?v.frete_mkt:null),
     tarifa_ml:(v.tarifa_ml!=null?v.tarifa_ml:null), frete_ml:(v.frete_ml!=null?v.frete_ml:null), credito_ml:(v.credito_ml!=null?v.credito_ml:null),   // b31: comissão/frete/estorno REAIS do ML (fase ml_real) — o calcPL prioriza estes sobre o Bling
+    devolucao:(v.devolucao?1:0), dev_frete_retorno:(v.dev_frete_retorno!=null?Number(v.dev_frete_retorno):null), dev_destino:v.dev_destino||null, dev_status:v.dev_status||null, dev_aberta:(v.dev_aberta?1:0),   // b39: devolução do ML
     _sit:v.situacao||null, _cancelado:/cancel/i.test(String(v.situacao||''))
   }));
 }
@@ -857,10 +858,11 @@ function renderAnalise(){
   _anLP = LP;   // lista filtrada completa (usada pelo ⬇︎ CSV)
   // d49: resuminho do PERÍODO/FILTRO inteiro no topo da Análise (todas as páginas; canceladas fora) — pedido do Diego
   (function(){ const el=$('anResumo'); if(!el) return;
-    let rT=0,rI=0,rC=0,rF=0,rM=0,rMn=0,rN=0;
+    let rT=0,rI=0,rC=0,rF=0,rM=0,rMn=0,rN=0,rDev=0,rDevFrete=0,rDevAb=0;
     LP.forEach(x=>{ if(x.h._cancelado) return; const P=x.P; rN++;
       if(P.tot!=null)rT+=P.tot; if(P.imposto!=null)rI+=P.imposto; if(P.tarifa!=null)rC+=P.tarifa;
-      if(P.frV!=null)rF+=P.frV; if(P.mc!=null){rM+=P.mc;rMn++;} });
+      if(P.frV!=null)rF+=P.frV; if(P.mc!=null){rM+=P.mc;rMn++;}
+      if(x.h.devolucao){ rDev++; if(x.h.dev_frete_retorno!=null)rDevFrete+=Number(x.h.dev_frete_retorno); if(x.h.dev_aberta)rDevAb++; } });
     const mini=(l,v,c)=>'<div style="background:var(--card);border:1px solid var(--line);border-radius:9px;padding:7px 11px;min-width:96px"><div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut)">'+l+'</div><div style="font-size:15px;font-weight:800'+(c?';color:'+c:'')+'">'+v+'</div></div>';
     el.innerHTML = rN? '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">'+
       mini('Vendido (NF c/ frete)',BRL(rT))+
@@ -868,6 +870,7 @@ function renderAnalise(){
       mini('Comiss\u00e3o',BRL(rC),'#f87171')+
       mini('Frete vendedor',BRL(rF),'#f87171')+
       mini('\ud83d\udc8e M.C.',BRL(rM)+' <span style="font-size:10px;color:var(--mut)">('+rMn+'/'+rN+' c/ margem)</span>', rM>=0?'#34d399':'#f87171')+
+      (rDev? mini('\ud83d\udd34 Devolu\u00e7\u00f5es', rDev+' <span style="font-size:10px;color:var(--mut)">'+(rDevAb?'('+rDevAb+' aberta'+(rDevAb>1?'s':'')+') · ':'')+'frete ret. '+BRL(rDevFrete)+'</span>', '#f87171') : '')+
     '</div>' : '';
   })();
   $('anInfo').textContent = LP.length ? ((anPage*PAG+1)+'–'+(anPage*PAG+pagPL.length)+' de '+LP.length+' venda(s)') : 'sem vendas no período';
@@ -915,7 +918,7 @@ function renderAnalise(){
       const tag = h._cancelado ? '<span class="st bad">CANCELADA</span>' : '<span class="dim" style="font-size:10px" title="o sync ainda não trouxe os itens desta venda do Bling — a margem entra sozinha na próxima rodada (até 5 min)">⏳</span>';
       return sep + '<tr style="opacity:'+(h._cancelado?'.38':'.72')+'">'+
         '<td class="dim">'+dtx+'</td>'+
-        '<td>'+(h._cancelado?'<span style="color:#64748b;font-weight:800" title="CANCELADO no Bling">✕</span> ':'<span style="color:#f59e0b;font-weight:800" title="aguardando bipagem">✓</span> ')+'<b>'+esc(h.numero)+'</b><br><span class="dim" style="font-size:10px">'+esc(h._sit||'')+'</span></td>'+
+        '<td>'+(h._cancelado?'<span style="color:#64748b;font-weight:800" title="CANCELADO no Bling">✕</span> ':'<span style="color:#f59e0b;font-weight:800" title="aguardando bipagem">✓</span> ')+'<b>'+esc(h.numero)+'</b>'+(h.devolucao?' <span class="st bad" style="font-size:9px" title="DEVOLU\u00c7\u00c3O no ML">\ud83d\udd34 DEVOLV.</span>':'')+'<br><span class="dim" style="font-size:10px">'+esc(h._sit||'')+'</span></td>'+
         '<td class="dim" style="font-size:11px;max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(h.numero_loja?esc(h.numero_loja)+(linkMkt(h)?' <a href="'+linkMkt(h)+'" target="_blank" rel="noopener" style="text-decoration:none">↗</a>':''):'—')+'</td>'+
         '<td>'+esc(nomeCanal(P.ck))+'</td>'+
         '<td><div class="desc" style="max-width:200px">'+esc(h.cliente||'')+'</div></td>'+
@@ -927,7 +930,7 @@ function renderAnalise(){
     }
     return sep + '<tr'+(h._cancelado?' style="opacity:.38" title="pedido CANCELADO no Bling — fora dos totais"':'')+'>'+
       '<td class="dim" style="white-space:nowrap" title="'+(h.venda_em?('venda: '+dtBR(h.venda_em)+' · '):(h.venda_dia?('venda: '+String(h.venda_dia).slice(8,10)+'/'+String(h.venda_dia).slice(5,7)+' · '):''))+'conferido: '+dtBR(h.conferido_em)+'">'+(h.venda_em?dtBR(h.venda_em):(h.venda_dia?(String(h.venda_dia).slice(8,10)+'/'+String(h.venda_dia).slice(5,7)+(h.nf_emissao?(' '+String(h.nf_emissao).replace(' ','T').slice(11,16)+' <span style="font-size:9px" title="hora da EMISSÃO da NF no Bling — a hora exata da venda só a API do canal dá">🧾</span>'):' <span style="font-size:9px" title="dia da venda (Bling) — hora só com a API do canal">🕘</span>')):(h.nf_emissao?(String(h.nf_emissao).slice(8,10)+'/'+String(h.nf_emissao).slice(5,7)+' '+String(h.nf_emissao).replace(' ','T').slice(11,16)+' <span style="font-size:9px" title="hora da EMISSÃO da NF no Bling — a hora exata da venda só a API do canal dá">🧾</span>'):(dtBR(h.conferido_em)+' <span style="font-size:9px" title="hora da conferência">🕘</span>'))))+'</td>'+
-      '<td>'+(h._cancelado?'<span style="color:#64748b;font-weight:800" title="CANCELADO no Bling — fora dos totais">✕</span> ':(h.sintetico?'<span style="color:#f59e0b;font-weight:800" title="aguardando bipagem — margem já calculada">✓</span> ':'<span style="color:#34d399;font-weight:800" title="bipagem confirmada">✓</span> '))+'<b>'+esc(h.numero||h.id)+'</b>'+(carrinho?' <span class="badge" title="'+unid+' unidades">🛒 '+unid+'</span>':'')+
+      '<td>'+(h._cancelado?'<span style="color:#64748b;font-weight:800" title="CANCELADO no Bling — fora dos totais">✕</span> ':(h.sintetico?'<span style="color:#f59e0b;font-weight:800" title="aguardando bipagem — margem já calculada">✓</span> ':'<span style="color:#34d399;font-weight:800" title="bipagem confirmada">✓</span> '))+'<b>'+esc(h.numero||h.id)+'</b>'+(carrinho?' <span class="badge" title="'+unid+' unidades">🛒 '+unid+'</span>':'')+(h.devolucao?' <span class="st bad" style="font-size:9px" title="DEVOLU\u00c7\u00c3O no ML'+(h.dev_frete_retorno!=null?' \u00b7 frete de retorno '+BRL(h.dev_frete_retorno):'')+(h.dev_destino==='seller_address'?' \u00b7 mercadoria volta pro galp\u00e3o':(h.dev_destino==='warehouse'?' \u00b7 mercadoria foi pro ML':''))+(h.dev_aberta?' \u00b7 EM ABERTO':' \u00b7 fechada')+'">\ud83d\udd34 DEVOLV.</span>':'')+
         (h.nf_numero?'<div class="desc">NF '+esc(h.nf_numero)+'</div>':'')+'</td>'+
       (function(){
         const nlV = String(h.numero_loja||'');
