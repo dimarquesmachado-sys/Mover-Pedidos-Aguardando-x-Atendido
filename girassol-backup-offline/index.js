@@ -41,7 +41,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v26/07 b40';
+const VERSAO     = 'girassol-backup-offline v26/07 b41';
 
 // ── SESSÃO DE OPERADOR (cookie assinado HMAC) — protege rotas de dados/ação ──
 // Segredo estável entre restarts. Usa ADMIN_KEY (já configurada no Render) como base.
@@ -839,6 +839,34 @@ function routes(readBody) {
       const dias = Number(urlObj.searchParams.get('dias') || 14);
       mlSyncFees(dias).catch(() => {});
       json(res, 200, { ok: true, iniciado: true, dias, mensagem: 'pesca ML rodando em background — chame de novo p/ ver o progresso' });
+      return true;
+    }
+
+    // SONDA (sessão OU ?k=): investiga um ID INTERNO de pedido do Bling (o que apareceu cru na Análise).
+    // Uso: /girassol-backup-offline/sonda-bling-pedido?id=26341228931
+    if (method === 'GET' && p === '/girassol-backup-offline/sonda-bling-pedido') {
+      const kD = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const sessD = validarSessao(req.headers['cookie']);
+      if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
+      const idQ = String((urlObj.searchParams && urlObj.searchParams.get('id')) || '').replace(/\D/g, '');
+      if (!idQ) { json(res, 200, { ok: false, erro: 'passe ?id=ID_INTERNO_DO_BLING' }); return true; }
+      const out = { ok: true, id: idQ };
+      try {
+        const r = await blingGet('/pedidos/vendas/' + idQ);
+        out.status = r && r.status;
+        out.ok_resp = r && r.ok;
+        const d = (r && r.data && r.data.data) ? r.data.data : (r && r.data) || null;
+        if (d && (d.id || d.numero)) {
+          out.resumo = {
+            numero: d.numero, numeroLoja: d.numeroLoja, data: d.data,
+            situacao: d.situacao || null, total: d.total,
+            cliente: d.contato && (d.contato.nome || d.contato.id) || null,
+            loja: d.loja && d.loja.id || null, itens: Array.isArray(d.itens) ? d.itens.length : null
+          };
+          out.cru = d;   // cru completo pra eu ver tudo
+        } else { out.vazio = true; out.cru = d; }
+      } catch (e) { out.erro = String(e.message || e); }
+      json(res, 200, out);
       return true;
     }
 
