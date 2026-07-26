@@ -103,7 +103,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd68';
+const DASH_BUILD = 'd69';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -256,10 +256,6 @@ function montar(){
   '<div class="cover" id="cover"></div></div></div>'+
   '<div class="wrap">'+
     '<div class="kpis" id="kpis"></div>'+
-    '<div class="sec"><h2>📈 Progressão do período <span class="hint">diário · sacada do Bling, com o NOSSO imposto mensal correto</span></h2>'+
-      '<div id="grafTot" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px"></div>'+
-      '<div id="grafProg" style="overflow-x:auto"></div>'+
-      '<div class="nota" id="grafLeg"></div></div>'+
     '<div class="sec"><h2>🔍 Buscar pedido &amp; lucro <span class="hint">nº do pedido · NF · nº da venda no marketplace · SKU · parte do título</span></h2>'+
       '<input id="qBusca" placeholder="ex.: 73620 · 076265 · 2000017436578280 · 6376-220v · tosquiadeira" '+
       'style="width:100%;background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:10px;padding:11px 14px;font-size:13px" '+
@@ -286,18 +282,22 @@ function montar(){
       '<div id="anResumo"></div>'+
       '<div class="tw"><table id="tAnalise"></table></div>'+
       '<div class="nota"><b>Sobre a ordem:</b> dentro de cada dia, ML aparece na hora REAL da venda; TikTok/Shopee/Magalu/Amazon entram pela hora da <b>EMISSÃO da NF</b> (🧾), que acompanha a venda de perto — acabaram os blocos por canal. O 🕘 (hora da conferência) só aparece quando a linha ainda não tem NF. A hora exata da venda desses canais continua existindo <b>só na API do próprio canal</b>. Pra confrontar com o Jodda, use o ⬇︎ CSV e case pelo <b>número da venda no marketplace</b>. · ML mostra a hora REAL da venda (vem da pesca); TikTok/Shopee o Bling não guarda hora — o 🕘 marca que ali está a hora da <b>conferência</b> (a hora da venda desses canais chega quando plugarmos as APIs deles) · colunas (−) são deduções e (+) é crédito · <b>Estorno</b> = o valor exato da linha "Estorno" da venda no ML (no Flex ele já vem líquido: bonificação menos o frete cobrado), somado na M.C. · no Flex o custo do frete é o <b>motoboy</b> configurado no ⚙️ · tarifa <span class="ok">REAL</span> = pescada do ML · <span class="ok">BLING</span> = comissão que o Bling importou do canal (TikTok/Shopee/Magalu) · sem tag = % configurada · custo carrega sob demanda por página · 🛒 = mais de 1 item/unidade</div></div>'+
+    '<div class="sec"><h2>🏆 Top produtos <span class="hint">clique nos títulos p/ ordenar ↑↓ · faturamento = SOMA de todos os pedidos do SKU no período · 💎 M.C. = margem dos pedidos rateada por item — o rank do que dá LUCRO de verdade · Curva ABC recalculada pro período pesquisado (A = 80% do faturamento)</span></h2>'+
+      '<div class="tw"><table id="tProd"></table></div><div id="prodAviso"></div></div>'+
+    '<div class="sec"><h2>🛒 Por canal</h2><div class="tw"><table id="tCanal"></table></div></div>'+
     '<div class="grid2">'+
       '<div class="sec"><h2>📈 Pedidos por dia</h2><div class="chartbox"><canvas id="cPed"></canvas></div></div>'+
       '<div class="sec"><h2>💰 Faturamento por dia</h2><div class="chartbox"><canvas id="cFat"></canvas></div></div>'+
     '</div>'+
-    '<div class="sec"><h2>🛒 Por canal</h2><div class="tw"><table id="tCanal"></table></div></div>'+
-    '<div class="sec"><h2>🏆 Top produtos <span class="hint">clique nos títulos p/ ordenar ↑↓ · faturamento = SOMA de todos os pedidos do SKU no período · 💎 M.C. = margem dos pedidos rateada por item — o rank do que dá LUCRO de verdade · Curva ABC recalculada pro período pesquisado (A = 80% do faturamento)</span></h2>'+
-      '<div class="tw"><table id="tProd"></table></div><div id="prodAviso"></div></div>'+
-    '<div class="sec"><h2>🗺️ Vendas por estado</h2><div class="tw"><table id="tUF"></table></div><div id="ufAviso"></div></div>'+
     '<div class="sec"><h2>📦 Projeção de estoque &amp; margem <span class="hint">ritmo dos últimos 14 dias · clique p/ ordenar</span></h2>'+
       '<div id="projBox" style="margin-bottom:10px;font-size:12px"><span class="mut" id="projStatus">⏳ carregando saldo/preço/custo do Bling… (~30-60s na 1ª vez)</span> '+
       '<button class="btn" id="btnProj" onclick="carregarSkuInfo(true)" style="display:none">↻ recarregar do Bling (ignora cache)</button> <button class="btn sec" onclick="sincCustos()" title="resolve TODOS os custos em background, devagar, sem estourar o limite do Bling — e grava em cache permanente">🐢 sincronizar custos (fundo)</button></div>'+
       '<div class="tw"><table id="tProj"></table></div><div id="projAviso"></div></div>'+
+    '<div class="sec"><h2>📈 Progressão do período <span class="hint">diário · sacada do Bling, com o NOSSO imposto mensal correto</span></h2>'+
+      '<div id="grafTot" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px"></div>'+
+      '<div id="grafProg" style="overflow-x:auto"></div>'+
+      '<div class="nota" id="grafLeg"></div></div>'+
+    '<div class="sec"><h2>🗺️ Vendas por estado</h2><div class="tw"><table id="tUF"></table></div><div id="ufAviso"></div></div>'+
     '<div class="sec"><h2>⚙️ Impostos &amp; taxas <span class="hint">alíquota do Simples varia mês a mês · taxas de marketplace em % (estimativa; ML tem a REAL por pedido na busca)</span></h2>'+
       '<div id="cfgBox"></div>'+
       '<div style="font-size:12px;color:var(--mut);margin:14px 0 6px">🚛 Motoboy do FLEX pago pela loja (R$) — de fábrica: <b>ML R$ 12</b> · <b>Shopee R$ 9</b> · <b>demais R$ 9</b>. Entra como custo quando o pedido é FLEX.</div>'+
@@ -414,7 +414,7 @@ function render(){
   $('kpis').innerHTML =
     kpi('var(--ac)','📦','Pedidos', N(PER.length), N(unid)+' unidades') +
     (AGD.length?kpi('#38bdf8','📅','Dia completo (Jodda)', BRL(fat+agdVal), N(PER.length+AGD.length)+' pedidos = '+N(PER.length)+' bipados + '+N(AGD.length)+' a bipar · comparável ao Faturamento Total do Jodda'):'') +
-    kpi('var(--ok)','🛍','Faturamento produtos', BRL(pedNF?fatNF:fatProd), pedNF?('pela NOTA FISCAL ('+pc(pedNF,PER.length)+'% dos pedidos) · só os JÁ BIPADOS — o dia inteiro tá no 📅'):('pelos itens do pedido'+(cItem<95?' · <span class="warn">'+cItem+'% cobertura</span>':''))) +
+    kpi('var(--ok)','🏷️','Faturamento produtos', BRL(pedNF?fatNF:fatProd), pedNF?('pela NOTA FISCAL ('+pc(pedNF,PER.length)+'% dos pedidos) · só os JÁ BIPADOS — o dia inteiro tá no 📅'):('pelos itens do pedido'+(cItem<95?' · <span class="warn">'+cItem+'% cobertura</span>':''))) +
     kpi('var(--cy)','💰','Total dos pedidos', BRL(fat), 'com frete embutido'+(semValor?' · <span class="warn">'+semValor+' sem valor</span>':'')) +
     kpi('#a78bfa','🚚','Frete embutido', fretePedNF?BRL(freteNF):(fretePed?BRL(freteEmb):'—'), fretePedNF?('EXATO pela nota · '+N(fretePedNF)+' pedidos'):(fretePed?('estimado · '+N(fretePed)+' ped.'):'aguardando cobertura')) +
     kpi('var(--warn)','🎯','Ticket médio', BRL(ticket), 'por pedido (total c/ frete)') +
@@ -649,6 +649,8 @@ function buscarPed(q){
     if(String(h.numero||'').toLowerCase()===q) return true;
     if(String(h.nf_numero||'').toLowerCase().includes(q)) return true;
     if(String(h.numero_loja||'').toLowerCase().includes(q)) return true;
+    if(String(h.ml_pack||'').toLowerCase().includes(q)) return true;   // ID do carrinho (2000014…)
+    if(String(h.ml_order||'').toLowerCase().includes(q)) return true;  // ID do envio (2000017…) — acha por qualquer um dos dois
     return (h.itens||[]).some(it=> String(it.sku||'').toLowerCase().includes(q) || String(it.descricao||'').toLowerCase().includes(q));
   }).slice(0,15);
   if(!hits.length){ res.innerHTML='<div class="dim" style="padding:8px">nada encontrado</div>'; return; }
@@ -674,7 +676,7 @@ function renderPL(h){
     '<h2>💎 Pedido '+esc(h.numero||h.id)+' · '+esc(ck)+' · '+diaVenda(h)+
     (h.numero_loja?' <span class="badge">venda '+esc(h.numero_loja)+(linkMkt(h)?' <a href="'+linkMkt(h)+'" target="_blank" rel="noopener" style="text-decoration:none" title="abrir esta venda no Mercado Livre">↗</a>':'')+'</span>':'')+(h.nf_numero?' <span class="badge">NF '+esc(h.nf_numero)+'</span>':'')+'</h2>'+
     '<table>'+
-    linha('🛍 Produtos (nota fiscal)', rp)+
+    linha('🏷️ Produtos (nota fiscal)', rp)+
     linha('🚚 Frete embutido (receita)', frete)+
     linha('🏛 Imposto ('+(aliq!=null?aliq+'% de '+mes:'<span class="warn">configure ⚙️ '+mes+'</span>')+')', imposto!=null?-imposto:null)+
     linha('🏪 Tarifa '+ (feeReal!=null?'<span class="ok">REAL (ML)</span>':(feeBling!=null?'<span class="ok">REAL (Bling)</span>':(tx!=null?tx+'% est.':'<span class="warn">configure ⚙️</span>'))), tarifa!=null?-tarifa:null,
