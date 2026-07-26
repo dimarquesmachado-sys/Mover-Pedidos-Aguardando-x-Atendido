@@ -861,13 +861,25 @@ function routes(readBody) {
       const out = { ok: true, total: null, por_mes: {}, por_canal: {} };
       out.total = await supaCount('girassol', '');
       for (const m of ['2026-01','2026-02','2026-03','2026-04','2026-05','2026-06','2026-07']) {
-        out.por_mes[m] = await supaCount('girassol', 'data_venda=gte.'+m+'-01&data_venda=lte.'+m+'-31');
+        out.por_mes[m] = await supaCount('girassol', 'data_venda=gte.'+m+'-01&data_venda=lte.'+m+'-'+ULTIMO_DIA[m.slice(5,7)]);
       }
       for (const c of ['ml','shopee','tiktok','magalu','amazon','olist','madeira','leroy','outro']) {
         const n = await supaCount('girassol', 'canal=eq.'+c);
         if (n) out.por_canal[c] = n;
       }
       json(res, 200, out);
+      return true;
+    }
+
+    // DISPARA o backfill do ANO TODO — roda os meses de janeiro até 'ate' EM SEQUÊNCIA, sozinho. Uso: /girassol-backup-offline/backfill-ano  (ou &ate=07 pra parar em julho)
+    if (method === 'GET' && p === '/girassol-backup-offline/backfill-ano') {
+      const kD = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const sessD = validarSessao(req.headers['cookie']);
+      if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
+      if (_backfillAno.rodando || _backfill.rodando) { json(res, 200, { ok: false, msg: 'já tem backfill rodando — acompanhe em /backfill-status', ano: _backfillAno, mes: _backfill }); return true; }
+      const ateMes = String((urlObj.searchParams && urlObj.searchParams.get('ate')) || '07').padStart(2,'0');   // default: vai até julho (mês atual)
+      backfillAnoTodo(ateMes);   // NÃO await — roda em background, mês a mês
+      json(res, 200, { ok: true, msg: '✅ backfill do ANO iniciado (janeiro até '+('2026-'+ateMes)+'), rodando os meses EM SEQUÊNCIA sozinho. Acompanhe em /backfill-status. Cada mês ~15-20 min; o ano todo leva ~2h. É idempotente (cada mês limpa e regrava o seu).', ate: '2026-'+ateMes });
       return true;
     }
 
@@ -888,7 +900,7 @@ function routes(readBody) {
       const kD = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
       const sessD = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
-      json(res, 200, { ok: true, status: _backfill });
+      json(res, 200, { ok: true, status: _backfill, ano: (_backfillAno.rodando || _backfillAno.fim) ? _backfillAno : undefined });
       return true;
     }
 
@@ -3029,6 +3041,21 @@ async function backfillVendas(de, ate, empresa){
     _backfill.fase = 'concluido';
   } catch(e){ _backfill.fase='erro'; _backfill.msg = String(e.message||e); }
   _backfill.rodando = false; _backfill.fim = new Date().toISOString();
+}
+
+const ULTIMO_DIA = { '01':'31','02':'28','03':'31','04':'30','05':'31','06':'30','07':'31','08':'31','09':'30','10':'31','11':'30','12':'31' };
+let _backfillAno = { rodando:false, mesAtual:null, feitos:[], inicio:null, fim:null };
+async function backfillAnoTodo(ateMes){
+  if(_backfillAno.rodando || _backfill.rodando) return;
+  _backfillAno = { rodando:true, mesAtual:null, feitos:[], inicio:new Date().toISOString(), fim:null };
+  const meses = ['01','02','03','04','05','06','07','08','09','10','11','12'].filter(m => m <= ateMes);
+  for(const m of meses){
+    _backfillAno.mesAtual = '2026-'+m;
+    await backfillVendas('2026-'+m+'-01', '2026-'+m+'-'+ULTIMO_DIA[m], 'girassol');   // espera cada mês terminar antes do próximo
+    _backfillAno.feitos.push({ mes:'2026-'+m, pedidos:_backfill.pedidos, itens:_backfill.itens, gravados:_backfill.gravados, erros:_backfill.erros });
+    await new Promise(r=>setTimeout(r,2500));
+  }
+  _backfillAno.rodando = false; _backfillAno.mesAtual = null; _backfillAno.fim = new Date().toISOString();
 }
 
 async function vendasSync() {
