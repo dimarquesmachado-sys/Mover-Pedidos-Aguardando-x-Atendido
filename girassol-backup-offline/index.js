@@ -41,7 +41,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v25/07 b38';
+const VERSAO     = 'girassol-backup-offline v25/07 b39';
 
 // ── SESSÃO DE OPERADOR (cookie assinado HMAC) — protege rotas de dados/ação ──
 // Segredo estável entre restarts. Usa ADMIN_KEY (já configurada no Render) como base.
@@ -2739,6 +2739,54 @@ async function pescarDadosML(nlRaw, tokenML, dorme) {
   return reg;
 }
 
+// ─── Busca as DEVOLUÇÕES (type 'returns') recentes do ML + o frete de retorno de cada ──────
+// Retorna mapa { order_id(string): {claim_id, stage, aberta, data, frete_retorno, destino, dev_status} }.
+// Ignora o ruído (cancel_purchase/mediations/cancel_sale) — só devolução física que gera prejuízo.
+// destino 'warehouse' = vai pro ML (frete de retorno cobrado do vendedor); 'seller_address' = volta pro galpão.
+async function buscarDevolucoesML(tokenML, dorme) {
+  if (!tokenML) return {};
+  const H = { headers: { Authorization: 'Bearer ' + tokenML } };
+  let sellerId = null;
+  try { const rm = await fetch('https://api.mercadolibre.com/users/me', H); const dm = await rm.json().catch(() => null); if (rm.ok && dm && dm.id) sellerId = dm.id; } catch (e) {}
+  if (!sellerId) return {};
+  const mapa = {};
+  for (const st of ['opened', 'closed']) {
+    try {
+      const rc = await fetch('https://api.mercadolibre.com/post-purchase/v1/claims/search?players.user_id=' + sellerId + '&players.role=respondent&status=' + st + '&sort=date_created:desc&limit=50', H);
+      const dc = await rc.json().catch(() => null);
+      const data = (dc && dc.data) || [];
+      for (const c of data) {
+        if (!c || c.type !== 'returns' || c.resource !== 'order') continue;   // só devolução de pedido (resource_id = order_id)
+        const oid = String(c.resource_id);
+        if (mapa[oid]) continue;   // opened vem primeiro, tem prioridade
+        mapa[oid] = { claim_id: c.id, stage: c.stage, aberta: (st === 'opened'), data: c.date_created, frete_retorno: null, destino: null, dev_status: null };
+      }
+    } catch (e) {}
+    await dorme(200);
+  }
+  // pros claims de devolução, busca o custo do frete de retorno + status/destino da devolução
+  for (const oid of Object.keys(mapa)) {
+    const cid = mapa[oid].claim_id;
+    try {
+      const rr = await fetch('https://api.mercadolibre.com/post-purchase/v1/claims/' + cid + '/charges/return-cost', H);
+      const dr = await rr.json().catch(() => null);
+      if (rr.ok && dr && dr.amount != null) mapa[oid].frete_retorno = Number(dr.amount);   // frete de retorno pago pelo vendedor
+    } catch (e) {}
+    await dorme(150);
+    try {
+      const rt = await fetch('https://api.mercadolibre.com/post-purchase/v2/claims/' + cid + '/returns', H);
+      const dt = await rt.json().catch(() => null);
+      if (rt.ok && dt) {
+        mapa[oid].dev_status = dt.status;   // label_generated / shipped / ...
+        const sh = Array.isArray(dt.shipments) ? dt.shipments[0] : null;
+        if (sh && sh.destination) mapa[oid].destino = sh.destination.name;   // warehouse / seller_address
+      }
+    } catch (e) {}
+    await dorme(150);
+  }
+  return mapa;
+}
+
 async function vendasSync() {
   if (_vsy.rodando) return;
   _vsy.rodando = true; _vsy.erro = null; _vsy.fase = 'listagem';
@@ -2848,6 +2896,34 @@ async function vendasSync() {
           await dormeR(350);
         }
         writeJson(F, atual);   // dado real do ML no disco — o dashboard já mostra "REAL"
+      }
+    } catch (e) {}
+    _vsy.fase = 'devolucoes';
+    // fase DEVOLUÇÕES (b39): busca as devoluções (type 'returns') recentes do ML e marca os pedidos
+    // com o frete de retorno + status/destino. Roda leve (só as ~50 recentes de cada status, filtradas
+    // por type returns). O prejuízo = perde a venda (reembolso) + frete de ida (já capturado) + este frete de retorno.
+    try {
+      let tkC = null;
+      try { const { garantirTokenML: _g6 } = require('../girassol/mlTokenManager'); tkC = await _g6(); } catch (e) {}
+      if (tkC) {
+        const dormeC = ms => new Promise(r5 => setTimeout(r5, ms));
+        const devs = await buscarDevolucoesML(tkC, dormeC);
+        if (devs && Object.keys(devs).length) {
+          for (const v of Object.values(atual)) {
+            if (!v || (v.marketplace !== 'ml' && v.marketplace !== 'mercadolivre')) continue;
+            const d = devs[String(v.numero_loja || '')] || devs[String(v.ml_order || '')] || devs[String(v.ml_pack || '')] || null;
+            if (d) {
+              v.devolucao = 1;
+              v.dev_claim_id = d.claim_id;
+              v.dev_frete_retorno = d.frete_retorno;   // frete de retorno pago pelo vendedor (0 quando volta pro galpão)
+              v.dev_destino = d.destino;                // warehouse (foi pro ML) / seller_address (voltou pro galpão)
+              v.dev_status = d.dev_status;              // label_generated / shipped / ...
+              v.dev_aberta = d.aberta ? 1 : 0;          // ainda em aberto (disputa/claim) vs já fechada
+              v.dev_data = d.data;
+            }
+          }
+          writeJson(F, atual);   // devoluções marcadas no disco
+        }
       }
     } catch (e) {}
     _vsy.fase = 'nf_emissao';
