@@ -41,7 +41,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v26/07 b43';
+const VERSAO     = 'girassol-backup-offline v26/07 b44';
 
 // ── SESSÃO DE OPERADOR (cookie assinado HMAC) — protege rotas de dados/ação ──
 // Segredo estável entre restarts. Usa ADMIN_KEY (já configurada no Render) como base.
@@ -839,6 +839,27 @@ function routes(readBody) {
       const dias = Number(urlObj.searchParams.get('dias') || 14);
       mlSyncFees(dias).catch(() => {});
       json(res, 200, { ok: true, iniciado: true, dias, mensagem: 'pesca ML rodando em background — chame de novo p/ ver o progresso' });
+      return true;
+    }
+
+    // DISPARA o backfill de um período (roda em BACKGROUND). Uso: /girassol-backup-offline/backfill?de=2026-01-01&ate=2026-01-31
+    if (method === 'GET' && p === '/girassol-backup-offline/backfill') {
+      const kD = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const sessD = validarSessao(req.headers['cookie']);
+      if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
+      if (_backfill.rodando) { json(res, 200, { ok: false, msg: 'já tem um backfill rodando — acompanhe em /backfill-status', status: _backfill }); return true; }
+      const de = String((urlObj.searchParams && urlObj.searchParams.get('de')) || '2026-01-01').slice(0, 10);
+      const ate = String((urlObj.searchParams && urlObj.searchParams.get('ate')) || new Date().toISOString().slice(0, 10)).slice(0, 10);
+      backfillVendas(de, ate, 'girassol');   // NÃO await — roda em background
+      json(res, 200, { ok: true, msg: '✅ backfill iniciado em background (só Girassol). Acompanhe em /backfill-status. Ele deleta o período antes e regrava, então pode rodar de novo sem duplicar.', de, ate });
+      return true;
+    }
+    // STATUS do backfill em andamento. Uso: /girassol-backup-offline/backfill-status
+    if (method === 'GET' && p === '/girassol-backup-offline/backfill-status') {
+      const kD = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const sessD = validarSessao(req.headers['cookie']);
+      if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
+      json(res, 200, { ok: true, status: _backfill });
       return true;
     }
 
@@ -2893,6 +2914,75 @@ async function buscarDevolucoesML(tokenML, dorme) {
     await dorme(150);
   }
   return mapa;
+}
+
+// ─── BACKFILL do histórico de vendas pro Supabase ────────────────────────────────────────────
+const DEFAULT_ALIQ_BK = { '2026-01':11.409280, '2026-02':11.3254, '2026-03':12.3402, '2026-04':13.6001, '2026-05':13.9149, '2026-06':14.056, '2026-07':14.1, '2026-08':14.1, '2026-09':14.1, '2026-10':14.1, '2026-11':14.1, '2026-12':14.1 };
+let _backfill = { rodando:false, empresa:null, de:null, ate:null, pagina:0, pedidos:0, itens:0, gravados:0, erros:0, fase:'parado', inicio:null, fim:null, msg:'' };
+async function backfillVendas(de, ate, empresa){
+  if(_backfill.rodando) return;
+  _backfill = { rodando:true, empresa, de, ate, pagina:0, pedidos:0, itens:0, gravados:0, erros:0, fase:'preparando', inicio:new Date().toISOString(), fim:null, msg:'' };
+  const dorme = ms => new Promise(r=>setTimeout(r,ms));
+  try {
+    const custos = readJson(path.join(CACHE_DIR,'_custos.json'), {});
+    const cfg = readJson(path.join(CACHE_DIR,'_config-fiscal.json'), {aliquotas:{}});
+    const aliqBk = mes => (cfg.aliquotas && cfg.aliquotas[mes]!=null ? Number(cfg.aliquotas[mes]) : (DEFAULT_ALIQ_BK[mes]!=null?DEFAULT_ALIQ_BK[mes]:14.1));
+    // idempotente: limpa o período antes (rodar de novo não duplica)
+    await supaReq(empresa, 'DELETE', 'vendas_historico?empresa=eq.'+encodeURIComponent(empresa)+'&data_venda=gte.'+de+'&data_venda=lte.'+ate, null);
+    _backfill.fase = 'varrendo';
+    let buffer = [];
+    const flush = async () => {
+      if(!buffer.length) return;
+      const ins = await supaReq(empresa,'POST','vendas_historico', buffer);
+      if(ins.ok) _backfill.gravados += buffer.length;
+      else { _backfill.erros += buffer.length; _backfill.msg = 'erro Supabase status '+ins.status+' '+((ins.body||ins.erro||'')+'').slice(0,140); }
+      buffer = [];
+    };
+    for(let pg=1; pg<=500; pg++){
+      _backfill.pagina = pg;
+      const r = await blingGet('/pedidos/vendas?dataEmissaoInicial='+de+'&dataEmissaoFinal='+ate+'&pagina='+pg+'&limite=100');
+      const lista = (r && r.ok && r.data && r.data.data) || [];
+      if(!lista.length) break;
+      for(const p of lista){
+        if(!p || p.id==null) continue;
+        if(/cancel/i.test(String((p.situacao&&(p.situacao.valor||p.situacao.nome))||''))) continue;   // pula cancelados
+        _backfill.pedidos++;
+        let det=null;
+        try { const rd = await blingGet('/pedidos/vendas/'+p.id); det = (rd&&rd.ok&&rd.data&&rd.data.data)||null; } catch(e){}
+        await dorme(430);   // rate limit do Bling (~2,3 req/s)
+        if(!det){ _backfill.erros++; continue; }
+        const itens = (det.itens||[]).map(i=>({ sku:((i.codigo||(i.produto&&i.produto.codigo)||'')+'').trim()||null, desc:((i.descricao||(i.produto&&i.produto.nome)||'')+'').slice(0,180), qtd:Number(i.quantidade||1), vt: Math.round(Number(i.valor||0)*Number(i.quantidade||1)*100)/100 }));
+        if(!itens.length) continue;
+        const total = Number(det.total)||0;
+        const somaProd = itens.reduce((s,i)=>s+i.vt,0) || 1;
+        const comissao = Number((det.taxas&&det.taxas.taxaComissao)||0);
+        const frete = Number((det.taxas&&det.taxas.custoFrete)||0);
+        const dataV = (String(det.dataEmissao||det.data||p.data||'').slice(0,10)) || null;
+        const imposto = total * aliqBk((dataV||'').slice(0,7))/100;
+        const ljId = String((det.loja&&det.loja.id)||(p.loja&&p.loja.id)||'');
+        const canal = LOJA_MKT[ljId] || _inferCanal(det.numeroPedidoLoja||p.numeroLoja);
+        const nl = det.numeroPedidoLoja || p.numeroLoja || null;
+        const numPed = String(det.numero!=null?det.numero:(p.numero!=null?p.numero:p.id));
+        for(const it of itens){
+          const frac = it.vt/somaProd;
+          const cU = (custos[it.sku] && custos[it.sku].custo!=null) ? Number(custos[it.sku].custo) : null;
+          const custoItem = cU!=null ? Math.round(cU*it.qtd*100)/100 : null;
+          const comItem = Math.round(comissao*frac*100)/100;
+          const freteItem = Math.round(frete*frac*100)/100;
+          const impItem = Math.round(imposto*frac*100)/100;
+          const margem = custoItem!=null ? Math.round((it.vt - custoItem - comItem - freteItem - impItem)*100)/100 : null;
+          buffer.push({ empresa, numero_pedido:numPed, numero_loja:nl, canal, data_venda:dataV, sku:it.sku, descricao:it.desc, quantidade:it.qtd, valor_produto:it.vt, valor_nota:Math.round(total*frac*100)/100, custo:custoItem, comissao:comItem, frete_vendedor:freteItem, imposto:impItem, margem });
+          _backfill.itens++;
+        }
+        if(buffer.length >= 200) await flush();
+      }
+      if(lista.length < 100) break;
+      await dorme(300);
+    }
+    await flush();
+    _backfill.fase = 'concluido';
+  } catch(e){ _backfill.fase='erro'; _backfill.msg = String(e.message||e); }
+  _backfill.rodando = false; _backfill.fim = new Date().toISOString();
 }
 
 async function vendasSync() {
