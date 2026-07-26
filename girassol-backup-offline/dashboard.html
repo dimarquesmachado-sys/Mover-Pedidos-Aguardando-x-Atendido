@@ -103,7 +103,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd72';
+const DASH_BUILD = 'd73';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -675,7 +675,7 @@ function buscarPed(q){
   }).slice(0,15);
   if(!hits.length){ res.innerHTML='<div class="dim" style="padding:8px">nada encontrado</div>'; return; }
   res.innerHTML = '<table><tr><th>Data</th><th>Pedido</th><th>Canal</th><th>Cliente</th><th class="num">Total</th><th></th></tr>'+
-    hits.map(h=>'<tr><td class="dim">'+diaVenda(h)+'</td><td><b>'+esc(h.numero||h.id)+'</b>'+(h.nf_numero?'<div class="desc">NF '+esc(h.nf_numero)+'</div>':'')+'</td>'+
+    hits.map(h=>'<tr><td class="dim">'+diaVenda(h)+'</td><td><b>'+esc(h.numero||h.id)+'</b>'+(h.id?' <a href="https://www.bling.com.br/vendas.php#edit/'+esc(h.id)+'" target="_blank" rel="noopener" title="abrir o pedido no Bling" style="font-size:10px;color:#3b82f6;text-decoration:none;font-weight:600">Bling↗</a>':'')+(h.nf_numero?'<div class="desc">NF '+esc(h.nf_numero)+(h.nf_id?' <a href="https://www.bling.com.br/notas.fiscais.php#edit/'+esc(h.nf_id)+'" target="_blank" rel="noopener" title="abrir a NF no Bling" style="color:#3b82f6;text-decoration:none;font-weight:600">↗</a>':'')+'</div>':'')+'</td>'+
       '<td>'+esc(canalKey(h.marketplace))+'</td><td class="desc" style="max-width:200px">'+esc(h.cliente||'')+'</td>'+
       '<td class="num">'+(h.valor!=null?BRL(Number(h.valor)):'<span class="dim">—</span>')+'</td>'+
       '<td><button class="btn" style="padding:5px 12px;font-size:11px" onclick="abrirPL(\''+h.id+'\')">💎 lucro</button></td></tr>').join('')+'</table>';
@@ -975,8 +975,8 @@ function renderAnalise(){
     }
     return sep + '<tr style="'+estiloLinha(h)+'"'+(h._cancelado?' title="pedido CANCELADO no Bling — fora dos totais"':(h.devolucao?(' title="DEVOLU\u00c7\u00c3O'+(h.dev_aberta?' em andamento (dinheiro ainda n\u00e3o resolvido no Mercado Pago)':' consolidada')+'"'):''))+'>'+
       '<td class="dim" style="white-space:nowrap" title="'+(h.venda_em?('venda: '+dtBR(h.venda_em)+' · '):(h.venda_dia?('venda: '+String(h.venda_dia).slice(8,10)+'/'+String(h.venda_dia).slice(5,7)+' · '):''))+'conferido: '+dtBR(h.conferido_em)+'">'+(h.venda_em?dtBR(h.venda_em):(h.venda_dia?(String(h.venda_dia).slice(8,10)+'/'+String(h.venda_dia).slice(5,7)+(h.nf_emissao?(' '+String(h.nf_emissao).replace(' ','T').slice(11,16)+' <span style="font-size:9px" title="hora da EMISSÃO da NF no Bling — a hora exata da venda só a API do canal dá">🧾</span>'):' <span style="font-size:9px" title="dia da venda (Bling) — hora só com a API do canal">🕘</span>')):(h.nf_emissao?(String(h.nf_emissao).slice(8,10)+'/'+String(h.nf_emissao).slice(5,7)+' '+String(h.nf_emissao).replace(' ','T').slice(11,16)+' <span style="font-size:9px" title="hora da EMISSÃO da NF no Bling — a hora exata da venda só a API do canal dá">🧾</span>'):(dtBR(h.conferido_em)+' <span style="font-size:9px" title="hora da conferência">🕘</span>'))))+'</td>'+
-      '<td>'+(h._cancelado?'<span style="color:#64748b;font-weight:800" title="CANCELADO no Bling — fora dos totais">✕</span> ':(h.sintetico?'<span style="color:#f59e0b;font-weight:800" title="aguardando bipagem — margem já calculada">✓</span> ':'<span style="color:#34d399;font-weight:800" title="bipagem confirmada">✓</span> '))+'<b>'+esc(h.numero||h.id)+'</b>'+(carrinho?' <span class="badge" title="'+unid+' unidades">🛒 '+unid+'</span>':'')+(h.devolucao?' <span class="st bad" style="font-size:9px" title="DEVOLU\u00c7\u00c3O no ML'+(h.dev_frete_retorno!=null?' \u00b7 frete de retorno '+BRL(h.dev_frete_retorno):'')+(h.dev_destino==='seller_address'?' \u00b7 mercadoria volta pro galp\u00e3o':(h.dev_destino==='warehouse'?' \u00b7 mercadoria foi pro ML':''))+(h.dev_aberta?' \u00b7 EM ABERTO':' \u00b7 fechada')+'">\ud83d\udd34 DEVOLV.</span>':'')+
-        (h.nf_numero?'<div class="desc">NF '+esc(h.nf_numero)+'</div>':'')+'</td>'+
+      '<td>'+(h._cancelado?'<span style="color:#64748b;font-weight:800" title="CANCELADO no Bling — fora dos totais">✕</span> ':(h.sintetico?'<span style="color:#f59e0b;font-weight:800" title="aguardando bipagem — margem já calculada">✓</span> ':'<span style="color:#34d399;font-weight:800" title="bipagem confirmada">✓</span> '))+'<b>'+esc(h.numero||h.id)+'</b>'+(h.id?' <a href="https://www.bling.com.br/vendas.php#edit/'+esc(h.id)+'" target="_blank" rel="noopener" title="abrir o pedido no Bling" style="font-size:10px;color:#3b82f6;text-decoration:none;font-weight:600">Bling↗</a>':'')+(carrinho?' <span class="badge" title="'+unid+' unidades">🛒 '+unid+'</span>':'')+(h.devolucao?' <span class="st bad" style="font-size:9px" title="DEVOLU\u00c7\u00c3O no ML'+(h.dev_frete_retorno!=null?' \u00b7 frete de retorno '+BRL(h.dev_frete_retorno):'')+(h.dev_destino==='seller_address'?' \u00b7 mercadoria volta pro galp\u00e3o':(h.dev_destino==='warehouse'?' \u00b7 mercadoria foi pro ML':''))+(h.dev_aberta?' \u00b7 EM ABERTO':' \u00b7 fechada')+'">\ud83d\udd34 DEVOLV.</span>':'')+
+        (h.nf_numero?'<div class="desc">NF '+esc(h.nf_numero)+(h.nf_id?' <a href="https://www.bling.com.br/notas.fiscais.php#edit/'+esc(h.nf_id)+'" target="_blank" rel="noopener" title="abrir a NF no Bling" style="color:#3b82f6;text-decoration:none;font-weight:600">↗</a>':'')+'</div>':'')+'</td>'+
       (function(){
         const nlV = String(h.numero_loja||'');
         const par = [h.ml_pack, h.ml_order].map(x=>x!=null?String(x):null).find(x=>x && x!==nlV) || null;
