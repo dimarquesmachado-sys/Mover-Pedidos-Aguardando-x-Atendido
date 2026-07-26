@@ -39,8 +39,11 @@
   .pill{border:1px solid var(--line);border-radius:999px;padding:3px 10px;background:var(--card)}
   .pill b{font-weight:800}
   .pill.g b{color:var(--ok)} .pill.w{border-color:#f59e0b44} .pill.w b{color:var(--warn)}
-  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(158px,1fr));gap:12px;margin:18px 0}
+  .kpis{display:flex;flex-wrap:nowrap;overflow-x:auto;gap:12px;margin:18px 0;padding-bottom:6px}
+  .kpis::-webkit-scrollbar{height:6px}
+  .kpis::-webkit-scrollbar-thumb{background:var(--line2);border-radius:3px}
   .kpi{background:linear-gradient(160deg,var(--card2),var(--card));border:1px solid var(--line);border-radius:var(--r);
+       flex:1 1 150px;min-width:146px;
        padding:14px 16px;position:relative;overflow:hidden;transition:transform .15s,border-color .15s}
   .kpi:hover{transform:translateY(-2px);border-color:var(--line2)}
   .kpi::before{content:'';position:absolute;inset:0 0 auto 0;height:3px;background:var(--kc,var(--ac));opacity:.9}
@@ -100,7 +103,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd65';
+const DASH_BUILD = 'd68';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -159,6 +162,18 @@ function setSortProj(c){ sortProj = { col:c, dir:(sortProj.col===c ? -sortProj.d
 const seta = (st,c)=> st.col===c ? (st.dir<0?' ↓':' ↑') : '';
 function cmpNull(a,b,dir){ const an=(a==null||!isFinite(a)), bn=(b==null||!isFinite(b)); if(an&&bn)return 0; if(an)return 1; if(bn)return -1; return (a-b)*dir; }
 
+// b41: cor da linha por ESTADO da venda — bate o olho e entende de cara.
+// 🟢 verde=ativa perfeita · 🟡 amarela=devolução em andamento · 🔴 vermelha=devolveu · ⚪ cinza=cancelou (sem enviar)
+function estiloLinha(h){
+  if(h && h.devolucao){
+    return h.dev_aberta
+      ? 'border-left:3px solid #eab308;background:linear-gradient(90deg,rgba(234,179,8,.14),transparent 55%)'   // devolução rolando (dinheiro ainda pendente no MP)
+      : 'border-left:3px solid #ef4444;background:linear-gradient(90deg,rgba(239,68,68,.16),transparent 55%)';   // devolução consolidada — prejuízo real
+  }
+  if(h && h._cancelado) return 'border-left:3px solid #475569;opacity:.4';   // cancelou — nao-evento
+  return 'border-left:3px solid rgba(52,211,153,.45)';   // ativa saudavel
+}
+
 function prepararVendas(){
   const _sit = {}; (VENDAS||[]).forEach(v=>{ if(v&&v.numero!=null) _sit[String(v.numero)]=v; });
   (DADOS||[]).forEach(h=>{ const v=_sit[String(h.numero)]; if(v){ h._sit=v.situacao||null; h._cancelado=/cancel/i.test(String(v.situacao||'')); if(v.data && !h.venda_dia) h.venda_dia=v.data; if(v.venda_em && !h.venda_em) h.venda_em=v.venda_em; if(v.tarifa_ml!=null && h.tarifa_ml==null) h.tarifa_ml=Number(v.tarifa_ml); if(v.frete_recebido!=null && h.frete_recebido==null) h.frete_recebido=Number(v.frete_recebido); if(v.renda_canal!=null && h.renda_canal==null) h.renda_canal=Number(v.renda_canal); if(v.devolucao){ h.devolucao=1; if(v.dev_frete_retorno!=null)h.dev_frete_retorno=Number(v.dev_frete_retorno); h.dev_destino=v.dev_destino; h.dev_status=v.dev_status; h.dev_aberta=v.dev_aberta; } } });   // d45: bipada herda dia/hora · d50: tarifa REAL · d51: frete recebido · d53: renda oficial · b39: devolução
@@ -212,6 +227,7 @@ function intervalo(){
   else if(periodo==='7') de = spDate(Date.now()-6*86400000);
   else if(periodo==='30') de = spDate(Date.now()-29*86400000);
   else if(periodo==='mes') de = hoje.slice(0,8)+'01';
+  else if(periodo==='ano') de = hoje.slice(0,4)+'-01-01';   // ano corrente inteiro (01/jan até hoje)
   else if(periodo==='mesant'){ const [Y,M]=hoje.split('-').map(Number); const pm=new Date(Y,M-2,1);
     const y2=pm.getFullYear(), m2=String(pm.getMonth()+1).padStart(2,'0');
     de=y2+'-'+m2+'-01'; ate=y2+'-'+m2+'-'+String(new Date(Y,M-1,0).getDate()).padStart(2,'0'); }
@@ -250,6 +266,12 @@ function montar(){
       'oninput="buscarPed(this.value)">'+
       '<div id="buscaRes" style="margin-top:10px"></div><div id="plCard"></div></div>'+
     '<div class="sec"><h2>📋 Análise de vendas — margem por pedido <span class="hint">mais novas em cima · ✓ verde = bipado · ✓ laranja = aguardando bipagem (margem já calculada) · 🧾 = hora da NF · 🕘 = hora da conferência</span></h2>'+
+    '<div style="display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--mut);margin:-4px 0 10px;align-items:center"><span style="color:var(--mut)">cor da linha:</span>'+
+      '<span style="display:inline-flex;align-items:center;gap:5px"><span style="width:11px;height:11px;border-radius:2px;background:#34d399;display:inline-block"></span>ativa</span>'+
+      '<span style="display:inline-flex;align-items:center;gap:5px"><span style="width:11px;height:11px;border-radius:2px;background:#eab308;display:inline-block"></span>devolução em andamento</span>'+
+      '<span style="display:inline-flex;align-items:center;gap:5px"><span style="width:11px;height:11px;border-radius:2px;background:#ef4444;display:inline-block"></span>devolvida</span>'+
+      '<span style="display:inline-flex;align-items:center;gap:5px"><span style="width:11px;height:11px;border-radius:2px;background:#475569;display:inline-block"></span>cancelada</span>'+
+    '</div>'+
       '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px"><span id="anPerChips" style="display:flex;gap:6px;flex-wrap:wrap"></span><span id="anPerDatas"></span></div>'+
       '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">'+
       '<select id="anCanalSel" onchange="anCanal=this.value;anPage=0;renderAnalise()" style="background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:9px;padding:7px 10px;font-size:12.5px"></select>'+
@@ -316,7 +338,7 @@ function montar(){
 }
 
 function render(){
-  const defs = [['dia','Hoje'],['ontem','Ontem'],['7','7 dias'],['30','30 dias'],['mes','Mês'],['mesant','Mês anterior'],['custom','Período…']];
+  const defs = [['dia','Hoje'],['ontem','Ontem'],['7','7 dias'],['30','30 dias'],['mes','Mês'],['mesant','Mês anterior'],['ano','Ano'],['custom','Período…']];
   $('chips').innerHTML = defs.map(([k,l])=>'<button class="chip'+(periodo===k?' on':'')+'" onclick="setPeriodo(\''+k+'\')">'+l+'</button>').join('');
   $('custom').style.display = periodo==='custom' ? 'flex' : 'none';
 
@@ -806,6 +828,7 @@ function anIntervalo(){
   else if(anPer==='ontem'){ const o = spDate(Date.now()-86400000); de=o; ate=o; }
   else if(anPer==='7') de = spDate(Date.now()-6*86400000);
   else if(anPer==='mes') de = hoje.slice(0,8)+'01';
+  else if(anPer==='ano') de = hoje.slice(0,4)+'-01-01';   // ano corrente inteiro
   else if(anPer==='mesant'){ const [Y,M]=hoje.split('-').map(Number); const pm=new Date(Y,M-2,1);
     const y2=pm.getFullYear(), m2=String(pm.getMonth()+1).padStart(2,'0');
     de=y2+'-'+m2+'-01'; ate=y2+'-'+m2+'-'+String(new Date(Y,M-1,0).getDate()).padStart(2,'0'); }
@@ -817,7 +840,7 @@ function renderAnalise(){
   if(window._anPintou && selAtiva()){ clearTimeout(window._selT2); window._selT2=setTimeout(renderAnalise,2500); return; }
   window._anPintou = true;
   const pr=$('anPerChips'), pd=$('anPerDatas');
-  if(pr){ const defs=[['dia','Hoje'],['ontem','Ontem'],['7','Semana'],['mes','Mês'],['mesant','Mês passado'],['custom','Período…']];
+  if(pr){ const defs=[['dia','Hoje'],['ontem','Ontem'],['7','Semana'],['mes','Mês'],['mesant','Mês passado'],['ano','Ano'],['custom','Período…']];
     pr.innerHTML = defs.map(([k,l])=>'<button class="chip'+(anPer===k?' on':'')+'" onclick="setAnPer(\''+k+'\')">'+l+'</button>').join(''); }
   if(pd){ pd.innerHTML = anPer==='custom' ? ' <input type="date" value="'+anPDe+'" onclick="this.showPicker&&this.showPicker()" onchange="anPDe=this.value;anPage=0;renderAnalise()"> <input type="date" value="'+anPAte+'" onclick="this.showPicker&&this.showPicker()" onchange="anPAte=this.value;anPage=0;renderAnalise()">' : ''; }
   const iv=anIntervalo();
@@ -916,7 +939,7 @@ function renderAnalise(){
     if(h.sintetico && !((h.itens||[]).length)){   // detalhe ainda não chegou — linha resumida
       const dtx = _d ? (_d.slice(8,10)+'/'+_d.slice(5,7)) : '—';
       const tag = h._cancelado ? '<span class="st bad">CANCELADA</span>' : '<span class="dim" style="font-size:10px" title="o sync ainda não trouxe os itens desta venda do Bling — a margem entra sozinha na próxima rodada (até 5 min)">⏳</span>';
-      return sep + '<tr style="opacity:'+(h._cancelado?'.38':'.72')+'">'+
+      return sep + '<tr style="'+estiloLinha(h)+'">'+
         '<td class="dim">'+dtx+'</td>'+
         '<td>'+(h._cancelado?'<span style="color:#64748b;font-weight:800" title="CANCELADO no Bling">✕</span> ':'<span style="color:#f59e0b;font-weight:800" title="aguardando bipagem">✓</span> ')+'<b>'+esc(h.numero)+'</b>'+(h.devolucao?' <span class="st bad" style="font-size:9px" title="DEVOLU\u00c7\u00c3O no ML">\ud83d\udd34 DEVOLV.</span>':'')+'<br><span class="dim" style="font-size:10px">'+esc(h._sit||'')+'</span></td>'+
         '<td class="dim" style="font-size:11px;max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(h.numero_loja?esc(h.numero_loja)+(linkMkt(h)?' <a href="'+linkMkt(h)+'" target="_blank" rel="noopener" style="text-decoration:none">↗</a>':''):'—')+'</td>'+
@@ -928,7 +951,7 @@ function renderAnalise(){
         '<td class="num">'+tag+'</td><td class="num dim">—</td>'+
       '</tr>';
     }
-    return sep + '<tr'+(h._cancelado?' style="opacity:.38" title="pedido CANCELADO no Bling — fora dos totais"':'')+'>'+
+    return sep + '<tr style="'+estiloLinha(h)+'"'+(h._cancelado?' title="pedido CANCELADO no Bling — fora dos totais"':(h.devolucao?(' title="DEVOLU\u00c7\u00c3O'+(h.dev_aberta?' em andamento (dinheiro ainda n\u00e3o resolvido no Mercado Pago)':' consolidada')+'"'):''))+'>'+
       '<td class="dim" style="white-space:nowrap" title="'+(h.venda_em?('venda: '+dtBR(h.venda_em)+' · '):(h.venda_dia?('venda: '+String(h.venda_dia).slice(8,10)+'/'+String(h.venda_dia).slice(5,7)+' · '):''))+'conferido: '+dtBR(h.conferido_em)+'">'+(h.venda_em?dtBR(h.venda_em):(h.venda_dia?(String(h.venda_dia).slice(8,10)+'/'+String(h.venda_dia).slice(5,7)+(h.nf_emissao?(' '+String(h.nf_emissao).replace(' ','T').slice(11,16)+' <span style="font-size:9px" title="hora da EMISSÃO da NF no Bling — a hora exata da venda só a API do canal dá">🧾</span>'):' <span style="font-size:9px" title="dia da venda (Bling) — hora só com a API do canal">🕘</span>')):(h.nf_emissao?(String(h.nf_emissao).slice(8,10)+'/'+String(h.nf_emissao).slice(5,7)+' '+String(h.nf_emissao).replace(' ','T').slice(11,16)+' <span style="font-size:9px" title="hora da EMISSÃO da NF no Bling — a hora exata da venda só a API do canal dá">🧾</span>'):(dtBR(h.conferido_em)+' <span style="font-size:9px" title="hora da conferência">🕘</span>'))))+'</td>'+
       '<td>'+(h._cancelado?'<span style="color:#64748b;font-weight:800" title="CANCELADO no Bling — fora dos totais">✕</span> ':(h.sintetico?'<span style="color:#f59e0b;font-weight:800" title="aguardando bipagem — margem já calculada">✓</span> ':'<span style="color:#34d399;font-weight:800" title="bipagem confirmada">✓</span> '))+'<b>'+esc(h.numero||h.id)+'</b>'+(carrinho?' <span class="badge" title="'+unid+' unidades">🛒 '+unid+'</span>':'')+(h.devolucao?' <span class="st bad" style="font-size:9px" title="DEVOLU\u00c7\u00c3O no ML'+(h.dev_frete_retorno!=null?' \u00b7 frete de retorno '+BRL(h.dev_frete_retorno):'')+(h.dev_destino==='seller_address'?' \u00b7 mercadoria volta pro galp\u00e3o':(h.dev_destino==='warehouse'?' \u00b7 mercadoria foi pro ML':''))+(h.dev_aberta?' \u00b7 EM ABERTO':' \u00b7 fechada')+'">\ud83d\udd34 DEVOLV.</span>':'')+
         (h.nf_numero?'<div class="desc">NF '+esc(h.nf_numero)+'</div>':'')+'</td>'+
