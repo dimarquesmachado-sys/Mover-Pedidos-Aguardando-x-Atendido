@@ -96,14 +96,59 @@
             border-radius:16px;padding:40px 30px}
   .skel{color:var(--dim);text-align:center;padding:30px}
   ::-webkit-scrollbar{height:8px;width:8px} ::-webkit-scrollbar-thumb{background:var(--line2);border-radius:99px}
-  @media(max-width:720px){ body{padding:0 10px 30px} .sec{padding:14px} .desc{max-width:180px} .kpi .v{font-size:18px} }
+  /* ══════════════ CELULAR ══════════════ */
+  @media(max-width:720px){
+    body{padding:0 8px 30px}
+    .sec{padding:12px;border-radius:12px}
+    .desc{max-width:none}
+    /* cards: 2 por linha em vez de rolagem lateral */
+    .kpis{display:grid;grid-template-columns:1fr 1fr;overflow-x:visible;gap:8px;margin:12px 0}
+    .kpi{min-width:0!important;padding:10px 12px}
+    .kpi .v{font-size:17px} .kpi .l{font-size:10px} .kpi .s{font-size:9.5px}
+    .kpi .ic{font-size:15px}
+    /* alvos de toque maiores */
+    .chip{padding:9px 13px;font-size:13px}
+    button.chip,.btn{min-height:38px}
+    h2{font-size:15px}
+    .hint{display:none}
+    /* barra "ir para" fixa no topo — navegar sem rolar o dia todo */
+    .atalhos{position:sticky;top:0;z-index:20;background:var(--bg);padding:8px 0;margin:0 0 10px;
+             overflow-x:auto;flex-wrap:nowrap!important;-webkit-overflow-scrolling:touch}
+    .atalhos .chip{flex:0 0 auto;white-space:nowrap}
+    /* tabelas mais compactas */
+    table{font-size:11.5px}
+    td{padding:7px 6px} th{padding:6px 6px;font-size:9.5px}
+    .tw{overflow-x:auto;-webkit-overflow-scrolling:touch}
+    /* ANÁLISE: esconde as colunas menos críticas (venda mkt, canal, un., produtos, estorno) */
+    #tAnalise tr>*:nth-child(3),#tAnalise tr>*:nth-child(4),#tAnalise tr>*:nth-child(6),
+    #tAnalise tr>*:nth-child(8),#tAnalise tr>*:nth-child(13){display:none}
+    /* TOP PRODUTOS: esconde curva e participação */
+    #tProd tr>*:nth-child(7),#tProd tr>*:nth-child(9){display:none}
+    /* cabeçalho congelado da tabela desligado no celular (brigava com a barra fixa) */
+    .tw th{position:static;box-shadow:none}
+    /* rodapé de paginação empilha */
+    #anRodape{flex-wrap:wrap}
+    /* mapa do Brasil menor */
+    #ufMapa{transform:scale(.86);transform-origin:top left}
+  }
+  /* ══════════════ CELULAR ESTREITO ══════════════ */
+  @media(max-width:520px){
+    .kpis{grid-template-columns:1fr 1fr}
+    .kpi .v{font-size:16px}
+    /* na Análise sobra o essencial: data · pedido · produto · venda · M.C. · % */
+    #tAnalise tr>*:nth-child(9),#tAnalise tr>*:nth-child(10),
+    #tAnalise tr>*:nth-child(11),#tAnalise tr>*:nth-child(12){display:none}
+    #tProd tr>*:nth-child(5),#tProd tr>*:nth-child(8){display:none}
+    table{font-size:11px} td{padding:6px 5px}
+    .sskus div{font-size:11px}
+  }
 </style>
 </head>
 <body>
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd91';
+const DASH_BUILD = 'd93';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -1001,8 +1046,12 @@ function renderAnalise(){
   if(pd){ pd.innerHTML = anPer==='custom' ? ' <input type="date" value="'+anPDe+'" onclick="this.showPicker&&this.showPicker()" onchange="anPDe=this.value;anPage=0;renderAnalise()"> <input type="date" value="'+anPAte+'" onclick="this.showPicker&&this.showPicker()" onchange="anPAte=this.value;anPage=0;renderAnalise()">' : ''; }
   const iv=anIntervalo();
   let L = DADOS.filter(h=>{ if(!h.conferido_em) return false; const d=diaVenda(h); return d>=iv.de && d<=iv.ate; });
-  const cnt={}; L.forEach(h=>{ const k=canalKey(h.marketplace); cnt[k]=(cnt[k]||0)+1; });
-  const opts='<option value="">Todos os canais ('+L.length+')</option>'+Object.keys(cnt).sort().map(k=>'<option value="'+k+'"'+(anCanal===k?' selected':'')+'>'+nomeCanal(k)+' ('+cnt[k]+')</option>').join('');
+  // 🐛 27/07: o dropdown contava SÓ os bipados (mostrava 72 com 110 na lista). Agora conta o mesmo
+  // universo que a lista exibe: bipados + vendas do Bling ainda não bipadas.
+  const _naoBip = (SINT||[]).filter(h=>{ const d2=diaVenda(h); return d2>=iv.de && d2<=iv.ate; });
+  const _univ = L.concat(_naoBip);
+  const cnt={}; _univ.forEach(h=>{ const k=canalKey(h.marketplace); cnt[k]=(cnt[k]||0)+1; });
+  const opts='<option value="">Todos os canais ('+_univ.length+')</option>'+Object.keys(cnt).sort().map(k=>'<option value="'+k+'"'+(anCanal===k?' selected':'')+'>'+nomeCanal(k)+' ('+cnt[k]+')</option>').join('');
   if(sel.innerHTML!==opts) sel.innerHTML=opts;
   if(anCanal) L=L.filter(h=>canalKey(h.marketplace)===anCanal);
   const q = String(anSku||'').trim().toLowerCase();
