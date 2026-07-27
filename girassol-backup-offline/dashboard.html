@@ -56,7 +56,8 @@
   .kpi .l{font-size:11px;color:var(--mut);font-weight:600;letter-spacing:.02em;margin-top:2px}
   .kpi .v{font-size:21px;font-weight:800;letter-spacing:-.02em;margin-top:3px;font-variant-numeric:tabular-nums}
   .kpi .s{font-size:10.5px;color:var(--dim);margin-top:2px}
-  .sec{background:linear-gradient(170deg,var(--card2),var(--card));border:1px solid var(--line);border-radius:var(--r);
+  /* o cabeçalho é fixo: reserva a altura dele pra o atalho parar no INÍCIO da seção, não em cima dela */
+  .sec{scroll-margin-top:calc(var(--hdrH,104px) + 14px);background:linear-gradient(170deg,var(--card2),var(--card));border:1px solid var(--line);border-radius:var(--r);
        padding:18px;margin:14px 0}
   .sec h2{font-size:14px;font-weight:800;margin:0 0 14px;letter-spacing:-.01em;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
   .sec h2 .hint{font-size:10.5px;font-weight:600;color:var(--dim);margin-left:auto}
@@ -169,7 +170,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd102';
+const DASH_BUILD = 'd104';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -484,7 +485,13 @@ function comAncora(fn){
   fn();
   if(alvo){ requestAnimationFrame(()=>{ const depois = alvo.getBoundingClientRect().top; const dif = depois-antes; if(Math.abs(dif)>2) window.scrollBy(0, dif); }); }
 }
-function irPra(id){ const el=document.getElementById(id); if(el) el.scrollIntoView({behavior:'smooth',block:'start'}); }
+function irPra(id){
+  const el=document.getElementById(id); if(!el) return;
+  const hd=document.querySelector('.hdr');
+  const off=(hd?hd.offsetHeight:0)+12;   // desconta o cabeçalho fixo pra parar no início da seção
+  const y=el.getBoundingClientRect().top + window.pageYOffset - off;
+  window.scrollTo({top:Math.max(0,y), behavior:'smooth'});
+}
 function setPeriodo(p){ periodo=p; espelharPeriodoNaAnalise(); comAncora(()=>{ render(); renderAnalise(); }); }
 // d48: o seletor do TOPO é o botão MASTER — escolheu lá, a Análise de vendas obedece junto.
 // (os chips da própria Análise continuam funcionando pra quem quiser um recorte diferente só nela)
@@ -618,7 +625,12 @@ function render(){
   let fat=0, comValor=0, semValor=0, flex=0, unid=0, itensTot=0, itensComValor=0, comUF=0, fatProd=0, freteEmb=0, fretePed=0, pedML=0, pedMLr=0, pedTarReal=0;
   let fatNF=0, pedNF=0, freteNF=0, fretePedNF=0;   // fonte NOTA FISCAL (vprod_nf)
   const porDia={}, porProd={}, porUF={}; let porCanal={};
-  PER.forEach(h=>{
+  const AGD = (SINT||[]).filter(s=>{ if(s._cancelado) return false; const d2=diaVenda(s); return d2>=de && d2<=ate; });
+  const agdVal = AGD.reduce((s2,x)=> s2 + ((x.valor!=null&&isFinite(Number(x.valor)))?Number(x.valor):0), 0);
+  // 27/07: o ranking/Top produtos/Por canal contavam SÓ os bipados — venda ainda não bipada
+  // (ex.: PM1) sumia do Top produtos mesmo tendo margem. Agora o laço cobre as duas populações,
+  // igual os cards do topo. O 'fat' passa a somar tudo, então o card não soma agdVal de novo.
+  PER.concat(AGD).forEach(h=>{
     const d = diaVenda(h);
     if(!porDia[d]) porDia[d]={ped:0,fat:0};
     porDia[d].ped++;
@@ -675,8 +687,6 @@ function render(){
   const kpi=(kc,ic,l,v,s)=>'<div class="kpi" style="--kc:'+kc+'"><span class="ic">'+ic+'</span><div class="l">'+l+'</div><div class="v">'+v+'</div>'+(s?'<div class="s">'+s+'</div>':'')+'</div>';
   // d47: "dia completo" = bipados do período + vendas do Bling AINDA não bipadas atribuídas ao período (canceladas fora)
   // Este é o número comparável ao Jodda — os demais cards são só a parte JÁ BIPADA (margem fechada).
-  const AGD = (SINT||[]).filter(s=>{ if(s._cancelado) return false; const d2=diaVenda(s); return d2>=de && d2<=ate; });
-  const agdVal = AGD.reduce((s2,x)=> s2 + ((x.valor!=null&&isFinite(Number(x.valor)))?Number(x.valor):0), 0);
   // ── CÁLCULO DO PERÍODO ──────────────────────────────────────────────────────────
   // Roda sobre TODAS as vendas aprovadas do período (bipadas + ainda não bipadas),
   // exatamente a mesma população do card "Faturamento Total". Antes só as bipadas
@@ -759,8 +769,8 @@ function render(){
     setTimeout(()=>completarDetalhes(), 400);
   })();
   $('kpis').innerHTML =
-    kpi('#34d399','💰','Faturamento Total', BRL(usaHist?HIST.totais.faturamento:(fat+agdVal)), (usaHist?'📚 histórico · ':'')+'vendas aprovadas no período · '+N(totPed)+' pedidos') +
-    kpi('#f59e0b','🧾','Impostos', BRL(usaHist?HIST.totais.imposto:MC.imp), (MC.imp>0&&(fat+agdVal)>0?('Simples · '+(Math.round(MC.imp/(fat+agdVal)*10000)/100).toString().replace('.',',')+'% do faturamento'):'Simples nacional')+(MC.pedImp<totPed?' · <span class="warn">falta alíquota em '+N(totPed-MC.pedImp)+'</span>':'')) +
+    kpi('#34d399','💰','Faturamento Total', BRL(usaHist?HIST.totais.faturamento:fat), (usaHist?'📚 histórico · ':'')+'vendas aprovadas no período · '+N(totPed)+' pedidos') +
+    kpi('#f59e0b','🧾','Impostos', BRL(usaHist?HIST.totais.imposto:MC.imp), (MC.imp>0&&fat>0?('Simples · '+(Math.round(MC.imp/fat*10000)/100).toString().replace('.',',')+'% do faturamento'):'Simples nacional')+(MC.pedImp<totPed?' · <span class="warn">falta alíquota em '+N(totPed-MC.pedImp)+'</span>':'')) +
     kpi('#a78bfa','📦','Custo de produtos', BRL(usaHist?HIST.totais.custo:MC.cus),
       usaHist ? (HIST.totais.un_sem_custo ? ('<span class="warn">⚠ '+N(HIST.totais.un_sem_custo)+' un. sem custo no período</span>') : (N(HIST.totais.unidades)+' unidades vendidas'))
       : MC.semDados ? ('<span class="warn">⚠ '+N(MC.semDados)+' pedido(s) fora da conta (custo ainda não fechado)</span>')
@@ -768,10 +778,10 @@ function render(){
       : (MC.cusUn>=MC.unTot ? (N(MC.unTot)+' unidades vendidas')
       : ('<span class="warn">⚠ sem custo em '+N(MC.unTot-MC.cusUn)+' de '+N(MC.unTot)+' un.</span><div style="font-size:10px;margin-top:2px;line-height:1.35">cadastre o custo destes no Bling: <b style="font-family:ui-monospace,monospace;color:#fbbf24">'+MC.semCustoSkus.slice(0,8).map(esc).join(', ')+(MC.semCustoSkus.length>8?' +'+(MC.semCustoSkus.length-8):'')+'</b></div>')))) +
     (MC.temCfg
-      ? '<div class="kpi" style="--kc:#14b8a6"><span class="ic">💎</span><div class="l">Lucro Bruto (M.C.)</div><div class="v '+((usaHist?HIST.totais.margem:MC.mc)>=0?'ok':'bad')+'">'+BRL(usaHist?HIST.totais.margem:MC.mc)+((usaHist?HIST.totais.faturamento:(fat+agdVal))>0?'<span style="font-size:13px;opacity:.8;font-weight:600"> · '+(Math.round((usaHist?HIST.totais.margem:MC.mc)/(usaHist?HIST.totais.faturamento:(fat+agdVal))*1000)/10).toString().replace('.',',')+'%</span>':'')+'</div><div class="s">'+(usaHist?'📚 do histórico completo do período':(MC.semDados?'<span class="warn">⚠ '+N(MC.pedOk)+' de '+N(totPed)+' pedidos com custo fechado (bate com a Análise)</span>':(MC.unTot&&MC.cusUn<MC.unTot?'<span class="warn">⚠ falta cadastrar o custo de '+N(MC.unTot-MC.cusUn)+' un. — o lucro real fica um pouco menor</span>':(MC.semCfg?'<span class="warn">⚠ '+N(MC.semCfg)+' pedido(s) sem taxa configurada</span>':'venda − imposto − comissão − frete − custo'))))+'</div></div>'
+      ? '<div class="kpi" style="--kc:#14b8a6"><span class="ic">💎</span><div class="l">Lucro Bruto (M.C.)</div><div class="v '+((usaHist?HIST.totais.margem:MC.mc)>=0?'ok':'bad')+'">'+BRL(usaHist?HIST.totais.margem:MC.mc)+((usaHist?HIST.totais.faturamento:fat)>0?'<span style="font-size:13px;opacity:.8;font-weight:600"> · '+(Math.round((usaHist?HIST.totais.margem:MC.mc)/(usaHist?HIST.totais.faturamento:fat)*1000)/10).toString().replace('.',',')+'%</span>':'')+'</div><div class="s">'+(usaHist?'📚 do histórico completo do período':(MC.semDados?'<span class="warn">⚠ '+N(MC.pedOk)+' de '+N(totPed)+' pedidos com custo fechado (bate com a Análise)</span>':(MC.unTot&&MC.cusUn<MC.unTot?'<span class="warn">⚠ falta cadastrar o custo de '+N(MC.unTot-MC.cusUn)+' un. — o lucro real fica um pouco menor</span>':(MC.semCfg?'<span class="warn">⚠ '+N(MC.semCfg)+' pedido(s) sem taxa configurada</span>':'venda − imposto − comissão − frete − custo'))))+'</div></div>'
       : '<div class="kpi" style="--kc:#64748b;cursor:pointer" onclick="document.getElementById(\'cfgBox\').scrollIntoView({behavior:\'smooth\'})"><span class="ic">💎</span><div class="l">Lucro Bruto (M.C.)</div><div class="v dim">—</div><div class="s warn">⚙️ configure as taxas por canal abaixo</div></div>') +
     kpi('var(--ac)','📊','Pedidos', N(totPed), (!usaHist && MC.semItens)?('<span class="warn">⚠ '+N(MC.semItens)+' sem detalhe</span> <button onclick="completarDetalhes()" title="o dashboard já busca sozinho ao abrir o período — este botão é só pra tentar de novo" style="background:#1d4ed8;color:#fff;border:0;border-radius:6px;padding:2px 7px;font-size:10px;font-weight:700;cursor:pointer">↻ tentar de novo</button><div id="avisoDet" style="font-size:10px;margin-top:2px"></div>'):(MC.unTot>0?('<b style="font-size:13px;color:var(--txt);opacity:1">'+N(usaHist?HIST.totais.unidades:MC.unTot)+' unidades vendidas</b>'):'sem itens no período')) +
-    kpi('var(--warn)','🎯','Ticket médio', BRL((usaHist?HIST.totais.faturamento:(fat+agdVal))/(totPed||1)), 'faturamento ÷ pedidos') +
+    kpi('var(--warn)','🎯','Ticket médio', BRL((usaHist?HIST.totais.faturamento:fat)/(totPed||1)), 'faturamento ÷ pedidos') +
     (VENDAS.length?'<div class="kpi" style="--kc:#38bdf8"><span class="ic">🛰</span><div class="l">Ao vivo</div><div class="v"><button onclick="sincVendas(this)" style="background:#38bdf822;border:1px solid #38bdf855;color:#7dd3fc;border-radius:8px;padding:5px 12px;cursor:pointer;font-weight:700;font-size:14px">🔄 atualizar</button></div><div class="s">'+N(VBok.length)+' vendas no Bling · sincroniza sozinho a cada 5 min</div></div>':'') +
     '<div class="kpi" id="kMargem" style="display:none"></div>';
 
@@ -783,7 +793,7 @@ function render(){
   const canais = Object.keys(porCanal).sort((a,b)=>porCanal[b].ped-porCanal[a].ped);
   const NOME = {mercadolivre:'Mercado Livre',ml:'Mercado Livre',shopee:'Shopee',magalu:'Magalu',amazon:'Amazon',tiktok:'TikTok',madeira:'MadeiraMadeira',leroy:'Leroy Merlin',outro:'Outro'};
   $('tCanal').innerHTML = '<tr><th>Canal</th><th class="num">Pedidos</th><th class="num">%</th><th class="num">Faturamento</th><th class="num">Ticket médio</th><th class="num">⚡ Flex</th></tr>'+
-    canais.map(mk=>{const c=porCanal[mk];const p=pc(c.ped,PER.length);
+    canais.map(mk=>{const c=porCanal[mk];const p=pc(c.ped,totPed||PER.length);
       return '<tr><td><b>'+esc(NOME[mk]||mk)+'</b></td>'+
       '<td class="num"><div style="display:flex;align-items:center;gap:8px;justify-content:flex-end"><div class="bar" style="width:64px;flex:none"><i style="width:'+p+'%"></i></div><b>'+N(c.ped)+'</b></div></td>'+
       '<td class="num dim">'+p+'%</td>'+
