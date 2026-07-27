@@ -148,7 +148,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd97';
+const DASH_BUILD = 'd98';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -735,7 +735,7 @@ function render(){
 
   // 📚 período longo: o ranking vem do histórico (Supabase), não do cache local
   const prods = usaHist
-    ? HIST.skus.map(x=>({ sku:x.sku, desc:x.desc, qtd:x.un, qtdV:x.un, fat:x.fat, custo:x.cus, qtdC:x.un, mc:x.mar, mcQtd:x.un }))
+    ? HIST.skus.map(x=>({ sku:x.sku, desc:x.desc, qtd:x.un, qtdV:x.un, fat:x.fat, custo:x.cus, qtdC:x.un, mc:x.mar, qtdM:x.un }))   // 27/07: era 'mcQtd' (nome errado) e a tela mostrava "0/241 un. c/ margem"
     : Object.values(porProd);
   // d56: curva ABC do PERÍODO pesquisado — ordena por faturamento e acumula: A = até 80% do faturamento · B = 80–95% · C = o resto (sem faturamento = C)
   (function(){
