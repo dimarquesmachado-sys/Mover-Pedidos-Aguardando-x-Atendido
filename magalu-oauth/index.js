@@ -24,11 +24,21 @@
 
 const fs   = require('fs');
 const path = require('path');
-const { json, html } = require('../lib/http');
+const { json, html, readBody } = require('../lib/http');
 
-const VERSAO = 'magalu-oauth v1 b25';
+const VERSAO = 'magalu-oauth v1 b29';
 
 const DATA_DIR = process.env.MAGALU_DATA_DIR || '/data/magalu';
+
+// ── ARQUIVADOR DAS NF-e DE FULFILLMENT ────────────────────────────────
+// O cron baixa sozinho 2x por dia e guarda no disco do Render (/data é o
+// volume persistente — sobrevive a deploy). O painel só lista o que já está
+// pronto: o download vira instantâneo, sem esperar a Magalu gerar.
+const NF_DIR         = process.env.MAGALU_NF_DIR || (DATA_DIR + '/nf-fulfillment');
+const NF_EMPRESAS    = (process.env.MAGALU_NF_EMPRESAS || 'good,amb').split(',').map(x => x.trim()).filter(Boolean);
+const NF_DIAS        = 31;   // janela puxada sempre: o Bling ignora as repetidas, entao vale pegar tudo
+const NF_MANTER      = 10;   // quantos arquivos guardar por empresa (o resto e apagado)
+const NF_CRON        = process.env.MAGALU_NF_CRON || '0 9,18 * * *';   // 9h e 18h, TZ do servico (America/Sao_Paulo)
 
 // Endpoints do ID Magalu (OAuth) e da API pública.
 // A tela de consentimento é /login (NÃO /oauth/authorize — esse devolve JSON
@@ -231,17 +241,172 @@ async function tratar(req, res, urlObj) {
   //  estao na lista precisaAdmin dele, e /magalu/nf-full NAO esta nessa lista
   //  (de proposito — nao quis mexer no orquestrador). Entao a trava e feita
   //  AQUI DENTRO. Sem ela a rota ficaria publica e qualquer um baixaria as NFs.
-  if (p === '/magalu/nf-full' || p === '/magalu/nf-full/baixar') {
+  if (p === '/magalu/nf-full' || p === '/magalu/nf-full/baixar' || p === '/magalu/nf-full/arquivo' || p === '/magalu/nf-full/rodar' || p === '/magalu/nf-full/importar' || p === '/magalu/nf-full/cookie') {
     const CHAVE_ADMIN = process.env.ADMIN_KEY || '';
     if (!CHAVE_ADMIN || q.get('k') !== CHAVE_ADMIN) { json(res, 404, { error: 'not found', path: p }); return true; }
 
     const eData = s => /^\d{4}-\d{2}-\d{2}$/.test(s);
     const fmtD  = d => d.toISOString().slice(0, 10);
 
+    // ── ENTREGA UM ARQUIVO JA ARQUIVADO (instantaneo) ──
+    if (p === '/magalu/nf-full/arquivo') {
+      const nome = String(q.get('nome') || '');
+      // so aceita o padrao exato do arquivador — barra qualquer ../ ou nome torto
+      if (!/^[a-z]+-\d{4}-\d{2}-\d{2}-\d{4}\.zip$/.test(nome)) { json(res, 400, { ok: false, erro: 'nome inválido' }); return true; }
+      const cheio = path.join(NF_DIR, nome);
+      let buf; try { buf = fs.readFileSync(cheio); } catch (e) { json(res, 404, { ok: false, erro: 'arquivo não está mais no disco' }); return true; }
+
+      // tipo=saida  → vendas + remessas (tpNF=1)
+      // tipo=entrada→ retornos simbólicos (tpNF=0)
+      // sem tipo    → o ZIP original, do jeito que a Magalu mandou
+      const tipo = String(q.get('tipo') || '').toLowerCase();
+      let saida_nome = nome;
+      if (tipo === 'saida' || tipo === 'entrada') {
+        let sep; try { sep = nfSeparar(buf); } catch (e) { json(res, 500, { ok: false, erro: 'não consegui abrir o zip: ' + String(e.message || e) }); return true; }
+        const itens = (tipo === 'saida' ? sep.saida : sep.entrada);
+        if (!itens.length) { json(res, 404, { ok: false, erro: 'não há notas de ' + tipo + ' nesse arquivo' }); return true; }
+        try { buf = nfMontarZip(itens); } catch (e) { json(res, 500, { ok: false, erro: 'falha ao montar o zip: ' + String(e.message || e) }); return true; }
+        saida_nome = nome.replace(/\.zip$/, '') + '-' + (tipo === 'saida' ? 'SAIDA' : 'ENTRADA') + '.zip';
+      }
+
+      res.writeHead(200, {
+        'Content-Type': 'application/zip',
+        'Content-Disposition': 'attachment; filename="' + saida_nome + '"',
+        'Content-Length': buf.length
+      });
+      res.end(buf);
+      return true;
+    }
+
+    // ── PAGINA DE COLAR O COOKIE DO BLING ──
+    // /magalu/nf-full/cookie?empresa=amb&k=ADMIN_KEY
+    // Mesma ideia do /cookie-setup da Girassol: cola e salva em disco, sem
+    // redeploy. Aceita o "Copiar como cURL" inteiro — ele extrai o cookie.
+    if (p === '/magalu/nf-full/cookie') {
+      const emp = String(q.get('empresa') || '').toLowerCase().trim();
+      if (!BLING_IMP[emp]) { json(res, 400, { ok: false, erro: 'empresa inválida (use good ou amb)' }); return true; }
+      const kq = encodeURIComponent(q.get('k') || '');
+      const NOMES = { good: 'GOOD Import', amb: 'AMBTotal' };
+
+      if (method === 'POST') {
+        let corpo = {};
+        try { corpo = await readBody(req); } catch (e) {}
+        const bruto = String(corpo.texto || '');
+        const cookie = blingExtrairCookie(bruto);
+        if (!cookie || cookie.length < 20 || cookie.indexOf('=') < 0) {
+          json(res, 400, { ok: false, erro: 'não achei um cookie válido no que você colou' }); return true;
+        }
+        try { blingSalvarCookie(emp, cookie); } catch (e) { json(res, 500, { ok: false, erro: String(e.message || e) }); return true; }
+        json(res, 200, { ok: true, empresa: emp, caracteres: cookie.length, tem_phpsessid: /PHPSESSID=/i.test(cookie) });
+        return true;
+      }
+
+      const atual = blingLerCookie(emp);
+      const st = atual
+        ? '<p class="ok">✓ Já tem cookie salvo para ' + (NOMES[emp] || emp) + ' (' + atual.length + ' caracteres' + (/PHPSESSID=/i.test(atual) ? ', com PHPSESSID' : ', <b>sem PHPSESSID — suspeito</b>') + '). Cole de novo pra atualizar.</p>'
+        : '<p class="nao">Nenhum cookie salvo para ' + (NOMES[emp] || emp) + ' ainda.</p>';
+
+      html(res, 200, `<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Cookie Bling — ${NOMES[emp] || emp}</title><style>
+body{font:15px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#0f1115;color:#e8eaed;margin:0;padding:24px}
+.wrap{max-width:720px;margin:0 auto}h1{font-size:20px;margin:0 0 16px}
+.card{background:#181b21;border:1px solid #2a2f3a;border-radius:10px;padding:18px;margin-bottom:16px}
+textarea{width:100%;height:150px;background:#0f1115;color:#e8eaed;border:1px solid #2a2f3a;border-radius:6px;padding:10px;font-family:ui-monospace,Menlo,monospace;font-size:12px}
+button{background:#1a73e8;color:#fff;border:0;padding:12px 20px;border-radius:8px;font:inherit;font-weight:600;cursor:pointer;margin-top:12px}
+.ok{color:#81c995}.nao{color:#f28b82}ol{padding-left:20px}li{margin-bottom:6px}
+.msg{margin-top:12px;font-weight:600;display:none}a{color:#8ab4f8}
+</style></head><body><div class="wrap">
+<h1>Cookie do Bling — ${NOMES[emp] || emp}</h1>
+<div class="card">
+  ${st}
+  <ol>
+    <li>Abra o Bling <b>logado na conta da ${NOMES[emp] || emp}</b></li>
+    <li>F12 → aba <b>Rede</b> → clique em qualquer requisição para bling.com.br</li>
+    <li>Botão direito → <b>Copiar</b> → <b>Copiar como cURL</b></li>
+    <li>Cole tudo aqui embaixo e salve — eu extraio só o cookie</li>
+  </ol>
+  <textarea id="t" placeholder="cole aqui o cURL inteiro, ou só a linha do Cookie"></textarea>
+  <button id="b">Salvar cookie</button>
+  <div class="msg" id="m"></div>
+</div>
+<div class="card" style="font-size:13px;color:#9aa0a6">
+  Fica salvo em disco, não em variável de ambiente — por isso não derruba o serviço.<br>
+  Vai vencer de tempos em tempos: quando vencer, o envio falha avisando, e você volta aqui e cola de novo.<br><br>
+  <a href="/magalu/nf-full?k=${kq}">← voltar para o painel</a>
+</div>
+</div><script>
+document.getElementById('b').addEventListener('click', async function(){
+  var m = document.getElementById('m'); m.style.display='block'; m.style.color='#9aa0a6'; m.textContent='Salvando...';
+  try{
+    var r = await fetch(location.pathname + location.search, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({texto: document.getElementById('t').value})});
+    var j = await r.json();
+    if(j.ok){ m.style.color='#81c995'; m.textContent='✓ Salvo (' + j.caracteres + ' caracteres' + (j.tem_phpsessid?', com PHPSESSID':', SEM PHPSESSID — confira') + ')'; document.getElementById('t').value=''; }
+    else { m.style.color='#f28b82'; m.textContent='✗ ' + (j.erro || 'falhou'); }
+  }catch(e){ m.style.color='#f28b82'; m.textContent='✗ ' + e.message; }
+});
+</script></body></html>`);
+      return true;
+    }
+
+    // ── MANDA UM ARQUIVO JA BAIXADO PRO BLING ──
+    // /magalu/nf-full/importar?empresa=amb&nome=amb-2026-07-27-0900.zip&tipo=saida&k=
+    if (p === '/magalu/nf-full/importar') {
+      const emp = String(q.get('empresa') || '').toLowerCase().trim();
+      const nome = String(q.get('nome') || '');
+      const tipo = String(q.get('tipo') || 'saida').toLowerCase() === 'entrada' ? 'E' : 'S';
+      if (!BLING_IMP[emp]) { json(res, 400, { ok: false, erro: 'empresa sem configuração de Bling: ' + emp }); return true; }
+      if (!/^[a-z]+-\d{4}-\d{2}-\d{2}-\d{4}\.zip$/.test(nome)) { json(res, 400, { ok: false, erro: 'nome inválido' }); return true; }
+      let buf; try { buf = fs.readFileSync(path.join(NF_DIR, nome)); } catch (e) { json(res, 404, { ok: false, erro: 'arquivo não está mais no disco' }); return true; }
+      try {
+        const r = await blingImportar(emp, buf, tipo);
+        json(res, 200, { ok: true, versao: VERSAO, arquivo: nome, ...r });
+      } catch (e) {
+        const msg = String(e.message || e);
+        json(res, 502, {
+          ok: false, arquivo: nome, empresa: emp, erro: msg,
+          dica: msg.indexOf('COOKIE_EXPIRADO') === 0
+            ? 'O cookie do Bling venceu. Abra o Bling logado, F12 > Rede > qualquer requisição > cabeçalho Cookie > copie a linha inteira e cole na variável BLING_COOKIE_' + emp.toUpperCase() + ' no Render.'
+            : undefined
+        });
+      }
+      return true;
+    }
+
+    // ── RODA A ROTINA NA MAO (mesma coisa que o cron faz) ──
+    if (p === '/magalu/nf-full/rodar') {
+      try { const r = await nfRotina('manual'); json(res, 200, { ok: true, versao: VERSAO, ...r }); }
+      catch (e) { json(res, 500, { ok: false, erro: String(e.message || e) }); }
+      return true;
+    }
+
     // ── PAINEL ──
     if (p === '/magalu/nf-full') {
       const hoje = new Date();
-      const pad = fmtD(hoje), pde = fmtD(new Date(hoje.getTime() - 6 * 864e5));
+      const pad = fmtD(hoje), pde = fmtD(new Date(hoje.getTime() - 30 * 864e5));
+      const kq = encodeURIComponent(q.get('k') || '');
+      const NOMES = { good: 'GOOD Import', amb: 'AMBTotal', girassol: 'Girassol' };
+      const prontos = nfListar(null);
+      const linhas = prontos.length
+        ? prontos.map(f => {
+            const d = f.em ? new Date(f.em) : null;
+            const quando = d ? (String(d.getDate()).padStart(2,'0') + '/' + String(d.getMonth()+1).padStart(2,'0') + ' às ' + String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0')) : '?';
+            const base = '/magalu/nf-full/arquivo?nome=' + encodeURIComponent(f.nome) + '&k=' + kq;
+            const n = f.notas || {};
+            const qs = (x) => (typeof x === 'number' ? ' (' + x + ')' : '');
+            return '<div class="arq">'
+                 + '<div class="cab"><span class="emp">' + (NOMES[f.empresa] || f.empresa) + '</span>'
+                 + '<span class="qd">' + quando + '</span>'
+                 + '<span class="tam">' + (f.bytes / 1024 < 1024 ? Math.round(f.bytes/1024) + ' KB' : (f.bytes/1048576).toFixed(1) + ' MB') + '</span></div>'
+                 + '<div class="acoes">'
+                 + '<a class="mini azul" href="' + base + '&tipo=saida">Notas de SAÍDA' + qs(n.saida) + '</a>'
+                 + '<a class="mini roxo" href="' + base + '&tipo=entrada">Notas de ENTRADA' + qs(n.entrada) + '</a>'
+                 + '<a class="mini" href="' + base + '">tudo junto</a>'
+                 + (BLING_IMP[f.empresa] && BLING_IMP[f.empresa].cookie()
+                     ? '<a class="mini verde" href="/magalu/nf-full/importar?empresa=' + f.empresa + '&nome=' + encodeURIComponent(f.nome) + '&tipo=saida&k=' + kq + '">→ mandar pro Bling</a>'
+                     : '')
+                 + '</div></div>';
+          }).join('')
+        : '<p class="vazio">Nada arquivado ainda. O robô roda às 9h e às 18h. Se quiser adiantar, clique em <b>Rodar agora</b>.</p>';
       html(res, 200, `<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>NF-e Fulfillment Magalu</title><style>
@@ -257,10 +422,37 @@ a.btn{flex:1;min-width:170px;text-align:center;text-decoration:none;background:#
 a.btn.good{background:#0f9d58}a.btn:hover{opacity:.9}
 .aviso{font-size:12px;color:#9aa0a6;margin-top:14px;padding-top:14px;border-top:1px solid #2a2f3a}
 .erro{color:#f28b82;font-size:13px;margin-top:10px;display:none}
+.tit{font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:#9aa0a6;margin-bottom:12px}
+.arq{padding:12px 12px 10px;border-radius:7px;border:1px solid #2a2f3a;margin-bottom:10px;background:#0f1115}
+.cab{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.emp{font-weight:600;flex:1}.qd{color:#9aa0a6;font-size:13px}.tam{color:#9aa0a6;font-size:12px}
+.acoes{display:flex;gap:8px;flex-wrap:wrap}
+a.mini{text-decoration:none;font-size:12.5px;font-weight:600;padding:7px 11px;border-radius:6px;background:#2a2f3a;color:#e8eaed}
+a.mini.azul{background:#1a73e8;color:#fff}a.mini.roxo{background:#6f42c1;color:#fff}a.mini.verde{background:#0f9d58;color:#fff}a.mini:hover{opacity:.88}
+a.btn.cinza{background:#2a2f3a;color:#e8eaed}
+p.vazio{color:#9aa0a6;font-size:13px;margin:0}
 </style></head><body><div class="wrap">
 <h1>NF-e Fulfillment — Magalu</h1>
-<p class="sub">Baixa o ZIP com os XMLs das notas que a Magalu emitiu no fulfillment. Depois é só importar no Bling em lote.</p>
+<p class="sub">O robô baixa sozinho às 9h e às 18h. É só clicar e importar no Bling.</p>
 <div class="card">
+  <div class="tit">Prontos pra baixar</div>
+  ${linhas}
+  <div class="btns" style="margin-top:14px">
+    <a class="btn cinza" href="/magalu/nf-full/rodar?k=${kq}">Rodar agora</a>
+    <a class="btn cinza" href="/magalu/nf-full?k=${kq}">Atualizar lista</a>
+  </div>
+  <div class="aviso">Cookie do Bling:
+    ${['good','amb'].map(e => (BLING_IMP[e].cookie()
+        ? '<a href="/magalu/nf-full/cookie?empresa=' + e + '&k=' + kq + '" style="color:#81c995">' + (e === 'good' ? 'GOOD' : 'AMB') + ' ✓</a>'
+        : '<a href="/magalu/nf-full/cookie?empresa=' + e + '&k=' + kq + '" style="color:#f28b82">' + (e === 'good' ? 'GOOD' : 'AMB') + ' — colar</a>')).join(' &nbsp;|&nbsp; ')}
+  </div>
+  <div class="aviso"><b>SAÍDA</b> = vendas e remessas (importar no Bling como notas de <b>saída</b>).<br>
+  <b>ENTRADA</b> = retornos simbólicos do depósito (importar como notas de <b>entrada</b>, num lote separado).<br>
+  A Magalu manda os dois tipos no mesmo arquivo — por isso a separação.<br><br>
+  "Rodar agora" leva de 20 a 60 segundos e devolve um texto técnico — depois volta aqui e clica em Atualizar lista.</div>
+</div>
+<div class="card">
+  <div class="tit">Período específico (opcional)</div>
   <div class="linha">
     <div><label>De</label><input type="date" id="de" value="${pde}"></div>
     <div><label>Até</label><input type="date" id="ate" value="${pad}"></div>
@@ -310,53 +502,14 @@ liga('bAmb','amb'); liga('bGood','good');
     const dias = (new Date(ate) - new Date(de)) / 864e5;
     if (dias > 31)                       { json(res, 400, { ok: false, erro: 'período de ' + Math.round(dias) + ' dias; a Magalu aceita no máximo 31' }); return true; }
 
-    // Pede o link, insistindo nos status que significam "espera um pouco".
-    async function pedirLinkZip(empresa, dIni, dFim) {
-      const tok = await getAccessToken(empresa);
-      const alvo = 'https://api.magalu.com/seller/v1/invoices/fulfillment'
-                 + '?start_date=' + encodeURIComponent(dIni) + '&end_date=' + encodeURIComponent(dFim);
-      const esperas = [0, 5000, 10000, 20000];
-      const historico = [];
-      for (let i = 0; i < esperas.length; i++) {
-        if (esperas[i]) await new Promise(r => setTimeout(r, esperas[i]));
-        const r = await fetch(alvo, { headers: { 'Authorization': 'Bearer ' + tok, 'Accept': 'application/json' } });
-        const txt = await r.text();
-        historico.push(r.status);
-        if (r.status === 200) {
-          let j = null; try { j = JSON.parse(txt); } catch (e) {}
-          if (j && j.signed_url) return { link: j.signed_url, expira: j.expires_on || null, historico };
-          throw new Error('a Magalu respondeu 200 mas sem signed_url: ' + txt.slice(0, 200));
-        }
-        // 408 = gerando; 429 = chamou rápido demais; 503 = instabilidade → insiste
-        if (r.status !== 408 && r.status !== 429 && r.status !== 503) {
-          throw new Error('a Magalu respondeu ' + r.status + ': ' + txt.slice(0, 200));
-        }
-      }
-      throw new Error('a Magalu não devolveu o link em ' + esperas.length + ' tentativas (status: ' + historico.join(', ') + '). Tente de novo em um minuto.');
-    }
-
-    let info;
-    try { info = await pedirLinkZip(emp, de, ate); }
-    catch (e) { json(res, 502, { ok: false, empresa: emp, periodo: { de, ate }, erro: String(e.message || e) }); return true; }
-
     let buf;
-    try {
-      const rz = await fetch(info.link);
-      if (!rz.ok) { json(res, 502, { ok: false, erro: 'o link assinado devolveu HTTP ' + rz.status, link_expira_em: info.expira }); return true; }
-      buf = Buffer.from(await rz.arrayBuffer());
-    } catch (e) { json(res, 502, { ok: false, erro: 'falha ao baixar o zip: ' + String(e.message || e) }); return true; }
-
-    // ZIP começa com PK — se não começar, veio outra coisa e é melhor avisar
-    if (!(buf.length > 4 && buf[0] === 0x50 && buf[1] === 0x4B)) {
-      json(res, 502, { ok: false, erro: 'o arquivo não é um ZIP', bytes: buf.length, inicio: buf.toString('utf8').slice(0, 200) });
-      return true;
-    }
+    try { buf = await nfBaixarZip(emp, de, ate); }
+    catch (e) { json(res, 502, { ok: false, empresa: emp, periodo: { de, ate }, erro: String(e.message || e) }); return true; }
 
     res.writeHead(200, {
       'Content-Type': 'application/zip',
       'Content-Disposition': 'attachment; filename="NFs-' + emp + '-' + de + '_a_' + ate + '.zip"',
-      'Content-Length': buf.length,
-      'X-Magalu-Tentativas': info.historico.join(',')
+      'Content-Length': buf.length
     });
     res.end(buf);
     return true;
@@ -1035,6 +1188,382 @@ function paginaSimples(titulo, corpoHtml) {
     + '<title>' + esc(titulo) + '</title>'
     + '<div style="max-width:640px;margin:40px auto;font:16px/1.5 system-ui,sans-serif;padding:0 16px">'
     + '<h2>' + esc(titulo) + '</h2><p>' + corpoHtml + '</p></div>';
+}
+
+// ══════════════════════════════════════════════════════════════════════
+//  ARQUIVADOR — baixa as NF-e de fulfillment sozinho, 2x por dia
+// ══════════════════════════════════════════════════════════════════════
+//  POR QUE ARQUIVAR EM VEZ DE BAIXAR NA HORA: a Magalu leva de 3 a 40s pra
+//  gerar o ZIP, e as vezes responde 408/429/503 pedindo pra esperar. Com o
+//  cron, quando o Diego abre o painel o arquivo do dia JA ESTA PRONTO — o
+//  download é instantâneo e não depende da Magalu estar de bom humor.
+
+// ══════════════════════════════════════════════════════════════════════
+//  ENVIO PRO BLING — replica a tela importador.notas.fiscais.lote.php
+// ══════════════════════════════════════════════════════════════════════
+//  TUDO AQUI FOI LIDO DO CODIGO DO PROPRIO BLING (27/07), nada chutado:
+//
+//  PASSO 1 (libs/fileuploader.js, qq.UploadHandlerXhr._upload):
+//    POST {base}/upload.restore.php?idEmpresa={idEmpresa}
+//    multipart/form-data com UM campo chamado "qqfile" (data.append("qqfile", file))
+//    cabecalhos: X-Requested-With: XMLHttpRequest
+//                X-File-Name: encodeURIComponent(nome)
+//                Accept: application/json, text/javascript
+//    resposta: {"success":true,"tmp":"<nome do arquivo temporario>"}
+//
+//  PASSO 2 (libs/xajax-*.js, Xajax.call, caso xajaxDefinedPost):
+//    POST {base}/services/importador.notas.fiscais.lote.server.php?f=validarArquivoNotasFiscais
+//    application/x-www-form-urlencoded, corpo:
+//      xajax={funcao}&xajaxr={Date.now()}&xajaxargs[]={arg}...
+//    a ordem dos argumentos vem de validarArquivo() do form.importador:
+//      (nomeArquivo, tipo, loja, unidadeNegocio, lancarContas, lancarEstoque)
+//
+//  O COOKIE nunca fica no codigo: vem de BLING_COOKIE_GOOD / BLING_COOKIE_AMB.
+//  Quando ele expira, o Bling devolve a tela de login em vez do JSON — e a
+//  gente AVISA em vez de fingir que importou. Isso e nota fiscal.
+
+const BLING_BASE = process.env.BLING_BASE || 'https://www.bling.com.br';
+
+// idEmpresa / loja / unidade sao por conta. Tudo trocavel por env var, pra
+// nao precisar mexer no codigo se ele criar outra unidade de negocio.
+const BLING_IMP = {
+  good: {
+    idEmpresa: process.env.BLING_EMPRESA_GOOD || '4956030980',
+    loja:      process.env.BLING_LOJA_GOOD    || '203381869',
+    unidade:   process.env.BLING_UNIDADE_GOOD || '1726045',
+    cookie:    () => blingLerCookie('good')
+  },
+  amb: {
+    idEmpresa: process.env.BLING_EMPRESA_AMB || '14901993834',
+    loja:      process.env.BLING_LOJA_AMB    || '206018666',
+    unidade:   process.env.BLING_UNIDADE_AMB || '2920232',
+    cookie:    () => blingLerCookie('amb')
+  }
+};
+
+const BLING_LIMITE = 3000000;   // tamMax do form.importador (3 MB)
+
+// ── COOKIE DO BLING: arquivo em disco, env como fallback ──────────────
+//  MESMO PADRAO do girassol/stagingImport.js (que ja faz isso ha tempo
+//  pro importador de staging). Guardar em ARQUIVO e nao em env var e de
+//  proposito: mexer em variavel de ambiente no Render REDEPLOYA o servico
+//  inteiro, e esse cookie vence toda hora. Colar numa pagina nao derruba nada.
+function blingCookieArquivo(emp) { return path.join(DATA_DIR, 'bling-cookie-' + emp + '.txt'); }
+
+// Aceita o "Copiar como cURL" inteiro, um -H 'cookie: ...', ou a linha crua.
+// Regras copiadas do extrairCookie() do stagingImport, que ja e testado em campo.
+function blingExtrairCookie(texto) {
+  if (!texto) return '';
+  const t = String(texto).trim();
+  const tenta = s => {
+    let m = s.match(/-b\s+'([^']+)'/) || s.match(/-b\s+"([^"]+)"/) ||
+            s.match(/--cookie\s+'([^']+)'/) || s.match(/--cookie\s+"([^"]+)"/);
+    if (m) return m[1];
+    m = s.match(/-H\s+'cookie:\s*([^']+)'/i) || s.match(/-H\s+"cookie:\s*([^"]+)"/i);
+    if (m) return m[1];
+    m = s.match(/(?:^|\n)\s*cookie:\s*([^\n'"]+)/i);
+    if (m) return m[1];
+    return null;
+  };
+  const achado = tenta(t) || tenta(t.replace(/\^/g, ''));
+  if (achado) return achado.trim();
+  if (t.indexOf('=') >= 0 && t.indexOf(';') >= 0) return t.replace(/^cookie:\s*/i, '').trim();
+  return t;
+}
+
+function blingSalvarCookie(emp, cookie) {
+  try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch (e) {}
+  fs.writeFileSync(blingCookieArquivo(emp), cookie, 'utf8');
+}
+
+// Ordem: arquivo em disco > env no padrao dele (GOOD_BLING_COOKIE) > env antiga
+function blingLerCookie(emp) {
+  try {
+    const f = blingCookieArquivo(emp);
+    if (fs.existsSync(f)) { const c = fs.readFileSync(f, 'utf8').trim(); if (c) return c; }
+  } catch (e) {}
+  return process.env[emp.toUpperCase() + '_BLING_COOKIE'] || process.env['BLING_COOKIE_' + emp.toUpperCase()] || '';
+}
+
+function blingMultipart(nomeArquivo, buf) {
+  const b = '----MoverPedidos' + Date.now().toString(16);
+  const cab = Buffer.from(
+    '--' + b + '\r\n' +
+    'Content-Disposition: form-data; name="qqfile"; filename="' + nomeArquivo + '"\r\n' +
+    'Content-Type: application/zip\r\n\r\n', 'utf8');
+  const fim = Buffer.from('\r\n--' + b + '--\r\n', 'utf8');
+  return { corpo: Buffer.concat([cab, buf, fim]), tipo: 'multipart/form-data; boundary=' + b };
+}
+
+// Se o cookie morreu, o Bling manda HTML de login em vez de JSON.
+function blingParecePaginaDeLogin(txt) {
+  return /<html/i.test(txt) && /login|senha|acesso/i.test(txt);
+}
+
+async function blingUpload(cfg, nomeArquivo, buf) {
+  const mp = blingMultipart(nomeArquivo, buf);
+  const url = BLING_BASE + '/upload.restore.php?idEmpresa=' + encodeURIComponent(cfg.idEmpresa);
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Cookie': cfg.cookie(),
+      'Accept': 'application/json, text/javascript',
+      'X-Requested-With': 'XMLHttpRequest',
+      'X-File-Name': encodeURIComponent(nomeArquivo),
+      'Content-Type': mp.tipo,
+      'Origin': BLING_BASE,
+      'Referer': BLING_BASE + '/importador.notas.fiscais.lote.php',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) MoverPedidos/1.0'
+    },
+    body: mp.corpo
+  });
+  const txt = await r.text();
+  if (blingParecePaginaDeLogin(txt)) throw new Error('COOKIE_EXPIRADO: o Bling devolveu a tela de login no upload');
+  let j = null; try { j = JSON.parse(txt); } catch (e) {}
+  if (!j || !j.success || !j.tmp) {
+    throw new Error('upload não retornou o tmp (HTTP ' + r.status + '): ' + txt.slice(0, 250));
+  }
+  return j.tmp;
+}
+
+async function blingProcessar(cfg, tmp, tipo) {
+  const args = [tmp, tipo, String(cfg.loja), String(cfg.unidade), 'true', 'false'];
+  //                                                              ^lancarContas ^lancarEstoque
+  // lancarEstoque SEMPRE false: o estoque do Full esta no CD da Magalu, nao no galpao.
+  let corpo = 'xajax=' + encodeURIComponent('validarArquivoNotasFiscais') + '&xajaxr=' + Date.now();
+  args.forEach(a => { corpo += '&xajaxargs[]=' + encodeURIComponent(a); });
+
+  const url = BLING_BASE + '/services/importador.notas.fiscais.lote.server.php?f=validarArquivoNotasFiscais';
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Cookie': cfg.cookie(),
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'Accept': '*/*',
+      'X-Requested-With': 'XMLHttpRequest',
+      'Origin': BLING_BASE,
+      'Referer': BLING_BASE + '/importador.notas.fiscais.lote.php',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) MoverPedidos/1.0'
+    },
+    body: corpo
+  });
+  const txt = await r.text();
+  if (blingParecePaginaDeLogin(txt)) throw new Error('COOKIE_EXPIRADO: o Bling devolveu a tela de login ao processar');
+  return { status: r.status, texto: txt };
+}
+
+// Le o retorno do Bling e traduz pra numeros. As frases sao as que aparecem
+// na tela de resultado (vistas em 27/07 num lote real da AMB).
+function blingResumir(txt) {
+  const limpo = String(txt || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+  const conta = re => (limpo.match(re) || []).length;
+  return {
+    ja_registradas: conta(/já está registrada|ja esta registrada/gi),
+    eram_de_entrada: conta(/Para importar notas de entrada/gi),
+    nao_importados: conta(/XML não importado|XML nao importado/gi),
+    trecho: limpo.trim().slice(0, 400)
+  };
+}
+
+// Quebra os XMLs em ZIPs de no maximo 3 MB (limite do Bling).
+function blingFatiar(itens, limite) {
+  const fatias = [];
+  let atual = [];
+  for (const it of itens) {
+    atual.push(it);
+    const tam = nfMontarZip(atual).length;
+    if (tam > limite) {
+      if (atual.length === 1) { fatias.push(atual); atual = []; continue; }  // um XML sozinho ja estoura: manda assim mesmo
+      atual.pop();
+      fatias.push(atual);
+      atual = [it];
+    }
+  }
+  if (atual.length) fatias.push(atual);
+  return fatias;
+}
+
+// Importa um ZIP inteiro no Bling. tipo: 'S' (saida) ou 'E' (entrada).
+// Manda SO as notas do tipo pedido — o Bling recusa as do outro tipo, mas
+// mandar so o certo deixa o retorno legivel e o arquivo menor.
+async function blingImportar(empresa, bufZip, tipo) {
+  const cfg = BLING_IMP[empresa];
+  if (!cfg) throw new Error('empresa sem configuração de Bling: ' + empresa);
+  if (!cfg.cookie()) throw new Error('SEM_COOKIE: nenhum cookie do Bling salvo para ' + empresa + ' — cole em /magalu/nf-full/cookie?empresa=' + empresa);
+
+  const sep = nfSeparar(bufZip);
+  const itens = (tipo === 'E' ? sep.entrada : sep.saida);
+  if (!itens.length) return { empresa, tipo, enviados: 0, aviso: 'nenhuma nota desse tipo no arquivo', lotes: [] };
+
+  const fatias = blingFatiar(itens, BLING_LIMITE);
+  const lotes = [];
+  for (let i = 0; i < fatias.length; i++) {
+    const buf = nfMontarZip(fatias[i]);
+    const nome = 'magalu-' + empresa + '-' + (tipo === 'E' ? 'entrada' : 'saida') + '-' + (i + 1) + '.zip';
+    const tmp = await blingUpload(cfg, nome, buf);
+    const resp = await blingProcessar(cfg, tmp, tipo);
+    lotes.push({ lote: i + 1, arquivo: nome, notas: fatias[i].length, bytes: buf.length, http: resp.status, resumo: blingResumir(resp.texto) });
+    if (i < fatias.length - 1) await new Promise(r => setTimeout(r, 3000));
+  }
+  return { empresa, tipo, enviados: itens.length, lotes };
+}
+
+// ── SEPARAR O ZIP POR TIPO DE NOTA ────────────────────────────────────
+//  DESCOBERTO EM 27/07 abrindo um ZIP real da AMB (183 XMLs): a Magalu
+//  devolve TRES tipos de nota juntos, em pastas diferentes:
+//    NfeVenda            (89) venda ao consumidor      tpNF=1  SAIDA
+//    NfeRemessa           (3) remessa pro operador log. tpNF=1  SAIDA
+//    NfeRetornoSimbolico (91) retorno simbolico         tpNF=0  ENTRADA
+//  A importacao em lote do Bling pergunta se o lote e de saida OU de
+//  entrada — entao mandar os 183 de uma vez classifica metade errado.
+//  Por isso separamos AQUI, e o painel oferece um download de cada.
+//
+//  Classificamos pelo <tpNF> de dentro do XML, nao pelo nome da pasta:
+//  se a Magalu renomear as pastas um dia, isso aqui continua certo.
+function nfSeparar(buf) {
+  const AdmZip = require('adm-zip');
+  const zip = new AdmZip(buf);
+  const saida = [], entrada = [], indefinido = [];
+  zip.getEntries().forEach(e => {
+    if (e.isDirectory) return;
+    const nome = e.entryName.split('/').pop();
+    if (!/\.xml$/i.test(nome)) return;
+    let dados; try { dados = e.getData(); } catch (err) { return; }
+    const m = /<tpNF>\s*([01])\s*<\/tpNF>/.exec(dados.toString('utf8'));
+    const alvo = !m ? indefinido : (m[1] === '1' ? saida : entrada);
+    alvo.push({ nome, dados });
+  });
+  return { saida, entrada, indefinido };
+}
+
+// Monta um ZIP novo, com os arquivos soltos na raiz (sem subpasta).
+function nfMontarZip(itens) {
+  const AdmZip = require('adm-zip');
+  const out = new AdmZip();
+  itens.forEach(it => out.addFile(it.nome, it.dados));
+  return out.toBuffer();
+}
+
+// Conta quantas notas de cada tipo tem no ZIP, pro painel mostrar.
+function nfContar(buf) {
+  try {
+    const s = nfSeparar(buf);
+    return { saida: s.saida.length, entrada: s.entrada.length, indefinido: s.indefinido.length };
+  } catch (e) { return null; }
+}
+
+function nfGarantirDir() {
+  try { fs.mkdirSync(NF_DIR, { recursive: true }); } catch (e) {}
+}
+
+// Pede o link assinado, insistindo nos status que significam "espera um pouco".
+async function nfPedirLink(empresa, dIni, dFim) {
+  const tok = await getAccessToken(empresa);
+  const alvo = 'https://api.magalu.com/seller/v1/invoices/fulfillment'
+             + '?start_date=' + encodeURIComponent(dIni) + '&end_date=' + encodeURIComponent(dFim);
+  const esperas = [0, 5000, 10000, 20000, 30000];
+  const historico = [];
+  for (let i = 0; i < esperas.length; i++) {
+    if (esperas[i]) await new Promise(r => setTimeout(r, esperas[i]));
+    const r = await fetch(alvo, { headers: { 'Authorization': 'Bearer ' + tok, 'Accept': 'application/json' } });
+    const txt = await r.text();
+    historico.push(r.status);
+    if (r.status === 200) {
+      let j = null; try { j = JSON.parse(txt); } catch (e) {}
+      if (j && j.signed_url) return { link: j.signed_url, expira: j.expires_on || null, historico };
+      throw new Error('a Magalu respondeu 200 mas sem signed_url: ' + txt.slice(0, 200));
+    }
+    // 408 = esta gerando | 429 = chamou rapido demais | 503 = instabilidade → insiste
+    if (r.status !== 408 && r.status !== 429 && r.status !== 503) {
+      throw new Error('a Magalu respondeu ' + r.status + ': ' + txt.slice(0, 200));
+    }
+  }
+  throw new Error('a Magalu nao devolveu o link em ' + esperas.length + ' tentativas (status: ' + historico.join(', ') + ')');
+}
+
+// Pede o link e baixa o ZIP. Devolve o Buffer.
+async function nfBaixarZip(empresa, dIni, dFim) {
+  const info = await nfPedirLink(empresa, dIni, dFim);
+  const rz = await fetch(info.link);
+  if (!rz.ok) throw new Error('o link assinado devolveu HTTP ' + rz.status);
+  const buf = Buffer.from(await rz.arrayBuffer());
+  // ZIP comeca com PK — se nao comecar, veio outra coisa
+  if (!(buf.length > 4 && buf[0] === 0x50 && buf[1] === 0x4B)) {
+    throw new Error('o que voltou nao e um ZIP (' + buf.length + ' bytes): ' + buf.toString('utf8').slice(0, 150));
+  }
+  return buf;
+}
+
+function nfListar(empresa) {
+  nfGarantirDir();
+  let nomes = [];
+  try { nomes = fs.readdirSync(NF_DIR); } catch (e) { return []; }
+  return nomes
+    .filter(n => /^[a-z]+-\d{4}-\d{2}-\d{2}-\d{4}\.zip$/.test(n))
+    .filter(n => !empresa || n.startsWith(empresa + '-'))
+    .map(n => {
+      let st = null; try { st = fs.statSync(path.join(NF_DIR, n)); } catch (e) {}
+      let notas = null;
+      try { notas = JSON.parse(fs.readFileSync(path.join(NF_DIR, n + '.json'), 'utf8')); } catch (e) {}
+      return { nome: n, empresa: n.split('-')[0], bytes: st ? st.size : 0, em: st ? st.mtime.toISOString() : null, notas };
+    })
+    .sort((a, b) => (b.em || '').localeCompare(a.em || ''));
+}
+
+// Apaga os mais antigos, mantendo os NF_MANTER mais novos de cada empresa.
+function nfLimpar(empresa) {
+  const lista = nfListar(empresa);
+  lista.slice(NF_MANTER).forEach(f => {
+    try { fs.unlinkSync(path.join(NF_DIR, f.nome)); } catch (e) {}
+    try { fs.unlinkSync(path.join(NF_DIR, f.nome + '.json')); } catch (e) {}
+  });
+}
+
+// A rotina em si: para cada empresa, puxa os ultimos NF_DIAS e grava.
+async function nfRotina(origem) {
+  nfGarantirDir();
+  const agora = new Date();
+  const ate = agora.toISOString().slice(0, 10);
+  const de  = new Date(agora.getTime() - (NF_DIAS - 1) * 864e5).toISOString().slice(0, 10);
+  const carimbo = ate + '-' + String(agora.getHours()).padStart(2, '0') + String(agora.getMinutes()).padStart(2, '0');
+  const resultado = [];
+
+  for (const emp of NF_EMPRESAS) {
+    try {
+      const buf = await nfBaixarZip(emp, de, ate);
+      const nome = emp + '-' + carimbo + '.zip';
+      fs.writeFileSync(path.join(NF_DIR, nome), buf);
+      const cont = nfContar(buf);
+      if (cont) { try { fs.writeFileSync(path.join(NF_DIR, nome + '.json'), JSON.stringify(cont)); } catch (e) {} }
+      nfLimpar(emp);
+      const linha = { empresa: emp, ok: true, arquivo: nome, bytes: buf.length, notas: cont };
+      // So manda pro Bling sozinho se BLING_IMPORT_AUTO=1. Desligado por padrao
+      // de proposito: primeiro ele testa na mao pelo painel e confere o retorno.
+      if (process.env.BLING_IMPORT_AUTO === '1' && BLING_IMP[emp] && BLING_IMP[emp].cookie()) {
+        try { linha.bling = await blingImportar(emp, buf, 'S'); }
+        catch (e) { linha.bling = { erro: String(e.message || e) }; console.error('[magalu-nf] bling ' + emp + ':', e.message); }
+      }
+      resultado.push(linha);
+      console.log('[magalu-nf] (' + origem + ') ' + emp + ': ' + nome + ' (' + buf.length + ' bytes)');
+    } catch (e) {
+      resultado.push({ empresa: emp, ok: false, erro: String(e.message || e) });
+      console.error('[magalu-nf] (' + origem + ') ' + emp + ' FALHOU:', e.message);
+    }
+    // espaco entre empresas: o endpoint devolve 429 se chamar em sequencia
+    if (emp !== NF_EMPRESAS[NF_EMPRESAS.length - 1]) await new Promise(r => setTimeout(r, 15000));
+  }
+  return { periodo: { de, ate }, resultado };
+}
+
+// Agenda no carregamento do modulo. Nao precisa mexer no index.js da RAIZ.
+try {
+  const cron = require('node-cron');
+  cron.schedule(NF_CRON, () => {
+    nfRotina('cron').catch(e => console.error('[magalu-nf] cron explodiu:', e.message));
+  });
+  console.log('[magalu-nf] cron agendado: ' + NF_CRON + ' | empresas: ' + NF_EMPRESAS.join(', ') + ' | pasta: ' + NF_DIR);
+} catch (e) {
+  console.error('[magalu-nf] nao consegui agendar o cron:', e.message);
 }
 
 module.exports = { tratar, getAccessToken, VERSAO, EMPRESAS_VALIDAS };
