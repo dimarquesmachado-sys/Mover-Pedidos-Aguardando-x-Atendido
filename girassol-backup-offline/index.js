@@ -41,7 +41,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v27/07 b57';
+const VERSAO     = 'girassol-backup-offline v27/07 b58';
 
 // ── SESSÃO DE OPERADOR (cookie assinado HMAC) — protege rotas de dados/ação ──
 // Segredo estável entre restarts. Usa ADMIN_KEY (já configurada no Render) como base.
@@ -3581,6 +3581,12 @@ async function custoSync(fresh) {
   const conf = readJson(CONFERIDOS_FILE, {});
   const todos = new Set();
   for (const c of Object.values(conf)) { for (const it of ((c && c.itens) || [])) { if (it && it.sku) todos.add(String(it.sku)); } }
+  // 27/07: pega também os SKUs das vendas AINDA NÃO BIPADAS (_vendas_dia.json). Antes a fila saía só dos
+  // conferidos — SKU que só aparecia em pedido não bipado nunca ganhava custo, e a margem saía inflada.
+  try {
+    const vd = readJson(path.join(CACHE_DIR, '_vendas_dia.json'), {});
+    for (const v of Object.values(vd)) { for (const it of ((v && v.it) || [])) { if (it && it.sku) todos.add(String(it.sku)); } }
+  } catch (e) {}
   const SETE_D = 7 * 24 * 3600 * 1000;
   const alvos = [...todos].filter(sk => { const k = cc[sk]; return fresh || !k || !k.id || (Date.now() - (k.ts || 0)) > SETE_D || k.custo == null; });
   _cst = { rodando: true, feitos: 0, total: alvos.length, ok: 0, falhas: 0, inicio: new Date().toISOString() };
