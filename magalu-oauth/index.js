@@ -26,7 +26,7 @@ const fs   = require('fs');
 const path = require('path');
 const { json, html } = require('../lib/http');
 
-const VERSAO = 'magalu-oauth v1 b24';
+const VERSAO = 'magalu-oauth v1 b25';
 
 const DATA_DIR = process.env.MAGALU_DATA_DIR || '/data/magalu';
 
@@ -210,6 +210,155 @@ async function tratar(req, res, urlObj) {
     } catch (e) {
       json(res, 502, { ok: false, empresa: emp, erro: String(e.message || e) });
     }
+    return true;
+  }
+
+  // ── NF-e FULFILLMENT: painel + download do ZIP ───────────────────────
+  //  /magalu/nf-full?k=ADMIN_KEY                          → painel
+  //  /magalu/nf-full/baixar?empresa=amb&de=X&ate=Y&k=...  → devolve o .zip
+  //
+  //  CONTRATO DA API (confirmado na sonda de 26-27/07, AMB e GOOD):
+  //    GET /seller/v1/invoices/fulfillment?start_date=AAAA-MM-DD&end_date=AAAA-MM-DD
+  //    → 200 {"expires_on":"...","signed_url":"https://storage.googleapis.com/...zip"}
+  //    O link e assinado e vale ~30 min. O ZIP tem os XMLs do periodo.
+  //  Outros status que a API devolve e o que significam:
+  //    408 REQUEST_TIMEOUT  → "esta sendo processado, tente de novo" (geracao assincrona)
+  //    429 TOO_MANY_REQUESTS→ chamou rapido demais; espacar alguns segundos resolve
+  //    503                  → instabilidade momentanea do lado deles
+  //  Por isso o pedirLinkZip abaixo REPETE em vez de desistir.
+  //
+  //  ⚠ TRAVA DE ADMIN: o index.js da RAIZ so exige ADMIN_KEY nos paths que
+  //  estao na lista precisaAdmin dele, e /magalu/nf-full NAO esta nessa lista
+  //  (de proposito — nao quis mexer no orquestrador). Entao a trava e feita
+  //  AQUI DENTRO. Sem ela a rota ficaria publica e qualquer um baixaria as NFs.
+  if (p === '/magalu/nf-full' || p === '/magalu/nf-full/baixar') {
+    const CHAVE_ADMIN = process.env.ADMIN_KEY || '';
+    if (!CHAVE_ADMIN || q.get('k') !== CHAVE_ADMIN) { json(res, 404, { error: 'not found', path: p }); return true; }
+
+    const eData = s => /^\d{4}-\d{2}-\d{2}$/.test(s);
+    const fmtD  = d => d.toISOString().slice(0, 10);
+
+    // ── PAINEL ──
+    if (p === '/magalu/nf-full') {
+      const hoje = new Date();
+      const pad = fmtD(hoje), pde = fmtD(new Date(hoje.getTime() - 6 * 864e5));
+      html(res, 200, `<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NF-e Fulfillment Magalu</title><style>
+*{box-sizing:border-box}body{font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#0f1115;color:#e8eaed;margin:0;padding:24px}
+.wrap{max-width:620px;margin:0 auto}h1{font-size:20px;margin:0 0 4px}
+p.sub{color:#9aa0a6;margin:0 0 24px;font-size:13px}
+.card{background:#181b21;border:1px solid #2a2f3a;border-radius:10px;padding:18px;margin-bottom:16px}
+label{display:block;font-size:12px;color:#9aa0a6;margin-bottom:5px}
+input[type=date]{background:#0f1115;color:#e8eaed;border:1px solid #2a2f3a;border-radius:6px;padding:9px;font:inherit;width:100%}
+.linha{display:flex;gap:12px;margin-bottom:16px}.linha>div{flex:1}
+.btns{display:flex;gap:12px;flex-wrap:wrap}
+a.btn{flex:1;min-width:170px;text-align:center;text-decoration:none;background:#1a73e8;color:#fff;padding:13px 16px;border-radius:8px;font-weight:600}
+a.btn.good{background:#0f9d58}a.btn:hover{opacity:.9}
+.aviso{font-size:12px;color:#9aa0a6;margin-top:14px;padding-top:14px;border-top:1px solid #2a2f3a}
+.erro{color:#f28b82;font-size:13px;margin-top:10px;display:none}
+</style></head><body><div class="wrap">
+<h1>NF-e Fulfillment — Magalu</h1>
+<p class="sub">Baixa o ZIP com os XMLs das notas que a Magalu emitiu no fulfillment. Depois é só importar no Bling em lote.</p>
+<div class="card">
+  <div class="linha">
+    <div><label>De</label><input type="date" id="de" value="${pde}"></div>
+    <div><label>Até</label><input type="date" id="ate" value="${pad}"></div>
+  </div>
+  <div class="btns">
+    <a class="btn" id="bAmb" href="#">Baixar AMBTotal</a>
+    <a class="btn good" id="bGood" href="#">Baixar GOOD Import</a>
+  </div>
+  <div class="erro" id="erro"></div>
+  <div class="aviso">O período não pode passar de <b>31 dias</b> (regra da Magalu).<br>
+  Pode demorar de 5 a 40 segundos: a Magalu gera o arquivo na hora, e se ela responder
+  "estou processando" o servidor espera e tenta de novo sozinho.</div>
+</div>
+<div class="card" style="font-size:13px;color:#9aa0a6">
+  <b style="color:#e8eaed">No Bling, depois:</b><br>
+  Configurações → Importações de Dados → Importar Notas Fiscais em Lote → notas de <b>saída</b>.<br>
+  Marcar lançar contas. <b>Não</b> marcar lançar estoque (o estoque do Full está no CD da Magalu).
+</div>
+</div><script>
+var K = new URLSearchParams(location.search).get('k') || '';
+function mont(emp){
+  var de = document.getElementById('de').value, ate = document.getElementById('ate').value;
+  var e = document.getElementById('erro'); e.style.display='none';
+  if(!de || !ate){ e.textContent='Preencha as duas datas.'; e.style.display='block'; return null; }
+  if(de > ate){ e.textContent='A data inicial está depois da final.'; e.style.display='block'; return null; }
+  var dias = (new Date(ate) - new Date(de)) / 864e5;
+  if(dias > 31){ e.textContent='O período tem '+Math.round(dias)+' dias. O máximo é 31.'; e.style.display='block'; return null; }
+  return '/magalu/nf-full/baixar?empresa='+emp+'&de='+de+'&ate='+ate+'&k='+encodeURIComponent(K);
+}
+function liga(id, emp){
+  document.getElementById(id).addEventListener('click', function(ev){
+    ev.preventDefault(); var u = mont(emp); if(u) location.href = u;
+  });
+}
+liga('bAmb','amb'); liga('bGood','good');
+</script></body></html>`);
+      return true;
+    }
+
+    // ── DOWNLOAD ──
+    const emp = String(q.get('empresa') || '').toLowerCase().trim();
+    const de  = String(q.get('de') || '').trim();
+    const ate = String(q.get('ate') || '').trim();
+    if (!EMPRESAS_VALIDAS.includes(emp)) { json(res, 400, { ok: false, erro: 'empresa inválida: ' + emp }); return true; }
+    if (!eData(de) || !eData(ate))       { json(res, 400, { ok: false, erro: 'datas devem ser AAAA-MM-DD' }); return true; }
+    if (de > ate)                        { json(res, 400, { ok: false, erro: 'data inicial depois da final' }); return true; }
+    const dias = (new Date(ate) - new Date(de)) / 864e5;
+    if (dias > 31)                       { json(res, 400, { ok: false, erro: 'período de ' + Math.round(dias) + ' dias; a Magalu aceita no máximo 31' }); return true; }
+
+    // Pede o link, insistindo nos status que significam "espera um pouco".
+    async function pedirLinkZip(empresa, dIni, dFim) {
+      const tok = await getAccessToken(empresa);
+      const alvo = 'https://api.magalu.com/seller/v1/invoices/fulfillment'
+                 + '?start_date=' + encodeURIComponent(dIni) + '&end_date=' + encodeURIComponent(dFim);
+      const esperas = [0, 5000, 10000, 20000];
+      const historico = [];
+      for (let i = 0; i < esperas.length; i++) {
+        if (esperas[i]) await new Promise(r => setTimeout(r, esperas[i]));
+        const r = await fetch(alvo, { headers: { 'Authorization': 'Bearer ' + tok, 'Accept': 'application/json' } });
+        const txt = await r.text();
+        historico.push(r.status);
+        if (r.status === 200) {
+          let j = null; try { j = JSON.parse(txt); } catch (e) {}
+          if (j && j.signed_url) return { link: j.signed_url, expira: j.expires_on || null, historico };
+          throw new Error('a Magalu respondeu 200 mas sem signed_url: ' + txt.slice(0, 200));
+        }
+        // 408 = gerando; 429 = chamou rápido demais; 503 = instabilidade → insiste
+        if (r.status !== 408 && r.status !== 429 && r.status !== 503) {
+          throw new Error('a Magalu respondeu ' + r.status + ': ' + txt.slice(0, 200));
+        }
+      }
+      throw new Error('a Magalu não devolveu o link em ' + esperas.length + ' tentativas (status: ' + historico.join(', ') + '). Tente de novo em um minuto.');
+    }
+
+    let info;
+    try { info = await pedirLinkZip(emp, de, ate); }
+    catch (e) { json(res, 502, { ok: false, empresa: emp, periodo: { de, ate }, erro: String(e.message || e) }); return true; }
+
+    let buf;
+    try {
+      const rz = await fetch(info.link);
+      if (!rz.ok) { json(res, 502, { ok: false, erro: 'o link assinado devolveu HTTP ' + rz.status, link_expira_em: info.expira }); return true; }
+      buf = Buffer.from(await rz.arrayBuffer());
+    } catch (e) { json(res, 502, { ok: false, erro: 'falha ao baixar o zip: ' + String(e.message || e) }); return true; }
+
+    // ZIP começa com PK — se não começar, veio outra coisa e é melhor avisar
+    if (!(buf.length > 4 && buf[0] === 0x50 && buf[1] === 0x4B)) {
+      json(res, 502, { ok: false, erro: 'o arquivo não é um ZIP', bytes: buf.length, inicio: buf.toString('utf8').slice(0, 200) });
+      return true;
+    }
+
+    res.writeHead(200, {
+      'Content-Type': 'application/zip',
+      'Content-Disposition': 'attachment; filename="NFs-' + emp + '-' + de + '_a_' + ate + '.zip"',
+      'Content-Length': buf.length,
+      'X-Magalu-Tentativas': info.historico.join(',')
+    });
+    res.end(buf);
     return true;
   }
 
