@@ -103,7 +103,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd82';
+const DASH_BUILD = 'd85';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -187,9 +187,29 @@ function prepararVendas(){
     itens:(v.it||[]).map(i2=>({sku:i2.sku,qtd:i2.qtd,valor_total:i2.vt,custo:(i2.custo!=null?i2.custo:null)})), taxa_mkt:(v.taxa_mkt!=null?v.taxa_mkt:null), frete_mkt:(v.frete_mkt!=null?v.frete_mkt:null),
     tarifa_ml:(v.tarifa_ml!=null?v.tarifa_ml:null), frete_ml:(v.frete_ml!=null?v.frete_ml:null), credito_ml:(v.credito_ml!=null?v.credito_ml:null),   // b31: comissão/frete/estorno REAIS do ML (fase ml_real) — o calcPL prioriza estes sobre o Bling
     devolucao:(v.devolucao?1:0), dev_frete_retorno:(v.dev_frete_retorno!=null?Number(v.dev_frete_retorno):null), dev_destino:v.dev_destino||null, dev_status:v.dev_status||null, dev_aberta:(v.dev_aberta?1:0),   // b39: devolução do ML
-    _sit:v.situacao||null, _cancelado:/cancel/i.test(String(v.situacao||''))
+    _sit:v.situacao||null, _cancelado:(/cancel/i.test(String(v.situacao||'')) || !!v.cancelado_mkt), cancelado_mkt:(v.cancelado_mkt?1:0)
   }));
 }
+// 🔄 pergunta ao ML/Shopee se algum pedido do período foi CANCELADO pelo cliente
+let _stMkt = false;
+async function checarCancelados(silencioso){
+  if(_stMkt) return; _stMkt = true;
+  try{
+    const { de, ate } = intervalo();
+    const r = await fetch(MOD+'/status-mkt?de='+de+'&ate='+ate, {credentials:'same-origin'});
+    const d = await r.json().catch(()=>null);
+    if(d && d.ok){
+      const rh = await fetch(MOD+'/historico',{credentials:'same-origin'});
+      const dh = await rh.json();
+      if(dh && Array.isArray(dh.itens)){ DADOS=dh.itens; VENDAS=Array.isArray(dh.vendas_bling)?dh.vendas_bling:[]; prepararVendas(); render(); renderAnalise(); }
+      if(!silencioso && d.cancelados_agora) alert(d.cancelados_agora+' pedido(s) cancelados no marketplace foram marcados.');
+    }
+  }catch(e){}
+  _stMkt = false;
+}
+// a cada 10 min, se o filtro estiver em HOJE, confere vendas novas e cancelamentos
+setInterval(()=>{ if(periodo==='dia' && !document.hidden) checarCancelados(true); }, 600000);
+
 // ⚡ busca AGORA o detalhe (SKU/qtd/taxas) dos pedidos do período que estão sem — em sequência, até zerar
 let _compDet = false;
 let _autoDet = {};   // período já buscado automaticamente nesta sessão
@@ -466,6 +486,7 @@ function render(){
   const TODOS = PER.concat(AGD);
   const MC = (function(){
     let rec=0, imp=0, impMC=0, tar=0, cus=0, cusMC=0, pedOk=0, semCfg=0, cusUn=0, unTot=0, tReais=0, frV=0, fRecP=0, pedImp=0, semItens=0;
+    const semCustoSet = new Set();   // SKUs sem custo cadastrado — o card lista pra o Diego saber onde preencher
     // valor dos PRODUTOS: da nota quando existe; senão a soma dos itens; senão o total do pedido
     const vProd = h => {
       if(h.vprod_nf!=null && isFinite(Number(h.vprod_nf))) return Number(h.vprod_nf);
@@ -492,7 +513,7 @@ function render(){
       (h.itens||[]).forEach(it=>{
         const q = Number(it.qtd||1); unTot += q;
         const c = custoIt(it);
-        if(c!=null){ cusPed += c*q; cusUn += q; }
+        if(c!=null){ cusPed += c*q; cusUn += q; } else if(it.sku) semCustoSet.add(String(it.sku));
       });
       cus += cusPed;
       // MARGEM: precisa de valor + alíquota + (tarifa real OU % configurada do canal)
@@ -514,7 +535,7 @@ function render(){
       else if(h.flex){ const fx=flexDe(canalKey(h.marketplace)); if(fx!=null && fx>0) frV += fx; }
       else if(h.frete_mkt!=null && isFinite(Number(h.frete_mkt)) && Number(h.frete_mkt)>0) frV += Number(h.frete_mkt);
     });
-    return { rec, imp, impMC, tar, cus, cusMC, pedOk, semCfg, cusUn, unTot, tReais, frV, fRecP, pedImp, semItens,
+    return { rec, imp, impMC, tar, cus, cusMC, pedOk, semCfg, cusUn, unTot, tReais, frV, fRecP, pedImp, semItens, semCustoSkus: Array.from(semCustoSet),
              mc: rec-impMC-tar-cusMC-frV+fRecP, temCfg: !!Object.keys(CFG.taxas).length };
   })();
   const totPed = PER.length + AGD.length;
@@ -533,11 +554,11 @@ function render(){
       MC.semItens ? ('<span class="warn">⚠ incompleto: '+N(MC.semItens)+' pedido(s) sem detalhe</span>')
       : (!MC.unTot ? 'sem itens no período'
       : (MC.cusUn>=MC.unTot ? (N(MC.unTot)+' unidades vendidas')
-      : ('<span class="warn">⚠ sem custo em '+N(MC.unTot-MC.cusUn)+' de '+N(MC.unTot)+' un.</span> — use 🐢 sincronizar custos')))) +
+      : ('<span class="warn">⚠ sem custo em '+N(MC.unTot-MC.cusUn)+' de '+N(MC.unTot)+' un.</span><div style="font-size:10px;margin-top:2px;line-height:1.35">cadastre o custo destes no Bling: <b style="font-family:ui-monospace,monospace;color:#fbbf24">'+MC.semCustoSkus.slice(0,8).map(esc).join(', ')+(MC.semCustoSkus.length>8?' +'+(MC.semCustoSkus.length-8):'')+'</b></div>')))) +
     (MC.temCfg
-      ? '<div class="kpi" style="--kc:#14b8a6"><span class="ic">💎</span><div class="l">Lucro Bruto (M.C.)</div><div class="v '+(MC.mc>=0?'ok':'bad')+'">'+BRL(MC.mc)+'</div><div class="s">'+(MC.semItens?'<span class="warn">⚠ '+N(MC.semItens)+' pedido(s) sem detalhe — MARGEM OTIMISTA</span>':(MC.unTot&&MC.cusUn<MC.unTot?'<span class="warn">⚠ falta o custo de '+N(MC.unTot-MC.cusUn)+' de '+N(MC.unTot)+' un. — MARGEM OTIMISTA</span>':(MC.semCfg?'<span class="warn">⚠ '+N(MC.semCfg)+' pedido(s) sem taxa configurada</span>':'venda − imposto − comissão − frete − custo')))+(MC.tReais?' · '+N(MC.tReais)+' c/ tarifa real':'')+'</div></div>'
+      ? '<div class="kpi" style="--kc:#14b8a6"><span class="ic">💎</span><div class="l">Lucro Bruto (M.C.)</div><div class="v '+(MC.mc>=0?'ok':'bad')+'">'+BRL(MC.mc)+((fat+agdVal)>0?'<span style="font-size:13px;opacity:.8;font-weight:600"> · '+(Math.round(MC.mc/(fat+agdVal)*1000)/10).toString().replace('.',',')+'%</span>':'')+'</div><div class="s">'+(MC.semItens?'<span class="warn">⚠ '+N(MC.semItens)+' pedido(s) ainda sem detalhe — o lucro real fica um pouco menor</span>':(MC.unTot&&MC.cusUn<MC.unTot?'<span class="warn">⚠ falta cadastrar o custo de '+N(MC.unTot-MC.cusUn)+' un. — o lucro real fica um pouco menor</span>':(MC.semCfg?'<span class="warn">⚠ '+N(MC.semCfg)+' pedido(s) sem taxa configurada</span>':'venda − imposto − comissão − frete − custo')))+'</div></div>'
       : '<div class="kpi" style="--kc:#64748b;cursor:pointer" onclick="document.getElementById(\'cfgBox\').scrollIntoView({behavior:\'smooth\'})"><span class="ic">💎</span><div class="l">Lucro Bruto (M.C.)</div><div class="v dim">—</div><div class="s warn">⚙️ configure as taxas por canal abaixo</div></div>') +
-    kpi('var(--ac)','📊','Pedidos', N(totPed), MC.semItens?('<span class="warn">⚠ '+N(MC.semItens)+' sem detalhe</span> <button onclick="completarDetalhes()" title="o dashboard já busca sozinho ao abrir o período — este botão é só pra tentar de novo" style="background:#1d4ed8;color:#fff;border:0;border-radius:6px;padding:2px 7px;font-size:10px;font-weight:700;cursor:pointer">↻ tentar de novo</button><div id="avisoDet" style="font-size:10px;margin-top:2px"></div>'):(MC.unTot>0?(N(MC.unTot)+' unidades vendidas'):'sem itens no período')) +
+    kpi('var(--ac)','📊','Pedidos', N(totPed), MC.semItens?('<span class="warn">⚠ '+N(MC.semItens)+' sem detalhe</span> <button onclick="completarDetalhes()" title="o dashboard já busca sozinho ao abrir o período — este botão é só pra tentar de novo" style="background:#1d4ed8;color:#fff;border:0;border-radius:6px;padding:2px 7px;font-size:10px;font-weight:700;cursor:pointer">↻ tentar de novo</button><div id="avisoDet" style="font-size:10px;margin-top:2px"></div>'):(MC.unTot>0?('<b style="font-size:13px;color:var(--txt);opacity:1">'+N(MC.unTot)+' unidades vendidas</b>'):'sem itens no período')) +
     kpi('var(--warn)','🎯','Ticket médio', BRL((fat+agdVal)/(totPed||1)), 'faturamento ÷ pedidos') +
     (VENDAS.length?'<div class="kpi" style="--kc:#38bdf8"><span class="ic">🛰</span><div class="l">Ao vivo</div><div class="v"><button onclick="sincVendas(this)" style="background:#38bdf822;border:1px solid #38bdf855;color:#7dd3fc;border-radius:8px;padding:5px 12px;cursor:pointer;font-weight:700;font-size:14px">🔄 atualizar</button></div><div class="s">'+N(VBok.length)+' vendas no Bling · sincroniza sozinho a cada 5 min</div></div>':'') +
     '<div class="kpi" id="kMargem" style="display:none"></div>';
@@ -962,7 +983,8 @@ function renderAnalise(){
     '<button class="chip'+(anLP===''?' on':'')+'" onclick="anLP=\'\';anPage=0;renderAnalise()">Todos</button>'+
     '<button class="chip" style="'+(anLP==='lucro'?'background:#065f46;border-color:#065f46;color:#fff':'color:#34d399;border-color:#34d399')+'" onclick="anLP=\'lucro\';anPage=0;renderAnalise()">Lucro ('+nLucro+')</button>'+
     '<button class="chip" style="'+(anLP==='prej'?'background:#7f1d1d;border-color:#7f1d1d;color:#fff':'color:#f87171;border-color:#f87171')+'" onclick="anLP=\'prej\';anPage=0;renderAnalise()">Preju\u00edzo ('+nPrej+')</button>'+
-    (nInc?'<button class="chip" style="'+(anLP==='inc'?'background:#78350f;border-color:#78350f;color:#fff':'color:#fbbf24;border-color:#fbbf24')+'" onclick="anLP=\'inc\';anPage=0;renderAnalise()" title="vendas sem margem fechada — falta custo no Bling, NF ou tarifa">Incompletas ('+nInc+')</button>':'')+
+    ''+   // chip "Incompletas" removido (Diego, 27/07): gerava dúvida sobre dados faltando
+
     (nAg?'<button class="chip" style="'+(anAg?'background:#334155;border-color:#64748b;color:#fff':'color:#94a3b8;border-color:#475569')+'" onclick="anAg=!anAg;anPage=0;renderAnalise()" title="vendas ainda NÃO bipadas pelo estoque (✓ laranja na lista) — clique pra ocultar/mostrar">✓ aguardando bipagem ('+nAg+')</button>':'');
   if(anLP==='lucro') LP=LP.filter(x=>x.P.mc!=null&&x.P.mc>0);
   else if(anLP==='prej') LP=LP.filter(x=>x.P.mc!=null&&x.P.mc<0);
