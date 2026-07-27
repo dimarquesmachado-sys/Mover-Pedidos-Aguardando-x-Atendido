@@ -26,7 +26,7 @@ const fs   = require('fs');
 const path = require('path');
 const { json, html, readBody } = require('../lib/http');
 
-const VERSAO = 'magalu-oauth v1 b37';
+const VERSAO = 'magalu-oauth v1 b38';
 
 const DATA_DIR = process.env.MAGALU_DATA_DIR || '/data/magalu';
 
@@ -308,6 +308,40 @@ async function tratar(req, res, urlObj) {
     if (p === '/magalu/nf-full/diag') {
       const empD = String(q.get('empresa') || '').toLowerCase().trim();
       if (!BLING_IMP[empD]) { json(res, 400, { ok: false, erro: 'empresa inválida (use good ou amb)' }); return true; }
+      // ── MODO AO VIVO: /diag?empresa=amb&de=...&ate=... ──────────────
+      //  Pede o pacote a Magalu NA HORA, com o intervalo que voce mandar, e
+      //  diz ate que nota ele vai. Serve pra separar duas causas:
+      //    - se um intervalo DIFERENTE traz notas mais recentes que o nosso
+      //      arquivo do dia, entao a Magalu esta devolvendo CACHE por
+      //      intervalo (o caminho do zip no storage inclui as datas)
+      //    - se nem assim vem, a exportacao deles e que esta atrasada
+      //  Nao grava nada, nao mexe no controle de chaves.
+      const dvDe = String(q.get('de') || '').trim();
+      const dvAte = String(q.get('ate') || '').trim();
+      if (dvDe && dvAte) {
+        let buf6;
+        try { buf6 = await nfBaixarZip(empD, dvDe, dvAte); }
+        catch (e) { json(res, 502, { ok: false, empresa: empD, periodo: { de: dvDe, ate: dvAte }, erro: String(e.message || e) }); return true; }
+        let sep6; try { sep6 = nfSeparar(buf6); } catch (e) { json(res, 500, { ok: false, erro: String(e.message || e) }); return true; }
+        const notas6 = sep6.saida.map(it => {
+          const t = it.dados.toString('utf8', 0, Math.min(it.dados.length, 6000));
+          return {
+            numero: (/<nNF>(\d+)<\/nNF>/.exec(t) || [])[1] || null,
+            emitida: (/<dhEmi>([^<]+)<\/dhEmi>/.exec(t) || [])[1] || null,
+            destinatario: (/<dest>[\s\S]*?<xNome>([^<]+)<\/xNome>/.exec(t) || [])[1] || null
+          };
+        }).filter(x => x.emitida).sort((a7, b7) => a7.emitida.localeCompare(b7.emitida));
+        json(res, 200, {
+          ok: true, ao_vivo: true, empresa: empD, versao: VERSAO,
+          agora_sp: new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }),
+          periodo: { de: dvDe, ate: dvAte },
+          bytes: buf6.length, saida: sep6.saida.length, entrada: sep6.entrada.length,
+          nota_mais_recente: notas6.length ? notas6[notas6.length - 1].emitida : null,
+          ultimas_8: notas6.slice(-8)
+        });
+        return true;
+      }
+
       const arqs = nfListar(empD);
       if (!arqs.length) { json(res, 200, { ok: true, empresa: empD, erro: 'nenhum arquivo baixado' }); return true; }
 
