@@ -103,7 +103,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd76';
+const DASH_BUILD = 'd77';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -493,10 +493,10 @@ function render(){
   const totPed = PER.length + AGD.length;
   $('kpis').innerHTML =
     kpi('#34d399','💰','Faturamento Total', BRL(fat+agdVal), 'vendas aprovadas no período · '+N(totPed)+' pedidos') +
-    kpi('#f59e0b','🧾','Impostos', BRL(MC.imp), 'Simples · '+N(MC.pedImp)+' de '+N(totPed)+' pedidos'+(MC.imp>0&&(fat+agdVal)>0?(' · '+(Math.round(MC.imp/(fat+agdVal)*10000)/100)+'% do faturamento'):'')) +
-    kpi('#a78bfa','📦','Custo de produtos', BRL(MC.cus), MC.unTot?('custo conhecido em '+N(MC.cusUn)+' de '+N(MC.unTot)+' unidades ('+pc(MC.cusUn,MC.unTot)+'%)'):'sem itens no período') +
+    kpi('#f59e0b','🧾','Impostos', BRL(MC.imp), (MC.imp>0&&(fat+agdVal)>0?('Simples · '+(Math.round(MC.imp/(fat+agdVal)*10000)/100).toString().replace('.',',')+'% do faturamento'):'Simples nacional')+(MC.pedImp<totPed?' · <span class="warn">falta alíquota em '+N(totPed-MC.pedImp)+'</span>':'')) +
+    kpi('#a78bfa','📦','Custo de produtos', BRL(MC.cus), !MC.unTot?'sem itens no período':(MC.cusUn>=MC.unTot?(N(MC.unTot)+' unidades vendidas'):('<span class="warn">⚠ sem custo em '+N(MC.unTot-MC.cusUn)+' de '+N(MC.unTot)+' un.</span> — use 🐢 sincronizar custos'))) +
     (MC.temCfg
-      ? '<div class="kpi" style="--kc:#14b8a6"><span class="ic">💎</span><div class="l">Lucro Bruto (M.C.)</div><div class="v '+(MC.mc>=0?'ok':'bad')+'">'+BRL(MC.mc)+'</div><div class="s">'+N(MC.pedOk)+' de '+N(totPed)+' pedidos'+(MC.semCfg?' · <span class="warn">'+N(MC.semCfg)+' sem dado</span>':'')+(MC.tReais?' · '+N(MC.tReais)+' tarifa REAL':'')+'</div></div>'
+      ? '<div class="kpi" style="--kc:#14b8a6"><span class="ic">💎</span><div class="l">Lucro Bruto (M.C.)</div><div class="v '+(MC.mc>=0?'ok':'bad')+'">'+BRL(MC.mc)+'</div><div class="s">'+(MC.semCfg?'<span class="warn">⚠ '+N(MC.semCfg)+' pedido(s) sem taxa configurada</span>':'venda − imposto − comissão − frete − custo')+(MC.tReais?' · '+N(MC.tReais)+' c/ tarifa real':'')+'</div></div>'
       : '<div class="kpi" style="--kc:#64748b;cursor:pointer" onclick="document.getElementById(\'cfgBox\').scrollIntoView({behavior:\'smooth\'})"><span class="ic">💎</span><div class="l">Lucro Bruto (M.C.)</div><div class="v dim">—</div><div class="s warn">⚙️ configure as taxas por canal abaixo</div></div>') +
     kpi('var(--ac)','📊','Pedidos', N(totPed), MC.unTot>0?(N(MC.unTot)+' unidades vendidas'):'detalhes carregando…') +
     kpi('var(--warn)','🎯','Ticket médio', BRL((fat+agdVal)/(totPed||1)), 'faturamento ÷ pedidos') +
