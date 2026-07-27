@@ -41,7 +41,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v27/07 b50';
+const VERSAO     = 'girassol-backup-offline v27/07 b51';
 
 // ── SESSÃO DE OPERADOR (cookie assinado HMAC) — protege rotas de dados/ação ──
 // Segredo estável entre restarts. Usa ADMIN_KEY (já configurada no Render) como base.
@@ -1560,6 +1560,14 @@ function routes(readBody) {
       const reenvios = readJson(CONFERIDOS_FILE.replace('conferidos.json', 'reenvios.json'), {});
       const reenvioDireto = String(process.env.CHECKOUT_REENVIO_DIRETO_EMPRESAS || '').toLowerCase().split(',').map(s => s.trim()).includes('girassol');
       const vendasB = Object.values(readJson(path.join(CACHE_DIR, '_vendas_dia.json'), {}));
+      // CUSTO PRONTO (27/07): o backend já tem o banco permanente de custos (_custos.json) — manda o custo
+      // junto de cada item, em vez de o dashboard consultar o Bling ao vivo (lento e falha quando o Bling satura).
+      try {
+        const _ccH = readJson(path.join(CACHE_DIR, '_custos.json'), {});
+        const _cuH = sk => { const c = _ccH[String(sk || '').trim()]; return (c && c.custo != null && isFinite(Number(c.custo))) ? Number(c.custo) : null; };
+        for (const h of itens) if (Array.isArray(h.itens)) h.itens = h.itens.map(it => Object.assign({}, it, { custo: _cuH(it.sku) }));
+        for (const v of vendasB) if (Array.isArray(v.it)) v.it = v.it.map(it => Object.assign({}, it, { custo: _cuH(it.sku) }));
+      } catch (e) {}
       json(res, 200, { ok: true, total: Object.keys(conf).length, itens, reenvios, reenvio_direto: reenvioDireto, vendas_bling: vendasB });
       return true;
     }
