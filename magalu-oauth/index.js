@@ -26,7 +26,7 @@ const fs   = require('fs');
 const path = require('path');
 const { json, html } = require('../lib/http');
 
-const VERSAO = 'magalu-oauth v1 b23';
+const VERSAO = 'magalu-oauth v1 b24';
 
 const DATA_DIR = process.env.MAGALU_DATA_DIR || '/data/magalu';
 
@@ -258,6 +258,11 @@ async function tratar(req, res, urlObj) {
         status: r.status, content_type: ct.slice(0, 60), bytes: buf.length, ms: Date.now() - t0
       };
       if (loc) out.REDIRECT_PARA = loc.slice(0, 300);
+      try {
+        const hs = {};
+        r.headers.forEach((v, k) => { if (!/^(date|server|connection|content-length)$/i.test(k)) hs[k] = String(v).slice(0, 120); });
+        out.headers = hs;
+      } catch (e) {}
 
       // assinatura de ZIP = PK\x03\x04
       if (buf.length > 4 && buf[0] === 0x50 && buf[1] === 0x4B) { out.VEIO_ZIP = true; return out; }
@@ -292,31 +297,54 @@ async function tratar(req, res, urlObj) {
     // 1) pelado — é aqui que o 422 entrega o nome dos parâmetros
     tentativas.push(await inspecionar(BASE));
 
-    // 2) matriz de nomes de período
-    const pares = [
-      ['start_date', 'end_date'],
-      ['initial_date', 'final_date'],
-      ['_start_date', '_end_date'],
-      ['begin_date', 'end_date'],
-      ['issue_date_start', 'issue_date_end'],
-      ['created_at_start', 'created_at_end'],
-      ['from', 'to'],
-      ['period_start', 'period_end']
-    ];
-    for (const par of pares) {
-      tentativas.push(await inspecionar(BASE + '?' + par[0] + '=' + de + '&' + par[1] + '=' + ate));
+    // 2) FASE 2 (26/07): o 422 confirmou que os parametros sao start_date e
+    //    end_date. Com eles a API passou da validacao e devolveu 503 — entao o
+    //    que falta descobrir e o FORMATO da data (e se o 503 e transitorio).
+    const dorme = ms => new Promise(r => setTimeout(r, ms));
+    const qs = (a, b, extra) => BASE + '?start_date=' + encodeURIComponent(a) + '&end_date=' + encodeURIComponent(b) + (extra || '');
+
+    // 2a) o formato que deu 503, repetido 3x — separa 503 transitorio de 503 sempre
+    for (let i = 0; i < 3; i++) {
+      const t = await inspecionar(qs(de, ate));
+      t.nota = 'data simples, tentativa ' + (i + 1) + '/3';
+      tentativas.push(t);
+      if (i < 2) await dorme(1500);
     }
+
+    // 2b) variacoes de formato de data/hora
+    const formatos = [
+      [de + 'T00:00:00Z',       ate + 'T23:59:59Z',       'ISO com Z'],
+      [de + 'T00:00:00',        ate + 'T23:59:59',        'ISO sem timezone'],
+      [de + 'T00:00:00-03:00',  ate + 'T23:59:59-03:00',  'ISO com offset BR'],
+      [de + ' 00:00:00',        ate + ' 23:59:59',        'data e hora com espaco'],
+      [de + 'T00:00:00.000Z',   ate + 'T23:59:59.999Z',   'ISO com milissegundos']
+    ];
+    for (const f of formatos) {
+      const t = await inspecionar(qs(f[0], f[1]));
+      t.nota = f[2];
+      tentativas.push(t);
+    }
+
+    // 2c) janelas menores — talvez o 503 seja volume de dados
+    const t1 = await inspecionar(qs(ate, ate));            t1.nota = 'janela de 1 dia (so a data final)';   tentativas.push(t1);
+    // 2d) paginacao no padrao Magalu (_limit / _offset)
+    const t2 = await inspecionar(qs(de, ate, '&_limit=5&_offset=0')); t2.nota = 'com _limit=5 e _offset=0';  tentativas.push(t2);
 
     // 3) se passar &delivery=UUID, testa também a NF por entrega
     const dlv = String(q.get('delivery') || '').trim();
     if (dlv) {
-      tentativas.push(await inspecionar('https://api.magalu.com/seller/v1/deliveries/' + encodeURIComponent(dlv) + '/invoices'));
+      const t3 = await inspecionar(BASE + '?delivery_id=' + encodeURIComponent(dlv));
+      t3.nota = 'delivery_id na rota de fulfillment (a alternativa que o 422 ofereceu)';
+      tentativas.push(t3);
+      const t4 = await inspecionar('https://api.magalu.com/seller/v1/deliveries/' + encodeURIComponent(dlv) + '/invoices');
+      t4.nota = 'rota de NF por entrega';
+      tentativas.push(t4);
     }
 
     json(res, 200, {
       ok: true, empresa: emp, versao: VERSAO,
       periodo_testado: { de, ate },
-      leia: 'Olhe PRIMEIRO a tentativa sem parâmetro: o 422 costuma listar os campos obrigatórios pelo nome. Depois procure a linha que deu 200 e veja se trouxe VEIO_ZIP, VEIO_XML, REDIRECT_PARA ou LINKS_ENCONTRADOS.',
+      leia: 'FASE 2: start_date e end_date ja estao confirmados. Agora procure qualquer linha com status DIFERENTE de 503 e de 422 — e veja o campo nota de cada tentativa pra saber qual formato de data foi usado.',
       tentativas
     });
     return true;
