@@ -26,7 +26,7 @@ const fs   = require('fs');
 const path = require('path');
 const { json, html, readBody } = require('../lib/http');
 
-const VERSAO = 'magalu-oauth v1 b33';
+const VERSAO = 'magalu-oauth v1 b35';
 
 const DATA_DIR = process.env.MAGALU_DATA_DIR || '/data/magalu';
 
@@ -37,8 +37,8 @@ const DATA_DIR = process.env.MAGALU_DATA_DIR || '/data/magalu';
 const NF_DIR         = process.env.MAGALU_NF_DIR || (DATA_DIR + '/nf-fulfillment');
 const NF_EMPRESAS    = (process.env.MAGALU_NF_EMPRESAS || 'good,amb').split(',').map(x => x.trim()).filter(Boolean);
 const NF_DIAS        = 31;   // janela puxada sempre: o Bling ignora as repetidas, entao vale pegar tudo
-const NF_MANTER      = 10;   // quantos arquivos guardar por empresa (o resto e apagado)
-const NF_CRON        = process.env.MAGALU_NF_CRON || '0 9,18 * * *';   // 9h e 18h, TZ do servico (America/Sao_Paulo)
+const NF_MANTER      = 20;   // quantos arquivos guardar por empresa (com 4 rodadas/dia da ~2,5 dias)
+const NF_CRON        = process.env.MAGALU_NF_CRON || '0 6,12,18,23 * * *';   // 6h, 12h, 18h e 23h, TZ do servico (America/Sao_Paulo)
 
 // Endpoints do ID Magalu (OAuth) e da API pública.
 // A tela de consentimento é /login (NÃO /oauth/authorize — esse devolve JSON
@@ -277,11 +277,16 @@ async function tratar(req, res, urlObj) {
       // tipo=entrada→ retornos simbólicos (tpNF=0)
       // sem tipo    → o ZIP original, do jeito que a Magalu mandou
       const tipo = String(q.get('tipo') || '').toLowerCase();
+      const soNovas = String(q.get('novas') || '').toLowerCase().trim();   // valor = a empresa
       let saida_nome = nome;
       if (tipo === 'saida' || tipo === 'entrada') {
         let sep; try { sep = nfSeparar(buf); } catch (e) { json(res, 500, { ok: false, erro: 'não consegui abrir o zip: ' + String(e.message || e) }); return true; }
-        const itens = (tipo === 'saida' ? sep.saida : sep.entrada);
-        if (!itens.length) { json(res, 404, { ok: false, erro: 'não há notas de ' + tipo + ' nesse arquivo' }); return true; }
+        let itens = (tipo === 'saida' ? sep.saida : sep.entrada);
+        if (soNovas && BLING_IMP[soNovas]) {
+          const ja = new Set(nfLerImportadas(soNovas).chaves);
+          itens = itens.filter(it => it.chave && !ja.has(it.chave));
+        }
+        if (!itens.length) { json(res, 404, { ok: false, erro: soNovas ? 'nenhuma nota nova nesse arquivo' : 'não há notas de ' + tipo + ' nesse arquivo' }); return true; }
         try { buf = nfMontarZip(itens); } catch (e) { json(res, 500, { ok: false, erro: 'falha ao montar o zip: ' + String(e.message || e) }); return true; }
         saida_nome = nome.replace(/\.zip$/, '') + '-' + (tipo === 'saida' ? 'SAIDA' : 'ENTRADA') + '.zip';
       }
@@ -307,16 +312,28 @@ async function tratar(req, res, urlObj) {
       const arqs = nfListar(emp3);
       if (!arqs.length) { json(res, 200, { ok: true, empresa: emp3, precisa: false, motivo: 'nenhum arquivo baixado ainda' }); return true; }
       const novoArq = arqs[0];
-      const hoje = new Date().toISOString().slice(0, 10);
-      let jaHoje = null;
-      try { jaHoje = JSON.parse(fs.readFileSync(path.join(NF_DIR, '_importado-' + emp3 + '-' + hoje + '.json'), 'utf8')); } catch (e) {}
+      // ANTES era "ja importou hoje?" — o que travava tudo depois da
+      // primeira importacao do dia. Agora a pergunta e outra: "o arquivo
+      // mais novo ja foi importado?". Assim, quantas vezes o cron rodar,
+      // tantas levas a extensao importa — sem repetir a mesma.
+      // A pergunta certa nao e "esse arquivo ja foi importado?" e sim
+      // "tem NOTA nova aqui dentro?". Sem isso, as 4 rodadas diarias
+      // mandariam o mesmo lote pro Bling rejeitar inteiro, todo dia.
+      const ultimo = nfLerImportadas(emp3);
+      let novas = [], totalSaida = 0;
+      try { const r5 = nfNovasDoArquivo(emp3, novoArq.nome); novas = r5.novas; totalSaida = r5.saida.length; }
+      catch (e) { json(res, 500, { ok: false, erro: 'não consegui abrir o zip: ' + String(e.message || e) }); return true; }
 
       json(res, 200, {
         ok: true, empresa: emp3, versao: VERSAO,
         arquivo: novoArq.nome, baixado_em: novoArq.em, notas: novoArq.notas,
-        precisa: !jaHoje,
-        ja_importado_hoje: jaHoje || null,
-        url_zip_saida: '/magalu/nf-full/arquivo?nome=' + encodeURIComponent(novoArq.nome) + '&tipo=saida&k=' + encodeURIComponent(q.get('k') || '')
+        saida_no_arquivo: totalSaida,
+        novas: novas.length,
+        precisa: novas.length > 0,
+        ja_importado_hoje: novas.length ? null : { quando: ultimo.quando, arquivo: ultimo.arquivo, resumo: ultimo.resumo },
+        ultima_importacao: ultimo.quando ? { quando: ultimo.quando, arquivo: ultimo.arquivo, chaves_guardadas: ultimo.chaves.length } : null,
+        // só as notas que ainda não foram — o Bling nem precisa recusar nada
+        url_zip_saida: '/magalu/nf-full/arquivo?nome=' + encodeURIComponent(novoArq.nome) + '&tipo=saida&novas=' + emp3 + '&k=' + encodeURIComponent(q.get('k') || '')
       });
       return true;
     }
@@ -327,11 +344,19 @@ async function tratar(req, res, urlObj) {
       try { corpo3 = await readBody(req); } catch (e) {}
       const emp4 = String(corpo3.empresa || '').toLowerCase();
       if (!BLING_IMP[emp4]) { json(res, 400, { ok: false, erro: 'empresa inválida' }); return true; }
-      const hoje4 = new Date().toISOString().slice(0, 10);
-      const reg = { quando: new Date().toISOString(), arquivo: corpo3.arquivo || null, resumo: corpo3.resumo || null, via: 'extensao' };
-      try { fs.mkdirSync(NF_DIR, { recursive: true }); fs.writeFileSync(path.join(NF_DIR, '_importado-' + emp4 + '-' + hoje4 + '.json'), JSON.stringify(reg)); } catch (e) {}
-      console.log('[magalu-nf] extensão importou ' + emp4 + ': ' + JSON.stringify(reg.resumo));
-      json(res, 200, { ok: true, gravado: reg });
+      // Marca como importadas as chaves que estavam no lote enviado.
+      // So chega aqui se a extensao concluiu — ela nao registra em caso de erro.
+      const antes = nfLerImportadas(emp4);
+      const jaTinha = new Set(antes.chaves);
+      let acrescentadas = 0;
+      try {
+        const r6 = nfNovasDoArquivo(emp4, String(corpo3.arquivo || ''));
+        r6.novas.forEach(it => { if (!jaTinha.has(it.chave)) { jaTinha.add(it.chave); acrescentadas++; } });
+      } catch (e) {}
+      const reg = { quando: new Date().toISOString(), arquivo: corpo3.arquivo || null, resumo: corpo3.resumo || null, via: 'extensao', chaves: Array.from(jaTinha) };
+      nfGravarImportadas(emp4, reg);
+      console.log('[magalu-nf] extensão importou ' + emp4 + ': +' + acrescentadas + ' chaves novas');
+      json(res, 200, { ok: true, empresa: emp4, chaves_novas: acrescentadas, chaves_guardadas: reg.chaves.length });
       return true;
     }
 
@@ -1625,6 +1650,17 @@ async function blingImportar(empresa, bufZip, tipo) {
 //
 //  Classificamos pelo <tpNF> de dentro do XML, nao pelo nome da pasta:
 //  se a Magalu renomear as pastas um dia, isso aqui continua certo.
+// Chave de acesso (44 digitos). Tenta o Id="NFe..." do XML, que e o lugar
+// canonico; se nao achar, cai pro nome do arquivo, que a Magalu monta como
+// {pedido}-{chave}.xml. Sem chave, a nota nao entra na conta de "ja foi".
+function nfChave(dados, nome) {
+  const txt = dados.toString('utf8', 0, Math.min(dados.length, 4000));
+  let m = /Id="NFe(\d{44})"/.exec(txt) || /<chNFe>(\d{44})<\/chNFe>/.exec(txt);
+  if (m) return m[1];
+  m = /(\d{44})/.exec(String(nome || ''));
+  return m ? m[1] : null;
+}
+
 function nfSeparar(buf) {
   const AdmZip = require('adm-zip');
   const zip = new AdmZip(buf);
@@ -1636,7 +1672,7 @@ function nfSeparar(buf) {
     let dados; try { dados = e.getData(); } catch (err) { return; }
     const m = /<tpNF>\s*([01])\s*<\/tpNF>/.exec(dados.toString('utf8'));
     const alvo = !m ? indefinido : (m[1] === '1' ? saida : entrada);
-    alvo.push({ nome, dados });
+    alvo.push({ nome, dados, chave: nfChave(dados, nome) });
   });
   return { saida, entrada, indefinido };
 }
@@ -1702,6 +1738,35 @@ async function nfBaixarZip(empresa, dIni, dFim) {
     throw new Error('o que voltou nao e um ZIP (' + buf.length + ' bytes): ' + buf.toString('utf8').slice(0, 150));
   }
   return buf;
+}
+
+// Guarda as chaves ja importadas por empresa. E isso que evita mandar de
+// novo, 4x por dia, o mesmo lote pro Bling rejeitar tudo como repetido.
+function nfArquivoImportadas(emp) { return path.join(NF_DIR, '_importado-' + emp + '.json'); }
+
+function nfLerImportadas(emp) {
+  try {
+    const j = JSON.parse(fs.readFileSync(nfArquivoImportadas(emp), 'utf8'));
+    return { quando: j.quando || null, arquivo: j.arquivo || null, resumo: j.resumo || null, chaves: Array.isArray(j.chaves) ? j.chaves : [] };
+  } catch (e) { return { quando: null, arquivo: null, resumo: null, chaves: [] }; }
+}
+
+function nfGravarImportadas(emp, reg) {
+  try {
+    fs.mkdirSync(NF_DIR, { recursive: true });
+    // guarda no maximo as 4000 ultimas — 31 dias de duas empresas cabe folgado
+    if (reg.chaves.length > 4000) reg.chaves = reg.chaves.slice(-4000);
+    fs.writeFileSync(nfArquivoImportadas(emp), JSON.stringify(reg));
+  } catch (e) {}
+}
+
+// Quais notas de saida desse ZIP ainda NAO foram importadas.
+function nfNovasDoArquivo(emp, nomeArquivo) {
+  const buf = fs.readFileSync(path.join(NF_DIR, nomeArquivo));
+  const sep = nfSeparar(buf);
+  const jaImportadas = new Set(nfLerImportadas(emp).chaves);
+  const novas = sep.saida.filter(it => it.chave && !jaImportadas.has(it.chave));
+  return { saida: sep.saida, novas };
 }
 
 function nfListar(empresa) {
