@@ -148,7 +148,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd94';
+const DASH_BUILD = 'd96';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -235,6 +235,76 @@ function prepararVendas(){
     _sit:v.situacao||null, _cancelado:(/cancel/i.test(String(v.situacao||'')) || !!v.cancelado_mkt), cancelado_mkt:(v.cancelado_mkt?1:0)
   }));
 }
+// desenha a tabela da Análise com as vendas vindas do HISTÓRICO (banco), 100 por página
+function renderHistLinhas(iv){
+  const tb=$('tAnalise'), rp=document.getElementById('anRodape'), inf=$('anInfo');
+  if(!tb) return;
+  if(!HLIN || HLIN._de!==iv.de || HLIN._ate!==iv.ate){
+    tb.innerHTML='<tr><td class="dim" style="padding:14px">⏳ carregando as vendas do histórico…</td></tr>';
+    if(inf) inf.textContent='';
+    if(rp) rp.style.display='none';
+    return;
+  }
+  const ps=HLIN.pedidos||[];
+  const pgAtual=HLIN.pagina||1, totPg=HLIN.total_paginas||1;
+  tb.innerHTML =
+    '<tr><th>Data</th><th>Pedido</th><th>Canal</th><th>Produto</th><th class="num">Un.</th>'+
+    '<th class="num">Venda NF</th><th class="num">Custo (−)</th><th class="num">Imposto (−)</th>'+
+    '<th class="num">Tarifa (−)</th><th class="num">Frete vend. (−)</th><th class="num">💎 M.C.</th><th class="num">MC %</th></tr>'+
+    (ps.length? ps.map(function(o){
+      const pcm = o.vnota>0 ? Math.round(o.margem/o.vnota*1000)/10 : null;
+      const skus = (o.itens||[]).map(function(i){ return (i.qtd>1?i.qtd+'× ':'')+esc(i.sku||''); }).join('<br>');
+      return '<tr>'+
+        '<td class="dim" style="white-space:nowrap">'+esc(String(o.data||'').slice(8,10)+'/'+String(o.data||'').slice(5,7))+'</td>'+
+        '<td><b>'+esc(o.numero)+'</b>'+(o.numero_loja?'<div class="desc" style="font-size:10px">'+esc(o.numero_loja)+'</div>':'')+'</td>'+
+        '<td>'+esc(nomeCanal(canalKey(o.canal)))+'</td>'+
+        '<td><div class="desc" style="max-width:200px">'+skus+'</div></td>'+
+        '<td class="num">'+N(o.un)+'</td>'+
+        '<td class="num">'+BRL(o.vnota)+'</td>'+
+        '<td class="num'+(o.semCusto?' warn':'')+'">'+(o.custo?BRL(o.custo):'—')+(o.semCusto?' ⚠':'')+'</td>'+
+        '<td class="num">'+BRL(o.imposto)+'</td>'+
+        '<td class="num">'+BRL(o.comissao)+'</td>'+
+        '<td class="num">'+(o.frete?BRL(o.frete):'—')+'</td>'+
+        '<td class="num '+(o.margem>=0?'ok':'bad')+'"><b>'+BRL(o.margem)+'</b></td>'+
+        '<td class="num '+(o.margem>=0?'ok':'bad')+'">'+(pcm!=null?(String(pcm).replace('.',',')+'%'):'—')+'</td>'+
+      '</tr>';
+    }).join('') : '<tr><td class="dim" colspan="12" style="padding:14px">sem vendas nesta página</td></tr>');
+  const ini=(pgAtual-1)*(HLIN.por_pagina||100)+1, fim=ini+ps.length-1;
+  if(inf) inf.textContent = ps.length ? (ini+'–'+fim+' de '+N(HLIN.total_pedidos||0)+' pedido(s) · página '+pgAtual+' de '+totPg) : '';
+  if(rp){
+    rp.style.display='flex';
+    let sel='<select onchange="histIrPagina(this.value)" style="background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:6px 9px;font-size:12.5px">';
+    for(let i=1;i<=totPg;i++){ sel += '<option value="'+i+'"'+(i===pgAtual?' selected':'')+'>página '+i+'</option>'; }
+    sel += '</select>';
+    rp.innerHTML = '<b style="font-size:12.5px">📚 histórico</b>'+
+      '<span class="mut" style="font-size:12px">'+N(HLIN.total_pedidos||0)+' pedidos · 100 por página</span>'+
+      '<span style="margin-left:auto"></span>'+
+      (pgAtual>1?'<button class="chip" onclick="histIrPagina('+(pgAtual-1)+')">← Anterior</button>':'')+
+      sel+
+      (pgAtual<totPg?'<button class="chip" style="background:#1d4ed8;border-color:#1d4ed8;color:#fff;font-weight:700" onclick="histIrPagina('+(pgAtual+1)+')">Próxima →</button>':'<span class="mut" style="font-size:12px">última página</span>');
+  }
+}
+
+// 📚 LISTA do histórico, paginada por pedido (100 por página) — vem do banco, não do cache local
+let HLIN = null;            // {pedidos, pagina, total_paginas, total_pedidos}
+let _hlCarregando = false;
+async function carregarLinhasHist(de, ate, pagina){
+  if(_hlCarregando) return;
+  _hlCarregando = true;
+  try{
+    const r = await fetch(MOD+'/historico-linhas?de='+de+'&ate='+ate+'&pagina='+(pagina||1)+'&lim=100', {credentials:'same-origin'});
+    const d = await r.json().catch(()=>null);
+    if(d && d.ok){ HLIN = d; HLIN._de=de; HLIN._ate=ate; renderAnalise(); }
+  }catch(e){}
+  _hlCarregando = false;
+}
+function histIrPagina(n){
+  if(!HLIN) return;
+  const p = Math.min(Math.max(1, Number(n)||1), HLIN.total_paginas||1);
+  carregarLinhasHist(HLIN._de, HLIN._ate, p);
+  const el=document.getElementById('secAnalise'); if(el) el.scrollIntoView({behavior:'smooth'});
+}
+
 // 📚 HISTÓRICO LONGO (Supabase): períodos que não cabem na janela local (Ano, 6 meses…)
 let HIST = null;          // agregado do período, vindo do servidor
 let _histCarregando = false;
@@ -1093,6 +1163,8 @@ function renderAnalise(){
     // continua sendo o que existe no cache local, e isso fica dito na tela pra não confundir.
     const hOK = !!(HIST && HIST.de===iv.de && HIST.ate===iv.ate && HIST.totais);
     if(hOK){
+      // garante a 1ª página das linhas do histórico
+      if(!HLIN || HLIN._de!==iv.de || HLIN._ate!==iv.ate){ carregarLinhasHist(iv.de, iv.ate, 1); }
       const T=HIST.totais;
       const mini2=(l,v,c)=>'<div style="background:var(--card);border:1px solid var(--line);border-radius:9px;padding:7px 11px;min-width:96px"><div style="font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut)">'+l+'</div><div style="font-weight:800;font-size:14px'+(c?';color:'+c:'')+'">'+v+'</div></div>';
       el.innerHTML = '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px">'+
@@ -1104,7 +1176,8 @@ function renderAnalise(){
         mini2('\ud83d\udc8e M.C.',BRL(T.margem),T.margem>=0?'#34d399':'#f87171')+
         mini2('Pedidos',N(T.pedidos))+
       '</div>'+
-      '<div class="nota" style="margin-bottom:10px"><b>\ud83d\udcda Per\u00edodo longo:</b> os totais acima vêm do <b>hist\u00f3rico completo</b> ('+N(T.pedidos)+' pedidos, '+N(T.itens)+' itens). A <b>lista abaixo</b> mostra apenas as vendas que ainda est\u00e3o no cache recente do sistema — por isso a quantidade de linhas \u00e9 diferente. Para conferir venda a venda de um dia espec\u00edfico, use o filtro <b>Hoje</b>, <b>Ontem</b> ou <b>Per\u00edodo\u2026</b> com uma data recente.</div>';
+      '<div class="nota" style="margin-bottom:10px"><b>\ud83d\udcda Hist\u00f3rico:</b> '+N(T.pedidos)+' pedidos e '+N(T.itens)+' itens no per\u00edodo. A lista abaixo vem do banco, 100 pedidos por p\u00e1gina.</div>';
+      renderHistLinhas(iv);
       return;
     }
     let rT=0,rI=0,rC=0,rF=0,rM=0,rMn=0,rN=0,rDev=0,rDevFrete=0,rDevAb=0;
