@@ -308,6 +308,23 @@
   .hsync{flex:0 0 auto;font-size:11px;font-weight:700;border-radius:999px;padding:3px 8px}
   .hsync.ok{color:var(--ok);background:#0e2a1a}
   .hsync.wait{color:var(--warn);background:#2a1f08}
+  /* ⚠️ ALERTA DE PRODUTO FRÁGIL */
+  .fragilOverlay{position:fixed;inset:0;background:rgba(120,20,20,.55);z-index:9999;display:flex;align-items:center;justify-content:center;animation:fragIn .15s ease}
+  @keyframes fragIn{from{opacity:0}to{opacity:1}}
+  .fragilBox{background:#1a1414;border:3px solid #f59e0b;border-radius:16px;padding:26px 30px;max-width:440px;width:90%;text-align:center;box-shadow:0 12px 50px rgba(0,0,0,.6)}
+  .fragilIco{font-size:56px;line-height:1;animation:fragPulse 1s ease infinite}
+  @keyframes fragPulse{0%,100%{transform:scale(1)}50%{transform:scale(1.12)}}
+  .fragilTit{font-size:26px;font-weight:900;color:#f59e0b;letter-spacing:1px;margin:8px 0}
+  .fragilMsg{font-size:16px;color:#fde68a;margin:6px 0 14px;line-height:1.4}
+  .fragilSkus{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-bottom:18px}
+  .fragilSkus span{background:#f59e0b22;border:1px solid #f59e0b66;color:#fbbf24;border-radius:6px;padding:3px 9px;font-family:ui-monospace,monospace;font-size:13px;font-weight:700}
+  .fragilOk{background:#f59e0b;color:#1a1414;border:0;border-radius:10px;padding:12px 22px;font-size:16px;font-weight:800;cursor:pointer;width:100%}
+  .fragilOk:disabled{background:#5b4a2a;color:#a89;cursor:wait}
+  .item.fragilItem{border-color:#f59e0b !important;background:linear-gradient(90deg,#f59e0b14,transparent)}
+  .fragilTag{background:#f59e0b;color:#1a1414;border-radius:5px;padding:1px 6px;font-size:11px;font-weight:800;margin-right:5px;vertical-align:middle}
+  .sskus{margin:3px 0 2px;display:flex;flex-direction:column;gap:1px}
+  .sskus div{font-size:12px;color:var(--mut);line-height:1.3}
+  .sskus b{color:#cfe0ff;font-family:ui-monospace,monospace}
 </style>
 </head>
 <body>
@@ -382,7 +399,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b126';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b127';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#b3b9c4'}, magalu:{n:'Magalu',c:'#0086ff'}, shein:{n:'Shein',c:'#e0e0e0'},
@@ -391,6 +408,75 @@ const MKT = {
   outro:{n:'Outro',c:'#94a3b8'}
 };
 let pedidoAtual = null;   // {bling_id,numero,cliente,nf,marketplace,itens:[{sku,ean,descricao,qtd,bipado}]}
+
+// ── ⚠️ ALERTA DE PRODUTO FRÁGIL (lista e config vêm do painel /fragil/) ──
+let FRAGEIS = new Set();
+let FRAGIL_MSGS = {};
+let FRAGIL_DIAG = 'nao carregou';
+let FRAGIL_CFG = { mensagemPadrao:'Aten\u00e7\u00e3o! Produto fr\u00e1gil. Embalar com cuidado.', velocidadeVoz:1.1, nomeVoz:'', tempoMinimoSegundos:2 };
+const normSku = s => String(s||'').trim().toUpperCase();
+async function carregarFrageis(){
+  try{
+    const r = await fetch('/fragil/api/skus', {credentials:'same-origin'});
+    if(!r.ok){ FRAGIL_DIAG = 'HTTP '+r.status; return; }
+    const d = await r.json();
+    if(d && d.skus){
+      FRAGEIS = new Set(Object.keys(d.skus).map(normSku));
+      FRAGIL_MSGS = {};
+      for(const k of Object.keys(d.skus)){ const m = d.skus[k]; if(typeof m==='string' && m.trim()) FRAGIL_MSGS[normSku(k)] = m.trim(); }
+    }
+    if(d && d.config) FRAGIL_CFG = Object.assign(FRAGIL_CFG, d.config);
+    FRAGIL_DIAG = FRAGEIS.size + ' SKUs';
+    const el = document.getElementById('fragilDiag');
+    if(el) el.textContent = '\u26a0\ufe0f ' + FRAGIL_DIAG;
+  }catch(e){ FRAGIL_DIAG = 'erro: '+(e.message||e); }
+}
+function falarFragil(txt){
+  try{
+    if(!('speechSynthesis' in window)) return;
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(txt);
+    u.lang='pt-BR'; u.rate=Number(FRAGIL_CFG.velocidadeVoz)||1.1;
+    if(FRAGIL_CFG.nomeVoz){ const v=speechSynthesis.getVoices().find(x=>x.name===FRAGIL_CFG.nomeVoz); if(v) u.voice=v; }
+    speechSynthesis.speak(u);
+  }catch(e){}
+}
+function alertaFragil(ped){
+  if(!ped || !ped.temFragil) return;
+  const skus = ped.skusFrageis||[];
+  const proprias = skus.map(x=>FRAGIL_MSGS[normSku(x)]).filter(Boolean);
+  const msg = proprias.length ? proprias.join('. ') : (FRAGIL_CFG.mensagemPadrao || 'Aten\u00e7\u00e3o! Produto fr\u00e1gil.');
+  falarFragil(msg);
+  const seg = Math.max(0, Math.round(Number(FRAGIL_CFG.tempoMinimoSegundos)||0));
+  const ov = document.createElement('div'); ov.className='fragilOverlay';
+  ov.innerHTML = '<div class="fragilBox"><div class="fragilIco">\u26a0\ufe0f</div>'+
+    '<div class="fragilTit">PRODUTO FR\u00c1GIL</div>'+
+    '<div class="fragilMsg">'+esc(msg)+'</div>'+
+    '<div class="fragilSkus">'+skus.map(x=>'<span>'+esc(x)+'</span>').join('')+'</div>'+
+    '<button class="fragilOk" '+(seg>0?'disabled':'')+'>'+(seg>0?('aguarde '+seg+'s\u2026'):'OK, vou embalar com cuidado')+'</button></div>';
+  document.body.appendChild(ov);
+  const btn = ov.querySelector('.fragilOk');
+  const fechar = ()=>{ try{speechSynthesis.cancel();}catch(e){} ov.remove(); };
+  if(seg>0){ let rr=seg; const iv=setInterval(()=>{ rr--; if(rr>0){ btn.textContent='aguarde '+rr+'s\u2026'; } else { clearInterval(iv); btn.textContent='OK, vou embalar com cuidado'; btn.disabled=false; } },1000); }
+  btn.onclick = fechar;
+}
+
+// \ud83d\udd53 data/hora do pedido — NF quando existe, senão quando o sistema viu no Bling
+function blocoHora(p){
+  var dt = p.nf_emissao || p.visto_em; if(!dt) return '';
+  var d2 = new Date(String(dt).replace(' ','T')); if(isNaN(d2)) return '';
+  var f2 = ('0'+d2.getDate()).slice(-2)+'/'+('0'+(d2.getMonth()+1)).slice(-2)+'/'+d2.getFullYear()+' \u00e0s '+('0'+d2.getHours()).slice(-2)+':'+('0'+d2.getMinutes()).slice(-2)+'h';
+  return '<div class="stime" title="'+(p.nf_emissao?'data e hora da EMISS\u00c3O da NF no Bling':'quando este pedido apareceu pro sistema (o Bling n\u00e3o d\u00e1 a hora do pedido)')+'">\ud83d\udd53 '+(p.nf_emissao?'NF ':'Bling ')+f2+'</div>';
+}
+// \ud83d\udd17 links do Bling (SÓ ADMIN)
+function linkBlingPedido(p){
+  if(!souAdmin() || !p.id) return '';
+  return '<a href="https://www.bling.com.br/vendas.php#edit/'+encodeURIComponent(String(p.id))+'" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="abrir o PEDIDO no Bling (admin)" style="text-decoration:none;font-size:11px;font-weight:700;color:#a78bfa">Bling\u2197</a>';
+}
+function linkBlingNF(p){
+  if(!souAdmin() || !p.nf_id) return '';
+  return '<a href="https://www.bling.com.br/notas.fiscais.php#edit/'+encodeURIComponent(String(p.nf_id))+'" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="abrir a NOTA FISCAL no Bling (admin)" style="text-decoration:none;font-size:11px;font-weight:700;color:#4ade80">NF\u2197</a>';
+}
 let zplAtual = null;
 let listaCache = [];
 let semEtiqCache = [];   // pedidos ATENDIDO sem etiqueta (problema)
@@ -683,7 +769,7 @@ async function carregarLista(){
     (function(){
       const _min = d.ciclo_rodou_em ? Math.round((Date.now() - new Date(d.ciclo_rodou_em).getTime())/60000) : null;
       const _vs  = d.versao ? String(d.versao).split(' ').pop() : 'v?';
-      $('ver').innerHTML = _vs + ' \u00b7 ui ' + UI_BUILD
+      $('ver').innerHTML = _vs + ' \u00b7 ui ' + UI_BUILD + ' \u00b7 <span id="fragilDiag" title="SKUs fr\u00e1geis carregados do painel /fragil/">\u26a0\ufe0f ' + FRAGIL_DIAG + '</span>'
         + (_min!=null ? ' \u00b7 <span style="color:'+(_min>25?'#f87171':'#94a3b8')+'" title="\u00faltima consulta ao Bling (o ciclo roda sozinho de 10 em 10 min)">\u23f1 '+_min+' min</span>' : '')
         + (d.sem_etiqueta>0 ? ' \u00b7 <span style="color:#fbbf24" title="pedidos sem etiqueta \u2014 o servidor tenta de novo sozinho a cada 5 min">\u26a0 '+d.sem_etiqueta+' s/ etiqueta</span>' : '');
     })();
@@ -787,11 +873,13 @@ function renderLista(){
         '<div class="scl1">'+
           '<span class="badge" style="background:'+m.c+'">'+m.n+'</span>'+
           '<span class="num">'+esc(p.numero||p.id)+'</span>'+
-          ((souAdmin() && p.numero_loja && /amazon/i.test(String(p.marketplace||'')))?'<a href="https://sellercentral.amazon.com.br/orders-v3/order/'+encodeURIComponent(String(p.numero_loja).trim())+'" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="abrir a venda no Seller Central da Amazon (admin)" style="text-decoration:none;font-size:13px;color:#38bdf8">↗</a>':'')+((souAdmin() && p.numero_loja && /magalu/i.test(String(p.marketplace||'')))?'<a href="/magalu/ir/amb?n='+encodeURIComponent(String(p.numero_loja).trim())+'" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="abrir o pedido direto no seller da Magalu (admin)" style="text-decoration:none;font-size:13px;color:#38bdf8">↗</a>':'')+((souAdmin() && p.numero_loja && /tiktok/i.test(String(p.marketplace||'')))?'<a href="https://seller-br.tiktok.com/order/detail?order_no='+String(p.numero_loja).replace(/\D/g,'')+'&shop_region=BR" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="abrir a venda no seller center do TikTok (admin)" style="text-decoration:none;font-size:13px;color:#38bdf8">↗</a>':'')+((souAdmin() && p.numero_loja && /shopee/i.test(String(p.marketplace||'')))?'<a href="/amb-checkout-offline/ir-shopee?sn='+encodeURIComponent(String(p.numero_loja).trim())+'" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="abrir esta venda direto no seller center da Shopee (admin)" style="text-decoration:none;font-size:13px;color:#38bdf8">↗</a>':'')+((souAdmin() && p.numero_loja && /ml|merc/i.test(String(p.marketplace||'')))?'<a href="https://www.mercadolivre.com.br/vendas/'+String(p.numero_loja).replace(/\D/g,'')+'/detalhe" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="abrir a venda no Mercado Livre (só admin vê)" style="text-decoration:none;font-size:13px;color:#38bdf8">↗</a>':'')+
+          linkBlingPedido(p)+linkBlingNF(p)+
+          ((souAdmin() && p.numero_loja && /amazon/i.test(String(p.marketplace||'')))?'<a href="https://sellercentral.amazon.com.br/orders-v3/order/'+encodeURIComponent(String(p.numero_loja).trim())+'" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="abrir a venda no Seller Central da Amazon (admin)" style="text-decoration:none;font-size:11px;font-weight:700;color:#38bdf8">MKTP↗</a>':'')+((souAdmin() && p.numero_loja && /magalu/i.test(String(p.marketplace||'')))?'<a href="/magalu/ir/amb?n='+encodeURIComponent(String(p.numero_loja).trim())+'" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="abrir o pedido direto no seller da Magalu (admin)" style="text-decoration:none;font-size:11px;font-weight:700;color:#38bdf8">MKTP↗</a>':'')+((souAdmin() && p.numero_loja && /tiktok/i.test(String(p.marketplace||'')))?'<a href="https://seller-br.tiktok.com/order/detail?order_no='+String(p.numero_loja).replace(/\D/g,'')+'&shop_region=BR" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="abrir a venda no seller center do TikTok (admin)" style="text-decoration:none;font-size:11px;font-weight:700;color:#38bdf8">MKTP↗</a>':'')+((souAdmin() && p.numero_loja && /shopee/i.test(String(p.marketplace||'')))?'<a href="/amb-checkout-offline/ir-shopee?sn='+encodeURIComponent(String(p.numero_loja).trim())+'" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="abrir esta venda direto no seller center da Shopee (admin)" style="text-decoration:none;font-size:11px;font-weight:700;color:#38bdf8">MKTP↗</a>':'')+((souAdmin() && p.numero_loja && /ml|merc/i.test(String(p.marketplace||'')))?'<a href="https://www.mercadolivre.com.br/vendas/'+String(p.numero_loja).replace(/\D/g,'')+'/detalhe" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="abrir a venda no Mercado Livre (só admin vê)" style="text-decoration:none;font-size:11px;font-weight:700;color:#38bdf8">MKTP↗</a>':'')+
           '<span class="setag">⚠️ sem etiqueta</span>'+
         '</div>'+
         (p.cliente?'<div class="scli">'+esc(p.cliente)+'</div>':'')+
         '<div class="smeta">NF '+(p.nf_numero?esc(p.nf_numero):'—')+' · o Bling não trouxe a etiqueta deste pedido</div>'+
+        blocoHora(p)+
         (souAdmin()?'<button class="btn sec" style="margin-top:8px;font-size:12px;padding:7px 11px" onclick="event.stopPropagation();anexarEtiqueta(\''+esc(p.id)+'\',\''+esc(p.numero||p.id)+'\')">📎 anexar etiqueta (ZPL/ZIP/PDF)</button>':'')+
       '</div>';
     }).join('');
@@ -813,20 +901,21 @@ function renderLista(){
         '<span class="chk'+((p.tem_nf||p.nf_numero)?'':' off')+'" title="Nota Fiscal">🧾<i>'+((p.tem_nf||p.nf_numero)?'✓':'✗')+'</i></span>'+
         '<span class="badge" style="background:'+m.c+'">'+m.n+'</span>'+
         '<span class="num">'+esc(p.numero)+'</span>'+
-        ((souAdmin() && p.numero_loja && /amazon/i.test(String(p.marketplace||'')))?'<a href="https://sellercentral.amazon.com.br/orders-v3/order/'+encodeURIComponent(String(p.numero_loja).trim())+'" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="abrir a venda no Seller Central da Amazon (admin)" style="text-decoration:none;font-size:13px;color:#38bdf8">↗</a>':'')+((souAdmin() && p.numero_loja && /magalu/i.test(String(p.marketplace||'')))?'<a href="/magalu/ir/amb?n='+encodeURIComponent(String(p.numero_loja).trim())+'" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="abrir o pedido direto no seller da Magalu (admin)" style="text-decoration:none;font-size:13px;color:#38bdf8">↗</a>':'')+((souAdmin() && p.numero_loja && /tiktok/i.test(String(p.marketplace||'')))?'<a href="https://seller-br.tiktok.com/order/detail?order_no='+String(p.numero_loja).replace(/\D/g,'')+'&shop_region=BR" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="abrir a venda no seller center do TikTok (admin)" style="text-decoration:none;font-size:13px;color:#38bdf8">↗</a>':'')+((souAdmin() && p.numero_loja && /shopee/i.test(String(p.marketplace||'')))?'<a href="/amb-checkout-offline/ir-shopee?sn='+encodeURIComponent(String(p.numero_loja).trim())+'" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="abrir esta venda direto no seller center da Shopee (admin)" style="text-decoration:none;font-size:13px;color:#38bdf8">↗</a>':'')+((souAdmin() && p.numero_loja && /ml|merc/i.test(String(p.marketplace||'')))?'<a href="https://www.mercadolivre.com.br/vendas/'+String(p.numero_loja).replace(/\D/g,'')+'/detalhe" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="abrir a venda no Mercado Livre (só admin vê)" style="text-decoration:none;font-size:13px;color:#38bdf8">↗</a>':'')+
+        linkBlingPedido(p)+linkBlingNF(p)+
+        ((souAdmin() && p.numero_loja && /amazon/i.test(String(p.marketplace||'')))?'<a href="https://sellercentral.amazon.com.br/orders-v3/order/'+encodeURIComponent(String(p.numero_loja).trim())+'" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="abrir a venda no Seller Central da Amazon (admin)" style="text-decoration:none;font-size:11px;font-weight:700;color:#38bdf8">MKTP↗</a>':'')+((souAdmin() && p.numero_loja && /magalu/i.test(String(p.marketplace||'')))?'<a href="/magalu/ir/amb?n='+encodeURIComponent(String(p.numero_loja).trim())+'" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="abrir o pedido direto no seller da Magalu (admin)" style="text-decoration:none;font-size:11px;font-weight:700;color:#38bdf8">MKTP↗</a>':'')+((souAdmin() && p.numero_loja && /tiktok/i.test(String(p.marketplace||'')))?'<a href="https://seller-br.tiktok.com/order/detail?order_no='+String(p.numero_loja).replace(/\D/g,'')+'&shop_region=BR" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="abrir a venda no seller center do TikTok (admin)" style="text-decoration:none;font-size:11px;font-weight:700;color:#38bdf8">MKTP↗</a>':'')+((souAdmin() && p.numero_loja && /shopee/i.test(String(p.marketplace||'')))?'<a href="/amb-checkout-offline/ir-shopee?sn='+encodeURIComponent(String(p.numero_loja).trim())+'" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="abrir esta venda direto no seller center da Shopee (admin)" style="text-decoration:none;font-size:11px;font-weight:700;color:#38bdf8">MKTP↗</a>':'')+((souAdmin() && p.numero_loja && /ml|merc/i.test(String(p.marketplace||'')))?'<a href="https://www.mercadolivre.com.br/vendas/'+String(p.numero_loja).replace(/\D/g,'')+'/detalhe" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="abrir a venda no Mercado Livre (só admin vê)" style="text-decoration:none;font-size:11px;font-weight:700;color:#38bdf8">MKTP↗</a>':'')+
         (p.volumes>1?'<span class="voltag">📦 '+p.volumes+' vol</span>':'')+
         (resvOutro?'<span class="resvtag">🟠 '+esc(resvOutro)+'</span>':'')+
         (p.conferido?'<span class="donetag">✓</span>':'')+
         (servicoDesconhecido(p)?'<span class="voltag" style="background:#b45309;color:#fff" title="Serviço Shopee não reconhecido — confira se é FLEX ou ponto de coleta">⚠️ serviço?</span>':'')+
       '</div>'+
       (p.cliente?'<div class="scli">'+esc(p.cliente)+'</div>':'')+
-      '<div class="smeta">'+((p.skus&&p.skus[0])?'📦 <b>'+esc(p.skus[0])+'</b>'+(p.skus.length>1?' +'+(p.skus.length-1):'')+' · ':'')+(p.itens||0)+' item(s) · NF '+(p.nf_numero?esc(p.nf_numero):(p.tem_nf?'ok':'—'))+(p.tem_danfe?' · <span class="pdfok">PDF✓</span>':'')+'</div>'+
-      (function(){
-        var dt = p.nf_emissao || p.visto_em; if(!dt) return '';
-        var d2 = new Date(String(dt).replace(' ','T')); if(isNaN(d2)) return '';
-        var f2 = ('0'+d2.getDate()).slice(-2)+'/'+('0'+(d2.getMonth()+1)).slice(-2)+'/'+d2.getFullYear()+' às '+('0'+d2.getHours()).slice(-2)+':'+('0'+d2.getMinutes()).slice(-2)+'h';
-        return '<div class="stime" title="'+(p.nf_emissao?'data e hora da EMISSÃO da NF no Bling':'quando este pedido apareceu pro sistema (o Bling não dá a hora do pedido)')+'">🕓 '+(p.nf_emissao?'NF ':'Bling ')+f2+'</div>';
+      (function(){   // 2+ SKUs: um por linha
+        var ss=(p.skus||[]).filter(Boolean);
+        if(ss.length<2) return '';
+        return '<div class="sskus">'+ss.map(function(x){return '<div>📦 <b>'+esc(x)+'</b></div>';}).join('')+'</div>';
       })()+
+      '<div class="smeta">'+(((p.skus||[]).filter(Boolean).length===1)?'📦 <b>'+esc(p.skus[0])+'</b> · ':'')+(p.itens||0)+' item(s) · NF '+(p.nf_numero?esc(p.nf_numero):(p.tem_nf?'ok':'—'))+(p.tem_danfe?' · <span class="pdfok">PDF✓</span>':'')+'</div>'+
+      blocoHora(p)+
     '</div>';
   }).join('');
 }
@@ -888,6 +977,7 @@ async function selecionar(id){
     zplAtual = await fetch('/amb-checkout-offline/etiqueta/'+id).then(r=>r.text());
     estoqueSaldos = {}; estoqueCheckout = {}; estoqueCarregado = false;   // reset: estoque do pedido novo (renderiza "…" até chegar)
     renderDetail();
+    alertaFragil(ped);   // \u26a0\ufe0f avisa se o pedido tem produto fr\u00e1gil
     renderLista(); // atualiza highlight
     iniciarHeartbeat(id);
     carregarEstoque(id);   // 📦 busca o estoque restante ao vivo (async, não trava a abertura)
@@ -899,16 +989,21 @@ async function selecionar(id){
 function prepararPedido(ped){
   const grupos = [], unidades = [];
   let uid = 0;
-  const novaUnid = (o)=>{ const u={ _id:uid++, sku:o.sku||'', ean:o.ean||null, descricao:o.descricao||'', img:o.img||null, qtd:Number(o.qtd||0), bipado:0, loc:o.loc||'' }; unidades.push(u); return u; };
+  const novaUnid = (o)=>{ const u={ _id:uid++, sku:o.sku||'', ean:o.ean||null, descricao:o.descricao||'', img:o.img||null, qtd:Number(o.qtd||0), bipado:0, loc:o.loc||'', fragil: FRAGEIS.has(normSku(o.sku)) }; unidades.push(u); return u; };
   for(const it of (ped.itens||[])){
     if(it.tipo==='kit' && Array.isArray(it.componentes) && it.componentes.length){
       const comps = it.componentes.map(c=>novaUnid(c));
-      grupos.push({ tipo:'kit', sku:it.sku, descricao:it.descricao, ean:it.ean, img:it.img, qtd:Number(it.qtd||0), comps });
+      const kitFragil = FRAGEIS.has(normSku(it.sku));
+      if(kitFragil) comps.forEach(c=>{ c.fragil = true; });   // kit frágil: marca os componentes
+      grupos.push({ tipo:'kit', sku:it.sku, descricao:it.descricao, ean:it.ean, img:it.img, qtd:Number(it.qtd||0), comps, fragil:kitFragil });
     } else {
       grupos.push({ tipo:'leaf', unit:novaUnid(it) });
     }
   }
   ped.grupos = grupos; ped.unidades = unidades;
+  const kitsFrag = grupos.filter(g=>g.tipo==='kit' && g.fragil).map(g=>g.sku);
+  ped.skusFrageis = [...new Set([...kitsFrag, ...unidades.filter(u=>u.fragil).map(u=>u.sku)])];
+  ped.temFragil = ped.skusFrageis.length > 0;
 }
 
 function renderDetail(){
@@ -999,10 +1094,10 @@ function atualizarEstoque(){
 
 function unitRow(u, isComp){
   const full = u.bipado>=u.qtd;
-  return '<div class="item '+(isComp?'comp ':'')+(full?'full':'')+'">'+
+  return '<div class="item '+(isComp?'comp ':'')+(u.fragil?'fragilItem ':'')+(full?'full':'')+'">'+
     thumb(u.img)+
     '<div class="icount"><span class="'+(full?'b':'')+'">'+u.bipado+'</span>/'+u.qtd+'</div>'+
-    '<div class="idesc"><div class="d">'+esc(u.descricao||u.sku||'item')+'</div>'+
+    '<div class="idesc"><div class="d">'+(u.fragil?'<span class="fragilTag">\u26a0\ufe0f FR\u00c1GIL</span> ':'')+esc(u.descricao||u.sku||'item')+'</div>'+
       '<div class="e">SKU '+esc(u.sku||'—')+' · EAN '+(u.ean?esc(u.ean):'<span class="noean">sem EAN</span>')+' · '+((u.loc||'').trim()?'<span class="loctag">📍 '+esc(u.loc)+'</span>':'<span class="locsem">📍 sem local</span>')+'</div>'+
       '<div class="estoque">'+estTags(u.sku)+'</div></div>'+
     ((full||!souAdmin())?'':'<button class="miniok" onclick="manualUnit('+u._id+')">+1</button>')+
@@ -1971,6 +2066,7 @@ document.addEventListener('keydown', e=>{ if((e.ctrlKey||e.metaKey) && (e.key===
 (async function(){ await setupQZ(); reconectarQZ(); })();
 aplicarModoLabel();
 checarLogin();   // gate de login → ele carrega a lista assim que liberar
+carregarFrageis(); setInterval(carregarFrageis, 300000);   // lista de fr\u00e1geis do /fragil/, atualiza a cada 5 min
 setInterval(()=>{ if(!pedidoAtual && (!loginAtivo || localStorage.getItem('gbkp_logado')==='1')) carregarLista(); }, 20000);
 </script>
 </body>
