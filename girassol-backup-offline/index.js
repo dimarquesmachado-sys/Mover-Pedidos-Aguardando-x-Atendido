@@ -41,7 +41,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v27/07 b60';
+const VERSAO     = 'girassol-backup-offline v27/07 b62';
 
 // ── SESSÃO DE OPERADOR (cookie assinado HMAC) — protege rotas de dados/ação ──
 // Segredo estável entre restarts. Usa ADMIN_KEY (já configurada no Render) como base.
@@ -895,6 +895,76 @@ function routes(readBody) {
       json(res, 200, { ok: true, msg: '✅ backfill iniciado em background (só Girassol). Acompanhe em /backfill-status. Ele deleta o período antes e regrava, então pode rodar de novo sem duplicar.', de, ate });
       return true;
     }
+    // LISTA do histórico, paginada por PEDIDO (o banco guarda 1 linha por ITEM, então agrupa antes).
+    // Uso: /girassol-backup-offline/historico-linhas?de=&ate=&off=0&lim=100
+    if (method === 'GET' && p === '/girassol-backup-offline/historico-linhas') {
+      const kR = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const sessR = validarSessao(req.headers['cookie']);
+      if (!((process.env.ADMIN_KEY && kR === process.env.ADMIN_KEY) || (sessR && ehAdmin(sessR)))) { json(res, 404, { error: 'not found' }); return true; }
+      const deR = String((urlObj.searchParams && urlObj.searchParams.get('de')) || '').slice(0, 10);
+      const ateR = String((urlObj.searchParams && urlObj.searchParams.get('ate')) || '').slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(deR) || !/^\d{4}-\d{2}-\d{2}$/.test(ateR)) { json(res, 400, { ok: false, erro: 'passe &de=&ate=' }); return true; }
+      const lim = Math.min(200, Math.max(10, parseInt((urlObj.searchParams && urlObj.searchParams.get('lim')) || '100', 10) || 100));
+      const pagina = Math.max(1, parseInt((urlObj.searchParams && urlObj.searchParams.get('pagina')) || '1', 10) || 1);
+      const { url: uR, key: kkR } = supaCfg('girassol');
+      if (!uR || !kkR) { json(res, 500, { ok: false, erro: 'Supabase não configurado' }); return true; }
+      const HH = { apikey: kkR, Authorization: 'Bearer ' + kkR };
+      const BASE = uR.replace(/\/+$/, '') + '/rest/v1/vendas_historico?empresa=eq.girassol&data_venda=gte.' + deR + '&data_venda=lte.' + ateR;
+      // ÍNDICE DE PEDIDOS do período (só o número — leve) pra saber onde cada página começa.
+      // Cacheado 10 min: permite pular direto pra qualquer página, sem varrer o banco de novo.
+      const ck = 'idx|' + deR + '|' + ateR;
+      let idx = (_histCache[ck] && (Date.now() - _histCache[ck].ts) < 600000) ? _histCache[ck].dados : null;
+      if (!idx) {
+        idx = [];
+        try {
+          let o2 = 0;
+          while (o2 < 80000) {
+            const ri = await fetch(BASE + '&select=numero_pedido&order=data_venda.desc,numero_pedido.desc&limit=1000&offset=' + o2, { headers: HH });
+            const ln = await ri.json().catch(() => []);
+            if (!Array.isArray(ln) || !ln.length) break;
+            for (const l of ln) {
+              const k = String(l.numero_pedido || '(sem número)');
+              if (idx.length && idx[idx.length - 1].n === k) idx[idx.length - 1].c++;
+              else idx.push({ n: k, c: 1 });
+            }
+            if (ln.length < 1000) break;
+            o2 += 1000;
+          }
+        } catch (e) {}
+        _histCache[ck] = { ts: Date.now(), dados: idx };
+      }
+      const totalPedidos = idx.length, totalPaginas = Math.max(1, Math.ceil(totalPedidos / lim));
+      const pg = Math.min(pagina, totalPaginas);
+      const iniPed = (pg - 1) * lim, fimPed = Math.min(totalPedidos, iniPed + lim);
+      let off = 0; for (let i = 0; i < iniPed; i++) off += idx[i].c;
+      let qtdItens = 0; for (let i = iniPed; i < fimPed; i++) qtdItens += idx[i].c;
+      const campos = 'numero_pedido,numero_loja,canal,data_venda,sku,descricao,quantidade,valor_produto,valor_nota,custo,comissao,frete_vendedor,imposto,margem';
+      let linhas = [];
+      try {
+        const rq = await fetch(BASE + '&select=' + campos + '&order=data_venda.desc,numero_pedido.desc&limit=' + Math.max(1, qtdItens) + '&offset=' + off, { headers: HH });
+        linhas = await rq.json().catch(() => []);
+        if (!Array.isArray(linhas)) linhas = [];
+      } catch (e) { json(res, 500, { ok: false, erro: String(e.message || e) }); return true; }
+      const ordem = [], mapa = {};
+      for (const l of linhas) {
+        const k = String(l.numero_pedido || '(sem número)');
+        if (!mapa[k]) { mapa[k] = { numero: k, numero_loja: l.numero_loja || null, canal: l.canal || 'outro', data: l.data_venda, itens: [], un: 0, vprod: 0, vnota: 0, custo: 0, semCusto: 0, comissao: 0, frete: 0, imposto: 0, margem: 0 }; ordem.push(k); }
+        const o = mapa[k], q = Number(l.quantidade) || 0;
+        o.itens.push({ sku: l.sku || '', qtd: q });
+        o.un += q; o.vprod += Number(l.valor_produto) || 0; o.vnota += Number(l.valor_nota) || 0;
+        if (l.custo != null) o.custo += Number(l.custo); else o.semCusto += q;
+        o.comissao += Number(l.comissao) || 0; o.frete += Number(l.frete_vendedor) || 0;
+        o.imposto += Number(l.imposto) || 0; if (l.margem != null) o.margem += Number(l.margem);
+      }
+      const pedidos = ordem.map(k => {
+        const o = mapa[k];
+        ['vprod','vnota','custo','comissao','frete','imposto','margem'].forEach(c => { o[c] = Math.round(o[c] * 100) / 100; });
+        return o;
+      });
+      json(res, 200, { ok: true, pedidos, pagina: pg, total_paginas: totalPaginas, total_pedidos: totalPedidos, por_pagina: lim });
+      return true;
+    }
+
     // HISTÓRICO LONGO (Supabase): períodos que não cabem na janela local (Ano, 6 meses...).
     // Agrega no servidor e devolve pronto — o navegador não aguenta 23 mil linhas.
     // Uso: /girassol-backup-offline/historico-longo?de=YYYY-MM-DD&ate=YYYY-MM-DD
