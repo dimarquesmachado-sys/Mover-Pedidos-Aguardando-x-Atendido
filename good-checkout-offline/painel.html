@@ -306,6 +306,20 @@
   .hsync{flex:0 0 auto;font-size:11px;font-weight:700;border-radius:999px;padding:3px 8px}
   .hsync.ok{color:var(--ok);background:#0e2a1a}
   .hsync.wait{color:var(--warn);background:#2a1f08}
+  /* ⚠️ ALERTA DE PRODUTO FRÁGIL */
+  .fragilOverlay{position:fixed;inset:0;background:rgba(120,20,20,.55);z-index:9999;display:flex;align-items:center;justify-content:center;animation:fragIn .15s ease}
+  @keyframes fragIn{from{opacity:0}to{opacity:1}}
+  .fragilBox{background:#1a1414;border:3px solid #f59e0b;border-radius:16px;padding:26px 30px;max-width:440px;width:90%;text-align:center;box-shadow:0 12px 50px rgba(0,0,0,.6)}
+  .fragilIco{font-size:56px;line-height:1;animation:fragPulse 1s ease infinite}
+  @keyframes fragPulse{0%,100%{transform:scale(1)}50%{transform:scale(1.12)}}
+  .fragilTit{font-size:26px;font-weight:900;color:#f59e0b;letter-spacing:1px;margin:8px 0}
+  .fragilMsg{font-size:16px;color:#fde68a;margin:6px 0 14px;line-height:1.4}
+  .fragilSkus{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-bottom:18px}
+  .fragilSkus span{background:#f59e0b22;border:1px solid #f59e0b66;color:#fbbf24;border-radius:6px;padding:3px 9px;font-family:ui-monospace,monospace;font-size:13px;font-weight:700}
+  .fragilOk{background:#f59e0b;color:#1a1414;border:0;border-radius:10px;padding:12px 22px;font-size:16px;font-weight:800;cursor:pointer;width:100%}
+  .fragilOk:disabled{background:#5b4a2a;color:#a89;cursor:wait}
+  .item.fragilItem{border-color:#f59e0b !important;background:linear-gradient(90deg,#f59e0b14,transparent)}
+  .fragilTag{background:#f59e0b;color:#1a1414;border-radius:5px;padding:1px 6px;font-size:11px;font-weight:800;margin-right:5px;vertical-align:middle}
 </style>
 </head>
 <body>
@@ -380,7 +394,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b60';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b61';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#b3b9c4'}, magalu:{n:'Magalu',c:'#0086ff'},
@@ -389,6 +403,48 @@ const MKT = {
   outro:{n:'Outro',c:'#94a3b8'}
 };
 let pedidoAtual = null;   // {bling_id,numero,cliente,nf,marketplace,itens:[{sku,ean,descricao,qtd,bipado}]}
+
+// ── ⚠️ ALERTA DE PRODUTO FRÁGIL (lista e config vêm do painel /fragil/) ──
+let FRAGEIS = new Set();
+let FRAGIL_CFG = { mensagemPadrao:'Atenção! Produto frágil. Embalar com cuidado.', velocidadeVoz:1.1, nomeVoz:'', tempoMinimoSegundos:2 };
+const normSku = s => String(s||'').trim().toUpperCase();
+async function carregarFrageis(){
+  try{
+    const r = await fetch('/fragil/api/skus', {credentials:'same-origin'});
+    if(!r.ok) return;
+    const d = await r.json();
+    if(d && d.skus) FRAGEIS = new Set(Object.keys(d.skus).map(normSku));
+    if(d && d.config) FRAGIL_CFG = Object.assign(FRAGIL_CFG, d.config);
+  }catch(e){}
+}
+function falarFragil(txt){
+  try{
+    if(!('speechSynthesis' in window)) return;
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(txt);
+    u.lang='pt-BR'; u.rate=Number(FRAGIL_CFG.velocidadeVoz)||1.1;
+    if(FRAGIL_CFG.nomeVoz){ const v=speechSynthesis.getVoices().find(x=>x.name===FRAGIL_CFG.nomeVoz); if(v) u.voice=v; }
+    speechSynthesis.speak(u);
+  }catch(e){}
+}
+function alertaFragil(ped){
+  if(!ped || !ped.temFragil) return;
+  const skus = ped.skusFrageis||[];
+  const msg = FRAGIL_CFG.mensagemPadrao || 'Atenção! Produto frágil.';
+  falarFragil(msg);
+  const seg = Math.max(0, Math.round(Number(FRAGIL_CFG.tempoMinimoSegundos)||0));
+  const ov = document.createElement('div'); ov.className='fragilOverlay';
+  ov.innerHTML = '<div class="fragilBox"><div class="fragilIco">\u26a0\ufe0f</div>'+
+    '<div class="fragilTit">PRODUTO FR\u00c1GIL</div>'+
+    '<div class="fragilMsg">'+esc(msg)+'</div>'+
+    '<div class="fragilSkus">'+skus.map(x=>'<span>'+esc(x)+'</span>').join('')+'</div>'+
+    '<button class="fragilOk" '+(seg>0?'disabled':'')+'>'+(seg>0?('aguarde '+seg+'s\u2026'):'OK, vou embalar com cuidado')+'</button></div>';
+  document.body.appendChild(ov);
+  const btn = ov.querySelector('.fragilOk');
+  const fechar = ()=>{ try{speechSynthesis.cancel();}catch(e){} ov.remove(); };
+  if(seg>0){ let rr=seg; const iv=setInterval(()=>{ rr--; if(rr>0){ btn.textContent='aguarde '+rr+'s\u2026'; } else { clearInterval(iv); btn.textContent='OK, vou embalar com cuidado'; btn.disabled=false; } },1000); }
+  btn.onclick = fechar;
+}
 let zplAtual = null;
 let listaCache = [];
 let semEtiqCache = [];   // pedidos ATENDIDO sem etiqueta (problema)
@@ -898,6 +954,7 @@ async function selecionar(id){
     zplAtual = await fetch('/good-checkout-offline/etiqueta/'+id).then(r=>r.text());
     estoqueSaldos = {}; estoqueCheckout = {}; estoqueCarregado = false;   // reset: estoque do pedido novo (renderiza "…" até chegar)
     renderDetail();
+    alertaFragil(ped);   // \u26a0\ufe0f avisa se o pedido tem produto fr\u00e1gil
     renderLista(); // atualiza highlight
     iniciarHeartbeat(id);
     carregarEstoque(id);   // 📦 busca o estoque restante ao vivo (async, não trava a abertura)
@@ -909,7 +966,7 @@ async function selecionar(id){
 function prepararPedido(ped){
   const grupos = [], unidades = [];
   let uid = 0;
-  const novaUnid = (o)=>{ const u={ _id:uid++, sku:o.sku||'', ean:o.ean||null, descricao:o.descricao||'', img:o.img||null, qtd:Number(o.qtd||0), bipado:0, loc:o.loc||'' }; unidades.push(u); return u; };
+  const novaUnid = (o)=>{ const u={ _id:uid++, sku:o.sku||'', ean:o.ean||null, descricao:o.descricao||'', img:o.img||null, qtd:Number(o.qtd||0), bipado:0, loc:o.loc||'', fragil: FRAGEIS.has(normSku(o.sku)) }; unidades.push(u); return u; };
   for(const it of (ped.itens||[])){
     if(it.tipo==='kit' && Array.isArray(it.componentes) && it.componentes.length){
       const comps = it.componentes.map(c=>novaUnid(c));
@@ -919,6 +976,8 @@ function prepararPedido(ped){
     }
   }
   ped.grupos = grupos; ped.unidades = unidades;
+  ped.skusFrageis = [...new Set(unidades.filter(u=>u.fragil).map(u=>u.sku))];
+  ped.temFragil = ped.skusFrageis.length > 0;
 }
 
 function renderDetail(){
@@ -1009,10 +1068,10 @@ function atualizarEstoque(){
 
 function unitRow(u, isComp){
   const full = u.bipado>=u.qtd;
-  return '<div class="item '+(isComp?'comp ':'')+(full?'full':'')+'">'+
+  return '<div class="item '+(isComp?'comp ':'')+(u.fragil?'fragilItem ':'')+(full?'full':'')+'">'+
     thumb(u.img)+
     '<div class="icount"><span class="'+(full?'b':'')+'">'+u.bipado+'</span>/'+u.qtd+'</div>'+
-    '<div class="idesc"><div class="d">'+esc(u.descricao||u.sku||'item')+'</div>'+
+    '<div class="idesc"><div class="d">'+(u.fragil?'<span class="fragilTag">\u26a0\ufe0f FR\u00c1GIL</span> ':'')+esc(u.descricao||u.sku||'item')+'</div>'+
       '<div class="e">SKU '+esc(u.sku||'—')+' · EAN '+(u.ean?esc(u.ean):'<span class="noean">sem EAN</span>')+' · '+((u.loc||'').trim()?'<span class="loctag">📍 '+esc(u.loc)+'</span>':'<span class="locsem">📍 sem local</span>')+'</div>'+
       '<div class="estoque">'+estTags(u.sku)+'</div></div>'+
     ((full||!souAdmin())?'':'<button class="miniok" onclick="manualUnit('+u._id+')">+1</button>')+
@@ -1981,6 +2040,7 @@ document.addEventListener('keydown', e=>{ if((e.ctrlKey||e.metaKey) && (e.key===
 (async function(){ await setupQZ(); reconectarQZ(); })();
 aplicarModoLabel();
 checarLogin();   // gate de login → ele carrega a lista assim que liberar
+carregarFrageis(); setInterval(carregarFrageis, 300000);   // \u26a0\ufe0f lista de fr\u00e1geis do painel /fragil/, atualiza a cada 5 min
 setInterval(()=>{ if(!pedidoAtual && (!loginAtivo || localStorage.getItem('gbkp_logado')==='1')) carregarLista(); }, 20000);
 </script>
 </body>
