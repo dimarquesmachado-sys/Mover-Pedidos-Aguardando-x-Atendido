@@ -103,7 +103,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd90';
+const DASH_BUILD = 'd91';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -371,6 +371,7 @@ function montar(){
       '<button class="chip" onclick="anPage++;renderAnalise()">Próxima →</button></div>'+
       '<div id="anResumo"></div>'+
       '<div class="tw"><table id="tAnalise"></table></div>'+
+      '<div id="anRodape" style="display:none;align-items:center;gap:8px;margin-top:8px;padding:8px;background:var(--bg2);border-radius:9px"></div>'+
       '<div class="nota"><b>Sobre a ordem:</b> dentro de cada dia, ML aparece na hora REAL da venda; TikTok/Shopee/Magalu/Amazon entram pela hora da <b>EMISSÃO da NF</b> (🧾), que acompanha a venda de perto — acabaram os blocos por canal. O 🕘 (hora da conferência) só aparece quando a linha ainda não tem NF. A hora exata da venda desses canais continua existindo <b>só na API do próprio canal</b>. Pra confrontar com o Jodda, use o ⬇︎ CSV e case pelo <b>número da venda no marketplace</b>. · ML mostra a hora REAL da venda (vem da pesca); TikTok/Shopee o Bling não guarda hora — o 🕘 marca que ali está a hora da <b>conferência</b> (a hora da venda desses canais chega quando plugarmos as APIs deles) · colunas (−) são deduções e (+) é crédito · <b>Estorno</b> = o valor exato da linha "Estorno" da venda no ML (no Flex ele já vem líquido: bonificação menos o frete cobrado), somado na M.C. · no Flex o custo do frete é o <b>motoboy</b> configurado no ⚙️ · tarifa <span class="ok">REAL</span> = pescada do ML · <span class="ok">BLING</span> = comissão que o Bling importou do canal (TikTok/Shopee/Magalu) · sem tag = % configurada · custo carrega sob demanda por página · 🛒 = mais de 1 item/unidade</div></div>'+
     '<div class="sec" id="secTop"><h2>🏆 Top produtos <span class="hint">clique nos títulos p/ ordenar ↑↓ · faturamento = SOMA de todos os pedidos do SKU no período · 💎 M.C. = margem dos pedidos rateada por item — o rank do que dá LUCRO de verdade · Curva ABC recalculada pro período pesquisado (A = 80% do faturamento)</span></h2>'+
       '<div class="tw"><table id="tProd"></table></div><div id="prodAviso"></div></div>'+
@@ -1030,7 +1031,8 @@ function renderAnalise(){
   else if(anLP==='prej') LP=LP.filter(x=>x.P.mc!=null&&x.P.mc<0);
   else if(anLP==='inc') LP=LP.filter(x=>x.P.mc==null);
   LP.sort((a,b)=> tMs(b.h)-tMs(a.h));
-  const PAG=100, maxP=Math.max(0,Math.ceil(LP.length/PAG)-1);
+  const PAG=(anPer==='dia'||anPer==='ontem') ? Math.max(1, LP.length) : 100;   // dia inteiro numa página só (Diego, 27/07)
+  const maxP=Math.max(0,Math.ceil(LP.length/PAG)-1);
   if(anPage>maxP) anPage=maxP; if(anPage<0) anPage=0;
   const pagPL=LP.slice(anPage*PAG, anPage*PAG+PAG);
   const pag=pagPL.map(x=>x.h);
@@ -1052,7 +1054,17 @@ function renderAnalise(){
       (rDev? mini('\ud83d\udd34 Devolu\u00e7\u00f5es', rDev+' <span style="font-size:10px;color:var(--mut)">'+(rDevAb?'('+rDevAb+' aberta'+(rDevAb>1?'s':'')+') · ':'')+'frete ret. '+BRL(rDevFrete)+'</span>', '#f87171') : '')+
     '</div>' : '';
   })();
-  $('anInfo').textContent = LP.length ? ((anPage*PAG+1)+'–'+(anPage*PAG+pagPL.length)+' de '+LP.length+' venda(s)') : 'sem vendas no período';
+  (function(){
+    const rp = document.getElementById('anRodape'); if(!rp) return;
+    if(maxP<=0){ rp.style.display='none'; rp.innerHTML=''; return; }
+    rp.style.display='flex';
+    rp.innerHTML = '<b style="font-size:12.5px">\u26a0\ufe0f tem mais venda(s) nas pr\u00f3ximas p\u00e1ginas</b>'+
+      '<span class="mut" style="font-size:12px">mostrando '+pagPL.length+' de '+LP.length+' \u00b7 p\u00e1gina '+(anPage+1)+' de '+(maxP+1)+'</span>'+
+      '<span style="margin-left:auto"></span>'+
+      (anPage>0?'<button class="chip" onclick="anPage--;renderAnalise();document.getElementById(\'secAnalise\').scrollIntoView({behavior:\'smooth\'})">\u2190 Anterior</button>':'')+
+      (anPage<maxP?'<button class="chip" style="background:#1d4ed8;border-color:#1d4ed8;color:#fff;font-weight:700" onclick="anPage++;renderAnalise();document.getElementById(\'secAnalise\').scrollIntoView({behavior:\'smooth\'})">ver as pr\u00f3ximas '+Math.min(PAG, LP.length-(anPage+1)*PAG)+' \u2192</button>':'');
+  })();
+  $('anInfo').textContent = LP.length ? ((anPage*PAG+1)+'–'+(anPage*PAG+pagPL.length)+' de '+LP.length+' venda(s)'+(maxP>0?('  ·  página '+(anPage+1)+' de '+(maxP+1)):'')) : 'sem vendas no período';
   const faltam=[...new Set(pag.flatMap(h=>(h.itens||[]).map(i=>i.sku)).filter(sk=>sk && !SKUINFO[sk] && !_anTried[sk]))];
   if(faltam.length && !_anLoading){
     faltam.forEach(sk=>{ _anTried[sk]=1; });
@@ -1109,13 +1121,13 @@ function renderAnalise(){
     }
     return sep + '<tr style="'+estiloLinha(h)+'"'+(h._cancelado?' title="pedido CANCELADO no Bling — fora dos totais"':(h.devolucao?(' title="DEVOLU\u00c7\u00c3O'+(h.dev_aberta?' em andamento (dinheiro ainda n\u00e3o resolvido no Mercado Pago)':' consolidada')+'"'):''))+'>'+
       '<td class="dim" style="white-space:nowrap" title="'+(h.venda_em?('venda: '+dtBR(h.venda_em)+' · '):(h.venda_dia?('venda: '+String(h.venda_dia).slice(8,10)+'/'+String(h.venda_dia).slice(5,7)+' · '):''))+'conferido: '+dtBR(h.conferido_em)+'">'+(h.venda_em?dtBR(h.venda_em):(h.venda_dia?(String(h.venda_dia).slice(8,10)+'/'+String(h.venda_dia).slice(5,7)+(h.nf_emissao?(' '+String(h.nf_emissao).replace(' ','T').slice(11,16)+' <span style="font-size:9px" title="hora da EMISSÃO da NF no Bling — a hora exata da venda só a API do canal dá">🧾</span>'):' <span style="font-size:9px" title="dia da venda (Bling) — hora só com a API do canal">🕘</span>')):(h.nf_emissao?(String(h.nf_emissao).slice(8,10)+'/'+String(h.nf_emissao).slice(5,7)+' '+String(h.nf_emissao).replace(' ','T').slice(11,16)+' <span style="font-size:9px" title="hora da EMISSÃO da NF no Bling — a hora exata da venda só a API do canal dá">🧾</span>'):(dtBR(h.conferido_em)+' <span style="font-size:9px" title="hora da conferência">🕘</span>'))))+'</td>'+
-      '<td>'+(h._cancelado?'<span style="color:#64748b;font-weight:800" title="CANCELADO no Bling — fora dos totais">✕</span> ':(h.sintetico?'<span style="color:#f59e0b;font-weight:800" title="aguardando bipagem — margem já calculada">✓</span> ':'<span style="color:#34d399;font-weight:800" title="bipagem confirmada">✓</span> '))+'<b>'+esc(h.numero||h.id)+'</b>'+(h.id?' <a href="https://www.bling.com.br/vendas.php#edit/'+esc(h.id)+'" target="_blank" rel="noopener" title="abrir o pedido no Bling" style="font-size:10px;color:#3b82f6;text-decoration:none;font-weight:600">Bling↗</a>':'')+(carrinho?' <span class="badge" title="'+unid+' unidades">🛒 '+unid+'</span>':'')+(h.devolucao?' <span class="st bad" style="font-size:9px" title="DEVOLU\u00c7\u00c3O no ML'+(h.dev_frete_retorno!=null?' \u00b7 frete de retorno '+BRL(h.dev_frete_retorno):'')+(h.dev_destino==='seller_address'?' \u00b7 mercadoria volta pro galp\u00e3o':(h.dev_destino==='warehouse'?' \u00b7 mercadoria foi pro ML':''))+(h.dev_aberta?' \u00b7 EM ABERTO':' \u00b7 fechada')+'">\ud83d\udd34 DEVOLV.</span>':'')+
+      '<td>'+(h._cancelado?'<span style="color:#64748b;font-weight:800" title="CANCELADO — fora dos totais">✕</span> <span class="st bad" style="font-size:9px">CANCELADA</span> ':(h.sintetico?'<span style="color:#f59e0b;font-weight:800" title="aguardando bipagem — margem já calculada">✓</span> ':'<span style="color:#34d399;font-weight:800" title="bipagem confirmada">✓</span> '))+'<b>'+esc(h.numero||h.id)+'</b>'+(h.id?' <a href="https://www.bling.com.br/vendas.php#edit/'+esc(h.id)+'" target="_blank" rel="noopener" title="abrir o pedido no Bling" style="font-size:10px;color:#3b82f6;text-decoration:none;font-weight:600">Bling↗</a>':'')+(carrinho?' <span class="badge" title="'+unid+' unidades">🛒 '+unid+'</span>':'')+(h.devolucao?' <span class="st bad" style="font-size:9px" title="DEVOLU\u00c7\u00c3O no ML'+(h.dev_frete_retorno!=null?' \u00b7 frete de retorno '+BRL(h.dev_frete_retorno):'')+(h.dev_destino==='seller_address'?' \u00b7 mercadoria volta pro galp\u00e3o':(h.dev_destino==='warehouse'?' \u00b7 mercadoria foi pro ML':''))+(h.dev_aberta?' \u00b7 EM ABERTO':' \u00b7 fechada')+'">\ud83d\udd34 DEVOLV.</span>':'')+
         (h.nf_numero?'<div class="desc">NF '+esc(h.nf_numero)+(h.nf_id?' <a href="https://www.bling.com.br/notas.fiscais.php#edit/'+esc(h.nf_id)+'" target="_blank" rel="noopener" title="abrir a NF no Bling" style="color:#3b82f6;text-decoration:none;font-weight:600">↗</a>':'')+'</div>':'')+'</td>'+
       (function(){
         const nlV = String(h.numero_loja||'');
         const par = [h.ml_pack, h.ml_order].map(x=>x!=null?String(x):null).find(x=>x && x!==nlV) || null;
         const um = (v,dim)=>'<span data-nl="'+esc(v)+'" onclick="copiaNL(this)" style="cursor:pointer;display:inline-block;max-width:126px;overflow:hidden;text-overflow:ellipsis;vertical-align:middle'+(dim?';opacity:.55;font-size:10px':'')+'" title="clique = copiar · '+esc(v)+'">'+esc(v)+'</span>';
-        return '<td class="dim" style="font-size:11px;max-width:170px;white-space:nowrap">'+(nlV?(
+        return '<td style="font-size:11px;max-width:170px;white-space:nowrap;color:var(--tx)">'+(nlV?(
           um(nlV,false)+(linkMkt(h)?' <a href="'+linkMkt(h)+'" target="_blank" rel="noopener" style="text-decoration:none;font-size:12px" title="abrir esta venda no Mercado Livre">↗</a>':'')+
           (par?'<br>'+um(par,true):'')
         ):'—')+'</td>';
@@ -1143,7 +1155,7 @@ function renderAnalise(){
     '<th class="num" title="total da NOTA FISCAL (com frete embutido, quando o canal lança)">Venda NF</th><th class="num" title="só os produtos: preço × quantidade">R$ Produtos</th><th class="num">Custo (−)</th><th class="num">Imposto (−)</th>'+
     '<th class="num">Tarifa (−)</th><th class="num">Frete vend. (−)</th><th class="num">Estorno (+)</th><th class="num">💎 M.C.</th><th class="num">MC %</th></tr>'+
     (linhas || '<tr><td class="dim" colspan="15">sem vendas no período</td></tr>')+
-    (pag.length?('<tr style="border-top:2px solid var(--line2)"><td colspan="6" style="font-weight:800">Σ desta página</td>'+
+    (pag.length?('<tr style="border-top:2px solid var(--line2)"><td colspan="6" style="font-weight:800">Σ desta página'+(maxP>0?(' <span class="mut" style="font-weight:400;font-size:11px">('+pag.length+' de '+LP.length+' — o total do período está lá em cima)</span>'):'')+'</td>'+
       cel(T.tot)+cel(T.rp,'ok')+cel(T.cus)+cel(T.imp)+cel(T.tar)+cel(T.frv)+cel(T.cre,'ok')+
       '<td class="num" style="font-weight:800"><span class="'+(T.mc>=0?'ok':'bad')+'">'+BRL(T.mc)+'</span></td>'+
       '<td class="num dim">'+T.mcN+'/'+pag.length+' compl.</td></tr>'):'');
