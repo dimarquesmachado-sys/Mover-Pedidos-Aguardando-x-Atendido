@@ -103,7 +103,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd88';
+const DASH_BUILD = 'd89';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -462,7 +462,7 @@ function render(){
       const sku=it.sku||'(sem SKU)';
       if(!porProd[sku]) porProd[sku]={sku,desc:it.descricao||'',qtd:0,fat:0,qtdV:0};
       porProd[sku].qtd+=q;
-      const _infC=SKUINFO[sku];   // custo total do SKU no período (custo unit × qtd) — pra as colunas de custo/margem
+      const _infC=(it.custo!=null&&isFinite(Number(it.custo)))?{custo:Number(it.custo)}:SKUINFO[sku];   // custo do servidor primeiro, SKUINFO reserva
       if(_infC && _infC.custo!=null && isFinite(Number(_infC.custo))){ porProd[sku].custo=(porProd[sku].custo||0)+Number(_infC.custo)*q; porProd[sku].qtdC=(porProd[sku].qtdC||0)+q; }
       if(it.valor_total!=null && isFinite(Number(it.valor_total))){ const vt=Number(it.valor_total); porProd[sku].fat+=vt; porProd[sku].qtdV+=q; itensComValor++; _iv+=vt; }
       else _todos=false;
@@ -763,7 +763,7 @@ function calcPL(h){
   let tarifa = (feeReal!=null)?feeReal:(feeBling!=null?feeBling:((tx!=null&&rp!=null)?rp*tx/100:null));
   if(ck==='madeira' && feeReal==null && feeBling==null && tarifa!=null) tarifa += 5;   // Madeira Envios: taxa fixa R$ 5,00 por pedido
   let custo=0, cusUn=0, unTot=0;
-  (h.itens||[]).forEach(it=>{ const q=Number(it.qtd||1); unTot+=q; const inf=SKUINFO[it.sku]; if(inf&&inf.custo!=null){ custo+=inf.custo*q; cusUn+=q; } });
+  (h.itens||[]).forEach(it=>{ const q=Number(it.qtd||1); unTot+=q; let c=(it.custo!=null&&isFinite(Number(it.custo)))?Number(it.custo):null; if(c==null){ const inf=SKUINFO[it.sku]; if(inf&&inf.custo!=null) c=Number(inf.custo); } if(c!=null){ custo+=c*q; cusUn+=q; } });   // 27/07: custo do SERVIDOR (banco _custos.json) primeiro; SKUINFO é reserva — antes a Análise e os cards usavam fontes diferentes e davam lucros diferentes
   const custoOk = cusUn===unTot && unTot>0;
   let frV = null, frFonte = null;
   if (h.frete_ml!=null && isFinite(Number(h.frete_ml)) && Number(h.frete_ml)>0) { frV = Number(h.frete_ml); frFonte = 'ml'; }   // 0 nao e frete real: deixa cair no Bling/FLEX (senao o custo do motoboy sumia)
