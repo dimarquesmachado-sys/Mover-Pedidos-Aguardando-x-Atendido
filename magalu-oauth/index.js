@@ -26,7 +26,7 @@ const fs   = require('fs');
 const path = require('path');
 const { json, html } = require('../lib/http');
 
-const VERSAO = 'magalu-oauth v1 b22';
+const VERSAO = 'magalu-oauth v1 b23';
 
 const DATA_DIR = process.env.MAGALU_DATA_DIR || '/data/magalu';
 
@@ -210,6 +210,115 @@ async function tratar(req, res, urlObj) {
     } catch (e) {
       json(res, 502, { ok: false, empresa: emp, erro: String(e.message || e) });
     }
+    return true;
+  }
+
+  // ── SONDA NF-e FULFILLMENT (26/07) ──────────────────────────────────
+  // /magalu/sonda?empresa=amb&nf=1[&de=2026-07-19&ate=2026-07-26][&delivery=UUID]
+  //
+  // POR QUE PENDURADA NO /magalu/sonda: esse path JÁ está na lista de rotas
+  // admin do index.js da RAIZ. Criar /magalu/nf-full exigiria editar o
+  // orquestrador da raiz — o arquivo que derrubou o serviço em 23/07. Não vale
+  // o risco por uma sondagem.
+  //
+  // O QUE FAZ: chama GET /seller/v1/invoices/fulfillment PELADO (o 422 do
+  // Magalu costuma listar os parâmetros obrigatórios pelo nome) e depois testa
+  // uma matriz de nomes de parâmetro de período, porque a doc não renderiza os
+  // parâmetros no HTML. Mostra status, content-type, tamanho e um pedaço do
+  // corpo de cada tentativa. NÃO grava nada, NÃO importa nada.
+  if (method === 'GET' && p === '/magalu/sonda' && q.get('nf')) {
+    const emp = String(q.get('empresa') || '').toLowerCase().trim();
+    if (!EMPRESAS_VALIDAS.includes(emp)) { json(res, 400, { ok: false, erro: 'empresa inválida' }); return true; }
+
+    const fmt = d => d.toISOString().slice(0, 10);
+    const hoje = new Date();
+    const ate = String(q.get('ate') || fmt(hoje)).trim();
+    const de  = String(q.get('de')  || fmt(new Date(hoje.getTime() - 7 * 864e5))).trim();
+
+    let tok = '';
+    try { tok = await getAccessToken(emp); }
+    catch (e) { json(res, 502, { ok: false, erro: 'token: ' + String(e.message || e) }); return true; }
+    const H = { 'Authorization': 'Bearer ' + tok, 'Accept': 'application/json' };
+
+    // Lê a resposta SEM assumir que é JSON: se vier ZIP (o portal devolve um
+    // .zip de 526 KB) ou XML puro, mede e identifica em vez de despejar lixo.
+    async function inspecionar(url) {
+      const t0 = Date.now();
+      let r;
+      try { r = await fetch(url, { headers: H, redirect: 'manual' }); }
+      catch (e) { return { url: url.replace('https://api.magalu.com', ''), erro: String(e.message || e).slice(0, 160) }; }
+
+      const ct  = r.headers.get('content-type') || '';
+      const loc = r.headers.get('location') || null;
+      let buf;
+      try { buf = Buffer.from(await r.arrayBuffer()); } catch (e) { buf = Buffer.alloc(0); }
+
+      const out = {
+        url: url.replace('https://api.magalu.com', ''),
+        status: r.status, content_type: ct.slice(0, 60), bytes: buf.length, ms: Date.now() - t0
+      };
+      if (loc) out.REDIRECT_PARA = loc.slice(0, 300);
+
+      // assinatura de ZIP = PK\x03\x04
+      if (buf.length > 4 && buf[0] === 0x50 && buf[1] === 0x4B) { out.VEIO_ZIP = true; return out; }
+
+      const txt = buf.toString('utf8');
+      if (/^\s*<\?xml|<nfeProc|<NFe/i.test(txt)) { out.VEIO_XML = true; out.trecho = txt.slice(0, 300); return out; }
+
+      let j = null; try { j = JSON.parse(txt); } catch (e) {}
+      if (!j) { out.corpo = txt.slice(0, 500); return out; }
+
+      out.json_chaves = Object.keys(j).slice(0, 20);
+      // caça qualquer campo que pareça link de download (o portal devolve URL
+      // assinada do storage.googleapis.com)
+      const links = [];
+      (function caca(o, base) {
+        if (!o || typeof o !== 'object' || links.length > 8) return;
+        for (const k of Object.keys(o)) {
+          const v = o[k];
+          const cam = base ? base + '.' + k : k;
+          if (typeof v === 'string' && /^https?:\/\//i.test(v)) links.push(cam + ' = ' + v.slice(0, 200));
+          else if (v && typeof v === 'object') caca(v, cam);
+        }
+      })(j, '');
+      if (links.length) out.LINKS_ENCONTRADOS = links;
+      out.corpo = JSON.stringify(j).slice(0, 700);
+      return out;
+    }
+
+    const BASE = 'https://api.magalu.com/seller/v1/invoices/fulfillment';
+    const tentativas = [];
+
+    // 1) pelado — é aqui que o 422 entrega o nome dos parâmetros
+    tentativas.push(await inspecionar(BASE));
+
+    // 2) matriz de nomes de período
+    const pares = [
+      ['start_date', 'end_date'],
+      ['initial_date', 'final_date'],
+      ['_start_date', '_end_date'],
+      ['begin_date', 'end_date'],
+      ['issue_date_start', 'issue_date_end'],
+      ['created_at_start', 'created_at_end'],
+      ['from', 'to'],
+      ['period_start', 'period_end']
+    ];
+    for (const par of pares) {
+      tentativas.push(await inspecionar(BASE + '?' + par[0] + '=' + de + '&' + par[1] + '=' + ate));
+    }
+
+    // 3) se passar &delivery=UUID, testa também a NF por entrega
+    const dlv = String(q.get('delivery') || '').trim();
+    if (dlv) {
+      tentativas.push(await inspecionar('https://api.magalu.com/seller/v1/deliveries/' + encodeURIComponent(dlv) + '/invoices'));
+    }
+
+    json(res, 200, {
+      ok: true, empresa: emp, versao: VERSAO,
+      periodo_testado: { de, ate },
+      leia: 'Olhe PRIMEIRO a tentativa sem parâmetro: o 422 costuma listar os campos obrigatórios pelo nome. Depois procure a linha que deu 200 e veja se trouxe VEIO_ZIP, VEIO_XML, REDIRECT_PARA ou LINKS_ENCONTRADOS.',
+      tentativas
+    });
     return true;
   }
 
