@@ -103,7 +103,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd85';
+const DASH_BUILD = 'd87';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -179,7 +179,7 @@ function estiloLinha(h){
 
 function prepararVendas(){
   const _sit = {}; (VENDAS||[]).forEach(v=>{ if(v&&v.numero!=null) _sit[String(v.numero)]=v; });
-  (DADOS||[]).forEach(h=>{ const v=_sit[String(h.numero)]; if(v){ h._sit=v.situacao||null; h._cancelado=/cancel/i.test(String(v.situacao||'')); if(v.data && !h.venda_dia) h.venda_dia=v.data; if(v.venda_em && !h.venda_em) h.venda_em=v.venda_em; if(v.tarifa_ml!=null && h.tarifa_ml==null) h.tarifa_ml=Number(v.tarifa_ml); if(v.frete_recebido!=null && h.frete_recebido==null) h.frete_recebido=Number(v.frete_recebido); if(v.renda_canal!=null && h.renda_canal==null) h.renda_canal=Number(v.renda_canal); if(v.devolucao){ h.devolucao=1; if(v.dev_frete_retorno!=null)h.dev_frete_retorno=Number(v.dev_frete_retorno); h.dev_destino=v.dev_destino; h.dev_status=v.dev_status; h.dev_aberta=v.dev_aberta; } } });   // d45: bipada herda dia/hora · d50: tarifa REAL · d51: frete recebido · d53: renda oficial · b39: devolução
+  (DADOS||[]).forEach(h=>{ const v=_sit[String(h.numero)]; if(v){ h._sit=v.situacao||null; h._cancelado=(/cancel/i.test(String(v.situacao||'')) || !!v.cancelado_mkt); if(v.data && !h.venda_dia) h.venda_dia=v.data; if(v.venda_em && !h.venda_em) h.venda_em=v.venda_em; if(v.tarifa_ml!=null && h.tarifa_ml==null) h.tarifa_ml=Number(v.tarifa_ml); if(v.frete_recebido!=null && h.frete_recebido==null) h.frete_recebido=Number(v.frete_recebido); if(v.renda_canal!=null && h.renda_canal==null) h.renda_canal=Number(v.renda_canal); if(v.devolucao){ h.devolucao=1; if(v.dev_frete_retorno!=null)h.dev_frete_retorno=Number(v.dev_frete_retorno); h.dev_destino=v.dev_destino; h.dev_status=v.dev_status; h.dev_aberta=v.dev_aberta; } } });   // d45: bipada herda dia/hora · d50: tarifa REAL · d51: frete recebido · d53: renda oficial · b39: devolução
   const _nums = new Set((DADOS||[]).map(h=>String(h.numero)));
   SINT = (VENDAS||[]).filter(v=>v&&v.numero!=null&&!_nums.has(String(v.numero))).map(v=>({
     sintetico:true, id:'s'+v.id, numero:v.numero, numero_loja:v.numero_loja||'', marketplace:v.marketplace||'outro',
@@ -190,6 +190,29 @@ function prepararVendas(){
     _sit:v.situacao||null, _cancelado:(/cancel/i.test(String(v.situacao||'')) || !!v.cancelado_mkt), cancelado_mkt:(v.cancelado_mkt?1:0)
   }));
 }
+// 📚 HISTÓRICO LONGO (Supabase): períodos que não cabem na janela local (Ano, 6 meses…)
+let HIST = null;          // agregado do período, vindo do servidor
+let _histCarregando = false;
+const HIST_JANELA_DIAS = 6;   // o cache local guarda ~6 dias; antes disso, o histórico manda
+function precisaHistorico(de){
+  const lim = new Date(Date.now() - HIST_JANELA_DIAS*86400000).toISOString().slice(0,10);
+  return String(de) < lim;
+}
+async function carregarHistorico(de, ate){
+  if(_histCarregando) return;
+  if(HIST && HIST.de===de && HIST.ate===ate) return;
+  _histCarregando = true;
+  const el = document.getElementById('histAviso');
+  if(el) el.innerHTML = '⏳ carregando o histórico de '+de+' a '+ate+'…';
+  try{
+    const r = await fetch(MOD+'/historico-longo?de='+de+'&ate='+ate, {credentials:'same-origin'});
+    const d = await r.json().catch(()=>null);
+    if(d && d.ok){ HIST = d; render(); renderAnalise(); }
+    else if(el) el.innerHTML = '<span class="warn">não consegui carregar o histórico</span>';
+  }catch(e){ if(el) el.innerHTML = '<span class="warn">'+(e.message||e)+'</span>'; }
+  _histCarregando = false;
+}
+
 // 🔄 pergunta ao ML/Shopee se algum pedido do período foi CANCELADO pelo cliente
 let _stMkt = false;
 async function checarCancelados(silencioso){
@@ -322,7 +345,7 @@ function montar(){
       '<button class="chip" onclick="irPra(&#39;secCanal&#39;)">🛒 Por canal</button>'+
       '<button class="chip" onclick="irPra(&#39;secProj&#39;)">📦 Projeção de estoque</button>'+
       '</div>'+
-      '<div class="kpis" id="kpis"></div>'+
+      '<div id="histAviso" style="font-size:12px;color:var(--mut);margin:0 0 8px"></div>'+'<div class="kpis" id="kpis"></div>'+
     '<div class="sec" id="secBusca"><h2>🔍 Buscar pedido &amp; lucro <span class="hint">nº do pedido · NF · nº da venda no marketplace · SKU · parte do título</span></h2>'+
       '<input id="qBusca" placeholder="ex.: 73620 · 076265 · 2000017436578280 · 6376-220v · tosquiadeira" '+
       'style="width:100%;background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:10px;padding:11px 14px;font-size:13px" '+
@@ -419,7 +442,7 @@ function render(){
 
   let fat=0, comValor=0, semValor=0, flex=0, unid=0, itensTot=0, itensComValor=0, comUF=0, fatProd=0, freteEmb=0, fretePed=0, pedML=0, pedMLr=0, pedTarReal=0;
   let fatNF=0, pedNF=0, freteNF=0, fretePedNF=0;   // fonte NOTA FISCAL (vprod_nf)
-  const porDia={}, porCanal={}, porProd={}, porUF={};
+  const porDia={}, porProd={}, porUF={}; let porCanal={};
   PER.forEach(h=>{
     const d = diaVenda(h);
     if(!porDia[d]) porDia[d]={ped:0,fat:0};
@@ -538,7 +561,19 @@ function render(){
     return { rec, imp, impMC, tar, cus, cusMC, pedOk, semCfg, cusUn, unTot, tReais, frV, fRecP, pedImp, semItens, semCustoSkus: Array.from(semCustoSet),
              mc: rec-impMC-tar-cusMC-frV+fRecP, temCfg: !!Object.keys(CFG.taxas).length };
   })();
-  const totPed = PER.length + AGD.length;
+  const usaHist = !!(HIST && HIST.de===de && HIST.ate===ate && HIST.totais);   // período longo: os números vêm do histórico
+  const totPed = usaHist ? HIST.totais.pedidos : (PER.length + AGD.length);
+  // 🔄 HOJE: confere cancelamentos no marketplace já na abertura (o automático de 10 min só viria depois)
+  (function(){
+    if(periodo!=='dia' || _stMkt) return;
+    const ch2 = 'mkt|'+de+'|'+ate;
+    if(_autoDet[ch2]) return;
+    _autoDet[ch2] = 1;
+    setTimeout(()=>checarCancelados(true), 900);
+  })();
+  // 📚 período longo → busca o agregado do histórico (Supabase)
+  if(precisaHistorico(de)){ if(!HIST || HIST.de!==de || HIST.ate!==ate) carregarHistorico(de, ate); }
+  else if(HIST){ HIST = null; }
   // ⚡ AUTOMÁTICO: se o período que está na tela tem pedido sem detalhe, busca sozinho (1x por período)
   (function(){
     if(!MC.semItens || _compDet) return;
@@ -548,18 +583,18 @@ function render(){
     setTimeout(()=>completarDetalhes(), 400);
   })();
   $('kpis').innerHTML =
-    kpi('#34d399','💰','Faturamento Total', BRL(fat+agdVal), 'vendas aprovadas no período · '+N(totPed)+' pedidos') +
-    kpi('#f59e0b','🧾','Impostos', BRL(MC.imp), (MC.imp>0&&(fat+agdVal)>0?('Simples · '+(Math.round(MC.imp/(fat+agdVal)*10000)/100).toString().replace('.',',')+'% do faturamento'):'Simples nacional')+(MC.pedImp<totPed?' · <span class="warn">falta alíquota em '+N(totPed-MC.pedImp)+'</span>':'')) +
-    kpi('#a78bfa','📦','Custo de produtos', BRL(MC.cus),
+    kpi('#34d399','💰','Faturamento Total', BRL(usaHist?HIST.totais.faturamento:(fat+agdVal)), (usaHist?'📚 histórico · ':'')+'vendas aprovadas no período · '+N(totPed)+' pedidos') +
+    kpi('#f59e0b','🧾','Impostos', BRL(usaHist?HIST.totais.imposto:MC.imp), (MC.imp>0&&(fat+agdVal)>0?('Simples · '+(Math.round(MC.imp/(fat+agdVal)*10000)/100).toString().replace('.',',')+'% do faturamento'):'Simples nacional')+(MC.pedImp<totPed?' · <span class="warn">falta alíquota em '+N(totPed-MC.pedImp)+'</span>':'')) +
+    kpi('#a78bfa','📦','Custo de produtos', BRL(usaHist?HIST.totais.custo:MC.cus),
       MC.semItens ? ('<span class="warn">⚠ incompleto: '+N(MC.semItens)+' pedido(s) sem detalhe</span>')
       : (!MC.unTot ? 'sem itens no período'
       : (MC.cusUn>=MC.unTot ? (N(MC.unTot)+' unidades vendidas')
       : ('<span class="warn">⚠ sem custo em '+N(MC.unTot-MC.cusUn)+' de '+N(MC.unTot)+' un.</span><div style="font-size:10px;margin-top:2px;line-height:1.35">cadastre o custo destes no Bling: <b style="font-family:ui-monospace,monospace;color:#fbbf24">'+MC.semCustoSkus.slice(0,8).map(esc).join(', ')+(MC.semCustoSkus.length>8?' +'+(MC.semCustoSkus.length-8):'')+'</b></div>')))) +
     (MC.temCfg
-      ? '<div class="kpi" style="--kc:#14b8a6"><span class="ic">💎</span><div class="l">Lucro Bruto (M.C.)</div><div class="v '+(MC.mc>=0?'ok':'bad')+'">'+BRL(MC.mc)+((fat+agdVal)>0?'<span style="font-size:13px;opacity:.8;font-weight:600"> · '+(Math.round(MC.mc/(fat+agdVal)*1000)/10).toString().replace('.',',')+'%</span>':'')+'</div><div class="s">'+(MC.semItens?'<span class="warn">⚠ '+N(MC.semItens)+' pedido(s) ainda sem detalhe — o lucro real fica um pouco menor</span>':(MC.unTot&&MC.cusUn<MC.unTot?'<span class="warn">⚠ falta cadastrar o custo de '+N(MC.unTot-MC.cusUn)+' un. — o lucro real fica um pouco menor</span>':(MC.semCfg?'<span class="warn">⚠ '+N(MC.semCfg)+' pedido(s) sem taxa configurada</span>':'venda − imposto − comissão − frete − custo')))+'</div></div>'
+      ? '<div class="kpi" style="--kc:#14b8a6"><span class="ic">💎</span><div class="l">Lucro Bruto (M.C.)</div><div class="v '+((usaHist?HIST.totais.margem:MC.mc)>=0?'ok':'bad')+'">'+BRL(usaHist?HIST.totais.margem:MC.mc)+((usaHist?HIST.totais.faturamento:(fat+agdVal))>0?'<span style="font-size:13px;opacity:.8;font-weight:600"> · '+(Math.round((usaHist?HIST.totais.margem:MC.mc)/(usaHist?HIST.totais.faturamento:(fat+agdVal))*1000)/10).toString().replace('.',',')+'%</span>':'')+'</div><div class="s">'+(MC.semItens?'<span class="warn">⚠ '+N(MC.semItens)+' pedido(s) ainda sem detalhe — o lucro real fica um pouco menor</span>':(MC.unTot&&MC.cusUn<MC.unTot?'<span class="warn">⚠ falta cadastrar o custo de '+N(MC.unTot-MC.cusUn)+' un. — o lucro real fica um pouco menor</span>':(MC.semCfg?'<span class="warn">⚠ '+N(MC.semCfg)+' pedido(s) sem taxa configurada</span>':'venda − imposto − comissão − frete − custo')))+'</div></div>'
       : '<div class="kpi" style="--kc:#64748b;cursor:pointer" onclick="document.getElementById(\'cfgBox\').scrollIntoView({behavior:\'smooth\'})"><span class="ic">💎</span><div class="l">Lucro Bruto (M.C.)</div><div class="v dim">—</div><div class="s warn">⚙️ configure as taxas por canal abaixo</div></div>') +
-    kpi('var(--ac)','📊','Pedidos', N(totPed), MC.semItens?('<span class="warn">⚠ '+N(MC.semItens)+' sem detalhe</span> <button onclick="completarDetalhes()" title="o dashboard já busca sozinho ao abrir o período — este botão é só pra tentar de novo" style="background:#1d4ed8;color:#fff;border:0;border-radius:6px;padding:2px 7px;font-size:10px;font-weight:700;cursor:pointer">↻ tentar de novo</button><div id="avisoDet" style="font-size:10px;margin-top:2px"></div>'):(MC.unTot>0?('<b style="font-size:13px;color:var(--txt);opacity:1">'+N(MC.unTot)+' unidades vendidas</b>'):'sem itens no período')) +
-    kpi('var(--warn)','🎯','Ticket médio', BRL((fat+agdVal)/(totPed||1)), 'faturamento ÷ pedidos') +
+    kpi('var(--ac)','📊','Pedidos', N(totPed), MC.semItens?('<span class="warn">⚠ '+N(MC.semItens)+' sem detalhe</span> <button onclick="completarDetalhes()" title="o dashboard já busca sozinho ao abrir o período — este botão é só pra tentar de novo" style="background:#1d4ed8;color:#fff;border:0;border-radius:6px;padding:2px 7px;font-size:10px;font-weight:700;cursor:pointer">↻ tentar de novo</button><div id="avisoDet" style="font-size:10px;margin-top:2px"></div>'):(MC.unTot>0?('<b style="font-size:13px;color:var(--txt);opacity:1">'+N(usaHist?HIST.totais.unidades:MC.unTot)+' unidades vendidas</b>'):'sem itens no período')) +
+    kpi('var(--warn)','🎯','Ticket médio', BRL((usaHist?HIST.totais.faturamento:(fat+agdVal))/(totPed||1)), 'faturamento ÷ pedidos') +
     (VENDAS.length?'<div class="kpi" style="--kc:#38bdf8"><span class="ic">🛰</span><div class="l">Ao vivo</div><div class="v"><button onclick="sincVendas(this)" style="background:#38bdf822;border:1px solid #38bdf855;color:#7dd3fc;border-radius:8px;padding:5px 12px;cursor:pointer;font-weight:700;font-size:14px">🔄 atualizar</button></div><div class="s">'+N(VBok.length)+' vendas no Bling · sincroniza sozinho a cada 5 min</div></div>':'') +
     '<div class="kpi" id="kMargem" style="display:none"></div>';
 
@@ -567,6 +602,7 @@ function render(){
   const labels = dias.map(d=>d.slice(8,10)+'/'+d.slice(5,7));
   desenharCharts(labels, dias.map(d=>porDia[d].ped), dias.map(d=>Math.round(porDia[d].fat*100)/100));
 
+  if(usaHist){ porCanal = {}; for(const c of Object.keys(HIST.canais)){ const h2=HIST.canais[c]; porCanal[c]={ped:h2.pedidos, fat:h2.fat, comValor:h2.pedidos, flex:0}; } }
   const canais = Object.keys(porCanal).sort((a,b)=>porCanal[b].ped-porCanal[a].ped);
   const NOME = {mercadolivre:'Mercado Livre',ml:'Mercado Livre',shopee:'Shopee',magalu:'Magalu',amazon:'Amazon',tiktok:'TikTok',madeira:'MadeiraMadeira',leroy:'Leroy Merlin',outro:'Outro'};
   $('tCanal').innerHTML = '<tr><th>Canal</th><th class="num">Pedidos</th><th class="num">%</th><th class="num">Faturamento</th><th class="num">Ticket médio</th><th class="num">⚡ Flex</th></tr>'+
@@ -578,7 +614,10 @@ function render(){
       '<td class="num">'+(c.comValor?BRL(c.fat/c.comValor):'<span class="dim">—</span>')+'</td>'+
       '<td class="num">'+(c.flex?'<span class="warn">'+c.flex+'</span>':'<span class="dim">·</span>')+'</td></tr>';}).join('');
 
-  const prods = Object.values(porProd);
+  // 📚 período longo: o ranking vem do histórico (Supabase), não do cache local
+  const prods = usaHist
+    ? HIST.skus.map(x=>({ sku:x.sku, desc:x.desc, qtd:x.un, qtdV:x.un, fat:x.fat, custo:x.cus, qtdC:x.un, mc:x.mar, mcQtd:x.un }))
+    : Object.values(porProd);
   // d56: curva ABC do PERÍODO pesquisado — ordena por faturamento e acumula: A = até 80% do faturamento · B = 80–95% · C = o resto (sem faturamento = C)
   (function(){
     const pf = prods.slice().sort((a,b)=>(b.fat||0)-(a.fat||0));
