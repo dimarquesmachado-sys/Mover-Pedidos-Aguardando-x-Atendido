@@ -11,13 +11,17 @@
  * - Tem OAuth Bling pra autocomplete de produtos
  * - Tem cache de produtos do Bling
  *
+ * LOGIN: os usuários vêm da env var FRAGIL_USUARIOS (fonte única).
+ *        Formato: usuario:senha,usuario2:senha2
+ *        Não existe mais usuarios.json em disco nem chave-mestra "admin".
+ *
  * Cron único: carregar índice de produtos no startup (chama uma vez ao iniciar).
  */
 
 const fs   = require('fs');
 const path = require('path');
 
-const { lerDados, salvarDados, lerUsuarios, salvarUsuarios } = require('./data');
+const { lerDados, salvarDados } = require('./data');
 const auth         = require('./auth');
 const tokenManager = require('./tokenManager');
 const blingProdutos = require('./blingProdutos');
@@ -56,6 +60,12 @@ function pegarUsuario(req) {
   const token = req.headers['x-session-token'] || '';
   return auth.validarSessao(token);
 }
+
+// Mensagem usada nas rotas de escrita de usuário (agora gerenciados no Render)
+const MSG_USUARIOS_ENV =
+  'Usuários são gerenciados na variável de ambiente FRAGIL_USUARIOS, no painel do Render ' +
+  '(serviço Mover-Pedidos-Aguardando-x-Atendido → aba Environment). ' +
+  'Formato: usuario:senha,usuario2:senha2';
 
 // Servir arquivo estático do public/fragil/
 const PUBLIC_DIR = path.join(__dirname, '..', 'public', 'fragil');
@@ -117,18 +127,20 @@ function routes(readBody) {
     // ─ Health ─
     if (method === 'GET' && p === '/fragil/health') {
       const dados = lerDados();
-      const usuarios = lerUsuarios();
+      const usuarios = auth.listarUsuarios();
       const tokens = tokenManager.lerTokens();
-      return json(res, 200, {
+      json(res, 200, {
         ok: true,
         skusFrageis: Object.keys(dados.skus).length,
         atualizadoEm: dados.atualizadoEm,
         atualizadoPor: dados.atualizadoPor,
         usuariosCadastrados: usuarios.length,
-        chaveMestraAtiva: usuarios.length === 0 && !!auth.ADMIN_PASSWORD,
+        usuariosViaEnv: true,
+        chaveMestraAtiva: false,
         blingConfigurado: !!process.env.FRAGIL_BLING_CLIENT_ID && !!process.env.FRAGIL_BLING_CLIENT_SECRET,
         blingLogado: !!(tokens.access_token || tokens.refresh_token)
-      }), true;
+      });
+      return true;
     }
 
     // ─ LOGIN ─
@@ -138,11 +150,11 @@ function routes(readBody) {
       const r = auth.autenticar(usuario, senha);
       if (!r.ok) { json(res, 401, { ok: false, erro: r.erro }); return true; }
       const token = auth.criarSessao(r.usuario);
-      console.log(`[fragil LOGIN] ${r.usuario}${r.chaveMestra ? ' (CHAVE-MESTRA)' : ''}`);
+      console.log(`[fragil LOGIN] ${r.usuario}`);
       json(res, 200, {
         ok: true, token,
         usuario: r.usuario, perfil: r.perfil, nome: r.nome,
-        chaveMestra: !!r.chaveMestra,
+        chaveMestra: false,
         expiraHoras: auth.SESSAO_HORAS
       });
       return true;
@@ -161,79 +173,48 @@ function routes(readBody) {
     if (method === 'GET' && p === '/fragil/api/me') {
       const usuario = pegarUsuario(req);
       if (!usuario) { json(res, 401, { erro: 'Sessão inválida' }); return true; }
-      const lista = lerUsuarios();
+      const lista = auth.listarUsuarios();
       const u = lista.find(x => (x.usuario || '').toLowerCase() === usuario.toLowerCase());
       json(res, 200, {
         ok: true, usuario,
         nome: u?.nome || usuario,
         perfil: u?.perfil || 'admin',
-        chaveMestra: lista.length === 0
+        chaveMestra: false
       });
       return true;
     }
 
-    // ─ USUÁRIOS (gestão) ─
+    // ─ USUÁRIOS (somente leitura — gerenciados na env var FRAGIL_USUARIOS) ─
     if (method === 'GET' && p === '/fragil/api/usuarios') {
       const usuario = pegarUsuario(req);
       if (!usuario) { json(res, 401, { erro: 'Sessão inválida' }); return true; }
-      const lista = lerUsuarios().map(u => ({
+      // NUNCA devolve senha — só login, nome e perfil
+      const lista = auth.listarUsuarios().map(u => ({
         usuario: u.usuario, nome: u.nome, perfil: u.perfil
       }));
-      json(res, 200, { ok: true, usuarios: lista });
+      json(res, 200, {
+        ok: true,
+        usuarios: lista,
+        somenteLeitura: true,
+        origem: 'env:FRAGIL_USUARIOS',
+        aviso: MSG_USUARIOS_ENV
+      });
       return true;
     }
 
+    // Criar / excluir / trocar senha: bloqueado, agora é no Render
     if (method === 'POST' && p === '/fragil/api/usuarios') {
-      const usuarioAtual = pegarUsuario(req);
-      if (!usuarioAtual) { json(res, 401, { erro: 'Sessão inválida' }); return true; }
-      const body = await readBody(req);
-      const { usuario, senha, nome, perfil } = body || {};
-      if (!usuario || !senha) { json(res, 400, { erro: 'usuario e senha são obrigatórios' }); return true; }
-      const lista = lerUsuarios();
-      if (lista.find(u => (u.usuario || '').toLowerCase() === usuario.toLowerCase())) {
-        json(res, 400, { erro: 'usuário já existe' });
-        return true;
-      }
-      lista.push({
-        usuario,
-        senhaHash: auth.hashSenha(senha),
-        nome: nome || usuario,
-        perfil: perfil || 'admin'
-      });
-      salvarUsuarios(lista);
-      console.log(`[fragil USUARIOS] ${usuarioAtual} criou: ${usuario}`);
-      json(res, 200, { ok: true });
+      json(res, 400, { erro: MSG_USUARIOS_ENV });
       return true;
     }
 
     if (method === 'DELETE' && p.startsWith('/fragil/api/usuarios/')) {
-      const usuarioAtual = pegarUsuario(req);
-      if (!usuarioAtual) { json(res, 401, { erro: 'Sessão inválida' }); return true; }
-      const alvo = decodeURIComponent(p.replace('/fragil/api/usuarios/', ''));
-      let lista = lerUsuarios();
-      const antes = lista.length;
-      lista = lista.filter(u => (u.usuario || '').toLowerCase() !== alvo.toLowerCase());
-      if (lista.length === antes) { json(res, 404, { erro: 'usuário não encontrado' }); return true; }
-      salvarUsuarios(lista);
-      console.log(`[fragil USUARIOS] ${usuarioAtual} excluiu: ${alvo}`);
-      json(res, 200, { ok: true });
+      json(res, 400, { erro: MSG_USUARIOS_ENV });
       return true;
     }
 
     if (method === 'POST' && p.match(/^\/fragil\/api\/usuarios\/[^/]+\/senha$/)) {
-      const usuarioAtual = pegarUsuario(req);
-      if (!usuarioAtual) { json(res, 401, { erro: 'Sessão inválida' }); return true; }
-      const alvo = decodeURIComponent(p.split('/')[4]);
-      const body = await readBody(req);
-      const { senha } = body || {};
-      if (!senha) { json(res, 400, { erro: 'senha obrigatória' }); return true; }
-      const lista = lerUsuarios();
-      const u = lista.find(x => (x.usuario || '').toLowerCase() === alvo.toLowerCase());
-      if (!u) { json(res, 404, { erro: 'usuário não encontrado' }); return true; }
-      u.senhaHash = auth.hashSenha(senha);
-      salvarUsuarios(lista);
-      console.log(`[fragil USUARIOS] ${usuarioAtual} resetou senha de: ${alvo}`);
-      json(res, 200, { ok: true });
+      json(res, 400, { erro: MSG_USUARIOS_ENV });
       return true;
     }
 
@@ -289,7 +270,8 @@ function routes(readBody) {
       return true;
     }
 
-    // ─ Migração de dados (rota de admin, importa skus/usuarios externos) ─
+    // ─ Migração de dados (rota de admin, importa skus externos) ─
+    // Usuários NÃO são mais importados aqui — vivem na env var FRAGIL_USUARIOS.
     if (method === 'POST' && p === '/fragil/admin/importar') {
       const usuario = pegarUsuario(req);
       if (!usuario) { json(res, 401, { erro: 'Sessão inválida' }); return true; }
@@ -299,11 +281,11 @@ function routes(readBody) {
           salvarDados(body.skus, usuario);
           console.log(`[fragil IMPORTAR] ${usuario} importou skus.json (${Object.keys(body.skus.skus || {}).length} SKUs)`);
         }
-        if (Array.isArray(body.usuarios)) {
-          salvarUsuarios(body.usuarios);
-          console.log(`[fragil IMPORTAR] ${usuario} importou usuarios.json (${body.usuarios.length} usuários)`);
-        }
-        json(res, 200, { ok: true });
+        json(res, 200, {
+          ok: true,
+          usuariosIgnorados: Array.isArray(body.usuarios) ? body.usuarios.length : 0,
+          aviso: Array.isArray(body.usuarios) ? MSG_USUARIOS_ENV : undefined
+        });
       } catch (e) {
         json(res, 500, { erro: e.message });
       }
@@ -348,6 +330,13 @@ function routes(readBody) {
 // ── Boot ─────────────────────────────────────────────────────────────
 // Dispara carregamento do índice de produtos no startup (se tiver tokens)
 function bootstrap() {
+  const nUsuarios = auth.listarUsuarios().length;
+  if (nUsuarios === 0) {
+    console.warn('[fragil] ⚠️  FRAGIL_USUARIOS vazia — ninguém consegue logar no painel. ' +
+                 'Defina no Render: FRAGIL_USUARIOS=usuario:senha');
+  } else {
+    console.log(`[fragil] ${nUsuarios} usuário(s) carregado(s) da env var FRAGIL_USUARIOS`);
+  }
   setTimeout(() => {
     const tokens = tokenManager.lerTokens();
     if (tokens.access_token || tokens.refresh_token) {
