@@ -394,7 +394,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b62';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b63';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#b3b9c4'}, magalu:{n:'Magalu',c:'#0086ff'},
@@ -467,6 +467,13 @@ let ordenacao = 'produto';   // 'numero' (mais antigos) | 'produto' (agrupa pedi
 function setOrdenacao(v){ ordenacao = v; renderChips(); renderLista(); }
 // chave de agrupamento por produto: SKUs distintos ordenados e juntados. "so SKU-A" ("a") vem ANTES de
 // "SKU-A + SKU-B" ("a|b"), que vem antes de "so SKU-B" ("b") — pedidos puros primeiro, depois os combinados.
+// 🕓 data/hora do pedido — NF quando existe, senão quando o sistema viu no Bling (usada nos cards com E sem etiqueta)
+function blocoHora(p){
+  var dt = p.nf_emissao || p.visto_em; if(!dt) return '';
+  var d2 = new Date(String(dt).replace(' ','T')); if(isNaN(d2)) return '';
+  var f2 = ('0'+d2.getDate()).slice(-2)+'/'+('0'+(d2.getMonth()+1)).slice(-2)+'/'+d2.getFullYear()+' \u00e0s '+('0'+d2.getHours()).slice(-2)+':'+('0'+d2.getMinutes()).slice(-2)+'h';
+  return '<div class="stime" title="'+(p.nf_emissao?'data e hora da EMISS\u00c3O da NF no Bling':'quando este pedido apareceu pro sistema (o Bling n\u00e3o d\u00e1 a hora do pedido)')+'">\ud83d\udd53 '+(p.nf_emissao?'NF ':'Bling ')+f2+'</div>';
+}
 function skuKeyPedido(p){ const arr=(p.skus_pick&&p.skus_pick.length)?p.skus_pick:(p.skus||[]); const u=[...new Set(arr.map(s=>String(s).toLowerCase()))].sort(); return u.length?u.join('|'):'~~~'; }
 
 const $ = id => document.getElementById(id);
@@ -856,7 +863,8 @@ function renderLista(){
           '<span class="setag">⚠️ sem etiqueta</span>'+
         '</div>'+
         (p.cliente?'<div class="scli">'+esc(p.cliente)+'</div>':'')+
-        '<div class="smeta">NF '+(p.nf_numero?esc(p.nf_numero):'—')+' · o Bling não trouxe a etiqueta deste pedido</div>'+
+        '<div class="smeta">NF '+(p.nf_numero?esc(p.nf_numero):'\u2014')+' \u00b7 o Bling n\u00e3o trouxe a etiqueta deste pedido</div>'+
+        blocoHora(p)+
         (souAdmin()?'<button class="btn sec" style="margin-top:8px;font-size:12px;padding:7px 11px" onclick="event.stopPropagation();anexarEtiqueta(\''+esc(p.id)+'\',\''+esc(p.numero||p.id)+'\')">📎 anexar etiqueta (ZPL/ZIP/PDF)</button>':'')+
       '</div>';
     }).join('');
@@ -897,12 +905,7 @@ function renderLista(){
       '</div>'+
       (p.cliente?'<div class="scli">'+esc(p.cliente)+'</div>':'')+
       '<div class="smeta">'+((p.skus&&p.skus[0])?'📦 <b>'+esc(p.skus[0])+'</b>'+(p.skus.length>1?' +'+(p.skus.length-1):'')+' · ':'')+(p.itens||0)+' item(s) · NF '+(p.nf_numero?esc(p.nf_numero):(p.tem_nf?'ok':'—'))+(p.tem_danfe?' · <span class="pdfok">PDF✓</span>':'')+'</div>'+
-      (function(){
-        var dt = p.nf_emissao || p.visto_em; if(!dt) return '';
-        var d2 = new Date(String(dt).replace(' ','T')); if(isNaN(d2)) return '';
-        var f2 = ('0'+d2.getDate()).slice(-2)+'/'+('0'+(d2.getMonth()+1)).slice(-2)+'/'+d2.getFullYear()+' às '+('0'+d2.getHours()).slice(-2)+':'+('0'+d2.getMinutes()).slice(-2)+'h';
-        return '<div class="stime" title="'+(p.nf_emissao?'data e hora da EMISSÃO da NF no Bling':'quando este pedido apareceu pro sistema (o Bling não dá a hora do pedido)')+'">🕓 '+(p.nf_emissao?'NF ':'Bling ')+f2+'</div>';
-      })()+
+      blocoHora(p)+
     '</div>';
   }).join('');
 }
