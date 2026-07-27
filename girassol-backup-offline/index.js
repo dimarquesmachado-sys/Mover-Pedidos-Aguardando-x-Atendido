@@ -41,7 +41,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v27/07 b56';
+const VERSAO     = 'girassol-backup-offline v27/07 b57';
 
 // ── SESSÃO DE OPERADOR (cookie assinado HMAC) — protege rotas de dados/ação ──
 // Segredo estável entre restarts. Usa ADMIN_KEY (já configurada no Render) como base.
@@ -1386,7 +1386,8 @@ function routes(readBody) {
             fornecedor: det && det.fornecedor ? { precoCusto: det.fornecedor.precoCusto, precoCompra: det.fornecedor.precoCompra } : null,
             estrutura_chaves: det && det.estrutura ? Object.keys(det.estrutura) : null,
             componentes_qtd: Array.isArray(compsRaw) ? compsRaw.length : 0,
-            componentes_amostra: Array.isArray(compsRaw) ? compsRaw.slice(0, 3) : null });
+            componentes_amostra: Array.isArray(compsRaw) ? compsRaw.slice(0, 3) : null,
+            fornecedores_crus: await (async () => { try { const rr = await blingGet('/produtos/fornecedores?idProduto=' + (it0 && it0.id) + '&limite=5'); return (rr.ok && rr.data && rr.data.data) || rr.data || null; } catch (e) { return String(e.message || e); } })() });
         } catch (e) { json(res, 500, { ok: false, erro: String(e.message || e) }); }
         return true;
       }
@@ -3598,12 +3599,20 @@ async function custoSync(fresh) {
       }
       if (prod && prod.id) {
         const forn = prod.fornecedor || {};
-        let cand = [forn.precoCusto, forn.precoCompra, prod.precoCusto, prod.custo].map(Number).filter(v => isFinite(v) && v > 0);
+        let cand = [forn.precoCusto, forn.precoCompra, forn.preco, forn.custo, prod.precoCusto, prod.custo, prod.precoCompra].map(Number).filter(v => isFinite(v) && v > 0);
         if (!cand.length) {
           const rf = await bg2(`/produtos/fornecedores?idProduto=${prod.id}&limite=5`);
           const arr = (rf.ok && rf.data && rf.data.data) || [];
           const pref = arr.find(x => x && x.padrao) || arr[0];
-          if (pref) cand = [pref.precoCusto, pref.precoCompra].map(Number).filter(v => isFinite(v) && v > 0);
+          // 27/07: o nome do campo varia na resposta do Bling — aceita todos os candidatos
+          if (pref) cand = [pref.precoCusto, pref.precoCompra, pref.preco, pref.custo, pref.valor, pref.valorCusto]
+                            .map(Number).filter(v => isFinite(v) && v > 0);
+          if (!cand.length && arr.length) {
+            for (const fx of arr) {
+              const vs = Object.keys(fx || {}).filter(k => /pre(c|ç)o|custo|valor/i.test(k)).map(k => Number(fx[k])).filter(v => isFinite(v) && v > 0);
+              if (vs.length) { cand = [Math.min.apply(null, vs)]; break; }
+            }
+          }
         }
         // KIT / produto COM COMPOSIÇÃO (27/07): o Bling não preenche o custo do kit em si —
         // ele mostra "Preço Total de Custo" somando os componentes. Fazemos o mesmo.
