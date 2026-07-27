@@ -374,8 +374,32 @@ document.getElementById('b').addEventListener('click', async function(){
 
     // ── RODA A ROTINA NA MAO (mesma coisa que o cron faz) ──
     if (p === '/magalu/nf-full/rodar') {
-      try { const r = await nfRotina('manual'); json(res, 200, { ok: true, versao: VERSAO, ...r }); }
-      catch (e) { json(res, 500, { ok: false, erro: String(e.message || e) }); }
+      const so = String(q.get('empresa') || '').toLowerCase().trim();
+      if (so && NF_EMPRESAS.indexOf(so) < 0) { json(res, 400, { ok: false, erro: 'empresa inválida: ' + so }); return true; }
+      const d = nfDisparar('manual', so ? [so] : null);
+      const kq2 = encodeURIComponent(q.get('k') || '');
+      // Responde JA, com uma pagina que se atualiza sozinha — em vez de
+      // segurar a conexao por minutos deixando a tela em branco.
+      html(res, 200, `<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="15;url=/magalu/nf-full?k=${kq2}">
+<title>Buscando na Magalu…</title><style>
+body{font:15px/1.6 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#0f1115;color:#e8eaed;margin:0;padding:44px 24px;text-align:center}
+.sp{width:38px;height:38px;margin:0 auto 22px;border:4px solid #2a2f3a;border-top-color:#1a73e8;border-radius:50%;animation:g 1s linear infinite}
+@keyframes g{to{transform:rotate(360deg)}}
+h1{font-size:19px;margin:0 0 10px}p{color:#9aa0a6;max-width:540px;margin:10px auto}
+a{color:#8ab4f8}.box{background:#181b21;border:1px solid #2a2f3a;border-radius:10px;padding:18px;max-width:560px;margin:24px auto;text-align:left;font-size:13px;color:#9aa0a6}
+</style></head><body>
+<div class="sp"></div>
+<h1>${d.disparou ? 'Buscando na Magalu…' : 'Já tem uma busca rodando'}</h1>
+<p>Em 15 segundos eu te levo pro painel. <b>Pode fechar a aba</b> — o trabalho continua no servidor.</p>
+<div class="box">
+Pode levar vários minutos. A Magalu limita quantas vezes seguidas dá pra pedir o arquivo, e
+quando ela responde "espera um pouco" o robô espera de verdade — 30s, 1min, 2min, 4min — em
+vez de desistir. As duas empresas são pedidas com 2 minutos de intervalo, pelo mesmo motivo.
+No painel aparece o andamento.
+</div>
+<p><a href="/magalu/nf-full?k=${kq2}">← ir agora pro painel</a></p>
+</body></html>`);
       return true;
     }
 
@@ -386,6 +410,24 @@ document.getElementById('b').addEventListener('click', async function(){
       const kq = encodeURIComponent(q.get('k') || '');
       const NOMES = { good: 'GOOD Import', amb: 'AMBTotal', girassol: 'Girassol' };
       const prontos = nfListar(null);
+      // bloco de andamento: enquanto roda, a pagina se recarrega sozinha
+      const est = nfLerEstado();
+      let andamento = '';
+      if (nfRodando) {
+        andamento = '<div class="card" style="border-color:#1a73e8"><div class="tit" style="color:#8ab4f8">Buscando na Magalu agora…</div>'
+                  + '<div style="font-size:13px;color:#9aa0a6">Começou às ' + (est && est.inicio ? new Date(est.inicio).toLocaleTimeString('pt-BR') : '?')
+                  + ' — empresas: ' + ((est && est.empresas) || []).join(', ')
+                  + '. Pode levar vários minutos; esta página se atualiza sozinha.</div></div>';
+      } else if (est && est.fim) {
+        const houveErro = (est.resultado || []).some(x => !x.ok) || est.erro;
+        andamento = '<div class="card" style="border-color:' + (houveErro ? '#f28b82' : '#2a2f3a') + '">'
+                  + '<div class="tit">Última busca — ' + new Date(est.fim).toLocaleString('pt-BR') + '</div>'
+                  + '<div style="font-size:13px;color:#9aa0a6">'
+                  + (est.erro ? 'Erro: ' + est.erro : (est.resultado || []).map(x =>
+                      (x.empresa === 'good' ? 'GOOD' : 'AMB') + ': ' + (x.ok ? '✓ ' + (x.notas ? (x.notas.saida + ' saída / ' + x.notas.entrada + ' entrada') : 'ok') : '✗ ' + x.erro)
+                    ).join('<br>'))
+                  + '</div></div>';
+      }
       const linhas = prontos.length
         ? prontos.map(f => {
             const d = f.em ? new Date(f.em) : null;
@@ -409,6 +451,7 @@ document.getElementById('b').addEventListener('click', async function(){
         : '<p class="vazio">Nada arquivado ainda. O robô roda às 9h e às 18h. Se quiser adiantar, clique em <b>Rodar agora</b>.</p>';
       html(res, 200, `<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+${nfRodando ? '<meta http-equiv="refresh" content="15">' : ''}
 <title>NF-e Fulfillment Magalu</title><style>
 *{box-sizing:border-box}body{font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#0f1115;color:#e8eaed;margin:0;padding:24px}
 .wrap{max-width:620px;margin:0 auto}h1{font-size:20px;margin:0 0 4px}
@@ -418,7 +461,7 @@ label{display:block;font-size:12px;color:#9aa0a6;margin-bottom:5px}
 input[type=date]{background:#0f1115;color:#e8eaed;border:1px solid #2a2f3a;border-radius:6px;padding:9px;font:inherit;width:100%}
 .linha{display:flex;gap:12px;margin-bottom:16px}.linha>div{flex:1}
 .btns{display:flex;gap:12px;flex-wrap:wrap}
-a.btn{flex:1;min-width:170px;text-align:center;text-decoration:none;background:#1a73e8;color:#fff;padding:13px 16px;border-radius:8px;font-weight:600}
+a.btn{flex:1;min-width:120px;text-align:center;text-decoration:none;background:#1a73e8;color:#fff;padding:13px 16px;border-radius:8px;font-weight:600}
 a.btn.good{background:#0f9d58}a.btn:hover{opacity:.9}
 .aviso{font-size:12px;color:#9aa0a6;margin-top:14px;padding-top:14px;border-top:1px solid #2a2f3a}
 .erro{color:#f28b82;font-size:13px;margin-top:10px;display:none}
@@ -434,11 +477,14 @@ p.vazio{color:#9aa0a6;font-size:13px;margin:0}
 </style></head><body><div class="wrap">
 <h1>NF-e Fulfillment — Magalu</h1>
 <p class="sub">O robô baixa sozinho às 9h e às 18h. É só clicar e importar no Bling.</p>
+${andamento}
 <div class="card">
   <div class="tit">Prontos pra baixar</div>
   ${linhas}
   <div class="btns" style="margin-top:14px">
-    <a class="btn cinza" href="/magalu/nf-full/rodar?k=${kq}">Rodar agora</a>
+    <a class="btn cinza" href="/magalu/nf-full/rodar?k=${kq}">Rodar agora (as duas)</a>
+    <a class="btn cinza" href="/magalu/nf-full/rodar?empresa=amb&k=${kq}">só AMB</a>
+    <a class="btn cinza" href="/magalu/nf-full/rodar?empresa=good&k=${kq}">só GOOD</a>
     <a class="btn cinza" href="/magalu/nf-full?k=${kq}">Atualizar lista</a>
   </div>
   <div class="aviso">Cookie do Bling:
@@ -446,6 +492,7 @@ p.vazio{color:#9aa0a6;font-size:13px;margin:0}
         ? '<a href="/magalu/nf-full/cookie?empresa=' + e + '&k=' + kq + '" style="color:#81c995">' + (e === 'good' ? 'GOOD' : 'AMB') + ' ✓</a>'
         : '<a href="/magalu/nf-full/cookie?empresa=' + e + '&k=' + kq + '" style="color:#f28b82">' + (e === 'good' ? 'GOOD' : 'AMB') + ' — colar</a>')).join(' &nbsp;|&nbsp; ')}
   </div>
+  <div class="aviso">Se der erro de limite, use <b>só AMB</b> ou <b>só GOOD</b> e espere uns minutos entre uma e outra — a Magalu conta o limite por IP, e as duas empresas dividem o mesmo.</div>
   <div class="aviso"><b>SAÍDA</b> = vendas e remessas (importar no Bling como notas de <b>saída</b>).<br>
   <b>ENTRADA</b> = retornos simbólicos do depósito (importar como notas de <b>entrada</b>, num lote separado).<br>
   A Magalu manda os dois tipos no mesmo arquivo — por isso a separação.<br><br>
@@ -1461,7 +1508,12 @@ async function nfPedirLink(empresa, dIni, dFim) {
   const tok = await getAccessToken(empresa);
   const alvo = 'https://api.magalu.com/seller/v1/invoices/fulfillment'
              + '?start_date=' + encodeURIComponent(dIni) + '&end_date=' + encodeURIComponent(dFim);
-  const esperas = [0, 5000, 10000, 20000, 30000];
+  // O 429 da Magalu vem da BORDA (a resposta traz cabecalhos x-goog-* e um
+  // last-modified de 2025: e uma pagina estatica de limite). Limite de borda
+  // e por IP — e o IP aqui e o do Render, compartilhado por tudo que roda nele.
+  // Uso real sao 4 chamadas por dia, entao o certo e ser MUITO paciente:
+  // esperar minutos nao custa nada agora que a rotina roda em segundo plano.
+  const esperas = [0, 30000, 60000, 120000, 240000];
   const historico = [];
   for (let i = 0; i < esperas.length; i++) {
     if (esperas[i]) await new Promise(r => setTimeout(r, esperas[i]));
@@ -1520,7 +1572,7 @@ function nfLimpar(empresa) {
 }
 
 // A rotina em si: para cada empresa, puxa os ultimos NF_DIAS e grava.
-async function nfRotina(origem) {
+async function nfRotina(origem, quais) {
   nfGarantirDir();
   const agora = new Date();
   const ate = agora.toISOString().slice(0, 10);
@@ -1528,7 +1580,8 @@ async function nfRotina(origem) {
   const carimbo = ate + '-' + String(agora.getHours()).padStart(2, '0') + String(agora.getMinutes()).padStart(2, '0');
   const resultado = [];
 
-  for (const emp of NF_EMPRESAS) {
+  const lista = (quais && quais.length) ? quais : NF_EMPRESAS;
+  for (const emp of lista) {
     try {
       const buf = await nfBaixarZip(emp, de, ate);
       const nome = emp + '-' + carimbo + '.zip';
@@ -1550,16 +1603,45 @@ async function nfRotina(origem) {
       console.error('[magalu-nf] (' + origem + ') ' + emp + ' FALHOU:', e.message);
     }
     // espaco entre empresas: o endpoint devolve 429 se chamar em sequencia
-    if (emp !== NF_EMPRESAS[NF_EMPRESAS.length - 1]) await new Promise(r => setTimeout(r, 15000));
+    if (emp !== lista[lista.length - 1]) await new Promise(r => setTimeout(r, 120000));   // 2 min: as duas empresas disputam o mesmo orcamento de IP
   }
   return { periodo: { de, ate }, resultado };
+}
+
+// ── EXECUCAO EM SEGUNDO PLANO ─────────────────────────────────────────
+//  A rotina agora leva minutos (as esperas do 429 sao longas de proposito).
+//  Segurar a resposta do navegador esse tempo todo da tela branca e ainda
+//  arrisca o proxy do Render cortar. Entao: dispara e responde na hora, e o
+//  painel mostra o andamento.
+let nfRodando = false;
+let nfUltima = null;
+const NF_ESTADO = () => path.join(NF_DIR, '_ultima-execucao.json');
+
+function nfSalvarEstado() {
+  try { fs.mkdirSync(NF_DIR, { recursive: true }); fs.writeFileSync(NF_ESTADO(), JSON.stringify(nfUltima)); } catch (e) {}
+}
+function nfLerEstado() {
+  if (nfUltima) return nfUltima;
+  try { return JSON.parse(fs.readFileSync(NF_ESTADO(), 'utf8')); } catch (e) { return null; }
+}
+
+function nfDisparar(origem, quais) {
+  if (nfRodando) return { disparou: false, motivo: 'já tem uma execução em andamento' };
+  nfRodando = true;
+  nfUltima = { origem, empresas: (quais && quais.length) ? quais : NF_EMPRESAS, inicio: new Date().toISOString(), fim: null, resultado: null };
+  nfSalvarEstado();
+  nfRotina(origem, quais)
+    .then(r => { nfUltima.periodo = r.periodo; nfUltima.resultado = r.resultado; })
+    .catch(e => { nfUltima.erro = String(e.message || e); })
+    .finally(() => { nfUltima.fim = new Date().toISOString(); nfRodando = false; nfSalvarEstado(); });
+  return { disparou: true };
 }
 
 // Agenda no carregamento do modulo. Nao precisa mexer no index.js da RAIZ.
 try {
   const cron = require('node-cron');
   cron.schedule(NF_CRON, () => {
-    nfRotina('cron').catch(e => console.error('[magalu-nf] cron explodiu:', e.message));
+    nfDisparar('cron');
   });
   console.log('[magalu-nf] cron agendado: ' + NF_CRON + ' | empresas: ' + NF_EMPRESAS.join(', ') + ' | pasta: ' + NF_DIR);
 } catch (e) {
