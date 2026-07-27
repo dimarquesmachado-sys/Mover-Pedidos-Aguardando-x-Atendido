@@ -41,7 +41,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v27/07 b54';
+const VERSAO     = 'girassol-backup-offline v27/07 b56';
 
 // ── SESSÃO DE OPERADOR (cookie assinado HMAC) — protege rotas de dados/ação ──
 // Segredo estável entre restarts. Usa ADMIN_KEY (já configurada no Render) como base.
@@ -895,6 +895,67 @@ function routes(readBody) {
       json(res, 200, { ok: true, msg: '✅ backfill iniciado em background (só Girassol). Acompanhe em /backfill-status. Ele deleta o período antes e regrava, então pode rodar de novo sem duplicar.', de, ate });
       return true;
     }
+    // HISTÓRICO LONGO (Supabase): períodos que não cabem na janela local (Ano, 6 meses...).
+    // Agrega no servidor e devolve pronto — o navegador não aguenta 23 mil linhas.
+    // Uso: /girassol-backup-offline/historico-longo?de=YYYY-MM-DD&ate=YYYY-MM-DD
+    if (method === 'GET' && p === '/girassol-backup-offline/historico-longo') {
+      const kL = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const sessL = validarSessao(req.headers['cookie']);
+      if (!((process.env.ADMIN_KEY && kL === process.env.ADMIN_KEY) || (sessL && ehAdmin(sessL)))) { json(res, 404, { error: 'not found' }); return true; }
+      const deL = String((urlObj.searchParams && urlObj.searchParams.get('de')) || '').slice(0, 10);
+      const ateL = String((urlObj.searchParams && urlObj.searchParams.get('ate')) || '').slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(deL) || !/^\d{4}-\d{2}-\d{2}$/.test(ateL)) { json(res, 400, { ok: false, erro: 'passe &de=&ate=' }); return true; }
+      const cacheKey = deL + '|' + ateL;
+      if (_histCache[cacheKey] && (Date.now() - _histCache[cacheKey].ts) < 600000) { json(res, 200, Object.assign({ cache: true }, _histCache[cacheKey].dados)); return true; }
+      const { url: uL, key: kkL } = supaCfg('girassol');
+      if (!uL || !kkL) { json(res, 500, { ok: false, erro: 'Supabase não configurado' }); return true; }
+      const H = { apikey: kkL, Authorization: 'Bearer ' + kkL };
+      const campos = 'numero_pedido,canal,data_venda,sku,descricao,quantidade,valor_produto,valor_nota,custo,comissao,frete_vendedor,imposto,margem';
+      const T = { fat: 0, prod: 0, imp: 0, cus: 0, com: 0, fre: 0, mar: 0, un: 0, itens: 0, semCusto: 0 };
+      const peds = new Set(), porCanal = {}, porSku = {}, porDia = {};
+      let offset = 0, paginas = 0;
+      try {
+        while (offset < 60000) {
+          const rq = await fetch(uL.replace(/\/+$/, '') + '/rest/v1/vendas_historico?empresa=eq.girassol&data_venda=gte.' + deL + '&data_venda=lte.' + ateL + '&select=' + campos + '&order=data_venda.asc&limit=1000&offset=' + offset, { headers: H });
+          if (!rq.ok) break;
+          const linhas = await rq.json().catch(() => []);
+          if (!Array.isArray(linhas) || !linhas.length) break;
+          paginas++;
+          for (const l of linhas) {
+            const q = Number(l.quantidade) || 0, vp = Number(l.valor_produto) || 0, vn = Number(l.valor_nota) || 0;
+            const cu = (l.custo == null ? null : Number(l.custo)), co = Number(l.comissao) || 0, fr = Number(l.frete_vendedor) || 0, im = Number(l.imposto) || 0;
+            T.itens++; T.un += q; T.prod += vp; T.fat += vn; T.imp += im; T.com += co; T.fre += fr;
+            if (cu != null) T.cus += cu; else T.semCusto += q;
+            const mg = (l.margem == null ? null : Number(l.margem));
+            if (mg != null) T.mar += mg;
+            if (l.numero_pedido) peds.add(String(l.numero_pedido));
+            const cn = l.canal || 'outro';
+            if (!porCanal[cn]) porCanal[cn] = { fat: 0, un: 0, mar: 0, peds: new Set() };
+            porCanal[cn].fat += vn; porCanal[cn].un += q; porCanal[cn].mar += (mg || 0); if (l.numero_pedido) porCanal[cn].peds.add(String(l.numero_pedido));
+            const sk = l.sku || '(sem sku)';
+            if (!porSku[sk]) porSku[sk] = { sku: sk, desc: l.descricao || '', un: 0, fat: 0, cus: 0, mar: 0 };
+            porSku[sk].un += q; porSku[sk].fat += vp; porSku[sk].cus += (cu != null ? cu : 0); porSku[sk].mar += (mg || 0);
+            const dd = String(l.data_venda || '').slice(0, 10);
+            if (dd) { if (!porDia[dd]) porDia[dd] = { fat: 0, peds: new Set() }; porDia[dd].fat += vn; if (l.numero_pedido) porDia[dd].peds.add(String(l.numero_pedido)); }
+          }
+          if (linhas.length < 1000) break;
+          offset += 1000;
+        }
+      } catch (e) { json(res, 500, { ok: false, erro: String(e.message || e) }); return true; }
+      const canais = {}; for (const c of Object.keys(porCanal)) canais[c] = { fat: Math.round(porCanal[c].fat * 100) / 100, un: porCanal[c].un, mar: Math.round(porCanal[c].mar * 100) / 100, pedidos: porCanal[c].peds.size };
+      const dias = {}; for (const d of Object.keys(porDia)) dias[d] = { fat: Math.round(porDia[d].fat * 100) / 100, pedidos: porDia[d].peds.size };
+      const skus = Object.values(porSku).sort((a, b) => b.mar - a.mar).slice(0, 300)
+        .map(x => ({ sku: x.sku, desc: x.desc, un: x.un, fat: Math.round(x.fat * 100) / 100, cus: Math.round(x.cus * 100) / 100, mar: Math.round(x.mar * 100) / 100 }));
+      const dados = { ok: true, de: deL, ate: ateL, fonte: 'supabase', paginas,
+        totais: { faturamento: Math.round(T.fat * 100) / 100, produtos: Math.round(T.prod * 100) / 100, imposto: Math.round(T.imp * 100) / 100,
+                  custo: Math.round(T.cus * 100) / 100, comissao: Math.round(T.com * 100) / 100, frete: Math.round(T.fre * 100) / 100,
+                  margem: Math.round(T.mar * 100) / 100, pedidos: peds.size, unidades: T.un, itens: T.itens, un_sem_custo: T.semCusto },
+        canais, dias, skus };
+      _histCache[cacheKey] = { ts: Date.now(), dados };
+      json(res, 200, dados);
+      return true;
+    }
+
     // STATUS NO MARKETPLACE: pergunta ao ML/Shopee se o pedido foi CANCELADO pelo cliente.
     // O Bling demora (ou não) pra refletir isso; o dashboard precisa mostrar cinza na hora.
     // Uso: /girassol-backup-offline/status-mkt?de=YYYY-MM-DD&ate=YYYY-MM-DD
@@ -1310,6 +1371,25 @@ function routes(readBody) {
       if (!((process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || (sessC && ehAdmin(sessC)))) { json(res, 404, { error: 'not found' }); return true; }
       if (urlObj.searchParams.get('status')) { json(res, 200, { ok: true, rodando: !!_cst.rodando, progresso: _cst.feitos + '/' + _cst.total, ok_ate_agora: _cst.ok, falhas: _cst.falhas, inicio: _cst.inicio }); return true; }
       const skuProbe = urlObj.searchParams.get('sku');
+      if (skuProbe && urlObj.searchParams.get('raw')) {
+        // raio-X do que o Bling devolve pra esse SKU (pra entender custo faltando)
+        try {
+          const rb = await blingGet('/produtos?codigo=' + encodeURIComponent(skuProbe) + '&criterio=5&limite=3');
+          const lst = (rb.ok && rb.data && rb.data.data) || [];
+          const it0 = lst[0] || null;
+          let det = null;
+          if (it0 && it0.id) { const dd = await blingGet('/produtos/' + it0.id); det = (dd.ok && dd.data && dd.data.data) || null; }
+          const compsRaw = det ? ((det.estrutura && (det.estrutura.componentes || det.estrutura.itens)) || det.composicao || det.componentes || null) : null;
+          json(res, 200, { ok: true, sku: skuProbe, achou_na_busca: lst.length, id: it0 && it0.id,
+            campos_topo: det ? Object.keys(det) : null,
+            precoCusto: det && det.precoCusto, custo: det && det.custo, preco: det && det.preco,
+            fornecedor: det && det.fornecedor ? { precoCusto: det.fornecedor.precoCusto, precoCompra: det.fornecedor.precoCompra } : null,
+            estrutura_chaves: det && det.estrutura ? Object.keys(det.estrutura) : null,
+            componentes_qtd: Array.isArray(compsRaw) ? compsRaw.length : 0,
+            componentes_amostra: Array.isArray(compsRaw) ? compsRaw.slice(0, 3) : null });
+        } catch (e) { json(res, 500, { ok: false, erro: String(e.message || e) }); }
+        return true;
+      }
       if (skuProbe) { const ccP = readJson(path.join(CACHE_DIR, '_custos.json'), {}); json(res, 200, { ok: true, sku: skuProbe, no_cache_permanente: ccP[skuProbe] || null, total_no_cache: Object.keys(ccP).length }); return true; }
       if (_cst.rodando) { json(res, 200, { ok: true, ja_rodando: true, progresso: _cst.feitos + '/' + _cst.total }); return true; }
       custoSync(!!urlObj.searchParams.get('fresh')).catch(() => {});
@@ -3093,6 +3173,7 @@ async function buscarDevolucoesML(tokenML, dorme) {
 
 // ─── BACKFILL do histórico de vendas pro Supabase ────────────────────────────────────────────
 const DEFAULT_ALIQ_BK = { '2026-01':11.409280, '2026-02':11.3254, '2026-03':12.3402, '2026-04':13.6001, '2026-05':13.9149, '2026-06':14.056, '2026-07':14.1, '2026-08':14.1, '2026-09':14.1, '2026-10':14.1, '2026-11':14.1, '2026-12':14.1 };
+const _histCache = {};   // agregados do Supabase por período (10 min)
 let _backfill = { rodando:false, empresa:null, de:null, ate:null, pagina:0, pedidos:0, itens:0, gravados:0, erros:0, fase:'parado', inicio:null, fim:null, msg:'' };
 async function backfillVendas(de, ate, empresa){
   if(_backfill.rodando) return;
@@ -3523,6 +3604,32 @@ async function custoSync(fresh) {
           const arr = (rf.ok && rf.data && rf.data.data) || [];
           const pref = arr.find(x => x && x.padrao) || arr[0];
           if (pref) cand = [pref.precoCusto, pref.precoCompra].map(Number).filter(v => isFinite(v) && v > 0);
+        }
+        // KIT / produto COM COMPOSIÇÃO (27/07): o Bling não preenche o custo do kit em si —
+        // ele mostra "Preço Total de Custo" somando os componentes. Fazemos o mesmo.
+        if (!cand.length) {
+          const comps = (prod.estrutura && (prod.estrutura.componentes || prod.estrutura.itens))
+                     || prod.composicao || prod.componentes || null;
+          if (Array.isArray(comps) && comps.length) {
+            let soma = 0, completo = true;
+            for (const cp of comps.slice(0, 30)) {
+              const idc = (cp.produto && cp.produto.id) || cp.idProduto || cp.id || null;
+              const qc = Number(cp.quantidade != null ? cp.quantidade : (cp.qtd != null ? cp.qtd : 1)) || 1;
+              if (!idc) { completo = false; break; }
+              const dc = await bg2(`/produtos/${idc}`);
+              const pc = (dc.ok && dc.data && dc.data.data) || null;
+              let cu = null;
+              if (pc) {
+                const f2 = pc.fornecedor || {};
+                const cs = [f2.precoCusto, f2.precoCompra, pc.precoCusto, pc.custo].map(Number).filter(v => isFinite(v) && v > 0);
+                if (cs.length) cu = cs[0];
+              }
+              if (cu == null) { completo = false; break; }
+              soma += cu * qc;
+              await dorme(420);
+            }
+            if (completo && soma > 0) { cand = [Math.round(soma * 10000) / 10000]; console.log('[CUSTO] ' + sku + ': custo somado da COMPOSIÇÃO = ' + cand[0]); }
+          }
         }
         cc[sku] = { id: prod.id, preco: (prod.preco != null && isFinite(Number(prod.preco))) ? Number(prod.preco) : null, custo: cand.length ? Math.round(cand[0] * 10000) / 10000 : null, ts: Date.now() };
         _cst.ok++;
