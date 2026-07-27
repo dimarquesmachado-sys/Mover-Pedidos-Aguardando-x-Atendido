@@ -23,6 +23,11 @@
   .hdr{position:sticky;top:0;z-index:50;background:linear-gradient(180deg,rgba(10,14,26,.97) 70%,rgba(10,14,26,0));
        padding:14px 0 10px;margin:0 -16px;padding-left:16px;padding-right:16px}
   .hrow{max-width:min(1720px,96vw);margin:0 auto;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  /* cabeçalho: filtros à esquerda · atalhos à direita, tudo dentro da faixa fixa */
+  .hbot{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding-bottom:8px}
+  .hleft{flex:1 1 auto;min-width:0}
+  .atalhos{flex:0 0 auto;display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;align-items:center;max-width:52%}
+  .atalhos .chip{white-space:nowrap}
   h1{font-size:17px;font-weight:800;margin:0;letter-spacing:-.02em;display:flex;align-items:center;gap:8px}
   h1 .logo{width:30px;height:30px;border-radius:9px;background:linear-gradient(135deg,#fbbf24,#f59e0b);
            display:inline-flex;align-items:center;justify-content:center;font-size:16px}
@@ -111,9 +116,10 @@
     button.chip,.btn{min-height:38px}
     h2{font-size:15px}
     .hint{display:none}
-    /* barra "ir para" fixa no topo — navegar sem rolar o dia todo */
-    .atalhos{position:sticky;top:0;z-index:20;background:var(--bg);padding:8px 0;margin:0 0 10px;
-             overflow-x:auto;flex-wrap:nowrap!important;-webkit-overflow-scrolling:touch}
+    /* no celular o cabeçalho empilha e a barra de atalhos rola de lado */
+    .hbot{flex-direction:column;gap:6px}
+    .atalhos{max-width:100%;justify-content:flex-start;overflow-x:auto;flex-wrap:nowrap!important;
+             -webkit-overflow-scrolling:touch;padding-bottom:2px}
     .atalhos .chip{flex:0 0 auto;white-space:nowrap}
     /* tabelas mais compactas */
     table{font-size:11.5px}
@@ -148,7 +154,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd98';
+const DASH_BUILD = 'd99';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -448,12 +454,14 @@ function montar(){
     '<h1><span class="logo">🌻</span> Inteligência de Vendas · Girassol <span class="badge">'+DASH_BUILD+'</span></h1>'+
     '<div class="hlinks"><a href="'+MOD+'/painel">← checkout</a></div>'+
   '</div>'+
-  '<div class="wrap"><div class="chips" id="chips"></div>'+
-  '<div class="custom" id="custom">De <input type="date" id="pDe" onclick="this.showPicker&&this.showPicker()" onchange="pDe=this.value;setPeriodo(\'custom\')"> '+
-  'até <input type="date" id="pAte" onclick="this.showPicker&&this.showPicker()" onchange="pAte=this.value;setPeriodo(\'custom\')"></div>'+
-  '<div class="cover" id="cover"></div></div></div>'+
-  '<div class="wrap">'+
-    '<div class="atalhos" style="display:flex;gap:8px;flex-wrap:wrap;margin:2px 0 14px;align-items:center">'+
+  '<div class="wrap hbot">'+
+    '<div class="hleft">'+
+      '<div class="chips" id="chips"></div>'+
+      '<div class="custom" id="custom">De <input type="date" id="pDe" onclick="this.showPicker&&this.showPicker()" onchange="pDe=this.value;setPeriodo(\'custom\')"> '+
+      'até <input type="date" id="pAte" onclick="this.showPicker&&this.showPicker()" onchange="pAte=this.value;setPeriodo(\'custom\')"></div>'+
+      '<div class="cover" id="cover"></div>'+
+    '</div>'+
+    '<div class="atalhos">'+
       '<span style="color:var(--mut);font-size:12px;margin-right:2px">ir para:</span>'+
       '<button class="chip" onclick="irPra(&#39;secBusca&#39;)">🔍 Buscar pedido</button>'+
       '<button class="chip" onclick="irPra(&#39;secAnalise&#39;)">📋 Análise de vendas</button>'+
@@ -461,6 +469,8 @@ function montar(){
       '<button class="chip" onclick="irPra(&#39;secCanal&#39;)">🛒 Por canal</button>'+
       '<button class="chip" onclick="irPra(&#39;secProj&#39;)">📦 Projeção de estoque</button>'+
       '</div>'+
+  '</div></div>'+
+  '<div class="wrap">'+
       '<div id="histAviso" style="font-size:12px;color:var(--mut);margin:0 0 8px"></div>'+'<div class="kpis" id="kpis"></div>'+
     '<div class="sec" id="secBusca"><h2>🔍 Buscar pedido &amp; lucro <span class="hint">nº do pedido · NF · nº da venda no marketplace · SKU · parte do título</span></h2>'+
       '<input id="qBusca" placeholder="ex.: 73620 · 076265 · 2000017436578280 · 6376-220v · tosquiadeira" '+
