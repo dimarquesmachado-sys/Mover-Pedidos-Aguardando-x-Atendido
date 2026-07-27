@@ -394,7 +394,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b61';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b62';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#b3b9c4'}, magalu:{n:'Magalu',c:'#0086ff'},
@@ -408,14 +408,23 @@ let pedidoAtual = null;   // {bling_id,numero,cliente,nf,marketplace,itens:[{sku
 let FRAGEIS = new Set();
 let FRAGIL_CFG = { mensagemPadrao:'Atenção! Produto frágil. Embalar com cuidado.', velocidadeVoz:1.1, nomeVoz:'', tempoMinimoSegundos:2 };
 const normSku = s => String(s||'').trim().toUpperCase();
+let FRAGIL_DIAG = 'nao carregou';
+let FRAGIL_MSGS = {};   // SKU -> mensagem propria (o painel /fragil/ permite uma por SKU)
 async function carregarFrageis(){
   try{
     const r = await fetch('/fragil/api/skus', {credentials:'same-origin'});
-    if(!r.ok) return;
+    if(!r.ok){ FRAGIL_DIAG = 'HTTP '+r.status; return; }
     const d = await r.json();
-    if(d && d.skus) FRAGEIS = new Set(Object.keys(d.skus).map(normSku));
+    if(d && d.skus){
+      FRAGEIS = new Set(Object.keys(d.skus).map(normSku));
+      FRAGIL_MSGS = {};
+      for(const k of Object.keys(d.skus)){ const m = d.skus[k]; if(typeof m==='string' && m.trim()) FRAGIL_MSGS[normSku(k)] = m.trim(); }
+    }
     if(d && d.config) FRAGIL_CFG = Object.assign(FRAGIL_CFG, d.config);
-  }catch(e){}
+    FRAGIL_DIAG = FRAGEIS.size + ' SKUs';
+    const el = document.getElementById('fragilDiag');
+    if(el) el.textContent = '\u26a0\ufe0f ' + FRAGIL_DIAG;
+  }catch(e){ FRAGIL_DIAG = 'erro: '+(e.message||e); }
 }
 function falarFragil(txt){
   try{
@@ -430,7 +439,8 @@ function falarFragil(txt){
 function alertaFragil(ped){
   if(!ped || !ped.temFragil) return;
   const skus = ped.skusFrageis||[];
-  const msg = FRAGIL_CFG.mensagemPadrao || 'Atenção! Produto frágil.';
+  const proprias = skus.map(x=>FRAGIL_MSGS[normSku(x)]).filter(Boolean);
+  const msg = proprias.length ? proprias.join('. ') : (FRAGIL_CFG.mensagemPadrao || 'Aten\u00e7\u00e3o! Produto fr\u00e1gil.');
   falarFragil(msg);
   const seg = Math.max(0, Math.round(Number(FRAGIL_CFG.tempoMinimoSegundos)||0));
   const ov = document.createElement('div'); ov.className='fragilOverlay';
@@ -737,7 +747,7 @@ async function carregarLista(){
     (function(){
       const _min = d.ciclo_rodou_em ? Math.round((Date.now() - new Date(d.ciclo_rodou_em).getTime())/60000) : null;
       const _vs  = d.versao ? String(d.versao).split(' ').pop() : 'v?';
-      $('ver').innerHTML = _vs + ' \u00b7 ui ' + UI_BUILD
+      $('ver').innerHTML = _vs + ' \u00b7 ui ' + UI_BUILD + ' \u00b7 <span id="fragilDiag" title="SKUs fr\u00e1geis carregados do painel /fragil/">\u26a0\ufe0f ' + FRAGIL_DIAG + '</span>'
         + (_min!=null ? ' \u00b7 <span style="color:'+(_min>25?'#f87171':'#94a3b8')+'" title="\u00faltima consulta ao Bling (o ciclo roda sozinho de 10 em 10 min)">\u23f1 '+_min+' min</span>' : '')
         + (d.sem_etiqueta>0 ? ' \u00b7 <span style="color:#fbbf24" title="pedidos sem etiqueta \u2014 o servidor tenta de novo sozinho a cada 5 min">\u26a0 '+d.sem_etiqueta+' s/ etiqueta</span>' : '');
     })();
@@ -970,13 +980,16 @@ function prepararPedido(ped){
   for(const it of (ped.itens||[])){
     if(it.tipo==='kit' && Array.isArray(it.componentes) && it.componentes.length){
       const comps = it.componentes.map(c=>novaUnid(c));
-      grupos.push({ tipo:'kit', sku:it.sku, descricao:it.descricao, ean:it.ean, img:it.img, qtd:Number(it.qtd||0), comps });
+      const kitFragil = FRAGEIS.has(normSku(it.sku));
+      if(kitFragil) comps.forEach(c=>{ c.fragil = true; });   // kit frágil: marca os componentes (é o que o estoquista pega na mão)
+      grupos.push({ tipo:'kit', sku:it.sku, descricao:it.descricao, ean:it.ean, img:it.img, qtd:Number(it.qtd||0), comps, fragil:kitFragil });
     } else {
       grupos.push({ tipo:'leaf', unit:novaUnid(it) });
     }
   }
   ped.grupos = grupos; ped.unidades = unidades;
-  ped.skusFrageis = [...new Set(unidades.filter(u=>u.fragil).map(u=>u.sku))];
+  const kitsFrag = grupos.filter(g=>g.tipo==='kit' && g.fragil).map(g=>g.sku);
+  ped.skusFrageis = [...new Set([...kitsFrag, ...unidades.filter(u=>u.fragil).map(u=>u.sku)])];
   ped.temFragil = ped.skusFrageis.length > 0;
 }
 
