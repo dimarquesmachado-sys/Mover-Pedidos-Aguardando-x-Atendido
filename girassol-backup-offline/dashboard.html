@@ -170,7 +170,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd105';
+const DASH_BUILD = 'd106';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -673,17 +673,20 @@ function render(){
   const ticket = comValor ? fat/comValor : 0;
   const pc = (a,b)=> b? Math.round(a/b*100) : 0;
   const nTot = PER.length + AGD.length;   // 27/07: o laço acima cobre bipados + não bipados — o denominador tem que ser o mesmo
-  const cVal = pc(comValor,nTot), cItem = pc(itensComValor,itensTot), cUF = pc(comUF,nTot);
+  const cVal = pc(comValor,nTot), cItem = pc(itensComValor,itensTot);
+  // ⚠️ UF e NF só existem no pedido JÁ BIPADO (a venda ainda não bipada não tem esses campos).
+  // Medi-los contra o total derrubava a % e acendia o aviso de "cobertura baixa" sem motivo.
+  const cUF = pc(comUF,PER.length||1), cNF = pc(pedNF,PER.length||1), cTar = pc(pedTarReal,nTot);
 
   $('cover').innerHTML = PER.length === 0 ?
     ('<span class="dim">'+de+' → '+ate+'</span><span class="dim">0 vendas atribuídas a este período — vendas de fim de semana entram assim que forem bipadas (caem no dia CERTO) · clica em <b>Ontem</b> ou <b>Mês</b> 😉 · a busca de pedido lá embaixo funciona independente do período</span>') :
     '<span class="dim">'+de+' → '+ate+'</span>'+
     '<span class="pill '+(cVal>=95?'g':'w')+'">valor <b>'+cVal+'%</b></span>'+
     '<span class="pill '+(cItem>=95?'g':'w')+'">valor/item <b>'+cItem+'%</b></span>'+
-    '<span class="pill '+(cUF>=95?'g':'w')+'">UF <b>'+cUF+'%</b></span>'+
-    '<span class="pill '+(pc(pedNF,nTot)>=95?'g':'w')+'">nota fiscal <b>'+pc(pedNF,nTot)+'%</b></span>'+
-    '<span class="pill '+(pc(pedTarReal,nTot)>=95?'g':'w')+'">tarifa real <b>'+pc(pedTarReal,nTot)+'%</b></span>'+
-    ((cVal<95||cItem<95||cUF<95)?'<span class="warn" style="font-size:11px">← cobertura baixa: rode os backfills p/ o retroativo</span>':'');
+    '<span class="pill '+(cUF>=95?'g':'w')+'" title="dos pedidos já bipados">UF <b>'+cUF+'%</b></span>'+
+    '<span class="pill '+(cNF>=95?'g':'w')+'" title="dos pedidos já bipados">nota fiscal <b>'+cNF+'%</b></span>'+
+    '<span class="pill '+(cTar>=95?'g':'w')+'" title="pedidos com a comissão REAL do marketplace (o resto usa a % configurada)">tarifa real <b>'+cTar+'%</b></span>'+
+    ((cVal<90||cItem<90)?'<span class="warn" style="font-size:11px" title="são vendas cujo detalhe ainda não chegou do Bling — entra sozinho nas próximas rodadas">← detalhe de algumas vendas ainda chegando</span>':'');
 
   const kpi=(kc,ic,l,v,s)=>'<div class="kpi" style="--kc:'+kc+'"><span class="ic">'+ic+'</span><div class="l">'+l+'</div><div class="v">'+v+'</div>'+(s?'<div class="s">'+s+'</div>':'')+'</div>';
   // d47: "dia completo" = bipados do período + vendas do Bling AINDA não bipadas atribuídas ao período (canceladas fora)
