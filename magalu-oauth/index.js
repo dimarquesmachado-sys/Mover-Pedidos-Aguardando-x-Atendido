@@ -296,13 +296,16 @@ async function tratar(req, res, urlObj) {
         if (!cookie || cookie.length < 20 || cookie.indexOf('=') < 0) {
           json(res, 400, { ok: false, erro: 'não achei um cookie válido no que você colou' }); return true;
         }
+        const conf = blingConferirCookie(cookie);
+        if (!conf.ok) { json(res, 400, { ok: false, erro: conf.erro, posicao: conf.posicao, trecho_ao_redor: cookie.slice(Math.max(0, conf.posicao - 40), conf.posicao + 20) }); return true; }
         try { blingSalvarCookie(emp, cookie); } catch (e) { json(res, 500, { ok: false, erro: String(e.message || e) }); return true; }
         json(res, 200, { ok: true, empresa: emp, caracteres: cookie.length, tem_phpsessid: /PHPSESSID=/i.test(cookie) });
         return true;
       }
 
       const atual = blingLerCookie(emp);
-      const st = atual
+      const confAtual = atual ? blingConferirCookie(atual) : { ok: true };
+      const st = (atual && !confAtual.ok) ? '<p class="nao">⚠ O cookie salvo está inválido: ' + confAtual.erro + '</p>' : atual
         ? '<p class="ok">✓ Já tem cookie salvo para ' + (NOMES[emp] || emp) + ' (' + atual.length + ' caracteres' + (/PHPSESSID=/i.test(atual) ? ', com PHPSESSID' : ', <b>sem PHPSESSID — suspeito</b>') + '). Cole de novo pra atualizar.</p>'
         : '<p class="nao">Nenhum cookie salvo para ' + (NOMES[emp] || emp) + ' ainda.</p>';
 
@@ -1318,6 +1321,25 @@ function blingExtrairCookie(texto) {
   return t;
 }
 
+// Cabecalho HTTP so aceita ASCII imprimivel. Se veio "…" (caractere 8230),
+// e porque o texto foi copiado do PAINEL DE CABECALHOS do DevTools, que corta
+// valores longos na exibicao. Melhor recusar na hora do que quebrar depois.
+function blingConferirCookie(cookie) {
+  for (let i = 0; i < cookie.length; i++) {
+    const c = cookie.charCodeAt(i);
+    if (c < 32 || c > 126) {
+      const ch = cookie[i];
+      return {
+        ok: false, posicao: i, codigo: c, caractere: ch,
+        erro: (ch === '…' || c === 8230)
+          ? 'o cookie está CORTADO: tem "…" na posição ' + i + '. Isso acontece quando se copia do painel de cabeçalhos do DevTools, que encurta valores longos. Use botão direito na requisição → Copiar → Copiar como cURL, e cole o cURL inteiro aqui.'
+          : 'o cookie tem um caractere inválido para cabeçalho HTTP na posição ' + i + ' (código ' + c + '). Recopie usando Copiar como cURL.'
+      };
+    }
+  }
+  return { ok: true };
+}
+
 function blingSalvarCookie(emp, cookie) {
   try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch (e) {}
   fs.writeFileSync(blingCookieArquivo(emp), cookie, 'utf8');
@@ -1437,6 +1459,8 @@ async function blingImportar(empresa, bufZip, tipo) {
   const cfg = BLING_IMP[empresa];
   if (!cfg) throw new Error('empresa sem configuração de Bling: ' + empresa);
   if (!cfg.cookie()) throw new Error('SEM_COOKIE: nenhum cookie do Bling salvo para ' + empresa + ' — cole em /magalu/nf-full/cookie?empresa=' + empresa);
+  const confC = blingConferirCookie(cfg.cookie());
+  if (!confC.ok) throw new Error('COOKIE_INVALIDO: ' + confC.erro);
 
   const sep = nfSeparar(bufZip);
   const itens = (tipo === 'E' ? sep.entrada : sep.saida);
