@@ -41,7 +41,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v27/07 b59';
+const VERSAO     = 'girassol-backup-offline v27/07 b60';
 
 // ── SESSÃO DE OPERADOR (cookie assinado HMAC) — protege rotas de dados/ação ──
 // Segredo estável entre restarts. Usa ADMIN_KEY (já configurada no Render) como base.
@@ -3369,6 +3369,7 @@ async function vendasSync() {
           .filter(v => v && (v.marketplace === 'ml' || v.marketplace === 'mercadolivre') && v.numero_loja && !v.ml_real && !bipR.has(String(v.numero)) && !/cancel/i.test(String(v.situacao || '')))
           .sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')) || Number(b.numero || 0) - Number(a.numero || 0))   // recentes primeiro
           .slice(0, 40);   // lote por rodada — o ML tem rate limit; 40 × ~3 chamadas cada
+        let _mlN = 0;
         for (const v of alvosR) {
           try {
             const reg = await pescarDadosML(v.numero_loja, tkR, dormeR);
@@ -3385,6 +3386,7 @@ async function vendasSync() {
             }
           } catch (e) {}
           await dormeR(350);
+          if ((++_mlN % 10) === 0) { try { writeJson(F, atual); } catch (e) {} }   // 27/07: grava parcial — deploy no meio não joga a pesca fora
         }
         writeJson(F, atual);   // dado real do ML no disco — o dashboard já mostra "REAL"
       }
@@ -3432,6 +3434,7 @@ async function vendasSync() {
         if (!Object.keys(pendN).length) return;
         const c9 = readJson(CONFERIDOS_FILE, {});   // relê antes de gravar — não atropela bipagem no meio
         let n9 = 0;
+        let _pnf_ = 0;
         for (const [k9, v9] of Object.entries(pendN)) { if (c9[k9] && (c9[k9].nf_emissao == null || c9[k9].nf_emissao === '')) { c9[k9].nf_emissao = v9; if (v9) n9++; } }
         writeJson(CONFERIDOS_FILE, c9);
         for (const k9 of Object.keys(pendN)) delete pendN[k9];
