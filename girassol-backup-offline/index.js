@@ -41,7 +41,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v27/07 b53';
+const VERSAO     = 'girassol-backup-offline v27/07 b54';
 
 // ── SESSÃO DE OPERADOR (cookie assinado HMAC) — protege rotas de dados/ação ──
 // Segredo estável entre restarts. Usa ADMIN_KEY (já configurada no Render) como base.
@@ -895,6 +895,77 @@ function routes(readBody) {
       json(res, 200, { ok: true, msg: '✅ backfill iniciado em background (só Girassol). Acompanhe em /backfill-status. Ele deleta o período antes e regrava, então pode rodar de novo sem duplicar.', de, ate });
       return true;
     }
+    // STATUS NO MARKETPLACE: pergunta ao ML/Shopee se o pedido foi CANCELADO pelo cliente.
+    // O Bling demora (ou não) pra refletir isso; o dashboard precisa mostrar cinza na hora.
+    // Uso: /girassol-backup-offline/status-mkt?de=YYYY-MM-DD&ate=YYYY-MM-DD
+    if (method === 'GET' && p === '/girassol-backup-offline/status-mkt') {
+      const kS = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const sessS = validarSessao(req.headers['cookie']);
+      if (!((process.env.ADMIN_KEY && kS === process.env.ADMIN_KEY) || (sessS && ehAdmin(sessS)))) { json(res, 404, { error: 'not found' }); return true; }
+      const deS = String((urlObj.searchParams && urlObj.searchParams.get('de')) || '').slice(0, 10);
+      const ateS = String((urlObj.searchParams && urlObj.searchParams.get('ate')) || '').slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(deS) || !/^\d{4}-\d{2}-\d{2}$/.test(ateS)) { json(res, 400, { ok: false, erro: 'passe &de=&ate=' }); return true; }
+      const FS = path.join(CACHE_DIR, '_vendas_dia.json');
+      const atualS = readJson(FS, {});
+      const noPeriodo = Object.values(atualS).filter(v => {
+        if (!v || v.numero == null || !v.numero_loja) return false;
+        if (/cancel/i.test(String(v.situacao || ''))) return false;   // já sabemos que caiu
+        const d = String(v.data || '').slice(0, 10);
+        return d >= deS && d <= ateS;
+      });
+      let checados = 0, cancelados = [];
+      // ── ML ──
+      const alvoML = noPeriodo.filter(v => v.marketplace === 'ml' || v.marketplace === 'mercadolivre').slice(0, 80);
+      if (alvoML.length) {
+        let tkS = null; try { const { garantirTokenML: _g5 } = require('../girassol/mlTokenManager'); tkS = await _g5(); } catch (e) {}
+        if (tkS) {
+          for (const v of alvoML) {
+            try {
+              const nlS = String(v.numero_loja).replace(/\D/g, '');
+              let rS = await fetch('https://api.mercadolibre.com/orders/' + nlS, { headers: { Authorization: 'Bearer ' + tkS } });
+              let dS = await rS.json().catch(() => null);
+              if (!rS.ok) {   // pode ser PACK (carrinho): pega o 1º pedido de dentro
+                const rp = await fetch('https://api.mercadolibre.com/packs/' + nlS, { headers: { Authorization: 'Bearer ' + tkS } });
+                const dp = await rp.json().catch(() => null);
+                const o1 = dp && dp.orders && dp.orders[0];
+                if (o1) { rS = await fetch('https://api.mercadolibre.com/orders/' + (o1.id || o1), { headers: { Authorization: 'Bearer ' + tkS } }); dS = await rS.json().catch(() => null); }
+              }
+              checados++;
+              if (rS.ok && dS && String(dS.status || '').toLowerCase() === 'cancelled') {
+                v.situacao = 'Cancelado no Mercado Livre'; v.cancelado_mkt = 1; cancelados.push(v.numero);
+              }
+            } catch (e) {}
+            await new Promise(r5 => setTimeout(r5, 260));
+          }
+        }
+      }
+      // ── SHOPEE (em lote de 20 pela rota interna do shopee-nf-sync) ──
+      const alvoSH = noPeriodo.filter(v => v.marketplace === 'shopee').slice(0, 60);
+      const SHU = process.env.SHOPEE_SYNC_URL || 'https://girassol-shopee-sync-organizar-envio.onrender.com';
+      const SHK = process.env.SHOPEE_SYNC_KEY || '';
+      if (alvoSH.length && SHK) {
+        for (let i = 0; i < alvoSH.length; i += 20) {
+          const fatia = alvoSH.slice(i, i + 20);
+          try {
+            const rSh = await fetch(SHU + '/girassol/interno/margem-pedidos?k=' + encodeURIComponent(SHK) + '&order_sns=' + encodeURIComponent(fatia.map(v => v.numero_loja).join(',')));
+            const dSh = await rSh.json().catch(() => null);
+            const lst = (dSh && (dSh.pedidos || dSh.data)) || null;
+            if (lst) {
+              const porSn2 = Array.isArray(lst) ? Object.fromEntries(lst.map(x => [String(x.order_sn), x])) : lst;
+              for (const v of fatia) {
+                const pS2 = porSn2[String(v.numero_loja)];
+                checados++;
+                if (pS2 && /cancel/i.test(String(pS2.order_status || ''))) { v.situacao = 'Cancelado na Shopee'; v.cancelado_mkt = 1; cancelados.push(v.numero); }
+              }
+            }
+          } catch (e) {}
+        }
+      }
+      try { writeJson(FS, atualS); } catch (e) {}
+      json(res, 200, { ok: true, checados, cancelados_agora: cancelados.length, numeros: cancelados.slice(0, 30) });
+      return true;
+    }
+
     // COMPLETAR DETALHES do período que o dashboard está mostrando (SKU/qtd/taxas dos ainda não bipados).
     // Uso: /girassol-backup-offline/completar-detalhes?de=YYYY-MM-DD&ate=YYYY-MM-DD
     // Processa um lote curto e devolve quantos faltam — o dashboard chama em sequência até zerar.
