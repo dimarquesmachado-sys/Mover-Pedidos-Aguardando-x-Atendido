@@ -26,7 +26,7 @@ const fs   = require('fs');
 const path = require('path');
 const { json, html, readBody } = require('../lib/http');
 
-const VERSAO = 'magalu-oauth v1 b35';
+const VERSAO = 'magalu-oauth v1 b36';
 
 const DATA_DIR = process.env.MAGALU_DATA_DIR || '/data/magalu';
 
@@ -283,7 +283,8 @@ async function tratar(req, res, urlObj) {
         let sep; try { sep = nfSeparar(buf); } catch (e) { json(res, 500, { ok: false, erro: 'não consegui abrir o zip: ' + String(e.message || e) }); return true; }
         let itens = (tipo === 'saida' ? sep.saida : sep.entrada);
         if (soNovas && BLING_IMP[soNovas]) {
-          const ja = new Set(nfLerImportadas(soNovas).chaves);
+          const impx = nfLerImportadas(soNovas);
+          const ja = new Set(tipo === 'entrada' ? impx.entrada : impx.saida);
           itens = itens.filter(it => it.chave && !ja.has(it.chave));
         }
         if (!itens.length) { json(res, 404, { ok: false, erro: soNovas ? 'nenhuma nota nova nesse arquivo' : 'não há notas de ' + tipo + ' nesse arquivo' }); return true; }
@@ -320,20 +321,26 @@ async function tratar(req, res, urlObj) {
       // "tem NOTA nova aqui dentro?". Sem isso, as 4 rodadas diarias
       // mandariam o mesmo lote pro Bling rejeitar inteiro, todo dia.
       const ultimo = nfLerImportadas(emp3);
-      let novas = [], totalSaida = 0;
-      try { const r5 = nfNovasDoArquivo(emp3, novoArq.nome); novas = r5.novas; totalSaida = r5.saida.length; }
-      catch (e) { json(res, 500, { ok: false, erro: 'não consegui abrir o zip: ' + String(e.message || e) }); return true; }
+      let nS = [], tS = 0, nE = [], tE = 0;
+      try {
+        const rS = nfNovasDoArquivo(emp3, novoArq.nome, 'S'); nS = rS.novas; tS = rS.todas.length;
+        const rE = nfNovasDoArquivo(emp3, novoArq.nome, 'E'); nE = rE.novas; tE = rE.todas.length;
+      } catch (e) { json(res, 500, { ok: false, erro: 'não consegui abrir o zip: ' + String(e.message || e) }); return true; }
+
+      const url = (t) => '/magalu/nf-full/arquivo?nome=' + encodeURIComponent(novoArq.nome) + '&tipo=' + t + '&novas=' + emp3 + '&k=' + encodeURIComponent(q.get('k') || '');
 
       json(res, 200, {
         ok: true, empresa: emp3, versao: VERSAO,
         arquivo: novoArq.nome, baixado_em: novoArq.em, notas: novoArq.notas,
-        saida_no_arquivo: totalSaida,
-        novas: novas.length,
-        precisa: novas.length > 0,
-        ja_importado_hoje: novas.length ? null : { quando: ultimo.quando, arquivo: ultimo.arquivo, resumo: ultimo.resumo },
-        ultima_importacao: ultimo.quando ? { quando: ultimo.quando, arquivo: ultimo.arquivo, chaves_guardadas: ultimo.chaves.length } : null,
-        // só as notas que ainda não foram — o Bling nem precisa recusar nada
-        url_zip_saida: '/magalu/nf-full/arquivo?nome=' + encodeURIComponent(novoArq.nome) + '&tipo=saida&novas=' + emp3 + '&k=' + encodeURIComponent(q.get('k') || '')
+        saida_no_arquivo: tS, entrada_no_arquivo: tE,
+        novas: nS.length,              // compatibilidade com a extensao 1.0.5
+        novas_saida: nS.length,
+        novas_entrada: nE.length,
+        precisa: (nS.length + nE.length) > 0,
+        ja_importado_hoje: (nS.length + nE.length) ? null : { quando: ultimo.quando, arquivo: ultimo.arquivo, resumo: ultimo.resumo },
+        ultima_importacao: ultimo.quando ? { quando: ultimo.quando, arquivo: ultimo.arquivo, guardadas_saida: ultimo.saida.length, guardadas_entrada: ultimo.entrada.length } : null,
+        url_zip_saida: url('saida'),
+        url_zip_entrada: url('entrada')
       });
       return true;
     }
@@ -346,17 +353,22 @@ async function tratar(req, res, urlObj) {
       if (!BLING_IMP[emp4]) { json(res, 400, { ok: false, erro: 'empresa inválida' }); return true; }
       // Marca como importadas as chaves que estavam no lote enviado.
       // So chega aqui se a extensao concluiu — ela nao registra em caso de erro.
+      const tipoReg = (String(corpo3.tipo || 'S').toUpperCase() === 'E') ? 'entrada' : 'saida';
       const antes = nfLerImportadas(emp4);
-      const jaTinha = new Set(antes.chaves);
+      const jaTinha = new Set(antes[tipoReg]);
       let acrescentadas = 0;
       try {
-        const r6 = nfNovasDoArquivo(emp4, String(corpo3.arquivo || ''));
+        const r6 = nfNovasDoArquivo(emp4, String(corpo3.arquivo || ''), tipoReg === 'entrada' ? 'E' : 'S');
         r6.novas.forEach(it => { if (!jaTinha.has(it.chave)) { jaTinha.add(it.chave); acrescentadas++; } });
       } catch (e) {}
-      const reg = { quando: new Date().toISOString(), arquivo: corpo3.arquivo || null, resumo: corpo3.resumo || null, via: 'extensao', chaves: Array.from(jaTinha) };
+      const reg = {
+        quando: new Date().toISOString(), arquivo: corpo3.arquivo || null, resumo: corpo3.resumo || null, via: 'extensao',
+        saida:   tipoReg === 'saida'   ? Array.from(jaTinha) : antes.saida,
+        entrada: tipoReg === 'entrada' ? Array.from(jaTinha) : antes.entrada
+      };
       nfGravarImportadas(emp4, reg);
-      console.log('[magalu-nf] extensão importou ' + emp4 + ': +' + acrescentadas + ' chaves novas');
-      json(res, 200, { ok: true, empresa: emp4, chaves_novas: acrescentadas, chaves_guardadas: reg.chaves.length });
+      console.log('[magalu-nf] extensão importou ' + emp4 + ' (' + tipoReg + '): +' + acrescentadas + ' chaves novas');
+      json(res, 200, { ok: true, empresa: emp4, tipo: tipoReg, chaves_novas: acrescentadas, guardadas_saida: reg.saida.length, guardadas_entrada: reg.entrada.length });
       return true;
     }
 
@@ -1744,29 +1756,42 @@ async function nfBaixarZip(empresa, dIni, dFim) {
 // novo, 4x por dia, o mesmo lote pro Bling rejeitar tudo como repetido.
 function nfArquivoImportadas(emp) { return path.join(NF_DIR, '_importado-' + emp + '.json'); }
 
+// Duas listas separadas: saida e entrada. Sao importadas em lotes
+// diferentes (muda o campo Tipo na tela do Bling), entao o controle
+// tambem tem que ser separado.
 function nfLerImportadas(emp) {
   try {
     const j = JSON.parse(fs.readFileSync(nfArquivoImportadas(emp), 'utf8'));
-    return { quando: j.quando || null, arquivo: j.arquivo || null, resumo: j.resumo || null, chaves: Array.isArray(j.chaves) ? j.chaves : [] };
-  } catch (e) { return { quando: null, arquivo: null, resumo: null, chaves: [] }; }
+    // compatibilidade: o formato antigo tinha um "chaves" solto, que eram
+    // as de saida (era o unico tipo que a gente importava ate 27/07)
+    const antigas = Array.isArray(j.chaves) ? j.chaves : [];
+    return {
+      quando: j.quando || null, arquivo: j.arquivo || null, resumo: j.resumo || null,
+      saida:   Array.isArray(j.saida)   ? j.saida   : antigas,
+      entrada: Array.isArray(j.entrada) ? j.entrada : []
+    };
+  } catch (e) { return { quando: null, arquivo: null, resumo: null, saida: [], entrada: [] }; }
 }
 
 function nfGravarImportadas(emp, reg) {
   try {
     fs.mkdirSync(NF_DIR, { recursive: true });
-    // guarda no maximo as 4000 ultimas — 31 dias de duas empresas cabe folgado
-    if (reg.chaves.length > 4000) reg.chaves = reg.chaves.slice(-4000);
+    // guarda no maximo as 4000 ultimas de cada tipo
+    if (reg.saida.length > 4000)   reg.saida   = reg.saida.slice(-4000);
+    if (reg.entrada.length > 4000) reg.entrada = reg.entrada.slice(-4000);
     fs.writeFileSync(nfArquivoImportadas(emp), JSON.stringify(reg));
   } catch (e) {}
 }
 
-// Quais notas de saida desse ZIP ainda NAO foram importadas.
-function nfNovasDoArquivo(emp, nomeArquivo) {
+// Quais notas desse ZIP, do tipo pedido, ainda NAO foram importadas.
+function nfNovasDoArquivo(emp, nomeArquivo, tipo) {
   const buf = fs.readFileSync(path.join(NF_DIR, nomeArquivo));
   const sep = nfSeparar(buf);
-  const jaImportadas = new Set(nfLerImportadas(emp).chaves);
-  const novas = sep.saida.filter(it => it.chave && !jaImportadas.has(it.chave));
-  return { saida: sep.saida, novas };
+  const imp = nfLerImportadas(emp);
+  const ehEntrada = (tipo === 'E' || tipo === 'entrada');
+  const todas = ehEntrada ? sep.entrada : sep.saida;
+  const ja = new Set(ehEntrada ? imp.entrada : imp.saida);
+  return { todas, novas: todas.filter(it => it.chave && !ja.has(it.chave)) };
 }
 
 function nfListar(empresa) {
