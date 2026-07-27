@@ -26,7 +26,7 @@ const fs   = require('fs');
 const path = require('path');
 const { json, html, readBody } = require('../lib/http');
 
-const VERSAO = 'magalu-oauth v1 b29';
+const VERSAO = 'magalu-oauth v1 b33';
 
 const DATA_DIR = process.env.MAGALU_DATA_DIR || '/data/magalu';
 
@@ -241,7 +241,24 @@ async function tratar(req, res, urlObj) {
   //  estao na lista precisaAdmin dele, e /magalu/nf-full NAO esta nessa lista
   //  (de proposito — nao quis mexer no orquestrador). Entao a trava e feita
   //  AQUI DENTRO. Sem ela a rota ficaria publica e qualquer um baixaria as NFs.
-  if (p === '/magalu/nf-full' || p === '/magalu/nf-full/baixar' || p === '/magalu/nf-full/arquivo' || p === '/magalu/nf-full/rodar' || p === '/magalu/nf-full/importar' || p === '/magalu/nf-full/cookie') {
+  // ── ROTAS QUE A EXTENSAO DO CHROME USA ────────────────────────────
+  //  A extensao roda DENTRO da aba do bling.com.br, entao o upload sai da
+  //  sessao real do Diego — nada de cookie guardado, IP forjado ou User-Agent
+  //  inventado. Ela so precisa de duas coisas daqui: saber o que esta
+  //  pendente e baixar o ZIP ja separado por tipo.
+  //  Por isso essas rotas (e a de baixar arquivo) liberam CORS pro bling.
+  if (p.indexOf('/magalu/nf-full') === 0) {
+    const origem = (req.headers && req.headers.origin) || '';
+    if (/^https:\/\/(www\.)?bling\.com\.br$/.test(origem)) {
+      res.setHeader('Access-Control-Allow-Origin', origem);
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+      res.setHeader('Vary', 'Origin');
+    }
+    if (method === 'OPTIONS') { res.writeHead(204); res.end(); return true; }
+  }
+
+  if (p === '/magalu/nf-full' || p === '/magalu/nf-full/baixar' || p === '/magalu/nf-full/arquivo' || p === '/magalu/nf-full/rodar' || p === '/magalu/nf-full/importar' || p === '/magalu/nf-full/cookie' || p === '/magalu/nf-full/cookie-testar' || p === '/magalu/nf-full/ext/estado' || p === '/magalu/nf-full/ext/registrar') {
     const CHAVE_ADMIN = process.env.ADMIN_KEY || '';
     if (!CHAVE_ADMIN || q.get('k') !== CHAVE_ADMIN) { json(res, 404, { error: 'not found', path: p }); return true; }
 
@@ -278,6 +295,55 @@ async function tratar(req, res, urlObj) {
       return true;
     }
 
+    // ── EXTENSAO: o que esta pendente pra empresa logada ──
+    //  A extensao manda o idEmpresa que leu da propria pagina do Bling, e a
+    //  gente responde de quem e e o que falta. Assim ela nunca importa na
+    //  conta errada — a fonte da verdade e a pagina, nao um chute.
+    if (p === '/magalu/nf-full/ext/estado') {
+      const idEmp = String(q.get('idEmpresa') || '').trim();
+      const emp3 = Object.keys(BLING_IMP).find(e => String(BLING_IMP[e].idEmpresa) === idEmp);
+      if (!emp3) { json(res, 404, { ok: false, erro: 'idEmpresa não reconhecido: ' + idEmp, conhecidos: Object.keys(BLING_IMP).map(e => ({ empresa: e, idEmpresa: BLING_IMP[e].idEmpresa })) }); return true; }
+
+      const arqs = nfListar(emp3);
+      if (!arqs.length) { json(res, 200, { ok: true, empresa: emp3, precisa: false, motivo: 'nenhum arquivo baixado ainda' }); return true; }
+      const novoArq = arqs[0];
+      const hoje = new Date().toISOString().slice(0, 10);
+      let jaHoje = null;
+      try { jaHoje = JSON.parse(fs.readFileSync(path.join(NF_DIR, '_importado-' + emp3 + '-' + hoje + '.json'), 'utf8')); } catch (e) {}
+
+      json(res, 200, {
+        ok: true, empresa: emp3, versao: VERSAO,
+        arquivo: novoArq.nome, baixado_em: novoArq.em, notas: novoArq.notas,
+        precisa: !jaHoje,
+        ja_importado_hoje: jaHoje || null,
+        url_zip_saida: '/magalu/nf-full/arquivo?nome=' + encodeURIComponent(novoArq.nome) + '&tipo=saida&k=' + encodeURIComponent(q.get('k') || '')
+      });
+      return true;
+    }
+
+    // ── EXTENSAO: registra o que o Bling respondeu ──
+    if (p === '/magalu/nf-full/ext/registrar' && method === 'POST') {
+      let corpo3 = {};
+      try { corpo3 = await readBody(req); } catch (e) {}
+      const emp4 = String(corpo3.empresa || '').toLowerCase();
+      if (!BLING_IMP[emp4]) { json(res, 400, { ok: false, erro: 'empresa inválida' }); return true; }
+      const hoje4 = new Date().toISOString().slice(0, 10);
+      const reg = { quando: new Date().toISOString(), arquivo: corpo3.arquivo || null, resumo: corpo3.resumo || null, via: 'extensao' };
+      try { fs.mkdirSync(NF_DIR, { recursive: true }); fs.writeFileSync(path.join(NF_DIR, '_importado-' + emp4 + '-' + hoje4 + '.json'), JSON.stringify(reg)); } catch (e) {}
+      console.log('[magalu-nf] extensão importou ' + emp4 + ': ' + JSON.stringify(reg.resumo));
+      json(res, 200, { ok: true, gravado: reg });
+      return true;
+    }
+
+    // ── TESTA SE A SESSAO DO BLING ESTA VIVA (so leitura) ──
+    if (p === '/magalu/nf-full/cookie-testar') {
+      const emp2 = String(q.get('empresa') || '').toLowerCase().trim();
+      if (!BLING_IMP[emp2]) { json(res, 400, { ok: false, erro: 'empresa inválida (use good ou amb)' }); return true; }
+      const r2 = await blingTestarSessao(emp2);
+      json(res, r2.viva ? 200 : 502, { empresa: emp2, versao: VERSAO, ...r2 });
+      return true;
+    }
+
     // ── PAGINA DE COLAR O COOKIE DO BLING ──
     // /magalu/nf-full/cookie?empresa=amb&k=ADMIN_KEY
     // Mesma ideia do /cookie-setup da Girassol: cola e salva em disco, sem
@@ -298,8 +364,8 @@ async function tratar(req, res, urlObj) {
         }
         const conf = blingConferirCookie(cookie);
         if (!conf.ok) { json(res, 400, { ok: false, erro: conf.erro, posicao: conf.posicao, trecho_ao_redor: cookie.slice(Math.max(0, conf.posicao - 40), conf.posicao + 20) }); return true; }
-        try { blingSalvarCookie(emp, cookie); } catch (e) { json(res, 500, { ok: false, erro: String(e.message || e) }); return true; }
-        json(res, 200, { ok: true, empresa: emp, caracteres: cookie.length, tem_phpsessid: /PHPSESSID=/i.test(cookie) });
+        try { blingSalvarCookie(emp, cookie, blingExtrairUA(bruto)); } catch (e) { json(res, 500, { ok: false, erro: String(e.message || e) }); return true; }
+        json(res, 200, { ok: true, empresa: emp, caracteres: cookie.length, tem_phpsessid: /PHPSESSID=/i.test(cookie), user_agent: blingExtrairUA(bruto) || '(não veio no que você colou — vou usar um padrão)' });
         return true;
       }
 
@@ -330,6 +396,7 @@ button{background:#1a73e8;color:#fff;border:0;padding:12px 20px;border-radius:8p
   </ol>
   <textarea id="t" placeholder="cole aqui o cURL inteiro, ou só a linha do Cookie"></textarea>
   <button id="b">Salvar cookie</button>
+  <a href="/magalu/nf-full/cookie-testar?empresa=${emp}&k=${kq}" style="display:inline-block;margin-left:10px;margin-top:12px;background:#2a2f3a;color:#e8eaed;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600">Testar sessão</a>
   <div class="msg" id="m"></div>
 </div>
 <div class="card" style="font-size:13px;color:#9aa0a6">
@@ -368,7 +435,7 @@ document.getElementById('b').addEventListener('click', async function(){
         json(res, 502, {
           ok: false, arquivo: nome, empresa: emp, erro: msg,
           dica: msg.indexOf('COOKIE_EXPIRADO') === 0
-            ? 'O cookie do Bling venceu. Abra o Bling logado, F12 > Rede > qualquer requisição > cabeçalho Cookie > copie a linha inteira e cole na variável BLING_COOKIE_' + emp.toUpperCase() + ' no Render.'
+            ? 'O cookie do Bling venceu. Recole em /magalu/nf-full/cookie?empresa=' + emp + ' (botão direito na requisição > Copiar como cURL).'
             : undefined
         });
       }
@@ -493,7 +560,8 @@ ${andamento}
   <div class="aviso">Cookie do Bling:
     ${['good','amb'].map(e => (BLING_IMP[e].cookie()
         ? '<a href="/magalu/nf-full/cookie?empresa=' + e + '&k=' + kq + '" style="color:#81c995">' + (e === 'good' ? 'GOOD' : 'AMB') + ' ✓</a>'
-        : '<a href="/magalu/nf-full/cookie?empresa=' + e + '&k=' + kq + '" style="color:#f28b82">' + (e === 'good' ? 'GOOD' : 'AMB') + ' — colar</a>')).join(' &nbsp;|&nbsp; ')}
+        : '<a href="/magalu/nf-full/cookie?empresa=' + e + '&k=' + kq + '" style="color:#f28b82">' + (e === 'good' ? 'GOOD' : 'AMB') + ' — colar</a>')
+        + (BLING_IMP[e].cookie() ? ' <a href="/magalu/nf-full/cookie-testar?empresa=' + e + '&k=' + kq + '" style="color:#9aa0a6;font-size:12px">(testar)</a>' : '')).join(' &nbsp;|&nbsp; ')}
   </div>
   <div class="aviso">Se der erro de limite, use <b>só AMB</b> ou <b>só GOOD</b> e espere uns minutos entre uma e outra — a Magalu conta o limite por IP, e as duas empresas dividem o mesmo.</div>
   <div class="aviso"><b>SAÍDA</b> = vendas e remessas (importar no Bling como notas de <b>saída</b>).<br>
@@ -1281,13 +1349,15 @@ const BLING_IMP = {
     idEmpresa: process.env.BLING_EMPRESA_GOOD || '4956030980',
     loja:      process.env.BLING_LOJA_GOOD    || '203381869',
     unidade:   process.env.BLING_UNIDADE_GOOD || '1726045',
-    cookie:    () => blingLerCookie('good')
+    cookie:    () => blingLerCookie('good'),
+    ua:        () => blingLerUA('good')
   },
   amb: {
     idEmpresa: process.env.BLING_EMPRESA_AMB || '14901993834',
     loja:      process.env.BLING_LOJA_AMB    || '206018666',
     unidade:   process.env.BLING_UNIDADE_AMB || '2920232',
-    cookie:    () => blingLerCookie('amb')
+    cookie:    () => blingLerCookie('amb'),
+    ua:        () => blingLerUA('amb')
   }
 };
 
@@ -1298,7 +1368,19 @@ const BLING_LIMITE = 3000000;   // tamMax do form.importador (3 MB)
 //  pro importador de staging). Guardar em ARQUIVO e nao em env var e de
 //  proposito: mexer em variavel de ambiente no Render REDEPLOYA o servico
 //  inteiro, e esse cookie vence toda hora. Colar numa pagina nao derruba nada.
-function blingCookieArquivo(emp) { return path.join(DATA_DIR, 'bling-cookie-' + emp + '.txt'); }
+function blingCookieArquivo(emp) { return path.join(DATA_DIR, 'bling-cookie-' + emp + '.json'); }
+function blingCookieArquivoAntigo(emp) { return path.join(DATA_DIR, 'bling-cookie-' + emp + '.txt'); }
+
+// Extrai o User-Agent do cURL colado. IMPORTANTE: o Bling (PHP) amarra a
+// sessao ao User-Agent — mandar um UA diferente do navegador que gerou o
+// cookie faz ele responder com redirect pro /login (visto em 27/07).
+// Por isso guardamos o UA junto e repetimos exatamente o mesmo.
+function blingExtrairUA(texto) {
+  const t = String(texto || '');
+  const m = t.match(/-H\s+'user-agent:\s*([^']+)'/i) || t.match(/-H\s+"user-agent:\s*([^"]+)"/i)
+         || t.match(/(?:^|\n)\s*user-agent:\s*([^\n'"]+)/i);
+  return m ? m[1].trim() : '';
+}
 
 // Aceita o "Copiar como cURL" inteiro, um -H 'cookie: ...', ou a linha crua.
 // Regras copiadas do extrairCookie() do stagingImport, que ja e testado em campo.
@@ -1340,18 +1422,28 @@ function blingConferirCookie(cookie) {
   return { ok: true };
 }
 
-function blingSalvarCookie(emp, cookie) {
+function blingSalvarCookie(emp, cookie, ua) {
   try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch (e) {}
-  fs.writeFileSync(blingCookieArquivo(emp), cookie, 'utf8');
+  fs.writeFileSync(blingCookieArquivo(emp), JSON.stringify({ cookie, ua: ua || '', salvo_em: new Date().toISOString() }), 'utf8');
 }
 
 // Ordem: arquivo em disco > env no padrao dele (GOOD_BLING_COOKIE) > env antiga
-function blingLerCookie(emp) {
+function blingLerSessao(emp) {
   try {
     const f = blingCookieArquivo(emp);
-    if (fs.existsSync(f)) { const c = fs.readFileSync(f, 'utf8').trim(); if (c) return c; }
+    if (fs.existsSync(f)) { const j = JSON.parse(fs.readFileSync(f, 'utf8')); if (j && j.cookie) return j; }
   } catch (e) {}
-  return process.env[emp.toUpperCase() + '_BLING_COOKIE'] || process.env['BLING_COOKIE_' + emp.toUpperCase()] || '';
+  try {
+    const fv = blingCookieArquivoAntigo(emp);   // formato antigo (so o cookie)
+    if (fs.existsSync(fv)) { const c = fs.readFileSync(fv, 'utf8').trim(); if (c) return { cookie: c, ua: '' }; }
+  } catch (e) {}
+  const env = process.env[emp.toUpperCase() + '_BLING_COOKIE'] || process.env['BLING_COOKIE_' + emp.toUpperCase()] || '';
+  return env ? { cookie: env, ua: '' } : null;
+}
+function blingLerCookie(emp) { const ss = blingLerSessao(emp); return ss ? ss.cookie : ''; }
+function blingLerUA(emp) {
+  const ss = blingLerSessao(emp);
+  return (ss && ss.ua) ? ss.ua : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:154.0) Gecko/20100101 Firefox/154.0';
 }
 
 function blingMultipart(nomeArquivo, buf) {
@@ -1366,7 +1458,12 @@ function blingMultipart(nomeArquivo, buf) {
 
 // Se o cookie morreu, o Bling manda HTML de login em vez de JSON.
 function blingParecePaginaDeLogin(txt) {
-  return /<html/i.test(txt) && /login|senha|acesso/i.test(txt);
+  const t = String(txt || '');
+  // O Bling nao devolve HTML de login: devolve um <script> que redireciona.
+  // Foi exatamente isso que voltou em 27/07 quando a sessao foi recusada.
+  if (/location\.href\s*=\s*["'][^"']*\/login/i.test(t)) return true;
+  if (/\/login\?r=/i.test(t)) return true;
+  return /<html/i.test(t) && /login|senha|acesso/i.test(t);
 }
 
 async function blingUpload(cfg, nomeArquivo, buf) {
@@ -1382,7 +1479,7 @@ async function blingUpload(cfg, nomeArquivo, buf) {
       'Content-Type': mp.tipo,
       'Origin': BLING_BASE,
       'Referer': BLING_BASE + '/importador.notas.fiscais.lote.php',
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) MoverPedidos/1.0'
+      'User-Agent': cfg.ua()
     },
     body: mp.corpo
   });
@@ -1412,13 +1509,50 @@ async function blingProcessar(cfg, tmp, tipo) {
       'X-Requested-With': 'XMLHttpRequest',
       'Origin': BLING_BASE,
       'Referer': BLING_BASE + '/importador.notas.fiscais.lote.php',
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) MoverPedidos/1.0'
+      'User-Agent': cfg.ua()
     },
     body: corpo
   });
   const txt = await r.text();
   if (blingParecePaginaDeLogin(txt)) throw new Error('COOKIE_EXPIRADO: o Bling devolveu a tela de login ao processar');
   return { status: r.status, texto: txt };
+}
+
+// Bate na propria tela do importador so pra ver se a sessao esta viva.
+// E leitura pura: nao envia nada, nao importa nada.
+async function blingTestarSessao(empresa) {
+  const cfg = BLING_IMP[empresa];
+  if (!cfg) return { ok: false, erro: 'empresa inválida' };
+  if (!cfg.cookie()) return { ok: false, viva: false, erro: 'nenhum cookie salvo' };
+  const conf = blingConferirCookie(cfg.cookie());
+  if (!conf.ok) return { ok: false, viva: false, erro: conf.erro };
+  let r, txt;
+  try {
+    r = await fetch(BLING_BASE + '/importador.notas.fiscais.lote.php', {
+      headers: {
+        'Cookie': cfg.cookie(),
+        'User-Agent': cfg.ua(),
+        'Accept': 'text/html,application/xhtml+xml',
+        'Referer': BLING_BASE + '/'
+      }
+    });
+    txt = await r.text();
+  } catch (e) { return { ok: false, viva: false, erro: String(e.message || e) }; }
+
+  if (blingParecePaginaDeLogin(txt)) {
+    return { ok: true, viva: false, http: r.status, motivo: 'o Bling mandou pra tela de login — sessão recusada', amostra: txt.slice(0, 200) };
+  }
+  // a pagina do importador tem o select loja_xml e a chamada initForm(idEmpresa)
+  const achouForm = /loja_xml/.test(txt);
+  const mId = /initForm\s*\(\s*(\d+)/.exec(txt);
+  return {
+    ok: true, viva: !!achouForm, http: r.status,
+    achou_tela_do_importador: achouForm,
+    idEmpresa_da_pagina: mId ? mId[1] : null,
+    idEmpresa_configurado: cfg.idEmpresa,
+    confere: mId ? (mId[1] === String(cfg.idEmpresa)) : null,
+    amostra: achouForm ? undefined : txt.slice(0, 200)
+  };
 }
 
 // Le o retorno do Bling e traduz pra numeros. As frases sao as que aparecem
