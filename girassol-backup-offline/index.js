@@ -41,7 +41,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v27/07 b52';
+const VERSAO     = 'girassol-backup-offline v27/07 b53';
 
 // ── SESSÃO DE OPERADOR (cookie assinado HMAC) — protege rotas de dados/ação ──
 // Segredo estável entre restarts. Usa ADMIN_KEY (já configurada no Render) como base.
@@ -895,6 +895,51 @@ function routes(readBody) {
       json(res, 200, { ok: true, msg: '✅ backfill iniciado em background (só Girassol). Acompanhe em /backfill-status. Ele deleta o período antes e regrava, então pode rodar de novo sem duplicar.', de, ate });
       return true;
     }
+    // COMPLETAR DETALHES do período que o dashboard está mostrando (SKU/qtd/taxas dos ainda não bipados).
+    // Uso: /girassol-backup-offline/completar-detalhes?de=YYYY-MM-DD&ate=YYYY-MM-DD
+    // Processa um lote curto e devolve quantos faltam — o dashboard chama em sequência até zerar.
+    if (method === 'GET' && p === '/girassol-backup-offline/completar-detalhes') {
+      const kD = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const sessD = validarSessao(req.headers['cookie']);
+      if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
+      const deD = String((urlObj.searchParams && urlObj.searchParams.get('de')) || '').slice(0, 10);
+      const ateD = String((urlObj.searchParams && urlObj.searchParams.get('ate')) || '').slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(deD) || !/^\d{4}-\d{2}-\d{2}$/.test(ateD)) { json(res, 400, { ok: false, erro: 'passe &de=AAAA-MM-DD&ate=AAAA-MM-DD' }); return true; }
+      const FV = path.join(CACHE_DIR, '_vendas_dia.json');
+      const atualD = readJson(FV, {});
+      const confD = readJson(CONFERIDOS_FILE, {});
+      const bipD = new Set(Object.values(confD).map(c => String(c && c.numero)));
+      const faltando = Object.values(atualD).filter(v => {
+        if (!v || v.det || v.numero == null) return false;
+        if (bipD.has(String(v.numero))) return false;
+        if (/cancel/i.test(String(v.situacao || ''))) return false;
+        const d = String(v.data || '').slice(0, 10);
+        return d >= deD && d <= ateD;
+      }).sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')));
+      const lote = faltando.slice(0, 40);   // ~18s por chamada — o dashboard repete até zerar
+      let feitos = 0;
+      for (const v of lote) {
+        try {
+          const rd = await blingGet('/pedidos/vendas/' + v.id);
+          const det = (rd && rd.ok && rd.data && rd.data.data) || null;
+          if (det) {
+            if (!v.numero_loja && det.numeroPedidoLoja) v.numero_loja = det.numeroPedidoLoja;
+            if (!v.marketplace || v.marketplace === 'outro') { const lj3 = String((det.loja && det.loja.id) || ''); v.marketplace = LOJA_MKT[lj3] || _inferCanal(v.numero_loja); }
+            v.it = (det.itens || []).map(i2 => ({ sku: (i2.codigo || (i2.produto && i2.produto.codigo) || '').trim() || null, qtd: Number(i2.quantidade || 1), vt: Math.round(Number(i2.valor || 0) * Number(i2.quantidade || 1) * 100) / 100 }));
+            const tc2 = det.taxas && Number(det.taxas.taxaComissao); if (isFinite(tc2) && tc2 > 0) v.taxa_mkt = Math.round(tc2 * 100) / 100;
+            const cf2 = det.taxas && Number(det.taxas.custoFrete); if (isFinite(cf2) && cf2 > 0) v.frete_mkt = Math.round(cf2 * 100) / 100;
+            if (det.situacao && (det.situacao.valor || det.situacao.nome)) v.situacao = det.situacao.valor || det.situacao.nome;
+            v.det = 1; feitos++;
+          }
+        } catch (e) {}
+        if ((feitos % 10) === 0) { try { writeJson(FV, atualD); } catch (e) {} }
+        await new Promise(r4 => setTimeout(r4, 430));
+      }
+      try { writeJson(FV, atualD); } catch (e) {}
+      json(res, 200, { ok: true, feitos, restantes: Math.max(0, faltando.length - feitos) });
+      return true;
+    }
+
     // STATUS do backfill em andamento. Uso: /girassol-backup-offline/backfill-status
     if (method === 'GET' && p === '/girassol-backup-offline/backfill-status') {
       const kD = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
