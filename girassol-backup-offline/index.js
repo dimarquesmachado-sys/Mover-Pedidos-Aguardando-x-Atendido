@@ -41,7 +41,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v27/07 b62';
+const VERSAO     = 'girassol-backup-offline v27/07 b63';
 
 // ── SESSÃO DE OPERADOR (cookie assinado HMAC) — protege rotas de dados/ação ──
 // Segredo estável entre restarts. Usa ADMIN_KEY (já configurada no Render) como base.
@@ -1026,6 +1026,26 @@ function routes(readBody) {
       return true;
     }
 
+    // DIAGNÓSTICO de um pedido: mostra o que o servidor sabe (venda + conferido). Uso: ?numero=117238
+    if (method === 'GET' && p === '/girassol-backup-offline/diag-pedido') {
+      const kX = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const sessX = validarSessao(req.headers['cookie']);
+      if (!((process.env.ADMIN_KEY && kX === process.env.ADMIN_KEY) || (sessX && ehAdmin(sessX)))) { json(res, 404, { error: 'not found' }); return true; }
+      const numX = String((urlObj.searchParams && urlObj.searchParams.get('numero')) || '').trim();
+      if (!numX) { json(res, 400, { ok: false, erro: 'passe &numero=' }); return true; }
+      const vdX = readJson(path.join(CACHE_DIR, '_vendas_dia.json'), {});
+      const confX = readJson(CONFERIDOS_FILE, {});
+      const venda = Object.values(vdX).find(v => v && String(v.numero) === numX) || null;
+      const confId = Object.keys(confX).find(k => confX[k] && String(confX[k].numero) === numX) || null;
+      json(res, 200, { ok: true, numero: numX,
+        na_lista_de_vendas: !!venda,
+        venda: venda ? { id: venda.id, numero: venda.numero, situacao: venda.situacao, cancelado_mkt: venda.cancelado_mkt || 0, marketplace: venda.marketplace, numero_loja: venda.numero_loja, tem_itens: !!(venda.it && venda.it.length), det: venda.det || 0 } : null,
+        esta_bipado: !!confId,
+        conferido: confId ? { id: confId, numero: confX[confId].numero, cancelado: confX[confId].cancelado || 0, nf_numero: confX[confId].nf_numero } : null,
+        veredito: (venda && (/cancel/i.test(String(venda.situacao || '')) || venda.cancelado_mkt)) ? 'CANCELADO (o dashboard deve pintar cinza)' : 'NAO cancelado segundo o servidor' });
+      return true;
+    }
+
     // STATUS NO MARKETPLACE: pergunta ao ML/Shopee se o pedido foi CANCELADO pelo cliente.
     // O Bling demora (ou não) pra refletir isso; o dashboard precisa mostrar cinza na hora.
     // Uso: /girassol-backup-offline/status-mkt?de=YYYY-MM-DD&ate=YYYY-MM-DD
@@ -1093,6 +1113,16 @@ function routes(readBody) {
         }
       }
       try { writeJson(FS, atualS); } catch (e) {}
+      // marca também nos CONFERIDOS (pedidos já bipados) — é de lá que o dashboard monta a linha
+      if (cancelados.length) {
+        try {
+          const confM = readJson(CONFERIDOS_FILE, {});
+          const alvo = new Set(cancelados.map(x => String(x)));
+          let mex = 0;
+          for (const k of Object.keys(confM)) { const c = confM[k]; if (c && alvo.has(String(c.numero))) { c.cancelado = 1; mex++; } }
+          if (mex) writeJson(CONFERIDOS_FILE, confM);
+        } catch (e) {}
+      }
       json(res, 200, { ok: true, checados, cancelados_agora: cancelados.length, numeros: cancelados.slice(0, 30) });
       return true;
     }
@@ -1827,6 +1857,25 @@ function routes(readBody) {
       const reenvios = readJson(CONFERIDOS_FILE.replace('conferidos.json', 'reenvios.json'), {});
       const reenvioDireto = String(process.env.CHECKOUT_REENVIO_DIRETO_EMPRESAS || '').toLowerCase().split(',').map(s => s.trim()).includes('girassol');
       const vendasB = Object.values(readJson(path.join(CACHE_DIR, '_vendas_dia.json'), {}));
+      // CANCELADO PRONTO (27/07): o servidor decide, o navegador só desenha. Antes o dashboard tentava
+      // casar cada pedido bipado com a lista de vendas pra descobrir se estava cancelado — se o pedido
+      // não estivesse na lista (ou o nº não casasse), a marca nunca aparecia. Agora vai no payload.
+      try {
+        const _vdC = readJson(path.join(CACHE_DIR, '_vendas_dia.json'), {});
+        const _porNum = {}, _porId = {};
+        for (const v of Object.values(_vdC)) {
+          if (!v) continue;
+          const canc = (/cancel/i.test(String(v.situacao || '')) || !!v.cancelado_mkt) ? 1 : 0;
+          if (v.numero != null) _porNum[String(v.numero)] = { canc, sit: v.situacao || null };
+          if (v.id != null) _porId[String(v.id)] = { canc, sit: v.situacao || null };
+        }
+        for (const h of itens) {
+          const reg = _porNum[String(h.numero)] || _porId[String(h.id)] || null;
+          if (reg) { h.cancelado = reg.canc; if (!h.situacao_mkt && reg.sit) h.situacao_mkt = reg.sit; }
+          else h.cancelado = 0;
+        }
+        for (const v of vendasB) { v.cancelado = (/cancel/i.test(String(v.situacao || '')) || !!v.cancelado_mkt) ? 1 : 0; }
+      } catch (e) {}
       // CUSTO PRONTO (27/07): o backend já tem o banco permanente de custos (_custos.json) — manda o custo
       // junto de cada item, em vez de o dashboard consultar o Bling ao vivo (lento e falha quando o Bling satura).
       try {
