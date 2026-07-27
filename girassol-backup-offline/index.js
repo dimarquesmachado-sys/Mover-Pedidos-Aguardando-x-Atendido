@@ -41,7 +41,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v27/07 b51';
+const VERSAO     = 'girassol-backup-offline v27/07 b52';
 
 // ── SESSÃO DE OPERADOR (cookie assinado HMAC) — protege rotas de dados/ação ──
 // Segredo estável entre restarts. Usa ADMIN_KEY (já configurada no Render) como base.
@@ -3116,6 +3116,7 @@ async function vendasSync() {
         .filter(v => v && !v.det && v.numero != null && !bipN.has(String(v.numero)) && !/cancel/i.test(String(v.situacao || '')))
         .sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')) || Number(b.numero || 0) - Number(a.numero || 0))   // b30: mais RECENTES primeiro. Com 800+ vendas na janela, os recentes (que o Diego abre pra ver) ficavam no FIM da fila de inserção e nunca ganhavam detalhe/margem — agora entram primeiro.
         .slice(0, 120);   // b30: 90→120 por rodada pra drenar o volume mais rápido
+      let _detN = 0;
       for (const v of alvosDet) {
         const rd = await blingGet('/pedidos/vendas/' + v.id);
         const det = (rd && rd.ok && rd.data && rd.data.data) || null;
@@ -3138,6 +3139,9 @@ async function vendasSync() {
           }
         }
         await new Promise(r3 => setTimeout(r3, 450));
+        // b52: grava PARCIAL a cada 20 — antes só gravava no fim do lote, e qualquer deploy/reinício
+        // no meio jogava fora o trabalho da rodada inteira (pedido ficava sem itens = sem unidade/custo).
+        if ((++_detN % 20) === 0) { try { writeJson(F, atual); } catch (e) {} }
       }
       writeJson(F, atual);   // itens/taxas no disco JÁ — o dashboard enxerga a margem na hora
     } catch (e) {}
