@@ -26,7 +26,7 @@ const fs   = require('fs');
 const path = require('path');
 const { json, html, readBody } = require('../lib/http');
 
-const VERSAO = 'magalu-oauth v1 b36';
+const VERSAO = 'magalu-oauth v1 b37';
 
 const DATA_DIR = process.env.MAGALU_DATA_DIR || '/data/magalu';
 
@@ -258,7 +258,7 @@ async function tratar(req, res, urlObj) {
     if (method === 'OPTIONS') { res.writeHead(204); res.end(); return true; }
   }
 
-  if (p === '/magalu/nf-full' || p === '/magalu/nf-full/baixar' || p === '/magalu/nf-full/arquivo' || p === '/magalu/nf-full/rodar' || p === '/magalu/nf-full/importar' || p === '/magalu/nf-full/cookie' || p === '/magalu/nf-full/cookie-testar' || p === '/magalu/nf-full/ext/estado' || p === '/magalu/nf-full/ext/registrar') {
+  if (p === '/magalu/nf-full' || p === '/magalu/nf-full/baixar' || p === '/magalu/nf-full/arquivo' || p === '/magalu/nf-full/rodar' || p === '/magalu/nf-full/importar' || p === '/magalu/nf-full/cookie' || p === '/magalu/nf-full/cookie-testar' || p === '/magalu/nf-full/ext/estado' || p === '/magalu/nf-full/ext/registrar' || p === '/magalu/nf-full/diag') {
     const CHAVE_ADMIN = process.env.ADMIN_KEY || '';
     if (!CHAVE_ADMIN || q.get('k') !== CHAVE_ADMIN) { json(res, 404, { error: 'not found', path: p }); return true; }
 
@@ -298,6 +298,48 @@ async function tratar(req, res, urlObj) {
         'Content-Length': buf.length
       });
       res.end(buf);
+      return true;
+    }
+
+    // ── MEDIDOR: ate que momento a exportacao da Magalu esta em dia ──
+    //  Serve pra responder uma pergunta so: "a nota que falta no Bling nao
+    //  veio porque o robo nao rodou, ou porque a Magalu ainda nao a colocou
+    //  no pacote?". Le as datas de emissao (dhEmi) de dentro dos XMLs.
+    if (p === '/magalu/nf-full/diag') {
+      const empD = String(q.get('empresa') || '').toLowerCase().trim();
+      if (!BLING_IMP[empD]) { json(res, 400, { ok: false, erro: 'empresa inválida (use good ou amb)' }); return true; }
+      const arqs = nfListar(empD);
+      if (!arqs.length) { json(res, 200, { ok: true, empresa: empD, erro: 'nenhum arquivo baixado' }); return true; }
+
+      const quantos = Math.min(parseInt(q.get('arquivos') || '4', 10) || 4, 10);
+      const olhar = arqs.slice(0, quantos);
+      const relatorio = olhar.map(a => {
+        let sep; try { sep = nfSeparar(fs.readFileSync(path.join(NF_DIR, a.nome))); }
+        catch (e) { return { arquivo: a.nome, erro: String(e.message || e) }; }
+        const notas = sep.saida.map(it => {
+          const t = it.dados.toString('utf8', 0, Math.min(it.dados.length, 6000));
+          const dh = (/<dhEmi>([^<]+)<\/dhEmi>/.exec(t) || [])[1] || null;
+          const nn = (/<nNF>(\d+)<\/nNF>/.exec(t) || [])[1] || null;
+          const dest = (/<dest>[\s\S]*?<xNome>([^<]+)<\/xNome>/.exec(t) || [])[1] || null;
+          return { numero: nn, emitida: dh, destinatario: dest, chave: it.chave };
+        }).filter(x => x.emitida).sort((a2, b2) => a2.emitida.localeCompare(b2.emitida));
+
+        return {
+          arquivo: a.nome,
+          baixado_em: a.em,
+          saida: sep.saida.length, entrada: sep.entrada.length,
+          nota_mais_antiga: notas.length ? notas[0].emitida : null,
+          nota_mais_recente: notas.length ? notas[notas.length - 1].emitida : null,
+          ultimas_5: notas.slice(-5)
+        };
+      });
+
+      json(res, 200, {
+        ok: true, empresa: empD, versao: VERSAO,
+        agora_sp: new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }),
+        leia: 'Compare o "nota_mais_recente" de cada arquivo. Se os arquivos das 12h e 18h pararem na mesma nota do arquivo da manhã, a exportação da Magalu é que está atrasada — não o robô.',
+        arquivos: relatorio
+      });
       return true;
     }
 
@@ -1705,6 +1747,14 @@ function nfContar(buf) {
   } catch (e) { return null; }
 }
 
+// Data no fuso de Sao Paulo, formato AAAA-MM-DD. O servico roda com
+// TZ=America/Sao_Paulo, mas passamos o timeZone explicito pra nao depender
+// disso — se alguem mexer na variavel, as datas continuam certas.
+function nfHojeSP(d) {
+  try { return (d || new Date()).toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' }); }
+  catch (e) { return (d || new Date()).toISOString().slice(0, 10); }
+}
+
 function nfGarantirDir() {
   try { fs.mkdirSync(NF_DIR, { recursive: true }); } catch (e) {}
 }
@@ -1823,8 +1873,11 @@ function nfLimpar(empresa) {
 async function nfRotina(origem, quais) {
   nfGarantirDir();
   const agora = new Date();
-  const ate = agora.toISOString().slice(0, 10);
-  const de  = new Date(agora.getTime() - (NF_DIAS - 1) * 864e5).toISOString().slice(0, 10);
+  // ⚠ NAO usar toISOString(): ele devolve UTC. Depois das 21h de Brasilia o
+  // "hoje" em UTC ja e amanha, entao a rodada das 23h pedia a Magalu um
+  // periodo terminando numa data FUTURA e carimbava o arquivo errado.
+  const ate = nfHojeSP(agora);
+  const de  = nfHojeSP(new Date(agora.getTime() - (NF_DIAS - 1) * 864e5));
   const carimbo = ate + '-' + String(agora.getHours()).padStart(2, '0') + String(agora.getMinutes()).padStart(2, '0');
   const resultado = [];
 
