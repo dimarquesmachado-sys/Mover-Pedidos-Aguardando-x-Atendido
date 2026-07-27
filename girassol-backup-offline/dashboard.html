@@ -103,7 +103,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd79';
+const DASH_BUILD = 'd80';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -189,6 +189,31 @@ function prepararVendas(){
     devolucao:(v.devolucao?1:0), dev_frete_retorno:(v.dev_frete_retorno!=null?Number(v.dev_frete_retorno):null), dev_destino:v.dev_destino||null, dev_status:v.dev_status||null, dev_aberta:(v.dev_aberta?1:0),   // b39: devolução do ML
     _sit:v.situacao||null, _cancelado:/cancel/i.test(String(v.situacao||''))
   }));
+}
+// ⚡ busca AGORA o detalhe (SKU/qtd/taxas) dos pedidos do período que estão sem — em sequência, até zerar
+let _compDet = false;
+async function completarDetalhes(){
+  if(_compDet) return; _compDet = true;
+  const { de, ate } = intervalo();
+  const av = document.getElementById('avisoDet');
+  const msg = t => { const e=document.getElementById('avisoDet'); if(e) e.innerHTML = t; };
+  try{
+    for(let volta=1; volta<=40; volta++){
+      msg('⏳ buscando detalhes no Bling… ('+volta+'ª leva)');
+      const r = await fetch(MOD+'/completar-detalhes?de='+de+'&ate='+ate, {credentials:'same-origin'});
+      if(!r.ok){ msg('⚠️ não consegui (HTTP '+r.status+')'); break; }
+      const d = await r.json();
+      if(!d || !d.ok){ msg('⚠️ '+((d&&d.erro)||'falhou')); break; }
+      msg('⏳ '+d.feitos+' pedido(s) resolvidos · faltam '+d.restantes+'…');
+      if(!d.restantes || !d.feitos) break;
+    }
+    // recarrega os dados e redesenha
+    const rh = await fetch(MOD+'/historico',{credentials:'same-origin'});
+    const dh = await rh.json();
+    if(dh && Array.isArray(dh.itens)){ DADOS = dh.itens; VENDAS = Array.isArray(dh.vendas_bling)?dh.vendas_bling:[]; prepararVendas(); render(); renderAnalise(); }
+    msg('');
+  }catch(e){ msg('⚠️ '+(e.message||e)); }
+  _compDet = false;
 }
 async function sincVendas(btn){
   if(btn){ btn.disabled=true; btn.textContent='⏳ Bling…'; }
@@ -503,7 +528,7 @@ function render(){
     (MC.temCfg
       ? '<div class="kpi" style="--kc:#14b8a6"><span class="ic">💎</span><div class="l">Lucro Bruto (M.C.)</div><div class="v '+(MC.mc>=0?'ok':'bad')+'">'+BRL(MC.mc)+'</div><div class="s">'+(MC.semItens?'<span class="warn">⚠ sem custo de '+N(MC.semItens)+' pedido(s) — margem otimista</span>':(MC.semCfg?'<span class="warn">⚠ '+N(MC.semCfg)+' pedido(s) sem taxa configurada</span>':'venda − imposto − comissão − frete − custo'))+(MC.tReais?' · '+N(MC.tReais)+' c/ tarifa real':'')+'</div></div>'
       : '<div class="kpi" style="--kc:#64748b;cursor:pointer" onclick="document.getElementById(\'cfgBox\').scrollIntoView({behavior:\'smooth\'})"><span class="ic">💎</span><div class="l">Lucro Bruto (M.C.)</div><div class="v dim">—</div><div class="s warn">⚙️ configure as taxas por canal abaixo</div></div>') +
-    kpi('var(--ac)','📊','Pedidos', N(totPed), MC.semItens?('<span class="warn">⚠ '+N(MC.semItens)+' pedido(s) sem detalhe ainda</span> · '+N(MC.unTot)+' un. contadas'):(MC.unTot>0?(N(MC.unTot)+' unidades vendidas'):'sem itens no período')) +
+    kpi('var(--ac)','📊','Pedidos', N(totPed), MC.semItens?('<span class="warn">⚠ '+N(MC.semItens)+' sem detalhe</span> <button onclick="completarDetalhes()" style="background:#1d4ed8;color:#fff;border:0;border-radius:6px;padding:2px 7px;font-size:10px;font-weight:700;cursor:pointer">⚡ buscar agora</button><div id="avisoDet" style="font-size:10px;margin-top:2px"></div>'):(MC.unTot>0?(N(MC.unTot)+' unidades vendidas'):'sem itens no período')) +
     kpi('var(--warn)','🎯','Ticket médio', BRL((fat+agdVal)/(totPed||1)), 'faturamento ÷ pedidos') +
     (VENDAS.length?'<div class="kpi" style="--kc:#38bdf8"><span class="ic">🛰</span><div class="l">Ao vivo</div><div class="v"><button onclick="sincVendas(this)" style="background:#38bdf822;border:1px solid #38bdf855;color:#7dd3fc;border-radius:8px;padding:5px 12px;cursor:pointer;font-weight:700;font-size:14px">🔄 atualizar</button></div><div class="s">'+N(VBok.length)+' vendas no Bling · sincroniza sozinho a cada 5 min</div></div>':'') +
     '<div class="kpi" id="kMargem" style="display:none"></div>';
