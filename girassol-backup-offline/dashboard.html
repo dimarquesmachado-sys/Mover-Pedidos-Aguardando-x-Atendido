@@ -101,11 +101,26 @@
             border-radius:16px;padding:40px 30px}
   .skel{color:var(--dim);text-align:center;padding:30px}
   ::-webkit-scrollbar{height:8px;width:8px} ::-webkit-scrollbar-thumb{background:var(--line2);border-radius:99px}
+  /* cartões de venda (só aparecem no celular) */
+  .vcards{display:none}
+  .vcard{background:var(--card);border:1px solid var(--line);border-radius:11px;padding:10px 12px}
+  .vcTopo{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-bottom:5px}
+  .vcNum{font-weight:800;font-size:14px}
+  .vcHora{color:var(--mut);font-size:11px;margin-left:auto}
+  .vcSku{font-size:12px;color:#cfe0ff;font-family:ui-monospace,monospace;line-height:1.35;margin-bottom:6px;word-break:break-word}
+  .vcNums{display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px}
+  .vcB{background:var(--bg2);border-radius:7px;padding:5px 7px}
+  .vcB i{display:block;font-style:normal;font-size:9px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut)}
+  .vcB b{font-size:12.5px;font-variant-numeric:tabular-nums}
   /* ══════════════ CELULAR ══════════════ */
   @media(max-width:720px){
     body{padding:0 8px 30px}
     .sec{padding:12px;border-radius:12px}
-    .desc{max-width:none}
+    .desc{max-width:150px}
+    /* as tabelas que sobram (Top produtos, Por canal, Projeção) rolam de lado sem esticar a página */
+    .tw{max-width:100%;overflow-x:auto}
+    .tw table{min-width:640px}
+    #secAnalise .vcards+.tw{display:none}
     /* cards: 2 por linha em vez de rolagem lateral */
     .kpis{display:grid;grid-template-columns:1fr 1fr;overflow-x:visible;gap:8px;margin:12px 0}
     .kpi{min-width:0!important;padding:10px 12px}
@@ -125,9 +140,9 @@
     table{font-size:11.5px}
     td{padding:7px 6px} th{padding:6px 6px;font-size:9.5px}
     .tw{overflow-x:auto;-webkit-overflow-scrolling:touch}
-    /* ANÁLISE: esconde as colunas menos críticas (venda mkt, canal, un., produtos, estorno) */
-    #tAnalise tr>*:nth-child(3),#tAnalise tr>*:nth-child(4),#tAnalise tr>*:nth-child(6),
-    #tAnalise tr>*:nth-child(8),#tAnalise tr>*:nth-child(13){display:none}
+    /* ANÁLISE no celular: a tabela some e cada venda vira um CARTÃO (ver .vcards) */
+    #secAnalise .tw{display:none}
+    .vcards{display:flex;flex-direction:column;gap:8px}
     /* TOP PRODUTOS: esconde curva e participação */
     #tProd tr>*:nth-child(7),#tProd tr>*:nth-child(9){display:none}
     /* cabeçalho congelado da tabela desligado no celular (brigava com a barra fixa) */
@@ -141,12 +156,12 @@
   @media(max-width:520px){
     .kpis{grid-template-columns:1fr 1fr}
     .kpi .v{font-size:16px}
-    /* na Análise sobra o essencial: data · pedido · produto · venda · M.C. · % */
-    #tAnalise tr>*:nth-child(9),#tAnalise tr>*:nth-child(10),
-    #tAnalise tr>*:nth-child(11),#tAnalise tr>*:nth-child(12){display:none}
     #tProd tr>*:nth-child(5),#tProd tr>*:nth-child(8){display:none}
     table{font-size:11px} td{padding:6px 5px}
     .sskus div{font-size:11px}
+    .vcNums{grid-template-columns:1fr 1fr}
+    .vcNum{font-size:13px}
+    .tw table{min-width:560px}
   }
 </style>
 </head>
@@ -154,7 +169,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd99';
+const DASH_BUILD = 'd102';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -242,6 +257,32 @@ function prepararVendas(){
     _sit:v.situacao||null, _cancelado:(!!v.cancelado || /cancel/i.test(String(v.situacao||'')) || !!v.cancelado_mkt), cancelado_mkt:(v.cancelado_mkt?1:0)
   }));
 }
+// 📱 CARTÕES DE VENDA (celular): a tabela de 15 colunas é ilegível no telefone; aqui cada venda
+// vira um cartão com o essencial — nº, canal, SKU, valor e margem. A tabela continua no desktop.
+function cardVenda(o){
+  const cor = o.cancelado ? '#475569' : (o.dev ? (o.devAberta?'#eab308':'#ef4444') : 'rgba(52,211,153,.45)');
+  const nums = [];
+  nums.push('<div class="vcB"><i>venda</i><b>'+(o.venda!=null?BRL(o.venda):'—')+'</b></div>');
+  nums.push('<div class="vcB"><i>custo</i><b>'+(o.custo!=null?BRL(o.custo):'—')+'</b></div>');
+  nums.push('<div class="vcB"><i>💎 margem</i><b class="'+((o.mc||0)>=0?'ok':'bad')+'">'+(o.mc!=null?BRL(o.mc):'—')+(o.pc!=null?(' <span style="font-size:10px;opacity:.8">'+String(o.pc).replace('.',',')+'%</span>'):'')+'</b></div>');
+  return '<div class="vcard" style="border-left:3px solid '+cor+(o.cancelado?';opacity:.55':'')+'">'+
+    '<div class="vcTopo">'+
+      (o.cancelado?'<span style="color:#64748b;font-weight:800">✕</span>':'<span style="color:#34d399;font-weight:800">✓</span>')+
+      '<span class="vcNum">'+esc(o.numero)+'</span>'+
+      '<span class="badge">'+esc(o.canal)+'</span>'+
+      (o.cancelado?'<span class="st bad" style="font-size:9px">CANCELADA</span>':'')+
+      (o.dev?'<span class="st bad" style="font-size:9px">🔴 DEVOLV.</span>':'')+
+      '<span class="vcHora">'+esc(o.hora||'')+'</span>'+
+    '</div>'+
+    '<div class="vcSku">'+o.skus+'</div>'+
+    '<div class="vcNums">'+nums.join('')+'</div>'+
+  '</div>';
+}
+function renderCardsVenda(lista){
+  const el=document.getElementById('anCards'); if(!el) return;
+  el.innerHTML = lista.length ? lista.map(cardVenda).join('') : '<div class="dim" style="padding:14px">sem vendas no período</div>';
+}
+
 // desenha a tabela da Análise com as vendas vindas do HISTÓRICO (banco), 100 por página
 function renderHistLinhas(iv){
   const tb=$('tAnalise'), rp=document.getElementById('anRodape'), inf=$('anInfo');
@@ -277,6 +318,12 @@ function renderHistLinhas(iv){
       '</tr>';
     }).join('') : '<tr><td class="dim" colspan="12" style="padding:14px">sem vendas nesta página</td></tr>');
   const ini=(pgAtual-1)*(HLIN.por_pagina||100)+1, fim=ini+ps.length-1;
+  renderCardsVenda(ps.map(function(o){
+    return { numero:o.numero, canal:nomeCanal(canalKey(o.canal)), hora:String(o.data||'').slice(8,10)+'/'+String(o.data||'').slice(5,7),
+             skus:(o.itens||[]).map(function(i){return (i.qtd>1?i.qtd+'\u00d7 ':'')+esc(i.sku||'');}).join(' \u00b7 '),
+             venda:o.vnota, custo:(o.custo||null), mc:o.margem, pc:(o.vnota>0?Math.round(o.margem/o.vnota*1000)/10:null),
+             cancelado:false, dev:false };
+  }));
   if(inf) inf.textContent = ps.length ? (ini+'–'+fim+' de '+N(HLIN.total_pedidos||0)+' pedido(s) · página '+pgAtual+' de '+totPg) : '';
   if(rp){
     rp.style.display='flex';
@@ -497,6 +544,7 @@ function montar(){
       '<button class="chip" onclick="anPage++;renderAnalise()">Próxima →</button></div>'+
       '<div id="anResumo"></div>'+
       '<div class="tw"><table id="tAnalise"></table></div>'+
+      '<div class="vcards" id="anCards"></div>'+
       '<div id="anRodape" style="display:none;align-items:center;gap:8px;margin-top:8px;padding:8px;background:var(--bg2);border-radius:9px"></div>'+
       '<div class="nota"><b>Sobre a ordem:</b> dentro de cada dia, ML aparece na hora REAL da venda; TikTok/Shopee/Magalu/Amazon entram pela hora da <b>EMISSÃO da NF</b> (🧾), que acompanha a venda de perto — acabaram os blocos por canal. O 🕘 (hora da conferência) só aparece quando a linha ainda não tem NF. A hora exata da venda desses canais continua existindo <b>só na API do próprio canal</b>. Pra confrontar com o Jodda, use o ⬇︎ CSV e case pelo <b>número da venda no marketplace</b>. · ML mostra a hora REAL da venda (vem da pesca); TikTok/Shopee o Bling não guarda hora — o 🕘 marca que ali está a hora da <b>conferência</b> (a hora da venda desses canais chega quando plugarmos as APIs deles) · colunas (−) são deduções e (+) é crédito · <b>Estorno</b> = o valor exato da linha "Estorno" da venda no ML (no Flex ele já vem líquido: bonificação menos o frete cobrado), somado na M.C. · no Flex o custo do frete é o <b>motoboy</b> configurado no ⚙️ · tarifa <span class="ok">REAL</span> = pescada do ML · <span class="ok">BLING</span> = comissão que o Bling importou do canal (TikTok/Shopee/Magalu) · sem tag = % configurada · custo carrega sob demanda por página · 🛒 = mais de 1 item/unidade</div></div>'+
     '<div class="sec" id="secTop"><h2>🏆 Top produtos <span class="hint">clique nos títulos p/ ordenar ↑↓ · faturamento = SOMA de todos os pedidos do SKU no período · 💎 M.C. = margem dos pedidos rateada por item — o rank do que dá LUCRO de verdade · Curva ABC recalculada pro período pesquisado (A = 80% do faturamento)</span></h2>'+
@@ -1216,6 +1264,15 @@ function renderAnalise(){
       (anPage>0?'<button class="chip" onclick="anPage--;renderAnalise();document.getElementById(\'secAnalise\').scrollIntoView({behavior:\'smooth\'})">\u2190 Anterior</button>':'')+
       (anPage<maxP?'<button class="chip" style="background:#1d4ed8;border-color:#1d4ed8;color:#fff;font-weight:700" onclick="anPage++;renderAnalise();document.getElementById(\'secAnalise\').scrollIntoView({behavior:\'smooth\'})">ver as pr\u00f3ximas '+Math.min(PAG, LP.length-(anPage+1)*PAG)+' \u2192</button>':'');
   })();
+  renderCardsVenda(pagPL.map(function(x){
+    const h=x.h, P=x.P;
+    const dt = h.venda_em ? dtBR(h.venda_em).slice(-5) : (h.venda_dia?String(h.venda_dia).slice(8,10)+'/'+String(h.venda_dia).slice(5,7):'');
+    return { numero:(h.numero||h.id), canal:nomeCanal(P.ck), hora:dt,
+             skus:((h.itens||[]).length?(h.itens||[]).map(function(i){return (Number(i.qtd||1)>1?i.qtd+'\u00d7 ':'')+esc(i.sku||'');}).join(' \u00b7 '):'<span class="dim">detalhe a caminho\u2026</span>'),
+             venda:(P.tot!=null?P.tot:(h.valor!=null?Number(h.valor):null)), custo:(P.custo!=null?P.custo:null),
+             mc:(P.mc!=null?P.mc:null), pc:(P.mc!=null&&P.tot?Math.round(P.mc/P.tot*1000)/10:null),
+             cancelado:!!h._cancelado, dev:!!h.devolucao, devAberta:!!h.dev_aberta };
+  }));
   $('anInfo').textContent = LP.length ? ((anPage*PAG+1)+'–'+(anPage*PAG+pagPL.length)+' de '+LP.length+' venda(s)'+(maxP>0?('  ·  página '+(anPage+1)+' de '+(maxP+1)):'')) : 'sem vendas no período';
   const faltam=[...new Set(pag.flatMap(h=>(h.itens||[]).map(i=>i.sku)).filter(sk=>sk && !SKUINFO[sk] && !_anTried[sk]))];
   if(faltam.length && !_anLoading){
