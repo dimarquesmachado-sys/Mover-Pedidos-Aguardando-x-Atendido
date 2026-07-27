@@ -170,7 +170,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd104';
+const DASH_BUILD = 'd105';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -672,7 +672,8 @@ function render(){
   });
   const ticket = comValor ? fat/comValor : 0;
   const pc = (a,b)=> b? Math.round(a/b*100) : 0;
-  const cVal = pc(comValor,PER.length), cItem = pc(itensComValor,itensTot), cUF = pc(comUF,PER.length);
+  const nTot = PER.length + AGD.length;   // 27/07: o laço acima cobre bipados + não bipados — o denominador tem que ser o mesmo
+  const cVal = pc(comValor,nTot), cItem = pc(itensComValor,itensTot), cUF = pc(comUF,nTot);
 
   $('cover').innerHTML = PER.length === 0 ?
     ('<span class="dim">'+de+' → '+ate+'</span><span class="dim">0 vendas atribuídas a este período — vendas de fim de semana entram assim que forem bipadas (caem no dia CERTO) · clica em <b>Ontem</b> ou <b>Mês</b> 😉 · a busca de pedido lá embaixo funciona independente do período</span>') :
@@ -680,8 +681,8 @@ function render(){
     '<span class="pill '+(cVal>=95?'g':'w')+'">valor <b>'+cVal+'%</b></span>'+
     '<span class="pill '+(cItem>=95?'g':'w')+'">valor/item <b>'+cItem+'%</b></span>'+
     '<span class="pill '+(cUF>=95?'g':'w')+'">UF <b>'+cUF+'%</b></span>'+
-    '<span class="pill '+(pc(pedNF,PER.length)>=95?'g':'w')+'">nota fiscal <b>'+pc(pedNF,PER.length)+'%</b></span>'+
-    '<span class="pill '+(pc(pedTarReal,PER.length)>=95?'g':'w')+'">tarifa real <b>'+pc(pedTarReal,PER.length)+'%</b></span>'+
+    '<span class="pill '+(pc(pedNF,nTot)>=95?'g':'w')+'">nota fiscal <b>'+pc(pedNF,nTot)+'%</b></span>'+
+    '<span class="pill '+(pc(pedTarReal,nTot)>=95?'g':'w')+'">tarifa real <b>'+pc(pedTarReal,nTot)+'%</b></span>'+
     ((cVal<95||cItem<95||cUF<95)?'<span class="warn" style="font-size:11px">← cobertura baixa: rode os backfills p/ o retroativo</span>':'');
 
   const kpi=(kc,ic,l,v,s)=>'<div class="kpi" style="--kc:'+kc+'"><span class="ic">'+ic+'</span><div class="l">'+l+'</div><div class="v">'+v+'</div>'+(s?'<div class="s">'+s+'</div>':'')+'</div>';
@@ -862,7 +863,7 @@ function render(){
       '<td><div class="bar"><i style="width:'+p+'%"></i></div></td></tr>';}).join('')
     || '<tr><td class="dim" colspan="5">nenhum pedido com UF no período</td></tr>');
   renderMapaUF(porUF);
-  $('ufAviso').innerHTML = (PER.length-comUF) ? '<div class="aviso">⚠️ '+N(PER.length-comUF)+' pedido(s) sem UF — o backfill de detalhes preenche o retroativo.</div>' : '';
+  $('ufAviso').innerHTML = ((PER.length+AGD.length)-comUF) ? '<div class="aviso">⚠️ '+N((PER.length+AGD.length)-comUF)+' pedido(s) sem UF — o backfill de detalhes preenche o retroativo.</div>' : '';
 
   renderProjChips(); renderProjecao();
   renderCfg();
@@ -984,7 +985,7 @@ function buscarPed(q){
   q = String(q||'').trim().toLowerCase();
   const res=$('buscaRes'), card=$('plCard'); card.innerHTML='';
   if(q.length<2){ res.innerHTML=''; return; }
-  const hits = DADOS.filter(h=>{
+  const hits = (DADOS||[]).concat(SINT||[]).filter(h=>{   // 27/07: buscava só nos bipados
     if(String(h.numero||'').toLowerCase()===q) return true;
     if(String(h.nf_numero||'').toLowerCase().includes(q)) return true;
     if(String(h.numero_loja||'').toLowerCase().includes(q)) return true;
@@ -1094,8 +1095,10 @@ function renderGrafico(){
   const el=$('grafProg'); if(!el) return;
   const iv=intervalo();
   const dias={};
-  DADOS.forEach(h=>{
-    if(!h.conferido_em) return; const d=diaVenda(h); if(d<iv.de||d>iv.ate) return;
+  (DADOS||[]).concat(SINT||[]).forEach(h=>{   // 27/07: contava só os bipados
+    if(!h.conferido_em && !h.sintetico) return;
+    if(h._cancelado) return;
+    const d=diaVenda(h); if(d<iv.de||d>iv.ate) return;
     const P=calcPL(h);
     const o=dias[d]||(dias[d]={mc:0,imp:0,tar:0,frv:0});
     if(P.mc!=null)o.mc+=P.mc; if(P.imposto!=null)o.imp+=P.imposto;
@@ -1385,8 +1388,9 @@ function topSkus14(){
   const corte = spDate(Date.now()-(projDias-1)*86400000);
   const hoje = hojeSP();
   const agg = {};
-  DADOS.forEach(h=>{
-    if(!h.conferido_em) return;
+  (DADOS||[]).concat(SINT||[]).forEach(h=>{   // 27/07: o ritmo de vendas ignorava as não bipadas
+    if(!h.conferido_em && !h.sintetico) return;
+    if(h._cancelado) return;   // cancelada não entra no ritmo
     const d = diaVenda(h); if(d<corte || d>hoje) return;
     (h.itens||[]).forEach(it=>{
       const sku=it.sku; if(!sku) return;
