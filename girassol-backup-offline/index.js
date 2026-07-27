@@ -41,7 +41,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v27/07 b58';
+const VERSAO     = 'girassol-backup-offline v27/07 b59';
 
 // ── SESSÃO DE OPERADOR (cookie assinado HMAC) — protege rotas de dados/ação ──
 // Segredo estável entre restarts. Usa ADMIN_KEY (já configurada no Render) como base.
@@ -3285,17 +3285,27 @@ async function vendasSync() {
         if (!p || p.id == null) continue;
         const nl = p.numeroPedidoLoja || p.numeroLoja || null;   // a LISTAGEM do Bling manda numeroLoja (o detalhe manda numeroPedidoLoja)
         const ljId = String((p.loja && p.loja.id) || '');
-        atual[String(p.id)] = {
+        // 🐛 27/07 — BUG GRAVE CORRIGIDO: aqui o registro era SUBSTITUÍDO inteiro a cada rodada (5 min),
+        // apagando tudo que as fases seguintes tinham enriquecido: itens (it), flag det, tarifa/frete REAIS
+        // do ML, hora da venda, dados da Shopee e a marca de cancelado no marketplace. Resultado: a cada
+        // rodada quase tudo voltava à estaca zero e só ~120 pedidos eram reconstruídos — por isso os
+        // pedidos ficavam eternamente sem detalhe/margem e o "cancelado" sumia sozinho.
+        // Agora MESCLA: a listagem só atualiza os campos que ela realmente conhece.
+        const _ant = atual[String(p.id)] || {};
+        const _sitBling = (p.situacao && (p.situacao.valor || p.situacao.nome)) || null;
+        atual[String(p.id)] = Object.assign({}, _ant, {
           id: p.id, numero: p.numero != null ? p.numero : null,
-          numero_loja: nl, marketplace: LOJA_MKT[ljId] || _inferCanal(nl),   // canal OFICIAL pela loja do Bling; formato do nº é só fallback
-          data: (p.data || '').slice(0, 10) || null,
-          total: (p.total != null && isFinite(Number(p.total))) ? Number(p.total) : null,
-          cliente: (p.contato && p.contato.nome) || '',
-          situacao: (p.situacao && (p.situacao.valor || p.situacao.nome)) || null,
+          numero_loja: nl || _ant.numero_loja || null,
+          marketplace: LOJA_MKT[ljId] || _ant.marketplace || _inferCanal(nl),   // canal OFICIAL pela loja do Bling; formato do nº é só fallback
+          data: (p.data || '').slice(0, 10) || _ant.data || null,
+          total: (p.total != null && isFinite(Number(p.total))) ? Number(p.total) : (_ant.total != null ? _ant.total : null),
+          cliente: (p.contato && p.contato.nome) || _ant.cliente || '',
+          // se já sabemos que o MARKETPLACE cancelou, não deixa a situação do Bling apagar isso
+          situacao: (_ant.cancelado_mkt && !/cancel/i.test(String(_sitBling || ''))) ? (_ant.situacao || _sitBling) : _sitBling,
           situacao_id: (p.situacao && p.situacao.id) || null,
           loja_id: (p.loja && p.loja.id) || null,
           atualizado_em: new Date().toISOString()
-        };
+        });
       }
       if (lista.length < 100) break;
       await new Promise(r2 => setTimeout(r2, 450));
