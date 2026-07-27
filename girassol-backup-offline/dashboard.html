@@ -103,7 +103,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd80';
+const DASH_BUILD = 'd82';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -192,6 +192,7 @@ function prepararVendas(){
 }
 // ⚡ busca AGORA o detalhe (SKU/qtd/taxas) dos pedidos do período que estão sem — em sequência, até zerar
 let _compDet = false;
+let _autoDet = {};   // período já buscado automaticamente nesta sessão
 async function completarDetalhes(){
   if(_compDet) return; _compDet = true;
   const { de, ate } = intervalo();
@@ -517,6 +518,14 @@ function render(){
              mc: rec-impMC-tar-cusMC-frV+fRecP, temCfg: !!Object.keys(CFG.taxas).length };
   })();
   const totPed = PER.length + AGD.length;
+  // ⚡ AUTOMÁTICO: se o período que está na tela tem pedido sem detalhe, busca sozinho (1x por período)
+  (function(){
+    if(!MC.semItens || _compDet) return;
+    const chave = de+'|'+ate;
+    if(_autoDet[chave]) return;
+    _autoDet[chave] = 1;
+    setTimeout(()=>completarDetalhes(), 400);
+  })();
   $('kpis').innerHTML =
     kpi('#34d399','💰','Faturamento Total', BRL(fat+agdVal), 'vendas aprovadas no período · '+N(totPed)+' pedidos') +
     kpi('#f59e0b','🧾','Impostos', BRL(MC.imp), (MC.imp>0&&(fat+agdVal)>0?('Simples · '+(Math.round(MC.imp/(fat+agdVal)*10000)/100).toString().replace('.',',')+'% do faturamento'):'Simples nacional')+(MC.pedImp<totPed?' · <span class="warn">falta alíquota em '+N(totPed-MC.pedImp)+'</span>':'')) +
@@ -526,9 +535,9 @@ function render(){
       : (MC.cusUn>=MC.unTot ? (N(MC.unTot)+' unidades vendidas')
       : ('<span class="warn">⚠ sem custo em '+N(MC.unTot-MC.cusUn)+' de '+N(MC.unTot)+' un.</span> — use 🐢 sincronizar custos')))) +
     (MC.temCfg
-      ? '<div class="kpi" style="--kc:#14b8a6"><span class="ic">💎</span><div class="l">Lucro Bruto (M.C.)</div><div class="v '+(MC.mc>=0?'ok':'bad')+'">'+BRL(MC.mc)+'</div><div class="s">'+(MC.semItens?'<span class="warn">⚠ sem custo de '+N(MC.semItens)+' pedido(s) — margem otimista</span>':(MC.semCfg?'<span class="warn">⚠ '+N(MC.semCfg)+' pedido(s) sem taxa configurada</span>':'venda − imposto − comissão − frete − custo'))+(MC.tReais?' · '+N(MC.tReais)+' c/ tarifa real':'')+'</div></div>'
+      ? '<div class="kpi" style="--kc:#14b8a6"><span class="ic">💎</span><div class="l">Lucro Bruto (M.C.)</div><div class="v '+(MC.mc>=0?'ok':'bad')+'">'+BRL(MC.mc)+'</div><div class="s">'+(MC.semItens?'<span class="warn">⚠ '+N(MC.semItens)+' pedido(s) sem detalhe — MARGEM OTIMISTA</span>':(MC.unTot&&MC.cusUn<MC.unTot?'<span class="warn">⚠ falta o custo de '+N(MC.unTot-MC.cusUn)+' de '+N(MC.unTot)+' un. — MARGEM OTIMISTA</span>':(MC.semCfg?'<span class="warn">⚠ '+N(MC.semCfg)+' pedido(s) sem taxa configurada</span>':'venda − imposto − comissão − frete − custo')))+(MC.tReais?' · '+N(MC.tReais)+' c/ tarifa real':'')+'</div></div>'
       : '<div class="kpi" style="--kc:#64748b;cursor:pointer" onclick="document.getElementById(\'cfgBox\').scrollIntoView({behavior:\'smooth\'})"><span class="ic">💎</span><div class="l">Lucro Bruto (M.C.)</div><div class="v dim">—</div><div class="s warn">⚙️ configure as taxas por canal abaixo</div></div>') +
-    kpi('var(--ac)','📊','Pedidos', N(totPed), MC.semItens?('<span class="warn">⚠ '+N(MC.semItens)+' sem detalhe</span> <button onclick="completarDetalhes()" style="background:#1d4ed8;color:#fff;border:0;border-radius:6px;padding:2px 7px;font-size:10px;font-weight:700;cursor:pointer">⚡ buscar agora</button><div id="avisoDet" style="font-size:10px;margin-top:2px"></div>'):(MC.unTot>0?(N(MC.unTot)+' unidades vendidas'):'sem itens no período')) +
+    kpi('var(--ac)','📊','Pedidos', N(totPed), MC.semItens?('<span class="warn">⚠ '+N(MC.semItens)+' sem detalhe</span> <button onclick="completarDetalhes()" title="o dashboard já busca sozinho ao abrir o período — este botão é só pra tentar de novo" style="background:#1d4ed8;color:#fff;border:0;border-radius:6px;padding:2px 7px;font-size:10px;font-weight:700;cursor:pointer">↻ tentar de novo</button><div id="avisoDet" style="font-size:10px;margin-top:2px"></div>'):(MC.unTot>0?(N(MC.unTot)+' unidades vendidas'):'sem itens no período')) +
     kpi('var(--warn)','🎯','Ticket médio', BRL((fat+agdVal)/(totPed||1)), 'faturamento ÷ pedidos') +
     (VENDAS.length?'<div class="kpi" style="--kc:#38bdf8"><span class="ic">🛰</span><div class="l">Ao vivo</div><div class="v"><button onclick="sincVendas(this)" style="background:#38bdf822;border:1px solid #38bdf855;color:#7dd3fc;border-radius:8px;padding:5px 12px;cursor:pointer;font-weight:700;font-size:14px">🔄 atualizar</button></div><div class="s">'+N(VBok.length)+' vendas no Bling · sincroniza sozinho a cada 5 min</div></div>':'') +
     '<div class="kpi" id="kMargem" style="display:none"></div>';
