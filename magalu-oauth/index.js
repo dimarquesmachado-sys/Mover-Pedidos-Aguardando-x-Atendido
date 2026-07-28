@@ -26,7 +26,7 @@ const fs   = require('fs');
 const path = require('path');
 const { json, html, readBody } = require('../lib/http');
 
-const VERSAO = 'magalu-oauth v1 b39';
+const VERSAO = 'magalu-oauth v1 b40';
 
 const DATA_DIR = process.env.MAGALU_DATA_DIR || '/data/magalu';
 
@@ -1807,7 +1807,11 @@ async function nfPedirLink(empresa, dIni, dFim) {
   // e por IP — e o IP aqui e o do Render, compartilhado por tudo que roda nele.
   // Uso real sao 4 chamadas por dia, entao o certo e ser MUITO paciente:
   // esperar minutos nao custa nada agora que a rotina roda em segundo plano.
-  const esperas = [0, 30000, 60000, 120000, 240000];
+  // Teto de ~17,5 min. A geracao levou 36s de manha, mas a noite (27/07,
+  // 21h) um pacote novo devolveu 408 + 503s por mais de 7 min — a Magalu
+  // gera mais devagar no horario de pico. Como roda em segundo plano,
+  // esperar mais nao custa nada; desistir cedo custa a rodada inteira.
+  const esperas = [0, 30000, 60000, 120000, 240000, 300000, 300000];
   const historico = [];
   for (let i = 0; i < esperas.length; i++) {
     if (esperas[i]) await new Promise(r => setTimeout(r, esperas[i]));
@@ -1824,7 +1828,10 @@ async function nfPedirLink(empresa, dIni, dFim) {
       throw new Error('a Magalu respondeu ' + r.status + ': ' + txt.slice(0, 200));
     }
   }
-  throw new Error('a Magalu nao devolveu o link em ' + esperas.length + ' tentativas (status: ' + historico.join(', ') + ')');
+  const minutos = Math.round(esperas.reduce((a, b) => a + b, 0) / 60000);
+  const soGerando = historico.every(h => h === 408 || h === 503 || h === 429);
+  throw new Error('a Magalu nao devolveu o link em ' + esperas.length + ' tentativas ao longo de ~' + minutos + ' min (status: ' + historico.join(', ') + ')' +
+    (soGerando ? '. Ela ainda esta GERANDO o pacote — a geracao continua la mesmo depois de eu desistir; espere alguns minutos e rode de novo, ou deixe a proxima rodada automatica pegar' : ''));
 }
 
 // Pede o link e baixa o ZIP. Devolve o Buffer.
