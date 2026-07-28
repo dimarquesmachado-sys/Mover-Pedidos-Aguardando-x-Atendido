@@ -255,7 +255,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd141';
+const DASH_BUILD = 'd142';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -433,6 +433,79 @@ function renderHistLinhas(iv){
       sel+
       (pgAtual<totPg?'<button class="chip" style="background:#1d4ed8;border-color:#1d4ed8;color:#fff;font-weight:700" onclick="histIrPagina('+(pgAtual+1)+')">Próxima →</button>':'<span class="mut" style="font-size:12px">última página</span>');
   }
+}
+
+// 🧮 PLANO DE COMPRA — o motor roda no servidor; aqui só desenhamos e explicamos
+let PLANO = null, _planoCarregando = false;
+function _cpParam(){
+  const v = id => { const e=document.getElementById(id); return e? e.value : null; };
+  return { lead: Number(v('cpLead'))||4, cob: Number(v('cpCob'))||5, seg: Number(v('cpSeg'))||0.5,
+           curva: v('cpCurva')||'A' };
+}
+async function carregarPlano(forcar){
+  if(_planoCarregando) return;
+  const p=_cpParam();
+  if(PLANO && !forcar && PLANO.lead===p.lead && PLANO.cob===p.cob && PLANO.seg===p.seg && String(PLANO.curva).toUpperCase()===p.curva.toUpperCase()) return;
+  _planoCarregando = true;
+  const inf=document.getElementById('cpInfo');
+  if(inf) inf.textContent = '⏳ calculando… (na primeira vez ele busca saldo e imagem de cada produto no Bling, leva um pouco)';
+  try{
+    const r = await fetch(MOD+'/plano-compra?lead='+p.lead+'&cob='+p.cob+'&seg='+p.seg+'&curva='+p.curva+'&base=180', {credentials:'same-origin'});
+    const d = await r.json().catch(()=>null);
+    if(d && d.ok){ PLANO = d; renderPlano(); }
+    else if(inf) inf.innerHTML = '<span class="warn">não consegui calcular'+((d&&d.erro)?(': '+esc(d.erro)):'')+'</span>';
+  }catch(e){ if(inf) inf.innerHTML='<span class="warn">'+(e.message||e)+'</span>'; }
+  _planoCarregando = false;
+}
+function _planoFiltrado(){
+  if(!PLANO || !PLANO.itens) return [];
+  const el=document.getElementById('qCompra'), t=el?el.value:'';
+  return PLANO.itens.filter(x=>casaBusca(t, x.sku, x.nome));
+}
+function baixarPlano(){
+  const L=_planoFiltrado();
+  baixarPlanilha('plano-de-compra',
+    ['SKU','Produto','Imagem (URL)','Curva','Vendidas na base','Media por dia','Saldo hoje','Acaba em (dias)','Precisa ate o proximo ciclo','COMPRAR','Custo unitario','Investimento','Margem por unidade','Lucro em risco'],
+    L.map(x=>[x.sku, x.nome||'', x.img||'', x.curva, x.un, x.md, (x.saldo!=null?x.saldo:''), (x.acaba_em!=null?x.acaba_em:''),
+              x.precisa, x.comprar, (x.custo_un!=null?x.custo_un:''), (x.investir!=null?x.investir:''), x.mc_un, x.risco]));
+}
+function renderPlano(){
+  const tb=document.getElementById('tCompra'), inf=document.getElementById('cpInfo'), rs=document.getElementById('cpResumo');
+  if(!tb || !PLANO) return;
+  const L=_planoFiltrado();
+  const T=PLANO.totais||{};
+  if(rs) rs.innerHTML =
+    '<div class="vcB" style="min-width:150px"><i>investimento necessário</i><b>'+BRL(T.investir||0)+'</b></div>'+
+    '<div class="vcB" style="min-width:150px"><i>⚠ lucro em risco se não comprar</i><b class="bad">'+BRL(T.risco||0)+'</b></div>'+
+    '<div class="vcB" style="min-width:120px"><i>SKUs a comprar</i><b>'+N(T.skus_a_comprar||0)+'</b></div>';
+  if(inf) inf.innerHTML = 'horizonte: <b>'+PLANO.lead+' meses</b> de espera + <b>'+PLANO.cob+'</b> de cobertura + <b>'+PLANO.seg+'</b> de segurança = <b>'+N(PLANO.horizonte_dias)+' dias</b> de estoque a cobrir'+
+    ' · ritmo medido em '+PLANO.de+' → '+PLANO.ate+' · '+N(PLANO.skus)+' SKUs na curva selecionada';
+  tb.innerHTML =
+    '<tr><th title="primeira imagem do produto no Bling — a mesma que voc\u00ea manda pro fornecedor">Foto</th>'+
+    '<th title="c\u00f3digo e nome do produto">Produto</th>'+
+    '<th title="curva ABC do per\u00edodo: A concentra 80% do faturamento">Curva</th>'+
+    '<th class="num" title="m\u00e9dia de unidades por dia, j\u00e1 ajustada pela tend\u00eancia dos \u00faltimos 30 dias">Ritmo/dia</th>'+
+    '<th class="num" title="saldo em estoque hoje, direto do Bling">Saldo</th>'+
+    '<th class="num" title="em quantos dias o estoque acaba nesse ritmo \u2014 se for MENOS que o lead time, vai faltar">Acaba em</th>'+
+    '<th class="num" title="quanto voc\u00ea precisa ter pra cobrir todo o horizonte">Precisa</th>'+
+    '<th class="num" title="o que comprar agora: precisa \u2212 saldo">COMPRAR</th>'+
+    '<th class="num" title="quanto custa essa compra (custo do Bling \u00d7 quantidade)">Investir</th>'+
+    '<th class="num" title="lucro que voc\u00ea deixa de ganhar nos dias em que o produto ficar em falta">\u26a0 Lucro em risco</th></tr>'+
+    (L.length ? L.map(function(x){
+      const falta = (x.acaba_em!=null && x.acaba_em < Math.round(PLANO.lead*30.4));
+      return '<tr'+(falta?' style="background:linear-gradient(90deg,rgba(239,68,68,.10),transparent 60%)"':'')+'>'+
+        '<td>'+(x.img?('<img src="'+esc(x.img)+'" alt="" loading="lazy" style="width:42px;height:42px;object-fit:cover;border-radius:6px;background:#0d1326">'):'<span class="dim" style="font-size:10px">sem foto</span>')+'</td>'+
+        '<td><b>'+esc(x.sku)+'</b><div class="desc" style="max-width:260px">'+esc(x.nome||'')+'</div></td>'+
+        '<td><span class="st '+(x.curva==='A'?'ok':(x.curva==='B'?'':'dim'))+'">'+esc(x.curva)+'</span></td>'+
+        '<td class="num">'+String(x.md).replace('.',',')+'<div class="mut" style="font-size:10px">'+(x.tendencia>=25?'▲':(x.tendencia<=-25?'▼':'≈'))+' '+x.tendencia+'%</div></td>'+
+        '<td class="num">'+(x.saldo!=null?N(x.saldo):'<span class="warn" title="não consegui ler o saldo no Bling">?</span>')+'</td>'+
+        '<td class="num'+(falta?' bad':'')+'">'+(x.acaba_em!=null?(N(x.acaba_em)+'d'):'—')+'</td>'+
+        '<td class="num dim">'+N(x.precisa)+'</td>'+
+        '<td class="num" style="font-weight:800;font-size:14px">'+(x.comprar>0?N(x.comprar):'<span class="dim">—</span>')+'</td>'+
+        '<td class="num">'+(x.investir!=null?BRL(x.investir):'<span class="warn" title="sem custo cadastrado no Bling">sem custo</span>')+'</td>'+
+        '<td class="num '+(x.risco>0?'bad':'dim')+'">'+(x.risco>0?BRL(x.risco):'—')+'</td>'+
+      '</tr>';
+    }).join('') : '<tr><td class="dim" colspan="10" style="padding:14px">'+((document.getElementById('qCompra')||{}).value?'nenhum SKU com esse filtro':'nada a comprar com esses parâmetros')+'</td></tr>');
 }
 
 // 🔮 PREVISÃO DE VENDAS POR PRODUTO (o servidor lê o histórico e calcula)
@@ -741,6 +814,7 @@ function montar(){
       '<option value="secDia">📈 Pedidos por dia</option>'+
       '<option value="secProj">📦 Projeção de estoque</option>'+
       '<option value="secPrev">🔮 Previsão de vendas</option>'+
+      '<option value="secCompra">🧮 Plano de compra</option>'+
       '<option value="secProg">📉 Progressão do período</option>'+
       '<option value="secUF">🗺️ Vendas por estado</option>'+
       '<option value="secCfg">⚙️ Impostos &amp; taxas</option>'+
@@ -755,6 +829,7 @@ function montar(){
         '<button class="chip" onclick="irPra(&#39;secDia&#39;)">📈 Pedidos por dia</button>'+
         '<button class="chip" onclick="irPra(&#39;secProj&#39;)">📦 Projeção de estoque</button>'+
         '<button class="chip" onclick="irPra(&#39;secPrev&#39;)">🔮 Previsão de vendas</button>'+
+        '<button class="chip" onclick="irPra(&#39;secCompra&#39;)">🧮 Plano de compra</button>'+
         '<button class="chip" onclick="irPra(&#39;secProg&#39;)">📉 Progressão do período</button>'+
         '<button class="chip" onclick="irPra(&#39;secUF&#39;)">🗺️ Vendas por estado</button>'+
         '<button class="chip" onclick="irPra(&#39;secCfg&#39;)">⚙️ Impostos &amp; taxas</button>'+
@@ -827,6 +902,25 @@ function montar(){
       '</div>'+
       '<div id="prevInfo" class="mut" style="font-size:12px;margin-bottom:6px"></div>'+
       '<div class="tw"><table id="tPrev"></table></div>'+
+    '</div>'+
+    '<div class="sec" id="secCompra"><h2>\ud83e\uddee Plano de compra <span class="hint">quanto comprar de cada produto pra n\u00e3o faltar at\u00e9 o pr\u00f3ximo ciclo \u00b7 ordenado pelo LUCRO EM RISCO, n\u00e3o pelo volume</span></h2>'+
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0">'+
+        '<span class="mut rotFiltro" style="font-size:12px">fornecedor leva</span>'+
+        '<input id="cpLead" class="campoDias" type="number" min="0" max="24" step="0.5" value="4" onchange="carregarPlano(true)" title="lead time: meses entre fazer o pedido e a mercadoria chegar" style="width:64px;background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:6px 8px;font-size:12.5px">'+
+        '<span class="mut rotFiltro" style="font-size:12px">m \u00b7 cobrir</span>'+
+        '<input id="cpCob" class="campoDias" type="number" min="0.5" max="24" step="0.5" value="5" onchange="carregarPlano(true)" title="quantos meses de estoque voc\u00ea quer ter DEPOIS que a mercadoria chegar" style="width:64px;background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:6px 8px;font-size:12.5px">'+
+        '<span class="mut rotFiltro" style="font-size:12px">m \u00b7 seguran\u00e7a</span>'+
+        '<input id="cpSeg" class="campoDias" type="number" min="0" max="6" step="0.5" value="0.5" onchange="carregarPlano(true)" title="colchão extra, em meses, pra atraso do fornecedor ou pico de venda" style="width:60px;background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:6px 8px;font-size:12.5px">'+
+        '<select id="cpCurva" onchange="carregarPlano(true)" title="curva ABC calculada no per\u00edodo do hist\u00f3rico" style="background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:6px 8px;font-size:12.5px">'+
+          '<option value="A">s\u00f3 curva A</option><option value="AB">curva A + B</option><option value="todas">todos</option>'+
+        '</select>'+
+        '<input id="qCompra" class="campoBusca" placeholder="\ud83d\udd0e filtrar por SKU ou nome" oninput="renderPlano()" style="flex:1 1 180px;min-width:150px;background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:6px 10px;font-size:12.5px">'+
+        '<button class="chip btFiltro" onclick="baixarPlano()">\u2b07\ufe0e Excel</button>'+
+        '<button class="chip btFiltro" onclick="carregarPlano(true)"><span class="soDesk">\u21bb recalcular</span><span class="soCel">\u21bb</span></button>'+
+      '</div>'+
+      '<div id="cpResumo" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px"></div>'+
+      '<div id="cpInfo" class="mut" style="font-size:12px;margin-bottom:6px"></div>'+
+      '<div class="tw"><table id="tCompra"></table></div>'+
     '</div>'+
     '<div class="sec" id="secProg"><h2>📈 Progressão do período <span class="hint">diário · sacada do Bling, com o NOSSO imposto mensal correto</span></h2>'+
       '<div id="grafTot" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px"></div>'+
@@ -1158,6 +1252,7 @@ function render(){
   renderGrafico();
   renderAnalise();
   renderPrevisao(); carregarPrevisao();
+  carregarPlano();
   ajustaSticky();
   montarNavCards();
 }
