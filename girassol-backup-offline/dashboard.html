@@ -26,7 +26,10 @@
   /* cabeçalho: filtros à esquerda · atalhos à direita, tudo dentro da faixa fixa */
   .hbot{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding-bottom:8px}
   .hleft{flex:1 1 auto;min-width:0}
-  .atalhos{flex:0 0 auto;display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;align-items:center;max-width:62%}
+  .atalhos{flex:0 0 auto;display:flex;gap:8px;align-items:flex-start;max-width:62%}
+  /* 5 por linha, sempre — sem depender de onde a linha quebraria sozinha */
+  .atGrid{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;flex:1 1 auto}
+  .atGrid .chip{width:100%;justify-content:center;text-align:center}
   /* com 10 atalhos os botões precisam ser mais enxutos, senão o cabeçalho fixo come a tela */
   .atalhos .chip{white-space:nowrap;padding:5px 9px;font-size:11.5px}
   h1{font-size:17px;font-weight:800;margin:0;letter-spacing:-.02em;display:flex;align-items:center;gap:8px}
@@ -107,6 +110,14 @@
   #tUF td,#tUF th{padding:5px 6px;font-size:12px}
   #tUF td.num,#tUF th.num{padding-left:4px;padding-right:6px}
   #twUF table{min-width:0}
+  /* navegador flutuante entre cards */
+  #navCards{position:fixed;right:14px;bottom:16px;z-index:60;display:flex;flex-direction:column;gap:6px;
+            opacity:0;transition:opacity .18s}
+  #navCards button{width:38px;height:34px;border-radius:9px;cursor:pointer;font-size:13px;line-height:1;
+            background:rgba(19,26,48,.92);border:1px solid var(--line2);color:#cfe0ff;backdrop-filter:blur(4px);
+            box-shadow:0 3px 10px rgba(0,0,0,.4)}
+  #navCards button:hover{background:#1d4ed8;border-color:#1d4ed8;color:#fff}
+  #navCards button.topo{font-size:15px;height:30px;opacity:.85}
   /* cartões de venda (só aparecem no celular) */
   .vcards{display:none}
   .vcard{background:var(--card);border:1px solid var(--line);border-radius:11px;padding:10px 12px}
@@ -216,7 +227,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd129';
+const DASH_BUILD = 'd135';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -273,7 +284,7 @@ const tMs = h => {
 };
 function setSortProd(c){ sortProd = { col:c, dir:(sortProd.col===c ? -sortProd.dir : -1) }; render(); }
 function setSortProj(c){ sortProj = { col:c, dir:(sortProj.col===c ? -sortProj.dir : -1) }; renderProjecao(); }
-function setProjDias(d){ projDias = d; renderProjChips(); renderProjecao(); }
+function setProjDias(d){ projDias = Math.max(1, Math.min(365, Number(d)||14)); const e=document.getElementById('projDiasLivre'); if(e) e.value=projDias; renderProjChips(); renderProjecao(); }
 function renderProjChips(){ const el=document.getElementById('projChips'); if(!el) return; const ops=[[7,'7 dias'],[14,'14 dias'],[30,'30 dias'],[60,'60 dias'],[90,'90 dias']]; el.innerHTML = ops.map(function(o){ return '<button class="chip'+(projDias===o[0]?' on':'')+'" onclick="setProjDias('+o[0]+')">'+o[1]+'</button>'; }).join(''); }
 const seta = (st,c)=> st.col===c ? (st.dir<0?' ↓':' ↑') : '';
 function cmpNull(a,b,dir){ const an=(a==null||!isFinite(a)), bn=(b==null||!isFinite(b)); if(an&&bn)return 0; if(an)return 1; if(bn)return -1; return (a-b)*dir; }
@@ -393,7 +404,7 @@ function renderHistLinhas(iv){
 
 // 🔮 PREVISÃO DE VENDAS POR PRODUTO (o servidor lê o histórico e calcula)
 let PREV = null, prevBase = 180, _prevCarregando = false;
-function setPrevBase(d){ prevBase = d; carregarPrevisao(true); }
+function setPrevBase(d){ prevBase = Math.max(15, Math.min(730, Number(d)||180)); const e=document.getElementById('prevDiasLivre'); if(e) e.value=prevBase; carregarPrevisao(true); }
 async function carregarPrevisao(forcar){
   if(_prevCarregando) return;
   if(PREV && PREV.base_dias===prevBase && !forcar) return;
@@ -407,9 +418,20 @@ async function carregarPrevisao(forcar){
   }catch(e){ if(inf) inf.innerHTML='<span class="warn">'+(e.message||e)+'</span>'; }
   _prevCarregando = false;
 }
+function _prevFiltrada(){
+  if(!PREV || !PREV.produtos) return [];
+  const el=document.getElementById('qPrev'), t=el?el.value:'';
+  return PREV.produtos.filter(x=>casaBusca(t, x.sku, x.desc));
+}
+function baixarPrevisao(){
+  const L=_prevFiltrada();
+  baixarPlanilha('previsao-vendas',
+    ['SKU','Produto','Vendidas na base','Media por dia','Ultimos 30d','30d anteriores','Tendencia %','Previsao 1 semana','Previsao 1 mes','Previsao 3 meses','Previsao 6 meses','Previsao 1 ano'],
+    L.map(x=>[x.sku, x.desc||'', x.un, x.media_dia, x.un30, x.un_30_60, x.tendencia, x.p7, x.p30, x.p90, x.p180, x.p365]));
+}
 function renderPrevisao(){
   const ch=document.getElementById('prevChips');
-  if(ch) ch.innerHTML = [[90,'3 meses'],[180,'6 meses'],[365,'1 ano']]
+  if(ch) ch.innerHTML = [[30,'1 m\u00eas'],[60,'2 meses'],[90,'3 meses'],[180,'6 meses'],[365,'1 ano']]
     .map(function(a){ return '<button class="chip'+(prevBase===a[0]?' on':'')+'" onclick="setPrevBase('+a[0]+')">'+a[1]+'</button>'; }).join('');
   const inf=document.getElementById('prevInfo'), tb=document.getElementById('tPrev');
   if(!PREV || !tb) return;
@@ -420,7 +442,7 @@ function renderPrevisao(){
     '<tr><th>#</th><th>Produto</th><th class="num" title="unidades vendidas na base escolhida">Vendidas</th>'+
     '<th class="num" title="últimos 30 dias contra os 30 anteriores">Tendência</th>'+
     '<th class="num">1 sem</th><th class="num">1 mês</th><th class="num">3 meses</th><th class="num">6 meses</th><th class="num">1 ano</th></tr>'+
-    (PREV.produtos.length ? PREV.produtos.slice(0,150).map(function(x,i){
+    (_prevFiltrada().length ? _prevFiltrada().slice(0,150).map(function(x,i){
       return '<tr>'+
         '<td class="dim">'+(i+1)+'</td>'+
         '<td><b>'+esc(x.sku)+'</b><div class="desc" style="max-width:280px">'+esc(x.desc||'')+'</div></td>'+
@@ -429,7 +451,7 @@ function renderPrevisao(){
         '<td class="num">'+N(x.p7)+'</td><td class="num"><b>'+N(x.p30)+'</b></td><td class="num">'+N(x.p90)+'</td>'+
         '<td class="num">'+N(x.p180)+'</td><td class="num" style="font-weight:800">'+N(x.p365)+'</td>'+
       '</tr>';
-    }).join('') : '<tr><td class="dim" colspan="9" style="padding:14px">sem histórico suficiente no período escolhido</td></tr>');
+    }).join('') : '<tr><td class="dim" colspan="9" style="padding:14px">'+(document.getElementById('qPrev')&&document.getElementById('qPrev').value?'nenhum SKU com esse filtro':'sem histórico suficiente no período escolhido')+'</td></tr>');
 }
 
 // 📚 LISTA do histórico, paginada por pedido (100 por página) — vem do banco, não do cache local
@@ -675,30 +697,32 @@ function montar(){
     '</div>'+
     '<select id="selAtalho" class="selPer selAt" onchange="if(this.value){irPra(this.value);this.selectedIndex=0}">'+
       '<option value="">\u2193 ir para uma se\u00e7\u00e3o\u2026</option>'+
-      '<option value="secBusca">\ud83d\udd0d Buscar pedido</option>'+
-      '<option value="secAnalise">\ud83d\udccb An\u00e1lise de vendas</option>'+
-      '<option value="secTop">\ud83c\udfc6 Top produtos</option>'+
-      '<option value="secCanal">\ud83d\uded2 Por canal</option>'+
-      '<option value="secProj">\ud83d\udce6 Proje\u00e7\u00e3o de estoque</option>'+
-      '<option value="secPrev">\ud83d\udd2e Previs\u00e3o de vendas</option>'+
-      '<option value="secDia">\ud83d\udcc8 Pedidos por dia</option>'+
-      '<option value="secProg">\ud83d\udcc9 Progress\u00e3o do per\u00edodo</option>'+
-      '<option value="secUF">\ud83d\uddfa\ufe0f Vendas por estado</option>'+
-      '<option value="secCfg">\u2699\ufe0f Impostos &amp; taxas</option>'+
+      '<option value="secBusca">🔍 Buscar pedido</option>'+
+      '<option value="secAnalise">📋 Análise de vendas</option>'+
+      '<option value="secTop">🏆 Top produtos</option>'+
+      '<option value="secCanal">🛒 Por canal</option>'+
+      '<option value="secDia">📈 Pedidos por dia</option>'+
+      '<option value="secProj">📦 Projeção de estoque</option>'+
+      '<option value="secPrev">🔮 Previsão de vendas</option>'+
+      '<option value="secProg">📉 Progressão do período</option>'+
+      '<option value="secUF">🗺️ Vendas por estado</option>'+
+      '<option value="secCfg">⚙️ Impostos &amp; taxas</option>'+
     '</select>'+
     '<div class="atalhos">'+
       '<span style="color:var(--mut);font-size:12px;margin-right:2px">ir para:</span>'+
-      '<button class="chip" onclick="irPra(&#39;secBusca&#39;)">🔍 Buscar pedido</button>'+
-      '<button class="chip" onclick="irPra(&#39;secAnalise&#39;)">📋 Análise de vendas</button>'+
-      '<button class="chip" onclick="irPra(&#39;secTop&#39;)">🏆 Top produtos</button>'+
-      '<button class="chip" onclick="irPra(&#39;secCanal&#39;)">🛒 Por canal</button>'+
-      '<button class="chip" onclick="irPra(&#39;secProj&#39;)">📦 Projeção de estoque</button>'+
-      '<button class="chip" onclick="irPra(&#39;secPrev&#39;)">🔮 Previsão de vendas</button>'+
-      '<button class="chip" onclick="irPra(&#39;secDia&#39;)">📈 Pedidos por dia</button>'+
-      '<button class="chip" onclick="irPra(&#39;secProg&#39;)">📉 Progressão do período</button>'+
-      '<button class="chip" onclick="irPra(&#39;secUF&#39;)">🗺️ Vendas por estado</button>'+
-      '<button class="chip" onclick="irPra(&#39;secCfg&#39;)">⚙️ Impostos &amp; taxas</button>'+
+      '<div class="atGrid">'+
+        '<button class="chip" onclick="irPra(&#39;secBusca&#39;)">🔍 Buscar pedido</button>'+
+        '<button class="chip" onclick="irPra(&#39;secAnalise&#39;)">📋 Análise de vendas</button>'+
+        '<button class="chip" onclick="irPra(&#39;secTop&#39;)">🏆 Top produtos</button>'+
+        '<button class="chip" onclick="irPra(&#39;secCanal&#39;)">🛒 Por canal</button>'+
+        '<button class="chip" onclick="irPra(&#39;secDia&#39;)">📈 Pedidos por dia</button>'+
+        '<button class="chip" onclick="irPra(&#39;secProj&#39;)">📦 Projeção de estoque</button>'+
+        '<button class="chip" onclick="irPra(&#39;secPrev&#39;)">🔮 Previsão de vendas</button>'+
+        '<button class="chip" onclick="irPra(&#39;secProg&#39;)">📉 Progressão do período</button>'+
+        '<button class="chip" onclick="irPra(&#39;secUF&#39;)">🗺️ Vendas por estado</button>'+
+        '<button class="chip" onclick="irPra(&#39;secCfg&#39;)">⚙️ Impostos &amp; taxas</button>'+
       '</div>'+
+    '</div>'+
   '</div></div>'+
   '<div class="wrap">'+
       '<div id="histAviso" style="font-size:12px;color:var(--mut);margin:0 0 8px"></div>'+'<div class="kpis" id="kpis"></div>'+
@@ -720,7 +744,7 @@ function montar(){
       '<input id="anSkuInp" placeholder="🔎 pedido, NF, venda ou SKU…" oninput="anSku=this.value;anPage=0;renderAnalise()" style="background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:9px;padding:7px 10px;font-size:12.5px;width:210px">'+
       '<span id="anLPChips" style="display:flex;gap:6px"></span>'+
       '<button class="chip" onclick="sincVendas(this)" title="consulta o Bling AGORA — o sincronizador também roda sozinho a cada 5 min">🔄 atualizar</button>'+
-      '<button class="chip" onclick="baixarCSV()" title="baixa TODAS as vendas do filtro atual — abre no Excel, ideal p/ confrontar com o Jodda linha a linha">⬇︎ CSV</button>'+
+      '<button class="chip" onclick="baixarCSV()" title="baixa TODAS as vendas do período (nos períodos longos ele busca o histórico inteiro no servidor) — abre no Excel, ideal p/ confrontar com o Jodda linha a linha">\u2b07\ufe0e Excel</button>'+
       '<span id="anInfo" class="mut" style="font-size:12px"></span>'+
       '<span style="margin-left:auto"></span>'+
       '<button class="chip" onclick="if(anPage>0){anPage--;renderAnalise();}">← Anterior</button>'+
@@ -731,6 +755,10 @@ function montar(){
       '<div id="anRodape" style="display:none;align-items:center;gap:8px;margin-top:8px;padding:8px;background:var(--bg2);border-radius:9px"></div>'+
       '<div class="nota"><b>Sobre a ordem:</b> dentro de cada dia, ML aparece na hora REAL da venda; TikTok/Shopee/Magalu/Amazon entram pela hora da <b>EMISSÃO da NF</b> (🧾), que acompanha a venda de perto — acabaram os blocos por canal. O 🕘 (hora da conferência) só aparece quando a linha ainda não tem NF. A hora exata da venda desses canais continua existindo <b>só na API do próprio canal</b>. Pra confrontar com o Jodda, use o ⬇︎ CSV e case pelo <b>número da venda no marketplace</b>. · ML mostra a hora REAL da venda (vem da pesca); TikTok/Shopee o Bling não guarda hora — o 🕘 marca que ali está a hora da <b>conferência</b> (a hora da venda desses canais chega quando plugarmos as APIs deles) · colunas (−) são deduções e (+) é crédito · <b>Estorno</b> = o valor exato da linha "Estorno" da venda no ML (no Flex ele já vem líquido: bonificação menos o frete cobrado), somado na M.C. · no Flex o custo do frete é o <b>motoboy</b> configurado no ⚙️ · tarifa <span class="ok">REAL</span> = pescada do ML · <span class="ok">BLING</span> = comissão que o Bling importou do canal (TikTok/Shopee/Magalu) · sem tag = % configurada · custo carrega sob demanda por página · 🛒 = mais de 1 item/unidade</div></div>'+
     '<div class="sec" id="secTop"><h2>🏆 Top produtos <span class="hint">clique nos títulos p/ ordenar ↑↓ · faturamento = SOMA de todos os pedidos do SKU no período · 💎 M.C. = margem dos pedidos rateada por item — o rank do que dá LUCRO de verdade · Curva ABC recalculada pro período pesquisado (A = 80% do faturamento)</span></h2>'+
+      '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px">'+
+        '<input id="qTop" placeholder="\ud83d\udd0e filtrar por SKU ou nome" oninput="renderTopProdutos&&renderTopProdutos();render()" style="flex:1 1 220px;min-width:160px;background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:6px 10px;font-size:12.5px">'+
+        '<button class="chip" onclick="baixarTopProdutos()">\u2b07\ufe0e Excel</button>'+
+      '</div>'+
       '<div class="tw"><table id="tProd"></table></div><div id="prodAviso"></div></div>'+
     '<div class="sec" id="secCanal"><h2>🛒 Por canal</h2><div class="tw"><table id="tCanal"></table></div></div>'+
     '<div class="grid2">'+
@@ -738,7 +766,13 @@ function montar(){
       '<div class="sec"><h2>💰 Faturamento por dia</h2><div class="chartbox"><canvas id="cFat"></canvas></div></div>'+
     '</div>'+
     '<div class="sec" id="secProj"><h2>📦 Projeção de estoque &amp; margem <span class="hint">ritmo de vendas p/ prever a reposição · clique p/ ordenar</span></h2>'+
-      '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:10px"><span style="color:var(--mut);font-size:12px;margin-right:2px">ritmo:</span><span id="projChips" style="display:flex;gap:6px;flex-wrap:wrap"></span></div>'+
+      '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:10px">'+
+        '<span style="color:var(--mut);font-size:12px;margin-right:2px">ritmo:</span><span id="projChips" style="display:flex;gap:6px;flex-wrap:wrap"></span>'+
+        '<input id="projDiasLivre" type="number" min="1" max="365" placeholder="dias" style="width:74px;background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:6px 8px;font-size:12.5px" '+
+          'onkeydown="if(event.key===\'Enter\')setProjDias(Number(this.value)||14)" title="qualquer per\u00edodo: digite os dias e tecle Enter (ex.: 25)">'+
+        '<input id="qProj" placeholder="\ud83d\udd0e filtrar por SKU ou nome" oninput="renderProjecao()" style="flex:1 1 190px;min-width:150px;background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:6px 10px;font-size:12.5px">'+
+        '<button class="chip" onclick="baixarProjecao()">\u2b07\ufe0e Excel</button>'+
+      '</div>'+
       '<div id="projBox" style="margin-bottom:10px;font-size:12px"><span class="mut" id="projStatus">⏳ carregando saldo/preço/custo do Bling… (~30-60s na 1ª vez)</span> '+
       '<button class="btn" id="btnProj" onclick="carregarSkuInfo(true)" style="display:none">↻ recarregar do Bling (ignora cache)</button> <button class="btn sec" onclick="sincCustos()" title="resolve TODOS os custos em background, devagar, sem estourar o limite do Bling — e grava em cache permanente">🐢 sincronizar custos (fundo)</button></div>'+
       '<div class="tw"><table id="tProj"></table></div><div id="projAviso"></div></div>'+
@@ -746,7 +780,11 @@ function montar(){
       '<div class="hint">quanto cada SKU deve vender daqui pra frente, com base no hist\u00f3rico. A proje\u00e7\u00e3o d\u00e1 mais peso aos \u00faltimos 30 dias (reage a produto subindo ou caindo); a coluna <b>tend\u00eancia</b> compara os \u00faltimos 30 dias com os 30 anteriores.</div>'+
       '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0">'+
         '<span class="mut" style="font-size:12px">base de c\u00e1lculo:</span><div id="prevChips" style="display:flex;gap:6px;flex-wrap:wrap"></div>'+
-        '<button class="chip" onclick="carregarPrevisao(true)" style="margin-left:auto">\u21bb recalcular</button>'+
+        '<input id="prevDiasLivre" type="number" min="15" max="730" placeholder="dias" style="width:78px;background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:6px 8px;font-size:12.5px" '+
+          'onkeydown="if(event.key===\'Enter\')setPrevBase(Number(this.value)||180)" title="qualquer per\u00edodo: digite os dias e tecle Enter">'+
+        '<input id="qPrev" placeholder="\ud83d\udd0e filtrar por SKU ou nome" oninput="renderPrevisao()" style="flex:1 1 190px;min-width:150px;background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:6px 10px;font-size:12.5px">'+
+        '<button class="chip" onclick="baixarPrevisao()" title="baixa a tabela como est\u00e1 na tela, com o filtro aplicado">\u2b07\ufe0e Excel</button>'+
+        '<button class="chip" onclick="carregarPrevisao(true)">\u21bb recalcular</button>'+
       '</div>'+
       '<div id="prevInfo" class="mut" style="font-size:12px;margin-bottom:6px"></div>'+
       '<div class="tw"><table id="tPrev"></table></div>'+
@@ -1012,9 +1050,10 @@ function render(){
       '<td class="num">'+(c.flex?'<span class="warn">'+c.flex+'</span>':'<span class="dim">·</span>')+'</td></tr>';}).join('');
 
   // 📚 período longo: o ranking vem do histórico (Supabase), não do cache local
-  const prods = usaHist
+  const _qT = document.getElementById('qTop');
+  const prods = (usaHist
     ? HIST.skus.map(x=>({ sku:x.sku, desc:x.desc, qtd:x.un, qtdV:x.un, fat:x.fat, custo:x.cus, qtdC:x.un, mc:x.mar, qtdM:x.un }))   // 27/07: era 'mcQtd' (nome errado) e a tela mostrava "0/241 un. c/ margem"
-    : Object.values(porProd);
+    : Object.values(porProd)).filter(x=>casaBusca(_qT?_qT.value:'', x.sku, x.desc));
   // d56: curva ABC do PERÍODO pesquisado — ordena por faturamento e acumula: A = até 80% do faturamento · B = 80–95% · C = o resto (sem faturamento = C)
   (function(){
     const pf = prods.slice().sort((a,b)=>(b.fat||0)-(a.fat||0));
@@ -1034,6 +1073,7 @@ function render(){
   });
   const fatTot = prods.reduce((s,p)=>s+p.fat,0)||1;
   const mcTot = prods.reduce((s,p)=>s+(p.mc!=null?p.mc:0),0)||1;   // pra a coluna "% da M.C. total"
+  _topProds = prods;   // guardado pro Excel
   $('tProd').innerHTML = '<tr><th>#</th><th>Produto</th>'+
     '<th class="num sort" onclick="setSortProd(\'curva\')" title="curva ABC do período pesquisado: A concentra 80% do faturamento, B até 95%, C o resto">Curva'+seta(sortProd,'curva')+'</th>'+
     '<th class="num sort" onclick="setSortProd(\'qtd\')">Unid.'+seta(sortProd,'qtd')+'</th>'+
@@ -1080,6 +1120,7 @@ function render(){
   renderAnalise();
   renderPrevisao(); carregarPrevisao();
   ajustaSticky();
+  montarNavCards();
 }
 
 function desenharCharts(labels, sPed, sFat){
@@ -1340,7 +1381,106 @@ function renderGrafico(){
   el.innerHTML=svg;
   $('grafLeg').innerHTML = series.map(sr=>'<span style="color:'+sr[1]+'">\u25CF</span> '+sr[2]).join(' &nbsp; ')+' \u00b7 somas di\u00e1rias \u00b7 M.C. s\u00f3 dos pedidos completos \u00b7 passa o mouse nos pontos';
 }
-function baixarCSV(){
+// baixa TODAS as vendas de um período longo, página por página, direto do histórico
+async function baixarHistoricoCompleto(iv){
+  const btns = document.querySelectorAll('[onclick*="baixarCSV"]');
+  btns.forEach(b=>{ b.disabled=true; b.dataset.txt=b.textContent; b.textContent='⏳ montando…'; });
+  const linhas = [];
+  try{
+    for(let pg=1; pg<=200; pg++){
+      const r = await fetch(MOD+'/historico-linhas?de='+iv.de+'&ate='+iv.ate+'&pagina='+pg+'&lim=200', {credentials:'same-origin'});
+      const d = await r.json().catch(()=>null);
+      if(!d || !d.ok || !d.pedidos || !d.pedidos.length) break;
+      for(const o of d.pedidos){
+        const pcm = o.vnota>0 ? Math.round(o.margem/o.vnota*1000)/10 : '';
+        linhas.push([
+          String(o.data||'').split('-').reverse().join('/'),
+          o.numero, o.numero_loja||'', nomeCanal(canalKey(o.canal)),
+          (o.itens||[]).map(i=>(Number(i.qtd)||1)+'x '+(i.sku||'')).join(' | '),
+          o.un, o.vnota, o.vprod, o.custo, o.imposto, o.comissao, o.frete, o.margem, pcm
+        ]);
+        if(btns.length) btns[0].textContent = '⏳ '+N(linhas.length)+' vendas…';
+      }
+      if(!d.tem_mais && pg>=(d.total_paginas||pg)) break;
+      if(d.total_paginas && pg>=d.total_paginas) break;
+    }
+    baixarPlanilha('analise-vendas-'+iv.de+'_a_'+iv.ate,
+      ['Data','Pedido','Venda no marketplace','Canal','Produtos','Unidades','Venda (NF)','Produtos (R$)','Custo','Imposto','Comissao','Frete vendedor','Margem (M.C.)','Margem %'],
+      linhas);
+  }catch(e){ alert('não consegui montar a planilha: '+(e.message||e)); }
+  btns.forEach(b=>{ b.disabled=false; b.textContent=b.dataset.txt||'⬇︎ Excel'; });
+}
+// ⬆⬇ NAVEGADOR ENTRE CARDS: dois botõezinhos flutuantes no canto. Pulam pro começo do card
+// anterior / seguinte, descontando o cabeçalho fixo (senão o título fica escondido atrás dele).
+function _secoes(){ return Array.prototype.slice.call(document.querySelectorAll('.sec')); }
+function _topoDe(el){
+  const hd=document.querySelector('.hdr');
+  return el.getBoundingClientRect().top + window.pageYOffset - ((hd?hd.offsetHeight:0)+12);
+}
+function irCard(dir){
+  const secs=_secoes(); if(!secs.length) return;
+  const y=window.pageYOffset, tops=secs.map(_topoDe);
+  let alvo;
+  if(dir>0) alvo = tops.find(t=>t > y+4);
+  else { const ant=tops.filter(t=>t < y-4); alvo = ant.length?ant[ant.length-1]:0; }
+  if(alvo==null) alvo = dir>0 ? document.body.scrollHeight : 0;
+  window.scrollTo({top:Math.max(0,alvo), behavior:'smooth'});
+}
+function montarNavCards(){
+  if(document.getElementById('navCards')) return;
+  const d=document.createElement('div');
+  d.id='navCards';
+  d.innerHTML='<button onclick="irCard(-1)" title="card anterior">\u25b2</button>'+
+              '<button onclick="window.scrollTo({top:0,behavior:\'smooth\'})" title="voltar ao topo" class="topo">\u2302</button>'+
+              '<button onclick="irCard(1)" title="pr\u00f3ximo card">\u25bc</button>';
+  document.body.appendChild(d);
+  const mostra=()=>{ d.style.opacity = window.pageYOffset>140 ? '1' : '0';
+                     d.style.pointerEvents = window.pageYOffset>140 ? 'auto' : 'none'; };
+  window.addEventListener('scroll', mostra, {passive:true}); mostra();
+}
+// 28/07: gerador de planilha usado pelos 3 cards (Top produtos, Projeção e Previsão).
+// CSV com BOM e ";" — o Excel em português abre direto, sem tela de importação.
+let _projBase = [], _topProds = [];
+function baixarProjecao(){
+  baixarPlanilha('projecao-estoque',
+    ['SKU','Produto','Vendas '+projDias+'d','Media por dia','Saldo em estoque','Dias de cobertura','Custo unitario','Preco de venda','Margem %'],
+    (_projBase||[]).map(function(x){
+      const i=SKUINFO[x.sku]||{};
+      return [x.sku, i.nome||x.desc||'', x.qtd14, x.md, (i.saldo!=null?i.saldo:''), (x.diasR!=null&&isFinite(x.diasR)?x.diasR:''), (i.custo!=null?i.custo:''), (i.preco!=null?i.preco:''), (x.mgPct!=null?x.mgPct:'')];
+    }));
+}
+function baixarTopProdutos(){
+  baixarPlanilha('top-produtos',
+    ['#','SKU','Produto','Curva ABC','Unidades','Faturamento','Custo','Margem (M.C.)','Margem %','Retorno sobre custo %'],
+    (_topProds||[]).map(function(x,i){
+      const mgp = (x.fat>0 && x.mc!=null) ? Math.round(x.mc/x.fat*100) : '';
+      const ret = (x.custo>0 && x.mc!=null) ? Math.round(x.mc/x.custo*100) : '';
+      return [i+1, x.sku, x.desc||'', x.curva||'', x.qtd, x.fat, (x.custo||0), (x.mc!=null?x.mc:''), mgp, ret];
+    }));
+}
+function baixarPlanilha(nomeArq, cabecalho, linhas){
+  if(!linhas || !linhas.length){ alert('não há linhas para baixar com o filtro atual'); return; }
+  const q = t => '"'+String(t==null?'':t).replace(/"/g,'""')+'"';
+  const cel = v => (typeof v === 'number' && isFinite(v)) ? String(v.toFixed(2)).replace('.',',') : q(v);
+  const txt = '\uFEFF' + cabecalho.map(q).join(';') + '\n' + linhas.map(l=>l.map(cel).join(';')).join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([txt], {type:'text/csv;charset=utf-8'}));
+  a.download = nomeArq + '-' + hojeSP() + '.csv';
+  document.body.appendChild(a); a.click(); a.remove();
+}
+// busca por SKU/nome, sem acento e sem caixa
+const _norm = t => String(t||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+function casaBusca(termo, ...campos){
+  const t = _norm(termo).trim();
+  if(!t) return true;
+  const alvo = campos.map(_norm).join(' ');
+  return t.split(/\s+/).every(p => alvo.indexOf(p) >= 0);
+}
+// 28/07: nos períodos LONGOS (Mês/Ano) a lista da tela é paginada pelo servidor — o CSV baixava
+// só a página aberta. Agora ele varre todas as páginas e entrega o período inteiro.
+async function baixarCSV(){
+  const iv = anIntervalo();
+  if(HIST && HIST.de===iv.de && HIST.ate===iv.ate){ await baixarHistoricoCompleto(iv); return; }
   if(!_anLP || !_anLP.length){ alert('sem vendas no filtro atual'); return; }
   const br = v => (v==null||!isFinite(v)) ? '' : String(Number(v).toFixed(2)).replace('.',',');   // decimal BR p/ o Excel
   const q = t => '"'+String(t==null?'':t).replace(/"/g,'""')+'"';
@@ -1750,8 +1890,10 @@ function renderMapaUF(porUF){
       '<span style="margin-left:auto">nº de pedidos \u00b7 passe o mouse p/ % e faturamento</span></div>';
 }
 function renderProjecao(){
-  const base = topSkus14();
-  if(!base.length){ $('tProj').innerHTML='<tr><td class="dim">sem vendas nos últimos '+projDias+' dias</td></tr>'; return; }
+  const _qP = document.getElementById('qProj');
+  const base = topSkus14().filter(x=>casaBusca(_qP?_qP.value:'', x.sku, (SKUINFO[x.sku]&&SKUINFO[x.sku].nome)||x.desc||''));
+  _projBase = base;   // guardado pro Excel
+  if(!base.length){ $('tProj').innerHTML='<tr><td class="dim" style="padding:14px">'+((_qP&&_qP.value)?'nenhum SKU com esse filtro':('sem vendas nos últimos '+projDias+' dias'))+'</td></tr>'; return; }
   const linhas = base.map(t=>{
     const info = SKUINFO[t.sku]||{};
     const md = t.qtd/projDias;
