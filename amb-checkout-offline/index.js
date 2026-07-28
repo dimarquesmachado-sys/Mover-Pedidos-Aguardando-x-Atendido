@@ -2,7 +2,6 @@
 
 // ════════════════════════════════════════════════════════════════════════
 //  AMBTOTAL · CHECKOUT OFFLINE — FASE 1 (poller) + FASE 2 (bipagem)   (Mover-Pedidos)
-//  amb-checkout-offline v28/06 b9   (a versão real é a const VERSAO abaixo)
 // ════════════════════════════════════════════════════════════════════════
 //  Módulo do orquestrador unificado (HTTP-native, sem Express).
 //  Reaproveita o token Bling da AMBTotal via ../ambtotal/tokenManager.
