@@ -83,8 +83,13 @@ async function getPedidosPorStatus(token, statusId, dataInicial, dataFinal) {
   let totalBruto = 0;
   for (let pag = 1; pag <= MAX_PAGINAS; pag++) {
     const url =
+      // 🐛 28/07 — os parâmetros CERTOS da API v3 do Bling para PEDIDOS são dataInicial/dataFinal.
+      // Com "dataEmissaoInicial/Final" (que não existem aqui) o Bling IGNORAVA o filtro e devolvia
+      // TODOS os pedidos naquela situação, de todos os tempos. Como o F1 processa só os primeiros
+      // MAX_F1 da lista, ele mastigava os mais ANTIGOS e nunca chegava nos pedidos do dia.
+      // (O endpoint /nfe mais abaixo usa dataEmissaoInicial de verdade — aquele está certo.)
       `${BLING_API}/pedidos/vendas?idsSituacoes=${statusId}` +
-      `&dataEmissaoInicial=${dataInicial}&dataEmissaoFinal=${dataFinal}` +
+      `&dataInicial=${dataInicial}&dataFinal=${dataFinal}` +
       `&limite=100&pagina=${pag}`;
     const resp = await fetchComRetry(
       url,
