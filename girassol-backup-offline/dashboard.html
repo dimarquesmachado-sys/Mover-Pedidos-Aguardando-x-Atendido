@@ -110,6 +110,9 @@
   #tUF td,#tUF th{padding:5px 6px;font-size:12px}
   #tUF td.num,#tUF th.num{padding-left:4px;padding-right:6px}
   #twUF table{min-width:0}
+  /* coluna com explicação: sublinhado pontilhado discreto avisa que dá pra passar o mouse */
+  th[title]{cursor:help;text-decoration:underline dotted rgba(255,255,255,.28);text-underline-offset:3px}
+  th[title]:hover{color:#cfe0ff}
   /* navegador flutuante entre cards */
   #navCards{position:fixed;right:14px;bottom:16px;z-index:60;display:flex;flex-direction:column;gap:6px;
             opacity:0;transition:opacity .18s}
@@ -131,6 +134,8 @@
   .vcB b{font-size:12.5px;font-variant-numeric:tabular-nums}
   .selPer{display:none}
   .selAt{display:none}
+  .selFiltro{display:none}
+  .soCel{display:none}
   .covResumo{display:none}
   .btnVivo{display:none;background:#38bdf822;border:1px solid #38bdf855;color:#7dd3fc;border-radius:8px;
            padding:6px 10px;font-size:15px;cursor:pointer;line-height:1}
@@ -164,6 +169,29 @@
     .btnVivo{display:inline-block}
     .kpiVivo{display:none}                    /* o 🔄 do topo faz o mesmo papel */
     #kpis .kpi:last-child:nth-child(odd){grid-column:1 / -1}
+    /* ── barras de filtro dos cards ──
+       mesma ideia do cabeçalho: o que era uma fileira de botões vira um seletor.
+       linha 1: [período ▾] [dias]   ·   linha 2: [buscar SKU] [⬇ Excel] [↻] */
+    /* !important porque esses dois têm display:flex escrito no próprio elemento, e estilo
+       embutido ganha da folha de estilo — sem isso os botões continuavam aparecendo junto do seletor */
+    #prevChips,#projChips,.rotFiltro{display:none!important}
+    .soDesk{display:none}
+    .soCel{display:inline}
+    .selFiltro{display:block;flex:1 1 calc(100% - 84px);min-width:0;
+               background:var(--bg2);border:1px solid var(--line);color:var(--tx);
+               border-radius:9px;padding:9px 10px;font-size:14px;font-weight:700}
+    .campoDias{flex:0 0 76px!important;order:2}
+    .campoBusca{flex:1 1 calc(100% - 132px)!important;order:3}
+    .btFiltro{order:4;flex:0 0 auto;padding:9px 11px;font-size:12.5px}
+    /* no celular elas viravam uma fileira apertada; agora a busca ocupa a linha toda
+       e os botões/campos pequenos ficam embaixo, sem espremer */
+    #qPrev,#qProj,#qTop{flex:1 1 100%!important;min-width:0!important;font-size:16px!important;padding:9px 10px!important}
+    #prevDiasLivre,#projDiasLivre{width:70px!important;font-size:14px!important}
+    #prevChips,#projChips{gap:5px}
+    #prevChips .chip,#projChips .chip{padding:7px 10px;font-size:12.5px}
+    /* navegador flutuante: um pouco maior no dedo e fora do caminho do rodapé */
+    #navCards{right:10px;bottom:12px;gap:5px}
+    #navCards button{width:42px;height:38px;font-size:14px}
     /* previsão: no celular só o essencial (produto, vendidas, tendência, 1 mês, 1 ano) */
     #tPrev tr>*:nth-child(1),#tPrev tr>*:nth-child(5),#tPrev tr>*:nth-child(7),#tPrev tr>*:nth-child(8){display:none}
     #tPrev table,#tPrev{min-width:0}
@@ -227,7 +255,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd135';
+const DASH_BUILD = 'd141';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -285,7 +313,12 @@ const tMs = h => {
 function setSortProd(c){ sortProd = { col:c, dir:(sortProd.col===c ? -sortProd.dir : -1) }; render(); }
 function setSortProj(c){ sortProj = { col:c, dir:(sortProj.col===c ? -sortProj.dir : -1) }; renderProjecao(); }
 function setProjDias(d){ projDias = Math.max(1, Math.min(365, Number(d)||14)); const e=document.getElementById('projDiasLivre'); if(e) e.value=projDias; renderProjChips(); renderProjecao(); }
-function renderProjChips(){ const el=document.getElementById('projChips'); if(!el) return; const ops=[[7,'7 dias'],[14,'14 dias'],[30,'30 dias'],[60,'60 dias'],[90,'90 dias']]; el.innerHTML = ops.map(function(o){ return '<button class="chip'+(projDias===o[0]?' on':'')+'" onclick="setProjDias('+o[0]+')">'+o[1]+'</button>'; }).join(''); }
+function renderProjChips(){
+  const sd=document.getElementById('projSelDias');
+  if(sd){ const OPS=[[7,'7 dias'],[14,'14 dias'],[30,'30 dias'],[60,'60 dias'],[90,'90 dias']];
+          const extra = OPS.some(a=>a[0]===projDias) ? '' : '<option value="'+projDias+'" selected>'+projDias+' dias</option>';
+          sd.innerHTML = OPS.map(a=>'<option value="'+a[0]+'"'+(projDias===a[0]?' selected':'')+'>'+a[1]+'</option>').join('')+extra; }
+  const el=document.getElementById('projChips'); if(!el) return; const ops=[[7,'7 dias'],[14,'14 dias'],[30,'30 dias'],[60,'60 dias'],[90,'90 dias']]; el.innerHTML = ops.map(function(o){ return '<button class="chip'+(projDias===o[0]?' on':'')+'" onclick="setProjDias('+o[0]+')">'+o[1]+'</button>'; }).join(''); }
 const seta = (st,c)=> st.col===c ? (st.dir<0?' ↓':' ↑') : '';
 function cmpNull(a,b,dir){ const an=(a==null||!isFinite(a)), bn=(b==null||!isFinite(b)); if(an&&bn)return 0; if(an)return 1; if(bn)return -1; return (a-b)*dir; }
 
@@ -357,9 +390,9 @@ function renderHistLinhas(iv){
   const ps=HLIN.pedidos||[];
   const pgAtual=HLIN.pagina||1, totPg=HLIN.total_paginas||1;
   tb.innerHTML =
-    '<tr><th>Data</th><th>Pedido</th><th>Canal</th><th>Produto</th><th class="num">Un.</th>'+
-    '<th class="num">Venda NF</th><th class="num">Custo (−)</th><th class="num">Imposto (−)</th>'+
-    '<th class="num">Tarifa (−)</th><th class="num">Frete vend. (−)</th><th class="num">💎 M.C.</th><th class="num">MC %</th></tr>'+
+    '<tr><th title="dia da venda">Data</th><th title="número do pedido no Bling · ✓ verde = já bipado · ✓ laranja = aguardando bipagem · ✕ = cancelado">Pedido</th><th title="onde a venda aconteceu">Canal</th><th title="SKU(s) do pedido">Produto</th><th class="num" title="total de unidades do pedido">Un.</th>'+
+    '<th class="num" title="total da NOTA FISCAL do pedido — já com o frete embutido quando o canal lança">Venda NF</th><th class="num" title="quanto a mercadoria custou: custo unitário × quantidade, do banco de custos do Bling">Custo (−)</th><th class="num" title="Simples Nacional — alíquota do MÊS da venda aplicada sobre o valor da nota">Imposto (−)</th>'+
+    '<th class="num" title="comissão do marketplace — REAL quando o canal informa; senão a % que você configurou lá embaixo">Tarifa (−)</th><th class="num" title="frete que sai do SEU bolso: real do ML, motoboy do Flex ou estimativa do Bling">Frete vend. (−)</th><th class="num" title="margem de contribuição: venda − imposto − comissão − frete − custo">💎 M.C.</th><th class="num" title="a margem em % sobre o valor dos produtos">MC %</th></tr>'+
     (ps.length? ps.map(function(o){
       const pcm = o.vnota>0 ? Math.round(o.margem/o.vnota*1000)/10 : null;
       const skus = (o.itens||[]).map(function(i){ return (i.qtd>1?i.qtd+'× ':'')+esc(i.sku||''); }).join('<br>');
@@ -431,7 +464,11 @@ function baixarPrevisao(){
 }
 function renderPrevisao(){
   const ch=document.getElementById('prevChips');
-  if(ch) ch.innerHTML = [[30,'1 m\u00eas'],[60,'2 meses'],[90,'3 meses'],[180,'6 meses'],[365,'1 ano']]
+  const OPS_PREV = [[30,'1 m\u00eas'],[60,'2 meses'],[90,'3 meses'],[180,'6 meses'],[365,'1 ano']];
+  const sb=document.getElementById('prevSelBase');
+  if(sb){ const extra = OPS_PREV.some(a=>a[0]===prevBase) ? '' : '<option value="'+prevBase+'" selected>'+prevBase+' dias</option>';
+          sb.innerHTML = OPS_PREV.map(a=>'<option value="'+a[0]+'"'+(prevBase===a[0]?' selected':'')+'>'+a[1]+'</option>').join('')+extra; }
+  if(ch) ch.innerHTML = OPS_PREV
     .map(function(a){ return '<button class="chip'+(prevBase===a[0]?' on':'')+'" onclick="setPrevBase('+a[0]+')">'+a[1]+'</button>'; }).join('');
   const inf=document.getElementById('prevInfo'), tb=document.getElementById('tPrev');
   if(!PREV || !tb) return;
@@ -439,9 +476,9 @@ function renderPrevisao(){
     (PREV.cache?' <span class="mut">(do cache — recalcula a cada 30 min)</span>':'');
   const seta = function(t){ return t>=25 ? '<span class="ok">▲ '+t+'%</span>' : (t<=-25 ? '<span class="bad">▼ '+t+'%</span>' : '<span class="mut">≈ '+(t>0?'+':'')+t+'%</span>'); };
   tb.innerHTML =
-    '<tr><th>#</th><th>Produto</th><th class="num" title="unidades vendidas na base escolhida">Vendidas</th>'+
+    '<tr><th title="posição no ranking">#</th><th title="SKU(s) do pedido">Produto</th><th class="num" title="unidades vendidas na base escolhida">Vendidas</th>'+
     '<th class="num" title="últimos 30 dias contra os 30 anteriores">Tendência</th>'+
-    '<th class="num">1 sem</th><th class="num">1 mês</th><th class="num">3 meses</th><th class="num">6 meses</th><th class="num">1 ano</th></tr>'+
+    '<th class="num" title="quantas unidades devem sair em 1 SEMANA, mantido o ritmo atual">1 sem</th><th class="num" title="previsão para 30 dias — costuma ser a mais útil pra decidir compra">1 mês</th><th class="num" title="previsão para 90 dias">3 meses</th><th class="num" title="previsão para 180 dias">6 meses</th><th class="num" title="previsão para 365 dias — serve pra dimensionar importação">1 ano</th></tr>'+
     (_prevFiltrada().length ? _prevFiltrada().slice(0,150).map(function(x,i){
       return '<tr>'+
         '<td class="dim">'+(i+1)+'</td>'+
@@ -767,11 +804,12 @@ function montar(){
     '</div>'+
     '<div class="sec" id="secProj"><h2>📦 Projeção de estoque &amp; margem <span class="hint">ritmo de vendas p/ prever a reposição · clique p/ ordenar</span></h2>'+
       '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:10px">'+
-        '<span style="color:var(--mut);font-size:12px;margin-right:2px">ritmo:</span><span id="projChips" style="display:flex;gap:6px;flex-wrap:wrap"></span>'+
-        '<input id="projDiasLivre" type="number" min="1" max="365" placeholder="dias" style="width:74px;background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:6px 8px;font-size:12.5px" '+
+        '<span class="rotFiltro" style="color:var(--mut);font-size:12px;margin-right:2px">ritmo:</span><span id="projChips" style="display:flex;gap:6px;flex-wrap:wrap"></span>'+
+        '<select id="projSelDias" class="selFiltro" onchange="setProjDias(Number(this.value))"></select>'+
+        '<input id="projDiasLivre" class="campoDias" type="number" min="1" max="365" placeholder="dias" style="width:74px;background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:6px 8px;font-size:12.5px" '+
           'onkeydown="if(event.key===\'Enter\')setProjDias(Number(this.value)||14)" title="qualquer per\u00edodo: digite os dias e tecle Enter (ex.: 25)">'+
-        '<input id="qProj" placeholder="\ud83d\udd0e filtrar por SKU ou nome" oninput="renderProjecao()" style="flex:1 1 190px;min-width:150px;background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:6px 10px;font-size:12.5px">'+
-        '<button class="chip" onclick="baixarProjecao()">\u2b07\ufe0e Excel</button>'+
+        '<input id="qProj" class="campoBusca" placeholder="\ud83d\udd0e filtrar por SKU ou nome" oninput="renderProjecao()" style="flex:1 1 190px;min-width:150px;background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:6px 10px;font-size:12.5px">'+
+        '<button class="chip btFiltro" onclick="baixarProjecao()">\u2b07\ufe0e Excel</button>'+
       '</div>'+
       '<div id="projBox" style="margin-bottom:10px;font-size:12px"><span class="mut" id="projStatus">⏳ carregando saldo/preço/custo do Bling… (~30-60s na 1ª vez)</span> '+
       '<button class="btn" id="btnProj" onclick="carregarSkuInfo(true)" style="display:none">↻ recarregar do Bling (ignora cache)</button> <button class="btn sec" onclick="sincCustos()" title="resolve TODOS os custos em background, devagar, sem estourar o limite do Bling — e grava em cache permanente">🐢 sincronizar custos (fundo)</button></div>'+
@@ -779,12 +817,13 @@ function montar(){
     '<div class="sec" id="secPrev"><h2>🔮 Previs\u00e3o de vendas por produto</h2>'+
       '<div class="hint">quanto cada SKU deve vender daqui pra frente, com base no hist\u00f3rico. A proje\u00e7\u00e3o d\u00e1 mais peso aos \u00faltimos 30 dias (reage a produto subindo ou caindo); a coluna <b>tend\u00eancia</b> compara os \u00faltimos 30 dias com os 30 anteriores.</div>'+
       '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0">'+
-        '<span class="mut" style="font-size:12px">base de c\u00e1lculo:</span><div id="prevChips" style="display:flex;gap:6px;flex-wrap:wrap"></div>'+
-        '<input id="prevDiasLivre" type="number" min="15" max="730" placeholder="dias" style="width:78px;background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:6px 8px;font-size:12.5px" '+
+        '<span class="mut rotFiltro" style="font-size:12px">base de c\u00e1lculo:</span><div id="prevChips" style="display:flex;gap:6px;flex-wrap:wrap"></div>'+
+        '<select id="prevSelBase" class="selFiltro" onchange="setPrevBase(Number(this.value))"></select>'+
+        '<input id="prevDiasLivre" class="campoDias" type="number" min="15" max="730" placeholder="dias" style="width:78px;background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:6px 8px;font-size:12.5px" '+
           'onkeydown="if(event.key===\'Enter\')setPrevBase(Number(this.value)||180)" title="qualquer per\u00edodo: digite os dias e tecle Enter">'+
-        '<input id="qPrev" placeholder="\ud83d\udd0e filtrar por SKU ou nome" oninput="renderPrevisao()" style="flex:1 1 190px;min-width:150px;background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:6px 10px;font-size:12.5px">'+
-        '<button class="chip" onclick="baixarPrevisao()" title="baixa a tabela como est\u00e1 na tela, com o filtro aplicado">\u2b07\ufe0e Excel</button>'+
-        '<button class="chip" onclick="carregarPrevisao(true)">\u21bb recalcular</button>'+
+        '<input id="qPrev" class="campoBusca" placeholder="\ud83d\udd0e filtrar por SKU ou nome" oninput="renderPrevisao()" style="flex:1 1 190px;min-width:150px;background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:6px 10px;font-size:12.5px">'+
+        '<button class="chip btFiltro" onclick="baixarPrevisao()" title="baixa a tabela como est\u00e1 na tela, com o filtro aplicado">\u2b07\ufe0e Excel</button>'+
+        '<button class="chip btFiltro" onclick="carregarPrevisao(true)" title="refaz o c\u00e1lculo agora, sem esperar o cache de 30 min"><span class="soDesk">\u21bb recalcular</span><span class="soCel">\u21bb</span></button>'+
       '</div>'+
       '<div id="prevInfo" class="mut" style="font-size:12px;margin-bottom:6px"></div>'+
       '<div class="tw"><table id="tPrev"></table></div>'+
@@ -1040,7 +1079,7 @@ function render(){
   if(usaHist){ porCanal = {}; for(const c of Object.keys(HIST.canais)){ const h2=HIST.canais[c]; porCanal[c]={ped:h2.pedidos, fat:h2.fat, comValor:h2.pedidos, flex:0}; } }
   const canais = Object.keys(porCanal).sort((a,b)=>porCanal[b].ped-porCanal[a].ped);
   const NOME = {mercadolivre:'Mercado Livre',ml:'Mercado Livre',shopee:'Shopee',magalu:'Magalu',amazon:'Amazon',tiktok:'TikTok',madeira:'MadeiraMadeira',leroy:'Leroy Merlin',outro:'Outro'};
-  $('tCanal').innerHTML = '<tr><th>Canal</th><th class="num">Pedidos</th><th class="num">%</th><th class="num">Faturamento</th><th class="num">Ticket médio</th><th class="num">⚡ Flex</th></tr>'+
+  $('tCanal').innerHTML = '<tr><th title="onde a venda aconteceu">Canal</th><th class="num" title="quantos pedidos no período filtrado">Pedidos</th><th class="num" title="participação no total do período">%</th><th class="num" title="soma do valor das notas no período">Faturamento</th><th class="num" title="faturamento ÷ pedidos do canal">Ticket médio</th><th class="num" title="pedidos entregues por Flex (motoboy próprio)">⚡ Flex</th></tr>'+
     canais.map(mk=>{const c=porCanal[mk];const p=pc(c.ped,totPed||PER.length);
       return '<tr><td><b>'+esc(NOME[mk]||mk)+'</b></td>'+
       '<td class="num"><div style="display:flex;align-items:center;gap:8px;justify-content:flex-end"><div class="bar" style="width:64px;flex:none"><i style="width:'+p+'%"></i></div><b>'+N(c.ped)+'</b></div></td>'+
@@ -1074,16 +1113,16 @@ function render(){
   const fatTot = prods.reduce((s,p)=>s+p.fat,0)||1;
   const mcTot = prods.reduce((s,p)=>s+(p.mc!=null?p.mc:0),0)||1;   // pra a coluna "% da M.C. total"
   _topProds = prods;   // guardado pro Excel
-  $('tProd').innerHTML = '<tr><th>#</th><th>Produto</th>'+
+  $('tProd').innerHTML = '<tr><th title="posição no ranking">#</th><th title="SKU(s) do pedido">Produto</th>'+
     '<th class="num sort" onclick="setSortProd(\'curva\')" title="curva ABC do período pesquisado: A concentra 80% do faturamento, B até 95%, C o resto">Curva'+seta(sortProd,'curva')+'</th>'+
-    '<th class="num sort" onclick="setSortProd(\'qtd\')">Unid.'+seta(sortProd,'qtd')+'</th>'+
-    '<th class="num sort" onclick="setSortProd(\'fat\')">Faturamento'+seta(sortProd,'fat')+'</th>'+
+    '<th class="num sort" title="unidades vendidas do SKU no período (soma as quantidades de todos os pedidos)" onclick="setSortProd(\'qtd\')">Unid.'+seta(sortProd,'qtd')+'</th>'+
+    '<th class="num sort" onclick="setSortProd(\'fat\')" title="soma do valor das notas no período">Faturamento'+seta(sortProd,'fat')+'</th>'+
     '<th class="num sort" onclick="setSortProd(\'custo\')" title="custo total do SKU no período (custo unitário × unidades vendidas)">Custo'+seta(sortProd,'custo')+'</th>'+
     '<th class="num sort" onclick="setSortProd(\'mc\')" title="Lucro Bruto = margem de contribuição rateada dos pedidos deste SKU no período (o que sobra depois de imposto, comissão e custo)">💎 Lucro Bruto'+seta(sortProd,'mc')+'</th>'+
     '<th class="num sort" onclick="setSortProd(\'mcpct\')" title="margem de contribuição ÷ faturamento do SKU (quanto sobra por real vendido)">M.C. %'+seta(sortProd,'mcpct')+'</th>'+
     '<th class="num sort" onclick="setSortProd(\'mcusto\')" title="Retorno sobre o custo: quanto de lucro cada R$1 gasto no produto devolve. Ex.: 200% = pra cada R$1 de custo, o produto gera R$2 de lucro. Quanto maior, mais eficiente é o dinheiro parado nesse SKU">Retorno/custo'+seta(sortProd,'mcusto')+'</th>'+
     '<th class="num" title="quanto este SKU representa da M.C. total do período">% M.C.</th>'+
-    '<th class="num">% fat.</th><th style="width:12%"></th></tr>'+
+    '<th class="num" title="quanto esse produto representa do faturamento do período">% fat.</th><th style="width:12%"></th></tr>'+
     ord.slice(0,50).map((p,i)=>{
       const pf=Math.round(p.fat/fatTot*100);
       const parcial = p.qtdV < p.qtd;
@@ -1105,7 +1144,7 @@ function render(){
   $('prodAviso').innerHTML = semFatUn ? '<div class="aviso">⚠️ <b>'+N(semFatUn)+' unidades</b> do período ainda sem valor gravado — o faturamento por produto soma só as valoradas (etiqueta âmbar "x/y un."). Complete o <b>backfill de detalhes</b>.</div>' : '';
 
   const ufs = Object.keys(porUF).sort((a,b)=>porUF[b].ped-porUF[a].ped);
-  $('tUF').innerHTML = '<tr><th>UF</th><th class="num">Pedidos</th><th class="num">%</th><th class="num">Faturamento</th><th style="width:26%"></th></tr>'+
+  $('tUF').innerHTML = '<tr><th title="estado do cliente, pela nota fiscal">UF</th><th class="num" title="quantos pedidos no período filtrado">Pedidos</th><th class="num" title="participação no total do período">%</th><th class="num" title="soma do valor das notas no período">Faturamento</th><th style="width:26%"></th></tr>'+
     (ufs.slice(0,15).map(u=>{const c=porUF[u];const p=pc(c.ped,comUF||1);
       return '<tr><td><b>'+esc(u)+'</b></td><td class="num">'+N(c.ped)+'</td><td class="num dim">'+p+'%</td>'+
       '<td class="num ok">'+(c.fat?BRL(c.fat):'<span class="dim">—</span>')+'</td>'+
@@ -1245,7 +1284,7 @@ function buscarPed(q){
     return (h.itens||[]).some(it=> String(it.sku||'').toLowerCase().includes(q) || String(it.descricao||'').toLowerCase().includes(q));
   }).slice(0,15);
   if(!hits.length){ res.innerHTML='<div class="dim" style="padding:8px">nada encontrado</div>'; return; }
-  res.innerHTML = '<table><tr><th>Data</th><th>Pedido</th><th>Canal</th><th>Cliente</th><th class="num">Total</th><th></th></tr>'+
+  res.innerHTML = '<table><tr><th title="dia da venda">Data</th><th title="número do pedido no Bling · ✓ verde = já bipado · ✓ laranja = aguardando bipagem · ✕ = cancelado">Pedido</th><th title="onde a venda aconteceu">Canal</th><th title="nome do comprador no marketplace">Cliente</th><th class="num" title="valor total do pedido">Total</th><th></th></tr>'+
     hits.map(h=>'<tr><td class="dim">'+diaVenda(h)+'</td><td><b>'+esc(h.numero||h.id)+'</b>'+(h.id?' <a href="https://www.bling.com.br/vendas.php#edit/'+esc(h.id)+'" target="_blank" rel="noopener" title="abrir o pedido no Bling" style="font-size:10px;color:#3b82f6;text-decoration:none;font-weight:600">Bling↗</a>':'')+(h.nf_numero?'<div class="desc">NF '+esc(h.nf_numero)+(h.nf_id?' <a href="https://www.bling.com.br/notas.fiscais.php#edit/'+esc(h.nf_id)+'" target="_blank" rel="noopener" title="abrir a NF no Bling" style="color:#3b82f6;text-decoration:none;font-weight:600">↗</a>':'')+'</div>':'')+'</td>'+
       '<td>'+esc(canalKey(h.marketplace))+'</td><td class="desc" style="max-width:200px">'+esc(h.cliente||'')+'</td>'+
       '<td class="num">'+(h.valor!=null?BRL(Number(h.valor)):'<span class="dim">—</span>')+'</td>'+
@@ -1460,14 +1499,40 @@ function baixarTopProdutos(){
 }
 function baixarPlanilha(nomeArq, cabecalho, linhas){
   if(!linhas || !linhas.length){ alert('não há linhas para baixar com o filtro atual'); return; }
-  const q = t => '"'+String(t==null?'':t).replace(/"/g,'""')+'"';
-  const cel = v => (typeof v === 'number' && isFinite(v)) ? String(v.toFixed(2)).replace('.',',') : q(v);
-  const txt = '\uFEFF' + cabecalho.map(q).join(';') + '\n' + linhas.map(l=>l.map(cel).join(';')).join('\n');
+  // 28/07: passou de CSV para XLS DE VERDADE (formato XML do Excel). Vantagem: número vai como
+  // NÚMERO — dá pra somar, ordenar e filtrar na planilha sem precisar converter nada. E abre com
+  // dois cliques, sem tela de importação, independente do separador do Windows.
+  const esc = t => String(t==null?'':t)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g,'');
+  const cel = v => (typeof v === 'number' && isFinite(v))
+      ? '<Cell><Data ss:Type="Number">'+v+'</Data></Cell>'
+      : '<Cell><Data ss:Type="String">'+esc(v)+'</Data></Cell>';
+  const larguras = cabecalho.map((c,i)=>{
+    let m = String(c).length;
+    for(const l of linhas){ const t=String(l[i]==null?'':l[i]); if(t.length>m) m=t.length; }
+    return '<Column ss:AutoFitWidth="0" ss:Width="'+Math.min(320, Math.max(58, m*6.6))+'"/>';
+  }).join('');
+  const xml =
+    '<?xml version="1.0" encoding="UTF-8"?>\n<?mso-application progid="Excel.Sheet"?>\n'+
+    '<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">'+
+    '<Styles>'+
+      '<Style ss:ID="cab"><Font ss:Bold="1" ss:Color="#1F3864"/><Interior ss:Color="#DDEBF7" ss:Pattern="Solid"/>'+
+        '<Alignment ss:Vertical="Center"/><Borders><Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#9DC3E6"/></Borders></Style>'+
+    '</Styles>'+
+    '<Worksheet ss:Name="Dados"><Table>'+ larguras +
+      '<Row ss:StyleID="cab">'+ cabecalho.map(c=>'<Cell ss:StyleID="cab"><Data ss:Type="String">'+esc(c)+'</Data></Cell>').join('') +'</Row>'+
+      linhas.map(l=>'<Row>'+l.map(cel).join('')+'</Row>').join('')+
+    '</Table>'+
+    '<WorksheetOptions xmlns="urn:schemas-microsoft-com:office:excel"><FreezePanes/><FrozenNoSplit/>'+
+      '<SplitHorizontal>1</SplitHorizontal><TopRowBottomPane>1</TopRowBottomPane><ActivePane>2</ActivePane></WorksheetOptions>'+
+    '</Worksheet></Workbook>';
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([txt], {type:'text/csv;charset=utf-8'}));
-  a.download = nomeArq + '-' + hojeSP() + '.csv';
+  a.href = URL.createObjectURL(new Blob(['\uFEFF'+xml], {type:'application/vnd.ms-excel;charset=utf-8'}));
+  a.download = nomeArq + '-' + hojeSP() + '.xls';
   document.body.appendChild(a); a.click(); a.remove();
 }
+
 // busca por SKU/nome, sem acento e sem caixa
 const _norm = t => String(t||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
 function casaBusca(termo, ...campos){
@@ -1482,8 +1547,9 @@ async function baixarCSV(){
   const iv = anIntervalo();
   if(HIST && HIST.de===iv.de && HIST.ate===iv.ate){ await baixarHistoricoCompleto(iv); return; }
   if(!_anLP || !_anLP.length){ alert('sem vendas no filtro atual'); return; }
-  const br = v => (v==null||!isFinite(v)) ? '' : String(Number(v).toFixed(2)).replace('.',',');   // decimal BR p/ o Excel
-  const q = t => '"'+String(t==null?'':t).replace(/"/g,'""')+'"';
+  // 28/07: valores CRUS (número vai como número no XLS; texto como texto)
+  const num = v => (v==null || !isFinite(v)) ? '' : Number(Number(v).toFixed(2));
+  const txt = t => (t==null ? '' : String(t));
   const cab = ['Dia da venda','Hora','Fonte da hora','Pedido','NF','Venda no marketplace','Pack ML','Order ML','Canal','Situacao','SKUs','Unidades','Venda NF','R$ Produtos','Custo','Imposto','Tarifa','Fonte da tarifa','Frete vendedor','Fonte do frete','Estorno ML (credito)','Margem de contribuicao','MC %'];
   const linhas = _anLP.map(x=>{
     const h=x.h, P=x.P;
@@ -1491,22 +1557,19 @@ async function baixarCSV(){
     const skus=(h.itens||[]).map(i=>i.sku).join(' | ');
     const d2=diaVenda(h);
     return [
-      q(d2?(d2.slice(8,10)+'/'+d2.slice(5,7)+'/'+d2.slice(0,4)):''),
-      q(h.venda_em?dtBR(h.venda_em).slice(6):''),
-      q(h.venda_em?'venda (API do canal)':'sem hora do canal'),
-      q(h.numero||h.id), q(h.nf_numero||''), q(h.numero_loja||''), q(h.ml_pack||''), q(h.ml_order||''), q(P.ck), q(h._sit||(h.sintetico?'nao bipada':'bipada')), q(skus), unid,
-      br(P.tot), br(P.rp), br(P.custoOk?P.custo:null), br(P.imposto), br(P.tarifa),
-      q(P.feeReal!=null?'REAL (ML)':(P.feeBling!=null?'Bling':(P.tx!=null?'% configurada':''))),
-      br(P.frV), q(P.frFonte==='ml'?'real ML':(P.frFonte==='magalu'?('Magalu '+(P.magFreteFonte==='prov'?'previsto':'real')):(P.frFonte==='bling'?'Bling':(P.frFonte==='flex'?'FLEX (config)':'')))),
-      br(P.credito),
-      br(P.mc), (P.mc!=null&&P.rp)?Math.round(P.mc/P.rp*100):''
-    ].join(';');
+      txt(d2?(d2.slice(8,10)+'/'+d2.slice(5,7)+'/'+d2.slice(0,4)):''),
+      txt(h.venda_em?dtBR(h.venda_em).slice(6):''),
+      txt(h.venda_em?'venda (API do canal)':'sem hora do canal'),
+      txt(h.numero||h.id), txt(h.nf_numero||''), txt(h.numero_loja||''), txt(h.ml_pack||''), txt(h.ml_order||''),
+      txt(nomeCanal(P.ck)), txt(h._sit||(h.sintetico?'nao bipada':'bipada')), txt(skus), unid,
+      num(P.tot), num(P.rp), num(P.custoOk?P.custo:null), num(P.imposto), num(P.tarifa),
+      txt(P.feeReal!=null?'REAL (ML)':(P.feeBling!=null?'Bling':(P.tx!=null?'% configurada':''))),
+      num(P.frV), txt(P.frFonte==='ml'?'real ML':(P.frFonte==='magalu'?('Magalu '+(P.magFreteFonte==='prov'?'previsto':'real')):(P.frFonte==='bling'?'Bling':(P.frFonte==='flex'?'FLEX (config)':'')))),
+      num(P.credito),
+      num(P.mc), (P.mc!=null&&P.rp)?Math.round(P.mc/P.rp*100):''
+    ];
   });
-  const txt = '\uFEFF' + cab.map(q).join(';') + '\n' + linhas.join('\n');
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([txt], {type:'text/csv;charset=utf-8'}));
-  a.download = 'analise-vendas-'+hojeSP()+'.csv';
-  document.body.appendChild(a); a.click(); a.remove();
+  baixarPlanilha('analise-vendas', cab, linhas);   // 28/07: mesma planilha XLS dos outros cards
 }
 const anBuscaOk = q => h => {
   // casa com: nº do pedido, nº da NF, nº da venda no marketplace, id do Bling ou SKU (pedaço serve)
@@ -1768,9 +1831,9 @@ function renderAnalise(){
     '</tr>';
   }).join('');
   $('tAnalise').innerHTML =
-    '<tr><th>Data/hora</th><th>Pedido</th><th>Venda (mkt)</th><th>Canal</th><th>Produto</th><th class="num">Un.</th>'+
-    '<th class="num" title="total da NOTA FISCAL (com frete embutido, quando o canal lança)">Venda NF</th><th class="num" title="só os produtos: preço × quantidade">R$ Produtos</th><th class="num">Custo (−)</th><th class="num">Imposto (−)</th>'+
-    '<th class="num">Tarifa (−)</th><th class="num">Frete vend. (−)</th><th class="num">Estorno (+)</th><th class="num">💎 M.C.</th><th class="num">MC %</th></tr>'+
+    '<tr><th title="quando a venda aconteceu — hora REAL do canal quando ele informa; senão a hora da nota ou da conferência">Data/hora</th><th title="número do pedido no Bling · ✓ verde = já bipado · ✓ laranja = aguardando bipagem · ✕ = cancelado">Pedido</th><th title="número da venda no marketplace — clique pra copiar">Venda (mkt)</th><th title="onde a venda aconteceu">Canal</th><th title="SKU(s) do pedido">Produto</th><th class="num" title="total de unidades do pedido">Un.</th>'+
+    '<th class="num" title="total da NOTA FISCAL (com frete embutido, quando o canal lança)">Venda NF</th><th class="num" title="só os produtos: preço × quantidade">R$ Produtos</th><th class="num" title="quanto a mercadoria custou: custo unitário × quantidade, do banco de custos do Bling">Custo (−)</th><th class="num" title="Simples Nacional — alíquota do MÊS da venda aplicada sobre o valor da nota">Imposto (−)</th>'+
+    '<th class="num" title="comissão do marketplace — REAL quando o canal informa; senão a % que você configurou lá embaixo">Tarifa (−)</th><th class="num" title="frete que sai do SEU bolso: real do ML, motoboy do Flex ou estimativa do Bling">Frete vend. (−)</th><th class="num" title="crédito devolvido pelo marketplace (ex.: tarifa estornada) — SOMA na margem">Estorno (+)</th><th class="num" title="margem de contribuição: venda − imposto − comissão − frete − custo">💎 M.C.</th><th class="num" title="a margem em % sobre o valor dos produtos">MC %</th></tr>'+
     (linhas || '<tr><td class="dim" colspan="15">sem vendas no período</td></tr>')+
     (pag.length?('<tr style="border-top:2px solid var(--line2)"><td colspan="6" style="font-weight:800">Σ desta página'+(maxP>0?(' <span class="mut" style="font-weight:400;font-size:11px">('+pag.length+' de '+LP.length+' — o total do período está lá em cima)</span>'):'')+'</td>'+
       cel(T.tot)+cel(T.rp,'ok')+cel(T.cus)+cel(T.imp)+cel(T.tar)+cel(T.frv)+cel(T.cre,'ok')+
@@ -1907,8 +1970,17 @@ function renderProjecao(){
   });
   linhas.sort((a,b)=>cmpNull(a[sortProj.col], b[sortProj.col], sortProj.dir));
   let margemTot=0, margemCob=0;
-  const th=(col,lbl)=>'<th class="num sort" onclick="setSortProj(\''+col+'\')">'+lbl+seta(sortProj,col)+'</th>';
-  $('tProj').innerHTML = '<tr><th>SKU</th>'+th('qtd14','Vendas '+projDias+'d')+th('md','média/dia')+th('saldo','Saldo')+th('diasR','Acaba em')+th('compra','Comprar p/ 30d')+th('custo','Custo')+th('mUn','Margem un.')+'</tr>'+
+  const AJUDA_PROJ = {
+    qtd14:'quantas unidades sa\u00edram no per\u00edodo do ritmo escolhido a\u00ed em cima',
+    md:'m\u00e9dia de unidades por dia no mesmo per\u00edodo \u2014 \u00e9 a base de tudo aqui',
+    saldo:'saldo em estoque hoje, direto do Bling',
+    diasR:'em quantos dias o estoque acaba se continuar vendendo nesse ritmo',
+    comprar:'quanto comprar pra ter 30 dias de estoque \u2014 j\u00e1 descontando o que voc\u00ea tem',
+    custo:'custo unit\u00e1rio cadastrado no Bling',
+    mgUn:'quanto sobra por unidade vendida: pre\u00e7o \u2212 custo \u2212 imposto \u2212 comiss\u00e3o'
+  };
+  const th=(col,lbl)=>'<th class="num sort" title="'+esc(AJUDA_PROJ[col]||'')+'" onclick="setSortProj(\''+col+'\')">'+lbl+seta(sortProj,col)+'</th>';
+  $('tProj').innerHTML = '<tr><th title="código do produto no Bling">SKU</th>'+th('qtd14','Vendas '+projDias+'d')+th('md','média/dia')+th('saldo','Saldo')+th('diasR','Acaba em')+th('compra','Comprar p/ 30d')+th('custo','Custo')+th('mUn','Margem un.')+'</tr>'+
     linhas.map(t=>{
       if(t.mUn!=null){ margemTot += t.mUn*t.qtdV; margemCob++; }
       const stt = t.diasR==null ? '<span class="dim">—</span>'
