@@ -185,7 +185,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd116';
+const DASH_BUILD = 'd117';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -353,6 +353,47 @@ function renderHistLinhas(iv){
       sel+
       (pgAtual<totPg?'<button class="chip" style="background:#1d4ed8;border-color:#1d4ed8;color:#fff;font-weight:700" onclick="histIrPagina('+(pgAtual+1)+')">Próxima →</button>':'<span class="mut" style="font-size:12px">última página</span>');
   }
+}
+
+// 🔮 PREVISÃO DE VENDAS POR PRODUTO (o servidor lê o histórico e calcula)
+let PREV = null, prevBase = 180, _prevCarregando = false;
+function setPrevBase(d){ prevBase = d; carregarPrevisao(true); }
+async function carregarPrevisao(forcar){
+  if(_prevCarregando) return;
+  if(PREV && PREV.base_dias===prevBase && !forcar) return;
+  _prevCarregando = true;
+  const inf=document.getElementById('prevInfo'); if(inf) inf.textContent = '⏳ calculando com '+prevBase+' dias de histórico…';
+  try{
+    const r = await fetch(MOD+'/previsao-vendas?base='+prevBase, {credentials:'same-origin'});
+    const d = await r.json().catch(()=>null);
+    if(d && d.ok){ PREV = d; renderPrevisao(); }
+    else if(inf) inf.innerHTML = '<span class="warn">não consegui calcular</span>';
+  }catch(e){ if(inf) inf.innerHTML='<span class="warn">'+(e.message||e)+'</span>'; }
+  _prevCarregando = false;
+}
+function renderPrevisao(){
+  const ch=document.getElementById('prevChips');
+  if(ch) ch.innerHTML = [[90,'3 meses'],[180,'6 meses'],[365,'1 ano']]
+    .map(function(a){ return '<button class="chip'+(prevBase===a[0]?' on':'')+'" onclick="setPrevBase('+a[0]+')">'+a[1]+'</button>'; }).join('');
+  const inf=document.getElementById('prevInfo'), tb=document.getElementById('tPrev');
+  if(!PREV || !tb) return;
+  if(inf) inf.innerHTML = 'base: '+PREV.de+' → '+PREV.ate+' · '+N(PREV.linhas)+' itens vendidos · '+N(PREV.skus)+' SKUs'+
+    (PREV.cache?' <span class="mut">(do cache — recalcula a cada 30 min)</span>':'');
+  const seta = function(t){ return t>=25 ? '<span class="ok">▲ '+t+'%</span>' : (t<=-25 ? '<span class="bad">▼ '+t+'%</span>' : '<span class="mut">≈ '+(t>0?'+':'')+t+'%</span>'); };
+  tb.innerHTML =
+    '<tr><th>#</th><th>Produto</th><th class="num" title="unidades vendidas na base escolhida">Vendidas</th>'+
+    '<th class="num" title="últimos 30 dias contra os 30 anteriores">Tendência</th>'+
+    '<th class="num">1 sem</th><th class="num">1 mês</th><th class="num">3 meses</th><th class="num">6 meses</th><th class="num">1 ano</th></tr>'+
+    (PREV.produtos.length ? PREV.produtos.slice(0,150).map(function(x,i){
+      return '<tr>'+
+        '<td class="dim">'+(i+1)+'</td>'+
+        '<td><b>'+esc(x.sku)+'</b><div class="desc" style="max-width:280px">'+esc(x.desc||'')+'</div></td>'+
+        '<td class="num">'+N(x.un)+'<div class="mut" style="font-size:10px">'+String(x.media_dia).replace('.',',')+'/dia</div></td>'+
+        '<td class="num">'+seta(x.tendencia)+'<div class="mut" style="font-size:10px">'+N(x.un30)+' vs '+N(x.un_30_60)+'</div></td>'+
+        '<td class="num">'+N(x.p7)+'</td><td class="num"><b>'+N(x.p30)+'</b></td><td class="num">'+N(x.p90)+'</td>'+
+        '<td class="num">'+N(x.p180)+'</td><td class="num" style="font-weight:800">'+N(x.p365)+'</td>'+
+      '</tr>';
+    }).join('') : '<tr><td class="dim" colspan="9" style="padding:14px">sem histórico suficiente no período escolhido</td></tr>');
 }
 
 // 📚 LISTA do histórico, paginada por pedido (100 por página) — vem do banco, não do cache local
@@ -595,6 +636,7 @@ function montar(){
       '<button class="chip" onclick="irPra(&#39;secBusca&#39;)">🔍 Buscar pedido</button>'+
       '<button class="chip" onclick="irPra(&#39;secAnalise&#39;)">📋 Análise de vendas</button>'+
       '<button class="chip" onclick="irPra(&#39;secTop&#39;)">🏆 Top produtos</button>'+
+      '<button class="chip" onclick="irPra(&#39;secPrev&#39;)">🔮 Previsão</button>'+
       '<button class="chip" onclick="irPra(&#39;secCanal&#39;)">🛒 Por canal</button>'+
       '<button class="chip" onclick="irPra(&#39;secProj&#39;)">📦 Projeção de estoque</button>'+
       '</div>'+
@@ -631,6 +673,15 @@ function montar(){
       '<div class="nota"><b>Sobre a ordem:</b> dentro de cada dia, ML aparece na hora REAL da venda; TikTok/Shopee/Magalu/Amazon entram pela hora da <b>EMISSÃO da NF</b> (🧾), que acompanha a venda de perto — acabaram os blocos por canal. O 🕘 (hora da conferência) só aparece quando a linha ainda não tem NF. A hora exata da venda desses canais continua existindo <b>só na API do próprio canal</b>. Pra confrontar com o Jodda, use o ⬇︎ CSV e case pelo <b>número da venda no marketplace</b>. · ML mostra a hora REAL da venda (vem da pesca); TikTok/Shopee o Bling não guarda hora — o 🕘 marca que ali está a hora da <b>conferência</b> (a hora da venda desses canais chega quando plugarmos as APIs deles) · colunas (−) são deduções e (+) é crédito · <b>Estorno</b> = o valor exato da linha "Estorno" da venda no ML (no Flex ele já vem líquido: bonificação menos o frete cobrado), somado na M.C. · no Flex o custo do frete é o <b>motoboy</b> configurado no ⚙️ · tarifa <span class="ok">REAL</span> = pescada do ML · <span class="ok">BLING</span> = comissão que o Bling importou do canal (TikTok/Shopee/Magalu) · sem tag = % configurada · custo carrega sob demanda por página · 🛒 = mais de 1 item/unidade</div></div>'+
     '<div class="sec" id="secTop"><h2>🏆 Top produtos <span class="hint">clique nos títulos p/ ordenar ↑↓ · faturamento = SOMA de todos os pedidos do SKU no período · 💎 M.C. = margem dos pedidos rateada por item — o rank do que dá LUCRO de verdade · Curva ABC recalculada pro período pesquisado (A = 80% do faturamento)</span></h2>'+
       '<div class="tw"><table id="tProd"></table></div><div id="prodAviso"></div></div>'+
+    '<div class="sec" id="secPrev"><h2>\U0001f52e Previs\u00e3o de vendas por produto</h2>'+
+      '<div class="hint">quanto cada SKU deve vender daqui pra frente, com base no hist\u00f3rico. A proje\u00e7\u00e3o d\u00e1 mais peso aos \u00faltimos 30 dias (reage a produto subindo ou caindo); a coluna <b>tend\u00eancia</b> compara os \u00faltimos 30 dias com os 30 anteriores.</div>'+
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0">'+
+        '<span class="mut" style="font-size:12px">base de c\u00e1lculo:</span><div id="prevChips" style="display:flex;gap:6px;flex-wrap:wrap"></div>'+
+        '<button class="chip" onclick="carregarPrevisao(true)" style="margin-left:auto">\u21bb recalcular</button>'+
+      '</div>'+
+      '<div id="prevInfo" class="mut" style="font-size:12px;margin-bottom:6px"></div>'+
+      '<div class="tw"><table id="tPrev"></table></div>'+
+    '</div>'+
     '<div class="sec" id="secCanal"><h2>🛒 Por canal</h2><div class="tw"><table id="tCanal"></table></div></div>'+
     '<div class="grid2">'+
       '<div class="sec"><h2>📈 Pedidos por dia</h2><div class="chartbox"><canvas id="cPed"></canvas></div></div>'+
@@ -967,6 +1018,7 @@ function render(){
   renderCfg();
   renderGrafico();
   renderAnalise();
+  renderPrevisao(); carregarPrevisao();
   ajustaSticky();
 }
 
