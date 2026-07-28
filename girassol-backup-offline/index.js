@@ -2,7 +2,6 @@
 
 // ════════════════════════════════════════════════════════════════════════
 //  GIRASSOL · BACKUP OFFLINE — FASE 1 (poller) + FASE 2 (bipagem)   (Mover-Pedidos)
-//  girassol-backup-offline v28/06 b9   (a versão real é a const VERSAO abaixo)
 // ════════════════════════════════════════════════════════════════════════
 //  Módulo do orquestrador unificado (HTTP-native, sem Express).
 //  Reaproveita o token Bling da Girassol via ../girassol/tokenManager.
@@ -41,7 +40,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v28/07 b65';
+const VERSAO     = 'girassol-backup-offline v28/07 b66';
 
 // ── SESSÃO DE OPERADOR (cookie assinado HMAC) — protege rotas de dados/ação ──
 // Segredo estável entre restarts. Usa ADMIN_KEY (já configurada no Render) como base.
@@ -895,6 +894,72 @@ function routes(readBody) {
       json(res, 200, { ok: true, msg: '✅ backfill iniciado em background (só Girassol). Acompanhe em /backfill-status. Ele deleta o período antes e regrava, então pode rodar de novo sem duplicar.', de, ate });
       return true;
     }
+    // 🔮 PREVISÃO DE VENDAS POR PRODUTO — usa o histórico do Supabase.
+    // Uso: /girassol-backup-offline/previsao-vendas?base=180  (dias de histórico usados como base)
+    // Devolve, por SKU: o que vendeu na base, a média por dia, a TENDÊNCIA (últimos 30d x 30d
+    // anteriores) e a projeção pra 7 / 30 / 90 / 180 / 365 dias.
+    if (method === 'GET' && p === '/girassol-backup-offline/previsao-vendas') {
+      const kP = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const sessP = validarSessao(req.headers['cookie']);
+      if (!((process.env.ADMIN_KEY && kP === process.env.ADMIN_KEY) || (sessP && ehAdmin(sessP)))) { json(res, 404, { error: 'not found' }); return true; }
+      const baseDias = Math.min(730, Math.max(30, parseInt((urlObj.searchParams && urlObj.searchParams.get('base')) || '180', 10) || 180));
+      const hojeP = new Date();
+      const dePV = new Date(hojeP.getTime() - baseDias * 86400000).toISOString().slice(0, 10);
+      const atePV = hojeP.toISOString().slice(0, 10);
+      const ck = 'prev|' + baseDias + '|' + atePV;
+      if (_histCache[ck] && (Date.now() - _histCache[ck].ts) < 1800000) { json(res, 200, Object.assign({ cache: true }, _histCache[ck].dados)); return true; }
+      const { url: uP, key: kkP } = supaCfg('girassol');
+      if (!uP || !kkP) { json(res, 500, { ok: false, erro: 'Supabase não configurado' }); return true; }
+      const HP = { apikey: kkP, Authorization: 'Bearer ' + kkP };
+      const corte30 = new Date(hojeP.getTime() - 30 * 86400000).toISOString().slice(0, 10);
+      const corte60 = new Date(hojeP.getTime() - 60 * 86400000).toISOString().slice(0, 10);
+      const porSku = {};
+      let diasComVenda = new Set(), offP = 0, linhasLidas = 0;
+      try {
+        while (offP < 120000) {
+          const rq = await fetch(uP.replace(/\/+$/, '') + '/rest/v1/vendas_historico?empresa=eq.girassol&data_venda=gte.' + dePV + '&data_venda=lte.' + atePV +
+                    '&select=sku,descricao,quantidade,valor_produto,margem,data_venda&order=data_venda.asc&limit=1000&offset=' + offP, { headers: HP });
+          if (!rq.ok) break;
+          const ln = await rq.json().catch(() => []);
+          if (!Array.isArray(ln) || !ln.length) break;
+          linhasLidas += ln.length;
+          for (const l of ln) {
+            const sk = l.sku || '(sem sku)';
+            if (!porSku[sk]) porSku[sk] = { sku: sk, desc: l.descricao || '', un: 0, fat: 0, mar: 0, un30: 0, un3060: 0, dias: new Set() };
+            const o = porSku[sk], q = Number(l.quantidade) || 0, d = String(l.data_venda || '').slice(0, 10);
+            o.un += q; o.fat += Number(l.valor_produto) || 0; o.mar += Number(l.margem) || 0;
+            if (d >= corte30) o.un30 += q; else if (d >= corte60) o.un3060 += q;
+            if (d) { o.dias.add(d); diasComVenda.add(d); }
+          }
+          if (ln.length < 1000) break;
+          offP += 1000;
+        }
+      } catch (e) { json(res, 500, { ok: false, erro: String(e.message || e) }); return true; }
+      const lista = Object.values(porSku).map(o => {
+        const mediaDia = o.un / baseDias;
+        // tendência: últimos 30 dias contra os 30 anteriores
+        const tend = o.un3060 > 0 ? ((o.un30 - o.un3060) / o.un3060) : (o.un30 > 0 ? 1 : 0);
+        // a projeção usa a média recente quando há histórico recente (reage melhor), com piso na média geral
+        const mediaRec = o.un30 / 30;
+        const base = (o.un30 > 0 ? (mediaRec * 0.7 + mediaDia * 0.3) : mediaDia);
+        const pr = d => Math.round(base * d);
+        return {
+          sku: o.sku, desc: o.desc, un: o.un, fat: Math.round(o.fat * 100) / 100,
+          margem: Math.round(o.mar * 100) / 100,
+          dias_com_venda: o.dias.size,
+          media_dia: Math.round(mediaDia * 1000) / 1000,
+          un30: o.un30, un_30_60: o.un3060,
+          tendencia: Math.round(tend * 100),
+          p7: pr(7), p30: pr(30), p90: pr(90), p180: pr(180), p365: pr(365)
+        };
+      }).filter(x => x.un > 0).sort((a, b) => b.p365 - a.p365).slice(0, 400);
+      const dados = { ok: true, base_dias: baseDias, de: dePV, ate: atePV, linhas: linhasLidas,
+                      dias_com_venda: diasComVenda.size, skus: lista.length, produtos: lista };
+      _histCache[ck] = { ts: Date.now(), dados };
+      json(res, 200, dados);
+      return true;
+    }
+
     // LISTA do histórico, paginada por PEDIDO (o banco guarda 1 linha por ITEM, então agrupa antes).
     // Uso: /girassol-backup-offline/historico-linhas?de=&ate=&off=0&lim=100
     if (method === 'GET' && p === '/girassol-backup-offline/historico-linhas') {
@@ -1607,7 +1672,9 @@ function routes(readBody) {
       if (!process.env.ADMIN_KEY || kD !== process.env.ADMIN_KEY) { json(res, 404, { error: 'not found' }); return true; }
       const isoDD = dt => dt.toISOString().slice(0, 10);
       const hjD = new Date(); const inD = new Date(hjD); inD.setDate(inD.getDate() - 3); const fiD = new Date(hjD); fiD.setDate(fiD.getDate() + 1);
-      const rD = await blingGet('/pedidos/vendas?dataEmissaoInicial=' + isoDD(inD) + '&dataEmissaoFinal=' + isoDD(fiD) + '&pagina=1&limite=3');
+      // 28/07: parâmetro CERTO da API v3 (dataInicial/dataFinal). O antigo dataEmissaoInicial não existe
+      // e era ignorado pelo Bling, que devolvia pedidos de qualquer data.
+      const rD = await blingGet('/pedidos/vendas?dataInicial=' + isoDD(inD) + '&dataFinal=' + isoDD(fiD) + '&pagina=1&limite=3');
       json(res, 200, { ok: !!(rD && rD.ok), itens_crus: (rD && rD.data && rD.data.data) || [], loja_mkt_mapa: LOJA_MKT });
       return true;
     }
@@ -3410,7 +3477,9 @@ async function vendasSync() {
     const atual = readJson(F, {});
     let paginas = 0;
     for (let pg = 1; pg <= 20; pg++) {
-      const r = await blingGet('/pedidos/vendas?dataEmissaoInicial=' + isoD(ini) + '&dataEmissaoFinal=' + isoD(fim) + '&pagina=' + pg + '&limite=100');
+      // 28/07: idem — antes o vendasSync trazia os mais recentes de QUALQUER data e só não quebrava
+      // por causa do limite de páginas + filtro no frontend. Agora a janela vale de verdade.
+      const r = await blingGet('/pedidos/vendas?dataInicial=' + isoD(ini) + '&dataFinal=' + isoD(fim) + '&pagina=' + pg + '&limite=100');
       const lista = (r && r.ok && r.data && r.data.data) || [];
       if (!lista.length) break;
       paginas++;
