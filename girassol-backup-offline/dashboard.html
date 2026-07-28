@@ -157,11 +157,26 @@
     #tPrev table,#tPrev{min-width:0}
     .selPer{display:block;width:100%;background:var(--bg2);border:1px solid var(--line);color:var(--tx);
             border-radius:9px;padding:9px 10px;font-size:14px;font-weight:700}
-    /* cobertura: só o resumo; toca e abre */
-    .covResumo{display:inline-flex;align-items:center;gap:5px;cursor:pointer;border:0;font:inherit}
+    /* ── CABEÇALHO COMPACTO ── */
+    /* o resumo mora SÓ no topo (ao lado do checkout); o de baixo sai de cena */
+    #coverTopo .covResumo{display:inline-flex;align-items:center;gap:5px;cursor:pointer;border:0;font:inherit}
+    #cover .covResumo{display:none}
     #cover .covItem{display:none}
     #cover.aberto .covItem{display:inline-flex}
-    #cover{gap:6px}
+    #cover{gap:6px;margin-top:4px}
+    /* título menor, numa linha só */
+    h1{font-size:16px;line-height:1.25}
+    .hrow{gap:6px;align-items:flex-start}
+    h1{flex:1 1 100%}
+    /* 🔄 · ← checkout · status: tudo numa linha, à esquerda */
+    .hlinks{flex-direction:row!important;align-items:center!important;gap:10px;width:100%;
+            justify-content:flex-start!important;flex-wrap:wrap;margin-top:-2px}
+    .hlinks>div{gap:10px!important}
+    /* os dois seletores lado a lado */
+    .hbot{flex-direction:row!important;gap:8px;align-items:flex-start}
+    .hleft{flex:1 1 0;min-width:0}
+    .selAt{flex:1 1 0;min-width:0;margin-top:0}
+    .selPer,.selAt{padding:8px 8px;font-size:13px}
     .atalhos{max-width:100%;justify-content:flex-start;overflow-x:auto;flex-wrap:nowrap!important;
              -webkit-overflow-scrolling:touch;padding-bottom:2px}
     .atalhos .chip{flex:0 0 auto;white-space:nowrap}
@@ -198,7 +213,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd120';
+const DASH_BUILD = 'd121';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
