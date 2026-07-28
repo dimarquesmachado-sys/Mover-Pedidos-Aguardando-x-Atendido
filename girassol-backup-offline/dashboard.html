@@ -26,8 +26,9 @@
   /* cabeçalho: filtros à esquerda · atalhos à direita, tudo dentro da faixa fixa */
   .hbot{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding-bottom:8px}
   .hleft{flex:1 1 auto;min-width:0}
-  .atalhos{flex:0 0 auto;display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;align-items:center;max-width:52%}
-  .atalhos .chip{white-space:nowrap}
+  .atalhos{flex:0 0 auto;display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;align-items:center;max-width:62%}
+  /* com 10 atalhos os botões precisam ser mais enxutos, senão o cabeçalho fixo come a tela */
+  .atalhos .chip{white-space:nowrap;padding:5px 9px;font-size:11.5px}
   h1{font-size:17px;font-weight:800;margin:0;letter-spacing:-.02em;display:flex;align-items:center;gap:8px}
   h1 .logo{width:30px;height:30px;border-radius:9px;background:linear-gradient(135deg,#fbbf24,#f59e0b);
            display:inline-flex;align-items:center;justify-content:center;font-size:16px}
@@ -215,7 +216,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd127';
+const DASH_BUILD = 'd129';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -680,6 +681,10 @@ function montar(){
       '<option value="secCanal">\ud83d\uded2 Por canal</option>'+
       '<option value="secProj">\ud83d\udce6 Proje\u00e7\u00e3o de estoque</option>'+
       '<option value="secPrev">\ud83d\udd2e Previs\u00e3o de vendas</option>'+
+      '<option value="secDia">\ud83d\udcc8 Pedidos por dia</option>'+
+      '<option value="secProg">\ud83d\udcc9 Progress\u00e3o do per\u00edodo</option>'+
+      '<option value="secUF">\ud83d\uddfa\ufe0f Vendas por estado</option>'+
+      '<option value="secCfg">\u2699\ufe0f Impostos &amp; taxas</option>'+
     '</select>'+
     '<div class="atalhos">'+
       '<span style="color:var(--mut);font-size:12px;margin-right:2px">ir para:</span>'+
@@ -689,6 +694,10 @@ function montar(){
       '<button class="chip" onclick="irPra(&#39;secCanal&#39;)">🛒 Por canal</button>'+
       '<button class="chip" onclick="irPra(&#39;secProj&#39;)">📦 Projeção de estoque</button>'+
       '<button class="chip" onclick="irPra(&#39;secPrev&#39;)">🔮 Previsão de vendas</button>'+
+      '<button class="chip" onclick="irPra(&#39;secDia&#39;)">📈 Pedidos por dia</button>'+
+      '<button class="chip" onclick="irPra(&#39;secProg&#39;)">📉 Progressão do período</button>'+
+      '<button class="chip" onclick="irPra(&#39;secUF&#39;)">🗺️ Vendas por estado</button>'+
+      '<button class="chip" onclick="irPra(&#39;secCfg&#39;)">⚙️ Impostos &amp; taxas</button>'+
       '</div>'+
   '</div></div>'+
   '<div class="wrap">'+
@@ -725,7 +734,7 @@ function montar(){
       '<div class="tw"><table id="tProd"></table></div><div id="prodAviso"></div></div>'+
     '<div class="sec" id="secCanal"><h2>🛒 Por canal</h2><div class="tw"><table id="tCanal"></table></div></div>'+
     '<div class="grid2">'+
-      '<div class="sec"><h2>📈 Pedidos por dia</h2><div class="chartbox"><canvas id="cPed"></canvas></div></div>'+
+      '<div class="sec" id="secDia"><h2>📈 Pedidos por dia</h2><div class="chartbox"><canvas id="cPed"></canvas></div></div>'+
       '<div class="sec"><h2>💰 Faturamento por dia</h2><div class="chartbox"><canvas id="cFat"></canvas></div></div>'+
     '</div>'+
     '<div class="sec" id="secProj"><h2>📦 Projeção de estoque &amp; margem <span class="hint">ritmo de vendas p/ prever a reposição · clique p/ ordenar</span></h2>'+
@@ -742,12 +751,12 @@ function montar(){
       '<div id="prevInfo" class="mut" style="font-size:12px;margin-bottom:6px"></div>'+
       '<div class="tw"><table id="tPrev"></table></div>'+
     '</div>'+
-    '<div class="sec"><h2>📈 Progressão do período <span class="hint">diário · sacada do Bling, com o NOSSO imposto mensal correto</span></h2>'+
+    '<div class="sec" id="secProg"><h2>📈 Progressão do período <span class="hint">diário · sacada do Bling, com o NOSSO imposto mensal correto</span></h2>'+
       '<div id="grafTot" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px"></div>'+
       '<div id="grafProg" style="overflow-x:auto"></div>'+
       '<div class="nota" id="grafLeg"></div></div>'+
-    '<div class="sec"><h2>🗺️ Vendas por estado</h2><div style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start;justify-content:center"><div style="flex:0 1 340px;min-width:260px"><div class="tw" id="twUF"><table id="tUF"></table></div><div id="ufAviso"></div></div><div id="ufMapa" style="flex:1 1 420px;min-width:300px;max-width:620px"></div></div></div>'+
-    '<div class="sec"><h2>⚙️ Impostos &amp; taxas <span class="hint">alíquota do Simples varia mês a mês · taxas de marketplace em % (estimativa; ML tem a REAL por pedido na busca)</span></h2>'+
+    '<div class="sec" id="secUF"><h2>🗺️ Vendas por estado</h2><div style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start;justify-content:center"><div style="flex:0 1 340px;min-width:260px"><div class="tw" id="twUF"><table id="tUF"></table></div><div id="ufAviso"></div></div><div id="ufMapa" style="flex:1 1 420px;min-width:300px;max-width:620px"></div></div></div>'+
+    '<div class="sec" id="secCfg"><h2>⚙️ Impostos &amp; taxas <span class="hint">alíquota do Simples varia mês a mês · taxas de marketplace em % (estimativa; ML tem a REAL por pedido na busca)</span></h2>'+
       '<div id="cfgBox"></div>'+
       '<div style="font-size:12px;color:var(--mut);margin:14px 0 6px">🚛 Motoboy do FLEX pago pela loja (R$) — de fábrica: <b>ML R$ 12</b> · <b>Shopee R$ 9</b> · <b>demais R$ 9</b>. Entra como custo quando o pedido é FLEX.</div>'+
     '<div style="display:flex;gap:14px;flex-wrap:wrap">'+
