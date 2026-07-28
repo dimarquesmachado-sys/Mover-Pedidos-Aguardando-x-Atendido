@@ -45,9 +45,18 @@ async function temEtiquetaML(mlToken, numeroLoja) {
     const shipmentId = await getShipmentInfo(mlToken, numeroLoja);
     const { status, substatus } = await getShipmentSubstatus(mlToken, shipmentId);
     console.log(`[ML] numeroLoja=${numeroLoja} shipment=${shipmentId} status=${status} substatus=${substatus}`);
-    // Proteção caso de borda: status pronto p/ envio → tem etiqueta (mesmo se substatus='buffered')
+    // 27/07 — CORREÇÃO: 'ready_to_ship' NÃO significa que a etiqueta existe.
+    // O substatus 'invoice_pending' quer dizer que o ML ainda não fechou a etapa dele (a etiqueta
+    // NÃO é imprimível — a API responde NOT_PRINTABLE_STATUS). Antes esses pedidos eram tratados
+    // como "tem etiqueta" e ficavam parados em ATENDIDO, entupindo a lista do galpão com pedido
+    // que ninguém consegue despachar. Agora eles voltam pra AGUARDANDO e retornam sozinhos quando
+    // a etiqueta liberar.
+    const SEM_ETIQUETA_AINDA = ['invoice_pending', 'buffered', 'ready_to_print_pending', 'regenerating'];
+    if (SEM_ETIQUETA_AINDA.includes(String(substatus || ''))) {
+      console.log(`[ML] numeroLoja=${numeroLoja} substatus=${substatus} — etiqueta AINDA não imprimível, pode mover`);
+      return false;
+    }
     if (status === 'ready_to_ship') return true;
-    if (substatus === 'buffered') return false;
     return true;
   } catch (e) {
     console.warn(`[ML] Erro ao consultar ${numeroLoja}: ${e.message} — assumindo sem etiqueta`);
