@@ -215,7 +215,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd123';
+const DASH_BUILD = 'd124';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -371,8 +371,8 @@ function renderHistLinhas(iv){
     return { numero:o.numero, canal:nomeCanal(canalKey(o.canal)), hora:String(o.data||'').slice(8,10)+'/'+String(o.data||'').slice(5,7),
              skus:(o.itens||[]).map(function(i){return '<div style="margin-bottom:3px"><b style="color:#7dd3fc">'+(Number(i.qtd)||1)+'\u00d7</b> '+esc(i.sku||'')+'</div>';}).join(''),
              venda:o.vnota, custo:(o.custo||null), mc:o.margem, pc:(o.vnota>0?Math.round(o.margem/o.vnota*1000)/10:null),
-             desp:(function(){ var d=(Number(o.imposto)||0)+(Number(o.comissao)||0)+(Number(o.frete)||0); return d>0?d:null; })(),
-             despDet:'comissão '+BRL(Number(o.comissao)||0)+' + imposto '+BRL(Number(o.imposto)||0)+' + frete '+BRL(Number(o.frete)||0),
+             desp:(function(){ var d=Number(o.vnota)-(Number(o.custo)||0)-Number(o.margem); return d>0.005?d:null; })(),
+             despDet:'comissão '+BRL(Number(o.comissao)||0)+' · imposto '+BRL(Number(o.imposto)||0)+' · frete '+BRL(Number(o.frete)||0),
              cancelado:false, dev:false };
   }));
   if(inf) inf.textContent = ps.length ? (ini+'–'+fim+' de '+N(HLIN.total_pedidos||0)+' pedido(s) · página '+pgAtual+' de '+totPg) : '';
@@ -1498,8 +1498,27 @@ function renderAnalise(){
                     : '<span class="dim">detalhe a caminho\u2026</span>'),
              venda:(P.tot!=null?P.tot:(h.valor!=null?Number(h.valor):null)), custo:(P.custo!=null?P.custo:null),
              mc:(P.mc!=null?P.mc:null), pc:(P.mc!=null&&P.tot?Math.round(P.mc/P.tot*1000)/10:null),
-             desp:(function(){ var d=(Number(P.imposto)||0)+(Number(P.tarifa)||0)+(Number(P.frV)||0)-(Number(P.credito)||0); return d>0?d:null; })(),
-             despDet:'comissão '+BRL(Number(P.tarifa)||0)+' + imposto '+BRL(Number(P.imposto)||0)+' + frete '+BRL(Number(P.frV)||0)+((Number(P.credito)||0)>0?(' − estorno '+BRL(Number(P.credito)||0)):''),
+             // 28/07: NÃO somar os componentes na mão. A margem muda de fórmula por canal (Shopee/Magalu
+             // com renda líquida já embutem a comissão; no Magalu o frete às vezes é só exibição; há ainda
+             // frete recebido e desconto do marketplace). Somando à mão, o quadrinho mentiria em vários
+             // pedidos. Assim SEMPRE fecha: venda − custo − margem = tudo o que foi descontado.
+             desp:(function(){
+               var v=(P.tot!=null?Number(P.tot):(h.valor!=null?Number(h.valor):null));
+               if(v==null || P.mc==null) return null;
+               var d = v - (Number(P.custo)||0) - Number(P.mc);
+               return d>0.005 ? d : null;
+             })(),
+             despDet:(function(){
+               var p=[];
+               if(P.tarifa) p.push('comiss\u00e3o '+BRL(P.tarifa));
+               if(P.imposto) p.push('imposto '+BRL(P.imposto));
+               if(P.frV) p.push('frete '+BRL(P.frV)+(P.frFonte==='flex'?' (Flex)':''));
+               if(P.rendaCanal) p.push('canal informou l\u00edquido de '+BRL(P.rendaCanal));
+               if(P.credito) p.push('\u2212 estorno '+BRL(P.credito));
+               if(P.freteRec) p.push('\u2212 frete recebido '+BRL(P.freteRec));
+               if(P.desconto) p.push('desconto do marketplace '+BRL(P.desconto));
+               return p.join(' \u00b7 ') || 'tudo que foi descontado, fora o custo do produto';
+             })(),
              cancelado:!!h._cancelado, dev:!!h.devolucao, devAberta:!!h.dev_aberta };
   }));
   $('anInfo').textContent = LP.length ? ((anPage*PAG+1)+'–'+(anPage*PAG+pagPL.length)+' de '+LP.length+' venda(s)'+(maxP>0?('  ·  página '+(anPage+1)+' de '+(maxP+1)):'')) : 'sem vendas no período';
