@@ -68,7 +68,14 @@ async function temEtiquetaML(mlToken, numeroLoja) {
 async function _fluxo1(token) {
   const { inicial, final } = getPeriodo();
   const lista = await getPedidosPorStatus(token, SITUACAO_ATENDIDO, inicial, final);
-  const batch = lista.slice(0, MAX_F1);
+  // 28/07: processa os MAIS RECENTES primeiro. Antes pegava os primeiros da lista (os mais
+  // antigos) — se houvesse mais pedidos que o limite do lote, os do dia nunca eram avaliados.
+  const _ord = lista.slice().sort((a, b) => {
+    const da = String(a.data || ''), db = String(b.data || '');
+    if (da !== db) return db.localeCompare(da);
+    return Number(b.id || 0) - Number(a.id || 0);
+  });
+  const batch = _ord.slice(0, MAX_F1);
   console.log(`[F1] ${lista.length} encontrados | processando ${batch.length}`);
   let mlToken = null;
   try { mlToken = await garantirTokenML(); } catch (e) {
