@@ -174,7 +174,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd113';
+const DASH_BUILD = 'd114';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -538,6 +538,10 @@ function avisoCom(txt, lista, comoResolver){
          '<div style="font-size:10px;margin-top:2px;line-height:1.35"><b style="font-family:ui-monospace,monospace;color:#fbbf24">'+mostra+'</b>'+
          (comoResolver?('<div style="opacity:.8;margin-top:1px">'+comoResolver+'</div>'):'')+'</div>';
 }
+// registro FANTASMA: casca no cache sem nº de pedido, sem itens e sem valor. Sobra de pedido
+// excluído no Bling. Contava como pedido e disparava 3 alertas de uma vez (sem alíquota, sem taxa,
+// sem detalhe) — porque não tem mês, nem canal, nem item. Fica fora de tudo.
+const ehFantasmaReg = h => !h.numero && !((h.itens||[]).length) && !(Number(h.valor)>0) && !(Number(h.vprod_nf)>0);
 function comAncora(fn){
   marcarAncora();
   fn();
@@ -675,7 +679,11 @@ function render(){
   $('custom').style.display = periodo==='custom' ? 'flex' : 'none';
 
   const {de, ate} = intervalo();
-  const PER = DADOS.filter(h => { if(!h.conferido_em) return false; const d = diaVenda(h); return d>=de && d<=ate; });
+  // 28/07: registro FANTASMA — casca no cache sem número de pedido, sem itens e sem valor.
+  // Não é venda: é sobra de um pedido excluído no Bling ou de um cache incompleto. Ficava contado
+  // como pedido e disparava TRÊS alertas ao mesmo tempo (sem alíquota, sem taxa e sem detalhe),
+  // porque não tem mês, não tem canal e não tem item. Fora da conta.
+  const PER = DADOS.filter(h => { if(!h.conferido_em) return false; if(ehFantasmaReg(h)) return false; const d = diaVenda(h); return d>=de && d<=ate; });
   const VB = (VENDAS||[]).filter(v=>{ const d2=String(v.data||'').slice(0,10); return d2>=de && d2<=ate; });
   const VBok = VB.filter(v=>!/cancel/i.test(String(v.situacao||'')));
   const vbSoma = VBok.reduce((a,v)=>a+(Number(v.total)||0),0);
@@ -1257,7 +1265,11 @@ function renderAnalise(){
     pr.innerHTML = ''; }   // 28/07: filtro de período REMOVIDO daqui — quem manda é o do topo, que já vale pra tela toda
   if(pd){ pd.innerHTML = anPer==='custom' ? ' <input type="date" value="'+anPDe+'" onclick="this.showPicker&&this.showPicker()" onchange="anPDe=this.value;anPage=0;renderAnalise()"> <input type="date" value="'+anPAte+'" onclick="this.showPicker&&this.showPicker()" onchange="anPAte=this.value;anPage=0;renderAnalise()">' : ''; }
   const iv=anIntervalo();
-  let L = DADOS.filter(h=>{ if(!h.conferido_em) return false; const d=diaVenda(h); return d>=iv.de && d<=iv.ate; });
+  let L = DADOS.filter(h=>{
+    if(!h.conferido_em) return false;
+    if(ehFantasmaReg(h)) return false;   // casca sem número/itens/valor não é venda
+    const d=diaVenda(h); return d>=iv.de && d<=iv.ate;
+  });
   // 🐛 27/07: o dropdown contava SÓ os bipados (mostrava 72 com 110 na lista). Agora conta o mesmo
   // universo que a lista exibe: bipados + vendas do Bling ainda não bipadas.
   const _naoBip = (SINT||[]).filter(h=>{ const d2=diaVenda(h); return d2>=iv.de && d2<=iv.ate; });
