@@ -123,16 +123,20 @@ async function listarAtendidos() {
   const qs = `idSituacao=${SIT_ATENDIDO}&dataEmissaoInicial=${dataISO(ini)}&dataEmissaoFinal=${dataISO(hoje)}`;
   const out = [];
   let fetchOk = false;
+  let completa = false;              // só true se a paginação foi até o fim SEM falhar no meio
   for (let pagina = 1; pagina <= 50; pagina++) {
     const { ok, data } = await blingGet(`/pedidos/vendas?${qs}&pagina=${pagina}&limite=100`);
     if (pagina === 1) fetchOk = ok;        // marca se o Bling respondeu (p/ não limpar cache offline)
     const lista = (data && data.data) || [];
-    if (!ok || lista.length === 0) break;
+    // ⚠️ ANTES: um !ok na página 2+ saía do loop e a lista PARCIAL era devolvida como ok=true —
+    // a reconciliação então apagava do cache todo pedido que faltou (levando junto etiqueta anexada).
+    if (!ok) break;                        // falhou no meio → completa fica FALSE
+    if (lista.length === 0) { completa = true; break; }
     out.push(...lista);
-    if (lista.length < 100) break;
+    if (lista.length < 100) { completa = true; break; }
     await sleep(PAUSA_MS);
   }
-  return { ok: fetchOk, pedidos: out };
+  return { ok: fetchOk, completa, pedidos: out };
 }
 
 async function detalhePedido(id) {
@@ -367,22 +371,30 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
     const man      = manifest();
     const cacheEan = skuEanCache();
     const locC     = locCache();
-    const { ok: listaOk, pedidos: atendidos } = await listarAtendidos();
+    const { ok: listaOk, completa: listaCompleta, pedidos: atendidos } = await listarAtendidos();
     console.log(`[GOODBKP] ${atendidos.length} pedido(s) ATENDIDO(${SIT_ATENDIDO}) na janela de ${JANELA_DIAS}d (bling ok=${listaOk})`);
 
     // RECONCILIAÇÃO: remove do cache quem NÃO está mais em ATENDIDO (enviado/processado).
     // Só roda se o Bling respondeu E veio algo — assim, se o Bling cair, o cache offline é preservado.
-    if (listaOk && atendidos.length > 0) {
+    if (listaOk && !listaCompleta) {
+      console.log('[GOODBKP] ⚠️ lista do Bling veio INCOMPLETA (falhou no meio da paginação) — reconciliação PULADA, cache preservado');
+    }
+    if (listaOk && listaCompleta && atendidos.length > 0) {
       const idsAtuais = new Set(atendidos.map(p => String(p.id)));
-      let removidos = 0;
-      for (const id of Object.keys(man)) {
-        if (!idsAtuais.has(String(id))) {
+      const aRemover = Object.keys(man).filter(id => !idsAtuais.has(String(id)));
+      // TRAVA DE SEGURANÇA: sumir com muita coisa de uma vez quase sempre é lista ruim do Bling,
+      // não 40% dos pedidos despachados no mesmo minuto. Melhor não remover do que apagar etiqueta anexada.
+      const limiteSeguro = Math.max(5, Math.ceil(Object.keys(man).length * 0.4));
+      if (aRemover.length > limiteSeguro) {
+        console.log(`[GOODBKP] ⚠️ reconciliação ABORTADA: removeria ${aRemover.length} de ${Object.keys(man).length} pedidos — lista do Bling parece incompleta. Cache preservado.`);
+      } else if (aRemover.length) {
+        for (const id of aRemover) {
           try { fs.rmSync(path.join(CACHE_DIR, String(id)), { recursive: true, force: true }); } catch (e) {}
           delete man[id];
-          removidos++;
         }
+        salvarManifest(man);
+        console.log(`[GOODBKP] reconciliação: ${aRemover.length} pedido(s) saíram do ATENDIDO e foram removidos do cache`);
       }
-      if (removidos) { salvarManifest(man); console.log(`[GOODBKP] reconciliação: ${removidos} pedido(s) saíram do ATENDIDO e foram removidos do cache`); }
     }
 
     // ESPELHO DO BLING: pedido que estava finalizado+sincronizado aqui mas VOLTOU pra ATENDIDO no Bling
