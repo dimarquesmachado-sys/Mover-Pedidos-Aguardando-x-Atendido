@@ -215,7 +215,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd124';
+const DASH_BUILD = 'd127';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -1512,8 +1512,19 @@ function renderAnalise(){
                var p=[];
                if(P.tarifa) p.push('comiss\u00e3o '+BRL(P.tarifa));
                if(P.imposto) p.push('imposto '+BRL(P.imposto));
-               if(P.frV) p.push('frete '+BRL(P.frV)+(P.frFonte==='flex'?' (Flex)':''));
-               if(P.rendaCanal) p.push('canal informou l\u00edquido de '+BRL(P.rendaCanal));
+               // uma palavra só: REAL quando o canal já fechou o valor, PROVISÓRIO quando ainda é estimativa
+               if(P.frV){
+                 // o rótulo depende da ORIGEM do frete, não do canal:
+                 //   ml     = veio da API do Mercado Livre  → real
+                 //   flex   = motoboy da sua configuração   → Flex
+                 //   magalu = real só quando o canal fechou o líquido; senão ainda é estimativa
+                 //   bling  = estimativa que o Bling importou → provisório
+                 var qual = P.frFonte==='flex'   ? 'Flex'
+                          : P.frFonte==='ml'     ? 'frete real'
+                          : P.frFonte==='magalu' ? (P.rendaCanal!=null ? 'frete real' : 'frete provis\u00f3rio')
+                          : 'frete provis\u00f3rio';
+                 p.push('frete '+BRL(P.frV)+' ('+qual+')');
+               }
                if(P.credito) p.push('\u2212 estorno '+BRL(P.credito));
                if(P.freteRec) p.push('\u2212 frete recebido '+BRL(P.freteRec));
                if(P.desconto) p.push('desconto do marketplace '+BRL(P.desconto));
