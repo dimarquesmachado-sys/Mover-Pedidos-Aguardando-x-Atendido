@@ -79,12 +79,16 @@ async function sincronizarConferidos() {
       // Falha ao mover: confere se o pedido JÁ AVANÇOU (saiu de ATENDIDO por outro
       // processo — despachado/faturado). Se não está mais em ATENDIDO, o sync já não
       // é necessário: marca como resolvido em vez de "falha" (evita ruído no /saude).
-      let situAtual = null;
+      let situAtual = null, sumiu = false;
       try {
         const g = await blingGet(`/pedidos/vendas/${id}`);
         const ped = g && g.data && (g.data.data || g.data);
         situAtual = ped && ped.situacao && Number(ped.situacao.id);
+        // 28/07: pedido EXCLUÍDO no Bling responde 404. Antes isso caía no "falha" e o sync
+        // tentava de novo TODO ciclo, pra sempre — enchendo o log com o mesmo erro.
+        if (g && Number(g.status) === 404) sumiu = true;
       } catch (e) {}
+      if (!situAtual && Number(r.status) === 404) sumiu = true;
       if (situAtual && situAtual !== SIT_ATENDIDO) {
         conf[id].sincronizado = true;
         conf[id].sincronizado_em = new Date().toISOString();
@@ -92,6 +96,14 @@ async function sincronizarConferidos() {
         delete conf[id].sync_erro;
         jaAvancados++;
         console.log(`[GIRABKP] sync ${id}: já avançou p/ situacao ${situAtual} (resolvido, sem mover)`);
+      } else if (sumiu) {
+        // não existe mais no Bling: não há o que sincronizar — encerra e para de tentar
+        conf[id].sincronizado = true;
+        conf[id].sincronizado_em = new Date().toISOString();
+        conf[id].sync_resolvido = 'pedido-excluido-no-bling';
+        delete conf[id].sync_erro;
+        jaAvancados++;
+        console.log(`[GIRABKP] sync ${id}: pedido não existe mais no Bling (excluído) — encerrado, não tenta mais`);
       } else {
         conf[id].sync_erro = String(r.status || 'err');
         falhas++;
