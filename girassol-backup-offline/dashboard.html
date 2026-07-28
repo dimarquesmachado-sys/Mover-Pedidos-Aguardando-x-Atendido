@@ -117,6 +117,8 @@
   .vcB{background:var(--bg2);border-radius:7px;padding:5px 7px}
   .vcB i{display:block;font-style:normal;font-size:9px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut)}
   .vcB b{font-size:12.5px;font-variant-numeric:tabular-nums}
+  .selPer{display:none}
+  .covResumo{display:none}
   /* ══════════════ CELULAR ══════════════ */
   @media(max-width:720px){
     body{padding:0 8px 30px}
@@ -138,6 +140,15 @@
     .hint{display:none}
     /* no celular o cabeçalho empilha e a barra de atalhos rola de lado */
     .hbot{flex-direction:column;gap:6px}
+    /* período: 8 botões viram 1 seletor */
+    .chips{display:none}
+    .selPer{display:block;width:100%;background:var(--bg2);border:1px solid var(--line);color:var(--tx);
+            border-radius:9px;padding:9px 10px;font-size:14px;font-weight:700}
+    /* cobertura: só o resumo; toca e abre */
+    .covResumo{display:inline-flex;align-items:center;gap:5px;cursor:pointer;border:0;font:inherit}
+    #cover .covItem{display:none}
+    #cover.aberto .covItem{display:inline-flex}
+    #cover{gap:6px}
     .atalhos{max-width:100%;justify-content:flex-start;overflow-x:auto;flex-wrap:nowrap!important;
              -webkit-overflow-scrolling:touch;padding-bottom:2px}
     .atalhos .chip{flex:0 0 auto;white-space:nowrap}
@@ -174,7 +185,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd114';
+const DASH_BUILD = 'd116';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -574,6 +585,7 @@ function montar(){
   '<div class="wrap hbot">'+
     '<div class="hleft">'+
       '<div class="chips" id="chips"></div>'+
+      '<select id="selPeriodo" class="selPer" onchange="setPeriodo(this.value)"></select>'+
       '<div class="custom" id="custom">De <input type="date" id="pDe" onclick="this.showPicker&&this.showPicker()" onchange="pDe=this.value;setPeriodo(\'custom\')"> '+
       'até <input type="date" id="pAte" onclick="this.showPicker&&this.showPicker()" onchange="pAte=this.value;setPeriodo(\'custom\')"></div>'+
       '<div class="cover" id="cover"></div>'+
@@ -633,7 +645,7 @@ function montar(){
       '<div id="grafTot" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px"></div>'+
       '<div id="grafProg" style="overflow-x:auto"></div>'+
       '<div class="nota" id="grafLeg"></div></div>'+
-    '<div class="sec"><h2>🗺️ Vendas por estado</h2><div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start"><div style="flex:0 1 300px;min-width:250px"><div class="tw" id="twUF"><table id="tUF"></table></div><div id="ufAviso"></div></div><div id="ufMapa" style="flex:1 1 380px;min-width:300px"></div></div></div>'+
+    '<div class="sec"><h2>🗺️ Vendas por estado</h2><div style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start;justify-content:center"><div style="flex:0 1 340px;min-width:260px"><div class="tw" id="twUF"><table id="tUF"></table></div><div id="ufAviso"></div></div><div id="ufMapa" style="flex:1 1 420px;min-width:300px;max-width:620px"></div></div></div>'+
     '<div class="sec"><h2>⚙️ Impostos &amp; taxas <span class="hint">alíquota do Simples varia mês a mês · taxas de marketplace em % (estimativa; ML tem a REAL por pedido na busca)</span></h2>'+
       '<div id="cfgBox"></div>'+
       '<div style="font-size:12px;color:var(--mut);margin:14px 0 6px">🚛 Motoboy do FLEX pago pela loja (R$) — de fábrica: <b>ML R$ 12</b> · <b>Shopee R$ 9</b> · <b>demais R$ 9</b>. Entra como custo quando o pedido é FLEX.</div>'+
@@ -676,6 +688,8 @@ function montar(){
 function render(){
   const defs = [['dia','Hoje'],['ontem','Ontem'],['7','7 dias'],['30','30 dias'],['mes','Mês'],['mesant','Mês anterior'],['ano','Ano'],['custom','Período…']];
   $('chips').innerHTML = defs.map(([k,l])=>'<button class="chip'+(periodo===k?' on':'')+'" onclick="setPeriodo(\''+k+'\')">'+l+'</button>').join('');
+  // no celular os 8 botões viram um seletor (economiza 2 linhas de tela)
+  const sp=$('selPeriodo'); if(sp) sp.innerHTML = defs.map(([k,l])=>'<option value="'+k+'"'+(periodo===k?' selected':'')+'>'+l+'</option>').join('');
   $('custom').style.display = periodo==='custom' ? 'flex' : 'none';
 
   const {de, ate} = intervalo();
@@ -745,14 +759,21 @@ function render(){
   // Medi-los contra o total derrubava a % e acendia o aviso de "cobertura baixa" sem motivo.
   const cUF = pc(comUF,PER.length||1), cNF = pc(pedNF,PER.length||1), cTar = pc(pedTarReal,nTot);
 
+  // resumo das pílulas: no celular fica só ele; toca e abre a lista completa
+  const piores = [['valor',cVal],['valor/item',cItem],['UF',cUF],['nota fiscal',cNF],['tarifa real',cTar]]
+                   .filter(x=>x[1]<95).sort((a,b)=>a[1]-b[1]);
+  const resumo = piores.length
+    ? '<button class="pill w covResumo" onclick="document.getElementById(\'cover\').classList.toggle(\'aberto\')">\u26a0 '+piores.length+' ponto(s) a conferir \u00b7 '+piores[0][0]+' '+piores[0][1]+'% <b>\u25be</b></button>'
+    : '<button class="pill g covResumo" onclick="document.getElementById(\'cover\').classList.toggle(\'aberto\')">\u2705 dados completos <b>\u25be</b></button>';
   $('cover').innerHTML = PER.length === 0 ?
     ('<span class="dim">'+de+' → '+ate+'</span><span class="dim">0 vendas atribuídas a este período — vendas de fim de semana entram assim que forem bipadas (caem no dia CERTO) · clica em <b>Ontem</b> ou <b>Mês</b> 😉 · a busca de pedido lá embaixo funciona independente do período</span>') :
-    '<span class="dim">'+de+' → '+ate+'</span>'+
-    '<span class="pill '+(cVal>=95?'g':'w')+'">valor <b>'+cVal+'%</b></span>'+
-    '<span class="pill '+(cItem>=95?'g':'w')+'">valor/item <b>'+cItem+'%</b></span>'+
-    '<span class="pill '+(cUF>=95?'g':'w')+'" title="dos pedidos já bipados">UF <b>'+cUF+'%</b></span>'+
-    '<span class="pill '+(cNF>=95?'g':'w')+'" title="dos pedidos já bipados">nota fiscal <b>'+cNF+'%</b></span>'+
-    '<span class="pill '+(cTar>=95?'g':'w')+'" title="pedidos com a comissão REAL do marketplace (o resto usa a % configurada)">tarifa real <b>'+cTar+'%</b></span>'+
+    resumo+
+    '<span class="dim covItem">'+de+' → '+ate+'</span>'+
+    '<span class="pill covItem '+(cVal>=95?'g':'w')+'">valor <b>'+cVal+'%</b></span>'+
+    '<span class="pill covItem '+(cItem>=95?'g':'w')+'">valor/item <b>'+cItem+'%</b></span>'+
+    '<span class="pill covItem '+(cUF>=95?'g':'w')+'" title="dos pedidos já bipados">UF <b>'+cUF+'%</b></span>'+
+    '<span class="pill covItem '+(cNF>=95?'g':'w')+'" title="dos pedidos já bipados">nota fiscal <b>'+cNF+'%</b></span>'+
+    '<span class="pill covItem '+(cTar>=95?'g':'w')+'" title="pedidos com a comissão REAL do marketplace (o resto usa a % configurada)">tarifa real <b>'+cTar+'%</b></span>'+
     ((cVal<90||cItem<90)?'<span class="warn" style="font-size:11px" title="são vendas cujo detalhe ainda não chegou do Bling — entra sozinho nas próximas rodadas">← detalhe de algumas vendas ainda chegando</span>':'');
 
   const kpi=(kc,ic,l,v,s)=>'<div class="kpi" style="--kc:'+kc+'"><span class="ic">'+ic+'</span><div class="l">'+l+'</div><div class="v">'+v+'</div>'+(s?'<div class="s">'+s+'</div>':'')+'</div>';
@@ -1533,7 +1554,7 @@ function renderMapaUF(porUF){
   const el=$('ufMapa'); if(!el) return;
   const tot=Object.values(porUF).reduce((a,c)=>a+(c.ped||0),0)||1;
   const max=Math.max(1,...Object.values(porUF).map(c=>c.ped||0));
-  const COL_X=238;              // coluna dos rótulos que não cabem dentro
+  const COL_X=228;              // coluna dos rótulos que não cabem dentro
   const comVenda=Object.keys(BR_UF).filter(uf=>(porUF[uf]&&porUF[uf].ped)>0)
                    .sort((a,b)=>porUF[b].ped-porUF[a].ped);   // quem vende mais escolhe lugar primeiro
   const postos=[], dentroList=[], foraList=[];
@@ -1547,7 +1568,7 @@ function renderMapaUF(porUF){
   // rótulos de fora: empilhados à direita, na altura do estado, sem se sobrepor
   foraList.sort((a,b)=>(BR_CEN[a][1])-(BR_CEN[b][1]));
   let ultimo=-99; const posFora={};
-  for(const uf of foraList){ const y=Math.max(BR_CEN[uf][1], ultimo+11); posFora[uf]=Math.min(y,190); ultimo=posFora[uf]; }
+  for(const uf of foraList){ const y=Math.max(BR_CEN[uf][1], ultimo+10); posFora[uf]=Math.min(y,188); ultimo=posFora[uf]; }
 
   let formas='', linhas='', txtDentro='', txtFora='';
   for(const uf of Object.keys(BR_UF)){
@@ -1559,17 +1580,17 @@ function renderMapaUF(porUF){
   for(const uf of dentroList){
     const [cx,cy]=BR_CEN[uf], ped=porUF[uf].ped;
     const cor = (ped/max)>0.45 ? '#ffffff' : '#dbeafe';
-    txtDentro+='<text x="'+cx+'" y="'+(cy-1)+'" fill="'+cor+'" font-size="8" font-weight="800" text-anchor="middle">'+uf+'</text>'+
-               '<text x="'+cx+'" y="'+(cy+7.5)+'" fill="'+cor+'" font-size="7.5" font-weight="700" text-anchor="middle">'+N(ped)+'</text>';
+    txtDentro+='<text x="'+cx+'" y="'+(cy-1)+'" fill="'+cor+'" font-size="7.5" font-weight="800" text-anchor="middle">'+uf+'</text>'+
+               '<text x="'+cx+'" y="'+(cy+6.5)+'" fill="'+cor+'" font-size="6.8" font-weight="700" text-anchor="middle">'+N(ped)+'</text>';
   }
   for(const uf of foraList){
     const [cx,cy]=BR_CEN[uf], y=posFora[uf], ped=porUF[uf].ped;
-    linhas+='<path d="M'+cx+' '+cy+'L'+(COL_X-14)+' '+y+'L'+(COL_X-3)+' '+y+'" fill="none" stroke="#64748b" stroke-width="0.45"/>'+
-            '<circle cx="'+cx+'" cy="'+cy+'" r="1.1" fill="#94a3b8"/>';
-    txtFora+='<text x="'+COL_X+'" y="'+(y+2.6)+'" font-size="7.5" font-weight="800" fill="#dbeafe">'+uf+
+    linhas+='<path d="M'+cx+' '+cy+'L'+(COL_X-10)+' '+y+'L'+(COL_X-2.5)+' '+y+'" fill="none" stroke="#64748b" stroke-width="0.4"/>'+
+            '<circle cx="'+cx+'" cy="'+cy+'" r="0.9" fill="#94a3b8"/>';
+    txtFora+='<text x="'+COL_X+'" y="'+(y+2.2)+'" font-size="6.5" font-weight="800" fill="#dbeafe">'+uf+
              ' <tspan fill="#94a3b8" font-weight="600">'+N(ped)+'</tspan></text>';
   }
-  el.innerHTML='<svg viewBox="0 0 268 196" style="width:100%;height:auto;display:block">'+
+  el.innerHTML='<svg viewBox="0 0 262 194" style="width:100%;max-width:600px;height:auto;display:block;margin:0 auto">'+
       formas+linhas+txtDentro+txtFora+'</svg>'+
     '<div style="display:flex;align-items:center;gap:6px;margin-top:6px;font-size:10px;color:var(--mut)">'+
       '<span>menos</span><div style="width:100px;height:9px;border-radius:5px;background:linear-gradient(90deg,#1e3a5f,#2a6fa8,#38bdf8)"></div><span>mais vendas</span>'+
