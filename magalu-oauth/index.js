@@ -26,7 +26,7 @@ const fs   = require('fs');
 const path = require('path');
 const { json, html, readBody } = require('../lib/http');
 
-const VERSAO = 'magalu-oauth v1 b38';
+const VERSAO = 'magalu-oauth v1 b39';
 
 const DATA_DIR = process.env.MAGALU_DATA_DIR || '/data/magalu';
 
@@ -235,7 +235,7 @@ async function tratar(req, res, urlObj) {
   //    408 REQUEST_TIMEOUT  → "esta sendo processado, tente de novo" (geracao assincrona)
   //    429 TOO_MANY_REQUESTS→ chamou rapido demais; espacar alguns segundos resolve
   //    503                  → instabilidade momentanea do lado deles
-  //  Por isso o pedirLinkZip abaixo REPETE em vez de desistir.
+  //  Por isso o nfPedirLink (no arquivador, mais abaixo) REPETE em vez de desistir.
   //
   //  ⚠ TRAVA DE ADMIN: o index.js da RAIZ so exige ADMIN_KEY nos paths que
   //  estao na lista precisaAdmin dele, e /magalu/nf-full NAO esta nessa lista
@@ -589,7 +589,8 @@ No painel aparece o andamento.
     // ── PAINEL ──
     if (p === '/magalu/nf-full') {
       const hoje = new Date();
-      const pad = fmtD(hoje), pde = fmtD(new Date(hoje.getTime() - 30 * 864e5));
+      // fmtD era UTC: depois das 21h de Brasilia o campo "Ate" vinha com amanha
+      const pad = nfHojeSP(hoje), pde = nfHojeSP(new Date(hoje.getTime() - 30 * 864e5));
       const kq = encodeURIComponent(q.get('k') || '');
       const NOMES = { good: 'GOOD Import', amb: 'AMBTotal', girassol: 'Girassol' };
       const prontos = nfListar(null);
@@ -631,7 +632,7 @@ No painel aparece o andamento.
                      : '')
                  + '</div></div>';
           }).join('')
-        : '<p class="vazio">Nada arquivado ainda. O robô roda às 9h e às 18h. Se quiser adiantar, clique em <b>Rodar agora</b>.</p>';
+        : '<p class="vazio">Nada arquivado ainda. O robô roda às 6h, 12h, 18h e 23h. Se quiser adiantar, clique em <b>Rodar agora</b>.</p>';
       html(res, 200, `<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 ${nfRodando ? '<meta http-equiv="refresh" content="15">' : ''}
@@ -659,7 +660,7 @@ a.btn.cinza{background:#2a2f3a;color:#e8eaed}
 p.vazio{color:#9aa0a6;font-size:13px;margin:0}
 </style></head><body><div class="wrap">
 <h1>NF-e Fulfillment — Magalu</h1>
-<p class="sub">O robô baixa sozinho às 9h e às 18h. É só clicar e importar no Bling.</p>
+<p class="sub">O robô baixa sozinho às 6h, 12h, 18h e 23h. A extensão importa no Bling quando você abre o sistema.</p>
 ${andamento}
 <div class="card">
   <div class="tit">Prontos pra baixar</div>
@@ -1671,7 +1672,10 @@ async function blingTestarSessao(empresa) {
 // Le o retorno do Bling e traduz pra numeros. As frases sao as que aparecem
 // na tela de resultado (vistas em 27/07 num lote real da AMB).
 function blingResumir(txt) {
-  const limpo = String(txt || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+  // tira os marcadores de CDATA antes das tags, senao sobra "]]>" no texto
+  const limpo = String(txt || '')
+    .replace(/<!\[CDATA\[/g, ' ').replace(/\]\]>/g, ' ')
+    .replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
   const conta = re => (limpo.match(re) || []).length;
   return {
     ja_registradas: conta(/já está registrada|ja esta registrada/gi),
@@ -1911,7 +1915,20 @@ async function nfRotina(origem, quais) {
   // "hoje" em UTC ja e amanha, entao a rodada das 23h pedia a Magalu um
   // periodo terminando numa data FUTURA e carimbava o arquivo errado.
   const ate = nfHojeSP(agora);
-  const de  = nfHojeSP(new Date(agora.getTime() - (NF_DIAS - 1) * 864e5));
+  // ── ANTI-CACHE ──────────────────────────────────────────────────────
+  //  O caminho do ZIP no storage da Magalu inclui o periodo:
+  //    invoices_fulfillment/{seller}/{de}-{ate}/invoices-{de}-{ate}.zip
+  //  Pedir SEMPRE o mesmo intervalo = sempre a mesma chave, e ha indicios
+  //  (27/07) de que eles devolvem o arquivo cacheado da primeira geracao
+  //  do dia em vez de regerar. Variar o "de" por rodada muda a chave e
+  //  forca um pacote novo: 6h pede 31 dias, 12h 30, 18h 29, 23h 28.
+  //  Encolher a janela nao perde nada — o Bling deduplica por chave e a
+  //  rodada seguinte volta a cobrir mais.
+  const horaSP = parseInt(new Date().toLocaleString('en-US', { timeZone: 'America/Sao_Paulo', hour: 'numeric', hour12: false }), 10) || 0;
+  const ORDEM_RODADA = { 6: 0, 12: 1, 18: 2, 23: 3 };
+  const varia = (ORDEM_RODADA[horaSP] !== undefined) ? ORDEM_RODADA[horaSP] : (horaSP % 4);
+  const dias = Math.max(7, NF_DIAS - varia);
+  const de  = nfHojeSP(new Date(agora.getTime() - (dias - 1) * 864e5));
   const carimbo = ate + '-' + String(agora.getHours()).padStart(2, '0') + String(agora.getMinutes()).padStart(2, '0');
   const resultado = [];
 
@@ -1932,7 +1949,7 @@ async function nfRotina(origem, quais) {
         catch (e) { linha.bling = { erro: String(e.message || e) }; console.error('[magalu-nf] bling ' + emp + ':', e.message); }
       }
       resultado.push(linha);
-      console.log('[magalu-nf] (' + origem + ') ' + emp + ': ' + nome + ' (' + buf.length + ' bytes)');
+      console.log('[magalu-nf] (' + origem + ') ' + emp + ': ' + nome + ' (' + buf.length + ' bytes, periodo ' + de + ' a ' + ate + ')');
     } catch (e) {
       resultado.push({ empresa: emp, ok: false, erro: String(e.message || e) });
       console.error('[magalu-nf] (' + origem + ') ' + emp + ' FALHOU:', e.message);
