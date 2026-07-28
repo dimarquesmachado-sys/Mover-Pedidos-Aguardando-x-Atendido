@@ -1,4053 +1,1696 @@
-'use strict';
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Inteligência de Vendas · Girassol</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root{
+    --bg:#0a0e1a; --bg2:#0d1326; --card:#131a30; --card2:#182138;
+    --line:#232d4a; --line2:#2d3a5e;
+    --tx:#e7ecf6; --mut:#8b96b3; --dim:#5a6485;
+    --ac:#6366f1; --ac2:#818cf8; --ok:#22c55e; --ok2:#4ade80;
+    --warn:#f59e0b; --bad:#ef4444; --cy:#22d3ee;
+    --r:14px;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:radial-gradient(1200px 500px at 70% -100px,#151d3a 0%,var(--bg) 55%);color:var(--tx);
+       font:14px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Inter,sans-serif;padding:0 16px 40px}
+  a{color:var(--ac2);text-decoration:none}
+  .wrap{max-width:min(1720px,96vw);margin:0 auto}
+  .hdr{position:sticky;top:0;z-index:50;background:linear-gradient(180deg,rgba(10,14,26,.97) 70%,rgba(10,14,26,0));
+       padding:14px 0 10px;margin:0 -16px;padding-left:16px;padding-right:16px}
+  .hrow{max-width:min(1720px,96vw);margin:0 auto;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  /* cabeçalho: filtros à esquerda · atalhos à direita, tudo dentro da faixa fixa */
+  .hbot{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding-bottom:8px}
+  .hleft{flex:1 1 auto;min-width:0}
+  .atalhos{flex:0 0 auto;display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;align-items:center;max-width:52%}
+  .atalhos .chip{white-space:nowrap}
+  h1{font-size:17px;font-weight:800;margin:0;letter-spacing:-.02em;display:flex;align-items:center;gap:8px}
+  h1 .logo{width:30px;height:30px;border-radius:9px;background:linear-gradient(135deg,#fbbf24,#f59e0b);
+           display:inline-flex;align-items:center;justify-content:center;font-size:16px}
+  .badge{font-size:10px;font-weight:700;color:var(--dim);border:1px solid var(--line);border-radius:5px;padding:1px 6px;letter-spacing:.05em}
+  .hlinks{margin-left:auto;font-size:12px;color:var(--mut)}
+  .chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+  .chip{background:var(--card);border:1px solid var(--line);color:var(--mut);border-radius:999px;
+        padding:7px 15px;font-size:12.5px;font-weight:600;cursor:pointer;transition:all .15s}
+  .chip:hover{border-color:var(--line2);color:var(--tx)}
+  .chip.on{border-color:var(--ac);color:#fff;background:linear-gradient(135deg,#1e2650,#232d5e);box-shadow:0 0 0 1px var(--ac) inset}
+  .custom{display:none;gap:8px;margin-top:8px;align-items:center;flex-wrap:wrap;font-size:12.5px;color:var(--mut)}
+  input[type=date],input[type=number]{background:var(--card);border:1px solid var(--line);color:var(--tx);border-radius:9px;padding:7px 10px;font-size:12.5px}
+  .cover{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px;font-size:11.5px;color:var(--mut)}
+  .pill{border:1px solid var(--line);border-radius:999px;padding:3px 10px;background:var(--card)}
+  .pill b{font-weight:800}
+  .pill.g b{color:var(--ok)} .pill.w{border-color:#f59e0b44} .pill.w b{color:var(--warn)}
+  .kpis{display:flex;flex-wrap:nowrap;overflow-x:auto;gap:12px;margin:18px 0;padding-bottom:6px}
+  .kpis::-webkit-scrollbar{height:6px}
+  .kpis::-webkit-scrollbar-thumb{background:var(--line2);border-radius:3px}
+  .kpi{background:linear-gradient(160deg,var(--card2),var(--card));border:1px solid var(--line);border-radius:var(--r);
+       flex:1 1 150px;min-width:146px;
+       padding:14px 16px;position:relative;overflow:hidden;transition:transform .15s,border-color .15s}
+  .kpi:hover{transform:translateY(-2px);border-color:var(--line2)}
+  .kpi::before{content:'';position:absolute;inset:0 0 auto 0;height:3px;background:var(--kc,var(--ac));opacity:.9}
+  .kpi .ic{font-size:15px;opacity:.9}
+  .kpi .l{font-size:11px;color:var(--mut);font-weight:600;letter-spacing:.02em;margin-top:2px}
+  .kpi .v{font-size:21px;font-weight:800;letter-spacing:-.02em;margin-top:3px;font-variant-numeric:tabular-nums}
+  .kpi .s{font-size:10.5px;color:var(--dim);margin-top:2px}
+  /* o cabeçalho é fixo: reserva a altura dele pra o atalho parar no INÍCIO da seção, não em cima dela */
+  .sec{scroll-margin-top:calc(var(--hdrH,104px) + 14px);background:linear-gradient(170deg,var(--card2),var(--card));border:1px solid var(--line);border-radius:var(--r);
+       padding:18px;margin:14px 0}
+  .sec h2{font-size:14px;font-weight:800;margin:0 0 14px;letter-spacing:-.01em;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .sec h2 .hint{font-size:10.5px;font-weight:600;color:var(--dim);margin-left:auto}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:860px){ .grid2{grid-template-columns:1fr} }
+  .chartbox{position:relative;height:230px}
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  th{color:var(--mut);text-align:left;font-weight:700;font-size:11px;letter-spacing:.04em;text-transform:uppercase;
+     padding:8px 10px;border-bottom:1px solid var(--line2);white-space:nowrap;user-select:none}
+  th.sort{cursor:pointer} th.sort:hover{color:var(--tx)}
+  /* cabecalho congelado: o wrapper .tw rola por dentro e o <th> gruda no topo dele */
+  .tw{border-radius:10px}
+  .tw th{position:sticky;top:var(--hdrH,104px);z-index:3;background:#141b33;box-shadow:0 2px 6px rgba(0,0,0,.45)}
+  .tw thead th{top:0}
 
-// ════════════════════════════════════════════════════════════════════════
-//  GIRASSOL · BACKUP OFFLINE — FASE 1 (poller) + FASE 2 (bipagem)   (Mover-Pedidos)
-// ════════════════════════════════════════════════════════════════════════
-//  Módulo do orquestrador unificado (HTTP-native, sem Express).
-//  Reaproveita o token Bling da Girassol via ../girassol/tokenManager.
-//
-//  A cada ciclo (cron backupCache):
-//    1) lista pedidos ATENDIDO (situação 9) da janela de emissão;
-//    2) pra cada pedido ainda NÃO cacheado por completo:
-//         - detalhe (cliente + itens com SKU/qtd);
-//         - EAN de cada item (produto, getPossiveisGtins robusto);
-//         - NF (nº + chave) via /pedidos/vendas/{id}/nfe;
-//         - ETIQUETA (ZPL) via /logisticas/etiquetas → baixa o link p/ /data;
-//    3) purga o cache fora da janela de retenção.
-//
-//  Cache no disco /data do PRÓPRIO serviço Mover-Pedidos. A tela offline
-//  (Fase 2) também morará aqui (mesmo serviço = mesmo disco = mesmo cache).
-//
-//  ⚠ PRÉ-REQUISITO de scope no app Bling da Girassol (Mover-Pedidos):
-//     • Logísticas (leitura)  → necessário p/ /logisticas/etiquetas
-//     • Produtos  (leitura)   → necessário p/ resolver EAN por produto
-//     Se faltar: o pedido ainda é cacheado, mas vem sem etiqueta / sem EAN.
-//     Adiciona os scopes e re-autoriza pelo /setup (cola o auth_code).
-// ════════════════════════════════════════════════════════════════════════
+  td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:middle}
+  tbody tr{transition:background .12s}
+  tbody tr:hover{background:#ffffff08}
+  tr:last-child td{border-bottom:none}
+  .num{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+  .bar{background:#ffffff10;border-radius:99px;height:7px;overflow:hidden;min-width:60px}
+  .bar>i{display:block;height:7px;border-radius:99px;background:linear-gradient(90deg,var(--ac),var(--ac2))}
+  .bar>i.g{background:linear-gradient(90deg,#16a34a,var(--ok2))}
+  .rank{display:inline-flex;width:24px;height:24px;border-radius:8px;align-items:center;justify-content:center;
+        font-size:11px;font-weight:800;background:#ffffff0d;color:var(--mut)}
+  .rank.r1{background:linear-gradient(135deg,#fbbf24,#d97706);color:#1a1204}
+  .rank.r2{background:linear-gradient(135deg,#e2e8f0,#94a3b8);color:#1e293b}
+  .rank.r3{background:linear-gradient(135deg,#f6ad7b,#c2703d);color:#2d1505}
+  .sku{font-weight:700} .desc{font-size:11px;color:var(--mut);max-width:340px;white-space:normal;line-height:1.35}
+  .mut{color:var(--mut)} .dim{color:var(--dim)} .ok{color:var(--ok)} .warn{color:var(--warn)} .bad{color:var(--bad)}
+  .cvg{font-size:10px;color:var(--warn);background:#f59e0b14;border:1px solid #f59e0b33;border-radius:5px;padding:1px 5px;margin-left:6px;white-space:nowrap}
+  .st{display:inline-block;font-size:10.5px;font-weight:700;border-radius:6px;padding:2px 8px}
+  .st.ok{background:#22c55e1a;color:var(--ok2);border:1px solid #22c55e33}
+  .st.w{background:#f59e0b1a;color:var(--warn);border:1px solid #f59e0b33}
+  .st.b{background:#ef44441a;color:#f87171;border:1px solid #ef444433}
+  .aviso{font-size:12px;color:var(--warn);margin-top:10px;background:#f59e0b0d;border:1px solid #f59e0b26;border-radius:9px;padding:8px 12px}
+  .nota{font-size:11px;color:var(--dim);margin-top:14px;line-height:1.6}
+  .btn{background:linear-gradient(135deg,var(--ac),#4f46e5);border:none;color:#fff;border-radius:10px;padding:9px 16px;
+       font-size:12.5px;font-weight:700;cursor:pointer;transition:filter .15s}
+  .btn:hover{filter:brightness(1.15)} .btn[disabled]{opacity:.5;cursor:default}
+  .loginbox{max-width:440px;margin:80px auto;text-align:center;background:var(--card);border:1px solid var(--line);
+            border-radius:16px;padding:40px 30px}
+  .skel{color:var(--dim);text-align:center;padding:30px}
+  ::-webkit-scrollbar{height:8px;width:8px} ::-webkit-scrollbar-thumb{background:var(--line2);border-radius:99px}
+  /* tabela de estados: colunas juntinhas, sem espaço à toa */
+  #tUF td,#tUF th{padding:5px 6px;font-size:12px}
+  #tUF td.num,#tUF th.num{padding-left:4px;padding-right:6px}
+  #twUF table{min-width:0}
+  /* cartões de venda (só aparecem no celular) */
+  .vcards{display:none}
+  .vcard{background:var(--card);border:1px solid var(--line);border-radius:11px;padding:10px 12px}
+  .vcTopo{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-bottom:5px}
+  .vcNum{font-weight:800;font-size:14px}
+  .vcHora{color:var(--mut);font-size:11px;margin-left:auto}
+  .vcSku{font-size:12px;color:#cfe0ff;font-family:ui-monospace,monospace;line-height:1.35;margin-bottom:6px;word-break:break-word}
+  .vcNums{display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px}
+  .vcB{background:var(--bg2);border-radius:7px;padding:5px 7px}
+  .vcB i{display:block;font-style:normal;font-size:9px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut)}
+  .vcB b{font-size:12.5px;font-variant-numeric:tabular-nums}
+  .selPer{display:none}
+  .covResumo{display:none}
+  /* ══════════════ CELULAR ══════════════ */
+  @media(max-width:720px){
+    body{padding:0 8px 30px}
+    .sec{padding:12px;border-radius:12px}
+    .desc{max-width:150px}
+    /* as tabelas que sobram (Top produtos, Por canal, Projeção) rolam de lado sem esticar a página */
+    .tw{max-width:100%;overflow-x:auto}
+    .tw table{min-width:640px}
+    #secAnalise .vcards+.tw{display:none}
+    /* cards: 2 por linha em vez de rolagem lateral */
+    .kpis{display:grid;grid-template-columns:1fr 1fr;overflow-x:visible;gap:8px;margin:12px 0}
+    .kpi{min-width:0!important;padding:10px 12px}
+    .kpi .v{font-size:17px} .kpi .l{font-size:10px} .kpi .s{font-size:9.5px}
+    .kpi .ic{font-size:15px}
+    /* alvos de toque maiores */
+    .chip{padding:9px 13px;font-size:13px}
+    button.chip,.btn{min-height:38px}
+    h2{font-size:15px}
+    .hint{display:none}
+    /* no celular o cabeçalho empilha e a barra de atalhos rola de lado */
+    .hbot{flex-direction:column;gap:6px}
+    /* período: 8 botões viram 1 seletor */
+    .chips{display:none}
+    .selPer{display:block;width:100%;background:var(--bg2);border:1px solid var(--line);color:var(--tx);
+            border-radius:9px;padding:9px 10px;font-size:14px;font-weight:700}
+    /* cobertura: só o resumo; toca e abre */
+    .covResumo{display:inline-flex;align-items:center;gap:5px;cursor:pointer;border:0;font:inherit}
+    #cover .covItem{display:none}
+    #cover.aberto .covItem{display:inline-flex}
+    #cover{gap:6px}
+    .atalhos{max-width:100%;justify-content:flex-start;overflow-x:auto;flex-wrap:nowrap!important;
+             -webkit-overflow-scrolling:touch;padding-bottom:2px}
+    .atalhos .chip{flex:0 0 auto;white-space:nowrap}
+    /* tabelas mais compactas */
+    table{font-size:11.5px}
+    td{padding:7px 6px} th{padding:6px 6px;font-size:9.5px}
+    .tw{overflow-x:auto;-webkit-overflow-scrolling:touch}
+    /* ANÁLISE no celular: a tabela some e cada venda vira um CARTÃO (ver .vcards) */
+    #secAnalise .tw{display:none}
+    .vcards{display:flex;flex-direction:column;gap:8px}
+    /* TOP PRODUTOS: esconde curva e participação */
+    #tProd tr>*:nth-child(7),#tProd tr>*:nth-child(9){display:none}
+    /* cabeçalho congelado da tabela desligado no celular (brigava com a barra fixa) */
+    .tw th{position:static;box-shadow:none}
+    /* rodapé de paginação empilha */
+    #anRodape{flex-wrap:wrap}
+    /* mapa do Brasil menor */
+    #ufMapa{transform:scale(.86);transform-origin:top left}
+  }
+  /* ══════════════ CELULAR ESTREITO ══════════════ */
+  @media(max-width:520px){
+    .kpis{grid-template-columns:1fr 1fr}
+    .kpi .v{font-size:16px}
+    #tProd tr>*:nth-child(5),#tProd tr>*:nth-child(8){display:none}
+    table{font-size:11px} td{padding:6px 5px}
+    .sskus div{font-size:11px}
+    .vcNums{grid-template-columns:1fr 1fr}
+    .vcNum{font-size:13px}
+    .tw table{min-width:560px}
+  }
+</style>
+</head>
+<body>
+<div id="app"><div class="skel">⏳ carregando…</div></div>
+<script>
+const MOD = '/girassol-backup-offline';
+const DASH_BUILD = 'd117';
+let DADOS = [];
+let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
+let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
+let periodo = 'dia', pDe = '', pAte = '';   // abre no DIA (pedido do Diego)
+let SKUINFO = {}, skuInfoCarregado = false, _skuLoading = false;
+let CFG = { aliquotas:{}, taxas:{} };   // alíquota Simples por mês (YYYY-MM: %) + tarifa % por canal
+let MAG_NIVEL = '50';   // nível de desconto do frete Magalu (coparticipação): 'sem'|'25'|'50' (default 50%)
+// Alíquotas 2026 da GIRASSOL vindas de fábrica (editáveis no ⚙️; o que você salvar SOBREPÕE estas):
+const DEFAULT_ALIQ = { '2026-01':11.409280, '2026-02':11.3254, '2026-03':12.3402, '2026-04':13.6001, '2026-05':13.9149, '2026-06':14.056, '2026-07':14.1 };
+const aliqDe = mes => (CFG.aliquotas[mes] != null ? CFG.aliquotas[mes] : (DEFAULT_ALIQ[mes] != null ? DEFAULT_ALIQ[mes] : null));
+const DEFAULT_FLEX = { ml: 12, shopee: 9, outros: 9 };   // motoboy do FLEX pago pela loja — ML R$ 12 · Shopee e demais R$ 9 (editável no ⚙️)
+const NOME_CANAL={ml:'MercadoLivre',tiktok:'TikTok',magalu:'MagaLu',shopee:'Shopee',amazon:'Amazon',madeira:'MadeiraMadeira',outro:'Outro'};
+const nomeCanal=k=>NOME_CANAL[k]||String(k||'').charAt(0).toUpperCase()+String(k||'').slice(1);
+const flexDe = ck => {
+  const fx = (CFG.flex || {});
+  const k = (ck === 'ml' || ck === 'shopee') ? ck : 'outros';
+  if (fx[k] != null) return fx[k];
+  if (k === 'outros' && fx.geral != null) return fx.geral;   // compatibilidade com a config antiga
+  return DEFAULT_FLEX[k];
+};
+const CANAIS_CFG = ['ml','shopee','magalu','amazon','tiktok','madeira','leroy','outro'];
+const canalKey = mk => { mk=(mk||'outro').toLowerCase(); return mk==='mercadolivre'?'ml':(CANAIS_CFG.includes(mk)?mk:'outro'); };
+let sortProd = { col: 'mc', dir: -1 };   // default: maior Lucro Bruto (M.C.) em cima
+let sortProj = { col: 'qtd14', dir: -1 };
+let projDias = 14;   // período do ritmo da projeção (dias)
+let chPed = null, chFat = null;
+let _plMLFee = {};   // tarifa real ML por pedido (sob demanda)
+let anPage=0, anCanal='', anSku='', anPer='dia', anPDe='', anPAte='', anLP='', anAg=true, _anLoading=false;   // 📋 análise de vendas (abre no DIA) · anAg: aguardando bipagem VISÍVEL por padrão (d54 — Diego quer a M.C. do dia inteiro, bipado ou não; o chip 🕐 esconde quando quiser)
+let _anTried = {};   // SKUs ja tentados no on-demand — evita loop de recarga que apagava seleção
+let _anLP = [];   // última lista filtrada da Análise — fonte do export CSV
 
-const fs    = require('fs');
-const path  = require('path');
-const fetch = require('node-fetch');
-const AdmZip = require('adm-zip');
-const crypto = require('crypto');
-const https = require('https');
-const { garantirToken } = require('../good/tokenManager');
-const { gerarDanfeSimplificado, gerarDanfeSimplificadoZPL } = require('./danfe-simplificado');
-const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
+const $ = id => document.getElementById(id);
+const esc = s => String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const BRL = v => 'R$ ' + (Math.round(v*100)/100).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+const BRLk = v => v>=1000 ? 'R$ '+(v/1000).toLocaleString('pt-BR',{maximumFractionDigits:1})+'k' : BRL(v);
+const N = v => Number(v).toLocaleString('pt-BR');
+const diaSP = iso => { try{ return new Date(iso).toLocaleString('sv-SE',{timeZone:'America/Sao_Paulo'}).slice(0,10); }catch(e){ return String(iso||'').slice(0,10); } };
+const hojeSP = () => new Date().toLocaleString('sv-SE',{timeZone:'America/Sao_Paulo'}).slice(0,10);
+const spDate = ms => new Date(ms).toLocaleString('sv-SE',{timeZone:'America/Sao_Paulo'}).slice(0,10);
+const dtBR = iso => { try{ return new Date(iso).toLocaleString('pt-BR',{timeZone:'America/Sao_Paulo',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}).replace(',',''); }catch(e){ return ''; } };
+const diaVenda = h => { if (h.venda_em) return diaSP(h.venda_em); if (h.venda_dia) return String(h.venda_dia).slice(0,10); return h && h.conferido_em ? new Date(h.conferido_em).toLocaleString('sv-SE',{timeZone:'America/Sao_Paulo'}).slice(0,10) : ''; };   // DIA DA VENDA: hora real (ML) > data da venda (Bling) > conferência
+const tMs = h => {
+  // EIXO UNICO de tempo. Antes: quem tinha venda_dia era carimbado ao MEIO-DIA e quem nao tinha usava a
+  // hora da bipagem — dois eixos no mesmo sort = ordem embaralhada. Agora: hora REAL quando o canal fornece
+  // (ML); senao, DIA da venda + relógio da conferência (um só eixo, coerente dentro do dia).
+  if (h.venda_em) { const n1 = Date.parse(h.venda_em); if (isFinite(n1)) return n1; }
+  const nc = Date.parse((h.nf_emissao ? String(h.nf_emissao).replace(' ','T') : '') || h.conferido_em || '');
+  if (h.venda_dia) {
+    const hora = isFinite(nc) ? new Date(nc).toLocaleString('sv-SE', { timeZone: 'America/Sao_Paulo' }).slice(11, 19) : '12:00:00';
+    const n2 = Date.parse(String(h.venda_dia).slice(0, 10) + 'T' + hora + '-03:00');
+    if (isFinite(n2)) return n2;
+  }
+  return isFinite(nc) ? nc : 0;
+};
+function setSortProd(c){ sortProd = { col:c, dir:(sortProd.col===c ? -sortProd.dir : -1) }; render(); }
+function setSortProj(c){ sortProj = { col:c, dir:(sortProj.col===c ? -sortProj.dir : -1) }; renderProjecao(); }
+function setProjDias(d){ projDias = d; renderProjChips(); renderProjecao(); }
+function renderProjChips(){ const el=document.getElementById('projChips'); if(!el) return; const ops=[[7,'7 dias'],[14,'14 dias'],[30,'30 dias'],[60,'60 dias'],[90,'90 dias']]; el.innerHTML = ops.map(function(o){ return '<button class="chip'+(projDias===o[0]?' on':'')+'" onclick="setProjDias('+o[0]+')">'+o[1]+'</button>'; }).join(''); }
+const seta = (st,c)=> st.col===c ? (st.dir<0?' ↓':' ↑') : '';
+function cmpNull(a,b,dir){ const an=(a==null||!isFinite(a)), bn=(b==null||!isFinite(b)); if(an&&bn)return 0; if(an)return 1; if(bn)return -1; return (a-b)*dir; }
 
-// Certificado/chave do QZ Tray p/ assinar as impressões (mata o popup "Untrusted").
-// Configure no Render: GIRABKP_QZ_CERT (digital-certificate.txt) e GIRABKP_QZ_PRIVKEY (private-key.pem).
-const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
-const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
-
-const VERSAO     = 'girassol-backup-offline v28/07 b66';
-
-// ── SESSÃO DE OPERADOR (cookie assinado HMAC) — protege rotas de dados/ação ──
-// Segredo estável entre restarts. Usa ADMIN_KEY (já configurada no Render) como base.
-const SESS_SECRET = process.env.ADMIN_KEY || process.env.SESSION_SECRET || 'bkp-sess-2026';
-const SESS_TTL = 14 * 60 * 60 * 1000; // 14h (cobre o turno)
-const SESS_COOKIE = 'bkp_sess';
-function assinarSessao(nome) {
-  const pl = Buffer.from(JSON.stringify({ n: nome, exp: Date.now() + SESS_TTL })).toString('base64url');
-  const sig = require('crypto').createHmac('sha256', SESS_SECRET).update(pl).digest('base64url');
-  return pl + '.' + sig;
+// b41: cor da linha por ESTADO da venda — bate o olho e entende de cara.
+// 🟢 verde=ativa perfeita · 🟡 amarela=devolução em andamento · 🔴 vermelha=devolveu · ⚪ cinza=cancelou (sem enviar)
+function estiloLinha(h){
+  if(h && h.devolucao){
+    return h.dev_aberta
+      ? 'border-left:3px solid #eab308;background:linear-gradient(90deg,rgba(234,179,8,.14),transparent 55%)'   // devolução rolando (dinheiro ainda pendente no MP)
+      : 'border-left:3px solid #ef4444;background:linear-gradient(90deg,rgba(239,68,68,.16),transparent 55%)';   // devolução consolidada — prejuízo real
+  }
+  if(h && h._cancelado) return 'border-left:3px solid #475569;opacity:.4';   // cancelou — nao-evento
+  return 'border-left:3px solid rgba(52,211,153,.45)';   // ativa saudavel
 }
-function validarSessao(cookieHeader) {
-  const m = new RegExp('(?:^|;\\s*)' + SESS_COOKIE + '=([^;]+)').exec(cookieHeader || '');
-  if (!m) return null;
-  const parts = m[1].split('.');
-  if (parts.length !== 2) return null;
-  const esp = require('crypto').createHmac('sha256', SESS_SECRET).update(parts[0]).digest('base64url');
-  if (parts[1] !== esp) return null;
-  let pl; try { pl = JSON.parse(Buffer.from(parts[0], 'base64url').toString()); } catch (e) { return null; }
-  if (!pl.exp || Date.now() > pl.exp) return null;
-  return pl.n;
+
+function prepararVendas(){
+  const _sit = {}; (VENDAS||[]).forEach(v=>{ if(v&&v.numero!=null) _sit[String(v.numero)]=v; });
+  (DADOS||[]).forEach(h=>{ if(h.cancelado) h._cancelado=true;   // marca vinda do SERVIDOR — vale mesmo se o pedido não estiver na lista de vendas
+    const v=_sit[String(h.numero)]; if(v){ h._sit=v.situacao||null; h._cancelado=(!!h.cancelado || /cancel/i.test(String(v.situacao||'')) || !!v.cancelado_mkt); if(v.data && !h.venda_dia) h.venda_dia=v.data; if(v.venda_em && !h.venda_em) h.venda_em=v.venda_em; if(v.tarifa_ml!=null && h.tarifa_ml==null) h.tarifa_ml=Number(v.tarifa_ml); if(v.frete_recebido!=null && h.frete_recebido==null) h.frete_recebido=Number(v.frete_recebido); if(v.renda_canal!=null && h.renda_canal==null) h.renda_canal=Number(v.renda_canal); if(v.devolucao){ h.devolucao=1; if(v.dev_frete_retorno!=null)h.dev_frete_retorno=Number(v.dev_frete_retorno); h.dev_destino=v.dev_destino; h.dev_status=v.dev_status; h.dev_aberta=v.dev_aberta; } } });   // d45: bipada herda dia/hora · d50: tarifa REAL · d51: frete recebido · d53: renda oficial · b39: devolução
+  const _nums = new Set((DADOS||[]).map(h=>String(h.numero)));
+  SINT = (VENDAS||[]).filter(v=>v&&v.numero!=null&&!_nums.has(String(v.numero))).map(v=>({
+    sintetico:true, id:'s'+v.id, numero:v.numero, numero_loja:v.numero_loja||'', marketplace:v.marketplace||'outro',
+    venda_em:v.venda_em||null, venda_dia:v.data||null, valor:(v.total!=null?Number(v.total):null), cliente:v.cliente||'',
+    itens:(v.it||[]).map(i2=>({sku:i2.sku,qtd:i2.qtd,valor_total:i2.vt,custo:(i2.custo!=null?i2.custo:null)})), taxa_mkt:(v.taxa_mkt!=null?v.taxa_mkt:null), frete_mkt:(v.frete_mkt!=null?v.frete_mkt:null),
+    tarifa_ml:(v.tarifa_ml!=null?v.tarifa_ml:null), frete_ml:(v.frete_ml!=null?v.frete_ml:null), credito_ml:(v.credito_ml!=null?v.credito_ml:null),   // b31: comissão/frete/estorno REAIS do ML (fase ml_real) — o calcPL prioriza estes sobre o Bling
+    devolucao:(v.devolucao?1:0), dev_frete_retorno:(v.dev_frete_retorno!=null?Number(v.dev_frete_retorno):null), dev_destino:v.dev_destino||null, dev_status:v.dev_status||null, dev_aberta:(v.dev_aberta?1:0),   // b39: devolução do ML
+    _sit:v.situacao||null, _cancelado:(!!v.cancelado || /cancel/i.test(String(v.situacao||'')) || !!v.cancelado_mkt), cancelado_mkt:(v.cancelado_mkt?1:0)
+  }));
+}
+// 📱 CARTÕES DE VENDA (celular): a tabela de 15 colunas é ilegível no telefone; aqui cada venda
+// vira um cartão com o essencial — nº, canal, SKU, valor e margem. A tabela continua no desktop.
+function cardVenda(o){
+  const cor = o.cancelado ? '#475569' : (o.dev ? (o.devAberta?'#eab308':'#ef4444') : 'rgba(52,211,153,.45)');
+  const nums = [];
+  nums.push('<div class="vcB"><i>venda</i><b>'+(o.venda!=null?BRL(o.venda):'—')+'</b></div>');
+  nums.push('<div class="vcB"><i>custo</i><b>'+(o.custo!=null?BRL(o.custo):'—')+'</b></div>');
+  nums.push('<div class="vcB"><i>💎 margem</i><b class="'+((o.mc||0)>=0?'ok':'bad')+'">'+(o.mc!=null?BRL(o.mc):'—')+(o.pc!=null?(' <span style="font-size:10px;opacity:.8">'+String(o.pc).replace('.',',')+'%</span>'):'')+'</b></div>');
+  return '<div class="vcard" style="border-left:3px solid '+cor+(o.cancelado?';opacity:.55':'')+'">'+
+    '<div class="vcTopo">'+
+      (o.cancelado?'<span style="color:#64748b;font-weight:800">✕</span>':'<span style="color:#34d399;font-weight:800">✓</span>')+
+      '<span class="vcNum">'+esc(o.numero)+'</span>'+
+      '<span class="badge">'+esc(o.canal)+'</span>'+
+      (o.cancelado?'<span class="st bad" style="font-size:9px">CANCELADA</span>':'')+
+      (o.dev?'<span class="st bad" style="font-size:9px">🔴 DEVOLV.</span>':'')+
+      '<span class="vcHora">'+esc(o.hora||'')+'</span>'+
+    '</div>'+
+    '<div class="vcSku">'+o.skus+'</div>'+
+    '<div class="vcNums">'+nums.join('')+'</div>'+
+  '</div>';
+}
+function renderCardsVenda(lista){
+  const el=document.getElementById('anCards'); if(!el) return;
+  el.innerHTML = lista.length ? lista.map(cardVenda).join('') : '<div class="dim" style="padding:14px">sem vendas no período</div>';
 }
 
-// ─── Módulos extraídos (Fase 1: base + nf + etiquetas) ───────────────────
-const base = require('./base');
-const { BLING_BASE, CACHE_DIR, SIT_ATENDIDO, SIT_VERIFICADO, SYNC_ON, JANELA_DIAS, PAUSA_MS, RETENCAO_DIAS, ETIQ_FORMATO, CRON_EXPR,
-  MANIFEST_FILE, SKU_EAN_FILE, CONFERIDOS_FILE, RESERVAS_FILE, RESERVA_TTL_MS, KIT_CACHE_FILE, LOC_FILE, LOC_LOG_FILE, EAN_INDEX_FILE,
-  ARQUIVO_DIR, ARQUIVO_DIAS, SMTP_HOST, SMTP_PORT, EMAIL_USER, EMAIL_PASS, EMAIL_DEST, SCHEMA, LOJA_MKT, MKT_NOME,
-  sleep, ensureDir, readJson, writeJson, dataISO, json, html, manifest, salvarManifest, skuEanCache, locCache, salvarLoc,
-  salvarSkuEan, lerIndiceEan, lerReservas, lerOperadores, lerAdmins, ehAdmin, blingGet, blingWrite, moverSituacao } = base;
-const { parseNF, acharNFporRange, nfDoPedido, carregarNFs, acharNFnaLista, baixarDanfe, parseXmlNF, baixarXmlNF, dadosNFSimp } = require('./nf');
-const { baixarEtiqueta, baixarEtiquetaPDF, labelaryPost, zplParaPdf, etiquetaPdf } = require('./etiquetas');
-// ─── Módulos extraídos (Lote 1: comum/produtos/arquivo/separacao/email-docs) ────────
-const { servicoDoPedido, ehFlex, cronDeveriaTerRodado, kitIncompletoNoCache, zplEscape, bannerVolumeZpl } = require('./comum');
-const { getPossiveisGtins, primeiroEan, primeiraImagem, localizacaoDeProduto, localizacaoPorSku, salvarNoIndiceEan, eanDoItem, produtoDetalhe, infoProduto, limparProdCache } = require('./produtos');
-const { purgar, arquivarFinalizado, purgarArquivo, purgarConferidos } = require('./arquivo');
-let _ultimoCicloAgora = 0;   // trava anti-spam do botão 'Bling agora' (1 disparo/min)
-let _bf = { rodando: false, feitos: 0, total: 0, ok: 0, falhas: 0, iniciado_em: null };   // status do backfill de valores
-let _bfd = { rodando: false, feitos: 0, total: 0, ok: 0, falhas: 0, iniciado_em: null };   // status do backfill de DETALHES (uf + valor por item)
-let _skuInfoCache = null;   // cache em memória do sku-info (saldo/preço/custo)
-let _mls = { rodando: false, feitos: 0, total: 0, ok: 0, falhas: 0, iniciado_em: null, erros: {}, amostras: [] };   // pesca de tarifas/frete REAIS do ML
+// desenha a tabela da Análise com as vendas vindas do HISTÓRICO (banco), 100 por página
+function renderHistLinhas(iv){
+  const tb=$('tAnalise'), rp=document.getElementById('anRodape'), inf=$('anInfo');
+  if(!tb) return;
+  if(!HLIN || HLIN._de!==iv.de || HLIN._ate!==iv.ate){
+    tb.innerHTML='<tr><td class="dim" style="padding:14px">⏳ carregando as vendas do histórico…</td></tr>';
+    if(inf) inf.textContent='';
+    if(rp) rp.style.display='none';
+    return;
+  }
+  const ps=HLIN.pedidos||[];
+  const pgAtual=HLIN.pagina||1, totPg=HLIN.total_paginas||1;
+  tb.innerHTML =
+    '<tr><th>Data</th><th>Pedido</th><th>Canal</th><th>Produto</th><th class="num">Un.</th>'+
+    '<th class="num">Venda NF</th><th class="num">Custo (−)</th><th class="num">Imposto (−)</th>'+
+    '<th class="num">Tarifa (−)</th><th class="num">Frete vend. (−)</th><th class="num">💎 M.C.</th><th class="num">MC %</th></tr>'+
+    (ps.length? ps.map(function(o){
+      const pcm = o.vnota>0 ? Math.round(o.margem/o.vnota*1000)/10 : null;
+      const skus = (o.itens||[]).map(function(i){ return (i.qtd>1?i.qtd+'× ':'')+esc(i.sku||''); }).join('<br>');
+      return '<tr>'+
+        '<td class="dim" style="white-space:nowrap">'+esc(String(o.data||'').slice(8,10)+'/'+String(o.data||'').slice(5,7))+'</td>'+
+        '<td><b>'+esc(o.numero)+'</b>'+(o.numero_loja?'<div class="desc" style="font-size:10px">'+esc(o.numero_loja)+'</div>':'')+'</td>'+
+        '<td>'+esc(nomeCanal(canalKey(o.canal)))+'</td>'+
+        '<td><div class="desc" style="max-width:200px">'+skus+'</div></td>'+
+        '<td class="num">'+N(o.un)+'</td>'+
+        '<td class="num">'+BRL(o.vnota)+'</td>'+
+        '<td class="num'+(o.semCusto?' warn':'')+'">'+(o.custo?BRL(o.custo):'—')+(o.semCusto?' ⚠':'')+'</td>'+
+        '<td class="num">'+BRL(o.imposto)+'</td>'+
+        '<td class="num">'+BRL(o.comissao)+'</td>'+
+        '<td class="num">'+(o.frete?BRL(o.frete):'—')+'</td>'+
+        '<td class="num '+(o.margem>=0?'ok':'bad')+'"><b>'+BRL(o.margem)+'</b></td>'+
+        '<td class="num '+(o.margem>=0?'ok':'bad')+'">'+(pcm!=null?(String(pcm).replace('.',',')+'%'):'—')+'</td>'+
+      '</tr>';
+    }).join('') : '<tr><td class="dim" colspan="12" style="padding:14px">sem vendas nesta página</td></tr>');
+  const ini=(pgAtual-1)*(HLIN.por_pagina||100)+1, fim=ini+ps.length-1;
+  renderCardsVenda(ps.map(function(o){
+    return { numero:o.numero, canal:nomeCanal(canalKey(o.canal)), hora:String(o.data||'').slice(8,10)+'/'+String(o.data||'').slice(5,7),
+             skus:(o.itens||[]).map(function(i){return (i.qtd>1?i.qtd+'\u00d7 ':'')+esc(i.sku||'');}).join(' \u00b7 '),
+             venda:o.vnota, custo:(o.custo||null), mc:o.margem, pc:(o.vnota>0?Math.round(o.margem/o.vnota*1000)/10:null),
+             cancelado:false, dev:false };
+  }));
+  if(inf) inf.textContent = ps.length ? (ini+'–'+fim+' de '+N(HLIN.total_pedidos||0)+' pedido(s) · página '+pgAtual+' de '+totPg) : '';
+  if(rp){
+    rp.style.display='flex';
+    let sel='<select onchange="histIrPagina(this.value)" style="background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:6px 9px;font-size:12.5px">';
+    for(let i=1;i<=totPg;i++){ sel += '<option value="'+i+'"'+(i===pgAtual?' selected':'')+'>página '+i+'</option>'; }
+    sel += '</select>';
+    rp.innerHTML = '<b style="font-size:12.5px">📚 histórico</b>'+
+      '<span class="mut" style="font-size:12px">'+N(HLIN.total_pedidos||0)+' pedidos · 100 por página</span>'+
+      '<span style="margin-left:auto"></span>'+
+      (pgAtual>1?'<button class="chip" onclick="histIrPagina('+(pgAtual-1)+')">← Anterior</button>':'')+
+      sel+
+      (pgAtual<totPg?'<button class="chip" style="background:#1d4ed8;border-color:#1d4ed8;color:#fff;font-weight:700" onclick="histIrPagina('+(pgAtual+1)+')">Próxima →</button>':'<span class="mut" style="font-size:12px">última página</span>');
+  }
+}
 
-// BACKFILL-NF LOCAL: lê nf-simp.json (cache/arquivo) e preenche vprod_nf nos conferidos sem ele.
-// 100% disco, zero API — seguro pra rodar no cron diário e ao abrir o dashboard.
-function backfillNFLocal(dias) {
-  dias = Math.max(1, Math.min(120, Number(dias || 45)));
-  const corte = Date.now() - dias * 86400000;
-  const conf2 = readJson(CONFERIDOS_FILE, {});
-  let alvo = 0, comSimp = 0, semSimp = 0, ufN = 0;
-  for (const [cid, c] of Object.entries(conf2)) {
-    if (!c || !c.conferido_em || new Date(c.conferido_em).getTime() < corte) continue;
-    if (c.vprod_nf != null && c.numero_loja != null && c.uf != null) continue;
-    alvo++;
-    let ds = readJson(path.join(CACHE_DIR, String(cid), 'nf-simp.json'), null);
-    if (!ds) ds = readJson(path.join(ARQUIVO_DIR, String(cid), 'nf-simp.json'), null);
-    if (ds) {
-      if (c.numero_loja == null && ds.numeroPedidoLoja) c.numero_loja = String(ds.numeroPedidoLoja);
-      // UF/município: dos campos novos do nf-simp, ou garimpado do endereço dos antigos ("..., Cidade - UF, CEP ...")
-      if (c.uf == null) {
-        let _u = ds.uf || null, _m = ds.municipio || null;
-        if (!_u && ds.consumidor && ds.consumidor.endereco) {
-          const seg = String(ds.consumidor.endereco).split(',').map(t => t.trim()).reverse().find(t => / - [A-Z]{2}$/.test(t));
-          const mm = seg && seg.match(/^(.*) - ([A-Z]{2})$/);
-          if (mm) { _m = _m || mm[1]; _u = mm[2]; }
-        }
-        if (_u) { c.uf = _u; if (_m && c.municipio == null) c.municipio = _m; ufN++; }
-      }
-      if (Array.isArray(ds.itens) && ds.itens.length) {
-        const s2 = ds.itens.reduce((a, i) => a + (Number(i.valorTotal) || 0), 0);
-        if (isFinite(s2) && s2 > 0) { if (c.vprod_nf == null) { c.vprod_nf = Math.round(s2 * 100) / 100; comSimp++; } continue; }
-      }
+// 🔮 PREVISÃO DE VENDAS POR PRODUTO (o servidor lê o histórico e calcula)
+let PREV = null, prevBase = 180, _prevCarregando = false;
+function setPrevBase(d){ prevBase = d; carregarPrevisao(true); }
+async function carregarPrevisao(forcar){
+  if(_prevCarregando) return;
+  if(PREV && PREV.base_dias===prevBase && !forcar) return;
+  _prevCarregando = true;
+  const inf=document.getElementById('prevInfo'); if(inf) inf.textContent = '⏳ calculando com '+prevBase+' dias de histórico…';
+  try{
+    const r = await fetch(MOD+'/previsao-vendas?base='+prevBase, {credentials:'same-origin'});
+    const d = await r.json().catch(()=>null);
+    if(d && d.ok){ PREV = d; renderPrevisao(); }
+    else if(inf) inf.innerHTML = '<span class="warn">não consegui calcular</span>';
+  }catch(e){ if(inf) inf.innerHTML='<span class="warn">'+(e.message||e)+'</span>'; }
+  _prevCarregando = false;
+}
+function renderPrevisao(){
+  const ch=document.getElementById('prevChips');
+  if(ch) ch.innerHTML = [[90,'3 meses'],[180,'6 meses'],[365,'1 ano']]
+    .map(function(a){ return '<button class="chip'+(prevBase===a[0]?' on':'')+'" onclick="setPrevBase('+a[0]+')">'+a[1]+'</button>'; }).join('');
+  const inf=document.getElementById('prevInfo'), tb=document.getElementById('tPrev');
+  if(!PREV || !tb) return;
+  if(inf) inf.innerHTML = 'base: '+PREV.de+' → '+PREV.ate+' · '+N(PREV.linhas)+' itens vendidos · '+N(PREV.skus)+' SKUs'+
+    (PREV.cache?' <span class="mut">(do cache — recalcula a cada 30 min)</span>':'');
+  const seta = function(t){ return t>=25 ? '<span class="ok">▲ '+t+'%</span>' : (t<=-25 ? '<span class="bad">▼ '+t+'%</span>' : '<span class="mut">≈ '+(t>0?'+':'')+t+'%</span>'); };
+  tb.innerHTML =
+    '<tr><th>#</th><th>Produto</th><th class="num" title="unidades vendidas na base escolhida">Vendidas</th>'+
+    '<th class="num" title="últimos 30 dias contra os 30 anteriores">Tendência</th>'+
+    '<th class="num">1 sem</th><th class="num">1 mês</th><th class="num">3 meses</th><th class="num">6 meses</th><th class="num">1 ano</th></tr>'+
+    (PREV.produtos.length ? PREV.produtos.slice(0,150).map(function(x,i){
+      return '<tr>'+
+        '<td class="dim">'+(i+1)+'</td>'+
+        '<td><b>'+esc(x.sku)+'</b><div class="desc" style="max-width:280px">'+esc(x.desc||'')+'</div></td>'+
+        '<td class="num">'+N(x.un)+'<div class="mut" style="font-size:10px">'+String(x.media_dia).replace('.',',')+'/dia</div></td>'+
+        '<td class="num">'+seta(x.tendencia)+'<div class="mut" style="font-size:10px">'+N(x.un30)+' vs '+N(x.un_30_60)+'</div></td>'+
+        '<td class="num">'+N(x.p7)+'</td><td class="num"><b>'+N(x.p30)+'</b></td><td class="num">'+N(x.p90)+'</td>'+
+        '<td class="num">'+N(x.p180)+'</td><td class="num" style="font-weight:800">'+N(x.p365)+'</td>'+
+      '</tr>';
+    }).join('') : '<tr><td class="dim" colspan="9" style="padding:14px">sem histórico suficiente no período escolhido</td></tr>');
+}
+
+// 📚 LISTA do histórico, paginada por pedido (100 por página) — vem do banco, não do cache local
+let HLIN = null;            // {pedidos, pagina, total_paginas, total_pedidos}
+let _hlCarregando = false;
+async function carregarLinhasHist(de, ate, pagina){
+  if(_hlCarregando) return;
+  _hlCarregando = true;
+  try{
+    const r = await fetch(MOD+'/historico-linhas?de='+de+'&ate='+ate+'&pagina='+(pagina||1)+'&lim=100', {credentials:'same-origin'});
+    const d = await r.json().catch(()=>null);
+    if(d && d.ok){ HLIN = d; HLIN._de=de; HLIN._ate=ate; renderAnalise(); restaurarAncora(); }
+  }catch(e){}
+  _hlCarregando = false;
+}
+function histIrPagina(n){
+  if(!HLIN) return;
+  const p = Math.min(Math.max(1, Number(n)||1), HLIN.total_paginas||1);
+  carregarLinhasHist(HLIN._de, HLIN._ate, p);
+  const el=document.getElementById('secAnalise'); if(el) el.scrollIntoView({behavior:'smooth'});
+}
+
+// 📚 HISTÓRICO LONGO (Supabase): períodos que não cabem na janela local (Ano, 6 meses…)
+let HIST = null;          // agregado do período, vindo do servidor
+let _histCarregando = false;
+const HIST_JANELA_DIAS = 6;   // o cache local guarda ~6 dias; antes disso, o histórico manda
+function precisaHistorico(de){
+  const lim = new Date(Date.now() - HIST_JANELA_DIAS*86400000).toISOString().slice(0,10);
+  return String(de) < lim;
+}
+async function carregarHistorico(de, ate){
+  if(_histCarregando) return;
+  if(HIST && HIST.de===de && HIST.ate===ate) return;
+  _histCarregando = true;
+  const el = document.getElementById('histAviso');
+  if(el) el.innerHTML = '⏳ carregando o histórico de '+de+' a '+ate+'…';
+  try{
+    const r = await fetch(MOD+'/historico-longo?de='+de+'&ate='+ate, {credentials:'same-origin'});
+    const d = await r.json().catch(()=>null);
+    if(d && d.ok){ HIST = d; if(el) el.innerHTML=''; render(); renderAnalise(); restaurarAncora(); setTimeout(restaurarAncora,150); }
+    else if(el) el.innerHTML = '<span class="warn">não consegui carregar o histórico</span>';
+  }catch(e){ if(el) el.innerHTML = '<span class="warn">'+(e.message||e)+'</span>'; }
+  _histCarregando = false;
+}
+
+// 🔄 pergunta ao ML/Shopee se algum pedido do período foi CANCELADO pelo cliente
+let _stMkt = false;
+async function checarCancelados(silencioso){
+  if(_stMkt) return; _stMkt = true;
+  try{
+    const { de, ate } = intervalo();
+    const r = await fetch(MOD+'/status-mkt?de='+de+'&ate='+ate, {credentials:'same-origin'});
+    const d = await r.json().catch(()=>null);
+    if(d && d.ok){
+      const rh = await fetch(MOD+'/historico',{credentials:'same-origin'});
+      const dh = await rh.json();
+      if(dh && Array.isArray(dh.itens)){ DADOS=dh.itens; VENDAS=Array.isArray(dh.vendas_bling)?dh.vendas_bling:[]; prepararVendas(); render(); renderAnalise(); }
+      if(!silencioso && d.cancelados_agora) alert(d.cancelados_agora+' pedido(s) cancelados no marketplace foram marcados.');
     }
-    semSimp++;
+  }catch(e){}
+  _stMkt = false;
+}
+// a cada 10 min, se o filtro estiver em HOJE, confere vendas novas e cancelamentos
+// 🔄 ATUALIZAÇÃO AUTOMÁTICA no filtro HOJE
+// Antes: só de 10 em 10 min E só com a aba na frente — se você estivesse noutra aba (ou com o
+// celular bloqueado) o ciclo pulava a vez e a tela ficava velha sem avisar.
+let _ultAtualiz = 0;
+async function atualizarDados(motivo){
+  if(periodo!=='dia' || _recarregando) return;
+  _recarregando = true;
+  try{
+    const r = await fetch(MOD+'/historico',{credentials:'same-origin'});
+    const d = await r.json();
+    if(d && Array.isArray(d.itens)){
+      DADOS=d.itens; VENDAS=Array.isArray(d.vendas_bling)?d.vendas_bling:[];
+      prepararVendas(); render(); renderAnalise(); restaurarAncora();
+      _ultAtualiz = Date.now();
+      const el=document.getElementById('ultAtualiz');
+      if(el) el.textContent = 'atualizado ' + new Date().toTimeString().slice(0,5);
+    }
+  }catch(e){}
+  _recarregando = false;
+}
+let _recarregando = false;
+// a cada 3 min (o servidor busca vendas novas a cada 5) — roda mesmo com a aba atrás
+setInterval(()=>{ if(periodo==='dia') atualizarDados('ciclo'); }, 180000);
+// e SEMPRE que você volta pra aba, se faz mais de 1 min que não atualiza
+document.addEventListener('visibilitychange', ()=>{
+  if(!document.hidden && periodo==='dia' && (Date.now()-_ultAtualiz)>60000) atualizarDados('voltou');
+});
+window.addEventListener('focus', ()=>{
+  if(periodo==='dia' && (Date.now()-_ultAtualiz)>60000) atualizarDados('foco');
+});
+// a checagem de cancelamento no marketplace é mais pesada (consulta o ML pedido a pedido): 10 min
+setInterval(()=>{ if(periodo==='dia' && !document.hidden) checarCancelados(true); }, 600000);
+
+// ⚡ busca AGORA o detalhe (SKU/qtd/taxas) dos pedidos do período que estão sem — em sequência, até zerar
+let _compDet = false;
+let _autoDet = {};   // período já buscado automaticamente nesta sessão
+async function completarDetalhes(){
+  if(_compDet) return; _compDet = true;
+  const { de, ate } = intervalo();
+  const av = document.getElementById('avisoDet');
+  const msg = t => { const e=document.getElementById('avisoDet'); if(e) e.innerHTML = t; };
+  try{
+    // 28/07: eram até 40 levas seguidas (cada uma ~18s) — dava MINUTOS de tela ocupada quando o
+    // período tinha muito pedido sem detalhe. Agora vai até 3 levas; o resto o sincronizador
+    // completa em segundo plano, sem prender você na tela.
+    for(let volta=1; volta<=3; volta++){
+      msg('⏳ buscando detalhes no Bling… ('+volta+'ª leva)');
+      const r = await fetch(MOD+'/completar-detalhes?de='+de+'&ate='+ate, {credentials:'same-origin'});
+      if(!r.ok){ msg('⚠️ não consegui (HTTP '+r.status+')'); break; }
+      const d = await r.json();
+      if(!d || !d.ok){ msg('⚠️ '+((d&&d.erro)||'falhou')); break; }
+      msg('⏳ '+d.feitos+' pedido(s) resolvidos · faltam '+d.restantes+'…');
+      if(!d.restantes || !d.feitos) break;
+    }
+    // recarrega os dados e redesenha
+    const rh = await fetch(MOD+'/historico',{credentials:'same-origin'});
+    const dh = await rh.json();
+    if(dh && Array.isArray(dh.itens)){ DADOS = dh.itens; VENDAS = Array.isArray(dh.vendas_bling)?dh.vendas_bling:[]; prepararVendas(); render(); renderAnalise(); }
+    msg('');
+  }catch(e){ msg('⚠️ '+(e.message||e)); }
+  _compDet = false;
+}
+async function sincVendas(btn){
+  if(btn){ btn.disabled=true; btn.textContent='⏳ Bling…'; }
+  try{
+    await fetch(MOD+'/vendas-sync',{credentials:'same-origin'});
+    await new Promise(r=>setTimeout(r,6000));
+    const r=await fetch(MOD+'/historico',{credentials:'same-origin'}); const d=await r.json();
+    if(d&&Array.isArray(d.itens)){ DADOS=d.itens; VENDAS=Array.isArray(d.vendas_bling)?d.vendas_bling:[]; prepararVendas(); render(); }
+  }catch(e){}
+  if(btn){ btn.disabled=false; btn.textContent='🔄 atualizar'; }
+}
+async function boot(){
+  try{
+    const r = await fetch(MOD + '/historico', { credentials:'same-origin' });
+    if(r.status === 401 || r.status === 403){ semLogin(); return; }
+    const d = await r.json();
+    if(!d || !Array.isArray(d.itens)){ semLogin(); return; }
+    DADOS = d.itens;
+    VENDAS = Array.isArray(d.vendas_bling) ? d.vendas_bling : [];
+    prepararVendas();
+    try{ const rc = await fetch(MOD+'/config-fiscal',{credentials:'same-origin'}); const dc = await rc.json(); if(dc&&dc.config) CFG = { aliquotas: dc.config.aliquotas||{}, taxas: dc.config.taxas||{}, flex: dc.config.flex||{} }; }catch(e){}
+    try{ const rm = await fetch(MOD+'/config-frete-magalu',{credentials:'same-origin'}); const dm = await rm.json(); if(dm&&dm.config&&dm.config.nivel_desconto) MAG_NIVEL = dm.config.nivel_desconto; }catch(e){}
+    montar();
+  }catch(e){
+    $('app').innerHTML = '<div class="loginbox">✗ falha ao carregar: '+esc(e.message)+'<br><br><a href="'+MOD+'/dashboard">tentar de novo</a></div>';
   }
-  if (comSimp || ufN) writeJson(CONFERIDOS_FILE, conf2);
-  if (comSimp || semSimp) console.log(`[BACKFILL-NF] ${comSimp} preenchido(s) pela nota, ${semSimp} sem nf-simp no disco (janela ${dias}d)`);
-  return { candidatos: alvo, preenchidos_pela_nf: comSimp, uf_preenchidas: ufN, sem_nf_simp_no_disco: semSimp, dias };
 }
-const { montarSeparacao, montarSeparacaoPorPedido } = require('./separacao');
-const { enviarEmailDocs } = require('./email-docs');
-const { listarAtendidos, detalhePedido, sincronizarConferidos, indexarCatalogoCompleto, cachearPedido, rodarCiclo, getUltimoResumo, getUltimoSync, getIdxStatus } = require('./ciclo');
-
-// ─── Config (env prefixo GIRABKP_, defaults sãos) ───────────────────────
-// presença entre PCs: quem está separando cada pedido. Limpa reservas vencidas a cada leitura.
-// operadores p/ login (env GIRABKP_OPERADORES = "Nome:senha,Nome:senha"). Vazio = login DESLIGADO.
-// quem pode REABRIR/reverter pedido (env GIRABKP_ADMIN = "Diego" ou "Diego,Angelica"). Vazio = sem restrição (todo mundo pode).
-
-// FLEX = entrega por motoboy (etiqueta sempre disponível). Mesma lógica do checkout-expedição.
-const FLEX_KEYWORDS = ['mercado envios flex', 'entrega local', 'vapt', 'shopee entrega direta'];
-
-// ─── helpers genéricos ──────────────────────────────────────────────────
-
-// EAN robusto — varre todos os nomes de campo que o Bling usa pro GTIN
-
-// 1ª imagem do produto (lista traz imagemURL; detalhe traz midia.imagens.externas[].link)
-
-// localização (depósito/prateleira) do produto — fica em estoque.localizacao no /produtos/{id}
-
-// busca a localização de um SKU (p/ pedidos antigos sem cache): lista por código → se não vier, detalhe
-
-// ─── estado do módulo ───────────────────────────────────────────────────
-
-// o cron roda só dentro de uma faixa de horas (ex: 6-23). Isso evita o /saude dar alarme falso de madrugada.
-// lê a faixa do próprio CRON_EXPR e usa a hora local do servidor (mesma base do cron) — robusto a fuso.
-
-
-// ─── índice de EAN (cresce sozinho: todo produto resolvido entra aqui) ───
-
-// ─── indexação total do catálogo (roda 1x; deixa todo EAN achável na hora) ───
-
-// GET autenticado no Bling Girassol (token via tokenManager + retry 429)
-
-// escrita no Bling (PATCH/POST/PUT) — mesmo cuidado do blingGet (token + retry 429)
-
-// muda a situação de um pedido de venda (precisa do escopo "Gerenciar situações")
-
-// FASE 3: empurra os pedidos conferidos offline (sincronizado:false) p/ VERIFICADO no Bling
-
-
-
-
-// método mandado pelo Diego: pagina /nfe (sem filtro) e acha a NF com id
-// entre pedidoId e pedidoId+2000 (ids sequenciais). /nfe vem desc por id.
-
-
-// ── NF em LOTE (eficiente p/ o ciclo): pagina /nfe UMA vez até cobrir o
-//    menor id de pedido do lote, e casa todos em memória. /nfe vem desc por id.
-
-// EAN: produto por id → produto por SKU. Cacheia por SKU.
-
-// detalhe completo do produto (/produtos/{id}) com cache por ciclo
-
-// {sku, ean, descricao, img} de um produto por id (usa cacheEan por SKU)
-
-// baixa a etiqueta de envio. O Bling devolve um ZIP (com "Etiqueta de envio.txt"
-// dentro = o ZPL), mesmo pedindo formato=ZPL. Então: baixa binário → descompacta.
-
-// baixa o DANFE em PDF da NF (via /nfe/{id} → linkPDF). Retorna Buffer ou null.
-
-// ─── DANFE Simplificado: enriquecimento de dados (detalhe da NF + XML) ───
-
-// monta o objeto de dados p/ o gerador, a partir do id da NF (Bling) + nº do pedido
-
-// POST ao Labelary usando o módulo https nativo — lê a resposta binária de forma confiável
-// (o node-fetch às vezes corta respostas grandes com "Premature close")
-
-// converte ZPL → PDF via Labelary (com retry — trata rate limit 429 e quedas de conexão). Usado p/ não-ML.
-
-// etiqueta em PDF. 1º tenta o PDF nativo do Bling (vale p/ QUALQUER marketplace — ML, Shopee, Amazon...;
-// precisa do Bling no ar). 2º fallback offline: ZPL cacheado em disco → Labelary (não depende do Bling).
-
-
-
-// arquiva etiqueta + meta de um pedido FINALIZADO num lugar separado do cache (a etiqueta não dá p/ rebaixar depois; DANFE re-gera pelo nf.id)
-// remove do arquivo os finalizados mais velhos que ARQUIVO_DIAS
-
-// envia etiqueta + DANFE de um pedido finalizado pro estoque por email (Parte B)
-
-// limpa do histórico os finalizados JÁ sincronizados com +30 dias (não mexe nos pendentes de sync)
-
-// detecta pedido cacheado com kit incompleto (algum componente sem SKU) → sinal pra re-resolver
-
-
-// LISTA DE SEPARAÇÃO — agrega os itens de TODOS os pedidos cacheados (não-finalizados),
-// explodindo kits em componentes e somando a quantidade por SKU. Tudo do cache → funciona offline.
-
-// 2ª visão: separação POR PEDIDO (cada pedido com seus itens; itens podem repetir entre pedidos — OK, é pra uso raro)
-
-// ─── Adesivo "VOLUME i/N" (ZPL 10x15) — impresso ANTES de cada etiqueta Madeira ──
-// Sem ^PW/^LL de propósito: usa a config da impressora (não trunca a etiqueta dos
-// Correios que vem depois). Centralizado via ^FB. Layout AJUSTÁVEL após teste real.
-
-// ── SESSÃO SHOPEE QUE SE RENOVA SOZINHA (b23) ───────────────────────────
-// O de-para order_sn → id interno só existe no endpoint que a caixa de busca do
-// Seller Center usa, e ele exige cookie de sessão. Recapturar isso na mão toda
-// vez que vence é chato — então a env var passa a ser só a SEMENTE:
-//   1) no primeiro uso ela é copiada pro disco;
-//   2) a cada resposta da Shopee a gente aproveita o `set-cookie` que ela devolve
-//      e regrava o jar — que é exatamente o que o navegador faz, e é por isso que
-//      ele fica logado por meses;
-//   3) um cron 2x ao dia faz uma chamada barata só pra manter a sessão quente,
-//      mesmo em dia que ninguém clicou em nenhum ↗.
-// Se o Diego colar uma semente NOVA na env (porque a sessão morreu de vez), ela
-// ganha do disco — detectado por hash da própria env.
-const SHOPEE_ENV_COOKIE  = 'GIRABKP_SHOPEE_COOKIE';
-const SHOPEE_SESSAO_FILE = path.join(CACHE_DIR, '_shopee-sessao.json');
-
-function _shopeeHash(s) {
-  try { return require('crypto').createHash('sha1').update(String(s)).digest('hex').slice(0, 12); }
-  catch (e) { return 'len' + String(s).length; }
+function semLogin(){
+  $('app').innerHTML = '<div class="loginbox">🔒 <b>Sessão de admin necessária</b><br><span class="mut" style="font-size:12px">o dashboard usa o login do checkout</span><br><br>'+
+    '<a href="'+MOD+'/painel"><button class="btn">Fazer login no painel</button></a>'+
+    '<div class="nota">depois de logar, volte e recarregue esta página</div></div>';
 }
 
-function shopeeSessaoLer() {
-  const env  = String(process.env[SHOPEE_ENV_COOKIE] || '').trim();
-  const j    = readJson(SHOPEE_SESSAO_FILE, null) || {};
-  const envH = env ? _shopeeHash(env) : '';
-  if (env && j.semente !== envH) {          // semente nova na env → ela manda
-    const novo = { cookie: env, semente: envH, origem: 'env', atualizado: new Date().toISOString(), renovacoes: 0 };
-    try { ensureDir(CACHE_DIR); writeJson(SHOPEE_SESSAO_FILE, novo); } catch (e) {}
-    return novo;
-  }
-  if (j.cookie) return j;
-  if (env) return { cookie: env, semente: envH, origem: 'env', atualizado: null, renovacoes: 0 };
-  return { cookie: '', origem: 'nenhum', renovacoes: 0 };
+function intervalo(){
+  const hoje = hojeSP();
+  let de, ate = hoje;
+  if(periodo==='dia') de = hoje;
+  else if(periodo==='ontem'){ const o = spDate(Date.now()-86400000); de=o; ate=o; }
+  else if(periodo==='7') de = spDate(Date.now()-6*86400000);
+  else if(periodo==='30') de = spDate(Date.now()-29*86400000);
+  else if(periodo==='mes') de = hoje.slice(0,8)+'01';
+  else if(periodo==='ano') de = hoje.slice(0,4)+'-01-01';   // ano corrente inteiro (01/jan até hoje)
+  else if(periodo==='mesant'){ const [Y,M]=hoje.split('-').map(Number); const pm=new Date(Y,M-2,1);
+    const y2=pm.getFullYear(), m2=String(pm.getMonth()+1).padStart(2,'0');
+    de=y2+'-'+m2+'-01'; ate=y2+'-'+m2+'-'+String(new Date(Y,M-1,0).getDate()).padStart(2,'0'); }
+  else { de = pDe || '2000-01-01'; ate = pAte || hoje; }
+  return {de, ate};
+}
+// mantém o Diego na mesma seção quando o conteúdo re-renderiza (troca de período muda o tamanho da página)
+// 28/07: a correção acontecia UMA vez, no quadro seguinte. Só que a tela ainda muda depois disso
+// (o histórico chega da rede, os detalhes entram, as tabelas mudam de altura) — e aí você era jogado
+// de volta pro topo. Agora a âncora fica guardada e é reaplicada algumas vezes, cobrindo o assíncrono.
+let _ancEl=null, _ancTop=0;
+function marcarAncora(){
+  const secs = Array.prototype.slice.call(document.querySelectorAll('.sec'));
+  let alvo=null, melhor=Infinity;
+  for(const el of secs){ const r=el.getBoundingClientRect(); if(r.bottom>40){ const d=Math.abs(r.top-70); if(d<melhor){ melhor=d; alvo=el; } } }
+  _ancEl = alvo; _ancTop = alvo ? alvo.getBoundingClientRect().top : 0;
+}
+function restaurarAncora(){
+  if(!_ancEl || !document.body.contains(_ancEl)) return;
+  const dif = _ancEl.getBoundingClientRect().top - _ancTop;
+  if(Math.abs(dif) > 2) window.scrollBy(0, dif);
+}
+// ⚠️ aviso que DIZ QUAIS: em vez de só "2 pedidos sem taxa", mostra os números/SKUs por baixo
+function avisoCom(txt, lista, comoResolver){
+  if(!lista || !lista.length) return '<span class="warn">\u26a0 '+txt+'</span>';
+  const mostra = lista.slice(0,10).map(esc).join(', ') + (lista.length>10 ? (' +'+(lista.length-10)+' outros') : '');
+  return '<span class="warn">\u26a0 '+txt+'</span>'+
+         '<div style="font-size:10px;margin-top:2px;line-height:1.35"><b style="font-family:ui-monospace,monospace;color:#fbbf24">'+mostra+'</b>'+
+         (comoResolver?('<div style="opacity:.8;margin-top:1px">'+comoResolver+'</div>'):'')+'</div>';
+}
+// registro FANTASMA: casca no cache sem nº de pedido, sem itens e sem valor. Sobra de pedido
+// excluído no Bling. Contava como pedido e disparava 3 alertas de uma vez (sem alíquota, sem taxa,
+// sem detalhe) — porque não tem mês, nem canal, nem item. Fica fora de tudo.
+const ehFantasmaReg = h => !h.numero && !((h.itens||[]).length) && !(Number(h.valor)>0) && !(Number(h.vprod_nf)>0);
+function comAncora(fn){
+  marcarAncora();
+  fn();
+  requestAnimationFrame(restaurarAncora);
+  setTimeout(restaurarAncora, 120); setTimeout(restaurarAncora, 450); setTimeout(restaurarAncora, 1000);
+}
+function irPra(id){
+  const el=document.getElementById(id); if(!el) return;
+  const hd=document.querySelector('.hdr');
+  const off=(hd?hd.offsetHeight:0)+12;   // desconta o cabeçalho fixo pra parar no início da seção
+  const y=el.getBoundingClientRect().top + window.pageYOffset - off;
+  window.scrollTo({top:Math.max(0,y), behavior:'smooth'});
+}
+function setPeriodo(p){ periodo=p; espelharPeriodoNaAnalise(); comAncora(()=>{ render(); renderAnalise(); }); }
+// d48: o seletor do TOPO é o botão MASTER — escolheu lá, a Análise de vendas obedece junto.
+// (os chips da própria Análise continuam funcionando pra quem quiser um recorte diferente só nela)
+function espelharPeriodoNaAnalise(){
+  if(periodo==='custom'){ anPer='custom'; anPDe=pDe; anPAte=pAte; }
+  else if(periodo==='30'){ const iv=intervalo(); anPer='custom'; anPDe=iv.de; anPAte=iv.ate; }   // a Análise não tem chip "30 dias" — vira Período… com as datas
+  else anPer=periodo;   // dia/ontem/7/mes/mesant existem nos dois
+  anPage=0;
 }
 
-// Pega o set-cookie da resposta e funde no jar. Devolve null se nada mudou.
-function shopeeSessaoAtualiza(resp) {
-  let lista = [];
-  try { if (resp && resp.headers && typeof resp.headers.getSetCookie === 'function') lista = resp.headers.getSetCookie() || []; } catch (e) {}
-  if (!lista.length) { try { const s = resp && resp.headers && resp.headers.get('set-cookie'); if (s) lista = [s]; } catch (e) {} }
-  if (!lista.length) return null;
+function montar(){
+  $('app').innerHTML =
+  '<div class="hdr"><div class="hrow">'+
+    '<h1><span class="logo">🌻</span> Inteligência de Vendas · Girassol <span class="badge">'+DASH_BUILD+'</span></h1>'+
+    '<div class="hlinks"><a href="'+MOD+'/painel">← checkout</a></div>'+
+  '</div>'+
+  '<div class="wrap hbot">'+
+    '<div class="hleft">'+
+      '<div class="chips" id="chips"></div>'+
+      '<select id="selPeriodo" class="selPer" onchange="setPeriodo(this.value)"></select>'+
+      '<div class="custom" id="custom">De <input type="date" id="pDe" onclick="this.showPicker&&this.showPicker()" onchange="pDe=this.value;setPeriodo(\'custom\')"> '+
+      'até <input type="date" id="pAte" onclick="this.showPicker&&this.showPicker()" onchange="pAte=this.value;setPeriodo(\'custom\')"></div>'+
+      '<div class="cover" id="cover"></div>'+
+    '</div>'+
+    '<div class="atalhos">'+
+      '<span style="color:var(--mut);font-size:12px;margin-right:2px">ir para:</span>'+
+      '<button class="chip" onclick="irPra(&#39;secBusca&#39;)">🔍 Buscar pedido</button>'+
+      '<button class="chip" onclick="irPra(&#39;secAnalise&#39;)">📋 Análise de vendas</button>'+
+      '<button class="chip" onclick="irPra(&#39;secTop&#39;)">🏆 Top produtos</button>'+
+      '<button class="chip" onclick="irPra(&#39;secPrev&#39;)">🔮 Previsão</button>'+
+      '<button class="chip" onclick="irPra(&#39;secCanal&#39;)">🛒 Por canal</button>'+
+      '<button class="chip" onclick="irPra(&#39;secProj&#39;)">📦 Projeção de estoque</button>'+
+      '</div>'+
+  '</div></div>'+
+  '<div class="wrap">'+
+      '<div id="histAviso" style="font-size:12px;color:var(--mut);margin:0 0 8px"></div>'+'<div class="kpis" id="kpis"></div>'+
+    '<div class="sec" id="secBusca"><h2>🔍 Buscar pedido &amp; lucro <span class="hint">nº do pedido · NF · nº da venda no marketplace · SKU · parte do título</span></h2>'+
+      '<input id="qBusca" placeholder="digite e tecle Enter" '+
+      'style="width:100%;background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:10px;padding:11px 14px;font-size:13px" '+
+      'oninput="buscarPed(this.value)">'+
+      '<div id="buscaRes" style="margin-top:10px"></div><div id="plCard"></div></div>'+
+    '<div class="sec" id="secAnalise"><h2>📋 Análise de vendas — margem por pedido <span class="hint">mais novas em cima · ✓ verde = bipado · ✓ laranja = aguardando bipagem (margem já calculada) · 🧾 = hora da NF · 🕘 = hora da conferência</span></h2>'+
+    '<div style="display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--mut);margin:-4px 0 10px;align-items:center"><span style="color:var(--mut)">cor da linha:</span>'+
+      '<span style="display:inline-flex;align-items:center;gap:5px"><span style="width:11px;height:11px;border-radius:2px;background:#34d399;display:inline-block"></span>ativa</span>'+
+      '<span style="display:inline-flex;align-items:center;gap:5px"><span style="width:11px;height:11px;border-radius:2px;background:#eab308;display:inline-block"></span>devolução em andamento</span>'+
+      '<span style="display:inline-flex;align-items:center;gap:5px"><span style="width:11px;height:11px;border-radius:2px;background:#ef4444;display:inline-block"></span>devolvida</span>'+
+      '<span style="display:inline-flex;align-items:center;gap:5px"><span style="width:11px;height:11px;border-radius:2px;background:#475569;display:inline-block"></span>cancelada</span>'+
+    '</div>'+
+      '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px"><span id="anPerChips" style="display:flex;gap:6px;flex-wrap:wrap"></span><span id="anPerDatas"></span></div>'+
+      '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">'+
+      '<select id="anCanalSel" onchange="anCanal=this.value;anPage=0;renderAnalise()" style="background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:9px;padding:7px 10px;font-size:12.5px"></select>'+
+      '<input id="anSkuInp" placeholder="🔎 pedido, NF, venda ou SKU…" oninput="anSku=this.value;anPage=0;renderAnalise()" style="background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:9px;padding:7px 10px;font-size:12.5px;width:210px">'+
+      '<span id="anLPChips" style="display:flex;gap:6px"></span>'+
+      '<button class="chip" onclick="sincVendas(this)" title="consulta o Bling AGORA — o sincronizador também roda sozinho a cada 5 min">🔄 atualizar</button>'+
+      '<button class="chip" onclick="baixarCSV()" title="baixa TODAS as vendas do filtro atual — abre no Excel, ideal p/ confrontar com o Jodda linha a linha">⬇︎ CSV</button>'+
+      '<span id="anInfo" class="mut" style="font-size:12px"></span>'+
+      '<span style="margin-left:auto"></span>'+
+      '<button class="chip" onclick="if(anPage>0){anPage--;renderAnalise();}">← Anterior</button>'+
+      '<button class="chip" onclick="anPage++;renderAnalise()">Próxima →</button></div>'+
+      '<div id="anResumo"></div>'+
+      '<div class="tw"><table id="tAnalise"></table></div>'+
+      '<div class="vcards" id="anCards"></div>'+
+      '<div id="anRodape" style="display:none;align-items:center;gap:8px;margin-top:8px;padding:8px;background:var(--bg2);border-radius:9px"></div>'+
+      '<div class="nota"><b>Sobre a ordem:</b> dentro de cada dia, ML aparece na hora REAL da venda; TikTok/Shopee/Magalu/Amazon entram pela hora da <b>EMISSÃO da NF</b> (🧾), que acompanha a venda de perto — acabaram os blocos por canal. O 🕘 (hora da conferência) só aparece quando a linha ainda não tem NF. A hora exata da venda desses canais continua existindo <b>só na API do próprio canal</b>. Pra confrontar com o Jodda, use o ⬇︎ CSV e case pelo <b>número da venda no marketplace</b>. · ML mostra a hora REAL da venda (vem da pesca); TikTok/Shopee o Bling não guarda hora — o 🕘 marca que ali está a hora da <b>conferência</b> (a hora da venda desses canais chega quando plugarmos as APIs deles) · colunas (−) são deduções e (+) é crédito · <b>Estorno</b> = o valor exato da linha "Estorno" da venda no ML (no Flex ele já vem líquido: bonificação menos o frete cobrado), somado na M.C. · no Flex o custo do frete é o <b>motoboy</b> configurado no ⚙️ · tarifa <span class="ok">REAL</span> = pescada do ML · <span class="ok">BLING</span> = comissão que o Bling importou do canal (TikTok/Shopee/Magalu) · sem tag = % configurada · custo carrega sob demanda por página · 🛒 = mais de 1 item/unidade</div></div>'+
+    '<div class="sec" id="secTop"><h2>🏆 Top produtos <span class="hint">clique nos títulos p/ ordenar ↑↓ · faturamento = SOMA de todos os pedidos do SKU no período · 💎 M.C. = margem dos pedidos rateada por item — o rank do que dá LUCRO de verdade · Curva ABC recalculada pro período pesquisado (A = 80% do faturamento)</span></h2>'+
+      '<div class="tw"><table id="tProd"></table></div><div id="prodAviso"></div></div>'+
+    '<div class="sec" id="secPrev"><h2>\U0001f52e Previs\u00e3o de vendas por produto</h2>'+
+      '<div class="hint">quanto cada SKU deve vender daqui pra frente, com base no hist\u00f3rico. A proje\u00e7\u00e3o d\u00e1 mais peso aos \u00faltimos 30 dias (reage a produto subindo ou caindo); a coluna <b>tend\u00eancia</b> compara os \u00faltimos 30 dias com os 30 anteriores.</div>'+
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0">'+
+        '<span class="mut" style="font-size:12px">base de c\u00e1lculo:</span><div id="prevChips" style="display:flex;gap:6px;flex-wrap:wrap"></div>'+
+        '<button class="chip" onclick="carregarPrevisao(true)" style="margin-left:auto">\u21bb recalcular</button>'+
+      '</div>'+
+      '<div id="prevInfo" class="mut" style="font-size:12px;margin-bottom:6px"></div>'+
+      '<div class="tw"><table id="tPrev"></table></div>'+
+    '</div>'+
+    '<div class="sec" id="secCanal"><h2>🛒 Por canal</h2><div class="tw"><table id="tCanal"></table></div></div>'+
+    '<div class="grid2">'+
+      '<div class="sec"><h2>📈 Pedidos por dia</h2><div class="chartbox"><canvas id="cPed"></canvas></div></div>'+
+      '<div class="sec"><h2>💰 Faturamento por dia</h2><div class="chartbox"><canvas id="cFat"></canvas></div></div>'+
+    '</div>'+
+    '<div class="sec" id="secProj"><h2>📦 Projeção de estoque &amp; margem <span class="hint">ritmo de vendas p/ prever a reposição · clique p/ ordenar</span></h2>'+
+      '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:10px"><span style="color:var(--mut);font-size:12px;margin-right:2px">ritmo:</span><span id="projChips" style="display:flex;gap:6px;flex-wrap:wrap"></span></div>'+
+      '<div id="projBox" style="margin-bottom:10px;font-size:12px"><span class="mut" id="projStatus">⏳ carregando saldo/preço/custo do Bling… (~30-60s na 1ª vez)</span> '+
+      '<button class="btn" id="btnProj" onclick="carregarSkuInfo(true)" style="display:none">↻ recarregar do Bling (ignora cache)</button> <button class="btn sec" onclick="sincCustos()" title="resolve TODOS os custos em background, devagar, sem estourar o limite do Bling — e grava em cache permanente">🐢 sincronizar custos (fundo)</button></div>'+
+      '<div class="tw"><table id="tProj"></table></div><div id="projAviso"></div></div>'+
+    '<div class="sec"><h2>📈 Progressão do período <span class="hint">diário · sacada do Bling, com o NOSSO imposto mensal correto</span></h2>'+
+      '<div id="grafTot" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px"></div>'+
+      '<div id="grafProg" style="overflow-x:auto"></div>'+
+      '<div class="nota" id="grafLeg"></div></div>'+
+    '<div class="sec"><h2>🗺️ Vendas por estado</h2><div style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start;justify-content:center"><div style="flex:0 1 340px;min-width:260px"><div class="tw" id="twUF"><table id="tUF"></table></div><div id="ufAviso"></div></div><div id="ufMapa" style="flex:1 1 420px;min-width:300px;max-width:620px"></div></div></div>'+
+    '<div class="sec"><h2>⚙️ Impostos &amp; taxas <span class="hint">alíquota do Simples varia mês a mês · taxas de marketplace em % (estimativa; ML tem a REAL por pedido na busca)</span></h2>'+
+      '<div id="cfgBox"></div>'+
+      '<div style="font-size:12px;color:var(--mut);margin:14px 0 6px">🚛 Motoboy do FLEX pago pela loja (R$) — de fábrica: <b>ML R$ 12</b> · <b>Shopee R$ 9</b> · <b>demais R$ 9</b>. Entra como custo quando o pedido é FLEX.</div>'+
+    '<div style="display:flex;gap:14px;flex-wrap:wrap">'+
+      [['ml','Mercado Livre'],['shopee','Shopee'],['outros','Demais canais']].map(function(fx){
+        var salvo = (CFG.flex && CFG.flex[fx[0]] != null) ? CFG.flex[fx[0]] : null;
+        var val = salvo != null ? salvo : DEFAULT_FLEX[fx[0]];
+        return '<label style="font-size:12px;color:var(--mut)">'+fx[1]+'<br><input type="number" step="0.5" min="0" max="100" data-flex="'+fx[0]+'" value="'+val+'" style="width:96px'+(salvo!=null?'':';color:#8b96b3')+'" title="'+(salvo!=null?'valor salvo por você':'de fábrica (R$ '+DEFAULT_FLEX[fx[0]]+') — edite p/ sobrepor')+'"></label>';
+      }).join('')+
+    '</div>'+
+      '<div style="font-size:12px;color:var(--mut);margin:14px 0 6px">📦 Nível de desconto do frete Magalu <span class="dim">(coparticipação — veja o seu % em <a href="https://seller.magalu.com/reputacao" target="_blank" style="color:var(--ok)">seller.magalu.com/reputacao</a>)</span>. Usado só na PREVISÃO do frete; quando o pedido é entregue, o valor REAL da Magalu substitui.</div>'+
+    '<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center">'+
+      '<label style="font-size:12px;color:var(--mut)">Desconto de coparticipação<br><select id="magNivelSel" style="background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:9px;padding:7px 10px;font-size:12.5px;margin-top:3px">'+
+        '<option value="50"'+(MAG_NIVEL==='50'?' selected':'')+'>Despacho &gt;97% — 50% de desconto</option>'+
+        '<option value="25"'+(MAG_NIVEL==='25'?' selected':'')+'>Despacho 87-97% — 25% de desconto</option>'+
+        '<option value="sem"'+(MAG_NIVEL==='sem'?' selected':'')+'>Despacho &lt;87% — sem desconto</option>'+
+      '</select></label>'+
+    '</div>'+
+    '<div style="margin-top:12px"><button class="btn" onclick="salvarCfg()">💾 Salvar</button> <span id="cfgMsg" class="mut" style="font-size:12px;margin-left:8px"></span></div>'+
+      '<div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line)"><div style="font-size:12px;color:var(--mut);margin-bottom:8px">🔧 Manutenção <span class="dim">(rodam sozinhas de madrugada — use só se quiser AGORA)</span></div>'+
+      '<button class="btn" onclick="rodarPescaML()">🎣 Pescar tarifas ML agora</button> '+
+      '<button class="btn" onclick="rodarBackfillNF()" style="background:linear-gradient(135deg,#0d9488,#0f766e)">🧾 Backfill NF agora</button> '+
+      '<span id="manutMsg" class="mut" style="font-size:12px;margin-left:8px"></span></div></div>'+
+    '<div class="nota"><b>Regras deste painel</b> · datas no horário de São Paulo · kits contam pelo SKU do kit · '+
+      'faturamento por produto = soma de (preço do item × qtd) em CADA pedido do período · '+
+      'produtos/frete usam a NOTA FISCAL do pedido quando disponível (fonte fiscal exata) · '+
+      '<b>margem de contribuição</b> = produtos(NF) − imposto(alíquota do mês × total) − tarifa do canal (ML: real por pedido; demais: % configurada) − custo (Bling); o frete recebido aproxima o frete pago e não entra na conta · '+
+      'margem bruta = venda − custo, sem frete/taxas · só entram pedidos finalizados no checkout offline. '+
+      '<b>datas pelo DIA DA VENDA (igual ao Jodda) — o pedido aparece após a bipagem no checkout, mas cai no dia em que foi vendido.</b></div>'+
+  '</div>';
+  render();
+  const bootSku = () => {   // espera os pedidos carregarem — antes disparava aos 400ms sobre DADOS vazio e marcava "✓" sem carregar nada
+    if (skuInfoCarregado) return;
+    if (!DADOS || !DADOS.length) { const st0=$('projStatus'); if(st0) st0.textContent='⏳ esperando os pedidos carregarem…'; setTimeout(bootSku, 500); return; }
+    carregarSkuInfo();
+  };
+  setTimeout(bootSku, 400);
+}
 
-  const atual = shopeeSessaoLer();
-  if (!atual.cookie) return null;
+function render(){
+  const defs = [['dia','Hoje'],['ontem','Ontem'],['7','7 dias'],['30','30 dias'],['mes','Mês'],['mesant','Mês anterior'],['ano','Ano'],['custom','Período…']];
+  $('chips').innerHTML = defs.map(([k,l])=>'<button class="chip'+(periodo===k?' on':'')+'" onclick="setPeriodo(\''+k+'\')">'+l+'</button>').join('');
+  // no celular os 8 botões viram um seletor (economiza 2 linhas de tela)
+  const sp=$('selPeriodo'); if(sp) sp.innerHTML = defs.map(([k,l])=>'<option value="'+k+'"'+(periodo===k?' selected':'')+'>'+l+'</option>').join('');
+  $('custom').style.display = periodo==='custom' ? 'flex' : 'none';
 
-  const mapa = new Map();
-  String(atual.cookie).split(';').forEach(p => { const i = p.indexOf('='); if (i > 0) mapa.set(p.slice(0, i).trim(), p.slice(i + 1).trim()); });
+  const {de, ate} = intervalo();
+  // 28/07: registro FANTASMA — casca no cache sem número de pedido, sem itens e sem valor.
+  // Não é venda: é sobra de um pedido excluído no Bling ou de um cache incompleto. Ficava contado
+  // como pedido e disparava TRÊS alertas ao mesmo tempo (sem alíquota, sem taxa e sem detalhe),
+  // porque não tem mês, não tem canal e não tem item. Fora da conta.
+  const PER = DADOS.filter(h => { if(!h.conferido_em) return false; if(ehFantasmaReg(h)) return false; const d = diaVenda(h); return d>=de && d<=ate; });
+  const VB = (VENDAS||[]).filter(v=>{ const d2=String(v.data||'').slice(0,10); return d2>=de && d2<=ate; });
+  const VBok = VB.filter(v=>!/cancel/i.test(String(v.situacao||'')));
+  const vbSoma = VBok.reduce((a,v)=>a+(Number(v.total)||0),0);
+  const vbCanc = VB.length - VBok.length;
 
-  let mudou = 0;
-  lista.forEach(sc => {
-    const par = String(sc).split(';')[0];
-    const i = par.indexOf('=');
-    if (i <= 0) return;
-    const nome = par.slice(0, i).trim();
-    const val  = par.slice(i + 1).trim();
-    if (!nome) return;
-    if (!val || val === 'deleted') { if (mapa.delete(nome)) mudou++; return; }
-    if (mapa.get(nome) !== val) { mapa.set(nome, val); mudou++; }
+  let fat=0, comValor=0, semValor=0, flex=0, unid=0, itensTot=0, itensComValor=0, comUF=0, fatProd=0, freteEmb=0, fretePed=0, pedML=0, pedMLr=0, pedTarReal=0;
+  let fatNF=0, pedNF=0, freteNF=0, fretePedNF=0;   // fonte NOTA FISCAL (vprod_nf)
+  const porDia={}, porProd={}, porUF={}; let porCanal={};
+  const AGD = (SINT||[]).filter(s=>{ if(s._cancelado) return false; const d2=diaVenda(s); return d2>=de && d2<=ate; });
+  const agdVal = AGD.reduce((s2,x)=> s2 + ((x.valor!=null&&isFinite(Number(x.valor)))?Number(x.valor):0), 0);
+  // 27/07: o ranking/Top produtos/Por canal contavam SÓ os bipados — venda ainda não bipada
+  // (ex.: PM1) sumia do Top produtos mesmo tendo margem. Agora o laço cobre as duas populações,
+  // igual os cards do topo. O 'fat' passa a somar tudo, então o card não soma agdVal de novo.
+  PER.concat(AGD).forEach(h=>{
+    const d = diaVenda(h);
+    if(!porDia[d]) porDia[d]={ped:0,fat:0};
+    porDia[d].ped++;
+    const mk=(h.marketplace||'outro').toLowerCase();
+    if(!porCanal[mk]) porCanal[mk]={ped:0,fat:0,flex:0,comValor:0};
+    porCanal[mk].ped++;
+    if(h.flex){ flex++; porCanal[mk].flex++; }
+    if(canalKey(mk)==='ml'){ pedML++; if(h.tarifa_ml!=null) pedMLr++; }
+    if(h.tarifa_ml!=null || (h.taxa_mkt!=null && Number(h.taxa_mkt)>0)) pedTarReal++;
+    if(h.valor!=null && isFinite(Number(h.valor))){ const v=Number(h.valor); fat+=v; comValor++; porDia[d].fat+=v; porCanal[mk].fat+=v; porCanal[mk].comValor++; }
+    else semValor++;
+    if(h.uf){ comUF++; const u=String(h.uf).toUpperCase(); if(!porUF[u]) porUF[u]={ped:0,fat:0}; porUF[u].ped++; if(h.valor!=null) porUF[u].fat+=Number(h.valor)||0; }
+    let _iv=0, _todos=true, _nIt=0;
+    (h.itens||[]).forEach(it=>{
+      const q=Number(it.qtd||1); unid+=q; itensTot++; _nIt++;
+      const sku=it.sku||'(sem SKU)';
+      if(!porProd[sku]) porProd[sku]={sku,desc:it.descricao||'',qtd:0,fat:0,qtdV:0};
+      porProd[sku].qtd+=q;
+      const _infC=(it.custo!=null&&isFinite(Number(it.custo)))?{custo:Number(it.custo)}:SKUINFO[sku];   // custo do servidor primeiro, SKUINFO reserva
+      if(_infC && _infC.custo!=null && isFinite(Number(_infC.custo))){ porProd[sku].custo=(porProd[sku].custo||0)+Number(_infC.custo)*q; porProd[sku].qtdC=(porProd[sku].qtdC||0)+q; }
+      if(it.valor_total!=null && isFinite(Number(it.valor_total))){ const vt=Number(it.valor_total); porProd[sku].fat+=vt; porProd[sku].qtdV+=q; itensComValor++; _iv+=vt; }
+      else _todos=false;
+    });
+    fatProd += _iv;
+    // d55: 💎 M.C. RATEADA por SKU (rank de lucro no Top produtos) — a M.C. do pedido é dividida
+    // entre os itens proporcional ao valor de cada um (fallback: proporcional à quantidade)
+    const _Pp = calcPL(h);
+    if(_Pp && _Pp.mc!=null && (h.itens||[]).length){
+      const _base = (h.itens||[]).map(it=>{ const q=Number(it.qtd||1); const vt=(it.valor_total!=null&&isFinite(Number(it.valor_total)))?Number(it.valor_total):null; return {sku:it.sku||'(sem SKU)',q,peso:(vt!=null&&vt>0)?vt:null}; });
+      const _totP = _base.reduce((s2,b2)=>s2+(b2.peso!=null?b2.peso:0),0);
+      const _qtotP = _base.reduce((s2,b2)=>s2+b2.q,0)||1;
+      _base.forEach(b2=>{ const share = _totP>0 ? ((b2.peso!=null?b2.peso:0)/_totP) : (b2.q/_qtotP);
+        const pp=porProd[b2.sku]; if(!pp) return;
+        pp.mc=(pp.mc||0)+_Pp.mc*share; pp.qtdM=(pp.qtdM||0)+b2.q; });
+    }
+    if(h.valor!=null && _nIt && _todos){ const fr=Number(h.valor)-_iv; if(isFinite(fr)){ freteEmb+=fr; fretePed++; } }
+    const vNF = (h.vprod_nf!=null && isFinite(Number(h.vprod_nf))) ? Number(h.vprod_nf) : null;
+    if(vNF!=null){ fatNF+=vNF; pedNF++; if(h.valor!=null){ const frN=Number(h.valor)-vNF; if(isFinite(frN)){ freteNF+=frN; fretePedNF++; } } }
   });
-  if (!mudou) return null;
-
-  const cookie = Array.from(mapa.entries()).map(([k, v]) => k + '=' + v).join('; ');
-  const novo = { cookie, semente: atual.semente || '', origem: 'renovado', atualizado: new Date().toISOString(), renovacoes: (atual.renovacoes || 0) + 1 };
-  try { ensureDir(CACHE_DIR); writeJson(SHOPEE_SESSAO_FILE, novo); } catch (e) {}
-  return { mudou, renovacoes: novo.renovacoes };
-}
-
-const SHOPEE_CAB = {
-  'Accept': 'application/json, text/plain, */*',
-  'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
-  'Referer': 'https://seller.shopee.com.br/portal/sale/order',
-  'X-Api-Src-List': 'pc',
-  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:154.0) Gecko/20100101 Firefox/154.0'
-};
-
-function shopeeUrlBusca(cookie, termo) {
-  const cds = (String(cookie).match(/(?:^|;\s*)SPC_CDS=([^;]+)/) || [])[1] || '';
-  return 'https://seller.shopee.com.br/api/v3/order/get_order_list_search_bar_hint'
-       + '?SPC_CDS=' + encodeURIComponent(cds)
-       + '&SPC_CDS_VER=2&keyword=' + encodeURIComponent(termo)
-       + '&category=1&order_list_tab=100&entity_type=1';
-}
-
-// Chamada barata só pra Shopee renovar os cookies. Roda no cron 2x ao dia.
-async function shopeeKeepAlive() {
-  const sess = shopeeSessaoLer();
-  if (!sess.cookie) { console.log('[GIRABKP] shopee keep-alive: sem cookie (env ' + SHOPEE_ENV_COOKIE + ' vazia) — nada a fazer'); return { ok: false, motivo: 'sem cookie' }; }
-  try {
-    const r = await fetch(shopeeUrlBusca(sess.cookie, 'keepalive'), { headers: Object.assign({ 'Cookie': sess.cookie }, SHOPEE_CAB) });
-    const t = await r.text();
-    const ren = shopeeSessaoAtualiza(r);
-    const vivo = (r.status === 200 && /"code"\s*:\s*0/.test(t));
-    console.log('[GIRABKP] shopee keep-alive: HTTP ' + r.status + (vivo ? ' ✓ sessão viva' : ' ✗ sessão NÃO respondeu como logada') + (ren ? (' · ' + ren.mudou + ' cookie(s) renovado(s), total ' + ren.renovacoes) : ' · nada a renovar'));
-    return { ok: vivo, status: r.status, renovou: ren ? ren.mudou : 0, corpo: t.slice(0, 300) };
-  } catch (e) {
-    console.log('[GIRABKP] shopee keep-alive falhou: ' + ((e && e.message) || e));
-    return { ok: false, erro: String((e && e.message) || e).slice(0, 200) };
-  }
-}
-
-// ─── Rotas HTTP (namespaced) ────────────────────────────────────────────
-function routes(readBody) {
-  return async function handle(req, res, urlObj) {
-    const { method } = req;
-    const p = urlObj.pathname;
-
-    // ── GUARDA DE SESSÃO ────────────────────────────────────────────────
-    // Rotas públicas (tela de login precisa delas) e as já cobertas pela trava
-    // central do index.js (ADMIN_KEY: /run,/setup,/debug,/robo,/forcar) passam.
-    // Todo o RESTO (dados de pedido, DANFE, XML, separação, ações) exige sessão.
-    {
-      const _meu = p.startsWith('/girassol-backup-offline'); // guarda só age nas rotas DESTE módulo
-      const _pub = (
-        p === '/girassol-backup-offline' || p === '/girassol-backup-offline/' ||
-        p === '/girassol-backup-offline/painel' || p === '/girassol-backup-offline/login' ||
-        p === '/girassol-backup-offline/operadores' || p === '/girassol-backup-offline/health' ||
-        p === '/girassol-backup-offline/saude' || p.includes('/callback') ||
-        p === '/girassol-backup-offline/qz-cert' || p === '/girassol-backup-offline/qz-sign'
-      );
-      const _central = (
-        p.includes('/run') || p.includes('/setup') || p.includes('/robo') ||
-        p.includes('/forcar') || /debug/i.test(p)
-      );
-      if (_meu && !_pub && !_central) {
-        const _op = validarSessao(req.headers['cookie']);
-        if (!_op) { json(res, 401, { ok: false, erro: 'Sessão necessária. Faça login.' }); return true; }
-        req._op = _op;
-      }
-    }
-
-    // raiz do módulo → manda pro painel (evita "not found" ao abrir a URL base)
-    if (method === 'GET' && (p === '/girassol-backup-offline' || p === '/girassol-backup-offline/')) {
-      res.writeHead(302, { Location: '/girassol-backup-offline/painel' });
-      res.end();
-      return true;
-    }
-
-    // ── IR PRO PEDIDO NA SHOPEE (b22) ────────────────────────────────────
-    // O link ↗ dos cards apontava pra URL de BUSCA do Seller Center
-    // (?searchKeyword=<order_sn>), que NÃO filtra nada: cai na lista inteira.
-    // A URL que abre o pedido é /portal/sale/order/<id_interno_numerico>, e esse
-    // id é snowflake — não sai do order_sn nem de nenhuma API oficial da Shopee.
-    // Único lugar que faz o de-para é o endpoint que a caixa de busca do próprio
-    // Seller Center usa. Ele responde a um GET simples, só exigindo o cookie de
-    // sessão (env GIRABKP_SHOPEE_COOKIE), mesmo padrão do BLING_COOKIE.
-    // O id de um pedido nunca muda, então guardamos em _shopee-ids.json: resolveu
-    // uma vez, nunca mais consulta — e os links já resolvidos seguem funcionando
-    // mesmo depois que o cookie vencer.
-    // Falhou por qualquer motivo? Redireciona pra URL de busca (o comportamento
-    // de hoje). Nunca fica pior do que já era. Com &diag=1 devolve o passo a passo.
-    if (method === 'GET' && p === '/girassol-backup-offline/ir-shopee') {
-      const snIr  = String((urlObj.searchParams && urlObj.searchParams.get('sn')) || '').trim();
-      const diagIr = ((urlObj.searchParams && urlObj.searchParams.get('diag')) || '') === '1';
-      const buscaIr = 'https://seller.shopee.com.br/portal/sale/order?searchKeyword=' + encodeURIComponent(snIr);
-      const vai = destino => { res.writeHead(302, { Location: destino, 'Cache-Control': 'no-store' }); res.end(); };
-
-      if (!snIr) { if (diagIr) { json(res, 400, { ok: false, erro: 'faltou ?sn=' }); } else { vai(buscaIr); } return true; }
-
-      const ARQ_IDS = path.join(CACHE_DIR, '_shopee-ids.json');
-      const mapaIr  = readJson(ARQ_IDS, {}) || {};
-      if (mapaIr[snIr] && !diagIr) { vai('https://seller.shopee.com.br/portal/sale/order/' + mapaIr[snIr]); return true; }
-
-      const passosIr = [];
-      let idIr = mapaIr[snIr] || null;
-      if (idIr) passosIr.push({ passo: 'cache', order_id: idIr });
-
-      try {
-        const sessIr = shopeeSessaoLer();
-        const ckIr   = sessIr.cookie;
-        if (!ckIr) {
-          passosIr.push({ passo: 'cookie', erro: 'sem cookie: env GIRABKP_SHOPEE_COOKIE vazia e nada gravado no disco' });
-        } else {
-          const cdsIr = (ckIr.match(/(?:^|;\s*)SPC_CDS=([^;]+)/) || [])[1] || '';
-          const urlIr = 'https://seller.shopee.com.br/api/v3/order/get_order_list_search_bar_hint'
-                      + '?SPC_CDS=' + encodeURIComponent(cdsIr)
-                      + '&SPC_CDS_VER=2'
-                      + '&keyword=' + encodeURIComponent(snIr)
-                      + '&category=1&order_list_tab=100&entity_type=1';
-          const rIr = await fetch(urlIr, {
-            headers: {
-              'Cookie': ckIr,
-              'Accept': 'application/json, text/plain, */*',
-              'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
-              'Referer': 'https://seller.shopee.com.br/portal/sale/order',
-              'X-Api-Src-List': 'pc',
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:154.0) Gecko/20100101 Firefox/154.0'
-            }
-          });
-          const txtIr = await rIr.text();
-          const renIr = shopeeSessaoAtualiza(rIr);   // set-cookie da resposta → a sessão se renova sozinha
-          passosIr.push({ passo: 'consulta', status: rIr.status, tem_cds: !!cdsIr, tam_cookie: ckIr.length, origem_cookie: sessIr.origem || null, renovou: renIr ? renIr.mudou : 0, corpo: txtIr.slice(0, 700) });
-
-          let jIr = null; try { jIr = JSON.parse(txtIr); } catch (e) {}
-          // o resultado NÃO vem em data.list — vem em data.order_sn_result.list.
-          // Varre recursivamente qualquer "list" que tenha order_id, pra não depender do formato.
-          const achIr = [];
-          (function varre(o, prof) {
-            if (!o || typeof o !== 'object' || prof > 6) return;
-            if (Array.isArray(o.list)) o.list.forEach(x => { if (x && x.order_id) achIr.push(x); });
-            Object.keys(o).forEach(k => { if (o[k] && typeof o[k] === 'object') varre(o[k], prof + 1); });
-          })(jIr && jIr.data, 0);
-
-          const alvoIr = achIr.find(x => String(x.order_sn || '').toUpperCase() === snIr.toUpperCase()) || achIr[0];
-          if (alvoIr && alvoIr.order_id) {
-            idIr = String(alvoIr.order_id);
-            mapaIr[snIr] = idIr;
-            try { writeJson(ARQ_IDS, mapaIr); } catch (e) {}
-            passosIr.push({ passo: 'achou', order_id: idIr, order_sn: alvoIr.order_sn || null });
-          } else {
-            passosIr.push({ passo: 'nao_achou', candidatos: achIr.length, code: (jIr && (jIr.code != null ? jIr.code : jIr.error)) || null, msg: (jIr && (jIr.user_message || jIr.message)) || null });
-          }
-        }
-      } catch (e) {
-        passosIr.push({ passo: 'excecao', erro: String((e && e.message) || e).slice(0, 250) });
-      }
-
-      if (diagIr) {
-        json(res, 200, { ok: !!idIr, sn: snIr, order_id: idIr, destino: idIr ? ('https://seller.shopee.com.br/portal/sale/order/' + idIr) : buscaIr, ids_em_cache: Object.keys(mapaIr).length, versao: VERSAO, passos: passosIr });
-        return true;
-      }
-      vai(idIr ? ('https://seller.shopee.com.br/portal/sale/order/' + idIr) : buscaIr);
-      return true;
-    }
-
-    // SAÚDE DA SESSÃO SHOPEE (b23) — admin. Diz se o cookie está vivo, de onde ele
-    // veio (env ou renovado sozinho) e quando foi atualizado pela última vez.
-    if (method === 'GET' && p === '/girassol-backup-offline/shopee-sessao') {
-      const opSh = validarSessao(req.headers['cookie']);
-      if (!opSh || !ehAdmin(opSh)) { json(res, 403, { ok: false, erro: 'apenas admin' }); return true; }
-      const antes = shopeeSessaoLer();
-      const teste = await shopeeKeepAlive();
-      const dep   = shopeeSessaoLer();
-      json(res, 200, {
-        ok: !!teste.ok,
-        empresa: 'girassol-backup-offline',
-        env_semente: SHOPEE_ENV_COOKIE,
-        tem_cookie: !!antes.cookie,
-        tam_cookie: (antes.cookie || '').length,
-        origem: dep.origem || null,
-        atualizado: dep.atualizado || null,
-        renovacoes: dep.renovacoes || 0,
-        teste,
-        versao: VERSAO
-      });
-      return true;
-    }
-
-    // ADMIN (por sessão): dispara o ciclo AGORA — consulta o Bling sem esperar os 10 min do cron
-    if (method === 'POST' && p === '/girassol-backup-offline/ciclo-agora') {
-      const opSess = validarSessao(req.headers['cookie']);
-      if (!opSess || !ehAdmin(opSess)) { json(res, 403, { ok: false, erro: 'apenas admin' }); return true; }
-      const agora = Date.now();
-      if (agora - _ultimoCicloAgora < 60000) { json(res, 200, { ok: false, erro: '⏳ ciclo já disparado há menos de 1 min — aguarde' }); return true; }
-      _ultimoCicloAgora = agora;
-      rodarCiclo('painel-admin').catch(() => {});
-      json(res, 200, { ok: true, mensagem: 'consultando o Bling agora (~30-60s)' });
-      return true;
-    }
-
-    // ADMIN: ANEXAR ETIQUETA PDF na mão. Existe pro caso real em que o Bling fica SEM logística
-    // no pedido (importou depois do envio já organizado no canal, ou a NF travou a edição) e a
-    // etiqueta não vem nem pelo Bling nem pela API do canal. O admin baixa a etiqueta no painel do
-    // marketplace, anexa aqui, e o pedido volta a ser processável pelo estoquista — que NÃO precisa
-    // (nem deve) ter acesso ao seller center. Body: { id, pdf_base64 }.
-    if (method === 'POST' && p === '/girassol-backup-offline/etiqueta-anexar') {
-      const opSess = validarSessao(req.headers['cookie']);
-      if (!opSess || !ehAdmin(opSess)) { json(res, 403, { ok: false, erro: 'apenas admin' }); return true; }
-      let body = {}; try { const _rb = await readBody(req); body = (_rb && typeof _rb === 'object') ? _rb : JSON.parse(_rb || '{}'); } catch (e) {}
-      const idA = String(body.id || '').trim();
-      const b64A = String(body.pdf_base64 || '').replace(/^data:[^,]*,/, '');
-      if (!idA || !b64A) { json(res, 400, { ok: false, erro: 'faltou o id do pedido ou o arquivo' }); return true; }
-      let bufA = null; try { bufA = Buffer.from(b64A, 'base64'); } catch (e) {}
-      if (!bufA || bufA.length < 200) { json(res, 400, { ok: false, erro: 'arquivo vazio ou inválido' }); return true; }
-      // b16: aceita ZPL, ZIP (com VÁRIOS arquivos dentro) e PDF.
-      // O ZIP da Shopee traz thermal_zpl_shipping_label.txt + content_declaration.pdf, e o ZPL
-      // começa com um bloco gigante de gráfico (~DGR) — o ^XA só aparece lá pelo byte 14.800.
-      // Por isso: procura os marcadores numa janela larga, olha TODAS as entradas do zip e
-      // confia no nome do arquivo. ZPL vai pro caminho nativo; PDF vai pro alternativo.
-      const _ehZpl = b => { if (!b || b.length < 50) return false; const t = b.slice(0, 30000).toString('latin1'); return t.indexOf('^XA') >= 0 || t.indexOf('~DG') >= 0 || t.indexOf('^FO') >= 0 || t.indexOf('^GF') >= 0; };
-      const _ehPdf = b => !!(b && b.length > 100 && b.slice(0, 4).toString('utf8') === '%PDF');
-      const _zipEntradas = buf => {   // lê pelo DIRETÓRIO CENTRAL (o zip vem em modo streaming, tamanhos zerados no header local)
-        const zlibA = require('zlib');
-        let eocd = -1;
-        for (let x = buf.length - 22; x >= 0 && x > buf.length - 66000; x--) { if (buf.readUInt32LE(x) === 0x06054b50) { eocd = x; break; } }
-        if (eocd < 0) return [];
-        const qtd = buf.readUInt16LE(eocd + 10);
-        let off = buf.readUInt32LE(eocd + 16);
-        const saida = [];
-        for (let k = 0; k < qtd && off + 46 < buf.length; k++) {
-          if (buf.readUInt32LE(off) !== 0x02014b50) break;
-          const metodo = buf.readUInt16LE(off + 10), tamComp = buf.readUInt32LE(off + 20);
-          const fnLen = buf.readUInt16LE(off + 28), exLen = buf.readUInt16LE(off + 30), cmLen = buf.readUInt16LE(off + 32);
-          const nome = buf.slice(off + 46, off + 46 + fnLen).toString('utf8');
-          const loc = buf.readUInt32LE(off + 42);
-          const lfn = buf.readUInt16LE(loc + 26), lex = buf.readUInt16LE(loc + 28);
-          const ini = loc + 30 + lfn + lex;
-          const dados = tamComp > 0 ? buf.slice(ini, ini + tamComp) : buf.slice(ini);
-          try { saida.push({ nome, conteudo: metodo === 0 ? dados : zlibA.inflateRawSync(dados, { finishFlush: zlibA.constants.Z_SYNC_FLUSH }) }); } catch (e) {}
-          off += 46 + fnLen + exLen + cmLen;
-        }
-        return saida;
-      };
-      let conteudoA = null, formatoA = null;
-      if (_ehPdf(bufA)) { conteudoA = bufA; formatoA = 'pdf'; }
-      else if (_ehZpl(bufA)) { conteudoA = bufA; formatoA = 'zpl'; }
-      else if (bufA[0] === 0x50 && bufA[1] === 0x4B && bufA[2] === 0x03 && bufA[3] === 0x04) {   // ZIP "PK\x03\x04"
-        try {
-          const ents = _zipEntradas(bufA);
-          const zplE = ents.find(e => /zpl/i.test(e.nome) || /\.txt$/i.test(e.nome) || _ehZpl(e.conteudo));   // a etiqueta tem prioridade
-          if (zplE) { conteudoA = zplE.conteudo; formatoA = 'zpl'; }
-          else { const pdfE = ents.find(e => _ehPdf(e.conteudo)); if (pdfE) { conteudoA = pdfE.conteudo; formatoA = 'pdf'; } }
-        } catch (e) {}
-      }
-      if (!conteudoA) { json(res, 400, { ok: false, erro: 'não reconheci o arquivo — mande a etiqueta em ZPL (.txt), ZIP ou PDF' }); return true; }
-      const dirA = path.join(CACHE_DIR, String(idA));
-      const alvoA = formatoA === 'pdf' ? path.join(dirA, 'etiqueta.pdf') : path.join(dirA, 'etiqueta.' + String(ETIQ_FORMATO || 'zpl').toLowerCase());
-      try { ensureDir(dirA); fs.writeFileSync(alvoA, conteudoA); }
-      catch (e) { json(res, 500, { ok: false, erro: 'não consegui salvar o arquivo' }); return true; }
-      // vale JÁ (sem esperar o próximo ciclo): manifesto + snapshot
-      try {
-        const manA = readJson(MANIFEST_FILE, {});
-        if (manA[idA]) { manA[idA].tem_etiqueta = true; manA[idA].etiqueta_pdf = (formatoA === 'pdf'); manA[idA].etiqueta_formato = (formatoA === 'pdf' ? 'PDF' : ETIQ_FORMATO); writeJson(MANIFEST_FILE, manA); }
-      } catch (e) {}
-      try {
-        const snapA = readJson(path.join(dirA, 'pedido.json'), null);
-        if (snapA) { snapA.tem_etiqueta = true; snapA.etiqueta_pdf = (formatoA === 'pdf'); snapA.etiqueta_formato = (formatoA === 'pdf' ? 'PDF' : ETIQ_FORMATO); writeJson(path.join(dirA, 'pedido.json'), snapA); }
-      } catch (e) {}
-      console.log(`[GIRABKP] etiqueta ANEXADA na mão no pedido ${idA} (${formatoA.toUpperCase()}, ${conteudoA.length} bytes) por ${opSess}`);
-      json(res, 200, { ok: true, formato: formatoA, bytes: conteudoA.length });
-      return true;
-    }
-
-    // ADMIN (?k=): BACKFILL DE VALORES — busca no Bling o total dos pedidos JÁ FINALIZADOS
-    // que não têm valor gravado (finalizados antes da atualização do faturamento) e preenche
-    // retroativamente. Uso: /girassol-backup-offline/backfill-valores?k=ADMIN_KEY&dias=31
-    // Roda em background (~400ms por pedido, respeitando o rate limit). Chame de novo p/ ver o progresso.
-    if ((method === 'POST' || method === 'GET') && p === '/girassol-backup-offline/backfill-valores') {
-      const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
-      if (!process.env.ADMIN_KEY || k !== process.env.ADMIN_KEY) { json(res, 404, { error: 'not found' }); return true; }
-      if (_bf.rodando) { json(res, 200, { ok: true, rodando: true, progresso: _bf.feitos + '/' + _bf.total, ok_ate_agora: _bf.ok, falhas: _bf.falhas, iniciado_em: _bf.iniciado_em }); return true; }
-      const dias = Math.max(1, Math.min(120, Number(urlObj.searchParams.get('dias') || 31)));
-      const corte = Date.now() - dias * 86400000;
-      const confIni = readJson(CONFERIDOS_FILE, {});
-      const alvos = Object.keys(confIni).filter(id => {
-        const c = confIni[id];
-        return c && (c.valor == null) && c.conferido_em && new Date(c.conferido_em).getTime() >= corte;
-      });
-      if (!alvos.length) { json(res, 200, { ok: true, mensagem: 'nada a preencher — todos os finalizados dos últimos ' + dias + ' dias já têm valor' }); return true; }
-      _bf = { rodando: true, feitos: 0, total: alvos.length, ok: 0, falhas: 0, iniciado_em: new Date().toISOString() };
-      json(res, 200, { ok: true, iniciado: true, pedidos_sem_valor: alvos.length, dias, mensagem: 'backfill rodando em background (~' + Math.ceil(alvos.length * 0.5 / 60) + ' min) — chame esta URL de novo pra ver o progresso' });
-      (async () => {
-        const dorme = ms => new Promise(r => setTimeout(r, ms));
-        const pendentes = {};
-        const salvar = () => {
-          if (!Object.keys(pendentes).length) return;
-          const c2 = readJson(CONFERIDOS_FILE, {});
-          for (const [id, v] of Object.entries(pendentes)) { if (c2[id]) c2[id].valor = v; }
-          writeJson(CONFERIDOS_FILE, c2);
-          for (const id of Object.keys(pendentes)) delete pendentes[id];
-        };
-        for (const id of alvos) {
-          try {
-            const det = await detalhePedido(id);
-            if (det && det.total != null && isFinite(Number(det.total))) { pendentes[id] = Number(det.total); _bf.ok++; }
-            else _bf.falhas++;
-          } catch (e) { _bf.falhas++; }
-          _bf.feitos++;
-          if (_bf.feitos % 15 === 0) { salvar(); console.log(`[BACKFILL] ${_bf.feitos}/${_bf.total} (ok=${_bf.ok} falhas=${_bf.falhas})`); }
-          await dorme(400);
-        }
-        salvar();
-        _bf.rodando = false;
-        console.log(`[BACKFILL] ✔ concluído: ${_bf.ok} valor(es) preenchido(s), ${_bf.falhas} falha(s) de ${_bf.total}`);
-      })().catch(e => { _bf.rodando = false; console.log('[BACKFILL] ✗ ' + e.message); });
-      return true;
-    }
-
-    // ADMIN (?k=): BACKFILL DE DETALHES — preenche UF + valor POR ITEM dos já finalizados
-    // Uso: /girassol-backup-offline/backfill-detalhes?k=ADMIN_KEY&dias=31
-    if ((method === 'POST' || method === 'GET') && p === '/girassol-backup-offline/backfill-detalhes') {
-      const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
-      if (!process.env.ADMIN_KEY || k !== process.env.ADMIN_KEY) { json(res, 404, { error: 'not found' }); return true; }
-      if (_bfd.rodando) { json(res, 200, { ok: true, rodando: true, progresso: _bfd.feitos + '/' + _bfd.total, ok_ate_agora: _bfd.ok, falhas: _bfd.falhas, iniciado_em: _bfd.iniciado_em }); return true; }
-      const dias = Math.max(1, Math.min(120, Number(urlObj.searchParams.get('dias') || 31)));
-      const corte = Date.now() - dias * 86400000;
-      const confIni = readJson(CONFERIDOS_FILE, {});
-      const alvos = Object.keys(confIni).filter(id => {
-        const c = confIni[id];
-        if (!c || !c.conferido_em || new Date(c.conferido_em).getTime() < corte) return false;
-        const semItemValor = Array.isArray(c.itens) && c.itens.length && c.itens.some(it => it.valor_total == null);
-        return c.uf == null || c.valor == null || semItemValor;
-      });
-      if (!alvos.length) { json(res, 200, { ok: true, mensagem: 'nada a preencher — últimos ' + dias + ' dias já têm UF e valores por item' }); return true; }
-      _bfd = { rodando: true, feitos: 0, total: alvos.length, ok: 0, falhas: 0, iniciado_em: new Date().toISOString() };
-      json(res, 200, { ok: true, iniciado: true, pedidos_a_detalhar: alvos.length, dias, mensagem: 'backfill de detalhes rodando (~' + Math.ceil(alvos.length * 0.5 / 60) + ' min) — chame de novo pra ver o progresso' });
-      (async () => {
-        const dorme = ms => new Promise(r => setTimeout(r, ms));
-        const pend = {};
-        const salvar = () => {
-          if (!Object.keys(pend).length) return;
-          const c2 = readJson(CONFERIDOS_FILE, {});
-          for (const [id, d] of Object.entries(pend)) {
-            if (!c2[id]) continue;
-            if (d.valor != null && c2[id].valor == null) c2[id].valor = d.valor;
-            if (d.uf) c2[id].uf = d.uf;
-            if (d.municipio) c2[id].municipio = d.municipio;
-            if (d.taxa_mkt != null && c2[id].taxa_mkt == null) c2[id].taxa_mkt = d.taxa_mkt;
-            if (d.venda_dia && !c2[id].venda_dia) c2[id].venda_dia = d.venda_dia;
-            if (d.frete_mkt != null && c2[id].frete_mkt == null) c2[id].frete_mkt = d.frete_mkt;
-            if (d.porSku && Array.isArray(c2[id].itens)) {
-              c2[id].itens.forEach(it => {
-                const v = d.porSku[String(it.sku || '').trim()];
-                if (v != null && it.valor_total == null) { it.valor_unit = v; it.valor_total = v * Number(it.qtd || 1); }
-              });
-            }
-          }
-          writeJson(CONFERIDOS_FILE, c2);
-          for (const id of Object.keys(pend)) delete pend[id];
-        };
-        for (const id of alvos) {
-          try {
-            const det = await detalhePedido(id);
-            if (det) {
-              const porSku = {};
-              (det.itens || []).forEach(it => { const c = String(it.codigo || (it.produto && it.produto.codigo) || '').trim(); if (c && it.valor != null) porSku[c] = Number(it.valor); });
-              pend[id] = {
-                valor: (det.total != null ? Number(det.total) : null),
-                uf: (det.transporte && det.transporte.etiqueta && det.transporte.etiqueta.uf) || null,
-                municipio: (det.transporte && det.transporte.etiqueta && det.transporte.etiqueta.municipio) || null,
-                venda_dia: (det.data ? String(det.data).slice(0, 10) : null),
-                taxa_mkt: (det.taxas && isFinite(Number(det.taxas.taxaComissao)) && Number(det.taxas.taxaComissao) > 0) ? Math.round(Number(det.taxas.taxaComissao) * 100) / 100 : null,
-                frete_mkt: (det.taxas && isFinite(Number(det.taxas.custoFrete)) && Number(det.taxas.custoFrete) > 0) ? Math.round(Number(det.taxas.custoFrete) * 100) / 100 : null,
-                porSku
-              };
-              _bfd.ok++;
-            } else _bfd.falhas++;
-          } catch (e) { _bfd.falhas++; }
-          _bfd.feitos++;
-          if (_bfd.feitos % 15 === 0) { salvar(); console.log(`[BACKFILL-DET] ${_bfd.feitos}/${_bfd.total}`); }
-          await dorme(400);
-        }
-        salvar(); _bfd.rodando = false;
-        console.log(`[BACKFILL-DET] ✔ concluído: ${_bfd.ok} ok, ${_bfd.falhas} falha(s) de ${_bfd.total}`);
-      })().catch(e => { _bfd.rodando = false; console.log('[BACKFILL-DET] ✗ ' + e.message); });
-      return true;
-    }
-
-    // DASHBOARD (sessão admin): saldo/preço/custo por SKU, cache 6h em disco — alimenta a projeção de estoque
-    if (method === 'POST' && p === '/girassol-backup-offline/sku-info') {
-      const opSess = validarSessao(req.headers['cookie']);
-      if (!opSess || !ehAdmin(opSess)) { json(res, 403, { ok: false, erro: 'apenas admin' }); return true; }
-      let body = {}; try { const _rb = await readBody(req); body = (_rb && typeof _rb === 'object') ? _rb : JSON.parse(_rb || '{}'); } catch (e) {}   // tolerante: lib/http passou a devolver objeto ja parseado
-      const skus = Array.isArray(body.skus) ? body.skus.map(x => String(x || '').trim()).filter(Boolean).slice(0, 40) : [];
-      if (!skus.length) { json(res, 200, { ok: true, skus: {} }); return true; }
-      const CACHE_SKUINFO = path.join(CACHE_DIR, '_skus-info.json');
-      if (!_skuInfoCache) _skuInfoCache = readJson(CACHE_SKUINFO, {});
-      const TTL = 6 * 3600 * 1000;
-      const out = {}; const faltam = [];
-      let _ccTop = null;   // cache permanente de custos, carregado sob demanda
-      for (const sku of skus) {
-        const c = _skuInfoCache[sku];
-        if (!body.fresh && c && (Date.now() - (c.ts || 0)) < TTL && (c.custo != null || c.saldo != null)) {
-          // OVERLAY: o custo do cache PERMANENTE sobrepõe qualquer null do cache de 6h (era o que segurava o custo na tela)
-          if (!_ccTop) _ccTop = readJson(path.join(CACHE_DIR, '_custos.json'), {});
-          const k9 = _ccTop[sku];
-          out[sku] = (k9 && k9.custo != null && c.custo == null) ? Object.assign({}, c, { custo: k9.custo, preco: (c.preco != null ? c.preco : k9.preco) }) : c;
-        } else faltam.push(sku);
-      }
-      const dorme = ms => new Promise(r => setTimeout(r, ms));
-      const bg = async (pth) => { for (let t = 0; t < 3; t++) { const r = await blingGet(pth); if (r && r.ok) return r; await dorme(1100 + t * 500); } return await blingGet(pth); };   // anti-429: re-tenta com pausa crescente
-      let resolveFalhas = 0;
-      // 0) cache PERMANENTE de custos (_custos.json, populado pelo custo-sync em background)
-      const _ccAll = readJson(path.join(CACHE_DIR, '_custos.json'), {});
-      const ids = {};
-      const aResolver = [];
-      for (const sku of faltam) {
-        const k2 = _ccAll[sku];
-        if (k2 && k2.id && (Date.now() - (k2.ts || 0)) < 7 * 24 * 3600 * 1000) { ids[sku] = { id: k2.id, preco: (k2.preco != null ? k2.preco : null), custo: (k2.custo != null ? k2.custo : null) }; }
-        else aResolver.push(sku);
-      }
-      // 1) resolve SKU → produto — só quem NÃO está no cache permanente
-      for (const sku of aResolver) {
-        try {
-          let prod = null;
-          for (const v of [...new Set([sku, sku.toUpperCase(), sku.toLowerCase()])]) {
-            const r = await bg(`/produtos?codigo=${encodeURIComponent(v)}&limite=1&criterio=5`);
-            const it = r.ok && r.data && r.data.data && r.data.data[0];
-            if (it && it.id) { const d = await bg(`/produtos/${it.id}`); prod = (d.ok && d.data && d.data.data) || it; break; }
-            await dorme(300);
-          }
-          if (prod && prod.id) {
-            const forn = prod.fornecedor || {};
-            const cand = [forn.precoCusto, forn.precoCompra, prod.precoCusto, prod.custo].map(Number).filter(v => isFinite(v) && v > 0);
-            ids[sku] = { id: prod.id, preco: (prod.preco != null && isFinite(Number(prod.preco))) ? Number(prod.preco) : null, custo: cand.length ? cand[0] : null };
-          } else { ids[sku] = null; if (resolveFalhas < 3) console.log('[SKU-INFO] nao resolveu', sku); resolveFalhas++; }
-        } catch (e) { ids[sku] = null; if (resolveFalhas < 3) console.log('[SKU-INFO] erro em', sku, String(e.message || e).slice(0, 80)); resolveFalhas++; }
-        await dorme(400);
-      }
-      // 2) SALDO em LOTE — no Bling v3 o saldo vem de /estoques/saldos, não do detalhe do produto
-      const saldos = {};
-      const todosIds = Object.values(ids).filter(Boolean).map(o => o.id);
-      for (let i = 0; i < todosIds.length; i += 40) {
-        try {
-          const qs = todosIds.slice(i, i + 40).map(pid => 'idsProdutos[]=' + pid).join('&');
-          const r = await bg('/estoques/saldos?' + qs);
-          const arr = (r.ok && r.data && r.data.data) || [];
-          for (const e2 of arr) {
-            const pid = e2 && e2.produto && e2.produto.id;
-            const sv = e2 && (e2.saldoVirtualTotal != null ? e2.saldoVirtualTotal : e2.saldoFisicoTotal);
-            if (pid != null && sv != null && isFinite(Number(sv))) saldos[pid] = Number(sv);
-          }
-        } catch (e) {}
-        await dorme(300);
-      }
-      // 3) custo: quem ficou sem, tenta o endpoint de fornecedores do produto
-      for (const [sku2, o2] of Object.entries(ids)) {
-        if (!o2 || o2.custo != null) continue;
-        try {
-          const r = await bg(`/produtos/fornecedores?idProduto=${o2.id}&limite=5`);
-          const arr = (r.ok && r.data && r.data.data) || [];
-          const pref = arr.find(x => x && x.padrao) || arr[0];
-          const cand = pref ? [pref.precoCusto, pref.precoCompra].map(Number).filter(v => isFinite(v) && v > 0) : [];
-          if (cand.length) o2.custo = cand[0];
-        } catch (e) {}
-        await dorme(220);
-      }
-      for (const sku of faltam) {
-        const o2 = ids[sku];
-        const info = o2 ? { saldo: (saldos[o2.id] != null ? saldos[o2.id] : null), preco: o2.preco, custo: o2.custo, ts: Date.now() }
-                        : { saldo: null, preco: null, custo: null, ts: Date.now() };
-        // b20: o banco PERMANENTE (_custos.json) é SOBERANO — falha de consulta (429 do Bling) nunca mais
-        // apaga um custo conhecido. Foi o que sumiu custos da tela em 22/07 (tempestade do re-cache SCHEMA 5).
-        if (info.custo == null) { const kP = _ccAll[sku]; if (kP && kP.custo != null) { info.custo = kP.custo; if (info.preco == null && kP.preco != null) info.preco = kP.preco; } }
-        const c0 = _skuInfoCache[sku];
-        if (info.custo == null && c0 && c0.custo != null) info.custo = c0.custo;   // e o valor antigo do cache de 6h também vale mais que um null novo
-        _skuInfoCache[sku] = info; out[sku] = info;
-      }
-      if (faltam.length) { try { writeJson(CACHE_SKUINFO, _skuInfoCache); } catch (e) {} }
-      json(res, 200, { ok: true, skus: out, consultados_agora: faltam.length, resolvidos: Object.keys(ids).filter(k2 => ids[k2]).length, nao_resolvidos: resolveFalhas });
-      return true;
-    }
-
-    // DASHBOARD — página (dashboard.html do módulo; por ora só a Girassol tem o arquivo)
-    if (method === 'GET' && p === '/girassol-backup-offline/dashboard') {
-      const fdash = path.join(__dirname, 'dashboard.html');
-      if (!fs.existsSync(fdash)) { json(res, 404, { ok: false, erro: 'dashboard ainda não habilitado nesta empresa' }); return true; }
-      try { const htmlContent = fs.readFileSync(fdash, 'utf8'); res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(htmlContent); }
-      catch (e) { json(res, 500, { erro: 'dashboard.html: ' + e.message }); }
-      return true;
-    }
-
-    // DASHBOARD (sessão admin): dispara o backfill-NF local ao abrir o dashboard — mantém os números sempre frescos
-    if (method === 'POST' && p === '/girassol-backup-offline/backfill-nf-auto') {
-      const opSess = validarSessao(req.headers['cookie']);
-      if (!opSess || !ehAdmin(opSess)) { json(res, 403, { ok: false, erro: 'apenas admin' }); return true; }
-      json(res, 200, { ok: true, ...backfillNFLocal(45) });
-      return true;
-    }
-
-    // ADMIN (?k=): BACKFILL-NF — 100% LOCAL (lê nf-simp.json do cache/arquivo; ZERO chamadas ao Bling).
-    // Preenche vprod_nf (Σ itens da NOTA) nos finalizados → produtos EXATO + frete EXATO (valor − vprod_nf), retroativo.
-    // Uso: /girassol-backup-offline/backfill-nf?k=ADMIN_KEY&dias=45   (roda em segundos)
-    if ((method === 'POST' || method === 'GET') && p === '/girassol-backup-offline/backfill-nf') {
-      const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
-      const sessB = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || (sessB && ehAdmin(sessB)))) { json(res, 404, { error: 'not found' }); return true; }
-      const r = backfillNFLocal(urlObj.searchParams.get('dias'));
-      json(res, 200, { ok: true, ...r,
-        mensagem: r.preenchidos_pela_nf ? ('✓ ' + r.preenchidos_pela_nf + ' pedido(s) ganharam produtos/frete EXATOS da nota (leitura local, sem API)') : 'nada novo a preencher' });
-      return true;
-    }
-
-    // DASHBOARD (sessão admin): CONFIG FISCAL — alíquota do Simples POR MÊS + taxa % por canal
-    if ((method === 'GET' || method === 'POST') && p === '/girassol-backup-offline/config-fiscal') {
-      const opSess = validarSessao(req.headers['cookie']);
-      if (!opSess || !ehAdmin(opSess)) { json(res, 403, { ok: false, erro: 'apenas admin' }); return true; }
-      const CFG_FILE = path.join(CACHE_DIR, '_config-fiscal.json');
-      if (method === 'GET') { json(res, 200, { ok: true, config: readJson(CFG_FILE, { aliquotas: {}, taxas: {} }) }); return true; }
-      let body = {}; try { const _rb = await readBody(req); body = (_rb && typeof _rb === 'object') ? _rb : JSON.parse(_rb || '{}'); } catch (e) {}   // tolerante: lib/http passou a devolver objeto ja parseado
-      const atual = readJson(CFG_FILE, { aliquotas: {}, taxas: {} });
-      if (body.aliquotas && typeof body.aliquotas === 'object') for (const [k2, v2] of Object.entries(body.aliquotas)) { const n2 = Number(v2); if (/^\d{4}-\d{2}$/.test(k2) && isFinite(n2) && n2 >= 0 && n2 <= 40) atual.aliquotas[k2] = n2; else if (v2 === null) delete atual.aliquotas[k2]; }
-      if (body.taxas && typeof body.taxas === 'object') for (const [k2, v2] of Object.entries(body.taxas)) { const n2 = Number(v2); if (isFinite(n2) && n2 >= 0 && n2 <= 50) atual.taxas[String(k2).toLowerCase()] = n2; else if (v2 === null) delete atual.taxas[String(k2).toLowerCase()]; }
-      if (body.flex && typeof body.flex === 'object') { atual.flex = atual.flex || {}; for (const [k2, v2] of Object.entries(body.flex)) { const n2 = Number(v2); if (['ml', 'shopee', 'outros', 'geral'].indexOf(k2) >= 0 && isFinite(n2) && n2 >= 0 && n2 <= 100) atual.flex[k2] = n2; else if (v2 === null) delete atual.flex[k2]; } }
-      writeJson(CFG_FILE, atual);
-      json(res, 200, { ok: true, config: atual });
-      return true;
-    }
-
-    // DASHBOARD (sessão admin): TARIFA REAL do Mercado Livre p/ um pedido (sale_fee da API), com cache permanente
-    if (method === 'POST' && p === '/girassol-backup-offline/ml-fee') {
-      const opSess = validarSessao(req.headers['cookie']);
-      if (!opSess || !ehAdmin(opSess)) { json(res, 403, { ok: false, erro: 'apenas admin' }); return true; }
-      let body = {}; try { const _rb = await readBody(req); body = (_rb && typeof _rb === 'object') ? _rb : JSON.parse(_rb || '{}'); } catch (e) {}   // tolerante: lib/http passou a devolver objeto ja parseado
-      const orderId = String(body.numeroLoja || '').replace(/\D/g, '');
-      if (!orderId) { json(res, 200, { ok: false, erro: 'numeroLoja vazio' }); return true; }
-      const FEE_FILE = path.join(CACHE_DIR, '_mlfees.json');
-      const cacheF = readJson(FEE_FILE, {});
-      if (cacheF[orderId] && cacheF[orderId].fee != null) { json(res, 200, { ok: true, fee: cacheF[orderId].fee, itens: cacheF[orderId].itens, fonte: 'cache' }); return true; }
-      try {
-        const { garantirTokenML } = require('../girassol/mlTokenManager');
-        const tokenML = await garantirTokenML();
-        const r = await fetch('https://api.mercadolibre.com/orders/' + orderId, { headers: { Authorization: 'Bearer ' + tokenML } });
-        const d = await r.json().catch(() => null);
-        if (!r.ok || !d) { json(res, 200, { ok: false, erro: 'ML respondeu ' + r.status + (d && d.message ? ': ' + d.message : '') }); return true; }
-        let fee = 0, nIt = 0;
-        for (const it of (d.order_items || [])) { const q = Number(it.quantity || 1); const sf = Number(it.sale_fee || 0); if (isFinite(sf)) { fee += sf * q; nIt++; } }
-        fee = Math.round(fee * 100) / 100;
-        cacheF[orderId] = { fee, itens: nIt, ts: Date.now() };
-        writeJson(FEE_FILE, cacheF);
-        json(res, 200, { ok: true, fee, itens: nIt, fonte: 'ml' });
-      } catch (e) { json(res, 200, { ok: false, erro: 'ML indisponível: ' + String(e.message || e).slice(0, 120) }); }
-      return true;
-    }
-
-    // ADMIN (?k=): PESCA de tarifas/frete REAIS do ML agora (também roda sozinha todo dia às 04:40)
-    // Uso: /girassol-backup-offline/ml-sync-fees?k=ADMIN_KEY&dias=31 — chame de novo p/ ver o progresso
-    if ((method === 'POST' || method === 'GET') && p === '/girassol-backup-offline/ml-sync-fees') {
-      const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
-      const sessA = validarSessao(req.headers['cookie']);
-      const autorizado = (process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || (sessA && ehAdmin(sessA));
-      if (!autorizado) { json(res, 404, { error: 'not found' }); return true; }
-      const soStatus = (urlObj.searchParams && urlObj.searchParams.get('status')) === '1';
-      if (_mls.rodando || soStatus) { json(res, 200, { ok: true, rodando: !!_mls.rodando, progresso: _mls.feitos + '/' + _mls.total, ok_ate_agora: _mls.ok, falhas: _mls.falhas, ultimo_inicio: _mls.iniciado_em, erros: _mls.erros || {}, amostras: _mls.amostras || [] }); return true; }
-      const dias = Number(urlObj.searchParams.get('dias') || 14);
-      mlSyncFees(dias).catch(() => {});
-      json(res, 200, { ok: true, iniciado: true, dias, mensagem: 'pesca ML rodando em background — chame de novo p/ ver o progresso' });
-      return true;
-    }
-
-    // LIMPA toda a tabela (empresa girassol) — pra recomeçar o backfill do zero. Uso: /girassol-backup-offline/backfill-limpar
-    if (method === 'GET' && p === '/girassol-backup-offline/backfill-limpar') {
-      const kD = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
-      const sessD = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
-      if (_backfill.rodando) { json(res, 200, { ok: false, msg: 'tem um backfill rodando — espere terminar (ou reinicie o serviço) antes de limpar' }); return true; }
-      const del = await supaReq('girassol', 'DELETE', 'vendas_historico?empresa=eq.girassol', null);
-      json(res, 200, { ok: del.ok, status: del.status, msg: del.ok ? '✅ tabela zerada (empresa girassol). Pode rodar o backfill do zero, mês a mês.' : '❌ falhou ao limpar: ' + ((del.body||del.erro||'')+'').slice(0,150) });
-      return true;
-    }
-
-    // CONFERE o que foi gravado no Supabase — conta registros por MÊS e por CANAL. Uso: /girassol-backup-offline/backfill-conferir
-    if (method === 'GET' && p === '/girassol-backup-offline/backfill-conferir') {
-      const kD = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
-      const sessD = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
-      const out = { ok: true, total: null, por_mes: {}, por_canal: {} };
-      out.total = await supaCount('girassol', '');
-      for (const m of ['2026-01','2026-02','2026-03','2026-04','2026-05','2026-06','2026-07']) {
-        out.por_mes[m] = await supaCount('girassol', 'data_venda=gte.'+m+'-01&data_venda=lte.'+m+'-'+ULTIMO_DIA[m.slice(5,7)]);
-      }
-      for (const c of ['ml','shopee','tiktok','magalu','amazon','olist','madeira','leroy','outro']) {
-        const n = await supaCount('girassol', 'canal=eq.'+c);
-        if (n) out.por_canal[c] = n;
-      }
-      json(res, 200, out);
-      return true;
-    }
-
-    // DISPARA o backfill do ANO TODO — roda os meses de janeiro até 'ate' EM SEQUÊNCIA, sozinho. Uso: /girassol-backup-offline/backfill-ano  (ou &ate=07 pra parar em julho)
-    if (method === 'GET' && p === '/girassol-backup-offline/backfill-ano') {
-      const kD = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
-      const sessD = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
-      if (_backfillAno.rodando || _backfill.rodando) { json(res, 200, { ok: false, msg: 'já tem backfill rodando — acompanhe em /backfill-status', ano: _backfillAno, mes: _backfill }); return true; }
-      const ateMes = String((urlObj.searchParams && urlObj.searchParams.get('ate')) || '07').padStart(2,'0');   // default: vai até julho (mês atual)
-      backfillAnoTodo(ateMes);   // NÃO await — roda em background, mês a mês
-      json(res, 200, { ok: true, msg: '✅ backfill do ANO iniciado (janeiro até '+('2026-'+ateMes)+'), rodando os meses EM SEQUÊNCIA sozinho. Acompanhe em /backfill-status. Cada mês ~15-20 min; o ano todo leva ~2h. É idempotente (cada mês limpa e regrava o seu).', ate: '2026-'+ateMes });
-      return true;
-    }
-
-    // DISPARA o backfill de um período (roda em BACKGROUND). Uso: /girassol-backup-offline/backfill?de=2026-01-01&ate=2026-01-31
-    if (method === 'GET' && p === '/girassol-backup-offline/backfill') {
-      const kD = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
-      const sessD = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
-      if (_backfill.rodando) { json(res, 200, { ok: false, msg: 'já tem um backfill rodando — acompanhe em /backfill-status', status: _backfill }); return true; }
-      const de = String((urlObj.searchParams && urlObj.searchParams.get('de')) || '2026-01-01').slice(0, 10);
-      const ate = String((urlObj.searchParams && urlObj.searchParams.get('ate')) || new Date().toISOString().slice(0, 10)).slice(0, 10);
-      backfillVendas(de, ate, 'girassol');   // NÃO await — roda em background
-      json(res, 200, { ok: true, msg: '✅ backfill iniciado em background (só Girassol). Acompanhe em /backfill-status. Ele deleta o período antes e regrava, então pode rodar de novo sem duplicar.', de, ate });
-      return true;
-    }
-    // 🔮 PREVISÃO DE VENDAS POR PRODUTO — usa o histórico do Supabase.
-    // Uso: /girassol-backup-offline/previsao-vendas?base=180  (dias de histórico usados como base)
-    // Devolve, por SKU: o que vendeu na base, a média por dia, a TENDÊNCIA (últimos 30d x 30d
-    // anteriores) e a projeção pra 7 / 30 / 90 / 180 / 365 dias.
-    if (method === 'GET' && p === '/girassol-backup-offline/previsao-vendas') {
-      const kP = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
-      const sessP = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kP === process.env.ADMIN_KEY) || (sessP && ehAdmin(sessP)))) { json(res, 404, { error: 'not found' }); return true; }
-      const baseDias = Math.min(730, Math.max(30, parseInt((urlObj.searchParams && urlObj.searchParams.get('base')) || '180', 10) || 180));
-      const hojeP = new Date();
-      const dePV = new Date(hojeP.getTime() - baseDias * 86400000).toISOString().slice(0, 10);
-      const atePV = hojeP.toISOString().slice(0, 10);
-      const ck = 'prev|' + baseDias + '|' + atePV;
-      if (_histCache[ck] && (Date.now() - _histCache[ck].ts) < 1800000) { json(res, 200, Object.assign({ cache: true }, _histCache[ck].dados)); return true; }
-      const { url: uP, key: kkP } = supaCfg('girassol');
-      if (!uP || !kkP) { json(res, 500, { ok: false, erro: 'Supabase não configurado' }); return true; }
-      const HP = { apikey: kkP, Authorization: 'Bearer ' + kkP };
-      const corte30 = new Date(hojeP.getTime() - 30 * 86400000).toISOString().slice(0, 10);
-      const corte60 = new Date(hojeP.getTime() - 60 * 86400000).toISOString().slice(0, 10);
-      const porSku = {};
-      let diasComVenda = new Set(), offP = 0, linhasLidas = 0;
-      try {
-        while (offP < 120000) {
-          const rq = await fetch(uP.replace(/\/+$/, '') + '/rest/v1/vendas_historico?empresa=eq.girassol&data_venda=gte.' + dePV + '&data_venda=lte.' + atePV +
-                    '&select=sku,descricao,quantidade,valor_produto,margem,data_venda&order=data_venda.asc&limit=1000&offset=' + offP, { headers: HP });
-          if (!rq.ok) break;
-          const ln = await rq.json().catch(() => []);
-          if (!Array.isArray(ln) || !ln.length) break;
-          linhasLidas += ln.length;
-          for (const l of ln) {
-            const sk = l.sku || '(sem sku)';
-            if (!porSku[sk]) porSku[sk] = { sku: sk, desc: l.descricao || '', un: 0, fat: 0, mar: 0, un30: 0, un3060: 0, dias: new Set() };
-            const o = porSku[sk], q = Number(l.quantidade) || 0, d = String(l.data_venda || '').slice(0, 10);
-            o.un += q; o.fat += Number(l.valor_produto) || 0; o.mar += Number(l.margem) || 0;
-            if (d >= corte30) o.un30 += q; else if (d >= corte60) o.un3060 += q;
-            if (d) { o.dias.add(d); diasComVenda.add(d); }
-          }
-          if (ln.length < 1000) break;
-          offP += 1000;
-        }
-      } catch (e) { json(res, 500, { ok: false, erro: String(e.message || e) }); return true; }
-      const lista = Object.values(porSku).map(o => {
-        const mediaDia = o.un / baseDias;
-        // tendência: últimos 30 dias contra os 30 anteriores
-        const tend = o.un3060 > 0 ? ((o.un30 - o.un3060) / o.un3060) : (o.un30 > 0 ? 1 : 0);
-        // a projeção usa a média recente quando há histórico recente (reage melhor), com piso na média geral
-        const mediaRec = o.un30 / 30;
-        const base = (o.un30 > 0 ? (mediaRec * 0.7 + mediaDia * 0.3) : mediaDia);
-        const pr = d => Math.round(base * d);
-        return {
-          sku: o.sku, desc: o.desc, un: o.un, fat: Math.round(o.fat * 100) / 100,
-          margem: Math.round(o.mar * 100) / 100,
-          dias_com_venda: o.dias.size,
-          media_dia: Math.round(mediaDia * 1000) / 1000,
-          un30: o.un30, un_30_60: o.un3060,
-          tendencia: Math.round(tend * 100),
-          p7: pr(7), p30: pr(30), p90: pr(90), p180: pr(180), p365: pr(365)
-        };
-      }).filter(x => x.un > 0).sort((a, b) => b.p365 - a.p365).slice(0, 400);
-      const dados = { ok: true, base_dias: baseDias, de: dePV, ate: atePV, linhas: linhasLidas,
-                      dias_com_venda: diasComVenda.size, skus: lista.length, produtos: lista };
-      _histCache[ck] = { ts: Date.now(), dados };
-      json(res, 200, dados);
-      return true;
-    }
-
-    // LISTA do histórico, paginada por PEDIDO (o banco guarda 1 linha por ITEM, então agrupa antes).
-    // Uso: /girassol-backup-offline/historico-linhas?de=&ate=&off=0&lim=100
-    if (method === 'GET' && p === '/girassol-backup-offline/historico-linhas') {
-      const kR = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
-      const sessR = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kR === process.env.ADMIN_KEY) || (sessR && ehAdmin(sessR)))) { json(res, 404, { error: 'not found' }); return true; }
-      const deR = String((urlObj.searchParams && urlObj.searchParams.get('de')) || '').slice(0, 10);
-      const ateR = String((urlObj.searchParams && urlObj.searchParams.get('ate')) || '').slice(0, 10);
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(deR) || !/^\d{4}-\d{2}-\d{2}$/.test(ateR)) { json(res, 400, { ok: false, erro: 'passe &de=&ate=' }); return true; }
-      const lim = Math.min(200, Math.max(10, parseInt((urlObj.searchParams && urlObj.searchParams.get('lim')) || '100', 10) || 100));
-      const pagina = Math.max(1, parseInt((urlObj.searchParams && urlObj.searchParams.get('pagina')) || '1', 10) || 1);
-      const { url: uR, key: kkR } = supaCfg('girassol');
-      if (!uR || !kkR) { json(res, 500, { ok: false, erro: 'Supabase não configurado' }); return true; }
-      const HH = { apikey: kkR, Authorization: 'Bearer ' + kkR };
-      const BASE = uR.replace(/\/+$/, '') + '/rest/v1/vendas_historico?empresa=eq.girassol&data_venda=gte.' + deR + '&data_venda=lte.' + ateR;
-      // ÍNDICE DE PEDIDOS do período (só o número — leve) pra saber onde cada página começa.
-      // Cacheado 10 min: permite pular direto pra qualquer página, sem varrer o banco de novo.
-      const ck = 'idx|' + deR + '|' + ateR;
-      let idx = (_histCache[ck] && (Date.now() - _histCache[ck].ts) < 600000) ? _histCache[ck].dados : null;
-      if (!idx) {
-        idx = [];
-        try {
-          let o2 = 0;
-          while (o2 < 80000) {
-            const ri = await fetch(BASE + '&select=numero_pedido&order=data_venda.desc,numero_pedido.desc&limit=1000&offset=' + o2, { headers: HH });
-            const ln = await ri.json().catch(() => []);
-            if (!Array.isArray(ln) || !ln.length) break;
-            for (const l of ln) {
-              const k = String(l.numero_pedido || '(sem número)');
-              if (idx.length && idx[idx.length - 1].n === k) idx[idx.length - 1].c++;
-              else idx.push({ n: k, c: 1 });
-            }
-            if (ln.length < 1000) break;
-            o2 += 1000;
-          }
-        } catch (e) {}
-        _histCache[ck] = { ts: Date.now(), dados: idx };
-      }
-      const totalPedidos = idx.length, totalPaginas = Math.max(1, Math.ceil(totalPedidos / lim));
-      const pg = Math.min(pagina, totalPaginas);
-      const iniPed = (pg - 1) * lim, fimPed = Math.min(totalPedidos, iniPed + lim);
-      let off = 0; for (let i = 0; i < iniPed; i++) off += idx[i].c;
-      let qtdItens = 0; for (let i = iniPed; i < fimPed; i++) qtdItens += idx[i].c;
-      const campos = 'numero_pedido,numero_loja,canal,data_venda,sku,descricao,quantidade,valor_produto,valor_nota,custo,comissao,frete_vendedor,imposto,margem';
-      let linhas = [];
-      try {
-        const rq = await fetch(BASE + '&select=' + campos + '&order=data_venda.desc,numero_pedido.desc&limit=' + Math.max(1, qtdItens) + '&offset=' + off, { headers: HH });
-        linhas = await rq.json().catch(() => []);
-        if (!Array.isArray(linhas)) linhas = [];
-      } catch (e) { json(res, 500, { ok: false, erro: String(e.message || e) }); return true; }
-      const _ccR = readJson(path.join(CACHE_DIR, '_custos.json'), {});
-      const _cuR = sk => { const c = _ccR[String(sk || '').trim()]; return (c && c.custo != null && isFinite(Number(c.custo))) ? Number(c.custo) : null; };
-      const ordem = [], mapa = {};
-      for (const l of linhas) {
-        const k = String(l.numero_pedido || '(sem número)');
-        if (!mapa[k]) { mapa[k] = { numero: k, numero_loja: l.numero_loja || null, canal: l.canal || 'outro', data: l.data_venda, itens: [], un: 0, vprod: 0, vnota: 0, custo: 0, semCusto: 0, comissao: 0, frete: 0, imposto: 0, margem: 0 }; ordem.push(k); }
-        const o = mapa[k], q = Number(l.quantidade) || 0;
-        o.itens.push({ sku: l.sku || '', qtd: q });
-        o.un += q; o.vprod += Number(l.valor_produto) || 0; o.vnota += Number(l.valor_nota) || 0;
-        // 28/07: mesmo reparo do agregado — custo cadastrado depois do backfill entra na leitura
-        if (l.custo != null) o.custo += Number(l.custo);
-        else { const cxR = _cuR(l.sku); if (cxR != null) o.custo += cxR * q; else o.semCusto += q; }
-        o.comissao += Number(l.comissao) || 0; o.frete += Number(l.frete_vendedor) || 0;
-        o.imposto += Number(l.imposto) || 0; if (l.margem != null) o.margem += Number(l.margem);
-      }
-      const pedidos = ordem.map(k => {
-        const o = mapa[k];
-        ['vprod','vnota','custo','comissao','frete','imposto','margem'].forEach(c => { o[c] = Math.round(o[c] * 100) / 100; });
-        return o;
-      });
-      json(res, 200, { ok: true, pedidos, pagina: pg, total_paginas: totalPaginas, total_pedidos: totalPedidos, por_pagina: lim });
-      return true;
-    }
-
-    // HISTÓRICO LONGO (Supabase): períodos que não cabem na janela local (Ano, 6 meses...).
-    // Agrega no servidor e devolve pronto — o navegador não aguenta 23 mil linhas.
-    // Uso: /girassol-backup-offline/historico-longo?de=YYYY-MM-DD&ate=YYYY-MM-DD
-    if (method === 'GET' && p === '/girassol-backup-offline/historico-longo') {
-      const kL = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
-      const sessL = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kL === process.env.ADMIN_KEY) || (sessL && ehAdmin(sessL)))) { json(res, 404, { error: 'not found' }); return true; }
-      const deL = String((urlObj.searchParams && urlObj.searchParams.get('de')) || '').slice(0, 10);
-      const ateL = String((urlObj.searchParams && urlObj.searchParams.get('ate')) || '').slice(0, 10);
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(deL) || !/^\d{4}-\d{2}-\d{2}$/.test(ateL)) { json(res, 400, { ok: false, erro: 'passe &de=&ate=' }); return true; }
-      const cacheKey = deL + '|' + ateL;
-      if (_histCache[cacheKey] && (Date.now() - _histCache[cacheKey].ts) < 600000) { json(res, 200, Object.assign({ cache: true }, _histCache[cacheKey].dados)); return true; }
-      const { url: uL, key: kkL } = supaCfg('girassol');
-      if (!uL || !kkL) { json(res, 500, { ok: false, erro: 'Supabase não configurado' }); return true; }
-      const H = { apikey: kkL, Authorization: 'Bearer ' + kkL };
-      const campos = 'numero_pedido,canal,data_venda,sku,descricao,quantidade,valor_produto,valor_nota,custo,comissao,frete_vendedor,imposto,margem';
-      // 28/07: o backfill gravou o custo que existia NAQUELE dia. Depois o banco de custos cresceu
-      // (de 288 pra 541 SKUs), então muita linha antiga ficou sem custo à toa. Aqui completamos na
-      // LEITURA com o _custos.json atual — sem precisar refazer o backfill inteiro.
-      const _ccL = readJson(path.join(CACHE_DIR, '_custos.json'), {});
-      const _cuL = sk => { const c = _ccL[String(sk || '').trim()]; return (c && c.custo != null && isFinite(Number(c.custo))) ? Number(c.custo) : null; };
-      let _repostos = 0;
-      const T = { fat: 0, prod: 0, imp: 0, cus: 0, com: 0, fre: 0, mar: 0, un: 0, itens: 0, semCusto: 0 };
-      const peds = new Set(), porCanal = {}, porSku = {}, porDia = {}, semCustoSet = new Set();
-      let offset = 0, paginas = 0;
-      try {
-        while (offset < 60000) {
-          const rq = await fetch(uL.replace(/\/+$/, '') + '/rest/v1/vendas_historico?empresa=eq.girassol&data_venda=gte.' + deL + '&data_venda=lte.' + ateL + '&select=' + campos + '&order=data_venda.asc&limit=1000&offset=' + offset, { headers: H });
-          if (!rq.ok) break;
-          const linhas = await rq.json().catch(() => []);
-          if (!Array.isArray(linhas) || !linhas.length) break;
-          paginas++;
-          for (const l of linhas) {
-            const q = Number(l.quantidade) || 0, vp = Number(l.valor_produto) || 0, vn = Number(l.valor_nota) || 0;
-            let cu = (l.custo == null ? null : Number(l.custo));
-            if (cu == null) { const cx = _cuL(l.sku); if (cx != null) { cu = cx * q; _repostos++; } }   // custo cadastrado DEPOIS do backfill
-            const co = Number(l.comissao) || 0, fr = Number(l.frete_vendedor) || 0, im = Number(l.imposto) || 0;
-            T.itens++; T.un += q; T.prod += vp; T.fat += vn; T.imp += im; T.com += co; T.fre += fr;
-            if (cu != null) T.cus += cu; else { T.semCusto += q; if (l.sku) semCustoSet.add(String(l.sku)); }
-            let mg = (l.margem == null ? null : Number(l.margem));
-            if (mg != null && l.custo == null && cu != null) mg -= cu;   // margem gravada sem custo: desconta o custo reposto
-            if (mg != null) T.mar += mg;
-            if (l.numero_pedido) peds.add(String(l.numero_pedido));
-            const cn = l.canal || 'outro';
-            if (!porCanal[cn]) porCanal[cn] = { fat: 0, un: 0, mar: 0, peds: new Set() };
-            porCanal[cn].fat += vn; porCanal[cn].un += q; porCanal[cn].mar += (mg || 0); if (l.numero_pedido) porCanal[cn].peds.add(String(l.numero_pedido));
-            const sk = l.sku || '(sem sku)';
-            if (!porSku[sk]) porSku[sk] = { sku: sk, desc: l.descricao || '', un: 0, fat: 0, cus: 0, mar: 0 };
-            porSku[sk].un += q; porSku[sk].fat += vp; porSku[sk].cus += (cu != null ? cu : 0); porSku[sk].mar += (mg || 0);
-            const dd = String(l.data_venda || '').slice(0, 10);
-            if (dd) { if (!porDia[dd]) porDia[dd] = { fat: 0, peds: new Set() }; porDia[dd].fat += vn; if (l.numero_pedido) porDia[dd].peds.add(String(l.numero_pedido)); }
-          }
-          if (linhas.length < 1000) break;
-          offset += 1000;
-        }
-      } catch (e) { json(res, 500, { ok: false, erro: String(e.message || e) }); return true; }
-      const canais = {}; for (const c of Object.keys(porCanal)) canais[c] = { fat: Math.round(porCanal[c].fat * 100) / 100, un: porCanal[c].un, mar: Math.round(porCanal[c].mar * 100) / 100, pedidos: porCanal[c].peds.size };
-      const dias = {}; for (const d of Object.keys(porDia)) dias[d] = { fat: Math.round(porDia[d].fat * 100) / 100, pedidos: porDia[d].peds.size };
-      const skus = Object.values(porSku).sort((a, b) => b.mar - a.mar).slice(0, 300)
-        .map(x => ({ sku: x.sku, desc: x.desc, un: x.un, fat: Math.round(x.fat * 100) / 100, cus: Math.round(x.cus * 100) / 100, mar: Math.round(x.mar * 100) / 100 }));
-      const dados = { ok: true, de: deL, ate: ateL, fonte: 'supabase', paginas,
-        totais: { faturamento: Math.round(T.fat * 100) / 100, produtos: Math.round(T.prod * 100) / 100, imposto: Math.round(T.imp * 100) / 100,
-                  custo: Math.round(T.cus * 100) / 100, comissao: Math.round(T.com * 100) / 100, frete: Math.round(T.fre * 100) / 100,
-                  margem: Math.round(T.mar * 100) / 100, pedidos: peds.size, unidades: T.un, itens: T.itens, un_sem_custo: T.semCusto,
-                  skus_sem_custo: Array.from(semCustoSet).slice(0, 60), custos_repostos: _repostos },
-        canais, dias, skus };
-      _histCache[cacheKey] = { ts: Date.now(), dados };
-      json(res, 200, dados);
-      return true;
-    }
-
-    // DIAGNÓSTICO de um pedido: mostra o que o servidor sabe (venda + conferido). Uso: ?numero=117238
-    if (method === 'GET' && p === '/girassol-backup-offline/diag-pedido') {
-      const kX = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
-      const sessX = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kX === process.env.ADMIN_KEY) || (sessX && ehAdmin(sessX)))) { json(res, 404, { error: 'not found' }); return true; }
-      const numX = String((urlObj.searchParams && urlObj.searchParams.get('numero')) || '').trim();
-      if (!numX) { json(res, 400, { ok: false, erro: 'passe &numero=' }); return true; }
-      const vdX = readJson(path.join(CACHE_DIR, '_vendas_dia.json'), {});
-      const confX = readJson(CONFERIDOS_FILE, {});
-      const venda = Object.values(vdX).find(v => v && String(v.numero) === numX) || null;
-      const confId = Object.keys(confX).find(k => confX[k] && String(confX[k].numero) === numX) || null;
-      json(res, 200, { ok: true, numero: numX,
-        na_lista_de_vendas: !!venda,
-        venda: venda ? { id: venda.id, numero: venda.numero, situacao: venda.situacao, cancelado_mkt: venda.cancelado_mkt || 0, marketplace: venda.marketplace, numero_loja: venda.numero_loja, tem_itens: !!(venda.it && venda.it.length), det: venda.det || 0 } : null,
-        esta_bipado: !!confId,
-        conferido: confId ? { id: confId, numero: confX[confId].numero, cancelado: confX[confId].cancelado || 0, nf_numero: confX[confId].nf_numero } : null,
-        veredito: (venda && (/cancel/i.test(String(venda.situacao || '')) || venda.cancelado_mkt)) ? 'CANCELADO (o dashboard deve pintar cinza)' : 'NAO cancelado segundo o servidor' });
-      return true;
-    }
-
-    // STATUS NO MARKETPLACE: pergunta ao ML/Shopee se o pedido foi CANCELADO pelo cliente.
-    // O Bling demora (ou não) pra refletir isso; o dashboard precisa mostrar cinza na hora.
-    // Uso: /girassol-backup-offline/status-mkt?de=YYYY-MM-DD&ate=YYYY-MM-DD
-    if (method === 'GET' && p === '/girassol-backup-offline/status-mkt') {
-      const kS = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
-      const sessS = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kS === process.env.ADMIN_KEY) || (sessS && ehAdmin(sessS)))) { json(res, 404, { error: 'not found' }); return true; }
-      const deS = String((urlObj.searchParams && urlObj.searchParams.get('de')) || '').slice(0, 10);
-      const ateS = String((urlObj.searchParams && urlObj.searchParams.get('ate')) || '').slice(0, 10);
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(deS) || !/^\d{4}-\d{2}-\d{2}$/.test(ateS)) { json(res, 400, { ok: false, erro: 'passe &de=&ate=' }); return true; }
-      const FS = path.join(CACHE_DIR, '_vendas_dia.json');
-      const atualS = readJson(FS, {});
-      const noPeriodo = Object.values(atualS).filter(v => {
-        if (!v || v.numero == null || !v.numero_loja) return false;
-        if (/cancel/i.test(String(v.situacao || ''))) return false;   // já sabemos que caiu
-        const d = String(v.data || '').slice(0, 10);
-        return d >= deS && d <= ateS;
-      });
-      let checados = 0, cancelados = [];
-      // ── ML ──
-      const alvoML = noPeriodo.filter(v => v.marketplace === 'ml' || v.marketplace === 'mercadolivre').slice(0, 80);
-      if (alvoML.length) {
-        let tkS = null; try { const { garantirTokenML: _g5 } = require('../girassol/mlTokenManager'); tkS = await _g5(); } catch (e) {}
-        if (tkS) {
-          for (const v of alvoML) {
-            try {
-              const nlS = String(v.numero_loja).replace(/\D/g, '');
-              let rS = await fetch('https://api.mercadolibre.com/orders/' + nlS, { headers: { Authorization: 'Bearer ' + tkS } });
-              let dS = await rS.json().catch(() => null);
-              if (!rS.ok) {   // pode ser PACK (carrinho): pega o 1º pedido de dentro
-                const rp = await fetch('https://api.mercadolibre.com/packs/' + nlS, { headers: { Authorization: 'Bearer ' + tkS } });
-                const dp = await rp.json().catch(() => null);
-                const o1 = dp && dp.orders && dp.orders[0];
-                if (o1) { rS = await fetch('https://api.mercadolibre.com/orders/' + (o1.id || o1), { headers: { Authorization: 'Bearer ' + tkS } }); dS = await rS.json().catch(() => null); }
-              }
-              checados++;
-              if (rS.ok && dS && String(dS.status || '').toLowerCase() === 'cancelled') {
-                v.situacao = 'Cancelado no Mercado Livre'; v.cancelado_mkt = 1; cancelados.push(v.numero);
-              }
-            } catch (e) {}
-            await new Promise(r5 => setTimeout(r5, 260));
-          }
-        }
-      }
-      // ── SHOPEE (em lote de 20 pela rota interna do shopee-nf-sync) ──
-      const alvoSH = noPeriodo.filter(v => v.marketplace === 'shopee').slice(0, 60);
-      const SHU = process.env.SHOPEE_SYNC_URL || 'https://girassol-shopee-sync-organizar-envio.onrender.com';
-      const SHK = process.env.SHOPEE_SYNC_KEY || '';
-      if (alvoSH.length && SHK) {
-        for (let i = 0; i < alvoSH.length; i += 20) {
-          const fatia = alvoSH.slice(i, i + 20);
-          try {
-            const rSh = await fetch(SHU + '/girassol/interno/margem-pedidos?k=' + encodeURIComponent(SHK) + '&order_sns=' + encodeURIComponent(fatia.map(v => v.numero_loja).join(',')));
-            const dSh = await rSh.json().catch(() => null);
-            const lst = (dSh && (dSh.pedidos || dSh.data)) || null;
-            if (lst) {
-              const porSn2 = Array.isArray(lst) ? Object.fromEntries(lst.map(x => [String(x.order_sn), x])) : lst;
-              for (const v of fatia) {
-                const pS2 = porSn2[String(v.numero_loja)];
-                checados++;
-                if (pS2 && /cancel/i.test(String(pS2.order_status || ''))) { v.situacao = 'Cancelado na Shopee'; v.cancelado_mkt = 1; cancelados.push(v.numero); }
-              }
-            }
-          } catch (e) {}
-        }
-      }
-      try { writeJson(FS, atualS); } catch (e) {}
-      // marca também nos CONFERIDOS (pedidos já bipados) — é de lá que o dashboard monta a linha
-      if (cancelados.length) {
-        try {
-          const confM = readJson(CONFERIDOS_FILE, {});
-          const alvo = new Set(cancelados.map(x => String(x)));
-          let mex = 0;
-          for (const k of Object.keys(confM)) { const c = confM[k]; if (c && alvo.has(String(c.numero))) { c.cancelado = 1; mex++; } }
-          if (mex) writeJson(CONFERIDOS_FILE, confM);
-        } catch (e) {}
-      }
-      json(res, 200, { ok: true, checados, cancelados_agora: cancelados.length, numeros: cancelados.slice(0, 30) });
-      return true;
-    }
-
-    // COMPLETAR DETALHES do período que o dashboard está mostrando (SKU/qtd/taxas dos ainda não bipados).
-    // Uso: /girassol-backup-offline/completar-detalhes?de=YYYY-MM-DD&ate=YYYY-MM-DD
-    // Processa um lote curto e devolve quantos faltam — o dashboard chama em sequência até zerar.
-    if (method === 'GET' && p === '/girassol-backup-offline/completar-detalhes') {
-      const kD = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
-      const sessD = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
-      const deD = String((urlObj.searchParams && urlObj.searchParams.get('de')) || '').slice(0, 10);
-      const ateD = String((urlObj.searchParams && urlObj.searchParams.get('ate')) || '').slice(0, 10);
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(deD) || !/^\d{4}-\d{2}-\d{2}$/.test(ateD)) { json(res, 400, { ok: false, erro: 'passe &de=AAAA-MM-DD&ate=AAAA-MM-DD' }); return true; }
-      const FV = path.join(CACHE_DIR, '_vendas_dia.json');
-      const atualD = readJson(FV, {});
-      const confD = readJson(CONFERIDOS_FILE, {});
-      const bipD = new Set(Object.values(confD).map(c => String(c && c.numero)));
-      const faltando = Object.values(atualD).filter(v => {
-        if (!v || v.det || v.numero == null) return false;
-        if (bipD.has(String(v.numero))) return false;
-        if (/cancel/i.test(String(v.situacao || ''))) return false;
-        const d = String(v.data || '').slice(0, 10);
-        return d >= deD && d <= ateD;
-      }).sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')));
-      const lote = faltando.slice(0, 40);   // ~18s por chamada — o dashboard repete até zerar
-      let feitos = 0;
-      for (const v of lote) {
-        try {
-          const rd = await blingGet('/pedidos/vendas/' + v.id);
-          const det = (rd && rd.ok && rd.data && rd.data.data) || null;
-          if (det) {
-            if (!v.numero_loja && det.numeroPedidoLoja) v.numero_loja = det.numeroPedidoLoja;
-            if (!v.marketplace || v.marketplace === 'outro') { const lj3 = String((det.loja && det.loja.id) || ''); v.marketplace = LOJA_MKT[lj3] || _inferCanal(v.numero_loja); }
-            v.it = (det.itens || []).map(i2 => ({ sku: (i2.codigo || (i2.produto && i2.produto.codigo) || '').trim() || null, qtd: Number(i2.quantidade || 1), vt: Math.round(Number(i2.valor || 0) * Number(i2.quantidade || 1) * 100) / 100 }));
-            const tc2 = det.taxas && Number(det.taxas.taxaComissao); if (isFinite(tc2) && tc2 > 0) v.taxa_mkt = Math.round(tc2 * 100) / 100;
-            const cf2 = det.taxas && Number(det.taxas.custoFrete); if (isFinite(cf2) && cf2 > 0) v.frete_mkt = Math.round(cf2 * 100) / 100;
-            if (det.situacao && (det.situacao.valor || det.situacao.nome)) v.situacao = det.situacao.valor || det.situacao.nome;
-            v.det = 1; feitos++;
-          }
-        } catch (e) {}
-        if ((feitos % 10) === 0) { try { writeJson(FV, atualD); } catch (e) {} }
-        await new Promise(r4 => setTimeout(r4, 430));
-      }
-      try { writeJson(FV, atualD); } catch (e) {}
-      json(res, 200, { ok: true, feitos, restantes: Math.max(0, faltando.length - feitos) });
-      return true;
-    }
-
-    // STATUS do backfill em andamento. Uso: /girassol-backup-offline/backfill-status
-    if (method === 'GET' && p === '/girassol-backup-offline/backfill-status') {
-      const kD = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
-      const sessD = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
-      json(res, 200, { ok: true, status: _backfill, ano: (_backfillAno.rodando || _backfillAno.fim) ? _backfillAno : undefined });
-      return true;
-    }
-
-    // TESTE de conexão com o Supabase (histórico) — grava e apaga 1 registro. Confirma antes do backfill.
-    // Uso: /girassol-backup-offline/backfill-teste
-    if (method === 'GET' && p === '/girassol-backup-offline/backfill-teste') {
-      const kD = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
-      const sessD = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
-      const out = { ok: true };
-      const { url } = supaCfg('girassol');
-      out.url_configurada = url ? (String(url).slice(0, 30) + '…') : 'FALTANDO';
-      const marca = '__TESTE_' + Date.now();
-      const ins = await supaReq('girassol', 'POST', 'vendas_historico', [{ empresa: 'girassol', numero_pedido: marca, canal: 'teste', data_venda: '2026-01-01', sku: 'TESTE-CONEXAO', quantidade: 0, valor_produto: 0 }]);
-      out.gravar = { status: ins.status, ok: ins.ok, erro: ins.erro || null, resposta: (ins.body || '').slice(0, 200) };
-      if (ins.ok) {
-        const del = await supaReq('girassol', 'DELETE', 'vendas_historico?numero_pedido=eq.' + encodeURIComponent(marca), null);
-        out.apagar = { status: del.status, ok: del.ok };
-        out.resultado = (del.ok) ? '✅ CONEXÃO OK — gravou e apagou o registro de teste. Pode rodar o backfill.' : '⚠️ gravou mas não apagou — confira o DELETE (mas escrita funciona)';
-      } else {
-        out.resultado = '❌ FALHOU ao gravar. Confira SUPABASE_URL_VENDAS_GIRASSOL e SUPABASE_KEY_VENDAS_GIRASSOL no Render (a chave TEM que ser a service_role).';
-      }
-      json(res, 200, out);
-      return true;
-    }
-
-    // SONDA (sessão OU ?k=): investiga um ID INTERNO de pedido do Bling (o que apareceu cru na Análise).
-    // Uso: /girassol-backup-offline/sonda-bling-pedido?id=26341228931
-    if (method === 'GET' && p === '/girassol-backup-offline/sonda-bling-pedido') {
-      const kD = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
-      const sessD = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
-      const idQ = String((urlObj.searchParams && urlObj.searchParams.get('id')) || '').replace(/\D/g, '');
-      if (!idQ) { json(res, 200, { ok: false, erro: 'passe ?id=ID_INTERNO_DO_BLING' }); return true; }
-      const out = { ok: true, id: idQ };
-      try {
-        const r = await blingGet('/pedidos/vendas/' + idQ);
-        out.status = r && r.status;
-        out.ok_resp = r && r.ok;
-        const d = (r && r.data && r.data.data) ? r.data.data : (r && r.data) || null;
-        if (d && (d.id || d.numero)) {
-          out.resumo = {
-            numero: d.numero, numeroLoja: d.numeroLoja, data: d.data,
-            situacao: d.situacao || null, total: d.total,
-            cliente: d.contato && (d.contato.nome || d.contato.id) || null,
-            loja: d.loja && d.loja.id || null, itens: Array.isArray(d.itens) ? d.itens.length : null
-          };
-          out.cru = d;   // cru completo pra eu ver tudo
-        } else { out.vazio = true; out.cru = d; }
-      } catch (e) { out.erro = String(e.message || e); }
-      json(res, 200, out);
-      return true;
-    }
-
-    // SONDA (sessão admin OU ?k=): financeiro REAL de um pagamento no MERCADO PAGO — reembolso,
-    // estornos, taxas. Usa MP_ACCESS_TOKEN_GIRASSOL (app do MP da Girassol). Temporária.
-    // Uso: /girassol-backup-offline/sonda-mp?pid=PAYMENT_ID  (ou &nl=NUMERO_DA_VENDA pra achar o payment_id via ML)
-    if (method === 'GET' && p === '/girassol-backup-offline/sonda-mp') {
-      const kD = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
-      const sessD = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
-      const mpTok = process.env.MP_ACCESS_TOKEN_GIRASSOL;
-      const out = { ok: true };
-      if (!mpTok) { out.ok = false; out.erro = 'falta MP_ACCESS_TOKEN_GIRASSOL no env do Render'; json(res, 200, out); return true; }
-      out.mp_token_prefixo = String(mpTok).slice(0, 8);   // confirma o token certo (deve começar com APP_USR-) sem expor
-      let pid = String((urlObj.searchParams && urlObj.searchParams.get('pid')) || '').replace(/\D/g, '');
-      const nlQ = String((urlObj.searchParams && urlObj.searchParams.get('nl')) || '').replace(/\D/g, '');
-      if (!pid && nlQ) {   // veio o nº da venda ML: busca o pedido pra achar o payment_id
-        try {
-          const { garantirTokenML: _g7 } = require('../girassol/mlTokenManager');
-          const tkML = await _g7();
-          const rr = await fetch('https://api.mercadolibre.com/orders/' + nlQ, { headers: { Authorization: 'Bearer ' + tkML } });
-          const dd = await rr.json().catch(() => null);
-          if (dd && Array.isArray(dd.payments) && dd.payments[0]) { pid = String(dd.payments[0].id).replace(/\D/g, ''); out.payment_id_do_pedido = pid; }
-        } catch (e) { out.erro_ml = String(e.message || e); }
-      }
-      if (!pid) { out.ok = false; out.erro = 'passe ?pid=PAYMENT_ID ou &nl=NUMERO_DA_VENDA'; json(res, 200, out); return true; }
-      out.payment_id = pid;
-      const H = { headers: { Authorization: 'Bearer ' + mpTok } };
-      try {
-        const rp = await fetch('https://api.mercadopago.com/v1/payments/' + pid, H);
-        out.pagamento_status = rp.status;
-        out.pagamento = await rp.json().catch(() => null);   // CRU: transaction_amount, transaction_amount_refunded, status, fee_details, charges_details, taxes_amount...
-      } catch (e) { out.erro_pag = String(e.message || e); }
-      try {
-        const rf = await fetch('https://api.mercadopago.com/v1/payments/' + pid + '/refunds', H);
-        out.refunds_status = rf.status;
-        out.refunds = await rf.json().catch(() => null);   // lista de estornos (reembolsos ao comprador)
-      } catch (e) { out.erro_ref = String(e.message || e); }
-      json(res, 200, out);
-      return true;
-    }
-
-    // SONDA (sessão admin): mapeia a estrutura REAL de devoluções/claims do ML antes de integrar
-    // o prejuízo. Roda /claims/search (claims do seller) e, pros primeiros, busca returns +
-    // return-cost (frete de retorno). É temporária — sai depois que a integração estiver validada.
-    // Uso: /girassol-backup-offline/sonda-ml-claims
-    if (method === 'GET' && p === '/girassol-backup-offline/sonda-ml-claims') {
-      const kD = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
-      const sessD = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
-      let tk = null;
-      try { const { garantirTokenML: _g4 } = require('../girassol/mlTokenManager'); tk = await _g4(); }
-      catch (e) { json(res, 200, { ok: false, erro: 'sem token ML: ' + String(e.message || e) }); return true; }
-      const H = { headers: { Authorization: 'Bearer ' + tk } };
-      const out = { ok: true, detalhes: [] };
-      // Client ID do app que gerou o token (o ML embute no token: APP_USR-{app_id}-...).
-      // É NESSE app que a permissão de pós-venda/devoluções precisa ser habilitada.
-      out.app_id_do_token = (String(tk).match(/APP_USR-(\d+)-/) || [])[1] || 'nao-identificado';
-      try {
-        // o /claims/search exige pelo menos 1 filtro; o ML recomenda players.user_id + players.role=respondent
-        // (o vendedor é o "respondent" da reclamação). Pega o seller_id via /users/me.
-        let sellerId = null;
-        try { const rm = await fetch('https://api.mercadolibre.com/users/me', H); const dm = await rm.json().catch(() => null); if (rm.ok && dm && dm.id) sellerId = dm.id; } catch (e) {}
-        out.seller_id = sellerId;
-        const base = sellerId ? ('players.user_id=' + sellerId + '&players.role=respondent&') : '';
-        // o filtro obrigatório do /claims/search é status/stage/type — players.user_id sozinho não conta.
-        // Faz 2 buscas (abertas + fechadas) pra trazer TODAS as reclamações/devoluções da conta.
-        out.buscas = {};
-        let listaAll = [];
-        for (const st of ['opened', 'closed']) {
-          try {
-            const rc = await fetch('https://api.mercadolibre.com/post-purchase/v1/claims/search?' + base + 'status=' + st + '&sort=date_created:desc&limit=30', H);
-            const dc = await rc.json().catch(() => null);
-            out.buscas[st] = { status: rc.status, total: (dc && dc.paging && dc.paging.total), raw: dc };
-            const l = (dc && (dc.data || [])) || [];
-            if (Array.isArray(l)) listaAll = listaAll.concat(l);
-          } catch (e) { out.buscas[st] = { erro: String(e.message || e) }; }
-        }
-        out.total_claims = ((out.buscas.opened && out.buscas.opened.total) || 0) + ((out.buscas.closed && out.buscas.closed.total) || 0);
-        const amostra = listaAll.slice(0, 3);
-        for (const c of amostra) {
-          const cid = c && (c.id || c.claim_id || c.resource_id);
-          if (!cid) continue;
-          const det = { claim_id: cid };
-          try { const r1 = await fetch('https://api.mercadolibre.com/post-purchase/v2/claims/' + cid + '/returns', H); det.returns_status = r1.status; det.returns = await r1.json().catch(() => null); } catch (e) {}
-          try { const r2 = await fetch('https://api.mercadolibre.com/post-purchase/v1/claims/' + cid + '/charges/return-cost', H); det.return_cost_status = r2.status; det.return_cost = await r2.json().catch(() => null); } catch (e) {}
-          out.detalhes.push(det);
-        }
-      } catch (e) { out.erro = String(e.message || e); }
-      json(res, 200, out);
-      return true;
-    }
-
-    // SONDA (sessão admin): mapeia os COMPONENTES DE PAGAMENTO de vendas ML reais — cupom,
-    // desconto, promoção, bônus, pagamento, carrinho — mostrando order+shipment CRUS de 2 pedidos
-    // ML recentes. Pra eu ver a estrutura exata e integrar quem-paga-o-quê. Temporária.
-    // Uso: /girassol-backup-offline/sonda-ml-pagamento  (opcional &nl=NUMERO_DA_VENDA pra um pedido específico)
-    if (method === 'GET' && p === '/girassol-backup-offline/sonda-ml-pagamento') {
-      const kD = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
-      const sessD = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
-      let tk = null;
-      try { const { garantirTokenML: _g5 } = require('../girassol/mlTokenManager'); tk = await _g5(); }
-      catch (e) { json(res, 200, { ok: false, erro: 'sem token ML: ' + String(e.message || e) }); return true; }
-      const H = { headers: { Authorization: 'Bearer ' + tk } };
-      let alvos = [];
-      const nlQ = String((urlObj.searchParams && urlObj.searchParams.get('nl')) || '').replace(/\D/g, '');
-      if (nlQ) { alvos = [{ numero: null, numero_loja: nlQ }]; }
-      else {
-        const vd = readJson(path.join(CACHE_DIR, '_vendas_dia.json'), {});
-        alvos = Object.values(vd).filter(v => v && (v.marketplace === 'ml' || v.marketplace === 'mercadolivre') && v.numero_loja)
-          .sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')))
-          .slice(0, 2);
-      }
-      const out = { ok: true, pedidos: [] };
-      for (const v of alvos) {
-        const nl = String(v.numero_loja).replace(/\D/g, '');
-        const reg = { numero: v.numero, numero_loja: nl };
-        try {
-          let r = await fetch('https://api.mercadolibre.com/orders/' + nl, H);
-          let d = await r.json().catch(() => null);
-          if (!r.ok && r.status === 404) {   // 404 = pack (carrinho): abre o pack e pega a 1ª order
-            const rp = await fetch('https://api.mercadolibre.com/packs/' + nl, H);
-            reg.pack_raw = await rp.json().catch(() => null);
-            const o1 = reg.pack_raw && reg.pack_raw.orders && reg.pack_raw.orders[0];
-            if (o1) { r = await fetch('https://api.mercadolibre.com/orders/' + (o1.id || o1), H); d = await r.json().catch(() => null); }
-          }
-          reg.order_status = r.status;
-          reg.order_raw = d;   // CRU: coupon, payments, order_items (unit_price/full_unit_price), taxes, discounts...
-          const shipId = d && d.shipping && d.shipping.id;
-          if (shipId) { try { const rs = await fetch('https://api.mercadolibre.com/shipments/' + shipId, H); reg.shipment_raw = await rs.json().catch(() => null); } catch (e) {} }
-        } catch (e) { reg.erro = String(e.message || e); }
-        out.pedidos.push(reg);
-      }
-      json(res, 200, out);
-      return true;
-    }
-
-    // ADMIN (?k= ou sessão): RAIO-X da cobertura por mês — onde estão os buracos de valor/UF
-    if (method === 'GET' && p === '/girassol-backup-offline/debug-cobertura') {
-      const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
-      const sessX = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || (sessX && ehAdmin(sessX)))) { json(res, 404, { error: 'not found' }); return true; }
-      const confX = readJson(CONFERIDOS_FILE, {});
-      const porMes = {}; const exemplos = [];
-      for (const [cid, c] of Object.entries(confX)) {
-        if (!c || !c.conferido_em) continue;
-        const mes = new Date(c.conferido_em).toLocaleString('sv-SE', { timeZone: 'America/Sao_Paulo' }).slice(0, 7);
-        if (!porMes[mes]) porMes[mes] = { pedidos: 0, sem_uf: 0, sem_vprod_nf: 0, unidades: 0, unid_sem_valor: 0 };
-        const g = porMes[mes]; g.pedidos++;
-        if (c.uf == null) g.sem_uf++;
-        if (c.vprod_nf == null) g.sem_vprod_nf++;
-        let semV = 0;
-        for (const it of (c.itens || [])) { const q = Number(it.qtd || 1); g.unidades += q; if (it.valor_total == null) { g.unid_sem_valor += q; semV += q; } }
-        if (semV && exemplos.length < 8) exemplos.push({ id: cid, mes, numero: c.numero, skus: (c.itens || []).filter(i => i.valor_total == null).map(i => i.sku) });
-      }
-      json(res, 200, { ok: true, por_mes: porMes, exemplos_itens_sem_valor: exemplos });
-      return true;
-    }
-
-    // ADMIN (?k= ou sessão): RAIO-X DO PEDIDO CRU do Bling — mostra TODAS as chaves e qualquer campo
-    // com cara de data/hora, pra decidirmos com o payload real se o Bling guarda a hora da venda.
-    // Uso: /girassol-backup-offline/debug-pedido?id=116063  (o nº que aparece na coluna Pedido)
-    if (method === 'GET' && p === '/girassol-backup-offline/debug-pedido') {
-      const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
-      const sessP = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || (sessP && ehAdmin(sessP)))) { json(res, 404, { error: 'not found' }); return true; }
-      const idQ = String(urlObj.searchParams.get('id') || '').trim();
-      if (!idQ) { json(res, 200, { ok: false, erro: 'passe ?id=NUMERO (nº do pedido) ou ?id=ID_BLING' }); return true; }
-      // aceita nº do pedido (procura no conferidos) ou id do Bling direto
-      const idClean = idQ.replace(/\D/g, '');   // aceita nº do pedido, nº da venda no marketplace ou id do Bling (limpa sufixos tipo _ML)
-      let alvoId = idClean || idQ;
-      const confP = readJson(CONFERIDOS_FILE, {});
-      for (const [cid, c] of Object.entries(confP)) {
-        if (!c) continue;
-        if (String(c.numero) === idClean || (c.numero_loja && String(c.numero_loja) === idClean)) { alvoId = cid; break; }
-      }
-      try {
-        const det = await detalhePedido(alvoId);
-        if (!det) { json(res, 200, { ok: false, erro: 'pedido não encontrado no Bling (id ' + alvoId + ')' }); return true; }
-        const comHora = {};
-        const varre = (obj, pref) => {
-          for (const [k2, v2] of Object.entries(obj || {})) {
-            const cam = pref ? pref + '.' + k2 : k2;
-            if (v2 && typeof v2 === 'object' && !Array.isArray(v2)) { varre(v2, cam); continue; }
-            const sv = String(v2 == null ? '' : v2);
-            if (/data|hora|date|time/i.test(k2) || /\d{4}-\d{2}-\d{2}/.test(sv) || /\d{2}:\d{2}/.test(sv)) comHora[cam] = v2;
-          }
-        };
-        varre(det, '');
-        json(res, 200, { ok: true, id_bling: alvoId, numero: det.numero,
-          chaves_do_pedido: Object.keys(det),
-          todos_os_campos_com_data_ou_hora: comHora,
-          veredito_hora: (Object.values(comHora).some(v => /\d{2}:\d{2}/.test(String(v))) ? 'TEM campo com HORA — cola aqui que eu implemento' : 'só DATAS (sem hora) — o Bling não guarda a hora da venda'),
-          taxas: det.taxas || null,                       // 💎 se vier taxaComissao/custoFrete: tarifa+frete de TODOS os canais sem app!
-          intermediador: det.intermediador || null,
-          totais: { totalProdutos: det.totalProdutos, total: det.total, desconto: det.desconto, outrasDespesas: det.outrasDespesas },
-          itens_do_bling: (det.itens || []).map(i => ({ codigo: i.codigo || null, codigo_produto: (i.produto && i.produto.codigo) || null, descricao: String(i.descricao || '').slice(0, 60), qtd: i.quantidade, valor: i.valor })),
-          itens_do_conferido: ((confP[alvoId] && confP[alvoId].itens) || []).map(i => ({ sku: i.sku, qtd: i.qtd, valor_total: i.valor_total })),
-          conferido_campos: (function(){ const c = confP[alvoId] || {}; return { tarifa_ml: c.tarifa_ml != null ? c.tarifa_ml : null, frete_ml: c.frete_ml != null ? c.frete_ml : null, venda_em: c.venda_em || null, taxa_mkt: c.taxa_mkt != null ? c.taxa_mkt : null, frete_mkt: c.frete_mkt != null ? c.frete_mkt : null, vprod_nf: c.vprod_nf != null ? c.vprod_nf : null, numero_loja: c.numero_loja || null, marketplace: c.marketplace || null }; })() });
-      } catch (e) { json(res, 200, { ok: false, erro: String(e.message || e).slice(0, 200) }); }
-      return true;
-    }
-
-    // ADMIN (?k= obrigatorio — trava central intercepta rotas 'debug'): RAIO-X DO PRODUTO no Bling.
-    // Mostra TODAS as chaves do produto + campos de preco/custo + o que /estoques/saldos e /produtos/fornecedores devolvem.
-    // Uso: /girassol-backup-offline/debug-sku?sku=KP16&k=SUA_CHAVE
-    if (method === 'GET' && p === '/girassol-backup-offline/debug-sku') {
-      const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
-      const sessP = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || (sessP && ehAdmin(sessP)))) { json(res, 404, { error: 'not found' }); return true; }
-      const skuQ = String(urlObj.searchParams.get('sku') || '').trim();
-      if (!skuQ) { json(res, 200, { ok: false, erro: 'passe ?sku=CODIGO' }); return true; }
-      try {
-        const rb = await blingGet('/produtos?codigo=' + encodeURIComponent(skuQ) + '&criterio=5');
-        const p0 = rb && rb.ok && rb.data && rb.data.data && rb.data.data[0];   // envelope do blingGet: {ok, data:{data:[...]}}
-        if (!p0) { json(res, 200, { ok: false, erro: 'produto nao encontrado por codigo ' + skuQ }); return true; }
-        const rd = await blingGet('/produtos/' + p0.id);
-        const det = (rd && rd.ok && rd.data && rd.data.data) || {};
-        const precos = {};
-        const cata = (obj, pref) => { for (const [k2, v2] of Object.entries(obj || {})) { const cam = pref ? pref + '.' + k2 : k2; if (v2 && typeof v2 === 'object' && !Array.isArray(v2)) { cata(v2, cam); continue; } if (/pre[cç]o|custo|cost|price/i.test(k2)) precos[cam] = v2; } };
-        cata(det, '');
-        let saldos = null, fornecedores = null;
-        try { const rs = await blingGet('/estoques/saldos?idsProdutos[]=' + p0.id); saldos = (rs && rs.data && rs.data.data) || (rs && rs.data) || rs; } catch (e) { saldos = { erro: String(e.message || e).slice(0, 120) }; }
-        try { const rf = await blingGet('/produtos/fornecedores?idProduto=' + p0.id); fornecedores = (rf && rf.data && rf.data.data) || (rf && rf.data) || rf; } catch (e) { fornecedores = { erro: String(e.message || e).slice(0, 120) }; }
-        json(res, 200, { ok: true, sku: skuQ, id_produto: p0.id,
-          chaves_do_produto: Object.keys(det),
-          todos_os_campos_de_preco_ou_custo: precos,
-          saldo_estoques: saldos,
-          endpoint_fornecedores: fornecedores,
-          veredito: (precos.precoCusto != null && Number(precos.precoCusto) > 0) ? 'precoCusto EXISTE no produto — vou ler daqui' : 'sem precoCusto no detalhe — olhar os outros campos acima' });
-      } catch (e) { json(res, 200, { ok: false, erro: String(e.message || e).slice(0, 200) }); }
-      return true;
-    }
-
-    // ADMIN (sessão ou ?k=): sincronizador de custos em background. ?status=1 mostra progresso.
-    if (method === 'GET' && p === '/girassol-backup-offline/custo-sync') {
-      const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
-      const sessC = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || (sessC && ehAdmin(sessC)))) { json(res, 404, { error: 'not found' }); return true; }
-      if (urlObj.searchParams.get('status')) { json(res, 200, { ok: true, rodando: !!_cst.rodando, progresso: _cst.feitos + '/' + _cst.total, ok_ate_agora: _cst.ok, falhas: _cst.falhas, inicio: _cst.inicio }); return true; }
-      const skuProbe = urlObj.searchParams.get('sku');
-      if (skuProbe && urlObj.searchParams.get('raw')) {
-        // raio-X do que o Bling devolve pra esse SKU (pra entender custo faltando)
-        try {
-          const rb = await blingGet('/produtos?codigo=' + encodeURIComponent(skuProbe) + '&criterio=5&limite=3');
-          const lst = (rb.ok && rb.data && rb.data.data) || [];
-          const it0 = lst[0] || null;
-          let det = null;
-          if (it0 && it0.id) { const dd = await blingGet('/produtos/' + it0.id); det = (dd.ok && dd.data && dd.data.data) || null; }
-          const compsRaw = det ? ((det.estrutura && (det.estrutura.componentes || det.estrutura.itens)) || det.composicao || det.componentes || null) : null;
-          json(res, 200, { ok: true, sku: skuProbe, achou_na_busca: lst.length, id: it0 && it0.id,
-            campos_topo: det ? Object.keys(det) : null,
-            precoCusto: det && det.precoCusto, custo: det && det.custo, preco: det && det.preco,
-            fornecedor: det && det.fornecedor ? { precoCusto: det.fornecedor.precoCusto, precoCompra: det.fornecedor.precoCompra } : null,
-            estrutura_chaves: det && det.estrutura ? Object.keys(det.estrutura) : null,
-            componentes_qtd: Array.isArray(compsRaw) ? compsRaw.length : 0,
-            componentes_amostra: Array.isArray(compsRaw) ? compsRaw.slice(0, 3) : null,
-            fornecedores_crus: await (async () => { try { const rr = await blingGet('/produtos/fornecedores?idProduto=' + (it0 && it0.id) + '&limite=5'); return (rr.ok && rr.data && rr.data.data) || rr.data || null; } catch (e) { return String(e.message || e); } })() });
-        } catch (e) { json(res, 500, { ok: false, erro: String(e.message || e) }); }
-        return true;
-      }
-      if (skuProbe) { const ccP = readJson(path.join(CACHE_DIR, '_custos.json'), {}); json(res, 200, { ok: true, sku: skuProbe, no_cache_permanente: ccP[skuProbe] || null, total_no_cache: Object.keys(ccP).length }); return true; }
-      if (_cst.rodando) { json(res, 200, { ok: true, ja_rodando: true, progresso: _cst.feitos + '/' + _cst.total }); return true; }
-      custoSync(!!urlObj.searchParams.get('fresh')).catch(() => {});
-      json(res, 200, { ok: true, iniciado: true, mensagem: 'custo-sync rodando em background (tartaruga anti-429) — ?status=1 p/ acompanhar' });
-      return true;
-    }
-
-    // ADMIN (?k=): RAIO-X DO DINHEIRO NO ML — order + shipment + /costs crus, p/ mapear estorno/tarifas.
-    // Uso: /girassol-backup-offline/debug-ml?id=116454&k=SUA_CHAVE   (nº do pedido, da venda ou id Bling)
-    if (method === 'GET' && p === '/girassol-backup-offline/debug-ml') {
-      const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
-      const sessM = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || (sessM && ehAdmin(sessM)))) { json(res, 404, { error: 'not found' }); return true; }
-      const q0 = String(urlObj.searchParams.get('id') || '').replace(/\D/g, '');
-      if (!q0) { json(res, 200, { ok: false, erro: 'passe ?id=NUMERO' }); return true; }
-      const confM = readJson(CONFERIDOS_FILE, {});
-      let alvo = null, cidM = null;
-      for (const [cid, c] of Object.entries(confM)) {
-        if (!c) continue;
-        if (String(c.numero) === q0 || (c.numero_loja && String(c.numero_loja) === q0) || cid === q0) { alvo = c; cidM = cid; break; }
-      }
-      if (!alvo) { json(res, 200, { ok: false, erro: 'pedido nao encontrado no conferido' }); return true; }
-      const { garantirTokenML: _gtok } = require('../girassol/mlTokenManager');   // require local, igual aos outros blocos deste arquivo
-      const tk = await _gtok().catch(() => null);
-      if (!tk) { json(res, 200, { ok: false, erro: 'sem token ML' }); return true; }
-      const H2 = { headers: { Authorization: 'Bearer ' + tk } };
-      const nl2 = String(alvo.numero_loja || '').replace(/\D/g, '');
-      const out2 = { ok: true, pedido: alvo.numero, numero_loja: nl2, conferido: { tarifa_ml: alvo.tarifa_ml, frete_ml: alvo.frete_ml, credito_ml: alvo.credito_ml, venda_em: alvo.venda_em, flex: !!alvo.flex } };
-      try {
-        let ords2 = null;
-        const r1 = await fetch('https://api.mercadolibre.com/orders/' + nl2, H2);
-        const d1 = await r1.json().catch(() => null);
-        if (r1.ok && d1) ords2 = [d1];
-        else {
-          const rp2 = await fetch('https://api.mercadolibre.com/packs/' + nl2, H2);
-          const dp2 = await rp2.json().catch(() => null);
-          out2.pack = rp2.ok ? { orders: (dp2 && dp2.orders) || null } : { erro: rp2.status };
-          if (rp2.ok && dp2 && Array.isArray(dp2.orders)) {
-            ords2 = [];
-            for (const oq of dp2.orders) { const ro = await fetch('https://api.mercadolibre.com/orders/' + (oq.id || oq), H2); const doo = await ro.json().catch(() => null); if (ro.ok && doo) ords2.push(doo); }
-          }
-        }
-        if (!ords2 || !ords2.length) { out2.erro_order = 'nem order nem pack'; json(res, 200, out2); return true; }
-        out2.orders = ords2.map(od => ({
-          id: od.id, date_created: od.date_created, total_amount: od.total_amount, paid_amount: od.paid_amount,
-          itens: (od.order_items || []).map(it => ({ sku: (it.item && (it.item.seller_sku || it.item.id)) || null, qtd: it.quantity, preco: it.unit_price, sale_fee: it.sale_fee, listing_type: it.listing_type_id })),
-          taxes: od.taxes || null,
-          payments: (od.payments || []).map(pg => ({ status: pg.status, transaction_amount: pg.transaction_amount, shipping_cost: pg.shipping_cost, overpaid_amount: pg.overpaid_amount, marketplace_fee: pg.marketplace_fee, total_paid_amount: pg.total_paid_amount })),
-          shipping_id: (od.shipping && od.shipping.id) || null
-        }));
-        const shId = out2.orders.map(o3 => o3.shipping_id).filter(Boolean)[0];
-        if (shId) {
-          const rs2 = await fetch('https://api.mercadolibre.com/shipments/' + shId, H2);
-          const ds2 = await rs2.json().catch(() => null);
-          if (rs2.ok && ds2) out2.shipment = { id: ds2.id, logistic_type: (ds2.logistic && ds2.logistic.type) || ds2.logistic_type || null, mode: ds2.mode, status: ds2.status, cost: ds2.cost, base_cost: ds2.base_cost, list_cost: ds2.list_cost, shipping_option: ds2.shipping_option || null };
-          const rc2 = await fetch('https://api.mercadolibre.com/shipments/' + shId + '/costs', H2);
-          const dc2 = await rc2.json().catch(() => null);
-          out2.shipment_costs = rc2.ok ? dc2 : { erro: rc2.status, msg: (dc2 && (dc2.message || dc2.error)) || null };
-        }
-      } catch (e) { out2.erro = String(e.message || e).slice(0, 200); }
-      json(res, 200, out2);
-      return true;
-    }
-
-    // ADMIN/sessão: sincronizador de vendas do Bling (todas as situações). ?status=1 mostra o estado.
-    // DEBUG (?k=): raio-X do 🧾 — pega 3 conferidos recentes SEM hora de NF e mostra, pra cada um:
-    // o que tem no conf, o que tem no snapshot (snap.nf) e o resultado CRU da chamada /nfe/{id} feita AGORA.
-    // Revela na hora onde o preenchimento tranca: snapshot sem nf.id? Bling recusando? campo com outro nome?
-    if (method === 'GET' && p === '/girassol-backup-offline/debug-nf-emissao') {
-      const kE = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
-      if (!process.env.ADMIN_KEY || kE !== process.env.ADMIN_KEY) { json(res, 404, { error: 'not found' }); return true; }
-      const confE = readJson(CONFERIDOS_FILE, {});
-      const corteE = Date.now() - 4 * 86400000;
-      const alvosE = Object.entries(confE)
-        .filter(([idE, cE]) => cE && (cE.nf_emissao == null || cE.nf_emissao === '') && cE.nf_numero && cE.conferido_em && Date.parse(cE.conferido_em) >= corteE)
-        .sort((a, b) => String(b[1].conferido_em || '').localeCompare(String(a[1].conferido_em || '')))
-        .slice(0, 3);
-      const saidaE = [];
-      for (const [idE, cE] of alvosE) {
-        const snE = readJson(path.join(CACHE_DIR, String(idE), 'pedido.json'), null);
-        const item = {
-          pedido_id: idE, nf_numero: cE.nf_numero, nf_emissao_no_conf: cE.nf_emissao === '' ? '(sentinela vazia)' : cE.nf_emissao,
-          conferido_em: cE.conferido_em, marketplace: cE.marketplace || null,
-          snapshot_existe: !!snE, snap_nf: (snE && snE.nf) || null, chamada_nfe: null
-        };
-        try {
-          const nfE2 = await nfDoPedido(idE);   // b16: mesmo caminho que a fase NF usa agora
-          item.chamada_nfe = { via: 'nfDoPedido', achou: !!nfE2, nf: nfE2 || null };
-        } catch (e) { item.chamada_nfe = { via: 'nfDoPedido', achou: false, erro: String(e.message || e).slice(0, 200) }; }
-        await new Promise(r5 => setTimeout(r5, 350));
-        saidaE.push(item);
-      }
-      json(res, 200, { ok: true, sem_hora_no_conf: alvosE.length, amostra: saidaE });
-      return true;
-    }
-
-    // DEBUG (?k=): 3 itens CRUS da listagem /pedidos/vendas — confirma se o Bling manda loja.id e numeroLoja
-    if (method === 'GET' && p === '/girassol-backup-offline/debug-vendas-raw') {
-      const kD = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
-      if (!process.env.ADMIN_KEY || kD !== process.env.ADMIN_KEY) { json(res, 404, { error: 'not found' }); return true; }
-      const isoDD = dt => dt.toISOString().slice(0, 10);
-      const hjD = new Date(); const inD = new Date(hjD); inD.setDate(inD.getDate() - 3); const fiD = new Date(hjD); fiD.setDate(fiD.getDate() + 1);
-      // 28/07: parâmetro CERTO da API v3 (dataInicial/dataFinal). O antigo dataEmissaoInicial não existe
-      // e era ignorado pelo Bling, que devolvia pedidos de qualquer data.
-      const rD = await blingGet('/pedidos/vendas?dataInicial=' + isoDD(inD) + '&dataFinal=' + isoDD(fiD) + '&pagina=1&limite=3');
-      json(res, 200, { ok: !!(rD && rD.ok), itens_crus: (rD && rD.data && rD.data.data) || [], loja_mkt_mapa: LOJA_MKT });
-      return true;
-    }
-
-    // NÍVEL de desconto do frete Magalu (config do ⚙️). GET lê, POST salva.
-    // Valida por SESSÃO admin (igual config-fiscal) — chamada pelo dashboard.
-    if (p === '/girassol-backup-offline/config-frete-magalu') {
-      const opSess = validarSessao(req.headers['cookie']);
-      if (!opSess || !ehAdmin(opSess)) { json(res, 403, { ok: false, erro: 'apenas admin' }); return true; }
-      const CFG = path.join(CACHE_DIR, '_config-frete-magalu.json');
-      if (method === 'GET') { json(res, 200, { ok: true, config: readJson(CFG, { nivel_desconto: '50' }) }); return true; }
-      if (method === 'POST') {
-        let body = {}; try { const _rb = await readBody(req); body = (_rb && typeof _rb === 'object') ? _rb : JSON.parse(_rb || '{}'); } catch (e) {}
-        let nivel = '50'; if (['sem', '25', '50'].includes(body.nivel_desconto)) nivel = body.nivel_desconto;
-        writeJson(CFG, { nivel_desconto: nivel, em: new Date().toISOString() });
-        json(res, 200, { ok: true, salvo: nivel }); return true;
-      }
-    }
-
-    // SONDA de dimensões de um produto — pra ver os nomes EXATOS dos campos (largura/altura/
-    // profundidade/peso) que o cálculo de frete Magalu vai usar.
-    // REMOVIDA por segurança após cumprir o diagnóstico (usava ?k= na query e expunha o
-    // produto cru). As dimensões vêm de blingGet('/produtos/{id}').dimensoes, já confirmado.
-
-    if (method === 'GET' && p === '/girassol-backup-offline/vendas-sync') {
-      const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
-      const sessV = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || sessV)) { json(res, 404, { error: 'not found' }); return true; }
-      if (urlObj.searchParams.get('status')) { json(res, 200, { ok: true, rodando: _vsy.rodando, fase: _vsy.fase || null, vendas_na_janela: _vsy.total, atualizado_em: _vsy.atualizado_em, erro: _vsy.erro }); return true; }
-      vendasSync().catch(() => {});
-      json(res, 200, { ok: true, iniciado: true });
-      return true;
-    }
-
-    if ((method === 'POST' || method === 'GET') && p === '/girassol-backup-offline/run') {
-      const forcar = /[?&]force=1\b/.test(urlObj.search || '');
-      rodarCiclo(forcar ? 'manual-force' : 'manual', forcar);
-      json(res, 200, { mensagem: `Ciclo${forcar ? ' (FORCE — re-cacheia tudo)' : ''} iniciado. Veja /girassol-backup-offline/status.`, versao: VERSAO });
-      return true;
-    }
-
-    // salva a localização de um SKU no Bling (PATCH /produtos/{id}) + atualiza o cache + registra quem editou
-    if (method === 'POST' && p === '/girassol-backup-offline/salvar-localizacao') {
-      let body = {};
-      try { body = await readBody(req); } catch (e) {}
-      const sku = String(body.sku || '').trim();
-      const localizacao = String(body.localizacao == null ? '' : body.localizacao).trim();
-      const op = String(body.op || '').trim();
-      if (!sku || sku === '(sem SKU)') { json(res, 200, { ok: false, erro: 'SKU inválido' }); return true; }
-      const busca = await blingGet(`/produtos?codigo=${encodeURIComponent(sku)}&limite=1`);
-      const item = busca.ok && busca.data && busca.data.data && busca.data.data[0];
-      if (!item || !item.id) { json(res, 200, { ok: false, erro: 'produto não encontrado p/ SKU ' + sku }); return true; }
-      const patch = await blingWrite('PATCH', `/produtos/${item.id}`, { estoque: { localizacao } });
-      if (!patch.ok) { json(res, 200, { ok: false, erro: (patch.data && patch.data.error && (patch.data.error.description || patch.data.error.type)) || ('erro Bling ' + patch.status) }); return true; }
-      const locC = locCache();
-      const locAntiga = locC[sku] || localizacaoDeProduto(item) || '';
-      locC[sku] = localizacao; salvarLoc(locC);
-      const log = readJson(LOC_LOG_FILE, []);
-      log.push({ op: op || '?', sku, de: locAntiga, para: localizacao, em: new Date().toISOString() });
-      if (log.length > 3000) log.splice(0, log.length - 3000);    // mantém os últimos 3000
-      writeJson(LOC_LOG_FILE, log);
-      console.log(`[GIRABKP] localização ${sku}: "${locAntiga}" → "${localizacao}" por ${op || '?'}`);
-      json(res, 200, { ok: true, sku, localizacao, de: locAntiga });
-      return true;
-    }
-
-    // auditoria: log de edições de localização (quem mudou o quê e quando). uso: /localizacoes-log
-    if (method === 'GET' && p === '/girassol-backup-offline/localizacoes-log') {
-      const log = readJson(LOC_LOG_FILE, []);
-      json(res, 200, { ok: true, total: log.length, log: log.slice(-500).reverse() });
-      return true;
-    }
-
-    // busca um produto por SKU ou EAN (telinha de consulta/edição de localização do estoquista)
-    if (method === 'GET' && p === '/girassol-backup-offline/buscar-produto') {
-      const q = String(urlObj.searchParams.get('q') || '').trim();
-      if (!q) { json(res, 200, { ok: false, erro: 'busca vazia' }); return true; }
-      const dig = q.replace(/\D/g, '');
-      const pareceEan = dig.length >= 8 && dig.length <= 14 && /^\d+$/.test(q.replace(/\s/g, ''));
-      let prod = null;
-      const porSku = async (codigo) => {
-        const base = String(codigo || '').trim();
-        const variantes = [...new Set([base, base.toUpperCase(), base.toLowerCase()])];
-        for (const v of variantes) {                           // ?codigo= do Bling é case-sensitive → tenta as 3 caixas
-          const r = await blingGet(`/produtos?codigo=${encodeURIComponent(v)}&limite=1`);
-          const it = r.ok && r.data && r.data.data && r.data.data[0];
-          if (it && it.id) return await produtoDetalhe(it.id);
-        }
-        return null;
-      };
-      if (!pareceEan) prod = await porSku(q);                 // SKU é o caminho 100%
-      if (!prod && dig.length >= 8) {                          // EAN: cache reverso → API do Bling
-        const se = skuEanCache();
-        let achou = null;
-        for (const sku of Object.keys(se)) { if (String(se[sku]).replace(/\D/g, '') === dig) { achou = sku; break; } }
-        if (achou) prod = await porSku(achou);
-        if (!prod) {                                           // índice de EAN (cresce sozinho / indexação total) — rápido e confiável
-          const hit = lerIndiceEan()[dig];
-          if (hit && hit.id) prod = await produtoDetalhe(hit.id);
-        }
-        if (!prod) {                                           // último recurso: filtro do Bling (lento, pouco confiável)
-          for (const campo of ['gtin', 'gtinTributario', 'ean', 'codigoBarras']) {
-            const r = await blingGet(`/produtos?${campo}=${encodeURIComponent(q)}&limite=5`);
-            const itens = (r.ok && r.data && r.data.data) || [];
-            for (const it of itens) {
-              if (!it.id) continue;
-              const det = await produtoDetalhe(it.id);
-              if (det && getPossiveisGtins(det).some(e => String(e).replace(/\D/g, '') === dig)) { prod = det; break; }
-            }
-            if (prod) break;
-          }
-        }
-      }
-      if (!prod && pareceEan) prod = await porSku(q);          // às vezes o código É o número digitado
-      if (!prod) { json(res, 200, { ok: false, erro: 'nada encontrado p/ "' + q + '"' }); return true; }
-      salvarNoIndiceEan(prod);                                 // alimenta o índice — toda resolução entra no cache
-      const est = prod.estoque || {};
-      let localizacao = localizacaoDeProduto(prod);            // 1º: Bling (fonte da verdade)
-      if (!localizacao) {                                      // 2º: cache local (localização editada pelo painel)
-        const lc = locCache(); const sk = prod.codigo || '';
-        localizacao = lc[sk] || lc[sk.toUpperCase()] || lc[sk.toLowerCase()] || '';
-      }
-      json(res, 200, { ok: true, produto: {
-        sku: prod.codigo || '',
-        nome: prod.nome || '',
-        ean: getPossiveisGtins(prod)[0] || '',
-        estoque: (est.saldoVirtualTotal != null ? est.saldoVirtualTotal : (est.saldoVirtual != null ? est.saldoVirtual : null)),
-        localizacao: localizacao,
-        img: primeiraImagem(prod)
-      } });
-      return true;
-    }
-
-    // ─── debug: onde o Bling guarda a localização de um SKU ───
-    if (method === 'GET' && p === '/girassol-backup-offline/debug-produto') {
-      if (!ehAdmin((urlObj.searchParams && urlObj.searchParams.get('op')) || '')) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
-      const q = String(urlObj.searchParams.get('q') || '').trim();
-      let prod = null;
-      for (const v of [...new Set([q, q.toUpperCase(), q.toLowerCase()])]) {
-        const r = await blingGet(`/produtos?codigo=${encodeURIComponent(v)}&limite=1`);
-        const it = r.ok && r.data && r.data.data && r.data.data[0];
-        if (it && it.id) { prod = await produtoDetalhe(it.id); break; }
-      }
-      json(res, 200, {
-        ok: !!prod,
-        sku: prod && prod.codigo,
-        estoque: prod && prod.estoque,                 // <- onde deve estar localizacao
-        localizacaoRoot: prod && prod.localizacao,     // <- ou aqui
-        cacheLocal: locCache()[q] || locCache()[String(q).toUpperCase()] || null
-      });
-      return true;
-    }
-
-    // ─── indexar catálogo inteiro (1x; deixa todo EAN achável na hora) — só admin ───
-    if (method === 'GET' && p === '/girassol-backup-offline/indexar-catalogo') {
-      const op = String(urlObj.searchParams.get('op') || '');
-      if (!ehAdmin(op)) { json(res, 200, { ok: false, precisa_admin: true, erro: 'só admin pode indexar' }); return true; }
-      if (getIdxStatus().rodando) { json(res, 200, { ok: true, started: false, jaRodando: true, status: getIdxStatus() }); return true; }
-      indexarCatalogoCompleto();                       // dispara em background (não aguarda)
-      json(res, 200, { ok: true, started: true });
-      return true;
-    }
-    if (method === 'GET' && p === '/girassol-backup-offline/indexar-status') {
-      json(res, 200, { ok: true, status: getIdxStatus() });
-      return true;
-    }
-
-    // ─── QZ Tray: assinatura (mata o popup "Untrusted") ───
-    // serve o certificado público p/ o QZ confiar
-    if (method === 'GET' && p === '/girassol-backup-offline/qz-cert') {
-      res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
-      res.end(QZ_CERT || '');
-      return true;
-    }
-    // assina a requisição do QZ com a chave privada (RSA-SHA512)
-    if (method === 'GET' && p === '/girassol-backup-offline/qz-sign') {
-      let toSign = '';
-      try { toSign = (urlObj.searchParams && urlObj.searchParams.get('request')) || ''; } catch (e) {}
-      if (!toSign) { const m = /[?&]request=([^&]*)/.exec(urlObj.search || ''); toSign = m ? decodeURIComponent(m[1]) : ''; }
-      if (!QZ_PRIVKEY) { res.writeHead(200, { 'Content-Type': 'text/plain' }); res.end(''); return true; }
-      try {
-        const s = crypto.createSign('RSA-SHA512'); s.update(toSign);
-        res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
-        res.end(s.sign(QZ_PRIVKEY, 'base64'));
-      } catch (e) { res.writeHead(200, { 'Content-Type': 'text/plain' }); res.end(''); }
-      return true;
-    }
-
-    // ─── FASE 2: tela de bipagem ───
-    // serve a página
-    if (method === 'GET' && p === '/girassol-backup-offline/painel') {
-      try {
-        const htmlContent = fs.readFileSync(path.join(__dirname, 'painel.html'), 'utf8');
-        html(res, 200, htmlContent);
-      } catch (e) { json(res, 500, { erro: 'painel.html: ' + e.message }); }
-      return true;
-    }
-
-    // lista os pedidos PRONTOS (com etiqueta) + estado de conferido
-    if (method === 'GET' && p === '/girassol-backup-offline/lista') {
-      const man = manifest();
-      const conf = readJson(CONFERIDOS_FILE, {});
-      const rsv = lerReservas();
-      const ids = Object.keys(man);
-      // backfill cliente + nº NF p/ busca (lê snapshot só de quem ainda não tem; persiste 1x)
-      let mexeu = false;
-      for (const i of ids) {
-        const m = man[i];
-        if (m && (m.cliente === undefined || m.nf_numero === undefined || m.nf_emissao === undefined || m.nf_id === undefined)) {
-          const snap = readJson(path.join(CACHE_DIR, String(i), 'pedido.json'), null);
-          if (snap) { m.cliente = snap.cliente || ''; m.nf_numero = (snap.nf && snap.nf.numero) || null; m.nf_emissao = (snap.nf && snap.nf.dataEmissao) || null; m.nf_id = (snap.nf && snap.nf.id) || null; m.visto_em = snap.visto_em || snap.cacheado_em || null; m.numero_loja = m.numero_loja || snap.numero_loja || null; }
-          else { m.cliente = m.cliente || ''; m.nf_numero = m.nf_numero || null; m.nf_emissao = m.nf_emissao || null; m.nf_id = m.nf_id || null; }
-          mexeu = true;
-        }
-      }
-      if (mexeu) salvarManifest(man);
-      const prontos = ids
-        .filter(i => man[i].tem_etiqueta && !conf[i])                          // SÓ ATENDIDO ainda NÃO finalizado
-        .map(i => ({ id: i, ...man[i], reservado_por: (rsv[i] && rsv[i].user) || null, reservado_em: (rsv[i] && rsv[i].em) || null }))
-        .sort((a, b) => Number(a.numero || 0) - Number(b.numero || 0));        // mais ANTIGOS (menor nº) em cima
-      const semEtiq = ids
-        .filter(i => !man[i].tem_etiqueta && !conf[i])                         // ATENDIDO mas SEM etiqueta = problema
-        .map(i => ({ id: i, numero: man[i].numero, cliente: man[i].cliente || '', nf_numero: man[i].nf_numero || null, nf_emissao: man[i].nf_emissao || null, marketplace: man[i].marketplace || 'outro', numero_loja: man[i].numero_loja || null, visto_em: man[i].visto_em || null, nf_id: man[i].nf_id || null }))   // numero_loja p/ o ↗; visto_em p/ a data-hora; nf_id p/ o link da NF
-        .sort((a, b) => Number(a.numero || 0) - Number(b.numero || 0));
-      const hoje = new Date().toISOString().slice(0, 10);
-      const finalizadosHoje = Object.values(conf).filter(c => c && String(c.conferido_em || '').slice(0, 10) === hoje).length;
-      json(res, 200, {
-        versao: VERSAO,
-        ciclo_rodou_em: (getUltimoResumo() || {}).rodouEm || null,   // p/ o painel mostrar há quanto tempo o Bling foi consultado
-        prontos: prontos.length,
-        sem_etiqueta: semEtiq.length,
-        sem_etiqueta_pedidos: semEtiq,
-        finalizados_hoje: finalizadosHoje,
-        pedidos: prontos
-      });
-      return true;
-    }
-
-    // LISTA DE SEPARAÇÃO — agregado de itens a separar (do cache). ?mkt=ml|shopee|... ou vazio = todos
-    if (method === 'GET' && p === '/girassol-backup-offline/separacao') {
-      const mkt = urlObj.searchParams.get('mkt');
-      json(res, 200, montarSeparacao(mkt && mkt !== 'todos' ? mkt : null));
-      return true;
-    }
-    if (method === 'GET' && p === '/girassol-backup-offline/separacao-por-pedido') {
-      const mkt = urlObj.searchParams.get('mkt');
-      json(res, 200, montarSeparacaoPorPedido(mkt && mkt !== 'todos' ? mkt : null));
-      return true;
-    }
-
-    // HISTÓRICO — últimos pedidos finalizados (do conferidos.json), mais recentes primeiro
-    if (method === 'GET' && p === '/girassol-backup-offline/historico') {
-      const conf = readJson(CONFERIDOS_FILE, {});
-      // BUGFIX d45: o backfill de nf_emissao rodava DEPOIS do map — a resposta do 1º carregamento saía sem a hora
-      // da NF (só o 2º F5 pegava). Agora completa o conf ANTES de montar os itens.
-      let _mudouNF=false;
-      for (const [cid2,c3] of Object.entries(conf)) { if (c3 && (c3.nf_emissao === undefined || c3.nf_id === undefined)) { const sn2 = readJson(path.join(CACHE_DIR, String(cid2), 'pedido.json'), null); if (c3.nf_emissao === undefined) c3.nf_emissao = (sn2 && sn2.nf && sn2.nf.dataEmissao) || null; if (c3.nf_id === undefined) c3.nf_id = (sn2 && sn2.nf && sn2.nf.id) || null; _mudouNF=true; } }
-      if (_mudouNF) { try { writeJson(CONFERIDOS_FILE, conf); } catch(e){} }
-      const itens = Object.keys(conf).map(id => ({ id, ...conf[id] }))
-        .sort((a, b) => String(b.conferido_em || '').localeCompare(String(a.conferido_em || '')));
-      const reenvios = readJson(CONFERIDOS_FILE.replace('conferidos.json', 'reenvios.json'), {});
-      const reenvioDireto = String(process.env.CHECKOUT_REENVIO_DIRETO_EMPRESAS || '').toLowerCase().split(',').map(s => s.trim()).includes('girassol');
-      const vendasB = Object.values(readJson(path.join(CACHE_DIR, '_vendas_dia.json'), {}));
-      // CANCELADO PRONTO (27/07): o servidor decide, o navegador só desenha. Antes o dashboard tentava
-      // casar cada pedido bipado com a lista de vendas pra descobrir se estava cancelado — se o pedido
-      // não estivesse na lista (ou o nº não casasse), a marca nunca aparecia. Agora vai no payload.
-      try {
-        const _vdC = readJson(path.join(CACHE_DIR, '_vendas_dia.json'), {});
-        const _porNum = {}, _porId = {};
-        for (const v of Object.values(_vdC)) {
-          if (!v) continue;
-          const canc = (/cancel/i.test(String(v.situacao || '')) || !!v.cancelado_mkt) ? 1 : 0;
-          if (v.numero != null) _porNum[String(v.numero)] = { canc, sit: v.situacao || null };
-          if (v.id != null) _porId[String(v.id)] = { canc, sit: v.situacao || null };
-        }
-        for (const h of itens) {
-          const reg = _porNum[String(h.numero)] || _porId[String(h.id)] || null;
-          if (reg) { h.cancelado = reg.canc; if (!h.situacao_mkt && reg.sit) h.situacao_mkt = reg.sit; }
-          else h.cancelado = 0;
-        }
-        for (const v of vendasB) { v.cancelado = (/cancel/i.test(String(v.situacao || '')) || !!v.cancelado_mkt) ? 1 : 0; }
-      } catch (e) {}
-      // CUSTO PRONTO (27/07): o backend já tem o banco permanente de custos (_custos.json) — manda o custo
-      // junto de cada item, em vez de o dashboard consultar o Bling ao vivo (lento e falha quando o Bling satura).
-      try {
-        const _ccH = readJson(path.join(CACHE_DIR, '_custos.json'), {});
-        const _cuH = sk => { const c = _ccH[String(sk || '').trim()]; return (c && c.custo != null && isFinite(Number(c.custo))) ? Number(c.custo) : null; };
-        for (const h of itens) if (Array.isArray(h.itens)) h.itens = h.itens.map(it => Object.assign({}, it, { custo: _cuH(it.sku) }));
-        for (const v of vendasB) if (Array.isArray(v.it)) v.it = v.it.map(it => Object.assign({}, it, { custo: _cuH(it.sku) }));
-      } catch (e) {}
-      json(res, 200, { ok: true, total: Object.keys(conf).length, itens, reenvios, reenvio_direto: reenvioDireto, vendas_bling: vendasB });
-      return true;
-    }
-
-    // DEBUG — mostra onde o Bling guarda a localização de um SKU (confirma o campo)
-    // uso: /girassol-backup-offline/debug-loc/{SKU}
-    if (method === 'GET' && p.startsWith('/girassol-backup-offline/debug-loc/')) {
-      if (!ehAdmin((urlObj.searchParams && urlObj.searchParams.get('op')) || '')) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
-      const sku = decodeURIComponent(p.split('/').pop() || '');
-      const { ok, data } = await blingGet(`/produtos?codigo=${encodeURIComponent(sku)}&limite=1`);
-      const item = ok && data && data.data && data.data[0];
-      let det = null;
-      if (item && item.id) det = await produtoDetalhe(item.id);
-      json(res, 200, {
-        sku,
-        da_lista: { estoque: (item && item.estoque) || null, localizacao_raiz: (item && item.localizacao) || null },
-        do_detalhe: { estoque: (det && det.estoque) || null, localizacao_raiz: (det && det.localizacao) || null },
-        extraido: localizacaoDeProduto(det || item)
-      });
-      return true;
-    }
-
-    // detalhe do pedido cacheado (itens + EAN + NF)
-    if (method === 'GET' && p.startsWith('/girassol-backup-offline/pedido/')) {
-      const id = p.split('/').filter(Boolean).pop();
-      const ped = readJson(path.join(CACHE_DIR, String(id), 'pedido.json'), null);
-      if (!ped) { json(res, 404, { erro: 'pedido não cacheado' }); return true; }
-      const conf = readJson(CONFERIDOS_FILE, {});
-      ped.conferido = conf[id] || null;
-      // localização FRESCA: sobrescreve o loc congelado no snapshot pelo cache de localização ATUAL.
-      // assim, um produto recém-localizado em OUTRO pedido não volta a pedir localização aqui.
-      try {
-        const lc = locCache();
-        const fresco = (sku, atual) => {
-          const s = String(sku || '').trim();
-          if (s) {
-            if (lc[s] != null) return lc[s];
-            if (lc[s.toUpperCase()] != null) return lc[s.toUpperCase()];
-            if (lc[s.toLowerCase()] != null) return lc[s.toLowerCase()];
-          }
-          return atual || '';
-        };
-        (ped.itens || []).forEach(it => {
-          it.loc = fresco(it.sku, it.loc);
-          (it.componentes || []).forEach(c => { c.loc = fresco(c.sku, c.loc); });
-        });
-      } catch (e) {}
-      json(res, 200, ped);
-      return true;
-    }
-
-    // estoque AO VIVO dos itens de um pedido (saldoVirtualTotal do Bling).
-    // como a NF já baixou o estoque ANTES do pedido chegar no checkout, esse saldo JÁ está
-    // descontado dos pedidos na fila → é o estoque real restante (não desconta de novo).
-    // separado da abertura do pedido (a tela chama async) → não trava o checkout offline.
-    // Bling fora do ar = saldos nulos → a tela mostra "—".
-    if (method === 'GET' && p.startsWith('/girassol-backup-offline/estoque-pedido/')) {
-      const id = p.split('/').filter(Boolean).pop();
-      const ped = readJson(path.join(CACHE_DIR, String(id), 'pedido.json'), null);
-      if (!ped) { json(res, 404, { ok: false, erro: 'pedido não cacheado' }); return true; }
-      const skus = new Set();
-      (ped.itens || []).forEach(it => {
-        if (it.sku) skus.add(String(it.sku).trim());
-        (it.componentes || []).forEach(c => { if (c.sku) skus.add(String(c.sku).trim()); });
-      });
-      // EM CHECKOUT: quanto de cada SKU está comprometido na fila agora — reusa a agregação da separação
-      // (soma por SKU em todos os pedidos prontos, kits explodidos). É INFO, NÃO desconta do saldo Bling:
-      // o saldoVirtual já vem descontado da NF, então subtrair de novo seria conta errada.
-      const checkout = {};
-      try {
-        const sep = montarSeparacao();
-        const mapaSep = {};
-        (sep.linhas || []).forEach(l => { mapaSep[String(l.sku || '').trim()] = l.qtd; });
-        for (const sku of skus) { checkout[sku] = mapaSep[sku] || 0; }
-      } catch (e) {}
-      const porSku = async (codigo) => {                       // estoque AO VIVO — NÃO usa produtoDetalhe (tem cache do ciclo)
-        const base0 = String(codigo || '').trim();
-        if (!base0) return null;
-        const variantes = [...new Set([base0, base0.toUpperCase(), base0.toLowerCase()])];
-        for (const v of variantes) {
-          const r = await blingGet(`/produtos?codigo=${encodeURIComponent(v)}&limite=1`);
-          const it = r.ok && r.data && r.data.data && r.data.data[0];
-          if (it && it.id) {
-            // se a busca já trouxe o saldo, usa (1 call); senão, pega o detalhe AO VIVO (sem cache) → saldo sempre fresco
-            if (it.estoque && (it.estoque.saldoVirtualTotal != null || it.estoque.saldoVirtual != null)) return it;
-            const d = await blingGet(`/produtos/${it.id}`);
-            return (d.ok && d.data && d.data.data) ? d.data.data : null;
-          }
-        }
-        return null;
-      };
-      const saldos = {};
-      for (const sku of skus) {
-        if (!sku) continue;
-        try {
-          const prod = await porSku(sku);
-          const est = (prod && prod.estoque) || {};
-          saldos[sku] = (est.saldoVirtualTotal != null ? est.saldoVirtualTotal : (est.saldoVirtual != null ? est.saldoVirtual : null));
-        } catch (e) { saldos[sku] = null; }
-      }
-      json(res, 200, { ok: true, saldos: saldos, checkout: checkout });
-      return true;
-    }
-
-    // serve o ZPL cacheado (texto puro) p/ o QZ Tray imprimir
-    if (method === 'GET' && p.startsWith('/girassol-backup-offline/etiqueta/')) {
-      const id = p.split('/').filter(Boolean).pop();
-      try {
-        const zpl = fs.readFileSync(path.join(CACHE_DIR, String(id), `etiqueta.${ETIQ_FORMATO.toLowerCase()}`), 'utf8');
-        res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
-        res.end(zpl);
-      } catch (e) { json(res, 404, { erro: 'etiqueta não cacheada' }); }
-      return true;
-    }
-
-    // serve o DANFE (PDF) — usa o cache; se faltar, gera na hora pelo Bling
-    if (method === 'GET' && p.startsWith('/girassol-backup-offline/danfe/')) {
-      const id = p.split('/').filter(Boolean).pop();
-      const dir = path.join(CACHE_DIR, String(id));
-      let pdf = null;
-      try { pdf = fs.readFileSync(path.join(dir, 'danfe.pdf')); } catch (e) {}
-      if (!pdf) { // não cacheado → gera agora (precisa do Bling online)
-        const snap = readJson(path.join(dir, 'pedido.json'), null);
-        const nfId = snap && snap.nf && snap.nf.id;
-        if (nfId) { pdf = await baixarDanfe(nfId); if (pdf) { try { ensureDir(dir); fs.writeFileSync(path.join(dir, 'danfe.pdf'), pdf); } catch (e) {} } }
-      }
-      if (pdf) { res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': 'inline; filename="danfe.pdf"' }); res.end(pdf); }
-      else json(res, 404, { erro: 'DANFE indisponível (sem cache e Bling não respondeu)' });
-      return true;
-    }
-
-    // serve a ETIQUETA em PDF — usa o cache; se faltar, gera na hora pelo Bling
-    if (method === 'GET' && p.startsWith('/girassol-backup-offline/etiqueta-pdf/')) {
-      const id = p.split('/').filter(Boolean).pop();
-      const dir = path.join(CACHE_DIR, String(id));
-      let pdf = null;
-      try { pdf = fs.readFileSync(path.join(dir, 'etiqueta.pdf')); } catch (e) {}
-      if (!pdf) { // não cacheado → gera agora: PDF do Bling (ML) ou ZPL→PDF via Labelary (não-ML)
-        pdf = await etiquetaPdf(id, dir);
-        if (pdf) { try { ensureDir(dir); fs.writeFileSync(path.join(dir, 'etiqueta.pdf'), pdf); } catch (e) {} }
-      }
-      if (pdf) { res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': 'inline; filename="etiqueta.pdf"' }); res.end(pdf); }
-      else json(res, 404, { erro: 'etiqueta PDF indisponível' });
-      return true;
-    }
-
-    // IMPRESSÃO A4: etiqueta + NF (DANFE) MESCLADAS num PDF só — evita o navegador bloquear a 2ª aba
-    if (method === 'GET' && p.startsWith('/girassol-backup-offline/imprimir/')) {
-      const id = p.split('/').filter(Boolean).pop();
-      const dir = path.join(CACHE_DIR, String(id));
-      // etiqueta em PDF (ML cacheada; não-ML via Labelary on-demand)
-      let etqBuf = null;
-      try { etqBuf = fs.readFileSync(path.join(dir, 'etiqueta.pdf')); } catch (e) {}
-      if (!etqBuf) { etqBuf = await etiquetaPdf(id, dir); if (etqBuf) { try { ensureDir(dir); fs.writeFileSync(path.join(dir, 'etiqueta.pdf'), etqBuf); } catch (e) {} } }
-      // NF (DANFE) em PDF (cacheada ou baixa do Bling)
-      let nfBuf = null;
-      try { nfBuf = fs.readFileSync(path.join(dir, 'danfe.pdf')); } catch (e) {}
-      if (!nfBuf) {
-        const snap = readJson(path.join(dir, 'pedido.json'), null);
-        if (snap && snap.nf && snap.nf.id) { nfBuf = await baixarDanfe(snap.nf.id); if (nfBuf) { try { fs.writeFileSync(path.join(dir, 'danfe.pdf'), nfBuf); } catch (e) {} } }
-      }
-      const partes = [etqBuf, nfBuf].filter(Boolean);
-      if (!partes.length) { json(res, 404, { erro: 'sem etiqueta nem NF' }); return true; }
-      try {
-        const { PDFDocument, StandardFonts, rgb } = require('pdf-lib');
-        const out = await PDFDocument.create();
-        // MADEIRA multi-volume: o PDF da etiqueta tem N páginas (1 por caixa). Intercala
-        // [etiqueta i][DANFE carimbada "VOLUME i/N"] p/ cada caixa sair autossuficiente e numerada.
-        const _snapImp = readJson(path.join(dir, 'pedido.json'), null);
-        const _ehMadeira = !!(_snapImp && (_snapImp.etiqueta_mm || _snapImp.marketplace === 'madeira'));
-        let _etqDoc = null, _nVol = 1;
-        if (etqBuf) { try { _etqDoc = await PDFDocument.load(etqBuf); _nVol = _etqDoc.getPageCount() || 1; } catch (e) {} }
-
-        if (_ehMadeira && _etqDoc && nfBuf && _nVol > 1) {
-          const fonte = await out.embedFont(StandardFonts.HelveticaBold);
-          const danfeDoc = await PDFDocument.load(nfBuf);
-          const danfeIdx = danfeDoc.getPageIndices();
-          for (let i = 0; i < _nVol; i++) {
-            try { const [pgEtq] = await out.copyPages(_etqDoc, [i]); out.addPage(pgEtq); } catch (e) {}  // etiqueta da caixa i
-            try {
-              const copias = await out.copyPages(danfeDoc, danfeIdx);                                    // cópia fresca da NF p/ esta caixa
-              copias.forEach((pg, k) => {
-                out.addPage(pg);
-                if (k === 0) {                                                                           // carimba só a 1ª página da DANFE
-                  const { width, height } = pg.getSize();
-                  const txt = 'VOLUME ' + (i + 1) + '/' + _nVol;
-                  const sz = 15, padX = 9, boxH = 23;
-                  const tw = fonte.widthOfTextAtSize(txt, sz);
-                  const bx = width - tw - padX * 2 - 12, by = height - boxH - 12;
-                  pg.drawRectangle({ x: bx, y: by, width: tw + padX * 2, height: boxH, color: rgb(0.05, 0.05, 0.05) });
-                  pg.drawText(txt, { x: bx + padX, y: by + 6, size: sz, font: fonte, color: rgb(1, 1, 1) });
-                }
-              });
-            } catch (e) {}
-          }
-        } else {
-          for (const buf of partes) {                                                                   // normal: [etiqueta(s)...][DANFE]
-            try {
-              const src = await PDFDocument.load(buf);
-              const pgs = await out.copyPages(src, src.getPageIndices());
-              pgs.forEach(pg => out.addPage(pg));
-            } catch (e) { /* pula PDF inválido, segue com os outros */ }
-          }
-        }
-        const merged = Buffer.from(await out.save());
-        res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': 'inline; filename="etiqueta-nf.pdf"' });
-        res.end(merged);
-      } catch (e) { // pdf-lib indisponível → fallback: devolve só a etiqueta
-        if (etqBuf) { res.writeHead(200, { 'Content-Type': 'application/pdf' }); res.end(etqBuf); }
-        else json(res, 500, { erro: 'merge falhou: ' + e.message });
-      }
-      return true;
-    }
-
-    // LOGIN: lista os NOMES dos operadores (sem senha) — o painel decide se mostra a tela de login
-    if (method === 'GET' && p === '/girassol-backup-offline/operadores') {
-      const nomes = Object.keys(lerOperadores());
-      json(res, 200, { operadores: nomes, login_ativo: nomes.length > 0, admins: lerAdmins() });
-      return true;
-    }
-
-    // LOGIN: valida nome + senha contra a env GIRABKP_OPERADORES
-    if (method === 'POST' && p === '/girassol-backup-offline/login') {
-      const body = await readBody(req);
-      const nome = String(body.nome || '').trim();
-      const senha = String(body.senha || '').trim();
-      const ops = lerOperadores();
-      if (ops[nome] !== undefined && String(ops[nome]) === senha) {
-        res.setHeader('Set-Cookie', SESS_COOKIE + '=' + assinarSessao(nome) + '; Path=/girassol-backup-offline; HttpOnly; SameSite=Lax; Max-Age=' + Math.floor(SESS_TTL/1000));
-        // LOGIN DISPARA O BLING: se a última consulta foi há mais de 3 min, roda em background — assim
-        // ninguém abre a lista com etiqueta velha. Vários logins seguidos = 1 ciclo só (trava de intervalo).
-        let _cicloDisparado = false;
-        try {
-          const _ur = getUltimoResumo() || {};
-          const _idade = _ur.rodouEm ? (Date.now() - new Date(_ur.rodouEm).getTime()) : Infinity;
-          if (_idade > 3 * 60 * 1000) {
-            _cicloDisparado = true;
-            console.log('[CICLO-LOGIN] ' + nome + ' entrou \u2014 \u00faltima consulta ao Bling h\u00e1 ' + (isFinite(_idade) ? Math.round(_idade / 60000) + ' min' : 'nunca') + ' \u2192 ciclo em background');
-            rodarCiclo('login').catch(() => {});
-          }
-        } catch (e) {}
-        json(res, 200, { ok: true, nome, ciclo_disparado: _cicloDisparado });
-      } else {
-        json(res, 200, { ok: false, erro: 'nome ou senha inválidos' });
-      }
-      return true;
-    }
-
-    // RESERVA um pedido p/ um operador (presença entre PCs — quadradinho colorido tipo Bling)
-    if (method === 'POST' && p === '/girassol-backup-offline/reservar') {
-      const body = await readBody(req);
-      const id = String(body.id || '');
-      const user = String(body.user || '').trim();
-      if (!id) { json(res, 400, { erro: 'id obrigatório' }); return true; }
-      const r = lerReservas();
-      const dono = r[id] && r[id].user;
-      if (dono && user && dono !== user && !body.forcar) {   // já tem OUTRO operador nesse pedido
-        json(res, 200, { ok: false, reservado_por: dono, em: r[id].em });
-        return true;
-      }
-      r[id] = { user, em: new Date().toISOString() };
-      writeJson(RESERVAS_FILE, r);
-      json(res, 200, { ok: true });
-      return true;
-    }
-
-    // LIBERA a reserva (ao voltar pra lista / finalizar)
-    if (method === 'POST' && p === '/girassol-backup-offline/liberar') {
-      const body = await readBody(req);
-      const id = String(body.id || '');
-      const r = lerReservas();
-      if (r[id]) { delete r[id]; writeJson(RESERVAS_FILE, r); }
-      json(res, 200, { ok: true });
-      return true;
-    }
-
-    // REABRIR um pedido finalizado por engano: tira da fila de conferidos → volta pra lista.
-    // Aceita o bling_id OU o número visível. Se já tinha ido pra VERIFICADO, devolve pra ATENDIDO no Bling.
-    if ((method === 'GET' || method === 'POST') && p.startsWith('/girassol-backup-offline/reabrir/')) {
-      let op = '';
-      try { op = (urlObj.searchParams && urlObj.searchParams.get('op')) || ''; } catch (e) {}
-      if (!op && method === 'POST') { try { const b = await readBody(req); op = String(b.op || ''); } catch (e) {} }
-      if (!ehAdmin(op)) { json(res, 200, { ok: false, erro: 'apenas o admin pode reabrir/reverter pedidos', precisa_admin: true }); return true; }
-      const arg = decodeURIComponent(p.split('/').pop() || '');
-      const conf = readJson(CONFERIDOS_FILE, {});
-      const id = conf[arg] ? arg : (Object.keys(conf).find(k => String(conf[k] && conf[k].numero) === String(arg)) || null);
-      if (!id) { json(res, 200, { ok: false, erro: 'pedido não está na fila de finalizados', arg }); return true; }
-      const eraSync = !!(conf[id] && conf[id].sincronizado);
-      delete conf[id];
-      writeJson(CONFERIDOS_FILE, conf);
-      let revertido = false;
-      if (eraSync) { const mv = await moverSituacao(id, SIT_ATENDIDO); revertido = !!(mv && mv.ok); }   // VERIFICADO → volta pra ATENDIDO
-      const rsv = lerReservas(); if (rsv[id]) { delete rsv[id]; writeJson(RESERVAS_FILE, rsv); }
-      rodarCiclo('reabrir').catch(() => {});   // re-cacheia em background → reaparece na lista se estiver ATENDIDO
-      console.log(`[GIRABKP] reaberto ${id} (era sync=${eraSync}, revertido p/ ATENDIDO=${revertido})`);
-      json(res, 200, { ok: true, id, removido_da_fila: true, revertido_p_atendido: revertido });
-      return true;
-    }
-
-    // marca pedido como conferido offline (entra na fila p/ sync na Fase 3)
-    if (method === 'POST' && p === '/girassol-backup-offline/conferido') {
-      const body = await readBody(req);
-      const id = String(body.id || '');
-      if (!id) { json(res, 400, { erro: 'id obrigatório' }); return true; }
-      const snapC = readJson(path.join(CACHE_DIR, String(id), 'pedido.json'), null);
-      const conf = readJson(CONFERIDOS_FILE, {});
-      if (conf[id]) {   // JÁ finalizado por alguém → não refaz, não reimprime, não re-sincroniza
-        json(res, 200, { ok: false, ja_finalizado: true, por: conf[id].user || '', em: conf[id].conferido_em });
-        return true;
-      }
-      conf[id] = {
-        user: body.user || '',
-        conferido_em: new Date().toISOString(),
-        sincronizado: false,
-        numero: snapC ? snapC.numero : (body.numero || null),
-        cliente: snapC ? (snapC.cliente || '') : '',
-        marketplace: snapC ? (snapC.marketplace || null) : null,
-        flex: !!(snapC && snapC.flex),
-        servico: snapC ? (snapC.servico || '') : '',
-        nf_numero: (snapC && snapC.nf && snapC.nf.numero) || null,
-        nf_id: (snapC && snapC.nf && snapC.nf.id) || null,   // ID interno da NF — link direto pro Bling
-        nf_emissao: (snapC && snapC.nf && snapC.nf.dataEmissao) || null,   // b11: hora da NF já entra na bipagem (dashboard ordena por ela)
-        valor: (snapC && snapC.total != null) ? Number(snapC.total) : null,   // faturamento (total do pedido)
-        uf: (snapC && snapC.uf) || null,
-        vprod_nf: (function(){ try {   // Σ itens da NOTA (fonte fiscal) → produtos EXATO; frete = valor − vprod_nf
-          const ds = readJson(path.join(CACHE_DIR, String(id), 'nf-simp.json'), null);
-          if (ds && Array.isArray(ds.itens) && ds.itens.length) { const s2 = ds.itens.reduce((a,i)=>a+(Number(i.valorTotal)||0),0); return isFinite(s2)&&s2>0 ? Math.round(s2*100)/100 : null; }
-        } catch (e) {} return null; })(),
-        municipio: (snapC && snapC.municipio) || null,
-        numero_loja: (snapC && snapC.numero_loja) || null,
-        venda_dia: (snapC && snapC.venda_dia) || null,
-        taxa_mkt: (snapC && snapC.taxa_mkt) || null,
-        frete_mkt: (snapC && snapC.frete_mkt) || null,
-        itens: snapC ? (snapC.itens || []).map(it => ({ sku: it.sku || '', descricao: String(it.descricao || '').slice(0, 90), qtd: it.qtd || 1, valor_unit: (it.valor_unit != null ? it.valor_unit : null), valor_total: (it.valor_total != null ? it.valor_total : null) })) : []
-      };
-      writeJson(CONFERIDOS_FILE, conf);            // grava na fila primeiro — nunca perde
-      arquivarFinalizado(id);                       // arquiva etiqueta + meta p/ reimprimir/reenviar depois (Parte A)
-      { const rsvF = lerReservas(); if (rsvF[id]) { delete rsvF[id]; writeJson(RESERVAS_FILE, rsvF); } }   // finalizou → solta a reserva
-
-      // ESPELHO EM TEMPO REAL: se o sync tá ligado e o Bling responde, move p/ VERIFICADO já.
-      // Se o Bling estiver fora, fica na fila e o cron sincroniza quando ele voltar.
-      let sincronizado = false, blingOffline = false;
-      if (SYNC_ON) {
-        const r = await moverSituacao(id, SIT_VERIFICADO);
-        if (r.ok) {
-          conf[id].sincronizado = true;
-          conf[id].sincronizado_em = new Date().toISOString();
-          delete conf[id].sync_erro;
-          sincronizado = true;
-          console.log(`[GIRABKP] conferido ${id} → ${SIT_VERIFICADO} (espelho na hora) OK`);
-        } else {
-          conf[id].sync_erro = String(r.status || 'err');
-          blingOffline = true;
-          console.log(`[GIRABKP] conferido ${id} ficou na fila (bling ${r.status}) — sincroniza depois`);
-        }
-        writeJson(CONFERIDOS_FILE, conf);
-      }
-      json(res, 200, { ok: true, id, sincronizado, bling_offline: blingOffline });
-      return true;
-    }
-
-    // FASE 3 — força o sync da fila de conferidos → VERIFICADO (24). Botão "Sincronizar" / manual.
-    if ((method === 'POST' || method === 'GET') && p === '/girassol-backup-offline/sincronizar') {
-      const r = await sincronizarConferidos();
-      json(res, 200, { ok: true, ...r });
-      return true;
-    }
-
-    // DEBUG — testa mover UM pedido p/ VERIFICADO (ou outro id via ?situacao=). Mostra resposta crua do Bling.
-    // uso: /girassol-backup-offline/debug-mover/{idDoPedido}
-    if (method === 'GET' && p.startsWith('/girassol-backup-offline/debug-mover/')) {
-      if (!ehAdmin((urlObj.searchParams && urlObj.searchParams.get('op')) || '')) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
-      const id = p.split('/').pop();
-      const sit = Number(urlObj.searchParams.get('situacao') || SIT_VERIFICADO);
-      const r = await moverSituacao(id, sit);
-      json(res, 200, { pedido: id, situacao_destino: sit, resultado: r });
-      return true;
-    }
-
-    if (method === 'GET' && p === '/girassol-backup-offline/status') {
-      const man = manifest();
-      const ids = Object.keys(man);
-      const conf = readJson(CONFERIDOS_FILE, {});
-      const confIds = Object.keys(conf);
-      json(res, 200, {
-        versao: VERSAO,
-        resumo: getUltimoResumo(),
-        cacheDir: CACHE_DIR,
-        situacaoAtendido: SIT_ATENDIDO,
-        situacaoVerificado: SIT_VERIFICADO,
-        formato: ETIQ_FORMATO,
-        total: ids.length,
-        comEtiqueta: ids.filter(i => man[i].tem_etiqueta).length,
-        semEtiqueta: ids.filter(i => !man[i].tem_etiqueta).length,
-        sync: { ...getUltimoSync(), ligado: SYNC_ON, conferidos: confIds.length, pendentes: confIds.filter(i => !conf[i].sincronizado).length },
-        pedidos: ids.map(i => ({ id: i, ...man[i] }))
-      });
-      return true;
-    }
-
-    // SAÚDE: para monitor externo (UptimeRobot). 200 = tudo OK · 503 = algo quebrou (dispara o alerta).
-    if ((method === 'GET' || method === 'HEAD') && p === '/girassol-backup-offline/saude') {
-      const agora = Date.now();
-      const conf = readJson(CONFERIDOS_FILE, {});
-      const pendentes = Object.keys(conf).filter(i => conf[i] && !conf[i].sincronizado);
-      const rodouEm = getUltimoResumo().rodouEm ? new Date(getUltimoResumo().rodouEm).getTime() : 0;
-      const minDesdeCiclo = rodouEm ? Math.round((agora - rodouEm) / 60000) : null;
-      const problemas = [], avisos = [];
-      // 1) ciclo parado — só vale DENTRO da janela ativa do cron (evita alarme falso de madrugada)
-      if (!rodouEm) avisos.push('ainda não rodou o 1º ciclo (boot recente?)');
-      else if (cronDeveriaTerRodado() && minDesdeCiclo > 30) problemas.push('o ciclo não roda há ' + minDesdeCiclo + ' min no horário ativo (esperado ~10 min)');
-      // 2) Bling inalcançável no último ciclo (auth ou conexão)
-      if (getUltimoResumo().blingOk === false) problemas.push('o último ciclo NÃO conseguiu falar com o Bling (auth/conexão)');
-      // 3) sync-back falhando
-      if (SYNC_ON && getUltimoSync() && getUltimoSync().falhas > 0) problemas.push('o sync pro Bling falhou em ' + getUltimoSync().falhas + ' pedido(s) no último ciclo');
-      // avisos (não derrubam o status, só informam)
-      if (!SYNC_ON) avisos.push('GIRABKP_SYNC_ON desligado — finalizados não voltam pro Bling sozinhos');
-      if (pendentes.length > 0) avisos.push(pendentes.length + ' finalizado(s) ainda não sincronizado(s)');
-      const ok = problemas.length === 0;
-      const code = ok ? 200 : 503;
-      // UptimeRobot (plano grátis) checa via HEAD — responde só o status, sem corpo. GET segue com o JSON completo.
-      if (method === 'HEAD') { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(); return true; }
-      json(res, code, {
-        ok,
-        versao: VERSAO,
-        em: new Date().toISOString(),
-        ultimo_ciclo: getUltimoResumo().rodouEm,
-        min_desde_ciclo: minDesdeCiclo,
-        bling_ok: getUltimoResumo().blingOk !== false,
-        pedidos_no_cache: Object.keys(manifest()).length,
-        sync: { ligado: SYNC_ON, pendentes: pendentes.length, ...(getUltimoSync() || {}) },
-        problemas,
-        avisos
-      });
-      return true;
-    }
-
-    // BUSCAR PEDIDO por número (ou ID) em QUALQUER status — ao vivo no Bling.
-    // Pra achar a NF de um pedido que não passou pelo Checkout Offline.
-    if (method === 'GET' && p === '/girassol-backup-offline/buscar-pedido') {
-      const q = String(urlObj.searchParams.get('q') || '').trim();
-      if (!q) { json(res, 400, { ok: false, erro: 'use ?q=NUMERO' }); return true; }
-      let ids = [], via = null;
-      // 1) tenta filtrar por número — e confiro no código (caso o Bling ignore o filtro, igual no /nfe)
-      const r1 = await blingGet(`/pedidos/vendas?numero=${encodeURIComponent(q)}&limite=20`);
-      if (r1.ok && r1.data && Array.isArray(r1.data.data)) {
-        const match = r1.data.data.filter(p => String(p.numero) === String(q));
-        if (match.length) { ids = match.map(p => p.id); via = 'numero'; }
-      }
-      // 2) fallback: trata q como ID interno do Bling
-      if (!ids.length) {
-        const r2 = await blingGet(`/pedidos/vendas/${encodeURIComponent(q)}`);
-        if (r2.ok && r2.data && r2.data.data && String(r2.data.data.id) === String(q)) { ids = [r2.data.data.id]; via = 'id'; }
-      }
-      const pedidos = [];
-      for (const id of ids.slice(0, 10)) {
-        const det = await detalhePedido(id);
-        if (!det) continue;
-        const nf = await nfDoPedido(id);
-        pedidos.push({
-          id: det.id,
-          numero: det.numero || null,
-          data: det.data || null,
-          situacao_id: (det.situacao && (det.situacao.id || det.situacao)) || null,
-          cliente: (det.contato && det.contato.nome) || '',
-          total: det.total || null,
-          loja_id: (det.loja && det.loja.id) || null,
-          itens: Array.isArray(det.itens) ? det.itens.map(it => ({ descricao: it.descricao || (it.produto && it.produto.nome) || '', sku: it.codigo || (it.produto && it.produto.codigo) || '', qtd: it.quantidade || 0 })) : [],
-          nf: nf ? { id: nf.id, numero: nf.numero, chave: nf.chave } : null
-        });
-        await sleep(PAUSA_MS);
-      }
-      // também busca NOTAS FISCAIS por número (a NF tem numeração própria, diferente do pedido)
-      const notas = [];
-      const rnf = await blingGet(`/nfe?numero=${encodeURIComponent(q)}&limite=10`);
-      if (rnf.ok && rnf.data && Array.isArray(rnf.data.data)) {
-        for (const n of rnf.data.data.filter(x => String(x.numero) === String(q)).slice(0, 10)) {
-          notas.push({
-            id: n.id,
-            numero: n.numero,
-            chave: n.chaveAcesso || n.chave || null,
-            cliente: (n.contato && n.contato.nome) || '',
-            situacao_id: (n.situacao && (n.situacao.id || n.situacao)) || null,
-            data: n.dataEmissao || n.data || null,
-            valor: n.valorNota || n.valor || null
-          });
-        }
-      }
-      json(res, 200, { ok: pedidos.length > 0 || notas.length > 0, via, q, pedidos, notas });
-      return true;
-    }
-    // baixa o DANFE (PDF) de QUALQUER pedido ao vivo (acha a NF na hora) — não precisa estar no cache
-    if (method === 'GET' && p.startsWith('/girassol-backup-offline/nf-danfe-live/')) {
-      const id = p.split('/').filter(Boolean).pop();
-      const nf = await nfDoPedido(id);
-      const pdf = nf && nf.id ? await baixarDanfe(nf.id) : null;
-      if (pdf) { res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': `inline; filename="danfe-${id}.pdf"` }); res.end(pdf); }
-      else json(res, 404, { ok: false, erro: 'DANFE indisponível (pedido sem NF ou Bling não respondeu)', nf: nf || null });
-      return true;
-    }
-    // baixa o DANFE (PDF) direto pelo ID da NOTA (pra resultados de busca por NF)
-    if (method === 'GET' && p.startsWith('/girassol-backup-offline/danfe-nf/')) {
-      const nfId = p.split('/').filter(Boolean).pop();
-      const pdf = await baixarDanfe(nfId);
-      if (pdf) { res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': `inline; filename="danfe-nf-${nfId}.pdf"` }); res.end(pdf); }
-      else json(res, 404, { ok: false, erro: 'DANFE indisponível (NF sem PDF ou Bling não respondeu)' });
-      return true;
-    }
-    // baixa o XML da NOTA pelo ID
-    if (method === 'GET' && p.startsWith('/girassol-backup-offline/xml-nf/')) {
-      const nfId = p.split('/').filter(Boolean).pop();
-      const det = await blingGet(`/nfe/${nfId}`);
-      const nf = det.data && det.data.data;
-      const xml = nf ? await baixarXmlNF(nf) : '';
-      if (xml) { res.writeHead(200, { 'Content-Type': 'application/xml; charset=utf-8', 'Content-Disposition': `attachment; filename="nf-${(nf && nf.numero) || nfId}.xml"` }); res.end(xml); }
-      else json(res, 404, { ok: false, erro: 'XML indisponível' });
-      return true;
-    }
-    // ARQUIVO: info de um pedido finalizado (existe arquivo? meta)
-    // DIAGNÓSTICO de etiqueta — mostra o que o Bling devolve (PDF e ZPL) p/ um pedido + o que tá no cache
-    // TESTE de conversão ZPL→PDF (Labelary) — compara o ZPL do cache vs o fresco do Bling
-    if (method === 'GET' && p.startsWith('/girassol-backup-offline/arq-info/')) {
-      const id = p.split('/').filter(Boolean).pop();
-      const ped = readJson(path.join(ARQUIVO_DIR, String(id), 'pedido.json'), null);
-      const etqPath = path.join(ARQUIVO_DIR, String(id), `etiqueta.${ETIQ_FORMATO.toLowerCase()}`);
-      json(res, 200, { id, arquivado: !!ped, tem_etiqueta: fs.existsSync(etqPath), numero: ped && ped.numero, cliente: ped && ped.cliente, nf: ped && ped.nf });
-      return true;
-    }
-    // ARQUIVO: etiqueta arquivada → PDF (converte ZPL se preciso)
-    if (method === 'GET' && p.startsWith('/girassol-backup-offline/arq-etiqueta-pdf/')) {
-      const id = p.split('/').filter(Boolean).pop();
-      let pdf = null;
-      try { pdf = await etiquetaPdf(id, path.join(ARQUIVO_DIR, String(id))); } catch (e) {}
-      if (pdf) { res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': `inline; filename="etiqueta-${id}.pdf"` }); res.end(pdf); }
-      else json(res, 404, { ok: false, erro: 'etiqueta não disponível (pedido finalizado antes desse recurso, ou ML postado)' });
-      return true;
-    }
-    // ARQUIVO: DANFE de um pedido arquivado → gera na hora pelo nf.id guardado
-    if (method === 'GET' && p.startsWith('/girassol-backup-offline/arq-danfe/')) {
-      const id = p.split('/').filter(Boolean).pop();
-      const ped = readJson(path.join(ARQUIVO_DIR, String(id), 'pedido.json'), null);
-      const nfId = ped && ped.nf && ped.nf.id;
-      const pdf = nfId ? await baixarDanfe(nfId) : null;
-      if (pdf) { res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': `inline; filename="danfe-${id}.pdf"` }); res.end(pdf); }
-      else json(res, 404, { ok: false, erro: 'DANFE indisponível (sem nf.id arquivado ou Bling fora)' });
-      return true;
-    }
-    // ENVIAR pro estoque: etiqueta + DANFE por email (Parte B)
-    // ── REENVIO DE DOCS: o estoquista SINALIZA (etiqueta rasgou / NF com problema) e o ADMIN decide enviar ──
-    // Futuro: env CHECKOUT_REENVIO_DIRETO_EMPRESAS ("girassol,good") → nas empresas listadas o pedido do
-    // estoquista já dispara o e-mail direto, sem esperar o admin. Sem a env (padrão) = só sinaliza.
-    if (method === 'POST' && p.startsWith('/girassol-backup-offline/pedir-reenvio/')) {
-      let op = '';
-      try { const b = await readBody(req); op = String(b.op || ''); } catch (e) {}
-      if (!op) { json(res, 200, { ok: false, erro: 'identifique o operador (faça login no painel)' }); return true; }
-      const id = decodeURIComponent(p.split('/').filter(Boolean).pop() || '');
-      const confR = readJson(CONFERIDOS_FILE, {});
-      const c = confR[id] || {};
-      const direto = String(process.env.CHECKOUT_REENVIO_DIRETO_EMPRESAS || '').toLowerCase().split(',').map(s => s.trim()).includes('girassol');
-      if (direto) {
-        const r = await enviarEmailDocs(id, op);
-        if (r.ok && confR[id]) {   // flag visível no histórico: quem reenviou e quando
-          confR[id].reenvios = (confR[id].reenvios || 0) + 1;
-          confR[id].ultimo_reenvio = { por: op, em: new Date().toISOString() };
-          writeJson(CONFERIDOS_FILE, confR);
-        }
-        console.log(`[GIRABKP] 📨 reenvio DIRETO pedido ${c.numero || id} por ${op} → ${r.ok ? 'enviado' : 'FALHA: ' + r.erro}`);
-        json(res, 200, { ...r, direto: true });
-        return true;
-      }
-      const REENVIOS_FILE = CONFERIDOS_FILE.replace('conferidos.json', 'reenvios.json');
-      const ree = readJson(REENVIOS_FILE, {});
-      ree[id] = { numero: c.numero || null, cliente: c.cliente || '', por: op, em: new Date().toISOString() };
-      writeJson(REENVIOS_FILE, ree);
-      console.log(`[GIRABKP] 📨 REENVIO SOLICITADO — pedido ${c.numero || id} por ${op} (admin envia pelo Histórico)`);
-      json(res, 200, { ok: true, solicitado: true });
-      return true;
-    }
-    // admin resolve a solicitação: {enviar:true} manda o e-mail e baixa; {enviar:false} só descarta
-    if (method === 'POST' && p.startsWith('/girassol-backup-offline/reenvio-resolver/')) {
-      let op = '', enviar = false;
-      try { const b = await readBody(req); op = String(b.op || ''); enviar = !!b.enviar; } catch (e) {}
-      if (!ehAdmin(op)) { json(res, 200, { ok: false, erro: 'apenas o admin' }); return true; }
-      const id = decodeURIComponent(p.split('/').filter(Boolean).pop() || '');
-      const REENVIOS_FILE = CONFERIDOS_FILE.replace('conferidos.json', 'reenvios.json');
-      let r = { ok: true, enviado: false };
-      if (enviar) { const e = await enviarEmailDocs(id, op); r = { ...e, enviado: !!e.ok }; if (!e.ok) { json(res, 200, r); return true; } }
-      if (enviar) { const cE = readJson(CONFERIDOS_FILE, {}); if (cE[id]) { cE[id].reenvios = (cE[id].reenvios || 0) + 1; cE[id].ultimo_reenvio = { por: op, em: new Date().toISOString() }; writeJson(CONFERIDOS_FILE, cE); } }
-      const ree = readJson(REENVIOS_FILE, {});
-      delete ree[id]; writeJson(REENVIOS_FILE, ree);
-      console.log(`[GIRABKP] 📨 reenvio ${id} ${enviar ? 'ENVIADO' : 'descartado'} por ${op}`);
-      json(res, 200, r);
-      return true;
-    }
-    if (method === 'POST' && p.startsWith('/girassol-backup-offline/enviar-docs/')) {
-      let op = '';
-      try { op = (urlObj.searchParams && urlObj.searchParams.get('op')) || ''; } catch (e) {}
-      if (!op) { try { const b = await readBody(req); op = String(b.op || ''); } catch (e) {} }
-      if (!ehAdmin(op)) { json(res, 200, { ok: false, erro: 'apenas o admin pode enviar documentos', precisa_admin: true }); return true; }
-      const id = decodeURIComponent(p.split('/').filter(Boolean).pop() || '');
-      const r = await enviarEmailDocs(id, op);
-      if (r.ok) { const cD = readJson(CONFERIDOS_FILE, {}); if (cD[id]) { cD[id].reenvios = (cD[id].reenvios || 0) + 1; cD[id].ultimo_reenvio = { por: op, em: new Date().toISOString() }; writeJson(CONFERIDOS_FILE, cD); } }
-      console.log(`[GIRABKP] enviar-docs ${id} (por ${op}) → ${r.ok ? 'OK (' + r.anexos + ' anexos)' : 'FALHA: ' + r.erro}`);
-      json(res, 200, r);
-      return true;
-    }
-    // DEBUG: por que a NF do pedido não veio? mostra a resposta crua do link pedido→nota + campos do pedido
-    if (method === 'GET' && p.startsWith('/girassol-backup-offline/debug-nfped/')) {
-      if (!ehAdmin((urlObj.searchParams && urlObj.searchParams.get('op')) || '')) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
-      const id = p.split('/').filter(Boolean).pop();
-      const out = { id };
-      const r = await blingGet(`/pedidos/vendas/${id}/nfe`); await sleep(PAUSA_MS);
-      out.endpoint_pedido_nfe = { ok: r.ok, status: r.status, data: r.data };
-      const det = await detalhePedido(id);
-      out.pedido_keys = det ? Object.keys(det) : null;
-      out.pedido_situacao = det ? det.situacao : null;
-      out.pedido_campos_nf = det ? { notaFiscal: det.notaFiscal, nfe: det.nfe, notasFiscais: det.notasFiscais, idNotaFiscal: det.idNotaFiscal } : null;
-      json(res, 200, out);
-      return true;
-    }
-    // DEBUG: mostra a resposta crua do Bling pra entender como buscar pedido (filtro funciona? 116856 é numero ou numeroLoja?)
-    // DEBUG 2: testa buscar NF por número e contato por nome (pra saber quais buscas a API permite)
-
-    // BACKUP: baixa um JSON com o estado que NÃO vem do Bling (fila + localizações + índice + log). Só admin.
-    if (method === 'GET' && p === '/girassol-backup-offline/backup') {
-      const op = String(urlObj.searchParams.get('op') || '');
-      if (!ehAdmin(op)) { json(res, 200, { ok: false, precisa_admin: true, erro: 'só admin — use ?op=SEUNOME' }); return true; }
-      const dump = {
-        versao: VERSAO,
-        gerado_em: new Date().toISOString(),
-        conferidos: readJson(CONFERIDOS_FILE, {}),
-        localizacoes: readJson(LOC_FILE, {}),
-        indice_ean: readJson(EAN_INDEX_FILE, {}),
-        localizacoes_log: readJson(LOC_LOG_FILE, [])
-      };
-      const nome = 'backup-good-offline-' + new Date().toISOString().slice(0, 10) + '.json';
-      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Disposition': 'attachment; filename="' + nome + '"' });
-      res.end(JSON.stringify(dump, null, 2));
-      return true;
-    }
-    // RESTAURAR (página): cola o JSON do backup e restaura. Só admin (?op=SEUNOME).
-    if (method === 'GET' && p === '/girassol-backup-offline/restaurar') {
-      const op = String(urlObj.searchParams.get('op') || '');
-      if (!ehAdmin(op)) { html(res, 200, '<meta charset=utf-8><p style="font-family:Arial;margin:40px">Acesso só pra admin. Use <b>?op=SEUNOME</b> no fim da URL.</p>'); return true; }
-      const pg = '<!doctype html><meta charset=utf-8><title>Restaurar backup</title>' +
-        '<style>body{font-family:Arial;max-width:720px;margin:40px auto;padding:0 16px;color:#111}textarea{width:100%;height:300px;font-family:monospace;font-size:12px;box-sizing:border-box}button{padding:10px 20px;font-size:15px;font-weight:700;background:#f59e0b;border:0;border-radius:8px;cursor:pointer;margin-top:12px}#r{margin-top:14px;font-weight:700}</style>' +
-        '<h2>Restaurar backup — Checkout Offline</h2>' +
-        '<p>Cola o conteúdo do arquivo de backup (JSON) e clica em Restaurar. <b style="color:#c00">Isso sobrescreve o estado atual.</b></p>' +
-        '<textarea id=j placeholder="cola aqui o JSON do backup"></textarea>' +
-        '<button onclick="rest()">Restaurar</button><div id=r></div>' +
-        '<script>async function rest(){var el=document.getElementById("r");var o;try{o=JSON.parse(document.getElementById("j").value)}catch(e){el.textContent="JSON inválido: "+e.message;return}o.op=' + JSON.stringify(op) + ';try{var x=await fetch("/girassol-backup-offline/restaurar",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(o)});x=await x.json();el.textContent=x.ok?("\\u2713 Restaurado: "+x.restaurados.join(", ")):("Falhou: "+(x.erro||"erro"))}catch(e){el.textContent="Erro: "+e.message}}<\/script>';
-      html(res, 200, pg);
-      return true;
-    }
-    // RESTAURAR (ação): grava de volta só o que veio no corpo. Só admin.
-    if (method === 'POST' && p === '/girassol-backup-offline/restaurar') {
-      let body = {};
-      try { body = await readBody(req); } catch (e) {}
-      if (!ehAdmin(String(body.op || ''))) { json(res, 200, { ok: false, precisa_admin: true, erro: 'só admin' }); return true; }
-      const restaurados = [];
-      if (body.conferidos && typeof body.conferidos === 'object') { writeJson(CONFERIDOS_FILE, body.conferidos); restaurados.push('fila finalizados (' + Object.keys(body.conferidos).length + ')'); }
-      if (body.localizacoes && typeof body.localizacoes === 'object') { writeJson(LOC_FILE, body.localizacoes); restaurados.push('localizações (' + Object.keys(body.localizacoes).length + ')'); }
-      if (body.indice_ean && typeof body.indice_ean === 'object') { writeJson(EAN_INDEX_FILE, body.indice_ean); restaurados.push('índice EAN (' + Object.keys(body.indice_ean).length + ')'); }
-      if (Array.isArray(body.localizacoes_log)) { writeJson(LOC_LOG_FILE, body.localizacoes_log); restaurados.push('log (' + body.localizacoes_log.length + ')'); }
-      json(res, 200, { ok: restaurados.length > 0, restaurados });
-      return true;
-    }
-
-    // DEBUG: dumpa as respostas cruas do Bling p/ um pedido (diagnóstico NF/etiqueta)
-    if (method === 'GET' && p.startsWith('/girassol-backup-offline/debug/')) {
-      const id = p.split('/').filter(Boolean).pop();
-      const out = { id, versao: VERSAO };
-      try {
-        const ped = await blingGet(`/pedidos/vendas/${id}`);
-        out.pedido_status = ped.status;
-        const d = ped.data && ped.data.data;
-        out.pedido = d ? {
-          numero: d.numero,
-          situacao: d.situacao,
-          loja: d.loja,
-          numeroLoja: d.numeroLoja,
-          contato: d.contato && { nome: d.contato.nome },
-          itens: (d.itens || []).map(it => ({ codigo: it.codigo, quantidade: it.quantidade, produto: it.produto }))
-        } : ped.data;
-        out.servico = d ? servicoDoPedido(d) : null;       // o campo que o checkout usa pra decidir FLEX
-        out.seria_flex = d ? ehFlex(servicoDoPedido(d)) : null;
-
-        const nfe = await blingGet(`/pedidos/vendas/${id}/nfe`);
-        out.nfe_direto_status = nfe.status;
-        out.nfe_direto_raw = nfe.data;
-        out.nf_por_range = await acharNFporRange(id);
-
-        // testa as 2 formas do parâmetro de etiqueta p/ cravar qual o Bling aceita
-        const etqA = await blingGet(`/logisticas/etiquetas?formato=${ETIQ_FORMATO}&idsVendas[]=${id}`);
-        out.etiqueta_bracket = { status: etqA.status, raw: etqA.data };
-        const etqB = await blingGet(`/logisticas/etiquetas?formato=${ETIQ_FORMATO}&idsVendas%5B%5D=${id}`);
-        out.etiqueta_encoded = { status: etqB.status, raw: etqB.data };
-
-        const bom = (etqA.ok && etqA.data) ? etqA : (etqB.ok ? etqB : null);
-        const link = bom && bom.data && bom.data.data && bom.data.data[0] && bom.data.data[0].link;
-        out.etiqueta_link = link ? link.slice(0, 90) + '...' : null;
-        if (link) {
-          try {
-            const r = await fetch(link);
-            const buf = await r.buffer();
-            const ehZip = buf && buf.length >= 2 && buf[0] === 0x50 && buf[1] === 0x4B;
-            let zpl = null, arquivos = null;
-            if (ehZip) {
-              const zip = new AdmZip(buf);
-              arquivos = zip.getEntries().map(e => e.entryName);
-              const ent = zip.getEntries().find(e => /\.(txt|zpl)$/i.test(e.entryName)) || zip.getEntries()[0];
-              zpl = ent ? ent.getData().toString('utf8') : null;
-            } else {
-              zpl = buf.toString('utf8');
-            }
-            out.etiqueta_download = {
-              status: r.status,
-              contentType: r.headers.get('content-type'),
-              tamanho_zip: buf ? buf.length : 0,
-              eh_zip: ehZip,
-              arquivos_no_zip: arquivos,
-              zpl_tamanho: zpl ? zpl.length : 0,
-              zpl_inicio: zpl ? zpl.slice(0, 200) : null,
-              zpl_marcadores: zpl ? {                        // desempate coleta vs entrega direta
-                retirada_pelo_comprador: /RETIRADA\s+PELO\s+COMPRADOR/i.test(zpl),
-                coleta: /COLETA/i.test(zpl),
-                entrega_direta: /ENTREGA\s+DIRETA/i.test(zpl),
-                blocos_grafico_gfa: (zpl.match(/\^GFA/g) || []).length
-              } : null
-            };
-          } catch (e) { out.etiqueta_download = { erro: e.message }; }
-        }
-      } catch (e) { out.erro = e.message; }
-      json(res, 200, out);
-      return true;
-    }
-
-    // DEBUG: lista vendas ML recentes (loja 203146903) p/ achar uma pra testar etiqueta
-    if (method === 'GET' && p === '/girassol-backup-offline/debug-ml') {
-      if (!ehAdmin((urlObj.searchParams && urlObj.searchParams.get('op')) || '')) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
-      const { data } = await blingGet(`/pedidos/vendas?idLoja=203146903&limite=20&pagina=1`);
-      const lista = (data && data.data) || [];
-      json(res, 200, {
-        versao: VERSAO,
-        total: lista.length,
-        pedidos: lista.map(o => ({
-          id: o.id,
-          numero: o.numero,
-          situacao: o.situacao && o.situacao.id,
-          data: o.data
-        }))
-      });
-      return true;
-    }
-
-    // DEBUG: dumpa o produto CRU por SKU — vê formato + estrutura/componentes da composição
-    // uso: /girassol-backup-offline/debug-produto/{SKU}
-    if (method === 'GET' && p.startsWith('/girassol-backup-offline/debug-produto/')) {
-      if (!ehAdmin((urlObj.searchParams && urlObj.searchParams.get('op')) || '')) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
-      const sku = decodeURIComponent(p.split('/').filter(Boolean).pop() || '');
-      const lista = await blingGet(`/produtos?codigo=${encodeURIComponent(sku)}&limite=1`);
-      const item = lista.data && lista.data.data && lista.data.data[0];
-      let raw = null, detStatus = null;
-      if (item && item.id) { const r = await blingGet(`/produtos/${item.id}`); detStatus = r.status; raw = (r.data && r.data.data) || null; await sleep(PAUSA_MS); }
-      json(res, 200, {
-        sku,
-        da_lista: item ? { id: item.id, formato: item.formato, idProdutoPai: item.idProdutoPai } : null,
-        detalhe_status: detStatus,
-        campos_detalhe: raw ? Object.keys(raw) : null,
-        formato_detalhe: raw && raw.formato,
-        tem_estrutura: !!(raw && raw.estrutura),
-        estrutura: (raw && raw.estrutura) || null,
-        variacao: (raw && raw.variacao) || null
-      });
-      return true;
-    }
-
-    // DEBUG: dumpa a ESTRUTURA dos produtos de um pedido (variação / composição / kit)
-    // uso: /girassol-backup-offline/debug-estrutura/{idDoPedido}
-    if (method === 'GET' && p.startsWith('/girassol-backup-offline/debug-estrutura/')) {
-      if (!ehAdmin((urlObj.searchParams && urlObj.searchParams.get('op')) || '')) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
-      const id = p.split('/').filter(Boolean).pop();
-      const out = { pedido: id, versao: VERSAO, itens: [] };
-      try {
-        // probe: o escopo Produtos funciona? (lista 1 produto)
-        const probe = await blingGet(`/produtos?limite=1`);
-        out.probe_produtos = {
-          status: probe.status, ok: probe.ok,
-          corpo: probe.data && probe.data.data && probe.data.data[0]
-            ? { campos: Object.keys(probe.data.data[0]) }
-            : probe.data
-        };
-        await sleep(PAUSA_MS);
-
-        const ped = await blingGet(`/pedidos/vendas/${id}`);
-        const d = ped.data && ped.data.data;
-        out.numero = d && d.numero;
-        for (const it of ((d && d.itens) || [])) {
-          const prodId = it.produto && it.produto.id;
-          let status = null, raw = null;
-          if (prodId) {
-            const r = await blingGet(`/produtos/${prodId}`);
-            status = r.status;
-            raw = r.data;               // corpo CRU do /produtos/{id}
-            await sleep(PAUSA_MS);
-          }
-          out.itens.push({
-            item_descricao: it.descricao,
-            item_codigo: it.codigo,
-            item_qtd: it.quantidade,
-            item_produto: it.produto,   // o que vem dentro do item do pedido
-            produto_id: prodId,
-            produtos_status: status,    // HTTP status do /produtos/{id}
-            produtos_raw: raw           // corpo cru (aqui vejo formato/estrutura/erro)
-          });
-        }
-      } catch (e) { out.erro = e.message; }
-      json(res, 200, out);
-      return true;
-    }
-
-    // DEBUG: acha pedidos no cache que parecem KIT/composição (p/ inspecionar a estrutura)
-
-    // DEBUG: dumpa o objeto NF + TESTA baixar o DANFE em PDF (linkPDF) de dentro do Render
-    if (method === 'GET' && p === '/girassol-backup-offline/debug-nf') {
-      if (!ehAdmin((urlObj.searchParams && urlObj.searchParams.get('op')) || '')) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
-      const out = { versao: VERSAO };
-      try {
-        const r = await blingGet(`/nfe?limite=1`);
-        out.lista_status = r.status;
-        const nf0 = r.data && r.data.data && r.data.data[0];
-        if (nf0 && nf0.id) {
-          await sleep(PAUSA_MS);
-          const det = await blingGet(`/nfe/${nf0.id}`);
-          const nf = det.data && det.data.data;
-          out.numero = nf && nf.numero;
-          out.tem_linkPDF = !!(nf && nf.linkPDF);
-          out.tem_linkDanfe = !!(nf && nf.linkDanfe);
-          out.tem_xml = !!(nf && nf.xml);
-          out.campos_nf = nf ? Object.keys(nf) : null;
-          out.links_e_danfe = nf ? Object.keys(nf).filter(k => /link|danfe|pdf|simpl|etiq|impress/i.test(k)).reduce((o, k) => { o[k] = nf[k]; return o; }, {}) : null;
-          if (nf && nf.linkPDF) {
-            try {
-              const resp = await fetch(nf.linkPDF, { redirect: 'follow' });
-              const buf = Buffer.from(await resp.arrayBuffer());
-              const head = buf.slice(0, 8).toString('latin1');
-              out.download_pdf = {
-                status: resp.status,
-                content_type: resp.headers.get('content-type'),
-                tamanho_bytes: buf.length,
-                primeiros_bytes: head,
-                eh_pdf: head.startsWith('%PDF'),
-                parece_bloqueio: /^<|html|cloudflare/i.test(head)
-              };
-            } catch (e) { out.download_pdf = { erro: e.message }; }
-          }
-        }
-      } catch (e) { out.erro = e.message; }
-      json(res, 200, out);
-      return true;
-    }
-
-    // DEBUG/PREVIEW: gera o DANFE Simplificado 10x15 de um pedido REAL (pra ver e validar)
-    // uso: /girassol-backup-offline/debug-nf-simp/{idDoPedido}        → abre o PDF
-    //      /girassol-backup-offline/debug-nf-simp/{idDoPedido}?json=1 → mostra os dados extraídos
-    if (method === 'GET' && p.startsWith('/girassol-backup-offline/debug-nf-simp/')) {
-      if (!ehAdmin((urlObj.searchParams && urlObj.searchParams.get('op')) || '')) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
-      const pedidoId = p.split('/').filter(Boolean).pop();
-      let snap = readJson(path.join(CACHE_DIR, String(pedidoId), 'pedido.json'), null);
-      if (!snap) {  // talvez seja o NÚMERO do pedido (o que você vê na tela) → procura no manifest
-        const man = manifest();
-        const achado = Object.keys(man).find(k => String(man[k].numero) === String(pedidoId));
-        if (achado) snap = readJson(path.join(CACHE_DIR, String(achado), 'pedido.json'), null);
-      }
-      if (!snap || !snap.nf || !snap.nf.id) { json(res, 404, { erro: 'pedido sem NF cacheada', pedido: pedidoId }); return true; }
-      let dados;
-      try { dados = await dadosNFSimp(snap.nf.id, snap.numero); }
-      catch (e) { json(res, 502, { erro: 'falha ao montar dados', detalhe: e.message }); return true; }
-      if (!dados) { json(res, 502, { erro: 'NF não retornou dados' }); return true; }
-      if (/[?&]json=1/.test(urlObj.search || '')) { json(res, 200, dados); return true; }
-      try {
-        const pdf = await gerarDanfeSimplificado(dados);
-        res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': 'inline; filename="danfe-simplificado.pdf"' });
-        res.end(pdf);
-      } catch (e) { json(res, 500, { erro: 'falha ao gerar PDF', detalhe: e.message }); }
-      return true;
-    }
-
-    // PRODUÇÃO: gera/serve o DANFE SIMPLIFICADO (10x15) p/ imprimir na Zebra.
-    //   cache-first (nf-simp.json gravado pelo cron → funciona OFFLINE);
-    //   se não tiver no cache, busca ao vivo e cacheia.
-    // uso: /girassol-backup-offline/danfe-simp/{idOuNumero}
-    if (method === 'GET' && p.startsWith('/girassol-backup-offline/danfe-simp/')) {
-      const pedidoId = p.split('/').filter(Boolean).pop();
-      let dir = path.join(CACHE_DIR, String(pedidoId));
-      let snap = readJson(path.join(dir, 'pedido.json'), null);
-      if (!snap) {  // talvez seja o NÚMERO do pedido (o que aparece na tela)
-        const man = manifest();
-        const achado = Object.keys(man).find(k => String(man[k].numero) === String(pedidoId));
-        if (achado) { dir = path.join(CACHE_DIR, String(achado)); snap = readJson(path.join(dir, 'pedido.json'), null); }
-      }
-      if (!snap) { json(res, 404, { erro: 'pedido não cacheado', pedido: pedidoId }); return true; }
-      const blingId = path.basename(dir);
-      // 1) cache de dados (nf-simp.json gravado pelo cron)
-      let dados = readJson(path.join(dir, 'nf-simp.json'), null);
-      if (!dados) {
-        // acha a NF: do snapshot, ou ao vivo (re-cache antigo pode ter perdido o nf.id) → e CURA o snapshot
-        let nfId = snap.nf && snap.nf.id;
-        if (!nfId) {
-          try {
-            const nf = await nfDoPedido(blingId);
-            if (nf && nf.id) { nfId = nf.id; snap.nf = nf; snap.tem_nf = true; writeJson(path.join(dir, 'pedido.json'), snap); }
-          } catch (e) {}
-        }
-        if (!nfId) { json(res, 404, { erro: 'pedido sem NF', pedido: pedidoId }); return true; }
-        try { dados = await dadosNFSimp(nfId, snap.numero); }
-        catch (e) { json(res, 502, { erro: 'falha ao montar dados', detalhe: e.message }); return true; }
-        if (dados) { try { writeJson(path.join(dir, 'nf-simp.json'), dados); } catch (e) {} }
-      }
-      if (!dados) { json(res, 502, { erro: 'NF não retornou dados' }); return true; }
-      const q = urlObj.search || '';
-      // ?zpl=1 → ZPL CRU (o que a Zebra imprime); ?preview=1 → ZPL renderizado p/ PDF via Labelary (ver no note); senão → PDF nativo
-      try {
-        if (/[?&]zpl=1/.test(q)) {
-          const zpl = gerarDanfeSimplificadoZPL(dados);
-          res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
-          res.end(zpl);
-        } else if (/[?&]preview=1/.test(q)) {
-          const zpl = gerarDanfeSimplificadoZPL(dados);
-          const pdf = await zplParaPdf(zpl);
-          if (pdf) { res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': 'inline; filename="danfe-zpl-preview.pdf"' }); res.end(pdf); }
-          else json(res, 502, { erro: 'Labelary nao converteu o ZPL (tente de novo)' });
-        } else {
-          const pdf = await gerarDanfeSimplificado(dados);
-          res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': 'inline; filename="danfe-simplificado.pdf"' });
-          res.end(pdf);
-        }
-      } catch (e) { json(res, 500, { erro: 'falha ao gerar', detalhe: e.message }); }
-      return true;
-    }
-
-    // ETIQUETA MADEIRA na ZEBRA (10x15 térmico). Monta, POR VOLUME:
-    //   [adesivo VOLUME i/N] + [etiqueta Correios 10x15] + [DANFE-simplificada].
-    // O ZPL do Madeira é PÚBLICO (zplPorBatch — sem token/sessão); cacheia em
-    // etiqueta-correios.zpl p/ reimpressão. A DANFE-simp reaproveita gerarDanfeSimplificadoZPL.
-    // uso: /girassol-backup-offline/etiqueta-madeira-zpl/{idOuNumero}   (?nodanfe=1 → só etiqueta+adesivo)
-    if (method === 'GET' && p.startsWith('/girassol-backup-offline/etiqueta-madeira-zpl/')) {
-      const pedidoId = p.split('/').filter(Boolean).pop();
-      let dir = path.join(CACHE_DIR, String(pedidoId));
-      let snap = readJson(path.join(dir, 'pedido.json'), null);
-      if (!snap) {
-        const man = manifest();
-        const achado = Object.keys(man).find(k => String(man[k].numero) === String(pedidoId));
-        if (achado) { dir = path.join(CACHE_DIR, String(achado)); snap = readJson(path.join(dir, 'pedido.json'), null); }
-      }
-      if (!snap) { json(res, 404, { erro: 'pedido não cacheado', pedido: pedidoId }); return true; }
-
-      // 1) ZPL do Madeira (etiquetas dos Correios — 1 bloco ^XA..^XZ por volume). Cache → ou baixa (público).
-      let zplMM = null;
-      const _zplFile = path.join(dir, 'etiqueta-correios.zpl');
-      try {
-        if (fs.existsSync(_zplFile)) zplMM = fs.readFileSync(_zplFile, 'utf8');
-        else {
-          const mmEtq = require('../girassol-mm-etiquetas');
-          let regMM = null;
-          for (const c of [snap.numero_loja, snap.nf && snap.nf.numero].filter(Boolean)) { regMM = mmEtq.acharLote(c); if (regMM) break; }
-          if (regMM && regMM.batch) {
-            zplMM = await mmEtq.zplPorBatch(regMM.batch);
-            if (zplMM && zplMM.indexOf('^XA') !== -1) { try { fs.writeFileSync(_zplFile, zplMM); } catch (e) {} }
-          }
-        }
-      } catch (e) {}
-      if (!zplMM) { json(res, 502, { erro: 'ZPL do Madeira indisponível (lote não está no mapa, ou Portal fora do ar)' }); return true; }
-      const blocos = zplMM.match(/\^XA[\s\S]*?\^XZ/g) || [];
-      if (!blocos.length) { json(res, 502, { erro: 'ZPL do Madeira sem etiquetas (^XA...^XZ)' }); return true; }
-      const N = blocos.length;
-
-      // 2) DANFE-simplificada em ZPL (mesmo padrão da /danfe-simp: cache nf-simp.json → ou ao vivo)
-      let danfeZpl = '';
-      if (!/[?&]nodanfe=1/.test(urlObj.search || '')) {
-        try {
-          let dados = readJson(path.join(dir, 'nf-simp.json'), null);
-          if (!dados) {
-            let nfId = snap.nf && snap.nf.id;
-            if (!nfId) {   // re-cache antigo pode ter perdido o nf.id → re-busca e CURA o snapshot (igual /danfe-simp)
-              try { const _nf = await nfDoPedido(path.basename(dir)); if (_nf && _nf.id) { nfId = _nf.id; snap.nf = _nf; snap.tem_nf = true; writeJson(path.join(dir, 'pedido.json'), snap); } } catch (e) {}
-            }
-            if (nfId) { dados = await dadosNFSimp(nfId, snap.numero); if (dados) { try { writeJson(path.join(dir, 'nf-simp.json'), dados); } catch (e) {} } }
-          }
-          if (dados) danfeZpl = gerarDanfeSimplificadoZPL(dados) || '';
-        } catch (e) {}
-      }
-
-      // 3) monta: [adesivo i/N] + [Correios i] + [DANFE-simp]  por volume
-      const cliente = (snap.cliente || '').slice(0, 28);
-      const numero = snap.numero || pedidoId;
-      let out = '';
-      for (let i = 0; i < N; i++) {
-        out += bannerVolumeZpl(i + 1, N, numero, cliente);
-        out += blocos[i] + '\n';
-        if (danfeZpl) out += danfeZpl + '\n';
-      }
-      res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
-      res.end(out);
-      return true;
-    }
-
-    // ETIQUETA de postagem + tira da DANFE numa etiqueta só (ML / Amazon / Magalu / TikTok)
-    // Shopee NÃO usa — já vem fundida nativa pela própria API.
-    // ?info=1 → mostra os números da fusão (fator, se cabe) SEM imprimir, p/ diagnóstico.
-    // ?pdf=1  → devolve um PDF da etiqueta fundida (imprime em qualquer impressora; testar à distância).
-    // uso: /girassol-backup-offline/etiqueta-fundida/{idOuNumero}
-    if (method === 'GET' && p.startsWith('/girassol-backup-offline/etiqueta-fundida/')) {
-      const pedidoId = p.split('/').filter(Boolean).pop();
-      let dir = path.join(CACHE_DIR, String(pedidoId));
-      let snap = readJson(path.join(dir, 'pedido.json'), null);
-      if (!snap) {  // talvez seja o NÚMERO do pedido (o que aparece na tela)
-        const man = manifest();
-        const achado = Object.keys(man).find(k => String(man[k].numero) === String(pedidoId));
-        if (achado) { dir = path.join(CACHE_DIR, String(achado)); snap = readJson(path.join(dir, 'pedido.json'), null); }
-      }
-      if (!snap) { json(res, 404, { erro: 'pedido não cacheado', pedido: pedidoId }); return true; }
-      const blingId = path.basename(dir);
-      // 1) etiqueta ZPL do cache (precisa ser ZPL — não funde PDF)
-      let zplEtq = null;
-      try { zplEtq = fs.readFileSync(path.join(dir, `etiqueta.${ETIQ_FORMATO.toLowerCase()}`), 'utf8'); }
-      catch (e) { json(res, 404, { erro: 'etiqueta não cacheada', pedido: pedidoId }); return true; }
-      if (!/\^XA/.test(zplEtq)) { json(res, 422, { erro: 'etiqueta não é ZPL', formato: ETIQ_FORMATO }); return true; }
-      // 2) dados da NF (igual /danfe-simp: cache nf-simp.json, ou monta ao vivo e cura o snapshot)
-      let dados = readJson(path.join(dir, 'nf-simp.json'), null);
-      if (!dados) {
-        let nfId = snap.nf && snap.nf.id;
-        if (!nfId) {
-          try {
-            const nf = await nfDoPedido(blingId);
-            if (nf && nf.id) { nfId = nf.id; snap.nf = nf; snap.tem_nf = true; writeJson(path.join(dir, 'pedido.json'), snap); }
-          } catch (e) {}
-        }
-        if (!nfId) { json(res, 404, { erro: 'pedido sem NF', pedido: pedidoId }); return true; }
-        try { dados = await dadosNFSimp(nfId, snap.numero); }
-        catch (e) { json(res, 502, { erro: 'falha ao montar dados', detalhe: e.message }); return true; }
-        if (dados) { try { writeJson(path.join(dir, 'nf-simp.json'), dados); } catch (e) {} }
-      }
-      if (!dados) { json(res, 502, { erro: 'NF não retornou dados' }); return true; }
-      // 3) funde etiqueta + tira da DANFE → ZPL único pra Zebra
-      try {
-        const r = fundirEtiquetaComDanfe(zplEtq, dados);
-        // raster que enche tudo (sem espaço nem p/ 1 linha) → não fundível; mantém 2 etiquetas
-        if (r.modo === 'declinou') {
-          if (/[?&]info=1/.test(urlObj.search || '')) { json(res, 200, { pedido: pedidoId, fundivel: false, modo: 'declinou', motivo: r.motivo }); return true; }
-          json(res, 409, { erro: 'etiqueta-imagem enche tudo — não fundível', motivo: r.motivo, dica: 'mantenha etiqueta + DANFE em 2 etiquetas' });
-          return true;
-        }
-        if (/[?&]info=1/.test(urlObj.search || '')) {   // diagnóstico, não imprime
-          const info = { pedido: pedidoId, fundivel: true, modo: r.modo };
-          if (r.modo === 'fusao') { info.encolheu = r.fator < 1; info.fator = Number(r.fator.toFixed(3)); info.conteudo_ate = r.maxY; info.conteudo_escalado = r.novoMaxY; info.fundo_final = r.fundoFinal; info.cabe_10x15 = r.fundoFinal <= 1185; }
-          else { info.tipo = 'raster (imagem)'; info.imagem_ate = r.fimImagem; info.espaco_livre = r.livre; info.adicionou = 'linha NF: numero/serie/data/natureza no rodape'; }
-          json(res, 200, info);
-          return true;
-        }
-        if (/[?&]pdf=1/.test(urlObj.search || '')) {   // PDF p/ imprimir em qualquer impressora (testar à distância)
-          const pdf = await zplParaPdf(r.zpl);
-          if (pdf) { res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': 'inline; filename="etiqueta-fundida.pdf"' }); res.end(pdf); }
-          else json(res, 502, { erro: 'Labelary não converteu o ZPL (tente de novo)' });
-          return true;
-        }
-        res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
-        res.end(r.zpl);
-      } catch (e) { json(res, 500, { erro: 'falha ao fundir', detalhe: e.message }); }
-      return true;
-    }
-
-    // testa o caminho do DANFE p/ UM pedido (id do pedido) e cacheia se der certo
-    // uso: /girassol-backup-offline/debug-danfe/{idDoPedido}
-    if (method === 'GET' && p.startsWith('/girassol-backup-offline/debug-danfe/')) {
-      if (!ehAdmin((urlObj.searchParams && urlObj.searchParams.get('op')) || '')) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
-      const id = p.split('/').filter(Boolean).pop();
-      const out = { pedido: id, versao: VERSAO };
-      try {
-        const dir = path.join(CACHE_DIR, String(id));
-        out.dir_existe = fs.existsSync(dir);
-        out.danfe_ja_cacheado = fs.existsSync(path.join(dir, 'danfe.pdf'));
-        const snap = readJson(path.join(dir, 'pedido.json'), null);
-        out.snapshot_existe = !!snap;
-        out.nf_no_snapshot = (snap && snap.nf) || null;
-        let nfId = snap && snap.nf && snap.nf.id;
-        out.nf_id_snapshot = nfId || null;
-        if (!nfId) { // fallback: tenta achar a NF do pedido na hora
-          const nf = await nfDoPedido(id); await sleep(PAUSA_MS);
-          out.nf_via_fallback = nf;
-          nfId = nf && nf.id;
-        }
-        out.nf_id_usado = nfId || null;
-        if (nfId) {
-          const det = await blingGet(`/nfe/${nfId}`);
-          out.nfe_get_ok = det.ok; out.nfe_get_status = det.status;
-          const nf = det.data && det.data.data;
-          out.tem_linkPDF = !!(nf && nf.linkPDF);
-          if (nf && nf.linkPDF) {
-            const resp = await fetch(nf.linkPDF, { redirect: 'follow' });
-            const buf = Buffer.from(await resp.arrayBuffer());
-            const head = buf.slice(0, 8).toString('latin1');
-            out.download = { status: resp.status, tamanho: buf.length, primeiros: head, eh_pdf: head.startsWith('%PDF') };
-            if (head.startsWith('%PDF')) {
-              fs.writeFileSync(path.join(dir, 'danfe.pdf'), buf);
-              if (snap) { snap.tem_danfe = true; writeJson(path.join(dir, 'pedido.json'), snap); }
-              const man = manifest(); if (man[id]) { man[id].tem_danfe = true; salvarManifest(man); }
-              out.salvou = true;
-            }
-          }
-        }
-      } catch (e) { out.erro = e.message; }
-      json(res, 200, out);
-      return true;
-    }
-
-    // testa se o Bling devolve a ETIQUETA em PDF (vs ZPL) p/ um pedido
-    // uso: /girassol-backup-offline/debug-etiqueta-fmt/{idDoPedido}
-    if (method === 'GET' && p.startsWith('/girassol-backup-offline/debug-etiqueta-fmt/')) {
-      if (!ehAdmin((urlObj.searchParams && urlObj.searchParams.get('op')) || '')) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
-      const id = p.split('/').filter(Boolean).pop();
-      const out = { pedido: id, versao: VERSAO };
-      try {
-        for (const fmt of ['PDF', 'ZPL']) {
-          const r = await blingGet(`/logisticas/etiquetas?formato=${fmt}&idsVendas[]=${id}`); await sleep(PAUSA_MS);
-          const item = r.data && r.data.data && r.data.data[0];
-          const link = item && item.link;
-          const info = { api_ok: r.ok, api_status: r.status, tem_link: !!link };
-          if (!link && r.data) info.resposta = JSON.stringify(r.data).slice(0, 300);
-          if (link) {
-            try {
-              const resp = await fetch(link); await sleep(PAUSA_MS);
-              const buf = Buffer.from(await resp.arrayBuffer());
-              const head = buf.slice(0, 8).toString('latin1');
-              info.download = {
-                status: resp.status,
-                content_type: resp.headers.get('content-type'),
-                tamanho: buf.length,
-                primeiros: head,
-                eh_pdf: head.startsWith('%PDF'),
-                eh_zip: head.charCodeAt(0) === 0x50 && head.charCodeAt(1) === 0x4B
-              };
-            } catch (e) { info.download = { erro: e.message }; }
-          }
-          out[fmt] = info;
-        }
-      } catch (e) { out.erro = e.message; }
-      json(res, 200, out);
-      return true;
-    }
-
-    return false; // não tratou
-  };
-}
-
-// roda 1 ciclo logo após o boot do serviço
-// ═══ VENDAS-SYNC (background): TODAS as vendas do Bling por data, em QUALQUER situação —
-// independe de bipagem. Roda a cada 5 min + boot + botão. Cancelada vem com a situação marcada.
-let _vsy = { rodando: false, total: 0, atualizado_em: null, erro: null };
-function _inferCanal(nl) {
-  const s = String(nl || '');
-  if (!s) return 'outro';
-  if (s.indexOf('-') >= 0) return 'amazon';
-  if (/[a-z]/i.test(s)) return 'shopee';
-  if (/^200/.test(s)) return 'ml';
-  if (/^585/.test(s)) return 'tiktok';
-  if (/^15/.test(s)) return 'magalu';
-  return 'outro';
-}
-// ─── FRETE MAGALU (coparticipação) — tabela + cubagem + banco por SKU ─────────
-// A Magalu cobra o frete por FAIXA de peso (o maior entre peso real e cubado),
-// com desconto conforme o nível de "Despacho no Prazo" do mês. A API financeira
-// só traz o frete REAL quando o pedido liquida; até lá estimamos pela tabela
-// (e, se o SKU já vendeu antes, pela média real dele — auto-corretivo).
-const MAGALU_FRETE_TABELA = [
-  // [pesoMaxKg, semDesconto, desc25 (87-97%), desc50 (>97%)]
-  [0.5, 35.90, 26.93, 17.95], [1, 40.80, 30.68, 20.45], [2, 42.90, 32.18, 21.45],
-  [5, 50.90, 38.18, 25.45], [9, 77.90, 58.43, 38.95], [13, 98.00, 74.18, 49.45],
-  [17, 111.90, 83.93, 55.95], [23, 134.90, 101.18, 67.45], [30, 148.90, 111.68, 74.45],
-  [40, 179.90, 134.93, 89.95], [50, 189.90, 142.43, 94.95], [60, 199.90, 149.93, 99.95],
-  [70, 209.90, 157.43, 104.95], [80, 219.90, 164.93, 109.95], [90, 229.90, 172.43, 114.95],
-  [100, 239.90, 179.93, 119.95], [110, 249.90, 187.43, 124.95], [120, 259.90, 194.93, 129.95],
-  [130, 269.90, 202.43, 134.95], [140, 279.90, 209.93, 139.95], [150, 289.90, 217.43, 144.95],
-  [160, 299.90, 224.93, 149.95], [170, 309.90, 232.43, 154.95], [180, 319.90, 239.93, 159.95],
-  [190, 329.90, 247.43, 164.95], [200, 339.90, 254.93, 169.95]
-];
-// nível de desconto configurável (default 50% = coluna >97%; salvo em _config-frete-magalu.json).
-// Índice na linha da tabela: 1=sem desconto, 2=desc25, 3=desc50.
-function magaluNivelColuna() {
-  try {
-    const cfg = readJson(path.join(CACHE_DIR, '_config-frete-magalu.json'), {});
-    const n = cfg.nivel_desconto;   // 'sem' | '25' | '50'
-    if (n === 'sem') return 1;
-    if (n === '25') return 2;
-    return 3;   // default 50%
-  } catch (e) { return 3; }
-}
-// peso cubado + faixa → valor da tabela pela coluna do nível. Retorna null se faltar dimensão.
-function magaluFreteTabela(dim, pesoBruto) {
-  if (!dim) return null;
-  const larg = Number(dim.largura), alt = Number(dim.altura), prof = Number(dim.profundidade);
-  if (!(larg > 0 && alt > 0 && prof > 0)) return null;
-  // unidadeMedida:1 = cm (o padrão do Bling). Converte pra metros.
-  const m3 = (larg / 100) * (alt / 100) * (prof / 100);
-  const cubado = m3 * 167;   // fator 167 (leves) — casa com o dado real; pesados (300) raros
-  const pReal = Number(pesoBruto) || 0;
-  const peso = Math.max(pReal, cubado);   // a Magalu usa o MAIOR
-  const col = magaluNivelColuna();
-  for (const linha of MAGALU_FRETE_TABELA) {
-    if (peso <= linha[0]) return Math.round(linha[col] * 100) / 100;
-  }
-  return Math.round(MAGALU_FRETE_TABELA[MAGALU_FRETE_TABELA.length - 1][col] * 100) / 100;   // acima de 200kg
-}
-// banco por SKU: média do frete REAL conforme os pedidos liquidam (fonte auto-corretiva).
-function magaluFreteSkuLer() { try { return readJson(path.join(CACHE_DIR, '_magalu_frete_sku.json'), {}); } catch (e) { return {}; } }
-function magaluFreteSkuGravar(sku, freteReal) {
-  if (!sku || !(freteReal > 0)) return;
-  try {
-    const F2 = path.join(CACHE_DIR, '_magalu_frete_sku.json');
-    const banco = readJson(F2, {});
-    const cur = banco[sku] || { soma: 0, n: 0, media: 0 };
-    cur.soma = Math.round((cur.soma + freteReal) * 100) / 100; cur.n += 1;
-    cur.media = Math.round((cur.soma / cur.n) * 100) / 100;
-    cur.ultimo = freteReal; cur.em = new Date().toISOString();
-    banco[sku] = cur; writeJson(F2, banco);
-  } catch (e) {}
-}
-// cache das dimensões por SKU (evita re-consultar o Bling toda rodada)
-const _dimCache = {};
-async function magaluDimSku(sku) {
-  if (!sku) return null;
-  if (_dimCache[sku] !== undefined) return _dimCache[sku];
-  try {
-    const rb = await blingGet('/produtos?codigo=' + encodeURIComponent(sku) + '&criterio=5');
-    const p0 = rb && rb.ok && rb.data && rb.data.data && rb.data.data[0];
-    if (!p0 || !p0.id) { _dimCache[sku] = null; return null; }
-    const rd = await blingGet('/produtos/' + p0.id);
-    const prod = (rd && rd.ok && rd.data && rd.data.data) || null;
-    const out = prod ? { dim: prod.dimensoes, peso: prod.pesoBruto } : null;
-    _dimCache[sku] = out; return out;
-  } catch (e) { _dimCache[sku] = null; return null; }
-}
-// frete provisório de um pedido: histórico do SKU (se já vendeu) senão a tabela pela dimensão.
-async function magaluFreteProvisorio(v) {
-  const it = (v.it || [])[0];   // 1º item define a faixa (a maioria dos pedidos é 1 SKU)
-  const sku = it && it.sku;
-  if (!sku) return null;
-  const banco = magaluFreteSkuLer();
-  if (banco[sku] && banco[sku].media > 0) return banco[sku].media;   // histórico real do SKU manda
-  const d = await magaluDimSku(sku);
-  if (!d) return null;
-  return magaluFreteTabela(d.dim, d.peso);
-}
-
-// ─── PESCA os dados REAIS de um pedido direto na API do ML (fonte primária) ──────
-// Dado o numero_loja, devolve { fee (comissão real via sale_fee), frete, venda (hora),
-// credito, credito_fonte, logistica, pack, order, costs_ok } ou null se o ML não respondeu.
-// Trata carrinho (pack), Flex (self_service: frete não é custo, é o motoboy; estorno = líquido)
-// e compensações. Reusada pela pesca dos bipados (mlSyncFees) e pela fase ml_real (não-bipados).
-async function pescarDadosML(nlRaw, tokenML, dorme) {
-  const nl = String(nlRaw || '').replace(/\D/g, '');
-  if (!nl || !tokenML) return null;
-  const H = { headers: { Authorization: 'Bearer ' + tokenML } };
-  let r = await fetch('https://api.mercadolibre.com/orders/' + nl, H);
-  let d = await r.json().catch(() => null);
-  let ords = null;
-  if (r.ok && d) ords = [d];
-  else if (r.status === 404) {   // id 2000... que dá 404 é PACK (carrinho): abre o pack e pega as orders
-    try {
-      const rp = await fetch('https://api.mercadolibre.com/packs/' + nl, H);
-      const dp = await rp.json().catch(() => null);
-      if (rp.ok && dp && Array.isArray(dp.orders) && dp.orders.length) {
-        ords = [];
-        for (const oq of dp.orders) {
-          try { const ro = await fetch('https://api.mercadolibre.com/orders/' + (oq.id || oq), H); const doo = await ro.json().catch(() => null); if (ro.ok && doo) ords.push(doo); } catch (e3) {}
-          await dorme(150);
-        }
-        if (!ords.length) ords = null;
-      }
-    } catch (e2) {}
-  }
-  if (!ords || !ords.length) return null;
-  let fee = 0, venda = null, shipId = null;
-  for (const od of ords) {
-    for (const it of (od.order_items || [])) { const q = Number(it.quantity || 1); const sf = Number(it.sale_fee || 0); if (isFinite(sf)) fee += sf * q; }
-    if (!venda && od.date_created) venda = od.date_created;
-    if (!shipId && od.shipping && od.shipping.id) shipId = od.shipping.id;
-  }
-  const _ord0 = (ords[0] && ords[0].id != null) ? String(ords[0].id) : null;
-  const _viaPack = !!(_ord0 && _ord0 !== nl);
-  const _packId = _viaPack ? nl : ((ords[0] && ords[0].pack_id != null) ? String(ords[0].pack_id) : null);
-  const reg = { fee: Math.round(fee * 100) / 100, frete: null, venda: venda, _orders: ords.length, pack: _packId, order: _ord0 };
-  if (shipId) {
-    let ehFlex = false, baseCost = null;
-    try {
-      const rs = await fetch('https://api.mercadolibre.com/shipments/' + shipId, H);
-      const ds = await rs.json().catch(() => null);
-      if (rs.ok && ds) {
-        const logi = (ds.logistic && ds.logistic.type) || ds.logistic_type || null;
-        if (logi) reg.logistica = logi;
-        ehFlex = (logi === 'self_service');
-        const bc = Number(ds.base_cost); if (isFinite(bc) && bc > 0) baseCost = bc;
-        const so = ds.shipping_option || {};
-        const lc = Number(so.list_cost != null ? so.list_cost : ds.list_cost);
-        const cc = Number(so.cost != null ? so.cost : ds.cost);
-        if (!ehFlex && isFinite(lc) && isFinite(cc) && lc > cc) reg.frete = Math.round((lc - cc) * 100) / 100;
-      }
-    } catch (e) {}
-    await dorme(200);
-    try {
-      const rc = await fetch('https://api.mercadolibre.com/shipments/' + shipId + '/costs', H);
-      const dc = await rc.json().catch(() => null);
-      if (rc.ok && dc) {
-        reg.costs_ok = true;
-        const sd0 = Array.isArray(dc.senders) ? dc.senders[0] : null;
-        const scost = Number(sd0 && sd0.cost);
-        const scOk = isFinite(scost) && scost > 0;
-        let cred = 0, fonte = null;
-        if (sd0) {
-          const c1 = Number(sd0.compensation); if (isFinite(c1) && c1 > 0) { cred += c1; fonte = 'compensation'; }
-          for (const cx of (sd0.compensations || [])) { const c2 = Number(cx && cx.amount); if (isFinite(c2) && c2 > 0) { cred += c2; fonte = 'compensation'; } }
-        }
-        if (cred === 0 && ehFlex && baseCost != null) { cred = Math.round((baseCost - (scOk ? scost : 0)) * 100) / 100; fonte = 'flex_liquido'; }
-        if (cred !== 0) { reg.credito = Math.round(cred * 100) / 100; reg.credito_fonte = fonte; }
-        if (!ehFlex && scOk) reg.frete = Math.round(scost * 100) / 100;
-      }
-    } catch (e) {}
-    await dorme(200);
-  }
-  return reg;
-}
-
-// ─── Supabase (histórico de vendas) — grava via REST; empresa escolhe as env vars ────────────
-function supaCfg(empresa){
-  const E = String(empresa||'girassol').toUpperCase();
-  return { url: process.env['SUPABASE_URL_VENDAS_'+E], key: process.env['SUPABASE_KEY_VENDAS_'+E] };
-}
-async function supaReq(empresa, metodo, pathQuery, body){
-  const { url, key } = supaCfg(empresa);
-  if(!url || !key) return { ok:false, status:0, erro:'faltam SUPABASE_URL_VENDAS_'+String(empresa||'').toUpperCase()+' / SUPABASE_KEY_VENDAS_'+String(empresa||'').toUpperCase() };
-  const h = { 'apikey': key, 'Authorization': 'Bearer '+key, 'Content-Type': 'application/json' };
-  if(metodo==='POST') h['Prefer']='return=minimal';
-  try {
-    const r = await fetch(url.replace(/\/+$/,'') + '/rest/v1/' + pathQuery, { method: metodo, headers: h, body: body?JSON.stringify(body):undefined });
-    const txt = await r.text().catch(()=> '');
-    return { ok: r.ok, status: r.status, body: txt };
-  } catch(e){ return { ok:false, status:0, erro:String(e.message||e) }; }
-}
-
-async function supaCount(empresa, filtro){
-  const { url, key } = supaCfg(empresa);
-  if(!url || !key) return null;
-  try {
-    const r = await fetch(url.replace(/\/+$/,'') + '/rest/v1/vendas_historico?empresa=eq.'+encodeURIComponent(empresa)+(filtro?('&'+filtro):'')+'&select=id', { method:'HEAD', headers:{ 'apikey':key, 'Authorization':'Bearer '+key, 'Prefer':'count=exact', 'Range':'0-0' } });
-    const cr = (r.headers.get('content-range')||'').split('/')[1];
-    return cr!=null ? Number(cr) : null;
-  } catch(e){ return null; }
-}
-
-// ─── Busca as DEVOLUÇÕES (type 'returns') recentes do ML + o frete de retorno de cada ──────
-// Retorna mapa { order_id(string): {claim_id, stage, aberta, data, frete_retorno, destino, dev_status} }.
-// Ignora o ruído (cancel_purchase/mediations/cancel_sale) — só devolução física que gera prejuízo.
-// destino 'warehouse' = vai pro ML (frete de retorno cobrado do vendedor); 'seller_address' = volta pro galpão.
-async function buscarDevolucoesML(tokenML, dorme) {
-  if (!tokenML) return {};
-  const H = { headers: { Authorization: 'Bearer ' + tokenML } };
-  let sellerId = null;
-  try { const rm = await fetch('https://api.mercadolibre.com/users/me', H); const dm = await rm.json().catch(() => null); if (rm.ok && dm && dm.id) sellerId = dm.id; } catch (e) {}
-  if (!sellerId) return {};
-  const mapa = {};
-  for (const st of ['opened', 'closed']) {
-    try {
-      const rc = await fetch('https://api.mercadolibre.com/post-purchase/v1/claims/search?players.user_id=' + sellerId + '&players.role=respondent&status=' + st + '&sort=date_created:desc&limit=50', H);
-      const dc = await rc.json().catch(() => null);
-      const data = (dc && dc.data) || [];
-      for (const c of data) {
-        if (!c || c.type !== 'returns' || c.resource !== 'order') continue;   // só devolução de pedido (resource_id = order_id)
-        const oid = String(c.resource_id);
-        if (mapa[oid]) continue;   // opened vem primeiro, tem prioridade
-        mapa[oid] = { claim_id: c.id, stage: c.stage, aberta: (st === 'opened'), data: c.date_created, frete_retorno: null, destino: null, dev_status: null };
-      }
-    } catch (e) {}
-    await dorme(200);
-  }
-  // pros claims de devolução, busca o custo do frete de retorno + status/destino da devolução
-  for (const oid of Object.keys(mapa)) {
-    const cid = mapa[oid].claim_id;
-    try {
-      const rr = await fetch('https://api.mercadolibre.com/post-purchase/v1/claims/' + cid + '/charges/return-cost', H);
-      const dr = await rr.json().catch(() => null);
-      if (rr.ok && dr && dr.amount != null) mapa[oid].frete_retorno = Number(dr.amount);   // frete de retorno pago pelo vendedor
-    } catch (e) {}
-    await dorme(150);
-    try {
-      const rt = await fetch('https://api.mercadolibre.com/post-purchase/v2/claims/' + cid + '/returns', H);
-      const dt = await rt.json().catch(() => null);
-      if (rt.ok && dt) {
-        mapa[oid].dev_status = dt.status;   // label_generated / shipped / ...
-        const sh = Array.isArray(dt.shipments) ? dt.shipments[0] : null;
-        if (sh && sh.destination) mapa[oid].destino = sh.destination.name;   // warehouse / seller_address
-      }
-    } catch (e) {}
-    await dorme(150);
-  }
-  return mapa;
-}
-
-// ─── BACKFILL do histórico de vendas pro Supabase ────────────────────────────────────────────
-const DEFAULT_ALIQ_BK = { '2026-01':11.409280, '2026-02':11.3254, '2026-03':12.3402, '2026-04':13.6001, '2026-05':13.9149, '2026-06':14.056, '2026-07':14.1, '2026-08':14.1, '2026-09':14.1, '2026-10':14.1, '2026-11':14.1, '2026-12':14.1 };
-const _histCache = {};   // agregados do Supabase por período (10 min)
-let _backfill = { rodando:false, empresa:null, de:null, ate:null, pagina:0, pedidos:0, itens:0, gravados:0, erros:0, fase:'parado', inicio:null, fim:null, msg:'' };
-async function backfillVendas(de, ate, empresa){
-  if(_backfill.rodando) return;
-  _backfill = { rodando:true, empresa, de, ate, pagina:0, pedidos:0, itens:0, gravados:0, erros:0, fase:'preparando', inicio:new Date().toISOString(), fim:null, msg:'' };
-  const dorme = ms => new Promise(r=>setTimeout(r,ms));
-  try {
-    const custos = readJson(path.join(CACHE_DIR,'_custos.json'), {});
-    const cfg = readJson(path.join(CACHE_DIR,'_config-fiscal.json'), {aliquotas:{}});
-    const aliqBk = mes => (cfg.aliquotas && cfg.aliquotas[mes]!=null ? Number(cfg.aliquotas[mes]) : (DEFAULT_ALIQ_BK[mes]!=null?DEFAULT_ALIQ_BK[mes]:14.1));
-    // idempotente: limpa o período antes (rodar de novo não duplica)
-    await supaReq(empresa, 'DELETE', 'vendas_historico?empresa=eq.'+encodeURIComponent(empresa)+'&data_venda=gte.'+de+'&data_venda=lte.'+ate, null);
-    _backfill.fase = 'varrendo';
-    let buffer = [];
-    const flush = async () => {
-      if(!buffer.length) return;
-      const ins = await supaReq(empresa,'POST','vendas_historico', buffer);
-      if(ins.ok) _backfill.gravados += buffer.length;
-      else { _backfill.erros += buffer.length; _backfill.msg = 'erro Supabase status '+ins.status+' '+((ins.body||ins.erro||'')+'').slice(0,140); }
-      buffer = [];
+  const ticket = comValor ? fat/comValor : 0;
+  const pc = (a,b)=> b? Math.round(a/b*100) : 0;
+  const nTot = PER.length + AGD.length;   // 27/07: o laço acima cobre bipados + não bipados — o denominador tem que ser o mesmo
+  const cVal = pc(comValor,nTot), cItem = pc(itensComValor,itensTot);
+  // ⚠️ UF e NF só existem no pedido JÁ BIPADO (a venda ainda não bipada não tem esses campos).
+  // Medi-los contra o total derrubava a % e acendia o aviso de "cobertura baixa" sem motivo.
+  const cUF = pc(comUF,PER.length||1), cNF = pc(pedNF,PER.length||1), cTar = pc(pedTarReal,nTot);
+
+  // resumo das pílulas: no celular fica só ele; toca e abre a lista completa
+  const piores = [['valor',cVal],['valor/item',cItem],['UF',cUF],['nota fiscal',cNF],['tarifa real',cTar]]
+                   .filter(x=>x[1]<95).sort((a,b)=>a[1]-b[1]);
+  const resumo = piores.length
+    ? '<button class="pill w covResumo" onclick="document.getElementById(\'cover\').classList.toggle(\'aberto\')">\u26a0 '+piores.length+' ponto(s) a conferir \u00b7 '+piores[0][0]+' '+piores[0][1]+'% <b>\u25be</b></button>'
+    : '<button class="pill g covResumo" onclick="document.getElementById(\'cover\').classList.toggle(\'aberto\')">\u2705 dados completos <b>\u25be</b></button>';
+  $('cover').innerHTML = PER.length === 0 ?
+    ('<span class="dim">'+de+' → '+ate+'</span><span class="dim">0 vendas atribuídas a este período — vendas de fim de semana entram assim que forem bipadas (caem no dia CERTO) · clica em <b>Ontem</b> ou <b>Mês</b> 😉 · a busca de pedido lá embaixo funciona independente do período</span>') :
+    resumo+
+    '<span class="dim covItem">'+de+' → '+ate+'</span>'+
+    '<span class="pill covItem '+(cVal>=95?'g':'w')+'">valor <b>'+cVal+'%</b></span>'+
+    '<span class="pill covItem '+(cItem>=95?'g':'w')+'">valor/item <b>'+cItem+'%</b></span>'+
+    '<span class="pill covItem '+(cUF>=95?'g':'w')+'" title="dos pedidos já bipados">UF <b>'+cUF+'%</b></span>'+
+    '<span class="pill covItem '+(cNF>=95?'g':'w')+'" title="dos pedidos já bipados">nota fiscal <b>'+cNF+'%</b></span>'+
+    '<span class="pill covItem '+(cTar>=95?'g':'w')+'" title="pedidos com a comissão REAL do marketplace (o resto usa a % configurada)">tarifa real <b>'+cTar+'%</b></span>'+
+    ((cVal<90||cItem<90)?'<span class="warn" style="font-size:11px" title="são vendas cujo detalhe ainda não chegou do Bling — entra sozinho nas próximas rodadas">← detalhe de algumas vendas ainda chegando</span>':'');
+
+  const kpi=(kc,ic,l,v,s)=>'<div class="kpi" style="--kc:'+kc+'"><span class="ic">'+ic+'</span><div class="l">'+l+'</div><div class="v">'+v+'</div>'+(s?'<div class="s">'+s+'</div>':'')+'</div>';
+  // d47: "dia completo" = bipados do período + vendas do Bling AINDA não bipadas atribuídas ao período (canceladas fora)
+  // Este é o número comparável ao Jodda — os demais cards são só a parte JÁ BIPADA (margem fechada).
+  // ── CÁLCULO DO PERÍODO ──────────────────────────────────────────────────────────
+  // Roda sobre TODAS as vendas aprovadas do período (bipadas + ainda não bipadas),
+  // exatamente a mesma população do card "Faturamento Total". Antes só as bipadas
+  // com vprod_nf entravam — por isso imposto/custo/margem não batiam com o faturamento.
+  const TODOS = PER.concat(AGD);
+  const MC = (function(){
+    let rec=0, imp=0, impMC=0, tar=0, cus=0, cusMC=0, pedOk=0, semCfg=0, cusUn=0, unTot=0, tReais=0, frV=0, fRecP=0, pedImp=0, semItens=0, semDados=0, credML=0;
+    const semCustoSet = new Set();   // SKUs sem custo cadastrado
+    const semAliqSet = new Set();    // meses sem alíquota configurada
+    const semTaxaPed = [];           // pedidos sem taxa do canal
+    const semDetPed  = [];           // pedidos sem detalhe (itens) ainda
+    // valor dos PRODUTOS: da nota quando existe; senão a soma dos itens; senão o total do pedido
+    const vProd = h => {
+      if(h.vprod_nf!=null && isFinite(Number(h.vprod_nf))) return Number(h.vprod_nf);
+      const soma = (h.itens||[]).reduce((a,it)=> a + ((it.valor_total!=null&&isFinite(Number(it.valor_total)))?Number(it.valor_total):0), 0);
+      if(soma>0) return Math.round(soma*100)/100;
+      return (h.valor!=null&&isFinite(Number(h.valor))) ? Number(h.valor) : null;
     };
-    let foraDoPeriodo = 0;
-    for(let pg=1; pg<=500; pg++){
-      _backfill.pagina = pg;
-      const r = await blingGet('/pedidos/vendas?dataInicial='+de+'&dataFinal='+ate+'&pagina='+pg+'&limite=100');
-      const lista = (r && r.ok && r.data && r.data.data) || [];
-      if(!lista.length) break;
-      for(const p of lista){
-        if(!p || p.id==null) continue;
-        const dtP = String(p.data||'').slice(0,10);
-        if(dtP && (dtP < de || dtP > ate)){ foraDoPeriodo++; continue; }   // TRAVA: só o período pedido (caso o filtro do Bling falhe)
-        if(/cancel/i.test(String((p.situacao&&(p.situacao.valor||p.situacao.nome))||''))) continue;   // pula cancelados
-        _backfill.pedidos++;
-        let det=null;
-        try { const rd = await blingGet('/pedidos/vendas/'+p.id); det = (rd&&rd.ok&&rd.data&&rd.data.data)||null; } catch(e){}
-        await dorme(430);   // rate limit do Bling (~2,3 req/s)
-        if(!det){ _backfill.erros++; continue; }
-        const itens = (det.itens||[]).map(i=>({ sku:((i.codigo||(i.produto&&i.produto.codigo)||'')+'').trim()||null, desc:((i.descricao||(i.produto&&i.produto.nome)||'')+'').slice(0,180), qtd:Number(i.quantidade||1), vt: Math.round(Number(i.valor||0)*Number(i.quantidade||1)*100)/100 }));
-        if(!itens.length) continue;
-        const total = Number(det.total)||0;
-        const somaProd = itens.reduce((s,i)=>s+i.vt,0) || 1;
-        let comissao = Number((det.taxas&&det.taxas.taxaComissao)||0);
-        let frete = Number((det.taxas&&det.taxas.custoFrete)||0);
-        const dataV = (String(det.dataEmissao||det.data||p.data||'').slice(0,10)) || null;
-        const imposto = total * aliqBk((dataV||'').slice(0,7))/100;
-        const ljId = String((det.loja&&det.loja.id)||(p.loja&&p.loja.id)||'');
-        const nl = det.numeroPedidoLoja || p.numeroLoja || null;
-        const ehOlist = (ljId === '203301094') || /^ORD/i.test(String(nl||''));   // OLIST: loja fixa no Bling + nº começa com "ORD"
-        const canal = ehOlist ? 'olist' : (LOJA_MKT[ljId] || _inferCanal(nl));
-        if(ehOlist && (!comissao || comissao<=0)) comissao = Math.round(somaProd * 22 / 100 * 100)/100;   // OLIST cobrava ~22% (do Jodda) — o Bling não guarda a taxa dela
-        if(ehOlist && (!frete || frete<=0)) frete = 12;   // OLIST: motoboy R$12/pedido (Diego) — o Bling não tem o frete de envio dela
-        const numPed = String(det.numero!=null?det.numero:(p.numero!=null?p.numero:p.id));
-        for(const it of itens){
-          const frac = it.vt/somaProd;
-          const cU = (custos[it.sku] && custos[it.sku].custo!=null) ? Number(custos[it.sku].custo) : null;
-          const custoItem = cU!=null ? Math.round(cU*it.qtd*100)/100 : null;
-          const comItem = Math.round(comissao*frac*100)/100;
-          const freteItem = Math.round(frete*frac*100)/100;
-          const impItem = Math.round(imposto*frac*100)/100;
-          const margem = custoItem!=null ? Math.round((it.vt - custoItem - comItem - freteItem - impItem)*100)/100 : null;
-          buffer.push({ empresa, numero_pedido:numPed, numero_loja:nl, canal, data_venda:dataV, sku:it.sku, descricao:it.desc, quantidade:it.qtd, valor_produto:it.vt, valor_nota:Math.round(total*frac*100)/100, custo:custoItem, comissao:comItem, frete_vendedor:freteItem, imposto:impItem, margem });
-          _backfill.itens++;
-        }
-        if(buffer.length >= 200) await flush();
+    // custo do item: o backend manda pronto (banco _custos.json); SKUINFO fica de reserva
+    const custoIt = it => {
+      if(it.custo!=null && isFinite(Number(it.custo))) return Number(it.custo);
+      const info = SKUINFO[it.sku];
+      return (info && info.custo!=null && isFinite(Number(info.custo))) ? Number(info.custo) : null;
+    };
+    TODOS.forEach(h=>{
+      const rp   = vProd(h);
+      const tot  = (h.valor!=null&&isFinite(Number(h.valor))) ? Number(h.valor) : rp;
+      const aliq = aliqDe(diaVenda(h).slice(0,7));
+      // IMPOSTO incide sobre TODA venda aprovada — não depende de ter tarifa ou custo
+      let impPed = 0;
+      if(aliq!=null && tot!=null){ impPed = tot*aliq/100; imp += impPed; pedImp++; }
+      else if(aliq==null) semAliqSet.add(diaVenda(h).slice(0,7));
+      // CUSTO por item — um pedido só é COMPLETO se tem itens E todos com custo conhecido
+      let cusPed = 0, custoCompleto = ((h.itens||[]).length > 0);
+      if(!((h.itens||[]).length)){ semItens++; if(semDetPed.length<40) semDetPed.push(h.numero||h.id); }
+      (h.itens||[]).forEach(it=>{
+        const q = Number(it.qtd||1); unTot += q;
+        const c = custoIt(it);
+        if(c!=null){ cusPed += c*q; cusUn += q; } else { custoCompleto = false; if(it.sku) semCustoSet.add(String(it.sku)); }
+      });
+      // MARGEM: precisa de valor + alíquota + (tarifa real OU % configurada do canal)
+      if(rp==null){ semCfg++; return; }
+      const tReal = (h.tarifa_ml!=null && isFinite(Number(h.tarifa_ml))) ? Number(h.tarifa_ml) : ((h.taxa_mkt!=null && isFinite(Number(h.taxa_mkt)) && Number(h.taxa_mkt)>0) ? Number(h.taxa_mkt) : null);
+      let tx = CFG.taxas[canalKey(h.marketplace)];
+      if(canalKey(h.marketplace)==='madeira' && tx==null) tx = 17.6;
+      if(aliq==null || (tReal==null && tx==null)){ semCfg++; if(semTaxaPed.length<40) semTaxaPed.push((h.numero||h.id)+' ('+nomeCanal(canalKey(h.marketplace))+')'); return; }
+      if(!custoCompleto){ semDados++; return; }   // sem custo fechado: fora da margem
+      const rCan = (h.renda_canal!=null && isFinite(Number(h.renda_canal)) && Number(h.renda_canal)>0) ? Number(h.renda_canal) : null;
+      if(rCan!=null){ rec += rCan; }
+      else {
+        rec += (tot!=null && tot<rp ? tot : rp);
+        tar += (tReal!=null ? tReal : (rp*tx/100 + (canalKey(h.marketplace)==='madeira'?5:0)));
+        if(h.frete_recebido!=null && isFinite(Number(h.frete_recebido)) && Number(h.frete_recebido)>0) fRecP += Number(h.frete_recebido);
       }
-      if(lista.length < 100) break;
-      await dorme(300);
-    }
-    await flush();
-    _backfill.fora = foraDoPeriodo;
-    _backfill.fase = 'concluido';
-  } catch(e){ _backfill.fase='erro'; _backfill.msg = String(e.message||e); }
-  _backfill.rodando = false; _backfill.fim = new Date().toISOString();
+      cus += cusPed; impMC += impPed; cusMC += cusPed; pedOk++;
+      if(h.credito_ml!=null && isFinite(Number(h.credito_ml))) credML += Number(h.credito_ml);   // estorno do ML (a Análise já somava)
+      if(tReal!=null) tReais++;
+      if(h.frete_ml!=null && isFinite(Number(h.frete_ml))) frV += Number(h.frete_ml);
+      else if(h.flex){ const fx=flexDe(canalKey(h.marketplace)); if(fx!=null && fx>0) frV += fx; }
+      else if(h.frete_mkt!=null && isFinite(Number(h.frete_mkt)) && Number(h.frete_mkt)>0) frV += Number(h.frete_mkt);
+    });
+    return { rec, imp, impMC, tar, cus, cusMC, pedOk, semCfg, cusUn, unTot, tReais, frV, fRecP, credML, pedImp, semItens, semDados, semCustoSkus: Array.from(semCustoSet),
+             semAliqMeses: Array.from(semAliqSet), semTaxaPed, semDetPed,
+             mc: rec-impMC-tar-cusMC-frV+fRecP+credML, temCfg: !!Object.keys(CFG.taxas).length };
+  })();
+  const usaHist = !!(HIST && HIST.de===de && HIST.ate===ate && HIST.totais);   // período longo: os números vêm do histórico
+  const totPed = usaHist ? HIST.totais.pedidos : (PER.length + AGD.length);
+  // 🔄 HOJE: confere cancelamentos no marketplace já na abertura (o automático de 10 min só viria depois)
+  (function(){
+    if(periodo!=='dia' || _stMkt) return;
+    const ch2 = 'mkt|'+de+'|'+ate;
+    if(_autoDet[ch2]) return;
+    _autoDet[ch2] = 1;
+    setTimeout(()=>checarCancelados(true), 900);
+  })();
+  // 📚 período longo → busca o agregado do histórico (Supabase)
+  if(precisaHistorico(de)){ if(!HIST || HIST.de!==de || HIST.ate!==ate) carregarHistorico(de, ate); }
+  else if(HIST){ HIST = null; }
+  // ⚡ AUTOMÁTICO: se o período que está na tela tem pedido sem detalhe, busca sozinho (1x por período)
+  (function(){
+    if(!MC.semItens || _compDet) return;
+    if(periodo!=='dia') return;   // 28/07: só no HOJE. Em períodos maiores isso disparava centenas
+                                  // de buscas e deixava a tela "carregando" por minutos (o caso do Ontem).
+    const chave = de+'|'+ate;
+    if(_autoDet[chave]) return;
+    _autoDet[chave] = 1;
+    setTimeout(()=>completarDetalhes(), 400);
+  })();
+  $('kpis').innerHTML =
+    kpi('#34d399','💰','Faturamento Total', BRL(usaHist?HIST.totais.faturamento:fat), (usaHist?'📚 histórico · ':'')+'vendas aprovadas no período · '+N(totPed)+' pedidos') +
+    kpi('#f59e0b','🧾','Impostos', BRL(usaHist?HIST.totais.imposto:MC.imp), (MC.imp>0&&fat>0?('Simples · '+(Math.round(MC.imp/fat*10000)/100).toString().replace('.',',')+'% do faturamento'):'Simples nacional')+(MC.pedImp<totPed?('<div style="font-size:10px;margin-top:2px"><span class="warn">⚠ '+N(totPed-MC.pedImp)+' pedido(s) sem alíquota</span> — falta cadastrar o mês <b style="color:#fbbf24">'+MC.semAliqMeses.map(esc).join(', ')+'</b> na seção Impostos, lá embaixo</div>'):'')) +
+    kpi('#a78bfa','📦','Custo de produtos', BRL(usaHist?HIST.totais.custo:MC.cus),
+      usaHist ? (HIST.totais.un_sem_custo ? avisoCom(N(HIST.totais.un_sem_custo)+' un. sem custo no período', (HIST.totais.skus_sem_custo||[]), 'cadastre o preço de custo destes SKUs no Bling e rode o custo-sync') : (N(HIST.totais.unidades)+' unidades vendidas'))
+      : MC.semDados ? ('<span class="warn">⚠ '+N(MC.semDados)+' pedido(s) fora da conta (custo ainda não fechado)</span>')
+      : (!MC.unTot ? 'sem itens no período'
+      : (MC.cusUn>=MC.unTot ? (N(MC.unTot)+' unidades vendidas')
+      : avisoCom('sem custo em '+N(MC.unTot-MC.cusUn)+' de '+N(MC.unTot)+' un.', MC.semCustoSkus, 'cadastre o preço de custo destes SKUs no Bling e rode o custo-sync')))) +
+    (MC.temCfg
+      ? '<div class="kpi" style="--kc:#14b8a6"><span class="ic">💎</span><div class="l">Lucro Bruto (M.C.)</div><div class="v '+((usaHist?HIST.totais.margem:MC.mc)>=0?'ok':'bad')+'">'+BRL(usaHist?HIST.totais.margem:MC.mc)+((usaHist?HIST.totais.faturamento:fat)>0?'<span style="font-size:13px;opacity:.8;font-weight:600"> · '+(Math.round((usaHist?HIST.totais.margem:MC.mc)/(usaHist?HIST.totais.faturamento:fat)*1000)/10).toString().replace('.',',')+'%</span>':'')+'</div><div class="s">'+(usaHist?'📚 do histórico completo do período':(MC.semDados?'<span class="warn">⚠ '+N(MC.pedOk)+' de '+N(totPed)+' pedidos com custo fechado (bate com a Análise)</span>':(MC.unTot&&MC.cusUn<MC.unTot?'<span class="warn">⚠ falta cadastrar o custo de '+N(MC.unTot-MC.cusUn)+' un. — o lucro real fica um pouco menor</span>':(MC.semCfg?avisoCom(N(MC.semCfg)+' pedido(s) sem taxa do canal', MC.semTaxaPed, 'configure a % do canal na seção ⚙️, lá embaixo'):'venda − imposto − comissão − frete − custo'))))+'</div></div>'
+      : '<div class="kpi" style="--kc:#64748b;cursor:pointer" onclick="document.getElementById(\'cfgBox\').scrollIntoView({behavior:\'smooth\'})"><span class="ic">💎</span><div class="l">Lucro Bruto (M.C.)</div><div class="v dim">—</div><div class="s warn">⚙️ configure as taxas por canal abaixo</div></div>') +
+    kpi('var(--ac)','📊','Pedidos', N(totPed), (!usaHist && MC.semItens)?(avisoCom(N(MC.semItens)+' sem detalhe', MC.semDetPed, 'o sistema busca sozinho; dá pra forçar no botão ao lado')+' <button onclick="completarDetalhes()" title="o dashboard já busca sozinho ao abrir o período — este botão é só pra tentar de novo" style="background:#1d4ed8;color:#fff;border:0;border-radius:6px;padding:2px 7px;font-size:10px;font-weight:700;cursor:pointer">↻ tentar de novo</button><div id="avisoDet" style="font-size:10px;margin-top:2px"></div>'):(MC.unTot>0?('<b style="font-size:13px;color:var(--txt);opacity:1">'+N(usaHist?HIST.totais.unidades:MC.unTot)+' unidades vendidas</b>'):'sem itens no período')) +
+    kpi('var(--warn)','🎯','Ticket médio', BRL((usaHist?HIST.totais.faturamento:fat)/(totPed||1)), 'faturamento ÷ pedidos') +
+    (VENDAS.length?'<div class="kpi" style="--kc:#38bdf8"><span class="ic">🛰</span><div class="l">Ao vivo</div><div class="v"><button onclick="sincVendas(this)" style="background:#38bdf822;border:1px solid #38bdf855;color:#7dd3fc;border-radius:8px;padding:5px 12px;cursor:pointer;font-weight:700;font-size:14px">🔄 atualizar</button></div><div class="s"><span id="ultAtualiz">atualiza sozinho</span> · a cada 3 min</div></div>':'') +
+    '<div class="kpi" id="kMargem" style="display:none"></div>';
+
+  const dias = Object.keys(porDia).sort();
+  const labels = dias.map(d=>d.slice(8,10)+'/'+d.slice(5,7));
+  desenharCharts(labels, dias.map(d=>porDia[d].ped), dias.map(d=>Math.round(porDia[d].fat*100)/100));
+
+  if(usaHist){ porCanal = {}; for(const c of Object.keys(HIST.canais)){ const h2=HIST.canais[c]; porCanal[c]={ped:h2.pedidos, fat:h2.fat, comValor:h2.pedidos, flex:0}; } }
+  const canais = Object.keys(porCanal).sort((a,b)=>porCanal[b].ped-porCanal[a].ped);
+  const NOME = {mercadolivre:'Mercado Livre',ml:'Mercado Livre',shopee:'Shopee',magalu:'Magalu',amazon:'Amazon',tiktok:'TikTok',madeira:'MadeiraMadeira',leroy:'Leroy Merlin',outro:'Outro'};
+  $('tCanal').innerHTML = '<tr><th>Canal</th><th class="num">Pedidos</th><th class="num">%</th><th class="num">Faturamento</th><th class="num">Ticket médio</th><th class="num">⚡ Flex</th></tr>'+
+    canais.map(mk=>{const c=porCanal[mk];const p=pc(c.ped,totPed||PER.length);
+      return '<tr><td><b>'+esc(NOME[mk]||mk)+'</b></td>'+
+      '<td class="num"><div style="display:flex;align-items:center;gap:8px;justify-content:flex-end"><div class="bar" style="width:64px;flex:none"><i style="width:'+p+'%"></i></div><b>'+N(c.ped)+'</b></div></td>'+
+      '<td class="num dim">'+p+'%</td>'+
+      '<td class="num ok">'+(c.fat?BRL(c.fat):'<span class="dim">—</span>')+'</td>'+
+      '<td class="num">'+(c.comValor?BRL(c.fat/c.comValor):'<span class="dim">—</span>')+'</td>'+
+      '<td class="num">'+(c.flex?'<span class="warn">'+c.flex+'</span>':'<span class="dim">·</span>')+'</td></tr>';}).join('');
+
+  // 📚 período longo: o ranking vem do histórico (Supabase), não do cache local
+  const prods = usaHist
+    ? HIST.skus.map(x=>({ sku:x.sku, desc:x.desc, qtd:x.un, qtdV:x.un, fat:x.fat, custo:x.cus, qtdC:x.un, mc:x.mar, qtdM:x.un }))   // 27/07: era 'mcQtd' (nome errado) e a tela mostrava "0/241 un. c/ margem"
+    : Object.values(porProd);
+  // d56: curva ABC do PERÍODO pesquisado — ordena por faturamento e acumula: A = até 80% do faturamento · B = 80–95% · C = o resto (sem faturamento = C)
+  (function(){
+    const pf = prods.slice().sort((a,b)=>(b.fat||0)-(a.fat||0));
+    const ft = pf.reduce((s2,p2)=>s2+(p2.fat||0),0)||1;
+    let ac = 0;
+    pf.forEach(p2=>{ ac += (p2.fat||0); const pc2 = ac/ft; p2.curva = (p2.fat>0 ? (pc2<=0.80?'A':(pc2<=0.95?'B':'C')) : 'C'); });
+  })();
+  const _cvR = {A:1,B:2,C:3};
+  const ord = prods.slice().sort((a,b)=>{
+    if(sortProd.col==='fat') return cmpNull(a.fat||0,b.fat||0,sortProd.dir);
+    if(sortProd.col==='custo') return cmpNull(a.custo||0,b.custo||0,sortProd.dir);
+    if(sortProd.col==='mcusto') return cmpNull((a.custo>0&&a.mc!=null?a.mc/a.custo:null),(b.custo>0&&b.mc!=null?b.mc/b.custo:null),sortProd.dir);   // margem sobre custo %
+    if(sortProd.col==='mcpct') return cmpNull((a.fat>0&&a.mc!=null?a.mc/a.fat:null),(b.fat>0&&b.mc!=null?b.mc/b.fat:null),sortProd.dir);   // margem de contribuição %
+    if(sortProd.col==='mc') return cmpNull((a.mc!=null?a.mc:null),(b.mc!=null?b.mc:null),sortProd.dir);   // d55: rank por 💎
+    if(sortProd.col==='curva'){ const dv=(_cvR[a.curva]||9)-(_cvR[b.curva]||9); return dv!==0 ? dv*(sortProd.dir===-1?1:-1) : (b.fat||0)-(a.fat||0); }   // d56: A↔C, empate decide o faturamento
+    return cmpNull(a.qtd,b.qtd,sortProd.dir);
+  });
+  const fatTot = prods.reduce((s,p)=>s+p.fat,0)||1;
+  const mcTot = prods.reduce((s,p)=>s+(p.mc!=null?p.mc:0),0)||1;   // pra a coluna "% da M.C. total"
+  $('tProd').innerHTML = '<tr><th>#</th><th>Produto</th>'+
+    '<th class="num sort" onclick="setSortProd(\'curva\')" title="curva ABC do período pesquisado: A concentra 80% do faturamento, B até 95%, C o resto">Curva'+seta(sortProd,'curva')+'</th>'+
+    '<th class="num sort" onclick="setSortProd(\'qtd\')">Unid.'+seta(sortProd,'qtd')+'</th>'+
+    '<th class="num sort" onclick="setSortProd(\'fat\')">Faturamento'+seta(sortProd,'fat')+'</th>'+
+    '<th class="num sort" onclick="setSortProd(\'custo\')" title="custo total do SKU no período (custo unitário × unidades vendidas)">Custo'+seta(sortProd,'custo')+'</th>'+
+    '<th class="num sort" onclick="setSortProd(\'mc\')" title="Lucro Bruto = margem de contribuição rateada dos pedidos deste SKU no período (o que sobra depois de imposto, comissão e custo)">💎 Lucro Bruto'+seta(sortProd,'mc')+'</th>'+
+    '<th class="num sort" onclick="setSortProd(\'mcpct\')" title="margem de contribuição ÷ faturamento do SKU (quanto sobra por real vendido)">M.C. %'+seta(sortProd,'mcpct')+'</th>'+
+    '<th class="num sort" onclick="setSortProd(\'mcusto\')" title="Retorno sobre o custo: quanto de lucro cada R$1 gasto no produto devolve. Ex.: 200% = pra cada R$1 de custo, o produto gera R$2 de lucro. Quanto maior, mais eficiente é o dinheiro parado nesse SKU">Retorno/custo'+seta(sortProd,'mcusto')+'</th>'+
+    '<th class="num" title="quanto este SKU representa da M.C. total do período">% M.C.</th>'+
+    '<th class="num">% fat.</th><th style="width:12%"></th></tr>'+
+    ord.slice(0,50).map((p,i)=>{
+      const pf=Math.round(p.fat/fatTot*100);
+      const parcial = p.qtdV < p.qtd;
+      const rk = i<3 ? 'rank r'+(i+1) : 'rank';
+      return '<tr><td><span class="'+rk+'">'+(i+1)+'</span></td>'+
+      '<td><div class="sku">'+esc(p.sku)+'</div><div class="desc">'+esc(p.desc)+'</div></td>'+
+      '<td class="num"><span style="font-weight:800;padding:1px 8px;border-radius:6px;font-size:11px;'+(p.curva==='A'?'background:#065f4633;color:#34d399;border:1px solid #34d39955':(p.curva==='B'?'background:#78350f33;color:#fbbf24;border:1px solid #fbbf2455':'background:#33415555;color:#94a3b8;border:1px solid #47556955'))+'" title="'+(p.curva==='A'?'curva A — está nos SKUs que somam 80% do faturamento do período':(p.curva==='B'?'curva B — faixa de 80% a 95% do faturamento acumulado':'curva C — cauda: últimos 5% do faturamento'))+'">'+p.curva+'</span></td>'+
+      '<td class="num">'+N(p.qtd)+'</td>'+
+      '<td class="num ok">'+(p.fat?BRL(p.fat):'<span class="dim">—</span>')+(parcial&&p.fat?'<span class="cvg">'+N(p.qtdV)+'/'+N(p.qtd)+' un. c/ valor</span>':'')+'</td>'+
+      '<td class="num">'+(p.custo?BRL(p.custo):'<span class="dim">—</span>')+(((p.qtdC||0)<p.qtd&&p.custo)?'<span class="cvg">'+N(p.qtdC||0)+'/'+N(p.qtd)+' un. c/ custo</span>':'')+'</td>'+
+      '<td class="num" style="font-weight:700">'+(p.mc!=null?('<span class="'+(p.mc>=0?'ok':'bad')+'">'+BRL(p.mc)+'</span>'+((p.qtdM||0)<p.qtd?'<span class="cvg">'+N(p.qtdM||0)+'/'+N(p.qtd)+' un. c/ margem</span>':'')):'<span class="dim" title="pedidos deste SKU ainda sem margem fechada (custo/tarifa)">—</span>')+'</td>'+
+      '<td class="num">'+((p.mc!=null&&p.fat>0)?('<span class="'+(p.mc>=0?'ok':'bad')+'">'+Math.round(p.mc/p.fat*100)+'%</span>'):'<span class="dim">—</span>')+'</td>'+
+      '<td class="num">'+((p.mc!=null&&p.custo>0)?('<span class="'+(p.mc>=0?'ok':'bad')+'">'+Math.round(p.mc/p.custo*100)+'%</span>'):'<span class="dim">—</span>')+'</td>'+
+      '<td class="num dim">'+(p.mc!=null?Math.round((p.mc||0)/mcTot*100)+'%':'—')+'</td>'+
+      '<td class="num dim">'+(p.fat?pf+'%':'—')+'</td>'+
+      '<td><div class="bar"><i class="g" style="width:'+pf+'%"></i></div></td></tr>';
+    }).join('');
+  const semFatUn = prods.reduce((s,p)=>s+(p.qtd-p.qtdV),0);
+  $('prodAviso').innerHTML = semFatUn ? '<div class="aviso">⚠️ <b>'+N(semFatUn)+' unidades</b> do período ainda sem valor gravado — o faturamento por produto soma só as valoradas (etiqueta âmbar "x/y un."). Complete o <b>backfill de detalhes</b>.</div>' : '';
+
+  const ufs = Object.keys(porUF).sort((a,b)=>porUF[b].ped-porUF[a].ped);
+  $('tUF').innerHTML = '<tr><th>UF</th><th class="num">Pedidos</th><th class="num">%</th><th class="num">Faturamento</th><th style="width:26%"></th></tr>'+
+    (ufs.slice(0,15).map(u=>{const c=porUF[u];const p=pc(c.ped,comUF||1);
+      return '<tr><td><b>'+esc(u)+'</b></td><td class="num">'+N(c.ped)+'</td><td class="num dim">'+p+'%</td>'+
+      '<td class="num ok">'+(c.fat?BRL(c.fat):'<span class="dim">—</span>')+'</td>'+
+      '<td><div class="bar"><i style="width:'+p+'%"></i></div></td></tr>';}).join('')
+    || '<tr><td class="dim" colspan="5">nenhum pedido com UF no período</td></tr>');
+  renderMapaUF(porUF);
+  $('ufAviso').innerHTML = ((PER.length+AGD.length)-comUF) ? '<div class="aviso">⚠️ '+N((PER.length+AGD.length)-comUF)+' pedido(s) sem UF — o backfill de detalhes preenche o retroativo.</div>' : '';
+
+  renderProjChips(); renderProjecao();
+  renderCfg();
+  renderGrafico();
+  renderAnalise();
+  renderPrevisao(); carregarPrevisao();
+  ajustaSticky();
 }
 
-const ULTIMO_DIA = { '01':'31','02':'28','03':'31','04':'30','05':'31','06':'30','07':'31','08':'31','09':'30','10':'31','11':'30','12':'31' };
-let _backfillAno = { rodando:false, mesAtual:null, feitos:[], inicio:null, fim:null };
-async function backfillAnoTodo(ateMes){
-  if(_backfillAno.rodando || _backfill.rodando) return;
-  _backfillAno = { rodando:true, mesAtual:null, feitos:[], inicio:new Date().toISOString(), fim:null };
-  const meses = ['01','02','03','04','05','06','07','08','09','10','11','12'].filter(m => m <= ateMes);
-  for(const m of meses){
-    _backfillAno.mesAtual = '2026-'+m;
-    await backfillVendas('2026-'+m+'-01', '2026-'+m+'-'+ULTIMO_DIA[m], 'girassol');   // espera cada mês terminar antes do próximo
-    _backfillAno.feitos.push({ mes:'2026-'+m, pedidos:_backfill.pedidos, itens:_backfill.itens, gravados:_backfill.gravados, erros:_backfill.erros });
-    await new Promise(r=>setTimeout(r,2500));
+function desenharCharts(labels, sPed, sFat){
+  if(!window.Chart){
+    const c1=$('cPed'); if(c1&&c1.parentElement) c1.parentElement.innerHTML='<div class="dim" style="padding:30px;text-align:center">gráfico indisponível (CDN bloqueado)</div>';
+    return;
   }
-  _backfillAno.rodando = false; _backfillAno.mesAtual = null; _backfillAno.fim = new Date().toISOString();
+  const gopts = (fmt) => ({
+    responsive:true, maintainAspectRatio:false,
+    plugins:{ legend:{display:false},
+      tooltip:{backgroundColor:'#0d1326',borderColor:'#2d3a5e',borderWidth:1,titleColor:'#e7ecf6',bodyColor:'#8b96b3',
+               callbacks:{ label: ctx => fmt(ctx.parsed.y) } } },
+    scales:{ x:{ grid:{color:'#ffffff08'}, ticks:{color:'#5a6485',font:{size:10},maxRotation:0,autoSkip:true} },
+             y:{ grid:{color:'#ffffff0a'}, ticks:{color:'#5a6485',font:{size:10}, callback:v=>fmt(v)}, beginAtZero:true } }
+  });
+  if(chPed) chPed.destroy();
+  chPed = new Chart($('cPed'), { type:'bar',
+    data:{ labels, datasets:[{ data:sPed, backgroundColor:'#6366f1cc', hoverBackgroundColor:'#818cf8', borderRadius:5, maxBarThickness:26 }] },
+    options: gopts(v=>N(v)+' ped.') });
+  if(chFat) chFat.destroy();
+  chFat = new Chart($('cFat'), { type:'line',
+    data:{ labels, datasets:[{ data:sFat, borderColor:'#22c55e', backgroundColor:'#22c55e22', fill:true, tension:.35,
+                               pointRadius:2.5, pointBackgroundColor:'#22c55e', borderWidth:2 }] },
+    options: gopts(v=>BRLk(Number(v))) });
 }
 
-async function vendasSync() {
-  if (_vsy.rodando) return;
-  _vsy.rodando = true; _vsy.erro = null; _vsy.fase = 'listagem';
-  try {
-    const isoD = dt => dt.toISOString().slice(0, 10);
-    const hoje = new Date();
-    const ini = new Date(hoje); ini.setDate(ini.getDate() - 3);
-    const fim = new Date(hoje); fim.setDate(fim.getDate() + 1);   // janela [hoje-3, hoje+1] — evita o bug do mesmo-dia do Bling
-    const F = path.join(CACHE_DIR, '_vendas_dia.json');
-    const MAG_EMPRESA = process.env.MAGALU_EMPRESA || 'girassol';   // qual empresa Magalu este serviço consulta (girassol/good/amb)
-    const atual = readJson(F, {});
-    let paginas = 0;
-    for (let pg = 1; pg <= 20; pg++) {
-      // 28/07: idem — antes o vendasSync trazia os mais recentes de QUALQUER data e só não quebrava
-      // por causa do limite de páginas + filtro no frontend. Agora a janela vale de verdade.
-      const r = await blingGet('/pedidos/vendas?dataInicial=' + isoD(ini) + '&dataFinal=' + isoD(fim) + '&pagina=' + pg + '&limite=100');
-      const lista = (r && r.ok && r.data && r.data.data) || [];
-      if (!lista.length) break;
-      paginas++;
-      for (const p of lista) {
-        if (!p || p.id == null) continue;
-        const nl = p.numeroPedidoLoja || p.numeroLoja || null;   // a LISTAGEM do Bling manda numeroLoja (o detalhe manda numeroPedidoLoja)
-        const ljId = String((p.loja && p.loja.id) || '');
-        // 🐛 27/07 — BUG GRAVE CORRIGIDO: aqui o registro era SUBSTITUÍDO inteiro a cada rodada (5 min),
-        // apagando tudo que as fases seguintes tinham enriquecido: itens (it), flag det, tarifa/frete REAIS
-        // do ML, hora da venda, dados da Shopee e a marca de cancelado no marketplace. Resultado: a cada
-        // rodada quase tudo voltava à estaca zero e só ~120 pedidos eram reconstruídos — por isso os
-        // pedidos ficavam eternamente sem detalhe/margem e o "cancelado" sumia sozinho.
-        // Agora MESCLA: a listagem só atualiza os campos que ela realmente conhece.
-        const _ant = atual[String(p.id)] || {};
-        const _sitBling = (p.situacao && (p.situacao.valor || p.situacao.nome)) || null;
-        atual[String(p.id)] = Object.assign({}, _ant, {
-          id: p.id, numero: p.numero != null ? p.numero : null,
-          numero_loja: nl || _ant.numero_loja || null,
-          marketplace: LOJA_MKT[ljId] || _ant.marketplace || _inferCanal(nl),   // canal OFICIAL pela loja do Bling; formato do nº é só fallback
-          data: (p.data || '').slice(0, 10) || _ant.data || null,
-          total: (p.total != null && isFinite(Number(p.total))) ? Number(p.total) : (_ant.total != null ? _ant.total : null),
-          cliente: (p.contato && p.contato.nome) || _ant.cliente || '',
-          // se já sabemos que o MARKETPLACE cancelou, não deixa a situação do Bling apagar isso
-          situacao: (_ant.cancelado_mkt && !/cancel/i.test(String(_sitBling || ''))) ? (_ant.situacao || _sitBling) : _sitBling,
-          situacao_id: (p.situacao && p.situacao.id) || null,
-          loja_id: (p.loja && p.loja.id) || null,
-          atualizado_em: new Date().toISOString()
-        });
-      }
-      if (lista.length < 100) break;
-      await new Promise(r2 => setTimeout(r2, 450));
-    }
-    writeJson(F, atual);   // b12: grava JÁ após a fase 1 — o 🔄 do dashboard espera 6s e recarrega; antes, o arquivo só era gravado no fim da rodada (~1 min) e o botão sempre mostrava a rodada anterior
-    _vsy.fase = 'detalhes';
-    // b21: esta fase virou a PRIMEIRA depois da listagem — é ela que dá MARGEM às vendas ainda não bipadas
-    // (itens → custo/R$ produtos; taxas → tarifa). Estava por último atrás de NF/Shopee e pedido novo ficava
-    // sem margem nenhuma até o fim da rodada (ou pra sempre, se a rodada não terminasse).
-    // fase 2: DETALHE dos ainda não-bipados (itens → custo/R$ produtos; taxas → tarifa/frete) — margem antes da bipagem
-    try {
-      const confS = readJson(CONFERIDOS_FILE, {});
-      const bipN = new Set(Object.values(confS).map(c => String(c && c.numero)));
-      let _tkV=null; try{ const {garantirTokenML:_g2}=require('../girassol/mlTokenManager'); _tkV=await _g2(); }catch(e){}   // hora real do ML nas não-bipadas
-      const alvosDet = Object.values(atual)
-        .filter(v => v && !v.det && v.numero != null && !bipN.has(String(v.numero)) && !/cancel/i.test(String(v.situacao || '')))
-        .sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')) || Number(b.numero || 0) - Number(a.numero || 0))   // b30: mais RECENTES primeiro. Com 800+ vendas na janela, os recentes (que o Diego abre pra ver) ficavam no FIM da fila de inserção e nunca ganhavam detalhe/margem — agora entram primeiro.
-        .slice(0, 120);   // b30: 90→120 por rodada pra drenar o volume mais rápido
-      let _detN = 0;
-      for (const v of alvosDet) {
-        const rd = await blingGet('/pedidos/vendas/' + v.id);
-        const det = (rd && rd.ok && rd.data && rd.data.data) || null;
-        if (det) {
-          if (!v.numero_loja && det.numeroPedidoLoja) v.numero_loja = det.numeroPedidoLoja;   // detalhe traz numeroPedidoLoja
-          if (!v.marketplace || v.marketplace === 'outro') { const lj2 = String((det.loja && det.loja.id) || ''); v.marketplace = LOJA_MKT[lj2] || _inferCanal(v.numero_loja); }
-          v.it = (det.itens || []).map(i2 => ({ sku: (i2.codigo || (i2.produto && i2.produto.codigo) || '').trim() || null, qtd: Number(i2.quantidade || 1), vt: Math.round(Number(i2.valor || 0) * Number(i2.quantidade || 1) * 100) / 100 }));
-          const tc = det.taxas && Number(det.taxas.taxaComissao); if (isFinite(tc) && tc > 0) v.taxa_mkt = Math.round(tc * 100) / 100;
-          const cf = det.taxas && Number(det.taxas.custoFrete); if (isFinite(cf) && cf > 0) v.frete_mkt = Math.round(cf * 100) / 100;
-          if (det.situacao && (det.situacao.valor || det.situacao.nome)) v.situacao = det.situacao.valor || det.situacao.nome;
-          v.det = 1;
-          if (_tkV && v.marketplace === 'ml' && v.numero_loja && !v.venda_em) {
-            try {
-              const nlm = String(v.numero_loja).replace(/\D/g, '');
-              let rml = await fetch('https://api.mercadolibre.com/orders/' + nlm, { headers: { Authorization: 'Bearer ' + _tkV } });
-              let dml = await rml.json().catch(() => null);
-              if (!rml.ok) { rml = await fetch('https://api.mercadolibre.com/packs/' + nlm, { headers: { Authorization: 'Bearer ' + _tkV } }); const dp3 = await rml.json().catch(() => null); const o1 = dp3 && dp3.orders && dp3.orders[0]; if (rml.ok && o1) { rml = await fetch('https://api.mercadolibre.com/orders/' + (o1.id || o1), { headers: { Authorization: 'Bearer ' + _tkV } }); dml = await rml.json().catch(() => null); } }
-              if (rml.ok && dml && dml.date_created) v.venda_em = dml.date_created;
-            } catch (e) {}
-          }
-        }
-        await new Promise(r3 => setTimeout(r3, 450));
-        // b52: grava PARCIAL a cada 20 — antes só gravava no fim do lote, e qualquer deploy/reinício
-        // no meio jogava fora o trabalho da rodada inteira (pedido ficava sem itens = sem unidade/custo).
-        if ((++_detN % 20) === 0) { try { writeJson(F, atual); } catch (e) {} }
-      }
-      writeJson(F, atual);   // itens/taxas no disco JÁ — o dashboard enxerga a margem na hora
-    } catch (e) {}
-    _vsy.fase = 'ml_real';
-    // fase ML REAL (b31): pros pedidos ML NÃO-bipados, pesca comissão + frete REAIS direto da API
-    // do ML (fonte primária, mais confiável que o taxaComissao/custoFrete que o Bling importa).
-    // A fase detalhes acima já deu SKU/custo/tarifa-do-Bling; esta SOBREPÕE com o dado real do ML.
-    // Recentes primeiro, lote limitado (rate limit do ML). Quando o pedido é bipado, a mlSyncFees assume.
-    try {
-      const confR = readJson(CONFERIDOS_FILE, {});
-      const bipR = new Set(Object.values(confR).map(c => String(c && c.numero)));
-      let tkR = null;
-      try { const { garantirTokenML: _g3 } = require('../girassol/mlTokenManager'); tkR = await _g3(); } catch (e) {}
-      if (tkR) {
-        const dormeR = ms => new Promise(r4 => setTimeout(r4, ms));
-        const alvosR = Object.values(atual)
-          .filter(v => v && (v.marketplace === 'ml' || v.marketplace === 'mercadolivre') && v.numero_loja && !v.ml_real && !bipR.has(String(v.numero)) && !/cancel/i.test(String(v.situacao || '')))
-          .sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')) || Number(b.numero || 0) - Number(a.numero || 0))   // recentes primeiro
-          .slice(0, 40);   // lote por rodada — o ML tem rate limit; 40 × ~3 chamadas cada
-        let _mlN = 0;
-        for (const v of alvosR) {
-          try {
-            const reg = await pescarDadosML(v.numero_loja, tkR, dormeR);
-            if (reg) {
-              if (reg.fee != null && reg.fee > 0) v.tarifa_ml = reg.fee;   // comissão REAL do ML (sobrepõe a do Bling)
-              if (reg.frete != null) v.frete_ml = reg.frete;               // frete REAL do ML
-              if (reg.venda) v.venda_em = reg.venda;                       // hora real da venda
-              if (reg.credito != null) v.credito_ml = reg.credito;         // estorno/compensação
-              if (reg.credito_fonte) v.credito_fonte = reg.credito_fonte;
-              if (reg.logistica) v.logistica_ml = reg.logistica;
-              if (reg.order) v.ml_order = reg.order;
-              if (reg.pack) v.ml_pack = reg.pack;
-              v.ml_real = 1;   // pescado — não repesca até bipar (aí a mlSyncFees assume)
-            }
-          } catch (e) {}
-          await dormeR(350);
-          if ((++_mlN % 10) === 0) { try { writeJson(F, atual); } catch (e) {} }   // 27/07: grava parcial — deploy no meio não joga a pesca fora
-        }
-        writeJson(F, atual);   // dado real do ML no disco — o dashboard já mostra "REAL"
-      }
-    } catch (e) {}
-    _vsy.fase = 'devolucoes';
-    // fase DEVOLUÇÕES (b39): busca as devoluções (type 'returns') recentes do ML e marca os pedidos
-    // com o frete de retorno + status/destino. Roda leve (só as ~50 recentes de cada status, filtradas
-    // por type returns). O prejuízo = perde a venda (reembolso) + frete de ida (já capturado) + este frete de retorno.
-    try {
-      let tkC = null;
-      try { const { garantirTokenML: _g6 } = require('../girassol/mlTokenManager'); tkC = await _g6(); } catch (e) {}
-      if (tkC) {
-        const dormeC = ms => new Promise(r5 => setTimeout(r5, ms));
-        const devs = await buscarDevolucoesML(tkC, dormeC);
-        if (devs && Object.keys(devs).length) {
-          for (const v of Object.values(atual)) {
-            if (!v || (v.marketplace !== 'ml' && v.marketplace !== 'mercadolivre')) continue;
-            const d = devs[String(v.numero_loja || '')] || devs[String(v.ml_order || '')] || devs[String(v.ml_pack || '')] || null;
-            if (d) {
-              v.devolucao = 1;
-              v.dev_claim_id = d.claim_id;
-              v.dev_frete_retorno = d.frete_retorno;   // frete de retorno pago pelo vendedor (0 quando volta pro galpão)
-              v.dev_destino = d.destino;                // warehouse (foi pro ML) / seller_address (voltou pro galpão)
-              v.dev_status = d.dev_status;              // label_generated / shipped / ...
-              v.dev_aberta = d.aberta ? 1 : 0;          // ainda em aberto (disputa/claim) vs já fechada
-              v.dev_data = d.data;
-            }
-          }
-          writeJson(F, atual);   // devoluções marcadas no disco
-        }
-      }
-    } catch (e) {}
-    _vsy.fase = 'nf_emissao';
-    // fase NF (rodava por último e NUNCA gravava: o processo morria no meio da rodada e o salvamento era só no fim —
-    // b14: roda logo após a listagem e salva a cada 8, então mesmo rodada interrompida deixa progresso no disco)
-    try {
-      const confN = readJson(CONFERIDOS_FILE, {});
-      const corteN = Date.now() - 4 * 86400000;
-      const alvosN = Object.entries(confN)
-        .filter(([idN, cN]) => cN && (cN.nf_emissao == null || cN.nf_emissao === '') && cN.nf_numero && cN.conferido_em && Date.parse(cN.conferido_em) >= corteN)   // b16: '' (sentinela antiga) volta pra fila
-        .sort((a, b) => String(b[1].conferido_em || '').localeCompare(String(a[1].conferido_em || '')))   // mais NOVO primeiro
-        .slice(0, 30);
-      const pendN = {};
-      const salvarN = () => {
-        if (!Object.keys(pendN).length) return;
-        const c9 = readJson(CONFERIDOS_FILE, {});   // relê antes de gravar — não atropela bipagem no meio
-        let n9 = 0;
-        let _pnf_ = 0;
-        for (const [k9, v9] of Object.entries(pendN)) { if (c9[k9] && (c9[k9].nf_emissao == null || c9[k9].nf_emissao === '')) { c9[k9].nf_emissao = v9; if (v9) n9++; } }
-        writeJson(CONFERIDOS_FILE, c9);
-        for (const k9 of Object.keys(pendN)) delete pendN[k9];
-        if (n9) console.log('[VENDAS-SYNC] nf_emissao preenchida em ' + n9 + ' conferido(s)');
-      };
-      let cN2 = 0;
-      for (const [idN] of alvosN) {
-        // b16: a pasta do pedido SAI do cache quando ele finaliza (raio-X provou: snapshot_existe=false),
-        // então a fonte é o Bling PELO PEDIDO — nfDoPedido tenta /pedidos/vendas/{id}/nfe e cai pro detalhe se precisar.
-        const snN = readJson(path.join(CACHE_DIR, String(idN), 'pedido.json'), null);
-        let dtN = (snN && snN.nf && snN.nf.dataEmissao) || null;   // se o snapshot ainda viver e já tiver, aproveita de graça
-        if (!dtN) {
-          try {
-            const nfO = await nfDoPedido(idN);
-            if (nfO && nfO.dataEmissao) dtN = nfO.dataEmissao;
-            else if (nfO && nfO.id) {   // NF achada mas a resposta veio sem a data → detalhe /nfe/{id}
-              await new Promise(r4a => setTimeout(r4a, 450));
-              const rN = await blingGet('/nfe/' + nfO.id);
-              const dN = rN && rN.ok && rN.data && rN.data.data;
-              if (dN && dN.dataEmissao) dtN = dN.dataEmissao;
-            }
-          } catch (e) {}
-        }
-        if (dtN) {
-          pendN[idN] = dtN;
-          if (snN && snN.nf) { snN.nf.dataEmissao = dtN; try { writeJson(path.join(CACHE_DIR, String(idN), 'pedido.json'), snN); } catch (e) {} }
-        }
-        cN2++; if (cN2 % 8 === 0) salvarN();
-        await new Promise(r4 => setTimeout(r4, 450));
-      }
-      salvarN();
-    } catch (e) { console.log('[VENDAS-SYNC] fase nf_emissao falhou: ' + String(e.message || e).slice(0, 120)); }
-    _vsy.fase = 'shopee';
-    // fase SHOPEE (b17): hora REAL da venda (create_time) + comissão REAL (escrow) direto do app da Shopee,
-    // via a rota interna do serviço shopee-nf-sync (que guarda os tokens). Batch de até 20 order_sns por rodada.
-    // Precisa da env SHOPEE_SYNC_KEY no Render DESTE serviço (mesma chave que abriu o teste C); URL opcional em SHOPEE_SYNC_URL.
-    try {
-      const SH_URL = process.env.SHOPEE_SYNC_URL || 'https://girassol-shopee-sync-organizar-envio.onrender.com';
-      const SH_KEY = process.env.SHOPEE_SYNC_KEY || '';
-      if (SH_KEY) {
-        const candS = Object.values(atual)
-          .filter(v => v && v.marketplace === 'shopee' && v.numero_loja && (v.venda_em == null || v.tarifa_ml == null || v.frete_recebido == null || v.renda_canal == null))   // b18/b19: frete_recebido e renda_canal também entram na fila (backfill)
-          .sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')))
-          .slice(0, 20);
-        if (candS.length) {
-          const rS = await fetch(SH_URL + '/girassol/interno/margem-pedidos?k=' + encodeURIComponent(SH_KEY) + '&order_sns=' + encodeURIComponent(candS.map(v => v.numero_loja).join(',')), { timeout: 90000 });
-          const jS = await rS.json().catch(() => null);
-          if (jS && jS.ok && Array.isArray(jS.pedidos)) {
-            const porSn = {}; jS.pedidos.forEach(pS => { if (pS && pS.order_sn) porSn[pS.order_sn] = pS; });
-            let nS = 0;
-            for (const v of candS) {
-              const pS = porSn[v.numero_loja]; if (!pS) continue;
-              if (pS.create_time && v.venda_em == null) { v.venda_em = new Date(Number(pS.create_time) * 1000).toISOString(); nS++; }
-              const es = pS.escrow || null;
-              if (es && v.tarifa_ml == null) {
-                const com = Number(es.net_commission_fee != null ? es.net_commission_fee : es.commission_fee) || 0;
-                const srv = Number(es.net_service_fee != null ? es.net_service_fee : es.service_fee) || 0;
-                const tS = Math.round((com + srv) * 100) / 100;
-                if (tS > 0) v.tarifa_ml = tS;   // o dashboard exibe pela mesma via da tarifa REAL do ML
-              }
-              if (es && v.frete_recebido == null) {
-                const frB = Number(es.buyer_paid_shipping_fee) || 0;   // b18: frete que o COMPRADOR pagou (extrato: "Subtotal estimado do frete") — crédito na M.C.
-                v.frete_recebido = frB > 0 ? Math.round(frB * 100) / 100 : 0;   // 0 = confirmado sem frete do comprador (sai da fila)
-              }
-              if (es && v.renda_canal == null) {
-                // b19: a RENDA OFICIAL do pedido (o que a Shopee deposita) — já liquida taxas, moedas Shopee,
-                // cupons (dela e teus) e frete do comprador. É a âncora da M.C. no dashboard (caso das 170 moedas = R$ 1,70 que a Shopee banca).
-                const ra = Number(es.escrow_amount_after_adjustment != null ? es.escrow_amount_after_adjustment : es.escrow_amount);
-                if (isFinite(ra) && ra > 0) v.renda_canal = Math.round(ra * 100) / 100;
-              }
-            }
-            if (nS) console.log('[VENDAS-SYNC] shopee: hora/comissão real em ' + nS + ' venda(s)');
-            writeJson(F, atual);
-          }
-        }
-      }
-    } catch (e) { console.log('[VENDAS-SYNC] fase shopee falhou: ' + String(e.message || e).slice(0, 120)); }
-    _vsy.fase = 'magalu';
-    // fase MAGALU: valores REAIS da API de Análise Financeira (comissão serviço+tech, MDR,
-    // tarifa fixa, coparticipação de frete, devolução) via a rota /magalu/financeiro-lote
-    // no MESMO serviço. A Magalu manda PRÉVIA (comissão) e substitui pelo REAL (com frete)
-    // quando o pedido é entregue/liquidado — igual o Jodda. Por isso re-consultamos os
-    // provisórios até o frete aparecer (v.mag_fin='real'). Usa a ADMIN_KEY do próprio serviço.
-    try {
-      const ADM = process.env.ADMIN_KEY || '';
-      const PORT = process.env.PORT || 3000;
-      if (ADM) {
-        // candidatos: pedidos magalu sem financeiro ainda (mag_fin ausente) OU provisórios
-        // (mag_fin='prov' — comissão veio mas falta frete). Os 'real' saem da fila.
-        const candM = Object.values(atual)
-          .filter(v => v && v.marketplace === 'magalu' && v.numero_loja && v.mag_fin !== 'real')
-          .sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')))
-          .slice(0, 30);
-        if (candM.length) {
-          const codes = candM.map(v => String(v.numero_loja)).join(',');
-          const urlM = 'http://127.0.0.1:' + PORT + '/magalu/financeiro-lote?empresa=' + MAG_EMPRESA +
-            '&k=' + encodeURIComponent(ADM) + '&dias=45&codes=' + encodeURIComponent(codes);
-          const rM = await fetch(urlM, { timeout: 90000 });
-          const jM = await rM.json().catch(() => null);
-          if (jM && jM.ok && jM.pedidos) {
-            let nM = 0;
-            for (const v of candM) {
-              const fin = jM.pedidos[String(v.numero_loja)];
-              if (!fin) continue;   // ainda não apareceu na API (não entregue) — continua na fila
-              const liquidado = !!(fin.frete_debito && fin.frete_debito !== 0);
-              // taxa base (sempre real): comissão(serviço+tech+frete-comissão) + MDR + tarifa fixa
-              const taxaBase = Math.abs(fin.comissao) + Math.abs(fin.mdr) + Math.abs(fin.tarifa_fixa);
-              let freteCopart, freteFonte;
-              if (liquidado) {
-                // LIQUIDADO: frete REAL da API + alimenta o banco por SKU (aprende pro futuro)
-                freteCopart = Math.abs(fin.frete_debito); freteFonte = 'real';
-                const it0 = (v.it || [])[0];
-                if (it0 && it0.sku) magaluFreteSkuGravar(it0.sku, freteCopart);
-              } else {
-                // PROVISÓRIO: estima o frete (histórico do SKU, senão tabela pela dimensão)
-                const est = await magaluFreteProvisorio(v);
-                freteCopart = est != null ? est : 0; freteFonte = est != null ? 'prov' : 'sem';
-              }
-              // TARIFA = só a comissão da Magalu (serviço+tech+comissão-frete) + MDR + tarifa fixa.
-              // O frete de coparticipação vai SEPARADO em mag_frete_copart (coluna FRETE VEND.),
-              // pra não misturar comissão e frete na mesma coluna.
-              const taxaBaseR = Math.round(taxaBase * 100) / 100;
-              if (taxaBaseR > 0) { v.tarifa_ml = taxaBaseR; nM++; }
-              v.mag_frete_copart = Math.round(freteCopart * 100) / 100;   // frete: exibido na coluna FRETE VEND.
-              v.mag_frete_fonte = freteFonte;   // 'real' | 'prov' | 'sem'
-              // devolução: estorno da venda (REFUND) quando houver
-              if (fin.tem_devolucao) { v.mag_refund = Math.abs(fin.refund); v.devolvido = true; }
-              // saldo líquido oficial da Magalu (a âncora, tipo renda_canal da Shopee) — só quando liquidado
-              if (liquidado && isFinite(fin.saldo_liquido)) v.renda_canal = fin.saldo_liquido;
-              // estável só quando o frete real apareceu (liquidado). Senão fica 'prov' e re-consulta.
-              v.mag_fin = liquidado ? 'real' : 'prov';
-            }
-            if (nM) console.log('[VENDAS-SYNC] magalu: financeiro real em ' + nM + ' venda(s)');
-            writeJson(F, atual);
-          }
-        }
-      }
-    } catch (e) { console.log('[VENDAS-SYNC] fase magalu falhou: ' + String(e.message || e).slice(0, 120)); }
-    // poda: fora da janela de 6 dias sai do arquivo (o histórico de verdade vive nos conferidos)
-    const corte = new Date(hoje); corte.setDate(corte.getDate() - 6);
-    const corteS = isoD(corte);
-    for (const [k, v] of Object.entries(atual)) { if (!v || !v.data || v.data < corteS) delete atual[k]; }
-    writeJson(F, atual);
-    _vsy.total = Object.keys(atual).length; _vsy.atualizado_em = new Date().toISOString(); _vsy.fase = 'fim';
-    console.log('[VENDAS-SYNC] ok — ' + _vsy.total + ' venda(s) na janela (' + paginas + ' página(s))');
-  } catch (e) { _vsy.erro = String(e.message || e).slice(0, 140); console.log('[VENDAS-SYNC] falhou: ' + _vsy.erro); }
-  _vsy.rodando = false;
+// ── ⚙️ config fiscal ────────────────────────────────────────────────────────
+function mesesAno(){
+  const y = hojeSP().slice(0,4);
+  return Array.from({length:12},(_,i)=> y+'-'+String(i+1).padStart(2,'0'));
+}
+function renderCfg(){
+  const box=$('cfgBox'); if(!box) return;
+  const NOMEC={ml:'Mercado Livre',shopee:'Shopee',magalu:'Magalu',amazon:'Amazon',tiktok:'TikTok',madeira:'MadeiraMadeira',leroy:'Leroy',outro:'Outro'};
+  box.innerHTML =
+    '<div style="font-size:12px;color:var(--mut);margin-bottom:6px">📅 Alíquota do Simples por mês (%) — os 12 meses de '+hojeSP().slice(0,4)+' · valores em cinza = de fábrica (edite e salve p/ sobrepor; o cálculo recalcula sozinho)</div>'+
+    '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px 14px">'+ mesesAno().map(m=>{
+      const NM=['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'][Number(m.slice(5,7))-1];
+      const salvo = CFG.aliquotas[m], padrao = (typeof DEFAULT_ALIQ!=='undefined' && DEFAULT_ALIQ[m]!=null)? DEFAULT_ALIQ[m] : null;
+      const val = salvo!=null? salvo : (padrao!=null? padrao : '');
+      return '<label style="font-size:12px;color:var(--mut);display:flex;align-items:center;gap:6px;justify-content:space-between"><b style="min-width:56px">'+NM+'/'+m.slice(2,4)+'</b>'+
+        '<input type="number" step="0.0001" min="0" max="40" data-aliq="'+m+'" value="'+val+'" placeholder="%" '+
+        'style="width:96px'+(salvo==null&&padrao!=null?';color:#8b96b3':'')+'" title="'+(salvo!=null?'valor salvo por você':(padrao!=null?'de fábrica ('+padrao+'%) — edite p/ sobrepor':'sem alíquota'))+'"></label>';
+    }).join('')+'</div>'+
+    '<div style="font-size:12px;color:var(--mut);margin:14px 0 6px">🏪 Tarifa por canal (% sobre produtos) — estimativa p/ o agregado; na busca, ML usa a REAL</div>'+
+    '<div style="display:flex;gap:10px;flex-wrap:wrap">'+ CANAIS_CFG.map(c=>
+      '<label style="font-size:12px;color:var(--mut)">'+NOMEC[c]+'<br><input type="number" step="0.1" min="0" max="50" data-taxa="'+c+'" value="'+(CFG.taxas[c]!=null?CFG.taxas[c]:'')+'" placeholder="%" style="width:86px"></label>').join('')+'</div>';
+}
+async function salvarCfg(){
+  const aliquotas={}, taxas={};
+  document.querySelectorAll('[data-aliq]').forEach(i=>{ aliquotas[i.dataset.aliq] = i.value===''?null:Number(i.value); });
+  document.querySelectorAll('[data-taxa]').forEach(i=>{ taxas[i.dataset.taxa] = i.value===''?null:Number(i.value); });
+  const flex={}; document.querySelectorAll('[data-flex]').forEach(i=>{ flex[i.dataset.flex] = i.value===''?null:Number(i.value); });
+  const msg=$('cfgMsg'); msg.textContent='salvando…';
+  try{
+    const r = await fetch(MOD+'/config-fiscal',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({aliquotas,taxas,flex})});
+    const d = await r.json();
+    // nível de desconto do frete Magalu — salvo na sua própria rota (não é config fiscal)
+    const magSel = $('magNivelSel');
+    if(magSel){ try{ await fetch(MOD+'/config-frete-magalu',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({nivel_desconto:magSel.value})}); }catch(e){} }
+    if(d&&d.ok){ CFG={aliquotas:d.config.aliquotas||{},taxas:d.config.taxas||{},flex:d.config.flex||{}}; msg.textContent='✓ salvo'; render(); }
+    else msg.textContent='✗ '+((d&&d.erro)||'falhou');
+  }catch(e){ msg.textContent='✗ '+e.message; }
 }
 
-// ═══ CUSTO-SYNC (background): resolve custo/preço de TODOS os SKUs vendidos, devagar (anti-429),
-// e grava em cache PERMANENTE em disco (_custos.json, validade 7d). O sku-info lê daqui — instantâneo.
-let _cst = { rodando: false, feitos: 0, total: 0, ok: 0, falhas: 0, inicio: null };
-async function custoSync(fresh) {
-  if (_cst.rodando) return;
-  const CUSTO_FILE = path.join(CACHE_DIR, '_custos.json');
-  const cc = readJson(CUSTO_FILE, {});
-  const conf = readJson(CONFERIDOS_FILE, {});
-  const todos = new Set();
-  for (const c of Object.values(conf)) { for (const it of ((c && c.itens) || [])) { if (it && it.sku) todos.add(String(it.sku)); } }
-  // 27/07: pega também os SKUs das vendas AINDA NÃO BIPADAS (_vendas_dia.json). Antes a fila saía só dos
-  // conferidos — SKU que só aparecia em pedido não bipado nunca ganhava custo, e a margem saía inflada.
-  try {
-    const vd = readJson(path.join(CACHE_DIR, '_vendas_dia.json'), {});
-    for (const v of Object.values(vd)) { for (const it of ((v && v.it) || [])) { if (it && it.sku) todos.add(String(it.sku)); } }
-  } catch (e) {}
-  const SETE_D = 7 * 24 * 3600 * 1000;
-  const alvos = [...todos].filter(sk => { const k = cc[sk]; return fresh || !k || !k.id || (Date.now() - (k.ts || 0)) > SETE_D || k.custo == null; });
-  _cst = { rodando: true, feitos: 0, total: alvos.length, ok: 0, falhas: 0, inicio: new Date().toISOString() };
-  console.log('[CUSTO] sync iniciando — ' + alvos.length + ' SKU(s) a resolver (tartaruga: ~1,2s/chamada)');
-  const dorme = ms => new Promise(r => setTimeout(r, ms));
-  const bg2 = async (pth) => { for (let t = 0; t < 4; t++) { const r = await blingGet(pth); if (r && r.ok) return r; await dorme(1500 + t * 700); } return await blingGet(pth); };
-  let desdeGravei = 0;
-  for (const sku of alvos) {
-    try {
-      let prod = null;
-      for (const v of [...new Set([sku, sku.toUpperCase(), sku.toLowerCase()])]) {
-        const r = await bg2(`/produtos?codigo=${encodeURIComponent(v)}&limite=1&criterio=5`);
-        const it = r.ok && r.data && r.data.data && r.data.data[0];
-        if (it && it.id) { const d = await bg2(`/produtos/${it.id}`); prod = (d.ok && d.data && d.data.data) || it; break; }
-        await dorme(600);
-      }
-      if (prod && prod.id) {
-        const forn = prod.fornecedor || {};
-        let cand = [forn.precoCusto, forn.precoCompra, forn.preco, forn.custo, prod.precoCusto, prod.custo, prod.precoCompra].map(Number).filter(v => isFinite(v) && v > 0);
-        if (!cand.length) {
-          const rf = await bg2(`/produtos/fornecedores?idProduto=${prod.id}&limite=5`);
-          const arr = (rf.ok && rf.data && rf.data.data) || [];
-          const pref = arr.find(x => x && x.padrao) || arr[0];
-          // 27/07: o nome do campo varia na resposta do Bling — aceita todos os candidatos
-          if (pref) cand = [pref.precoCusto, pref.precoCompra, pref.preco, pref.custo, pref.valor, pref.valorCusto]
-                            .map(Number).filter(v => isFinite(v) && v > 0);
-          if (!cand.length && arr.length) {
-            for (const fx of arr) {
-              const vs = Object.keys(fx || {}).filter(k => /pre(c|ç)o|custo|valor/i.test(k)).map(k => Number(fx[k])).filter(v => isFinite(v) && v > 0);
-              if (vs.length) { cand = [Math.min.apply(null, vs)]; break; }
-            }
-          }
-        }
-        // KIT / produto COM COMPOSIÇÃO (27/07): o Bling não preenche o custo do kit em si —
-        // ele mostra "Preço Total de Custo" somando os componentes. Fazemos o mesmo.
-        if (!cand.length) {
-          const comps = (prod.estrutura && (prod.estrutura.componentes || prod.estrutura.itens))
-                     || prod.composicao || prod.componentes || null;
-          if (Array.isArray(comps) && comps.length) {
-            let soma = 0, completo = true;
-            for (const cp of comps.slice(0, 30)) {
-              const idc = (cp.produto && cp.produto.id) || cp.idProduto || cp.id || null;
-              const qc = Number(cp.quantidade != null ? cp.quantidade : (cp.qtd != null ? cp.qtd : 1)) || 1;
-              if (!idc) { completo = false; break; }
-              const dc = await bg2(`/produtos/${idc}`);
-              const pc = (dc.ok && dc.data && dc.data.data) || null;
-              let cu = null;
-              if (pc) {
-                const f2 = pc.fornecedor || {};
-                const cs = [f2.precoCusto, f2.precoCompra, pc.precoCusto, pc.custo].map(Number).filter(v => isFinite(v) && v > 0);
-                if (cs.length) cu = cs[0];
-              }
-              if (cu == null) { completo = false; break; }
-              soma += cu * qc;
-              await dorme(420);
-            }
-            if (completo && soma > 0) { cand = [Math.round(soma * 10000) / 10000]; console.log('[CUSTO] ' + sku + ': custo somado da COMPOSIÇÃO = ' + cand[0]); }
-          }
-        }
-        cc[sku] = { id: prod.id, preco: (prod.preco != null && isFinite(Number(prod.preco))) ? Number(prod.preco) : null, custo: cand.length ? Math.round(cand[0] * 10000) / 10000 : null, ts: Date.now() };
-        _cst.ok++;
-      } else { _cst.falhas++; }
-    } catch (e) { _cst.falhas++; }
-    _cst.feitos++; desdeGravei++;
-    if (desdeGravei >= 10) { desdeGravei = 0; try { writeJson(path.join(CACHE_DIR, '_custos.json'), cc); } catch (e) {} }
-    await dorme(1200);
-  }
-  try { writeJson(path.join(CACHE_DIR, '_custos.json'), cc); } catch (e) {}
-  _cst.rodando = false;
-  console.log('[CUSTO] sync concluiu — ok=' + _cst.ok + ' falhas=' + _cst.falhas + ' de ' + _cst.total);
+// ── 🔍 busca & P&L por pedido ───────────────────────────────────────────────
+function calcPL(h){
+  const mes = diaVenda(h).slice(0,7);
+  const ck = canalKey(h.marketplace);
+  const rp = (h.vprod_nf!=null&&isFinite(Number(h.vprod_nf)))?Number(h.vprod_nf):(((h.itens||[]).reduce((a,i)=>a+(Number(i.valor_total)||0),0))||null);
+  const tot = (h.valor!=null&&isFinite(Number(h.valor)))?Number(h.valor):null;
+  const frete = (tot!=null&&rp!=null)?tot-rp:null;
+  const aliq = aliqDe(mes);
+  const imposto = (aliq!=null&&tot!=null)?tot*aliq/100:null;
+  const feeReal = (h.tarifa_ml!=null&&isFinite(Number(h.tarifa_ml)))?Number(h.tarifa_ml):_plMLFee[h.id];
+  const feeBling = (h.taxa_mkt!=null&&isFinite(Number(h.taxa_mkt))&&Number(h.taxa_mkt)>0)?Number(h.taxa_mkt):null;   // 💎 comissão importada pelo Bling (TikTok/Shopee/Magalu)
+  let tx = CFG.taxas[ck];
+  if(ck==='madeira' && tx==null) tx = 17.6;   // d50: tabela oficial MM (Diego 22/07) — padrão 17,6%; categorias variam 14,5–19%
+  let tarifa = (feeReal!=null)?feeReal:(feeBling!=null?feeBling:((tx!=null&&rp!=null)?rp*tx/100:null));
+  if(ck==='madeira' && feeReal==null && feeBling==null && tarifa!=null) tarifa += 5;   // Madeira Envios: taxa fixa R$ 5,00 por pedido
+  let custo=0, cusUn=0, unTot=0;
+  (h.itens||[]).forEach(it=>{ const q=Number(it.qtd||1); unTot+=q; let c=(it.custo!=null&&isFinite(Number(it.custo)))?Number(it.custo):null; if(c==null){ const inf=SKUINFO[it.sku]; if(inf&&inf.custo!=null) c=Number(inf.custo); } if(c!=null){ custo+=c*q; cusUn+=q; } });   // 27/07: custo do SERVIDOR (banco _custos.json) primeiro; SKUINFO é reserva — antes a Análise e os cards usavam fontes diferentes e davam lucros diferentes
+  const custoOk = cusUn===unTot && unTot>0;
+  let frV = null, frFonte = null;
+  if (h.frete_ml!=null && isFinite(Number(h.frete_ml)) && Number(h.frete_ml)>0) { frV = Number(h.frete_ml); frFonte = 'ml'; }   // 0 nao e frete real: deixa cair no Bling/FLEX (senao o custo do motoboy sumia)
+  else if (ck==='magalu' && h.mag_frete_copart!=null && isFinite(Number(h.mag_frete_copart)) && Number(h.mag_frete_copart)>0) { frV = Number(h.mag_frete_copart); frFonte = 'magalu'; }   // frete de coparticipação Magalu (o frete REAL desse canal — não é motoboy, é logística Magalu)
+  else if (h.flex) { const fx = flexDe(ck); if (fx!=null && fx>0) { frV = fx; frFonte = 'flex'; } }   // d52: FLEX deduz o MOTOBOY da config — o "frete" que o Bling importa num flex é o frete do COMPRADOR (entra como crédito via escrow), não custo do vendedor (caso BRS 260722C6YRDNC0)
+  else if (h.frete_mkt!=null && isFinite(Number(h.frete_mkt)) && Number(h.frete_mkt)>0) { frV = Number(h.frete_mkt); frFonte = 'bling'; }
+  const completo = [rp,imposto,tarifa].every(v=>v!=null) && custoOk;
+  // ESTORNO do ML (compensação de envio, típica do Flex): crédito que o ML devolve pra loja — SOMA na M.C.
+  const credito = (h.credito_ml!=null && isFinite(Number(h.credito_ml)) && Number(h.credito_ml)!==0) ? Number(h.credito_ml) : null;
+  // d51: FINO no centavo (caso BRS 260722C6YRDNC0 x extrato Shopee) —
+  // (a) NF menor que a soma dos itens = DESCONTO dado ao cliente: a receita efetiva de produto é o tot (o que o comprador pagou), não o preço cheio;
+  // (b) frete que o COMPRADOR paga (capturado do escrow da Shopee, buyer_paid_shipping_fee) entra como crédito na M.C.
+  const rpEf = (tot!=null && rp!=null && tot < rp) ? tot : rp;
+  const desconto = (tot!=null && rp!=null && tot < rp) ? Math.round((rp-tot)*100)/100 : null;
+  const freteRec = (h.frete_recebido!=null && isFinite(Number(h.frete_recebido)) && Number(h.frete_recebido)>0) ? Number(h.frete_recebido) : null;
+  // d53: RENDA OFICIAL do canal (escrow da Shopee) — o depósito exato: já liquida taxas, moedas Shopee, cupons e frete do comprador.
+  // Quando existe, a M.C. ancora nela (e NÃO soma tarifa/desconto/freteRec de novo — tudo já está dentro).
+  const rendaCanal = (h.renda_canal!=null && isFinite(Number(h.renda_canal)) && Number(h.renda_canal)>0) ? Number(h.renda_canal) : null;
+  // Magalu: fonte do frete de coparticipação embutido na tarifa — 'real' (liquidado, da API),
+  // 'prov' (estimado pela tabela/histórico, ainda vai mudar) ou null. Governa a cor no painel.
+  const magFreteFonte = (ck==='magalu' && h.mag_frete_fonte) ? h.mag_frete_fonte : null;
+  const magFreteCopart = (ck==='magalu' && h.mag_frete_copart!=null && isFinite(Number(h.mag_frete_copart))) ? Number(h.mag_frete_copart) : null;
+  // M.C.: quando o pedido Magalu LIQUIDOU, renda_canal (saldo líquido oficial) JÁ desconta o frete real —
+  // então o frete Magalu que aparece em frV é só pra EXIBIÇÃO e não pode ser descontado de novo (senão conta 2x).
+  // No provisório (renda_canal null), a tarifa é só comissão, então o frete de frV É descontado (correto).
+  const frVparaMC = (ck==='magalu' && frFonte==='magalu' && rendaCanal!=null) ? 0 : (frV||0);
+  const mc = completo? (rendaCanal!=null ? (rendaCanal-imposto-custo-frVparaMC+(credito||0)) : (rpEf-imposto-tarifa-custo-frVparaMC+(credito||0)+(freteRec||0))) : null;
+  return {mes,ck,rp,rpEf,desconto,freteRec,rendaCanal,tot,frete,aliq,imposto,feeReal,feeBling,tx,tarifa,custo,cusUn,unTot,custoOk,frV,frFonte,credito,completo,mc,magFreteFonte,magFreteCopart};
+}
+function buscarPed(q){
+  q = String(q||'').trim().toLowerCase();
+  const res=$('buscaRes'), card=$('plCard'); card.innerHTML='';
+  if(q.length<2){ res.innerHTML=''; return; }
+  const hits = (DADOS||[]).concat(SINT||[]).filter(h=>{   // 27/07: buscava só nos bipados
+    if(String(h.numero||'').toLowerCase()===q) return true;
+    if(String(h.nf_numero||'').toLowerCase().includes(q)) return true;
+    if(String(h.numero_loja||'').toLowerCase().includes(q)) return true;
+    if(String(h.ml_pack||'').toLowerCase().includes(q)) return true;   // ID do carrinho (2000014…)
+    if(String(h.ml_order||'').toLowerCase().includes(q)) return true;  // ID do envio (2000017…) — acha por qualquer um dos dois
+    return (h.itens||[]).some(it=> String(it.sku||'').toLowerCase().includes(q) || String(it.descricao||'').toLowerCase().includes(q));
+  }).slice(0,15);
+  if(!hits.length){ res.innerHTML='<div class="dim" style="padding:8px">nada encontrado</div>'; return; }
+  res.innerHTML = '<table><tr><th>Data</th><th>Pedido</th><th>Canal</th><th>Cliente</th><th class="num">Total</th><th></th></tr>'+
+    hits.map(h=>'<tr><td class="dim">'+diaVenda(h)+'</td><td><b>'+esc(h.numero||h.id)+'</b>'+(h.id?' <a href="https://www.bling.com.br/vendas.php#edit/'+esc(h.id)+'" target="_blank" rel="noopener" title="abrir o pedido no Bling" style="font-size:10px;color:#3b82f6;text-decoration:none;font-weight:600">Bling↗</a>':'')+(h.nf_numero?'<div class="desc">NF '+esc(h.nf_numero)+(h.nf_id?' <a href="https://www.bling.com.br/notas.fiscais.php#edit/'+esc(h.nf_id)+'" target="_blank" rel="noopener" title="abrir a NF no Bling" style="color:#3b82f6;text-decoration:none;font-weight:600">↗</a>':'')+'</div>':'')+'</td>'+
+      '<td>'+esc(canalKey(h.marketplace))+'</td><td class="desc" style="max-width:200px">'+esc(h.cliente||'')+'</td>'+
+      '<td class="num">'+(h.valor!=null?BRL(Number(h.valor)):'<span class="dim">—</span>')+'</td>'+
+      '<td><button class="btn" style="padding:5px 12px;font-size:11px" onclick="abrirPL(\''+h.id+'\')">💎 lucro</button></td></tr>').join('')+'</table>';
+}
+async function abrirPL(id){
+  const h = DADOS.find(x=>String(x.id)===String(id)); if(!h) return;
+  const skus=(h.itens||[]).map(i=>i.sku).filter(Boolean);
+  const faltam=skus.filter(sk=>!SKUINFO[sk]);
+  if(faltam.length){ try{ const r=await fetch(MOD+'/sku-info',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({skus:faltam})}); const d=await r.json(); if(d&&d.skus) Object.assign(SKUINFO,d.skus); }catch(e){} }
+  renderPL(h);
+}
+function renderPL(h){
+  const card=$('plCard');
+  const {mes,ck,rp,tot,frete,aliq,imposto,feeReal,feeBling,tx,tarifa,custo,cusUn,unTot,frV,frFonte,credito,completo,mc,magFreteFonte} = calcPL(h);
+  const linha=(l,v,extra)=>'<tr><td>'+l+'</td><td class="num">'+(v!=null?BRL(v):'<span class="dim">—</span>')+(extra||'')+'</td></tr>';
+  card.innerHTML =
+    '<div class="sec" style="margin-top:12px;background:linear-gradient(160deg,#14201a,#131a30);border-color:#14b8a655">'+
+    '<h2>💎 Pedido '+esc(h.numero||h.id)+' · '+esc(ck)+' · '+diaVenda(h)+
+    (h.numero_loja?' <span class="badge">venda '+esc(h.numero_loja)+(linkMkt(h)?' <a href="'+linkMkt(h)+'" target="_blank" rel="noopener" style="text-decoration:none" title="abrir esta venda no Mercado Livre">↗</a>':'')+'</span>':'')+(h.nf_numero?' <span class="badge">NF '+esc(h.nf_numero)+'</span>':'')+'</h2>'+
+    '<table>'+
+    linha('🏷️ Produtos (nota fiscal)', rp)+
+    linha('🚚 Frete embutido (receita)', frete)+
+    linha('🏛 Imposto ('+(aliq!=null?aliq+'% de '+mes:'<span class="warn">configure ⚙️ '+mes+'</span>')+')', imposto!=null?-imposto:null)+
+    linha('🏪 Tarifa '+ (feeReal!=null?'<span class="ok">REAL (ML)</span>':(feeBling!=null?'<span class="ok">REAL (Bling)</span>':(tx!=null?tx+'% est.':'<span class="warn">configure ⚙️</span>'))), tarifa!=null?-tarifa:null,
+      (ck==='ml'&&h.numero_loja&&feeReal==null?' <button class="btn" style="padding:3px 10px;font-size:10.5px" onclick="pegarFeeML(\''+h.id+'\',\''+esc(h.numero_loja)+'\')">buscar real</button>':''))+
+    linha('📦 Custo ('+cusUn+'/'+unTot+' un. c/ custo)', (cusUn?-custo:null))+
+    (frV!=null ? linha('🚛 Frete vendedor <span class="'+(frFonte==='magalu'&&magFreteFonte==='prov'?'warn':'ok')+'">('+(frFonte==='ml'?'real ML':(frFonte==='magalu'?('Magalu '+(magFreteFonte==='prov'?'previsto':'real')):(frFonte==='bling'?'Bling':'FLEX ⚙️')))+')</span>', -frV) : (ck==='ml' ? linha('🚛 Frete vendedor <span class="ok">(real ML)</span>', null) : ''))+
+    (credito!=null ? linha('💵 Estorno do ML <span class="ok">(compensação de envio)</span>', credito) : '')+
+    '<tr><td style="border-top:2px solid var(--line2);font-weight:800">💎 Margem de contribuição</td>'+
+    '<td class="num" style="border-top:2px solid var(--line2);font-weight:800">'+
+      (mc!=null?('<span class="'+(mc>=0?'ok':'bad')+'">'+BRL(mc)+'</span><span class="dim" style="font-size:11px"> · '+(rp?Math.round(mc/rp*100):0)+'%</span>'):'<span class="warn">incompleto — resolva os "—" acima</span>')+'</td></tr>'+
+    '</table><div class="nota">ML: tarifa e frete do vendedor REAIS (pescados da API) quando disponíveis; demais canais: tarifa % configurada e frete recebido ≈ pago · imposto sobre o total do pedido</div></div>';
+}
+async function pegarFeeML(id, numeroLoja){
+  try{
+    const r=await fetch(MOD+'/ml-fee',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({numeroLoja})});
+    const d=await r.json();
+    if(d&&d.ok&&d.fee!=null){ _plMLFee[id]=Number(d.fee); const h=DADOS.find(x=>String(x.id)===String(id)); if(h) renderPL(h); }
+    else alert('Tarifa ML: '+((d&&d.erro)||'não disponível'));
+  }catch(e){ alert('Tarifa ML: '+e.message); }
 }
 
-function bootstrap() {
-  // PESCA AUTOMÁTICA PÓS-DEPLOY: todo deploy mata a pesca em andamento; aqui ela renasce sozinha
-  // 90s depois do boot (após o ciclo inicial). Com dias=14 só re-checa os recentes — barato e idempotente.
-  setTimeout(() => { try { console.log('[ML-FEES] pesca automática pós-deploy iniciando…'); mlSyncFees(14).catch(() => {}); } catch (e) {} }, 90 * 1000);
-  setTimeout(() => { try { custoSync(false).catch(() => {}); } catch (e) {} }, 240 * 1000);   // custos: tartaruga pós-boot, só o que falta
-  setInterval(() => { try { custoSync(false).catch(() => {}); } catch (e) {} }, 6 * 3600 * 1000);   // b20: o banco de custos se mantém completo SOZINHO (a cada 6h, só faltantes/vencidos)
-  setTimeout(() => { try { vendasSync().catch(() => {}); } catch (e) {} }, 150 * 1000);
-  setInterval(() => { try { vendasSync().catch(() => {}); } catch (e) {} }, 5 * 60 * 1000);   // vendas do Bling: análise quase em tempo real
-  // ETIQUETA PARADA: enquanto existir pedido sem etiqueta, tenta de novo a cada 5 min (o cron normal é 10/10).
-  // Em dia limpo (0 sem etiqueta) NADA extra roda — custo zero. Cobre etiqueta que o canal demora a gerar.
-  setInterval(() => {
-    try {
-      const r = getUltimoResumo();
-      if (r && r.semEtiqueta > 0) { console.log('[CICLO-EXTRA] ' + r.semEtiqueta + ' pedido(s) sem etiqueta \u2014 rodando ciclo extra'); rodarCiclo('auto-etiqueta').catch(() => {}); }
-    } catch (e) {}
-  }, 5 * 60 * 1000);
-
-  ensureDir(CACHE_DIR);
-  console.log(`[GIRABKP] ${VERSAO} ativo — ATENDIDO=${SIT_ATENDIDO}, janela=${JANELA_DIAS}d, cron="${CRON_EXPR}", formato=${ETIQ_FORMATO}`);
-  setTimeout(() => rodarCiclo('boot'), 20000);
+// ── 🔧 manutenção (sessão admin — sem chave na URL) ─────────────────────────
+async function rodarPescaML(){
+  const msg=$('manutMsg'); msg.textContent='🎣 iniciando pesca ML…';
+  try{
+    const r=await fetch(MOD+'/ml-sync-fees?dias=14',{method:'POST',credentials:'same-origin'});
+    if(r.status===404){ msg.textContent='✗ atualize o index.js no GitHub (rota antiga)'; return; }
+    const d=await r.json();
+    if(d&&(d.iniciado||d.rodando)) pollPesca();
+    else msg.textContent=(d&&d.mensagem)||'nada a pescar';
+  }catch(e){ msg.textContent='✗ '+e.message; }
+}
+async function pollPesca(){
+  const msg=$('manutMsg');
+  try{
+    const r=await fetch(MOD+'/ml-sync-fees?status=1',{credentials:'same-origin'});
+    const d=await r.json();
+    if(d&&d.rodando){ msg.textContent='🎣 pescando… '+d.progresso+' (✓'+d.ok_ate_agora+' ✗'+d.falhas+')'; setTimeout(pollPesca,4000); }
+    else{ msg.textContent='✓ pesca concluída ('+(d&&d.progresso||'')+') — recarregue a página p/ ver as tarifas'; }
+  }catch(e){ msg.textContent='✗ '+e.message; }
+}
+async function rodarBackfillNF(){
+  const msg=$('manutMsg'); msg.textContent='🧾 lendo notas do disco…';
+  try{
+    const r=await fetch(MOD+'/backfill-nf?dias=45',{method:'POST',credentials:'same-origin'});
+    if(r.status===404){ msg.textContent='✗ atualize o index.js no GitHub (rota antiga)'; return; }
+    const d=await r.json();
+    msg.textContent=(d&&d.mensagem)?('✓ '+d.mensagem+' — recarregue a página'):'✓ feito';
+  }catch(e){ msg.textContent='✗ '+e.message; }
 }
 
-// ═══ PESCA POSTERIOR (ML): busca tarifa REAL (sale_fee) e frete do vendedor nos pedidos ML
-// recentes e grava no conferido (tarifa_ml / frete_ml). Roda no cron diário e sob demanda.
-// Re-checa os finalizados dos últimos 3 dias mesmo se já têm tarifa (o ML pode ajustar depois).
-async function mlSyncFees(dias) {
-  dias = Math.max(1, Math.min(60, Number(dias || 14)));
-  if (_mls.rodando) return _mls;
-  const corte = Date.now() - dias * 86400000;
-  const recheck = Date.now() - 3 * 86400000;
-  const conf0 = readJson(CONFERIDOS_FILE, {});
-  const alvos = Object.entries(conf0).filter(([cid, c]) => {
-    if (!c || !c.conferido_em) return false;
-    const t = new Date(c.conferido_em).getTime();
-    if (t < corte) return false;
-    const mk = String(c.marketplace || '').toLowerCase();
-    if (mk !== 'ml' && mk !== 'mercadolivre') return false;
-    if (!c.numero_loja) return false;
-    return c.tarifa_ml == null || c.venda_em == null || !c.ml_costs_v3 || c.ml_order == null || t >= recheck;   // ml_order==null: ainda sem o par pack/order — uma passada preenche   // !ml_costs_v2 = ainda nao passou pelo /costs (frete real + estorno) — vale uma passada
-  }).map(([cid]) => cid);
-  if (!alvos.length) { console.log('[ML-FEES] nada a pescar (' + dias + 'd)'); return { ok: true, nada: true }; }
-  _mls = { rodando: true, feitos: 0, total: alvos.length, ok: 0, falhas: 0, iniciado_em: new Date().toISOString(), erros: {}, amostras: [] };
-  console.log('[ML-FEES] pescando tarifas de ' + alvos.length + ' pedido(s) ML...');
-  const dorme = ms => new Promise(r => setTimeout(r, ms));
-  let tokenML = null;
-  try { const { garantirTokenML } = require('../girassol/mlTokenManager'); tokenML = await garantirTokenML(); }
-  catch (e) { _mls.rodando = false; console.log('[ML-FEES] ✗ sem token ML: ' + e.message); return _mls; }
-  const pend = {};
-  const salvar = () => {
-    if (!Object.keys(pend).length) return;
-    const c2 = readJson(CONFERIDOS_FILE, {});
-    for (const [cid, d] of Object.entries(pend)) { if (!c2[cid]) continue; if (d.fee != null) c2[cid].tarifa_ml = d.fee; if (d.frete != null) c2[cid].frete_ml = d.frete; if (d.venda) c2[cid].venda_em = d.venda; if (d.credito != null) c2[cid].credito_ml = d.credito; if (d.credito_fonte) c2[cid].credito_fonte = d.credito_fonte; if (d.logistica) c2[cid].logistica_ml = d.logistica; if (d.pack) c2[cid].ml_pack = d.pack; if (d.order) c2[cid].ml_order = d.order; if (d.costs_ok) { c2[cid].ml_costs_v3 = 1; if (d.credito == null) delete c2[cid].credito_ml; if (d.frete == null) delete c2[cid].frete_ml; } }
-    writeJson(CONFERIDOS_FILE, c2);
-    for (const cid of Object.keys(pend)) delete pend[cid];
-  };
-  for (const cid of alvos) {
-    try {
-      const nl = String((conf0[cid] && conf0[cid].numero_loja) || '').replace(/\D/g, '');
-      const H = { headers: { Authorization: 'Bearer ' + tokenML } };
-      let r = await fetch('https://api.mercadolibre.com/orders/' + nl, H);
-      let d = await r.json().catch(() => null);
-      let ords = null;   // 1 order normal; N orders quando o Bling gravou o PACK id (carrinho)
-      if (r.ok && d) ords = [d];
-      else if (r.status === 404) {
-        // "Order do not exists" com id 2000...: é PACK (carrinho) — abre o pack e pega as orders de dentro
-        try {
-          const rp = await fetch('https://api.mercadolibre.com/packs/' + nl, H);
-          const dp = await rp.json().catch(() => null);
-          if (rp.ok && dp && Array.isArray(dp.orders) && dp.orders.length) {
-            ords = [];
-            for (const oq of dp.orders) {
-              try {
-                const ro = await fetch('https://api.mercadolibre.com/orders/' + (oq.id || oq), H);
-                const doo = await ro.json().catch(() => null);
-                if (ro.ok && doo) ords.push(doo);
-              } catch (e3) {}
-              await dorme(150);
-            }
-            if (!ords.length) ords = null;
-          }
-        } catch (e2) {}
-      }
-      if (ords && ords.length) {
-        let fee = 0, venda = null, shipId = null;
-        for (const od of ords) {
-          for (const it of (od.order_items || [])) { const q = Number(it.quantity || 1); const sf = Number(it.sale_fee || 0); if (isFinite(sf)) fee += sf * q; }
-          if (!venda && od.date_created) venda = od.date_created;
-          if (!shipId && od.shipping && od.shipping.id) shipId = od.shipping.id;
-        }
-        // PAR de números do ML: toda venda tem order_id; carrinho tem também pack_id (e a tela/NF do ML usam o pack).
-        // Se o /orders respondeu direto, nl era a ORDER e o pack vem no payload; se caímos no /packs, nl era o PACK.
-        const _ord0 = (ords[0] && ords[0].id != null) ? String(ords[0].id) : null;
-        const _viaPack = !!(_ord0 && _ord0 !== nl);
-        const _packId = _viaPack ? nl : ((ords[0] && ords[0].pack_id != null) ? String(ords[0].pack_id) : null);
-        const reg = { fee: Math.round(fee * 100) / 100, frete: null, venda: venda, _orders: ords.length, pack: _packId, order: _ord0 };
-        if (shipId) {
-          let ehFlex = false, baseCost = null;
-          try {
-            const rs = await fetch('https://api.mercadolibre.com/shipments/' + shipId, H);
-            const ds = await rs.json().catch(() => null);
-            if (rs.ok && ds) {
-              const logi = (ds.logistic && ds.logistic.type) || ds.logistic_type || null;
-              if (logi) reg.logistica = logi;
-              ehFlex = (logi === 'self_service');   // self_service = Mercado Envios FLEX (quem entrega e o vendedor)
-              const bc = Number(ds.base_cost);
-              if (isFinite(bc) && bc > 0) baseCost = bc;   // bonificacao que o ML paga pela entrega Flex
-              const so = ds.shipping_option || {};
-              const lc = Number(so.list_cost != null ? so.list_cost : ds.list_cost);
-              const cc = Number(so.cost != null ? so.cost : ds.cost);
-              // SO grava frete quando o vendedor realmente paga algo. Gravar 0 fazia o painel achar que
-              // "0 e o valor real" e ignorar o custo configurado do FLEX (o motoboy) -> margem inflada.
-              if (!ehFlex && isFinite(lc) && isFinite(cc) && lc > cc) reg.frete = Math.round((lc - cc) * 100) / 100;
-            }
-          } catch (e) {}
-          await dorme(200);
-          // /shipments/{id}/costs + base_cost = o ESTORNO exatamente como o ML mostra na tela da venda.
-          //  - senders[0].cost .... frete que o ML COBRA do vendedor
-          //  - base_cost .......... bonificacao que o ML PAGA pela entrega Flex
-          //  - FLEX: o ML nao mostra as duas pontas, mostra o LIQUIDO (base_cost - cost). Conferido:
-          //      116454 -> 11,00 - 0,00 = 11,00   |   116462 -> 11,00 - 9,90 = 1,10
-          //    Por isso, no Flex, o frete cobrado NAO entra como custo separado (ja esta liquido aqui);
-          //    o custo real do Flex e o motoboy, configurado no painel por canal.
-          try {
-            const rc = await fetch('https://api.mercadolibre.com/shipments/' + shipId + '/costs', H);
-            const dc = await rc.json().catch(() => null);
-            if (rc.ok && dc) {
-              reg.costs_ok = true;
-              const sd0 = Array.isArray(dc.senders) ? dc.senders[0] : null;
-              const scost = Number(sd0 && sd0.cost);
-              const scOk = isFinite(scost) && scost > 0;
-              let cred = 0, fonte = null;
-              if (sd0) {   // compensacoes explicitas (avaria, dimensao errada...) vem primeiro
-                const c1 = Number(sd0.compensation);
-                if (isFinite(c1) && c1 > 0) { cred += c1; fonte = 'compensation'; }
-                for (const cx of (sd0.compensations || [])) { const c2 = Number(cx && cx.amount); if (isFinite(c2) && c2 > 0) { cred += c2; fonte = 'compensation'; } }
-              }
-              if (cred === 0 && ehFlex && baseCost != null) {
-                cred = Math.round((baseCost - (scOk ? scost : 0)) * 100) / 100;   // LIQUIDO, igual a tela do ML
-                fonte = 'flex_liquido';
-              }
-              if (cred !== 0) { reg.credito = Math.round(cred * 100) / 100; reg.credito_fonte = fonte; }
-              if (!ehFlex && scOk) reg.frete = Math.round(scost * 100) / 100;   // fora do Flex o frete e custo de verdade
-            }
-          } catch (e) {}
-          await dorme(200);
-        }
-        pend[cid] = reg; _mls.ok++;
-      } else {
-        _mls.falhas++;
-        const stc = String(r.status), em = (((d && (d.message || d.error)) || '') + (r.status === 404 ? ' [nem order nem pack]' : '')).slice(0, 140);
-        _mls.erros[stc] = (_mls.erros[stc] || 0) + 1;
-        if (_mls.amostras.length < 3) { _mls.amostras.push({ pedido: cid, numero_loja: nl, status: r.status, msg: em }); }
-        if ((_mls.erros[stc] || 0) === 1) console.log('[ML-FEES] falha ' + r.status + ' no pedido ' + cid + ' (venda ' + nl + '): ' + em);
-      }
-    } catch (e) {
-      _mls.falhas++;
-      _mls.erros.exc = (_mls.erros.exc || 0) + 1;
-      if (_mls.amostras.length < 3) { _mls.amostras.push({ pedido: cid, status: 'exc', msg: String(e.message || e).slice(0, 140) }); }
-      if (_mls.erros.exc === 1) console.log('[ML-FEES] exceção no pedido ' + cid + ': ' + (e.message || e));
-    }
-    _mls.feitos++;
-    if (_mls.feitos % 15 === 0) { salvar(); console.log('[ML-FEES] ' + _mls.feitos + '/' + _mls.total); }
-    await dorme(350);
-  }
-  salvar(); _mls.rodando = false;
-  console.log('[ML-FEES] ✔ ' + _mls.ok + ' ok, ' + _mls.falhas + ' falha(s) de ' + _mls.total);
-  return _mls;
-}
-
-module.exports = {
-  id: 'girassol-backup-offline',
-  nome: 'Girassol Backup Offline',
-  rotinas: { backupCache: () => rodarCiclo('cron'), backfillNF: () => backfillNFLocal(45), mlSyncFees: () => mlSyncFees(14), shopeeKeepAlive: () => shopeeKeepAlive() },
-  routes,
-  crons: { backupCache: CRON_EXPR, backfillNF: '15 4 * * *', mlSyncFees: '40 4 * * *', shopeeKeepAlive: '20 5,17 * * *' },
-  bootstrap
+// ── 📋 análise de vendas (margem por pedido, estilo MercadoTurbo) ───────────
+const selAtiva = () => { try { const s2 = window.getSelection && window.getSelection(); return !!(s2 && String(s2).length); } catch (e) { return false; } };
+let _selT = null;
+const renderSafe = () => { if (selAtiva()) { clearTimeout(_selT); _selT = setTimeout(renderSafe, 2500); return; } render(); };   // nunca redesenha por cima de uma seleção de texto
+const linkMkt = h => {
+  // ML: https://www.mercadolivre.com.br/vendas/{id}/detalhe — o callbackUrl da URL do navegador
+  // é só estado da tela anterior (no exemplo do Diego o id do caminho nem batia com o do search).
+  const nl = String((h && h.ml_pack) || (h && h.numero_loja) || '').replace(/\D/g, '');   // pack quando existe — e o que a tela do ML abre
+  if (!nl) return '';
+  const ck = canalKey(h.marketplace);
+  if (ck === 'ml') return 'https://www.mercadolivre.com.br/vendas/' + nl + '/detalhe';
+  if (ck === 'tiktok' && h.numero_loja) return 'https://seller-br.tiktok.com/order/detail?order_no=' + encodeURIComponent(String(h.numero_loja).replace(/\D/g,'')) + '&shop_region=BR';   // order_no = o próprio número que temos — link direto
+  if (ck === 'amazon' && h.numero_loja) return 'https://sellercentral.amazon.com.br/orders-v3/order/' + encodeURIComponent(String(h.numero_loja).trim());   // número com hífens — formato nativo
+  if (ck === 'magalu' && h.numero_loja) return '/magalu/ir/girassol?n=' + encodeURIComponent(String(h.numero_loja).replace(/\D/g,''));   // rota nossa: resolve o UUID do pacote pela API oficial   // sem o UUID interno (só a API da Magalu dá) — teste do Diego decide
+  if (ck === 'shopee' && h.numero_loja) return '/girassol-backup-offline/ir-shopee?sn=' + encodeURIComponent(String(h.numero_loja).trim());   // rota nossa: resolve o id interno pelo cookie de sessão da Shopee e redireciona direto pro pedido
+  return '';   // demais canais: falta a URL de cada seller center — basta o Diego colar um exemplo
 };
+function ajustaSticky(){
+  const hd = document.querySelector('.hdr');
+  if (hd) document.documentElement.style.setProperty('--hdrH', Math.max(0, hd.offsetHeight - 2) + 'px');
+}
+window.addEventListener('resize', ajustaSticky);
+function copiaNL(el){ const v = el.getAttribute('data-nl') || ''; try { navigator.clipboard && navigator.clipboard.writeText(v); } catch (e) {} el.style.color = '#34d399'; setTimeout(() => { el.style.color = ''; }, 700); }
+function renderGrafico(){
+  const el=$('grafProg'); if(!el) return;
+  const iv=intervalo();
+  const dias={};
+  (DADOS||[]).concat(SINT||[]).forEach(h=>{   // 27/07: contava só os bipados
+    if(!h.conferido_em && !h.sintetico) return;
+    if(h._cancelado) return;
+    const d=diaVenda(h); if(d<iv.de||d>iv.ate) return;
+    const P=calcPL(h);
+    const o=dias[d]||(dias[d]={mc:0,imp:0,tar:0,frv:0});
+    if(P.mc!=null)o.mc+=P.mc; if(P.imposto!=null)o.imp+=P.imposto;
+    if(P.tarifa!=null)o.tar+=P.tarifa; if(P.frV!=null)o.frv+=P.frV;
+  });
+  const ks=Object.keys(dias).sort();
+  const tot={mc:0,imp:0,tar:0,frv:0}; ks.forEach(k=>{tot.mc+=dias[k].mc;tot.imp+=dias[k].imp;tot.tar+=dias[k].tar;tot.frv+=dias[k].frv;});
+  $('grafTot').innerHTML =
+    '<span class="pill g" style="font-size:13px;padding:8px 12px">\uD83D\uDC8E M.C. do per\u00edodo <b>'+BRL(tot.mc)+'</b></span>'+
+    '<span class="pill w" style="font-size:13px;padding:8px 12px">\uD83E\uDDFE Impostos <b>'+BRL(tot.imp)+'</b></span>'+
+    '<span class="pill" style="font-size:13px;padding:8px 12px;border-color:#a78bfa;color:#a78bfa">\uD83C\uDFEA Tarifas <b>'+BRL(tot.tar)+'</b></span>'+
+    '<span class="pill" style="font-size:13px;padding:8px 12px;border-color:#f472b6;color:#f472b6">\uD83D\uDE9B Frete vend. <b>'+BRL(tot.frv)+'</b></span>';
+  if(ks.length<2){ el.innerHTML='<div class="dim" style="padding:14px">per\u00edodo de 1 dia \u2014 escolhe Semana/M\u00eas pra ver a curva</div>'; $('grafLeg').textContent=''; return; }
+  const series=[['mc','#34d399','M.C.'],['imp','#f59e0b','Imposto'],['tar','#a78bfa','Tarifa'],['frv','#f472b6','Frete vend.']];
+  const W=1000,H=250,PL=52,PR=14,PT=14,PB=30, iw=W-PL-PR, ih=H-PT-PB;
+  let mx=0; ks.forEach(k=>series.forEach(sr=>{ if(dias[k][sr[0]]>mx)mx=dias[k][sr[0]]; })); if(mx<=0)mx=1;
+  const X=i=>PL+(ks.length===1?iw/2:i*iw/(ks.length-1)), Y=v=>PT+ih-(v/mx)*ih;
+  let svg='<svg viewBox="0 0 '+W+' '+H+'" style="width:100%;min-width:640px;height:auto" xmlns="http://www.w3.org/2000/svg">';
+  for(let g=0;g<=4;g++){ const y=PT+ih*g/4, v=mx*(1-g/4);
+    svg+='<line x1="'+PL+'" y1="'+y+'" x2="'+(W-PR)+'" y2="'+y+'" stroke="rgba(148,163,184,.15)"/>'+
+         '<text x="'+(PL-6)+'" y="'+(y+4)+'" text-anchor="end" font-size="10" fill="#8b96b3">'+(v>=1000?(v/1000).toFixed(1)+'k':Math.round(v))+'</text>'; }
+  ks.forEach((k,i)=>{ if(ks.length<=16||i%Math.ceil(ks.length/14)===0) svg+='<text x="'+X(i)+'" y="'+(H-8)+'" text-anchor="middle" font-size="10" fill="#8b96b3">'+k.slice(8,10)+'/'+k.slice(5,7)+'</text>'; });
+  series.forEach(sr=>{
+    const f2=sr[0], cor=sr[1], nome=sr[2];
+    svg+='<polyline fill="none" stroke="'+cor+'" stroke-width="2.5" points="'+ks.map((k,i)=>X(i)+','+Y(dias[k][f2])).join(' ')+'"/>';
+    ks.forEach((k,i)=>{ svg+='<circle cx="'+X(i)+'" cy="'+Y(dias[k][f2])+'" r="3.5" fill="'+cor+'"><title>'+nome+' '+k.slice(8,10)+'/'+k.slice(5,7)+': '+BRL(dias[k][f2])+'</title></circle>'; });
+  });
+  svg+='</svg>';
+  el.innerHTML=svg;
+  $('grafLeg').innerHTML = series.map(sr=>'<span style="color:'+sr[1]+'">\u25CF</span> '+sr[2]).join(' &nbsp; ')+' \u00b7 somas di\u00e1rias \u00b7 M.C. s\u00f3 dos pedidos completos \u00b7 passa o mouse nos pontos';
+}
+function baixarCSV(){
+  if(!_anLP || !_anLP.length){ alert('sem vendas no filtro atual'); return; }
+  const br = v => (v==null||!isFinite(v)) ? '' : String(Number(v).toFixed(2)).replace('.',',');   // decimal BR p/ o Excel
+  const q = t => '"'+String(t==null?'':t).replace(/"/g,'""')+'"';
+  const cab = ['Dia da venda','Hora','Fonte da hora','Pedido','NF','Venda no marketplace','Pack ML','Order ML','Canal','Situacao','SKUs','Unidades','Venda NF','R$ Produtos','Custo','Imposto','Tarifa','Fonte da tarifa','Frete vendedor','Fonte do frete','Estorno ML (credito)','Margem de contribuicao','MC %'];
+  const linhas = _anLP.map(x=>{
+    const h=x.h, P=x.P;
+    const unid=(h.itens||[]).reduce((a,i)=>a+Number(i.qtd||1),0);
+    const skus=(h.itens||[]).map(i=>i.sku).join(' | ');
+    const d2=diaVenda(h);
+    return [
+      q(d2?(d2.slice(8,10)+'/'+d2.slice(5,7)+'/'+d2.slice(0,4)):''),
+      q(h.venda_em?dtBR(h.venda_em).slice(6):''),
+      q(h.venda_em?'venda (API do canal)':'sem hora do canal'),
+      q(h.numero||h.id), q(h.nf_numero||''), q(h.numero_loja||''), q(h.ml_pack||''), q(h.ml_order||''), q(P.ck), q(h._sit||(h.sintetico?'nao bipada':'bipada')), q(skus), unid,
+      br(P.tot), br(P.rp), br(P.custoOk?P.custo:null), br(P.imposto), br(P.tarifa),
+      q(P.feeReal!=null?'REAL (ML)':(P.feeBling!=null?'Bling':(P.tx!=null?'% configurada':''))),
+      br(P.frV), q(P.frFonte==='ml'?'real ML':(P.frFonte==='magalu'?('Magalu '+(P.magFreteFonte==='prov'?'previsto':'real')):(P.frFonte==='bling'?'Bling':(P.frFonte==='flex'?'FLEX (config)':'')))),
+      br(P.credito),
+      br(P.mc), (P.mc!=null&&P.rp)?Math.round(P.mc/P.rp*100):''
+    ].join(';');
+  });
+  const txt = '\uFEFF' + cab.map(q).join(';') + '\n' + linhas.join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([txt], {type:'text/csv;charset=utf-8'}));
+  a.download = 'analise-vendas-'+hojeSP()+'.csv';
+  document.body.appendChild(a); a.click(); a.remove();
+}
+const anBuscaOk = q => h => {
+  // casa com: nº do pedido, nº da NF, nº da venda no marketplace, id do Bling ou SKU (pedaço serve)
+  const alvos = [h.numero, h.nf_numero, h.numero_loja, h.ml_pack, h.ml_order, h.id];
+  for (const a of alvos) { if (a != null && String(a).toLowerCase().includes(q)) return true; }
+  return (h.itens || []).some(it => String(it.sku || '').toLowerCase().includes(q));
+};
+function setAnPer(p){ anPer=p; anPage=0; comAncora(()=>renderAnalise()); }
+function anIntervalo(){
+  const hoje = hojeSP();
+  let de, ate = hoje;
+  if(anPer==='dia') de = hoje;
+  else if(anPer==='ontem'){ const o = spDate(Date.now()-86400000); de=o; ate=o; }
+  else if(anPer==='7') de = spDate(Date.now()-6*86400000);
+  else if(anPer==='mes') de = hoje.slice(0,8)+'01';
+  else if(anPer==='ano') de = hoje.slice(0,4)+'-01-01';   // ano corrente inteiro
+  else if(anPer==='mesant'){ const [Y,M]=hoje.split('-').map(Number); const pm=new Date(Y,M-2,1);
+    const y2=pm.getFullYear(), m2=String(pm.getMonth()+1).padStart(2,'0');
+    de=y2+'-'+m2+'-01'; ate=y2+'-'+m2+'-'+String(new Date(Y,M-1,0).getDate()).padStart(2,'0'); }
+  else { de = anPDe || '2000-01-01'; ate = anPAte || hoje; }
+  return {de, ate};
+}
+function renderAnalise(){
+  const sel=$('anCanalSel'); if(!sel) return;
+  if(window._anPintou && selAtiva()){ clearTimeout(window._selT2); window._selT2=setTimeout(renderAnalise,2500); return; }
+  window._anPintou = true;
+  const pr=$('anPerChips'), pd=$('anPerDatas');
+  if(pr){ const defs=[['dia','Hoje'],['ontem','Ontem'],['7','Semana'],['mes','Mês'],['mesant','Mês passado'],['ano','Ano'],['custom','Período…']];
+    pr.innerHTML = ''; }   // 28/07: filtro de período REMOVIDO daqui — quem manda é o do topo, que já vale pra tela toda
+  if(pd){ pd.innerHTML = anPer==='custom' ? ' <input type="date" value="'+anPDe+'" onclick="this.showPicker&&this.showPicker()" onchange="anPDe=this.value;anPage=0;renderAnalise()"> <input type="date" value="'+anPAte+'" onclick="this.showPicker&&this.showPicker()" onchange="anPAte=this.value;anPage=0;renderAnalise()">' : ''; }
+  const iv=anIntervalo();
+  let L = DADOS.filter(h=>{
+    if(!h.conferido_em) return false;
+    if(ehFantasmaReg(h)) return false;   // casca sem número/itens/valor não é venda
+    const d=diaVenda(h); return d>=iv.de && d<=iv.ate;
+  });
+  // 🐛 27/07: o dropdown contava SÓ os bipados (mostrava 72 com 110 na lista). Agora conta o mesmo
+  // universo que a lista exibe: bipados + vendas do Bling ainda não bipadas.
+  const _naoBip = (SINT||[]).filter(h=>{ const d2=diaVenda(h); return d2>=iv.de && d2<=iv.ate; });
+  const _univ = L.concat(_naoBip);
+  const cnt={}; _univ.forEach(h=>{ const k=canalKey(h.marketplace); cnt[k]=(cnt[k]||0)+1; });
+  const opts='<option value="">Todos os canais ('+_univ.length+')</option>'+Object.keys(cnt).sort().map(k=>'<option value="'+k+'"'+(anCanal===k?' selected':'')+'>'+nomeCanal(k)+' ('+cnt[k]+')</option>').join('');
+  if(sel.innerHTML!==opts) sel.innerHTML=opts;
+  if(anCanal) L=L.filter(h=>canalKey(h.marketplace)===anCanal);
+  const q = String(anSku||'').trim().toLowerCase();
+  if(q) L=L.filter(anBuscaOk(q));
+  let LP = L.map(h=>({h:h, P:calcPL(h)}));
+  // vendas do Bling ainda NÃO bipadas: entram com margem calculada (itens/tarifa/frete do sincronizador)
+  const LS = (SINT||[]).filter(h=>{ const d2=diaVenda(h); return d2>=iv.de&&d2<=iv.ate; })
+    .filter(h=>!anCanal||canalKey(h.marketplace)===anCanal)
+    .filter(h=>!q||anBuscaOk(q)(h));
+  LP = LP.concat(LS.map(h=>({h:h,P:calcPL(h)})));
+  // d46: "aguardando bipagem" (venda no Bling sem itens/margem ainda) OCULTA por padrão — a análise é de MARGEM
+  const _ehAg = x => x.h.sintetico && !((x.h.itens||[]).length);
+  const nAg = LP.filter(_ehAg).length;
+  if(!anAg) LP = LP.filter(x=>!_ehAg(x));
+  const nLucro = LP.filter(x=>x.P.mc!=null&&x.P.mc>0&&!x.h._cancelado).length, nPrej = LP.filter(x=>x.P.mc!=null&&x.P.mc<0&&!x.h._cancelado).length;
+  const nInc = LP.filter(x=>x.P.mc==null).length;
+  const lpEl=$('anLPChips');
+  if(lpEl) lpEl.innerHTML =
+    '<button class="chip'+(anLP===''?' on':'')+'" onclick="anLP=\'\';anPage=0;renderAnalise()">Todos</button>'+
+    '<button class="chip" style="'+(anLP==='lucro'?'background:#065f46;border-color:#065f46;color:#fff':'color:#34d399;border-color:#34d399')+'" onclick="anLP=\'lucro\';anPage=0;renderAnalise()">Lucro ('+nLucro+')</button>'+
+    '<button class="chip" style="'+(anLP==='prej'?'background:#7f1d1d;border-color:#7f1d1d;color:#fff':'color:#f87171;border-color:#f87171')+'" onclick="anLP=\'prej\';anPage=0;renderAnalise()">Preju\u00edzo ('+nPrej+')</button>'+
+    ''+   // chip "Incompletas" removido (Diego, 27/07): gerava dúvida sobre dados faltando
+
+    (nAg?'<button class="chip" style="'+(anAg?'background:#334155;border-color:#64748b;color:#fff':'color:#94a3b8;border-color:#475569')+'" onclick="anAg=!anAg;anPage=0;renderAnalise()" title="vendas ainda NÃO bipadas pelo estoque (✓ laranja na lista) — clique pra ocultar/mostrar">✓ aguardando bipagem ('+nAg+')</button>':'');
+  if(anLP==='lucro') LP=LP.filter(x=>x.P.mc!=null&&x.P.mc>0);
+  else if(anLP==='prej') LP=LP.filter(x=>x.P.mc!=null&&x.P.mc<0);
+  else if(anLP==='inc') LP=LP.filter(x=>x.P.mc==null);
+  LP.sort((a,b)=> tMs(b.h)-tMs(a.h));
+  const PAG=(anPer==='dia'||anPer==='ontem') ? Math.max(1, LP.length) : 100;   // dia inteiro numa página só (Diego, 27/07)
+  const maxP=Math.max(0,Math.ceil(LP.length/PAG)-1);
+  if(anPage>maxP) anPage=maxP; if(anPage<0) anPage=0;
+  const pagPL=LP.slice(anPage*PAG, anPage*PAG+PAG);
+  const pag=pagPL.map(x=>x.h);
+  _anLP = LP;   // lista filtrada completa (usada pelo ⬇︎ CSV)
+  // d49: resuminho do PERÍODO/FILTRO inteiro no topo da Análise (todas as páginas; canceladas fora) — pedido do Diego
+  (function(){ const el=$('anResumo'); if(!el) return;
+    // 📚 período longo: o resumo vem do HISTÓRICO (mesma fonte dos cards do topo) — a lista abaixo
+    // continua sendo o que existe no cache local, e isso fica dito na tela pra não confundir.
+    const hOK = !!(HIST && HIST.de===iv.de && HIST.ate===iv.ate && HIST.totais);
+    if(hOK){
+      // garante a 1ª página das linhas do histórico
+      if(!HLIN || HLIN._de!==iv.de || HLIN._ate!==iv.ate){ carregarLinhasHist(iv.de, iv.ate, 1); }
+      const T=HIST.totais;
+      const mini2=(l,v,c)=>'<div style="background:var(--card);border:1px solid var(--line);border-radius:9px;padding:7px 11px;min-width:96px"><div style="font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut)">'+l+'</div><div style="font-weight:800;font-size:14px'+(c?';color:'+c:'')+'">'+v+'</div></div>';
+      el.innerHTML = '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px">'+
+        mini2('\ud83d\udcda Vendido (hist\u00f3rico)',BRL(T.faturamento))+
+        mini2('Impostos',BRL(T.imposto))+
+        mini2('Comiss\u00e3o',BRL(T.comissao))+
+        mini2('Frete vendedor',BRL(T.frete))+
+        mini2('Custo',BRL(T.custo))+
+        mini2('\ud83d\udc8e M.C.',BRL(T.margem),T.margem>=0?'#34d399':'#f87171')+
+        mini2('Pedidos',N(T.pedidos))+
+      '</div>'+
+      '<div class="nota" style="margin-bottom:10px"><b>\ud83d\udcda Hist\u00f3rico:</b> '+N(T.pedidos)+' pedidos e '+N(T.itens)+' itens no per\u00edodo. A lista abaixo vem do banco, 100 pedidos por p\u00e1gina.</div>';
+      renderHistLinhas(iv);
+      return;
+    }
+    let rT=0,rI=0,rC=0,rF=0,rM=0,rMn=0,rN=0,rDev=0,rDevFrete=0,rDevAb=0;
+    LP.forEach(x=>{ if(x.h._cancelado) return; const P=x.P; rN++;
+      if(P.tot!=null)rT+=P.tot; if(P.imposto!=null)rI+=P.imposto; if(P.tarifa!=null)rC+=P.tarifa;
+      if(P.frV!=null)rF+=P.frV; if(P.mc!=null){rM+=P.mc;rMn++;}
+      if(x.h.devolucao){ rDev++; if(x.h.dev_frete_retorno!=null)rDevFrete+=Number(x.h.dev_frete_retorno); if(x.h.dev_aberta)rDevAb++; } });
+    const mini=(l,v,c)=>'<div style="background:var(--card);border:1px solid var(--line);border-radius:9px;padding:7px 11px;min-width:96px"><div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut)">'+l+'</div><div style="font-size:15px;font-weight:800'+(c?';color:'+c:'')+'">'+v+'</div></div>';
+    el.innerHTML = rN? '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">'+
+      mini('Vendido (NF c/ frete)',BRL(rT))+
+      mini('Impostos',BRL(rI),'#f87171')+
+      mini('Comiss\u00e3o',BRL(rC),'#f87171')+
+      mini('Frete vendedor',BRL(rF),'#f87171')+
+      mini('\ud83d\udc8e M.C.',BRL(rM)+' <span style="font-size:10px;color:var(--mut)">('+rMn+'/'+rN+' c/ margem)</span>', rM>=0?'#34d399':'#f87171')+
+      (rDev? mini('\ud83d\udd34 Devolu\u00e7\u00f5es', rDev+' <span style="font-size:10px;color:var(--mut)">'+(rDevAb?'('+rDevAb+' aberta'+(rDevAb>1?'s':'')+') · ':'')+'frete ret. '+BRL(rDevFrete)+'</span>', '#f87171') : '')+
+    '</div>' : '';
+  })();
+  (function(){
+    const rp = document.getElementById('anRodape'); if(!rp) return;
+    if(maxP<=0){ rp.style.display='none'; rp.innerHTML=''; return; }
+    rp.style.display='flex';
+    rp.innerHTML = '<b style="font-size:12.5px">\u26a0\ufe0f tem mais venda(s) nas pr\u00f3ximas p\u00e1ginas</b>'+
+      '<span class="mut" style="font-size:12px">mostrando '+pagPL.length+' de '+LP.length+' \u00b7 p\u00e1gina '+(anPage+1)+' de '+(maxP+1)+'</span>'+
+      '<span style="margin-left:auto"></span>'+
+      (anPage>0?'<button class="chip" onclick="anPage--;renderAnalise();document.getElementById(\'secAnalise\').scrollIntoView({behavior:\'smooth\'})">\u2190 Anterior</button>':'')+
+      (anPage<maxP?'<button class="chip" style="background:#1d4ed8;border-color:#1d4ed8;color:#fff;font-weight:700" onclick="anPage++;renderAnalise();document.getElementById(\'secAnalise\').scrollIntoView({behavior:\'smooth\'})">ver as pr\u00f3ximas '+Math.min(PAG, LP.length-(anPage+1)*PAG)+' \u2192</button>':'');
+  })();
+  renderCardsVenda(pagPL.map(function(x){
+    const h=x.h, P=x.P;
+    const dt = h.venda_em ? dtBR(h.venda_em).slice(-5) : (h.venda_dia?String(h.venda_dia).slice(8,10)+'/'+String(h.venda_dia).slice(5,7):'');
+    return { numero:(h.numero||h.id), canal:nomeCanal(P.ck), hora:dt,
+             skus:((h.itens||[]).length?(h.itens||[]).map(function(i){return (Number(i.qtd||1)>1?i.qtd+'\u00d7 ':'')+esc(i.sku||'');}).join(' \u00b7 '):'<span class="dim">detalhe a caminho\u2026</span>'),
+             venda:(P.tot!=null?P.tot:(h.valor!=null?Number(h.valor):null)), custo:(P.custo!=null?P.custo:null),
+             mc:(P.mc!=null?P.mc:null), pc:(P.mc!=null&&P.tot?Math.round(P.mc/P.tot*1000)/10:null),
+             cancelado:!!h._cancelado, dev:!!h.devolucao, devAberta:!!h.dev_aberta };
+  }));
+  $('anInfo').textContent = LP.length ? ((anPage*PAG+1)+'–'+(anPage*PAG+pagPL.length)+' de '+LP.length+' venda(s)'+(maxP>0?('  ·  página '+(anPage+1)+' de '+(maxP+1)):'')) : 'sem vendas no período';
+  const faltam=[...new Set(pag.flatMap(h=>(h.itens||[]).map(i=>i.sku)).filter(sk=>sk && !SKUINFO[sk] && !_anTried[sk]))];
+  if(faltam.length && !_anLoading){
+    faltam.forEach(sk=>{ _anTried[sk]=1; });
+    _anLoading=true;
+    (async()=>{
+      for(let i=0;i<faltam.length && i<40;i+=8){
+        try{
+          const r=await fetch(MOD+'/sku-info',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({skus:faltam.slice(i,i+8)})});
+          const d=await r.json(); if(d&&d.skus){ Object.assign(SKUINFO,d.skus); console.log('[AN] pedi',faltam.slice(i,i+8).length,'· veio',Object.keys(d.skus).length); }
+        }catch(e){}
+      }
+    })().finally(()=>{ _anLoading=false; renderAnalise(); });
+  }
+  const T={tot:0,rp:0,imp:0,tar:0,cus:0,frv:0,cre:0,mc:0,mcN:0};
+  const cel=(v,cls)=>'<td class="num'+(cls?' '+cls:'')+'">'+(v!=null?BRL(v):'<span class="dim">—</span>')+'</td>';
+  const totDia = {};   // totais por dia (da lista filtrada inteira, nao so da pagina)
+  LP.forEach(x=>{ if(x.h._cancelado) return; const d2=diaVenda(x.h); const t=totDia[d2]||(totDia[d2]={n:0,rp:0,tot:0,mc:0,mcN:0});
+    t.n++; if(x.P.rp!=null)t.rp+=x.P.rp; if(x.P.tot!=null)t.tot+=x.P.tot; if(x.P.mc!=null){t.mc+=x.P.mc;t.mcN++;} });
+  let _diaAnt = null;
+  const linhas = pagPL.map(x=>{
+    const h=x.h, P=x.P;
+    const _d = diaVenda(h);
+    let sep = '';
+    if(_d !== _diaAnt){
+      _diaAnt = _d;
+      const t = totDia[_d] || {n:0,rp:0,tot:0,mc:0,mcN:0};
+      sep = '<tr style="background:var(--bg2)"><td colspan="6" style="font-weight:800;padding:7px 8px">\uD83D\uDCC5 '+(_d?(_d.slice(8,10)+'/'+_d.slice(5,7)+'/'+_d.slice(0,4)):'sem data')+' <span class="mut" style="font-weight:400;font-size:11px">'+t.n+' venda(s) no filtro</span></td>'+
+        '<td colspan="4" class="num mut" style="font-size:11px" title="faturamento do dia \u2014 valor das notas, o mesmo n\u00famero do card l\u00e1 em cima">faturamento '+BRL(t.tot)+'</td>'+
+        '<td colspan="5" class="num" style="font-size:11px;font-weight:700">\uD83D\uDC8E '+BRL(t.mc)+' <span class="mut" style="font-weight:400">('+t.mcN+'/'+t.n+')</span></td></tr>';
+    }
+    const unid=(h.itens||[]).reduce((a,i)=>a+Number(i.qtd||1),0);
+    const carrinho=((h.itens||[]).length>1)||unid>1;
+    if(!h._cancelado){   // só CANCELADA fica fora do Σ; não-bipada com margem calculada CONTA
+      if(P.tot!=null)T.tot+=P.tot; if(P.rp!=null)T.rp+=P.rp; if(P.imposto!=null)T.imp+=P.imposto;
+      if(P.tarifa!=null)T.tar+=P.tarifa; if(P.custoOk)T.cus+=P.custo; if(P.frV!=null)T.frv+=P.frV; if(P.credito!=null)T.cre+=P.credito;
+      if(P.mc!=null){ T.mc+=P.mc; T.mcN++; }
+    }
+    const it0=(h.itens||[])[0]||{};
+    const pmc = (P.mc!=null&&P.rp)?Math.round(P.mc/P.rp*100):null;
+    if(h.sintetico && !((h.itens||[]).length)){   // detalhe ainda não chegou — linha resumida
+      const dtx = _d ? (_d.slice(8,10)+'/'+_d.slice(5,7)) : '—';
+      const tag = h._cancelado ? '<span class="st bad">CANCELADA</span>' : '<span class="dim" style="font-size:10px" title="o sync ainda não trouxe os itens desta venda do Bling — a margem entra sozinha na próxima rodada (até 5 min)">⏳</span>';
+      return sep + '<tr style="'+estiloLinha(h)+'">'+
+        '<td class="dim">'+dtx+'</td>'+
+        '<td>'+(h._cancelado?'<span style="color:#64748b;font-weight:800" title="CANCELADO no Bling">✕</span> ':'<span style="color:#f59e0b;font-weight:800" title="aguardando bipagem">✓</span> ')+'<b>'+esc(h.numero)+'</b>'+(h.devolucao?' <span class="st bad" style="font-size:9px" title="DEVOLU\u00c7\u00c3O no ML">\ud83d\udd34 DEVOLV.</span>':'')+'<br><span class="dim" style="font-size:10px">'+esc(h._sit||'')+'</span></td>'+
+        '<td class="dim" style="font-size:11px;max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(h.numero_loja?esc(h.numero_loja)+(linkMkt(h)?' <a href="'+linkMkt(h)+'" target="_blank" rel="noopener" style="text-decoration:none">↗</a>':''):'—')+'</td>'+
+        '<td>'+esc(nomeCanal(P.ck))+'</td>'+
+        '<td><div class="desc" style="max-width:200px">'+esc(h.cliente||'')+'</div></td>'+
+        '<td class="num dim">—</td>'+
+        '<td class="num'+(h._cancelado?' dim':'')+'" title="total do pedido no Bling (NF ainda não emitida)">'+(h.valor!=null?BRL(h.valor):'—')+'</td>'+
+        '<td class="num dim">—</td><td class="num dim">—</td><td class="num dim">—</td><td class="num dim">—</td><td class="num dim">—</td><td class="num dim">—</td>'+
+        '<td class="num">'+tag+'</td><td class="num dim">—</td>'+
+      '</tr>';
+    }
+    return sep + '<tr style="'+estiloLinha(h)+'"'+(h._cancelado?' title="pedido CANCELADO no Bling — fora dos totais"':(h.devolucao?(' title="DEVOLU\u00c7\u00c3O'+(h.dev_aberta?' em andamento (dinheiro ainda n\u00e3o resolvido no Mercado Pago)':' consolidada')+'"'):''))+'>'+
+      '<td class="dim" style="white-space:nowrap" title="'+(h.venda_em?('venda: '+dtBR(h.venda_em)+' · '):(h.venda_dia?('venda: '+String(h.venda_dia).slice(8,10)+'/'+String(h.venda_dia).slice(5,7)+' · '):''))+'conferido: '+dtBR(h.conferido_em)+'">'+(h.venda_em?dtBR(h.venda_em):(h.venda_dia?(String(h.venda_dia).slice(8,10)+'/'+String(h.venda_dia).slice(5,7)+(h.nf_emissao?(' '+String(h.nf_emissao).replace(' ','T').slice(11,16)+' <span style="font-size:9px" title="hora da EMISSÃO da NF no Bling — a hora exata da venda só a API do canal dá">🧾</span>'):' <span style="font-size:9px" title="dia da venda (Bling) — hora só com a API do canal">🕘</span>')):(h.nf_emissao?(String(h.nf_emissao).slice(8,10)+'/'+String(h.nf_emissao).slice(5,7)+' '+String(h.nf_emissao).replace(' ','T').slice(11,16)+' <span style="font-size:9px" title="hora da EMISSÃO da NF no Bling — a hora exata da venda só a API do canal dá">🧾</span>'):(dtBR(h.conferido_em)+' <span style="font-size:9px" title="hora da conferência">🕘</span>'))))+'</td>'+
+      '<td>'+(h._cancelado?'<span style="color:#64748b;font-weight:800" title="CANCELADO — fora dos totais">✕</span> <span class="st bad" style="font-size:9px">CANCELADA</span> ':(h.sintetico?'<span style="color:#f59e0b;font-weight:800" title="aguardando bipagem — margem já calculada">✓</span> ':'<span style="color:#34d399;font-weight:800" title="bipagem confirmada">✓</span> '))+'<b>'+esc(h.numero||h.id)+'</b>'+(h.id?' <a href="https://www.bling.com.br/vendas.php#edit/'+esc(h.id)+'" target="_blank" rel="noopener" title="abrir o pedido no Bling" style="font-size:10px;color:#3b82f6;text-decoration:none;font-weight:600">Bling↗</a>':'')+(carrinho?' <span class="badge" title="'+unid+' unidades">🛒 '+unid+'</span>':'')+(h.devolucao?' <span class="st bad" style="font-size:9px" title="DEVOLU\u00c7\u00c3O no ML'+(h.dev_frete_retorno!=null?' \u00b7 frete de retorno '+BRL(h.dev_frete_retorno):'')+(h.dev_destino==='seller_address'?' \u00b7 mercadoria volta pro galp\u00e3o':(h.dev_destino==='warehouse'?' \u00b7 mercadoria foi pro ML':''))+(h.dev_aberta?' \u00b7 EM ABERTO':' \u00b7 fechada')+'">\ud83d\udd34 DEVOLV.</span>':'')+
+        (h.nf_numero?'<div class="desc">NF '+esc(h.nf_numero)+(h.nf_id?' <a href="https://www.bling.com.br/notas.fiscais.php#edit/'+esc(h.nf_id)+'" target="_blank" rel="noopener" title="abrir a NF no Bling" style="color:#3b82f6;text-decoration:none;font-weight:600">↗</a>':'')+'</div>':'')+'</td>'+
+      (function(){
+        const nlV = String(h.numero_loja||'');
+        const par = [h.ml_pack, h.ml_order].map(x=>x!=null?String(x):null).find(x=>x && x!==nlV) || null;
+        const um = (v,dim)=>'<span data-nl="'+esc(v)+'" onclick="copiaNL(this)" style="cursor:pointer;display:inline-block;max-width:126px;overflow:hidden;text-overflow:ellipsis;vertical-align:middle'+(dim?';opacity:.55;font-size:10px':'')+'" title="clique = copiar · '+esc(v)+'">'+esc(v)+'</span>';
+        return '<td style="font-size:11px;max-width:170px;white-space:nowrap;color:var(--tx)">'+(nlV?(
+          um(nlV,false)+(linkMkt(h)?' <a href="'+linkMkt(h)+'" target="_blank" rel="noopener" style="text-decoration:none;font-size:12px" title="abrir esta venda no Mercado Livre">↗</a>':'')+
+          (par?'<br>'+um(par,true):'')
+        ):'—')+'</td>';
+      })()+
+      '<td>'+esc(nomeCanal(P.ck))+'</td>'+
+      '<td><div class="desc" style="max-width:200px">'+(((h.itens||[]).length?(h.itens||[]).map(function(ix){var q2=Number(ix.qtd||1);return (q2>1?q2+'× ':'')+esc(ix.sku||'');}).join('<br>'):esc(it0.sku||'')))+'</div></td>'+
+      '<td class="num">'+N(unid)+'</td>'+
+      cel(P.tot)+cel(P.rp,'ok')+
+      cel(P.custoOk?P.custo:null)+cel(P.imposto)+
+      '<td class="num">'+(P.tarifa!=null?BRL(P.tarifa)+(P.feeReal!=null?' <span class="st ok" style="font-size:9px">REAL</span>':(P.feeBling!=null?' <span class="st ok" style="font-size:9px">BLING</span>':''))+(P.rp?'<div class="desc">'+Math.round(P.tarifa/P.rp*100)+'%</div>':''):'<span class="dim">—</span>')+'</td>'+
+      '<td class="num">'+(P.frV!=null?(
+          P.frFonte==='magalu'
+            ? (P.magFreteFonte==='prov'
+                ? '<span class="warn">'+BRL(P.frV)+'</span> <span class="st w" style="font-size:9px" title="frete de coparticipação Magalu ESTIMADO pela tabela — o valor real chega quando o pedido é entregue">PREVISTO</span>'
+                : '<span class="ok">'+BRL(P.frV)+'</span> <span class="st ok" style="font-size:9px" title="frete de coparticipação REAL, da API financeira da Magalu">REAL</span>')
+            : BRL(P.frV)+(P.frFonte==='flex'?' <span class="st warn" style="font-size:9px">FLEX</span>':'')
+        ):'<span class="dim">—</span>')+'</td>'+
+      '<td class="num">'+(P.credito!=null?('<span class="'+(P.credito>=0?'ok':'bad')+'">'+(P.credito>=0?'+':'')+BRL(P.credito)+'</span>'):'<span class="dim">—</span>')+'</td>'+
+      '<td class="num" style="font-weight:800">'+(P.mc!=null?('<span class="'+(P.mc>=0?'ok':'bad')+'">'+BRL(P.mc)+'</span>'):'<span class="warn" title="falta config/custo">—</span>')+'</td>'+
+      '<td class="num '+(pmc!=null?(pmc>=0?'ok':'bad'):'dim')+'">'+(pmc!=null?pmc+'%':'—')+'</td>'+
+    '</tr>';
+  }).join('');
+  $('tAnalise').innerHTML =
+    '<tr><th>Data/hora</th><th>Pedido</th><th>Venda (mkt)</th><th>Canal</th><th>Produto</th><th class="num">Un.</th>'+
+    '<th class="num" title="total da NOTA FISCAL (com frete embutido, quando o canal lança)">Venda NF</th><th class="num" title="só os produtos: preço × quantidade">R$ Produtos</th><th class="num">Custo (−)</th><th class="num">Imposto (−)</th>'+
+    '<th class="num">Tarifa (−)</th><th class="num">Frete vend. (−)</th><th class="num">Estorno (+)</th><th class="num">💎 M.C.</th><th class="num">MC %</th></tr>'+
+    (linhas || '<tr><td class="dim" colspan="15">sem vendas no período</td></tr>')+
+    (pag.length?('<tr style="border-top:2px solid var(--line2)"><td colspan="6" style="font-weight:800">Σ desta página'+(maxP>0?(' <span class="mut" style="font-weight:400;font-size:11px">('+pag.length+' de '+LP.length+' — o total do período está lá em cima)</span>'):'')+'</td>'+
+      cel(T.tot)+cel(T.rp,'ok')+cel(T.cus)+cel(T.imp)+cel(T.tar)+cel(T.frv)+cel(T.cre,'ok')+
+      '<td class="num" style="font-weight:800"><span class="'+(T.mc>=0?'ok':'bad')+'">'+BRL(T.mc)+'</span></td>'+
+      '<td class="num dim">'+T.mcN+'/'+pag.length+' compl.</td></tr>'):'');
+}
+
+// ── 📦 projeção ─────────────────────────────────────────────────────────────
+function topSkus14(){
+  const corte = spDate(Date.now()-(projDias-1)*86400000);
+  const hoje = hojeSP();
+  const agg = {};
+  (DADOS||[]).concat(SINT||[]).forEach(h=>{   // 27/07: o ritmo de vendas ignorava as não bipadas
+    if(!h.conferido_em && !h.sintetico) return;
+    if(h._cancelado) return;   // cancelada não entra no ritmo
+    const d = diaVenda(h); if(d<corte || d>hoje) return;
+    (h.itens||[]).forEach(it=>{
+      const sku=it.sku; if(!sku) return;
+      if(!agg[sku]) agg[sku]={sku,desc:it.descricao||'',qtd:0,fat:0,qtdV:0};
+      agg[sku].qtd+=Number(it.qtd||1);
+      if(it.valor_total!=null){ agg[sku].fat+=Number(it.valor_total)||0; agg[sku].qtdV+=Number(it.qtd||1); }
+    });
+  });
+  return Object.values(agg).sort((a,b)=>b.qtd-a.qtd).slice(0,40);
+}
+function sincCustos(){
+  const st = $('projStatus');
+  fetch(MOD+'/custo-sync',{credentials:'same-origin'}).then(r=>r.json()).then(d=>{
+    if(st) st.textContent = d && d.ja_rodando ? ('🐢 já sincronizando… ('+d.progresso+')') : '🐢 sincronizando custos em background (~alguns minutos) — depois clica ↻';
+  }).catch(()=>{ if(st) st.textContent='✗ não consegui iniciar o custo-sync'; });
+}
+async function carregarSkuInfo(fresh){
+  if(_skuLoading) return; _skuLoading = true;
+  if(fresh) _anTried = {};
+  const st=$('projStatus'), btn=$('btnProj');
+  if(st) st.textContent='⏳ consultando o Bling (saldo/preço/custo)… ~30-60s na 1ª vez';
+  if(btn) btn.style.display='none';
+  const skus = topSkus14().map(t=>t.sku).filter(Boolean);
+  if(!skus.length){ _skuLoading=false; const st1=$('projStatus'); if(st1) st1.textContent='⏳ sem SKUs ainda — re-tento quando os pedidos chegarem…'; setTimeout(()=>{ if(!skuInfoCarregado) carregarSkuInfo(fresh); }, 1500); return; }
+  let feitos = 0, falhas = 0, _ultResp = '—';
+  for(let i=0;i<skus.length;i+=8){   // fatias de 8: cada chamada responde em ~20s (40 de uma vez estourava o timeout do servidor)
+    try{
+      const r = await fetch(MOD+'/sku-info',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({skus:skus.slice(i,i+8), fresh: !!fresh})});
+      if(r.status===403){ if(st) st.innerHTML='🔒 sessão de admin expirou — <a href="'+MOD+'/painel">faça login</a> e recarregue'; _skuLoading=false; return; }
+      const d = await r.json();
+      let nResp = 0;
+      if(d && d.skus){ Object.assign(SKUINFO, d.skus); nResp = Object.keys(d.skus).length; }
+      _ultResp = nResp;
+    }catch(e){ falhas++; _ultResp = 'erro'; }
+    feitos = Math.min(skus.length, i+8);
+    if(st) st.textContent='⏳ Bling… '+feitos+'/'+skus.length+' · última fatia devolveu '+_ultResp+' SKU(s)'+(falhas?' · '+falhas+' falha(s)':'');
+    if(!selAtiva()) renderProjecao();   // mostra o que chegou — sem apagar seleção de texto
+  }
+  skuInfoCarregado = true;
+  const _comCusto = Object.values(SKUINFO).filter(x=>x&&x.custo!=null).length;
+  if(st) st.textContent = (falhas? ('✓ parcial — '+falhas+' falha(s) · '):'✓ ')+Object.keys(SKUINFO).length+' SKU(s) carregados · '+_comCusto+' com custo';
+  if(btn){ btn.style.display=''; btn.disabled=false; btn.textContent='↻ recarregar do Bling (ignora cache)'; }
+  _skuLoading = false;
+  renderSafe();   // re-render completo — espera você terminar de copiar, se estiver selecionando
+}
+// ══════════ MAPA DO BRASIL (contornos reais dos 27 estados) ══════════
+// Geometria do @react-jvectormap/brazil (livre p/ uso), simplificada de 641 KB para ~13 KB.
+// BR_CEN = centro de cada estado · BR_TAM = largura/altura (pra saber se o rótulo cabe dentro).
+const BR_UF={RO:"M39.8 75.3L41.6 73.3L43.7 73.3L44.6 74.2L47.2 72.6L47.6 73.5L49.1 71.3L52.4 71.1L53.3 68.1L54.1 68.0L54.8 66.3L58.4 66.3L61.9 70.4L63.0 70.7L63.9 69.8L65.0 70.9L64.3 72.6L65.0 74.4L64.6 81.0L72.1 81.7L71.5 85.2L73.1 87.6L71.7 89.0L70.1 93.1L68.6 94.3L67.2 93.2L63.3 93.6L61.7 91.4L58.8 90.9L57.1 89.0L56.0 89.2L54.1 88.1L51.7 88.5L49.7 86.4L48.2 86.0L46.6 82.3L47.1 81.0L46.3 79.3L46.9 77.3L46.4 74.7L45.7 75.5L44.7 74.9L41.6 75.7L39.8 75.3Z",AC:"M6.6 62.1L12.0 64.6L22.9 67.1L40.6 75.9L35.5 79.7L33.8 79.5L31.5 81.6L27.4 80.7L21.7 81.1L22.3 73.4L18.9 76.1L14.2 76.2L13.8 74.0L9.4 73.3L10.7 71.3L7.9 68.1L6.7 66.0L7.2 65.3L5.7 64.3L5.9 63.2L7.1 63.1L6.6 62.1Z",AM:"M6.6 62.1L7.4 60.4L9.8 59.1L9.3 56.8L10.6 55.0L11.1 52.5L15.7 49.5L20.1 48.8L21.0 47.7L23.1 47.7L23.7 48.7L24.8 48.4L27.5 32.8L26.5 29.9L24.4 28.3L24.4 24.7L27.1 23.8L28.8 24.2L28.1 22.2L25.4 22.1L25.4 19.0L33.4 18.9L33.2 17.7L34.4 18.5L37.0 16.4L38.4 18.9L38.4 21.7L39.5 21.4L42.1 23.7L45.5 22.5L45.7 24.2L47.8 21.7L49.6 21.3L51.2 19.9L51.4 20.7L53.2 17.7L57.1 16.8L59.2 17.9L58.7 19.6L60.4 22.6L60.0 24.9L61.6 29.0L60.1 31.2L63.0 34.2L65.0 35.1L64.3 33.8L64.6 31.3L66.2 29.8L67.6 30.1L68.8 31.8L70.5 30.9L70.1 29.9L71.8 26.1L77.2 26.1L77.3 29.1L79.9 33.0L80.7 33.4L81.4 32.8L81.7 34.2L85.4 35.8L87.7 38.2L90.5 37.3L88.7 39.2L79.2 60.1L80.8 63.3L79.6 65.7L80.1 67.1L79.5 70.3L64.4 70.4L63.9 69.8L62.6 70.7L58.4 66.3L54.8 66.3L54.1 68.0L53.3 68.1L52.3 71.2L49.1 71.3L48.1 73.3L47.1 72.6L44.6 74.2L43.7 73.3L41.6 73.3L39.8 75.3L22.9 67.1L12.0 64.6L6.6 62.1Z",RR:"M52.2 10.4L49.3 6.5L50.4 7.4L52.3 7.2L53.2 8.5L54.5 7.8L55.4 8.6L55.7 8.0L56.8 8.1L58.0 9.8L59.0 9.4L59.0 7.7L59.9 7.8L60.3 7.0L62.8 7.4L65.7 5.2L67.3 5.3L69.2 3.3L68.6 1.9L71.3 1.8L72.0 3.2L71.2 5.4L73.5 6.0L73.3 7.0L74.3 8.1L72.6 10.0L72.1 14.7L73.3 16.3L73.5 18.8L75.5 20.6L77.1 21.0L77.2 26.1L71.8 26.1L70.1 29.9L70.5 30.9L68.8 31.8L67.6 30.1L66.2 29.8L64.6 31.3L64.3 33.8L65.0 35.1L63.0 34.2L60.1 31.1L61.1 30.5L61.6 29.0L60.0 24.9L60.3 22.1L58.7 19.6L59.2 17.9L56.1 16.7L55.8 15.5L52.8 15.2L53.1 14.1L51.9 12.2L52.2 10.4Z",AP:"M96.3 15.5L99.5 16.8L101.5 15.8L105.6 16.7L107.3 15.1L108.2 12.1L111.6 7.7L112.2 5.7L114.3 8.4L114.2 10.8L116.0 16.9L117.3 16.7L118.2 18.6L119.8 19.1L119.6 22.5L118.9 24.0L117.3 24.5L116.2 26.5L113.6 28.0L111.4 31.3L111.3 32.6L109.5 33.4L107.8 32.5L107.4 30.3L105.4 28.1L104.3 25.5L104.6 24.1L103.2 22.9L103.1 21.3L100.0 20.1L99.0 18.9L96.9 18.7L96.3 15.5Z",TO:"M115.8 83.2L116.5 79.5L119.1 72.8L123.1 67.3L123.4 65.5L122.3 64.3L123.1 61.3L125.7 59.9L127.7 56.4L127.4 55.5L128.2 54.8L125.3 53.5L127.1 52.6L129.4 53.1L131.2 54.4L131.8 57.9L131.0 61.6L130.0 62.6L131.2 63.0L130.8 63.7L133.4 66.7L135.4 65.9L136.1 66.8L135.7 68.0L134.5 68.4L133.2 71.6L135.6 73.7L135.2 74.9L136.5 77.0L139.7 77.0L135.4 82.5L136.0 83.6L137.9 84.1L136.8 84.2L136.5 85.3L137.5 85.6L136.4 86.1L136.6 87.6L137.6 88.4L136.9 90.6L137.8 90.5L136.6 90.8L136.3 90.0L136.2 90.7L131.6 92.3L130.6 91.4L130.3 93.1L128.6 92.0L128.0 92.4L128.1 91.6L126.7 92.3L126.4 91.5L126.1 92.4L125.8 90.9L123.5 89.8L122.3 92.2L118.0 90.1L118.7 87.9L116.9 90.2L116.4 90.0L115.8 83.2Z",MT:"M64.3 72.7L65.0 70.9L64.5 70.4L79.5 70.3L80.1 67.1L79.6 65.7L80.8 63.3L83.1 67.5L83.4 70.2L85.3 71.0L87.3 73.3L118.3 75.4L116.5 79.5L115.8 83.2L116.0 89.0L117.0 90.3L115.2 94.5L114.2 100.2L112.2 100.9L110.4 104.7L108.7 105.0L106.7 106.9L106.9 108.2L105.1 109.7L104.1 111.9L104.8 115.5L100.6 114.9L101.8 113.6L101.8 111.5L100.0 113.4L98.8 113.6L97.6 112.7L95.1 113.6L90.4 111.2L87.4 111.9L86.0 114.0L84.1 114.8L82.7 113.0L81.5 112.9L79.6 111.3L79.2 109.2L80.0 106.8L71.2 106.8L70.9 103.0L69.3 101.2L70.8 101.1L69.7 96.7L70.2 95.7L68.6 94.2L70.1 93.1L71.7 89.0L73.1 87.6L71.5 85.2L72.4 82.7L72.1 81.7L69.9 81.1L64.6 81.0L65.0 74.4L64.3 72.7Z",GO:"M104.0 112.9L105.1 109.7L106.9 108.2L106.7 106.9L108.7 105.0L110.4 104.7L112.2 100.9L114.2 100.2L115.2 94.5L117.1 89.5L118.4 88.0L118.0 90.1L122.3 92.2L123.5 89.8L125.8 90.9L126.1 92.4L126.4 91.5L126.7 92.3L128.1 91.6L128.0 92.4L128.6 92.0L130.3 93.1L130.6 91.4L131.6 92.3L136.2 90.7L136.3 90.0L136.6 90.8L137.8 90.5L136.7 92.1L138.1 92.2L137.2 93.0L137.0 94.8L137.0 96.2L138.7 97.5L138.2 99.6L137.2 100.4L135.9 99.2L135.9 100.9L133.9 100.9L134.5 104.9L132.0 105.7L131.6 103.1L127.9 103.1L127.5 105.8L132.1 105.8L131.4 108.0L133.0 110.3L131.0 112.3L132.3 113.4L132.2 115.6L130.0 117.3L129.0 117.7L127.6 116.9L124.4 116.8L122.2 118.5L121.6 117.7L118.1 118.6L115.4 122.6L107.8 118.6L105.5 118.4L106.3 117.0L104.6 116.8L104.0 112.9Z",MS:"M81.3 122.9L84.0 116.4L82.4 113.1L84.1 114.8L86.0 114.0L87.4 111.9L90.4 111.2L95.1 113.6L97.6 112.7L98.8 113.6L100.0 113.4L101.8 111.5L101.8 113.6L100.7 114.9L104.8 115.5L104.6 116.8L106.3 117.0L105.5 118.4L107.3 118.5L114.2 121.7L115.0 123.0L114.3 126.3L111.8 128.1L109.5 133.4L107.6 135.9L102.3 139.4L99.1 144.9L97.2 143.7L95.4 144.6L93.7 144.4L92.7 137.9L91.6 136.2L89.9 136.2L89.1 135.2L87.0 136.3L81.5 135.3L82.3 129.8L80.7 126.2L82.1 124.9L80.8 123.9L81.3 122.9Z",MG:"M114.5 124.0L114.8 122.5L115.4 122.5L115.5 121.6L118.1 118.6L121.6 117.7L122.2 118.5L124.4 116.8L127.6 116.9L129.0 117.7L132.1 115.7L132.3 113.4L131.0 112.3L133.0 110.3L131.4 107.8L132.1 105.6L134.5 104.9L133.9 100.9L135.9 100.9L135.9 99.2L136.9 100.3L138.3 100.2L137.9 101.9L145.2 97.4L147.8 97.1L148.8 97.4L148.3 98.9L150.0 99.7L151.7 98.9L156.8 101.5L158.2 101.1L160.3 103.1L160.4 104.3L163.4 103.9L167.3 106.0L165.4 108.5L165.4 109.9L164.4 109.8L164.0 110.7L163.7 112.4L165.7 114.1L165.6 115.2L162.5 115.1L163.1 116.0L161.2 116.8L162.4 119.3L160.8 119.4L161.9 120.0L162.2 122.5L160.2 126.0L158.0 126.7L158.1 128.2L156.5 129.8L155.5 133.0L156.0 133.4L152.3 135.2L148.8 135.1L141.2 138.0L139.6 137.6L139.3 139.0L136.7 139.2L136.3 137.5L134.9 136.3L135.8 132.1L133.5 132.0L132.4 129.4L133.1 128.2L131.3 124.9L124.9 125.8L124.5 127.2L124.1 125.8L123.0 126.5L122.9 124.9L117.1 124.0L114.6 125.5L114.5 124.0Z",PR:"M97.5 151.6L99.2 146.3L98.8 145.3L99.9 144.4L100.4 142.2L101.7 141.2L102.3 139.4L105.3 137.6L108.8 138.1L109.3 137.3L113.3 138.1L115.8 139.5L119.5 139.3L120.9 140.5L121.2 144.0L123.1 146.3L122.6 147.8L126.1 147.9L126.2 149.8L127.6 149.4L127.9 150.4L128.7 150.5L126.0 154.3L123.3 154.4L121.5 155.5L119.6 154.4L117.8 155.0L116.6 154.4L115.9 155.6L113.5 155.9L113.5 157.4L112.7 157.8L109.0 156.5L102.5 155.8L101.2 154.2L100.9 152.5L99.9 151.9L98.3 152.9L97.5 151.6Z",RS:"M84.6 173.8L91.5 165.9L92.4 166.2L92.0 165.3L95.5 163.4L96.5 161.8L99.1 161.4L101.0 159.9L102.1 160.3L103.4 159.7L103.7 160.3L105.0 159.6L105.3 160.3L109.1 160.6L114.2 163.3L116.4 166.0L120.5 166.4L120.8 167.1L119.7 167.6L119.5 169.6L118.6 170.0L119.0 170.7L119.5 170.0L120.7 170.6L117.6 176.6L115.2 179.9L109.0 184.7L106.7 189.3L103.3 192.2L102.6 191.9L102.7 189.3L104.8 187.3L102.4 185.8L101.7 184.1L97.6 181.0L94.5 180.0L92.9 178.0L90.9 179.2L90.8 177.7L87.1 174.4L83.6 175.2L83.1 174.8L84.6 173.8Z",BA:"M135.4 82.6L137.3 79.4L140.2 76.7L142.0 80.3L143.4 80.8L145.0 79.3L147.2 79.3L149.3 76.4L148.5 74.0L150.3 72.6L153.6 74.3L155.7 72.9L158.0 72.5L160.2 69.9L161.4 69.9L163.6 72.1L163.0 73.6L163.7 73.7L165.1 73.1L165.5 71.6L166.9 71.6L167.2 70.5L169.6 69.1L173.1 71.3L173.6 70.5L174.0 71.4L174.7 71.3L177.4 77.8L177.1 79.6L175.2 79.7L175.1 80.7L177.1 83.6L179.3 83.3L176.0 89.1L171.7 92.0L171.1 99.4L172.1 104.9L170.4 111.2L170.8 113.8L168.3 117.0L165.6 115.2L165.7 114.1L163.7 112.4L164.4 109.8L165.4 109.9L165.4 108.3L167.4 106.1L165.6 104.6L162.8 103.8L160.4 104.3L160.3 103.1L158.2 101.1L156.8 101.5L151.7 98.9L150.0 99.7L148.3 98.9L148.8 97.4L146.7 96.9L137.9 101.9L138.7 97.5L137.0 96.2L137.2 93.0L138.1 92.2L136.7 92.1L137.8 90.5L136.9 90.6L137.6 88.4L136.6 87.6L136.4 86.1L137.5 85.6L136.5 85.3L136.8 84.2L137.9 84.1L136.0 83.6L135.4 82.6Z",PI:"M138.5 77.5L139.3 73.6L138.3 71.0L140.8 64.9L144.5 63.5L147.5 60.4L149.1 60.1L150.3 60.8L152.7 60.1L153.3 58.3L152.1 56.9L152.0 54.8L153.5 52.7L152.6 48.0L154.9 44.2L156.3 44.2L157.5 43.0L158.1 40.8L160.4 41.7L160.0 43.9L160.8 47.1L161.6 47.7L160.8 51.2L162.3 52.7L163.2 59.9L165.0 60.6L164.1 63.5L163.3 63.9L164.2 65.8L163.9 67.2L158.0 72.5L155.7 72.9L153.4 74.4L150.3 72.6L148.9 73.5L148.5 74.5L149.3 76.4L147.2 79.3L145.0 79.3L143.4 80.8L141.3 79.8L140.2 76.7L138.5 77.5Z",CE:"M160.0 43.8L160.8 41.5L167.0 41.3L173.9 45.5L177.9 49.8L179.6 50.5L177.9 51.4L175.4 56.4L173.5 58.0L172.6 61.5L173.6 63.0L171.6 65.7L168.3 63.1L164.1 63.5L165.0 60.6L163.0 59.3L162.3 52.7L160.8 51.2L161.6 47.7L160.8 47.1L160.0 43.8Z",RN:"M173.5 58.1L175.4 56.4L177.9 51.4L179.7 51.0L182.4 52.2L188.1 52.6L190.5 59.1L185.9 59.1L183.8 58.1L183.3 60.7L182.3 61.5L181.7 60.3L179.8 60.7L178.6 60.2L180.1 56.9L177.5 57.6L175.6 59.2L173.5 58.1Z",AL:"M175.1 73.0L177.3 70.6L181.1 73.2L184.6 72.2L186.2 70.6L189.7 70.9L183.8 78.7L181.1 76.2L175.1 73.0Z",SE:"M175.1 80.1L177.1 79.6L177.4 77.8L176.2 75.8L176.2 73.9L181.1 76.2L183.8 78.6L181.8 79.7L178.5 83.8L176.3 83.0L175.1 80.1Z",DF:"M127.5 104.7L127.9 103.1L131.6 103.1L132.1 105.8L127.5 105.8L127.5 104.7Z",PE:"M160.3 69.9L163.9 67.2L164.2 65.8L163.3 63.9L164.1 63.5L168.3 63.1L171.0 65.8L172.8 64.6L175.8 65.6L179.8 62.9L181.0 63.9L179.2 66.3L180.0 66.3L180.9 67.9L183.6 65.6L188.0 64.7L188.1 63.8L190.0 63.5L191.3 64.6L189.7 70.9L186.2 70.6L182.8 73.0L181.1 73.2L177.3 70.6L175.1 73.0L173.8 70.5L173.1 71.3L169.6 69.1L167.2 70.5L166.9 71.6L165.5 71.6L165.1 73.1L163.7 73.7L163.0 73.6L163.6 72.1L162.4 70.5L160.3 69.9Z",MA:"M125.3 53.5L130.7 49.6L133.1 46.2L135.6 41.3L135.1 40.6L136.3 39.7L137.3 36.3L136.8 35.9L137.6 35.6L137.5 33.6L138.3 32.5L138.5 33.4L139.1 32.5L139.0 33.7L139.8 33.0L139.5 34.1L140.2 32.9L139.6 34.3L141.1 33.7L140.8 34.9L141.5 33.8L141.4 35.9L142.5 34.0L142.7 34.8L143.9 34.3L143.5 35.2L144.7 35.4L143.7 36.3L145.0 35.9L146.2 39.6L147.7 39.1L147.2 39.5L147.9 40.0L149.6 38.2L155.0 40.6L158.1 40.7L157.5 43.0L156.3 44.2L154.9 44.2L152.6 48.1L153.5 52.7L152.0 54.8L152.1 56.9L153.3 58.3L152.9 60.0L150.3 60.8L149.1 60.1L147.5 60.4L144.5 63.5L140.8 64.9L138.3 71.0L139.3 73.6L138.5 77.5L136.5 77.0L135.2 74.9L135.6 73.7L133.2 71.6L134.5 68.4L135.9 67.8L136.0 66.4L135.3 65.9L133.4 66.7L130.8 63.7L131.2 63.0L130.0 62.6L131.0 61.6L131.8 58.1L131.2 54.4L127.1 52.6L125.3 53.5Z",PA:"M77.2 21.4L79.1 21.2L79.9 19.6L81.4 20.1L81.5 19.3L83.6 19.1L84.7 17.7L91.1 18.4L91.4 17.4L90.3 16.3L91.0 15.0L93.8 15.6L95.6 14.7L96.8 16.6L96.9 18.7L99.0 18.9L100.0 20.1L103.1 21.3L103.2 22.9L104.6 24.1L104.3 25.5L105.4 28.1L107.4 30.3L107.8 32.5L109.4 33.4L111.3 32.6L111.4 31.3L113.6 28.0L116.2 26.5L117.3 24.5L118.4 24.0L119.0 25.8L120.9 25.6L122.2 27.3L124.4 28.5L126.9 28.6L126.6 29.8L128.8 30.8L130.2 30.0L131.3 31.1L131.3 30.3L132.0 30.3L132.7 31.2L133.7 30.8L133.9 31.7L134.2 31.0L134.8 31.9L135.3 31.3L135.1 32.2L136.3 31.6L136.3 32.6L137.4 31.8L137.0 33.1L138.0 32.4L137.6 35.6L136.8 36.0L137.3 36.3L137.0 37.9L136.3 38.3L136.3 39.7L135.1 40.6L135.6 41.3L133.1 46.2L130.7 49.6L125.3 53.5L128.2 54.8L127.4 55.5L127.7 56.4L125.7 59.9L123.1 61.3L122.3 64.3L123.4 65.5L123.1 67.3L119.1 72.8L118.3 75.4L87.3 73.3L85.3 71.0L83.4 70.2L83.1 67.5L79.2 60.1L88.7 39.2L90.5 37.3L87.7 38.2L85.4 35.8L81.7 34.2L81.4 32.8L80.7 33.4L79.4 32.4L77.3 29.1L77.2 21.4Z",SP:"M104.6 137.8L108.0 135.5L112.9 126.8L117.1 124.0L122.9 124.9L123.0 126.5L124.1 125.8L124.5 127.2L124.9 125.8L131.3 124.9L133.1 128.2L132.4 129.4L133.5 132.0L135.8 132.1L134.9 136.3L136.3 137.5L136.6 139.2L139.3 139.0L139.6 137.6L141.2 138.0L143.9 136.8L144.8 137.8L147.0 138.2L144.0 139.6L143.6 140.8L144.3 141.5L141.0 142.8L141.0 143.8L138.8 143.4L134.5 145.5L128.3 151.0L128.7 150.5L127.9 150.4L127.6 149.4L126.1 149.7L126.1 147.9L122.6 147.8L123.1 146.3L121.2 144.0L120.9 140.5L119.4 139.2L115.8 139.5L113.3 138.1L109.4 137.3L108.8 138.1L104.6 137.8Z",RJ:"M143.6 140.7L144.0 139.6L147.0 138.2L144.8 137.8L144.0 136.7L148.8 135.1L151.8 135.4L156.0 133.4L155.5 133.0L156.5 129.8L157.6 128.9L158.5 129.1L158.6 130.5L162.2 131.4L162.0 134.9L157.4 137.4L157.9 138.5L157.2 139.7L152.3 139.6L152.1 138.1L151.1 138.7L151.8 138.6L151.7 139.6L147.8 140.2L149.8 140.0L148.9 139.4L146.6 140.0L146.0 139.3L144.5 140.2L144.6 141.2L145.4 141.1L145.0 141.5L143.6 140.7Z",ES:"M157.8 128.8L158.0 126.7L160.2 126.0L162.2 122.4L161.9 120.0L160.8 119.4L162.4 119.3L161.9 117.5L161.1 117.4L161.5 116.2L163.1 116.0L162.4 115.2L164.3 114.8L168.2 116.9L167.6 123.3L166.5 124.1L164.7 128.2L163.1 129.3L162.2 131.4L158.6 130.5L158.6 129.3L157.8 128.8Z",SC:"M101.2 160.1L102.0 159.0L102.1 155.6L112.2 157.2L112.7 157.8L113.5 157.4L113.5 155.9L115.9 155.6L116.6 154.4L117.8 155.0L119.6 154.4L121.5 155.5L123.3 154.4L125.8 154.1L126.5 155.4L125.6 157.6L126.0 159.8L126.6 159.9L125.9 160.5L125.3 166.6L120.7 170.6L118.6 170.2L119.5 169.6L119.7 167.6L120.8 167.1L120.5 166.4L116.4 166.0L114.2 163.3L109.1 160.6L105.3 160.3L105.0 159.6L101.2 160.1Z",PB:"M172.6 61.1L173.6 58.4L175.6 59.2L179.8 56.8L180.2 57.4L178.6 60.2L179.8 60.7L181.7 60.3L182.3 61.5L183.3 60.7L183.8 58.1L185.9 59.1L190.5 59.1L191.3 63.9L188.0 63.8L188.0 64.7L183.6 65.6L180.9 67.9L180.0 66.3L179.2 66.3L180.8 63.5L179.3 63.0L175.8 65.6L174.5 64.9L173.4 65.3L172.8 64.6L173.6 63.0L172.6 61.1Z"};
+const BR_CEN={"RO":[56.5,80.3],"AC":[23.2,71.9],"AM":[48.6,45.8],"RR":[63.3,18.5],"AP":[108.1,19.6],"TO":[127.8,72.9],"MT":[91.3,89.4],"GO":[121.4,105.3],"MS":[97.9,128.1],"MG":[140.9,118.2],"PR":[113.1,147.6],"RS":[101.9,175.9],"BA":[157.4,93.1],"PI":[151.7,60.8],"CE":[169.8,53.5],"RN":[182,56.3],"AL":[182.4,74.7],"SE":[179.5,78.9],"DF":[129.8,104.5],"PE":[175.8,68.3],"MA":[141.7,55],"PA":[107.6,45.1],"SP":[125.8,137.5],"RJ":[152.9,135.2],"ES":[163,123.1],"SC":[113.9,162.4],"PB":[182,62.4]};
+const BR_TAM={"RO":[33.3,28],"AC":[34.9,19.5],"AM":[83.9,58.9],"RR":[27.9,33.3],"AP":[23.5,27.7],"TO":[23.9,40.5],"MT":[54,52.2],"GO":[34.7,34.6],"MS":[34.3,33.7],"MG":[52.8,42.1],"PR":[31.2,20.5],"RS":[37.7,32.6],"BA":[43.9,47.9],"PI":[26.7,40],"CE":[19.6,24.4],"RN":[17,10.5],"AL":[14.6,8.1],"SE":[8.7,9.9],"DF":[4.6,2.7],"PE":[31,10.8],"MA":[32.8,45],"PA":[60.8,60.7],"SP":[42.4,27],"RJ":[18.6,12.6],"ES":[10.4,16.6],"SC":[25.4,16.5],"PB":[18.7,11.1]};
+function corMapa(t){            // 0 = pouca venda (apagado) · 1 = muita (forte)
+  if(!(t>0)) return '#1b2340';
+  const a=[30,58,95], b=[56,189,248];
+  const c=a.map((v,i)=>Math.round(v+(b[i]-v)*Math.pow(t,0.55)));
+  return 'rgb('+c[0]+','+c[1]+','+c[2]+')';
+}
+function renderMapaUF(porUF){
+  const el=$('ufMapa'); if(!el) return;
+  const tot=Object.values(porUF).reduce((a,c)=>a+(c.ped||0),0)||1;
+  const max=Math.max(1,...Object.values(porUF).map(c=>c.ped||0));
+  const COL_X=228;              // coluna dos rótulos que não cabem dentro
+  const comVenda=Object.keys(BR_UF).filter(uf=>(porUF[uf]&&porUF[uf].ped)>0)
+                   .sort((a,b)=>porUF[b].ped-porUF[a].ped);   // quem vende mais escolhe lugar primeiro
+  const postos=[], dentroList=[], foraList=[];
+  for(const uf of comVenda){
+    const [w,h]=BR_TAM[uf]||[0,0], [cx,cy]=BR_CEN[uf]||[0,0];
+    const cabe = w>=17 && h>=17;                              // espaço pra sigla + número
+    const livre = !postos.some(p=>Math.abs(p[0]-cx)<19 && Math.abs(p[1]-cy)<17);   // não encosta em outro
+    if(cabe && livre){ postos.push([cx,cy]); dentroList.push(uf); }
+    else foraList.push(uf);
+  }
+  // rótulos de fora: empilhados à direita, na altura do estado, sem se sobrepor
+  foraList.sort((a,b)=>(BR_CEN[a][1])-(BR_CEN[b][1]));
+  let ultimo=-99; const posFora={};
+  for(const uf of foraList){ const y=Math.max(BR_CEN[uf][1], ultimo+10); posFora[uf]=Math.min(y,188); ultimo=posFora[uf]; }
+
+  let formas='', linhas='', txtDentro='', txtFora='';
+  for(const uf of Object.keys(BR_UF)){
+    const c=porUF[uf], ped=c?c.ped:0, pctn=ped/tot*100;
+    const pct=pctn>=1?Math.round(pctn)+'%':(pctn>0?pctn.toFixed(1).replace('.',',')+'%':'0%');
+    formas+='<path d="'+BR_UF[uf]+'" fill="'+corMapa(ped/max)+'" stroke="#0b1020" stroke-width="0.5">'+
+            '<title>'+esc(uf+(ped?(': '+N(ped)+' pedido(s) · '+pct+(c.fat?(' · '+BRL(c.fat)):'')):': sem vendas'))+'</title></path>';
+  }
+  for(const uf of dentroList){
+    const [cx,cy]=BR_CEN[uf], ped=porUF[uf].ped;
+    const cor = (ped/max)>0.45 ? '#ffffff' : '#dbeafe';
+    txtDentro+='<text x="'+cx+'" y="'+(cy-1)+'" fill="'+cor+'" font-size="7.5" font-weight="800" text-anchor="middle">'+uf+'</text>'+
+               '<text x="'+cx+'" y="'+(cy+6.5)+'" fill="'+cor+'" font-size="6.8" font-weight="700" text-anchor="middle">'+N(ped)+'</text>';
+  }
+  for(const uf of foraList){
+    const [cx,cy]=BR_CEN[uf], y=posFora[uf], ped=porUF[uf].ped;
+    linhas+='<path d="M'+cx+' '+cy+'L'+(COL_X-10)+' '+y+'L'+(COL_X-2.5)+' '+y+'" fill="none" stroke="#64748b" stroke-width="0.4"/>'+
+            '<circle cx="'+cx+'" cy="'+cy+'" r="0.9" fill="#94a3b8"/>';
+    txtFora+='<text x="'+COL_X+'" y="'+(y+2.2)+'" font-size="6.5" font-weight="800" fill="#dbeafe">'+uf+
+             ' <tspan fill="#94a3b8" font-weight="600">'+N(ped)+'</tspan></text>';
+  }
+  el.innerHTML='<svg viewBox="0 0 262 194" style="width:100%;max-width:600px;height:auto;display:block;margin:0 auto">'+
+      formas+linhas+txtDentro+txtFora+'</svg>'+
+    '<div style="display:flex;align-items:center;gap:6px;margin-top:6px;font-size:10px;color:var(--mut)">'+
+      '<span>menos</span><div style="width:100px;height:9px;border-radius:5px;background:linear-gradient(90deg,#1e3a5f,#2a6fa8,#38bdf8)"></div><span>mais vendas</span>'+
+      '<span style="margin-left:auto">nº de pedidos \u00b7 passe o mouse p/ % e faturamento</span></div>';
+}
+function renderProjecao(){
+  const base = topSkus14();
+  if(!base.length){ $('tProj').innerHTML='<tr><td class="dim">sem vendas nos últimos '+projDias+' dias</td></tr>'; return; }
+  const linhas = base.map(t=>{
+    const info = SKUINFO[t.sku]||{};
+    const md = t.qtd/projDias;
+    const saldo = (info.saldo!=null && isFinite(Number(info.saldo))) ? Number(info.saldo) : null;
+    const diasR = (saldo!=null && md>0) ? saldo/md : null;
+    const compra = (saldo!=null) ? Math.max(0, Math.ceil(md*30 - saldo)) : null;
+    const precoMed = (t.qtdV>0) ? t.fat/t.qtdV : null;
+    const custo = (info.custo!=null && isFinite(Number(info.custo))) ? Number(info.custo) : null;
+    const mUn = (precoMed!=null && precoMed>0 && custo!=null) ? precoMed - custo : null;
+    return { ...t, qtd14:t.qtd, md, saldo, diasR, compra, custo, mUn };
+  });
+  linhas.sort((a,b)=>cmpNull(a[sortProj.col], b[sortProj.col], sortProj.dir));
+  let margemTot=0, margemCob=0;
+  const th=(col,lbl)=>'<th class="num sort" onclick="setSortProj(\''+col+'\')">'+lbl+seta(sortProj,col)+'</th>';
+  $('tProj').innerHTML = '<tr><th>SKU</th>'+th('qtd14','Vendas '+projDias+'d')+th('md','média/dia')+th('saldo','Saldo')+th('diasR','Acaba em')+th('compra','Comprar p/ 30d')+th('custo','Custo')+th('mUn','Margem un.')+'</tr>'+
+    linhas.map(t=>{
+      if(t.mUn!=null){ margemTot += t.mUn*t.qtdV; margemCob++; }
+      const stt = t.diasR==null ? '<span class="dim">—</span>'
+        : t.diasR<7 ? '<span class="st b">'+t.diasR.toFixed(0)+' dias</span>'
+        : t.diasR<15 ? '<span class="st w">'+t.diasR.toFixed(0)+' dias</span>'
+        : '<span class="st ok">'+(t.diasR>=99?'99+':t.diasR.toFixed(0))+' dias</span>';
+      return '<tr><td><div class="sku">'+esc(t.sku)+'</div><div class="desc">'+esc(t.desc)+'</div></td>'+
+      '<td class="num">'+N(t.qtd)+'</td><td class="num dim">'+t.md.toFixed(1)+'</td>'+
+      '<td class="num">'+(t.saldo!=null?N(t.saldo):'<span class="dim">?</span>')+'</td>'+
+      '<td class="num">'+stt+'</td>'+
+      '<td class="num">'+(t.compra!=null?(t.compra?'<b>'+N(t.compra)+'</b>':'<span class="ok">ok</span>'):'<span class="dim">—</span>')+'</td>'+
+      '<td class="num">'+(t.custo!=null?BRL(t.custo):'<span class="dim">—</span>')+'</td>'+
+      '<td class="num '+(t.mUn!=null?(t.mUn>0?'ok':'bad'):'dim')+'">'+(t.mUn!=null?BRL(t.mUn):'—')+'</td></tr>';
+    }).join('');
+  if(skuInfoCarregado){
+    const cob = Math.round(margemCob/linhas.length*100);
+    const k = $('kMargem');
+    if(k) k.innerHTML = '<span class="ic">📊</span><div class="l">Margem bruta 14d (top 40)</div>'+
+      '<div class="v '+(margemTot>=0?'ok':'bad')+'">'+BRL(margemTot)+'</div>'+
+      '<div class="s">'+cob+'% dos SKUs com custo no Bling</div>';
+    $('projAviso').innerHTML = (cob<100)?'<div class="aviso">⚠️ '+(linhas.length-margemCob)+' SKU(s) sem custo cadastrado no Bling (campo fornecedor) — margem parcial. Cadastre lá, ou me peça a importação por planilha.</div>':'';
+  }
+}
+
+boot();
+</script>
+</body>
+</html>
