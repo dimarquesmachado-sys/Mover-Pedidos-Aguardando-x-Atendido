@@ -185,7 +185,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd117';
+const DASH_BUILD = 'd119';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -636,9 +636,9 @@ function montar(){
       '<button class="chip" onclick="irPra(&#39;secBusca&#39;)">🔍 Buscar pedido</button>'+
       '<button class="chip" onclick="irPra(&#39;secAnalise&#39;)">📋 Análise de vendas</button>'+
       '<button class="chip" onclick="irPra(&#39;secTop&#39;)">🏆 Top produtos</button>'+
-      '<button class="chip" onclick="irPra(&#39;secPrev&#39;)">🔮 Previsão</button>'+
       '<button class="chip" onclick="irPra(&#39;secCanal&#39;)">🛒 Por canal</button>'+
       '<button class="chip" onclick="irPra(&#39;secProj&#39;)">📦 Projeção de estoque</button>'+
+      '<button class="chip" onclick="irPra(&#39;secPrev&#39;)">🔮 Previsão de vendas</button>'+
       '</div>'+
   '</div></div>'+
   '<div class="wrap">'+
@@ -673,15 +673,6 @@ function montar(){
       '<div class="nota"><b>Sobre a ordem:</b> dentro de cada dia, ML aparece na hora REAL da venda; TikTok/Shopee/Magalu/Amazon entram pela hora da <b>EMISSÃO da NF</b> (🧾), que acompanha a venda de perto — acabaram os blocos por canal. O 🕘 (hora da conferência) só aparece quando a linha ainda não tem NF. A hora exata da venda desses canais continua existindo <b>só na API do próprio canal</b>. Pra confrontar com o Jodda, use o ⬇︎ CSV e case pelo <b>número da venda no marketplace</b>. · ML mostra a hora REAL da venda (vem da pesca); TikTok/Shopee o Bling não guarda hora — o 🕘 marca que ali está a hora da <b>conferência</b> (a hora da venda desses canais chega quando plugarmos as APIs deles) · colunas (−) são deduções e (+) é crédito · <b>Estorno</b> = o valor exato da linha "Estorno" da venda no ML (no Flex ele já vem líquido: bonificação menos o frete cobrado), somado na M.C. · no Flex o custo do frete é o <b>motoboy</b> configurado no ⚙️ · tarifa <span class="ok">REAL</span> = pescada do ML · <span class="ok">BLING</span> = comissão que o Bling importou do canal (TikTok/Shopee/Magalu) · sem tag = % configurada · custo carrega sob demanda por página · 🛒 = mais de 1 item/unidade</div></div>'+
     '<div class="sec" id="secTop"><h2>🏆 Top produtos <span class="hint">clique nos títulos p/ ordenar ↑↓ · faturamento = SOMA de todos os pedidos do SKU no período · 💎 M.C. = margem dos pedidos rateada por item — o rank do que dá LUCRO de verdade · Curva ABC recalculada pro período pesquisado (A = 80% do faturamento)</span></h2>'+
       '<div class="tw"><table id="tProd"></table></div><div id="prodAviso"></div></div>'+
-    '<div class="sec" id="secPrev"><h2>\U0001f52e Previs\u00e3o de vendas por produto</h2>'+
-      '<div class="hint">quanto cada SKU deve vender daqui pra frente, com base no hist\u00f3rico. A proje\u00e7\u00e3o d\u00e1 mais peso aos \u00faltimos 30 dias (reage a produto subindo ou caindo); a coluna <b>tend\u00eancia</b> compara os \u00faltimos 30 dias com os 30 anteriores.</div>'+
-      '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0">'+
-        '<span class="mut" style="font-size:12px">base de c\u00e1lculo:</span><div id="prevChips" style="display:flex;gap:6px;flex-wrap:wrap"></div>'+
-        '<button class="chip" onclick="carregarPrevisao(true)" style="margin-left:auto">\u21bb recalcular</button>'+
-      '</div>'+
-      '<div id="prevInfo" class="mut" style="font-size:12px;margin-bottom:6px"></div>'+
-      '<div class="tw"><table id="tPrev"></table></div>'+
-    '</div>'+
     '<div class="sec" id="secCanal"><h2>🛒 Por canal</h2><div class="tw"><table id="tCanal"></table></div></div>'+
     '<div class="grid2">'+
       '<div class="sec"><h2>📈 Pedidos por dia</h2><div class="chartbox"><canvas id="cPed"></canvas></div></div>'+
@@ -692,6 +683,15 @@ function montar(){
       '<div id="projBox" style="margin-bottom:10px;font-size:12px"><span class="mut" id="projStatus">⏳ carregando saldo/preço/custo do Bling… (~30-60s na 1ª vez)</span> '+
       '<button class="btn" id="btnProj" onclick="carregarSkuInfo(true)" style="display:none">↻ recarregar do Bling (ignora cache)</button> <button class="btn sec" onclick="sincCustos()" title="resolve TODOS os custos em background, devagar, sem estourar o limite do Bling — e grava em cache permanente">🐢 sincronizar custos (fundo)</button></div>'+
       '<div class="tw"><table id="tProj"></table></div><div id="projAviso"></div></div>'+
+    '<div class="sec" id="secPrev"><h2>🔮 Previs\u00e3o de vendas por produto</h2>'+
+      '<div class="hint">quanto cada SKU deve vender daqui pra frente, com base no hist\u00f3rico. A proje\u00e7\u00e3o d\u00e1 mais peso aos \u00faltimos 30 dias (reage a produto subindo ou caindo); a coluna <b>tend\u00eancia</b> compara os \u00faltimos 30 dias com os 30 anteriores.</div>'+
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0">'+
+        '<span class="mut" style="font-size:12px">base de c\u00e1lculo:</span><div id="prevChips" style="display:flex;gap:6px;flex-wrap:wrap"></div>'+
+        '<button class="chip" onclick="carregarPrevisao(true)" style="margin-left:auto">\u21bb recalcular</button>'+
+      '</div>'+
+      '<div id="prevInfo" class="mut" style="font-size:12px;margin-bottom:6px"></div>'+
+      '<div class="tw"><table id="tPrev"></table></div>'+
+    '</div>'+
     '<div class="sec"><h2>📈 Progressão do período <span class="hint">diário · sacada do Bling, com o NOSSO imposto mensal correto</span></h2>'+
       '<div id="grafTot" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px"></div>'+
       '<div id="grafProg" style="overflow-x:auto"></div>'+
