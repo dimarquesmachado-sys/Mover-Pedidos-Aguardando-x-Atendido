@@ -170,7 +170,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd107';
+const DASH_BUILD = 'd108';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -558,7 +558,7 @@ function montar(){
   '<div class="wrap">'+
       '<div id="histAviso" style="font-size:12px;color:var(--mut);margin:0 0 8px"></div>'+'<div class="kpis" id="kpis"></div>'+
     '<div class="sec" id="secBusca"><h2>🔍 Buscar pedido &amp; lucro <span class="hint">nº do pedido · NF · nº da venda no marketplace · SKU · parte do título</span></h2>'+
-      '<input id="qBusca" placeholder="ex.: 73620 · 076265 · 2000017436578280 · 6376-220v · tosquiadeira" '+
+      '<input id="qBusca" placeholder="digite e tecle Enter" '+
       'style="width:100%;background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:10px;padding:11px 14px;font-size:13px" '+
       'oninput="buscarPed(this.value)">'+
       '<div id="buscaRes" style="margin-top:10px"></div><div id="plCard"></div></div>'+
@@ -817,7 +817,7 @@ function render(){
       : '<div class="kpi" style="--kc:#64748b;cursor:pointer" onclick="document.getElementById(\'cfgBox\').scrollIntoView({behavior:\'smooth\'})"><span class="ic">💎</span><div class="l">Lucro Bruto (M.C.)</div><div class="v dim">—</div><div class="s warn">⚙️ configure as taxas por canal abaixo</div></div>') +
     kpi('var(--ac)','📊','Pedidos', N(totPed), (!usaHist && MC.semItens)?('<span class="warn">⚠ '+N(MC.semItens)+' sem detalhe</span> <button onclick="completarDetalhes()" title="o dashboard já busca sozinho ao abrir o período — este botão é só pra tentar de novo" style="background:#1d4ed8;color:#fff;border:0;border-radius:6px;padding:2px 7px;font-size:10px;font-weight:700;cursor:pointer">↻ tentar de novo</button><div id="avisoDet" style="font-size:10px;margin-top:2px"></div>'):(MC.unTot>0?('<b style="font-size:13px;color:var(--txt);opacity:1">'+N(usaHist?HIST.totais.unidades:MC.unTot)+' unidades vendidas</b>'):'sem itens no período')) +
     kpi('var(--warn)','🎯','Ticket médio', BRL((usaHist?HIST.totais.faturamento:fat)/(totPed||1)), 'faturamento ÷ pedidos') +
-    (VENDAS.length?'<div class="kpi" style="--kc:#38bdf8"><span class="ic">🛰</span><div class="l">Ao vivo</div><div class="v"><button onclick="sincVendas(this)" style="background:#38bdf822;border:1px solid #38bdf855;color:#7dd3fc;border-radius:8px;padding:5px 12px;cursor:pointer;font-weight:700;font-size:14px">🔄 atualizar</button></div><div class="s">'+N(VBok.length)+' vendas no Bling · <span id="ultAtualiz">atualiza sozinho</span></div></div>':'') +
+    (VENDAS.length?'<div class="kpi" style="--kc:#38bdf8"><span class="ic">🛰</span><div class="l">Ao vivo</div><div class="v"><button onclick="sincVendas(this)" style="background:#38bdf822;border:1px solid #38bdf855;color:#7dd3fc;border-radius:8px;padding:5px 12px;cursor:pointer;font-weight:700;font-size:14px">🔄 atualizar</button></div><div class="s"><span id="ultAtualiz">atualiza sozinho</span> · a cada 3 min</div></div>':'') +
     '<div class="kpi" id="kMargem" style="display:none"></div>';
 
   const dias = Object.keys(porDia).sort();
@@ -1348,7 +1348,7 @@ function renderAnalise(){
       _diaAnt = _d;
       const t = totDia[_d] || {n:0,rp:0,mc:0,mcN:0};
       sep = '<tr style="background:var(--bg2)"><td colspan="6" style="font-weight:800;padding:7px 8px">\uD83D\uDCC5 '+(_d?(_d.slice(8,10)+'/'+_d.slice(5,7)+'/'+_d.slice(0,4)):'sem data')+' <span class="mut" style="font-weight:400;font-size:11px">'+t.n+' venda(s) no filtro</span></td>'+
-        '<td colspan="4" class="num mut" style="font-size:11px">produtos '+BRL(t.rp)+'</td>'+
+        '<td colspan="4" class="num mut" style="font-size:11px" title="soma dos ITENS (preço × quantidade). Não é o faturamento: o faturamento é o valor da NOTA, que já desconta o que o marketplace abateu">soma dos itens '+BRL(t.rp)+'</td>'+
         '<td colspan="5" class="num" style="font-size:11px;font-weight:700">\uD83D\uDC8E '+BRL(t.mc)+' <span class="mut" style="font-weight:400">('+t.mcN+'/'+t.n+')</span></td></tr>';
     }
     const unid=(h.itens||[]).reduce((a,i)=>a+Number(i.qtd||1),0);
