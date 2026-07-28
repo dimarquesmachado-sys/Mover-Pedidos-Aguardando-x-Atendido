@@ -170,7 +170,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd106';
+const DASH_BUILD = 'd107';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -401,6 +401,37 @@ async function checarCancelados(silencioso){
   _stMkt = false;
 }
 // a cada 10 min, se o filtro estiver em HOJE, confere vendas novas e cancelamentos
+// 🔄 ATUALIZAÇÃO AUTOMÁTICA no filtro HOJE
+// Antes: só de 10 em 10 min E só com a aba na frente — se você estivesse noutra aba (ou com o
+// celular bloqueado) o ciclo pulava a vez e a tela ficava velha sem avisar.
+let _ultAtualiz = 0;
+async function atualizarDados(motivo){
+  if(periodo!=='dia' || _recarregando) return;
+  _recarregando = true;
+  try{
+    const r = await fetch(MOD+'/historico',{credentials:'same-origin'});
+    const d = await r.json();
+    if(d && Array.isArray(d.itens)){
+      DADOS=d.itens; VENDAS=Array.isArray(d.vendas_bling)?d.vendas_bling:[];
+      prepararVendas(); render(); renderAnalise();
+      _ultAtualiz = Date.now();
+      const el=document.getElementById('ultAtualiz');
+      if(el) el.textContent = 'atualizado ' + new Date().toTimeString().slice(0,5);
+    }
+  }catch(e){}
+  _recarregando = false;
+}
+let _recarregando = false;
+// a cada 3 min (o servidor busca vendas novas a cada 5) — roda mesmo com a aba atrás
+setInterval(()=>{ if(periodo==='dia') atualizarDados('ciclo'); }, 180000);
+// e SEMPRE que você volta pra aba, se faz mais de 1 min que não atualiza
+document.addEventListener('visibilitychange', ()=>{
+  if(!document.hidden && periodo==='dia' && (Date.now()-_ultAtualiz)>60000) atualizarDados('voltou');
+});
+window.addEventListener('focus', ()=>{
+  if(periodo==='dia' && (Date.now()-_ultAtualiz)>60000) atualizarDados('foco');
+});
+// a checagem de cancelamento no marketplace é mais pesada (consulta o ML pedido a pedido): 10 min
 setInterval(()=>{ if(periodo==='dia' && !document.hidden) checarCancelados(true); }, 600000);
 
 // ⚡ busca AGORA o detalhe (SKU/qtd/taxas) dos pedidos do período que estão sem — em sequência, até zerar
@@ -786,7 +817,7 @@ function render(){
       : '<div class="kpi" style="--kc:#64748b;cursor:pointer" onclick="document.getElementById(\'cfgBox\').scrollIntoView({behavior:\'smooth\'})"><span class="ic">💎</span><div class="l">Lucro Bruto (M.C.)</div><div class="v dim">—</div><div class="s warn">⚙️ configure as taxas por canal abaixo</div></div>') +
     kpi('var(--ac)','📊','Pedidos', N(totPed), (!usaHist && MC.semItens)?('<span class="warn">⚠ '+N(MC.semItens)+' sem detalhe</span> <button onclick="completarDetalhes()" title="o dashboard já busca sozinho ao abrir o período — este botão é só pra tentar de novo" style="background:#1d4ed8;color:#fff;border:0;border-radius:6px;padding:2px 7px;font-size:10px;font-weight:700;cursor:pointer">↻ tentar de novo</button><div id="avisoDet" style="font-size:10px;margin-top:2px"></div>'):(MC.unTot>0?('<b style="font-size:13px;color:var(--txt);opacity:1">'+N(usaHist?HIST.totais.unidades:MC.unTot)+' unidades vendidas</b>'):'sem itens no período')) +
     kpi('var(--warn)','🎯','Ticket médio', BRL((usaHist?HIST.totais.faturamento:fat)/(totPed||1)), 'faturamento ÷ pedidos') +
-    (VENDAS.length?'<div class="kpi" style="--kc:#38bdf8"><span class="ic">🛰</span><div class="l">Ao vivo</div><div class="v"><button onclick="sincVendas(this)" style="background:#38bdf822;border:1px solid #38bdf855;color:#7dd3fc;border-radius:8px;padding:5px 12px;cursor:pointer;font-weight:700;font-size:14px">🔄 atualizar</button></div><div class="s">'+N(VBok.length)+' vendas no Bling · sincroniza sozinho a cada 5 min</div></div>':'') +
+    (VENDAS.length?'<div class="kpi" style="--kc:#38bdf8"><span class="ic">🛰</span><div class="l">Ao vivo</div><div class="v"><button onclick="sincVendas(this)" style="background:#38bdf822;border:1px solid #38bdf855;color:#7dd3fc;border-radius:8px;padding:5px 12px;cursor:pointer;font-weight:700;font-size:14px">🔄 atualizar</button></div><div class="s">'+N(VBok.length)+' vendas no Bling · <span id="ultAtualiz">atualiza sozinho</span></div></div>':'') +
     '<div class="kpi" id="kMargem" style="display:none"></div>';
 
   const dias = Object.keys(porDia).sort();
