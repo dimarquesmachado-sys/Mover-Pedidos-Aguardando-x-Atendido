@@ -46,6 +46,14 @@ async function temEtiquetaML(mlToken, numeroLoja) {
     const { status, substatus } = await getShipmentSubstatus(mlToken, shipmentId);
     console.log(`[AMB ML] numeroLoja=${numeroLoja} shipment=${shipmentId} status=${status} substatus=${substatus}`);
     // Proteção caso de borda: status pronto p/ envio → tem etiqueta (mesmo se substatus='buffered')
+    // 28/07 — 'ready_to_ship' NÃO garante etiqueta: com substatus 'invoice_pending' o ML ainda não
+    // fechou a etapa dele e a etiqueta NÃO é imprimível (a API responde NOT_PRINTABLE_STATUS).
+    // Esses pedidos ficavam presos em ATENDIDO entupindo a lista do galpão.
+    const SEM_ETIQUETA_AINDA = ['invoice_pending', 'buffered', 'ready_to_print_pending', 'regenerating'];
+    if (SEM_ETIQUETA_AINDA.includes(String(substatus || ''))) {
+      console.log(`[ML] numeroLoja=${numeroLoja} substatus=${substatus} — etiqueta AINDA não imprimível, pode mover`);
+      return false;
+    }
     if (status === 'ready_to_ship') return true;
     if (substatus === 'buffered') return false;
     return true;
@@ -59,7 +67,14 @@ async function temEtiquetaML(mlToken, numeroLoja) {
 async function _fluxo1(token) {
   const { inicial, final } = getPeriodo();
   const lista = await getPedidosPorStatus(token, SITUACAO_ATENDIDO, inicial, final);
-  const batch = lista.slice(0, MAX_F1);
+  // 28/07: processa os MAIS RECENTES primeiro. Antes pegava os primeiros da lista (os mais
+  // antigos) — se houvesse mais pedidos que o limite do lote, os do dia nunca eram avaliados.
+  const _ord = lista.slice().sort((a, b) => {
+    const da = String(a.data || ''), db = String(b.data || '');
+    if (da !== db) return db.localeCompare(da);
+    return Number(b.id || 0) - Number(a.id || 0);
+  });
+  const batch = _ord.slice(0, MAX_F1);
   console.log(`[AMB F1] ${lista.length} encontrados | processando ${batch.length}`);
   let mlToken = null;
   try { mlToken = await garantirTokenML(); } catch (e) {
