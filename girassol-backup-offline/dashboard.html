@@ -113,7 +113,7 @@
   .vcNum{font-weight:800;font-size:14px}
   .vcHora{color:var(--mut);font-size:11px;margin-left:auto}
   .vcSku{font-size:12px;color:#cfe0ff;font-family:ui-monospace,monospace;line-height:1.35;margin-bottom:6px;word-break:break-word}
-  .vcNums{display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px}
+  .vcNums{display:grid;grid-template-columns:1fr 1fr;gap:5px}   /* 4 quadrinhos em 2x2 */
   .vcB{background:var(--bg2);border-radius:7px;padding:5px 7px}
   .vcB i{display:block;font-style:normal;font-size:9px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut)}
   .vcB b{font-size:12.5px;font-variant-numeric:tabular-nums}
@@ -215,7 +215,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd122';
+const DASH_BUILD = 'd123';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -310,6 +310,9 @@ function cardVenda(o){
   const nums = [];
   nums.push('<div class="vcB"><i>venda</i><b>'+(o.venda!=null?BRL(o.venda):'—')+'</b></div>');
   nums.push('<div class="vcB"><i>custo</i><b>'+(o.custo!=null?BRL(o.custo):'—')+'</b></div>');
+  // 28/07: quadrinho novo — soma TUDO que o marketplace e o governo levaram (fora o custo do produto):
+  // comissão + imposto + frete do vendedor, menos o estorno. Antes isso ficava invisível no celular.
+  nums.push('<div class="vcB" title="'+esc(o.despDet||'comissão + imposto + frete do vendedor')+'"><i>− taxas e imposto</i><b class="bad">'+(o.desp!=null?BRL(o.desp):'—')+'</b></div>');
   nums.push('<div class="vcB"><i>💎 margem</i><b class="'+((o.mc||0)>=0?'ok':'bad')+'">'+(o.mc!=null?BRL(o.mc):'—')+(o.pc!=null?(' <span style="font-size:10px;opacity:.8">'+String(o.pc).replace('.',',')+'%</span>'):'')+'</b></div>');
   return '<div class="vcard" style="border-left:3px solid '+cor+(o.cancelado?';opacity:.55':'')+'">'+
     '<div class="vcTopo">'+
@@ -368,6 +371,8 @@ function renderHistLinhas(iv){
     return { numero:o.numero, canal:nomeCanal(canalKey(o.canal)), hora:String(o.data||'').slice(8,10)+'/'+String(o.data||'').slice(5,7),
              skus:(o.itens||[]).map(function(i){return '<div style="margin-bottom:3px"><b style="color:#7dd3fc">'+(Number(i.qtd)||1)+'\u00d7</b> '+esc(i.sku||'')+'</div>';}).join(''),
              venda:o.vnota, custo:(o.custo||null), mc:o.margem, pc:(o.vnota>0?Math.round(o.margem/o.vnota*1000)/10:null),
+             desp:(function(){ var d=(Number(o.imposto)||0)+(Number(o.comissao)||0)+(Number(o.frete)||0); return d>0?d:null; })(),
+             despDet:'comissão '+BRL(Number(o.comissao)||0)+' + imposto '+BRL(Number(o.imposto)||0)+' + frete '+BRL(Number(o.frete)||0),
              cancelado:false, dev:false };
   }));
   if(inf) inf.textContent = ps.length ? (ini+'–'+fim+' de '+N(HLIN.total_pedidos||0)+' pedido(s) · página '+pgAtual+' de '+totPg) : '';
@@ -1493,6 +1498,8 @@ function renderAnalise(){
                     : '<span class="dim">detalhe a caminho\u2026</span>'),
              venda:(P.tot!=null?P.tot:(h.valor!=null?Number(h.valor):null)), custo:(P.custo!=null?P.custo:null),
              mc:(P.mc!=null?P.mc:null), pc:(P.mc!=null&&P.tot?Math.round(P.mc/P.tot*1000)/10:null),
+             desp:(function(){ var d=(Number(P.imposto)||0)+(Number(P.tarifa)||0)+(Number(P.frV)||0)-(Number(P.credito)||0); return d>0?d:null; })(),
+             despDet:'comissão '+BRL(Number(P.tarifa)||0)+' + imposto '+BRL(Number(P.imposto)||0)+' + frete '+BRL(Number(P.frV)||0)+((Number(P.credito)||0)>0?(' − estorno '+BRL(Number(P.credito)||0)):''),
              cancelado:!!h._cancelado, dev:!!h.devolucao, devAberta:!!h.dev_aberta };
   }));
   $('anInfo').textContent = LP.length ? ((anPage*PAG+1)+'–'+(anPage*PAG+pagPL.length)+' de '+LP.length+' venda(s)'+(maxP>0?('  ·  página '+(anPage+1)+' de '+(maxP+1)):'')) : 'sem vendas no período';
