@@ -40,7 +40,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v28/07 b67';
+const VERSAO     = 'girassol-backup-offline v28/07 b68';
 
 // ── SESSÃO DE OPERADOR (cookie assinado HMAC) — protege rotas de dados/ação ──
 // Segredo estável entre restarts. Usa ADMIN_KEY (já configurada no Render) como base.
@@ -894,6 +894,134 @@ function routes(readBody) {
       json(res, 200, { ok: true, msg: '✅ backfill iniciado em background (só Girassol). Acompanhe em /backfill-status. Ele deleta o período antes e regrava, então pode rodar de novo sem duplicar.', de, ate });
       return true;
     }
+    // 🧮 PLANO DE COMPRA — o motor. Junta ritmo de venda (histórico), saldo e imagem (Bling) e custo
+    // (_custos.json) e devolve, por SKU: quanto comprar pra cobrir lead time + cobertura desejada,
+    // o quanto isso custa e QUANTO LUCRO ESTÁ EM RISCO se faltar. Ordenado pelo risco, não pelo volume.
+    // Uso: /girassol-backup-offline/plano-compra?lead=4&cob=5&seg=0.5&base=180&curva=A
+    if (method === 'GET' && p === '/girassol-backup-offline/plano-compra') {
+      const kC = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const sessC = validarSessao(req.headers['cookie']);
+      if (!((process.env.ADMIN_KEY && kC === process.env.ADMIN_KEY) || (sessC && ehAdmin(sessC)))) { json(res, 404, { error: 'not found' }); return true; }
+      const par = n => Number((urlObj.searchParams && urlObj.searchParams.get(n)) || '');
+      const lead = Math.min(24, Math.max(0, par('lead') || 4));        // meses até a mercadoria chegar
+      const cob  = Math.min(24, Math.max(0.5, par('cob') || 5));       // meses de estoque desejados DEPOIS que chegar
+      const seg  = Math.min(6, Math.max(0, par('seg') || 0.5));        // colchão de segurança, em meses
+      const base = Math.min(730, Math.max(30, par('base') || 180));    // histórico usado pra medir o ritmo
+      const curva = String((urlObj.searchParams && urlObj.searchParams.get('curva')) || 'todas').toUpperCase();
+      const mult = Math.max(1, par('mult') || 1);                      // múltiplo de compra (caixa fechada)
+      const DIA = 30.4;
+      const hojeC = new Date();
+      const deC = new Date(hojeC.getTime() - base * 86400000).toISOString().slice(0, 10);
+      const ateC = hojeC.toISOString().slice(0, 10);
+
+      // ── 1) ritmo, faturamento e margem por SKU, do histórico ──
+      const { url: uC, key: kkC } = supaCfg('girassol');
+      if (!uC || !kkC) { json(res, 500, { ok: false, erro: 'Supabase não configurado' }); return true; }
+      const HC = { apikey: kkC, Authorization: 'Bearer ' + kkC };
+      const corte30 = new Date(hojeC.getTime() - 30 * 86400000).toISOString().slice(0, 10);
+      const corte60 = new Date(hojeC.getTime() - 60 * 86400000).toISOString().slice(0, 10);
+      const acc = {};
+      try {
+        let off = 0;
+        while (off < 120000) {
+          const rq = await fetch(uC.replace(/\/+$/, '') + '/rest/v1/vendas_historico?empresa=eq.girassol&data_venda=gte.' + deC + '&data_venda=lte.' + ateC +
+                    '&select=sku,descricao,quantidade,valor_produto,margem,data_venda&limit=1000&offset=' + off, { headers: HC });
+          if (!rq.ok) break;
+          const ln = await rq.json().catch(() => []);
+          if (!Array.isArray(ln) || !ln.length) break;
+          for (const l of ln) {
+            const sk = l.sku; if (!sk) continue;
+            if (!acc[sk]) acc[sk] = { sku: sk, desc: l.descricao || '', un: 0, fat: 0, mar: 0, un30: 0, un3060: 0 };
+            const o = acc[sk], q = Number(l.quantidade) || 0, d = String(l.data_venda || '').slice(0, 10);
+            o.un += q; o.fat += Number(l.valor_produto) || 0; o.mar += Number(l.margem) || 0;
+            if (d >= corte30) o.un30 += q; else if (d >= corte60) o.un3060 += q;
+          }
+          if (ln.length < 1000) break;
+          off += 1000;
+        }
+      } catch (e) { json(res, 500, { ok: false, erro: String(e.message || e) }); return true; }
+
+      // ── 2) curva ABC por faturamento do período ──
+      const lista = Object.values(acc).filter(x => x.un > 0).sort((a, b) => b.fat - a.fat);
+      const fatTotal = lista.reduce((a, c) => a + c.fat, 0) || 1;
+      let cum = 0;
+      for (const x of lista) { cum += x.fat; const pc = cum / fatTotal; x.curva = pc <= 0.8 ? 'A' : (pc <= 0.95 ? 'B' : 'C'); }
+
+      // ── 3) saldo, custo e imagem (cache próprio, 12h — não martela o Bling) ──
+      const F_PROD = path.join(CACHE_DIR, '_prod_compra.json');
+      const cacheP = readJson(F_PROD, {});
+      const custos = readJson(path.join(CACHE_DIR, '_custos.json'), {});
+      const alvo = lista.filter(x => curva === 'TODAS' || x.curva === curva || (curva === 'AB' && (x.curva === 'A' || x.curva === 'B')));
+      const VAL = 12 * 3600 * 1000;
+      let buscados = 0;
+      for (const x of alvo.slice(0, 260)) {
+        const c = cacheP[x.sku];
+        if (c && (Date.now() - (c.ts || 0)) < VAL) { x.saldo = c.saldo; x.img = c.img; x.nome = c.nome || x.desc; continue; }
+        try {
+          const rb = await blingGet('/produtos?codigo=' + encodeURIComponent(x.sku) + '&criterio=5&limite=1');
+          const it0 = (rb.ok && rb.data && rb.data.data && rb.data.data[0]) || null;
+          let saldo = null, img = null, nome = null;
+          if (it0) {
+            nome = it0.nome || null;
+            img = primeiraImagem(it0);
+            saldo = (it0.estoque && (it0.estoque.saldoVirtualTotal != null ? it0.estoque.saldoVirtualTotal : it0.estoque.saldoFisicoTotal));
+            if (saldo == null || img == null) {
+              const dd = await blingGet('/produtos/' + it0.id);
+              const det = (dd.ok && dd.data && dd.data.data) || null;
+              if (det) {
+                if (img == null) img = primeiraImagem(det);
+                if (saldo == null && det.estoque) saldo = (det.estoque.saldoVirtualTotal != null ? det.estoque.saldoVirtualTotal : det.estoque.saldoFisicoTotal);
+              }
+            }
+          }
+          x.saldo = (saldo != null && isFinite(Number(saldo))) ? Number(saldo) : null;
+          x.img = img || null; x.nome = nome || x.desc;
+          cacheP[x.sku] = { saldo: x.saldo, img: x.img, nome: x.nome, ts: Date.now() };
+          buscados++;
+          if (buscados % 15 === 0) { try { writeJson(F_PROD, cacheP); } catch (e) {} }
+          await new Promise(r => setTimeout(r, 340));
+        } catch (e) { x.saldo = null; x.img = null; x.nome = x.desc; }
+      }
+      try { writeJson(F_PROD, cacheP); } catch (e) {}
+
+      // ── 4) a conta ──
+      const horizonteDias = Math.round((lead + cob + seg) * DIA);
+      const leadDias = Math.round(lead * DIA);
+      const itens = alvo.map(x => {
+        const mdBase = x.un / base;
+        const mdRec = x.un30 / 30;
+        const md0 = x.un30 > 0 ? (mdRec * 0.7 + mdBase * 0.3) : mdBase;
+        const tend = x.un3060 > 0 ? ((x.un30 - x.un3060) / x.un3060) : (x.un30 > 0 ? 1 : 0);
+        const md = Math.max(0, md0 * (1 + Math.max(-0.5, Math.min(1, tend)) / 2));   // tendência com pé no chão
+        const custoUn = (custos[x.sku] && custos[x.sku].custo != null) ? Number(custos[x.sku].custo) : null;
+        const mcUn = x.un > 0 ? (x.mar / x.un) : 0;
+        const saldo = x.saldo != null ? x.saldo : 0;
+        const precisa = Math.ceil(md * horizonteDias);
+        let comprar = Math.max(0, precisa - saldo);
+        if (mult > 1 && comprar > 0) comprar = Math.ceil(comprar / mult) * mult;
+        const acabaEm = md > 0 ? Math.floor(saldo / md) : null;
+        const diasSemEstoque = (acabaEm != null) ? Math.max(0, leadDias - acabaEm) : 0;
+        const risco = diasSemEstoque * md * Math.max(0, mcUn);
+        return {
+          sku: x.sku, nome: x.nome || x.desc, img: x.img || null, curva: x.curva,
+          un: x.un, un30: x.un30, un_30_60: x.un3060, tendencia: Math.round(tend * 100),
+          md: Math.round(md * 1000) / 1000, saldo: x.saldo, acaba_em: acabaEm,
+          precisa, comprar, custo_un: custoUn,
+          investir: custoUn != null ? Math.round(comprar * custoUn * 100) / 100 : null,
+          mc_un: Math.round(mcUn * 100) / 100,
+          risco: Math.round(risco * 100) / 100,
+          sem_saldo: x.saldo == null, sem_custo: custoUn == null
+        };
+      }).sort((a, b) => (b.risco - a.risco) || (b.mc_un * b.comprar - a.mc_un * a.comprar));
+
+      const tot = itens.reduce((a, c) => ({ investir: a.investir + (c.investir || 0), risco: a.risco + c.risco, skus: a.skus + (c.comprar > 0 ? 1 : 0) }), { investir: 0, risco: 0, skus: 0 });
+      json(res, 200, { ok: true, lead, cob, seg, base, curva, mult, horizonte_dias: horizonteDias,
+        de: deC, ate: ateC, skus: itens.length,
+        totais: { investir: Math.round(tot.investir * 100) / 100, risco: Math.round(tot.risco * 100) / 100, skus_a_comprar: tot.skus },
+        itens });
+      return true;
+    }
+
     // 🔮 PREVISÃO DE VENDAS POR PRODUTO — usa o histórico do Supabase.
     // Uso: /girassol-backup-offline/previsao-vendas?base=180  (dias de histórico usados como base)
     // Devolve, por SKU: o que vendeu na base, a média por dia, a TENDÊNCIA (últimos 30d x 30d
