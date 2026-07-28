@@ -41,7 +41,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v28/07 b64';
+const VERSAO     = 'girassol-backup-offline v28/07 b65';
 
 // ── SESSÃO DE OPERADOR (cookie assinado HMAC) — protege rotas de dados/ação ──
 // Segredo estável entre restarts. Usa ADMIN_KEY (já configurada no Render) como base.
@@ -945,6 +945,8 @@ function routes(readBody) {
         linhas = await rq.json().catch(() => []);
         if (!Array.isArray(linhas)) linhas = [];
       } catch (e) { json(res, 500, { ok: false, erro: String(e.message || e) }); return true; }
+      const _ccR = readJson(path.join(CACHE_DIR, '_custos.json'), {});
+      const _cuR = sk => { const c = _ccR[String(sk || '').trim()]; return (c && c.custo != null && isFinite(Number(c.custo))) ? Number(c.custo) : null; };
       const ordem = [], mapa = {};
       for (const l of linhas) {
         const k = String(l.numero_pedido || '(sem número)');
@@ -952,7 +954,9 @@ function routes(readBody) {
         const o = mapa[k], q = Number(l.quantidade) || 0;
         o.itens.push({ sku: l.sku || '', qtd: q });
         o.un += q; o.vprod += Number(l.valor_produto) || 0; o.vnota += Number(l.valor_nota) || 0;
-        if (l.custo != null) o.custo += Number(l.custo); else o.semCusto += q;
+        // 28/07: mesmo reparo do agregado — custo cadastrado depois do backfill entra na leitura
+        if (l.custo != null) o.custo += Number(l.custo);
+        else { const cxR = _cuR(l.sku); if (cxR != null) o.custo += cxR * q; else o.semCusto += q; }
         o.comissao += Number(l.comissao) || 0; o.frete += Number(l.frete_vendedor) || 0;
         o.imposto += Number(l.imposto) || 0; if (l.margem != null) o.margem += Number(l.margem);
       }
@@ -981,6 +985,12 @@ function routes(readBody) {
       if (!uL || !kkL) { json(res, 500, { ok: false, erro: 'Supabase não configurado' }); return true; }
       const H = { apikey: kkL, Authorization: 'Bearer ' + kkL };
       const campos = 'numero_pedido,canal,data_venda,sku,descricao,quantidade,valor_produto,valor_nota,custo,comissao,frete_vendedor,imposto,margem';
+      // 28/07: o backfill gravou o custo que existia NAQUELE dia. Depois o banco de custos cresceu
+      // (de 288 pra 541 SKUs), então muita linha antiga ficou sem custo à toa. Aqui completamos na
+      // LEITURA com o _custos.json atual — sem precisar refazer o backfill inteiro.
+      const _ccL = readJson(path.join(CACHE_DIR, '_custos.json'), {});
+      const _cuL = sk => { const c = _ccL[String(sk || '').trim()]; return (c && c.custo != null && isFinite(Number(c.custo))) ? Number(c.custo) : null; };
+      let _repostos = 0;
       const T = { fat: 0, prod: 0, imp: 0, cus: 0, com: 0, fre: 0, mar: 0, un: 0, itens: 0, semCusto: 0 };
       const peds = new Set(), porCanal = {}, porSku = {}, porDia = {}, semCustoSet = new Set();
       let offset = 0, paginas = 0;
@@ -993,10 +1003,13 @@ function routes(readBody) {
           paginas++;
           for (const l of linhas) {
             const q = Number(l.quantidade) || 0, vp = Number(l.valor_produto) || 0, vn = Number(l.valor_nota) || 0;
-            const cu = (l.custo == null ? null : Number(l.custo)), co = Number(l.comissao) || 0, fr = Number(l.frete_vendedor) || 0, im = Number(l.imposto) || 0;
+            let cu = (l.custo == null ? null : Number(l.custo));
+            if (cu == null) { const cx = _cuL(l.sku); if (cx != null) { cu = cx * q; _repostos++; } }   // custo cadastrado DEPOIS do backfill
+            const co = Number(l.comissao) || 0, fr = Number(l.frete_vendedor) || 0, im = Number(l.imposto) || 0;
             T.itens++; T.un += q; T.prod += vp; T.fat += vn; T.imp += im; T.com += co; T.fre += fr;
             if (cu != null) T.cus += cu; else { T.semCusto += q; if (l.sku) semCustoSet.add(String(l.sku)); }
-            const mg = (l.margem == null ? null : Number(l.margem));
+            let mg = (l.margem == null ? null : Number(l.margem));
+            if (mg != null && l.custo == null && cu != null) mg -= cu;   // margem gravada sem custo: desconta o custo reposto
             if (mg != null) T.mar += mg;
             if (l.numero_pedido) peds.add(String(l.numero_pedido));
             const cn = l.canal || 'outro';
@@ -1020,7 +1033,7 @@ function routes(readBody) {
         totais: { faturamento: Math.round(T.fat * 100) / 100, produtos: Math.round(T.prod * 100) / 100, imposto: Math.round(T.imp * 100) / 100,
                   custo: Math.round(T.cus * 100) / 100, comissao: Math.round(T.com * 100) / 100, frete: Math.round(T.fre * 100) / 100,
                   margem: Math.round(T.mar * 100) / 100, pedidos: peds.size, unidades: T.un, itens: T.itens, un_sem_custo: T.semCusto,
-                  skus_sem_custo: Array.from(semCustoSet).slice(0, 60) },
+                  skus_sem_custo: Array.from(semCustoSet).slice(0, 60), custos_repostos: _repostos },
         canais, dias, skus };
       _histCache[cacheKey] = { ts: Date.now(), dados };
       json(res, 200, dados);
