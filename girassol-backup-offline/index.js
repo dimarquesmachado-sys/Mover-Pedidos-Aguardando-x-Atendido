@@ -41,7 +41,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.GIRABKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GIRABKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'girassol-backup-offline v27/07 b63';
+const VERSAO     = 'girassol-backup-offline v28/07 b64';
 
 // ── SESSÃO DE OPERADOR (cookie assinado HMAC) — protege rotas de dados/ação ──
 // Segredo estável entre restarts. Usa ADMIN_KEY (já configurada no Render) como base.
@@ -982,7 +982,7 @@ function routes(readBody) {
       const H = { apikey: kkL, Authorization: 'Bearer ' + kkL };
       const campos = 'numero_pedido,canal,data_venda,sku,descricao,quantidade,valor_produto,valor_nota,custo,comissao,frete_vendedor,imposto,margem';
       const T = { fat: 0, prod: 0, imp: 0, cus: 0, com: 0, fre: 0, mar: 0, un: 0, itens: 0, semCusto: 0 };
-      const peds = new Set(), porCanal = {}, porSku = {}, porDia = {};
+      const peds = new Set(), porCanal = {}, porSku = {}, porDia = {}, semCustoSet = new Set();
       let offset = 0, paginas = 0;
       try {
         while (offset < 60000) {
@@ -995,7 +995,7 @@ function routes(readBody) {
             const q = Number(l.quantidade) || 0, vp = Number(l.valor_produto) || 0, vn = Number(l.valor_nota) || 0;
             const cu = (l.custo == null ? null : Number(l.custo)), co = Number(l.comissao) || 0, fr = Number(l.frete_vendedor) || 0, im = Number(l.imposto) || 0;
             T.itens++; T.un += q; T.prod += vp; T.fat += vn; T.imp += im; T.com += co; T.fre += fr;
-            if (cu != null) T.cus += cu; else T.semCusto += q;
+            if (cu != null) T.cus += cu; else { T.semCusto += q; if (l.sku) semCustoSet.add(String(l.sku)); }
             const mg = (l.margem == null ? null : Number(l.margem));
             if (mg != null) T.mar += mg;
             if (l.numero_pedido) peds.add(String(l.numero_pedido));
@@ -1019,7 +1019,8 @@ function routes(readBody) {
       const dados = { ok: true, de: deL, ate: ateL, fonte: 'supabase', paginas,
         totais: { faturamento: Math.round(T.fat * 100) / 100, produtos: Math.round(T.prod * 100) / 100, imposto: Math.round(T.imp * 100) / 100,
                   custo: Math.round(T.cus * 100) / 100, comissao: Math.round(T.com * 100) / 100, frete: Math.round(T.fre * 100) / 100,
-                  margem: Math.round(T.mar * 100) / 100, pedidos: peds.size, unidades: T.un, itens: T.itens, un_sem_custo: T.semCusto },
+                  margem: Math.round(T.mar * 100) / 100, pedidos: peds.size, unidades: T.un, itens: T.itens, un_sem_custo: T.semCusto,
+                  skus_sem_custo: Array.from(semCustoSet).slice(0, 60) },
         canais, dias, skus };
       _histCache[cacheKey] = { ts: Date.now(), dados };
       json(res, 200, dados);
