@@ -20,7 +20,7 @@ const { rotinaNFeML, enviarNFeUnica } = require('./nfeMlFluxo');
 
 // ── Crons da AMBTotal ─────────────────────────────────────────────────
 const crons = {
-  expediente:  '*/3 6-23 * * *',                              // F1 a cada 3 min
+  expediente:  '*/3 * * * *',                                 // F1 a cada 3 min, 24h (28/07: antes 6-23; pedido da madrugada esperava até as 6h)
   virada:      '10 0 * * *',                                  // F2 às 00:10
   manha:       ['0 6 * * *', '30 6 * * *', '0 7 * * *',       // F2 às 06:00, 06:30, 07:00
                 '*/15 6-23 * * *'],                           // F2 a cada 15 min diurno
