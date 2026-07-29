@@ -360,7 +360,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd169';
+const DASH_BUILD = 'd170';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -462,8 +462,8 @@ function cardVenda(o){
   nums.push('<div class="vcB"><i>custo</i><b>'+(o.custo!=null?BRL(o.custo):'—')+'</b></div>');
   // 28/07: quadrinho novo — soma TUDO que o marketplace e o governo levaram (fora o custo do produto):
   // comissão + imposto + frete do vendedor, menos o estorno. Antes isso ficava invisível no celular.
-  nums.push('<div class="vcB" title="'+esc(o.despDet||'comissão + imposto + frete do vendedor')+'"><i>− taxas e imposto</i><b class="bad">'+(o.desp!=null?BRL(o.desp):'—')+'</b></div>');
-  nums.push('<div class="vcB"><i>💎 margem</i><b class="'+((o.mc||0)>=0?'ok':'bad')+'">'+(o.mc!=null?BRL(o.mc):'—')+(o.pc!=null?(' <span style="font-size:10px;opacity:.8">'+String(o.pc).replace('.',',')+'%</span>'):'')+'</b></div>');
+  nums.push('<div class="vcB" title="'+esc(o.despDet||'comissão + imposto + frete do vendedor')+'"><i>Taxas, Frete e Imposto</i><b class="bad">'+(o.desp!=null?BRL(o.desp):'—')+'</b></div>');
+  nums.push('<div class="vcB"><i>💎 Lucro Bruto (M.C.)</i><b class="'+((o.mc||0)>=0?'ok':'bad')+'">'+(o.mc!=null?BRL(o.mc):'—')+(o.pc!=null?(' <span style="font-size:10px;opacity:.8">('+String(o.pc).replace('.',',')+'%)</span>'):'')+'</b></div>');
   return '<div class="vcard" style="border-left:3px solid '+cor+(o.cancelado?';opacity:.55':'')+'">'+
     '<div class="vcTopo">'+
       (o.cancelado?'<span style="color:#64748b;font-weight:800">✕</span>':'<span style="color:#34d399;font-weight:800">✓</span>')+
@@ -2066,9 +2066,10 @@ function renderAnalise(){
     // com um selo dizendo de onde veio: 🧾 hora da NF · 🕘 hora da conferência.
     const dt = (function(){
       // "h" no fim deixa claro que é HORA e não data — 07:03h
+      // 29/07: os selos depois da hora sa\u00edram \u2014 sujavam o cart\u00e3o. Hora \u00e9 hora, de onde quer que venha.
       if(h.venda_em) return dtBR(h.venda_em).slice(-5)+'h';
-      if(h.nf_emissao){ const t=String(h.nf_emissao).replace(' ','T').slice(11,16); if(t) return t+'h \ud83e\uddfe'; }
-      if(h.conferido_em){ const t=dtBR(h.conferido_em).slice(-5); if(t) return t+'h \ud83d\udd58'; }
+      if(h.nf_emissao){ const t=String(h.nf_emissao).replace(' ','T').slice(11,16); if(t) return t+'h'; }
+      if(h.conferido_em){ const t=dtBR(h.conferido_em).slice(-5); if(t) return t+'h'; }
       // sem nenhuma hora disponível (canal que não informa e venda ainda não bipada)
       return h.venda_dia ? (String(h.venda_dia).slice(8,10)+'/'+String(h.venda_dia).slice(5,7)) : '';
     })();
