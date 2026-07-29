@@ -159,6 +159,15 @@
              border-radius:9px;padding:7px 9px;font-size:12.5px}
   /* botões auxiliares menores (recarregar do Bling / sincronizar custos) */
   .btMini{padding:6px 10px;font-size:12px}
+  /* barra que repete o cabeçalho da tabela em leitura (só no celular) */
+  #cabFlut{position:fixed;z-index:45;display:none;pointer-events:none;
+           box-shadow:0 4px 12px rgba(0,0,0,.55);border-radius:0 0 8px 8px;overflow:hidden}
+  #cabFlut .cabInner{overflow:hidden}
+  #cabFlut table{border-collapse:collapse;background:#141b33}
+  #cabFlut th{background:#141b33;color:var(--mut);font-size:10.5px;font-weight:700;text-align:left;
+              padding:7px 8px;border-bottom:1px solid var(--line2);white-space:nowrap;
+              text-transform:uppercase;letter-spacing:.02em}
+  #cabFlut th .sort,#cabFlut th span{pointer-events:none}
   /* navegador flutuante entre cards */
   #navCards{position:fixed;right:14px;bottom:16px;z-index:60;display:flex;flex-direction:column;gap:6px;
             opacity:0;transition:opacity .18s}
@@ -200,12 +209,11 @@
     /* 29/07: overflow-x cria uma área de rolagem própria e QUEBRA o cabeçalho grudado.
        Nas tabelas que cabem na tela (colunas já reduzidas) tiramos o overflow, e aí o
        cabeçalho gruda igual ao do computador. */
-    /* as tabelas já têm poucas colunas no celular: forçamos elas a caber, e aí o
-       'overflow-x:visible' é seguro — e o cabeçalho gruda de verdade. */
-    .twFit{overflow-x:visible!important;max-width:100%}
-    .twFit table{width:100%!important;min-width:0!important;table-layout:fixed}
-    .twFit td,.twFit th{white-space:normal!important;word-break:break-word;overflow-wrap:anywhere}
-    .twFit td>div,.twFit th>div{max-width:100%!important}
+    /* 29/07 — VOLTOU ATRÁS: eu tinha forçado as tabelas a caber, e isso espremeu tudo e estragou
+       a leitura. O card PODE rolar de lado; o que não pode é a PÁGINA sair da borda — e disso
+       cuida a trava em html/body lá em cima. O cabeçalho grudado agora é feito por código
+       (barra flutuante), porque dentro de uma área que rola de lado o 'sticky' não funciona. */
+    .twFit{overflow-x:auto!important;max-width:100%}
     .tw table{min-width:640px}
     #secAnalise .vcards+.tw{display:none}
     /* cards: 2 por linha em vez de rolagem lateral */
@@ -314,12 +322,11 @@
     table{font-size:11.5px}
     td{padding:7px 6px} th{padding:6px 6px;font-size:9.5px}
     .tw{overflow-x:auto;-webkit-overflow-scrolling:touch}
-    /* as tabelas já têm poucas colunas no celular: forçamos elas a caber, e aí o
-       'overflow-x:visible' é seguro — e o cabeçalho gruda de verdade. */
-    .twFit{overflow-x:visible!important;max-width:100%}
-    .twFit table{width:100%!important;min-width:0!important;table-layout:fixed}
-    .twFit td,.twFit th{white-space:normal!important;word-break:break-word;overflow-wrap:anywhere}
-    .twFit td>div,.twFit th>div{max-width:100%!important}
+    /* 29/07 — VOLTOU ATRÁS: eu tinha forçado as tabelas a caber, e isso espremeu tudo e estragou
+       a leitura. O card PODE rolar de lado; o que não pode é a PÁGINA sair da borda — e disso
+       cuida a trava em html/body lá em cima. O cabeçalho grudado agora é feito por código
+       (barra flutuante), porque dentro de uma área que rola de lado o 'sticky' não funciona. */
+    .twFit{overflow-x:auto!important;max-width:100%}
     /* ANÁLISE no celular: a tabela some e cada venda vira um CARTÃO (ver .vcards) */
     #secAnalise .tw{display:none}
     .vcards{display:flex;flex-direction:column;gap:8px}
@@ -351,7 +358,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd165';
+const DASH_BUILD = 'd167';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -1761,6 +1768,47 @@ function irCard(dir){
   if(alvo==null) alvo = dir>0 ? document.body.scrollHeight : 0;
   window.scrollTo({top:Math.max(0,alvo), behavior:'smooth'});
 }
+// 29/07 — CABEÇALHO GRUDADO NO CELULAR, feito por código.
+// Dentro de uma área que rola de lado (que é o caso das tabelas no telefone), o "sticky" do
+// navegador não funciona: ele gruda naquela área, não na tela. Então montamos uma barra
+// flutuante que COPIA o cabeçalho da tabela que está sendo lida, e some quando ela sai de vista.
+// A barra acompanha a rolagem lateral do card, pra as colunas ficarem alinhadas.
+let _barraCab = null, _tabAtual = null;
+function _hdrAltura(){ const hd=document.querySelector('.hdr'); return hd?hd.offsetHeight:0; }
+function atualizarCabecalhoFlutuante(){
+  if(window.innerWidth > 720){ if(_barraCab) _barraCab.style.display='none'; return; }
+  if(!_barraCab){
+    _barraCab = document.createElement('div');
+    _barraCab.id = 'cabFlut';
+    document.body.appendChild(_barraCab);
+  }
+  const topo = _hdrAltura();
+  let alvo = null;
+  for(const tw of document.querySelectorAll('.tw')){
+    if(tw.offsetParent === null) continue;              // escondida nesta largura
+    const tb = tw.querySelector('table'); if(!tb) continue;
+    const tr = tb.querySelector('tr'); if(!tr) continue;
+    const r = tw.getBoundingClientRect();
+    // a tabela precisa estar em vista E já ter passado do topo
+    if(r.top < topo + 4 && r.bottom > topo + 60){ alvo = {tw, tb, tr}; break; }
+  }
+  if(!alvo){ _barraCab.style.display='none'; _tabAtual=null; return; }
+  if(_tabAtual !== alvo.tb){
+    _tabAtual = alvo.tb;
+    const larguras = Array.prototype.map.call(alvo.tr.children, c=>c.getBoundingClientRect().width);
+    _barraCab.innerHTML = '<div class="cabInner"><table><tr>'+
+      Array.prototype.map.call(alvo.tr.children, function(c,i){
+        return '<th style="width:'+larguras[i]+'px;min-width:'+larguras[i]+'px">'+c.innerHTML+'</th>';
+      }).join('')+'</tr></table></div>';
+  }
+  const r = alvo.tw.getBoundingClientRect();
+  _barraCab.style.display = 'block';
+  _barraCab.style.top = topo+'px';
+  _barraCab.style.left = Math.max(0, r.left)+'px';
+  _barraCab.style.width = Math.min(r.width, window.innerWidth)+'px';
+  const inner = _barraCab.querySelector('.cabInner');
+  if(inner) inner.scrollLeft = alvo.tw.scrollLeft;      // acompanha a rolagem lateral do card
+}
 function montarNavCards(){
   if(document.getElementById('navCards')) return;
   const d=document.createElement('div');
@@ -1777,6 +1825,12 @@ function montarNavCards(){
                                  topoBt.style.opacity = noTopo ? '.35' : '.85';
                                  topoBt.style.pointerEvents = noTopo ? 'none' : 'auto'; } };
   window.addEventListener('scroll', mostra, {passive:true}); mostra();
+  const atualizaCab = ()=>{ try{ atualizarCabecalhoFlutuante(); }catch(e){} };
+  window.addEventListener('scroll', atualizaCab, {passive:true});
+  window.addEventListener('resize', ()=>{ _tabAtual=null; atualizaCab(); });
+  document.querySelectorAll('.tw').forEach(tw=>tw.addEventListener('scroll', atualizaCab, {passive:true}));
+  setInterval(atualizaCab, 700);   // as tabelas são redesenhadas com frequência
+  atualizaCab();
 }
 // 28/07: gerador de planilha usado pelos 3 cards (TOP Produtos, Projeção e Previsão).
 // CSV com BOM e ";" — o Excel em português abre direto, sem tela de importação.
@@ -2009,9 +2063,11 @@ function renderAnalise(){
     // filtro HOJE isso não diz nada (a data já é hoje). Agora usa a melhor fonte que existir,
     // com um selo dizendo de onde veio: 🧾 hora da NF · 🕘 hora da conferência.
     const dt = (function(){
-      if(h.venda_em) return dtBR(h.venda_em).slice(-5);
-      if(h.nf_emissao){ const t=String(h.nf_emissao).replace(' ','T').slice(11,16); if(t) return t+' \ud83e\uddfe'; }
-      if(h.conferido_em){ const t=dtBR(h.conferido_em).slice(-5); if(t) return t+' \ud83d\udd58'; }
+      // "h" no fim deixa claro que é HORA e não data — 07:03h
+      if(h.venda_em) return dtBR(h.venda_em).slice(-5)+'h';
+      if(h.nf_emissao){ const t=String(h.nf_emissao).replace(' ','T').slice(11,16); if(t) return t+'h \ud83e\uddfe'; }
+      if(h.conferido_em){ const t=dtBR(h.conferido_em).slice(-5); if(t) return t+'h \ud83d\udd58'; }
+      // sem nenhuma hora disponível (canal que não informa e venda ainda não bipada)
       return h.venda_dia ? (String(h.venda_dia).slice(8,10)+'/'+String(h.venda_dia).slice(5,7)) : '';
     })();
     return { numero:(h.numero||h.id), canal:nomeCanal(P.ck), hora:dt,
