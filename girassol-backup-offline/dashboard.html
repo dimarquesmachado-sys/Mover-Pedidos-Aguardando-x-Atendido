@@ -137,6 +137,13 @@
   .anSel{flex:0 0 auto;max-width:220px}
   .anBusca{flex:1 1 240px;min-width:160px}
   /* campo com rótulo em cima (Plano de Compra) */
+  /* totais da Análise: 3 por linha; a última linha estica pra preencher */
+  .miniTot{flex:1 1 calc(33.33% - 6px);min-width:96px}
+  /* 29/07: busca + Excel + ↻ num grupo indivisivel - antes o Excel caia sozinho numa linha
+     quando os botoes de periodo ocupavam muito espaco. Agora eles andam sempre juntos. */
+  .grpBusca{display:flex;gap:6px;align-items:center;flex:1 1 320px;min-width:260px}
+  .grpBusca .campoBusca{flex:1 1 auto;min-width:0;max-width:340px}
+  .grpBusca .btFiltro{flex:0 0 auto}
   /* seletores do Plano de Compra - o rotulo vive DENTRO da opcao, entao sempre da pra ler */
   .cpSel{background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:9px;
          padding:8px 9px;font-size:12.5px;font-weight:600;cursor:pointer;max-width:210px}
@@ -181,7 +188,7 @@
     body{padding:0 8px 30px}
     .sec{padding:12px;border-radius:12px}
     .desc{max-width:150px}
-    /* as tabelas que sobram (Top Produtos, Por Canal, Projeção) rolam de lado sem esticar a página */
+    /* as tabelas que sobram (TOP Produtos, Por Canal, Projeção) rolam de lado sem esticar a página */
     .tw{max-width:100%;overflow-x:auto}
     .tw table{min-width:640px}
     #secAnalise .vcards+.tw{display:none}
@@ -208,7 +215,8 @@
     #kpis .kpi:last-child:nth-child(odd){grid-column:1 / -1}
     /* ── barras de filtro dos cards ──
        mesma ideia do cabeçalho: o que era uma fileira de botões vira um seletor.
-       linha 1: [período ▾] [dias]   ·   linha 2: [buscar SKU] [⬇ Excel] [↻] */
+    /* linha 2: o grupo inteiro ocupa a largura */
+    .grpBusca{flex:1 1 100%!important;min-width:0!important;order:3;gap:5px}
     /* !important porque esses dois têm display:flex escrito no próprio elemento, e estilo
        embutido ganha da folha de estilo — sem isso os botões continuavam aparecendo junto do seletor */
     #prevChips,#projChips,.rotFiltro{display:none!important}
@@ -225,11 +233,15 @@
     .btFiltro{order:4;flex:0 0 auto;padding:8px 9px;font-size:12.5px}
     .selFiltro{flex:1 1 calc(100% - 84px);order:1;padding:7px 8px;font-size:13px;min-width:0}
     /* Análise no celular: [canal][busca] em cima, [chips][ações][paginação] embaixo */
+    /* 3 caixas de total por linha, e a última linha divide o espaço entre as que sobraram */
+    .miniTot{flex:1 1 calc(33.33% - 5px)!important;min-width:0!important;padding:6px 7px!important}
+    .miniTot>div:first-child{font-size:8.5px!important}
+    .miniTot>div:last-child{font-size:12px!important}
     .anBarra{gap:6px}
     .anSel{flex:0 0 auto!important;max-width:128px;font-size:12px;padding:7px 6px}
     .anBusca{flex:1 1 calc(100% - 136px)!important;min-width:0!important;font-size:16px}
     .anAcao{padding:8px 9px;font-size:12.5px}
-    #anInfo{flex:1 1 100%;order:9;margin-top:-2px}
+    #anInfo{flex:0 1 auto;order:5;font-size:11px;white-space:nowrap;margin:0}   /* junto das setas, não numa linha só pra ele */
     /* Plano de Compra: 3 campos dividem a linha 1; curva + busca + botões na linha 2 */
     /* Plano de Compra: 2 seletores por linha, legiveis */
     .cpSel{flex:1 1 calc(50% - 4px);max-width:none;min-width:0;font-size:12.5px;padding:9px 8px}
@@ -315,7 +327,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd155';
+const DASH_BUILD = 'd159';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -432,6 +444,31 @@ function cardVenda(o){
     '<div class="vcNums">'+nums.join('')+'</div>'+
   '</div>';
 }
+// 29/07: o título do produto some quando (a) a venda ainda não foi bipada e o servidor é antigo,
+// ou (b) o SKU não está entre os da Projeção (que é quem carrega o cadastro). Aqui o próprio
+// cartão vai buscar os nomes que faltam e se redesenha — sem depender de versão do servidor.
+let _nomesBuscando = false;
+async function garantirNomes(lista){
+  if(_nomesBuscando || !lista || !lista.length) return;
+  const falta = [];
+  for(const x of lista){
+    for(const i of ((x.h && x.h.itens) || [])){
+      if(!i.sku) continue;
+      if(i.descricao) continue;
+      if(SKUINFO[i.sku] && SKUINFO[i.sku].nome) continue;
+      if(falta.indexOf(i.sku) < 0) falta.push(i.sku);
+    }
+  }
+  if(!falta.length) return;
+  _nomesBuscando = true;
+  try{
+    const r = await fetch(MOD+'/sku-info', {method:'POST', credentials:'same-origin',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify({skus: falta.slice(0,60)})});
+    const d = await r.json().catch(()=>null);
+    if(d && d.skus && Object.keys(d.skus).length){ Object.assign(SKUINFO, d.skus); renderAnalise(); }
+  }catch(e){}
+  _nomesBuscando = false;
+}
 function renderCardsVenda(lista){
   const el=document.getElementById('anCards'); if(!el) return;
   el.innerHTML = lista.length ? lista.map(cardVenda).join('') : '<div class="dim" style="padding:14px">sem vendas no período</div>';
@@ -499,8 +536,9 @@ function renderHistLinhas(iv){
 let PLANO = null, _planoCarregando = false;
 function _cpParam(){
   const v = id => { const e=document.getElementById(id); return e? e.value : null; };
-  return { lead: Number(v('cpLead'))||4, cob: Number(v('cpCob'))||5, seg: Number(v('cpSeg'))||0.5,
-           curva: v('cpCurva')||'A' };
+  // 29/07: o campo "segurança" saiu — se você escolhe cobrir 5 meses, o colchão já está
+  // embutido nessa escolha. Quer mais folga? é só cobrir 6.
+  return { lead: Number(v('cpLead'))||4, cob: Number(v('cpCob'))||5, seg: 0, curva: v('cpCurva')||'A' };
 }
 async function carregarPlano(forcar){
   if(_planoCarregando) return;
@@ -538,7 +576,7 @@ function renderPlano(){
     '<div class="vcB" style="min-width:150px"><i>investimento necessário</i><b>'+BRL(T.investir||0)+'</b></div>'+
     '<div class="vcB" style="min-width:150px"><i>⚠ lucro em risco se não comprar</i><b class="bad">'+BRL(T.risco||0)+'</b></div>'+
     '<div class="vcB" style="min-width:120px"><i>SKUs a comprar</i><b>'+N(T.skus_a_comprar||0)+'</b></div>';
-  if(inf) inf.innerHTML = 'horizonte: <b>'+PLANO.lead+' meses</b> de espera + <b>'+PLANO.cob+'</b> de cobertura + <b>'+PLANO.seg+'</b> de segurança = <b>'+N(PLANO.horizonte_dias)+' dias</b> de estoque a cobrir'+
+  if(inf) inf.innerHTML = 'horizonte: <b>'+PLANO.lead+' meses</b> de espera + <b>'+PLANO.cob+' meses</b> de cobertura = <b>'+N(PLANO.horizonte_dias)+' dias</b> de estoque a garantir'+
     ' · ritmo medido em '+PLANO.de+' → '+PLANO.ate+' · '+N(PLANO.skus)+' SKUs na curva selecionada';
   tb.innerHTML =
     '<tr><th title="primeira imagem do produto no Bling — a mesma que voc\u00ea manda pro fornecedor">Foto</th>'+
@@ -874,7 +912,7 @@ function montar(){
       '<option value="">\u2193 ir para uma se\u00e7\u00e3o\u2026</option>'+
       '<option value="secBusca">🔍 Buscar Pedido</option>'+
       '<option value="secAnalise">📋 Análise de Vendas</option>'+
-      '<option value="secTop">🏆 Top Produtos</option>'+
+      '<option value="secTop">🏆 TOP Produtos</option>'+
       '<option value="secCanal">🛒 Por Canal</option>'+
       '<option value="secDia">📈 Pedidos por Dia</option>'+
       '<option value="secProj">📦 Projeção de Estoque</option>'+
@@ -889,7 +927,7 @@ function montar(){
       '<div class="atGrid">'+
         '<button class="chip" onclick="irPra(&#39;secBusca&#39;)">🔍 Buscar Pedido</button>'+
         '<button class="chip" onclick="irPra(&#39;secAnalise&#39;)">📋 Análise de Vendas</button>'+
-        '<button class="chip" onclick="irPra(&#39;secTop&#39;)">🏆 Top Produtos</button>'+
+        '<button class="chip" onclick="irPra(&#39;secTop&#39;)">🏆 TOP Produtos</button>'+
         '<button class="chip" onclick="irPra(&#39;secCanal&#39;)">🛒 Por Canal</button>'+
         '<button class="chip" onclick="irPra(&#39;secDia&#39;)">📈 Pedidos por Dia</button>'+
         '<button class="chip" onclick="irPra(&#39;secProj&#39;)">📦 Projeção de Estoque</button>'+
@@ -939,10 +977,12 @@ function montar(){
         '<div style="margin-top:5px"><b>Estorno:</b> \u00e9 o valor da linha \"Estorno\" da venda no ML \u2014 no Flex ele j\u00e1 chega l\u00edquido (bonifica\u00e7\u00e3o menos o frete cobrado) e SOMA na margem. No <b>Flex</b>, o custo do frete \u00e9 o valor do motoboy que voc\u00ea configurou no \u2699\ufe0f.</div>'+
         '<div style="margin-top:5px">Pra <b>confrontar com o Jodda</b>: baixe o \u2b07\ufe0e <b>Excel</b> e case pelo n\u00famero da venda no marketplace \u2014 \u00e9 o \u00fanico campo que existe igual nos dois lados.</div>'+
       '</div></div>'+
-    '<div class="sec" id="secTop"><h2>🏆 Top Produtos <span class="hint">clique nos títulos p/ ordenar ↑↓ · faturamento = SOMA de todos os pedidos do SKU no período · 💎 M.C. = margem dos pedidos rateada por item — o rank do que dá LUCRO de verdade · Curva ABC recalculada pro período pesquisado (A = 80% do faturamento)</span></h2>'+
+    '<div class="sec" id="secTop"><h2>🏆 TOP Produtos <span class="hint">clique nos títulos p/ ordenar ↑↓ · faturamento = SOMA de todos os pedidos do SKU no período · 💎 M.C. = margem dos pedidos rateada por item — o rank do que dá LUCRO de verdade · Curva ABC recalculada pro período pesquisado (A = 80% do faturamento)</span></h2>'+
       '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px">'+
-        '<input id="qTop" class="campoBusca" placeholder="\ud83d\udd0e filtrar por SKU ou nome" oninput="renderTopProdutos&&renderTopProdutos();render()" style="flex:0 1 260px;min-width:150px;background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:6px 10px;font-size:12.5px">'+
+        '<div class="grpBusca">'+
+        '<input id="qTop" class="campoBusca" placeholder="\ud83d\udd0e filtrar por SKU ou nome" oninput="renderTopProdutos&&renderTopProdutos();render()" style="background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:6px 10px;font-size:12.5px">'+
         '<button class="chip btFiltro" onclick="baixarTopProdutos()">\u2b07\ufe0e<span class="soDesk"> Excel</span></button>'+
+        '</div>'+
       '</div>'+
       '<div class="tw"><table id="tProd"></table></div><div id="prodAviso"></div></div>'+
     '<div class="sec" id="secCanal"><h2>🛒 Por Canal</h2><div class="tw"><table id="tCanal"></table></div></div>'+
@@ -956,8 +996,10 @@ function montar(){
         '<select id="projSelDias" class="selFiltro" onchange="setProjDias(Number(this.value))"></select>'+
         '<input id="projDiasLivre" class="campoDias" type="number" min="1" max="365" placeholder="dias" style="width:74px;background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:6px 8px;font-size:12.5px" '+
           'onkeydown="if(event.key===\'Enter\')setProjDias(Number(this.value)||14)" title="qualquer per\u00edodo: digite os dias e tecle Enter (ex.: 25)">'+
-        '<input id="qProj" class="campoBusca" placeholder="\ud83d\udd0e filtrar por SKU ou nome" oninput="renderProjecao()" style="flex:0 1 240px;min-width:140px;background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:6px 10px;font-size:12.5px">'+
+        '<div class="grpBusca">'+
+        '<input id="qProj" class="campoBusca" placeholder="\ud83d\udd0e filtrar por SKU ou nome" oninput="renderProjecao()" style="background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:6px 10px;font-size:12.5px">'+
         '<button class="chip btFiltro" onclick="baixarProjecao()">\u2b07\ufe0e<span class="soDesk"> Excel</span></button>'+
+        '</div>'+
       '</div>'+
       '<div id="projBox" style="margin-bottom:10px;font-size:12px"><span class="mut" id="projStatus">⏳ carregando saldo/preço/custo do Bling… (~30-60s na 1ª vez)</span> '+
       '<button class="btn btMini" id="btnProj" onclick="carregarSkuInfo(true)" style="display:none" title="busca saldo e preço de novo no Bling, ignorando o cache"><span class="soDesk">↻ recarregar do Bling</span><span class="soCel">↻ Bling</span></button> <button class="btn btMini" onclick="sincCustos()" title="resolve TODOS os custos em background, devagar, sem estourar o limite do Bling — e grava em cache permanente"><span class="soDesk">🐢 sincronizar custos (fundo)</span><span class="soCel">🐢 custos</span></button></div>'+
@@ -969,9 +1011,11 @@ function montar(){
         '<select id="prevSelBase" class="selFiltro" onchange="setPrevBase(Number(this.value))"></select>'+
         '<input id="prevDiasLivre" class="campoDias" type="number" min="15" max="730" placeholder="dias" style="width:78px;background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:6px 8px;font-size:12.5px" '+
           'onkeydown="if(event.key===\'Enter\')setPrevBase(Number(this.value)||180)" title="qualquer per\u00edodo: digite os dias e tecle Enter">'+
-        '<input id="qPrev" class="campoBusca" placeholder="\ud83d\udd0e filtrar por SKU ou nome" oninput="renderPrevisao()" style="flex:0 1 240px;min-width:140px;background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:6px 10px;font-size:12.5px">'+
+        '<div class="grpBusca">'+
+        '<input id="qPrev" class="campoBusca" placeholder="\ud83d\udd0e filtrar por SKU ou nome" oninput="renderPrevisao()" style="background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:6px 10px;font-size:12.5px">'+
         '<button class="chip btFiltro" onclick="baixarPrevisao()" title="baixa a tabela como est\u00e1 na tela, com o filtro aplicado">\u2b07\ufe0e<span class="soDesk"> Excel</span></button>'+
         '<button class="chip btFiltro" onclick="carregarPrevisao(true)" title="refaz o c\u00e1lculo agora, sem esperar o cache de 30 min"><span class="soDesk">\u21bb recalcular</span><span class="soCel">\u21bb</span></button>'+
+        '</div>'+
       '</div>'+
       '<div id="prevInfo" class="mut" style="font-size:12px;margin-bottom:6px"></div>'+
       '<div class="tw"><table id="tPrev"></table></div>'+
@@ -987,15 +1031,14 @@ function montar(){
         '<select id="cpCob" class="cpSel" onchange="carregarPlano(true)" title="quantos meses de estoque voce quer ter DEPOIS que a mercadoria chegar">'+
           [1,2,3,4,5,6,8,10,12].map(function(m){ return '<option value="'+m+'"'+(m===5?' selected':'')+'>\ud83d\udce6 Cobrir: '+m+(m>1?' meses':' m\u00eas')+'</option>'; }).join('')+
         '</select>'+
-        '<select id="cpSeg" class="cpSel" onchange="carregarPlano(true)" title="colchao extra pra atraso do fornecedor ou pico de venda">'+
-          [[0,'sem colch\u00e3o'],[0.5,'meio m\u00eas'],[1,'1 m\u00eas'],[1.5,'1 m\u00eas e meio'],[2,'2 meses'],[3,'3 meses']].map(function(a){ return '<option value="'+a[0]+'"'+(a[0]===0.5?' selected':'')+'>\ud83d\udee1\ufe0f Seguran\u00e7a: '+a[1]+'</option>'; }).join('')+
-        '</select>'+
         '<select id="cpCurva" class="cpSel" onchange="carregarPlano(true)" title="curva ABC calculada no per\u00edodo do hist\u00f3rico">'+
           '<option value="A">\ud83c\udfc6 S\u00f3 curva A</option><option value="AB">\ud83c\udfc6 Curva A + B</option><option value="todas">\ud83c\udfc6 Todos os produtos</option>'+
         '</select>'+
-        '<input id="qCompra" class="campoBusca" placeholder="\ud83d\udd0e filtrar por SKU ou nome" oninput="renderPlano()" style="flex:1 1 180px;min-width:150px;background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:6px 10px;font-size:12.5px">'+
+        '<div class="grpBusca">'+
+        '<input id="qCompra" class="campoBusca" placeholder="\ud83d\udd0e filtrar por SKU ou nome" oninput="renderPlano()" style="background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:6px 10px;font-size:12.5px">'+
         '<button class="chip btFiltro" onclick="baixarPlano()">\u2b07\ufe0e<span class="soDesk"> Excel</span></button>'+
         '<button class="chip btFiltro" onclick="carregarPlano(true)"><span class="soDesk">\u21bb recalcular</span><span class="soCel">\u21bb</span></button>'+
+        '</div>'+
       '</div>'+
       '<div id="cpResumo" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px"></div>'+
       '<div id="cpInfo" class="mut" style="font-size:12px;margin-bottom:6px"></div>'+
@@ -1068,8 +1111,8 @@ function render(){
   const porDia={}, porProd={}, porUF={}; let porCanal={};
   const AGD = (SINT||[]).filter(s=>{ if(s._cancelado) return false; const d2=diaVenda(s); return d2>=de && d2<=ate; });
   const agdVal = AGD.reduce((s2,x)=> s2 + ((x.valor!=null&&isFinite(Number(x.valor)))?Number(x.valor):0), 0);
-  // 27/07: o ranking/Top Produtos/Por Canal contavam SÓ os bipados — venda ainda não bipada
-  // (ex.: PM1) sumia do Top Produtos mesmo tendo margem. Agora o laço cobre as duas populações,
+  // 27/07: o ranking/TOP Produtos/Por Canal contavam SÓ os bipados — venda ainda não bipada
+  // (ex.: PM1) sumia do TOP Produtos mesmo tendo margem. Agora o laço cobre as duas populações,
   // igual os cards do topo. O 'fat' passa a somar tudo, então o card não soma agdVal de novo.
   PER.concat(AGD).forEach(h=>{
     const d = diaVenda(h);
@@ -1096,7 +1139,7 @@ function render(){
       else _todos=false;
     });
     fatProd += _iv;
-    // d55: 💎 M.C. RATEADA por SKU (rank de lucro no Top Produtos) — a M.C. do pedido é dividida
+    // d55: 💎 M.C. RATEADA por SKU (rank de lucro no TOP Produtos) — a M.C. do pedido é dividida
     // entre os itens proporcional ao valor de cada um (fallback: proporcional à quantidade)
     const _Pp = calcPL(h);
     if(_Pp && _Pp.mc!=null && (h.itens||[]).length){
@@ -1687,7 +1730,7 @@ function montarNavCards(){
                                  topoBt.style.pointerEvents = noTopo ? 'none' : 'auto'; } };
   window.addEventListener('scroll', mostra, {passive:true}); mostra();
 }
-// 28/07: gerador de planilha usado pelos 3 cards (Top Produtos, Projeção e Previsão).
+// 28/07: gerador de planilha usado pelos 3 cards (TOP Produtos, Projeção e Previsão).
 // CSV com BOM e ";" — o Excel em português abre direto, sem tela de importação.
 let _projBase = [], _topProds = [];
 function baixarProjecao(){
@@ -1884,7 +1927,7 @@ function renderAnalise(){
       if(P.tot!=null)rT+=P.tot; if(P.imposto!=null)rI+=P.imposto; if(P.tarifa!=null)rC+=P.tarifa;
       if(P.frV!=null)rF+=P.frV; if(P.mc!=null){rM+=P.mc;rMn++;}
       if(x.h.devolucao){ rDev++; if(x.h.dev_frete_retorno!=null)rDevFrete+=Number(x.h.dev_frete_retorno); if(x.h.dev_aberta)rDevAb++; } });
-    const mini=(l,v,c)=>'<div style="background:var(--card);border:1px solid var(--line);border-radius:9px;padding:7px 11px;min-width:96px"><div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut)">'+l+'</div><div style="font-size:15px;font-weight:800'+(c?';color:'+c:'')+'">'+v+'</div></div>';
+    const mini=(l,v,c)=>'<div class="miniTot" style="background:var(--card);border:1px solid var(--line);border-radius:9px;padding:7px 11px"><div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut)">'+l+'</div><div style="font-size:15px;font-weight:800'+(c?';color:'+c:'')+'">'+v+'</div></div>';
     el.innerHTML = rN? '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">'+
       mini('Vendido (NF c/ frete)',BRL(rT))+
       mini('Impostos',BRL(rI),'#f87171')+
@@ -1906,6 +1949,7 @@ function renderAnalise(){
       (anPage>0?'<button class="chip" onclick="anPage--;renderAnalise();document.getElementById(\'secAnalise\').scrollIntoView({behavior:\'smooth\'})" title="p\u00e1gina anterior">\u2190<span class="soDesk"> Anterior</span></button>':'')+
       (anPage<maxP?'<button class="chip" style="background:#1d4ed8;border-color:#1d4ed8;color:#fff;font-weight:700" onclick="anPage++;renderAnalise();document.getElementById(\'secAnalise\').scrollIntoView({behavior:\'smooth\'})">ver as pr\u00f3ximas '+Math.min(PAG, LP.length-(anPage+1)*PAG)+' \u2192</button>':'');
   })();
+  garantirNomes(pagPL);   // busca os nomes que faltarem e redesenha
   renderCardsVenda(pagPL.map(function(x){
     const h=x.h, P=x.P;
     const dt = h.venda_em ? dtBR(h.venda_em).slice(-5) : (h.venda_dia?String(h.venda_dia).slice(8,10)+'/'+String(h.venda_dia).slice(5,7):'');
