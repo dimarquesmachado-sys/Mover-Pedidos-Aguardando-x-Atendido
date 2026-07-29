@@ -113,6 +113,26 @@
   /* coluna com explicação: sublinhado pontilhado discreto avisa que dá pra passar o mouse */
   th[title]{cursor:help;text-decoration:underline dotted rgba(255,255,255,.28);text-underline-offset:3px}
   th[title]:hover{color:#cfe0ff}
+  /* legenda do rodapé da Análise */
+  .lg{display:inline-flex;align-items:center;gap:5px}
+  .lg i{width:11px;height:11px;border-radius:2px;display:inline-block}
+  /* barra da Análise */
+  .anPerLinha{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
+  .anPerLinha:empty,.anPerLinha:has(#anPerChips:empty){margin-bottom:0}
+  .anBarra{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
+  .anSel{flex:0 0 auto;max-width:220px}
+  .anBusca{flex:1 1 240px;min-width:160px}
+  /* campo com rótulo em cima (Plano de compra) */
+  .cpCampo{display:inline-flex;flex-direction:column;gap:2px;background:var(--bg2);border:1px solid var(--line);
+           border-radius:9px;padding:4px 8px 5px;cursor:help}
+  .cpCampo i{font-style:normal;font-size:9.5px;text-transform:uppercase;letter-spacing:.03em;color:var(--mut);white-space:nowrap}
+  .cpCampo input{width:56px;background:transparent;border:0;color:var(--tx);font-size:14px;font-weight:800;padding:0}
+  .cpCampo input:focus{outline:none}
+  .cpCampo b{display:none}
+  .selSempre{display:inline-block!important;background:var(--bg2);border:1px solid var(--line);color:var(--tx);
+             border-radius:9px;padding:7px 9px;font-size:12.5px}
+  /* botões auxiliares menores (recarregar do Bling / sincronizar custos) */
+  .btMini{padding:6px 10px;font-size:12px}
   /* navegador flutuante entre cards */
   #navCards{position:fixed;right:14px;bottom:16px;z-index:60;display:flex;flex-direction:column;gap:6px;
             opacity:0;transition:opacity .18s}
@@ -180,9 +200,29 @@
     .selFiltro{display:block;flex:1 1 calc(100% - 84px);min-width:0;
                background:var(--bg2);border:1px solid var(--line);color:var(--tx);
                border-radius:9px;padding:9px 10px;font-size:14px;font-weight:700}
-    .campoDias{flex:0 0 76px!important;order:2}
-    .campoBusca{flex:1 1 calc(100% - 132px)!important;order:3}
-    .btFiltro{order:4;flex:0 0 auto;padding:9px 11px;font-size:12.5px}
+    .campoDias{flex:0 0 68px!important;order:2}
+    /* linha 2: busca + Excel + ↻, tudo junto (a busca cede o espaço) */
+    .campoBusca{flex:1 1 calc(100% - 152px)!important;order:3;min-width:110px!important}
+    .btFiltro{order:4;flex:0 0 auto;padding:9px 10px;font-size:12px}
+    .selFiltro{flex:1 1 calc(100% - 76px);padding:8px 9px;font-size:13.5px}
+    /* Análise no celular: [canal][busca] em cima, [chips][ações][paginação] embaixo */
+    .anBarra{gap:6px}
+    .anSel{flex:0 0 auto!important;max-width:128px;font-size:12px;padding:7px 6px}
+    .anBusca{flex:1 1 calc(100% - 136px)!important;min-width:0!important;font-size:16px}
+    .anAcao{padding:8px 9px;font-size:12.5px}
+    #anInfo{flex:1 1 100%;order:9;margin-top:-2px}
+    /* Plano de compra: 3 campos dividem a linha 1; curva + busca + botões na linha 2 */
+    .cpCampo{flex:1 1 0;min-width:0;padding:4px 6px 5px}
+    .cpCampo i{font-size:9px}
+    .cpCampo input{width:100%;font-size:15px}
+    #qCompra{flex:1 1 calc(100% - 210px)!important;min-width:96px!important}
+    .selSempre{flex:0 0 auto;padding:8px 8px;font-size:12px}
+    /* botões auxiliares: pequenos e na mesma linha */
+    .btMini{padding:6px 9px!important;font-size:11.5px!important}
+    #projBox{font-size:11.5px}
+    /* os 2 gráficos por dia tinham um respiro maior que os outros cards */
+    .grid2{gap:12px}
+    .grid2>.sec{margin-bottom:0}
     /* no celular elas viravam uma fileira apertada; agora a busca ocupa a linha toda
        e os botões/campos pequenos ficam embaixo, sem espremer */
     #qPrev,#qProj,#qTop{flex:1 1 100%!important;min-width:0!important;font-size:16px!important;padding:9px 10px!important}
@@ -190,7 +230,7 @@
     #prevChips,#projChips{gap:5px}
     #prevChips .chip,#projChips .chip{padding:7px 10px;font-size:12.5px}
     /* navegador flutuante: um pouco maior no dedo e fora do caminho do rodapé */
-    #navCards{right:10px;bottom:12px;gap:5px}
+    #navCards{right:10px;bottom:26px;gap:5px}   /* mais alto: no Android o rodapé do navegador cobria */
     #navCards button{width:42px;height:38px;font-size:14px}
     /* previsão: no celular só o essencial (produto, vendidas, tendência, 1 mês, 1 ano) */
     #tPrev tr>*:nth-child(1),#tPrev tr>*:nth-child(5),#tPrev tr>*:nth-child(7),#tPrev tr>*:nth-child(8){display:none}
@@ -210,7 +250,10 @@
     h1{flex:1 1 100%}
     /* 🔄 · ← checkout · status: tudo numa linha, à esquerda */
     .hlinks{flex-direction:row!important;align-items:center!important;gap:10px;width:100%;
-            justify-content:flex-start!important;flex-wrap:wrap;margin-top:-2px}
+            justify-content:flex-start!important;flex-wrap:wrap;margin-top:6px}
+    h1{margin-bottom:2px}
+    .hbot{margin-top:8px}
+    .hdr{padding-bottom:8px}
     .hlinks>div{gap:10px!important}
     /* os dois seletores lado a lado */
     .hbot{flex-direction:row!important;gap:8px;align-items:flex-start;padding-bottom:4px}
@@ -255,7 +298,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd142';
+const DASH_BUILD = 'd148';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -342,7 +385,7 @@ function prepararVendas(){
   SINT = (VENDAS||[]).filter(v=>v&&v.numero!=null&&!_nums.has(String(v.numero))).map(v=>({
     sintetico:true, id:'s'+v.id, numero:v.numero, numero_loja:v.numero_loja||'', marketplace:v.marketplace||'outro',
     venda_em:v.venda_em||null, venda_dia:v.data||null, valor:(v.total!=null?Number(v.total):null), cliente:v.cliente||'',
-    itens:(v.it||[]).map(i2=>({sku:i2.sku,qtd:i2.qtd,valor_total:i2.vt,custo:(i2.custo!=null?i2.custo:null)})), taxa_mkt:(v.taxa_mkt!=null?v.taxa_mkt:null), frete_mkt:(v.frete_mkt!=null?v.frete_mkt:null),
+    itens:(v.it||[]).map(i2=>({sku:i2.sku,descricao:(i2.d||null),qtd:i2.qtd,valor_total:i2.vt,custo:(i2.custo!=null?i2.custo:null)})), taxa_mkt:(v.taxa_mkt!=null?v.taxa_mkt:null), frete_mkt:(v.frete_mkt!=null?v.frete_mkt:null),
     tarifa_ml:(v.tarifa_ml!=null?v.tarifa_ml:null), frete_ml:(v.frete_ml!=null?v.frete_ml:null), credito_ml:(v.credito_ml!=null?v.credito_ml:null),   // b31: comissão/frete/estorno REAIS do ML (fase ml_real) — o calcPL prioriza estes sobre o Bling
     devolucao:(v.devolucao?1:0), dev_frete_retorno:(v.dev_frete_retorno!=null?Number(v.dev_frete_retorno):null), dev_destino:v.dev_destino||null, dev_status:v.dev_status||null, dev_aberta:(v.dev_aberta?1:0),   // b39: devolução do ML
     _sit:v.situacao||null, _cancelado:(!!v.cancelado || /cancel/i.test(String(v.situacao||'')) || !!v.cancelado_mkt), cancelado_mkt:(v.cancelado_mkt?1:0)
@@ -740,7 +783,7 @@ function intervalo(){
 // de volta pro topo. Agora a âncora fica guardada e é reaplicada algumas vezes, cobrindo o assíncrono.
 let _ancEl=null, _ancTop=0;
 function marcarAncora(){
-  const secs = Array.prototype.slice.call(document.querySelectorAll('.sec'));
+  const secs = Array.prototype.slice.call(document.querySelectorAll('div.sec'));
   let alvo=null, melhor=Infinity;
   for(const el of secs){ const r=el.getBoundingClientRect(); if(r.bottom>40){ const d=Math.abs(r.top-70); if(d<melhor){ melhor=d; alvo=el; } } }
   _ancEl = alvo; _ancTop = alvo ? alvo.getBoundingClientRect().top : 0;
@@ -843,29 +886,37 @@ function montar(){
       'style="width:100%;background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:10px;padding:11px 14px;font-size:13px" '+
       'oninput="buscarPed(this.value)">'+
       '<div id="buscaRes" style="margin-top:10px"></div><div id="plCard"></div></div>'+
-    '<div class="sec" id="secAnalise"><h2>📋 Análise de vendas — margem por pedido <span class="hint">mais novas em cima · ✓ verde = bipado · ✓ laranja = aguardando bipagem (margem já calculada) · 🧾 = hora da NF · 🕘 = hora da conferência</span></h2>'+
-    '<div style="display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--mut);margin:-4px 0 10px;align-items:center"><span style="color:var(--mut)">cor da linha:</span>'+
-      '<span style="display:inline-flex;align-items:center;gap:5px"><span style="width:11px;height:11px;border-radius:2px;background:#34d399;display:inline-block"></span>ativa</span>'+
-      '<span style="display:inline-flex;align-items:center;gap:5px"><span style="width:11px;height:11px;border-radius:2px;background:#eab308;display:inline-block"></span>devolução em andamento</span>'+
-      '<span style="display:inline-flex;align-items:center;gap:5px"><span style="width:11px;height:11px;border-radius:2px;background:#ef4444;display:inline-block"></span>devolvida</span>'+
-      '<span style="display:inline-flex;align-items:center;gap:5px"><span style="width:11px;height:11px;border-radius:2px;background:#475569;display:inline-block"></span>cancelada</span>'+
-    '</div>'+
-      '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px"><span id="anPerChips" style="display:flex;gap:6px;flex-wrap:wrap"></span><span id="anPerDatas"></span></div>'+
-      '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">'+
-      '<select id="anCanalSel" onchange="anCanal=this.value;anPage=0;renderAnalise()" style="background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:9px;padding:7px 10px;font-size:12.5px"></select>'+
-      '<input id="anSkuInp" placeholder="🔎 pedido, NF, venda ou SKU…" oninput="anSku=this.value;anPage=0;renderAnalise()" style="background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:9px;padding:7px 10px;font-size:12.5px;width:210px">'+
+    '<div class="sec" id="secAnalise"><h2>📋 Análise de vendas <span class="hint">margem por pedido · mais novas em cima</span></h2>'+
+          '<div class="anPerLinha"><span id="anPerChips"></span><span id="anPerDatas"></span></div>'+
+      '<div class="anBarra">'+
+      '<select id="anCanalSel" class="anSel" onchange="anCanal=this.value;anPage=0;renderAnalise()" style="background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:9px;padding:7px 10px;font-size:12.5px"></select>'+
+      '<input id="anSkuInp" class="anBusca" placeholder="🔎 pedido, NF, venda ou SKU…" oninput="anSku=this.value;anPage=0;renderAnalise()" style="background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:9px;padding:7px 10px;font-size:12.5px;width:210px">'+
       '<span id="anLPChips" style="display:flex;gap:6px"></span>'+
-      '<button class="chip" onclick="sincVendas(this)" title="consulta o Bling AGORA — o sincronizador também roda sozinho a cada 5 min">🔄 atualizar</button>'+
-      '<button class="chip" onclick="baixarCSV()" title="baixa TODAS as vendas do período (nos períodos longos ele busca o histórico inteiro no servidor) — abre no Excel, ideal p/ confrontar com o Jodda linha a linha">\u2b07\ufe0e Excel</button>'+
+      '<button class="chip anAcao" onclick="sincVendas(this)" title="consulta o Bling AGORA — o sincronizador também roda sozinho a cada 5 min">🔄<span class="soDesk"> atualizar</span></button>'+
+      '<button class="chip anAcao" onclick="baixarCSV()" title="baixa TODAS as vendas do período em Excel">⬇︎<span class="soDesk"> Excel</span></button>'+
       '<span id="anInfo" class="mut" style="font-size:12px"></span>'+
       '<span style="margin-left:auto"></span>'+
-      '<button class="chip" onclick="if(anPage>0){anPage--;renderAnalise();}">← Anterior</button>'+
-      '<button class="chip" onclick="anPage++;renderAnalise()">Próxima →</button></div>'+
+      '<button class="chip anAcao" onclick="if(anPage>0){anPage--;renderAnalise();}" title="página anterior">←<span class="soDesk"> Anterior</span></button>'+
+      '<button class="chip anAcao" onclick="anPage++;renderAnalise()" title="próxima página"><span class="soDesk">Próxima </span>→</button></div>'+
       '<div id="anResumo"></div>'+
       '<div class="tw"><table id="tAnalise"></table></div>'+
       '<div class="vcards" id="anCards"></div>'+
       '<div id="anRodape" style="display:none;align-items:center;gap:8px;margin-top:8px;padding:8px;background:var(--bg2);border-radius:9px"></div>'+
-      '<div class="nota"><b>Sobre a ordem:</b> dentro de cada dia, ML aparece na hora REAL da venda; TikTok/Shopee/Magalu/Amazon entram pela hora da <b>EMISSÃO da NF</b> (🧾), que acompanha a venda de perto — acabaram os blocos por canal. O 🕘 (hora da conferência) só aparece quando a linha ainda não tem NF. A hora exata da venda desses canais continua existindo <b>só na API do próprio canal</b>. Pra confrontar com o Jodda, use o ⬇︎ CSV e case pelo <b>número da venda no marketplace</b>. · ML mostra a hora REAL da venda (vem da pesca); TikTok/Shopee o Bling não guarda hora — o 🕘 marca que ali está a hora da <b>conferência</b> (a hora da venda desses canais chega quando plugarmos as APIs deles) · colunas (−) são deduções e (+) é crédito · <b>Estorno</b> = o valor exato da linha "Estorno" da venda no ML (no Flex ele já vem líquido: bonificação menos o frete cobrado), somado na M.C. · no Flex o custo do frete é o <b>motoboy</b> configurado no ⚙️ · tarifa <span class="ok">REAL</span> = pescada do ML · <span class="ok">BLING</span> = comissão que o Bling importou do canal (TikTok/Shopee/Magalu) · sem tag = % configurada · custo carrega sob demanda por página · 🛒 = mais de 1 item/unidade</div></div>'+
+      '<div id="anLegenda" style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;font-size:11px;color:var(--mut);margin-top:10px;padding-top:9px;border-top:1px solid var(--line)">'+
+        '<b style="color:var(--mut);font-weight:700">como ler:</b>'+
+        '<span class="lg"><i style="background:#34d399"></i>ativa</span>'+
+        '<span class="lg"><i style="background:#eab308"></i>devolu\u00e7\u00e3o em andamento</span>'+
+        '<span class="lg"><i style="background:#ef4444"></i>devolvida</span>'+
+        '<span class="lg"><i style="background:#475569"></i>cancelada</span>'+
+        '<span class="soDesk">\u00b7 \u2713 verde = bipado \u00b7 \u2713 laranja = aguardando bipagem (margem j\u00e1 calculada) \u00b7 \ud83e\uddfe = hora da NF \u00b7 \ud83d\udd58 = hora da confer\u00eancia</span>'+
+        '<span class="soCel">\u00b7 \u2713 verde = bipado \u00b7 \u2713 laranja = ainda n\u00e3o bipado (a margem j\u00e1 est\u00e1 calculada) \u00b7 toque no n\u00famero do pedido p/ copiar</span>'+
+      '</div>'+
+      '<div class="nota">'+
+        '<div><b>Ordem das vendas:</b> dentro de cada dia o <b>ML</b> entra pela hora REAL da venda; os demais canais entram pela hora da <b>NF</b>. Quando ainda n\u00e3o h\u00e1 NF, a hora mostrada \u00e9 a da confer\u00eancia.</div>'+
+        '<div class="soDesk" style="margin-top:5px">Colunas marcadas com <b>(\u2212)</b> s\u00e3o dedu\u00e7\u00f5es e <b>(+)</b> \u00e9 cr\u00e9dito. A tarifa vem <b>REAL</b> quando o canal informa; sem marca\u00e7\u00e3o, \u00e9 a % configurada no \u2699\ufe0f.</div>'+
+        '<div style="margin-top:5px"><b>Estorno:</b> \u00e9 o valor da linha \"Estorno\" da venda no ML \u2014 no Flex ele j\u00e1 chega l\u00edquido (bonifica\u00e7\u00e3o menos o frete cobrado) e SOMA na margem. No <b>Flex</b>, o custo do frete \u00e9 o valor do motoboy que voc\u00ea configurou no \u2699\ufe0f.</div>'+
+        '<div style="margin-top:5px">Pra <b>confrontar com o Jodda</b>: baixe o \u2b07\ufe0e <b>Excel</b> e case pelo n\u00famero da venda no marketplace \u2014 \u00e9 o \u00fanico campo que existe igual nos dois lados.</div>'+
+      '</div></div>'+
     '<div class="sec" id="secTop"><h2>🏆 Top produtos <span class="hint">clique nos títulos p/ ordenar ↑↓ · faturamento = SOMA de todos os pedidos do SKU no período · 💎 M.C. = margem dos pedidos rateada por item — o rank do que dá LUCRO de verdade · Curva ABC recalculada pro período pesquisado (A = 80% do faturamento)</span></h2>'+
       '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px">'+
         '<input id="qTop" placeholder="\ud83d\udd0e filtrar por SKU ou nome" oninput="renderTopProdutos&&renderTopProdutos();render()" style="flex:1 1 220px;min-width:160px;background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:6px 10px;font-size:12.5px">'+
@@ -887,7 +938,7 @@ function montar(){
         '<button class="chip btFiltro" onclick="baixarProjecao()">\u2b07\ufe0e Excel</button>'+
       '</div>'+
       '<div id="projBox" style="margin-bottom:10px;font-size:12px"><span class="mut" id="projStatus">⏳ carregando saldo/preço/custo do Bling… (~30-60s na 1ª vez)</span> '+
-      '<button class="btn" id="btnProj" onclick="carregarSkuInfo(true)" style="display:none">↻ recarregar do Bling (ignora cache)</button> <button class="btn sec" onclick="sincCustos()" title="resolve TODOS os custos em background, devagar, sem estourar o limite do Bling — e grava em cache permanente">🐢 sincronizar custos (fundo)</button></div>'+
+      '<button class="btn btMini" id="btnProj" onclick="carregarSkuInfo(true)" style="display:none" title="busca saldo e preço de novo no Bling, ignorando o cache"><span class="soDesk">↻ recarregar do Bling</span><span class="soCel">↻ Bling</span></button> <button class="btn btMini" onclick="sincCustos()" title="resolve TODOS os custos em background, devagar, sem estourar o limite do Bling — e grava em cache permanente"><span class="soDesk">🐢 sincronizar custos (fundo)</span><span class="soCel">🐢 custos</span></button></div>'+
       '<div class="tw"><table id="tProj"></table></div><div id="projAviso"></div></div>'+
     '<div class="sec" id="secPrev"><h2>🔮 Previs\u00e3o de vendas por produto</h2>'+
       '<div class="hint">quanto cada SKU deve vender daqui pra frente, com base no hist\u00f3rico. A proje\u00e7\u00e3o d\u00e1 mais peso aos \u00faltimos 30 dias (reage a produto subindo ou caindo); a coluna <b>tend\u00eancia</b> compara os \u00faltimos 30 dias com os 30 anteriores.</div>'+
@@ -905,13 +956,14 @@ function montar(){
     '</div>'+
     '<div class="sec" id="secCompra"><h2>\ud83e\uddee Plano de compra <span class="hint">quanto comprar de cada produto pra n\u00e3o faltar at\u00e9 o pr\u00f3ximo ciclo \u00b7 ordenado pelo LUCRO EM RISCO, n\u00e3o pelo volume</span></h2>'+
       '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0">'+
-        '<span class="mut rotFiltro" style="font-size:12px">fornecedor leva</span>'+
-        '<input id="cpLead" class="campoDias" type="number" min="0" max="24" step="0.5" value="4" onchange="carregarPlano(true)" title="lead time: meses entre fazer o pedido e a mercadoria chegar" style="width:64px;background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:6px 8px;font-size:12.5px">'+
-        '<span class="mut rotFiltro" style="font-size:12px">m \u00b7 cobrir</span>'+
-        '<input id="cpCob" class="campoDias" type="number" min="0.5" max="24" step="0.5" value="5" onchange="carregarPlano(true)" title="quantos meses de estoque voc\u00ea quer ter DEPOIS que a mercadoria chegar" style="width:64px;background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:6px 8px;font-size:12.5px">'+
-        '<span class="mut rotFiltro" style="font-size:12px">m \u00b7 seguran\u00e7a</span>'+
-        '<input id="cpSeg" class="campoDias" type="number" min="0" max="6" step="0.5" value="0.5" onchange="carregarPlano(true)" title="colchão extra, em meses, pra atraso do fornecedor ou pico de venda" style="width:60px;background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:6px 8px;font-size:12.5px">'+
-        '<select id="cpCurva" onchange="carregarPlano(true)" title="curva ABC calculada no per\u00edodo do hist\u00f3rico" style="background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:6px 8px;font-size:12.5px">'+
+        // cada campo com r\u00f3tulo em cima: no celular os n\u00fameros soltos (4, 5, 0,5) n\u00e3o diziam nada
+        '<label class="cpCampo" title="lead time: meses entre fazer o pedido e a mercadoria chegar"><i>espera do fornecedor</i>'+
+          '<input id="cpLead" type="number" min="0" max="24" step="0.5" value="4" onchange="carregarPlano(true)"><b>meses</b></label>'+
+        '<label class="cpCampo" title="quantos meses de estoque voc\u00ea quer ter DEPOIS que a mercadoria chegar"><i>quero cobrir</i>'+
+          '<input id="cpCob" type="number" min="0.5" max="24" step="0.5" value="5" onchange="carregarPlano(true)"><b>meses</b></label>'+
+        '<label class="cpCampo" title="colch\u00e3o extra, em meses, pra atraso do fornecedor ou pico de venda"><i>seguran\u00e7a</i>'+
+          '<input id="cpSeg" type="number" min="0" max="6" step="0.5" value="0.5" onchange="carregarPlano(true)"><b>meses</b></label>'+
+        '<select id="cpCurva" class="selFiltro selSempre" onchange="carregarPlano(true)" title="curva ABC calculada no per\u00edodo do hist\u00f3rico">'+
           '<option value="A">s\u00f3 curva A</option><option value="AB">curva A + B</option><option value="todas">todos</option>'+
         '</select>'+
         '<input id="qCompra" class="campoBusca" placeholder="\ud83d\udd0e filtrar por SKU ou nome" oninput="renderPlano()" style="flex:1 1 180px;min-width:150px;background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:6px 10px;font-size:12.5px">'+
@@ -1379,14 +1431,23 @@ function buscarPed(q){
     return (h.itens||[]).some(it=> String(it.sku||'').toLowerCase().includes(q) || String(it.descricao||'').toLowerCase().includes(q));
   }).slice(0,15);
   if(!hits.length){ res.innerHTML='<div class="dim" style="padding:8px">nada encontrado</div>'; return; }
-  res.innerHTML = '<table><tr><th title="dia da venda">Data</th><th title="número do pedido no Bling · ✓ verde = já bipado · ✓ laranja = aguardando bipagem · ✕ = cancelado">Pedido</th><th title="onde a venda aconteceu">Canal</th><th title="nome do comprador no marketplace">Cliente</th><th class="num" title="valor total do pedido">Total</th><th></th></tr>'+
+  res.innerHTML = '<table><tr><th title="dia da venda">Data</th><th title="número do pedido no Bling · ✓ verde = já bipado · ✓ laranja = aguardando bipagem · ✕ = cancelado">Pedido</th><th title="onde a venda aconteceu">Canal</th><th title="nome do comprador no marketplace">Cliente</th><th class="num" title="valor total do pedido">Total</th><th class="num" title="margem de contribuição do pedido: venda − imposto − comissão − frete − custo · clique no valor pra ver a conta aberta">💎 M.C.</th></tr>'+
     hits.map(h=>'<tr><td class="dim">'+diaVenda(h)+'</td><td><b>'+esc(h.numero||h.id)+'</b>'+(h.id?' <a href="https://www.bling.com.br/vendas.php#edit/'+esc(h.id)+'" target="_blank" rel="noopener" title="abrir o pedido no Bling" style="font-size:10px;color:#3b82f6;text-decoration:none;font-weight:600">Bling↗</a>':'')+(h.nf_numero?'<div class="desc">NF '+esc(h.nf_numero)+(h.nf_id?' <a href="https://www.bling.com.br/notas.fiscais.php#edit/'+esc(h.nf_id)+'" target="_blank" rel="noopener" title="abrir a NF no Bling" style="color:#3b82f6;text-decoration:none;font-weight:600">↗</a>':'')+'</div>':'')+'</td>'+
       '<td>'+esc(canalKey(h.marketplace))+'</td><td class="desc" style="max-width:200px">'+esc(h.cliente||'')+'</td>'+
       '<td class="num">'+(h.valor!=null?BRL(Number(h.valor)):'<span class="dim">—</span>')+'</td>'+
-      '<td><button class="btn" style="padding:5px 12px;font-size:11px" onclick="abrirPL(\''+h.id+'\')">💎 lucro</button></td></tr>').join('')+'</table>';
+      // 28/07: era um botão "💎 lucro" que não dizia nada (e não funcionava nas vendas ainda não
+      // bipadas). Virou o VALOR da margem, clicável pra abrir a conta aberta embaixo.
+      (function(){
+        const P = calcPL(h);
+        if(P.mc==null) return '<td class="num dim" title="ainda falta detalhe ou custo deste pedido">—</td></tr>';
+        const pc = (P.rp>0) ? Math.round(P.mc/P.rp*100) : null;
+        return '<td class="num"><a href="javascript:void(0)" onclick="abrirPL(\''+esc(h.id)+'\')" '+
+               'style="text-decoration:none;font-weight:800" class="'+(P.mc>=0?'ok':'bad')+'" title="clique p/ ver a conta aberta">'+
+               BRL(P.mc)+'</a>'+(pc!=null?('<div class="mut" style="font-size:10px">'+pc+'%</div>'):'')+'</td></tr>';
+      })()).join('')+'</table>';
 }
 async function abrirPL(id){
-  const h = DADOS.find(x=>String(x.id)===String(id)); if(!h) return;
+  const h = (DADOS||[]).concat(SINT||[]).find(x=>String(x.id)===String(id)); if(!h) return;   // 28/07: antes só achava os bipados
   const skus=(h.itens||[]).map(i=>i.sku).filter(Boolean);
   const faltam=skus.filter(sk=>!SKUINFO[sk]);
   if(faltam.length){ try{ const r=await fetch(MOD+'/sku-info',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({skus:faltam})}); const d=await r.json(); if(d&&d.skus) Object.assign(SKUINFO,d.skus); }catch(e){} }
@@ -1546,7 +1607,11 @@ async function baixarHistoricoCompleto(iv){
 }
 // ⬆⬇ NAVEGADOR ENTRE CARDS: dois botõezinhos flutuantes no canto. Pulam pro começo do card
 // anterior / seguinte, descontando o cabeçalho fixo (senão o título fica escondido atrás dele).
-function _secoes(){ return Array.prototype.slice.call(document.querySelectorAll('.sec')); }
+function _secoes(){
+  // 28/07: era querySelectorAll('.sec') — só que existe um BOTÃO com class="btn sec"
+  // (secundário) na Projeção, e a seta parava nele achando que era um card.
+  return Array.prototype.slice.call(document.querySelectorAll('div.sec'));
+}
 function _topoDe(el){
   const hd=document.querySelector('.hdr');
   return el.getBoundingClientRect().top + window.pageYOffset - ((hd?hd.offsetHeight:0)+12);
@@ -1568,8 +1633,13 @@ function montarNavCards(){
               '<button onclick="window.scrollTo({top:0,behavior:\'smooth\'})" title="voltar ao topo" class="topo">\u2302</button>'+
               '<button onclick="irCard(1)" title="pr\u00f3ximo card">\u25bc</button>';
   document.body.appendChild(d);
-  const mostra=()=>{ d.style.opacity = window.pageYOffset>140 ? '1' : '0';
-                     d.style.pointerEvents = window.pageYOffset>140 ? 'auto' : 'none'; };
+  // 28/07: ficavam invisíveis até rolar 140px — agora nascem prontas. Só o ⌂ (voltar ao topo)
+  // fica apagado enquanto você JÁ está no topo, porque aí ele não faria nada.
+  d.style.opacity='1'; d.style.pointerEvents='auto';
+  const topoBt = d.querySelector('.topo');
+  const mostra=()=>{ if(topoBt){ const noTopo = window.pageYOffset < 120;
+                                 topoBt.style.opacity = noTopo ? '.35' : '.85';
+                                 topoBt.style.pointerEvents = noTopo ? 'none' : 'auto'; } };
   window.addEventListener('scroll', mostra, {passive:true}); mostra();
 }
 // 28/07: gerador de planilha usado pelos 3 cards (Top produtos, Projeção e Previsão).
