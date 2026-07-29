@@ -425,6 +425,8 @@ async function carregarFrageis(){
     }
     if(d && d.config) FRAGIL_CFG = Object.assign(FRAGIL_CFG, d.config);
     FRAGIL_DIAG = FRAGEIS.size + ' SKUs';
+    const el = document.getElementById('fragilDiag');
+    if(el) el.textContent = '\u26a0\ufe0f ' + FRAGIL_DIAG;
   }catch(e){ FRAGIL_DIAG = 'erro: '+(e.message||e); }
 }
 function falarFragil(txt){
@@ -763,9 +765,14 @@ async function carregarLista(){
     const d = await api('/good-checkout-offline/lista');
     (function(){
       const _min = d.ciclo_rodou_em ? Math.round((Date.now() - new Date(d.ciclo_rodou_em).getTime())/60000) : null;
+      // 29/07: o ciclo roda de 10 em 10 min MAS S\u00d3 DAS 6h \u00c0S 23h. De madrugada ele dorme, e o
+      // contador crescia at\u00e9 ~7h de espera pintado de VERMELHO — alarme falso todo santo dia.
+      const _h = new Date().getHours();
+      const _dormindo = (_h < 6);                 // fora da janela do cron
+      const _atrasado = (_min != null && _min > 25 && !_dormindo);
       const _vs  = d.versao ? String(d.versao).split(' ').pop() : 'v?';
-      $('ver').innerHTML = _vs + ' \u00b7 ui ' + UI_BUILD
-        + (_min!=null ? ' \u00b7 <span style="color:'+(_min>25?'#f87171':'#94a3b8')+'" title="\u00faltima consulta ao Bling (o ciclo roda sozinho de 10 em 10 min)">\u23f1 '+_min+' min</span>' : '')
+      $('ver').innerHTML = _vs + ' \u00b7 ui ' + UI_BUILD + ' \u00b7 <span id="fragilDiag" title="SKUs fr\u00e1geis carregados do painel /fragil/">\u26a0\ufe0f ' + FRAGIL_DIAG + '</span>'
+        + (_min!=null ? ' \u00b7 <span style="color:'+(_atrasado?'#f87171':'#94a3b8')+'" title="'+(_dormindo ? 'tempo desde a \u00faltima consulta ao Bling. O ciclo roda de 10 em 10 min das 6h \u00e0s 23h \u2014 de madrugada ele dorme, ent\u00e3o esse n\u00famero cresce e est\u00e1 tudo certo' : 'tempo desde a \u00faltima consulta ao Bling (o ciclo roda sozinho de 10 em 10 min, das 6h \u00e0s 23h)')+'">\u23f1 '+_min+' min'+(_dormindo?' \ud83d\ude34':'')+'</span>' : '')
         + (d.sem_etiqueta>0 ? ' \u00b7 <span style="color:#fbbf24" title="pedidos sem etiqueta \u2014 o servidor tenta de novo sozinho a cada 5 min">\u26a0 '+d.sem_etiqueta+' s/ etiqueta</span>' : '');
     })();
     const semN = d.sem_etiqueta||0;
