@@ -87,6 +87,13 @@
      padding:8px 10px;border-bottom:1px solid var(--line2);white-space:nowrap;user-select:none}
   th.sort{cursor:pointer} th.sort:hover{color:var(--tx)}
   /* cabecalho congelado: o wrapper .tw rola por dentro e o <th> gruda no topo dele */
+  /* 29/07 — TRAVA: a página não pode ficar mais larga que a tela. Sem isso, uma tabela larga
+     empurra o documento pro lado, dá pra arrastar a tela e o cabeçalho fixo e os botões
+     flutuantes "somem" (ficam presos na tela enquanto a página desliza por baixo).
+     Uso 'clip' e não 'hidden' de propósito: 'hidden' criaria uma área de rolagem e quebraria
+     tudo que é grudado; 'clip' só corta, sem virar rolagem. */
+  html{overflow-x:clip}
+  body{overflow-x:clip;max-width:100vw}
   .tw{border-radius:10px}
   .tw th{position:sticky;top:var(--hdrH,104px);z-index:3;background:#141b33;box-shadow:0 2px 6px rgba(0,0,0,.45)}
   .tw thead th{top:0}
@@ -193,7 +200,12 @@
     /* 29/07: overflow-x cria uma área de rolagem própria e QUEBRA o cabeçalho grudado.
        Nas tabelas que cabem na tela (colunas já reduzidas) tiramos o overflow, e aí o
        cabeçalho gruda igual ao do computador. */
-    .twFit{overflow-x:visible!important}
+    /* as tabelas já têm poucas colunas no celular: forçamos elas a caber, e aí o
+       'overflow-x:visible' é seguro — e o cabeçalho gruda de verdade. */
+    .twFit{overflow-x:visible!important;max-width:100%}
+    .twFit table{width:100%!important;min-width:0!important;table-layout:fixed}
+    .twFit td,.twFit th{white-space:normal!important;word-break:break-word;overflow-wrap:anywhere}
+    .twFit td>div,.twFit th>div{max-width:100%!important}
     .tw table{min-width:640px}
     #secAnalise .vcards+.tw{display:none}
     /* cards: 2 por linha em vez de rolagem lateral */
@@ -302,7 +314,12 @@
     table{font-size:11.5px}
     td{padding:7px 6px} th{padding:6px 6px;font-size:9.5px}
     .tw{overflow-x:auto;-webkit-overflow-scrolling:touch}
-    .twFit{overflow-x:visible!important}
+    /* as tabelas já têm poucas colunas no celular: forçamos elas a caber, e aí o
+       'overflow-x:visible' é seguro — e o cabeçalho gruda de verdade. */
+    .twFit{overflow-x:visible!important;max-width:100%}
+    .twFit table{width:100%!important;min-width:0!important;table-layout:fixed}
+    .twFit td,.twFit th{white-space:normal!important;word-break:break-word;overflow-wrap:anywhere}
+    .twFit td>div,.twFit th>div{max-width:100%!important}
     /* ANÁLISE no celular: a tabela some e cada venda vira um CARTÃO (ver .vcards) */
     #secAnalise .tw{display:none}
     .vcards{display:flex;flex-direction:column;gap:8px}
@@ -334,7 +351,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd163';
+const DASH_BUILD = 'd165';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -1000,7 +1017,7 @@ function montar(){
         '<span class="lg"><i style="background:#ef4444"></i>devolvida</span>'+
         '<span class="lg"><i style="background:#475569"></i>cancelada</span>'+
         '<span class="soDesk">\u00b7 \u2713 verde = bipado \u00b7 \u2713 laranja = aguardando bipagem (margem j\u00e1 calculada) \u00b7 \ud83e\uddfe = hora da NF \u00b7 \ud83d\udd58 = hora da confer\u00eancia</span>'+
-        '<span class="soCel">\u00b7 \u2713 verde = bipado \u00b7 \u2713 laranja = ainda n\u00e3o bipado (a margem j\u00e1 est\u00e1 calculada) \u00b7 toque no n\u00famero do pedido p/ copiar</span>'+
+        '<span class="soCel">\u00b7 \u2713 verde = bipado \u00b7 \u2713 laranja = ainda n\u00e3o bipado (a margem j\u00e1 est\u00e1 calculada) \u00b7 a hora sem selo vem do canal; \ud83e\uddfe = hora da NF \u00b7 \ud83d\udd58 = hora da confer\u00eancia \u00b7 toque no n\u00famero do pedido p/ copiar</span>'+
       '</div>'+
       '<div class="nota">'+
         '<div><b>Ordem das vendas:</b> dentro de cada dia o <b>ML</b> entra pela hora REAL da venda; os demais canais entram pela hora da <b>NF</b>. Quando ainda n\u00e3o h\u00e1 NF, a hora mostrada \u00e9 a da confer\u00eancia.</div>'+
@@ -1988,7 +2005,15 @@ function renderAnalise(){
   garantirNomes(pagPL);   // busca os nomes que faltarem e redesenha
   renderCardsVenda(pagPL.map(function(x){
     const h=x.h, P=x.P;
-    const dt = h.venda_em ? dtBR(h.venda_em).slice(-5) : (h.venda_dia?String(h.venda_dia).slice(8,10)+'/'+String(h.venda_dia).slice(5,7):'');
+    // 29/07: canais como o TikTok não informam a hora da venda, e o cartão caía pra data — no
+    // filtro HOJE isso não diz nada (a data já é hoje). Agora usa a melhor fonte que existir,
+    // com um selo dizendo de onde veio: 🧾 hora da NF · 🕘 hora da conferência.
+    const dt = (function(){
+      if(h.venda_em) return dtBR(h.venda_em).slice(-5);
+      if(h.nf_emissao){ const t=String(h.nf_emissao).replace(' ','T').slice(11,16); if(t) return t+' \ud83e\uddfe'; }
+      if(h.conferido_em){ const t=dtBR(h.conferido_em).slice(-5); if(t) return t+' \ud83d\udd58'; }
+      return h.venda_dia ? (String(h.venda_dia).slice(8,10)+'/'+String(h.venda_dia).slice(5,7)) : '';
+    })();
     return { numero:(h.numero||h.id), canal:nomeCanal(P.ck), hora:dt,
              skus:((h.itens||[]).length
                     ? (h.itens||[]).map(function(i){
