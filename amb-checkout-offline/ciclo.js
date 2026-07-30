@@ -139,29 +139,57 @@ async function listarAtendidos() {
 
   // ── FILTRO FULL ──────────────────────────────────────────────────────
   // Vendas de fulfillment (Shopee Full, Magalu Full…) entram no Bling em
-  // situação ATENDIDO mas NÃO passam pelo galpão — a mercadoria está no CD
-  // do marketplace. Sem filtro, elas caem na fila do estoquista e poluem a
-  // expedição. A API do pedido traz unidadeNegocio.id em CADA item da lista
-  // (confirmado 30/07: pedido Shopee Full = unidadeNegocio.id 2920348).
-  // Removemos os pedidos cuja unidade de negócio está na lista de Full.
+  // situação ATENDIDO mas NÃO passam pelo galpão. A unidade de negócio Full
+  // identifica essas vendas.
   //
-  // Configurável por env AMBBKP_UN_FULL = "2920348,2920232" (Shopee FULL,
-  // Magalu FULL…). VAZIA = não filtra nada (comportamento idêntico ao antigo),
-  // então subir este código sem a env não muda a operação.
+  // ⚠️ DOIS problemas descobertos na API do Bling (30/07, via sonda):
+  //  (1) a unidade vem em pedido.loja.unidadeNegocio.id — NÃO no topo do
+  //      pedido. (O HTML da tela chama de idConfUnidadeNegocio, que não
+  //      existe no JSON.)
+  //  (2) a lista /pedidos/vendas OMITE unidadeNegocio de forma INTERMITENTE
+  //      — duas chamadas idênticas, uma traz o campo, a outra não. Por isso,
+  //      quando a lista não traz a unidade, buscamos o DETALHE do pedido
+  //      (/pedidos/vendas/{id}), que sempre traz.
+  //
+  // Configurável por env AMBBKP_UN_FULL = "2920348,2920232". VAZIA = não
+  // filtra nada (idêntico ao comportamento antigo).
   const UN_FULL = String(process.env.AMBBKP_UN_FULL || '')
     .split(',').map(s => s.trim()).filter(Boolean);
   let ocultosFull = 0;
   let pedidos = out;
-  const idsFullVistos = [];   // ids que a lista do Bling trouxe como Full (p/ expurgar do cache antigo)
+  const idsFullVistos = [];   // ids que se confirmaram Full (p/ expurgar do cache antigo)
   if (UN_FULL.length) {
     const setFull = new Set(UN_FULL);
-    pedidos = out.filter(p => {
-      const un = String((p.unidadeNegocio && p.unidadeNegocio.id) || '');
-      const eFull = un && setFull.has(un);
-      if (eFull) { ocultosFull++; idsFullVistos.push(String(p.id)); }
-      return !eFull;   // mantém só o que NÃO é Full
-    });
-    if (ocultosFull) console.log(`[AMBBKP] filtro Full: ${ocultosFull} pedido(s) ocultado(s) da fila do estoquista (UN ${UN_FULL.join(',')})`);
+    // lê a unidade das duas formas possíveis na lista
+    const unDaLista = (p) => {
+      const a = p && p.loja && p.loja.unidadeNegocio && p.loja.unidadeNegocio.id;
+      const b = p && p.unidadeNegocio && p.unidadeNegocio.id;
+      return a || b || null;
+    };
+    // 1ª passada: decide pelo que a lista trouxe; junta os "sem unidade" p/ checar no detalhe
+    const indefinidos = [];
+    for (const p of out) {
+      const un = unDaLista(p);
+      if (un != null) {
+        if (setFull.has(String(un))) { ocultosFull++; idsFullVistos.push(String(p.id)); }
+      } else {
+        indefinidos.push(p);   // a lista não trouxe unidade → precisa do detalhe
+      }
+    }
+    // 2ª passada: só os indefinidos → busca o detalhe (que sempre traz a unidade)
+    const idsFullSet = new Set(idsFullVistos);
+    for (const p of indefinidos) {
+      try {
+        const det = await detalhePedido(p.id);
+        const un = (det && det.loja && det.loja.unidadeNegocio && det.loja.unidadeNegocio.id)
+                || (det && det.unidadeNegocio && det.unidadeNegocio.id) || null;
+        if (un != null && setFull.has(String(un))) { ocultosFull++; idsFullVistos.push(String(p.id)); idsFullSet.add(String(p.id)); }
+      } catch (e) { /* se o detalhe falhar, não esconde — melhor mostrar que sumir por engano */ }
+      await sleep(PAUSA_MS);
+    }
+    // aplica: remove da fila tudo que se confirmou Full
+    pedidos = out.filter(p => !idsFullSet.has(String(p.id)));
+    if (ocultosFull) console.log(`[AMBBKP] filtro Full: ${ocultosFull} pedido(s) ocultado(s) da fila do estoquista (UN ${UN_FULL.join(',')}; ${indefinidos.length} checado(s) por detalhe)`);
   }
 
   return { ok: fetchOk, completa, pedidos, ocultosFull, idsFullVistos };
@@ -379,7 +407,7 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC, nfCtx) {
     numero: ped.numero || null,
     numero_loja: ped.numeroLoja || null,
     loja_id: lojaId || null,
-    un_id: String((ped.unidadeNegocio && ped.unidadeNegocio.id) || '') || null,   // unidade de negócio (p/ identificar Full)
+    un_id: String((ped.loja && ped.loja.unidadeNegocio && ped.loja.unidadeNegocio.id) || (ped.unidadeNegocio && ped.unidadeNegocio.id) || '') || null,   // unidade de negócio (p/ identificar Full) — vem em loja.unidadeNegocio
     marketplace: mkt,
     servico: _servico,
     flex: ehFlex(_servico),
