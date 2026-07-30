@@ -352,7 +352,7 @@ function routes(readBody) {
       const k = urlObj.searchParams.get('k') || '';
       if (!process.env.ADMIN_KEY || k !== process.env.ADMIN_KEY) { json(res, 404, { error: 'not found' }); return true; }
 
-      const out = { ok: true, versao: 'sonda-un v3' };
+      const out = { ok: true, versao: 'sonda-un v4' };
       out.env_AMBBKP_UN_FULL = process.env.AMBBKP_UN_FULL || '(vazia)';
 
       // 1) O que o listarAtendidos COM FILTRO devolve agora (é o que o ciclo usa)
@@ -398,6 +398,22 @@ function routes(readBody) {
           full_unidadeNegocio_valor: full ? (full.unidadeNegocio || null) : null
         };
       } catch (e) { out.dump_lista_limite100 = { erro: String(e.message || e) }; }
+
+      // 5) TESTE DEFINITIVO: o código-fonte REAL da listarAtendidos que está
+      //    carregada na memória do processo. Se não tiver "idsFullVistos", o
+      //    servidor está rodando uma versão ANTIGA do ciclo.js (módulo em
+      //    cache), apesar do arquivo no disco estar certo.
+      try {
+        const fonte = listarAtendidos.toString();
+        out.funcao_em_memoria = {
+          tem_filtro_full: fonte.includes('idsFullVistos'),
+          tem_AMBBKP_UN_FULL: fonte.includes('AMBBKP_UN_FULL'),
+          tamanho_chars: fonte.length,
+          // primeiros e últimos trechos pra eu comparar de olho
+          inicio: fonte.slice(0, 120),
+          fim: fonte.slice(-200)
+        };
+      } catch (e) { out.funcao_em_memoria = { erro: String(e.message || e) }; }
 
       if (urlObj.searchParams.get('expurgar') === '1') {
         try {
