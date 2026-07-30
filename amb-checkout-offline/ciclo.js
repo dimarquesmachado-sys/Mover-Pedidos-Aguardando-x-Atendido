@@ -8,7 +8,7 @@ const fs    = require('fs');
 const path  = require('path');
 const fetch = require('node-fetch');
 const base  = require('./base');
-const { BLING_BASE, CACHE_DIR, SIT_ATENDIDO, SIT_VERIFICADO, SYNC_ON, JANELA_DIAS, PAUSA_MS, RETENCAO_DIAS, ETIQ_FORMATO, CRON_EXPR,
+const { BLING_BASE, CACHE_DIR, SIT_ATENDIDO, SIT_DESPACHADOS, SIT_VERIFICADO, SYNC_ON, JANELA_DIAS, PAUSA_MS, RETENCAO_DIAS, ETIQ_FORMATO, CRON_EXPR,
   MANIFEST_FILE, SKU_EAN_FILE, CONFERIDOS_FILE, RESERVAS_FILE, RESERVA_TTL_MS, KIT_CACHE_FILE, LOC_FILE, LOC_LOG_FILE, EAN_INDEX_FILE,
   ARQUIVO_DIR, ARQUIVO_DIAS, SMTP_HOST, SMTP_PORT, EMAIL_USER, EMAIL_PASS, EMAIL_DEST, SCHEMA, LOJA_MKT, MKT_NOME,
   sleep, ensureDir, readJson, writeJson, dataISO, json, html, manifest, salvarManifest, skuEanCache, locCache, salvarLoc,
@@ -478,6 +478,26 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
         }
       }
       if (expurgados) { salvarManifest(man); console.log(`[AMBBKP] expurgo Full: ${expurgados} pedido(s) Full removido(s) do cache (saíram da fila)`); }
+
+      // MOVE FULL → DESPACHADOS: o Full já foi despachado pela Shopee (a
+      // mercadoria saiu do CD dela), então o lugar dele no Bling é DESPACHADOS,
+      // não ATENDIDO. Movemos por API, igual o F1 faz com o ML. Isso é
+      // COMPLEMENTAR ao filtro: o filtro já tirou da fila do estoquista (o que
+      // importa); o move só arruma a situação no Bling, de tempos em tempos.
+      // Se o move falhar (429, rede), tudo bem — o filtro continua escondendo
+      // e o move é tentado no próximo ciclo. AMBBKP_SIT_DESPACHADOS controla o
+      // destino; se ficar 0/vazio, o move é DESLIGADO (só o filtro age).
+      if (SIT_DESPACHADOS && Array.isArray(idsFullVistos) && idsFullVistos.length) {
+        let movidos = 0, falhas = 0;
+        for (const id of idsFullVistos) {
+          try {
+            const r = await moverSituacao(id, SIT_DESPACHADOS);
+            if (r && r.ok !== false) movidos++; else falhas++;
+          } catch (e) { falhas++; }
+          await sleep(PAUSA_MS);
+        }
+        console.log(`[AMBBKP] move Full → DESPACHADOS(${SIT_DESPACHADOS}): ${movidos} movido(s)${falhas ? `, ${falhas} falha(s) (retenta no próximo ciclo)` : ''}`);
+      }
     }
 
     // RECONCILIAÇÃO: remove do cache quem NÃO está mais em ATENDIDO (enviado/processado).
