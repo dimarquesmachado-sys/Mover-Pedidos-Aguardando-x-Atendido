@@ -352,46 +352,46 @@ function routes(readBody) {
       const k = urlObj.searchParams.get('k') || '';
       if (!process.env.ADMIN_KEY || k !== process.env.ADMIN_KEY) { json(res, 404, { error: 'not found' }); return true; }
 
-      const idPedido = urlObj.searchParams.get('id');
-      const out = { ok: true, versao: 'sonda-un v1' };
+      const out = { ok: true, versao: 'sonda-un v2' };
+      out.env_AMBBKP_UN_FULL = process.env.AMBBKP_UN_FULL || '(vazia)';
 
-      // 1) A LISTA que o estoquista usa (idSituacao=Atendido) — o pedido traz UN aqui?
+      // 1) O que o listarAtendidos COM FILTRO devolve agora (é o que o ciclo usa)
       try {
-        const hoje = new Date(); const ini = new Date(hoje); ini.setDate(ini.getDate() - JANELA_DIAS);
-        const qs = `idSituacao=${SIT_ATENDIDO}&dataEmissaoInicial=${dataISO(ini)}&dataEmissaoFinal=${dataISO(hoje)}`;
-        const r = await blingGet(`/pedidos/vendas?${qs}&pagina=1&limite=3`);
-        const primeiro = r && r.data && r.data.data && r.data.data[0];
-        out.lista = {
-          ok: !!(r && r.ok),
-          exemplo_bruto: primeiro || null,
-          campos_no_item: primeiro ? Object.keys(primeiro) : [],
-          tem_unidade_negocio: primeiro ? ('idConfUnidadeNegocio' in primeiro || 'unidadeNegocio' in primeiro || 'idUnidadeNegocio' in primeiro) : null
+        const r = await listarAtendidos();
+        out.listarAtendidos = {
+          bling_ok: r.ok,
+          completa: r.completa,
+          pedidos_apos_filtro: (r.pedidos || []).length,
+          ocultosFull: r.ocultosFull || 0,
+          idsFullVistos: r.idsFullVistos || [],
+          numeros_apos_filtro: (r.pedidos || []).map(p => p.numero)
         };
-      } catch (e) { out.lista = { erro: String(e.message || e) }; }
+      } catch (e) { out.listarAtendidos = { erro: String(e.message || e) }; }
 
-      // 2) O DETALHE de um pedido específico — aqui a UN quase certamente aparece.
-      //    Se não passar id, usa o primeiro da lista acima.
+      // 2) O que está no CACHE agora (é o que a tela do estoquista mostra)
       try {
-        const alvo = idPedido || (out.lista && out.lista.exemplo_bruto && out.lista.exemplo_bruto.id);
-        if (alvo) {
-          const rd = await blingGet(`/pedidos/vendas/${alvo}`);
-          const ped = rd && rd.data && rd.data.data;
-          out.detalhe = {
-            id: alvo,
-            ok: !!(rd && rd.ok),
-            campos_no_pedido: ped ? Object.keys(ped) : [],
-            // procura a UN em todos os lugares plausíveis
-            loja: ped && ped.loja || null,
-            idConfUnidadeNegocio: ped ? (ped.idConfUnidadeNegocio ?? null) : null,
-            unidadeNegocio: ped ? (ped.unidadeNegocio ?? null) : null,
-            idUnidadeNegocio: ped ? (ped.idUnidadeNegocio ?? null) : null,
-            // despeja o pedido inteiro pra eu ver onde a UN se esconde
-            pedido_bruto: ped || null
+        const man = manifest();
+        const ids = Object.keys(man);
+        out.cache = {
+          total_no_cache: ids.length,
+          por_numero: ids.map(id => ({ id, numero: man[id] && man[id].numero, un_id: man[id] && man[id].un_id, tem_etiqueta: man[id] && man[id].tem_etiqueta })).sort((a, b) => Number(a.numero || 0) - Number(b.numero || 0))
+        };
+      } catch (e) { out.cache = { erro: String(e.message || e) }; }
+
+      // 3) Gatilho opcional: /sonda-un?k=...&expurgar=1 roda o ciclo AGORA
+      //    (filtro + expurgo) e relê o cache, pra você ver o antes/depois.
+      if (urlObj.searchParams.get('expurgar') === '1') {
+        try {
+          await rodarCiclo('sonda-expurgo');
+          const man2 = manifest();
+          out.apos_expurgo = {
+            total_no_cache: Object.keys(man2).length,
+            numeros: Object.keys(man2).map(id => man2[id] && man2[id].numero).sort((a, b) => Number(a || 0) - Number(b || 0))
           };
-        } else {
-          out.detalhe = { erro: 'sem pedido para detalhar (lista vazia e nenhum id passado)' };
-        }
-      } catch (e) { out.detalhe = { erro: String(e.message || e) }; }
+        } catch (e) { out.apos_expurgo = { erro: String(e.message || e) }; }
+      } else {
+        out.dica = 'Para rodar o ciclo (filtro + expurgo) agora e ver o resultado, acrescente &expurgar=1 nesta mesma URL.';
+      }
 
       json(res, 200, out);
       return true;
