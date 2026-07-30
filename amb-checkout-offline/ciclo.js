@@ -268,7 +268,17 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC, nfCtx) {
   // Vem em ZPL (a conta imprime térmico) — mesmo formato do Bling, cai no fluxo normal de impressão.
   // Modo &rapido=1: só baixa documento que já existe (~3s), sem create/polling, pra não travar o ciclo.
   // Precisa da env SHOPEE_SYNC_KEY; sem ela o bloco nem tenta.
-  if (!temEtiqueta && mkt === 'shopee' && ped.numeroLoja && process.env.SHOPEE_SYNC_KEY) {
+  // 30/07 — FREIO: sem isso ele repete a MESMA chamada a cada 2 min pra sempre (o caso 2577
+  // falhou 18x seguidas com o mesmo erro). Depois de 3 falhas, espera 1 hora antes de tentar de
+  // novo naquele pedido. Assim para de gastar chamada (e de somar aos 429) num pedido que não
+  // vai resolver sozinho — mas continua tentando de tempos em tempos, caso a Shopee libere.
+  const _shKey = 'sh:' + String(ped.numeroLoja || ped.numero);
+  const _shSt = _shFalhas.get(_shKey);
+  const _shFreado = !!(_shSt && _shSt.n >= 3 && (Date.now() - _shSt.ts) < 3600000);
+  if (_shFreado) {
+    console.log(`[AMBBKP] fallback Shopee ${ped.numero}: em espera (${_shSt.n} falhas seguidas, pr\u00f3xima tentativa em ${Math.max(0, Math.round((3600000 - (Date.now() - _shSt.ts)) / 60000))} min)`);
+  }
+  if (!_shFreado && !temEtiqueta && mkt === 'shopee' && ped.numeroLoja && process.env.SHOPEE_SYNC_KEY) {
     try {
       const SH_URL = process.env.SHOPEE_SYNC_URL || 'https://girassol-shopee-sync-organizar-envio.onrender.com';
       const urlEtq = SH_URL + '/amb/interno/etiqueta?rapido=1&k=' + encodeURIComponent(process.env.SHOPEE_SYNC_KEY) + '&order_sn=' + encodeURIComponent(String(ped.numeroLoja).trim());
@@ -279,19 +289,31 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC, nfCtx) {
         const ehZpl = fmtSh === 'zpl' || (bufSh && bufSh.slice(0, 400).toString('utf8').indexOf('^XA') >= 0);
         const ehPdfSh = fmtSh === 'pdf' || (bufSh && bufSh.slice(0, 4).toString('utf8') === '%PDF');
         if (bufSh && bufSh.length > 300 && ehZpl) {
-          fs.writeFileSync(_etqPath, bufSh); temEtiqueta = true;   // ZPL no caminho nativo — imprime igual às outras
+          fs.writeFileSync(_etqPath, bufSh); temEtiqueta = true; _shFalhas.delete(_shKey);   // ZPL no caminho nativo
           console.log(`[AMBBKP] etiqueta ${ped.numero} baixada DIRETO da Shopee em ZPL (${bufSh.length} bytes)`);
         } else if (bufSh && bufSh.length > 300 && ehPdfSh) {
-          fs.writeFileSync(_etqPdfPath, bufSh); temEtiqueta = true; etqEhPdf = true;
+          fs.writeFileSync(_etqPdfPath, bufSh); temEtiqueta = true; etqEhPdf = true; _shFalhas.delete(_shKey);
           console.log(`[AMBBKP] etiqueta ${ped.numero} baixada DIRETO da Shopee em PDF (${bufSh.length} bytes)`);
         } else {
           console.log(`[AMBBKP] fallback Shopee ${ped.numero}: resposta sem etiqueta reconhecível`);
         }
       } else {
-        let detSh = ''; try { detSh = (await rSh.text()).slice(0, 200).replace(/\s+/g, ' '); } catch (e) {}
+        // 30/07: o corte em 200 caracteres escondia justamente o que interessa — a lista
+        // "selecionaveis" com os formatos que a Shopee aceita PRA ESTE pedido. Sem ela não dá
+        // pra saber qual formato pedir. Agora vai inteiro (até 1200) e, quando dá pra ler o
+        // JSON, destacamos o formato aceito numa linha própria.
+        let detSh = ''; try { detSh = (await rSh.text()).slice(0, 1200).replace(/\s+/g, ' '); } catch (e) {}
         console.log(`[AMBBKP] fallback Shopee ${ped.numero}: HTTP ${rSh.status} ${detSh}`);
+        try {
+          const jSh = JSON.parse(detSh);
+          const pPar = (jSh && jSh.passos || []).find(x => x && x.passo === 'parameter');
+          if (pPar && Array.isArray(pPar.selecionaveis) && pPar.selecionaveis.length) {
+            console.log(`[AMBBKP] \ud83d\udd0e Shopee ${ped.numero} (${ped.numeroLoja}): pedimos "${pPar.sugerido}" mas ela S\u00d3 ACEITA [${pPar.selecionaveis.join(', ')}] \u2014 \u00e9 esse o formato que o shopee-nf-sync precisa usar`);
+          }
+        } catch (e) {}
       }
     } catch (e) { console.log(`[AMBBKP] fallback Shopee ${ped.numero}: ${String(e.message || e).slice(0, 160)}`); }
+    if (!temEtiqueta) { const a = _shFalhas.get(_shKey) || { n: 0 }; _shFalhas.set(_shKey, { n: a.n + 1, ts: Date.now() }); }
   }
   // MADEIRA MADEIRA não tem etiqueta no Bling. Se a etiqueta já está no mapa MM
   // (gerada por nós e sincronizada pela extensão), conta o pedido como PRONTO.
@@ -357,6 +379,9 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC, nfCtx) {
   writeJson(path.join(dir, 'pedido.json'), snapshot);
   return snapshot;
 }
+
+// 30/07: quantas vezes seguidas a etiqueta da Shopee falhou em cada pedido (freio anti-martelo)
+const _shFalhas = new Map();
 
 async function rodarCiclo(motivo = 'cron', forcar = false) {
   if (rodando && rodandoDesde && (Date.now() - rodandoDesde) > 15 * 60 * 1000) {
