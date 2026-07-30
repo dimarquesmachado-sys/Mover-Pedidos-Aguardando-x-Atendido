@@ -65,6 +65,11 @@ async function temEtiquetaML(mlToken, numeroLoja) {
 }
 
 // ── Fluxo 1 — ATENDIDO → AGUARDANDO ────────────────────────────────────────────
+// 30/07: memória do que MOVEMOS, pra detectar quando o Bling desfaz. Vive em memória:
+// um deploy zera o mapa, mas as linhas já escritas no log do Render permanecem — e é o log
+// que serve de prova.
+const _movidosPorNos = new Map();
+
 async function _fluxo1(token) {
   const { inicial, final } = getPeriodo();
   const lista = await getPedidosPorStatus(token, SITUACAO_ATENDIDO, inicial, final);
@@ -82,7 +87,22 @@ async function _fluxo1(token) {
     console.warn('[F1] Sem token ML:', e.message);
   }
   let movidos = 0, pulados = 0, ignorados = 0;
+  let naoAplicados = 0, desfeitos = 0;   // 30/07: Bling aceitou mas não aplicou / desfez depois
   for (const p of batch) {
+    // 30/07: se ESTE pedido já foi movido por nós e está de volta na lista de ATENDIDO,
+    // alguém desfez. Registramos com os dois horários — é a prova pro ticket do Bling.
+    {
+      const marca = _movidosPorNos.get(String(p.id));
+      if (marca) {
+        const min = Math.round((Date.now() - marca.em) / 60000);
+        console.error(`[F1] \u21a9\ufe0f DESFEITO PELO BLING — pedido ${p.id}` +
+          (marca.numero ? ` (nº ${marca.numero})` : '') +
+          `: nós movemos pra AGUARDANDO em ${new Date(marca.em).toISOString()} e ele está em ATENDIDO de novo ` +
+          `${min} min depois (agora ${new Date().toISOString()}). Não foi a nossa API — provável mapeamento automático do ML no Bling.`);
+        _movidosPorNos.delete(String(p.id));
+        desfeitos++;
+      }
+    }
     if (jaProcessado('F1', p.id)) { pulados++; continue; }
     if (!isMercadoEnviosPorLoja(p)) { ignorados++; continue; }
     let pDetalhe = p;
@@ -119,14 +139,44 @@ async function _fluxo1(token) {
     // Sem etiqueta → move para AGUARDANDO
     try {
       await alterarSituacao(token, p.id, SITUACAO_AGUARDANDO);
-      movidos++;
-      marcarProcessado('F1', p.id);
+      // ── 30/07: CONFERE SE PEGOU ─────────────────────────────────────────────────────────────
+      // Caso real (pedidos 117517 e 117610): o Bling ACEITA a chamada, registra a ocorrência
+      // "Situação alterada via API v3", responde sucesso — e depois o pedido volta pra ATENDIDO
+      // por uma ocorrência SEM DESCRIÇÃO (o mapeamento automático do ML). Antes a gente confiava
+      // na resposta e marcava como resolvido, então a falha ficava invisível.
+      // Agora: relemos o pedido, e só marcamos como feito se a situação REALMENTE mudou.
+      await new Promise(r => setTimeout(r, 1200));   // fôlego pro Bling aplicar
+      let conferiu = null;
+      try {
+        const pv = await getPedidoDetalhe(token, p.id);
+        conferiu = pv && pv.situacao ? Number(pv.situacao.id) : null;
+      } catch (e2) { console.warn(`[F1] não consegui reler ${p.id} p/ conferir: ${e2.message}`); }
+
+      if (conferiu === SITUACAO_AGUARDANDO) {
+        movidos++;
+        marcarProcessado('F1', p.id);
+        _movidosPorNos.set(String(p.id), { em: Date.now(), numero: p.numero || null });
+      } else if (conferiu === null) {
+        // não deu pra conferir: conta como movido (a chamada foi aceita) mas NÃO marca,
+        // pra o próximo ciclo verificar de novo
+        movidos++;
+        console.warn(`[F1] Pedido ${p.id} — chamada aceita, mas não consegui CONFERIR. Não vou marcar como feito; o próximo ciclo revê.`);
+      } else {
+        naoAplicados++;
+        console.error(`[F1] ⚠️ BLING ACEITOU MAS NÃO APLICOU — pedido ${p.id}` +
+          (p.numero ? ` (nº ${p.numero})` : '') +
+          `: pedi situação ${SITUACAO_AGUARDANDO} (AGUARDANDO) e ao reler ele está em ${conferiu}. ` +
+          `Sem marcar como feito — o próximo ciclo tenta de novo. ` +
+          `Registrado em ${new Date().toISOString()}`);
+      }
     } catch (e) {
       if (e.code === 401 || e.message === 'TOKEN_EXPIRADO') throw e;
       console.error(`[F1] Erro ao mover ${p.id}:`, e.message);
     }
   }
-  console.log(`[F1] movidos=${movidos} | ignorados=${ignorados} | já processados=${pulados}`);
+  console.log(`[F1] movidos=${movidos} | ignorados=${ignorados} | já processados=${pulados}` +
+    (naoAplicados ? ` | \u26a0\ufe0f BLING N\u00c3O APLICOU=${naoAplicados}` : '') +
+    (desfeitos ? ` | \u21a9\ufe0f DESFEITOS PELO BLING=${desfeitos}` : ''));
 }
 
 // ── Fluxo 2 — AGUARDANDO → ATENDIDO ────────────────────────────────────────────
