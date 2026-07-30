@@ -11,6 +11,7 @@ const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 
 const CACHE_DIR     = process.env.GOODBKP_CACHE_DIR    || '/data/cache-offline/good';
 const SIT_ATENDIDO  = Number(process.env.GOODBKP_SIT_ATENDIDO  || 9);              // ATENDIDO
+const SIT_DESPACHADOS = Number(process.env.GOODBKP_SIT_DESPACHADOS || 0);          // DESPACHADOS do Full — 0 = move DESLIGADO até configurar o id desta conta
 const SIT_VERIFICADO = Number(process.env.GOODBKP_SIT_VERIFICADO || 24);           // VERIFICADO (destino do sync Fase 3)
 const SYNC_ON       = process.env.GOODBKP_SYNC_ON === '1';                          // liga o sync automático no cron (Fase 3)
 const JANELA_DIAS   = Number(process.env.GOODBKP_JANELA_DIAS   || 5);
@@ -166,7 +167,7 @@ async function moverSituacao(blingId, idSituacao) {
 
 module.exports = {
   fs, path, fetch, garantirToken, BLING_BASE,
-  CACHE_DIR, SIT_ATENDIDO, SIT_VERIFICADO, SYNC_ON, JANELA_DIAS, PAUSA_MS, RETENCAO_DIAS, ETIQ_FORMATO, CRON_EXPR,
+  CACHE_DIR, SIT_ATENDIDO, SIT_DESPACHADOS, SIT_VERIFICADO, SYNC_ON, JANELA_DIAS, PAUSA_MS, RETENCAO_DIAS, ETIQ_FORMATO, CRON_EXPR,
   MANIFEST_FILE, SKU_EAN_FILE, CONFERIDOS_FILE, RESERVAS_FILE, RESERVA_TTL_MS,
   KIT_CACHE_FILE, LOC_FILE, LOC_LOG_FILE, EAN_INDEX_FILE, ARQUIVO_DIR, ARQUIVO_DIAS,
   SMTP_HOST, SMTP_PORT, EMAIL_USER, EMAIL_PASS, EMAIL_DEST, SCHEMA, LOJA_MKT, MKT_NOME,
