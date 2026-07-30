@@ -1,271 +1,293 @@
 'use strict';
 
-const { garantirToken, renovarToken } = require('./tokenManager');
-const { garantirTokenML } = require('./mlTokenManager');
-const {
-  SITUACAO_ATENDIDO, SITUACAO_AGUARDANDO,
-  getPeriodo,
-  getPedidosPorStatus, getPedidoDetalhe,
-  getCodigoRastreio, isMercadoEnviosPorLoja,
-  alterarSituacao,
-  jaProcessado, marcarProcessado, limparMemoriaAntiga
-} = require('./blingApi');
-const { getShipmentInfo, getShipmentSubstatus } = require('./mlApi');
+/**
+ * Módulo Girassol — Mover Pedidos + Corrigir-NFs + F3 NF-e → ML
+ */
 
-const MAX_F1 = parseInt(process.env.MAX_PEDIDOS_F1 || '40');
-const MAX_F2 = parseInt(process.env.MAX_PEDIDOS_F2 || '60');
+const { rotinaExpediente, rotinaVirada, rotinaManha } = require('./fluxos');
+const { corrigirNFsPendentes, retryNFManual, getEstadoRetrySEFAZ } = require('./nfFluxos');
+const { gerarTokenInicial, garantirToken } = require('./tokenManager');
+const { gerarTokenInicialNF, garantirTokenNF } = require('./nfTokenManager');
+const { trocarCodigoPorToken, gerarUrlAutorizacao, garantirTokenML } = require('./mlTokenManager');
+const { rotinaNFeML, enviarNFeUnica } = require('./nfeMlFluxo');
 
-const _rodando = { F1: false, F2: false };
+// ── Crons do Girassol ─────────────────────────────────────────────────
+// 30/07: TUDO 24h (Diego viajando: a madrugada do Brasil e o dia dele).
+// Bonus: rodar de noite espalha as chamadas e alivia os 429 do Bling no pico.
+const crons = {
+  expediente:  '*/3 * * * *',                                 // F1 a cada 3 min, 24h (28/07: antes 6-23; pedido da madrugada esperava até as 6h)
+  virada:      '10 0 * * *',                                  // F2 às 00:10
+  manha:       ['0 6 * * *', '30 6 * * *', '0 7 * * *',       // F2 às 06:00, 06:30, 07:00
+                '*/15 * * * *'],                           // F2 a cada 15 min diurno
+  corrigirNFs: '*/5 * * * *',                              // Corrigir-NFs a cada 5 min
+  nfeMl:       '0,10,20,30,40,50 * * * *'                  // F3 NF-e→ML a cada 10 min
+};
 
-async function comGuard(fluxo, fn) {
-  if (_rodando[fluxo]) {
-    console.log(`[fluxos] ${fluxo} já em execução — pulando`);
-    return;
-  }
-  _rodando[fluxo] = true;
-  try { await fn(); } finally { _rodando[fluxo] = false; }
+// ── Helpers HTTP locais ───────────────────────────────────────────────
+function json(res, code, body) {
+  res.writeHead(code, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify(body));
+}
+function html(res, code, body) {
+  res.writeHead(code, { 'Content-Type': 'text/html; charset=utf-8' });
+  res.end(body);
 }
 
-async function comTokenRenewable(fn) {
-  try {
-    return await fn(await garantirToken());
-  } catch (e) {
-    if (e.code === 401 || e.message === 'TOKEN_EXPIRADO') {
-      const token = await renovarToken();
-      return await fn(token);
-    }
-    throw e;
-  }
-}
+/**
+ * Registra rotas HTTP do Girassol — SEM prefixo (mantém compat com produção).
+ */
+function routes(readBody) {
+  return async function handle(req, res, urlObj) {
+    const { method } = req;
+    const p = urlObj.pathname;
 
-// Verifica via API do ML se pedido tem etiqueta disponível
-// Retorna true = tem etiqueta, false = buffered (sem etiqueta)
-async function temEtiquetaML(mlToken, numeroLoja) {
-  try {
-    const shipmentId = await getShipmentInfo(mlToken, numeroLoja);
-    const { status, substatus } = await getShipmentSubstatus(mlToken, shipmentId);
-    console.log(`[ML] numeroLoja=${numeroLoja} shipment=${shipmentId} status=${status} substatus=${substatus}`);
-    // 27/07 — CORREÇÃO: 'ready_to_ship' NÃO significa que a etiqueta existe.
-    // O substatus 'invoice_pending' quer dizer que o ML ainda não fechou a etapa dele (a etiqueta
-    // NÃO é imprimível — a API responde NOT_PRINTABLE_STATUS). Antes esses pedidos eram tratados
-    // como "tem etiqueta" e ficavam parados em ATENDIDO, entupindo a lista do galpão com pedido
-    // que ninguém consegue despachar. Agora eles voltam pra AGUARDANDO e retornam sozinhos quando
-    // a etiqueta liberar.
-    const SEM_ETIQUETA_AINDA = ['invoice_pending', 'buffered', 'ready_to_print_pending', 'regenerating'];
-    if (SEM_ETIQUETA_AINDA.includes(String(substatus || ''))) {
-      console.log(`[ML] numeroLoja=${numeroLoja} substatus=${substatus} — etiqueta AINDA não imprimível, pode mover`);
-      return false;
-    }
-    if (status === 'ready_to_ship') return true;
-    return true;
-  } catch (e) {
-    console.warn(`[ML] Erro ao consultar ${numeroLoja}: ${e.message} — assumindo sem etiqueta`);
-    return false;
-  }
-}
-
-// ── Fluxo 1 — ATENDIDO → AGUARDANDO ────────────────────────────────────────────
-// 30/07: memória do que MOVEMOS, pra detectar quando o Bling desfaz. Vive em memória:
-// um deploy zera o mapa, mas as linhas já escritas no log do Render permanecem — e é o log
-// que serve de prova.
-const _movidosPorNos = new Map();
-
-async function _fluxo1(token) {
-  const { inicial, final } = getPeriodo();
-  const lista = await getPedidosPorStatus(token, SITUACAO_ATENDIDO, inicial, final);
-  // 28/07: processa os MAIS RECENTES primeiro. Antes pegava os primeiros da lista (os mais
-  // antigos) — se houvesse mais pedidos que o limite do lote, os do dia nunca eram avaliados.
-  const _ord = lista.slice().sort((a, b) => {
-    const da = String(a.data || ''), db = String(b.data || '');
-    if (da !== db) return db.localeCompare(da);
-    return Number(b.id || 0) - Number(a.id || 0);
-  });
-  const batch = _ord.slice(0, MAX_F1);
-  console.log(`[F1] ${lista.length} encontrados | processando ${batch.length}`);
-  let mlToken = null;
-  try { mlToken = await garantirTokenML(); } catch (e) {
-    console.warn('[F1] Sem token ML:', e.message);
-  }
-  let movidos = 0, pulados = 0, ignorados = 0;
-  let naoAplicados = 0, desfeitos = 0;   // 30/07: Bling aceitou mas não aplicou / desfez depois
-  for (const p of batch) {
-    // 30/07: se ESTE pedido já foi movido por nós e está de volta na lista de ATENDIDO,
-    // alguém desfez. Registramos com os dois horários — é a prova pro ticket do Bling.
-    {
-      const marca = _movidosPorNos.get(String(p.id));
-      if (marca) {
-        const min = Math.round((Date.now() - marca.em) / 60000);
-        console.error(`[F1] \u21a9\ufe0f DESFEITO PELO BLING — pedido ${p.id}` +
-          (marca.numero ? ` (nº ${marca.numero})` : '') +
-          `: nós movemos pra AGUARDANDO em ${new Date(marca.em).toISOString()} e ele está em ATENDIDO de novo ` +
-          `${min} min depois (agora ${new Date().toISOString()}). Não foi a nossa API — provável mapeamento automático do ML no Bling.`);
-        _movidosPorNos.delete(String(p.id));
-        desfeitos++;
-      }
-    }
-    if (jaProcessado('F1', p.id)) { pulados++; continue; }
-    if (!isMercadoEnviosPorLoja(p)) { ignorados++; continue; }
-    let pDetalhe = p;
-    try {
-      pDetalhe = await getPedidoDetalhe(token, p.id) || p;
-    } catch (e) {
-      if (e.code === 401 || e.message === 'TOKEN_EXPIRADO') throw e;
-      console.error(`[F1] Erro detalhe ${p.id}:`, e.message);
-    }
-    const rastreio = getCodigoRastreio(pDetalhe);
-    const isFlex = String(pDetalhe?.transporte?.volumes?.[0]?.servico || '').toUpperCase().includes('FLEX');
-    console.log(`[F1] Pedido ${p.id} | loja=${p.loja?.id} | rastreio="${rastreio}" | flex=${isFlex}`);
-
-    // PROTEÇÃO: só move se ainda estiver em ATENDIDO no detalhe atualizado
-    // Defende contra pedidos que mudaram de situação entre a listagem e o detalhe
-    if (pDetalhe?.situacao?.id !== SITUACAO_ATENDIDO) {
-      console.log(`[F1] Pedido ${p.id} já não está em ATENDIDO (situação atual: ${pDetalhe?.situacao?.id}) — pulando`);
-      ignorados++;
-      continue;
-    }
-
-    if (isFlex) { ignorados++; continue; }
-    if (rastreio !== '') { ignorados++; continue; }
-    // Sem rastreio no Bling → confirma no ML
-    const numeroLoja = pDetalhe?.numeroLoja || p?.numeroLoja;
-    if (mlToken && numeroLoja) {
-      const temEtiqueta = await temEtiquetaML(mlToken, numeroLoja);
-      if (temEtiqueta) {
-        console.log(`[F1] Pedido ${p.id} tem etiqueta no ML — não move`);
-        ignorados++;
-        continue;
-      }
-    }
-    // Sem etiqueta → move para AGUARDANDO
-    try {
-      await alterarSituacao(token, p.id, SITUACAO_AGUARDANDO);
-      // ── 30/07: CONFERE SE PEGOU ─────────────────────────────────────────────────────────────
-      // Caso real (pedidos 117517 e 117610): o Bling ACEITA a chamada, registra a ocorrência
-      // "Situação alterada via API v3", responde sucesso — e depois o pedido volta pra ATENDIDO
-      // por uma ocorrência SEM DESCRIÇÃO (o mapeamento automático do ML). Antes a gente confiava
-      // na resposta e marcava como resolvido, então a falha ficava invisível.
-      // Agora: relemos o pedido, e só marcamos como feito se a situação REALMENTE mudou.
-      await new Promise(r => setTimeout(r, 1200));   // fôlego pro Bling aplicar
-      let conferiu = null;
+    // Setup Bling (Mover-Pedidos)
+    if (p === '/setup' && method === 'POST') {
+      const body = await readBody(req);
       try {
-        const pv = await getPedidoDetalhe(token, p.id);
-        conferiu = pv && pv.situacao ? Number(pv.situacao.id) : null;
-      } catch (e2) { console.warn(`[F1] não consegui reler ${p.id} p/ conferir: ${e2.message}`); }
+        await gerarTokenInicial(body.auth_code);
+        json(res, 200, { ok: true, message: 'Tokens Bling gerados e salvos ✓' });
+      } catch (e) { json(res, 400, { ok: false, error: e.message }); }
+      return true;
+    }
 
-      if (conferiu === SITUACAO_AGUARDANDO) {
-        movidos++;
-        marcarProcessado('F1', p.id);
-        _movidosPorNos.set(String(p.id), { em: Date.now(), numero: p.numero || null });
-      } else if (conferiu === null) {
-        // não deu pra conferir: conta como movido (a chamada foi aceita) mas NÃO marca,
-        // pra o próximo ciclo verificar de novo
-        movidos++;
-        console.warn(`[F1] Pedido ${p.id} — chamada aceita, mas não consegui CONFERIR. Não vou marcar como feito; o próximo ciclo revê.`);
-      } else {
-        naoAplicados++;
-        console.error(`[F1] ⚠️ BLING ACEITOU MAS NÃO APLICOU — pedido ${p.id}` +
-          (p.numero ? ` (nº ${p.numero})` : '') +
-          `: pedi situação ${SITUACAO_AGUARDANDO} (AGUARDANDO) e ao reler ele está em ${conferiu}. ` +
-          `Sem marcar como feito — o próximo ciclo tenta de novo. ` +
-          `Registrado em ${new Date().toISOString()}`);
+    // Setup Bling NF (Corrigir-NFs)
+    if (p === '/setup-nf' && method === 'POST') {
+      const body = await readBody(req);
+      try {
+        await gerarTokenInicialNF(body.auth_code);
+        json(res, 200, { ok: true, message: 'Tokens Bling NF gerados e salvos ✓' });
+      } catch (e) { json(res, 400, { ok: false, error: e.message }); }
+      return true;
+    }
+    if (p === '/callback-nf' && method === 'GET') {
+      const code = urlObj.searchParams.get('code');
+      if (!code) { html(res, 400, '<h2>❌ Código não encontrado na URL</h2>'); return true; }
+      try {
+        await gerarTokenInicialNF(code);
+        html(res, 200, '<h2>✅ Token do Bling NF obtido e salvo com sucesso! Pode fechar esta aba.</h2>');
+      } catch (e) { html(res, 500, `<h2>❌ Erro: ${e.message}</h2>`); }
+      return true;
+    }
+
+    // Setup ML
+    if (p === '/setup-ml' && method === 'GET') {
+      const authUrl = gerarUrlAutorizacao();
+      res.writeHead(302, { Location: authUrl });
+      res.end();
+      return true;
+    }
+    if (p === '/callback-ml' && method === 'GET') {
+      const code = urlObj.searchParams.get('code');
+      if (!code) { html(res, 400, '<h2>❌ Código não encontrado na URL</h2>'); return true; }
+      try {
+        await trocarCodigoPorToken(code);
+        html(res, 200, '<h2>✅ Token do ML obtido e salvo com sucesso! Pode fechar esta aba.</h2>');
+      } catch (e) { html(res, 500, `<h2>❌ Erro: ${e.message}</h2>`); }
+      return true;
+    }
+
+    // Runs manuais
+    if (method === 'POST') {
+      if (p === '/run/expedicao')    { rotinaExpediente().catch(console.error); json(res, 202, { queued: 'rotinaExpediente' }); return true; }
+      if (p === '/run/virada')       { rotinaVirada().catch(console.error);     json(res, 202, { queued: 'rotinaVirada' }); return true; }
+      if (p === '/run/manha')        { rotinaManha().catch(console.error);      json(res, 202, { queued: 'rotinaManha' }); return true; }
+      if (p === '/run/corrigir-nfs') { corrigirNFsPendentes().catch(console.error); json(res, 202, { queued: 'corrigirNFsPendentes' }); return true; }
+      if (p === '/run/nfe-ml')       { rotinaNFeML().catch(console.error);      json(res, 202, { queued: 'rotinaNFeML' }); return true; }
+
+      // Envio manual de UMA NF específica: POST /run/nfe-ml/:idNfe
+      if (p.startsWith('/run/nfe-ml/')) {
+        const idNfe = p.split('/').pop();
+        try {
+          const resultado = await enviarNFeUnica(idNfe);
+          json(res, 200, resultado);
+        } catch (e) { json(res, 500, { ok: false, error: e.message }); }
+        return true;
       }
-    } catch (e) {
-      if (e.code === 401 || e.message === 'TOKEN_EXPIRADO') throw e;
-      console.error(`[F1] Erro ao mover ${p.id}:`, e.message);
-    }
-  }
-  console.log(`[F1] movidos=${movidos} | ignorados=${ignorados} | já processados=${pulados}` +
-    (naoAplicados ? ` | \u26a0\ufe0f BLING N\u00c3O APLICOU=${naoAplicados}` : '') +
-    (desfeitos ? ` | \u21a9\ufe0f DESFEITOS PELO BLING=${desfeitos}` : ''));
-}
 
-// ── Fluxo 2 — AGUARDANDO → ATENDIDO ────────────────────────────────────────────
-async function _fluxo2(token) {
-  const { inicial, final } = getPeriodo();
-  const lista = await getPedidosPorStatus(token, SITUACAO_AGUARDANDO, inicial, final);
-  const batch = lista.slice(0, MAX_F2);
-  console.log(`[F2] ${lista.length} encontrados | processando ${batch.length}`);
-  let mlToken = null;
-  try { mlToken = await garantirTokenML(); } catch (e) {
-    console.warn('[F2] Sem token ML:', e.message);
-  }
-  let movidos = 0;
-  for (const p of batch) {
-    if (jaProcessado('F2', p.id)) { continue; }
-    if (!isMercadoEnviosPorLoja(p)) continue;
-    let pDetalhe = p;
-    try {
-      pDetalhe = await getPedidoDetalhe(token, p.id) || p;
-    } catch (e) {
-      if (e.code === 401 || e.message === 'TOKEN_EXPIRADO') throw e;
-      console.error(`[F2] Erro detalhe ${p.id}:`, e.message);
-    }
-    const rastreio = getCodigoRastreio(pDetalhe);
-    const isFlex = String(pDetalhe?.transporte?.volumes?.[0]?.servico || '').toUpperCase().includes('FLEX');
-    console.log(`[F2] Pedido ${p.id} | loja=${p.loja?.id} | rastreio="${rastreio}" | flex=${isFlex}`);
-
-    // FIX BUG (27/06/2026): usar pDetalhe (atualizado) em vez de p (lista inicial, dado velho)
-    // Antes era: if (p.situacao?.id !== SITUACAO_AGUARDANDO) continue;
-    // O dado da lista pode ter minutos de defasagem, e o pedido pode ter sido CANCELADO no Bling
-    if (pDetalhe?.situacao?.id !== SITUACAO_AGUARDANDO) {
-      console.log(`[F2] Pedido ${p.id} já não está em AGUARDANDO (situação atual: ${pDetalhe?.situacao?.id}) — pulando`);
-      continue;
-    }
-
-    let deveAtender = false;
-    if (isFlex) {
-      deveAtender = true;
-    } else if (rastreio !== '') {
-      deveAtender = true;
-    } else {
-      // Sem rastreio → verifica no ML
-      const numeroLoja = pDetalhe?.numeroLoja || p?.numeroLoja;
-      if (mlToken && numeroLoja) {
-        deveAtender = await temEtiquetaML(mlToken, numeroLoja);
-        if (deveAtender) console.log(`[F2] Pedido ${p.id} tem etiqueta no ML → move para ATENDIDO`);
+      // Retry manual de UMA NF rejeitada por SEFAZ: POST /run/retry-nf/:id
+      if (p.startsWith('/run/retry-nf/')) {
+        const idNF = p.split('/').pop();
+        if (!idNF || !/^\d+$/.test(idNF)) { json(res, 400, { ok: false, erro: 'ID da NF inválido' }); return true; }
+        try {
+          const r = await retryNFManual(idNF);
+          json(res, r.ok ? 200 : 400, r);
+        } catch (e) {
+          json(res, 500, { ok: false, erro: e.message });
+        }
+        return true;
       }
     }
-    if (!deveAtender) continue;
 
-    // PROTEÇÃO EXTRA: re-checa situação IMEDIATAMENTE antes do PATCH
-    // Defende contra mudanças que aconteceram durante o temEtiquetaML (que demora 1-2s)
-    try {
-      const pFresh = await getPedidoDetalhe(token, p.id);
-      if (pFresh?.situacao?.id !== SITUACAO_AGUARDANDO) {
-        console.log(`[F2] ⚠️ Pedido ${p.id} mudou de situação durante processamento (agora ${pFresh?.situacao?.id}) — ABORTANDO move por segurança`);
-        continue;
+    // Debug — estado do retry SEFAZ em memória
+    if (method === 'GET' && p === '/debug/retry-sefaz') {
+      json(res, 200, getEstadoRetrySEFAZ());
+      return true;
+    }
+
+    // Robô local: lista NFs em "Consultar situação" (sit=0) pra validar via UI interna
+    if (method === 'GET' && p === '/robo/nfs-consultar-situacao') {
+      try {
+        const { getNFsSituacaoConsulta } = require('./nfBlingApi');
+        const token = await garantirTokenNF();
+        const nfs = await getNFsSituacaoConsulta(token);
+        json(res, 200, {
+          empresa: 'girassol',
+          total: nfs.length,
+          nfs: nfs.map(n => ({ id: n.id, numero: n.numero, dataEmissao: n.dataEmissao }))
+        });
+      } catch (e) { json(res, 500, { error: e.message }); }
+      return true;
+    }
+
+    // Debug
+    if (method === 'GET' && p === '/debug/token') {
+      try {
+        const token = await garantirToken();
+        json(res, 200, { token });
+      } catch (e) { json(res, 500, { error: e.message }); }
+      return true;
+    }
+    if (method === 'GET' && p === '/debug/token-nf') {
+      try {
+        const token = await garantirTokenNF();
+        json(res, 200, { token });
+      } catch (e) { json(res, 500, { error: e.message }); }
+      return true;
+    }
+    if (method === 'GET' && p === '/debug/token-ml') {
+      try {
+        const token = await garantirTokenML();
+        json(res, 200, { token });
+      } catch (e) { json(res, 500, { error: e.message }); }
+      return true;
+    }
+    if (method === 'GET' && p.startsWith('/debug/pedido/')) {
+      const idPedido = p.split('/').pop();
+      try {
+        const { getPedidoDetalhe } = require('./blingApi');
+        const token = await garantirToken();
+        const detalhe = await getPedidoDetalhe(token, idPedido);
+        json(res, 200, detalhe);
+      } catch (e) { json(res, 500, { error: e.message }); }
+      return true;
+    }
+    if (method === 'GET' && p.startsWith('/debug/nfe/')) {
+      const idNfe = p.split('/').pop();
+      try {
+        const { getNFeDetalhe } = require('./blingApi');
+        const token = await garantirToken();
+        const detalhe = await getNFeDetalhe(token, idNfe);
+        json(res, 200, detalhe);
+      } catch (e) { json(res, 500, { error: e.message }); }
+      return true;
+    }
+    // Envio único de NF-e → ML (debug/manual via GET)
+    if (method === 'GET' && p.startsWith('/debug/enviar-nfe/')) {
+      const nfeId = p.split('/').pop();
+      try {
+        const resultado = await enviarNFeUnica(nfeId);
+        json(res, 200, resultado);
+      } catch (e) { json(res, 500, { error: e.message }); }
+      return true;
+    }
+    if (method === 'GET' && p.startsWith('/debug/nf-corrigir/')) {
+      const idNF = p.split('/').pop();
+      try {
+        const { getNFDetalhe } = require('./nfBlingApi');
+        const token = await garantirTokenNF();
+        const detalhe = await getNFDetalhe(token, idNF);
+        json(res, 200, detalhe);
+      } catch (e) { json(res, 500, { error: e.message }); }
+      return true;
+    }
+    // Debug SintegraWS: GET /debug/sintegra/:cnpj/:uf
+    // Debug CNPJá (fonte 2 de IE): GET /debug/cnpja/:cnpj/:uf
+    if (method === 'GET' && p.startsWith('/debug/cnpja/')) {
+      const partes = p.split('/');
+      const cnpj = partes[3];
+      const uf = partes[4];
+      if (!cnpj || !uf) { json(res, 400, { ok: false, erro: 'Uso: /debug/cnpja/:cnpj/:uf' }); return true; }
+      try {
+        const resp = await fetch(`https://open.cnpja.com/office/${String(cnpj).replace(/\D/g,'')}`, { headers: { 'Accept': 'application/json' } });
+        const data = resp.ok ? await resp.json() : null;
+        const regs = (data && Array.isArray(data.registrations)) ? data.registrations : [];
+        json(res, 200, { cnpj, uf, httpStatus: resp.status, registrations: regs });
+      } catch (e) { json(res, 500, { error: e.message }); }
+      return true;
+    }
+    if (method === 'GET' && p.startsWith('/debug/sintegra/')) {
+      const partes = p.split('/');
+      const cnpj = partes[3];
+      const uf = partes[4];
+      if (!cnpj || !uf) {
+        json(res, 400, { ok: false, erro: 'Uso: /debug/sintegra/:cnpj/:uf' });
+        return true;
       }
-    } catch (e) {
-      if (e.code === 401 || e.message === 'TOKEN_EXPIRADO') throw e;
-      console.error(`[F2] Erro na re-checagem ${p.id}:`, e.message, '— por segurança NÃO vou mover');
-      continue;
+      try {
+        const { getIEPorCNPJ } = require('./nfBlingApi');
+        const resultado = await getIEPorCNPJ(cnpj, uf);
+        json(res, 200, {
+          cnpj, uf, resultado,
+          observacao: resultado
+            ? `IE encontrada: "${resultado.ie}" (contribuinte=${resultado.contribuinte})`
+            : 'IE não encontrada — SintegraWS pode ter falhado ou retornou vazio. Veja os logs do servidor.'
+        });
+      } catch (e) { json(res, 500, { error: e.message }); }
+      return true;
+    }
+    // DEBUG TEMPORÁRIO: shipment cru do ML (use o shipment_id que aparece no log)
+    if (method === 'GET' && p.startsWith('/debug/shipment/')) {
+      const idShipment = p.split('/').pop();
+      try {
+        const { getShipmentRaw } = require('./mlApi');
+        const token = await garantirTokenML();
+        const resultado = await getShipmentRaw(token, idShipment);
+        json(res, 200, resultado);
+      } catch (e) { json(res, 500, { error: e.message }); }
+      return true;
+    }
+    // DEBUG TEMPORÁRIO: shipment cru do ML a partir do número do pedido ML (numeroLoja)
+    if (method === 'GET' && p.startsWith('/debug/shipment-pedido/')) {
+      const numeroML = p.split('/').pop();
+      try {
+        const { getShipmentInfo, getShipmentRaw } = require('./mlApi');
+        const token = await garantirTokenML();
+        const shipmentId = await getShipmentInfo(token, numeroML);
+        const resultado = await getShipmentRaw(token, shipmentId);
+        json(res, 200, { numeroML, shipmentId, ...resultado });
+      } catch (e) { json(res, 500, { error: e.message }); }
+      return true;
+    }
+    if (method === 'GET' && p.startsWith('/debug/cep/')) {
+      const cep = p.split('/').pop();
+      try {
+        const { getCidadePorCEP } = require('./nfBlingApi');
+        const resultado = await getCidadePorCEP(cep);
+        json(res, 200, {
+          cep, resultado,
+          observacao: resultado
+            ? 'Este é o que seria gravado na NF (municipio + uf)'
+            : 'CEP inválido ou ViaCEP não retornou dados'
+        });
+      } catch (e) { json(res, 500, { error: e.message }); }
+      return true;
     }
 
-    try {
-      await alterarSituacao(token, p.id, SITUACAO_ATENDIDO);
-      movidos++;
-      marcarProcessado('F2', p.id);
-    } catch (e) {
-      if (e.code === 401 || e.message === 'TOKEN_EXPIRADO') throw e;
-      console.error(`[F2] Erro ao mover ${p.id}:`, e.message);
-    }
-  }
-  console.log(`[F2] movidos=${movidos}`);
+    return false; // não tratou
+  };
 }
 
-async function rotinaExpediente() {
-  await comGuard('F1', () => comTokenRenewable(_fluxo1));
-}
-
-async function rotinaVirada() {
-  console.log('[rotinas] === VIRADA ===');
-  limparMemoriaAntiga();
-  await comGuard('F2', () => comTokenRenewable(_fluxo2));
-}
-
-async function rotinaManha() {
-  console.log('[rotinas] === MANHÃ ===');
-  await comGuard('F2', () => comTokenRenewable(_fluxo2));
-}
-
-module.exports = { rotinaExpediente, rotinaVirada, rotinaManha };
+module.exports = {
+  id: 'girassol',
+  nome: 'Girassol',
+  rotinas: {
+    rotinaExpediente,
+    rotinaVirada,
+    rotinaManha,
+    corrigirNFs: corrigirNFsPendentes,
+    nfeMl: rotinaNFeML
+  },
+  routes,
+  crons
+};
