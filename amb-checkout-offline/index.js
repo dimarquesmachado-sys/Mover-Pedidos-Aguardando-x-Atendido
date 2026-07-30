@@ -352,7 +352,7 @@ function routes(readBody) {
       const k = urlObj.searchParams.get('k') || '';
       if (!process.env.ADMIN_KEY || k !== process.env.ADMIN_KEY) { json(res, 404, { error: 'not found' }); return true; }
 
-      const out = { ok: true, versao: 'sonda-un v2' };
+      const out = { ok: true, versao: 'sonda-un v3' };
       out.env_AMBBKP_UN_FULL = process.env.AMBBKP_UN_FULL || '(vazia)';
 
       // 1) O que o listarAtendidos COM FILTRO devolve agora (é o que o ciclo usa)
@@ -380,6 +380,25 @@ function routes(readBody) {
 
       // 3) Gatilho opcional: /sonda-un?k=...&expurgar=1 roda o ciclo AGORA
       //    (filtro + expurgo) e relê o cache, pra você ver o antes/depois.
+      // 4) DUMP CRU: o item exato que o listarAtendidos vê (mesma query,
+      //    limite=100). É aqui que descobrimos se unidadeNegocio vem na lista.
+      try {
+        const hoje = new Date(); const ini = new Date(hoje); ini.setDate(ini.getDate() - JANELA_DIAS);
+        const qs = `idSituacao=${SIT_ATENDIDO}&dataEmissaoInicial=${dataISO(ini)}&dataEmissaoFinal=${dataISO(hoje)}`;
+        const r = await blingGet(`/pedidos/vendas?${qs}&pagina=1&limite=100`);
+        const arr = (r && r.data && r.data.data) || [];
+        // acha um dos 5 Full pelo número, e mostra o item BRUTO inteiro
+        const alvos = ['2594', '2590', '2588', '2579', '2577'];
+        const full = arr.find(p => alvos.includes(String(p.numero)));
+        out.dump_lista_limite100 = {
+          total_na_pagina: arr.length,
+          primeiro_item_bruto: arr[0] || null,
+          um_full_bruto: full || '(nenhum dos 5 Full nesta página)',
+          full_tem_unidadeNegocio: full ? ('unidadeNegocio' in full) : null,
+          full_unidadeNegocio_valor: full ? (full.unidadeNegocio || null) : null
+        };
+      } catch (e) { out.dump_lista_limite100 = { erro: String(e.message || e) }; }
+
       if (urlObj.searchParams.get('expurgar') === '1') {
         try {
           await rodarCiclo('sonda-expurgo');
