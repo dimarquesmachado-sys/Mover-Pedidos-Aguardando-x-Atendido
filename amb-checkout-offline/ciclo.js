@@ -136,7 +136,34 @@ async function listarAtendidos() {
     if (lista.length < 100) { completa = true; break; }
     await sleep(PAUSA_MS);
   }
-  return { ok: fetchOk, completa, pedidos: out };
+
+  // ── FILTRO FULL ──────────────────────────────────────────────────────
+  // Vendas de fulfillment (Shopee Full, Magalu Full…) entram no Bling em
+  // situação ATENDIDO mas NÃO passam pelo galpão — a mercadoria está no CD
+  // do marketplace. Sem filtro, elas caem na fila do estoquista e poluem a
+  // expedição. A API do pedido traz unidadeNegocio.id em CADA item da lista
+  // (confirmado 30/07: pedido Shopee Full = unidadeNegocio.id 2920348).
+  // Removemos os pedidos cuja unidade de negócio está na lista de Full.
+  //
+  // Configurável por env AMBBKP_UN_FULL = "2920348,2920232" (Shopee FULL,
+  // Magalu FULL…). VAZIA = não filtra nada (comportamento idêntico ao antigo),
+  // então subir este código sem a env não muda a operação.
+  const UN_FULL = String(process.env.AMBBKP_UN_FULL || '')
+    .split(',').map(s => s.trim()).filter(Boolean);
+  let ocultosFull = 0;
+  let pedidos = out;
+  if (UN_FULL.length) {
+    const setFull = new Set(UN_FULL);
+    pedidos = out.filter(p => {
+      const un = String((p.unidadeNegocio && p.unidadeNegocio.id) || '');
+      const eFull = un && setFull.has(un);
+      if (eFull) ocultosFull++;
+      return !eFull;   // mantém só o que NÃO é Full
+    });
+    if (ocultosFull) console.log(`[AMBBKP] filtro Full: ${ocultosFull} pedido(s) ocultado(s) da fila do estoquista (UN ${UN_FULL.join(',')})`);
+  }
+
+  return { ok: fetchOk, completa, pedidos, ocultosFull };
 }
 
 async function detalhePedido(id) {
@@ -351,6 +378,7 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC, nfCtx) {
     numero: ped.numero || null,
     numero_loja: ped.numeroLoja || null,
     loja_id: lojaId || null,
+    un_id: String((ped.unidadeNegocio && ped.unidadeNegocio.id) || '') || null,   // unidade de negócio (p/ identificar Full)
     marketplace: mkt,
     servico: _servico,
     flex: ehFlex(_servico),
@@ -412,7 +440,23 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
     }
     if (listaOk && listaCompleta && atendidos.length > 0) {
       const idsAtuais = new Set(atendidos.map(p => String(p.id)));
-      const aRemover = Object.keys(man).filter(id => !idsAtuais.has(String(id)));
+      // Pedidos que estão em ATENDIDO mas foram OCULTADOS pelo filtro Full
+      // (unidade de negócio de fulfillment) não podem contar como "sumiram":
+      // eles continuam no Bling, só não aparecem na fila. Se já entraram no
+      // cache numa versão anterior, mantemos — nunca removê-los aqui.
+      const UN_FULL_REC = String(process.env.AMBBKP_UN_FULL || '').split(',').map(s => s.trim()).filter(Boolean);
+      let idsFull = new Set();
+      if (UN_FULL_REC.length) {
+        try {
+          const setF = new Set(UN_FULL_REC);
+          for (const id of Object.keys(man)) {
+            const snap = readJson(path.join(CACHE_DIR, String(id), 'pedido.json'), null);
+            const un = snap && snap.un_id ? String(snap.un_id) : '';
+            if (un && setF.has(un)) idsFull.add(String(id));
+          }
+        } catch (e) {}
+      }
+      const aRemover = Object.keys(man).filter(id => !idsAtuais.has(String(id)) && !idsFull.has(String(id)));
       // TRAVA DE SEGURANÇA: sumir com muita coisa de uma vez quase sempre é lista ruim do Bling,
       // não 40% dos pedidos despachados no mesmo minuto. Melhor não remover do que apagar etiqueta anexada.
       const limiteSeguro = Math.max(5, Math.ceil(Object.keys(man).length * 0.4));
