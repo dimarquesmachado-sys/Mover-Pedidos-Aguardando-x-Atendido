@@ -138,29 +138,47 @@ async function listarAtendidos() {
   }
 
   // ── FILTRO FULL ──────────────────────────────────────────────────────
-  // Vendas de fulfillment (Shopee Full, Magalu Full…) entram no Bling em
-  // situação ATENDIDO mas NÃO passam pelo galpão — a mercadoria está no CD
-  // do marketplace. Sem filtro, elas caem na fila do estoquista e poluem a
-  // expedição. A API do pedido traz unidadeNegocio.id em CADA item da lista.
-  // Removemos os pedidos cuja unidade de negócio está na lista de Full.
+  // Vendas de fulfillment (Shopee Full, Magalu Full…) entram em ATENDIDO mas
+  // NÃO passam pelo galpão. A unidade de negócio Full identifica essas vendas.
   //
-  // Configurável por env GOODBKP_UN_FULL = "1726045,..." (os ids das
-  // unidades de negócio Full DESTA conta). VAZIA = não filtra nada
-  // (comportamento idêntico ao antigo).
+  // ⚠️ DOIS problemas da API do Bling (30/07): (1) a unidade vem em
+  // pedido.loja.unidadeNegocio.id, NÃO no topo; (2) a lista omite o campo de
+  // forma INTERMITENTE — quando falta, buscamos o DETALHE do pedido.
+  //
+  // Configurável por env GOODBKP_UN_FULL. VAZIA = não filtra nada.
   const UN_FULL = String(process.env.GOODBKP_UN_FULL || '')
     .split(',').map(s => s.trim()).filter(Boolean);
   let ocultosFull = 0;
   let pedidos = out;
-  const idsFullVistos = [];   // ids que a lista do Bling trouxe como Full (p/ expurgar do cache antigo)
+  const idsFullVistos = [];
   if (UN_FULL.length) {
     const setFull = new Set(UN_FULL);
-    pedidos = out.filter(p => {
-      const un = String((p.unidadeNegocio && p.unidadeNegocio.id) || '');
-      const eFull = un && setFull.has(un);
-      if (eFull) { ocultosFull++; idsFullVistos.push(String(p.id)); }
-      return !eFull;   // mantém só o que NÃO é Full
-    });
-    if (ocultosFull) console.log(`[GOODBKP] filtro Full: ${ocultosFull} pedido(s) ocultado(s) da fila do estoquista (UN ${UN_FULL.join(',')})`);
+    const unDaLista = (p) => {
+      const a = p && p.loja && p.loja.unidadeNegocio && p.loja.unidadeNegocio.id;
+      const b = p && p.unidadeNegocio && p.unidadeNegocio.id;
+      return a || b || null;
+    };
+    const indefinidos = [];
+    for (const p of out) {
+      const un = unDaLista(p);
+      if (un != null) {
+        if (setFull.has(String(un))) { ocultosFull++; idsFullVistos.push(String(p.id)); }
+      } else {
+        indefinidos.push(p);
+      }
+    }
+    const idsFullSet = new Set(idsFullVistos);
+    for (const p of indefinidos) {
+      try {
+        const det = await detalhePedido(p.id);
+        const un = (det && det.loja && det.loja.unidadeNegocio && det.loja.unidadeNegocio.id)
+                || (det && det.unidadeNegocio && det.unidadeNegocio.id) || null;
+        if (un != null && setFull.has(String(un))) { ocultosFull++; idsFullVistos.push(String(p.id)); idsFullSet.add(String(p.id)); }
+      } catch (e) { /* detalhe falhou → não esconde */ }
+      await sleep(PAUSA_MS);
+    }
+    pedidos = out.filter(p => !idsFullSet.has(String(p.id)));
+    if (ocultosFull) console.log(`[GOODBKP] filtro Full: ${ocultosFull} pedido(s) ocultado(s) da fila do estoquista (UN ${UN_FULL.join(',')}; ${indefinidos.length} checado(s) por detalhe)`);
   }
 
   return { ok: fetchOk, completa, pedidos, ocultosFull, idsFullVistos };
@@ -350,7 +368,7 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC, nfCtx) {
     numero: ped.numero || null,
     numero_loja: ped.numeroLoja || null,
     loja_id: lojaId || null,
-    un_id: String((ped.unidadeNegocio && ped.unidadeNegocio.id) || '') || null,   // unidade de negócio (p/ identificar Full)
+    un_id: String((ped.loja && ped.loja.unidadeNegocio && ped.loja.unidadeNegocio.id) || (ped.unidadeNegocio && ped.unidadeNegocio.id) || '') || null,   // unidade de negócio (p/ identificar Full) — vem em loja.unidadeNegocio
     marketplace: mkt,
     servico: _servico,
     flex: ehFlex(_servico),
