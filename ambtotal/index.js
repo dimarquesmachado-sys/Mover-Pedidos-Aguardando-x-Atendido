@@ -19,13 +19,16 @@ const { getPedidoDetalhe } = require('./blingApi');
 const { rotinaNFeML, enviarNFeUnica } = require('./nfeMlFluxo');
 
 // ── Crons da AMBTotal ─────────────────────────────────────────────────
+// 30/07: TUDO 24h. O Diego viaja (Europa/China), então a madrugada do Brasil é o dia dele —
+// não pode abrir o painel e ver pedido pendente só porque o sistema estava dormindo.
+// Bônus: rodar de noite espalha as chamadas e alivia os 429 do Bling no horário de pico.
 const crons = {
   expediente:  '*/3 * * * *',                                 // F1 a cada 3 min, 24h (28/07: antes 6-23; pedido da madrugada esperava até as 6h)
   virada:      '10 0 * * *',                                  // F2 às 00:10
   manha:       ['0 6 * * *', '30 6 * * *', '0 7 * * *',       // F2 às 06:00, 06:30, 07:00
-                '*/15 6-23 * * *'],                           // F2 a cada 15 min diurno
-  corrigirNFs: '*/5 6-23 * * *',                              // Corrigir-NFs a cada 5 min
-  nfeMl:       '2,12,22,32,42,52 6-23 * * *'                  // F3 NF-e→ML a cada 10 min (escalonado: Girassol :0, AMB :2, GOOD :4)
+                '*/15 * * * *'],                           // F2 a cada 15 min diurno
+  corrigirNFs: '*/5 * * * *',                              // Corrigir-NFs a cada 5 min
+  nfeMl:       '2,12,22,32,42,52 * * * *'                  // F3 NF-e→ML a cada 10 min (escalonado: Girassol :0, AMB :2, GOOD :4)
 };
 
 // ── Helpers HTTP locais ───────────────────────────────────────────────
