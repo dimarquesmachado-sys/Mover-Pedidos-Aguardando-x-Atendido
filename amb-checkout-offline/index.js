@@ -352,7 +352,7 @@ function routes(readBody) {
       const k = urlObj.searchParams.get('k') || '';
       if (!process.env.ADMIN_KEY || k !== process.env.ADMIN_KEY) { json(res, 404, { error: 'not found' }); return true; }
 
-      const out = { ok: true, versao: 'sonda-un v4' };
+      const out = { ok: true, versao: 'sonda-un v5' };
       out.env_AMBBKP_UN_FULL = process.env.AMBBKP_UN_FULL || '(vazia)';
 
       // 1) O que o listarAtendidos COM FILTRO devolve agora (é o que o ciclo usa)
@@ -392,10 +392,12 @@ function routes(readBody) {
         const full = arr.find(p => alvos.includes(String(p.numero)));
         out.dump_lista_limite100 = {
           total_na_pagina: arr.length,
-          primeiro_item_bruto: arr[0] || null,
-          um_full_bruto: full || '(nenhum dos 5 Full nesta página)',
-          full_tem_unidadeNegocio: full ? ('unidadeNegocio' in full) : null,
-          full_unidadeNegocio_valor: full ? (full.unidadeNegocio || null) : null
+          numeros_na_pagina: arr.map(p => p.numero),
+          achou_full: !!full,
+          full_numero: full ? full.numero : null,
+          full_keys: full ? Object.keys(full) : null,                    // as chaves REAIS do objeto
+          full_json: full ? JSON.stringify(full) : null,                 // o objeto serializado, sem ambiguidade
+          full_unidadeNegocio_direto: full ? full.unidadeNegocio : 'sem full'
         };
       } catch (e) { out.dump_lista_limite100 = { erro: String(e.message || e) }; }
 
@@ -414,6 +416,32 @@ function routes(readBody) {
           fim: fonte.slice(-200)
         };
       } catch (e) { out.funcao_em_memoria = { erro: String(e.message || e) }; }
+
+      // 6) POR QUE FILTRA 0: replica a query e o filtro, pedido a pedido,
+      //    mostrando o que o filtro enxerga em cada um.
+      try {
+        const hoje = new Date(); const ini = new Date(hoje); ini.setDate(ini.getDate() - JANELA_DIAS);
+        const qs = `idSituacao=${SIT_ATENDIDO}&dataEmissaoInicial=${dataISO(ini)}&dataEmissaoFinal=${dataISO(hoje)}`;
+        const acc = [];
+        for (let pg = 1; pg <= 50; pg++) {
+          const r = await blingGet(`/pedidos/vendas?${qs}&pagina=${pg}&limite=100`);
+          const lst = (r && r.data && r.data.data) || [];
+          if (!r || !r.ok) break;
+          acc.push(...lst);
+          if (lst.length < 100) break;
+        }
+        const UN_FULL = String(process.env.AMBBKP_UN_FULL || '').split(',').map(s => s.trim()).filter(Boolean);
+        const setFull = new Set(UN_FULL);
+        out.replay_filtro = {
+          total_paginado: acc.length,
+          UN_FULL_lido: UN_FULL,
+          por_pedido: acc.map(p => {
+            const raw = p.unidadeNegocio && p.unidadeNegocio.id;
+            const un = String(raw || '');
+            return { numero: p.numero, un_raw: raw ?? null, un_str: un, bate: un && setFull.has(un) };
+          })
+        };
+      } catch (e) { out.replay_filtro = { erro: String(e.message || e) }; }
 
       if (urlObj.searchParams.get('expurgar') === '1') {
         try {
