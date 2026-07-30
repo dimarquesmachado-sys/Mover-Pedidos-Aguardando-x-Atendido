@@ -329,7 +329,8 @@ function routes(readBody) {
         p === '/amb-checkout-offline/painel' || p === '/amb-checkout-offline/login' ||
         p === '/amb-checkout-offline/operadores' || p === '/amb-checkout-offline/health' ||
         p === '/amb-checkout-offline/saude' || p.includes('/callback') ||
-        p === '/amb-checkout-offline/qz-cert' || p === '/amb-checkout-offline/qz-sign'
+        p === '/amb-checkout-offline/qz-cert' || p === '/amb-checkout-offline/qz-sign' ||
+        p === '/amb-checkout-offline/sonda-un'   // sonda de unidade de negócio (auth própria por ?k=)
       );
       const _central = (
         p.includes('/run') || p.includes('/setup') || p.includes('/robo') ||
@@ -340,6 +341,60 @@ function routes(readBody) {
         if (!_op) { json(res, 401, { ok: false, erro: 'Sessão necessária. Faça login.' }); return true; }
         req._op = _op;
       }
+    }
+
+    // ── SONDA DE UNIDADE DE NEGÓCIO (temporária, diagnóstico) ───────────
+    // Objetivo: descobrir ONDE, no JSON do pedido da API do Bling, aparece a
+    // unidade de negócio (Shopee FULL vs Matriz) — se vem na LISTA de pedidos
+    // ou só no DETALHE. Sem isso, não dá pra escrever o filtro com segurança.
+    // Uso: /amb-checkout-offline/sonda-un?k=ADMIN_KEY[&id=NUMERO_DO_PEDIDO]
+    if (method === 'GET' && p === '/amb-checkout-offline/sonda-un') {
+      const k = urlObj.searchParams.get('k') || '';
+      if (!process.env.ADMIN_KEY || k !== process.env.ADMIN_KEY) { json(res, 404, { error: 'not found' }); return true; }
+
+      const idPedido = urlObj.searchParams.get('id');
+      const out = { ok: true, versao: 'sonda-un v1' };
+
+      // 1) A LISTA que o estoquista usa (idSituacao=Atendido) — o pedido traz UN aqui?
+      try {
+        const hoje = new Date(); const ini = new Date(hoje); ini.setDate(ini.getDate() - JANELA_DIAS);
+        const qs = `idSituacao=${SIT_ATENDIDO}&dataEmissaoInicial=${dataISO(ini)}&dataEmissaoFinal=${dataISO(hoje)}`;
+        const r = await blingGet(`/pedidos/vendas?${qs}&pagina=1&limite=3`);
+        const primeiro = r && r.data && r.data.data && r.data.data[0];
+        out.lista = {
+          ok: !!(r && r.ok),
+          exemplo_bruto: primeiro || null,
+          campos_no_item: primeiro ? Object.keys(primeiro) : [],
+          tem_unidade_negocio: primeiro ? ('idConfUnidadeNegocio' in primeiro || 'unidadeNegocio' in primeiro || 'idUnidadeNegocio' in primeiro) : null
+        };
+      } catch (e) { out.lista = { erro: String(e.message || e) }; }
+
+      // 2) O DETALHE de um pedido específico — aqui a UN quase certamente aparece.
+      //    Se não passar id, usa o primeiro da lista acima.
+      try {
+        const alvo = idPedido || (out.lista && out.lista.exemplo_bruto && out.lista.exemplo_bruto.id);
+        if (alvo) {
+          const rd = await blingGet(`/pedidos/vendas/${alvo}`);
+          const ped = rd && rd.data && rd.data.data;
+          out.detalhe = {
+            id: alvo,
+            ok: !!(rd && rd.ok),
+            campos_no_pedido: ped ? Object.keys(ped) : [],
+            // procura a UN em todos os lugares plausíveis
+            loja: ped && ped.loja || null,
+            idConfUnidadeNegocio: ped ? (ped.idConfUnidadeNegocio ?? null) : null,
+            unidadeNegocio: ped ? (ped.unidadeNegocio ?? null) : null,
+            idUnidadeNegocio: ped ? (ped.idUnidadeNegocio ?? null) : null,
+            // despeja o pedido inteiro pra eu ver onde a UN se esconde
+            pedido_bruto: ped || null
+          };
+        } else {
+          out.detalhe = { erro: 'sem pedido para detalhar (lista vazia e nenhum id passado)' };
+        }
+      } catch (e) { out.detalhe = { erro: String(e.message || e) }; }
+
+      json(res, 200, out);
+      return true;
     }
 
     // raiz do módulo → manda pro painel (evita "not found" ao abrir a URL base)
