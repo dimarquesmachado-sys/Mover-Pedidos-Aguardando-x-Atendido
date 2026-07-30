@@ -151,18 +151,19 @@ async function listarAtendidos() {
     .split(',').map(s => s.trim()).filter(Boolean);
   let ocultosFull = 0;
   let pedidos = out;
+  const idsFullVistos = [];   // ids que a lista do Bling trouxe como Full (p/ expurgar do cache antigo)
   if (UN_FULL.length) {
     const setFull = new Set(UN_FULL);
     pedidos = out.filter(p => {
       const un = String((p.unidadeNegocio && p.unidadeNegocio.id) || '');
       const eFull = un && setFull.has(un);
-      if (eFull) ocultosFull++;
+      if (eFull) { ocultosFull++; idsFullVistos.push(String(p.id)); }
       return !eFull;   // mantém só o que NÃO é Full
     });
     if (ocultosFull) console.log(`[GOODBKP] filtro Full: ${ocultosFull} pedido(s) ocultado(s) da fila do estoquista (UN ${UN_FULL.join(',')})`);
   }
 
-  return { ok: fetchOk, completa, pedidos, ocultosFull };
+  return { ok: fetchOk, completa, pedidos, ocultosFull, idsFullVistos };
 }
 
 async function detalhePedido(id) {
@@ -398,8 +399,23 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
     const man      = manifest();
     const cacheEan = skuEanCache();
     const locC     = locCache();
-    const { ok: listaOk, completa: listaCompleta, pedidos: atendidos } = await listarAtendidos();
+    const { ok: listaOk, completa: listaCompleta, pedidos: atendidos, idsFullVistos } = await listarAtendidos();
     console.log(`[GOODBKP] ${atendidos.length} pedido(s) ATENDIDO(${SIT_ATENDIDO}) na janela de ${JANELA_DIAS}d (bling ok=${listaOk})`);
+
+    // EXPURGO FULL: remove do cache os pedidos que a lista trouxe como Full
+    // mas que já estavam cacheados (antes do filtro). Remoção segura e
+    // desejada — sabemos que são Full. Full não tem etiqueta de vendedor.
+    if (Array.isArray(idsFullVistos) && idsFullVistos.length) {
+      let expurgados = 0;
+      for (const id of idsFullVistos) {
+        if (man[id]) {
+          try { fs.rmSync(path.join(CACHE_DIR, String(id)), { recursive: true, force: true }); } catch (e) {}
+          delete man[id];
+          expurgados++;
+        }
+      }
+      if (expurgados) { salvarManifest(man); console.log(`[GOODBKP] expurgo Full: ${expurgados} pedido(s) Full removido(s) do cache (saíram da fila)`); }
+    }
 
     // RECONCILIAÇÃO: remove do cache quem NÃO está mais em ATENDIDO (enviado/processado).
     // Só roda se o Bling respondeu E veio algo — assim, se o Bling cair, o cache offline é preservado.
