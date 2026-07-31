@@ -360,7 +360,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd170';
+const DASH_BUILD = 'd171';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -1348,7 +1348,17 @@ function render(){
   })();
   $('kpis').innerHTML =
     kpi('#34d399','💰','Faturamento Total', BRL(usaHist?HIST.totais.faturamento:fat), (usaHist?'📚 histórico · ':'')+'vendas aprovadas no período · '+N(totPed)+' pedidos') +
-    kpi('#f59e0b','🧾','Impostos', BRL(usaHist?HIST.totais.imposto:MC.imp), (MC.imp>0&&fat>0?('Simples · '+(Math.round(MC.imp/fat*10000)/100).toString().replace('.',',')+'% do faturamento'):'Simples nacional')+(MC.pedImp<totPed?('<div style="font-size:10px;margin-top:2px"><span class="warn">⚠ '+N(totPed-MC.pedImp)+' pedido(s) sem alíquota</span> — falta cadastrar o mês <b style="color:#fbbf24">'+MC.semAliqMeses.map(esc).join(', ')+'</b> na seção Impostos, lá embaixo</div>'):'')) +
+    kpi('#f59e0b','🧾','Impostos', BRL(usaHist?HIST.totais.imposto:MC.imp), (MC.imp>0&&fat>0?('Simples · '+(Math.round(MC.imp/fat*10000)/100).toString().replace('.',',')+'% do faturamento'):'Simples nacional')+((function(){
+      // 31/07: no período LONGO o total de pedidos vem do histórico e a contagem de quem tem
+      // alíquota vinha dos dados LOCAIS (só ~6 dias) — a subtração dava um número absurdo
+      // (17.351 de 21.018 no filtro Ano). Agora cada caminho usa a SUA própria contagem.
+      const semAliq = usaHist ? (HIST.totais.pedidos_sem_imposto || 0) : (totPed - MC.pedImp);
+      if (!(semAliq > 0)) return '';
+      const meses = usaHist ? '' : (MC.semAliqMeses||[]).map(esc).join(', ');
+      return '<div style="font-size:10px;margin-top:2px"><span class="warn">\u26a0 '+N(semAliq)+' pedido(s) sem al\u00edquota</span>'+
+             (meses ? (' \u2014 falta cadastrar o m\u00eas <b style="color:#fbbf24">'+meses+'</b> na se\u00e7\u00e3o Impostos, l\u00e1 embaixo') :
+                      ' \u2014 pedidos antigos que entraram no hist\u00f3rico sem imposto calculado') + '</div>';
+    })())) +
     kpi('#a78bfa','📦','Custo de Produtos', BRL(usaHist?HIST.totais.custo:MC.cus),
       usaHist ? (HIST.totais.un_sem_custo ? avisoCom(N(HIST.totais.un_sem_custo)+' un. sem custo no período', (HIST.totais.skus_sem_custo||[]), 'cadastre o preço de custo destes SKUs no Bling e rode o custo-sync') : (N(HIST.totais.unidades)+' unidades vendidas'))
       : MC.semDados ? ('<span class="warn">⚠ '+N(MC.semDados)+' pedido(s) fora da conta (custo ainda não fechado)</span>')
