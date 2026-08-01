@@ -360,7 +360,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd171';
+const DASH_BUILD = 'd172';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -1355,9 +1355,17 @@ function render(){
       const semAliq = usaHist ? (HIST.totais.pedidos_sem_imposto || 0) : (totPed - MC.pedImp);
       if (!(semAliq > 0)) return '';
       const meses = usaHist ? '' : (MC.semAliqMeses||[]).map(esc).join(', ');
+      // 01/08: quando é histórico, mostra QUAIS pedidos (com a data) — antes só dizia quantos,
+      // e o Diego não tinha como achar no Bling.
+      const lista = usaHist ? (HIST.totais.pedidos_sem_imposto_lista || []) : [];
+      const quais = lista.length
+        ? ('<div style="margin-top:2px"><b style="font-family:ui-monospace,monospace;color:#fbbf24">'+
+           lista.slice(0,10).map(function(x){ return esc(x.pedido)+(x.data?(' <span style="opacity:.75;font-weight:400">('+dBR(x.data)+')</span>'):''); }).join(' \u00b7 ')+
+           '</b>'+(semAliq>lista.length?(' <span style="opacity:.7">+'+N(semAliq-lista.length)+' outros</span>'):'')+'</div>')
+        : '';
       return '<div style="font-size:10px;margin-top:2px"><span class="warn">\u26a0 '+N(semAliq)+' pedido(s) sem al\u00edquota</span>'+
              (meses ? (' \u2014 falta cadastrar o m\u00eas <b style="color:#fbbf24">'+meses+'</b> na se\u00e7\u00e3o Impostos, l\u00e1 embaixo') :
-                      ' \u2014 pedidos antigos que entraram no hist\u00f3rico sem imposto calculado') + '</div>';
+                      ' \u2014 entraram no hist\u00f3rico sem imposto calculado') + quais + '</div>';
     })())) +
     kpi('#a78bfa','📦','Custo de Produtos', BRL(usaHist?HIST.totais.custo:MC.cus),
       usaHist ? (HIST.totais.un_sem_custo ? avisoCom(N(HIST.totais.un_sem_custo)+' un. sem custo no período', (HIST.totais.skus_sem_custo||[]), 'cadastre o preço de custo destes SKUs no Bling e rode o custo-sync') : (N(HIST.totais.unidades)+' unidades vendidas'))
