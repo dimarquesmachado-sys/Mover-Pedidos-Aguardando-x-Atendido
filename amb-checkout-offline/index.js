@@ -40,7 +40,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.AMBBKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.AMBBKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'amb-checkout-offline v01/08 b21';
+const VERSAO     = 'amb-checkout-offline v01/08 b22';
 
 // ── SESSÃO DE OPERADOR (cookie assinado HMAC) — protege rotas de dados/ação ──
 // Segredo estável entre restarts. Usa ADMIN_KEY (já configurada no Render) como base.
@@ -330,6 +330,7 @@ function routes(readBody) {
         p === '/amb-checkout-offline/operadores' || p === '/amb-checkout-offline/health' ||
         p === '/amb-checkout-offline/saude' || p.includes('/callback') ||
         p === '/amb-checkout-offline/qz-cert' || p === '/amb-checkout-offline/qz-sign' ||
+        p === '/amb-checkout-offline/shopee-semear' ||   // semear cookie da sessao (auth propria por ?k=)
         p === '/amb-checkout-offline/shopee-devolucao' ||   // devolucao entregue? (auth propria por ?k= ou sessao admin)
         p === '/amb-checkout-offline/sonda-un'   // sonda de unidade de negócio (auth própria por ?k=)
       );
@@ -552,6 +553,31 @@ function routes(readBody) {
         return true;
       }
       vai(idIr ? ('https://seller.shopee.com.br/portal/sale/order/' + idIr) : buscaIr);
+      return true;
+    }
+
+    // ── SEMEAR SESSÃO SHOPEE (b22) — cola o cURL (ou só o trecho do
+    // Cookie:) da chamada que FUNCIONA no seu navegador, e o servidor
+    // extrai o cookie e grava no jar. Serve pros cookies HttpOnly
+    // (SPC_ST etc.) que a captura manual pra env AMBBKP_SHOPEE_COOKIE
+    // nao pega. Guarda: ?k=ADMIN_KEY. POST body {curl:"..."} OU {cookie:"..."}.
+    if (method === 'POST' && p === '/amb-checkout-offline/shopee-semear') {
+      const kSe = String((urlObj.searchParams && urlObj.searchParams.get('k')) || '');
+      if (!process.env.ADMIN_KEY || kSe !== process.env.ADMIN_KEY) { json(res, 404, { error: 'not found' }); return true; }
+      let bodySe = {}; try { const _rb = await readBody(req); bodySe = (_rb && typeof _rb === 'object') ? _rb : JSON.parse(_rb || '{}'); } catch (e) {}
+      let bruto = String(bodySe.cookie || bodySe.curl || '').trim();
+      if (!bruto) { json(res, 400, { ok: false, erro: 'faltou {cookie:"..."} ou {curl:"..."} no corpo' }); return true; }
+      // aceita o cURL inteiro: pega o valor de -H 'Cookie: ...' (aspa simples ou dupla)
+      let ck = bruto;
+      const mCk = bruto.match(/-H\s+['"]cookie:\s*([^'"]+)['"]/i);
+      if (mCk) ck = mCk[1];
+      ck = ck.replace(/^cookie:\s*/i, '').trim();
+      const nomes = [...new Set((ck.match(/(?:^|;\s*)([A-Za-z0-9_]+)=/g) || []).map(x => x.replace(/[;=\s]/g, '')))];
+      const temST = /(?:^|;\s*)SPC_ST=/.test(ck);
+      if (!temST) { json(res, 400, { ok: false, erro: 'o cookie colado NAO tem SPC_ST — cole o da chamada de return que funciona (com HttpOnly)', nomes }); return true; }
+      const novo = { cookie: ck, semente: _shopeeHash(ck), origem: 'semeado', atualizado: new Date().toISOString(), renovacoes: 0 };
+      try { ensureDir(CACHE_DIR); writeJson(SHOPEE_SESSAO_FILE, novo); } catch (e) { json(res, 500, { ok: false, erro: 'falhou ao gravar o jar: ' + String(e && e.message || e) }); return true; }
+      json(res, 200, { ok: true, gravado: true, tam_cookie: ck.length, tem_SPC_ST: true, cookies: nomes.length, nomes, versao: VERSAO });
       return true;
     }
 
