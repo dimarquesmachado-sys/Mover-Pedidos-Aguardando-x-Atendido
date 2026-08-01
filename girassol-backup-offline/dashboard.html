@@ -360,7 +360,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd174';
+const DASH_BUILD = 'd175';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -2073,10 +2073,23 @@ function renderAnalise(){
     if(hOK){
       // garante a 1ª página das linhas do histórico
       if(!HLIN || HLIN._de!==iv.de || HLIN._ate!==iv.ate){ carregarLinhasHist(iv.de, iv.ate, 1); }
-      const T=HIST.totais;
+      // 01/08 — o resumo passa a RESPEITAR o filtro de canal. Antes mostrava sempre o total do
+      // período inteiro (o servidor só mandava o agregado geral), então filtrar "MercadoLivre"
+      // não mudava nada — e o resumo de cima discordava da lista de baixo.
+      let T = HIST.totais, _rotuloT = '\ud83d\udcda Vendido (hist\u00f3rico)', _avisoT = '';
+      if(anCanal && HIST.canais && HIST.canais[anCanal]){
+        const c = HIST.canais[anCanal];
+        T = { faturamento:c.fat, imposto:(c.imp||0), comissao:(c.com||0), frete:(c.fre||0),
+              custo:(c.cus||0), margem:c.mar, pedidos:c.pedidos, itens:(c.itens||0), unidades:c.un };
+        _rotuloT = '\ud83d\udcda Vendido \u00b7 '+esc(nomeCanal(anCanal));
+      }
+      if(anSku && String(anSku).trim()){
+        _avisoT = '<div class="nota" style="margin-bottom:8px"><span class="warn">\u26a0 o resumo abaixo \u00e9 do '+
+          (anCanal?('canal '+esc(nomeCanal(anCanal))):'per\u00edodo')+' inteiro</span> \u2014 a busca por texto filtra a LISTA, mas n\u00e3o o resumo (ele vem somado do servidor).</div>';
+      }
       const mini2=(l,v,c)=>'<div style="background:var(--card);border:1px solid var(--line);border-radius:9px;padding:7px 11px;min-width:96px"><div style="font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut)">'+l+'</div><div style="font-weight:800;font-size:14px'+(c?';color:'+c:'')+'">'+v+'</div></div>';
-      el.innerHTML = '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px">'+
-        mini2('\ud83d\udcda Vendido (hist\u00f3rico)',BRL(T.faturamento))+
+      el.innerHTML = _avisoT + '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px">'+
+        mini2(_rotuloT,BRL(T.faturamento))+
         mini2('Impostos',BRL(T.imposto))+
         mini2('Comiss\u00e3o',BRL(T.comissao))+
         mini2('Frete vendedor',BRL(T.frete))+
