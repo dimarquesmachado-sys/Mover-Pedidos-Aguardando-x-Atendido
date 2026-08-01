@@ -360,7 +360,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd173';
+const DASH_BUILD = 'd174';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -1157,7 +1157,12 @@ function render(){
   // Não é venda: é sobra de um pedido excluído no Bling ou de um cache incompleto. Ficava contado
   // como pedido e disparava TRÊS alertas ao mesmo tempo (sem alíquota, sem taxa e sem detalhe),
   // porque não tem mês, não tem canal e não tem item. Fora da conta.
-  const PER = DADOS.filter(h => { if(!h.conferido_em) return false; if(ehFantasmaReg(h)) return false; const d = diaVenda(h); return d>=de && d<=ate; });
+  // 01/08 — VENDA CANCELADA FORA DOS CARDS. A Análise, os gráficos e as não-bipadas (AGD) já
+  // excluíam, mas os CARDS DO TOPO ainda somavam o pedido BIPADO que foi cancelado depois —
+  // inflando faturamento, custo, imposto e lucro, e discordando do total da própria Análise
+  // logo abaixo. Cancelada não é venda: sai de tudo. (Ela CONTINUA aparecendo cinza na lista,
+  // que usa outra coleção — some só das contas.)
+  const PER = DADOS.filter(h => { if(!h.conferido_em) return false; if(ehFantasmaReg(h)) return false; if(h._cancelado) return false; const d = diaVenda(h); return d>=de && d<=ate; });
   const VB = (VENDAS||[]).filter(v=>{ const d2=String(v.data||'').slice(0,10); return d2>=de && d2<=ate; });
   const VBok = VB.filter(v=>!/cancel/i.test(String(v.situacao||'')));
   const vbSoma = VBok.reduce((a,v)=>a+(Number(v.total)||0),0);
