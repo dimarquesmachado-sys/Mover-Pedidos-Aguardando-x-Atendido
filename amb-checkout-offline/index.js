@@ -40,7 +40,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.AMBBKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.AMBBKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'amb-checkout-offline v27/07 b19';
+const VERSAO     = 'amb-checkout-offline v01/08 b20';
 
 // ── SESSÃO DE OPERADOR (cookie assinado HMAC) — protege rotas de dados/ação ──
 // Segredo estável entre restarts. Usa ADMIN_KEY (já configurada no Render) como base.
@@ -330,6 +330,7 @@ function routes(readBody) {
         p === '/amb-checkout-offline/operadores' || p === '/amb-checkout-offline/health' ||
         p === '/amb-checkout-offline/saude' || p.includes('/callback') ||
         p === '/amb-checkout-offline/qz-cert' || p === '/amb-checkout-offline/qz-sign' ||
+        p === '/amb-checkout-offline/shopee-devolucao' ||   // devolucao entregue? (auth propria por ?k= ou sessao admin)
         p === '/amb-checkout-offline/sonda-un'   // sonda de unidade de negócio (auth própria por ?k=)
       );
       const _central = (
@@ -551,6 +552,112 @@ function routes(readBody) {
         return true;
       }
       vai(idIr ? ('https://seller.shopee.com.br/portal/sale/order/' + idIr) : buscaIr);
+      return true;
+    }
+
+    // ── DEVOLUÇÃO SHOPEE: entregue? quando? (b20 — fase 2 do bloco ─────
+    // vermelho do Devoluções da AMB). Lê o Seller Center com o MESMO
+    // cookie/jar do ir-shopee: histórico da logística REVERSA
+    // (/api/v1/return/reverse_logistics_tracking_history) — é onde mora
+    // o "Pedido devolvido dd/mm hh:mm" da página da solicitação.
+    // Aceita ?rid=<id_interno> (o número da URL do portal) OU
+    // ?rsn=<numero_da_solicitacao> (tenta resolver o id via detail).
+    // Guarda: ?k=ADMIN_KEY OU sessão de admin do checkout. &diag=1 = passos.
+    // Entregue é terminal → cache permanente em _shopee-devolucoes.json.
+    if (method === 'GET' && p === '/amb-checkout-offline/shopee-devolucao') {
+      const kSd = String((urlObj.searchParams && urlObj.searchParams.get('k')) || '');
+      const opSd = validarSessao(req.headers['cookie']);
+      const podeSd = (process.env.ADMIN_KEY && kSd === process.env.ADMIN_KEY) || (opSd && ehAdmin(opSd));
+      if (!podeSd) { json(res, 404, { error: 'not found' }); return true; }
+
+      const ridQ = String((urlObj.searchParams && urlObj.searchParams.get('rid')) || '').trim();
+      const rsnQ = String((urlObj.searchParams && urlObj.searchParams.get('rsn')) || '').trim().toUpperCase();
+      const diagSd = ((urlObj.searchParams && urlObj.searchParams.get('diag')) || '') === '1';
+      if (!ridQ && !rsnQ) { json(res, 400, { ok: false, erro: 'faltou ?rid= (id interno da URL do portal) ou ?rsn= (numero da solicitacao)' }); return true; }
+
+      const ARQ_DEV = path.join(CACHE_DIR, '_shopee-devolucoes.json');
+      const mapaSd = readJson(ARQ_DEV, {}) || {};
+      const passosSd = [];
+      let rid = ridQ || (rsnQ ? (mapaSd['rsn:' + rsnQ] || null) : null);
+      if (!ridQ && rid) passosSd.push({ passo: 'cache-rsn', rid });
+
+      const jaSd = rid && mapaSd[rid];
+      if (jaSd && jaSd.entregue && !diagSd) { json(res, 200, { ok: true, origem: 'cache', rid, rsn: rsnQ || null, entregue: true, entregue_em: jaSd.entregue_em || null, versao: VERSAO }); return true; }
+
+      try {
+        const sessSd = shopeeSessaoLer();
+        const ckSd = sessSd.cookie;
+        if (!ckSd) {
+          passosSd.push({ passo: 'cookie', erro: 'sem cookie: env ' + SHOPEE_ENV_COOKIE + ' vazia e nada gravado no disco' });
+        } else {
+          const cdsSd = (ckSd.match(/(?:^|;\s*)SPC_CDS=([^;]+)/) || [])[1] || '';
+          const cabSd = {
+            'Cookie': ckSd,
+            'Accept': 'application/json, text/plain, */*',
+            'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+            'Referer': 'https://seller.shopee.com.br/portal/sale/return',
+            'X-Api-Src-List': 'pc',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:154.0) Gecko/20100101 Firefox/154.0'
+          };
+
+          if (!rid && rsnQ) {
+            const urlDet = 'https://seller.shopee.com.br/api/v3/return/detail'
+              + '?SPC_CDS=' + encodeURIComponent(cdsSd) + '&SPC_CDS_VER=2'
+              + '&return_sn=' + encodeURIComponent(rsnQ) + '&language=pt-br';
+            const rDet = await fetch(urlDet, { headers: cabSd });
+            const tDet = await rDet.text();
+            shopeeSessaoAtualiza(rDet);
+            let jDet = null; try { jDet = JSON.parse(tDet); } catch (e) {}
+            let achouSd = null;
+            (function varre(o, prof) {
+              if (!o || typeof o !== 'object' || prof > 6 || achouSd) return;
+              if (o.return_id != null) { achouSd = String(o.return_id); return; }
+              if (o.returnid != null) { achouSd = String(o.returnid); return; }
+              Object.keys(o).forEach(k2 => { if (o[k2] && typeof o[k2] === 'object') varre(o[k2], prof + 1); });
+            })(jDet, 0);
+            passosSd.push({ passo: 'resolver-rsn', status: rDet.status, rid_achado: achouSd, corpo: achouSd ? undefined : tDet.slice(0, 500) });
+            if (achouSd) { rid = achouSd; mapaSd['rsn:' + rsnQ] = rid; try { ensureDir(CACHE_DIR); writeJson(ARQ_DEV, mapaSd); } catch (e) {} }
+          }
+
+          if (rid) {
+            const urlHist = 'https://seller.shopee.com.br/api/v1/return/reverse_logistics_tracking_history/'
+              + '?SPC_CDS=' + encodeURIComponent(cdsSd) + '&SPC_CDS_VER=2'
+              + '&log_id=1&return_id=' + encodeURIComponent(rid);
+            const rH = await fetch(urlHist, { headers: cabSd });
+            const tH = await rH.text();
+            shopeeSessaoAtualiza(rH);
+            let jH = null; try { jH = JSON.parse(tH); } catch (e) {}
+
+            const eventosSd = [];
+            (function varre(o, prof) {
+              if (!o || prof > 7) return;
+              if (Array.isArray(o)) { o.forEach(x => varre(x, prof + 1)); return; }
+              if (typeof o !== 'object') return;
+              const t2 = o.ctime || o.time || o.timestamp || o.update_time || o.create_time || null;
+              const d2 = o.description || o.desc || o.message || o.text || o.status_text || null;
+              if (t2 && d2) eventosSd.push({ t: Number(t2), texto: String(d2) });
+              Object.keys(o).forEach(k2 => varre(o[k2], prof + 1));
+            })(jH, 0);
+            eventosSd.sort((a, b) => b.t - a.t);
+            const isoSd = t2 => { const n2 = Number(t2); const ms = n2 > 1e12 ? n2 : (n2 > 1e9 ? n2 * 1000 : NaN); const dt = new Date(ms); return isNaN(dt) ? null : dt.toISOString(); };
+            const evSd = eventosSd.find(e => /devolvid|entregue|entregad|delivered|delivery.?done/i.test(e.texto)) || null;
+
+            const outSd = { ok: true, rid, rsn: rsnQ || null,
+              entregue: !!evSd, entregue_em: evSd ? isoSd(evSd.t) : null,
+              ultimo_evento: eventosSd[0] ? { quando: isoSd(eventosSd[0].t), texto: eventosSd[0].texto.slice(0, 120) } : null,
+              eventos: eventosSd.slice(0, 5).map(e => ({ quando: isoSd(e.t), texto: e.texto.slice(0, 120) })),
+              origem_cookie: sessSd.origem || null, versao: VERSAO };
+            passosSd.push({ passo: 'historico', status: rH.status, eventos: eventosSd.length, corpo: eventosSd.length ? undefined : tH.slice(0, 500) });
+            if (outSd.entregue) { mapaSd[rid] = { entregue: true, entregue_em: outSd.entregue_em, ts: Date.now() }; try { ensureDir(CACHE_DIR); writeJson(ARQ_DEV, mapaSd); } catch (e) {} }
+            if (diagSd) outSd.passos = passosSd;
+            json(res, 200, outSd);
+            return true;
+          }
+        }
+      } catch (e) {
+        passosSd.push({ passo: 'excecao', erro: String((e && e.message) || e).slice(0, 250) });
+      }
+      json(res, 200, { ok: false, rid: rid || null, rsn: rsnQ || null, erro: 'nao consegui ler a devolucao — veja os passos', passos: passosSd, versao: VERSAO });
       return true;
     }
 
