@@ -360,7 +360,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd176';
+const DASH_BUILD = 'd177';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -1786,14 +1786,18 @@ function renderGrafico(){
   el.innerHTML=svg;
   $('grafLeg').innerHTML = series.map(sr=>'<span style="color:'+sr[1]+'">\u25CF</span> '+sr[2]).join(' &nbsp; ')+' \u00b7 somas di\u00e1rias \u00b7 M.C. s\u00f3 dos pedidos completos \u00b7 passa o mouse nos pontos';
 }
+// 01/08: nome de arquivo seguro a partir do canal (o Diego baixou dois e vieram iguais)
+function canalArquivo(k){ return String(nomeCanal(k)||k).normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^A-Za-z0-9]+/g,'').toLowerCase(); }
 // baixa TODAS as vendas de um período longo, página por página, direto do histórico
 async function baixarHistoricoCompleto(iv){
   const btns = document.querySelectorAll('[onclick*="baixarCSV"]');
   btns.forEach(b=>{ b.disabled=true; b.dataset.txt=b.textContent; b.textContent='⏳ montando…'; });
+  if(anSku && String(anSku).trim() && !confirm('A busca por texto n\u00e3o filtra o Excel no per\u00edodo longo \u2014 ele vai sair com '+(anCanal?('o canal '+nomeCanal(anCanal)):'todos os canais')+' inteiro.\n\nBaixar assim mesmo?')) return;
   const linhas = [];
   try{
     for(let pg=1; pg<=200; pg++){
-      const r = await fetch(MOD+'/historico-linhas?de='+iv.de+'&ate='+iv.ate+'&pagina='+pg+'&lim=200', {credentials:'same-origin'});
+      // 01/08: o Excel baixava TODOS os canais mesmo com o filtro ligado — agora leva o canal
+      const r = await fetch(MOD+'/historico-linhas?de='+iv.de+'&ate='+iv.ate+'&pagina='+pg+'&lim=200'+(anCanal?('&canal='+encodeURIComponent(anCanal)):''), {credentials:'same-origin'});
       const d = await r.json().catch(()=>null);
       if(!d || !d.ok || !d.pedidos || !d.pedidos.length) break;
       for(const o of d.pedidos){
@@ -1809,7 +1813,7 @@ async function baixarHistoricoCompleto(iv){
       if(!d.tem_mais && pg>=(d.total_paginas||pg)) break;
       if(d.total_paginas && pg>=d.total_paginas) break;
     }
-    baixarPlanilha('analise-vendas-'+iv.de+'_a_'+iv.ate,
+    baixarPlanilha('analise-vendas-'+(anCanal?(canalArquivo(anCanal)+'-'):'')+iv.de+'_a_'+iv.ate,
       ['Data','Pedido','Venda no marketplace','Canal','Produtos','Unidades','Venda (NF)','Produtos (R$)','Custo','Imposto','Comissao','Frete vendedor','Margem (M.C.)','Margem %'],
       linhas);
   }catch(e){ alert('não consegui montar a planilha: '+(e.message||e)); }
