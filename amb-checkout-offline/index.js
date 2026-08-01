@@ -40,7 +40,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.AMBBKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.AMBBKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'amb-checkout-offline v01/08 b20';
+const VERSAO     = 'amb-checkout-offline v01/08 b21';
 
 // ── SESSÃO DE OPERADOR (cookie assinado HMAC) — protege rotas de dados/ação ──
 // Segredo estável entre restarts. Usa ADMIN_KEY (já configurada no Render) como base.
@@ -591,6 +591,12 @@ function routes(readBody) {
           passosSd.push({ passo: 'cookie', erro: 'sem cookie: env ' + SHOPEE_ENV_COOKIE + ' vazia e nada gravado no disco' });
         } else {
           const cdsSd = (ckSd.match(/(?:^|;\s*)SPC_CDS=([^;]+)/) || [])[1] || '';
+          // b21 - os endpoints de DEVOLUCAO exigem o token anti-CSRF
+          // (errcode 2 "token not found" com cookie vivo): o valor do
+          // cookie csrftoken repetido no cabecalho X-CSRFToken. Os de
+          // pedido (ir-shopee) nunca cobraram; os de return cobram.
+          const csrfSd = (ckSd.match(/(?:^|;\s*)csrftoken=([^;]+)/i) || [])[1] || '';
+          passosSd.push({ passo: 'preparo', tem_cds: !!cdsSd, tem_csrf: !!csrfSd, tam_cookie: ckSd.length, origem_cookie: sessSd.origem || null });
           const cabSd = {
             'Cookie': ckSd,
             'Accept': 'application/json, text/plain, */*',
@@ -599,6 +605,7 @@ function routes(readBody) {
             'X-Api-Src-List': 'pc',
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:154.0) Gecko/20100101 Firefox/154.0'
           };
+          if (csrfSd) cabSd['X-CSRFToken'] = csrfSd;
 
           if (!rid && rsnQ) {
             const urlDet = 'https://seller.shopee.com.br/api/v3/return/detail'
@@ -642,7 +649,7 @@ function routes(readBody) {
             const isoSd = t2 => { const n2 = Number(t2); const ms = n2 > 1e12 ? n2 : (n2 > 1e9 ? n2 * 1000 : NaN); const dt = new Date(ms); return isNaN(dt) ? null : dt.toISOString(); };
             const evSd = eventosSd.find(e => /devolvid|entregue|entregad|delivered|delivery.?done/i.test(e.texto)) || null;
 
-            const outSd = { ok: true, rid, rsn: rsnQ || null,
+            const outSd = { ok: rH.status === 200, http_historico: rH.status, rid, rsn: rsnQ || null,
               entregue: !!evSd, entregue_em: evSd ? isoSd(evSd.t) : null,
               ultimo_evento: eventosSd[0] ? { quando: isoSd(eventosSd[0].t), texto: eventosSd[0].texto.slice(0, 120) } : null,
               eventos: eventosSd.slice(0, 5).map(e => ({ quando: isoSd(e.t), texto: e.texto.slice(0, 120) })),
