@@ -360,7 +360,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd175';
+const DASH_BUILD = 'd176';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -519,7 +519,7 @@ function renderCardsVenda(lista){
 function renderHistLinhas(iv){
   const tb=$('tAnalise'), rp=document.getElementById('anRodape'), inf=$('anInfo');
   if(!tb) return;
-  if(!HLIN || HLIN._de!==iv.de || HLIN._ate!==iv.ate){
+  if(!HLIN || HLIN._de!==iv.de || HLIN._ate!==iv.ate || (HLIN._canal||'')!==(anCanal||'')){
     tb.innerHTML='<tr><td class="dim" style="padding:14px">⏳ carregando as vendas do histórico…</td></tr>';
     if(inf) inf.textContent='';
     if(rp) rp.style.display='none';
@@ -527,6 +527,10 @@ function renderHistLinhas(iv){
   }
   const ps=HLIN.pedidos||[];
   const pgAtual=HLIN.pagina||1, totPg=HLIN.total_paginas||1;
+  // 01/08: o contador também vem do HISTÓRICO (antes sobrava o texto calculado do cache local,
+  // por isso dizia "762 vendas" quando o card dizia 876)
+  { const tp = HLIN.total_pedidos||ps.length, lim = HLIN.por_pagina||200, ini = (pgAtual-1)*lim+1;
+    if(inf) inf.textContent = tp ? (N(ini)+'\u2013'+N(Math.min(tp, ini+ps.length-1))+' de '+N(tp)+' venda(s)'+(totPg>1?('  \u00b7  p\u00e1gina '+pgAtual+' de '+totPg):'')) : 'sem vendas no per\u00edodo'; }
   tb.innerHTML =
     '<tr><th title="dia da venda">Data</th><th title="número do pedido no Bling · ✓ verde = já bipado · ✓ laranja = aguardando bipagem · ✕ = cancelado">Pedido</th><th title="onde a venda aconteceu">Canal</th><th title="SKU(s) do pedido">Produto</th><th class="num" title="total de unidades do pedido">Un.</th>'+
     '<th class="num" title="total da NOTA FISCAL do pedido — já com o frete embutido quando o canal lança">Venda NF</th><th class="num" title="quanto a mercadoria custou: custo unitário × quantidade, do banco de custos do Bling">Custo (−)</th><th class="num" title="Simples Nacional — alíquota do MÊS da venda aplicada sobre o valor da nota">Imposto (−)</th>'+
@@ -717,9 +721,10 @@ async function carregarLinhasHist(de, ate, pagina){
   _hlCarregando = true;
   try{
     // 29/07: 200 por página, igual ao filtro do dia — antes o histórico vinha de 100 em 100
-    const r = await fetch(MOD+'/historico-linhas?de='+de+'&ate='+ate+'&pagina='+(pagina||1)+'&lim=200', {credentials:'same-origin'});
+    // 01/08: leva o CANAL escolhido — antes a lista do Mês/Ano ignorava o filtro
+    const r = await fetch(MOD+'/historico-linhas?de='+de+'&ate='+ate+'&pagina='+(pagina||1)+'&lim=200'+(anCanal?('&canal='+encodeURIComponent(anCanal)):''), {credentials:'same-origin'});
     const d = await r.json().catch(()=>null);
-    if(d && d.ok){ HLIN = d; HLIN._de=de; HLIN._ate=ate; renderAnalise(); restaurarAncora();
+    if(d && d.ok){ HLIN = d; HLIN._de=de; HLIN._ate=ate; HLIN._canal=anCanal||''; renderAnalise(); restaurarAncora();
       garantirNomes((d.pedidos||[]).map(function(o){ return {h:{itens:(o.itens||[])}}; }));   // títulos também no Mês/Ano
     }
   }catch(e){}
@@ -2027,8 +2032,15 @@ function renderAnalise(){
   // universo que a lista exibe: bipados + vendas do Bling ainda não bipadas.
   const _naoBip = (SINT||[]).filter(h=>{ const d2=diaVenda(h); return d2>=iv.de && d2<=iv.ate; });
   const _univ = L.concat(_naoBip);
-  const cnt={}; _univ.forEach(h=>{ const k=canalKey(h.marketplace); cnt[k]=(cnt[k]||0)+1; });
-  const opts='<option value="">Todos Canais ('+_univ.length+')</option>'+Object.keys(cnt).sort().map(k=>'<option value="'+k+'"'+(anCanal===k?' selected':'')+'>'+nomeCanal(k)+' ('+cnt[k]+')</option>').join('');
+  // 01/08 — no período LONGO o dropdown contava o cache local (~6 dias de vendas + bipados),
+  // enquanto os cards contavam o histórico: dava 762 no dropdown e 876 no card, pro mesmo canal.
+  // Agora, quando os números vêm do histórico, o dropdown vem de lá também.
+  const _usaH = !!(HIST && HIST.de===iv.de && HIST.ate===iv.ate && HIST.totais);
+  let cnt={}, _totUniv=_univ.length;
+  if(_usaH && HIST.canais){ for(const k of Object.keys(HIST.canais)) cnt[k]=HIST.canais[k].pedidos||0;
+                            _totUniv = HIST.totais.pedidos||0; }
+  else _univ.forEach(h=>{ const k=canalKey(h.marketplace); cnt[k]=(cnt[k]||0)+1; });
+  const opts='<option value="">Todos Canais ('+N(_totUniv)+')</option>'+Object.keys(cnt).sort().map(k=>'<option value="'+k+'"'+(anCanal===k?' selected':'')+'>'+nomeCanal(k)+' ('+cnt[k]+')</option>').join('');
   if(sel.innerHTML!==opts) sel.innerHTML=opts;
   if(anCanal) L=L.filter(h=>canalKey(h.marketplace)===anCanal);
   const q = String(anSku||'').trim().toLowerCase();
@@ -2072,7 +2084,7 @@ function renderAnalise(){
     const hOK = !!(HIST && HIST.de===iv.de && HIST.ate===iv.ate && HIST.totais);
     if(hOK){
       // garante a 1ª página das linhas do histórico
-      if(!HLIN || HLIN._de!==iv.de || HLIN._ate!==iv.ate){ carregarLinhasHist(iv.de, iv.ate, 1); }
+      if(!HLIN || HLIN._de!==iv.de || HLIN._ate!==iv.ate || (HLIN._canal||'')!==(anCanal||'')){ carregarLinhasHist(iv.de, iv.ate, 1); }
       // 01/08 — o resumo passa a RESPEITAR o filtro de canal. Antes mostrava sempre o total do
       // período inteiro (o servidor só mandava o agregado geral), então filtrar "MercadoLivre"
       // não mudava nada — e o resumo de cima discordava da lista de baixo.
