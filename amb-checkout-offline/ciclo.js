@@ -528,7 +528,27 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
       // não 40% dos pedidos despachados no mesmo minuto. Melhor não remover do que apagar etiqueta anexada.
       const limiteSeguro = Math.max(5, Math.ceil(Object.keys(man).length * 0.4));
       if (aRemover.length > limiteSeguro) {
-        console.log(`[AMBBKP] ⚠️ reconciliação ABORTADA: removeria ${aRemover.length} de ${Object.keys(man).length} pedidos — lista do Bling parece incompleta. Cache preservado.`);
+        // 02/08 — ANTES: abortava TUDO e o cache nunca encolhia. Numa empresa de volume menor a
+        // remoção normal passa dos 40% com facilidade (AMB: 49 de 71 = 69%), então a trava disparava
+        // em TODO ciclo. Pior: pedido preso no cache também nunca mais era reprocessado, porque a
+        // fila parte da lista do Bling — por isso os "sem etiqueta" fantasmas nunca resolviam.
+        // AGORA: em vez de confiar na proporção, PERGUNTAMOS ao Bling um por um. Só sai do cache
+        // quem o Bling confirmar que existe e NÃO está mais em ATENDIDO. Lista ruim do Bling continua
+        // sem apagar nada (a consulta individual falha ou devolve ATENDIDO), e limpeza legítima passa.
+        console.log(`[AMBBKP] reconciliação: ${aRemover.length} de ${Object.keys(man).length} candidatos a sair — acima do limite (${limiteSeguro}), conferindo um a um no Bling…`);
+        let confirmados = 0, mantidos = 0, semResposta = 0;
+        for (const id of aRemover) {
+          let det = null;
+          try { det = await detalhePedido(id); } catch (e) { det = null; }
+          if (!det) { semResposta++; continue; }                                  // Bling não respondeu → preserva
+          const sit = det.situacao && Number(det.situacao.id);
+          if (sit && sit === Number(SIT_ATENDIDO)) { mantidos++; continue; }      // ainda ATENDIDO → preserva
+          try { fs.rmSync(path.join(CACHE_DIR, String(id)), { recursive: true, force: true }); } catch (e) {}
+          delete man[id]; confirmados++;
+          await new Promise(r => setTimeout(r, PAUSA_MS || 220));
+        }
+        if (confirmados) salvarManifest(man);
+        console.log(`[AMBBKP] reconciliação conferida: ${confirmados} removido(s) · ${mantidos} seguem em ATENDIDO · ${semResposta} sem resposta do Bling (preservados)`);
       } else if (aRemover.length) {
         for (const id of aRemover) {
           try { fs.rmSync(path.join(CACHE_DIR, String(id)), { recursive: true, force: true }); } catch (e) {}
