@@ -163,6 +163,39 @@ CLASSIFIQUE em UMA destas 4 categorias:
      O grao vem do HISTORICO — o cliente NAO precisa repetir o numero. So NAO vale se ele
      citou 2+ graos diferentes (ai "todos" eh ambiguo: nao da pra saber quanto de cada).
 
+     CASO D — SUBSTITUICAO PONTUAL que fecha (cliente aceita um grao substituto):
+     Quando no HISTORICO ja existe uma lista de graos+quantidades e a UNICA pendencia era
+
+     um grao INDISPONIVEL (a loja recusou X e perguntou por qual trocar), e agora o cliente
+
+     indica o grao SUBSTITUTO — mesmo curto, tipo "pode ser 180", "manda 180", "o 180 entao",
+
+     "coloca no 180" — ENTENDA que a quantidade do grao recusado vai TODA pro grao substituto,
+
+     e FECHE. Isso equivale a: pegue a lista anterior do cliente, troque a linha do grao
+
+     recusado pela MESMA quantidade no grao substituto, e monte o pedido inteiro. Se o total
+
+     bater ${totalLixas} com graos validos e multiplos de ${unidadesPorPacote}, eh "claro" —
+
+     confirme direto, NAO pergunte "confirma?". O grao substituto TEM que estar na lista de
+
+     disponiveis; se nao estiver, ai sim eh "ambiguo".
+
+     Ex: historico "20 do 80, 30 do 150, 20 do 320, 20 do 400, 10 do 1500" (=100) mas g80
+
+     indisponivel; cliente diz "pode ser 180" -> troca as 20 do 80 por 20 do 180 ->
+
+     pedido final "20 do 180, 30 do 150, 20 do 320, 20 do 400, 10 do 1500" (=100) ✅ CLARO.
+
+     ATENCAO CRITICA: ao montar o pedido_estruturado nesse caso, INCLUA o grao substituto
+
+     com a quantidade que era do grao recusado. NAO devolva a lista sem ele (ficaria faltando
+
+     e o total nao fecharia). O erro a EVITAR: escrever "20un de g180" na mensagem mas deixar
+
+     o g180 DE FORA do pedido_estruturado.
+
    AÇÃO: Confirme de forma DECLARATIVA que o pedido foi registrado e JA VAI SEGUIR,
    listando EXATAMENTE os itens (inclusive os que voce completou no caso B), e ENCERRE
    avisando da postagem. NAO pergunte se esta correto, NAO convide a mudar, NAO termine
@@ -218,6 +251,10 @@ REGRAS RIGIDAS:
   com as quantidades que ele deu — MESMO que a soma nao feche ${totalLixas}. NAO remova um grao
   valido do pedido_estruturado so porque o total ficou errado (o sistema confere a soma sozinho;
   se voce tirar um grao valido, voce quebra essa conferencia e trava um pedido que estava certo).
+- SUBSTITUICAO: se o cliente aceitou um grao substituto (ver CASO D), o pedido_estruturado
+  TEM que CONTER esse grao substituto com a quantidade que era do grao recusado. A mensagem e o
+  pedido_estruturado tem que BATER: se voce escreve "20un de g180" na msg, o g180 com quantidade 20
+  PRECISA estar no pedido_estruturado. Nunca cite um item na mensagem e o omita do pedido_estruturado.
 - Voce PODE completar/montar a distribuicao quando o cliente pede VARIEDADE ou um
   pedido UNIFORME ("X de cada") que nao fecha — sempre em multiplos de ${unidadesPorPacote}
   e somando EXATAMENTE ${totalLixas}, usando so graos disponiveis.
