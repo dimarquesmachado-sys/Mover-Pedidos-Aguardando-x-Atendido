@@ -360,7 +360,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd179';
+const DASH_BUILD = 'd180';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -925,7 +925,7 @@ function dBR(d){
 // 02/08 — despesas do ML que NÃO são por pedido (publicidade, armazenagem Full, devolução) e
 // por isso nunca apareceram no dashboard. Vêm da API oficial de faturamento do ML, guardada em
 // disco pela rotina diária — aqui só lemos o resumo do período escolhido.
-let _mlbCache = {};
+let _mlbCache = {}, MLB_PER = null, MLB_CK = '';   // despesas do ML do período em exibição
 async function carregarDespesasML(){
   const iv = intervalo(); const ck = iv.de + '|' + iv.ate;
   const el = document.getElementById('mlbCards'); if(!el) return;
@@ -933,7 +933,11 @@ async function carregarDespesasML(){
   try{
     const r = await fetch(MOD+'/ml-billing-resumo?de='+iv.de+'&ate='+iv.ate, {credentials:'same-origin'});
     const d = await r.json().catch(()=>null);
-    if(d && d.ok){ _mlbCache[ck] = d; desenharDespesasML(d); }
+    if(d && d.ok){ _mlbCache[ck] = d; desenharDespesasML(d);
+      // 02/08: o Diego quer o topo como INDICADOR TOTAL — o card do Lucro passa a mostrar também
+      // o valor com as despesas do ML já descontadas. Guarda e redesenha.
+      MLB_PER = d; MLB_CK = ck; try{ render(); }catch(e){}
+    }
     else el.innerHTML = '<span class="dim">n\u00e3o consegui ler o faturamento do ML</span>';
   }catch(e){ el.innerHTML = '<span class="dim">n\u00e3o consegui ler o faturamento do ML</span>'; }
 }
@@ -1427,7 +1431,22 @@ function render(){
       : (MC.cusUn>=MC.unTot ? (N(MC.unTot)+' unidades vendidas')
       : avisoCom('sem custo em '+N(MC.unTot-MC.cusUn)+' de '+N(MC.unTot)+' un.', MC.semCustoSkus, 'cadastre o preço de custo destes SKUs no Bling e rode o custo-sync')))) +
     (MC.temCfg
-      ? '<div class="kpi" style="--kc:#14b8a6"><span class="ic">💎</span><div class="l">Lucro Bruto (M.C.)</div><div class="v '+((usaHist?HIST.totais.margem:MC.mc)>=0?'ok':'bad')+'">'+BRL(usaHist?HIST.totais.margem:MC.mc)+((usaHist?HIST.totais.faturamento:fat)>0?'<span style="font-size:13px;opacity:.8;font-weight:600"> · '+(Math.round((usaHist?HIST.totais.margem:MC.mc)/(usaHist?HIST.totais.faturamento:fat)*1000)/10).toString().replace('.',',')+'%</span>':'')+'</div><div class="s">'+(usaHist?'📚 do histórico completo do período':(MC.semDados?'<span class="warn">⚠ '+N(MC.pedOk)+' de '+N(totPed)+' pedidos com custo fechado (bate com a Análise)</span>':(MC.unTot&&MC.cusUn<MC.unTot?'<span class="warn">⚠ falta cadastrar o custo de '+N(MC.unTot-MC.cusUn)+' un. — o lucro real fica um pouco menor</span>':(MC.semCfg?avisoCom(N(MC.semCfg)+' pedido(s) sem taxa do canal', MC.semTaxaPed, 'configure a % do canal na seção ⚙️, lá embaixo'):'venda − imposto − comissão − frete − custo'))))+'</div></div>'
+      ? '<div class="kpi" style="--kc:#14b8a6"><span class="ic">💎</span><div class="l">Lucro Bruto (M.C.)</div><div class="v '+((usaHist?HIST.totais.margem:MC.mc)>=0?'ok':'bad')+'">'+BRL(usaHist?HIST.totais.margem:MC.mc)+((usaHist?HIST.totais.faturamento:fat)>0?'<span style="font-size:13px;opacity:.8;font-weight:600"> · '+(Math.round((usaHist?HIST.totais.margem:MC.mc)/(usaHist?HIST.totais.faturamento:fat)*1000)/10).toString().replace('.',',')+'%</span>':'')+'</div>'+
+        // 02/08 — LUCRO DEPOIS DAS DESPESAS DO ML. Publicidade, armazenagem e devolução são do
+        // período (não de um pedido), então não entram na margem por venda — mas o Diego quer o
+        // topo como indicador TOTAL. Mostramos as duas: a margem e o líquido.
+        (function(){
+          const iv2=intervalo();
+          if(!MLB_PER || MLB_CK!==(iv2.de+'|'+iv2.ate)) return '';
+          const c=MLB_PER.categorias||{};
+          const desp=(c.ads||0)+(c.full||0)+(c.devolucao||0)+(c.credito||0);
+          if(!desp) return '';
+          const liq=(usaHist?HIST.totais.margem:MC.mc)-desp;
+          return '<div style="font-size:12px;margin-top:2px;font-weight:700" class="'+(liq>=0?'ok':'bad')+'" '+
+                 'title="margem por venda menos as despesas do Mercado Livre do per\u00edodo (publicidade, armazenagem Full, devolu\u00e7\u00f5es e tarifas estornadas)">'+
+                 BRL(liq)+' <span class="mut" style="font-weight:400">ap\u00f3s despesas ML</span></div>';
+        })()+
+        '<div class="s">'+(usaHist?'\ud83d\udcda do hist\u00f3rico completo do per\u00edodo':(MC.semDados?'<span class="warn">⚠ '+N(MC.pedOk)+' de '+N(totPed)+' pedidos com custo fechado (bate com a Análise)</span>':(MC.unTot&&MC.cusUn<MC.unTot?'<span class="warn">⚠ falta cadastrar o custo de '+N(MC.unTot-MC.cusUn)+' un. — o lucro real fica um pouco menor</span>':(MC.semCfg?avisoCom(N(MC.semCfg)+' pedido(s) sem taxa do canal', MC.semTaxaPed, 'configure a % do canal na seção ⚙️, lá embaixo'):'venda − imposto − comissão − frete − custo'))))+'</div></div>'
       : '<div class="kpi" style="--kc:#64748b;cursor:pointer" onclick="document.getElementById(\'cfgBox\').scrollIntoView({behavior:\'smooth\'})"><span class="ic">💎</span><div class="l">Lucro Bruto (M.C.)</div><div class="v dim">—</div><div class="s warn">⚙️ configure as taxas por canal abaixo</div></div>') +
     kpi('var(--ac)','📊','Pedidos', N(totPed), (!usaHist && MC.semItens)?(avisoCom(N(MC.semItens)+' sem detalhe', MC.semDetPed, 'o sistema busca sozinho; dá pra forçar no botão ao lado')+' <button onclick="completarDetalhes()" title="o dashboard já busca sozinho ao abrir o período — este botão é só pra tentar de novo" style="background:#1d4ed8;color:#fff;border:0;border-radius:6px;padding:2px 7px;font-size:10px;font-weight:700;cursor:pointer">↻ tentar de novo</button><div id="avisoDet" style="font-size:10px;margin-top:2px"></div>'):(MC.unTot>0?('<b style="font-size:13px;color:var(--txt);opacity:1">'+N(usaHist?HIST.totais.unidades:MC.unTot)+' unidades vendidas</b>'):'sem itens no período')) +
     kpi('var(--warn)','🎯','Ticket Médio', BRL((usaHist?HIST.totais.faturamento:fat)/(totPed||1)), 'faturamento ÷ pedidos') +
