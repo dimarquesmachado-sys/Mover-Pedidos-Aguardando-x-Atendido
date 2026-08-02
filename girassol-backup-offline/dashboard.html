@@ -148,6 +148,10 @@
   /* campo com rótulo em cima (Plano de Compra) */
   /* totais da Análise: 3 por linha; a última linha estica pra preencher */
   .miniTot{flex:1 1 calc(33.33% - 6px);min-width:96px}
+  /* 02/08: na seção de despesas do ML são 5 caixas — com 33% cada, as duas últimas esticavam
+     pra meia tela num monitor largo. Aqui elas ganham um teto e ficam do mesmo tamanho. */
+  #mlbCards .miniTot{flex:0 1 210px;min-width:170px}
+  #mlbCards>div{gap:8px}
   /* 29/07: busca + Excel + ↻ num grupo indivisivel - antes o Excel caia sozinho numa linha
      quando os botoes de periodo ocupavam muito espaco. Agora eles andam sempre juntos. */
   .grpBusca{display:flex;gap:6px;align-items:center;flex:1 1 320px;min-width:260px}
@@ -360,7 +364,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd180';
+const DASH_BUILD = 'd181';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
