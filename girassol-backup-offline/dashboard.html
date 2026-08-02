@@ -360,7 +360,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd178';
+const DASH_BUILD = 'd179';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -922,6 +922,44 @@ function dBR(d){
   const m = t.match(/^(\d{4})-(\d{2})-(\d{2})/);
   return m ? (m[3]+'/'+m[2]+'/'+m[1]) : t;
 }
+// 02/08 — despesas do ML que NÃO são por pedido (publicidade, armazenagem Full, devolução) e
+// por isso nunca apareceram no dashboard. Vêm da API oficial de faturamento do ML, guardada em
+// disco pela rotina diária — aqui só lemos o resumo do período escolhido.
+let _mlbCache = {};
+async function carregarDespesasML(){
+  const iv = intervalo(); const ck = iv.de + '|' + iv.ate;
+  const el = document.getElementById('mlbCards'); if(!el) return;
+  if(_mlbCache[ck]){ desenharDespesasML(_mlbCache[ck]); return; }
+  try{
+    const r = await fetch(MOD+'/ml-billing-resumo?de='+iv.de+'&ate='+iv.ate, {credentials:'same-origin'});
+    const d = await r.json().catch(()=>null);
+    if(d && d.ok){ _mlbCache[ck] = d; desenharDespesasML(d); }
+    else el.innerHTML = '<span class="dim">n\u00e3o consegui ler o faturamento do ML</span>';
+  }catch(e){ el.innerHTML = '<span class="dim">n\u00e3o consegui ler o faturamento do ML</span>'; }
+}
+function desenharDespesasML(d){
+  const el = document.getElementById('mlbCards'); if(!el) return;
+  const c = d.categorias || {};
+  const linhas = [
+    ['\ud83d\udce2 Publicidade (Ads)', c.ads||0,        '#f59e0b', 'tarifas de campanha de an\u00fancios no per\u00edodo'],
+    ['\ud83d\udce6 Armazenagem Full',  c.full||0,        '#a78bfa', 'custo de guardar seu estoque no Full'],
+    ['\u21a9\ufe0f Devolu\u00e7\u00f5es',       c.devolucao||0,   '#f87171', 'tarifa de devolu\u00e7\u00e3o e frete de retorno'],
+    ['\ud83d\udcb5 Tarifas devolvidas', c.credito||0,    '#34d399', 'cobran\u00e7as que o ML estornou \u2014 entram a seu favor']
+  ];
+  const soma = (c.ads||0)+(c.full||0)+(c.devolucao||0)+(c.credito||0);
+  el.innerHTML = '<div style="display:flex;gap:8px;flex-wrap:wrap">'+
+    linhas.map(function(l){
+      return '<div class="miniTot" style="background:var(--card);border:1px solid var(--line);border-radius:9px;padding:7px 11px" title="'+l[3]+'">'+
+             '<div class="mut" style="font-size:9.5px;text-transform:uppercase;letter-spacing:.03em">'+l[0]+'</div>'+
+             '<div style="font-weight:800;font-size:13px;color:'+l[2]+'">'+BRL(l[1])+'</div></div>';
+    }).join('')+
+    '<div class="miniTot" style="background:var(--bg2);border:1px solid var(--line2);border-radius:9px;padding:7px 11px" title="soma das quatro caixas ao lado">'+
+      '<div class="mut" style="font-size:9.5px;text-transform:uppercase;letter-spacing:.03em">\u2211 impacto no per\u00edodo</div>'+
+      '<div style="font-weight:800;font-size:13px" class="'+(soma>0?'bad':'ok')+'">'+BRL(soma)+'</div></div>'+
+    '</div>'+
+    (d.atualizado ? ('<div class="mut" style="font-size:10px;margin-top:5px">faturamento do ML atualizado em '+dBR(String(d.atualizado).slice(0,10))+'</div>') : '');
+}
+
 function toggleCobertura(){
   const d=document.getElementById('coverTopoDet'); if(!d) return;
   d.style.display = (d.style.display==='none' || !d.style.display) ? 'block' : 'none';
@@ -1003,6 +1041,10 @@ function montar(){
   '</div></div>'+
   '<div class="wrap">'+
       '<div id="histAviso" style="font-size:12px;color:var(--mut);margin:0 0 8px"></div>'+'<div class="kpis" id="kpis"></div>'+
+    '<div class="sec" id="secMLB"><h2>\ud83d\udcb8 Despesas do Mercado Livre <span class="hint">do per\u00edodo \u00b7 fora da margem por pedido</span></h2>'+
+      '<div id="mlbCards" class="mut" style="font-size:12px">carregando\u2026</div>'+
+      '<div class="nota" style="margin-top:8px">Vêm do <b>faturamento oficial do ML</b> (o mesmo dos relat\u00f3rios em Faturamento \u2192 Relat\u00f3rios). S\u00e3o cobran\u00e7as do <b>per\u00edodo</b>, n\u00e3o de um pedido \u2014 por isso <b>n\u00e3o entram</b> no Lucro Bruto (M.C.) acima, que \u00e9 margem por venda. Para o lucro do m\u00eas, desconte estes valores.</div>'+
+    '</div>'+
     '<div class="sec" id="secBusca"><h2>🔍 Buscar Pedido e Lucro <span class="hint">nº do pedido · NF · nº da venda no marketplace · SKU · parte do título</span></h2>'+
       '<input id="qBusca" placeholder="digite e tecle Enter" '+
       'style="width:100%;background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:10px;padding:11px 14px;font-size:13px" '+
@@ -1237,6 +1279,7 @@ function render(){
     : '<button class="pill g covResumo" onclick="document.getElementById(\'cover\').classList.toggle(\'aberto\')">\u2705 dados completos <b>\u25be</b></button>';
   // 28/07: o indicador vive ao lado do "← checkout" e ABRE ALI MESMO. Antes ele mandava abrir
   // um bloco que fica noutro canto da tela, e por isso parecia que o clique não fazia nada.
+  try{ carregarDespesasML(); }catch(e){}   // 02/08: despesas do ML do período
   { const ct=document.getElementById('coverTopo'), cd=document.getElementById('coverTopoDet');
     if(ct) ct.innerHTML = (PER.length===0)
       ? '<button class="pill w covResumo" onclick="toggleCobertura()">∅ sem vendas no período <b>▾</b></button>'
