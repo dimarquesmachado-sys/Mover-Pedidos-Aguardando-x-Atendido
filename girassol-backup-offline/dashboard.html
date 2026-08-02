@@ -360,7 +360,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd177';
+const DASH_BUILD = 'd178';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -1670,7 +1670,7 @@ function renderPL(h){
   card.innerHTML =
     '<div class="sec" style="margin-top:12px;background:linear-gradient(160deg,#14201a,#131a30);border-color:#14b8a655">'+
     '<h2>💎 Pedido '+esc(h.numero||h.id)+' · '+esc(ck)+' · '+diaVenda(h)+
-    (h.numero_loja?' <span class="badge">venda '+esc(h.numero_loja)+(linkMkt(h)?' <a href="'+linkMkt(h)+'" target="_blank" rel="noopener" style="text-decoration:none" title="abrir esta venda no Mercado Livre">↗</a>':'')+'</span>':'')+(h.nf_numero?' <span class="badge">NF '+esc(h.nf_numero)+'</span>':'')+'</h2>'+
+    (h.numero_loja?' <span class="badge">venda '+esc(h.numero_loja)+(linkMkt(h)?' <a href="'+linkMkt(h)+'" target="_blank" rel="noopener" style="text-decoration:none" title="abrir esta venda no '+esc(nomeCanal(canalKey(h.marketplace)))+'">↗</a>':'')+'</span>':'')+(h.nf_numero?' <span class="badge">NF '+esc(h.nf_numero)+'</span>':'')+'</h2>'+
     '<table>'+
     linha('🏷️ Produtos (nota fiscal)', rp)+
     linha('🚚 Frete embutido (receita)', frete)+
@@ -2275,7 +2275,7 @@ function renderAnalise(){
         const par = [h.ml_pack, h.ml_order].map(x=>x!=null?String(x):null).find(x=>x && x!==nlV) || null;
         const um = (v,dim)=>'<span data-nl="'+esc(v)+'" onclick="copiaNL(this)" style="cursor:pointer;display:inline-block;max-width:126px;overflow:hidden;text-overflow:ellipsis;vertical-align:middle'+(dim?';opacity:.55;font-size:10px':'')+'" title="clique = copiar · '+esc(v)+'">'+esc(v)+'</span>';
         return '<td style="font-size:11px;max-width:170px;white-space:nowrap;color:var(--tx)">'+(nlV?(
-          um(nlV,false)+(linkMkt(h)?' <a href="'+linkMkt(h)+'" target="_blank" rel="noopener" style="text-decoration:none;font-size:12px" title="abrir esta venda no Mercado Livre">↗</a>':'')+
+          um(nlV,false)+(linkMkt(h)?' <a href="'+linkMkt(h)+'" target="_blank" rel="noopener" style="text-decoration:none;font-size:12px" title="abrir esta venda no '+esc(nomeCanal(canalKey(h.marketplace)))+'">↗</a>':'')+
           (par?'<br>'+um(par,true):'')
         ):'—')+'</td>';
       })()+
