@@ -364,7 +364,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd183';
+const DASH_BUILD = 'd184';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -1103,8 +1103,8 @@ function montar(){
       '<div class="tw twFit"><table id="tProd"></table></div><div id="prodAviso"></div></div>'+
     '<div class="sec" id="secCanal"><h2>🛒 Por Canal</h2><div class="tw twFit"><table id="tCanal"></table></div></div>'+
     '<div class="grid2">'+
-      '<div class="sec" id="secDia"><h2>📈 Pedidos por Dia</h2><div class="chartbox"><canvas id="cPed"></canvas></div></div>'+
-      '<div class="sec"><h2>💰 Faturamento por Dia</h2><div class="chartbox"><canvas id="cFat"></canvas></div></div>'+
+      '<div class="sec" id="secDia"><h2 id="hGrafPed">📈 Pedidos por Dia</h2><div class="chartbox"><canvas id="cPed"></canvas></div></div>'+
+      '<div class="sec"><h2 id="hGrafFat">💰 Faturamento por Dia</h2><div class="chartbox"><canvas id="cFat"></canvas></div></div>'+
     '</div>'+
     '<div class="sec" id="secProj"><h2>📦 Projeção de Estoque e Margem <span class="hint">ritmo de vendas p/ prever a reposição · clique p/ ordenar</span></h2>'+
       '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:10px">'+
@@ -1463,9 +1463,29 @@ function render(){
     (VENDAS.length?'<div class="kpi kpiVivo" style="--kc:#38bdf8"><span class="ic">🛰</span><div class="l">Ao Vivo</div><div class="v"><button onclick="sincVendas(this)" style="background:#38bdf822;border:1px solid #38bdf855;color:#7dd3fc;border-radius:8px;padding:5px 12px;cursor:pointer;font-weight:700;font-size:14px">🔄 atualizar</button></div><div class="s"><span id="ultAtualiz">atualiza sozinho</span> · a cada 3 min</div></div>':'') +
     '<div class="kpi" id="kMargem" style="display:none"></div>';
 
-  const dias = Object.keys(porDia).sort();
-  const labels = dias.map(d=>d.slice(8,10)+'/'+d.slice(5,7));
-  desenharCharts(labels, dias.map(d=>porDia[d].ped), dias.map(d=>Math.round(porDia[d].fat*100)/100));
+  // 03/08 (d184, pedido do Diego): periodo acima de ~35 dias agrupa os graficos POR MES
+  // (por dia nao cabe na tela) — e no periodo longo eles passam a ler o HISTORICO (HIST.dias),
+  // nao o cache local: antes o filtro Ano mostrava so a janela recente (comecava em 16/06).
+  const fonteDias = (usaHist && HIST.dias) ? (function(){ const o={}; for(const d of Object.keys(HIST.dias)){ const v=HIST.dias[d]||{}; o[d]={ped:(v.pedidos!=null?v.pedidos:(v.ped||0)), fat:(v.fat||0)}; } return o; })() : porDia;
+  const dias = Object.keys(fonteDias).sort();
+  const agrupaMes = dias.length>1 && ((new Date(dias[dias.length-1]) - new Date(dias[0]))/86400000 > 35);
+  let labels, sPed, sFat, sufTit;
+  if (agrupaMes){
+    const MN=['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
+    const agg={};
+    for(const d of dias){ const m=d.slice(0,7); if(!agg[m]) agg[m]={ped:0,fat:0}; agg[m].ped+=fonteDias[d].ped; agg[m].fat+=fonteDias[d].fat; }
+    const ms=Object.keys(agg).sort();
+    labels=ms.map(m=>MN[Number(m.slice(5,7))-1]+'/'+m.slice(2,4));
+    sPed=ms.map(m=>agg[m].ped); sFat=ms.map(m=>Math.round(agg[m].fat*100)/100);
+    sufTit='Mes';
+  } else {
+    labels=dias.map(d=>d.slice(8,10)+'/'+d.slice(5,7));
+    sPed=dias.map(d=>fonteDias[d].ped); sFat=dias.map(d=>Math.round(fonteDias[d].fat*100)/100);
+    sufTit='Dia';
+  }
+  try{ const hP=document.getElementById('hGrafPed'); if(hP) hP.textContent='\ud83d\udcc8 Pedidos por '+sufTit;
+       const hF=document.getElementById('hGrafFat'); if(hF) hF.textContent='\ud83d\udcb0 Faturamento por '+sufTit; }catch(e){}
+  desenharCharts(labels, sPed, sFat);
 
   if(usaHist){ porCanal = {}; for(const c of Object.keys(HIST.canais)){ const h2=HIST.canais[c]; porCanal[c]={ped:h2.pedidos, fat:h2.fat, comValor:h2.pedidos, flex:0}; } }
   const canais = Object.keys(porCanal).sort((a,b)=>porCanal[b].ped-porCanal[a].ped);
