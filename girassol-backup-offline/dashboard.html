@@ -364,7 +364,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd182';
+const DASH_BUILD = 'd183';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -1439,22 +1439,24 @@ function render(){
       : (MC.cusUn>=MC.unTot ? (N(MC.unTot)+' unidades vendidas')
       : avisoCom('sem custo em '+N(MC.unTot-MC.cusUn)+' de '+N(MC.unTot)+' un.', MC.semCustoSkus, 'cadastre o preço de custo destes SKUs no Bling e rode o custo-sync')))) +
     (MC.temCfg
-      ? '<div class="kpi" style="--kc:#14b8a6"><span class="ic">💎</span><div class="l">Lucro Bruto (M.C.)</div><div class="v '+((usaHist?HIST.totais.margem:MC.mc)>=0?'ok':'bad')+'">'+BRL(usaHist?HIST.totais.margem:MC.mc)+((usaHist?HIST.totais.faturamento:fat)>0?'<span style="font-size:13px;opacity:.8;font-weight:600"> · '+(Math.round((usaHist?HIST.totais.margem:MC.mc)/(usaHist?HIST.totais.faturamento:fat)*1000)/10).toString().replace('.',',')+'%</span>':'')+'</div>'+
-        // 02/08 — LUCRO DEPOIS DAS DESPESAS DO ML. Publicidade, armazenagem e devolução são do
-        // período (não de um pedido), então não entram na margem por venda — mas o Diego quer o
-        // topo como indicador TOTAL. Mostramos as duas: a margem e o líquido.
-        (function(){
-          const iv2=intervalo();
-          if(!MLB_PER || MLB_CK!==(iv2.de+'|'+iv2.ate)) return '';
-          const c=MLB_PER.categorias||{};
-          const desp=(c.ads||0)+(c.full||0)+(c.devolucao||0)+(c.credito||0);
-          if(!desp) return '';
-          const liq=(usaHist?HIST.totais.margem:MC.mc)-desp;
-          return '<div style="font-size:12px;margin-top:2px;font-weight:700" class="'+(liq>=0?'ok':'bad')+'" '+
-                 'title="margem por venda menos as despesas do Mercado Livre do per\u00edodo (publicidade, armazenagem Full, devolu\u00e7\u00f5es e tarifas estornadas)">'+
-                 BRL(liq)+' <span class="mut" style="font-weight:400">ap\u00f3s despesas ML</span></div>';
-        })()+
-        '<div class="s">'+(usaHist?'\ud83d\udcda do hist\u00f3rico completo do per\u00edodo':(MC.semDados?'<span class="warn">⚠ '+N(MC.pedOk)+' de '+N(totPed)+' pedidos com custo fechado (bate com a Análise)</span>':(MC.unTot&&MC.cusUn<MC.unTot?'<span class="warn">⚠ falta cadastrar o custo de '+N(MC.unTot-MC.cusUn)+' un. — o lucro real fica um pouco menor</span>':(MC.semCfg?avisoCom(N(MC.semCfg)+' pedido(s) sem taxa do canal', MC.semTaxaPed, 'configure a % do canal na seção ⚙️, lá embaixo'):'venda − imposto − comissão − frete − custo'))))+'</div></div>'
+      ? (function(){
+        // 03/08 (d183, pedido do Diego): UM valor só no card — o lucro JÁ COM as despesas do ML
+        // descontadas (Ads + armazenagem Full + devoluções). E CONSERTO do bug herdado: a soma
+        // antiga ainda incluía o CRÉDITO (estornos), o que fazia o "após despesas" SUBIR — o
+        // crédito é quase todo de venda cancelada, que já está fora do faturamento (mesma
+        // correção que o painel de despesas recebeu no d182, este card tinha ficado pra trás).
+        const mBase=(usaHist?HIST.totais.margem:MC.mc);
+        const iv2=intervalo();
+        const temD=(MLB_PER && MLB_CK===(iv2.de+'|'+iv2.ate));
+        const c=temD?(MLB_PER.categorias||{}):{};
+        const desp=(c.ads||0)+(c.full||0)+(c.devolucao||0);   // SEM o crédito, de propósito
+        const mFin=mBase-desp;
+        const fat2=(usaHist?HIST.totais.faturamento:fat);
+        return '<div class="kpi" style="--kc:#14b8a6"><span class="ic">\ud83d\udc8e</span><div class="l">Lucro Bruto (M.C.)</div><div class="v '+(mFin>=0?'ok':'bad')+'" '+
+               'title="venda \u2212 imposto \u2212 comiss\u00e3o \u2212 frete \u2212 custo'+(desp?' \u2212 despesas ML do per\u00edodo (Ads, armazenagem Full e devolu\u00e7\u00f5es \u2014 as tarifas estornadas ficam de fora: s\u00e3o de venda cancelada, que j\u00e1 n\u00e3o conta no faturamento)':'')+'">'+
+               BRL(mFin)+(fat2>0?'<span style="font-size:13px;opacity:.8;font-weight:600"> \u00b7 '+(Math.round(mFin/fat2*1000)/10).toLocaleString('pt-BR')+'%</span>':'')+'</div>'+
+               '<div class="s">venda \u2212 imposto \u2212 comiss\u00e3o \u2212 frete \u2212 custo'+(desp?' \u2212 Ads/Full/devolu\u00e7\u00f5es':'')+(usaHist?' \u00b7 \ud83d\udcda hist\u00f3rico completo':'')+'</div></div>';
+      })()
       : '<div class="kpi" style="--kc:#64748b;cursor:pointer" onclick="document.getElementById(\'cfgBox\').scrollIntoView({behavior:\'smooth\'})"><span class="ic">💎</span><div class="l">Lucro Bruto (M.C.)</div><div class="v dim">—</div><div class="s warn">⚙️ configure as taxas por canal abaixo</div></div>') +
     kpi('var(--ac)','📊','Pedidos', N(totPed), (!usaHist && MC.semItens)?(avisoCom(N(MC.semItens)+' sem detalhe', MC.semDetPed, 'o sistema busca sozinho; dá pra forçar no botão ao lado')+' <button onclick="completarDetalhes()" title="o dashboard já busca sozinho ao abrir o período — este botão é só pra tentar de novo" style="background:#1d4ed8;color:#fff;border:0;border-radius:6px;padding:2px 7px;font-size:10px;font-weight:700;cursor:pointer">↻ tentar de novo</button><div id="avisoDet" style="font-size:10px;margin-top:2px"></div>'):(MC.unTot>0?('<b style="font-size:13px;color:var(--txt);opacity:1">'+N(usaHist?HIST.totais.unidades:MC.unTot)+' unidades vendidas</b>'):'sem itens no período')) +
     kpi('var(--warn)','🎯','Ticket Médio', BRL((usaHist?HIST.totais.faturamento:fat)/(totPed||1)), 'faturamento ÷ pedidos') +
