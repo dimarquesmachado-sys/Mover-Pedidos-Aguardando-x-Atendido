@@ -364,7 +364,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd184';
+const DASH_BUILD = 'd185';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -989,7 +989,7 @@ function irPra(id){
   const y=el.getBoundingClientRect().top + window.pageYOffset - off;
   window.scrollTo({top:Math.max(0,y), behavior:'smooth'});
 }
-function setPeriodo(p){ periodo=p; espelharPeriodoNaAnalise(); comAncora(()=>{ render(); renderAnalise(); }); }
+function setPeriodo(p){ periodo=p; espelharPeriodoNaAnalise(); window._anForce=true; comAncora(()=>{ render(); renderAnalise(); }); }
 // d48: o seletor do TOPO é o botão MASTER — escolheu lá, a Análise de Vendas obedece junto.
 // (os chips da própria Análise continuam funcionando pra quem quiser um recorte diferente só nela)
 function espelharPeriodoNaAnalise(){
@@ -1065,7 +1065,7 @@ function montar(){
     '<div class="sec" id="secAnalise"><h2>📋 Análise de Vendas <span class="hint">margem por pedido · mais novas em cima</span></h2>'+
           '<div class="anPerLinha"><span id="anPerChips"></span><span id="anPerDatas"></span></div>'+
       '<div class="anBarra">'+
-      '<select id="anCanalSel" class="anSel" onchange="anCanal=this.value;anPage=0;renderAnalise()" style="background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:9px;padding:7px 10px;font-size:12.5px"></select>'+
+      '<select id="anCanalSel" class="anSel" onchange="anCanal=this.value;anPage=0;window._anForce=true;renderAnalise()" style="background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:9px;padding:7px 10px;font-size:12.5px"></select>'+
       '<input id="anSkuInp" class="anBusca" placeholder="🔎 pedido, NF, venda ou SKU…" oninput="anSku=this.value;anPage=0;renderAnalise()" style="background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:9px;padding:7px 10px;font-size:12.5px;width:210px">'+
       '<span id="anLPChips" style="display:flex;gap:6px"></span>'+
       '<button class="chip anAcao" onclick="sincVendas(this)" title="consulta o Bling AGORA — o sincronizador também roda sozinho a cada 5 min">🔄<span class="soDesk"> atualizar</span></button>'+
@@ -2095,7 +2095,7 @@ const anBuscaOk = q => h => {
   for (const a of alvos) { if (a != null && String(a).toLowerCase().includes(q)) return true; }
   return (h.itens || []).some(it => String(it.sku || '').toLowerCase().includes(q));
 };
-function setAnPer(p){ anPer=p; anPage=0; comAncora(()=>renderAnalise()); }
+function setAnPer(p){ anPer=p; anPage=0; window._anForce=true; comAncora(()=>renderAnalise()); }
 function anIntervalo(){
   const hoje = hojeSP();
   let de, ate = hoje;
@@ -2112,7 +2112,13 @@ function anIntervalo(){
 }
 function renderAnalise(){
   const sel=$('anCanalSel'); if(!sel) return;
-  if(window._anPintou && selAtiva()){ clearTimeout(window._selT2); window._selT2=setTimeout(renderAnalise,2500); return; }
+  // 03/08 (d185) — BUG: com TEXTO SELECIONADO na pagina (o Diego seleciona pra copiar e colar
+  // no chat), esta trava adiava o render PARA SEMPRE: a Analise congelava na pintura de "Hoje"
+  // enquanto os cards seguiam o filtro (7d/30d mostravam os mesmos 77 pedidos do dia). A trava
+  // continua valendo pros refreshes AUTOMATICOS (nao apagar selecao no meio de uma copia), mas
+  // TROCA DE FILTRO/CANAL e intencao explicita — renderiza mesmo com selecao (_anForce).
+  if(window._anPintou && selAtiva() && !window._anForce){ clearTimeout(window._selT2); window._selT2=setTimeout(renderAnalise,2500); return; }
+  window._anForce=false;
   window._anPintou = true;
   const pr=$('anPerChips'), pd=$('anPerDatas');
   if(pr){ const defs=[['dia','Hoje'],['ontem','Ontem'],['7','Semana'],['mes','Mês'],['mesant','Mês passado'],['ano','Ano'],['custom','Período…']];
