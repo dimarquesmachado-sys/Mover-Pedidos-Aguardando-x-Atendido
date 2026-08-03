@@ -364,7 +364,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd185';
+const DASH_BUILD = 'd186';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -1926,6 +1926,12 @@ function irCard(dir){
   const secs=_secoes(); if(!secs.length) return;
   const y=window.pageYOffset, tops=secs.map(_topoDe);
   let alvo;
+  // 03/08 (d186, pedido do Diego): estando no TOPO, a primeira seta \u25bc vai DIRETO pra
+  // An\u00e1lise de Vendas \u2014 pula Despesas do ML e Buscar Pedido, que ele n\u00e3o consulta nesse gesto.
+  if(dir>0 && y < 60){
+    const an = document.getElementById('secAnalise') || (function(){ const h=Array.prototype.slice.call(document.querySelectorAll('div.sec h2')).find(x=>/An\u00e1lise de Vendas/.test(x.textContent||'')); return h?h.closest('div.sec'):null; })();
+    if(an){ window.scrollTo({top:Math.max(0,_topoDe(an)), behavior:'smooth'}); return; }
+  }
   if(dir>0) alvo = tops.find(t=>t > y+4);
   else { const ant=tops.filter(t=>t < y-4); alvo = ant.length?ant[ant.length-1]:0; }
   if(alvo==null) alvo = dir>0 ? document.body.scrollHeight : 0;
