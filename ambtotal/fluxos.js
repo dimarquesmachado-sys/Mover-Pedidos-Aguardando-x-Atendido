@@ -13,6 +13,32 @@ const {
 const { getShipmentInfo, getShipmentSubstatus } = require('./mlApi');
 
 const MAX_F1 = parseInt(process.env.AMB_MAX_PEDIDOS_F1 || '40');
+
+// ── 04/08: RE-MOVE (o Bling desfaz o nosso movimento) ─────────────────────────
+// Portado da GOOD, onde o caso foi provado no pedido 74493 (Bling 26501022094): o ML diz
+// status=pending/substatus=buffered (etiqueta só sai no dia da coleta), o F1 decide mover,
+// o PATCH volta com sucesso ("→ situação ... ✓") e o Bling registra a ocorrência — mas o
+// pedido reaparece em ATENDIDO. Antes disso o F1 marcava o pedido como "já processado" no
+// sucesso e não tentava mais naquele dia, então ele passava o dia entupindo a fila do
+// estoquista. Agora RETENTA — com freio, porque cada tentativa é uma chamada no Bling (que
+// já trabalha no teto do 429) e uma ocorrência nova no histórico do pedido:
+//   • espera AMB_F1_REMOVE_ESPERA_MIN minutos entre tentativas do MESMO pedido (padrão 15)
+//   • no máximo AMB_F1_REMOVE_MAX tentativas por pedido por dia (padrão 8); depois desiste
+//     até a virada, pra não ficar em ping-pong infinito com o Bling
+// O freio natural continua sendo a própria regra: no ciclo em que o ML liberar a etiqueta,
+// temEtiquetaML passa a devolver true e o F1 simplesmente para de mover.
+const REMOVE_MAX       = parseInt(process.env.AMB_F1_REMOVE_MAX || '8');
+const REMOVE_ESPERA_MS = parseInt(process.env.AMB_F1_REMOVE_ESPERA_MIN || '15') * 60000;
+const _reMove = new Map();   // idPedido -> { dia, n, ultimo }
+function _tentativas(id) {
+  const hoje = new Date().toISOString().slice(0, 10);
+  const r = _reMove.get(id);
+  if (r && r.dia === hoje) return r;
+  if (_reMove.size > 2000) { for (const [k, v] of _reMove) if (v.dia !== hoje) _reMove.delete(k); }
+  const novo = { dia: hoje, n: 0, ultimo: 0 };
+  _reMove.set(id, novo);
+  return novo;
+}
 const MAX_F2 = parseInt(process.env.AMB_MAX_PEDIDOS_F2 || '60');
 
 const _rodando = { F1: false, F2: false };
@@ -83,6 +109,10 @@ async function _fluxo1(token) {
   let movidos = 0, pulados = 0, ignorados = 0;
   for (const p of batch) {
     if (jaProcessado('F1', p.id)) { pulados++; continue; }
+    // Ja movemos este pedido hoje e ele voltou pra ATENDIDO: espera o intervalo antes de
+    // insistir. Fica ANTES do detalhe de proposito — evita gastar chamada do Bling a toa.
+    const _rm = _tentativas(p.id);
+    if (_rm.n > 0 && (Date.now() - _rm.ultimo) < REMOVE_ESPERA_MS) { pulados++; continue; }
     if (!isMercadoEnviosPorLoja(p)) { ignorados++; continue; }
     let pDetalhe = p;
     try {
@@ -117,7 +147,12 @@ async function _fluxo1(token) {
     try {
       await alterarSituacao(token, p.id, SITUACAO_AGUARDANDO);
       movidos++;
-      marcarProcessado('F1', p.id);
+      _rm.n++; _rm.ultimo = Date.now();
+      if (_rm.n > 1) console.log(`[AMB F1] Pedido ${p.id} tinha VOLTADO pra ATENDIDO (o Bling desfez) — movido de novo | tentativa ${_rm.n}/${REMOVE_MAX} hoje`);
+      if (_rm.n >= REMOVE_MAX) {
+        console.log(`[AMB F1] Pedido ${p.id} voltou ${_rm.n}x hoje — desistindo ate a virada. Se persistir, e configuracao do Bling (mapeamento da integracao do ML), nao do nosso lado`);
+        marcarProcessado('F1', p.id);
+      }
     } catch (e) {
       if (e.code === 401 || e.message === 'TOKEN_EXPIRADO') throw e;
       console.error(`[AMB F1] Erro ao mover ${p.id}:`, e.message);
