@@ -364,7 +364,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd186';
+const DASH_BUILD = 'd187';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -970,6 +970,28 @@ function desenharDespesasML(d){
       '<div style="font-weight:800;font-size:13px" class="'+(soma>0?'bad':'ok')+'">'+BRL(soma)+'</div></div>'+
     '</div>'+
     (d.atualizado ? ('<div class="mut" style="font-size:10px;margin-top:5px">faturamento do ML atualizado em '+dBR(String(d.atualizado).slice(0,10))+'</div>') : '');
+}
+
+// 04/08 (d187): a M.C. deste resumo SEMPRE deu diferente do card \ud83d\udc8e l\u00e1 em cima, e isso
+// confundia. N\u00c3O \u00e9 diverg\u00eancia: o card \u00e9 o lucro do PER\u00cdODO (desconta Ads, armazenagem Full e
+// devolu\u00e7\u00f5es, que s\u00e3o cobran\u00e7as de campanha/per\u00edodo e n\u00e3o pertencem a pedido nenhum \u2014 Ads e
+// Full nem trazem n\u00famero de venda no relat\u00f3rio do ML) e este resumo \u00e9 a soma da margem POR
+// PEDIDO. A diferen\u00e7a \u00e9 sempre exatamente o \u2211 sai do bolso. Agora a conta fica escrita na tela.
+function despesasMLper(){
+  const iv2 = intervalo();
+  if(!(MLB_PER && MLB_CK === (iv2.de+'|'+iv2.ate))) return 0;
+  const c = MLB_PER.categorias || {};
+  return (c.ads||0)+(c.full||0)+(c.devolucao||0);   // SEM o cr\u00e9dito, igual ao card e ao painel de despesas
+}
+function notaBateCard(mcPed, filtrado){
+  const d = despesasMLper();
+  // com filtro de canal ou busca por texto a conta N\u00c3O fecha (o card de cima \u00e9 sempre do per\u00edodo
+  // inteiro), ent\u00e3o a nota some em vez de mostrar uma igualdade que n\u00e3o bate.
+  if(!d || filtrado || mcPed == null) return '';
+  return '<div class="nota" style="margin-bottom:10px">\ud83d\udc8e M.C. por pedido <b>'+BRL(mcPed)+'</b> \u2212 '+
+         'despesas do ML no per\u00edodo <b>'+BRL(d)+'</b> = <b>'+BRL(mcPed-d)+'</b> \u2014 que \u00e9 o valor do card '+
+         '\ud83d\udc8e Lucro Bruto l\u00e1 em cima. Ads, armazenagem Full e devolu\u00e7\u00f5es s\u00e3o cobran\u00e7as do '+
+         'PER\u00cdODO, n\u00e3o de um pedido \u2014 por isso n\u00e3o entram na margem pedido a pedido.</div>';
 }
 
 function toggleCobertura(){
@@ -2217,7 +2239,8 @@ function renderAnalise(){
         mini2('\ud83d\udc8e M.C.',BRL(T.margem),T.margem>=0?'#34d399':'#f87171')+
         mini2('Pedidos',N(T.pedidos))+
       '</div>'+
-      '<div class="nota" style="margin-bottom:10px"><b>\ud83d\udcda Hist\u00f3rico:</b> '+N(T.pedidos)+' pedidos e '+N(T.itens)+' itens no per\u00edodo. A lista abaixo vem do banco, 100 pedidos por p\u00e1gina.</div>';
+      '<div class="nota" style="margin-bottom:10px"><b>\ud83d\udcda Hist\u00f3rico:</b> '+N(T.pedidos)+' pedidos e '+N(T.itens)+' itens no per\u00edodo. A lista abaixo vem do banco, 100 pedidos por p\u00e1gina.</div>' +
+      notaBateCard(T.margem, !!(anCanal || (anSku && String(anSku).trim())));
       renderHistLinhas(iv);
       return;
     }
@@ -2234,7 +2257,7 @@ function renderAnalise(){
       mini('Frete vendedor',BRL(rF),'#f87171')+
       mini('\ud83d\udc8e M.C.',BRL(rM)+' <span style="font-size:10px;color:var(--mut)">('+rMn+'/'+rN+' c/ margem)</span>', rM>=0?'#34d399':'#f87171')+
       (rDev? mini('\ud83d\udd34 Devolu\u00e7\u00f5es', rDev+' <span style="font-size:10px;color:var(--mut)">'+(rDevAb?'('+rDevAb+' aberta'+(rDevAb>1?'s':'')+') · ':'')+'frete ret. '+BRL(rDevFrete)+'</span>', '#f87171') : '')+
-    '</div>' : '';
+    '</div>' + notaBateCard(rMn?rM:null, !!(anCanal || (anSku && String(anSku).trim()))) : '';
   })();
   (function(){
     const rp = document.getElementById('anRodape'); if(!rp) return;
