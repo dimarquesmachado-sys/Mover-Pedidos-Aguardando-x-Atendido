@@ -70,6 +70,33 @@ async function temEtiquetaML(mlToken, numeroLoja) {
 // que serve de prova.
 const _movidosPorNos = new Map();
 
+// ── 04/08: FREIO + RE-MOVE ────────────────────────────────────────────────────
+// A Girassol já detectava o desfeito e já conferia se o PATCH pegou de verdade (bloco de
+// 30/07 mais abaixo). Faltavam duas coisas:
+//  (a) quando o Bling ACEITA e não aplica (ou não dá pra conferir), o pedido não é marcado
+//      como feito — então o F1 reinsistia A CADA 3 MINUTOS, sem teto, o dia inteiro;
+//  (b) quando o Bling DESFAZ um move já confirmado, o pedido voltava pra ATENDIDO mas o
+//      `jaProcessado` daquele dia continuava valendo, então ele NÃO era movido de novo e
+//      passava o resto do dia na fila do estoquista.
+// Agora o desfeito DESTRAVA o pedido (move de novo, igual GOOD e AMBTotal) e toda tentativa
+// passa por um freio — cada uma custa chamada no Bling (que já trabalha no teto do 429) e
+// escreve uma ocorrência nova no histórico do pedido:
+//   • espera F1_REMOVE_ESPERA_MIN minutos entre tentativas do MESMO pedido (padrão 15)
+//   • no máximo F1_REMOVE_MAX tentativas por pedido por dia (padrão 8); depois desiste até
+//     a virada, pra não ficar em ping-pong infinito com o Bling
+const REMOVE_MAX       = parseInt(process.env.F1_REMOVE_MAX || '8');
+const REMOVE_ESPERA_MS = parseInt(process.env.F1_REMOVE_ESPERA_MIN || '15') * 60000;
+const _reMove = new Map();   // idPedido -> { dia, n, ultimo, destravado }
+function _tentativas(id) {
+  const hoje = new Date().toISOString().slice(0, 10);
+  const r = _reMove.get(id);
+  if (r && r.dia === hoje) return r;
+  if (_reMove.size > 2000) { for (const [k, v] of _reMove) if (v.dia !== hoje) _reMove.delete(k); }
+  const novo = { dia: hoje, n: 0, ultimo: 0, destravado: false, desistiu: false };
+  _reMove.set(id, novo);
+  return novo;
+}
+
 async function _fluxo1(token) {
   const { inicial, final } = getPeriodo();
   const lista = await getPedidosPorStatus(token, SITUACAO_ATENDIDO, inicial, final);
@@ -89,6 +116,7 @@ async function _fluxo1(token) {
   let movidos = 0, pulados = 0, ignorados = 0;
   let naoAplicados = 0, desfeitos = 0;   // 30/07: Bling aceitou mas não aplicou / desfez depois
   for (const p of batch) {
+    const _rm = _tentativas(p.id);
     // 30/07: se ESTE pedido já foi movido por nós e está de volta na lista de ATENDIDO,
     // alguém desfez. Registramos com os dois horários — é a prova pro ticket do Bling.
     {
@@ -101,9 +129,17 @@ async function _fluxo1(token) {
           `${min} min depois (agora ${new Date().toISOString()}). Não foi a nossa API — provável mapeamento automático do ML no Bling.`);
         _movidosPorNos.delete(String(p.id));
         desfeitos++;
+        // 04/08: o pedido tinha sido marcado como feito quando o move foi confirmado; como o
+        // Bling desfez, destrava pra ele voltar a ser movido (o freio abaixo segura o ritmo).
+        // Se já desistimos deste pedido hoje (teto batido), NÃO destrava — senão o desfeito
+        // reabria o pedido a cada ciclo e o teto nunca valia.
+        if (!_rm.desistiu) _rm.destravado = true;
       }
     }
-    if (jaProcessado('F1', p.id)) { pulados++; continue; }
+    if (!_rm.destravado && jaProcessado('F1', p.id)) { pulados++; continue; }
+    // Já tentamos este pedido hoje: espera o intervalo antes de insistir. Fica ANTES do
+    // detalhe de propósito — evita gastar chamada do Bling à toa.
+    if (_rm.n > 0 && (Date.now() - _rm.ultimo) < REMOVE_ESPERA_MS) { pulados++; continue; }
     if (!isMercadoEnviosPorLoja(p)) { ignorados++; continue; }
     let pDetalhe = p;
     try {
@@ -139,6 +175,9 @@ async function _fluxo1(token) {
     // Sem etiqueta → move para AGUARDANDO
     try {
       await alterarSituacao(token, p.id, SITUACAO_AGUARDANDO);
+      // 04/08: conta a tentativa (toda chamada custa API e escreve ocorrência no pedido)
+      _rm.n++; _rm.ultimo = Date.now();
+      if (_rm.n > 1) console.log(`[F1] Pedido ${p.id} — nova tentativa de mover pra AGUARDANDO | ${_rm.n}/${REMOVE_MAX} hoje`);
       // ── 30/07: CONFERE SE PEGOU ─────────────────────────────────────────────────────────────
       // Caso real (pedidos 117517 e 117610): o Bling ACEITA a chamada, registra a ocorrência
       // "Situação alterada via API v3", responde sucesso — e depois o pedido volta pra ATENDIDO
@@ -168,6 +207,13 @@ async function _fluxo1(token) {
           `: pedi situação ${SITUACAO_AGUARDANDO} (AGUARDANDO) e ao reler ele está em ${conferiu}. ` +
           `Sem marcar como feito — o próximo ciclo tenta de novo. ` +
           `Registrado em ${new Date().toISOString()}`);
+      }
+      if (_rm.n >= REMOVE_MAX && !_rm.desistiu) {
+        console.log(`[F1] Pedido ${p.id} — ${_rm.n} tentativas hoje, desistindo até a virada. ` +
+          `Se persistir, é configuração do Bling (mapeamento da integração do ML), não do nosso lado`);
+        _rm.desistiu = true;
+        _rm.destravado = false;
+        marcarProcessado('F1', p.id);
       }
     } catch (e) {
       if (e.code === 401 || e.message === 'TOKEN_EXPIRADO') throw e;
