@@ -32,7 +32,11 @@ const { json, ehAdmin } = base;
 let _pes = {
   rodando: false, fase: 'parado', de: null, ate: null,
   alvos: 0, pescados: 0, gravados: 0, sem_fee: 0, erros: 0, linhas_gravadas: 0,
-  comissao_recuperada: 0, inicio: null, fim: null, msg: '', ultimo: null
+  comissao_recuperada: 0, inicio: null, fim: null, msg: '', ultimo: null,
+  // 04/08 v2: sem isto a rodada de 21:08 devolveu 1.948 "sem_fee" e não deu pra saber POR QUÊ.
+  http: { ok: 0, r404: 0, r429: 0, outros: 0, pack_ok: 0, pack_falhou: 0, esperas: 0 },
+  sem_fee_prefixo_ml: 0,   // quantos dos "sem fee" são linhas ML- (as que vieram do marketplace, não do Bling)
+  exemplos_sem_fee: []     // até 8 amostras dos que falharam, com o status HTTP — pra não ficar no escuro de novo
 };
 
 function rotasPescaria(ctx) {
@@ -43,6 +47,67 @@ function rotasPescaria(ctx) {
     const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
     const s = validarSessao(req.headers['cookie']);
     return (process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || (s && ehAdmin(s));
+  }
+
+  // ── v2 (04/08): buscador de sale_fee PRÓPRIO, leve e paciente ──────────────
+  // Na 1ª rodada em massa eu usei o pescarDadosML, que faz 3 a 4 chamadas por pedido
+  // (pedido + envio + custos). Pra pescaria só interessa o sale_fee — as outras duas
+  // eram jogadas fora e ainda somavam pressão na API. Resultado: 2.947 pedidos em 38
+  // minutos, ~4 chamadas/s sustentadas, e 1.948 voltaram "sem fee" SEM erro nenhum —
+  // cara de 429 engolido (o pescarDadosML trata qualquer resposta ruim como "não achei").
+  // Agora: 1 chamada por pedido, espera crescente no 429, e cada status contabilizado.
+  async function feeDoML(nl, tk) {
+    const id = String(nl || '').replace(/\D/g, '');
+    if (!id || !tk) return { fee: null, status: 0, via: null };
+    const H = { headers: { Authorization: 'Bearer ' + tk } };
+    const esperas = [2000, 4000, 8000, 15000, 25000];
+    for (let t2 = 0; t2 <= esperas.length; t2++) {
+      let r;
+      try { r = await fetch('https://api.mercadolibre.com/orders/' + id, H); }
+      catch (e) { _pes.http.outros++; return { fee: null, status: 0, via: 'excecao' }; }
+      if (r.status === 429) {                      // rate limit: espera e insiste
+        _pes.http.r429++;
+        if (t2 === esperas.length) return { fee: null, status: 429, via: 'desistiu' };
+        _pes.http.esperas++;
+        await dorme(esperas[t2]);
+        continue;
+      }
+      if (r.ok) {
+        const d = await r.json().catch(() => null);
+        _pes.http.ok++;
+        return { fee: somaFee(d ? [d] : []), status: 200, via: 'order' };
+      }
+      if (r.status === 404) {                      // pode ser PACK (carrinho)
+        _pes.http.r404++;
+        const rp = await fetch('https://api.mercadolibre.com/packs/' + id, H).catch(() => null);
+        const dp = rp && rp.ok ? await rp.json().catch(() => null) : null;
+        if (!dp || !Array.isArray(dp.orders) || !dp.orders.length) { _pes.http.pack_falhou++; return { fee: null, status: 404, via: 'nem-pack' }; }
+        const ords = [];
+        for (const oq of dp.orders) {
+          try {
+            const ro = await fetch('https://api.mercadolibre.com/orders/' + (oq.id || oq), H);
+            if (ro.ok) { const doo = await ro.json().catch(() => null); if (doo) ords.push(doo); }
+          } catch (e) {}
+          await dorme(200);
+        }
+        if (!ords.length) { _pes.http.pack_falhou++; return { fee: null, status: 404, via: 'pack-vazio' }; }
+        _pes.http.pack_ok++;
+        return { fee: somaFee(ords), status: 200, via: 'pack' };
+      }
+      _pes.http.outros++;
+      return { fee: null, status: r.status, via: 'http' };
+    }
+    return { fee: null, status: 0, via: null };
+  }
+  function somaFee(ords) {
+    let fee = 0;
+    for (const od of (ords || [])) {
+      for (const it of (od.order_items || [])) {
+        const q = Number(it.quantity || 1), sf = Number(it.sale_fee || 0);
+        if (isFinite(sf)) fee += sf * q;
+      }
+    }
+    return Math.round(fee * 100) / 100;
   }
 
   // GET direto no Supabase (o supaReq só devolve texto; aqui precisamos do JSON)
@@ -122,7 +187,9 @@ function rotasPescaria(ctx) {
   // Rodada em massa, em segundo plano.
   async function rodarMassa(de, ate, max) {
     _pes = { rodando: true, fase: 'listando', de, ate, alvos: 0, pescados: 0, gravados: 0, sem_fee: 0, erros: 0,
-             linhas_gravadas: 0, comissao_recuperada: 0, inicio: new Date().toISOString(), fim: null, msg: '', ultimo: null };
+             linhas_gravadas: 0, comissao_recuperada: 0, inicio: new Date().toISOString(), fim: null, msg: '', ultimo: null,
+             http: { ok: 0, r404: 0, r429: 0, outros: 0, pack_ok: 0, pack_falhou: 0, esperas: 0 },
+             sem_fee_prefixo_ml: 0, exemplos_sem_fee: [] };
     try {
       const { alvos } = await alvosDoPeriodo(de, ate);
       _pes.alvos = alvos.length;
@@ -132,16 +199,21 @@ function rotasPescaria(ctx) {
       const lista = alvos.slice(0, max);
       for (const reg of lista) {
         try {
-          const dados = await pescarDadosML(reg.numero_loja, tk, dorme);
+          const d2 = await feeDoML(reg.numero_loja, tk);
           _pes.pescados++;
           _pes.ultimo = reg.numero_pedido;
-          const fee = dados && Number(dados.fee);
-          if (!dados || !isFinite(fee) || fee <= 0) { _pes.sem_fee++; await dorme(300); continue; }
+          const fee = Number(d2.fee);
+          if (!isFinite(fee) || fee <= 0) {
+            _pes.sem_fee++;
+            if (/^ML-/i.test(reg.numero_pedido)) _pes.sem_fee_prefixo_ml++;
+            if (_pes.exemplos_sem_fee.length < 8) _pes.exemplos_sem_fee.push({ pedido: reg.numero_pedido, numero_loja: reg.numero_loja, data: reg.data_venda, http: d2.status, via: d2.via });
+            await dorme(260); continue;
+          }
           const g = await gravarPedido(reg, fee);
           if (g.ok) { _pes.gravados++; _pes.linhas_gravadas += g.linhas; _pes.comissao_recuperada = Math.round((_pes.comissao_recuperada + fee) * 100) / 100; }
           else { _pes.erros++; _pes.msg = g.erro || ''; }
         } catch (e) { _pes.erros++; _pes.msg = String(e.message || e); }
-        await dorme(350);   // fôlego pro ML e pro Supabase
+        await dorme(260);   // fôlego pro ML e pro Supabase (1 chamada por pedido agora)
       }
       _pes.fase = 'concluido';
     } catch (e) {
@@ -232,19 +304,21 @@ function rotasPescaria(ctx) {
         valorEnvolvido += a.valor;
       }
       const exemplos = [];
+      _pes.http = { ok: 0, r404: 0, r429: 0, outros: 0, pack_ok: 0, pack_falhou: 0, esperas: 0 };
       let tk = null;
       try { tk = await tokenDoML(); } catch (e) {}
       if (tk) {
         for (const a of alvos.slice(0, amostra)) {
           try {
-            const d = await pescarDadosML(a.numero_loja, tk, dorme);
-            const fee = d && Number(d.fee);
+            const d = await feeDoML(a.numero_loja, tk);
+            const fee = Number(d.fee);
             exemplos.push({
               pedido: a.numero_pedido, numero_loja: a.numero_loja, data: a.data_venda,
               valor_produtos: Math.round(a.valor * 100) / 100,
               comissao_gravada: Math.round(a.comissao * 100) / 100,
               comissao_real_ml: isFinite(fee) ? fee : null,
-              pct: (isFinite(fee) && a.valor > 0) ? Math.round(fee / a.valor * 1000) / 10 : null
+              pct: (isFinite(fee) && a.valor > 0) ? Math.round(fee / a.valor * 1000) / 10 : null,
+              http: d.status, via: d.via
             });
           } catch (e) { exemplos.push({ pedido: a.numero_pedido, erro: String(e.message || e) }); }
           await dorme(300);
@@ -257,6 +331,7 @@ function rotasPescaria(ctx) {
         valor_envolvido: Math.round(valorEnvolvido * 100) / 100,
         por_mes: porMes,
         exemplos,
+        http_da_amostra: _pes.http,
         aviso: 'NADA foi gravado. Pra aplicar em UM pedido: &pedido=NUMERO&gravar=1. Pra rodar o período: &massa=1&gravar=1&max=N',
         token_ml: tk ? 'ok' : 'INDISPONÍVEL — sem ele a pescaria não roda'
       });
