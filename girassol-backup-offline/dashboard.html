@@ -364,13 +364,13 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd189';
+const DASH_BUILD = 'd190';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
 let periodo = 'dia', pDe = '', pAte = '';   // abre no DIA (pedido do Diego)
 let SKUINFO = {}, skuInfoCarregado = false, _skuLoading = false;
-let CFG = { aliquotas:{}, taxas:{} };   // alíquota Simples por mês (YYYY-MM: %) + tarifa % por canal
+let CFG = { aliquotas:{}, taxas:{}, ciencia_aliq:{} };   // alíquota Simples por mês (YYYY-MM: %) + tarifa % por canal + ciência das herdadas
 let MAG_NIVEL = '50';   // nível de desconto do frete Magalu (coparticipação): 'sem'|'25'|'50' (default 50%)
 // Alíquotas 2026 da GIRASSOL vindas de fábrica (editáveis no ⚙️; o que você salvar SOBREPÕE estas):
 const DEFAULT_ALIQ = { '2026-01':11.409280, '2026-02':11.3254, '2026-03':12.3402, '2026-04':13.6001, '2026-05':13.9149, '2026-06':14.056, '2026-07':14.1 };
@@ -880,7 +880,7 @@ async function boot(){
     DADOS = d.itens;
     VENDAS = Array.isArray(d.vendas_bling) ? d.vendas_bling : [];
     prepararVendas();
-    try{ const rc = await fetch(MOD+'/config-fiscal',{credentials:'same-origin'}); const dc = await rc.json(); if(dc&&dc.config) CFG = { aliquotas: dc.config.aliquotas||{}, taxas: dc.config.taxas||{}, flex: dc.config.flex||{} }; }catch(e){}
+    try{ const rc = await fetch(MOD+'/config-fiscal',{credentials:'same-origin'}); const dc = await rc.json(); if(dc&&dc.config) CFG = { aliquotas: dc.config.aliquotas||{}, taxas: dc.config.taxas||{}, flex: dc.config.flex||{}, ciencia_aliq: dc.config.ciencia_aliq||{} }; }catch(e){}
     try{ const rm = await fetch(MOD+'/config-frete-magalu',{credentials:'same-origin'}); const dm = await rm.json(); if(dm&&dm.config&&dm.config.nivel_desconto) MAG_NIVEL = dm.config.nivel_desconto; }catch(e){}
     montar();
   }catch(e){
@@ -1091,6 +1091,7 @@ function montar(){
     '</div>'+
   '</div></div>'+
   '<div class="wrap">'+
+      '<div id="avisoAliq"></div>'+
       '<div id="histAviso" style="font-size:12px;color:var(--mut);margin:0 0 8px"></div>'+'<div class="kpis" id="kpis"></div>'+
     '<div class="sec" id="secMLB"><h2>\ud83d\udcb8 Despesas do Mercado Livre <span class="hint">do per\u00edodo \u00b7 fora da margem por pedido</span></h2>'+
       '<div id="mlbCards" class="mut" style="font-size:12px">carregando\u2026</div>'+
@@ -1608,12 +1609,62 @@ function render(){
 
   renderProjChips(); renderProjecao();
   renderCfg();
+  try{ renderAvisoAliq(); }catch(e){ console.error('[dashboard] aviso de aliquota:', e); }
   renderGrafico();
   renderAnalise();
   renderPrevisao(); carregarPrevisao();
   carregarPlano();
   ajustaSticky();
   montarNavCards();
+}
+
+// ── 05/08 (d190): AVISO DE ALIQUOTA HERDADA, com CIENCIA registrada ────────────
+// A heranca do d189 evita o imposto ZERO, mas heranca silenciosa vira erro silencioso.
+// Entao o painel avisa NO TOPO, em vermelho, e so para de avisar quando o Diego (a) preenche
+// a aliquota do mes ou (b) da CIENCIA — que fica gravada no servidor com quem e quando.
+// Se o mes de origem mudar, a ciencia daquele mes deixa de valer e o aviso volta sozinho.
+const NM_MES = ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
+const rotuloMes = m => NM_MES[Number(String(m).slice(5,7))-1] + '/' + String(m).slice(2,4);
+function herdadasPendentes(){
+  const out = [];
+  for (const par of _aliqHerdadas) {
+    const [mes, de] = par.split('\u2190');
+    const ci = (CFG.ciencia_aliq || {})[mes];
+    if (!ci || ci.de !== de) out.push({ mes, de });
+  }
+  return out;
+}
+function renderAvisoAliq(){
+  const box = $('avisoAliq'); if (!box) return;
+  const pend = herdadasPendentes();
+  if (!pend.length) { box.innerHTML = ''; return; }
+  const lista = pend.map(p => '<b>'+rotuloMes(p.mes)+'</b> usando a de <b>'+rotuloMes(p.de)+'</b> ('+_aliqBruta(p.de)+'%)').join(' \u00b7 ');
+  box.innerHTML =
+    '<div style="border:1px solid #ef444488;background:#7f1d1d33;border-radius:10px;padding:12px 14px;margin:0 0 12px">'+
+      '<div style="font-weight:800;color:#fca5a5;margin-bottom:4px">\u26a0\ufe0f Al\u00edquota do Simples n\u00e3o confirmada</div>'+
+      '<div style="font-size:13px;color:#e7ecf6;line-height:1.5">'+lista+'.<br>'+
+        'Esse m\u00eas n\u00e3o tem al\u00edquota pr\u00f3pria salva. Estou herdando a do m\u00eas anterior para <b>n\u00e3o calcular imposto zero</b> \u2014 '+
+        'mas o valor pode estar errado, e o imposto entra na M.C. de todas as vendas do per\u00edodo. '+
+        '<b>Confirme a al\u00edquota certa</b> ou d\u00ea ci\u00eancia de que sabe que est\u00e1 aproximada.</div>'+
+      '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">'+
+        '<button onclick="irParaCfg()">\u2699\ufe0f Preencher agora</button>'+
+        '<button onclick="darCienciaAliq()" style="background:#334155">\u2713 Estou ciente, seguir com a herdada</button>'+
+      '</div>'+
+      '<div id="avisoAliqMsg" style="font-size:12px;color:var(--mut);margin-top:6px"></div>'+
+    '</div>';
+}
+function irParaCfg(){ try{ const el=$('secCfg')||document.querySelector('[id^=secCfg]'); if(el) el.scrollIntoView({behavior:'smooth',block:'start'}); }catch(e){} }
+async function darCienciaAliq(){
+  const pend = herdadasPendentes(); if (!pend.length) return;
+  const msg = $('avisoAliqMsg'); if (msg) msg.textContent = 'registrando\u2026';
+  const corpo = {}; pend.forEach(p => { corpo[p.mes] = p.de; });
+  try{
+    const r = await fetch(MOD+'/config-fiscal',{method:'POST',credentials:'same-origin',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify({ ciencia_aliq: corpo })});
+    const d = await r.json();
+    if (d && d.ok) { CFG.ciencia_aliq = (d.config && d.config.ciencia_aliq) || CFG.ciencia_aliq; renderAvisoAliq(); }
+    else if (msg) msg.textContent = 'n\u00e3o consegui registrar \u2014 tente de novo';
+  }catch(e){ if (msg) msg.textContent = 'n\u00e3o consegui registrar \u2014 ' + e.message; }
 }
 
 function desenharCharts(labels, sPed, sFat){
@@ -1722,7 +1773,7 @@ async function salvarCfg(){
     const magSel = $('magNivelSel');
     if(magSel){ try{ await fetch(MOD+'/config-frete-magalu',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({nivel_desconto:magSel.value})}); }catch(e){} }
     if(d&&d.ok){
-      CFG={aliquotas:d.config.aliquotas||{},taxas:d.config.taxas||{},flex:d.config.flex||{}};
+      CFG={aliquotas:d.config.aliquotas||{},taxas:d.config.taxas||{},flex:d.config.flex||{},ciencia_aliq:d.config.ciencia_aliq||{}};
       render();
       // 01/08: se alguma ALÍQUOTA mudou, o servidor já saiu reaplicando nas linhas gravadas do
       // histórico. Aqui a gente acompanha e mostra o progresso ao lado do botão, até terminar.
