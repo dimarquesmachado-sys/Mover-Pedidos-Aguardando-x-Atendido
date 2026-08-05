@@ -24,9 +24,10 @@
 // ════════════════════════════════════════════════════════════════════════
 
 const fetch = require('node-fetch');
+const path = require('path');
 
 const base = require('./base');
-const { json, ehAdmin } = base;
+const { json, ehAdmin, readJson, CACHE_DIR } = base;
 
 // estado da rodada em massa (memória; um deploy no meio zera e é só rodar de novo)
 let _pes = {
@@ -334,6 +335,89 @@ function rotasPescaria(ctx) {
         http_da_amostra: _pes.http,
         aviso: 'NADA foi gravado. Pra aplicar em UM pedido: &pedido=NUMERO&gravar=1. Pra rodar o período: &massa=1&gravar=1&max=N',
         token_ml: tk ? 'ok' : 'INDISPONÍVEL — sem ele a pescaria não roda'
+      });
+      return true;
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  AUDITORIA ML — o extrato do ML contra o que a gente tem gravado
+    //  (04/08: nasceu da conciliação que revelou dois buracos além da comissão)
+    //  SÓ LÊ. Não grava, não chama a API do ML — o billing já está no disco.
+    //  Mês a mês: comissão, frete e o parcelamento (que hoje não entra em lugar
+    //  nenhum da margem: o backfill soma comissao+mp e o card soma ads+full+devolução).
+    // ════════════════════════════════════════════════════════════════════════
+    if (method === 'GET' && p === '/girassol-backup-offline/auditoria-ml') {
+      if (!admOk(req, urlObj)) { json(res, 404, { error: 'not found' }); return true; }
+      const q = urlObj.searchParams;
+      const de = String((q && q.get('de')) || '').slice(0, 10);
+      const ate = String((q && q.get('ate')) || '').slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(de) || !/^\d{4}-\d{2}-\d{2}$/.test(ate)) {
+        json(res, 400, { ok: false, erro: 'passe &de=AAAA-MM-DD&ate=AAAA-MM-DD' }); return true;
+      }
+
+      // ── lado do ML: o faturamento oficial que já está no disco ──
+      const bill = readJson(path.join(CACHE_DIR, '_ml_billing.json'), { tarifas: {} });
+      const ml = {};
+      for (const x of Object.values(bill.tarifas || {})) {
+        const d = String((x && x.d) || '');
+        if (!d || d < de || d > ate) continue;
+        const m = d.slice(0, 7);
+        ml[m] = ml[m] || { comissao: 0, mp: 0, frete: 0, parcelamento: 0, ads: 0, full: 0, devolucao: 0, credito: 0, outros: 0 };
+        const c = x.c || 'outros';
+        if (ml[m][c] == null) ml[m].outros += Number(x.v) || 0;
+        else ml[m][c] += Number(x.v) || 0;
+      }
+
+      // ── nosso lado: o histórico do canal ml, mês a mês ──
+      const nosso = {};
+      let off = 0;
+      for (let pag = 0; pag < 60; pag++) {
+        const lote = await supaGet('vendas_historico?empresa=eq.girassol&canal=eq.ml' +
+          '&data_venda=gte.' + de + '&data_venda=lte.' + ate +
+          '&select=data_venda,valor_produto,comissao,frete_vendedor&order=data_venda.asc&limit=1000&offset=' + off);
+        if (!Array.isArray(lote) || !lote.length) break;
+        for (const l of lote) {
+          const m = String(l.data_venda || '').slice(0, 7);
+          if (!m) continue;
+          nosso[m] = nosso[m] || { produtos: 0, comissao: 0, frete: 0, linhas: 0 };
+          nosso[m].produtos += Number(l.valor_produto || 0);
+          nosso[m].comissao += Number(l.comissao || 0);
+          nosso[m].frete += Number(l.frete_vendedor || 0);
+          nosso[m].linhas++;
+        }
+        off += lote.length;
+        if (lote.length < 1000) break;
+        await dorme(120);
+      }
+
+      const r2 = v => Math.round((Number(v) || 0) * 100) / 100;
+      const meses = [...new Set([...Object.keys(ml), ...Object.keys(nosso)])].sort();
+      const por_mes = {};
+      const tot = { ml_comissao_mp: 0, nossa_comissao: 0, ml_frete: 0, nosso_frete: 0, ml_parcelamento: 0, nossos_produtos: 0 };
+      for (const m of meses) {
+        const a2m = ml[m] || {}, b2 = nosso[m] || {};
+        const mlCom = (a2m.comissao || 0) + (a2m.mp || 0);
+        por_mes[m] = {
+          nossos_produtos: r2(b2.produtos), linhas: b2.linhas || 0,
+          comissao: { ml_cobrou: r2(mlCom), temos: r2(b2.comissao), falta: r2(mlCom - (b2.comissao || 0)) },
+          frete:    { ml_cobrou: r2(a2m.frete), temos: r2(b2.frete), falta: r2((a2m.frete || 0) - (b2.frete || 0)) },
+          parcelamento_nao_contabilizado: r2(a2m.parcelamento)
+        };
+        tot.ml_comissao_mp += mlCom; tot.nossa_comissao += (b2.comissao || 0);
+        tot.ml_frete += (a2m.frete || 0); tot.nosso_frete += (b2.frete || 0);
+        tot.ml_parcelamento += (a2m.parcelamento || 0); tot.nossos_produtos += (b2.produtos || 0);
+      }
+      json(res, 200, {
+        ok: true, de, ate, so_leitura: true, canal: 'ml',
+        total: {
+          produtos_ml_no_historico: r2(tot.nossos_produtos),
+          comissao: { ml_cobrou: r2(tot.ml_comissao_mp), temos: r2(tot.nossa_comissao), falta: r2(tot.ml_comissao_mp - tot.nossa_comissao),
+                      taxa_efetiva_ml: tot.nossos_produtos > 0 ? Math.round(tot.ml_comissao_mp / tot.nossos_produtos * 1000) / 10 : null },
+          frete: { ml_cobrou: r2(tot.ml_frete), temos: r2(tot.nosso_frete), falta: r2(tot.ml_frete - tot.nosso_frete) },
+          parcelamento_nao_contabilizado: r2(tot.ml_parcelamento)
+        },
+        por_mes,
+        leia: 'comissao.ml_cobrou = categorias comissao+mp do faturamento oficial. falta > 0 = custo real que a margem nao esta vendo. parcelamento nao entra em lugar nenhum hoje.'
       });
       return true;
     }
