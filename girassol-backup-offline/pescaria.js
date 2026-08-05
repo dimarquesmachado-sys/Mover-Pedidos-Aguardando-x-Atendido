@@ -396,12 +396,16 @@ function rotasPescaria(ctx) {
       const tot = { ml_comissao_mp: 0, nossa_comissao: 0, ml_frete: 0, nosso_frete: 0, ml_parcelamento: 0, nossos_produtos: 0 };
       for (const m of meses) {
         const a2m = ml[m] || {}, b2 = nosso[m] || {};
-        const mlCom = (a2m.comissao || 0) + (a2m.mp || 0);
+        // 05/08: desde o b111 o PARCELAMENTO entra na comissão do pedido (é custo da venda,
+        // conforme a doc do ML). Se o comparador não somar ele deste lado, o "temos" aparece
+        // ~R$ 84 mil maior que o "ml_cobrou" e parece erro grave — quando na verdade os dois
+        // lados é que estariam medindo coisas diferentes.
+        const mlCom = (a2m.comissao || 0) + (a2m.mp || 0) + (a2m.parcelamento || 0);
         por_mes[m] = {
           nossos_produtos: r2(b2.produtos), linhas: b2.linhas || 0,
           comissao: { ml_cobrou: r2(mlCom), temos: r2(b2.comissao), falta: r2(mlCom - (b2.comissao || 0)) },
           frete:    { ml_cobrou: r2(a2m.frete), temos: r2(b2.frete), falta: r2((a2m.frete || 0) - (b2.frete || 0)) },
-          parcelamento_nao_contabilizado: r2(a2m.parcelamento)
+          parcelamento_dentro_da_comissao: r2(a2m.parcelamento)
         };
         tot.ml_comissao_mp += mlCom; tot.nossa_comissao += (b2.comissao || 0);
         tot.ml_frete += (a2m.frete || 0); tot.nosso_frete += (b2.frete || 0);
@@ -414,10 +418,10 @@ function rotasPescaria(ctx) {
           comissao: { ml_cobrou: r2(tot.ml_comissao_mp), temos: r2(tot.nossa_comissao), falta: r2(tot.ml_comissao_mp - tot.nossa_comissao),
                       taxa_efetiva_ml: tot.nossos_produtos > 0 ? Math.round(tot.ml_comissao_mp / tot.nossos_produtos * 1000) / 10 : null },
           frete: { ml_cobrou: r2(tot.ml_frete), temos: r2(tot.nosso_frete), falta: r2(tot.ml_frete - tot.nosso_frete) },
-          parcelamento_nao_contabilizado: r2(tot.ml_parcelamento)
+          parcelamento_dentro_da_comissao: r2(tot.ml_parcelamento)
         },
         por_mes,
-        leia: 'comissao.ml_cobrou = categorias comissao+mp do faturamento oficial. falta > 0 = custo real que a margem nao esta vendo. parcelamento nao entra em lugar nenhum hoje.'
+        leia: 'comissao.ml_cobrou = categorias comissao+mp+parcelamento do faturamento oficial (desde o b111 o parcelamento entra na comissao do pedido). falta > 0 = custo real que a margem ainda nao esta vendo.'
       });
       return true;
     }
