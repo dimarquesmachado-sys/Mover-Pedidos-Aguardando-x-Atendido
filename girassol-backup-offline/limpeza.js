@@ -34,6 +34,46 @@ function cfgStorage() {
   return { url, key };
 }
 
+// 05/08: a MESMA poda usada pela rota, agora tambem chamavel pela rotina noturna.
+// Sem isso a limpeza continuaria dependendo de alguem lembrar de abrir a URL.
+async function podarExpedicao(dias, max) {
+  const d = Math.max(7, Number(dias) || 45);
+  const m = Math.min(5000, Math.max(1, Number(max) || 2000));
+  const { url, key } = cfgStorage();
+  if (!url || !key) return { apagados: 0, mb: 0, erro: 'sem credencial de storage' };
+  const dorme = ms => new Promise(r => setTimeout(r, ms));
+  const H = { apikey: key, Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' };
+  const corte = new Date(Date.now() - d * 864e5).toISOString();
+  const velhos = []; let bytes = 0;
+  let off = 0;
+  for (let pag = 0; pag < 60; pag++) {
+    const r = await fetch(url + '/storage/v1/object/list/' + BUCKET, { method: 'POST', headers: H,
+      body: JSON.stringify({ prefix: '', limit: 100, offset: off, sortBy: { column: 'created_at', order: 'asc' } }) });
+    if (!r.ok) return { apagados: 0, mb: 0, erro: 'listagem HTTP ' + r.status };
+    const lote = await r.json().catch(() => null);
+    if (!Array.isArray(lote) || !lote.length) break;
+    let passou = false;
+    for (const o of lote) {
+      const c = o.created_at || (o.metadata && o.metadata.lastModified) || '';
+      if (c && c < corte) { if (velhos.length < m) { velhos.push(o.name); bytes += Number((o.metadata && o.metadata.size) || 0); } }
+      else if (c) passou = true;
+    }
+    off += lote.length;
+    if (passou || velhos.length >= m) break;
+    await dorme(120);
+  }
+  if (!velhos.length) return { apagados: 0, mb: 0 };
+  let apagados = 0, erro = null;
+  for (let i = 0; i < velhos.length; i += 100) {
+    const lote = velhos.slice(i, i + 100);
+    const r = await fetch(url + '/storage/v1/object/' + BUCKET, { method: 'DELETE', headers: H, body: JSON.stringify({ prefixes: lote }) });
+    if (r.ok) apagados += lote.length;
+    else { erro = 'DELETE HTTP ' + r.status; if (r.status === 401 || r.status === 403) break; }
+    await dorme(200);
+  }
+  return { apagados, mb: Math.round(bytes / 1048576 * 10) / 10, erro };
+}
+
 function rotasLimpeza(ctx) {
   const { validarSessao } = ctx;
   const dorme = ms => new Promise(r => setTimeout(r, ms));
@@ -156,4 +196,4 @@ function rotasLimpeza(ctx) {
   };
 }
 
-module.exports = { rotasLimpeza };
+module.exports = { rotasLimpeza, podarExpedicao };
