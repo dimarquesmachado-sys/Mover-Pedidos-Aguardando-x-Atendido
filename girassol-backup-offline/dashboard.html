@@ -364,7 +364,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd187';
+const DASH_BUILD = 'd188';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -1507,7 +1507,9 @@ function render(){
   }
   try{ const hP=document.getElementById('hGrafPed'); if(hP) hP.textContent='\ud83d\udcc8 Pedidos por '+sufTit;
        const hF=document.getElementById('hGrafFat'); if(hF) hF.textContent='\ud83d\udcb0 Faturamento por '+sufTit; }catch(e){}
-  desenharCharts(labels, sPed, sFat);
+  // cinto e suspensorio: mesmo que o grafico quebre por outro motivo, o render continua
+  try { desenharCharts(labels, sPed, sFat); }
+  catch (e) { console.error('[dashboard] os graficos falharam, o resto do painel segue:', e); }
 
   if(usaHist){ porCanal = {}; for(const c of Object.keys(HIST.canais)){ const h2=HIST.canais[c]; porCanal[c]={ped:h2.pedidos, fat:h2.fat, comValor:h2.pedidos, flex:0}; } }
   const canais = Object.keys(porCanal).sort((a,b)=>porCanal[b].ped-porCanal[a].ped);
@@ -1597,6 +1599,21 @@ function render(){
 }
 
 function desenharCharts(labels, sPed, sFat){
+  // ── 05/08 (d188): o Chart.js vem de CDN externo (cdnjs, no topo do arquivo). Se ele
+  // NAO carregar — CDN fora do ar, rede do lugar bloqueando, bloqueador de anuncio — o
+  // `new Chart` estourava AQUI e derrubava o resto do render(): Por Canal, Vendas por
+  // Estado, Projecao, config, ANALISE DE VENDAS, Previsao e Plano de Compra ficavam em
+  // branco, sem mensagem nenhuma. Parecia que os dados tinham sumido.
+  // Agora o grafico falha sozinho, avisa, e o painel inteiro segue de pe.
+  if (typeof Chart === 'undefined') {
+    ['cPed','cFat'].forEach(id=>{
+      const c = $(id);
+      if (c && c.parentNode) c.parentNode.innerHTML =
+        '<div class="nota">\ud83d\udcc9 nao consegui carregar a biblioteca de graficos (Chart.js, vem de CDN externo). '+
+        'S\u00f3 os dois gr\u00e1ficos ficam de fora \u2014 todos os n\u00fameros do painel continuam normais.</div>';
+    });
+    return;
+  }
   if(!window.Chart){
     const c1=$('cPed'); if(c1&&c1.parentElement) c1.parentElement.innerHTML='<div class="dim" style="padding:30px;text-align:center">gráfico indisponível (CDN bloqueado)</div>';
     return;
