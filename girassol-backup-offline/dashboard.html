@@ -364,7 +364,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd188';
+const DASH_BUILD = 'd189';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -374,7 +374,24 @@ let CFG = { aliquotas:{}, taxas:{} };   // alíquota Simples por mês (YYYY-MM: 
 let MAG_NIVEL = '50';   // nível de desconto do frete Magalu (coparticipação): 'sem'|'25'|'50' (default 50%)
 // Alíquotas 2026 da GIRASSOL vindas de fábrica (editáveis no ⚙️; o que você salvar SOBREPÕE estas):
 const DEFAULT_ALIQ = { '2026-01':11.409280, '2026-02':11.3254, '2026-03':12.3402, '2026-04':13.6001, '2026-05':13.9149, '2026-06':14.056, '2026-07':14.1 };
-const aliqDe = mes => (CFG.aliquotas[mes] != null ? CFG.aliquotas[mes] : (DEFAULT_ALIQ[mes] != null ? DEFAULT_ALIQ[mes] : null));
+// ── 05/08 (d189): ALIQUOTA ZERO E UMA BOMBA-RELOGIO ────────────────────────────
+// O ⚙️ salva 0 quando o campo tem 0, e set/out/nov/dez de 2026 estao zerados. No dia
+// 1º de setembro o imposto de TODA venda sairia ZERO e a margem apareceria inflada em
+// ~15% do faturamento, sem nenhum aviso. Deixar vazio tambem nao serve: ai o pedido sai
+// INTEIRO da margem. Entao: mes sem aliquota propria HERDA a do ultimo mes conhecido e
+// fica registrado em _aliqHerdadas, que o ⚙️ mostra como aviso.
+const _aliqHerdadas = new Set();
+const _aliqBruta = m => (CFG.aliquotas[m] != null ? CFG.aliquotas[m] : (DEFAULT_ALIQ[m] != null ? DEFAULT_ALIQ[m] : null));
+const aliqDe = mes => {
+  const v = _aliqBruta(mes);
+  if (v != null && Number(v) > 0) return Number(v);
+  const conhecidos = Object.keys(Object.assign({}, DEFAULT_ALIQ, CFG.aliquotas))
+    .filter(m => m < mes && _aliqBruta(m) != null && Number(_aliqBruta(m)) > 0).sort();
+  if (!conhecidos.length) return null;
+  const ult = conhecidos[conhecidos.length - 1];
+  _aliqHerdadas.add(mes + '\u2190' + ult);
+  return Number(_aliqBruta(ult));
+};
 const DEFAULT_FLEX = { ml: 12, shopee: 9, outros: 9 };   // motoboy do FLEX pago pela loja — ML R$ 12 · Shopee e demais R$ 9 (editável no ⚙️)
 const NOME_CANAL={ml:'MercadoLivre',tiktok:'TikTok',magalu:'MagaLu',shopee:'Shopee',amazon:'Amazon',madeira:'MadeiraMadeira',outro:'Outro'};
 const nomeCanal=k=>NOME_CANAL[k]||String(k||'').charAt(0).toUpperCase()+String(k||'').slice(1);
@@ -1389,6 +1406,7 @@ function render(){
       if(rp==null){ semCfg++; return; }
       const tReal = (h.tarifa_ml!=null && isFinite(Number(h.tarifa_ml))) ? Number(h.tarifa_ml) : ((h.taxa_mkt!=null && isFinite(Number(h.taxa_mkt)) && Number(h.taxa_mkt)>0) ? Number(h.taxa_mkt) : null);
       let tx = CFG.taxas[canalKey(h.marketplace)];
+      if(tx != null && !(Number(tx) > 0)) tx = null;   // 05/08: 0% nao existe em marketplace nenhum — 0 salvo no ⚙️ e "nao configurado", nao "sem comissao"
       if(canalKey(h.marketplace)==='madeira' && tx==null) tx = 17.6;
       if(aliq==null || (tReal==null && tx==null)){ semCfg++; if(semTaxaPed.length<40) semTaxaPed.push((h.numero||h.id)+' ('+nomeCanal(canalKey(h.marketplace))+')'); return; }
       if(!custoCompleto){ semDados++; return; }   // sem custo fechado: fora da margem
@@ -1655,7 +1673,10 @@ function renderCfg(){
         '<input type="number" step="0.0001" min="0" max="40" data-aliq="'+m+'" value="'+val+'" placeholder="%" '+
         'style="width:96px'+(salvo==null&&padrao!=null?';color:#8b96b3':'')+'" title="'+(salvo!=null?'valor salvo por você':(padrao!=null?'de fábrica ('+padrao+'%) — edite p/ sobrepor':'sem alíquota'))+'"></label>';
     }).join('')+'</div>'+
-    '<div style="font-size:12px;color:var(--mut);margin:14px 0 6px">🏪 Tarifa por canal (% sobre produtos) — estimativa p/ o agregado; na busca, ML usa a REAL</div>'+
+    (_aliqHerdadas.size ? '<div class="aviso" style="margin:10px 0">\u26a0\ufe0f M\u00eas sem al\u00edquota pr\u00f3pria usando a de outro m\u00eas: '+
+       Array.from(_aliqHerdadas).map(x=>x.split('\u2190')[0]+' \u2190 '+x.split('\u2190')[1]).join(' \u00b7 ')+
+       '. Preencha o valor certo aqui embaixo \u2014 sen\u00e3o o imposto sai aproximado.</div>' : '')+
+    '<div style="font-size:12px;color:var(--mut);margin:14px 0 6px">🏪 Tarifa por canal (% sobre produtos) — estimativa p/ o agregado; na busca, ML usa a REAL. <b>Deixar 0 = n\u00e3o configurado</b> (o pedido sem comiss\u00e3o real fica fora da margem, em vez de entrar com tarifa zero e inflar o lucro)</div>'+
     '<div style="display:flex;gap:10px;flex-wrap:wrap">'+ CANAIS_CFG.map(c=>
       '<label style="font-size:12px;color:var(--mut)">'+NOMEC[c]+'<br><input type="number" step="0.1" min="0" max="50" data-taxa="'+c+'" value="'+(CFG.taxas[c]!=null?CFG.taxas[c]:'')+'" placeholder="%" style="width:86px"></label>').join('')+'</div>';
 }
@@ -1725,6 +1746,7 @@ function calcPL(h){
   const feeReal = (h.tarifa_ml!=null&&isFinite(Number(h.tarifa_ml)))?Number(h.tarifa_ml):_plMLFee[h.id];
   const feeBling = (h.taxa_mkt!=null&&isFinite(Number(h.taxa_mkt))&&Number(h.taxa_mkt)>0)?Number(h.taxa_mkt):null;   // 💎 comissão importada pelo Bling (TikTok/Shopee/Magalu)
   let tx = CFG.taxas[ck];
+  if(tx != null && !(Number(tx) > 0)) tx = null;   // idem: 0 salvo = nao configurado
   if(ck==='madeira' && tx==null) tx = 17.6;   // d50: tabela oficial MM (Diego 22/07) — padrão 17,6%; categorias variam 14,5–19%
   let tarifa = (feeReal!=null)?feeReal:(feeBling!=null?feeBling:((tx!=null&&rp!=null)?rp*tx/100:null));
   if(ck==='madeira' && feeReal==null && feeBling==null && tarifa!=null) tarifa += 5;   // Madeira Envios: taxa fixa R$ 5,00 por pedido
