@@ -393,7 +393,7 @@ function rotasPescaria(ctx) {
       const r2 = v => Math.round((Number(v) || 0) * 100) / 100;
       const meses = [...new Set([...Object.keys(ml), ...Object.keys(nosso)])].sort();
       const por_mes = {};
-      const tot = { ml_comissao_mp: 0, nossa_comissao: 0, ml_frete: 0, nosso_frete: 0, ml_parcelamento: 0, nossos_produtos: 0 };
+      const tot = { ml_comissao_mp: 0, nossa_comissao: 0, ml_frete: 0, nosso_frete: 0, ml_parcelamento: 0, nossos_produtos: 0, estornos: 0 };
       for (const m of meses) {
         const a2m = ml[m] || {}, b2 = nosso[m] || {};
         // 05/08: desde o b111 o PARCELAMENTO entra na comissão do pedido (é custo da venda,
@@ -401,13 +401,18 @@ function rotasPescaria(ctx) {
         // ~R$ 84 mil maior que o "ml_cobrou" e parece erro grave — quando na verdade os dois
         // lados é que estariam medindo coisas diferentes.
         const mlCom = (a2m.comissao || 0) + (a2m.mp || 0) + (a2m.parcelamento || 0);
+        // 05/08: o billing cobra a comissao da venda e ESTORNA quando ela e cancelada (categoria
+        // 'credito', que vem NEGATIVA). Como o nosso historico nao guarda venda cancelada, esse
+        // estorno tem que sair do "ml_cobrou" — senao a auditoria acusa uma falta que nao existe.
+        const est = Math.abs(a2m.credito || 0);
         por_mes[m] = {
           nossos_produtos: r2(b2.produtos), linhas: b2.linhas || 0,
-          comissao: { ml_cobrou: r2(mlCom), temos: r2(b2.comissao), falta: r2(mlCom - (b2.comissao || 0)) },
+          comissao: { ml_cobrou: r2(mlCom), temos: r2(b2.comissao), falta: r2(mlCom - (b2.comissao || 0)),
+                      estornos_do_ml: r2(est), falta_liquida: r2(mlCom - (b2.comissao || 0) - est) },
           frete:    { ml_cobrou: r2(a2m.frete), temos: r2(b2.frete), falta: r2((a2m.frete || 0) - (b2.frete || 0)) },
           parcelamento_dentro_da_comissao: r2(a2m.parcelamento)
         };
-        tot.ml_comissao_mp += mlCom; tot.nossa_comissao += (b2.comissao || 0);
+        tot.ml_comissao_mp += mlCom; tot.nossa_comissao += (b2.comissao || 0); tot.estornos += est;
         tot.ml_frete += (a2m.frete || 0); tot.nosso_frete += (b2.frete || 0);
         tot.ml_parcelamento += (a2m.parcelamento || 0); tot.nossos_produtos += (b2.produtos || 0);
       }
@@ -416,12 +421,13 @@ function rotasPescaria(ctx) {
         total: {
           produtos_ml_no_historico: r2(tot.nossos_produtos),
           comissao: { ml_cobrou: r2(tot.ml_comissao_mp), temos: r2(tot.nossa_comissao), falta: r2(tot.ml_comissao_mp - tot.nossa_comissao),
+                      estornos_do_ml: r2(tot.estornos), falta_liquida: r2(tot.ml_comissao_mp - tot.nossa_comissao - tot.estornos),
                       taxa_efetiva_ml: tot.nossos_produtos > 0 ? Math.round(tot.ml_comissao_mp / tot.nossos_produtos * 1000) / 10 : null },
           frete: { ml_cobrou: r2(tot.ml_frete), temos: r2(tot.nosso_frete), falta: r2(tot.ml_frete - tot.nosso_frete) },
           parcelamento_dentro_da_comissao: r2(tot.ml_parcelamento)
         },
         por_mes,
-        leia: 'comissao.ml_cobrou = categorias comissao+mp+parcelamento do faturamento oficial (desde o b111 o parcelamento entra na comissao do pedido). falta > 0 = custo real que a margem ainda nao esta vendo.'
+        leia: 'comissao.ml_cobrou = categorias comissao+mp+parcelamento do faturamento oficial (desde o b111 o parcelamento entra na comissao do pedido). falta_liquida ja desconta os estornos de venda cancelada (categoria credito), que o ML cobrou e devolveu e que o nosso historico nao guarda. E a falta_liquida que importa.'
       });
       return true;
     }
