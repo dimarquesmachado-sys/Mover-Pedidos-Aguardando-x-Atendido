@@ -141,6 +141,20 @@ function contasDoEscrow(resp) {
   const sobra = Math.round((produtos + frete_do_comprador - tarifa + fsf - escrow) * 100) / 100;
   return {
     produtos, comissao, servico, rebate, afiliado, seguro_envio: seg, transacao, transacao_cartao_informada, campanha, processa,
+    // 06/08: os itens com a tarifa RATEADA por valor. É o que permite responder
+    // "quais SKUs entregam mais % pra Shopee" — a pergunta que a AMB levantou, com
+    // pedidos de R$ 19,90 pagando 46% de tarifa por causa da taxa fixa de serviço.
+    itens: (function(){
+      const its = Array.isArray(oi.items) ? oi.items : [];
+      const somaIt = its.reduce((s, i2) => s + (num(i2.discounted_price) || num(i2.selling_price) || num(i2.original_price)) * (num(i2.quantity_purchased) || 1), 0);
+      return its.map(function(i2){
+        const q2 = num(i2.quantity_purchased) || 1;
+        const v2 = Math.round(((num(i2.discounted_price) || num(i2.selling_price) || num(i2.original_price)) * q2) * 100) / 100;
+        const parte = somaIt > 0 ? v2 / somaIt : (its.length ? 1 / its.length : 0);
+        return { sku: i2.model_sku || i2.item_sku || null, nome: i2.item_name || null, qtd: q2,
+                 valor: v2, tarifa: Math.round(tarifa * parte * 100) / 100 };
+      });
+    })(),
     tarifa, frete_do_comprador, frete, frete_liquido_vendedor, credito_frete, escrow, sobra,
     final_shipping_fee: num(oi.final_shipping_fee), shopee_shipping_rebate: num(oi.shopee_shipping_rebate),
     comissao_bruta: num(oi.commission_fee), servico_bruto: num(oi.service_fee),   // confere: bruta+bruto tem que dar a mesma tarifa
@@ -318,6 +332,58 @@ function resumoShopee(de, ate) {
       devolucoes: readJson(ARQ_DEV(), {}).atualizado || null,
       carteira: readJson(ARQ_CAR(), {}).atualizado || null
     }
+  };
+}
+
+// ════════════════════════════════════════════════════════════════════════
+//  TARIFA POR SKU (06/08) — a pergunta que a AMB levantou
+//  Na AMB a taxa média deu 34,5%, mas o que assusta é o caso a caso: um pedido
+//  de R$ 19,90 paga R$ 9,17 de tarifa (46%). Não é comissão alta — é a taxa FIXA
+//  de serviço, que em ticket baixo esmaga a margem.
+//  Isto lista, por SKU, quanto do preço vai embora em tarifa. Serve pras três
+//  lojas (&loja=amb|girassol|good). SÓ LEITURA.
+async function tarifasPorSku(loja, dias, max) {
+  const d = Math.min(15, Math.max(1, Number(dias) || 15));
+  const teto = Math.min(300, Math.max(1, Number(max) || 100));
+  const rl = await pedirAoSync('escrow-liberado', { dias: String(d), size: '50' }, loja);
+  const lst = (rl && rl.dados && rl.dados.resposta && rl.dados.resposta.response && rl.dados.resposta.response.escrow_list) || [];
+  const sns = lst.slice(0, teto).map(x => String((x && x.order_sn) || '')).filter(Boolean);
+  if (!sns.length) return { erro: 'a loja não devolveu pedidos liberados nesse período' };
+  const porSku = {};
+  let pedidos = 0, somaProd = 0, somaTar = 0, semItens = 0;
+  for (let i = 0; i < sns.length; i += 50) {
+    const mapa = await escrowEmLote(sns.slice(i, i + 50), loja);
+    for (const [sn, c] of Object.entries(mapa)) {
+      if (!c) continue;
+      pedidos++; somaProd += c.produtos; somaTar += c.tarifa;
+      if (!c.itens || !c.itens.length) { semItens++; continue; }
+      for (const it of c.itens) {
+        const s = it.sku || 'sem sku';
+        porSku[s] = porSku[s] || { sku: s, nome: it.nome, pedidos: 0, unidades: 0, faturamento: 0, tarifa: 0 };
+        porSku[s].pedidos++; porSku[s].unidades += it.qtd;
+        porSku[s].faturamento = Math.round((porSku[s].faturamento + it.valor) * 100) / 100;
+        porSku[s].tarifa = Math.round((porSku[s].tarifa + it.tarifa) * 100) / 100;
+      }
+      void sn;
+    }
+    if (sns.length > 50) await _dorme(400);
+  }
+  const linhas = Object.values(porSku).map(function(x){
+    const pct = x.faturamento > 0 ? Math.round(x.tarifa / x.faturamento * 1000) / 10 : null;
+    return Object.assign(x, {
+      pct_tarifa: pct,
+      preco_medio: Math.round(x.faturamento / (x.unidades || 1) * 100) / 100,
+      sobra_apos_tarifa: Math.round((x.faturamento - x.tarifa) * 100) / 100,
+      sobra_por_unidade: Math.round((x.faturamento - x.tarifa) / (x.unidades || 1) * 100) / 100
+    });
+  }).sort((a2, b2) => (b2.pct_tarifa || 0) - (a2.pct_tarifa || 0));
+  return {
+    pedidos, sem_itens: semItens,
+    faturamento: Math.round(somaProd * 100) / 100,
+    tarifa: Math.round(somaTar * 100) / 100,
+    pct_medio: somaProd > 0 ? Math.round(somaTar / somaProd * 1000) / 10 : null,
+    piores: linhas.slice(0, 25),
+    melhores: linhas.slice(-10).reverse()
   };
 }
 
@@ -540,6 +606,17 @@ function rotasShopee(ctx) {
       return true;
     }
 
+    // ── QUAIS SKUs ENTREGAM MAIS % PRA SHOPEE ──────────────────────────────
+    if (method === 'GET' && p === '/girassol-backup-offline/shopee/tarifa-por-sku') {
+      if (!admOk(req, urlObj)) { json(res, 404, { error: 'not found' }); return true; }
+      const lojaT = q.get('loja') || LOJA;
+      const r = await tarifasPorSku(lojaT, q.get('dias') || '15', q.get('max') || '100');
+      json(res, 200, Object.assign({ ok: !r.erro, loja: lojaT, dias: Number(q.get('dias') || 15) }, r, {
+        leia: 'pct_tarifa = quanto do preço do SKU vai embora só em tarifa da Shopee (comissão + serviço + rebate + afiliado + seguro). sobra_por_unidade = o que resta ANTES de custo, imposto e frete. "piores" = maior % primeiro.'
+      }));
+      return true;
+    }
+
     // ── RESUMO pronto pro dashboard: devoluções por SKU + despesas da carteira ──
     if (method === 'GET' && p === '/girassol-backup-offline/shopee/resumo') {
       if (!admOk(req, urlObj)) { json(res, 404, { error: 'not found' }); return true; }
@@ -557,10 +634,10 @@ function rotasShopee(ctx) {
 
 // escrow de VÁRIOS pedidos numa chamada (até 50). O formato do lote é diferente
 // do individual — response[].escrow_detail.order_income — e é aqui que isso é tratado.
-async function escrowEmLote(orderSns) {
+async function escrowEmLote(orderSns, loja) {
   const sns = (orderSns || []).map(s => String(s).trim()).filter(Boolean).slice(0, 50);
   if (!sns.length) return {};
-  const r = await pedirAoSync('escrow-lote', { sns: sns.join(',') });
+  const r = await pedirAoSync('escrow-lote', { sns: sns.join(',') }, loja);
   const lista = (r && r.dados && r.dados.resposta && r.dados.resposta.response) || [];
   const saida = {};
   for (const item of lista) {
@@ -572,4 +649,4 @@ async function escrowEmLote(orderSns) {
   return saida;
 }
 
-module.exports = { rotasShopee, escrowDoPedido, contasDoEscrow, escrowEmLote, coletarDevolucoes, coletarCarteira, resumoShopee, pedirAoSync };
+module.exports = { rotasShopee, escrowDoPedido, contasDoEscrow, escrowEmLote, coletarDevolucoes, coletarCarteira, resumoShopee, tarifasPorSku, pedirAoSync };
