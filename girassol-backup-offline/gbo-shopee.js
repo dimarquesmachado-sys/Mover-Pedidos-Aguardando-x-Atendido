@@ -26,8 +26,13 @@
 
 const fetch = require('node-fetch');
 
+const path = require('path');
+
 const base = require('./base');
-const { json, ehAdmin, CONFERIDOS_FILE, readJson } = base;
+const { json, ehAdmin, CONFERIDOS_FILE, CACHE_DIR, readJson, writeJson } = base;
+
+const ARQ_DEV = () => path.join(CACHE_DIR, '_shopee_devolucoes.json');
+const ARQ_CAR = () => path.join(CACHE_DIR, '_shopee_carteira.json');
 
 const SYNC_URL = (process.env.SHOPEE_SYNC_URL || 'https://girassol-shopee-sync-organizar-envio.onrender.com').replace(/\/+$/, '');
 const SYNC_KEY = String(process.env.SHOPEE_SYNC_KEY || '').trim();
@@ -151,6 +156,142 @@ async function pedirAoSync(oQue, params) {
     return { ok: r.ok && d && d.ok !== false, status: r.status, dados: d, cru: txt.slice(0, 6000),
              via: SYNC_URL + '/' + LOJA + '/interno/' + oQue };
   } catch (e) { return { ok: false, erro: String((e && e.message) || e) }; }
+}
+
+// ════════════════════════════════════════════════════════════════════════
+//  COLETORES (06/08) — devoluções e carteira, guardados no disco
+// ════════════════════════════════════════════════════════════════════════
+//  A Shopee só aceita JANELA DE 15 DIAS nestes endpoints (ela mesma disse:
+//  "The period between create_time_from and created_time_of must not more than
+//  15 days"). Então quem quer 45 dias pede TRÊS janelas — é o que estes
+//  coletores fazem, guardando tudo por chave única pra não duplicar quando
+//  rodarem de novo.
+//  O arquivo no disco é a fonte que o dashboard vai ler depois, do mesmo jeito
+//  que o _ml_billing.json é pro Mercado Livre.
+const _num = v => { const n = Number(v); return isFinite(n) ? n : 0; };
+const _dorme = ms => new Promise(r => setTimeout(r, ms));
+
+async function coletarDevolucoes(dias, pedirAoSync) {
+  const total = Math.min(180, Math.max(1, Number(dias) || 45));
+  const agora = Math.floor(Date.now() / 1000);
+  const arq = readJson(ARQ_DEV(), { devolucoes: {}, atualizado: null });
+  arq.devolucoes = arq.devolucoes || {};
+  let novas = 0, vistas = 0, janelas = 0, erro = null;
+  for (let fim = agora; fim > agora - total * 86400; fim -= 15 * 86400) {
+    const ini = Math.max(agora - total * 86400, fim - 15 * 86400 + 60);
+    janelas++;
+    for (let pag = 0; pag < 20; pag++) {
+      const r = await pedirAoSync('devolucoes', { de: String(ini), ate: String(fim), page: String(pag), size: '50' });
+      const resp = r && r.dados && r.dados.resposta && r.dados.resposta.response;
+      if (!resp) { erro = erro || ('janela ' + ini + '-' + fim + ' pagina ' + pag + ': sem resposta'); break; }
+      const lista = resp['return'] || [];
+      for (const d of lista) {
+        if (!d || !d.return_sn) continue;
+        vistas++;
+        if (!arq.devolucoes[d.return_sn]) novas++;
+        arq.devolucoes[d.return_sn] = {
+          return_sn: d.return_sn, order_sn: d.order_sn || null,
+          refund_amount: _num(d.refund_amount), antes_do_desconto: _num(d.amount_before_discount),
+          status: d.status || null, motivo: d.reason || null, motivo_texto: d.text_reason || null,
+          criado_em: d.create_time || null, atualizado_em: d.update_time || null,
+          precisa_logistica: !!d.needs_logistics, tipo: d.return_refund_type || null,
+          itens: (d.item || []).map(it => ({
+            sku: it.variation_sku || it.item_sku || null, nome: it.name || null,
+            qtd: _num(it.amount), preco: _num(it.item_price), devolvido: _num(it.refund_amount)
+          }))
+        };
+      }
+      if (!resp.more) break;
+      await _dorme(300);
+    }
+    await _dorme(300);
+  }
+  arq.atualizado = new Date().toISOString();
+  writeJson(ARQ_DEV(), arq);
+  return { janelas, vistas, novas, guardadas: Object.keys(arq.devolucoes).length, erro };
+}
+
+async function coletarCarteira(dias, pedirAoSync) {
+  const total = Math.min(180, Math.max(1, Number(dias) || 30));
+  const agora = Math.floor(Date.now() / 1000);
+  const arq = readJson(ARQ_CAR(), { transacoes: {}, atualizado: null });
+  arq.transacoes = arq.transacoes || {};
+  let novas = 0, vistas = 0, janelas = 0, erro = null;
+  for (let fim = agora; fim > agora - total * 86400; fim -= 15 * 86400) {
+    const ini = Math.max(agora - total * 86400, fim - 15 * 86400 + 60);
+    janelas++;
+    for (let pag = 1; pag <= 40; pag++) {
+      const r = await pedirAoSync('carteira', { de: String(ini), ate: String(fim), page: String(pag), size: '100' });
+      const resp = r && r.dados && r.dados.resposta && r.dados.resposta.response;
+      const lista = (resp && resp.transaction_list) || [];
+      if (!resp) { erro = erro || ('janela ' + ini + '-' + fim + ' pagina ' + pag + ': sem resposta'); break; }
+      for (const x of lista) {
+        if (!x || x.transaction_id == null) continue;
+        vistas++;
+        const id = String(x.transaction_id);
+        if (!arq.transacoes[id]) novas++;
+        arq.transacoes[id] = {
+          id, tipo: x.transaction_type || null, valor: _num(x.amount),
+          entra_ou_sai: x.money_flow || null, quando: x.create_time || null,
+          order_sn: x.order_sn || null, refund_sn: x.refund_sn || null,
+          descricao: x.description || null, aba: x.transaction_tab_type || null,
+          taxa: _num(x.transaction_fee), saldo_depois: _num(x.current_balance), status: x.status || null
+        };
+      }
+      if (!lista.length) break;
+      await _dorme(300);
+    }
+    await _dorme(300);
+  }
+  arq.atualizado = new Date().toISOString();
+  writeJson(ARQ_CAR(), arq);
+  return { janelas, vistas, novas, guardadas: Object.keys(arq.transacoes).length, erro };
+}
+
+// Lê o que já está no disco e devolve pronto pro dashboard: devoluções por SKU e
+// as despesas da carteira separadas do que é renda de pedido.
+function resumoShopee(de, ate) {
+  const ini = Date.parse(de + 'T00:00:00Z') / 1000, fim = Date.parse(ate + 'T23:59:59Z') / 1000;
+  const dev = readJson(ARQ_DEV(), { devolucoes: {} }).devolucoes || {};
+  const car = readJson(ARQ_CAR(), { transacoes: {} }).transacoes || {};
+  const porSku = {}, porMotivo = {};
+  let devTotal = 0, devQtd = 0;
+  for (const d of Object.values(dev)) {
+    const q = Number(d.criado_em || 0);
+    if (!(q >= ini && q <= fim)) continue;
+    devQtd++; devTotal += _num(d.refund_amount);
+    porMotivo[d.motivo || 'sem motivo'] = (porMotivo[d.motivo || 'sem motivo'] || 0) + 1;
+    for (const it of (d.itens || [])) {
+      const s = it.sku || 'sem sku';
+      porSku[s] = porSku[s] || { sku: s, qtd: 0, valor: 0, nome: it.nome || null };
+      porSku[s].qtd += it.qtd || 1;
+      porSku[s].valor = Math.round((porSku[s].valor + _num(it.devolvido)) * 100) / 100;
+    }
+  }
+  // na carteira, renda de pedido NÃO é despesa — ela já está na margem por pedido.
+  // Despesa é o resto: ajuste, reembolso, taxa, publicidade.
+  const RENDA = /ESCROW|ORDER_INCOME/i, SAQUE = /WITHDRAWAL/i;
+  const porTipo = {}; let saiDoBolso = 0;
+  for (const x of Object.values(car)) {
+    const q = Number(x.quando || 0);
+    if (!(q >= ini && q <= fim)) continue;
+    const t = x.tipo || 'sem tipo';
+    porTipo[t] = Math.round(((porTipo[t] || 0) + _num(x.valor)) * 100) / 100;
+    if (RENDA.test(t) || SAQUE.test(t)) continue;          // renda e saque não são custo
+    if (x.entra_ou_sai === 'MONEY_OUT') saiDoBolso = Math.round((saiDoBolso + _num(x.valor)) * 100) / 100;
+  }
+  return {
+    devolucoes: {
+      quantidade: devQtd, valor_devolvido: Math.round(devTotal * 100) / 100,
+      por_motivo: porMotivo,
+      por_sku: Object.values(porSku).sort((a, b) => b.valor - a.valor).slice(0, 50)
+    },
+    carteira: { por_tipo: porTipo, sai_do_bolso: saiDoBolso },
+    atualizado: {
+      devolucoes: readJson(ARQ_DEV(), {}).atualizado || null,
+      carteira: readJson(ARQ_CAR(), {}).atualizado || null
+    }
+  };
 }
 
 function rotasShopee(ctx) {
@@ -317,8 +458,47 @@ function rotasShopee(ctx) {
       return true;
     }
 
+    // ── COLETAR e guardar no disco (roda sozinho pela noturna, ou aqui na mão) ──
+    if (method === 'GET' && (p === '/girassol-backup-offline/shopee/coletar-devolucoes' || p === '/girassol-backup-offline/shopee/coletar-carteira')) {
+      if (!admOk(req, urlObj)) { json(res, 404, { error: 'not found' }); return true; }
+      const ehDev = p.endsWith('devolucoes');
+      const dias = Math.min(180, Math.max(1, parseInt(q.get('dias') || (ehDev ? '45' : '30'), 10) || 45));
+      const r = ehDev ? await coletarDevolucoes(dias, pedirAoSync) : await coletarCarteira(dias, pedirAoSync);
+      json(res, 200, Object.assign({ ok: !r.erro, coletor: ehDev ? 'devolucoes' : 'carteira', dias }, r,
+        { nota: 'a Shopee só aceita janela de 15 dias, então isto varre em janelas e guarda no disco por chave única (rodar de novo não duplica)' }));
+      return true;
+    }
+
+    // ── RESUMO pronto pro dashboard: devoluções por SKU + despesas da carteira ──
+    if (method === 'GET' && p === '/girassol-backup-offline/shopee/resumo') {
+      if (!admOk(req, urlObj)) { json(res, 404, { error: 'not found' }); return true; }
+      const de = String(q.get('de') || '').slice(0, 10), ate = String(q.get('ate') || '').slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(de) || !/^\d{4}-\d{2}-\d{2}$/.test(ate)) {
+        json(res, 400, { ok: false, erro: 'passe &de=AAAA-MM-DD&ate=AAAA-MM-DD' }); return true;
+      }
+      json(res, 200, Object.assign({ ok: true, de, ate }, resumoShopee(de, ate)));
+      return true;
+    }
+
     return false;   // não é rota da Shopee
   };
 }
 
-module.exports = { rotasShopee, escrowDoPedido, contasDoEscrow };
+// escrow de VÁRIOS pedidos numa chamada (até 50). O formato do lote é diferente
+// do individual — response[].escrow_detail.order_income — e é aqui que isso é tratado.
+async function escrowEmLote(orderSns) {
+  const sns = (orderSns || []).map(s => String(s).trim()).filter(Boolean).slice(0, 50);
+  if (!sns.length) return {};
+  const r = await pedirAoSync('escrow-lote', { sns: sns.join(',') });
+  const lista = (r && r.dados && r.dados.resposta && r.dados.resposta.response) || [];
+  const saida = {};
+  for (const item of lista) {
+    const det = (item && item.escrow_detail) || item;
+    const sn = det && det.order_sn;
+    if (!sn || !det.order_income) continue;
+    saida[String(sn)] = contasDoEscrow({ response: { order_income: det.order_income } });
+  }
+  return saida;
+}
+
+module.exports = { rotasShopee, escrowDoPedido, contasDoEscrow, escrowEmLote, coletarDevolucoes, coletarCarteira, resumoShopee, pedirAoSync };
