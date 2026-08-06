@@ -87,7 +87,11 @@ function contasDoEscrow(resp) {
   // Uso net + rebate (e nao os brutos) porque nao depende de `service_fee` vir sempre.
   const reb = (oi.seller_product_rebate && typeof oi.seller_product_rebate === 'object') ? oi.seller_product_rebate : {};
   const rebate = num(reb.amount);
-  const tarifa   = Math.round((comissao + servico + rebate + campanha + processa) * 100) / 100;
+  // 06/08 rodada 4 — o pedido 260804E38AK924 sobrou exatos 0,45, que era o
+  // `order_ams_commission_fee`: a COMISSAO DE AFILIADO. E custo do vendedor e tem
+  // coluna propria no MercadoTurbo ("Comissao Afiliado", R$ 2.428,50 no ano).
+  const afiliado = num(oi.order_ams_commission_fee);
+  const tarifa   = Math.round((comissao + servico + rebate + afiliado + campanha + processa) * 100) / 100;
   // ── 06/08, rodada 3: o SINAL do final_shipping_fee ────────────────────────────
   // Eu tratava valor positivo como CUSTO de frete. O pedido 260805JQ6X1DUT provou o
   // contrario: final_shipping_fee +8,00 (e shopee_shipping_rebate 8), e o escrow veio
@@ -97,13 +101,26 @@ function contasDoEscrow(resp) {
   // porque quem bancou foi a Shopee ou o comprador.
   // Conclusao: o escrow NUNCA cobra frete desta loja. O frete que sai do bolso e o motoboy
   // do Flex/Entrega Direta, que e pago FORA da Shopee e ja tem valor proprio no ⚙️.
-  const credito_frete = Math.round(Math.max(0, num(oi.final_shipping_fee)) * 100) / 100;
-  const frete    = 0;
+  // ── RODADA 4: a identidade completa do frete ─────────────────────────────────
+  // Rodada 3 eu disse "o escrow nao cobra frete". Estava incompleto. Os pedidos
+  // 260805H8TR3GJT e 260804EETUMXPS (sobra -8,00) e o 260804DSB9FTBC (sobra +1,23)
+  // mostraram as duas pontas que faltavam:
+  //   • buyer_paid_shipping_fee = frete que o COMPRADOR pagou e a Shopee REPASSA -> receita
+  //   • final_shipping_fee = -(actual_shipping_fee - shopee_shipping_rebate), ou seja o
+  //     liquido do frete com o sinal ja invertido: NEGATIVO = custo do vendedor,
+  //     POSITIVO = subsidio que sobra pra ele
+  // Conferido nos 11 pedidos reais das 4 rodadas — a identidade que fecha em TODOS e:
+  //   escrow = produtos + frete_do_comprador - tarifa + final_shipping_fee
+  const frete_do_comprador = num(oi.buyer_paid_shipping_fee);
+  const fsf = num(oi.final_shipping_fee);
+  const frete    = Math.round(Math.max(0, -fsf) * 100) / 100;   // custo liquido de frete do vendedor
+  const credito_frete = Math.round(Math.max(0, fsf) * 100) / 100;
   const escrow   = num(oi.escrow_amount_after_adjustment !== undefined ? oi.escrow_amount_after_adjustment : oi.escrow_amount);
   // se a formula estiver certa, isto tem que dar ~0 em todo pedido
-  const sobra = Math.round((produtos - tarifa + credito_frete - escrow) * 100) / 100;
+  const sobra = Math.round((produtos + frete_do_comprador - tarifa + fsf - escrow) * 100) / 100;
   return {
-    produtos, comissao, servico, rebate, transacao, transacao_cartao_informada, campanha, processa, tarifa, frete, credito_frete, escrow, sobra,
+    produtos, comissao, servico, rebate, afiliado, transacao, transacao_cartao_informada, campanha, processa,
+    tarifa, frete_do_comprador, frete, credito_frete, escrow, sobra,
     final_shipping_fee: num(oi.final_shipping_fee), shopee_shipping_rebate: num(oi.shopee_shipping_rebate),
     comissao_bruta: num(oi.commission_fee), servico_bruto: num(oi.service_fee),   // confere: bruta+bruto tem que dar a mesma tarifa
     pct_tarifa: produtos > 0 ? Math.round(tarifa / produtos * 1000) / 10 : null,
@@ -217,7 +234,7 @@ function rotasShopee(ctx) {
         ok: true, so_leitura: true, conferidos: cand.length,
         fecharam: fecharam.length, nao_fecharam: nao_fecharam.length, falhas: falhas.length,
         taxa_media_pct: somaProdutos > 0 ? Math.round(somaTarifa / somaProdutos * 1000) / 10 : null,
-        formula: 'tarifa = net_comissao + net_servico + seller_product_rebate + campanha + processamento (equivale a comissao BRUTA + servico BRUTO) · credito_frete = max(0, final_shipping_fee) e SOMA (e subsidio, nao custo) · o escrow nao cobra frete desta loja · a taxa de cartao NAO entra · confere se produtos − tarifa + credito_frete − escrow ≈ 0',
+        formula: 'tarifa = net_comissao + net_servico + seller_product_rebate + campanha + processamento (equivale a comissao BRUTA + servico BRUTO) · credito_frete = max(0, final_shipping_fee) e SOMA (e subsidio, nao custo) · o escrow nao cobra frete desta loja · a taxa de cartao NAO entra · confere a identidade produtos + frete_do_comprador − tarifa + final_shipping_fee = escrow',
         exemplos_que_fecharam: fecharam.slice(0, 3),
         os_que_nao_fecharam: nao_fecharam.slice(0, 4),   // com o cru junto, 4 ja e bastante texto
         falhas_detalhe: falhas.slice(0, 5)
