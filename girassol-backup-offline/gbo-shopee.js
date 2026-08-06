@@ -137,6 +137,22 @@ function contasDoEscrow(resp) {
   };
 }
 
+// ── 06/08: cliente das rotas financeiras do servico dono do token ─────────────
+// Uma funcao so, generica: monta a URL /:loja/interno/<o-que>?<params>&k=CHAVE.
+// Devolve SEMPRE o cru — nao interpreto nada antes de olhar uma amostra real.
+async function pedirAoSync(oQue, params) {
+  if (!SYNC_KEY) return { ok: false, erro: 'falta a env SHOPEE_SYNC_KEY neste servico' };
+  const q = new URLSearchParams(Object.assign({}, params || {}, { k: SYNC_KEY }));
+  const url = SYNC_URL + '/' + LOJA + '/interno/' + oQue + '?' + q.toString();
+  try {
+    const r = await fetch(url, { headers: { 'Content-Type': 'application/json' } });
+    const txt = await r.text();
+    let d = null; try { d = JSON.parse(txt); } catch (e) {}
+    return { ok: r.ok && d && d.ok !== false, status: r.status, dados: d, cru: txt.slice(0, 6000),
+             via: SYNC_URL + '/' + LOJA + '/interno/' + oQue };
+  } catch (e) { return { ok: false, erro: String((e && e.message) || e) }; }
+}
+
 function rotasShopee(ctx) {
   const { validarSessao } = ctx;
 
@@ -246,6 +262,57 @@ function rotasShopee(ctx) {
         exemplos_que_fecharam: fecharam.slice(0, 3),
         os_que_nao_fecharam: nao_fecharam.slice(0, 4),   // com o cru junto, 4 ja e bastante texto
         falhas_detalhe: falhas.slice(0, 5)
+      });
+      return true;
+    }
+
+    // ── SONDAS DO FINANCEIRO COMPLETO (06/08) ──────────────────────────────
+    // Tudo só leitura e tudo CRU. A ordem é sempre a mesma que deu certo no
+    // escrow: sondar → olhar o JSON real → só então escrever o parser.
+    //   /shopee/carteira?dias=7    → ads, ajustes, reembolsos, saques (= billing do ML)
+    //   /shopee/devolucoes?dias=30 → devolução e o custo dela
+    //   /shopee/liberado?dias=15   → o que a Shopee liberou (tela "Minha Renda")
+    //   /shopee/lote?pedidos=a,b   → escrow de até 50 pedidos numa chamada só
+    const SONDAS = {
+      '/girassol-backup-offline/shopee/carteira':   { rota: 'carteira',         padrao: { dias: '7' } },
+      '/girassol-backup-offline/shopee/devolucoes': { rota: 'devolucoes',       padrao: { dias: '30' } },
+      '/girassol-backup-offline/shopee/liberado':   { rota: 'escrow-liberado',  padrao: { dias: '15' } }
+    };
+    if (method === 'GET' && SONDAS[p]) {
+      if (!admOk(req, urlObj)) { json(res, 404, { error: 'not found' }); return true; }
+      const s = SONDAS[p];
+      const par = Object.assign({}, s.padrao);
+      for (const c of ['dias', 'de', 'ate', 'page', 'size']) { const v = q.get(c); if (v) par[c] = v; }
+      const r = await pedirAoSync(s.rota, par);
+      json(res, 200, {
+        ok: !!r.ok, sonda: s.rota, parametros: par, via: r.via || null,
+        erro: r.erro || null, status_http: r.status || null, resposta_crua: r.cru || null,
+        leia: 'resposta CRUA da Shopee, repassada pelo serviço que tem o token. Ainda não interpreto nada — com a amostra na mão eu escrevo o parser sem chutar formato.'
+      });
+      return true;
+    }
+
+    // escrow de vários pedidos numa chamada só (até 50)
+    if (method === 'GET' && p === '/girassol-backup-offline/shopee/lote') {
+      if (!admOk(req, urlObj)) { json(res, 404, { error: 'not found' }); return true; }
+      let sns = String(q.get('pedidos') || '').split(',').map(x => x.trim()).filter(Boolean);
+      let veioDe = 'parâmetro';
+      if (!sns.length) {
+        const conf = readJson(CONFERIDOS_FILE, {});
+        const linhas = Array.isArray(conf) ? conf : Object.values(conf || {});
+        sns = linhas
+          .filter(h => h && /shopee/i.test(String(h.marketplace || h.canal || '')) && String(h.numero_loja || '').length > 6)
+          .sort((a2, b2) => String(b2.conferido_em || b2.cacheado_em || '').localeCompare(String(a2.conferido_em || a2.cacheado_em || '')))
+          .slice(0, Math.min(50, Math.max(1, parseInt(q.get('max') || '5', 10) || 5)))
+          .map(h => String(h.numero_loja));
+        veioDe = 'cache dos bipados';
+        if (!sns.length) { json(res, 404, { ok: false, erro: 'sem venda de Shopee no cache — passe &pedidos=A,B,C' }); return true; }
+      }
+      const r = await pedirAoSync('escrow-lote', { sns: sns.join(',') });
+      json(res, 200, {
+        ok: !!r.ok, pedidos: sns.length, de_onde_vieram: veioDe, via: r.via || null,
+        erro: r.erro || null, status_http: r.status || null, resposta_crua: r.cru || null,
+        leia: 'se este lote devolver os mesmos campos do get_escrow_detail, trocamos a busca 1-a-1 por esta: 50 pedidos por chamada em vez de 1.'
       });
       return true;
     }
