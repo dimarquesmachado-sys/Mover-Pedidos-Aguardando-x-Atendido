@@ -113,14 +113,22 @@ function contasDoEscrow(resp) {
   //   escrow = produtos + frete_do_comprador - tarifa + final_shipping_fee
   const frete_do_comprador = num(oi.buyer_paid_shipping_fee);
   const fsf = num(oi.final_shipping_fee);
-  const frete    = Math.round(Math.max(0, -fsf) * 100) / 100;   // custo liquido de frete do vendedor
+  // ⚠️ ARMADILHA QUE QUASE PASSOU (06/08): gravar `max(0,-final_shipping_fee)` como custo
+  // INFLA a margem negativa. No 260806K85EPVXY o comprador pagou 6,30 de frete (receita)
+  // e o frete custou 6,30 — se eu lancasse so o custo, tiraria 6,30 do lucro que nao saiu
+  // do bolso de ninguem. O que importa pro resultado e o LIQUIDO das duas pontas:
+  //   frete_liquido_vendedor = -(buyer_paid_shipping_fee + final_shipping_fee)
+  //   positivo = saiu do bolso · negativo = sobrou dinheiro de frete
+  // Com ele vale a identidade limpa:  produtos - tarifa - frete_liquido = escrow
+  const frete    = Math.round(Math.max(0, -fsf) * 100) / 100;   // bruto, so pra conferencia
+  const frete_liquido_vendedor = Math.round(-(frete_do_comprador + fsf) * 100) / 100;
   const credito_frete = Math.round(Math.max(0, fsf) * 100) / 100;
   const escrow   = num(oi.escrow_amount_after_adjustment !== undefined ? oi.escrow_amount_after_adjustment : oi.escrow_amount);
   // se a formula estiver certa, isto tem que dar ~0 em todo pedido
   const sobra = Math.round((produtos + frete_do_comprador - tarifa + fsf - escrow) * 100) / 100;
   return {
     produtos, comissao, servico, rebate, afiliado, transacao, transacao_cartao_informada, campanha, processa,
-    tarifa, frete_do_comprador, frete, credito_frete, escrow, sobra,
+    tarifa, frete_do_comprador, frete, frete_liquido_vendedor, credito_frete, escrow, sobra,
     final_shipping_fee: num(oi.final_shipping_fee), shopee_shipping_rebate: num(oi.shopee_shipping_rebate),
     comissao_bruta: num(oi.commission_fee), servico_bruto: num(oi.service_fee),   // confere: bruta+bruto tem que dar a mesma tarifa
     pct_tarifa: produtos > 0 ? Math.round(tarifa / produtos * 1000) / 10 : null,
@@ -246,4 +254,4 @@ function rotasShopee(ctx) {
   };
 }
 
-module.exports = { rotasShopee, escrowDoPedido };
+module.exports = { rotasShopee, escrowDoPedido, contasDoEscrow };
