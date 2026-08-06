@@ -65,7 +65,12 @@ function contasDoEscrow(resp) {
   const produtos = num(oi.order_discounted_price) || num(oi.cost_of_goods_sold) || num(oi.order_selling_price);
   const comissao = num(oi.net_commission_fee !== undefined ? oi.net_commission_fee : oi.commission_fee);
   const servico  = num(oi.net_service_fee !== undefined ? oi.net_service_fee : oi.service_fee);
-  const transacao = num(oi.credit_card_transaction_fee);   // o buyer_transaction_fee quem paga e o comprador
+  // 06/08 — a conferencia em lote DERRUBOU o credit_card_transaction_fee da formula:
+  // no pedido 260805HPJYPYQ2 a sobra deu exatamente -6,66, que era o valor desse campo.
+  // Ou seja: ele NAO sai do bolso do vendedor (ja esta embutido/e do comprador). Fica
+  // reportado a parte, pra gente ver, mas fora da conta.
+  const transacao = 0;
+  const transacao_cartao_informada = num(oi.credit_card_transaction_fee);
   const campanha  = num(oi.campaign_fee);
   const processa  = num(oi.seller_order_processing_fee);
   const tarifa   = Math.round((comissao + servico + transacao + campanha + processa) * 100) / 100;
@@ -74,7 +79,7 @@ function contasDoEscrow(resp) {
   // se a formula estiver certa, isto tem que dar ~0 em todo pedido
   const sobra = Math.round((produtos - tarifa - frete - escrow) * 100) / 100;
   return {
-    produtos, comissao, servico, transacao, campanha, processa, tarifa, frete, escrow, sobra,
+    produtos, comissao, servico, transacao, transacao_cartao_informada, campanha, processa, tarifa, frete, escrow, sobra,
     pct_tarifa: produtos > 0 ? Math.round(tarifa / produtos * 1000) / 10 : null,
     pagamento: oi.buyer_payment_method || null,
     frete_real_da_shopee: num(oi.actual_shipping_fee), frete_pago_pelo_comprador: num(oi.buyer_paid_shipping_fee)
@@ -158,11 +163,27 @@ function rotasShopee(ctx) {
         const sn = String(c.numero_loja);
         const r = await escrowDoPedido(sn);
         const contas = r.ok && r.dados ? contasDoEscrow(r.dados.resposta) : null;
+        // 06/08: pros que NAO fecharem, guardo os campos do order_income que NAO sao zero.
+        // Sem isso eu ficaria adivinhando qual campo falta — e adivinhar formato de API ja
+        // me custou cinco tentativas erradas no Mercado Livre.
+        const cruNaoZero = (() => {
+          try {
+            const oi = r.dados.resposta.response.order_income;
+            const o = {};
+            for (const [k2, v2] of Object.entries(oi)) {
+              if (k2 === 'items' || k2 === 'net_commission_fee_info_list' || k2 === 'net_service_fee_info_list') continue;
+              if (typeof v2 === 'object' && v2 !== null) { const s2 = JSON.stringify(v2); if (s2 !== '{}' && !/^\{("?[a-z_]+"?:0,?)+\}$/.test(s2)) o[k2] = v2; continue; }
+              if (v2 !== 0 && v2 !== '' && v2 !== null && v2 !== 'N/A') o[k2] = v2;
+            }
+            return o;
+          } catch (e) { return null; }
+        })();
         if (!contas) { falhas.push({ pedido: sn, status: r.status || null, erro: r.erro || (r.dados && r.dados.erro) || 'sem order_income' }); }
         else {
           somaTarifa += contas.tarifa; somaProdutos += contas.produtos;
           const reg = Object.assign({ pedido: sn, pedido_bling: c.numero || null }, contas);
-          if (Math.abs(contas.sobra) <= 0.02) fecharam.push(reg); else nao_fecharam.push(reg);
+          if (Math.abs(contas.sobra) <= 0.02) fecharam.push(reg);
+          else nao_fecharam.push(Object.assign(reg, { campos_nao_zero_do_escrow: cruNaoZero }));
         }
         await new Promise(r2 => setTimeout(r2, 350));
       }
@@ -172,7 +193,7 @@ function rotasShopee(ctx) {
         taxa_media_pct: somaProdutos > 0 ? Math.round(somaTarifa / somaProdutos * 1000) / 10 : null,
         formula: 'tarifa = comissao + servico + transacao_cartao + campanha + processamento · frete_vendedor = max(0, final_shipping_fee) · confere se produtos − tarifa − frete − escrow ≈ 0',
         exemplos_que_fecharam: fecharam.slice(0, 3),
-        os_que_nao_fecharam: nao_fecharam.slice(0, 10),
+        os_que_nao_fecharam: nao_fecharam.slice(0, 4),   // com o cru junto, 4 ja e bastante texto
         falhas_detalhe: falhas.slice(0, 5)
       });
       return true;
