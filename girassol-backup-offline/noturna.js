@@ -35,7 +35,8 @@ let _not = {
 const hojeMenos = d => new Date(Date.now() - d * 864e5).toISOString().slice(0, 10);
 
 function criarNoturna(ctx) {
-  const { mlBillingSync, backfillVendas, mlSyncFees, varrerCancelados, canarioCron, podarExpedicao, VERSAO, validarSessao, ehAdmin, json } = ctx;
+  const { mlBillingSync, backfillVendas, mlSyncFees, varrerCancelados, canarioCron, podarExpedicao,
+          coletarDevolucoes, coletarCarteira, VERSAO, validarSessao, ehAdmin, json } = ctx;
   const dorme = ms => new Promise(r => setTimeout(r, ms));
 
   async function etapa(nome, fn) {
@@ -89,6 +90,25 @@ function criarNoturna(ctx) {
       return 'disparada';
     });
     await dorme(4000);
+
+    // 4b. SHOPEE: devoluções e carteira (06/08)
+    // A Shopee so aceita janela de 15 dias, entao os coletores varrem em janelas e
+    // guardam no disco por chave unica — rodar de novo nao duplica. Devolucoes trazem
+    // SKU e motivo; a carteira traz ads, ajustes e reembolsos, que nao passam pelo Bling.
+    if (typeof coletarDevolucoes === 'function') {
+      await etapa('devoluções da Shopee (45 dias)', async () => {
+        const r = await coletarDevolucoes(45);
+        return r ? (r.novas + ' novas de ' + r.vistas + ' vistas · ' + r.guardadas + ' no total' + (r.erro ? ' | ' + r.erro : '')) : 'ok';
+      });
+      await dorme(3000);
+    }
+    if (typeof coletarCarteira === 'function') {
+      await etapa('carteira da Shopee (30 dias)', async () => {
+        const r = await coletarCarteira(30);
+        return r ? (r.novas + ' novas de ' + r.vistas + ' vistas · ' + r.guardadas + ' no total' + (r.erro ? ' | ' + r.erro : '')) : 'ok';
+      });
+      await dorme(3000);
+    }
 
     // 5. o bucket de imagens se mantém sozinho
     if (typeof podarExpedicao === 'function') {
