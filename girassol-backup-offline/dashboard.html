@@ -364,7 +364,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd192';
+const DASH_BUILD = 'd193';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -1080,6 +1080,36 @@ function despesasSHPper(){
   if(!(SHP_PER && SHP_CK === (iv2.de+'|'+iv2.ate))) return 0;
   return Number((SHP_PER.carteira && SHP_PER.carteira.sai_do_bolso) || 0) || 0;
 }
+// d193 — a tabela dos SKUs que venderam sem custo. Só aparece quando existe algum.
+function desenharSemCusto(MC){
+  const sec = document.getElementById('secSemCusto'), el = document.getElementById('scTab');
+  if(!sec || !el) return;
+  const L = (MC && MC.semCustoDet) || [];
+  if(!L.length){ sec.style.display='none'; return; }
+  sec.style.display='';
+  const totV = L.reduce(function(s,x){ return s + (x.valor||0); }, 0);
+  const totU = L.reduce(function(s,x){ return s + (x.un||0); }, 0);
+  el.innerHTML =
+    '<div class="mut" style="font-size:12px;margin-bottom:6px"><b>'+N(L.length)+'</b> SKU(s) \u00b7 '+N(totU)+' unidade(s) \u00b7 '+BRL(totV)+' de faturamento fora da margem</div>'+
+    '<table style="width:100%;font-size:12px"><thead><tr>'+
+      '<th style="text-align:left">SKU</th><th style="text-align:left">Produto</th>'+
+      '<th style="text-align:right">un.</th><th style="text-align:right">pedidos</th><th style="text-align:right">R$ vendido</th></tr></thead><tbody>'+
+    L.slice(0,60).map(function(x){
+      return '<tr><td><b>'+x.sku+'</b></td><td class="mut">'+String(x.nome||'').slice(0,60)+'</td>'+
+             '<td style="text-align:right">'+N(x.un)+'</td>'+
+             '<td style="text-align:right">'+N(x.pedidos)+'</td>'+
+             '<td style="text-align:right;color:#f87171">'+BRL(x.valor)+'</td></tr>';
+    }).join('')+'</tbody></table>'+
+    (L.length>60 ? '<div class="mut" style="font-size:11px;margin-top:4px">mostrando os 60 de maior valor, de '+N(L.length)+'</div>' : '')+
+    '<button class="btn" style="margin-top:8px" onclick="copiarSemCusto()">\ud83d\udccb copiar a lista de SKUs</button>';
+}
+function copiarSemCusto(){
+  const L = (window._MC_ULT && window._MC_ULT.semCustoDet) || [];
+  const txt = L.map(function(x){ return x.sku; }).join('\n');
+  try{ navigator.clipboard.writeText(txt); alert(L.length+' SKU(s) copiados — cole no Bling pra achar cada um.'); }
+  catch(e){ prompt('copie os SKUs:', txt); }
+}
+
 function notaBateCard(mcPed, filtrado){
   const d = Math.round((despesasMLper() + despesasSHPper())*100)/100;
   // com filtro de canal ou busca por texto a conta N\u00c3O fecha (o card de cima \u00e9 sempre do per\u00edodo
@@ -1180,6 +1210,10 @@ function montar(){
     '<div class="sec" id="secSHP"><h2>\ud83d\udfe0 Despesas e Devolu\u00e7\u00f5es da Shopee <span class="hint">do per\u00edodo \u00b7 fora da margem por pedido</span></h2>'+
       '<div id="shpCards" class="mut" style="font-size:12px">carregando\u2026</div>'+
       '<div class="nota" style="margin-top:8px">V\u00eam da <b>API oficial da Shopee</b> (carteira e devolu\u00e7\u00f5es), coletadas de madrugada. <b>Nada disso passa pelo Bling.</b> O maior item costuma ser o estorno ap\u00f3s devolu\u00e7\u00e3o: a Shopee j\u00e1 tinha pago, o cliente devolveu e ela tirou o dinheiro de volta da carteira. Como s\u00e3o cobran\u00e7as do <b>per\u00edodo</b>, ainda <b>n\u00e3o entram</b> no Lucro Bruto (M.C.) l\u00e1 em cima \u2014 desconte para o lucro do m\u00eas.</div>'+
+    '</div>'+
+    '<div class="sec" id="secSemCusto" style="display:none"><h2>\u26a0\ufe0f SKUs que venderam SEM custo <span class="hint">no per\u00edodo \u00b7 estes pedidos ficam FORA da margem</span></h2>'+
+      '<div id="scTab" class="mut" style="font-size:12px"></div>'+
+      '<div class="nota" style="margin-top:8px">S\u00f3 entram SKUs que <b>realmente venderam</b> no per\u00edodo e n\u00e3o t\u00eam pre\u00e7o de custo. Produto PAI, A-COMBINAR ou em meio de cadastro <b>n\u00e3o aparece aqui</b> \u2014 eles n\u00e3o faturam. Cadastre o custo no Bling e rode o custo-sync; o pedido volta pra margem sozinho.</div>'+
     '</div>'+
     '<div class="sec" id="secBusca"><h2>🔍 Buscar Pedido e Lucro <span class="hint">nº do pedido · NF · nº da venda no marketplace · SKU · parte do título</span></h2>'+
       '<input id="qBusca" placeholder="digite e tecle Enter" '+
@@ -1456,6 +1490,12 @@ function render(){
   const MC = (function(){
     let rec=0, imp=0, impMC=0, tar=0, cus=0, cusMC=0, pedOk=0, semCfg=0, cusUn=0, unTot=0, tReais=0, frV=0, fRecP=0, pedImp=0, semItens=0, semDados=0, credML=0;
     const semCustoSet = new Set();   // SKUs sem custo cadastrado
+    // d193 — pedido do Diego: "me relaciona os SKU com problema, e os sem custo que
+    // TENHAM VENDA mas vieram com custo zerado". Varrer o catálogo inteiro atrás de
+    // custo zero mistura produto em cadastro, PAI e A-COMBINAR — nada disso fatura.
+    // O que importa é o SKU que VENDEU sem custo. Aqui a gente já passa por cada item
+    // de cada venda do período, então é só somar quanto cada um deixou de fora.
+    const semCustoDet = new Map();   // sku -> { un, valor, pedidos:Set, nome }
     const semAliqSet = new Set();    // meses sem alíquota configurada
     const semTaxaPed = [];           // pedidos sem taxa do canal
     const semDetPed  = [];           // pedidos sem detalhe (itens) ainda
@@ -1486,7 +1526,20 @@ function render(){
       (h.itens||[]).forEach(it=>{
         const q = Number(it.qtd||1); unTot += q;
         const c = custoIt(it);
-        if(c!=null){ cusPed += c*q; cusUn += q; } else { custoCompleto = false; if(it.sku) semCustoSet.add(String(it.sku)); }
+        if(c!=null){ cusPed += c*q; cusUn += q; }
+        else {
+          custoCompleto = false;
+          if(it.sku){
+            const sk = String(it.sku);
+            semCustoSet.add(sk);
+            let d0 = semCustoDet.get(sk);
+            if(!d0){ d0 = { sku: sk, un: 0, valor: 0, pedidos: new Set(), nome: it.titulo || it.nome || '' }; semCustoDet.set(sk, d0); }
+            d0.un += q;
+            d0.valor = Math.round((d0.valor + (Number(it.valor||it.preco||0)||0) * q) * 100) / 100;
+            d0.pedidos.add(h.numero || h.id);
+            if(!d0.nome && (it.titulo || it.nome)) d0.nome = it.titulo || it.nome;
+          }
+        }
       });
       // MARGEM: precisa de valor + alíquota + (tarifa real OU % configurada do canal)
       if(rp==null){ semCfg++; return; }
@@ -1511,9 +1564,14 @@ function render(){
       else if(h.frete_mkt!=null && isFinite(Number(h.frete_mkt)) && Number(h.frete_mkt)>0) frV += Number(h.frete_mkt);
     });
     return { rec, imp, impMC, tar, cus, cusMC, pedOk, semCfg, cusUn, unTot, tReais, frV, fRecP, credML, pedImp, semItens, semDados, semCustoSkus: Array.from(semCustoSet),
+      semCustoDet: Array.from(semCustoDet.values()).map(function(x){ return { sku:x.sku, nome:x.nome, un:x.un, valor:x.valor, pedidos:x.pedidos.size }; }).sort(function(a2,b2){ return b2.valor - a2.valor; }),
              semAliqMeses: Array.from(semAliqSet), semTaxaPed, semDetPed,
              mc: rec-impMC-tar-cusMC-frV+fRecP+credML, temCfg: !!Object.keys(CFG.taxas).length };
   })();
+  // d193: guarda o último MC (o botão de copiar lê daqui) e desenha a lista dos
+  // SKUs que venderam sem custo. Fica logo depois do cálculo, então acompanha
+  // qualquer troca de período automaticamente.
+  try{ window._MC_ULT = MC; desenharSemCusto(MC); }catch(e){}
   const usaHist = !!(HIST && HIST.de===de && HIST.ate===ate && HIST.totais);   // período longo: os números vêm do histórico
   const totPed = usaHist ? HIST.totais.pedidos : (PER.length + AGD.length);
   // 🔄 HOJE: confere cancelamentos no marketplace já na abertura (o automático de 10 min só viria depois)
