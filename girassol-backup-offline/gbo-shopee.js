@@ -40,9 +40,10 @@ const LOJA = process.env.SHOPEE_SYNC_LOJA || 'girassol';
 
 // Busca o escrow de um pedido no serviço que é dono do token.
 // Devolve SEMPRE o cru junto: se o formato mudar, a gente vê na hora.
-async function escrowDoPedido(orderSn) {
+async function escrowDoPedido(orderSn, loja) {
   if (!SYNC_KEY) return { ok: false, erro: 'falta a env SHOPEE_SYNC_KEY neste serviço' };
-  const url = SYNC_URL + '/' + LOJA + '/interno/escrow/' + encodeURIComponent(String(orderSn).trim()) +
+  const alvoP = (loja && /^(amb|girassol|good)$/.test(String(loja))) ? String(loja) : LOJA;
+  const url = SYNC_URL + '/' + alvoP + '/interno/escrow/' + encodeURIComponent(String(orderSn).trim()) +
     '?k=' + encodeURIComponent(SYNC_KEY);
   try {
     const r = await fetch(url, { headers: { 'Content-Type': 'application/json' } });
@@ -78,6 +79,13 @@ function contasDoEscrow(resp) {
   const transacao_cartao_informada = num(oi.credit_card_transaction_fee);
   const campanha  = num(oi.campaign_fee);
   const processa  = num(oi.seller_order_processing_fee);
+  // ── 06/08: campo que só apareceu quando olhei a AMBTOTAL ─────────────────────
+  // Pedido 260725KRDBJVMN da AMB: 19,90 − 3,58 (comissão) − 5,10 (serviço) daria
+  // 11,22, mas o escrow veio 10,73. Faltavam exatos 0,49 — que estavam em
+  // `shipping_seller_protection_fee_amount`, o seguro de envio do vendedor.
+  // Na Girassol esse campo vem SEMPRE zero, então não apareceu em 100 pedidos.
+  // Foi exatamente por isso que valeu testar na AMB ANTES de portar qualquer coisa.
+  const seg = num(oi.shipping_seller_protection_fee_amount);
   // ── 06/08: O CAMPO QUE FALTAVA — seller_product_rebate ──────────────────────
   // A instrumentacao entregou de bandeja: nos 4 pedidos que nao fechavam, o
   // `seller_product_rebate.amount` era EXATAMENTE a sobra (31,97 / 3,74 / 11,98 / 70,83).
@@ -96,7 +104,7 @@ function contasDoEscrow(resp) {
   // `order_ams_commission_fee`: a COMISSAO DE AFILIADO. E custo do vendedor e tem
   // coluna propria no MercadoTurbo ("Comissao Afiliado", R$ 2.428,50 no ano).
   const afiliado = num(oi.order_ams_commission_fee);
-  const tarifa   = Math.round((comissao + servico + rebate + afiliado + campanha + processa) * 100) / 100;
+  const tarifa   = Math.round((comissao + servico + rebate + afiliado + seg + campanha + processa) * 100) / 100;
   // ── 06/08, rodada 3: o SINAL do final_shipping_fee ────────────────────────────
   // Eu tratava valor positivo como CUSTO de frete. O pedido 260805JQ6X1DUT provou o
   // contrario: final_shipping_fee +8,00 (e shopee_shipping_rebate 8), e o escrow veio
@@ -132,7 +140,7 @@ function contasDoEscrow(resp) {
   // se a formula estiver certa, isto tem que dar ~0 em todo pedido
   const sobra = Math.round((produtos + frete_do_comprador - tarifa + fsf - escrow) * 100) / 100;
   return {
-    produtos, comissao, servico, rebate, afiliado, transacao, transacao_cartao_informada, campanha, processa,
+    produtos, comissao, servico, rebate, afiliado, seguro_envio: seg, transacao, transacao_cartao_informada, campanha, processa,
     tarifa, frete_do_comprador, frete, frete_liquido_vendedor, credito_frete, escrow, sobra,
     final_shipping_fee: num(oi.final_shipping_fee), shopee_shipping_rebate: num(oi.shopee_shipping_rebate),
     comissao_bruta: num(oi.commission_fee), servico_bruto: num(oi.service_fee),   // confere: bruta+bruto tem que dar a mesma tarifa
@@ -377,18 +385,29 @@ function rotasShopee(ctx) {
     if (method === 'GET' && p === '/girassol-backup-offline/shopee/conferir') {
       if (!admOk(req, urlObj)) { json(res, 404, { error: 'not found' }); return true; }
       const max = Math.min(200, Math.max(1, parseInt(q.get('max') || '20', 10) || 20));
-      const conf = readJson(CONFERIDOS_FILE, {});
-      const linhas = Array.isArray(conf) ? conf : Object.values(conf || {});
-      const cand = linhas
-        .filter(h => h && /shopee/i.test(String(h.marketplace || h.canal || '')) && String(h.numero_loja || '').length > 6)
-        .sort((a2, b2) => String(b2.conferido_em || b2.cacheado_em || '').localeCompare(String(a2.conferido_em || a2.cacheado_em || '')))
-        .slice(0, max);
-      if (!cand.length) { json(res, 404, { ok: false, erro: 'sem venda de Shopee no cache' }); return true; }
+      const lojaC = q.get('loja');
+      let cand = [];
+      if (lojaC && lojaC !== LOJA) {
+        // 06/08: conferir a fórmula em OUTRA loja (a AMB). Os pedidos vêm da própria
+        // loja, pela lista de escrow liberado — o cache de bipados daqui só tem pedido
+        // da Girassol, e a Shopee recusa com "does not belong to you".
+        const rl = await pedirAoSync('escrow-liberado', { dias: '15', size: '50' }, lojaC);
+        const lst = (rl && rl.dados && rl.dados.resposta && rl.dados.resposta.response && rl.dados.resposta.response.escrow_list) || [];
+        cand = lst.slice(0, max).map(x => ({ numero_loja: String((x && x.order_sn) || ''), numero: null })).filter(x => x.numero_loja);
+      } else {
+        const conf = readJson(CONFERIDOS_FILE, {});
+        const linhas = Array.isArray(conf) ? conf : Object.values(conf || {});
+        cand = linhas
+          .filter(h => h && /shopee/i.test(String(h.marketplace || h.canal || '')) && String(h.numero_loja || '').length > 6)
+          .sort((a2, b2) => String(b2.conferido_em || b2.cacheado_em || '').localeCompare(String(a2.conferido_em || a2.cacheado_em || '')))
+          .slice(0, max);
+      }
+      if (!cand.length) { json(res, 404, { ok: false, erro: 'sem venda de Shopee pra conferir' + (lojaC ? ' na loja ' + lojaC : '') }); return true; }
       const fecharam = [], nao_fecharam = [], falhas = [];
       let somaTarifa = 0, somaProdutos = 0;
       for (const c of cand) {
         const sn = String(c.numero_loja);
-        const r = await escrowDoPedido(sn);
+        const r = await escrowDoPedido(sn, lojaC);
         const contas = r.ok && r.dados ? contasDoEscrow(r.dados.resposta) : null;
         // 06/08: pros que NAO fecharem, guardo os campos do order_income que NAO sao zero.
         // Sem isso eu ficaria adivinhando qual campo falta — e adivinhar formato de API ja
