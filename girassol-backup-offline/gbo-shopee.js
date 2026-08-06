@@ -73,13 +73,28 @@ function contasDoEscrow(resp) {
   const transacao_cartao_informada = num(oi.credit_card_transaction_fee);
   const campanha  = num(oi.campaign_fee);
   const processa  = num(oi.seller_order_processing_fee);
-  const tarifa   = Math.round((comissao + servico + transacao + campanha + processa) * 100) / 100;
+  // ── 06/08: O CAMPO QUE FALTAVA — seller_product_rebate ──────────────────────
+  // A instrumentacao entregou de bandeja: nos 4 pedidos que nao fechavam, o
+  // `seller_product_rebate.amount` era EXATAMENTE a sobra (31,97 / 3,74 / 11,98 / 70,83).
+  // O que acontece: a Shopee ABATE parte da comissao e do servico (por isso net_* vem
+  // baixo, ate 3% em vez de 18%) e cobra a diferenca de volta como rebate — e o rebate
+  // sai do bolso do vendedor. A prova aritmetica:
+  //   net_commission_fee = commission_fee - rebate.commission_fee_offset
+  //   net_service_fee    = service_fee    - rebate.service_fee_offset
+  //   rebate.amount      = commission_fee_offset + service_fee_offset
+  // Logo net + net + rebate == comissao BRUTA + servico BRUTO. Ex. do 260805JK61BNC8:
+  //   20,10 + 19,84 + 31,97 = 71,91 = 39,35 + 32,56  ->  327,90 - 71,91 = 255,99 = escrow
+  // Uso net + rebate (e nao os brutos) porque nao depende de `service_fee` vir sempre.
+  const reb = (oi.seller_product_rebate && typeof oi.seller_product_rebate === 'object') ? oi.seller_product_rebate : {};
+  const rebate = num(reb.amount);
+  const tarifa   = Math.round((comissao + servico + rebate + campanha + processa) * 100) / 100;
   const frete    = Math.round(Math.max(0, num(oi.final_shipping_fee)) * 100) / 100;
   const escrow   = num(oi.escrow_amount_after_adjustment !== undefined ? oi.escrow_amount_after_adjustment : oi.escrow_amount);
   // se a formula estiver certa, isto tem que dar ~0 em todo pedido
   const sobra = Math.round((produtos - tarifa - frete - escrow) * 100) / 100;
   return {
-    produtos, comissao, servico, transacao, transacao_cartao_informada, campanha, processa, tarifa, frete, escrow, sobra,
+    produtos, comissao, servico, rebate, transacao, transacao_cartao_informada, campanha, processa, tarifa, frete, escrow, sobra,
+    comissao_bruta: num(oi.commission_fee), servico_bruto: num(oi.service_fee),   // confere: bruta+bruto tem que dar a mesma tarifa
     pct_tarifa: produtos > 0 ? Math.round(tarifa / produtos * 1000) / 10 : null,
     pagamento: oi.buyer_payment_method || null,
     frete_real_da_shopee: num(oi.actual_shipping_fee), frete_pago_pelo_comprador: num(oi.buyer_paid_shipping_fee)
@@ -191,7 +206,7 @@ function rotasShopee(ctx) {
         ok: true, so_leitura: true, conferidos: cand.length,
         fecharam: fecharam.length, nao_fecharam: nao_fecharam.length, falhas: falhas.length,
         taxa_media_pct: somaProdutos > 0 ? Math.round(somaTarifa / somaProdutos * 1000) / 10 : null,
-        formula: 'tarifa = comissao + servico + transacao_cartao + campanha + processamento · frete_vendedor = max(0, final_shipping_fee) · confere se produtos − tarifa − frete − escrow ≈ 0',
+        formula: 'tarifa = net_comissao + net_servico + seller_product_rebate + campanha + processamento (equivale a comissao BRUTA + servico BRUTO) · frete_vendedor = max(0, final_shipping_fee) · a taxa de cartao NAO entra · confere se produtos − tarifa − frete − escrow ≈ 0',
         exemplos_que_fecharam: fecharam.slice(0, 3),
         os_que_nao_fecharam: nao_fecharam.slice(0, 4),   // com o cru junto, 4 ja e bastante texto
         falhas_detalhe: falhas.slice(0, 5)
