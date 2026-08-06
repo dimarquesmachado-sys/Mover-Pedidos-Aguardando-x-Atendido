@@ -364,7 +364,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd191';
+const DASH_BUILD = 'd192';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -968,7 +968,7 @@ async function carregarDespesasML(){
 // Por que isso importa: NADA disso passa pelo Bling. O maior item é o
 // ADJUSTMENT_FOR_RR — a Shopee já tinha pago, o cliente devolveu e ela tirou o
 // dinheiro de volta da carteira. É o custo da devolução, e até hoje não aparecia.
-let _shpCache = {};
+let _shpCache = {}, SHP_PER = null, SHP_CK = '';   // financeiro da Shopee do período em exibição
 const NOME_TIPO_SHP = {
   ADJUSTMENT_FOR_RR_AFTER_ESCROW_VERIFIED: '↩️ Devolução (estorno após pagamento)',
   ADJUSTMENT_CENTER_DEDUCT: '⚖️ Ajuste da Shopee',
@@ -987,7 +987,10 @@ async function carregarDespesasShopee(){
   try{
     const r = await fetch(MOD+'/shopee/resumo?de='+iv.de+'&ate='+iv.ate, {credentials:'same-origin'});
     const d = await r.json().catch(()=>null);
-    if(d && d.ok){ _shpCache[ck] = d; desenharDespesasShopee(d); }
+    if(d && d.ok){ _shpCache[ck] = d; desenharDespesasShopee(d);
+      // d192: o card 💎 passa a descontar TAMBÉM o que a Shopee tira da carteira,
+      // como já fazia com o ML. Guarda e redesenha.
+      SHP_PER = d; SHP_CK = ck; try{ render(); }catch(e){} }
     else el.innerHTML = '<span class="dim">n\u00e3o consegui ler o financeiro da Shopee</span>';
   }catch(e){ el.innerHTML = '<span class="dim">n\u00e3o consegui ler o financeiro da Shopee</span>'; }
 }
@@ -1069,8 +1072,16 @@ function despesasMLper(){
   const c = MLB_PER.categorias || {};
   return (c.ads||0)+(c.full||0)+(c.devolucao||0);   // SEM o cr\u00e9dito, igual ao card e ao painel de despesas
 }
+// d192 — o mesmo papel do despesasMLper(), do lado da Shopee. Só entra o que ELA
+// tirou da carteira e que não é saque nem renda de pedido: estorno de devolução
+// (ADJUSTMENT_FOR_RR), ajustes e correções de repasse. Nada disso passa pelo Bling.
+function despesasSHPper(){
+  const iv2 = intervalo();
+  if(!(SHP_PER && SHP_CK === (iv2.de+'|'+iv2.ate))) return 0;
+  return Number((SHP_PER.carteira && SHP_PER.carteira.sai_do_bolso) || 0) || 0;
+}
 function notaBateCard(mcPed, filtrado){
-  const d = despesasMLper();
+  const d = Math.round((despesasMLper() + despesasSHPper())*100)/100;
   // com filtro de canal ou busca por texto a conta N\u00c3O fecha (o card de cima \u00e9 sempre do per\u00edodo
   // inteiro), ent\u00e3o a nota some em vez de mostrar uma igualdade que n\u00e3o bate.
   if(!d || filtrado || mcPed == null) return '';
@@ -1564,13 +1575,15 @@ function render(){
         const iv2=intervalo();
         const temD=(MLB_PER && MLB_CK===(iv2.de+'|'+iv2.ate));
         const c=temD?(MLB_PER.categorias||{}):{};
-        const desp=(c.ads||0)+(c.full||0)+(c.devolucao||0);   // SEM o crédito, de propósito
+        const despML=(c.ads||0)+(c.full||0)+(c.devolucao||0);   // SEM o crédito, de propósito
+        const despSHP=despesasSHPper();   // d192: estorno de devolução + ajustes da Shopee
+        const desp=Math.round((despML+despSHP)*100)/100;
         const mFin=mBase-desp;
         const fat2=(usaHist?HIST.totais.faturamento:fat);
         return '<div class="kpi" style="--kc:#14b8a6"><span class="ic">\ud83d\udc8e</span><div class="l">Lucro Bruto (M.C.)</div><div class="v '+(mFin>=0?'ok':'bad')+'" '+
-               'title="venda \u2212 imposto \u2212 comiss\u00e3o \u2212 frete \u2212 custo'+(desp?' \u2212 despesas ML do per\u00edodo (Ads, armazenagem Full e devolu\u00e7\u00f5es \u2014 as tarifas estornadas ficam de fora: s\u00e3o de venda cancelada, que j\u00e1 n\u00e3o conta no faturamento)':'')+'">'+
+               'title="venda \u2212 imposto \u2212 comiss\u00e3o \u2212 frete \u2212 custo'+(desp?(' \u2212 despesas do per\u00edodo: ML '+BRL(despML)+' (Ads, armazenagem Full e devolu\u00e7\u00f5es \u2014 as tarifas estornadas ficam de fora: s\u00e3o de venda cancelada, que j\u00e1 n\u00e3o conta no faturamento) + Shopee '+BRL(despSHP)+' (estorno de devolu\u00e7\u00e3o e ajustes tirados da carteira)'):'')+'">'+
                BRL(mFin)+(fat2>0?'<span style="font-size:13px;opacity:.8;font-weight:600"> \u00b7 '+(Math.round(mFin/fat2*1000)/10).toLocaleString('pt-BR')+'%</span>':'')+'</div>'+
-               '<div class="s">venda \u2212 imposto \u2212 comiss\u00e3o \u2212 frete \u2212 custo'+(desp?' \u2212 Ads/Full/devolu\u00e7\u00f5es':'')+(usaHist?' \u00b7 \ud83d\udcda hist\u00f3rico completo':'')+'</div></div>';
+               '<div class="s">venda \u2212 imposto \u2212 comiss\u00e3o \u2212 frete \u2212 custo'+(desp?(' \u2212 despesas ML'+(despSHP?' e Shopee':'')):'')+(usaHist?' \u00b7 \ud83d\udcda hist\u00f3rico completo':'')+'</div></div>';
       })()
       : '<div class="kpi" style="--kc:#64748b;cursor:pointer" onclick="document.getElementById(\'cfgBox\').scrollIntoView({behavior:\'smooth\'})"><span class="ic">💎</span><div class="l">Lucro Bruto (M.C.)</div><div class="v dim">—</div><div class="s warn">⚙️ configure as taxas por canal abaixo</div></div>') +
     kpi('var(--ac)','📊','Pedidos', N(totPed), (!usaHist && MC.semItens)?(avisoCom(N(MC.semItens)+' sem detalhe', MC.semDetPed, 'o sistema busca sozinho; dá pra forçar no botão ao lado')+' <button onclick="completarDetalhes()" title="o dashboard já busca sozinho ao abrir o período — este botão é só pra tentar de novo" style="background:#1d4ed8;color:#fff;border:0;border-radius:6px;padding:2px 7px;font-size:10px;font-weight:700;cursor:pointer">↻ tentar de novo</button><div id="avisoDet" style="font-size:10px;margin-top:2px"></div>'):(MC.unTot>0?('<b style="font-size:13px;color:var(--txt);opacity:1">'+N(usaHist?HIST.totais.unidades:MC.unTot)+' unidades vendidas</b>'):'sem itens no período')) +
