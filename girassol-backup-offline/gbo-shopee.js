@@ -88,12 +88,23 @@ function contasDoEscrow(resp) {
   const reb = (oi.seller_product_rebate && typeof oi.seller_product_rebate === 'object') ? oi.seller_product_rebate : {};
   const rebate = num(reb.amount);
   const tarifa   = Math.round((comissao + servico + rebate + campanha + processa) * 100) / 100;
-  const frete    = Math.round(Math.max(0, num(oi.final_shipping_fee)) * 100) / 100;
+  // ── 06/08, rodada 3: o SINAL do final_shipping_fee ────────────────────────────
+  // Eu tratava valor positivo como CUSTO de frete. O pedido 260805JQ6X1DUT provou o
+  // contrario: final_shipping_fee +8,00 (e shopee_shipping_rebate 8), e o escrow veio
+  // 8,00 MAIOR que produtos-tarifa. Ou seja positivo e CREDITO — subsidio de frete que
+  // a Shopee deposita pro vendedor. Somando como custo eu errava em DOBRO: a sobra deu -16.
+  // E quando vem NEGATIVO (-6,30, -12,04, -1,44) tambem nao e custo: a conta fecha sem ele,
+  // porque quem bancou foi a Shopee ou o comprador.
+  // Conclusao: o escrow NUNCA cobra frete desta loja. O frete que sai do bolso e o motoboy
+  // do Flex/Entrega Direta, que e pago FORA da Shopee e ja tem valor proprio no ⚙️.
+  const credito_frete = Math.round(Math.max(0, num(oi.final_shipping_fee)) * 100) / 100;
+  const frete    = 0;
   const escrow   = num(oi.escrow_amount_after_adjustment !== undefined ? oi.escrow_amount_after_adjustment : oi.escrow_amount);
   // se a formula estiver certa, isto tem que dar ~0 em todo pedido
-  const sobra = Math.round((produtos - tarifa - frete - escrow) * 100) / 100;
+  const sobra = Math.round((produtos - tarifa + credito_frete - escrow) * 100) / 100;
   return {
-    produtos, comissao, servico, rebate, transacao, transacao_cartao_informada, campanha, processa, tarifa, frete, escrow, sobra,
+    produtos, comissao, servico, rebate, transacao, transacao_cartao_informada, campanha, processa, tarifa, frete, credito_frete, escrow, sobra,
+    final_shipping_fee: num(oi.final_shipping_fee), shopee_shipping_rebate: num(oi.shopee_shipping_rebate),
     comissao_bruta: num(oi.commission_fee), servico_bruto: num(oi.service_fee),   // confere: bruta+bruto tem que dar a mesma tarifa
     pct_tarifa: produtos > 0 ? Math.round(tarifa / produtos * 1000) / 10 : null,
     pagamento: oi.buyer_payment_method || null,
@@ -206,7 +217,7 @@ function rotasShopee(ctx) {
         ok: true, so_leitura: true, conferidos: cand.length,
         fecharam: fecharam.length, nao_fecharam: nao_fecharam.length, falhas: falhas.length,
         taxa_media_pct: somaProdutos > 0 ? Math.round(somaTarifa / somaProdutos * 1000) / 10 : null,
-        formula: 'tarifa = net_comissao + net_servico + seller_product_rebate + campanha + processamento (equivale a comissao BRUTA + servico BRUTO) · frete_vendedor = max(0, final_shipping_fee) · a taxa de cartao NAO entra · confere se produtos − tarifa − frete − escrow ≈ 0',
+        formula: 'tarifa = net_comissao + net_servico + seller_product_rebate + campanha + processamento (equivale a comissao BRUTA + servico BRUTO) · credito_frete = max(0, final_shipping_fee) e SOMA (e subsidio, nao custo) · o escrow nao cobra frete desta loja · a taxa de cartao NAO entra · confere se produtos − tarifa + credito_frete − escrow ≈ 0',
         exemplos_que_fecharam: fecharam.slice(0, 3),
         os_que_nao_fecharam: nao_fecharam.slice(0, 4),   // com o cru junto, 4 ja e bastante texto
         falhas_detalhe: falhas.slice(0, 5)
