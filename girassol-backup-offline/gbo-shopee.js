@@ -268,17 +268,32 @@ function resumoShopee(de, ate) {
       porSku[s].valor = Math.round((porSku[s].valor + _num(it.devolvido)) * 100) / 100;
     }
   }
-  // na carteira, renda de pedido NÃO é despesa — ela já está na margem por pedido.
-  // Despesa é o resto: ajuste, reembolso, taxa, publicidade.
-  const RENDA = /ESCROW|ORDER_INCOME/i, SAQUE = /WITHDRAWAL/i;
-  const porTipo = {}; let saiDoBolso = 0;
+  // ── CORRIGIDO 06/08, na 1a coleta de verdade ────────────────────────────────
+  // Eu filtrava renda com /ESCROW|ORDER_INCOME/i — e esse regex ENGOLIU dois custos
+  // reais, porque o nome deles também tem "ESCROW":
+  //   ADJUSTMENT_FOR_RR_AFTER_ESCROW_VERIFIED  −1.455,22 em 30 dias (ajuste por
+  //       devolução depois do escrow já verificado — é O CUSTO DA DEVOLUÇÃO)
+  //   ESCROW_VERIFIED_MINUS                       −29,48
+  // Com o filtro velho o "sai do bolso" deu R$ 16,34; o certo era R$ 1.501,04.
+  // Agora a regra é explícita e pelo SINAL, não por parecença de nome:
+  //   renda  = ESCROW_VERIFIED_ADD (e ORDER_INCOME) — já está na margem por pedido
+  //   saque  = WITHDRAWAL_* — tirar dinheiro da carteira não é custo
+  //   custo  = todo o resto com valor NEGATIVO, somado em módulo
+  const ehRenda = t2 => /^(ESCROW_VERIFIED_ADD|ORDER_INCOME)/i.test(t2);
+  const ehSaque = t2 => /^WITHDRAWAL/i.test(t2);
+  const porTipo = {}; let saiDoBolso = 0; const custoPorTipo = {};
   for (const x of Object.values(car)) {
     const q = Number(x.quando || 0);
     if (!(q >= ini && q <= fim)) continue;
-    const t = x.tipo || 'sem tipo';
-    porTipo[t] = Math.round(((porTipo[t] || 0) + _num(x.valor)) * 100) / 100;
-    if (RENDA.test(t) || SAQUE.test(t)) continue;          // renda e saque não são custo
-    if (x.entra_ou_sai === 'MONEY_OUT') saiDoBolso = Math.round((saiDoBolso + _num(x.valor)) * 100) / 100;
+    const t2 = x.tipo || 'sem tipo';
+    const v = _num(x.valor);
+    porTipo[t2] = Math.round(((porTipo[t2] || 0) + v) * 100) / 100;
+    if (ehRenda(t2) || ehSaque(t2)) continue;
+    if (v < 0 || x.entra_ou_sai === 'MONEY_OUT') {
+      const custo = Math.abs(v);
+      saiDoBolso = Math.round((saiDoBolso + custo) * 100) / 100;
+      custoPorTipo[t2] = Math.round(((custoPorTipo[t2] || 0) + custo) * 100) / 100;
+    }
   }
   return {
     devolucoes: {
@@ -286,7 +301,7 @@ function resumoShopee(de, ate) {
       por_motivo: porMotivo,
       por_sku: Object.values(porSku).sort((a, b) => b.valor - a.valor).slice(0, 50)
     },
-    carteira: { por_tipo: porTipo, sai_do_bolso: saiDoBolso },
+    carteira: { por_tipo: porTipo, custo_por_tipo: custoPorTipo, sai_do_bolso: saiDoBolso },
     atualizado: {
       devolucoes: readJson(ARQ_DEV(), {}).atualizado || null,
       carteira: readJson(ARQ_CAR(), {}).atualizado || null
