@@ -457,6 +457,19 @@ function rotasShopee(ctx) {
       if (!admOk(req, urlObj)) { json(res, 404, { error: 'not found' }); return true; }
       let sns = String(q.get('pedidos') || '').split(',').map(x => x.trim()).filter(Boolean);
       let veioDe = 'parâmetro';
+      const lojaPed = q.get('loja');
+      // ── 06/08, conserto na hora: com &loja=amb eu buscava os order_sn no cache dos
+      // bipados da GIRASSOL — e a Shopee respondeu certo: "order_not_found ... does not
+      // belong to you". Pedido da Girassol não é da AMB, óbvio. Quando a loja é OUTRA,
+      // os pedidos têm que vir da própria loja: uso a lista de escrow liberado dela.
+      if (!sns.length && lojaPed && lojaPed !== LOJA) {
+        const rl = await pedirAoSync('escrow-liberado', { dias: '15', size: '50' }, lojaPed);
+        const lista = (rl && rl.dados && rl.dados.resposta && rl.dados.resposta.response && rl.dados.resposta.response.escrow_list) || [];
+        sns = lista.map(x => String((x && x.order_sn) || '')).filter(Boolean)
+                   .slice(0, Math.min(50, Math.max(1, parseInt(q.get('max') || '5', 10) || 5)));
+        veioDe = 'lista de escrow liberado da loja ' + lojaPed;
+        if (!sns.length) { json(res, 404, { ok: false, erro: 'a loja ' + lojaPed + ' não devolveu pedidos liberados nos últimos 15 dias — passe &pedidos=A,B,C' }); return true; }
+      }
       if (!sns.length) {
         const conf = readJson(CONFERIDOS_FILE, {});
         const linhas = Array.isArray(conf) ? conf : Object.values(conf || {});
