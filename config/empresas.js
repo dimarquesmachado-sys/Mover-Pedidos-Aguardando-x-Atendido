@@ -27,7 +27,8 @@ const empresas = [
   require('../good-drive-imagens'),
   require('../amb-drive-imagens'),
   require('../ponto'),
-  require('../girassol-backup-offline'),
+  require('../girassol-backup-offline/gbo-app'),   // 05/08: era require('../girassol-backup-offline') e resolvia pro index.js da pasta.
+                                                  // Renomeado pra gbo-app.js porque havia 21 index.js no repo e isso já causou upload na pasta errada.
   require('../good-checkout-offline'),
   require('../amb-checkout-offline'),
   require('../good-mm-diag'),
