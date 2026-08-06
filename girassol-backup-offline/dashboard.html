@@ -364,7 +364,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd190';
+const DASH_BUILD = 'd191';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -962,6 +962,75 @@ async function carregarDespesasML(){
     else el.innerHTML = '<span class="dim">n\u00e3o consegui ler o faturamento do ML</span>';
   }catch(e){ el.innerHTML = '<span class="dim">n\u00e3o consegui ler o faturamento do ML</span>'; }
 }
+// ── 06/08 (d191): DESPESAS E DEVOLUÇÕES DA SHOPEE ─────────────────────────────
+// Vêm da API oficial da Shopee (carteira + devoluções), coletadas pela rotina
+// noturna e guardadas em disco — do mesmo jeito que o faturamento do ML.
+// Por que isso importa: NADA disso passa pelo Bling. O maior item é o
+// ADJUSTMENT_FOR_RR — a Shopee já tinha pago, o cliente devolveu e ela tirou o
+// dinheiro de volta da carteira. É o custo da devolução, e até hoje não aparecia.
+let _shpCache = {};
+const NOME_TIPO_SHP = {
+  ADJUSTMENT_FOR_RR_AFTER_ESCROW_VERIFIED: '↩️ Devolução (estorno após pagamento)',
+  ADJUSTMENT_CENTER_DEDUCT: '⚖️ Ajuste da Shopee',
+  ESCROW_VERIFIED_MINUS: '➖ Correção de repasse',
+  ADS_TOPUP: '📢 Publicidade (Ads)',
+  FBS_FEE: '📦 Armazenagem Full'
+};
+const MOTIVO_SHP = {
+  CHANGE_MIND: 'mudou de ideia', WRONG_ITEM: 'item errado', NOT_RECEIPT: 'diz que não recebeu',
+  FUNCTIONAL_DMG: 'chegou com defeito', ITEM_NOT_FIT: 'não serviu', ITEM_MISSING: 'faltou item'
+};
+async function carregarDespesasShopee(){
+  const iv = intervalo(); const ck = iv.de + '|' + iv.ate;
+  const el = document.getElementById('shpCards'); if(!el) return;
+  if(_shpCache[ck]){ desenharDespesasShopee(_shpCache[ck]); return; }
+  try{
+    const r = await fetch(MOD+'/shopee/resumo?de='+iv.de+'&ate='+iv.ate, {credentials:'same-origin'});
+    const d = await r.json().catch(()=>null);
+    if(d && d.ok){ _shpCache[ck] = d; desenharDespesasShopee(d); }
+    else el.innerHTML = '<span class="dim">n\u00e3o consegui ler o financeiro da Shopee</span>';
+  }catch(e){ el.innerHTML = '<span class="dim">n\u00e3o consegui ler o financeiro da Shopee</span>'; }
+}
+function desenharDespesasShopee(d){
+  const el = document.getElementById('shpCards'); if(!el) return;
+  const cst = (d.carteira && d.carteira.custo_por_tipo) || {};
+  const sai = (d.carteira && d.carteira.sai_do_bolso) || 0;
+  const dev = d.devolucoes || {};
+  const tipos = Object.keys(cst).sort((a2,b2)=>cst[b2]-cst[a2]);
+  let h = '<div style="display:flex;gap:8px;flex-wrap:wrap">'+
+    tipos.map(function(k){
+      return '<div class="miniTot" style="background:var(--card);border:1px solid var(--line);border-radius:9px;padding:7px 11px" title="'+k+'">'+
+             '<div class="mut" style="font-size:9.5px;text-transform:uppercase;letter-spacing:.03em">'+(NOME_TIPO_SHP[k]||k)+'</div>'+
+             '<div style="font-weight:800;font-size:13px;color:#f87171">'+BRL(cst[k])+'</div></div>';
+    }).join('')+
+    '<div class="miniTot" style="background:var(--bg2);border:1px solid var(--line2);border-radius:9px;padding:7px 11px" title="tudo que a Shopee tirou da carteira e que N\u00c3O \u00e9 saque nem renda de pedido">'+
+      '<div class="mut" style="font-size:9.5px;text-transform:uppercase;letter-spacing:.03em">\u2211 sai do bolso</div>'+
+      '<div style="font-weight:800;font-size:13px" class="'+(sai>0?'bad':'ok')+'">'+BRL(sai)+'</div></div>'+
+    '<div class="miniTot" style="background:var(--card);border:1px solid var(--line);border-radius:9px;padding:7px 11px" title="quantas devolu\u00e7\u00f5es e quanto foi devolvido ao comprador no per\u00edodo">'+
+      '<div class="mut" style="font-size:9.5px;text-transform:uppercase;letter-spacing:.03em">\u21a9\ufe0f Devolu\u00e7\u00f5es</div>'+
+      '<div style="font-weight:800;font-size:13px">'+N(dev.quantidade||0)+' \u00b7 '+BRL(dev.valor_devolvido||0)+'</div></div>'+
+    '</div>';
+  const mot = dev.por_motivo || {};
+  const motOrd = Object.keys(mot).sort((a2,b2)=>mot[b2]-mot[a2]);
+  if(motOrd.length) h += '<div class="mut" style="font-size:11px;margin-top:8px">por que voltou: '+
+    motOrd.map(k=> '<b>'+N(mot[k])+'</b> '+(MOTIVO_SHP[k]||k)).join(' \u00b7 ')+'</div>';
+  const sk = (dev.por_sku||[]).slice(0,10);
+  if(sk.length){
+    const tot = (dev.valor_devolvido||0) || 1;
+    h += '<table style="width:100%;margin-top:10px;font-size:12px"><thead><tr>'+
+      '<th style="text-align:left">SKU que mais voltou</th><th style="text-align:right">un.</th><th style="text-align:right">R$ devolvido</th><th style="text-align:right">% do total</th></tr></thead><tbody>'+
+      sk.map(function(s){
+        return '<tr><td title="'+(s.nome||'').replace(/"/g,'')+'">'+s.sku+'</td>'+
+               '<td style="text-align:right">'+N(s.qtd)+'</td>'+
+               '<td style="text-align:right;color:#f87171">'+BRL(s.valor)+'</td>'+
+               '<td style="text-align:right" class="mut">'+(Math.round(s.valor/tot*1000)/10)+'%</td></tr>';
+      }).join('')+'</tbody></table>';
+  }
+  const at = (d.atualizado && (d.atualizado.carteira || d.atualizado.devolucoes)) || null;
+  if(at) h += '<div class="mut" style="font-size:10px;margin-top:5px">Shopee atualizada em '+dBR(String(at).slice(0,10))+'</div>';
+  el.innerHTML = h;
+}
+
 function desenharDespesasML(d){
   const el = document.getElementById('mlbCards'); if(!el) return;
   const c = d.categorias || {};
@@ -1096,6 +1165,10 @@ function montar(){
     '<div class="sec" id="secMLB"><h2>\ud83d\udcb8 Despesas do Mercado Livre <span class="hint">do per\u00edodo \u00b7 fora da margem por pedido</span></h2>'+
       '<div id="mlbCards" class="mut" style="font-size:12px">carregando\u2026</div>'+
       '<div class="nota" style="margin-top:8px">Vêm do <b>faturamento oficial do ML</b> (o mesmo dos relat\u00f3rios em Faturamento \u2192 Relat\u00f3rios). S\u00e3o cobran\u00e7as do <b>per\u00edodo</b>, n\u00e3o de um pedido \u2014 por isso <b>n\u00e3o entram</b> no Lucro Bruto (M.C.) acima, que \u00e9 margem por venda. Para o lucro do m\u00eas, desconte estes valores.</div>'+
+    '</div>'+
+    '<div class="sec" id="secSHP"><h2>\ud83d\udfe0 Despesas e Devolu\u00e7\u00f5es da Shopee <span class="hint">do per\u00edodo \u00b7 fora da margem por pedido</span></h2>'+
+      '<div id="shpCards" class="mut" style="font-size:12px">carregando\u2026</div>'+
+      '<div class="nota" style="margin-top:8px">V\u00eam da <b>API oficial da Shopee</b> (carteira e devolu\u00e7\u00f5es), coletadas de madrugada. <b>Nada disso passa pelo Bling.</b> O maior item costuma ser o estorno ap\u00f3s devolu\u00e7\u00e3o: a Shopee j\u00e1 tinha pago, o cliente devolveu e ela tirou o dinheiro de volta da carteira. Como s\u00e3o cobran\u00e7as do <b>per\u00edodo</b>, ainda <b>n\u00e3o entram</b> no Lucro Bruto (M.C.) l\u00e1 em cima \u2014 desconte para o lucro do m\u00eas.</div>'+
     '</div>'+
     '<div class="sec" id="secBusca"><h2>🔍 Buscar Pedido e Lucro <span class="hint">nº do pedido · NF · nº da venda no marketplace · SKU · parte do título</span></h2>'+
       '<input id="qBusca" placeholder="digite e tecle Enter" '+
@@ -1332,6 +1405,7 @@ function render(){
   // 28/07: o indicador vive ao lado do "← checkout" e ABRE ALI MESMO. Antes ele mandava abrir
   // um bloco que fica noutro canto da tela, e por isso parecia que o clique não fazia nada.
   try{ carregarDespesasML(); }catch(e){}   // 02/08: despesas do ML do período
+  try{ carregarDespesasShopee(); }catch(e){}   // 06/08 (d191): carteira e devoluções da Shopee
   { const ct=document.getElementById('coverTopo'), cd=document.getElementById('coverTopoDet');
     if(ct) ct.innerHTML = (PER.length===0)
       ? '<button class="pill w covResumo" onclick="toggleCobertura()">∅ sem vendas no período <b>▾</b></button>'
