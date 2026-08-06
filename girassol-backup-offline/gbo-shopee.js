@@ -145,16 +145,20 @@ function contasDoEscrow(resp) {
 // ── 06/08: cliente das rotas financeiras do servico dono do token ─────────────
 // Uma funcao so, generica: monta a URL /:loja/interno/<o-que>?<params>&k=CHAVE.
 // Devolve SEMPRE o cru — nao interpreto nada antes de olhar uma amostra real.
-async function pedirAoSync(oQue, params) {
+async function pedirAoSync(oQue, params, loja) {
   if (!SYNC_KEY) return { ok: false, erro: 'falta a env SHOPEE_SYNC_KEY neste servico' };
+  // 06/08: o `loja` opcional deixa OLHAR a AMBTotal e a GOOD daqui, sem subir nada la.
+  // O servico dono do token ja atende as tres pelo :loja da URL. Serve pra ver, por
+  // exemplo, o fbs_fee do Shopee Full da AMB — que na Girassol vem sempre ZERO.
+  const alvo = (loja && /^(amb|girassol|good)$/.test(String(loja))) ? String(loja) : LOJA;
   const q = new URLSearchParams(Object.assign({}, params || {}, { k: SYNC_KEY }));
-  const url = SYNC_URL + '/' + LOJA + '/interno/' + oQue + '?' + q.toString();
+  const url = SYNC_URL + '/' + alvo + '/interno/' + oQue + '?' + q.toString();
   try {
     const r = await fetch(url, { headers: { 'Content-Type': 'application/json' } });
     const txt = await r.text();
     let d = null; try { d = JSON.parse(txt); } catch (e) {}
     return { ok: r.ok && d && d.ok !== false, status: r.status, dados: d, cru: txt.slice(0, 6000),
-             via: SYNC_URL + '/' + LOJA + '/interno/' + oQue };
+             via: SYNC_URL + '/' + alvo + '/interno/' + oQue };
   } catch (e) { return { ok: false, erro: String((e && e.message) || e) }; }
 }
 
@@ -439,7 +443,7 @@ function rotasShopee(ctx) {
       const s = SONDAS[p];
       const par = Object.assign({}, s.padrao);
       for (const c of ['dias', 'de', 'ate', 'page', 'size']) { const v = q.get(c); if (v) par[c] = v; }
-      const r = await pedirAoSync(s.rota, par);
+      const r = await pedirAoSync(s.rota, par, q.get('loja'));
       json(res, 200, {
         ok: !!r.ok, sonda: s.rota, parametros: par, via: r.via || null,
         erro: r.erro || null, status_http: r.status || null, resposta_crua: r.cru || null,
@@ -464,11 +468,31 @@ function rotasShopee(ctx) {
         veioDe = 'cache dos bipados';
         if (!sns.length) { json(res, 404, { ok: false, erro: 'sem venda de Shopee no cache — passe &pedidos=A,B,C' }); return true; }
       }
-      const r = await pedirAoSync('escrow-lote', { sns: sns.join(',') });
+      const r = await pedirAoSync('escrow-lote', { sns: sns.join(',') }, q.get('loja'));
       json(res, 200, {
         ok: !!r.ok, pedidos: sns.length, de_onde_vieram: veioDe, via: r.via || null,
         erro: r.erro || null, status_http: r.status || null, resposta_crua: r.cru || null,
         leia: 'se este lote devolver os mesmos campos do get_escrow_detail, trocamos a busca 1-a-1 por esta: 50 pedidos por chamada em vez de 1.'
+      });
+      return true;
+    }
+
+    // ── SONDA GENÉRICA: qualquer endpoint da Shopee, e de qualquer loja ────────
+    // Nasceu pra duas perguntas que ficaram abertas:
+    //   ADS   → /shopee/api?caminho=/api/v2/ads/get_total_balance
+    //           (o domínio de anúncios exige permissão especial; em vez de eu supor
+    //            se está liberado, quem responde é a própria Shopee)
+    //   AMB   → &loja=amb em qualquer sonda, pra ver o financeiro da AMBTotal —
+    //           inclusive o fbs_fee do Shopee Full, que na Girassol vem sempre zero
+    if (method === 'GET' && p === '/girassol-backup-offline/shopee/api') {
+      if (!admOk(req, urlObj)) { json(res, 404, { error: 'not found' }); return true; }
+      const caminho = String(q.get('caminho') || '').trim();
+      if (!caminho) { json(res, 400, { ok: false, erro: 'passe &caminho=/api/v2/...' }); return true; }
+      const r = await pedirAoSync('shopee-raw', { caminho, q: String(q.get('q') || '') }, q.get('loja'));
+      json(res, 200, {
+        ok: !!r.ok, caminho, loja: q.get('loja') || LOJA, via: r.via || null,
+        erro: r.erro || null, status_http: r.status || null, resposta_crua: r.cru || null,
+        leia: 'resposta CRUA. Se vier erro de permissão, é a Shopee dizendo que o domínio não está liberado pro app — resolve no console, não no código.'
       });
       return true;
     }
