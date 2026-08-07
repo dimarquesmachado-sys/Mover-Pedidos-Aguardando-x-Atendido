@@ -203,7 +203,10 @@
   #coverTopo .covResumo{background:#4c1d95;border:1px solid #6d28d9;color:#ddd6fe;white-space:nowrap}
   #coverTopo .covResumo:hover{background:#5b21b6;border-color:#7c3aed}
   #coverTopoDet{width:100%}
-  .btnVivo{display:none;background:#38bdf822;border:1px solid #38bdf855;color:#7dd3fc;border-radius:8px;
+  /* d195 (pedido do Diego): o card "Ao Vivo" saiu da grade pra abrir espaço pro card
+     de Taxas. O 🔄 do topo já fazia o mesmo papel no celular desde sempre — agora
+     vale em qualquer tela. */
+  .btnVivo{display:inline-block;background:#38bdf822;border:1px solid #38bdf855;color:#7dd3fc;border-radius:8px;
            padding:6px 10px;font-size:15px;cursor:pointer;line-height:1}
   /* ══════════════ CELULAR ══════════════ */
   @media(max-width:720px){
@@ -240,7 +243,6 @@
     .selAt{display:block;width:100%;background:var(--bg2);border:1px solid var(--line);color:var(--tx);
            border-radius:9px;padding:9px 10px;font-size:14px;font-weight:700;margin-top:6px}
     /* botão de atualizar sobe pro topo (o card "Ao Vivo" some da grade) */
-    .btnVivo{display:inline-block}
     .kpiVivo{display:none}                    /* o 🔄 do topo faz o mesmo papel */
     #kpis .kpi:last-child:nth-child(odd){grid-column:1 / -1}
     /* ── barras de filtro dos cards ──
@@ -364,7 +366,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd194';
+const DASH_BUILD = 'd195';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -1622,6 +1624,36 @@ function render(){
       : (!MC.unTot ? 'sem itens no período'
       : (MC.cusUn>=MC.unTot ? (N(MC.unTot)+' unidades vendidas')
       : avisoCom('sem custo em '+N(MC.unTot-MC.cusUn)+' de '+N(MC.unTot)+' un.', MC.semCustoSkus, 'cadastre o preço de custo destes SKUs no Bling e rode o custo-sync')))) +
+    // ── d195 (pedido do Diego): o card que FECHA A CONTA ─────────────────────────
+    // "Faturamento − Impostos − Custo − Taxas = M.C." Antes faltava essa parcela na
+    // tela: dava pra ver o faturamento, o imposto e o custo, mas o pedaço que vai
+    // pras plataformas ficava só dentro do cálculo da margem.
+    // O valor é apurado POR DIFERENÇA (fat − imposto − custo − M.C.), então ele fecha
+    // por construção — inclusive no período longo, que lê o histórico e nem sempre
+    // traz tarifa e frete separados. O detalhe do que compõe vai no title.
+    (function(){
+      const iv3=intervalo();
+      const temD3=(MLB_PER && MLB_CK===(iv3.de+'|'+iv3.ate));
+      const c3=temD3?(MLB_PER.categorias||{}):{};
+      const despML3=(c3.ads||0)+(c3.full||0)+(c3.devolucao||0);
+      const despSHP3=despesasSHPper();
+      const mBase3=(usaHist?HIST.totais.margem:MC.mc);
+      const mFin3=mBase3-Math.round((despML3+despSHP3)*100)/100;
+      const fat3=(usaHist?HIST.totais.faturamento:fat);
+      const imp3=(usaHist?HIST.totais.imposto:MC.imp);
+      const cus3=(usaHist?HIST.totais.custo:MC.cus);
+      const taxas=Math.round((fat3-imp3-cus3-mFin3)*100)/100;
+      const det=['comiss\u00e3o/tarifa '+BRL(MC.tar||0),
+                 'frete do vendedor '+BRL(MC.frV||0),
+                 (MC.fRecP?('\u2212 frete cobrado do comprador '+BRL(MC.fRecP)):''),
+                 (MC.credML?('\u2212 tarifas estornadas '+BRL(MC.credML)):''),
+                 (despML3?('despesas ML do per\u00edodo '+BRL(despML3)):''),
+                 (despSHP3?('despesas Shopee do per\u00edodo '+BRL(despSHP3)):'')].filter(Boolean).join(' \u00b7 ');
+      return '<div class="kpi" style="--kc:#fb7185"><span class="ic">\ud83c\udfea</span><div class="l">Taxas e Fretes</div>'+
+             '<div class="v bad" title="tudo que fica com as plataformas: '+det+'\u000aApurado por diferen\u00e7a: faturamento \u2212 impostos \u2212 custo \u2212 M.C.">'+BRL(taxas)+
+             (fat3>0?'<span style="font-size:13px;opacity:.8;font-weight:600"> \u00b7 '+(Math.round(taxas/fat3*1000)/10).toLocaleString('pt-BR')+'%</span>':'')+'</div>'+
+             '<div class="s">comiss\u00e3o + frete + despesas das plataformas</div></div>';
+    })() +
     (MC.temCfg
       ? (function(){
         // 03/08 (d183, pedido do Diego): UM valor só no card — o lucro JÁ COM as despesas do ML
@@ -1646,7 +1678,9 @@ function render(){
       : '<div class="kpi" style="--kc:#64748b;cursor:pointer" onclick="document.getElementById(\'cfgBox\').scrollIntoView({behavior:\'smooth\'})"><span class="ic">💎</span><div class="l">Lucro Bruto (M.C.)</div><div class="v dim">—</div><div class="s warn">⚙️ configure as taxas por canal abaixo</div></div>') +
     kpi('var(--ac)','📊','Pedidos', N(totPed), (!usaHist && MC.semItens)?(avisoCom(N(MC.semItens)+' sem detalhe', MC.semDetPed, 'o sistema busca sozinho; dá pra forçar no botão ao lado')+' <button onclick="completarDetalhes()" title="o dashboard já busca sozinho ao abrir o período — este botão é só pra tentar de novo" style="background:#1d4ed8;color:#fff;border:0;border-radius:6px;padding:2px 7px;font-size:10px;font-weight:700;cursor:pointer">↻ tentar de novo</button><div id="avisoDet" style="font-size:10px;margin-top:2px"></div>'):(MC.unTot>0?('<b style="font-size:13px;color:var(--txt);opacity:1">'+N(usaHist?HIST.totais.unidades:MC.unTot)+' unidades vendidas</b>'):'sem itens no período')) +
     kpi('var(--warn)','🎯','Ticket Médio', BRL((usaHist?HIST.totais.faturamento:fat)/(totPed||1)), 'faturamento ÷ pedidos') +
-    (VENDAS.length?'<div class="kpi kpiVivo" style="--kc:#38bdf8"><span class="ic">🛰</span><div class="l">Ao Vivo</div><div class="v"><button onclick="sincVendas(this)" style="background:#38bdf822;border:1px solid #38bdf855;color:#7dd3fc;border-radius:8px;padding:5px 12px;cursor:pointer;font-weight:700;font-size:14px">🔄 atualizar</button></div><div class="s"><span id="ultAtualiz">atualiza sozinho</span> · a cada 3 min</div></div>':'') +
+    /* d195: o "Ao Vivo" virou só o 🔄 lá em cima, ao lado do título. O <span id="ultAtualiz">
+       continua existindo (escondido) porque outras funções escrevem nele. */
+    (VENDAS.length?'<span id="ultAtualiz" style="display:none"></span>':'') +
     '<div class="kpi" id="kMargem" style="display:none"></div>';
 
   // 03/08 (d184, pedido do Diego): periodo acima de ~35 dias agrupa os graficos POR MES
