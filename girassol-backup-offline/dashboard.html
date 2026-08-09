@@ -368,7 +368,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd197';
+const DASH_BUILD = 'd199';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -1310,7 +1310,7 @@ function montar(){
       '<button class="btn btMini" id="btnProj" onclick="carregarSkuInfo(true)" style="display:none" title="busca saldo e preço de novo no Bling, ignorando o cache"><span class="soDesk">↻ recarregar do Bling</span><span class="soCel">↻ Bling</span></button> <button class="btn btMini" onclick="sincCustos()" title="resolve TODOS os custos em background, devagar, sem estourar o limite do Bling — e grava em cache permanente"><span class="soDesk">🐢 sincronizar custos (fundo)</span><span class="soCel">🐢 custos</span></button></div>'+
       '<div class="tw twFit"><table id="tProj"></table></div><div id="projAviso"></div></div>'+
     '<div class="sec" id="secPrev"><h2>🔮 Previs\u00e3o de Vendas por Produto</h2>'+
-      '<div class="hint">quanto cada SKU deve vender daqui pra frente, com base no hist\u00f3rico. A proje\u00e7\u00e3o d\u00e1 mais peso aos \u00faltimos 30 dias (reage a produto subindo ou caindo); a coluna <b>tend\u00eancia</b> compara os \u00faltimos 30 dias com os 30 anteriores.</div>'+
+      '<div class="hint">quanto cada SKU deve vender daqui pra frente, com base no hist\u00f3rico. O peso dos \u00faltimos 30 dias <b>diminui conforme o prazo aumenta</b> \u2014 70% na coluna de 1 semana, 20% na de 1 ano \u2014 porque o ritmo recente acerta o curto prazo e erra o longo. A coluna <b>tend\u00eancia</b> compara os \u00faltimos 30 dias com os 30 anteriores.<br>Por isso a proje\u00e7\u00e3o de 6 meses <b>n\u00e3o</b> \u00e9 igual ao que vendeu nos \u00faltimos 6 meses: se o produto est\u00e1 subindo ela fica acima, se est\u00e1 caindo fica abaixo.</div>'+
       '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0">'+
         '<span class="mut rotFiltro" style="font-size:12px">base de c\u00e1lculo:</span><div id="prevChips" style="display:flex;gap:6px;flex-wrap:wrap"></div>'+
         '<select id="prevSelBase" class="selFiltro" onchange="setPrevBase(Number(this.value))"></select>'+
@@ -1722,7 +1722,12 @@ function render(){
       return '<div class="kpi" style="--kc:#22d3ee"><span class="ic">\ud83d\udd2e</span><div class="l">Previs\u00e3o do M\u00eas</div>'+
              '<div class="v" title="'+nm+': '+BRL(P.fat)+' em '+N(P.diaAtual)+' dia(s) = '+BRL(P.ritmo)+' por dia. No mesmo ritmo, os '+N(P.diasNoMes)+' dias fecham em '+BRL(P.previsto)+'.">'+
              BRL(P.previsto)+'</div>'+
-             '<div class="s"><b>'+nm+'</b> \u00b7 no ritmo atual \u00b7 '+BRL(P.ritmo)+'/dia'+(falta>0?(' \u00b7 faltam '+N(falta)+' dia'+(falta>1?'s':'')):' \u00b7 m\u00eas fechado')+'</div></div>';
+             // d198: no desktop a linha quebrava ENTRE o "R$" e o número. Cada pedaço
+             // agora é um bloco que não parte no meio — a quebra só acontece nos
+             // separadores "·", que é onde ela não incomoda.
+             '<div class="s"><b>'+nm+'</b> \u00b7 no ritmo atual \u00b7 '+
+             '<span style="white-space:nowrap">'+BRL(P.ritmo)+'/dia</span>'+
+             (falta>0?(' \u00b7 <span style="white-space:nowrap">faltam '+N(falta)+' dia'+(falta>1?'s':'')+'</span>'):' \u00b7 <span style="white-space:nowrap">m\u00eas fechado</span>')+'</div></div>';
     })() +
     /* d195: o "Ao Vivo" virou só o 🔄 lá em cima, ao lado do título. O <span id="ultAtualiz">
        continua existindo (escondido) porque outras funções escrevem nele. */
