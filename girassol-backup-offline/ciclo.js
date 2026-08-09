@@ -204,7 +204,12 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC, nfCtx) {
   try {
     const _snapAnt = readJson(path.join(dir, 'pedido.json'), null);
     const _antId = _snapAnt && _snapAnt.nf && _snapAnt.nf.id;
-    if (_antId && (!nf || Number(nf.id) !== Number(_antId))) {
+    // 09/08: se a NF foi ANEXADA À MÃO, a auto-cura NÃO apaga.
+    // Este é exatamente o cenário do Diego: a nota do Bling foi cancelada, ele emitiu
+    // outra e anexou no checkout. Aqui a auto-cura veria "a NF mudou" e apagaria
+    // JUSTAMENTE o PDF que ele subiu, deixando o estoquista sem documento — ou pior,
+    // re-baixando a do Bling. O carimbo `nf_anexada` (b133) manda quem vale.
+    if (_antId && (!nf || Number(nf.id) !== Number(_antId)) && !(_snapAnt && _snapAnt.nf_anexada)) {
       for (const fdel of ['danfe.pdf', 'nf-simp.json']) { try { fs.unlinkSync(path.join(dir, fdel)); } catch (e) {} }
       console.log(`[NF-CASA] pedido ${id}: NF corrigida (${_antId} → ${(nf && nf.id) || 'nenhuma'}) — DANFE antiga descartada`);
     }
