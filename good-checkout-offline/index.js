@@ -542,7 +542,7 @@ function routes(readBody) {
       console.log(`[GOODBKP] etiqueta ANEXADA na mão no pedido ${idA} (${formatoA.toUpperCase()}, ${conteudoA.length} bytes) por ${opSess}`);
       // ev1 - registra o anexo no app DEVOLUCOES (pesquisavel depois).
       // Fire-and-forget: se o servico estiver fora ou sem envs, nada muda aqui.
-      try { require('../lib/avisar-devolucoes')('good', 'etiqueta_anexada', idA, { formato: formatoA, quem: (opSess && (opSess.usuario || opSess.nome || opSess.login)) || '' }); } catch (e) {}
+      try { require('../lib/avisar-devolucoes')('good', 'etiqueta_anexada', idA, { formato: formatoA, quem: (typeof opSess === 'string' ? opSess : (opSess && (opSess.usuario || opSess.nome || opSess.login))) || '' }); } catch (e) {}
       json(res, 200, { ok: true, formato: formatoA, bytes: conteudoA.length });
       return true;
     }

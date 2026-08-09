@@ -595,6 +595,9 @@ function routes(readBody) {
       try { const mm = readJson(MANIFEST_FILE, {}); if (mm[idN]) { aplica(mm[idN]); writeJson(MANIFEST_FILE, mm); } } catch (e) {}
       try { const sn = readJson(path.join(dirN, 'pedido.json'), null); if (sn) writeJson(path.join(dirN, 'pedido.json'), aplica(sn)); } catch (e) {}
       console.log(`[GIRABKP] NF ANEXADA na mão no pedido ${idN} (${pdfN ? 'PDF' : ''}${pdfN && xmlN ? '+' : ''}${xmlN ? 'XML' : ''}${numeroNF ? ', nº ' + numeroNF : ''}) por ${opN}`);
+      // ev1 - registra a NF anexada no app DEVOLUCOES (pesquisavel pelo
+      // nº da NF e tambem pelo pedido). Fire-and-forget, nunca atrapalha.
+      try { require('../lib/avisar-devolucoes')('girassol', 'nf_anexada', numeroNF || idN, { pedido: idN, chave: chaveNF || '', emissao: emissaoNF || '', quem: (typeof opN === 'string' ? opN : '') || '' }); } catch (e) {}
       json(res, 200, { ok: true, pdf: !!pdfN, xml: !!xmlN, nf_numero: numeroNF, chave: chaveNF, emissao: emissaoNF });
       return true;
     }
@@ -665,7 +668,7 @@ function routes(readBody) {
       console.log(`[GIRABKP] etiqueta ANEXADA na mão no pedido ${idA} (${formatoA.toUpperCase()}, ${conteudoA.length} bytes) por ${opSess}`);
       // ev1 - registra o anexo no app DEVOLUCOES (pesquisavel depois).
       // Fire-and-forget: se o servico estiver fora ou sem envs, nada muda aqui.
-      try { require('../lib/avisar-devolucoes')('girassol', 'etiqueta_anexada', idA, { formato: formatoA, quem: (opSess && (opSess.usuario || opSess.nome || opSess.login)) || '' }); } catch (e) {}
+      try { require('../lib/avisar-devolucoes')('girassol', 'etiqueta_anexada', idA, { formato: formatoA, quem: (typeof opSess === 'string' ? opSess : (opSess && (opSess.usuario || opSess.nome || opSess.login))) || '' }); } catch (e) {}
       json(res, 200, { ok: true, formato: formatoA, bytes: conteudoA.length });
       return true;
     }
