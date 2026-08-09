@@ -38,6 +38,26 @@ function rotasCanario(ctx) {
   const temCampo = (o, c) => o && Object.prototype.hasOwnProperty.call(o, c);
   const horasDesde = iso => { const t = Date.parse(iso || ''); return isFinite(t) ? Math.round((Date.now() - t) / 36e5 * 10) / 10 : null; };
 
+  // ── 0. SHOPEE: quanto falta pra Partner Key vencer? ───────────────────────
+  // A Live API Partner Key do app da Shopee vence em 23/10/2026 12:59. No dia em
+  // que vencer, TODA chamada assinada para de funcionar de uma vez — escrow,
+  // devoluções, carteira, etiqueta. Não é degradação, é apagão.
+  // Este check não chama ninguém: é aritmética de calendário. Fica amarelo com
+  // 30 dias de antecedência e vermelho com 7, pra dar tempo de renovar com calma.
+  // A data vem da env SHOPEE_KEY_VENCE (AAAA-MM-DD); sem ela, usa a conhecida.
+  function checaChaveShopee() {
+    const t0 = Date.now();
+    const venc = String(process.env.SHOPEE_KEY_VENCE || '2026-10-23').slice(0, 10);
+    const tv = Date.parse(venc + 'T12:00:00Z');
+    if (!isFinite(tv)) return { nome: 'Shopee · validade da Partner Key', estado: 'alerta', detalhe: 'data de vencimento inválida em SHOPEE_KEY_VENCE: ' + venc, ms: Date.now() - t0 };
+    const dias = Math.floor((tv - Date.now()) / 864e5);
+    const quando = venc.split('-').reverse().join('/');
+    if (dias < 0) return { nome: 'Shopee · validade da Partner Key', estado: 'erro', detalhe: 'VENCEU em ' + quando + ' — as chamadas assinadas já estão falhando. Gere a chave nova no console da Open Platform e troque a env do serviço do token', ms: Date.now() - t0 };
+    if (dias <= 7) return { nome: 'Shopee · validade da Partner Key', estado: 'erro', detalhe: 'vence em ' + dias + ' dia(s), em ' + quando + ' — renove AGORA, senão escrow/devoluções/carteira/etiqueta param de uma vez', ms: Date.now() - t0 };
+    if (dias <= 30) return { nome: 'Shopee · validade da Partner Key', estado: 'alerta', detalhe: 'vence em ' + dias + ' dias (' + quando + ') — dá pra renovar com calma agora', ms: Date.now() - t0 };
+    return { nome: 'Shopee · validade da Partner Key', estado: 'ok', detalhe: 'vence em ' + quando + ' (faltam ' + dias + ' dias)', ms: Date.now() - t0 };
+  }
+
   // ── 1. BLING: o pedido ainda traz as taxas? ────────────────────────────────
   // Não olha o VALOR (taxa zero é legítima). Olha se o CAMPO existe — se o Bling
   // parar de mandar `taxas`, a cascata inteira do backfill fica cega.
@@ -170,7 +190,7 @@ function rotasCanario(ctx) {
         try { checagens.push(await fn()); }
         catch (e) { checagens.push({ nome: fn.name, estado: 'erro', detalhe: 'exceção: ' + String(e.message || e) }); }
       }
-      for (const fn of [checaBilling, checaDisco]) {
+      for (const fn of [checaBilling, checaDisco, checaChaveShopee]) {
         try { checagens.push(fn()); }
         catch (e) { checagens.push({ nome: fn.name, estado: 'erro', detalhe: 'exceção: ' + String(e.message || e) }); }
       }
