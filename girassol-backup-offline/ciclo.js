@@ -476,6 +476,12 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
         continue;
       }
       const snap = readJson(path.join(dir, 'pedido.json'), null);
+      // 09/08: se a NF foi ANEXADA na mão, NUNCA baixar do Bling por cima.
+      // O caso é o do Diego: NF emitida com erro ou cancelada, ele emite outra e anexa.
+      // O `snap.nf.id` continua apontando pra NOTA VELHA — então, se o danfe.pdf sumisse
+      // (re-cache, poda), este passo baixaria a CANCELADA de volta, calado. Com o carimbo
+      // `nf_anexada` isso não acontece: o pedido fica sem PDF em vez de com o PDF errado.
+      if (snap && snap.nf_anexada) { continue; }
       if (!snap || !snap.nf || !snap.nf.id) { danfesSemId++; continue; }
       const pdf = await baixarDanfe(snap.nf.id); await sleep(PAUSA_MS);
       if (pdf) {
