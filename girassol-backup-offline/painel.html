@@ -397,7 +397,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b133';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b134';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#b3b9c4'}, magalu:{n:'Magalu',c:'#0086ff'}, shein:{n:'Shein',c:'#e0e0e0'},
@@ -931,6 +931,11 @@ function renderLista(){
       })()+
       '<div class="smeta">'+(((p.skus||[]).filter(Boolean).length===1)?'📦 <b>'+esc(p.skus[0])+'</b> · ':'')+(p.itens||0)+' item(s) · NF '+(p.nf_numero?esc(p.nf_numero):(p.tem_nf?'ok':'—'))+(p.tem_danfe?' · <span class="pdfok">PDF✓</span>':'')+'</div>'+
       blocoHora(p)+
+      /* 09/08 (b134): o 🧾 anexar NF também no card NORMAL. Na primeira versão ele ficou
+         só no card "sem etiqueta" — e o caso real do Diego é o oposto: pedido COM etiqueta
+         cuja NF foi cancelada/emitida errada. Sem isso ele não conseguia nem ver o botão.
+         Só admin, e o stopPropagation impede que o clique selecione o pedido. */
+      (souAdmin()?'<div style="margin-top:6px"><button class="btn sec" style="font-size:11px;padding:5px 9px" onclick="event.stopPropagation();anexarNF(\''+esc(p.id)+'\',\''+esc(p.numero||p.id)+'\')" title="substituir a nota deste pedido: o PDF vira a DANFE que imprime, o XML preenche número, chave e emissão">🧾 anexar/substituir NF</button></div>':'')+
     '</div>';
   }).join('');
 }
