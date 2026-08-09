@@ -89,10 +89,27 @@ function rotasHistorico(ctx) {
         const mediaDia = o.un / baseDias;
         // tendência: últimos 30 dias contra os 30 anteriores
         const tend = o.un3060 > 0 ? ((o.un30 - o.un3060) / o.un3060) : (o.un30 > 0 ? 1 : 0);
-        // a projeção usa a média recente quando há histórico recente (reage melhor), com piso na média geral
+        // ── 09/08: o PESO DO RECENTE AGORA CAI CONFORME O HORIZONTE CRESCE ────────
+        // Antes era 70% recente + 30% média geral em TODOS os prazos. Num produto que
+        // acelerou (o KP16 vendeu 726 no último mês contra 432 no anterior), isso
+        // esticava o mês quente por um ano inteiro: 8,7/dia de média virava 19,5/dia
+        // na projeção, e o ano dava 7.135 un. contra 1.564 vendidas em 6 meses.
+        // O Diego estranhou com razão. A correção é estatística, não de gosto: o ritmo
+        // recente prevê BEM o curto prazo e MAL o longo. Então quanto mais longe o
+        // horizonte, mais a média longa manda.
         const mediaRec = o.un30 / 30;
-        const base = (o.un30 > 0 ? (mediaRec * 0.7 + mediaDia * 0.3) : mediaDia);
-        const pr = d => Math.round(base * d);
+        const pesoRec = d => (d <= 7 ? 0.70 : d <= 30 ? 0.55 : d <= 90 ? 0.40 : d <= 180 ? 0.30 : 0.20);
+        const pr = d => {
+          if (!(o.un30 > 0)) return Math.round(mediaDia * d);
+          const w = pesoRec(d);
+          // (tinha posto um teto em `mediaRec` aqui e TIREI: a mistura já fica sempre
+          //  entre as duas médias, então o teto nunca pegava no produto SUBINDO — e no
+          //  produto CAINDO ele jogava a projeção pro ritmo recente, subestimando de
+          //  propósito o que não devia. Previsão é previsão; quem tem que ser
+          //  conservador é o plano de compra, e lá o teto continua, de caso pensado.)
+          return Math.round((mediaRec * w + mediaDia * (1 - w)) * d);
+        };
+        const base = (o.un30 > 0 ? (mediaRec * 0.30 + mediaDia * 0.70) : mediaDia);   // referência de 180d, só p/ exibir
         return {
           sku: o.sku, desc: o.desc, un: o.un, fat: Math.round(o.fat * 100) / 100,
           margem: Math.round(o.mar * 100) / 100,
