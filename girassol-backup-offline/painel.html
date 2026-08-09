@@ -397,7 +397,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b134';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b135';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#b3b9c4'}, magalu:{n:'Magalu',c:'#0086ff'}, shein:{n:'Shein',c:'#e0e0e0'},
@@ -935,7 +935,12 @@ function renderLista(){
          só no card "sem etiqueta" — e o caso real do Diego é o oposto: pedido COM etiqueta
          cuja NF foi cancelada/emitida errada. Sem isso ele não conseguia nem ver o botão.
          Só admin, e o stopPropagation impede que o clique selecione o pedido. */
-      (souAdmin()?'<div style="margin-top:6px"><button class="btn sec" style="font-size:11px;padding:5px 9px" onclick="event.stopPropagation();anexarNF(\''+esc(p.id)+'\',\''+esc(p.numero||p.id)+'\')" title="substituir a nota deste pedido: o PDF vira a DANFE que imprime, o XML preenche número, chave e emissão">🧾 anexar/substituir NF</button></div>':'')+
+      /* 09/08 (b135): o 📎 também no card normal, do lado do 🧾. Antes ele só existia no
+         card "sem etiqueta" — e o caso do Diego é pedido COM etiqueta cuja etiqueta mudou
+         (a NF foi cancelada, o marketplace gerou outra). Vale sempre a última que ele sobe:
+         o anexo agora apaga o arquivo do outro formato, então não sobra etiqueta velha. */
+      (souAdmin()?'<div style="margin-top:6px"><button class="btn sec" style="font-size:11px;padding:5px 9px" onclick="event.stopPropagation();anexarNF(\''+esc(p.id)+'\',\''+esc(p.numero||p.id)+'\')" title="substituir a nota deste pedido: o PDF vira a DANFE que imprime, o XML preenche número, chave e emissão">🧾 anexar/substituir NF</button>'+
+       '<button class="btn sec" style="font-size:11px;padding:5px 9px;margin-left:6px" onclick="event.stopPropagation();anexarEtiqueta(\''+esc(p.id)+'\',\''+esc(p.numero||p.id)+'\')" title="substituir a etiqueta deste pedido (ZPL/ZIP/PDF) — a que você subir por último é a que vale, e a antiga é apagada">📎 substituir etiqueta</button></div>':'')+
     '</div>';
   }).join('');
 }
