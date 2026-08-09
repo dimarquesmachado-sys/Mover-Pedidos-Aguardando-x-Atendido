@@ -366,7 +366,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/girassol-backup-offline';
-const DASH_BUILD = 'd195';
+const DASH_BUILD = 'd196';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -761,6 +761,33 @@ function histIrPagina(n){
 }
 
 // 📚 HISTÓRICO LONGO (Supabase): períodos que não cabem na janela local (Ano, 6 meses…)
+// ── d196 (pedido do Diego): PREVISÃO DO MÊS ──────────────────────────────────
+// Card fixo no topo, igual ao do Jodda: quanto o mês deve fechar no ritmo atual.
+// Duas decisões que ele pediu:
+//  • é SEMPRE o mês corrente, não o período selecionado. Olhando "Ano" ou "Mês
+//    anterior" o card continua mostrando agosto — assim não fica buraco na grade
+//    e o número não vira bobagem (prever um mês que já acabou não faz sentido).
+//  • o nome do mês sai da data, então em 1º de setembro ele vira "Setembro" sozinho.
+// Busca o mês corrente uma vez só, à parte do período em exibição.
+let PREV_MES = null;
+async function carregarPrevisaoMes(){
+  try{
+    const hj = new Date();
+    const ini = hj.toISOString().slice(0,8) + '01';
+    const hoje = hj.toISOString().slice(0,10);
+    const r = await fetch(MOD+'/historico-longo?de='+ini+'&ate='+hoje, {credentials:'same-origin'});
+    const d = await r.json().catch(()=>null);
+    if(!(d && d.ok && d.totais)) return;
+    const diasNoMes = new Date(hj.getFullYear(), hj.getMonth()+1, 0).getDate();
+    const diaAtual  = hj.getDate();
+    const fatMes    = Number(d.totais.faturamento||0)||0;
+    const ritmo     = diaAtual>0 ? fatMes/diaAtual : 0;
+    PREV_MES = { mes: hj.getMonth(), ano: hj.getFullYear(), fat: fatMes, ritmo,
+                 diaAtual, diasNoMes, previsto: Math.round(ritmo*diasNoMes*100)/100 };
+    try{ render(); }catch(e){}
+  }catch(e){}
+}
+
 let HIST = null;          // agregado do período, vindo do servidor
 let _histCarregando = false;
 const HIST_JANELA_DIAS = 6;   // o cache local guarda ~6 dias; antes disso, o histórico manda
@@ -1453,6 +1480,12 @@ function render(){
   // um bloco que fica noutro canto da tela, e por isso parecia que o clique não fazia nada.
   try{ carregarDespesasML(); }catch(e){}   // 02/08: despesas do ML do período
   try{ carregarDespesasShopee(); }catch(e){}   // 06/08 (d191): carteira e devoluções da Shopee
+  // d196: a previsão do mês é buscada UMA vez (é sempre o mês corrente, não muda
+  // com o período). Se já veio, não busca de novo — a não ser que o dia tenha virado.
+  try{
+    const _hj = new Date();
+    if(!PREV_MES || PREV_MES.mes !== _hj.getMonth() || PREV_MES.diaAtual !== _hj.getDate()) carregarPrevisaoMes();
+  }catch(e){}
   { const ct=document.getElementById('coverTopo'), cd=document.getElementById('coverTopoDet');
     if(ct) ct.innerHTML = (PER.length===0)
       ? '<button class="pill w covResumo" onclick="toggleCobertura()">∅ sem vendas no período <b>▾</b></button>'
@@ -1678,6 +1711,17 @@ function render(){
       : '<div class="kpi" style="--kc:#64748b;cursor:pointer" onclick="document.getElementById(\'cfgBox\').scrollIntoView({behavior:\'smooth\'})"><span class="ic">💎</span><div class="l">Lucro Bruto (M.C.)</div><div class="v dim">—</div><div class="s warn">⚙️ configure as taxas por canal abaixo</div></div>') +
     kpi('var(--ac)','📊','Pedidos', N(totPed), (!usaHist && MC.semItens)?(avisoCom(N(MC.semItens)+' sem detalhe', MC.semDetPed, 'o sistema busca sozinho; dá pra forçar no botão ao lado')+' <button onclick="completarDetalhes()" title="o dashboard já busca sozinho ao abrir o período — este botão é só pra tentar de novo" style="background:#1d4ed8;color:#fff;border:0;border-radius:6px;padding:2px 7px;font-size:10px;font-weight:700;cursor:pointer">↻ tentar de novo</button><div id="avisoDet" style="font-size:10px;margin-top:2px"></div>'):(MC.unTot>0?('<b style="font-size:13px;color:var(--txt);opacity:1">'+N(usaHist?HIST.totais.unidades:MC.unTot)+' unidades vendidas</b>'):'sem itens no período')) +
     kpi('var(--warn)','🎯','Ticket Médio', BRL((usaHist?HIST.totais.faturamento:fat)/(totPed||1)), 'faturamento ÷ pedidos') +
+    // d196: previsão do mês corrente — independe do período que está na tela
+    (function(){
+      const MESES=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+      if(!PREV_MES) return kpi('#22d3ee','🔮','Previsão do Mês','<span class="dim">—</span>','calculando…');
+      const P=PREV_MES, nm=MESES[P.mes]||'';
+      const falta=P.diasNoMes-P.diaAtual;
+      return '<div class="kpi" style="--kc:#22d3ee"><span class="ic">\ud83d\udd2e</span><div class="l">Previs\u00e3o do M\u00eas</div>'+
+             '<div class="v" title="'+nm+': '+BRL(P.fat)+' em '+N(P.diaAtual)+' dia(s) = '+BRL(P.ritmo)+' por dia. No mesmo ritmo, os '+N(P.diasNoMes)+' dias fecham em '+BRL(P.previsto)+'.">'+
+             BRL(P.previsto)+'</div>'+
+             '<div class="s"><b>'+nm+'</b> \u00b7 no ritmo atual \u00b7 '+BRL(P.ritmo)+'/dia'+(falta>0?(' \u00b7 faltam '+N(falta)+' dia'+(falta>1?'s':'')):' \u00b7 m\u00eas fechado')+'</div></div>';
+    })() +
     /* d195: o "Ao Vivo" virou só o 🔄 lá em cima, ao lado do título. O <span id="ultAtualiz">
        continua existindo (escondido) porque outras funções escrevem nele. */
     (VENDAS.length?'<span id="ultAtualiz" style="display:none"></span>':'') +
