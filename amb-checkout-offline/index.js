@@ -333,7 +333,11 @@ async function shopeeKeepAlive() {
 // O agendador da RAIZ registra sozinho qualquer chave nova de `crons` que tenha
 // uma funcao de mesmo nome em `rotinas` — nao precisa mexer no index da raiz.
 const _noturna = criarNoturna({
-  mlBillingSync, backfillVendas, mlSyncFees, varrerCancelados, canarioCron,
+  // 10/08 (Codex P2): o canário PRECISA do contexto — sem ele, rotasCanario(undefined)
+  // explodia no destructure, o catch engolia, e a etapa noturna dizia "conferido"
+  // sem ter conferido NADA. (A Girassol tem o mesmo defeito — consertar lá também.)
+  mlBillingSync, backfillVendas, mlSyncFees, varrerCancelados,
+  canarioCron: () => canarioCron({ VERSAO, validarSessao }),
       // AMB: a poda do bucket de expedição roda UMA vez, na noturna da Girassol (bucket é compartilhado)
       podarExpedicao: async () => ({ ok: true, pulado: 'poda do bucket roda na noturna da Girassol' }),
   // 06/08: a Shopee tambem passa a se manter sozinha — devolucoes (por SKU e motivo) e
@@ -1882,7 +1886,7 @@ function routes(readBody) {
       // ── SHOPEE (em lote de 20 pela rota interna do shopee-nf-sync) ──
       const alvoSH = noPeriodo.filter(v => v.marketplace === 'shopee').slice(0, 60);
       const SHU = process.env.AMBBKP_SHOPEE_SYNC_URL || 'https://ambtotal-shopee-nf-sync-x-bling.onrender.com';
-      const SHK = process.env.SHOPEE_SYNC_KEY || '';
+      const SHK = process.env.AMBBKP_SHOPEE_SYNC_KEY || process.env.SHOPEE_SYNC_KEY || '';
       if (alvoSH.length && SHK) {
         for (let i = 0; i < alvoSH.length; i += 20) {
           const fatia = alvoSH.slice(i, i + 20);
@@ -4040,15 +4044,18 @@ async function backfillVendas(de, ate, empresa){
                          comissao_somada: 0, comissao_que_o_bling_dava: 0, frete_liquido_visto: 0,
                          modo: SHOPEE_TODOS ? 'todos os pedidos' : 'so quando o Bling nao trouxe taxa' };
     const aliqBk = mes => (cfg.aliquotas && cfg.aliquotas[mes]!=null ? Number(cfg.aliquotas[mes]) : (DEFAULT_ALIQ_BK[mes]!=null?DEFAULT_ALIQ_BK[mes]:14.1));
-    // idempotente: limpa o período antes (rodar de novo não duplica)
-    await supaReq(empresa, 'DELETE', 'vendas_historico?empresa=eq.'+encodeURIComponent(empresa)+'&data_venda=gte.'+de+'&data_venda=lte.'+ate, null);
+    // 10/08 (Codex P1): NADA é apagado antes da coleta terminar. A versão antiga
+    // deletava o período aqui e gravava página a página — uma queda do Bling no meio
+    // deixava o histórico MEIO VAZIO (e a noturna roda isto sozinha às 03:45).
+    // Agora a varredura ACUMULA tudo em memória; o DELETE + gravação só acontecem
+    // no final, com a coleta completa em mãos. Falhou no meio? Aborta sem apagar.
     _backfill.fase = 'varrendo';
     let buffer = [];
+    const estoque = [];   // a coleta inteira, aguardando a gravação do final
     const flush = async () => {
       if(!buffer.length) return;
-      const ins = await supaReq(empresa,'POST','vendas_historico', buffer);
-      if(ins.ok) _backfill.gravados += buffer.length;
-      else { _backfill.erros += buffer.length; _backfill.msg = 'erro Supabase status '+ins.status+' '+((ins.body||ins.erro||'')+'').slice(0,140); }
+      for (const it of buffer) estoque.push(it);
+      _backfill.coletados = estoque.length;
       buffer = [];
     };
     let foraDoPeriodo = 0;
@@ -4070,7 +4077,7 @@ async function backfillVendas(de, ate, empresa){
       }
       if (lista === null) {
         _backfill.fase = 'erro';
-        _backfill.msg = 'a página ' + pg + ' falhou 6 vezes seguidas — RODADA INCOMPLETA, rode o período de novo';
+        _backfill.msg = 'a página ' + pg + ' falhou 6 vezes seguidas — rodada ABORTADA e NADA foi apagado: o histórico antigo do período continua inteiro. Rode de novo mais tarde.';
         console.log('[BACKFILL] ✗ abortado na página ' + pg + ' — histórico do período ficou incompleto, rode de novo');
         _backfill.rodando = false; _backfill.fim = new Date().toISOString();
         return;
@@ -4376,6 +4383,16 @@ async function backfillVendas(de, ate, empresa){
       }
     } catch (e) { _backfill.msg_ml = String(e.message || e).slice(0, 160); console.log('[BACKFILL] ML: ' + (e.message || e)); }
 
+    // coleta completa — só AGORA o período antigo dá lugar ao novo
+    _backfill.fase = 'gravando';
+    await supaReq(empresa, 'DELETE', 'vendas_historico?empresa=eq.'+encodeURIComponent(empresa)+'&data_venda=gte.'+de+'&data_venda=lte.'+ate, null);
+    for (let i0 = 0; i0 < estoque.length; i0 += 200) {
+      const lote = estoque.slice(i0, i0 + 200);
+      const ins = await supaReq(empresa,'POST','vendas_historico', lote);
+      if(ins.ok) _backfill.gravados += lote.length;
+      else { _backfill.erros += lote.length; _backfill.msg = 'erro Supabase status '+ins.status+' '+((ins.body||ins.erro||'')+'').slice(0,140); }
+      await dorme(120);
+    }
     _backfill.fora = foraDoPeriodo;
     _backfill.fase = 'concluido';
   } catch(e){ _backfill.fase='erro'; _backfill.msg = String(e.message||e); }
@@ -4962,7 +4979,7 @@ async function vendasSync() {
     // Precisa da env SHOPEE_SYNC_KEY no Render DESTE serviço (mesma chave que abriu o teste C); URL opcional em SHOPEE_SYNC_URL.
     try {
       const SH_URL = process.env.AMBBKP_SHOPEE_SYNC_URL || 'https://ambtotal-shopee-nf-sync-x-bling.onrender.com';
-      const SH_KEY = process.env.SHOPEE_SYNC_KEY || '';
+      const SH_KEY = process.env.AMBBKP_SHOPEE_SYNC_KEY || process.env.SHOPEE_SYNC_KEY || '';
       if (SH_KEY) {
         const candS = Object.values(atual)
           // b121 (06/08): `!v.tarifa_shopee_v2` entra na fila pra REPROCESSAR quem já tem
