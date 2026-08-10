@@ -4848,6 +4848,17 @@ async function vendasSync() {
         let sellerD = null;
         try { const rm = await fetch('https://api.mercadolibre.com/users/me', HD); if (rm.ok) sellerD = (await rm.json()).id; } catch (e) {}
         if (sellerD) {
+          // Codex #11 (pack): RECONCILIAÇÃO antes de criar — se o Bling já tem o pedido
+          // (pelo order_id OU pelo pack_id do carrinho, que é o que o Bling grava em
+          // numeroLoja), a provisória morre aqui. Cobre qualquer ordem de chegada.
+          const blingSet = new Set();
+          for (const [k5, v5] of Object.entries(atual)) {
+            if (v5 && v5.numero_loja && !String(k5).startsWith('ml:')) blingSet.add(String(v5.numero_loja));
+          }
+          for (const [k5, v5] of Object.entries(atual)) {
+            if (!String(k5).startsWith('ml:') || !v5) continue;
+            if (blingSet.has(String(v5.numero_loja || '')) || (v5.pack_id && blingSet.has(String(v5.pack_id)))) delete atual[k5];
+          }
           const jaTem = new Set();
           for (const v of Object.values(atual)) { if (v && v.numero_loja) jaTem.add(String(v.numero_loja)); }
           const dIni = new Date(hoje); dIni.setDate(dIni.getDate() - 1);   // ontem+hoje: cobre a virada
@@ -4865,18 +4876,26 @@ async function vendasSync() {
             for (const o3 of arr3) {
               if (!o3 || o3.id == null) continue;
               const oid = String(o3.id);
+              const st3 = String(o3.status || '');
+              // Codex #11 (cancelada depois): se o ML cancelou e a provisória existe, ela morre
+              if (/cancell/i.test(st3)) { if (atual['ml:' + oid]) { delete atual['ml:' + oid]; } continue; }
+              // Codex #11 (só pagas): mesmo critério do ingest histórico deste arquivo
+              if (st3 !== 'paid') continue;
               if (jaTem.has(oid)) continue;
-              if (/cancell/i.test(String(o3.status || ''))) continue;
+              if (o3.pack_id && jaTem.has(String(o3.pack_id))) continue;   // carrinho: o Bling conhece pelo pack
+              // Codex #11 (schema): itens no formato do cache — {sku, d, qtd, vt}
               const its = (o3.order_items || []).map(oi => ({
-                sku: String((oi.item && (oi.item.seller_sku || oi.item.seller_custom_field)) || '').trim(),
-                quantidade: Number(oi.quantity || 1),
-                valor: Number(oi.unit_price || 0)
+                sku: (String((oi.item && (oi.item.seller_sku || oi.item.seller_custom_field)) || '').trim()) || null,
+                d: String((oi.item && oi.item.title) || '').slice(0, 120) || null,
+                qtd: Number(oi.quantity || 1),
+                vt: Math.round(Number(oi.unit_price || 0) * Number(oi.quantity || 1) * 100) / 100
               }));
               atual['ml:' + oid] = {
                 id: 'ml:' + oid, sem_bling: true, det: true,
-                numero: null, numero_loja: oid, marketplace: 'mercadolivre',
+                numero: null, numero_loja: oid, pack_id: (o3.pack_id != null ? String(o3.pack_id) : null),
+                marketplace: 'mercadolivre',
                 data: String(o3.date_created || '').slice(0, 10),
-                hora_venda: (o3.date_created || null),
+                venda_em: (o3.date_created || null),
                 total: Number(o3.paid_amount != null ? o3.paid_amount : (o3.total_amount || 0)),
                 cliente: (o3.buyer && (o3.buyer.nickname || '')) || '',
                 it: its.length ? its : undefined,
