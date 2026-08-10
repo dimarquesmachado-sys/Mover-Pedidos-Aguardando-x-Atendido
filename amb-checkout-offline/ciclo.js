@@ -632,11 +632,17 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
         man[id] = {
           numero: snap.numero, marketplace: snap.marketplace,
           servico: snap.servico || '', flex: !!snap.flex,
-          cliente: snap.cliente || '', nf_numero: (snap.nf && snap.nf.numero) || null,
+          cliente: snap.cliente || '', nf_numero: (snap.nf && snap.nf.numero) || snap.nf_numero || null,
           tem_nf: snap.tem_nf, tem_kit: snap.tem_kit, tem_etiqueta: snap.tem_etiqueta,
-          tem_danfe: !!(ja && ja.tem_danfe),
+          tem_danfe: !!((ja && ja.tem_danfe) || snap.tem_danfe),
+          // 10/08: os CARIMBOS DE ANEXO no manifesto — o 5º ponto de leitura. O snapshot
+          // preserva (b136), mas o manifesto era reconstruído com lista fixa de campos e
+          // os perdia no re-cache (kit re-resolve toda rodada!) → o painel, que lê DAQUI,
+          // deixava de mostrar os selos e voltava a tratar o pedido como não-anexado.
+          nf_anexada: !!(snap.nf_anexada || (ja && ja.nf_anexada)),
+          etiqueta_anexada: !!(snap.etiqueta_anexada || (ja && ja.etiqueta_anexada)),
           numero_loja: snap.numero_loja || null,
-          nf_emissao: (snap.nf && snap.nf.dataEmissao) || null,   // data+hora OFICIAL da NF no Bling
+          nf_emissao: (snap.nf && snap.nf.dataEmissao) || snap.nf_emissao || null,   // data+hora OFICIAL da NF no Bling
           visto_em: snap.visto_em || null,
           itens: snap.itens.length, skus: (snap.itens || []).map(it => it.sku).filter(Boolean),
           // skus_pick = SKUs que o estoquista REALMENTE pega: kit/composição explode nos componentes; item normal usa o próprio SKU
