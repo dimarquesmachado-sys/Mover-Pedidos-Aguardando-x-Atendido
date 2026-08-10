@@ -448,7 +448,14 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC, nfCtx) {
         snapshot.nf_anexada = true;
         if (_ant.nf_numero && !snapshot.nf_numero) snapshot.nf_numero = _ant.nf_numero;
         if (_ant.nf_emissao && !snapshot.nf_emissao) snapshot.nf_emissao = _ant.nf_emissao;
-        if (_ant.nf && _ant.nf.chave) snapshot.nf = Object.assign({}, snapshot.nf || {}, { chave: _ant.nf.chave });
+        // 10/08 (Codex, PR#5): preservar TAMBÉM no objeto CANÔNICO. Lista, detalhe e
+        // busca leem snapshot.nf.numero/dataEmissao e tem_nf — restaurar só o top-level
+        // fazia esses fluxos voltarem pra nota velha do Bling (ou pra "sem nota").
+        snapshot.nf = Object.assign({}, snapshot.nf || {},
+          (_ant.nf && _ant.nf.chave) ? { chave: _ant.nf.chave } : {},
+          _ant.nf_numero ? { numero: _ant.nf_numero } : {},
+          _ant.nf_emissao ? { dataEmissao: _ant.nf_emissao } : {});
+        if (_ant.nf_numero || (snapshot.nf && snapshot.nf.numero)) snapshot.tem_nf = true;
         if (fs.existsSync(path.join(dir, 'danfe.pdf'))) snapshot.tem_danfe = true;
       }
       if (_ant.etiqueta_anexada) {
@@ -632,7 +639,9 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
         man[id] = {
           numero: snap.numero, marketplace: snap.marketplace,
           servico: snap.servico || '', flex: !!snap.flex,
-          cliente: snap.cliente || '', nf_numero: (snap.nf && snap.nf.numero) || snap.nf_numero || null,
+          // 10/08 (Codex, PR#6): com NF ANEXADA o campo do ADMIN ganha do que o Bling
+          // ainda mostra — senão cada re-cache republicava o número da nota CANCELADA.
+          cliente: snap.cliente || '', nf_numero: (snap.nf_anexada && snap.nf_numero) || (snap.nf && snap.nf.numero) || snap.nf_numero || null,
           tem_nf: snap.tem_nf, tem_kit: snap.tem_kit, tem_etiqueta: snap.tem_etiqueta,
           tem_danfe: !!((ja && ja.tem_danfe) || snap.tem_danfe),
           // 10/08: os CARIMBOS DE ANEXO no manifesto — o 5º ponto de leitura. O snapshot
@@ -642,7 +651,7 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
           nf_anexada: !!(snap.nf_anexada || (ja && ja.nf_anexada)),
           etiqueta_anexada: !!(snap.etiqueta_anexada || (ja && ja.etiqueta_anexada)),
           numero_loja: snap.numero_loja || null,
-          nf_emissao: (snap.nf && snap.nf.dataEmissao) || snap.nf_emissao || null,   // data+hora OFICIAL da NF no Bling
+          nf_emissao: (snap.nf_anexada && snap.nf_emissao) || (snap.nf && snap.nf.dataEmissao) || snap.nf_emissao || null,   // data+hora OFICIAL da NF no Bling
           visto_em: snap.visto_em || null,
           itens: snap.itens.length, skus: (snap.itens || []).map(it => it.sku).filter(Boolean),
           // skus_pick = SKUs que o estoquista REALMENTE pega: kit/composição explode nos componentes; item normal usa o próprio SKU
