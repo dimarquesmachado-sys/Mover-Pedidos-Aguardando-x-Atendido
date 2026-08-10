@@ -40,7 +40,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.GOODBKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GOODBKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'good-checkout-offline v27/07 b15';
+const VERSAO     = 'good-checkout-offline v10/08 b16';
 
 // ── SESSÃO DE OPERADOR (cookie assinado HMAC) — protege rotas de dados/ação ──
 // Segredo estável entre restarts. Usa ADMIN_KEY (já configurada no Render) como base.
@@ -476,6 +476,91 @@ function routes(readBody) {
     // etiqueta não vem nem pelo Bling nem pela API do canal. O admin baixa a etiqueta no painel do
     // marketplace, anexa aqui, e o pedido volta a ser processável pelo estoquista — que NÃO precisa
     // (nem deve) ter acesso ao seller center. Body: { id, pdf_base64 }.
+    // ── 09/08: ANEXAR A NOTA FISCAL (PDF ou XML) ────────────────────────────────
+    // Irmã da etiqueta-anexar, pro caso oposto: o pedido tem etiqueta mas está SEM NF
+    // no cache (nota emitida fora do Bling, ou o Bling ainda não devolveu o PDF).
+    //  • PDF  → vira o `danfe.pdf` da pasta do pedido. Como o `tem_danfe` é medido pela
+    //           EXISTÊNCIA do arquivo (ciclo.js:340), ele passa a valer sozinho, e a rota
+    //           /danfe/{id} serve o arquivo anexado em vez de tentar baixar do Bling.
+    //  • XML  → guarda como `nf.xml` E lê de dentro dele o número, a chave e a data de
+    //           emissão, preenchendo o pedido. É o que destrava a conferência e o 🧾 hh:mm.
+    //  • ZIP  → olha as entradas e pega o que achar (PDF tem prioridade sobre XML).
+    if (method === 'POST' && p === '/good-checkout-offline/nf-anexar') {
+      const opN = validarSessao(req.headers['cookie']);
+      if (!opN || !ehAdmin(opN)) { json(res, 403, { ok: false, erro: 'apenas admin' }); return true; }
+      let bodyN = {}; try { const _rn = await readBody(req); bodyN = (_rn && typeof _rn === 'object') ? _rn : JSON.parse(_rn || '{}'); } catch (e) {}
+      const idN = String(bodyN.id || '').trim();
+      const b64N = String(bodyN.pdf_base64 || '').replace(/^data:[^,]*,/, '');
+      if (!idN || !b64N) { json(res, 400, { ok: false, erro: 'faltou o id do pedido ou o arquivo' }); return true; }
+      let bufN = null; try { bufN = Buffer.from(b64N, 'base64'); } catch (e) {}
+      if (!bufN || bufN.length < 100) { json(res, 400, { ok: false, erro: 'arquivo vazio ou inválido' }); return true; }
+      const ehPdfN = b => !!(b && b.length > 100 && b.slice(0, 4).toString('utf8') === '%PDF');
+      const ehXmlN = b => { if (!b || b.length < 80) return false; const s = b.slice(0, 4000).toString('utf8'); return /<\s*(nfeProc|NFe|infNFe)[\s>]/i.test(s); };
+      let pdfN = null, xmlN = null;
+      if (ehPdfN(bufN)) pdfN = bufN;
+      else if (ehXmlN(bufN)) xmlN = bufN;
+      else if (bufN[0] === 0x50 && bufN[1] === 0x4B) {
+        try {   // reaproveita a leitura de zip da etiqueta? não: aquela vive dentro do outro if. Aqui é uma leitura simples do diretório central.
+          const zl = require('zlib');
+          let eo = -1;
+          for (let x = bufN.length - 22; x >= 0 && x > bufN.length - 66000; x--) { if (bufN.readUInt32LE(x) === 0x06054b50) { eo = x; break; } }
+          if (eo >= 0) {
+            const qt = bufN.readUInt16LE(eo + 10); let of = bufN.readUInt32LE(eo + 16);
+            for (let k = 0; k < qt && of + 46 < bufN.length; k++) {
+              if (bufN.readUInt32LE(of) !== 0x02014b50) break;
+              const mt = bufN.readUInt16LE(of + 10), tc = bufN.readUInt32LE(of + 20);
+              const fn = bufN.readUInt16LE(of + 28), ex = bufN.readUInt16LE(of + 30), cm = bufN.readUInt16LE(of + 32);
+              const lc = bufN.readUInt32LE(of + 42);
+              const lf = bufN.readUInt16LE(lc + 26), le = bufN.readUInt16LE(lc + 28);
+              const ini = lc + 30 + lf + le;
+              const dd = tc > 0 ? bufN.slice(ini, ini + tc) : bufN.slice(ini);
+              let conteudo = null;
+              try { conteudo = mt === 0 ? dd : zl.inflateRawSync(dd, { finishFlush: zl.constants.Z_SYNC_FLUSH }); } catch (e) {}
+              if (conteudo) { if (!pdfN && ehPdfN(conteudo)) pdfN = conteudo; else if (!xmlN && ehXmlN(conteudo)) xmlN = conteudo; }
+              of += 46 + fn + ex + cm;
+            }
+          }
+        } catch (e) {}
+      }
+      if (!pdfN && !xmlN) { json(res, 400, { ok: false, erro: 'não reconheci o arquivo — mande a NF em PDF (DANFE) ou XML' }); return true; }
+      const dirN = path.join(CACHE_DIR, String(idN));
+      let numeroNF = null, chaveNF = null, emissaoNF = null;
+      try {
+        ensureDir(dirN);
+        // 09/08 (b137, Codex): mata o `nf-simp.json` NA HORA DO ANEXO. A auto-cura do ciclo
+        // só apagava quando o ID da NF MUDAVA no Bling — e no caso comum a associação
+        // cancelada mantém o mesmo id, então o arquivo da nota velha sobrevivia e a Zebra
+        // seguia imprimindo os dados fiscais dela.
+        try { fs.unlinkSync(path.join(dirN, 'nf-simp.json')); } catch (e) {}
+        if (pdfN) fs.writeFileSync(path.join(dirN, 'danfe.pdf'), pdfN);
+        if (xmlN) {
+          fs.writeFileSync(path.join(dirN, 'nf.xml'), xmlN);
+          const s = xmlN.toString('utf8');
+          const mN = s.match(/<nNF>\s*(\d+)\s*<\/nNF>/i);           if (mN) numeroNF = mN[1];
+          const mC = s.match(/(?:<chNFe>\s*|Id="NFe)(\d{44})/i);      if (mC) chaveNF = mC[1];
+          const mD = s.match(/<dhEmi>\s*([0-9T:+\-]{19})/i) || s.match(/<dEmi>\s*(\d{4}-\d{2}-\d{2})/i);
+          if (mD) emissaoNF = mD[1].replace('T', ' ').slice(0, 19);
+        }
+      } catch (e) { json(res, 500, { ok: false, erro: 'não consegui salvar o arquivo' }); return true; }
+      const aplica = o => {
+        if (!o) return o;
+        if (pdfN) o.tem_danfe = true;
+        if (numeroNF) { o.nf_numero = numeroNF; o.tem_nf = true; }
+        if (emissaoNF) o.nf_emissao = emissaoNF;
+        if (chaveNF) { o.nf = Object.assign({}, o.nf || {}, { chave: chaveNF, numero: numeroNF || (o.nf && o.nf.numero) }); }
+        o.nf_anexada = true;
+        return o;
+      };
+      try { const mm = readJson(MANIFEST_FILE, {}); if (mm[idN]) { aplica(mm[idN]); writeJson(MANIFEST_FILE, mm); } } catch (e) {}
+      try { const sn = readJson(path.join(dirN, 'pedido.json'), null); if (sn) writeJson(path.join(dirN, 'pedido.json'), aplica(sn)); } catch (e) {}
+      console.log(`[GOODBKP] NF ANEXADA na mão no pedido ${idN} (${pdfN ? 'PDF' : ''}${pdfN && xmlN ? '+' : ''}${xmlN ? 'XML' : ''}${numeroNF ? ', nº ' + numeroNF : ''}) por ${opN}`);
+      // ev1 - registra a NF anexada no app DEVOLUCOES (pesquisavel pelo
+      // nº da NF e tambem pelo pedido). Fire-and-forget, nunca atrapalha.
+      try { require('../lib/avisar-devolucoes')('girassol', 'nf_anexada', numeroNF || idN, { pedido: idN, chave: chaveNF || '', emissao: emissaoNF || '', quem: (typeof opN === 'string' ? opN : '') || '' }); } catch (e) {}
+      json(res, 200, { ok: true, pdf: !!pdfN, xml: !!xmlN, nf_numero: numeroNF, chave: chaveNF, emissao: emissaoNF });
+      return true;
+    }
+
     if (method === 'POST' && p === '/good-checkout-offline/etiqueta-anexar') {
       const opSess = validarSessao(req.headers['cookie']);
       if (!opSess || !ehAdmin(opSess)) { json(res, 403, { ok: false, erro: 'apenas admin' }); return true; }
@@ -528,16 +613,28 @@ function routes(readBody) {
       if (!conteudoA) { json(res, 400, { ok: false, erro: 'não reconheci o arquivo — mande a etiqueta em ZPL (.txt), ZIP ou PDF' }); return true; }
       const dirA = path.join(CACHE_DIR, String(idA));
       const alvoA = formatoA === 'pdf' ? path.join(dirA, 'etiqueta.pdf') : path.join(dirA, 'etiqueta.' + String(ETIQ_FORMATO || 'zpl').toLowerCase());
-      try { ensureDir(dirA); fs.writeFileSync(alvoA, conteudoA); }
+      try {
+        ensureDir(dirA);
+        // 09/08 (b136, P2 do Codex): GRAVA PRIMEIRO, apaga depois. Antes eu apagava o
+        // outro formato e só então escrevia — se a escrita falhasse (disco cheio, I/O),
+        // o pedido ficava SEM etiqueta nenhuma, tendo destruído a que funcionava.
+        const _outro = formatoA === 'pdf'
+          ? path.join(dirA, 'etiqueta.' + String(ETIQ_FORMATO || 'zpl').toLowerCase())
+          : path.join(dirA, 'etiqueta.pdf');
+        fs.writeFileSync(alvoA, conteudoA);
+        if (_outro !== alvoA && fs.existsSync(_outro)) { try { fs.unlinkSync(_outro); console.log(`[GOODBKP] etiqueta anexada substituiu a antiga (${path.basename(_outro)} apagada) no pedido ${idA}`); } catch (e) {} }
+      }
       catch (e) { json(res, 500, { ok: false, erro: 'não consegui salvar o arquivo' }); return true; }
       // vale JÁ (sem esperar o próximo ciclo): manifesto + snapshot
       try {
         const manA = readJson(MANIFEST_FILE, {});
-        if (manA[idA]) { manA[idA].tem_etiqueta = true; manA[idA].etiqueta_pdf = (formatoA === 'pdf'); manA[idA].etiqueta_formato = (formatoA === 'pdf' ? 'PDF' : ETIQ_FORMATO); writeJson(MANIFEST_FILE, manA); }
+        // porte (Codex P1c): carimbo `etiqueta_anexada` — sem ele o ciclo re-baixava
+      // o PDF velho do Bling por cima do ZPL que o admin subiu.
+      if (manA[idA]) { manA[idA].etiqueta_anexada = true; manA[idA].tem_etiqueta = true; manA[idA].etiqueta_pdf = (formatoA === 'pdf'); manA[idA].etiqueta_formato = (formatoA === 'pdf' ? 'PDF' : ETIQ_FORMATO); writeJson(MANIFEST_FILE, manA); }
       } catch (e) {}
       try {
         const snapA = readJson(path.join(dirA, 'pedido.json'), null);
-        if (snapA) { snapA.tem_etiqueta = true; snapA.etiqueta_pdf = (formatoA === 'pdf'); snapA.etiqueta_formato = (formatoA === 'pdf' ? 'PDF' : ETIQ_FORMATO); writeJson(path.join(dirA, 'pedido.json'), snapA); }
+        if (snapA) { snapA.etiqueta_anexada = true; snapA.tem_etiqueta = true; snapA.etiqueta_pdf = (formatoA === 'pdf'); snapA.etiqueta_formato = (formatoA === 'pdf' ? 'PDF' : ETIQ_FORMATO); writeJson(path.join(dirA, 'pedido.json'), snapA); }
       } catch (e) {}
       console.log(`[GOODBKP] etiqueta ANEXADA na mão no pedido ${idA} (${formatoA.toUpperCase()}, ${conteudoA.length} bytes) por ${opSess}`);
       // ev1 - registra o anexo no app DEVOLUCOES (pesquisavel depois).
@@ -1296,7 +1393,10 @@ function routes(readBody) {
       try { pdf = fs.readFileSync(path.join(dir, 'danfe.pdf')); } catch (e) {}
       if (!pdf) { // não cacheado → gera agora (precisa do Bling online)
         const snap = readJson(path.join(dir, 'pedido.json'), null);
-        const nfId = snap && snap.nf && snap.nf.id;
+        // porte (Codex): num anexo SÓ DE XML não existe danfe.pdf de propósito — e o
+        // `snap.nf.id` continua sendo o da nota VELHA. Sem esta guarda, abrir ou imprimir
+        // o pedido baixava a nota CANCELADA do Bling e ainda a gravava no cache.
+        const nfId = (snap && snap.nf_anexada) ? null : (snap && snap.nf && snap.nf.id);
         if (nfId) { pdf = await baixarDanfe(nfId); if (pdf) { try { ensureDir(dir); fs.writeFileSync(path.join(dir, 'danfe.pdf'), pdf); } catch (e) {} } }
       }
       if (pdf) { res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': 'inline; filename="danfe.pdf"' }); res.end(pdf); }
