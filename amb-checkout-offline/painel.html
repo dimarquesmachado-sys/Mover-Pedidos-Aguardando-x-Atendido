@@ -399,7 +399,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b128';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b129';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#b3b9c4'}, magalu:{n:'Magalu',c:'#0086ff'}, shein:{n:'Shein',c:'#e0e0e0'},
@@ -885,6 +885,7 @@ function renderLista(){
         (p.cliente?'<div class="scli">'+esc(p.cliente)+'</div>':'')+
         '<div class="smeta">NF '+(p.nf_numero?esc(p.nf_numero):'—')+' · o Bling não trouxe a etiqueta deste pedido</div>'+
         blocoHora(p)+
+        (selosAnexo(p)?('<div style="margin-top:6px">'+selosAnexo(p)+'</div>'):'')+
         (souAdmin()?'<button class="btn sec" style="margin-top:8px;font-size:12px;padding:7px 11px" onclick="event.stopPropagation();anexarEtiqueta(\''+esc(p.id)+'\',\''+esc(p.numero||p.id)+'\')">📎 anexar etiqueta (ZPL/ZIP/PDF)</button>':'')+
       '</div>';
     }).join('');
@@ -921,6 +922,9 @@ function renderLista(){
       })()+
       '<div class="smeta">'+(((p.skus||[]).filter(Boolean).length===1)?'📦 <b>'+esc(p.skus[0])+'</b> · ':'')+(p.itens||0)+' item(s) · NF '+(p.nf_numero?esc(p.nf_numero):(p.tem_nf?'ok':'—'))+(p.tem_danfe?' · <span class="pdfok">PDF✓</span>':'')+'</div>'+
       blocoHora(p)+
+      (selosAnexo(p)?('<div style="margin-top:6px">'+selosAnexo(p)+'</div>'):'')+
+      (souAdmin()?'<div style="margin-top:6px"><button class="btn sec" style="font-size:11px;padding:5px 9px" onclick="event.stopPropagation();anexarNF(\''+esc(p.id)+'\',\''+esc(p.numero||p.id)+'\')" title="Anexar ou SUBSTITUIR a nota fiscal deste pedido (só admin).&#10;PDF: vira a DANFE que o estoquista imprime.&#10;XML: além disso preenche número, chave e hora de emissão.&#10;Vale sempre a última que você subir — a anterior é descartada.">📎 NF</button>'+
+       '<button class="btn sec" style="font-size:11px;padding:5px 9px;margin-left:6px" onclick="event.stopPropagation();anexarEtiqueta(\''+esc(p.id)+'\',\''+esc(p.numero||p.id)+'\')" title="Anexar ou SUBSTITUIR a etiqueta deste pedido (só admin).&#10;Aceita ZPL, ZIP (com vários dentro) e PDF.&#10;Vale sempre a última que você subir — a antiga é apagada, inclusive no outro formato.">📎 Etiqueta</button></div>':'')+
     '</div>';
   }).join('');
 }
@@ -939,6 +943,38 @@ async function anexarEtiqueta(id, numero){
       const b64 = await new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(String(r.result).split(',')[1]); r.onerror=()=>rej(new Error('não consegui ler o arquivo')); r.readAsDataURL(f); });
       const j = await postJson('/amb-checkout-offline/etiqueta-anexar', { id: id, pdf_base64: b64 });
       if(j && j.ok){ toast('✅ etiqueta anexada — pedido '+numero+' liberado'); await carregarLista(); }
+      else alert('Não deu: '+((j&&j.erro)||'erro desconhecido'));
+    }catch(e){ alert('Não deu: '+(e.message||e)); }
+  };
+  inp.click();
+}
+
+// b138 (pedido do Diego): depois de anexar, o card tem que DIZER que foi anexado.
+// Ele subiu a NF de um pedido que já tinha nota — o número não mudou e nada apareceu
+// na tela, então ficou sem saber se pegou. Os carimbos já vinham do servidor (a lista
+// devolve o manifesto inteiro); faltava só mostrar.
+function selosAnexo(p){
+  let s = '';
+  if (p && p.nf_anexada) s += '<span class="badge" style="background:#4ade8022;border:1px solid #4ade8055;color:#4ade80" title="a nota deste pedido foi anexada à mão por um admin — é ELA que vale, e o ciclo não a substitui pela do Bling">🧾 NF anexada</span>';
+  if (p && p.etiqueta_anexada) s += '<span class="badge" style="background:#38bdf822;border:1px solid #38bdf855;color:#38bdf8;margin-left:4px" title="a etiqueta deste pedido foi anexada à mão por um admin — é ELA que imprime">📎 etiqueta anexada</span>';
+  return s;
+}
+
+async function anexarNF(id, numero){
+  const inp = document.createElement('input');
+  inp.type = 'file'; inp.accept = '.pdf,.xml,.zip,application/pdf,text/xml,application/xml,application/zip';
+  inp.onchange = async () => {
+    const f = inp.files && inp.files[0];
+    if(!f) return;
+    if(f.size > 8*1024*1024){ alert('arquivo muito grande (máx 8 MB)'); return; }
+    toast('🧾 enviando NF do '+numero+'…');
+    try{
+      const b64 = await new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(String(r.result).split(',')[1]); r.onerror=()=>rej(new Error('não consegui ler o arquivo')); r.readAsDataURL(f); });
+      const j = await postJson('/amb-checkout-offline/nf-anexar', { id: id, pdf_base64: b64 });
+      if(j && j.ok){
+        toast('✅ NF anexada no pedido '+numero+(j.nf_numero?(' — nº '+j.nf_numero):'')+(j.pdf?' · DANFE pronta pra imprimir':'')+' · o card agora mostra o selo 🧾');
+        await carregarLista();
+      }
       else alert('Não deu: '+((j&&j.erro)||'erro desconhecido'));
     }catch(e){ alert('Não deu: '+(e.message||e)); }
   };

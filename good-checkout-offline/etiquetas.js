@@ -89,12 +89,17 @@ async function zplParaPdf(zpl) {
 async function etiquetaPdf(blingId, dir) {
   // 0) PDF já cacheado nesta pasta → usa direto (offline; não depende do Bling re-servir, ex: Amazon pós-despacho)
   if (dir) { try { const c = fs.readFileSync(path.join(dir, 'etiqueta.pdf')); if (c && c.length && c.slice(0, 4).toString('latin1') === '%PDF') return c; } catch (e) {} }
+  // porte (Codex): se o admin ANEXOU a etiqueta, o Bling NÃO manda aqui. O passo 1
+  // pedia o PDF ao Bling ANTES do ZPL local — então /etiqueta-pdf e /imprimir voltavam
+  // a servir a etiqueta VELHA. Com o carimbo, pula direto pro ZPL que ele subiu.
+  let _anexada = false;
+  if (dir) { try { const _s = JSON.parse(fs.readFileSync(path.join(dir, 'pedido.json'), 'utf8')); _anexada = !!(_s && _s.etiqueta_anexada); } catch (e) {} }
   // 1) PDF nativo do Bling — o Bling gera o PDF da etiqueta de qualquer marketplace
-  try { const direto = await baixarEtiquetaPDF(blingId); if (direto) return direto; } catch (e) {}
+  if (!_anexada) { try { const direto = await baixarEtiquetaPDF(blingId); if (direto) return direto; } catch (e) {} }
   // 2) fallback offline: ZPL cacheado → Labelary
   let zpl = null;
   if (dir) { try { zpl = fs.readFileSync(path.join(dir, `etiqueta.${ETIQ_FORMATO.toLowerCase()}`), 'utf8'); } catch (e) {} }
-  if (!zpl) { try { zpl = await baixarEtiqueta(blingId); } catch (e) {} }
+  if (!zpl && !_anexada) { try { zpl = await baixarEtiqueta(blingId); } catch (e) {} }
   if (zpl && zpl.indexOf('^XA') >= 0) { try { const p = await zplParaPdf(zpl); if (p) return p; } catch (e) {} }
   // 3) MADEIRA MADEIRA: não tem etiqueta no Bling. Lê o snapshot (pedido.json), acha o
   //    batch no mapa (sincronizado pela extensão) e baixa o PDF direto do MM com o token.
