@@ -35,7 +35,10 @@ const ARQ_DEV = () => path.join(CACHE_DIR, '_shopee_devolucoes.json');
 const ARQ_CAR = () => path.join(CACHE_DIR, '_shopee_carteira.json');
 
 const SYNC_URL = (process.env.AMBBKP_SHOPEE_SYNC_URL || 'https://ambtotal-shopee-nf-sync-x-bling.onrender.com').replace(/\/+$/, '');
-const SYNC_KEY = String(process.env.AMBBKP_SHOPEE_SYNC_KEY || '').trim();
+// 10/08 (Codex P1): fallback pra SHOPEE_SYNC_KEY global — o ciclo da AMB JÁ usa essa
+// env pra falar com o serviço dela, então a chave já está no Render. Sem o fallback,
+// escrow e coletas noturnas morriam com "falta a env" num serviço já configurado.
+const SYNC_KEY = String(process.env.AMBBKP_SHOPEE_SYNC_KEY || process.env.SHOPEE_SYNC_KEY || '').trim();
 const LOJA = process.env.AMBBKP_SHOPEE_SYNC_LOJA || 'amb';
 
 // Busca o escrow de um pedido no serviço que é dono do token.
