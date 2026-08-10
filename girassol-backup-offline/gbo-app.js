@@ -578,6 +578,11 @@ function routes(readBody) {
         // cancelada mantém o mesmo id, então o arquivo da nota velha sobrevivia e a Zebra
         // seguia imprimindo os dados fiscais dela.
         try { fs.unlinkSync(path.join(dirN, 'nf-simp.json')); } catch (e) {}
+        // 10/08 (Codex, PR#5): anexo SÓ DE XML também descarta a DANFE anterior — ela é
+        // da nota velha (do Bling ou de um anexo passado) e o /danfe//imprimir a serviriam.
+        // Vale a última subida: sem PDF novo, melhor SEM danfe (guardas seguram o Bling)
+        // do que com a cancelada.
+        if (xmlN && !pdfN) { try { fs.unlinkSync(path.join(dirN, 'danfe.pdf')); } catch (e) {} }
         if (pdfN) fs.writeFileSync(path.join(dirN, 'danfe.pdf'), pdfN);
         if (xmlN) {
           fs.writeFileSync(path.join(dirN, 'nf.xml'), xmlN);
@@ -2079,7 +2084,9 @@ function routes(readBody) {
       try { nfBuf = fs.readFileSync(path.join(dir, 'danfe.pdf')); } catch (e) {}
       if (!nfBuf) {
         const snap = readJson(path.join(dir, 'pedido.json'), null);
-        if (snap && snap.nf && snap.nf.id) { nfBuf = await baixarDanfe(snap.nf.id); if (nfBuf) { try { fs.writeFileSync(path.join(dir, 'danfe.pdf'), nfBuf); } catch (e) {} } }
+        // 10/08 (Codex, PR#5): a impressão A4 tinha o MESMO fallback sem guarda que o
+        // /danfe — com NF anexada e sem PDF em cache, baixava a nota VELHA do Bling.
+        if (snap && !snap.nf_anexada && snap.nf && snap.nf.id) { nfBuf = await baixarDanfe(snap.nf.id); if (nfBuf) { try { fs.writeFileSync(path.join(dir, 'danfe.pdf'), nfBuf); } catch (e) {} } }
       }
       const partes = [etqBuf, nfBuf].filter(Boolean);
       if (!partes.length) { json(res, 404, { erro: 'sem etiqueta nem NF' }); return true; }
