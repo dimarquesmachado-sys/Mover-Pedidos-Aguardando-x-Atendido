@@ -536,6 +536,11 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
       if (fs.existsSync(path.join(dir, 'nf-simp.json'))) continue;   // já tem
       const snap = readJson(path.join(dir, 'pedido.json'), null);
       if (!snap) { simpSemId++; continue; }
+      // 09/08 (b137, Codex): NF anexada à mão? Não regerar daqui. O `snap.nf.id` ainda é o
+      // da nota VELHA, então este passo reconstruiria o nf-simp com os dados fiscais da
+      // nota CANCELADA — e é ele que a DANFE simplificada e a etiqueta fundida imprimem.
+      // Melhor SEM nf-simp (a rota cai no caminho normal) do que com o dado errado.
+      if (snap.nf_anexada) { continue; }
       let nfId = snap.nf && snap.nf.id;
       if (!nfId) {   // re-cache antigo pode ter perdido o nf.id → acha ao vivo e CURA o snapshot
         try {
