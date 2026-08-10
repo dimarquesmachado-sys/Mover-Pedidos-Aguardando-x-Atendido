@@ -209,9 +209,15 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC, nfCtx) {
     // outra e anexou no checkout. Aqui a auto-cura veria "a NF mudou" e apagaria
     // JUSTAMENTE o PDF que ele subiu, deixando o estoquista sem documento — ou pior,
     // re-baixando a do Bling. O carimbo `nf_anexada` (b133) manda quem vale.
-    if (_antId && (!nf || Number(nf.id) !== Number(_antId)) && !(_snapAnt && _snapAnt.nf_anexada)) {
-      for (const fdel of ['danfe.pdf', 'nf-simp.json']) { try { fs.unlinkSync(path.join(dir, fdel)); } catch (e) {} }
-      console.log(`[NF-CASA] pedido ${id}: NF corrigida (${_antId} → ${(nf && nf.id) || 'nenhuma'}) — DANFE antiga descartada`);
+    if (_antId && (!nf || Number(nf.id) !== Number(_antId))) {
+      // b136 (P1b do Codex): quando a NF foi ANEXADA à mão, preservo o `danfe.pdf` — que é
+      // o arquivo que o admin subiu — mas o `nf-simp.json` TEM que morrer do mesmo jeito.
+      // Ele não vem no anexo: é dado PARSEADO da nota antiga, e a DANFE simplificada e a
+      // etiqueta fundida leem dele. Preservar os dois faria a Zebra imprimir o número e os
+      // dados fiscais da nota CANCELADA — exatamente o que o anexo veio evitar.
+      const _anexada = !!(_snapAnt && _snapAnt.nf_anexada);
+      for (const fdel of (_anexada ? ['nf-simp.json'] : ['danfe.pdf', 'nf-simp.json'])) { try { fs.unlinkSync(path.join(dir, fdel)); } catch (e) {} }
+      console.log(`[NF-CASA] pedido ${id}: NF corrigida (${_antId} → ${(nf && nf.id) || 'nenhuma'}) — ${_anexada ? 'DANFE ANEXADA preservada, nf-simp regerada' : 'DANFE antiga descartada'}`);
     }
   } catch (e) {}
 
@@ -353,6 +359,29 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC, nfCtx) {
     visto_em: (function () { try { const a = JSON.parse(fs.readFileSync(path.join(dir, 'pedido.json'), 'utf8')); return (a && (a.visto_em || a.cacheado_em)) || new Date().toISOString(); } catch (e) { return new Date().toISOString(); } })(),   // 1ª vez que ESTE pedido apareceu pro sistema — sobrevive a re-caches
     cacheado_em: new Date().toISOString()
   };
+  // b136 (P1a do Codex): o snapshot novo NÃO carregava os carimbos de anexo — então, no
+  // ciclo seguinte, a guarda acima não via mais `nf_anexada` e a auto-cura apagava a NF
+  // que o admin tinha subido. Num anexo só de XML (sem danfe.pdf) o estrago era pior: o
+  // passo da DANFE baixava a nota CANCELADA do Bling de volta.
+  // Os carimbos são do ADMIN, não do Bling — então sobrevivem a qualquer re-cache.
+  try {
+    const _ant = readJson(path.join(dir, 'pedido.json'), null);
+    if (_ant) {
+      if (_ant.nf_anexada) {
+        snapshot.nf_anexada = true;
+        if (_ant.nf_numero && !snapshot.nf_numero) snapshot.nf_numero = _ant.nf_numero;
+        if (_ant.nf_emissao && !snapshot.nf_emissao) snapshot.nf_emissao = _ant.nf_emissao;
+        if (_ant.nf && _ant.nf.chave) snapshot.nf = Object.assign({}, snapshot.nf || {}, { chave: _ant.nf.chave });
+        if (fs.existsSync(path.join(dir, 'danfe.pdf'))) snapshot.tem_danfe = true;
+      }
+      if (_ant.etiqueta_anexada) {
+        snapshot.etiqueta_anexada = true;
+        snapshot.tem_etiqueta = true;
+        if (_ant.etiqueta_pdf != null) snapshot.etiqueta_pdf = _ant.etiqueta_pdf;
+        if (_ant.etiqueta_formato) snapshot.etiqueta_formato = _ant.etiqueta_formato;
+      }
+    }
+  } catch (e) {}
   writeJson(path.join(dir, 'pedido.json'), snapshot);
   return snapshot;
 }
@@ -507,6 +536,11 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
       if (fs.existsSync(path.join(dir, 'nf-simp.json'))) continue;   // já tem
       const snap = readJson(path.join(dir, 'pedido.json'), null);
       if (!snap) { simpSemId++; continue; }
+      // 09/08 (b137, Codex): NF anexada à mão? Não regerar daqui. O `snap.nf.id` ainda é o
+      // da nota VELHA, então este passo reconstruiria o nf-simp com os dados fiscais da
+      // nota CANCELADA — e é ele que a DANFE simplificada e a etiqueta fundida imprimem.
+      // Melhor SEM nf-simp (a rota cai no caminho normal) do que com o dado errado.
+      if (snap.nf_anexada) { continue; }
       let nfId = snap.nf && snap.nf.id;
       if (!nfId) {   // re-cache antigo pode ter perdido o nf.id → acha ao vivo e CURA o snapshot
         try {
@@ -536,6 +570,10 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
       const dir = path.join(CACHE_DIR, String(ped.id));
       if (fs.existsSync(path.join(dir, 'etiqueta.pdf'))) continue;
       if (!fs.existsSync(path.join(dir, `etiqueta.${extEtq}`))) continue;
+      // b136 (P1c do Codex): se o ZPL veio de um ANEXO do admin, NÃO baixar o PDF do Bling.
+      // O PDF de lá é da etiqueta VELHA, e é ele que a impressão A4 e a /imprimir usam —
+      // o admin substituiria e o estoquista imprimiria a antiga assim mesmo.
+      try { const _s = readJson(path.join(dir, 'pedido.json'), null); if (_s && _s.etiqueta_anexada) continue; } catch (e) {}
       const pdf = await baixarEtiquetaPDF(ped.id); await sleep(PAUSA_MS);
       if (pdf) { fs.writeFileSync(path.join(dir, 'etiqueta.pdf'), pdf); etqPdfNovos++; }
     }
