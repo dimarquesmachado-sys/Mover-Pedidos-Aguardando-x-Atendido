@@ -250,7 +250,11 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC, nfCtx) {
     const _snapAnt = readJson(path.join(dir, 'pedido.json'), null);
     const _antId = _snapAnt && _snapAnt.nf && _snapAnt.nf.id;
     if (_antId && (!nf || Number(nf.id) !== Number(_antId))) {
-      for (const fdel of ['danfe.pdf', 'nf-simp.json']) { try { fs.unlinkSync(path.join(dir, fdel)); } catch (e) {} }
+      // porte (Codex): NF ANEXADA à mão? preserva o danfe.pdf (é o arquivo que o admin
+      // subiu) mas o nf-simp.json morre do mesmo jeito — ele é dado PARSEADO da nota
+      // antiga, e a DANFE simplificada e a etiqueta fundida imprimem dele.
+      const _anexada = !!(_snapAnt && _snapAnt.nf_anexada);
+      for (const fdel of (_anexada ? ['nf-simp.json'] : ['danfe.pdf', 'nf-simp.json'])) { try { fs.unlinkSync(path.join(dir, fdel)); } catch (e) {} }
       console.log(`[NF-CASA] pedido ${id}: NF corrigida (${_antId} → ${(nf && nf.id) || 'nenhuma'}) — DANFE antiga descartada`);
     }
   } catch (e) {}
@@ -394,6 +398,28 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC, nfCtx) {
     visto_em: (function () { try { const a = JSON.parse(fs.readFileSync(path.join(dir, 'pedido.json'), 'utf8')); return (a && (a.visto_em || a.cacheado_em)) || new Date().toISOString(); } catch (e) { return new Date().toISOString(); } })(),   // 1ª vez que ESTE pedido apareceu pro sistema — sobrevive a re-caches
     cacheado_em: new Date().toISOString()
   };
+  // porte (Codex P1a): o snapshot novo NÃO carregava os carimbos de anexo — no ciclo
+  // seguinte a guarda não via mais `nf_anexada` e a auto-cura apagava a NF que o admin
+  // subiu; num anexo só de XML, o passo da DANFE baixava a nota CANCELADA de volta.
+  // Os carimbos são do ADMIN, não do Bling — sobrevivem a qualquer re-cache.
+  try {
+    const _ant = readJson(path.join(dir, 'pedido.json'), null);
+    if (_ant) {
+      if (_ant.nf_anexada) {
+        snapshot.nf_anexada = true;
+        if (_ant.nf_numero && !snapshot.nf_numero) snapshot.nf_numero = _ant.nf_numero;
+        if (_ant.nf_emissao && !snapshot.nf_emissao) snapshot.nf_emissao = _ant.nf_emissao;
+        if (_ant.nf && _ant.nf.chave) snapshot.nf = Object.assign({}, snapshot.nf || {}, { chave: _ant.nf.chave });
+        if (fs.existsSync(path.join(dir, 'danfe.pdf'))) snapshot.tem_danfe = true;
+      }
+      if (_ant.etiqueta_anexada) {
+        snapshot.etiqueta_anexada = true;
+        snapshot.tem_etiqueta = true;
+        if (_ant.etiqueta_pdf != null) snapshot.etiqueta_pdf = _ant.etiqueta_pdf;
+        if (_ant.etiqueta_formato) snapshot.etiqueta_formato = _ant.etiqueta_formato;
+      }
+    }
+  } catch (e) {}
   writeJson(path.join(dir, 'pedido.json'), snapshot);
   return snapshot;
 }
@@ -589,6 +615,9 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
       }
       const snap = readJson(path.join(dir, 'pedido.json'), null);
       if (!snap || !snap.nf || !snap.nf.id) { danfesSemId++; continue; }
+      // porte: NF anexada à mão NUNCA é re-baixada do Bling — o snap.nf.id ainda é o da
+      // nota VELHA, então este passo restauraria a cancelada se o danfe.pdf sumisse.
+      if (snap && snap.nf_anexada) { continue; }
       const pdf = await baixarDanfe(snap.nf.id); await sleep(PAUSA_MS);
       if (pdf) {
         fs.writeFileSync(path.join(dir, 'danfe.pdf'), pdf);
@@ -608,6 +637,10 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
       if (fs.existsSync(path.join(dir, 'nf-simp.json'))) continue;   // já tem
       const snap = readJson(path.join(dir, 'pedido.json'), null);
       if (!snap) { simpSemId++; continue; }
+      // porte (Codex): NF anexada? não regerar o nf-simp daqui — o snap.nf.id ainda é o
+      // da nota VELHA e este passo reconstruiria o arquivo com os dados fiscais da
+      // CANCELADA. Melhor sem nf-simp (a rota cai no caminho normal) do que com o errado.
+      if (snap.nf_anexada) { continue; }
       let nfId = snap.nf && snap.nf.id;
       if (!nfId) {   // re-cache antigo pode ter perdido o nf.id → acha ao vivo e CURA o snapshot
         try {
@@ -637,6 +670,9 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
       const dir = path.join(CACHE_DIR, String(ped.id));
       if (fs.existsSync(path.join(dir, 'etiqueta.pdf'))) continue;
       if (!fs.existsSync(path.join(dir, `etiqueta.${extEtq}`))) continue;
+      // porte (Codex P1c): ZPL veio de ANEXO do admin? NÃO baixar o PDF do Bling — o PDF
+      // de lá é da etiqueta VELHA, e é ele que a impressão A4 e a /imprimir usam.
+      try { const _s = readJson(path.join(dir, 'pedido.json'), null); if (_s && _s.etiqueta_anexada) continue; } catch (e) {}
       const pdf = await baixarEtiquetaPDF(ped.id); await sleep(PAUSA_MS);
       if (pdf) { fs.writeFileSync(path.join(dir, 'etiqueta.pdf'), pdf); etqPdfNovos++; }
     }
