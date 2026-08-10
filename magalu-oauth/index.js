@@ -889,6 +889,65 @@ liga('bAmb','amb'); liga('bGood','good');
   // id (uuid do pedido), code (número LU visível) e deliveries[] (onde deve estar
   // o uuid do pacote que falta na URL /pedidos/<code>/<uuid>). Esta sonda pega 1
   // pedido (ou busca por code) e mostra TODOS os uuids candidatos, expandidos.
+  // 10/08: PEDIDOS DO DIA — "marketplace primeiro, Bling é conferência". Lista as
+  // vendas recentes direto da API da Magalu (purchased_at_from, filtro descoberto na
+  // sonda da linha ~1012) pro vendasSync mostrar a venda NA HORA, antes do XML do
+  // Full descer pro Bling. Campos do total são DEFENSIVOS (a estrutura exata do
+  // pedido não foi 100% mapeada): &raw=1 devolve a 1ª order crua pra calibrarmos.
+  // Uso: GET /magalu/pedidos-do-dia?empresa=amb&k=ADMIN_KEY[&desde=AAAA-MM-DD][&raw=1]
+  if (method === 'GET' && p === '/magalu/pedidos-do-dia') {
+    const emp = String(q.get('empresa') || '').toLowerCase().trim();
+    if (!EMPRESAS_VALIDAS.includes(emp)) { json(res, 400, { ok: false, erro: 'empresa inválida' }); return true; }
+    const kD = String(q.get('k') || '').trim();
+    if (!process.env.ADMIN_KEY || kD !== process.env.ADMIN_KEY) { json(res, 404, { error: 'not found' }); return true; }
+    let tok = '';
+    try { tok = await getAccessToken(emp); }
+    catch (e) { json(res, 502, { ok: false, erro: 'token: ' + String(e.message || e) }); return true; }
+    const H = { 'Authorization': 'Bearer ' + tok, 'Accept': 'application/json' };
+    const BASE = 'https://api.magalu.com/seller/v1/orders';
+    const hj = new Date(); hj.setDate(hj.getDate() - 1);
+    const desde = String(q.get('desde') || hj.toISOString().slice(0, 10)).slice(0, 10);
+    const querRaw = q.get('raw') === '1';
+    const out = { ok: true, empresa: emp, desde, pedidos: [] };
+    try {
+      let cru1 = null;
+      for (let off = 0; off < 300; off += 50) {
+        const r = await fetch(BASE + '?_limit=50&_offset=' + off + '&purchased_at_from=' + encodeURIComponent(desde + 'T00:00:00Z'), { headers: H });
+        const tx = await r.text();
+        let j = null; try { j = JSON.parse(tx); } catch (e) {}
+        const arr = (j && (j.results || j.orders || (Array.isArray(j) ? j : []))) || [];
+        if (!r.ok || !arr.length) { if (!r.ok && off === 0) out.http = { status: r.status, corpo: tx.slice(0, 200) }; break; }
+        for (const o of arr) {
+          if (!o) continue;
+          if (!cru1) cru1 = o;
+          const code = String(o.code || o.order_code || '').trim();
+          if (!code) continue;
+          // total DEFENSIVO — candidatos em ordem de plausibilidade; 0 = não achamos (calibrar com &raw=1)
+          const tot = Number(
+            (o.total_amount != null ? o.total_amount :
+            (o.amounts && o.amounts.total != null ? o.amounts.total :
+            (o.amount && o.amount.total != null ? o.amount.total :
+            (o.total != null ? o.total : 0))))
+          ) || 0;
+          out.pedidos.push({
+            code,
+            id: o.id || null,
+            purchased_at: o.purchased_at || o.created_at || null,
+            status: (o.status && (o.status.name || o.status)) || null,
+            total: tot,
+            cliente: (o.customer && (o.customer.name || o.customer.nickname)) || ''
+          });
+        }
+        if (arr.length < 50) break;
+        await new Promise(r2 => setTimeout(r2, 350));
+      }
+      if (querRaw && cru1) out.amostra_crua = cru1;
+      out.total_listado = out.pedidos.length;
+    } catch (e) { out.ok = false; out.erro = String(e.message || e).slice(0, 180); }
+    json(res, 200, out);
+    return true;
+  }
+
   if (method === 'GET' && p === '/magalu/sonda') {
     const emp = String(q.get('empresa') || '').toLowerCase().trim();
     if (!EMPRESAS_VALIDAS.includes(emp)) { json(res, 400, { ok: false, erro: 'empresa inválida' }); return true; }
