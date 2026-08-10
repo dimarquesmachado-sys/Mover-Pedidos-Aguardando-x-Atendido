@@ -561,7 +561,7 @@ function routes(readBody) {
       console.log(`[GOODBKP] NF ANEXADA na mão no pedido ${idN} (${pdfN ? 'PDF' : ''}${pdfN && xmlN ? '+' : ''}${xmlN ? 'XML' : ''}${numeroNF ? ', nº ' + numeroNF : ''}) por ${opN}`);
       // ev1 - registra a NF anexada no app DEVOLUCOES (pesquisavel pelo
       // nº da NF e tambem pelo pedido). Fire-and-forget, nunca atrapalha.
-      try { require('../lib/avisar-devolucoes')('girassol', 'nf_anexada', numeroNF || idN, { pedido: idN, chave: chaveNF || '', emissao: emissaoNF || '', quem: (typeof opN === 'string' ? opN : '') || '' }); } catch (e) {}
+      try { require('../lib/avisar-devolucoes')('good', 'nf_anexada', numeroNF || idN, { pedido: idN, chave: chaveNF || '', emissao: emissaoNF || '', quem: (typeof opN === 'string' ? opN : '') || '' }); } catch (e) {}
       json(res, 200, { ok: true, pdf: !!pdfN, xml: !!xmlN, nf_numero: numeroNF, chave: chaveNF, emissao: emissaoNF });
       return true;
     }
