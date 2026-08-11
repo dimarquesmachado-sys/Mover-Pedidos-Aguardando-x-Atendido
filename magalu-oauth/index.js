@@ -909,6 +909,7 @@ liga('bAmb','amb'); liga('bGood','good');
     const desde = String(q.get('desde') || hj.toISOString().slice(0, 10)).slice(0, 10);
     const querRaw = q.get('raw') === '1';
     const out = { ok: true, empresa: emp, desde, pedidos: [] };
+    let foraJanela = 0, semData = 0, lidos = 0;
     try {
       let cru1 = null;
       for (let off = 0; off < 300; off += 50) {
@@ -922,6 +923,11 @@ liga('bAmb','amb'); liga('bGood','good');
           if (!cru1) cru1 = o;
           const code = String(o.code || o.order_code || '').trim();
           if (!code) continue;
+          // 11/08: a Magalu IGNORA o purchased_at_from (provado: 300 pedidos vieram com
+          // datas velhas). Então filtramos AQUI, pela data que o pedido traz. Sem isto o
+          // consumidor recebe o histórico inteiro achando que é "o dia".
+          const dtP = String(o.purchased_at || o.created_at || '').slice(0, 10);
+          if (dtP) { if (dtP < desde) { foraJanela++; continue; } } else { semData++; }
           // total DEFENSIVO — candidatos em ordem de plausibilidade; 0 = não achamos (calibrar com &raw=1)
           const tot = Number(
             (o.total_amount != null ? o.total_amount :
@@ -938,11 +944,16 @@ liga('bAmb','amb'); liga('bGood','good');
             cliente: (o.customer && (o.customer.name || o.customer.nickname)) || ''
           });
         }
+        lidos += arr.length;
         if (arr.length < 50) break;
+        if (off + 50 >= 300) { out.truncado = true; break; }   // não fingir janela completa
         await new Promise(r2 => setTimeout(r2, 350));
       }
       if (querRaw && cru1) out.amostra_crua = cru1;
       out.total_listado = out.pedidos.length;
+      out.lidos_da_api = lidos; out.fora_da_janela = foraJanela; out.sem_data = semData;
+      // se a API devolveu MUITO e quase tudo era velho, o filtro dela não funciona
+      out.filtro_do_servidor_funciona = !(lidos >= 50 && foraJanela > out.pedidos.length);
     } catch (e) { out.ok = false; out.erro = String(e.message || e).slice(0, 180); }
     json(res, 200, out);
     return true;
