@@ -692,7 +692,9 @@ function routes(readBody) {
           ensureDir(dirM);
           const _outroM = path.join(dirM, 'etiqueta.pdf');
           fs.writeFileSync(alvoM, bufM);   // grava-primeiro (b136): só remove o PDF depois que o ZPL está no disco
-          if (fs.existsSync(_outroM)) { try { fs.unlinkSync(_outroM); } catch (e) {} }
+          // Codex PR#35: com GOODBKP_ETIQ_FORMATO=PDF os dois caminhos coincidem — sem o guard,
+          // apagaríamos o arquivo que acabamos de gravar (a irmã individual sempre teve o guard)
+          if (_outroM !== alvoM && fs.existsSync(_outroM)) { try { fs.unlinkSync(_outroM); } catch (e) {} }
         } catch (e) { invalidas.push(nfN); continue; }
         if (manM[idM]) { manM[idM].etiqueta_anexada = true; manM[idM].tem_etiqueta = true; manM[idM].etiqueta_pdf = false; manM[idM].etiqueta_formato = ETIQ_FORMATO; mudouMan = true; }
         try {
@@ -702,7 +704,17 @@ function routes(readBody) {
         try { require('../lib/avisar-devolucoes')('good', 'etiqueta_anexada', idM, { formato: 'zpl', quem: quemM, massa: true }); } catch (e) {}
         casadas.push({ nf: nfN, id: idM, numero: (manM[idM] && manM[idM].numero) || null, bytes: bufM.length });
       }
-      if (mudouMan) { try { writeJson(MANIFEST_FILE, manM); } catch (e) {} }
+      // Codex PR#35: o ciclo pode salvar um manifesto ANTIGO por cima (ele carrega o dele em
+      // memória no começo da rodada). Re-lemos AGORA e carimbamos a cópia fresca — a janela de
+      // corrida cai de minutos pra milissegundos; e se ainda assim o ciclo atropelar, o próximo
+      // reconstrói do snapshot (que também carimbamos), então o estado se auto-repara.
+      if (mudouMan) {
+        try {
+          const manF = readJson(MANIFEST_FILE, {});
+          for (const c of casadas) { if (manF[c.id]) { manF[c.id].etiqueta_anexada = true; manF[c.id].tem_etiqueta = true; manF[c.id].etiqueta_pdf = false; manF[c.id].etiqueta_formato = ETIQ_FORMATO; } }
+          writeJson(MANIFEST_FILE, manF);
+        } catch (e) {}
+      }
       console.log('[GOODBKP] etiquetas em MASSA: ' + casadas.length + ' anexada(s), ' + sem_pedido.length + ' sem pedido, ' + invalidas.length + ' inválida(s) — por ' + quemM);
       json(res, 200, { ok: true, total: lista.length, anexadas: casadas.length, casadas, sem_pedido, ambiguas, invalidas });
       return true;
@@ -719,7 +731,7 @@ function routes(readBody) {
         '<p>Selecione o arquivo <b>JSON</b> com as etiquetas já identificadas (nf + zpl). Cada uma será anexada ao pedido cuja <b>NF</b> bater no manifesto.</p>' +
         '<input type="file" id="f" accept=".json,application/json"> <button id="b" style="padding:8px 18px">Enviar</button>' +
         '<pre id="o" style="background:#f5f5f5;padding:12px;white-space:pre-wrap"></pre>' +
-        '<script>document.getElementById("b").onclick=async()=>{const f=document.getElementById("f").files[0];const o=document.getElementById("o");if(!f){o.textContent="escolha o arquivo";return}o.textContent="enviando…";try{const t=await f.text();const r=await fetch("/good-checkout-offline/etiquetas-zpl-massa",{method:"POST",headers:{"Content-Type":"application/json"},body:t});const j=await r.json();o.textContent=JSON.stringify(j,null,2)}catch(e){o.textContent="erro: "+e.message}};</script>' +
+        '<script>document.getElementById("b").onclick=async()=>{const f=document.getElementById("f").files[0];const o=document.getElementById("o");if(!f){o.textContent="escolha o arquivo";return}try{const dados=JSON.parse(await f.text());const todas=Array.isArray(dados.etiquetas)?dados.etiquetas:[];if(!todas.length){o.textContent="o JSON não tem etiquetas";return}const TAM=60;const agg={total:todas.length,anexadas:0,casadas:[],sem_pedido:[],ambiguas:[],invalidas:[]};for(let i=0;i<todas.length;i+=TAM){o.textContent="enviando "+Math.min(i+TAM,todas.length)+" de "+todas.length+"…";const r=await fetch("/good-checkout-offline/etiquetas-zpl-massa",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({etiquetas:todas.slice(i,i+TAM)})});const j=await r.json();if(!j.ok){o.textContent="erro no lote: "+JSON.stringify(j);return}agg.anexadas+=j.anexadas;agg.casadas.push(...j.casadas);agg.sem_pedido.push(...j.sem_pedido);agg.ambiguas.push(...j.ambiguas);agg.invalidas.push(...j.invalidas)}o.textContent=JSON.stringify(agg,null,2)}catch(e){o.textContent="erro: "+e.message}};</script>' +
         '</body></html>');
       return true;
     }
