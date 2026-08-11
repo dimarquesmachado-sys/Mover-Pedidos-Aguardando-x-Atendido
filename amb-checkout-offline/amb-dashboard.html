@@ -349,7 +349,10 @@
     /* TOP PRODUTOS: esconde curva e participação */
     /* 29/07: a coluna 7 (💎 Lucro Bruto, o VALOR da M.C.) estava escondida — sobrava a % sem o
        valor. Agora ela fica, e saem o nº da linha, o Custo e o Retorno/custo. */
-    #tProd tr>*:nth-child(1),#tProd tr>*:nth-child(6),#tProd tr>*:nth-child(9){display:none}
+    /* 11/08 (Codex PR#22): a coluna FOTO entrou como 2ª e empurrou todas as outras uma
+       casa. Índices atualizados: some o nº da linha (1), o Custo (7) e o Retorno/custo (10);
+       ficam Foto, Produto, Unid., Faturamento e o 💎 Lucro Bruto. */
+    #tProd tr>*:nth-child(1),#tProd tr>*:nth-child(7),#tProd tr>*:nth-child(10){display:none}
     /* cabeçalho congelado da tabela desligado no celular (brigava com a barra fixa) */
     .tw th{position:static;box-shadow:none}
     /* rodapé de paginação empilha */
@@ -361,7 +364,7 @@
   @media(max-width:520px){
     .kpis{grid-template-columns:1fr 1fr}
     .kpi .v{font-size:16px}
-    #tProd tr>*:nth-child(3){display:none}   /* tela bem estreita: sai também a Curva */
+    #tProd tr>*:nth-child(4){display:none}   /* tela bem estreita: sai também a Curva (era a 3, virou 4 com a Foto) */
     table{font-size:11px} td{padding:6px 5px}
     .sskus div{font-size:11px}
     .vcNums{grid-template-columns:1fr 1fr}
@@ -374,7 +377,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/amb-checkout-offline';
-const DASH_BUILD = 'a6';
+const DASH_BUILD = 'a7';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -1852,8 +1855,15 @@ function render(){
         const s = vis.reduce((a,p)=>({
           qtd:a.qtd+(Number(p.qtd)||0), fat:a.fat+(Number(p.fat)||0),
           custo:a.custo+(Number(p.custo)||0), mc:a.mc+(p.mc!=null?Number(p.mc):0),
-          temMC:a.temMC||p.mc!=null
-        }), {qtd:0,fat:0,custo:0,mc:0,temMC:false});
+          temMC:a.temMC||p.mc!=null,
+          // (Codex PR#22) cobertura: unidades que REALMENTE têm margem calculada. Sem isto,
+          // SKU sem margem entrava somando zero e o total saía menor do que é, com % derivada
+          // de lucro incompleto — e sem o aviso que as linhas individuais mostram.
+          unM:a.unM+(p.mc!=null?(Number(p.qtdM||p.qtd)||0):0),
+          unC:a.unC+((p.custo>0)?(Number(p.qtdC||p.qtd)||0):0)
+        }), {qtd:0,fat:0,custo:0,mc:0,temMC:false,unM:0,unC:0});
+        const mcCompleto = s.temMC && s.unM >= s.qtd;
+        const cvgMC = mcCompleto ? '' : '<span class="cvg">'+N(s.unM)+'/'+N(s.qtd)+' un. c/ margem</span>';
         const rot = 'TOTAL ' + (prods.length>vis.length ? '<span class="dim">(os '+vis.length+' da tela, de '+N(prods.length)+' SKUs)</span>' : '<span class="dim">('+vis.length+' SKUs)</span>');
         return '<tr style="border-top:2px solid #334155;font-weight:800;background:#0b122080">'+
           '<td></td><td></td>'+
@@ -1862,15 +1872,22 @@ function render(){
           '<td class="num">'+N(s.qtd)+'</td>'+
           '<td class="num ok">'+BRL(s.fat)+'</td>'+
           '<td class="num">'+(s.custo?BRL(s.custo):'<span class="dim">—</span>')+'</td>'+
-          '<td class="num">'+(s.temMC?('<span class="'+(s.mc>=0?'ok':'bad')+'">'+BRL(s.mc)+'</span>'):'<span class="dim">—</span>')+'</td>'+
-          '<td class="num">'+((s.temMC&&s.fat>0)?('<span class="'+(s.mc>=0?'ok':'bad')+'">'+Math.round(s.mc/s.fat*100)+'%</span>'):'<span class="dim">—</span>')+'</td>'+
-          '<td class="num">'+((s.temMC&&s.custo>0)?('<span class="'+(s.mc>=0?'ok':'bad')+'">'+Math.round(s.mc/s.custo*100)+'%</span>'):'<span class="dim">—</span>')+'</td>'+
+          '<td class="num">'+(s.temMC?('<span class="'+(s.mc>=0?'ok':'bad')+'">'+BRL(s.mc)+'</span>'+cvgMC):'<span class="dim">—</span>')+'</td>'+
+          // % só quando a margem cobre TODAS as unidades: percentual tirado de lucro parcial engana.
+          '<td class="num">'+((mcCompleto&&s.fat>0)?('<span class="'+(s.mc>=0?'ok':'bad')+'">'+Math.round(s.mc/s.fat*100)+'%</span>'):'<span class="dim" title="parcial: nem todas as unidades têm margem calculada">—</span>')+'</td>'+
+          '<td class="num">'+((mcCompleto&&s.custo>0&&s.unC>=s.qtd)?('<span class="'+(s.mc>=0?'ok':'bad')+'">'+Math.round(s.mc/s.custo*100)+'%</span>'):'<span class="dim" title="parcial: margem ou custo incompletos">—</span>')+'</td>'+
           '<td class="num dim"></td><td class="num dim"></td><td></td></tr>';
       })();
   // 📸 busca as fotos que faltam pros SKUs da tela (a rota lê do cache e só vai ao Bling
   // pelo que não tem; o resto entra na próxima rodada). Teto de tentativas evita laço.
   (function(){
-    const pend = ord.slice(0,50).map(p=>p.sku).filter(s=>s && FOTOS[s]===undefined);
+    const visSk = ord.slice(0,50).map(p=>p.sku).filter(Boolean);
+    // (Codex PR#22) o teto é POR CONJUNTO VISÍVEL: mudou a ordenação ou o filtro, a contagem
+    // recomeça. Antes, as 50 primeiras gastavam as 6 rodadas e todo SKU que aparecesse
+    // depois ficava sem foto pro resto da sessão, sem nunca ter sido tentado.
+    const _assin = visSk.slice().sort().join('|');
+    if(_assin !== _fotoAssin){ _fotoAssin = _assin; _fotoRodadas = 0; }
+    const pend = visSk.filter(s=>FOTOS[s]===undefined);
     if(!pend.length || _fotoBusy || _fotoRodadas>=6) return;
     _fotoBusy = true; _fotoRodadas++;
     fetch(MOD+'/produto-fotos?skus='+encodeURIComponent(pend.slice(0,40).join(',')), {credentials:'same-origin'})
@@ -2406,7 +2423,7 @@ function montarNavCards(){
 // CSV com BOM e ";" — o Excel em português abre direto, sem tela de importação.
 let _projBase = [], _topProds = [];
 let FOTOS = {};        // sku -> url da foto (Bling), preenchido sob demanda
-let _fotoBusy = false, _fotoRodadas = 0;   // trava anti-loop e teto de tentativas
+let _fotoBusy = false, _fotoRodadas = 0, _fotoAssin = '';   // trava anti-loop e teto POR conjunto visível
 function baixarProjecao(){
   baixarPlanilha('projecao-estoque',
     ['SKU','Produto','Vendas '+projDias+'d','Media por dia','Saldo em estoque','Dias de cobertura','Custo unitario','Preco de venda','Margem %'],
