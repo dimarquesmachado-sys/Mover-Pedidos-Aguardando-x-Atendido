@@ -40,9 +40,14 @@ function primeiroEan(produto) {
 function primeiraImagem(prod) {
   if (!prod) return null;
   if (prod.imagemURL) return prod.imagemURL;
-  const ext = prod.midia && prod.midia.imagens && prod.midia.imagens.externas;
+  const im = (prod.midia && prod.midia.imagens) || {};
+  const ext = im.externas;
   if (ext && ext[0] && ext[0].link) return ext[0].link;
-  const url = prod.midia && prod.midia.imagens && prod.midia.imagens.imagensURL;
+  // 11/08 (herdado da AMB): kits apareciam sem foto porque a imagem deles é INTERNA
+  // (arquivo enviado ao Bling), e aqui só se lia a externa.
+  const int = im.internas;
+  if (int && int[0] && (int[0].link || int[0].url)) return int[0].link || int[0].url;
+  const url = im.imagensURL;
   if (url && url[0] && (url[0].link || url[0])) return url[0].link || url[0];
   return null;
 }
