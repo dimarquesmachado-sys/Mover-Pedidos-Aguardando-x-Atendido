@@ -211,7 +211,12 @@ function rotasCanario(ctx) {
           if (r2.status === 401) { estado = 'erro'; partes.push('loja ' + loja + ': chave RECUSADA (401) — a env não bate com a INTERNAL_KEY do serviço'); }
           else if (r2.status === 404) { estado = 'erro'; partes.push('loja ' + loja + ': rota não existe (404) — serviço desatualizado ou loja não configurada'); }
           else if (!r2.ok || !j2 || !j2.ok) { estado = 'erro'; partes.push('loja ' + loja + ': HTTP ' + r2.status + ' ' + String((j2 && j2.erro) || '').slice(0, 60)); }
-          else { partes.push('loja ' + loja + ': responde (' + (j2.listados != null ? j2.listados : '?') + ' pedido(s) em 24h)' + (j2.parcial ? ' ⚠️ PARCIAL' : '')); }
+          else {
+            partes.push('loja ' + loja + ': responde (' + (j2.listados != null ? j2.listados : '?') + ' pedido(s) em 24h)');
+            // Codex PR#19: o serviço dizendo "minha lista está INCOMPLETA" não pode sair
+            // verde — o canário ficaria calado justamente quando falta venda.
+            if (j2.parcial) { estado = (estado === 'erro' ? 'erro' : 'alerta'); partes.push('⚠️ resposta PARCIAL' + (j2.erro_lista ? ': ' + String(j2.erro_lista).slice(0, 60) : '') + (j2.truncado ? ' (truncada)' : '')); }
+          }
         } catch (e) { estado = 'erro'; partes.push('loja ' + loja + ': ' + String(e.message || e).slice(0, 60)); }
       }
     }
