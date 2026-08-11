@@ -907,12 +907,14 @@ liga('bAmb','amb'); liga('bGood','good');
     const BASE = 'https://api.magalu.com/seller/v1/orders';
     const hj = new Date(); hj.setDate(hj.getDate() - 1);
     const desde = String(q.get('desde') || hj.toISOString().slice(0, 10)).slice(0, 10);
+    const ate = /^\d{4}-\d{2}-\d{2}$/.test(String(q.get('ate') || '')) ? String(q.get('ate')) : '';   // 11/08: janela fechada (mês inteiro)
+    const paginas = Math.min(60, Math.max(6, parseInt(q.get('paginas') || '6', 10) || 6));              // 50 por página
     const querRaw = q.get('raw') === '1';
-    const out = { ok: true, empresa: emp, desde, pedidos: [] };
+    const out = { ok: true, empresa: emp, desde, ate: ate || null, pedidos: [] };
     let foraJanela = 0, semData = 0, lidos = 0;
     try {
       let cru1 = null;
-      for (let off = 0; off < 300; off += 50) {
+      for (let off = 0; off < paginas * 50; off += 50) {
         const r = await fetch(BASE + '?_limit=50&_offset=' + off + '&purchased_at_from=' + encodeURIComponent(desde + 'T00:00:00Z'), { headers: H });
         const tx = await r.text();
         let j = null; try { j = JSON.parse(tx); } catch (e) {}
@@ -927,7 +929,7 @@ liga('bAmb','amb'); liga('bGood','good');
           // datas velhas). Então filtramos AQUI, pela data que o pedido traz. Sem isto o
           // consumidor recebe o histórico inteiro achando que é "o dia".
           const dtP = String(o.purchased_at || o.created_at || '').slice(0, 10);
-          if (dtP) { if (dtP < desde) { foraJanela++; continue; } } else { semData++; }
+          if (dtP) { if (dtP < desde || (ate && dtP > ate)) { foraJanela++; continue; } } else { semData++; }
           // total DEFENSIVO — candidatos em ordem de plausibilidade; 0 = não achamos (calibrar com &raw=1)
           const tot = Number(
             (o.total_amount != null ? o.total_amount :
@@ -935,18 +937,33 @@ liga('bAmb','amb'); liga('bGood','good');
             (o.amount && o.amount.total != null ? o.amount.total :
             (o.total != null ? o.total : 0))))
           ) || 0;
+          // 11/08: ITENS (SKU/qtd/valor) — sem eles a caça grava faturamento sem custo,
+          // e a margem do pedido sai inflada. Leitura DEFENSIVA: a Magalu põe os itens ora
+          // em `items`, ora dentro de cada `deliveries[]`, com nomes variados de campo.
+          let itens = [];
+          try {
+            const fontes = [].concat(o.items || [], ...((o.deliveries || []).map(dl => dl.items || [])));
+            itens = fontes.map(i3 => ({
+              sku: String((i3.sku || i3.seller_sku || i3.code || (i3.product && (i3.product.sku || i3.product.code)) || '')).trim() || null,
+              qtd: Number(i3.quantity != null ? i3.quantity : (i3.qty != null ? i3.qty : 1)) || 1,
+              valor: Number(i3.unit_price != null ? i3.unit_price
+                     : (i3.price != null ? i3.price
+                     : ((i3.amounts && (i3.amounts.unit != null ? i3.amounts.unit : i3.amounts.total)) || 0))) || 0
+            })).filter(x => x.sku || x.valor);
+          } catch (e) {}
           out.pedidos.push({
             code,
             id: o.id || null,
             purchased_at: o.purchased_at || o.created_at || null,
             status: (o.status && (o.status.name || o.status)) || null,
             total: tot,
-            cliente: (o.customer && (o.customer.name || o.customer.nickname)) || ''
+            cliente: (o.customer && (o.customer.name || o.customer.nickname)) || '',
+            itens
           });
         }
         lidos += arr.length;
         if (arr.length < 50) break;
-        if (off + 50 >= 300) { out.truncado = true; break; }   // não fingir janela completa
+        if (off + 50 >= paginas * 50) { out.truncado = true; break; }   // não fingir janela completa
         await new Promise(r2 => setTimeout(r2, 350));
       }
       if (querRaw && cru1) out.amostra_crua = cru1;
