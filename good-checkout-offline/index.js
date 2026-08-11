@@ -40,7 +40,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.GOODBKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GOODBKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'good-checkout-offline v10/08 b16';
+const VERSAO     = 'good-checkout-offline v11/08 b17';
 
 // ── SESSÃO DE OPERADOR (cookie assinado HMAC) — protege rotas de dados/ação ──
 // Segredo estável entre restarts. Usa ADMIN_KEY (já configurada no Render) como base.
@@ -329,7 +329,8 @@ function routes(readBody) {
         p === '/good-checkout-offline/painel' || p === '/good-checkout-offline/login' ||
         p === '/good-checkout-offline/operadores' || p === '/good-checkout-offline/health' ||
         p === '/good-checkout-offline/saude' || p.includes('/callback') ||
-        p === '/good-checkout-offline/qz-cert' || p === '/good-checkout-offline/qz-sign'
+        p === '/good-checkout-offline/qz-cert' || p === '/good-checkout-offline/qz-sign' ||
+        p === '/good-checkout-offline/etiquetas-lote'   // valida SOZINHA (ADMIN_KEY ?k= ou sessão admin) — precisa passar pela trava pra URL com k funcionar
       );
       const _central = (
         p.includes('/run') || p.includes('/setup') || p.includes('/robo') ||
@@ -646,6 +647,99 @@ function routes(readBody) {
       // Fire-and-forget: se o servico estiver fora ou sem envs, nada muda aqui.
       try { require('../lib/avisar-devolucoes')('good', 'etiqueta_anexada', idA, { formato: formatoA, quem: (typeof opSess === 'string' ? opSess : (opSess && (opSess.usuario || opSess.nome || opSess.login))) || '' }); } catch (e) {}
       json(res, 200, { ok: true, formato: formatoA, bytes: conteudoA.length });
+      return true;
+    }
+
+    // ADMIN: ETIQUETAS EM LOTE — o PDF em massa da Shopee vira 1 ZIP com <order_sn>.pdf
+    // (recortado fora daqui) e ESTA rota anexa cada um no pedido certo de uma vez.
+    // Nasceu em 11/08: o token Bling↔Shopee da GOOD venceu (365 dias, sem alerta), 37 pedidos
+    // atrasaram, as etiquetas foram geradas EM MASSA no Seller Center — e etiqueta gerada fora
+    // da nossa cadeia NUNCA vem pela API (caso documentado 27/07): só o anexar resolve.
+    // GET = página de upload; POST = processa. A gravação por pedido é a MESMA sequência da
+    // rota etiqueta-anexar (grava primeiro, apaga o outro formato depois, carimbos, ev1).
+    if (p === '/good-checkout-offline/etiquetas-lote') {
+      const kL = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const sessL = validarSessao(req.headers['cookie']);
+      const admL = (process.env.ADMIN_KEY && kL === process.env.ADMIN_KEY) || (sessL && ehAdmin(sessL));
+      if (!admL) { json(res, 404, { error: 'not found' }); return true; }
+      if (method === 'GET') {
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.end('<!doctype html><meta charset="utf-8"><title>Etiquetas em lote · GOOD</title>' +
+          '<body style="font-family:system-ui;max-width:680px;margin:40px auto;padding:0 16px">' +
+          '<h2>📎 Etiquetas em lote (Shopee)</h2>' +
+          '<p>Envie o <b>ZIP</b> com um PDF por pedido, nomeado <code>&lt;order_sn&gt;.pdf</code>. ' +
+          'Cada etiqueta é anexada no card certo; quem já tinha etiqueta é <b>substituído</b> (vale a última).</p>' +
+          '<input type="file" id="f" accept=".zip"> <button id="b" onclick="enviar()">Anexar tudo</button>' +
+          '<pre id="out" style="background:#f6f6f6;padding:12px;white-space:pre-wrap"></pre>' +
+          '<script>async function enviar(){const f=document.getElementById("f").files[0];const out=document.getElementById("out");' +
+          'if(!f){out.textContent="escolha o ZIP";return}const b=document.getElementById("b");b.disabled=true;out.textContent="enviando "+f.name+" ("+f.size+" bytes)…";' +
+          'const b64=await new Promise((ok,er)=>{const r=new FileReader();r.onload=()=>ok(String(r.result).split(",")[1]);r.onerror=er;r.readAsDataURL(f)});' +
+          'try{const r=await fetch(location.pathname+location.search,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({zip_base64:b64})});' +
+          'const j=await r.json();out.textContent=JSON.stringify(j,null,2)}catch(e){out.textContent="falhou: "+e}b.disabled=false}</scr' + 'ipt>');
+        return true;
+      }
+      if (method !== 'POST') { json(res, 405, { ok: false, erro: 'use GET (página) ou POST (zip_base64)' }); return true; }
+      let bodyL = {}; try { const _rb = await readBody(req); bodyL = (_rb && typeof _rb === 'object') ? _rb : JSON.parse(_rb || '{}'); } catch (e) {}
+      let bufL = null; try { bufL = Buffer.from(String(bodyL.zip_base64 || '').replace(/^data:[^,]*,/, ''), 'base64'); } catch (e) {}
+      if (!bufL || bufL.length < 200 || !(bufL[0] === 0x50 && bufL[1] === 0x4B)) { json(res, 400, { ok: false, erro: 'mande um ZIP (zip_base64)' }); return true; }
+      // mesmo leitor por diretório central da rota etiqueta-anexar (cópia deliberada:
+      // não mexo numa rota validada em produção no meio de um caso urgente)
+      const _zipEntradasL = buf => {
+        const zlibL = require('zlib');
+        let eocd = -1;
+        for (let x = buf.length - 22; x >= 0 && x > buf.length - 66000; x--) { if (buf.readUInt32LE(x) === 0x06054b50) { eocd = x; break; } }
+        if (eocd < 0) return [];
+        const qtd = buf.readUInt16LE(eocd + 10);
+        let off = buf.readUInt32LE(eocd + 16);
+        const saida = [];
+        for (let k2 = 0; k2 < qtd && off + 46 < buf.length; k2++) {
+          if (buf.readUInt32LE(off) !== 0x02014b50) break;
+          const metodo = buf.readUInt16LE(off + 10), tamComp = buf.readUInt32LE(off + 20);
+          const fnLen = buf.readUInt16LE(off + 28), exLen = buf.readUInt16LE(off + 30), cmLen = buf.readUInt16LE(off + 32);
+          const nome = buf.slice(off + 46, off + 46 + fnLen).toString('utf8');
+          const loc = buf.readUInt32LE(off + 42);
+          const lfn = buf.readUInt16LE(loc + 26), lex = buf.readUInt16LE(loc + 28);
+          const ini = loc + 30 + lfn + lex;
+          const dados = tamComp > 0 ? buf.slice(ini, ini + tamComp) : buf.slice(ini);
+          try { saida.push({ nome, conteudo: metodo === 0 ? dados : zlibL.inflateRawSync(dados, { finishFlush: zlibL.constants.Z_SYNC_FLUSH }) }); } catch (e) {}
+          off += 46 + fnLen + exLen + cmLen;
+        }
+        return saida;
+      };
+      const _ehPdfL = b => !!(b && b.length > 100 && b.slice(0, 4).toString('utf8') === '%PDF');
+      const entsL = _zipEntradasL(bufL).filter(e => e && e.nome && !e.nome.endsWith('/'));
+      // manifesto UMA vez: mapa numero_loja → id (comparação sem caixa)
+      const manL = readJson(MANIFEST_FILE, {});
+      const porSn = {};
+      for (const [idM, mM] of Object.entries(manL)) { if (mM && mM.numero_loja) porSn[String(mM.numero_loja).trim().toUpperCase()] = idM; }
+      const r = { ok: true, no_zip: entsL.length, anexadas: 0, substituidas: 0, nao_encontrados: [], invalidos: [] };
+      let mudouMan = false;
+      for (const ent of entsL) {
+        const nomeBase = ent.nome.split('/').pop();
+        const snL = String(nomeBase.replace(/\.pdf$/i, '')).trim().toUpperCase();
+        if (!_ehPdfL(ent.conteudo)) { r.invalidos.push(nomeBase); continue; }
+        const idL = porSn[snL];
+        if (!idL) { r.nao_encontrados.push(snL); continue; }
+        const dirL = path.join(CACHE_DIR, String(idL));
+        const alvoL = path.join(dirL, 'etiqueta.pdf');
+        const outroL = path.join(dirL, 'etiqueta.' + String(ETIQ_FORMATO || 'zpl').toLowerCase());
+        const jaTinha = !!(manL[idL] && manL[idL].tem_etiqueta);
+        try {
+          ensureDir(dirL);
+          fs.writeFileSync(alvoL, ent.conteudo);   // grava primeiro…
+          if (outroL !== alvoL && fs.existsSync(outroL)) { try { fs.unlinkSync(outroL); } catch (e) {} }   // …apaga o outro formato depois
+        } catch (e) { r.invalidos.push(nomeBase + ' (falha ao salvar)'); continue; }
+        if (manL[idL]) { manL[idL].etiqueta_anexada = true; manL[idL].tem_etiqueta = true; manL[idL].etiqueta_pdf = true; manL[idL].etiqueta_formato = 'PDF'; mudouMan = true; }
+        try {
+          const snapL = readJson(path.join(dirL, 'pedido.json'), null);
+          if (snapL) { snapL.etiqueta_anexada = true; snapL.tem_etiqueta = true; snapL.etiqueta_pdf = true; snapL.etiqueta_formato = 'PDF'; writeJson(path.join(dirL, 'pedido.json'), snapL); }
+        } catch (e) {}
+        try { require('../lib/avisar-devolucoes')('good', 'etiqueta_anexada', idL, { formato: 'pdf', lote: true, quem: (typeof sessL === 'string' ? sessL : (sessL && (sessL.usuario || sessL.nome || sessL.login))) || 'admin-k' }); } catch (e) {}
+        if (jaTinha) r.substituidas++; else r.anexadas++;
+      }
+      if (mudouMan) { try { writeJson(MANIFEST_FILE, manL); } catch (e) {} }
+      console.log('[GOODBKP] etiquetas em LOTE: ' + r.anexadas + ' anexada(s), ' + r.substituidas + ' substituída(s), ' + r.nao_encontrados.length + ' sem pedido no cache, ' + r.invalidos.length + ' inválida(s)');
+      json(res, 200, r);
       return true;
     }
 
