@@ -33,8 +33,13 @@ const { json, ehAdmin, CONFERIDOS_FILE, CACHE_DIR, readJson, writeJson } = base;
 
 const ARQ_DEV = () => path.join(CACHE_DIR, '_shopee_devolucoes.json');
 const ARQ_CAR = () => path.join(CACHE_DIR, '_shopee_carteira.json');
+// 11/08 — ATENÇÃO: existe UM SÓ serviço Shopee, multi-loja (`/amb`, `/girassol`, `/good`).
+// O host tem nome de girassol por ter sido o primeiro, mas atende as três empresas; o repo
+// chama-se ambtotal-shopee-nf-sync-x-bling. Eu tinha apontado a AMB pro nome do REPO —
+// hostname que não existe no Render — e TODA chamada de escrow do ano voltou 404 "Not Found"
+// (era a causa do escrow_sem_resposta em 100% dos pedidos Shopee desde janeiro).
 
-const SYNC_URL = (process.env.AMBBKP_SHOPEE_SYNC_URL || 'https://ambtotal-shopee-nf-sync-x-bling.onrender.com').replace(/\/+$/, '');
+const SYNC_URL = (process.env.AMBBKP_SHOPEE_SYNC_URL || 'https://girassol-shopee-sync-organizar-envio.onrender.com').replace(/\/+$/, '');
 // 10/08 (Codex P1): fallback pra SHOPEE_SYNC_KEY global — o ciclo da AMB JÁ usa essa
 // env pra falar com o serviço dela, então a chave já está no Render. Sem o fallback,
 // escrow e coletas noturnas morriam com "falta a env" num serviço já configurado.
