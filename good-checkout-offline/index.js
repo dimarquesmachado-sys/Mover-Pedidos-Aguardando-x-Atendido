@@ -40,7 +40,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.GOODBKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GOODBKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'good-checkout-offline v11/08 b17';
+const VERSAO     = 'good-checkout-offline v11/08 b18';
 
 // ── SESSÃO DE OPERADOR (cookie assinado HMAC) — protege rotas de dados/ação ──
 // Segredo estável entre restarts. Usa ADMIN_KEY (já configurada no Render) como base.
@@ -310,6 +310,85 @@ async function shopeeKeepAlive() {
     console.log('[GOODBKP] shopee keep-alive falhou: ' + ((e && e.message) || e));
     return { ok: false, erro: String((e && e.message) || e).slice(0, 200) };
   }
+}
+
+const lerZipEntradas = buf => {   // lê pelo DIRETÓRIO CENTRAL (o zip vem em modo streaming, tamanhos zerados no header local)
+  const zlibA = require('zlib');
+  let eocd = -1;
+  for (let x = buf.length - 22; x >= 0 && x > buf.length - 66000; x--) { if (buf.readUInt32LE(x) === 0x06054b50) { eocd = x; break; } }
+  if (eocd < 0) return [];
+  const qtd = buf.readUInt16LE(eocd + 10);
+  let off = buf.readUInt32LE(eocd + 16);
+  const saida = [];
+  for (let k = 0; k < qtd && off + 46 < buf.length; k++) {
+    if (buf.readUInt32LE(off) !== 0x02014b50) break;
+    const metodo = buf.readUInt16LE(off + 10), tamComp = buf.readUInt32LE(off + 20);
+    const fnLen = buf.readUInt16LE(off + 28), exLen = buf.readUInt16LE(off + 30), cmLen = buf.readUInt16LE(off + 32);
+    const nome = buf.slice(off + 46, off + 46 + fnLen).toString('utf8');
+    const loc = buf.readUInt32LE(off + 42);
+    const lfn = buf.readUInt16LE(loc + 26), lex = buf.readUInt16LE(loc + 28);
+    const ini = loc + 30 + lfn + lex;
+    const dados = tamComp > 0 ? buf.slice(ini, ini + tamComp) : buf.slice(ini);
+    try { saida.push({ nome, conteudo: metodo === 0 ? dados : zlibA.inflateRawSync(dados, { finishFlush: zlibA.constants.Z_SYNC_FLUSH }) }); } catch (e) {}
+    off += 46 + fnLen + exLen + cmLen;
+  }
+  return saida;
+};
+
+
+// ─── DECODIFICADOR DAS ETIQUETAS RASTER DA SHOPEE (b18) ─────────────────────────────
+// O ZPL da Shopee é 100% imagem (par ~DG + ^XA^XG por etiqueta, zero ^FD). A identidade
+// de cada etiqueta vem dos códigos DENTRO do bitmap: chave da NF-e (CODE128 da DANFE,
+// 44 dígitos — o nº da NF são os dígitos 26–34) e tracking BR no QR. Decodificação por
+// zxing-wasm, validada 31/31 no lote real de 11/08. Carregamento LAZY (o wasm só sobe
+// à primeira chamada; se o pacote faltar no deploy, o erro volta claro na resposta).
+let _zx = null;
+async function _zxReader() {
+  if (_zx) return _zx;
+  const { prepareZXingModule, readBarcodes } = require('zxing-wasm/reader');
+  // o require.resolve aponta pro build cjs (dist/cjs/reader/…); o .wasm mora em dist/reader/.
+  // Procuramos nos candidatos e usamos o primeiro que existir — falha vira erro claro na rota.
+  const _base = path.dirname(require.resolve('zxing-wasm/reader'));
+  const _cands = [
+    path.join(_base, 'zxing_reader.wasm'),
+    path.join(_base, '..', '..', 'reader', 'zxing_reader.wasm'),
+    path.join(_base, '..', 'reader', 'zxing_reader.wasm')
+  ];
+  const wasmPath = _cands.find(c => { try { return fs.existsSync(c); } catch (e) { return false; } });
+  if (!wasmPath) throw new Error('zxing_reader.wasm não encontrado (candidatos: ' + _cands.join(' | ') + ')');
+  const wb = fs.readFileSync(wasmPath);
+  prepareZXingModule({ overrides: { wasmBinary: wb.buffer.slice(wb.byteOffset, wb.byteOffset + wb.byteLength) }, fireImmediately: true });
+  _zx = readBarcodes;
+  return _zx;
+}
+async function decodificarZplShopee(txt) {
+  const readBarcodes = await _zxReader();
+  const zlibD = require('zlib');
+  const ms = [...String(txt).matchAll(/~DG[A-Z]:[A-Z0-9_.]+,(\d+),(\d+),:Z64:([A-Za-z0-9+\/=]+)/g)];
+  const cortes = ms.map(m => m.index);
+  const saida = [];
+  for (let k = 0; k < ms.length; k++) {
+    const fatia = txt.slice(cortes[k], k + 1 < cortes.length ? cortes[k + 1] : txt.length);
+    const item = { zpl: fatia, nf: null, chave: null, tracking: null };
+    try {
+      const total = Number(ms[k][1]), rb = Number(ms[k][2]);
+      const raw = zlibD.inflateSync(Buffer.from(ms[k][3], 'base64'));
+      const w = rb * 8, h = Math.floor(total / rb);
+      const rgba = new Uint8ClampedArray(w * h * 4);
+      for (let i = 0; i < raw.length && i < rb * h; i++) {
+        const b = raw[i];
+        for (let bit = 0; bit < 8; bit++) { const v = ((b >> (7 - bit)) & 1) ? 0 : 255; const o = (i * 8 + bit) * 4; rgba[o] = v; rgba[o + 1] = v; rgba[o + 2] = v; rgba[o + 3] = 255; }
+      }
+      const res = await readBarcodes({ data: rgba, width: w, height: h }, { formats: ['Code128', 'QRCode'], tryHarder: true, maxNumberOfSymbols: 8 });
+      for (const r of res) {
+        const s = String(r.text || '');
+        if (!item.chave && /^\d{44}$/.test(s)) { item.chave = s; item.nf = Number(s.slice(25, 34)); }
+        if (!item.tracking && /^BR[0-9A-Z]{10,}$/.test(s)) item.tracking = s;
+      }
+    } catch (e) {}
+    saida.push(item);
+  }
+  return saida;
 }
 
 // ─── Rotas HTTP (namespaced) ────────────────────────────────────────────
@@ -582,28 +661,7 @@ function routes(readBody) {
       // confia no nome do arquivo. ZPL vai pro caminho nativo; PDF vai pro alternativo.
       const _ehZpl = b => { if (!b || b.length < 50) return false; const t = b.slice(0, 30000).toString('latin1'); return t.indexOf('^XA') >= 0 || t.indexOf('~DG') >= 0 || t.indexOf('^FO') >= 0 || t.indexOf('^GF') >= 0; };
       const _ehPdf = b => !!(b && b.length > 100 && b.slice(0, 4).toString('utf8') === '%PDF');
-      const _zipEntradas = buf => {   // lê pelo DIRETÓRIO CENTRAL (o zip vem em modo streaming, tamanhos zerados no header local)
-        const zlibA = require('zlib');
-        let eocd = -1;
-        for (let x = buf.length - 22; x >= 0 && x > buf.length - 66000; x--) { if (buf.readUInt32LE(x) === 0x06054b50) { eocd = x; break; } }
-        if (eocd < 0) return [];
-        const qtd = buf.readUInt16LE(eocd + 10);
-        let off = buf.readUInt32LE(eocd + 16);
-        const saida = [];
-        for (let k = 0; k < qtd && off + 46 < buf.length; k++) {
-          if (buf.readUInt32LE(off) !== 0x02014b50) break;
-          const metodo = buf.readUInt16LE(off + 10), tamComp = buf.readUInt32LE(off + 20);
-          const fnLen = buf.readUInt16LE(off + 28), exLen = buf.readUInt16LE(off + 30), cmLen = buf.readUInt16LE(off + 32);
-          const nome = buf.slice(off + 46, off + 46 + fnLen).toString('utf8');
-          const loc = buf.readUInt32LE(off + 42);
-          const lfn = buf.readUInt16LE(loc + 26), lex = buf.readUInt16LE(loc + 28);
-          const ini = loc + 30 + lfn + lex;
-          const dados = tamComp > 0 ? buf.slice(ini, ini + tamComp) : buf.slice(ini);
-          try { saida.push({ nome, conteudo: metodo === 0 ? dados : zlibA.inflateRawSync(dados, { finishFlush: zlibA.constants.Z_SYNC_FLUSH }) }); } catch (e) {}
-          off += 46 + fnLen + exLen + cmLen;
-        }
-        return saida;
-      };
+      const _zipEntradas = lerZipEntradas;   // b18: parser movido pro escopo do módulo (a rota de massa usa também)
       let conteudoA = null, formatoA = null;
       if (_ehPdf(bufA)) { conteudoA = bufA; formatoA = 'pdf'; }
       else if (_ehZpl(bufA)) { conteudoA = bufA; formatoA = 'zpl'; }
@@ -664,8 +722,40 @@ function routes(readBody) {
       const opSessM = validarSessao(req.headers['cookie']);
       if (!opSessM || !ehAdmin(opSessM)) { json(res, 403, { ok: false, erro: 'apenas admin' }); return true; }
       let bodyM = {}; try { const _rm = await readBody(req); bodyM = (_rm && typeof _rm === 'object') ? _rm : JSON.parse(_rm || '{}'); } catch (e) { json(res, 400, { ok: false, erro: 'body inválido' }); return true; }
-      const lista = Array.isArray(bodyM.etiquetas) ? bodyM.etiquetas : [];
-      if (!lista.length) { json(res, 400, { ok: false, erro: 'mande { etiquetas: [{ nf, tracking, zpl_base64 }] }' }); return true; }
+      let lista = Array.isArray(bodyM.etiquetas) ? bodyM.etiquetas : [];
+      let decodificadas = null, sem_codigo = 0;
+      // b18: aceita o ARQUIVO CRU da Shopee (zip ou o .txt do ZPL agregado) — o servidor
+      // fatia e decodifica os códigos de dentro do bitmap (chave NF + tracking) sozinho
+      if (!lista.length && bodyM.arquivo_base64) {
+        let bufU = null; try { bufU = Buffer.from(String(bodyM.arquivo_base64).replace(/^data:[^,]*,/, ''), 'base64'); } catch (e) {}
+        if (!bufU || bufU.length < 200) { json(res, 400, { ok: false, erro: 'arquivo vazio ou inválido' }); return true; }
+        if (bufU.length > 12 * 1024 * 1024) { json(res, 400, { ok: false, erro: 'arquivo acima de 12MB — divida em partes' }); return true; }
+        let txtU = null;
+        if (bufU[0] === 0x50 && bufU[1] === 0x4B && bufU[2] === 0x03 && bufU[3] === 0x04) {
+          try {
+            const entsU = lerZipEntradas(bufU);
+            const zplU = entsU.find(e2 => /zpl/i.test(e2.nome) || /\.txt$/i.test(e2.nome) || (e2.conteudo && e2.conteudo.slice(0, 30000).toString('latin1').indexOf('~DG') >= 0));
+            if (zplU) txtU = zplU.conteudo.toString('latin1');
+          } catch (e) {}
+        } else {
+          const cab = bufU.slice(0, 30000).toString('latin1');
+          if (cab.indexOf('~DG') >= 0 || cab.indexOf('^XA') >= 0) txtU = bufU.toString('latin1');
+        }
+        if (!txtU) { json(res, 400, { ok: false, erro: 'não reconheci o arquivo — mande o ZIP da Shopee, o .txt do ZPL ou o JSON identificado' }); return true; }
+        let itensU = [];
+        try { itensU = await decodificarZplShopee(txtU); }
+        catch (e) { json(res, 500, { ok: false, erro: 'decodificador indisponível: ' + String(e.message || e).slice(0, 160) }); return true; }
+        if (!itensU.length) { json(res, 400, { ok: false, erro: 'nenhuma etiqueta (~DG) encontrada no arquivo' }); return true; }
+        if (itensU.length > 120) { json(res, 400, { ok: false, erro: itensU.length + ' etiquetas num arquivo só — divida em arquivos de até 120 (a decodificação roda dentro da requisição)' }); return true; }
+        decodificadas = itensU.length;
+        lista = [];
+        for (const it2 of itensU) {
+          if (!it2.nf) { sem_codigo++; continue; }
+          lista.push({ nf: it2.nf, tracking: it2.tracking, zpl_base64: Buffer.from(it2.zpl, 'latin1').toString('base64') });
+        }
+        if (!lista.length) { json(res, 200, { ok: false, erro: 'decodifiquei ' + decodificadas + ' etiqueta(s) mas nenhuma trouxe a chave da NF legível', decodificadas, sem_codigo }); return true; }
+      }
+      if (!lista.length) { json(res, 400, { ok: false, erro: 'mande { arquivo_base64 } (zip/txt da Shopee) ou { etiquetas: [{ nf, tracking, zpl_base64 }] }' }); return true; }
       if (lista.length > 300) { json(res, 400, { ok: false, erro: 'máximo de 300 etiquetas por chamada' }); return true; }
       const _ehZplM = b => { if (!b || b.length < 50) return false; const s = b.slice(0, 30000).toString('latin1'); return s.indexOf('^XA') >= 0 || s.indexOf('~DG') >= 0; };
       const manM = readJson(MANIFEST_FILE, {});
@@ -716,7 +806,7 @@ function routes(readBody) {
         } catch (e) {}
       }
       console.log('[GOODBKP] etiquetas em MASSA: ' + casadas.length + ' anexada(s), ' + sem_pedido.length + ' sem pedido, ' + invalidas.length + ' inválida(s) — por ' + quemM);
-      json(res, 200, { ok: true, total: lista.length, anexadas: casadas.length, casadas, sem_pedido, ambiguas, invalidas });
+      json(res, 200, { ok: true, total: lista.length, decodificadas, sem_codigo, anexadas: casadas.length, casadas, sem_pedido, ambiguas, invalidas });
       return true;
     }
 
@@ -728,10 +818,10 @@ function routes(readBody) {
       res.end('<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
         '<title>Etiquetas em massa · GOOD</title><body style="font-family:system-ui;max-width:680px;margin:32px auto;padding:0 16px">' +
         '<h2>📎 Etiquetas em massa — GOOD</h2>' +
-        '<p>Selecione o arquivo <b>JSON</b> com as etiquetas já identificadas (nf + zpl). Cada uma será anexada ao pedido cuja <b>NF</b> bater no manifesto.</p>' +
-        '<input type="file" id="f" accept=".json,application/json"> <button id="b" style="padding:8px 18px">Enviar</button>' +
+        '<p>Selecione o <b>ZIP baixado da Shopee</b> (ou o .txt do ZPL, ou um JSON já identificado). O servidor lê a <b>chave da NF</b> de dentro de cada etiqueta e anexa no pedido certo.</p>' +
+        '<input type="file" id="f" accept=".zip,.txt,.json,application/json,application/zip,text/plain"> <button id="b" style="padding:8px 18px">Enviar</button>' +
         '<pre id="o" style="background:#f5f5f5;padding:12px;white-space:pre-wrap"></pre>' +
-        '<script>document.getElementById("b").onclick=async()=>{const f=document.getElementById("f").files[0];const o=document.getElementById("o");if(!f){o.textContent="escolha o arquivo";return}try{const dados=JSON.parse(await f.text());const todas=Array.isArray(dados.etiquetas)?dados.etiquetas:[];if(!todas.length){o.textContent="o JSON não tem etiquetas";return}const TAM=60;const agg={total:todas.length,anexadas:0,casadas:[],sem_pedido:[],ambiguas:[],invalidas:[]};for(let i=0;i<todas.length;i+=TAM){o.textContent="enviando "+Math.min(i+TAM,todas.length)+" de "+todas.length+"…";const r=await fetch("/good-checkout-offline/etiquetas-zpl-massa",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({etiquetas:todas.slice(i,i+TAM)})});const j=await r.json();if(!j.ok){o.textContent="erro no lote: "+JSON.stringify(j);return}agg.anexadas+=j.anexadas;agg.casadas.push(...j.casadas);agg.sem_pedido.push(...j.sem_pedido);agg.ambiguas.push(...j.ambiguas);agg.invalidas.push(...j.invalidas)}o.textContent=JSON.stringify(agg,null,2)}catch(e){o.textContent="erro: "+e.message}};</script>' +
+        '<script>document.getElementById("b").onclick=async()=>{const f=document.getElementById("f").files[0];const o=document.getElementById("o");if(!f){o.textContent="escolha o arquivo";return}try{const nome=(f.name||"").toLowerCase();if(nome.endsWith(".json")){const dados=JSON.parse(await f.text());const todas=Array.isArray(dados.etiquetas)?dados.etiquetas:[];if(!todas.length){o.textContent="o JSON não tem etiquetas";return}const TAM=60;const agg={total:todas.length,anexadas:0,casadas:[],sem_pedido:[],ambiguas:[],invalidas:[]};for(let i=0;i<todas.length;i+=TAM){o.textContent="enviando "+Math.min(i+TAM,todas.length)+" de "+todas.length+"…";const r=await fetch("/good-checkout-offline/etiquetas-zpl-massa",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({etiquetas:todas.slice(i,i+TAM)})});const j=await r.json();if(!j.ok){o.textContent="erro no lote: "+JSON.stringify(j);return}agg.anexadas+=j.anexadas;agg.casadas.push(...j.casadas);agg.sem_pedido.push(...j.sem_pedido);agg.ambiguas.push(...j.ambiguas);agg.invalidas.push(...j.invalidas)}o.textContent=JSON.stringify(agg,null,2);return}o.textContent="enviando e decodificando (uns segundos)…";const buf=await f.arrayBuffer();let b64="";const u8=new Uint8Array(buf);for(let i=0;i<u8.length;i+=32768){b64+=String.fromCharCode.apply(null,u8.subarray(i,i+32768))}b64=btoa(b64);const r=await fetch("/good-checkout-offline/etiquetas-zpl-massa",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({arquivo_base64:b64})});const j=await r.json();o.textContent=JSON.stringify(j,null,2)}catch(e){o.textContent="erro: "+e.message}};</script>' +
         '</body></html>');
       return true;
     }
