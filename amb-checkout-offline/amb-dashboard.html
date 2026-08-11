@@ -217,6 +217,10 @@
   .btnVivo{display:inline-block;background:#38bdf822;border:1px solid #38bdf855;color:#7dd3fc;border-radius:8px;
            padding:6px 10px;font-size:15px;cursor:pointer;line-height:1}
   /* ══════════════ CELULAR ══════════════ */
+  /* 11/08 (pedido do Diego): foto do TOP Produtos DOBRADA no desktop — 76px. No celular
+     ela volta pra 38px, senão a linha estica e a tabela vira rolagem infinita. */
+  img.fotoTop{width:76px;height:76px;object-fit:cover;border-radius:8px;background:#0b1220;display:block}
+  .fotoTop.semFoto{display:inline-flex;align-items:center;justify-content:center;width:76px;height:76px;border-radius:8px;background:#0b1220;font-size:28px}
   @media(max-width:720px){
     body{padding:0 8px 30px}
     .sec{padding:12px;border-radius:12px}
@@ -346,6 +350,8 @@
     /* ANÁLISE no celular: a tabela some e cada venda vira um CARTÃO (ver .vcards) */
     #secAnalise .tw{display:none}
     .vcards{display:flex;flex-direction:column;gap:8px}
+    img.fotoTop{width:38px;height:38px;border-radius:6px}
+    .fotoTop.semFoto{width:38px;height:38px;font-size:15px;border-radius:6px}
     /* TOP PRODUTOS: esconde curva e participação */
     /* 29/07: a coluna 7 (💎 Lucro Bruto, o VALOR da M.C.) estava escondida — sobrava a % sem o
        valor. Agora ela fica, e saem o nº da linha, o Custo e o Retorno/custo. */
@@ -377,7 +383,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/amb-checkout-offline';
-const DASH_BUILD = 'a7';
+const DASH_BUILD = 'a8';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -1832,8 +1838,8 @@ function render(){
       const rk = i<3 ? 'rank r'+(i+1) : 'rank';
       const _f = FOTOS[p.sku];
       return '<tr><td><span class="'+rk+'">'+(i+1)+'</span></td>'+
-      '<td>'+(_f?('<img src="'+esc(_f)+'" alt="" loading="lazy" style="width:38px;height:38px;object-fit:cover;border-radius:6px;background:#0b1220">')
-                :'<span class="dim" style="display:inline-block;width:38px;height:38px;line-height:38px;text-align:center;border-radius:6px;background:#0b1220;font-size:15px">📦</span>')+'</td>'+
+      '<td>'+(_f?('<img class="fotoTop" src="'+esc(_f)+'" alt="" loading="lazy">')
+                :'<span class="fotoTop semFoto dim">📦</span>')+'</td>'+
       '<td><div class="sku">'+esc(p.sku)+'</div><div class="desc">'+esc(p.desc)+'</div></td>'+
       '<td class="num"><span style="font-weight:800;padding:1px 8px;border-radius:6px;font-size:11px;'+(p.curva==='A'?'background:#065f4633;color:#34d399;border:1px solid #34d39955':(p.curva==='B'?'background:#78350f33;color:#fbbf24;border:1px solid #fbbf2455':'background:#33415555;color:#94a3b8;border:1px solid #47556955'))+'" title="'+(p.curva==='A'?'curva A — está nos SKUs que somam 80% do faturamento do período':(p.curva==='B'?'curva B — faixa de 80% a 95% do faturamento acumulado':'curva C — cauda: últimos 5% do faturamento'))+'">'+p.curva+'</span></td>'+
       '<td class="num">'+N(p.qtd)+'</td>'+
