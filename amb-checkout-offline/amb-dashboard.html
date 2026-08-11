@@ -349,7 +349,10 @@
     /* TOP PRODUTOS: esconde curva e participação */
     /* 29/07: a coluna 7 (💎 Lucro Bruto, o VALOR da M.C.) estava escondida — sobrava a % sem o
        valor. Agora ela fica, e saem o nº da linha, o Custo e o Retorno/custo. */
-    #tProd tr>*:nth-child(1),#tProd tr>*:nth-child(6),#tProd tr>*:nth-child(9){display:none}
+    /* 11/08 (Codex PR#22): a coluna FOTO entrou como 2ª e empurrou todas as outras uma
+       casa. Índices atualizados: some o nº da linha (1), o Custo (7) e o Retorno/custo (10);
+       ficam Foto, Produto, Unid., Faturamento e o 💎 Lucro Bruto. */
+    #tProd tr>*:nth-child(1),#tProd tr>*:nth-child(7),#tProd tr>*:nth-child(10){display:none}
     /* cabeçalho congelado da tabela desligado no celular (brigava com a barra fixa) */
     .tw th{position:static;box-shadow:none}
     /* rodapé de paginação empilha */
@@ -361,7 +364,7 @@
   @media(max-width:520px){
     .kpis{grid-template-columns:1fr 1fr}
     .kpi .v{font-size:16px}
-    #tProd tr>*:nth-child(3){display:none}   /* tela bem estreita: sai também a Curva */
+    #tProd tr>*:nth-child(4){display:none}   /* tela bem estreita: sai também a Curva (era a 3, virou 4 com a Foto) */
     table{font-size:11px} td{padding:6px 5px}
     .sskus div{font-size:11px}
     .vcNums{grid-template-columns:1fr 1fr}
@@ -374,7 +377,7 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/amb-checkout-offline';
-const DASH_BUILD = 'a5';
+const DASH_BUILD = 'a7';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -1288,14 +1291,6 @@ function montar(){
         '<div style="margin-top:5px"><b>Estorno:</b> \u00e9 o valor da linha \"Estorno\" da venda no ML \u2014 no Flex ele j\u00e1 chega l\u00edquido (bonifica\u00e7\u00e3o menos o frete cobrado) e SOMA na margem. No <b>Flex</b>, o custo do frete \u00e9 o valor do motoboy que voc\u00ea configurou no \u2699\ufe0f.</div>'+
         '<div style="margin-top:5px">Pra <b>confrontar com o Jodda</b>: baixe o \u2b07\ufe0e <b>Excel</b> e case pelo n\u00famero da venda no marketplace \u2014 \u00e9 o \u00fanico campo que existe igual nos dois lados.</div>'+
       '</div></div>'+
-    '<div class="sec" id="secMLB"><h2>\ud83d\udcb8 Despesas do Mercado Livre <span class="hint">do per\u00edodo \u00b7 fora da margem por pedido</span></h2>'+
-      '<div id="mlbCards" class="mut" style="font-size:12px">carregando\u2026</div>'+
-      '<div class="nota" style="margin-top:8px">Vêm do <b>faturamento oficial do ML</b> (o mesmo dos relat\u00f3rios em Faturamento \u2192 Relat\u00f3rios). S\u00e3o cobran\u00e7as do <b>per\u00edodo</b>, n\u00e3o de um pedido \u2014 por isso <b>n\u00e3o entram</b> no Lucro Bruto (M.C.) acima, que \u00e9 margem por venda. Para o lucro do m\u00eas, desconte estes valores.</div>'+
-    '</div>'+
-    '<div class="sec" id="secSHP"><h2>\ud83d\udfe0 Despesas e Devolu\u00e7\u00f5es da Shopee <span class="hint">do per\u00edodo \u00b7 fora da margem por pedido</span></h2>'+
-      '<div id="shpCards" class="mut" style="font-size:12px">carregando\u2026</div>'+
-      '<div class="nota" style="margin-top:8px">V\u00eam da <b>API oficial da Shopee</b> (carteira e devolu\u00e7\u00f5es), coletadas de madrugada. <b>Nada disso passa pelo Bling.</b> O maior item costuma ser o estorno ap\u00f3s devolu\u00e7\u00e3o: a Shopee j\u00e1 tinha pago, o cliente devolveu e ela tirou o dinheiro de volta da carteira. Como s\u00e3o cobran\u00e7as do <b>per\u00edodo</b>, ainda <b>n\u00e3o entram</b> no Lucro Bruto (M.C.) l\u00e1 em cima \u2014 desconte para o lucro do m\u00eas.</div>'+
-    '</div>'+
     '<div class="sec" id="secTop"><h2>🏆 TOP Produtos <span class="hint">clique nos títulos p/ ordenar ↑↓ · faturamento = SOMA de todos os pedidos do SKU no período · 💎 M.C. = margem dos pedidos rateada por item — o rank do que dá LUCRO de verdade · Curva ABC recalculada pro período pesquisado (A = 80% do faturamento)</span></h2>'+
       '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px">'+
         '<div class="grpBusca">'+
@@ -1304,6 +1299,14 @@ function montar(){
         '</div>'+
       '</div>'+
       '<div class="tw twFit"><table id="tProd"></table></div><div id="prodAviso"></div></div>'+
+    '<div class="sec" id="secMLB"><h2>\ud83d\udcb8 Despesas do Mercado Livre <span class="hint">do per\u00edodo \u00b7 fora da margem por pedido</span></h2>'+
+      '<div id="mlbCards" class="mut" style="font-size:12px">carregando\u2026</div>'+
+      '<div class="nota" style="margin-top:8px">Vêm do <b>faturamento oficial do ML</b> (o mesmo dos relat\u00f3rios em Faturamento \u2192 Relat\u00f3rios). S\u00e3o cobran\u00e7as do <b>per\u00edodo</b>, n\u00e3o de um pedido \u2014 por isso <b>n\u00e3o entram</b> no Lucro Bruto (M.C.) acima, que \u00e9 margem por venda. Para o lucro do m\u00eas, desconte estes valores.</div>'+
+    '</div>'+
+    '<div class="sec" id="secSHP"><h2>\ud83d\udfe0 Despesas e Devolu\u00e7\u00f5es da Shopee <span class="hint">do per\u00edodo \u00b7 fora da margem por pedido</span></h2>'+
+      '<div id="shpCards" class="mut" style="font-size:12px">carregando\u2026</div>'+
+      '<div class="nota" style="margin-top:8px">V\u00eam da <b>API oficial da Shopee</b> (carteira e devolu\u00e7\u00f5es), coletadas de madrugada. <b>Nada disso passa pelo Bling.</b> O maior item costuma ser o estorno ap\u00f3s devolu\u00e7\u00e3o: a Shopee j\u00e1 tinha pago, o cliente devolveu e ela tirou o dinheiro de volta da carteira. Como s\u00e3o cobran\u00e7as do <b>per\u00edodo</b>, ainda <b>n\u00e3o entram</b> no Lucro Bruto (M.C.) l\u00e1 em cima \u2014 desconte para o lucro do m\u00eas.</div>'+
+    '</div>'+
     '<div class="sec" id="secCanal"><h2>🛒 Por Canal</h2><div class="tw twFit"><table id="tCanal"></table></div></div>'+
     '<div class="grid2">'+
       '<div class="sec" id="secDia"><h2 id="hGrafPed">📈 Pedidos por Dia</h2><div class="chartbox"><canvas id="cPed"></canvas></div></div>'+
@@ -1811,7 +1814,9 @@ function render(){
   const fatTot = prods.reduce((s,p)=>s+p.fat,0)||1;
   const mcTot = prods.reduce((s,p)=>s+(p.mc!=null?p.mc:0),0)||1;   // pra a coluna "% da M.C. total"
   _topProds = prods;   // guardado pro Excel
-  $('tProd').innerHTML = '<tr><th title="posição no ranking">#</th><th title="SKU(s) do pedido">Produto</th>'+
+  $('tProd').innerHTML = '<tr><th title="posição no ranking">#</th>'+
+    '<th title="foto do produto no Bling — a mesma do Plano de Compra">Foto</th>'+
+    '<th title="SKU(s) do pedido">Produto</th>'+
     '<th class="num sort" onclick="setSortProd(\'curva\')" title="curva ABC do período pesquisado: A concentra 80% do faturamento, B até 95%, C o resto">Curva'+seta(sortProd,'curva')+'</th>'+
     '<th class="num sort" title="unidades vendidas do SKU no período (soma as quantidades de todos os pedidos)" onclick="setSortProd(\'qtd\')">Unid.'+seta(sortProd,'qtd')+'</th>'+
     '<th class="num sort" onclick="setSortProd(\'fat\')" title="soma do valor das notas no período">Faturamento'+seta(sortProd,'fat')+'</th>'+
@@ -1825,7 +1830,10 @@ function render(){
       const pf=Math.round(p.fat/fatTot*100);
       const parcial = p.qtdV < p.qtd;
       const rk = i<3 ? 'rank r'+(i+1) : 'rank';
+      const _f = FOTOS[p.sku];
       return '<tr><td><span class="'+rk+'">'+(i+1)+'</span></td>'+
+      '<td>'+(_f?('<img src="'+esc(_f)+'" alt="" loading="lazy" style="width:38px;height:38px;object-fit:cover;border-radius:6px;background:#0b1220">')
+                :'<span class="dim" style="display:inline-block;width:38px;height:38px;line-height:38px;text-align:center;border-radius:6px;background:#0b1220;font-size:15px">📦</span>')+'</td>'+
       '<td><div class="sku">'+esc(p.sku)+'</div><div class="desc">'+esc(p.desc)+'</div></td>'+
       '<td class="num"><span style="font-weight:800;padding:1px 8px;border-radius:6px;font-size:11px;'+(p.curva==='A'?'background:#065f4633;color:#34d399;border:1px solid #34d39955':(p.curva==='B'?'background:#78350f33;color:#fbbf24;border:1px solid #fbbf2455':'background:#33415555;color:#94a3b8;border:1px solid #47556955'))+'" title="'+(p.curva==='A'?'curva A — está nos SKUs que somam 80% do faturamento do período':(p.curva==='B'?'curva B — faixa de 80% a 95% do faturamento acumulado':'curva C — cauda: últimos 5% do faturamento'))+'">'+p.curva+'</span></td>'+
       '<td class="num">'+N(p.qtd)+'</td>'+
@@ -1837,7 +1845,56 @@ function render(){
       '<td class="num dim">'+(p.mc!=null?Math.round((p.mc||0)/mcTot*100)+'%':'—')+'</td>'+
       '<td class="num dim">'+(p.fat?pf+'%':'—')+'</td>'+
       '<td><div class="bar"><i class="g" style="width:'+pf+'%"></i></div></td></tr>';
-    }).join('');
+    }).join('')
+    // 11/08 (pedido do Diego): linha de TOTAL — o lucro somado que o TOP Produtos entregou.
+    // Soma as linhas EXIBIDAS (o ranking mostra 50); havendo mais SKUs no período, o rótulo
+    // diz de quantos, pra ninguém ler como total do período inteiro.
+    + (function(){
+        const vis = ord.slice(0,50);
+        if(!vis.length) return '';
+        const s = vis.reduce((a,p)=>({
+          qtd:a.qtd+(Number(p.qtd)||0), fat:a.fat+(Number(p.fat)||0),
+          custo:a.custo+(Number(p.custo)||0), mc:a.mc+(p.mc!=null?Number(p.mc):0),
+          temMC:a.temMC||p.mc!=null,
+          // (Codex PR#22) cobertura: unidades que REALMENTE têm margem calculada. Sem isto,
+          // SKU sem margem entrava somando zero e o total saía menor do que é, com % derivada
+          // de lucro incompleto — e sem o aviso que as linhas individuais mostram.
+          unM:a.unM+(p.mc!=null?(Number(p.qtdM||p.qtd)||0):0),
+          unC:a.unC+((p.custo>0)?(Number(p.qtdC||p.qtd)||0):0)
+        }), {qtd:0,fat:0,custo:0,mc:0,temMC:false,unM:0,unC:0});
+        const mcCompleto = s.temMC && s.unM >= s.qtd;
+        const cvgMC = mcCompleto ? '' : '<span class="cvg">'+N(s.unM)+'/'+N(s.qtd)+' un. c/ margem</span>';
+        const rot = 'TOTAL ' + (prods.length>vis.length ? '<span class="dim">(os '+vis.length+' da tela, de '+N(prods.length)+' SKUs)</span>' : '<span class="dim">('+vis.length+' SKUs)</span>');
+        return '<tr style="border-top:2px solid #334155;font-weight:800;background:#0b122080">'+
+          '<td></td><td></td>'+
+          '<td>'+rot+'</td>'+
+          '<td class="num"></td>'+
+          '<td class="num">'+N(s.qtd)+'</td>'+
+          '<td class="num ok">'+BRL(s.fat)+'</td>'+
+          '<td class="num">'+(s.custo?BRL(s.custo):'<span class="dim">—</span>')+'</td>'+
+          '<td class="num">'+(s.temMC?('<span class="'+(s.mc>=0?'ok':'bad')+'">'+BRL(s.mc)+'</span>'+cvgMC):'<span class="dim">—</span>')+'</td>'+
+          // % só quando a margem cobre TODAS as unidades: percentual tirado de lucro parcial engana.
+          '<td class="num">'+((mcCompleto&&s.fat>0)?('<span class="'+(s.mc>=0?'ok':'bad')+'">'+Math.round(s.mc/s.fat*100)+'%</span>'):'<span class="dim" title="parcial: nem todas as unidades têm margem calculada">—</span>')+'</td>'+
+          '<td class="num">'+((mcCompleto&&s.custo>0&&s.unC>=s.qtd)?('<span class="'+(s.mc>=0?'ok':'bad')+'">'+Math.round(s.mc/s.custo*100)+'%</span>'):'<span class="dim" title="parcial: margem ou custo incompletos">—</span>')+'</td>'+
+          '<td class="num dim"></td><td class="num dim"></td><td></td></tr>';
+      })();
+  // 📸 busca as fotos que faltam pros SKUs da tela (a rota lê do cache e só vai ao Bling
+  // pelo que não tem; o resto entra na próxima rodada). Teto de tentativas evita laço.
+  (function(){
+    const visSk = ord.slice(0,50).map(p=>p.sku).filter(Boolean);
+    // (Codex PR#22) o teto é POR CONJUNTO VISÍVEL: mudou a ordenação ou o filtro, a contagem
+    // recomeça. Antes, as 50 primeiras gastavam as 6 rodadas e todo SKU que aparecesse
+    // depois ficava sem foto pro resto da sessão, sem nunca ter sido tentado.
+    const _assin = visSk.slice().sort().join('|');
+    if(_assin !== _fotoAssin){ _fotoAssin = _assin; _fotoRodadas = 0; }
+    const pend = visSk.filter(s=>FOTOS[s]===undefined);
+    if(!pend.length || _fotoBusy || _fotoRodadas>=6) return;
+    _fotoBusy = true; _fotoRodadas++;
+    fetch(MOD+'/produto-fotos?skus='+encodeURIComponent(pend.slice(0,40).join(',')), {credentials:'same-origin'})
+      .then(r=>r.json()).then(d=>{
+        if(d && d.ok && d.fotos){ Object.assign(FOTOS, d.fotos); render(); }
+      }).catch(()=>{}).finally(()=>{ _fotoBusy = false; });
+  })();
   const semFatUn = prods.reduce((s,p)=>s+(p.qtd-p.qtdV),0);
   $('prodAviso').innerHTML = semFatUn ? '<div class="aviso">⚠️ <b>'+N(semFatUn)+' unidades</b> do período ainda sem valor gravado — o faturamento por produto soma só as valoradas (etiqueta âmbar "x/y un."). Complete o <b>backfill de detalhes</b>.</div>' : '';
 
@@ -2365,6 +2422,8 @@ function montarNavCards(){
 // 28/07: gerador de planilha usado pelos 3 cards (TOP Produtos, Projeção e Previsão).
 // CSV com BOM e ";" — o Excel em português abre direto, sem tela de importação.
 let _projBase = [], _topProds = [];
+let FOTOS = {};        // sku -> url da foto (Bling), preenchido sob demanda
+let _fotoBusy = false, _fotoRodadas = 0, _fotoAssin = '';   // trava anti-loop e teto POR conjunto visível
 function baixarProjecao(){
   baixarPlanilha('projecao-estoque',
     ['SKU','Produto','Vendas '+projDias+'d','Media por dia','Saldo em estoque','Dias de cobertura','Custo unitario','Preco de venda','Margem %'],
