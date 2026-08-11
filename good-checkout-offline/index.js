@@ -40,7 +40,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.GOODBKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GOODBKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'good-checkout-offline v10/08 b16';
+const VERSAO     = 'good-checkout-offline v11/08 b17';
 
 // ── SESSÃO DE OPERADOR (cookie assinado HMAC) — protege rotas de dados/ação ──
 // Segredo estável entre restarts. Usa ADMIN_KEY (já configurada no Render) como base.
@@ -646,6 +646,81 @@ function routes(readBody) {
       // Fire-and-forget: se o servico estiver fora ou sem envs, nada muda aqui.
       try { require('../lib/avisar-devolucoes')('good', 'etiqueta_anexada', idA, { formato: formatoA, quem: (typeof opSess === 'string' ? opSess : (opSess && (opSess.usuario || opSess.nome || opSess.login))) || '' }); } catch (e) {}
       json(res, 200, { ok: true, formato: formatoA, bytes: conteudoA.length });
+      return true;
+    }
+
+    // ─── ETIQUETAS EM MASSA (11/08, b17) — o lote da Shopee de uma vez só ─────────────────
+    // Caso real que motivou: o token Bling↔Shopee venceu (365d, sem alerta), 31 pedidos do dia
+    // ficaram sem etiqueta no checkout, e o Diego baixou o ZPL agregado direto da Shopee. As
+    // etiquetas são 100% raster (imagem GRF, sem ^FD nem barcode ZPL) — a identificação vem
+    // dos códigos DENTRO da imagem (chave da NF-e no CODE128 da DANFE + tracking BR no QR),
+    // decodificados FORA daqui. Esta rota recebe o resultado já identificado:
+    //   POST { etiquetas: [{ nf: 77412, tracking: 'BR26…', zpl_base64: '…' }] }
+    // e casa cada uma pelo nf_numero do manifesto. Grava IDÊNTICO ao anexo individual
+    // (grava-primeiro, carimbos no manifesto + snapshot, ev1 pro Devoluções).
+    if (method === 'POST' && p === '/good-checkout-offline/etiquetas-zpl-massa') {
+      // sessão de admin, igual à irmã individual (a trava central do módulo já exige login
+      // antes de chegar aqui; chave por query não passa pelo gate, então nem oferecemos)
+      const opSessM = validarSessao(req.headers['cookie']);
+      if (!opSessM || !ehAdmin(opSessM)) { json(res, 403, { ok: false, erro: 'apenas admin' }); return true; }
+      let bodyM = {}; try { const _rm = await readBody(req); bodyM = (_rm && typeof _rm === 'object') ? _rm : JSON.parse(_rm || '{}'); } catch (e) { json(res, 400, { ok: false, erro: 'body inválido' }); return true; }
+      const lista = Array.isArray(bodyM.etiquetas) ? bodyM.etiquetas : [];
+      if (!lista.length) { json(res, 400, { ok: false, erro: 'mande { etiquetas: [{ nf, tracking, zpl_base64 }] }' }); return true; }
+      if (lista.length > 300) { json(res, 400, { ok: false, erro: 'máximo de 300 etiquetas por chamada' }); return true; }
+      const _ehZplM = b => { if (!b || b.length < 50) return false; const s = b.slice(0, 30000).toString('latin1'); return s.indexOf('^XA') >= 0 || s.indexOf('~DG') >= 0; };
+      const manM = readJson(MANIFEST_FILE, {});
+      // índice nf_numero → id (e tracking → id como reserva, se o snapshot tiver rastreio)
+      const porNF = {};
+      for (const [idX, mX] of Object.entries(manM)) {
+        const nfX = Number(mX && mX.nf_numero);
+        if (isFinite(nfX) && nfX > 0 && porNF[nfX] === undefined) porNF[nfX] = idX;
+        else if (isFinite(nfX) && nfX > 0 && porNF[nfX] !== undefined) porNF[nfX] = null;   // NF duplicada no manifesto: ambígua, não casa às cegas
+      }
+      const casadas = [], sem_pedido = [], invalidas = [], ambiguas = [];
+      let mudouMan = false;
+      const quemM = (typeof opSessM === 'string' ? opSessM : (opSessM && (opSessM.usuario || opSessM.nome || opSessM.login))) || '';
+      for (const et of lista) {
+        const nfN = Number(et && et.nf);
+        let bufM = null; try { bufM = Buffer.from(String((et && et.zpl_base64) || '').replace(/^data:[^,]*,/, ''), 'base64'); } catch (e) {}
+        if (!isFinite(nfN) || nfN <= 0 || !bufM || bufM.length < 200 || !_ehZplM(bufM)) { invalidas.push(et && et.nf); continue; }
+        const idM = porNF[nfN];
+        if (idM === null) { ambiguas.push(nfN); continue; }
+        if (!idM) { sem_pedido.push(nfN); continue; }
+        const dirM = path.join(CACHE_DIR, String(idM));
+        const alvoM = path.join(dirM, 'etiqueta.' + String(ETIQ_FORMATO || 'zpl').toLowerCase());
+        try {
+          ensureDir(dirM);
+          const _outroM = path.join(dirM, 'etiqueta.pdf');
+          fs.writeFileSync(alvoM, bufM);   // grava-primeiro (b136): só remove o PDF depois que o ZPL está no disco
+          if (fs.existsSync(_outroM)) { try { fs.unlinkSync(_outroM); } catch (e) {} }
+        } catch (e) { invalidas.push(nfN); continue; }
+        if (manM[idM]) { manM[idM].etiqueta_anexada = true; manM[idM].tem_etiqueta = true; manM[idM].etiqueta_pdf = false; manM[idM].etiqueta_formato = ETIQ_FORMATO; mudouMan = true; }
+        try {
+          const snapM = readJson(path.join(dirM, 'pedido.json'), null);
+          if (snapM) { snapM.etiqueta_anexada = true; snapM.tem_etiqueta = true; snapM.etiqueta_pdf = false; snapM.etiqueta_formato = ETIQ_FORMATO; writeJson(path.join(dirM, 'pedido.json'), snapM); }
+        } catch (e) {}
+        try { require('../lib/avisar-devolucoes')('good', 'etiqueta_anexada', idM, { formato: 'zpl', quem: quemM, massa: true }); } catch (e) {}
+        casadas.push({ nf: nfN, id: idM, numero: (manM[idM] && manM[idM].numero) || null, bytes: bufM.length });
+      }
+      if (mudouMan) { try { writeJson(MANIFEST_FILE, manM); } catch (e) {} }
+      console.log('[GOODBKP] etiquetas em MASSA: ' + casadas.length + ' anexada(s), ' + sem_pedido.length + ' sem pedido, ' + invalidas.length + ' inválida(s) — por ' + quemM);
+      json(res, 200, { ok: true, total: lista.length, anexadas: casadas.length, casadas, sem_pedido, ambiguas, invalidas });
+      return true;
+    }
+
+    // ─── página do upload em massa (admin logado) ─────────────────────────────────────────
+    if (method === 'GET' && p === '/good-checkout-offline/etiquetas-massa') {
+      const opSessP2 = validarSessao(req.headers['cookie']);
+      if (!opSessP2 || !ehAdmin(opSessP2)) { res.writeHead(302, { Location: '/good-checkout-offline/' }); res.end(); return true; }
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end('<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
+        '<title>Etiquetas em massa · GOOD</title><body style="font-family:system-ui;max-width:680px;margin:32px auto;padding:0 16px">' +
+        '<h2>📎 Etiquetas em massa — GOOD</h2>' +
+        '<p>Selecione o arquivo <b>JSON</b> com as etiquetas já identificadas (nf + zpl). Cada uma será anexada ao pedido cuja <b>NF</b> bater no manifesto.</p>' +
+        '<input type="file" id="f" accept=".json,application/json"> <button id="b" style="padding:8px 18px">Enviar</button>' +
+        '<pre id="o" style="background:#f5f5f5;padding:12px;white-space:pre-wrap"></pre>' +
+        '<script>document.getElementById("b").onclick=async()=>{const f=document.getElementById("f").files[0];const o=document.getElementById("o");if(!f){o.textContent="escolha o arquivo";return}o.textContent="enviando…";try{const t=await f.text();const r=await fetch("/good-checkout-offline/etiquetas-zpl-massa",{method:"POST",headers:{"Content-Type":"application/json"},body:t});const j=await r.json();o.textContent=JSON.stringify(j,null,2)}catch(e){o.textContent="erro: "+e.message}};</script>' +
+        '</body></html>');
       return true;
     }
 
