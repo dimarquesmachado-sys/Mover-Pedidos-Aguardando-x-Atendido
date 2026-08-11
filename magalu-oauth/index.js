@@ -939,12 +939,16 @@ liga('bAmb','amb'); liga('bGood','good');
           const dtP = String(o.purchased_at || o.created_at || '').slice(0, 10);
           if (dtP) { if (dtP < desde || (ate && dtP > ate)) { foraJanela++; continue; } } else { semData++; }
           // total DEFENSIVO — candidatos em ordem de plausibilidade; 0 = não achamos (calibrar com &raw=1)
-          const tot = Number(
-            (o.total_amount != null ? o.total_amount :
-            (o.amounts && o.amounts.total != null ? o.amounts.total :
-            (o.amount && o.amount.total != null ? o.amount.total :
-            (o.total != null ? o.total : 0))))
-          ) || 0;
+          // 11/08 ⚠️ A MAGALU MANDA VALOR EM CENTAVOS nos campos `amounts.*`. Sem dividir,
+          // o pedido de R$ 145,70 entrava como R$ 14.570 — julho foi pra R$ 1,87 MILHÃO no
+          // dashboard. Regra: o que vem de `amounts` é centavo (÷100); `total_amount`/`total`
+          // vêm em reais. `cru` fica na resposta pra conferência.
+          let tot = 0, totFonte = null;
+          if (o.amounts && o.amounts.total != null) { tot = Number(o.amounts.total) / 100; totFonte = 'amounts.total (centavos)'; }
+          else if (o.amount && o.amount.total != null) { tot = Number(o.amount.total) / 100; totFonte = 'amount.total (centavos)'; }
+          else if (o.total_amount != null) { tot = Number(o.total_amount); totFonte = 'total_amount'; }
+          else if (o.total != null) { tot = Number(o.total); totFonte = 'total'; }
+          tot = Number(tot) || 0;
           // 11/08: ITENS (SKU/qtd/valor) — sem eles a caça grava faturamento sem custo,
           // e a margem do pedido sai inflada. Leitura DEFENSIVA: a Magalu põe os itens ora
           // em `items`, ora dentro de cada `deliveries[]`, com nomes variados de campo.
@@ -959,11 +963,13 @@ liga('bAmb','amb'); liga('bGood','good');
               const qtd = Number(i3.quantity != null ? i3.quantity : (i3.qty != null ? i3.qty : 1)) || 1;
               // (Codex PR#25) `amounts.total` é o total DA LINHA, não o unitário — quem consome
               // multiplica por qtd de novo. Convertido aqui, senão o faturamento sai qtd× maior.
+              // mesmo cuidado com centavos nos ITENS (e `amounts.total` continua sendo o
+              // total DA LINHA — vira unitário dividindo pela quantidade)
               let valor = null;
-              if (i3.unit_price != null) valor = Number(i3.unit_price);
+              if (i3.amounts && i3.amounts.unit != null) valor = Number(i3.amounts.unit) / 100;
+              else if (i3.amounts && i3.amounts.total != null) valor = Number(i3.amounts.total) / 100 / (qtd || 1);
+              else if (i3.unit_price != null) valor = Number(i3.unit_price);
               else if (i3.price != null) valor = Number(i3.price);
-              else if (i3.amounts && i3.amounts.unit != null) valor = Number(i3.amounts.unit);
-              else if (i3.amounts && i3.amounts.total != null) valor = Number(i3.amounts.total) / (qtd || 1);
               else if (i3.total != null) valor = Number(i3.total) / (qtd || 1);
               return {
                 sku: String((i3.sku || i3.seller_sku || i3.code || (i3.product && (i3.product.sku || i3.product.code)) || '')).trim() || null,
@@ -979,6 +985,7 @@ liga('bAmb','amb'); liga('bGood','good');
             purchased_at: o.purchased_at || o.created_at || null,
             status: (o.status && (o.status.name || o.status)) || null,
             total: tot,
+            total_fonte: totFonte,
             cliente: (o.customer && (o.customer.name || o.customer.nickname)) || '',
             itens
           });
