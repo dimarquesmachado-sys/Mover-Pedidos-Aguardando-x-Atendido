@@ -668,11 +668,12 @@ function routes(readBody) {
           '<body style="font-family:system-ui;max-width:680px;margin:40px auto;padding:0 16px">' +
           '<h2>📎 Etiquetas em lote (Shopee)</h2>' +
           '<p>Envie o <b>ZIP</b> com um PDF por pedido, nomeado <code>&lt;order_sn&gt;.pdf</code>. ' +
+          '<p style="color:#a55">⚠️ Limite: ZIP de até <b>~8 MB</b> por envio (o corpo vira base64 e o serviço corta em 12 MB). Maior que isso? Divida em 2+ ZIPs e envie um por vez.</p>' +
           'Cada etiqueta é anexada no card certo; quem já tinha etiqueta é <b>substituído</b> (vale a última).</p>' +
           '<input type="file" id="f" accept=".zip"> <button id="b" onclick="enviar()">Anexar tudo</button>' +
           '<pre id="out" style="background:#f6f6f6;padding:12px;white-space:pre-wrap"></pre>' +
           '<script>async function enviar(){const f=document.getElementById("f").files[0];const out=document.getElementById("out");' +
-          'if(!f){out.textContent="escolha o ZIP";return}const b=document.getElementById("b");b.disabled=true;out.textContent="enviando "+f.name+" ("+f.size+" bytes)…";' +
+          'if(!f){out.textContent="escolha o ZIP";return}if(f.size>8.5*1024*1024){out.textContent="❌ "+(f.size/1048576).toFixed(1)+" MB — acima do limite de ~8 MB. Divida o ZIP em partes e envie uma por vez.";return}const b=document.getElementById("b");b.disabled=true;out.textContent="enviando "+f.name+" ("+f.size+" bytes)…";' +
           'const b64=await new Promise((ok,er)=>{const r=new FileReader();r.onload=()=>ok(String(r.result).split(",")[1]);r.onerror=er;r.readAsDataURL(f)});' +
           'try{const r=await fetch(location.pathname+location.search,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({zip_base64:b64})});' +
           'const j=await r.json();out.textContent=JSON.stringify(j,null,2)}catch(e){out.textContent="falhou: "+e}b.disabled=false}</scr' + 'ipt>');
@@ -681,7 +682,7 @@ function routes(readBody) {
       if (method !== 'POST') { json(res, 405, { ok: false, erro: 'use GET (página) ou POST (zip_base64)' }); return true; }
       let bodyL = {}; try { const _rb = await readBody(req); bodyL = (_rb && typeof _rb === 'object') ? _rb : JSON.parse(_rb || '{}'); } catch (e) {}
       let bufL = null; try { bufL = Buffer.from(String(bodyL.zip_base64 || '').replace(/^data:[^,]*,/, ''), 'base64'); } catch (e) {}
-      if (!bufL || bufL.length < 200 || !(bufL[0] === 0x50 && bufL[1] === 0x4B)) { json(res, 400, { ok: false, erro: 'mande um ZIP (zip_base64)' }); return true; }
+      if (!bufL || bufL.length < 200 || !(bufL[0] === 0x50 && bufL[1] === 0x4B)) { json(res, 400, { ok: false, erro: 'mande um ZIP (zip_base64). Se o ZIP tiver mais de ~8 MB, o corpo estoura o limite de 12 MB do serviço e chega vazio — divida em partes e envie uma por vez (a rota pode ser chamada quantas vezes precisar)' }); return true; }
       // mesmo leitor por diretório central da rota etiqueta-anexar (cópia deliberada:
       // não mexo numa rota validada em produção no meio de um caso urgente)
       const _zipEntradasL = buf => {
@@ -711,7 +712,13 @@ function routes(readBody) {
       // manifesto UMA vez: mapa numero_loja → id (comparação sem caixa)
       const manL = readJson(MANIFEST_FILE, {});
       const porSn = {};
-      for (const [idM, mM] of Object.entries(manL)) { if (mM && mM.numero_loja) porSn[String(mM.numero_loja).trim().toUpperCase()] = idM; }
+      // Codex P2 (PR#34): SÓ pedidos Shopee entram no mapa — um PDF cujo nome coincidisse com
+      // o numero_loja de OUTRO canal sobrescreveria (e apagaria o ZPL de) um pedido inocente
+      for (const [idM, mM] of Object.entries(manL)) {
+        if (!mM || !mM.numero_loja) continue;
+        if (String(mM.marketplace || '').toLowerCase() !== 'shopee') continue;
+        porSn[String(mM.numero_loja).trim().toUpperCase()] = idM;
+      }
       const r = { ok: true, no_zip: entsL.length, anexadas: 0, substituidas: 0, nao_encontrados: [], invalidos: [] };
       let mudouMan = false;
       for (const ent of entsL) {
@@ -726,7 +733,12 @@ function routes(readBody) {
         const jaTinha = !!(manL[idL] && manL[idL].tem_etiqueta);
         try {
           ensureDir(dirL);
-          fs.writeFileSync(alvoL, ent.conteudo);   // grava primeiro…
+          // Codex P2 (PR#34): escrita ATÔMICA — tmp + rename. writeFileSync direto TRUNCA o
+          // etiqueta.pdf existente antes de escrever: um disco cheio no meio do lote destruiria
+          // a etiqueta que funcionava. O rename só acontece com o arquivo novo inteiro no disco.
+          const tmpL = alvoL + '.tmp';
+          fs.writeFileSync(tmpL, ent.conteudo);
+          fs.renameSync(tmpL, alvoL);
           if (outroL !== alvoL && fs.existsSync(outroL)) { try { fs.unlinkSync(outroL); } catch (e) {} }   // …apaga o outro formato depois
         } catch (e) { r.invalidos.push(nomeBase + ' (falha ao salvar)'); continue; }
         if (manL[idL]) { manL[idL].etiqueta_anexada = true; manL[idL].tem_etiqueta = true; manL[idL].etiqueta_pdf = true; manL[idL].etiqueta_formato = 'PDF'; mudouMan = true; }
