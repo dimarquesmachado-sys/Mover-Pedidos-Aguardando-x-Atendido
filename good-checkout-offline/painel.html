@@ -397,7 +397,7 @@
 </aside>
 
 <script>
-const UI_BUILD = 'b68';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
+const UI_BUILD = 'b69';   // cravado no painel — se não bater com a versão do servidor, painel tá velho em cache
 const MKT = {
   ml:{n:'ML',c:'#ffe600'}, shopee:{n:'Shopee',c:'#ee4d2d'}, tiktok:{n:'TikTok',c:'#69c9d0'},
   amazon:{n:'Amazon',c:'#b3b9c4'}, magalu:{n:'Magalu',c:'#0086ff'},
@@ -711,8 +711,17 @@ async function imprimirMadeiraZebra(id){
 
 // ── chave Zebra(ZPL) ↔ A4(PDF) p/ a ETIQUETA (a NF é sempre A4) ──
 function modoEtiqueta(){ return localStorage.getItem('gbkp_modo_etiq')==='a4' ? 'a4' : 'zebra'; }
+function temEtiquetaPdfAnexada(id){ return !!(pedidoAtual && String(pedidoAtual.bling_id)===String(id) && pedidoAtual.etiqueta_pdf); }
 async function imprimirEtiqueta(id, zpl){
   if(ehPedidoMadeira(id) && modoEtiqueta()!=='a4'){ await imprimirMadeiraZebra(id); return; }   // Madeira na Zebra: ZPL montado (adesivo+Correios+DANFE)
+  if(temEtiquetaPdfAnexada(id) && modoEtiqueta()!=='a4'){
+    // b69 (Codex P1 do PR#34): etiqueta ANEXADA em PDF (lote/📎) não tem ZPL — o fluxo Zebra
+    // buscaria /etiqueta/{id}, receberia o 404 em texto e MANDARIA ISSO pra impressora.
+    // Mesmo desvio que a Madeira já usa: abre o PDF pra imprimir pelo navegador.
+    window.open(location.origin+'/good-checkout-offline/etiqueta-pdf/'+id, '_blank');
+    toast('📄 etiqueta anexada em PDF — imprima pela janela que abriu');
+    return;
+  }
   if(modoEtiqueta()==='a4' || ehPedidoMadeira(id)){
     window.open(location.origin+'/good-checkout-offline/etiqueta-pdf/'+id, '_blank');  // Madeira em A4, ou modo A4 — imprime pelo navegador
   }else{
@@ -1024,7 +1033,7 @@ async function selecionar(id){
     }
     prepararPedido(ped);
     pedidoAtual = ped;
-    zplAtual = await fetch('/good-checkout-offline/etiqueta/'+id).then(r=>r.text());
+    zplAtual = ped.etiqueta_pdf ? null : await fetch('/good-checkout-offline/etiqueta/'+id).then(r=>r.text());   // b69: pedido só-PDF não tem ZPL — não carregar o 404 como se fosse etiqueta
     estoqueSaldos = {}; estoqueCheckout = {}; estoqueCarregado = false;   // reset: estoque do pedido novo (renderiza "…" até chegar)
     renderDetail();
     alertaFragil(ped);   // \u26a0\ufe0f avisa se o pedido tem produto fr\u00e1gil
