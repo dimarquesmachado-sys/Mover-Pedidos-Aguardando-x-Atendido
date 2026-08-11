@@ -1843,6 +1843,7 @@ function routes(readBody) {
       if (urlObj.searchParams.get('status')) { json(res, 200, _mlcred); return true; }
       const de = urlObj.searchParams.get('de') || '2026-01-01';
       const ate = urlObj.searchParams.get('ate') || new Date().toISOString().slice(0, 10);
+      if (_mlcred.rodando) { json(res, 200, { ok: false, ja_rodando: true, msg: 'uma distribuição já está em andamento (' + (_mlcred.de || '?') + ' a ' + (_mlcred.ate || '?') + ') — acompanhe em ?status=1 e repita depois', de: _mlcred.de, ate: _mlcred.ate }); return true; }
       aplicarCreditosFlex(de, ate).catch(() => {});
       json(res, 200, { ok: true, msg: 'distribuindo créditos Flex de ' + de + ' a ' + ate + ' em background — acompanhe em ?status=1', de, ate });
       return true;
@@ -4826,6 +4827,8 @@ async function backfillVendas(de, ate, empresa){
     }
     _backfill.fora = foraDoPeriodo;
     _backfill.fase = 'concluido';
+    // Codex PR#33: a reconstrução apaga+reinsere sem credito_ml — redistribui os bônus do período
+    try { aplicarCreditosFlex(de, ate).catch(() => {}); } catch (e9) {}
   } catch(e){ _backfill.fase='erro'; _backfill.msg = String(e.message||e); }
   _backfill.rodando = false; _backfill.fim = new Date().toISOString();
 }
@@ -5063,41 +5066,70 @@ async function mlBillingSync(maxPeriodos) {
 // ─── CRÉDITOS DE ENVIO DO ML (bônus Flex) → vendas_historico.credito_ml ──────────────────
 // 11/08 — auditoria de 2 vendas contra o extrato do ML provou: o ML PAGA o envio Flex
 // (bônus/compensação) e a margem ignorava o crédito — toda venda Flex saía R$ 9-11 pior.
-// O dado JÁ ESTÁ BAIXADO: o billing diário grava os créditos (categoria 'credito', valor
-// negativo) com o nº da venda em o/p. Esta função só DISTRIBUI: agrupa os créditos por
-// venda e grava credito_ml na PRIMEIRA linha do pedido no Supabase (uma linha só, pra
-// nunca somar em dobro num pedido de várias linhas). Zero chamadas novas ao ML.
-// Idempotente: sobrescreve com a soma atual do billing — rodar de novo corrige sozinho.
-let _mlcred = { rodando:false, de:null, ate:null, no_billing:0, com_venda:0, sem_venda:0, pedidos:0, gravados:0, ja_iguais:0, sem_linha_no_historico:0, erros:0, ultima_falha:null, amostra:null, inicio:null, fim:null };
+// O dado JÁ ESTÁ BAIXADO: o billing diário grava os créditos com o nº da venda em o/p.
+// Esta função só DISTRIBUI. Zero chamadas novas ao ML. Regras (as 4 vieram do Codex no PR #33):
+//   1. SÓ bônus de ENVIO entra: a categoria 'credito' também carrega estorno de tarifa e
+//      cancelamento — o filtro é pelo TEXTO (bonifica + envio/flex). O que tem venda mas não
+//      casa no texto vai contado em ignorados_por_texto, pra calibrarmos com o dado real.
+//   2. Carrinho: o crédito às vezes só traz o order id e o Bling grava o PACK em numero_loja —
+//      um 1º passe monta o mapa order→pack com TODAS as tarifas (igual ao ml-vendas-faltando).
+//   3. A janela de/ate só SELECIONA quais vendas reprocessar; a soma gravada é SEMPRE o total
+//      do billing daquela venda — senão a rodada diária de 45d sobrescreveria o ano com parcial.
+//   4. Grava na PRIMEIRA linha do pedido (nunca soma em dobro em pedido multi-linha). Idempotente.
+let _mlcred = { rodando:false, de:null, ate:null, no_billing:0, bonus_envio:0, sem_venda:0, ignorados_por_texto:{}, pedidos:0, gravados:0, ja_iguais:0, sem_linha_no_historico:0, erros:0, ultima_falha:null, amostra:null, inicio:null, fim:null };
+function _ehBonusEnvio(tf) {
+  if (!tf || tf.c !== 'credito') return false;
+  const tx = String(tf.t || '');
+  return /bonifica/i.test(tx) && /(envio|env[ií]o|flex)/i.test(tx);
+}
 async function aplicarCreditosFlex(de, ate) {
   if (_mlcred.rodando) return _mlcred;
-  _mlcred = { rodando:true, de:de||null, ate:ate||null, no_billing:0, com_venda:0, sem_venda:0, pedidos:0, gravados:0, ja_iguais:0, sem_linha_no_historico:0, erros:0, ultima_falha:null, amostra:null, inicio:new Date().toISOString(), fim:null };
+  _mlcred = { rodando:true, de:de||null, ate:ate||null, no_billing:0, bonus_envio:0, sem_venda:0, ignorados_por_texto:{}, pedidos:0, gravados:0, ja_iguais:0, sem_linha_no_historico:0, erros:0, ultima_falha:null, amostra:null, inicio:new Date().toISOString(), fim:null };
   try {
     const arq = readJson(path.join(CACHE_DIR, '_ml_billing.json'), null);
-    const tarifas = (arq && arq.tarifas) || {};
-    const porVenda = {};   // numero_loja candidato → soma dos créditos (positiva)
-    for (const tf of Object.values(tarifas)) {
+    const tarifas = Object.values((arq && arq.tarifas) || {});
+    // passe 0: mapa order→pack com TODAS as tarifas (o pack nem sempre vem no próprio crédito)
+    const mapaPack = {};
+    for (const tf of tarifas) { if (tf && tf.o && tf.p) mapaPack[String(tf.o)] = String(tf.p); }
+    const chavesDe = (tf) => {
+      const ks = new Set();
+      if (tf.o) { ks.add(String(tf.o)); const pk = mapaPack[String(tf.o)]; if (pk) ks.add(pk); }
+      if (tf.p) ks.add(String(tf.p));
+      return [...ks];
+    };
+    // passe 1: seleciona as vendas AFETADAS (bônus com data dentro da janela pedida)
+    const afetadas = new Set();
+    for (const tf of tarifas) {
       if (!tf || tf.c !== 'credito') continue;
       _mlcred.no_billing++;
+      if (!_ehBonusEnvio(tf)) {
+        const ch0 = chavesDe(tf);
+        if (ch0.length) { const k0 = String(tf.t || '(sem texto)').slice(0, 60); _mlcred.ignorados_por_texto[k0] = (_mlcred.ignorados_por_texto[k0] || 0) + 1; }
+        continue;
+      }
+      _mlcred.bonus_envio++;
       const dia = String(tf.d || '');
       if (de && dia && dia < de) continue;
       if (ate && dia && dia > ate) continue;
-      const val = Math.abs(Number(tf.v) || 0);   // crédito é gravado NEGATIVO no billing
-      if (!(val > 0)) continue;
-      const chaves = [tf.o, tf.p].filter(Boolean).map(String);
-      if (!chaves.length) { _mlcred.sem_venda++; continue; }
-      _mlcred.com_venda++;
-      if (!_mlcred.amostra) _mlcred.amostra = { venda: chaves[0], valor: val, texto: tf.t || null, dia: dia };
-      // o Bling grava ora o order, ora o PACK em numero_loja — indexa pelos dois,
-      // mas a soma por venda usa UMA entrada (a primeira chave) pra não duplicar
-      const reg = { v: val };
-      for (const ch of chaves) { (porVenda[ch] = porVenda[ch] || []).push(reg); }
+      const ch = chavesDe(tf);
+      if (!ch.length) { _mlcred.sem_venda++; continue; }
+      if (!_mlcred.amostra) _mlcred.amostra = { venda: ch[0], valor: Math.abs(Number(tf.v) || 0), texto: tf.t || null, dia: dia };
+      for (const c of ch) afetadas.add(c);
     }
-    // consolida: cada crédito (objeto reg) conta UMA vez por venda mesmo indexado em 2 chaves
-    const somaDe = (lista) => { const vistos = new Set(); let s = 0; for (const r of lista) { if (vistos.has(r)) continue; vistos.add(r); s += r.v; } return Math.round(s * 100) / 100; };
-    const chavesOrdenadas = Object.keys(porVenda);
-    for (const nl of chavesOrdenadas) {
-      const cred = somaDe(porVenda[nl]);
+    // passe 2: pra cada venda afetada, soma TODOS os bônus dela no billing (sem janela) — regra 3
+    const somaPorChave = {};
+    for (const tf of tarifas) {
+      if (!_ehBonusEnvio(tf)) continue;
+      const val = Math.abs(Number(tf.v) || 0);
+      if (!(val > 0)) continue;
+      const ch = chavesDe(tf).filter(c => afetadas.has(c));
+      if (!ch.length) continue;
+      // o mesmo crédito indexado em order E pack conta UMA vez por venda: registra o objeto
+      for (const c of ch) { (somaPorChave[c] = somaPorChave[c] || new Set()).add(tf); }
+    }
+    for (const nl of Object.keys(somaPorChave)) {
+      let cred = 0; for (const tf of somaPorChave[nl]) cred += Math.abs(Number(tf.v) || 0);
+      cred = Math.round(cred * 100) / 100;
       if (!(cred > 0)) continue;
       _mlcred.pedidos++;
       try {
@@ -5105,7 +5137,7 @@ async function aplicarCreditosFlex(de, ate) {
         let lin = null;
         try { const arr = JSON.parse(rG.body || '[]'); lin = Array.isArray(arr) ? arr[0] : null; } catch (e) {}
         if (!rG.ok) { _mlcred.erros++; _mlcred.ultima_falha = 'GET ' + nl + ' status ' + rG.status + ' ' + String(rG.body || rG.erro || '').slice(0, 160); continue; }
-        if (!lin) { _mlcred.sem_linha_no_historico++; continue; }   // venda não está no histórico (ex.: pack/order que o Bling gravou diferente OU período não backfillado)
+        if (!lin) { _mlcred.sem_linha_no_historico++; continue; }
         if (lin.credito_ml != null && Math.abs(Number(lin.credito_ml) - cred) < 0.005) { _mlcred.ja_iguais++; continue; }
         const rP = await supaReq('amb', 'PATCH', 'vendas_historico?id=eq.' + encodeURIComponent(lin.id), { credito_ml: cred });
         if (rP.ok) _mlcred.gravados++;
@@ -5115,7 +5147,7 @@ async function aplicarCreditosFlex(de, ate) {
     }
   } catch (e) { _mlcred.erros++; _mlcred.ultima_falha = String(e.message || e).slice(0, 160); }
   _mlcred.rodando = false; _mlcred.fim = new Date().toISOString();
-  console.log('[ML-CREDITOS] fim — ' + _mlcred.gravados + ' gravado(s) de ' + _mlcred.pedidos + ' pedido(s) com crédito | sem venda: ' + _mlcred.sem_venda + ' | erros: ' + _mlcred.erros);
+  console.log('[ML-CREDITOS] fim — ' + _mlcred.gravados + ' gravado(s) de ' + _mlcred.pedidos + ' venda(s) com bônus | ignorados (outros créditos): ' + Object.values(_mlcred.ignorados_por_texto).reduce((a, b) => a + b, 0) + ' | erros: ' + _mlcred.erros);
   return _mlcred;
 }
 
