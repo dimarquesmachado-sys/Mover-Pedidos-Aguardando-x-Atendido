@@ -919,7 +919,15 @@ liga('bAmb','amb'); liga('bGood','good');
         const tx = await r.text();
         let j = null; try { j = JSON.parse(tx); } catch (e) {}
         const arr = (j && (j.results || j.orders || (Array.isArray(j) ? j : []))) || [];
-        if (!r.ok || !arr.length) { if (!r.ok && off === 0) out.http = { status: r.status, corpo: tx.slice(0, 200) }; break; }
+        // (Codex PR#25) falha da Magalu NÃO pode virar "período vazio" com ok:true — quem
+        // consome trataria como completo e o mês ficaria faltando pedidos pra sempre, calado.
+        if (!r.ok) {
+          out.http = { status: r.status, corpo: tx.slice(0, 200) };
+          if (off === 0) { out.ok = false; out.erro = 'Magalu recusou a listagem: HTTP ' + r.status + ' ' + tx.slice(0, 100); }
+          else { out.parcial = true; out.erro_lista = 'HTTP ' + r.status + ' na página ' + (off / 50 + 1); }
+          break;
+        }
+        if (!arr.length) break;
         for (const o of arr) {
           if (!o) continue;
           if (!cru1) cru1 = o;
@@ -942,14 +950,28 @@ liga('bAmb','amb'); liga('bGood','good');
           // em `items`, ora dentro de cada `deliveries[]`, com nomes variados de campo.
           let itens = [];
           try {
-            const fontes = [].concat(o.items || [], ...((o.deliveries || []).map(dl => dl.items || [])));
-            itens = fontes.map(i3 => ({
-              sku: String((i3.sku || i3.seller_sku || i3.code || (i3.product && (i3.product.sku || i3.product.code)) || '')).trim() || null,
-              qtd: Number(i3.quantity != null ? i3.quantity : (i3.qty != null ? i3.qty : 1)) || 1,
-              valor: Number(i3.unit_price != null ? i3.unit_price
-                     : (i3.price != null ? i3.price
-                     : ((i3.amounts && (i3.amounts.unit != null ? i3.amounts.unit : i3.amounts.total)) || 0))) || 0
-            })).filter(x => x.sku || x.valor);
+            // (Codex PR#25) UMA representação só: a Magalu às vezes repete os mesmos itens em
+            // `items` E dentro de cada `deliveries[]`. Concatenar duplicava quantidade, custo e
+            // margem do pedido. Prioridade: items do pedido; só se vazio, os das entregas.
+            let fontes = Array.isArray(o.items) && o.items.length ? o.items : [];
+            if (!fontes.length) fontes = [].concat(...((o.deliveries || []).map(dl => dl.items || [])));
+            itens = fontes.map(i3 => {
+              const qtd = Number(i3.quantity != null ? i3.quantity : (i3.qty != null ? i3.qty : 1)) || 1;
+              // (Codex PR#25) `amounts.total` é o total DA LINHA, não o unitário — quem consome
+              // multiplica por qtd de novo. Convertido aqui, senão o faturamento sai qtd× maior.
+              let valor = null;
+              if (i3.unit_price != null) valor = Number(i3.unit_price);
+              else if (i3.price != null) valor = Number(i3.price);
+              else if (i3.amounts && i3.amounts.unit != null) valor = Number(i3.amounts.unit);
+              else if (i3.amounts && i3.amounts.total != null) valor = Number(i3.amounts.total) / (qtd || 1);
+              else if (i3.total != null) valor = Number(i3.total) / (qtd || 1);
+              return {
+                sku: String((i3.sku || i3.seller_sku || i3.code || (i3.product && (i3.product.sku || i3.product.code)) || '')).trim() || null,
+                desc: String((i3.name || i3.title || (i3.product && i3.product.name) || '')).slice(0, 120) || null,
+                qtd,
+                valor: Number(valor) || 0
+              };
+            }).filter(x => x.sku || x.valor);
           } catch (e) {}
           out.pedidos.push({
             code,
