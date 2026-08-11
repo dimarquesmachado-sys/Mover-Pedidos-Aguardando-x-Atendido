@@ -178,6 +178,51 @@ function rotasCanario(ctx) {
     return { nome: 'Disco · caches do ciclo', estado, detalhe: partes.join(' · '), ms: Date.now() - t0 };
   }
 
+
+  // ── 5. SERVIÇOS VIZINHOS: o que o dashboard consome por HTTP está de pé? ────
+  //  11/08 — nasceu de um prejuízo real: o host do serviço da Shopee estava
+  //  errado no código (era o nome do REPO, não o do serviço no Render). Toda
+  //  chamada voltava 404 e o sistema anotava "escrow sem resposta", como se a
+  //  Shopee é que não tivesse respondido. Passou DESPERCEBIDO DE JANEIRO A
+  //  AGOSTO — 8 meses de tarifa estimada em vez de real, em metade das vendas.
+  //  Serviço separado é um contrato como outro qualquer: tem que ser vigiado.
+  async function checaServicos() {
+    const t0 = Date.now();
+    const shURL = (process.env.AMBBKP_SHOPEE_SYNC_URL || 'https://girassol-shopee-sync-organizar-envio.onrender.com').replace(/\/+$/, '');
+    const shKey = String(process.env.AMBBKP_SHOPEE_SYNC_KEY || process.env.SHOPEE_SYNC_KEY || '').trim();
+    const loja = process.env.AMBBKP_SHOPEE_SYNC_LOJA || 'amb';
+    const partes = [];
+    let estado = 'ok';
+    // (a) o host existe e é o serviço certo?
+    try {
+      const r = await fetch(shURL + '/', { timeout: 20000 });
+      const txt = await r.text().catch(() => '');
+      if (!r.ok) { estado = 'erro'; partes.push('host ' + shURL + ' respondeu HTTP ' + r.status + ' (' + txt.slice(0, 40).replace(/\s+/g, ' ') + ') — SERVIÇO ERRADO OU FORA'); }
+      else if (!/\{/.test(txt)) { estado = 'alerta'; partes.push('host respondeu, mas não parece o serviço (sem JSON na raiz)'); }
+      else partes.push('host de pé');
+    } catch (e) { estado = 'erro'; partes.push('host ' + shURL + ' inacessível: ' + String(e.message || e).slice(0, 60)); }
+    // (b) a loja da AMB é atendida E a chave é aceita? (1 pedido, só leitura)
+    if (estado !== 'erro') {
+      if (!shKey) { estado = 'alerta'; partes.push('sem chave configurada (AMBBKP_SHOPEE_SYNC_KEY / SHOPEE_SYNC_KEY)'); }
+      else {
+        try {
+          const r2 = await fetch(shURL + '/' + loja + '/interno/pedidos-do-dia?horas=24&k=' + encodeURIComponent(shKey), { timeout: 45000 });
+          const j2 = await r2.json().catch(() => null);
+          if (r2.status === 401) { estado = 'erro'; partes.push('loja ' + loja + ': chave RECUSADA (401) — a env não bate com a INTERNAL_KEY do serviço'); }
+          else if (r2.status === 404) { estado = 'erro'; partes.push('loja ' + loja + ': rota não existe (404) — serviço desatualizado ou loja não configurada'); }
+          else if (!r2.ok || !j2 || !j2.ok) { estado = 'erro'; partes.push('loja ' + loja + ': HTTP ' + r2.status + ' ' + String((j2 && j2.erro) || '').slice(0, 60)); }
+          else {
+            partes.push('loja ' + loja + ': responde (' + (j2.listados != null ? j2.listados : '?') + ' pedido(s) em 24h)');
+            // Codex PR#19: o serviço dizendo "minha lista está INCOMPLETA" não pode sair
+            // verde — o canário ficaria calado justamente quando falta venda.
+            if (j2.parcial) { estado = (estado === 'erro' ? 'erro' : 'alerta'); partes.push('⚠️ resposta PARCIAL' + (j2.erro_lista ? ': ' + String(j2.erro_lista).slice(0, 60) : '') + (j2.truncado ? ' (truncada)' : '')); }
+          }
+        } catch (e) { estado = 'erro'; partes.push('loja ' + loja + ': ' + String(e.message || e).slice(0, 60)); }
+      }
+    }
+    return { nome: 'Serviço Shopee (sync) · host, loja e chave', estado, detalhe: partes.join(' · '), ms: Date.now() - t0 };
+  }
+
   return async function handleCanario(req, res, urlObj) {
     const { method } = req;
     const p = urlObj.pathname;
@@ -186,7 +231,7 @@ function rotasCanario(ctx) {
       if (!admOk(req, urlObj)) { json(res, 404, { error: 'not found' }); return true; }
       const t0 = Date.now();
       const checagens = [];
-      for (const fn of [checaBling, checaML]) {
+      for (const fn of [checaBling, checaML, checaServicos]) {
         try { checagens.push(await fn()); }
         catch (e) { checagens.push({ nome: fn.name, estado: 'erro', detalhe: 'exceção: ' + String(e.message || e) }); }
       }
