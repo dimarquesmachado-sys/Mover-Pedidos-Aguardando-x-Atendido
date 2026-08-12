@@ -821,10 +821,21 @@ function routes(readBody) {
       const idsTodos = String(urlObj.searchParams.get('pedidos') || '').split(',').map(s => s.trim()).filter(Boolean);
       if (!idsTodos.length) { json(res, 400, { ok: false, erro: 'use ?pedidos=id1,id2,…' }); return true; }
       if (idsTodos.length > 120) { json(res, 400, { ok: false, erro: 'máximo 120 pedidos por lote (recebi ' + idsTodos.length + ') — divida em dois' }); return true; }   // Codex PR#41: nunca cortar em silêncio
-      const ids = idsTodos;
+      // 12/08 (achado no 1º uso real): o galpão/o Diego digita o NÚMERO da venda (74816), mas a
+      // pasta do cache usa a CHAVE do Bling — mesma tradução do /debug-nf-simp: sem pasta, procura
+      // o numero (e o numero_loja) no manifesto. Assim a rota aceita os dois formatos.
+      const manDL = manifest();
+      const resolveDL = (x) => {
+        const s = String(x);
+        try { if (fs.existsSync(path.join(CACHE_DIR, s, 'pedido.json')) || fs.existsSync(path.join(CACHE_DIR, s, 'danfe.pdf'))) return s; } catch (e) {}
+        const k = Object.keys(manDL).find(k2 => String(manDL[k2].numero) === s || String(manDL[k2].numero_loja || '') === s || String(manDL[k2].nf_numero || '') === s);
+        return k || s;
+      };
+      const ids = idsTodos.map(resolveDL);
       const { PDFDocument } = require('pdf-lib');
       const docs = [], achadas = [], faltando = [];
-      for (const idL of ids) {
+      for (let iDL = 0; iDL < ids.length; iDL++) {
+        const idL = ids[iDL], rotuloDL = idsTodos[iDL];
         const dirL = path.join(CACHE_DIR, String(idL));
         let nfB = null;
         try { nfB = fs.readFileSync(path.join(dirL, 'danfe.pdf')); } catch (e) {}
@@ -846,7 +857,7 @@ function routes(readBody) {
         // Codex PR#41: valida o PDF JÁ NA COLETA — truncado/cifrado não vira "achada"
         let docL = null;
         if (nfB) { try { docL = await PDFDocument.load(nfB); } catch (e) { docL = null; } }
-        if (docL && docL.getPageCount() > 0) { docs.push([idL, docL]); achadas.push(idL); } else faltando.push(idL);
+        if (docL && docL.getPageCount() > 0) { docs.push([rotuloDL, docL]); achadas.push(rotuloDL); } else faltando.push(rotuloDL);
       }
       if (urlObj.searchParams.get('json')) { json(res, 200, { ok: true, pedidas: ids.length, achadas, faltando }); return true; }
       if (!docs.length) { json(res, 404, { ok: false, erro: 'nenhuma DANFE válida encontrada', faltando }); return true; }
