@@ -376,7 +376,9 @@ function routes(readBody) {
         p === '/amb-checkout-offline/shopee-semear' ||   // semear cookie da sessao (auth propria por ?k=)
         p === '/amb-checkout-offline/shopee-devolucao' ||   // devolucao entregue? (auth propria por ?k= ou sessao admin)
         p === '/amb-checkout-offline/sonda-un' ||   // sonda de unidade de negócio (auth própria por ?k=)
-        p === '/amb-checkout-offline/dashboard'   // Codex PR#38: auth PRÓPRIA na rota (sessão ADMIN ou ?k=) — o gate barrava o ?k= sem cookie
+        p === '/amb-checkout-offline/dashboard' ||   // Codex PR#38: auth PRÓPRIA na rota (sessão ADMIN ou ?k=) — o gate barrava o ?k= sem cookie
+        p === '/amb-checkout-offline/historico' ||   // Codex PR#38 P1/P2: auth própria em camadas (admin completo / operador stripado / anônimo só com k)
+        p === '/amb-checkout-offline/ml-billing-resumo'   // Codex PR#38: auth própria (admin)
       );
       const _central = (
         p.includes('/run') || p.includes('/setup') || p.includes('/robo') ||
@@ -1856,6 +1858,10 @@ function routes(readBody) {
     }
 
     if (method === 'GET' && p === '/amb-checkout-offline/ml-billing-resumo') {
+      // Codex PR#38 (P1): financeiro é SÓ ADMIN — mesma guarda das rotas irmãs do dashboard
+      const sBil = validarSessao(req.headers['cookie']);
+      const kBil = urlObj.searchParams.get('k') || '';
+      if (!((process.env.ADMIN_KEY && kBil === process.env.ADMIN_KEY) || (sBil && ehAdmin(sBil)))) { json(res, 404, { error: 'not found' }); return true; }
       const b = readJson(MLB_FILE(), { porDia: {} });
       const deB = String(urlObj.searchParams.get('de') || '').slice(0, 10);
       const ateB = String(urlObj.searchParams.get('ate') || '').slice(0, 10);
