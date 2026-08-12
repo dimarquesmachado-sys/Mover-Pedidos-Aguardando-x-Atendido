@@ -40,7 +40,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.GOODBKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GOODBKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'good-checkout-offline v11/08 b18';
+const VERSAO     = 'good-checkout-offline v12/08 b19';
 
 // ── SESSÃO DE OPERADOR (cookie assinado HMAC) — protege rotas de dados/ação ──
 // Segredo estável entre restarts. Usa ADMIN_KEY (já configurada no Render) como base.
@@ -408,7 +408,8 @@ function routes(readBody) {
         p === '/good-checkout-offline/painel' || p === '/good-checkout-offline/login' ||
         p === '/good-checkout-offline/operadores' || p === '/good-checkout-offline/health' ||
         p === '/good-checkout-offline/saude' || p.includes('/callback') ||
-        p === '/good-checkout-offline/qz-cert' || p === '/good-checkout-offline/qz-sign'
+        p === '/good-checkout-offline/qz-cert' || p === '/good-checkout-offline/qz-sign' ||
+        p === '/good-checkout-offline/danfes-lote'   // Codex PR#41: auth própria na rota (302+admin) — o gate devolvia 401 JSON antes do redirect
       );
       const _central = (
         p.includes('/run') || p.includes('/setup') || p.includes('/robo') ||
@@ -807,6 +808,59 @@ function routes(readBody) {
       }
       console.log('[GOODBKP] etiquetas em MASSA: ' + casadas.length + ' anexada(s), ' + sem_pedido.length + ' sem pedido, ' + invalidas.length + ' inválida(s) — por ' + quemM);
       json(res, 200, { ok: true, total: lista.length, decodificadas, sem_codigo, anexadas: casadas.length, casadas, sem_pedido, ambiguas, invalidas });
+      return true;
+    }
+
+    // ── DANFEs em LOTE (12/08, caso das 29 DANFEs trocadas pela Shopee): junta as NFs
+    // corretas de N pedidos num PDF único pro galpão imprimir 1 arquivo e colar sobre o
+    // rodapé errado das etiquetas. Fonte: danfe.pdf do cache; fallback baixarDanfe com a
+    // MESMA guarda do /imprimir (nunca baixa NF velha por cima de nota anexada — PR#5).
+    if (method === 'GET' && p === '/good-checkout-offline/danfes-lote') {
+      const opSessDL = validarSessao(req.headers['cookie']);
+      if (!opSessDL || !ehAdmin(opSessDL)) { res.writeHead(302, { Location: '/good-checkout-offline/' }); res.end(); return true; }
+      const idsTodos = String(urlObj.searchParams.get('pedidos') || '').split(',').map(s => s.trim()).filter(Boolean);
+      if (!idsTodos.length) { json(res, 400, { ok: false, erro: 'use ?pedidos=id1,id2,…' }); return true; }
+      if (idsTodos.length > 120) { json(res, 400, { ok: false, erro: 'máximo 120 pedidos por lote (recebi ' + idsTodos.length + ') — divida em dois' }); return true; }   // Codex PR#41: nunca cortar em silêncio
+      const ids = idsTodos;
+      const { PDFDocument } = require('pdf-lib');
+      const docs = [], achadas = [], faltando = [];
+      for (const idL of ids) {
+        const dirL = path.join(CACHE_DIR, String(idL));
+        let nfB = null;
+        try { nfB = fs.readFileSync(path.join(dirL, 'danfe.pdf')); } catch (e) {}
+        if (!nfB) {
+          const snapL = readJson(path.join(dirL, 'pedido.json'), null);
+          if (snapL && !snapL.nf_anexada && snapL.nf && snapL.nf.id) {
+            const baixado = await baixarDanfe(snapL.nf.id);
+            // Codex PR#41 (P1): um admin pode ter ANEXADO a NF corrigida enquanto o download
+            // rodava — re-lê o snapshot e o disco DEPOIS do await; anexo novo vence o Bling velho
+            const snapL2 = readJson(path.join(dirL, 'pedido.json'), null);
+            if (snapL2 && snapL2.nf_anexada) {
+              try { nfB = fs.readFileSync(path.join(dirL, 'danfe.pdf')); } catch (e) {}
+            } else if (baixado) {
+              nfB = baixado;
+              try { ensureDir(dirL); fs.writeFileSync(path.join(dirL, 'danfe.pdf'), nfB); } catch (e) {}
+            }
+          }
+        }
+        // Codex PR#41: valida o PDF JÁ NA COLETA — truncado/cifrado não vira "achada"
+        let docL = null;
+        if (nfB) { try { docL = await PDFDocument.load(nfB); } catch (e) { docL = null; } }
+        if (docL && docL.getPageCount() > 0) { docs.push([idL, docL]); achadas.push(idL); } else faltando.push(idL);
+      }
+      if (urlObj.searchParams.get('json')) { json(res, 200, { ok: true, pedidas: ids.length, achadas, faltando }); return true; }
+      if (!docs.length) { json(res, 404, { ok: false, erro: 'nenhuma DANFE válida encontrada', faltando }); return true; }
+      try {
+        const outDL = await PDFDocument.create();
+        for (const [idL, srcDL] of docs) {
+          try { const pgs = await outDL.copyPages(srcDL, srcDL.getPageIndices()); pgs.forEach(pg => outDL.addPage(pg)); }
+          catch (e) { faltando.push(idL); }
+        }
+        if (!outDL.getPageCount()) { json(res, 422, { ok: false, erro: 'nenhuma página copiada', faltando }); return true; }   // Codex PR#41: nunca 200 com PDF vazio
+        const mergedDL = Buffer.from(await outDL.save());
+        res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': 'inline; filename="danfes-lote.pdf"', 'X-Faltando': faltando.join(',') });
+        res.end(mergedDL);
+      } catch (e) { json(res, 500, { ok: false, erro: 'pdf-lib: ' + String(e.message || e).slice(0, 120), faltando }); }
       return true;
     }
 
