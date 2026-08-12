@@ -40,7 +40,7 @@ const { fundirEtiquetaComDanfe } = require('./fusao-etiqueta');
 const QZ_CERT    = (process.env.GOODBKP_QZ_CERT    || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 const QZ_PRIVKEY = (process.env.GOODBKP_QZ_PRIVKEY || '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
-const VERSAO     = 'good-checkout-offline v11/08 b18';
+const VERSAO     = 'good-checkout-offline v12/08 b19';
 
 // ── SESSÃO DE OPERADOR (cookie assinado HMAC) — protege rotas de dados/ação ──
 // Segredo estável entre restarts. Usa ADMIN_KEY (já configurada no Render) como base.
@@ -807,6 +807,45 @@ function routes(readBody) {
       }
       console.log('[GOODBKP] etiquetas em MASSA: ' + casadas.length + ' anexada(s), ' + sem_pedido.length + ' sem pedido, ' + invalidas.length + ' inválida(s) — por ' + quemM);
       json(res, 200, { ok: true, total: lista.length, decodificadas, sem_codigo, anexadas: casadas.length, casadas, sem_pedido, ambiguas, invalidas });
+      return true;
+    }
+
+    // ── DANFEs em LOTE (12/08, caso das 29 DANFEs trocadas pela Shopee): junta as NFs
+    // corretas de N pedidos num PDF único pro galpão imprimir 1 arquivo e colar sobre o
+    // rodapé errado das etiquetas. Fonte: danfe.pdf do cache; fallback baixarDanfe com a
+    // MESMA guarda do /imprimir (nunca baixa NF velha por cima de nota anexada — PR#5).
+    if (method === 'GET' && p === '/good-checkout-offline/danfes-lote') {
+      const opSessDL = validarSessao(req.headers['cookie']);
+      if (!opSessDL || !ehAdmin(opSessDL)) { res.writeHead(302, { Location: '/good-checkout-offline/' }); res.end(); return true; }
+      const ids = String(urlObj.searchParams.get('pedidos') || '').split(',').map(s => s.trim()).filter(Boolean).slice(0, 120);
+      if (!ids.length) { json(res, 400, { ok: false, erro: 'use ?pedidos=id1,id2,…' }); return true; }
+      const bufs = [], achadas = [], faltando = [];
+      for (const idL of ids) {
+        const dirL = path.join(CACHE_DIR, String(idL));
+        let nfB = null;
+        try { nfB = fs.readFileSync(path.join(dirL, 'danfe.pdf')); } catch (e) {}
+        if (!nfB) {
+          const snapL = readJson(path.join(dirL, 'pedido.json'), null);
+          if (snapL && !snapL.nf_anexada && snapL.nf && snapL.nf.id) {
+            nfB = await baixarDanfe(snapL.nf.id);
+            if (nfB) { try { ensureDir(dirL); fs.writeFileSync(path.join(dirL, 'danfe.pdf'), nfB); } catch (e) {} }
+          }
+        }
+        if (nfB) { bufs.push([idL, nfB]); achadas.push(idL); } else faltando.push(idL);
+      }
+      if (urlObj.searchParams.get('json')) { json(res, 200, { ok: true, pedidas: ids.length, achadas, faltando }); return true; }
+      if (!bufs.length) { json(res, 404, { ok: false, erro: 'nenhuma DANFE encontrada', faltando }); return true; }
+      try {
+        const { PDFDocument } = require('pdf-lib');
+        const outDL = await PDFDocument.create();
+        for (const [idL, b] of bufs) {
+          try { const src = await PDFDocument.load(b); const pgs = await outDL.copyPages(src, src.getPageIndices()); pgs.forEach(pg => outDL.addPage(pg)); }
+          catch (e) { faltando.push(idL); }
+        }
+        const mergedDL = Buffer.from(await outDL.save());
+        res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': 'inline; filename="danfes-lote.pdf"', 'X-Faltando': faltando.join(',') });
+        res.end(mergedDL);
+      } catch (e) { json(res, 500, { ok: false, erro: 'pdf-lib: ' + String(e.message || e).slice(0, 120), faltando }); }
       return true;
     }
 
