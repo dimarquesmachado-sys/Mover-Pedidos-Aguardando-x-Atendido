@@ -5223,7 +5223,9 @@ async function aplicarCreditosFlex(de, ate) {
       await new Promise(r5 => setTimeout(r5, 90));
     }
     for (const [cidC, rC] of Object.entries(credPorCid)) {
-      if (confL[cidC] && Math.abs(Number(confL[cidC].credito_ml || 0) - rC.cred) >= 0.005) {
+      // Codex PR#40 2ª leva: a FONTE atualiza mesmo com o valor igual — sem o carimbo 'billing',
+      // a guarda do salvar não protege este crédito e o próximo /costs vazio o apagaria
+      if (confL[cidC] && (Math.abs(Number(confL[cidC].credito_ml || 0) - rC.cred) >= 0.005 || confL[cidC].credito_fonte !== 'billing')) {
         confL[cidC].credito_ml = rC.cred; confL[cidC].credito_fonte = 'billing'; mudouConf = true; _mlcred.carimbados_local++;
       }
     }
@@ -5232,7 +5234,11 @@ async function aplicarCreditosFlex(de, ate) {
         // re-read anti-corrida (mesmo padrão da rota de massa): o bipe pode ter mexido no arquivo
         const confF = readJson(CONFERIDOS_FILE, {});
         let algum = false;
-        for (const [cidF, cF] of Object.entries(confL)) { if (cF && cF.credito_fonte === 'billing' && confF[cidF] && Math.abs(Number(confF[cidF].credito_ml || 0) - Number(cF.credito_ml || 0)) >= 0.005) { confF[cidF].credito_ml = cF.credito_ml; confF[cidF].credito_fonte = 'billing'; algum = true; } }
+        // Codex PR#40 2ª leva: só os ids RECALCULADOS nesta rodada — varrer o confL inteiro
+        // re-imporia snapshots billing velhos por cima do que outro writer gravou no meio
+        for (const [cidF, rF] of Object.entries(credPorCid)) {
+          if (confF[cidF] && (Math.abs(Number(confF[cidF].credito_ml || 0) - rF.cred) >= 0.005 || confF[cidF].credito_fonte !== 'billing')) { confF[cidF].credito_ml = rF.cred; confF[cidF].credito_fonte = 'billing'; algum = true; }
+        }
         if (algum) writeJson(CONFERIDOS_FILE, confF);
       } catch (e) {}
     }
