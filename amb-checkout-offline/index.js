@@ -5190,21 +5190,24 @@ async function aplicarCreditosFlex(de, ate) {
     for (const [cidL, cL] of Object.entries(confL)) {
       for (const chL of [cL && cL.ml_order, cL && cL.ml_pack, cL && cL.numero_loja]) { if (chL && idxConf[String(chL)] === undefined) idxConf[String(chL)] = cidL; }
     }
-    const vdPathL = path.join(CACHE_DIR, '_vendas_dia.json');
-    const vdL = readJson(vdPathL, {});
-    let mudouConf = false, mudouVd = false;
+    // Codex PR#40: num carrinho, somaPorChave tem o PACK (total) e as orders (parciais), e os
+    // dois aliases apontam pro MESMO conferido — resolver por REGISTRO, com o pack canônico
+    // vencendo (parcial nunca sobrescreve total). credPorNL alimenta o _vendas_dia no fim.
+    const credPorCid = {};   // cid → { cred, ehPack }
+    const credPorNL = {};    // numero_loja → cred (pro merge tardio do _vendas_dia)
+    let mudouConf = false;
     _mlcred.carimbados_local = 0;
     for (const nl of Object.keys(somaPorChave)) {
       let cred = 0; for (const tf of somaPorChave[nl]) cred += Math.abs(Number(tf.v) || 0);
       cred = Math.round(cred * 100) / 100;
       if (!(cred > 0)) continue;
       _mlcred.pedidos++;
+      credPorNL[String(nl)] = Math.max(credPorNL[String(nl)] || 0, cred);
       const cidL2 = idxConf[String(nl)];
-      if (cidL2 && confL[cidL2] && Math.abs(Number(confL[cidL2].credito_ml || 0) - cred) >= 0.005) {
-        confL[cidL2].credito_ml = cred; confL[cidL2].credito_fonte = 'billing'; mudouConf = true; _mlcred.carimbados_local++;
-      }
-      for (const vL of Object.values(vdL)) {
-        if (vL && String(vL.numero_loja || '') === String(nl) && Math.abs(Number(vL.credito_ml || 0) - cred) >= 0.005) { vL.credito_ml = cred; mudouVd = true; }
+      if (cidL2 && confL[cidL2]) {
+        const ehPack = String(confL[cidL2].ml_pack || '') === String(nl);
+        const atual = credPorCid[cidL2];
+        if (!atual || (ehPack && !atual.ehPack) || (ehPack === !!atual.ehPack && cred > atual.cred)) credPorCid[cidL2] = { cred, ehPack };
       }
       try {
         const rG = await supaReq('amb', 'GET', 'vendas_historico?empresa=eq.amb&canal=eq.ml&numero_loja=eq.' + encodeURIComponent(nl) + '&select=id,credito_ml&order=id.asc&limit=1', null);
@@ -5219,6 +5222,11 @@ async function aplicarCreditosFlex(de, ate) {
       } catch (e) { _mlcred.erros++; _mlcred.ultima_falha = String(e.message || e).slice(0, 160); }
       await new Promise(r5 => setTimeout(r5, 90));
     }
+    for (const [cidC, rC] of Object.entries(credPorCid)) {
+      if (confL[cidC] && Math.abs(Number(confL[cidC].credito_ml || 0) - rC.cred) >= 0.005) {
+        confL[cidC].credito_ml = rC.cred; confL[cidC].credito_fonte = 'billing'; mudouConf = true; _mlcred.carimbados_local++;
+      }
+    }
     if (mudouConf) {
       try {
         // re-read anti-corrida (mesmo padrão da rota de massa): o bipe pode ter mexido no arquivo
@@ -5228,7 +5236,18 @@ async function aplicarCreditosFlex(de, ate) {
         if (algum) writeJson(CONFERIDOS_FILE, confF);
       } catch (e) {}
     }
-    if (mudouVd) { try { writeJson(vdPathL, vdL); } catch (e) {} }
+    // Codex PR#40 (P1): o vendasSync de 5min reescreve _vendas_dia no meio da rodada — re-lê
+    // AGORA e mescla SÓ os créditos calculados, nunca o snapshot inteiro de minutos atrás
+    try {
+      const vdPathL = path.join(CACHE_DIR, '_vendas_dia.json');
+      const vdF = readJson(vdPathL, {});
+      let mudouVdF = false;
+      for (const vF of Object.values(vdF)) {
+        const cF = credPorNL[String((vF && vF.numero_loja) || '')];
+        if (cF && Math.abs(Number(vF.credito_ml || 0) - cF) >= 0.005) { vF.credito_ml = cF; mudouVdF = true; }
+      }
+      if (mudouVdF) writeJson(vdPathL, vdF);
+    } catch (e) {}
   } catch (e) { _mlcred.erros++; _mlcred.ultima_falha = String(e.message || e).slice(0, 160); }
   _mlcred.rodando = false; _mlcred.fim = new Date().toISOString();
   console.log('[ML-CREDITOS] fim — ' + _mlcred.gravados + ' gravado(s) de ' + _mlcred.pedidos + ' venda(s) com bônus | ignorados (outros créditos): ' + Object.values(_mlcred.ignorados_por_texto).reduce((a, b) => a + b, 0) + ' | erros: ' + _mlcred.erros);
@@ -6154,7 +6173,7 @@ async function mlSyncFees(dias) {
   const salvar = () => {
     if (!Object.keys(pend).length) return;
     const c2 = readJson(CONFERIDOS_FILE, {});
-    for (const [cid, d] of Object.entries(pend)) { if (!c2[cid]) continue; if (d.fee != null) c2[cid].tarifa_ml = d.fee; if (d.frete != null) c2[cid].frete_ml = d.frete; if (d.venda) c2[cid].venda_em = d.venda; if (d.credito != null) c2[cid].credito_ml = d.credito; if (d.credito_fonte) c2[cid].credito_fonte = d.credito_fonte; if (d.logistica) c2[cid].logistica_ml = d.logistica; if (d.pack) c2[cid].ml_pack = d.pack; if (d.order) c2[cid].ml_order = d.order; if (d.costs_ok) { c2[cid].ml_costs_v3 = 1; if (d.credito == null) delete c2[cid].credito_ml; if (d.frete == null) delete c2[cid].frete_ml; } }
+    for (const [cid, d] of Object.entries(pend)) { if (!c2[cid]) continue; if (d.fee != null) c2[cid].tarifa_ml = d.fee; if (d.frete != null) c2[cid].frete_ml = d.frete; if (d.venda) c2[cid].venda_em = d.venda; if (d.credito != null) c2[cid].credito_ml = d.credito; if (d.credito_fonte) c2[cid].credito_fonte = d.credito_fonte; if (d.logistica) c2[cid].logistica_ml = d.logistica; if (d.pack) c2[cid].ml_pack = d.pack; if (d.order) c2[cid].ml_order = d.order; if (d.costs_ok) { c2[cid].ml_costs_v3 = 1; if (d.credito == null && c2[cid].credito_fonte !== 'billing') delete c2[cid].credito_ml; /* Codex PR#40: /costs vazio não apaga crédito do billing */ if (d.frete == null) delete c2[cid].frete_ml; } }
     writeJson(CONFERIDOS_FILE, c2);
     for (const cid of Object.keys(pend)) delete pend[cid];
   };
