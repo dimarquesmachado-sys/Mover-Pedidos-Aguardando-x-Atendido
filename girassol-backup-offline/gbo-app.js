@@ -390,8 +390,15 @@ function routes(readBody) {
       );
       if (_meu && !_pub && !_central) {
         const _op = validarSessao(req.headers['cookie']);
-        if (!_op) { json(res, 401, { ok: false, erro: 'Sessão necessária. Faça login.' }); return true; }
-        req._op = _op;
+        if (!_op) {
+          // Codex PR#38 (2ª rodada): a ADMIN_KEY vale como credencial já no gate — o fluxo
+          // ?k= do dashboard chama /historico-longo, /previsao-vendas, /plano-compra, /sku-info
+          // etc., e todas morriam aqui no 401 antes de a guarda admin própria delas avaliar a
+          // chave. Cada rota de dados continua revalidando (chave OU sessão admin) por conta.
+          const _kG = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+          if (process.env.ADMIN_KEY && _kG === process.env.ADMIN_KEY) { req._op = 'admin-key'; }
+          else { json(res, 401, { ok: false, erro: 'Sessão necessária. Faça login.' }); return true; }
+        } else { req._op = _op; }
       }
     }
 
