@@ -824,12 +824,14 @@ function routes(readBody) {
       // 12/08 (achado no 1º uso real): o galpão/o Diego digita o NÚMERO da venda (74816), mas a
       // pasta do cache usa a CHAVE do Bling — mesma tradução do /debug-nf-simp: sem pasta, procura
       // o numero (e o numero_loja) no manifesto. Assim a rota aceita os dois formatos.
-      const manDL = manifest();
       // 12/08 (regra do Diego): NF EXATA ou não pega — nada de cascata/adivinhação. Aceita a
       // chave da pasta do cache (uso interno) ou o NÚMERO DA NF; dois pedidos com a mesma NF
       // (não deve existir) não escolhem nenhum — cai em faltando com o motivo.
       const resolveDL = (x) => {
-        const s = String(x).replace(/^0+/, '');   // 077488 e 77488 são a mesma NF
+        // Codex PR#42: o manifesto e RELIDO a cada item — o ciclo de fundo pode reassociar a
+        // NF de um pedido enquanto o lote roda, e um mapa velho entregaria a NF B sob o rotulo A
+        const manDL = manifest();
+        const s = String(x).replace(/^0+/, '');   // 077488 e 77488 sao a mesma NF
         try { if (fs.existsSync(path.join(CACHE_DIR, String(x), 'pedido.json')) || fs.existsSync(path.join(CACHE_DIR, String(x), 'danfe.pdf'))) return { id: String(x) }; } catch (e) {}
         // Codex PR#42: '0'/'00' normaliza pra vazio e casaria com todo pedido SEM nf_numero
         if (!s) return { id: null, ambiguo: 'número de NF inválido' };
