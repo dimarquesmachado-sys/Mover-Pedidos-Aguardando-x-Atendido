@@ -383,7 +383,12 @@ function rotasHistorico(ctx) {
       if (!admH9) {
         // camada estoquista: some o financeiro dos itens e a lista de vendas (só o modal 🕘 usa esta rota sem admin)
         const FIN9 = ['custo','margem','tarifa_ml','frete_ml','credito_ml','credito_fonte','frete_recebido','renda_canal','comissao','imposto','valor_produto','valor_nota','valor','logistica_ml','venda_em','dev_frete_retorno','ml_costs_v3'];
-        for (const it9 of itens) { for (const c9 of FIN9) { if (c9 in it9) delete it9[c9]; } }
+        for (const it9 of itens) {
+          for (const c9 of FIN9) { if (c9 in it9) delete it9[c9]; }
+          // Codex PR#38 (2ª rodada): o financeiro TAMBÉM mora dentro de h.itens — o injetor de
+          // custo-pronto acabou de pôr `custo` por linha, e o bipe grava valor_unit/valor_total
+          if (Array.isArray(it9.itens)) it9.itens = it9.itens.map(li9 => { const o9 = Object.assign({}, li9); for (const c9 of ['custo','valor_unit','valor_total','valor','preco','vprod_nf','taxa_mkt','frete_mkt']) { if (c9 in o9) delete o9[c9]; } return o9; });
+        }
         while (vendasB.length) vendasB.pop();
       }
       json(res, 200, { ok: true, total: Object.keys(conf).length, itens, reenvios, reenvio_direto: reenvioDireto, vendas_bling: vendasB });
