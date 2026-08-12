@@ -389,7 +389,7 @@ const MOD = '/girassol-backup-offline';
     return _f(u, o);
   };
 })();
-const DASH_BUILD = 'd200';
+const DASH_BUILD = 'd201';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -1295,14 +1295,6 @@ function montar(){
         '<div style="margin-top:5px"><b>Estorno:</b> \u00e9 o valor da linha \"Estorno\" da venda no ML \u2014 no Flex ele j\u00e1 chega l\u00edquido (bonifica\u00e7\u00e3o menos o frete cobrado) e SOMA na margem. No <b>Flex</b>, o custo do frete \u00e9 o valor do motoboy que voc\u00ea configurou no \u2699\ufe0f.</div>'+
         '<div style="margin-top:5px">Pra <b>confrontar com o Jodda</b>: baixe o \u2b07\ufe0e <b>Excel</b> e case pelo n\u00famero da venda no marketplace \u2014 \u00e9 o \u00fanico campo que existe igual nos dois lados.</div>'+
       '</div></div>'+
-    '<div class="sec" id="secMLB"><h2>\ud83d\udcb8 Despesas do Mercado Livre <span class="hint">do per\u00edodo \u00b7 fora da margem por pedido</span></h2>'+
-      '<div id="mlbCards" class="mut" style="font-size:12px">carregando\u2026</div>'+
-      '<div class="nota" style="margin-top:8px">Vêm do <b>faturamento oficial do ML</b> (o mesmo dos relat\u00f3rios em Faturamento \u2192 Relat\u00f3rios). S\u00e3o cobran\u00e7as do <b>per\u00edodo</b>, n\u00e3o de um pedido \u2014 por isso <b>n\u00e3o entram</b> no Lucro Bruto (M.C.) acima, que \u00e9 margem por venda. Para o lucro do m\u00eas, desconte estes valores.</div>'+
-    '</div>'+
-    '<div class="sec" id="secSHP"><h2>\ud83d\udfe0 Despesas e Devolu\u00e7\u00f5es da Shopee <span class="hint">do per\u00edodo \u00b7 fora da margem por pedido</span></h2>'+
-      '<div id="shpCards" class="mut" style="font-size:12px">carregando\u2026</div>'+
-      '<div class="nota" style="margin-top:8px">V\u00eam da <b>API oficial da Shopee</b> (carteira e devolu\u00e7\u00f5es), coletadas de madrugada. <b>Nada disso passa pelo Bling.</b> O maior item costuma ser o estorno ap\u00f3s devolu\u00e7\u00e3o: a Shopee j\u00e1 tinha pago, o cliente devolveu e ela tirou o dinheiro de volta da carteira. Como s\u00e3o cobran\u00e7as do <b>per\u00edodo</b>, ainda <b>n\u00e3o entram</b> no Lucro Bruto (M.C.) l\u00e1 em cima \u2014 desconte para o lucro do m\u00eas.</div>'+
-    '</div>'+
     '<div class="sec" id="secTop"><h2>🏆 TOP Produtos <span class="hint">clique nos títulos p/ ordenar ↑↓ · faturamento = SOMA de todos os pedidos do SKU no período · 💎 M.C. = margem dos pedidos rateada por item — o rank do que dá LUCRO de verdade · Curva ABC recalculada pro período pesquisado (A = 80% do faturamento)</span></h2>'+
       '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px">'+
         '<div class="grpBusca">'+
@@ -1311,6 +1303,14 @@ function montar(){
         '</div>'+
       '</div>'+
       '<div class="tw twFit"><table id="tProd"></table></div><div id="prodAviso"></div></div>'+
+    '<div class="sec" id="secMLB"><h2>\ud83d\udcb8 Despesas do Mercado Livre <span class="hint">do per\u00edodo \u00b7 fora da margem por pedido</span></h2>'+
+      '<div id="mlbCards" class="mut" style="font-size:12px">carregando\u2026</div>'+
+      '<div class="nota" style="margin-top:8px">Vêm do <b>faturamento oficial do ML</b> (o mesmo dos relat\u00f3rios em Faturamento \u2192 Relat\u00f3rios). S\u00e3o cobran\u00e7as do <b>per\u00edodo</b>, n\u00e3o de um pedido \u2014 por isso <b>n\u00e3o entram</b> no Lucro Bruto (M.C.) acima, que \u00e9 margem por venda. Para o lucro do m\u00eas, desconte estes valores.</div>'+
+    '</div>'+
+    '<div class="sec" id="secSHP"><h2>\ud83d\udfe0 Despesas e Devolu\u00e7\u00f5es da Shopee <span class="hint">do per\u00edodo \u00b7 fora da margem por pedido</span></h2>'+
+      '<div id="shpCards" class="mut" style="font-size:12px">carregando\u2026</div>'+
+      '<div class="nota" style="margin-top:8px">V\u00eam da <b>API oficial da Shopee</b> (carteira e devolu\u00e7\u00f5es), coletadas de madrugada. <b>Nada disso passa pelo Bling.</b> O maior item costuma ser o estorno ap\u00f3s devolu\u00e7\u00e3o: a Shopee j\u00e1 tinha pago, o cliente devolveu e ela tirou o dinheiro de volta da carteira. Como s\u00e3o cobran\u00e7as do <b>per\u00edodo</b>, ainda <b>n\u00e3o entram</b> no Lucro Bruto (M.C.) l\u00e1 em cima \u2014 desconte para o lucro do m\u00eas.</div>'+
+    '</div>'+
     '<div class="sec" id="secCanal"><h2>🛒 Por Canal</h2><div class="tw twFit"><table id="tCanal"></table></div></div>'+
     '<div class="grid2">'+
       '<div class="sec" id="secDia"><h2 id="hGrafPed">📈 Pedidos por Dia</h2><div class="chartbox"><canvas id="cPed"></canvas></div></div>'+
