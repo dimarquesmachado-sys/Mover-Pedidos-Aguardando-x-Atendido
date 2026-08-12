@@ -831,9 +831,21 @@ function routes(readBody) {
       const resolveDL = (x) => {
         const s = String(x).replace(/^0+/, '');   // 077488 e 77488 são a mesma NF
         try { if (fs.existsSync(path.join(CACHE_DIR, String(x), 'pedido.json')) || fs.existsSync(path.join(CACHE_DIR, String(x), 'danfe.pdf'))) return { id: String(x) }; } catch (e) {}
-        const hits = Object.keys(manDL).filter(k2 => String((manDL[k2] || {}).nf_numero || '').replace(/^0+/, '') === s);
-        if (hits.length === 1) return { id: hits[0] };
+        // Codex PR#42: '0'/'00' normaliza pra vazio e casaria com todo pedido SEM nf_numero
+        if (!s) return { id: null, ambiguo: 'número de NF inválido' };
+        const hits = Object.keys(manDL).filter(k2 => {
+          const nfk = String((manDL[k2] || {}).nf_numero || '').replace(/^0+/, '');
+          return nfk && nfk === s;
+        });
         if (hits.length > 1) return { id: null, ambiguo: 'NF ' + s + ' aparece em ' + hits.length + ' pedidos' };
+        if (hits.length === 1) {
+          // Codex PR#42: NF anexada à mão pelo caminho só-PDF não atualiza o nf_numero do
+          // manifesto — o número velho (cancelado) apontaria pra DANFE nova. Sem número
+          // verificado, a rota NÃO entrega: o admin imprime esse pelo 📎 NF do card.
+          const snapV = readJson(path.join(CACHE_DIR, String(hits[0]), 'pedido.json'), null);
+          if (snapV && snapV.nf_anexada) return { id: null, ambiguo: 'NF anexada à mão — número não confirmado, imprima pelo 📎 NF do pedido' };
+          return { id: hits[0] };
+        }
         return { id: null };
       };
       const resolvidos = idsTodos.map(resolveDL);
