@@ -207,6 +207,9 @@
   .soCel{display:none}
   .covResumo{display:none}
   #coverTopo .covResumo{display:inline-flex;align-items:center;gap:5px;cursor:pointer;font:inherit;font-size:11px;padding:4px 9px}
+  /* botão de volta pro checkout — pedido do Diego 11/08: "não só o escrito" */
+  .btnCheckout{display:inline-flex;align-items:center;gap:6px;background:#1e3a8a;border:1px solid #3b82f6;color:#dbeafe;padding:5px 14px;border-radius:8px;text-decoration:none;font-weight:700;font-size:12px;white-space:nowrap}
+  .btnCheckout:hover{background:#1d4ed8;color:#fff}
   /* indicador de cobertura: destaque roxo, colado no "← checkout" */
   #coverTopo .covResumo{background:#4c1d95;border:1px solid #6d28d9;color:#ddd6fe;white-space:nowrap}
   #coverTopo .covResumo:hover{background:#5b21b6;border-color:#7c3aed}
@@ -1209,7 +1212,7 @@ function montar(){
     '<div class="hlinks" style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">'+
       '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end">'+
         '<button id="btnVivoTopo" class="btnVivo" onclick="sincVendas(this)" title="atualizar as vendas agora">\ud83d\udd04</button>'+
-        '<a href="'+MOD+'/painel">\u2190 checkout</a>'+
+        '<a class="btnCheckout" href="'+MOD+'/painel">\ud83e\uddfe Checkout</a>'+
         '<span id="coverTopo"></span>'+
       '</div>'+
       '<div id="coverTopoDet" style="display:none"></div>'+
