@@ -825,17 +825,27 @@ function routes(readBody) {
       // pasta do cache usa a CHAVE do Bling — mesma tradução do /debug-nf-simp: sem pasta, procura
       // o numero (e o numero_loja) no manifesto. Assim a rota aceita os dois formatos.
       const manDL = manifest();
+      // Codex PR#42 (P1): número de venda e número de NF vivem na MESMA faixa (74816 × 77488) —
+      // um empate colaria a nota de outro cliente na caixa. Precedência determinística, uma
+      // camada por vez, e AMBIGUIDADE (2+ na mesma camada) nunca escolhe: cai em faltando.
       const resolveDL = (x) => {
         const s = String(x);
-        try { if (fs.existsSync(path.join(CACHE_DIR, s, 'pedido.json')) || fs.existsSync(path.join(CACHE_DIR, s, 'danfe.pdf'))) return s; } catch (e) {}
-        const k = Object.keys(manDL).find(k2 => String(manDL[k2].numero) === s || String(manDL[k2].numero_loja || '') === s || String(manDL[k2].nf_numero || '') === s);
-        return k || s;
+        try { if (fs.existsSync(path.join(CACHE_DIR, s, 'pedido.json')) || fs.existsSync(path.join(CACHE_DIR, s, 'danfe.pdf'))) return { id: s }; } catch (e) {}
+        for (const campo of ['numero', 'numero_loja', 'nf_numero']) {
+          const hits = Object.keys(manDL).filter(k2 => String((manDL[k2] || {})[campo] || '') === s);
+          if (hits.length === 1) return { id: hits[0] };
+          if (hits.length > 1) return { id: null, ambiguo: campo + ' repetido em ' + hits.length + ' pedidos' };
+        }
+        return { id: null };
       };
-      const ids = idsTodos.map(resolveDL);
+      const resolvidos = idsTodos.map(resolveDL);
+      const ids = resolvidos.map(r => r.id);
+      const ambiguos = [];
       const { PDFDocument } = require('pdf-lib');
       const docs = [], achadas = [], faltando = [];
       for (let iDL = 0; iDL < ids.length; iDL++) {
         const idL = ids[iDL], rotuloDL = idsTodos[iDL];
+        if (!idL) { faltando.push(rotuloDL); if (resolvidos[iDL].ambiguo) ambiguos.push(rotuloDL + ' (' + resolvidos[iDL].ambiguo + ')'); continue; }
         const dirL = path.join(CACHE_DIR, String(idL));
         let nfB = null;
         try { nfB = fs.readFileSync(path.join(dirL, 'danfe.pdf')); } catch (e) {}
@@ -859,8 +869,8 @@ function routes(readBody) {
         if (nfB) { try { docL = await PDFDocument.load(nfB); } catch (e) { docL = null; } }
         if (docL && docL.getPageCount() > 0) { docs.push([rotuloDL, docL]); achadas.push(rotuloDL); } else faltando.push(rotuloDL);
       }
-      if (urlObj.searchParams.get('json')) { json(res, 200, { ok: true, pedidas: ids.length, achadas, faltando }); return true; }
-      if (!docs.length) { json(res, 404, { ok: false, erro: 'nenhuma DANFE válida encontrada', faltando }); return true; }
+      if (urlObj.searchParams.get('json')) { json(res, 200, { ok: true, pedidas: ids.length, achadas, faltando, ambiguos }); return true; }
+      if (!docs.length) { json(res, 404, { ok: false, erro: 'nenhuma DANFE válida encontrada', faltando, ambiguos }); return true; }
       try {
         const outDL = await PDFDocument.create();
         for (const [idL, srcDL] of docs) {
@@ -869,7 +879,7 @@ function routes(readBody) {
         }
         if (!outDL.getPageCount()) { json(res, 422, { ok: false, erro: 'nenhuma página copiada', faltando }); return true; }   // Codex PR#41: nunca 200 com PDF vazio
         const mergedDL = Buffer.from(await outDL.save());
-        res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': 'inline; filename="danfes-lote.pdf"', 'X-Faltando': faltando.join(',') });
+        res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': 'inline; filename="danfes-lote.pdf"', 'X-Faltando': faltando.join(','), 'X-Ambiguos': ambiguos.join(' | ') });
         res.end(mergedDL);
       } catch (e) { json(res, 500, { ok: false, erro: 'pdf-lib: ' + String(e.message || e).slice(0, 120), faltando }); }
       return true;
