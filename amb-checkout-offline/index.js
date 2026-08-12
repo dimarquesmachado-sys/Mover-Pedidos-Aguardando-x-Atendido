@@ -773,7 +773,12 @@ function routes(readBody) {
     // ADMIN (por sessão): dispara o ciclo AGORA — consulta o Bling sem esperar os 10 min do cron
     if (method === 'POST' && p === '/amb-checkout-offline/ciclo-agora') {
       const opSess = validarSessao(req.headers['cookie']);
-      if (!opSess || !ehAdmin(opSess)) { json(res, 403, { ok: false, erro: 'apenas admin' }); return true; }
+      // Codex PR#38 (3ª rodada): "apenas admin" aceita TAMBÉM a ADMIN_KEY — mesma credencial
+      // que o gate e as rotas irmãs já honram; sem isso o fluxo ?k= recebia 403 aqui e o
+      // dashboard carregava config fiscal default em silêncio (números errados).
+      const _kAdm = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const _okAdm = (process.env.ADMIN_KEY && _kAdm === process.env.ADMIN_KEY) || (opSess && ehAdmin(opSess));
+      if (!_okAdm) { json(res, 403, { ok: false, erro: 'apenas admin' }); return true; }
       const agora = Date.now();
       if (agora - _ultimoCicloAgora < 60000) { json(res, 200, { ok: false, erro: '⏳ ciclo já disparado há menos de 1 min — aguarde' }); return true; }
       _ultimoCicloAgora = agora;
@@ -879,7 +884,12 @@ function routes(readBody) {
 
     if (method === 'POST' && p === '/amb-checkout-offline/etiqueta-anexar') {
       const opSess = validarSessao(req.headers['cookie']);
-      if (!opSess || !ehAdmin(opSess)) { json(res, 403, { ok: false, erro: 'apenas admin' }); return true; }
+      // Codex PR#38 (3ª rodada): "apenas admin" aceita TAMBÉM a ADMIN_KEY — mesma credencial
+      // que o gate e as rotas irmãs já honram; sem isso o fluxo ?k= recebia 403 aqui e o
+      // dashboard carregava config fiscal default em silêncio (números errados).
+      const _kAdm = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const _okAdm = (process.env.ADMIN_KEY && _kAdm === process.env.ADMIN_KEY) || (opSess && ehAdmin(opSess));
+      if (!_okAdm) { json(res, 403, { ok: false, erro: 'apenas admin' }); return true; }
       let body = {}; try { const _rb = await readBody(req); body = (_rb && typeof _rb === 'object') ? _rb : JSON.parse(_rb || '{}'); } catch (e) {}
       const idA = String(body.id || '').trim();
       const b64A = String(body.pdf_base64 || '').replace(/^data:[^,]*,/, '');
@@ -1078,7 +1088,12 @@ function routes(readBody) {
     // DASHBOARD (sessão admin): saldo/preço/custo por SKU, cache 6h em disco — alimenta a projeção de estoque
     if (method === 'POST' && p === '/amb-checkout-offline/sku-info') {
       const opSess = validarSessao(req.headers['cookie']);
-      if (!opSess || !ehAdmin(opSess)) { json(res, 403, { ok: false, erro: 'apenas admin' }); return true; }
+      // Codex PR#38 (3ª rodada): "apenas admin" aceita TAMBÉM a ADMIN_KEY — mesma credencial
+      // que o gate e as rotas irmãs já honram; sem isso o fluxo ?k= recebia 403 aqui e o
+      // dashboard carregava config fiscal default em silêncio (números errados).
+      const _kAdm = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const _okAdm = (process.env.ADMIN_KEY && _kAdm === process.env.ADMIN_KEY) || (opSess && ehAdmin(opSess));
+      if (!_okAdm) { json(res, 403, { ok: false, erro: 'apenas admin' }); return true; }
       let body = {}; try { const _rb = await readBody(req); body = (_rb && typeof _rb === 'object') ? _rb : JSON.parse(_rb || '{}'); } catch (e) {}   // tolerante: lib/http passou a devolver objeto ja parseado
       const skus = Array.isArray(body.skus) ? body.skus.map(x => String(x || '').trim()).filter(Boolean).slice(0, 40) : [];
       if (!skus.length) { json(res, 200, { ok: true, skus: {} }); return true; }
@@ -1190,7 +1205,12 @@ function routes(readBody) {
     // DASHBOARD (sessão admin): dispara o backfill-NF local ao abrir o dashboard — mantém os números sempre frescos
     if (method === 'POST' && p === '/amb-checkout-offline/backfill-nf-auto') {
       const opSess = validarSessao(req.headers['cookie']);
-      if (!opSess || !ehAdmin(opSess)) { json(res, 403, { ok: false, erro: 'apenas admin' }); return true; }
+      // Codex PR#38 (3ª rodada): "apenas admin" aceita TAMBÉM a ADMIN_KEY — mesma credencial
+      // que o gate e as rotas irmãs já honram; sem isso o fluxo ?k= recebia 403 aqui e o
+      // dashboard carregava config fiscal default em silêncio (números errados).
+      const _kAdm = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const _okAdm = (process.env.ADMIN_KEY && _kAdm === process.env.ADMIN_KEY) || (opSess && ehAdmin(opSess));
+      if (!_okAdm) { json(res, 403, { ok: false, erro: 'apenas admin' }); return true; }
       json(res, 200, { ok: true, ...backfillNFLocal(45) });
       return true;
     }
@@ -1211,7 +1231,12 @@ function routes(readBody) {
     // DASHBOARD (sessão admin): CONFIG FISCAL — alíquota do Simples POR MÊS + taxa % por canal
     if ((method === 'GET' || method === 'POST') && p === '/amb-checkout-offline/config-fiscal') {
       const opSess = validarSessao(req.headers['cookie']);
-      if (!opSess || !ehAdmin(opSess)) { json(res, 403, { ok: false, erro: 'apenas admin' }); return true; }
+      // Codex PR#38 (3ª rodada): "apenas admin" aceita TAMBÉM a ADMIN_KEY — mesma credencial
+      // que o gate e as rotas irmãs já honram; sem isso o fluxo ?k= recebia 403 aqui e o
+      // dashboard carregava config fiscal default em silêncio (números errados).
+      const _kAdm = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const _okAdm = (process.env.ADMIN_KEY && _kAdm === process.env.ADMIN_KEY) || (opSess && ehAdmin(opSess));
+      if (!_okAdm) { json(res, 403, { ok: false, erro: 'apenas admin' }); return true; }
       const CFG_FILE = path.join(CACHE_DIR, '_config-fiscal.json');
       if (method === 'GET') { json(res, 200, { ok: true, config: readJson(CFG_FILE, { aliquotas: {}, taxas: {} }) }); return true; }
       let body = {}; try { const _rb = await readBody(req); body = (_rb && typeof _rb === 'object') ? _rb : JSON.parse(_rb || '{}'); } catch (e) {}   // tolerante: lib/http passou a devolver objeto ja parseado
@@ -1265,7 +1290,12 @@ function routes(readBody) {
     // DASHBOARD (sessão admin): TARIFA REAL do Mercado Livre p/ um pedido (sale_fee da API), com cache permanente
     if (method === 'POST' && p === '/amb-checkout-offline/ml-fee') {
       const opSess = validarSessao(req.headers['cookie']);
-      if (!opSess || !ehAdmin(opSess)) { json(res, 403, { ok: false, erro: 'apenas admin' }); return true; }
+      // Codex PR#38 (3ª rodada): "apenas admin" aceita TAMBÉM a ADMIN_KEY — mesma credencial
+      // que o gate e as rotas irmãs já honram; sem isso o fluxo ?k= recebia 403 aqui e o
+      // dashboard carregava config fiscal default em silêncio (números errados).
+      const _kAdm = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const _okAdm = (process.env.ADMIN_KEY && _kAdm === process.env.ADMIN_KEY) || (opSess && ehAdmin(opSess));
+      if (!_okAdm) { json(res, 403, { ok: false, erro: 'apenas admin' }); return true; }
       let body = {}; try { const _rb = await readBody(req); body = (_rb && typeof _rb === 'object') ? _rb : JSON.parse(_rb || '{}'); } catch (e) {}   // tolerante: lib/http passou a devolver objeto ja parseado
       const orderId = String(body.numeroLoja || '').replace(/\D/g, '');
       if (!orderId) { json(res, 200, { ok: false, erro: 'numeroLoja vazio' }); return true; }
@@ -2310,7 +2340,12 @@ function routes(readBody) {
     // Valida por SESSÃO admin (igual config-fiscal) — chamada pelo dashboard.
     if (p === '/amb-checkout-offline/config-frete-magalu') {
       const opSess = validarSessao(req.headers['cookie']);
-      if (!opSess || !ehAdmin(opSess)) { json(res, 403, { ok: false, erro: 'apenas admin' }); return true; }
+      // Codex PR#38 (3ª rodada): "apenas admin" aceita TAMBÉM a ADMIN_KEY — mesma credencial
+      // que o gate e as rotas irmãs já honram; sem isso o fluxo ?k= recebia 403 aqui e o
+      // dashboard carregava config fiscal default em silêncio (números errados).
+      const _kAdm = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const _okAdm = (process.env.ADMIN_KEY && _kAdm === process.env.ADMIN_KEY) || (opSess && ehAdmin(opSess));
+      if (!_okAdm) { json(res, 403, { ok: false, erro: 'apenas admin' }); return true; }
       const CFG = path.join(CACHE_DIR, '_config-frete-magalu.json');
       if (method === 'GET') { json(res, 200, { ok: true, config: readJson(CFG, { nivel_desconto: '50' }) }); return true; }
       if (method === 'POST') {
