@@ -380,7 +380,9 @@ function routes(readBody) {
         p === '/girassol-backup-offline/operadores' || p === '/girassol-backup-offline/health' ||
         p === '/girassol-backup-offline/saude' || p.includes('/callback') ||
         p === '/girassol-backup-offline/qz-cert' || p === '/girassol-backup-offline/qz-sign' ||
-        p === '/girassol-backup-offline/dashboard'   // Codex PR#38: auth PRÓPRIA na rota (sessão ADMIN ou ?k=) — o gate barrava o ?k= sem cookie
+        p === '/girassol-backup-offline/dashboard' ||   // Codex PR#38: auth PRÓPRIA na rota (sessão ADMIN ou ?k=) — o gate barrava o ?k= sem cookie
+        p === '/girassol-backup-offline/historico' ||   // Codex PR#38 P1/P2: auth própria em camadas (admin completo / operador stripado / anônimo só com k)
+        p === '/girassol-backup-offline/ml-billing-resumo'   // Codex PR#38: auth própria (admin)
       );
       const _central = (
         p.includes('/run') || p.includes('/setup') || p.includes('/robo') ||
@@ -1298,6 +1300,10 @@ function routes(readBody) {
     }
     // resumo de um período, pros cards do dashboard
     if (method === 'GET' && p === '/girassol-backup-offline/ml-billing-resumo') {
+      // Codex PR#38 (P1): financeiro é SÓ ADMIN — mesma guarda das rotas irmãs do dashboard
+      const sBil = validarSessao(req.headers['cookie']);
+      const kBil = urlObj.searchParams.get('k') || '';
+      if (!((process.env.ADMIN_KEY && kBil === process.env.ADMIN_KEY) || (sBil && ehAdmin(sBil)))) { json(res, 404, { error: 'not found' }); return true; }
       const b = readJson(MLB_FILE(), { porDia: {} });
       const deB = String(urlObj.searchParams.get('de') || '').slice(0, 10);
       const ateB = String(urlObj.searchParams.get('ate') || '').slice(0, 10);
