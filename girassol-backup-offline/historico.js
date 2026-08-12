@@ -331,6 +331,14 @@ function rotasHistorico(ctx) {
 
     // HISTÓRICO — últimos pedidos finalizados (do conferidos.json), mais recentes primeiro
     if (method === 'GET' && p === '/girassol-backup-offline/historico') {
+      // Codex PR#38 (P1): o "NUNCA estoquista" vale pra INFORMAÇÃO, não só pra página do
+      // dashboard. Em camadas: ADMIN (sessão de admin OU ?k=ADMIN_KEY) → resposta completa;
+      // operador logado (estoquista) → itens SEM os campos financeiros (o modal 🕘 do painel
+      // só precisa de identificação/etiqueta); sem sessão e sem chave → 401.
+      const sessH9 = validarSessao(req.headers['cookie']);
+      const kH9 = urlObj.searchParams.get('k') || '';
+      const admH9 = (process.env.ADMIN_KEY && kH9 === process.env.ADMIN_KEY) || (sessH9 && ehAdmin(sessH9));
+      if (!admH9 && !sessH9) { json(res, 401, { ok: false, erro: 'Sessão necessária. Faça login.' }); return true; }
       const conf = readJson(CONFERIDOS_FILE, {});
       // BUGFIX d45: o backfill de nf_emissao rodava DEPOIS do map — a resposta do 1º carregamento saía sem a hora
       // da NF (só o 2º F5 pegava). Agora completa o conf ANTES de montar os itens.
@@ -369,6 +377,12 @@ function rotasHistorico(ctx) {
         for (const h of itens) if (Array.isArray(h.itens)) h.itens = h.itens.map(it => Object.assign({}, it, { custo: _cuH(it.sku) }));
         for (const v of vendasB) if (Array.isArray(v.it)) v.it = v.it.map(it => Object.assign({}, it, { custo: _cuH(it.sku) }));
       } catch (e) {}
+      if (!admH9) {
+        // camada estoquista: some o financeiro dos itens e a lista de vendas (só o modal 🕘 usa esta rota sem admin)
+        const FIN9 = ['custo','margem','tarifa_ml','frete_ml','credito_ml','credito_fonte','frete_recebido','renda_canal','comissao','imposto','valor_produto','valor_nota','valor','logistica_ml','venda_em','dev_frete_retorno','ml_costs_v3'];
+        for (const it9 of itens) { for (const c9 of FIN9) { if (c9 in it9) delete it9[c9]; } }
+        while (vendasB.length) vendasB.pop();
+      }
       json(res, 200, { ok: true, total: Object.keys(conf).length, itens, reenvios, reenvio_direto: reenvioDireto, vendas_bling: vendasB });
       return true;
     }
