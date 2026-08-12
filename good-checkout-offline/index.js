@@ -818,13 +818,54 @@ function routes(readBody) {
     if (method === 'GET' && p === '/good-checkout-offline/danfes-lote') {
       const opSessDL = validarSessao(req.headers['cookie']);
       if (!opSessDL || !ehAdmin(opSessDL)) { res.writeHead(302, { Location: '/good-checkout-offline/' }); res.end(); return true; }
-      const idsTodos = String(urlObj.searchParams.get('pedidos') || '').split(',').map(s => s.trim()).filter(Boolean);
-      if (!idsTodos.length) { json(res, 400, { ok: false, erro: 'use ?pedidos=id1,id2,…' }); return true; }
+      const idsTodos = String(urlObj.searchParams.get('nfs') || urlObj.searchParams.get('pedidos') || '').split(',').map(s => s.trim()).filter(Boolean);
+      if (!idsTodos.length) { json(res, 400, { ok: false, erro: 'use ?nfs=77488,77491,… (números das NFs)' }); return true; }
       if (idsTodos.length > 120) { json(res, 400, { ok: false, erro: 'máximo 120 pedidos por lote (recebi ' + idsTodos.length + ') — divida em dois' }); return true; }   // Codex PR#41: nunca cortar em silêncio
-      const ids = idsTodos;
+      // 12/08 (achado no 1º uso real): o galpão/o Diego digita o NÚMERO da venda (74816), mas a
+      // pasta do cache usa a CHAVE do Bling — mesma tradução do /debug-nf-simp: sem pasta, procura
+      // o numero (e o numero_loja) no manifesto. Assim a rota aceita os dois formatos.
+      // 12/08 (regra do Diego): NF EXATA ou não pega — nada de cascata/adivinhação. Aceita a
+      // chave da pasta do cache (uso interno) ou o NÚMERO DA NF; dois pedidos com a mesma NF
+      // (não deve existir) não escolhem nenhum — cai em faltando com o motivo.
+      const resolveDL = (x) => {
+        // Codex PR#42: o manifesto e RELIDO a cada item — o ciclo de fundo pode reassociar a
+        // NF de um pedido enquanto o lote roda, e um mapa velho entregaria a NF B sob o rotulo A
+        const manDL = manifest();
+        const s = String(x).replace(/^0+/, '');   // 077488 e 77488 sao a mesma NF
+        try { if (fs.existsSync(path.join(CACHE_DIR, String(x), 'pedido.json')) || fs.existsSync(path.join(CACHE_DIR, String(x), 'danfe.pdf'))) return { id: String(x) }; } catch (e) {}
+        // Codex PR#42: '0'/'00' normaliza pra vazio e casaria com todo pedido SEM nf_numero
+        if (!s) return { id: null, ambiguo: 'número de NF inválido' };
+        const hits = Object.keys(manDL).filter(k2 => {
+          const nfk = String((manDL[k2] || {}).nf_numero || '').replace(/^0+/, '');
+          return nfk && nfk === s;
+        });
+        if (hits.length > 1) return { id: null, ambiguo: 'NF ' + s + ' aparece em ' + hits.length + ' pedidos' };
+        if (hits.length === 1) {
+          // Codex PR#42: NF anexada à mão pelo caminho só-PDF não atualiza o nf_numero do
+          // manifesto — o número velho (cancelado) apontaria pra DANFE nova. Sem número
+          // verificado, a rota NÃO entrega: o admin imprime esse pelo 📎 NF do card.
+          // Codex PR#42: anexo COM XML tem numero confirmado (o /nf-anexar le o nNF e grava
+          // no snapshot) — vale. So o anexo SO-PDF fica sem numero verificado e e recusado.
+          const snapV = readJson(path.join(CACHE_DIR, String(hits[0]), 'pedido.json'), null);
+          if (snapV && snapV.nf_anexada) {
+            const numV = String((snapV.nf && snapV.nf.numero) || snapV.nf_numero || '').replace(/^0+/, '');
+            if (numV !== s) return { id: null, ambiguo: 'NF anexada sem numero confirmado - imprima pelo botao NF do pedido' };
+          }
+          return { id: hits[0] };
+        }
+        return { id: null };
+      };
+      const ambiguos = [];
       const { PDFDocument } = require('pdf-lib');
       const docs = [], achadas = [], faltando = [];
-      for (const idL of ids) {
+      // Codex PR#42: resolver TUDO antes do loop deixava a janela dos awaits — outro admin
+      // podia trocar a NF de um pedido ainda nao lido e a gente entregaria o PDF novo sob o
+      // numero velho. Cada item e resolvido no instante em que vai ser lido.
+      for (let iDL = 0; iDL < idsTodos.length; iDL++) {
+        const rotuloDL = idsTodos[iDL];
+        const rDL = resolveDL(rotuloDL);
+        const idL = rDL.id;
+        if (!idL) { faltando.push(rotuloDL); if (rDL.ambiguo) ambiguos.push(rotuloDL + ' (' + rDL.ambiguo + ')'); continue; }
         const dirL = path.join(CACHE_DIR, String(idL));
         let nfB = null;
         try { nfB = fs.readFileSync(path.join(dirL, 'danfe.pdf')); } catch (e) {}
@@ -846,10 +887,10 @@ function routes(readBody) {
         // Codex PR#41: valida o PDF JÁ NA COLETA — truncado/cifrado não vira "achada"
         let docL = null;
         if (nfB) { try { docL = await PDFDocument.load(nfB); } catch (e) { docL = null; } }
-        if (docL && docL.getPageCount() > 0) { docs.push([idL, docL]); achadas.push(idL); } else faltando.push(idL);
+        if (docL && docL.getPageCount() > 0) { docs.push([rotuloDL, docL]); achadas.push(rotuloDL); } else faltando.push(rotuloDL);
       }
-      if (urlObj.searchParams.get('json')) { json(res, 200, { ok: true, pedidas: ids.length, achadas, faltando }); return true; }
-      if (!docs.length) { json(res, 404, { ok: false, erro: 'nenhuma DANFE válida encontrada', faltando }); return true; }
+      if (urlObj.searchParams.get('json')) { json(res, 200, { ok: true, pedidas: idsTodos.length, achadas, faltando, ambiguos }); return true; }
+      if (!docs.length) { json(res, 404, { ok: false, erro: 'nenhuma DANFE válida encontrada', faltando, ambiguos }); return true; }
       try {
         const outDL = await PDFDocument.create();
         for (const [idL, srcDL] of docs) {
@@ -858,7 +899,7 @@ function routes(readBody) {
         }
         if (!outDL.getPageCount()) { json(res, 422, { ok: false, erro: 'nenhuma página copiada', faltando }); return true; }   // Codex PR#41: nunca 200 com PDF vazio
         const mergedDL = Buffer.from(await outDL.save());
-        res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': 'inline; filename="danfes-lote.pdf"', 'X-Faltando': faltando.join(',') });
+        res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': 'inline; filename="danfes-lote.pdf"', 'X-Faltando': faltando.join(','), 'X-Ambiguos': ambiguos.map(a9 => String(a9).split(' (')[0]).join(',') });   // Codex PR#42: header e Latin-1 — motivo (com acento/emoji) so no ?json=1
         res.end(mergedDL);
       } catch (e) { json(res, 500, { ok: false, erro: 'pdf-lib: ' + String(e.message || e).slice(0, 120), faltando }); }
       return true;
