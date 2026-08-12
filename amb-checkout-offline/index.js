@@ -375,7 +375,8 @@ function routes(readBody) {
         p === '/amb-checkout-offline/qz-cert' || p === '/amb-checkout-offline/qz-sign' ||
         p === '/amb-checkout-offline/shopee-semear' ||   // semear cookie da sessao (auth propria por ?k=)
         p === '/amb-checkout-offline/shopee-devolucao' ||   // devolucao entregue? (auth propria por ?k= ou sessao admin)
-        p === '/amb-checkout-offline/sonda-un'   // sonda de unidade de negócio (auth própria por ?k=)
+        p === '/amb-checkout-offline/sonda-un' ||   // sonda de unidade de negócio (auth própria por ?k=)
+        p === '/amb-checkout-offline/dashboard'   // Codex PR#38: auth PRÓPRIA na rota (sessão ADMIN ou ?k=) — o gate barrava o ?k= sem cookie
       );
       const _central = (
         p.includes('/run') || p.includes('/setup') || p.includes('/robo') ||
