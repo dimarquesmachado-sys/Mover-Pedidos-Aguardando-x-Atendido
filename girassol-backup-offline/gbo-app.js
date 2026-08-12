@@ -379,7 +379,8 @@ function routes(readBody) {
         p === '/girassol-backup-offline/painel' || p === '/girassol-backup-offline/login' ||
         p === '/girassol-backup-offline/operadores' || p === '/girassol-backup-offline/health' ||
         p === '/girassol-backup-offline/saude' || p.includes('/callback') ||
-        p === '/girassol-backup-offline/qz-cert' || p === '/girassol-backup-offline/qz-sign'
+        p === '/girassol-backup-offline/qz-cert' || p === '/girassol-backup-offline/qz-sign' ||
+        p === '/girassol-backup-offline/dashboard'   // Codex PR#38: auth PRÓPRIA na rota (sessão ADMIN ou ?k=) — o gate barrava o ?k= sem cookie
       );
       const _central = (
         p.includes('/run') || p.includes('/setup') || p.includes('/robo') ||
