@@ -818,24 +818,22 @@ function routes(readBody) {
     if (method === 'GET' && p === '/good-checkout-offline/danfes-lote') {
       const opSessDL = validarSessao(req.headers['cookie']);
       if (!opSessDL || !ehAdmin(opSessDL)) { res.writeHead(302, { Location: '/good-checkout-offline/' }); res.end(); return true; }
-      const idsTodos = String(urlObj.searchParams.get('pedidos') || '').split(',').map(s => s.trim()).filter(Boolean);
-      if (!idsTodos.length) { json(res, 400, { ok: false, erro: 'use ?pedidos=id1,id2,…' }); return true; }
+      const idsTodos = String(urlObj.searchParams.get('nfs') || urlObj.searchParams.get('pedidos') || '').split(',').map(s => s.trim()).filter(Boolean);
+      if (!idsTodos.length) { json(res, 400, { ok: false, erro: 'use ?nfs=77488,77491,… (números das NFs)' }); return true; }
       if (idsTodos.length > 120) { json(res, 400, { ok: false, erro: 'máximo 120 pedidos por lote (recebi ' + idsTodos.length + ') — divida em dois' }); return true; }   // Codex PR#41: nunca cortar em silêncio
       // 12/08 (achado no 1º uso real): o galpão/o Diego digita o NÚMERO da venda (74816), mas a
       // pasta do cache usa a CHAVE do Bling — mesma tradução do /debug-nf-simp: sem pasta, procura
       // o numero (e o numero_loja) no manifesto. Assim a rota aceita os dois formatos.
       const manDL = manifest();
-      // Codex PR#42 (P1): número de venda e número de NF vivem na MESMA faixa (74816 × 77488) —
-      // um empate colaria a nota de outro cliente na caixa. Precedência determinística, uma
-      // camada por vez, e AMBIGUIDADE (2+ na mesma camada) nunca escolhe: cai em faltando.
+      // 12/08 (regra do Diego): NF EXATA ou não pega — nada de cascata/adivinhação. Aceita a
+      // chave da pasta do cache (uso interno) ou o NÚMERO DA NF; dois pedidos com a mesma NF
+      // (não deve existir) não escolhem nenhum — cai em faltando com o motivo.
       const resolveDL = (x) => {
-        const s = String(x);
-        try { if (fs.existsSync(path.join(CACHE_DIR, s, 'pedido.json')) || fs.existsSync(path.join(CACHE_DIR, s, 'danfe.pdf'))) return { id: s }; } catch (e) {}
-        for (const campo of ['numero', 'numero_loja', 'nf_numero']) {
-          const hits = Object.keys(manDL).filter(k2 => String((manDL[k2] || {})[campo] || '') === s);
-          if (hits.length === 1) return { id: hits[0] };
-          if (hits.length > 1) return { id: null, ambiguo: campo + ' repetido em ' + hits.length + ' pedidos' };
-        }
+        const s = String(x).replace(/^0+/, '');   // 077488 e 77488 são a mesma NF
+        try { if (fs.existsSync(path.join(CACHE_DIR, String(x), 'pedido.json')) || fs.existsSync(path.join(CACHE_DIR, String(x), 'danfe.pdf'))) return { id: String(x) }; } catch (e) {}
+        const hits = Object.keys(manDL).filter(k2 => String((manDL[k2] || {}).nf_numero || '').replace(/^0+/, '') === s);
+        if (hits.length === 1) return { id: hits[0] };
+        if (hits.length > 1) return { id: null, ambiguo: 'NF ' + s + ' aparece em ' + hits.length + ' pedidos' };
         return { id: null };
       };
       const resolvidos = idsTodos.map(resolveDL);
