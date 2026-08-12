@@ -386,6 +386,17 @@
 <div id="app"><div class="skel">⏳ carregando…</div></div>
 <script>
 const MOD = '/amb-checkout-offline';
+// Codex PR#38 (P2): quem abre o dashboard por ?k=ADMIN_KEY não tem cookie — propaga a
+// chave a TODAS as chamadas do módulo, senão o boot() cai em 401 e a página vira login.
+(function(){
+  const K = new URLSearchParams(location.search).get('k');
+  if (!K) return;
+  const _f = window.fetch.bind(window);
+  window.fetch = function(u, o){
+    try { if (typeof u === 'string' && u.indexOf(MOD) === 0) u += (u.indexOf('?') >= 0 ? '&' : '?') + 'k=' + encodeURIComponent(K); } catch(e){}
+    return _f(u, o);
+  };
+})();
 const DASH_BUILD = 'a9';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
