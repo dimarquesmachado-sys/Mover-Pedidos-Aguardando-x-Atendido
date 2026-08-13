@@ -1135,6 +1135,20 @@ function routes(readBody) {
         }
 
         const bp = require('./blingPedidos');
+
+        // RESERVA a linha antes da operacao IRREVERSIVEL. Checar e depois emitir sao
+        // duas coisas: o cron podia gravar venda_cancelada entre a guarda acima e o
+        // gerarNFe, e a nota saia mesmo assim. Este PATCH condicional so passa se a
+        // venda continua viva NESTE instante — e como o cron usa o mesmo campo pra
+        // gravar o cancelamento, um dos dois perde a corrida no proprio Postgres.
+        const reserva = await lcp.atualizarVenda(orderId, { nf_emitindo_em: new Date().toISOString() },
+          { somenteSe: 'venda_cancelada_em=is.null&nf_emitida_em=is.null&status=not.in.(venda_cancelada,cancelado,cancelada_quarentena)' });
+        if (reserva.ok && Array.isArray(reserva.data) && reserva.data.length === 0) {
+          json(res, 409, { ok: false, erro: 'estado_mudou',
+            mensagem: 'O estado da venda mudou agora (cancelamento ou NF detectados). Nada foi emitido. Recarregue o painel e confira.' });
+          return true;
+        }
+
         console.log(`[lixas-combinar emitir-nf] orderId=${orderId} pedidoBling=${v.bling_pedido_id}`);
         const r = await bp.gerarNFe(v.bling_pedido_id);
 
