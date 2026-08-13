@@ -4160,6 +4160,10 @@ async function vendasSync() {
               if (reg.logistica) v.logistica_ml = reg.logistica;
               if (reg.order) v.ml_order = reg.order;
               if (reg.pack) v.ml_pack = reg.pack;
+              // Codex PR#48: se a leitura NOVA não trouxe crédito, o valor velho tem que sair ANTES
+              // de marcar como processado — senão a linha fica excluída das próximas rodadas com
+              // um crédito obsoleto (ex.: o /costs passou a cobrar frete do vendedor).
+              if (reg.credito == null && reg.costs_ok) { delete v.credito_ml; delete v.credito_fonte; }
               v.ml_real = ML_REAL_V;   // pescado NA VERSÃO ATUAL do cálculo — não repesca até bipar (aí a mlSyncFees assume)
             }
           } catch (e) {}
