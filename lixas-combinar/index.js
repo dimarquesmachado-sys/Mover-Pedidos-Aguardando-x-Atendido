@@ -115,7 +115,18 @@ function classificarVenda(v) {
   // 'cancelado' e o status que o revisarAtencaoHumana grava quando acha o pedido
   // cancelado no BLING — sem tratar aqui, ele caia no default e voltava a aparecer
   // como pendente "aguardando o cliente".
-  if (v.venda_cancelada_em || v.status === 'venda_cancelada' || v.status === 'cancelado') {
+  // Nem todo cancelamento passa pelo cron: o processarAutoEmissao grava
+  // venda_cancelada_em direto na Guarda 1.5, sem montar alerta_pos_venda. Se a linha
+  // ja tinha trabalho feito, ela cairia calada no bolsao fechado — e o cron nunca
+  // conserta, porque venda_cancelada_em a exclui das proximas rodadas. Aqui a
+  // classificacao deduz o alerta a partir dos proprios marcadores.
+  const _cancelada = v.venda_cancelada_em || v.status === 'venda_cancelada' || v.status === 'cancelado';
+  const _jaTinhaTrabalho = !!(v.nf_emitida_em || v.bling_editado_em || v.ml_etiqueta_em || v.processado_manual_em);
+  if (_cancelada && _jaTinhaTrabalho && !v.alerta_pos_venda && !v.alerta_reconhecido_em) {
+    return { bolsao: 'pendente', motivo: 'humano',
+             rotulo: '🚨 CANCELADA depois de NF/pedido/etiqueta — não despachar' };
+  }
+  if (_cancelada) {
     const noBling = v.status === 'cancelado' && !v.venda_cancelada_em;
     return { bolsao: 'resolvido', motivo: 'cancelada',
              rotulo: noBling ? '❌ Cancelada no Bling' : '❌ Cancelada no ML' };
@@ -128,8 +139,14 @@ function classificarVenda(v) {
   // codigo volta pra false), entao usar a flag prenderia em Pendentes toda venda que
   // um dia foi escalada — mesmo depois de voce emitir a NF ou concluir na mao.
   if (v.status === 'precisa_atencao_humano') {
+    // Distingue a ORIGEM: se ha nf_erro/bling_erro registrado, o status veio de uma
+    // falha operacional (e a NF pode ter sido curada depois) — dizer "cliente pediu
+    // algo" ali seria mentira. So chama de pedido do cliente quando nao ha erro tecnico.
+    const veioDeFalha = !!(v.nf_erro || v.bling_erro);
     return { bolsao: 'pendente', motivo: 'humano',
-             rotulo: v.nf_emitida_em ? '🚨 Cliente pediu algo APÓS a NF' : '🚨 Precisa de você' };
+             rotulo: (v.nf_emitida_em && !veioDeFalha) ? '🚨 Cliente pediu algo APÓS a NF'
+                   : (v.nf_emitida_em && veioDeFalha)  ? '⚠️ NF saiu, mas ficou erro registrado — conferir'
+                   : '🚨 Precisa de você' };
   }
   if (v.nf_emitida_em) {
     return { bolsao: 'resolvido', motivo: 'nf', rotulo: '📄 NF emitida' };
@@ -914,6 +931,11 @@ function routes(readBody) {
         }
 
         const v = venda.data;
+        if (v.processado_manual_em) {
+          json(res, 409, { ok: false, erro: 'conclusao_manual',
+            mensagem: 'Esta venda foi concluida na mao (NF provavelmente emitida por fora do painel). Emitir aqui criaria uma segunda NF.' });
+          return true;
+        }
         if (!v.bling_pedido_id) {
           json(res, 400, {
             ok: false,
@@ -1019,6 +1041,14 @@ function routes(readBody) {
           return true;
         }
         const v = venda.data;
+
+        // Conclusao manual e autoritativa (NF emitida POR FORA do painel): emitir aqui
+        // geraria uma SEGUNDA nota. Mesma guarda que o recuperarFalsosProcessados.
+        if (v.processado_manual_em) {
+          json(res, 409, { ok: false, erro: 'conclusao_manual',
+            mensagem: 'Esta venda foi concluida na mao (NF provavelmente emitida por fora do painel). Emitir aqui criaria uma segunda NF. Se a nota NAO saiu, desfaca a conclusao manual antes.' });
+          return true;
+        }
 
         // Ja tem NF? nada a fazer.
         if (v.nf_emitida_em) {
