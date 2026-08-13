@@ -439,7 +439,10 @@ function routes(readBody) {
           r_processado: todos.filter(v => v.motivo === 'processado').length,
           // alertas = cancelou DEPOIS que a gente ja montou/emitiu. E o numero
           // que importa: cada um desses e pacote que nao pode ser despachado.
-          alertas: todos.filter(v => v.alerta_pos_venda).length
+          // So os NAO reconhecidos. O texto do alerta fica no card como historico,
+          // entao contar por alerta_pos_venda mostraria "(N!)" pra sempre — sinal de
+          // pacote que nao pode ser despachado, mesmo depois de tratado.
+          alertas: todos.filter(v => v.alerta_pos_venda && !v.alerta_reconhecido_em).length
         };
 
         // dias vai na resposta pro painel poder mostrar a janela real no card "Total"
