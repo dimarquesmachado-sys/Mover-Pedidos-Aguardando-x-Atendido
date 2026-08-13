@@ -1016,7 +1016,14 @@ async function _processarAutoEmissaoInner({ venda, iaResult, graosResult, lcp })
       const rt = await lcp.atualizarVenda(orderId, { status: 'processado' });
       okTerm = !!(rt && rt.ok);
     } catch (e) { console.error(`[auto-emissao] order ${orderId} excecao gravando status terminal: ${e.message}`); }
-    if (!okTerm) console.error(`[auto-emissao] order ${orderId} 🚨 nao gravou o status terminal (${motivo}) — mantendo na fila`);
+    if (!okTerm) {
+      // retry:true so IMPEDE o wrapper de apagar uma entrada existente — se a chamada
+      // veio direto do lerRespostas (sem entrada na fila), nada seria agendado e a
+      // venda ficaria no status ativo indefinidamente. Enfileira explicitamente.
+      console.error(`[auto-emissao] order ${orderId} 🚨 nao gravou o status terminal (${motivo}) — enfileirando restauracao`);
+      try { _retry.enfileirarRestauracao({ orderId, venda, iaResult, graosResult }); }
+      catch (e) { console.error(`[auto-emissao] order ${orderId} falhei ao enfileirar: ${e.message}`); }
+    }
     console.warn(`[auto-emissao] order ${orderId} terminal (${motivo}) — nao monto nem emito`);
     return { falha: true, retry: !okTerm, motivo };
   }
