@@ -573,6 +573,14 @@ function routes(readBody) {
           return true;
         }
         const vMP = vAtualMP.data;
+        // Etiqueta ja gerada: marcar manualmente gravaria processado_manual_em, que
+        // exclui a venda da repescagem de envio — o shipment congelaria em
+        // ready_to_ship e nunca chegaria a shipped/delivered.
+        if (vMP.ml_etiqueta_em) {
+          json(res, 409, { ok: false, erro: 'etiqueta_ja_gerada',
+            mensagem: `Esta venda ja tem etiqueta no ML (${vMP.ml_shipment_status || '?'}) e o sistema acompanha ate a postagem. Nao precisa marcar na mao.` });
+          return true;
+        }
         if (vMP.venda_cancelada_em || vMP.status === 'venda_cancelada' || vMP.status === 'cancelada_quarentena') {
           json(res, 409, { ok: false, erro: 'venda_cancelada',
             mensagem: 'Esta venda esta CANCELADA no Mercado Livre (ou aguardando conferencia da etiqueta). Nao da pra marcar como concluida — se ja houver NF, cancele/estorne no Bling.' });
@@ -1148,6 +1156,17 @@ function routes(readBody) {
         const lcp = require('../auto-mensagens/lixasCombinarPendentes');
         const venda = await lcp.buscar(orderId);
         if (!venda.ok || !venda.data) { json(res, 404, { ok: false, erro: 'venda_nao_encontrada', orderId }); return true; }
+        // Venda cancelada: mandar "pedido confirmado, sera postado em breve" pro cliente
+        // que acabou de cancelar e o oposto do que a situacao pede — e quem esta no card
+        // esta justamente tratando o alerta de NAO despachar.
+        {
+          const vc = venda.data;
+          if (vc.venda_cancelada_em || vc.status === 'venda_cancelada' || vc.status === 'cancelada_quarentena') {
+            json(res, 409, { ok: false, erro: 'venda_cancelada',
+              mensagem: 'Esta venda esta CANCELADA no Mercado Livre. Nao da pra mandar confirmacao de pedido pro cliente.' });
+            return true;
+          }
+        }
 
         const conf = await enviarConfirmacaoPedido(venda.data, orderId);
         json(res, 200, conf);
