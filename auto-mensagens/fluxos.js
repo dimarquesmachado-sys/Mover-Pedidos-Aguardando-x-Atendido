@@ -672,8 +672,9 @@ async function rotinaChecarCanceladasML(opts = {}) {
         // — a escada, que roda a cada 30 min, ainda selecionava a linha e podia montar
         // e emitir NF de um pedido cancelado). Mas NAO grava venda_cancelada_em: e ele
         // que exclui a linha das proximas rodadas, e ainda falta determinar o alerta.
+        let quarentenaOk = false;
         try {
-          await lcp.atualizarVenda(oid, {
+          const rq = await lcp.atualizarVenda(oid, {
             // Status PROPRIO de quarentena: 'venda_cancelada' sairia do CANCELADAS_STATUS
             // e a linha nunca voltaria pra tentar o envio de novo — o alerta de nao
             // despachar nunca sairia. 'cancelada_quarentena' esta na lista e o
@@ -682,17 +683,28 @@ async function rotinaChecarCanceladasML(opts = {}) {
             ml_status: st.status,
             ml_status_atualizado_em: agoraIso
           });
+          quarentenaOk = !!(rq && rq.ok);
         } catch (e) {
           console.error(`[canceladas] order ${oid} falhei ate na quarentena: ${e.message}`);
         }
-        out.erros.push({ order_id: oid, erro: `cancelada, mas nao confirmei o envio (${envFalhou}) — em quarentena, alerta pendente` });
+        // atualizarVenda devolve {ok:false} em vez de lancar. Sem conferir, a rodada
+        // diria "em quarentena" com a linha ainda no status original — e a escada
+        // poderia montar e faturar um pedido ja cancelado.
+        if (!quarentenaOk) {
+          console.error(`[canceladas] order ${oid} 🚨 CANCELADA e a QUARENTENA NAO GRAVOU — venda segue elegivel ao automatico`);
+          out.erros.push({ order_id: oid, erro: `cancelada no ML e FALHOU gravar a quarentena — venda ainda no fluxo automatico, tratar na mao` });
+        } else {
+          out.erros.push({ order_id: oid, erro: `cancelada, mas nao confirmei o envio (${envFalhou}) — em quarentena, alerta pendente` });
+        }
         console.error(`[canceladas] order ${oid} CANCELADA e envio desconhecido (${envFalhou}) — nao finalizo agora`);
         // PRECISA entrar em detalhes: o botao "Verificar ML" le detalhes[0] e, sem isso,
         // o painel mostraria "✅ Venda ativa" pra um pedido que o ML acabou de confirmar
         // como CANCELADO — o oposto do que a checagem descobriu.
         out.detalhes.push({ order_id: oid, ml_status: st.status, cancelada: true,
-                            adiado: true, alerta: null, buyer: v.buyer_nome || null,
-                            aviso: `cancelada no ML, mas o envio nao pode ser confirmado (${envFalhou}) — gravacao adiada` });
+                            adiado: true, quarentena: quarentenaOk, alerta: null, buyer: v.buyer_nome || null,
+                            aviso: quarentenaOk
+                              ? `cancelada no ML. Envio nao confirmado (${envFalhou}) — venda posta em QUARENTENA: ja saiu do fluxo automatico e sera reconferida ate dar pra dizer se a etiqueta saiu.`
+                              : `cancelada no ML, envio nao confirmado (${envFalhou}) e a quarentena NAO gravou — a venda continua no fluxo automatico. Tratar na mao.` });
         continue;
       }
     }
