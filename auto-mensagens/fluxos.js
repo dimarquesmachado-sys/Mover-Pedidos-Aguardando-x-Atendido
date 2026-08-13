@@ -400,6 +400,10 @@ const CANCELADAS_STATUS = (
 const CANCELADAS_DIAS        = Number(process.env.LIXAS_CANCELADAS_DIAS)
   || Number(process.env.LIXAS_JANELA_DIAS) || 30;
 const CANCELADAS_IDADE_MIN_H = Number(process.env.LIXAS_CANCELADAS_IDADE_MIN_HORAS) || 24;
+// Idade minima pra checar o ENVIO. Separada da de cancelamento de proposito: a etiqueta
+// costuma sair no MESMO dia da venda, e se herdasse as 24h do cancelamento uma venda ja
+// tratada ficaria presa em Pendentes o primeiro dia inteiro. Default 0 = checa desde ja.
+const ENVIO_IDADE_MIN_H = Number(process.env.LIXAS_ENVIO_IDADE_MIN_HORAS) || 0;
 const CANCELADAS_REPESCAR_H  = Number(process.env.LIXAS_CANCELADAS_REPESCAR_HORAS) || 6;
 const CANCELADAS_MAX         = Number(process.env.LIXAS_CANCELADAS_MAX_POR_RODADA) || 40;
 const CANCELADAS_PAUSA_MS    = Number(process.env.LIXAS_CANCELADAS_PAUSA_MS) || 350;
@@ -448,7 +452,10 @@ async function rotinaChecarCanceladasML(opts = {}) {
       if (v.venda_cancelada_em) return false;                                  // ja sabemos que morreu
       if (!CANCELADAS_STATUS.includes(String(v.status || ''))) return false;
       const nasceu = v.data_venda ? new Date(v.data_venda).getTime() : 0;
-      if (!nasceu || (agora - nasceu) < idadeMinMs) return false;              // nova demais
+      // Entra na rodada se ja passou do limiar de QUALQUER uma das duas checagens
+      // (cancelamento ou envio). Dentro do loop cada uma decide se roda.
+      const limiarMin = Math.min(idadeMinMs, ENVIO_IDADE_MIN_H * 3600 * 1000);
+      if (!nasceu || (agora - nasceu) < limiarMin) return false;               // nova demais pra tudo
       if (v.ml_status_atualizado_em) {
         const ultima = new Date(v.ml_status_atualizado_em).getTime();
         if (ultima && (agora - ultima) < repescarMs) return false;             // checada ha pouco
@@ -476,9 +483,19 @@ async function rotinaChecarCanceladasML(opts = {}) {
 
     // getOrderStatusResumo ja e a prova de excecao; o try aqui e cinto+suspensorio
     // pra garantir que UMA venda problematica nunca derrube a rodada inteira.
+    const idadeMs = v.data_venda ? (Date.now() - new Date(v.data_venda).getTime()) : Infinity;
+    const podeCancelamento = idadeMs >= (CANCELADAS_IDADE_MIN_H * 3600 * 1000) || !!opts.orderId;
+    const podeEnvio        = idadeMs >= (ENVIO_IDADE_MIN_H * 3600 * 1000) || !!opts.orderId;
+
     let st;
-    try { st = await ml.getOrderStatusResumo(oid); }
-    catch (e) { st = { ok: false, erro: e.message }; }
+    if (podeCancelamento) {
+      try { st = await ml.getOrderStatusResumo(oid); }
+      catch (e) { st = { ok: false, erro: e.message }; }
+    } else {
+      // Venda nova demais pra checagem de cancelamento, mas o envio pode ser olhado:
+      // segue como "viva" e cai no ramo de baixo, que so mexe no shipment.
+      st = { ok: true, status: null, cancelada: false, _soEnvio: true };
+    }
 
     out.checadas++;
 
@@ -496,8 +513,9 @@ async function rotinaChecarCanceladasML(opts = {}) {
       //   - ja detectamos etiqueta antes -> nao pergunta mais (nao volta atras)
       //   - ja tem NF emitida -> o painel ja considera resolvida por outro caminho
       // Assim o custo extra fica so nas vendas que realmente estao em aberto.
-      const campos = { ml_status: st.status, ml_status_atualizado_em: agoraIso };
-      if (!v.ml_etiqueta_em && !v.nf_emitida_em) {
+      const campos = { ml_status_atualizado_em: agoraIso };
+      if (!st._soEnvio) campos.ml_status = st.status;
+      if (podeEnvio && !v.ml_etiqueta_em && !v.nf_emitida_em) {
         try {
           const env = await ml.getEnvioResumo(oid);
           if (env && env.ok) {
