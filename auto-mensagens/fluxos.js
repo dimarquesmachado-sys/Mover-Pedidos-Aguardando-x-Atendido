@@ -604,6 +604,14 @@ async function rotinaChecarCanceladasML(opts = {}) {
               // preserva o carimbo ORIGINAL: quando a etiqueta saiu importa mais que
               // quando a gente reconferiu.
               if (!v.ml_etiqueta_em) campos.ml_etiqueta_em = agoraIso;
+              // TIRA dos status automaticos. So o marcador nao basta: o painel ja
+              // mostrava a venda como resolvida, mas o lerRespostas continuava
+              // processando mensagem nova e podia reescrever o pedido e emitir NF de
+              // algo ja etiquetado/postado. 'processado' e terminal pra essas rotinas.
+              if (['aguardando_resposta','cliente_respondeu','cliente_confirmou_pedido','aguardando_bling'].includes(String(v.status || ''))) {
+                campos.status = 'processado';
+                console.log(`[canceladas] order ${oid} etiqueta detectada — status ${v.status} -> processado (sai do automatico)`);
+              }
               console.log(`[canceladas] order ${oid} ja tem etiqueta no ML (${env.status}/${env.substatus || '-'}) — sai do bolsao de pendentes`);
             }
           } else {
@@ -855,25 +863,34 @@ async function _processarAutoEmissaoInner({ venda, iaResult, graosResult, lcp })
             // permitiria a recuperacao do confirmou-strand pegar a venda de novo e,
             // com uma falha transiente na consulta de status, montar e emitir NF de um
             // pedido ja cancelado.
+            // Confere o retorno: atualizarVenda devolve {ok:false} sem lancar. Se a
+            // quarentena nao gravou, a linha segue em cliente_confirmou_pedido/
+            // aguardando_bling e volta pela rehidratacao — pede RETRY em vez de sair.
+            let qOk = false;
             try {
-              await lcp.atualizarVenda(orderId, {
+              const rq = await lcp.atualizarVenda(orderId, {
                 status: 'cancelada_quarentena',
                 ml_status: st.status,
                 ml_status_atualizado_em: new Date().toISOString()
               });
+              qOk = !!(rq && rq.ok);
             } catch (e2) { console.error(`[auto-emissao] order ${orderId} falhei na quarentena: ${e2.message}`); }
-            return { falha: true, motivo: 'venda_cancelada_no_ml_envio_indeterminado' };
+            if (!qOk) console.error(`[auto-emissao] order ${orderId} 🚨 quarentena NAO gravou — mantendo na fila`);
+            return { falha: true, retry: !qOk, motivo: 'venda_cancelada_no_ml_envio_indeterminado' };
           }
         } catch (e) {
           console.error(`[auto-emissao] order ${orderId} cancelada e falhei ao conferir envio (${e.message}) — quarentena`);
+          let qOk2 = false;
           try {
-            await lcp.atualizarVenda(orderId, {
+            const rq2 = await lcp.atualizarVenda(orderId, {
               status: 'cancelada_quarentena',
               ml_status: st.status,
               ml_status_atualizado_em: new Date().toISOString()
             });
+            qOk2 = !!(rq2 && rq2.ok);
           } catch (e2) { console.error(`[auto-emissao] order ${orderId} falhei na quarentena: ${e2.message}`); }
-          return { falha: true, motivo: 'venda_cancelada_no_ml_envio_indeterminado' };
+          if (!qOk2) console.error(`[auto-emissao] order ${orderId} 🚨 quarentena NAO gravou — mantendo na fila`);
+          return { falha: true, retry: !qOk2, motivo: 'venda_cancelada_no_ml_envio_indeterminado' };
         }
       }
       await lcp.atualizarVenda(orderId, campos);
