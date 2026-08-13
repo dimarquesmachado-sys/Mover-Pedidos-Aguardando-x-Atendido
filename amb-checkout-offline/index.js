@@ -1917,7 +1917,7 @@ function routes(readBody) {
                 const roP = await fetch('https://api.mercadolibre.com/orders/' + oidP, HD);
                 const dorP = roP.ok ? await roP.json().catch(() => null) : null;
                 if (!dorP) { outD.erros.push('orders(' + oidP + '): HTTP ' + roP.status); continue; }
-                outD.orders_do_pack.push({ id: dorP.id, total: dorP.total_amount, frete_comprador: (dorP.shipping && dorP.shipping.cost) != null ? dorP.shipping.cost : null, pagamentos: (dorP.payments || []).map(pg => ({ id: pg.id, valor: pg.transaction_amount, frete: pg.shipping_cost, taxa: pg.marketplace_fee })) });
+                outD.orders_do_pack.push({ id: dorP.id, shipping_id: (dorP.shipping && dorP.shipping.id) || null, total: dorP.total_amount, frete_comprador: (dorP.shipping && dorP.shipping.cost) != null ? dorP.shipping.cost : null, pagamentos: (dorP.payments || []).map(pg => ({ id: pg.id, valor: pg.transaction_amount, frete: pg.shipping_cost, taxa: pg.marketplace_fee })) });
                 if (!dor) dor = dorP;
                 await new Promise(r => setTimeout(r, 150));
               }
@@ -1929,22 +1929,36 @@ function routes(readBody) {
         else {
           outD.order = { id: dor.id, pack_id: dor.pack_id || null, status: dor.status, total: dor.total_amount, pago: dor.paid_amount, frete_comprador: (dor.shipping && dor.shipping.cost) != null ? dor.shipping.cost : null };
           outD.pagamentos = (dor.payments || []).map(pg => ({ id: pg.id, status: pg.status, valor: pg.transaction_amount, frete: pg.shipping_cost, taxa: pg.marketplace_fee, tipo: pg.payment_type }));
-          const shipId = (dor.shipping && dor.shipping.id) || null;
-          if (shipId) {
-            const rs = await fetch('https://api.mercadolibre.com/shipments/' + shipId, HD);
-            const ds = await rs.json().catch(() => null);
-            // Codex PR#46: list_cost/cost aparecem no TOPO em algumas respostas — mesma
-            // cascata da pesca (shipping_option primeiro, depois o topo), pra nao descartar
-            // uma fonte boa por projecao vazia
-            if (rs.ok && ds) { const soD = ds.shipping_option || {}; outD.shipment = { id: shipId, logistic: (ds.logistic && ds.logistic.type) || ds.logistic_type || null, status: ds.status, base_cost: ds.base_cost, list_cost: soD.list_cost != null ? soD.list_cost : ds.list_cost, cost: soD.cost != null ? soD.cost : ds.cost }; }
-            else outD.erros.push('shipments: HTTP ' + rs.status);
-            const rc = await fetch('https://api.mercadolibre.com/shipments/' + shipId + '/costs', HD);
-            const dc = await rc.json().catch(() => null);
-            if (rc.ok && dc) {
-              const sd = Array.isArray(dc.senders) ? dc.senders[0] : null;
-              outD.costs = { gross_amount: dc.gross_amount, receiver_cost: dc.receiver && dc.receiver.cost, sender_cost: sd && sd.cost, compensation: sd && sd.compensation, compensations: (sd && sd.compensations) || [], save: sd && sd.save, discounts: (sd && sd.discounts) || null };
-            } else outD.erros.push('costs: HTTP ' + rc.status);
-          } else outD.erros.push('pedido sem shipping.id');
+          // Codex PR#46 (4a rodada): num carrinho o envio pode estar em QUALQUER das orders —
+          // junta todos os shipment ids distintos e consulta cada um. E cada fonte tem try
+          // proprio: falha de transporte em /shipments nao pode impedir a consulta a /costs,
+          // que e justamente a outra candidata que esta rota existe pra comparar.
+          const shipIds = [];
+          for (const cand of [dor].concat(outD.orders_do_pack ? [] : [])) { const sid = cand && cand.shipping && cand.shipping.id; if (sid && !shipIds.includes(sid)) shipIds.push(sid); }
+          for (const oP of (outD.orders_do_pack || [])) { const sid = oP && oP.shipping_id; if (sid && !shipIds.includes(sid)) shipIds.push(sid); }
+          if (!shipIds.length) outD.erros.push('nenhuma order tem shipping.id');
+          outD.envios = [];
+          for (const shipId of shipIds) {
+            const linhaE = { shipment_id: shipId, shipment: null, costs: null };
+            try {
+              const rs = await fetch('https://api.mercadolibre.com/shipments/' + shipId, HD);
+              const ds = rs.ok ? await rs.json().catch(() => null) : null;
+              if (ds) { const soD = ds.shipping_option || {}; linhaE.shipment = { logistic: (ds.logistic && ds.logistic.type) || ds.logistic_type || null, status: ds.status, base_cost: ds.base_cost, list_cost: soD.list_cost != null ? soD.list_cost : ds.list_cost, cost: soD.cost != null ? soD.cost : ds.cost }; }
+              else outD.erros.push('shipments(' + shipId + '): HTTP ' + rs.status);
+            } catch (eS) { outD.erros.push('shipments(' + shipId + '): ' + String(eS.message || eS).slice(0, 120)); }
+            try {
+              const rc = await fetch('https://api.mercadolibre.com/shipments/' + shipId + '/costs', HD);
+              const dc = rc.ok ? await rc.json().catch(() => null) : null;
+              if (dc) {
+                const sd = Array.isArray(dc.senders) ? dc.senders[0] : null;
+                linhaE.costs = { gross_amount: dc.gross_amount, receiver_cost: dc.receiver && dc.receiver.cost, sender_cost: sd && sd.cost, compensation: sd && sd.compensation, compensations: (sd && sd.compensations) || [], save: sd && sd.save, discounts: (sd && sd.discounts) || null };
+              } else outD.erros.push('costs(' + shipId + '): HTTP ' + rc.status);
+            } catch (eC) { outD.erros.push('costs(' + shipId + '): ' + String(eC.message || eC).slice(0, 120)); }
+            outD.envios.push(linhaE);
+            await new Promise(r => setTimeout(r, 150));
+          }
+          // compatibilidade: os campos antigos apontam pro 1o envio
+          if (outD.envios.length) { outD.shipment = Object.assign({ id: outD.envios[0].shipment_id }, outD.envios[0].shipment || {}); outD.costs = outD.envios[0].costs; }
         }
       } catch (e) { outD.erros.push('ML: ' + String(e.message || e).slice(0, 160)); }
 
