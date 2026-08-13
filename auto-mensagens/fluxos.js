@@ -516,7 +516,10 @@ async function rotinaChecarCanceladasML(opts = {}) {
     const cotaEnvio = Math.max(1, Math.floor(_max / 2));
     const filaEnvio  = alvos.filter(v => v._dueEnvio).slice(0, cotaEnvio);
     const setEnvio   = new Set(filaEnvio.map(v => String(v.order_id)));
-    const filaCancel = alvos.filter(v => !setEnvio.has(String(v.order_id)))
+    // Exige _dueCancel: sem isso, um backlog de candidatos so-de-envio ocupava tambem
+    // a metade reservada ao cancelamento (e o loop pulava getOrderStatusResumo em todos
+    // eles, porque _dueCancel e false), atrasando a deteccao de vendas canceladas.
+    const filaCancel = alvos.filter(v => v._dueCancel && !setEnvio.has(String(v.order_id)))
                             .slice(0, _max - filaEnvio.length);
     alvos = filaEnvio.concat(filaCancel);
   }
