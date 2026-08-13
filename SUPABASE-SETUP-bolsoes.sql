@@ -29,6 +29,17 @@ ALTER TABLE lixas_combinar_pendentes
 CREATE INDEX IF NOT EXISTS idx_lixas_pendentes_etiqueta
   ON lixas_combinar_pendentes (ml_etiqueta_em DESC NULLS LAST);
 
+-- ── BACKFILL: conclusoes manuais ANTERIORES a este deploy ───────────────────
+-- O botao "✓ Processado" antigo gravava so status='processado', sem marcador.
+-- Sem este passo, toda venda concluida na mao no passado seria reclassificada
+-- como anomalia e voltaria pra Pendentes ("marcado processado mas SEM NF").
+-- Usa atualizado_em como carimbo aproximado (e quando o status foi gravado).
+UPDATE lixas_combinar_pendentes
+   SET processado_manual_em = COALESCE(atualizado_em, criado_em, NOW())
+ WHERE status = 'processado'
+   AND processado_manual_em IS NULL
+   AND nf_emitida_em IS NULL;
+
 -- ── Conferencia ─────────────────────────────────────────────────────────────
 SELECT column_name, data_type
 FROM information_schema.columns
