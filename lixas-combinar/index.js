@@ -101,8 +101,13 @@ async function enviarConfirmacaoPedido(v, orderId) {
 // Ordem importa: cancelada > NF > etiqueta/postado > processado. A primeira que
 // bater define o motivo mostrado no card.
 function classificarVenda(v) {
-  if (v.venda_cancelada_em || v.status === 'venda_cancelada') {
-    return { bolsao: 'resolvido', motivo: 'cancelada', rotulo: '❌ Cancelada no ML' };
+  // 'cancelado' e o status que o revisarAtencaoHumana grava quando acha o pedido
+  // cancelado no BLING — sem tratar aqui, ele caia no default e voltava a aparecer
+  // como pendente "aguardando o cliente".
+  if (v.venda_cancelada_em || v.status === 'venda_cancelada' || v.status === 'cancelado') {
+    const noBling = v.status === 'cancelado' && !v.venda_cancelada_em;
+    return { bolsao: 'resolvido', motivo: 'cancelada',
+             rotulo: noBling ? '❌ Cancelada no Bling' : '❌ Cancelada no ML' };
   }
   if (v.nf_emitida_em) {
     return { bolsao: 'resolvido', motivo: 'nf', rotulo: '📄 NF emitida' };
@@ -113,8 +118,12 @@ function classificarVenda(v) {
     return { bolsao: 'resolvido', motivo: postado ? 'postado' : 'etiqueta',
              rotulo: postado ? '📦 Postado' : '🏷️ Etiqueta gerada' };
   }
+  // 'processado' SEM NF nao e conclusao: e justamente o caso que o card marca com
+  // "⚠️ SEM NF" e oferece o botao Recuperar NF (marcado na mao por engano, ou montar
+  // que falhou no meio). Mandar pra Resolvidos esconderia um pedido sem nota fiscal.
+  // So conta como resolvido quando ha NF de verdade — e essa ja foi tratada acima.
   if (v.status === 'processado') {
-    return { bolsao: 'resolvido', motivo: 'processado', rotulo: '✓ Processado' };
+    return { bolsao: 'pendente', motivo: 'humano', rotulo: '⚠️ Marcado processado mas SEM NF' };
   }
 
   // ── Pendente: a sub-flag diz DE QUEM e a bola ──
@@ -318,6 +327,34 @@ function routes(readBody) {
         const todosR = await lcp.listarPendentes({ dias, limit: 500 });
         const todos = todosR.ok && Array.isArray(todosR.data) ? todosR.data : [];
 
+        // CURA A NF ANTES DE CLASSIFICAR. Se rodasse depois (como antes), a venda cujo
+        // nf_emitida_em acabou de ser preenchido continuaria classificada como pendente
+        // NESTA resposta — card fantasma em Pendentes e contadores errados.
+        // Confere a NF REAL no Bling pros cards que mostrariam o botao "Emitir/Recuperar
+        // NF" mas tem nf_emitida_em vazio (campo desatualizado). Se a nota existe no
+        // Bling, cura o campo aqui -> o botao some sozinho. Limitado a 20 checagens pra
+        // nao pesar a listagem (so os poucos com campo desatualizado entram nisso).
+        try {
+          const bp = require('./blingPedidos');
+          let _checados = 0;
+          for (const v of todos) {
+            if (_checados >= 20) break;
+            const mostrariaBotaoNF = (v.bling_editado_em || v.status === 'processado') && !v.nf_emitida_em && v.bling_pedido_id;
+            if (!mostrariaBotaoNF) continue;
+            _checados++;
+            try {
+              const det = await bp.obterPedidoCompleto(v.bling_pedido_id);
+              const nf = (det && det.ok) ? det.pedido?.notaFiscal : null;
+              const nfId = (nf && typeof nf === 'object') ? nf.id : nf;
+              if (Number(nfId) > 0) {
+                const quando = new Date().toISOString();
+                await lcp.atualizarVenda(v.order_id, { nf_emitida_em: quando });
+                v.nf_emitida_em = quando; // reflete ja nesta resposta (botao some)
+              }
+            } catch (_) { /* checagem falhou: mantem o botao (melhor pecar por mostrar) */ }
+          }
+        } catch (_) { /* sem bp disponivel: segue sem curar */ }
+
         // Classifica TODAS (o painel trabalha por bolsao, nao por status cru)
         for (const v of todos) {
           const cls = classificarVenda(v);
@@ -335,7 +372,14 @@ function routes(readBody) {
 
         let pendentes = todos;
         if (bolsao) pendentes = pendentes.filter(v => v.bolsao === bolsao);
-        if (motivo) pendentes = pendentes.filter(v => v.motivo === motivo);
+        // 'etiqueta' no filtro = etiqueta OU postado (o chip mostra os dois juntos e o
+        // contador r_etiqueta soma ambos; filtrar so por 'etiqueta' devolvia menos
+        // cards que o numero do proprio chip).
+        if (motivo) {
+          pendentes = (motivo === 'etiqueta')
+            ? pendentes.filter(v => v.motivo === 'etiqueta' || v.motivo === 'postado')
+            : pendentes.filter(v => v.motivo === motivo);
+        }
         if (!bolsao && !motivo && status) {
           if (status === 'cliente_respondeu') {
             pendentes = pendentes.filter(v => v.status === 'cliente_respondeu' || v.status === 'cliente_confirmou_pedido');
@@ -345,30 +389,7 @@ function routes(readBody) {
         }
         pendentes = pendentes.slice(0, 200);
 
-        // Confere a NF REAL no Bling pros cards que mostrariam o botao "Emitir/Recuperar
-        // NF" mas tem nf_emitida_em vazio (campo desatualizado). Se a nota existe no
-        // Bling, cura o campo aqui -> o botao some sozinho. Limitado a 20 checagens pra
-        // nao pesar a listagem (so os poucos com campo desatualizado entram nisso).
-        try {
-          const bp = require('./blingPedidos');
-          let _checados = 0;
-          for (const v of pendentes) {
-            if (_checados >= 20) break;
-            const mostrariaBotaoNF = (v.bling_editado_em || v.status === 'processado') && !v.nf_emitida_em && v.bling_pedido_id;
-            if (!mostrariaBotaoNF) continue;
-            _checados++;
-            try {
-              const det = await bp.obterPedidoCompleto(v.bling_pedido_id);
-              const nf = (det && det.ok) ? det.pedido?.notaFiscal : null;
-              const nfId = (nf && typeof nf === 'object') ? nf.id : nf;
-              if (Number(nfId) > 0) {
-                const quando = new Date().toISOString();
-                await lcp.atualizarVenda(v.order_id, { nf_emitida_em: quando });
-                v.nf_emitida_em = quando; // reflete ja nesta resposta (botao some)
-              }
-            } catch (_) { /* checagem falhou: mantem o botao (melhor pecar por mostrar) */ }
-          }
-        } catch (_) { /* sem bp disponivel: segue sem curar */ }
+
 
         const stats = {
           total: todos.length,
