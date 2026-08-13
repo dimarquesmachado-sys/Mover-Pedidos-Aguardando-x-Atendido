@@ -426,6 +426,13 @@ async function rotinaChecarCanceladasML(opts = {}) {
   if (!lcp.configurado()) { out.erro = 'supabase_nao_configurado'; return out; }
 
   // ── Monta a lista de alvos ────────────────────────────────────────────
+  // Idade minima EFETIVA do cancelamento: o override ?idadeMinHoras da rota manual
+  // vale tambem na decisao de consultar o ML la embaixo — senao idadeMinHoras=0
+  // selecionava a venda nova e depois pulava a checagem dela mesmo assim.
+  let _idadeMinCancelH = CANCELADAS_IDADE_MIN_H;
+  if (opts.idadeMinHoras !== undefined && !Number.isNaN(Number(opts.idadeMinHoras))) {
+    _idadeMinCancelH = Number(opts.idadeMinHoras);
+  }
   let alvos = [];
 
   if (opts.orderId) {
@@ -443,8 +450,7 @@ async function rotinaChecarCanceladasML(opts = {}) {
     // Checagem explicita de undefined (e nao `||`) pra que ?idadeMinHoras=0 e
     // ?repescarHoras=0 funcionem de verdade: 0 significa "sem trava, checa tudo
     // agora". Com `||` o zero cairia no default e a rota nao obedeceria.
-    const idadeMinMs = (opts.idadeMinHoras !== undefined && !Number.isNaN(Number(opts.idadeMinHoras))
-      ? Number(opts.idadeMinHoras) : CANCELADAS_IDADE_MIN_H) * 3600 * 1000;
+    const idadeMinMs = _idadeMinCancelH * 3600 * 1000;
     const repescarMs = (opts.repescarHoras !== undefined && !Number.isNaN(Number(opts.repescarHoras))
       ? Number(opts.repescarHoras) : CANCELADAS_REPESCAR_H) * 3600 * 1000;
 
@@ -484,7 +490,7 @@ async function rotinaChecarCanceladasML(opts = {}) {
     // getOrderStatusResumo ja e a prova de excecao; o try aqui e cinto+suspensorio
     // pra garantir que UMA venda problematica nunca derrube a rodada inteira.
     const idadeMs = v.data_venda ? (Date.now() - new Date(v.data_venda).getTime()) : Infinity;
-    const podeCancelamento = idadeMs >= (CANCELADAS_IDADE_MIN_H * 3600 * 1000) || !!opts.orderId;
+    const podeCancelamento = idadeMs >= (_idadeMinCancelH * 3600 * 1000) || !!opts.orderId;
     const podeEnvio        = idadeMs >= (ENVIO_IDADE_MIN_H * 3600 * 1000) || !!opts.orderId;
 
     let st;
