@@ -454,10 +454,30 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
       // trava) passam a olhar só esse universo.
       const confRec = readJson(CONFERIDOS_FILE, {});
       const pendentes = Object.keys(man).filter(id => !confRec[id]);
-      const aRemover = pendentes.filter(id => !idsAtuais.has(String(id)));
+      const candidatos = pendentes.filter(id => !idsAtuais.has(String(id)));
+      // Codex PR#54 (P1): a lista só cobre a JANELA (5 dias). Um pendente ANTIGO que continua
+      // ATENDIDO não aparece nela — e, com a trava agora alcançável, seria apagado junto com a
+      // etiqueta anexada. Antes de remover, cada candidato é CONFERIDO individualmente no Bling:
+      // continua ATENDIDO → fica; mudou de situação → sai; consulta falhou → fica (preserva).
+      const aRemover = [];
+      let naoConferidos = 0;
+      for (const id of candidatos) {
+        let det = null;
+        for (let t = 1; t <= 3 && !det; t++) {
+          try { const rd = await blingGet('/pedidos/vendas/' + id); det = (rd && rd.ok && rd.data && rd.data.data) || null; } catch (e) { det = null; }
+          if (!det) await new Promise(r => setTimeout(r, 900 * t));
+        }
+        if (!det) { naoConferidos++; continue; }                                  // não deu pra confirmar: preserva
+        const sit = det.situacao && Number(det.situacao.id);
+        if (sit && sit !== Number(SIT_ATENDIDO)) aRemover.push(id);               // confirmado fora do ATENDIDO
+        await new Promise(r => setTimeout(r, 120));
+      }
+      if (naoConferidos) console.log('[GIRABKP] reconciliação: ' + naoConferidos + ' candidato(s) sem confirmação no Bling — preservados');
       // TRAVA DE SEGURANÇA: sumir com muita coisa de uma vez quase sempre é lista ruim do Bling,
       // não 40% dos pedidos despachados no mesmo minuto. Melhor não remover do que apagar etiqueta anexada.
-      const limiteSeguro = Math.max(5, Math.ceil(pendentes.length * 0.4));
+      // Codex PR#54 (P2): sem piso mínimo — com poucos pendentes o piso de 5 tornava a trava
+      // inalcançável (aRemover nunca passa do total de pendentes), anulando a proteção.
+      const limiteSeguro = Math.max(1, Math.ceil(pendentes.length * 0.4));
       if (aRemover.length > limiteSeguro) {
         reconciliacao = 'abortada_trava';
         console.log(`[GIRABKP] ⚠️ reconciliação ABORTADA: removeria ${aRemover.length} de ${pendentes.length} pendente(s) — lista do Bling parece incompleta. Cache preservado.`);
