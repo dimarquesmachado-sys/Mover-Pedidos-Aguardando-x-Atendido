@@ -621,6 +621,15 @@ function routes(readBody) {
             mensagem: 'Esta venda tem NF registrada no sistema. Desfazer a conclusao nao apaga a nota — trate no Bling.' });
           return true;
         }
+        // Venda CANCELADA: desfazer devolveria a linha pra 'precisa_atencao_humano', que
+        // o revisarAtencaoHumana reengaja — e com uma falha transiente na consulta de
+        // status (que por desenho segue em frente) daria pra montar e faturar um pedido
+        // ja cancelado. O marcador manual nao e o que prende a venda aqui.
+        if (v.venda_cancelada_em || v.status === 'venda_cancelada' || v.status === 'cancelada_quarentena') {
+          json(res, 409, { ok: false, erro: 'venda_cancelada',
+            mensagem: 'Esta venda esta CANCELADA no Mercado Livre. Nao ha o que desfazer aqui — se houver NF emitida por fora, cancele/estorne no Bling.' });
+          return true;
+        }
         // Volta pro estado acionavel: se o pedido ja estava montado, cai em
         // 'cliente_confirmou_pedido' (falta so emitir); senao volta pra atencao humana.
         const novoStatus = v.bling_editado_em ? 'cliente_confirmou_pedido' : 'precisa_atencao_humano';
