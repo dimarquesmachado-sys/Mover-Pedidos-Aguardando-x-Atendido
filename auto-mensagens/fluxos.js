@@ -694,6 +694,17 @@ async function rotinaChecarCanceladasML(opts = {}) {
         // que exclui a linha das proximas rodadas, e ainda falta determinar o alerta.
         let quarentenaOk = false;
         try {
+          // Releitura antes de gravar: o cron e o botao "Verificar ML" podem estar
+          // rodando na mesma venda. Se o outro ja finalizou o cancelamento, sobrescrever
+          // com quarentena deixaria a linha num estado impossivel — venda_cancelada_em
+          // preenchido (exclui do filtro pra sempre) com status de quarentena (o painel
+          // segue mostrando como pendente de conferencia).
+          const _relido = await lcp.buscar(oid);
+          if (_relido && _relido.ok && _relido.data && _relido.data.venda_cancelada_em) {
+            console.log(`[canceladas] order ${oid} cancelamento ja finalizado por outra execucao — nao sobrescrevo com quarentena`);
+            await new Promise(r => setTimeout(r, CANCELADAS_PAUSA_MS));
+            continue;
+          }
           const rq = await lcp.atualizarVenda(oid, {
             // Status PROPRIO de quarentena: 'venda_cancelada' sairia do CANCELADAS_STATUS
             // e a linha nunca voltaria pra tentar o envio de novo — o alerta de nao
@@ -893,6 +904,11 @@ async function _processarAutoEmissaoInner({ venda, iaResult, graosResult, lcp })
             // aguardando_bling e volta pela rehidratacao — pede RETRY em vez de sair.
             let qOk = false;
             try {
+              const _relA = await lcp.buscar(orderId);
+              if (_relA && _relA.ok && _relA.data && _relA.data.venda_cancelada_em) {
+                console.log(`[auto-emissao] order ${orderId} cancelamento ja finalizado por outra execucao — nao sobrescrevo`);
+                return { falha: true, motivo: 'venda_cancelada_no_ml' };
+              }
               const rq = await lcp.atualizarVenda(orderId, {
                 status: 'cancelada_quarentena',
                 ml_status: st.status,
@@ -907,6 +923,11 @@ async function _processarAutoEmissaoInner({ venda, iaResult, graosResult, lcp })
           console.error(`[auto-emissao] order ${orderId} cancelada e falhei ao conferir envio (${e.message}) — quarentena`);
           let qOk2 = false;
           try {
+            const _relB = await lcp.buscar(orderId);
+            if (_relB && _relB.ok && _relB.data && _relB.data.venda_cancelada_em) {
+              console.log(`[auto-emissao] order ${orderId} cancelamento ja finalizado por outra execucao — nao sobrescrevo`);
+              return { falha: true, motivo: 'venda_cancelada_no_ml' };
+            }
             const rq2 = await lcp.atualizarVenda(orderId, {
               status: 'cancelada_quarentena',
               ml_status: st.status,
