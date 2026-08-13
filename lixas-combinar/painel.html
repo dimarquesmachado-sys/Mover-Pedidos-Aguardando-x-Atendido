@@ -549,6 +549,7 @@ function renderCard(v) {
         <a href="${orderLink}" target="_blank" title="Abre o detalhe da venda no Mercado Livre">🛒 Venda</a>
         ${botaoML}
         ${botoesBling}
+        ${v.alerta_pos_venda && !v.alerta_reconhecido_em ? `<button style="background:#b91c1c;color:#fff;border:none" title="Confirma que você já parou o despacho e cancelou/estornou a NF. O card sai da fila de pendentes" onclick="reconhecerAlerta('${v.order_id}')">✔️ Alerta tratado</button>` : ''}
         ${v.status !== 'processado' ? `<button class="processed" title="Marca como resolvido na mão (tira da lista de pendentes). Use quando você já tratou esse pedido por fora" onclick="marcarProcessado('${v.order_id}')">✓ Processado</button>` : ''}
       </div>
       ${iaInstrBlock}
@@ -585,6 +586,19 @@ async function verificarML(orderId) {
   } finally {
     document.querySelectorAll('.btn-ml').forEach(b => b.disabled = false);
   }
+}
+
+async function reconhecerAlerta(orderId) {
+  if (!confirm('Confirma que o despacho foi parado e a NF cancelada/estornada?\n\nO card sai da fila de pendentes (o texto do alerta continua no histórico).')) return;
+  try {
+    const r = await fetch(`${API_BASE}/api/pendentes/${orderId}/reconhecer-alerta`, {
+      method: 'POST', headers: { 'X-Session-Token': token() }
+    });
+    if (r.status === 401) { logout(); return; }
+    const d = await r.json();
+    if (d.ok) await recarregar();
+    else mostrarModal('❌ Erro', JSON.stringify(d, null, 2), true);
+  } catch (e) { mostrarModal('❌ Erro', e.message, true); }
 }
 
 async function marcarProcessado(orderId) {
