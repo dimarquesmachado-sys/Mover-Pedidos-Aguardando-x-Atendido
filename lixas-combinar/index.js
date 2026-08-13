@@ -581,7 +581,7 @@ function routes(readBody) {
             mensagem: `Esta venda ja tem etiqueta no ML (${vMP.ml_shipment_status || '?'}) e o sistema acompanha ate a postagem. Nao precisa marcar na mao.` });
           return true;
         }
-        if (vMP.venda_cancelada_em || vMP.status === 'venda_cancelada' || vMP.status === 'cancelada_quarentena') {
+        if (vMP.venda_cancelada_em || vMP.status === 'venda_cancelada' || vMP.status === 'cancelado' || vMP.status === 'cancelada_quarentena') {
           json(res, 409, { ok: false, erro: 'venda_cancelada',
             mensagem: 'Esta venda esta CANCELADA no Mercado Livre (ou aguardando conferencia da etiqueta). Nao da pra marcar como concluida — se ja houver NF, cancele/estorne no Bling.' });
           return true;
@@ -625,7 +625,7 @@ function routes(readBody) {
         // o revisarAtencaoHumana reengaja — e com uma falha transiente na consulta de
         // status (que por desenho segue em frente) daria pra montar e faturar um pedido
         // ja cancelado. O marcador manual nao e o que prende a venda aqui.
-        if (v.venda_cancelada_em || v.status === 'venda_cancelada' || v.status === 'cancelada_quarentena') {
+        if (v.venda_cancelada_em || v.status === 'venda_cancelada' || v.status === 'cancelado' || v.status === 'cancelada_quarentena') {
           json(res, 409, { ok: false, erro: 'venda_cancelada',
             mensagem: 'Esta venda esta CANCELADA no Mercado Livre. Nao ha o que desfazer aqui — se houver NF emitida por fora, cancele/estorne no Bling.' });
           return true;
@@ -698,6 +698,7 @@ function routes(readBody) {
           // encaminhar, d.quarentena vinha undefined e TODA quarentena bem-sucedida
           // aparecia como "quarentena FALHOU / continua no fluxo automatico".
           quarentena: !!d.quarentena,
+          indeterminado: !!d.indeterminado,
           gravado: d.gravado !== false,
           aviso: d.aviso || null,
           erros: r.erros || []
@@ -960,7 +961,7 @@ function routes(readBody) {
         const v = venda.data;
         // Venda CANCELADA (ou em quarentena, cancelamento ja confirmado no ML): montar
         // ou faturar aqui gera pedido/NF de algo que o cliente cancelou.
-        if (v.venda_cancelada_em || v.status === 'venda_cancelada' || v.status === 'cancelada_quarentena') {
+        if (v.venda_cancelada_em || v.status === 'venda_cancelada' || v.status === 'cancelado' || v.status === 'cancelada_quarentena') {
           json(res, 409, { ok: false, erro: 'venda_cancelada',
             mensagem: 'Esta venda esta CANCELADA no Mercado Livre. Nao da pra montar nem emitir NF. Se ja houver nota, cancele/estorne no Bling.' });
           return true;
@@ -1073,7 +1074,7 @@ function routes(readBody) {
         const v = venda.data;
         // Venda CANCELADA (ou em quarentena, cancelamento ja confirmado no ML): montar
         // ou faturar aqui gera pedido/NF de algo que o cliente cancelou.
-        if (v.venda_cancelada_em || v.status === 'venda_cancelada' || v.status === 'cancelada_quarentena') {
+        if (v.venda_cancelada_em || v.status === 'venda_cancelada' || v.status === 'cancelado' || v.status === 'cancelada_quarentena') {
           json(res, 409, { ok: false, erro: 'venda_cancelada',
             mensagem: 'Esta venda esta CANCELADA no Mercado Livre. Nao da pra montar nem emitir NF. Se ja houver nota, cancele/estorne no Bling.' });
           return true;
@@ -1170,7 +1171,7 @@ function routes(readBody) {
         // esta justamente tratando o alerta de NAO despachar.
         {
           const vc = venda.data;
-          if (vc.venda_cancelada_em || vc.status === 'venda_cancelada' || vc.status === 'cancelada_quarentena') {
+          if (vc.venda_cancelada_em || vc.status === 'venda_cancelada' || vc.status === 'cancelado' || vc.status === 'cancelada_quarentena') {
             json(res, 409, { ok: false, erro: 'venda_cancelada',
               mensagem: 'Esta venda esta CANCELADA no Mercado Livre. Nao da pra mandar confirmacao de pedido pro cliente.' });
             return true;
@@ -1211,7 +1212,7 @@ function routes(readBody) {
         // geraria uma SEGUNDA nota. Mesma guarda que o recuperarFalsosProcessados.
         // Venda CANCELADA (ou em quarentena, cancelamento ja confirmado no ML): montar
         // ou faturar aqui gera pedido/NF de algo que o cliente cancelou.
-        if (v.venda_cancelada_em || v.status === 'venda_cancelada' || v.status === 'cancelada_quarentena') {
+        if (v.venda_cancelada_em || v.status === 'venda_cancelada' || v.status === 'cancelado' || v.status === 'cancelada_quarentena') {
           json(res, 409, { ok: false, erro: 'venda_cancelada',
             mensagem: 'Esta venda esta CANCELADA no Mercado Livre. Nao da pra montar nem emitir NF. Se ja houver nota, cancele/estorne no Bling.' });
           return true;
