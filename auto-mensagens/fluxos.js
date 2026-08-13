@@ -520,7 +520,11 @@ async function rotinaChecarCanceladasML(opts = {}) {
     // pro fim da fila por varias horas, matando a promessa de refresh horario.
     // Reserva metade do lote pro envio; o que sobrar volta pro cancelamento.
     const _max = Number(opts.max) || CANCELADAS_MAX;
-    const cotaEnvio = Math.max(1, Math.floor(_max / 2));
+    // Com _max=1 (env ou ?max=1), reservar a unica vaga pro envio zerava a fila de
+    // cancelamento — e um backlog de envio esconderia indefinidamente um cancelamento
+    // pos-NF. Nesse caso as duas alternam por rodada.
+    const _alternaEnvio = (new Date().getHours() % 2) === 0;
+    const cotaEnvio = _max <= 1 ? (_alternaEnvio ? 1 : 0) : Math.max(1, Math.floor(_max / 2));
     const filaEnvio  = alvos.filter(v => v._dueEnvio).slice(0, cotaEnvio);
     const setEnvio   = new Set(filaEnvio.map(v => String(v.order_id)));
     // Exige _dueCancel: sem isso, um backlog de candidatos so-de-envio ocupava tambem
@@ -569,7 +573,7 @@ async function rotinaChecarCanceladasML(opts = {}) {
       out.erros.push({ order_id: oid, erro: st.erro });
       console.warn(`[canceladas] order ${oid} nao consegui checar o cancelamento: ${st.erro} — sigo so com o envio`);
       try { await lcp.atualizarVenda(oid, { ml_status_atualizado_em: agoraIso }); } catch (_) {}
-      st = { ok: true, status: v.ml_status || null, cancelada: false, _soEnvio: true };
+      st = { ok: true, status: v.ml_status || null, cancelada: false, _soEnvio: true, _statusIndeterminado: st.erro || 'falha lendo status' };
       await new Promise(r => setTimeout(r, CANCELADAS_PAUSA_MS));
     }
 
@@ -651,7 +655,14 @@ async function rotinaChecarCanceladasML(opts = {}) {
       }
       out.detalhes.push({ order_id: oid, ml_status: st.status, cancelada: false,
                           shipment: campos.ml_shipment_status || null, etiqueta: !!campos.ml_etiqueta_em,
-                          gravado: !!updV.ok });
+                          gravado: !!updV.ok,
+                          // indeterminado: NAO da pra dizer "venda ativa" — o status do
+                          // pedido nem chegou a ser lido. O painel usa isso pra avisar
+                          // em vez de liberar o processamento.
+                          indeterminado: !!st._statusIndeterminado,
+                          aviso: st._statusIndeterminado
+                            ? `Nao consegui ler o status do pedido no ML (${st._statusIndeterminado}). O envio foi conferido, mas NAO da pra afirmar que a venda esta ativa.`
+                            : undefined });
       await new Promise(r => setTimeout(r, CANCELADAS_PAUSA_MS));
       continue;
     }
