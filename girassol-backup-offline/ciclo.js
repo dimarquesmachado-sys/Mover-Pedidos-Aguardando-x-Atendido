@@ -124,19 +124,28 @@ async function listarAtendidos() {
   const out = [];
   let fetchOk = false;
   let completa = false;              // só true se a paginação foi até o fim SEM falhar no meio
+  let paginasRefeitas = 0, falhouNaPagina = null;
   for (let pagina = 1; pagina <= 50; pagina++) {
-    const { ok, data } = await blingGet(`/pedidos/vendas?${qs}&pagina=${pagina}&limite=100`);
+    // 13/08 — uma falha isolada (429/timeout do Bling) fazia a lista voltar INCOMPLETA e a
+    // reconciliação era pulada TODA vez. Efeito medido na Girassol: 9 pedidos ML já despachados
+    // presos como "sem etiqueta" no painel. Agora cada página é re-tentada antes de desistir.
+    let ok = false, data = null;
+    for (let tent = 1; tent <= 4; tent++) {
+      ({ ok, data } = await blingGet(`/pedidos/vendas?${qs}&pagina=${pagina}&limite=100`));
+      if (ok) { if (tent > 1) paginasRefeitas++; break; }
+      await new Promise(r => setTimeout(r, 1200 * tent));
+    }
     if (pagina === 1) fetchOk = ok;        // marca se o Bling respondeu (p/ não limpar cache offline)
     const lista = (data && data.data) || [];
     // ⚠️ ANTES: um !ok na página 2+ saía do loop e a lista PARCIAL era devolvida como ok=true —
     // a reconciliação então apagava do cache todo pedido que faltou (levando junto etiqueta anexada).
-    if (!ok) break;                        // falhou no meio → completa fica FALSE
+    if (!ok) { falhouNaPagina = pagina; break; }   // falhou 4× → completa fica FALSE
     if (lista.length === 0) { completa = true; break; }
     out.push(...lista);
     if (lista.length < 100) { completa = true; break; }
     await sleep(PAUSA_MS);
   }
-  return { ok: fetchOk, completa, pedidos: out };
+  return { ok: fetchOk, completa, pedidos: out, paginas_refeitas: paginasRefeitas, falhou_na_pagina: falhouNaPagina };
 }
 
 async function detalhePedido(id) {
@@ -412,14 +421,17 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
     const man      = manifest();
     const cacheEan = skuEanCache();
     const locC     = locCache();
-    const { ok: listaOk, completa: listaCompleta, pedidos: atendidos } = await listarAtendidos();
+    const { ok: listaOk, completa: listaCompleta, pedidos: atendidos, paginas_refeitas: pagRef, falhou_na_pagina: pagFalha } = await listarAtendidos();
+    let reconciliacao = 'ok';   // vira 'pulada_lista_incompleta' | 'abortada_trava' | 'sem_lista' conforme o caso
     console.log(`[GIRABKP] ${atendidos.length} pedido(s) ATENDIDO(${SIT_ATENDIDO}) na janela de ${JANELA_DIAS}d (bling ok=${listaOk})`);
 
     // RECONCILIAÇÃO: remove do cache quem NÃO está mais em ATENDIDO (enviado/processado).
     // Só roda se o Bling respondeu E veio algo — assim, se o Bling cair, o cache offline é preservado.
     if (listaOk && !listaCompleta) {
-      console.log('[GIRABKP] ⚠️ lista do Bling veio INCOMPLETA (falhou no meio da paginação) — reconciliação PULADA, cache preservado');
+      reconciliacao = 'pulada_lista_incompleta';
+      console.log('[GIRABKP] ⚠️ lista do Bling veio INCOMPLETA (falhou na página ' + pagFalha + ' após 4 tentativas) — reconciliação PULADA, cache preservado');
     }
+    if (!listaOk) reconciliacao = 'sem_lista';
     if (listaOk && listaCompleta && atendidos.length > 0) {
       const idsAtuais = new Set(atendidos.map(p => String(p.id)));
       const aRemover = Object.keys(man).filter(id => !idsAtuais.has(String(id)));
@@ -427,6 +439,7 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
       // não 40% dos pedidos despachados no mesmo minuto. Melhor não remover do que apagar etiqueta anexada.
       const limiteSeguro = Math.max(5, Math.ceil(Object.keys(man).length * 0.4));
       if (aRemover.length > limiteSeguro) {
+        reconciliacao = 'abortada_trava';
         console.log(`[GIRABKP] ⚠️ reconciliação ABORTADA: removeria ${aRemover.length} de ${Object.keys(man).length} pedidos — lista do Bling parece incompleta. Cache preservado.`);
       } else if (aRemover.length) {
         for (const id of aRemover) {
@@ -657,6 +670,8 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
       rodouEm: new Date().toISOString(),
       duracaoSeg: Math.round((Date.now() - t0) / 1000),
       blingOk: listaOk,                            // o Bling respondeu neste ciclo? (p/ o /saude)
+      reconciliacao,                               // 13/08: 'ok' | 'pulada_lista_incompleta' | 'abortada_trava' | 'sem_lista'
+      paginasRefeitas: pagRef || 0,                // quantas páginas precisaram de re-tentativa
       total: ids.length,
       comEtiqueta: ids.filter(i => man[i].tem_etiqueta).length,
       semEtiqueta: ids.filter(i => !man[i].tem_etiqueta).length,
