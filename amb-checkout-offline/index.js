@@ -1890,11 +1890,15 @@ function routes(readBody) {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(diaG)) { json(res, 400, { ok: false, erro: 'use ?dia=AAAA-MM-DD&k=ADMIN_KEY' }); return true; }
       const outG = { dia: diaG, magalu: [], bling: { paginas: 0, pedidos: 0, datas: {}, amostra: [] }, casamento: null, erros: [] };
       try {
-        const urlMg = (process.env.MAGALU_URL || 'https://magalu-oauth.onrender.com') + '/magalu/pedidos-do-dia?empresa=amb&desde=' + diaG + '&ate=' + diaG + '&paginas=6&k=' + encodeURIComponent(process.env.ADMIN_KEY || '');
-        const rMg = await fetch(urlMg, { timeout: 45000 });
+        // o módulo magalu-oauth roda NO MESMO serviço — a chamada é local (foi o HTTP 404 da 1ª tentativa)
+        const urlMg = 'http://127.0.0.1:' + (process.env.PORT || 3000) + '/magalu/pedidos-do-dia?empresa=' + (process.env.MAG_EMPRESA || 'amb') + '&desde=' + diaG + '&ate=' + diaG + '&paginas=6&k=' + encodeURIComponent(process.env.ADMIN_KEY || '');
+        const rMg = await fetch(urlMg, { timeout: 60000 });
         const jMg = rMg.ok ? await rMg.json().catch(() => null) : null;
         if (!jMg) outG.erros.push('magalu: HTTP ' + rMg.status);
-        else outG.magalu = (jMg.pedidos || []).slice(0, 8).map(x => ({ code: x.code, id: x.id || null, purchased_at: x.purchased_at, status: x.status, total: x.total, itens: (x.itens || []).length }));
+        else {
+          outG.magalu_total = (jMg.pedidos || []).length;
+          outG.magalu = (jMg.pedidos || []).slice(0, 8).map(x => ({ code: x.code, id: x.id || null, purchased_at: x.purchased_at, status: x.status, total: x.total, itens: (x.itens || []).length, skus: (x.itens || []).map(i9 => i9.sku).slice(0, 3) }));
+        }
       } catch (e) { outG.erros.push('magalu: ' + String(e.message || e).slice(0, 140)); }
       try {
         for (let pg = 1; pg <= 12; pg++) {
@@ -1915,6 +1919,11 @@ function routes(readBody) {
         const chavesB = new Set();
         for (const a of outG.bling.amostra) { if (a.numeroLoja) chavesB.add(String(a.numeroLoja).trim()); if (a.numeroPedidoLoja) chavesB.add(String(a.numeroPedidoLoja).trim()); }
         outG.casamento = outG.magalu.map(m => ({ code: m.code, id: m.id, casa_por_code: chavesB.has(String(m.code)), casa_por_id: chavesB.has(String(m.id || '')) }));
+        // quais LOJAS o Bling tem naquele dia — se nenhuma for a da Magalu, o pedido não existe
+        // no Bling como pedido de venda (caso do Magalu FULL, em que a Magalu emite a própria NF)
+        const lojasB = {};
+        for (const a of outG.bling.amostra) { const l = String(a.loja || '?'); lojasB[l] = (lojasB[l] || 0) + 1; }
+        outG.bling.lojas_na_amostra = lojasB;
       } catch (e) {}
       json(res, 200, outG);
       return true;
