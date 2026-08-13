@@ -393,7 +393,12 @@ const CANCELADAS_STATUS = (
   process.env.LIXAS_CANCELADAS_STATUS ||
   'aguardando_resposta,cliente_respondeu,cliente_confirmou_pedido,precisa_atencao_humano,processado'
 ).split(',').map(s => s.trim()).filter(Boolean);
-const CANCELADAS_DIAS        = Number(process.env.LIXAS_CANCELADAS_DIAS) || 7;
+// Acompanha a janela do leitor (LIXAS_JANELA_DIAS, default 30). Se ficasse em 7
+// enquanto o lerRespostas processa ate 30 dias, existiria uma faixa de 8-30 dias em
+// que uma venda CANCELADA no ML seguiria sendo processada — montando pedido no Bling
+// e emitindo NF (irreversivel) de algo que o cliente ja cancelou.
+const CANCELADAS_DIAS        = Number(process.env.LIXAS_CANCELADAS_DIAS)
+  || Number(process.env.LIXAS_JANELA_DIAS) || 30;
 const CANCELADAS_IDADE_MIN_H = Number(process.env.LIXAS_CANCELADAS_IDADE_MIN_HORAS) || 24;
 const CANCELADAS_REPESCAR_H  = Number(process.env.LIXAS_CANCELADAS_REPESCAR_HORAS) || 6;
 const CANCELADAS_MAX         = Number(process.env.LIXAS_CANCELADAS_MAX_POR_RODADA) || 40;
