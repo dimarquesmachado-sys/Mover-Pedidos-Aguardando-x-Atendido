@@ -2988,6 +2988,7 @@ async function pescarDadosML(nlRaw, tokenML, dorme) {
       if (rs.ok && ds) {
         const logi = (ds.logistic && ds.logistic.type) || ds.logistic_type || null;
         if (logi) reg.logistica = logi;
+        reg.ship_ok = true;   // Codex PR#48: prova que /shipments respondeu (costs_ok sozinho não prova)
         ehFlex = (logi === 'self_service');
         const bc = Number(ds.base_cost); if (isFinite(bc) && bc > 0) baseCost = bc;
         const so = ds.shipping_option || {};
@@ -4172,7 +4173,7 @@ async function vendasSync() {
               if (reg.credito == null && reg.costs_ok) { delete v.credito_ml; delete v.credito_fonte; }
               // Codex PR#48: só sobe de versão se as chamadas que a regra NOVA exige completaram.
               // Falha transitória em /shipments ou /costs deixa a linha na fila da próxima rodada.
-              v.ml_real = reg.costs_ok ? ML_REAL_V : 1;
+              v.ml_real = (reg.costs_ok && reg.ship_ok) ? ML_REAL_V : 1;   /* Codex PR#48: sem a classificacao do envio, 'nao e Flex' pode ser falso negativo */
             }
           } catch (e) {}
           await dormeR(350);
