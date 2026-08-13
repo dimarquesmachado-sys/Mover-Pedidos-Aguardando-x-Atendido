@@ -812,6 +812,18 @@ async function rotinaChecarCanceladasML(opts = {}) {
       console.log(`[canceladas] order ${oid} cancelada no ML (nada montado/emitido ainda) — cliente ${v.buyer_nome || '?'}`);
     }
 
+    // O outro lado da exclusao mutua: se uma emissao manual acabou de reservar a linha
+    // (nf_emitindo_em preenchido ha menos de 2 min), o cron NAO grava o cancelamento —
+    // deixa pra proxima rodada, quando a emissao ja terminou e o estado esta estavel.
+    if (v.nf_emitindo_em) {
+      const emissaoMs = Date.now() - new Date(v.nf_emitindo_em).getTime();
+      if (emissaoMs >= 0 && emissaoMs < 2 * 60 * 1000) {
+        console.warn(`[canceladas] order ${oid} cancelada, mas ha uma emissao de NF em curso — adio o registro pra proxima rodada`);
+        out.erros.push({ order_id: oid, erro: 'cancelada durante emissao de NF em curso — adiado' });
+        await new Promise(r => setTimeout(r, CANCELADAS_PAUSA_MS));
+        continue;
+      }
+    }
     const upd = await lcp.atualizarVenda(oid, campos);
     if (!upd.ok) {
       // Fail closed: sem gravar, a linha segue no status original e pode ser faturada.
