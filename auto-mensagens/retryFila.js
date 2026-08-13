@@ -102,7 +102,12 @@ async function _rehidratarStatus({ lcp, status, modo }) {
   let lista;
   // confirmou-strand pode ser BACKLOG (dias atras), entao janela maior; os demais
   // (aguardando_bling, humano-timing) sao recentes, 2 dias basta.
-  const diasJanela = (modo === 'confirmou-strand') ? (Number(process.env.LIXAS_REPESCA_CONFIRMOU_DIAS) || 7) : 2;
+  // confirmou-strand acompanha LIXAS_JANELA_DIAS: a reconciliacao pode empurrar venda
+  // antiga (8-30 dias) pra 'cliente_confirmou_pedido', e se quem consome esse status
+  // olhasse so 7 dias ela sumiria de todos os caminhos de emissao, encalhada sem NF.
+  const diasJanela = (modo === 'confirmou-strand')
+    ? (Number(process.env.LIXAS_REPESCA_CONFIRMOU_DIAS) || Number(process.env.LIXAS_JANELA_DIAS) || 30)
+    : 2;
   try { lista = await lcp.listarPendentes({ dias: diasJanela, status, limit: 50 }); }
   catch (e) { console.warn(`[retry-bling] erro lendo ${status} do banco: ${e.message}`); return; }
   if (!lista || !lista.ok || !Array.isArray(lista.data) || lista.data.length === 0) return;
@@ -196,7 +201,7 @@ async function revisarAtencaoHumana({ lcp }) {
   // Mesma janela do leitor (LIXAS_JANELA_DIAS, default 30): sem isso, venda que foi
   // pra atencao humana e cujo cliente volta depois do 7o dia nunca seria re-engajada.
   const _janelaDias = Number(process.env.LIXAS_JANELA_DIAS) || 30;
-  try { lista = await lcp.listarPendentes({ dias: _janelaDias, status: 'precisa_atencao_humano', limit: 50 }); }
+  try { lista = await lcp.listarPendentes({ dias: _janelaDias, status: 'precisa_atencao_humano', limit: 200 }); }
   catch (e) { console.error(`[revisar] erro listando atencao humana: ${e.message}`); return; }
   const vendas = (lista && lista.ok && Array.isArray(lista.data)) ? lista.data : [];
   if (vendas.length === 0) return;
@@ -263,8 +268,12 @@ async function revisarAtencaoHumana({ lcp }) {
           } else {
             await lcp.atualizarVenda(venda.order_id, { bling_pedido_id: String(busca.pedidoId) });
             console.log(`[revisar] order ${venda.order_id} situacao ${sit} SEM NF (erro=${venda.bling_erro || 'nenhum'}) — mantido p/ revisao humana (painel)`);
+            // NAO da continue aqui: a venda segue em atencao humana, e se o cliente
+            // mandou uma mensagem nova ela precisa chegar no re-engajamento abaixo —
+            // justamente o caso que a janela ampliada quer recuperar. O continue
+            // incondicional matava isso. So pula quando a linha foi re-roteada.
           }
-          continue;
+          if (claroEstrut && AUTO_EMITIR_HABILITADO) continue;
         }
       }
 
