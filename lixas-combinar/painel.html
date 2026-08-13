@@ -550,7 +550,7 @@ function renderCard(v) {
         ${botaoML}
         ${botoesBling}
         ${v.alerta_pos_venda && !v.alerta_reconhecido_em ? `<button style="background:#b91c1c;color:#fff;border:none" title="Confirma que você já parou o despacho e cancelou/estornou a NF. O card sai da fila de pendentes" onclick="reconhecerAlerta('${v.order_id}')">✔️ Alerta tratado</button>` : ''}
-        ${v.status !== 'processado' ? `<button class="processed" title="Marca como resolvido na mão (tira da lista de pendentes). Use quando você já tratou esse pedido por fora" onclick="marcarProcessado('${v.order_id}')">✓ Processado</button>` : ''}
+        ${(v.status !== 'processado' || (!v.processado_manual_em && !v.nf_emitida_em)) ? `<button class="processed" title="Marca como resolvido na mão (tira da lista de pendentes). Use quando você já tratou esse pedido por fora" onclick="marcarProcessado('${v.order_id}')">${v.status === 'processado' ? '✓ Confirmar conclusão' : '✓ Processado'}</button>` : ''}
       </div>
       ${iaInstrBlock}
     </div>
