@@ -559,6 +559,17 @@ function routes(readBody) {
       const orderId = p.replace('/lixas-combinar/api/pendentes/', '').replace('/marcar-processado', '');
       try {
         const lcp = require('../auto-mensagens/lixasCombinarPendentes');
+        // Venda cancelada / em quarentena NAO vira "concluida": sobrescrever a
+        // quarentena com processado + processado_manual_em a excluiria do cron por
+        // DOIS caminhos (status e marcador), a reconferencia de etiqueta nunca
+        // aconteceria e o alerta de nao despachar se perderia.
+        const vAtualMP = await lcp.buscar(orderId);
+        const vMP = (vAtualMP && vAtualMP.ok) ? vAtualMP.data : null;
+        if (vMP && (vMP.venda_cancelada_em || vMP.status === 'venda_cancelada' || vMP.status === 'cancelada_quarentena')) {
+          json(res, 409, { ok: false, erro: 'venda_cancelada',
+            mensagem: 'Esta venda esta CANCELADA no Mercado Livre (ou aguardando conferencia da etiqueta). Nao da pra marcar como concluida — se ja houver NF, cancele/estorne no Bling.' });
+          return true;
+        }
         // Grava a marca de conclusao MANUAL junto: e ela que faz o card virar
         // "resolvido" na classificacao (sem ela, processado sem NF volta pra Pendentes
         // como anomalia — que e o comportamento certo pra quem NAO passou por aqui).
