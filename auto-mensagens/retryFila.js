@@ -191,9 +191,15 @@ async function retentarEmissoesBling({ lcp }) {
         console.warn(`[retry-bling] order ${orderId} nao consegui reler o estado — pulo esta rodada (nao emito com dado velho)`);
         continue;
       }
-      if (vAtual.processado_manual_em || vAtual.nf_emitida_em || vAtual.venda_cancelada_em) {
+      // cancelada_quarentena tambem e terminal: o cancelamento JA foi confirmado no ML,
+      // so falta saber da etiqueta. Sem isso o retry seguiria e, numa falha transiente
+      // da consulta de status, editaria o pedido e emitiria NF de venda cancelada.
+      if (vAtual.processado_manual_em || vAtual.nf_emitida_em || vAtual.venda_cancelada_em
+          || vAtual.status === 'cancelada_quarentena' || vAtual.status === 'venda_cancelada') {
         const motivo = vAtual.processado_manual_em ? 'concluida na mao'
-                     : vAtual.nf_emitida_em ? 'NF ja emitida' : 'venda cancelada';
+                     : vAtual.nf_emitida_em ? 'NF ja emitida'
+                     : vAtual.status === 'cancelada_quarentena' ? 'cancelada no ML (quarentena)'
+                     : 'venda cancelada';
         console.log(`[retry-bling] order ${orderId} saiu da fila sem emitir — ${motivo}`);
         _retryBling.delete(orderId);
         continue;
