@@ -4519,7 +4519,16 @@ async function cacaMagalu(de, ate, empresa, opts) {
         try { const rOld = await supaReq(empresa, 'GET', qs + '&select=*', null); if (rOld.ok) { const j0 = JSON.parse(rOld.body || 'null'); if (Array.isArray(j0)) antigas = j0; } } catch (e) { antigas = null; }
         if (!antigas || !antigas.length) { _mgc.refazer_sem_backup = (_mgc.refazer_sem_backup || 0) + 1; jaGravados.add(String(cod)); continue; }
         const del = await supaReq(empresa, 'DELETE', qs, null);
-        if (!del.ok) { _mgc.refazer_falhas++; jaGravados.add(String(cod)); continue; }   // não apagou: não insere (evita duplicar)
+        if (!del.ok) {
+          // Codex PR#51 (3ª rodada): DELETE com resposta perdida (timeout/socket) volta ok:false
+          // mesmo tendo apagado — sair aqui removeria o pedido do histórico pra sempre. Então
+          // CONFERE o estado real antes de decidir: se as linhas sumiram, segue a troca; se
+          // continuam lá, não apagou mesmo e o pedido fica intocado.
+          let aindaTem = null;
+          try { const rChk = await supaReq(empresa, 'GET', qs + '&select=numero_loja', null); if (rChk.ok) { const j1 = JSON.parse(rChk.body || 'null'); if (Array.isArray(j1)) aindaTem = j1.length; } } catch (e) { aindaTem = null; }
+          if (aindaTem === null || aindaTem > 0) { _mgc.refazer_falhas++; jaGravados.add(String(cod)); continue; }
+          _mgc.refazer_delete_ambiguo = (_mgc.refazer_delete_ambiguo || 0) + 1;   // apagou de fato: segue e grava as novas
+        }
         _mgc.refazer_apagados++;
         const ins = await supaReq(empresa, 'POST', 'vendas_historico', novas);
         if (!ins.ok) {
