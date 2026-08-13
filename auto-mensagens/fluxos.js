@@ -508,7 +508,17 @@ async function rotinaChecarCanceladasML(opts = {}) {
       return na - nb;
     });
 
-    alvos = alvos.slice(0, Number(opts.max) || CANCELADAS_MAX);
+    // COTA SEPARADA. Os dois tipos de checagem competiam pela mesma fatia: um backlog
+    // de vendas so-de-cancelamento (todas com relogio zero) empurrava as etiquetas novas
+    // pro fim da fila por varias horas, matando a promessa de refresh horario.
+    // Reserva metade do lote pro envio; o que sobrar volta pro cancelamento.
+    const _max = Number(opts.max) || CANCELADAS_MAX;
+    const cotaEnvio = Math.max(1, Math.floor(_max / 2));
+    const filaEnvio  = alvos.filter(v => v._dueEnvio).slice(0, cotaEnvio);
+    const setEnvio   = new Set(filaEnvio.map(v => String(v.order_id)));
+    const filaCancel = alvos.filter(v => !setEnvio.has(String(v.order_id)))
+                            .slice(0, _max - filaEnvio.length);
+    alvos = filaEnvio.concat(filaCancel);
   }
 
   out.candidatas = alvos.length;
