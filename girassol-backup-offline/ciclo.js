@@ -131,7 +131,16 @@ async function listarAtendidos() {
     // presos como "sem etiqueta" no painel. Agora cada página é re-tentada antes de desistir.
     let ok = false, data = null;
     for (let tent = 1; tent <= 4; tent++) {
-      ({ ok, data } = await blingGet(`/pedidos/vendas?${qs}&pagina=${pagina}&limite=100`));
+      // Codex PR#53: o node-fetch v2 usado pelo blingGet NÃO tem timeout por padrão — se o Bling
+      // aceita a conexão e não responde, o await ficava pendurado pra sempre: o ciclo travava e
+      // a re-tentativa (o motivo deste PR) nunca acontecia. Cada tentativa tem prazo próprio.
+      const TETO_MS = 45000;
+      try {
+        ({ ok, data } = await Promise.race([
+          blingGet(`/pedidos/vendas?${qs}&pagina=${pagina}&limite=100`),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('timeout ' + TETO_MS + 'ms na página ' + pagina)), TETO_MS))
+        ]));
+      } catch (e) { ok = false; data = null; console.log('[GIRABKP] página ' + pagina + ' tentativa ' + tent + ': ' + String(e.message || e).slice(0, 80)); }
       if (ok) { if (tent > 1) paginasRefeitas++; break; }
       await new Promise(r => setTimeout(r, 1200 * tent));
     }
@@ -432,6 +441,9 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
       console.log('[GIRABKP] ⚠️ lista do Bling veio INCOMPLETA (falhou na página ' + pagFalha + ' após 4 tentativas) — reconciliação PULADA, cache preservado');
     }
     if (!listaOk) reconciliacao = 'sem_lista';
+    // Codex PR#53: lista boa e VAZIA (o último pendente acabou de sair) pula o bloco abaixo —
+    // dizer 'ok' aí seria mentira: o que ficou no manifesto continua aparecendo no painel.
+    if (listaOk && listaCompleta && atendidos.length === 0) reconciliacao = 'pulada_lista_vazia';
     if (listaOk && listaCompleta && atendidos.length > 0) {
       const idsAtuais = new Set(atendidos.map(p => String(p.id)));
       const aRemover = Object.keys(man).filter(id => !idsAtuais.has(String(id)));
