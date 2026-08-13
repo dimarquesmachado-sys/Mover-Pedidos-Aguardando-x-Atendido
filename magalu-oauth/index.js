@@ -26,7 +26,7 @@ const fs   = require('fs');
 const path = require('path');
 const { json, html, readBody } = require('../lib/http');
 
-const VERSAO = 'magalu-oauth v1 b40';
+const VERSAO = 'magalu-oauth v1 b41';
 
 const DATA_DIR = process.env.MAGALU_DATA_DIR || '/data/magalu';
 
@@ -895,6 +895,55 @@ liga('bAmb','amb'); liga('bGood','good');
   // Full descer pro Bling. Campos do total são DEFENSIVOS (a estrutura exata do
   // pedido não foi 100% mapeada): &raw=1 devolve a 1ª order crua pra calibrarmos.
   // Uso: GET /magalu/pedidos-do-dia?empresa=amb&k=ADMIN_KEY[&desde=AAAA-MM-DD][&raw=1]
+  // ── SONDA DO DETALHE DO PEDIDO (13/08) ────────────────────────────────────────────
+  // Motivo: a LISTAGEM /seller/v1/orders devolve os itens SEM sku (medido: skus [null] em
+  // todos os pedidos de 31/07 da AMB), e por isso as vendas Magalu entraram no histórico do
+  // dashboard sem SKU — 116 unidades e R$ 16.390 em julho fora do ranking de produtos.
+  // Regra do Diego neste projeto: não chutar endpoint — sondar e ver o retorno real primeiro.
+  // Esta rota chama GET /seller/v1/orders/{id} e devolve o DETALHE com os dados pessoais do
+  // comprador REMOVIDOS (fica só o que interessa: itens, sku, quantidade, valores).
+  // Uso: GET /magalu/pedido-sonda?empresa=amb&id={uuid ou code}&k=ADMIN_KEY[&cru=1]
+  if (method === 'GET' && p === '/magalu/pedido-sonda') {
+    const empS = String(q.get('empresa') || '').toLowerCase().trim();
+    if (!EMPRESAS_VALIDAS.includes(empS)) { json(res, 400, { ok: false, erro: 'empresa inválida' }); return true; }
+    const kS = String(q.get('k') || '').trim();
+    if (!process.env.ADMIN_KEY || kS !== process.env.ADMIN_KEY) { json(res, 404, { error: 'not found' }); return true; }
+    const idS = String(q.get('id') || '').trim();
+    if (!idS) { json(res, 400, { ok: false, erro: 'use ?id={uuid ou code do pedido}' }); return true; }
+    let tokS = '';
+    try { tokS = await getAccessToken(empS); }
+    catch (e) { json(res, 502, { ok: false, erro: 'token: ' + String(e.message || e) }); return true; }
+    const outS = { ok: true, empresa: empS, id: idS, tentativas: [] };
+    // 2 caminhos possíveis pro detalhe — a sonda tenta os dois e mostra qual respondeu
+    const alvos = [
+      'https://api.magalu.com/seller/v1/orders/' + encodeURIComponent(idS),
+      'https://api.magalu.com/seller/v1/orders/' + encodeURIComponent(idS) + '/items'
+    ];
+    for (const u of alvos) {
+      try {
+        const r = await fetch(u, { headers: { Authorization: 'Bearer ' + tokS, Accept: 'application/json' } });
+        const tx = await r.text();
+        let j = null; try { j = JSON.parse(tx); } catch (e) {}
+        const linha = { url: u.replace('https://api.magalu.com', ''), status: r.status, tem_json: Boolean(j) };
+        if (j) {
+          // limpa dados pessoais antes de devolver (nunca expor comprador numa sonda)
+          const limpo = JSON.parse(JSON.stringify(j));
+          for (const campo of ['customer', 'delivery', 'shipping', 'billing', 'buyer', 'addresses', 'address']) { if (limpo[campo]) limpo[campo] = '(omitido)'; }
+          const arr = limpo.items || limpo.products || limpo.order_items || (Array.isArray(limpo) ? limpo : null);
+          linha.chaves_do_topo = Object.keys(limpo).slice(0, 25);
+          linha.itens_qtd = Array.isArray(arr) ? arr.length : 0;
+          linha.itens = Array.isArray(arr) ? arr.slice(0, 3) : null;   // item CRU: mostra onde o SKU realmente está
+          if (q.get('cru') === '1') linha.cru = limpo;
+        } else { linha.corpo = tx.slice(0, 300); }
+        outS.tentativas.push(linha);
+        if (r.ok && j) break;
+        await new Promise(r2 => setTimeout(r2, 400));
+      } catch (e) { outS.tentativas.push({ url: u.replace('https://api.magalu.com', ''), erro: String(e.message || e).slice(0, 160) }); }
+    }
+    json(res, 200, outS);
+    return true;
+  }
+
   if (method === 'GET' && p === '/magalu/pedidos-do-dia') {
     const emp = String(q.get('empresa') || '').toLowerCase().trim();
     if (!EMPRESAS_VALIDAS.includes(emp)) { json(res, 400, { ok: false, erro: 'empresa inválida' }); return true; }
