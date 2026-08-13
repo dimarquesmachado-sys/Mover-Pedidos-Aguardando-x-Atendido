@@ -1908,12 +1908,20 @@ function routes(readBody) {
           try {
             const rp = await fetch('https://api.mercadolibre.com/packs/' + encodeURIComponent(vendaD), HD);
             const dp = await rp.json().catch(() => null);
-            const oid = rp.ok && dp && Array.isArray(dp.orders) && dp.orders.length ? (dp.orders[0].id || dp.orders[0]) : null;
-            if (oid) {
-              outD.resolvido_de_pack = { pack: vendaD, orders: dp.orders.map(o => o.id || o) };
-              const ro2 = await fetch('https://api.mercadolibre.com/orders/' + oid, HD);
-              const dor2 = ro2.ok ? await ro2.json().catch(() => null) : null;
-              if (dor2) dor = dor2; else { dor = null; outD.erros.push('orders(do pack): HTTP ' + ro2.status); }
+            const idsPack = rp.ok && dp && Array.isArray(dp.orders) ? dp.orders.map(o => o.id || o) : [];
+            if (idsPack.length) {
+              outD.resolvido_de_pack = { pack: vendaD, orders: idsPack };
+              // Codex PR#46: carrinho pode ter frete/tarifa em QUALQUER das orders — busca todas
+              outD.orders_do_pack = [];
+              for (const oidP of idsPack) {
+                const roP = await fetch('https://api.mercadolibre.com/orders/' + oidP, HD);
+                const dorP = roP.ok ? await roP.json().catch(() => null) : null;
+                if (!dorP) { outD.erros.push('orders(' + oidP + '): HTTP ' + roP.status); continue; }
+                outD.orders_do_pack.push({ id: dorP.id, total: dorP.total_amount, frete_comprador: (dorP.shipping && dorP.shipping.cost) != null ? dorP.shipping.cost : null, pagamentos: (dorP.payments || []).map(pg => ({ id: pg.id, valor: pg.transaction_amount, frete: pg.shipping_cost, taxa: pg.marketplace_fee })) });
+                if (!dor) dor = dorP;
+                await new Promise(r => setTimeout(r, 150));
+              }
+              if (!dor) outD.erros.push('nenhuma order do pack respondeu');
             } else outD.erros.push('packs: HTTP ' + rp.status);
           } catch (e3) { outD.erros.push('packs: ' + String(e3.message || e3).slice(0, 120)); }
         } else if (!ro.ok) { outD.erros.push('orders: HTTP ' + ro.status); }
@@ -1942,14 +1950,32 @@ function routes(readBody) {
 
       try {
         const arqD = readJson(path.join(CACHE_DIR, '_ml_billing.json'), null);
+        // Codex PR#46: cache ausente/corrompido NAO pode parecer "cache sem linhas" — isso
+        // inverteria o diagnostico. Sem tarifas legiveis, e falha de FONTE e vai pros erros.
+        if (!arqD || typeof arqD !== 'object' || !arqD.tarifas || typeof arqD.tarifas !== 'object') {
+          outD.erros.push('billing: _ml_billing.json ausente ou invalido (fonte indisponivel, nao "sem linhas")');
+          outD.billing = null;
+          json(res, 200, outD);
+          return true;
+        }
         // Codex PR#46: no carrinho o credito costuma estar na ORDER, nao no pack — junta todos
         // os ids conhecidos (o pedido pedido, a order resolvida, o pack e as orders do pack)
         const chavesD = new Set([vendaD]);
         if (outD.order && outD.order.id) chavesD.add(String(outD.order.id));
         if (outD.order && outD.order.pack_id) chavesD.add(String(outD.order.pack_id));
         for (const oid2 of ((outD.resolvido_de_pack && outD.resolvido_de_pack.orders) || [])) chavesD.add(String(oid2));
+        // Codex PR#46: se a API do ML falhou, o proprio CACHE liga order↔pack (mesmo mapa que o
+        // aplicarCreditosFlex monta) — assim o billing continua correto sem depender do ML
+        const tarifasD = Object.values(arqD.tarifas || {});
+        for (let volta = 0; volta < 2; volta++) {
+          for (const tf of tarifasD) {
+            if (!tf) continue;
+            const o = String(tf.o || ''), pk = String(tf.p || '');
+            if (o && pk) { if (chavesD.has(o)) chavesD.add(pk); if (chavesD.has(pk)) chavesD.add(o); }
+          }
+        }
         outD.chaves_consultadas = [...chavesD];
-        for (const tf of Object.values((arqD && arqD.tarifas) || {})) {
+        for (const tf of tarifasD) {
           if (!tf) continue;
           if (chavesD.has(String(tf.o || '')) || chavesD.has(String(tf.p || ''))) outD.billing.push({ data: tf.d, valor: tf.v, categoria: tf.c, texto: tf.t });
         }
