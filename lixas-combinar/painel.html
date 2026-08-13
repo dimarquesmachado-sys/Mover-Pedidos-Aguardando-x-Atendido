@@ -508,7 +508,9 @@ function renderCard(v) {
   // CONFIRMAR CLIENTE — pedido claro (interpretado/montado) já com NF: reenvia ao
   // cliente a confirmação "pedido confirmado, será postado em breve...". Útil pros
   // casos já processados, onde não há mais botão de NF pra disparar a confirmação.
-  if (v.ia_categoria === 'claro' && v.ia_pedido_estruturado && v.nf_emitida_em) {
+  // !_canceladaOuQuar: com a venda cancelada, mandar "pedido confirmado, sera postado
+  // em breve" contradiz o alerta de NAO despachar que a pessoa esta tratando no card.
+  if (v.ia_categoria === 'claro' && v.ia_pedido_estruturado && v.nf_emitida_em && !_canceladaOuQuar) {
     botoesBling += `
       <button class="btn-sub" title="Envia (ou reenvia) ao cliente a confirmação do pedido no Mercado Livre" onclick="confirmarCliente('${v.order_id}')">✅ Confirmar cliente</button>
     `;
