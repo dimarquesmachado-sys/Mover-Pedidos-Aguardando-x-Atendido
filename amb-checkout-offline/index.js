@@ -1899,7 +1899,9 @@ function routes(readBody) {
         const HD = { headers: { Authorization: 'Bearer ' + tk } };
 
         const ro = await fetch('https://api.mercadolibre.com/orders/' + encodeURIComponent(vendaD), HD);
-        let dor = await ro.json().catch(() => null);
+        // Codex PR#46: corpo de ERRO (401/403/429/404) nao pode virar "order" — a rota existe
+        // pra separar "fonte sem dado" de "fonte falhou", entao so o payload de sucesso conta
+        let dor = ro.ok ? await ro.json().catch(() => null) : null;
         // Codex PR#46: id que da 404 em /orders e PACK (carrinho) — as vendas deste caso SAO
         // carrinho. Mesma cascata que a pesca ja usa: abre /packs/{id} e pega a 1a order.
         if (!ro.ok && ro.status === 404) {
@@ -1910,8 +1912,8 @@ function routes(readBody) {
             if (oid) {
               outD.resolvido_de_pack = { pack: vendaD, orders: dp.orders.map(o => o.id || o) };
               const ro2 = await fetch('https://api.mercadolibre.com/orders/' + oid, HD);
-              const dor2 = await ro2.json().catch(() => null);
-              if (ro2.ok && dor2) dor = dor2; else outD.erros.push('orders(do pack): HTTP ' + ro2.status);
+              const dor2 = ro2.ok ? await ro2.json().catch(() => null) : null;
+              if (dor2) dor = dor2; else { dor = null; outD.erros.push('orders(do pack): HTTP ' + ro2.status); }
             } else outD.erros.push('packs: HTTP ' + rp.status);
           } catch (e3) { outD.erros.push('packs: ' + String(e3.message || e3).slice(0, 120)); }
         } else if (!ro.ok) { outD.erros.push('orders: HTTP ' + ro.status); }
@@ -1940,8 +1942,13 @@ function routes(readBody) {
 
       try {
         const arqD = readJson(path.join(CACHE_DIR, '_ml_billing.json'), null);
+        // Codex PR#46: no carrinho o credito costuma estar na ORDER, nao no pack — junta todos
+        // os ids conhecidos (o pedido pedido, a order resolvida, o pack e as orders do pack)
         const chavesD = new Set([vendaD]);
+        if (outD.order && outD.order.id) chavesD.add(String(outD.order.id));
         if (outD.order && outD.order.pack_id) chavesD.add(String(outD.order.pack_id));
+        for (const oid2 of ((outD.resolvido_de_pack && outD.resolvido_de_pack.orders) || [])) chavesD.add(String(oid2));
+        outD.chaves_consultadas = [...chavesD];
         for (const tf of Object.values((arqD && arqD.tarifas) || {})) {
           if (!tf) continue;
           if (chavesD.has(String(tf.o || '')) || chavesD.has(String(tf.p || ''))) outD.billing.push({ data: tf.d, valor: tf.v, categoria: tf.c, texto: tf.t });
