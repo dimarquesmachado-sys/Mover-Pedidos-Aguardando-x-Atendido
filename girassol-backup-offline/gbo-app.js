@@ -52,6 +52,9 @@ const VERSAO     = 'girassol-backup-offline v13/08 b140';
 // Codex PR#48: versão do cálculo do crédito ML. Subir este número faz o vendasSync
 // repescar as vendas do dia já cacheadas — necessário quando a REGRA muda (v2 = gross_amount).
 const ML_REAL_V  = 2;
+// Codex PR#48: idem pros BIPADOS — o predicado do mlSyncFees pulava venda antiga que já
+// tinha ml_costs_v3, então a regra nova (gross_amount) nunca chegava nela.
+const ML_COSTS_V = 2;
 
 // ── SESSÃO DE OPERADOR (cookie assinado HMAC) — protege rotas de dados/ação ──
 // Segredo estável entre restarts. Usa ADMIN_KEY (já configurada no Render) como base.
@@ -4167,7 +4170,9 @@ async function vendasSync() {
               // Codex PR#48: se a pesca NOVA não achou crédito, limpa o que ficou da versão
               // antiga ANTES de marcar como processado — senão o valor velho ficaria congelado
               if (reg.credito == null && reg.costs_ok) { delete v.credito_ml; delete v.credito_fonte; }
-              v.ml_real = ML_REAL_V;   // pescado NA VERSÃO ATUAL do cálculo
+              // Codex PR#48: só sobe de versão se as chamadas que a regra NOVA exige completaram.
+              // Falha transitória em /shipments ou /costs deixa a linha na fila da próxima rodada.
+              v.ml_real = reg.costs_ok ? ML_REAL_V : 1;
             }
           } catch (e) {}
           await dormeR(350);
@@ -4587,7 +4592,7 @@ async function mlSyncFees(dias) {
     const mk = String(c.marketplace || '').toLowerCase();
     if (mk !== 'ml' && mk !== 'mercadolivre') return false;
     if (!c.numero_loja) return false;
-    return c.tarifa_ml == null || c.venda_em == null || !c.ml_costs_v3 || c.ml_order == null || t >= recheck;   // ml_order==null: ainda sem o par pack/order — uma passada preenche   // !ml_costs_v2 = ainda nao passou pelo /costs (frete real + estorno) — vale uma passada
+    return c.tarifa_ml == null || c.venda_em == null || Number(c.ml_costs_v3 || 0) < ML_COSTS_V || c.ml_order == null || t >= recheck;   /* Codex PR#48: marcador versionado */   // ml_order==null: ainda sem o par pack/order — uma passada preenche   // !ml_costs_v2 = ainda nao passou pelo /costs (frete real + estorno) — vale uma passada
   }).map(([cid]) => cid);
   if (!alvos.length) { console.log('[ML-FEES] nada a pescar (' + dias + 'd)'); return { ok: true, nada: true }; }
   _mls = { rodando: true, feitos: 0, total: alvos.length, ok: 0, falhas: 0, iniciado_em: new Date().toISOString(), erros: {}, amostras: [] };
@@ -4600,7 +4605,7 @@ async function mlSyncFees(dias) {
   const salvar = () => {
     if (!Object.keys(pend).length) return;
     const c2 = readJson(CONFERIDOS_FILE, {});
-    for (const [cid, d] of Object.entries(pend)) { if (!c2[cid]) continue; if (d.fee != null) c2[cid].tarifa_ml = d.fee; if (d.frete != null) c2[cid].frete_ml = d.frete; if (d.venda) c2[cid].venda_em = d.venda; if (d.credito != null) c2[cid].credito_ml = d.credito; if (d.credito_fonte) c2[cid].credito_fonte = d.credito_fonte; if (d.logistica) c2[cid].logistica_ml = d.logistica; if (d.pack) c2[cid].ml_pack = d.pack; if (d.order) c2[cid].ml_order = d.order; if (d.costs_ok) { c2[cid].ml_costs_v3 = 1; if (d.credito == null) delete c2[cid].credito_ml; /* Codex PR#48: /costs novo manda — resposta fresca com custo do vendedor derruba o gross antigo */ if (d.frete == null) delete c2[cid].frete_ml; } }
+    for (const [cid, d] of Object.entries(pend)) { if (!c2[cid]) continue; if (d.fee != null) c2[cid].tarifa_ml = d.fee; if (d.frete != null) c2[cid].frete_ml = d.frete; if (d.venda) c2[cid].venda_em = d.venda; if (d.credito != null) c2[cid].credito_ml = d.credito; if (d.credito_fonte) c2[cid].credito_fonte = d.credito_fonte; if (d.logistica) c2[cid].logistica_ml = d.logistica; if (d.pack) c2[cid].ml_pack = d.pack; if (d.order) c2[cid].ml_order = d.order; if (d.costs_ok) { c2[cid].ml_costs_v3 = ML_COSTS_V; if (d.credito == null) delete c2[cid].credito_ml; /* Codex PR#48: /costs novo manda — resposta fresca com custo do vendedor derruba o gross antigo */ if (d.frete == null) delete c2[cid].frete_ml; } }
     writeJson(CONFERIDOS_FILE, c2);
     for (const cid of Object.keys(pend)) delete pend[cid];
   };
