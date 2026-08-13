@@ -193,7 +193,10 @@ async function revisarAtencaoHumana({ lcp }) {
     .split(',').map(s => Number(s.trim())).filter(n => !isNaN(n));
 
   let lista;
-  try { lista = await lcp.listarPendentes({ dias: 7, status: 'precisa_atencao_humano', limit: 50 }); }
+  // Mesma janela do leitor (LIXAS_JANELA_DIAS, default 30): sem isso, venda que foi
+  // pra atencao humana e cujo cliente volta depois do 7o dia nunca seria re-engajada.
+  const _janelaDias = Number(process.env.LIXAS_JANELA_DIAS) || 30;
+  try { lista = await lcp.listarPendentes({ dias: _janelaDias, status: 'precisa_atencao_humano', limit: 50 }); }
   catch (e) { console.error(`[revisar] erro listando atencao humana: ${e.message}`); return; }
   const vendas = (lista && lista.ok && Array.isArray(lista.data)) ? lista.data : [];
   if (vendas.length === 0) return;
