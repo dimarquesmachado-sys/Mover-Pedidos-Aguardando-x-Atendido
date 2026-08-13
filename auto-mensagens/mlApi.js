@@ -520,8 +520,60 @@ async function getPrazoPostagem(orderId) {
   return out;
 }
 
+/**
+ * Resumo de ENVIO de um pedido — responde "essa venda ja saiu da minha frente?".
+ *
+ * Enxuta de proposito: so /orders (pra achar o shipping.id) + /shipments. NAO chama
+ * lead_time como a getPrazoPostagem, porque aqui so interessa etiqueta/postagem e
+ * essa rotina roda pra dezenas de vendas por rodada.
+ *
+ * Status do shipment no ML, na ordem: pending -> handling -> ready_to_ship
+ * (substatus ready_to_print / printed) -> shipped -> delivered.
+ * A ETIQUETA passa a existir em ready_to_ship. Dai pra frente a venda ja esta
+ * tratada do ponto de vista do painel.
+ */
+async function getEnvioResumo(orderId) {
+  try {
+    const r = await mlFetch('GET', `/orders/${orderId}`);
+    if (!r.ok) return { ok: false, httpStatus: r.status, erro: `ML ${r.status} lendo order` };
+    const order = r.data || {};
+    const shippingId = order?.shipping?.id || order?.shipping_id || null;
+
+    // Sem shipping.id: pode ser pack (carrinho) ou retirada. Nao da pra afirmar que
+    // tem etiqueta — devolve "sem envio" em vez de chutar.
+    if (!shippingId) {
+      return { ok: true, semEnvio: true, status: null, substatus: null, temEtiqueta: false, postado: false };
+    }
+
+    const s = await mlFetch('GET', `/shipments/${shippingId}`);
+    if (!s.ok) {
+      return { ok: false, httpStatus: s.status, erro: `ML ${s.status} lendo shipment ${shippingId}`,
+               dica: s.status === 403 ? 'token sem permissao de shipments — pode precisar reautorizar o app ML' : undefined };
+    }
+    const d = s.data || {};
+    const st  = String(d.status || '').toLowerCase();
+    const sub = String(d.substatus || '').toLowerCase();
+
+    const postado     = ['shipped', 'delivered', 'not_delivered'].includes(st);
+    const temEtiqueta = postado || st === 'ready_to_ship';
+
+    return {
+      ok: true,
+      shippingId,
+      status: d.status || null,
+      substatus: d.substatus || null,
+      temEtiqueta,
+      postado,
+      cancelado: st === 'cancelled'
+    };
+  } catch (e) {
+    return { ok: false, erro: e.message };
+  }
+}
+
 module.exports = {
   buscarVendasPagas,
+  getEnvioResumo,
   getOrderDetalhe,
   getOrderStatusResumo,
   getPrazoPostagem,
