@@ -773,6 +773,12 @@ async function rotinaChecarCanceladasML(opts = {}) {
       // Nao conta como cancelada nesta rodada — a proxima tenta de novo.
       out.erros.push({ order_id: oid, erro: 'FALHOU gravar o cancelamento no Supabase — venda ainda no fluxo automatico, tratar na mao' });
       console.error(`[canceladas] order ${oid} 🚨 cancelamento NAO gravou — venda segue elegivel ao automatico`);
+      // PRECISA aparecer em detalhes: o "Verificar ML" le detalhes[0] e, sem entrada,
+      // cai em {} e responde cancelada:false — o painel diria "Venda ativa" logo depois
+      // de o ML confirmar o cancelamento, convidando a despachar.
+      out.detalhes.push({ order_id: oid, ml_status: st.status, cancelada: true,
+                          gravado: false, quarentena: false, adiado: true, buyer: v.buyer_nome || null,
+                          aviso: 'cancelada no ML, mas a gravacao no banco FALHOU — a venda continua no fluxo automatico. Tratar na mao.' });
       await new Promise(r => setTimeout(r, CANCELADAS_PAUSA_MS));
       continue;
     }
@@ -930,10 +936,14 @@ async function _processarAutoEmissaoInner({ venda, iaResult, graosResult, lcp })
   // basta: a fase 2 do lerRespostas varre 'processado', e uma mensagem nova do cliente
   // devolve a linha pra precisa_atencao_humano -> revisarAtencaoHumana -> de volta ao
   // fluxo. O marcador tem que valer como terminal aqui tambem.
-  if (venda.ml_etiqueta_em) {
+  // processado_manual_em entra junto: a fase 2 do lerRespostas devolve linha
+  // 'processado' pra atencao humana quando o cliente escreve, e o revisarAtencaoHumana
+  // pode reengajar — chegando aqui com NF ja emitida POR FORA.
+  if (venda.ml_etiqueta_em || venda.processado_manual_em) {
+    const motivo = venda.ml_etiqueta_em ? 'etiqueta_ja_gerada' : 'conclusao_manual';
     await lcp.atualizarVenda(orderId, { status: 'processado' });
-    console.warn(`[auto-emissao] order ${orderId} ja tem etiqueta no ML (${venda.ml_shipment_status || '?'}) — nao monto nem emito`);
-    return { falha: true, motivo: 'etiqueta_ja_gerada' };
+    console.warn(`[auto-emissao] order ${orderId} terminal (${motivo}) — nao monto nem emito`);
+    return { falha: true, motivo };
   }
 
   // Guarda 2 — pedido_estruturado valido
