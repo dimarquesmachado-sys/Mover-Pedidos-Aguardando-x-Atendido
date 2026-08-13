@@ -206,8 +206,19 @@ async function retentarEmissoesBling({ lcp }) {
         // status e 'processado', sem restaurar a venda ficaria presa em Pendentes como
         // "Re-tentando" pra sempre — sem retry nenhum acontecendo.
         if (vAtual.processado_manual_em && vAtual.status !== 'processado') {
-          try { await lcp.atualizarVenda(orderId, { status: 'processado' }); }
-          catch (e2) { console.error(`[retry-bling] order ${orderId} falhei ao restaurar status: ${e2.message}`); }
+          // atualizarVenda devolve {ok:false} em vez de lancar: sem conferir, um PATCH
+          // que falhou deixaria a venda em 'aguardando_bling' pra sempre (o classificador
+          // so reconhece a conclusao manual quando o status e 'processado') e a entrada
+          // ja teria sido apagada da fila — card preso em "Re-tentando" sem retry algum.
+          let restaurou = false;
+          try {
+            const rr = await lcp.atualizarVenda(orderId, { status: 'processado' });
+            restaurou = !!(rr && rr.ok);
+          } catch (e2) { console.error(`[retry-bling] order ${orderId} falhei ao restaurar status: ${e2.message}`); }
+          if (!restaurou) {
+            console.error(`[retry-bling] order ${orderId} 🚨 nao consegui restaurar o status — MANTENHO na fila pra tentar de novo`);
+            continue;   // entrada fica; a proxima rodada tenta restaurar outra vez
+          }
         }
         _retryBling.delete(orderId);
         continue;
