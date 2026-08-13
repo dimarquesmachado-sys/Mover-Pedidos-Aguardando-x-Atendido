@@ -1899,8 +1899,23 @@ function routes(readBody) {
         const HD = { headers: { Authorization: 'Bearer ' + tk } };
 
         const ro = await fetch('https://api.mercadolibre.com/orders/' + encodeURIComponent(vendaD), HD);
-        const dor = await ro.json().catch(() => null);
-        if (!ro.ok || !dor) { outD.erros.push('orders: HTTP ' + ro.status); }
+        let dor = await ro.json().catch(() => null);
+        // Codex PR#46: id que da 404 em /orders e PACK (carrinho) — as vendas deste caso SAO
+        // carrinho. Mesma cascata que a pesca ja usa: abre /packs/{id} e pega a 1a order.
+        if (!ro.ok && ro.status === 404) {
+          try {
+            const rp = await fetch('https://api.mercadolibre.com/packs/' + encodeURIComponent(vendaD), HD);
+            const dp = await rp.json().catch(() => null);
+            const oid = rp.ok && dp && Array.isArray(dp.orders) && dp.orders.length ? (dp.orders[0].id || dp.orders[0]) : null;
+            if (oid) {
+              outD.resolvido_de_pack = { pack: vendaD, orders: dp.orders.map(o => o.id || o) };
+              const ro2 = await fetch('https://api.mercadolibre.com/orders/' + oid, HD);
+              const dor2 = await ro2.json().catch(() => null);
+              if (ro2.ok && dor2) dor = dor2; else outD.erros.push('orders(do pack): HTTP ' + ro2.status);
+            } else outD.erros.push('packs: HTTP ' + rp.status);
+          } catch (e3) { outD.erros.push('packs: ' + String(e3.message || e3).slice(0, 120)); }
+        } else if (!ro.ok) { outD.erros.push('orders: HTTP ' + ro.status); }
+        if (!dor) { outD.erros.push('sem order utilizavel'); }
         else {
           outD.order = { id: dor.id, pack_id: dor.pack_id || null, status: dor.status, total: dor.total_amount, pago: dor.paid_amount, frete_comprador: (dor.shipping && dor.shipping.cost) != null ? dor.shipping.cost : null };
           outD.pagamentos = (dor.payments || []).map(pg => ({ id: pg.id, status: pg.status, valor: pg.transaction_amount, frete: pg.shipping_cost, taxa: pg.marketplace_fee, tipo: pg.payment_type }));
@@ -1908,7 +1923,10 @@ function routes(readBody) {
           if (shipId) {
             const rs = await fetch('https://api.mercadolibre.com/shipments/' + shipId, HD);
             const ds = await rs.json().catch(() => null);
-            if (rs.ok && ds) outD.shipment = { id: shipId, logistic: (ds.logistic && ds.logistic.type) || ds.logistic_type || null, status: ds.status, base_cost: ds.base_cost, list_cost: (ds.shipping_option || {}).list_cost, cost: (ds.shipping_option || {}).cost };
+            // Codex PR#46: list_cost/cost aparecem no TOPO em algumas respostas — mesma
+            // cascata da pesca (shipping_option primeiro, depois o topo), pra nao descartar
+            // uma fonte boa por projecao vazia
+            if (rs.ok && ds) { const soD = ds.shipping_option || {}; outD.shipment = { id: shipId, logistic: (ds.logistic && ds.logistic.type) || ds.logistic_type || null, status: ds.status, base_cost: ds.base_cost, list_cost: soD.list_cost != null ? soD.list_cost : ds.list_cost, cost: soD.cost != null ? soD.cost : ds.cost }; }
             else outD.erros.push('shipments: HTTP ' + rs.status);
             const rc = await fetch('https://api.mercadolibre.com/shipments/' + shipId + '/costs', HD);
             const dc = await rc.json().catch(() => null);
