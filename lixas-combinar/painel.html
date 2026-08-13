@@ -551,7 +551,7 @@ function renderCard(v) {
         <a href="${orderLink}" target="_blank" title="Abre o detalhe da venda no Mercado Livre">🛒 Venda</a>
         ${botaoML}
         ${botoesBling}
-        ${v.alerta_pos_venda && !v.alerta_reconhecido_em ? `<button style="background:#b91c1c;color:#fff;border:none" title="Confirma que você já parou o despacho e cancelou/estornou a NF. O card sai da fila de pendentes" onclick="reconhecerAlerta('${v.order_id}')">✔️ Alerta tratado</button>` : ''}
+        ${(v.alerta_efetivo || v.alerta_pos_venda) && !v.alerta_reconhecido_em ? `<button style="background:#b91c1c;color:#fff;border:none" title="Confirma que você já parou o despacho e cancelou/estornou a NF. O card sai da fila de pendentes" onclick="reconhecerAlerta('${v.order_id}')">✔️ Alerta tratado</button>` : ''}
         ${(v.status !== 'processado' || (!v.processado_manual_em && !v.nf_emitida_em)) ? `<button class="processed" title="Marca como resolvido na mão (tira da lista de pendentes). Use quando você já tratou esse pedido por fora" onclick="marcarProcessado('${v.order_id}')">${v.status === 'processado' ? '✓ Confirmar conclusão' : '✓ Processado'}</button>` : ''}
       </div>
       ${iaInstrBlock}
@@ -571,7 +571,20 @@ async function verificarML(orderId) {
     const d = await r.json();
     if (!d.ok) { alert('Erro: ' + (d.erro || 'desconhecido')); return; }
 
-    if (d.cancelada) {
+    if (d.cancelada && d.adiado) {
+      // Cancelamento CONFIRMADO no ML, mas a gravacao foi adiada porque nao deu pra
+      // conferir a etiqueta. Dizer "saiu do fluxo automatico" aqui seria falso: nada
+      // foi gravado e as outras rotinas ainda podem processar a venda.
+      mostrarModal(
+        '⚠️ CANCELADA no ML — envio não confirmado',
+        `Status no Mercado Livre: ${d.ml_status || '?'}\n\n` +
+        (d.aviso ? d.aviso + '\n\n' : '') +
+        'A venda ESTÁ cancelada, mas não consegui conferir se a etiqueta já saiu — então NADA foi gravado ainda ' +
+        'e ela continua no fluxo automático. O sistema tenta de novo na próxima rodada.\n\n' +
+        '⚠️ NÃO despache este pedido.',
+        true
+      );
+    } else if (d.cancelada) {
       mostrarModal(
         '❌ Venda CANCELADA no ML',
         (d.alerta ? '🚨 ' + d.alerta + '\n\n' : '') +
