@@ -664,7 +664,20 @@ async function rotinaChecarCanceladasML(opts = {}) {
       // a etiqueta ja tivesse sido impressa ninguem seria avisado de parar o despacho.
       // Deixa pra proxima passada (o cancelamento nao vai embora sozinho).
       if (envFalhou) {
-        out.erros.push({ order_id: oid, erro: `cancelada, mas nao confirmei o envio (${envFalhou}) — adiado pra proxima rodada` });
+        // QUARENTENA: grava status + ml_status AGORA (tira a venda do fluxo automatico
+        // — a escada, que roda a cada 30 min, ainda selecionava a linha e podia montar
+        // e emitir NF de um pedido cancelado). Mas NAO grava venda_cancelada_em: e ele
+        // que exclui a linha das proximas rodadas, e ainda falta determinar o alerta.
+        try {
+          await lcp.atualizarVenda(oid, {
+            status: 'venda_cancelada',
+            ml_status: st.status,
+            ml_status_atualizado_em: agoraIso
+          });
+        } catch (e) {
+          console.error(`[canceladas] order ${oid} falhei ate na quarentena: ${e.message}`);
+        }
+        out.erros.push({ order_id: oid, erro: `cancelada, mas nao confirmei o envio (${envFalhou}) — em quarentena, alerta pendente` });
         console.error(`[canceladas] order ${oid} CANCELADA e envio desconhecido (${envFalhou}) — nao finalizo agora`);
         // PRECISA entrar em detalhes: o botao "Verificar ML" le detalhes[0] e, sem isso,
         // o painel mostraria "✅ Venda ativa" pra um pedido que o ML acabou de confirmar
