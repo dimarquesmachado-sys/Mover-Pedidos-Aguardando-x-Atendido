@@ -554,6 +554,7 @@ function renderCard(v) {
         <a href="${orderLink}" target="_blank" title="Abre o detalhe da venda no Mercado Livre">🛒 Venda</a>
         ${botaoML}
         ${botoesBling}
+        ${v.processado_manual_em && !v.nf_emitida_em ? `<button title="Desfaz a marca de conclusão manual e devolve a venda pra Pendentes. Use se a NF de fora não saiu, ou se marcou o card errado." onclick="desfazerConclusao('${v.order_id}')">↩️ Desfazer conclusão</button>` : ''}
         ${(v.alerta_efetivo || v.alerta_pos_venda) && !v.alerta_reconhecido_em ? `<button style="background:#b91c1c;color:#fff;border:none" title="Confirma que você já parou o despacho e cancelou/estornou a NF. O card sai da fila de pendentes" onclick="reconhecerAlerta('${v.order_id}')">✔️ Alerta tratado</button>` : ''}
         ${(v.status !== 'processado' || (!v.processado_manual_em && !v.nf_emitida_em)) ? `<button class="processed" title="Marca como resolvido na mão (tira da lista de pendentes). Use quando você já tratou esse pedido por fora" onclick="marcarProcessado('${v.order_id}')">${v.status === 'processado' ? '✓ Confirmar conclusão' : '✓ Processado'}</button>` : ''}
       </div>
@@ -604,6 +605,19 @@ async function verificarML(orderId) {
   } finally {
     document.querySelectorAll('.btn-ml').forEach(b => b.disabled = false);
   }
+}
+
+async function desfazerConclusao(orderId) {
+  if (!confirm('Desfazer a conclusão manual desta venda?\n\nEla volta pra Pendentes e os botões de montar/emitir NF voltam a aparecer.\n\nUse quando a NF de fora não saiu, ou se marcou o card errado.')) return;
+  try {
+    const r = await fetch(`${API_BASE}/api/pendentes/${orderId}/desfazer-conclusao`, {
+      method: 'POST', headers: { 'X-Session-Token': token() }
+    });
+    if (r.status === 401) { logout(); return; }
+    const d = await r.json();
+    if (d.ok) await recarregar();
+    else mostrarModal('❌ Não deu', (d.mensagem || d.erro || JSON.stringify(d)), true);
+  } catch (e) { mostrarModal('❌ Erro', e.message, true); }
 }
 
 async function reconhecerAlerta(orderId) {
