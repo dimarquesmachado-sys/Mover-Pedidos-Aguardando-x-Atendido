@@ -179,7 +179,7 @@ function rotasHistorico(ctx) {
       const iniPed = (pg - 1) * lim, fimPed = Math.min(totalPedidos, iniPed + lim);
       let off = 0; for (let i = 0; i < iniPed; i++) off += idx[i].c;
       let qtdItens = 0; for (let i = iniPed; i < fimPed; i++) qtdItens += idx[i].c;
-      const campos = 'numero_pedido,numero_loja,canal,data_venda,sku,descricao,quantidade,valor_produto,valor_nota,custo,comissao,frete_vendedor,imposto,margem';
+      const campos = 'numero_pedido,numero_loja,canal,data_venda,sku,descricao,quantidade,valor_produto,valor_nota,custo,comissao,frete_vendedor,imposto,margem,credito_ml';
       let linhas = [];
       try {
         const rq = await fetch(BASE + qCanal + '&select=' + campos + '&order=data_venda.desc,numero_pedido.desc,sku.desc&limit=' + Math.max(1, qtdItens) + '&offset=' + off, { headers: HH });
@@ -234,7 +234,7 @@ function rotasHistorico(ctx) {
       const { url: uL, key: kkL } = supaCfg('girassol');
       if (!uL || !kkL) { json(res, 500, { ok: false, erro: 'Supabase não configurado' }); return true; }
       const H = { apikey: kkL, Authorization: 'Bearer ' + kkL };
-      const campos = 'numero_pedido,canal,data_venda,sku,descricao,quantidade,valor_produto,valor_nota,custo,comissao,frete_vendedor,imposto,margem';
+      const campos = 'numero_pedido,canal,data_venda,sku,descricao,quantidade,valor_produto,valor_nota,custo,comissao,frete_vendedor,imposto,margem,credito_ml';
       // 28/07: o backfill gravou o custo que existia NAQUELE dia. Depois o banco de custos cresceu
       // (de 288 pra 541 SKUs), então muita linha antiga ficou sem custo à toa. Aqui completamos na
       // LEITURA com o _custos.json atual — sem precisar refazer o backfill inteiro.
@@ -285,13 +285,17 @@ function rotasHistorico(ctx) {
             if (mg != null) mg -= (im - _imGrav);   // imposto recalculado: a margem acompanha
             if (mg != null && l.custo == null && cu != null) mg -= cu;   // margem gravada sem custo: desconta o custo reposto
             if (mg != null) T.mar += mg;
+            // Codex PR#48: bônus de envio Flex (gravado na 1ª linha do pedido) entra na margem
+            // agregada — sem isto Mês/30 dias/Ano seguiriam subestimados mesmo após a re-pesca
+            const crdL = Number(l.credito_ml) || 0;
+            if (crdL) { T.mar += crdL; T.cred = Math.round(((T.cred || 0) + crdL) * 100) / 100; }
             if (l.numero_pedido) peds.add(String(l.numero_pedido));
             const cn = l.canal || 'outro';
             // 01/08: o resumo da Análise no período longo mostrava sempre o total do período, mesmo
             // filtrando por canal — porque o agregado por canal só tinha fat/un/margem. Agora traz
             // imposto, comissão, frete, custo e itens, e o filtro passa a valer no resumo também.
             if (!porCanal[cn]) porCanal[cn] = { fat: 0, un: 0, mar: 0, imp: 0, com: 0, fre: 0, cus: 0, itens: 0, peds: new Set() };
-            porCanal[cn].fat += vn; porCanal[cn].un += q; porCanal[cn].mar += (mg || 0);
+            porCanal[cn].fat += vn; porCanal[cn].un += q; porCanal[cn].mar += (mg || 0) + (Number(l.credito_ml) || 0);   // Codex PR#48: crédito Flex também no por-canal
             porCanal[cn].imp += im; porCanal[cn].com += co; porCanal[cn].fre += fr; porCanal[cn].cus += (cu || 0); porCanal[cn].itens++;
             if (l.numero_pedido) porCanal[cn].peds.add(String(l.numero_pedido));
             const sk = l.sku || '(sem sku)';
