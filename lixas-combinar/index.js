@@ -120,6 +120,14 @@ function classificarVenda(v) {
     return { bolsao: 'resolvido', motivo: 'cancelada',
              rotulo: noBling ? '❌ Cancelada no Bling' : '❌ Cancelada no ML' };
   }
+  // Escalacao humana EXPLICITA vence os marcadores de conclusao. O fechamento
+  // pos-processado (lerRespostas) marca precisa_atencao_humano quando o cliente manda
+  // uma mensagem de verdade DEPOIS da NF — pedido de troca, reclamacao. Se a NF fosse
+  // avaliada antes, esse card ia pro bolsao fechado e o pedido do cliente sumia.
+  if (v.status === 'precisa_atencao_humano' || v.ia_escalou_humano) {
+    return { bolsao: 'pendente', motivo: 'humano',
+             rotulo: v.nf_emitida_em ? '🚨 Cliente pediu algo APÓS a NF' : '🚨 Precisa de você' };
+  }
   if (v.nf_emitida_em) {
     return { bolsao: 'resolvido', motivo: 'nf', rotulo: '📄 NF emitida' };
   }
