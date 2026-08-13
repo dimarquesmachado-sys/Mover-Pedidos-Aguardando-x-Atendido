@@ -391,7 +391,7 @@ async function rotinaACombinar() {
 
 const CANCELADAS_STATUS = (
   process.env.LIXAS_CANCELADAS_STATUS ||
-  'aguardando_resposta,cliente_respondeu,cliente_confirmou_pedido,aguardando_bling,precisa_atencao_humano,processado'
+  'aguardando_resposta,cliente_respondeu,cliente_confirmou_pedido,aguardando_bling,cancelada_quarentena,precisa_atencao_humano,processado'
 ).split(',').map(s => s.trim()).filter(Boolean);
 // Acompanha a janela do leitor (LIXAS_JANELA_DIAS, default 30). Se ficasse em 7
 // enquanto o lerRespostas processa ate 30 dias, existiria uma faixa de 8-30 dias em
@@ -563,10 +563,14 @@ async function rotinaChecarCanceladasML(opts = {}) {
     out.checadas++;
 
     if (!st.ok) {
+      // NAO abandona a venda: carimba o relogio do cancelamento (senao ela volta com
+      // prioridade maxima toda hora e ocupa as vagas reservadas ao envio pra sempre) e
+      // segue como "viva" pra que a checagem de ENVIO ainda aconteca nesta rodada.
       out.erros.push({ order_id: oid, erro: st.erro });
-      console.warn(`[canceladas] order ${oid} nao consegui checar: ${st.erro}`);
+      console.warn(`[canceladas] order ${oid} nao consegui checar o cancelamento: ${st.erro} — sigo so com o envio`);
+      try { await lcp.atualizarVenda(oid, { ml_status_atualizado_em: agoraIso }); } catch (_) {}
+      st = { ok: true, status: v.ml_status || null, cancelada: false, _soEnvio: true };
       await new Promise(r => setTimeout(r, CANCELADAS_PAUSA_MS));
-      continue;
     }
 
     if (!st.cancelada) {
@@ -670,7 +674,11 @@ async function rotinaChecarCanceladasML(opts = {}) {
         // que exclui a linha das proximas rodadas, e ainda falta determinar o alerta.
         try {
           await lcp.atualizarVenda(oid, {
-            status: 'venda_cancelada',
+            // Status PROPRIO de quarentena: 'venda_cancelada' sairia do CANCELADAS_STATUS
+            // e a linha nunca voltaria pra tentar o envio de novo — o alerta de nao
+            // despachar nunca sairia. 'cancelada_quarentena' esta na lista e o
+            // classificador trata como pendente humano.
+            status: 'cancelada_quarentena',
             ml_status: st.status,
             ml_status_atualizado_em: agoraIso
           });
@@ -830,11 +838,29 @@ async function _processarAutoEmissaoInner({ venda, iaResult, graosResult, lcp })
           } else if (envG && !envG.ok) {
             // Envio indeterminado: NAO finaliza agora. Sem gravar venda_cancelada_em a
             // linha volta na proxima rodada; gravar cego perderia o alerta pra sempre.
-            console.error(`[auto-emissao] order ${orderId} cancelada mas envio indeterminado (${envG.erro}) — nao finalizo, so aborto a emissao`);
+            console.error(`[auto-emissao] order ${orderId} cancelada mas envio indeterminado (${envG.erro}) — quarentena`);
+            // Persiste a quarentena ANTES de sair: deixar em cliente_confirmou_pedido
+            // permitiria a recuperacao do confirmou-strand pegar a venda de novo e,
+            // com uma falha transiente na consulta de status, montar e emitir NF de um
+            // pedido ja cancelado.
+            try {
+              await lcp.atualizarVenda(orderId, {
+                status: 'cancelada_quarentena',
+                ml_status: st.status,
+                ml_status_atualizado_em: new Date().toISOString()
+              });
+            } catch (e2) { console.error(`[auto-emissao] order ${orderId} falhei na quarentena: ${e2.message}`); }
             return { falha: true, motivo: 'venda_cancelada_no_ml_envio_indeterminado' };
           }
         } catch (e) {
-          console.error(`[auto-emissao] order ${orderId} cancelada e falhei ao conferir envio (${e.message}) — nao finalizo`);
+          console.error(`[auto-emissao] order ${orderId} cancelada e falhei ao conferir envio (${e.message}) — quarentena`);
+          try {
+            await lcp.atualizarVenda(orderId, {
+              status: 'cancelada_quarentena',
+              ml_status: st.status,
+              ml_status_atualizado_em: new Date().toISOString()
+            });
+          } catch (e2) { console.error(`[auto-emissao] order ${orderId} falhei na quarentena: ${e2.message}`); }
           return { falha: true, motivo: 'venda_cancelada_no_ml_envio_indeterminado' };
         }
       }
