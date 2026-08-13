@@ -1006,9 +1006,19 @@ async function _processarAutoEmissaoInner({ venda, iaResult, graosResult, lcp })
   // pode reengajar — chegando aqui com NF ja emitida POR FORA.
   if (venda.ml_etiqueta_em || venda.processado_manual_em) {
     const motivo = venda.ml_etiqueta_em ? 'etiqueta_ja_gerada' : 'conclusao_manual';
-    await lcp.atualizarVenda(orderId, { status: 'processado' });
+    // Confere o retorno: atualizarVenda devolve {ok:false} sem lancar. Sem isso, o
+    // wrapper apagaria a entrada da fila com a linha ainda em aguardando_resposta/
+    // cliente_confirmou_pedido/precisa_atencao_humano — e como classificarVenda so
+    // reconhece a conclusao manual quando o status e 'processado', a venda ficaria
+    // presa em Pendentes pra sempre, sem nada agendado pra consertar.
+    let okTerm = false;
+    try {
+      const rt = await lcp.atualizarVenda(orderId, { status: 'processado' });
+      okTerm = !!(rt && rt.ok);
+    } catch (e) { console.error(`[auto-emissao] order ${orderId} excecao gravando status terminal: ${e.message}`); }
+    if (!okTerm) console.error(`[auto-emissao] order ${orderId} 🚨 nao gravou o status terminal (${motivo}) — mantendo na fila`);
     console.warn(`[auto-emissao] order ${orderId} terminal (${motivo}) — nao monto nem emito`);
-    return { falha: true, motivo };
+    return { falha: true, retry: !okTerm, motivo };
   }
 
   // Guarda 2 — pedido_estruturado valido
