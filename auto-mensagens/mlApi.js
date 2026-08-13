@@ -541,10 +541,37 @@ async function getEnvioResumo(orderId) {
 
     // Sem shipping.id: pode ser pack (carrinho) ou retirada. Nao da pra afirmar que
     // tem etiqueta — devolve "sem envio" em vez de chutar.
+    // Carrinho: o pedido nao tem shipping.id proprio, o envio e do PACK. Sem resolver,
+    // devolveriamos ok:true/temEtiqueta:false — e quem le trata isso como "confirmado
+    // que nao ha etiqueta", finalizando cancelamento sem alerta mesmo com etiqueta
+    // de pack ja impressa. Se nem pelo pack der, devolve ok:false (indeterminado).
     if (!shippingId) {
-      return { ok: true, semEnvio: true, status: null, substatus: null, temEtiqueta: false, postado: false };
+      const packId = order?.pack_id || null;
+      if (packId) {
+        try {
+          const pk = await getPackInfo(packId);
+          const irmaos = Array.isArray(pk?.orders) ? pk.orders : [];
+          for (const o of irmaos) {
+            if (String(o.id) === String(orderId)) continue;
+            const ro = await mlFetch('GET', `/orders/${o.id}`);
+            const sid = ro.ok ? (ro.data?.shipping?.id || ro.data?.shipping_id || null) : null;
+            if (sid) return await _resumoDoShipment(sid);
+          }
+        } catch (e) {
+          return { ok: false, erro: `nao consegui resolver o envio pelo pack ${packId}: ${e.message}` };
+        }
+      }
+      return { ok: false, semEnvio: true, erro: 'pedido sem shipping.id e sem envio localizavel pelo pack — estado indeterminado' };
     }
 
+    return await _resumoDoShipment(shippingId);
+  } catch (e) {
+    return { ok: false, erro: e.message };
+  }
+}
+
+async function _resumoDoShipment(shippingId) {
+  try {
     const s = await mlFetch('GET', `/shipments/${shippingId}`);
     if (!s.ok) {
       return { ok: false, httpStatus: s.status, erro: `ML ${s.status} lendo shipment ${shippingId}`,
