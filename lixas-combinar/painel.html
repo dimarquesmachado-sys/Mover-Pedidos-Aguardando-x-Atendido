@@ -360,18 +360,11 @@ async function carregarBolsao(qual) {
 async function recarregar() {
   await carregarBolsao('pendente');
   const sec = document.getElementById('bolsao-resolvido');
+  // Com Resolvidos fechado NAO ha segunda chamada: o /api/pendentes calcula os stats
+  // sobre TODAS as vendas (independente do filtro), entao a resposta do bolsao de
+  // Pendentes ja trouxe os numeros dos dois. Uma request extra aqui repetiria a
+  // varredura no Supabase e ate 20 consultas de NF no Bling a toa.
   if (sec && !sec.classList.contains('fechado')) await carregarBolsao('resolvido');
-  else await atualizarContadores();
-}
-
-// Quando Resolvidos esta fechado, ainda precisamos dos numeros dos chips/cabecalho.
-async function atualizarContadores() {
-  try {
-    const r = await fetch(`${API_BASE}/api/pendentes`, { headers: { 'X-Session-Token': token() } });
-    if (r.status === 401) { logout(); return; }
-    const d = await r.json();
-    if (d && d.ok) renderStats(d.stats || {});
-  } catch (_) {}
 }
 
 function _setNum(id, val) { const e = document.getElementById(id); if (e) e.textContent = val || 0; }
