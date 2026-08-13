@@ -480,7 +480,9 @@ function renderCard(v) {
   }
 
   // Botao Emitir NF — quando pedido ja foi editado no Bling, mas NF ainda nao foi emitida
-  if (v.bling_editado_em && v.bling_pedido_id && !v.nf_emitida_em) {
+  // !processado_manual_em: conclusao manual = NF emitida POR FORA. Emitir aqui criaria
+  // uma SEGUNDA nota — o backend recusa com 409, mas o botao nem deve aparecer.
+  if (v.bling_editado_em && v.bling_pedido_id && !v.nf_emitida_em && !v.processado_manual_em) {
     botoesBling += `
       <button class="btn-nf" onclick="emitirNF('${v.order_id}')">📄 Emitir NF</button>
     `;
@@ -488,7 +490,7 @@ function renderCard(v) {
 
   // RECUPERACAO — pedido marcado 'processado' mas SEM NF (preso pelo botao manual
   // ou pelo bug antigo). Mostra aviso + botao que monta (se preciso) + emite a NF.
-  if (v.status === 'processado' && !v.nf_emitida_em) {
+  if (v.status === 'processado' && !v.nf_emitida_em && !v.processado_manual_em) {
     botoesBling += `
       <button class="btn-nf" data-recup="${v.order_id}" title="Este pedido está como 'processado' mas SEM nota fiscal. Clica pra montar (se preciso) e emitir a NF agora." onclick="recuperarNF('${v.order_id}')" style="background:#dc2626">🔧 Recuperar NF</button>
     `;
@@ -525,7 +527,7 @@ function renderCard(v) {
       ${alertaBlock}
       <div class="card-header">
         <div class="card-titulo">${esc(v.descricao_produto || v.sku_a_combinar || 'Sem desc')}</div>
-        <div class="card-status ${statusCls}">${statusLabel}${v.status === 'processado' && !v.nf_emitida_em ? ' <span style="background:#dc2626;color:#fff;padding:1px 5px;border-radius:4px;font-size:10px;margin-left:4px">⚠️ SEM NF</span>' : ''}</div>${rotuloBolsao}
+        <div class="card-status ${statusCls}">${statusLabel}${v.status === 'processado' && !v.nf_emitida_em && !v.processado_manual_em ? ' <span style="background:#dc2626;color:#fff;padding:1px 5px;border-radius:4px;font-size:10px;margin-left:4px">⚠️ SEM NF</span>' : ''}</div>${rotuloBolsao}
       </div>
       <div class="card-info">📦 SKU: <b>${esc(v.sku_a_combinar || '-')}</b></div>
       <div class="card-info">👤 ${esc(v.buyer_nome || '-')} ${v.total_msgs_cliente ? `(${v.total_msgs_cliente} msg${v.total_msgs_cliente > 1 ? 's' : ''})` : ''}</div>
