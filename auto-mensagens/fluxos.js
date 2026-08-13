@@ -475,6 +475,9 @@ async function rotinaChecarCanceladasML(opts = {}) {
       const envioVencido  = (idadeMs2 >= ENVIO_IDADE_MIN_H * 3600 * 1000)
                             && !v.ml_etiqueta_em && !v.nf_emitida_em
                             && (!tEnvio || (agora - tEnvio) >= ENVIO_REPESCAR_H * 3600 * 1000);
+      // Guarda quais checagens estao vencidas: a ordenacao usa SO o relogio delas.
+      v._dueCancel = cancelVencido;
+      v._dueEnvio  = envioVencido;
       return cancelVencido || envioVencido;
     });
 
@@ -483,11 +486,17 @@ async function rotinaChecarCanceladasML(opts = {}) {
     // empatava com as demais e a ordem da fonte (mais nova primeiro) decidia — as
     // mais antigas nunca chegavam a ser consultadas quando havia mais candidatas
     // que CANCELADAS_MAX.
+    // Considera SO o relogio das checagens que estao vencidas pra esta venda. Olhar
+    // um relogio que nunca vai rodar dava prioridade maxima indevida: venda com NF
+    // nao faz poll de envio, entao ml_envio_checado_em fica null pra sempre e ela
+    // furava a fila das que realmente precisam do envio conferido.
     const _relogio = (v) => {
-      const tc = v.ml_status_atualizado_em ? new Date(v.ml_status_atualizado_em).getTime() : 0;
-      const te = v.ml_envio_checado_em ? new Date(v.ml_envio_checado_em).getTime() : 0;
-      if (!tc || !te) return 0;          // alguma checagem nunca feita -> prioridade maxima
-      return Math.min(tc, te);           // senao, a mais atrasada das duas manda
+      const ts = [];
+      if (v._dueCancel) ts.push(v.ml_status_atualizado_em ? new Date(v.ml_status_atualizado_em).getTime() : 0);
+      if (v._dueEnvio)  ts.push(v.ml_envio_checado_em ? new Date(v.ml_envio_checado_em).getTime() : 0);
+      if (ts.length === 0) return 0;
+      if (ts.some(t => !t)) return 0;    // checagem devida que nunca rodou -> prioridade
+      return Math.min(...ts);            // senao, a mais atrasada das devidas manda
     };
     alvos.sort((a, b) => {
       const d = _relogio(a) - _relogio(b);
