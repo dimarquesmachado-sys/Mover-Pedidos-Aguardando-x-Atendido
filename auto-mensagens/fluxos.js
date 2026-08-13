@@ -473,7 +473,14 @@ async function rotinaChecarCanceladasML(opts = {}) {
       const tEnvio  = v.ml_envio_checado_em ? new Date(v.ml_envio_checado_em).getTime() : 0;
       const cancelVencido = (idadeMs2 >= idadeMinMs) && (!tCancel || (agora - tCancel) >= repescarMs);
       const envioVencido  = (idadeMs2 >= ENVIO_IDADE_MIN_H * 3600 * 1000)
-                            && !v.ml_etiqueta_em && !v.nf_emitida_em && !v.processado_manual_em
+                            && !v.processado_manual_em && !v.nf_emitida_em
+                            // Etiqueta detectada NAO encerra o acompanhamento: o envio
+                            // ainda evolui pra shipped/delivered, e sem isso o card
+                            // ficaria em "Etiqueta gerada" pra sempre e um alerta
+                            // posterior diria "nao despachar" num pacote ja postado.
+                            // Para so num status terminal.
+                            && !['shipped','delivered','not_delivered','cancelled']
+                                 .includes(String(v.ml_shipment_status || '').toLowerCase())
                             && (!tEnvio || (agora - tEnvio) >= ENVIO_REPESCAR_H * 3600 * 1000);
       // Guarda quais checagens estao vencidas: a ordenacao usa SO o relogio delas.
       v._dueCancel = cancelVencido;
@@ -777,12 +784,37 @@ async function _processarAutoEmissaoInner({ venda, iaResult, graosResult, lcp })
   try {
     const st = await ml.getOrderStatusResumo(String(orderId));
     if (st && st.ok && st.cancelada) {
-      await lcp.atualizarVenda(orderId, {
+      // Antes de gravar venda_cancelada_em (que exclui a linha das proximas rodadas
+      // PARA SEMPRE), confere o envio: etiqueta impressa desde o ultimo poll precisa
+      // virar alerta de nao despachar. Mesma logica ja aplicada no cron — este escritor
+      // olhava so o status do pedido.
+      const campos = {
         status: 'venda_cancelada',
         ml_status: st.status,
         ml_status_atualizado_em: new Date().toISOString(),
         venda_cancelada_em: new Date().toISOString()
-      });
+      };
+      if (!venda.ml_etiqueta_em && !venda.nf_emitida_em && !venda.bling_editado_em) {
+        try {
+          const envG = await ml.getEnvioResumo(String(orderId));
+          if (envG && envG.ok && envG.temEtiqueta) {
+            campos.ml_etiqueta_em = new Date().toISOString();
+            campos.ml_shipment_status = envG.status || null;
+            campos.alerta_pos_venda = (`CANCELADA NO ML com etiqueta ja gerada (${envG.status}). NAO DESPACHAR. ` +
+              `Conferir devolucao/estorno no ML e o pedido no Bling.`).slice(0, 500);
+            console.error(`[auto-emissao] 🚨 order ${orderId} cancelada COM etiqueta ja gerada — alerta gravado`);
+          } else if (envG && !envG.ok) {
+            // Envio indeterminado: NAO finaliza agora. Sem gravar venda_cancelada_em a
+            // linha volta na proxima rodada; gravar cego perderia o alerta pra sempre.
+            console.error(`[auto-emissao] order ${orderId} cancelada mas envio indeterminado (${envG.erro}) — nao finalizo, so aborto a emissao`);
+            return { falha: true, motivo: 'venda_cancelada_no_ml_envio_indeterminado' };
+          }
+        } catch (e) {
+          console.error(`[auto-emissao] order ${orderId} cancelada e falhei ao conferir envio (${e.message}) — nao finalizo`);
+          return { falha: true, motivo: 'venda_cancelada_no_ml_envio_indeterminado' };
+        }
+      }
+      await lcp.atualizarVenda(orderId, campos);
       console.warn(`[auto-emissao] order ${orderId} CANCELADA no ML (${st.status}) — emissao abortada antes de montar/emitir`);
       return { falha: true, motivo: 'venda_cancelada_no_ml' };
     }
