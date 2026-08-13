@@ -101,6 +101,14 @@ async function enviarConfirmacaoPedido(v, orderId) {
 // Ordem importa: cancelada > NF > etiqueta/postado > processado. A primeira que
 // bater define o motivo mostrado no card.
 function classificarVenda(v) {
+  // CANCELOU DEPOIS DE MONTAR/EMITIR: o cron grava alerta_pos_venda porque alguem
+  // precisa parar o despacho e cancelar/estornar a NF. Esse card NAO pode ir pro
+  // bolsao Resolvidos — ele nasce fechado, e o alerta ficaria invisivel justo no
+  // caso em que o pacote ainda pode ser despachado por engano.
+  if (v.alerta_pos_venda) {
+    return { bolsao: 'pendente', motivo: 'humano', rotulo: '🚨 CANCELADA APÓS NF/pedido — não despachar' };
+  }
+
   // 'cancelado' e o status que o revisarAtencaoHumana grava quando acha o pedido
   // cancelado no BLING — sem tratar aqui, ele caia no default e voltava a aparecer
   // como pendente "aguardando o cliente".
@@ -127,12 +135,19 @@ function classificarVenda(v) {
   }
 
   // ── Pendente: a sub-flag diz DE QUEM e a bola ──
+  // ORDEM IMPORTA: 'aguardando_bling' SEMPRE grava um bling_erro explicativo enquanto
+  // a fila de retry continua tentando sozinha. Se o teste generico de erro viesse antes,
+  // todo retry normal cairia no vermelho "Precisa de voce" — inflando o bolsao com
+  // coisa que se resolve sem ninguem, e tornando este ramo inalcancavel.
+  if (v.status === 'aguardando_bling') {
+    return { bolsao: 'pendente', motivo: 'confirmou', rotulo: '🔄 Re-tentando montar/emitir' };
+  }
+  if (v.status === 'cliente_confirmou_pedido') {
+    return { bolsao: 'pendente', motivo: 'confirmou', rotulo: '✓ Pedido fechado — falta montar/emitir' };
+  }
   const temErro = !!(v.bling_erro || v.nf_erro);
   if (v.status === 'precisa_atencao_humano' || v.ia_escalou_humano || temErro) {
     return { bolsao: 'pendente', motivo: 'humano', rotulo: '🚨 Precisa de você' };
-  }
-  if (v.status === 'cliente_confirmou_pedido' || v.status === 'aguardando_bling') {
-    return { bolsao: 'pendente', motivo: 'confirmou', rotulo: '✓ Pedido fechado — falta montar/emitir' };
   }
   if (v.status === 'cliente_respondeu') {
     return { bolsao: 'pendente', motivo: 'respondeu', rotulo: '💬 Cliente respondeu — IA tratando' };
