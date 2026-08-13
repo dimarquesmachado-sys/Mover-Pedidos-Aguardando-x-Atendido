@@ -87,6 +87,50 @@ async function enviarConfirmacaoPedido(v, orderId) {
   }
 }
 
+// ════════════════════════════════════════════════════════════════════
+// CLASSIFICACAO EM 2 BOLSOES (o painel so mostra isso)
+//
+//   PENDENTE  = venda paga, viva, que ainda depende de alguem: nao tem NF, nao
+//               tem etiqueta no ML, nao foi cancelada. E o que precisa de acao.
+//   RESOLVIDO = ja saiu da frente: NF emitida, etiqueta gerada/postado no ML,
+//               cancelada, ou marcada como processada na mao.
+//
+// Fica no BACKEND de proposito: assim painel, contadores e qualquer outro
+// consumidor usam a MESMA regra, sem duas verdades.
+//
+// Ordem importa: cancelada > NF > etiqueta/postado > processado. A primeira que
+// bater define o motivo mostrado no card.
+function classificarVenda(v) {
+  if (v.venda_cancelada_em || v.status === 'venda_cancelada') {
+    return { bolsao: 'resolvido', motivo: 'cancelada', rotulo: '❌ Cancelada no ML' };
+  }
+  if (v.nf_emitida_em) {
+    return { bolsao: 'resolvido', motivo: 'nf', rotulo: '📄 NF emitida' };
+  }
+  if (v.ml_etiqueta_em) {
+    const st = String(v.ml_shipment_status || '').toLowerCase();
+    const postado = ['shipped', 'delivered', 'not_delivered'].includes(st);
+    return { bolsao: 'resolvido', motivo: postado ? 'postado' : 'etiqueta',
+             rotulo: postado ? '📦 Postado' : '🏷️ Etiqueta gerada' };
+  }
+  if (v.status === 'processado') {
+    return { bolsao: 'resolvido', motivo: 'processado', rotulo: '✓ Processado' };
+  }
+
+  // ── Pendente: a sub-flag diz DE QUEM e a bola ──
+  const temErro = !!(v.bling_erro || v.nf_erro);
+  if (v.status === 'precisa_atencao_humano' || v.ia_escalou_humano || temErro) {
+    return { bolsao: 'pendente', motivo: 'humano', rotulo: '🚨 Precisa de você' };
+  }
+  if (v.status === 'cliente_confirmou_pedido' || v.status === 'aguardando_bling') {
+    return { bolsao: 'pendente', motivo: 'confirmou', rotulo: '✓ Pedido fechado — falta montar/emitir' };
+  }
+  if (v.status === 'cliente_respondeu') {
+    return { bolsao: 'pendente', motivo: 'respondeu', rotulo: '💬 Cliente respondeu — IA tratando' };
+  }
+  return { bolsao: 'pendente', motivo: 'aguardando', rotulo: '⏳ Aguardando o cliente' };
+}
+
 // ── Router (interface esperada pelo orquestrador raiz) ───────────────
 function routes(readBody) {
   return async function handle(req, res, urlObj) {
@@ -274,14 +318,32 @@ function routes(readBody) {
         const todosR = await lcp.listarPendentes({ dias, limit: 500 });
         const todos = todosR.ok && Array.isArray(todosR.data) ? todosR.data : [];
 
-        // Aplica filtro - "cliente_respondeu" cobre ambos os status (respondeu E confirmou)
-        let pendentes = todos;
-        if (status === 'cliente_respondeu') {
-          pendentes = todos.filter(v => v.status === 'cliente_respondeu' || v.status === 'cliente_confirmou_pedido');
-        } else if (status) {
-          pendentes = todos.filter(v => v.status === status);
+        // Classifica TODAS (o painel trabalha por bolsao, nao por status cru)
+        for (const v of todos) {
+          const cls = classificarVenda(v);
+          v.bolsao = cls.bolsao;
+          v.motivo = cls.motivo;
+          v.rotulo_bolsao = cls.rotulo;
         }
-        pendentes = pendentes.slice(0, 100);
+
+        // Filtros aceitos:
+        //   ?bolsao=pendente|resolvido   (os 2 blocos)
+        //   ?motivo=humano|confirmou|... (sub-filtro dentro do bloco)
+        //   ?status=...                  (mantido por compatibilidade)
+        const bolsao = urlObj.searchParams.get('bolsao') || null;
+        const motivo = urlObj.searchParams.get('motivo') || null;
+
+        let pendentes = todos;
+        if (bolsao) pendentes = pendentes.filter(v => v.bolsao === bolsao);
+        if (motivo) pendentes = pendentes.filter(v => v.motivo === motivo);
+        if (!bolsao && !motivo && status) {
+          if (status === 'cliente_respondeu') {
+            pendentes = pendentes.filter(v => v.status === 'cliente_respondeu' || v.status === 'cliente_confirmou_pedido');
+          } else {
+            pendentes = pendentes.filter(v => v.status === status);
+          }
+        }
+        pendentes = pendentes.slice(0, 200);
 
         // Confere a NF REAL no Bling pros cards que mostrariam o botao "Emitir/Recuperar
         // NF" mas tem nf_emitida_em vazio (campo desatualizado). Se a nota existe no
@@ -318,6 +380,17 @@ function routes(readBody) {
           // (nao so pelo status) pra pegar registro antigo caso alguem mexa no
           // status na mao depois.
           canceladas: todos.filter(v => v.status === 'venda_cancelada' || v.venda_cancelada_em).length,
+          // ── contadores dos 2 bolsoes (o que o painel novo usa) ──
+          pendente: todos.filter(v => v.bolsao === 'pendente').length,
+          resolvido: todos.filter(v => v.bolsao === 'resolvido').length,
+          p_humano:     todos.filter(v => v.motivo === 'humano').length,
+          p_confirmou:  todos.filter(v => v.motivo === 'confirmou').length,
+          p_respondeu:  todos.filter(v => v.motivo === 'respondeu').length,
+          p_aguardando: todos.filter(v => v.motivo === 'aguardando').length,
+          r_nf:         todos.filter(v => v.motivo === 'nf').length,
+          r_etiqueta:   todos.filter(v => v.motivo === 'etiqueta' || v.motivo === 'postado').length,
+          r_cancelada:  todos.filter(v => v.motivo === 'cancelada').length,
+          r_processado: todos.filter(v => v.motivo === 'processado').length,
           // alertas = cancelou DEPOIS que a gente ja montou/emitiu. E o numero
           // que importa: cada um desses e pacote que nao pode ser despachado.
           alertas: todos.filter(v => v.alerta_pos_venda).length
