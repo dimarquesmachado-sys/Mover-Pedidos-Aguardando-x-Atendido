@@ -20,6 +20,11 @@
 const tokenMgr = require('./tokenManager');
 const lixasService = require('./lixasService');
 
+// Janela de dias que o painel lista. Era 7 fixo — venda mais antiga que isso sumia
+// da tela mesmo existindo no banco, e nao dava pra fechar na mao (caso 31/07, cliente
+// respondeu 9 dias depois da compra). Aceita ?dias=N na URL pra abrir mais quando precisar.
+const PAINEL_DIAS = Number(process.env.LIXAS_PAINEL_DIAS) || 30;
+
 // ── Helpers HTTP ─────────────────────────────────────────────────────
 function json(res, code, body) {
   res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' });
@@ -262,9 +267,11 @@ function routes(readBody) {
           return true;
         }
         const status = urlObj.searchParams.get('status') || null;
+        // Janela configuravel (default PAINEL_DIAS = 30). ?dias=90 abre mais.
+        const dias = Number(urlObj.searchParams.get('dias')) || PAINEL_DIAS;
 
         // Busca TODOS uma vez so e filtra em memoria (evita 2 chamadas Supabase)
-        const todosR = await lcp.listarPendentes({ dias: 7, limit: 500 });
+        const todosR = await lcp.listarPendentes({ dias, limit: 500 });
         const todos = todosR.ok && Array.isArray(todosR.data) ? todosR.data : [];
 
         // Aplica filtro - "cliente_respondeu" cobre ambos os status (respondeu E confirmou)
@@ -316,7 +323,8 @@ function routes(readBody) {
           alertas: todos.filter(v => v.alerta_pos_venda).length
         };
 
-        json(res, 200, { ok: true, pendentes, stats });
+        // dias vai na resposta pro painel poder mostrar a janela real no card "Total"
+        json(res, 200, { ok: true, dias, pendentes, stats });
       } catch (e) {
         json(res, 500, { ok: false, erro: e.message });
       }
