@@ -591,6 +591,30 @@ async function _processarAutoEmissaoInner({ venda, iaResult, graosResult, lcp })
     return { puladaConfianca: true };
   }
 
+  // Guarda 1.5 — VENDA AINDA VIVA NO ML (fecha a corrida com o cron de cancelamento).
+  // O leitor roda a cada 2 min; a varredura de cancelamento, de hora em hora. Numa
+  // janela de 30 dias existe backlog que o leitor ve ANTES da primeira passada de
+  // cancelamento — e uma venda ja cancelada viraria NF irreversivel. Ampliar a janela
+  // do cron so descobre isso depois; a unica guarda que fecha a corrida e perguntar
+  // ao ML agora, logo antes de emitir. Custo: 1 chamada por emissao.
+  // Falha de consulta NAO bloqueia (nao inventa problema onde talvez nao haja):
+  // so bloqueia quando o ML confirma que a venda morreu.
+  try {
+    const st = await ml.getOrderStatusResumo(String(orderId));
+    if (st && st.ok && st.cancelada) {
+      await lcp.atualizarVenda(orderId, {
+        status: 'venda_cancelada',
+        ml_status: st.status,
+        ml_status_atualizado_em: new Date().toISOString(),
+        venda_cancelada_em: new Date().toISOString()
+      });
+      console.warn(`[auto-emissao] order ${orderId} CANCELADA no ML (${st.status}) — emissao abortada antes de montar/emitir`);
+      return { falha: true, motivo: 'venda_cancelada_no_ml' };
+    }
+  } catch (e) {
+    console.warn(`[auto-emissao] order ${orderId} nao consegui checar status ML antes de emitir (segue): ${e.message}`);
+  }
+
   // Guarda 2 — pedido_estruturado valido
   const graosEscolhidos = Array.isArray(iaResult.pedido_estruturado) ? iaResult.pedido_estruturado : null;
   if (!graosEscolhidos || graosEscolhidos.length === 0) {
