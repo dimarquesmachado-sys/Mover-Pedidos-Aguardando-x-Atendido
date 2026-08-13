@@ -92,11 +92,17 @@ async function listarPendentes({ dias = 7, status = null, limit = 100 } = {}) {
 /**
  * Atualiza UMA venda (pra quando cliente responde, ou Diego marca como processado).
  */
-async function atualizarVenda(orderId, campos) {
+async function atualizarVenda(orderId, campos, opts) {
   if (!configurado()) return { ok: false, erro: 'supabase_nao_configurado' };
   campos.atualizado_em = new Date().toISOString();
-  return supabaseFetch(`${TABELA}?order_id=eq.${encodeURIComponent(orderId)}`, {
+  // opts.somenteSe: filtros PostgREST extras no MESMO PATCH — o update vira
+  // condicional de verdade (checagem e escrita numa operacao so), fechando corridas
+  // que um "ler antes, gravar depois" apenas estreita.
+  // Ex: { somenteSe: 'venda_cancelada_em=is.null' } => so grava se ainda nao finalizou.
+  const extra = (opts && opts.somenteSe) ? `&${opts.somenteSe}` : '';
+  return supabaseFetch(`${TABELA}?order_id=eq.${encodeURIComponent(orderId)}${extra}`, {
     method: 'PATCH',
+    headers: { Prefer: 'return=representation' },   // devolve as linhas afetadas
     body: JSON.stringify(campos)
   });
 }
