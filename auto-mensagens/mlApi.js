@@ -554,8 +554,14 @@ async function getEnvioResumo(orderId) {
     const st  = String(d.status || '').toLowerCase();
     const sub = String(d.substatus || '').toLowerCase();
 
+    // 'ready_to_ship' NAO garante etiqueta: nesses substatus o ML ainda nao fechou a
+    // etapa dele e a impressao responde NOT_PRINTABLE_STATUS. Mesma lista ja usada em
+    // girassol/good/ambtotal fluxos.js (SEM_ETIQUETA_AINDA) — manter em sincronia.
+    // Critico aqui: gravar etiqueta cedo demais faz a venda sumir de Pendentes ANTES
+    // de a etiqueta existir, e como nao reconsultamos depois, ela sumiria pra sempre.
+    const SEM_ETIQUETA_AINDA = ['invoice_pending', 'buffered', 'ready_to_print_pending', 'regenerating'];
     const postado     = ['shipped', 'delivered', 'not_delivered'].includes(st);
-    const temEtiqueta = postado || st === 'ready_to_ship';
+    const temEtiqueta = postado || (st === 'ready_to_ship' && !SEM_ETIQUETA_AINDA.includes(sub));
 
     return {
       ok: true,
