@@ -566,6 +566,14 @@ async function getEnvioResumo(orderId) {
           return { ok: false, erro: `nao consegui resolver o envio pelo pack ${packId}: ${e.message}` };
         }
       }
+      // Pedido TERMINAL (cancelado/invalido) sem shipping e sem pack nunca vai ganhar
+      // envio — devolver erro deixaria a venda em quarentena eterna, repescada pra
+      // sempre por uma etiqueta que nao pode existir. Aqui "sem etiqueta" e um fato.
+      const stOrder = String(order?.status || '').toLowerCase();
+      if (['cancelled', 'invalid'].includes(stOrder) && !packId) {
+        return { ok: true, semEnvio: true, status: null, substatus: null,
+                 temEtiqueta: false, postado: false, terminalSemEnvio: true };
+      }
       return { ok: false, semEnvio: true, erro: 'pedido sem shipping.id e sem envio localizavel pelo pack — estado indeterminado' };
     }
 
