@@ -913,6 +913,13 @@ function routes(readBody) {
         }
 
         const v = venda.data;
+        // Venda CANCELADA (ou em quarentena, cancelamento ja confirmado no ML): montar
+        // ou faturar aqui gera pedido/NF de algo que o cliente cancelou.
+        if (v.venda_cancelada_em || v.status === 'venda_cancelada' || v.status === 'cancelada_quarentena') {
+          json(res, 409, { ok: false, erro: 'venda_cancelada',
+            mensagem: 'Esta venda esta CANCELADA no Mercado Livre. Nao da pra montar nem emitir NF. Se ja houver nota, cancele/estorne no Bling.' });
+          return true;
+        }
         // Conclusao manual = NF emitida POR FORA. Editar aqui reescreveria os itens de
         // um pedido ja faturado. Preview (dryRun) segue liberado: nao escreve nada.
         if (v.processado_manual_em && !dryRun) {
@@ -1012,6 +1019,13 @@ function routes(readBody) {
         }
 
         const v = venda.data;
+        // Venda CANCELADA (ou em quarentena, cancelamento ja confirmado no ML): montar
+        // ou faturar aqui gera pedido/NF de algo que o cliente cancelou.
+        if (v.venda_cancelada_em || v.status === 'venda_cancelada' || v.status === 'cancelada_quarentena') {
+          json(res, 409, { ok: false, erro: 'venda_cancelada',
+            mensagem: 'Esta venda esta CANCELADA no Mercado Livre. Nao da pra montar nem emitir NF. Se ja houver nota, cancele/estorne no Bling.' });
+          return true;
+        }
         if (v.processado_manual_em) {
           json(res, 409, { ok: false, erro: 'conclusao_manual',
             mensagem: 'Esta venda foi concluida na mao (NF provavelmente emitida por fora do painel). Emitir aqui criaria uma segunda NF.' });
@@ -1125,6 +1139,13 @@ function routes(readBody) {
 
         // Conclusao manual e autoritativa (NF emitida POR FORA do painel): emitir aqui
         // geraria uma SEGUNDA nota. Mesma guarda que o recuperarFalsosProcessados.
+        // Venda CANCELADA (ou em quarentena, cancelamento ja confirmado no ML): montar
+        // ou faturar aqui gera pedido/NF de algo que o cliente cancelou.
+        if (v.venda_cancelada_em || v.status === 'venda_cancelada' || v.status === 'cancelada_quarentena') {
+          json(res, 409, { ok: false, erro: 'venda_cancelada',
+            mensagem: 'Esta venda esta CANCELADA no Mercado Livre. Nao da pra montar nem emitir NF. Se ja houver nota, cancele/estorne no Bling.' });
+          return true;
+        }
         if (v.processado_manual_em) {
           json(res, 409, { ok: false, erro: 'conclusao_manual',
             mensagem: 'Esta venda foi concluida na mao (NF provavelmente emitida por fora do painel). Emitir aqui criaria uma segunda NF. Se a nota NAO saiu, desfaca a conclusao manual antes.' });
