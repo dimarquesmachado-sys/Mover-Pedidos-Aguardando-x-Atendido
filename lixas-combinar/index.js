@@ -486,7 +486,11 @@ function routes(readBody) {
             pendentes = pendentes.filter(v => v.status === status);
           }
         }
-        pendentes = pendentes.slice(0, 200);
+        // NAO trunca: paginar a fonte e cortar aqui em 200 recriava o mesmo problema
+        // (as mais ANTIGAS ficam de fora, e o painel nao tem "carregar mais"), com os
+        // contadores contando linhas que ninguem consegue abrir. Devolve o bolsao
+        // inteiro; se um dia ficar pesado, o corte volta junto com paginacao na UI.
+        const totalBolsao = pendentes.length;
 
 
 
@@ -523,7 +527,7 @@ function routes(readBody) {
         };
 
         // dias vai na resposta pro painel poder mostrar a janela real no card "Total"
-        json(res, 200, { ok: true, dias, pendentes, stats });
+        json(res, 200, { ok: true, dias, total_bolsao: totalBolsao, pendentes, stats });
       } catch (e) {
         json(res, 500, { ok: false, erro: e.message });
       }
@@ -653,7 +657,17 @@ function routes(readBody) {
         // Volta pro estado acionavel: se o pedido ja estava montado, cai em
         // 'cliente_confirmou_pedido' (falta so emitir); senao volta pra atencao humana.
         const novoStatus = v.bling_editado_em ? 'cliente_confirmou_pedido' : 'precisa_atencao_humano';
-        const r = await lcp.atualizarVenda(orderId, { processado_manual_em: null, status: novoStatus });
+        // PATCH CONDICIONAL, mesmo motivo do marcar-processado: a leitura acima estreita
+        // a corrida mas nao fecha. Se o cron gravar cancelamento/quarentena no meio,
+        // este update restauraria um status elegivel a re-engajamento — e dai a
+        // auto-emissao pode chegar, ja que a consulta de status falha aberta.
+        const r = await lcp.atualizarVenda(orderId, { processado_manual_em: null, status: novoStatus },
+          { somenteSe: 'venda_cancelada_em=is.null&nf_emitida_em=is.null&status=not.in.(venda_cancelada,cancelado,cancelada_quarentena)' });
+        if (r.ok && Array.isArray(r.data) && r.data.length === 0) {
+          json(res, 409, { ok: false, erro: 'estado_mudou',
+            mensagem: 'O estado da venda mudou enquanto voce clicava (cancelamento ou NF detectados). Recarregue o painel e confira antes de desfazer.' });
+          return true;
+        }
         if (!r.ok) { json(res, 500, { ok: false, erro: 'erro_atualizar', data: r.data }); return true; }
         console.log(`[lixas-combinar] conclusao manual DESFEITA por ${sessao.sessao?.usuario || '?'} — order ${orderId} -> ${novoStatus}`);
         json(res, 200, { ok: true, orderId, status: novoStatus });
