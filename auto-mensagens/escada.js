@@ -72,7 +72,10 @@ async function rotinaEscadaIndisponivel(opts = {}) {
     // Conclusao manual = NF emitida POR FORA do painel: editar e emitir aqui criaria
     // uma SEGUNDA nota. E venda cancelada (ou em quarentena) nao se monta.
     if (v.processado_manual_em) continue;
-    if (v.venda_cancelada_em || v.status === 'venda_cancelada' || v.status === 'cancelada_quarentena') continue;
+    // Etiqueta ja gerada: a escada edita e emite DIRETO (nao passa pelo
+    // processarAutoEmissao), entao a Guarda 1.6 nao a protege — precisa da guarda aqui.
+    if (v.ml_etiqueta_em) continue;
+    if (v.venda_cancelada_em || v.status === 'venda_cancelada' || v.status === 'cancelada_quarentena' || v.status === 'cancelado') continue;
     const k = String(v.order_id);
     if (_vistos.has(k)) continue;
     _vistos.add(k);
