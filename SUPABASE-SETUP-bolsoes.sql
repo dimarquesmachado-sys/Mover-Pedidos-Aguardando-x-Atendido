@@ -29,28 +29,20 @@ ALTER TABLE lixas_combinar_pendentes
 CREATE INDEX IF NOT EXISTS idx_lixas_pendentes_etiqueta
   ON lixas_combinar_pendentes (ml_etiqueta_em DESC NULLS LAST);
 
--- ── BACKFILL: conclusoes manuais ANTERIORES a este deploy ───────────────────
--- O botao "✓ Processado" antigo gravava so status='processado', sem marcador.
--- Sem este passo, toda venda concluida na mao no passado seria reclassificada
--- como anomalia e voltaria pra Pendentes ("marcado processado mas SEM NF").
--- Usa atualizado_em como carimbo aproximado (e quando o status foi gravado).
--- IMPORTANTE: so marca onde ha EVIDENCIA de trabalho real (pedido montado no Bling).
--- Linha 'processado' sem NF *e* sem pedido montado e exatamente o "falso processado"
--- que o recuperarFalsosProcessados caca — clique por engano ou montagem que morreu no
--- meio. Marcar essas como conclusao manual jogaria elas pro bolsao fechado e esconderia
--- uma NF faltando. Essas ficam em Pendentes de proposito, pra voce triar uma vez.
-UPDATE lixas_combinar_pendentes
-   SET processado_manual_em = COALESCE(atualizado_em, criado_em, NOW())
- WHERE status = 'processado'
-   AND processado_manual_em IS NULL
-   AND nf_emitida_em IS NULL
-   AND bling_editado_em IS NOT NULL;
-
--- Quantas ficaram pra triar (aparecem em Pendentes como "marcado processado mas SEM NF"):
-SELECT count(*) AS falsos_processados_para_triar
+-- ── SEM BACKFILL — de proposito ─────────────────────────────────────────────
+-- A versao anterior marcava como "conclusao manual" toda linha 'processado' com
+-- pedido montado no Bling e sem NF local. Mas pedido montado prova so que os itens
+-- foram lancados, NAO que existe nota — e a rota /recuperar-nf existe justamente
+-- porque montagem sem NF acontece (bug antigo do montar, clique por engano).
+-- Marcar essas linhas as mandaria pro bolsao Resolvidos e faria TODOS os caminhos
+-- de NF (automatico e manual) pularem elas: pedido sem nota fiscal, em silencio.
+--
+-- Entao nao marcamos nada. As linhas historicas aparecem em Pendentes como
+-- "marcado processado mas SEM NF", com os botoes de Recuperar NF e de Confirmar
+-- conclusao — voce tria uma vez, sabendo o que cada uma e.
+SELECT count(*) AS processados_sem_nf_para_triar
   FROM lixas_combinar_pendentes
- WHERE status = 'processado' AND nf_emitida_em IS NULL
-   AND bling_editado_em IS NULL AND processado_manual_em IS NULL;
+ WHERE status = 'processado' AND nf_emitida_em IS NULL;
 
 -- ── Conferencia ─────────────────────────────────────────────────────────────
 SELECT column_name, data_type
