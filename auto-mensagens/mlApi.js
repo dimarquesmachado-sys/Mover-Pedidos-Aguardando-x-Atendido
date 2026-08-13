@@ -550,6 +550,11 @@ async function getEnvioResumo(orderId) {
       if (packId) {
         try {
           const pk = await getPackInfo(packId);
+          // O envio compartilhado costuma vir NO PROPRIO pack — e como good/mlApi.js e
+          // girassol/mlApi.js ja fazem. Varrer so os irmaos falhava quando o shipment
+          // existe apenas no nivel do pack.
+          const sidPack = pk?.shipment?.id || pk?.shipping?.id || pk?.shipment_id || null;
+          if (sidPack) return await _resumoDoShipment(sidPack);
           const irmaos = Array.isArray(pk?.orders) ? pk.orders : [];
           for (const o of irmaos) {
             if (String(o.id) === String(orderId)) continue;
@@ -588,7 +593,15 @@ async function _resumoDoShipment(shippingId) {
     // de a etiqueta existir, e como nao reconsultamos depois, ela sumiria pra sempre.
     const SEM_ETIQUETA_AINDA = ['invoice_pending', 'buffered', 'ready_to_print_pending', 'regenerating'];
     const postado     = ['shipped', 'delivered', 'not_delivered'].includes(st);
-    const temEtiqueta = postado || (st === 'ready_to_ship' && !SEM_ETIQUETA_AINDA.includes(sub));
+    // Envio CANCELADO nao apaga o passado: se ha marca de impressao no payload, a
+    // etiqueta existiu e o pacote pode estar pronto na bancada. Sem isso, o
+    // cancelamento era finalizado como comum e ninguem era avisado.
+    const jaImprimiu = !!(d.date_first_printed || d.date_printed
+                          || sub === 'printed' || sub === 'ready_to_print'
+                          || (d.status_history && (d.status_history.date_ready_to_ship || d.status_history.date_shipped)));
+    const temEtiqueta = postado
+                     || (st === 'ready_to_ship' && !SEM_ETIQUETA_AINDA.includes(sub))
+                     || (st === 'cancelled' && jaImprimiu);
 
     return {
       ok: true,
