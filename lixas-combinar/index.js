@@ -124,7 +124,10 @@ function classificarVenda(v) {
   // pos-processado (lerRespostas) marca precisa_atencao_humano quando o cliente manda
   // uma mensagem de verdade DEPOIS da NF — pedido de troca, reclamacao. Se a NF fosse
   // avaliada antes, esse card ia pro bolsao fechado e o pedido do cliente sumia.
-  if (v.status === 'precisa_atencao_humano' || v.ia_escalou_humano) {
+  // SO o status atual vale aqui. ia_escalou_humano so e gravado como true (nada no
+  // codigo volta pra false), entao usar a flag prenderia em Pendentes toda venda que
+  // um dia foi escalada — mesmo depois de voce emitir a NF ou concluir na mao.
+  if (v.status === 'precisa_atencao_humano') {
     return { bolsao: 'pendente', motivo: 'humano',
              rotulo: v.nf_emitida_em ? '🚨 Cliente pediu algo APÓS a NF' : '🚨 Precisa de você' };
   }
@@ -164,7 +167,7 @@ function classificarVenda(v) {
     return { bolsao: 'pendente', motivo: 'confirmou', rotulo: '✓ Pedido fechado — falta montar/emitir' };
   }
   const temErro = !!(v.bling_erro || v.nf_erro);
-  if (v.status === 'precisa_atencao_humano' || v.ia_escalou_humano || temErro) {
+  if (v.status === 'precisa_atencao_humano' || temErro) {
     return { bolsao: 'pendente', motivo: 'humano', rotulo: '🚨 Precisa de você' };
   }
   if (v.status === 'cliente_respondeu') {
