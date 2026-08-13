@@ -612,6 +612,18 @@ async function rotinaChecarCanceladasML(opts = {}) {
                 campos.status = 'processado';
                 console.log(`[canceladas] order ${oid} etiqueta detectada — status ${v.status} -> processado (sai do automatico)`);
               }
+              // QUARENTENA que descobre etiqueta: fecha o cancelamento e cria o alerta
+              // AGORA. Antes ficava esperando o relogio do cancelamento vencer (ate 6h)
+              // mostrando so o card generico, sem botao de reconhecer.
+              if (String(v.status || '') === 'cancelada_quarentena') {
+                campos.status = 'venda_cancelada';
+                campos.venda_cancelada_em = agoraIso;
+                campos.alerta_pos_venda = (
+                  `CANCELADA NO ML com etiqueta ja gerada (${env.status || '?'}). NAO DESPACHAR. ` +
+                  `Conferir devolucao/estorno no ML e a NF/pedido no Bling.`
+                ).slice(0, 500);
+                console.error(`[canceladas] 🚨🚨 order ${oid} quarentena resolvida: CANCELADA COM ETIQUETA — alerta criado`);
+              }
               console.log(`[canceladas] order ${oid} ja tem etiqueta no ML (${env.status}/${env.substatus || '-'}) — sai do bolsao de pendentes`);
             }
           } else {
@@ -756,7 +768,14 @@ async function rotinaChecarCanceladasML(opts = {}) {
     }
 
     const upd = await lcp.atualizarVenda(oid, campos);
-    if (!upd.ok) out.erros.push({ order_id: oid, erro: 'falhou gravar o cancelamento no Supabase' });
+    if (!upd.ok) {
+      // Fail closed: sem gravar, a linha segue no status original e pode ser faturada.
+      // Nao conta como cancelada nesta rodada — a proxima tenta de novo.
+      out.erros.push({ order_id: oid, erro: 'FALHOU gravar o cancelamento no Supabase — venda ainda no fluxo automatico, tratar na mao' });
+      console.error(`[canceladas] order ${oid} 🚨 cancelamento NAO gravou — venda segue elegivel ao automatico`);
+      await new Promise(r => setTimeout(r, CANCELADAS_PAUSA_MS));
+      continue;
+    }
 
     out.canceladas++;
     out.detalhes.push({
@@ -893,12 +912,28 @@ async function _processarAutoEmissaoInner({ venda, iaResult, graosResult, lcp })
           return { falha: true, retry: !qOk2, motivo: 'venda_cancelada_no_ml_envio_indeterminado' };
         }
       }
-      await lcp.atualizarVenda(orderId, campos);
+      const updG = await lcp.atualizarVenda(orderId, campos);
+      if (!updG || !updG.ok) {
+        // Nao gravou: a linha segue em cliente_confirmou_pedido/aguardando_bling e
+        // volta pela rehidratacao. Pede RETRY pra nao sumir da fila achando resolvido.
+        console.error(`[auto-emissao] order ${orderId} 🚨 cancelamento NAO gravou — mantendo na fila`);
+        return { falha: true, retry: true, motivo: 'venda_cancelada_no_ml_gravacao_falhou' };
+      }
       console.warn(`[auto-emissao] order ${orderId} CANCELADA no ML (${st.status}) — emissao abortada antes de montar/emitir`);
       return { falha: true, motivo: 'venda_cancelada_no_ml' };
     }
   } catch (e) {
     console.warn(`[auto-emissao] order ${orderId} nao consegui checar status ML antes de emitir (segue): ${e.message}`);
+  }
+
+  // Guarda 1.6 — ETIQUETA JA GERADA. Mover o status pra 'processado' na deteccao nao
+  // basta: a fase 2 do lerRespostas varre 'processado', e uma mensagem nova do cliente
+  // devolve a linha pra precisa_atencao_humano -> revisarAtencaoHumana -> de volta ao
+  // fluxo. O marcador tem que valer como terminal aqui tambem.
+  if (venda.ml_etiqueta_em) {
+    await lcp.atualizarVenda(orderId, { status: 'processado' });
+    console.warn(`[auto-emissao] order ${orderId} ja tem etiqueta no ML (${venda.ml_shipment_status || '?'}) — nao monto nem emito`);
+    return { falha: true, motivo: 'etiqueta_ja_gerada' };
   }
 
   // Guarda 2 — pedido_estruturado valido
