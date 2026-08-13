@@ -1908,7 +1908,7 @@ function routes(readBody) {
             if (outG.bling.amostra.length < 10) outG.bling.amostra.push({ id: pd.id, numero: pd.numero, data: dtB, numeroLoja: pd.numeroLoja || null, numeroPedidoLoja: pd.numeroPedidoLoja || null, loja: (pd.loja && pd.loja.id) || null });
           }
           if (lote.length < 100) break;
-          await dorme(300);
+          await new Promise(r0 => setTimeout(r0, 300));
         }
       } catch (e) { outG.erros.push('bling: ' + String(e.message || e).slice(0, 140)); }
       try {
