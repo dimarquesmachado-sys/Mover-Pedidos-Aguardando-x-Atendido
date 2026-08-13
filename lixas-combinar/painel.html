@@ -453,7 +453,10 @@ function renderCard(v) {
   // !processado_manual_em: linha concluida na mao teve NF emitida POR FORA. O botao
   // composto chama /editar-bling ANTES do /emitir-nf, entao sem esta guarda ele
   // reescreveria os itens de um pedido ja faturado — e o 409 da emissao chegaria tarde.
-  if (v.ia_categoria === 'claro' && v.ia_pedido_estruturado && !v.bling_editado_em && !v.processado_manual_em) {
+  // Cancelada/quarentena tambem some com os controles: montar ou faturar aqui geraria
+  // pedido/NF de algo que o cliente ja cancelou.
+  const _canceladaOuQuar = !!(v.venda_cancelada_em || v.status === 'venda_cancelada' || v.status === 'cancelada_quarentena');
+  if (v.ia_categoria === 'claro' && v.ia_pedido_estruturado && !v.bling_editado_em && !v.processado_manual_em && !_canceladaOuQuar) {
     botoesBling = `
       <button class="btn-dry" title="Ensaio (dry-run): testa a montagem no Bling SEM emitir nada — confere se acha os produtos, se as quantidades batem e se os valores/rateio fecham" onclick="testarBling('${v.order_id}', true)">🧪 Preview</button>
       <button class="btn-full" title="Monta os itens no Bling (usando o pedido que a IA entendeu) e emite a NF-e — transmite pra SEFAZ" onclick="montarComNF('${v.order_id}')">🚀 Montar Pedido + NF Bling</button>
@@ -485,7 +488,7 @@ function renderCard(v) {
   // Botao Emitir NF — quando pedido ja foi editado no Bling, mas NF ainda nao foi emitida
   // !processado_manual_em: conclusao manual = NF emitida POR FORA. Emitir aqui criaria
   // uma SEGUNDA nota — o backend recusa com 409, mas o botao nem deve aparecer.
-  if (v.bling_editado_em && v.bling_pedido_id && !v.nf_emitida_em && !v.processado_manual_em) {
+  if (v.bling_editado_em && v.bling_pedido_id && !v.nf_emitida_em && !v.processado_manual_em && !_canceladaOuQuar) {
     botoesBling += `
       <button class="btn-nf" onclick="emitirNF('${v.order_id}')">📄 Emitir NF</button>
     `;
@@ -493,7 +496,7 @@ function renderCard(v) {
 
   // RECUPERACAO — pedido marcado 'processado' mas SEM NF (preso pelo botao manual
   // ou pelo bug antigo). Mostra aviso + botao que monta (se preciso) + emite a NF.
-  if (v.status === 'processado' && !v.nf_emitida_em && !v.processado_manual_em) {
+  if (v.status === 'processado' && !v.nf_emitida_em && !v.processado_manual_em && !_canceladaOuQuar) {
     botoesBling += `
       <button class="btn-nf" data-recup="${v.order_id}" title="Este pedido está como 'processado' mas SEM nota fiscal. Clica pra montar (se preciso) e emitir a NF agora." onclick="recuperarNF('${v.order_id}')" style="background:#dc2626">🔧 Recuperar NF</button>
     `;
@@ -580,12 +583,15 @@ async function verificarML(orderId) {
       // conferir a etiqueta. Dizer "saiu do fluxo automatico" aqui seria falso: nada
       // foi gravado e as outras rotinas ainda podem processar a venda.
       mostrarModal(
-        '⚠️ CANCELADA no ML — envio não confirmado',
+        d.quarentena ? '⚠️ CANCELADA no ML — em quarentena' : '🚨 CANCELADA no ML — quarentena FALHOU',
         `Status no Mercado Livre: ${d.ml_status || '?'}\n\n` +
         (d.aviso ? d.aviso + '\n\n' : '') +
-        'A venda ESTÁ cancelada, mas não consegui conferir se a etiqueta já saiu — então NADA foi gravado ainda ' +
-        'e ela continua no fluxo automático. O sistema tenta de novo na próxima rodada.\n\n' +
-        '⚠️ NÃO despache este pedido.',
+        (d.quarentena
+          ? 'A venda ESTÁ cancelada e já saiu do fluxo automático (não monta, não emite NF, não recebe mensagem). ' +
+            'Só falta confirmar se a etiqueta chegou a sair — o sistema reconfere sozinho e, se tiver saído, gera o alerta.'
+          : 'A venda ESTÁ cancelada, mas NÃO consegui gravar isso no banco — ela CONTINUA no fluxo automático. ' +
+            'Trate na mão agora.') +
+        '\n\n⚠️ NÃO despache este pedido.',
         true
       );
     } else if (d.cancelada) {
