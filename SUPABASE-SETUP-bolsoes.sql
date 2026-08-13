@@ -14,7 +14,16 @@
 ALTER TABLE lixas_combinar_pendentes
   ADD COLUMN IF NOT EXISTS ml_shipment_status    TEXT,
   ADD COLUMN IF NOT EXISTS ml_shipment_substatus TEXT,
-  ADD COLUMN IF NOT EXISTS ml_etiqueta_em        TIMESTAMPTZ;
+  ADD COLUMN IF NOT EXISTS ml_etiqueta_em        TIMESTAMPTZ,
+  -- Timestamp SEPARADO do de cancelamento. Sem ele, uma checagem so-de-envio
+  -- carimbava ml_status_atualizado_em e a repescagem achava que o CANCELAMENTO
+  -- tinha sido conferido — adiando a 1a checagem real e deixando uma janela em
+  -- que venda cancelada seguia pro processamento automatico.
+  ADD COLUMN IF NOT EXISTS ml_envio_checado_em   TIMESTAMPTZ,
+  -- Marca o "✓ Processado" clicado no painel. Diferencia conclusao manual
+  -- legitima de venda que ficou 'processado' sem NF por engano/falha.
+  ADD COLUMN IF NOT EXISTS processado_manual_em  TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS alerta_reconhecido_em TIMESTAMPTZ;
 
 -- Painel: separar rapido quem ja tem etiqueta
 CREATE INDEX IF NOT EXISTS idx_lixas_pendentes_etiqueta
@@ -24,6 +33,6 @@ CREATE INDEX IF NOT EXISTS idx_lixas_pendentes_etiqueta
 SELECT column_name, data_type
 FROM information_schema.columns
 WHERE table_name = 'lixas_combinar_pendentes'
-  AND column_name IN ('ml_shipment_status','ml_shipment_substatus','ml_etiqueta_em')
+  AND column_name IN ('ml_shipment_status','ml_shipment_substatus','ml_etiqueta_em','ml_envio_checado_em','processado_manual_em','alerta_reconhecido_em')
 ORDER BY column_name;
--- Esperado: 3 linhas.
+-- Esperado: 6 linhas.
