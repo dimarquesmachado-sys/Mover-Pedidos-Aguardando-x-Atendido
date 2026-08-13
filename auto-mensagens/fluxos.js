@@ -462,11 +462,16 @@ async function rotinaChecarCanceladasML(opts = {}) {
       // (cancelamento ou envio). Dentro do loop cada uma decide se roda.
       const limiarMin = Math.min(idadeMinMs, ENVIO_IDADE_MIN_H * 3600 * 1000);
       if (!nasceu || (agora - nasceu) < limiarMin) return false;               // nova demais pra tudo
-      if (v.ml_status_atualizado_em) {
-        const ultima = new Date(v.ml_status_atualizado_em).getTime();
-        if (ultima && (agora - ultima) < repescarMs) return false;             // checada ha pouco
-      }
-      return true;
+      // Repescagem AVALIADA POR TIPO: cada checagem tem seu proprio timestamp.
+      // Basta uma das duas estar "vencida" pra venda entrar na rodada.
+      const idadeMs2 = agora - nasceu;
+      const tCancel = v.ml_status_atualizado_em ? new Date(v.ml_status_atualizado_em).getTime() : 0;
+      const tEnvio  = v.ml_envio_checado_em ? new Date(v.ml_envio_checado_em).getTime() : 0;
+      const cancelVencido = (idadeMs2 >= idadeMinMs) && (!tCancel || (agora - tCancel) >= repescarMs);
+      const envioVencido  = (idadeMs2 >= ENVIO_IDADE_MIN_H * 3600 * 1000)
+                            && !v.ml_etiqueta_em && !v.nf_emitida_em
+                            && (!tEnvio || (agora - tEnvio) >= repescarMs);
+      return cancelVencido || envioVencido;
     });
 
     // Nunca-checado primeiro (timestamp 0); depois o checado ha mais tempo.
@@ -519,11 +524,18 @@ async function rotinaChecarCanceladasML(opts = {}) {
       //   - ja detectamos etiqueta antes -> nao pergunta mais (nao volta atras)
       //   - ja tem NF emitida -> o painel ja considera resolvida por outro caminho
       // Assim o custo extra fica so nas vendas que realmente estao em aberto.
-      const campos = { ml_status_atualizado_em: agoraIso };
-      if (!st._soEnvio) campos.ml_status = st.status;
+      // So carimba o timestamp do CANCELAMENTO quando ele foi realmente consultado.
+      // Carimbar numa passada so-de-envio fazia a repescagem achar que o
+      // cancelamento tinha sido conferido, adiando a 1a checagem real.
+      const campos = {};
+      if (!st._soEnvio) {
+        campos.ml_status = st.status;
+        campos.ml_status_atualizado_em = agoraIso;
+      }
       if (podeEnvio && !v.ml_etiqueta_em && !v.nf_emitida_em) {
         try {
           const env = await ml.getEnvioResumo(oid);
+          campos.ml_envio_checado_em = agoraIso;
           if (env && env.ok) {
             campos.ml_shipment_status = env.status || null;
             campos.ml_shipment_substatus = env.substatus || null;
@@ -531,12 +543,21 @@ async function rotinaChecarCanceladasML(opts = {}) {
               campos.ml_etiqueta_em = agoraIso;
               console.log(`[canceladas] order ${oid} ja tem etiqueta no ML (${env.status}/${env.substatus || '-'}) — sai do bolsao de pendentes`);
             }
+          } else {
+            // getEnvioResumo NAO lanca: devolve { ok:false }. Sem tratar aqui, um token
+            // sem permissao de shipments falharia em silencio e as vendas ficariam em
+            // Pendentes pra sempre sem ninguem saber por que.
+            const msg = (env && (env.dica || env.erro)) || 'falha desconhecida lendo envio';
+            out.erros.push({ order_id: oid, erro: `envio: ${msg}` });
+            console.warn(`[canceladas] order ${oid} nao consegui ler o envio: ${msg}`);
           }
         } catch (e) {
-          console.warn(`[canceladas] order ${oid} nao consegui ler o envio (segue): ${e.message}`);
+          out.erros.push({ order_id: oid, erro: `envio: ${e.message}` });
+          console.warn(`[canceladas] order ${oid} excecao lendo o envio: ${e.message}`);
         }
         await new Promise(r => setTimeout(r, CANCELADAS_PAUSA_MS));
       }
+      if (Object.keys(campos).length === 0) { await new Promise(r => setTimeout(r, CANCELADAS_PAUSA_MS)); continue; }
       await lcp.atualizarVenda(oid, campos);
       out.detalhes.push({ order_id: oid, ml_status: st.status, cancelada: false,
                           shipment: campos.ml_shipment_status || null, etiqueta: !!campos.ml_etiqueta_em });
