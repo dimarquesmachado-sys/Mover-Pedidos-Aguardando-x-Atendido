@@ -121,6 +121,12 @@ function classificarVenda(v) {
   // ja tinha trabalho feito, ela cairia calada no bolsao fechado — e o cron nunca
   // conserta, porque venda_cancelada_em a exclui das proximas rodadas. Aqui a
   // classificacao deduz o alerta a partir dos proprios marcadores.
+  // Quarentena: cancelamento CONFIRMADO no ML cuja etiqueta nao pode ser conferida.
+  // Fica em Pendentes ate o cron resolver — se havia etiqueta, vira alerta.
+  if (v.status === 'cancelada_quarentena') {
+    return { bolsao: 'pendente', motivo: 'humano', alertaEfetivo: true,
+             rotulo: '🚨 CANCELADA no ML — conferindo se a etiqueta saiu' };
+  }
   const _cancelada = v.venda_cancelada_em || v.status === 'venda_cancelada' || v.status === 'cancelado';
   const _jaTinhaTrabalho = !!(v.nf_emitida_em || v.bling_editado_em || v.ml_etiqueta_em || v.processado_manual_em);
   if (_cancelada && _jaTinhaTrabalho && !v.alerta_pos_venda && !v.alerta_reconhecido_em) {
