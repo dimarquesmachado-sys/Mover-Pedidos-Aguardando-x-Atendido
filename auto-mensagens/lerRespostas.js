@@ -178,8 +178,12 @@ async function rotinaLerRespostas() {
     // IMPORTANTE: inclui TANTO 'aguardando_resposta' QUANTO 'cliente_respondeu'.
     // O 'cliente_respondeu' eh setado quando o cliente escreve ANTES da nossa msg
     // inicial sair (corrida). Sem isso, essas vendas ficavam orfas e a IA nunca rodava.
-    const listaAg = await lcp.listarPendentes({ dias: JANELA_DIAS, status: 'aguardando_resposta', limit: 50 });
-    const listaResp = await lcp.listarPendentes({ dias: JANELA_DIAS, status: 'cliente_respondeu', limit: 50 });
+    // limit 200 (era 50): listarPendentes ordena por data_venda DESC antes de cortar,
+    // entao com a janela de 30 dias um limite baixo deixaria as vendas MAIS ANTIGAS de
+    // fora pra sempre — justo as que esta mudanca quer recuperar. Com o volume atual
+    // (~20 vendas/30 dias) 200 da folga de 10x; se um dia encostar, ai sim paginar.
+    const listaAg = await lcp.listarPendentes({ dias: JANELA_DIAS, status: 'aguardando_resposta', limit: 200 });
+    const listaResp = await lcp.listarPendentes({ dias: JANELA_DIAS, status: 'cliente_respondeu', limit: 200 });
     if (!listaAg.ok && !listaResp.ok) {
       console.error(`[lixas-combinar lerRespostas] erro listando: ${JSON.stringify((listaAg.data || listaResp.data)).slice(0,200)}`);
       return { ok: false, erro: 'erro_listar', stats };
