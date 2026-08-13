@@ -630,6 +630,14 @@ async function rotinaChecarCanceladasML(opts = {}) {
               }
               console.log(`[canceladas] order ${oid} ja tem etiqueta no ML (${env.status}/${env.substatus || '-'}) — sai do bolsao de pendentes`);
             }
+            // Quarentena com envio agora CONHECIDO e SEM etiqueta: o cancelamento ja
+            // estava confirmado, so faltava saber da etiqueta. Finaliza aqui em vez de
+            // deixar a venda no balde urgente ate o relogio do cancelamento vencer (6h+).
+            if (!env.temEtiqueta && String(v.status || '') === 'cancelada_quarentena') {
+              campos.status = 'venda_cancelada';
+              campos.venda_cancelada_em = agoraIso;
+              console.log(`[canceladas] order ${oid} quarentena resolvida: cancelada SEM etiqueta — finalizada sem alerta`);
+            }
           } else {
             // getEnvioResumo NAO lanca: devolve { ok:false }. Sem tratar aqui, um token
             // sem permissao de shipments falharia em silencio e as vendas ficariam em
@@ -724,7 +732,7 @@ async function rotinaChecarCanceladasML(opts = {}) {
             status: 'cancelada_quarentena',
             ml_status: st.status,
             ml_status_atualizado_em: agoraIso
-          });
+          }, { somenteSe: 'venda_cancelada_em=is.null' });
           quarentenaOk = !!(rq && rq.ok);
         } catch (e) {
           console.error(`[canceladas] order ${oid} falhei ate na quarentena: ${e.message}`);
@@ -924,7 +932,7 @@ async function _processarAutoEmissaoInner({ venda, iaResult, graosResult, lcp })
                 status: 'cancelada_quarentena',
                 ml_status: st.status,
                 ml_status_atualizado_em: new Date().toISOString()
-              });
+              }, { somenteSe: 'venda_cancelada_em=is.null' });
               qOk = !!(rq && rq.ok);
             } catch (e2) { console.error(`[auto-emissao] order ${orderId} falhei na quarentena: ${e2.message}`); }
             if (!qOk) console.error(`[auto-emissao] order ${orderId} 🚨 quarentena NAO gravou — mantendo na fila`);
@@ -943,7 +951,7 @@ async function _processarAutoEmissaoInner({ venda, iaResult, graosResult, lcp })
               status: 'cancelada_quarentena',
               ml_status: st.status,
               ml_status_atualizado_em: new Date().toISOString()
-            });
+            }, { somenteSe: 'venda_cancelada_em=is.null' });
             qOk2 = !!(rq2 && rq2.ok);
           } catch (e2) { console.error(`[auto-emissao] order ${orderId} falhei na quarentena: ${e2.message}`); }
           if (!qOk2) console.error(`[auto-emissao] order ${orderId} 🚨 quarentena NAO gravou — mantendo na fila`);
