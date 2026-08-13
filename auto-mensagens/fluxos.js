@@ -616,6 +616,15 @@ async function rotinaChecarCanceladasML(opts = {}) {
     if (!v.nf_emitida_em && !v.bling_editado_em && v.processado_manual_em) {
       jaFeito.push(`marcada como concluida na mao em ${_fmtBR(v.processado_manual_em)} (a NF pode ter saido por fora do painel)`);
     }
+    // Etiqueta gerada/postado tambem e trabalho feito: o pacote pode ja estar montado
+    // na bancada ou a caminho do posto. Se o cancelamento chegar depois disso e nao
+    // gerar alerta, a venda cai calada no bolsao de resolvidas e o pacote sai.
+    if (v.ml_etiqueta_em) {
+      const stEnv = String(v.ml_shipment_status || '').toLowerCase();
+      jaFeito.push(['shipped', 'delivered', 'not_delivered'].includes(stEnv)
+        ? `pacote JA POSTADO no ML (${v.ml_shipment_status}) — conferir devolucao/estorno`
+        : `etiqueta ja gerada no ML em ${_fmtBR(v.ml_etiqueta_em)}`);
+    }
 
     const campos = {
       status: 'venda_cancelada',
