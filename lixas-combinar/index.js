@@ -124,7 +124,11 @@ function classificarVenda(v) {
   // Quarentena: cancelamento CONFIRMADO no ML cuja etiqueta nao pode ser conferida.
   // Fica em Pendentes ate o cron resolver — se havia etiqueta, vira alerta.
   if (v.status === 'cancelada_quarentena') {
-    return { bolsao: 'pendente', motivo: 'humano', alertaEfetivo: true,
+    // alertaEfetivo FICA FALSE de proposito: reconhecer aqui gravaria
+    // alerta_reconhecido_em antes de existir alerta, e quando a reconferencia
+    // descobrisse a etiqueta o aviso real de "nao despachar" nasceria ja silenciado.
+    // O card continua em Pendentes, so nao oferece o botao de reconhecer ainda.
+    return { bolsao: 'pendente', motivo: 'humano',
              rotulo: '🚨 CANCELADA no ML — conferindo se a etiqueta saiu' };
   }
   const _cancelada = v.venda_cancelada_em || v.status === 'venda_cancelada' || v.status === 'cancelado';
