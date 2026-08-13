@@ -4164,7 +4164,10 @@ async function vendasSync() {
               // de marcar como processado — senão a linha fica excluída das próximas rodadas com
               // um crédito obsoleto (ex.: o /costs passou a cobrar frete do vendedor).
               if (reg.credito == null && reg.costs_ok) { delete v.credito_ml; delete v.credito_fonte; }
-              v.ml_real = ML_REAL_V;   // pescado NA VERSÃO ATUAL do cálculo — não repesca até bipar (aí a mlSyncFees assume)
+              // Codex PR#48: se a pesca NOVA não achou crédito, limpa o que ficou da versão
+              // antiga ANTES de marcar como processado — senão o valor velho ficaria congelado
+              if (reg.credito == null && reg.costs_ok) { delete v.credito_ml; delete v.credito_fonte; }
+              v.ml_real = ML_REAL_V;   // pescado NA VERSÃO ATUAL do cálculo
             }
           } catch (e) {}
           await dormeR(350);
