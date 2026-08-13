@@ -564,8 +564,16 @@ function routes(readBody) {
         // DOIS caminhos (status e marcador), a reconferencia de etiqueta nunca
         // aconteceria e o alerta de nao despachar se perderia.
         const vAtualMP = await lcp.buscar(orderId);
-        const vMP = (vAtualMP && vAtualMP.ok) ? vAtualMP.data : null;
-        if (vMP && (vMP.venda_cancelada_em || vMP.status === 'venda_cancelada' || vMP.status === 'cancelada_quarentena')) {
+        if (!vAtualMP || !vAtualMP.ok || !vAtualMP.data) {
+          // Fail closed: sem leitura confiavel nao da pra saber se a venda foi
+          // cancelada/quarentenada depois que o card carregou. Gravar assim mesmo
+          // sobrescreveria a quarentena e sumiria com o alerta de nao despachar.
+          json(res, 503, { ok: false, erro: 'estado_indeterminado',
+            mensagem: 'Nao consegui confirmar o estado atual da venda no banco. Tente de novo em instantes.' });
+          return true;
+        }
+        const vMP = vAtualMP.data;
+        if (vMP.venda_cancelada_em || vMP.status === 'venda_cancelada' || vMP.status === 'cancelada_quarentena') {
           json(res, 409, { ok: false, erro: 'venda_cancelada',
             mensagem: 'Esta venda esta CANCELADA no Mercado Livre (ou aguardando conferencia da etiqueta). Nao da pra marcar como concluida — se ja houver NF, cancele/estorne no Bling.' });
           return true;
@@ -669,6 +677,11 @@ function routes(readBody) {
           // saiu do fluxo automatico — quando na verdade nada foi gravado e as outras
           // rotinas continuam podendo processa-la.
           adiado: !!d.adiado,
+          // quarentena/gravado: o painel escolhe o texto do modal por eles. Sem
+          // encaminhar, d.quarentena vinha undefined e TODA quarentena bem-sucedida
+          // aparecia como "quarentena FALHOU / continua no fluxo automatico".
+          quarentena: !!d.quarentena,
+          gravado: d.gravado !== false,
           aviso: d.aviso || null,
           erros: r.erros || []
         });
@@ -935,6 +948,13 @@ function routes(readBody) {
             mensagem: 'Esta venda esta CANCELADA no Mercado Livre. Nao da pra montar nem emitir NF. Se ja houver nota, cancele/estorne no Bling.' });
           return true;
         }
+        // Etiqueta ja gerada/postada: montar ou faturar agora mexeria num pedido que
+        // ja saiu (ou esta pronto pra sair) — mesmo criterio da Guarda 1.6 do fluxo.
+        if (v.ml_etiqueta_em) {
+          json(res, 409, { ok: false, erro: 'etiqueta_ja_gerada',
+            mensagem: `Esta venda ja tem etiqueta no ML (${v.ml_shipment_status || '?'}). Nao da pra montar nem emitir NF por aqui — se faltar nota, resolva no Bling.` });
+          return true;
+        }
         // Conclusao manual = NF emitida POR FORA. Editar aqui reescreveria os itens de
         // um pedido ja faturado. Preview (dryRun) segue liberado: nao escreve nada.
         if (v.processado_manual_em && !dryRun) {
@@ -1039,6 +1059,13 @@ function routes(readBody) {
         if (v.venda_cancelada_em || v.status === 'venda_cancelada' || v.status === 'cancelada_quarentena') {
           json(res, 409, { ok: false, erro: 'venda_cancelada',
             mensagem: 'Esta venda esta CANCELADA no Mercado Livre. Nao da pra montar nem emitir NF. Se ja houver nota, cancele/estorne no Bling.' });
+          return true;
+        }
+        // Etiqueta ja gerada/postada: montar ou faturar agora mexeria num pedido que
+        // ja saiu (ou esta pronto pra sair) — mesmo criterio da Guarda 1.6 do fluxo.
+        if (v.ml_etiqueta_em) {
+          json(res, 409, { ok: false, erro: 'etiqueta_ja_gerada',
+            mensagem: `Esta venda ja tem etiqueta no ML (${v.ml_shipment_status || '?'}). Nao da pra montar nem emitir NF por aqui — se faltar nota, resolva no Bling.` });
           return true;
         }
         if (v.processado_manual_em) {
@@ -1159,6 +1186,13 @@ function routes(readBody) {
         if (v.venda_cancelada_em || v.status === 'venda_cancelada' || v.status === 'cancelada_quarentena') {
           json(res, 409, { ok: false, erro: 'venda_cancelada',
             mensagem: 'Esta venda esta CANCELADA no Mercado Livre. Nao da pra montar nem emitir NF. Se ja houver nota, cancele/estorne no Bling.' });
+          return true;
+        }
+        // Etiqueta ja gerada/postada: montar ou faturar agora mexeria num pedido que
+        // ja saiu (ou esta pronto pra sair) — mesmo criterio da Guarda 1.6 do fluxo.
+        if (v.ml_etiqueta_em) {
+          json(res, 409, { ok: false, erro: 'etiqueta_ja_gerada',
+            mensagem: `Esta venda ja tem etiqueta no ML (${v.ml_shipment_status || '?'}). Nao da pra montar nem emitir NF por aqui — se faltar nota, resolva no Bling.` });
           return true;
         }
         if (v.processado_manual_em) {
