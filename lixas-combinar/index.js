@@ -874,6 +874,13 @@ function routes(readBody) {
         }
 
         const v = venda.data;
+        // Conclusao manual = NF emitida POR FORA. Editar aqui reescreveria os itens de
+        // um pedido ja faturado. Preview (dryRun) segue liberado: nao escreve nada.
+        if (v.processado_manual_em && !dryRun) {
+          json(res, 409, { ok: false, erro: 'conclusao_manual',
+            mensagem: 'Esta venda foi concluida na mao (NF provavelmente emitida por fora do painel). Editar o pedido agora mexeria num pedido ja faturado. Se a nota NAO saiu, desfaca a conclusao manual antes.' });
+          return true;
+        }
         let graosEscolhidos = payload.graos;
 
         // Se nao veio body, tenta usar o pedido_estruturado que IA salvou
