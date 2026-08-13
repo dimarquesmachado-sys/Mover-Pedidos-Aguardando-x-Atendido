@@ -175,6 +175,27 @@
   .instr-erro { background:#fef2f2; border:1px solid #fecaca; border-radius:6px; padding:10px; font-size:13px; color:#991b1b; }
   .instr-interp { margin-top:4px; font-style:italic; opacity:0.85; }
   .instr-hint2 { margin-top:6px; font-size:11px; opacity:0.8; }
+
+  /* ── 2 bolsoes ────────────────────────────────────── */
+  .bolsao { max-width:1400px; margin:0 auto 22px; border:1px solid #e5e7eb; border-radius:12px; background:#fff; overflow:hidden; }
+  .bolsao-head { display:flex; align-items:center; gap:12px; padding:14px 18px; cursor:pointer; background:#fafbfc; border-bottom:1px solid #eef0f3; user-select:none; }
+  .bolsao-head:hover { background:#f4f6f8; }
+  .bolsao-tit { font-size:17px; font-weight:700; color:#222; }
+  .bolsao-num { display:inline-block; min-width:26px; padding:1px 9px; margin-left:6px; border-radius:999px; background:#e5e7eb; color:#374151; font-size:14px; text-align:center; }
+  #bolsao-pendente .bolsao-num { background:#fee2e2; color:#b91c1c; }
+  #bolsao-resolvido .bolsao-num { background:#dcfce7; color:#15803d; }
+  .bolsao-sub { flex:1; font-size:12px; color:#9ca3af; }
+  .bolsao-toggle { font-size:15px; color:#9ca3af; }
+  .bolsao.fechado .chips, .bolsao.fechado .cards { display:none; }
+  .chips { display:flex; flex-wrap:wrap; gap:8px; padding:12px 18px; border-bottom:1px solid #f1f3f5; background:#fff; }
+  .chip { border:1px solid #e5e7eb; background:#fff; color:#374151; border-radius:999px; padding:6px 13px; font-size:13px; cursor:pointer; transition:.12s; }
+  .chip:hover { border-color:#cbd5e1; background:#f8fafc; }
+  .chip b { margin-left:5px; color:#6b7280; }
+  .chip.ativo { border-color:#2563eb; background:#eff6ff; color:#1d4ed8; font-weight:600; }
+  .chip.ativo b { color:#1d4ed8; }
+  .chip-alerta b { color:#dc2626; }
+  .bolsao .cards { padding:16px 18px; }
+  .rotulo-bolsao { display:inline-block; font-size:11px; padding:2px 8px; border-radius:999px; background:#f1f5f9; color:#475569; margin-left:6px; }
 </style>
 </head>
 <body>
@@ -192,17 +213,8 @@
 
 <div id="app" style="display:none">
 <header>
-  <h1>🌻 Lixas A COMBINAR <span class="badge">Pendentes</span><span class="ver" style="font-size:11px;font-weight:normal;color:#9ca3af;margin-left:8px;font-family:monospace;">v20/07 · canceladas-ML</span></h1>
+  <h1>🌻 Lixas A COMBINAR <span class="badge">Pendentes</span><span class="ver" style="font-size:11px;font-weight:normal;color:#9ca3af;margin-left:8px;font-family:monospace;">v13/08 · 2-bolsoes</span></h1>
   <div class="toolbar">
-    <select id="filtro-status" onchange="recarregar()">
-      <option value="" selected>Todos os status</option>
-      <option value="aguardando_resposta">Aguardando resposta</option>
-      <option value="cliente_respondeu">Cliente respondeu</option>
-      <option value="cliente_confirmou_pedido">Confirmou pedido</option>
-      <option value="precisa_atencao_humano">🚨 Precisa atenção</option>
-      <option value="processado">Processado</option>
-      <option value="venda_cancelada">❌ Cancelada no ML</option>
-    </select>
     <button onclick="recarregar()">🔄 Atualizar</button>
     <span class="user-info" id="user-info"></span>
     <button onclick="logout()">Sair</button>
@@ -210,18 +222,39 @@
 </header>
 
 <main>
-  <div class="stats" id="stats">
-    <div class="stat" onclick="filtrarPor('')" data-filtro=""><div class="num" id="stat-total">0</div><div class="label">Total 7 dias</div></div>
-    <div class="stat" onclick="filtrarPor('aguardando_resposta')" data-filtro="aguardando_resposta"><div class="num" id="stat-aguardando">0</div><div class="label">Aguardando</div></div>
-    <div class="stat" onclick="filtrarPor('cliente_respondeu')" data-filtro="cliente_respondeu"><div class="num" id="stat-respondeu">0</div><div class="label">Cliente respondeu</div></div>
-    <div class="stat" onclick="filtrarPor('precisa_atencao_humano')" data-filtro="precisa_atencao_humano"><div class="num" id="stat-atencao" style="color:#dc2626">0</div><div class="label">🚨 Atenção humana</div></div>
-    <div class="stat" onclick="filtrarPor('processado')" data-filtro="processado"><div class="num" id="stat-processado">0</div><div class="label">Processado</div></div>
-    <div class="stat" onclick="filtrarPor('venda_cancelada')" data-filtro="venda_cancelada"><div class="num" id="stat-canceladas" style="color:#991b1b">0</div><div class="label">❌ Canceladas ML</div></div>
-  </div>
+  <!-- ══ BOLSAO 1: PENDENTES — o que depende de alguem ══ -->
+  <section class="bolsao" id="bolsao-pendente">
+    <div class="bolsao-head" onclick="toggleBolsao('pendente')">
+      <span class="bolsao-tit">🔴 Pendentes <span class="bolsao-num" id="num-pendente">0</span></span>
+      <span class="bolsao-sub">venda paga, sem NF, sem etiqueta e não cancelada</span>
+      <span class="bolsao-toggle" id="tg-pendente">▾</span>
+    </div>
+    <div class="chips" id="chips-pendente">
+      <button class="chip ativo" data-motivo="" onclick="filtrarBolsao('pendente','')">Todos <b id="c-p-todos">0</b></button>
+      <button class="chip chip-alerta" data-motivo="humano" onclick="filtrarBolsao('pendente','humano')">🚨 Precisa de você <b id="c-p-humano">0</b></button>
+      <button class="chip" data-motivo="confirmou" onclick="filtrarBolsao('pendente','confirmou')">✓ Falta montar/emitir <b id="c-p-confirmou">0</b></button>
+      <button class="chip" data-motivo="respondeu" onclick="filtrarBolsao('pendente','respondeu')">💬 IA tratando <b id="c-p-respondeu">0</b></button>
+      <button class="chip" data-motivo="aguardando" onclick="filtrarBolsao('pendente','aguardando')">⏳ Aguardando cliente <b id="c-p-aguardando">0</b></button>
+    </div>
+    <div id="cards-pendente" class="cards"><div class="loading">Carregando…</div></div>
+  </section>
 
-  <div id="cards" class="cards">
-    <div class="loading">Carregando pendentes…</div>
-  </div>
+  <!-- ══ BOLSAO 2: RESOLVIDOS — nasce fechado, so consulta ══ -->
+  <section class="bolsao fechado" id="bolsao-resolvido">
+    <div class="bolsao-head" onclick="toggleBolsao('resolvido')">
+      <span class="bolsao-tit">✅ Resolvidos <span class="bolsao-num" id="num-resolvido">0</span></span>
+      <span class="bolsao-sub">com NF, com etiqueta, postados ou cancelados — clique para abrir</span>
+      <span class="bolsao-toggle" id="tg-resolvido">▸</span>
+    </div>
+    <div class="chips" id="chips-resolvido">
+      <button class="chip ativo" data-motivo="" onclick="filtrarBolsao('resolvido','')">Todos <b id="c-r-todos">0</b></button>
+      <button class="chip" data-motivo="nf" onclick="filtrarBolsao('resolvido','nf')">📄 Com NF <b id="c-r-nf">0</b></button>
+      <button class="chip" data-motivo="etiqueta" onclick="filtrarBolsao('resolvido','etiqueta')">🏷️ Etiqueta/postado <b id="c-r-etiqueta">0</b></button>
+      <button class="chip" data-motivo="processado" onclick="filtrarBolsao('resolvido','processado')">✓ Processado na mão <b id="c-r-processado">0</b></button>
+      <button class="chip chip-alerta" data-motivo="cancelada" onclick="filtrarBolsao('resolvido','cancelada')">❌ Cancelados <b id="c-r-cancelada">0</b></button>
+    </div>
+    <div id="cards-resolvido" class="cards"></div>
+  </section>
 </main>
 
   <footer style="max-width:1400px; margin:32px auto 24px; padding:16px 18px; background:#f9fafb; border:1px solid #eef0f3; border-radius:10px; font-size:13px; color:#555; line-height:1.6;">
@@ -281,60 +314,84 @@ async function mostrarApp() {
   await recarregar();
 }
 
-function filtrarPor(status) {
-  // Atualiza o select de filtro
-  const sel = document.getElementById('filtro-status');
-  if (sel) sel.value = status;
-  // Marca stat clicado como ativo
-  document.querySelectorAll('.stat').forEach(el => {
-    el.classList.toggle('ativo', el.getAttribute('data-filtro') === status);
-  });
-  recarregar();
+// ── Estado dos 2 bolsoes ──────────────────────────────────────────
+// Cada bolsao guarda o sub-filtro (motivo) escolhido. '' = todos.
+const _filtro = { pendente: '', resolvido: '' };
+
+function toggleBolsao(qual) {
+  const sec = document.getElementById('bolsao-' + qual);
+  const tg  = document.getElementById('tg-' + qual);
+  const fechado = sec.classList.toggle('fechado');
+  if (tg) tg.textContent = fechado ? '\u25b8' : '\u25be';
+  // Resolvidos nasce fechado e so carrega quando voce abre (economiza render)
+  if (!fechado && qual === 'resolvido') carregarBolsao('resolvido');
 }
 
-async function recarregar() {
-  const cardsEl = document.getElementById('cards');
-  cardsEl.innerHTML = '<div class="loading">Carregando pendentes…</div>';
-
-  const status = document.getElementById('filtro-status').value;
-  // Sincroniza marcacao dos stats com o filtro atual
-  document.querySelectorAll('.stat').forEach(el => {
-    el.classList.toggle('ativo', el.getAttribute('data-filtro') === status);
+function filtrarBolsao(qual, motivo) {
+  _filtro[qual] = motivo;
+  document.querySelectorAll('#chips-' + qual + ' .chip').forEach(el => {
+    el.classList.toggle('ativo', (el.getAttribute('data-motivo') || '') === motivo);
   });
-  const url = `${API_BASE}/api/pendentes${status ? '?status=' + status : ''}`;
+  carregarBolsao(qual);
+}
 
+async function carregarBolsao(qual) {
+  const el = document.getElementById('cards-' + qual);
+  if (!el) return;
+  el.innerHTML = '<div class="loading">Carregando\u2026</div>';
+  const motivo = _filtro[qual];
+  const url = `${API_BASE}/api/pendentes?bolsao=${qual}` + (motivo ? '&motivo=' + motivo : '');
   try {
     const r = await fetch(url, { headers: { 'X-Session-Token': token() } });
     if (r.status === 401) { logout(); return; }
     const d = await r.json();
-    if (!d.ok) { cardsEl.innerHTML = `<div class="empty">Erro: ${d.erro || 'desconhecido'}</div>`; return; }
-
-    const lista = d.pendentes || [];
+    if (!d.ok) { el.innerHTML = `<div class="empty">Erro: ${d.erro || 'desconhecido'}</div>`; return; }
     renderStats(d.stats || {});
-
-    if (lista.length === 0) {
-      cardsEl.innerHTML = '<div class="empty">Nenhuma venda pendente no filtro atual.</div>';
-      return;
-    }
-
-    cardsEl.innerHTML = lista.map(renderCard).join('');
+    const lista = d.pendentes || [];
+    el.innerHTML = lista.length
+      ? lista.map(renderCard).join('')
+      : `<div class="empty">${qual === 'pendente' ? 'Nada pendente \u2014 tudo tratado. \u{1F389}' : 'Nada aqui neste filtro.'}</div>`;
   } catch (e) {
-    cardsEl.innerHTML = `<div class="empty">Erro carregando: ${e.message}</div>`;
+    el.innerHTML = `<div class="empty">Erro carregando: ${e.message}</div>`;
   }
 }
 
+// Recarrega os dois (o de Resolvidos so se estiver aberto)
+async function recarregar() {
+  await carregarBolsao('pendente');
+  const sec = document.getElementById('bolsao-resolvido');
+  if (sec && !sec.classList.contains('fechado')) await carregarBolsao('resolvido');
+  else await atualizarContadores();
+}
+
+// Quando Resolvidos esta fechado, ainda precisamos dos numeros dos chips/cabecalho.
+async function atualizarContadores() {
+  try {
+    const r = await fetch(`${API_BASE}/api/pendentes`, { headers: { 'X-Session-Token': token() } });
+    if (r.status === 401) { logout(); return; }
+    const d = await r.json();
+    if (d && d.ok) renderStats(d.stats || {});
+  } catch (_) {}
+}
+
+function _setNum(id, val) { const e = document.getElementById(id); if (e) e.textContent = val || 0; }
+
 function renderStats(s) {
-  document.getElementById('stat-total').textContent = s.total || 0;
-  document.getElementById('stat-aguardando').textContent = s.aguardando || 0;
-  document.getElementById('stat-respondeu').textContent = s.respondeu || 0;
-  document.getElementById('stat-atencao').textContent = s.atencao || 0;
-  document.getElementById('stat-processado').textContent = s.processado || 0;
-  const elC = document.getElementById('stat-canceladas');
-  if (elC) {
-    // Mostra "3 (2!)" quando ha alerta pos-venda: o numero entre parenteses e o
-    // que voce precisa olhar hoje — cancelamento depois de NF/pedido montado.
-    elC.textContent = (s.canceladas || 0) + (s.alertas ? ` (${s.alertas}!)` : '');
-  }
+  _setNum('num-pendente',  s.pendente);
+  _setNum('num-resolvido', s.resolvido);
+  _setNum('c-p-todos',      s.pendente);
+  _setNum('c-p-humano',     s.p_humano);
+  _setNum('c-p-confirmou',  s.p_confirmou);
+  _setNum('c-p-respondeu',  s.p_respondeu);
+  _setNum('c-p-aguardando', s.p_aguardando);
+  _setNum('c-r-todos',      s.resolvido);
+  _setNum('c-r-nf',         s.r_nf);
+  _setNum('c-r-etiqueta',   s.r_etiqueta);
+  _setNum('c-r-processado', s.r_processado);
+  // Cancelados mostra "2 (1!)" quando houve cancelamento DEPOIS de montar/emitir —
+  // o numero entre parenteses e pacote que nao pode ser despachado.
+  const elC = document.getElementById('c-r-cancelada');
+  if (elC) elC.textContent = (s.r_cancelada || 0) + (s.alertas ? ` (${s.alertas}!)` : '');
 }
 
 function renderCard(v) {
@@ -356,6 +413,12 @@ function renderCard(v) {
     'cancelado': 'status-cancelado',
     'venda_cancelada': 'status-venda-cancelada'
   }[v.status] || 'status-aguardando';
+
+  // Rotulo vindo da classificacao do backend: diz em UMA linha por que a venda esta
+  // neste bolsao ("Precisa de voce", "NF emitida", "Etiqueta gerada"...).
+  const rotuloBolsao = v.rotulo_bolsao
+    ? `<span class="rotulo-bolsao"${v.motivo === 'humano' ? ' style="background:#fee2e2;color:#b91c1c;font-weight:600"' : ''}>${esc(v.rotulo_bolsao)}</span>`
+    : '';
 
   const dataVenda = v.data_venda ? new Date(v.data_venda).toLocaleString('pt-BR') : '';
   const tempoResp = v.ultima_resposta_em ? new Date(v.ultima_resposta_em).toLocaleString('pt-BR') : '';
@@ -469,7 +532,7 @@ function renderCard(v) {
       ${alertaBlock}
       <div class="card-header">
         <div class="card-titulo">${esc(v.descricao_produto || v.sku_a_combinar || 'Sem desc')}</div>
-        <div class="card-status ${statusCls}">${statusLabel}${v.status === 'processado' && !v.nf_emitida_em ? ' <span style="background:#dc2626;color:#fff;padding:1px 5px;border-radius:4px;font-size:10px;margin-left:4px">⚠️ SEM NF</span>' : ''}</div>
+        <div class="card-status ${statusCls}">${statusLabel}${v.status === 'processado' && !v.nf_emitida_em ? ' <span style="background:#dc2626;color:#fff;padding:1px 5px;border-radius:4px;font-size:10px;margin-left:4px">⚠️ SEM NF</span>' : ''}</div>${rotuloBolsao}
       </div>
       <div class="card-info">📦 SKU: <b>${esc(v.sku_a_combinar || '-')}</b></div>
       <div class="card-info">👤 ${esc(v.buyer_nome || '-')} ${v.total_msgs_cliente ? `(${v.total_msgs_cliente} msg${v.total_msgs_cliente > 1 ? 's' : ''})` : ''}</div>
