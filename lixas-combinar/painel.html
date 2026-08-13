@@ -373,7 +373,7 @@ function renderStats(s) {
   _setNum('num-pendente',  s.pendente);
   _setNum('num-resolvido', s.resolvido);
   _setNum('c-p-todos',      s.pendente);
-  _setNum('c-p-humano',     s.p_humano);
+  // c-p-humano e escrito abaixo com o marcador de alerta junto — nao sobrescrever aqui.
   _setNum('c-p-confirmou',  s.p_confirmou);
   _setNum('c-p-respondeu',  s.p_respondeu);
   _setNum('c-p-aguardando', s.p_aguardando);
@@ -384,7 +384,13 @@ function renderStats(s) {
   // Cancelados mostra "2 (1!)" quando houve cancelamento DEPOIS de montar/emitir —
   // o numero entre parenteses e pacote que nao pode ser despachado.
   const elC = document.getElementById('c-r-cancelada');
-  if (elC) elC.textContent = (s.r_cancelada || 0) + (s.alertas ? ` (${s.alertas}!)` : '');
+  if (elC) elC.textContent = (s.r_cancelada || 0);
+  // O "(N!)" fica no chip que REALMENTE contem esses cards. Alerta pos-venda nao
+  // reconhecido e classificado como pendente/humano — anunciar o numero no chip
+  // Cancelados (dentro de Resolvidos) mandava o operador pra um filtro
+  // bolsao=resolvido&motivo=cancelada, onde nenhum desses cards aparece.
+  const elH = document.getElementById('c-p-humano');
+  if (elH) elH.textContent = (s.p_humano || 0) + (s.alertas ? ` (${s.alertas}🚨)` : '');
 }
 
 function renderCard(v) {
