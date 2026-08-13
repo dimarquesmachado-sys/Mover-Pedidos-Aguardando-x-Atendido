@@ -408,8 +408,18 @@ function routes(readBody) {
         const dias = Number(urlObj.searchParams.get('dias')) || PAINEL_DIAS;
 
         // Busca TODOS uma vez so e filtra em memoria (evita 2 chamadas Supabase)
-        const todosR = await lcp.listarPendentes({ dias, limit: 500 });
-        const todos = todosR.ok && Array.isArray(todosR.data) ? todosR.data : [];
+        // Pagina a janela toda: com limit unico vinham so as 500 MAIS NOVAS
+        // (data_venda DESC) e as vendas antigas sumiam dos DOIS bolsoes e dos
+        // contadores — inclusive pendentes que precisam de acao. Mesmo tratamento
+        // que o cron de envio ja recebeu.
+        const PAG = 500;
+        let todos = [];
+        for (let pg = 0; pg < 20; pg++) {
+          const r = await lcp.listarPendentes({ dias, limit: PAG, offset: pg * PAG });
+          const arr = (r.ok && Array.isArray(r.data)) ? r.data : [];
+          todos = todos.concat(arr);
+          if (arr.length < PAG) break;
+        }
 
         // CURA A NF ANTES DE CLASSIFICAR. Se rodasse depois (como antes), a venda cujo
         // nf_emitida_em acabou de ser preenchido continuaria classificada como pendente
@@ -589,10 +599,20 @@ function routes(readBody) {
         // Grava a marca de conclusao MANUAL junto: e ela que faz o card virar
         // "resolvido" na classificacao (sem ela, processado sem NF volta pra Pendentes
         // como anomalia — que e o comportamento certo pra quem NAO passou por aqui).
+        // PATCH CONDICIONAL: a leitura acima e o write eram operacoes separadas, entao
+        // o cron horario podia gravar cancelada_quarentena no meio e este update
+        // sobrescreveria com processado+marcador — e o marcador suprime a repescagem de
+        // envio, atrasando o alerta de nao despachar. Os filtros repetem no proprio
+        // PATCH o que foi conferido na leitura: se a linha mudou, nao grava.
         const r = await lcp.atualizarVenda(orderId, {
           status: 'processado',
           processado_manual_em: new Date().toISOString()
-        });
+        }, { somenteSe: 'venda_cancelada_em=is.null&ml_etiqueta_em=is.null&status=not.in.(venda_cancelada,cancelado,cancelada_quarentena)' });
+        if (r.ok && Array.isArray(r.data) && r.data.length === 0) {
+          json(res, 409, { ok: false, erro: 'estado_mudou',
+            mensagem: 'O estado da venda mudou enquanto voce clicava (cancelamento ou etiqueta detectados). Recarregue o painel e confira antes de marcar como concluida.' });
+          return true;
+        }
         if (!r.ok) { json(res, 500, { ok: false, erro: 'erro_atualizar', data: r.data }); return true; }
         json(res, 200, { ok: true, orderId });
       } catch (e) {
