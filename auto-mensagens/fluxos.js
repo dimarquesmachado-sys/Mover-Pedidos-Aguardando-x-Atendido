@@ -473,7 +473,7 @@ async function rotinaChecarCanceladasML(opts = {}) {
       const tEnvio  = v.ml_envio_checado_em ? new Date(v.ml_envio_checado_em).getTime() : 0;
       const cancelVencido = (idadeMs2 >= idadeMinMs) && (!tCancel || (agora - tCancel) >= repescarMs);
       const envioVencido  = (idadeMs2 >= ENVIO_IDADE_MIN_H * 3600 * 1000)
-                            && !v.ml_etiqueta_em && !v.nf_emitida_em
+                            && !v.ml_etiqueta_em && !v.nf_emitida_em && !v.processado_manual_em
                             && (!tEnvio || (agora - tEnvio) >= ENVIO_REPESCAR_H * 3600 * 1000);
       // Guarda quais checagens estao vencidas: a ordenacao usa SO o relogio delas.
       v._dueCancel = cancelVencido;
