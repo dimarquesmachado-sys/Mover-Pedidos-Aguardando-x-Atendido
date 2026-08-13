@@ -23,7 +23,11 @@ ALTER TABLE lixas_combinar_pendentes
   -- Marca o "✓ Processado" clicado no painel. Diferencia conclusao manual
   -- legitima de venda que ficou 'processado' sem NF por engano/falha.
   ADD COLUMN IF NOT EXISTS processado_manual_em  TIMESTAMPTZ,
-  ADD COLUMN IF NOT EXISTS alerta_reconhecido_em TIMESTAMPTZ;
+  ADD COLUMN IF NOT EXISTS alerta_reconhecido_em TIMESTAMPTZ,
+  -- Reserva da emissao manual de NF. O endpoint grava aqui antes de chamar o Bling
+  -- (PATCH condicional) e o cron de cancelamento respeita a janela de 2 min — assim a
+  -- checagem de cancelamento e a emissao irreversivel viram mutuamente exclusivas.
+  ADD COLUMN IF NOT EXISTS nf_emitindo_em        TIMESTAMPTZ;
 
 -- Painel: separar rapido quem ja tem etiqueta
 CREATE INDEX IF NOT EXISTS idx_lixas_pendentes_etiqueta
@@ -48,6 +52,6 @@ SELECT count(*) AS processados_sem_nf_para_triar
 SELECT column_name, data_type
 FROM information_schema.columns
 WHERE table_name = 'lixas_combinar_pendentes'
-  AND column_name IN ('ml_shipment_status','ml_shipment_substatus','ml_etiqueta_em','ml_envio_checado_em','processado_manual_em','alerta_reconhecido_em')
+  AND column_name IN ('ml_shipment_status','ml_shipment_substatus','ml_etiqueta_em','ml_envio_checado_em','processado_manual_em','alerta_reconhecido_em','nf_emitindo_em')
 ORDER BY column_name;
--- Esperado: 6 linhas.
+-- Esperado: 7 linhas.
