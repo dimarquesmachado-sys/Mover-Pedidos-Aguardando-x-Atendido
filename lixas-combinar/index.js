@@ -109,7 +109,8 @@ function classificarVenda(v) {
   // o botao "Alerta tratado" grava alerta_reconhecido_em e o card sai da fila —
   // sem isso ele ficaria preso em Pendentes pra sempre.
   if (v.alerta_pos_venda && !v.alerta_reconhecido_em) {
-    return { bolsao: 'pendente', motivo: 'humano', rotulo: '🚨 CANCELADA APÓS NF/pedido — não despachar' };
+    return { bolsao: 'pendente', motivo: 'humano', alertaEfetivo: true,
+             rotulo: '🚨 CANCELADA APÓS NF/pedido — não despachar' };
   }
 
   // 'cancelado' e o status que o revisarAtencaoHumana grava quando acha o pedido
@@ -123,7 +124,10 @@ function classificarVenda(v) {
   const _cancelada = v.venda_cancelada_em || v.status === 'venda_cancelada' || v.status === 'cancelado';
   const _jaTinhaTrabalho = !!(v.nf_emitida_em || v.bling_editado_em || v.ml_etiqueta_em || v.processado_manual_em);
   if (_cancelada && _jaTinhaTrabalho && !v.alerta_pos_venda && !v.alerta_reconhecido_em) {
-    return { bolsao: 'pendente', motivo: 'humano',
+    // alertaEfetivo: o painel usa isso pra mostrar o "Alerta tratado". Sem a marca, o
+    // botao so aparecia quando havia alerta_pos_venda GRAVADO — e o alerta deduzido
+    // (cancelamento escrito pelo processarAutoEmissao) ficaria preso pra sempre.
+    return { bolsao: 'pendente', motivo: 'humano', alertaEfetivo: true,
              rotulo: '🚨 CANCELADA depois de NF/pedido/etiqueta — não despachar' };
   }
   if (_cancelada) {
@@ -180,11 +184,24 @@ function classificarVenda(v) {
   if (v.status === 'aguardando_bling') {
     return { bolsao: 'pendente', motivo: 'confirmou', rotulo: '🔄 Re-tentando montar/emitir' };
   }
+  // temErro ANTES do confirmou: quando a montagem manual falha, o bling_erro fica
+  // gravado mas o status continua 'cliente_confirmou_pedido' — o card caia no chip
+  // comum e quem filtra por falha nao via o pedido que ja tinha quebrado.
+  // (aguardando_bling segue acima: la o erro e transitorio e o retry cuida sozinho.)
+  const temErro = !!(v.bling_erro || v.nf_erro);
+  // (6) Falha TERMINAL da IA tambem e trabalho humano: quando a interpretacao ou o
+  // envio quebram, o lerRespostas grava ia_processado_em junto, e a trava
+  // anti-duplicacao impede nova tentativa pra MESMA mensagem — o cliente pode ter
+  // ficado sem resposta nenhuma enquanto o card dizia "IA tratando".
+  const iaTravada = v.ia_categoria === 'erro_ia' || !!v.ia_erro_envio;
+  if (temErro || iaTravada) {
+    return { bolsao: 'pendente', motivo: 'humano',
+             rotulo: iaTravada ? '🚨 IA falhou — cliente pode estar sem resposta' : '🚨 Precisa de você' };
+  }
   if (v.status === 'cliente_confirmou_pedido') {
     return { bolsao: 'pendente', motivo: 'confirmou', rotulo: '✓ Pedido fechado — falta montar/emitir' };
   }
-  const temErro = !!(v.bling_erro || v.nf_erro);
-  if (v.status === 'precisa_atencao_humano' || temErro) {
+  if (v.status === 'precisa_atencao_humano') {
     return { bolsao: 'pendente', motivo: 'humano', rotulo: '🚨 Precisa de você' };
   }
   if (v.status === 'cliente_respondeu') {
@@ -392,6 +409,10 @@ function routes(readBody) {
           let _checados = 0;
           for (const v of todos) {
             if (_checados >= 20) break;
+            // Conclusao manual e autoritativa e os botoes de NF ja estao escondidos —
+            // consultar o Bling aqui gastaria o teto de 20 em linhas resolvidas e
+            // atrasaria a cura das que realmente tem NF pendente de reconciliar.
+            if (v.processado_manual_em) continue;
             const mostrariaBotaoNF = (v.bling_editado_em || v.status === 'processado') && !v.nf_emitida_em && v.bling_pedido_id;
             if (!mostrariaBotaoNF) continue;
             _checados++;
@@ -414,6 +435,7 @@ function routes(readBody) {
           v.bolsao = cls.bolsao;
           v.motivo = cls.motivo;
           v.rotulo_bolsao = cls.rotulo;
+          v.alerta_efetivo = !!cls.alertaEfetivo;
         }
 
         // Filtros aceitos:
@@ -581,6 +603,12 @@ function routes(readBody) {
           ml_status: d.ml_status || null,
           cancelada: !!d.cancelada,
           alerta: d.alerta || null,
+          // adiado/aviso: cancelamento CONFIRMADO no ML cuja gravacao foi adiada porque
+          // o envio nao pode ser conferido. Sem propagar, o painel diria que a venda ja
+          // saiu do fluxo automatico — quando na verdade nada foi gravado e as outras
+          // rotinas continuam podendo processa-la.
+          adiado: !!d.adiado,
+          aviso: d.aviso || null,
           erros: r.erros || []
         });
       } catch (e) {
