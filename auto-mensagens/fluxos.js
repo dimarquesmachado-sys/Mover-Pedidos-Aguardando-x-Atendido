@@ -522,8 +522,13 @@ async function rotinaChecarCanceladasML(opts = {}) {
     // getOrderStatusResumo ja e a prova de excecao; o try aqui e cinto+suspensorio
     // pra garantir que UMA venda problematica nunca derrube a rodada inteira.
     const idadeMs = v.data_venda ? (Date.now() - new Date(v.data_venda).getTime()) : Infinity;
-    const podeCancelamento = idadeMs >= (_idadeMinCancelH * 3600 * 1000) || !!opts.orderId;
-    const podeEnvio        = idadeMs >= (ENVIO_IDADE_MIN_H * 3600 * 1000) || !!opts.orderId;
+    // Respeita a flag de "vencida" calculada no filtro. Sem isso, uma venda escolhida
+    // SO porque o envio venceu ainda consultava o cancelamento (a idade dela passa das
+    // 24h de qualquer jeito) e carimbava ml_status_atualizado_em toda hora — anulando o
+    // intervalo de 6h e dobrando o trafego no ML. Vale o inverso tambem.
+    // No modo 1-venda (botao Verificar ML) segue incondicional: voce clicou, checa tudo.
+    const podeCancelamento = !!opts.orderId || (v._dueCancel && idadeMs >= (_idadeMinCancelH * 3600 * 1000));
+    const podeEnvio        = !!opts.orderId || (v._dueEnvio  && idadeMs >= (ENVIO_IDADE_MIN_H * 3600 * 1000));
 
     let st;
     if (podeCancelamento) {
@@ -585,9 +590,17 @@ async function rotinaChecarCanceladasML(opts = {}) {
         await new Promise(r => setTimeout(r, CANCELADAS_PAUSA_MS));
       }
       if (Object.keys(campos).length === 0) { await new Promise(r => setTimeout(r, CANCELADAS_PAUSA_MS)); continue; }
-      await lcp.atualizarVenda(oid, campos);
+      // atualizarVenda devolve { ok:false } em vez de lancar. Sem conferir, uma coluna
+      // nao migrada ou falha transiente do REST passaria batida: a rodada diria que a
+      // etiqueta foi detectada, mas nada teria sido gravado e a venda seguiria pendente.
+      const updV = await lcp.atualizarVenda(oid, campos);
+      if (!updV.ok) {
+        out.erros.push({ order_id: oid, erro: 'falhou gravar o status de envio/checagem no Supabase' });
+        console.error(`[canceladas] order ${oid} NAO consegui gravar ${Object.keys(campos).join(',')} no Supabase`);
+      }
       out.detalhes.push({ order_id: oid, ml_status: st.status, cancelada: false,
-                          shipment: campos.ml_shipment_status || null, etiqueta: !!campos.ml_etiqueta_em });
+                          shipment: campos.ml_shipment_status || null, etiqueta: !!campos.ml_etiqueta_em,
+                          gravado: !!updV.ok });
       await new Promise(r => setTimeout(r, CANCELADAS_PAUSA_MS));
       continue;
     }
