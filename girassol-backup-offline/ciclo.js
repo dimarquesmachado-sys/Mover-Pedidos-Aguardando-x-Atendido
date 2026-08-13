@@ -446,13 +446,21 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
     if (listaOk && listaCompleta && atendidos.length === 0) reconciliacao = 'pulada_lista_vazia';
     if (listaOk && listaCompleta && atendidos.length > 0) {
       const idsAtuais = new Set(atendidos.map(p => String(p.id)));
-      const aRemover = Object.keys(man).filter(id => !idsAtuais.has(String(id)));
+      // 13/08 — MEDIDO na Girassol: cache com 150 pedidos e só 21 ATENDIDOS no Bling. A conta
+      // antiga comparava o manifesto INTEIRO com a lista, então "removeria 129 de 150" (86%) e
+      // a trava abortava TUDO — inclusive os 9 fantasmas que o painel mostrava como sem etiqueta.
+      // Só que esses 129 não são erro: são pedidos JÁ BIPADOS, que ficam no cache até a rotina
+      // de retenção apagar. Quem precisa estar em ATENDIDO é o NÃO conferido — a comparação (e a
+      // trava) passam a olhar só esse universo.
+      const confRec = readJson(CONFERIDOS_FILE, {});
+      const pendentes = Object.keys(man).filter(id => !confRec[id]);
+      const aRemover = pendentes.filter(id => !idsAtuais.has(String(id)));
       // TRAVA DE SEGURANÇA: sumir com muita coisa de uma vez quase sempre é lista ruim do Bling,
       // não 40% dos pedidos despachados no mesmo minuto. Melhor não remover do que apagar etiqueta anexada.
-      const limiteSeguro = Math.max(5, Math.ceil(Object.keys(man).length * 0.4));
+      const limiteSeguro = Math.max(5, Math.ceil(pendentes.length * 0.4));
       if (aRemover.length > limiteSeguro) {
         reconciliacao = 'abortada_trava';
-        console.log(`[GIRABKP] ⚠️ reconciliação ABORTADA: removeria ${aRemover.length} de ${Object.keys(man).length} pedidos — lista do Bling parece incompleta. Cache preservado.`);
+        console.log(`[GIRABKP] ⚠️ reconciliação ABORTADA: removeria ${aRemover.length} de ${pendentes.length} pendente(s) — lista do Bling parece incompleta. Cache preservado.`);
       } else if (aRemover.length) {
         for (const id of aRemover) {
           try { fs.rmSync(path.join(CACHE_DIR, String(id)), { recursive: true, force: true }); } catch (e) {}
