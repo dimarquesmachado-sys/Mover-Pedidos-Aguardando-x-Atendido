@@ -68,7 +68,8 @@ async function _agendarOuEscalarRetry({ orderId, venda, iaResult, graosResult, l
       bling_erro: `auto: pedido nao encontrado no Bling apos ${Math.round(idadeMin)} min de espera (${(erro || '').slice(0, 130)})`
     });
     console.warn(`[retry-bling] order ${orderId} desistiu apos ${Math.round(idadeMin)} min — humano`);
-    return { falha: true, motivo: 'pedido_nao_encontrado_max' };
+    return {
+    falha: true, motivo: 'pedido_nao_encontrado_max' };
   }
 
   const attempts = ex ? ex.attempts + 1 : 1;
@@ -346,10 +347,21 @@ async function revisarAtencaoHumana({ lcp }) {
   // ── API exposta pro fluxos.js (processarAutoEmissao mexe na fila por aqui) ──
   function removerDaFila(orderId) { return _retryBling.delete(String(orderId)); }
 
+  // Enfileira uma entrada SO pra tentar restaurar o status terminal depois. Usado
+  // quando o PATCH de 'processado' falha numa chamada que veio direto do lerRespostas
+  // (sem entrada previa na fila) — sem isso, retry:true nao agenda nada.
+  function enfileirarRestauracao({ orderId, venda, iaResult, graosResult }) {
+    const k = String(orderId);
+    if (_retryBling.has(k)) return;
+    _retryBling.set(k, { venda, iaResult, graosResult, desde: Date.now(), tentativas: 0 });
+    console.log(`[retry-bling] order ${k} enfileirado pra restaurar status terminal`);
+  }
+
   return {
     retentarEmissoesBling,
     revisarAtencaoHumana,
     agendarOuEscalarRetry: _agendarOuEscalarRetry,
     removerDaFila,
+    enfileirarRestauracao,
   };
 };
