@@ -490,9 +490,32 @@ async function rotinaChecarCanceladasML(opts = {}) {
     }
 
     if (!st.cancelada) {
-      // Viva. So carimba a checagem pra ela sair da fila pelas proximas 6h.
-      await lcp.atualizarVenda(oid, { ml_status: st.status, ml_status_atualizado_em: agoraIso });
-      out.detalhes.push({ order_id: oid, ml_status: st.status, cancelada: false });
+      // Viva. Carimba a checagem (sai da fila pelas proximas 6h) e, de quebra,
+      // atualiza o ENVIO — e o que o painel usa pra tirar da frente o que ja tem
+      // etiqueta/foi postado. So consulta quando ainda vale a pena:
+      //   - ja detectamos etiqueta antes -> nao pergunta mais (nao volta atras)
+      //   - ja tem NF emitida -> o painel ja considera resolvida por outro caminho
+      // Assim o custo extra fica so nas vendas que realmente estao em aberto.
+      const campos = { ml_status: st.status, ml_status_atualizado_em: agoraIso };
+      if (!v.ml_etiqueta_em && !v.nf_emitida_em) {
+        try {
+          const env = await ml.getEnvioResumo(oid);
+          if (env && env.ok) {
+            campos.ml_shipment_status = env.status || null;
+            campos.ml_shipment_substatus = env.substatus || null;
+            if (env.temEtiqueta) {
+              campos.ml_etiqueta_em = agoraIso;
+              console.log(`[canceladas] order ${oid} ja tem etiqueta no ML (${env.status}/${env.substatus || '-'}) — sai do bolsao de pendentes`);
+            }
+          }
+        } catch (e) {
+          console.warn(`[canceladas] order ${oid} nao consegui ler o envio (segue): ${e.message}`);
+        }
+        await new Promise(r => setTimeout(r, CANCELADAS_PAUSA_MS));
+      }
+      await lcp.atualizarVenda(oid, campos);
+      out.detalhes.push({ order_id: oid, ml_status: st.status, cancelada: false,
+                          shipment: campos.ml_shipment_status || null, etiqueta: !!campos.ml_etiqueta_em });
       await new Promise(r => setTimeout(r, CANCELADAS_PAUSA_MS));
       continue;
     }
