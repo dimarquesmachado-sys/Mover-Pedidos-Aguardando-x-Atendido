@@ -184,14 +184,21 @@ async function retentarEmissoesBling({ lcp }) {
       // tentaria uma SEGUNDA nota.
       const atual = await lcp.buscar(orderId);
       const vAtual = (atual && atual.ok && atual.data) ? atual.data : null;
-      if (vAtual && (vAtual.processado_manual_em || vAtual.nf_emitida_em || vAtual.venda_cancelada_em)) {
+      // FAIL CLOSED: sem releitura confiavel nao da pra saber se voce concluiu na mao
+      // ou se o pedido foi cancelado depois de entrar na fila. Emitir com o retrato
+      // antigo arriscaria uma segunda NF — a fila fica pra proxima rodada.
+      if (!vAtual) {
+        console.warn(`[retry-bling] order ${orderId} nao consegui reler o estado — pulo esta rodada (nao emito com dado velho)`);
+        continue;
+      }
+      if (vAtual.processado_manual_em || vAtual.nf_emitida_em || vAtual.venda_cancelada_em) {
         const motivo = vAtual.processado_manual_em ? 'concluida na mao'
                      : vAtual.nf_emitida_em ? 'NF ja emitida' : 'venda cancelada';
         console.log(`[retry-bling] order ${orderId} saiu da fila sem emitir — ${motivo}`);
         _retryBling.delete(orderId);
         continue;
       }
-      await processarAutoEmissao({ venda: vAtual || entry.venda, iaResult: entry.iaResult, graosResult: entry.graosResult, lcp });
+      await processarAutoEmissao({ venda: vAtual, iaResult: entry.iaResult, graosResult: entry.graosResult, lcp });
     } catch (e) {
       console.error(`[retry-bling] order ${orderId} erro no retry: ${e.message}`);
     }
