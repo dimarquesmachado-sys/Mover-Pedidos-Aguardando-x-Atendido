@@ -4606,7 +4606,7 @@ async function mlSyncFees(dias) {
   const salvar = () => {
     if (!Object.keys(pend).length) return;
     const c2 = readJson(CONFERIDOS_FILE, {});
-    for (const [cid, d] of Object.entries(pend)) { if (!c2[cid]) continue; if (d.fee != null) c2[cid].tarifa_ml = d.fee; if (d.frete != null) c2[cid].frete_ml = d.frete; if (d.venda) c2[cid].venda_em = d.venda; if (d.credito != null) c2[cid].credito_ml = d.credito; if (d.credito_fonte) c2[cid].credito_fonte = d.credito_fonte; if (d.logistica) c2[cid].logistica_ml = d.logistica; if (d.pack) c2[cid].ml_pack = d.pack; if (d.order) c2[cid].ml_order = d.order; if (d.costs_ok) { c2[cid].ml_costs_v3 = ML_COSTS_V; if (d.credito == null) delete c2[cid].credito_ml; /* Codex PR#48: /costs novo manda — resposta fresca com custo do vendedor derruba o gross antigo */ if (d.frete == null) delete c2[cid].frete_ml; } }
+    for (const [cid, d] of Object.entries(pend)) { if (!c2[cid]) continue; if (d.fee != null) c2[cid].tarifa_ml = d.fee; if (d.frete != null) c2[cid].frete_ml = d.frete; if (d.venda) c2[cid].venda_em = d.venda; if (d.credito != null) c2[cid].credito_ml = d.credito; if (d.credito_fonte) c2[cid].credito_fonte = d.credito_fonte; if (d.logistica) c2[cid].logistica_ml = d.logistica; if (d.pack) c2[cid].ml_pack = d.pack; if (d.order) c2[cid].ml_order = d.order; if (d.costs_ok && d.ship_ok) { c2[cid].ml_costs_v3 = ML_COSTS_V; if (d.credito == null) delete c2[cid].credito_ml; /* Codex PR#48: /costs novo manda — resposta fresca com custo do vendedor derruba o gross antigo */ if (d.frete == null) delete c2[cid].frete_ml; } }
     writeJson(CONFERIDOS_FILE, c2);
     for (const cid of Object.keys(pend)) delete pend[cid];
   };
@@ -4658,6 +4658,7 @@ async function mlSyncFees(dias) {
             if (rs.ok && ds) {
               const logi = (ds.logistic && ds.logistic.type) || ds.logistic_type || null;
               if (logi) reg.logistica = logi;
+              reg.ship_ok = true;   /* Codex PR#48: /costs sozinho nao prova que sabemos se e Flex */
               ehFlex = (logi === 'self_service');   // self_service = Mercado Envios FLEX (quem entrega e o vendedor)
               const bc = Number(ds.base_cost);
               if (isFinite(bc) && bc > 0) baseCost = bc;   // bonificacao que o ML paga pela entrega Flex
