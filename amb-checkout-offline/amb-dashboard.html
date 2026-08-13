@@ -397,7 +397,7 @@ const MOD = '/amb-checkout-offline';
     return _f(u, o);
   };
 })();
-const DASH_BUILD = 'a9';
+const DASH_BUILD = 'a10';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -500,7 +500,7 @@ function estiloLinha(h){
 function prepararVendas(){
   const _sit = {}; (VENDAS||[]).forEach(v=>{ if(v&&v.numero!=null) _sit[String(v.numero)]=v; });
   (DADOS||[]).forEach(h=>{ if(h.cancelado) h._cancelado=true;   // marca vinda do SERVIDOR — vale mesmo se o pedido não estiver na lista de vendas
-    const v=_sit[String(h.numero)]; if(v){ h._sit=v.situacao||null; h._cancelado=(!!h.cancelado || /cancel/i.test(String(v.situacao||'')) || !!v.cancelado_mkt); if(v.data && !h.venda_dia) h.venda_dia=v.data; if(v.venda_em && !h.venda_em) h.venda_em=v.venda_em; if(v.tarifa_ml!=null && h.tarifa_ml==null) h.tarifa_ml=Number(v.tarifa_ml); if(v.frete_recebido!=null && h.frete_recebido==null) h.frete_recebido=Number(v.frete_recebido); if(v.credito_ml!=null && h.credito_ml==null) h.credito_ml=Number(v.credito_ml); if(v.frete_ml!=null && h.frete_ml==null) h.frete_ml=Number(v.frete_ml); if(v.logistica_ml && !h.logistica_ml) h.logistica_ml=v.logistica_ml; if(v.renda_canal!=null && h.renda_canal==null) h.renda_canal=Number(v.renda_canal); if(v.devolucao){ h.devolucao=1; if(v.dev_frete_retorno!=null)h.dev_frete_retorno=Number(v.dev_frete_retorno); h.dev_destino=v.dev_destino; h.dev_status=v.dev_status; h.dev_aberta=v.dev_aberta; } } });   // d45: bipada herda dia/hora · d50: tarifa REAL · d51: frete recebido · d53: renda oficial · b39: devolução
+    const v=_sit[String(h.numero)]; if(v){ h._sit=v.situacao||null; h._cancelado=(!!h.cancelado || /cancel/i.test(String(v.situacao||'')) || !!v.cancelado_mkt); if(v.data && !h.venda_dia) h.venda_dia=v.data; if(v.venda_em && !h.venda_em) h.venda_em=v.venda_em; if(v.tarifa_ml!=null && h.tarifa_ml==null) h.tarifa_ml=Number(v.tarifa_ml); if(v.frete_recebido!=null && h.frete_recebido==null) h.frete_recebido=Number(v.frete_recebido); if(v.credito_ml!=null && h.credito_ml==null) h.credito_ml=Number(v.credito_ml); if(v.frete_ml!=null && Number(v.frete_ml)>0 && h.frete_ml==null) h.frete_ml=Number(v.frete_ml); /* Codex PR#48: zero nao e frete real — deixa cair no fallback do motoboy Flex */ if(v.logistica_ml && !h.logistica_ml) h.logistica_ml=v.logistica_ml; if(v.renda_canal!=null && h.renda_canal==null) h.renda_canal=Number(v.renda_canal); if(v.devolucao){ h.devolucao=1; if(v.dev_frete_retorno!=null)h.dev_frete_retorno=Number(v.dev_frete_retorno); h.dev_destino=v.dev_destino; h.dev_status=v.dev_status; h.dev_aberta=v.dev_aberta; } } });   // d45: bipada herda dia/hora · d50: tarifa REAL · d51: frete recebido · d53: renda oficial · b39: devolução
   const _nums = new Set((DADOS||[]).map(h=>String(h.numero)));
   // a5 (Codex PR#11): o histórico também conhece vendas pelo nº do marketplace — as
   // provisórias DIRETO DO ML (numero null, sem_bling) entram na tela por AQUI, e só
@@ -511,6 +511,7 @@ function prepararVendas(){
     venda_em:v.venda_em||null, nf_emissao:(v.nf_em||null), venda_dia:v.data||null, valor:(v.total!=null?Number(v.total):null), cliente:v.cliente||'',
     itens:(v.it||[]).map(i2=>({sku:i2.sku,descricao:(i2.d||null),qtd:i2.qtd,valor_total:i2.vt,custo:(i2.custo!=null?i2.custo:null)})), taxa_mkt:(v.taxa_mkt!=null?v.taxa_mkt:null), frete_mkt:(v.frete_mkt!=null?v.frete_mkt:null),
     tarifa_ml:(v.tarifa_ml!=null?v.tarifa_ml:null), frete_ml:(v.frete_ml!=null?v.frete_ml:null), credito_ml:(v.credito_ml!=null?v.credito_ml:null),   // b31: comissão/frete/estorno REAIS do ML (fase ml_real) — o calcPL prioriza estes sobre o Bling
+    logistica_ml:(v.logistica_ml||null), flex:((v.logistica_ml==='self_service')?1:0),   /* 13/08 (regra do Diego): venda existe = venda com TODOS os custos, bipada ou nao. Sem isto a nao-bipada somava o bonus do Flex e NAO descontava o motoboy — margem inflada */
     devolucao:(v.devolucao?1:0), dev_frete_retorno:(v.dev_frete_retorno!=null?Number(v.dev_frete_retorno):null), dev_destino:v.dev_destino||null, dev_status:v.dev_status||null, dev_aberta:(v.dev_aberta?1:0),   // b39: devolução do ML
     _sit:v.situacao||null, _cancelado:(!!v.cancelado || /cancel/i.test(String(v.situacao||'')) || !!v.cancelado_mkt), cancelado_mkt:(v.cancelado_mkt?1:0)
   }));
