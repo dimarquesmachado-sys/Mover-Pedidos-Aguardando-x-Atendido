@@ -105,7 +105,10 @@ function classificarVenda(v) {
   // precisa parar o despacho e cancelar/estornar a NF. Esse card NAO pode ir pro
   // bolsao Resolvidos — ele nasce fechado, e o alerta ficaria invisivel justo no
   // caso em que o pacote ainda pode ser despachado por engano.
-  if (v.alerta_pos_venda) {
+  // Enquanto NAO reconhecido. Depois que voce parou o despacho e estornou a NF,
+  // o botao "Alerta tratado" grava alerta_reconhecido_em e o card sai da fila —
+  // sem isso ele ficaria preso em Pendentes pra sempre.
+  if (v.alerta_pos_venda && !v.alerta_reconhecido_em) {
     return { bolsao: 'pendente', motivo: 'humano', rotulo: '🚨 CANCELADA APÓS NF/pedido — não despachar' };
   }
 
@@ -131,6 +134,13 @@ function classificarVenda(v) {
   // que falhou no meio). Mandar pra Resolvidos esconderia um pedido sem nota fiscal.
   // So conta como resolvido quando ha NF de verdade — e essa ja foi tratada acima.
   if (v.status === 'processado') {
+    // Conclusao MANUAL de verdade (voce clicou "✓ Processado", tratando por fora):
+    // e resolvido, como o proprio botao promete — e alimenta o chip "Processado na mão".
+    if (v.processado_manual_em) {
+      return { bolsao: 'resolvido', motivo: 'processado', rotulo: '✓ Processado na mão' };
+    }
+    // Sem NF e sem marca de conclusao manual = anomalia (montar que falhou no meio,
+    // ou status gravado por engano). E o caso do aviso vermelho SEM NF + Recuperar NF.
     return { bolsao: 'pendente', motivo: 'humano', rotulo: '⚠️ Marcado processado mas SEM NF' };
   }
 
@@ -479,8 +489,36 @@ function routes(readBody) {
       const orderId = p.replace('/lixas-combinar/api/pendentes/', '').replace('/marcar-processado', '');
       try {
         const lcp = require('../auto-mensagens/lixasCombinarPendentes');
-        const r = await lcp.atualizarVenda(orderId, { status: 'processado' });
+        // Grava a marca de conclusao MANUAL junto: e ela que faz o card virar
+        // "resolvido" na classificacao (sem ela, processado sem NF volta pra Pendentes
+        // como anomalia — que e o comportamento certo pra quem NAO passou por aqui).
+        const r = await lcp.atualizarVenda(orderId, {
+          status: 'processado',
+          processado_manual_em: new Date().toISOString()
+        });
         if (!r.ok) { json(res, 500, { ok: false, erro: 'erro_atualizar', data: r.data }); return true; }
+        json(res, 200, { ok: true, orderId });
+      } catch (e) {
+        json(res, 500, { ok: false, erro: e.message });
+      }
+      return true;
+    }
+
+    // POST /lixas-combinar/api/pendentes/:orderId/reconhecer-alerta
+    //   Marca que o alerta de "cancelada DEPOIS de montar/emitir" ja foi tratado
+    //   (despacho parado, NF cancelada/estornada). Sem isso o card ficava preso em
+    //   Pendentes pra sempre, porque nada limpava alerta_pos_venda.
+    //   O texto do alerta NAO e apagado — fica no card como historico do que houve.
+    if (method === 'POST' && p.startsWith('/lixas-combinar/api/pendentes/') && p.endsWith('/reconhecer-alerta')) {
+      const sessao = requerAuth();
+      if (!sessao.ok) { json(res, 401, { ok: false, erro: 'nao_autenticado' }); return true; }
+
+      const orderId = p.replace('/lixas-combinar/api/pendentes/', '').replace('/reconhecer-alerta', '');
+      try {
+        const lcp = require('../auto-mensagens/lixasCombinarPendentes');
+        const r = await lcp.atualizarVenda(orderId, { alerta_reconhecido_em: new Date().toISOString() });
+        if (!r.ok) { json(res, 500, { ok: false, erro: 'erro_atualizar', data: r.data }); return true; }
+        console.log(`[lixas-combinar] alerta pos-venda reconhecido por ${sessao.sessao?.usuario || '?'} — order ${orderId}`);
         json(res, 200, { ok: true, orderId });
       } catch (e) {
         json(res, 500, { ok: false, erro: e.message });
