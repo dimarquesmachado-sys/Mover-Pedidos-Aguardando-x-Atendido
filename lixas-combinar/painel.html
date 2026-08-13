@@ -450,7 +450,10 @@ function renderCard(v) {
 
   // Botoes Bling — sao mostrados quando IA classificou como "claro" e tem pedido estruturado
   let botoesBling = '';
-  if (v.ia_categoria === 'claro' && v.ia_pedido_estruturado && !v.bling_editado_em) {
+  // !processado_manual_em: linha concluida na mao teve NF emitida POR FORA. O botao
+  // composto chama /editar-bling ANTES do /emitir-nf, entao sem esta guarda ele
+  // reescreveria os itens de um pedido ja faturado — e o 409 da emissao chegaria tarde.
+  if (v.ia_categoria === 'claro' && v.ia_pedido_estruturado && !v.bling_editado_em && !v.processado_manual_em) {
     botoesBling = `
       <button class="btn-dry" title="Ensaio (dry-run): testa a montagem no Bling SEM emitir nada — confere se acha os produtos, se as quantidades batem e se os valores/rateio fecham" onclick="testarBling('${v.order_id}', true)">🧪 Preview</button>
       <button class="btn-full" title="Monta os itens no Bling (usando o pedido que a IA entendeu) e emite a NF-e — transmite pra SEFAZ" onclick="montarComNF('${v.order_id}')">🚀 Montar Pedido + NF Bling</button>
