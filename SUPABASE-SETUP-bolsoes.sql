@@ -34,11 +34,23 @@ CREATE INDEX IF NOT EXISTS idx_lixas_pendentes_etiqueta
 -- Sem este passo, toda venda concluida na mao no passado seria reclassificada
 -- como anomalia e voltaria pra Pendentes ("marcado processado mas SEM NF").
 -- Usa atualizado_em como carimbo aproximado (e quando o status foi gravado).
+-- IMPORTANTE: so marca onde ha EVIDENCIA de trabalho real (pedido montado no Bling).
+-- Linha 'processado' sem NF *e* sem pedido montado e exatamente o "falso processado"
+-- que o recuperarFalsosProcessados caca — clique por engano ou montagem que morreu no
+-- meio. Marcar essas como conclusao manual jogaria elas pro bolsao fechado e esconderia
+-- uma NF faltando. Essas ficam em Pendentes de proposito, pra voce triar uma vez.
 UPDATE lixas_combinar_pendentes
    SET processado_manual_em = COALESCE(atualizado_em, criado_em, NOW())
  WHERE status = 'processado'
    AND processado_manual_em IS NULL
-   AND nf_emitida_em IS NULL;
+   AND nf_emitida_em IS NULL
+   AND bling_editado_em IS NOT NULL;
+
+-- Quantas ficaram pra triar (aparecem em Pendentes como "marcado processado mas SEM NF"):
+SELECT count(*) AS falsos_processados_para_triar
+  FROM lixas_combinar_pendentes
+ WHERE status = 'processado' AND nf_emitida_em IS NULL
+   AND bling_editado_em IS NULL AND processado_manual_em IS NULL;
 
 -- ── Conferencia ─────────────────────────────────────────────────────────────
 SELECT column_name, data_type
