@@ -76,14 +76,17 @@ async function upsertPendente(p) {
  * Lista pendentes dos ultimos N dias (default 7).
  * Filtra por status opcional.
  */
-async function listarPendentes({ dias = 7, status = null, limit = 100 } = {}) {
+async function listarPendentes({ dias = 7, status = null, limit = 100, offset = 0 } = {}) {
   if (!configurado()) return { ok: false, erro: 'supabase_nao_configurado' };
 
   const desde = new Date(Date.now() - dias * 24 * 60 * 60 * 1000).toISOString();
   // Janela por data_venda (sempre preenchido). Antes era msg_inicial_enviada_em,
   // que fica VAZIO em vendas registradas via recuperar (cliente ja tinha respondido,
   // nao recebeu msg inicial) — essas sumiam do painel E da recuperacao.
+  // offset: permite paginar a janela inteira. Sem ele, um limit unico devolve so as
+  // N mais novas (data_venda DESC) e as vendas antigas ficam invisiveis pra quem varre.
   let query = `${TABELA}?data_venda=gte.${desde}&order=data_venda.desc&limit=${limit}`;
+  if (offset > 0) query += `&offset=${offset}`;
   if (status) query += `&status=eq.${encodeURIComponent(status)}`;
 
   return supabaseFetch(query, { method: 'GET' });
