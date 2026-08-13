@@ -564,6 +564,39 @@ function routes(readBody) {
       return true;
     }
 
+    // POST /lixas-combinar/api/pendentes/:orderId/desfazer-conclusao
+    //   Limpa processado_manual_em e devolve a venda pra Pendentes. Necessario porque
+    //   o marcador bloqueia editar/emitir/recuperar e esconde os botoes — sem esta
+    //   rota, um clique errado (ou NF de fora que na verdade falhou) so teria conserto
+    //   editando o Supabase na mao. As proprias mensagens de erro mandam desfazer.
+    if (method === 'POST' && p.startsWith('/lixas-combinar/api/pendentes/') && p.endsWith('/desfazer-conclusao')) {
+      const sessao = requerAuth();
+      if (!sessao.ok) { json(res, 401, { ok: false, erro: 'nao_autenticado' }); return true; }
+
+      const orderId = p.replace('/lixas-combinar/api/pendentes/', '').replace('/desfazer-conclusao', '');
+      try {
+        const lcp = require('../auto-mensagens/lixasCombinarPendentes');
+        const venda = await lcp.buscar(orderId);
+        if (!venda.ok || !venda.data) { json(res, 404, { ok: false, erro: 'venda_nao_encontrada', orderId }); return true; }
+        const v = venda.data;
+        if (v.nf_emitida_em) {
+          json(res, 409, { ok: false, erro: 'nf_registrada',
+            mensagem: 'Esta venda tem NF registrada no sistema. Desfazer a conclusao nao apaga a nota — trate no Bling.' });
+          return true;
+        }
+        // Volta pro estado acionavel: se o pedido ja estava montado, cai em
+        // 'cliente_confirmou_pedido' (falta so emitir); senao volta pra atencao humana.
+        const novoStatus = v.bling_editado_em ? 'cliente_confirmou_pedido' : 'precisa_atencao_humano';
+        const r = await lcp.atualizarVenda(orderId, { processado_manual_em: null, status: novoStatus });
+        if (!r.ok) { json(res, 500, { ok: false, erro: 'erro_atualizar', data: r.data }); return true; }
+        console.log(`[lixas-combinar] conclusao manual DESFEITA por ${sessao.sessao?.usuario || '?'} — order ${orderId} -> ${novoStatus}`);
+        json(res, 200, { ok: true, orderId, status: novoStatus });
+      } catch (e) {
+        json(res, 500, { ok: false, erro: e.message });
+      }
+      return true;
+    }
+
     // POST /lixas-combinar/api/pendentes/:orderId/reconhecer-alerta
     //   Marca que o alerta de "cancelada DEPOIS de montar/emitir" ja foi tratado
     //   (despacho parado, NF cancelada/estornada). Sem isso o card ficava preso em
