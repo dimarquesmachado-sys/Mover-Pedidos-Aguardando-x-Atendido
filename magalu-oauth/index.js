@@ -26,7 +26,7 @@ const fs   = require('fs');
 const path = require('path');
 const { json, html, readBody } = require('../lib/http');
 
-const VERSAO = 'magalu-oauth v1 b41';
+const VERSAO = 'magalu-oauth v1 b42';
 
 const DATA_DIR = process.env.MAGALU_DATA_DIR || '/data/magalu';
 
@@ -1017,12 +1017,19 @@ liga('bAmb','amb'); liga('bGood','good');
               let valor = null;
               if (i3.amounts && i3.amounts.unit != null) valor = Number(i3.amounts.unit) / 100;
               else if (i3.amounts && i3.amounts.total != null) valor = Number(i3.amounts.total) / 100 / (qtd || 1);
+              // 13/08 (sonda do pedido real): unit_price é OBJETO { value, normalizer } em
+              // centavos — `Number(objeto)` dava NaN e o valor caía nos campos seguintes.
+              else if (i3.unit_price && i3.unit_price.value != null) valor = Number(i3.unit_price.value) / (Number(i3.unit_price.normalizer) || 100);
               else if (i3.unit_price != null) valor = Number(i3.unit_price);
               else if (i3.price != null) valor = Number(i3.price);
               else if (i3.total != null) valor = Number(i3.total) / (qtd || 1);
               return {
-                sku: String((i3.sku || i3.seller_sku || i3.code || (i3.product && (i3.product.sku || i3.product.code)) || '')).trim() || null,
-                desc: String((i3.name || i3.title || (i3.product && i3.product.name) || '')).slice(0, 120) || null,
+                // 13/08 — MEDIDO na sonda do pedido real (amostra_crua): o item da Magalu traz o
+                // SKU e o nome dentro de `info` (deliveries[].items[].info.sku = "FL-1011-PRETO").
+                // Sem ler `info`, TODA venda Magalu entrava no histórico com sku null — foram 116
+                // unidades e R$ 16.390 fora do ranking de produtos em julho/2026.
+                sku: String((i3.sku || i3.seller_sku || i3.code || (i3.info && (i3.info.sku || i3.info.code)) || (i3.product && (i3.product.sku || i3.product.code)) || '')).trim() || null,
+                desc: String((i3.name || i3.title || (i3.info && (i3.info.name || i3.info.description)) || (i3.product && i3.product.name) || '')).slice(0, 120) || null,
                 qtd,
                 valor: Number(valor) || 0
               };
