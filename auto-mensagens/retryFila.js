@@ -201,6 +201,14 @@ async function retentarEmissoesBling({ lcp }) {
                      : vAtual.status === 'cancelada_quarentena' ? 'cancelada no ML (quarentena)'
                      : 'venda cancelada';
         console.log(`[retry-bling] order ${orderId} saiu da fila sem emitir — ${motivo}`);
+        // A rehidratacao pode ter reescrito o status pra 'aguardando_bling' antes de
+        // chegarmos aqui. Como o classificador so reconhece a conclusao manual quando o
+        // status e 'processado', sem restaurar a venda ficaria presa em Pendentes como
+        // "Re-tentando" pra sempre — sem retry nenhum acontecendo.
+        if (vAtual.processado_manual_em && vAtual.status !== 'processado') {
+          try { await lcp.atualizarVenda(orderId, { status: 'processado' }); }
+          catch (e2) { console.error(`[retry-bling] order ${orderId} falhei ao restaurar status: ${e2.message}`); }
+        }
         _retryBling.delete(orderId);
         continue;
       }
