@@ -71,6 +71,10 @@ async function recuperarFalsosProcessados({ dias = 30 } = {}) {
     // (1) Filtro — so os FALSOS (marcados na mao, sem montar/emitir)
     if (v.bling_editado_em) continue;                                   // ja montado de verdade
     if (v.nf_emitida_em) continue;                                      // ja tem NF registrada
+    // Conclusao manual e AUTORITATIVA: o cenario documentado do botao e NF emitida POR
+    // FORA do painel, entao a linha fica sem nf_emitida_em local de proposito. Sem esta
+    // guarda, a recuperacao editaria o pedido e tentaria emitir uma SEGUNDA nota.
+    if (v.processado_manual_em) continue;
     if (String(v.ia_categoria || '') !== 'claro') continue;            // ambiguo: nao auto
     if (Number(v.ia_confianca || 0) < LIMIAR_CONFIANCA_AUTO) continue; // confianca baixa: nao auto
 
