@@ -4512,15 +4512,23 @@ async function cacaMagalu(de, ate, empresa, opts) {
         if (!novas || !novas.length) continue;                       // sem substituto: não mexe
         if (!completas(novas)) { _mgc.refazer_incompletos++; jaGravados.add(String(cod)); continue; }
         const qs = 'vendas_historico?empresa=eq.' + encodeURIComponent(empresa) + '&canal=eq.magalu&numero_loja=eq.' + encodeURIComponent(cod);
-        let antigas = [];
-        try { const rOld = await supaReq(empresa, 'GET', qs + '&select=*', null); if (rOld.ok) antigas = JSON.parse(rOld.body || '[]'); } catch (e) {}
+        // Codex PR#51 (2ª rodada): SEM cópia de segurança válida, não apaga. Se o GET falhar
+        // ou vier corrompido, a restauração seria impossível e o pedido sumiria do histórico
+        // pra sempre — o oposto do que este modo existe pra fazer.
+        let antigas = null;
+        try { const rOld = await supaReq(empresa, 'GET', qs + '&select=*', null); if (rOld.ok) { const j0 = JSON.parse(rOld.body || 'null'); if (Array.isArray(j0)) antigas = j0; } } catch (e) { antigas = null; }
+        if (!antigas || !antigas.length) { _mgc.refazer_sem_backup = (_mgc.refazer_sem_backup || 0) + 1; jaGravados.add(String(cod)); continue; }
         const del = await supaReq(empresa, 'DELETE', qs, null);
         if (!del.ok) { _mgc.refazer_falhas++; jaGravados.add(String(cod)); continue; }   // não apagou: não insere (evita duplicar)
         _mgc.refazer_apagados++;
         const ins = await supaReq(empresa, 'POST', 'vendas_historico', novas);
         if (!ins.ok) {
           _mgc.refazer_falhas++;
-          if (antigas.length) { try { await supaReq(empresa, 'POST', 'vendas_historico', antigas.map(x => { const y = Object.assign({}, x); delete y.id; return y; })); } catch (e) {} }
+          // restaura o snapshot e CONFERE (supaReq devolve ok, não lança): se a volta falhar,
+          // o pedido fica registrado por número em `refazer_perdidos` pra conserto manual.
+          let voltou = false;
+          try { const rb = await supaReq(empresa, 'POST', 'vendas_historico', antigas.map(x => { const y = Object.assign({}, x); delete y.id; return y; })); voltou = Boolean(rb && rb.ok); } catch (e) { voltou = false; }
+          if (!voltou) { (_mgc.refazer_perdidos = _mgc.refazer_perdidos || []).push(String(cod)); }
         } else { _mgc.linhas += novas.length; _mgc.refazer_trocados++; }
         jaGravados.add(String(cod));
         await dorme(120);
