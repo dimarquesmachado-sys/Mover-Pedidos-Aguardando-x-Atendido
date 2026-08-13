@@ -606,6 +606,23 @@ async function rotinaChecarCanceladasML(opts = {}) {
     }
 
     // ── CANCELADA ───────────────────────────────────────────────────────
+    // Se a etiqueta ficou imprimivel DEPOIS do ultimo poll e o cliente cancelou antes
+    // do proximo, o marcador em cache estaria vazio e o alerta nao sairia — mesmo com o
+    // pacote possivelmente ja impresso. Como o ramo de cima (!st.cancelada) nao roda
+    // aqui, confere o envio agora, uma vez, antes de montar o jaFeito.
+    if (!v.ml_etiqueta_em && !v.nf_emitida_em && !v.bling_editado_em) {
+      try {
+        const envC = await ml.getEnvioResumo(oid);
+        if (envC && envC.ok && envC.temEtiqueta) {
+          v.ml_etiqueta_em = agoraIso;
+          v.ml_shipment_status = envC.status || null;
+          console.warn(`[canceladas] order ${oid} cancelada, mas a etiqueta JA existia (${envC.status}) — vai gerar alerta`);
+        }
+      } catch (e) {
+        console.warn(`[canceladas] order ${oid} nao consegui conferir o envio antes do alerta: ${e.message}`);
+      }
+      await new Promise(r => setTimeout(r, CANCELADAS_PAUSA_MS));
+    }
     const jaFeito = [];
     if (v.nf_emitida_em) jaFeito.push(`NF ${v.nf_numero || '?'}/${v.nf_serie || '?'} emitida em ${_fmtBR(v.nf_emitida_em)}`);
     if (v.bling_editado_em) jaFeito.push(`pedido Bling ${v.bling_pedido_id || '?'} montado em ${_fmtBR(v.bling_editado_em)}`);
