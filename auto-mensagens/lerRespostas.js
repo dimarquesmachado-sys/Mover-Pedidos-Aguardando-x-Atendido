@@ -39,6 +39,12 @@ const FECHAMENTO_HABILITADO = (process.env.LIXAS_FECHAMENTO_HABILITADO || 'true'
 const FECHAMENTO_TEXTO = process.env.LIXAS_FECHAMENTO_TEXTO ||
   'Obrigado! Seu pedido está confirmado e será postado em breve — todo rastreamento da entrega você acompanha dentro da sua compra no MercadoLivre. 😊';
 const FECHAMENTO_DIAS = Number(process.env.LIXAS_FECHAMENTO_DIAS || 3);
+// Janela de dias que o cron varre. Era 7 fixo — venda mais antiga que isso deixava de
+// ser lida, entao se o cliente respondesse depois (caso 31/07 respondido 9 dias depois)
+// ninguem processava e o pedido ficava parado pra sempre. 30 dias cobre o comportamento
+// real: cliente que some por uma semana e volta. Custo: o ciclo passa a consultar ~20
+// conversas em vez de ~5 — folgado pro limite do ML.
+const JANELA_DIAS = Number(process.env.LIXAS_JANELA_DIAS) || 30;
 
 // ── Estado + helpers exclusivos deste subsistema (movidos de fluxos.js) ──
 const AFIRMACOES_SIMPLES = ['sim', 'ok', 'okay', 'blz', 'beleza', 'obrigado', 'obrigada', 'obg', 'valeu', 'vlw',
@@ -168,12 +174,16 @@ async function rotinaLerRespostas() {
     try { await retentarEmissoesBling({ lcp }); } catch (e) { console.error('[retry-bling] falhou:', e.message); }
     try { await revisarAtencaoHumana({ lcp }); } catch (e) { console.error('[revisar] falhou:', e.message); }
 
-    // Lista pendentes a processar (ultimos 7 dias).
+    // Lista pendentes a processar (janela = JANELA_DIAS, default 30).
     // IMPORTANTE: inclui TANTO 'aguardando_resposta' QUANTO 'cliente_respondeu'.
     // O 'cliente_respondeu' eh setado quando o cliente escreve ANTES da nossa msg
     // inicial sair (corrida). Sem isso, essas vendas ficavam orfas e a IA nunca rodava.
-    const listaAg = await lcp.listarPendentes({ dias: 7, status: 'aguardando_resposta', limit: 50 });
-    const listaResp = await lcp.listarPendentes({ dias: 7, status: 'cliente_respondeu', limit: 50 });
+    // limit 200 (era 50): listarPendentes ordena por data_venda DESC antes de cortar,
+    // entao com a janela de 30 dias um limite baixo deixaria as vendas MAIS ANTIGAS de
+    // fora pra sempre — justo as que esta mudanca quer recuperar. Com o volume atual
+    // (~20 vendas/30 dias) 200 da folga de 10x; se um dia encostar, ai sim paginar.
+    const listaAg = await lcp.listarPendentes({ dias: JANELA_DIAS, status: 'aguardando_resposta', limit: 200 });
+    const listaResp = await lcp.listarPendentes({ dias: JANELA_DIAS, status: 'cliente_respondeu', limit: 200 });
     if (!listaAg.ok && !listaResp.ok) {
       console.error(`[lixas-combinar lerRespostas] erro listando: ${JSON.stringify((listaAg.data || listaResp.data)).slice(0,200)}`);
       return { ok: false, erro: 'erro_listar', stats };

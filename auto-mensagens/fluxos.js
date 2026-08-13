@@ -393,7 +393,12 @@ const CANCELADAS_STATUS = (
   process.env.LIXAS_CANCELADAS_STATUS ||
   'aguardando_resposta,cliente_respondeu,cliente_confirmou_pedido,precisa_atencao_humano,processado'
 ).split(',').map(s => s.trim()).filter(Boolean);
-const CANCELADAS_DIAS        = Number(process.env.LIXAS_CANCELADAS_DIAS) || 7;
+// Acompanha a janela do leitor (LIXAS_JANELA_DIAS, default 30). Se ficasse em 7
+// enquanto o lerRespostas processa ate 30 dias, existiria uma faixa de 8-30 dias em
+// que uma venda CANCELADA no ML seguiria sendo processada — montando pedido no Bling
+// e emitindo NF (irreversivel) de algo que o cliente ja cancelou.
+const CANCELADAS_DIAS        = Number(process.env.LIXAS_CANCELADAS_DIAS)
+  || Number(process.env.LIXAS_JANELA_DIAS) || 30;
 const CANCELADAS_IDADE_MIN_H = Number(process.env.LIXAS_CANCELADAS_IDADE_MIN_HORAS) || 24;
 const CANCELADAS_REPESCAR_H  = Number(process.env.LIXAS_CANCELADAS_REPESCAR_HORAS) || 6;
 const CANCELADAS_MAX         = Number(process.env.LIXAS_CANCELADAS_MAX_POR_RODADA) || 40;
@@ -584,6 +589,30 @@ async function _processarAutoEmissaoInner({ venda, iaResult, graosResult, lcp })
     await lcp.atualizarVenda(orderId, { status: 'precisa_atencao_humano' });
     console.log(`[auto-emissao] order ${orderId} confianca ${iaResult.confianca}% < ${LIMIAR_CONFIANCA_AUTO}% — humano`);
     return { puladaConfianca: true };
+  }
+
+  // Guarda 1.5 — VENDA AINDA VIVA NO ML (fecha a corrida com o cron de cancelamento).
+  // O leitor roda a cada 2 min; a varredura de cancelamento, de hora em hora. Numa
+  // janela de 30 dias existe backlog que o leitor ve ANTES da primeira passada de
+  // cancelamento — e uma venda ja cancelada viraria NF irreversivel. Ampliar a janela
+  // do cron so descobre isso depois; a unica guarda que fecha a corrida e perguntar
+  // ao ML agora, logo antes de emitir. Custo: 1 chamada por emissao.
+  // Falha de consulta NAO bloqueia (nao inventa problema onde talvez nao haja):
+  // so bloqueia quando o ML confirma que a venda morreu.
+  try {
+    const st = await ml.getOrderStatusResumo(String(orderId));
+    if (st && st.ok && st.cancelada) {
+      await lcp.atualizarVenda(orderId, {
+        status: 'venda_cancelada',
+        ml_status: st.status,
+        ml_status_atualizado_em: new Date().toISOString(),
+        venda_cancelada_em: new Date().toISOString()
+      });
+      console.warn(`[auto-emissao] order ${orderId} CANCELADA no ML (${st.status}) — emissao abortada antes de montar/emitir`);
+      return { falha: true, motivo: 'venda_cancelada_no_ml' };
+    }
+  } catch (e) {
+    console.warn(`[auto-emissao] order ${orderId} nao consegui checar status ML antes de emitir (segue): ${e.message}`);
   }
 
   // Guarda 2 — pedido_estruturado valido
