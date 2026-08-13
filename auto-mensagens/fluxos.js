@@ -391,7 +391,7 @@ async function rotinaACombinar() {
 
 const CANCELADAS_STATUS = (
   process.env.LIXAS_CANCELADAS_STATUS ||
-  'aguardando_resposta,cliente_respondeu,cliente_confirmou_pedido,precisa_atencao_humano,processado'
+  'aguardando_resposta,cliente_respondeu,cliente_confirmou_pedido,aguardando_bling,precisa_atencao_humano,processado'
 ).split(',').map(s => s.trim()).filter(Boolean);
 // Acompanha a janela do leitor (LIXAS_JANELA_DIAS, default 30). Se ficasse em 7
 // enquanto o lerRespostas processa ate 30 dias, existiria uma faixa de 8-30 dias em
@@ -611,17 +611,32 @@ async function rotinaChecarCanceladasML(opts = {}) {
     // pacote possivelmente ja impresso. Como o ramo de cima (!st.cancelada) nao roda
     // aqui, confere o envio agora, uma vez, antes de montar o jaFeito.
     if (!v.ml_etiqueta_em && !v.nf_emitida_em && !v.bling_editado_em) {
+      let envFalhou = null;
       try {
         const envC = await ml.getEnvioResumo(oid);
-        if (envC && envC.ok && envC.temEtiqueta) {
-          v.ml_etiqueta_em = agoraIso;
-          v.ml_shipment_status = envC.status || null;
-          console.warn(`[canceladas] order ${oid} cancelada, mas a etiqueta JA existia (${envC.status}) — vai gerar alerta`);
+        if (envC && envC.ok) {
+          if (envC.temEtiqueta) {
+            v.ml_etiqueta_em = agoraIso;
+            v.ml_shipment_status = envC.status || null;
+            console.warn(`[canceladas] order ${oid} cancelada, mas a etiqueta JA existia (${envC.status}) — vai gerar alerta`);
+          }
+        } else {
+          envFalhou = (envC && (envC.dica || envC.erro)) || 'falha lendo envio';
         }
       } catch (e) {
-        console.warn(`[canceladas] order ${oid} nao consegui conferir o envio antes do alerta: ${e.message}`);
+        envFalhou = e.message;
       }
       await new Promise(r => setTimeout(r, CANCELADAS_PAUSA_MS));
+
+      // NAO finaliza como cancelamento sem alerta enquanto o envio for desconhecido:
+      // gravar venda_cancelada_em tiraria a venda das proximas rodadas PARA SEMPRE, e se
+      // a etiqueta ja tivesse sido impressa ninguem seria avisado de parar o despacho.
+      // Deixa pra proxima passada (o cancelamento nao vai embora sozinho).
+      if (envFalhou) {
+        out.erros.push({ order_id: oid, erro: `cancelada, mas nao confirmei o envio (${envFalhou}) — adiado pra proxima rodada` });
+        console.error(`[canceladas] order ${oid} CANCELADA e envio desconhecido (${envFalhou}) — nao finalizo agora`);
+        continue;
+      }
     }
     const jaFeito = [];
     if (v.nf_emitida_em) jaFeito.push(`NF ${v.nf_numero || '?'}/${v.nf_serie || '?'} emitida em ${_fmtBR(v.nf_emitida_em)}`);
