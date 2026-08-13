@@ -584,7 +584,12 @@ async function rotinaChecarCanceladasML(opts = {}) {
         campos.ml_status = st.status;
         campos.ml_status_atualizado_em = agoraIso;
       }
-      if (podeEnvio && !v.ml_etiqueta_em && !v.nf_emitida_em) {
+      // Alinhado com a selecao: etiqueta em cache NAO encerra o poll (o envio ainda
+      // evolui pra shipped/delivered). Antes, a selecao escolhia a linha toda hora e a
+      // execucao pulava — ml_shipment_status congelava em ready_to_ship pra sempre.
+      const _stEnv = String(v.ml_shipment_status || '').toLowerCase();
+      const _envTerminal = ['shipped','delivered','not_delivered','cancelled'].includes(_stEnv);
+      if (podeEnvio && !v.nf_emitida_em && !v.processado_manual_em && !_envTerminal) {
         try {
           const env = await ml.getEnvioResumo(oid);
           campos.ml_envio_checado_em = agoraIso;
@@ -592,7 +597,9 @@ async function rotinaChecarCanceladasML(opts = {}) {
             campos.ml_shipment_status = env.status || null;
             campos.ml_shipment_substatus = env.substatus || null;
             if (env.temEtiqueta) {
-              campos.ml_etiqueta_em = agoraIso;
+              // preserva o carimbo ORIGINAL: quando a etiqueta saiu importa mais que
+              // quando a gente reconferiu.
+              if (!v.ml_etiqueta_em) campos.ml_etiqueta_em = agoraIso;
               console.log(`[canceladas] order ${oid} ja tem etiqueta no ML (${env.status}/${env.substatus || '-'}) — sai do bolsao de pendentes`);
             }
           } else {
@@ -630,7 +637,11 @@ async function rotinaChecarCanceladasML(opts = {}) {
     // do proximo, o marcador em cache estaria vazio e o alerta nao sairia — mesmo com o
     // pacote possivelmente ja impresso. Como o ramo de cima (!st.cancelada) nao roda
     // aqui, confere o envio agora, uma vez, antes de montar o jaFeito.
-    if (!v.ml_etiqueta_em && !v.nf_emitida_em && !v.bling_editado_em) {
+    // processado_manual_em ja e evidencia suficiente pro jaFeito: nao adia o
+    // cancelamento esperando um envio que pode nao existir (pedido sem shipping
+    // resolvivel adiaria a linha em TODA rodada, e o aviso de cancelar a NF emitida
+    // por fora nunca sairia).
+    if (!v.ml_etiqueta_em && !v.nf_emitida_em && !v.bling_editado_em && !v.processado_manual_em) {
       let envFalhou = null;
       try {
         const envC = await ml.getEnvioResumo(oid);
