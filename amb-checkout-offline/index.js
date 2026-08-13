@@ -4479,7 +4479,10 @@ async function cacaMagalu(de, ate, empresa, opts) {
 
     // (Codex P1) cancelado DEPOIS de gravado: apaga do histórico
     for (const cod of res2.cancelados) {
-      if (!jaTem.has(cod)) continue;
+      // Codex PR#51: alvo de refazer saiu do jaTem, mas se foi CANCELADO na Magalu a receita
+      // velha tem que sumir igual — senão o refazer deixaria no histórico o que a rodada
+      // normal apagaria.
+      if (!jaTem.has(cod) && !paraRefazer.has(cod)) continue;
       const del = await supaReq(empresa, 'DELETE', 'vendas_historico?empresa=eq.' + encodeURIComponent(empresa) + '&canal=eq.magalu&numero_loja=eq.' + encodeURIComponent(cod), null);
       if (del.ok) _mgc.removidos_cancelados++;
       await dorme(80);
@@ -4489,19 +4492,44 @@ async function cacaMagalu(de, ate, empresa, opts) {
     // NÃO viram linha, aparecem aqui como pendência pra investigar.
     _mgc.enriquecidos_bling = res2.enriquecidos_bling || 0;
     _mgc.sem_no_bling = res2.sem_no_bling || 0;
-    // apaga as linhas velhas SÓ dos pedidos que vamos regravar agora (evita duplicar)
+    // ── Codex PR#51: TROCA SEGURA, pedido a pedido ────────────────────────────────────
+    // Antes: apagava tudo e depois inseria em lote. Se um POST falhasse no meio, o pedido
+    // ficava SEM linha nenhuma no histórico (sumia do faturamento); e um DELETE que falhasse
+    // em silêncio deixava linha velha + nova (duplicada).
+    // Agora, para cada alvo: guarda as linhas antigas → apaga (só segue se o apagar deu certo)
+    // → grava as novas → se a gravação falhar, RESTAURA as antigas e conta o erro.
+    // E só é elegível o alvo cujas linhas novas têm TODAS o SKU preenchido — pedido que
+    // voltaria com item sem SKU fica intocado e é reportado como pendência.
+    const porPedido = {};
+    for (const l of res2.linhas) { const k = String(l.numero_loja); (porPedido[k] = porPedido[k] || []).push(l); }
+    const completas = c => c.length > 0 && c.every(l => String(l.sku || '').trim() !== '');
+    _mgc.refazer_apagados = 0; _mgc.refazer_trocados = 0; _mgc.refazer_incompletos = 0; _mgc.refazer_falhas = 0;
+    const jaGravados = new Set();
+
     if (refazer && paraRefazer.size) {
-      const vaiGravar = new Set(res2.linhas.map(l => String(l.numero_loja)));
-      _mgc.refazer_apagados = 0;
       for (const cod of paraRefazer) {
-        if (!vaiGravar.has(String(cod))) continue;
-        const del = await supaReq(empresa, 'DELETE', 'vendas_historico?empresa=eq.' + encodeURIComponent(empresa) + '&canal=eq.magalu&numero_loja=eq.' + encodeURIComponent(cod), null);
-        if (del.ok) _mgc.refazer_apagados++;
-        await dorme(80);
+        const novas = porPedido[String(cod)];
+        if (!novas || !novas.length) continue;                       // sem substituto: não mexe
+        if (!completas(novas)) { _mgc.refazer_incompletos++; jaGravados.add(String(cod)); continue; }
+        const qs = 'vendas_historico?empresa=eq.' + encodeURIComponent(empresa) + '&canal=eq.magalu&numero_loja=eq.' + encodeURIComponent(cod);
+        let antigas = [];
+        try { const rOld = await supaReq(empresa, 'GET', qs + '&select=*', null); if (rOld.ok) antigas = JSON.parse(rOld.body || '[]'); } catch (e) {}
+        const del = await supaReq(empresa, 'DELETE', qs, null);
+        if (!del.ok) { _mgc.refazer_falhas++; jaGravados.add(String(cod)); continue; }   // não apagou: não insere (evita duplicar)
+        _mgc.refazer_apagados++;
+        const ins = await supaReq(empresa, 'POST', 'vendas_historico', novas);
+        if (!ins.ok) {
+          _mgc.refazer_falhas++;
+          if (antigas.length) { try { await supaReq(empresa, 'POST', 'vendas_historico', antigas.map(x => { const y = Object.assign({}, x); delete y.id; return y; })); } catch (e) {} }
+        } else { _mgc.linhas += novas.length; _mgc.refazer_trocados++; }
+        jaGravados.add(String(cod));
+        await dorme(120);
       }
     }
-    for (let i0 = 0; i0 < res2.linhas.length; i0 += 200) {
-      const lote = res2.linhas.slice(i0, i0 + 200);
+
+    const restantes = res2.linhas.filter(l => !jaGravados.has(String(l.numero_loja)));
+    for (let i0 = 0; i0 < restantes.length; i0 += 200) {
+      const lote = restantes.slice(i0, i0 + 200);
       const ins = await supaReq(empresa, 'POST', 'vendas_historico', lote);
       if (!ins.ok) throw new Error('gravação: status ' + ins.status + ' ' + String(ins.body || '').slice(0, 120));
       _mgc.linhas += lote.length;
