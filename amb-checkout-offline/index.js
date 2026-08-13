@@ -1914,9 +1914,14 @@ function routes(readBody) {
               // Codex PR#46: carrinho pode ter frete/tarifa em QUALQUER das orders — busca todas
               outD.orders_do_pack = [];
               for (const oidP of idsPack) {
-                const roP = await fetch('https://api.mercadolibre.com/orders/' + oidP, HD);
-                const dorP = roP.ok ? await roP.json().catch(() => null) : null;
-                if (!dorP) { outD.erros.push('orders(' + oidP + '): HTTP ' + roP.status); continue; }
+                // Codex PR#46: try por order — queda de rede numa nao pode esconder as outras
+                let dorP = null;
+                try {
+                  const roP = await fetch('https://api.mercadolibre.com/orders/' + oidP, HD);
+                  dorP = roP.ok ? await roP.json().catch(() => null) : null;
+                  if (!dorP) outD.erros.push('orders(' + oidP + '): HTTP ' + roP.status);
+                } catch (eP) { outD.erros.push('orders(' + oidP + '): ' + String(eP.message || eP).slice(0, 120)); }
+                if (!dorP) { await new Promise(r => setTimeout(r, 150)); continue; }
                 outD.orders_do_pack.push({ id: dorP.id, shipping_id: (dorP.shipping && dorP.shipping.id) || null, total: dorP.total_amount, frete_comprador: (dorP.shipping && dorP.shipping.cost) != null ? dorP.shipping.cost : null, pagamentos: (dorP.payments || []).map(pg => ({ id: pg.id, valor: pg.transaction_amount, frete: pg.shipping_cost, taxa: pg.marketplace_fee })) });
                 if (!dor) dor = dorP;
                 await new Promise(r => setTimeout(r, 150));
@@ -1925,6 +1930,29 @@ function routes(readBody) {
             } else outD.erros.push('packs: HTTP ' + rp.status);
           } catch (e3) { outD.erros.push('packs: ' + String(e3.message || e3).slice(0, 120)); }
         } else if (!ro.ok) { outD.erros.push('orders: HTTP ' + ro.status); }
+        // Codex PR#46 (5a rodada): se veio uma ORDER de carrinho (payload OK com pack_id), as
+        // irmas nunca eram abertas — a compensacao Flex pode estar em qualquer uma delas
+        if (dor && dor.pack_id && !outD.resolvido_de_pack) {
+          try {
+            const rpk = await fetch('https://api.mercadolibre.com/packs/' + encodeURIComponent(dor.pack_id), HD);
+            const dpk = rpk.ok ? await rpk.json().catch(() => null) : null;
+            const idsIrmas = dpk && Array.isArray(dpk.orders) ? dpk.orders.map(o => o.id || o) : [];
+            if (idsIrmas.length) {
+              outD.resolvido_de_pack = { pack: String(dor.pack_id), orders: idsIrmas, veio_de: 'order' };
+              outD.orders_do_pack = outD.orders_do_pack || [];
+              for (const oidI of idsIrmas) {
+                if (String(oidI) === String(dor.id)) { outD.orders_do_pack.push({ id: dor.id, shipping_id: (dor.shipping && dor.shipping.id) || null, total: dor.total_amount, frete_comprador: (dor.shipping && dor.shipping.cost) != null ? dor.shipping.cost : null, pagamentos: (dor.payments || []).map(pg => ({ id: pg.id, valor: pg.transaction_amount, frete: pg.shipping_cost, taxa: pg.marketplace_fee })) }); continue; }
+                try {
+                  const roI = await fetch('https://api.mercadolibre.com/orders/' + oidI, HD);
+                  const dorI = roI.ok ? await roI.json().catch(() => null) : null;
+                  if (!dorI) { outD.erros.push('orders(' + oidI + '): HTTP ' + roI.status); continue; }
+                  outD.orders_do_pack.push({ id: dorI.id, shipping_id: (dorI.shipping && dorI.shipping.id) || null, total: dorI.total_amount, frete_comprador: (dorI.shipping && dorI.shipping.cost) != null ? dorI.shipping.cost : null, pagamentos: (dorI.payments || []).map(pg => ({ id: pg.id, valor: pg.transaction_amount, frete: pg.shipping_cost, taxa: pg.marketplace_fee })) });
+                } catch (eI) { outD.erros.push('orders(' + oidI + '): ' + String(eI.message || eI).slice(0, 120)); }
+                await new Promise(r => setTimeout(r, 150));
+              }
+            } else outD.erros.push('packs(' + dor.pack_id + '): HTTP ' + rpk.status);
+          } catch (ePk) { outD.erros.push('packs(' + dor.pack_id + '): ' + String(ePk.message || ePk).slice(0, 120)); }
+        }
         if (!dor) { outD.erros.push('sem order utilizavel'); }
         else {
           outD.order = { id: dor.id, pack_id: dor.pack_id || null, status: dor.status, total: dor.total_amount, pago: dor.paid_amount, frete_comprador: (dor.shipping && dor.shipping.cost) != null ? dor.shipping.cost : null };
