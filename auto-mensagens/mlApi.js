@@ -547,6 +547,7 @@ async function getEnvioResumo(orderId) {
     // de pack ja impressa. Se nem pelo pack der, devolve ok:false (indeterminado).
     if (!shippingId) {
       const packId = order?.pack_id || null;
+      let packTodosTerminais = null;   // null = nao deu pra avaliar
       if (packId) {
         try {
           const pk = await getPackInfo(packId);
@@ -556,12 +557,20 @@ async function getEnvioResumo(orderId) {
           const sidPack = pk?.shipment?.id || pk?.shipping?.id || pk?.shipment_id || null;
           if (sidPack) return await _resumoDoShipment(sidPack);
           const irmaos = Array.isArray(pk?.orders) ? pk.orders : [];
+          // Acompanha se TODOS os membros sao terminais: carrinho cancelado inteiro
+          // antes do fulfillment nunca vai ganhar envio, e sem isso a venda ficaria em
+          // quarentena eterna esperando uma etiqueta que nao pode existir.
+          let todosTerminais = ['cancelled', 'invalid'].includes(String(order?.status || '').toLowerCase());
+          let leuTodos = true;
           for (const o of irmaos) {
             if (String(o.id) === String(orderId)) continue;
             const ro = await mlFetch('GET', `/orders/${o.id}`);
-            const sid = ro.ok ? (ro.data?.shipping?.id || ro.data?.shipping_id || null) : null;
+            if (!ro.ok) { leuTodos = false; continue; }
+            const sid = ro.data?.shipping?.id || ro.data?.shipping_id || null;
             if (sid) return await _resumoDoShipment(sid);
+            if (!['cancelled', 'invalid'].includes(String(ro.data?.status || '').toLowerCase())) todosTerminais = false;
           }
+          packTodosTerminais = leuTodos ? todosTerminais : null;
         } catch (e) {
           return { ok: false, erro: `nao consegui resolver o envio pelo pack ${packId}: ${e.message}` };
         }
@@ -570,7 +579,10 @@ async function getEnvioResumo(orderId) {
       // envio — devolver erro deixaria a venda em quarentena eterna, repescada pra
       // sempre por uma etiqueta que nao pode existir. Aqui "sem etiqueta" e um fato.
       const stOrder = String(order?.status || '').toLowerCase();
-      if (['cancelled', 'invalid'].includes(stOrder) && !packId) {
+      // Terminal sem envio: pedido solto cancelado, OU pack cujos membros foram TODOS
+      // lidos e estao todos terminais sem nenhum shipment. Nos dois casos "sem etiqueta"
+      // e fato, nao duvida — devolver erro deixaria a venda em quarentena pra sempre.
+      if (['cancelled', 'invalid'].includes(stOrder) && (!packId || packTodosTerminais === true)) {
         return { ok: true, semEnvio: true, status: null, substatus: null,
                  temEtiqueta: false, postado: false, terminalSemEnvio: true };
       }
@@ -604,9 +616,15 @@ async function _resumoDoShipment(shippingId) {
     // Envio CANCELADO nao apaga o passado: se ha marca de impressao no payload, a
     // etiqueta existiu e o pacote pode estar pronto na bancada. Sem isso, o
     // cancelamento era finalizado como comum e ninguem era avisado.
+    // date_ready_to_ship NAO prova impressao: o shipment pode ter entrado em
+    // ready_to_ship justamente num substatus NAO imprimivel (invoice_pending, buffered)
+    // e sido cancelado ali. Usar esse marco criava alerta urgente falso — card vermelho
+    // de "nao despachar" pra pacote que nunca teve etiqueta. Exige prova real: carimbo
+    // de impressao, substatus imprimivel, ou ter chegado a ser postado.
     const jaImprimiu = !!(d.date_first_printed || d.date_printed
                           || sub === 'printed' || sub === 'ready_to_print'
-                          || (d.status_history && (d.status_history.date_ready_to_ship || d.status_history.date_shipped)));
+                          || (d.status_history && (d.status_history.date_first_printed
+                                                   || d.status_history.date_shipped)));
     const temEtiqueta = postado
                      || (st === 'ready_to_ship' && !SEM_ETIQUETA_AINDA.includes(sub))
                      || (st === 'cancelled' && jaImprimiu);
