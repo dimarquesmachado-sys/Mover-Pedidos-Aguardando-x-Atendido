@@ -193,7 +193,11 @@ function classificarVenda(v) {
   // envio quebram, o lerRespostas grava ia_processado_em junto, e a trava
   // anti-duplicacao impede nova tentativa pra MESMA mensagem — o cliente pode ter
   // ficado sem resposta nenhuma enquanto o card dizia "IA tratando".
-  const iaTravada = v.ia_categoria === 'erro_ia' || !!v.ia_erro_envio;
+  // ia_erro_envio nunca e limpo pelos caminhos de sucesso, entao um erro antigo
+  // marcaria a venda como travada pra sempre. So vale enquanto a IA nao tratou uma
+  // mensagem MAIS NOVA com sucesso (ia_msg_enviada sem a marca de falha).
+  const envioFalhouAgora = !!v.ia_erro_envio && String(v.ia_msg_enviada || '').includes('[FALHOU ENVIO]');
+  const iaTravada = v.ia_categoria === 'erro_ia' || envioFalhouAgora;
   if (temErro || iaTravada) {
     return { bolsao: 'pendente', motivo: 'humano',
              rotulo: iaTravada ? '🚨 IA falhou — cliente pode estar sem resposta' : '🚨 Precisa de você' };
@@ -492,7 +496,10 @@ function routes(readBody) {
           // So os NAO reconhecidos. O texto do alerta fica no card como historico,
           // entao contar por alerta_pos_venda mostraria "(N!)" pra sempre — sinal de
           // pacote que nao pode ser despachado, mesmo depois de tratado.
-          alertas: todos.filter(v => v.alerta_pos_venda && !v.alerta_reconhecido_em).length
+          // Inclui o alerta DEDUZIDO (alerta_efetivo, marcado na classificacao): sem
+          // isso o chip Cancelados nao mostrava "(N!)" pros cancelamentos escritos por
+          // fora do cron, mesmo com o card sentado na fila humana.
+          alertas: todos.filter(v => (v.alerta_efetivo || v.alerta_pos_venda) && !v.alerta_reconhecido_em).length
         };
 
         // dias vai na resposta pro painel poder mostrar a janela real no card "Total"
