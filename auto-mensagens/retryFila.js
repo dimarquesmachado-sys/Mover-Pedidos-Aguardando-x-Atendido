@@ -178,7 +178,20 @@ async function retentarEmissoesBling({ lcp }) {
   console.log(`[retry-bling] ${_retryBling.size} venda(s) na fila de retry`);
   for (const [orderId, entry] of Array.from(_retryBling.entries())) {
     try {
-      await processarAutoEmissao({ venda: entry.venda, iaResult: entry.iaResult, graosResult: entry.graosResult, lcp });
+      // RELE o estado do banco antes de emitir. entry.venda e um retrato do momento em
+      // que a venda entrou na fila; se voce concluiu na mao (NF por fora) ou o pedido
+      // foi cancelado depois, o retrato nao sabe — e o retry editaria o pedido e
+      // tentaria uma SEGUNDA nota.
+      const atual = await lcp.buscar(orderId);
+      const vAtual = (atual && atual.ok && atual.data) ? atual.data : null;
+      if (vAtual && (vAtual.processado_manual_em || vAtual.nf_emitida_em || vAtual.venda_cancelada_em)) {
+        const motivo = vAtual.processado_manual_em ? 'concluida na mao'
+                     : vAtual.nf_emitida_em ? 'NF ja emitida' : 'venda cancelada';
+        console.log(`[retry-bling] order ${orderId} saiu da fila sem emitir — ${motivo}`);
+        _retryBling.delete(orderId);
+        continue;
+      }
+      await processarAutoEmissao({ venda: vAtual || entry.venda, iaResult: entry.iaResult, graosResult: entry.graosResult, lcp });
     } catch (e) {
       console.error(`[retry-bling] order ${orderId} erro no retry: ${e.message}`);
     }
