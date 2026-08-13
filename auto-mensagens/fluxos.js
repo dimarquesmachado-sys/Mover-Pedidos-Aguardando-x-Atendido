@@ -404,6 +404,10 @@ const CANCELADAS_IDADE_MIN_H = Number(process.env.LIXAS_CANCELADAS_IDADE_MIN_HOR
 // costuma sair no MESMO dia da venda, e se herdasse as 24h do cancelamento uma venda ja
 // tratada ficaria presa em Pendentes o primeiro dia inteiro. Default 0 = checa desde ja.
 const ENVIO_IDADE_MIN_H = Number(process.env.LIXAS_ENVIO_IDADE_MIN_HORAS) || 0;
+// Intervalo de RE-consulta do envio. Separado do de cancelamento (6h) porque o cron
+// e horario: reusando as 6h, uma etiqueta gerada logo apos a consulta so seria vista
+// 6h depois — contra a promessa de "sai na proxima hora".
+const ENVIO_REPESCAR_H = Number(process.env.LIXAS_ENVIO_REPESCAR_HORAS) || 1;
 const CANCELADAS_REPESCAR_H  = Number(process.env.LIXAS_CANCELADAS_REPESCAR_HORAS) || 6;
 const CANCELADAS_MAX         = Number(process.env.LIXAS_CANCELADAS_MAX_POR_RODADA) || 40;
 const CANCELADAS_PAUSA_MS    = Number(process.env.LIXAS_CANCELADAS_PAUSA_MS) || 350;
@@ -470,15 +474,29 @@ async function rotinaChecarCanceladasML(opts = {}) {
       const cancelVencido = (idadeMs2 >= idadeMinMs) && (!tCancel || (agora - tCancel) >= repescarMs);
       const envioVencido  = (idadeMs2 >= ENVIO_IDADE_MIN_H * 3600 * 1000)
                             && !v.ml_etiqueta_em && !v.nf_emitida_em
-                            && (!tEnvio || (agora - tEnvio) >= repescarMs);
+                            && (!tEnvio || (agora - tEnvio) >= ENVIO_REPESCAR_H * 3600 * 1000);
       return cancelVencido || envioVencido;
     });
 
-    // Nunca-checado primeiro (timestamp 0); depois o checado ha mais tempo.
+    // Nunca-checado primeiro; depois o checado ha mais tempo. Considera os DOIS
+    // relogios: olhando so o de cancelamento, venda nova (que tem os dois nulos)
+    // empatava com as demais e a ordem da fonte (mais nova primeiro) decidia — as
+    // mais antigas nunca chegavam a ser consultadas quando havia mais candidatas
+    // que CANCELADAS_MAX.
+    const _relogio = (v) => {
+      const tc = v.ml_status_atualizado_em ? new Date(v.ml_status_atualizado_em).getTime() : 0;
+      const te = v.ml_envio_checado_em ? new Date(v.ml_envio_checado_em).getTime() : 0;
+      if (!tc || !te) return 0;          // alguma checagem nunca feita -> prioridade maxima
+      return Math.min(tc, te);           // senao, a mais atrasada das duas manda
+    };
     alvos.sort((a, b) => {
-      const ta = a.ml_status_atualizado_em ? new Date(a.ml_status_atualizado_em).getTime() : 0;
-      const tb = b.ml_status_atualizado_em ? new Date(b.ml_status_atualizado_em).getTime() : 0;
-      return ta - tb;
+      const d = _relogio(a) - _relogio(b);
+      // Desempate entre nunca-checados: venda mais ANTIGA primeiro (a mais proxima
+      // de vencer o prazo de postagem).
+      if (d !== 0) return d;
+      const na = a.data_venda ? new Date(a.data_venda).getTime() : 0;
+      const nb = b.data_venda ? new Date(b.data_venda).getTime() : 0;
+      return na - nb;
     });
 
     alvos = alvos.slice(0, Number(opts.max) || CANCELADAS_MAX);
@@ -569,6 +587,13 @@ async function rotinaChecarCanceladasML(opts = {}) {
     const jaFeito = [];
     if (v.nf_emitida_em) jaFeito.push(`NF ${v.nf_numero || '?'}/${v.nf_serie || '?'} emitida em ${_fmtBR(v.nf_emitida_em)}`);
     if (v.bling_editado_em) jaFeito.push(`pedido Bling ${v.bling_pedido_id || '?'} montado em ${_fmtBR(v.bling_editado_em)}`);
+    // Conclusao manual tambem e trabalho ja feito: o cenario tipico do botao
+    // "✓ Processado" e NF emitida POR FORA do painel. Sem isso, um cancelamento
+    // posterior no ML nao geraria alerta e a venda cairia calada no bolsao de
+    // resolvidas — ninguem seria avisado pra parar o despacho e estornar a nota.
+    if (!v.nf_emitida_em && !v.bling_editado_em && v.processado_manual_em) {
+      jaFeito.push(`marcada como concluida na mao em ${_fmtBR(v.processado_manual_em)} (a NF pode ter saido por fora do painel)`);
+    }
 
     const campos = {
       status: 'venda_cancelada',
