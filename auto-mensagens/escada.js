@@ -69,6 +69,10 @@ async function rotinaEscadaIndisponivel(opts = {}) {
     ...(listaAguard.ok && Array.isArray(listaAguard.data) ? listaAguard.data : [])
   ]) {
     if (!/indispon/i.test(String(v.bling_erro || '')) || v.nf_emitida_em) continue;
+    // Conclusao manual = NF emitida POR FORA do painel: editar e emitir aqui criaria
+    // uma SEGUNDA nota. E venda cancelada (ou em quarentena) nao se monta.
+    if (v.processado_manual_em) continue;
+    if (v.venda_cancelada_em || v.status === 'venda_cancelada' || v.status === 'cancelada_quarentena') continue;
     const k = String(v.order_id);
     if (_vistos.has(k)) continue;
     _vistos.add(k);
