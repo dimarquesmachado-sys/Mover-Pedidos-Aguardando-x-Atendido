@@ -393,6 +393,11 @@ const CANCELADAS_STATUS = (
   process.env.LIXAS_CANCELADAS_STATUS ||
   'aguardando_resposta,cliente_respondeu,cliente_confirmou_pedido,aguardando_bling,cancelada_quarentena,precisa_atencao_humano,processado'
 ).split(',').map(s => s.trim()).filter(Boolean);
+// 'cancelada_quarentena' e status INTERNO desta rotina — ela mesma o escreve e so ela
+// o resolve. Um deploy com LIXAS_CANCELADAS_STATUS antigo/custom substituiria o default
+// inteiro e deixaria a linha quarentenada pra sempre, sem nunca reconferir a etiqueta.
+// Por isso entra sempre, depois do parse do override.
+if (!CANCELADAS_STATUS.includes('cancelada_quarentena')) CANCELADAS_STATUS.push('cancelada_quarentena');
 // Acompanha a janela do leitor (LIXAS_JANELA_DIAS, default 30). Se ficasse em 7
 // enquanto o lerRespostas processa ate 30 dias, existiria uma faixa de 8-30 dias em
 // que uma venda CANCELADA no ML seguiria sendo processada — montando pedido no Bling
@@ -447,8 +452,18 @@ async function rotinaChecarCanceladasML(opts = {}) {
     alvos = [r.data];
   } else {
     const dias = Number(opts.dias) || CANCELADAS_DIAS;
-    const listaR = await lcp.listarPendentes({ dias, limit: 500 });
-    const lista = (listaR.ok && Array.isArray(listaR.data)) ? listaR.data : [];
+    // Pagina a janela toda: com limit unico, listarPendentes devolve as 500 MAIS NOVAS
+    // (data_venda DESC) e as vendas antigas nunca entram na ordenacao — ficariam em
+    // Pendentes mesmo depois de etiquetadas/postadas. Linhas ja resolvidas ocupam essa
+    // cota, entao o teto e atingido mais rapido do que parece.
+    const PAG = 500;
+    let lista = [];
+    for (let pg = 0; pg < 20; pg++) {
+      const r = await lcp.listarPendentes({ dias, limit: PAG, offset: pg * PAG });
+      const arr = (r.ok && Array.isArray(r.data)) ? r.data : [];
+      lista = lista.concat(arr);
+      if (arr.length < PAG) break;
+    }
 
     const agora = Date.now();
     // Checagem explicita de undefined (e nao `||`) pra que ?idadeMinHoras=0 e
@@ -901,7 +916,17 @@ async function _processarAutoEmissaoInner({ venda, iaResult, graosResult, lcp })
         ml_status_atualizado_em: new Date().toISOString(),
         venda_cancelada_em: new Date().toISOString()
       };
-      if (!venda.ml_etiqueta_em && !venda.nf_emitida_em && !venda.bling_editado_em) {
+      // processado_manual_em ja prova que houve trabalho (NF pode ter saido por fora),
+      // e o marcador exclui a venda da repescagem de envio — consultar o shipment aqui
+      // so cria a chance de cair na quarentena e ADIAR o alerta que ja e devido.
+      if (venda.processado_manual_em) {
+        campos.venda_cancelada_em = new Date().toISOString();
+        campos.alerta_pos_venda = (
+          `CANCELADA NO ML apos conclusao manual (${_fmtBR(venda.processado_manual_em)}). NAO DESPACHAR. ` +
+          `A NF pode ter sido emitida por fora do painel — conferir e cancelar/estornar no Bling.`
+        ).slice(0, 500);
+        console.error(`[auto-emissao] 🚨 order ${orderId} cancelada apos conclusao manual — alerta gravado`);
+      } else if (!venda.ml_etiqueta_em && !venda.nf_emitida_em && !venda.bling_editado_em) {
         try {
           const envG = await ml.getEnvioResumo(String(orderId));
           if (envG && envG.ok && envG.temEtiqueta) {
