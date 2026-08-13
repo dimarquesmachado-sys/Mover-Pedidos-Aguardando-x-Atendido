@@ -645,6 +645,12 @@ async function rotinaChecarCanceladasML(opts = {}) {
       if (envFalhou) {
         out.erros.push({ order_id: oid, erro: `cancelada, mas nao confirmei o envio (${envFalhou}) — adiado pra proxima rodada` });
         console.error(`[canceladas] order ${oid} CANCELADA e envio desconhecido (${envFalhou}) — nao finalizo agora`);
+        // PRECISA entrar em detalhes: o botao "Verificar ML" le detalhes[0] e, sem isso,
+        // o painel mostraria "✅ Venda ativa" pra um pedido que o ML acabou de confirmar
+        // como CANCELADO — o oposto do que a checagem descobriu.
+        out.detalhes.push({ order_id: oid, ml_status: st.status, cancelada: true,
+                            adiado: true, alerta: null, buyer: v.buyer_nome || null,
+                            aviso: `cancelada no ML, mas o envio nao pode ser confirmado (${envFalhou}) — gravacao adiada` });
         continue;
       }
     }
