@@ -732,6 +732,25 @@ async function rotinaChecarCanceladasML(opts = {}) {
       // nao migrada ou falha transiente do REST passaria batida: a rodada diria que a
       // etiqueta foi detectada, mas nada teria sido gravado e a venda seguiria pendente.
       const updV = await lcp.atualizarVenda(oid, campos);
+      // BLOQUEADA: um cancelamento entrou entre a leitura e esta escrita, e a guarda
+      // automatica recusou o PATCH porque `campos.status` e ativo. Sem tratar, o
+      // marcador de etiqueta se perderia — e venda_cancelada_em exclui a linha de todas
+      // as varreduras futuras, ou seja, o alerta de nao despachar nunca sairia.
+      // Regrava SEM o status (que a guarda protege) e monta o alerta pos-venda.
+      if (updV && updV.bloqueada && campos.ml_etiqueta_em) {
+        const semStatus = Object.assign({}, campos);
+        delete semStatus.status;
+        semStatus.alerta_pos_venda = (
+          `CANCELADA NO ML com etiqueta ja gerada (${campos.ml_shipment_status || '?'}). NAO DESPACHAR. ` +
+          `Conferir devolucao/estorno no ML e a NF/pedido no Bling.`
+        ).slice(0, 500);
+        const r2 = await lcp.atualizarVenda(oid, semStatus, { forcar: true });
+        console.error(`[canceladas] 🚨 order ${oid} etiqueta detectada em venda que acabou de ser CANCELADA — alerta gravado (${r2 && r2.ok ? 'ok' : 'FALHOU'})`);
+        out.detalhes.push({ order_id: oid, ml_status: st.status, cancelada: true,
+                            etiqueta: true, alerta: semStatus.alerta_pos_venda, buyer: v.buyer_nome || null });
+        await new Promise(r => setTimeout(r, CANCELADAS_PAUSA_MS));
+        continue;
+      }
       if (!updV.ok) {
         out.erros.push({ order_id: oid, erro: 'falhou gravar o status de envio/checagem no Supabase' });
         console.error(`[canceladas] order ${oid} NAO consegui gravar ${Object.keys(campos).join(',')} no Supabase`);
