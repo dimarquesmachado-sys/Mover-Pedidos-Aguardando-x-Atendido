@@ -756,7 +756,17 @@ async function rotinaChecarCanceladasML(opts = {}) {
         // despachar" — alerta falso sobre uma venda perfeitamente valida.
         const _rel = await lcp.buscar(oid);
         const _v2 = (_rel && _rel.ok) ? _rel.data : null;
-        const _terminal = !!(_v2 && (_v2.venda_cancelada_em || ['venda_cancelada','cancelado','cancelada_quarentena'].includes(String(_v2.status || ''))));
+        // Releitura que FALHA e indeterminado, nao "foi conclusao manual": se o
+        // bloqueio era um cancelamento, seguir pelo ramo nao-terminal descartaria a
+        // etiqueta e o alerta — e cancelamentos terminais saem das varreduras
+        // seguintes, entao nao haveria segunda chance.
+        if (!_v2) {
+          console.error(`[canceladas] order ${oid} etiqueta detectada, escrita bloqueada e NAO consegui reler — indeterminado, tratar na proxima rodada`);
+          out.erros.push({ order_id: oid, erro: 'etiqueta detectada com escrita bloqueada e releitura falhou — reconferir' });
+          await new Promise(r => setTimeout(r, CANCELADAS_PAUSA_MS));
+          continue;
+        }
+        const _terminal = !!(_v2.venda_cancelada_em || ['venda_cancelada','cancelado','cancelada_quarentena'].includes(String(_v2.status || '')));
         if (!_terminal) {
           // Nao e cancelamento: foi conclusao manual (ou a linha nao pode ser relida).
           // A decisao do operador prevalece — nao grava etiqueta nem alerta.
@@ -1328,6 +1338,24 @@ async function _processarAutoEmissaoInner({ venda, iaResult, graosResult, lcp })
     }
     if (venda.ml_envio_indeterminado_em) {
       try { await lcp.atualizarVenda(orderId, { ml_envio_indeterminado_em: null }); } catch (_) {}
+    }
+    // RECHECA o cancelamento DEPOIS do envio: o getEnvioResumo faz um /orders mais novo
+    // mas so olha o shipment, entao um cancelamento ocorrido entre a Guarda 1.5 e aqui
+    // nao apareceria — e seguiriamos pra reserva com marcadores locais intactos.
+    // Esta e a ULTIMA leitura do ML antes de escrever no Bling.
+    const stFinal = await ml.getOrderStatusResumo(String(orderId));
+    if (!stFinal || !stFinal.ok) {
+      console.warn(`[auto-emissao] order ${orderId} status indeterminado na recheca — nao edito nem emito`);
+      return { falha: true, retry: true, motivo: 'status_indeterminado' };
+    }
+    if (stFinal.cancelada) {
+      await lcp.atualizarVenda(orderId, {
+        status: 'venda_cancelada', ml_status: stFinal.status,
+        ml_status_atualizado_em: new Date().toISOString(),
+        venda_cancelada_em: new Date().toISOString()
+      });
+      console.warn(`[auto-emissao] order ${orderId} CANCELADA no ML (recheca pos-envio) — nao edito nem emito`);
+      return { falha: true, motivo: 'venda_cancelada_no_ml' };
     }
   } catch (e) {
     console.warn(`[auto-emissao] order ${orderId} excecao lendo o envio — nao edito nem emito: ${e.message}`);
