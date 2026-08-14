@@ -159,13 +159,17 @@ async function atualizarVenda(orderId, campos, opts) {
  * Marca como cliente_respondeu (quando cron de leitura detecta nova msg)
  */
 async function marcarRespostaCliente(orderId, { texto, dataResposta, totalMsgsCliente }) {
+  // A guarda automatica so protege cancelamento. Sem estes predicados, uma venda que
+  // ganhou etiqueta / NF / conclusao manual entre a leitura e esta escrita voltaria pra
+  // 'cliente_respondeu' — e o ciclo seguiria pra IA, falando com quem ja tem pedido
+  // fechado (e devolvendo a conclusao manual pra Pendentes).
   return atualizarVenda(orderId, {
     cliente_respondeu: true,
     ultima_resposta_cliente: texto,
     ultima_resposta_em: dataResposta,
     total_msgs_cliente: totalMsgsCliente || 1,
     status: 'cliente_respondeu'
-  });
+  }, { somenteSe: 'nf_emitida_em=is.null&ml_etiqueta_em=is.null&processado_manual_em=is.null' });
 }
 
 /**
@@ -232,8 +236,14 @@ async function reservarEmissao(orderId) {
 async function renovarEmissao(orderId, token) {
   if (!token) return true;   // compat: caminhos que ainda nao passam token
   try {
+    // Reaplica TODOS os predicados da reserva: o escritor de cancelamento grava o
+    // terminal sem limpar nf_emitindo_por, entao checar so o token deixaria um worker
+    // expirado renovar e seguir pra editar/emitir uma venda ja cancelada.
     const r = await atualizarVenda(orderId, { nf_emitindo_em: new Date().toISOString() },
-      { somenteSe: `nf_emitindo_por=eq.${encodeURIComponent(token)}` });
+      { somenteSe: `nf_emitindo_por=eq.${encodeURIComponent(token)}`
+                 + '&venda_cancelada_em=is.null&nf_emitida_em=is.null&ml_etiqueta_em=is.null'
+                 + '&processado_manual_em=is.null'
+                 + '&status=not.in.(venda_cancelada,cancelado,cancelada_quarentena)' });
     return !!(r && r.ok && (!Array.isArray(r.data) || r.data.length === 1));
   } catch (_) { return false; }
 }
