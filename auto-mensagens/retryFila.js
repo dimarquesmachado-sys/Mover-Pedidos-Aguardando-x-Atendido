@@ -282,7 +282,14 @@ async function revisarAtencaoHumana({ lcp }) {
       if (busca.ok) {
         const sit = Number(busca.situacaoId);
         if (SIT_CANCELADAS.includes(sit)) {
-          await lcp.atualizarVenda(venda.order_id, { status: 'cancelado', bling_erro: null, nf_erro: null });
+          const _uCanc = await lcp.atualizarVenda(venda.order_id, { status: 'cancelado', bling_erro: null, nf_erro: null }, { somenteSe: lcp.semReservaAtiva() });
+            // Adia se ha emissao em curso: sem isso, o dono do lease termina no Bling e
+            // sua escrita terminal (guardada por token) e rejeitada por este 'cancelado'
+            // — NF emitida sem registro.
+            if (_uCanc && _uCanc.ok && Array.isArray(_uCanc.data) && _uCanc.data.length === 0) {
+              console.warn(`[revisar] order ${venda.order_id} cancelado no Bling, mas ha emissao em curso — adiado`);
+              continue;
+            }
           console.log(`[revisar] order ${venda.order_id} cancelado no Bling (situacao ${sit}) — reconciliado`);
           continue;
         }
