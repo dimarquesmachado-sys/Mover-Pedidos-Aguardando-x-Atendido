@@ -305,9 +305,26 @@ function resumoShopee(de, ate) {
   const dev = readJson(ARQ_DEV(), { devolucoes: {} }).devolucoes || {};
   const car = readJson(ARQ_CAR(), { transacoes: {} }).transacoes || {};
   const porSku = {}, porMotivo = {};
+  // 14/08 (correção do Diego): `refund_amount` é o PREÇO devolvido ao comprador, NÃO o custo
+  // da loja — parte a Shopee banca. O que sai do bolso são os lançamentos da carteira
+  // (ADJUSTMENT_FOR_RR_* e afins), e eles trazem `order_sn`: dá pra casar pedido a pedido.
+  // Medido no período 01/07→14/08 da Girassol: R$ 5.249,08 devolvidos × R$ 1.598,66 debitados.
+  const custoPorPedido = {};
+  for (const x of Object.values(car)) {
+    const q1 = Number(x.quando || 0);
+    if (!(q1 >= ini && q1 <= fim)) continue;
+    const t1 = String(x.tipo || '').toUpperCase();
+    if (/^(ESCROW_VERIFIED_ADD|ORDER_INCOME|WITHDRAWAL)/.test(t1)) continue;   // renda e saque não são custo de devolução
+    const v1 = _num(x.valor);
+    if (v1 >= 0) continue;
+    const sn1 = String(x.order_sn || '').trim();
+    if (!sn1) continue;
+    custoPorPedido[sn1] = Math.round(((custoPorPedido[sn1] || 0) + Math.abs(v1)) * 100) / 100;
+  }
   let devTotal = 0, devQtd = 0, devParciais = 0, devAjustadas = 0, devCanceladas = 0;
   const porStatus = {};
   const maiores = [];
+  let devCustoReal = 0;
   for (const d of Object.values(dev)) {
     const q = Number(d.criado_em || 0);
     if (!(q >= ini && q <= fim)) continue;
@@ -322,14 +339,19 @@ function resumoShopee(de, ate) {
     if (d.devolucao_parcial) devParciais++;
     if (d.reembolso_ajustado) devAjustadas++;
     porMotivo[d.motivo || 'sem motivo'] = (porMotivo[d.motivo || 'sem motivo'] || 0) + 1;
-    maiores.push({ valor: _num(d.refund_amount), sku: ((d.itens || [])[0] || {}).sku || null,
+    maiores.push({ valor: _num(d.refund_amount), custo_real: custoPorPedido[String(d.order_sn || '')] || 0, sku: ((d.itens || [])[0] || {}).sku || null,
       motivo: d.motivo || null, texto: (d.motivo_texto || '').slice(0, 180) || null,
       status: st9 || null, order_sn: d.order_sn || null, parcial: !!d.devolucao_parcial });
+    const custoReal = custoPorPedido[String(d.order_sn || '')] || 0;
+    devCustoReal = Math.round((devCustoReal + custoReal) * 100) / 100;
+    const somaItens = (d.itens || []).reduce((s2, i2) => s2 + _num(i2.devolvido), 0) || 1;
     for (const it of (d.itens || [])) {
       const s = it.sku || 'sem sku';
-      porSku[s] = porSku[s] || { sku: s, qtd: 0, valor: 0, nome: it.nome || null };
+      porSku[s] = porSku[s] || { sku: s, qtd: 0, valor: 0, custo_real: 0, nome: it.nome || null };
       porSku[s].qtd += it.qtd || 1;
       porSku[s].valor = Math.round((porSku[s].valor + _num(it.devolvido)) * 100) / 100;
+      // o custo é do PEDIDO; rateia entre os itens devolvidos pelo valor de cada um
+      porSku[s].custo_real = Math.round((porSku[s].custo_real + custoReal * (_num(it.devolvido) / somaItens)) * 100) / 100;
     }
   }
   // ── CORRIGIDO 06/08, na 1a coleta de verdade ────────────────────────────────
@@ -372,6 +394,10 @@ function resumoShopee(de, ate) {
       // a partir de 17/08 a Shopee informa isto; antes disso vem zero por falta do campo
       quantidade_parcial: devParciais, quantidade_com_reembolso_ajustado: devAjustadas,
       canceladas_fora_da_conta: devCanceladas, por_status: porStatus,
+      // ★ o que REALMENTE saiu do bolso (casado com a carteira pelo número do pedido).
+      // `valor_devolvido` é o preço reembolsado ao comprador — parte a Shopee banca.
+      custo_real_na_carteira: devCustoReal,
+      nota_custo: 'valor_devolvido = preço reembolsado ao comprador · custo_real_na_carteira = o que a Shopee debitou de você (casado por pedido)',
       por_motivo: porMotivo,
       por_sku: Object.values(porSku).sort((a, b) => b.valor - a.valor).slice(0, 50),
       // 14/08 — o motivo OFICIAL engana: a sonda mostrou uma devolução marcada como
