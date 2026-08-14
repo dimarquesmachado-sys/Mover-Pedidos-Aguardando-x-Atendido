@@ -238,6 +238,32 @@ async function rotinaEscadaIndisponivel(opts = {}) {
       // RESERVA + CHECAGENS AO VIVO. O try/finally precisa englobar TAMBEM a edicao e a
       // emissao (mais abaixo) — fechar antes liberaria o lease justo durante as duas
       // operacoes que ele existe pra proteger, e mataria o escopo do resEsc.
+      // PREFLIGHT do envio ANTES de reservar: a reserva recusa qualquer linha com
+      // ml_envio_indeterminado_em, e so o poll horario limpava essa marca — entao uma
+      // falha transiente do ML travava a escada (que e sensivel a prazo de coleta) ate
+      // a proxima varredura. Uma leitura boa aqui limpa a marca e destrava.
+      // A releitura POS-reserva continua existindo, pra fechar a corrida da etiqueta.
+      try {
+        const _pre = await ml.getEnvioResumo(String(orderId));
+        if (_pre && _pre.ok) {
+          const _campos = {};
+          if (v.ml_envio_indeterminado_em) _campos.ml_envio_indeterminado_em = null;
+          if (_pre.temEtiqueta) {
+            _campos.ml_etiqueta_em = new Date().toISOString();
+            _campos.ml_shipment_status = _pre.status || null;
+            _campos.ml_shipment_substatus = _pre.substatus || null;
+          }
+          if (Object.keys(_campos).length) await lcp.atualizarVenda(orderId, _campos);
+          if (_pre.temEtiqueta) {
+            console.warn(`[escada] order ${orderId} etiqueta JA gerada (${_pre.status}) — nao reservo`);
+            stats.erros++; stats.lista.push({ order_id: orderId, acao: 'erro', motivo: 'etiqueta_ja_gerada' });
+            continue;
+          }
+        }
+      } catch (e) {
+        console.warn(`[escada] order ${orderId} preflight de envio falhou (segue pra reserva): ${e.message}`);
+      }
+
       const resEsc = await lcp.reservarEmissao(orderId);
       if (!resEsc.ok) {
         console.warn(`[escada] order ${orderId} nao reservei (${resEsc.motivo}) — nao edito nem emito`);
