@@ -33,6 +33,7 @@ const { json, ehAdmin, CONFERIDOS_FILE, CACHE_DIR, readJson, writeJson } = base;
 
 const ARQ_DEV = () => path.join(CACHE_DIR, '_shopee_devolucoes.json');
 const ARQ_CAR = () => path.join(CACHE_DIR, '_shopee_carteira.json');
+const ARQ_ADS = () => path.join(CACHE_DIR, '_shopee_ads.json');   // 14/08: gasto de Shopee Ads por DIA
 // 11/08 — ATENÇÃO: existe UM SÓ serviço Shopee, multi-loja (`/amb`, `/girassol`, `/good`).
 // O host tem nome de girassol por ter sido o primeiro, mas atende as três empresas; o repo
 // chama-se ambtotal-shopee-nf-sync-x-bling. Eu tinha apontado a AMB pro nome do REPO —
@@ -245,6 +246,53 @@ async function coletarDevolucoes(dias, pedirAoSync) {
   return { janelas, vistas, novas, guardadas: Object.keys(arq.devolucoes).length, erro };
 }
 
+// ── ADS DA SHOPEE (14/08) ───────────────────────────────────────────────────────
+// O Diego pagou Ads na Shopee da AMB e o gasto NÃO aparecia no painel. Motivo medido:
+// ads NÃO passa pela carteira (30 dias de carteira, zero linhas de ads) — ele só existe
+// no domínio de anúncios. A sonda confirmou que o acesso está liberado e que o endpoint
+// `/api/v2/ads/get_all_cpc_ads_daily_performance` devolve UMA LINHA POR DIA com `expense`
+// (medido 01→13/08 na AMB: R$ 431,02, com dias de 71,50 / 51,32 / 44,11).
+// Datas da Shopee são DD-MM-AAAA. Guardado por DIA, então recoletar não duplica.
+async function coletarAds(dias, pedirAoSync) {
+  const total = Math.min(180, Math.max(1, Number(dias) || 30));
+  const arq = readJson(ARQ_ADS(), { dias: {}, atualizado: null });
+  arq.dias = arq.dias || {};
+  const ddmm = d => String(d.getUTCDate()).padStart(2, '0') + '-' + String(d.getUTCMonth() + 1).padStart(2, '0') + '-' + d.getUTCFullYear();
+  const iso = d => d.toISOString().slice(0, 10);
+  let novos = 0, vistos = 0, janelas = 0, erro = null;
+  const hoje = new Date();
+  // janelas de 30 dias (a API aceita períodos, mas fatiar evita resposta gigante)
+  for (let off = 0; off < total; off += 30) {
+    const fim = new Date(Date.UTC(hoje.getUTCFullYear(), hoje.getUTCMonth(), hoje.getUTCDate() - off));
+    const ini = new Date(Date.UTC(hoje.getUTCFullYear(), hoje.getUTCMonth(), hoje.getUTCDate() - Math.min(total, off + 29)));
+    janelas++;
+    const r = await pedirAoSync('shopee-raw', { caminho: '/api/v2/ads/get_all_cpc_ads_daily_performance', q: 'start_date=' + ddmm(ini) + '&end_date=' + ddmm(fim) });
+    const resp = r && r.dados && r.dados.resposta && r.dados.resposta.response;
+    if (!Array.isArray(resp)) { erro = erro || ('janela ' + iso(ini) + '..' + iso(fim) + ': sem resposta'); continue; }
+    for (const l of resp) {
+      if (!l || !l.date) continue;
+      const p = String(l.date).split('-');           // DD-MM-AAAA → AAAA-MM-DD
+      if (p.length !== 3) continue;
+      const dia = p[2] + '-' + p[1] + '-' + p[0];
+      vistos++;
+      if (arq.dias[dia] === undefined) novos++;
+      arq.dias[dia] = {
+        dia,
+        gasto: _num(l.expense),
+        impressoes: Number(l.impression) || 0,
+        cliques: Number(l.clicks) || 0,
+        pedidos_diretos: Number(l.direct_order) || 0,
+        gmv_direto: _num(l.direct_gmv),
+        roas_direto: _num(l.direct_roas)
+      };
+    }
+    await new Promise(r0 => setTimeout(r0, 400));
+  }
+  arq.atualizado = new Date().toISOString();
+  writeJson(ARQ_ADS(), arq);
+  return { ok: !erro || vistos > 0, dias_pedidos: total, janelas, dias_vistos: vistos, dias_novos: novos, erro };
+}
+
 async function coletarCarteira(dias, pedirAoSync) {
   const total = Math.min(180, Math.max(1, Number(dias) || 30));
   const agora = Math.floor(Date.now() / 1000);
@@ -329,16 +377,32 @@ function resumoShopee(de, ate) {
       custoPorTipo[t2] = Math.round(((custoPorTipo[t2] || 0) + custo) * 100) / 100;
     }
   }
+  // 14/08 — ADS entra no MESMO "sai do bolso". Ele não vem da carteira (a Shopee não
+  // lança ads lá): vem do relatório diário de anúncios, guardado por dia.
+  const ads = readJson(ARQ_ADS(), { dias: {} }).dias || {};
+  let adsGasto = 0, adsCliques = 0, adsGmv = 0, adsDias = 0;
+  for (const d of Object.values(ads)) {
+    const dia = String(d && d.dia || '');
+    if (!(dia >= de && dia <= ate)) continue;
+    adsDias++;
+    adsGasto = Math.round((adsGasto + _num(d.gasto)) * 100) / 100;
+    adsCliques += Number(d.cliques) || 0;
+    adsGmv = Math.round((adsGmv + _num(d.gmv_direto)) * 100) / 100;
+  }
+  const saiTotal = Math.round((saiDoBolso + adsGasto) * 100) / 100;
   return {
     devolucoes: {
       quantidade: devQtd, valor_devolvido: Math.round(devTotal * 100) / 100,
       por_motivo: porMotivo,
       por_sku: Object.values(porSku).sort((a, b) => b.valor - a.valor).slice(0, 50)
     },
-    carteira: { por_tipo: porTipo, custo_por_tipo: custoPorTipo, sai_do_bolso: saiDoBolso },
+    ads: { gasto: adsGasto, dias: adsDias, cliques: adsCliques, gmv_direto: adsGmv, roas: adsGasto > 0 ? Math.round((adsGmv / adsGasto) * 100) / 100 : null },
+    // sai_do_bolso agora inclui ads; carteira_sai_do_bolso é a parte que vem da carteira
+    carteira: { por_tipo: porTipo, custo_por_tipo: custoPorTipo, carteira_sai_do_bolso: saiDoBolso, ads: adsGasto, sai_do_bolso: saiTotal },
     atualizado: {
       devolucoes: readJson(ARQ_DEV(), {}).atualizado || null,
-      carteira: readJson(ARQ_CAR(), {}).atualizado || null
+      carteira: readJson(ARQ_CAR(), {}).atualizado || null,
+      ads: readJson(ARQ_ADS(), {}).atualizado || null
     }
   };
 }
@@ -636,6 +700,15 @@ function rotasShopee(ctx) {
       return true;
     }
 
+    // 14/08 — coleta o gasto de Shopee Ads (não vem pela carteira)
+    if (p === '/amb-checkout-offline/shopee/coletar-ads') {
+      if (!admOk(req, urlObj)) { json(res, 404, { error: 'not found' }); return true; }
+      const dias = Math.min(180, Math.max(1, Number(q.get('dias')) || 30));
+      const r = await coletarAds(dias, pedirAoSync);
+      json(res, 200, Object.assign({ ok: true }, r));
+      return true;
+    }
+
     return false;   // não é rota da Shopee
   };
 }
@@ -657,4 +730,4 @@ async function escrowEmLote(orderSns, loja) {
   return saida;
 }
 
-module.exports = { rotasShopee, escrowDoPedido, contasDoEscrow, escrowEmLote, coletarDevolucoes, coletarCarteira, resumoShopee, tarifasPorSku, pedirAoSync };
+module.exports = { rotasShopee, escrowDoPedido, contasDoEscrow, escrowEmLote, coletarDevolucoes, coletarCarteira, coletarAds, resumoShopee, tarifasPorSku, pedirAoSync };
