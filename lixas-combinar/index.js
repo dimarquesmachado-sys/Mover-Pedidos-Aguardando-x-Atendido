@@ -1341,6 +1341,18 @@ function routes(readBody) {
           return true;
         }
 
+        // RESERVA ANTES DE MONTAR: a etapa 1 abaixo pode reescrever os itens no Bling.
+        // Reservar so antes do gerarNFe protegia a nota, mas nao o pedido.
+        const reservaR = await lcp.reservarEmissao(orderId);
+        if (!reservaR.ok) {
+          const zeroR = reservaR.motivo === 'estado_mudou';
+          json(res, zeroR ? 409 : 503, { ok: false, erro: zeroR ? 'estado_mudou' : 'reserva_falhou', etapa: 'reserva',
+            mensagem: zeroR
+              ? 'O estado da venda mudou (cancelamento, etiqueta ou NF detectados). NADA foi montado nem emitido. Recarregue o painel.'
+              : 'Nao consegui reservar a venda com seguranca. NADA foi montado nem emitido. Rode o SQL de setup e tente de novo.' });
+          return true;
+        }
+
         let pedidoBlingId = v.bling_pedido_id;
 
         // ETAPA 1 — montar, se ainda nao foi montado
@@ -1348,15 +1360,17 @@ function routes(readBody) {
           let graosEscolhidos;
           if (v.ia_pedido_estruturado) {
             try { graosEscolhidos = JSON.parse(v.ia_pedido_estruturado); }
-            catch (_) { json(res, 400, { ok: false, etapa: 'montar', erro: 'ia_pedido_estruturado invalido — trate manual' }); return true; }
+            catch (_) { await lcp.liberarEmissao(orderId); json(res, 400, { ok: false, etapa: 'montar', erro: 'ia_pedido_estruturado invalido — trate manual' }); return true; }
           }
           if (!Array.isArray(graosEscolhidos) || graosEscolhidos.length === 0) {
+            await lcp.liberarEmissao(orderId);
             json(res, 400, { ok: false, etapa: 'montar', erro: 'sem graos estruturados — trate manual' });
             return true;
           }
           const lixasService = require('./lixasService');
           const graosResult = await lixasService.getGraosDisponiveisPorSkuACombinar(v.sku_a_combinar);
           if (!graosResult.ok) {
+            await lcp.liberarEmissao(orderId);
             json(res, 500, { ok: false, etapa: 'montar', erro: 'erro_consultar_graos_bling', detalhe: graosResult.erro });
             return true;
           }
@@ -1378,6 +1392,7 @@ function routes(readBody) {
               status: 'precisa_atencao_humano',
               bling_erro: `recuperar montar ${edit.etapa || ''}: ${edit.erro || ''}`.slice(0, 500)
             });
+            await lcp.liberarEmissao(orderId);
             json(res, 500, { ok: false, etapa: 'montar', ...edit });
             return true;
           }
@@ -1391,19 +1406,8 @@ function routes(readBody) {
 
         // ETAPA 2 — emitir a NF
         if (!pedidoBlingId) {
+          await lcp.liberarEmissao(orderId);
           json(res, 400, { ok: false, etapa: 'nf', erro: 'sem bling_pedido_id apos montar' });
-          return true;
-        }
-        // Mesma reserva do /emitir-nf: este caminho gasta tempo montando o pedido antes
-        // de emitir, entao a janela pro cron gravar um cancelamento e ainda maior.
-        const reservaR = await lcp.reservarEmissao(orderId);
-        if (!reservaR.ok) {
-          const zeroR = reservaR.motivo === 'estado_mudou';
-          json(res, zeroR ? 409 : 503, { ok: false, erro: zeroR ? 'estado_mudou' : 'reserva_falhou',
-            etapa: 'nf',
-            mensagem: zeroR
-              ? 'O estado da venda mudou durante a recuperacao (cancelamento ou NF detectados). O pedido pode ter sido montado, mas NENHUMA nota foi emitida. Recarregue o painel.'
-              : 'Nao consegui reservar a venda pra emitir com seguranca. NENHUMA nota foi emitida. Rode o SQL de setup e tente de novo.' });
           return true;
         }
         const nf = await bp.gerarNFe(pedidoBlingId);
@@ -1413,10 +1417,16 @@ function routes(readBody) {
             Number(f.code) === 74 || /nota fiscal referenciada/i.test(String(f.msg || ''))
           );
           if (jaTemNF) {
-            await lcp.atualizarVenda(orderId, {
+            const p74r = await lcp.atualizarVenda(orderId, {
               nf_emitida_em: new Date().toISOString(), nf_erro: null,
               nf_emitindo_em: null, status: 'processado'
             });
+            if (!p74r.ok || (Array.isArray(p74r.data) && p74r.data.length !== 1)) {
+              console.error(`[lixas-combinar recuperar-nf] order ${orderId} 🚨 code 74 mas NAO gravei no banco`);
+              json(res, 207, { ok: false, erro: 'nf_existente_sem_registro',
+                mensagem: 'Esta venda JA POSSUI NF no Bling, mas nao consegui registrar isso no painel. Use o Verificar ML pra reconciliar.' });
+              return true;
+            }
             const confR1 = await enviarConfirmacaoPedido(v, orderId);
             json(res, 200, { ok: true, jaEmitida: true, mensagem: 'Bling ja tinha NF referenciada — registrado como emitida.', confirmacao_cliente: confR1 });
             return true;
