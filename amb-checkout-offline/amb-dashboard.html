@@ -397,7 +397,7 @@ const MOD = '/amb-checkout-offline';
     return _f(u, o);
   };
 })();
-const DASH_BUILD = 'a13';
+const DASH_BUILD = 'a14';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -1092,17 +1092,33 @@ function desenharDespesasShopee(d){
   const motOrd = Object.keys(mot).sort((a2,b2)=>mot[b2]-mot[a2]);
   if(motOrd.length) h += '<div class="mut" style="font-size:11px;margin-top:8px">por que voltou: '+
     motOrd.map(k=> '<b>'+N(mot[k])+'</b> '+(MOTIVO_SHP[k]||k)).join(' \u00b7 ')+'</div>';
+  // 14/08 — a tabela mostrava só "R$ devolvido", que é o PREÇO reembolsado ao comprador e
+  // NÃO o custo da loja (parte a Shopee banca). Medido: R$ 5.249 devolvidos × R$ 1.653 de
+  // custo real no mesmo período. Agora as duas colunas aparecem, e o % passa a ser do CUSTO,
+  // que é o que decide onde mexer.
   const sk = (dev.por_sku||[]).slice(0,10);
   if(sk.length){
+    const temCusto = sk.some(function(s){ return Number(s.custo_real)>0; });
+    const totCusto = Number(dev.custo_real_na_carteira||0) || 1;
     const tot = (dev.valor_devolvido||0) || 1;
     h += '<table style="width:100%;margin-top:10px;font-size:12px"><thead><tr>'+
-      '<th style="text-align:left">SKU que mais voltou</th><th style="text-align:right">un.</th><th style="text-align:right">R$ devolvido</th><th style="text-align:right">% do total</th></tr></thead><tbody>'+
+      '<th style="text-align:left">SKU que mais voltou</th><th style="text-align:right">un.</th>'+
+      '<th style="text-align:right" title="preço reembolsado ao comprador — parte disso a Shopee banca">R$ devolvido</th>'+
+      (temCusto? '<th style="text-align:right" title="o que a Shopee debitou de VOC\u00ca por essa devolu\u00e7\u00e3o (inclui o frete de retorno). \u00c9 este o preju\u00edzo">\ud83d\udcb8 custo real</th>':'')+
+      '<th style="text-align:right">% do total</th></tr></thead><tbody>'+
       sk.map(function(s){
+        const cr = Number(s.custo_real)||0;
+        const pct = temCusto ? (cr/totCusto*100) : (s.valor/tot*100);
         return '<tr><td title="'+(s.nome||'').replace(/"/g,'')+'">'+s.sku+'</td>'+
                '<td style="text-align:right">'+N(s.qtd)+'</td>'+
-               '<td style="text-align:right;color:#f87171">'+BRL(s.valor)+'</td>'+
-               '<td style="text-align:right" class="mut">'+(Math.round(s.valor/tot*1000)/10)+'%</td></tr>';
-      }).join('')+'</tbody></table>';
+               '<td style="text-align:right" class="mut">'+BRL(s.valor)+'</td>'+
+               (temCusto? '<td style="text-align:right;color:#f87171;font-weight:700">'+BRL(cr)+'</td>':'')+
+               '<td style="text-align:right" class="mut">'+(Math.round(pct*10)/10)+'%</td></tr>';
+      }).join('')+'</tbody></table>'+
+      (temCusto? '<div class="mut" style="font-size:10.5px;margin-top:5px">\u201cR$ devolvido\u201d \u00e9 o pre\u00e7o que voltou pro comprador; \u201ccusto real\u201d \u00e9 o que a Shopee tirou da sua carteira (com o frete de retorno dentro). O % \u00e9 sobre o custo.</div>':'');
+  }
+  if(Number(dev.canceladas_fora_da_conta)>0){
+    h += '<div class="mut" style="font-size:10.5px;margin-top:4px">'+N(dev.canceladas_fora_da_conta)+' devolu\u00e7\u00e3o(\u00f5es) cancelada(s) pela Shopee ficaram FORA da conta (custo zero).</div>';
   }
   const at = (d.atualizado && (d.atualizado.carteira || d.atualizado.devolucoes)) || null;
   if(at) h += '<div class="mut" style="font-size:10px;margin-top:5px">Shopee atualizada em '+dBR(String(at).slice(0,10))+'</div>';
