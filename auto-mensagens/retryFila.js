@@ -235,6 +235,47 @@ async function retentarEmissoesBling({ lcp }) {
         _retryBling.delete(orderId);
         continue;
       }
+      // Entrada de RESTAURACAO (NF ja emitida): nao reprocessa nada no Bling — so grava
+      // o resultado que se perdeu. Reemitir aqui reescreveria um pedido ja faturado.
+      if (entry.soRestaurar) {
+        const nfC = entry.nfConfirmada || {};
+        const upd = await lcp.atualizarVenda(orderId, {
+          nf_emitida_em: new Date().toISOString(),
+          nf_id: nfC.nfeId || null, nf_numero: nfC.numero || null, nf_serie: nfC.serie || null,
+          nf_chave: nfC.chave || null, nf_erro: null,
+          bling_pedido_id: entry.pedidoId ? String(entry.pedidoId) : (vAtual.bling_pedido_id || null),
+          nf_emitindo_em: null, nf_emitindo_por: null,
+          status: 'processado'
+        });
+        if (upd && upd.ok && (!Array.isArray(upd.data) || upd.data.length === 1)) {
+          console.log(`[retry-bling] order ${orderId} restauracao concluida — NF ${nfC.numero || '?'} registrada`);
+          _retryBling.delete(orderId);
+        } else {
+          console.error(`[retry-bling] order ${orderId} restauracao da NF ${nfC.numero || '?'} FALHOU — mantendo na fila`);
+        }
+        continue;
+      }
+      // Entrada de RESTAURACAO (NF ja emitida): nao reprocessa nada no Bling — so grava
+      // o resultado que se perdeu. Reemitir aqui reescreveria um pedido ja faturado, e o
+      // code 74 esperado viraria 'nf_falhou', tirando a entrada da fila sem registrar.
+      if (entry.soRestaurar) {
+        const nfC = entry.nfConfirmada || {};
+        const upd = await lcp.atualizarVenda(orderId, {
+          nf_emitida_em: new Date().toISOString(),
+          nf_id: nfC.nfeId || null, nf_numero: nfC.numero || null, nf_serie: nfC.serie || null,
+          nf_chave: nfC.chave || null, nf_erro: null,
+          bling_pedido_id: entry.pedidoId ? String(entry.pedidoId) : (vAtual.bling_pedido_id || null),
+          nf_emitindo_em: null, nf_emitindo_por: null,
+          status: 'processado'
+        });
+        if (upd && upd.ok && (!Array.isArray(upd.data) || upd.data.length === 1)) {
+          console.log(`[retry-bling] order ${orderId} restauracao concluida — NF ${nfC.numero || '?'} registrada`);
+          _retryBling.delete(orderId);
+        } else {
+          console.error(`[retry-bling] order ${orderId} restauracao da NF ${nfC.numero || '?'} FALHOU — mantendo na fila`);
+        }
+        continue;
+      }
       await processarAutoEmissao({ venda: vAtual, iaResult: entry.iaResult, graosResult: entry.graosResult, lcp });
     } catch (e) {
       console.error(`[retry-bling] order ${orderId} erro no retry: ${e.message}`);
@@ -414,10 +455,15 @@ async function revisarAtencaoHumana({ lcp }) {
   // Enfileira uma entrada SO pra tentar restaurar o status terminal depois. Usado
   // quando o PATCH de 'processado' falha numa chamada que veio direto do lerRespostas
   // (sem entrada previa na fila) — sem isso, retry:true nao agenda nada.
-  function enfileirarRestauracao({ orderId, venda, iaResult, graosResult }) {
+  function enfileirarRestauracao({ orderId, venda, iaResult, graosResult, nfConfirmada, pedidoId }) {
     const k = String(orderId);
     if (_retryBling.has(k)) return;
-    _retryBling.set(k, { venda, iaResult, graosResult, desde: Date.now(), tentativas: 0 });
+    // nfConfirmada: a NF JA SAIU e so a gravacao falhou. Sem esse discriminador a
+    // entrada era indistinguivel de um retry normal — o retentar reeditaria o pedido ja
+    // faturado e tentaria emitir de novo, o code 74 viraria 'nf_falhou' e a entrada
+    // sairia da fila com a nota ainda sem registro.
+    _retryBling.set(k, { venda, iaResult, graosResult, desde: Date.now(), tentativas: 0,
+                         soRestaurar: !!nfConfirmada, nfConfirmada: nfConfirmada || null, pedidoId: pedidoId || null });
     console.log(`[retry-bling] order ${k} enfileirado pra restaurar status terminal`);
   }
 
