@@ -1377,6 +1377,60 @@ function routes(readBody) {
           return true;
         }
 
+        // RECHECA APOS A RESERVA: com o lease ativo o cron de cancelamento ADIA sua
+        // gravacao, entao os marcadores locais congelam e nenhum predicado pararia este
+        // worker. Cancelamento ou etiqueta surgidos entre a checagem inicial e a reserva
+        // so aparecem perguntando ao ML de novo — mesmo padrao do recuperar-nf e da escada.
+        {
+          const mlE2 = require('../auto-mensagens/mlApi');
+          let envE2 = null, stE2 = null;
+          try {
+            envE2 = await mlE2.getEnvioResumo(String(orderId));
+            stE2 = await mlE2.getOrderStatusResumo(String(orderId));
+          } catch (e) {
+            await lcp.liberarEmissao(orderId, reserva.token);
+            json(res, 503, { ok: false, erro: 'estado_indeterminado', etapa: 'recheca',
+              mensagem: `Nao consegui reconfirmar o estado da venda (${e.message}). NENHUMA nota foi emitida.` });
+            return true;
+          }
+          if (!stE2 || !stE2.ok || !envE2 || !envE2.ok) {
+            await lcp.liberarEmissao(orderId, reserva.token);
+            json(res, 503, { ok: false, erro: 'estado_indeterminado', etapa: 'recheca',
+              mensagem: 'Nao consegui reconfirmar no Mercado Livre o estado da venda. NENHUMA nota foi emitida. Tente de novo em instantes.' });
+            return true;
+          }
+          if (stE2.cancelada || envE2.temEtiqueta) {
+            const campos = envE2.temEtiqueta
+              ? { ml_etiqueta_em: new Date().toISOString(), ml_shipment_status: envE2.status || null,
+                  ml_shipment_substatus: envE2.substatus || null }
+              : {};
+            if (stE2.cancelada) {
+              campos.status = 'venda_cancelada';
+              campos.ml_status = stE2.status;
+              campos.ml_status_atualizado_em = new Date().toISOString();
+              campos.venda_cancelada_em = new Date().toISOString();
+              if (envE2.temEtiqueta) {
+                campos.alerta_pos_venda = (`CANCELADA NO ML com etiqueta ja gerada (${envE2.status || '?'}). ` +
+                  `NAO DESPACHAR. Conferir devolucao/estorno no ML e a NF/pedido no Bling.`).slice(0, 500);
+              }
+            }
+            campos.nf_emitindo_em = null; campos.nf_emitindo_por = null;
+            const _uE2 = await lcp.atualizarVenda(orderId, campos,
+              Object.assign({ forcar: true }, lcp.fecharLease(reserva.token) || {}));
+            if (!_uE2 || !_uE2.ok || (Array.isArray(_uE2.data) && _uE2.data.length !== 1)) {
+              await lcp.liberarEmissao(orderId, reserva.token);
+              json(res, 503, { ok: false, erro: 'estado_nao_gravado', etapa: 'recheca',
+                mensagem: `A venda ${stE2.cancelada ? 'foi CANCELADA' : 'ja tem etiqueta'} no Mercado Livre, mas nao consegui registrar. NENHUMA nota foi emitida. ${stE2.cancelada ? 'NAO DESPACHE e tente' : 'Tente'} de novo em instantes.` });
+              return true;
+            }
+            json(res, 409, { ok: false, erro: stE2.cancelada ? 'venda_cancelada' : 'etiqueta_ja_gerada',
+              mensagem: stE2.cancelada
+                ? 'Esta venda foi CANCELADA no Mercado Livre. NENHUMA nota foi emitida.'
+                : `Esta venda ja tem etiqueta no ML (${envE2.status || '?'}). NENHUMA nota foi emitida.` });
+            return true;
+          }
+        }
+
         console.log(`[lixas-combinar emitir-nf] orderId=${orderId} pedidoBling=${v.bling_pedido_id}`);
         // Excecao do gerarNFe (rede rejeitada, etc) pulava direto pro catch externo e
         // deixava o lease preso ate vencer, bloqueando cancelamento e novas tentativas
