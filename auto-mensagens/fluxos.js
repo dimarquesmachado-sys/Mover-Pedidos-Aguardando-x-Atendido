@@ -1361,6 +1361,12 @@ async function _processarAutoEmissaoInner({ venda, iaResult, graosResult, lcp })
         console.warn(`[auto-emissao] order ${orderId} cancelada, mas ha emissao em curso — nao gravo agora`);
         return { falha: true, retry: true, motivo: 'venda_cancelada_emissao_em_curso' };
       }
+      // {ok:false} = a linha continua ATIVA no banco. Sem retry, o wrapper apagaria a
+      // entrada da fila reportando um cancelamento que nunca foi gravado.
+      if (!_uF || !_uF.ok) {
+        console.error(`[auto-emissao] order ${orderId} 🚨 cancelada no ML mas NAO gravei — mantendo na fila`);
+        return { falha: true, retry: true, motivo: 'venda_cancelada_gravacao_falhou' };
+      }
       console.warn(`[auto-emissao] order ${orderId} CANCELADA no ML (recheca pos-envio) — nao edito nem emito`);
       return { falha: true, motivo: 'venda_cancelada_no_ml' };
     }
