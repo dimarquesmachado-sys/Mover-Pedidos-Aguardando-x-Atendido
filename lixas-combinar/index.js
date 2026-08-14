@@ -1441,13 +1441,23 @@ function routes(readBody) {
             return true;
           }
           if (stC.cancelada) {
-            await lcp.atualizarVenda(orderId, {
+            const _uC = await lcp.atualizarVenda(orderId, {
               status: 'venda_cancelada', ml_status: stC.status,
               ml_status_atualizado_em: new Date().toISOString(),
               venda_cancelada_em: new Date().toISOString()
             }, { forcar: true });
+            // atualizarVenda resolve com {ok:false} em vez de lancar. Sem conferir, o
+            // card seguiria em Resolvidos sem alerta — e esta rota so aparece em venda
+            // com NF emitida, ou seja, justamente onde e preciso parar o despacho e
+            // cancelar a nota.
+            if (!_uC || !_uC.ok || (Array.isArray(_uC.data) && _uC.data.length !== 1)) {
+              console.error(`[lixas-combinar confirmar-cliente] order ${orderId} 🚨 cancelada no ML mas NAO gravei`);
+              json(res, 503, { ok: false, erro: 'cancelamento_nao_gravado',
+                mensagem: 'Esta venda foi CANCELADA no Mercado Livre, mas nao consegui registrar isso — o card continua como se estivesse tudo certo. NAO DESPACHE, confira a NF no Bling e tente de novo.' });
+              return true;
+            }
             json(res, 409, { ok: false, erro: 'venda_cancelada',
-              mensagem: 'Esta venda foi CANCELADA no Mercado Livre. NADA foi enviado a cliente.' });
+              mensagem: 'Esta venda foi CANCELADA no Mercado Livre. NADA foi enviado a cliente. Se houver NF emitida, cancele/estorne no Bling e NAO despache.' });
             return true;
           }
         } catch (e) {
