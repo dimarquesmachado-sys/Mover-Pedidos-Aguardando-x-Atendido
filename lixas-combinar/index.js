@@ -266,11 +266,20 @@ async function checarMlAntesDeEscrever(orderId, lcp, opts) {
   const temEtiq = envOk && env.temEtiqueta;
 
   if (temEtiq) {
-    await lcp.atualizarVenda(orderId, {
+    // Confere: se nao gravou, a etiqueta detectada some e a proxima chamada volta a
+    // liberar escrita no Bling achando que nao ha etiqueta.
+    const _uEt = await lcp.atualizarVenda(orderId, {
       ml_etiqueta_em: new Date().toISOString(),
       ml_shipment_status: env.status || null, ml_shipment_substatus: env.substatus || null,
       ml_envio_indeterminado_em: null
     });
+    if (!_uEt || !_uEt.ok || (Array.isArray(_uEt.data) && _uEt.data.length !== 1)) {
+      console.error(`[lixas-combinar] order ${orderId} 🚨 etiqueta detectada mas NAO gravada`);
+      if (!st.cancelada) {
+        return { ok: false, http: 503, corpo: { ok: false, erro: 'etiqueta_nao_gravada',
+          mensagem: 'Esta venda ja tem etiqueta no ML, mas nao consegui registrar. NADA foi alterado. Tente de novo em instantes.' } };
+      }
+    }
   } else if (envOk) {
     // Leitura boa e sem etiqueta: limpa a marca de indeterminado, senao uma falha
     // anterior deixaria toda edicao manual bloqueada ate o poll horario passar.
@@ -598,8 +607,14 @@ function routes(readBody) {
               const nfId = (nf && typeof nf === 'object') ? nf.id : nf;
               if (Number(nfId) > 0) {
                 const quando = new Date().toISOString();
-                await lcp.atualizarVenda(v.order_id, { nf_emitida_em: quando });
-                v.nf_emitida_em = quando; // reflete ja nesta resposta (botao some)
+                const _uCura = await lcp.atualizarVenda(v.order_id, { nf_emitida_em: quando });
+                // So reflete na resposta se GRAVOU: senao o botao sumiria desta carga e
+                // voltaria na proxima, e o operador acharia que o painel piscou.
+                if (_uCura && _uCura.ok && (!Array.isArray(_uCura.data) || _uCura.data.length === 1)) {
+                  v.nf_emitida_em = quando;
+                } else {
+                  console.error(`[lixas-combinar] order ${v.order_id} NF confirmada no Bling mas NAO gravada`);
+                }
               }
             } catch (_) { /* checagem falhou: mantem o botao (melhor pecar por mostrar) */ }
           }
@@ -1567,11 +1582,20 @@ function routes(readBody) {
             return true;
           }
           if (stC.cancelada) {
+            // Respeita lease ativo: com um worker dentro do gerarNFe, gravar o
+            // cancelamento aqui faria a escrita terminal dele ser rejeitada — NF
+            // emitida sem registro.
+            const _limC = new Date(Date.now() - (Number(process.env.LIXAS_NF_LEASE_MIN) || 10) * 60 * 1000).toISOString();
             const _uC = await lcp.atualizarVenda(orderId, {
               status: 'venda_cancelada', ml_status: stC.status,
               ml_status_atualizado_em: new Date().toISOString(),
               venda_cancelada_em: new Date().toISOString()
-            }, { forcar: true });
+            }, { forcar: true, somenteSe: `or=(nf_emitindo_em.is.null,nf_emitindo_em.lt.${_limC})` });
+            if (_uC && _uC.ok && Array.isArray(_uC.data) && _uC.data.length === 0) {
+              json(res, 409, { ok: false, erro: 'venda_cancelada_emissao_em_curso',
+                mensagem: 'Esta venda foi CANCELADA no Mercado Livre, mas ha uma emissao em curso agora. NADA foi enviado a cliente. Aguarde e recarregue — NAO DESPACHE.' });
+              return true;
+            }
             // atualizarVenda resolve com {ok:false} em vez de lancar. Sem conferir, o
             // card seguiria em Resolvidos sem alerta — e esta rota so aparece em venda
             // com NF emitida, ou seja, justamente onde e preciso parar o despacho e
