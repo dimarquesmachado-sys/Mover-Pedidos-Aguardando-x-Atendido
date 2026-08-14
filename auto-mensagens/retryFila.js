@@ -307,7 +307,13 @@ async function revisarAtencaoHumana({ lcp }) {
             // mandaria o card pro bolsao fechado — escondendo o pedido do cliente
             // poucos minutos depois de ele ter sido escalado.
             // Neste caso grava so a evidencia da NF e PRESERVA o status humano.
+            // A escalacao POS-NF (fase 2 do lerRespostas) parte de uma linha que JA tem
+            // nf_emitida_em. Usar so "tem resposta do cliente" era largo demais: pegava
+            // tambem escalacao tecnica/baixa confianca ANTERIOR a nota, e o painel
+            // passaria a dizer que o cliente pediu algo apos a NF — exigindo resolucao
+            // manual a toa em todo caso concluido por fora.
             const _escaladoPosNf = String(venda.status || '') === 'precisa_atencao_humano'
+                                   && !!venda.nf_emitida_em
                                    && !!venda.ultima_resposta_cliente;
             const _camposRec = {
               // A NF foi CONFIRMADA no Bling: grava o marcador. Sem ele, o classificador
