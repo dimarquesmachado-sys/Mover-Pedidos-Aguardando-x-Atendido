@@ -31,6 +31,9 @@ const path = require('path');
 const base = require('./base');
 const { json, ehAdmin, CONFERIDOS_FILE, CACHE_DIR, readJson, writeJson } = base;
 
+// 14/08 — ADS vem da lib COMPARTILHADA (lib/shopee-ads.js): a mesma lógica serve
+// girassol/amb/good, então descoberta nova entra uma vez só, não três.
+const adsLib = require('../lib/shopee-ads');
 const ARQ_DEV = () => path.join(CACHE_DIR, '_shopee_devolucoes.json');
 const ARQ_CAR = () => path.join(CACHE_DIR, '_shopee_carteira.json');
 
@@ -321,7 +324,9 @@ function resumoShopee(de, ate) {
       custoPorTipo[t2] = Math.round(((custoPorTipo[t2] || 0) + custo) * 100) / 100;
     }
   }
+  const ads = adsLib.resumoAds({ CACHE_DIR, readJson, writeJson, path, pedirAoSync }, de, ate);
   return {
+    ads,
     devolucoes: {
       quantidade: devQtd, valor_devolvido: Math.round(devTotal * 100) / 100,
       por_motivo: porMotivo,
@@ -625,6 +630,15 @@ function rotasShopee(ctx) {
         json(res, 400, { ok: false, erro: 'passe &de=AAAA-MM-DD&ate=AAAA-MM-DD' }); return true;
       }
       json(res, 200, Object.assign({ ok: true, de, ate }, resumoShopee(de, ate)));
+      return true;
+    }
+
+    // 14/08 — coleta o gasto de Shopee Ads (não passa pela carteira; é o relatório de anúncios)
+    if (p === '/girassol-backup-offline/shopee/coletar-ads') {
+      if (!admOk(req, urlObj)) { json(res, 404, { error: 'not found' }); return true; }
+      const dias = Math.min(365, Math.max(1, Number(q.get('dias')) || 30));
+      const r = await adsLib.coletarAds({ CACHE_DIR, readJson, writeJson, path, pedirAoSync }, dias, q.get('loja') || undefined);
+      json(res, 200, Object.assign({ ok: true }, r));
       return true;
     }
 
