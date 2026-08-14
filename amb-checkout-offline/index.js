@@ -1894,6 +1894,15 @@ function routes(readBody) {
       const deO = String(urlObj.searchParams.get('de') || (hojeO.slice(0, 4) + '-01-01')).slice(0, 10);
       const ateO = String(urlObj.searchParams.get('ate') || hojeO).slice(0, 10);
       if (!/^\d{4}-\d{2}-\d{2}$/.test(deO) || !/^\d{4}-\d{2}-\d{2}$/.test(ateO)) { json(res, 400, { ok: false, erro: 'datas em AAAA-MM-DD' }); return true; }
+      // Codex PR#62 (P2): data inexistente (2026-02-31) ou período invertido passavam no formato,
+      // o banco devolvia vazio e a rota reportava "0 órfãos" — conclusão errada com cara de certa.
+      const validaD = s => { const d0 = new Date(s + 'T00:00:00Z'); return !isNaN(d0.getTime()) && d0.toISOString().slice(0, 10) === s; };
+      if (!validaD(deO) || !validaD(ateO)) { json(res, 400, { ok: false, erro: 'data inexistente no calendário' }); return true; }
+      if (deO > ateO) { json(res, 400, { ok: false, erro: 'período invertido: de (' + deO + ') é depois de ate (' + ateO + ')' }); return true; }
+      // Codex PR#62 (P1): o backfill APAGA e regrava o período em lotes de 200. Ler com
+      // limit/offset durante isso devolve total misturado (e uma página curta no meio faria a
+      // rota jurar que terminou). Enquanto ele roda, a medição não acontece.
+      if (_backfill && _backfill.rodando) { json(res, 409, { ok: false, erro: 'backfill do histórico rodando agora (' + (_backfill.de || '?') + ' a ' + (_backfill.ate || '?') + ') — a leitura sairia misturada; tente de novo quando terminar' }); return true; }
       const outO = { ok: true, de: deO, ate: ateO, catalogo: 0, skus_no_historico: 0, orfaos: 0, faturamento_orfao: 0, amostra: [], erros: [] };
       // 1) catálogo completo do Bling → mapa codigo → id (é o produto_id que não muda no rename)
       const porCodigo = {};
@@ -1945,6 +1954,8 @@ function routes(readBody) {
       // justamente o que esta rota existe pra medir.
       if (!historicoCompleto) { outO.ok = false; outO.erro = 'período com mais de ' + TETO_LINHAS + ' linhas — reduza o intervalo; medição abortada pra não subestimar o impacto'; json(res, 200, outO); return true; }
       // 3) cruza: SKU do histórico que não existe mais no catálogo = órfão do rename
+      // se o backfill entrou DURANTE a leitura, o que foi lido já não é confiável
+      if (_backfill && _backfill.rodando) { json(res, 409, { ok: false, erro: 'backfill começou durante a leitura — medição descartada; rode de novo depois' }); return true; }
       const listaO = Object.values(porSkuO);
       outO.skus_no_historico = listaO.length;
       const orfaos = listaO.filter(x => porCodigo[x.sku] === undefined).sort((a, b) => b.fat - a.fat);
