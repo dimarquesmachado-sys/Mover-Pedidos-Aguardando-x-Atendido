@@ -284,6 +284,9 @@ async function coletarCarteira(dias, pedirAoSync) {
     await _dorme(300);
   }
   arq.atualizado = new Date().toISOString();
+  // 14/08 (Codex): `atualizado` era gravado mesmo com falha, e a conciliação passou a
+  // tratá-lo como prova de cobertura. `ok_em` só avança quando a coleta terminou SEM erro.
+  if (!erro) arq.ok_em = arq.atualizado;
   writeJson(ARQ_CAR(), arq);
   return { janelas, vistas, novas, guardadas: Object.keys(arq.transacoes).length, erro };
 }
