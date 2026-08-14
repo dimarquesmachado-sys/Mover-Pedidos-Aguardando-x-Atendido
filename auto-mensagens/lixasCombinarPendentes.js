@@ -95,9 +95,35 @@ async function listarPendentes({ dias = 7, status = null, limit = 100, offset = 
 /**
  * Atualiza UMA venda (pra quando cliente responde, ou Diego marca como processado).
  */
+// Estados TERMINAIS de cancelamento. Uma vez que a venda entra num deles, nenhuma
+// escrita de status "normal" pode tira-la de la — so as proprias rotinas de
+// cancelamento (que escrevem um destes, e portanto passam livres).
+const STATUS_TERMINAIS = ['venda_cancelada', 'cancelado', 'cancelada_quarentena'];
+
 async function atualizarVenda(orderId, campos, opts) {
   if (!configurado()) return { ok: false, erro: 'supabase_nao_configurado' };
   campos.atualizado_em = new Date().toISOString();
+
+  // ── GUARDA AUTOMATICA CONTRA RESSURREICAO ────────────────────────────────
+  // Havia ~36 escritas de status espalhadas por 6 arquivos (cron, escada, retry,
+  // recuperacao, lerRespostas, rotas do painel). Blindar uma a uma so descobria o
+  // proximo esquecido a cada revisao — a lição que o Codex repetiu neste PR e que
+  // CHECAR ANTES NAO SERIALIZA: a condicao precisa viajar no proprio PATCH.
+  //
+  // Entao a protecao vive AQUI, no unico ponto por onde todas passam: qualquer
+  // escrita que mude o status pra um estado NAO-terminal ganha automaticamente o
+  // predicado "a venda ainda nao foi cancelada". Se o cancelamento chegou no meio,
+  // o PATCH afeta zero linhas e o estado terminal permanece — em vez de a venda ser
+  // ressuscitada pro fluxo automatico e eventualmente faturada.
+  //
+  // Escapes deliberados:
+  //   - status terminal (as proprias rotinas de cancelamento) passam livres
+  //   - opts.forcar: para o caso raro de precisar sobrescrever de propósito
+  if (campos.status && !STATUS_TERMINAIS.includes(campos.status) && !(opts && opts.forcar)) {
+    const guarda = `venda_cancelada_em=is.null&status=not.in.(${STATUS_TERMINAIS.join(',')})`;
+    opts = Object.assign({}, opts);
+    opts.somenteSe = opts.somenteSe ? `${opts.somenteSe}&${guarda}` : guarda;
+  }
   // opts.somenteSe: filtros PostgREST extras no MESMO PATCH — o update vira
   // condicional de verdade (checagem e escrita numa operacao so), fechando corridas
   // que um "ler antes, gravar depois" apenas estreita.
