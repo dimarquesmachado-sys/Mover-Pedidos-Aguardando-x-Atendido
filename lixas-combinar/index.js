@@ -734,40 +734,14 @@ function routes(readBody) {
         // Grava a marca de conclusao MANUAL junto: e ela que faz o card virar
         // "resolvido" na classificacao (sem ela, processado sem NF volta pra Pendentes
         // como anomalia — que e o comportamento certo pra quem NAO passou por aqui).
-        // STATUS AO VIVO antes de aceitar a conclusao manual. O marcador suprime o
-        // polling de envio, e o de cancelamento tem idade minima + repescagem — entao
-        // um cancelamento recente poderia ficar horas sem aparecer, justo num caso em
-        // que a acao significa "NF emitida por fora" e exige cancelar a nota.
-        try {
-          const mlP = require('../auto-mensagens/mlApi');
-          const stP = await mlP.getOrderStatusResumo(String(orderId));
-          if (!stP || !stP.ok) {
-            json(res, 503, { ok: false, erro: 'estado_indeterminado',
-              mensagem: 'Nao consegui confirmar no Mercado Livre se a venda continua ativa. NADA foi marcado.' });
-            return true;
-          }
-          if (stP.cancelada) {
-            const _uP = await lcp.atualizarVenda(orderId, {
-              status: 'venda_cancelada', ml_status: stP.status,
-              ml_status_atualizado_em: new Date().toISOString(),
-              venda_cancelada_em: new Date().toISOString(),
-              alerta_pos_venda: ('CANCELADA NO ML e havia conclusao manual em curso (NF pode ter saido por fora). ' +
-                                 'NAO DESPACHAR. Conferir e cancelar/estornar a NF no Bling.').slice(0, 500)
-            }, { forcar: true });
-            if (!_uP || !_uP.ok || (Array.isArray(_uP.data) && _uP.data.length !== 1)) {
-              json(res, 503, { ok: false, erro: 'cancelamento_nao_gravado',
-                mensagem: 'Esta venda foi CANCELADA no Mercado Livre, mas nao consegui registrar. NAO DESPACHE e tente de novo.' });
-              return true;
-            }
-            json(res, 409, { ok: false, erro: 'venda_cancelada',
-              mensagem: 'Esta venda foi CANCELADA no Mercado Livre — nao da pra marcar como concluida. Se a NF saiu por fora, cancele/estorne no Bling e NAO despache.' });
-            return true;
-          }
-        } catch (e) {
-          json(res, 503, { ok: false, erro: 'estado_indeterminado',
-            mensagem: `Nao consegui confirmar o estado da venda (${e.message}). NADA foi marcado.` });
-          return true;
-        }
+        // Usa o MESMO helper das rotas de escrita: ele checa ENVIO e pedido ao vivo,
+        // respeita lease ativo de outro worker e trata o cancelamento com alerta.
+        // Sem o ENVIO aqui, o marcador manual (que suprime TODO o polling de shipment)
+        // seria gravado por cima de uma etiqueta recem-criada, congelando o rastreio.
+        // Sem o LEASE, um worker em curso emitiria a NF e a escrita terminal dele seria
+        // rejeitada pelo venda_cancelada_em recem-gravado — nota emitida sem registro.
+        const _chkP = await checarMlAntesDeEscrever(orderId, lcp);
+        if (!_chkP.ok) { json(res, _chkP.http, _chkP.corpo); return true; }
 
         // PATCH CONDICIONAL: a leitura acima e o write eram operacoes separadas, entao
         // o cron horario podia gravar cancelada_quarentena no meio e este update
