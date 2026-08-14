@@ -194,24 +194,44 @@ function _leaseLimite() {
  * @returns {{ ok:boolean, motivo?:string }}
  */
 async function reservarEmissao(orderId) {
+  // TOKEN unico por reserva. Sem dono, um worker cuja chamada ao Bling passou do lease
+  // liberaria, ao terminar, a reserva FRESCA de outro que ja assumiu a venda — e o cron
+  // voltaria a poder gravar cancelamento no meio da segunda emissao.
+  const token = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
   const pred = 'venda_cancelada_em=is.null&nf_emitida_em=is.null&ml_etiqueta_em=is.null'
              + '&processado_manual_em=is.null'
              + '&status=not.in.(venda_cancelada,cancelado,cancelada_quarentena)'
              + `&or=(nf_emitindo_em.is.null,nf_emitindo_em.lt.${_leaseLimite()})`;
-  const r = await atualizarVenda(orderId, { nf_emitindo_em: new Date().toISOString() }, { somenteSe: pred });
-  if (r.ok && Array.isArray(r.data) && r.data.length === 1) return { ok: true };
+  const r = await atualizarVenda(orderId,
+    { nf_emitindo_em: new Date().toISOString(), nf_emitindo_por: token }, { somenteSe: pred });
+  if (r.ok && Array.isArray(r.data) && r.data.length === 1) return { ok: true, token };
   if (r.ok && Array.isArray(r.data) && r.data.length === 0) return { ok: false, motivo: 'estado_mudou' };
   return { ok: false, motivo: 'reserva_falhou' };
 }
 
-/** Libera a reserva. Best-effort: nunca lanca. */
-async function liberarEmissao(orderId) {
-  try { await atualizarVenda(orderId, { nf_emitindo_em: null }); } catch (_) {}
+/**
+ * Libera a reserva — SO se ela ainda for deste worker (token bate). Best-effort.
+ * Sem token, mantem o comportamento antigo (compat com chamadas que ainda nao passam).
+ */
+async function liberarEmissao(orderId, token) {
+  try {
+    const opts = token ? { somenteSe: `nf_emitindo_por=eq.${encodeURIComponent(token)}` } : undefined;
+    await atualizarVenda(orderId, { nf_emitindo_em: null, nf_emitindo_por: null }, opts);
+  } catch (_) {}
+}
+
+/**
+ * Campos pra gravar o desfecho TERMINAL junto com a liberacao do lease, so se a
+ * reserva ainda for deste worker. Usado pelos 4 emissores.
+ */
+function fecharLease(token) {
+  return token ? { somenteSe: `nf_emitindo_por=eq.${encodeURIComponent(token)}` } : undefined;
 }
 
 module.exports = {
   reservarEmissao,
   liberarEmissao,
+  fecharLease,
   configurado,
   upsertPendente,
   listarPendentes,
