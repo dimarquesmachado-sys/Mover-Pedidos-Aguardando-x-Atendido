@@ -332,9 +332,17 @@ async function rotinaLerRespostas() {
           // Bloqueada = a venda virou terminal (cancelada) entre a leitura e agora.
           // Parar ANTES da IA: senao o cliente que acabou de cancelar recebe resposta
           // automatica de pedido.
-          if (_marc && _marc.bloqueada) {
-            console.log(`[lixas-combinar lerRespostas] ⏭️  Order ${venda.order_id} virou terminal (cancelada) — nao processo nem respondo`);
-            stats.semNovidade++;
+          // FAIL CLOSED: qualquer resultado que nao seja 1 linha confirmada para aqui.
+          //  - bloqueada  -> a venda virou terminal (cancelada) nesse meio tempo
+          //  - {ok:false} -> banco fora; nao da pra saber quem venceu a corrida NEM
+          //                  gravar o anti-duplicacao, entao rodar a IA arriscaria
+          //                  responder cliente cancelado e reprocessar no ciclo seguinte
+          const _marcOk = !!(_marc && _marc.ok && !_marc.bloqueada
+                             && (!Array.isArray(_marc.data) || _marc.data.length === 1));
+          if (!_marcOk) {
+            const _motivo = (_marc && _marc.bloqueada) ? 'virou terminal (cancelada)' : 'falha gravando a resposta';
+            console.log(`[lixas-combinar lerRespostas] ⏭️  Order ${venda.order_id} ${_motivo} — nao processo nem respondo`);
+            if (!_marc || !_marc.ok) stats.erros++; else stats.semNovidade++;
             continue;
           }
           stats.novasRespostas++;
