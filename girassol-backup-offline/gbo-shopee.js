@@ -640,6 +640,10 @@ function rotasShopee(ctx) {
       const de = String(q.get('de') || '').slice(0, 10), ate = String(q.get('ate') || '').slice(0, 10);
       if (!/^\d{4}-\d{2}-\d{2}$/.test(de) || !/^\d{4}-\d{2}-\d{2}$/.test(ate)) { json(res, 400, { ok: false, erro: 'passe &de=AAAA-MM-DD&ate=AAAA-MM-DD' }); return true; }
       if (de > ate) { json(res, 400, { ok: false, erro: 'período invertido' }); return true; }
+      // Codex PR#71: 2026-02-30 passa no formato e o Date normaliza pra 02/03 — conciliaria
+      // outro dia devolvendo o período que o usuário pediu. Data tem que existir no calendário.
+      const dataReal = s0 => { const d0 = new Date(s0 + 'T00:00:00Z'); return !isNaN(d0.getTime()) && d0.toISOString().slice(0, 10) === s0; };
+      if (!dataReal(de) || !dataReal(ate)) { json(res, 400, { ok: false, erro: 'data inexistente no calendário' }); return true; }
       // Codex PR#71: `&loja=` redirecionaria só o ESCROW pra outra empresa, enquanto a carteira
       // continuaria sendo a local — compararia pedidos de empresas diferentes e daria resultado
       // sem sentido. A conciliação é sempre da própria empresa deste módulo.
