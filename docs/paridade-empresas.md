@@ -37,7 +37,6 @@ histórico, nem os coletores da Shopee.
 - `produto-fotos`
 - `shopee-devolucao`
 - `shopee-semear`
-- `shopee/conciliar`
 - `sku-orfaos`
 - `sku-repara`
 - `sonda-un`
@@ -88,6 +87,9 @@ histórico, nem os coletores da Shopee.
 - `varrer-fornecedores`
 - `varrer-fornecedores-status`
 - `vendas-sync`
+
+> Nota: `shopee/conciliar` **saiu** da lista de exclusivas da AMB neste mesmo PR — a Girassol
+> passou a tê-la pela lib compartilhada. O levantamento reflete o estado com este PR aplicado.
 
 ## O que já foi unificado (código único, empresa como parâmetro)
 
