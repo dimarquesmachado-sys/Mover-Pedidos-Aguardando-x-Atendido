@@ -1371,7 +1371,31 @@ function routes(readBody) {
         } catch (e) {}
         return null;
       };
-      const ctxDev = { CACHE_DIR, path, readJson, writeJson, skuDoPedido };
+      // busca em LOTE no histórico (Supabase) — é onde estão SKU e valor de pedido antigo;
+      // o cache dos bipados só cobre ~7 dias e deixava valor 0 / sku null nas devoluções velhas
+      const buscarNoHistorico = async (orderIds) => {
+        const ids = Array.from(new Set((orderIds || []).map(x => String(x || '').trim()).filter(Boolean)));
+        const mapa = {};
+        for (let i0 = 0; i0 < ids.length; i0 += 40) {
+          const lote = ids.slice(i0, i0 + 40);
+          const q = 'vendas_historico?empresa=eq.girassol&numero_loja=in.(' + lote.map(encodeURIComponent).join(',') + ')' +
+                    '&select=numero_loja,sku,descricao,valor_produto,quantidade&limit=1000';
+          try {
+            const rr = await supaReq('girassol', 'GET', q, null);
+            if (!rr.ok) continue;
+            const arr = JSON.parse(rr.body || '[]');
+            if (!Array.isArray(arr)) continue;
+            for (const l of arr) {
+              const k = String(l && l.numero_loja || '');
+              if (!k) continue;
+              if (!mapa[k]) mapa[k] = { sku: l.sku || null, nome: l.descricao || null, valor: 0 };
+              mapa[k].valor = Math.round((mapa[k].valor + (Number(l.valor_produto) || 0)) * 100) / 100;
+            }
+          } catch (e) {}
+        }
+        return mapa;
+      };
+      const ctxDev = { CACHE_DIR, path, readJson, writeJson, skuDoPedido, buscarNoHistorico };
       if (p.endsWith('-coletar')) {
         let tkV = null;
         try { const { garantirTokenML: _gv } = require('../girassol/mlTokenManager'); tkV = await _gv(); }
@@ -1384,7 +1408,7 @@ function routes(readBody) {
       const ate = String(urlObj.searchParams.get('ate') || '').slice(0, 10);
       if (!/^\d{4}-\d{2}-\d{2}$/.test(de) || !/^\d{4}-\d{2}-\d{2}$/.test(ate)) { json(res, 400, { ok: false, erro: 'passe &de=AAAA-MM-DD&ate=AAAA-MM-DD' }); return true; }
       if (de > ate) { json(res, 400, { ok: false, erro: 'período invertido' }); return true; }
-      json(res, 200, Object.assign({ ok: true, de, ate }, mlDevLib.resumoDevolucoesML(ctxDev, de, ate)));
+      json(res, 200, Object.assign({ ok: true, de, ate }, await mlDevLib.resumoDevolucoesML(ctxDev, de, ate)));
       return true;
     }
 
