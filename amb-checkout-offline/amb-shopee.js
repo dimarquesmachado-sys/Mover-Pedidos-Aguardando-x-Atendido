@@ -266,9 +266,22 @@ async function coletarAds(dias, pedirAoSync) {
     const fim = new Date(Date.UTC(hoje.getUTCFullYear(), hoje.getUTCMonth(), hoje.getUTCDate() - off));
     const ini = new Date(Date.UTC(hoje.getUTCFullYear(), hoje.getUTCMonth(), hoje.getUTCDate() - Math.min(total, off + 29)));
     janelas++;
-    const r = await pedirAoSync('shopee-raw', { caminho: '/api/v2/ads/get_all_cpc_ads_daily_performance', q: 'start_date=' + ddmm(ini) + '&end_date=' + ddmm(fim) });
-    const resp = r && r.dados && r.dados.resposta && r.dados.resposta.response;
-    if (!Array.isArray(resp)) { erro = erro || ('janela ' + iso(ini) + '..' + iso(fim) + ': sem resposta'); continue; }
+    // 14/08 — o domínio de ads tem limite de chamadas (`ads.rate_limit.exceed_api`): rodar
+    // duas coletas seguidas derrubou a janela mais recente. Agora cada janela é re-tentada
+    // com espera crescente, e o erro REAL da Shopee é reportado (antes eu só dizia "sem
+    // resposta", que não ajudava a saber se era limite, permissão ou parâmetro).
+    let resp = null, ultimoMotivo = '';
+    for (let tent = 1; tent <= 4 && !Array.isArray(resp); tent++) {
+      if (tent > 1) await new Promise(r0 => setTimeout(r0, 4000 * (tent - 1)));
+      const r = await pedirAoSync('shopee-raw', { caminho: '/api/v2/ads/get_all_cpc_ads_daily_performance', q: 'start_date=' + ddmm(ini) + '&end_date=' + ddmm(fim) });
+      const cru = (r && r.dados && r.dados.resposta) || null;
+      resp = cru && cru.response;
+      if (!Array.isArray(resp)) {
+        ultimoMotivo = (cru && (cru.error || cru.message)) || (r && r.erro) || ('HTTP ' + ((r && r.status) || '?'));
+        resp = null;
+      }
+    }
+    if (!Array.isArray(resp)) { erro = erro || ('janela ' + iso(ini) + '..' + iso(fim) + ': ' + String(ultimoMotivo).slice(0, 160)); continue; }
     for (const l of resp) {
       if (!l || !l.date) continue;
       const p = String(l.date).split('-');           // DD-MM-AAAA → AAAA-MM-DD
