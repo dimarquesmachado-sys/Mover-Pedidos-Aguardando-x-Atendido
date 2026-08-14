@@ -1079,6 +1079,23 @@ function routes(readBody) {
         const idBuscaBling = v.pack_id || orderId;
         console.log(`[lixas-combinar editar-bling] buscando Bling com numeroLoja=${idBuscaBling} (pack_id=${v.pack_id || 'null'}, order_id=${orderId})`);
 
+        // RESERVA (so na edicao REAL): as guardas acima usam o snapshot lido no inicio,
+        // e entre ele e esta chamada o polling pode registrar etiqueta ou o cron um
+        // cancelamento — e a edicao reescreve os itens no Bling, o que nao se desfaz.
+        // Mesma reserva compartilhada dos caminhos automatico e de recuperacao.
+        let _resEd = null;
+        if (!dryRun) {
+          _resEd = await lcp.reservarEmissao(orderId);
+          if (!_resEd.ok) {
+            const zeroEd = _resEd.motivo === 'estado_mudou';
+            json(res, zeroEd ? 409 : 503, { ok: false, erro: zeroEd ? 'estado_mudou' : 'reserva_falhou',
+              mensagem: zeroEd
+                ? 'O estado da venda mudou agora (cancelamento, etiqueta ou NF detectados). NADA foi alterado no Bling. Recarregue o painel.'
+                : 'Nao consegui reservar a venda com seguranca. NADA foi alterado. Rode o SQL de setup e tente de novo.' });
+            return true;
+          }
+        }
+
         const r = await bp.editarPedidoComGraos({
           orderId: idBuscaBling,
           graosEscolhidos,
@@ -1090,6 +1107,7 @@ function routes(readBody) {
         });
 
         if (!r.ok) {
+          if (_resEd) await lcp.liberarEmissao(orderId, _resEd.token);
           // Atualiza tabela com erro
           await lcp.atualizarVenda(orderId, {
             bling_erro: `${r.etapa}: ${r.erro || JSON.stringify(r).slice(0,200)}`.slice(0, 500)
@@ -1103,11 +1121,13 @@ function routes(readBody) {
         // O status 'processado' so e setado quando a NF for REALMENTE emitida (rota emitir-nf).
         // Assim o card continua na lista de pendentes com o botao "Emitir NF" visivel.
         if (!dryRun) {
+          // Grava o resultado e libera o lease na MESMA escrita (so se ainda for nosso).
           await lcp.atualizarVenda(orderId, {
             bling_pedido_id: String(r.pedidoId),
             bling_editado_em: new Date().toISOString(),
-            bling_erro: null
-          });
+            bling_erro: null,
+            nf_emitindo_em: null, nf_emitindo_por: null
+          }, _resEd ? lcp.fecharLease(_resEd.token) : undefined);
         }
 
         json(res, 200, { ok: true, ...r });
@@ -1203,7 +1223,7 @@ function routes(readBody) {
             const p74 = await lcp.atualizarVenda(orderId, {
               nf_emitida_em: new Date().toISOString(),
               nf_erro: null,
-              nf_emitindo_em: null,     // lease liberado ATOMICAMENTE com o terminal
+              nf_emitindo_em: null, nf_emitindo_por: null,   // lease liberado com o terminal
               status: 'processado'
             });
             if (!p74.ok || (Array.isArray(p74.data) && p74.data.length !== 1)) {
@@ -1219,7 +1239,7 @@ function routes(readBody) {
           }
           await lcp.atualizarVenda(orderId, {
             nf_erro: `${r.status || ''}: ${r.erro || JSON.stringify(r.detalhe || {}).slice(0,200)}`.slice(0,500),
-            nf_emitindo_em: null      // falha nao-terminal: libera a reserva agora
+            nf_emitindo_em: null, nf_emitindo_por: null   // falha nao-terminal: libera agora
           });
           json(res, 200, { ok: false, ...r });
           return true;
@@ -1237,7 +1257,7 @@ function routes(readBody) {
           nf_serie: r.serie,
           nf_chave: r.chave || null,
           nf_erro: null,
-          nf_emitindo_em: null,     // reserva liberada
+          nf_emitindo_em: null, nf_emitindo_por: null,   // reserva liberada
           status: 'processado'
         });
         if (!persist.ok || (Array.isArray(persist.data) && persist.data.length !== 1)) {
@@ -1360,17 +1380,17 @@ function routes(readBody) {
           let graosEscolhidos;
           if (v.ia_pedido_estruturado) {
             try { graosEscolhidos = JSON.parse(v.ia_pedido_estruturado); }
-            catch (_) { await lcp.liberarEmissao(orderId); json(res, 400, { ok: false, etapa: 'montar', erro: 'ia_pedido_estruturado invalido — trate manual' }); return true; }
+            catch (_) { await lcp.liberarEmissao(orderId, reservaR && reservaR.token); json(res, 400, { ok: false, etapa: 'montar', erro: 'ia_pedido_estruturado invalido — trate manual' }); return true; }
           }
           if (!Array.isArray(graosEscolhidos) || graosEscolhidos.length === 0) {
-            await lcp.liberarEmissao(orderId);
+            await lcp.liberarEmissao(orderId, reservaR && reservaR.token);
             json(res, 400, { ok: false, etapa: 'montar', erro: 'sem graos estruturados — trate manual' });
             return true;
           }
           const lixasService = require('./lixasService');
           const graosResult = await lixasService.getGraosDisponiveisPorSkuACombinar(v.sku_a_combinar);
           if (!graosResult.ok) {
-            await lcp.liberarEmissao(orderId);
+            await lcp.liberarEmissao(orderId, reservaR && reservaR.token);
             json(res, 500, { ok: false, etapa: 'montar', erro: 'erro_consultar_graos_bling', detalhe: graosResult.erro });
             return true;
           }
@@ -1392,7 +1412,7 @@ function routes(readBody) {
               status: 'precisa_atencao_humano',
               bling_erro: `recuperar montar ${edit.etapa || ''}: ${edit.erro || ''}`.slice(0, 500)
             });
-            await lcp.liberarEmissao(orderId);
+            await lcp.liberarEmissao(orderId, reservaR && reservaR.token);
             json(res, 500, { ok: false, etapa: 'montar', ...edit });
             return true;
           }
@@ -1406,7 +1426,7 @@ function routes(readBody) {
 
         // ETAPA 2 — emitir a NF
         if (!pedidoBlingId) {
-          await lcp.liberarEmissao(orderId);
+          await lcp.liberarEmissao(orderId, reservaR && reservaR.token);
           json(res, 400, { ok: false, etapa: 'nf', erro: 'sem bling_pedido_id apos montar' });
           return true;
         }
@@ -1445,7 +1465,7 @@ function routes(readBody) {
           nf_emitida_em: new Date().toISOString(),
           nf_id: nf.nfeId, nf_numero: nf.numero, nf_serie: nf.serie,
           nf_chave: nf.chave || null, nf_erro: null,
-          nf_emitindo_em: null,     // reserva liberada
+          nf_emitindo_em: null, nf_emitindo_por: null,   // reserva liberada
           status: 'processado'
         });
         if (!persistR.ok || (Array.isArray(persistR.data) && persistR.data.length !== 1)) {
