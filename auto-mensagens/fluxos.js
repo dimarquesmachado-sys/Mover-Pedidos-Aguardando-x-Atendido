@@ -547,7 +547,17 @@ async function rotinaChecarCanceladasML(opts = {}) {
     // eles, porque _dueCancel e false), atrasando a deteccao de vendas canceladas.
     const filaCancel = alvos.filter(v => v._dueCancel && !setEnvio.has(String(v.order_id)))
                             .slice(0, _max - filaEnvio.length);
-    alvos = filaEnvio.concat(filaCancel);
+    // Sobra da cota de cancelamento volta pro envio: sem isso, um backlog so-de-envio
+    // usava metade do lote e deixava as outras vagas ociosas — etiqueta e postagem
+    // levariam varios ciclos horarios a mais por pura contabilidade.
+    let selecionados = filaEnvio.concat(filaCancel);
+    const sobra = _max - selecionados.length;
+    if (sobra > 0) {
+      const jaSel = new Set(selecionados.map(v => String(v.order_id)));
+      const extras = alvos.filter(v => v._dueEnvio && !jaSel.has(String(v.order_id))).slice(0, sobra);
+      selecionados = selecionados.concat(extras);
+    }
+    alvos = selecionados;
   }
 
   out.candidatas = alvos.length;
@@ -812,19 +822,26 @@ async function rotinaChecarCanceladasML(opts = {}) {
       console.log(`[canceladas] order ${oid} cancelada no ML (nada montado/emitido ainda) — cliente ${v.buyer_nome || '?'}`);
     }
 
-    // O outro lado da exclusao mutua: se uma emissao manual acabou de reservar a linha
-    // (nf_emitindo_em preenchido ha menos de 2 min), o cron NAO grava o cancelamento —
-    // deixa pra proxima rodada, quando a emissao ja terminou e o estado esta estavel.
-    if (v.nf_emitindo_em) {
-      const emissaoMs = Date.now() - new Date(v.nf_emitindo_em).getTime();
-      if (emissaoMs >= 0 && emissaoMs < 2 * 60 * 1000) {
-        console.warn(`[canceladas] order ${oid} cancelada, mas ha uma emissao de NF em curso — adio o registro pra proxima rodada`);
-        out.erros.push({ order_id: oid, erro: 'cancelada durante emissao de NF em curso — adiado' });
-        await new Promise(r => setTimeout(r, CANCELADAS_PAUSA_MS));
-        continue;
-      }
+    // EXCLUSAO MUTUA NO PROPRIO PATCH. Checar `v.nf_emitindo_em` nao bastava: esse
+    // valor vem do snapshot lido ao montar `alvos`, ANTES das chamadas ao ML — se a
+    // emissao reservar a linha nesse intervalo, o cron veria null e gravaria por cima
+    // com o gerarNFe em curso. O filtro abaixo faz o Postgres decidir: so grava se nao
+    // houver reserva nos ultimos 2 min.
+    const _limiteReserva = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+    const upd = await lcp.atualizarVenda(oid, campos,
+      { somenteSe: `or=(nf_emitindo_em.is.null,nf_emitindo_em.lt.${_limiteReserva})` });
+    if (upd.ok && Array.isArray(upd.data) && upd.data.length === 0) {
+      console.warn(`[canceladas] order ${oid} cancelada, mas ha emissao de NF em curso — adio o registro pra proxima rodada`);
+      out.erros.push({ order_id: oid, erro: 'cancelada durante emissao de NF em curso — adiado' });
+      // (4) precisa entrar em detalhes: o "Verificar ML" le detalhes[0] e, sem entrada,
+      // responde cancelada:false — o painel diria "venda ativa" logo apos o ML confirmar
+      // o cancelamento.
+      out.detalhes.push({ order_id: oid, ml_status: st.status, cancelada: true,
+                          adiado: true, gravado: false, quarentena: false, buyer: v.buyer_nome || null,
+                          aviso: 'cancelada no ML, mas ha uma emissao de NF em curso — o registro foi adiado pra proxima rodada. NAO despache.' });
+      await new Promise(r => setTimeout(r, CANCELADAS_PAUSA_MS));
+      continue;
     }
-    const upd = await lcp.atualizarVenda(oid, campos);
     if (!upd.ok) {
       // Fail closed: sem gravar, a linha segue no status original e pode ser faturada.
       // Nao conta como cancelada nesta rodada — a proxima tenta de novo.
