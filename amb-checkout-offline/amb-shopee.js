@@ -305,14 +305,26 @@ function resumoShopee(de, ate) {
   const dev = readJson(ARQ_DEV(), { devolucoes: {} }).devolucoes || {};
   const car = readJson(ARQ_CAR(), { transacoes: {} }).transacoes || {};
   const porSku = {}, porMotivo = {};
-  let devTotal = 0, devQtd = 0, devParciais = 0, devAjustadas = 0;
+  let devTotal = 0, devQtd = 0, devParciais = 0, devAjustadas = 0, devCanceladas = 0;
+  const porStatus = {};
+  const maiores = [];
   for (const d of Object.values(dev)) {
     const q = Number(d.criado_em || 0);
     if (!(q >= ini && q <= fim)) continue;
+    // 14/08 — MEDIDO na sonda crua: existe devolução com `status: CANCELLED` (o comprador
+    // abriu, a Shopee cancelou) e ela entrava no total como se o dinheiro tivesse voltado.
+    // Ex.: 26080106RK0AP6R, R$ 47,87, NOT_RECEIPT, CANCELLED — custo ZERO pra loja.
+    // Agora só conta o que está de fato aceito/em andamento; canceladas ficam à parte.
+    const st9 = String(d.status || '').toUpperCase();
+    porStatus[st9 || 'SEM STATUS'] = (porStatus[st9 || 'SEM STATUS'] || 0) + 1;
+    if (st9 === 'CANCELLED') { devCanceladas++; continue; }
     devQtd++; devTotal += _num(d.refund_amount);
     if (d.devolucao_parcial) devParciais++;
     if (d.reembolso_ajustado) devAjustadas++;
     porMotivo[d.motivo || 'sem motivo'] = (porMotivo[d.motivo || 'sem motivo'] || 0) + 1;
+    maiores.push({ valor: _num(d.refund_amount), sku: ((d.itens || [])[0] || {}).sku || null,
+      motivo: d.motivo || null, texto: (d.motivo_texto || '').slice(0, 180) || null,
+      status: st9 || null, order_sn: d.order_sn || null, parcial: !!d.devolucao_parcial });
     for (const it of (d.itens || [])) {
       const s = it.sku || 'sem sku';
       porSku[s] = porSku[s] || { sku: s, qtd: 0, valor: 0, nome: it.nome || null };
@@ -359,8 +371,14 @@ function resumoShopee(de, ate) {
       quantidade: devQtd, valor_devolvido: Math.round(devTotal * 100) / 100,
       // a partir de 17/08 a Shopee informa isto; antes disso vem zero por falta do campo
       quantidade_parcial: devParciais, quantidade_com_reembolso_ajustado: devAjustadas,
+      canceladas_fora_da_conta: devCanceladas, por_status: porStatus,
       por_motivo: porMotivo,
-      por_sku: Object.values(porSku).sort((a, b) => b.valor - a.valor).slice(0, 50)
+      por_sku: Object.values(porSku).sort((a, b) => b.valor - a.valor).slice(0, 50),
+      // 14/08 — o motivo OFICIAL engana: a sonda mostrou uma devolução marcada como
+      // CHANGE_MIND cujo texto era "o tamanho é pequeno, não serve para a máquina que tenho"
+      // (incompatibilidade, que se resolve no anúncio). As maiores com o que o comprador
+      // escreveu, pra decidir olhando o caso e não a etiqueta.
+      maiores: maiores.sort((a, b) => b.valor - a.valor).slice(0, 15)
     },
     // ★ 14/08 — MESMA RÉGUA DA SHOPEE. Provado com julho/2026: painel = vendas R$ 907,40 e
     // ROAS 9,07; o Jodda mostra exatamente os mesmos números, e o resto dele sai daí:
