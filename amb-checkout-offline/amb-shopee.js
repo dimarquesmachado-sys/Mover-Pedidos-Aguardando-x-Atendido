@@ -283,7 +283,16 @@ async function coletarAds(dias, pedirAoSync) {
         cliques: Number(l.clicks) || 0,
         pedidos_diretos: Number(l.direct_order) || 0,
         gmv_direto: _num(l.direct_gmv),
-        roas_direto: _num(l.direct_roas)
+        roas_direto: _num(l.direct_roas),
+        // 14/08: o PAINEL da Shopee (e o Jodda) mostram o AMPLO — venda de qualquer produto
+        // depois do clique, não só do item anunciado. Guardar os dois evita a impressão de
+        // divergência: no período 01→13/08 o painel deu R$ 6.993,30 / ROAS 16,23 (amplo) e o
+        // direto dava bem menos, com o MESMO investimento de R$ 431.
+        pedidos_amplos: Number(l.broad_order) || 0,
+        gmv_amplo: _num(l.broad_gmv),
+        roas_amplo: _num(l.broad_roas),
+        itens_diretos: Number(l.direct_item_sold) || 0,
+        itens_amplos: Number(l.broad_item_sold) || 0
       };
     }
     await new Promise(r0 => setTimeout(r0, 400));
@@ -380,14 +389,17 @@ function resumoShopee(de, ate) {
   // 14/08 — ADS entra no MESMO "sai do bolso". Ele não vem da carteira (a Shopee não
   // lança ads lá): vem do relatório diário de anúncios, guardado por dia.
   const ads = readJson(ARQ_ADS(), { dias: {} }).dias || {};
-  let adsGasto = 0, adsCliques = 0, adsGmv = 0, adsDias = 0;
+  let adsGasto = 0, adsCliques = 0, adsGmv = 0, adsDias = 0, adsImp = 0, adsGmvAmplo = 0, adsPedAmplos = 0;
   for (const d of Object.values(ads)) {
     const dia = String(d && d.dia || '');
     if (!(dia >= de && dia <= ate)) continue;
     adsDias++;
     adsGasto = Math.round((adsGasto + _num(d.gasto)) * 100) / 100;
     adsCliques += Number(d.cliques) || 0;
+    adsImp += Number(d.impressoes) || 0;
     adsGmv = Math.round((adsGmv + _num(d.gmv_direto)) * 100) / 100;
+    adsGmvAmplo = Math.round((adsGmvAmplo + _num(d.gmv_amplo)) * 100) / 100;
+    adsPedAmplos += Number(d.pedidos_amplos) || 0;
   }
   // ⚠️ 14/08 — CORREÇÃO IMPORTANTE (extrato de créditos de ads que o Diego trouxe):
   // o `expense` da API é CONSUMO de crédito, não desembolso. No período 01→13/08 o consumo
@@ -405,7 +417,11 @@ function resumoShopee(de, ate) {
       por_motivo: porMotivo,
       por_sku: Object.values(porSku).sort((a, b) => b.valor - a.valor).slice(0, 50)
     },
-    ads: { consumo: adsGasto, gasto: adsGasto, dias: adsDias, cliques: adsCliques, gmv_direto: adsGmv, roas: adsGasto > 0 ? Math.round((adsGmv / adsGasto) * 100) / 100 : null, entra_no_sai_do_bolso: false, nota: 'consumo de credito; o desembolso real depende do extrato de recargas (credito gratis e bonus de 10% nao sao custo)' },
+    ads: { consumo: adsGasto, gasto: adsGasto, dias: adsDias, cliques: adsCliques, impressoes: adsImp,
+      gmv_direto: adsGmv, roas_direto: adsGasto > 0 ? Math.round((adsGmv / adsGasto) * 100) / 100 : null,
+      // o amplo é o que o painel da Shopee e o Jodda mostram — por isso vem junto
+      gmv_amplo: adsGmvAmplo, pedidos_amplos: adsPedAmplos, roas_amplo: adsGasto > 0 ? Math.round((adsGmvAmplo / adsGasto) * 100) / 100 : null,
+      roas: adsGasto > 0 ? Math.round((adsGmv / adsGasto) * 100) / 100 : null, entra_no_sai_do_bolso: false, nota: 'consumo de credito; o desembolso real depende do extrato de recargas (credito gratis e bonus de 10% nao sao custo)' },
     // sai_do_bolso agora inclui ads; carteira_sai_do_bolso é a parte que vem da carteira
     carteira: { por_tipo: porTipo, custo_por_tipo: custoPorTipo, carteira_sai_do_bolso: saiDoBolso, ads_consumo_nao_somado: adsGasto, sai_do_bolso: saiTotal },
     atualizado: {
