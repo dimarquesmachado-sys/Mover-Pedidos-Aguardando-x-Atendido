@@ -820,6 +820,12 @@ function routes(readBody) {
         // Volta pro estado acionavel: se o pedido ja estava montado, cai em
         // 'cliente_confirmou_pedido' (falta so emitir); senao volta pra atencao humana.
         const novoStatus = v.bling_editado_em ? 'cliente_confirmou_pedido' : 'precisa_atencao_humano';
+        // ESTADO ML AO VIVO antes de REABRIR: este PATCH devolve a venda pra um status
+        // acionavel, e dali o revisarAtencaoHumana pode reconduzi-la ate o leitor de
+        // mensagens — que falaria com um cliente que acabou de cancelar.
+        const _chkD = await checarMlAntesDeEscrever(orderId, lcp);
+        if (!_chkD.ok) { json(res, _chkD.http, _chkD.corpo); return true; }
+
         // PATCH CONDICIONAL, mesmo motivo do marcar-processado: a leitura acima estreita
         // a corrida mas nao fecha. Se o cron gravar cancelamento/quarentena no meio,
         // este update restauraria um status elegivel a re-engajamento — e dai a
@@ -1282,6 +1288,9 @@ function routes(readBody) {
           // O pedido JA foi reescrito no Bling. Sem registro, o fluxo composto falha ao
           // emitir logo em seguida e o painel oferece editar de novo — com o lease preso.
           if (!_pEd.ok || (Array.isArray(_pEd.data) && _pEd.data.length !== 1)) {
+            // A edicao acabou; sem liberar, o lease bloquearia cancelamento e novas
+            // tentativas por ate 10 min. Nao ha finally nesta rota.
+            if (_resEd) await lcp.liberarEmissao(orderId, _resEd.token);
             console.error(`[lixas-combinar editar-bling] order ${orderId} 🚨 pedido ${r.pedidoId} EDITADO mas NAO gravado`);
             json(res, 207, { ok: false, erro: 'edicao_sem_registro', pedidoId: r.pedidoId,
               mensagem: `O pedido ${r.pedidoId} FOI montado no Bling, mas nao consegui registrar isso no painel. NAO monte de novo — confira no Bling e use o Verificar ML pra reconciliar.` });
