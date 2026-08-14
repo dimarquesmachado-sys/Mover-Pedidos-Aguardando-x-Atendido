@@ -188,6 +188,11 @@ function _leaseLimite() {
   return new Date(Date.now() - NF_LEASE_MIN * 60 * 1000).toISOString();
 }
 
+/** Predicado "sem reserva ativa", pros escritores de cancelamento. */
+function semReservaAtiva() {
+  return `or=(nf_emitindo_em.is.null,nf_emitindo_em.lt.${_leaseLimite()})`;
+}
+
 /**
  * Tenta reservar a venda pra emitir. FAIL CLOSED: so devolve true com 1 linha
  * afetada — {ok:false} (banco fora, coluna nao migrada) NAO autoriza emitir.
@@ -232,7 +237,63 @@ function fecharLease(token) {
   return token ? { somenteSe: `nf_emitindo_por=eq.${encodeURIComponent(token)}` } : undefined;
 }
 
+/**
+ * RECHECA o ML depois de adquirir o lease, imediatamente antes da 1a escrita no Bling.
+ * Precisa existir em TODO caminho que reserva: uma vez com o lease ativo, o cron de
+ * cancelamento ADIA sua gravacao, entao os marcadores locais congelam e nenhum
+ * predicado consegue mais parar o worker — so perguntando ao ML de novo.
+ * Grava o terminal encontrado (com alerta quando ha etiqueta) e fecha o lease.
+ * @returns {{ ok:true } | { ok:false, motivo:string, cancelada?:boolean, etiqueta?:boolean, mensagem:string }}
+ */
+async function recheckAposReserva(orderId, token) {
+  const ml = require('./mlApi');
+  let env = null, st = null;
+  try {
+    // ENVIO primeiro, STATUS por ultimo (o getEnvioResumo faz seu proprio /orders).
+    env = await ml.getEnvioResumo(String(orderId));
+    st = await ml.getOrderStatusResumo(String(orderId));
+  } catch (e) {
+    return { ok: false, motivo: 'estado_indeterminado',
+             mensagem: `Nao consegui reconfirmar o estado da venda (${e.message}). NADA foi alterado no Bling.` };
+  }
+  if (!st || !st.ok || !env || !env.ok) {
+    return { ok: false, motivo: 'estado_indeterminado',
+             mensagem: 'Nao consegui reconfirmar no Mercado Livre o estado da venda. NADA foi alterado no Bling. Tente de novo em instantes.' };
+  }
+  if (!st.cancelada && !env.temEtiqueta) return { ok: true };
+
+  const campos = env.temEtiqueta
+    ? { ml_etiqueta_em: new Date().toISOString(), ml_shipment_status: env.status || null,
+        ml_shipment_substatus: env.substatus || null, ml_envio_indeterminado_em: null }
+    : {};
+  if (st.cancelada) {
+    campos.status = 'venda_cancelada';
+    campos.ml_status = st.status;
+    campos.ml_status_atualizado_em = new Date().toISOString();
+    campos.venda_cancelada_em = new Date().toISOString();
+    if (env.temEtiqueta) {
+      campos.alerta_pos_venda = (`CANCELADA NO ML com etiqueta ja gerada (${env.status || '?'}). ` +
+        `NAO DESPACHAR. Conferir devolucao/estorno no ML e a NF/pedido no Bling.`).slice(0, 500);
+    }
+  }
+  campos.nf_emitindo_em = null; campos.nf_emitindo_por = null;
+  const u = await atualizarVenda(orderId, campos, Object.assign({ forcar: true }, fecharLease(token) || {}));
+  const gravou = !!(u && u.ok && (!Array.isArray(u.data) || u.data.length === 1));
+  return {
+    ok: false,
+    motivo: !gravou ? 'estado_nao_gravado' : (st.cancelada ? 'venda_cancelada' : 'etiqueta_ja_gerada'),
+    cancelada: !!st.cancelada, etiqueta: !!env.temEtiqueta, gravou,
+    mensagem: !gravou
+      ? `A venda ${st.cancelada ? 'foi CANCELADA' : 'ja tem etiqueta'} no Mercado Livre, mas nao consegui registrar. NADA foi alterado no Bling. ${st.cancelada ? 'NAO DESPACHE e tente' : 'Tente'} de novo em instantes.`
+      : (st.cancelada
+        ? 'Esta venda foi CANCELADA no Mercado Livre. NADA foi alterado no Bling.'
+        : `Esta venda ja tem etiqueta no ML (${env.status || '?'}). NADA foi alterado no Bling.`)
+  };
+}
+
 module.exports = {
+  recheckAposReserva,
+  semReservaAtiva,
   reservarEmissao,
   liberarEmissao,
   fecharLease,
