@@ -300,13 +300,25 @@ async function revisarAtencaoHumana({ lcp }) {
           } catch (_) { /* na duvida, NAO fecha como processado */ }
 
           if (temNF) {
-            const _uRec = await lcp.atualizarVenda(venda.order_id, {
-              status: 'processado',
-        // A NF foi CONFIRMADA no Bling: grava o marcador tambem. Sem ele, o
-        // classificador ve 'processado' sem nf_emitida_em e mantem a venda em
-        // Pendentes como "SEM NF" — e a reconciliacao de fundo nunca fecharia o caso.
-        nf_emitida_em: new Date().toISOString(), bling_pedido_id: String(busca.pedidoId), bling_erro: null, nf_erro: null
-            });
+            // ESCALACAO POS-NF: a fase 2 do lerRespostas poe a venda em
+            // precisa_atencao_humano quando o cliente manda uma mensagem de verdade
+            // DEPOIS da nota (troca, reclamacao). Como o revisarAtencaoHumana roda
+            // antes e acha o pedido pronto no Bling, resetar o status pra 'processado'
+            // mandaria o card pro bolsao fechado — escondendo o pedido do cliente
+            // poucos minutos depois de ele ter sido escalado.
+            // Neste caso grava so a evidencia da NF e PRESERVA o status humano.
+            const _escaladoPosNf = String(venda.status || '') === 'precisa_atencao_humano'
+                                   && !!venda.ultima_resposta_cliente;
+            const _camposRec = {
+              // A NF foi CONFIRMADA no Bling: grava o marcador. Sem ele, o classificador
+              // ve 'processado' sem nf_emitida_em e mantem a venda em Pendentes como
+              // "SEM NF" — e a reconciliacao de fundo nunca fecharia o caso.
+              nf_emitida_em: new Date().toISOString(),
+              bling_pedido_id: String(busca.pedidoId), bling_erro: null, nf_erro: null
+            };
+            if (!_escaladoPosNf) _camposRec.status = 'processado';
+            else console.log(`[revisar] order ${venda.order_id} NF confirmada, mas mantendo em atencao humana (mensagem do cliente pos-NF)`);
+            const _uRec = await lcp.atualizarVenda(venda.order_id, _camposRec);
             // BLOQUEADA: o cancelamento venceu a corrida e a guarda automatica recusou
             // o status 'processado'. A NF externa CONFIRMADA nao pode se perder — sem
             // ela, a linha vira uma cancelada comum e ninguem e avisado pra cancelar a
