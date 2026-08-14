@@ -201,7 +201,11 @@ async function reservarEmissao(orderId) {
   const pred = 'venda_cancelada_em=is.null&nf_emitida_em=is.null&ml_etiqueta_em=is.null'
              + '&processado_manual_em=is.null'
              + '&status=not.in.(venda_cancelada,cancelado,cancelada_quarentena)'
-             + `&or=(nf_emitindo_em.is.null,nf_emitindo_em.lt.${_leaseLimite()})`;
+             + `&or=(nf_emitindo_em.is.null,nf_emitindo_em.lt.${_leaseLimite()})`
+             // ENVIO INDETERMINADO barra a escrita no Bling: se a ultima leitura do
+             // shipment falhou, ml_etiqueta_em pode estar nulo so por falta de
+             // informacao — e uma etiqueta ja impressa passaria despercebida.
+             + '&ml_envio_indeterminado_em=is.null';
   const r = await atualizarVenda(orderId,
     { nf_emitindo_em: new Date().toISOString(), nf_emitindo_por: token }, { somenteSe: pred });
   if (r.ok && Array.isArray(r.data) && r.data.length === 1) return { ok: true, token };
