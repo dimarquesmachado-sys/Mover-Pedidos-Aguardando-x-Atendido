@@ -1897,25 +1897,38 @@ function routes(readBody) {
       const outO = { ok: true, de: deO, ate: ateO, catalogo: 0, skus_no_historico: 0, orfaos: 0, faturamento_orfao: 0, amostra: [], erros: [] };
       // 1) catálogo completo do Bling → mapa codigo → id (é o produto_id que não muda no rename)
       const porCodigo = {};
+      let catalogoCompleto = false;
+      const TETO_PG = 200;   // 20 mil produtos; se bater, é medição inválida, não fim de lista
       try {
-        for (let pg = 1; pg <= 60; pg++) {
+        for (let pg = 1; pg <= TETO_PG; pg++) {
           const rc = await blingGet('/produtos?pagina=' + pg + '&limite=100&criterio=2');
-          const lote = (rc && rc.ok && rc.data && rc.data.data) || [];
+          // Codex PR#62 (P1): blingGet devolve { ok:false } em vez de lançar — tratar isso como
+          // página vazia encerrava o laço em silêncio e TODO SKU das páginas seguintes viraria
+          // "órfão". Falhou = aborta a medição.
+          if (!rc || !rc.ok) { outO.ok = false; outO.erro = 'catálogo incompleto: a página ' + pg + ' do Bling falhou — medição abortada (sem o catálogo inteiro, SKU existente vira falso órfão)'; json(res, 200, outO); return true; }
+          const lote = (rc.data && rc.data.data) || [];
           for (const pr of lote) { const cd = String(pr.codigo || '').trim(); if (cd) porCodigo[cd] = pr.id; }
           outO.catalogo = Object.keys(porCodigo).length;
-          if (lote.length < 100) break;
+          if (lote.length < 100) { catalogoCompleto = true; break; }   // página curta = fim de verdade
           await new Promise(r0 => setTimeout(r0, 250));
         }
-      } catch (e) { outO.erros.push('catalogo: ' + String(e.message || e).slice(0, 140)); }
+      } catch (e) { outO.ok = false; outO.erro = 'catálogo: ' + String(e.message || e).slice(0, 140); json(res, 200, outO); return true; }
+      // Codex PR#62 (P1): teto batido com página cheia = tem produto que não foi lido
+      if (!catalogoCompleto) { outO.ok = false; outO.erro = 'catálogo maior que ' + (TETO_PG * 100) + ' produtos — aumente o teto; medição abortada pra não inventar órfão'; json(res, 200, outO); return true; }
       if (!outO.catalogo) { outO.ok = false; outO.erro = 'catálogo vazio — não dá pra medir órfão sem ele'; json(res, 200, outO); return true; }
       // 2) SKUs do histórico no período, com faturamento e unidades por SKU
       const porSkuO = {};
+      let historicoCompleto = false;
+      const TETO_LINHAS = 300000;
       try {
-        for (let off = 0; off < 60000; off += 1000) {
+        for (let off = 0; off < TETO_LINHAS; off += 1000) {
+          // Codex PR#62 (P1): limit/offset SEM order no PostgREST não garante a mesma travessia
+          // entre páginas — linha pode repetir ou sumir (ainda mais com backfill rodando). `id`
+          // é único e estável, então serve de desempate.
           const q = 'vendas_historico?empresa=eq.amb&data_venda=gte.' + deO + '&data_venda=lte.' + ateO +
-                    '&select=sku,quantidade,valor_produto,canal&limit=1000&offset=' + off;
+                    '&select=sku,quantidade,valor_produto,canal&order=id.asc&limit=1000&offset=' + off;
           const rr = await supaReq('amb', 'GET', q, null);
-          if (!rr.ok) { outO.erros.push('supabase: HTTP ' + rr.status); break; }
+          if (!rr.ok) { outO.ok = false; outO.erro = 'histórico incompleto: Supabase HTTP ' + rr.status + ' — medição abortada'; json(res, 200, outO); return true; }
           let arr = []; try { arr = JSON.parse(rr.body || '[]'); } catch (e) {}
           for (const l of arr) {
             const sk = String((l && l.sku) || '').trim();
@@ -1925,9 +1938,12 @@ function routes(readBody) {
             porSkuO[sk].fat += Number(l.valor_produto) || 0;
             const cn = String(l.canal || '?'); porSkuO[sk].canais[cn] = (porSkuO[sk].canais[cn] || 0) + 1;
           }
-          if (arr.length < 1000) break;
+          if (arr.length < 1000) { historicoCompleto = true; break; }
         }
-      } catch (e) { outO.erros.push('historico: ' + String(e.message || e).slice(0, 140)); }
+      } catch (e) { outO.ok = false; outO.erro = 'histórico: ' + String(e.message || e).slice(0, 140); json(res, 200, outO); return true; }
+      // Codex PR#62 (P2): parar no teto com página cheia subestimaria o impacto — que é
+      // justamente o que esta rota existe pra medir.
+      if (!historicoCompleto) { outO.ok = false; outO.erro = 'período com mais de ' + TETO_LINHAS + ' linhas — reduza o intervalo; medição abortada pra não subestimar o impacto'; json(res, 200, outO); return true; }
       // 3) cruza: SKU do histórico que não existe mais no catálogo = órfão do rename
       const listaO = Object.values(porSkuO);
       outO.skus_no_historico = listaO.length;
