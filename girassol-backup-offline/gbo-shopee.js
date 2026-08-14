@@ -34,6 +34,7 @@ const { json, ehAdmin, CONFERIDOS_FILE, CACHE_DIR, readJson, writeJson } = base;
 // 14/08 — ADS vem da lib COMPARTILHADA (lib/shopee-ads.js): a mesma lógica serve
 // girassol/amb/good, então descoberta nova entra uma vez só, não três.
 const adsLib = require('../lib/shopee-ads');
+const concLib = require('../lib/shopee-conciliar');   // paridade com a AMB: conciliação carteira × escrow
 const ARQ_DEV = () => path.join(CACHE_DIR, '_shopee_devolucoes.json');
 const ARQ_CAR = () => path.join(CACHE_DIR, '_shopee_carteira.json');
 
@@ -273,6 +274,9 @@ async function coletarCarteira(dias, pedirAoSync) {
     await _dorme(300);
   }
   arq.atualizado = new Date().toISOString();
+  // 14/08 (Codex): `atualizado` era gravado mesmo com falha, e a conciliação passou a
+  // tratá-lo como prova de cobertura. `ok_em` só avança quando a coleta terminou SEM erro.
+  if (!erro) arq.ok_em = arq.atualizado;
   writeJson(ARQ_CAR(), arq);
   return { janelas, vistas, novas, guardadas: Object.keys(arq.transacoes).length, erro };
 }
@@ -630,6 +634,25 @@ function rotasShopee(ctx) {
         json(res, 400, { ok: false, erro: 'passe &de=AAAA-MM-DD&ate=AAAA-MM-DD' }); return true;
       }
       json(res, 200, Object.assign({ ok: true, de, ate }, resumoShopee(de, ate)));
+      return true;
+    }
+
+    // 14/08 — conciliação carteira × escrow ("a Shopee me pagou o que devia?")
+    if (p === '/girassol-backup-offline/shopee/conciliar') {
+      if (!admOk(req, urlObj)) { json(res, 404, { error: 'not found' }); return true; }
+      const de = String(q.get('de') || '').slice(0, 10), ate = String(q.get('ate') || '').slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(de) || !/^\d{4}-\d{2}-\d{2}$/.test(ate)) { json(res, 400, { ok: false, erro: 'passe &de=AAAA-MM-DD&ate=AAAA-MM-DD' }); return true; }
+      if (de > ate) { json(res, 400, { ok: false, erro: 'período invertido' }); return true; }
+      // Codex PR#71: 2026-02-30 passa no formato e o Date normaliza pra 02/03 — conciliaria
+      // outro dia devolvendo o período que o usuário pediu. Data tem que existir no calendário.
+      const dataReal = s0 => { const d0 = new Date(s0 + 'T00:00:00Z'); return !isNaN(d0.getTime()) && d0.toISOString().slice(0, 10) === s0; };
+      if (!dataReal(de) || !dataReal(ate)) { json(res, 400, { ok: false, erro: 'data inexistente no calendário' }); return true; }
+      // Codex PR#71: `&loja=` redirecionaria só o ESCROW pra outra empresa, enquanto a carteira
+      // continuaria sendo a local — compararia pedidos de empresas diferentes e daria resultado
+      // sem sentido. A conciliação é sempre da própria empresa deste módulo.
+      if (q.get('loja')) { json(res, 400, { ok: false, erro: 'conciliação é sempre da própria empresa (a carteira é local) — remova &loja=' }); return true; }
+      const r = await concLib.conciliar({ readJson, ARQ_CAR, escrowEmLote }, de, ate, q.get('max'));
+      json(res, 200, r);
       return true;
     }
 

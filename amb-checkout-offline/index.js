@@ -92,6 +92,10 @@ const { rotasLimpeza, podarExpedicao } = require('./amb-limpeza');
 const { criarNoturna } = require('./amb-noturna');
 // ─── 05/08: API oficial da Shopee (Open Platform v2) — conectar, sondar o escrow ───
 const { rotasShopee, escrowDoPedido, contasDoEscrow, escrowEmLote, coletarDevolucoes, coletarCarteira, pedirAoSync } = require('./amb-shopee');
+// 14/08: ads vem da lib compartilhada; o wrapper injeta o ctx da empresa (mesmo padrão
+// dos outros coletores) pra rotina noturna poder chamar sem saber de detalhe nenhum.
+const _adsLib = require('../lib/shopee-ads');
+const coletarAds = dias => _adsLib.coletarAds({ CACHE_DIR, readJson, writeJson, path, pedirAoSync }, dias);
 const { canarioCron } = require('./amb-canario');
 let _ultimoCicloAgora = 0;   // trava anti-spam do botão 'Bling agora' (1 disparo/min)
 let _bf = { rodando: false, feitos: 0, total: 0, ok: 0, falhas: 0, iniciado_em: null };   // status do backfill de valores
@@ -343,6 +347,7 @@ const _noturna = criarNoturna({
   // 06/08: a Shopee tambem passa a se manter sozinha — devolucoes (por SKU e motivo) e
   // carteira (ads, ajustes, reembolsos), as duas em janelas de 15 dias, guardando no disco.
   coletarDevolucoes: (d) => coletarDevolucoes(d || 45, pedirAoSync),
+  coletarAds,   // 14/08: ads da Shopee também se mantém sozinho
   coletarCarteira:   (d) => coletarCarteira(d || 30, pedirAoSync),
   VERSAO, validarSessao, ehAdmin, json
 });

@@ -36,7 +36,7 @@ const hojeMenos = d => new Date(Date.now() - d * 864e5).toISOString().slice(0, 1
 
 function criarNoturna(ctx) {
   const { mlBillingSync, backfillVendas, mlSyncFees, varrerCancelados, canarioCron, podarExpedicao,
-          coletarDevolucoes, coletarCarteira, VERSAO, validarSessao, ehAdmin, json } = ctx;
+          coletarDevolucoes, coletarCarteira, coletarAds, VERSAO, validarSessao, ehAdmin, json } = ctx;
   const dorme = ms => new Promise(r => setTimeout(r, ms));
 
   async function etapa(nome, fn) {
@@ -106,6 +106,21 @@ function criarNoturna(ctx) {
       await etapa('carteira da Shopee (30 dias)', async () => {
         const r = await coletarCarteira(30);
         return r ? (r.novas + ' novas de ' + r.vistas + ' vistas · ' + r.guardadas + ' no total' + (r.erro ? ' | ' + r.erro : '')) : 'ok';
+      });
+      await dorme(3000);
+    }
+    // 14/08 (Codex no PR#70): o card de Ads lia só o arquivo, e nenhuma rotina o atualizava —
+    // o número ficaria congelado na última coleta manual enquanto o resto da Shopee seguia
+    // fresco. Agora a coleta de ads é etapa da noturna, como devoluções e carteira.
+    if (typeof coletarAds === 'function') {
+      await etapa('ads da Shopee (35 dias)', async () => {
+        const r = await coletarAds(35);
+        // Codex: `coletarAds` devolve {ok:false} em vez de lançar, e o `etapa` marcaria a
+        // rodada como bem-sucedida — a noturna diria "conferido" com dado velho na tela.
+        // Codex (2ª rodada): 35 dias = DUAS janelas, e `ok` fica true se qualquer uma trouxer
+        // linhas — a etapa passaria com metade do período velho. Qualquer erro reprova.
+        if (!r || r.ok === false || r.erro) throw new Error('coleta de ads incompleta' + (r && r.erro ? ': ' + r.erro : ''));
+        return r.dias_novos + ' dia(s) novo(s) de ' + r.dias_vistos + ' vistos' + (r.erro ? ' | ' + r.erro : '');
       });
       await dorme(3000);
     }
