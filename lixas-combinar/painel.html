@@ -599,6 +599,15 @@ async function verificarML(orderId) {
         true);
       return;
     }
+    if (!d.cancelada && d.etiqueta) {
+      // Etiqueta detectada agora: nao cair no ramo generico de "venda ativa".
+      mostrarModal('🏷️ Etiqueta já gerada no ML',
+        `Status do envio: ${d.shipment || '?'}\n\n` +
+        'O Mercado Livre já gerou a etiqueta desta venda — ela sai da fila de pendentes.' +
+        (d.gravado === false ? '\n\n⚠️ NÃO consegui registrar isso no painel. O card pode continuar aparecendo como pendente; confira antes de montar ou emitir qualquer coisa.' : ''),
+        d.gravado === false);
+      return;
+    }
     if (d.cancelada && d.adiado) {
       // Cancelamento CONFIRMADO no ML, mas a gravacao foi adiada porque nao deu pra
       // conferir a etiqueta. Dizer "saiu do fluxo automatico" aqui seria falso: nada
