@@ -426,8 +426,9 @@ function routes(readBody) {
         // de 10 mil linhas e parar na pagina 20 esconderia as mais antigas em silencio.
         const MAX_PAG = 500;
         let truncou = false;
+        let _cursor = null;
         for (let pg = 0; pg < MAX_PAG; pg++) {
-          const r = await lcp.listarPendentes({ dias, limit: PAG, offset: pg * PAG });
+          const r = await lcp.listarPendentes({ dias, limit: PAG, antesDe: _cursor });
           // Falha de pagina e INDISTINGUIVEL de fim do dataset se virar array vazio —
           // o painel devolveria ok:true com bolsao e contadores parciais, escondendo
           // justamente as vendas antigas que precisam de acao. Melhor erro explicito.
@@ -437,6 +438,8 @@ function routes(readBody) {
             return true;
           }
           todos = todos.concat(r.data);
+          const _ult = r.data[r.data.length - 1];
+          _cursor = _ult ? { data_venda: _ult.data_venda, order_id: _ult.order_id } : null;
           if (r.data.length < PAG) break;
           if (pg === MAX_PAG - 1) truncou = true;
         }
