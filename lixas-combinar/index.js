@@ -1122,12 +1122,20 @@ function routes(readBody) {
         // Assim o card continua na lista de pendentes com o botao "Emitir NF" visivel.
         if (!dryRun) {
           // Grava o resultado e libera o lease na MESMA escrita (so se ainda for nosso).
-          await lcp.atualizarVenda(orderId, {
+          const _pEd = await lcp.atualizarVenda(orderId, {
             bling_pedido_id: String(r.pedidoId),
             bling_editado_em: new Date().toISOString(),
             bling_erro: null,
             nf_emitindo_em: null, nf_emitindo_por: null
           }, _resEd ? lcp.fecharLease(_resEd.token) : undefined);
+          // O pedido JA foi reescrito no Bling. Sem registro, o fluxo composto falha ao
+          // emitir logo em seguida e o painel oferece editar de novo — com o lease preso.
+          if (!_pEd.ok || (Array.isArray(_pEd.data) && _pEd.data.length !== 1)) {
+            console.error(`[lixas-combinar editar-bling] order ${orderId} 🚨 pedido ${r.pedidoId} EDITADO mas NAO gravado`);
+            json(res, 207, { ok: false, erro: 'edicao_sem_registro', pedidoId: r.pedidoId,
+              mensagem: `O pedido ${r.pedidoId} FOI montado no Bling, mas nao consegui registrar isso no painel. NAO monte de novo — confira no Bling e use o Verificar ML pra reconciliar.` });
+            return true;
+          }
         }
 
         json(res, 200, { ok: true, ...r });
