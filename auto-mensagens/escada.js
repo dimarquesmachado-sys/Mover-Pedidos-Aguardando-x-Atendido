@@ -101,8 +101,12 @@ async function rotinaEscadaIndisponivel(opts = {}) {
 
       // 3. PRAZO de postagem real (via shipment do ML)
       let prazo = null;
+      // infoEnvio no escopo do loop: o resumo do shipment lido aqui e reusado mais
+      // abaixo, antes de escrever no Bling (evita uma segunda chamada ao ML).
+      let infoEnvio = null;
       try {
         const info = await ml.getPrazoPostagem(orderId);
+        infoEnvio = info;
         prazo = prazoMod.calcularPrazoPostagem(info && info.shipment_bruto ? info.shipment_bruto : {});
       } catch (e) {
         stats.pulados++; stats.lista.push({ order_id: orderId, acao: 'pulado', motivo: 'sem_prazo: ' + e.message }); continue;
@@ -245,6 +249,26 @@ async function rotinaEscadaIndisponivel(opts = {}) {
           console.warn(`[escada] order ${orderId} status ML indeterminado (${(stEsc && stEsc.erro) || 'sem resposta'}) — nao emito`);
           await lcp.liberarEmissao(orderId, resEsc.token);
           stats.erros++; stats.lista.push({ order_id: orderId, acao: 'erro', motivo: 'status_ml_indeterminado' });
+          continue;
+        }
+        // ENVIO ao vivo tambem: o getPrazoPostagem ja leu o shipment atual nesta mesma
+        // rodada (info.shipment_resumo), entao da pra decidir sem chamada extra. Uma
+        // etiqueta que ficou imprimivel depois do snapshot deixaria ml_etiqueta_em nulo
+        // e a reserva passaria — reescrevendo e faturando pedido ja etiquetado.
+        const _sr = infoEnvio && infoEnvio.shipment_resumo;
+        const _stEnv = String((_sr && _sr.status) || '').toLowerCase();
+        const _subEnv = String((_sr && _sr.substatus) || '').toLowerCase();
+        const SEM_ETIQ = ['invoice_pending', 'buffered', 'ready_to_print_pending', 'regenerating'];
+        const _temEtiq = ['shipped', 'delivered', 'not_delivered'].includes(_stEnv)
+                      || (_stEnv === 'ready_to_ship' && !SEM_ETIQ.includes(_subEnv));
+        if (_temEtiq) {
+          await lcp.atualizarVenda(orderId, {
+            ml_etiqueta_em: new Date().toISOString(),
+            ml_shipment_status: _sr.status || null, ml_shipment_substatus: _sr.substatus || null,
+            nf_emitindo_em: null, nf_emitindo_por: null
+          }, lcp.fecharLease(resEsc.token));
+          console.warn(`[escada] order ${orderId} etiqueta JA gerada (${_sr.status}) — nao edito nem emito`);
+          stats.erros++; stats.lista.push({ order_id: orderId, acao: 'erro', motivo: 'etiqueta_ja_gerada' });
           continue;
         }
         if (stEsc.cancelada) {
