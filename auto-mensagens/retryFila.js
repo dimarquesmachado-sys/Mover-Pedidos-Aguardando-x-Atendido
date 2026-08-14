@@ -312,8 +312,13 @@ async function revisarAtencaoHumana({ lcp }) {
             // tambem escalacao tecnica/baixa confianca ANTERIOR a nota, e o painel
             // passaria a dizer que o cliente pediu algo apos a NF — exigindo resolucao
             // manual a toa em todo caso concluido por fora.
+            // Conclusao concluida = nf_emitida_em OU processado_manual_em: o botao
+            // "Processado" grava so o marcador manual (a NF saiu por fora), e a fase 2
+            // varre essas linhas do mesmo jeito — exigir nf_emitida_em deixaria a
+            // reclamacao do cliente ser escondida nesses casos.
+            const _concluida = !!venda.nf_emitida_em || !!venda.processado_manual_em;
             const _escaladoPosNf = String(venda.status || '') === 'precisa_atencao_humano'
-                                   && !!venda.nf_emitida_em
+                                   && _concluida
                                    && !!venda.ultima_resposta_cliente;
             const _camposRec = {
               // A NF foi CONFIRMADA no Bling: grava o marcador. Sem ele, o classificador
