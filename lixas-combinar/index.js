@@ -1085,6 +1085,49 @@ function routes(readBody) {
         // Mesma reserva compartilhada dos caminhos automatico e de recuperacao.
         let _resEd = null;
         if (!dryRun) {
+          // ESTADO ML AO VIVO antes de reservar: os marcadores do banco podem ter ate
+          // 1h (o poll e horario). Se a cliente cancelou ou a etiqueta saiu nesse
+          // intervalo, a reserva passaria e o pedido seria reescrito assim mesmo.
+          try {
+            const stEd = await ml.getOrderStatusResumo(String(orderId));
+            if (!stEd || !stEd.ok) {
+              json(res, 503, { ok: false, erro: 'estado_indeterminado',
+                mensagem: 'Nao consegui confirmar no Mercado Livre se a venda continua ativa. NADA foi alterado. Tente de novo em instantes.' });
+              return true;
+            }
+            if (stEd.cancelada) {
+              await lcp.atualizarVenda(orderId, {
+                status: 'venda_cancelada', ml_status: stEd.status,
+                ml_status_atualizado_em: new Date().toISOString(),
+                venda_cancelada_em: new Date().toISOString()
+              });
+              json(res, 409, { ok: false, erro: 'venda_cancelada',
+                mensagem: 'Esta venda foi CANCELADA no Mercado Livre. NADA foi alterado no Bling.' });
+              return true;
+            }
+            const envEd = await ml.getEnvioResumo(String(orderId));
+            if (!envEd || !envEd.ok) {
+              await lcp.atualizarVenda(orderId, { ml_envio_indeterminado_em: new Date().toISOString() });
+              json(res, 503, { ok: false, erro: 'envio_indeterminado',
+                mensagem: 'Nao consegui confirmar no Mercado Livre se a etiqueta ja saiu. NADA foi alterado. Tente de novo em instantes.' });
+              return true;
+            }
+            if (envEd.temEtiqueta) {
+              await lcp.atualizarVenda(orderId, {
+                ml_etiqueta_em: new Date().toISOString(),
+                ml_shipment_status: envEd.status || null, ml_shipment_substatus: envEd.substatus || null,
+                ml_envio_indeterminado_em: null
+              });
+              json(res, 409, { ok: false, erro: 'etiqueta_ja_gerada',
+                mensagem: `Esta venda ja tem etiqueta no ML (${envEd.status || '?'}). NADA foi alterado — se faltar algo, resolva direto no Bling.` });
+              return true;
+            }
+          } catch (e) {
+            json(res, 503, { ok: false, erro: 'estado_indeterminado',
+              mensagem: `Nao consegui confirmar o estado da venda no Mercado Livre (${e.message}). NADA foi alterado.` });
+            return true;
+          }
+
           _resEd = await lcp.reservarEmissao(orderId);
           if (!_resEd.ok) {
             const zeroEd = _resEd.motivo === 'estado_mudou';
@@ -1096,7 +1139,9 @@ function routes(readBody) {
           }
         }
 
-        const r = await bp.editarPedidoComGraos({
+        let r;
+        try {
+          r = await bp.editarPedidoComGraos({
           orderId: idBuscaBling,
           graosEscolhidos,
           graosDisponiveis: graosResult.graos,
@@ -1104,7 +1149,11 @@ function routes(readBody) {
           descricaoBase: graosResult.descricao,
           dataVenda,
           dryRun
-        });
+          });
+        } catch (eEd) {
+          if (_resEd) await lcp.liberarEmissao(orderId, _resEd.token);
+          throw eEd;
+        }
 
         if (!r.ok) {
           if (_resEd) await lcp.liberarEmissao(orderId, _resEd.token);
@@ -1212,7 +1261,16 @@ function routes(readBody) {
         }
 
         console.log(`[lixas-combinar emitir-nf] orderId=${orderId} pedidoBling=${v.bling_pedido_id}`);
-        const r = await bp.gerarNFe(v.bling_pedido_id);
+        // Excecao do gerarNFe (rede rejeitada, etc) pulava direto pro catch externo e
+        // deixava o lease preso ate vencer, bloqueando cancelamento e novas tentativas
+        // sem ninguem em curso. Libera aqui e repropaga.
+        let r;
+        try {
+          r = await bp.gerarNFe(v.bling_pedido_id);
+        } catch (eNf) {
+          await lcp.liberarEmissao(orderId, reserva.token);
+          throw eNf;
+        }
 
         if (!r.ok) {
           // NAO solta o lease ainda: o code 74 abaixo e um desfecho TERMINAL (a NF ja
@@ -1438,7 +1496,13 @@ function routes(readBody) {
           json(res, 400, { ok: false, etapa: 'nf', erro: 'sem bling_pedido_id apos montar' });
           return true;
         }
-        const nf = await bp.gerarNFe(pedidoBlingId);
+        let nf;
+        try {
+          nf = await bp.gerarNFe(pedidoBlingId);
+        } catch (eNf) {
+          await lcp.liberarEmissao(orderId, reservaR && reservaR.token);
+          throw eNf;
+        }
         if (!nf.ok) {
           const campos = (nf.detalhe && nf.detalhe.error && nf.detalhe.error.fields) || [];
           const jaTemNF = Array.isArray(campos) && campos.some(f =>
