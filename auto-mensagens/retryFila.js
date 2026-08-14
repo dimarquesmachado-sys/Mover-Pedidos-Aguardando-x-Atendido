@@ -196,10 +196,12 @@ async function retentarEmissoesBling({ lcp }) {
       // so falta saber da etiqueta. Sem isso o retry seguiria e, numa falha transiente
       // da consulta de status, editaria o pedido e emitiria NF de venda cancelada.
       if (vAtual.processado_manual_em || vAtual.nf_emitida_em || vAtual.venda_cancelada_em
-          || vAtual.status === 'cancelada_quarentena' || vAtual.status === 'venda_cancelada') {
+          || vAtual.status === 'cancelada_quarentena' || vAtual.status === 'venda_cancelada'
+          || vAtual.status === 'cancelado') {
         const motivo = vAtual.processado_manual_em ? 'concluida na mao'
                      : vAtual.nf_emitida_em ? 'NF ja emitida'
                      : vAtual.status === 'cancelada_quarentena' ? 'cancelada no ML (quarentena)'
+                     : vAtual.status === 'cancelado' ? 'pedido cancelado no Bling'
                      : 'venda cancelada';
         console.log(`[retry-bling] order ${orderId} saiu da fila sem emitir — ${motivo}`);
         // A rehidratacao pode ter reescrito o status pra 'aguardando_bling' antes de
