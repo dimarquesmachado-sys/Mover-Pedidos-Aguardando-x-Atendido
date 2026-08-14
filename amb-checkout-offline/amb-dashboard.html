@@ -397,7 +397,7 @@ const MOD = '/amb-checkout-offline';
     return _f(u, o);
   };
 })();
-const DASH_BUILD = 'a18';
+const DASH_BUILD = 'a19';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -1428,15 +1428,16 @@ function montar(){
         '</div>'+
       '</div>'+
       '<div class="tw twFit"><table id="tProd"></table></div><div id="prodAviso"></div></div>'+
-    '<div class="sec" id="secMLB"><h2>\ud83d\udcb8 Despesas do Mercado Livre <span class="hint">do per\u00edodo \u00b7 fora da margem por pedido</span></h2>'+
+    '<div class="sec" id="secMLB"><h2>\ud83d\udcb8 Despesas e Devolu\u00e7\u00f5es do Mercado Livre <span class="hint">do per\u00edodo \u00b7 fora da margem por pedido</span></h2>'+
       '<div id="mlbCards" class="mut" style="font-size:12px">carregando\u2026</div>'+
       '<div class="nota" style="margin-top:8px">Vêm do <b>faturamento oficial do ML</b> (o mesmo dos relat\u00f3rios em Faturamento \u2192 Relat\u00f3rios). S\u00e3o cobran\u00e7as do <b>per\u00edodo</b>, n\u00e3o de um pedido \u2014 por isso <b>n\u00e3o entram</b> no Lucro Bruto (M.C.) acima, que \u00e9 margem por venda. Para o lucro do m\u00eas, desconte estes valores.</div>'+
-    '</div>'+
-    '<div class="sec" id="secDML"><h2>\u21a9\ufe0f Devolu\u00e7\u00f5es do Mercado Livre <span class="hint">do per\u00edodo \u00b7 o que voltou e por qu\u00ea</span></h2>'+
-      '<div id="dmlCards" class="mut" style="font-size:12px">carregando\u2026</div>'+
-      '<div class="mut" style="font-size:11px;margin-top:8px">Vem da API oficial do ML (reclama\u00e7\u00f5es do tipo <i>devolu\u00e7\u00e3o</i>). O <b>custo</b> cobrado pelo ML costuma ser ZERO quando \u00e9 arrependimento com produto conforme o an\u00fancio \u2014 o que pesa \u00e9 a mercadoria que volta. O valor em R$ das despesas do ML fica no card acima.</div>'+
-    '</div>'+
+      '<div style="border-top:1px solid var(--line2);margin:12px 0 10px"></div>'+
+      '<div class="mut" style="font-size:11px;margin-bottom:6px">\u21a9\ufe0f <b>Devolu\u00e7\u00f5es</b> \u2014 o que voltou e por qu\u00ea</div>'+
 
+      '<div id="dmlCards" class="mut" style="font-size:12px">carregando\u2026</div>'+
+      '<div class="mut" style="font-size:11px;margin-top:8px">Vem da API oficial do ML (reclama\u00e7\u00f5es do tipo <i>devolu\u00e7\u00e3o</i>). O <b>custo</b> cobrado pelo ML costuma ser ZERO quando \u00e9 arrependimento com produto conforme o an\u00fancio \u2014 o que pesa \u00e9 a mercadoria que volta. O valor em R$ que sai do bolso est\u00e1 nas despesas acima.</div>'+
+    '</div>'+
+    
     '<div class="sec" id="secSHP"><h2>\ud83d\udfe0 Despesas e Devolu\u00e7\u00f5es da Shopee <span class="hint">do per\u00edodo \u00b7 fora da margem por pedido</span></h2>'+
       '<div id="shpCards" class="mut" style="font-size:12px">carregando\u2026</div>'+
       '<div class="nota" style="margin-top:8px">V\u00eam da <b>API oficial da Shopee</b> (carteira e devolu\u00e7\u00f5es), coletadas de madrugada. <b>Nada disso passa pelo Bling.</b> O maior item costuma ser o estorno ap\u00f3s devolu\u00e7\u00e3o: a Shopee j\u00e1 tinha pago, o cliente devolveu e ela tirou o dinheiro de volta da carteira. Como s\u00e3o cobran\u00e7as do <b>per\u00edodo</b>, ainda <b>n\u00e3o entram</b> no Lucro Bruto (M.C.) l\u00e1 em cima \u2014 desconte para o lucro do m\u00eas.</div>'+
