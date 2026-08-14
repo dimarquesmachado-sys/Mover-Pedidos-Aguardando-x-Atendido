@@ -416,9 +416,16 @@ function routes(readBody) {
         let todos = [];
         for (let pg = 0; pg < 20; pg++) {
           const r = await lcp.listarPendentes({ dias, limit: PAG, offset: pg * PAG });
-          const arr = (r.ok && Array.isArray(r.data)) ? r.data : [];
-          todos = todos.concat(arr);
-          if (arr.length < PAG) break;
+          // Falha de pagina e INDISTINGUIVEL de fim do dataset se virar array vazio —
+          // o painel devolveria ok:true com bolsao e contadores parciais, escondendo
+          // justamente as vendas antigas que precisam de acao. Melhor erro explicito.
+          if (!r.ok || !Array.isArray(r.data)) {
+            json(res, 503, { ok: false, erro: 'leitura_incompleta',
+              mensagem: `Nao consegui ler a pagina ${pg + 1} das vendas. A lista ficaria incompleta e poderia esconder pedidos pendentes — recarregue em instantes.` });
+            return true;
+          }
+          todos = todos.concat(r.data);
+          if (r.data.length < PAG) break;
         }
 
         // CURA A NF ANTES DE CLASSIFICAR. Se rodasse depois (como antes), a venda cujo
@@ -1143,9 +1150,17 @@ function routes(readBody) {
         // gravar o cancelamento, um dos dois perde a corrida no proprio Postgres.
         const reserva = await lcp.atualizarVenda(orderId, { nf_emitindo_em: new Date().toISOString() },
           { somenteSe: 'venda_cancelada_em=is.null&nf_emitida_em=is.null&status=not.in.(venda_cancelada,cancelado,cancelada_quarentena)' });
-        if (reserva.ok && Array.isArray(reserva.data) && reserva.data.length === 0) {
-          json(res, 409, { ok: false, erro: 'estado_mudou',
-            mensagem: 'O estado da venda mudou agora (cancelamento ou NF detectados). Nada foi emitido. Recarregue o painel e confira.' });
+        // FAIL CLOSED: so segue com reserva CONFIRMADA (ok + exatamente 1 linha). Com
+        // {ok:false} — falha transiente do Supabase, ou coluna nf_emitindo_em ainda nao
+        // migrada — a rota emitia sem reserva nenhuma, ou seja, sem a serializacao que
+        // este bloco existe pra garantir.
+        const reservou = reserva.ok && Array.isArray(reserva.data) && reserva.data.length === 1;
+        if (!reservou) {
+          const zero = reserva.ok && Array.isArray(reserva.data) && reserva.data.length === 0;
+          json(res, zero ? 409 : 503, { ok: false, erro: zero ? 'estado_mudou' : 'reserva_falhou',
+            mensagem: zero
+              ? 'O estado da venda mudou agora (cancelamento ou NF detectados). Nada foi emitido. Recarregue o painel e confira.'
+              : 'Nao consegui reservar a venda pra emitir com seguranca (banco indisponivel ou coluna nf_emitindo_em nao migrada). NADA foi emitido. Rode o SQL de setup e tente de novo.' });
           return true;
         }
 
@@ -1335,6 +1350,20 @@ function routes(readBody) {
         // ETAPA 2 — emitir a NF
         if (!pedidoBlingId) {
           json(res, 400, { ok: false, etapa: 'nf', erro: 'sem bling_pedido_id apos montar' });
+          return true;
+        }
+        // Mesma reserva do /emitir-nf: este caminho gasta tempo montando o pedido antes
+        // de emitir, entao a janela pro cron gravar um cancelamento e ainda maior.
+        const reservaR = await lcp.atualizarVenda(orderId, { nf_emitindo_em: new Date().toISOString() },
+          { somenteSe: 'venda_cancelada_em=is.null&nf_emitida_em=is.null&status=not.in.(venda_cancelada,cancelado,cancelada_quarentena)' });
+        const reservouR = reservaR.ok && Array.isArray(reservaR.data) && reservaR.data.length === 1;
+        if (!reservouR) {
+          const zeroR = reservaR.ok && Array.isArray(reservaR.data) && reservaR.data.length === 0;
+          json(res, zeroR ? 409 : 503, { ok: false, erro: zeroR ? 'estado_mudou' : 'reserva_falhou',
+            etapa: 'nf',
+            mensagem: zeroR
+              ? 'O estado da venda mudou durante a recuperacao (cancelamento ou NF detectados). O pedido pode ter sido montado, mas NENHUMA nota foi emitida. Recarregue o painel.'
+              : 'Nao consegui reservar a venda pra emitir com seguranca. NENHUMA nota foi emitida. Rode o SQL de setup e tente de novo.' });
           return true;
         }
         const nf = await bp.gerarNFe(pedidoBlingId);
