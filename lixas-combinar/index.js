@@ -1166,15 +1166,13 @@ function routes(readBody) {
         // gerarNFe, e a nota saia mesmo assim. Este PATCH condicional so passa se a
         // venda continua viva NESTE instante — e como o cron usa o mesmo campo pra
         // gravar o cancelamento, um dos dois perde a corrida no proprio Postgres.
-        const reserva = await lcp.atualizarVenda(orderId, { nf_emitindo_em: new Date().toISOString() },
-          { somenteSe: `venda_cancelada_em=is.null&nf_emitida_em=is.null&ml_etiqueta_em=is.null&processado_manual_em=is.null&status=not.in.(venda_cancelada,cancelado,cancelada_quarentena)&or=(nf_emitindo_em.is.null,nf_emitindo_em.lt.${_leaseLimite()})` });
+        const reserva = await lcp.reservarEmissao(orderId);
         // FAIL CLOSED: so segue com reserva CONFIRMADA (ok + exatamente 1 linha). Com
         // {ok:false} — falha transiente do Supabase, ou coluna nf_emitindo_em ainda nao
         // migrada — a rota emitia sem reserva nenhuma, ou seja, sem a serializacao que
         // este bloco existe pra garantir.
-        const reservou = reserva.ok && Array.isArray(reserva.data) && reserva.data.length === 1;
-        if (!reservou) {
-          const zero = reserva.ok && Array.isArray(reserva.data) && reserva.data.length === 0;
+        if (!reserva.ok) {
+          const zero = reserva.motivo === 'estado_mudou';
           json(res, zero ? 409 : 503, { ok: false, erro: zero ? 'estado_mudou' : 'reserva_falhou',
             mensagem: zero
               ? 'O estado da venda mudou agora (cancelamento ou NF detectados). Nada foi emitido. Recarregue o painel e confira.'
@@ -1199,12 +1197,18 @@ function routes(readBody) {
             Number(f.code) === 74 || /nota fiscal referenciada/i.test(String(f.msg || ''))
           );
           if (jaTemNF) {
-            await lcp.atualizarVenda(orderId, {
+            const p74 = await lcp.atualizarVenda(orderId, {
               nf_emitida_em: new Date().toISOString(),
               nf_erro: null,
               nf_emitindo_em: null,     // lease liberado ATOMICAMENTE com o terminal
               status: 'processado'
             });
+            if (!p74.ok || (Array.isArray(p74.data) && p74.data.length !== 1)) {
+              console.error(`[lixas-combinar emitir-nf] order ${orderId} 🚨 code 74 (NF ja existe) mas NAO gravei no banco`);
+              json(res, 207, { ok: false, erro: 'nf_existente_sem_registro',
+                mensagem: 'Esta venda JA POSSUI NF no Bling, mas nao consegui registrar isso no painel. Use o Verificar ML pra reconciliar.' });
+              return true;
+            }
             console.log(`[lixas-combinar emitir-nf] orderId=${orderId} JA possuia NF referenciada (code 74) — marcado como emitida`);
             const confJa = await enviarConfirmacaoPedido(v, orderId);
             json(res, 200, { ok: true, jaEmitida: true, mensagem: 'Esta venda ja possui NF-e referenciada no Bling. Registrado como emitida.', confirmacao_cliente: confJa });
@@ -1219,7 +1223,11 @@ function routes(readBody) {
         }
 
         // Sucesso - grava na Supabase. NF emitida = pedido REALMENTE concluido.
-        await lcp.atualizarVenda(orderId, {
+        // A NF JA SAIU (irreversivel). Se este PATCH falhar, o painel nao sabe da nota
+        // e o lease fica preso ate vencer — entao a resposta precisa dizer isso em vez
+        // de fingir sucesso, e a confirmacao ao cliente nao pode sair sobre um estado
+        // que nao foi registrado.
+        const persist = await lcp.atualizarVenda(orderId, {
           nf_emitida_em: new Date().toISOString(),
           nf_id: r.nfeId,
           nf_numero: r.numero,
@@ -1229,6 +1237,12 @@ function routes(readBody) {
           nf_emitindo_em: null,     // reserva liberada
           status: 'processado'
         });
+        if (!persist.ok || (Array.isArray(persist.data) && persist.data.length !== 1)) {
+          console.error(`[lixas-combinar emitir-nf] order ${orderId} 🚨 NF ${r.numero || '?'} EMITIDA mas NAO gravada no banco`);
+          json(res, 207, { ok: false, erro: 'nf_emitida_sem_registro', nfNumero: r.numero, nfSerie: r.serie,
+            mensagem: `A NF ${r.numero || '?'} FOI EMITIDA no Bling, mas nao consegui registrar isso no painel. NAO emita de novo — confira no Bling e use o Verificar ML pra reconciliar.` });
+          return true;
+        }
 
         const conf = await enviarConfirmacaoPedido(v, orderId);
         json(res, 200, { ok: true, ...r, confirmacao_cliente: conf });
@@ -1379,11 +1393,9 @@ function routes(readBody) {
         }
         // Mesma reserva do /emitir-nf: este caminho gasta tempo montando o pedido antes
         // de emitir, entao a janela pro cron gravar um cancelamento e ainda maior.
-        const reservaR = await lcp.atualizarVenda(orderId, { nf_emitindo_em: new Date().toISOString() },
-          { somenteSe: `venda_cancelada_em=is.null&nf_emitida_em=is.null&ml_etiqueta_em=is.null&processado_manual_em=is.null&status=not.in.(venda_cancelada,cancelado,cancelada_quarentena)&or=(nf_emitindo_em.is.null,nf_emitindo_em.lt.${_leaseLimite()})` });
-        const reservouR = reservaR.ok && Array.isArray(reservaR.data) && reservaR.data.length === 1;
-        if (!reservouR) {
-          const zeroR = reservaR.ok && Array.isArray(reservaR.data) && reservaR.data.length === 0;
+        const reservaR = await lcp.reservarEmissao(orderId);
+        if (!reservaR.ok) {
+          const zeroR = reservaR.motivo === 'estado_mudou';
           json(res, zeroR ? 409 : 503, { ok: false, erro: zeroR ? 'estado_mudou' : 'reserva_falhou',
             etapa: 'nf',
             mensagem: zeroR
@@ -1416,13 +1428,19 @@ function routes(readBody) {
         }
 
         // Sucesso total
-        await lcp.atualizarVenda(orderId, {
+        const persistR = await lcp.atualizarVenda(orderId, {
           nf_emitida_em: new Date().toISOString(),
           nf_id: nf.nfeId, nf_numero: nf.numero, nf_serie: nf.serie,
           nf_chave: nf.chave || null, nf_erro: null,
           nf_emitindo_em: null,     // reserva liberada
           status: 'processado'
         });
+        if (!persistR.ok || (Array.isArray(persistR.data) && persistR.data.length !== 1)) {
+          console.error(`[lixas-combinar recuperar-nf] order ${orderId} 🚨 NF ${nf.numero || '?'} EMITIDA mas NAO gravada`);
+          json(res, 207, { ok: false, erro: 'nf_emitida_sem_registro', nfNumero: nf.numero, nfSerie: nf.serie,
+            mensagem: `A NF ${nf.numero || '?'} FOI EMITIDA no Bling, mas nao consegui registrar no painel. NAO emita de novo — use o Verificar ML pra reconciliar.` });
+          return true;
+        }
         const confR2 = await enviarConfirmacaoPedido(v, orderId);
         json(res, 200, { ok: true, recuperado: true, pedidoId: pedidoBlingId, nfNumero: nf.numero, nfSerie: nf.serie, confirmacao_cliente: confR2 });
       } catch (e) {
