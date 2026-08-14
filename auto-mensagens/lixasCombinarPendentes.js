@@ -159,7 +159,40 @@ async function buscar(orderId) {
   return { ok: true, data: Array.isArray(r.data) && r.data.length > 0 ? r.data[0] : null };
 }
 
+// ── RESERVA DE EMISSAO (lease) ───────────────────────────────────────────────
+// Um so lugar pra reservar/liberar, usado por TODOS os caminhos que emitem NF:
+// /emitir-nf, /recuperar-nf, processarAutoEmissao e a escada. Antes cada rota
+// montava o predicado por conta, e os emissores automaticos ficaram sem nenhum.
+const NF_LEASE_MIN = Number(process.env.LIXAS_NF_LEASE_MIN) || 10;
+
+function _leaseLimite() {
+  return new Date(Date.now() - NF_LEASE_MIN * 60 * 1000).toISOString();
+}
+
+/**
+ * Tenta reservar a venda pra emitir. FAIL CLOSED: so devolve true com 1 linha
+ * afetada — {ok:false} (banco fora, coluna nao migrada) NAO autoriza emitir.
+ * @returns {{ ok:boolean, motivo?:string }}
+ */
+async function reservarEmissao(orderId) {
+  const pred = 'venda_cancelada_em=is.null&nf_emitida_em=is.null&ml_etiqueta_em=is.null'
+             + '&processado_manual_em=is.null'
+             + '&status=not.in.(venda_cancelada,cancelado,cancelada_quarentena)'
+             + `&or=(nf_emitindo_em.is.null,nf_emitindo_em.lt.${_leaseLimite()})`;
+  const r = await atualizarVenda(orderId, { nf_emitindo_em: new Date().toISOString() }, { somenteSe: pred });
+  if (r.ok && Array.isArray(r.data) && r.data.length === 1) return { ok: true };
+  if (r.ok && Array.isArray(r.data) && r.data.length === 0) return { ok: false, motivo: 'estado_mudou' };
+  return { ok: false, motivo: 'reserva_falhou' };
+}
+
+/** Libera a reserva. Best-effort: nunca lanca. */
+async function liberarEmissao(orderId) {
+  try { await atualizarVenda(orderId, { nf_emitindo_em: null }); } catch (_) {}
+}
+
 module.exports = {
+  reservarEmissao,
+  liberarEmissao,
   configurado,
   upsertPendente,
   listarPendentes,
