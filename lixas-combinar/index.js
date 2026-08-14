@@ -1089,6 +1089,8 @@ function routes(readBody) {
           // 1h (o poll e horario). Se a cliente cancelou ou a etiqueta saiu nesse
           // intervalo, a reserva passaria e o pedido seria reescrito assim mesmo.
           try {
+            // require local: cada handler faz o seu (o `ml` de outra rota nao alcanca aqui)
+            const ml = require('../auto-mensagens/mlApi');
             const stEd = await ml.getOrderStatusResumo(String(orderId));
             if (!stEd || !stEd.ok) {
               json(res, 503, { ok: false, erro: 'estado_indeterminado',
