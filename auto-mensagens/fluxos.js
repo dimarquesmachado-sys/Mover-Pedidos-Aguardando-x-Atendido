@@ -391,8 +391,21 @@ async function rotinaACombinar() {
 
 const CANCELADAS_STATUS = (
   process.env.LIXAS_CANCELADAS_STATUS ||
-  'aguardando_resposta,cliente_respondeu,cliente_confirmou_pedido,precisa_atencao_humano,processado'
+  'aguardando_resposta,cliente_respondeu,cliente_confirmou_pedido,aguardando_bling,cancelada_quarentena,precisa_atencao_humano,processado'
 ).split(',').map(s => s.trim()).filter(Boolean);
+// 'cancelada_quarentena' e status INTERNO desta rotina — ela mesma o escreve e so ela
+// o resolve. Um deploy com LIXAS_CANCELADAS_STATUS antigo/custom substituiria o default
+// inteiro e deixaria a linha quarentenada pra sempre, sem nunca reconferir a etiqueta.
+// Por isso entra sempre, depois do parse do override.
+// Os dois status ATIVOS internos entram sempre, mesmo com LIXAS_CANCELADAS_STATUS
+// setada com um default antigo (o override substitui a lista inteira):
+//  - cancelada_quarentena: escrito e resolvido por esta rotina
+//  - aguardando_bling: fica de fora do polling de envio se ausente, e uma etiqueta que
+//    surja durante o retry nao seria registrada — a Guarda 1.6 deixaria o retry montar
+//    e emitir NF de um pedido ja etiquetado
+for (const _st of ['cancelada_quarentena', 'aguardando_bling']) {
+  if (!CANCELADAS_STATUS.includes(_st)) CANCELADAS_STATUS.push(_st);
+}
 // Acompanha a janela do leitor (LIXAS_JANELA_DIAS, default 30). Se ficasse em 7
 // enquanto o lerRespostas processa ate 30 dias, existiria uma faixa de 8-30 dias em
 // que uma venda CANCELADA no ML seguiria sendo processada — montando pedido no Bling
@@ -400,9 +413,27 @@ const CANCELADAS_STATUS = (
 const CANCELADAS_DIAS        = Number(process.env.LIXAS_CANCELADAS_DIAS)
   || Number(process.env.LIXAS_JANELA_DIAS) || 30;
 const CANCELADAS_IDADE_MIN_H = Number(process.env.LIXAS_CANCELADAS_IDADE_MIN_HORAS) || 24;
+// Idade minima pra checar o ENVIO. Separada da de cancelamento de proposito: a etiqueta
+// costuma sair no MESMO dia da venda, e se herdasse as 24h do cancelamento uma venda ja
+// tratada ficaria presa em Pendentes o primeiro dia inteiro. Default 0 = checa desde ja.
+const ENVIO_IDADE_MIN_H = Number(process.env.LIXAS_ENVIO_IDADE_MIN_HORAS) || 0;
+// Intervalo de RE-consulta do envio. Separado do de cancelamento (6h) porque o cron
+// e horario: reusando as 6h, uma etiqueta gerada logo apos a consulta so seria vista
+// 6h depois — contra a promessa de "sai na proxima hora".
+const ENVIO_REPESCAR_H = Number(process.env.LIXAS_ENVIO_REPESCAR_HORAS) || 1;
 const CANCELADAS_REPESCAR_H  = Number(process.env.LIXAS_CANCELADAS_REPESCAR_HORAS) || 6;
 const CANCELADAS_MAX         = Number(process.env.LIXAS_CANCELADAS_MAX_POR_RODADA) || 40;
 const CANCELADAS_PAUSA_MS    = Number(process.env.LIXAS_CANCELADAS_PAUSA_MS) || 350;
+// LEASE da emissao: janela em que o cron respeita uma reserva de NF em curso. Tem que
+// ser MAIOR que o pior caso de uma chamada ao Bling — o fetch do tokenManager nao tem
+// timeout, e uma requisicao lenta que passasse do lease deixaria o cron gravar
+// cancelamento com o gerarNFe ainda rodando. 10 min cobre com folga; o endpoint limpa
+// a reserva ao terminar, entao o valor alto nao trava nada no caminho normal.
+const NF_LEASE_MIN = Number(process.env.LIXAS_NF_LEASE_MIN) || 10;
+function _semReservaAtiva() {
+  const limite = new Date(Date.now() - NF_LEASE_MIN * 60 * 1000).toISOString();
+  return `or=(nf_emitindo_em.is.null,nf_emitindo_em.lt.${limite})`;
+}
 
 function _fmtBR(iso) {
   if (!iso) return '';
@@ -422,6 +453,13 @@ async function rotinaChecarCanceladasML(opts = {}) {
   if (!lcp.configurado()) { out.erro = 'supabase_nao_configurado'; return out; }
 
   // ── Monta a lista de alvos ────────────────────────────────────────────
+  // Idade minima EFETIVA do cancelamento: o override ?idadeMinHoras da rota manual
+  // vale tambem na decisao de consultar o ML la embaixo — senao idadeMinHoras=0
+  // selecionava a venda nova e depois pulava a checagem dela mesmo assim.
+  let _idadeMinCancelH = CANCELADAS_IDADE_MIN_H;
+  if (opts.idadeMinHoras !== undefined && !Number.isNaN(Number(opts.idadeMinHoras))) {
+    _idadeMinCancelH = Number(opts.idadeMinHoras);
+  }
   let alvos = [];
 
   if (opts.orderId) {
@@ -432,15 +470,45 @@ async function rotinaChecarCanceladasML(opts = {}) {
     alvos = [r.data];
   } else {
     const dias = Number(opts.dias) || CANCELADAS_DIAS;
-    const listaR = await lcp.listarPendentes({ dias, limit: 500 });
-    const lista = (listaR.ok && Array.isArray(listaR.data)) ? listaR.data : [];
+    // Pagina a janela toda: com limit unico, listarPendentes devolve as 500 MAIS NOVAS
+    // (data_venda DESC) e as vendas antigas nunca entram na ordenacao — ficariam em
+    // Pendentes mesmo depois de etiquetadas/postadas. Linhas ja resolvidas ocupam essa
+    // cota, entao o teto e atingido mais rapido do que parece.
+    const PAG = 500;
+    let lista = [];
+    // Sem teto fixo de paginas: com ?dias=90 a janela pode passar de 10 mil linhas e um
+    // corte em 20 paginas pararia no meio, escondendo as vendas mais antigas em
+    // silencio. O limite alto abaixo e so anti-loop e, se for atingido, e reportado.
+    const MAX_PAG = 500;
+    let truncou = false;
+    let _cursor = null;
+    for (let pg = 0; pg < MAX_PAG; pg++) {
+      const r = await lcp.listarPendentes({ dias, limit: PAG, antesDe: _cursor });
+      // Pagina que falha e indistinguivel de fim de dados se virar array vazio: a
+      // rodada terminaria "com sucesso" varrendo so as mais novas, e cancelamentos
+      // antigos ficariam invisiveis indefinidamente se a falha persistisse.
+      if (!r.ok || !Array.isArray(r.data)) {
+        out.erro = `falha lendo a pagina ${pg + 1} das vendas — rodada abortada pra nao varrer parcial`;
+        out.erros.push({ erro: out.erro });
+        console.error(`[canceladas] 🚨 ${out.erro}`);
+        return out;
+      }
+      lista = lista.concat(r.data);
+      const _ult = r.data[r.data.length - 1];
+      _cursor = _ult ? { data_venda: _ult.data_venda, order_id: _ult.order_id } : null;
+      if (r.data.length < PAG) break;
+      if (pg === MAX_PAG - 1) truncou = true;
+    }
+    if (truncou) {
+      out.erros.push({ erro: `janela com mais de ${MAX_PAG * PAG} vendas — varredura truncada, reduza LIXAS_CANCELADAS_DIAS` });
+      console.error(`[canceladas] 🚨 varredura truncada em ${MAX_PAG} paginas`);
+    }
 
     const agora = Date.now();
     // Checagem explicita de undefined (e nao `||`) pra que ?idadeMinHoras=0 e
     // ?repescarHoras=0 funcionem de verdade: 0 significa "sem trava, checa tudo
     // agora". Com `||` o zero cairia no default e a rota nao obedeceria.
-    const idadeMinMs = (opts.idadeMinHoras !== undefined && !Number.isNaN(Number(opts.idadeMinHoras))
-      ? Number(opts.idadeMinHoras) : CANCELADAS_IDADE_MIN_H) * 3600 * 1000;
+    const idadeMinMs = _idadeMinCancelH * 3600 * 1000;
     const repescarMs = (opts.repescarHoras !== undefined && !Number.isNaN(Number(opts.repescarHoras))
       ? Number(opts.repescarHoras) : CANCELADAS_REPESCAR_H) * 3600 * 1000;
 
@@ -448,22 +516,92 @@ async function rotinaChecarCanceladasML(opts = {}) {
       if (v.venda_cancelada_em) return false;                                  // ja sabemos que morreu
       if (!CANCELADAS_STATUS.includes(String(v.status || ''))) return false;
       const nasceu = v.data_venda ? new Date(v.data_venda).getTime() : 0;
-      if (!nasceu || (agora - nasceu) < idadeMinMs) return false;              // nova demais
-      if (v.ml_status_atualizado_em) {
-        const ultima = new Date(v.ml_status_atualizado_em).getTime();
-        if (ultima && (agora - ultima) < repescarMs) return false;             // checada ha pouco
-      }
-      return true;
+      // Entra na rodada se ja passou do limiar de QUALQUER uma das duas checagens
+      // (cancelamento ou envio). Dentro do loop cada uma decide se roda.
+      const limiarMin = Math.min(idadeMinMs, ENVIO_IDADE_MIN_H * 3600 * 1000);
+      if (!nasceu || (agora - nasceu) < limiarMin) return false;               // nova demais pra tudo
+      // Repescagem AVALIADA POR TIPO: cada checagem tem seu proprio timestamp.
+      // Basta uma das duas estar "vencida" pra venda entrar na rodada.
+      const idadeMs2 = agora - nasceu;
+      const tCancel = v.ml_status_atualizado_em ? new Date(v.ml_status_atualizado_em).getTime() : 0;
+      const tEnvio  = v.ml_envio_checado_em ? new Date(v.ml_envio_checado_em).getTime() : 0;
+      // Backoff apos falha: 15 min (nao as 6h do sucesso). Assim uma consulta que falhou
+      // volta rapido, em vez de deixar a venda sem checagem de cancelamento por horas.
+      const tFalha = v.ml_status_falha_em ? new Date(v.ml_status_falha_em).getTime() : 0;
+      const backoffOk = !tFalha || (agora - tFalha) >= 15 * 60 * 1000;
+      const cancelVencido = (idadeMs2 >= idadeMinMs) && backoffOk
+                            && (!tCancel || (agora - tCancel) >= repescarMs);
+      const envioVencido  = (idadeMs2 >= ENVIO_IDADE_MIN_H * 3600 * 1000)
+                            && !v.processado_manual_em && !v.nf_emitida_em
+                            // Etiqueta detectada NAO encerra o acompanhamento: o envio
+                            // ainda evolui pra shipped/delivered, e sem isso o card
+                            // ficaria em "Etiqueta gerada" pra sempre e um alerta
+                            // posterior diria "nao despachar" num pacote ja postado.
+                            // Para so num status terminal.
+                            && !['shipped','delivered','not_delivered','cancelled']
+                                 .includes(String(v.ml_shipment_status || '').toLowerCase())
+                            && (!tEnvio || (agora - tEnvio) >= ENVIO_REPESCAR_H * 3600 * 1000);
+      // Guarda quais checagens estao vencidas: a ordenacao usa SO o relogio delas.
+      v._dueCancel = cancelVencido;
+      v._dueEnvio  = envioVencido;
+      return cancelVencido || envioVencido;
     });
 
-    // Nunca-checado primeiro (timestamp 0); depois o checado ha mais tempo.
+    // Nunca-checado primeiro; depois o checado ha mais tempo. Considera os DOIS
+    // relogios: olhando so o de cancelamento, venda nova (que tem os dois nulos)
+    // empatava com as demais e a ordem da fonte (mais nova primeiro) decidia — as
+    // mais antigas nunca chegavam a ser consultadas quando havia mais candidatas
+    // que CANCELADAS_MAX.
+    // Considera SO o relogio das checagens que estao vencidas pra esta venda. Olhar
+    // um relogio que nunca vai rodar dava prioridade maxima indevida: venda com NF
+    // nao faz poll de envio, entao ml_envio_checado_em fica null pra sempre e ela
+    // furava a fila das que realmente precisam do envio conferido.
+    const _relogio = (v) => {
+      const ts = [];
+      if (v._dueCancel) ts.push(v.ml_status_atualizado_em ? new Date(v.ml_status_atualizado_em).getTime() : 0);
+      if (v._dueEnvio)  ts.push(v.ml_envio_checado_em ? new Date(v.ml_envio_checado_em).getTime() : 0);
+      if (ts.length === 0) return 0;
+      if (ts.some(t => !t)) return 0;    // checagem devida que nunca rodou -> prioridade
+      return Math.min(...ts);            // senao, a mais atrasada das devidas manda
+    };
     alvos.sort((a, b) => {
-      const ta = a.ml_status_atualizado_em ? new Date(a.ml_status_atualizado_em).getTime() : 0;
-      const tb = b.ml_status_atualizado_em ? new Date(b.ml_status_atualizado_em).getTime() : 0;
-      return ta - tb;
+      const d = _relogio(a) - _relogio(b);
+      // Desempate entre nunca-checados: venda mais ANTIGA primeiro (a mais proxima
+      // de vencer o prazo de postagem).
+      if (d !== 0) return d;
+      const na = a.data_venda ? new Date(a.data_venda).getTime() : 0;
+      const nb = b.data_venda ? new Date(b.data_venda).getTime() : 0;
+      return na - nb;
     });
 
-    alvos = alvos.slice(0, Number(opts.max) || CANCELADAS_MAX);
+    // COTA SEPARADA. Os dois tipos de checagem competiam pela mesma fatia: um backlog
+    // de vendas so-de-cancelamento (todas com relogio zero) empurrava as etiquetas novas
+    // pro fim da fila por varias horas, matando a promessa de refresh horario.
+    // Reserva metade do lote pro envio; o que sobrar volta pro cancelamento.
+    const _max = Number(opts.max) || CANCELADAS_MAX;
+    // Com _max=1 (env ou ?max=1), reservar a unica vaga pro envio zerava a fila de
+    // cancelamento — e um backlog de envio esconderia indefinidamente um cancelamento
+    // pos-NF. Nesse caso as duas alternam por rodada.
+    const _alternaEnvio = (new Date().getHours() % 2) === 0;
+    const cotaEnvio = _max <= 1 ? (_alternaEnvio ? 1 : 0) : Math.max(1, Math.floor(_max / 2));
+    const filaEnvio  = alvos.filter(v => v._dueEnvio).slice(0, cotaEnvio);
+    const setEnvio   = new Set(filaEnvio.map(v => String(v.order_id)));
+    // Exige _dueCancel: sem isso, um backlog de candidatos so-de-envio ocupava tambem
+    // a metade reservada ao cancelamento (e o loop pulava getOrderStatusResumo em todos
+    // eles, porque _dueCancel e false), atrasando a deteccao de vendas canceladas.
+    const filaCancel = alvos.filter(v => v._dueCancel && !setEnvio.has(String(v.order_id)))
+                            .slice(0, _max - filaEnvio.length);
+    // Sobra da cota de cancelamento volta pro envio: sem isso, um backlog so-de-envio
+    // usava metade do lote e deixava as outras vagas ociosas — etiqueta e postagem
+    // levariam varios ciclos horarios a mais por pura contabilidade.
+    let selecionados = filaEnvio.concat(filaCancel);
+    const sobra = _max - selecionados.length;
+    if (sobra > 0) {
+      const jaSel = new Set(selecionados.map(v => String(v.order_id)));
+      const extras = alvos.filter(v => v._dueEnvio && !jaSel.has(String(v.order_id))).slice(0, sobra);
+      selecionados = selecionados.concat(extras);
+    }
+    alvos = selecionados;
   }
 
   out.candidatas = alvos.length;
@@ -476,31 +614,319 @@ async function rotinaChecarCanceladasML(opts = {}) {
 
     // getOrderStatusResumo ja e a prova de excecao; o try aqui e cinto+suspensorio
     // pra garantir que UMA venda problematica nunca derrube a rodada inteira.
+    const idadeMs = v.data_venda ? (Date.now() - new Date(v.data_venda).getTime()) : Infinity;
+    // Respeita a flag de "vencida" calculada no filtro. Sem isso, uma venda escolhida
+    // SO porque o envio venceu ainda consultava o cancelamento (a idade dela passa das
+    // 24h de qualquer jeito) e carimbava ml_status_atualizado_em toda hora — anulando o
+    // intervalo de 6h e dobrando o trafego no ML. Vale o inverso tambem.
+    // No modo 1-venda (botao Verificar ML) segue incondicional: voce clicou, checa tudo.
+    const podeCancelamento = !!opts.orderId || (v._dueCancel && idadeMs >= (_idadeMinCancelH * 3600 * 1000));
+    const podeEnvio        = !!opts.orderId || (v._dueEnvio  && idadeMs >= (ENVIO_IDADE_MIN_H * 3600 * 1000));
+
     let st;
-    try { st = await ml.getOrderStatusResumo(oid); }
-    catch (e) { st = { ok: false, erro: e.message }; }
+    if (podeCancelamento) {
+      try { st = await ml.getOrderStatusResumo(oid); }
+      catch (e) { st = { ok: false, erro: e.message }; }
+    } else {
+      // Venda nova demais pra checagem de cancelamento, mas o envio pode ser olhado:
+      // segue como "viva" e cai no ramo de baixo, que so mexe no shipment.
+      st = { ok: true, status: null, cancelada: false, _soEnvio: true };
+    }
 
     out.checadas++;
 
     if (!st.ok) {
+      // NAO abandona a venda: carimba o relogio do cancelamento (senao ela volta com
+      // prioridade maxima toda hora e ocupa as vagas reservadas ao envio pra sempre) e
+      // segue como "viva" pra que a checagem de ENVIO ainda aconteca nesta rodada.
       out.erros.push({ order_id: oid, erro: st.erro });
-      console.warn(`[canceladas] order ${oid} nao consegui checar: ${st.erro}`);
+      console.warn(`[canceladas] order ${oid} nao consegui checar o cancelamento: ${st.erro} — sigo so com o envio`);
+      // NAO carimba ml_status_atualizado_em: esse campo significa "cancelamento
+      // conferido com sucesso", e a repescagem o usa pra suprimir novas tentativas por
+      // CANCELADAS_REPESCAR_H (6h). Como a Guarda 1.5 tambem segue em frente quando a
+      // consulta falha, uma venda de fato cancelada poderia ser faturada nessa janela.
+      // Backoff curto e proprio: 15 min, so pra nao martelar o ML em loop.
+      try { await lcp.atualizarVenda(oid, { ml_status_falha_em: agoraIso }); } catch (_) {}
+      st = { ok: true, status: v.ml_status || null, cancelada: false, _soEnvio: true, _statusIndeterminado: st.erro || 'falha lendo status' };
       await new Promise(r => setTimeout(r, CANCELADAS_PAUSA_MS));
-      continue;
     }
 
     if (!st.cancelada) {
-      // Viva. So carimba a checagem pra ela sair da fila pelas proximas 6h.
-      await lcp.atualizarVenda(oid, { ml_status: st.status, ml_status_atualizado_em: agoraIso });
-      out.detalhes.push({ order_id: oid, ml_status: st.status, cancelada: false });
+      // Viva. Carimba a checagem (sai da fila pelas proximas 6h) e, de quebra,
+      // atualiza o ENVIO — e o que o painel usa pra tirar da frente o que ja tem
+      // etiqueta/foi postado. So consulta quando ainda vale a pena:
+      //   - ja detectamos etiqueta antes -> nao pergunta mais (nao volta atras)
+      //   - ja tem NF emitida -> o painel ja considera resolvida por outro caminho
+      // Assim o custo extra fica so nas vendas que realmente estao em aberto.
+      // So carimba o timestamp do CANCELAMENTO quando ele foi realmente consultado.
+      // Carimbar numa passada so-de-envio fazia a repescagem achar que o
+      // cancelamento tinha sido conferido, adiando a 1a checagem real.
+      const campos = {};
+      if (!st._soEnvio) {
+        campos.ml_status = st.status;
+        campos.ml_status_atualizado_em = agoraIso;
+        if (v.ml_status_falha_em) campos.ml_status_falha_em = null;   // consulta voltou
+      }
+      // Alinhado com a selecao: etiqueta em cache NAO encerra o poll (o envio ainda
+      // evolui pra shipped/delivered). Antes, a selecao escolhia a linha toda hora e a
+      // execucao pulava — ml_shipment_status congelava em ready_to_ship pra sempre.
+      const _stEnv = String(v.ml_shipment_status || '').toLowerCase();
+      const _envTerminal = ['shipped','delivered','not_delivered','cancelled'].includes(_stEnv);
+      let envioIndet = null;
+      if (podeEnvio && !v.nf_emitida_em && !v.processado_manual_em && !_envTerminal) {
+        try {
+          const env = await ml.getEnvioResumo(oid);
+          campos.ml_envio_checado_em = agoraIso;
+          if (env && env.ok) {
+            campos.ml_shipment_status = env.status || null;
+            campos.ml_shipment_substatus = env.substatus || null;
+            if (v.ml_envio_indeterminado_em) campos.ml_envio_indeterminado_em = null;
+            if (env.temEtiqueta) {
+              // preserva o carimbo ORIGINAL: quando a etiqueta saiu importa mais que
+              // quando a gente reconferiu.
+              if (!v.ml_etiqueta_em) campos.ml_etiqueta_em = agoraIso;
+              // TIRA dos status automaticos. So o marcador nao basta: o painel ja
+              // mostrava a venda como resolvida, mas o lerRespostas continuava
+              // processando mensagem nova e podia reescrever o pedido e emitir NF de
+              // algo ja etiquetado/postado. 'processado' e terminal pra essas rotinas.
+              if (['aguardando_resposta','cliente_respondeu','cliente_confirmou_pedido','aguardando_bling'].includes(String(v.status || ''))) {
+                campos.status = 'processado';
+                console.log(`[canceladas] order ${oid} etiqueta detectada — status ${v.status} -> processado (sai do automatico)`);
+              }
+              // QUARENTENA que descobre etiqueta: fecha o cancelamento e cria o alerta
+              // AGORA. Antes ficava esperando o relogio do cancelamento vencer (ate 6h)
+              // mostrando so o card generico, sem botao de reconhecer.
+              if (String(v.status || '') === 'cancelada_quarentena') {
+                campos.status = 'venda_cancelada';
+                campos.venda_cancelada_em = agoraIso;
+                campos.alerta_pos_venda = (
+                  `CANCELADA NO ML com etiqueta ja gerada (${env.status || '?'}). NAO DESPACHAR. ` +
+                  `Conferir devolucao/estorno no ML e a NF/pedido no Bling.`
+                ).slice(0, 500);
+                console.error(`[canceladas] 🚨🚨 order ${oid} quarentena resolvida: CANCELADA COM ETIQUETA — alerta criado`);
+              }
+              console.log(`[canceladas] order ${oid} ja tem etiqueta no ML (${env.status}/${env.substatus || '-'}) — sai do bolsao de pendentes`);
+            }
+            // Quarentena com envio agora CONHECIDO e SEM etiqueta: o cancelamento ja
+            // estava confirmado, so faltava saber da etiqueta. Finaliza aqui em vez de
+            // deixar a venda no balde urgente ate o relogio do cancelamento vencer (6h+).
+            if (!env.temEtiqueta && String(v.status || '') === 'cancelada_quarentena') {
+              campos.status = 'venda_cancelada';
+              campos.venda_cancelada_em = agoraIso;
+              console.log(`[canceladas] order ${oid} quarentena resolvida: cancelada SEM etiqueta — finalizada sem alerta`);
+            }
+          } else {
+            // getEnvioResumo NAO lanca: devolve { ok:false }. Sem tratar aqui, um token
+            // sem permissao de shipments falharia em silencio e as vendas ficariam em
+            // Pendentes pra sempre sem ninguem saber por que.
+            const msg = (env && (env.dica || env.erro)) || 'falha desconhecida lendo envio';
+            out.erros.push({ order_id: oid, erro: `envio: ${msg}` });
+            console.warn(`[canceladas] order ${oid} nao consegui ler o envio: ${msg}`);
+            // INDETERMINADO tambem quando so o ENVIO falha: o painel derivava isso do
+            // status do pedido e diria "venda ativa", e como ml_etiqueta_em fica nulo a
+            // reserva libera editar/emitir mesmo que ja exista etiqueta.
+            campos.ml_envio_indeterminado_em = agoraIso;
+            envioIndet = msg;
+          }
+        } catch (e) {
+          out.erros.push({ order_id: oid, erro: `envio: ${e.message}` });
+          console.warn(`[canceladas] order ${oid} excecao lendo o envio: ${e.message}`);
+        }
+        await new Promise(r => setTimeout(r, CANCELADAS_PAUSA_MS));
+      }
+      if (Object.keys(campos).length === 0) { await new Promise(r => setTimeout(r, CANCELADAS_PAUSA_MS)); continue; }
+      // atualizarVenda devolve { ok:false } em vez de lancar. Sem conferir, uma coluna
+      // nao migrada ou falha transiente do REST passaria batida: a rodada diria que a
+      // etiqueta foi detectada, mas nada teria sido gravado e a venda seguiria pendente.
+      // processado_manual_em=is.null: se um operador marcou como concluida enquanto a
+      // consulta de envio estava em voo, gravar a etiqueta deixaria a linha com os DOIS
+      // marcadores — e o marcador manual exclui a venda do polling, congelando o
+      // shipment em "etiqueta gerada" sem nunca avancar pra postado.
+      const updV = await lcp.atualizarVenda(oid, campos,
+        campos.ml_etiqueta_em ? { somenteSe: 'processado_manual_em=is.null' } : undefined);
+      // BLOQUEADA: um cancelamento entrou entre a leitura e esta escrita, e a guarda
+      // automatica recusou o PATCH porque `campos.status` e ativo. Sem tratar, o
+      // marcador de etiqueta se perderia — e venda_cancelada_em exclui a linha de todas
+      // as varreduras futuras, ou seja, o alerta de nao despachar nunca sairia.
+      // Regrava SEM o status (que a guarda protege) e monta o alerta pos-venda.
+      if (updV && updV.bloqueada && campos.ml_etiqueta_em) {
+        // O bloqueio pode vir de DOIS predicados: a guarda automatica (cancelamento) ou
+        // o processado_manual_em que eu mesmo adicionei. Assumir cancelamento sempre
+        // jogava uma venda concluida na mao pra fila urgente com "cancelada, nao
+        // despachar" — alerta falso sobre uma venda perfeitamente valida.
+        const _rel = await lcp.buscar(oid);
+        const _v2 = (_rel && _rel.ok) ? _rel.data : null;
+        // Releitura que FALHA e indeterminado, nao "foi conclusao manual": se o
+        // bloqueio era um cancelamento, seguir pelo ramo nao-terminal descartaria a
+        // etiqueta e o alerta — e cancelamentos terminais saem das varreduras
+        // seguintes, entao nao haveria segunda chance.
+        if (!_v2) {
+          console.error(`[canceladas] order ${oid} etiqueta detectada, escrita bloqueada e NAO consegui reler — indeterminado, tratar na proxima rodada`);
+          out.erros.push({ order_id: oid, erro: 'etiqueta detectada com escrita bloqueada e releitura falhou — reconferir' });
+          await new Promise(r => setTimeout(r, CANCELADAS_PAUSA_MS));
+          continue;
+        }
+        const _terminal = !!(_v2.venda_cancelada_em || ['venda_cancelada','cancelado','cancelada_quarentena'].includes(String(_v2.status || '')));
+        if (!_terminal) {
+          // Nao e cancelamento: foi conclusao manual (ou a linha nao pode ser relida).
+          // A decisao do operador prevalece — nao grava etiqueta nem alerta.
+          console.log(`[canceladas] order ${oid} etiqueta detectada mas a escrita foi bloqueada por conclusao manual — respeito a decisao do operador`);
+          out.detalhes.push({ order_id: oid, ml_status: st.status, cancelada: false, etiqueta: false,
+                              aviso: 'etiqueta detectada, mas a venda foi concluida na mao nesse meio tempo' });
+          await new Promise(r => setTimeout(r, CANCELADAS_PAUSA_MS));
+          continue;
+        }
+        const semStatus = Object.assign({}, campos);
+        delete semStatus.status;
+        semStatus.alerta_pos_venda = (
+          `CANCELADA NO ML com etiqueta ja gerada (${campos.ml_shipment_status || '?'}). NAO DESPACHAR. ` +
+          `Conferir devolucao/estorno no ML e a NF/pedido no Bling.`
+        ).slice(0, 500);
+        const r2 = await lcp.atualizarVenda(oid, semStatus, { forcar: true });
+        const r2ok = !!(r2 && r2.ok && (!Array.isArray(r2.data) || r2.data.length === 1));
+        if (!r2ok) {
+          // venda_cancelada_em ja esta gravado, entao a linha sai de todas as varreduras
+          // futuras: nao ha proxima tentativa. Sem registrar como erro, o alerta de nao
+          // despachar sumiria em silencio justo com etiqueta impressa.
+          console.error(`[canceladas] 🚨🚨 order ${oid} etiqueta em venda CANCELADA e a reconciliacao FALHOU — alerta perdido, tratar na mao`);
+          out.erros.push({ order_id: oid, erro: 'cancelada COM etiqueta e nao consegui gravar o alerta — conferir na mao, NAO despachar' });
+        } else {
+          console.error(`[canceladas] 🚨 order ${oid} etiqueta detectada em venda que acabou de ser CANCELADA — alerta gravado`);
+        }
+        out.detalhes.push({ order_id: oid, ml_status: st.status, cancelada: true,
+                            etiqueta: true, gravado: r2ok,
+                            alerta: r2ok ? semStatus.alerta_pos_venda : null,
+                            aviso: r2ok ? undefined : 'cancelada COM etiqueta, mas o alerta NAO foi gravado — NAO despache.',
+                            buyer: v.buyer_nome || null });
+        await new Promise(r => setTimeout(r, CANCELADAS_PAUSA_MS));
+        continue;
+      }
+      if (!updV.ok) {
+        out.erros.push({ order_id: oid, erro: 'falhou gravar o status de envio/checagem no Supabase' });
+        console.error(`[canceladas] order ${oid} NAO consegui gravar ${Object.keys(campos).join(',')} no Supabase`);
+      }
+      out.detalhes.push({ order_id: oid, ml_status: st.status, cancelada: false,
+                          shipment: campos.ml_shipment_status || null, etiqueta: !!campos.ml_etiqueta_em,
+                          gravado: !!updV.ok,
+                          // indeterminado: NAO da pra dizer "venda ativa" — o status do
+                          // pedido nem chegou a ser lido. O painel usa isso pra avisar
+                          // em vez de liberar o processamento.
+                          indeterminado: !!st._statusIndeterminado || !!envioIndet,
+                          aviso: st._statusIndeterminado
+                            ? `Nao consegui ler o status do pedido no ML (${st._statusIndeterminado}). O envio foi conferido, mas NAO da pra afirmar que a venda esta ativa.`
+                            : undefined });
       await new Promise(r => setTimeout(r, CANCELADAS_PAUSA_MS));
       continue;
     }
 
     // ── CANCELADA ───────────────────────────────────────────────────────
+    // Se a etiqueta ficou imprimivel DEPOIS do ultimo poll e o cliente cancelou antes
+    // do proximo, o marcador em cache estaria vazio e o alerta nao sairia — mesmo com o
+    // pacote possivelmente ja impresso. Como o ramo de cima (!st.cancelada) nao roda
+    // aqui, confere o envio agora, uma vez, antes de montar o jaFeito.
+    // processado_manual_em ja e evidencia suficiente pro jaFeito: nao adia o
+    // cancelamento esperando um envio que pode nao existir (pedido sem shipping
+    // resolvivel adiaria a linha em TODA rodada, e o aviso de cancelar a NF emitida
+    // por fora nunca sairia).
+    if (!v.ml_etiqueta_em && !v.nf_emitida_em && !v.bling_editado_em && !v.processado_manual_em) {
+      let envFalhou = null;
+      try {
+        const envC = await ml.getEnvioResumo(oid);
+        if (envC && envC.ok) {
+          if (envC.temEtiqueta) {
+            v.ml_etiqueta_em = agoraIso;
+            v.ml_shipment_status = envC.status || null;
+            console.warn(`[canceladas] order ${oid} cancelada, mas a etiqueta JA existia (${envC.status}) — vai gerar alerta`);
+          }
+        } else {
+          envFalhou = (envC && (envC.dica || envC.erro)) || 'falha lendo envio';
+        }
+      } catch (e) {
+        envFalhou = e.message;
+      }
+      await new Promise(r => setTimeout(r, CANCELADAS_PAUSA_MS));
+
+      // NAO finaliza como cancelamento sem alerta enquanto o envio for desconhecido:
+      // gravar venda_cancelada_em tiraria a venda das proximas rodadas PARA SEMPRE, e se
+      // a etiqueta ja tivesse sido impressa ninguem seria avisado de parar o despacho.
+      // Deixa pra proxima passada (o cancelamento nao vai embora sozinho).
+      if (envFalhou) {
+        // QUARENTENA: grava status + ml_status AGORA (tira a venda do fluxo automatico
+        // — a escada, que roda a cada 30 min, ainda selecionava a linha e podia montar
+        // e emitir NF de um pedido cancelado). Mas NAO grava venda_cancelada_em: e ele
+        // que exclui a linha das proximas rodadas, e ainda falta determinar o alerta.
+        let quarentenaOk = false;
+        try {
+          // Releitura antes de gravar: o cron e o botao "Verificar ML" podem estar
+          // rodando na mesma venda. Se o outro ja finalizou o cancelamento, sobrescrever
+          // com quarentena deixaria a linha num estado impossivel — venda_cancelada_em
+          // preenchido (exclui do filtro pra sempre) com status de quarentena (o painel
+          // segue mostrando como pendente de conferencia).
+          const _relido = await lcp.buscar(oid);
+          if (_relido && _relido.ok && _relido.data && _relido.data.venda_cancelada_em) {
+            console.log(`[canceladas] order ${oid} cancelamento ja finalizado por outra execucao — nao sobrescrevo com quarentena`);
+            await new Promise(r => setTimeout(r, CANCELADAS_PAUSA_MS));
+            continue;
+          }
+          const rq = await lcp.atualizarVenda(oid, {
+            // Status PROPRIO de quarentena: 'venda_cancelada' sairia do CANCELADAS_STATUS
+            // e a linha nunca voltaria pra tentar o envio de novo — o alerta de nao
+            // despachar nunca sairia. 'cancelada_quarentena' esta na lista e o
+            // classificador trata como pendente humano.
+            status: 'cancelada_quarentena',
+            ml_status: st.status,
+            ml_status_atualizado_em: agoraIso
+          }, { somenteSe: `venda_cancelada_em=is.null&${_semReservaAtiva()}` });
+          // PostgREST devolve ok:true com data vazio quando o predicado nao casa (lease
+          // fresco). Exigir 1 linha: senao a rota diria "saiu do fluxo automatico" com o
+          // status intacto e o emissor reservado seguindo pro gerarNFe.
+          quarentenaOk = !!(rq && rq.ok && Array.isArray(rq.data) && rq.data.length === 1);
+          if (rq && rq.ok && Array.isArray(rq.data) && rq.data.length === 0) {
+            console.warn(`[canceladas] order ${oid} quarentena NAO aplicada: ha emissao de NF em curso — adiado`);
+          }
+        } catch (e) {
+          console.error(`[canceladas] order ${oid} falhei ate na quarentena: ${e.message}`);
+        }
+        // atualizarVenda devolve {ok:false} em vez de lancar. Sem conferir, a rodada
+        // diria "em quarentena" com a linha ainda no status original — e a escada
+        // poderia montar e faturar um pedido ja cancelado.
+        if (!quarentenaOk) {
+          console.error(`[canceladas] order ${oid} 🚨 CANCELADA e a QUARENTENA NAO GRAVOU — venda segue elegivel ao automatico`);
+          out.erros.push({ order_id: oid, erro: `cancelada no ML e FALHOU gravar a quarentena — venda ainda no fluxo automatico, tratar na mao` });
+        } else {
+          out.erros.push({ order_id: oid, erro: `cancelada, mas nao confirmei o envio (${envFalhou}) — em quarentena, alerta pendente` });
+        }
+        console.error(`[canceladas] order ${oid} CANCELADA e envio desconhecido (${envFalhou}) — nao finalizo agora`);
+        // PRECISA entrar em detalhes: o botao "Verificar ML" le detalhes[0] e, sem isso,
+        // o painel mostraria "✅ Venda ativa" pra um pedido que o ML acabou de confirmar
+        // como CANCELADO — o oposto do que a checagem descobriu.
+        out.detalhes.push({ order_id: oid, ml_status: st.status, cancelada: true,
+                            adiado: true, quarentena: quarentenaOk, alerta: null, buyer: v.buyer_nome || null,
+                            aviso: quarentenaOk
+                              ? `cancelada no ML. Envio nao confirmado (${envFalhou}) — venda posta em QUARENTENA: ja saiu do fluxo automatico e sera reconferida ate dar pra dizer se a etiqueta saiu.`
+                              : `cancelada no ML, envio nao confirmado (${envFalhou}) e a quarentena NAO gravou — a venda continua no fluxo automatico. Tratar na mao.` });
+        continue;
+      }
+    }
     const jaFeito = [];
     if (v.nf_emitida_em) jaFeito.push(`NF ${v.nf_numero || '?'}/${v.nf_serie || '?'} emitida em ${_fmtBR(v.nf_emitida_em)}`);
     if (v.bling_editado_em) jaFeito.push(`pedido Bling ${v.bling_pedido_id || '?'} montado em ${_fmtBR(v.bling_editado_em)}`);
+    // Conclusao manual tambem e trabalho ja feito: o cenario tipico do botao
+    // "✓ Processado" e NF emitida POR FORA do painel. Sem isso, um cancelamento
+    // posterior no ML nao geraria alerta e a venda cairia calada no bolsao de
+    // resolvidas — ninguem seria avisado pra parar o despacho e estornar a nota.
+    if (!v.nf_emitida_em && !v.bling_editado_em && v.processado_manual_em) {
+      jaFeito.push(`marcada como concluida na mao em ${_fmtBR(v.processado_manual_em)} (a NF pode ter saido por fora do painel)`);
+    }
+    // Etiqueta gerada/postado tambem e trabalho feito: o pacote pode ja estar montado
+    // na bancada ou a caminho do posto. Se o cancelamento chegar depois disso e nao
+    // gerar alerta, a venda cai calada no bolsao de resolvidas e o pacote sai.
+    if (v.ml_etiqueta_em) {
+      const stEnv = String(v.ml_shipment_status || '').toLowerCase();
+      jaFeito.push(['shipped', 'delivered', 'not_delivered'].includes(stEnv)
+        ? `pacote JA POSTADO no ML (${v.ml_shipment_status}) — conferir devolucao/estorno`
+        : `etiqueta ja gerada no ML em ${_fmtBR(v.ml_etiqueta_em)}`);
+    }
 
     const campos = {
       status: 'venda_cancelada',
@@ -521,8 +947,38 @@ async function rotinaChecarCanceladasML(opts = {}) {
       console.log(`[canceladas] order ${oid} cancelada no ML (nada montado/emitido ainda) — cliente ${v.buyer_nome || '?'}`);
     }
 
-    const upd = await lcp.atualizarVenda(oid, campos);
-    if (!upd.ok) out.erros.push({ order_id: oid, erro: 'falhou gravar o cancelamento no Supabase' });
+    // EXCLUSAO MUTUA NO PROPRIO PATCH. Checar `v.nf_emitindo_em` nao bastava: esse
+    // valor vem do snapshot lido ao montar `alvos`, ANTES das chamadas ao ML — se a
+    // emissao reservar a linha nesse intervalo, o cron veria null e gravaria por cima
+    // com o gerarNFe em curso. O filtro abaixo faz o Postgres decidir: so grava se nao
+    // houver reserva nos ultimos 2 min.
+    const upd = await lcp.atualizarVenda(oid, campos, { somenteSe: _semReservaAtiva() });
+    if (upd.ok && Array.isArray(upd.data) && upd.data.length === 0) {
+      console.warn(`[canceladas] order ${oid} cancelada, mas ha emissao de NF em curso — adio o registro pra proxima rodada`);
+      out.erros.push({ order_id: oid, erro: 'cancelada durante emissao de NF em curso — adiado' });
+      // (4) precisa entrar em detalhes: o "Verificar ML" le detalhes[0] e, sem entrada,
+      // responde cancelada:false — o painel diria "venda ativa" logo apos o ML confirmar
+      // o cancelamento.
+      out.detalhes.push({ order_id: oid, ml_status: st.status, cancelada: true,
+                          adiado: true, gravado: false, quarentena: false, buyer: v.buyer_nome || null,
+                          aviso: 'cancelada no ML, mas ha uma emissao de NF em curso — o registro foi adiado pra proxima rodada. NAO despache.' });
+      await new Promise(r => setTimeout(r, CANCELADAS_PAUSA_MS));
+      continue;
+    }
+    if (!upd.ok) {
+      // Fail closed: sem gravar, a linha segue no status original e pode ser faturada.
+      // Nao conta como cancelada nesta rodada — a proxima tenta de novo.
+      out.erros.push({ order_id: oid, erro: 'FALHOU gravar o cancelamento no Supabase — venda ainda no fluxo automatico, tratar na mao' });
+      console.error(`[canceladas] order ${oid} 🚨 cancelamento NAO gravou — venda segue elegivel ao automatico`);
+      // PRECISA aparecer em detalhes: o "Verificar ML" le detalhes[0] e, sem entrada,
+      // cai em {} e responde cancelada:false — o painel diria "Venda ativa" logo depois
+      // de o ML confirmar o cancelamento, convidando a despachar.
+      out.detalhes.push({ order_id: oid, ml_status: st.status, cancelada: true,
+                          gravado: false, quarentena: false, adiado: true, buyer: v.buyer_nome || null,
+                          aviso: 'cancelada no ML, mas a gravacao no banco FALHOU — a venda continua no fluxo automatico. Tratar na mao.' });
+      await new Promise(r => setTimeout(r, CANCELADAS_PAUSA_MS));
+      continue;
+    }
 
     out.canceladas++;
     out.detalhes.push({
@@ -602,17 +1058,133 @@ async function _processarAutoEmissaoInner({ venda, iaResult, graosResult, lcp })
   try {
     const st = await ml.getOrderStatusResumo(String(orderId));
     if (st && st.ok && st.cancelada) {
-      await lcp.atualizarVenda(orderId, {
+      // Antes de gravar venda_cancelada_em (que exclui a linha das proximas rodadas
+      // PARA SEMPRE), confere o envio: etiqueta impressa desde o ultimo poll precisa
+      // virar alerta de nao despachar. Mesma logica ja aplicada no cron — este escritor
+      // olhava so o status do pedido.
+      const campos = {
         status: 'venda_cancelada',
         ml_status: st.status,
         ml_status_atualizado_em: new Date().toISOString(),
         venda_cancelada_em: new Date().toISOString()
-      });
+      };
+      // processado_manual_em ja prova que houve trabalho (NF pode ter saido por fora),
+      // e o marcador exclui a venda da repescagem de envio — consultar o shipment aqui
+      // so cria a chance de cair na quarentena e ADIAR o alerta que ja e devido.
+      if (venda.processado_manual_em) {
+        campos.venda_cancelada_em = new Date().toISOString();
+        campos.alerta_pos_venda = (
+          `CANCELADA NO ML apos conclusao manual (${_fmtBR(venda.processado_manual_em)}). NAO DESPACHAR. ` +
+          `A NF pode ter sido emitida por fora do painel — conferir e cancelar/estornar no Bling.`
+        ).slice(0, 500);
+        console.error(`[auto-emissao] 🚨 order ${orderId} cancelada apos conclusao manual — alerta gravado`);
+      } else if (!venda.ml_etiqueta_em && !venda.nf_emitida_em && !venda.bling_editado_em) {
+        try {
+          const envG = await ml.getEnvioResumo(String(orderId));
+          if (envG && envG.ok && envG.temEtiqueta) {
+            campos.ml_etiqueta_em = new Date().toISOString();
+            campos.ml_shipment_status = envG.status || null;
+            campos.alerta_pos_venda = (`CANCELADA NO ML com etiqueta ja gerada (${envG.status}). NAO DESPACHAR. ` +
+              `Conferir devolucao/estorno no ML e o pedido no Bling.`).slice(0, 500);
+            console.error(`[auto-emissao] 🚨 order ${orderId} cancelada COM etiqueta ja gerada — alerta gravado`);
+          } else if (envG && !envG.ok) {
+            // Envio indeterminado: NAO finaliza agora. Sem gravar venda_cancelada_em a
+            // linha volta na proxima rodada; gravar cego perderia o alerta pra sempre.
+            console.error(`[auto-emissao] order ${orderId} cancelada mas envio indeterminado (${envG.erro}) — quarentena`);
+            // Persiste a quarentena ANTES de sair: deixar em cliente_confirmou_pedido
+            // permitiria a recuperacao do confirmou-strand pegar a venda de novo e,
+            // com uma falha transiente na consulta de status, montar e emitir NF de um
+            // pedido ja cancelado.
+            // Confere o retorno: atualizarVenda devolve {ok:false} sem lancar. Se a
+            // quarentena nao gravou, a linha segue em cliente_confirmou_pedido/
+            // aguardando_bling e volta pela rehidratacao — pede RETRY em vez de sair.
+            let qOk = false;
+            try {
+              const _relA = await lcp.buscar(orderId);
+              if (_relA && _relA.ok && _relA.data && _relA.data.venda_cancelada_em) {
+                console.log(`[auto-emissao] order ${orderId} cancelamento ja finalizado por outra execucao — nao sobrescrevo`);
+                return { falha: true, motivo: 'venda_cancelada_no_ml' };
+              }
+              const rq = await lcp.atualizarVenda(orderId, {
+                status: 'cancelada_quarentena',
+                ml_status: st.status,
+                ml_status_atualizado_em: new Date().toISOString()
+              }, { somenteSe: `venda_cancelada_em=is.null&${_semReservaAtiva()}` });
+              qOk = !!(rq && rq.ok && Array.isArray(rq.data) && rq.data.length === 1);
+            } catch (e2) { console.error(`[auto-emissao] order ${orderId} falhei na quarentena: ${e2.message}`); }
+            if (!qOk) console.error(`[auto-emissao] order ${orderId} 🚨 quarentena NAO gravou — mantendo na fila`);
+            return { falha: true, retry: !qOk, motivo: 'venda_cancelada_no_ml_envio_indeterminado' };
+          }
+        } catch (e) {
+          console.error(`[auto-emissao] order ${orderId} cancelada e falhei ao conferir envio (${e.message}) — quarentena`);
+          let qOk2 = false;
+          try {
+            const _relB = await lcp.buscar(orderId);
+            if (_relB && _relB.ok && _relB.data && _relB.data.venda_cancelada_em) {
+              console.log(`[auto-emissao] order ${orderId} cancelamento ja finalizado por outra execucao — nao sobrescrevo`);
+              return { falha: true, motivo: 'venda_cancelada_no_ml' };
+            }
+            const rq2 = await lcp.atualizarVenda(orderId, {
+              status: 'cancelada_quarentena',
+              ml_status: st.status,
+              ml_status_atualizado_em: new Date().toISOString()
+            }, { somenteSe: `venda_cancelada_em=is.null&${_semReservaAtiva()}` });
+            qOk2 = !!(rq2 && rq2.ok && Array.isArray(rq2.data) && rq2.data.length === 1);
+          } catch (e2) { console.error(`[auto-emissao] order ${orderId} falhei na quarentena: ${e2.message}`); }
+          if (!qOk2) console.error(`[auto-emissao] order ${orderId} 🚨 quarentena NAO gravou — mantendo na fila`);
+          return { falha: true, retry: !qOk2, motivo: 'venda_cancelada_no_ml_envio_indeterminado' };
+        }
+      }
+      // Respeita a reserva, como os ramos de quarentena acima: sem isso, este PATCH
+      // gravava o cancelamento com uma emissao ja autorizada em curso — e a rota
+      // reservada seguia direto pro gerarNFe.
+      const updG = await lcp.atualizarVenda(orderId, campos, { somenteSe: _semReservaAtiva() });
+      if (updG && updG.ok && Array.isArray(updG.data) && updG.data.length === 0) {
+        console.warn(`[auto-emissao] order ${orderId} cancelada, mas ha emissao de NF em curso — nao gravo agora`);
+        return { falha: true, retry: true, motivo: 'venda_cancelada_no_ml_emissao_em_curso' };
+      }
+      if (!updG || !updG.ok) {
+        // Nao gravou: a linha segue em cliente_confirmou_pedido/aguardando_bling e
+        // volta pela rehidratacao. Pede RETRY pra nao sumir da fila achando resolvido.
+        console.error(`[auto-emissao] order ${orderId} 🚨 cancelamento NAO gravou — mantendo na fila`);
+        return { falha: true, retry: true, motivo: 'venda_cancelada_no_ml_gravacao_falhou' };
+      }
       console.warn(`[auto-emissao] order ${orderId} CANCELADA no ML (${st.status}) — emissao abortada antes de montar/emitir`);
       return { falha: true, motivo: 'venda_cancelada_no_ml' };
     }
   } catch (e) {
     console.warn(`[auto-emissao] order ${orderId} nao consegui checar status ML antes de emitir (segue): ${e.message}`);
+  }
+
+  // Guarda 1.6 — ETIQUETA JA GERADA. Mover o status pra 'processado' na deteccao nao
+  // basta: a fase 2 do lerRespostas varre 'processado', e uma mensagem nova do cliente
+  // devolve a linha pra precisa_atencao_humano -> revisarAtencaoHumana -> de volta ao
+  // fluxo. O marcador tem que valer como terminal aqui tambem.
+  // processado_manual_em entra junto: a fase 2 do lerRespostas devolve linha
+  // 'processado' pra atencao humana quando o cliente escreve, e o revisarAtencaoHumana
+  // pode reengajar — chegando aqui com NF ja emitida POR FORA.
+  if (venda.ml_etiqueta_em || venda.processado_manual_em) {
+    const motivo = venda.ml_etiqueta_em ? 'etiqueta_ja_gerada' : 'conclusao_manual';
+    // Confere o retorno: atualizarVenda devolve {ok:false} sem lancar. Sem isso, o
+    // wrapper apagaria a entrada da fila com a linha ainda em aguardando_resposta/
+    // cliente_confirmou_pedido/precisa_atencao_humano — e como classificarVenda so
+    // reconhece a conclusao manual quando o status e 'processado', a venda ficaria
+    // presa em Pendentes pra sempre, sem nada agendado pra consertar.
+    let okTerm = false;
+    try {
+      const rt = await lcp.atualizarVenda(orderId, { status: 'processado' });
+      okTerm = !!(rt && rt.ok);
+    } catch (e) { console.error(`[auto-emissao] order ${orderId} excecao gravando status terminal: ${e.message}`); }
+    if (!okTerm) {
+      // retry:true so IMPEDE o wrapper de apagar uma entrada existente — se a chamada
+      // veio direto do lerRespostas (sem entrada na fila), nada seria agendado e a
+      // venda ficaria no status ativo indefinidamente. Enfileira explicitamente.
+      console.error(`[auto-emissao] order ${orderId} 🚨 nao gravou o status terminal (${motivo}) — enfileirando restauracao`);
+      try { _retry.enfileirarRestauracao({ orderId, venda, iaResult, graosResult }); }
+      catch (e) { console.error(`[auto-emissao] order ${orderId} falhei ao enfileirar: ${e.message}`); }
+    }
+    console.warn(`[auto-emissao] order ${orderId} terminal (${motivo}) — nao monto nem emito`);
+    return { falha: true, retry: !okTerm, motivo };
   }
 
   // Guarda 2 — pedido_estruturado valido
@@ -739,9 +1311,116 @@ async function _processarAutoEmissaoInner({ venda, iaResult, graosResult, lcp })
   // editarPedidoComGraos -> calcularRateio, e a sobra de centavos (se houver)
   // entra no campo DESCONTO ou OUTRAS DESPESAS do pedido, de modo que o TOTAL
   // sempre bate exato. Nao ha desvio pra humano por causa de centavo.
-  const edit = await bp.editarPedidoComGraos({ ...baseArgs, dryRun: false });
+  // RESERVA ANTES DE EDITAR. A edicao ja reescreve os itens no Bling — reservar so
+  // antes do gerarNFe impedia a nota, mas o pedido de uma venda etiquetada/postada/
+  // cancelada ja teria sido alterado. O predicado da reserva checa os marcadores
+  // terminais, entao ele e a guarda certa pra tambem proteger a escrita no Bling.
+  // ENVIO AO VIVO antes de reservar: a Guarda 1.5 so refresca o status do PEDIDO, e uma
+  // etiqueta que ficou imprimivel depois do ultimo poll horario deixaria ml_etiqueta_em
+  // nulo — a reserva passaria e o pedido seria reescrito e faturado com etiqueta ja
+  // gerada. Fail closed: so segue com confirmacao de que NAO ha etiqueta.
+  try {
+    const envA = await ml.getEnvioResumo(String(orderId));
+    if (!envA || !envA.ok) {
+      console.warn(`[auto-emissao] order ${orderId} envio indeterminado (${(envA && envA.erro) || 'sem resposta'}) — nao edito nem emito`);
+      try { await lcp.atualizarVenda(orderId, { ml_envio_indeterminado_em: new Date().toISOString() }); } catch (_) {}
+      return { falha: true, retry: true, motivo: 'envio_indeterminado' };
+    }
+    if (envA.temEtiqueta) {
+      const _uEtA = await lcp.atualizarVenda(orderId, {
+        ml_etiqueta_em: new Date().toISOString(),
+        ml_shipment_status: envA.status || null,
+        ml_shipment_substatus: envA.substatus || null,
+        ml_envio_indeterminado_em: null
+      });
+      // Nao gravou = a proxima passada volta a achar que nao ha etiqueta e libera a
+      // edicao/emissao. Pede retry pra tentar registrar de novo.
+      if (!_uEtA || !_uEtA.ok || (Array.isArray(_uEtA.data) && _uEtA.data.length !== 1)) {
+        console.error(`[auto-emissao] order ${orderId} 🚨 etiqueta detectada mas NAO gravada`);
+        return { falha: true, retry: true, motivo: 'etiqueta_nao_gravada' };
+      }
+      console.warn(`[auto-emissao] order ${orderId} etiqueta JA gerada no ML (${envA.status}) — nao edito nem emito`);
+      return { falha: true, motivo: 'etiqueta_ja_gerada' };
+    }
+    if (venda.ml_envio_indeterminado_em) {
+      try { await lcp.atualizarVenda(orderId, { ml_envio_indeterminado_em: null }); } catch (_) {}
+    }
+    // RECHECA o cancelamento DEPOIS do envio: o getEnvioResumo faz um /orders mais novo
+    // mas so olha o shipment, entao um cancelamento ocorrido entre a Guarda 1.5 e aqui
+    // nao apareceria — e seguiriamos pra reserva com marcadores locais intactos.
+    // Esta e a ULTIMA leitura do ML antes de escrever no Bling.
+    const stFinal = await ml.getOrderStatusResumo(String(orderId));
+    if (!stFinal || !stFinal.ok) {
+      console.warn(`[auto-emissao] order ${orderId} status indeterminado na recheca — nao edito nem emito`);
+      return { falha: true, retry: true, motivo: 'status_indeterminado' };
+    }
+    if (stFinal.cancelada) {
+      // Respeita lease ativo de OUTRO worker: se ele ja esta dentro do gerarNFe, gravar
+      // o cancelamento aqui faria a escrita terminal dele ser rejeitada — NF emitida
+      // sem registro. Zero linhas = adia (retry), o cron reconfirma depois.
+      const _uF = await lcp.atualizarVenda(orderId, {
+        status: 'venda_cancelada', ml_status: stFinal.status,
+        ml_status_atualizado_em: new Date().toISOString(),
+        venda_cancelada_em: new Date().toISOString()
+      }, { somenteSe: _semReservaAtiva() });
+      if (_uF && _uF.ok && Array.isArray(_uF.data) && _uF.data.length === 0) {
+        console.warn(`[auto-emissao] order ${orderId} cancelada, mas ha emissao em curso — nao gravo agora`);
+        return { falha: true, retry: true, motivo: 'venda_cancelada_emissao_em_curso' };
+      }
+      // {ok:false} = a linha continua ATIVA no banco. Sem retry, o wrapper apagaria a
+      // entrada da fila reportando um cancelamento que nunca foi gravado.
+      if (!_uF || !_uF.ok) {
+        console.error(`[auto-emissao] order ${orderId} 🚨 cancelada no ML mas NAO gravei — mantendo na fila`);
+        return { falha: true, retry: true, motivo: 'venda_cancelada_gravacao_falhou' };
+      }
+      console.warn(`[auto-emissao] order ${orderId} CANCELADA no ML (recheca pos-envio) — nao edito nem emito`);
+      return { falha: true, motivo: 'venda_cancelada_no_ml' };
+    }
+  } catch (e) {
+    console.warn(`[auto-emissao] order ${orderId} excecao lendo o envio — nao edito nem emito: ${e.message}`);
+    return { falha: true, retry: true, motivo: 'envio_indeterminado' };
+  }
+
+  const _res = await lcp.reservarEmissao(orderId);
+  if (!_res.ok) {
+    console.warn(`[auto-emissao] order ${orderId} nao reservei (${_res.motivo}) — nao edito nem emito`);
+    return { falha: true, retry: _res.motivo === 'reserva_falhou', motivo: `reserva_${_res.motivo}` };
+  }
+
+  // RECHECA COM O LEASE NA MAO (helper compartilhado): com a reserva ativa o cron de
+  // cancelamento adia sua gravacao, entao nenhum marcador local muda mais — so o ML
+  // pode revelar um cancelamento/etiqueta surgido durante a aquisicao do lease.
+  const _rc = await lcp.recheckAposReserva(orderId, _res.token);
+  if (!_rc.ok) {
+    console.warn(`[auto-emissao] order ${orderId} recheca pos-reserva barrou (${_rc.motivo}) — nao edito nem emito`);
+    if (_rc.motivo === 'estado_indeterminado' || _rc.motivo === 'estado_nao_gravado') {
+      await lcp.liberarEmissao(orderId, _res.token);
+      return { falha: true, retry: true, motivo: _rc.motivo };
+    }
+    return { falha: true, motivo: _rc.motivo };
+  }
+
+  // RENOVA o lease antes de cada passo irreversivel: as chamadas ao Bling nao tem
+  // timeout, entao a duracao real pode passar dos 10 min e outro worker reservaria a
+  // mesma venda. Perder a posse = ABORTA sem tocar no Bling.
+  if (!(await lcp.renovarEmissao(orderId, _res.token))) {
+    console.warn(`[auto-emissao] order ${orderId} perdi a posse do lease — nao edito`);
+    return { falha: true, retry: true, motivo: 'lease_perdido' };
+  }
+  let edit;
+  try {
+    edit = await bp.editarPedidoComGraos({ ...baseArgs, dryRun: false });
+  } catch (eEd) {
+    // Excecao (rede rejeitada) subia pro chamador com o lease ativo, bloqueando
+    // cancelamento e novas tentativas por ate 10 min sem ninguem em curso.
+    await lcp.liberarEmissao(orderId, _res.token);
+    throw eEd;
+  }
   if (!edit.ok) {
-    await lcp.atualizarVenda(orderId, { status: 'precisa_atencao_humano', bling_erro: `auto edit ${edit.etapa || ''}: ${edit.erro || ''}`.slice(0, 500) });
+    const _pEd = await lcp.atualizarVenda(orderId, { status: 'precisa_atencao_humano', nf_emitindo_em: null, nf_emitindo_por: null, bling_erro: `auto edit ${edit.etapa || ''}: ${edit.erro || ''}`.slice(0, 500) }, lcp.fecharLease(_res.token));
+    if (!_pEd || !_pEd.ok || (Array.isArray(_pEd.data) && _pEd.data.length !== 1)) {
+      await lcp.liberarEmissao(orderId, _res.token);
+    }
     console.error(`[auto-emissao] order ${orderId} edit falhou (${edit.etapa}): ${edit.erro}`);
     return { falha: true, motivo: 'edit_falhou' };
   }
@@ -755,29 +1434,83 @@ async function _processarAutoEmissaoInner({ venda, iaResult, graosResult, lcp })
     bling_erro: null
   });
 
+  // RESERVA antes da emissao irreversivel. O caminho automatico nunca setava
+  // nf_emitindo_em, entao o cron de cancelamento nao via lease nenhum e podia gravar
+  // o cancelamento com o gerarNFe ja em curso — as reservas das rotas manuais nao
+  // cobriam este emissor.
   // Emite a NF (NF transmitida pra SEFAZ — irreversivel)
-  const nf = await bp.gerarNFe(edit.pedidoId);
+  // RECHECA AO VIVO entre a edicao e a emissao: o editarPedidoComGraos pode demorar, e
+  // o renovarEmissao valida propriedade/predicados do BANCO — nao o estado no ML, cuja
+  // gravacao de cancelamento fica adiada justamente por causa do nosso lease.
+  const _rcNf = await lcp.recheckAposReserva(orderId, _res.token);
+  if (!_rcNf.ok) {
+    console.warn(`[auto-emissao] order ${orderId} recheca pre-NF barrou (${_rcNf.motivo}) — pedido ja editado, NAO emito`);
+    if (_rcNf.motivo === 'estado_indeterminado' || _rcNf.motivo === 'estado_nao_gravado') {
+      await lcp.liberarEmissao(orderId, _res.token);
+      return { falha: true, retry: true, motivo: _rcNf.motivo, pedidoId: edit.pedidoId };
+    }
+    return { falha: true, motivo: _rcNf.motivo, pedidoId: edit.pedidoId };
+  }
+  if (!(await lcp.renovarEmissao(orderId, _res.token))) {
+    console.warn(`[auto-emissao] order ${orderId} perdi a posse do lease — nao emito`);
+    return { falha: true, retry: true, motivo: 'lease_perdido' };
+  }
+  let nf;
+  try {
+    nf = await bp.gerarNFe(edit.pedidoId);
+  } catch (eNf) {
+    await lcp.liberarEmissao(orderId, _res.token);
+    throw eNf;
+  }
   if (!nf.ok) {
     // Pedido ja foi editado: deixa o bling_pedido_id salvo pro painel mostrar
     // o botao laranja e voce emitir na mao.
-    await lcp.atualizarVenda(orderId, {
+    const _pNf = await lcp.atualizarVenda(orderId, {
       status: 'precisa_atencao_humano',
+      nf_emitindo_em: null, nf_emitindo_por: null,
       nf_erro: `${nf.status || ''}: ${nf.erro || JSON.stringify(nf.detalhe || {}).slice(0, 200)}`.slice(0, 500)
-    });
+    }, lcp.fecharLease(_res.token));
+    // Nao gravou = o lease continua ativo e bloquearia cancelamento e nova tentativa
+    // por ate 10 min sem nada em curso. Libera explicitamente, como no caminho manual.
+    if (!_pNf || !_pNf.ok || (Array.isArray(_pNf.data) && _pNf.data.length !== 1)) {
+      await lcp.liberarEmissao(orderId, _res.token);
+    }
     console.error(`[auto-emissao] order ${orderId} pedido ${edit.pedidoId} editado mas NF falhou: ${nf.status} ${nf.erro}`);
     return { falha: true, motivo: 'nf_falhou', pedidoId: edit.pedidoId };
   }
 
   // Sucesso total
-  await lcp.atualizarVenda(orderId, {
+  // fecharLease(token): so grava se a reserva ainda for NOSSA. Se o lease venceu e
+  // outro worker assumiu, este write nao pode limpar a reserva dele.
+  const _persist = await lcp.atualizarVenda(orderId, {
     nf_emitida_em: new Date().toISOString(),
     nf_id: nf.nfeId,
     nf_numero: nf.numero,
     nf_serie: nf.serie,
     nf_chave: nf.chave || null,
     nf_erro: null,
+    nf_emitindo_em: null, nf_emitindo_por: null,   // lease liberado com o terminal
     status: 'processado'
-  });
+  }, lcp.fecharLease(_res.token));
+  // NF ja saiu (irreversivel). Se nao gravou, NAO reportar sucesso: o wrapper apagaria
+  // a entrada da fila, o painel mostraria a venda inacabada e o lease ficaria preso.
+  if (!_persist.ok || (Array.isArray(_persist.data) && _persist.data.length !== 1)) {
+    // NF ja emitida e nada em curso: segurar o lease bloquearia cancelamento e
+    // reconciliacao por 10 min, e o proprio retry seguinte esbarraria nessa reserva
+    // (estado_mudou) e sairia da fila.
+    await lcp.liberarEmissao(orderId, _res.token);
+    console.error(`[auto-emissao] order ${orderId} 🚨 NF ${nf.numero || '?'} EMITIDA mas NAO gravada — enfileirando reconciliacao`);
+    // retry:true so IMPEDE o wrapper de apagar uma entrada existente — numa chamada
+    // vinda do lerRespostas nao ha entrada nenhuma. E o bling_editado_em ja gravado faz
+    // o confirmou-strand pular esta linha. Sem enfileirar, a NF emitida ficaria sem
+    // registro ate alguem reconciliar na mao.
+    try { _retry.enfileirarRestauracao({ orderId, venda, iaResult, graosResult,
+            nfConfirmada: { nfeId: nf.nfeId, numero: nf.numero, serie: nf.serie, chave: nf.chave || null },
+            pedidoId: edit.pedidoId }); }
+    catch (e) { console.error(`[auto-emissao] order ${orderId} falhei ao enfileirar: ${e.message}`); }
+    return { falha: true, retry: true, motivo: 'nf_emitida_sem_registro',
+             nfNumero: nf.numero, pedidoId: edit.pedidoId };
+  }
   console.log(`[auto-emissao] ✅ order ${orderId} → pedido ${edit.pedidoId} editado + NF ${nf.numero}/${nf.serie} emitida (auto)`);
   return { emitida: true, pedidoId: edit.pedidoId, nfNumero: nf.numero };
 }

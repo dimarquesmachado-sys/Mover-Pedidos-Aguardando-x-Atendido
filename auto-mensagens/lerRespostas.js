@@ -324,11 +324,27 @@ async function rotinaLerRespostas() {
           }
 
           // Cliente respondeu - grava na tabela
-          await lcp.marcarRespostaCliente(venda.order_id, {
+          const _marc = await lcp.marcarRespostaCliente(venda.order_id, {
             texto: textoCliente,
             dataResposta,
             totalMsgsCliente: conv.totalCliente
           });
+          // Bloqueada = a venda virou terminal (cancelada) entre a leitura e agora.
+          // Parar ANTES da IA: senao o cliente que acabou de cancelar recebe resposta
+          // automatica de pedido.
+          // FAIL CLOSED: qualquer resultado que nao seja 1 linha confirmada para aqui.
+          //  - bloqueada  -> a venda virou terminal (cancelada) nesse meio tempo
+          //  - {ok:false} -> banco fora; nao da pra saber quem venceu a corrida NEM
+          //                  gravar o anti-duplicacao, entao rodar a IA arriscaria
+          //                  responder cliente cancelado e reprocessar no ciclo seguinte
+          const _marcOk = !!(_marc && _marc.ok && !_marc.bloqueada
+                             && (!Array.isArray(_marc.data) || _marc.data.length === 1));
+          if (!_marcOk) {
+            const _motivo = (_marc && _marc.bloqueada) ? 'virou terminal (cancelada)' : 'falha gravando a resposta';
+            console.log(`[lixas-combinar lerRespostas] ⏭️  Order ${venda.order_id} ${_motivo} — nao processo nem respondo`);
+            if (!_marc || !_marc.ok) stats.erros++; else stats.semNovidade++;
+            continue;
+          }
           stats.novasRespostas++;
           console.log(`[lixas-combinar lerRespostas] 💬 Order ${venda.order_id} cliente respondeu (${conv.totalCliente} msg) - "${textoCliente.slice(0, 60)}..."`);
 

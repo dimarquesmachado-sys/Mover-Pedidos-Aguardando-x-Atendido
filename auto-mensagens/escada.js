@@ -69,6 +69,13 @@ async function rotinaEscadaIndisponivel(opts = {}) {
     ...(listaAguard.ok && Array.isArray(listaAguard.data) ? listaAguard.data : [])
   ]) {
     if (!/indispon/i.test(String(v.bling_erro || '')) || v.nf_emitida_em) continue;
+    // Conclusao manual = NF emitida POR FORA do painel: editar e emitir aqui criaria
+    // uma SEGUNDA nota. E venda cancelada (ou em quarentena) nao se monta.
+    if (v.processado_manual_em) continue;
+    // Etiqueta ja gerada: a escada edita e emite DIRETO (nao passa pelo
+    // processarAutoEmissao), entao a Guarda 1.6 nao a protege — precisa da guarda aqui.
+    if (v.ml_etiqueta_em) continue;
+    if (v.venda_cancelada_em || v.status === 'venda_cancelada' || v.status === 'cancelada_quarentena' || v.status === 'cancelado') continue;
     const k = String(v.order_id);
     if (_vistos.has(k)) continue;
     _vistos.add(k);
@@ -94,8 +101,28 @@ async function rotinaEscadaIndisponivel(opts = {}) {
 
       // 3. PRAZO de postagem real (via shipment do ML)
       let prazo = null;
+      // infoEnvio no escopo do loop: o resumo do shipment lido aqui e reusado mais
+      // abaixo, antes de escrever no Bling (evita uma segunda chamada ao ML).
+      let infoEnvio = null;
       try {
         const info = await ml.getPrazoPostagem(orderId);
+        infoEnvio = info;
+        // O getPrazoPostagem ja traz o status do PEDIDO ao vivo. Sem olhar isso, o ramo
+        // do lembrete (que roda antes do corte) manda "escolha os graos" pra quem
+        // acabou de cancelar — os marcadores do snapshot so mudam no poll horario.
+        const _stVivo = String((info && (info.order_status || info.status)) || '').toLowerCase();
+        if (['cancelled', 'invalid'].includes(_stVivo)) {
+          try {
+            await lcp.atualizarVenda(orderId, {
+              status: 'venda_cancelada', ml_status: _stVivo,
+              ml_status_atualizado_em: new Date().toISOString(),
+              venda_cancelada_em: new Date().toISOString()
+            }, { somenteSe: lcp.semReservaAtiva() });
+          } catch (_) {}
+          console.warn(`[escada] order ${orderId} CANCELADA no ML — nao mando lembrete nem escalono`);
+          stats.pulados++; stats.lista.push({ order_id: orderId, acao: 'pulado', motivo: 'cancelada_no_ml' });
+          continue;
+        }
         prazo = prazoMod.calcularPrazoPostagem(info && info.shipment_bruto ? info.shipment_bruto : {});
       } catch (e) {
         stats.pulados++; stats.lista.push({ order_id: orderId, acao: 'pulado', motivo: 'sem_prazo: ' + e.message }); continue;
@@ -209,6 +236,8 @@ async function rotinaEscadaIndisponivel(opts = {}) {
 
       // dryRun: so reporta o que FARIA
       if (dryRun) {
+        // Preview NAO reserva nada, entao nao mexe em _libEsc (que so e declarado
+        // abaixo — tocar aqui dava ReferenceError por TDZ em toda simulacao).
         stats.substituidos++;
         stats.lista.push({ order_id: orderId, acao: 'substituiria', horas_ate_prazo: Math.round(horas * 10) / 10, ..._reg, trocas: resolvido.trocas, pedido_final: resolvido.pedidoFinal });
         continue;
@@ -217,6 +246,126 @@ async function rotinaEscadaIndisponivel(opts = {}) {
       // 6. MONTA no Bling (preserva cupom/desconto)
       const idBuscaBling = v.pack_id || orderId;
       const dataVenda = v.data_venda ? String(v.data_venda).split('T')[0] : null;
+      // RESERVA ANTES DA EDICAO: editarPedidoComGraos ja reescreve os itens no Bling.
+      // Reservar so antes do gerarNFe impedia a nota, mas o pedido de uma venda
+      // etiquetada/postada/cancelada ja teria sido alterado — e isso nao se desfaz.
+      // try/finally apos a reserva: promessa rejeitada do editarPedidoComGraos ou do
+      // gerarNFe pulava pro catch do loop sem liberar, travando a venda por ate 10 min.
+      // RESERVA + CHECAGENS AO VIVO. O try/finally precisa englobar TAMBEM a edicao e a
+      // emissao (mais abaixo) — fechar antes liberaria o lease justo durante as duas
+      // operacoes que ele existe pra proteger, e mataria o escopo do resEsc.
+      // PREFLIGHT do envio ANTES de reservar: a reserva recusa qualquer linha com
+      // ml_envio_indeterminado_em, e so o poll horario limpava essa marca — entao uma
+      // falha transiente do ML travava a escada (que e sensivel a prazo de coleta) ate
+      // a proxima varredura. Uma leitura boa aqui limpa a marca e destrava.
+      // A releitura POS-reserva continua existindo, pra fechar a corrida da etiqueta.
+      try {
+        const _pre = await ml.getEnvioResumo(String(orderId));
+        if (_pre && _pre.ok) {
+          const _campos = {};
+          if (v.ml_envio_indeterminado_em) _campos.ml_envio_indeterminado_em = null;
+          if (_pre.temEtiqueta) {
+            _campos.ml_etiqueta_em = new Date().toISOString();
+            _campos.ml_shipment_status = _pre.status || null;
+            _campos.ml_shipment_substatus = _pre.substatus || null;
+          }
+          if (Object.keys(_campos).length) await lcp.atualizarVenda(orderId, _campos);
+          if (_pre.temEtiqueta) {
+            console.warn(`[escada] order ${orderId} etiqueta JA gerada (${_pre.status}) — nao reservo`);
+            stats.erros++; stats.lista.push({ order_id: orderId, acao: 'erro', motivo: 'etiqueta_ja_gerada' });
+            continue;
+          }
+        }
+      } catch (e) {
+        console.warn(`[escada] order ${orderId} preflight de envio falhou (segue pra reserva): ${e.message}`);
+      }
+
+      const resEsc = await lcp.reservarEmissao(orderId);
+      if (!resEsc.ok) {
+        console.warn(`[escada] order ${orderId} nao reservei (${resEsc.motivo}) — nao edito nem emito`);
+        stats.erros++; stats.lista.push({ order_id: orderId, acao: 'erro', motivo: `reserva_${resEsc.motivo}` });
+        continue;
+      }
+      let _libEsc = false;
+      try {
+        // ENVIO AO VIVO — relido AGORA, nao o snapshot do passo 3. Entre aquela leitura
+        // e este ponto passam a resolucao de graos e a reserva; uma etiqueta que ficou
+        // imprimivel nesse intervalo passaria batida e a escada reescreveria e faturaria
+        // um pedido ja etiquetado. O getEnvioResumo ja aplica toda a regra de etiqueta
+        // (substatus nao-imprimiveis, postado, e cancelado COM evidencia de impressao).
+        let _envLive = null;
+        try { _envLive = await ml.getEnvioResumo(String(orderId)); }
+        catch (e) { _envLive = { ok: false, erro: e.message }; }
+        if (!_envLive || !_envLive.ok) {
+          console.warn(`[escada] order ${orderId} envio indeterminado (${(_envLive && _envLive.erro) || 'sem resposta'}) — nao edito nem emito`);
+          try { await lcp.atualizarVenda(orderId, { ml_envio_indeterminado_em: new Date().toISOString() }); } catch (_) {}
+          stats.erros++; stats.lista.push({ order_id: orderId, acao: 'erro', motivo: 'envio_indeterminado' });
+          continue;
+        }
+        const _sr = { status: _envLive.status, substatus: _envLive.substatus };
+        const _temEtiq = !!_envLive.temEtiqueta;
+
+        let stEsc = null;
+        try { stEsc = await ml.getOrderStatusResumo(String(orderId)); }
+        catch (e) {
+          console.warn(`[escada] order ${orderId} excecao checando status ML — nao emito: ${e.message}`);
+          stats.erros++; stats.lista.push({ order_id: orderId, acao: 'erro', motivo: 'status_ml_excecao' });
+          continue;
+        }
+        if (!stEsc || !stEsc.ok) {
+          console.warn(`[escada] order ${orderId} status ML indeterminado — nao emito`);
+          stats.erros++; stats.lista.push({ order_id: orderId, acao: 'erro', motivo: 'status_ml_indeterminado' });
+          continue;
+        }
+
+        if (stEsc.cancelada) {
+          const campos = {
+            status: 'venda_cancelada', ml_status: stEsc.status,
+            ml_status_atualizado_em: new Date().toISOString(),
+            venda_cancelada_em: new Date().toISOString(),
+            nf_emitindo_em: null, nf_emitindo_por: null
+          };
+          if (_temEtiq) {
+            campos.ml_etiqueta_em = new Date().toISOString();
+            campos.ml_shipment_status = (_sr && _sr.status) || null;
+            campos.alerta_pos_venda = (
+              `CANCELADA NO ML com etiqueta ja gerada (${(_sr && _sr.status) || '?'}). NAO DESPACHAR. ` +
+              `Conferir devolucao/estorno no ML e a NF/pedido no Bling.`
+            ).slice(0, 500);
+          }
+          const _updC = await lcp.atualizarVenda(orderId, campos, lcp.fecharLease(resEsc.token));
+          _libEsc = !!(_updC && _updC.ok && (!Array.isArray(_updC.data) || _updC.data.length === 1));
+          if (!_libEsc) console.error(`[escada] order ${orderId} 🚨 cancelada no ML mas NAO gravei`);
+          console.warn(`[escada] order ${orderId} CANCELADA no ML — abortando antes de editar`);
+          stats.erros++; stats.lista.push({ order_id: orderId, acao: 'erro', motivo: 'cancelada_no_ml' });
+          continue;
+        }
+
+        if (_temEtiq) {
+          const _uE = await lcp.atualizarVenda(orderId, {
+            ml_etiqueta_em: new Date().toISOString(),
+            ml_shipment_status: (_sr && _sr.status) || null,
+            ml_shipment_substatus: (_sr && _sr.substatus) || null,
+            nf_emitindo_em: null, nf_emitindo_por: null
+          }, lcp.fecharLease(resEsc.token));
+          // So declara o lease fechado se a escrita REALMENTE aconteceu: senao o
+          // finally pula a liberacao e a reserva fica ativa por ate 10 min sem
+          // ninguem trabalhando — com a etiqueta detectada nao registrada.
+          _libEsc = !!(_uE && _uE.ok && (!Array.isArray(_uE.data) || _uE.data.length === 1));
+          if (!_libEsc) console.error(`[escada] order ${orderId} 🚨 etiqueta detectada mas NAO gravei — libero o lease`);
+          console.warn(`[escada] order ${orderId} etiqueta JA gerada (${(_sr && _sr.status) || '?'}) — nao edito nem emito`);
+          stats.erros++; stats.lista.push({ order_id: orderId, acao: 'erro', motivo: 'etiqueta_ja_gerada' });
+          continue;
+        }
+
+
+        // RENOVA a posse antes do passo irreversivel: as leituras ao ML e as chamadas ao
+        // Bling podem passar do lease, e ai outro worker reservaria a mesma venda.
+        if (!(await lcp.renovarEmissao(orderId, resEsc.token))) {
+          console.warn(`[escada] order ${orderId} perdi a posse do lease — nao edito`);
+          stats.erros++; stats.lista.push({ order_id: orderId, acao: 'erro', motivo: 'lease_perdido' });
+          continue;
+        }
       const edit = await bp.editarPedidoComGraos({
         orderId: idBuscaBling, graosEscolhidos: resolvido.pedidoFinal, graosDisponiveis: graosResult.graos,
         unidadesPorPacote: graosResult.unidades_por_pacote, descricaoBase: graosResult.descricao,
@@ -224,6 +373,7 @@ async function rotinaEscadaIndisponivel(opts = {}) {
       });
       if (!edit.ok) {
         await lcp.atualizarVenda(orderId, { bling_erro: `escada edit ${edit.etapa || ''}: ${edit.erro || ''}`.slice(0, 500) });
+        await lcp.liberarEmissao(orderId, resEsc.token);
         stats.erros++; stats.lista.push({ order_id: orderId, acao: 'erro', motivo: 'edit_falhou', etapa: edit.etapa }); continue;
       }
       await lcp.atualizarVenda(orderId, {
@@ -232,6 +382,11 @@ async function rotinaEscadaIndisponivel(opts = {}) {
       });
 
       // 7. EMITE a NF (idempotente: code 74 = ja tem NF -> trata como emitida)
+      if (!(await lcp.renovarEmissao(orderId, resEsc.token))) {
+        console.warn(`[escada] order ${orderId} perdi a posse do lease — nao emito`);
+        stats.erros++; stats.lista.push({ order_id: orderId, acao: 'erro', motivo: 'lease_perdido' });
+        continue;
+      }
       const nf = await bp.gerarNFe(edit.pedidoId);
       let nfOk = nf.ok;
       if (!nf.ok) {
@@ -239,13 +394,24 @@ async function rotinaEscadaIndisponivel(opts = {}) {
         if (Array.isArray(campos) && campos.some(f => Number(f.code) === 74 || /nota fiscal referenciada/i.test(String(f.msg || '')))) nfOk = true;
       }
       if (!nfOk) {
-        await lcp.atualizarVenda(orderId, { status: 'precisa_atencao_humano', nf_erro: `${nf.status || ''}: ${nf.erro || JSON.stringify(nf.detalhe || {}).slice(0, 200)}`.slice(0, 500) });
+        await lcp.atualizarVenda(orderId, { status: 'precisa_atencao_humano', nf_emitindo_em: null, nf_emitindo_por: null, nf_erro: `${nf.status || ''}: ${nf.erro || JSON.stringify(nf.detalhe || {}).slice(0, 200)}`.slice(0, 500) }, lcp.fecharLease(resEsc.token));
         stats.erros++; stats.lista.push({ order_id: orderId, acao: 'erro', motivo: 'nf_falhou', pedidoId: edit.pedidoId }); continue;
       }
-      await lcp.atualizarVenda(orderId, {
+      // sucesso terminal fecha o lease na propria escrita
+      const _persistE = await lcp.atualizarVenda(orderId, {
         nf_emitida_em: new Date().toISOString(), nf_id: nf.nfeId || null, nf_numero: nf.numero || null,
-        nf_serie: nf.serie || null, nf_chave: nf.chave || null, nf_erro: null, status: 'processado'
-      });
+        nf_serie: nf.serie || null, nf_chave: nf.chave || null, nf_erro: null,
+        nf_emitindo_em: null, nf_emitindo_por: null, status: 'processado'
+      }, lcp.fecharLease(resEsc.token));
+      // NF ja saiu. Sem registro, o painel pode oferecer Recuperar NF de novo depois que
+      // o lease vencer — entao nao conta como sucesso nem avisa a cliente sobre um
+      // estado que nao ficou gravado.
+      if (!_persistE.ok || (Array.isArray(_persistE.data) && _persistE.data.length !== 1)) {
+        console.error(`[escada] order ${orderId} 🚨 NF ${nf.numero || '?'} EMITIDA mas NAO gravada`);
+        stats.erros++;
+        stats.lista.push({ order_id: orderId, acao: 'erro', motivo: 'nf_emitida_sem_registro', nf: nf.numero || null });
+        continue;
+      }
 
       // 8. AVISA a cliente da troca (best-effort; NF ja emitida, nao reverte se falhar)
       let avisoEnviado = false;
@@ -269,6 +435,10 @@ async function rotinaEscadaIndisponivel(opts = {}) {
         nf: nf.numero || 'ja_existia', aviso_cliente: avisoEnviado
       });
       console.log(`[escada] ✅ order ${orderId} substituido (${(resolvido.trocas || []).map(t => t.de + '→' + t.para).join(', ')}), NF ${nf.numero || 'ja existia'}, aviso=${avisoEnviado}, faltavam ${Math.round(horas * 10) / 10}h`);
+      } finally {
+        // Libera SO se nenhum desfecho ja fechou o lease na propria escrita.
+        if (!_libEsc) await lcp.liberarEmissao(orderId, resEsc && resEsc.token);
+      }
     } catch (e) {
       stats.erros++; stats.lista.push({ order_id: orderId, acao: 'erro', motivo: e.message });
       console.error(`[escada] order ${orderId} erro: ${e.message}`);

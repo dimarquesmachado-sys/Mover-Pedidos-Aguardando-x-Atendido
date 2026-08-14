@@ -25,6 +25,14 @@ const lixasService = require('./lixasService');
 // respondeu 9 dias depois da compra). Aceita ?dias=N na URL pra abrir mais quando precisar.
 const PAINEL_DIAS = Number(process.env.LIXAS_PAINEL_DIAS) || 30;
 
+// Lease da emissao — MESMA janela do cron (LIXAS_NF_LEASE_MIN, default 10 min).
+// Usado no predicado da reserva: so reserva quem encontra o lease livre ou vencido,
+// entao duas emissoes simultaneas da mesma venda nao passam as duas.
+function _leaseLimite() {
+  const min = Number(process.env.LIXAS_NF_LEASE_MIN) || 10;
+  return new Date(Date.now() - min * 60 * 1000).toISOString();
+}
+
 // ── Helpers HTTP ─────────────────────────────────────────────────────
 function json(res, code, body) {
   res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' });
@@ -86,6 +94,265 @@ async function enviarConfirmacaoPedido(v, orderId) {
     return { ok: false, motivo: e.message };
   }
 }
+
+// ════════════════════════════════════════════════════════════════════
+// CLASSIFICACAO EM 2 BOLSOES (o painel so mostra isso)
+//
+//   PENDENTE  = venda paga, viva, que ainda depende de alguem: nao tem NF, nao
+//               tem etiqueta no ML, nao foi cancelada. E o que precisa de acao.
+//   RESOLVIDO = ja saiu da frente: NF emitida, etiqueta gerada/postado no ML,
+//               cancelada, ou marcada como processada na mao.
+//
+// Fica no BACKEND de proposito: assim painel, contadores e qualquer outro
+// consumidor usam a MESMA regra, sem duas verdades.
+//
+// Ordem importa: cancelada > NF > etiqueta/postado > processado. A primeira que
+// bater define o motivo mostrado no card.
+function classificarVenda(v) {
+  // CANCELOU DEPOIS DE MONTAR/EMITIR: o cron grava alerta_pos_venda porque alguem
+  // precisa parar o despacho e cancelar/estornar a NF. Esse card NAO pode ir pro
+  // bolsao Resolvidos — ele nasce fechado, e o alerta ficaria invisivel justo no
+  // caso em que o pacote ainda pode ser despachado por engano.
+  // Enquanto NAO reconhecido. Depois que voce parou o despacho e estornou a NF,
+  // o botao "Alerta tratado" grava alerta_reconhecido_em e o card sai da fila —
+  // sem isso ele ficaria preso em Pendentes pra sempre.
+  if (v.alerta_pos_venda && !v.alerta_reconhecido_em) {
+    return { bolsao: 'pendente', motivo: 'humano', alertaEfetivo: true,
+             rotulo: '🚨 CANCELADA APÓS NF/pedido — não despachar' };
+  }
+
+  // 'cancelado' e o status que o revisarAtencaoHumana grava quando acha o pedido
+  // cancelado no BLING — sem tratar aqui, ele caia no default e voltava a aparecer
+  // como pendente "aguardando o cliente".
+  // Nem todo cancelamento passa pelo cron: o processarAutoEmissao grava
+  // venda_cancelada_em direto na Guarda 1.5, sem montar alerta_pos_venda. Se a linha
+  // ja tinha trabalho feito, ela cairia calada no bolsao fechado — e o cron nunca
+  // conserta, porque venda_cancelada_em a exclui das proximas rodadas. Aqui a
+  // classificacao deduz o alerta a partir dos proprios marcadores.
+  // Quarentena: cancelamento CONFIRMADO no ML cuja etiqueta nao pode ser conferida.
+  // Fica em Pendentes ate o cron resolver — se havia etiqueta, vira alerta.
+  if (v.status === 'cancelada_quarentena') {
+    // alertaEfetivo FICA FALSE de proposito: reconhecer aqui gravaria
+    // alerta_reconhecido_em antes de existir alerta, e quando a reconferencia
+    // descobrisse a etiqueta o aviso real de "nao despachar" nasceria ja silenciado.
+    // O card continua em Pendentes, so nao oferece o botao de reconhecer ainda.
+    return { bolsao: 'pendente', motivo: 'humano',
+             rotulo: '🚨 CANCELADA no ML — conferindo se a etiqueta saiu' };
+  }
+  const _cancelada = v.venda_cancelada_em || v.status === 'venda_cancelada' || v.status === 'cancelado';
+  const _jaTinhaTrabalho = !!(v.nf_emitida_em || v.bling_editado_em || v.ml_etiqueta_em || v.processado_manual_em);
+  if (_cancelada && _jaTinhaTrabalho && !v.alerta_pos_venda && !v.alerta_reconhecido_em) {
+    // alertaEfetivo: o painel usa isso pra mostrar o "Alerta tratado". Sem a marca, o
+    // botao so aparecia quando havia alerta_pos_venda GRAVADO — e o alerta deduzido
+    // (cancelamento escrito pelo processarAutoEmissao) ficaria preso pra sempre.
+    return { bolsao: 'pendente', motivo: 'humano', alertaEfetivo: true,
+             rotulo: '🚨 CANCELADA depois de NF/pedido/etiqueta — não despachar' };
+  }
+  if (_cancelada) {
+    const noBling = v.status === 'cancelado' && !v.venda_cancelada_em;
+    return { bolsao: 'resolvido', motivo: 'cancelada',
+             rotulo: noBling ? '❌ Cancelada no Bling' : '❌ Cancelada no ML' };
+  }
+  // Escalacao humana EXPLICITA vence os marcadores de conclusao. O fechamento
+  // pos-processado (lerRespostas) marca precisa_atencao_humano quando o cliente manda
+  // uma mensagem de verdade DEPOIS da NF — pedido de troca, reclamacao. Se a NF fosse
+  // avaliada antes, esse card ia pro bolsao fechado e o pedido do cliente sumia.
+  // SO o status atual vale aqui. ia_escalou_humano so e gravado como true (nada no
+  // codigo volta pra false), entao usar a flag prenderia em Pendentes toda venda que
+  // um dia foi escalada — mesmo depois de voce emitir a NF ou concluir na mao.
+  if (v.status === 'precisa_atencao_humano') {
+    // Distingue a ORIGEM: se ha nf_erro/bling_erro registrado, o status veio de uma
+    // falha operacional (e a NF pode ter sido curada depois) — dizer "cliente pediu
+    // algo" ali seria mentira. So chama de pedido do cliente quando nao ha erro tecnico.
+    const veioDeFalha = !!(v.nf_erro || v.bling_erro);
+    return { bolsao: 'pendente', motivo: 'humano',
+             rotulo: (v.nf_emitida_em && !veioDeFalha) ? '🚨 Cliente pediu algo APÓS a NF'
+                   : (v.nf_emitida_em && veioDeFalha)  ? '⚠️ NF saiu, mas ficou erro registrado — conferir'
+                   : '🚨 Precisa de você' };
+  }
+  if (v.nf_emitida_em) {
+    return { bolsao: 'resolvido', motivo: 'nf', rotulo: '📄 NF emitida' };
+  }
+  if (v.ml_etiqueta_em) {
+    const st = String(v.ml_shipment_status || '').toLowerCase();
+    const postado = ['shipped', 'delivered', 'not_delivered'].includes(st);
+    return { bolsao: 'resolvido', motivo: postado ? 'postado' : 'etiqueta',
+             rotulo: postado ? '📦 Postado' : '🏷️ Etiqueta gerada' };
+  }
+  // 'processado' SEM NF nao e conclusao: e justamente o caso que o card marca com
+  // "⚠️ SEM NF" e oferece o botao Recuperar NF (marcado na mao por engano, ou montar
+  // que falhou no meio). Mandar pra Resolvidos esconderia um pedido sem nota fiscal.
+  // So conta como resolvido quando ha NF de verdade — e essa ja foi tratada acima.
+  if (v.status === 'processado') {
+    // Conclusao MANUAL de verdade (voce clicou "✓ Processado", tratando por fora):
+    // e resolvido, como o proprio botao promete — e alimenta o chip "Processado na mão".
+    if (v.processado_manual_em) {
+      return { bolsao: 'resolvido', motivo: 'processado', rotulo: '✓ Processado na mão' };
+    }
+    // Sem NF e sem marca de conclusao manual = anomalia (montar que falhou no meio,
+    // ou status gravado por engano). E o caso do aviso vermelho SEM NF + Recuperar NF.
+    return { bolsao: 'pendente', motivo: 'humano', rotulo: '⚠️ Marcado processado mas SEM NF' };
+  }
+
+  // ── Pendente: a sub-flag diz DE QUEM e a bola ──
+  // ORDEM IMPORTA: 'aguardando_bling' SEMPRE grava um bling_erro explicativo enquanto
+  // a fila de retry continua tentando sozinha. Se o teste generico de erro viesse antes,
+  // todo retry normal cairia no vermelho "Precisa de voce" — inflando o bolsao com
+  // coisa que se resolve sem ninguem, e tornando este ramo inalcancavel.
+  if (v.status === 'aguardando_bling') {
+    return { bolsao: 'pendente', motivo: 'confirmou', rotulo: '🔄 Re-tentando montar/emitir' };
+  }
+  // temErro ANTES do confirmou: quando a montagem manual falha, o bling_erro fica
+  // gravado mas o status continua 'cliente_confirmou_pedido' — o card caia no chip
+  // comum e quem filtra por falha nao via o pedido que ja tinha quebrado.
+  // (aguardando_bling segue acima: la o erro e transitorio e o retry cuida sozinho.)
+  const temErro = !!(v.bling_erro || v.nf_erro);
+  // (6) Falha TERMINAL da IA tambem e trabalho humano: quando a interpretacao ou o
+  // envio quebram, o lerRespostas grava ia_processado_em junto, e a trava
+  // anti-duplicacao impede nova tentativa pra MESMA mensagem — o cliente pode ter
+  // ficado sem resposta nenhuma enquanto o card dizia "IA tratando".
+  // ia_erro_envio nunca e limpo pelos caminhos de sucesso, entao um erro antigo
+  // marcaria a venda como travada pra sempre. So vale enquanto a IA nao tratou uma
+  // mensagem MAIS NOVA com sucesso (ia_msg_enviada sem a marca de falha).
+  const envioFalhouAgora = !!v.ia_erro_envio && String(v.ia_msg_enviada || '').includes('[FALHOU ENVIO]');
+  const iaTravada = v.ia_categoria === 'erro_ia' || envioFalhouAgora;
+  if (temErro || iaTravada) {
+    return { bolsao: 'pendente', motivo: 'humano',
+             rotulo: iaTravada ? '🚨 IA falhou — cliente pode estar sem resposta' : '🚨 Precisa de você' };
+  }
+  if (v.status === 'cliente_confirmou_pedido') {
+    return { bolsao: 'pendente', motivo: 'confirmou', rotulo: '✓ Pedido fechado — falta montar/emitir' };
+  }
+  if (v.status === 'precisa_atencao_humano') {
+    return { bolsao: 'pendente', motivo: 'humano', rotulo: '🚨 Precisa de você' };
+  }
+  if (v.status === 'cliente_respondeu') {
+    return { bolsao: 'pendente', motivo: 'respondeu', rotulo: '💬 Cliente respondeu — IA tratando' };
+  }
+  return { bolsao: 'pendente', motivo: 'aguardando', rotulo: '⏳ Aguardando o cliente' };
+}
+
+/**
+ * Checagem ML AO VIVO antes de qualquer escrita no Bling (fail closed).
+ * Ordem importa: ENVIO primeiro. Se a venda foi cancelada E ja tem etiqueta, precisamos
+ * gravar o alerta de nao despachar ANTES do venda_cancelada_em — que exclui a linha de
+ * todas as varreduras futuras e mataria a chance de registrar o alerta.
+ * @returns {{ ok:true } | { ok:false, http:number, corpo:object }}
+ */
+async function checarMlAntesDeEscrever(orderId, lcp, opts) {
+  // opts.nfExterna: quem chama pelo botao "Processado" esta afirmando que a NF saiu
+  // POR FORA do painel. Se a venda estiver cancelada, o alerta de nao despachar e
+  // devido mesmo SEM etiqueta detectada — senao a linha vira uma cancelada comum, cai
+  // no bolsao fechado e ninguem e avisado pra cancelar a nota emitida por fora.
+  const nfExterna = !!(opts && opts.nfExterna);
+  const ml = require('../auto-mensagens/mlApi');
+  let st = null, env = null;
+  try {
+    // ENVIO primeiro, STATUS por ULTIMO: o getEnvioResumo faz seu proprio /orders mais
+    // novo mas ignora o status. Lendo o status antes, um cancelamento ocorrido entre as
+    // duas chamadas passava batido e a escrita era autorizada. A ultima leitura do ML
+    // antes de liberar tem que ser a do status.
+    env = await ml.getEnvioResumo(String(orderId));
+    st = await ml.getOrderStatusResumo(String(orderId));
+  } catch (e) {
+    return { ok: false, http: 503, corpo: { ok: false, erro: 'estado_indeterminado',
+      mensagem: `Nao consegui confirmar o estado da venda no Mercado Livre (${e.message}). NADA foi alterado.` } };
+  }
+  if (!st || !st.ok) {
+    return { ok: false, http: 503, corpo: { ok: false, erro: 'estado_indeterminado',
+      mensagem: 'Nao consegui confirmar no Mercado Livre se a venda continua ativa. NADA foi alterado. Tente de novo em instantes.' } };
+  }
+  const envOk = !!(env && env.ok);
+  const temEtiq = envOk && env.temEtiqueta;
+
+  if (temEtiq) {
+    // Confere: se nao gravou, a etiqueta detectada some e a proxima chamada volta a
+    // liberar escrita no Bling achando que nao ha etiqueta.
+    const _uEt = await lcp.atualizarVenda(orderId, {
+      ml_etiqueta_em: new Date().toISOString(),
+      ml_shipment_status: env.status || null, ml_shipment_substatus: env.substatus || null,
+      ml_envio_indeterminado_em: null
+    });
+    if (!_uEt || !_uEt.ok || (Array.isArray(_uEt.data) && _uEt.data.length !== 1)) {
+      console.error(`[lixas-combinar] order ${orderId} 🚨 etiqueta detectada mas NAO gravada`);
+      if (!st.cancelada) {
+        return { ok: false, http: 503, corpo: { ok: false, erro: 'etiqueta_nao_gravada',
+          mensagem: 'Esta venda ja tem etiqueta no ML, mas nao consegui registrar. NADA foi alterado. Tente de novo em instantes.' } };
+      }
+    }
+  } else if (envOk) {
+    // Leitura boa e sem etiqueta: limpa a marca de indeterminado, senao uma falha
+    // anterior deixaria toda edicao manual bloqueada ate o poll horario passar.
+    await lcp.atualizarVenda(orderId, { ml_envio_indeterminado_em: null });
+  } else {
+    await lcp.atualizarVenda(orderId, { ml_envio_indeterminado_em: new Date().toISOString() });
+  }
+
+  if (st.cancelada) {
+    const campos = {
+      status: 'venda_cancelada', ml_status: st.status,
+      ml_status_atualizado_em: new Date().toISOString(),
+      venda_cancelada_em: new Date().toISOString()
+    };
+    if (temEtiq || nfExterna) {
+      campos.alerta_pos_venda = temEtiq ? (
+        `CANCELADA NO ML com etiqueta ja gerada (${env.status || '?'}). NAO DESPACHAR. ` +
+        `Conferir devolucao/estorno no ML e a NF/pedido no Bling.`
+      ).slice(0, 500) : (
+        `CANCELADA NO ML e havia conclusao manual em curso (NF provavelmente emitida ` +
+        `POR FORA do painel). NAO DESPACHAR. Conferir e cancelar/estornar a NF no Bling.`
+      ).slice(0, 500);
+    } else if (!envOk) {
+      // Cancelada com envio DESCONHECIDO: quarentena em vez de finalizar, pra que o
+      // cron reconfira e gere o alerta se houver etiqueta.
+      campos.status = 'cancelada_quarentena';
+      delete campos.venda_cancelada_em;
+    }
+    // Respeita lease ativo: se um worker (automatico/recuperacao/escada) ja reservou e
+    // esta dentro do Bling, gravar o cancelamento aqui faria a escrita terminal DELE
+    // ser rejeitada — a venda ficaria cancelada, com NF emitida e sem o marcador nem o
+    // alerta. Zero linhas = adia; o cron reconfirma depois.
+    const _lim = new Date(Date.now() - (Number(process.env.LIXAS_NF_LEASE_MIN) || 10) * 60 * 1000).toISOString();
+    // venda_cancelada_em=is.null + status nao-terminal: o cron pode ter finalizado o
+    // cancelamento entre as leituras do ML e este PATCH, e com forcar:true a quarentena
+    // sobrescreveria o estado final — a linha ficaria excluida das varreduras (pelo
+    // venda_cancelada_em ja gravado) e eternamente "conferindo etiqueta" no painel.
+    const _updL = await lcp.atualizarVenda(orderId, campos,
+      { forcar: true, somenteSe: `venda_cancelada_em=is.null&status=not.in.(venda_cancelada,cancelado,cancelada_quarentena)&or=(nf_emitindo_em.is.null,nf_emitindo_em.lt.${_lim})` });
+    if (!_updL || !_updL.ok) {
+      // Falha de persistencia != cancelamento tratado. Dizer "cancelada" com a linha
+      // ainda ativa faria o operador parar, mas o leitor automatico e a escada
+      // continuariam elegiveis a processa-la.
+      console.error(`[lixas-combinar] order ${orderId} 🚨 cancelada no ML mas NAO consegui gravar`);
+      return { ok: false, http: 503, corpo: { ok: false, erro: 'cancelamento_nao_gravado',
+        mensagem: 'Esta venda foi CANCELADA no Mercado Livre, mas nao consegui registrar isso no banco — ela AINDA esta no fluxo automatico. NAO DESPACHE e tente de novo em instantes.' } };
+    }
+    if (_updL.ok && Array.isArray(_updL.data) && _updL.data.length === 0) {
+      console.warn(`[lixas-combinar] order ${orderId} cancelada no ML, mas ha emissao em curso — registro adiado`);
+      return { ok: false, http: 409, corpo: { ok: false, erro: 'venda_cancelada_emissao_em_curso',
+        mensagem: 'Esta venda foi CANCELADA no Mercado Livre, mas ha uma emissao em curso agora. NADA foi alterado por aqui. Aguarde um instante e recarregue — NAO DESPACHE.' } };
+    }
+    return { ok: false, http: 409, corpo: { ok: false, erro: 'venda_cancelada',
+      mensagem: temEtiq
+        ? 'Esta venda foi CANCELADA no Mercado Livre e JA TEM ETIQUETA. NADA foi alterado no Bling. NAO DESPACHE — confira estorno/devolucao.'
+        : nfExterna
+        ? 'Esta venda foi CANCELADA no Mercado Livre. NADA foi marcado. Se a NF ja saiu por fora do painel, cancele/estorne no Bling e NAO DESPACHE.'
+        : 'Esta venda foi CANCELADA no Mercado Livre. NADA foi alterado no Bling.' } };
+  }
+  if (temEtiq) {
+    return { ok: false, http: 409, corpo: { ok: false, erro: 'etiqueta_ja_gerada',
+      mensagem: `Esta venda ja tem etiqueta no ML (${env.status || '?'}). NADA foi alterado — se faltar algo, resolva direto no Bling.` } };
+  }
+  if (!envOk) {
+    return { ok: false, http: 503, corpo: { ok: false, erro: 'envio_indeterminado',
+      mensagem: 'Nao consegui confirmar no Mercado Livre se a etiqueta ja saiu. NADA foi alterado. Tente de novo em instantes.' } };
+  }
+  return { ok: true };
+}
+
+// Cursor da reconciliacao oportunista de NF. Vive no processo (nao precisa persistir:
+// se reiniciar, recomeca do zero e a varredura continua completa ao longo das cargas).
+let _curReconc = 0;
 
 // ── Router (interface esperada pelo orquestrador raiz) ───────────────
 function routes(readBody) {
@@ -271,27 +538,66 @@ function routes(readBody) {
         const dias = Number(urlObj.searchParams.get('dias')) || PAINEL_DIAS;
 
         // Busca TODOS uma vez so e filtra em memoria (evita 2 chamadas Supabase)
-        const todosR = await lcp.listarPendentes({ dias, limit: 500 });
-        const todos = todosR.ok && Array.isArray(todosR.data) ? todosR.data : [];
-
-        // Aplica filtro - "cliente_respondeu" cobre ambos os status (respondeu E confirmou)
-        let pendentes = todos;
-        if (status === 'cliente_respondeu') {
-          pendentes = todos.filter(v => v.status === 'cliente_respondeu' || v.status === 'cliente_confirmou_pedido');
-        } else if (status) {
-          pendentes = todos.filter(v => v.status === status);
+        // Pagina a janela toda: com limit unico vinham so as 500 MAIS NOVAS
+        // (data_venda DESC) e as vendas antigas sumiam dos DOIS bolsoes e dos
+        // contadores — inclusive pendentes que precisam de acao. Mesmo tratamento
+        // que o cron de envio ja recebeu.
+        const PAG = 500;
+        let todos = [];
+        // Sem teto fixo (ver mesma correcao no cron): com ?dias=90 a janela pode passar
+        // de 10 mil linhas e parar na pagina 20 esconderia as mais antigas em silencio.
+        const MAX_PAG = 500;
+        let truncou = false;
+        let _cursor = null;
+        for (let pg = 0; pg < MAX_PAG; pg++) {
+          const r = await lcp.listarPendentes({ dias, limit: PAG, antesDe: _cursor });
+          // Falha de pagina e INDISTINGUIVEL de fim do dataset se virar array vazio —
+          // o painel devolveria ok:true com bolsao e contadores parciais, escondendo
+          // justamente as vendas antigas que precisam de acao. Melhor erro explicito.
+          if (!r.ok || !Array.isArray(r.data)) {
+            json(res, 503, { ok: false, erro: 'leitura_incompleta',
+              mensagem: `Nao consegui ler a pagina ${pg + 1} das vendas. A lista ficaria incompleta e poderia esconder pedidos pendentes — recarregue em instantes.` });
+            return true;
+          }
+          todos = todos.concat(r.data);
+          const _ult = r.data[r.data.length - 1];
+          _cursor = _ult ? { data_venda: _ult.data_venda, order_id: _ult.order_id } : null;
+          if (r.data.length < PAG) break;
+          if (pg === MAX_PAG - 1) truncou = true;
         }
-        pendentes = pendentes.slice(0, 100);
+        if (truncou) {
+          json(res, 503, { ok: false, erro: 'janela_muito_grande',
+            mensagem: `A janela de ${dias} dias tem mais de ${MAX_PAG * PAG} vendas e a lista ficaria incompleta. Use um ?dias= menor.` });
+          return true;
+        }
 
+        // CURA A NF ANTES DE CLASSIFICAR. Se rodasse depois (como antes), a venda cujo
+        // nf_emitida_em acabou de ser preenchido continuaria classificada como pendente
+        // NESTA resposta — card fantasma em Pendentes e contadores errados.
         // Confere a NF REAL no Bling pros cards que mostrariam o botao "Emitir/Recuperar
         // NF" mas tem nf_emitida_em vazio (campo desatualizado). Se a nota existe no
         // Bling, cura o campo aqui -> o botao some sozinho. Limitado a 20 checagens pra
         // nao pesar a listagem (so os poucos com campo desatualizado entram nisso).
         try {
           const bp = require('./blingPedidos');
+          // ROTACAO: sem isso o loop olhava sempre os MESMOS 20 primeiros (ordem
+          // estavel), e uma linha mais antiga cuja NF existe no Bling nunca seria
+          // reconciliada — ficaria pra sempre em Pendentes como "SEM NF".
+          // O offset gira a cada carga do painel, cobrindo a lista inteira aos poucos.
+          const _cands = todos.filter(v =>
+            (v.bling_editado_em || v.status === 'processado') && !v.nf_emitida_em && v.bling_pedido_id && !v.processado_manual_em);
+          // Cursor que AVANCA por lote, em vez de derivar do relogio: com o painel
+          // aberto em cadencia regular (ex.: 1x/dia = 1440 min), o modulo do tempo caia
+          // sempre no mesmo ponto e as mesmas 20 linhas seriam checadas pra sempre.
+          const _giro = _cands.length > 20 ? (_curReconc % _cands.length) : 0;
+          const _ordem = _cands.slice(_giro).concat(_cands.slice(0, _giro));
           let _checados = 0;
-          for (const v of pendentes) {
+          for (const v of _ordem) {
             if (_checados >= 20) break;
+            // Conclusao manual e autoritativa e os botoes de NF ja estao escondidos —
+            // consultar o Bling aqui gastaria o teto de 20 em linhas resolvidas e
+            // atrasaria a cura das que realmente tem NF pendente de reconciliar.
+            if (v.processado_manual_em) continue;
             const mostrariaBotaoNF = (v.bling_editado_em || v.status === 'processado') && !v.nf_emitida_em && v.bling_pedido_id;
             if (!mostrariaBotaoNF) continue;
             _checados++;
@@ -301,12 +607,61 @@ function routes(readBody) {
               const nfId = (nf && typeof nf === 'object') ? nf.id : nf;
               if (Number(nfId) > 0) {
                 const quando = new Date().toISOString();
-                await lcp.atualizarVenda(v.order_id, { nf_emitida_em: quando });
-                v.nf_emitida_em = quando; // reflete ja nesta resposta (botao some)
+                const _uCura = await lcp.atualizarVenda(v.order_id, { nf_emitida_em: quando });
+                // So reflete na resposta se GRAVOU: senao o botao sumiria desta carga e
+                // voltaria na proxima, e o operador acharia que o painel piscou.
+                if (_uCura && _uCura.ok && (!Array.isArray(_uCura.data) || _uCura.data.length === 1)) {
+                  v.nf_emitida_em = quando;
+                } else {
+                  console.error(`[lixas-combinar] order ${v.order_id} NF confirmada no Bling mas NAO gravada`);
+                }
               }
             } catch (_) { /* checagem falhou: mantem o botao (melhor pecar por mostrar) */ }
           }
+          // avanca o cursor pelo tamanho do lote efetivamente checado
+          if (_cands.length > 20) _curReconc = (_giro + _checados) % _cands.length;
         } catch (_) { /* sem bp disponivel: segue sem curar */ }
+
+        // Classifica TODAS (o painel trabalha por bolsao, nao por status cru)
+        for (const v of todos) {
+          const cls = classificarVenda(v);
+          v.bolsao = cls.bolsao;
+          v.motivo = cls.motivo;
+          v.rotulo_bolsao = cls.rotulo;
+          v.alerta_efetivo = !!cls.alertaEfetivo;
+        }
+
+        // Filtros aceitos:
+        //   ?bolsao=pendente|resolvido   (os 2 blocos)
+        //   ?motivo=humano|confirmou|... (sub-filtro dentro do bloco)
+        //   ?status=...                  (mantido por compatibilidade)
+        const bolsao = urlObj.searchParams.get('bolsao') || null;
+        const motivo = urlObj.searchParams.get('motivo') || null;
+
+        let pendentes = todos;
+        if (bolsao) pendentes = pendentes.filter(v => v.bolsao === bolsao);
+        // 'etiqueta' no filtro = etiqueta OU postado (o chip mostra os dois juntos e o
+        // contador r_etiqueta soma ambos; filtrar so por 'etiqueta' devolvia menos
+        // cards que o numero do proprio chip).
+        if (motivo) {
+          pendentes = (motivo === 'etiqueta')
+            ? pendentes.filter(v => v.motivo === 'etiqueta' || v.motivo === 'postado')
+            : pendentes.filter(v => v.motivo === motivo);
+        }
+        if (!bolsao && !motivo && status) {
+          if (status === 'cliente_respondeu') {
+            pendentes = pendentes.filter(v => v.status === 'cliente_respondeu' || v.status === 'cliente_confirmou_pedido');
+          } else {
+            pendentes = pendentes.filter(v => v.status === status);
+          }
+        }
+        // NAO trunca: paginar a fonte e cortar aqui em 200 recriava o mesmo problema
+        // (as mais ANTIGAS ficam de fora, e o painel nao tem "carregar mais"), com os
+        // contadores contando linhas que ninguem consegue abrir. Devolve o bolsao
+        // inteiro; se um dia ficar pesado, o corte volta junto com paginacao na UI.
+        const totalBolsao = pendentes.length;
+
+
 
         const stats = {
           total: todos.length,
@@ -318,13 +673,30 @@ function routes(readBody) {
           // (nao so pelo status) pra pegar registro antigo caso alguem mexa no
           // status na mao depois.
           canceladas: todos.filter(v => v.status === 'venda_cancelada' || v.venda_cancelada_em).length,
+          // ── contadores dos 2 bolsoes (o que o painel novo usa) ──
+          pendente: todos.filter(v => v.bolsao === 'pendente').length,
+          resolvido: todos.filter(v => v.bolsao === 'resolvido').length,
+          p_humano:     todos.filter(v => v.motivo === 'humano').length,
+          p_confirmou:  todos.filter(v => v.motivo === 'confirmou').length,
+          p_respondeu:  todos.filter(v => v.motivo === 'respondeu').length,
+          p_aguardando: todos.filter(v => v.motivo === 'aguardando').length,
+          r_nf:         todos.filter(v => v.motivo === 'nf').length,
+          r_etiqueta:   todos.filter(v => v.motivo === 'etiqueta' || v.motivo === 'postado').length,
+          r_cancelada:  todos.filter(v => v.motivo === 'cancelada').length,
+          r_processado: todos.filter(v => v.motivo === 'processado').length,
           // alertas = cancelou DEPOIS que a gente ja montou/emitiu. E o numero
           // que importa: cada um desses e pacote que nao pode ser despachado.
-          alertas: todos.filter(v => v.alerta_pos_venda).length
+          // So os NAO reconhecidos. O texto do alerta fica no card como historico,
+          // entao contar por alerta_pos_venda mostraria "(N!)" pra sempre — sinal de
+          // pacote que nao pode ser despachado, mesmo depois de tratado.
+          // Inclui o alerta DEDUZIDO (alerta_efetivo, marcado na classificacao): sem
+          // isso o chip Cancelados nao mostrava "(N!)" pros cancelamentos escritos por
+          // fora do cron, mesmo com o card sentado na fila humana.
+          alertas: todos.filter(v => (v.alerta_efetivo || v.alerta_pos_venda) && !v.alerta_reconhecido_em).length
         };
 
         // dias vai na resposta pro painel poder mostrar a janela real no card "Total"
-        json(res, 200, { ok: true, dias, pendentes, stats });
+        json(res, 200, { ok: true, dias, total_bolsao: totalBolsao, pendentes, stats });
       } catch (e) {
         json(res, 500, { ok: false, erro: e.message });
       }
@@ -370,8 +742,144 @@ function routes(readBody) {
       const orderId = p.replace('/lixas-combinar/api/pendentes/', '').replace('/marcar-processado', '');
       try {
         const lcp = require('../auto-mensagens/lixasCombinarPendentes');
-        const r = await lcp.atualizarVenda(orderId, { status: 'processado' });
+        // Venda cancelada / em quarentena NAO vira "concluida": sobrescrever a
+        // quarentena com processado + processado_manual_em a excluiria do cron por
+        // DOIS caminhos (status e marcador), a reconferencia de etiqueta nunca
+        // aconteceria e o alerta de nao despachar se perderia.
+        const vAtualMP = await lcp.buscar(orderId);
+        if (!vAtualMP || !vAtualMP.ok || !vAtualMP.data) {
+          // Fail closed: sem leitura confiavel nao da pra saber se a venda foi
+          // cancelada/quarentenada depois que o card carregou. Gravar assim mesmo
+          // sobrescreveria a quarentena e sumiria com o alerta de nao despachar.
+          json(res, 503, { ok: false, erro: 'estado_indeterminado',
+            mensagem: 'Nao consegui confirmar o estado atual da venda no banco. Tente de novo em instantes.' });
+          return true;
+        }
+        const vMP = vAtualMP.data;
+        // Etiqueta ja gerada: marcar manualmente gravaria processado_manual_em, que
+        // exclui a venda da repescagem de envio — o shipment congelaria em
+        // ready_to_ship e nunca chegaria a shipped/delivered.
+        if (vMP.ml_etiqueta_em) {
+          json(res, 409, { ok: false, erro: 'etiqueta_ja_gerada',
+            mensagem: `Esta venda ja tem etiqueta no ML (${vMP.ml_shipment_status || '?'}) e o sistema acompanha ate a postagem. Nao precisa marcar na mao.` });
+          return true;
+        }
+        if (vMP.venda_cancelada_em || vMP.status === 'venda_cancelada' || vMP.status === 'cancelado' || vMP.status === 'cancelada_quarentena') {
+          json(res, 409, { ok: false, erro: 'venda_cancelada',
+            mensagem: 'Esta venda esta CANCELADA no Mercado Livre (ou aguardando conferencia da etiqueta). Nao da pra marcar como concluida — se ja houver NF, cancele/estorne no Bling.' });
+          return true;
+        }
+        // Grava a marca de conclusao MANUAL junto: e ela que faz o card virar
+        // "resolvido" na classificacao (sem ela, processado sem NF volta pra Pendentes
+        // como anomalia — que e o comportamento certo pra quem NAO passou por aqui).
+        // Usa o MESMO helper das rotas de escrita: ele checa ENVIO e pedido ao vivo,
+        // respeita lease ativo de outro worker e trata o cancelamento com alerta.
+        // Sem o ENVIO aqui, o marcador manual (que suprime TODO o polling de shipment)
+        // seria gravado por cima de uma etiqueta recem-criada, congelando o rastreio.
+        // Sem o LEASE, um worker em curso emitiria a NF e a escrita terminal dele seria
+        // rejeitada pelo venda_cancelada_em recem-gravado — nota emitida sem registro.
+        const _chkP = await checarMlAntesDeEscrever(orderId, lcp, { nfExterna: true });
+        if (!_chkP.ok) { json(res, _chkP.http, _chkP.corpo); return true; }
+
+        // PATCH CONDICIONAL: a leitura acima e o write eram operacoes separadas, entao
+        // o cron horario podia gravar cancelada_quarentena no meio e este update
+        // sobrescreveria com processado+marcador — e o marcador suprime a repescagem de
+        // envio, atrasando o alerta de nao despachar. Os filtros repetem no proprio
+        // PATCH o que foi conferido na leitura: se a linha mudou, nao grava.
+        const r = await lcp.atualizarVenda(orderId, {
+          status: 'processado',
+          processado_manual_em: new Date().toISOString()
+        }, { somenteSe: `venda_cancelada_em=is.null&ml_etiqueta_em=is.null&status=not.in.(venda_cancelada,cancelado,cancelada_quarentena)&or=(nf_emitindo_em.is.null,nf_emitindo_em.lt.${_leaseLimite()})` });
+        if (r.ok && Array.isArray(r.data) && r.data.length === 0) {
+          json(res, 409, { ok: false, erro: 'estado_mudou',
+            mensagem: 'Nao deu pra marcar agora: ou o estado da venda mudou (cancelamento/etiqueta), ou ha uma emissao de NF em curso neste momento. Aguarde um instante, recarregue o painel e confira.' });
+          return true;
+        }
         if (!r.ok) { json(res, 500, { ok: false, erro: 'erro_atualizar', data: r.data }); return true; }
+        json(res, 200, { ok: true, orderId });
+      } catch (e) {
+        json(res, 500, { ok: false, erro: e.message });
+      }
+      return true;
+    }
+
+    // POST /lixas-combinar/api/pendentes/:orderId/desfazer-conclusao
+    //   Limpa processado_manual_em e devolve a venda pra Pendentes. Necessario porque
+    //   o marcador bloqueia editar/emitir/recuperar e esconde os botoes — sem esta
+    //   rota, um clique errado (ou NF de fora que na verdade falhou) so teria conserto
+    //   editando o Supabase na mao. As proprias mensagens de erro mandam desfazer.
+    if (method === 'POST' && p.startsWith('/lixas-combinar/api/pendentes/') && p.endsWith('/desfazer-conclusao')) {
+      const sessao = requerAuth();
+      if (!sessao.ok) { json(res, 401, { ok: false, erro: 'nao_autenticado' }); return true; }
+
+      const orderId = p.replace('/lixas-combinar/api/pendentes/', '').replace('/desfazer-conclusao', '');
+      try {
+        const lcp = require('../auto-mensagens/lixasCombinarPendentes');
+        const venda = await lcp.buscar(orderId);
+        if (!venda.ok || !venda.data) { json(res, 404, { ok: false, erro: 'venda_nao_encontrada', orderId }); return true; }
+        const v = venda.data;
+        if (v.nf_emitida_em) {
+          json(res, 409, { ok: false, erro: 'nf_registrada',
+            mensagem: 'Esta venda tem NF registrada no sistema. Desfazer a conclusao nao apaga a nota — trate no Bling.' });
+          return true;
+        }
+        // Venda CANCELADA: desfazer devolveria a linha pra 'precisa_atencao_humano', que
+        // o revisarAtencaoHumana reengaja — e com uma falha transiente na consulta de
+        // status (que por desenho segue em frente) daria pra montar e faturar um pedido
+        // ja cancelado. O marcador manual nao e o que prende a venda aqui.
+        if (v.venda_cancelada_em || v.status === 'venda_cancelada' || v.status === 'cancelado' || v.status === 'cancelada_quarentena') {
+          json(res, 409, { ok: false, erro: 'venda_cancelada',
+            mensagem: 'Esta venda esta CANCELADA no Mercado Livre. Nao ha o que desfazer aqui — se houver NF emitida por fora, cancele/estorne no Bling.' });
+          return true;
+        }
+        // Volta pro estado acionavel: se o pedido ja estava montado, cai em
+        // 'cliente_confirmou_pedido' (falta so emitir); senao volta pra atencao humana.
+        const novoStatus = v.bling_editado_em ? 'cliente_confirmou_pedido' : 'precisa_atencao_humano';
+        // ESTADO ML AO VIVO antes de REABRIR: este PATCH devolve a venda pra um status
+        // acionavel, e dali o revisarAtencaoHumana pode reconduzi-la ate o leitor de
+        // mensagens — que falaria com um cliente que acabou de cancelar.
+        const _chkD = await checarMlAntesDeEscrever(orderId, lcp);
+        if (!_chkD.ok) { json(res, _chkD.http, _chkD.corpo); return true; }
+
+        // PATCH CONDICIONAL, mesmo motivo do marcar-processado: a leitura acima estreita
+        // a corrida mas nao fecha. Se o cron gravar cancelamento/quarentena no meio,
+        // este update restauraria um status elegivel a re-engajamento — e dai a
+        // auto-emissao pode chegar, ja que a consulta de status falha aberta.
+        const r = await lcp.atualizarVenda(orderId, { processado_manual_em: null, status: novoStatus },
+          // ml_etiqueta_em=is.null: se o poll registrar a etiqueta entre a checagem ao
+          // vivo e este PATCH, reabrir devolveria a venda pra Pendentes — e o status
+          // humano e classificado ANTES do marcador de etiqueta, entao ela voltaria a
+          // ser re-engajavel mesmo ja etiquetada.
+          { somenteSe: 'venda_cancelada_em=is.null&nf_emitida_em=is.null&ml_etiqueta_em=is.null&status=not.in.(venda_cancelada,cancelado,cancelada_quarentena)' });
+        if (r.ok && Array.isArray(r.data) && r.data.length === 0) {
+          json(res, 409, { ok: false, erro: 'estado_mudou',
+            mensagem: 'O estado da venda mudou enquanto voce clicava (cancelamento ou NF detectados). Recarregue o painel e confira antes de desfazer.' });
+          return true;
+        }
+        if (!r.ok) { json(res, 500, { ok: false, erro: 'erro_atualizar', data: r.data }); return true; }
+        console.log(`[lixas-combinar] conclusao manual DESFEITA por ${sessao.sessao?.usuario || '?'} — order ${orderId} -> ${novoStatus}`);
+        json(res, 200, { ok: true, orderId, status: novoStatus });
+      } catch (e) {
+        json(res, 500, { ok: false, erro: e.message });
+      }
+      return true;
+    }
+
+    // POST /lixas-combinar/api/pendentes/:orderId/reconhecer-alerta
+    //   Marca que o alerta de "cancelada DEPOIS de montar/emitir" ja foi tratado
+    //   (despacho parado, NF cancelada/estornada). Sem isso o card ficava preso em
+    //   Pendentes pra sempre, porque nada limpava alerta_pos_venda.
+    //   O texto do alerta NAO e apagado — fica no card como historico do que houve.
+    if (method === 'POST' && p.startsWith('/lixas-combinar/api/pendentes/') && p.endsWith('/reconhecer-alerta')) {
+      const sessao = requerAuth();
+      if (!sessao.ok) { json(res, 401, { ok: false, erro: 'nao_autenticado' }); return true; }
+
+      const orderId = p.replace('/lixas-combinar/api/pendentes/', '').replace('/reconhecer-alerta', '');
+      try {
+        const lcp = require('../auto-mensagens/lixasCombinarPendentes');
+        const r = await lcp.atualizarVenda(orderId, { alerta_reconhecido_em: new Date().toISOString() });
+        if (!r.ok) { json(res, 500, { ok: false, erro: 'erro_atualizar', data: r.data }); return true; }
+        console.log(`[lixas-combinar] alerta pos-venda reconhecido por ${sessao.sessao?.usuario || '?'} — order ${orderId}`);
         json(res, 200, { ok: true, orderId });
       } catch (e) {
         json(res, 500, { ok: false, erro: e.message });
@@ -403,6 +911,22 @@ function routes(readBody) {
           ml_status: d.ml_status || null,
           cancelada: !!d.cancelada,
           alerta: d.alerta || null,
+          // adiado/aviso: cancelamento CONFIRMADO no ML cuja gravacao foi adiada porque
+          // o envio nao pode ser conferido. Sem propagar, o painel diria que a venda ja
+          // saiu do fluxo automatico — quando na verdade nada foi gravado e as outras
+          // rotinas continuam podendo processa-la.
+          adiado: !!d.adiado,
+          // quarentena/gravado: o painel escolhe o texto do modal por eles. Sem
+          // encaminhar, d.quarentena vinha undefined e TODA quarentena bem-sucedida
+          // aparecia como "quarentena FALHOU / continua no fluxo automatico".
+          quarentena: !!d.quarentena,
+          indeterminado: !!d.indeterminado,
+          // etiqueta/shipment: sem propagar, a UI caia no ramo generico "venda ativa"
+          // mesmo tendo acabado de detectar etiqueta no ML.
+          etiqueta: !!d.etiqueta,
+          shipment: d.shipment || null,
+          gravado: d.gravado !== false,
+          aviso: d.aviso || null,
           erros: r.erros || []
         });
       } catch (e) {
@@ -661,6 +1185,27 @@ function routes(readBody) {
         }
 
         const v = venda.data;
+        // Venda CANCELADA (ou em quarentena, cancelamento ja confirmado no ML): montar
+        // ou faturar aqui gera pedido/NF de algo que o cliente cancelou.
+        if (v.venda_cancelada_em || v.status === 'venda_cancelada' || v.status === 'cancelado' || v.status === 'cancelada_quarentena') {
+          json(res, 409, { ok: false, erro: 'venda_cancelada',
+            mensagem: 'Esta venda esta CANCELADA no Mercado Livre. Nao da pra montar nem emitir NF. Se ja houver nota, cancele/estorne no Bling.' });
+          return true;
+        }
+        // Etiqueta ja gerada/postada: montar ou faturar agora mexeria num pedido que
+        // ja saiu (ou esta pronto pra sair) — mesmo criterio da Guarda 1.6 do fluxo.
+        if (v.ml_etiqueta_em) {
+          json(res, 409, { ok: false, erro: 'etiqueta_ja_gerada',
+            mensagem: `Esta venda ja tem etiqueta no ML (${v.ml_shipment_status || '?'}). Nao da pra montar nem emitir NF por aqui — se faltar nota, resolva no Bling.` });
+          return true;
+        }
+        // Conclusao manual = NF emitida POR FORA. Editar aqui reescreveria os itens de
+        // um pedido ja faturado. Preview (dryRun) segue liberado: nao escreve nada.
+        if (v.processado_manual_em && !dryRun) {
+          json(res, 409, { ok: false, erro: 'conclusao_manual',
+            mensagem: 'Esta venda foi concluida na mao (NF provavelmente emitida por fora do painel). Editar o pedido agora mexeria num pedido ja faturado. Se a nota NAO saiu, desfaca a conclusao manual antes.' });
+          return true;
+        }
         let graosEscolhidos = payload.graos;
 
         // Se nao veio body, tenta usar o pedido_estruturado que IA salvou
@@ -698,7 +1243,55 @@ function routes(readBody) {
         const idBuscaBling = v.pack_id || orderId;
         console.log(`[lixas-combinar editar-bling] buscando Bling com numeroLoja=${idBuscaBling} (pack_id=${v.pack_id || 'null'}, order_id=${orderId})`);
 
-        const r = await bp.editarPedidoComGraos({
+        // RESERVA (so na edicao REAL): as guardas acima usam o snapshot lido no inicio,
+        // e entre ele e esta chamada o polling pode registrar etiqueta ou o cron um
+        // cancelamento — e a edicao reescreve os itens no Bling, o que nao se desfaz.
+        // Mesma reserva compartilhada dos caminhos automatico e de recuperacao.
+        let _resEd = null;
+        if (!dryRun) {
+          // ESTADO ML AO VIVO antes de reservar (helper compartilhado com /emitir-nf):
+          // checa ENVIO antes do cancelamento, pra que uma venda cancelada COM etiqueta
+          // registre o alerta de nao despachar antes do venda_cancelada_em fechar a linha.
+          const _chk = await checarMlAntesDeEscrever(orderId, lcp);
+          if (!_chk.ok) { json(res, _chk.http, _chk.corpo); return true; }
+
+          _resEd = await lcp.reservarEmissao(orderId);
+          if (!_resEd.ok) {
+            const zeroEd = _resEd.motivo === 'estado_mudou';
+            json(res, zeroEd ? 409 : 503, { ok: false, erro: zeroEd ? 'estado_mudou' : 'reserva_falhou',
+              mensagem: zeroEd
+                ? 'O estado da venda mudou agora (cancelamento, etiqueta ou NF detectados). NADA foi alterado no Bling. Recarregue o painel.'
+                : 'Nao consegui reservar a venda com seguranca. NADA foi alterado. Rode o SQL de setup e tente de novo.' });
+            return true;
+          }
+        }
+
+        // RECHECA COM O LEASE NA MAO: mesma janela que o /emitir-nf e o /recuperar-nf
+        // ja fecham. Com a reserva ativa o cron de cancelamento adia sua gravacao, entao
+        // os marcadores em cache nao mudam mais — so o ML revela o que surgiu durante a
+        // aquisicao do lease.
+        if (_resEd) {
+          const _rcEd = await lcp.recheckAposReserva(orderId, _resEd.token);
+          if (!_rcEd.ok) {
+            if (_rcEd.motivo === 'estado_indeterminado' || _rcEd.motivo === 'estado_nao_gravado') {
+              await lcp.liberarEmissao(orderId, _resEd.token);
+              json(res, 503, { ok: false, erro: _rcEd.motivo, etapa: 'recheca', mensagem: _rcEd.mensagem });
+              return true;
+            }
+            json(res, 409, { ok: false, erro: _rcEd.motivo, etapa: 'recheca', mensagem: _rcEd.mensagem });
+            return true;
+          }
+        }
+
+        // RENOVA a posse imediatamente antes da escrita irreversivel.
+        if (_resEd && !(await lcp.renovarEmissao(orderId, _resEd.token))) {
+          json(res, 409, { ok: false, erro: 'lease_perdido',
+            mensagem: 'Outro processo assumiu esta venda enquanto eu preparava a montagem. NADA foi alterado. Recarregue o painel.' });
+          return true;
+        }
+        let r;
+        try {
+          r = await bp.editarPedidoComGraos({
           orderId: idBuscaBling,
           graosEscolhidos,
           graosDisponiveis: graosResult.graos,
@@ -706,9 +1299,14 @@ function routes(readBody) {
           descricaoBase: graosResult.descricao,
           dataVenda,
           dryRun
-        });
+          });
+        } catch (eEd) {
+          if (_resEd) await lcp.liberarEmissao(orderId, _resEd.token);
+          throw eEd;
+        }
 
         if (!r.ok) {
+          if (_resEd) await lcp.liberarEmissao(orderId, _resEd.token);
           // Atualiza tabela com erro
           await lcp.atualizarVenda(orderId, {
             bling_erro: `${r.etapa}: ${r.erro || JSON.stringify(r).slice(0,200)}`.slice(0, 500)
@@ -722,11 +1320,24 @@ function routes(readBody) {
         // O status 'processado' so e setado quando a NF for REALMENTE emitida (rota emitir-nf).
         // Assim o card continua na lista de pendentes com o botao "Emitir NF" visivel.
         if (!dryRun) {
-          await lcp.atualizarVenda(orderId, {
+          // Grava o resultado e libera o lease na MESMA escrita (so se ainda for nosso).
+          const _pEd = await lcp.atualizarVenda(orderId, {
             bling_pedido_id: String(r.pedidoId),
             bling_editado_em: new Date().toISOString(),
-            bling_erro: null
-          });
+            bling_erro: null,
+            nf_emitindo_em: null, nf_emitindo_por: null
+          }, _resEd ? lcp.fecharLease(_resEd.token) : undefined);
+          // O pedido JA foi reescrito no Bling. Sem registro, o fluxo composto falha ao
+          // emitir logo em seguida e o painel oferece editar de novo — com o lease preso.
+          if (!_pEd.ok || (Array.isArray(_pEd.data) && _pEd.data.length !== 1)) {
+            // A edicao acabou; sem liberar, o lease bloquearia cancelamento e novas
+            // tentativas por ate 10 min. Nao ha finally nesta rota.
+            if (_resEd) await lcp.liberarEmissao(orderId, _resEd.token);
+            console.error(`[lixas-combinar editar-bling] order ${orderId} 🚨 pedido ${r.pedidoId} EDITADO mas NAO gravado`);
+            json(res, 207, { ok: false, erro: 'edicao_sem_registro', pedidoId: r.pedidoId,
+              mensagem: `O pedido ${r.pedidoId} FOI montado no Bling, mas nao consegui registrar isso no painel. NAO monte de novo — confira no Bling e use o Verificar ML pra reconciliar.` });
+            return true;
+          }
         }
 
         json(res, 200, { ok: true, ...r });
@@ -753,6 +1364,25 @@ function routes(readBody) {
         }
 
         const v = venda.data;
+        // Venda CANCELADA (ou em quarentena, cancelamento ja confirmado no ML): montar
+        // ou faturar aqui gera pedido/NF de algo que o cliente cancelou.
+        if (v.venda_cancelada_em || v.status === 'venda_cancelada' || v.status === 'cancelado' || v.status === 'cancelada_quarentena') {
+          json(res, 409, { ok: false, erro: 'venda_cancelada',
+            mensagem: 'Esta venda esta CANCELADA no Mercado Livre. Nao da pra montar nem emitir NF. Se ja houver nota, cancele/estorne no Bling.' });
+          return true;
+        }
+        // Etiqueta ja gerada/postada: montar ou faturar agora mexeria num pedido que
+        // ja saiu (ou esta pronto pra sair) — mesmo criterio da Guarda 1.6 do fluxo.
+        if (v.ml_etiqueta_em) {
+          json(res, 409, { ok: false, erro: 'etiqueta_ja_gerada',
+            mensagem: `Esta venda ja tem etiqueta no ML (${v.ml_shipment_status || '?'}). Nao da pra montar nem emitir NF por aqui — se faltar nota, resolva no Bling.` });
+          return true;
+        }
+        if (v.processado_manual_em) {
+          json(res, 409, { ok: false, erro: 'conclusao_manual',
+            mensagem: 'Esta venda foi concluida na mao (NF provavelmente emitida por fora do painel). Emitir aqui criaria uma segunda NF.' });
+          return true;
+        }
         if (!v.bling_pedido_id) {
           json(res, 400, {
             ok: false,
@@ -763,10 +1393,74 @@ function routes(readBody) {
         }
 
         const bp = require('./blingPedidos');
+
+        // RESERVA a linha antes da operacao IRREVERSIVEL. Checar e depois emitir sao
+        // duas coisas: o cron podia gravar venda_cancelada entre a guarda acima e o
+        // gerarNFe, e a nota saia mesmo assim. Este PATCH condicional so passa se a
+        // venda continua viva NESTE instante — e como o cron usa o mesmo campo pra
+        // gravar o cancelamento, um dos dois perde a corrida no proprio Postgres.
+        // Mesma checagem ao vivo do /editar-bling: o pedido pode ter sido montado ha
+        // horas, e cancelamento/etiqueta surgidos depois do ultimo poll deixariam os
+        // marcadores nulos — a reserva passaria e a nota sairia mesmo assim.
+        const _chkNf = await checarMlAntesDeEscrever(orderId, lcp);
+        if (!_chkNf.ok) { json(res, _chkNf.http, _chkNf.corpo); return true; }
+
+        const reserva = await lcp.reservarEmissao(orderId);
+        // FAIL CLOSED: so segue com reserva CONFIRMADA (ok + exatamente 1 linha). Com
+        // {ok:false} — falha transiente do Supabase, ou coluna nf_emitindo_em ainda nao
+        // migrada — a rota emitia sem reserva nenhuma, ou seja, sem a serializacao que
+        // este bloco existe pra garantir.
+        if (!reserva.ok) {
+          const zero = reserva.motivo === 'estado_mudou';
+          json(res, zero ? 409 : 503, { ok: false, erro: zero ? 'estado_mudou' : 'reserva_falhou',
+            mensagem: zero
+              ? 'O estado da venda mudou agora (cancelamento ou NF detectados). Nada foi emitido. Recarregue o painel e confira.'
+              : 'Nao consegui reservar a venda pra emitir com seguranca (banco indisponivel ou coluna nf_emitindo_em nao migrada). NADA foi emitido. Rode o SQL de setup e tente de novo.' });
+          return true;
+        }
+
+        // RECHECA APOS A RESERVA: com o lease ativo o cron de cancelamento ADIA sua
+        // gravacao, entao os marcadores locais congelam e nenhum predicado pararia este
+        // worker. Cancelamento ou etiqueta surgidos entre a checagem inicial e a reserva
+        // so aparecem perguntando ao ML de novo — mesmo padrao do recuperar-nf e da escada.
+        {
+          // helper compartilhado (mesma logica dos outros caminhos)
+          const _rc2 = await lcp.recheckAposReserva(orderId, reserva.token);
+          if (!_rc2.ok) {
+            if (_rc2.motivo === 'estado_indeterminado' || _rc2.motivo === 'estado_nao_gravado') {
+              await lcp.liberarEmissao(orderId, reserva.token);
+              
+              json(res, 503, { ok: false, erro: _rc2.motivo, etapa: 'recheca', mensagem: _rc2.mensagem });
+              return true;
+            }
+            
+            json(res, 409, { ok: false, erro: _rc2.motivo, etapa: 'recheca', mensagem: _rc2.mensagem });
+            return true;
+          }
+        }
+
         console.log(`[lixas-combinar emitir-nf] orderId=${orderId} pedidoBling=${v.bling_pedido_id}`);
-        const r = await bp.gerarNFe(v.bling_pedido_id);
+        // Excecao do gerarNFe (rede rejeitada, etc) pulava direto pro catch externo e
+        // deixava o lease preso ate vencer, bloqueando cancelamento e novas tentativas
+        // sem ninguem em curso. Libera aqui e repropaga.
+        if (!(await lcp.renovarEmissao(orderId, reserva.token))) {
+          json(res, 409, { ok: false, erro: 'lease_perdido',
+            mensagem: 'Outro processo assumiu esta venda. NENHUMA nota foi emitida. Recarregue o painel.' });
+          return true;
+        }
+        let r;
+        try {
+          r = await bp.gerarNFe(v.bling_pedido_id);
+        } catch (eNf) {
+          await lcp.liberarEmissao(orderId, reserva.token);
+          throw eNf;
+        }
 
         if (!r.ok) {
+          // NAO solta o lease ainda: o code 74 abaixo e um desfecho TERMINAL (a NF ja
+          // existe) e precisa gravar nf_emitida_em/status na MESMA escrita que libera a
+          // reserva. Soltar antes abriria uma janela pro cron gravar cancelamento e o
+          // ramo do 74 sobrescrever com 'processado' + confirmacao pro cliente.
           // Bling code 74 = "Esta venda possui nota fiscal referenciada" → a NF JA EXISTE
           // (saiu por fora do painel: emissao direta no Bling, F3, etc). Trata como
           // JA-EMITIDA (idempotente): grava nf_emitida_em pra o botao sumir, em vez de
@@ -776,33 +1470,67 @@ function routes(readBody) {
             Number(f.code) === 74 || /nota fiscal referenciada/i.test(String(f.msg || ''))
           );
           if (jaTemNF) {
-            await lcp.atualizarVenda(orderId, {
+            const p74 = await lcp.atualizarVenda(orderId, {
               nf_emitida_em: new Date().toISOString(),
               nf_erro: null,
+              nf_emitindo_em: null, nf_emitindo_por: null,   // lease liberado com o terminal
               status: 'processado'
-            });
+            }, lcp.fecharLease(reserva.token));
+            if (!p74.ok || (Array.isArray(p74.data) && p74.data.length !== 1)) {
+              // A NF ja existe e nada mais esta em curso: segurar o lease so faria
+              // cancelamento e reconciliacao adiarem a toa. O predicado de token
+              // preserva a reserva de um worker mais novo, se houver.
+              await lcp.liberarEmissao(orderId, reserva.token);
+              console.error(`[lixas-combinar emitir-nf] order ${orderId} 🚨 code 74 (NF ja existe) mas NAO gravei no banco`);
+              json(res, 207, { ok: false, emitida: true, erro: 'nf_existente_sem_registro',
+                mensagem: 'Esta venda JA POSSUI NF no Bling, mas nao consegui registrar isso no painel. Use o Verificar ML pra reconciliar.' });
+              return true;
+            }
             console.log(`[lixas-combinar emitir-nf] orderId=${orderId} JA possuia NF referenciada (code 74) — marcado como emitida`);
             const confJa = await enviarConfirmacaoPedido(v, orderId);
             json(res, 200, { ok: true, jaEmitida: true, mensagem: 'Esta venda ja possui NF-e referenciada no Bling. Registrado como emitida.', confirmacao_cliente: confJa });
             return true;
           }
-          await lcp.atualizarVenda(orderId, {
-            nf_erro: `${r.status || ''}: ${r.erro || JSON.stringify(r.detalhe || {}).slice(0,200)}`.slice(0,500)
-          });
+          const _pErr = await lcp.atualizarVenda(orderId, {
+            nf_erro: `${r.status || ''}: ${r.erro || JSON.stringify(r.detalhe || {}).slice(0,200)}`.slice(0,500),
+            nf_emitindo_em: null, nf_emitindo_por: null   // falha nao-terminal: libera agora
+          }, lcp.fecharLease(reserva.token));
+          // Se o PATCH nao gravou, o lease continua ativo e bloquearia cancelamento e
+          // novas tentativas por ate 10 min sem nada em curso — libera explicitamente.
+          if (!_pErr || !_pErr.ok || (Array.isArray(_pErr.data) && _pErr.data.length !== 1)) {
+            await lcp.liberarEmissao(orderId, reserva.token);
+          }
           json(res, 200, { ok: false, ...r });
           return true;
         }
 
         // Sucesso - grava na Supabase. NF emitida = pedido REALMENTE concluido.
-        await lcp.atualizarVenda(orderId, {
+        // A NF JA SAIU (irreversivel). Se este PATCH falhar, o painel nao sabe da nota
+        // e o lease fica preso ate vencer — entao a resposta precisa dizer isso em vez
+        // de fingir sucesso, e a confirmacao ao cliente nao pode sair sobre um estado
+        // que nao foi registrado.
+        // fecharLease(token): se o lease venceu e outro worker assumiu, este write nao
+        // pode limpar a reserva dele nem carimbar por cima.
+        const persist = await lcp.atualizarVenda(orderId, {
           nf_emitida_em: new Date().toISOString(),
           nf_id: r.nfeId,
           nf_numero: r.numero,
           nf_serie: r.serie,
           nf_chave: r.chave || null,
           nf_erro: null,
+          nf_emitindo_em: null, nf_emitindo_por: null,   // reserva liberada
           status: 'processado'
-        });
+        }, lcp.fecharLease(reserva.token));
+        if (!persist.ok || (Array.isArray(persist.data) && persist.data.length !== 1)) {
+          // A NF ja saiu e nada mais esta em curso. Segurar o lease adiaria o registro
+          // de cancelamento e a reconciliacao justo quando ha uma nota irreversivel
+          // emitida sem registro — o pior momento pra ficar bloqueado.
+          await lcp.liberarEmissao(orderId, reserva.token);
+          console.error(`[lixas-combinar emitir-nf] order ${orderId} 🚨 NF ${r.numero || '?'} EMITIDA mas NAO gravada no banco`);
+          json(res, 207, { ok: false, emitida: true, erro: 'nf_emitida_sem_registro', nfNumero: r.numero, nfSerie: r.serie,
+            mensagem: `A NF ${r.numero || '?'} FOI EMITIDA no Bling, mas nao consegui registrar isso no painel. NAO emita de novo — confira no Bling e use o Verificar ML pra reconciliar.` });
+          return true;
+        }
 
         const conf = await enviarConfirmacaoPedido(v, orderId);
         json(res, 200, { ok: true, ...r, confirmacao_cliente: conf });
@@ -828,6 +1556,63 @@ function routes(readBody) {
         const lcp = require('../auto-mensagens/lixasCombinarPendentes');
         const venda = await lcp.buscar(orderId);
         if (!venda.ok || !venda.data) { json(res, 404, { ok: false, erro: 'venda_nao_encontrada', orderId }); return true; }
+        // Venda cancelada: mandar "pedido confirmado, sera postado em breve" pro cliente
+        // que acabou de cancelar e o oposto do que a situacao pede — e quem esta no card
+        // esta justamente tratando o alerta de NAO despachar.
+        {
+          const vc = venda.data;
+          if (vc.venda_cancelada_em || vc.status === 'venda_cancelada' || vc.status === 'cancelado' || vc.status === 'cancelada_quarentena') {
+            json(res, 409, { ok: false, erro: 'venda_cancelada',
+              mensagem: 'Esta venda esta CANCELADA no Mercado Livre. Nao da pra mandar confirmacao de pedido pro cliente.' });
+            return true;
+          }
+        }
+
+        // Status AO VIVO antes de falar com a cliente: os marcadores locais podem ter
+        // ate 1h, e mandar "pedido confirmado, sera postado" pra quem acabou de
+        // cancelar e o pior desfecho possivel desta rota.
+        try {
+          const mlC = require('../auto-mensagens/mlApi');
+          const stC = await mlC.getOrderStatusResumo(String(orderId));
+          if (!stC || !stC.ok) {
+            json(res, 503, { ok: false, erro: 'estado_indeterminado',
+              mensagem: 'Nao consegui confirmar no Mercado Livre se a venda continua ativa. NADA foi enviado a cliente.' });
+            return true;
+          }
+          if (stC.cancelada) {
+            // Respeita lease ativo: com um worker dentro do gerarNFe, gravar o
+            // cancelamento aqui faria a escrita terminal dele ser rejeitada — NF
+            // emitida sem registro.
+            const _limC = new Date(Date.now() - (Number(process.env.LIXAS_NF_LEASE_MIN) || 10) * 60 * 1000).toISOString();
+            const _uC = await lcp.atualizarVenda(orderId, {
+              status: 'venda_cancelada', ml_status: stC.status,
+              ml_status_atualizado_em: new Date().toISOString(),
+              venda_cancelada_em: new Date().toISOString()
+            }, { forcar: true, somenteSe: `or=(nf_emitindo_em.is.null,nf_emitindo_em.lt.${_limC})` });
+            if (_uC && _uC.ok && Array.isArray(_uC.data) && _uC.data.length === 0) {
+              json(res, 409, { ok: false, erro: 'venda_cancelada_emissao_em_curso',
+                mensagem: 'Esta venda foi CANCELADA no Mercado Livre, mas ha uma emissao em curso agora. NADA foi enviado a cliente. Aguarde e recarregue — NAO DESPACHE.' });
+              return true;
+            }
+            // atualizarVenda resolve com {ok:false} em vez de lancar. Sem conferir, o
+            // card seguiria em Resolvidos sem alerta — e esta rota so aparece em venda
+            // com NF emitida, ou seja, justamente onde e preciso parar o despacho e
+            // cancelar a nota.
+            if (!_uC || !_uC.ok || (Array.isArray(_uC.data) && _uC.data.length !== 1)) {
+              console.error(`[lixas-combinar confirmar-cliente] order ${orderId} 🚨 cancelada no ML mas NAO gravei`);
+              json(res, 503, { ok: false, erro: 'cancelamento_nao_gravado',
+                mensagem: 'Esta venda foi CANCELADA no Mercado Livre, mas nao consegui registrar isso — o card continua como se estivesse tudo certo. NAO DESPACHE, confira a NF no Bling e tente de novo.' });
+              return true;
+            }
+            json(res, 409, { ok: false, erro: 'venda_cancelada',
+              mensagem: 'Esta venda foi CANCELADA no Mercado Livre. NADA foi enviado a cliente. Se houver NF emitida, cancele/estorne no Bling e NAO despache.' });
+            return true;
+          }
+        } catch (e) {
+          json(res, 503, { ok: false, erro: 'estado_indeterminado',
+            mensagem: `Nao consegui confirmar o estado da venda (${e.message}). NADA foi enviado a cliente.` });
+          return true;
+        }
 
         const conf = await enviarConfirmacaoPedido(venda.data, orderId);
         json(res, 200, conf);
@@ -859,96 +1644,227 @@ function routes(readBody) {
         }
         const v = venda.data;
 
+        // Conclusao manual e autoritativa (NF emitida POR FORA do painel): emitir aqui
+        // geraria uma SEGUNDA nota. Mesma guarda que o recuperarFalsosProcessados.
+        // Venda CANCELADA (ou em quarentena, cancelamento ja confirmado no ML): montar
+        // ou faturar aqui gera pedido/NF de algo que o cliente cancelou.
+        if (v.venda_cancelada_em || v.status === 'venda_cancelada' || v.status === 'cancelado' || v.status === 'cancelada_quarentena') {
+          json(res, 409, { ok: false, erro: 'venda_cancelada',
+            mensagem: 'Esta venda esta CANCELADA no Mercado Livre. Nao da pra montar nem emitir NF. Se ja houver nota, cancele/estorne no Bling.' });
+          return true;
+        }
+        // Etiqueta ja gerada/postada: montar ou faturar agora mexeria num pedido que
+        // ja saiu (ou esta pronto pra sair) — mesmo criterio da Guarda 1.6 do fluxo.
+        if (v.ml_etiqueta_em) {
+          json(res, 409, { ok: false, erro: 'etiqueta_ja_gerada',
+            mensagem: `Esta venda ja tem etiqueta no ML (${v.ml_shipment_status || '?'}). Nao da pra montar nem emitir NF por aqui — se faltar nota, resolva no Bling.` });
+          return true;
+        }
+        if (v.processado_manual_em) {
+          json(res, 409, { ok: false, erro: 'conclusao_manual',
+            mensagem: 'Esta venda foi concluida na mao (NF provavelmente emitida por fora do painel). Emitir aqui criaria uma segunda NF. Se a nota NAO saiu, desfaca a conclusao manual antes.' });
+          return true;
+        }
+
         // Ja tem NF? nada a fazer.
         if (v.nf_emitida_em) {
           json(res, 200, { ok: true, jaEmitida: true, mensagem: 'Pedido ja tem NF emitida.' });
           return true;
         }
 
+        // RESERVA ANTES DE MONTAR: a etapa 1 abaixo pode reescrever os itens no Bling.
+        // Reservar so antes do gerarNFe protegia a nota, mas nao o pedido.
+        // Mesma checagem ao vivo dos outros caminhos: os marcadores em cache podem ter
+        // ate 1h, e este caminho monta o pedido antes de emitir.
+        const _chkR = await checarMlAntesDeEscrever(orderId, lcp);
+        if (!_chkR.ok) { json(res, _chkR.http, _chkR.corpo); return true; }
+
+        const reservaR = await lcp.reservarEmissao(orderId);
+        if (!reservaR.ok) {
+          const zeroR = reservaR.motivo === 'estado_mudou';
+          json(res, zeroR ? 409 : 503, { ok: false, erro: zeroR ? 'estado_mudou' : 'reserva_falhou', etapa: 'reserva',
+            mensagem: zeroR
+              ? 'O estado da venda mudou (cancelamento, etiqueta ou NF detectados). NADA foi montado nem emitido. Recarregue o painel.'
+              : 'Nao consegui reservar a venda com seguranca. NADA foi montado nem emitido. Rode o SQL de setup e tente de novo.' });
+          return true;
+        }
+
+        // try/finally cobrindo TUDO apos a reserva: a consulta de estoque e o
+        // editarPedidoComGraos podem lancar, e ate agora so as saidas explicitas
+        // liberavam — excecao deixava o lease preso por ate 10 min.
+        let _liberado = false;
+        try {
+          // RECHECA ao vivo APOS a reserva: o lease faz o cron de cancelamento adiar a
+        // gravacao, entao os marcadores locais nao mudam mais — os predicados nao
+        // conseguem parar este worker. Um cancelamento ou etiqueta surgidos entre a
+        // checagem inicial e aqui so aparecem perguntando ao ML de novo. Mesmo padrao
+        // da escada (que rele o envio depois de reservar).
+        {
+          // helper compartilhado (mesma logica dos outros caminhos)
+          const _rc2 = await lcp.recheckAposReserva(orderId, reservaR && reservaR.token);
+          if (!_rc2.ok) {
+            if (_rc2.motivo === 'estado_indeterminado' || _rc2.motivo === 'estado_nao_gravado') {
+              await lcp.liberarEmissao(orderId, reservaR && reservaR.token);
+              _liberado = true;
+              json(res, 503, { ok: false, erro: _rc2.motivo, etapa: 'recheca', mensagem: _rc2.mensagem });
+              return true;
+            }
+            _liberado = true;
+            json(res, 409, { ok: false, erro: _rc2.motivo, etapa: 'recheca', mensagem: _rc2.mensagem });
+            return true;
+          }
+        }
+
         let pedidoBlingId = v.bling_pedido_id;
 
-        // ETAPA 1 — montar, se ainda nao foi montado
-        if (!v.bling_editado_em) {
-          let graosEscolhidos;
-          if (v.ia_pedido_estruturado) {
-            try { graosEscolhidos = JSON.parse(v.ia_pedido_estruturado); }
-            catch (_) { json(res, 400, { ok: false, etapa: 'montar', erro: 'ia_pedido_estruturado invalido — trate manual' }); return true; }
-          }
-          if (!Array.isArray(graosEscolhidos) || graosEscolhidos.length === 0) {
-            json(res, 400, { ok: false, etapa: 'montar', erro: 'sem graos estruturados — trate manual' });
-            return true;
-          }
-          const lixasService = require('./lixasService');
-          const graosResult = await lixasService.getGraosDisponiveisPorSkuACombinar(v.sku_a_combinar);
-          if (!graosResult.ok) {
-            json(res, 500, { ok: false, etapa: 'montar', erro: 'erro_consultar_graos_bling', detalhe: graosResult.erro });
-            return true;
-          }
-          let dataVenda = null;
-          if (v.data_venda) dataVenda = String(v.data_venda).split('T')[0];
-          const idBuscaBling = v.pack_id || orderId;
+          // ETAPA 1 — montar, se ainda nao foi montado
+          if (!v.bling_editado_em) {
+            let graosEscolhidos;
+            if (v.ia_pedido_estruturado) {
+              try { graosEscolhidos = JSON.parse(v.ia_pedido_estruturado); }
+              catch (_) { await lcp.liberarEmissao(orderId, reservaR && reservaR.token); json(res, 400, { ok: false, etapa: 'montar', erro: 'ia_pedido_estruturado invalido — trate manual' }); return true; }
+            }
+            if (!Array.isArray(graosEscolhidos) || graosEscolhidos.length === 0) {
+              await lcp.liberarEmissao(orderId, reservaR && reservaR.token);
+              json(res, 400, { ok: false, etapa: 'montar', erro: 'sem graos estruturados — trate manual' });
+              return true;
+            }
+            const lixasService = require('./lixasService');
+            const graosResult = await lixasService.getGraosDisponiveisPorSkuACombinar(v.sku_a_combinar);
+            if (!graosResult.ok) {
+              await lcp.liberarEmissao(orderId, reservaR && reservaR.token);
+              json(res, 500, { ok: false, etapa: 'montar', erro: 'erro_consultar_graos_bling', detalhe: graosResult.erro });
+              return true;
+            }
+            let dataVenda = null;
+            if (v.data_venda) dataVenda = String(v.data_venda).split('T')[0];
+            const idBuscaBling = v.pack_id || orderId;
 
+            // RECHECA DE NOVO, colada na primeira escrita: a consulta de estoque acima e
+          // uma ida a rede, e com o lease ativo a gravacao do cancelamento fica adiada —
+          // entao a recheca anterior ja pode estar velha aqui.
+          {
+            const _rc3 = await lcp.recheckAposReserva(orderId, reservaR && reservaR.token);
+            if (!_rc3.ok) {
+              if (_rc3.motivo === 'estado_indeterminado' || _rc3.motivo === 'estado_nao_gravado') {
+                await lcp.liberarEmissao(orderId, reservaR && reservaR.token);
+              }
+              _liberado = true;
+              const _http = (_rc3.motivo === 'estado_indeterminado' || _rc3.motivo === 'estado_nao_gravado') ? 503 : 409;
+              json(res, _http, { ok: false, erro: _rc3.motivo, etapa: 'recheca_pos_estoque', mensagem: _rc3.mensagem });
+              return true;
+            }
+          }
+
+          // RENOVA a posse imediatamente antes da escrita irreversivel.
+          if (!(await lcp.renovarEmissao(orderId, reservaR && reservaR.token))) {
+            _liberado = true;
+            json(res, 409, { ok: false, erro: 'lease_perdido', etapa: 'montar',
+              mensagem: 'Outro processo assumiu esta venda enquanto eu preparava a montagem. NADA foi montado nem emitido.' });
+            return true;
+          }
           const edit = await bp.editarPedidoComGraos({
-            orderId: idBuscaBling,
-            graosEscolhidos,
-            graosDisponiveis: graosResult.graos,
-            unidadesPorPacote: graosResult.unidades_por_pacote,
-            descricaoBase: graosResult.descricao,
-            dataVenda,
-            dryRun: false
-          });
-          if (!edit.ok) {
+              orderId: idBuscaBling,
+              graosEscolhidos,
+              graosDisponiveis: graosResult.graos,
+              unidadesPorPacote: graosResult.unidades_por_pacote,
+              descricaoBase: graosResult.descricao,
+              dataVenda,
+              dryRun: false
+            });
+            if (!edit.ok) {
+              await lcp.atualizarVenda(orderId, {
+                status: 'precisa_atencao_humano',
+                bling_erro: `recuperar montar ${edit.etapa || ''}: ${edit.erro || ''}`.slice(0, 500)
+              });
+              await lcp.liberarEmissao(orderId, reservaR && reservaR.token);
+              json(res, 500, { ok: false, etapa: 'montar', ...edit });
+              return true;
+            }
+            pedidoBlingId = edit.pedidoId;
+            await lcp.atualizarVenda(orderId, {
+              bling_pedido_id: String(edit.pedidoId),
+              bling_editado_em: new Date().toISOString(),
+              bling_erro: null
+            });
+          }
+
+          // ETAPA 2 — emitir a NF
+          if (!pedidoBlingId) {
+            await lcp.liberarEmissao(orderId, reservaR && reservaR.token);
+            json(res, 400, { ok: false, etapa: 'nf', erro: 'sem bling_pedido_id apos montar' });
+            return true;
+          }
+          if (!(await lcp.renovarEmissao(orderId, reservaR && reservaR.token))) {
+            _liberado = true;
+            json(res, 409, { ok: false, erro: 'lease_perdido', etapa: 'nf',
+              mensagem: 'Outro processo assumiu esta venda. NENHUMA nota foi emitida.' });
+            return true;
+          }
+          let nf;
+          try {
+            nf = await bp.gerarNFe(pedidoBlingId);
+          } catch (eNf) {
+            await lcp.liberarEmissao(orderId, reservaR && reservaR.token);
+            throw eNf;
+          }
+          if (!nf.ok) {
+            const campos = (nf.detalhe && nf.detalhe.error && nf.detalhe.error.fields) || [];
+            const jaTemNF = Array.isArray(campos) && campos.some(f =>
+              Number(f.code) === 74 || /nota fiscal referenciada/i.test(String(f.msg || ''))
+            );
+            if (jaTemNF) {
+              const p74r = await lcp.atualizarVenda(orderId, {
+                nf_emitida_em: new Date().toISOString(), nf_erro: null,
+                nf_emitindo_em: null, nf_emitindo_por: null, status: 'processado'
+              }, lcp.fecharLease(reservaR && reservaR.token));
+              if (!p74r.ok || (Array.isArray(p74r.data) && p74r.data.length !== 1)) {
+                await lcp.liberarEmissao(orderId, reservaR && reservaR.token);
+                _liberado = true;
+                console.error(`[lixas-combinar recuperar-nf] order ${orderId} 🚨 code 74 mas NAO gravei no banco`);
+                json(res, 207, { ok: false, emitida: true, erro: 'nf_existente_sem_registro',
+                  mensagem: 'Esta venda JA POSSUI NF no Bling, mas nao consegui registrar isso no painel. Use o Verificar ML pra reconciliar.' });
+                return true;
+              }
+              _liberado = true;
+            const confR1 = await enviarConfirmacaoPedido(v, orderId);
+              json(res, 200, { ok: true, jaEmitida: true, mensagem: 'Bling ja tinha NF referenciada — registrado como emitida.', confirmacao_cliente: confR1 });
+              return true;
+            }
             await lcp.atualizarVenda(orderId, {
               status: 'precisa_atencao_humano',
-              bling_erro: `recuperar montar ${edit.etapa || ''}: ${edit.erro || ''}`.slice(0, 500)
-            });
-            json(res, 500, { ok: false, etapa: 'montar', ...edit });
+              nf_emitindo_em: null, nf_emitindo_por: null,
+              nf_erro: `recuperar nf ${nf.status || ''}: ${nf.erro || JSON.stringify(nf.detalhe || {}).slice(0,200)}`.slice(0, 500)
+            }, lcp.fecharLease(reservaR && reservaR.token));
+            json(res, 200, { ok: false, etapa: 'nf', ...nf });
             return true;
           }
-          pedidoBlingId = edit.pedidoId;
-          await lcp.atualizarVenda(orderId, {
-            bling_pedido_id: String(edit.pedidoId),
-            bling_editado_em: new Date().toISOString(),
-            bling_erro: null
-          });
-        }
 
-        // ETAPA 2 — emitir a NF
-        if (!pedidoBlingId) {
-          json(res, 400, { ok: false, etapa: 'nf', erro: 'sem bling_pedido_id apos montar' });
-          return true;
-        }
-        const nf = await bp.gerarNFe(pedidoBlingId);
-        if (!nf.ok) {
-          const campos = (nf.detalhe && nf.detalhe.error && nf.detalhe.error.fields) || [];
-          const jaTemNF = Array.isArray(campos) && campos.some(f =>
-            Number(f.code) === 74 || /nota fiscal referenciada/i.test(String(f.msg || ''))
-          );
-          if (jaTemNF) {
-            await lcp.atualizarVenda(orderId, {
-              nf_emitida_em: new Date().toISOString(), nf_erro: null, status: 'processado'
-            });
-            const confR1 = await enviarConfirmacaoPedido(v, orderId);
-            json(res, 200, { ok: true, jaEmitida: true, mensagem: 'Bling ja tinha NF referenciada — registrado como emitida.', confirmacao_cliente: confR1 });
+          // Sucesso total
+          const persistR = await lcp.atualizarVenda(orderId, {
+            nf_emitida_em: new Date().toISOString(),
+            nf_id: nf.nfeId, nf_numero: nf.numero, nf_serie: nf.serie,
+            nf_chave: nf.chave || null, nf_erro: null,
+            nf_emitindo_em: null, nf_emitindo_por: null,   // reserva liberada
+            status: 'processado'
+          }, lcp.fecharLease(reservaR && reservaR.token));
+          if (!persistR.ok || (Array.isArray(persistR.data) && persistR.data.length !== 1)) {
+            // NF irreversivel ja emitida e nao registrada: nao segurar o lease, que
+            // adiaria justamente o cancelamento e a reconciliacao que resolvem o caso.
+            await lcp.liberarEmissao(orderId, reservaR && reservaR.token);
+            _liberado = true;
+            console.error(`[lixas-combinar recuperar-nf] order ${orderId} 🚨 NF ${nf.numero || '?'} EMITIDA mas NAO gravada`);
+            json(res, 207, { ok: false, emitida: true, erro: 'nf_emitida_sem_registro', nfNumero: nf.numero, nfSerie: nf.serie,
+              mensagem: `A NF ${nf.numero || '?'} FOI EMITIDA no Bling, mas nao consegui registrar no painel. NAO emita de novo — use o Verificar ML pra reconciliar.` });
             return true;
           }
-          await lcp.atualizarVenda(orderId, {
-            status: 'precisa_atencao_humano',
-            nf_erro: `recuperar nf ${nf.status || ''}: ${nf.erro || JSON.stringify(nf.detalhe || {}).slice(0,200)}`.slice(0, 500)
-          });
-          json(res, 200, { ok: false, etapa: 'nf', ...nf });
-          return true;
-        }
+          _liberado = true;
+          const confR2 = await enviarConfirmacaoPedido(v, orderId);
+          json(res, 200, { ok: true, recuperado: true, pedidoId: pedidoBlingId, nfNumero: nf.numero, nfSerie: nf.serie, confirmacao_cliente: confR2 });
 
-        // Sucesso total
-        await lcp.atualizarVenda(orderId, {
-          nf_emitida_em: new Date().toISOString(),
-          nf_id: nf.nfeId, nf_numero: nf.numero, nf_serie: nf.serie,
-          nf_chave: nf.chave || null, nf_erro: null,
-          status: 'processado'
-        });
-        const confR2 = await enviarConfirmacaoPedido(v, orderId);
-        json(res, 200, { ok: true, recuperado: true, pedidoId: pedidoBlingId, nfNumero: nf.numero, nfSerie: nf.serie, confirmacao_cliente: confR2 });
+        } finally {
+          if (!_liberado) await lcp.liberarEmissao(orderId, reservaR && reservaR.token);
+        }
       } catch (e) {
         console.error('[lixas-combinar recuperar-nf]', e);
         json(res, 500, { ok: false, erro: e.message });
