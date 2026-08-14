@@ -672,6 +672,7 @@ async function rotinaChecarCanceladasML(opts = {}) {
       // execucao pulava — ml_shipment_status congelava em ready_to_ship pra sempre.
       const _stEnv = String(v.ml_shipment_status || '').toLowerCase();
       const _envTerminal = ['shipped','delivered','not_delivered','cancelled'].includes(_stEnv);
+      let envioIndet = null;
       if (podeEnvio && !v.nf_emitida_em && !v.processado_manual_em && !_envTerminal) {
         try {
           const env = await ml.getEnvioResumo(oid);
@@ -679,6 +680,7 @@ async function rotinaChecarCanceladasML(opts = {}) {
           if (env && env.ok) {
             campos.ml_shipment_status = env.status || null;
             campos.ml_shipment_substatus = env.substatus || null;
+            if (v.ml_envio_indeterminado_em) campos.ml_envio_indeterminado_em = null;
             if (env.temEtiqueta) {
               // preserva o carimbo ORIGINAL: quando a etiqueta saiu importa mais que
               // quando a gente reconferiu.
@@ -720,6 +722,11 @@ async function rotinaChecarCanceladasML(opts = {}) {
             const msg = (env && (env.dica || env.erro)) || 'falha desconhecida lendo envio';
             out.erros.push({ order_id: oid, erro: `envio: ${msg}` });
             console.warn(`[canceladas] order ${oid} nao consegui ler o envio: ${msg}`);
+            // INDETERMINADO tambem quando so o ENVIO falha: o painel derivava isso do
+            // status do pedido e diria "venda ativa", e como ml_etiqueta_em fica nulo a
+            // reserva libera editar/emitir mesmo que ja exista etiqueta.
+            campos.ml_envio_indeterminado_em = agoraIso;
+            envioIndet = msg;
           }
         } catch (e) {
           out.erros.push({ order_id: oid, erro: `envio: ${e.message}` });
@@ -731,7 +738,12 @@ async function rotinaChecarCanceladasML(opts = {}) {
       // atualizarVenda devolve { ok:false } em vez de lancar. Sem conferir, uma coluna
       // nao migrada ou falha transiente do REST passaria batida: a rodada diria que a
       // etiqueta foi detectada, mas nada teria sido gravado e a venda seguiria pendente.
-      const updV = await lcp.atualizarVenda(oid, campos);
+      // processado_manual_em=is.null: se um operador marcou como concluida enquanto a
+      // consulta de envio estava em voo, gravar a etiqueta deixaria a linha com os DOIS
+      // marcadores — e o marcador manual exclui a venda do polling, congelando o
+      // shipment em "etiqueta gerada" sem nunca avancar pra postado.
+      const updV = await lcp.atualizarVenda(oid, campos,
+        campos.ml_etiqueta_em ? { somenteSe: 'processado_manual_em=is.null' } : undefined);
       // BLOQUEADA: um cancelamento entrou entre a leitura e esta escrita, e a guarda
       // automatica recusou o PATCH porque `campos.status` e ativo. Sem tratar, o
       // marcador de etiqueta se perderia — e venda_cancelada_em exclui a linha de todas
@@ -745,9 +757,21 @@ async function rotinaChecarCanceladasML(opts = {}) {
           `Conferir devolucao/estorno no ML e a NF/pedido no Bling.`
         ).slice(0, 500);
         const r2 = await lcp.atualizarVenda(oid, semStatus, { forcar: true });
-        console.error(`[canceladas] 🚨 order ${oid} etiqueta detectada em venda que acabou de ser CANCELADA — alerta gravado (${r2 && r2.ok ? 'ok' : 'FALHOU'})`);
+        const r2ok = !!(r2 && r2.ok && (!Array.isArray(r2.data) || r2.data.length === 1));
+        if (!r2ok) {
+          // venda_cancelada_em ja esta gravado, entao a linha sai de todas as varreduras
+          // futuras: nao ha proxima tentativa. Sem registrar como erro, o alerta de nao
+          // despachar sumiria em silencio justo com etiqueta impressa.
+          console.error(`[canceladas] 🚨🚨 order ${oid} etiqueta em venda CANCELADA e a reconciliacao FALHOU — alerta perdido, tratar na mao`);
+          out.erros.push({ order_id: oid, erro: 'cancelada COM etiqueta e nao consegui gravar o alerta — conferir na mao, NAO despachar' });
+        } else {
+          console.error(`[canceladas] 🚨 order ${oid} etiqueta detectada em venda que acabou de ser CANCELADA — alerta gravado`);
+        }
         out.detalhes.push({ order_id: oid, ml_status: st.status, cancelada: true,
-                            etiqueta: true, alerta: semStatus.alerta_pos_venda, buyer: v.buyer_nome || null });
+                            etiqueta: true, gravado: r2ok,
+                            alerta: r2ok ? semStatus.alerta_pos_venda : null,
+                            aviso: r2ok ? undefined : 'cancelada COM etiqueta, mas o alerta NAO foi gravado — NAO despache.',
+                            buyer: v.buyer_nome || null });
         await new Promise(r => setTimeout(r, CANCELADAS_PAUSA_MS));
         continue;
       }
@@ -761,7 +785,7 @@ async function rotinaChecarCanceladasML(opts = {}) {
                           // indeterminado: NAO da pra dizer "venda ativa" — o status do
                           // pedido nem chegou a ser lido. O painel usa isso pra avisar
                           // em vez de liberar o processamento.
-                          indeterminado: !!st._statusIndeterminado,
+                          indeterminado: !!st._statusIndeterminado || !!envioIndet,
                           aviso: st._statusIndeterminado
                             ? `Nao consegui ler o status do pedido no ML (${st._statusIndeterminado}). O envio foi conferido, mas NAO da pra afirmar que a venda esta ativa.`
                             : undefined });
@@ -1273,7 +1297,7 @@ async function _processarAutoEmissaoInner({ venda, iaResult, graosResult, lcp })
 
   const edit = await bp.editarPedidoComGraos({ ...baseArgs, dryRun: false });
   if (!edit.ok) {
-    await lcp.atualizarVenda(orderId, { status: 'precisa_atencao_humano', nf_emitindo_em: null, nf_emitindo_por: null, bling_erro: `auto edit ${edit.etapa || ''}: ${edit.erro || ''}`.slice(0, 500) });
+    await lcp.atualizarVenda(orderId, { status: 'precisa_atencao_humano', nf_emitindo_em: null, nf_emitindo_por: null, bling_erro: `auto edit ${edit.etapa || ''}: ${edit.erro || ''}`.slice(0, 500) }, lcp.fecharLease(_res.token));
     console.error(`[auto-emissao] order ${orderId} edit falhou (${edit.etapa}): ${edit.erro}`);
     return { falha: true, motivo: 'edit_falhou' };
   }
@@ -1300,12 +1324,14 @@ async function _processarAutoEmissaoInner({ venda, iaResult, graosResult, lcp })
       status: 'precisa_atencao_humano',
       nf_emitindo_em: null, nf_emitindo_por: null,
       nf_erro: `${nf.status || ''}: ${nf.erro || JSON.stringify(nf.detalhe || {}).slice(0, 200)}`.slice(0, 500)
-    });
+    }, lcp.fecharLease(_res.token));
     console.error(`[auto-emissao] order ${orderId} pedido ${edit.pedidoId} editado mas NF falhou: ${nf.status} ${nf.erro}`);
     return { falha: true, motivo: 'nf_falhou', pedidoId: edit.pedidoId };
   }
 
   // Sucesso total
+  // fecharLease(token): so grava se a reserva ainda for NOSSA. Se o lease venceu e
+  // outro worker assumiu, este write nao pode limpar a reserva dele.
   const _persist = await lcp.atualizarVenda(orderId, {
     nf_emitida_em: new Date().toISOString(),
     nf_id: nf.nfeId,
@@ -1315,7 +1341,7 @@ async function _processarAutoEmissaoInner({ venda, iaResult, graosResult, lcp })
     nf_erro: null,
     nf_emitindo_em: null, nf_emitindo_por: null,   // lease liberado com o terminal
     status: 'processado'
-  });
+  }, lcp.fecharLease(_res.token));
   // NF ja saiu (irreversivel). Se nao gravou, NAO reportar sucesso: o wrapper apagaria
   // a entrada da fila, o painel mostraria a venda inacabada e o lease ficaria preso.
   if (!_persist.ok || (Array.isArray(_persist.data) && _persist.data.length !== 1)) {
