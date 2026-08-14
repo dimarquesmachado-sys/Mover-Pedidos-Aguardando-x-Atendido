@@ -327,6 +327,10 @@ async function checarMlAntesDeEscrever(orderId, lcp) {
   return { ok: true };
 }
 
+// Cursor da reconciliacao oportunista de NF. Vive no processo (nao precisa persistir:
+// se reiniciar, recomeca do zero e a varredura continua completa ao longo das cargas).
+let _curReconc = 0;
+
 // ── Router (interface esperada pelo orquestrador raiz) ───────────────
 function routes(readBody) {
   return async function handle(req, res, urlObj) {
@@ -559,7 +563,10 @@ function routes(readBody) {
           // O offset gira a cada carga do painel, cobrindo a lista inteira aos poucos.
           const _cands = todos.filter(v =>
             (v.bling_editado_em || v.status === 'processado') && !v.nf_emitida_em && v.bling_pedido_id && !v.processado_manual_em);
-          const _giro = _cands.length > 20 ? (Math.floor(Date.now() / 60000) % _cands.length) : 0;
+          // Cursor que AVANCA por lote, em vez de derivar do relogio: com o painel
+          // aberto em cadencia regular (ex.: 1x/dia = 1440 min), o modulo do tempo caia
+          // sempre no mesmo ponto e as mesmas 20 linhas seriam checadas pra sempre.
+          const _giro = _cands.length > 20 ? (_curReconc % _cands.length) : 0;
           const _ordem = _cands.slice(_giro).concat(_cands.slice(0, _giro));
           let _checados = 0;
           for (const v of _ordem) {
@@ -582,6 +589,8 @@ function routes(readBody) {
               }
             } catch (_) { /* checagem falhou: mantem o botao (melhor pecar por mostrar) */ }
           }
+          // avanca o cursor pelo tamanho do lote efetivamente checado
+          if (_cands.length > 20) _curReconc = (_giro + _checados) % _cands.length;
         } catch (_) { /* sem bp disponivel: segue sem curar */ }
 
         // Classifica TODAS (o painel trabalha por bolsao, nao por status cru)
@@ -751,10 +760,10 @@ function routes(readBody) {
         const r = await lcp.atualizarVenda(orderId, {
           status: 'processado',
           processado_manual_em: new Date().toISOString()
-        }, { somenteSe: 'venda_cancelada_em=is.null&ml_etiqueta_em=is.null&status=not.in.(venda_cancelada,cancelado,cancelada_quarentena)' });
+        }, { somenteSe: `venda_cancelada_em=is.null&ml_etiqueta_em=is.null&status=not.in.(venda_cancelada,cancelado,cancelada_quarentena)&or=(nf_emitindo_em.is.null,nf_emitindo_em.lt.${_leaseLimite()})` });
         if (r.ok && Array.isArray(r.data) && r.data.length === 0) {
           json(res, 409, { ok: false, erro: 'estado_mudou',
-            mensagem: 'O estado da venda mudou enquanto voce clicava (cancelamento ou etiqueta detectados). Recarregue o painel e confira antes de marcar como concluida.' });
+            mensagem: 'Nao deu pra marcar agora: ou o estado da venda mudou (cancelamento/etiqueta), ou ha uma emissao de NF em curso neste momento. Aguarde um instante, recarregue o painel e confira.' });
           return true;
         }
         if (!r.ok) { json(res, 500, { ok: false, erro: 'erro_atualizar', data: r.data }); return true; }
