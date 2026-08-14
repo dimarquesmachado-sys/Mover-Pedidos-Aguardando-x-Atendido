@@ -34,6 +34,7 @@ const { json, ehAdmin, CONFERIDOS_FILE, CACHE_DIR, readJson, writeJson } = base;
 // 14/08 — ADS vem da lib COMPARTILHADA (lib/shopee-ads.js): a mesma lógica serve
 // girassol/amb/good, então descoberta nova entra uma vez só, não três.
 const adsLib = require('../lib/shopee-ads');
+const concLib = require('../lib/shopee-conciliar');   // paridade com a AMB: conciliação carteira × escrow
 const ARQ_DEV = () => path.join(CACHE_DIR, '_shopee_devolucoes.json');
 const ARQ_CAR = () => path.join(CACHE_DIR, '_shopee_carteira.json');
 
@@ -630,6 +631,17 @@ function rotasShopee(ctx) {
         json(res, 400, { ok: false, erro: 'passe &de=AAAA-MM-DD&ate=AAAA-MM-DD' }); return true;
       }
       json(res, 200, Object.assign({ ok: true, de, ate }, resumoShopee(de, ate)));
+      return true;
+    }
+
+    // 14/08 — conciliação carteira × escrow ("a Shopee me pagou o que devia?")
+    if (p === '/girassol-backup-offline/shopee/conciliar') {
+      if (!admOk(req, urlObj)) { json(res, 404, { error: 'not found' }); return true; }
+      const de = String(q.get('de') || '').slice(0, 10), ate = String(q.get('ate') || '').slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(de) || !/^\d{4}-\d{2}-\d{2}$/.test(ate)) { json(res, 400, { ok: false, erro: 'passe &de=AAAA-MM-DD&ate=AAAA-MM-DD' }); return true; }
+      if (de > ate) { json(res, 400, { ok: false, erro: 'período invertido' }); return true; }
+      const r = await concLib.conciliar({ readJson, ARQ_CAR, escrowEmLote, loja: q.get('loja') || undefined }, de, ate, q.get('max'));
+      json(res, 200, r);
       return true;
     }
 
