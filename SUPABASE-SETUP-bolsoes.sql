@@ -35,7 +35,11 @@ ALTER TABLE lixas_combinar_pendentes
   ADD COLUMN IF NOT EXISTS ml_status_falha_em    TIMESTAMPTZ,
   -- Dono da reserva de emissao. Sem ele, um worker cuja chamada ao Bling passou do
   -- lease liberaria, ao terminar, a reserva FRESCA de outro que ja assumiu a venda.
-  ADD COLUMN IF NOT EXISTS nf_emitindo_por       TEXT;
+  ADD COLUMN IF NOT EXISTS nf_emitindo_por       TEXT,
+  -- Marca que a ULTIMA leitura do shipment falhou. Enquanto estiver preenchida, a
+  -- reserva nega editar/emitir: ml_etiqueta_em nulo pode ser falta de informacao, nao
+  -- ausencia de etiqueta.
+  ADD COLUMN IF NOT EXISTS ml_envio_indeterminado_em TIMESTAMPTZ;
 
 -- Painel: separar rapido quem ja tem etiqueta
 CREATE INDEX IF NOT EXISTS idx_lixas_pendentes_etiqueta
@@ -60,6 +64,6 @@ SELECT count(*) AS processados_sem_nf_para_triar
 SELECT column_name, data_type
 FROM information_schema.columns
 WHERE table_name = 'lixas_combinar_pendentes'
-  AND column_name IN ('ml_shipment_status','ml_shipment_substatus','ml_etiqueta_em','ml_envio_checado_em','processado_manual_em','alerta_reconhecido_em','nf_emitindo_em','ml_status_falha_em','nf_emitindo_por')
+  AND column_name IN ('ml_shipment_status','ml_shipment_substatus','ml_etiqueta_em','ml_envio_checado_em','processado_manual_em','alerta_reconhecido_em','nf_emitindo_em','ml_status_falha_em','nf_emitindo_por','ml_envio_indeterminado_em')
 ORDER BY column_name;
--- Esperado: 9 linhas.
+-- Esperado: 10 linhas.
