@@ -1770,6 +1770,10 @@ function routes(readBody) {
             status: 'processado'
           }, lcp.fecharLease(reservaR && reservaR.token));
           if (!persistR.ok || (Array.isArray(persistR.data) && persistR.data.length !== 1)) {
+            // NF irreversivel ja emitida e nao registrada: nao segurar o lease, que
+            // adiaria justamente o cancelamento e a reconciliacao que resolvem o caso.
+            await lcp.liberarEmissao(orderId, reservaR && reservaR.token);
+            _liberado = true;
             console.error(`[lixas-combinar recuperar-nf] order ${orderId} 🚨 NF ${nf.numero || '?'} EMITIDA mas NAO gravada`);
             json(res, 207, { ok: false, erro: 'nf_emitida_sem_registro', nfNumero: nf.numero, nfSerie: nf.serie,
               mensagem: `A NF ${nf.numero || '?'} FOI EMITIDA no Bling, mas nao consegui registrar no painel. NAO emita de novo — use o Verificar ML pra reconciliar.` });
