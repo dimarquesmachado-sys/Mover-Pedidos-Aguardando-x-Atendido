@@ -25,6 +25,14 @@ const lixasService = require('./lixasService');
 // respondeu 9 dias depois da compra). Aceita ?dias=N na URL pra abrir mais quando precisar.
 const PAINEL_DIAS = Number(process.env.LIXAS_PAINEL_DIAS) || 30;
 
+// Lease da emissao — MESMA janela do cron (LIXAS_NF_LEASE_MIN, default 10 min).
+// Usado no predicado da reserva: so reserva quem encontra o lease livre ou vencido,
+// entao duas emissoes simultaneas da mesma venda nao passam as duas.
+function _leaseLimite() {
+  const min = Number(process.env.LIXAS_NF_LEASE_MIN) || 10;
+  return new Date(Date.now() - min * 60 * 1000).toISOString();
+}
+
 // ── Helpers HTTP ─────────────────────────────────────────────────────
 function json(res, code, body) {
   res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' });
@@ -1149,7 +1157,7 @@ function routes(readBody) {
         // venda continua viva NESTE instante — e como o cron usa o mesmo campo pra
         // gravar o cancelamento, um dos dois perde a corrida no proprio Postgres.
         const reserva = await lcp.atualizarVenda(orderId, { nf_emitindo_em: new Date().toISOString() },
-          { somenteSe: 'venda_cancelada_em=is.null&nf_emitida_em=is.null&ml_etiqueta_em=is.null&processado_manual_em=is.null&status=not.in.(venda_cancelada,cancelado,cancelada_quarentena,processado)' });
+          { somenteSe: `venda_cancelada_em=is.null&nf_emitida_em=is.null&ml_etiqueta_em=is.null&processado_manual_em=is.null&status=not.in.(venda_cancelada,cancelado,cancelada_quarentena)&or=(nf_emitindo_em.is.null,nf_emitindo_em.lt.${_leaseLimite()})` });
         // FAIL CLOSED: so segue com reserva CONFIRMADA (ok + exatamente 1 linha). Com
         // {ok:false} — falha transiente do Supabase, ou coluna nf_emitindo_em ainda nao
         // migrada — a rota emitia sem reserva nenhuma, ou seja, sem a serializacao que
@@ -1168,9 +1176,10 @@ function routes(readBody) {
         const r = await bp.gerarNFe(v.bling_pedido_id);
 
         if (!r.ok) {
-          // Libera a reserva: sem isso a linha ficaria bloqueada pro cron ate o lease
-          // vencer, atrasando a deteccao de cancelamento a toa.
-          try { await lcp.atualizarVenda(orderId, { nf_emitindo_em: null }); } catch (_) {}
+          // NAO solta o lease ainda: o code 74 abaixo e um desfecho TERMINAL (a NF ja
+          // existe) e precisa gravar nf_emitida_em/status na MESMA escrita que libera a
+          // reserva. Soltar antes abriria uma janela pro cron gravar cancelamento e o
+          // ramo do 74 sobrescrever com 'processado' + confirmacao pro cliente.
           // Bling code 74 = "Esta venda possui nota fiscal referenciada" → a NF JA EXISTE
           // (saiu por fora do painel: emissao direta no Bling, F3, etc). Trata como
           // JA-EMITIDA (idempotente): grava nf_emitida_em pra o botao sumir, em vez de
@@ -1183,6 +1192,7 @@ function routes(readBody) {
             await lcp.atualizarVenda(orderId, {
               nf_emitida_em: new Date().toISOString(),
               nf_erro: null,
+              nf_emitindo_em: null,     // lease liberado ATOMICAMENTE com o terminal
               status: 'processado'
             });
             console.log(`[lixas-combinar emitir-nf] orderId=${orderId} JA possuia NF referenciada (code 74) — marcado como emitida`);
@@ -1191,7 +1201,8 @@ function routes(readBody) {
             return true;
           }
           await lcp.atualizarVenda(orderId, {
-            nf_erro: `${r.status || ''}: ${r.erro || JSON.stringify(r.detalhe || {}).slice(0,200)}`.slice(0,500)
+            nf_erro: `${r.status || ''}: ${r.erro || JSON.stringify(r.detalhe || {}).slice(0,200)}`.slice(0,500),
+            nf_emitindo_em: null      // falha nao-terminal: libera a reserva agora
           });
           json(res, 200, { ok: false, ...r });
           return true;
@@ -1359,7 +1370,7 @@ function routes(readBody) {
         // Mesma reserva do /emitir-nf: este caminho gasta tempo montando o pedido antes
         // de emitir, entao a janela pro cron gravar um cancelamento e ainda maior.
         const reservaR = await lcp.atualizarVenda(orderId, { nf_emitindo_em: new Date().toISOString() },
-          { somenteSe: 'venda_cancelada_em=is.null&nf_emitida_em=is.null&ml_etiqueta_em=is.null&processado_manual_em=is.null&status=not.in.(venda_cancelada,cancelado,cancelada_quarentena,processado)' });
+          { somenteSe: `venda_cancelada_em=is.null&nf_emitida_em=is.null&ml_etiqueta_em=is.null&processado_manual_em=is.null&status=not.in.(venda_cancelada,cancelado,cancelada_quarentena)&or=(nf_emitindo_em.is.null,nf_emitindo_em.lt.${_leaseLimite()})` });
         const reservouR = reservaR.ok && Array.isArray(reservaR.data) && reservaR.data.length === 1;
         if (!reservouR) {
           const zeroR = reservaR.ok && Array.isArray(reservaR.data) && reservaR.data.length === 0;
@@ -1372,14 +1383,14 @@ function routes(readBody) {
         }
         const nf = await bp.gerarNFe(pedidoBlingId);
         if (!nf.ok) {
-          try { await lcp.atualizarVenda(orderId, { nf_emitindo_em: null }); } catch (_) {}
           const campos = (nf.detalhe && nf.detalhe.error && nf.detalhe.error.fields) || [];
           const jaTemNF = Array.isArray(campos) && campos.some(f =>
             Number(f.code) === 74 || /nota fiscal referenciada/i.test(String(f.msg || ''))
           );
           if (jaTemNF) {
             await lcp.atualizarVenda(orderId, {
-              nf_emitida_em: new Date().toISOString(), nf_erro: null, status: 'processado'
+              nf_emitida_em: new Date().toISOString(), nf_erro: null,
+              nf_emitindo_em: null, status: 'processado'
             });
             const confR1 = await enviarConfirmacaoPedido(v, orderId);
             json(res, 200, { ok: true, jaEmitida: true, mensagem: 'Bling ja tinha NF referenciada — registrado como emitida.', confirmacao_cliente: confR1 });
@@ -1387,6 +1398,7 @@ function routes(readBody) {
           }
           await lcp.atualizarVenda(orderId, {
             status: 'precisa_atencao_humano',
+            nf_emitindo_em: null,
             nf_erro: `recuperar nf ${nf.status || ''}: ${nf.erro || JSON.stringify(nf.detalhe || {}).slice(0,200)}`.slice(0, 500)
           });
           json(res, 200, { ok: false, etapa: 'nf', ...nf });
