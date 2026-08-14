@@ -846,7 +846,11 @@ function routes(readBody) {
         // este update restauraria um status elegivel a re-engajamento — e dai a
         // auto-emissao pode chegar, ja que a consulta de status falha aberta.
         const r = await lcp.atualizarVenda(orderId, { processado_manual_em: null, status: novoStatus },
-          { somenteSe: 'venda_cancelada_em=is.null&nf_emitida_em=is.null&status=not.in.(venda_cancelada,cancelado,cancelada_quarentena)' });
+          // ml_etiqueta_em=is.null: se o poll registrar a etiqueta entre a checagem ao
+          // vivo e este PATCH, reabrir devolveria a venda pra Pendentes — e o status
+          // humano e classificado ANTES do marcador de etiqueta, entao ela voltaria a
+          // ser re-engajavel mesmo ja etiquetada.
+          { somenteSe: 'venda_cancelada_em=is.null&nf_emitida_em=is.null&ml_etiqueta_em=is.null&status=not.in.(venda_cancelada,cancelado,cancelada_quarentena)' });
         if (r.ok && Array.isArray(r.data) && r.data.length === 0) {
           json(res, 409, { ok: false, erro: 'estado_mudou',
             mensagem: 'O estado da venda mudou enquanto voce clicava (cancelamento ou NF detectados). Recarregue o painel e confira antes de desfazer.' });
@@ -1725,7 +1729,23 @@ function routes(readBody) {
             if (v.data_venda) dataVenda = String(v.data_venda).split('T')[0];
             const idBuscaBling = v.pack_id || orderId;
 
-            const edit = await bp.editarPedidoComGraos({
+            // RECHECA DE NOVO, colada na primeira escrita: a consulta de estoque acima e
+          // uma ida a rede, e com o lease ativo a gravacao do cancelamento fica adiada —
+          // entao a recheca anterior ja pode estar velha aqui.
+          {
+            const _rc3 = await lcp.recheckAposReserva(orderId, reservaR && reservaR.token);
+            if (!_rc3.ok) {
+              if (_rc3.motivo === 'estado_indeterminado' || _rc3.motivo === 'estado_nao_gravado') {
+                await lcp.liberarEmissao(orderId, reservaR && reservaR.token);
+              }
+              _liberado = true;
+              const _http = (_rc3.motivo === 'estado_indeterminado' || _rc3.motivo === 'estado_nao_gravado') ? 503 : 409;
+              json(res, _http, { ok: false, erro: _rc3.motivo, etapa: 'recheca_pos_estoque', mensagem: _rc3.mensagem });
+              return true;
+            }
+          }
+
+          const edit = await bp.editarPedidoComGraos({
               orderId: idBuscaBling,
               graosEscolhidos,
               graosDisponiveis: graosResult.graos,
