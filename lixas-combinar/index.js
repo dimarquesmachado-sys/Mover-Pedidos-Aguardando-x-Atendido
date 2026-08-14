@@ -292,8 +292,12 @@ async function checarMlAntesDeEscrever(orderId, lcp) {
     // ser rejeitada — a venda ficaria cancelada, com NF emitida e sem o marcador nem o
     // alerta. Zero linhas = adia; o cron reconfirma depois.
     const _lim = new Date(Date.now() - (Number(process.env.LIXAS_NF_LEASE_MIN) || 10) * 60 * 1000).toISOString();
+    // venda_cancelada_em=is.null + status nao-terminal: o cron pode ter finalizado o
+    // cancelamento entre as leituras do ML e este PATCH, e com forcar:true a quarentena
+    // sobrescreveria o estado final — a linha ficaria excluida das varreduras (pelo
+    // venda_cancelada_em ja gravado) e eternamente "conferindo etiqueta" no painel.
     const _updL = await lcp.atualizarVenda(orderId, campos,
-      { forcar: true, somenteSe: `or=(nf_emitindo_em.is.null,nf_emitindo_em.lt.${_lim})` });
+      { forcar: true, somenteSe: `venda_cancelada_em=is.null&status=not.in.(venda_cancelada,cancelado,cancelada_quarentena)&or=(nf_emitindo_em.is.null,nf_emitindo_em.lt.${_lim})` });
     if (!_updL || !_updL.ok) {
       // Falha de persistencia != cancelamento tratado. Dizer "cancelada" com a linha
       // ainda ativa faria o operador parar, mas o leitor automatico e a escada
@@ -549,8 +553,16 @@ function routes(readBody) {
         // nao pesar a listagem (so os poucos com campo desatualizado entram nisso).
         try {
           const bp = require('./blingPedidos');
+          // ROTACAO: sem isso o loop olhava sempre os MESMOS 20 primeiros (ordem
+          // estavel), e uma linha mais antiga cuja NF existe no Bling nunca seria
+          // reconciliada — ficaria pra sempre em Pendentes como "SEM NF".
+          // O offset gira a cada carga do painel, cobrindo a lista inteira aos poucos.
+          const _cands = todos.filter(v =>
+            (v.bling_editado_em || v.status === 'processado') && !v.nf_emitida_em && v.bling_pedido_id && !v.processado_manual_em);
+          const _giro = _cands.length > 20 ? (Math.floor(Date.now() / 60000) % _cands.length) : 0;
+          const _ordem = _cands.slice(_giro).concat(_cands.slice(0, _giro));
           let _checados = 0;
-          for (const v of todos) {
+          for (const v of _ordem) {
             if (_checados >= 20) break;
             // Conclusao manual e autoritativa e os botoes de NF ja estao escondidos —
             // consultar o Bling aqui gastaria o teto de 20 em linhas resolvidas e
@@ -887,6 +899,10 @@ function routes(readBody) {
           // aparecia como "quarentena FALHOU / continua no fluxo automatico".
           quarentena: !!d.quarentena,
           indeterminado: !!d.indeterminado,
+          // etiqueta/shipment: sem propagar, a UI caia no ramo generico "venda ativa"
+          // mesmo tendo acabado de detectar etiqueta no ML.
+          etiqueta: !!d.etiqueta,
+          shipment: d.shipment || null,
           gravado: d.gravado !== false,
           aviso: d.aviso || null,
           erros: r.erros || []
@@ -1386,7 +1402,7 @@ function routes(readBody) {
               nf_erro: null,
               nf_emitindo_em: null, nf_emitindo_por: null,   // lease liberado com o terminal
               status: 'processado'
-            });
+            }, lcp.fecharLease(reserva.token));
             if (!p74.ok || (Array.isArray(p74.data) && p74.data.length !== 1)) {
               console.error(`[lixas-combinar emitir-nf] order ${orderId} 🚨 code 74 (NF ja existe) mas NAO gravei no banco`);
               json(res, 207, { ok: false, erro: 'nf_existente_sem_registro',
@@ -1411,6 +1427,8 @@ function routes(readBody) {
         // e o lease fica preso ate vencer — entao a resposta precisa dizer isso em vez
         // de fingir sucesso, e a confirmacao ao cliente nao pode sair sobre um estado
         // que nao foi registrado.
+        // fecharLease(token): se o lease venceu e outro worker assumiu, este write nao
+        // pode limpar a reserva dele nem carimbar por cima.
         const persist = await lcp.atualizarVenda(orderId, {
           nf_emitida_em: new Date().toISOString(),
           nf_id: r.nfeId,
@@ -1420,7 +1438,7 @@ function routes(readBody) {
           nf_erro: null,
           nf_emitindo_em: null, nf_emitindo_por: null,   // reserva liberada
           status: 'processado'
-        });
+        }, lcp.fecharLease(reserva.token));
         if (!persist.ok || (Array.isArray(persist.data) && persist.data.length !== 1)) {
           console.error(`[lixas-combinar emitir-nf] order ${orderId} 🚨 NF ${r.numero || '?'} EMITIDA mas NAO gravada no banco`);
           json(res, 207, { ok: false, erro: 'nf_emitida_sem_registro', nfNumero: r.numero, nfSerie: r.serie,
@@ -1653,8 +1671,8 @@ function routes(readBody) {
             if (jaTemNF) {
               const p74r = await lcp.atualizarVenda(orderId, {
                 nf_emitida_em: new Date().toISOString(), nf_erro: null,
-                nf_emitindo_em: null, status: 'processado'
-              });
+                nf_emitindo_em: null, nf_emitindo_por: null, status: 'processado'
+              }, lcp.fecharLease(reservaR && reservaR.token));
               if (!p74r.ok || (Array.isArray(p74r.data) && p74r.data.length !== 1)) {
                 console.error(`[lixas-combinar recuperar-nf] order ${orderId} 🚨 code 74 mas NAO gravei no banco`);
                 json(res, 207, { ok: false, erro: 'nf_existente_sem_registro',
@@ -1682,7 +1700,7 @@ function routes(readBody) {
             nf_chave: nf.chave || null, nf_erro: null,
             nf_emitindo_em: null, nf_emitindo_por: null,   // reserva liberada
             status: 'processado'
-          });
+          }, lcp.fecharLease(reservaR && reservaR.token));
           if (!persistR.ok || (Array.isArray(persistR.data) && persistR.data.length !== 1)) {
             console.error(`[lixas-combinar recuperar-nf] order ${orderId} 🚨 NF ${nf.numero || '?'} EMITIDA mas NAO gravada`);
             json(res, 207, { ok: false, erro: 'nf_emitida_sem_registro', nfNumero: nf.numero, nfSerie: nf.serie,
