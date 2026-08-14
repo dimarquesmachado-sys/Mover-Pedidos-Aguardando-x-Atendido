@@ -305,26 +305,75 @@ function resumoShopee(de, ate) {
   const dev = readJson(ARQ_DEV(), { devolucoes: {} }).devolucoes || {};
   const car = readJson(ARQ_CAR(), { transacoes: {} }).transacoes || {};
   const porSku = {}, porMotivo = {};
+  // Codex PR#76 (3ª rodada): a alocação do custo tem que ser feita ANTES do recorte de
+  // período e olhando TODAS as devoluções do pedido — senão dois relatórios de 1 dia dão,
+  // cada um, o débito inteiro (o total do mês deixa de ser a soma dos dias). E quando a
+  // devolução é única no pedido, ela leva o débito com refund_sn MAIS o que veio sem.
+  const custoDaDevolucao = {};
   // 14/08 (correção do Diego): `refund_amount` é o PREÇO devolvido ao comprador, NÃO o custo
   // da loja — parte a Shopee banca. O que sai do bolso são os lançamentos da carteira
   // (ADJUSTMENT_FOR_RR_* e afins), e eles trazem `order_sn`: dá pra casar pedido a pedido.
   // Medido no período 01/07→14/08 da Girassol: R$ 5.249,08 devolvidos × R$ 1.598,66 debitados.
-  const custoPorPedido = {};
+  // Codex PR#76: o débito da devolução costuma cair em DIA DIFERENTE da abertura dela — se
+  // eu só olhasse a janela do relatório, o custo apareceria zerado (e no filtro de 1 dia a
+  // coluna sumiria). Indexo a carteira INTEIRA por pedido e por devolução; o recorte de
+  // período continua sendo feito pelas devoluções.
+  const custoPorPedido = {}, custoPorDevolucao = {};
   for (const x of Object.values(car)) {
-    const q1 = Number(x.quando || 0);
-    if (!(q1 >= ini && q1 <= fim)) continue;
     const t1 = String(x.tipo || '').toUpperCase();
-    if (/^(ESCROW_VERIFIED_ADD|ORDER_INCOME|WITHDRAWAL)/.test(t1)) continue;   // renda e saque não são custo de devolução
+    // Codex PR#76 (2ª rodada): como o índice passou a varrer a carteira INTEIRA (o débito da
+    // devolução cai em outro dia), aceitar "qualquer negativo do pedido" faria um relatório de
+    // UM dia absorver ajuste de meses atrás que nada tem a ver com devolução (ex.:
+    // ESCROW_VERIFIED_MINUS, que é correção de repasse). Só entram tipos de DEVOLUÇÃO.
+    if (!/RETURN|REFUND|_RR|ADJUSTMENT_FOR_RR/.test(t1)) continue;
     const v1 = _num(x.valor);
     if (v1 >= 0) continue;
     const sn1 = String(x.order_sn || '').trim();
+    const rsn = String(x.refund_sn || '').trim();
+    // Codex PR#76 (2ª rodada): o total do pedido é usado como FALLBACK; se parte dos débitos
+    // já tem refund_sn, o fallback tem que contar SÓ o que sobrou — senão A + (A+B).
+    // Codex PR#76: a carteira guarda `refund_sn` — quando existe, o débito é daquela devolução
+    // específica. Sem isso, duas devoluções parciais do MESMO pedido recebiam cada uma o
+    // débito inteiro e o total saía DOBRADO.
+    if (rsn) custoPorDevolucao[rsn] = Math.round(((custoPorDevolucao[rsn] || 0) + Math.abs(v1)) * 100) / 100;
     if (!sn1) continue;
+    if (rsn) continue;   // já contabilizado na devolução específica
     custoPorPedido[sn1] = Math.round(((custoPorPedido[sn1] || 0) + Math.abs(v1)) * 100) / 100;
   }
   let devTotal = 0, devQtd = 0, devParciais = 0, devAjustadas = 0, devCanceladas = 0;
   const porStatus = {};
   const maiores = [];
   let devCustoReal = 0;
+  (function alocarCusto() {
+    const porPedidoTodas = {};
+    for (const d0 of Object.values(dev)) {
+      const sn0 = String(d0.order_sn || ''); if (!sn0) continue;
+      (porPedidoTodas[sn0] = porPedidoTodas[sn0] || []).push(d0);
+    }
+    for (const sn0 of Object.keys(porPedidoTodas)) {
+      const lista0 = porPedidoTodas[sn0];
+      const semTag = custoPorPedido[sn0] || 0;              // débitos do pedido sem refund_sn
+      const comTag = lista0.filter(d0 => custoPorDevolucao[String(d0.return_sn || '')] != null);
+      for (const d0 of lista0) {
+        const r0 = String(d0.return_sn || '');
+        custoDaDevolucao[r0] = custoPorDevolucao[r0] || 0;
+      }
+      if (!semTag) continue;
+      if (lista0.length === 1) {                            // devolução única: leva tudo do pedido
+        const r0 = String(lista0[0].return_sn || '');
+        custoDaDevolucao[r0] = Math.round(((custoDaDevolucao[r0] || 0) + semTag) * 100) / 100;
+      } else {
+        // várias devoluções e débito sem identificação: rateia entre as que NÃO têm débito próprio
+        const alvos = lista0.filter(d0 => !(custoPorDevolucao[String(d0.return_sn || '')] > 0));
+        const destino = alvos.length ? alvos : lista0;
+        const parte = Math.round((semTag / destino.length) * 100) / 100;
+        for (const d0 of destino) {
+          const r0 = String(d0.return_sn || '');
+          custoDaDevolucao[r0] = Math.round(((custoDaDevolucao[r0] || 0) + parte) * 100) / 100;
+        }
+      }
+    }
+  })();
   for (const d of Object.values(dev)) {
     const q = Number(d.criado_em || 0);
     if (!(q >= ini && q <= fim)) continue;
@@ -339,11 +388,13 @@ function resumoShopee(de, ate) {
     if (d.devolucao_parcial) devParciais++;
     if (d.reembolso_ajustado) devAjustadas++;
     porMotivo[d.motivo || 'sem motivo'] = (porMotivo[d.motivo || 'sem motivo'] || 0) + 1;
-    maiores.push({ valor: _num(d.refund_amount), custo_real: custoPorPedido[String(d.order_sn || '')] || 0, sku: ((d.itens || [])[0] || {}).sku || null,
+    maiores.push({ valor: _num(d.refund_amount), custo_real: 0, sku: ((d.itens || [])[0] || {}).sku || null,
       motivo: d.motivo || null, texto: (d.motivo_texto || '').slice(0, 180) || null,
       status: st9 || null, order_sn: d.order_sn || null, parcial: !!d.devolucao_parcial });
-    const custoReal = custoPorPedido[String(d.order_sn || '')] || 0;
+    const custoReal = custoDaDevolucao[String(d.return_sn || '')] || 0;
     devCustoReal = Math.round((devCustoReal + custoReal) * 100) / 100;
+    // o item de `maiores` foi empilhado logo acima, antes de sabermos o custo: preenche agora
+    if (maiores.length) maiores[maiores.length - 1].custo_real = custoReal;
     const somaItens = (d.itens || []).reduce((s2, i2) => s2 + _num(i2.devolvido), 0) || 1;
     for (const it of (d.itens || [])) {
       const s = it.sku || 'sem sku';
@@ -399,7 +450,9 @@ function resumoShopee(de, ate) {
       custo_real_na_carteira: devCustoReal,
       nota_custo: 'valor_devolvido = preço reembolsado ao comprador · custo_real_na_carteira = o que a Shopee debitou de você (casado por pedido)',
       por_motivo: porMotivo,
-      por_sku: Object.values(porSku).sort((a, b) => b.valor - a.valor).slice(0, 50),
+      // Codex PR#76: ordenar pelo PREÇO escondia o SKU que realmente custa (a Shopee banca
+      // parte dos caros). Ordena pelo CUSTO REAL; empate/zero cai pro preço.
+      por_sku: Object.values(porSku).sort((a, b) => (b.custo_real - a.custo_real) || (b.valor - a.valor)).slice(0, 50),
       // 14/08 — o motivo OFICIAL engana: a sonda mostrou uma devolução marcada como
       // CHANGE_MIND cujo texto era "o tamanho é pequeno, não serve para a máquina que tenho"
       // (incompatibilidade, que se resolve no anúncio). As maiores com o que o comprador
