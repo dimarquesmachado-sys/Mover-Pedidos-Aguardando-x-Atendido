@@ -246,74 +246,9 @@ async function coletarDevolucoes(dias, pedirAoSync) {
   return { janelas, vistas, novas, guardadas: Object.keys(arq.devolucoes).length, erro };
 }
 
-// ── ADS DA SHOPEE (14/08) ───────────────────────────────────────────────────────
-// O Diego pagou Ads na Shopee da AMB e o gasto NÃO aparecia no painel. Motivo medido:
-// ads NÃO passa pela carteira (30 dias de carteira, zero linhas de ads) — ele só existe
-// no domínio de anúncios. A sonda confirmou que o acesso está liberado e que o endpoint
-// `/api/v2/ads/get_all_cpc_ads_daily_performance` devolve UMA LINHA POR DIA com `expense`
-// (medido 01→13/08 na AMB: R$ 431,02, com dias de 71,50 / 51,32 / 44,11).
-// Datas da Shopee são DD-MM-AAAA. Guardado por DIA, então recoletar não duplica.
-async function coletarAds(dias, pedirAoSync) {
-  const total = Math.min(180, Math.max(1, Number(dias) || 30));
-  const arq = readJson(ARQ_ADS(), { dias: {}, atualizado: null });
-  arq.dias = arq.dias || {};
-  const ddmm = d => String(d.getUTCDate()).padStart(2, '0') + '-' + String(d.getUTCMonth() + 1).padStart(2, '0') + '-' + d.getUTCFullYear();
-  const iso = d => d.toISOString().slice(0, 10);
-  let novos = 0, vistos = 0, janelas = 0, erro = null;
-  const hoje = new Date();
-  // janelas de 30 dias (a API aceita períodos, mas fatiar evita resposta gigante)
-  for (let off = 0; off < total; off += 30) {
-    const fim = new Date(Date.UTC(hoje.getUTCFullYear(), hoje.getUTCMonth(), hoje.getUTCDate() - off));
-    const ini = new Date(Date.UTC(hoje.getUTCFullYear(), hoje.getUTCMonth(), hoje.getUTCDate() - Math.min(total, off + 29)));
-    janelas++;
-    // 14/08 — o domínio de ads tem limite de chamadas (`ads.rate_limit.exceed_api`): rodar
-    // duas coletas seguidas derrubou a janela mais recente. Agora cada janela é re-tentada
-    // com espera crescente, e o erro REAL da Shopee é reportado (antes eu só dizia "sem
-    // resposta", que não ajudava a saber se era limite, permissão ou parâmetro).
-    let resp = null, ultimoMotivo = '';
-    for (let tent = 1; tent <= 4 && !Array.isArray(resp); tent++) {
-      if (tent > 1) await new Promise(r0 => setTimeout(r0, 4000 * (tent - 1)));
-      const r = await pedirAoSync('shopee-raw', { caminho: '/api/v2/ads/get_all_cpc_ads_daily_performance', q: 'start_date=' + ddmm(ini) + '&end_date=' + ddmm(fim) });
-      const cru = (r && r.dados && r.dados.resposta) || null;
-      resp = cru && cru.response;
-      if (!Array.isArray(resp)) {
-        ultimoMotivo = (cru && (cru.error || cru.message)) || (r && r.erro) || ('HTTP ' + ((r && r.status) || '?'));
-        resp = null;
-      }
-    }
-    if (!Array.isArray(resp)) { erro = erro || ('janela ' + iso(ini) + '..' + iso(fim) + ': ' + String(ultimoMotivo).slice(0, 160)); continue; }
-    for (const l of resp) {
-      if (!l || !l.date) continue;
-      const p = String(l.date).split('-');           // DD-MM-AAAA → AAAA-MM-DD
-      if (p.length !== 3) continue;
-      const dia = p[2] + '-' + p[1] + '-' + p[0];
-      vistos++;
-      if (arq.dias[dia] === undefined) novos++;
-      arq.dias[dia] = {
-        dia,
-        gasto: _num(l.expense),
-        impressoes: Number(l.impression) || 0,
-        cliques: Number(l.clicks) || 0,
-        pedidos_diretos: Number(l.direct_order) || 0,
-        gmv_direto: _num(l.direct_gmv),
-        roas_direto: _num(l.direct_roas),
-        // 14/08: o PAINEL da Shopee (e o Jodda) mostram o AMPLO — venda de qualquer produto
-        // depois do clique, não só do item anunciado. Guardar os dois evita a impressão de
-        // divergência: no período 01→13/08 o painel deu R$ 6.993,30 / ROAS 16,23 (amplo) e o
-        // direto dava bem menos, com o MESMO investimento de R$ 431.
-        pedidos_amplos: Number(l.broad_order) || 0,
-        gmv_amplo: _num(l.broad_gmv),
-        roas_amplo: _num(l.broad_roas),
-        itens_diretos: Number(l.direct_item_sold) || 0,
-        itens_amplos: Number(l.broad_item_sold) || 0
-      };
-    }
-    await new Promise(r0 => setTimeout(r0, 400));
-  }
-  arq.atualizado = new Date().toISOString();
-  writeJson(ARQ_ADS(), arq);
-  return { ok: !erro || vistos > 0, dias_pedidos: total, janelas, dias_vistos: vistos, dias_novos: novos, erro };
-}
+// ADS: a lógica agora mora em lib/shopee-ads.js — MESMO código pra girassol/amb/good.
+// Empresa entra como parâmetro; descoberta nova entra uma vez só, não três.
+const adsLib = require('../lib/shopee-ads');
 
 async function coletarCarteira(dias, pedirAoSync) {
   const total = Math.min(180, Math.max(1, Number(dias) || 30));
@@ -401,28 +336,10 @@ function resumoShopee(de, ate) {
   }
   // 14/08 — ADS entra no MESMO "sai do bolso". Ele não vem da carteira (a Shopee não
   // lança ads lá): vem do relatório diário de anúncios, guardado por dia.
-  const ads = readJson(ARQ_ADS(), { dias: {} }).dias || {};
-  let adsGasto = 0, adsCliques = 0, adsGmv = 0, adsDias = 0, adsImp = 0, adsGmvAmplo = 0, adsPedAmplos = 0;
-  for (const d of Object.values(ads)) {
-    const dia = String(d && d.dia || '');
-    if (!(dia >= de && dia <= ate)) continue;
-    adsDias++;
-    adsGasto = Math.round((adsGasto + _num(d.gasto)) * 100) / 100;
-    adsCliques += Number(d.cliques) || 0;
-    adsImp += Number(d.impressoes) || 0;
-    adsGmv = Math.round((adsGmv + _num(d.gmv_direto)) * 100) / 100;
-    adsGmvAmplo = Math.round((adsGmvAmplo + _num(d.gmv_amplo)) * 100) / 100;
-    adsPedAmplos += Number(d.pedidos_amplos) || 0;
-  }
-  // ⚠️ 14/08 — CORREÇÃO IMPORTANTE (extrato de créditos de ads que o Diego trouxe):
-  // o `expense` da API é CONSUMO de crédito, não desembolso. No período 01→13/08 o consumo
-  // foi R$ 431,02, mas parte dele saiu de crédito que a Shopee DEU: "Free Ads Credit"
-  // R$ 100,00 (recompensa de recarga), e as recargas de R$ 100 foram pagas R$ 90 (bônus de
-  // 10%). Além disso, "Recarga Automática (Comissão)" é descontada do repasse — se isso
-  // também aparecer na carteira, somar aqui contaria DUAS VEZES.
-  // Enquanto a classificação (consumo × recarga paga × crédito grátis) não estiver feita a
-  // partir do extrato, ads fica INFORMATIVO e NÃO entra no sai_do_bolso: superestimar custo
-  // é pior que a situação anterior, porque parece número conferido.
+  const ads = adsLib.resumoAds({ CACHE_DIR, readJson, writeJson, path, pedirAoSync }, de, ate);
+  const adsGasto = Number(ads.gasto) || 0;
+  // ads é INFORMATIVO: consumo de crédito, não desembolso (o desembolso aparece na
+  // carteira como SPM_DEDUCT e já está somado aqui). Não entra no sai_do_bolso.
   const saiTotal = saiDoBolso;
   return {
     devolucoes: {
@@ -437,15 +354,7 @@ function resumoShopee(de, ate) {
     // produto depois do clique. Então `roas`, `vendas` e `pedidos` passam a ser o AMPLO, que
     // é o que aparece na tela da Shopee; o direto continua exposto pra quem quiser o recorte
     // estrito. TACOS não sai daqui: depende do faturamento do canal, que o dashboard tem.
-    ads: { consumo: adsGasto, gasto: adsGasto, dias: adsDias, cliques: adsCliques, impressoes: adsImp,
-      ctr: adsImp > 0 ? Math.round((adsCliques / adsImp) * 10000) / 100 : null,
-      vendas: adsGmvAmplo, pedidos: adsPedAmplos,
-      roas: adsGasto > 0 ? Math.round((adsGmvAmplo / adsGasto) * 100) / 100 : null,
-      acos: adsGmvAmplo > 0 ? Math.round((adsGasto / adsGmvAmplo) * 10000) / 100 : null,
-      cac: adsPedAmplos > 0 ? Math.round((adsGasto / adsPedAmplos) * 100) / 100 : null,
-      gmv_amplo: adsGmvAmplo, pedidos_amplos: adsPedAmplos, roas_amplo: adsGasto > 0 ? Math.round((adsGmvAmplo / adsGasto) * 100) / 100 : null,
-      gmv_direto: adsGmv, roas_direto: adsGasto > 0 ? Math.round((adsGmv / adsGasto) * 100) / 100 : null,
-      entra_no_sai_do_bolso: false, nota: 'consumo de credito; o desembolso real depende do extrato de recargas (credito gratis e bonus de 10% nao sao custo)' },
+    ads,
     // sai_do_bolso agora inclui ads; carteira_sai_do_bolso é a parte que vem da carteira
     carteira: { por_tipo: porTipo, custo_por_tipo: custoPorTipo, carteira_sai_do_bolso: saiDoBolso, ads_consumo_nao_somado: adsGasto, sai_do_bolso: saiTotal },
     atualizado: {
@@ -831,7 +740,7 @@ function rotasShopee(ctx) {
     if (p === '/amb-checkout-offline/shopee/coletar-ads') {
       if (!admOk(req, urlObj)) { json(res, 404, { error: 'not found' }); return true; }
       const dias = Math.min(180, Math.max(1, Number(q.get('dias')) || 30));
-      const r = await coletarAds(dias, pedirAoSync);
+      const r = await adsLib.coletarAds({ CACHE_DIR, readJson, writeJson, path, pedirAoSync }, dias, q.get('loja') || undefined);
       json(res, 200, Object.assign({ ok: true }, r));
       return true;
     }
@@ -857,4 +766,4 @@ async function escrowEmLote(orderSns, loja) {
   return saida;
 }
 
-module.exports = { rotasShopee, escrowDoPedido, contasDoEscrow, escrowEmLote, coletarDevolucoes, coletarCarteira, coletarAds, resumoShopee, tarifasPorSku, pedirAoSync };
+module.exports = { rotasShopee, escrowDoPedido, contasDoEscrow, escrowEmLote, coletarDevolucoes, coletarCarteira, resumoShopee, tarifasPorSku, pedirAoSync };
