@@ -253,25 +253,40 @@ async function rotinaEscadaIndisponivel(opts = {}) {
       // nao passa pelo processarAutoEmissao — precisa das duas guardas por conta.
       try {
         const stEsc = await ml.getOrderStatusResumo(String(orderId));
-        if (stEsc && stEsc.ok && stEsc.cancelada) {
-          // Respeita lease ativo, como o cron: se outro emissor ja reservou e esta
-          // dentro do gerarNFe, gravar o cancelamento aqui deixaria a venda cancelada
-          // E faturada, com os dois terminais brigando.
-          const _lim = new Date(Date.now() - (Number(process.env.LIXAS_NF_LEASE_MIN) || 10) * 60 * 1000).toISOString();
+        // getOrderStatusResumo devolve {ok:false} em vez de lancar: sem tratar, uma
+        // falha transiente numa venda de fato cancelada caia direto no gerarNFe.
+        // Indeterminado = para, porque a proxima etapa e irreversivel.
+        if (!stEsc || !stEsc.ok) {
+          console.warn(`[escada] order ${orderId} status ML indeterminado (${(stEsc && stEsc.erro) || 'sem resposta'}) — nao emito`);
+          await lcp.liberarEmissao(orderId, resEsc.token);
+          stats.erros++; stats.lista.push({ order_id: orderId, acao: 'erro', motivo: 'status_ml_indeterminado' });
+          continue;
+        }
+        if (stEsc.cancelada) {
+          // A escada JA e a dona do lease (reservou acima), entao testar "sem lease
+          // ativo" daria zero linhas sempre. Converte a PROPRIA reserva no estado de
+          // cancelamento, liberando o lease na mesma escrita.
           const _updC = await lcp.atualizarVenda(orderId, {
             status: 'venda_cancelada', ml_status: stEsc.status,
             ml_status_atualizado_em: new Date().toISOString(),
-            venda_cancelada_em: new Date().toISOString()
-          }, { somenteSe: `or=(nf_emitindo_em.is.null,nf_emitindo_em.lt.${_lim})` });
-          if (_updC && _updC.ok && Array.isArray(_updC.data) && _updC.data.length === 0) {
-            console.warn(`[escada] order ${orderId} cancelada, mas ha emissao em curso — nao gravo agora`);
+            venda_cancelada_em: new Date().toISOString(),
+            nf_emitindo_em: null, nf_emitindo_por: null
+          }, lcp.fecharLease(resEsc.token));
+          if (!_updC || !_updC.ok || (Array.isArray(_updC.data) && _updC.data.length !== 1)) {
+            console.error(`[escada] order ${orderId} 🚨 cancelada no ML mas NAO gravei — libero o lease`);
+            await lcp.liberarEmissao(orderId, resEsc.token);
           }
           console.warn(`[escada] order ${orderId} CANCELADA no ML — abortando antes de emitir`);
           stats.erros++; stats.lista.push({ order_id: orderId, acao: 'erro', motivo: 'cancelada_no_ml' });
           continue;
         }
       } catch (e) {
-        console.warn(`[escada] order ${orderId} nao consegui checar status ML antes de emitir: ${e.message}`);
+        // Excecao tambem e indeterminado: NAO cair no gerarNFe achando que esta tudo
+        // bem. A venda volta na proxima rodada da escada.
+        console.warn(`[escada] order ${orderId} excecao checando status ML — nao emito: ${e.message}`);
+        await lcp.liberarEmissao(orderId, resEsc.token);
+        stats.erros++; stats.lista.push({ order_id: orderId, acao: 'erro', motivo: 'status_ml_excecao' });
+        continue;
       }
       const nf = await bp.gerarNFe(edit.pedidoId);
       let nfOk = nf.ok;
@@ -280,13 +295,13 @@ async function rotinaEscadaIndisponivel(opts = {}) {
         if (Array.isArray(campos) && campos.some(f => Number(f.code) === 74 || /nota fiscal referenciada/i.test(String(f.msg || '')))) nfOk = true;
       }
       if (!nfOk) {
-        await lcp.atualizarVenda(orderId, { status: 'precisa_atencao_humano', nf_emitindo_em: null, nf_erro: `${nf.status || ''}: ${nf.erro || JSON.stringify(nf.detalhe || {}).slice(0, 200)}`.slice(0, 500) });
+        await lcp.atualizarVenda(orderId, { status: 'precisa_atencao_humano', nf_emitindo_em: null, nf_emitindo_por: null, nf_erro: `${nf.status || ''}: ${nf.erro || JSON.stringify(nf.detalhe || {}).slice(0, 200)}`.slice(0, 500) });
         stats.erros++; stats.lista.push({ order_id: orderId, acao: 'erro', motivo: 'nf_falhou', pedidoId: edit.pedidoId }); continue;
       }
       const _persistE = await lcp.atualizarVenda(orderId, {
         nf_emitida_em: new Date().toISOString(), nf_id: nf.nfeId || null, nf_numero: nf.numero || null,
         nf_serie: nf.serie || null, nf_chave: nf.chave || null, nf_erro: null,
-        nf_emitindo_em: null, status: 'processado'
+        nf_emitindo_em: null, nf_emitindo_por: null, status: 'processado'
       });
       // NF ja saiu. Sem registro, o painel pode oferecer Recuperar NF de novo depois que
       // o lease vencer — entao nao conta como sucesso nem avisa a cliente sobre um
