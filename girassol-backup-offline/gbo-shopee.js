@@ -295,6 +295,11 @@ function resumoShopee(de, ate) {
   const dev = readJson(ARQ_DEV(), { devolucoes: {} }).devolucoes || {};
   const car = readJson(ARQ_CAR(), { transacoes: {} }).transacoes || {};
   const porSku = {}, porMotivo = {};
+  // Codex PR#76 (3ª rodada): a alocação do custo tem que ser feita ANTES do recorte de
+  // período e olhando TODAS as devoluções do pedido — senão dois relatórios de 1 dia dão,
+  // cada um, o débito inteiro (o total do mês deixa de ser a soma dos dias). E quando a
+  // devolução é única no pedido, ela leva o débito com refund_sn MAIS o que veio sem.
+  const custoDaDevolucao = {};
   // 14/08 (correção do Diego): `refund_amount` é o PREÇO devolvido ao comprador, NÃO o custo
   // da loja — parte a Shopee banca. O que sai do bolso são os lançamentos da carteira
   // (ADJUSTMENT_FOR_RR_* e afins), e eles trazem `order_sn`: dá pra casar pedido a pedido.
@@ -303,7 +308,7 @@ function resumoShopee(de, ate) {
   // eu só olhasse a janela do relatório, o custo apareceria zerado (e no filtro de 1 dia a
   // coluna sumiria). Indexo a carteira INTEIRA por pedido e por devolução; o recorte de
   // período continua sendo feito pelas devoluções.
-  const custoPorPedido = {}, custoPorDevolucao = {}, usadoPedido = {};
+  const custoPorPedido = {}, custoPorDevolucao = {};
   for (const x of Object.values(car)) {
     const t1 = String(x.tipo || '').toUpperCase();
     // Codex PR#76 (2ª rodada): como o índice passou a varrer a carteira INTEIRA (o débito da
@@ -329,6 +334,36 @@ function resumoShopee(de, ate) {
   const porStatus = {};
   const maiores = [];
   let devCustoReal = 0;
+  (function alocarCusto() {
+    const porPedidoTodas = {};
+    for (const d0 of Object.values(dev)) {
+      const sn0 = String(d0.order_sn || ''); if (!sn0) continue;
+      (porPedidoTodas[sn0] = porPedidoTodas[sn0] || []).push(d0);
+    }
+    for (const sn0 of Object.keys(porPedidoTodas)) {
+      const lista0 = porPedidoTodas[sn0];
+      const semTag = custoPorPedido[sn0] || 0;              // débitos do pedido sem refund_sn
+      const comTag = lista0.filter(d0 => custoPorDevolucao[String(d0.return_sn || '')] != null);
+      for (const d0 of lista0) {
+        const r0 = String(d0.return_sn || '');
+        custoDaDevolucao[r0] = custoPorDevolucao[r0] || 0;
+      }
+      if (!semTag) continue;
+      if (lista0.length === 1) {                            // devolução única: leva tudo do pedido
+        const r0 = String(lista0[0].return_sn || '');
+        custoDaDevolucao[r0] = Math.round(((custoDaDevolucao[r0] || 0) + semTag) * 100) / 100;
+      } else {
+        // várias devoluções e débito sem identificação: rateia entre as que NÃO têm débito próprio
+        const alvos = lista0.filter(d0 => !(custoPorDevolucao[String(d0.return_sn || '')] > 0));
+        const destino = alvos.length ? alvos : lista0;
+        const parte = Math.round((semTag / destino.length) * 100) / 100;
+        for (const d0 of destino) {
+          const r0 = String(d0.return_sn || '');
+          custoDaDevolucao[r0] = Math.round(((custoDaDevolucao[r0] || 0) + parte) * 100) / 100;
+        }
+      }
+    }
+  })();
   for (const d of Object.values(dev)) {
     const q = Number(d.criado_em || 0);
     if (!(q >= ini && q <= fim)) continue;
@@ -346,13 +381,7 @@ function resumoShopee(de, ate) {
     maiores.push({ valor: _num(d.refund_amount), custo_real: 0, sku: ((d.itens || [])[0] || {}).sku || null,
       motivo: d.motivo || null, texto: (d.motivo_texto || '').slice(0, 180) || null,
       status: st9 || null, order_sn: d.order_sn || null, parcial: !!d.devolucao_parcial });
-    const rsn9 = String(d.return_sn || '').trim();
-    let custoReal = 0;
-    if (rsn9 && custoPorDevolucao[rsn9] != null) custoReal = custoPorDevolucao[rsn9];
-    else {
-      const sn9 = String(d.order_sn || '');
-      if (sn9 && !usadoPedido[sn9]) { custoReal = custoPorPedido[sn9] || 0; usadoPedido[sn9] = true; }
-    }
+    const custoReal = custoDaDevolucao[String(d.return_sn || '')] || 0;
     devCustoReal = Math.round((devCustoReal + custoReal) * 100) / 100;
     // o item de `maiores` foi empilhado logo acima, antes de sabermos o custo: preenche agora
     if (maiores.length) maiores[maiores.length - 1].custo_real = custoReal;
