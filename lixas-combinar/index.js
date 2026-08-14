@@ -287,7 +287,18 @@ async function checarMlAntesDeEscrever(orderId, lcp) {
       campos.status = 'cancelada_quarentena';
       delete campos.venda_cancelada_em;
     }
-    await lcp.atualizarVenda(orderId, campos, { forcar: true });
+    // Respeita lease ativo: se um worker (automatico/recuperacao/escada) ja reservou e
+    // esta dentro do Bling, gravar o cancelamento aqui faria a escrita terminal DELE
+    // ser rejeitada — a venda ficaria cancelada, com NF emitida e sem o marcador nem o
+    // alerta. Zero linhas = adia; o cron reconfirma depois.
+    const _lim = new Date(Date.now() - (Number(process.env.LIXAS_NF_LEASE_MIN) || 10) * 60 * 1000).toISOString();
+    const _updL = await lcp.atualizarVenda(orderId, campos,
+      { forcar: true, somenteSe: `or=(nf_emitindo_em.is.null,nf_emitindo_em.lt.${_lim})` });
+    if (_updL && _updL.ok && Array.isArray(_updL.data) && _updL.data.length === 0) {
+      console.warn(`[lixas-combinar] order ${orderId} cancelada no ML, mas ha emissao em curso — registro adiado`);
+      return { ok: false, http: 409, corpo: { ok: false, erro: 'venda_cancelada_emissao_em_curso',
+        mensagem: 'Esta venda foi CANCELADA no Mercado Livre, mas ha uma emissao em curso agora. NADA foi alterado por aqui. Aguarde um instante e recarregue — NAO DESPACHE.' } };
+    }
     return { ok: false, http: 409, corpo: { ok: false, erro: 'venda_cancelada',
       mensagem: temEtiq
         ? 'Esta venda foi CANCELADA no Mercado Livre e JA TEM ETIQUETA. NADA foi alterado no Bling. NAO DESPACHE — confira estorno/devolucao.'
@@ -1470,6 +1481,11 @@ function routes(readBody) {
 
         // RESERVA ANTES DE MONTAR: a etapa 1 abaixo pode reescrever os itens no Bling.
         // Reservar so antes do gerarNFe protegia a nota, mas nao o pedido.
+        // Mesma checagem ao vivo dos outros caminhos: os marcadores em cache podem ter
+        // ate 1h, e este caminho monta o pedido antes de emitir.
+        const _chkR = await checarMlAntesDeEscrever(orderId, lcp);
+        if (!_chkR.ok) { json(res, _chkR.http, _chkR.corpo); return true; }
+
         const reservaR = await lcp.reservarEmissao(orderId);
         if (!reservaR.ok) {
           const zeroR = reservaR.motivo === 'estado_mudou';
@@ -1480,115 +1496,126 @@ function routes(readBody) {
           return true;
         }
 
-        let pedidoBlingId = v.bling_pedido_id;
-
-        // ETAPA 1 — montar, se ainda nao foi montado
-        if (!v.bling_editado_em) {
-          let graosEscolhidos;
-          if (v.ia_pedido_estruturado) {
-            try { graosEscolhidos = JSON.parse(v.ia_pedido_estruturado); }
-            catch (_) { await lcp.liberarEmissao(orderId, reservaR && reservaR.token); json(res, 400, { ok: false, etapa: 'montar', erro: 'ia_pedido_estruturado invalido — trate manual' }); return true; }
-          }
-          if (!Array.isArray(graosEscolhidos) || graosEscolhidos.length === 0) {
-            await lcp.liberarEmissao(orderId, reservaR && reservaR.token);
-            json(res, 400, { ok: false, etapa: 'montar', erro: 'sem graos estruturados — trate manual' });
-            return true;
-          }
-          const lixasService = require('./lixasService');
-          const graosResult = await lixasService.getGraosDisponiveisPorSkuACombinar(v.sku_a_combinar);
-          if (!graosResult.ok) {
-            await lcp.liberarEmissao(orderId, reservaR && reservaR.token);
-            json(res, 500, { ok: false, etapa: 'montar', erro: 'erro_consultar_graos_bling', detalhe: graosResult.erro });
-            return true;
-          }
-          let dataVenda = null;
-          if (v.data_venda) dataVenda = String(v.data_venda).split('T')[0];
-          const idBuscaBling = v.pack_id || orderId;
-
-          const edit = await bp.editarPedidoComGraos({
-            orderId: idBuscaBling,
-            graosEscolhidos,
-            graosDisponiveis: graosResult.graos,
-            unidadesPorPacote: graosResult.unidades_por_pacote,
-            descricaoBase: graosResult.descricao,
-            dataVenda,
-            dryRun: false
-          });
-          if (!edit.ok) {
-            await lcp.atualizarVenda(orderId, {
-              status: 'precisa_atencao_humano',
-              bling_erro: `recuperar montar ${edit.etapa || ''}: ${edit.erro || ''}`.slice(0, 500)
-            });
-            await lcp.liberarEmissao(orderId, reservaR && reservaR.token);
-            json(res, 500, { ok: false, etapa: 'montar', ...edit });
-            return true;
-          }
-          pedidoBlingId = edit.pedidoId;
-          await lcp.atualizarVenda(orderId, {
-            bling_pedido_id: String(edit.pedidoId),
-            bling_editado_em: new Date().toISOString(),
-            bling_erro: null
-          });
-        }
-
-        // ETAPA 2 — emitir a NF
-        if (!pedidoBlingId) {
-          await lcp.liberarEmissao(orderId, reservaR && reservaR.token);
-          json(res, 400, { ok: false, etapa: 'nf', erro: 'sem bling_pedido_id apos montar' });
-          return true;
-        }
-        let nf;
+        // try/finally cobrindo TUDO apos a reserva: a consulta de estoque e o
+        // editarPedidoComGraos podem lancar, e ate agora so as saidas explicitas
+        // liberavam — excecao deixava o lease preso por ate 10 min.
+        let _liberado = false;
         try {
-          nf = await bp.gerarNFe(pedidoBlingId);
-        } catch (eNf) {
-          await lcp.liberarEmissao(orderId, reservaR && reservaR.token);
-          throw eNf;
-        }
-        if (!nf.ok) {
-          const campos = (nf.detalhe && nf.detalhe.error && nf.detalhe.error.fields) || [];
-          const jaTemNF = Array.isArray(campos) && campos.some(f =>
-            Number(f.code) === 74 || /nota fiscal referenciada/i.test(String(f.msg || ''))
-          );
-          if (jaTemNF) {
-            const p74r = await lcp.atualizarVenda(orderId, {
-              nf_emitida_em: new Date().toISOString(), nf_erro: null,
-              nf_emitindo_em: null, status: 'processado'
-            });
-            if (!p74r.ok || (Array.isArray(p74r.data) && p74r.data.length !== 1)) {
-              console.error(`[lixas-combinar recuperar-nf] order ${orderId} 🚨 code 74 mas NAO gravei no banco`);
-              json(res, 207, { ok: false, erro: 'nf_existente_sem_registro',
-                mensagem: 'Esta venda JA POSSUI NF no Bling, mas nao consegui registrar isso no painel. Use o Verificar ML pra reconciliar.' });
+          let pedidoBlingId = v.bling_pedido_id;
+
+          // ETAPA 1 — montar, se ainda nao foi montado
+          if (!v.bling_editado_em) {
+            let graosEscolhidos;
+            if (v.ia_pedido_estruturado) {
+              try { graosEscolhidos = JSON.parse(v.ia_pedido_estruturado); }
+              catch (_) { await lcp.liberarEmissao(orderId, reservaR && reservaR.token); json(res, 400, { ok: false, etapa: 'montar', erro: 'ia_pedido_estruturado invalido — trate manual' }); return true; }
+            }
+            if (!Array.isArray(graosEscolhidos) || graosEscolhidos.length === 0) {
+              await lcp.liberarEmissao(orderId, reservaR && reservaR.token);
+              json(res, 400, { ok: false, etapa: 'montar', erro: 'sem graos estruturados — trate manual' });
               return true;
             }
-            const confR1 = await enviarConfirmacaoPedido(v, orderId);
-            json(res, 200, { ok: true, jaEmitida: true, mensagem: 'Bling ja tinha NF referenciada — registrado como emitida.', confirmacao_cliente: confR1 });
+            const lixasService = require('./lixasService');
+            const graosResult = await lixasService.getGraosDisponiveisPorSkuACombinar(v.sku_a_combinar);
+            if (!graosResult.ok) {
+              await lcp.liberarEmissao(orderId, reservaR && reservaR.token);
+              json(res, 500, { ok: false, etapa: 'montar', erro: 'erro_consultar_graos_bling', detalhe: graosResult.erro });
+              return true;
+            }
+            let dataVenda = null;
+            if (v.data_venda) dataVenda = String(v.data_venda).split('T')[0];
+            const idBuscaBling = v.pack_id || orderId;
+
+            const edit = await bp.editarPedidoComGraos({
+              orderId: idBuscaBling,
+              graosEscolhidos,
+              graosDisponiveis: graosResult.graos,
+              unidadesPorPacote: graosResult.unidades_por_pacote,
+              descricaoBase: graosResult.descricao,
+              dataVenda,
+              dryRun: false
+            });
+            if (!edit.ok) {
+              await lcp.atualizarVenda(orderId, {
+                status: 'precisa_atencao_humano',
+                bling_erro: `recuperar montar ${edit.etapa || ''}: ${edit.erro || ''}`.slice(0, 500)
+              });
+              await lcp.liberarEmissao(orderId, reservaR && reservaR.token);
+              json(res, 500, { ok: false, etapa: 'montar', ...edit });
+              return true;
+            }
+            pedidoBlingId = edit.pedidoId;
+            await lcp.atualizarVenda(orderId, {
+              bling_pedido_id: String(edit.pedidoId),
+              bling_editado_em: new Date().toISOString(),
+              bling_erro: null
+            });
+          }
+
+          // ETAPA 2 — emitir a NF
+          if (!pedidoBlingId) {
+            await lcp.liberarEmissao(orderId, reservaR && reservaR.token);
+            json(res, 400, { ok: false, etapa: 'nf', erro: 'sem bling_pedido_id apos montar' });
             return true;
           }
-          await lcp.atualizarVenda(orderId, {
-            status: 'precisa_atencao_humano',
-            nf_emitindo_em: null,
-            nf_erro: `recuperar nf ${nf.status || ''}: ${nf.erro || JSON.stringify(nf.detalhe || {}).slice(0,200)}`.slice(0, 500)
-          });
-          json(res, 200, { ok: false, etapa: 'nf', ...nf });
-          return true;
-        }
+          let nf;
+          try {
+            nf = await bp.gerarNFe(pedidoBlingId);
+          } catch (eNf) {
+            await lcp.liberarEmissao(orderId, reservaR && reservaR.token);
+            throw eNf;
+          }
+          if (!nf.ok) {
+            const campos = (nf.detalhe && nf.detalhe.error && nf.detalhe.error.fields) || [];
+            const jaTemNF = Array.isArray(campos) && campos.some(f =>
+              Number(f.code) === 74 || /nota fiscal referenciada/i.test(String(f.msg || ''))
+            );
+            if (jaTemNF) {
+              const p74r = await lcp.atualizarVenda(orderId, {
+                nf_emitida_em: new Date().toISOString(), nf_erro: null,
+                nf_emitindo_em: null, status: 'processado'
+              });
+              if (!p74r.ok || (Array.isArray(p74r.data) && p74r.data.length !== 1)) {
+                console.error(`[lixas-combinar recuperar-nf] order ${orderId} 🚨 code 74 mas NAO gravei no banco`);
+                json(res, 207, { ok: false, erro: 'nf_existente_sem_registro',
+                  mensagem: 'Esta venda JA POSSUI NF no Bling, mas nao consegui registrar isso no painel. Use o Verificar ML pra reconciliar.' });
+                return true;
+              }
+              _liberado = true;
+            const confR1 = await enviarConfirmacaoPedido(v, orderId);
+              json(res, 200, { ok: true, jaEmitida: true, mensagem: 'Bling ja tinha NF referenciada — registrado como emitida.', confirmacao_cliente: confR1 });
+              return true;
+            }
+            await lcp.atualizarVenda(orderId, {
+              status: 'precisa_atencao_humano',
+              nf_emitindo_em: null,
+              nf_erro: `recuperar nf ${nf.status || ''}: ${nf.erro || JSON.stringify(nf.detalhe || {}).slice(0,200)}`.slice(0, 500)
+            });
+            json(res, 200, { ok: false, etapa: 'nf', ...nf });
+            return true;
+          }
 
-        // Sucesso total
-        const persistR = await lcp.atualizarVenda(orderId, {
-          nf_emitida_em: new Date().toISOString(),
-          nf_id: nf.nfeId, nf_numero: nf.numero, nf_serie: nf.serie,
-          nf_chave: nf.chave || null, nf_erro: null,
-          nf_emitindo_em: null, nf_emitindo_por: null,   // reserva liberada
-          status: 'processado'
-        });
-        if (!persistR.ok || (Array.isArray(persistR.data) && persistR.data.length !== 1)) {
-          console.error(`[lixas-combinar recuperar-nf] order ${orderId} 🚨 NF ${nf.numero || '?'} EMITIDA mas NAO gravada`);
-          json(res, 207, { ok: false, erro: 'nf_emitida_sem_registro', nfNumero: nf.numero, nfSerie: nf.serie,
-            mensagem: `A NF ${nf.numero || '?'} FOI EMITIDA no Bling, mas nao consegui registrar no painel. NAO emita de novo — use o Verificar ML pra reconciliar.` });
-          return true;
+          // Sucesso total
+          const persistR = await lcp.atualizarVenda(orderId, {
+            nf_emitida_em: new Date().toISOString(),
+            nf_id: nf.nfeId, nf_numero: nf.numero, nf_serie: nf.serie,
+            nf_chave: nf.chave || null, nf_erro: null,
+            nf_emitindo_em: null, nf_emitindo_por: null,   // reserva liberada
+            status: 'processado'
+          });
+          if (!persistR.ok || (Array.isArray(persistR.data) && persistR.data.length !== 1)) {
+            console.error(`[lixas-combinar recuperar-nf] order ${orderId} 🚨 NF ${nf.numero || '?'} EMITIDA mas NAO gravada`);
+            json(res, 207, { ok: false, erro: 'nf_emitida_sem_registro', nfNumero: nf.numero, nfSerie: nf.serie,
+              mensagem: `A NF ${nf.numero || '?'} FOI EMITIDA no Bling, mas nao consegui registrar no painel. NAO emita de novo — use o Verificar ML pra reconciliar.` });
+            return true;
+          }
+          _liberado = true;
+          const confR2 = await enviarConfirmacaoPedido(v, orderId);
+          json(res, 200, { ok: true, recuperado: true, pedidoId: pedidoBlingId, nfNumero: nf.numero, nfSerie: nf.serie, confirmacao_cliente: confR2 });
+
+        } finally {
+          if (!_liberado) await lcp.liberarEmissao(orderId, reservaR && reservaR.token);
         }
-        const confR2 = await enviarConfirmacaoPedido(v, orderId);
-        json(res, 200, { ok: true, recuperado: true, pedidoId: pedidoBlingId, nfNumero: nf.numero, nfSerie: nf.serie, confirmacao_cliente: confR2 });
       } catch (e) {
         console.error('[lixas-combinar recuperar-nf]', e);
         json(res, 500, { ok: false, erro: e.message });
