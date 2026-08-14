@@ -1283,6 +1283,12 @@ function routes(readBody) {
           }
         }
 
+        // RENOVA a posse imediatamente antes da escrita irreversivel.
+        if (_resEd && !(await lcp.renovarEmissao(orderId, _resEd.token))) {
+          json(res, 409, { ok: false, erro: 'lease_perdido',
+            mensagem: 'Outro processo assumiu esta venda enquanto eu preparava a montagem. NADA foi alterado. Recarregue o painel.' });
+          return true;
+        }
         let r;
         try {
           r = await bp.editarPedidoComGraos({
@@ -1437,6 +1443,11 @@ function routes(readBody) {
         // Excecao do gerarNFe (rede rejeitada, etc) pulava direto pro catch externo e
         // deixava o lease preso ate vencer, bloqueando cancelamento e novas tentativas
         // sem ninguem em curso. Libera aqui e repropaga.
+        if (!(await lcp.renovarEmissao(orderId, reserva.token))) {
+          json(res, 409, { ok: false, erro: 'lease_perdido',
+            mensagem: 'Outro processo assumiu esta venda. NENHUMA nota foi emitida. Recarregue o painel.' });
+          return true;
+        }
         let r;
         try {
           r = await bp.gerarNFe(v.bling_pedido_id);
@@ -1745,6 +1756,13 @@ function routes(readBody) {
             }
           }
 
+          // RENOVA a posse imediatamente antes da escrita irreversivel.
+          if (!(await lcp.renovarEmissao(orderId, reservaR && reservaR.token))) {
+            _liberado = true;
+            json(res, 409, { ok: false, erro: 'lease_perdido', etapa: 'montar',
+              mensagem: 'Outro processo assumiu esta venda enquanto eu preparava a montagem. NADA foi montado nem emitido.' });
+            return true;
+          }
           const edit = await bp.editarPedidoComGraos({
               orderId: idBuscaBling,
               graosEscolhidos,
@@ -1775,6 +1793,12 @@ function routes(readBody) {
           if (!pedidoBlingId) {
             await lcp.liberarEmissao(orderId, reservaR && reservaR.token);
             json(res, 400, { ok: false, etapa: 'nf', erro: 'sem bling_pedido_id apos montar' });
+            return true;
+          }
+          if (!(await lcp.renovarEmissao(orderId, reservaR && reservaR.token))) {
+            _liberado = true;
+            json(res, 409, { ok: false, erro: 'lease_perdido', etapa: 'nf',
+              mensagem: 'Outro processo assumiu esta venda. NENHUMA nota foi emitida.' });
             return true;
           }
           let nf;
