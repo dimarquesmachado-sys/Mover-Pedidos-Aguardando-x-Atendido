@@ -1453,6 +1453,10 @@ async function _processarAutoEmissaoInner({ venda, iaResult, graosResult, lcp })
   // NF ja saiu (irreversivel). Se nao gravou, NAO reportar sucesso: o wrapper apagaria
   // a entrada da fila, o painel mostraria a venda inacabada e o lease ficaria preso.
   if (!_persist.ok || (Array.isArray(_persist.data) && _persist.data.length !== 1)) {
+    // NF ja emitida e nada em curso: segurar o lease bloquearia cancelamento e
+    // reconciliacao por 10 min, e o proprio retry seguinte esbarraria nessa reserva
+    // (estado_mudou) e sairia da fila.
+    await lcp.liberarEmissao(orderId, _res.token);
     console.error(`[auto-emissao] order ${orderId} 🚨 NF ${nf.numero || '?'} EMITIDA mas NAO gravada — pedindo reconciliacao`);
     return { falha: true, retry: true, motivo: 'nf_emitida_sem_registro',
              nfNumero: nf.numero, pedidoId: edit.pedidoId };
