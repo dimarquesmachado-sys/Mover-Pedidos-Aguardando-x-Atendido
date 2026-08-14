@@ -1951,6 +1951,28 @@ function routes(readBody) {
           const item = r && r.ok && r.data && r.data.data && r.data.data[0];
           const linha = { formato: fmt, http_ok: !!(r && r.ok), tem_item: !!item, tem_link: !!(item && item.link) };
           if (item) { linha.campos = Object.keys(item).slice(0, 12); linha.link_comeca_com = String(item.link || '').slice(0, 60) || null; }
+          // 14/08 — o Bling DEVOLVE link nos dois formatos (medido no pedido 26599886380 da
+          // Amazon), então a etiqueta não chegar ao checkout é problema no DOWNLOAD, não na
+          // API. Aqui o arquivo é realmente baixado pra ver o que vem: status, content-type,
+          // tamanho e os primeiros bytes. `baixarEtiquetaPDF` só aceita arquivo começando em
+          // %PDF — se a Amazon servir PNG/ZIP/outro, ele devolve null em silêncio.
+          if (item && item.link) {
+            try {
+              const rf = await fetch(item.link);
+              const buf = Buffer.from(await rf.arrayBuffer());
+              linha.download = {
+                http: rf.status,
+                content_type: (rf.headers && rf.headers.get && rf.headers.get('content-type')) || null,
+                bytes: buf.length,
+                comeca_com: buf.slice(0, 8).toString('latin1').replace(/[^\x20-\x7e]/g, '.'),
+                hex: buf.slice(0, 8).toString('hex'),
+                eh_pdf: buf.slice(0, 4).toString('latin1') === '%PDF',
+                eh_zpl: buf.slice(0, 400).toString('latin1').indexOf('^XA') >= 0,
+                eh_png: buf.slice(1, 4).toString('latin1') === 'PNG',
+                eh_zip: buf.slice(0, 2).toString('latin1') === 'PK'
+              };
+            } catch (e) { linha.download = { erro: String(e.message || e).slice(0, 160) }; }
+          }
           if (r && !r.ok) linha.erro = String((r.data && (r.data.error || r.data.message)) || ('HTTP ' + (r.status || '?'))).slice(0, 200);
           out.formatos.push(linha);
         } catch (e) { out.formatos.push({ formato: fmt, erro: String(e.message || e).slice(0, 160) }); }
