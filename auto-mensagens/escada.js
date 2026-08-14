@@ -239,6 +239,30 @@ async function rotinaEscadaIndisponivel(opts = {}) {
       });
 
       // 7. EMITE a NF (idempotente: code 74 = ja tem NF -> trata como emitida)
+      // Antes: status ML AO VIVO + reserva. Os campos do banco lidos no inicio podem
+      // estar ate 1h velhos (a varredura de cancelamento e horaria), e este emissor
+      // nao passa pelo processarAutoEmissao — precisa das duas guardas por conta.
+      try {
+        const stEsc = await ml.getOrderStatusResumo(String(orderId));
+        if (stEsc && stEsc.ok && stEsc.cancelada) {
+          await lcp.atualizarVenda(orderId, {
+            status: 'venda_cancelada', ml_status: stEsc.status,
+            ml_status_atualizado_em: new Date().toISOString(),
+            venda_cancelada_em: new Date().toISOString()
+          });
+          console.warn(`[escada] order ${orderId} CANCELADA no ML — abortando antes de emitir`);
+          stats.erros++; stats.lista.push({ order_id: orderId, acao: 'erro', motivo: 'cancelada_no_ml' });
+          continue;
+        }
+      } catch (e) {
+        console.warn(`[escada] order ${orderId} nao consegui checar status ML antes de emitir: ${e.message}`);
+      }
+      const resEsc = await lcp.reservarEmissao(orderId);
+      if (!resEsc.ok) {
+        console.warn(`[escada] order ${orderId} nao reservei pra emitir (${resEsc.motivo}) — nao emito agora`);
+        stats.erros++; stats.lista.push({ order_id: orderId, acao: 'erro', motivo: `reserva_${resEsc.motivo}` });
+        continue;
+      }
       const nf = await bp.gerarNFe(edit.pedidoId);
       let nfOk = nf.ok;
       if (!nf.ok) {
@@ -246,12 +270,13 @@ async function rotinaEscadaIndisponivel(opts = {}) {
         if (Array.isArray(campos) && campos.some(f => Number(f.code) === 74 || /nota fiscal referenciada/i.test(String(f.msg || '')))) nfOk = true;
       }
       if (!nfOk) {
-        await lcp.atualizarVenda(orderId, { status: 'precisa_atencao_humano', nf_erro: `${nf.status || ''}: ${nf.erro || JSON.stringify(nf.detalhe || {}).slice(0, 200)}`.slice(0, 500) });
+        await lcp.atualizarVenda(orderId, { status: 'precisa_atencao_humano', nf_emitindo_em: null, nf_erro: `${nf.status || ''}: ${nf.erro || JSON.stringify(nf.detalhe || {}).slice(0, 200)}`.slice(0, 500) });
         stats.erros++; stats.lista.push({ order_id: orderId, acao: 'erro', motivo: 'nf_falhou', pedidoId: edit.pedidoId }); continue;
       }
       await lcp.atualizarVenda(orderId, {
         nf_emitida_em: new Date().toISOString(), nf_id: nf.nfeId || null, nf_numero: nf.numero || null,
-        nf_serie: nf.serie || null, nf_chave: nf.chave || null, nf_erro: null, status: 'processado'
+        nf_serie: nf.serie || null, nf_chave: nf.chave || null, nf_erro: null,
+        nf_emitindo_em: null, status: 'processado'
       });
 
       // 8. AVISA a cliente da troca (best-effort; NF ja emitida, nao reverte se falhar)
