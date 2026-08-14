@@ -225,6 +225,13 @@ async function coletarDevolucoes(dias, pedirAoSync) {
           status: d.status || null, motivo: d.reason || null, motivo_texto: d.text_reason || null,
           criado_em: d.create_time || null, atualizado_em: d.update_time || null,
           precisa_logistica: !!d.needs_logistics, tipo: d.return_refund_type || null,
+          // 14/08 — campos novos anunciados pela Shopee (vigentes a partir de 17/08/2026):
+          // `is_partial_quantity_return` = o comprador devolveu só PARTE das unidades (comprou 3,
+          // devolveu 1) · `is_refund_amount_adjusted` = o reembolso saiu MENOR que o máximo
+          // reembolsável. Sem isso, toda devolução parecia total — e o card de devoluções por
+          // SKU superestimava a quantidade que realmente voltou.
+          devolucao_parcial: d.is_partial_quantity_return === true,
+          reembolso_ajustado: d.is_refund_amount_adjusted === true,
           itens: (d.item || []).map(it => ({
             sku: it.variation_sku || it.item_sku || null, nome: it.name || null,
             qtd: _num(it.amount), preco: _num(it.item_price), devolvido: _num(it.refund_amount)
@@ -288,11 +295,13 @@ function resumoShopee(de, ate) {
   const dev = readJson(ARQ_DEV(), { devolucoes: {} }).devolucoes || {};
   const car = readJson(ARQ_CAR(), { transacoes: {} }).transacoes || {};
   const porSku = {}, porMotivo = {};
-  let devTotal = 0, devQtd = 0;
+  let devTotal = 0, devQtd = 0, devParciais = 0, devAjustadas = 0;
   for (const d of Object.values(dev)) {
     const q = Number(d.criado_em || 0);
     if (!(q >= ini && q <= fim)) continue;
     devQtd++; devTotal += _num(d.refund_amount);
+    if (d.devolucao_parcial) devParciais++;
+    if (d.reembolso_ajustado) devAjustadas++;
     porMotivo[d.motivo || 'sem motivo'] = (porMotivo[d.motivo || 'sem motivo'] || 0) + 1;
     for (const it of (d.itens || [])) {
       const s = it.sku || 'sem sku';
@@ -333,6 +342,8 @@ function resumoShopee(de, ate) {
     ads,
     devolucoes: {
       quantidade: devQtd, valor_devolvido: Math.round(devTotal * 100) / 100,
+      // a partir de 17/08 a Shopee informa isto; antes disso vem zero por falta do campo
+      quantidade_parcial: devParciais, quantidade_com_reembolso_ajustado: devAjustadas,
       por_motivo: porMotivo,
       por_sku: Object.values(porSku).sort((a, b) => b.valor - a.valor).slice(0, 50)
     },
