@@ -254,8 +254,14 @@ async function rotinaEscadaIndisponivel(opts = {}) {
         // 'cancelled' COM evidencia de impressao conta como etiquetada — mesmo criterio
         // do _resumoDoShipment. Sem isso, um envio cancelado apos a etiqueta impressa
         // gravaria venda_cancelada_em sem alerta, e o marcador impede a reconciliacao.
-        const _jaImprimiu = !!(_sr && (_sr.date_first_printed || _sr.date_printed
-                              || _subEnv === 'printed' || _subEnv === 'ready_to_print'));
+        // As marcas de impressao NAO existem no shipment_resumo (ele so copia status,
+        // substatus, mode, datas de criacao/handling e lead_time) — ficam so no
+        // shipment_bruto. Ler do resumo fazia esta checagem ser sempre falsa.
+        const _sb = (infoEnvio && infoEnvio.shipment_bruto) || {};
+        const _hist = _sb.status_history || {};
+        const _jaImprimiu = !!(_sb.date_first_printed || _sb.date_printed
+                              || _hist.date_first_printed || _hist.date_shipped
+                              || _subEnv === 'printed' || _subEnv === 'ready_to_print');
         const _temEtiq = ['shipped', 'delivered', 'not_delivered'].includes(_stEnv)
                       || (_stEnv === 'ready_to_ship' && !SEM_ETIQ.includes(_subEnv))
                       || (_stEnv === 'cancelled' && _jaImprimiu);
