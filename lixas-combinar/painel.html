@@ -977,6 +977,17 @@ async function montarSubstituirAvisar(orderId) {
     });
     if (r2.status === 401) { logout(); return; }
     const d2 = await r2.json();
+
+    // emitida:true = a NF SAIU, so a gravacao falhou. Sem isto o operador leria que a
+    // nota nao saiu e mandaria emitir de novo — segunda NF de algo irreversivel.
+    if (d2.emitida) {
+      mostrarModal('⚠️ NF EMITIDA — mas não registrada',
+        `A NF ${d2.nfNumero || '?'}${d2.nfSerie ? '/' + d2.nfSerie : ''} FOI EMITIDA no Bling.\n\n` +
+        'Só não consegui registrar isso no painel.\n\n' +
+        '⚠️ NÃO emita de novo. Confira no Bling e use o 🔄 Verificar ML para reconciliar.', true);
+      await recarregar();
+      return;
+    }
     if (!d2.ok) {
       mostrarModal('⚠️ Montou, mas NF falhou', `Itens montados no pedido ${d1.pedidoId}, mas a NF NÃO saiu. Use "📄 Emitir NF" pra tentar de novo.\n\n${JSON.stringify(d2.detalhe || d2, null, 2)}`, true);
       await recarregar();
