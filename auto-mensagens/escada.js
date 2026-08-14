@@ -297,13 +297,17 @@ async function rotinaEscadaIndisponivel(opts = {}) {
         }
 
         if (_temEtiq) {
-          await lcp.atualizarVenda(orderId, {
+          const _uE = await lcp.atualizarVenda(orderId, {
             ml_etiqueta_em: new Date().toISOString(),
             ml_shipment_status: (_sr && _sr.status) || null,
             ml_shipment_substatus: (_sr && _sr.substatus) || null,
             nf_emitindo_em: null, nf_emitindo_por: null
           }, lcp.fecharLease(resEsc.token));
-          _libEsc = true;
+          // So declara o lease fechado se a escrita REALMENTE aconteceu: senao o
+          // finally pula a liberacao e a reserva fica ativa por ate 10 min sem
+          // ninguem trabalhando — com a etiqueta detectada nao registrada.
+          _libEsc = !!(_uE && _uE.ok && (!Array.isArray(_uE.data) || _uE.data.length === 1));
+          if (!_libEsc) console.error(`[escada] order ${orderId} 🚨 etiqueta detectada mas NAO gravei — libero o lease`);
           console.warn(`[escada] order ${orderId} etiqueta JA gerada (${(_sr && _sr.status) || '?'}) — nao edito nem emito`);
           stats.erros++; stats.lista.push({ order_id: orderId, acao: 'erro', motivo: 'etiqueta_ja_gerada' });
           continue;
