@@ -1467,7 +1467,7 @@ function routes(readBody) {
               // preserva a reserva de um worker mais novo, se houver.
               await lcp.liberarEmissao(orderId, reserva.token);
               console.error(`[lixas-combinar emitir-nf] order ${orderId} 🚨 code 74 (NF ja existe) mas NAO gravei no banco`);
-              json(res, 207, { ok: false, erro: 'nf_existente_sem_registro',
+              json(res, 207, { ok: false, emitida: true, erro: 'nf_existente_sem_registro',
                 mensagem: 'Esta venda JA POSSUI NF no Bling, mas nao consegui registrar isso no painel. Use o Verificar ML pra reconciliar.' });
               return true;
             }
@@ -1512,7 +1512,7 @@ function routes(readBody) {
           // emitida sem registro — o pior momento pra ficar bloqueado.
           await lcp.liberarEmissao(orderId, reserva.token);
           console.error(`[lixas-combinar emitir-nf] order ${orderId} 🚨 NF ${r.numero || '?'} EMITIDA mas NAO gravada no banco`);
-          json(res, 207, { ok: false, erro: 'nf_emitida_sem_registro', nfNumero: r.numero, nfSerie: r.serie,
+          json(res, 207, { ok: false, emitida: true, erro: 'nf_emitida_sem_registro', nfNumero: r.numero, nfSerie: r.serie,
             mensagem: `A NF ${r.numero || '?'} FOI EMITIDA no Bling, mas nao consegui registrar isso no painel. NAO emita de novo — confira no Bling e use o Verificar ML pra reconciliar.` });
           return true;
         }
@@ -1778,7 +1778,7 @@ function routes(readBody) {
                 await lcp.liberarEmissao(orderId, reservaR && reservaR.token);
                 _liberado = true;
                 console.error(`[lixas-combinar recuperar-nf] order ${orderId} 🚨 code 74 mas NAO gravei no banco`);
-                json(res, 207, { ok: false, erro: 'nf_existente_sem_registro',
+                json(res, 207, { ok: false, emitida: true, erro: 'nf_existente_sem_registro',
                   mensagem: 'Esta venda JA POSSUI NF no Bling, mas nao consegui registrar isso no painel. Use o Verificar ML pra reconciliar.' });
                 return true;
               }
@@ -1810,7 +1810,7 @@ function routes(readBody) {
             await lcp.liberarEmissao(orderId, reservaR && reservaR.token);
             _liberado = true;
             console.error(`[lixas-combinar recuperar-nf] order ${orderId} 🚨 NF ${nf.numero || '?'} EMITIDA mas NAO gravada`);
-            json(res, 207, { ok: false, erro: 'nf_emitida_sem_registro', nfNumero: nf.numero, nfSerie: nf.serie,
+            json(res, 207, { ok: false, emitida: true, erro: 'nf_emitida_sem_registro', nfNumero: nf.numero, nfSerie: nf.serie,
               mensagem: `A NF ${nf.numero || '?'} FOI EMITIDA no Bling, mas nao consegui registrar no painel. NAO emita de novo — use o Verificar ML pra reconciliar.` });
             return true;
           }
