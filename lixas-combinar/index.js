@@ -1655,7 +1655,12 @@ function routes(readBody) {
               }
             }
             campos.nf_emitindo_em = null; campos.nf_emitindo_por = null;
-            const _uRc = await lcp.atualizarVenda(orderId, campos, { forcar: true });
+            // fecharLease(token) junto com o forcar: se o lease venceu e outro worker
+            // ja reservou, este write nao pode limpar a reserva dele nem gravar
+            // cancelamento enquanto ele esta dentro do Bling.
+            const _fl = lcp.fecharLease(reservaR && reservaR.token);
+            const _uRc = await lcp.atualizarVenda(orderId, campos,
+              Object.assign({ forcar: true }, _fl || {}));
             // So declara o lease fechado com 1 linha confirmada: senao a linha mantem o
             // status acionavel E a reserva, o finally pula a limpeza, e o cancelamento
             // ou etiqueta detectados nao ficam registrados em lugar nenhum.
