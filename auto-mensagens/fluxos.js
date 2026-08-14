@@ -1439,6 +1439,18 @@ async function _processarAutoEmissaoInner({ venda, iaResult, graosResult, lcp })
   // o cancelamento com o gerarNFe ja em curso — as reservas das rotas manuais nao
   // cobriam este emissor.
   // Emite a NF (NF transmitida pra SEFAZ — irreversivel)
+  // RECHECA AO VIVO entre a edicao e a emissao: o editarPedidoComGraos pode demorar, e
+  // o renovarEmissao valida propriedade/predicados do BANCO — nao o estado no ML, cuja
+  // gravacao de cancelamento fica adiada justamente por causa do nosso lease.
+  const _rcNf = await lcp.recheckAposReserva(orderId, _res.token);
+  if (!_rcNf.ok) {
+    console.warn(`[auto-emissao] order ${orderId} recheca pre-NF barrou (${_rcNf.motivo}) — pedido ja editado, NAO emito`);
+    if (_rcNf.motivo === 'estado_indeterminado' || _rcNf.motivo === 'estado_nao_gravado') {
+      await lcp.liberarEmissao(orderId, _res.token);
+      return { falha: true, retry: true, motivo: _rcNf.motivo, pedidoId: edit.pedidoId };
+    }
+    return { falha: true, motivo: _rcNf.motivo, pedidoId: edit.pedidoId };
+  }
   if (!(await lcp.renovarEmissao(orderId, _res.token))) {
     console.warn(`[auto-emissao] order ${orderId} perdi a posse do lease — nao emito`);
     return { falha: true, retry: true, motivo: 'lease_perdido' };
