@@ -397,7 +397,15 @@ const CANCELADAS_STATUS = (
 // o resolve. Um deploy com LIXAS_CANCELADAS_STATUS antigo/custom substituiria o default
 // inteiro e deixaria a linha quarentenada pra sempre, sem nunca reconferir a etiqueta.
 // Por isso entra sempre, depois do parse do override.
-if (!CANCELADAS_STATUS.includes('cancelada_quarentena')) CANCELADAS_STATUS.push('cancelada_quarentena');
+// Os dois status ATIVOS internos entram sempre, mesmo com LIXAS_CANCELADAS_STATUS
+// setada com um default antigo (o override substitui a lista inteira):
+//  - cancelada_quarentena: escrito e resolvido por esta rotina
+//  - aguardando_bling: fica de fora do polling de envio se ausente, e uma etiqueta que
+//    surja durante o retry nao seria registrada — a Guarda 1.6 deixaria o retry montar
+//    e emitir NF de um pedido ja etiquetado
+for (const _st of ['cancelada_quarentena', 'aguardando_bling']) {
+  if (!CANCELADAS_STATUS.includes(_st)) CANCELADAS_STATUS.push(_st);
+}
 // Acompanha a janela do leitor (LIXAS_JANELA_DIAS, default 30). Se ficasse em 7
 // enquanto o lerRespostas processa ate 30 dias, existiria uma faixa de 8-30 dias em
 // que uma venda CANCELADA no ML seguiria sendo processada — montando pedido no Bling
@@ -776,7 +784,13 @@ async function rotinaChecarCanceladasML(opts = {}) {
             ml_status: st.status,
             ml_status_atualizado_em: agoraIso
           }, { somenteSe: `venda_cancelada_em=is.null&${_semReservaAtiva()}` });
-          quarentenaOk = !!(rq && rq.ok);
+          // PostgREST devolve ok:true com data vazio quando o predicado nao casa (lease
+          // fresco). Exigir 1 linha: senao a rota diria "saiu do fluxo automatico" com o
+          // status intacto e o emissor reservado seguindo pro gerarNFe.
+          quarentenaOk = !!(rq && rq.ok && Array.isArray(rq.data) && rq.data.length === 1);
+          if (rq && rq.ok && Array.isArray(rq.data) && rq.data.length === 0) {
+            console.warn(`[canceladas] order ${oid} quarentena NAO aplicada: ha emissao de NF em curso — adiado`);
+          }
         } catch (e) {
           console.error(`[canceladas] order ${oid} falhei ate na quarentena: ${e.message}`);
         }
@@ -1003,7 +1017,7 @@ async function _processarAutoEmissaoInner({ venda, iaResult, graosResult, lcp })
                 ml_status: st.status,
                 ml_status_atualizado_em: new Date().toISOString()
               }, { somenteSe: `venda_cancelada_em=is.null&${_semReservaAtiva()}` });
-              qOk = !!(rq && rq.ok);
+              qOk = !!(rq && rq.ok && Array.isArray(rq.data) && rq.data.length === 1);
             } catch (e2) { console.error(`[auto-emissao] order ${orderId} falhei na quarentena: ${e2.message}`); }
             if (!qOk) console.error(`[auto-emissao] order ${orderId} 🚨 quarentena NAO gravou — mantendo na fila`);
             return { falha: true, retry: !qOk, motivo: 'venda_cancelada_no_ml_envio_indeterminado' };
@@ -1022,7 +1036,7 @@ async function _processarAutoEmissaoInner({ venda, iaResult, graosResult, lcp })
               ml_status: st.status,
               ml_status_atualizado_em: new Date().toISOString()
             }, { somenteSe: `venda_cancelada_em=is.null&${_semReservaAtiva()}` });
-            qOk2 = !!(rq2 && rq2.ok);
+            qOk2 = !!(rq2 && rq2.ok && Array.isArray(rq2.data) && rq2.data.length === 1);
           } catch (e2) { console.error(`[auto-emissao] order ${orderId} falhei na quarentena: ${e2.message}`); }
           if (!qOk2) console.error(`[auto-emissao] order ${orderId} 🚨 quarentena NAO gravou — mantendo na fila`);
           return { falha: true, retry: !qOk2, motivo: 'venda_cancelada_no_ml_envio_indeterminado' };
