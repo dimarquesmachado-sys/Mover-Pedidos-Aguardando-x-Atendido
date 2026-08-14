@@ -248,8 +248,12 @@ async function checarMlAntesDeEscrever(orderId, lcp, opts) {
   const ml = require('../auto-mensagens/mlApi');
   let st = null, env = null;
   try {
-    st = await ml.getOrderStatusResumo(String(orderId));
+    // ENVIO primeiro, STATUS por ULTIMO: o getEnvioResumo faz seu proprio /orders mais
+    // novo mas ignora o status. Lendo o status antes, um cancelamento ocorrido entre as
+    // duas chamadas passava batido e a escrita era autorizada. A ultima leitura do ML
+    // antes de liberar tem que ser a do status.
     env = await ml.getEnvioResumo(String(orderId));
+    st = await ml.getOrderStatusResumo(String(orderId));
   } catch (e) {
     return { ok: false, http: 503, corpo: { ok: false, erro: 'estado_indeterminado',
       mensagem: `Nao consegui confirmar o estado da venda no Mercado Livre (${e.message}). NADA foi alterado.` } };
