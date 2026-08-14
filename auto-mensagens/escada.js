@@ -233,22 +233,7 @@ async function rotinaEscadaIndisponivel(opts = {}) {
         stats.erros++; stats.lista.push({ order_id: orderId, acao: 'erro', motivo: `reserva_${resEsc.motivo}` });
         continue;
       }
-      const edit = await bp.editarPedidoComGraos({
-        orderId: idBuscaBling, graosEscolhidos: resolvido.pedidoFinal, graosDisponiveis: graosResult.graos,
-        unidadesPorPacote: graosResult.unidades_por_pacote, descricaoBase: graosResult.descricao,
-        dataVenda, skuACombinar: v.sku_a_combinar || null, dryRun: false
-      });
-      if (!edit.ok) {
-        await lcp.atualizarVenda(orderId, { bling_erro: `escada edit ${edit.etapa || ''}: ${edit.erro || ''}`.slice(0, 500) });
-        stats.erros++; stats.lista.push({ order_id: orderId, acao: 'erro', motivo: 'edit_falhou', etapa: edit.etapa }); continue;
-      }
-      await lcp.atualizarVenda(orderId, {
-        bling_pedido_id: String(edit.pedidoId), bling_editado_em: new Date().toISOString(),
-        ia_pedido_estruturado: JSON.stringify(resolvido.pedidoFinal), bling_erro: null
-      });
-
-      // 7. EMITE a NF (idempotente: code 74 = ja tem NF -> trata como emitida)
-      // Antes: status ML AO VIVO + reserva. Os campos do banco lidos no inicio podem
+      // STATUS ML AO VIVO, ANTES de qualquer escrita no Bling. Os campos do banco lidos no inicio podem
       // estar ate 1h velhos (a varredura de cancelamento e horaria), e este emissor
       // nao passa pelo processarAutoEmissao — precisa das duas guardas por conta.
       try {
@@ -288,6 +273,22 @@ async function rotinaEscadaIndisponivel(opts = {}) {
         stats.erros++; stats.lista.push({ order_id: orderId, acao: 'erro', motivo: 'status_ml_excecao' });
         continue;
       }
+      const edit = await bp.editarPedidoComGraos({
+        orderId: idBuscaBling, graosEscolhidos: resolvido.pedidoFinal, graosDisponiveis: graosResult.graos,
+        unidadesPorPacote: graosResult.unidades_por_pacote, descricaoBase: graosResult.descricao,
+        dataVenda, skuACombinar: v.sku_a_combinar || null, dryRun: false
+      });
+      if (!edit.ok) {
+        await lcp.atualizarVenda(orderId, { bling_erro: `escada edit ${edit.etapa || ''}: ${edit.erro || ''}`.slice(0, 500) });
+        await lcp.liberarEmissao(orderId, resEsc.token);
+        stats.erros++; stats.lista.push({ order_id: orderId, acao: 'erro', motivo: 'edit_falhou', etapa: edit.etapa }); continue;
+      }
+      await lcp.atualizarVenda(orderId, {
+        bling_pedido_id: String(edit.pedidoId), bling_editado_em: new Date().toISOString(),
+        ia_pedido_estruturado: JSON.stringify(resolvido.pedidoFinal), bling_erro: null
+      });
+
+      // 7. EMITE a NF (idempotente: code 74 = ja tem NF -> trata como emitida)
       const nf = await bp.gerarNFe(edit.pedidoId);
       let nfOk = nf.ok;
       if (!nf.ok) {
