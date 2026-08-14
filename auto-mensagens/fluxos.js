@@ -1387,6 +1387,19 @@ async function _processarAutoEmissaoInner({ venda, iaResult, graosResult, lcp })
     return { falha: true, retry: _res.motivo === 'reserva_falhou', motivo: `reserva_${_res.motivo}` };
   }
 
+  // RECHECA COM O LEASE NA MAO (helper compartilhado): com a reserva ativa o cron de
+  // cancelamento adia sua gravacao, entao nenhum marcador local muda mais — so o ML
+  // pode revelar um cancelamento/etiqueta surgido durante a aquisicao do lease.
+  const _rc = await lcp.recheckAposReserva(orderId, _res.token);
+  if (!_rc.ok) {
+    console.warn(`[auto-emissao] order ${orderId} recheca pos-reserva barrou (${_rc.motivo}) — nao edito nem emito`);
+    if (_rc.motivo === 'estado_indeterminado' || _rc.motivo === 'estado_nao_gravado') {
+      await lcp.liberarEmissao(orderId, _res.token);
+      return { falha: true, retry: true, motivo: _rc.motivo };
+    }
+    return { falha: true, motivo: _rc.motivo };
+  }
+
   let edit;
   try {
     edit = await bp.editarPedidoComGraos({ ...baseArgs, dryRun: false });
@@ -1463,7 +1476,13 @@ async function _processarAutoEmissaoInner({ venda, iaResult, graosResult, lcp })
     // reconciliacao por 10 min, e o proprio retry seguinte esbarraria nessa reserva
     // (estado_mudou) e sairia da fila.
     await lcp.liberarEmissao(orderId, _res.token);
-    console.error(`[auto-emissao] order ${orderId} 🚨 NF ${nf.numero || '?'} EMITIDA mas NAO gravada — pedindo reconciliacao`);
+    console.error(`[auto-emissao] order ${orderId} 🚨 NF ${nf.numero || '?'} EMITIDA mas NAO gravada — enfileirando reconciliacao`);
+    // retry:true so IMPEDE o wrapper de apagar uma entrada existente — numa chamada
+    // vinda do lerRespostas nao ha entrada nenhuma. E o bling_editado_em ja gravado faz
+    // o confirmou-strand pular esta linha. Sem enfileirar, a NF emitida ficaria sem
+    // registro ate alguem reconciliar na mao.
+    try { _retry.enfileirarRestauracao({ orderId, venda, iaResult, graosResult }); }
+    catch (e) { console.error(`[auto-emissao] order ${orderId} falhei ao enfileirar: ${e.message}`); }
     return { falha: true, retry: true, motivo: 'nf_emitida_sem_registro',
              nfNumero: nf.numero, pedidoId: edit.pedidoId };
   }
