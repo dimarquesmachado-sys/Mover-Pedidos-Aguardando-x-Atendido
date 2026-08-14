@@ -295,14 +295,14 @@ async function rotinaEscadaIndisponivel(opts = {}) {
         if (Array.isArray(campos) && campos.some(f => Number(f.code) === 74 || /nota fiscal referenciada/i.test(String(f.msg || '')))) nfOk = true;
       }
       if (!nfOk) {
-        await lcp.atualizarVenda(orderId, { status: 'precisa_atencao_humano', nf_emitindo_em: null, nf_emitindo_por: null, nf_erro: `${nf.status || ''}: ${nf.erro || JSON.stringify(nf.detalhe || {}).slice(0, 200)}`.slice(0, 500) });
+        await lcp.atualizarVenda(orderId, { status: 'precisa_atencao_humano', nf_emitindo_em: null, nf_emitindo_por: null, nf_erro: `${nf.status || ''}: ${nf.erro || JSON.stringify(nf.detalhe || {}).slice(0, 200)}`.slice(0, 500) }, lcp.fecharLease(resEsc.token));
         stats.erros++; stats.lista.push({ order_id: orderId, acao: 'erro', motivo: 'nf_falhou', pedidoId: edit.pedidoId }); continue;
       }
       const _persistE = await lcp.atualizarVenda(orderId, {
         nf_emitida_em: new Date().toISOString(), nf_id: nf.nfeId || null, nf_numero: nf.numero || null,
         nf_serie: nf.serie || null, nf_chave: nf.chave || null, nf_erro: null,
         nf_emitindo_em: null, nf_emitindo_por: null, status: 'processado'
-      });
+      }, lcp.fecharLease(resEsc.token));
       // NF ja saiu. Sem registro, o painel pode oferecer Recuperar NF de novo depois que
       // o lease vencer — entao nao conta como sucesso nem avisa a cliente sobre um
       // estado que nao ficou gravado.
