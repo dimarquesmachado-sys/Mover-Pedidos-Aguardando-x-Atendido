@@ -1655,7 +1655,18 @@ function routes(readBody) {
               }
             }
             campos.nf_emitindo_em = null; campos.nf_emitindo_por = null;
-            await lcp.atualizarVenda(orderId, campos, { forcar: true });
+            const _uRc = await lcp.atualizarVenda(orderId, campos, { forcar: true });
+            // So declara o lease fechado com 1 linha confirmada: senao a linha mantem o
+            // status acionavel E a reserva, o finally pula a limpeza, e o cancelamento
+            // ou etiqueta detectados nao ficam registrados em lugar nenhum.
+            if (!_uRc || !_uRc.ok || (Array.isArray(_uRc.data) && _uRc.data.length !== 1)) {
+              await lcp.liberarEmissao(orderId, reservaR && reservaR.token);
+              _liberado = true;
+              console.error(`[lixas-combinar recuperar-nf] order ${orderId} 🚨 recheca detectou ${stR2.cancelada ? 'cancelamento' : 'etiqueta'} mas NAO gravei`);
+              json(res, 503, { ok: false, erro: 'estado_nao_gravado', etapa: 'recheca',
+                mensagem: `A venda ${stR2.cancelada ? 'foi CANCELADA' : 'ja tem etiqueta'} no Mercado Livre, mas nao consegui registrar isso. NADA foi montado nem emitido. ${stR2.cancelada ? 'NAO DESPACHE e tente' : 'Tente'} de novo em instantes.` });
+              return true;
+            }
             _liberado = true;
             json(res, 409, { ok: false, erro: stR2.cancelada ? 'venda_cancelada' : 'etiqueta_ja_gerada',
               mensagem: stR2.cancelada
