@@ -416,6 +416,16 @@ const ENVIO_REPESCAR_H = Number(process.env.LIXAS_ENVIO_REPESCAR_HORAS) || 1;
 const CANCELADAS_REPESCAR_H  = Number(process.env.LIXAS_CANCELADAS_REPESCAR_HORAS) || 6;
 const CANCELADAS_MAX         = Number(process.env.LIXAS_CANCELADAS_MAX_POR_RODADA) || 40;
 const CANCELADAS_PAUSA_MS    = Number(process.env.LIXAS_CANCELADAS_PAUSA_MS) || 350;
+// LEASE da emissao: janela em que o cron respeita uma reserva de NF em curso. Tem que
+// ser MAIOR que o pior caso de uma chamada ao Bling — o fetch do tokenManager nao tem
+// timeout, e uma requisicao lenta que passasse do lease deixaria o cron gravar
+// cancelamento com o gerarNFe ainda rodando. 10 min cobre com folga; o endpoint limpa
+// a reserva ao terminar, entao o valor alto nao trava nada no caminho normal.
+const NF_LEASE_MIN = Number(process.env.LIXAS_NF_LEASE_MIN) || 10;
+function _semReservaAtiva() {
+  const limite = new Date(Date.now() - NF_LEASE_MIN * 60 * 1000).toISOString();
+  return `or=(nf_emitindo_em.is.null,nf_emitindo_em.lt.${limite})`;
+}
 
 function _fmtBR(iso) {
   if (!iso) return '';
@@ -460,9 +470,17 @@ async function rotinaChecarCanceladasML(opts = {}) {
     let lista = [];
     for (let pg = 0; pg < 20; pg++) {
       const r = await lcp.listarPendentes({ dias, limit: PAG, offset: pg * PAG });
-      const arr = (r.ok && Array.isArray(r.data)) ? r.data : [];
-      lista = lista.concat(arr);
-      if (arr.length < PAG) break;
+      // Pagina que falha e indistinguivel de fim de dados se virar array vazio: a
+      // rodada terminaria "com sucesso" varrendo so as mais novas, e cancelamentos
+      // antigos ficariam invisiveis indefinidamente se a falha persistisse.
+      if (!r.ok || !Array.isArray(r.data)) {
+        out.erro = `falha lendo a pagina ${pg + 1} das vendas — rodada abortada pra nao varrer parcial`;
+        out.erros.push({ erro: out.erro });
+        console.error(`[canceladas] 🚨 ${out.erro}`);
+        return out;
+      }
+      lista = lista.concat(r.data);
+      if (r.data.length < PAG) break;
     }
 
     const agora = Date.now();
@@ -757,7 +775,7 @@ async function rotinaChecarCanceladasML(opts = {}) {
             status: 'cancelada_quarentena',
             ml_status: st.status,
             ml_status_atualizado_em: agoraIso
-          }, { somenteSe: 'venda_cancelada_em=is.null' });
+          }, { somenteSe: `venda_cancelada_em=is.null&${_semReservaAtiva()}` });
           quarentenaOk = !!(rq && rq.ok);
         } catch (e) {
           console.error(`[canceladas] order ${oid} falhei ate na quarentena: ${e.message}`);
@@ -827,9 +845,7 @@ async function rotinaChecarCanceladasML(opts = {}) {
     // emissao reservar a linha nesse intervalo, o cron veria null e gravaria por cima
     // com o gerarNFe em curso. O filtro abaixo faz o Postgres decidir: so grava se nao
     // houver reserva nos ultimos 2 min.
-    const _limiteReserva = new Date(Date.now() - 2 * 60 * 1000).toISOString();
-    const upd = await lcp.atualizarVenda(oid, campos,
-      { somenteSe: `or=(nf_emitindo_em.is.null,nf_emitindo_em.lt.${_limiteReserva})` });
+    const upd = await lcp.atualizarVenda(oid, campos, { somenteSe: _semReservaAtiva() });
     if (upd.ok && Array.isArray(upd.data) && upd.data.length === 0) {
       console.warn(`[canceladas] order ${oid} cancelada, mas ha emissao de NF em curso — adio o registro pra proxima rodada`);
       out.erros.push({ order_id: oid, erro: 'cancelada durante emissao de NF em curso — adiado' });
@@ -986,7 +1002,7 @@ async function _processarAutoEmissaoInner({ venda, iaResult, graosResult, lcp })
                 status: 'cancelada_quarentena',
                 ml_status: st.status,
                 ml_status_atualizado_em: new Date().toISOString()
-              }, { somenteSe: 'venda_cancelada_em=is.null' });
+              }, { somenteSe: `venda_cancelada_em=is.null&${_semReservaAtiva()}` });
               qOk = !!(rq && rq.ok);
             } catch (e2) { console.error(`[auto-emissao] order ${orderId} falhei na quarentena: ${e2.message}`); }
             if (!qOk) console.error(`[auto-emissao] order ${orderId} 🚨 quarentena NAO gravou — mantendo na fila`);
@@ -1005,7 +1021,7 @@ async function _processarAutoEmissaoInner({ venda, iaResult, graosResult, lcp })
               status: 'cancelada_quarentena',
               ml_status: st.status,
               ml_status_atualizado_em: new Date().toISOString()
-            }, { somenteSe: 'venda_cancelada_em=is.null' });
+            }, { somenteSe: `venda_cancelada_em=is.null&${_semReservaAtiva()}` });
             qOk2 = !!(rq2 && rq2.ok);
           } catch (e2) { console.error(`[auto-emissao] order ${orderId} falhei na quarentena: ${e2.message}`); }
           if (!qOk2) console.error(`[auto-emissao] order ${orderId} 🚨 quarentena NAO gravou — mantendo na fila`);
