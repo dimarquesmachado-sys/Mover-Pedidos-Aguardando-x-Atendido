@@ -706,6 +706,15 @@ async function recuperarNF(orderId) {
     });
     if (r.status === 401) { logout(); return; }
     const d = await r.json();
+
+    if (d.emitida) {
+      mostrarModal('⚠️ NF EMITIDA — mas não registrada',
+        `A NF ${d.nfNumero || '?'}${d.nfSerie ? '/' + d.nfSerie : ''} FOI EMITIDA no Bling.\n\n` +
+        'Só não consegui registrar isso no painel.\n\n' +
+        '⚠️ NÃO emita de novo. Confira no Bling e use o 🔄 Verificar ML para reconciliar.', true);
+      await recarregar();
+      return;
+    }
     if (d.ok && (d.recuperado || d.jaEmitida)) {
       alert(d.jaEmitida ? 'ℹ️ Já tinha NF — registrado como emitida.' : `✅ Recuperado! NF ${d.nfNumero}/${d.nfSerie} emitida.`);
       await recarregar();
@@ -779,6 +788,16 @@ async function emitirNF(orderId) {
     if (r.status === 401) { logout(); return; }
     const d = await r.json();
 
+    // emitida:true = a NF SAIU, so a gravacao falhou. Sem este ramo, o painel dizia que
+    // a nota nao saiu e mandava tentar de novo — uma segunda emissao de algo irreversivel.
+    if (d.emitida) {
+      mostrarModal('⚠️ NF EMITIDA — mas não registrada',
+        `A NF ${d.nfNumero || '?'}${d.nfSerie ? '/' + d.nfSerie : ''} FOI EMITIDA no Bling.\n\n` +
+        'Só não consegui registrar isso no painel.\n\n' +
+        '⚠️ NÃO emita de novo. Confira no Bling e use o 🔄 Verificar ML para reconciliar.', true);
+      await recarregar();
+      return;
+    }
     if (d.ok) {
       if (d.jaEmitida) {
         mostrarModal('ℹ️ NF já estava emitida', (d.mensagem || 'Esta venda já possui NF-e no Bling.') + '\n\nRegistrado — o botão Emitir NF vai sumir deste card.', false);
@@ -1019,6 +1038,16 @@ async function montarComNF(orderId, graos) {
     if (r2.status === 401) { logout(); return; }
     const d2 = await r2.json();
 
+    // emitida:true = a NF SAIU, so a gravacao falhou. Sem este ramo o operador leria
+    // "a NF NAO saiu, use Emitir NF de novo" — provocando uma SEGUNDA nota.
+    if (d2.emitida) {
+      mostrarModal('⚠️ Pedido montado, NF EMITIDA — mas não registrada',
+        `Pedido ${d1.pedidoId} montado e NF ${d2.nfNumero || '?'}${d2.nfSerie ? '/' + d2.nfSerie : ''} EMITIDA no Bling.\n\n` +
+        'Só não consegui registrar a nota no painel.\n\n' +
+        '⚠️ NÃO emita de novo. Confira no Bling e use o 🔄 Verificar ML para reconciliar.', true);
+      await recarregar();
+      return;
+    }
     if (d2.ok) {
       const texto = `✅ PEDIDO MONTADO + NF EMITIDA!\n\nPedido ID: ${d1.pedidoId}\nNF ID: ${d2.nfeId || '?'}\nNumero: ${d2.numero || '?'}\nSerie: ${d2.serie || '?'}\nChave: ${d2.chave || '(aguardando SEFAZ)'}\n\nConfira no Bling.`;
       mostrarModal('✅ Pedido + NF prontos', texto, false);
