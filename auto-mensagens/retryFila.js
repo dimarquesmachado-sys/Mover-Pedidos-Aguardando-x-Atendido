@@ -301,7 +301,11 @@ async function revisarAtencaoHumana({ lcp }) {
 
           if (temNF) {
             await lcp.atualizarVenda(venda.order_id, {
-              status: 'processado', bling_pedido_id: String(busca.pedidoId), bling_erro: null, nf_erro: null
+              status: 'processado',
+        // A NF foi CONFIRMADA no Bling: grava o marcador tambem. Sem ele, o
+        // classificador ve 'processado' sem nf_emitida_em e mantem a venda em
+        // Pendentes como "SEM NF" — e a reconciliacao de fundo nunca fecharia o caso.
+        nf_emitida_em: new Date().toISOString(), bling_pedido_id: String(busca.pedidoId), bling_erro: null, nf_erro: null
             });
             console.log(`[revisar] order ${venda.order_id} concluido COM NF (situacao ${sit}) — reconciliado p/ processado`);
             continue;
