@@ -1350,7 +1350,10 @@ async function _processarAutoEmissaoInner({ venda, iaResult, graosResult, lcp })
     throw eEd;
   }
   if (!edit.ok) {
-    await lcp.atualizarVenda(orderId, { status: 'precisa_atencao_humano', nf_emitindo_em: null, nf_emitindo_por: null, bling_erro: `auto edit ${edit.etapa || ''}: ${edit.erro || ''}`.slice(0, 500) }, lcp.fecharLease(_res.token));
+    const _pEd = await lcp.atualizarVenda(orderId, { status: 'precisa_atencao_humano', nf_emitindo_em: null, nf_emitindo_por: null, bling_erro: `auto edit ${edit.etapa || ''}: ${edit.erro || ''}`.slice(0, 500) }, lcp.fecharLease(_res.token));
+    if (!_pEd || !_pEd.ok || (Array.isArray(_pEd.data) && _pEd.data.length !== 1)) {
+      await lcp.liberarEmissao(orderId, _res.token);
+    }
     console.error(`[auto-emissao] order ${orderId} edit falhou (${edit.etapa}): ${edit.erro}`);
     return { falha: true, motivo: 'edit_falhou' };
   }
@@ -1379,11 +1382,16 @@ async function _processarAutoEmissaoInner({ venda, iaResult, graosResult, lcp })
   if (!nf.ok) {
     // Pedido ja foi editado: deixa o bling_pedido_id salvo pro painel mostrar
     // o botao laranja e voce emitir na mao.
-    await lcp.atualizarVenda(orderId, {
+    const _pNf = await lcp.atualizarVenda(orderId, {
       status: 'precisa_atencao_humano',
       nf_emitindo_em: null, nf_emitindo_por: null,
       nf_erro: `${nf.status || ''}: ${nf.erro || JSON.stringify(nf.detalhe || {}).slice(0, 200)}`.slice(0, 500)
     }, lcp.fecharLease(_res.token));
+    // Nao gravou = o lease continua ativo e bloquearia cancelamento e nova tentativa
+    // por ate 10 min sem nada em curso. Libera explicitamente, como no caminho manual.
+    if (!_pNf || !_pNf.ok || (Array.isArray(_pNf.data) && _pNf.data.length !== 1)) {
+      await lcp.liberarEmissao(orderId, _res.token);
+    }
     console.error(`[auto-emissao] order ${orderId} pedido ${edit.pedidoId} editado mas NF falhou: ${nf.status} ${nf.erro}`);
     return { falha: true, motivo: 'nf_falhou', pedidoId: edit.pedidoId };
   }
