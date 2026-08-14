@@ -397,7 +397,7 @@ const MOD = '/amb-checkout-offline';
     return _f(u, o);
   };
 })();
-const DASH_BUILD = 'a14';
+const DASH_BUILD = 'a15';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -1114,8 +1114,17 @@ function desenharDespesasShopee(d){
                '<td style="text-align:right" class="mut">'+BRL(s.valor)+'</td>'+
                (temCusto? '<td style="text-align:right;color:#f87171;font-weight:700">'+BRL(cr)+'</td>':'')+
                '<td style="text-align:right" class="mut">'+(Math.round(pct*10)/10)+'%</td></tr>';
-      }).join('')+'</tbody></table>'+
-      (temCusto? '<div class="mut" style="font-size:10.5px;margin-top:5px">\u201cR$ devolvido\u201d \u00e9 o pre\u00e7o que voltou pro comprador; \u201ccusto real\u201d \u00e9 o que a Shopee tirou da sua carteira (com o frete de retorno dentro). O % \u00e9 sobre o custo.</div>':'');
+      }).join('')+
+      (temCusto? '<tfoot><tr style="border-top:1px solid var(--line2)">'+
+        '<td style="padding-top:6px"><b>total das devolu\u00e7\u00f5es do per\u00edodo</b></td><td></td>'+
+        '<td style="text-align:right" class="mut">'+BRL(dev.valor_devolvido||0)+'</td>'+
+        '<td style="text-align:right;color:#f87171;font-weight:800">'+BRL(dev.custo_real_na_carteira||0)+'</td>'+
+        '<td></td></tr></tfoot>':'')+
+      '</tbody></table>'+
+      (temCusto? '<div class="mut" style="font-size:10.5px;margin-top:5px">\u201cR$ devolvido\u201d \u00e9 o pre\u00e7o que voltou pro comprador; \u201ccusto real\u201d \u00e9 o que a Shopee tirou da sua carteira (com o frete de retorno dentro). O % \u00e9 sobre o custo.'+
+        ((Math.abs((Number(dev.custo_real_na_carteira)||0) - (Number((d.carteira&&d.carteira.custo_por_tipo&&(d.carteira.custo_por_tipo.ADJUSTMENT_FOR_RR_AFTER_ESCROW_VERIFIED||0)))||0)) > 1)
+          ? ' <b>Aten\u00e7\u00e3o:</b> este total conta as devolu\u00e7\u00f5es ABERTAS no per\u00edodo, com o d\u00e9bito onde quer que a Shopee o tenha lan\u00e7ado (\u00e0s vezes no m\u00eas seguinte). O \u201cestorno\u201d l\u00e1 em cima soma s\u00f3 os d\u00e9bitos lan\u00e7ados DENTRO do per\u00edodo \u2014 por isso os dois n\u00fameros podem diferir.'
+          : '')+'</div>':'');
   }
   if(Number(dev.canceladas_fora_da_conta)>0){
     h += '<div class="mut" style="font-size:10.5px;margin-top:4px">'+N(dev.canceladas_fora_da_conta)+' devolu\u00e7\u00e3o(\u00f5es) cancelada(s) pela Shopee ficaram FORA da conta (custo zero).</div>';
