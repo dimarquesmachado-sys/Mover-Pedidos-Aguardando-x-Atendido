@@ -6,7 +6,7 @@ declaradas em cada módulo no `main`.
 
 | empresa | módulo | arquivos | rotas |
 |---|---|---|---|
-| Girassol | `girassol-backup-offline` | 22 | 128 |
+| Girassol | `girassol-backup-offline` | 22 | 129 |
 | AMBTotal | `amb-checkout-offline` | 20 | 129 |
 | GOOD | `good-checkout-offline` | 13 | 77 |
 
@@ -43,6 +43,7 @@ histórico, nem os coletores da Shopee.
 
 ### Nas duas (Girassol e AMB) e ausente na GOOD
 
+- `shopee/conciliar`
 - `auditoria-ml`
 - `backfill`
 - `backfill-ano`
@@ -88,8 +89,9 @@ histórico, nem os coletores da Shopee.
 - `varrer-fornecedores-status`
 - `vendas-sync`
 
-> Nota: `shopee/conciliar` **saiu** da lista de exclusivas da AMB neste mesmo PR — a Girassol
-> passou a tê-la pela lib compartilhada. O levantamento reflete o estado com este PR aplicado.
+> Nota: o levantamento reflete o estado **com este PR aplicado** — `shopee/conciliar` deixou de
+> ser exclusiva da AMB (a Girassol passou a tê-la pela lib compartilhada), então ela conta como
+> rota compartilhada e a Girassol vai a 129 rotas.
 
 ## O que já foi unificado (código único, empresa como parâmetro)
 
