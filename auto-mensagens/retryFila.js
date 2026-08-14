@@ -213,8 +213,17 @@ async function retentarEmissoesBling({ lcp }) {
           // ja teria sido apagada da fila — card preso em "Re-tentando" sem retry algum.
           let restaurou = false;
           try {
-            const rr = await lcp.atualizarVenda(orderId, { status: 'processado' });
+            // Condicional: entre a leitura do inicio deste retry e este PATCH, o cron
+            // pode ter gravado cancelada_quarentena. Restaurar 'processado' por cima
+            // esconderia o cancelamento recem-confirmado (e o marcador manual ainda
+            // suprime o polling de envio, adiando o alerta de nao despachar).
+            const rr = await lcp.atualizarVenda(orderId, { status: 'processado' },
+              { somenteSe: 'venda_cancelada_em=is.null&status=not.in.(venda_cancelada,cancelado,cancelada_quarentena)' });
+            // 0 linhas = a venda foi cancelada nesse meio tempo. Nao e falha: o estado
+            // certo agora e o do cancelamento, entao a entrada pode sair da fila.
+            const semLinhas = rr && rr.ok && Array.isArray(rr.data) && rr.data.length === 0;
             restaurou = !!(rr && rr.ok);
+            if (semLinhas) console.log(`[retry-bling] order ${orderId} nao restaurei o status: venda foi cancelada nesse meio tempo`);
           } catch (e2) { console.error(`[retry-bling] order ${orderId} falhei ao restaurar status: ${e2.message}`); }
           if (!restaurou) {
             console.error(`[retry-bling] order ${orderId} 🚨 nao consegui restaurar o status — MANTENHO na fila pra tentar de novo`);
