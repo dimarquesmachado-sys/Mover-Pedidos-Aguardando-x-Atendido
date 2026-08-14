@@ -422,7 +422,11 @@ function routes(readBody) {
         // que o cron de envio ja recebeu.
         const PAG = 500;
         let todos = [];
-        for (let pg = 0; pg < 20; pg++) {
+        // Sem teto fixo (ver mesma correcao no cron): com ?dias=90 a janela pode passar
+        // de 10 mil linhas e parar na pagina 20 esconderia as mais antigas em silencio.
+        const MAX_PAG = 500;
+        let truncou = false;
+        for (let pg = 0; pg < MAX_PAG; pg++) {
           const r = await lcp.listarPendentes({ dias, limit: PAG, offset: pg * PAG });
           // Falha de pagina e INDISTINGUIVEL de fim do dataset se virar array vazio —
           // o painel devolveria ok:true com bolsao e contadores parciais, escondendo
@@ -434,6 +438,12 @@ function routes(readBody) {
           }
           todos = todos.concat(r.data);
           if (r.data.length < PAG) break;
+          if (pg === MAX_PAG - 1) truncou = true;
+        }
+        if (truncou) {
+          json(res, 503, { ok: false, erro: 'janela_muito_grande',
+            mensagem: `A janela de ${dias} dias tem mais de ${MAX_PAG * PAG} vendas e a lista ficaria incompleta. Use um ?dias= menor.` });
+          return true;
         }
 
         // CURA A NF ANTES DE CLASSIFICAR. Se rodasse depois (como antes), a venda cujo
