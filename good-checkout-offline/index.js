@@ -1930,7 +1930,50 @@ function routes(readBody) {
       return true;
     }
 
-    if (method === 'GET' && p === '/good-checkout-offline/status') {
+// ── DIAGNÓSTICO DE ETIQUETA (14/08) ────────────────────────────────────────────
+    // Caso real: pedido da AMAZON (Bling 26599886380, NF 077663) ficou "sem etiqueta" no
+    // checkout, mas a etiqueta EXISTE e o Diego conseguiu baixá-la pelo Bling. O ciclo já
+    // trata Amazon (link ZPL vem nulo → tenta o PDF), e reprocessa todo pedido sem etiqueta
+    // a cada rodada — então a suspeita é que a API `/logisticas/etiquetas` não devolve o
+    // link, mesmo a tela do Bling imprimindo. Esta rota mostra a RESPOSTA CRUA da API nos
+    // dois formatos, pra decidir com dado em vez de suposição. Só leitura.
+    // Uso: GET /good-checkout-offline/etiqueta-diag?id=<idBling>&k=ADMIN_KEY
+    if (method === 'GET' && p === '/good-checkout-offline/etiqueta-diag') {
+      const kE = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const sE = validarSessao(req.headers['cookie']);
+      if (!((process.env.ADMIN_KEY && kE === process.env.ADMIN_KEY) || (sE && ehAdmin(sE)))) { json(res, 404, { error: 'not found' }); return true; }
+      const idE = String(urlObj.searchParams.get('id') || '').replace(/\D/g, '');
+      if (!idE) { json(res, 400, { ok: false, erro: 'use ?id=<id do pedido no Bling>&k=ADMIN_KEY' }); return true; }
+      const out = { ok: true, id_bling: idE, formatos: [], pedido: null, leia: 'link null nos dois formatos = o Bling NAO expoe essa etiqueta pela API (caso tipico de logistica do proprio marketplace). Link presente = falha nossa no download.' };
+      for (const fmt of ['ZPL', 'PDF']) {
+        try {
+          const r = await blingGet('/logisticas/etiquetas?formato=' + fmt + '&idsVendas[]=' + idE);
+          const item = r && r.ok && r.data && r.data.data && r.data.data[0];
+          const linha = { formato: fmt, http_ok: !!(r && r.ok), tem_item: !!item, tem_link: !!(item && item.link) };
+          if (item) { linha.campos = Object.keys(item).slice(0, 12); linha.link_comeca_com = String(item.link || '').slice(0, 60) || null; }
+          if (r && !r.ok) linha.erro = String((r.data && (r.data.error || r.data.message)) || ('HTTP ' + (r.status || '?'))).slice(0, 200);
+          out.formatos.push(linha);
+        } catch (e) { out.formatos.push({ formato: fmt, erro: String(e.message || e).slice(0, 160) }); }
+        await new Promise(r0 => setTimeout(r0, 400));
+      }
+      // contexto do pedido: loja (define o marketplace no ciclo) e se há logística registrada
+      try {
+        const rp = await blingGet('/pedidos/vendas/' + idE);
+        const det = (rp && rp.ok && rp.data && rp.data.data) || null;
+        if (det) out.pedido = {
+          numero: det.numero || null, loja_id: (det.loja && det.loja.id) || null,
+          numero_loja: det.numeroPedidoLoja || det.numeroLoja || null,
+          situacao: (det.situacao && det.situacao.id) || null,
+          tem_transporte: !!det.transporte,
+          transportador: (det.transporte && det.transporte.transportador && det.transporte.transportador.nome) || null,
+          rastreio: (det.transporte && det.transporte.volumes && det.transporte.volumes[0] && det.transporte.volumes[0].codigoRastreamento) || null
+        };
+      } catch (e) { out.pedido = { erro: String(e.message || e).slice(0, 160) }; }
+      json(res, 200, out);
+      return true;
+    }
+
+        if (method === 'GET' && p === '/good-checkout-offline/status') {
       const man = manifest();
       const ids = Object.keys(man);
       const conf = readJson(CONFERIDOS_FILE, {});
