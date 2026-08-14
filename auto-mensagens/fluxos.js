@@ -1273,7 +1273,7 @@ async function _processarAutoEmissaoInner({ venda, iaResult, graosResult, lcp })
 
   const edit = await bp.editarPedidoComGraos({ ...baseArgs, dryRun: false });
   if (!edit.ok) {
-    await lcp.atualizarVenda(orderId, { status: 'precisa_atencao_humano', nf_emitindo_em: null, bling_erro: `auto edit ${edit.etapa || ''}: ${edit.erro || ''}`.slice(0, 500) });
+    await lcp.atualizarVenda(orderId, { status: 'precisa_atencao_humano', nf_emitindo_em: null, nf_emitindo_por: null, bling_erro: `auto edit ${edit.etapa || ''}: ${edit.erro || ''}`.slice(0, 500) });
     console.error(`[auto-emissao] order ${orderId} edit falhou (${edit.etapa}): ${edit.erro}`);
     return { falha: true, motivo: 'edit_falhou' };
   }
@@ -1298,7 +1298,7 @@ async function _processarAutoEmissaoInner({ venda, iaResult, graosResult, lcp })
     // o botao laranja e voce emitir na mao.
     await lcp.atualizarVenda(orderId, {
       status: 'precisa_atencao_humano',
-      nf_emitindo_em: null,
+      nf_emitindo_em: null, nf_emitindo_por: null,
       nf_erro: `${nf.status || ''}: ${nf.erro || JSON.stringify(nf.detalhe || {}).slice(0, 200)}`.slice(0, 500)
     });
     console.error(`[auto-emissao] order ${orderId} pedido ${edit.pedidoId} editado mas NF falhou: ${nf.status} ${nf.erro}`);
@@ -1313,7 +1313,7 @@ async function _processarAutoEmissaoInner({ venda, iaResult, graosResult, lcp })
     nf_serie: nf.serie,
     nf_chave: nf.chave || null,
     nf_erro: null,
-    nf_emitindo_em: null,      // lease liberado junto com o terminal
+    nf_emitindo_em: null, nf_emitindo_por: null,   // lease liberado com o terminal
     status: 'processado'
   });
   // NF ja saiu (irreversivel). Se nao gravou, NAO reportar sucesso: o wrapper apagaria
