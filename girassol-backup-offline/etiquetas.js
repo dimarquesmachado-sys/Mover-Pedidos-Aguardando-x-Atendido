@@ -47,8 +47,22 @@ async function baixarEtiquetaPDF(blingId) {
   try {
     const r = await fetch(link);
     if (!r.ok) return null;
-    const buf = Buffer.from(await r.arrayBuffer());
-    if (buf.slice(0, 4).toString('latin1') !== '%PDF') return null;
+    let buf = Buffer.from(await r.arrayBuffer());
+    // 14/08 — MEDIDO no pedido Amazon 26599886380 da GOOD: o Bling DEVOLVE o link, mas o
+    // arquivo vem ZIPADO (assinatura PK, 49 KB, content-type application/octet-stream) com o
+    // PDF dentro. Como aqui só se aceitava algo começando em %PDF, o retorno era null EM
+    // SILÊNCIO e o pedido ficava "sem etiqueta" pra sempre, mesmo o Bling tendo a etiqueta.
+    // A função irmã (ZPL) já descompactava; esta não. Agora as duas tratam ZIP.
+    if (buf.length > 4 && buf[0] === 0x50 && buf[1] === 0x4B) {
+      try {
+        const zip = new AdmZip(buf);
+        const entries = zip.getEntries() || [];
+        if (!entries.length) return null;
+        const ent = entries.find(e2 => /\.pdf$/i.test(e2.entryName)) || entries[0];
+        buf = ent.getData();
+      } catch (e) { return null; }
+    }
+    if (!buf || buf.slice(0, 4).toString('latin1') !== '%PDF') return null;
     return buf;
   } catch (e) { return null; }
 }
