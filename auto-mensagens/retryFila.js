@@ -195,6 +195,49 @@ async function retentarEmissoesBling({ lcp }) {
       // cancelada_quarentena tambem e terminal: o cancelamento JA foi confirmado no ML,
       // so falta saber da etiqueta. Sem isso o retry seguiria e, numa falha transiente
       // da consulta de status, editaria o pedido e emitiria NF de venda cancelada.
+      // RESTAURACAO vem ANTES do descarte terminal: a entrada carrega uma NF ja emitida
+      // cujo registro se perdeu. Se o cancelamento finalizar a linha primeiro, o ramo
+      // terminal apagaria a entrada e a nota ficaria sem registro pra sempre.
+      if (entry.soRestaurar) {
+        const nfC = entry.nfConfirmada || {};
+        const jaTem = !!vAtual.nf_emitida_em;
+        if (!jaTem) {
+          const campos = {
+            nf_emitida_em: new Date().toISOString(),
+            nf_id: nfC.nfeId || null, nf_numero: nfC.numero || null, nf_serie: nfC.serie || null,
+            nf_chave: nfC.chave || null, nf_erro: null,
+            bling_pedido_id: entry.pedidoId ? String(entry.pedidoId) : (vAtual.bling_pedido_id || null)
+          };
+          // Linha ja terminal (cancelada): grava SO a evidencia da NF, sem mexer no
+          // status nem no lease de quem quer que seja — e monta o alerta, porque NF
+          // emitida em venda cancelada e caso de nao despachar.
+          const terminal = !!(vAtual.venda_cancelada_em
+            || ['venda_cancelada','cancelado','cancelada_quarentena'].includes(String(vAtual.status || '')));
+          if (terminal) {
+            if (!vAtual.alerta_pos_venda && !vAtual.alerta_reconhecido_em) {
+              campos.alerta_pos_venda = (`CANCELADA NO ML com NF ${nfC.numero || '?'} JA EMITIDA. ` +
+                `NAO DESPACHAR. Conferir e cancelar/estornar a nota no Bling.`).slice(0, 500);
+            }
+          } else {
+            // Nao terminal: fecha normalmente, mas so limpa o lease se ainda for nosso —
+            // outro worker pode ter reservado a linha nesse meio tempo.
+            campos.status = 'processado';
+            if (vAtual.nf_emitindo_por && entry.token && vAtual.nf_emitindo_por === entry.token) {
+              campos.nf_emitindo_em = null; campos.nf_emitindo_por = null;
+            } else if (!vAtual.nf_emitindo_por) {
+              campos.nf_emitindo_em = null; campos.nf_emitindo_por = null;
+            }
+          }
+          const upd = await lcp.atualizarVenda(orderId, campos, { forcar: true });
+          if (!(upd && upd.ok && (!Array.isArray(upd.data) || upd.data.length === 1))) {
+            console.error(`[retry-bling] order ${orderId} restauracao da NF ${nfC.numero || '?'} FALHOU — mantendo na fila`);
+            continue;
+          }
+          console.log(`[retry-bling] order ${orderId} restauracao concluida — NF ${nfC.numero || '?'} registrada${terminal ? ' (venda cancelada: alerta gravado)' : ''}`);
+        }
+        _retryBling.delete(orderId);
+        continue;
+      }
       if (vAtual.processado_manual_em || vAtual.nf_emitida_em || vAtual.venda_cancelada_em
           || vAtual.status === 'cancelada_quarentena' || vAtual.status === 'venda_cancelada'
           || vAtual.status === 'cancelado') {
@@ -233,47 +276,6 @@ async function retentarEmissoesBling({ lcp }) {
           }
         }
         _retryBling.delete(orderId);
-        continue;
-      }
-      // Entrada de RESTAURACAO (NF ja emitida): nao reprocessa nada no Bling — so grava
-      // o resultado que se perdeu. Reemitir aqui reescreveria um pedido ja faturado.
-      if (entry.soRestaurar) {
-        const nfC = entry.nfConfirmada || {};
-        const upd = await lcp.atualizarVenda(orderId, {
-          nf_emitida_em: new Date().toISOString(),
-          nf_id: nfC.nfeId || null, nf_numero: nfC.numero || null, nf_serie: nfC.serie || null,
-          nf_chave: nfC.chave || null, nf_erro: null,
-          bling_pedido_id: entry.pedidoId ? String(entry.pedidoId) : (vAtual.bling_pedido_id || null),
-          nf_emitindo_em: null, nf_emitindo_por: null,
-          status: 'processado'
-        });
-        if (upd && upd.ok && (!Array.isArray(upd.data) || upd.data.length === 1)) {
-          console.log(`[retry-bling] order ${orderId} restauracao concluida — NF ${nfC.numero || '?'} registrada`);
-          _retryBling.delete(orderId);
-        } else {
-          console.error(`[retry-bling] order ${orderId} restauracao da NF ${nfC.numero || '?'} FALHOU — mantendo na fila`);
-        }
-        continue;
-      }
-      // Entrada de RESTAURACAO (NF ja emitida): nao reprocessa nada no Bling — so grava
-      // o resultado que se perdeu. Reemitir aqui reescreveria um pedido ja faturado, e o
-      // code 74 esperado viraria 'nf_falhou', tirando a entrada da fila sem registrar.
-      if (entry.soRestaurar) {
-        const nfC = entry.nfConfirmada || {};
-        const upd = await lcp.atualizarVenda(orderId, {
-          nf_emitida_em: new Date().toISOString(),
-          nf_id: nfC.nfeId || null, nf_numero: nfC.numero || null, nf_serie: nfC.serie || null,
-          nf_chave: nfC.chave || null, nf_erro: null,
-          bling_pedido_id: entry.pedidoId ? String(entry.pedidoId) : (vAtual.bling_pedido_id || null),
-          nf_emitindo_em: null, nf_emitindo_por: null,
-          status: 'processado'
-        });
-        if (upd && upd.ok && (!Array.isArray(upd.data) || upd.data.length === 1)) {
-          console.log(`[retry-bling] order ${orderId} restauracao concluida — NF ${nfC.numero || '?'} registrada`);
-          _retryBling.delete(orderId);
-        } else {
-          console.error(`[retry-bling] order ${orderId} restauracao da NF ${nfC.numero || '?'} FALHOU — mantendo na fila`);
-        }
         continue;
       }
       await processarAutoEmissao({ venda: vAtual, iaResult: entry.iaResult, graosResult: entry.graosResult, lcp });
