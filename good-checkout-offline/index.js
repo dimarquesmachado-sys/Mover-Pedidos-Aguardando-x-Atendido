@@ -1978,6 +1978,32 @@ function routes(readBody) {
         } catch (e) { out.formatos.push({ formato: fmt, erro: String(e.message || e).slice(0, 160) }); }
         await new Promise(r0 => setTimeout(r0, 400));
       }
+      // 14/08 — o Bling devolve o link e o arquivo é um ZIP (corrigido no #79), mas a IMPRESSÃO
+      // lê `etiqueta.pdf` do cache do pedido: se o ciclo não passou por ele depois do conserto,
+      // sai só a NF (foi o que aconteceu com o pedido 26599886380). Aqui mostro o que está no
+      // cache e, com &salvar=1, gravo a etiqueta AGORA — sem esperar o próximo ciclo.
+      try {
+        const dirD = path.join(CACHE_DIR, String(idE));
+        const temZpl = fs.existsSync(path.join(dirD, 'etiqueta.zpl'));
+        const temPdf = fs.existsSync(path.join(dirD, 'etiqueta.pdf'));
+        const snapD = readJson(path.join(dirD, 'pedido.json'), null);
+        out.cache = { pasta_existe: fs.existsSync(dirD), etiqueta_zpl: temZpl, etiqueta_pdf: temPdf,
+          danfe_pdf: fs.existsSync(path.join(dirD, 'danfe.pdf')),
+          manifesto_tem_etiqueta: !!(snapD && snapD.tem_etiqueta) };
+        if (urlObj.searchParams.get('salvar') === '1' && !temPdf && !temZpl) {
+          const pdfBuf = await baixarEtiquetaPDF(idE);
+          if (pdfBuf && pdfBuf.length) {
+            ensureDir(dirD);
+            fs.writeFileSync(path.join(dirD, 'etiqueta.pdf'), pdfBuf);
+            if (snapD) { snapD.tem_etiqueta = true; writeJson(path.join(dirD, 'pedido.json'), snapD); }
+            try {
+              const man = readJson(MANIFEST_FILE, {});
+              if (man[idE]) { man[idE].tem_etiqueta = true; salvarManifest(man); }
+            } catch (e) {}
+            out.cache.salvo_agora = true; out.cache.bytes = pdfBuf.length;
+          } else { out.cache.salvo_agora = false; out.cache.motivo = 'baixarEtiquetaPDF devolveu vazio'; }
+        }
+      } catch (e) { out.cache = { erro: String(e.message || e).slice(0, 160) }; }
       // contexto do pedido: loja (define o marketplace no ciclo) e se há logística registrada
       try {
         const rp = await blingGet('/pedidos/vendas/' + idE);
