@@ -239,7 +239,12 @@ function classificarVenda(v) {
  * todas as varreduras futuras e mataria a chance de registrar o alerta.
  * @returns {{ ok:true } | { ok:false, http:number, corpo:object }}
  */
-async function checarMlAntesDeEscrever(orderId, lcp) {
+async function checarMlAntesDeEscrever(orderId, lcp, opts) {
+  // opts.nfExterna: quem chama pelo botao "Processado" esta afirmando que a NF saiu
+  // POR FORA do painel. Se a venda estiver cancelada, o alerta de nao despachar e
+  // devido mesmo SEM etiqueta detectada — senao a linha vira uma cancelada comum, cai
+  // no bolsao fechado e ninguem e avisado pra cancelar a nota emitida por fora.
+  const nfExterna = !!(opts && opts.nfExterna);
   const ml = require('../auto-mensagens/mlApi');
   let st = null, env = null;
   try {
@@ -276,10 +281,13 @@ async function checarMlAntesDeEscrever(orderId, lcp) {
       ml_status_atualizado_em: new Date().toISOString(),
       venda_cancelada_em: new Date().toISOString()
     };
-    if (temEtiq) {
-      campos.alerta_pos_venda = (
+    if (temEtiq || nfExterna) {
+      campos.alerta_pos_venda = temEtiq ? (
         `CANCELADA NO ML com etiqueta ja gerada (${env.status || '?'}). NAO DESPACHAR. ` +
         `Conferir devolucao/estorno no ML e a NF/pedido no Bling.`
+      ).slice(0, 500) : (
+        `CANCELADA NO ML e havia conclusao manual em curso (NF provavelmente emitida ` +
+        `POR FORA do painel). NAO DESPACHAR. Conferir e cancelar/estornar a NF no Bling.`
       ).slice(0, 500);
     } else if (!envOk) {
       // Cancelada com envio DESCONHECIDO: quarentena em vez de finalizar, pra que o
@@ -314,6 +322,8 @@ async function checarMlAntesDeEscrever(orderId, lcp) {
     return { ok: false, http: 409, corpo: { ok: false, erro: 'venda_cancelada',
       mensagem: temEtiq
         ? 'Esta venda foi CANCELADA no Mercado Livre e JA TEM ETIQUETA. NADA foi alterado no Bling. NAO DESPACHE — confira estorno/devolucao.'
+        : nfExterna
+        ? 'Esta venda foi CANCELADA no Mercado Livre. NADA foi marcado. Se a NF ja saiu por fora do painel, cancele/estorne no Bling e NAO DESPACHE.'
         : 'Esta venda foi CANCELADA no Mercado Livre. NADA foi alterado no Bling.' } };
   }
   if (temEtiq) {
@@ -749,7 +759,7 @@ function routes(readBody) {
         // seria gravado por cima de uma etiqueta recem-criada, congelando o rastreio.
         // Sem o LEASE, um worker em curso emitiria a NF e a escrita terminal dele seria
         // rejeitada pelo venda_cancelada_em recem-gravado — nota emitida sem registro.
-        const _chkP = await checarMlAntesDeEscrever(orderId, lcp);
+        const _chkP = await checarMlAntesDeEscrever(orderId, lcp, { nfExterna: true });
         if (!_chkP.ok) { json(res, _chkP.http, _chkP.corpo); return true; }
 
         // PATCH CONDICIONAL: a leitura acima e o write eram operacoes separadas, entao
@@ -1397,10 +1407,15 @@ function routes(readBody) {
             json(res, 200, { ok: true, jaEmitida: true, mensagem: 'Esta venda ja possui NF-e referenciada no Bling. Registrado como emitida.', confirmacao_cliente: confJa });
             return true;
           }
-          await lcp.atualizarVenda(orderId, {
+          const _pErr = await lcp.atualizarVenda(orderId, {
             nf_erro: `${r.status || ''}: ${r.erro || JSON.stringify(r.detalhe || {}).slice(0,200)}`.slice(0,500),
             nf_emitindo_em: null, nf_emitindo_por: null   // falha nao-terminal: libera agora
           }, lcp.fecharLease(reserva.token));
+          // Se o PATCH nao gravou, o lease continua ativo e bloquearia cancelamento e
+          // novas tentativas por ate 10 min sem nada em curso — libera explicitamente.
+          if (!_pErr || !_pErr.ok || (Array.isArray(_pErr.data) && _pErr.data.length !== 1)) {
+            await lcp.liberarEmissao(orderId, reserva.token);
+          }
           json(res, 200, { ok: false, ...r });
           return true;
         }
