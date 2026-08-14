@@ -389,16 +389,25 @@ function resumoShopee(de, ate) {
     adsCliques += Number(d.cliques) || 0;
     adsGmv = Math.round((adsGmv + _num(d.gmv_direto)) * 100) / 100;
   }
-  const saiTotal = Math.round((saiDoBolso + adsGasto) * 100) / 100;
+  // ⚠️ 14/08 — CORREÇÃO IMPORTANTE (extrato de créditos de ads que o Diego trouxe):
+  // o `expense` da API é CONSUMO de crédito, não desembolso. No período 01→13/08 o consumo
+  // foi R$ 431,02, mas parte dele saiu de crédito que a Shopee DEU: "Free Ads Credit"
+  // R$ 100,00 (recompensa de recarga), e as recargas de R$ 100 foram pagas R$ 90 (bônus de
+  // 10%). Além disso, "Recarga Automática (Comissão)" é descontada do repasse — se isso
+  // também aparecer na carteira, somar aqui contaria DUAS VEZES.
+  // Enquanto a classificação (consumo × recarga paga × crédito grátis) não estiver feita a
+  // partir do extrato, ads fica INFORMATIVO e NÃO entra no sai_do_bolso: superestimar custo
+  // é pior que a situação anterior, porque parece número conferido.
+  const saiTotal = saiDoBolso;
   return {
     devolucoes: {
       quantidade: devQtd, valor_devolvido: Math.round(devTotal * 100) / 100,
       por_motivo: porMotivo,
       por_sku: Object.values(porSku).sort((a, b) => b.valor - a.valor).slice(0, 50)
     },
-    ads: { gasto: adsGasto, dias: adsDias, cliques: adsCliques, gmv_direto: adsGmv, roas: adsGasto > 0 ? Math.round((adsGmv / adsGasto) * 100) / 100 : null },
+    ads: { consumo: adsGasto, gasto: adsGasto, dias: adsDias, cliques: adsCliques, gmv_direto: adsGmv, roas: adsGasto > 0 ? Math.round((adsGmv / adsGasto) * 100) / 100 : null, entra_no_sai_do_bolso: false, nota: 'consumo de credito; o desembolso real depende do extrato de recargas (credito gratis e bonus de 10% nao sao custo)' },
     // sai_do_bolso agora inclui ads; carteira_sai_do_bolso é a parte que vem da carteira
-    carteira: { por_tipo: porTipo, custo_por_tipo: custoPorTipo, carteira_sai_do_bolso: saiDoBolso, ads: adsGasto, sai_do_bolso: saiTotal },
+    carteira: { por_tipo: porTipo, custo_por_tipo: custoPorTipo, carteira_sai_do_bolso: saiDoBolso, ads_consumo_nao_somado: adsGasto, sai_do_bolso: saiTotal },
     atualizado: {
       devolucoes: readJson(ARQ_DEV(), {}).atualizado || null,
       carteira: readJson(ARQ_CAR(), {}).atualizado || null,

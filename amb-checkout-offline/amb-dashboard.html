@@ -397,7 +397,7 @@ const MOD = '/amb-checkout-offline';
     return _f(u, o);
   };
 })();
-const DASH_BUILD = 'a11';
+const DASH_BUILD = 'a12';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -1150,9 +1150,12 @@ function despesasSHPper(){
   // 14/08: o sai_do_bolso da Shopee passou a incluir o gasto de ADS (que não vem pela
   // carteira — a Shopee lança ads só no relatório de anúncios). O fallback soma as duas
   // partes caso o servidor ainda seja o antigo, sem contar duas vezes.
+  // 14/08: o servidor decide o que entra. O consumo de ads NÃO entra (é crédito consumido,
+  // não desembolso — parte vem de crédito grátis e de recarga com bônus). O card mostra o
+  // consumo em separado, sem misturar com custo.
   const cw = (SHP_PER && SHP_PER.carteira) || {};
   if (cw.sai_do_bolso != null) return Number(cw.sai_do_bolso) || 0;
-  return (Number(cw.carteira_sai_do_bolso) || 0) + (Number((SHP_PER.ads && SHP_PER.ads.gasto) || 0) || 0);
+  return Number(cw.carteira_sai_do_bolso) || 0;
 }
 // d193 — a tabela dos SKUs que venderam sem custo. Só aparece quando existe algum.
 function desenharSemCusto(MC){
