@@ -1400,6 +1400,13 @@ async function _processarAutoEmissaoInner({ venda, iaResult, graosResult, lcp })
     return { falha: true, motivo: _rc.motivo };
   }
 
+  // RENOVA o lease antes de cada passo irreversivel: as chamadas ao Bling nao tem
+  // timeout, entao a duracao real pode passar dos 10 min e outro worker reservaria a
+  // mesma venda. Perder a posse = ABORTA sem tocar no Bling.
+  if (!(await lcp.renovarEmissao(orderId, _res.token))) {
+    console.warn(`[auto-emissao] order ${orderId} perdi a posse do lease — nao edito`);
+    return { falha: true, retry: true, motivo: 'lease_perdido' };
+  }
   let edit;
   try {
     edit = await bp.editarPedidoComGraos({ ...baseArgs, dryRun: false });
@@ -1432,6 +1439,10 @@ async function _processarAutoEmissaoInner({ venda, iaResult, graosResult, lcp })
   // o cancelamento com o gerarNFe ja em curso — as reservas das rotas manuais nao
   // cobriam este emissor.
   // Emite a NF (NF transmitida pra SEFAZ — irreversivel)
+  if (!(await lcp.renovarEmissao(orderId, _res.token))) {
+    console.warn(`[auto-emissao] order ${orderId} perdi a posse do lease — nao emito`);
+    return { falha: true, retry: true, motivo: 'lease_perdido' };
+  }
   let nf;
   try {
     nf = await bp.gerarNFe(edit.pedidoId);
@@ -1481,7 +1492,9 @@ async function _processarAutoEmissaoInner({ venda, iaResult, graosResult, lcp })
     // vinda do lerRespostas nao ha entrada nenhuma. E o bling_editado_em ja gravado faz
     // o confirmou-strand pular esta linha. Sem enfileirar, a NF emitida ficaria sem
     // registro ate alguem reconciliar na mao.
-    try { _retry.enfileirarRestauracao({ orderId, venda, iaResult, graosResult }); }
+    try { _retry.enfileirarRestauracao({ orderId, venda, iaResult, graosResult,
+            nfConfirmada: { nfeId: nf.nfeId, numero: nf.numero, serie: nf.serie, chave: nf.chave || null },
+            pedidoId: edit.pedidoId }); }
     catch (e) { console.error(`[auto-emissao] order ${orderId} falhei ao enfileirar: ${e.message}`); }
     return { falha: true, retry: true, motivo: 'nf_emitida_sem_registro',
              nfNumero: nf.numero, pedidoId: edit.pedidoId };
