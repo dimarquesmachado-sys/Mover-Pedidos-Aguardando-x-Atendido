@@ -476,7 +476,12 @@ async function rotinaChecarCanceladasML(opts = {}) {
     // cota, entao o teto e atingido mais rapido do que parece.
     const PAG = 500;
     let lista = [];
-    for (let pg = 0; pg < 20; pg++) {
+    // Sem teto fixo de paginas: com ?dias=90 a janela pode passar de 10 mil linhas e um
+    // corte em 20 paginas pararia no meio, escondendo as vendas mais antigas em
+    // silencio. O limite alto abaixo e so anti-loop e, se for atingido, e reportado.
+    const MAX_PAG = 500;
+    let truncou = false;
+    for (let pg = 0; pg < MAX_PAG; pg++) {
       const r = await lcp.listarPendentes({ dias, limit: PAG, offset: pg * PAG });
       // Pagina que falha e indistinguivel de fim de dados se virar array vazio: a
       // rodada terminaria "com sucesso" varrendo so as mais novas, e cancelamentos
@@ -489,6 +494,11 @@ async function rotinaChecarCanceladasML(opts = {}) {
       }
       lista = lista.concat(r.data);
       if (r.data.length < PAG) break;
+      if (pg === MAX_PAG - 1) truncou = true;
+    }
+    if (truncou) {
+      out.erros.push({ erro: `janela com mais de ${MAX_PAG * PAG} vendas — varredura truncada, reduza LIXAS_CANCELADAS_DIAS` });
+      console.error(`[canceladas] 🚨 varredura truncada em ${MAX_PAG} paginas`);
     }
 
     const agora = Date.now();
@@ -512,7 +522,12 @@ async function rotinaChecarCanceladasML(opts = {}) {
       const idadeMs2 = agora - nasceu;
       const tCancel = v.ml_status_atualizado_em ? new Date(v.ml_status_atualizado_em).getTime() : 0;
       const tEnvio  = v.ml_envio_checado_em ? new Date(v.ml_envio_checado_em).getTime() : 0;
-      const cancelVencido = (idadeMs2 >= idadeMinMs) && (!tCancel || (agora - tCancel) >= repescarMs);
+      // Backoff apos falha: 15 min (nao as 6h do sucesso). Assim uma consulta que falhou
+      // volta rapido, em vez de deixar a venda sem checagem de cancelamento por horas.
+      const tFalha = v.ml_status_falha_em ? new Date(v.ml_status_falha_em).getTime() : 0;
+      const backoffOk = !tFalha || (agora - tFalha) >= 15 * 60 * 1000;
+      const cancelVencido = (idadeMs2 >= idadeMinMs) && backoffOk
+                            && (!tCancel || (agora - tCancel) >= repescarMs);
       const envioVencido  = (idadeMs2 >= ENVIO_IDADE_MIN_H * 3600 * 1000)
                             && !v.processado_manual_em && !v.nf_emitida_em
                             // Etiqueta detectada NAO encerra o acompanhamento: o envio
@@ -623,7 +638,12 @@ async function rotinaChecarCanceladasML(opts = {}) {
       // segue como "viva" pra que a checagem de ENVIO ainda aconteca nesta rodada.
       out.erros.push({ order_id: oid, erro: st.erro });
       console.warn(`[canceladas] order ${oid} nao consegui checar o cancelamento: ${st.erro} — sigo so com o envio`);
-      try { await lcp.atualizarVenda(oid, { ml_status_atualizado_em: agoraIso }); } catch (_) {}
+      // NAO carimba ml_status_atualizado_em: esse campo significa "cancelamento
+      // conferido com sucesso", e a repescagem o usa pra suprimir novas tentativas por
+      // CANCELADAS_REPESCAR_H (6h). Como a Guarda 1.5 tambem segue em frente quando a
+      // consulta falha, uma venda de fato cancelada poderia ser faturada nessa janela.
+      // Backoff curto e proprio: 15 min, so pra nao martelar o ML em loop.
+      try { await lcp.atualizarVenda(oid, { ml_status_falha_em: agoraIso }); } catch (_) {}
       st = { ok: true, status: v.ml_status || null, cancelada: false, _soEnvio: true, _statusIndeterminado: st.erro || 'falha lendo status' };
       await new Promise(r => setTimeout(r, CANCELADAS_PAUSA_MS));
     }
@@ -642,6 +662,7 @@ async function rotinaChecarCanceladasML(opts = {}) {
       if (!st._soEnvio) {
         campos.ml_status = st.status;
         campos.ml_status_atualizado_em = agoraIso;
+        if (v.ml_status_falha_em) campos.ml_status_falha_em = null;   // consulta voltou
       }
       // Alinhado com a selecao: etiqueta em cache NAO encerra o poll (o envio ainda
       // evolui pra shipped/delivered). Antes, a selecao escolhia a linha toda hora e a
