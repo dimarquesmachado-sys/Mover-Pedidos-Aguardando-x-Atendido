@@ -750,6 +750,22 @@ async function rotinaChecarCanceladasML(opts = {}) {
       // as varreduras futuras, ou seja, o alerta de nao despachar nunca sairia.
       // Regrava SEM o status (que a guarda protege) e monta o alerta pos-venda.
       if (updV && updV.bloqueada && campos.ml_etiqueta_em) {
+        // O bloqueio pode vir de DOIS predicados: a guarda automatica (cancelamento) ou
+        // o processado_manual_em que eu mesmo adicionei. Assumir cancelamento sempre
+        // jogava uma venda concluida na mao pra fila urgente com "cancelada, nao
+        // despachar" — alerta falso sobre uma venda perfeitamente valida.
+        const _rel = await lcp.buscar(oid);
+        const _v2 = (_rel && _rel.ok) ? _rel.data : null;
+        const _terminal = !!(_v2 && (_v2.venda_cancelada_em || ['venda_cancelada','cancelado','cancelada_quarentena'].includes(String(_v2.status || ''))));
+        if (!_terminal) {
+          // Nao e cancelamento: foi conclusao manual (ou a linha nao pode ser relida).
+          // A decisao do operador prevalece — nao grava etiqueta nem alerta.
+          console.log(`[canceladas] order ${oid} etiqueta detectada mas a escrita foi bloqueada por conclusao manual — respeito a decisao do operador`);
+          out.detalhes.push({ order_id: oid, ml_status: st.status, cancelada: false, etiqueta: false,
+                              aviso: 'etiqueta detectada, mas a venda foi concluida na mao nesse meio tempo' });
+          await new Promise(r => setTimeout(r, CANCELADAS_PAUSA_MS));
+          continue;
+        }
         const semStatus = Object.assign({}, campos);
         delete semStatus.status;
         semStatus.alerta_pos_venda = (
@@ -1289,6 +1305,35 @@ async function _processarAutoEmissaoInner({ venda, iaResult, graosResult, lcp })
   // antes do gerarNFe impedia a nota, mas o pedido de uma venda etiquetada/postada/
   // cancelada ja teria sido alterado. O predicado da reserva checa os marcadores
   // terminais, entao ele e a guarda certa pra tambem proteger a escrita no Bling.
+  // ENVIO AO VIVO antes de reservar: a Guarda 1.5 so refresca o status do PEDIDO, e uma
+  // etiqueta que ficou imprimivel depois do ultimo poll horario deixaria ml_etiqueta_em
+  // nulo — a reserva passaria e o pedido seria reescrito e faturado com etiqueta ja
+  // gerada. Fail closed: so segue com confirmacao de que NAO ha etiqueta.
+  try {
+    const envA = await ml.getEnvioResumo(String(orderId));
+    if (!envA || !envA.ok) {
+      console.warn(`[auto-emissao] order ${orderId} envio indeterminado (${(envA && envA.erro) || 'sem resposta'}) — nao edito nem emito`);
+      try { await lcp.atualizarVenda(orderId, { ml_envio_indeterminado_em: new Date().toISOString() }); } catch (_) {}
+      return { falha: true, retry: true, motivo: 'envio_indeterminado' };
+    }
+    if (envA.temEtiqueta) {
+      await lcp.atualizarVenda(orderId, {
+        ml_etiqueta_em: new Date().toISOString(),
+        ml_shipment_status: envA.status || null,
+        ml_shipment_substatus: envA.substatus || null,
+        ml_envio_indeterminado_em: null
+      });
+      console.warn(`[auto-emissao] order ${orderId} etiqueta JA gerada no ML (${envA.status}) — nao edito nem emito`);
+      return { falha: true, motivo: 'etiqueta_ja_gerada' };
+    }
+    if (venda.ml_envio_indeterminado_em) {
+      try { await lcp.atualizarVenda(orderId, { ml_envio_indeterminado_em: null }); } catch (_) {}
+    }
+  } catch (e) {
+    console.warn(`[auto-emissao] order ${orderId} excecao lendo o envio — nao edito nem emito: ${e.message}`);
+    return { falha: true, retry: true, motivo: 'envio_indeterminado' };
+  }
+
   const _res = await lcp.reservarEmissao(orderId);
   if (!_res.ok) {
     console.warn(`[auto-emissao] order ${orderId} nao reservei (${_res.motivo}) — nao edito nem emito`);
