@@ -481,8 +481,9 @@ async function rotinaChecarCanceladasML(opts = {}) {
     // silencio. O limite alto abaixo e so anti-loop e, se for atingido, e reportado.
     const MAX_PAG = 500;
     let truncou = false;
+    let _cursor = null;
     for (let pg = 0; pg < MAX_PAG; pg++) {
-      const r = await lcp.listarPendentes({ dias, limit: PAG, offset: pg * PAG });
+      const r = await lcp.listarPendentes({ dias, limit: PAG, antesDe: _cursor });
       // Pagina que falha e indistinguivel de fim de dados se virar array vazio: a
       // rodada terminaria "com sucesso" varrendo so as mais novas, e cancelamentos
       // antigos ficariam invisiveis indefinidamente se a falha persistisse.
@@ -493,6 +494,8 @@ async function rotinaChecarCanceladasML(opts = {}) {
         return out;
       }
       lista = lista.concat(r.data);
+      const _ult = r.data[r.data.length - 1];
+      _cursor = _ult ? { data_venda: _ult.data_venda, order_id: _ult.order_id } : null;
       if (r.data.length < PAG) break;
       if (pg === MAX_PAG - 1) truncou = true;
     }
@@ -1239,9 +1242,19 @@ async function _processarAutoEmissaoInner({ venda, iaResult, graosResult, lcp })
   // editarPedidoComGraos -> calcularRateio, e a sobra de centavos (se houver)
   // entra no campo DESCONTO ou OUTRAS DESPESAS do pedido, de modo que o TOTAL
   // sempre bate exato. Nao ha desvio pra humano por causa de centavo.
+  // RESERVA ANTES DE EDITAR. A edicao ja reescreve os itens no Bling — reservar so
+  // antes do gerarNFe impedia a nota, mas o pedido de uma venda etiquetada/postada/
+  // cancelada ja teria sido alterado. O predicado da reserva checa os marcadores
+  // terminais, entao ele e a guarda certa pra tambem proteger a escrita no Bling.
+  const _res = await lcp.reservarEmissao(orderId);
+  if (!_res.ok) {
+    console.warn(`[auto-emissao] order ${orderId} nao reservei (${_res.motivo}) — nao edito nem emito`);
+    return { falha: true, retry: _res.motivo === 'reserva_falhou', motivo: `reserva_${_res.motivo}` };
+  }
+
   const edit = await bp.editarPedidoComGraos({ ...baseArgs, dryRun: false });
   if (!edit.ok) {
-    await lcp.atualizarVenda(orderId, { status: 'precisa_atencao_humano', bling_erro: `auto edit ${edit.etapa || ''}: ${edit.erro || ''}`.slice(0, 500) });
+    await lcp.atualizarVenda(orderId, { status: 'precisa_atencao_humano', nf_emitindo_em: null, bling_erro: `auto edit ${edit.etapa || ''}: ${edit.erro || ''}`.slice(0, 500) });
     console.error(`[auto-emissao] order ${orderId} edit falhou (${edit.etapa}): ${edit.erro}`);
     return { falha: true, motivo: 'edit_falhou' };
   }
@@ -1259,12 +1272,6 @@ async function _processarAutoEmissaoInner({ venda, iaResult, graosResult, lcp })
   // nf_emitindo_em, entao o cron de cancelamento nao via lease nenhum e podia gravar
   // o cancelamento com o gerarNFe ja em curso — as reservas das rotas manuais nao
   // cobriam este emissor.
-  const _res = await lcp.reservarEmissao(orderId);
-  if (!_res.ok) {
-    console.warn(`[auto-emissao] order ${orderId} nao reservei pra emitir (${_res.motivo}) — nao emito agora`);
-    return { falha: true, retry: _res.motivo === 'reserva_falhou', motivo: `reserva_${_res.motivo}` };
-  }
-
   // Emite a NF (NF transmitida pra SEFAZ — irreversivel)
   const nf = await bp.gerarNFe(edit.pedidoId);
   if (!nf.ok) {
@@ -1280,7 +1287,7 @@ async function _processarAutoEmissaoInner({ venda, iaResult, graosResult, lcp })
   }
 
   // Sucesso total
-  await lcp.atualizarVenda(orderId, {
+  const _persist = await lcp.atualizarVenda(orderId, {
     nf_emitida_em: new Date().toISOString(),
     nf_id: nf.nfeId,
     nf_numero: nf.numero,
@@ -1290,6 +1297,13 @@ async function _processarAutoEmissaoInner({ venda, iaResult, graosResult, lcp })
     nf_emitindo_em: null,      // lease liberado junto com o terminal
     status: 'processado'
   });
+  // NF ja saiu (irreversivel). Se nao gravou, NAO reportar sucesso: o wrapper apagaria
+  // a entrada da fila, o painel mostraria a venda inacabada e o lease ficaria preso.
+  if (!_persist.ok || (Array.isArray(_persist.data) && _persist.data.length !== 1)) {
+    console.error(`[auto-emissao] order ${orderId} 🚨 NF ${nf.numero || '?'} EMITIDA mas NAO gravada — pedindo reconciliacao`);
+    return { falha: true, retry: true, motivo: 'nf_emitida_sem_registro',
+             nfNumero: nf.numero, pedidoId: edit.pedidoId };
+  }
   console.log(`[auto-emissao] ✅ order ${orderId} → pedido ${edit.pedidoId} editado + NF ${nf.numero}/${nf.serie} emitida (auto)`);
   return { emitida: true, pedidoId: edit.pedidoId, nfNumero: nf.numero };
 }
