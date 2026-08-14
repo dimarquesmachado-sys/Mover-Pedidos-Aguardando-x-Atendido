@@ -220,6 +220,7 @@ async function rotinaEscadaIndisponivel(opts = {}) {
 
       // dryRun: so reporta o que FARIA
       if (dryRun) {
+        _libEsc = true;
         stats.substituidos++;
         stats.lista.push({ order_id: orderId, acao: 'substituiria', horas_ate_prazo: Math.round(horas * 10) / 10, ..._reg, trocas: resolvido.trocas, pedido_final: resolvido.pedidoFinal });
         continue;
@@ -231,65 +232,75 @@ async function rotinaEscadaIndisponivel(opts = {}) {
       // RESERVA ANTES DA EDICAO: editarPedidoComGraos ja reescreve os itens no Bling.
       // Reservar so antes do gerarNFe impedia a nota, mas o pedido de uma venda
       // etiquetada/postada/cancelada ja teria sido alterado — e isso nao se desfaz.
-      const resEsc = await lcp.reservarEmissao(orderId);
-      if (!resEsc.ok) {
-        console.warn(`[escada] order ${orderId} nao reservei (${resEsc.motivo}) — nao edito nem emito`);
-        stats.erros++; stats.lista.push({ order_id: orderId, acao: 'erro', motivo: `reserva_${resEsc.motivo}` });
-        continue;
-      }
-      // STATUS ML AO VIVO, ANTES de qualquer escrita no Bling. Os campos do banco lidos no inicio podem
-      // estar ate 1h velhos (a varredura de cancelamento e horaria), e este emissor
-      // nao passa pelo processarAutoEmissao — precisa das duas guardas por conta.
+      // try/finally apos a reserva: promessa rejeitada do editarPedidoComGraos ou do
+      // gerarNFe pulava pro catch do loop sem liberar, travando a venda por ate 10 min.
+      let _libEsc = false;
       try {
-        const stEsc = await ml.getOrderStatusResumo(String(orderId));
-        // getOrderStatusResumo devolve {ok:false} em vez de lancar: sem tratar, uma
-        // falha transiente numa venda de fato cancelada caia direto no gerarNFe.
-        // Indeterminado = para, porque a proxima etapa e irreversivel.
-        if (!stEsc || !stEsc.ok) {
-          console.warn(`[escada] order ${orderId} status ML indeterminado (${(stEsc && stEsc.erro) || 'sem resposta'}) — nao emito`);
-          await lcp.liberarEmissao(orderId, resEsc.token);
-          stats.erros++; stats.lista.push({ order_id: orderId, acao: 'erro', motivo: 'status_ml_indeterminado' });
+        const resEsc = await lcp.reservarEmissao(orderId);
+        if (!resEsc.ok) {
+          console.warn(`[escada] order ${orderId} nao reservei (${resEsc.motivo}) — nao edito nem emito`);
+          stats.erros++; stats.lista.push({ order_id: orderId, acao: 'erro', motivo: `reserva_${resEsc.motivo}` });
           continue;
         }
-        // ENVIO ao vivo tambem: o getPrazoPostagem ja leu o shipment atual nesta mesma
-        // rodada (info.shipment_resumo), entao da pra decidir sem chamada extra. Uma
-        // etiqueta que ficou imprimivel depois do snapshot deixaria ml_etiqueta_em nulo
-        // e a reserva passaria — reescrevendo e faturando pedido ja etiquetado.
-        const _sr = infoEnvio && infoEnvio.shipment_resumo;
-        const _stEnv = String((_sr && _sr.status) || '').toLowerCase();
-        const _subEnv = String((_sr && _sr.substatus) || '').toLowerCase();
-        const SEM_ETIQ = ['invoice_pending', 'buffered', 'ready_to_print_pending', 'regenerating'];
-        const _temEtiq = ['shipped', 'delivered', 'not_delivered'].includes(_stEnv)
-                      || (_stEnv === 'ready_to_ship' && !SEM_ETIQ.includes(_subEnv));
-        if (_temEtiq) {
-          await lcp.atualizarVenda(orderId, {
-            ml_etiqueta_em: new Date().toISOString(),
-            ml_shipment_status: _sr.status || null, ml_shipment_substatus: _sr.substatus || null,
-            nf_emitindo_em: null, nf_emitindo_por: null
-          }, lcp.fecharLease(resEsc.token));
-          console.warn(`[escada] order ${orderId} etiqueta JA gerada (${_sr.status}) — nao edito nem emito`);
-          stats.erros++; stats.lista.push({ order_id: orderId, acao: 'erro', motivo: 'etiqueta_ja_gerada' });
-          continue;
-        }
-        if (stEsc.cancelada) {
-          // A escada JA e a dona do lease (reservou acima), entao testar "sem lease
-          // ativo" daria zero linhas sempre. Converte a PROPRIA reserva no estado de
-          // cancelamento, liberando o lease na mesma escrita.
-          const _updC = await lcp.atualizarVenda(orderId, {
-            status: 'venda_cancelada', ml_status: stEsc.status,
-            ml_status_atualizado_em: new Date().toISOString(),
-            venda_cancelada_em: new Date().toISOString(),
-            nf_emitindo_em: null, nf_emitindo_por: null
-          }, lcp.fecharLease(resEsc.token));
-          if (!_updC || !_updC.ok || (Array.isArray(_updC.data) && _updC.data.length !== 1)) {
-            console.error(`[escada] order ${orderId} 🚨 cancelada no ML mas NAO gravei — libero o lease`);
+        // STATUS ML AO VIVO, ANTES de qualquer escrita no Bling. Os campos do banco lidos no inicio podem
+        // estar ate 1h velhos (a varredura de cancelamento e horaria), e este emissor
+        // nao passa pelo processarAutoEmissao — precisa das duas guardas por conta.
+        try {
+          const stEsc = await ml.getOrderStatusResumo(String(orderId));
+          // getOrderStatusResumo devolve {ok:false} em vez de lancar: sem tratar, uma
+          // falha transiente numa venda de fato cancelada caia direto no gerarNFe.
+          // Indeterminado = para, porque a proxima etapa e irreversivel.
+          if (!stEsc || !stEsc.ok) {
+            console.warn(`[escada] order ${orderId} status ML indeterminado (${(stEsc && stEsc.erro) || 'sem resposta'}) — nao emito`);
             await lcp.liberarEmissao(orderId, resEsc.token);
+            stats.erros++; stats.lista.push({ order_id: orderId, acao: 'erro', motivo: 'status_ml_indeterminado' });
+            continue;
           }
-          console.warn(`[escada] order ${orderId} CANCELADA no ML — abortando antes de emitir`);
+          // ENVIO ao vivo tambem: o getPrazoPostagem ja leu o shipment atual nesta mesma
+          // rodada (info.shipment_resumo), entao da pra decidir sem chamada extra. Uma
+          // etiqueta que ficou imprimivel depois do snapshot deixaria ml_etiqueta_em nulo
+          // e a reserva passaria — reescrevendo e faturando pedido ja etiquetado.
+          const _sr = infoEnvio && infoEnvio.shipment_resumo;
+          const _stEnv = String((_sr && _sr.status) || '').toLowerCase();
+          const _subEnv = String((_sr && _sr.substatus) || '').toLowerCase();
+          const SEM_ETIQ = ['invoice_pending', 'buffered', 'ready_to_print_pending', 'regenerating'];
+          const _temEtiq = ['shipped', 'delivered', 'not_delivered'].includes(_stEnv)
+                        || (_stEnv === 'ready_to_ship' && !SEM_ETIQ.includes(_subEnv));
+          if (_temEtiq) {
+            await lcp.atualizarVenda(orderId, {
+              ml_etiqueta_em: new Date().toISOString(),
+              ml_shipment_status: _sr.status || null, ml_shipment_substatus: _sr.substatus || null,
+              nf_emitindo_em: null, nf_emitindo_por: null
+            }, lcp.fecharLease(resEsc.token));
+            console.warn(`[escada] order ${orderId} etiqueta JA gerada (${_sr.status}) — nao edito nem emito`);
+            _libEsc = true;
+          stats.erros++; stats.lista.push({ order_id: orderId, acao: 'erro', motivo: 'etiqueta_ja_gerada' });
+            continue;
+          }
+          if (stEsc.cancelada) {
+            // A escada JA e a dona do lease (reservou acima), entao testar "sem lease
+            // ativo" daria zero linhas sempre. Converte a PROPRIA reserva no estado de
+            // cancelamento, liberando o lease na mesma escrita.
+            const _updC = await lcp.atualizarVenda(orderId, {
+              status: 'venda_cancelada', ml_status: stEsc.status,
+              ml_status_atualizado_em: new Date().toISOString(),
+              venda_cancelada_em: new Date().toISOString(),
+              nf_emitindo_em: null, nf_emitindo_por: null
+            }, lcp.fecharLease(resEsc.token));
+            if (!_updC || !_updC.ok || (Array.isArray(_updC.data) && _updC.data.length !== 1)) {
+              console.error(`[escada] order ${orderId} 🚨 cancelada no ML mas NAO gravei — libero o lease`);
+              await lcp.liberarEmissao(orderId, resEsc.token);
+            }
+            console.warn(`[escada] order ${orderId} CANCELADA no ML — abortando antes de emitir`);
+            _libEsc = true;
           stats.erros++; stats.lista.push({ order_id: orderId, acao: 'erro', motivo: 'cancelada_no_ml' });
-          continue;
-        }
-      } catch (e) {
+            continue;
+          }
+  
+      } finally {
+        if (!_libEsc) await lcp.liberarEmissao(orderId, resEsc && resEsc.token);
+      }
+    } catch (e) {
         // Excecao tambem e indeterminado: NAO cair no gerarNFe achando que esta tudo
         // bem. A venda volta na proxima rodada da escada.
         console.warn(`[escada] order ${orderId} excecao checando status ML — nao emito: ${e.message}`);
