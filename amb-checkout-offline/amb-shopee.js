@@ -249,6 +249,7 @@ async function coletarDevolucoes(dias, pedirAoSync) {
 // ADS: a lógica agora mora em lib/shopee-ads.js — MESMO código pra girassol/amb/good.
 // Empresa entra como parâmetro; descoberta nova entra uma vez só, não três.
 const adsLib = require('../lib/shopee-ads');
+const concLib = require('../lib/shopee-conciliar');   // mesma conciliação pra todas as empresas
 
 async function coletarCarteira(dias, pedirAoSync) {
   const total = Math.min(180, Math.max(1, Number(dias) || 30));
@@ -671,68 +672,8 @@ function rotasShopee(ctx) {
       const de = String(q.get('de') || '').slice(0, 10), ate = String(q.get('ate') || '').slice(0, 10);
       if (!/^\d{4}-\d{2}-\d{2}$/.test(de) || !/^\d{4}-\d{2}-\d{2}$/.test(ate)) { json(res, 400, { ok: false, erro: 'passe &de=AAAA-MM-DD&ate=AAAA-MM-DD' }); return true; }
       if (de > ate) { json(res, 400, { ok: false, erro: 'período invertido' }); return true; }
-      const maxP = Math.min(300, Math.max(10, Number(q.get('max')) || 150));
-      const ini = Date.parse(de + 'T00:00:00Z') / 1000, fim = Date.parse(ate + 'T23:59:59Z') / 1000;
-      const car = readJson(ARQ_CAR(), { transacoes: {} }).transacoes || {};
-      const atualizadoCar = readJson(ARQ_CAR(), {}).atualizado || null;
-      if (!Object.keys(car).length) { json(res, 200, { ok: false, erro: 'carteira vazia — rode /shopee/coletar-carteira antes' }); return true; }
-      // 1) o que a carteira creditou por pedido no período
-      const creditoPorPedido = {};
-      let creditoTotal = 0, semOrderSn = 0;
-      for (const x of Object.values(car)) {
-        const quando = Number(x.quando || 0);
-        if (!(quando >= ini && quando <= fim)) continue;
-        if (!/^(ESCROW_VERIFIED_ADD|ORDER_INCOME)/i.test(String(x.tipo || ''))) continue;
-        const v = _num(x.valor);
-        creditoTotal = Math.round((creditoTotal + v) * 100) / 100;
-        const sn = String(x.order_sn || '').trim();
-        if (!sn) { semOrderSn++; continue; }
-        creditoPorPedido[sn] = Math.round(((creditoPorPedido[sn] || 0) + v) * 100) / 100;
-      }
-      const sns = Object.keys(creditoPorPedido).slice(0, maxP);
-      if (!sns.length) { json(res, 200, { ok: false, erro: 'nenhum crédito de pedido na carteira nesse período' }); return true; }
-      // 2) o que a Shopee diz que cada pedido rendeu (escrow), em lotes de 50
-      const escrowPorPedido = {}; let falhas = 0;
-      for (let i0 = 0; i0 < sns.length; i0 += 50) {
-        const lote = sns.slice(i0, i0 + 50);
-        let mapa = null;
-        try { mapa = await escrowEmLote(lote); } catch (e) { mapa = null; }
-        if (!mapa) { falhas += lote.length; continue; }
-        for (const sn of lote) {
-          const e = mapa[sn];
-          if (!e) { falhas++; continue; }
-          escrowPorPedido[sn] = _num(e.escrow);
-        }
-        await new Promise(r0 => setTimeout(r0, 400));
-      }
-      // 3) compara
-      const linhas = [];
-      let somaCredito = 0, somaEscrow = 0;
-      for (const sn of sns) {
-        if (escrowPorPedido[sn] === undefined) continue;
-        const cr = creditoPorPedido[sn], es = escrowPorPedido[sn];
-        somaCredito = Math.round((somaCredito + cr) * 100) / 100;
-        somaEscrow = Math.round((somaEscrow + es) * 100) / 100;
-        const dif = Math.round((cr - es) * 100) / 100;
-        if (Math.abs(dif) >= 0.01) linhas.push({ order_sn: sn, creditado: cr, escrow: es, diferenca: dif });
-      }
-      linhas.sort((a, b) => Math.abs(b.diferenca) - Math.abs(a.diferenca));
-      const difTotal = Math.round((somaCredito - somaEscrow) * 100) / 100;
-      json(res, 200, {
-        ok: true, de, ate,
-        pedidos_comparados: sns.filter(s => escrowPorPedido[s] !== undefined).length,
-        creditado_no_periodo: creditoTotal,
-        creditos_sem_order_sn: semOrderSn,
-        soma_creditado: somaCredito,
-        soma_escrow: somaEscrow,
-        diferenca_total: difTotal,
-        leitura: difTotal < -0.01
-          ? 'a carteira creditou MENOS que o escrow: algo é retido antes do repasse (candidato: recarga de ads por comissão) — nesse caso o custo JÁ está embutido e não deve ser somado de novo'
-          : (difTotal > 0.01 ? 'a carteira creditou MAIS que o escrow — investigar (ajuste/estorno a favor)' : 'carteira e escrow batem: nada é retido antes do repasse, então recarga por comissão (se houver) é custo A PARTE'),
-        divergentes: linhas.slice(0, 30),
-        sem_escrow: falhas,
-        carteira_atualizada_em: atualizadoCar
-      });
+      const r = await concLib.conciliar({ readJson, ARQ_CAR, escrowEmLote, loja: q.get('loja') || undefined }, de, ate, q.get('max'));
+      json(res, 200, r);
       return true;
     }
 
