@@ -1417,7 +1417,7 @@ function routes(readBody) {
           await lcp.atualizarVenda(orderId, {
             nf_erro: `${r.status || ''}: ${r.erro || JSON.stringify(r.detalhe || {}).slice(0,200)}`.slice(0,500),
             nf_emitindo_em: null, nf_emitindo_por: null   // falha nao-terminal: libera agora
-          });
+          }, lcp.fecharLease(reserva.token));
           json(res, 200, { ok: false, ...r });
           return true;
         }
@@ -1686,9 +1686,9 @@ function routes(readBody) {
             }
             await lcp.atualizarVenda(orderId, {
               status: 'precisa_atencao_humano',
-              nf_emitindo_em: null,
+              nf_emitindo_em: null, nf_emitindo_por: null,
               nf_erro: `recuperar nf ${nf.status || ''}: ${nf.erro || JSON.stringify(nf.detalhe || {}).slice(0,200)}`.slice(0, 500)
-            });
+            }, lcp.fecharLease(reservaR && reservaR.token));
             json(res, 200, { ok: false, etapa: 'nf', ...nf });
             return true;
           }
