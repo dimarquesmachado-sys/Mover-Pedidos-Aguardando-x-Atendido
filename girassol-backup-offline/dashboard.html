@@ -1078,6 +1078,30 @@ function desenharDevolucoesML(d){
         '<td style="text-align:right" class="mut">'+(Math.round((s.valor||0)/tot*1000)/10)+'%</td></tr>'; }).join('')+
       '</tbody></table>';
   }
+  // 14/08 (Diego): mostrar o NÚMERO DA VENDA pra ele abrir no ML e conferir se houve cobrança.
+  // Link direto pro detalhe da venda; o claim aparece no title pra quem quiser rastrear.
+  const lst = (d.maiores||[]).slice(0,20);
+  if(lst.length){
+    h += '<div class="mut" style="font-size:11px;margin-top:10px">devolu\u00e7\u00f5es do per\u00edodo \u2014 clique no n\u00famero pra abrir a venda no ML e conferir a cobran\u00e7a</div>'+
+      '<table style="width:100%;margin-top:4px;font-size:12px"><thead><tr>'+
+      '<th style="text-align:left">venda</th><th style="text-align:left">SKU</th>'+
+      '<th style="text-align:left">motivo</th><th style="text-align:left">retorno</th>'+
+      '<th style="text-align:right">R$ produto</th><th style="text-align:right">custo ML</th></tr></thead><tbody>'+
+      lst.map(function(x){
+        const on = String(x.order_id||'');
+        const ehVenda = /^2000/.test(on);   // 47… é id de ENVIO (reclamação sobre o envio), não abre em /vendas
+        const link = ehVenda
+          ? '<a href="https://www.mercadolivre.com.br/vendas/'+on+'/detalhe" target="_blank" rel="noopener" style="color:#38bdf8;text-decoration:none" title="claim '+(x.claim_id||'')+'">'+on+' \u2197</a>'
+          : '<span title="reclama\u00e7\u00e3o sobre o ENVIO (claim '+(x.claim_id||'')+') \u2014 n\u00e3o tem p\u00e1gina de venda">'+on+'</span>';
+        return '<tr><td>'+link+'</td>'+
+          '<td>'+(x.sku||'<span class="dim">\u2014</span>')+'</td>'+
+          '<td class="mut">'+(x.motivo||'')+'</td>'+
+          '<td class="mut">'+(x.status||'')+(String(x.dinheiro||'')==='retained'?' \u23f3':'')+'</td>'+
+          '<td style="text-align:right">'+BRL(x.valor||0)+'</td>'+
+          '<td style="text-align:right'+((x.custo_retorno||0)>0?';color:#f87171;font-weight:700':'')+'">'+BRL(x.custo_retorno||0)+'</td></tr>';
+      }).join('')+'</tbody></table>'+
+      '<div class="mut" style="font-size:10.5px;margin-top:4px">\u23f3 = o ML ainda est\u00e1 segurando o dinheiro dessa venda. \u201ccusto ML\u201d \u00e9 o frete de retorno que ele cobrou \u2014 zero quando \u00e9 arrependimento com produto conforme.</div>';
+  }
   if(d.atualizado) h += '<div class="mut" style="font-size:10px;margin-top:5px">ML atualizado em '+dBR(String(d.atualizado).slice(0,10))+'</div>';
   el.innerHTML = h;
 }
