@@ -115,7 +115,10 @@ function criarNoturna(ctx) {
     if (typeof coletarAds === 'function') {
       await etapa('ads da Shopee (35 dias)', async () => {
         const r = await coletarAds(35);
-        return r ? (r.dias_novos + ' dia(s) novo(s) de ' + r.dias_vistos + ' vistos' + (r.erro ? ' | ' + r.erro : '')) : 'ok';
+        // Codex: `coletarAds` devolve {ok:false} em vez de lançar, e o `etapa` marcaria a
+        // rodada como bem-sucedida — a noturna diria "conferido" com dado velho na tela.
+        if (!r || r.ok === false) throw new Error('coleta de ads falhou' + (r && r.erro ? ': ' + r.erro : ''));
+        return r.dias_novos + ' dia(s) novo(s) de ' + r.dias_vistos + ' vistos' + (r.erro ? ' | ' + r.erro : '');
       });
       await dorme(3000);
     }
