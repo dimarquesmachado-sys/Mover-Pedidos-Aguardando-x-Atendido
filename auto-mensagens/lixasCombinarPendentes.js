@@ -222,6 +222,22 @@ async function reservarEmissao(orderId) {
  * Libera a reserva — SO se ela ainda for deste worker (token bate). Best-effort.
  * Sem token, mantem o comportamento antigo (compat com chamadas que ainda nao passam).
  */
+/**
+ * RENOVA o lease mantendo a propriedade. fetchComRetry nao tem timeout e os fluxos
+ * fazem varias chamadas ao Bling + retries de 429, entao a duracao real NAO e limitada
+ * pelos 10 min — sem renovar, outro worker reservaria a mesma venda com o primeiro
+ * ainda escrevendo. Chamar imediatamente ANTES de cada passo irreversivel.
+ * @returns {boolean} false = perdemos a posse; o chamador deve ABORTAR sem tocar no Bling.
+ */
+async function renovarEmissao(orderId, token) {
+  if (!token) return true;   // compat: caminhos que ainda nao passam token
+  try {
+    const r = await atualizarVenda(orderId, { nf_emitindo_em: new Date().toISOString() },
+      { somenteSe: `nf_emitindo_por=eq.${encodeURIComponent(token)}` });
+    return !!(r && r.ok && (!Array.isArray(r.data) || r.data.length === 1));
+  } catch (_) { return false; }
+}
+
 async function liberarEmissao(orderId, token) {
   try {
     const opts = token ? { somenteSe: `nf_emitindo_por=eq.${encodeURIComponent(token)}` } : undefined;
@@ -293,6 +309,7 @@ async function recheckAposReserva(orderId, token) {
 
 module.exports = {
   recheckAposReserva,
+  renovarEmissao,
   semReservaAtiva,
   reservarEmissao,
   liberarEmissao,
