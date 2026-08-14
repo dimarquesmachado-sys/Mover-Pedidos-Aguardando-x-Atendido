@@ -306,16 +306,23 @@ function resumoShopee(de, ate) {
   const custoPorPedido = {}, custoPorDevolucao = {}, usadoPedido = {};
   for (const x of Object.values(car)) {
     const t1 = String(x.tipo || '').toUpperCase();
-    if (/^(ESCROW_VERIFIED_ADD|ORDER_INCOME|WITHDRAWAL)/.test(t1)) continue;   // renda e saque não são custo de devolução
+    // Codex PR#76 (2ª rodada): como o índice passou a varrer a carteira INTEIRA (o débito da
+    // devolução cai em outro dia), aceitar "qualquer negativo do pedido" faria um relatório de
+    // UM dia absorver ajuste de meses atrás que nada tem a ver com devolução (ex.:
+    // ESCROW_VERIFIED_MINUS, que é correção de repasse). Só entram tipos de DEVOLUÇÃO.
+    if (!/RETURN|REFUND|_RR|ADJUSTMENT_FOR_RR/.test(t1)) continue;
     const v1 = _num(x.valor);
     if (v1 >= 0) continue;
     const sn1 = String(x.order_sn || '').trim();
     const rsn = String(x.refund_sn || '').trim();
+    // Codex PR#76 (2ª rodada): o total do pedido é usado como FALLBACK; se parte dos débitos
+    // já tem refund_sn, o fallback tem que contar SÓ o que sobrou — senão A + (A+B).
     // Codex PR#76: a carteira guarda `refund_sn` — quando existe, o débito é daquela devolução
     // específica. Sem isso, duas devoluções parciais do MESMO pedido recebiam cada uma o
     // débito inteiro e o total saía DOBRADO.
     if (rsn) custoPorDevolucao[rsn] = Math.round(((custoPorDevolucao[rsn] || 0) + Math.abs(v1)) * 100) / 100;
     if (!sn1) continue;
+    if (rsn) continue;   // já contabilizado na devolução específica
     custoPorPedido[sn1] = Math.round(((custoPorPedido[sn1] || 0) + Math.abs(v1)) * 100) / 100;
   }
   let devTotal = 0, devQtd = 0, devParciais = 0, devAjustadas = 0, devCanceladas = 0;
