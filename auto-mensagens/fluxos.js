@@ -1327,12 +1327,18 @@ async function _processarAutoEmissaoInner({ venda, iaResult, graosResult, lcp })
       return { falha: true, retry: true, motivo: 'envio_indeterminado' };
     }
     if (envA.temEtiqueta) {
-      await lcp.atualizarVenda(orderId, {
+      const _uEtA = await lcp.atualizarVenda(orderId, {
         ml_etiqueta_em: new Date().toISOString(),
         ml_shipment_status: envA.status || null,
         ml_shipment_substatus: envA.substatus || null,
         ml_envio_indeterminado_em: null
       });
+      // Nao gravou = a proxima passada volta a achar que nao ha etiqueta e libera a
+      // edicao/emissao. Pede retry pra tentar registrar de novo.
+      if (!_uEtA || !_uEtA.ok || (Array.isArray(_uEtA.data) && _uEtA.data.length !== 1)) {
+        console.error(`[auto-emissao] order ${orderId} 🚨 etiqueta detectada mas NAO gravada`);
+        return { falha: true, retry: true, motivo: 'etiqueta_nao_gravada' };
+      }
       console.warn(`[auto-emissao] order ${orderId} etiqueta JA gerada no ML (${envA.status}) — nao edito nem emito`);
       return { falha: true, motivo: 'etiqueta_ja_gerada' };
     }
