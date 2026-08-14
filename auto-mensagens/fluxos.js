@@ -1028,7 +1028,14 @@ async function _processarAutoEmissaoInner({ venda, iaResult, graosResult, lcp })
           return { falha: true, retry: !qOk2, motivo: 'venda_cancelada_no_ml_envio_indeterminado' };
         }
       }
-      const updG = await lcp.atualizarVenda(orderId, campos);
+      // Respeita a reserva, como os ramos de quarentena acima: sem isso, este PATCH
+      // gravava o cancelamento com uma emissao ja autorizada em curso — e a rota
+      // reservada seguia direto pro gerarNFe.
+      const updG = await lcp.atualizarVenda(orderId, campos, { somenteSe: _semReservaAtiva() });
+      if (updG && updG.ok && Array.isArray(updG.data) && updG.data.length === 0) {
+        console.warn(`[auto-emissao] order ${orderId} cancelada, mas ha emissao de NF em curso — nao gravo agora`);
+        return { falha: true, retry: true, motivo: 'venda_cancelada_no_ml_emissao_em_curso' };
+      }
       if (!updG || !updG.ok) {
         // Nao gravou: a linha segue em cliente_confirmou_pedido/aguardando_bling e
         // volta pela rehidratacao. Pede RETRY pra nao sumir da fila achando resolvido.
