@@ -36,7 +36,7 @@ const hojeMenos = d => new Date(Date.now() - d * 864e5).toISOString().slice(0, 1
 
 function criarNoturna(ctx) {
   const { mlBillingSync, backfillVendas, mlSyncFees, varrerCancelados, canarioCron, podarExpedicao,
-          coletarDevolucoes, coletarCarteira, VERSAO, validarSessao, ehAdmin, json } = ctx;
+          coletarDevolucoes, coletarCarteira, coletarAds, VERSAO, validarSessao, ehAdmin, json } = ctx;
   const dorme = ms => new Promise(r => setTimeout(r, ms));
 
   async function etapa(nome, fn) {
@@ -106,6 +106,16 @@ function criarNoturna(ctx) {
       await etapa('carteira da Shopee (30 dias)', async () => {
         const r = await coletarCarteira(30);
         return r ? (r.novas + ' novas de ' + r.vistas + ' vistas · ' + r.guardadas + ' no total' + (r.erro ? ' | ' + r.erro : '')) : 'ok';
+      });
+      await dorme(3000);
+    }
+    // 14/08 (Codex no PR#70): o card de Ads lia só o arquivo, e nenhuma rotina o atualizava —
+    // o número ficaria congelado na última coleta manual enquanto o resto da Shopee seguia
+    // fresco. Agora a coleta de ads é etapa da noturna, como devoluções e carteira.
+    if (typeof coletarAds === 'function') {
+      await etapa('ads da Shopee (35 dias)', async () => {
+        const r = await coletarAds(35);
+        return r ? (r.dias_novos + ' dia(s) novo(s) de ' + r.dias_vistos + ' vistos' + (r.erro ? ' | ' + r.erro : '')) : 'ok';
       });
       await dorme(3000);
     }
