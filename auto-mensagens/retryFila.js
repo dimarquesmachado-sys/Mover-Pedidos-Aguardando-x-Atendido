@@ -300,13 +300,32 @@ async function revisarAtencaoHumana({ lcp }) {
           } catch (_) { /* na duvida, NAO fecha como processado */ }
 
           if (temNF) {
-            await lcp.atualizarVenda(venda.order_id, {
+            const _uRec = await lcp.atualizarVenda(venda.order_id, {
               status: 'processado',
         // A NF foi CONFIRMADA no Bling: grava o marcador tambem. Sem ele, o
         // classificador ve 'processado' sem nf_emitida_em e mantem a venda em
         // Pendentes como "SEM NF" — e a reconciliacao de fundo nunca fecharia o caso.
         nf_emitida_em: new Date().toISOString(), bling_pedido_id: String(busca.pedidoId), bling_erro: null, nf_erro: null
             });
+            // BLOQUEADA: o cancelamento venceu a corrida e a guarda automatica recusou
+            // o status 'processado'. A NF externa CONFIRMADA nao pode se perder — sem
+            // ela, a linha vira uma cancelada comum e ninguem e avisado pra cancelar a
+            // nota. Regrava sem o status (que o terminal protege) e monta o alerta.
+            if (_uRec && _uRec.bloqueada) {
+              const _rr = await lcp.buscar(venda.order_id);
+              const _vv = (_rr && _rr.ok) ? _rr.data : null;
+              if (_vv) {
+                const _c2 = { nf_emitida_em: new Date().toISOString(), bling_pedido_id: String(busca.pedidoId) };
+                if (!_vv.alerta_pos_venda && !_vv.alerta_reconhecido_em) {
+                  _c2.alerta_pos_venda = ('CANCELADA NO ML com NF CONFIRMADA no Bling. NAO DESPACHAR. ' +
+                    'Conferir e cancelar/estornar a nota.').slice(0, 500);
+                }
+                const _u2 = await lcp.atualizarVenda(venda.order_id, _c2, { forcar: true });
+                console.error(`[revisar] order ${venda.order_id} 🚨 NF confirmada em venda CANCELADA — alerta ${(_u2 && _u2.ok) ? 'gravado' : 'FALHOU'}`);
+              } else {
+                console.error(`[revisar] order ${venda.order_id} 🚨 NF confirmada, escrita bloqueada e releitura falhou — conferir na mao`);
+              }
+            }
             console.log(`[revisar] order ${venda.order_id} concluido COM NF (situacao ${sit}) — reconciliado p/ processado`);
             continue;
           }
