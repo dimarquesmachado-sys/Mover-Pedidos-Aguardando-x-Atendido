@@ -246,25 +246,22 @@ async function rotinaEscadaIndisponivel(opts = {}) {
       }
       let _libEsc = false;
       try {
-        // ENVIO + STATUS ao vivo antes de qualquer escrita no Bling.
-        const _sr = infoEnvio && infoEnvio.shipment_resumo;
-        const _stEnv = String((_sr && _sr.status) || '').toLowerCase();
-        const _subEnv = String((_sr && _sr.substatus) || '').toLowerCase();
-        const SEM_ETIQ = ['invoice_pending', 'buffered', 'ready_to_print_pending', 'regenerating'];
-        // 'cancelled' COM evidencia de impressao conta como etiquetada — mesmo criterio
-        // do _resumoDoShipment. Sem isso, um envio cancelado apos a etiqueta impressa
-        // gravaria venda_cancelada_em sem alerta, e o marcador impede a reconciliacao.
-        // As marcas de impressao NAO existem no shipment_resumo (ele so copia status,
-        // substatus, mode, datas de criacao/handling e lead_time) — ficam so no
-        // shipment_bruto. Ler do resumo fazia esta checagem ser sempre falsa.
-        const _sb = (infoEnvio && infoEnvio.shipment_bruto) || {};
-        const _hist = _sb.status_history || {};
-        const _jaImprimiu = !!(_sb.date_first_printed || _sb.date_printed
-                              || _hist.date_first_printed || _hist.date_shipped
-                              || _subEnv === 'printed' || _subEnv === 'ready_to_print');
-        const _temEtiq = ['shipped', 'delivered', 'not_delivered'].includes(_stEnv)
-                      || (_stEnv === 'ready_to_ship' && !SEM_ETIQ.includes(_subEnv))
-                      || (_stEnv === 'cancelled' && _jaImprimiu);
+        // ENVIO AO VIVO — relido AGORA, nao o snapshot do passo 3. Entre aquela leitura
+        // e este ponto passam a resolucao de graos e a reserva; uma etiqueta que ficou
+        // imprimivel nesse intervalo passaria batida e a escada reescreveria e faturaria
+        // um pedido ja etiquetado. O getEnvioResumo ja aplica toda a regra de etiqueta
+        // (substatus nao-imprimiveis, postado, e cancelado COM evidencia de impressao).
+        let _envLive = null;
+        try { _envLive = await ml.getEnvioResumo(String(orderId)); }
+        catch (e) { _envLive = { ok: false, erro: e.message }; }
+        if (!_envLive || !_envLive.ok) {
+          console.warn(`[escada] order ${orderId} envio indeterminado (${(_envLive && _envLive.erro) || 'sem resposta'}) — nao edito nem emito`);
+          try { await lcp.atualizarVenda(orderId, { ml_envio_indeterminado_em: new Date().toISOString() }); } catch (_) {}
+          stats.erros++; stats.lista.push({ order_id: orderId, acao: 'erro', motivo: 'envio_indeterminado' });
+          continue;
+        }
+        const _sr = { status: _envLive.status, substatus: _envLive.substatus };
+        const _temEtiq = !!_envLive.temEtiqueta;
 
         let stEsc = null;
         try { stEsc = await ml.getOrderStatusResumo(String(orderId)); }
