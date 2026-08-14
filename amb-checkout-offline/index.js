@@ -1929,16 +1929,23 @@ function routes(readBody) {
       const porSkuO = {};
       let historicoCompleto = false;
       const TETO_LINHAS = 300000;
+      let ultimoId = 0;
       try {
-        for (let off = 0; off < TETO_LINHAS; off += 1000) {
-          // Codex PR#62 (P1): limit/offset SEM order no PostgREST não garante a mesma travessia
-          // entre páginas — linha pode repetir ou sumir (ainda mais com backfill rodando). `id`
-          // é único e estável, então serve de desempate.
+        for (let lidas = 0; lidas < TETO_LINHAS; lidas += 1000) {
+          // Codex PR#62 (P1, 2 rodadas): OFFSET é frágil aqui — o backfill, a caça da Magalu e a
+          // varredura de cancelados APAGAM linhas do histórico, e cada linha apagada desloca os
+          // offsets seguintes, fazendo a leitura PULAR registros. Paginar por CHAVE (id > último
+          // lido) é imune a isso: nada se desloca, só o que foi apagado deixa de aparecer.
           const q = 'vendas_historico?empresa=eq.amb&data_venda=gte.' + deO + '&data_venda=lte.' + ateO +
-                    '&select=sku,quantidade,valor_produto,canal&order=id.asc&limit=1000&offset=' + off;
+                    '&id=gt.' + ultimoId + '&select=id,sku,quantidade,valor_produto,canal&order=id.asc&limit=1000';
           const rr = await supaReq('amb', 'GET', q, null);
           if (!rr.ok) { outO.ok = false; outO.erro = 'histórico incompleto: Supabase HTTP ' + rr.status + ' — medição abortada'; json(res, 200, outO); return true; }
-          let arr = []; try { arr = JSON.parse(rr.body || '[]'); } catch (e) {}
+          // Codex PR#62 (P2): corpo inválido com HTTP 200 (resposta truncada) virava array vazio
+          // e o laço tratava como fim — resultado parcial com cara de completo. Agora aborta.
+          let arr = null;
+          try { arr = JSON.parse(rr.body || 'null'); } catch (e) { arr = null; }
+          if (!Array.isArray(arr)) { outO.ok = false; outO.erro = 'histórico: resposta do Supabase ilegível (JSON inválido) — medição abortada'; json(res, 200, outO); return true; }
+          for (const l of arr) { const idL = Number(l && l.id) || 0; if (idL > ultimoId) ultimoId = idL; }
           for (const l of arr) {
             const sk = String((l && l.sku) || '').trim();
             if (!sk) continue;
