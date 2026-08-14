@@ -232,6 +232,78 @@ function classificarVenda(v) {
   return { bolsao: 'pendente', motivo: 'aguardando', rotulo: '⏳ Aguardando o cliente' };
 }
 
+/**
+ * Checagem ML AO VIVO antes de qualquer escrita no Bling (fail closed).
+ * Ordem importa: ENVIO primeiro. Se a venda foi cancelada E ja tem etiqueta, precisamos
+ * gravar o alerta de nao despachar ANTES do venda_cancelada_em — que exclui a linha de
+ * todas as varreduras futuras e mataria a chance de registrar o alerta.
+ * @returns {{ ok:true } | { ok:false, http:number, corpo:object }}
+ */
+async function checarMlAntesDeEscrever(orderId, lcp) {
+  const ml = require('../auto-mensagens/mlApi');
+  let st = null, env = null;
+  try {
+    st = await ml.getOrderStatusResumo(String(orderId));
+    env = await ml.getEnvioResumo(String(orderId));
+  } catch (e) {
+    return { ok: false, http: 503, corpo: { ok: false, erro: 'estado_indeterminado',
+      mensagem: `Nao consegui confirmar o estado da venda no Mercado Livre (${e.message}). NADA foi alterado.` } };
+  }
+  if (!st || !st.ok) {
+    return { ok: false, http: 503, corpo: { ok: false, erro: 'estado_indeterminado',
+      mensagem: 'Nao consegui confirmar no Mercado Livre se a venda continua ativa. NADA foi alterado. Tente de novo em instantes.' } };
+  }
+  const envOk = !!(env && env.ok);
+  const temEtiq = envOk && env.temEtiqueta;
+
+  if (temEtiq) {
+    await lcp.atualizarVenda(orderId, {
+      ml_etiqueta_em: new Date().toISOString(),
+      ml_shipment_status: env.status || null, ml_shipment_substatus: env.substatus || null,
+      ml_envio_indeterminado_em: null
+    });
+  } else if (envOk) {
+    // Leitura boa e sem etiqueta: limpa a marca de indeterminado, senao uma falha
+    // anterior deixaria toda edicao manual bloqueada ate o poll horario passar.
+    await lcp.atualizarVenda(orderId, { ml_envio_indeterminado_em: null });
+  } else {
+    await lcp.atualizarVenda(orderId, { ml_envio_indeterminado_em: new Date().toISOString() });
+  }
+
+  if (st.cancelada) {
+    const campos = {
+      status: 'venda_cancelada', ml_status: st.status,
+      ml_status_atualizado_em: new Date().toISOString(),
+      venda_cancelada_em: new Date().toISOString()
+    };
+    if (temEtiq) {
+      campos.alerta_pos_venda = (
+        `CANCELADA NO ML com etiqueta ja gerada (${env.status || '?'}). NAO DESPACHAR. ` +
+        `Conferir devolucao/estorno no ML e a NF/pedido no Bling.`
+      ).slice(0, 500);
+    } else if (!envOk) {
+      // Cancelada com envio DESCONHECIDO: quarentena em vez de finalizar, pra que o
+      // cron reconfira e gere o alerta se houver etiqueta.
+      campos.status = 'cancelada_quarentena';
+      delete campos.venda_cancelada_em;
+    }
+    await lcp.atualizarVenda(orderId, campos, { forcar: true });
+    return { ok: false, http: 409, corpo: { ok: false, erro: 'venda_cancelada',
+      mensagem: temEtiq
+        ? 'Esta venda foi CANCELADA no Mercado Livre e JA TEM ETIQUETA. NADA foi alterado no Bling. NAO DESPACHE — confira estorno/devolucao.'
+        : 'Esta venda foi CANCELADA no Mercado Livre. NADA foi alterado no Bling.' } };
+  }
+  if (temEtiq) {
+    return { ok: false, http: 409, corpo: { ok: false, erro: 'etiqueta_ja_gerada',
+      mensagem: `Esta venda ja tem etiqueta no ML (${env.status || '?'}). NADA foi alterado — se faltar algo, resolva direto no Bling.` } };
+  }
+  if (!envOk) {
+    return { ok: false, http: 503, corpo: { ok: false, erro: 'envio_indeterminado',
+      mensagem: 'Nao consegui confirmar no Mercado Livre se a etiqueta ja saiu. NADA foi alterado. Tente de novo em instantes.' } };
+  }
+  return { ok: true };
+}
+
 // ── Router (interface esperada pelo orquestrador raiz) ───────────────
 function routes(readBody) {
   return async function handle(req, res, urlObj) {
@@ -1085,50 +1157,11 @@ function routes(readBody) {
         // Mesma reserva compartilhada dos caminhos automatico e de recuperacao.
         let _resEd = null;
         if (!dryRun) {
-          // ESTADO ML AO VIVO antes de reservar: os marcadores do banco podem ter ate
-          // 1h (o poll e horario). Se a cliente cancelou ou a etiqueta saiu nesse
-          // intervalo, a reserva passaria e o pedido seria reescrito assim mesmo.
-          try {
-            // require local: cada handler faz o seu (o `ml` de outra rota nao alcanca aqui)
-            const ml = require('../auto-mensagens/mlApi');
-            const stEd = await ml.getOrderStatusResumo(String(orderId));
-            if (!stEd || !stEd.ok) {
-              json(res, 503, { ok: false, erro: 'estado_indeterminado',
-                mensagem: 'Nao consegui confirmar no Mercado Livre se a venda continua ativa. NADA foi alterado. Tente de novo em instantes.' });
-              return true;
-            }
-            if (stEd.cancelada) {
-              await lcp.atualizarVenda(orderId, {
-                status: 'venda_cancelada', ml_status: stEd.status,
-                ml_status_atualizado_em: new Date().toISOString(),
-                venda_cancelada_em: new Date().toISOString()
-              });
-              json(res, 409, { ok: false, erro: 'venda_cancelada',
-                mensagem: 'Esta venda foi CANCELADA no Mercado Livre. NADA foi alterado no Bling.' });
-              return true;
-            }
-            const envEd = await ml.getEnvioResumo(String(orderId));
-            if (!envEd || !envEd.ok) {
-              await lcp.atualizarVenda(orderId, { ml_envio_indeterminado_em: new Date().toISOString() });
-              json(res, 503, { ok: false, erro: 'envio_indeterminado',
-                mensagem: 'Nao consegui confirmar no Mercado Livre se a etiqueta ja saiu. NADA foi alterado. Tente de novo em instantes.' });
-              return true;
-            }
-            if (envEd.temEtiqueta) {
-              await lcp.atualizarVenda(orderId, {
-                ml_etiqueta_em: new Date().toISOString(),
-                ml_shipment_status: envEd.status || null, ml_shipment_substatus: envEd.substatus || null,
-                ml_envio_indeterminado_em: null
-              });
-              json(res, 409, { ok: false, erro: 'etiqueta_ja_gerada',
-                mensagem: `Esta venda ja tem etiqueta no ML (${envEd.status || '?'}). NADA foi alterado — se faltar algo, resolva direto no Bling.` });
-              return true;
-            }
-          } catch (e) {
-            json(res, 503, { ok: false, erro: 'estado_indeterminado',
-              mensagem: `Nao consegui confirmar o estado da venda no Mercado Livre (${e.message}). NADA foi alterado.` });
-            return true;
-          }
+          // ESTADO ML AO VIVO antes de reservar (helper compartilhado com /emitir-nf):
+          // checa ENVIO antes do cancelamento, pra que uma venda cancelada COM etiqueta
+          // registre o alerta de nao despachar antes do venda_cancelada_em fechar a linha.
+          const _chk = await checarMlAntesDeEscrever(orderId, lcp);
+          if (!_chk.ok) { json(res, _chk.http, _chk.corpo); return true; }
 
           _resEd = await lcp.reservarEmissao(orderId);
           if (!_resEd.ok) {
@@ -1248,6 +1281,12 @@ function routes(readBody) {
         // gerarNFe, e a nota saia mesmo assim. Este PATCH condicional so passa se a
         // venda continua viva NESTE instante — e como o cron usa o mesmo campo pra
         // gravar o cancelamento, um dos dois perde a corrida no proprio Postgres.
+        // Mesma checagem ao vivo do /editar-bling: o pedido pode ter sido montado ha
+        // horas, e cancelamento/etiqueta surgidos depois do ultimo poll deixariam os
+        // marcadores nulos — a reserva passaria e a nota sairia mesmo assim.
+        const _chkNf = await checarMlAntesDeEscrever(orderId, lcp);
+        if (!_chkNf.ok) { json(res, _chkNf.http, _chkNf.corpo); return true; }
+
         const reserva = await lcp.reservarEmissao(orderId);
         // FAIL CLOSED: so segue com reserva CONFIRMADA (ok + exatamente 1 linha). Com
         // {ok:false} — falha transiente do Supabase, ou coluna nf_emitindo_em ainda nao
