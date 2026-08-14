@@ -309,15 +309,22 @@ function resumoShopee(de, ate) {
   // da loja — parte a Shopee banca. O que sai do bolso são os lançamentos da carteira
   // (ADJUSTMENT_FOR_RR_* e afins), e eles trazem `order_sn`: dá pra casar pedido a pedido.
   // Medido no período 01/07→14/08 da Girassol: R$ 5.249,08 devolvidos × R$ 1.598,66 debitados.
-  const custoPorPedido = {};
+  // Codex PR#76: o débito da devolução costuma cair em DIA DIFERENTE da abertura dela — se
+  // eu só olhasse a janela do relatório, o custo apareceria zerado (e no filtro de 1 dia a
+  // coluna sumiria). Indexo a carteira INTEIRA por pedido e por devolução; o recorte de
+  // período continua sendo feito pelas devoluções.
+  const custoPorPedido = {}, custoPorDevolucao = {}, usadoPedido = {};
   for (const x of Object.values(car)) {
-    const q1 = Number(x.quando || 0);
-    if (!(q1 >= ini && q1 <= fim)) continue;
     const t1 = String(x.tipo || '').toUpperCase();
     if (/^(ESCROW_VERIFIED_ADD|ORDER_INCOME|WITHDRAWAL)/.test(t1)) continue;   // renda e saque não são custo de devolução
     const v1 = _num(x.valor);
     if (v1 >= 0) continue;
     const sn1 = String(x.order_sn || '').trim();
+    const rsn = String(x.refund_sn || '').trim();
+    // Codex PR#76: a carteira guarda `refund_sn` — quando existe, o débito é daquela devolução
+    // específica. Sem isso, duas devoluções parciais do MESMO pedido recebiam cada uma o
+    // débito inteiro e o total saía DOBRADO.
+    if (rsn) custoPorDevolucao[rsn] = Math.round(((custoPorDevolucao[rsn] || 0) + Math.abs(v1)) * 100) / 100;
     if (!sn1) continue;
     custoPorPedido[sn1] = Math.round(((custoPorPedido[sn1] || 0) + Math.abs(v1)) * 100) / 100;
   }
@@ -339,11 +346,19 @@ function resumoShopee(de, ate) {
     if (d.devolucao_parcial) devParciais++;
     if (d.reembolso_ajustado) devAjustadas++;
     porMotivo[d.motivo || 'sem motivo'] = (porMotivo[d.motivo || 'sem motivo'] || 0) + 1;
-    maiores.push({ valor: _num(d.refund_amount), custo_real: custoPorPedido[String(d.order_sn || '')] || 0, sku: ((d.itens || [])[0] || {}).sku || null,
+    maiores.push({ valor: _num(d.refund_amount), custo_real: 0, sku: ((d.itens || [])[0] || {}).sku || null,
       motivo: d.motivo || null, texto: (d.motivo_texto || '').slice(0, 180) || null,
       status: st9 || null, order_sn: d.order_sn || null, parcial: !!d.devolucao_parcial });
-    const custoReal = custoPorPedido[String(d.order_sn || '')] || 0;
+    const rsn9 = String(d.return_sn || '').trim();
+    let custoReal = 0;
+    if (rsn9 && custoPorDevolucao[rsn9] != null) custoReal = custoPorDevolucao[rsn9];
+    else {
+      const sn9 = String(d.order_sn || '');
+      if (sn9 && !usadoPedido[sn9]) { custoReal = custoPorPedido[sn9] || 0; usadoPedido[sn9] = true; }
+    }
     devCustoReal = Math.round((devCustoReal + custoReal) * 100) / 100;
+    // o item de `maiores` foi empilhado logo acima, antes de sabermos o custo: preenche agora
+    if (maiores.length) maiores[maiores.length - 1].custo_real = custoReal;
     const somaItens = (d.itens || []).reduce((s2, i2) => s2 + _num(i2.devolvido), 0) || 1;
     for (const it of (d.itens || [])) {
       const s = it.sku || 'sem sku';
@@ -399,7 +414,9 @@ function resumoShopee(de, ate) {
       custo_real_na_carteira: devCustoReal,
       nota_custo: 'valor_devolvido = preço reembolsado ao comprador · custo_real_na_carteira = o que a Shopee debitou de você (casado por pedido)',
       por_motivo: porMotivo,
-      por_sku: Object.values(porSku).sort((a, b) => b.valor - a.valor).slice(0, 50),
+      // Codex PR#76: ordenar pelo PREÇO escondia o SKU que realmente custa (a Shopee banca
+      // parte dos caros). Ordena pelo CUSTO REAL; empate/zero cai pro preço.
+      por_sku: Object.values(porSku).sort((a, b) => (b.custo_real - a.custo_real) || (b.valor - a.valor)).slice(0, 50),
       // 14/08 — o motivo OFICIAL engana: a sonda mostrou uma devolução marcada como
       // CHANGE_MIND cujo texto era "o tamanho é pequeno, não serve para a máquina que tenho"
       // (incompatibilidade, que se resolve no anúncio). As maiores com o que o comprador
