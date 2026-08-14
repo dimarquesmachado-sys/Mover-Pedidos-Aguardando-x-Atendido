@@ -600,6 +600,9 @@ async function verificarML(orderId) {
       return;
     }
     if (!d.cancelada && d.etiqueta) {
+      // recarrega ANTES do modal: sem isso o card e os botoes de escrita ficavam na
+      // tela contradizendo o proprio aviso de que a venda saiu de Pendentes.
+      if (d.gravado !== false) await recarregar();
       // Etiqueta detectada agora: nao cair no ramo generico de "venda ativa".
       mostrarModal('🏷️ Etiqueta já gerada no ML',
         `Status do envio: ${d.shipment || '?'}\n\n` +
