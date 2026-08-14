@@ -294,7 +294,15 @@ async function checarMlAntesDeEscrever(orderId, lcp) {
     const _lim = new Date(Date.now() - (Number(process.env.LIXAS_NF_LEASE_MIN) || 10) * 60 * 1000).toISOString();
     const _updL = await lcp.atualizarVenda(orderId, campos,
       { forcar: true, somenteSe: `or=(nf_emitindo_em.is.null,nf_emitindo_em.lt.${_lim})` });
-    if (_updL && _updL.ok && Array.isArray(_updL.data) && _updL.data.length === 0) {
+    if (!_updL || !_updL.ok) {
+      // Falha de persistencia != cancelamento tratado. Dizer "cancelada" com a linha
+      // ainda ativa faria o operador parar, mas o leitor automatico e a escada
+      // continuariam elegiveis a processa-la.
+      console.error(`[lixas-combinar] order ${orderId} 🚨 cancelada no ML mas NAO consegui gravar`);
+      return { ok: false, http: 503, corpo: { ok: false, erro: 'cancelamento_nao_gravado',
+        mensagem: 'Esta venda foi CANCELADA no Mercado Livre, mas nao consegui registrar isso no banco — ela AINDA esta no fluxo automatico. NAO DESPACHE e tente de novo em instantes.' } };
+    }
+    if (_updL.ok && Array.isArray(_updL.data) && _updL.data.length === 0) {
       console.warn(`[lixas-combinar] order ${orderId} cancelada no ML, mas ha emissao em curso — registro adiado`);
       return { ok: false, http: 409, corpo: { ok: false, erro: 'venda_cancelada_emissao_em_curso',
         mensagem: 'Esta venda foi CANCELADA no Mercado Livre, mas ha uma emissao em curso agora. NADA foi alterado por aqui. Aguarde um instante e recarregue — NAO DESPACHE.' } };
@@ -1419,6 +1427,33 @@ function routes(readBody) {
               mensagem: 'Esta venda esta CANCELADA no Mercado Livre. Nao da pra mandar confirmacao de pedido pro cliente.' });
             return true;
           }
+        }
+
+        // Status AO VIVO antes de falar com a cliente: os marcadores locais podem ter
+        // ate 1h, e mandar "pedido confirmado, sera postado" pra quem acabou de
+        // cancelar e o pior desfecho possivel desta rota.
+        try {
+          const mlC = require('../auto-mensagens/mlApi');
+          const stC = await mlC.getOrderStatusResumo(String(orderId));
+          if (!stC || !stC.ok) {
+            json(res, 503, { ok: false, erro: 'estado_indeterminado',
+              mensagem: 'Nao consegui confirmar no Mercado Livre se a venda continua ativa. NADA foi enviado a cliente.' });
+            return true;
+          }
+          if (stC.cancelada) {
+            await lcp.atualizarVenda(orderId, {
+              status: 'venda_cancelada', ml_status: stC.status,
+              ml_status_atualizado_em: new Date().toISOString(),
+              venda_cancelada_em: new Date().toISOString()
+            }, { forcar: true });
+            json(res, 409, { ok: false, erro: 'venda_cancelada',
+              mensagem: 'Esta venda foi CANCELADA no Mercado Livre. NADA foi enviado a cliente.' });
+            return true;
+          }
+        } catch (e) {
+          json(res, 503, { ok: false, erro: 'estado_indeterminado',
+            mensagem: `Nao consegui confirmar o estado da venda (${e.message}). NADA foi enviado a cliente.` });
+          return true;
         }
 
         const conf = await enviarConfirmacaoPedido(venda.data, orderId);
