@@ -76,17 +76,27 @@ async function upsertPendente(p) {
  * Lista pendentes dos ultimos N dias (default 7).
  * Filtra por status opcional.
  */
-async function listarPendentes({ dias = 7, status = null, limit = 100, offset = 0 } = {}) {
+async function listarPendentes({ dias = 7, status = null, limit = 100, offset = 0, antesDe = null } = {}) {
   if (!configurado()) return { ok: false, erro: 'supabase_nao_configurado' };
 
   const desde = new Date(Date.now() - dias * 24 * 60 * 60 * 1000).toISOString();
   // Janela por data_venda (sempre preenchido). Antes era msg_inicial_enviada_em,
   // que fica VAZIO em vendas registradas via recuperar (cliente ja tinha respondido,
   // nao recebeu msg inicial) — essas sumiam do painel E da recuperacao.
-  // offset: permite paginar a janela inteira. Sem ele, um limit unico devolve so as
-  // N mais novas (data_venda DESC) e as vendas antigas ficam invisiveis pra quem varre.
-  let query = `${TABELA}?data_venda=gte.${desde}&order=data_venda.desc&limit=${limit}`;
-  if (offset > 0) query += `&offset=${offset}`;
+  // PAGINACAO POR CHAVE (keyset), nao por offset. Com offset, uma venda nova inserida
+  // entre duas paginas desloca todas as seguintes: uma linha vem duplicada e outra
+  // some da varredura — justamente o tipo de buraco que a paginacao veio corrigir.
+  // O desempate por order_id garante ordem total quando ha data_venda repetida.
+  // `antesDe` = ultima linha da pagina anterior: { data_venda, order_id }.
+  let query = `${TABELA}?data_venda=gte.${desde}&order=data_venda.desc,order_id.desc&limit=${limit}`;
+  if (antesDe && antesDe.data_venda) {
+    const dv = encodeURIComponent(antesDe.data_venda);
+    const oid = encodeURIComponent(antesDe.order_id || '');
+    // (data_venda < X) OU (data_venda = X E order_id < Y)
+    query += `&or=(data_venda.lt.${dv},and(data_venda.eq.${dv},order_id.lt.${oid}))`;
+  } else if (offset > 0) {
+    query += `&offset=${offset}`;   // compat: chamadas antigas que ainda usam offset
+  }
   if (status) query += `&status=eq.${encodeURIComponent(status)}`;
 
   return supabaseFetch(query, { method: 'GET' });
@@ -129,11 +139,20 @@ async function atualizarVenda(orderId, campos, opts) {
   // que um "ler antes, gravar depois" apenas estreita.
   // Ex: { somenteSe: 'venda_cancelada_em=is.null' } => so grava se ainda nao finalizou.
   const extra = (opts && opts.somenteSe) ? `&${opts.somenteSe}` : '';
-  return supabaseFetch(`${TABELA}?order_id=eq.${encodeURIComponent(orderId)}${extra}`, {
+  const r = await supabaseFetch(`${TABELA}?order_id=eq.${encodeURIComponent(orderId)}${extra}`, {
     method: 'PATCH',
     headers: { Prefer: 'return=representation' },   // devolve as linhas afetadas
     body: JSON.stringify(campos)
   });
+  // BLOQUEADA != sucesso. PostgREST devolve ok:true com data vazio quando o predicado
+  // nao casa, e quem nao inspeciona `data` seguia como se tivesse gravado — no caso do
+  // marcarRespostaCliente, ate mandando mensagem automatica pra cliente cuja compra
+  // acabou de ser cancelada. A flag `bloqueada` torna isso visivel sem quebrar quem
+  // so olha `ok`.
+  if (r && r.ok && extra && Array.isArray(r.data) && r.data.length === 0) {
+    return Object.assign({}, r, { bloqueada: true, motivo: 'estado_mudou' });
+  }
+  return r;
 }
 
 /**
