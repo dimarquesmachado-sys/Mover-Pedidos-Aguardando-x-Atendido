@@ -1149,7 +1149,7 @@ function routes(readBody) {
         // venda continua viva NESTE instante — e como o cron usa o mesmo campo pra
         // gravar o cancelamento, um dos dois perde a corrida no proprio Postgres.
         const reserva = await lcp.atualizarVenda(orderId, { nf_emitindo_em: new Date().toISOString() },
-          { somenteSe: 'venda_cancelada_em=is.null&nf_emitida_em=is.null&status=not.in.(venda_cancelada,cancelado,cancelada_quarentena)' });
+          { somenteSe: 'venda_cancelada_em=is.null&nf_emitida_em=is.null&ml_etiqueta_em=is.null&processado_manual_em=is.null&status=not.in.(venda_cancelada,cancelado,cancelada_quarentena,processado)' });
         // FAIL CLOSED: so segue com reserva CONFIRMADA (ok + exatamente 1 linha). Com
         // {ok:false} — falha transiente do Supabase, ou coluna nf_emitindo_em ainda nao
         // migrada — a rota emitia sem reserva nenhuma, ou seja, sem a serializacao que
@@ -1168,6 +1168,9 @@ function routes(readBody) {
         const r = await bp.gerarNFe(v.bling_pedido_id);
 
         if (!r.ok) {
+          // Libera a reserva: sem isso a linha ficaria bloqueada pro cron ate o lease
+          // vencer, atrasando a deteccao de cancelamento a toa.
+          try { await lcp.atualizarVenda(orderId, { nf_emitindo_em: null }); } catch (_) {}
           // Bling code 74 = "Esta venda possui nota fiscal referenciada" → a NF JA EXISTE
           // (saiu por fora do painel: emissao direta no Bling, F3, etc). Trata como
           // JA-EMITIDA (idempotente): grava nf_emitida_em pra o botao sumir, em vez de
@@ -1202,6 +1205,7 @@ function routes(readBody) {
           nf_serie: r.serie,
           nf_chave: r.chave || null,
           nf_erro: null,
+          nf_emitindo_em: null,     // reserva liberada
           status: 'processado'
         });
 
@@ -1355,7 +1359,7 @@ function routes(readBody) {
         // Mesma reserva do /emitir-nf: este caminho gasta tempo montando o pedido antes
         // de emitir, entao a janela pro cron gravar um cancelamento e ainda maior.
         const reservaR = await lcp.atualizarVenda(orderId, { nf_emitindo_em: new Date().toISOString() },
-          { somenteSe: 'venda_cancelada_em=is.null&nf_emitida_em=is.null&status=not.in.(venda_cancelada,cancelado,cancelada_quarentena)' });
+          { somenteSe: 'venda_cancelada_em=is.null&nf_emitida_em=is.null&ml_etiqueta_em=is.null&processado_manual_em=is.null&status=not.in.(venda_cancelada,cancelado,cancelada_quarentena,processado)' });
         const reservouR = reservaR.ok && Array.isArray(reservaR.data) && reservaR.data.length === 1;
         if (!reservouR) {
           const zeroR = reservaR.ok && Array.isArray(reservaR.data) && reservaR.data.length === 0;
@@ -1368,6 +1372,7 @@ function routes(readBody) {
         }
         const nf = await bp.gerarNFe(pedidoBlingId);
         if (!nf.ok) {
+          try { await lcp.atualizarVenda(orderId, { nf_emitindo_em: null }); } catch (_) {}
           const campos = (nf.detalhe && nf.detalhe.error && nf.detalhe.error.fields) || [];
           const jaTemNF = Array.isArray(campos) && campos.some(f =>
             Number(f.code) === 74 || /nota fiscal referenciada/i.test(String(f.msg || ''))
@@ -1393,6 +1398,7 @@ function routes(readBody) {
           nf_emitida_em: new Date().toISOString(),
           nf_id: nf.nfeId, nf_numero: nf.numero, nf_serie: nf.serie,
           nf_chave: nf.chave || null, nf_erro: null,
+          nf_emitindo_em: null,     // reserva liberada
           status: 'processado'
         });
         const confR2 = await enviarConfirmacaoPedido(v, orderId);
