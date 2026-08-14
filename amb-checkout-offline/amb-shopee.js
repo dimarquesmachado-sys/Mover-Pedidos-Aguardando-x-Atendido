@@ -672,7 +672,11 @@ function rotasShopee(ctx) {
       const de = String(q.get('de') || '').slice(0, 10), ate = String(q.get('ate') || '').slice(0, 10);
       if (!/^\d{4}-\d{2}-\d{2}$/.test(de) || !/^\d{4}-\d{2}-\d{2}$/.test(ate)) { json(res, 400, { ok: false, erro: 'passe &de=AAAA-MM-DD&ate=AAAA-MM-DD' }); return true; }
       if (de > ate) { json(res, 400, { ok: false, erro: 'período invertido' }); return true; }
-      const r = await concLib.conciliar({ readJson, ARQ_CAR, escrowEmLote, loja: q.get('loja') || undefined }, de, ate, q.get('max'));
+      // Codex PR#71: `&loja=` redirecionaria só o ESCROW pra outra empresa, enquanto a carteira
+      // continuaria sendo a local — compararia pedidos de empresas diferentes e daria resultado
+      // sem sentido. A conciliação é sempre da própria empresa deste módulo.
+      if (q.get('loja')) { json(res, 400, { ok: false, erro: 'conciliação é sempre da própria empresa (a carteira é local) — remova &loja=' }); return true; }
+      const r = await concLib.conciliar({ readJson, ARQ_CAR, escrowEmLote }, de, ate, q.get('max'));
       json(res, 200, r);
       return true;
     }
