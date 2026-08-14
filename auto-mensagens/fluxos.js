@@ -1349,11 +1349,18 @@ async function _processarAutoEmissaoInner({ venda, iaResult, graosResult, lcp })
       return { falha: true, retry: true, motivo: 'status_indeterminado' };
     }
     if (stFinal.cancelada) {
-      await lcp.atualizarVenda(orderId, {
+      // Respeita lease ativo de OUTRO worker: se ele ja esta dentro do gerarNFe, gravar
+      // o cancelamento aqui faria a escrita terminal dele ser rejeitada — NF emitida
+      // sem registro. Zero linhas = adia (retry), o cron reconfirma depois.
+      const _uF = await lcp.atualizarVenda(orderId, {
         status: 'venda_cancelada', ml_status: stFinal.status,
         ml_status_atualizado_em: new Date().toISOString(),
         venda_cancelada_em: new Date().toISOString()
-      });
+      }, { somenteSe: _semReservaAtiva() });
+      if (_uF && _uF.ok && Array.isArray(_uF.data) && _uF.data.length === 0) {
+        console.warn(`[auto-emissao] order ${orderId} cancelada, mas ha emissao em curso — nao gravo agora`);
+        return { falha: true, retry: true, motivo: 'venda_cancelada_emissao_em_curso' };
+      }
       console.warn(`[auto-emissao] order ${orderId} CANCELADA no ML (recheca pos-envio) — nao edito nem emito`);
       return { falha: true, motivo: 'venda_cancelada_no_ml' };
     }
