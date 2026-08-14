@@ -1410,6 +1410,10 @@ function routes(readBody) {
               status: 'processado'
             }, lcp.fecharLease(reserva.token));
             if (!p74.ok || (Array.isArray(p74.data) && p74.data.length !== 1)) {
+              // A NF ja existe e nada mais esta em curso: segurar o lease so faria
+              // cancelamento e reconciliacao adiarem a toa. O predicado de token
+              // preserva a reserva de um worker mais novo, se houver.
+              await lcp.liberarEmissao(orderId, reserva.token);
               console.error(`[lixas-combinar emitir-nf] order ${orderId} 🚨 code 74 (NF ja existe) mas NAO gravei no banco`);
               json(res, 207, { ok: false, erro: 'nf_existente_sem_registro',
                 mensagem: 'Esta venda JA POSSUI NF no Bling, mas nao consegui registrar isso no painel. Use o Verificar ML pra reconciliar.' });
@@ -1685,6 +1689,8 @@ function routes(readBody) {
                 nf_emitindo_em: null, nf_emitindo_por: null, status: 'processado'
               }, lcp.fecharLease(reservaR && reservaR.token));
               if (!p74r.ok || (Array.isArray(p74r.data) && p74r.data.length !== 1)) {
+                await lcp.liberarEmissao(orderId, reservaR && reservaR.token);
+                _liberado = true;
                 console.error(`[lixas-combinar recuperar-nf] order ${orderId} 🚨 code 74 mas NAO gravei no banco`);
                 json(res, 207, { ok: false, erro: 'nf_existente_sem_registro',
                   mensagem: 'Esta venda JA POSSUI NF no Bling, mas nao consegui registrar isso no painel. Use o Verificar ML pra reconciliar.' });
