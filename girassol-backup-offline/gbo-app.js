@@ -1359,18 +1359,6 @@ function routes(readBody) {
       const sV = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kV === process.env.ADMIN_KEY) || (sV && ehAdmin(sV)))) { json(res, 404, { error: 'not found' }); return true; }
       const mlDevLib = require('../lib/ml-devolucoes');
-      // SKU/valor a partir do que já sabemos do pedido (cache dos bipados)
-      const skuDoPedido = (orderId) => {
-        try {
-          const conf = readJson(CONFERIDOS_FILE, {});
-          for (const v of Object.values(conf)) {
-            if (String(v && v.numero_loja || '') !== String(orderId)) continue;
-            const it = ((v.itens || [])[0]) || {};
-            return { sku: it.sku || (v.skus && v.skus[0]) || null, nome: it.descricao || null, valor: Number(v.valor_total || v.total || 0) || 0 };
-          }
-        } catch (e) {}
-        return null;
-      };
       // busca em LOTE no histórico (Supabase) — é onde estão SKU e valor de pedido antigo;
       // o cache dos bipados só cobre ~7 dias e deixava valor 0 / sku null nas devoluções velhas
       const buscarNoHistorico = async (orderIds) => {
@@ -1395,7 +1383,7 @@ function routes(readBody) {
         }
         return mapa;
       };
-      const ctxDev = { CACHE_DIR, path, readJson, writeJson, skuDoPedido, buscarNoHistorico };
+      const ctxDev = { CACHE_DIR, path, readJson, writeJson, buscarNoHistorico };
       if (p.endsWith('-coletar')) {
         let tkV = null;
         try { const { garantirTokenML: _gv } = require('../girassol/mlTokenManager'); tkV = await _gv(); }

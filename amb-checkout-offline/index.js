@@ -2317,17 +2317,6 @@ function routes(readBody) {
       const sV = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kV === process.env.ADMIN_KEY) || (sV && ehAdmin(sV)))) { json(res, 404, { error: 'not found' }); return true; }
       const mlDevLib = require('../lib/ml-devolucoes');
-      const skuDoPedido = (orderId) => {
-        try {
-          const conf = readJson(CONFERIDOS_FILE, {});
-          for (const v of Object.values(conf)) {
-            if (String((v && v.numero_loja) || '') !== String(orderId)) continue;
-            const it = ((v.itens || [])[0]) || {};
-            return { sku: it.sku || (v.skus && v.skus[0]) || null, nome: it.descricao || null, valor: Number(v.valor_total || v.total || 0) || 0 };
-          }
-        } catch (e) {}
-        return null;
-      };
       const buscarNoHistorico = async (orderIds) => {
         const ids = Array.from(new Set((orderIds || []).map(x => String(x || '').trim()).filter(Boolean)));
         const mapa = {};
@@ -2350,7 +2339,7 @@ function routes(readBody) {
         }
         return mapa;
       };
-      const ctxDev = { CACHE_DIR, path, readJson, writeJson, skuDoPedido, buscarNoHistorico };
+      const ctxDev = { CACHE_DIR, path, readJson, writeJson, buscarNoHistorico };
       if (p.endsWith('-coletar')) {
         let tkV = null;
         try { const { garantirTokenML: _gv } = require('../ambtotal/mlTokenManager'); tkV = await _gv(); }
