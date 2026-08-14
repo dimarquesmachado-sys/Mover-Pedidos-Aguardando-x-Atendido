@@ -224,6 +224,15 @@ async function rotinaEscadaIndisponivel(opts = {}) {
       // 6. MONTA no Bling (preserva cupom/desconto)
       const idBuscaBling = v.pack_id || orderId;
       const dataVenda = v.data_venda ? String(v.data_venda).split('T')[0] : null;
+      // RESERVA ANTES DA EDICAO: editarPedidoComGraos ja reescreve os itens no Bling.
+      // Reservar so antes do gerarNFe impedia a nota, mas o pedido de uma venda
+      // etiquetada/postada/cancelada ja teria sido alterado — e isso nao se desfaz.
+      const resEsc = await lcp.reservarEmissao(orderId);
+      if (!resEsc.ok) {
+        console.warn(`[escada] order ${orderId} nao reservei (${resEsc.motivo}) — nao edito nem emito`);
+        stats.erros++; stats.lista.push({ order_id: orderId, acao: 'erro', motivo: `reserva_${resEsc.motivo}` });
+        continue;
+      }
       const edit = await bp.editarPedidoComGraos({
         orderId: idBuscaBling, graosEscolhidos: resolvido.pedidoFinal, graosDisponiveis: graosResult.graos,
         unidadesPorPacote: graosResult.unidades_por_pacote, descricaoBase: graosResult.descricao,
@@ -264,12 +273,6 @@ async function rotinaEscadaIndisponivel(opts = {}) {
       } catch (e) {
         console.warn(`[escada] order ${orderId} nao consegui checar status ML antes de emitir: ${e.message}`);
       }
-      const resEsc = await lcp.reservarEmissao(orderId);
-      if (!resEsc.ok) {
-        console.warn(`[escada] order ${orderId} nao reservei pra emitir (${resEsc.motivo}) — nao emito agora`);
-        stats.erros++; stats.lista.push({ order_id: orderId, acao: 'erro', motivo: `reserva_${resEsc.motivo}` });
-        continue;
-      }
       const nf = await bp.gerarNFe(edit.pedidoId);
       let nfOk = nf.ok;
       if (!nf.ok) {
@@ -280,11 +283,20 @@ async function rotinaEscadaIndisponivel(opts = {}) {
         await lcp.atualizarVenda(orderId, { status: 'precisa_atencao_humano', nf_emitindo_em: null, nf_erro: `${nf.status || ''}: ${nf.erro || JSON.stringify(nf.detalhe || {}).slice(0, 200)}`.slice(0, 500) });
         stats.erros++; stats.lista.push({ order_id: orderId, acao: 'erro', motivo: 'nf_falhou', pedidoId: edit.pedidoId }); continue;
       }
-      await lcp.atualizarVenda(orderId, {
+      const _persistE = await lcp.atualizarVenda(orderId, {
         nf_emitida_em: new Date().toISOString(), nf_id: nf.nfeId || null, nf_numero: nf.numero || null,
         nf_serie: nf.serie || null, nf_chave: nf.chave || null, nf_erro: null,
         nf_emitindo_em: null, status: 'processado'
       });
+      // NF ja saiu. Sem registro, o painel pode oferecer Recuperar NF de novo depois que
+      // o lease vencer — entao nao conta como sucesso nem avisa a cliente sobre um
+      // estado que nao ficou gravado.
+      if (!_persistE.ok || (Array.isArray(_persistE.data) && _persistE.data.length !== 1)) {
+        console.error(`[escada] order ${orderId} 🚨 NF ${nf.numero || '?'} EMITIDA mas NAO gravada`);
+        stats.erros++;
+        stats.lista.push({ order_id: orderId, acao: 'erro', motivo: 'nf_emitida_sem_registro', nf: nf.numero || null });
+        continue;
+      }
 
       // 8. AVISA a cliente da troca (best-effort; NF ja emitida, nao reverte se falhar)
       let avisoEnviado = false;
