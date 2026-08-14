@@ -245,11 +245,18 @@ async function rotinaEscadaIndisponivel(opts = {}) {
       try {
         const stEsc = await ml.getOrderStatusResumo(String(orderId));
         if (stEsc && stEsc.ok && stEsc.cancelada) {
-          await lcp.atualizarVenda(orderId, {
+          // Respeita lease ativo, como o cron: se outro emissor ja reservou e esta
+          // dentro do gerarNFe, gravar o cancelamento aqui deixaria a venda cancelada
+          // E faturada, com os dois terminais brigando.
+          const _lim = new Date(Date.now() - (Number(process.env.LIXAS_NF_LEASE_MIN) || 10) * 60 * 1000).toISOString();
+          const _updC = await lcp.atualizarVenda(orderId, {
             status: 'venda_cancelada', ml_status: stEsc.status,
             ml_status_atualizado_em: new Date().toISOString(),
             venda_cancelada_em: new Date().toISOString()
-          });
+          }, { somenteSe: `or=(nf_emitindo_em.is.null,nf_emitindo_em.lt.${_lim})` });
+          if (_updC && _updC.ok && Array.isArray(_updC.data) && _updC.data.length === 0) {
+            console.warn(`[escada] order ${orderId} cancelada, mas ha emissao em curso — nao gravo agora`);
+          }
           console.warn(`[escada] order ${orderId} CANCELADA no ML — abortando antes de emitir`);
           stats.erros++; stats.lista.push({ order_id: orderId, acao: 'erro', motivo: 'cancelada_no_ml' });
           continue;
