@@ -389,7 +389,7 @@ const MOD = '/girassol-backup-offline';
     return _f(u, o);
   };
 })();
-const DASH_BUILD = 'd206';
+const DASH_BUILD = 'd207';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -1158,6 +1158,27 @@ function desenharDespesasShopee(d){
           ? ' <b>Aten\u00e7\u00e3o:</b> este total conta as devolu\u00e7\u00f5es ABERTAS no per\u00edodo, com o d\u00e9bito onde quer que a Shopee o tenha lan\u00e7ado (\u00e0s vezes no m\u00eas seguinte). O \u201cestorno\u201d l\u00e1 em cima soma s\u00f3 os d\u00e9bitos lan\u00e7ados DENTRO do per\u00edodo \u2014 por isso os dois n\u00fameros podem diferir.'
           : '')+'</div>':'');
   }
+  // 14/08 (Diego): tabela com o N\u00daMERO DA VENDA tamb\u00e9m na Shopee, como no card do ML —
+  // o link passa pela rota /ir-shopee, que resolve o id interno do pedido no Seller Center.
+  const mai = (dev.maiores||[]).slice(0,20);
+  if(mai.length){
+    h += '<div class="mut" style="font-size:11px;margin-top:10px">devolu\u00e7\u00f5es do per\u00edodo \u2014 clique no n\u00famero pra abrir o pedido na Shopee</div>'+
+      '<table style="width:100%;margin-top:4px;font-size:12px"><thead><tr>'+
+      '<th style="text-align:left">pedido</th><th style="text-align:left">SKU</th>'+
+      '<th style="text-align:left">motivo</th><th style="text-align:left">status</th>'+
+      '<th style="text-align:right">R$ devolvido</th><th style="text-align:right">custo real</th></tr></thead><tbody>'+
+      mai.map(function(x){
+        const sn = String(x.order_sn||'');
+        const link = sn ? '<a href="'+MOD+'/ir-shopee?sn='+encodeURIComponent(sn)+'" target="_blank" rel="noopener" style="color:#38bdf8;text-decoration:none">'+sn+' \u2197</a>' : '<span class="dim">\u2014</span>';
+        return '<tr><td>'+link+'</td>'+
+          '<td>'+(x.sku||'<span class="dim">\u2014</span>')+'</td>'+
+          '<td class="mut" title="'+String(x.texto||'').replace(/"/g,'')+'">'+(MOTIVO_SHP[x.motivo]||x.motivo||'')+'</td>'+
+          '<td class="mut">'+(x.status||'')+(x.parcial?' \u00b7 parcial':'')+'</td>'+
+          '<td style="text-align:right" class="mut">'+BRL(x.valor||0)+'</td>'+
+          '<td style="text-align:right'+((x.custo_real||0)>0?';color:#f87171;font-weight:700':'')+'">'+BRL(x.custo_real||0)+'</td></tr>';
+      }).join('')+'</tbody></table>'+
+      '<div class="mut" style="font-size:10.5px;margin-top:4px">passe o mouse no motivo pra ler o que o comprador escreveu.</div>';
+  }
   if(Number(dev.canceladas_fora_da_conta)>0){
     h += '<div class="mut" style="font-size:10.5px;margin-top:4px">'+N(dev.canceladas_fora_da_conta)+' devolu\u00e7\u00e3o(\u00f5es) cancelada(s) pela Shopee ficaram FORA da conta (custo zero).</div>';
   }
@@ -1387,14 +1408,14 @@ function montar(){
       '<div id="mlbCards" class="mut" style="font-size:12px">carregando\u2026</div>'+
       '<div class="nota" style="margin-top:8px">Vêm do <b>faturamento oficial do ML</b> (o mesmo dos relat\u00f3rios em Faturamento \u2192 Relat\u00f3rios). S\u00e3o cobran\u00e7as do <b>per\u00edodo</b>, n\u00e3o de um pedido \u2014 por isso <b>n\u00e3o entram</b> no Lucro Bruto (M.C.) acima, que \u00e9 margem por venda. Para o lucro do m\u00eas, desconte estes valores.</div>'+
     '</div>'+
-    '<div class="sec" id="secSHP"><h2>\ud83d\udfe0 Despesas e Devolu\u00e7\u00f5es da Shopee <span class="hint">do per\u00edodo \u00b7 fora da margem por pedido</span></h2>'+
-      '<div id="shpCards" class="mut" style="font-size:12px">carregando\u2026</div>'+
-      '<div class="nota" style="margin-top:8px">V\u00eam da <b>API oficial da Shopee</b> (carteira e devolu\u00e7\u00f5es), coletadas de madrugada. <b>Nada disso passa pelo Bling.</b> O maior item costuma ser o estorno ap\u00f3s devolu\u00e7\u00e3o: a Shopee j\u00e1 tinha pago, o cliente devolveu e ela tirou o dinheiro de volta da carteira. Como s\u00e3o cobran\u00e7as do <b>per\u00edodo</b>, ainda <b>n\u00e3o entram</b> no Lucro Bruto (M.C.) l\u00e1 em cima \u2014 desconte para o lucro do m\u00eas.</div>'+
-    '</div>'+
     '<div class="sec" id="secDML"><h2>\u21a9\ufe0f Devolu\u00e7\u00f5es do Mercado Livre <span class="hint">do per\u00edodo \u00b7 o que voltou e por qu\u00ea</span></h2>'+
       '<div id="dmlCards" class="mut" style="font-size:12px">carregando\u2026</div>'+
       '<div class="mut" style="font-size:11px;margin-top:8px">Vem da API oficial do ML (reclama\u00e7\u00f5es do tipo <i>devolu\u00e7\u00e3o</i>). O <b>custo</b> cobrado pelo ML costuma ser ZERO quando \u00e9 arrependimento com produto conforme o an\u00fancio \u2014 o que pesa \u00e9 a mercadoria que volta. O valor em R$ das despesas do ML fica no card acima.</div>'+
 
+    '<div class="sec" id="secSHP"><h2>\ud83d\udfe0 Despesas e Devolu\u00e7\u00f5es da Shopee <span class="hint">do per\u00edodo \u00b7 fora da margem por pedido</span></h2>'+
+      '<div id="shpCards" class="mut" style="font-size:12px">carregando\u2026</div>'+
+      '<div class="nota" style="margin-top:8px">V\u00eam da <b>API oficial da Shopee</b> (carteira e devolu\u00e7\u00f5es), coletadas de madrugada. <b>Nada disso passa pelo Bling.</b> O maior item costuma ser o estorno ap\u00f3s devolu\u00e7\u00e3o: a Shopee j\u00e1 tinha pago, o cliente devolveu e ela tirou o dinheiro de volta da carteira. Como s\u00e3o cobran\u00e7as do <b>per\u00edodo</b>, ainda <b>n\u00e3o entram</b> no Lucro Bruto (M.C.) l\u00e1 em cima \u2014 desconte para o lucro do m\u00eas.</div>'+
+    '</div>'+
     '<div class="sec" id="secCanal"><h2>🛒 Por Canal</h2><div class="tw twFit"><table id="tCanal"></table></div></div>'+
     '<div class="grid2">'+
       '<div class="sec" id="secDia"><h2 id="hGrafPed">📈 Pedidos por Dia</h2><div class="chartbox"><canvas id="cPed"></canvas></div></div>'+
