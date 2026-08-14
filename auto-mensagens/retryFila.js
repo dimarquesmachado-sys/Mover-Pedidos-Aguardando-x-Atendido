@@ -228,7 +228,21 @@ async function retentarEmissoesBling({ lcp }) {
               campos.nf_emitindo_em = null; campos.nf_emitindo_por = null;
             }
           }
-          const upd = await lcp.atualizarVenda(orderId, campos, { forcar: true });
+          // Condicional ao estado em que `terminal` e a decisao do lease foram tomados:
+          // se um cancelamento ou uma reserva nova chegou depois da leitura, o PATCH nao
+          // pode ressuscitar a venda nem limpar o lease de outro worker.
+          const _predRest = terminal
+            ? 'nf_emitida_em=is.null'
+            : ('nf_emitida_em=is.null&venda_cancelada_em=is.null'
+               + '&status=not.in.(venda_cancelada,cancelado,cancelada_quarentena)'
+               + (vAtual.nf_emitindo_por
+                  ? `&nf_emitindo_por=eq.${encodeURIComponent(vAtual.nf_emitindo_por)}`
+                  : '&nf_emitindo_por=is.null'));
+          const upd = await lcp.atualizarVenda(orderId, campos, { forcar: true, somenteSe: _predRest });
+          if (upd && upd.ok && Array.isArray(upd.data) && upd.data.length === 0) {
+            console.warn(`[retry-bling] order ${orderId} estado mudou durante a restauracao — tento na proxima rodada`);
+            continue;
+          }
           if (!(upd && upd.ok && (!Array.isArray(upd.data) || upd.data.length === 1))) {
             console.error(`[retry-bling] order ${orderId} restauracao da NF ${nfC.numero || '?'} FALHOU — mantendo na fila`);
             continue;
@@ -459,7 +473,18 @@ async function revisarAtencaoHumana({ lcp }) {
   // (sem entrada previa na fila) — sem isso, retry:true nao agenda nada.
   function enfileirarRestauracao({ orderId, venda, iaResult, graosResult, nfConfirmada, pedidoId }) {
     const k = String(orderId);
-    if (_retryBling.has(k)) return;
+    // PROMOVE entrada existente: se a NF ja saiu, uma entrada antiga com
+    // soRestaurar:false faria o proximo ciclo reeditar o pedido faturado e tentar
+    // emitir de novo. Atualiza no lugar em vez de ignorar.
+    if (_retryBling.has(k)) {
+      if (nfConfirmada) {
+        const e = _retryBling.get(k);
+        e.soRestaurar = true; e.nfConfirmada = nfConfirmada;
+        e.pedidoId = pedidoId || e.pedidoId || null;
+        console.log(`[retry-bling] order ${k} promovido a RESTAURACAO (NF ${nfConfirmada.numero || '?'} ja emitida)`);
+      }
+      return;
+    }
     // nfConfirmada: a NF JA SAIU e so a gravacao falhou. Sem esse discriminador a
     // entrada era indistinguivel de um retry normal — o retentar reeditaria o pedido ja
     // faturado e tentaria emitir de novo, o code 74 viraria 'nf_falhou' e a entrada
