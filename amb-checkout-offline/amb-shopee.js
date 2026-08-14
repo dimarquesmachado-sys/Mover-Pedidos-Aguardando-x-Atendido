@@ -266,9 +266,22 @@ async function coletarAds(dias, pedirAoSync) {
     const fim = new Date(Date.UTC(hoje.getUTCFullYear(), hoje.getUTCMonth(), hoje.getUTCDate() - off));
     const ini = new Date(Date.UTC(hoje.getUTCFullYear(), hoje.getUTCMonth(), hoje.getUTCDate() - Math.min(total, off + 29)));
     janelas++;
-    const r = await pedirAoSync('shopee-raw', { caminho: '/api/v2/ads/get_all_cpc_ads_daily_performance', q: 'start_date=' + ddmm(ini) + '&end_date=' + ddmm(fim) });
-    const resp = r && r.dados && r.dados.resposta && r.dados.resposta.response;
-    if (!Array.isArray(resp)) { erro = erro || ('janela ' + iso(ini) + '..' + iso(fim) + ': sem resposta'); continue; }
+    // 14/08 — o domínio de ads tem limite de chamadas (`ads.rate_limit.exceed_api`): rodar
+    // duas coletas seguidas derrubou a janela mais recente. Agora cada janela é re-tentada
+    // com espera crescente, e o erro REAL da Shopee é reportado (antes eu só dizia "sem
+    // resposta", que não ajudava a saber se era limite, permissão ou parâmetro).
+    let resp = null, ultimoMotivo = '';
+    for (let tent = 1; tent <= 4 && !Array.isArray(resp); tent++) {
+      if (tent > 1) await new Promise(r0 => setTimeout(r0, 4000 * (tent - 1)));
+      const r = await pedirAoSync('shopee-raw', { caminho: '/api/v2/ads/get_all_cpc_ads_daily_performance', q: 'start_date=' + ddmm(ini) + '&end_date=' + ddmm(fim) });
+      const cru = (r && r.dados && r.dados.resposta) || null;
+      resp = cru && cru.response;
+      if (!Array.isArray(resp)) {
+        ultimoMotivo = (cru && (cru.error || cru.message)) || (r && r.erro) || ('HTTP ' + ((r && r.status) || '?'));
+        resp = null;
+      }
+    }
+    if (!Array.isArray(resp)) { erro = erro || ('janela ' + iso(ini) + '..' + iso(fim) + ': ' + String(ultimoMotivo).slice(0, 160)); continue; }
     for (const l of resp) {
       if (!l || !l.date) continue;
       const p = String(l.date).split('-');           // DD-MM-AAAA → AAAA-MM-DD
@@ -417,11 +430,22 @@ function resumoShopee(de, ate) {
       por_motivo: porMotivo,
       por_sku: Object.values(porSku).sort((a, b) => b.valor - a.valor).slice(0, 50)
     },
+    // ★ 14/08 — MESMA RÉGUA DA SHOPEE. Provado com julho/2026: painel = vendas R$ 907,40 e
+    // ROAS 9,07; o Jodda mostra exatamente os mesmos números, e o resto dele sai daí:
+    // ACOS 11,02% = gasto/vendas · CAC 16,67 = gasto/pedidos · TACOS 0,35% = gasto sobre o
+    // faturamento TOTAL do canal. Ou seja, os dois usam o AMPLO (broad) — venda de qualquer
+    // produto depois do clique. Então `roas`, `vendas` e `pedidos` passam a ser o AMPLO, que
+    // é o que aparece na tela da Shopee; o direto continua exposto pra quem quiser o recorte
+    // estrito. TACOS não sai daqui: depende do faturamento do canal, que o dashboard tem.
     ads: { consumo: adsGasto, gasto: adsGasto, dias: adsDias, cliques: adsCliques, impressoes: adsImp,
-      gmv_direto: adsGmv, roas_direto: adsGasto > 0 ? Math.round((adsGmv / adsGasto) * 100) / 100 : null,
-      // o amplo é o que o painel da Shopee e o Jodda mostram — por isso vem junto
+      ctr: adsImp > 0 ? Math.round((adsCliques / adsImp) * 10000) / 100 : null,
+      vendas: adsGmvAmplo, pedidos: adsPedAmplos,
+      roas: adsGasto > 0 ? Math.round((adsGmvAmplo / adsGasto) * 100) / 100 : null,
+      acos: adsGmvAmplo > 0 ? Math.round((adsGasto / adsGmvAmplo) * 10000) / 100 : null,
+      cac: adsPedAmplos > 0 ? Math.round((adsGasto / adsPedAmplos) * 100) / 100 : null,
       gmv_amplo: adsGmvAmplo, pedidos_amplos: adsPedAmplos, roas_amplo: adsGasto > 0 ? Math.round((adsGmvAmplo / adsGasto) * 100) / 100 : null,
-      roas: adsGasto > 0 ? Math.round((adsGmv / adsGasto) * 100) / 100 : null, entra_no_sai_do_bolso: false, nota: 'consumo de credito; o desembolso real depende do extrato de recargas (credito gratis e bonus de 10% nao sao custo)' },
+      gmv_direto: adsGmv, roas_direto: adsGasto > 0 ? Math.round((adsGmv / adsGasto) * 100) / 100 : null,
+      entra_no_sai_do_bolso: false, nota: 'consumo de credito; o desembolso real depende do extrato de recargas (credito gratis e bonus de 10% nao sao custo)' },
     // sai_do_bolso agora inclui ads; carteira_sai_do_bolso é a parte que vem da carteira
     carteira: { por_tipo: porTipo, custo_por_tipo: custoPorTipo, carteira_sai_do_bolso: saiDoBolso, ads_consumo_nao_somado: adsGasto, sai_do_bolso: saiTotal },
     atualizado: {
