@@ -107,6 +107,22 @@ async function rotinaEscadaIndisponivel(opts = {}) {
       try {
         const info = await ml.getPrazoPostagem(orderId);
         infoEnvio = info;
+        // O getPrazoPostagem ja traz o status do PEDIDO ao vivo. Sem olhar isso, o ramo
+        // do lembrete (que roda antes do corte) manda "escolha os graos" pra quem
+        // acabou de cancelar — os marcadores do snapshot so mudam no poll horario.
+        const _stVivo = String((info && (info.order_status || info.status)) || '').toLowerCase();
+        if (['cancelled', 'invalid'].includes(_stVivo)) {
+          try {
+            await lcp.atualizarVenda(orderId, {
+              status: 'venda_cancelada', ml_status: _stVivo,
+              ml_status_atualizado_em: new Date().toISOString(),
+              venda_cancelada_em: new Date().toISOString()
+            }, { somenteSe: lcp.semReservaAtiva() });
+          } catch (_) {}
+          console.warn(`[escada] order ${orderId} CANCELADA no ML — nao mando lembrete nem escalono`);
+          stats.pulados++; stats.lista.push({ order_id: orderId, acao: 'pulado', motivo: 'cancelada_no_ml' });
+          continue;
+        }
         prazo = prazoMod.calcularPrazoPostagem(info && info.shipment_bruto ? info.shipment_bruto : {});
       } catch (e) {
         stats.pulados++; stats.lista.push({ order_id: orderId, acao: 'pulado', motivo: 'sem_prazo: ' + e.message }); continue;
@@ -343,6 +359,13 @@ async function rotinaEscadaIndisponivel(opts = {}) {
         }
 
 
+        // RENOVA a posse antes do passo irreversivel: as leituras ao ML e as chamadas ao
+        // Bling podem passar do lease, e ai outro worker reservaria a mesma venda.
+        if (!(await lcp.renovarEmissao(orderId, resEsc.token))) {
+          console.warn(`[escada] order ${orderId} perdi a posse do lease — nao edito`);
+          stats.erros++; stats.lista.push({ order_id: orderId, acao: 'erro', motivo: 'lease_perdido' });
+          continue;
+        }
       const edit = await bp.editarPedidoComGraos({
         orderId: idBuscaBling, graosEscolhidos: resolvido.pedidoFinal, graosDisponiveis: graosResult.graos,
         unidadesPorPacote: graosResult.unidades_por_pacote, descricaoBase: graosResult.descricao,
@@ -359,6 +382,11 @@ async function rotinaEscadaIndisponivel(opts = {}) {
       });
 
       // 7. EMITE a NF (idempotente: code 74 = ja tem NF -> trata como emitida)
+      if (!(await lcp.renovarEmissao(orderId, resEsc.token))) {
+        console.warn(`[escada] order ${orderId} perdi a posse do lease — nao emito`);
+        stats.erros++; stats.lista.push({ order_id: orderId, acao: 'erro', motivo: 'lease_perdido' });
+        continue;
+      }
       const nf = await bp.gerarNFe(edit.pedidoId);
       let nfOk = nf.ok;
       if (!nf.ok) {
