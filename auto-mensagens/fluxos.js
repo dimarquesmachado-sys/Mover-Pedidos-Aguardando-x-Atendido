@@ -1255,6 +1255,16 @@ async function _processarAutoEmissaoInner({ venda, iaResult, graosResult, lcp })
     bling_erro: null
   });
 
+  // RESERVA antes da emissao irreversivel. O caminho automatico nunca setava
+  // nf_emitindo_em, entao o cron de cancelamento nao via lease nenhum e podia gravar
+  // o cancelamento com o gerarNFe ja em curso — as reservas das rotas manuais nao
+  // cobriam este emissor.
+  const _res = await lcp.reservarEmissao(orderId);
+  if (!_res.ok) {
+    console.warn(`[auto-emissao] order ${orderId} nao reservei pra emitir (${_res.motivo}) — nao emito agora`);
+    return { falha: true, retry: _res.motivo === 'reserva_falhou', motivo: `reserva_${_res.motivo}` };
+  }
+
   // Emite a NF (NF transmitida pra SEFAZ — irreversivel)
   const nf = await bp.gerarNFe(edit.pedidoId);
   if (!nf.ok) {
@@ -1262,6 +1272,7 @@ async function _processarAutoEmissaoInner({ venda, iaResult, graosResult, lcp })
     // o botao laranja e voce emitir na mao.
     await lcp.atualizarVenda(orderId, {
       status: 'precisa_atencao_humano',
+      nf_emitindo_em: null,
       nf_erro: `${nf.status || ''}: ${nf.erro || JSON.stringify(nf.detalhe || {}).slice(0, 200)}`.slice(0, 500)
     });
     console.error(`[auto-emissao] order ${orderId} pedido ${edit.pedidoId} editado mas NF falhou: ${nf.status} ${nf.erro}`);
@@ -1276,6 +1287,7 @@ async function _processarAutoEmissaoInner({ venda, iaResult, graosResult, lcp })
     nf_serie: nf.serie,
     nf_chave: nf.chave || null,
     nf_erro: null,
+    nf_emitindo_em: null,      // lease liberado junto com o terminal
     status: 'processado'
   });
   console.log(`[auto-emissao] ✅ order ${orderId} → pedido ${edit.pedidoId} editado + NF ${nf.numero}/${nf.serie} emitida (auto)`);
