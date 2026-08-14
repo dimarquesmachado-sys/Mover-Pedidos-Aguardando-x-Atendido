@@ -324,11 +324,19 @@ async function rotinaLerRespostas() {
           }
 
           // Cliente respondeu - grava na tabela
-          await lcp.marcarRespostaCliente(venda.order_id, {
+          const _marc = await lcp.marcarRespostaCliente(venda.order_id, {
             texto: textoCliente,
             dataResposta,
             totalMsgsCliente: conv.totalCliente
           });
+          // Bloqueada = a venda virou terminal (cancelada) entre a leitura e agora.
+          // Parar ANTES da IA: senao o cliente que acabou de cancelar recebe resposta
+          // automatica de pedido.
+          if (_marc && _marc.bloqueada) {
+            console.log(`[lixas-combinar lerRespostas] ⏭️  Order ${venda.order_id} virou terminal (cancelada) — nao processo nem respondo`);
+            stats.semNovidade++;
+            continue;
+          }
           stats.novasRespostas++;
           console.log(`[lixas-combinar lerRespostas] 💬 Order ${venda.order_id} cliente respondeu (${conv.totalCliente} msg) - "${textoCliente.slice(0, 60)}..."`);
 
