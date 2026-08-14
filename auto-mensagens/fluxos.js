@@ -1340,7 +1340,15 @@ async function _processarAutoEmissaoInner({ venda, iaResult, graosResult, lcp })
     return { falha: true, retry: _res.motivo === 'reserva_falhou', motivo: `reserva_${_res.motivo}` };
   }
 
-  const edit = await bp.editarPedidoComGraos({ ...baseArgs, dryRun: false });
+  let edit;
+  try {
+    edit = await bp.editarPedidoComGraos({ ...baseArgs, dryRun: false });
+  } catch (eEd) {
+    // Excecao (rede rejeitada) subia pro chamador com o lease ativo, bloqueando
+    // cancelamento e novas tentativas por ate 10 min sem ninguem em curso.
+    await lcp.liberarEmissao(orderId, _res.token);
+    throw eEd;
+  }
   if (!edit.ok) {
     await lcp.atualizarVenda(orderId, { status: 'precisa_atencao_humano', nf_emitindo_em: null, nf_emitindo_por: null, bling_erro: `auto edit ${edit.etapa || ''}: ${edit.erro || ''}`.slice(0, 500) }, lcp.fecharLease(_res.token));
     console.error(`[auto-emissao] order ${orderId} edit falhou (${edit.etapa}): ${edit.erro}`);
@@ -1361,7 +1369,13 @@ async function _processarAutoEmissaoInner({ venda, iaResult, graosResult, lcp })
   // o cancelamento com o gerarNFe ja em curso — as reservas das rotas manuais nao
   // cobriam este emissor.
   // Emite a NF (NF transmitida pra SEFAZ — irreversivel)
-  const nf = await bp.gerarNFe(edit.pedidoId);
+  let nf;
+  try {
+    nf = await bp.gerarNFe(edit.pedidoId);
+  } catch (eNf) {
+    await lcp.liberarEmissao(orderId, _res.token);
+    throw eNf;
+  }
   if (!nf.ok) {
     // Pedido ja foi editado: deixa o bling_pedido_id salvo pro painel mostrar
     // o botao laranja e voce emitir na mao.
