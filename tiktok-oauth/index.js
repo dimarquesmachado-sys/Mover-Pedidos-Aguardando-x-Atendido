@@ -162,6 +162,31 @@ async function tratar(req, res, urlObj, json) {
     return true;
   }
 
+  // ── FINANCEIRO (15/08): coleta e resumo, pela lib compartilhada ─────────────────
+  // A fórmula foi MEDIDA no dado real antes de existir parser: identidade
+  // `receita − tarifa + frete = repasse` fechou em 3 de 3, e a tarifa é R$ 2,00 + 12%.
+  if (p === '/tiktok/financeiro' || p === '/tiktok/financeiro-coletar') {
+    if (!admOk()) { json(res, 404, { error: 'not found' }); return true; }
+    const loja = lojaDe(q);
+    const finLib = require('../lib/tiktok-financeiro');
+    const ctxFin = {
+      CACHE_DIR: process.env.TIKTOK_CACHE_DIR || '/data', path,
+      readJson: (arqv, padrao) => { try { return JSON.parse(fs.readFileSync(arqv, 'utf8')); } catch (e) { return padrao; } },
+      writeJson: (arqv, v) => { try { fs.mkdirSync(path.dirname(arqv), { recursive: true }); } catch (e) {} fs.writeFileSync(arqv, JSON.stringify(v, null, 2)); },
+      chamar
+    };
+    if (p.endsWith('-coletar')) {
+      const r = await finLib.coletarFinanceiro(ctxFin, loja, q.get('dias'), { refazer: q.get('refazer') === '1' });
+      json(res, 200, r);
+      return true;
+    }
+    const de = String(q.get('de') || '').slice(0, 10), ate = String(q.get('ate') || '').slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(de) || !/^\d{4}-\d{2}-\d{2}$/.test(ate)) { json(res, 400, { ok: false, erro: 'passe &de=AAAA-MM-DD&ate=AAAA-MM-DD' }); return true; }
+    if (de > ate) { json(res, 400, { ok: false, erro: 'período invertido' }); return true; }
+    json(res, 200, Object.assign({ ok: true, loja, de, ate }, finLib.resumoFinanceiro(ctxFin, loja, de, ate)));
+    return true;
+  }
+
   // SONDA GENÉRICA — não interpreta nada, devolve o JSON como o TikTok mandou
   if (p === '/tiktok/sonda') {
     if (!admOk()) { json(res, 404, { error: 'not found' }); return true; }
