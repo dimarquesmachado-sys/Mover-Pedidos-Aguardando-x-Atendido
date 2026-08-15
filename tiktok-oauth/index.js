@@ -1,0 +1,161 @@
+'use strict';
+// ════════════════════════════════════════════════════════════════════════════════
+//  TIKTOK SHOP — conexão e SONDA (14/08/2026)
+// ════════════════════════════════════════════════════════════════════════════════
+//  Objetivo do Diego: trazer do TikTok o MESMO conjunto que já vem de ML/Shopee/Magalu
+//  — taxas, comissões, fretes, ads, devoluções, custos — direto do marketplace.
+//
+//  Por que este módulo só CONECTA e SONDA, sem interpretar nada:
+//  é a regra que salvou os outros dois. No ML eu errei o formato 5× supondo estrutura;
+//  na Shopee a fórmula só ficou certa depois de ver o JSON cru (e ainda apareceu campo
+//  que só existe na AMB, o `shipping_seller_protection_fee_amount`). Aqui: conectar →
+//  sondar → ver o cru → só então escrever o parser.
+//
+//  App do Diego (TikTok Shop Partner Center): "Checkout-Coleta-Transportadora-Status-Bling",
+//  app_key 6jj99q5hog1do, BETA (até 25 vendedores autorizados), Brasil, segurança aprovada.
+//  ⚠️ O redirect cadastrado hoje aponta pro serviço de coleta, que NÃO usa TikTok (conferido:
+//  zero menções no código dele). Então não há risco de brigar por token — mas o redirect
+//  precisa apontar pra cá, ou o `code` é capturado na barra de endereços (rota /tiktok/trocar-code).
+//
+//  ENV: TIKTOK_APP_KEY · TIKTOK_APP_SECRET · TIKTOK_REDIRECT_URI (opcional)
+const crypto = require('crypto');
+const path = require('path');
+const fs = require('fs');
+
+const APP_KEY = process.env.TIKTOK_APP_KEY || '';
+const APP_SECRET = process.env.TIKTOK_APP_SECRET || '';
+const REDIRECT = process.env.TIKTOK_REDIRECT_URI || '';
+const BASE = process.env.TIKTOK_BASE || 'https://open-api.tiktokglobalshop.com';
+const AUTH = process.env.TIKTOK_AUTH_BASE || 'https://auth.tiktok-shops.com';
+const ARQ = () => path.join(process.env.TIKTOK_CACHE_DIR || '/data', '_tiktok_token.json');
+
+function lerToken() { try { return JSON.parse(fs.readFileSync(ARQ(), 'utf8')); } catch (e) { return null; } }
+function salvarToken(t) {
+  try { fs.mkdirSync(path.dirname(ARQ()), { recursive: true }); } catch (e) {}
+  fs.writeFileSync(ARQ(), JSON.stringify(t, null, 2));
+}
+
+// Assinatura das chamadas: HMAC-SHA256 sobre app_secret + path + params ordenados (sem
+// `sign` e sem `access_token`) + body, fechando com app_secret. Formato documentado pelo
+// TikTok Shop; a sonda confirma na prática antes de qualquer parser.
+function assinar(caminho, params, body) {
+  const chaves = Object.keys(params).filter(k => k !== 'sign' && k !== 'access_token').sort();
+  let base = caminho;
+  for (const k of chaves) base += k + params[k];
+  if (body) base += body;
+  const alvo = APP_SECRET + base + APP_SECRET;
+  return crypto.createHmac('sha256', APP_SECRET).update(alvo).digest('hex');
+}
+
+async function chamar(caminho, extras, opts) {
+  const t = lerToken();
+  const o = opts || {};
+  const params = Object.assign({
+    app_key: APP_KEY,
+    timestamp: String(Math.floor(Date.now() / 1000))
+  }, extras || {});
+  if (t && t.shop_cipher && !('shop_cipher' in params) && o.comShop !== false) params.shop_cipher = t.shop_cipher;
+  params.sign = assinar(caminho, params, o.body ? JSON.stringify(o.body) : '');
+  const qs = Object.keys(params).map(k => k + '=' + encodeURIComponent(params[k])).join('&');
+  const headers = { 'content-type': 'application/json' };
+  if (t && t.access_token) headers['x-tts-access-token'] = t.access_token;
+  const r = await fetch(BASE + caminho + '?' + qs, {
+    method: o.metodo || 'GET', headers,
+    body: o.body ? JSON.stringify(o.body) : undefined
+  });
+  const txt = await r.text();
+  let j = null; try { j = JSON.parse(txt); } catch (e) {}
+  return { http: r.status, ok: r.ok, corpo: j, cru: j ? null : txt.slice(0, 600) };
+}
+
+async function tratar(req, res, urlObj, json) {
+  const p = urlObj.pathname;
+  const q = urlObj.searchParams;
+  const ADM = process.env.ADMIN_KEY || '';
+  const admOk = () => ADM && q.get('k') === ADM;
+
+  if (p === '/tiktok/status') {
+    if (!admOk()) { json(res, 404, { error: 'not found' }); return true; }
+    const t = lerToken();
+    json(res, 200, {
+      ok: true,
+      falta_env: [!APP_KEY && 'TIKTOK_APP_KEY', !APP_SECRET && 'TIKTOK_APP_SECRET'].filter(Boolean),
+      app_key: APP_KEY ? APP_KEY.slice(0, 4) + '…' : null,
+      redirect_configurado: REDIRECT || '(use ?redirect= no /tiktok/conectar)',
+      loja_conectada: !!(t && t.access_token),
+      shop: t ? { id: t.shop_id || null, nome: t.shop_name || null, cipher: t.shop_cipher ? 'ok' : null } : null,
+      token_expira_em: (t && t.expira_em) || null,
+      leia: 'conecte em /tiktok/conectar?k=… e depois usenas sondas /tiktok/lojas e /tiktok/sonda?caminho=…'
+    });
+    return true;
+  }
+
+  if (p === '/tiktok/conectar') {
+    if (!admOk()) { json(res, 404, { error: 'not found' }); return true; }
+    if (!APP_KEY) { json(res, 400, { ok: false, erro: 'falta TIKTOK_APP_KEY no ambiente' }); return true; }
+    const url = AUTH + '/oauth/authorize?app_key=' + encodeURIComponent(APP_KEY) + '&state=girassol';
+    json(res, 200, { ok: true, url, leia: 'abra logado como dono da loja; ao autorizar, o TikTok volta pro redirect com ?code=… — se o redirect apontar pra outro serviço, copie o code da barra e chame /tiktok/trocar-code?code=…&k=' });
+    return true;
+  }
+
+  if (p === '/tiktok/callback' || p === '/tiktok/trocar-code') {
+    const code = String(q.get('code') || q.get('auth_code') || '').trim();
+    if (p === '/tiktok/trocar-code' && !admOk()) { json(res, 404, { error: 'not found' }); return true; }
+    if (!code) { json(res, 400, { ok: false, erro: 'sem ?code=' }); return true; }
+    try {
+      const r = await fetch(AUTH + '/api/v2/token/get?app_key=' + encodeURIComponent(APP_KEY) +
+        '&app_secret=' + encodeURIComponent(APP_SECRET) + '&auth_code=' + encodeURIComponent(code) +
+        '&grant_type=authorized_code');
+      const j = await r.json().catch(() => null);
+      const d = (j && j.data) || null;
+      if (!d || !d.access_token) { json(res, 502, { ok: false, erro: 'TikTok não devolveu token', resposta: j }); return true; }
+      salvarToken({
+        access_token: d.access_token, refresh_token: d.refresh_token,
+        expira_em: d.access_token_expire_in ? new Date(d.access_token_expire_in * 1000).toISOString() : null,
+        refresh_expira_em: d.refresh_token_expire_in ? new Date(d.refresh_token_expire_in * 1000).toISOString() : null,
+        obtido_em: new Date().toISOString()
+      });
+      json(res, 200, { ok: true, msg: '✅ TikTok conectado. Agora rode /tiktok/lojas?k=… para pegar o shop_cipher.' });
+    } catch (e) { json(res, 500, { ok: false, erro: String(e.message || e).slice(0, 200) }); }
+    return true;
+  }
+
+  // o shop_cipher identifica a loja em toda chamada — vem de get_authorized_shops
+  if (p === '/tiktok/lojas') {
+    if (!admOk()) { json(res, 404, { error: 'not found' }); return true; }
+    const r = await chamar('/authorization/202309/shops', {}, { comShop: false });
+    const lista = (r.corpo && r.corpo.data && r.corpo.data.shops) || [];
+    if (lista.length && q.get('salvar') !== '0') {
+      const t = lerToken() || {};
+      const alvo = lista.find(s => String(s.id) === String(q.get('shop_id'))) || lista[0];
+      t.shop_id = alvo.id; t.shop_name = alvo.name; t.shop_cipher = alvo.cipher;
+      salvarToken(t);
+    }
+    json(res, 200, { ok: r.ok, http: r.http, lojas: lista, resposta_crua: r.corpo || r.cru,
+      leia: 'a primeira loja (ou ?shop_id=) foi salva com o cipher; use ?salvar=0 para só olhar' });
+    return true;
+  }
+
+  // SONDA GENÉRICA — não interpreta nada, devolve o JSON como o TikTok mandou
+  if (p === '/tiktok/sonda') {
+    if (!admOk()) { json(res, 404, { error: 'not found' }); return true; }
+    const caminho = String(q.get('caminho') || '').trim();
+    if (!/^\/[a-z0-9_\/\.]+$/i.test(caminho)) {
+      json(res, 400, { ok: false, erro: 'use ?caminho=/order/202309/orders/search (só letras, números, / . _)',
+        exemplos: ['/order/202309/orders/search', '/finance/202309/statements', '/finance/202501/orders/settlements', '/return_refund/202309/return_orders/search'] });
+      return true;
+    }
+    const extras = {};
+    for (const [k, v] of q.entries()) { if (['k', 'caminho', 'metodo', 'body'].indexOf(k) < 0) extras[k] = v; }
+    let body = null;
+    if (q.get('body')) { try { body = JSON.parse(q.get('body')); } catch (e) { json(res, 400, { ok: false, erro: 'body não é JSON válido' }); return true; } }
+    const r = await chamar(caminho, extras, { metodo: (q.get('metodo') || 'GET').toUpperCase(), body });
+    json(res, 200, { ok: r.ok, http: r.http, caminho, params: extras, resposta_crua: r.corpo || r.cru,
+      leia: 'resposta CRUA do TikTok — nada interpretado ainda. Com ela na mão eu escrevo o parser sem chutar formato.' });
+    return true;
+  }
+
+  return false;
+}
+
+module.exports = { tratar, chamar, lerToken };
