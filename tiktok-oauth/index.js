@@ -166,9 +166,18 @@ async function tratar(req, res, urlObj, json) {
   if (p === '/tiktok/sonda') {
     if (!admOk()) { json(res, 404, { error: 'not found' }); return true; }
     const caminho = String(q.get('caminho') || '').trim();
-    if (!/^\/[a-z0-9_\/\.]+$/i.test(caminho)) {
+    // 14/08: ids de statement/pedido do TikTok trazem HÍFEN — sem ele no filtro, sondar o
+    // detalhe de um extrato era recusado antes de sair. Segue sem aceitar espaço, query ou
+    // caractere estranho: é uma sonda de leitura, não passagem livre.
+    if (!/^\/[a-z0-9_\-\/\.]+$/i.test(caminho)) {
       json(res, 400, { ok: false, erro: 'use ?caminho=/order/202309/orders/search (só letras, números, / . _)',
-        exemplos: ['/order/202309/orders/search', '/finance/202309/statements', '/finance/202501/orders/settlements', '/return_refund/202309/return_orders/search'] });
+        exemplos: [
+          '/finance/202309/statements  (exige &sort_field=statement_time)',
+          '/finance/202309/statements/{id}/statement_transactions',
+          '/finance/202309/payments',
+          '/order/202309/orders/search  (&metodo=POST)',
+          '/return_refund/202309/return_orders/search  (&metodo=POST)'
+        ] });
       return true;
     }
     const extras = {};
