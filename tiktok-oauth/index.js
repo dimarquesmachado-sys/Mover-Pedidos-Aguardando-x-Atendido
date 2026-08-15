@@ -27,12 +27,25 @@ const APP_SECRET = process.env.TIKTOK_APP_SECRET || '';
 const REDIRECT = process.env.TIKTOK_REDIRECT_URI || '';
 const BASE = process.env.TIKTOK_BASE || 'https://open-api.tiktokglobalshop.com';
 const AUTH = process.env.TIKTOK_AUTH_BASE || 'https://auth.tiktok-shops.com';
-const ARQ = () => path.join(process.env.TIKTOK_CACHE_DIR || '/data', '_tiktok_token.json');
+// ── MULTI-EMPRESA DESDE O NASCIMENTO (pedido do Diego, 14/08) ────────────────────
+// "se der pra fazer algo que fica fácil plugar outras empresas no futuro, melhor —
+//  faz tudo assim a partir de agora". Então: o app do TikTok é UM só (mesma app_key),
+// e cada loja autoriza separadamente → um token por loja, num arquivo por loja.
+// Plugar uma empresa nova = autorizar e pronto; nenhuma linha de código muda.
+// A lista sai da env TIKTOK_LOJAS (padrão: as três de hoje).
+const LOJAS = String(process.env.TIKTOK_LOJAS || 'girassol,amb,good')
+  .split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+const LOJA_PADRAO = LOJAS[0] || 'girassol';
+const lojaDe = q => {
+  const l = String((q && q.get && q.get('loja')) || '').trim().toLowerCase();
+  return LOJAS.indexOf(l) >= 0 ? l : LOJA_PADRAO;
+};
+const ARQ = loja => path.join(process.env.TIKTOK_CACHE_DIR || '/data', '_tiktok_token_' + (loja || LOJA_PADRAO) + '.json');
 
-function lerToken() { try { return JSON.parse(fs.readFileSync(ARQ(), 'utf8')); } catch (e) { return null; } }
-function salvarToken(t) {
-  try { fs.mkdirSync(path.dirname(ARQ()), { recursive: true }); } catch (e) {}
-  fs.writeFileSync(ARQ(), JSON.stringify(t, null, 2));
+function lerToken(loja) { try { return JSON.parse(fs.readFileSync(ARQ(loja), 'utf8')); } catch (e) { return null; } }
+function salvarToken(loja, t) {
+  try { fs.mkdirSync(path.dirname(ARQ(loja)), { recursive: true }); } catch (e) {}
+  fs.writeFileSync(ARQ(loja), JSON.stringify(t, null, 2));
 }
 
 // Assinatura das chamadas: HMAC-SHA256 sobre app_secret + path + params ordenados (sem
@@ -47,8 +60,8 @@ function assinar(caminho, params, body) {
   return crypto.createHmac('sha256', APP_SECRET).update(alvo).digest('hex');
 }
 
-async function chamar(caminho, extras, opts) {
-  const t = lerToken();
+async function chamar(caminho, extras, opts, loja) {
+  const t = lerToken(loja);
   const o = opts || {};
   const params = Object.assign({
     app_key: APP_KEY,
@@ -76,16 +89,22 @@ async function tratar(req, res, urlObj, json) {
 
   if (p === '/tiktok/status') {
     if (!admOk()) { json(res, 404, { error: 'not found' }); return true; }
-    const t = lerToken();
+    const porLoja = {};
+    for (const l of LOJAS) {
+      const t = lerToken(l);
+      porLoja[l] = t ? {
+        conectada: !!t.access_token,
+        shop: { id: t.shop_id || null, nome: t.shop_name || null, cipher: t.shop_cipher ? 'ok' : 'FALTA — rode /tiktok/lojas' },
+        token_expira_em: t.expira_em || null, refresh_expira_em: t.refresh_expira_em || null
+      } : { conectada: false };
+    }
     json(res, 200, {
       ok: true,
       falta_env: [!APP_KEY && 'TIKTOK_APP_KEY', !APP_SECRET && 'TIKTOK_APP_SECRET'].filter(Boolean),
       app_key: APP_KEY ? APP_KEY.slice(0, 4) + '…' : null,
-      redirect_configurado: REDIRECT || '(use ?redirect= no /tiktok/conectar)',
-      loja_conectada: !!(t && t.access_token),
-      shop: t ? { id: t.shop_id || null, nome: t.shop_name || null, cipher: t.shop_cipher ? 'ok' : null } : null,
-      token_expira_em: (t && t.expira_em) || null,
-      leia: 'conecte em /tiktok/conectar?k=… e depois usenas sondas /tiktok/lojas e /tiktok/sonda?caminho=…'
+      lojas: LOJAS, loja_padrao: LOJA_PADRAO, por_loja: porLoja,
+      redirect_configurado: REDIRECT || '(não definido — o code pode ser copiado da barra)',
+      leia: 'cada loja autoriza separadamente: /tiktok/conectar?loja=girassol&k=… · depois /tiktok/lojas?loja=…&k= · empresa nova entra em TIKTOK_LOJAS'
     });
     return true;
   }
@@ -93,12 +112,18 @@ async function tratar(req, res, urlObj, json) {
   if (p === '/tiktok/conectar') {
     if (!admOk()) { json(res, 404, { error: 'not found' }); return true; }
     if (!APP_KEY) { json(res, 400, { ok: false, erro: 'falta TIKTOK_APP_KEY no ambiente' }); return true; }
-    const url = AUTH + '/oauth/authorize?app_key=' + encodeURIComponent(APP_KEY) + '&state=girassol';
-    json(res, 200, { ok: true, url, leia: 'abra logado como dono da loja; ao autorizar, o TikTok volta pro redirect com ?code=… — se o redirect apontar pra outro serviço, copie o code da barra e chame /tiktok/trocar-code?code=…&k=' });
+    const loja = lojaDe(q);
+    // o `state` volta no callback e diz PARA QUAL LOJA é o token
+    const url = AUTH + '/oauth/authorize?app_key=' + encodeURIComponent(APP_KEY) + '&state=' + encodeURIComponent(loja);
+    json(res, 200, { ok: true, loja, url, leia: 'abra logado como dono da loja; ao autorizar, o TikTok volta pro redirect com ?code=… — se o redirect apontar pra outro serviço, copie o code da barra e chame /tiktok/trocar-code?code=…&k=' });
     return true;
   }
 
   if (p === '/tiktok/callback' || p === '/tiktok/trocar-code') {
+    // no callback a loja vem do `state`; no trocar-code, do ?loja=
+    const loja = (p === '/tiktok/callback')
+      ? (LOJAS.indexOf(String(q.get('state') || '').trim().toLowerCase()) >= 0 ? String(q.get('state')).trim().toLowerCase() : lojaDe(q))
+      : lojaDe(q);
     const code = String(q.get('code') || q.get('auth_code') || '').trim();
     if (p === '/tiktok/trocar-code' && !admOk()) { json(res, 404, { error: 'not found' }); return true; }
     if (!code) { json(res, 400, { ok: false, erro: 'sem ?code=' }); return true; }
@@ -109,13 +134,13 @@ async function tratar(req, res, urlObj, json) {
       const j = await r.json().catch(() => null);
       const d = (j && j.data) || null;
       if (!d || !d.access_token) { json(res, 502, { ok: false, erro: 'TikTok não devolveu token', resposta: j }); return true; }
-      salvarToken({
+      salvarToken(loja, {
         access_token: d.access_token, refresh_token: d.refresh_token,
         expira_em: d.access_token_expire_in ? new Date(d.access_token_expire_in * 1000).toISOString() : null,
         refresh_expira_em: d.refresh_token_expire_in ? new Date(d.refresh_token_expire_in * 1000).toISOString() : null,
         obtido_em: new Date().toISOString()
       });
-      json(res, 200, { ok: true, msg: '✅ TikTok conectado. Agora rode /tiktok/lojas?k=… para pegar o shop_cipher.' });
+      json(res, 200, { ok: true, loja, msg: '✅ TikTok conectado para ' + loja + '. Agora rode /tiktok/lojas?loja=' + loja + '&k=… para pegar o shop_cipher.' });
     } catch (e) { json(res, 500, { ok: false, erro: String(e.message || e).slice(0, 200) }); }
     return true;
   }
@@ -123,15 +148,16 @@ async function tratar(req, res, urlObj, json) {
   // o shop_cipher identifica a loja em toda chamada — vem de get_authorized_shops
   if (p === '/tiktok/lojas') {
     if (!admOk()) { json(res, 404, { error: 'not found' }); return true; }
-    const r = await chamar('/authorization/202309/shops', {}, { comShop: false });
+    const loja = lojaDe(q);
+    const r = await chamar('/authorization/202309/shops', {}, { comShop: false }, loja);
     const lista = (r.corpo && r.corpo.data && r.corpo.data.shops) || [];
     if (lista.length && q.get('salvar') !== '0') {
-      const t = lerToken() || {};
+      const t = lerToken(loja) || {};
       const alvo = lista.find(s => String(s.id) === String(q.get('shop_id'))) || lista[0];
       t.shop_id = alvo.id; t.shop_name = alvo.name; t.shop_cipher = alvo.cipher;
-      salvarToken(t);
+      salvarToken(loja, t);
     }
-    json(res, 200, { ok: r.ok, http: r.http, lojas: lista, resposta_crua: r.corpo || r.cru,
+    json(res, 200, { ok: r.ok, http: r.http, loja, lojas: lista, resposta_crua: r.corpo || r.cru,
       leia: 'a primeira loja (ou ?shop_id=) foi salva com o cipher; use ?salvar=0 para só olhar' });
     return true;
   }
@@ -146,11 +172,12 @@ async function tratar(req, res, urlObj, json) {
       return true;
     }
     const extras = {};
-    for (const [k, v] of q.entries()) { if (['k', 'caminho', 'metodo', 'body'].indexOf(k) < 0) extras[k] = v; }
+    for (const [k, v] of q.entries()) { if (['k', 'caminho', 'metodo', 'body', 'loja'].indexOf(k) < 0) extras[k] = v; }
     let body = null;
     if (q.get('body')) { try { body = JSON.parse(q.get('body')); } catch (e) { json(res, 400, { ok: false, erro: 'body não é JSON válido' }); return true; } }
-    const r = await chamar(caminho, extras, { metodo: (q.get('metodo') || 'GET').toUpperCase(), body });
-    json(res, 200, { ok: r.ok, http: r.http, caminho, params: extras, resposta_crua: r.corpo || r.cru,
+    const loja = lojaDe(q);
+    const r = await chamar(caminho, extras, { metodo: (q.get('metodo') || 'GET').toUpperCase(), body }, loja);
+    json(res, 200, { ok: r.ok, http: r.http, loja, caminho, params: extras, resposta_crua: r.corpo || r.cru,
       leia: 'resposta CRUA do TikTok — nada interpretado ainda. Com ela na mão eu escrevo o parser sem chutar formato.' });
     return true;
   }
@@ -158,4 +185,4 @@ async function tratar(req, res, urlObj, json) {
   return false;
 }
 
-module.exports = { tratar, chamar, lerToken };
+module.exports = { tratar, chamar, lerToken, LOJAS, LOJA_PADRAO };
