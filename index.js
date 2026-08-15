@@ -14,6 +14,7 @@ const cron = require('node-cron');
 const { json, readBody } = require('./lib/http');
 const empresas = require('./config/empresas');
 const magaluOauth = require('./magalu-oauth');   // handler global das rotas /magalu/*
+const tiktokOauth = require('./tiktok-oauth');   // handler global das rotas /tiktok/* (14/08)
 
 const TZ = process.env.TZ || 'America/Sao_Paulo';
 
@@ -161,6 +162,26 @@ const server = http.createServer(async (req, res) => {
       console.error('[magalu-oauth] erro:', e.message);
       return json(res, 500, { error: e.message });
     }
+  }
+
+  // ── TikTok Shop (14/08) ────────────────────────────────────────────────
+  // Bloco IRMÃO do magalu (não aninhado — aninhar faria a rota nunca ser alcançada).
+  // Só admin: todas as rotas /tiktok/* exigem ?k=ADMIN_KEY, exceto /tiktok/callback,
+  // que é o retorno do OAuth e chega sem chave.
+  if (path.startsWith('/tiktok/')) {
+    if (path !== '/tiktok/callback') {
+      if (!ADMIN_KEY || urlObj.searchParams.get('k') !== ADMIN_KEY) {
+        return json(res, 404, { error: 'not found', path });
+      }
+    }
+    try {
+      const tratou = await tiktokOauth.tratar(req, res, urlObj, json);
+      if (tratou) return;
+    } catch (e) {
+      console.error('[tiktok-oauth] erro:', e.message);
+      return json(res, 500, { ok: false, erro: String(e.message || e).slice(0, 200) });
+    }
+    return json(res, 404, { error: 'not found', path });
   }
 
   // Tenta cada handler de empresa
