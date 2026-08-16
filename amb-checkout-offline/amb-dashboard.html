@@ -397,7 +397,7 @@ const MOD = '/amb-checkout-offline';
     return _f(u, o);
   };
 })();
-const DASH_BUILD = 'a20';
+const DASH_BUILD = 'a21';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -2033,15 +2033,24 @@ function render(){
   const semFatUn = prods.reduce((s,p)=>s+(p.qtd-p.qtdV),0);
   $('prodAviso').innerHTML = semFatUn ? '<div class="aviso">⚠️ <b>'+N(semFatUn)+' unidades</b> do período ainda sem valor gravado — o faturamento por produto soma só as valoradas (etiqueta âmbar "x/y un."). Complete o <b>backfill de detalhes</b>.</div>' : '';
 
-  const ufs = Object.keys(porUF).sort((a,b)=>porUF[b].ped-porUF[a].ped);
+  // 17/08 — VENDAS POR ESTADO: era o último card lendo só o cache do checkout (~6 dias). Em
+  // Mês/Ano ele mostrava um pedaço do período como se fosse o todo. Agora, quando o período
+  // sai da janela do cache, usa o MESMO histórico dos cards do topo. Pedido gravado antes da
+  // UF entrar no backfill não tem estado: o painel AVISA quantos, em vez de fingir precisão.
+  let porUFef = porUF, ufSemDado = 0, ufDoHist = false;
+  if(precisaHistorico(intervalo().de) && HIST && HIST.de===intervalo().de && HIST.ate===intervalo().ate && Array.isArray(HIST.ufs)){
+    porUFef = {}; ufDoHist = true; ufSemDado = Number(HIST.pedidos_sem_uf)||0;
+    HIST.ufs.forEach(function(u){ porUFef[u.uf] = { ped:u.pedidos||0, fat:u.fat||0, un:u.un||0, mc:u.mar||0 }; });
+  }
+  const ufs = Object.keys(porUFef).sort((a,b)=>porUFef[b].ped-porUFef[a].ped);
   $('tUF').innerHTML = '<tr><th title="estado do cliente, pela nota fiscal">UF</th><th class="num" title="quantos pedidos no período filtrado">Pedidos</th><th class="num" title="participação no total do período">%</th><th class="num" title="soma do valor das notas no período">Faturamento</th><th style="width:26%"></th></tr>'+
-    (ufs.slice(0,15).map(u=>{const c=porUF[u];const p=pc(c.ped,comUF||1);
+    (ufs.slice(0,15).map(u=>{const c=porUFef[u];const p=pc(c.ped,comUF||1);
       return '<tr><td><b>'+esc(u)+'</b></td><td class="num">'+N(c.ped)+'</td><td class="num dim">'+p+'%</td>'+
       '<td class="num ok">'+(c.fat?BRL(c.fat):'<span class="dim">—</span>')+'</td>'+
       '<td><div class="bar"><i style="width:'+p+'%"></i></div></td></tr>';}).join('')
     || '<tr><td class="dim" colspan="5">nenhum pedido com UF no período</td></tr>');
   renderMapaUF(porUF);
-  $('ufAviso').innerHTML = ((PER.length+AGD.length)-comUF) ? '<div class="aviso">⚠️ '+N((PER.length+AGD.length)-comUF)+' pedido(s) sem UF — o backfill de detalhes preenche o retroativo.</div>' : '';
+  $('ufAviso').innerHTML = ((ufDoHist && ufSemDado) ? '<div class="aviso">⚠️ <b>'+N(ufSemDado)+' pedido(s)</b> do período foram gravados antes de o estado passar a ser guardado — eles ficam fora deste mapa. Rode o backfill do período pra preencher.</div>' : '') + ((PER.length+AGD.length)-comUF) ? '<div class="aviso">⚠️ '+N((PER.length+AGD.length)-comUF)+' pedido(s) sem UF — o backfill de detalhes preenche o retroativo.</div>' : '';
 
   renderProjChips(); renderProjecao();
   renderCfg();

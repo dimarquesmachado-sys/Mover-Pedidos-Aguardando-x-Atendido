@@ -179,7 +179,7 @@ function rotasHistorico(ctx) {
       const iniPed = (pg - 1) * lim, fimPed = Math.min(totalPedidos, iniPed + lim);
       let off = 0; for (let i = 0; i < iniPed; i++) off += idx[i].c;
       let qtdItens = 0; for (let i = iniPed; i < fimPed; i++) qtdItens += idx[i].c;
-      const campos = 'numero_pedido,numero_loja,canal,data_venda,sku,descricao,quantidade,valor_produto,valor_nota,custo,comissao,frete_vendedor,imposto,margem,credito_ml';
+      const campos = 'numero_pedido,numero_loja,canal,data_venda,sku,descricao,quantidade,valor_produto,valor_nota,custo,comissao,frete_vendedor,imposto,margem,credito_ml,uf'   // 17/08: uf entra pro card Vendas por Estado;
       let linhas = [];
       try {
         const rq = await fetch(BASE + qCanal + '&select=' + campos + '&order=data_venda.desc,numero_pedido.desc,sku.desc&limit=' + Math.max(1, qtdItens) + '&offset=' + off, { headers: HH });
@@ -253,7 +253,7 @@ function rotasHistorico(ctx) {
       const _cuL = sk => { const c = _ccL[String(sk || '').trim()]; return (c && c.custo != null && isFinite(Number(c.custo))) ? Number(c.custo) : null; };
       let _repostos = 0;
       const T = { fat: 0, prod: 0, imp: 0, cus: 0, com: 0, fre: 0, mar: 0, un: 0, itens: 0, semCusto: 0 };
-      const peds = new Set(), porCanal = {}, porSku = {}, porDia = {}, semCustoSet = new Set();
+      const peds = new Set(), porCanal = {}, porSku = {}, porDia = {}, porUF = {}, semCustoSet = new Set();
       // 31/07: o dashboard mostrava "17.351 pedidos sem alíquota" no filtro Ano porque cruzava o
       // TOTAL do histórico com a contagem dos dados LOCAIS (só ~6 dias). Agora o servidor conta de
       // verdade: pedido cujas linhas somam imposto ZERO, e de quais meses são.
@@ -307,6 +307,14 @@ function rotasHistorico(ctx) {
             if (dd) { if (!porDia[dd]) porDia[dd] = { fat: 0, mar: 0, imp: 0, com: 0, fre: 0, peds: new Set() };
               porDia[dd].fat += vn; porDia[dd].mar += (mg || 0); porDia[dd].imp += im; porDia[dd].com += co; porDia[dd].fre += fr;
               if (l.numero_pedido) porDia[dd].peds.add(String(l.numero_pedido)); }
+            // 17/08 — POR ESTADO: este card era o último lendo só o cache do checkout (~6 dias),
+            // então em Mês/Ano mostrava um pedaço do período como se fosse o todo. Linha antiga
+            // (gravada antes da UF entrar no backfill) cai em "—" e o painel avisa, sem mentir.
+            const ufL = String(l.uf || '').trim().toUpperCase().slice(0, 2);
+            const kUF = ufL || '—';
+            if (!porUF[kUF]) porUF[kUF] = { uf: kUF, fat: 0, un: 0, mar: 0, peds: new Set() };
+            porUF[kUF].fat += vn; porUF[kUF].un += q; porUF[kUF].mar += (mg || 0);
+            if (l.numero_pedido) porUF[kUF].peds.add(String(l.numero_pedido));
           }
           if (linhas.length < 1000) break;
           offset += 1000;
@@ -322,9 +330,13 @@ function rotasHistorico(ctx) {
         fat: Math.round(porDia[d].fat * 100) / 100, pedidos: porDia[d].peds.size,
         mar: Math.round((porDia[d].mar || 0) * 100) / 100, imp: Math.round((porDia[d].imp || 0) * 100) / 100,
         com: Math.round((porDia[d].com || 0) * 100) / 100, fre: Math.round((porDia[d].fre || 0) * 100) / 100 };
+      const ufs = Object.values(porUF).filter(u => u.uf !== '—').map(u => ({ uf: u.uf,
+        fat: Math.round(u.fat * 100) / 100, un: u.un, mar: Math.round(u.mar * 100) / 100, pedidos: u.peds.size }))
+        .sort((a, b) => b.fat - a.fat);
+      const pedSemUF = (porUF['—'] && porUF['—'].peds.size) || 0;
       const skus = Object.values(porSku).sort((a, b) => b.mar - a.mar).slice(0, 300)
         .map(x => ({ sku: x.sku, desc: x.desc, un: x.un, fat: Math.round(x.fat * 100) / 100, cus: Math.round(x.cus * 100) / 100, mar: Math.round(x.mar * 100) / 100 }));
-      const dados = { ok: true, de: deL, ate: ateL, fonte: 'supabase', paginas,
+      const dados = { ok: true, de: deL, ate: ateL, fonte: 'supabase', paginas, ufs, pedidos_sem_uf: pedSemUF,
         totais: { faturamento: Math.round(T.fat * 100) / 100, produtos: Math.round(T.prod * 100) / 100, imposto: Math.round(T.imp * 100) / 100,
                   custo: Math.round(T.cus * 100) / 100, comissao: Math.round(T.com * 100) / 100, frete: Math.round(T.fre * 100) / 100,
                   margem: Math.round(T.mar * 100) / 100, pedidos: peds.size, unidades: T.un, itens: T.itens, un_sem_custo: T.semCusto,
