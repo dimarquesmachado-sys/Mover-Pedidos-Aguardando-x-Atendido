@@ -129,7 +129,13 @@ function criarNoturna(ctx) {
           throw new Error('VENDA FORA DO BLING → ' + r.alertas.map(a => a.canal + ': ' + a.faltando + ' pedido(s)').join(' · ') +
                           ' | reautorize a integração no Bling e rode o backfill do período');
         }
-        return partes.join(' · ') + ((r.nao_verificados || []).length ? ' ⚠️ sem checar: ' + r.nao_verificados.join(',') : '');
+        // Codex (P1): canal NÃO VERIFICADO (erro, credencial ausente, lista truncada) não pode
+        // sair como etapa cumprida — a noturna diria "tudo conferido" sem ter conferido.
+        if ((r.nao_verificados || []).length) {
+          throw new Error('INDETERMINADO — não consegui conferir: ' + r.nao_verificados.join(', ') +
+                          ' (o resto: ' + partes.join(' · ') + ')');
+        }
+        return partes.join(' · ');
       });
       await dorme(2000);
     }
