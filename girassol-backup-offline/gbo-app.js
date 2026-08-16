@@ -395,7 +395,10 @@ const _listarNoMarketplaceCanario = async (canal, deTs, ateTs) => {
         // Codex (P1): erro do proxy/da Shopee NÃO pode virar lista vazia — vazio seria
         // lido como "o marketplace não vendeu nada", que é o oposto do que aconteceu.
         if (!resp) throw new Error('Shopee não respondeu: ' + String((cru && (cru.error || cru.message)) || (r && r.erro) || 'sem resposta').slice(0, 120));
-        const FORA_SH = ['UNPAID', 'CANCELLED', 'INVOICE_PENDING'];
+        // Codex (P1): INVOICE_PENDING é pedido PAGO esperando nota — ele PRECISA estar no
+        // Bling justamente pra ser faturado. Excluir escondia a queda de integração no estado
+        // mais comum da madrugada, que é exatamente o cenário que este canário existe pra pegar.
+        const FORA_SH = ['UNPAID', 'CANCELLED'];
         for (const o of (resp.order_list || [])) {
           if (!o || !o.order_sn) continue;
           if (FORA_SH.indexOf(String(o.order_status || '').toUpperCase()) >= 0) continue;
