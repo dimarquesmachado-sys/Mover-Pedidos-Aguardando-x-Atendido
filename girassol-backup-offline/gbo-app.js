@@ -4451,6 +4451,24 @@ async function vendasSync() {
       const bipR = new Set(Object.values(confR).map(c => String(c && c.numero)));
       let tkR = null;
       try { const { garantirTokenML: _g3 } = require('../girassol/mlTokenManager'); tkR = await _g3(); } catch (e) {}
+      // ── HORA REAL DA VENDA NO TIKTOK (16/08) ──────────────────────────────────────
+      // O Diego notou: "os tiktok tão tudo sem horário no dashboard". Motivo: `venda_em` só
+      // era preenchido por ML e Shopee; sem ele o painel carimba MEIO-DIA e a venda aparece
+      // fora de ordem no eixo do tempo. O dado já existe — o financeiro do TikTok guarda
+      // `criado_em` (order_create_time) por pedido. Aqui é só transportar; custo zero de API.
+      try {
+        const _tkArqH = require('path').join(process.env.TIKTOK_CACHE_DIR || '/data', '_tiktok_financeiro_girassol.json');
+        const _tkPedH = (JSON.parse(require('fs').readFileSync(_tkArqH, 'utf8')) || {}).pedidos || {};
+        let _tkHoras = 0;
+        for (const v of Object.values(atual)) {
+          if (!v || v.marketplace !== 'tiktok' || !v.numero_loja || v.venda_em) continue;
+          const reg = _tkPedH[String(v.numero_loja).trim()];
+          const ts = reg && Number(reg.criado_em);
+          if (ts && isFinite(ts)) { v.venda_em = new Date(ts * 1000).toISOString(); _tkHoras++; }
+        }
+        if (_tkHoras) console.log('[GIRABKP] hora real da venda preenchida em ' + _tkHoras + ' pedido(s) do TikTok');
+      } catch (e) {}
+
       if (tkR) {
         const dormeR = ms => new Promise(r4 => setTimeout(r4, ms));
         const alvosR = Object.values(atual)
