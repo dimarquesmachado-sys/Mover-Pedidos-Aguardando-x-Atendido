@@ -464,9 +464,25 @@ const _listarNoMarketplaceCanario = async (canal, deTs, ateTs) => {
 
 // Codex (P1 do #104): sem isto o canário só existiria se alguém lembrasse de abrir a URL —
 // e o objetivo é justamente avisar sozinho. A noturna passa a rodar a conferência.
+// Codex (#105): a trava vivia só na ROTA, e a noturna chama esta função direto — se um
+// backfill estivesse rodando, a etapa noturna passava por fora e brigava pela cota do Bling.
+// Além disso a checagem era de mão única: começado o canário, nada impedia um backfill de
+// entrar por cima. Agora o estado é COMPARTILHADO e vale para os dois lados.
+const _canario = { rodando: false, desde: null };
+
 async function conferirMarketplaces(dias) {
+  const anoR = (typeof _backfillAno !== 'undefined') && _backfillAno && _backfillAno.rodando;
+  if ((_backfill && _backfill.rodando) || anoR) {
+    return { ok: false, erro: 'tem backfill rodando — os dois brigam pela cota do Bling (429). Espere terminar.',
+      backfill: { de: _backfill && _backfill.de, ate: _backfill && _backfill.ate, do_ano: !!anoR } };
+  }
   const canLib = require('../lib/canario-marketplace');
-  return canLib.conferir({ empresa: 'girassol', listarNoBling: _listarNoBlingCanario, listarNoMarketplace: _listarNoMarketplaceCanario }, dias || 3, []);
+  _canario.rodando = true; _canario.desde = new Date().toISOString();
+  try {
+    return await canLib.conferir({ empresa: 'girassol', listarNoBling: _listarNoBlingCanario, listarNoMarketplace: _listarNoMarketplaceCanario }, dias || 3, []);
+  } finally {
+    _canario.rodando = false;
+  }
 }
 
 const _noturna = criarNoturna({
@@ -1279,6 +1295,9 @@ function routes(readBody) {
       const kD = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
       const sessD = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
+      // Codex (#105): mão dupla — se o canário está consultando o Bling AGORA, o backfill
+      // espera. Sem isto, iniciar um por cima recriava o 429 que acabamos de evitar.
+      if (_canario.rodando) { json(res, 200, { ok: false, msg: 'o canário está conferindo o Bling agora (desde ' + _canario.desde + ') — espere alguns segundos e tente de novo' }); return true; }
       if (_backfill.rodando) { json(res, 200, { ok: false, msg: 'já tem um backfill rodando — acompanhe em /backfill-status', status: _backfill }); return true; }
       const de = String((urlObj.searchParams && urlObj.searchParams.get('de')) || '2026-01-01').slice(0, 10);
       const ate = String((urlObj.searchParams && urlObj.searchParams.get('ate')) || new Date().toISOString().slice(0, 10)).slice(0, 10);
@@ -1499,19 +1518,8 @@ function routes(readBody) {
       const sC = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kC === process.env.ADMIN_KEY) || (sC && ehAdmin(sC)))) { json(res, 404, { error: 'not found' }); return true; }
       // 16/08: canário + backfill juntos = 429. Mesma trava da conciliação da Shopee.
-      // Codex: no backfill do ANO, `_backfill.rodando` fica FALSO nas pausas entre meses —
-      // o canário passava justo aí e brigava pela cota no mês seguinte. Checa os dois estados.
-      const anoRodando = (typeof _backfillAno !== 'undefined') && _backfillAno && _backfillAno.rodando;
-      if ((_backfill && _backfill.rodando) || anoRodando) {
-        json(res, 200, { ok: false, erro: 'tem backfill rodando — os dois brigam pela cota do Bling (429). Espere terminar e rode de novo.',
-          backfill: { de: _backfill.de, ate: _backfill.ate, pedidos: _backfill.pedidos, do_ano: !!anoRodando } });
-        return true;
-      }
-      const canLib = require('../lib/canario-marketplace');
-
-      const r = await canLib.conferir({ empresa: 'girassol', listarNoBling: _listarNoBlingCanario, listarNoMarketplace: _listarNoMarketplaceCanario },
-        urlObj.searchParams.get('dias'),
-        String(urlObj.searchParams.get('canais') || '').split(',').map(s => s.trim()).filter(Boolean));
+      // a trava mora na função compartilhada (vale pra rota E pra noturna)
+      const r = await conferirMarketplaces(urlObj.searchParams.get('dias'));
       json(res, 200, r);
       return true;
     }
