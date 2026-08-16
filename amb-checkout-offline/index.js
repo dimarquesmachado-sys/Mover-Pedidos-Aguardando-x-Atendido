@@ -5302,8 +5302,12 @@ async function backfillVendas(de, ate, empresa){
             _backfill.tiktok.usados++;
             comissao = Number(tkA.tarifa);
             comFonte = 'tiktok';
+            // Codex (P2): frete líquido POSITIVO é dinheiro que sobrou pra loja (subsídio maior
+            // que o custo). Zerar jogava esse crédito fora e subestimava a margem. A Shopee já
+            // grava o líquido podendo ficar negativo — aqui igual: crédito entra como frete
+            // negativo, que a margem soma de volta.
             const fLiqA = Number(tkA.frete_liquido || 0);
-            freteTiktokA = (fLiqA < 0) ? Math.round(Math.abs(fLiqA) * 100) / 100 : 0;
+            freteTiktokA = Math.round(-fLiqA * 100) / 100;
           } else { _backfill.tiktok.sem_dado++; }
         }
         if (canal === 'shopee' && nl && (SHOPEE_TODOS || !comissao || comissao <= 0)) {
