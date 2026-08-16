@@ -3693,8 +3693,11 @@ async function backfillVendas(de, ate, empresa){
             // significa que sobrou dinheiro de frete — nesse caso o custo é ZERO, nunca negativo.
             // ⚠️ `freFonte` só nasce mais abaixo — usar aqui quebraria o backfill inteiro
             // (TDZ, que o `node --check` NÃO pega). Guarda a decisão e aplica lá.
+            // Codex (#106): frete líquido POSITIVO é dinheiro que sobrou pra loja. Zerar
+            // jogava o crédito fora e subestimava a margem — a Shopee já grava o líquido
+            // podendo ficar negativo. Aqui igual: crédito entra como frete negativo.
             const fLiq = Number(tk.frete_liquido || 0);
-            freteTiktok = (fLiq < 0) ? Math.round(Math.abs(fLiq) * 100) / 100 : 0;
+            freteTiktok = Math.round(-fLiq * 100) / 100;
           } else { _backfill.tiktok.sem_dado++; }
         }
         let shopFonte = null;
