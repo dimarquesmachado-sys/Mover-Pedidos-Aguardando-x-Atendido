@@ -365,12 +365,17 @@ const _listarNoBlingCanario = async (de, ate) => {
       if (r && r.ok) break;
       const st429 = (r && r.status) || 0;
       if (st429 !== 429 && st429 !== 0 && st429 < 500) break;
-      await new Promise(r2 => setTimeout(r2, tent * 4000));
+      // Codex: não dormir depois da ÚLTIMA tentativa — eram 16s de espera sem ninguém
+      // atrás (o blingGet já tem retry próprio; a soma passava de 1 minuto pra nada).
+      if (tent < 4) await new Promise(r2 => setTimeout(r2, tent * 4000));
     }
     // Codex (P2): falha do Bling NÃO pode virar "nenhum pedido" — isso acusaria o
     // marketplace inteiro de sumido quando o problema é a nossa própria consulta.
+    // Codex: o blingGet devolve 429 TAMBÉM quando a rede falha (DNS, conexão) — afirmar
+    // "cota estourada" mandaria investigar o lado errado. A mensagem passa a citar as duas
+    // hipóteses, na ordem provável.
     if (!r || !r.ok) throw new Error('Bling não respondeu na página ' + pg + ' (HTTP ' + ((r && r.status) || '?') + ')' +
-      (((r && r.status) === 429) ? ' — cota da API estourada; rode fora do horário do backfill' : ''));
+      (((r && r.status) === 429) ? ' — cota da API estourada OU Bling inacessível (rede). Se houver backfill rodando, é cota; senão, cheque o Bling.' : ''));
     const arr = (r.data && r.data.data) || [];
     if (!arr.length) break;
     for (const pd of arr) {
@@ -1494,9 +1499,12 @@ function routes(readBody) {
       const sC = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kC === process.env.ADMIN_KEY) || (sC && ehAdmin(sC)))) { json(res, 404, { error: 'not found' }); return true; }
       // 16/08: canário + backfill juntos = 429. Mesma trava da conciliação da Shopee.
-      if (_backfill && _backfill.rodando) {
+      // Codex: no backfill do ANO, `_backfill.rodando` fica FALSO nas pausas entre meses —
+      // o canário passava justo aí e brigava pela cota no mês seguinte. Checa os dois estados.
+      const anoRodando = (typeof _backfillAno !== 'undefined') && _backfillAno && _backfillAno.rodando;
+      if ((_backfill && _backfill.rodando) || anoRodando) {
         json(res, 200, { ok: false, erro: 'tem backfill rodando — os dois brigam pela cota do Bling (429). Espere terminar e rode de novo.',
-          backfill: { de: _backfill.de, ate: _backfill.ate, pedidos: _backfill.pedidos } });
+          backfill: { de: _backfill.de, ate: _backfill.ate, pedidos: _backfill.pedidos, do_ano: !!anoRodando } });
         return true;
       }
       const canLib = require('../lib/canario-marketplace');
