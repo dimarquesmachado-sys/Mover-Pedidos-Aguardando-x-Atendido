@@ -1364,24 +1364,33 @@ function routes(readBody) {
     }
     // resumo de um período, pros cards do dashboard
     // ── CANÁRIO MARKETPLACE × BLING (16/08) ───────────────────────────────────────
-    // Regra do Diego: "o Bling não é o rei, quem manda é o MARKETPLACE". Este canário
-    // pega a lista de vendas em cada marketplace e confere se TODAS chegaram ao Bling.
-    // Caso real que motivou: o token Bling↔Shopee da Girassol venceu (dura ~365 dias e o
-    // Bling não avisa), 28 pedidos não desceram, e o sintoma só apareceu como diferença de
-    // faturamento (Jodda R$ 15 mil × nosso R$ 11 mil). Antes disso, a GOOD ficou um dia
-    // inteiro sem pedido Shopee no checkout pelo mesmo motivo.
+    // Regra do Diego: "o Bling não é o rei; quem manda é o MARKETPLACE". Pega a lista de
+    // vendas em cada marketplace e confere se TODAS chegaram ao Bling.
+    // Caso real: o token Bling↔Shopee da Girassol venceu (dura ~365 dias, o Bling não avisa),
+    // 28 pedidos não desceram, e o sintoma só apareceu como diferença de faturamento
+    // (Jodda R$ 15 mil × nosso R$ 11 mil). A GOOD passou pelo mesmo em 11/08.
+    //
+    // ⚠️ PRINCÍPIO (Codex, 8 apontamentos no #104): FALHA NUNCA VIRA "TUDO CERTO".
+    // Se a consulta falhar, vier truncada, ou o Bling não responder, o canal fica NÃO
+    // VERIFICADO e o veredito é INDETERMINADO — nunca ✅.
     if (method === 'GET' && p === '/girassol-backup-offline/canario-marketplaces') {
       const kC = urlObj.searchParams.get('k') || '';
       const sC = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kC === process.env.ADMIN_KEY) || (sC && ehAdmin(sC)))) { json(res, 404, { error: 'not found' }); return true; }
       const canLib = require('../lib/canario-marketplace');
 
-      // lado BLING: pedidos do período, agrupados por canal (a loja define o canal)
       const listarNoBling = async (de, ate) => {
         const porCanal = {};
-        for (let pg = 1; pg <= 60; pg++) {
-          const r = await blingGet('/pedidos/vendas?dataInicial=' + de + '&dataFinal=' + ate + '&pagina=' + pg + '&limite=100');
-          const arr = (r && r.ok && r.data && r.data.data) || [];
+        // Codex (P1): o Bling tem bug conhecido no MESMO DIA — o vendasSync já contorna
+        // pedindo um dia a mais. Sem isso, venda de hoje sumiria e seria acusada de falta.
+        const ateMais1 = new Date(Date.parse(ate + 'T12:00:00Z') + 86400000).toISOString().slice(0, 10);
+        const MAX_PG = 200;
+        for (let pg = 1; pg <= MAX_PG; pg++) {
+          const r = await blingGet('/pedidos/vendas?dataInicial=' + de + '&dataFinal=' + ateMais1 + '&pagina=' + pg + '&limite=100');
+          // Codex (P2): falha do Bling NÃO pode virar "nenhum pedido" — isso acusaria o
+          // marketplace inteiro de sumido quando o problema é a nossa própria consulta.
+          if (!r || !r.ok) throw new Error('Bling não respondeu na página ' + pg + ' (HTTP ' + ((r && r.status) || '?') + ')');
+          const arr = (r.data && r.data.data) || [];
           if (!arr.length) break;
           for (const pd of arr) {
             const lid = String((pd.loja && pd.loja.id) || '');
@@ -1391,28 +1400,34 @@ function routes(readBody) {
             (porCanal[canal] = porCanal[canal] || new Set()).add(nl);
           }
           if (arr.length < 100) break;
+          // Codex (P2): página cheia no teto = lista truncada, e truncada não vale comparar
+          if (pg === MAX_PG) throw new Error('mais de ' + (MAX_PG * 100) + ' pedidos no Bling nesse período — reduza &dias=');
           await new Promise(r2 => setTimeout(r2, 150));
         }
         return porCanal;
       };
 
-      // lado MARKETPLACE: cada canal na sua API. `null` = sem fonte conectada (não acusa).
       const listarNoMarketplace = async (canal, deTs, ateTs) => {
         if (canal === 'shopee') {
           if (!process.env.SHOPEE_SYNC_KEY) return null;
           const ids = [];
-          // a Shopee só aceita janela de 15 dias por consulta
           for (let ini = deTs; ini < ateTs; ini += 15 * 86400) {
             const fimJ = Math.min(ini + 15 * 86400 - 1, ateTs);
             let cursor = '';
-            for (let v = 0; v < 20; v++) {
+            const MAX_PG_SH = 60;
+            for (let v = 1; v <= MAX_PG_SH; v++) {
               const q = 'time_range_field=create_time&time_from=' + ini + '&time_to=' + fimJ + '&page_size=100' + (cursor ? '&cursor=' + encodeURIComponent(cursor) : '');
               const r = await pedirAoSync('shopee-raw', { caminho: '/api/v2/order/get_order_list', q });
-              const resp = r && r.dados && r.dados.resposta && r.dados.resposta.response;
-              if (!resp) break;
+              const cru = r && r.dados && r.dados.resposta;
+              const resp = cru && cru.response;
+              // Codex (P1): erro do proxy/da Shopee NÃO pode virar lista vazia — vazio seria
+              // lido como "o marketplace não vendeu nada", que é o oposto do que aconteceu.
+              if (!resp) throw new Error('Shopee não respondeu: ' + String((cru && (cru.error || cru.message)) || (r && r.erro) || 'sem resposta').slice(0, 120));
               for (const o of (resp.order_list || [])) if (o && o.order_sn) ids.push(String(o.order_sn));
               cursor = resp.next_cursor || '';
               if (!resp.more || !cursor) break;
+              // Codex (P1): teto atingido com "more" ainda ligado = truncado
+              if (v === MAX_PG_SH) return { incompleto: true, motivo: 'Shopee com mais de ' + (MAX_PG_SH * 100) + ' pedidos na janela' };
               await new Promise(r2 => setTimeout(r2, 200));
             }
           }
@@ -1424,15 +1439,17 @@ function routes(readBody) {
           if (!tk || typeof tk.chamar !== 'function' || !tk.lerToken || !tk.lerToken('girassol')) return null;
           const ids = [];
           let pageToken = '';
-          for (let v = 0; v < 30; v++) {
+          const MAX_PG_TK = 100;
+          for (let v = 1; v <= MAX_PG_TK; v++) {
             const r = await tk.chamar('/order/202309/orders/search',
               Object.assign({ page_size: '50' }, pageToken ? { page_token: pageToken } : {}),
               { metodo: 'POST', body: { create_time_ge: deTs, create_time_lt: ateTs } }, 'girassol');
             const d = r && r.corpo && r.corpo.data;
-            if (!d) break;
+            if (!d) throw new Error('TikTok não respondeu: ' + String((r && r.corpo && r.corpo.message) || ('HTTP ' + (r && r.http))).slice(0, 120));
             for (const o of (d.orders || [])) if (o && o.id) ids.push(String(o.id));
             pageToken = d.next_page_token || '';
             if (!pageToken) break;
+            if (v === MAX_PG_TK) return { incompleto: true, motivo: 'TikTok com mais de ' + (MAX_PG_TK * 50) + ' pedidos no período' };
             await new Promise(r2 => setTimeout(r2, 200));
           }
           return ids;
@@ -3476,6 +3493,18 @@ async function backfillVendas(de, ate, empresa){
     await tokenFee();
     _backfill.comissao = { bling: 0, billing: 0, sale_fee: 0, zero: 0, billing_no_mapa: Object.keys(comBill).length, token_ml: tkFee ? 'ok' : 'sem token' };
     _backfill.frete = { bling: 0, billing: 0, escrow: 0, zero: 0, billing_no_mapa: Object.keys(freBill).length };
+    // ── TIKTOK (15/08): tarifa REAL do marketplace, medida e conferida ─────────────
+    // O TikTok era o último canal grande sem conferência: a tarifa vinha do Bling e
+    // ninguém sabia se batia. Medido em julho/2026 na Girassol: o Bling dava R$ 4.752
+    // e a tarifa real é **R$ 11.286 (27,5%)** — R$ 6.534 de custo invisível, inflando a
+    // margem do canal. A conta do TikTok é `R$ 2,00 fixo + 12%`, e boa parte do que falta
+    // é COMISSÃO DE AFILIADO (creators), que não chega ao Bling.
+    // O arquivo é populado por /tiktok/financeiro-coletar (lib/tiktok-financeiro.js).
+    const _tkArq = require('path').join(process.env.TIKTOK_CACHE_DIR || '/data', '_tiktok_financeiro_girassol.json');
+    let _tkPedidos = {};
+    try { _tkPedidos = (JSON.parse(require('fs').readFileSync(_tkArq, 'utf8')) || {}).pedidos || {}; } catch (e) { _tkPedidos = {}; }
+    _backfill.tiktok = { pedidos_no_arquivo: Object.keys(_tkPedidos).length, usados: 0, sem_dado: 0,
+      tarifa_que_o_bling_dava: 0, tarifa_somada: 0, frete_liquido_visto: 0 };
     _backfill.shopee = { escrow_fechou: 0, escrow_com_sobra: 0, escrow_sem_resposta: 0, escrow_erro: 0,
                          comissao_somada: 0, comissao_que_o_bling_dava: 0, frete_liquido_visto: 0,
                          modo: SHOPEE_TODOS ? 'todos os pedidos' : 'so quando o Bling nao trouxe taxa' };
@@ -3618,6 +3647,29 @@ async function backfillVendas(de, ate, empresa){
         //          + order_ams_commission_fee (afiliado) + campaign_fee + processamento
         //   frete do vendedor = max(0, -final_shipping_fee)   (negativo = custo dele)
         // O escrow vem do servico que e dono do token (nao duplicamos credencial).
+        let freteTiktok = null;   // frete do vendedor pelo TikTok (null = canal não é TikTok / sem dado)
+        // ── CASCATA DO TIKTOK (15/08) — mesma lógica da Shopee: o marketplace manda ────
+        // A identidade `receita − tarifa + frete = repasse` fechou em 100% dos pedidos de
+        // julho (902 de 902). Diferente da Shopee, aqui NÃO se paga chamada por pedido: o
+        // financeiro já foi coletado por extrato e está no arquivo, então é só consultar.
+        // Só age quando existe dado daquele pedido — sem dado, mantém o que o Bling deu.
+        if (canal === 'tiktok' && nl) {
+          const tk = _tkPedidos[String(nl).trim()];
+          if (tk && Number(tk.tarifa) > 0) {
+            _backfill.tiktok.tarifa_que_o_bling_dava = Math.round((_backfill.tiktok.tarifa_que_o_bling_dava + Number(comissao || 0)) * 100) / 100;
+            _backfill.tiktok.tarifa_somada = Math.round((_backfill.tiktok.tarifa_somada + Number(tk.tarifa)) * 100) / 100;
+            _backfill.tiktok.frete_liquido_visto = Math.round((_backfill.tiktok.frete_liquido_visto + Number(tk.frete_liquido || 0)) * 100) / 100;
+            _backfill.tiktok.usados++;
+            comissao = Number(tk.tarifa);
+            comFonte = 'tiktok';
+            // frete: no TikTok o líquido já vem pronto (negativo = custo da loja). Positivo
+            // significa que sobrou dinheiro de frete — nesse caso o custo é ZERO, nunca negativo.
+            // ⚠️ `freFonte` só nasce mais abaixo — usar aqui quebraria o backfill inteiro
+            // (TDZ, que o `node --check` NÃO pega). Guarda a decisão e aplica lá.
+            const fLiq = Number(tk.frete_liquido || 0);
+            freteTiktok = (fLiq < 0) ? Math.round(Math.abs(fLiq) * 100) / 100 : 0;
+          } else { _backfill.tiktok.sem_dado++; }
+        }
         let shopFonte = null;
         if (canal === 'shopee' && nl && (SHOPEE_TODOS || !comissao || comissao <= 0)) {
           try {
@@ -3687,7 +3739,9 @@ async function backfillVendas(de, ate, empresa){
         // (FLEX nao entra por aqui: o ML nao cobra frete nesses, quem paga o motoboy e a loja.)
         // o frete que o escrow apurou manda no da Shopee — e o liquido real do pedido
         if (freteShopee != null) { frete = freteShopee; }
-        let freFonte = (freteShopee != null) ? 'escrow' : ((frete > 0) ? 'bling' : 'zero');
+        // TikTok entra ANTES do Bling na escolha do frete (é o dado do próprio marketplace)
+        if (freteTiktok != null) frete = freteTiktok;
+        let freFonte = (freteShopee != null) ? 'escrow' : (freteTiktok != null ? 'tiktok' : ((frete > 0) ? 'bling' : 'zero'));
         if ((!frete || frete <= 0) && canal === 'ml' && nl) {
           const fB = Number(freBill[String(nl).trim()] || 0);
           if (fB > 0) { frete = fB; freFonte = 'billing'; }
