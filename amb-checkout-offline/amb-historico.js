@@ -301,7 +301,12 @@ function rotasHistorico(ctx) {
             if (!porSku[sk]) porSku[sk] = { sku: sk, desc: l.descricao || '', un: 0, fat: 0, cus: 0, mar: 0 };
             porSku[sk].un += q; porSku[sk].fat += vp; porSku[sk].cus += (cu != null ? cu : 0); porSku[sk].mar += (mg || 0);
             const dd = String(l.data_venda || '').slice(0, 10);
-            if (dd) { if (!porDia[dd]) porDia[dd] = { fat: 0, peds: new Set() }; porDia[dd].fat += vn; if (l.numero_pedido) porDia[dd].peds.add(String(l.numero_pedido)); }
+            // 17/08 — mesmo conserto da Girassol: o card "Progressão do Período" lia só o
+            // cache do checkout (~6 dias) e a curva vinha errada em período longo. O histórico
+            // passa a devolver margem, imposto, tarifa e frete POR DIA.
+            if (dd) { if (!porDia[dd]) porDia[dd] = { fat: 0, mar: 0, imp: 0, com: 0, fre: 0, peds: new Set() };
+              porDia[dd].fat += vn; porDia[dd].mar += (mg || 0); porDia[dd].imp += im; porDia[dd].com += co; porDia[dd].fre += fr;
+              if (l.numero_pedido) porDia[dd].peds.add(String(l.numero_pedido)); }
           }
           if (linhas.length < 1000) break;
           offset += 1000;
@@ -313,7 +318,10 @@ function rotasHistorico(ctx) {
         imp: Math.round((porCanal[c].imp || 0) * 100) / 100, com: Math.round((porCanal[c].com || 0) * 100) / 100,
         fre: Math.round((porCanal[c].fre || 0) * 100) / 100, cus: Math.round((porCanal[c].cus || 0) * 100) / 100,
         itens: porCanal[c].itens || 0 };
-      const dias = {}; for (const d of Object.keys(porDia)) dias[d] = { fat: Math.round(porDia[d].fat * 100) / 100, pedidos: porDia[d].peds.size };
+      const dias = {}; for (const d of Object.keys(porDia)) dias[d] = {
+        fat: Math.round(porDia[d].fat * 100) / 100, pedidos: porDia[d].peds.size,
+        mar: Math.round((porDia[d].mar || 0) * 100) / 100, imp: Math.round((porDia[d].imp || 0) * 100) / 100,
+        com: Math.round((porDia[d].com || 0) * 100) / 100, fre: Math.round((porDia[d].fre || 0) * 100) / 100 };
       const skus = Object.values(porSku).sort((a, b) => b.mar - a.mar).slice(0, 300)
         .map(x => ({ sku: x.sku, desc: x.desc, un: x.un, fat: Math.round(x.fat * 100) / 100, cus: Math.round(x.cus * 100) / 100, mar: Math.round(x.mar * 100) / 100 }));
       const dados = { ok: true, de: deL, ate: ateL, fonte: 'supabase', paginas,

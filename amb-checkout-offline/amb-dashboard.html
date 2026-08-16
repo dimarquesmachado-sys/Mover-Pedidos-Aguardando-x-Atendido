@@ -397,7 +397,7 @@ const MOD = '/amb-checkout-offline';
     return _f(u, o);
   };
 })();
-const DASH_BUILD = 'a19';
+const DASH_BUILD = 'a20';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -2395,6 +2395,19 @@ function copiaNL(el){ const v = el.getAttribute('data-nl') || ''; try { navigato
 function renderGrafico(){
   const el=$('grafProg'); if(!el) return;
   const iv=intervalo();
+  // 17/08 — ESTE GRÁFICO LIA SÓ O CACHE. O cache guarda ~6 dias, então de uma semana pra trás
+  // a curva vinha vazia ou torta (o Diego viu na AMB e conferiu na Girassol) enquanto os cards
+  // do topo, que já usam o histórico, mostravam o número certo. Agora, quando o período sai da
+  // janela do cache, a série vem do MESMO histórico que alimenta os cards — uma fonte só.
+  if(precisaHistorico(iv.de) && HIST && HIST.dias && HIST.de===iv.de && HIST.ate===iv.ate){
+    const dH={};
+    Object.keys(HIST.dias).forEach(function(d){
+      if(d<iv.de||d>iv.ate) return;
+      const x=HIST.dias[d]||{};
+      dH[d]={ mc:Number(x.mar)||0, imp:Number(x.imp)||0, tar:Number(x.com)||0, frv:Number(x.fre)||0 };
+    });
+    if(Object.keys(dH).length) return desenhaGrafico(dH, el, iv, true);
+  }
   const dias={};
   (DADOS||[]).concat(SINT||[]).forEach(h=>{   // 27/07: contava só os bipados
     if(!h.conferido_em && !h.sintetico) return;
@@ -2405,6 +2418,9 @@ function renderGrafico(){
     if(P.mc!=null)o.mc+=P.mc; if(P.imposto!=null)o.imp+=P.imposto;
     if(P.tarifa!=null)o.tar+=P.tarifa; if(P.frV!=null)o.frv+=P.frV;
   });
+  return desenhaGrafico(dias, el, iv, false);
+}
+function desenhaGrafico(dias, el, iv, doHistorico){
   const ks=Object.keys(dias).sort();
   const tot={mc:0,imp:0,tar:0,frv:0}; ks.forEach(k=>{tot.mc+=dias[k].mc;tot.imp+=dias[k].imp;tot.tar+=dias[k].tar;tot.frv+=dias[k].frv;});
   $('grafTot').innerHTML =
