@@ -36,7 +36,7 @@ const hojeMenos = d => new Date(Date.now() - d * 864e5).toISOString().slice(0, 1
 
 function criarNoturna(ctx) {
   const { mlBillingSync, backfillVendas, mlSyncFees, varrerCancelados, canarioCron, podarExpedicao,
-          coletarDevolucoes, coletarCarteira, coletarAds, conferirMarketplaces, VERSAO, validarSessao, ehAdmin, json } = ctx;
+          coletarDevolucoes, coletarCarteira, coletarAds, conferirMarketplaces, coletarFinanceiroTikTok, VERSAO, validarSessao, ehAdmin, json } = ctx;
   const dorme = ms => new Promise(r => setTimeout(r, ms));
 
   async function etapa(nome, fn) {
@@ -69,9 +69,29 @@ function criarNoturna(ctx) {
     });
     await dorme(4000);
 
+    // 16/08 (Codex #105) — FINANCEIRO DO TIKTOK, ANTES do backfill: o backfill lê este cache
+    // para gravar a tarifa real e a hora da venda. Se rodasse depois, o dado novo só entraria
+    // no histórico na noite seguinte — e o pedido já teria saído da janela de 3 dias.
+    // Sem isto o cache só era atualizado quando
+    // alguém abria a URL na mão: pedido novo ficava sem tarifa real E sem hora da venda no
+    // painel, e o recurso ia silenciosamente parando de funcionar conforme o cache envelhecia.
+    if (typeof coletarFinanceiroTikTok === 'function') {
+      await etapa('financeiro do TikTok (35 dias)', async () => {
+        const r = await coletarFinanceiroTikTok(35);
+        if (!r || r.ok === false) throw new Error('coleta do TikTok falhou' + (r && r.erro ? ': ' + r.erro : ''));
+        return r.pedidos_novos + ' pedido(s) novo(s) · ' + r.guardados + ' no total' +
+               (r.nao_fecharam ? ' ⚠️ ' + r.nao_fecharam + ' não fecharam a identidade' : '');
+      });
+      await dorme(2000);
+    }
+
+
     // 2. histórico dos últimos 3 dias, já com o billing fresco
     await etapa('backfill dos últimos 3 dias', async () => {
-      await backfillVendas(hojeMenos(3), hojeMenos(0), 'girassol');
+      const rB = await backfillVendas(hojeMenos(3), hojeMenos(0), 'girassol');
+      // Codex (#105): o retorno era ignorado — se a trava do canário adiasse o backfill, a
+      // etapa dizia "concluída" e a única atualização diária do histórico sumia em silêncio.
+      if (rB && rB.ok === false) throw new Error('backfill ADIADO: ' + (rB.msg || 'motivo não informado'));
       return 'periodo ' + hojeMenos(3) + ' a ' + hojeMenos(0);
     });
     await dorme(4000);

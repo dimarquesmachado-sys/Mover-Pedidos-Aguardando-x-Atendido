@@ -356,10 +356,26 @@ const _listarNoBlingCanario = async (de, ate) => {
   const ateMais1 = new Date(Date.parse(ate + 'T12:00:00Z') + 86400000).toISOString().slice(0, 10);
   const MAX_PG = 200;
   for (let pg = 1; pg <= MAX_PG; pg++) {
-    const r = await blingGet('/pedidos/vendas?dataInicial=' + de + '&dataFinal=' + ateMais1 + '&pagina=' + pg + '&limite=100');
+    // 16/08 — MEDIDO em produção: rodar o canário JUNTO com o backfill estourou a cota do
+    // Bling e voltou HTTP 429 na 2ª página. 429 é fila cheia, não integração quebrada —
+    // então espera e tenta de novo. Erro de verdade (401/404) aborta na hora, sem insistir.
+    let r = null;
+    for (let tent = 1; tent <= 4; tent++) {
+      r = await blingGet('/pedidos/vendas?dataInicial=' + de + '&dataFinal=' + ateMais1 + '&pagina=' + pg + '&limite=100');
+      if (r && r.ok) break;
+      const st429 = (r && r.status) || 0;
+      if (st429 !== 429 && st429 !== 0 && st429 < 500) break;
+      // Codex: não dormir depois da ÚLTIMA tentativa — eram 16s de espera sem ninguém
+      // atrás (o blingGet já tem retry próprio; a soma passava de 1 minuto pra nada).
+      if (tent < 4) await new Promise(r2 => setTimeout(r2, tent * 4000));
+    }
     // Codex (P2): falha do Bling NÃO pode virar "nenhum pedido" — isso acusaria o
     // marketplace inteiro de sumido quando o problema é a nossa própria consulta.
-    if (!r || !r.ok) throw new Error('Bling não respondeu na página ' + pg + ' (HTTP ' + ((r && r.status) || '?') + ')');
+    // Codex: o blingGet devolve 429 TAMBÉM quando a rede falha (DNS, conexão) — afirmar
+    // "cota estourada" mandaria investigar o lado errado. A mensagem passa a citar as duas
+    // hipóteses, na ordem provável.
+    if (!r || !r.ok) throw new Error('Bling não respondeu na página ' + pg + ' (HTTP ' + ((r && r.status) || '?') + ')' +
+      (((r && r.status) === 429) ? ' — cota da API estourada OU Bling inacessível (rede). Se houver backfill rodando, é cota; senão, cheque o Bling.' : ''));
     const arr = (r.data && r.data.data) || [];
     if (!arr.length) break;
     for (const pd of arr) {
@@ -448,9 +464,49 @@ const _listarNoMarketplaceCanario = async (canal, deTs, ateTs) => {
 
 // Codex (P1 do #104): sem isto o canário só existiria se alguém lembrasse de abrir a URL —
 // e o objetivo é justamente avisar sozinho. A noturna passa a rodar a conferência.
-async function conferirMarketplaces(dias) {
+// Codex (#105): a trava vivia só na ROTA, e a noturna chama esta função direto — se um
+// backfill estivesse rodando, a etapa noturna passava por fora e brigava pela cota do Bling.
+// Além disso a checagem era de mão única: começado o canário, nada impedia um backfill de
+// entrar por cima. Agora o estado é COMPARTILHADO e vale para os dois lados.
+// Codex: com booleano, duas execuções sobrepostas (rota + noturna) entravam e a primeira a
+// terminar liberava a trava enquanto a outra ainda consultava. Contador resolve.
+const _canario = { ativos: 0, desde: null };
+Object.defineProperty(_canario, 'rodando', { get() { return this.ativos > 0; } });
+
+// Codex (#105): o cache do TikTok só era escrito pela rota admin — envelhecia sozinho e
+// levava junto a tarifa real e a hora da venda. A noturna passa a atualizá-lo.
+async function coletarFinanceiroTikTok(dias) {
+  const finLib = require('../lib/tiktok-financeiro');
+  const fs2 = require('fs'), path2 = require('path');
+  let tk = null;
+  try { tk = require('../tiktok-oauth'); } catch (e) { return { ok: true, pulado: 'módulo do TikTok indisponível', pedidos_novos: 0, guardados: 0 }; }
+  if (!tk || typeof tk.chamar !== 'function' || !tk.lerToken || !tk.lerToken('girassol')) {
+    return { ok: true, pulado: 'TikTok não conectado nesta empresa', pedidos_novos: 0, guardados: 0 };
+  }
+  const ctxFin = {
+    CACHE_DIR: process.env.TIKTOK_CACHE_DIR || '/data', path: path2,
+    readJson: (a, p) => { try { return JSON.parse(fs2.readFileSync(a, 'utf8')); } catch (e) { return p; } },
+    writeJson: (a, v) => { try { fs2.mkdirSync(path2.dirname(a), { recursive: true }); } catch (e) {} fs2.writeFileSync(a, JSON.stringify(v, null, 2)); },
+    chamar: tk.chamar
+  };
+  return finLib.coletarFinanceiro(ctxFin, 'girassol', dias || 35, {});
+}
+
+async function conferirMarketplaces(dias, canais) {
+  const anoR = (typeof _backfillAno !== 'undefined') && _backfillAno && _backfillAno.rodando;
+  if ((_backfill && _backfill.rodando) || anoR) {
+    return { ok: false, erro: 'tem backfill rodando — os dois brigam pela cota do Bling (429). Espere terminar.',
+      backfill: { de: _backfill && _backfill.de, ate: _backfill && _backfill.ate, do_ano: !!anoR } };
+  }
   const canLib = require('../lib/canario-marketplace');
-  return canLib.conferir({ empresa: 'girassol', listarNoBling: _listarNoBlingCanario, listarNoMarketplace: _listarNoMarketplaceCanario }, dias || 3, []);
+  _canario.ativos++; _canario.desde = _canario.desde || new Date().toISOString();
+  try {
+    return await canLib.conferir({ empresa: 'girassol', listarNoBling: _listarNoBlingCanario, listarNoMarketplace: _listarNoMarketplaceCanario },
+      dias || 3, Array.isArray(canais) ? canais : []);
+  } finally {
+    _canario.ativos = Math.max(0, _canario.ativos - 1);
+    if (!_canario.ativos) _canario.desde = null;
+  }
 }
 
 const _noturna = criarNoturna({
@@ -463,6 +519,7 @@ const _noturna = criarNoturna({
   // carteira (ads, ajustes, reembolsos), as duas em janelas de 15 dias, guardando no disco.
   coletarDevolucoes: (d) => coletarDevolucoes(d || 45, pedirAoSync),
   conferirMarketplaces,   // 16/08: canário marketplace × Bling na rotina
+  coletarFinanceiroTikTok,   // 16/08: mantém o cache do TikTok fresco (tarifa real + hora da venda)
   coletarAds,   // 14/08: ads da Shopee também se mantém sozinho
   coletarCarteira:   (d) => coletarCarteira(d || 30, pedirAoSync),
   VERSAO, validarSessao, ehAdmin, json
@@ -1251,6 +1308,9 @@ function routes(readBody) {
       const kD = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
       const sessD = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
+      // Codex: a trava do canário estava só no backfill MENSAL; o do ANO entrava por cima e
+      // recriava a disputa de cota. Vale para os dois.
+      if (_canario.rodando) { json(res, 200, { ok: false, msg: 'o canário está conferindo o Bling agora — espere alguns segundos e tente de novo' }); return true; }
       if (_backfillAno.rodando || _backfill.rodando) { json(res, 200, { ok: false, msg: 'já tem backfill rodando — acompanhe em /backfill-status', ano: _backfillAno, mes: _backfill }); return true; }
       const ateMes = String((urlObj.searchParams && urlObj.searchParams.get('ate')) || '07').padStart(2,'0');   // default: vai até julho (mês atual)
       backfillAnoTodo(ateMes);   // NÃO await — roda em background, mês a mês
@@ -1263,6 +1323,9 @@ function routes(readBody) {
       const kD = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
       const sessD = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
+      // Codex (#105): mão dupla — se o canário está consultando o Bling AGORA, o backfill
+      // espera. Sem isto, iniciar um por cima recriava o 429 que acabamos de evitar.
+      if (_canario.rodando) { json(res, 200, { ok: false, msg: 'o canário está conferindo o Bling agora (desde ' + _canario.desde + ') — espere alguns segundos e tente de novo' }); return true; }
       if (_backfill.rodando) { json(res, 200, { ok: false, msg: 'já tem um backfill rodando — acompanhe em /backfill-status', status: _backfill }); return true; }
       const de = String((urlObj.searchParams && urlObj.searchParams.get('de')) || '2026-01-01').slice(0, 10);
       const ate = String((urlObj.searchParams && urlObj.searchParams.get('ate')) || new Date().toISOString().slice(0, 10)).slice(0, 10);
@@ -1482,10 +1545,11 @@ function routes(readBody) {
       const kC = urlObj.searchParams.get('k') || '';
       const sC = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kC === process.env.ADMIN_KEY) || (sC && ehAdmin(sC)))) { json(res, 404, { error: 'not found' }); return true; }
-      const canLib = require('../lib/canario-marketplace');
-
-      const r = await canLib.conferir({ empresa: 'girassol', listarNoBling: _listarNoBlingCanario, listarNoMarketplace: _listarNoMarketplaceCanario },
-        urlObj.searchParams.get('dias'),
+      // 16/08: canário + backfill juntos = 429. Mesma trava da conciliação da Shopee.
+      // a trava mora na função compartilhada (vale pra rota E pra noturna).
+      // Codex: o filtro &canais= voltou a ser repassado — sem ele, pedir só `shopee` conferia
+      // os três e virava INDETERMINADO por falta de credencial em outro canal.
+      const r = await conferirMarketplaces(urlObj.searchParams.get('dias'),
         String(urlObj.searchParams.get('canais') || '').split(',').map(s => s.trim()).filter(Boolean));
       json(res, 200, r);
       return true;
@@ -3497,6 +3561,13 @@ async function varrerFornecedores(max) {
 }
 
 async function backfillVendas(de, ate, empresa){
+  // Codex (#105): a noturna chama esta função DIRETO, sem passar pelas rotas — então a trava
+  // do canário precisa morar aqui dentro, senão o backfill agendado dispara enquanto o
+  // canário consulta o Bling e recria a disputa de cota que este PR existe pra evitar.
+  if (_canario.rodando) {
+    console.log('[BACKFILL] adiado: o canário está conferindo o Bling (desde ' + _canario.desde + ')');
+    return { ok: false, msg: 'canário conferindo o Bling agora — backfill adiado' };
+  }
   if(_backfill.rodando) return;
   _backfill = { rodando:true, empresa, de, ate, pagina:0, pedidos:0, itens:0, gravados:0, erros:0, fase:'preparando', inicio:new Date().toISOString(), fim:null, msg:'' };
   try { await garantirSitCancel(async p2 => await blingGet(p2)); } catch (e) {}
@@ -4410,6 +4481,54 @@ async function vendasSync() {
       const bipR = new Set(Object.values(confR).map(c => String(c && c.numero)));
       let tkR = null;
       try { const { garantirTokenML: _g3 } = require('../girassol/mlTokenManager'); tkR = await _g3(); } catch (e) {}
+      // ── HORA REAL DA VENDA NO TIKTOK (16/08) ──────────────────────────────────────
+      // O Diego notou: "os tiktok tão tudo sem horário no dashboard". Motivo: `venda_em` só
+      // era preenchido por ML e Shopee; sem ele o painel carimba MEIO-DIA e a venda aparece
+      // fora de ordem no eixo do tempo. O dado já existe — o financeiro do TikTok guarda
+      // `criado_em` (order_create_time) por pedido. Aqui é só transportar; custo zero de API.
+      try {
+        const _tkArqH = require('path').join(process.env.TIKTOK_CACHE_DIR || '/data', '_tiktok_financeiro_girassol.json');
+        let _tkPedH = {};
+        try { _tkPedH = (JSON.parse(require('fs').readFileSync(_tkArqH, 'utf8')) || {}).pedidos || {}; } catch (e) {}
+        let _tkHoras = 0;
+        const _faltam = [];
+        for (const v of Object.values(atual)) {
+          if (!v || v.marketplace !== 'tiktok' || !v.numero_loja || v.venda_em) continue;
+          const reg = _tkPedH[String(v.numero_loja).trim()];
+          const ts = reg && Number(reg.criado_em);
+          if (ts && isFinite(ts)) { v.venda_em = new Date(ts * 1000).toISOString(); _tkHoras++; }
+          else _faltam.push(v);
+        }
+        // Codex (#105): venda RECENTE ainda não tem extrato (a liquidação demora dias), então o
+        // cache do financeiro não a conhece — e ela é justamente a que aparece no painel agora.
+        // A API de PEDIDOS do TikTok já traz `create_time`: uma consulta por janela resolve.
+        if (_faltam.length) {
+          let tkH = null;
+          try { tkH = require('../tiktok-oauth'); } catch (e) {}
+          if (tkH && typeof tkH.chamar === 'function' && tkH.lerToken && tkH.lerToken('girassol')) {
+            const mapa = {};
+            const desdeH = Math.floor(Date.now() / 1000) - 10 * 86400;
+            let tokenH = '';
+            for (let v2 = 0; v2 < 40; v2++) {
+              const rH = await tkH.chamar('/order/202309/orders/search',
+                Object.assign({ page_size: '50' }, tokenH ? { page_token: tokenH } : {}),
+                { metodo: 'POST', body: { create_time_ge: desdeH } }, 'girassol');
+              if (!rH || !rH.ok || !rH.corpo || rH.corpo.code !== 0) break;
+              const dH = rH.corpo.data || {};
+              for (const o of (dH.orders || [])) if (o && o.id && o.create_time) mapa[String(o.id)] = Number(o.create_time);
+              tokenH = dH.next_page_token || '';
+              if (!tokenH) break;
+              await new Promise(r5 => setTimeout(r5, 200));
+            }
+            for (const v of _faltam) {
+              const ts2 = mapa[String(v.numero_loja).trim()];
+              if (ts2 && isFinite(ts2)) { v.venda_em = new Date(ts2 * 1000).toISOString(); _tkHoras++; }
+            }
+          }
+        }
+        if (_tkHoras) console.log('[GIRABKP] hora real da venda preenchida em ' + _tkHoras + ' pedido(s) do TikTok');
+      } catch (e) {}
+
       if (tkR) {
         const dormeR = ms => new Promise(r4 => setTimeout(r4, ms));
         const alvosR = Object.values(atual)
