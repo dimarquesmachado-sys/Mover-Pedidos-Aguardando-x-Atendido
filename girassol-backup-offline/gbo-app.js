@@ -473,6 +473,25 @@ const _listarNoMarketplaceCanario = async (canal, deTs, ateTs) => {
 const _canario = { ativos: 0, desde: null };
 Object.defineProperty(_canario, 'rodando', { get() { return this.ativos > 0; } });
 
+// Codex (#105): o cache do TikTok só era escrito pela rota admin — envelhecia sozinho e
+// levava junto a tarifa real e a hora da venda. A noturna passa a atualizá-lo.
+async function coletarFinanceiroTikTok(dias) {
+  const finLib = require('../lib/tiktok-financeiro');
+  const fs2 = require('fs'), path2 = require('path');
+  let tk = null;
+  try { tk = require('../tiktok-oauth'); } catch (e) { return { ok: true, pulado: 'módulo do TikTok indisponível', pedidos_novos: 0, guardados: 0 }; }
+  if (!tk || typeof tk.chamar !== 'function' || !tk.lerToken || !tk.lerToken('girassol')) {
+    return { ok: true, pulado: 'TikTok não conectado nesta empresa', pedidos_novos: 0, guardados: 0 };
+  }
+  const ctxFin = {
+    CACHE_DIR: process.env.TIKTOK_CACHE_DIR || '/data', path: path2,
+    readJson: (a, p) => { try { return JSON.parse(fs2.readFileSync(a, 'utf8')); } catch (e) { return p; } },
+    writeJson: (a, v) => { try { fs2.mkdirSync(path2.dirname(a), { recursive: true }); } catch (e) {} fs2.writeFileSync(a, JSON.stringify(v, null, 2)); },
+    chamar: tk.chamar
+  };
+  return finLib.coletarFinanceiro(ctxFin, 'girassol', dias || 35, {});
+}
+
 async function conferirMarketplaces(dias, canais) {
   const anoR = (typeof _backfillAno !== 'undefined') && _backfillAno && _backfillAno.rodando;
   if ((_backfill && _backfill.rodando) || anoR) {
@@ -500,6 +519,7 @@ const _noturna = criarNoturna({
   // carteira (ads, ajustes, reembolsos), as duas em janelas de 15 dias, guardando no disco.
   coletarDevolucoes: (d) => coletarDevolucoes(d || 45, pedirAoSync),
   conferirMarketplaces,   // 16/08: canário marketplace × Bling na rotina
+  coletarFinanceiroTikTok,   // 16/08: mantém o cache do TikTok fresco (tarifa real + hora da venda)
   coletarAds,   // 14/08: ads da Shopee também se mantém sozinho
   coletarCarteira:   (d) => coletarCarteira(d || 30, pedirAoSync),
   VERSAO, validarSessao, ehAdmin, json
@@ -3541,6 +3561,13 @@ async function varrerFornecedores(max) {
 }
 
 async function backfillVendas(de, ate, empresa){
+  // Codex (#105): a noturna chama esta função DIRETO, sem passar pelas rotas — então a trava
+  // do canário precisa morar aqui dentro, senão o backfill agendado dispara enquanto o
+  // canário consulta o Bling e recria a disputa de cota que este PR existe pra evitar.
+  if (_canario.rodando) {
+    console.log('[BACKFILL] adiado: o canário está conferindo o Bling (desde ' + _canario.desde + ')');
+    return { ok: false, msg: 'canário conferindo o Bling agora — backfill adiado' };
+  }
   if(_backfill.rodando) return;
   _backfill = { rodando:true, empresa, de, ate, pagina:0, pedidos:0, itens:0, gravados:0, erros:0, fase:'preparando', inicio:new Date().toISOString(), fim:null, msg:'' };
   try { await garantirSitCancel(async p2 => await blingGet(p2)); } catch (e) {}
