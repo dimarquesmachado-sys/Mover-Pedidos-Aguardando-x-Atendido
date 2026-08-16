@@ -968,14 +968,17 @@ async function rotinaChecarCanceladasML(opts = {}) {
     if (!upd.ok) {
       // Fail closed: sem gravar, a linha segue no status original e pode ser faturada.
       // Nao conta como cancelada nesta rodada — a proxima tenta de novo.
-      out.erros.push({ order_id: oid, erro: 'FALHOU gravar o cancelamento no Supabase — venda ainda no fluxo automatico, tratar na mao' });
+      out.erros.push({ order_id: oid,
+        erro: `FALHOU gravar o cancelamento no Supabase — venda ainda no fluxo automatico, tratar na mao`,
+        causa: (upd && upd.causa) || null, http: (upd && upd.status) || null });
       console.error(`[canceladas] order ${oid} 🚨 cancelamento NAO gravou — venda segue elegivel ao automatico`);
       // PRECISA aparecer em detalhes: o "Verificar ML" le detalhes[0] e, sem entrada,
       // cai em {} e responde cancelada:false — o painel diria "Venda ativa" logo depois
       // de o ML confirmar o cancelamento, convidando a despachar.
       out.detalhes.push({ order_id: oid, ml_status: st.status, cancelada: true,
                           gravado: false, quarentena: false, adiado: true, buyer: v.buyer_nome || null,
-                          aviso: 'cancelada no ML, mas a gravacao no banco FALHOU — a venda continua no fluxo automatico. Tratar na mao.' });
+                          causa: (upd && upd.causa) || null,
+                          aviso: `cancelada no ML, mas a gravacao no banco FALHOU${(upd && upd.causa) ? ' — ' + String(upd.causa).slice(0, 200) : ''}. A venda continua no fluxo automatico.` });
       await new Promise(r => setTimeout(r, CANCELADAS_PAUSA_MS));
       continue;
     }
