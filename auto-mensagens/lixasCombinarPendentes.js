@@ -90,8 +90,9 @@ async function listarPendentes({ dias = 7, status = null, limit = 100, offset = 
   // `antesDe` = ultima linha da pagina anterior: { data_venda, order_id }.
   let query = `${TABELA}?data_venda=gte.${desde}&order=data_venda.desc,order_id.desc&limit=${limit}`;
   if (antesDe && antesDe.data_venda) {
-    const dv = encodeURIComponent(antesDe.data_venda);
-    const oid = encodeURIComponent(antesDe.order_id || '');
+    // aspas pelo mesmo motivo do _leaseLimite: data_venda e timestamp com ponto.
+    const dv = `"${String(antesDe.data_venda).replace(/"/g, '')}"`;
+    const oid = `"${String(antesDe.order_id || '').replace(/"/g, '')}"`;   // aspas por consistencia
     // (data_venda < X) OU (data_venda = X E order_id < Y)
     query += `&or=(data_venda.lt.${dv},and(data_venda.eq.${dv},order_id.lt.${oid}))`;
   } else if (offset > 0) {
@@ -199,8 +200,14 @@ async function buscar(orderId) {
 // montava o predicado por conta, e os emissores automaticos ficaram sem nenhum.
 const NF_LEASE_MIN = Number(process.env.LIXAS_NF_LEASE_MIN) || 10;
 
+/**
+ * Limite do lease JA ENTRE ASPAS, pronto pra usar dentro de `or=(...)`.
+ * O PostgREST separa `campo.operador.valor` por ponto, e o ISO tem ponto nos
+ * milissegundos ("...:56.789Z") — sem aspas ele parte o valor no lugar errado e
+ * REJEITA a requisicao inteira (a gravacao do cancelamento falhava por isso).
+ */
 function _leaseLimite() {
-  return new Date(Date.now() - NF_LEASE_MIN * 60 * 1000).toISOString();
+  return `"${new Date(Date.now() - NF_LEASE_MIN * 60 * 1000).toISOString()}"`;
 }
 
 /** Predicado "sem reserva ativa", pros escritores de cancelamento. */
