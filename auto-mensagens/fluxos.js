@@ -431,7 +431,9 @@ const CANCELADAS_PAUSA_MS    = Number(process.env.LIXAS_CANCELADAS_PAUSA_MS) || 
 // a reserva ao terminar, entao o valor alto nao trava nada no caminho normal.
 const NF_LEASE_MIN = Number(process.env.LIXAS_NF_LEASE_MIN) || 10;
 function _semReservaAtiva() {
-  const limite = new Date(Date.now() - NF_LEASE_MIN * 60 * 1000).toISOString();
+  // aspas obrigatorias: o ISO tem ponto nos milissegundos e o PostgREST parte
+  // `campo.operador.valor` por ponto — sem elas a requisicao inteira e rejeitada.
+  const limite = `"${new Date(Date.now() - NF_LEASE_MIN * 60 * 1000).toISOString()}"`;
   return `or=(nf_emitindo_em.is.null,nf_emitindo_em.lt.${limite})`;
 }
 
