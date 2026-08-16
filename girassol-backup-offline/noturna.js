@@ -36,7 +36,7 @@ const hojeMenos = d => new Date(Date.now() - d * 864e5).toISOString().slice(0, 1
 
 function criarNoturna(ctx) {
   const { mlBillingSync, backfillVendas, mlSyncFees, varrerCancelados, canarioCron, podarExpedicao,
-          coletarDevolucoes, coletarCarteira, coletarAds, VERSAO, validarSessao, ehAdmin, json } = ctx;
+          coletarDevolucoes, coletarCarteira, coletarAds, conferirMarketplaces, VERSAO, validarSessao, ehAdmin, json } = ctx;
   const dorme = ms => new Promise(r => setTimeout(r, ms));
 
   async function etapa(nome, fn) {
@@ -112,6 +112,27 @@ function criarNoturna(ctx) {
     // 14/08 (Codex no PR#70): o card de Ads lia só o arquivo, e nenhuma rotina o atualizava —
     // o número ficaria congelado na última coleta manual enquanto o resto da Shopee seguia
     // fresco. Agora a coleta de ads é etapa da noturna, como devoluções e carteira.
+    // 16/08 — CANÁRIO MARKETPLACE × BLING. Pedido do Diego depois do token Bling↔Shopee
+    // vencer em silêncio e esconder 28 pedidos: "o Bling não é o rei, quem manda é o
+    // marketplace". A etapa FALHA quando há venda que não chegou ao Bling — assim o alerta
+    // aparece no resumo da noturna em vez de depender de alguém abrir uma URL.
+    if (typeof conferirMarketplaces === 'function') {
+      await etapa('canário marketplace × Bling (3 dias)', async () => {
+        const r = await conferirMarketplaces(3);
+        if (!r || r.ok === false) throw new Error('não deu pra conferir: ' + ((r && r.erro) || 'sem resposta'));
+        const partes = Object.keys(r.por_canal || {}).map(k => {
+          const v = r.por_canal[k] || {};
+          if (v.verificado === false) return k + ': não verificado';
+          return k + ': ' + (v.faltando_no_bling || 0) + ' de ' + (v.no_marketplace || 0);
+        });
+        if ((r.alertas || []).length) {
+          throw new Error('VENDA FORA DO BLING → ' + r.alertas.map(a => a.canal + ': ' + a.faltando + ' pedido(s)').join(' · ') +
+                          ' | reautorize a integração no Bling e rode o backfill do período');
+        }
+        return partes.join(' · ') + ((r.nao_verificados || []).length ? ' ⚠️ sem checar: ' + r.nao_verificados.join(',') : '');
+      });
+      await dorme(2000);
+    }
     if (typeof coletarAds === 'function') {
       await etapa('ads da Shopee (35 dias)', async () => {
         const r = await coletarAds(35);
