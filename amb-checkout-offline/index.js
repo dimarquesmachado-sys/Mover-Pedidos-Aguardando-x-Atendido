@@ -2741,24 +2741,7 @@ function routes(readBody) {
       const { url } = supaCfg('amb');
       out.url_configurada = url ? (String(url).slice(0, 30) + '…') : 'FALTANDO';
       const marca = '__TESTE_' + Date.now();
-      // 17/08 — o teste passa a incluir a coluna `uf`. A UF vinha vazia no histórico mesmo com
-      // o caminho certo (`transporte.etiqueta.uf`, confirmado pela sonda: valor "SP"), e a
-      // suspeita é que o Supabase esteja recusando/ignorando a coluna nova. Este teste responde:
-      // se gravar com uf e ler de volta, a coluna existe e aceita.
-      const ins = await supaReq('amb', 'POST', 'vendas_historico', [{ empresa: 'amb', numero_pedido: marca, canal: 'teste', data_venda: '2026-01-01', sku: 'TESTE-CONEXAO', quantidade: 0, valor_produto: 0, uf: 'SP' }]);
-      out.coluna_uf = { enviado: 'SP' };
-      if (ins.ok) {
-        try {
-          const le = await supaReq('amb', 'GET', 'vendas_historico?numero_pedido=eq.' + encodeURIComponent(marca) + '&select=uf', null);
-          const arr = JSON.parse(le.body || '[]');
-          out.coluna_uf.lido_de_volta = (arr[0] && arr[0].uf) || null;
-          out.coluna_uf.veredito = (arr[0] && arr[0].uf === 'SP')
-            ? '✅ a coluna uf existe e aceita — se o histórico está vazio, o problema é o backfill'
-            : '🔴 gravou mas voltou vazio: a coluna nao existe (rode: alter table vendas_historico add column if not exists uf text) ou o PostgREST ainda esta com o schema antigo em cache (no Supabase: Settings > API > Reload schema)';
-        } catch (e) { out.coluna_uf.erro_leitura = String(e.message || e).slice(0, 160); }
-      } else {
-        out.coluna_uf.veredito = '🔴 o INSERT com uf falhou — resposta do Supabase em gravar.resposta';
-      }
+      const ins = await supaReq('amb', 'POST', 'vendas_historico', [{ empresa: 'amb', numero_pedido: marca, canal: 'teste', data_venda: '2026-01-01', sku: 'TESTE-CONEXAO', quantidade: 0, valor_produto: 0 }]);
       out.gravar = { status: ins.status, ok: ins.ok, erro: ins.erro || null, resposta: (ins.body || '').slice(0, 200) };
       if (ins.ok) {
         const del = await supaReq('amb', 'DELETE', 'vendas_historico?numero_pedido=eq.' + encodeURIComponent(marca), null);
@@ -5290,6 +5273,11 @@ async function backfillVendas(de, ate, empresa){
         const canal = ehOlist ? 'olist' : (LOJA_MKT[ljId] || _inferCanal(nl));
         // 17/08 — mesma gravação da Girassol: a UF alimenta o card "Vendas por Estado", que
         // até aqui lia só o cache do checkout (~6 dias) e distorcia Mês/Ano.
+        // 17/08 — INSTRUMENTAÇÃO: a UF continua chegando vazia no histórico mesmo com o
+        // caminho confirmado pela sonda (det.transporte.etiqueta.uf = "SP"). Em vez de seguir
+        // deduzindo, o status passa a mostrar quantos pedidos tiveram UF, quantos não, e o
+        // ESQUELETO do transporte do primeiro que falhou — aí o motivo aparece de uma vez.
+        if (!_backfill.uf) _backfill.uf = { com: 0, sem: 0, exemplo_sem: null };
         const ufPed = (function(){
           // 17/08 — MEDIDO: `transporte.etiqueta.uf` só existe depois que a etiqueta é gerada,
           // e o backfill varre TODOS os pedidos (inclusive os de hoje, ainda sem etiqueta) —
@@ -5303,7 +5291,22 @@ async function backfillVendas(de, ate, empresa){
           // duas letras não bastam: "Brasil" viraria "BR". Só passa sigla de estado de verdade.
           const UFS = ['AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO'];
           const s = String(cand || '').trim().toUpperCase().slice(0, 2);
-          return UFS.indexOf(s) >= 0 ? s : null;
+          const achou = UFS.indexOf(s) >= 0 ? s : null;
+          if (achou) _backfill.uf.com++;
+          else {
+            _backfill.uf.sem++;
+            if (!_backfill.uf.exemplo_sem) {
+              _backfill.uf.exemplo_sem = {
+                pedido: det.numero || det.id || null,
+                tem_transporte: !!det.transporte,
+                chaves_transporte: det.transporte ? Object.keys(det.transporte) : null,
+                tem_etiqueta: !!(det.transporte && det.transporte.etiqueta),
+                chaves_etiqueta: (det.transporte && det.transporte.etiqueta) ? Object.keys(det.transporte.etiqueta) : null,
+                valor_bruto: String((t.etiqueta && t.etiqueta.uf) || '') || null
+              };
+            }
+          }
+          return achou;
         })();
         // ── CASCATA (04/08): billing → sale_fee → o zero do Bling ──────────────────────
         let comFonte = (comissao > 0) ? 'bling' : 'zero';
