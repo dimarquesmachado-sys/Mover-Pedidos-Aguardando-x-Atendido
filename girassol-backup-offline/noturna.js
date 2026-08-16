@@ -36,7 +36,7 @@ const hojeMenos = d => new Date(Date.now() - d * 864e5).toISOString().slice(0, 1
 
 function criarNoturna(ctx) {
   const { mlBillingSync, backfillVendas, mlSyncFees, varrerCancelados, canarioCron, podarExpedicao,
-          coletarDevolucoes, coletarCarteira, coletarAds, conferirMarketplaces, VERSAO, validarSessao, ehAdmin, json } = ctx;
+          coletarDevolucoes, coletarCarteira, coletarAds, conferirMarketplaces, coletarFinanceiroTikTok, VERSAO, validarSessao, ehAdmin, json } = ctx;
   const dorme = ms => new Promise(r => setTimeout(r, ms));
 
   async function etapa(nome, fn) {
@@ -112,6 +112,19 @@ function criarNoturna(ctx) {
     // 14/08 (Codex no PR#70): o card de Ads lia só o arquivo, e nenhuma rotina o atualizava —
     // o número ficaria congelado na última coleta manual enquanto o resto da Shopee seguia
     // fresco. Agora a coleta de ads é etapa da noturna, como devoluções e carteira.
+    // 16/08 (Codex #105) — FINANCEIRO DO TIKTOK. Sem isto o cache só era atualizado quando
+    // alguém abria a URL na mão: pedido novo ficava sem tarifa real E sem hora da venda no
+    // painel, e o recurso ia silenciosamente parando de funcionar conforme o cache envelhecia.
+    if (typeof coletarFinanceiroTikTok === 'function') {
+      await etapa('financeiro do TikTok (35 dias)', async () => {
+        const r = await coletarFinanceiroTikTok(35);
+        if (!r || r.ok === false) throw new Error('coleta do TikTok falhou' + (r && r.erro ? ': ' + r.erro : ''));
+        return r.pedidos_novos + ' pedido(s) novo(s) · ' + r.guardados + ' no total' +
+               (r.nao_fecharam ? ' ⚠️ ' + r.nao_fecharam + ' não fecharam a identidade' : '');
+      });
+      await dorme(2000);
+    }
+
     // 16/08 — CANÁRIO MARKETPLACE × BLING. Pedido do Diego depois do token Bling↔Shopee
     // vencer em silêncio e esconder 28 pedidos: "o Bling não é o rei, quem manda é o
     // marketplace". A etapa FALHA quando há venda que não chegou ao Bling — assim o alerta
