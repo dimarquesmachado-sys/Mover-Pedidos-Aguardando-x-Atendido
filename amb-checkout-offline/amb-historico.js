@@ -230,7 +230,12 @@ function rotasHistorico(ctx) {
       const ateL = String((urlObj.searchParams && urlObj.searchParams.get('ate')) || '').slice(0, 10);
       if (!/^\d{4}-\d{2}-\d{2}$/.test(deL) || !/^\d{4}-\d{2}-\d{2}$/.test(ateL)) { json(res, 400, { ok: false, erro: 'passe &de=&ate=' }); return true; }
       const cacheKey = deL + '|' + ateL;
-      if (_histCache[cacheKey] && (Date.now() - _histCache[cacheKey].ts) < 600000) { json(res, 200, Object.assign({ cache: true }, _histCache[cacheKey].dados)); return true; }
+      // 17/08 — o cache de 10 min escondia o resultado do backfill que acabou de rodar: a
+      // conferência da UF voltava o retorno ANTIGO (ufs vazio) e parecia que o conserto não
+      // tinha funcionado. `&fresh=1` ignora o cache — o mesmo parâmetro que a rota de previsão
+      // já tinha. Sem ele nada muda (o cache continua valendo pro dashboard).
+      const _freshL = (urlObj.searchParams && urlObj.searchParams.get('fresh')) === '1';
+      if (!_freshL && _histCache[cacheKey] && (Date.now() - _histCache[cacheKey].ts) < 600000) { json(res, 200, Object.assign({ cache: true }, _histCache[cacheKey].dados)); return true; }
       const { url: uL, key: kkL } = supaCfg('amb');
       if (!uL || !kkL) { json(res, 500, { ok: false, erro: 'Supabase não configurado' }); return true; }
       const H = { apikey: kkL, Authorization: 'Bearer ' + kkL };
