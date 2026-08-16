@@ -2275,56 +2275,6 @@ function routes(readBody) {
       return true;
     }
 
-    // ── SONDA DO DETALHE DO PEDIDO NO BLING (17/08) ───────────────────────────────
-    // A UF continua vindo vazia mesmo com a cascata (etiqueta → endereço → contato): 26 de 26
-    // pedidos sem estado. Em vez de chutar um quarto caminho, esta rota mostra o ESQUELETO do
-    // detalhe que o Bling devolve — só as chaves e os campos que parecem UF, sem dado pessoal.
-    // Uso: /amb-checkout-offline/sonda-pedido?id=<idBling>&k=ADMIN_KEY
-    if (method === 'GET' && p === '/amb-checkout-offline/sonda-pedido') {
-      const kS = urlObj.searchParams.get('k') || '';
-      const sS = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && kS === process.env.ADMIN_KEY) || (sS && ehAdmin(sS)))) { json(res, 404, { error: 'not found' }); return true; }
-      const idS = String(urlObj.searchParams.get('id') || '').replace(/\D/g, '');
-      if (!idS) { json(res, 400, { ok: false, erro: 'use ?id=<id do pedido no Bling>&k=' }); return true; }
-      try {
-        const r = await blingGet('/pedidos/vendas/' + idS);
-        const det = (r && r.ok && r.data && r.data.data) || null;
-        if (!det) { json(res, 200, { ok: false, http: (r && r.status) || '?', erro: 'sem detalhe' }); return true; }
-        const esqueleto = o => {
-          if (!o || typeof o !== 'object') return typeof o;
-          const out = {};
-          for (const k of Object.keys(o)) {
-            const v = o[k];
-            out[k] = (v && typeof v === 'object' && !Array.isArray(v)) ? Object.keys(v)
-                   : (Array.isArray(v) ? ('[' + v.length + ']') : (v === null ? null : typeof v));
-          }
-          return out;
-        };
-        // procura QUALQUER campo cujo nome ou valor cheire a UF, em qualquer nível
-        const achados = [];
-        (function varre(o, caminho, nivel) {
-          if (!o || typeof o !== 'object' || nivel > 4) return;
-          for (const k of Object.keys(o)) {
-            const v = o[k];
-            const cam = caminho + '.' + k;
-            if (v && typeof v === 'object') { varre(v, cam, nivel + 1); continue; }
-            const s = String(v == null ? '' : v).trim().toUpperCase();
-            if (/^(UF|ESTADO|SIGLA)$/i.test(k) || (s.length === 2 && /^(AC|AL|AP|AM|BA|CE|DF|ES|GO|MA|MT|MS|MG|PA|PB|PR|PE|PI|RJ|RN|RS|RO|RR|SC|SP|SE|TO)$/.test(s))) {
-              achados.push({ caminho: cam, valor: s });
-            }
-          }
-        })(det, 'det', 0);
-        json(res, 200, { ok: true, id: idS, numero: det.numero || null,
-          chaves_do_pedido: Object.keys(det),
-          transporte: esqueleto(det.transporte),
-          transporte_etiqueta: esqueleto(det.transporte && det.transporte.etiqueta),
-          contato: esqueleto(det.contato),
-          onde_esta_a_uf: achados,
-          leia: 'onde_esta_a_uf lista TODO campo que parece estado (nome ou sigla válida). É daí que sai o caminho certo.' });
-      } catch (e) { json(res, 500, { ok: false, erro: String(e.message || e).slice(0, 200) }); }
-      return true;
-    }
-
     // ── AUTORIZAÇÃO DO ML PELA AMB (14/08) ────────────────────────────────────────
     // O setup do ML vive no módulo `ambtotal`, que NÃO está respondendo neste serviço
     // (/amb/setup-ml devolve 404 do roteador raiz = nenhum módulo tratou). Como o
@@ -2791,7 +2741,24 @@ function routes(readBody) {
       const { url } = supaCfg('amb');
       out.url_configurada = url ? (String(url).slice(0, 30) + '…') : 'FALTANDO';
       const marca = '__TESTE_' + Date.now();
-      const ins = await supaReq('amb', 'POST', 'vendas_historico', [{ empresa: 'amb', numero_pedido: marca, canal: 'teste', data_venda: '2026-01-01', sku: 'TESTE-CONEXAO', quantidade: 0, valor_produto: 0 }]);
+      // 17/08 — o teste passa a incluir a coluna `uf`. A UF vinha vazia no histórico mesmo com
+      // o caminho certo (`transporte.etiqueta.uf`, confirmado pela sonda: valor "SP"), e a
+      // suspeita é que o Supabase esteja recusando/ignorando a coluna nova. Este teste responde:
+      // se gravar com uf e ler de volta, a coluna existe e aceita.
+      const ins = await supaReq('amb', 'POST', 'vendas_historico', [{ empresa: 'amb', numero_pedido: marca, canal: 'teste', data_venda: '2026-01-01', sku: 'TESTE-CONEXAO', quantidade: 0, valor_produto: 0, uf: 'SP' }]);
+      out.coluna_uf = { enviado: 'SP' };
+      if (ins.ok) {
+        try {
+          const le = await supaReq('amb', 'GET', 'vendas_historico?numero_pedido=eq.' + encodeURIComponent(marca) + '&select=uf', null);
+          const arr = JSON.parse(le.body || '[]');
+          out.coluna_uf.lido_de_volta = (arr[0] && arr[0].uf) || null;
+          out.coluna_uf.veredito = (arr[0] && arr[0].uf === 'SP')
+            ? '✅ a coluna uf existe e aceita — se o histórico está vazio, o problema é o backfill'
+            : '🔴 gravou mas voltou vazio: a coluna nao existe (rode: alter table vendas_historico add column if not exists uf text) ou o PostgREST ainda esta com o schema antigo em cache (no Supabase: Settings > API > Reload schema)';
+        } catch (e) { out.coluna_uf.erro_leitura = String(e.message || e).slice(0, 160); }
+      } else {
+        out.coluna_uf.veredito = '🔴 o INSERT com uf falhou — resposta do Supabase em gravar.resposta';
+      }
       out.gravar = { status: ins.status, ok: ins.ok, erro: ins.erro || null, resposta: (ins.body || '').slice(0, 200) };
       if (ins.ok) {
         const del = await supaReq('amb', 'DELETE', 'vendas_historico?numero_pedido=eq.' + encodeURIComponent(marca), null);
