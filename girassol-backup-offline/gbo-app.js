@@ -4485,13 +4485,43 @@ async function vendasSync() {
       // `criado_em` (order_create_time) por pedido. Aqui é só transportar; custo zero de API.
       try {
         const _tkArqH = require('path').join(process.env.TIKTOK_CACHE_DIR || '/data', '_tiktok_financeiro_girassol.json');
-        const _tkPedH = (JSON.parse(require('fs').readFileSync(_tkArqH, 'utf8')) || {}).pedidos || {};
+        let _tkPedH = {};
+        try { _tkPedH = (JSON.parse(require('fs').readFileSync(_tkArqH, 'utf8')) || {}).pedidos || {}; } catch (e) {}
         let _tkHoras = 0;
+        const _faltam = [];
         for (const v of Object.values(atual)) {
           if (!v || v.marketplace !== 'tiktok' || !v.numero_loja || v.venda_em) continue;
           const reg = _tkPedH[String(v.numero_loja).trim()];
           const ts = reg && Number(reg.criado_em);
           if (ts && isFinite(ts)) { v.venda_em = new Date(ts * 1000).toISOString(); _tkHoras++; }
+          else _faltam.push(v);
+        }
+        // Codex (#105): venda RECENTE ainda não tem extrato (a liquidação demora dias), então o
+        // cache do financeiro não a conhece — e ela é justamente a que aparece no painel agora.
+        // A API de PEDIDOS do TikTok já traz `create_time`: uma consulta por janela resolve.
+        if (_faltam.length) {
+          let tkH = null;
+          try { tkH = require('../tiktok-oauth'); } catch (e) {}
+          if (tkH && typeof tkH.chamar === 'function' && tkH.lerToken && tkH.lerToken('girassol')) {
+            const mapa = {};
+            const desdeH = Math.floor(Date.now() / 1000) - 10 * 86400;
+            let tokenH = '';
+            for (let v2 = 0; v2 < 40; v2++) {
+              const rH = await tkH.chamar('/order/202309/orders/search',
+                Object.assign({ page_size: '50' }, tokenH ? { page_token: tokenH } : {}),
+                { metodo: 'POST', body: { create_time_ge: desdeH } }, 'girassol');
+              if (!rH || !rH.ok || !rH.corpo || rH.corpo.code !== 0) break;
+              const dH = rH.corpo.data || {};
+              for (const o of (dH.orders || [])) if (o && o.id && o.create_time) mapa[String(o.id)] = Number(o.create_time);
+              tokenH = dH.next_page_token || '';
+              if (!tokenH) break;
+              await new Promise(r5 => setTimeout(r5, 200));
+            }
+            for (const v of _faltam) {
+              const ts2 = mapa[String(v.numero_loja).trim()];
+              if (ts2 && isFinite(ts2)) { v.venda_em = new Date(ts2 * 1000).toISOString(); _tkHoras++; }
+            }
+          }
         }
         if (_tkHoras) console.log('[GIRABKP] hora real da venda preenchida em ' + _tkHoras + ' pedido(s) do TikTok');
       } catch (e) {}
