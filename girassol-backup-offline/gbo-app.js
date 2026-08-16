@@ -349,6 +349,107 @@ async function shopeeKeepAlive() {
 // A rotina noturna precisa das funcoes deste arquivo, entao e montada aqui.
 // O agendador da RAIZ registra sozinho qualquer chave nova de `crons` que tenha
 // uma funcao de mesmo nome em `rotinas` — nao precisa mexer no index da raiz.
+const _listarNoBlingCanario = async (de, ate) => {
+  const porCanal = {};
+  // Codex (P1): o Bling tem bug conhecido no MESMO DIA — o vendasSync já contorna
+  // pedindo um dia a mais. Sem isso, venda de hoje sumiria e seria acusada de falta.
+  const ateMais1 = new Date(Date.parse(ate + 'T12:00:00Z') + 86400000).toISOString().slice(0, 10);
+  const MAX_PG = 200;
+  for (let pg = 1; pg <= MAX_PG; pg++) {
+    const r = await blingGet('/pedidos/vendas?dataInicial=' + de + '&dataFinal=' + ateMais1 + '&pagina=' + pg + '&limite=100');
+    // Codex (P2): falha do Bling NÃO pode virar "nenhum pedido" — isso acusaria o
+    // marketplace inteiro de sumido quando o problema é a nossa própria consulta.
+    if (!r || !r.ok) throw new Error('Bling não respondeu na página ' + pg + ' (HTTP ' + ((r && r.status) || '?') + ')');
+    const arr = (r.data && r.data.data) || [];
+    if (!arr.length) break;
+    for (const pd of arr) {
+      const lid = String((pd.loja && pd.loja.id) || '');
+      const canal = LOJA_MKT[lid] || 'outro';
+      const nl = String(pd.numeroPedidoLoja || pd.numeroLoja || '').trim();
+      if (!nl) continue;
+      (porCanal[canal] = porCanal[canal] || new Set()).add(nl);
+    }
+    if (arr.length < 100) break;
+    // Codex (P2): página cheia no teto = lista truncada, e truncada não vale comparar
+    if (pg === MAX_PG) throw new Error('mais de ' + (MAX_PG * 100) + ' pedidos no Bling nesse período — reduza &dias=');
+    await new Promise(r2 => setTimeout(r2, 150));
+  }
+  return porCanal;
+};
+
+const _listarNoMarketplaceCanario = async (canal, deTs, ateTs) => {
+  if (canal === 'shopee') {
+    if (!process.env.SHOPEE_SYNC_KEY) return null;
+    const ids = [];
+    for (let ini = deTs; ini < ateTs; ini += 15 * 86400) {
+      const fimJ = Math.min(ini + 15 * 86400 - 1, ateTs);
+      let cursor = '';
+      const MAX_PG_SH = 60;
+      for (let v = 1; v <= MAX_PG_SH; v++) {
+        // Codex (P2): pedido não pago ou cancelado NÃO desce pro Bling — cobrá-lo seria
+        // alarme falso. Pede o status junto e filtra abaixo.
+        const q = 'time_range_field=create_time&time_from=' + ini + '&time_to=' + fimJ + '&page_size=100&response_optional_fields=order_status' + (cursor ? '&cursor=' + encodeURIComponent(cursor) : '');
+        const r = await pedirAoSync('shopee-raw', { caminho: '/api/v2/order/get_order_list', q });
+        const cru = r && r.dados && r.dados.resposta;
+        const resp = cru && cru.response;
+        // Codex (P1): erro do proxy/da Shopee NÃO pode virar lista vazia — vazio seria
+        // lido como "o marketplace não vendeu nada", que é o oposto do que aconteceu.
+        if (!resp) throw new Error('Shopee não respondeu: ' + String((cru && (cru.error || cru.message)) || (r && r.erro) || 'sem resposta').slice(0, 120));
+        const FORA_SH = ['UNPAID', 'CANCELLED', 'INVOICE_PENDING'];
+        for (const o of (resp.order_list || [])) {
+          if (!o || !o.order_sn) continue;
+          if (FORA_SH.indexOf(String(o.order_status || '').toUpperCase()) >= 0) continue;
+          ids.push(String(o.order_sn));
+        }
+        cursor = resp.next_cursor || '';
+        if (!resp.more || !cursor) break;
+        // Codex (P1): teto atingido com "more" ainda ligado = truncado
+        if (v === MAX_PG_SH) return { incompleto: true, motivo: 'Shopee com mais de ' + (MAX_PG_SH * 100) + ' pedidos na janela' };
+        await new Promise(r2 => setTimeout(r2, 200));
+      }
+    }
+    return ids;
+  }
+  if (canal === 'tiktok') {
+    let tk = null;
+    try { tk = require('../tiktok-oauth'); } catch (e) { return null; }
+    if (!tk || typeof tk.chamar !== 'function' || !tk.lerToken || !tk.lerToken('girassol')) return null;
+    const ids = [];
+    let pageToken = '';
+    const MAX_PG_TK = 100;
+    for (let v = 1; v <= MAX_PG_TK; v++) {
+      const r = await tk.chamar('/order/202309/orders/search',
+        Object.assign({ page_size: '50' }, pageToken ? { page_token: pageToken } : {}),
+        { metodo: 'POST', body: { create_time_ge: deTs, create_time_lt: ateTs } }, 'girassol');
+      // Codex (P1): erro do TikTok pode vir COM `data` preenchido — aceitar isso lia
+      // lista vazia como sucesso. A lib do financeiro exige ok + code 0; aqui idem.
+      if (!r || !r.ok || !r.corpo || r.corpo.code !== 0) {
+        throw new Error('TikTok não respondeu: ' + String((r && r.corpo && r.corpo.message) || ('HTTP ' + (r && r.http))).slice(0, 120));
+      }
+      const d = r.corpo.data || {};
+      const FORA_TK = ['UNPAID', 'CANCELLED'];
+      for (const o of (d.orders || [])) {
+        if (!o || !o.id) continue;
+        if (FORA_TK.indexOf(String(o.status || '').toUpperCase()) >= 0) continue;
+        ids.push(String(o.id));
+      }
+      pageToken = d.next_page_token || '';
+      if (!pageToken) break;
+      if (v === MAX_PG_TK) return { incompleto: true, motivo: 'TikTok com mais de ' + (MAX_PG_TK * 50) + ' pedidos no período' };
+      await new Promise(r2 => setTimeout(r2, 200));
+    }
+    return ids;
+  }
+  return null;   // ML entra quando tiver listagem própria aqui
+};
+
+// Codex (P1 do #104): sem isto o canário só existiria se alguém lembrasse de abrir a URL —
+// e o objetivo é justamente avisar sozinho. A noturna passa a rodar a conferência.
+async function conferirMarketplaces(dias) {
+  const canLib = require('../lib/canario-marketplace');
+  return canLib.conferir({ empresa: 'girassol', listarNoBling: _listarNoBlingCanario, listarNoMarketplace: _listarNoMarketplaceCanario }, dias || 3, []);
+}
+
 const _noturna = criarNoturna({
   mlBillingSync, backfillVendas, mlSyncFees, varrerCancelados, 
   // 11/08 (herdado da AMB): o canário PRECISA do contexto — sem ele rotasCanario(undefined)
@@ -358,6 +459,7 @@ const _noturna = criarNoturna({
   // 06/08: a Shopee tambem passa a se manter sozinha — devolucoes (por SKU e motivo) e
   // carteira (ads, ajustes, reembolsos), as duas em janelas de 15 dias, guardando no disco.
   coletarDevolucoes: (d) => coletarDevolucoes(d || 45, pedirAoSync),
+  conferirMarketplaces,   // 16/08: canário marketplace × Bling na rotina
   coletarAds,   // 14/08: ads da Shopee também se mantém sozinho
   coletarCarteira:   (d) => coletarCarteira(d || 30, pedirAoSync),
   VERSAO, validarSessao, ehAdmin, json
@@ -1379,85 +1481,7 @@ function routes(readBody) {
       if (!((process.env.ADMIN_KEY && kC === process.env.ADMIN_KEY) || (sC && ehAdmin(sC)))) { json(res, 404, { error: 'not found' }); return true; }
       const canLib = require('../lib/canario-marketplace');
 
-      const listarNoBling = async (de, ate) => {
-        const porCanal = {};
-        // Codex (P1): o Bling tem bug conhecido no MESMO DIA — o vendasSync já contorna
-        // pedindo um dia a mais. Sem isso, venda de hoje sumiria e seria acusada de falta.
-        const ateMais1 = new Date(Date.parse(ate + 'T12:00:00Z') + 86400000).toISOString().slice(0, 10);
-        const MAX_PG = 200;
-        for (let pg = 1; pg <= MAX_PG; pg++) {
-          const r = await blingGet('/pedidos/vendas?dataInicial=' + de + '&dataFinal=' + ateMais1 + '&pagina=' + pg + '&limite=100');
-          // Codex (P2): falha do Bling NÃO pode virar "nenhum pedido" — isso acusaria o
-          // marketplace inteiro de sumido quando o problema é a nossa própria consulta.
-          if (!r || !r.ok) throw new Error('Bling não respondeu na página ' + pg + ' (HTTP ' + ((r && r.status) || '?') + ')');
-          const arr = (r.data && r.data.data) || [];
-          if (!arr.length) break;
-          for (const pd of arr) {
-            const lid = String((pd.loja && pd.loja.id) || '');
-            const canal = LOJA_MKT[lid] || 'outro';
-            const nl = String(pd.numeroPedidoLoja || pd.numeroLoja || '').trim();
-            if (!nl) continue;
-            (porCanal[canal] = porCanal[canal] || new Set()).add(nl);
-          }
-          if (arr.length < 100) break;
-          // Codex (P2): página cheia no teto = lista truncada, e truncada não vale comparar
-          if (pg === MAX_PG) throw new Error('mais de ' + (MAX_PG * 100) + ' pedidos no Bling nesse período — reduza &dias=');
-          await new Promise(r2 => setTimeout(r2, 150));
-        }
-        return porCanal;
-      };
-
-      const listarNoMarketplace = async (canal, deTs, ateTs) => {
-        if (canal === 'shopee') {
-          if (!process.env.SHOPEE_SYNC_KEY) return null;
-          const ids = [];
-          for (let ini = deTs; ini < ateTs; ini += 15 * 86400) {
-            const fimJ = Math.min(ini + 15 * 86400 - 1, ateTs);
-            let cursor = '';
-            const MAX_PG_SH = 60;
-            for (let v = 1; v <= MAX_PG_SH; v++) {
-              const q = 'time_range_field=create_time&time_from=' + ini + '&time_to=' + fimJ + '&page_size=100' + (cursor ? '&cursor=' + encodeURIComponent(cursor) : '');
-              const r = await pedirAoSync('shopee-raw', { caminho: '/api/v2/order/get_order_list', q });
-              const cru = r && r.dados && r.dados.resposta;
-              const resp = cru && cru.response;
-              // Codex (P1): erro do proxy/da Shopee NÃO pode virar lista vazia — vazio seria
-              // lido como "o marketplace não vendeu nada", que é o oposto do que aconteceu.
-              if (!resp) throw new Error('Shopee não respondeu: ' + String((cru && (cru.error || cru.message)) || (r && r.erro) || 'sem resposta').slice(0, 120));
-              for (const o of (resp.order_list || [])) if (o && o.order_sn) ids.push(String(o.order_sn));
-              cursor = resp.next_cursor || '';
-              if (!resp.more || !cursor) break;
-              // Codex (P1): teto atingido com "more" ainda ligado = truncado
-              if (v === MAX_PG_SH) return { incompleto: true, motivo: 'Shopee com mais de ' + (MAX_PG_SH * 100) + ' pedidos na janela' };
-              await new Promise(r2 => setTimeout(r2, 200));
-            }
-          }
-          return ids;
-        }
-        if (canal === 'tiktok') {
-          let tk = null;
-          try { tk = require('../tiktok-oauth'); } catch (e) { return null; }
-          if (!tk || typeof tk.chamar !== 'function' || !tk.lerToken || !tk.lerToken('girassol')) return null;
-          const ids = [];
-          let pageToken = '';
-          const MAX_PG_TK = 100;
-          for (let v = 1; v <= MAX_PG_TK; v++) {
-            const r = await tk.chamar('/order/202309/orders/search',
-              Object.assign({ page_size: '50' }, pageToken ? { page_token: pageToken } : {}),
-              { metodo: 'POST', body: { create_time_ge: deTs, create_time_lt: ateTs } }, 'girassol');
-            const d = r && r.corpo && r.corpo.data;
-            if (!d) throw new Error('TikTok não respondeu: ' + String((r && r.corpo && r.corpo.message) || ('HTTP ' + (r && r.http))).slice(0, 120));
-            for (const o of (d.orders || [])) if (o && o.id) ids.push(String(o.id));
-            pageToken = d.next_page_token || '';
-            if (!pageToken) break;
-            if (v === MAX_PG_TK) return { incompleto: true, motivo: 'TikTok com mais de ' + (MAX_PG_TK * 50) + ' pedidos no período' };
-            await new Promise(r2 => setTimeout(r2, 200));
-          }
-          return ids;
-        }
-        return null;   // ML entra quando tiver listagem própria aqui
-      };
-
-      const r = await canLib.conferir({ empresa: 'girassol', listarNoBling, listarNoMarketplace },
+      const r = await canLib.conferir({ empresa: 'girassol', listarNoBling: _listarNoBlingCanario, listarNoMarketplace: _listarNoMarketplaceCanario },
         urlObj.searchParams.get('dias'),
         String(urlObj.searchParams.get('canais') || '').split(',').map(s => s.trim()).filter(Boolean));
       json(res, 200, r);
