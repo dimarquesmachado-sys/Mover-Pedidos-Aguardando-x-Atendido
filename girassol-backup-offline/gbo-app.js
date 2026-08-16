@@ -492,7 +492,7 @@ async function coletarFinanceiroTikTok(dias) {
   return finLib.coletarFinanceiro(ctxFin, 'girassol', dias || 35, {});
 }
 
-async function conferirMarketplaces(dias, canais) {
+async function conferirMarketplaces(dias, canais, opts) {
   const anoR = (typeof _backfillAno !== 'undefined') && _backfillAno && _backfillAno.rodando;
   if ((_backfill && _backfill.rodando) || anoR) {
     return { ok: false, erro: 'tem backfill rodando — os dois brigam pela cota do Bling (429). Espere terminar.',
@@ -502,7 +502,7 @@ async function conferirMarketplaces(dias, canais) {
   _canario.ativos++; _canario.desde = _canario.desde || new Date().toISOString();
   try {
     return await canLib.conferir({ empresa: 'girassol', listarNoBling: _listarNoBlingCanario, listarNoMarketplace: _listarNoMarketplaceCanario },
-      dias || 3, Array.isArray(canais) ? canais : []);
+      dias || 3, Array.isArray(canais) ? canais : [], opts || {});
   } finally {
     _canario.ativos = Math.max(0, _canario.ativos - 1);
     if (!_canario.ativos) _canario.desde = null;
@@ -1550,7 +1550,8 @@ function routes(readBody) {
       // Codex: o filtro &canais= voltou a ser repassado — sem ele, pedir só `shopee` conferia
       // os três e virava INDETERMINADO por falta de credencial em outro canal.
       const r = await conferirMarketplaces(urlObj.searchParams.get('dias'),
-        String(urlObj.searchParams.get('canais') || '').split(',').map(s => s.trim()).filter(Boolean));
+        String(urlObj.searchParams.get('canais') || '').split(',').map(s => s.trim()).filter(Boolean),
+        { todos: urlObj.searchParams.get('todos') === '1' });
       json(res, 200, r);
       return true;
     }
