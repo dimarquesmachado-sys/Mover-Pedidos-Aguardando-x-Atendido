@@ -239,7 +239,7 @@ function rotasHistorico(ctx) {
       const { url: uL, key: kkL } = supaCfg('girassol');
       if (!uL || !kkL) { json(res, 500, { ok: false, erro: 'Supabase não configurado' }); return true; }
       const H = { apikey: kkL, Authorization: 'Bearer ' + kkL };
-      const campos = 'numero_pedido,canal,data_venda,sku,descricao,quantidade,valor_produto,valor_nota,custo,comissao,frete_vendedor,imposto,margem';
+      const campos = 'numero_pedido,canal,data_venda,sku,descricao,quantidade,valor_produto,valor_nota,custo,comissao,frete_vendedor,imposto,margem,uf'   // 17/08: sem isto o historico-longo lia uf vazio em TODA linha (havia dois `campos` no arquivo e o uf tinha entrado no outro);
       // 28/07: o backfill gravou o custo que existia NAQUELE dia. Depois o banco de custos cresceu
       // (de 288 pra 541 SKUs), então muita linha antiga ficou sem custo à toa. Aqui completamos na
       // LEITURA com o _custos.json atual — sem precisar refazer o backfill inteiro.
