@@ -139,6 +139,9 @@ async function atualizarVenda(orderId, campos, opts) {
   // que um "ler antes, gravar depois" apenas estreita.
   // Ex: { somenteSe: 'venda_cancelada_em=is.null' } => so grava se ainda nao finalizou.
   const extra = (opts && opts.somenteSe) ? `&${opts.somenteSe}` : '';
+  // Log do PATCH que falha: sem isso, "a gravacao falhou" chega ao operador sem causa
+  // nenhuma — e a causa tipica (coluna nao migrada, predicado invalido) esta no corpo
+  // que o PostgREST devolve.
   const r = await supabaseFetch(`${TABELA}?order_id=eq.${encodeURIComponent(orderId)}${extra}`, {
     method: 'PATCH',
     headers: { Prefer: 'return=representation' },   // devolve as linhas afetadas
@@ -151,6 +154,14 @@ async function atualizarVenda(orderId, campos, opts) {
   // so olha `ok`.
   if (r && r.ok && extra && Array.isArray(r.data) && r.data.length === 0) {
     return Object.assign({}, r, { bloqueada: true, motivo: 'estado_mudou' });
+  }
+  if (r && !r.ok) {
+    const causa = (r.data && (r.data.message || r.data.hint || r.data.details)) || r.data;
+    console.error(`[lcp] PATCH order ${orderId} FALHOU (HTTP ${r.status}): ${typeof causa === 'string' ? causa.slice(0, 300) : JSON.stringify(causa).slice(0, 300)}`);
+    console.error(`[lcp]   campos: ${Object.keys(campos).join(', ')}`);
+    if (extra) console.error(`[lcp]   filtro: ${extra.slice(0, 200)}`);
+    // devolve a causa junto, pra quem responde HTTP poder mostrar
+    return Object.assign({}, r, { causa: typeof causa === 'string' ? causa : JSON.stringify(causa) });
   }
   return r;
 }
