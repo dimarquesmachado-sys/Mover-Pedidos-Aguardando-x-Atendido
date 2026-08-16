@@ -356,10 +356,21 @@ const _listarNoBlingCanario = async (de, ate) => {
   const ateMais1 = new Date(Date.parse(ate + 'T12:00:00Z') + 86400000).toISOString().slice(0, 10);
   const MAX_PG = 200;
   for (let pg = 1; pg <= MAX_PG; pg++) {
-    const r = await blingGet('/pedidos/vendas?dataInicial=' + de + '&dataFinal=' + ateMais1 + '&pagina=' + pg + '&limite=100');
+    // 16/08 — MEDIDO em produção: rodar o canário JUNTO com o backfill estourou a cota do
+    // Bling e voltou HTTP 429 na 2ª página. 429 é fila cheia, não integração quebrada —
+    // então espera e tenta de novo. Erro de verdade (401/404) aborta na hora, sem insistir.
+    let r = null;
+    for (let tent = 1; tent <= 4; tent++) {
+      r = await blingGet('/pedidos/vendas?dataInicial=' + de + '&dataFinal=' + ateMais1 + '&pagina=' + pg + '&limite=100');
+      if (r && r.ok) break;
+      const st429 = (r && r.status) || 0;
+      if (st429 !== 429 && st429 !== 0 && st429 < 500) break;
+      await new Promise(r2 => setTimeout(r2, tent * 4000));
+    }
     // Codex (P2): falha do Bling NÃO pode virar "nenhum pedido" — isso acusaria o
     // marketplace inteiro de sumido quando o problema é a nossa própria consulta.
-    if (!r || !r.ok) throw new Error('Bling não respondeu na página ' + pg + ' (HTTP ' + ((r && r.status) || '?') + ')');
+    if (!r || !r.ok) throw new Error('Bling não respondeu na página ' + pg + ' (HTTP ' + ((r && r.status) || '?') + ')' +
+      (((r && r.status) === 429) ? ' — cota da API estourada; rode fora do horário do backfill' : ''));
     const arr = (r.data && r.data.data) || [];
     if (!arr.length) break;
     for (const pd of arr) {
@@ -1482,6 +1493,12 @@ function routes(readBody) {
       const kC = urlObj.searchParams.get('k') || '';
       const sC = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kC === process.env.ADMIN_KEY) || (sC && ehAdmin(sC)))) { json(res, 404, { error: 'not found' }); return true; }
+      // 16/08: canário + backfill juntos = 429. Mesma trava da conciliação da Shopee.
+      if (_backfill && _backfill.rodando) {
+        json(res, 200, { ok: false, erro: 'tem backfill rodando — os dois brigam pela cota do Bling (429). Espere terminar e rode de novo.',
+          backfill: { de: _backfill.de, ate: _backfill.ate, pedidos: _backfill.pedidos } });
+        return true;
+      }
       const canLib = require('../lib/canario-marketplace');
 
       const r = await canLib.conferir({ empresa: 'girassol', listarNoBling: _listarNoBlingCanario, listarNoMarketplace: _listarNoMarketplaceCanario },
