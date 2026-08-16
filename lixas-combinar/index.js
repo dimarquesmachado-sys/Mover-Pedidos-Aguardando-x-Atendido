@@ -29,8 +29,10 @@ const PAINEL_DIAS = Number(process.env.LIXAS_PAINEL_DIAS) || 30;
 // Usado no predicado da reserva: so reserva quem encontra o lease livre ou vencido,
 // entao duas emissoes simultaneas da mesma venda nao passam as duas.
 function _leaseLimite() {
+  // ENTRE ASPAS: o PostgREST parte `campo.operador.valor` por ponto e o ISO tem ponto
+  // nos milissegundos — sem aspas o filtro e invalido e o PATCH inteiro e rejeitado.
   const min = Number(process.env.LIXAS_NF_LEASE_MIN) || 10;
-  return new Date(Date.now() - min * 60 * 1000).toISOString();
+  return `"${new Date(Date.now() - min * 60 * 1000).toISOString()}"`;
 }
 
 // ── Helpers HTTP ─────────────────────────────────────────────────────
@@ -312,7 +314,7 @@ async function checarMlAntesDeEscrever(orderId, lcp, opts) {
     // esta dentro do Bling, gravar o cancelamento aqui faria a escrita terminal DELE
     // ser rejeitada — a venda ficaria cancelada, com NF emitida e sem o marcador nem o
     // alerta. Zero linhas = adia; o cron reconfirma depois.
-    const _lim = new Date(Date.now() - (Number(process.env.LIXAS_NF_LEASE_MIN) || 10) * 60 * 1000).toISOString();
+    const _lim = `"${new Date(Date.now() - (Number(process.env.LIXAS_NF_LEASE_MIN) || 10) * 60 * 1000).toISOString()}"`;
     // venda_cancelada_em=is.null + status nao-terminal: o cron pode ter finalizado o
     // cancelamento entre as leituras do ML e este PATCH, e com forcar:true a quarentena
     // sobrescreveria o estado final — a linha ficaria excluida das varreduras (pelo
@@ -1583,7 +1585,7 @@ function routes(readBody) {
             // Respeita lease ativo: com um worker dentro do gerarNFe, gravar o
             // cancelamento aqui faria a escrita terminal dele ser rejeitada — NF
             // emitida sem registro.
-            const _limC = new Date(Date.now() - (Number(process.env.LIXAS_NF_LEASE_MIN) || 10) * 60 * 1000).toISOString();
+            const _limC = `"${new Date(Date.now() - (Number(process.env.LIXAS_NF_LEASE_MIN) || 10) * 60 * 1000).toISOString()}"`;
             const _uC = await lcp.atualizarVenda(orderId, {
               status: 'venda_cancelada', ml_status: stC.status,
               ml_status_atualizado_em: new Date().toISOString(),
