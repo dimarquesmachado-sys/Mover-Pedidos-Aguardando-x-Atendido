@@ -449,7 +449,57 @@ const _listarNoMarketplaceCanario = async (canal, deTs, ateTs) => {
     }
     return ids;
   }
-  return null;   // ML entra quando tiver listagem própria aqui
+  if (canal === 'ml') {
+    // 17/08 — o ML era o buraco do canário: ficava "sem fonte", e na AMB ele é 3.262 das 4.903
+    // linhas do ano. Sem ele o veredito não cobria o canal que mais pesa.
+    // Reusa o padrão que o backfill já usa: janelas de 5 DIAS (o /orders/search tem teto de
+    // 1.000 e período grande perderia o excedente EM SILÊNCIO) e só pedido `paid` — não pago ou
+    // cancelado não desce pro Bling e viraria alarme falso.
+    let tkML = null;
+    try { const { garantirTokenML: _gt } = require('../ambtotal/mlTokenManager'); tkML = await _gt(); }
+    catch (e) { return null; }
+    if (!tkML) return null;
+    const HML = { headers: { Authorization: 'Bearer ' + tkML } };
+    let sellerId = null;
+    try {
+      const rm = await fetch('https://api.mercadolibre.com/users/me', HML);
+      const dm = await rm.json().catch(() => null);
+      if (rm.ok && dm && dm.id) sellerId = dm.id;
+    } catch (e) {}
+    if (!sellerId) throw new Error('não consegui identificar o vendedor no ML (/users/me)');
+    const ids = [];
+    const d1 = new Date(deTs * 1000), d2 = new Date(ateTs * 1000);
+    for (let cur = new Date(d1); cur <= d2; cur.setDate(cur.getDate() + 5)) {
+      const jIni = new Date(cur), jFim = new Date(cur);
+      jFim.setDate(jFim.getDate() + 4);
+      if (jFim > d2) jFim.setTime(d2.getTime());
+      const base = 'https://api.mercadolibre.com/orders/search?seller=' + sellerId +
+                   '&order.date_created.from=' + encodeURIComponent(jIni.toISOString().slice(0, 10) + 'T00:00:00.000-03:00') +
+                   '&order.date_created.to=' + encodeURIComponent(jFim.toISOString().slice(0, 10) + 'T23:59:59.999-03:00') +
+                   '&sort=date_asc&limit=50';
+      let totalML = Infinity;
+      for (let off = 0; off < 1000 && off < totalML; off += 50) {
+        const r = await fetch(base + '&offset=' + off, HML);
+        if (!r.ok) throw new Error('ML não respondeu (HTTP ' + r.status + ')');
+        const d = await r.json().catch(() => null);
+        if (!d) throw new Error('ML devolveu resposta ilegível');
+        totalML = (d.paging && Number(d.paging.total)) || 0;
+        const arr = d.results || [];
+        for (const o of arr) {
+          if (String(o.status || '') !== 'paid') continue;
+          ids.push(String(o.id));
+          // o Bling ora guarda o pedido, ora o PACK (carrinho): os dois valem como presença
+          if (o.pack_id) ids.push(String(o.pack_id));
+        }
+        if (!arr.length) break;
+        await new Promise(r2 => setTimeout(r2, 150));
+      }
+      if (totalML > 1000) return { incompleto: true, motivo: 'mais de 1.000 pedidos numa janela de 5 dias no ML' };
+      await new Promise(r2 => setTimeout(r2, 200));
+    }
+    return ids;
+  }
+  return null;
 };
 
 // Codex (P1 do #104): sem isto o canário só existiria se alguém lembrasse de abrir a URL —
