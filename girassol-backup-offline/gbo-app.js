@@ -1275,7 +1275,16 @@ function routes(readBody) {
       const sessD = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
       const out = { ok: true, total: null, por_mes: {}, por_canal: {} };
-      out.total = await supaCount('girassol', '');
+      // Codex: com `&ano=`, só `por_mes` era filtrado — `total` e `por_canal` somavam TUDO,
+      // e o retorno ficava impossível de reconciliar depois da virada de ano. Os três usam
+      // esta janela; o acumulado geral continua em `total_todos_os_anos`.
+      // ⚠️ declarada AQUI, antes do primeiro uso: com `const` lá embaixo isto seria TDZ —
+      // o lint passa e a rota quebra só quando alguém chama.
+      const _hojeF = new Date();
+      const _anoF = Number(urlObj.searchParams.get('ano')) || _hojeF.getFullYear();
+      const _faixaAno = 'data_venda=gte.' + _anoF + '-01-01&data_venda=lte.' + _anoF + '-12-31';
+      out.total = await supaCount('girassol', _faixaAno);
+      out.total_todos_os_anos = await supaCount('girassol', '');
       // 14/08 — a lista de meses era FIXA até julho, então agosto sumia do relatório e parecia
       // buraco no histórico (ele estava lá; a conferência é que não olhava). Agora vai do mês
       // do ano corrente até o mês de HOJE, e o último mês é cortado no dia de hoje.
