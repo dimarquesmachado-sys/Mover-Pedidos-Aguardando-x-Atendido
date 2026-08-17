@@ -1278,24 +1278,21 @@ function routes(readBody) {
       // Codex: com `&ano=`, só `por_mes` era filtrado — `total` e `por_canal` somavam TUDO,
       // e o retorno ficava impossível de reconciliar depois da virada de ano. Os três usam
       // esta janela; o acumulado geral continua em `total_todos_os_anos`.
-      // ⚠️ declarada AQUI, antes do primeiro uso: com `const` lá embaixo isto seria TDZ —
-      // o lint passa e a rota quebra só quando alguém chama.
-      const _hojeF = new Date();
-      const _anoF = Number(urlObj.searchParams.get('ano')) || _hojeF.getFullYear();
-      const _faixaAno = 'data_venda=gte.' + _anoF + '-01-01&data_venda=lte.' + _anoF + '-12-31';
+      // ⚠️ tudo declarado AQUI, antes do primeiro uso: `const` lá embaixo seria TDZ — o lint
+      // passa e a rota quebra só quando alguém chama. (Havia DUAS variáveis de ano fazendo a
+      // mesma coisa depois de um push meu; ficou uma só.)
+      const hojeC = new Date();
+      const anoC = Number(urlObj.searchParams.get('ano')) || hojeC.getFullYear();
+      const ehAnoAtual = (anoC === hojeC.getFullYear());
+      const mesC = ehAnoAtual ? (hojeC.getMonth() + 1) : 12;
+      const _faixaAno = 'data_venda=gte.' + anoC + '-01-01&data_venda=lte.' + anoC + '-12-31';
+      out.ano = anoC;
       out.total = await supaCount('girassol', _faixaAno);
       out.total_todos_os_anos = await supaCount('girassol', '');
       // 14/08 — a lista de meses era FIXA até julho, então agosto sumia do relatório e parecia
       // buraco no histórico (ele estava lá; a conferência é que não olhava). Agora vai do mês
       // do ano corrente até o mês de HOJE, e o último mês é cortado no dia de hoje.
-      const hojeC = new Date();
-      // Codex PR#94 (P2): o ano é PARÂMETRO (&ano=), com padrão no ano corrente — o backfill do
-      // ano popula 2026 fixo, então em janeiro/2027 o relatório mostraria só o ano novo e
-      // pareceria que o histórico sumiu. Quem quiser conferir 2026 depois da virada passa &ano=2026.
-      const anoC = Number(urlObj.searchParams.get('ano')) || hojeC.getFullYear();
-      const ehAnoAtual = (anoC === hojeC.getFullYear());
-      const mesC = ehAnoAtual ? (hojeC.getMonth() + 1) : 12;
-      out.ano = anoC;
+      // (ano, faixa e mês atual já definidos acima — `&ano=` vale para meses, total e canais)
       for (let mm = 1; mm <= mesC; mm++) {
         const m = anoC + '-' + String(mm).padStart(2, '0');
         // Codex PR#94 (P2): fevereiro estava fixo em 28 na tabela, então 29/02 de ano bissexto
