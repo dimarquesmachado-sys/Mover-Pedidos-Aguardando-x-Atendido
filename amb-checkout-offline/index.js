@@ -1421,12 +1421,33 @@ function routes(readBody) {
       const sessD = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
       const out = { ok: true, total: null, por_mes: {}, por_canal: {} };
-      out.total = await supaCount('amb', '');
-      for (const m of ['2026-01','2026-02','2026-03','2026-04','2026-05','2026-06','2026-07']) {
-        out.por_mes[m] = await supaCount('amb', 'data_venda=gte.'+m+'-01&data_venda=lte.'+m+'-'+ULTIMO_DIA[m.slice(5,7)]);
+      // Codex: com `&ano=`, só `por_mes` era filtrado — `total` e `por_canal` somavam TUDO,
+      // e o retorno ficava impossível de reconciliar depois da virada de ano. Os três usam
+      // esta janela; o acumulado geral continua em `total_todos_os_anos`.
+      // ⚠️ tudo declarado AQUI, antes do primeiro uso: `const` lá embaixo seria TDZ — o lint
+      // passa e a rota quebra só quando alguém chama. (Havia DUAS variáveis de ano fazendo a
+      // mesma coisa depois de um push meu; ficou uma só.)
+      const hojeC = new Date();
+      const anoC = Number(urlObj.searchParams.get('ano')) || hojeC.getFullYear();
+      const ehAnoAtual = (anoC === hojeC.getFullYear());
+      const mesC = ehAnoAtual ? (hojeC.getMonth() + 1) : 12;
+      const _faixaAno = 'data_venda=gte.' + anoC + '-01-01&data_venda=lte.' + anoC + '-12-31';
+      out.ano = anoC;
+      out.total = await supaCount('amb', _faixaAno);
+      out.total_todos_os_anos = await supaCount('amb', '');
+      // 17/08 — mesma correção já feita na Girassol (#94/#96): a lista de meses era FIXA até
+      // julho, então agosto sumia do relatório e parecia buraco no histórico quando não era.
+      // Ano vira parâmetro (&ano=), com padrão no corrente; o último dia sai do calendário
+      // (fevereiro fixo em 28 perderia 29/02 em ano bissexto).
+      // (ano, faixa e mês atual já definidos acima — `&ano=` vale para meses, total e canais)
+      for (let mm = 1; mm <= mesC; mm++) {
+        const m = anoC + '-' + String(mm).padStart(2, '0');
+        const ultimoDoMes = new Date(Date.UTC(anoC, mm, 0)).getUTCDate();
+        const fimM = (ehAnoAtual && mm === mesC) ? String(hojeC.getDate()).padStart(2, '0') : String(ultimoDoMes).padStart(2, '0');
+        out.por_mes[m] = await supaCount('amb', 'data_venda=gte.' + m + '-01&data_venda=lte.' + m + '-' + fimM);
       }
       for (const c of ['ml','shopee','tiktok','magalu','amazon','olist','madeira','leroy','outro']) {
-        const n = await supaCount('amb', 'canal=eq.'+c);
+        const n = await supaCount('amb', _faixaAno + '&canal=eq.' + c);   // Codex: canais também no ano escolhido
         if (n) out.por_canal[c] = n;
       }
       json(res, 200, out);
