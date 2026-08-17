@@ -5574,13 +5574,23 @@ async function backfillVendas(de, ate, empresa){
     await supaReq(empresa, 'DELETE', 'vendas_historico?empresa=eq.'+encodeURIComponent(empresa)+'&data_venda=gte.'+de+'&data_venda=lte.'+ate, null);
     for (let i0 = 0; i0 < estoque.length; i0 += 200) {
       const lote = estoque.slice(i0, i0 + 200);
+      // 17/08 — PGRST102 "All object keys must match": o Supabase RECUSA o lote inteiro quando
+      // os objetos não têm o MESMO conjunto de chaves. Aconteceu de verdade nesta madrugada: a
+      // venda trazida direto do marketplace não tinha `uf` e a do Bling tinha → 112 de 312
+      // linhas perdidas numa rodada que ainda assim reportou "concluido". Normalizar aqui é o
+      // conserto certo: qualquer campo novo, em qualquer origem, deixa de derrubar o lote.
+      const _chaves = new Set();
+      for (const _o of lote) for (const _k of Object.keys(_o)) _chaves.add(_k);
+      for (const _o of lote) for (const _k of _chaves) if (!(_k in _o)) _o[_k] = null;
       const ins = await supaReq(empresa,'POST','vendas_historico', lote);
       if(ins.ok) _backfill.gravados += lote.length;
       else { _backfill.erros += lote.length; _backfill.msg = 'erro Supabase status '+ins.status+' '+((ins.body||ins.erro||'')+'').slice(0,140); }
       await dorme(120);
     }
     _backfill.fora = foraDoPeriodo;
-    _backfill.fase = 'concluido';
+    // 17/08: rodada com linha perdida NÃO é "concluido" — antes o status dizia concluído com
+    // 112 erros no meio e o histórico ficava incompleto sem ninguém perceber.
+    _backfill.fase = _backfill.erros ? 'concluido_com_erros' : 'concluido';
     // Codex PR#33: a reconstrução apaga+reinsere sem credito_ml — redistribui os bônus do período
     try { aplicarCreditosFlex(de, ate).catch(() => {}); } catch (e9) {}
   } catch(e){ _backfill.fase='erro'; _backfill.msg = String(e.message||e); }
