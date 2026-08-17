@@ -1422,8 +1422,20 @@ function routes(readBody) {
       if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
       const out = { ok: true, total: null, por_mes: {}, por_canal: {} };
       out.total = await supaCount('amb', '');
-      for (const m of ['2026-01','2026-02','2026-03','2026-04','2026-05','2026-06','2026-07']) {
-        out.por_mes[m] = await supaCount('amb', 'data_venda=gte.'+m+'-01&data_venda=lte.'+m+'-'+ULTIMO_DIA[m.slice(5,7)]);
+      // 17/08 — mesma correção já feita na Girassol (#94/#96): a lista de meses era FIXA até
+      // julho, então agosto sumia do relatório e parecia buraco no histórico quando não era.
+      // Ano vira parâmetro (&ano=), com padrão no corrente; o último dia sai do calendário
+      // (fevereiro fixo em 28 perderia 29/02 em ano bissexto).
+      const hojeC = new Date();
+      const anoC = Number(urlObj.searchParams.get('ano')) || hojeC.getFullYear();
+      const ehAnoAtual = (anoC === hojeC.getFullYear());
+      const mesC = ehAnoAtual ? (hojeC.getMonth() + 1) : 12;
+      out.ano = anoC;
+      for (let mm = 1; mm <= mesC; mm++) {
+        const m = anoC + '-' + String(mm).padStart(2, '0');
+        const ultimoDoMes = new Date(Date.UTC(anoC, mm, 0)).getUTCDate();
+        const fimM = (ehAnoAtual && mm === mesC) ? String(hojeC.getDate()).padStart(2, '0') : String(ultimoDoMes).padStart(2, '0');
+        out.por_mes[m] = await supaCount('amb', 'data_venda=gte.' + m + '-01&data_venda=lte.' + m + '-' + fimM);
       }
       for (const c of ['ml','shopee','tiktok','magalu','amazon','olist','madeira','leroy','outro']) {
         const n = await supaCount('amb', 'canal=eq.'+c);
