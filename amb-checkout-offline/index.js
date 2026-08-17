@@ -382,7 +382,10 @@ const _listarNoBlingCanario = async (de, ate) => {
 
 const _listarNoMarketplaceCanario = async (canal, deTs, ateTs) => {
   if (canal === 'shopee') {
-    if (!process.env.SHOPEE_SYNC_KEY) return null;
+    // Codex (#119): o resto da AMB usa AMBBKP_SHOPEE_SYNC_KEY OU a global (ver linhas 2823 e
+      // 6492). Exigir só a global marcava a Shopee como "sem fonte" numa conexão que funciona —
+      // e canal sem fonte vira INDETERMINADO, ou seja, o canário deixaria de achar pedido sumido.
+      if (!process.env.AMBBKP_SHOPEE_SYNC_KEY && !process.env.SHOPEE_SYNC_KEY) return null;
     const ids = [];
     for (let ini = deTs; ini < ateTs; ini += 15 * 86400) {
       const fimJ = Math.min(ini + 15 * 86400 - 1, ateTs);
@@ -5312,6 +5315,13 @@ async function varrerFornecedores(max) {
 }
 
 async function backfillVendas(de, ate, empresa){
+  // Codex (#119): a trava só impedia o CANÁRIO quando havia backfill rodando. Se o canário
+  // começa primeiro e alguém dispara backfill — ou a noturna chama esta função direto —, os
+  // dois consultam o Bling juntos e o 429 volta. Exclusão nos DOIS sentidos.
+  if (typeof _canario !== 'undefined' && _canario && _canario.rodando) {
+    console.log('[BACKFILL] adiado: o canário está conferindo o Bling (desde ' + _canario.desde + ')');
+    return { ok: false, msg: 'canário conferindo o Bling agora — backfill adiado' };
+  }
   if(_backfill.rodando) return;
   _backfill = { rodando:true, empresa, de, ate, pagina:0, pedidos:0, itens:0, gravados:0, erros:0, fase:'preparando', inicio:new Date().toISOString(), fim:null, msg:'' };
   try { await garantirSitCancel(async p2 => await blingGet(p2)); } catch (e) {}
