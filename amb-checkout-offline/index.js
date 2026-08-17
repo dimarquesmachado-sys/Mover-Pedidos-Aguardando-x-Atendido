@@ -1424,22 +1424,22 @@ function routes(readBody) {
       // Codex: com `&ano=`, só `por_mes` era filtrado — `total` e `por_canal` somavam TUDO,
       // e o retorno ficava impossível de reconciliar depois da virada de ano. Os três usam
       // esta janela; o acumulado geral continua em `total_todos_os_anos`.
-      // ⚠️ declarada AQUI, antes do primeiro uso: com `const` lá embaixo isto seria TDZ —
-      // o lint passa e a rota quebra só quando alguém chama.
-      const _hojeF = new Date();
-      const _anoF = Number(urlObj.searchParams.get('ano')) || _hojeF.getFullYear();
-      const _faixaAno = 'data_venda=gte.' + _anoF + '-01-01&data_venda=lte.' + _anoF + '-12-31';
+      // ⚠️ tudo declarado AQUI, antes do primeiro uso: `const` lá embaixo seria TDZ — o lint
+      // passa e a rota quebra só quando alguém chama. (Havia DUAS variáveis de ano fazendo a
+      // mesma coisa depois de um push meu; ficou uma só.)
+      const hojeC = new Date();
+      const anoC = Number(urlObj.searchParams.get('ano')) || hojeC.getFullYear();
+      const ehAnoAtual = (anoC === hojeC.getFullYear());
+      const mesC = ehAnoAtual ? (hojeC.getMonth() + 1) : 12;
+      const _faixaAno = 'data_venda=gte.' + anoC + '-01-01&data_venda=lte.' + anoC + '-12-31';
+      out.ano = anoC;
       out.total = await supaCount('amb', _faixaAno);
       out.total_todos_os_anos = await supaCount('amb', '');
       // 17/08 — mesma correção já feita na Girassol (#94/#96): a lista de meses era FIXA até
       // julho, então agosto sumia do relatório e parecia buraco no histórico quando não era.
       // Ano vira parâmetro (&ano=), com padrão no corrente; o último dia sai do calendário
       // (fevereiro fixo em 28 perderia 29/02 em ano bissexto).
-      const hojeC = new Date();
-      const anoC = Number(urlObj.searchParams.get('ano')) || hojeC.getFullYear();
-      const ehAnoAtual = (anoC === hojeC.getFullYear());
-      const mesC = ehAnoAtual ? (hojeC.getMonth() + 1) : 12;
-      out.ano = anoC;
+      // (ano, faixa e mês atual já definidos acima — `&ano=` vale para meses, total e canais)
       for (let mm = 1; mm <= mesC; mm++) {
         const m = anoC + '-' + String(mm).padStart(2, '0');
         const ultimoDoMes = new Date(Date.UTC(anoC, mm, 0)).getUTCDate();
