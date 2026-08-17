@@ -1438,7 +1438,7 @@ function routes(readBody) {
         out.por_mes[m] = await supaCount('amb', 'data_venda=gte.' + m + '-01&data_venda=lte.' + m + '-' + fimM);
       }
       for (const c of ['ml','shopee','tiktok','magalu','amazon','olist','madeira','leroy','outro']) {
-        const n = await supaCount('amb', 'canal=eq.'+c);
+        const n = await supaCount('amb', _faixaAno + '&canal=eq.' + c);   // Codex: canais também no ano escolhido
         if (n) out.por_canal[c] = n;
       }
       json(res, 200, out);
