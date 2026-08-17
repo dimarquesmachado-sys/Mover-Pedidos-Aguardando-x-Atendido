@@ -109,13 +109,63 @@ async function tratar(req, res, urlObj, json) {
     return true;
   }
 
+  // ── PAINEL (17/08) — uma tela só, pra não depender de decorar URL ────────────────
+  // O Diego, depois de conectar a 2ª loja: "difícil, não tem como criar nada mais fácil pras
+  // próximas lojas?". Tinha razão: eram 4 URLs na mão, e a `/tiktok/conectar` devolvia o link
+  // mesmo com a loja JÁ conectada — o que parecia falha. Aqui: status das lojas e um botão por
+  // etapa, na ordem, com o que já está pronto marcado.
+  if (p === '/tiktok/painel') {
+    if (!admOk()) { json(res, 404, { error: 'not found' }); return true; }
+    const k = encodeURIComponent(q.get('k') || '');
+    const linhas = LOJAS.map(l => {
+      const t = lerToken(l) || {};
+      const conectada = !!t.access_token, temCipher = !!t.shop_cipher;
+      const passo = !conectada ? 1 : (!temCipher ? 2 : 3);
+      const btn = (txt, href, cor) => '<a href="' + href + '" style="display:inline-block;padding:6px 12px;margin:2px;border-radius:8px;background:' + cor + ';color:#fff;text-decoration:none;font-size:13px">' + txt + '</a>';
+      return '<tr><td style="padding:10px 8px;font-weight:700">' + l + '</td>' +
+        '<td style="padding:10px 8px">' + (conectada ? (temCipher ? '✅ pronta' : '⚠️ falta o identificador da loja') : '— não conectada') +
+        (t.shop_name ? '<div style="font-size:12px;opacity:.7">' + t.shop_name + '</div>' : '') + '</td>' +
+        '<td style="padding:10px 8px">' +
+          (passo === 1 ? btn('1 · Autorizar no TikTok', '/tiktok/conectar?loja=' + l + '&ir=1&k=' + k, '#2563eb') : '') +
+          (passo === 2 ? btn('2 · Pegar identificador', '/tiktok/lojas?loja=' + l + '&k=' + k, '#7c3aed') : '') +
+          (passo === 3 ? btn('Coletar financeiro (180d)', '/tiktok/financeiro-coletar?loja=' + l + '&dias=180&k=' + k, '#16a34a') +
+                         btn('Reconectar', '/tiktok/conectar?loja=' + l + '&ir=1&forcar=1&k=' + k, '#64748b') : '') +
+        '</td></tr>';
+    }).join('');
+    const html = '<!doctype html><meta charset="utf-8"><title>TikTok — lojas</title>' +
+      '<body style="font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#0f172a;color:#e2e8f0;padding:24px">' +
+      '<h2 style="margin:0 0 4px">TikTok Shop — conexão por loja</h2>' +
+      '<div style="opacity:.7;font-size:13px;margin-bottom:16px">app ' + (APP_KEY ? APP_KEY.slice(0, 4) + '…' : '(sem APP_KEY)') +
+      ' · empresa nova: acrescente o nome em <code>TIKTOK_LOJAS</code> e ela aparece aqui</div>' +
+      '<table style="width:100%;max-width:820px;border-collapse:collapse;background:#1e293b;border-radius:12px;overflow:hidden">' +
+      '<tr style="background:#334155;font-size:12px;text-transform:uppercase;letter-spacing:.04em">' +
+      '<th style="text-align:left;padding:8px">loja</th><th style="text-align:left;padding:8px">situação</th><th style="text-align:left;padding:8px">próximo passo</th></tr>' +
+      linhas + '</table>' +
+      '<p style="opacity:.7;font-size:12.5px;max-width:820px;margin-top:16px">Depois de autorizar, o TikTok volta para o endereço cadastrado no app. ' +
+      'Se ele apontar para outro serviço, copie o <b>code</b> da barra e cole em <code>/tiktok/trocar-code?loja=…&amp;code=…&amp;k=…</code>. ' +
+      'Para eliminar esse passo de vez, mude o <b>Redirect URL</b> do app para <code>' + (REDIRECT || 'https://…/tiktok/callback') + '</code>.</p>';
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+    res.end(html);
+    return true;
+  }
+
   if (p === '/tiktok/conectar') {
     if (!admOk()) { json(res, 404, { error: 'not found' }); return true; }
     if (!APP_KEY) { json(res, 400, { ok: false, erro: 'falta TIKTOK_APP_KEY no ambiente' }); return true; }
     const loja = lojaDe(q);
+    const jaT = lerToken(loja);
+    // 17/08: a rota devolvia o link mesmo com a loja JÁ conectada, e isso parecia falha ("rodei
+    // e não funcionou"). Agora ela DIZ que já está conectada; `&forcar=1` reconecta de propósito.
+    if (jaT && jaT.access_token && q.get('forcar') !== '1') {
+      json(res, 200, { ok: true, loja, ja_conectada: true,
+        shop: { id: jaT.shop_id || null, nome: jaT.shop_name || null, cipher: jaT.shop_cipher ? 'ok' : 'FALTA — rode /tiktok/lojas?loja=' + loja },
+        leia: 'esta loja já está conectada. Para reconectar mesmo assim, use &forcar=1. Painel com tudo: /tiktok/painel?k=' });
+      return true;
+    }
     // o `state` volta no callback e diz PARA QUAL LOJA é o token
     const url = AUTH + '/oauth/authorize?app_key=' + encodeURIComponent(APP_KEY) + '&state=' + encodeURIComponent(loja);
-    json(res, 200, { ok: true, loja, url, leia: 'abra logado como dono da loja; ao autorizar, o TikTok volta pro redirect com ?code=… — se o redirect apontar pra outro serviço, copie o code da barra e chame /tiktok/trocar-code?code=…&k=' });
+    if (q.get('ir') === '1') { res.writeHead(302, { Location: url, 'Cache-Control': 'no-store' }); res.end(); return true; }
+    json(res, 200, { ok: true, loja, url, leia: 'abra logado como dono da loja (ou use &ir=1 pra ir direto); ao autorizar, o TikTok volta pro redirect com ?code=… — se o redirect apontar pra outro serviço, copie o code e chame /tiktok/trocar-code?loja=' + loja + '&code=…&k=' });
     return true;
   }
 
