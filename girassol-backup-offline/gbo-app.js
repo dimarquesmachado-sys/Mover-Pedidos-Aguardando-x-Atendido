@@ -569,7 +569,14 @@ async function completarTarifaTikTok(dias, opts) {
   const fs2 = require('fs'), path2 = require('path');
   const arq = path2.join(process.env.TIKTOK_CACHE_DIR || '/data', '_tiktok_financeiro_girassol.json');
   const lerFinanceiro = () => { try { return (JSON.parse(fs2.readFileSync(arq, 'utf8')) || {}).pedidos || {}; } catch (e) { return {}; } };
-  return compLib.completarTarifas({ empresa: 'girassol', supaReq, lerFinanceiro }, dias, opts || {});
+  const r = await compLib.completarTarifas({ empresa: 'girassol', supaReq, lerFinanceiro }, dias, opts || {});
+  // Codex (#123): sem limpar o cache do histórico, o painel seguia mostrando a tarifa antiga
+  // por até 30 min e a correção parecia não ter funcionado — como já fazem o backfill e a
+  // reaplicação de imposto.
+  if (r && r.ok && !r.simulacao && r.linhas_atualizadas) {
+    try { for (const k of Object.keys(_histCache)) delete _histCache[k]; } catch (e) {}
+  }
+  return r;
 }
 
 const _noturna = criarNoturna({
@@ -3388,6 +3395,9 @@ async function supaReq(empresa, metodo, pathQuery, body){
   if(!url || !key) return { ok:false, status:0, erro:'faltam SUPABASE_URL_VENDAS_'+String(empresa||'').toUpperCase()+' / SUPABASE_KEY_VENDAS_'+String(empresa||'').toUpperCase() };
   const h = { 'apikey': key, 'Authorization': 'Bearer '+key, 'Content-Type': 'application/json' };
   if(metodo==='POST') h['Prefer']='return=minimal';
+  // 18/08 (Codex #123): no PATCH precisamos SABER se alguma linha foi afetada — PATCH que casa
+  // zero linhas volta 200 do mesmo jeito. Com representation o corpo traz as linhas mexidas.
+  if(metodo==='PATCH') h['Prefer']='return=representation';
   try {
     const r = await fetch(url.replace(/\/+$/,'') + '/rest/v1/' + pathQuery, { method: metodo, headers: h, body: body?JSON.stringify(body):undefined });
     const txt = await r.text().catch(()=> '');
