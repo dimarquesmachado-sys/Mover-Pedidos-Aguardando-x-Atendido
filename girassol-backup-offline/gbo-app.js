@@ -559,6 +559,19 @@ async function conferirMarketplaces(dias, canais, opts) {
   }
 }
 
+
+// ── COMPLETAR A TARIFA DO TIKTOK SEM BACKFILL (18/08) ───────────────────────────
+// Venda recente entra com a tarifa do BLING porque a liquidação do TikTok demora dias.
+// Antes, corrigir exigia rodar o backfill do período inteiro (horas, apaga e regrava, já
+// custou dado perdido 2×). Isto atualiza SÓ comissao/frete/margem das linhas defasadas.
+async function completarTarifaTikTok(dias, opts) {
+  const compLib = require('../lib/tiktok-completar');
+  const fs2 = require('fs'), path2 = require('path');
+  const arq = path2.join(process.env.TIKTOK_CACHE_DIR || '/data', '_tiktok_financeiro_girassol.json');
+  const lerFinanceiro = () => { try { return (JSON.parse(fs2.readFileSync(arq, 'utf8')) || {}).pedidos || {}; } catch (e) { return {}; } };
+  return compLib.completarTarifas({ empresa: 'girassol', supaReq, lerFinanceiro }, dias, opts || {});
+}
+
 const _noturna = criarNoturna({
   mlBillingSync, backfillVendas, mlSyncFees, varrerCancelados, 
   // 11/08 (herdado da AMB): o canário PRECISA do contexto — sem ele rotasCanario(undefined)
@@ -569,6 +582,7 @@ const _noturna = criarNoturna({
   // carteira (ads, ajustes, reembolsos), as duas em janelas de 15 dias, guardando no disco.
   coletarDevolucoes: (d) => coletarDevolucoes(d || 45, pedirAoSync),
   conferirMarketplaces,   // 16/08: canário marketplace × Bling na rotina
+  completarTarifaTikTok,   // 18/08: corrige a tarifa das vendas que já liquidaram
   coletarFinanceiroTikTok,   // 16/08: mantém o cache do TikTok fresco (tarifa real + hora da venda)
   coletarAds,   // 14/08: ads da Shopee também se mantém sozinho
   coletarCarteira:   (d) => coletarCarteira(d || 30, pedirAoSync),
@@ -1587,6 +1601,16 @@ function routes(readBody) {
       return true;
     }
     // resumo de um período, pros cards do dashboard
+    // ── COMPLETAR TARIFA DO TIKTOK (18/08) ────────────────────────────────────────
+    if (method === 'GET' && p === '/girassol-backup-offline/tiktok-completar-tarifa') {
+      const kT = urlObj.searchParams.get('k') || '';
+      const sT = validarSessao(req.headers['cookie']);
+      if (!((process.env.ADMIN_KEY && kT === process.env.ADMIN_KEY) || (sT && ehAdmin(sT)))) { json(res, 404, { error: 'not found' }); return true; }
+      const r = await completarTarifaTikTok(urlObj.searchParams.get('dias'), { simular: urlObj.searchParams.get('simular') === '1' });
+      json(res, 200, r);
+      return true;
+    }
+
     // ── CANÁRIO MARKETPLACE × BLING (16/08) ───────────────────────────────────────
     // Regra do Diego: "o Bling não é o rei; quem manda é o MARKETPLACE". Pega a lista de
     // vendas em cada marketplace e confere se TODAS chegaram ao Bling.
