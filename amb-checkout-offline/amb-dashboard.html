@@ -397,7 +397,7 @@ const MOD = '/amb-checkout-offline';
     return _f(u, o);
   };
 })();
-const DASH_BUILD = 'a24';
+const DASH_BUILD = 'a25';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -788,7 +788,10 @@ function pedirLinhasHist(de, ate, pagina){
   _hlTimer = setTimeout(()=>{ carregarLinhasHist(de, ate, pagina); }, 400);
 }
 async function carregarLinhasHist(de, ate, pagina){
-  if(_hlCarregando) return;
+  /* 18/08: com a busca no servidor, digitar dispara vários pedidos e este guard DESCARTAVA os
+     que chegassem durante um carregamento — a consulta do termo era engolida e a tela ficava
+     mostrando o estado anterior pra sempre. Agora reagenda em vez de descartar. */
+  if(_hlCarregando){ pedirLinhasHist(de, ate, pagina); return; }
   _hlCarregando = true;
   try{
     // 29/07: 200 por página, igual ao filtro do dia — antes o histórico vinha de 100 em 100
@@ -799,6 +802,10 @@ async function carregarLinhasHist(de, ate, pagina){
     const _q = String(anSku||'').trim();
     const r = await fetch(MOD+'/historico-linhas?de='+de+'&ate='+ate+'&pagina='+(pagina||1)+'&lim=200'+(anCanal?('&canal='+encodeURIComponent(anCanal)):'')+(_q.length>=2?('&q='+encodeURIComponent(_q)):''), {credentials:'same-origin'});
     const d = await r.json().catch(()=>null);
+    if(!(d && d.ok)){   /* 18/08: erro do servidor ficava invisível e a tela dizia "sem vendas no período" */
+      const _tb=$('tAnalise');
+      if(_tb) _tb.innerHTML='<tr><td class="dim" style="padding:14px">⚠ não consegui carregar a lista do histórico agora'+((d&&d.erro)?(' ('+esc(String(d.erro))+')'):'')+' — tente de novo</td></tr>';
+    }
     if(d && d.ok){ HLIN = d; HLIN._de=de; HLIN._ate=ate; HLIN._canal=anCanal||''; HLIN._q=(_q.length>=2?_q:''); renderAnalise(); restaurarAncora();
       garantirNomes((d.pedidos||[]).map(function(o){ return {h:{itens:(o.itens||[])}}; }));   // títulos também no Mês/Ano
     }
@@ -2826,6 +2833,9 @@ function renderAnalise(){
     pr.innerHTML = ''; }   // 28/07: filtro de período REMOVIDO daqui — quem manda é o do topo, que já vale pra tela toda
   if(pd){ pd.innerHTML = anPer==='custom' ? ' <input type="date" value="'+anPDe+'" onclick="this.showPicker&&this.showPicker()" onchange="anPDe=this.value;anPage=0;renderAnalise()"> <input type="date" value="'+anPAte+'" onclick="this.showPicker&&this.showPicker()" onchange="anPAte=this.value;anPage=0;renderAnalise()">' : ''; }
   const iv=anIntervalo();
+  /* 18/08 — a LISTA do período longo vem do banco (renderHistLinhas). Esta flag existe porque
+     o `hOK` do resumo mora dentro de uma função anônima e não alcançava a pintura da tabela. */
+  const _usaHist = !!(HIST && HIST.de===iv.de && HIST.ate===iv.ate && HIST.totais);
   let L = DADOS.filter(h=>{
     if(!h.conferido_em) return false;
     if(ehFantasmaReg(h)) return false;   // casca sem número/itens/valor não é venda
@@ -2951,6 +2961,9 @@ function renderAnalise(){
       (anPage<maxP?'<button class="chip" style="background:#1d4ed8;border-color:#1d4ed8;color:#fff;font-weight:700" onclick="anPage++;renderAnalise();document.getElementById(\'secAnalise\').scrollIntoView({behavior:\'smooth\'})">ver as pr\u00f3ximas '+Math.min(PAG, LP.length-(anPage+1)*PAG)+' \u2192</button>':'');
   })();
   garantirNomes(pagPL);   // busca os nomes que faltarem e redesenha
+  /* mesmo motivo da tabela: no período longo os cartões do celular já foram pintados com as
+     vendas do banco pelo renderHistLinhas — repintar aqui com a lista local (vazia) apagava. */
+  if(_usaHist) return;
   renderCardsVenda(pagPL.map(function(x){
     const h=x.h, P=x.P;
     // 29/07: canais como o TikTok não informam a hora da venda, e o cartão caía pra data — no
@@ -3109,6 +3122,12 @@ function renderAnalise(){
       '<td class="num '+(pmc!=null?(pmc>=0?'ok':'bad'):'dim')+'">'+(pmc!=null?pmc+'%':'—')+'</td>'+
     '</tr>';
   }).join('');
+  /* ⚠️ 18/08 — BUG QUE ESVAZIAVA A LISTA NO MÊS/ANO: o renderHistLinhas pinta a tabela com as
+     vendas do banco lá em cima (dentro do bloco do resumo), e ESTA atribuição rodava logo depois
+     em TODO render, sobrescrevendo tudo com a lista LOCAL — que no período longo está vazia (o
+     cache só tem ~6 dias). Resultado: o resumo dizia "1.659 pedidos" e a tabela dizia "sem vendas
+     no período". No período longo quem manda é o renderHistLinhas; a saída acontece antes daqui,
+     junto com os cartões do celular, pelo mesmo motivo. */
   $('tAnalise').innerHTML =
     '<tr><th title="quando a venda aconteceu — hora REAL do canal quando ele informa; senão a hora da nota ou da conferência">Data/hora</th><th title="número do pedido no Bling · ✓ verde = já bipado · ✓ laranja = aguardando bipagem · ✕ = cancelado">Pedido</th><th title="número da venda no marketplace — clique pra copiar">Venda (mkt)</th><th title="onde a venda aconteceu">Canal</th><th title="SKU(s) do pedido">Produto</th><th class="num" title="total de unidades do pedido">Un.</th>'+
     '<th class="num" title="total da NOTA FISCAL (com frete embutido, quando o canal lança)">Venda NF</th><th class="num" title="só os produtos: preço × quantidade">R$ Produtos</th><th class="num" title="quanto a mercadoria custou: custo unitário × quantidade, do banco de custos do Bling">Custo (−)</th><th class="num" title="Simples Nacional — alíquota do MÊS da venda aplicada sobre o valor da nota">Imposto (−)</th>'+
