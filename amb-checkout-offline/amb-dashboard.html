@@ -397,7 +397,7 @@ const MOD = '/amb-checkout-offline';
     return _f(u, o);
   };
 })();
-const DASH_BUILD = 'a26';
+const DASH_BUILD = 'a27';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -510,6 +510,15 @@ function prepararVendas(){
     sintetico:true, id:'s'+v.id, numero:v.numero, numero_loja:v.numero_loja||'', ml_pack:(v.pack_id||v.ml_pack||null), marketplace:v.marketplace||'outro',   /* Codex r6: o pack_id do cache não chegava ao SINT — sem ele o dedup não reconhecia o mesmo pedido vindo do histórico como ML-<order_id> */
     venda_em:v.venda_em||null, nf_emissao:(v.nf_em||null), venda_dia:v.data||null, valor:(v.total!=null?Number(v.total):null), cliente:v.cliente||'',
     itens:(v.it||[]).map(i2=>({sku:i2.sku,descricao:(i2.d||null),qtd:i2.qtd,valor_total:i2.vt,custo:(i2.custo!=null?i2.custo:null)})), taxa_mkt:(v.taxa_mkt!=null?v.taxa_mkt:null), frete_mkt:(v.frete_mkt!=null?v.frete_mkt:null),
+    /* 18/08 — O DASHBOARD NÃO PODE DEPENDER DO BIPE (regra do Diego). A venda ainda não bipada
+       montava a linha por aqui, e esta lista NÃO trazia `renda_canal` nem `frete_recebido`: o
+       escrow da Shopee era buscado e gravado, a TARIFA dele chegava (está logo abaixo) e a
+       RECEITA não. Em pedido com moedas/cupom da Shopee — que o comprador abate e a Shopee
+       banca — a margem saía do valor PAGO PELO COMPRADOR e invertia de sinal (caso real:
+       260819PV6YA7PX, −4,31 na tela contra +20,47 pelo repasse de 43,92). Depois do bipe o
+       pedido passava pelo outro caminho e se consertava sozinho — por isso nunca apareceu nos
+       fechamentos. Os dois campos entram aqui; nenhuma fórmula muda. */
+    renda_canal:(v.renda_canal!=null?v.renda_canal:null), frete_recebido:(v.frete_recebido!=null?v.frete_recebido:null),
     tarifa_ml:(v.tarifa_ml!=null?v.tarifa_ml:null), frete_ml:((v.frete_ml!=null && Number(v.frete_ml)>0)?Number(v.frete_ml):null),   /* Codex: zero na sintetica fazia o agregado pular o motoboy do Flex */ credito_ml:(v.credito_ml!=null?v.credito_ml:null),   // b31: comissão/frete/estorno REAIS do ML (fase ml_real) — o calcPL prioriza estes sobre o Bling
     logistica_ml:(v.logistica_ml||null), flex:((v.logistica_ml==='self_service')?1:0),   /* 13/08 (regra do Diego): venda existe = venda com TODOS os custos, bipada ou nao. Sem isto a nao-bipada somava o bonus do Flex e NAO descontava o motoboy — margem inflada */
     devolucao:(v.devolucao?1:0), dev_frete_retorno:(v.dev_frete_retorno!=null?Number(v.dev_frete_retorno):null), dev_destino:v.dev_destino||null, dev_status:v.dev_status||null, dev_aberta:(v.dev_aberta?1:0),   // b39: devolução do ML
