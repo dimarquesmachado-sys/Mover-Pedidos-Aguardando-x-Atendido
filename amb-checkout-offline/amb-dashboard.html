@@ -582,6 +582,9 @@ function renderCardsVenda(lista){
 function renderHistLinhas(iv){
   const tb=$('tAnalise'), rp=document.getElementById('anRodape'), inf=$('anInfo');
   if(!tb) return;
+  /* enquanto a última consulta estiver falhada, o aviso + ↻ mandam: repintar com o HLIN da
+     página anterior faria a queda parecer resolvida (Codex, PR#132 r4). */
+  if(_hlErro !== null){ avisoHistFalhou(_hlErro); return; }
   if(!HLIN || HLIN._de!==iv.de || HLIN._ate!==iv.ate || (HLIN._canal||'')!==(anCanal||'') || (HLIN._q||'')!==_qAn()){
     tb.innerHTML='<tr><td class="dim" style="padding:14px">⏳ carregando as vendas do histórico…</td></tr>';
     if(inf) inf.textContent='';
@@ -780,6 +783,9 @@ function renderPrevisao(){
 let HLIN = null;            // {pedidos, pagina, total_paginas, total_pedidos}
 let _hlCarregando = false;
 let _hlUltima = null;   // última consulta TENTADA (não a última que deu certo) — é o que o ↻ repete
+let _hlErro = null;     // Codex (P2, PR#132 r4): a falha era só pintura; qualquer render seguinte
+                        // (o garantirNomes que ainda estava em voo, por exemplo) repintava com o
+                        // HLIN antigo e a queda parecia ter se resolvido sozinha. Agora é ESTADO.
 /* termo em uso na lista do histórico (só conta com 2+ caracteres, igual ao servidor) */
 function _qAn(){ const t=String(anSku||'').trim(); return t.length>=2 ? t : ''; }
 /* digitar dispara uma consulta por tecla — 400ms de espera resolve */
@@ -807,7 +813,7 @@ async function carregarLinhasHist(de, ate, pagina){
     const r = await fetch(MOD+'/historico-linhas?de='+de+'&ate='+ate+'&pagina='+(pagina||1)+'&lim=200'+(anCanal?('&canal='+encodeURIComponent(anCanal)):'')+(_q.length>=2?('&q='+encodeURIComponent(_q)):''), {credentials:'same-origin'});
     const d = await r.json().catch(()=>null);
     if(!(d && d.ok)) avisoHistFalhou((d&&d.erro)?String(d.erro):'');
-    if(d && d.ok){ HLIN = d; HLIN._de=de; HLIN._ate=ate; HLIN._canal=anCanal||''; HLIN._q=(_q.length>=2?_q:''); renderAnalise(); restaurarAncora();
+    if(d && d.ok){ _hlErro = null; HLIN = d; HLIN._de=de; HLIN._ate=ate; HLIN._canal=anCanal||''; HLIN._q=(_q.length>=2?_q:''); renderAnalise(); restaurarAncora();
       garantirNomes((d.pedidos||[]).map(function(o){ return {h:{itens:(o.itens||[])}}; }));   // títulos também no Mês/Ano
     }
   }catch(e){
@@ -820,6 +826,7 @@ async function carregarLinhasHist(de, ate, pagina){
 /* Codex (P2, PR#131): o aviso só ia pra tabela — no celular a tabela está escondida e quem
    aparece são os cartões, que ficavam com o resultado ANTIGO e nenhum sinal de falha. */
 function avisoHistFalhou(msg){
+  _hlErro = msg || '';
   const txt = '⚠ não consegui carregar a lista do histórico agora'+(msg?(' ('+esc(msg)+')'):'')+' — tente de novo';
   const bt = '<button class="chip" style="margin-left:8px" onclick="repetirHist()">↻ tentar de novo</button>';
   const tb=$('tAnalise'); if(tb) tb.innerHTML='<tr><td class="dim" style="padding:14px">'+txt+bt+'</td></tr>';
@@ -830,6 +837,7 @@ function avisoHistFalhou(msg){
 /* refaz a última consulta de lista do histórico (a que falhou) */
 function repetirHist(){
   const iv = anIntervalo();
+  _hlErro = null;   // sai do estado de falha pra tentativa poder pintar de novo
   const u = _hlUltima || { de: iv.de, ate: iv.ate, pagina: 1 };
   carregarLinhasHist(u.de, u.ate, u.pagina);
 }
