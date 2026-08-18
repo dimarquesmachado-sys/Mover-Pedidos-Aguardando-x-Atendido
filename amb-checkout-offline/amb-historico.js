@@ -493,8 +493,14 @@ function rotasHistorico(ctx) {
       if (qB.length < 2) { json(res, 400, { ok: false, erro: 'use ?q= com 2+ caracteres' }); return true; }
       const ckB = 'bq|' + qB.toLowerCase();
       if (_histCache[ckB] && (Date.now() - _histCache[ckB].ts) < 120000) { json(res, 200, Object.assign({ cache: true }, _histCache[ckB].dados)); return true; }
-      const limpoB = qB.replace(/[,()"'\\]/g, ' ').replace(/\s+/g, ' ').trim();
+      // Codex (P2, PR#128 r5): eu APAGAVA vírgula/parênteses/aspas do termo — "Kit (10 unidades)"
+      // virava "Kit 10 unidades" e deixava de casar com o texto gravado, enquanto a busca em
+      // memória (que não mexe no termo) continuava achando. Agora o termo vai INTEIRO, entre
+      // aspas duplas, que é como o PostgREST aceita valor com vírgula/parêntese; só a aspa e a
+      // contrabarra precisam de escape dentro delas. Sobra o controle de tamanho e de brancos.
+      const limpoB = qB.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim();
       if (!limpoB) { json(res, 400, { ok: false, erro: 'termo inválido' }); return true; }
+      const citaB = v => '"' + String(v).replace(/([\\"])/g, '\\$1') + '"';   // valor citado do PostgREST
       const { url: uB, key: kkB } = supaCfg('amb');
       if (!uB || !kkB) { json(res, 500, { ok: false, erro: 'Supabase não configurado' }); return true; }
       const HB = { apikey: kkB, Authorization: 'Bearer ' + kkB };
@@ -508,34 +514,42 @@ function rotasHistorico(ctx) {
       // entram PRIMEIRO na lista — 15 achados recentes por título nunca expulsam o
       // pedido exato que motivou a busca.
       const baseB = uB.replace(/\/+$/, '') + '/rest/v1/vendas_historico?empresa=eq.amb';
-      const termoB = encodeURIComponent(limpoB);
-      const numsB = [];
+      const eqB = encodeURIComponent(citaB(limpoB));            // valor exato, citado
+      const likeB = encodeURIComponent(citaB('*' + limpoB + '*'));   // substring, citada
       const achouB = new Set();
+      // Codex (P2, PR#128 r5): antes eu SÓ consultava sku/descrição se a fase de
+      // identificadores não tivesse enchido as 15 vagas — buscar "ML" devolvia 15 pedidos
+      // ML-… e nenhum produto, contrariando o "SKU · parte do título" que a tela promete.
+      // Agora as três classes SEMPRE são consultadas e a cota é dividida na hora de montar:
+      // exatos primeiro (assento garantido), depois id-fuzzy e produto se revezando.
       const puxaNums = async (filtro, lim) => {
+        const out = [];
         const rN = await fetch(baseB + filtro + '&select=numero_pedido&order=data_venda.desc,numero_pedido.desc&limit=' + lim, { headers: HB });
         if (!rN.ok) throw new Error('Supabase HTTP ' + rN.status);
         const ln = await rN.json().catch(() => []);
         for (const l of (Array.isArray(ln) ? ln : [])) {
           const nk = l && l.numero_pedido != null ? String(l.numero_pedido) : '';
-          if (!nk || achouB.has(nk)) continue;
-          achouB.add(nk); numsB.push(nk);
-          if (numsB.length >= 15) break;
+          if (nk && !out.includes(nk)) out.push(nk);
+          if (out.length >= 60) break;
         }
+        return out;
       };
+      const numsB = [];
+      const juntaB = nk => { if (nk && !achouB.has(nk) && numsB.length < 15) { achouB.add(nk); numsB.push(nk); } };
       let linhasB = [];
       try {
-        if (/^\d+$/.test(limpoB)) {
-          const eqs = 'numero_pedido.eq.' + limpoB + ',numero_loja.eq.' + limpoB;   // Codex r4: numero_pedido é TEXT no schema (o backfill grava 'ML-…'), então eq com número longo é seguro — o guard de 9 dígitos só impedia achar pedido de nº comprido
-          await puxaNums('&or=(' + eqs + ')', 200);
-        } else {
-          // Codex (P2, PR#128 r2): "ML-123" (como o backfill grava a venda marketplace-only)
-          // e ID da Amazon têm letra/hífen — o guard numérico pulava numero_pedido/numero_loja
-          // e o número MOSTRADO NA TELA não achava nada. ID não numérico também casa, sem caixa.
-          await puxaNums('&or=(numero_pedido.ilike.*' + termoB + '*,numero_loja.ilike.*' + termoB + '*)', 200);
-        }
-        if (numsB.length < 15) {
-          // termo numérico também tenta FRAGMENTO do nº da venda (o filtro em memória faz includes)
-          await puxaNums('&or=(' + (/^\d+$/.test(limpoB) ? 'numero_loja.ilike.*' + termoB + '*,' : '') + 'sku.ilike.*' + termoB + '*,descricao.ilike.*' + termoB + '*)', 400);
+        // Codex r4: numero_pedido é TEXT no schema (o backfill grava 'ML-…'), então eq com
+        // número longo é seguro — o guard de 9 dígitos só impedia achar pedido de nº comprido.
+        const exatosB = await puxaNums('&or=(numero_pedido.eq.' + eqB + ',numero_loja.eq.' + eqB + ')', 200);
+        // Codex (P2, PR#128 r5): venda marketplace-only de CARRINHO grava numero_pedido='ML-<oid>'
+        // e numero_loja=<pack_id> — digitar o ID nativo do pedido não casava em NENHUM eq. A
+        // substring em numero_pedido resolve (e vale pro ID da Amazon com hífen também).
+        const idFuzzyB = await puxaNums('&or=(numero_pedido.ilike.' + likeB + ',numero_loja.ilike.' + likeB + ')', 300);
+        const prodB = await puxaNums('&or=(sku.ilike.' + likeB + ',descricao.ilike.' + likeB + ')', 400);
+        for (const nk of exatosB) juntaB(nk);                       // exato tem assento garantido
+        for (let i = 0; i < Math.max(idFuzzyB.length, prodB.length) && numsB.length < 15; i++) {
+          if (i < prodB.length) juntaB(prodB[i]);                   // produto e id-fuzzy se revezam,
+          if (i < idFuzzyB.length) juntaB(idFuzzyB[i]);             // nenhuma classe fica zerada
         }
         if (numsB.length) {
           const camposB = 'numero_pedido,numero_loja,canal,data_venda,sku,descricao,quantidade,valor_produto,valor_nota,custo,comissao,frete_vendedor,imposto,margem,credito_ml,uf';
