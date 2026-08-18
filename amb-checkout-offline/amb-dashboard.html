@@ -397,7 +397,7 @@ const MOD = '/amb-checkout-offline';
     return _f(u, o);
   };
 })();
-const DASH_BUILD = 'a21';
+const DASH_BUILD = 'a22';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -2277,9 +2277,12 @@ function calcPL(h){
   const mc = completo? (rendaCanal!=null ? (rendaCanal-imposto-custo-frVparaMC+(credito||0)) : (rpEf-imposto-tarifa-custo-frVparaMC+(credito||0)+(freteRec||0))) : null;
   return {mes,ck,rp,rpEf,desconto,freteRec,rendaCanal,tot,frete,aliq,imposto,feeReal,feeBling,tx,tarifa,custo,cusUn,unTot,custoOk,frV,frFonte,credito,completo,mc,magFreteFonte,magFreteCopart};
 }
+let _bqTimer=null, _bqSeq=0;
+window._bhHist = {};
 function buscarPed(q){
   q = String(q||'').trim().toLowerCase();
   const res=$('buscaRes'), card=$('plCard'); card.innerHTML='';
+  if(_bqTimer){ clearTimeout(_bqTimer); _bqTimer=null; }
   if(q.length<2){ res.innerHTML=''; return; }
   const hits = (DADOS||[]).concat(SINT||[]).filter(h=>{   // 27/07: buscava só nos bipados
     if(String(h.numero||'').toLowerCase()===q) return true;
@@ -2289,8 +2292,29 @@ function buscarPed(q){
     if(String(h.ml_order||'').toLowerCase().includes(q)) return true;  // ID do envio (2000017…) — acha por qualquer um dos dois
     return (h.itens||[]).some(it=> String(it.sku||'').toLowerCase().includes(q) || String(it.descricao||'').toLowerCase().includes(q));
   }).slice(0,15);
-  if(!hits.length){ res.innerHTML='<div class="dim" style="padding:8px">nada encontrado</div>'; return; }
-  res.innerHTML = '<table><tr><th title="dia da venda">Data</th><th title="número do pedido no Bling · ✓ verde = já bipado · ✓ laranja = aguardando bipagem · ✕ = cancelado">Pedido</th><th title="onde a venda aconteceu">Canal</th><th title="nome do comprador no marketplace">Cliente</th><th class="num" title="valor total do pedido">Total</th><th class="num" title="margem de contribuição do pedido: venda − imposto − comissão − frete − custo · clique no valor pra ver a conta aberta">💎 M.C.</th></tr>'+
+  _bqRender(q, hits, null);
+  /* 18/08: o card só olhava a memória da página (cache de ~6 dias + dia) — pedido antigo dava
+     "nada encontrado" mesmo existindo no histórico (caso real: TikTok 585044523947951326 de
+     15/07). Agora busca TAMBÉM no Supabase, com debounce, e mescla: qualquer data. */
+  const seq = ++_bqSeq;
+  _bqTimer = setTimeout(async ()=>{
+    let hh=[];
+    try{ const r=await fetch(MOD+'/buscar-lucro?q='+encodeURIComponent(q),{credentials:'same-origin'}); const d=await r.json(); if(d&&d.ok&&Array.isArray(d.pedidos)) hh=d.pedidos; }catch(e){}
+    if(seq!==_bqSeq) return;   /* já digitou outra coisa — descarta resposta velha */
+    _bqRender(q, hits, hh);
+  }, 450);
+}
+function _bqRender(q, hits, hh){
+  const res=$('buscaRes');
+  const vistos = new Set(hits.map(h=>String(h.numero||h.id)));
+  const extra = (hh||[]).filter(h=>!vistos.has(String(h.numero))).slice(0, Math.max(0, 15-hits.length));
+  window._bhHist = {}; for(const h of extra) window._bhHist[String(h.numero)] = h;
+  if(!hits.length && !extra.length){
+    res.innerHTML = '<div class="dim" style="padding:8px">'+(hh===null?'nada no cache recente — buscando no histórico…':'nada encontrado (nem no histórico)')+'</div>';
+    return;
+  }
+  const dtBR = s => { const m=String(s||'').match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? (m[3]+'/'+m[2]) : ''; };
+    res.innerHTML = '<table><tr><th title="dia da venda">Data</th><th title="número do pedido no Bling · ✓ verde = já bipado · ✓ laranja = aguardando bipagem · ✕ = cancelado">Pedido</th><th title="onde a venda aconteceu">Canal</th><th title="nome do comprador no marketplace">Cliente</th><th class="num" title="valor total do pedido">Total</th><th class="num" title="margem de contribuição do pedido: venda − imposto − comissão − frete − custo · clique no valor pra ver a conta aberta">💎 M.C.</th></tr>'+
     hits.map(h=>'<tr><td class="dim">'+diaVenda(h)+'</td><td><b>'+esc(h.numero||h.id)+'</b>'+
       (h.id?' <a class="lkB" href="https://www.bling.com.br/vendas.php#edit/'+esc(h.id)+'" target="_blank" rel="noopener" title="abrir o pedido no Bling" style="font-size:10px">Bling↗</a>':'')+
       /* d200: FALTAVA o link pro pedido dentro do marketplace — o Diego pediu, e a
@@ -2308,7 +2332,43 @@ function buscarPed(q){
         return '<td class="num"><a href="javascript:void(0)" onclick="abrirPL(\''+esc(h.id)+'\')" '+
                'style="text-decoration:none;font-weight:800" class="'+(P.mc>=0?'ok':'bad')+'" title="clique p/ ver a conta aberta">'+
                BRL(P.mc)+'</a>'+(pc!=null?('<div class="mut" style="font-size:10px">'+pc+'%</div>'):'')+'</td></tr>';
-      })()).join('')+'</table>';
+      })()).join('')+
+    extra.map(h=>{
+      const lm = linkMkt({marketplace:h.canal, numero_loja:h.numero_loja});
+      const pc = (h.mc!=null && h.vprod>0) ? Math.round(h.mc/h.vprod*100) : null;
+      return '<tr><td class="dim">'+dtBR(h.data)+'</td><td><b>'+esc(h.numero)+'</b>'+
+        (lm?' <a class="lkM" href="'+lm+'" target="_blank" rel="noopener" title="abrir esta venda no marketplace" style="font-size:10px">MKTP↗</a>':'')+
+        '<div class="desc mut" style="font-size:10px">📚 histórico'+(h.numero_loja?(' · venda '+esc(h.numero_loja)):'')+'</div></td>'+
+        '<td>'+esc(h.canal||'')+'</td><td class="desc" style="max-width:200px">'+esc((h.itens&&h.itens[0]&&h.itens[0].descricao)||'')+'</td>'+
+        '<td class="num">'+(h.vnota!=null?BRL(Number(h.vnota)):'<span class="dim">—</span>')+'</td>'+
+        (h.mc==null
+          ? '<td class="num dim" title="alguma linha deste pedido está sem margem no histórico">—</td></tr>'
+          : '<td class="num"><a href="javascript:void(0)" onclick="abrirPLHist(\''+esc(h.numero)+'\')" style="text-decoration:none;font-weight:800" class="'+(h.mc>=0?'ok':'bad')+'" title="clique p/ ver a conta do histórico">'+BRL(h.mc)+'</a>'+(pc!=null?('<div class="mut" style="font-size:10px">'+pc+'%</div>'):'')+'</td></tr>');
+    }).join('')+'</table>'+
+    (hh===null?'<div class="mut" style="font-size:11px;padding:6px 2px">buscando também no histórico…</div>':'');
+}
+function abrirPLHist(num){
+  const h = (window._bhHist||{})[String(num)]; if(!h) return;
+  const card=$('plCard');
+  const linha=(l,v)=>'<tr><td>'+l+'</td><td class="num">'+(v!=null?BRL(v):'<span class="dim">—</span>')+'</td></tr>';
+  card.innerHTML =
+    '<div class="sec" style="margin-top:12px;background:linear-gradient(160deg,#14201a,#131a30);border-color:#14b8a655">'+
+    '<h2>💎 Pedido '+esc(h.numero)+' · '+esc(h.canal||'')+' · '+esc(h.data||'')+
+    (h.numero_loja?' <span class="badge">venda '+esc(h.numero_loja)+'</span>':'')+
+    ' <span class="badge">📚 histórico</span></h2>'+
+    '<table>'+
+    linha('🏷️ Produtos', h.vprod)+
+    linha('🧾 Venda (NF)', h.vnota)+
+    linha('📦 Custo (−)', h.custo)+
+    linha('🏛️ Imposto (−)', h.imposto)+
+    linha('🏪 Tarifa (−)', h.comissao)+
+    linha('🚚 Frete vendedor (−)', h.frete)+
+    (h.credito? linha('↩️ Estorno/crédito (+)', h.credito) : '')+
+    linha('💎 M.C.', h.mc)+
+    '</table>'+
+    '<div class="mut" style="font-size:11px;margin-top:6px">números do histórico (Supabase) · itens: '+
+    esc((h.itens||[]).map(i=>i.sku+' ×'+i.qtd).join(' · '))+'</div>'+
+    '</div>';
 }
 async function abrirPL(id){
   const h = (DADOS||[]).concat(SINT||[]).find(x=>String(x.id)===String(id)); if(!h) return;   // 28/07: antes só achava os bipados

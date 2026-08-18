@@ -9,6 +9,7 @@
 //    /historico-linhas — a lista paginada do mesmo período, filtrada no servidor
 //    /previsao-vendas  — projeção por SKU
 //    /buscar-pedido    — busca de um pedido e seu lucro
+//    /buscar-lucro     — busca GLOBAL no Supabase (qualquer data), agrupada por pedido
 //
 //  ⚠️ CUIDADO AO MEXER: é este arquivo que decide faturamento, custo, imposto e
 //  M.C. dos períodos longos. Qualquer alteração aqui tem que ser conferida contra
@@ -472,6 +473,63 @@ function rotasHistorico(ctx) {
         }
       }
       json(res, 200, { ok: pedidos.length > 0 || notas.length > 0, via, q, pedidos, notas });
+      return true;
+    }
+
+    // 🔎 BUSCA GLOBAL DE PEDIDO E LUCRO — qualquer data, direto no Supabase (18/08).
+    // O card do dashboard só filtrava a memória da página (cache de ~6 dias): pedido
+    // antigo dava "nada encontrado" mesmo existindo no histórico — caso real: TikTok
+    // 585044523947951326 de 15/07 (pedido 2200 da AMB, margem 87,77 no banco).
+    // q SÓ DÍGITOS casa numero_loja/sku por igualdade (e numero_pedido quando cabe em
+    // int4 — venda de marketplace tem 15-19 dígitos e estouraria a coluna, quebrando o
+    // or= inteiro); q com letras casa sku/descricao por ilike. Agrupa por pedido e
+    // devolve total e M.C. prontos do banco. Vírgula/parênteses/aspas saem do termo
+    // porque quebram a sintaxe do or=() do PostgREST.
+    if (method === 'GET' && p === '/amb-checkout-offline/buscar-lucro') {
+      const kB = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const sessB = validarSessao(req.headers['cookie']);
+      if (!((process.env.ADMIN_KEY && kB === process.env.ADMIN_KEY) || (sessB && ehAdmin(sessB)))) { json(res, 404, { error: 'not found' }); return true; }
+      const qB = String((urlObj.searchParams && urlObj.searchParams.get('q')) || '').trim().slice(0, 60);
+      if (qB.length < 2) { json(res, 400, { ok: false, erro: 'use ?q= com 2+ caracteres' }); return true; }
+      const ckB = 'bq|' + qB.toLowerCase();
+      if (_histCache[ckB] && (Date.now() - _histCache[ckB].ts) < 120000) { json(res, 200, Object.assign({ cache: true }, _histCache[ckB].dados)); return true; }
+      const limpoB = qB.replace(/[,()"'\\]/g, ' ').replace(/\s+/g, ' ').trim();
+      if (!limpoB) { json(res, 400, { ok: false, erro: 'termo inválido' }); return true; }
+      const { url: uB, key: kkB } = supaCfg('amb');
+      if (!uB || !kkB) { json(res, 500, { ok: false, erro: 'Supabase não configurado' }); return true; }
+      const HB = { apikey: kkB, Authorization: 'Bearer ' + kkB };
+      const filtroB = /^\d+$/.test(limpoB)
+        ? '&or=(' + (limpoB.length <= 9 ? 'numero_pedido.eq.' + limpoB + ',' : '') + 'numero_loja.eq.' + limpoB + ',sku.eq.' + limpoB + ')'
+        : '&or=(sku.ilike.*' + encodeURIComponent(limpoB) + '*,descricao.ilike.*' + encodeURIComponent(limpoB) + '*)';
+      const camposB = 'numero_pedido,numero_loja,canal,data_venda,sku,descricao,quantidade,valor_produto,valor_nota,custo,comissao,frete_vendedor,imposto,margem,credito_ml,uf';
+      let linhasB = [];
+      try {
+        const rB = await fetch(uB.replace(/\/+$/, '') + '/rest/v1/vendas_historico?empresa=eq.amb' + filtroB +
+                   '&select=' + camposB + '&order=data_venda.desc,numero_pedido.desc,sku.desc&limit=600', { headers: HB });
+        if (!rB.ok) { json(res, 502, { ok: false, erro: 'Supabase HTTP ' + rB.status }); return true; }
+        linhasB = await rB.json().catch(() => []);
+        if (!Array.isArray(linhasB)) linhasB = [];
+      } catch (e) { json(res, 500, { ok: false, erro: String(e.message || e) }); return true; }
+      const r2c = v => Math.round((Number(v) || 0) * 100) / 100;
+      const porPed = new Map();
+      for (const l of linhasB) {
+        const nk = String(l.numero_pedido || '(sem número)');
+        let g = porPed.get(nk);
+        if (!g) { g = { numero: nk, numero_loja: l.numero_loja || null, canal: l.canal || null, data: String(l.data_venda || '').slice(0, 10), uf: l.uf || null, itens: [], vprod: 0, vnota: 0, custo: 0, comissao: 0, frete: 0, imposto: 0, credito: 0, mc: 0, mc_incompleta: false }; porPed.set(nk, g); }
+        g.itens.push({ sku: l.sku || '', descricao: l.descricao || '', qtd: Number(l.quantidade) || 0 });
+        g.vprod = r2c(g.vprod + (Number(l.valor_produto) || 0));
+        g.vnota = r2c(g.vnota + (Number(l.valor_nota) || 0));
+        g.custo = r2c(g.custo + (Number(l.custo) || 0));
+        g.comissao = r2c(g.comissao + (Number(l.comissao) || 0));
+        g.frete = r2c(g.frete + (Number(l.frete_vendedor) || 0));
+        g.imposto = r2c(g.imposto + (Number(l.imposto) || 0));
+        g.credito = r2c(g.credito + (Number(l.credito_ml) || 0));
+        if (l.margem == null) g.mc_incompleta = true; else g.mc = r2c(g.mc + (Number(l.margem) || 0));
+      }
+      const pedidosB = Array.from(porPed.values()).slice(0, 15).map(g => Object.assign({}, g, { mc: g.mc_incompleta ? null : g.mc }));
+      const dadosB = { ok: true, q: qB, pedidos: pedidosB, linhas_lidas: linhasB.length, pedidos_achados: porPed.size };
+      _histCache[ckB] = { ts: Date.now(), dados: dadosB };
+      json(res, 200, dadosB);
       return true;
     }
 
