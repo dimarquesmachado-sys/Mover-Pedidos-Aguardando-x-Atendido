@@ -837,7 +837,9 @@ function avisoHistFalhou(msg){
 /* refaz a última consulta de lista do histórico (a que falhou) */
 function repetirHist(){
   const iv = anIntervalo();
-  _hlErro = null;   // sai do estado de falha pra tentativa poder pintar de novo
+  /* Codex (P2, PR#132 r5): NÃO limpar o erro aqui — entre o clique e a resposta, qualquer
+     render (o garantirNomes que voltou, por exemplo) passaria pelo guard e repintaria a
+     página velha como se tivesse voltado. O estado só cai no SUCESSO da nova consulta. */
   const u = _hlUltima || { de: iv.de, ate: iv.ate, pagina: 1 };
   carregarLinhasHist(u.de, u.ate, u.pagina);
 }
