@@ -498,17 +498,47 @@ function rotasHistorico(ctx) {
       const { url: uB, key: kkB } = supaCfg('amb');
       if (!uB || !kkB) { json(res, 500, { ok: false, erro: 'Supabase não configurado' }); return true; }
       const HB = { apikey: kkB, Authorization: 'Bearer ' + kkB };
-      const filtroB = /^\d+$/.test(limpoB)
-        ? '&or=(' + (limpoB.length <= 9 ? 'numero_pedido.eq.' + limpoB + ',' : '') + 'numero_loja.eq.' + limpoB + ',sku.eq.' + limpoB + ')'
-        : '&or=(sku.ilike.*' + encodeURIComponent(limpoB) + '*,descricao.ilike.*' + encodeURIComponent(limpoB) + '*)';
-      const camposB = 'numero_pedido,numero_loja,canal,data_venda,sku,descricao,quantidade,valor_produto,valor_nota,custo,comissao,frete_vendedor,imposto,margem,credito_ml,uf';
+      // Codex (P1, PR#128): casar por SKU/descrição numa venda MULTI-ITEM devolvia só as
+      // linhas que casaram — e a soma delas era apresentada como o total do PEDIDO,
+      // subestimando receita e margem. Agora em DUAS FASES: (1) descobrir QUAIS pedidos
+      // casam; (2) buscar TODAS as linhas desses pedidos e só então agregar.
+      // Codex (P2, PR#128): termo numérico também busca por SUBSTRING em sku/descrição
+      // (a UI promete "SKU · parte do título" — fragmento tipo "2200" de lumens sumia).
+      // Os EXATOS (nº do pedido / venda do marketplace) vêm numa consulta separada e
+      // entram PRIMEIRO na lista — 15 achados recentes por título nunca expulsam o
+      // pedido exato que motivou a busca.
+      const baseB = uB.replace(/\/+$/, '') + '/rest/v1/vendas_historico?empresa=eq.amb';
+      const termoB = encodeURIComponent(limpoB);
+      const numsB = [];
+      const achouB = new Set();
+      const puxaNums = async (filtro, lim) => {
+        const rN = await fetch(baseB + filtro + '&select=numero_pedido&order=data_venda.desc,numero_pedido.desc&limit=' + lim, { headers: HB });
+        if (!rN.ok) throw new Error('Supabase HTTP ' + rN.status);
+        const ln = await rN.json().catch(() => []);
+        for (const l of (Array.isArray(ln) ? ln : [])) {
+          const nk = l && l.numero_pedido != null ? String(l.numero_pedido) : '';
+          if (!nk || achouB.has(nk)) continue;
+          achouB.add(nk); numsB.push(nk);
+          if (numsB.length >= 15) break;
+        }
+      };
       let linhasB = [];
       try {
-        const rB = await fetch(uB.replace(/\/+$/, '') + '/rest/v1/vendas_historico?empresa=eq.amb' + filtroB +
-                   '&select=' + camposB + '&order=data_venda.desc,numero_pedido.desc,sku.desc&limit=600', { headers: HB });
-        if (!rB.ok) { json(res, 502, { ok: false, erro: 'Supabase HTTP ' + rB.status }); return true; }
-        linhasB = await rB.json().catch(() => []);
-        if (!Array.isArray(linhasB)) linhasB = [];
+        if (/^\d+$/.test(limpoB)) {
+          const eqs = (limpoB.length <= 9 ? 'numero_pedido.eq.' + limpoB + ',' : '') + 'numero_loja.eq.' + limpoB;
+          await puxaNums('&or=(' + eqs + ')', 200);
+        }
+        if (numsB.length < 15) {
+          await puxaNums('&or=(sku.ilike.*' + termoB + '*,descricao.ilike.*' + termoB + '*)', 400);
+        }
+        if (numsB.length) {
+          const camposB = 'numero_pedido,numero_loja,canal,data_venda,sku,descricao,quantidade,valor_produto,valor_nota,custo,comissao,frete_vendedor,imposto,margem,credito_ml,uf';
+          const rB = await fetch(baseB + '&numero_pedido=in.(' + numsB.map(encodeURIComponent).join(',') + ')' +
+                     '&select=' + camposB + '&order=data_venda.desc,numero_pedido.desc,sku.asc&limit=1000', { headers: HB });
+          if (!rB.ok) { json(res, 502, { ok: false, erro: 'Supabase HTTP ' + rB.status }); return true; }
+          linhasB = await rB.json().catch(() => []);
+          if (!Array.isArray(linhasB)) linhasB = [];
+        }
       } catch (e) { json(res, 500, { ok: false, erro: String(e.message || e) }); return true; }
       const r2c = v => Math.round((Number(v) || 0) * 100) / 100;
       const porPed = new Map();
@@ -526,7 +556,10 @@ function rotasHistorico(ctx) {
         g.credito = r2c(g.credito + (Number(l.credito_ml) || 0));
         if (l.margem == null) g.mc_incompleta = true; else g.mc = r2c(g.mc + (Number(l.margem) || 0));
       }
-      const pedidosB = Array.from(porPed.values()).slice(0, 15).map(g => Object.assign({}, g, { mc: g.mc_incompleta ? null : g.mc }));
+      // Codex (P1, PR#128): o historico-longo soma o credito_ml na margem — aqui a M.C.
+      // saía sem o crédito e o detalhamento não reconciliava. Mesma regra dos cards agora.
+      const pedidosB = numsB.map(nk => porPed.get(nk)).filter(Boolean).slice(0, 15)
+        .map(g => Object.assign({}, g, { mc: g.mc_incompleta ? null : Math.round((g.mc + g.credito) * 100) / 100 }));
       const dadosB = { ok: true, q: qB, pedidos: pedidosB, linhas_lidas: linhasB.length, pedidos_achados: porPed.size };
       _histCache[ckB] = { ts: Date.now(), dados: dadosB };
       json(res, 200, dadosB);

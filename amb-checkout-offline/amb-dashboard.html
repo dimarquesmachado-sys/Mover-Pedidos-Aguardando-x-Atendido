@@ -2283,7 +2283,9 @@ function buscarPed(q){
   q = String(q||'').trim().toLowerCase();
   const res=$('buscaRes'), card=$('plCard'); card.innerHTML='';
   if(_bqTimer){ clearTimeout(_bqTimer); _bqTimer=null; }
-  if(q.length<2){ res.innerHTML=''; return; }
+  /* Codex (P2, PR#128): fetch já em voo + input apagado = a resposta velha ainda passava
+     no teste de sequência e repovoava a tela vazia. Avança a sequência ANTES de sair. */
+  if(q.length<2){ _bqSeq++; res.innerHTML=''; return; }
   const hits = (DADOS||[]).concat(SINT||[]).filter(h=>{   // 27/07: buscava só nos bipados
     if(String(h.numero||'').toLowerCase()===q) return true;
     if(String(h.nf_numero||'').toLowerCase().includes(q)) return true;
@@ -2298,19 +2300,28 @@ function buscarPed(q){
      15/07). Agora busca TAMBÉM no Supabase, com debounce, e mescla: qualquer data. */
   const seq = ++_bqSeq;
   _bqTimer = setTimeout(async ()=>{
-    let hh=[];
-    try{ const r=await fetch(MOD+'/buscar-lucro?q='+encodeURIComponent(q),{credentials:'same-origin'}); const d=await r.json(); if(d&&d.ok&&Array.isArray(d.pedidos)) hh=d.pedidos; }catch(e){}
+    /* Codex (P2, PR#128): falha de rede/auth/config virava "nada encontrado (nem no
+       histórico)" — afirmação definitiva ERRADA. Erro agora é estado próprio na tela. */
+    let hh=[], erroH=null;
+    try{
+      const r=await fetch(MOD+'/buscar-lucro?q='+encodeURIComponent(q),{credentials:'same-origin'});
+      const d=await r.json();
+      if(d&&d.ok&&Array.isArray(d.pedidos)) hh=d.pedidos;
+      else erroH=(d&&d.erro)?String(d.erro):('HTTP '+r.status);
+    }catch(e){ erroH=String((e&&e.message)||e); }
     if(seq!==_bqSeq) return;   /* já digitou outra coisa — descarta resposta velha */
-    _bqRender(q, hits, hh);
+    _bqRender(q, hits, hh, erroH);
   }, 450);
 }
-function _bqRender(q, hits, hh){
+function _bqRender(q, hits, hh, erroH){
   const res=$('buscaRes');
   const vistos = new Set(hits.map(h=>String(h.numero||h.id)));
   const extra = (hh||[]).filter(h=>!vistos.has(String(h.numero))).slice(0, Math.max(0, 15-hits.length));
   window._bhHist = {}; for(const h of extra) window._bhHist[String(h.numero)] = h;
   if(!hits.length && !extra.length){
-    res.innerHTML = '<div class="dim" style="padding:8px">'+(hh===null?'nada no cache recente — buscando no histórico…':'nada encontrado (nem no histórico)')+'</div>';
+    res.innerHTML = '<div class="dim" style="padding:8px">'+(hh===null
+      ? 'nada no cache recente — buscando no histórico…'
+      : (erroH ? '⚠ nada no cache recente, e o histórico está indisponível agora ('+esc(erroH)+') — tente de novo' : 'nada encontrado (nem no histórico)'))+'</div>';
     return;
   }
   const dtBR = s => { const m=String(s||'').match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? (m[3]+'/'+m[2]) : ''; };
@@ -2345,7 +2356,8 @@ function _bqRender(q, hits, hh){
           ? '<td class="num dim" title="alguma linha deste pedido está sem margem no histórico">—</td></tr>'
           : '<td class="num"><a href="javascript:void(0)" onclick="abrirPLHist(\''+esc(h.numero)+'\')" style="text-decoration:none;font-weight:800" class="'+(h.mc>=0?'ok':'bad')+'" title="clique p/ ver a conta do histórico">'+BRL(h.mc)+'</a>'+(pc!=null?('<div class="mut" style="font-size:10px">'+pc+'%</div>'):'')+'</td></tr>');
     }).join('')+'</table>'+
-    (hh===null?'<div class="mut" style="font-size:11px;padding:6px 2px">buscando também no histórico…</div>':'');
+    (hh===null?'<div class="mut" style="font-size:11px;padding:6px 2px">buscando também no histórico…</div>'
+      : (erroH?'<div class="mut" style="font-size:11px;padding:6px 2px">⚠ histórico indisponível agora ('+esc(erroH)+') — mostrando só o período recente</div>':''));
 }
 function abrirPLHist(num){
   const h = (window._bhHist||{})[String(num)]; if(!h) return;
