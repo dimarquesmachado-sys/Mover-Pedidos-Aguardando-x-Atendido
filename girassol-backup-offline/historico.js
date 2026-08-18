@@ -487,7 +487,7 @@ function rotasHistorico(ctx) {
       const kB = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
       const sessB = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kB === process.env.ADMIN_KEY) || (sessB && ehAdmin(sessB)))) { json(res, 404, { error: 'not found' }); return true; }
-      const qB = String((urlObj.searchParams && urlObj.searchParams.get('q')) || '').trim().slice(0, 60);
+      const qB = Array.from(String((urlObj.searchParams && urlObj.searchParams.get('q')) || '').trim()).slice(0, 60).join('');   // Codex (P2, PR#128 r9): slice(0,60) corta no meio de emoji/caractere astral e o encodeURIComponent estoura URIError ANTES do try — 500 em vez de resultado. Cortar por CARACTERE, não por unidade UTF-16
       if (qB.length < 2) { json(res, 400, { ok: false, erro: 'use ?q= com 2+ caracteres' }); return true; }
       const ckB = 'bq|' + qB.toLowerCase();
       if (_histCache[ckB] && (Date.now() - _histCache[ckB].ts) < 120000) { json(res, 200, Object.assign({ cache: true }, _histCache[ckB].dados)); return true; }
@@ -589,6 +589,14 @@ function rotasHistorico(ctx) {
         let mgLn = (l.margem == null ? null : Number(l.margem));
         if (mgLn != null) mgLn -= (imLn - _imGravB);                       // imposto recalculado: a margem acompanha
         if (mgLn != null && l.custo == null && cuLn != null) mgLn -= cuLn;  // margem gravada sem custo: desconta o reposto
+        // Codex (P1, PR#128 r9): linha que foi pro banco ANTES de o SKU ter custo cadastrado tem
+        // custo E margem nulos. Eu repunha o custo, mas os dois ajustes acima só agem em margem
+        // já existente — a margem seguia nula, o pedido inteiro virava "incompleto" e a busca
+        // mostrava "—" mesmo com o custo hoje disponível. Reconstrói pela MESMA fórmula do
+        // backfill (index.js): valor_produto − custo − comissão − frete − imposto.
+        if (mgLn == null && cuLn != null) {
+          mgLn = Math.round(((Number(l.valor_produto) || 0) - cuLn - (Number(l.comissao) || 0) - (Number(l.frete_vendedor) || 0) - imLn) * 100) / 100;
+        }
         g.itens.push({ sku: l.sku || '', descricao: l.descricao || '', qtd: qLn });
         g.vprod = r2c(g.vprod + (Number(l.valor_produto) || 0));
         g.vnota = r2c(g.vnota + vnLn);
