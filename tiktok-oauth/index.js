@@ -260,6 +260,46 @@ async function tratar(req, res, urlObj, json) {
     return true;
   }
 
+  // ── QUEM NÃO FECHOU A IDENTIDADE (18/08) ────────────────────────────────────────
+  // A coleta guarda `confere` por pedido: 0 = `receita − tarifa + frete + ajuste = repasse`.
+  // Apareceu 1 pedido com sobra na AMB e 9 na Girassol — quero VER o que mudou, em vez de
+  // deixar o contador subindo em silêncio. Se a Shopee/TikTok criar cobrança nova, é aqui
+  // que ela aparece primeiro (foi assim que achamos o campo de proteção de frete na Shopee).
+  if (p === '/tiktok/nao-fecharam') {
+    if (!admOk()) { json(res, 404, { error: 'not found' }); return true; }
+    const loja = lojaDe(q);
+    const arqNF = path.join(process.env.TIKTOK_CACHE_DIR || '/data', '_tiktok_financeiro_' + loja + '.json');
+    let ped = {};
+    try { ped = (JSON.parse(fs.readFileSync(arqNF, 'utf8')) || {}).pedidos || {}; } catch (e) {}
+    const fora = [];
+    let total = 0;
+    for (const x of Object.values(ped)) {
+      total++;
+      const dif = Number(x.confere || 0);
+      if (Math.abs(dif) < 0.01) continue;
+      fora.push({
+        order_id: x.order_id, tipo: x.tipo, extrato: x.extrato_id,
+        criado_em: x.criado_em ? new Date(x.criado_em * 1000).toISOString() : null,
+        receita: x.receita, tarifa: x.tarifa, frete_liquido: x.frete_liquido, ajuste: x.ajuste, repasse: x.repasse,
+        deveria_dar: Math.round(((x.receita || 0) - (x.tarifa || 0) + (x.frete_liquido || 0) + (x.ajuste || 0)) * 100) / 100,
+        sobra: dif,
+        comissao_plataforma: x.comissao_plataforma, afiliado: x.afiliado,
+        subsidio_frete: x.subsidio_frete, frete_real: x.frete_real,
+        reembolso_cliente: x.reembolso_cliente, frete_devolucao: x.frete_devolucao,
+        taxa_adm_reembolso: x.taxa_adm_reembolso, desconto_plataforma: x.desconto_plataforma,
+        ajustes_depois: x.ajustes_depois, tipos_vistos: x.tipos_vistos
+      });
+    }
+    fora.sort((a, b) => Math.abs(b.sobra) - Math.abs(a.sobra));
+    json(res, 200, {
+      ok: true, loja, pedidos_guardados: total, nao_fecharam: fora.length,
+      soma_das_sobras: Math.round(fora.reduce((s, x) => s + x.sobra, 0) * 100) / 100,
+      lista: fora.slice(0, 50),
+      leia: 'sobra = repasse − (receita − tarifa + frete + ajuste). Positiva: o TikTok pagou MAIS do que a conta prevê (algum crédito que ainda não lemos). Negativa: cobrou algo que não está em nenhum campo conhecido.'
+    });
+    return true;
+  }
+
   // SONDA GENÉRICA — não interpreta nada, devolve o JSON como o TikTok mandou
   if (p === '/tiktok/sonda') {
     if (!admOk()) { json(res, 404, { error: 'not found' }); return true; }

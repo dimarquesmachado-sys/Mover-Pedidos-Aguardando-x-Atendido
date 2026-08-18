@@ -14,7 +14,8 @@ const cron = require('node-cron');
 const { json, readBody } = require('./lib/http');
 const empresas = require('./config/empresas');
 const magaluOauth = require('./magalu-oauth');   // handler global das rotas /magalu/*
-const tiktokOauth = require('./tiktok-oauth');   // handler global das rotas /tiktok/* (14/08)
+const tiktokOauth = require('./tiktok-oauth');
+const tiktokAds = require('./tiktok-ads');     // 18/08: gasto com anúncios vem de OUTRA API (API for Business)   // handler global das rotas /tiktok/* (14/08)
 
 const TZ = process.env.TZ || 'America/Sao_Paulo';
 
@@ -179,6 +180,23 @@ const server = http.createServer(async (req, res) => {
       if (tratou) return;
     } catch (e) {
       console.error('[tiktok-oauth] erro:', e.message);
+      return json(res, 500, { ok: false, erro: String(e.message || e).slice(0, 200) });
+    }
+    return json(res, 404, { error: 'not found', path });
+  }
+
+  // ── TikTok ADS (18/08) — API for Business, app SEPARADO do Shop ────────────────
+  if (path.startsWith('/tiktok-ads/')) {
+    if (path !== '/tiktok-ads/callback') {
+      if (!ADMIN_KEY || urlObj.searchParams.get('k') !== ADMIN_KEY) {
+        return json(res, 404, { error: 'not found', path });
+      }
+    }
+    try {
+      const tratou = await tiktokAds.tratar(req, res, urlObj, json);
+      if (tratou) return;
+    } catch (e) {
+      console.error('[tiktok-ads] erro:', e.message);
       return json(res, 500, { ok: false, erro: String(e.message || e).slice(0, 200) });
     }
     return json(res, 404, { error: 'not found', path });
