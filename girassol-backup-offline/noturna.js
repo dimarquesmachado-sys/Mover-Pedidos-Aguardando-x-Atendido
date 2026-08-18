@@ -36,7 +36,7 @@ const hojeMenos = d => new Date(Date.now() - d * 864e5).toISOString().slice(0, 1
 
 function criarNoturna(ctx) {
   const { mlBillingSync, backfillVendas, mlSyncFees, varrerCancelados, canarioCron, podarExpedicao,
-          coletarDevolucoes, coletarCarteira, coletarAds, conferirMarketplaces, coletarFinanceiroTikTok, VERSAO, validarSessao, ehAdmin, json } = ctx;
+          coletarDevolucoes, coletarCarteira, coletarAds, conferirMarketplaces, coletarFinanceiroTikTok, completarTarifaTikTok, VERSAO, validarSessao, ehAdmin, json } = ctx;
   const dorme = ms => new Promise(r => setTimeout(r, ms));
 
   async function etapa(nome, fn) {
@@ -132,6 +132,21 @@ function criarNoturna(ctx) {
     // 14/08 (Codex no PR#70): o card de Ads lia só o arquivo, e nenhuma rotina o atualizava —
     // o número ficaria congelado na última coleta manual enquanto o resto da Shopee seguia
     // fresco. Agora a coleta de ads é etapa da noturna, como devoluções e carteira.
+    // 18/08 — corrige a tarifa do TikTok das vendas que JÁ liquidaram. Roda depois do
+    // backfill de propósito: o backfill grava a venda nova (com a tarifa do Bling, porque o
+    // extrato ainda não existe) e esta etapa volta nas antigas cujo extrato já saiu. Sem
+    // isso, a única correção era rodar o backfill do período inteiro de novo.
+    if (typeof completarTarifaTikTok === 'function') {
+      await etapa('completar tarifa do TikTok (45 dias)', async () => {
+        const r = await completarTarifaTikTok(45);
+        if (!r || r.ok === false) throw new Error((r && r.erro) || 'falhou');
+        if (r.falhas) throw new Error(r.falhas + ' linha(s) não atualizaram (de ' + r.linhas_atualizadas + ')');
+        return r.pedidos_corrigidos + ' pedido(s) corrigido(s) · R$ ' + r.tarifa_a_mais_reconhecida.toFixed(2) +
+               ' de tarifa reconhecida · ' + r.sem_financeiro_ainda + ' ainda sem extrato';
+      });
+      await dorme(2000);
+    }
+
     // 16/08 — CANÁRIO MARKETPLACE × BLING. Pedido do Diego depois do token Bling↔Shopee
     // vencer em silêncio e esconder 28 pedidos: "o Bling não é o rei, quem manda é o
     // marketplace". A etapa FALHA quando há venda que não chegou ao Bling — assim o alerta

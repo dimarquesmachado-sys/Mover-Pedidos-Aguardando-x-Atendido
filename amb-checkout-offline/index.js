@@ -499,6 +499,26 @@ async function conferirMarketplaces(dias, canais, opts) {
   }
 }
 
+
+// ── COMPLETAR A TARIFA DO TIKTOK SEM BACKFILL (18/08) ───────────────────────────
+// Venda recente entra com a tarifa do BLING porque a liquidação do TikTok demora dias.
+// Antes, corrigir exigia rodar o backfill do período inteiro (horas, apaga e regrava, já
+// custou dado perdido 2×). Isto atualiza SÓ comissao/frete/margem das linhas defasadas.
+async function completarTarifaTikTok(dias, opts) {
+  const compLib = require('../lib/tiktok-completar');
+  const fs2 = require('fs'), path2 = require('path');
+  const arq = path2.join(process.env.TIKTOK_CACHE_DIR || '/data', '_tiktok_financeiro_amb.json');
+  const lerFinanceiro = () => { try { return (JSON.parse(fs2.readFileSync(arq, 'utf8')) || {}).pedidos || {}; } catch (e) { return {}; } };
+  const r = await compLib.completarTarifas({ empresa: 'amb', supaReq, lerFinanceiro }, dias, opts || {});
+  // Codex (#123): sem limpar o cache do histórico, o painel seguia mostrando a tarifa antiga
+  // por até 30 min e a correção parecia não ter funcionado — como já fazem o backfill e a
+  // reaplicação de imposto.
+  if (r && r.ok && !r.simulacao && r.linhas_atualizadas) {
+    try { for (const k of Object.keys(_histCache)) delete _histCache[k]; } catch (e) {}
+  }
+  return r;
+}
+
 const _noturna = criarNoturna({
   // 10/08 (Codex P2): o canário PRECISA do contexto — sem ele, rotasCanario(undefined)
   // explodia no destructure, o catch engolia, e a etapa noturna dizia "conferido"
@@ -511,6 +531,8 @@ const _noturna = criarNoturna({
   // carteira (ads, ajustes, reembolsos), as duas em janelas de 15 dias, guardando no disco.
   coletarDevolucoes: (d) => coletarDevolucoes(d || 45, pedirAoSync),
   conferirMarketplaces,   // 17/08: canário marketplace × Bling também na AMB
+  completarTarifaTikTok,   // 18/08: corrige a tarifa das vendas que já liquidaram
+  coletarFinanceiroTikTok,   // Codex #123 (P1): sem passar aqui, a etapa de coleta da noturna era PULADA na AMB e o cache nunca se atualizava sozinho
   coletarAds,   // 14/08: ads da Shopee também se mantém sozinho
   coletarCarteira:   (d) => coletarCarteira(d || 30, pedirAoSync),
   VERSAO, validarSessao, ehAdmin, json
@@ -2491,6 +2513,16 @@ function routes(readBody) {
         await mlTM.trocarCodigoPorToken(code);
         json(res, 200, { ok: true, msg: 'token do ML da AMB renovado com o escopo novo. Rode /amb-checkout-offline/ml-devolucoes-coletar?dias=60&k=…' });
       } catch (e) { json(res, 500, { ok: false, erro: String(e.message || e).slice(0, 250) }); }
+      return true;
+    }
+
+    // ── COMPLETAR TARIFA DO TIKTOK (18/08) ────────────────────────────────────────
+    if (method === 'GET' && p === '/amb-checkout-offline/tiktok-completar-tarifa') {
+      const kT = urlObj.searchParams.get('k') || '';
+      const sT = validarSessao(req.headers['cookie']);
+      if (!((process.env.ADMIN_KEY && kT === process.env.ADMIN_KEY) || (sT && ehAdmin(sT)))) { json(res, 404, { error: 'not found' }); return true; }
+      const r = await completarTarifaTikTok(urlObj.searchParams.get('dias'), { simular: urlObj.searchParams.get('simular') === '1' });
+      json(res, 200, r);
       return true;
     }
 
@@ -4726,6 +4758,9 @@ async function supaReq(empresa, metodo, pathQuery, body){
   if(!url || !key) return { ok:false, status:0, erro:'faltam SUPABASE_URL_VENDAS_'+String(empresa||'').toUpperCase()+' / SUPABASE_KEY_VENDAS_'+String(empresa||'').toUpperCase() };
   const h = { 'apikey': key, 'Authorization': 'Bearer '+key, 'Content-Type': 'application/json' };
   if(metodo==='POST') h['Prefer']='return=minimal';
+  // 18/08 (Codex #123): no PATCH precisamos SABER se alguma linha foi afetada — PATCH que casa
+  // zero linhas volta 200 do mesmo jeito. Com representation o corpo traz as linhas mexidas.
+  if(metodo==='PATCH') h['Prefer']='return=representation';
   try {
     const r = await fetch(url.replace(/\/+$/,'') + '/rest/v1/' + pathQuery, { method: metodo, headers: h, body: body?JSON.stringify(body):undefined });
     const txt = await r.text().catch(()=> '');
