@@ -151,8 +151,47 @@ function rotasHistorico(ctx) {
       const canalR = String((urlObj.searchParams && urlObj.searchParams.get('canal')) || '').trim().toLowerCase();
       const filtroCanal = /^[a-z0-9_]{1,20}$/.test(canalR) ? canalR : '';
       const qCanal = filtroCanal ? ('&canal=eq.' + encodeURIComponent(filtroCanal)) : '';
-      const ck = 'idx|' + deR + '|' + ateR + '|' + (filtroCanal || 'todos');
+      // 18/08 — BUSCA POR TEXTO NO SERVIDOR (mesmo buraco que o card 🔍 tinha, um andar acima):
+      // no período longo a LISTA vem paginada daqui, e o campo 🔎 da Análise só filtrava a memória
+      // do navegador — digitar o nº de um pedido de julho não filtrava NADA, e a tela ainda dizia
+      // que a busca filtrava a lista. Agora o termo chega aqui e vale pro período inteiro.
+      // Mesmas regras da rota /buscar-lucro: termo INTEIRO entre aspas do PostgREST (pontuação
+      // preservada), coringa escapado, corte por CARACTERE e as três classes (nº exato, pedaço de
+      // identificador, SKU/descrição) — o exato entra primeiro.
+      const qTxt = Array.from(String((urlObj.searchParams && urlObj.searchParams.get('q')) || '').trim())
+                   .slice(0, 60).join('').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim();
+      const usaQ = qTxt.length >= 2;
+      const citaR = v => '"' + String(v).replace(/([\\"])/g, '\\$1') + '"';
+      const ck = 'idx|' + deR + '|' + ateR + '|' + (filtroCanal || 'todos') + (usaQ ? ('|q:' + qTxt.toLowerCase()) : '');
       let idx = (_histCache[ck] && (Date.now() - _histCache[ck].ts) < 600000) ? _histCache[ck].dados : null;
+      if (!idx && usaQ) {
+        // ÍNDICE FILTRADO: descobre os pedidos que casam e ordena por data (mais novos em cima),
+        // como o resto da lista. Cada classe traz no máx. 1.000 linhas; o teto de 3.000 pedidos
+        // evita varrer o ano inteiro por um termo genérico.
+        const eqR = encodeURIComponent(citaR(qTxt));
+        const likeR = encodeURIComponent(citaR('*' + qTxt.replace(/([\\%_*])/g, '\\$1') + '*'));
+        const puxaAlvos = async filtro => {
+          const out = [];
+          try {
+            const rA = await fetch(BASE + qCanal + filtro + '&select=numero_pedido,data_venda&order=data_venda.desc,numero_pedido.desc&limit=1000', { headers: HH });
+            if (!rA.ok) return out;
+            const ln = await rA.json().catch(() => []);
+            for (const l of (Array.isArray(ln) ? ln : [])) {
+              if (l && l.numero_pedido != null) out.push({ n: String(l.numero_pedido), d: String(l.data_venda || '') });
+            }
+          } catch (e) {}
+          return out;
+        };
+        const achados = new Map();   // numero → data mais recente
+        const junta = arr => { for (const a of arr) { const at = achados.get(a.n); if (!at || a.d > at) achados.set(a.n, a.d); } };
+        junta(await puxaAlvos('&or=(numero_pedido.eq.' + eqR + ',numero_loja.eq.' + eqR + ')'));
+        junta(await puxaAlvos('&or=(numero_pedido.ilike.' + likeR + ',numero_loja.ilike.' + likeR + ')'));
+        junta(await puxaAlvos('&or=(sku.ilike.' + likeR + ',descricao.ilike.' + likeR + ')'));
+        idx = Array.from(achados.entries()).map(([n, d]) => ({ n, d, c: 0 }))
+              .sort((a, b) => (b.d.localeCompare(a.d)) || (b.n.localeCompare(a.n)))
+              .slice(0, 3000);
+        _histCache[ck] = { ts: Date.now(), dados: idx };
+      }
       if (!idx) {
         idx = [];
         try {
@@ -183,9 +222,20 @@ function rotasHistorico(ctx) {
       const campos = 'numero_pedido,numero_loja,canal,data_venda,sku,descricao,quantidade,valor_produto,valor_nota,custo,comissao,frete_vendedor,imposto,margem,uf'   // 17/08: uf entra pro card Vendas por Estado;
       let linhas = [];
       try {
-        const rq = await fetch(BASE + qCanal + '&select=' + campos + '&order=data_venda.desc,numero_pedido.desc,sku.desc&limit=' + Math.max(1, qtdItens) + '&offset=' + off, { headers: HH });
-        linhas = await rq.json().catch(() => []);
-        if (!Array.isArray(linhas)) linhas = [];
+        // Com termo o índice não conta linhas por pedido (o offset por linha não se aplica):
+        // a página é a FATIA de pedidos e as linhas vêm por numero_pedido=in.(…) — assim o pedido
+        // multi-item vem INTEIRO, e não só as linhas que casaram com o termo.
+        const alvosPg = usaQ ? idx.slice(iniPed, fimPed).map(x => x.n) : null;
+        const url = usaQ
+          ? (alvosPg.length
+              ? BASE + qCanal + '&numero_pedido=in.(' + alvosPg.map(encodeURIComponent).join(',') + ')&select=' + campos + '&order=data_venda.desc,numero_pedido.desc,sku.desc&limit=4000'
+              : null)
+          : BASE + qCanal + '&select=' + campos + '&order=data_venda.desc,numero_pedido.desc,sku.desc&limit=' + Math.max(1, qtdItens) + '&offset=' + off;
+        if (url) {
+          const rq = await fetch(url, { headers: HH });
+          linhas = await rq.json().catch(() => []);
+          if (!Array.isArray(linhas)) linhas = [];
+        }
       } catch (e) { json(res, 500, { ok: false, erro: String(e.message || e) }); return true; }
       const _ccR = readJson(path.join(CACHE_DIR, '_custos.json'), {});
       // 01/08: mesmo recálculo do imposto na lista de vendas do período longo
@@ -216,7 +266,7 @@ function rotasHistorico(ctx) {
         ['vprod','vnota','custo','comissao','frete','imposto','margem'].forEach(c => { o[c] = Math.round(o[c] * 100) / 100; });
         return o;
       });
-      json(res, 200, { ok: true, pedidos, pagina: pg, total_paginas: totalPaginas, total_pedidos: totalPedidos, por_pagina: lim });
+      json(res, 200, { ok: true, pedidos, pagina: pg, total_paginas: totalPaginas, total_pedidos: totalPedidos, por_pagina: lim, q: (usaQ ? qTxt : null), filtrado: usaQ });
       return true;
     }
 
