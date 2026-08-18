@@ -590,7 +590,7 @@ No painel aparece o andamento.
     if (p === '/magalu/nf-full') {
       const hoje = new Date();
       // fmtD era UTC: depois das 21h de Brasilia o campo "Ate" vinha com amanha
-      const pad = nfHojeSP(hoje), pde = nfHojeSP(new Date(hoje.getTime() - 30 * 864e5));
+      // (datas do período específico removidas junto com o painel manual)
       const kq = encodeURIComponent(q.get('k') || '');
       const NOMES = { good: 'GOOD Import', amb: 'AMBTotal', girassol: 'Girassol' };
       const prontos = nfListar(null);
@@ -616,21 +616,16 @@ No painel aparece o andamento.
         ? prontos.map(f => {
             const d = f.em ? new Date(f.em) : null;
             const quando = d ? (String(d.getDate()).padStart(2,'0') + '/' + String(d.getMonth()+1).padStart(2,'0') + ' às ' + String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0')) : '?';
-            const base = '/magalu/nf-full/arquivo?nome=' + encodeURIComponent(f.nome) + '&k=' + kq;
             const n = f.notas || {};
-            const qs = (x) => (typeof x === 'number' ? ' (' + x + ')' : '');
+            const qtd = (typeof n.saida === 'number' || typeof n.entrada === 'number')
+              ? ((n.saida || 0) + ' saída · ' + (n.entrada || 0) + ' entrada')
+              : '';
             return '<div class="arq">'
                  + '<div class="cab"><span class="emp">' + (NOMES[f.empresa] || f.empresa) + '</span>'
                  + '<span class="qd">' + quando + '</span>'
                  + '<span class="tam">' + (f.bytes / 1024 < 1024 ? Math.round(f.bytes/1024) + ' KB' : (f.bytes/1048576).toFixed(1) + ' MB') + '</span></div>'
-                 + '<div class="acoes">'
-                 + '<a class="mini azul" href="' + base + '&tipo=saida">Notas de SAÍDA' + qs(n.saida) + '</a>'
-                 + '<a class="mini roxo" href="' + base + '&tipo=entrada">Notas de ENTRADA' + qs(n.entrada) + '</a>'
-                 + '<a class="mini" href="' + base + '">tudo junto</a>'
-                 + (BLING_IMP[f.empresa] && BLING_IMP[f.empresa].cookie()
-                     ? '<a class="mini verde" href="/magalu/nf-full/importar?empresa=' + f.empresa + '&nome=' + encodeURIComponent(f.nome) + '&tipo=saida&k=' + kq + '">→ mandar pro Bling</a>'
-                     : '')
-                 + '</div></div>';
+                 + (qtd ? '<div class="qtd">' + qtd + '</div>' : '')
+                 + '</div>';
           }).join('')
         : '<p class="vazio">Nada arquivado ainda. O robô roda às 6h, 12h, 18h e 23h. Se quiser adiantar, clique em <b>Rodar agora</b>.</p>';
       html(res, 200, `<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
@@ -653,6 +648,7 @@ a.btn.good{background:#0f9d58}a.btn:hover{opacity:.9}
 .arq{padding:12px 12px 10px;border-radius:7px;border:1px solid #2a2f3a;margin-bottom:10px;background:#0f1115}
 .cab{display:flex;align-items:center;gap:10px;margin-bottom:10px}
 .emp{font-weight:600;flex:1}.qd{color:#9aa0a6;font-size:13px}.tam{color:#9aa0a6;font-size:12px}
+.qtd{color:#9aa0a6;font-size:12.5px;margin-top:2px}
 .acoes{display:flex;gap:8px;flex-wrap:wrap}
 a.mini{text-decoration:none;font-size:12.5px;font-weight:600;padding:7px 11px;border-radius:6px;background:#2a2f3a;color:#e8eaed}
 a.mini.azul{background:#1a73e8;color:#fff}a.mini.roxo{background:#6f42c1;color:#fff}a.mini.verde{background:#0f9d58;color:#fff}a.mini:hover{opacity:.88}
@@ -663,7 +659,7 @@ p.vazio{color:#9aa0a6;font-size:13px;margin:0}
 <p class="sub">O robô baixa sozinho às 6h, 12h, 18h e 23h. A extensão importa no Bling quando você abre o sistema.</p>
 ${andamento}
 <div class="card">
-  <div class="tit">Prontos pra baixar</div>
+  <div class="tit">Últimos pacotes que o robô baixou</div>
   ${linhas}
   <div class="btns" style="margin-top:14px">
     <a class="btn cinza" href="/magalu/nf-full/rodar?k=${kq}">Rodar agora (as duas)</a>
@@ -683,44 +679,12 @@ ${andamento}
   A Magalu manda os dois tipos no mesmo arquivo — por isso a separação.<br><br>
   "Rodar agora" leva de 20 a 60 segundos e devolve um texto técnico — depois volta aqui e clica em Atualizar lista.</div>
 </div>
-<div class="card">
-  <div class="tit">Período específico (opcional)</div>
-  <div class="linha">
-    <div><label>De</label><input type="date" id="de" value="${pde}"></div>
-    <div><label>Até</label><input type="date" id="ate" value="${pad}"></div>
-  </div>
-  <div class="btns">
-    <a class="btn" id="bAmb" href="#">Baixar AMBTotal</a>
-    <a class="btn good" id="bGood" href="#">Baixar GOOD Import</a>
-  </div>
-  <div class="erro" id="erro"></div>
-  <div class="aviso">O período não pode passar de <b>31 dias</b> (regra da Magalu).<br>
-  Pode demorar de 5 a 40 segundos: a Magalu gera o arquivo na hora, e se ela responder
-  "estou processando" o servidor espera e tenta de novo sozinho.</div>
-</div>
 <div class="card" style="font-size:13px;color:#9aa0a6">
-  <b style="color:#e8eaed">No Bling, depois:</b><br>
-  Configurações → Importações de Dados → Importar Notas Fiscais em Lote → notas de <b>saída</b>.<br>
-  Marcar lançar contas. <b>Não</b> marcar lançar estoque (o estoque do Full está no CD da Magalu).
+  <b style="color:#e8eaed">Como funciona:</b><br>
+  A extensão do Bling importa sozinha quando você abre o sistema — não precisa baixar nem clicar em nada aqui.<br>
+  Esta página é só pra acompanhar o robô e forçar uma busca se precisar.
 </div>
-</div><script>
-var K = new URLSearchParams(location.search).get('k') || '';
-function mont(emp){
-  var de = document.getElementById('de').value, ate = document.getElementById('ate').value;
-  var e = document.getElementById('erro'); e.style.display='none';
-  if(!de || !ate){ e.textContent='Preencha as duas datas.'; e.style.display='block'; return null; }
-  if(de > ate){ e.textContent='A data inicial está depois da final.'; e.style.display='block'; return null; }
-  var dias = (new Date(ate) - new Date(de)) / 864e5;
-  if(dias > 31){ e.textContent='O período tem '+Math.round(dias)+' dias. O máximo é 31.'; e.style.display='block'; return null; }
-  return '/magalu/nf-full/baixar?empresa='+emp+'&de='+de+'&ate='+ate+'&k='+encodeURIComponent(K);
-}
-function liga(id, emp){
-  document.getElementById(id).addEventListener('click', function(ev){
-    ev.preventDefault(); var u = mont(emp); if(u) location.href = u;
-  });
-}
-liga('bAmb','amb'); liga('bGood','good');
-</script></body></html>`);
+</div></body></html>`);
       return true;
     }
 
