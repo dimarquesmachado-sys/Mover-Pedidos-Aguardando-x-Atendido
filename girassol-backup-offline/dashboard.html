@@ -568,7 +568,8 @@ function renderHistLinhas(iv){
   if(!tb) return;
   /* enquanto a última consulta estiver falhada, o aviso + ↻ mandam: repintar com o HLIN da
      página anterior faria a queda parecer resolvida (Codex, PR#132 r4). */
-  if(_hlErro !== null){ avisoHistFalhou(_hlErro); return; }
+  if(_hlErro && _hlErro.de===iv.de && _hlErro.ate===iv.ate &&
+     (_hlErro.canal||'')===(anCanal||'') && (_hlErro.q||'')===_qAn()){ avisoHistFalhou(_hlErro); return; }
   if(!HLIN || HLIN._de!==iv.de || HLIN._ate!==iv.ate || (HLIN._canal||'')!==(anCanal||'') || (HLIN._q||'')!==_qAn()){
     tb.innerHTML='<tr><td class="dim" style="padding:14px">⏳ carregando as vendas do histórico…</td></tr>';
     if(inf) inf.textContent='';
@@ -793,7 +794,7 @@ async function carregarLinhasHist(de, ate, pagina){
     const _q = String(anSku||'').trim();
   /* Codex (P2, PR#132 r2): o botão "tentar de novo" lia HLIN, que só é atualizado quando dá
      CERTO — falhar a página 2 fazia o botão repetir a página 1. Guardo o que foi TENTADO. */
-  _hlUltima = { de, ate, pagina: (pagina||1) };
+  _hlUltima = { de, ate, pagina: (pagina||1), canal: (anCanal||''), q: (_q.length>=2?_q:'') };
     const r = await fetch(MOD+'/historico-linhas?de='+de+'&ate='+ate+'&pagina='+(pagina||1)+'&lim=200'+(anCanal?('&canal='+encodeURIComponent(anCanal)):'')+(_q.length>=2?('&q='+encodeURIComponent(_q)):''), {credentials:'same-origin'});
     const d = await r.json().catch(()=>null);
     if(!(d && d.ok)) avisoHistFalhou((d&&d.erro)?String(d.erro):'');
@@ -810,8 +811,13 @@ async function carregarLinhasHist(de, ate, pagina){
 /* Codex (P2, PR#131): o aviso só ia pra tabela — no celular a tabela está escondida e quem
    aparece são os cartões, que ficavam com o resultado ANTIGO e nenhum sinal de falha. */
 function avisoHistFalhou(msg){
-  _hlErro = msg || '';
-  const txt = '⚠ não consegui carregar a lista do histórico agora'+(msg?(' ('+esc(msg)+')'):'')+' — tente de novo';
+  /* Codex (P2, PR#132 r6): o erro era GLOBAL — falhar no canal X e voltar pro filtro anterior
+     (que já estava carregado) mantinha o aviso por cima de resultados válidos. O estado agora
+     guarda A QUAL consulta a falha pertence, e só bloqueia essa. */
+  if(typeof msg === 'object' && msg) _hlErro = msg;
+  else _hlErro = Object.assign({ msg: msg || '' }, _hlUltima || {});
+  const _m = (_hlErro && _hlErro.msg) || '';
+  const txt = '⚠ não consegui carregar a lista do histórico agora'+(_m?(' ('+esc(_m)+')'):'')+' — tente de novo';
   const bt = '<button class="chip" style="margin-left:8px" onclick="repetirHist()">↻ tentar de novo</button>';
   const tb=$('tAnalise'); if(tb) tb.innerHTML='<tr><td class="dim" style="padding:14px">'+txt+bt+'</td></tr>';
   const cd=document.getElementById('anCards'); if(cd) cd.innerHTML='<div class="dim" style="padding:14px">'+txt+bt+'</div>';
@@ -824,8 +830,8 @@ function repetirHist(){
   /* Codex (P2, PR#132 r5): NÃO limpar o erro aqui — entre o clique e a resposta, qualquer
      render (o garantirNomes que voltou, por exemplo) passaria pelo guard e repintaria a
      página velha como se tivesse voltado. O estado só cai no SUCESSO da nova consulta. */
-  const u = _hlUltima || { de: iv.de, ate: iv.ate, pagina: 1 };
-  carregarLinhasHist(u.de, u.ate, u.pagina);
+  const u = _hlErro || _hlUltima || { de: iv.de, ate: iv.ate, pagina: 1 };
+  carregarLinhasHist(u.de, u.ate, u.pagina||1);
 }
 function histIrPagina(n){
   if(!HLIN) return;
