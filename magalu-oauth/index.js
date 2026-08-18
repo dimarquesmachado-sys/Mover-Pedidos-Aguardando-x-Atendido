@@ -405,9 +405,26 @@ async function tratar(req, res, urlObj) {
 
       const url = (t) => '/magalu/nf-full/arquivo?nome=' + encodeURIComponent(novoArq.nome) + '&tipo=' + t + '&novas=' + emp3 + '&k=' + encodeURIComponent(q.get('k') || '');
 
+      // Hora da ULTIMA RODADA que deu certo pra esta empresa — inclusive quando
+      // o resultado foi "sem notas". A extensao usa isto pra saber se o robo
+      // esta saudavel: sem este campo, uma empresa que fica dias sem vender no
+      // Full (a GOOD faz 1-2 notas por rodada) acenderia alarme de "travou"
+      // so porque nao ha pacote novo pra baixar.
+      let verificadoEm = null, verificadoVazio = false;
+      try {
+        const estAtual = nfLerEstado();
+        const linhaEmp = estAtual && Array.isArray(estAtual.resultado)
+          ? estAtual.resultado.find(x => x && x.empresa === emp3) : null;
+        if (linhaEmp && linhaEmp.ok && estAtual.fim) {
+          verificadoEm = estAtual.fim;
+          verificadoVazio = Boolean(linhaEmp.vazio);
+        }
+      } catch (e) {}
+
       json(res, 200, {
         ok: true, empresa: emp3, versao: VERSAO,
         arquivo: novoArq.nome, baixado_em: novoArq.em, notas: novoArq.notas,
+        verificado_em: verificadoEm, sem_notas_no_periodo: verificadoVazio,
         saida_no_arquivo: tS, entrada_no_arquivo: tE,
         novas: nS.length,              // compatibilidade com a extensao 1.0.5
         novas_saida: nS.length,
@@ -608,7 +625,9 @@ No painel aparece o andamento.
                   + '<div class="tit">Última busca — ' + new Date(est.fim).toLocaleString('pt-BR') + '</div>'
                   + '<div style="font-size:13px;color:#9aa0a6">'
                   + (est.erro ? 'Erro: ' + est.erro : (est.resultado || []).map(x =>
-                      (x.empresa === 'good' ? 'GOOD' : 'AMB') + ': ' + (x.ok ? '✓ ' + (x.notas ? (x.notas.saida + ' saída / ' + x.notas.entrada + ' entrada') : 'ok') : '✗ ' + x.erro)
+                      (x.empresa === 'good' ? 'GOOD' : 'AMB') + ': ' + (x.ok
+                        ? (x.vazio ? '— sem notas no período' : '✓ ' + (x.notas ? (x.notas.saida + ' saída / ' + x.notas.entrada + ' entrada') : 'ok'))
+                        : '✗ ' + x.erro)
                     ).join('<br>'))
                   + '</div></div>';
       }
@@ -1964,6 +1983,14 @@ async function nfPedirLink(empresa, dIni, dFim) {
     // O 504 (Gateway Timeout) aparece quando a Magalu demora a gerar o pacote
     // no horario de pico — mesma natureza do 408/503, entao tambem insistimos
     // em vez de abortar a rodada (era o que travava a GOOD em 17/08).
+    // 404 = a Magalu nao tem pacote pro periodo (o seller nao vendeu nada no
+    // Full naquela janela). NAO e erro: e resultado vazio. Marco com uma flag
+    // pra quem chamou registrar como "sem notas" em vez de disparar alarme.
+    if (r.status === 404) {
+      const vazio = new Error('sem notas no periodo (a Magalu respondeu 404)');
+      vazio.semNotas = true;
+      throw vazio;
+    }
     if (r.status !== 408 && r.status !== 429 && r.status !== 502 && r.status !== 503 && r.status !== 504) {
       throw new Error('a Magalu respondeu ' + r.status + ': ' + txt.slice(0, 200));
     }
@@ -2098,8 +2125,16 @@ async function nfRotina(origem, quais) {
       resultado.push(linha);
       console.log('[magalu-nf] (' + origem + ') ' + emp + ': ' + nome + ' (' + buf.length + ' bytes, periodo ' + de + ' a ' + ate + ')');
     } catch (e) {
-      resultado.push({ empresa: emp, ok: false, erro: String(e.message || e) });
-      console.error('[magalu-nf] (' + origem + ') ' + emp + ' FALHOU:', e.message);
+      // "sem notas no periodo" nao e falha: o seller so nao vendeu no Full
+      // naquela janela. Registro como ok com vazio=true pra a extensao nao
+      // acender alerta vermelho por uma rotina normal.
+      if (e && e.semNotas) {
+        resultado.push({ empresa: emp, ok: true, vazio: true, notas: { saida: 0, entrada: 0 } });
+        console.log('[magalu-nf] (' + origem + ') ' + emp + ': sem notas no periodo ' + de + ' a ' + ate);
+      } else {
+        resultado.push({ empresa: emp, ok: false, erro: String(e.message || e) });
+        console.error('[magalu-nf] (' + origem + ') ' + emp + ' FALHOU:', e.message);
+      }
     }
     // espaco entre empresas: o endpoint devolve 429 se chamar em sequencia
     if (emp !== lista[lista.length - 1]) await new Promise(r => setTimeout(r, 120000));   // 2 min: as duas empresas disputam o mesmo orcamento de IP
