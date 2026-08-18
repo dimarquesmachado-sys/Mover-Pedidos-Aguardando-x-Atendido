@@ -9,6 +9,7 @@
 //    /historico-linhas — a lista paginada do mesmo período, filtrada no servidor
 //    /previsao-vendas  — projeção por SKU
 //    /buscar-pedido    — busca de um pedido e seu lucro
+//    /buscar-lucro     — busca GLOBAL no Supabase (qualquer data), agrupada por pedido
 //
 //  ⚠️ CUIDADO AO MEXER: é este arquivo que decide faturamento, custo, imposto e
 //  M.C. dos períodos longos. Qualquer alteração aqui tem que ser conferida contra
@@ -472,6 +473,141 @@ function rotasHistorico(ctx) {
         }
       }
       json(res, 200, { ok: pedidos.length > 0 || notas.length > 0, via, q, pedidos, notas });
+      return true;
+    }
+
+    // 🔎 BUSCA GLOBAL DE PEDIDO E LUCRO — qualquer data, direto no Supabase (18/08).
+    // O card do dashboard só filtrava a memória da página (cache de ~6 dias): pedido
+    // antigo dava "nada encontrado" mesmo existindo no histórico — caso real: TikTok
+    // 585044523947951326 de 15/07 (pedido 2200 da AMB, margem 87,77 no banco).
+    // q SÓ DÍGITOS casa numero_loja/sku por igualdade (e numero_pedido quando cabe em
+    // int4 — venda de marketplace tem 15-19 dígitos e estouraria a coluna, quebrando o
+    // or= inteiro); q com letras casa sku/descricao por ilike. Agrupa por pedido e
+    // devolve total e M.C. prontos do banco. Vírgula/parênteses/aspas saem do termo
+    // porque quebram a sintaxe do or=() do PostgREST.
+    if (method === 'GET' && p === '/amb-checkout-offline/buscar-lucro') {
+      const kB = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const sessB = validarSessao(req.headers['cookie']);
+      if (!((process.env.ADMIN_KEY && kB === process.env.ADMIN_KEY) || (sessB && ehAdmin(sessB)))) { json(res, 404, { error: 'not found' }); return true; }
+      const qB = String((urlObj.searchParams && urlObj.searchParams.get('q')) || '').trim().slice(0, 60);
+      if (qB.length < 2) { json(res, 400, { ok: false, erro: 'use ?q= com 2+ caracteres' }); return true; }
+      const ckB = 'bq|' + qB.toLowerCase();
+      if (_histCache[ckB] && (Date.now() - _histCache[ckB].ts) < 120000) { json(res, 200, Object.assign({ cache: true }, _histCache[ckB].dados)); return true; }
+      // Codex (P2, PR#128 r5): eu APAGAVA vírgula/parênteses/aspas do termo — "Kit (10 unidades)"
+      // virava "Kit 10 unidades" e deixava de casar com o texto gravado, enquanto a busca em
+      // memória (que não mexe no termo) continuava achando. Agora o termo vai INTEIRO, entre
+      // aspas duplas, que é como o PostgREST aceita valor com vírgula/parêntese; só a aspa e a
+      // contrabarra precisam de escape dentro delas. Sobra o controle de tamanho e de brancos.
+      const limpoB = qB.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim();
+      if (!limpoB) { json(res, 400, { ok: false, erro: 'termo inválido' }); return true; }
+      const citaB = v => '"' + String(v).replace(/([\\"])/g, '\\$1') + '"';   // valor citado do PostgREST
+      const { url: uB, key: kkB } = supaCfg('amb');
+      if (!uB || !kkB) { json(res, 500, { ok: false, erro: 'Supabase não configurado' }); return true; }
+      const HB = { apikey: kkB, Authorization: 'Bearer ' + kkB };
+      // Codex (P1, PR#128): casar por SKU/descrição numa venda MULTI-ITEM devolvia só as
+      // linhas que casaram — e a soma delas era apresentada como o total do PEDIDO,
+      // subestimando receita e margem. Agora em DUAS FASES: (1) descobrir QUAIS pedidos
+      // casam; (2) buscar TODAS as linhas desses pedidos e só então agregar.
+      // Codex (P2, PR#128): termo numérico também busca por SUBSTRING em sku/descrição
+      // (a UI promete "SKU · parte do título" — fragmento tipo "2200" de lumens sumia).
+      // Os EXATOS (nº do pedido / venda do marketplace) vêm numa consulta separada e
+      // entram PRIMEIRO na lista — 15 achados recentes por título nunca expulsam o
+      // pedido exato que motivou a busca.
+      const baseB = uB.replace(/\/+$/, '') + '/rest/v1/vendas_historico?empresa=eq.amb';
+      const eqB = encodeURIComponent(citaB(limpoB));            // valor exato, citado
+      // Codex (P2, PR#128 r6): `_` `%` `*` no termo viravam CORINGA do ilike — SKU "ABC_1"
+      // casava "ABCX1" e o lixo podia empurrar o SKU pedido pra fora das 400 linhas lidas.
+      // A busca em memória trata esses caracteres ao pé da letra; aqui passa a tratar também.
+      const likeB = encodeURIComponent(citaB('*' + limpoB.replace(/([\\%_*])/g, '\\$1') + '*'));
+      const achouB = new Set();
+      // Codex (P2, PR#128 r5): antes eu SÓ consultava sku/descrição se a fase de
+      // identificadores não tivesse enchido as 15 vagas — buscar "ML" devolvia 15 pedidos
+      // ML-… e nenhum produto, contrariando o "SKU · parte do título" que a tela promete.
+      // Agora as três classes SEMPRE são consultadas e a cota é dividida na hora de montar:
+      // exatos primeiro (assento garantido), depois id-fuzzy e produto se revezando.
+      const puxaNums = async (filtro, lim) => {
+        const out = [];
+        const rN = await fetch(baseB + filtro + '&select=numero_pedido&order=data_venda.desc,numero_pedido.desc&limit=' + lim, { headers: HB });
+        if (!rN.ok) throw new Error('Supabase HTTP ' + rN.status);
+        const ln = await rN.json().catch(() => []);
+        for (const l of (Array.isArray(ln) ? ln : [])) {
+          const nk = l && l.numero_pedido != null ? String(l.numero_pedido) : '';
+          if (nk && !out.includes(nk)) out.push(nk);
+          if (out.length >= 60) break;
+        }
+        return out;
+      };
+      const numsB = [];
+      const juntaB = nk => { if (nk && !achouB.has(nk) && numsB.length < 15) { achouB.add(nk); numsB.push(nk); } };
+      let linhasB = [];
+      try {
+        // Codex r4: numero_pedido é TEXT no schema (o backfill grava 'ML-…'), então eq com
+        // número longo é seguro — o guard de 9 dígitos só impedia achar pedido de nº comprido.
+        const exatosB = await puxaNums('&or=(numero_pedido.eq.' + eqB + ',numero_loja.eq.' + eqB + ')', 200);
+        // Codex (P2, PR#128 r5): venda marketplace-only de CARRINHO grava numero_pedido='ML-<oid>'
+        // e numero_loja=<pack_id> — digitar o ID nativo do pedido não casava em NENHUM eq. A
+        // substring em numero_pedido resolve (e vale pro ID da Amazon com hífen também).
+        const idFuzzyB = await puxaNums('&or=(numero_pedido.ilike.' + likeB + ',numero_loja.ilike.' + likeB + ')', 300);
+        const prodB = await puxaNums('&or=(sku.ilike.' + likeB + ',descricao.ilike.' + likeB + ')', 400);
+        for (const nk of exatosB) juntaB(nk);                       // exato tem assento garantido
+        for (let i = 0; i < Math.max(idFuzzyB.length, prodB.length) && numsB.length < 15; i++) {
+          if (i < prodB.length) juntaB(prodB[i]);                   // produto e id-fuzzy se revezam,
+          if (i < idFuzzyB.length) juntaB(idFuzzyB[i]);             // nenhuma classe fica zerada
+        }
+        if (numsB.length) {
+          const camposB = 'numero_pedido,numero_loja,canal,data_venda,sku,descricao,quantidade,valor_produto,valor_nota,custo,comissao,frete_vendedor,imposto,margem,credito_ml,uf';
+          const rB = await fetch(baseB + '&numero_pedido=in.(' + numsB.map(encodeURIComponent).join(',') + ')' +
+                     '&select=' + camposB + '&order=data_venda.desc,numero_pedido.desc,sku.asc&limit=1000', { headers: HB });
+          if (!rB.ok) { json(res, 502, { ok: false, erro: 'Supabase HTTP ' + rB.status }); return true; }
+          linhasB = await rB.json().catch(() => []);
+          if (!Array.isArray(linhasB)) linhasB = [];
+        }
+      } catch (e) { json(res, 500, { ok: false, erro: String(e.message || e) }); return true; }
+      const r2c = v => Math.round((Number(v) || 0) * 100) / 100;
+      // Codex (P1, PR#128 r2): o historico-longo REPÕE o custo cadastrado depois do backfill
+      // e RECALCULA o imposto com a alíquota atual do mês — a busca agregava os valores
+      // CONGELADOS da linha e a M.C. divergia dos cards pro MESMO pedido. Mesma normalização.
+      const _ccB = readJson(path.join(CACHE_DIR, '_custos.json'), {});
+      const _cuB = sk => { const c = _ccB[String(sk || '').trim()]; return (c && c.custo != null && isFinite(Number(c.custo))) ? Number(c.custo) : null; };
+      const _cfgB = readJson(path.join(CACHE_DIR, '_config-fiscal.json'), { aliquotas: {} });
+      const _aliqB = mes => {
+        const a = _cfgB.aliquotas && _cfgB.aliquotas[mes];
+        if (a != null && isFinite(Number(a))) return Number(a);
+        return (DEFAULT_ALIQ_BK && DEFAULT_ALIQ_BK[mes] != null) ? Number(DEFAULT_ALIQ_BK[mes]) : null;
+      };
+      const porPed = new Map();
+      for (const l of linhasB) {
+        const nk = String(l.numero_pedido || '(sem número)');
+        let g = porPed.get(nk);
+        if (!g) { g = { numero: nk, numero_loja: l.numero_loja || null, canal: l.canal || null, data: String(l.data_venda || '').slice(0, 10), uf: l.uf || null, itens: [], vprod: 0, vnota: 0, custo: 0, comissao: 0, frete: 0, imposto: 0, credito: 0, mc: 0, mc_incompleta: false, sem_custo: false }; porPed.set(nk, g); }
+        const qLn = Number(l.quantidade) || 0, vnLn = Number(l.valor_nota) || 0;
+        let cuLn = (l.custo == null ? null : Number(l.custo));
+        if (cuLn == null) { const cx = _cuB(l.sku); if (cx != null) cuLn = cx * qLn; }
+        const _imGravB = Number(l.imposto) || 0;
+        let imLn = _imGravB;
+        { const _aq = _aliqB(String(l.data_venda || '').slice(0, 7));
+          if (_aq != null && vnLn > 0) { const _novo = Math.round(vnLn * _aq / 100 * 100) / 100;
+            if (Math.abs(_novo - _imGravB) > 0.005) imLn = _novo; } }
+        let mgLn = (l.margem == null ? null : Number(l.margem));
+        if (mgLn != null) mgLn -= (imLn - _imGravB);                       // imposto recalculado: a margem acompanha
+        if (mgLn != null && l.custo == null && cuLn != null) mgLn -= cuLn;  // margem gravada sem custo: desconta o reposto
+        g.itens.push({ sku: l.sku || '', descricao: l.descricao || '', qtd: qLn });
+        g.vprod = r2c(g.vprod + (Number(l.valor_produto) || 0));
+        g.vnota = r2c(g.vnota + vnLn);
+        if (cuLn != null) g.custo = r2c(g.custo + cuLn); else g.sem_custo = true;
+        g.comissao = r2c(g.comissao + (Number(l.comissao) || 0));
+        g.frete = r2c(g.frete + (Number(l.frete_vendedor) || 0));
+        g.imposto = r2c(g.imposto + imLn);
+        g.credito = r2c(g.credito + (Number(l.credito_ml) || 0));
+        if (mgLn == null) g.mc_incompleta = true; else g.mc = r2c(g.mc + mgLn);
+      }
+      // Codex (P1, PR#128): o historico-longo soma o credito_ml na margem — aqui a M.C.
+      // saía sem o crédito e o detalhamento não reconciliava. Mesma regra dos cards agora.
+      const pedidosB = numsB.map(nk => porPed.get(nk)).filter(Boolean).slice(0, 15)
+        .map(g => Object.assign({}, g, { mc: g.mc_incompleta ? null : Math.round((g.mc + g.credito) * 100) / 100 }));
+      const dadosB = { ok: true, q: qB, pedidos: pedidosB, linhas_lidas: linhasB.length, pedidos_achados: porPed.size };
+      _histCache[ckB] = { ts: Date.now(), dados: dadosB };
+      json(res, 200, dadosB);
       return true;
     }
 

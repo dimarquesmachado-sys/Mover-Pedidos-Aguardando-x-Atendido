@@ -397,7 +397,7 @@ const MOD = '/amb-checkout-offline';
     return _f(u, o);
   };
 })();
-const DASH_BUILD = 'a21';
+const DASH_BUILD = 'a22';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -507,7 +507,7 @@ function prepararVendas(){
   // se o mesmo numero_loja ainda não estiver no histórico (sem contagem dupla).
   const _nljs = new Set((DADOS||[]).map(h=>String(h.numero_loja||'')).filter(Boolean));
   SINT = (VENDAS||[]).filter(v=>v&&((v.numero!=null&&!_nums.has(String(v.numero)))||(v.sem_bling&&v.numero==null&&v.numero_loja&&!_nljs.has(String(v.numero_loja))))).map(v=>({
-    sintetico:true, id:'s'+v.id, numero:v.numero, numero_loja:v.numero_loja||'', marketplace:v.marketplace||'outro',
+    sintetico:true, id:'s'+v.id, numero:v.numero, numero_loja:v.numero_loja||'', ml_pack:(v.pack_id||v.ml_pack||null), marketplace:v.marketplace||'outro',   /* Codex r6: o pack_id do cache não chegava ao SINT — sem ele o dedup não reconhecia o mesmo pedido vindo do histórico como ML-<order_id> */
     venda_em:v.venda_em||null, nf_emissao:(v.nf_em||null), venda_dia:v.data||null, valor:(v.total!=null?Number(v.total):null), cliente:v.cliente||'',
     itens:(v.it||[]).map(i2=>({sku:i2.sku,descricao:(i2.d||null),qtd:i2.qtd,valor_total:i2.vt,custo:(i2.custo!=null?i2.custo:null)})), taxa_mkt:(v.taxa_mkt!=null?v.taxa_mkt:null), frete_mkt:(v.frete_mkt!=null?v.frete_mkt:null),
     tarifa_ml:(v.tarifa_ml!=null?v.tarifa_ml:null), frete_ml:((v.frete_ml!=null && Number(v.frete_ml)>0)?Number(v.frete_ml):null),   /* Codex: zero na sintetica fazia o agregado pular o motoboy do Flex */ credito_ml:(v.credito_ml!=null?v.credito_ml:null),   // b31: comissão/frete/estorno REAIS do ML (fase ml_real) — o calcPL prioriza estes sobre o Bling
@@ -2277,10 +2277,15 @@ function calcPL(h){
   const mc = completo? (rendaCanal!=null ? (rendaCanal-imposto-custo-frVparaMC+(credito||0)) : (rpEf-imposto-tarifa-custo-frVparaMC+(credito||0)+(freteRec||0))) : null;
   return {mes,ck,rp,rpEf,desconto,freteRec,rendaCanal,tot,frete,aliq,imposto,feeReal,feeBling,tx,tarifa,custo,cusUn,unTot,custoOk,frV,frFonte,credito,completo,mc,magFreteFonte,magFreteCopart};
 }
+let _bqTimer=null, _bqSeq=0;
+window._bhHist = {};
 function buscarPed(q){
   q = String(q||'').trim().toLowerCase();
   const res=$('buscaRes'), card=$('plCard'); card.innerHTML='';
-  if(q.length<2){ res.innerHTML=''; return; }
+  if(_bqTimer){ clearTimeout(_bqTimer); _bqTimer=null; }
+  /* Codex (P2, PR#128): fetch já em voo + input apagado = a resposta velha ainda passava
+     no teste de sequência e repovoava a tela vazia. Avança a sequência ANTES de sair. */
+  if(q.length<2){ _bqSeq++; res.innerHTML=''; return; }
   const hits = (DADOS||[]).concat(SINT||[]).filter(h=>{   // 27/07: buscava só nos bipados
     if(String(h.numero||'').toLowerCase()===q) return true;
     if(String(h.nf_numero||'').toLowerCase().includes(q)) return true;
@@ -2289,9 +2294,63 @@ function buscarPed(q){
     if(String(h.ml_order||'').toLowerCase().includes(q)) return true;  // ID do envio (2000017…) — acha por qualquer um dos dois
     return (h.itens||[]).some(it=> String(it.sku||'').toLowerCase().includes(q) || String(it.descricao||'').toLowerCase().includes(q));
   }).slice(0,15);
-  if(!hits.length){ res.innerHTML='<div class="dim" style="padding:8px">nada encontrado</div>'; return; }
-  res.innerHTML = '<table><tr><th title="dia da venda">Data</th><th title="número do pedido no Bling · ✓ verde = já bipado · ✓ laranja = aguardando bipagem · ✕ = cancelado">Pedido</th><th title="onde a venda aconteceu">Canal</th><th title="nome do comprador no marketplace">Cliente</th><th class="num" title="valor total do pedido">Total</th><th class="num" title="margem de contribuição do pedido: venda − imposto − comissão − frete − custo · clique no valor pra ver a conta aberta">💎 M.C.</th></tr>'+
-    hits.map(h=>'<tr><td class="dim">'+diaVenda(h)+'</td><td><b>'+esc(h.numero||h.id)+'</b>'+
+  _bqRender(q, hits, null);
+  /* 18/08: o card só olhava a memória da página (cache de ~6 dias + dia) — pedido antigo dava
+     "nada encontrado" mesmo existindo no histórico (caso real: TikTok 585044523947951326 de
+     15/07). Agora busca TAMBÉM no Supabase, com debounce, e mescla: qualquer data. */
+  const seq = ++_bqSeq;
+  _bqTimer = setTimeout(async ()=>{
+    /* Codex (P2, PR#128): falha de rede/auth/config virava "nada encontrado (nem no
+       histórico)" — afirmação definitiva ERRADA. Erro agora é estado próprio na tela. */
+    let hh=[], erroH=null;
+    try{
+      const r=await fetch(MOD+'/buscar-lucro?q='+encodeURIComponent(q),{credentials:'same-origin'});
+      const d=await r.json();
+      if(d&&d.ok&&Array.isArray(d.pedidos)) hh=d.pedidos;
+      else erroH=(d&&d.erro)?String(d.erro):('HTTP '+r.status);
+    }catch(e){ erroH=String((e&&e.message)||e); }
+    if(seq!==_bqSeq) return;   /* já digitou outra coisa — descarta resposta velha */
+    _bqRender(q, hits, hh, erroH);
+  }, 450);
+}
+function _bqRender(q, hits, hh, erroH){
+  const res=$('buscaRes');
+  /* Codex (P2, PR#128 r2): venda marketplace-only recente não tem `numero` (id sintético
+     sml:…) e no histórico vira "ML-123" — o dedup por numero não casava e a MESMA venda
+     aparecia 2×, gastando 2 das 15 vagas. O nº da venda no marketplace entra na chave. */
+  const vistos = new Set();
+  /* Codex (P2, PR#128 r6): em venda de CARRINHO do ML o cache guarda numero_loja=<order_id>
+     e pack_id=<pack>, enquanto o histórico guarda numero_pedido='ML-<order_id>' e
+     numero_loja=<pack>. Nenhuma das duas chaves casava e a venda saía repetida. Agora todos
+     os identificadores do lado local entram no conjunto, inclusive na forma 'ML-…'. */
+  for(const h of hits){
+    vistos.add(String(h.numero||h.id));
+    for(const v of [h.numero_loja, h.ml_pack, h.ml_order]){ if(v){ vistos.add('L:'+String(v)); vistos.add('ML-'+String(v)); } }
+  }
+  const dedupH = (hh||[]).filter(h=>!vistos.has(String(h.numero)) && !(h.numero_loja && vistos.has('L:'+String(h.numero_loja))));
+  /* Codex (P2, PR#128 r3): 15 hits locais FUZZY (substring de SKU/título) enchiam as vagas e o
+     corte descartava até o pedido EXATO vindo do histórico — "2200" com 15 descrições casando
+     nunca mostrava o pedido 2200 antigo. Exato do histórico agora tem assento garantido:
+     sai fuzzy local do fim, nunca um exato. Limite de 15 vale pro conjunto COMBINADO. */
+  const ehExH = h=>String(h.numero||'').toLowerCase()===q || String(h.numero_loja||'').toLowerCase()===q;
+  const exH = dedupH.filter(ehExH), fzH = dedupH.filter(h=>!ehExH(h));
+  let loc = hits;
+  if(exH.length && loc.length + exH.length > 15){
+    const ehExL = h=>[h.numero,h.numero_loja,h.ml_pack,h.ml_order].some(v=>String(v||'').toLowerCase()===q);
+    const locEx = loc.filter(ehExL), locFz = loc.filter(h=>!ehExL(h));
+    loc = locEx.concat(locFz).slice(0, Math.max(locEx.length, 15-exH.length));
+  }
+  const extra = exH.concat(fzH).slice(0, Math.max(0, 15-loc.length));
+  window._bhHist = {}; for(const h of extra) window._bhHist[String(h.numero)] = h;
+  if(!loc.length && !extra.length){
+    res.innerHTML = '<div class="dim" style="padding:8px">'+(hh===null
+      ? 'nada no cache recente — buscando no histórico…'
+      : (erroH ? '⚠ nada no cache recente, e o histórico está indisponível agora ('+esc(erroH)+') — tente de novo' : 'nada encontrado (nem no histórico)'))+'</div>';
+    return;
+  }
+  const dtBR = s => { const m=String(s||'').match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? (m[3]+'/'+m[2]) : ''; };
+    res.innerHTML = '<table><tr><th title="dia da venda">Data</th><th title="número do pedido no Bling · ✓ verde = já bipado · ✓ laranja = aguardando bipagem · ✕ = cancelado">Pedido</th><th title="onde a venda aconteceu">Canal</th><th title="nome do comprador no marketplace">Cliente</th><th class="num" title="valor total do pedido">Total</th><th class="num" title="margem de contribuição do pedido: venda − imposto − comissão − frete − custo · clique no valor pra ver a conta aberta">💎 M.C.</th></tr>'+
+    loc.map(h=>'<tr><td class="dim">'+diaVenda(h)+'</td><td><b>'+esc(h.numero||h.id)+'</b>'+
       (h.id?' <a class="lkB" href="https://www.bling.com.br/vendas.php#edit/'+esc(h.id)+'" target="_blank" rel="noopener" title="abrir o pedido no Bling" style="font-size:10px">Bling↗</a>':'')+
       /* d200: FALTAVA o link pro pedido dentro do marketplace — o Diego pediu, e a
          funcao linkMkt() ja existia e ja era usada na Analise. Era so nao estar aqui. */
@@ -2308,7 +2367,47 @@ function buscarPed(q){
         return '<td class="num"><a href="javascript:void(0)" onclick="abrirPL(\''+esc(h.id)+'\')" '+
                'style="text-decoration:none;font-weight:800" class="'+(P.mc>=0?'ok':'bad')+'" title="clique p/ ver a conta aberta">'+
                BRL(P.mc)+'</a>'+(pc!=null?('<div class="mut" style="font-size:10px">'+pc+'%</div>'):'')+'</td></tr>';
-      })()).join('')+'</table>';
+      })()).join('')+
+    extra.map(h=>{
+      const lm = linkMkt({marketplace:h.canal, numero_loja:h.numero_loja});
+      const pc = (h.mc!=null && h.vprod>0) ? Math.round(h.mc/h.vprod*100) : null;
+      return '<tr><td class="dim">'+dtBR(h.data)+'</td><td><b>'+esc(h.numero)+'</b>'+
+        (lm?' <a class="lkM" href="'+lm+'" target="_blank" rel="noopener" title="abrir esta venda no marketplace" style="font-size:10px">MKTP↗</a>':'')+
+        '<div class="desc mut" style="font-size:10px">📚 histórico'+(h.numero_loja?(' · venda '+esc(h.numero_loja)):'')+'</div>'+
+        /* Codex (P2, PR#128 r4): a descrição do produto saía na coluna CLIENTE — o histórico não
+           tem nome de comprador, e produto rotulado de cliente confunde. Desceu pro nº do pedido. */
+        ((h.itens&&h.itens[0]&&h.itens[0].descricao)?('<div class="desc" style="font-size:10px;max-width:260px">'+esc(h.itens[0].descricao)+(h.itens.length>1?(' +'+(h.itens.length-1)):'')+'</div>'):'')+'</td>'+
+        '<td>'+esc(h.canal||'')+'</td><td class="dim">—</td>'+
+        '<td class="num">'+(h.vnota!=null?BRL(Number(h.vnota)):'<span class="dim">—</span>')+'</td>'+
+        (h.mc==null
+          ? '<td class="num dim" title="alguma linha deste pedido está sem margem no histórico">—</td></tr>'
+          : '<td class="num"><a href="javascript:void(0)" onclick="abrirPLHist(\''+esc(h.numero)+'\')" style="text-decoration:none;font-weight:800" class="'+(h.mc>=0?'ok':'bad')+'" title="'+(h.sem_custo?'há item SEM custo no cadastro — margem parcial · ':'')+'clique p/ ver a conta do histórico">'+BRL(h.mc)+'</a>'+(pc!=null?('<div class="mut" style="font-size:10px">'+pc+'%</div>'):'')+'</td></tr>');
+    }).join('')+'</table>'+
+    (hh===null?'<div class="mut" style="font-size:11px;padding:6px 2px">buscando também no histórico…</div>'
+      : (erroH?'<div class="mut" style="font-size:11px;padding:6px 2px">⚠ histórico indisponível agora ('+esc(erroH)+') — mostrando só o período recente</div>':''));
+}
+function abrirPLHist(num){
+  const h = (window._bhHist||{})[String(num)]; if(!h) return;
+  const card=$('plCard');
+  const linha=(l,v)=>'<tr><td>'+l+'</td><td class="num">'+(v!=null?BRL(v):'<span class="dim">—</span>')+'</td></tr>';
+  card.innerHTML =
+    '<div class="sec" style="margin-top:12px;background:linear-gradient(160deg,#14201a,#131a30);border-color:#14b8a655">'+
+    '<h2>💎 Pedido '+esc(h.numero)+' · '+esc(h.canal||'')+' · '+esc(h.data||'')+
+    (h.numero_loja?' <span class="badge">venda '+esc(h.numero_loja)+'</span>':'')+
+    ' <span class="badge">📚 histórico</span></h2>'+
+    '<table>'+
+    linha('🏷️ Produtos', h.vprod)+
+    linha('🧾 Venda (NF)', h.vnota)+
+    linha('📦 Custo (−)', h.custo)+
+    linha('🏛️ Imposto (−)', h.imposto)+
+    linha('🏪 Tarifa (−)', h.comissao)+
+    linha('🚚 Frete vendedor (−)', h.frete)+
+    (h.credito? linha('↩️ Estorno/crédito (+)', h.credito) : '')+
+    linha('💎 M.C.', h.mc)+
+    '</table>'+
+    '<div class="mut" style="font-size:11px;margin-top:6px">'+(h.sem_custo?'⚠ há item sem custo cadastrado — margem parcial · ':'')+'números do histórico (Supabase) · itens: '+
+    esc((h.itens||[]).map(i=>i.sku+' ×'+i.qtd).join(' · '))+'</div>'+
+    '</div>';
 }
 async function abrirPL(id){
   const h = (DADOS||[]).concat(SINT||[]).find(x=>String(x.id)===String(id)); if(!h) return;   // 28/07: antes só achava os bipados
