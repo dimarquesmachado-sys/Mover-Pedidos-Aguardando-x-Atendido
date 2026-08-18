@@ -525,9 +525,15 @@ function rotasHistorico(ctx) {
         if (/^\d+$/.test(limpoB)) {
           const eqs = (limpoB.length <= 9 ? 'numero_pedido.eq.' + limpoB + ',' : '') + 'numero_loja.eq.' + limpoB;
           await puxaNums('&or=(' + eqs + ')', 200);
+        } else {
+          // Codex (P2, PR#128 r2): "ML-123" (como o backfill grava a venda marketplace-only)
+          // e ID da Amazon têm letra/hífen — o guard numérico pulava numero_pedido/numero_loja
+          // e o número MOSTRADO NA TELA não achava nada. ID não numérico também casa, sem caixa.
+          await puxaNums('&or=(numero_pedido.ilike.*' + termoB + '*,numero_loja.ilike.*' + termoB + '*)', 200);
         }
         if (numsB.length < 15) {
-          await puxaNums('&or=(sku.ilike.*' + termoB + '*,descricao.ilike.*' + termoB + '*)', 400);
+          // termo numérico também tenta FRAGMENTO do nº da venda (o filtro em memória faz includes)
+          await puxaNums('&or=(' + (/^\d+$/.test(limpoB) ? 'numero_loja.ilike.*' + termoB + '*,' : '') + 'sku.ilike.*' + termoB + '*,descricao.ilike.*' + termoB + '*)', 400);
         }
         if (numsB.length) {
           const camposB = 'numero_pedido,numero_loja,canal,data_venda,sku,descricao,quantidade,valor_produto,valor_nota,custo,comissao,frete_vendedor,imposto,margem,credito_ml,uf';
@@ -539,20 +545,42 @@ function rotasHistorico(ctx) {
         }
       } catch (e) { json(res, 500, { ok: false, erro: String(e.message || e) }); return true; }
       const r2c = v => Math.round((Number(v) || 0) * 100) / 100;
+      // Codex (P1, PR#128 r2): o historico-longo REPÕE o custo cadastrado depois do backfill
+      // e RECALCULA o imposto com a alíquota atual do mês — a busca agregava os valores
+      // CONGELADOS da linha e a M.C. divergia dos cards pro MESMO pedido. Mesma normalização.
+      const _ccB = readJson(path.join(CACHE_DIR, '_custos.json'), {});
+      const _cuB = sk => { const c = _ccB[String(sk || '').trim()]; return (c && c.custo != null && isFinite(Number(c.custo))) ? Number(c.custo) : null; };
+      const _cfgB = readJson(path.join(CACHE_DIR, '_config-fiscal.json'), { aliquotas: {} });
+      const _aliqB = mes => {
+        const a = _cfgB.aliquotas && _cfgB.aliquotas[mes];
+        if (a != null && isFinite(Number(a))) return Number(a);
+        return (DEFAULT_ALIQ_BK && DEFAULT_ALIQ_BK[mes] != null) ? Number(DEFAULT_ALIQ_BK[mes]) : null;
+      };
       const porPed = new Map();
       for (const l of linhasB) {
         const nk = String(l.numero_pedido || '(sem número)');
         let g = porPed.get(nk);
-        if (!g) { g = { numero: nk, numero_loja: l.numero_loja || null, canal: l.canal || null, data: String(l.data_venda || '').slice(0, 10), uf: l.uf || null, itens: [], vprod: 0, vnota: 0, custo: 0, comissao: 0, frete: 0, imposto: 0, credito: 0, mc: 0, mc_incompleta: false }; porPed.set(nk, g); }
-        g.itens.push({ sku: l.sku || '', descricao: l.descricao || '', qtd: Number(l.quantidade) || 0 });
+        if (!g) { g = { numero: nk, numero_loja: l.numero_loja || null, canal: l.canal || null, data: String(l.data_venda || '').slice(0, 10), uf: l.uf || null, itens: [], vprod: 0, vnota: 0, custo: 0, comissao: 0, frete: 0, imposto: 0, credito: 0, mc: 0, mc_incompleta: false, sem_custo: false }; porPed.set(nk, g); }
+        const qLn = Number(l.quantidade) || 0, vnLn = Number(l.valor_nota) || 0;
+        let cuLn = (l.custo == null ? null : Number(l.custo));
+        if (cuLn == null) { const cx = _cuB(l.sku); if (cx != null) cuLn = cx * qLn; }
+        const _imGravB = Number(l.imposto) || 0;
+        let imLn = _imGravB;
+        { const _aq = _aliqB(String(l.data_venda || '').slice(0, 7));
+          if (_aq != null && vnLn > 0) { const _novo = Math.round(vnLn * _aq / 100 * 100) / 100;
+            if (Math.abs(_novo - _imGravB) > 0.005) imLn = _novo; } }
+        let mgLn = (l.margem == null ? null : Number(l.margem));
+        if (mgLn != null) mgLn -= (imLn - _imGravB);                       // imposto recalculado: a margem acompanha
+        if (mgLn != null && l.custo == null && cuLn != null) mgLn -= cuLn;  // margem gravada sem custo: desconta o reposto
+        g.itens.push({ sku: l.sku || '', descricao: l.descricao || '', qtd: qLn });
         g.vprod = r2c(g.vprod + (Number(l.valor_produto) || 0));
-        g.vnota = r2c(g.vnota + (Number(l.valor_nota) || 0));
-        g.custo = r2c(g.custo + (Number(l.custo) || 0));
+        g.vnota = r2c(g.vnota + vnLn);
+        if (cuLn != null) g.custo = r2c(g.custo + cuLn); else g.sem_custo = true;
         g.comissao = r2c(g.comissao + (Number(l.comissao) || 0));
         g.frete = r2c(g.frete + (Number(l.frete_vendedor) || 0));
-        g.imposto = r2c(g.imposto + (Number(l.imposto) || 0));
+        g.imposto = r2c(g.imposto + imLn);
         g.credito = r2c(g.credito + (Number(l.credito_ml) || 0));
-        if (l.margem == null) g.mc_incompleta = true; else g.mc = r2c(g.mc + (Number(l.margem) || 0));
+        if (mgLn == null) g.mc_incompleta = true; else g.mc = r2c(g.mc + mgLn);
       }
       // Codex (P1, PR#128): o historico-longo soma o credito_ml na margem — aqui a M.C.
       // saía sem o crédito e o detalhamento não reconciliava. Mesma regra dos cards agora.

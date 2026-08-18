@@ -2315,8 +2315,12 @@ function buscarPed(q){
 }
 function _bqRender(q, hits, hh, erroH){
   const res=$('buscaRes');
-  const vistos = new Set(hits.map(h=>String(h.numero||h.id)));
-  const extra = (hh||[]).filter(h=>!vistos.has(String(h.numero))).slice(0, Math.max(0, 15-hits.length));
+  /* Codex (P2, PR#128 r2): venda marketplace-only recente não tem `numero` (id sintético
+     sml:…) e no histórico vira "ML-123" — o dedup por numero não casava e a MESMA venda
+     aparecia 2×, gastando 2 das 15 vagas. O nº da venda no marketplace entra na chave. */
+  const vistos = new Set();
+  for(const h of hits){ vistos.add(String(h.numero||h.id)); if(h.numero_loja) vistos.add('L:'+String(h.numero_loja)); }
+  const extra = (hh||[]).filter(h=>!vistos.has(String(h.numero)) && !(h.numero_loja && vistos.has('L:'+String(h.numero_loja)))).slice(0, Math.max(0, 15-hits.length));
   window._bhHist = {}; for(const h of extra) window._bhHist[String(h.numero)] = h;
   if(!hits.length && !extra.length){
     res.innerHTML = '<div class="dim" style="padding:8px">'+(hh===null
@@ -2354,7 +2358,7 @@ function _bqRender(q, hits, hh, erroH){
         '<td class="num">'+(h.vnota!=null?BRL(Number(h.vnota)):'<span class="dim">—</span>')+'</td>'+
         (h.mc==null
           ? '<td class="num dim" title="alguma linha deste pedido está sem margem no histórico">—</td></tr>'
-          : '<td class="num"><a href="javascript:void(0)" onclick="abrirPLHist(\''+esc(h.numero)+'\')" style="text-decoration:none;font-weight:800" class="'+(h.mc>=0?'ok':'bad')+'" title="clique p/ ver a conta do histórico">'+BRL(h.mc)+'</a>'+(pc!=null?('<div class="mut" style="font-size:10px">'+pc+'%</div>'):'')+'</td></tr>');
+          : '<td class="num"><a href="javascript:void(0)" onclick="abrirPLHist(\''+esc(h.numero)+'\')" style="text-decoration:none;font-weight:800" class="'+(h.mc>=0?'ok':'bad')+'" title="'+(h.sem_custo?'há item SEM custo no cadastro — margem parcial · ':'')+'clique p/ ver a conta do histórico">'+BRL(h.mc)+'</a>'+(pc!=null?('<div class="mut" style="font-size:10px">'+pc+'%</div>'):'')+'</td></tr>');
     }).join('')+'</table>'+
     (hh===null?'<div class="mut" style="font-size:11px;padding:6px 2px">buscando também no histórico…</div>'
       : (erroH?'<div class="mut" style="font-size:11px;padding:6px 2px">⚠ histórico indisponível agora ('+esc(erroH)+') — mostrando só o período recente</div>':''));
@@ -2378,7 +2382,7 @@ function abrirPLHist(num){
     (h.credito? linha('↩️ Estorno/crédito (+)', h.credito) : '')+
     linha('💎 M.C.', h.mc)+
     '</table>'+
-    '<div class="mut" style="font-size:11px;margin-top:6px">números do histórico (Supabase) · itens: '+
+    '<div class="mut" style="font-size:11px;margin-top:6px">'+(h.sem_custo?'⚠ há item sem custo cadastrado — margem parcial · ':'')+'números do histórico (Supabase) · itens: '+
     esc((h.itens||[]).map(i=>i.sku+' ×'+i.qtd).join(' · '))+'</div>'+
     '</div>';
 }
