@@ -1995,13 +1995,17 @@ async function nfPedirLink(empresa, dIni, dFim) {
       if (j && j.signed_url) return { link: j.signed_url, expira: j.expires_on || null, historico };
       throw new Error('a Magalu respondeu 200 mas sem signed_url: ' + txt.slice(0, 200));
     }
-    // 408 = esta gerando | 429 = chamou rapido demais | 503 = instabilidade → insiste
-    if (r.status !== 408 && r.status !== 429 && r.status !== 503) {
+    // 408 = esta gerando | 429 = chamou rapido demais | 502/503/504 = timeout
+    // ou instabilidade da borda da Magalu → insiste (todos transitorios).
+    // O 504 (Gateway Timeout) aparece quando a Magalu demora a gerar o pacote
+    // no horario de pico — mesma natureza do 408/503, entao tambem insistimos
+    // em vez de abortar a rodada (era o que travava a GOOD em 17/08).
+    if (r.status !== 408 && r.status !== 429 && r.status !== 502 && r.status !== 503 && r.status !== 504) {
       throw new Error('a Magalu respondeu ' + r.status + ': ' + txt.slice(0, 200));
     }
   }
   const minutos = Math.round(esperas.reduce((a, b) => a + b, 0) / 60000);
-  const soGerando = historico.every(h => h === 408 || h === 503 || h === 429);
+  const soGerando = historico.every(h => h === 408 || h === 502 || h === 503 || h === 504 || h === 429);
   throw new Error('a Magalu nao devolveu o link em ' + esperas.length + ' tentativas ao longo de ~' + minutos + ' min (status: ' + historico.join(', ') + ')' +
     (soGerando ? '. Ela ainda esta GERANDO o pacote — a geracao continua la mesmo depois de eu desistir; espere alguns minutos e rode de novo, ou deixe a proxima rodada automatica pegar' : ''));
 }
