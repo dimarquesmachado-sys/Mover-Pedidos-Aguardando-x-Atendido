@@ -2242,9 +2242,22 @@ function _bqRender(q, hits, hh, erroH){
      aparecia 2×, gastando 2 das 15 vagas. O nº da venda no marketplace entra na chave. */
   const vistos = new Set();
   for(const h of hits){ vistos.add(String(h.numero||h.id)); if(h.numero_loja) vistos.add('L:'+String(h.numero_loja)); }
-  const extra = (hh||[]).filter(h=>!vistos.has(String(h.numero)) && !(h.numero_loja && vistos.has('L:'+String(h.numero_loja)))).slice(0, Math.max(0, 15-hits.length));
+  const dedupH = (hh||[]).filter(h=>!vistos.has(String(h.numero)) && !(h.numero_loja && vistos.has('L:'+String(h.numero_loja))));
+  /* Codex (P2, PR#128 r3): 15 hits locais FUZZY (substring de SKU/título) enchiam as vagas e o
+     corte descartava até o pedido EXATO vindo do histórico — "2200" com 15 descrições casando
+     nunca mostrava o pedido 2200 antigo. Exato do histórico agora tem assento garantido:
+     sai fuzzy local do fim, nunca um exato. Limite de 15 vale pro conjunto COMBINADO. */
+  const ehExH = h=>String(h.numero||'').toLowerCase()===q || String(h.numero_loja||'').toLowerCase()===q;
+  const exH = dedupH.filter(ehExH), fzH = dedupH.filter(h=>!ehExH(h));
+  let loc = hits;
+  if(exH.length && loc.length + exH.length > 15){
+    const ehExL = h=>[h.numero,h.numero_loja,h.ml_pack,h.ml_order].some(v=>String(v||'').toLowerCase()===q);
+    const locEx = loc.filter(ehExL), locFz = loc.filter(h=>!ehExL(h));
+    loc = locEx.concat(locFz).slice(0, Math.max(locEx.length, 15-exH.length));
+  }
+  const extra = exH.concat(fzH).slice(0, Math.max(0, 15-loc.length));
   window._bhHist = {}; for(const h of extra) window._bhHist[String(h.numero)] = h;
-  if(!hits.length && !extra.length){
+  if(!loc.length && !extra.length){
     res.innerHTML = '<div class="dim" style="padding:8px">'+(hh===null
       ? 'nada no cache recente — buscando no histórico…'
       : (erroH ? '⚠ nada no cache recente, e o histórico está indisponível agora ('+esc(erroH)+') — tente de novo' : 'nada encontrado (nem no histórico)'))+'</div>';
@@ -2252,7 +2265,7 @@ function _bqRender(q, hits, hh, erroH){
   }
   const dtBR = s => { const m=String(s||'').match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? (m[3]+'/'+m[2]) : ''; };
     res.innerHTML = '<table><tr><th title="dia da venda">Data</th><th title="número do pedido no Bling · ✓ verde = já bipado · ✓ laranja = aguardando bipagem · ✕ = cancelado">Pedido</th><th title="onde a venda aconteceu">Canal</th><th title="nome do comprador no marketplace">Cliente</th><th class="num" title="valor total do pedido">Total</th><th class="num" title="margem de contribuição do pedido: venda − imposto − comissão − frete − custo · clique no valor pra ver a conta aberta">💎 M.C.</th></tr>'+
-    hits.map(h=>'<tr><td class="dim">'+diaVenda(h)+'</td><td><b>'+esc(h.numero||h.id)+'</b>'+
+    loc.map(h=>'<tr><td class="dim">'+diaVenda(h)+'</td><td><b>'+esc(h.numero||h.id)+'</b>'+
       (h.id?' <a class="lkB" href="https://www.bling.com.br/vendas.php#edit/'+esc(h.id)+'" target="_blank" rel="noopener" title="abrir o pedido no Bling" style="font-size:10px">Bling↗</a>':'')+
       /* d200: FALTAVA o link pro pedido dentro do marketplace — o Diego pediu, e a
          funcao linkMkt() ja existia e ja era usada na Analise. Era so nao estar aqui. */
