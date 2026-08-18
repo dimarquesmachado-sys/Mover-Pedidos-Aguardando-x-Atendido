@@ -779,6 +779,7 @@ function renderPrevisao(){
 // 📚 LISTA do histórico, paginada por pedido (100 por página) — vem do banco, não do cache local
 let HLIN = null;            // {pedidos, pagina, total_paginas, total_pedidos}
 let _hlCarregando = false;
+let _hlUltima = null;   // última consulta TENTADA (não a última que deu certo) — é o que o ↻ repete
 /* termo em uso na lista do histórico (só conta com 2+ caracteres, igual ao servidor) */
 function _qAn(){ const t=String(anSku||'').trim(); return t.length>=2 ? t : ''; }
 /* digitar dispara uma consulta por tecla — 400ms de espera resolve */
@@ -800,6 +801,9 @@ async function carregarLinhasHist(de, ate, pagina){
        navegador e, no período longo (Mês/Ano), a lista vinha paginada do banco: digitar o
        número de um pedido antigo não filtrava nada. Agora vale pro período inteiro. */
     const _q = String(anSku||'').trim();
+  /* Codex (P2, PR#132 r2): o botão "tentar de novo" lia HLIN, que só é atualizado quando dá
+     CERTO — falhar a página 2 fazia o botão repetir a página 1. Guardo o que foi TENTADO. */
+  _hlUltima = { de, ate, pagina: (pagina||1) };
     const r = await fetch(MOD+'/historico-linhas?de='+de+'&ate='+ate+'&pagina='+(pagina||1)+'&lim=200'+(anCanal?('&canal='+encodeURIComponent(anCanal)):'')+(_q.length>=2?('&q='+encodeURIComponent(_q)):''), {credentials:'same-origin'});
     const d = await r.json().catch(()=>null);
     if(!(d && d.ok)) avisoHistFalhou((d&&d.erro)?String(d.erro):'');
@@ -826,7 +830,8 @@ function avisoHistFalhou(msg){
 /* refaz a última consulta de lista do histórico (a que falhou) */
 function repetirHist(){
   const iv = anIntervalo();
-  carregarLinhasHist((HLIN&&HLIN._de)||iv.de, (HLIN&&HLIN._ate)||iv.ate, (HLIN&&HLIN.pagina)||1);
+  const u = _hlUltima || { de: iv.de, ate: iv.ate, pagina: 1 };
+  carregarLinhasHist(u.de, u.ate, u.pagina);
 }
 function histIrPagina(n){
   if(!HLIN) return;
