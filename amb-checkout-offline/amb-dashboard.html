@@ -397,7 +397,7 @@ const MOD = '/amb-checkout-offline';
     return _f(u, o);
   };
 })();
-const DASH_BUILD = 'a25';
+const DASH_BUILD = 'a26';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -802,15 +802,24 @@ async function carregarLinhasHist(de, ate, pagina){
     const _q = String(anSku||'').trim();
     const r = await fetch(MOD+'/historico-linhas?de='+de+'&ate='+ate+'&pagina='+(pagina||1)+'&lim=200'+(anCanal?('&canal='+encodeURIComponent(anCanal)):'')+(_q.length>=2?('&q='+encodeURIComponent(_q)):''), {credentials:'same-origin'});
     const d = await r.json().catch(()=>null);
-    if(!(d && d.ok)){   /* 18/08: erro do servidor ficava invisível e a tela dizia "sem vendas no período" */
-      const _tb=$('tAnalise');
-      if(_tb) _tb.innerHTML='<tr><td class="dim" style="padding:14px">⚠ não consegui carregar a lista do histórico agora'+((d&&d.erro)?(' ('+esc(String(d.erro))+')'):'')+' — tente de novo</td></tr>';
-    }
+    if(!(d && d.ok)) avisoHistFalhou((d&&d.erro)?String(d.erro):'');
     if(d && d.ok){ HLIN = d; HLIN._de=de; HLIN._ate=ate; HLIN._canal=anCanal||''; HLIN._q=(_q.length>=2?_q:''); renderAnalise(); restaurarAncora();
       garantirNomes((d.pedidos||[]).map(function(o){ return {h:{itens:(o.itens||[])}}; }));   // títulos também no Mês/Ano
     }
-  }catch(e){}
+  }catch(e){
+    /* Codex (P2, PR#131): o catch estava VAZIO — servidor fora do ar ou conexão cortada deixava a
+       tela travada no "⏳ carregando" pra sempre, já que o render local não repinta mais. */
+    avisoHistFalhou(String((e&&e.message)||e));
+  }
   _hlCarregando = false;
+}
+/* Codex (P2, PR#131): o aviso só ia pra tabela — no celular a tabela está escondida e quem
+   aparece são os cartões, que ficavam com o resultado ANTIGO e nenhum sinal de falha. */
+function avisoHistFalhou(msg){
+  const txt = '⚠ não consegui carregar a lista do histórico agora'+(msg?(' ('+esc(msg)+')'):'')+' — tente de novo';
+  const tb=$('tAnalise'); if(tb) tb.innerHTML='<tr><td class="dim" style="padding:14px">'+txt+'</td></tr>';
+  const cd=document.getElementById('anCards'); if(cd) cd.innerHTML='<div class="dim" style="padding:14px">'+txt+'</div>';
+  const rp=document.getElementById('anRodape'); if(rp){ rp.style.display='none'; rp.innerHTML=''; }
 }
 function histIrPagina(n){
   if(!HLIN) return;
@@ -2871,7 +2880,11 @@ function renderAnalise(){
   const nLucro = LP.filter(x=>x.P.mc!=null&&x.P.mc>0&&!x.h._cancelado).length, nPrej = LP.filter(x=>x.P.mc!=null&&x.P.mc<0&&!x.h._cancelado).length;
   const nInc = LP.filter(x=>x.P.mc==null).length;
   const lpEl=$('anLPChips');
-  if(lpEl) lpEl.innerHTML =
+  /* Codex (P2, PR#131): no período longo a lista vem do banco e estes chips só mexiam na lista
+     LOCAL — clicar mudava o contador e não mudava uma linha da tabela. Enquanto o filtro não for
+     pro servidor, a tela diz a verdade em vez de oferecer um botão que não faz nada. */
+  if(_usaHist){ if(lpEl) lpEl.innerHTML = '<span class="mut" style="font-size:11.5px">Lucro/Prejuízo não filtram o período longo — a lista vem do banco</span>'; }
+  else if(lpEl) lpEl.innerHTML =
     '<button class="chip'+(anLP===''?' on':'')+'" onclick="anLP=\'\';anPage=0;renderAnalise()">Todos</button>'+
     '<button class="chip" style="'+(anLP==='lucro'?'background:#065f46;border-color:#065f46;color:#fff':'color:#34d399;border-color:#34d399')+'" onclick="anLP=\'lucro\';anPage=0;renderAnalise()">Lucro ('+nLucro+')</button>'+
     '<button class="chip" style="'+(anLP==='prej'?'background:#7f1d1d;border-color:#7f1d1d;color:#fff':'color:#f87171;border-color:#f87171')+'" onclick="anLP=\'prej\';anPage=0;renderAnalise()">Preju\u00edzo ('+nPrej+')</button>'+
@@ -2945,6 +2958,11 @@ function renderAnalise(){
       (rDev? mini('\ud83d\udd34 Devolu\u00e7\u00f5es', rDev+' <span style="font-size:10px;color:var(--mut)">'+(rDevAb?'('+rDevAb+' aberta'+(rDevAb>1?'s':'')+') · ':'')+'frete ret. '+BRL(rDevFrete)+'</span>', '#f87171') : '')+
     '</div>' + notaBateCard(rMn?rM:null, !!(anCanal || (anSku && String(anSku).trim()))) : '';
   })();
+  /* ⚠️ 18/08 — no período longo a tabela, os cartões e o PAGINADOR já foram pintados com as
+     vendas do banco pelo renderHistLinhas. Tudo que vem daqui pra baixo é a versão LOCAL (cache
+     de ~6 dias, vazio no Mês/Ano) e sobrescrevia os três — a tabela ficava "sem vendas no
+     período" e o rodapé do histórico sumia, sem como abrir a página 2 (Codex, PR#131). */
+  if(_usaHist) return;
   (function(){
     const rp = document.getElementById('anRodape'); if(!rp) return;
     { const lg=document.getElementById('anLegenda');
@@ -2961,9 +2979,6 @@ function renderAnalise(){
       (anPage<maxP?'<button class="chip" style="background:#1d4ed8;border-color:#1d4ed8;color:#fff;font-weight:700" onclick="anPage++;renderAnalise();document.getElementById(\'secAnalise\').scrollIntoView({behavior:\'smooth\'})">ver as pr\u00f3ximas '+Math.min(PAG, LP.length-(anPage+1)*PAG)+' \u2192</button>':'');
   })();
   garantirNomes(pagPL);   // busca os nomes que faltarem e redesenha
-  /* mesmo motivo da tabela: no período longo os cartões do celular já foram pintados com as
-     vendas do banco pelo renderHistLinhas — repintar aqui com a lista local (vazia) apagava. */
-  if(_usaHist) return;
   renderCardsVenda(pagPL.map(function(x){
     const h=x.h, P=x.P;
     // 29/07: canais como o TikTok não informam a hora da venda, e o cartão caía pra data — no
