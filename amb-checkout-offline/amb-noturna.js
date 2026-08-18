@@ -36,7 +36,7 @@ const hojeMenos = d => new Date(Date.now() - d * 864e5).toISOString().slice(0, 1
 
 function criarNoturna(ctx) {
   const { mlBillingSync, backfillVendas, mlSyncFees, varrerCancelados, canarioCron, podarExpedicao,
-          coletarDevolucoes, coletarCarteira, coletarAds, conferirMarketplaces, coletarFinanceiroTikTok, VERSAO, validarSessao, ehAdmin, json } = ctx;
+          coletarDevolucoes, coletarCarteira, coletarAds, conferirMarketplaces, coletarFinanceiroTikTok, completarTarifaTikTok, VERSAO, validarSessao, ehAdmin, json } = ctx;
   const dorme = ms => new Promise(r => setTimeout(r, ms));
 
   async function etapa(nome, fn) {
@@ -124,6 +124,21 @@ function criarNoturna(ctx) {
         if (!r || r.ok === false) throw new Error('coleta do TikTok falhou' + (r && r.erro ? ': ' + r.erro : ''));
         return r.pedidos_novos + ' pedido(s) novo(s) · ' + r.guardados + ' no total' +
                (r.nao_fecharam ? ' ⚠️ ' + r.nao_fecharam + ' não fecharam a identidade' : '');
+      });
+      await dorme(2000);
+    }
+
+    // 18/08 — corrige a tarifa do TikTok das vendas que JÁ liquidaram. Roda depois do
+    // backfill de propósito: o backfill grava a venda nova (com a tarifa do Bling, porque o
+    // extrato ainda não existe) e esta etapa volta nas antigas cujo extrato já saiu. Sem
+    // isso, a única correção era rodar o backfill do período inteiro de novo.
+    if (typeof completarTarifaTikTok === 'function') {
+      await etapa('completar tarifa do TikTok (45 dias)', async () => {
+        const r = await completarTarifaTikTok(45);
+        if (!r || r.ok === false) throw new Error((r && r.erro) || 'falhou');
+        if (r.falhas) throw new Error(r.falhas + ' linha(s) não atualizaram (de ' + r.linhas_atualizadas + ')');
+        return r.pedidos_corrigidos + ' pedido(s) corrigido(s) · R$ ' + r.tarifa_a_mais_reconhecida.toFixed(2) +
+               ' de tarifa reconhecida · ' + r.sem_financeiro_ainda + ' ainda sem extrato';
       });
       await dorme(2000);
     }
