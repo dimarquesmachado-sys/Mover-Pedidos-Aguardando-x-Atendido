@@ -513,7 +513,10 @@ function rotasHistorico(ctx) {
       // pedido exato que motivou a busca.
       const baseB = uB.replace(/\/+$/, '') + '/rest/v1/vendas_historico?empresa=eq.girassol';
       const eqB = encodeURIComponent(citaB(limpoB));            // valor exato, citado
-      const likeB = encodeURIComponent(citaB('*' + limpoB + '*'));   // substring, citada
+      // Codex (P2, PR#128 r6): `_` `%` `*` no termo viravam CORINGA do ilike — SKU "ABC_1"
+      // casava "ABCX1" e o lixo podia empurrar o SKU pedido pra fora das 400 linhas lidas.
+      // A busca em memória trata esses caracteres ao pé da letra; aqui passa a tratar também.
+      const likeB = encodeURIComponent(citaB('*' + limpoB.replace(/([\\%_*])/g, '\\$1') + '*'));
       const achouB = new Set();
       // Codex (P2, PR#128 r5): antes eu SÓ consultava sku/descrição se a fase de
       // identificadores não tivesse enchido as 15 vagas — buscar "ML" devolvia 15 pedidos
