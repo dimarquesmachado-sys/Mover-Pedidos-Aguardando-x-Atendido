@@ -389,7 +389,7 @@ const MOD = '/girassol-backup-offline';
     return _f(u, o);
   };
 })();
-const DASH_BUILD = 'd213';
+const DASH_BUILD = 'd214';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -566,7 +566,7 @@ function renderCardsVenda(lista){
 function renderHistLinhas(iv){
   const tb=$('tAnalise'), rp=document.getElementById('anRodape'), inf=$('anInfo');
   if(!tb) return;
-  if(!HLIN || HLIN._de!==iv.de || HLIN._ate!==iv.ate || (HLIN._canal||'')!==(anCanal||'')){
+  if(!HLIN || HLIN._de!==iv.de || HLIN._ate!==iv.ate || (HLIN._canal||'')!==(anCanal||'') || (HLIN._q||'')!==_qAn()){
     tb.innerHTML='<tr><td class="dim" style="padding:14px">⏳ carregando as vendas do histórico…</td></tr>';
     if(inf) inf.textContent='';
     if(rp) rp.style.display='none';
@@ -763,15 +763,27 @@ function renderPrevisao(){
 // 📚 LISTA do histórico, paginada por pedido (100 por página) — vem do banco, não do cache local
 let HLIN = null;            // {pedidos, pagina, total_paginas, total_pedidos}
 let _hlCarregando = false;
+/* termo em uso na lista do histórico (só conta com 2+ caracteres, igual ao servidor) */
+function _qAn(){ const t=String(anSku||'').trim(); return t.length>=2 ? t : ''; }
+/* digitar dispara uma consulta por tecla — 400ms de espera resolve */
+let _hlTimer=null;
+function pedirLinhasHist(de, ate, pagina){
+  if(_hlTimer) clearTimeout(_hlTimer);
+  _hlTimer = setTimeout(()=>{ carregarLinhasHist(de, ate, pagina); }, 400);
+}
 async function carregarLinhasHist(de, ate, pagina){
   if(_hlCarregando) return;
   _hlCarregando = true;
   try{
     // 29/07: 200 por página, igual ao filtro do dia — antes o histórico vinha de 100 em 100
     // 01/08: leva o CANAL escolhido — antes a lista do Mês/Ano ignorava o filtro
-    const r = await fetch(MOD+'/historico-linhas?de='+de+'&ate='+ate+'&pagina='+(pagina||1)+'&lim=200'+(anCanal?('&canal='+encodeURIComponent(anCanal)):''), {credentials:'same-origin'});
+    /* 18/08: o termo do campo 🔎 vai pro SERVIDOR — antes ele só filtrava a memória do
+       navegador e, no período longo (Mês/Ano), a lista vinha paginada do banco: digitar o
+       número de um pedido antigo não filtrava nada. Agora vale pro período inteiro. */
+    const _q = String(anSku||'').trim();
+    const r = await fetch(MOD+'/historico-linhas?de='+de+'&ate='+ate+'&pagina='+(pagina||1)+'&lim=200'+(anCanal?('&canal='+encodeURIComponent(anCanal)):'')+(_q.length>=2?('&q='+encodeURIComponent(_q)):''), {credentials:'same-origin'});
     const d = await r.json().catch(()=>null);
-    if(d && d.ok){ HLIN = d; HLIN._de=de; HLIN._ate=ate; HLIN._canal=anCanal||''; renderAnalise(); restaurarAncora();
+    if(d && d.ok){ HLIN = d; HLIN._de=de; HLIN._ate=ate; HLIN._canal=anCanal||''; HLIN._q=(_q.length>=2?_q:''); renderAnalise(); restaurarAncora();
       garantirNomes((d.pedidos||[]).map(function(o){ return {h:{itens:(o.itens||[])}}; }));   // títulos também no Mês/Ano
     }
   }catch(e){}
@@ -2795,7 +2807,7 @@ function renderAnalise(){
     const hOK = !!(HIST && HIST.de===iv.de && HIST.ate===iv.ate && HIST.totais);
     if(hOK){
       // garante a 1ª página das linhas do histórico
-      if(!HLIN || HLIN._de!==iv.de || HLIN._ate!==iv.ate || (HLIN._canal||'')!==(anCanal||'')){ carregarLinhasHist(iv.de, iv.ate, 1); }
+      if(!HLIN || HLIN._de!==iv.de || HLIN._ate!==iv.ate || (HLIN._canal||'')!==(anCanal||'') || (HLIN._q||'')!==_qAn()){ pedirLinhasHist(iv.de, iv.ate, 1); }
       // 01/08 — o resumo passa a RESPEITAR o filtro de canal. Antes mostrava sempre o total do
       // período inteiro (o servidor só mandava o agregado geral), então filtrar "MercadoLivre"
       // não mudava nada — e o resumo de cima discordava da lista de baixo.
@@ -2807,8 +2819,11 @@ function renderAnalise(){
         _rotuloT = '\ud83d\udcda Vendido \u00b7 '+esc(nomeCanal(anCanal));
       }
       if(anSku && String(anSku).trim()){
+        /* 18/08: este aviso dizia que a busca filtrava a LISTA — no período longo ela não
+           filtrava nem a lista (vinha paginada do banco). Agora filtra de verdade, e o texto
+           diz exatamente o que vale pra cada parte da tela. */
         _avisoT = '<div class="nota" style="margin-bottom:8px"><span class="warn">\u26a0 o resumo abaixo \u00e9 do '+
-          (anCanal?('canal '+esc(nomeCanal(anCanal))):'per\u00edodo')+' inteiro</span> \u2014 a busca por texto filtra a LISTA, mas n\u00e3o o resumo (ele vem somado do servidor).</div>';
+          (anCanal?('canal '+esc(nomeCanal(anCanal))):'per\u00edodo')+' inteiro</span> \u2014 a busca filtra a LISTA (no per\u00edodo todo, n\u00e3o s\u00f3 nesta p\u00e1gina), mas o resumo acima vem somado do servidor e ignora o termo.</div>';
       }
       const mini2=(l,v,c)=>'<div style="background:var(--card);border:1px solid var(--line);border-radius:9px;padding:7px 11px;min-width:96px"><div style="font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut)">'+l+'</div><div style="font-weight:800;font-size:14px'+(c?';color:'+c:'')+'">'+v+'</div></div>';
       el.innerHTML = _avisoT + '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px">'+
