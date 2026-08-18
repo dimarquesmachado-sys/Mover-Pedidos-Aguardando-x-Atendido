@@ -397,7 +397,7 @@ const MOD = '/amb-checkout-offline';
     return _f(u, o);
   };
 })();
-const DASH_BUILD = 'a22';
+const DASH_BUILD = 'a23';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -2332,7 +2332,11 @@ function _bqRender(q, hits, hh, erroH){
      corte descartava até o pedido EXATO vindo do histórico — "2200" com 15 descrições casando
      nunca mostrava o pedido 2200 antigo. Exato do histórico agora tem assento garantido:
      sai fuzzy local do fim, nunca um exato. Limite de 15 vale pro conjunto COMBINADO. */
-  const ehExH = h=>String(h.numero||'').toLowerCase()===q || String(h.numero_loja||'').toLowerCase()===q;
+  /* Codex (P2, PR#128 r9): o backend passou a achar o pedido de carrinho do ML pelo ID nativo,
+     mas ele volta como numero='ML-<id>' — a comparação crua não reconhecia isso como EXATO e o
+     pedido perdia o assento garantido pra 15 achados recentes de título. Compara sem o prefixo. */
+  const semPfx = v=>String(v||'').toLowerCase().replace(/^ml-/,'');
+  const ehExH = h=>semPfx(h.numero)===semPfx(q) || semPfx(h.numero_loja)===semPfx(q);
   const exH = dedupH.filter(ehExH), fzH = dedupH.filter(h=>!ehExH(h));
   let loc = hits;
   if(exH.length && loc.length + exH.length > 15){
