@@ -2366,8 +2366,11 @@ function _bqRender(q, hits, hh, erroH){
       const pc = (h.mc!=null && h.vprod>0) ? Math.round(h.mc/h.vprod*100) : null;
       return '<tr><td class="dim">'+dtBR(h.data)+'</td><td><b>'+esc(h.numero)+'</b>'+
         (lm?' <a class="lkM" href="'+lm+'" target="_blank" rel="noopener" title="abrir esta venda no marketplace" style="font-size:10px">MKTP↗</a>':'')+
-        '<div class="desc mut" style="font-size:10px">📚 histórico'+(h.numero_loja?(' · venda '+esc(h.numero_loja)):'')+'</div></td>'+
-        '<td>'+esc(h.canal||'')+'</td><td class="desc" style="max-width:200px">'+esc((h.itens&&h.itens[0]&&h.itens[0].descricao)||'')+'</td>'+
+        '<div class="desc mut" style="font-size:10px">📚 histórico'+(h.numero_loja?(' · venda '+esc(h.numero_loja)):'')+'</div>'+
+        /* Codex (P2, PR#128 r4): a descrição do produto saía na coluna CLIENTE — o histórico não
+           tem nome de comprador, e produto rotulado de cliente confunde. Desceu pro nº do pedido. */
+        ((h.itens&&h.itens[0]&&h.itens[0].descricao)?('<div class="desc" style="font-size:10px;max-width:260px">'+esc(h.itens[0].descricao)+(h.itens.length>1?(' +'+(h.itens.length-1)):'')+'</div>'):'')+'</td>'+
+        '<td>'+esc(h.canal||'')+'</td><td class="dim">—</td>'+
         '<td class="num">'+(h.vnota!=null?BRL(Number(h.vnota)):'<span class="dim">—</span>')+'</td>'+
         (h.mc==null
           ? '<td class="num dim" title="alguma linha deste pedido está sem margem no histórico">—</td></tr>'

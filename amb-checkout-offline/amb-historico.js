@@ -525,7 +525,7 @@ function rotasHistorico(ctx) {
       let linhasB = [];
       try {
         if (/^\d+$/.test(limpoB)) {
-          const eqs = (limpoB.length <= 9 ? 'numero_pedido.eq.' + limpoB + ',' : '') + 'numero_loja.eq.' + limpoB;
+          const eqs = 'numero_pedido.eq.' + limpoB + ',numero_loja.eq.' + limpoB;   // Codex r4: numero_pedido é TEXT no schema (o backfill grava 'ML-…'), então eq com número longo é seguro — o guard de 9 dígitos só impedia achar pedido de nº comprido
           await puxaNums('&or=(' + eqs + ')', 200);
         } else {
           // Codex (P2, PR#128 r2): "ML-123" (como o backfill grava a venda marketplace-only)

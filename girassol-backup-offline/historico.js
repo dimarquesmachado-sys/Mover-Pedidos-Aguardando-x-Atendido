@@ -523,7 +523,7 @@ function rotasHistorico(ctx) {
       let linhasB = [];
       try {
         if (/^\d+$/.test(limpoB)) {
-          const eqs = (limpoB.length <= 9 ? 'numero_pedido.eq.' + limpoB + ',' : '') + 'numero_loja.eq.' + limpoB;
+          const eqs = 'numero_pedido.eq.' + limpoB + ',numero_loja.eq.' + limpoB;   // Codex r4: numero_pedido é TEXT no schema (o backfill grava 'ML-…'), então eq com número longo é seguro — o guard de 9 dígitos só impedia achar pedido de nº comprido
           await puxaNums('&or=(' + eqs + ')', 200);
         } else {
           // Codex (P2, PR#128 r2): "ML-123" (como o backfill grava a venda marketplace-only)
@@ -536,7 +536,7 @@ function rotasHistorico(ctx) {
           await puxaNums('&or=(' + (/^\d+$/.test(limpoB) ? 'numero_loja.ilike.*' + termoB + '*,' : '') + 'sku.ilike.*' + termoB + '*,descricao.ilike.*' + termoB + '*)', 400);
         }
         if (numsB.length) {
-          const camposB = 'numero_pedido,numero_loja,canal,data_venda,sku,descricao,quantidade,valor_produto,valor_nota,custo,comissao,frete_vendedor,imposto,margem,credito_ml,uf';
+          const camposB = 'numero_pedido,numero_loja,canal,data_venda,sku,descricao,quantidade,valor_produto,valor_nota,custo,comissao,frete_vendedor,imposto,margem,uf';   // Codex r4: a GIRASSOL não tem credito_ml no vendas_historico (só a AMB grava/lê essa coluna) — selecioná-la faria o PostgREST responder 400 e TODA busca viraria 'histórico indisponível'
           const rB = await fetch(baseB + '&numero_pedido=in.(' + numsB.map(encodeURIComponent).join(',') + ')' +
                      '&select=' + camposB + '&order=data_venda.desc,numero_pedido.desc,sku.asc&limit=1000', { headers: HB });
           if (!rB.ok) { json(res, 502, { ok: false, erro: 'Supabase HTTP ' + rB.status }); return true; }
@@ -579,7 +579,7 @@ function rotasHistorico(ctx) {
         g.comissao = r2c(g.comissao + (Number(l.comissao) || 0));
         g.frete = r2c(g.frete + (Number(l.frete_vendedor) || 0));
         g.imposto = r2c(g.imposto + imLn);
-        g.credito = r2c(g.credito + (Number(l.credito_ml) || 0));
+        // (sem credito_ml aqui — ver comentário no camposB; g.credito fica 0 e a M.C. não soma crédito, igual ao resto do histórico da Girassol)
         if (mgLn == null) g.mc_incompleta = true; else g.mc = r2c(g.mc + mgLn);
       }
       // Codex (P1, PR#128): o historico-longo soma o credito_ml na margem — aqui a M.C.
