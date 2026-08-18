@@ -397,7 +397,7 @@ const MOD = '/amb-checkout-offline';
     return _f(u, o);
   };
 })();
-const DASH_BUILD = 'a25';
+const DASH_BUILD = 'a26';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -582,6 +582,10 @@ function renderCardsVenda(lista){
 function renderHistLinhas(iv){
   const tb=$('tAnalise'), rp=document.getElementById('anRodape'), inf=$('anInfo');
   if(!tb) return;
+  /* enquanto a última consulta estiver falhada, o aviso + ↻ mandam: repintar com o HLIN da
+     página anterior faria a queda parecer resolvida (Codex, PR#132 r4). */
+  if(_hlErro && _hlErro.de===iv.de && _hlErro.ate===iv.ate &&
+     (_hlErro.canal||'')===(anCanal||'') && (_hlErro.q||'')===_qAn()){ avisoHistFalhou(_hlErro); return; }
   if(!HLIN || HLIN._de!==iv.de || HLIN._ate!==iv.ate || (HLIN._canal||'')!==(anCanal||'') || (HLIN._q||'')!==_qAn()){
     tb.innerHTML='<tr><td class="dim" style="padding:14px">⏳ carregando as vendas do histórico…</td></tr>';
     if(inf) inf.textContent='';
@@ -779,7 +783,22 @@ function renderPrevisao(){
 // 📚 LISTA do histórico, paginada por pedido (100 por página) — vem do banco, não do cache local
 let HLIN = null;            // {pedidos, pagina, total_paginas, total_pedidos}
 let _hlCarregando = false;
+let _hlUltima = null;   // última consulta TENTADA (não a última que deu certo) — é o que o ↻ repete
+let _hlErro = null;     // Codex (P2, PR#132 r4): a falha era só pintura; qualquer render seguinte
+                        // (o garantirNomes que ainda estava em voo, por exemplo) repintava com o
+                        // HLIN antigo e a queda parecia ter se resolvido sozinha. Agora é ESTADO.
 /* termo em uso na lista do histórico (só conta com 2+ caracteres, igual ao servidor) */
+/* 18/08 (Diego): o link "Bling↗" abria .../vendas.php#edit/s26638909833 — com um "s" na frente
+   que o Bling não entende, e a página não abria. O "s" vem do id da linha SINTÉTICA (as vendas
+   que o checkout ainda não bipou nascem com id 's'+id pra não colidir com as bipadas). O link
+   precisa do id CRU. E venda que só existe no marketplace (id 'ml:123' / 'sml:123') não tem
+   pedido no Bling nenhum — nesses casos o link não deve aparecer. */
+function blingId(h){
+  if(!h || h.id==null) return null;
+  let v = String(h.id);
+  if(h.sintetico && v.charAt(0)==='s') v = v.slice(1);
+  return /^\d+$/.test(v) ? v : null;   // 'ml:123', 'sml:123' e afins não existem no Bling
+}
 function _qAn(){ const t=String(anSku||'').trim(); return t.length>=2 ? t : ''; }
 /* digitar dispara uma consulta por tecla — 400ms de espera resolve */
 let _hlTimer=null;
@@ -800,17 +819,46 @@ async function carregarLinhasHist(de, ate, pagina){
        navegador e, no período longo (Mês/Ano), a lista vinha paginada do banco: digitar o
        número de um pedido antigo não filtrava nada. Agora vale pro período inteiro. */
     const _q = String(anSku||'').trim();
+  /* Codex (P2, PR#132 r2): o botão "tentar de novo" lia HLIN, que só é atualizado quando dá
+     CERTO — falhar a página 2 fazia o botão repetir a página 1. Guardo o que foi TENTADO. */
+  _hlUltima = { de, ate, pagina: (pagina||1), canal: (anCanal||''), q: (_q.length>=2?_q:'') };
     const r = await fetch(MOD+'/historico-linhas?de='+de+'&ate='+ate+'&pagina='+(pagina||1)+'&lim=200'+(anCanal?('&canal='+encodeURIComponent(anCanal)):'')+(_q.length>=2?('&q='+encodeURIComponent(_q)):''), {credentials:'same-origin'});
     const d = await r.json().catch(()=>null);
-    if(!(d && d.ok)){   /* 18/08: erro do servidor ficava invisível e a tela dizia "sem vendas no período" */
-      const _tb=$('tAnalise');
-      if(_tb) _tb.innerHTML='<tr><td class="dim" style="padding:14px">⚠ não consegui carregar a lista do histórico agora'+((d&&d.erro)?(' ('+esc(String(d.erro))+')'):'')+' — tente de novo</td></tr>';
-    }
-    if(d && d.ok){ HLIN = d; HLIN._de=de; HLIN._ate=ate; HLIN._canal=anCanal||''; HLIN._q=(_q.length>=2?_q:''); renderAnalise(); restaurarAncora();
+    if(!(d && d.ok)) avisoHistFalhou((d&&d.erro)?String(d.erro):'');
+    if(d && d.ok){ _hlErro = null; HLIN = d; HLIN._de=de; HLIN._ate=ate; HLIN._canal=anCanal||''; HLIN._q=(_q.length>=2?_q:''); renderAnalise(); restaurarAncora();
       garantirNomes((d.pedidos||[]).map(function(o){ return {h:{itens:(o.itens||[])}}; }));   // títulos também no Mês/Ano
     }
-  }catch(e){}
+  }catch(e){
+    /* Codex (P2, PR#131): o catch estava VAZIO — servidor fora do ar ou conexão cortada deixava a
+       tela travada no "⏳ carregando" pra sempre, já que o render local não repinta mais. */
+    avisoHistFalhou(String((e&&e.message)||e));
+  }
   _hlCarregando = false;
+}
+/* Codex (P2, PR#131): o aviso só ia pra tabela — no celular a tabela está escondida e quem
+   aparece são os cartões, que ficavam com o resultado ANTIGO e nenhum sinal de falha. */
+function avisoHistFalhou(msg){
+  /* Codex (P2, PR#132 r6): o erro era GLOBAL — falhar no canal X e voltar pro filtro anterior
+     (que já estava carregado) mantinha o aviso por cima de resultados válidos. O estado agora
+     guarda A QUAL consulta a falha pertence, e só bloqueia essa. */
+  if(typeof msg === 'object' && msg) _hlErro = msg;
+  else _hlErro = Object.assign({ msg: msg || '' }, _hlUltima || {});
+  const _m = (_hlErro && _hlErro.msg) || '';
+  const txt = '⚠ não consegui carregar a lista do histórico agora'+(_m?(' ('+esc(_m)+')'):'')+' — tente de novo';
+  const bt = '<button class="chip" style="margin-left:8px" onclick="repetirHist()">↻ tentar de novo</button>';
+  const tb=$('tAnalise'); if(tb) tb.innerHTML='<tr><td class="dim" style="padding:14px">'+txt+bt+'</td></tr>';
+  const cd=document.getElementById('anCards'); if(cd) cd.innerHTML='<div class="dim" style="padding:14px">'+txt+bt+'</div>';
+  /* Codex (P2, PR#132): eu APAGAVA o paginador aqui — falhar a página 2 tirava justamente os
+     botões necessários pra tentar de novo, e só um F5 resolvia. O rodapé fica como está. */
+}
+/* refaz a última consulta de lista do histórico (a que falhou) */
+function repetirHist(){
+  const iv = anIntervalo();
+  /* Codex (P2, PR#132 r5): NÃO limpar o erro aqui — entre o clique e a resposta, qualquer
+     render (o garantirNomes que voltou, por exemplo) passaria pelo guard e repintaria a
+     página velha como se tivesse voltado. O estado só cai no SUCESSO da nova consulta. */
+  const u = _hlErro || _hlUltima || { de: iv.de, ate: iv.ate, pagina: 1 };
+  carregarLinhasHist(u.de, u.ate, u.pagina||1);
 }
 function histIrPagina(n){
   if(!HLIN) return;
@@ -2374,7 +2422,7 @@ function _bqRender(q, hits, hh, erroH){
   const dtBR = s => { const m=String(s||'').match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? (m[3]+'/'+m[2]) : ''; };
     res.innerHTML = '<table><tr><th title="dia da venda">Data</th><th title="número do pedido no Bling · ✓ verde = já bipado · ✓ laranja = aguardando bipagem · ✕ = cancelado">Pedido</th><th title="onde a venda aconteceu">Canal</th><th title="nome do comprador no marketplace">Cliente</th><th class="num" title="valor total do pedido">Total</th><th class="num" title="margem de contribuição do pedido: venda − imposto − comissão − frete − custo · clique no valor pra ver a conta aberta">💎 M.C.</th></tr>'+
     loc.map(h=>'<tr><td class="dim">'+diaVenda(h)+'</td><td><b>'+esc(h.numero||h.id)+'</b>'+
-      (h.id?' <a class="lkB" href="https://www.bling.com.br/vendas.php#edit/'+esc(h.id)+'" target="_blank" rel="noopener" title="abrir o pedido no Bling" style="font-size:10px">Bling↗</a>':'')+
+      (blingId(h)?' <a class="lkB" href="https://www.bling.com.br/vendas.php#edit/'+esc(blingId(h))+'" target="_blank" rel="noopener" title="abrir o pedido no Bling" style="font-size:10px">Bling↗</a>':'')+
       /* d200: FALTAVA o link pro pedido dentro do marketplace — o Diego pediu, e a
          funcao linkMkt() ja existia e ja era usada na Analise. Era so nao estar aqui. */
       (linkMkt(h)?' <a class="lkM" href="'+linkMkt(h)+'" target="_blank" rel="noopener" title="abrir esta venda no '+esc(nomeCanal(canalKey(h.marketplace)))+'" style="font-size:10px">MKTP↗</a>':'')+
@@ -2871,7 +2919,11 @@ function renderAnalise(){
   const nLucro = LP.filter(x=>x.P.mc!=null&&x.P.mc>0&&!x.h._cancelado).length, nPrej = LP.filter(x=>x.P.mc!=null&&x.P.mc<0&&!x.h._cancelado).length;
   const nInc = LP.filter(x=>x.P.mc==null).length;
   const lpEl=$('anLPChips');
-  if(lpEl) lpEl.innerHTML =
+  /* Codex (P2, PR#131): no período longo a lista vem do banco e estes chips só mexiam na lista
+     LOCAL — clicar mudava o contador e não mudava uma linha da tabela. Enquanto o filtro não for
+     pro servidor, a tela diz a verdade em vez de oferecer um botão que não faz nada. */
+  if(_usaHist){ if(lpEl) lpEl.innerHTML = '<span class="mut" style="font-size:11.5px">Lucro/Prejuízo não filtram o período longo — a lista vem do banco</span>'; }
+  else if(lpEl) lpEl.innerHTML =
     '<button class="chip'+(anLP===''?' on':'')+'" onclick="anLP=\'\';anPage=0;renderAnalise()">Todos</button>'+
     '<button class="chip" style="'+(anLP==='lucro'?'background:#065f46;border-color:#065f46;color:#fff':'color:#34d399;border-color:#34d399')+'" onclick="anLP=\'lucro\';anPage=0;renderAnalise()">Lucro ('+nLucro+')</button>'+
     '<button class="chip" style="'+(anLP==='prej'?'background:#7f1d1d;border-color:#7f1d1d;color:#fff':'color:#f87171;border-color:#f87171')+'" onclick="anLP=\'prej\';anPage=0;renderAnalise()">Preju\u00edzo ('+nPrej+')</button>'+
@@ -2945,11 +2997,24 @@ function renderAnalise(){
       (rDev? mini('\ud83d\udd34 Devolu\u00e7\u00f5es', rDev+' <span style="font-size:10px;color:var(--mut)">'+(rDevAb?'('+rDevAb+' aberta'+(rDevAb>1?'s':'')+') · ':'')+'frete ret. '+BRL(rDevFrete)+'</span>', '#f87171') : '')+
     '</div>' + notaBateCard(rMn?rM:null, !!(anCanal || (anSku && String(anSku).trim()))) : '';
   })();
+  /* ⚠️ 18/08 — no período longo a tabela, os cartões e o PAGINADOR já foram pintados com as
+     vendas do banco pelo renderHistLinhas. Tudo que vem daqui pra baixo é a versão LOCAL (cache
+     de ~6 dias, vazio no Mês/Ano) e sobrescrevia os três — a tabela ficava "sem vendas no
+     período" e o rodapé do histórico sumia, sem como abrir a página 2 (Codex, PR#131). */
+  /* Codex (P2, PR#132): este aviso ("não consegui buscar os nomes dos produtos") morava dentro do
+     bloco do rodapé LOCAL — com a saída nova ele nunca aparecia no período longo, e as linhas
+     ficavam sem descrição sem explicar por quê. Subiu pra antes da saída: vale nos dois modos. */
+  { const lg=document.getElementById('anLegenda');
+    if(lg){
+      if(_nomesErro){ if(lg.querySelectorAll('.avNome').length===0)
+        lg.insertAdjacentHTML('afterbegin','<span class="warn avNome" style="flex:1 1 100%">⚠ '+esc(_nomesErro)+'</span>'); }
+      /* Codex (P2, PR#132 r3): quando a busca dos nomes voltava a funcionar, o aviso antigo
+         continuava na tela dizendo que tinha falhado. Some junto com o erro. */
+      else lg.querySelectorAll('.avNome').forEach(function(x){ x.remove(); });
+    } }
+  if(_usaHist) return;
   (function(){
     const rp = document.getElementById('anRodape'); if(!rp) return;
-    { const lg=document.getElementById('anLegenda');
-      if(lg && _nomesErro && lg.querySelectorAll('.avNome').length===0)
-        lg.insertAdjacentHTML('afterbegin','<span class="warn avNome" style="flex:1 1 100%">⚠ '+esc(_nomesErro)+'</span>'); }
     if(maxP<=0){ rp.style.display='none'; rp.innerHTML=''; return; }
     rp.style.display='flex';
     // 28/07: aviso, contador e setas ficavam cada um numa linha no celular. Agora o aviso encolhe
@@ -2961,9 +3026,6 @@ function renderAnalise(){
       (anPage<maxP?'<button class="chip" style="background:#1d4ed8;border-color:#1d4ed8;color:#fff;font-weight:700" onclick="anPage++;renderAnalise();document.getElementById(\'secAnalise\').scrollIntoView({behavior:\'smooth\'})">ver as pr\u00f3ximas '+Math.min(PAG, LP.length-(anPage+1)*PAG)+' \u2192</button>':'');
   })();
   garantirNomes(pagPL);   // busca os nomes que faltarem e redesenha
-  /* mesmo motivo da tabela: no período longo os cartões do celular já foram pintados com as
-     vendas do banco pelo renderHistLinhas — repintar aqui com a lista local (vazia) apagava. */
-  if(_usaHist) return;
   renderCardsVenda(pagPL.map(function(x){
     const h=x.h, P=x.P;
     // 29/07: canais como o TikTok não informam a hora da venda, e o cartão caía pra data — no
@@ -3084,7 +3146,7 @@ function renderAnalise(){
     }
     return sep + '<tr style="'+estiloLinha(h)+'"'+(h._cancelado?' title="pedido CANCELADO no Bling — fora dos totais"':(h.devolucao?(' title="DEVOLU\u00c7\u00c3O'+(h.dev_aberta?' em andamento (dinheiro ainda n\u00e3o resolvido no Mercado Pago)':' consolidada')+'"'):''))+'>'+
       '<td class="dim" style="white-space:nowrap" title="'+(h.venda_em?('venda: '+dtBR(h.venda_em)+' · '):(h.venda_dia?('venda: '+String(h.venda_dia).slice(8,10)+'/'+String(h.venda_dia).slice(5,7)+' · '):''))+'conferido: '+dtBR(h.conferido_em)+'">'+(h.venda_em?dtBR(h.venda_em):(h.venda_dia?(String(h.venda_dia).slice(8,10)+'/'+String(h.venda_dia).slice(5,7)+(h.nf_emissao?(' '+String(h.nf_emissao).replace(' ','T').slice(11,16)+' <span style="font-size:9px" title="hora da EMISSÃO da NF no Bling — a hora exata da venda só a API do canal dá">🧾</span>'):' <span style="font-size:9px" title="dia da venda (Bling) — hora só com a API do canal">🕘</span>')):(h.nf_emissao?(String(h.nf_emissao).slice(8,10)+'/'+String(h.nf_emissao).slice(5,7)+' '+String(h.nf_emissao).replace(' ','T').slice(11,16)+' <span style="font-size:9px" title="hora da EMISSÃO da NF no Bling — a hora exata da venda só a API do canal dá">🧾</span>'):(dtBR(h.conferido_em)+' <span style="font-size:9px" title="hora da conferência">🕘</span>'))))+'</td>'+
-      '<td>'+(h._cancelado?'<span style="color:#64748b;font-weight:800" title="CANCELADO — fora dos totais">✕</span> <span class="st bad" style="font-size:9px">CANCELADA</span> ':(h.sintetico?'<span style="color:#f59e0b;font-weight:800" title="aguardando bipagem — margem já calculada">✓</span> ':'<span style="color:#34d399;font-weight:800" title="bipagem confirmada">✓</span> '))+'<b>'+esc(h.numero||h.id)+'</b>'+(h.id?' <a class="lkB" href="https://www.bling.com.br/vendas.php#edit/'+esc(h.id)+'" target="_blank" rel="noopener" title="abrir o pedido no Bling" style="font-size:10px">Bling↗</a>':'')+(carrinho?' <span class="badge" title="'+unid+' unidades">🛒 '+unid+'</span>':'')+(h.devolucao?' <span class="st bad" style="font-size:9px" title="DEVOLU\u00c7\u00c3O no ML'+(h.dev_frete_retorno!=null?' \u00b7 frete de retorno '+BRL(h.dev_frete_retorno):'')+(h.dev_destino==='seller_address'?' \u00b7 mercadoria volta pro galp\u00e3o':(h.dev_destino==='warehouse'?' \u00b7 mercadoria foi pro ML':''))+(h.dev_aberta?' \u00b7 EM ABERTO':' \u00b7 fechada')+'">\ud83d\udd34 DEVOLV.</span>':'')+
+      '<td>'+(h._cancelado?'<span style="color:#64748b;font-weight:800" title="CANCELADO — fora dos totais">✕</span> <span class="st bad" style="font-size:9px">CANCELADA</span> ':(h.sintetico?'<span style="color:#f59e0b;font-weight:800" title="aguardando bipagem — margem já calculada">✓</span> ':'<span style="color:#34d399;font-weight:800" title="bipagem confirmada">✓</span> '))+'<b>'+esc(h.numero||h.id)+'</b>'+(blingId(h)?' <a class="lkB" href="https://www.bling.com.br/vendas.php#edit/'+esc(blingId(h))+'" target="_blank" rel="noopener" title="abrir o pedido no Bling" style="font-size:10px">Bling↗</a>':'')+(carrinho?' <span class="badge" title="'+unid+' unidades">🛒 '+unid+'</span>':'')+(h.devolucao?' <span class="st bad" style="font-size:9px" title="DEVOLU\u00c7\u00c3O no ML'+(h.dev_frete_retorno!=null?' \u00b7 frete de retorno '+BRL(h.dev_frete_retorno):'')+(h.dev_destino==='seller_address'?' \u00b7 mercadoria volta pro galp\u00e3o':(h.dev_destino==='warehouse'?' \u00b7 mercadoria foi pro ML':''))+(h.dev_aberta?' \u00b7 EM ABERTO':' \u00b7 fechada')+'">\ud83d\udd34 DEVOLV.</span>':'')+
         (h.nf_numero?'<div class="desc">NF '+esc(h.nf_numero)+(h.nf_id?' <a class="lkN" href="https://www.bling.com.br/notas.fiscais.php#edit/'+esc(h.nf_id)+'" target="_blank" rel="noopener" title="abrir a NF no Bling">↗</a>':'')+'</div>':'')+'</td>'+
       (function(){
         const nlV = String(h.numero_loja||'');
