@@ -801,9 +801,16 @@ async function carregarLinhasHist(de, ate, pagina){
    aparece são os cartões, que ficavam com o resultado ANTIGO e nenhum sinal de falha. */
 function avisoHistFalhou(msg){
   const txt = '⚠ não consegui carregar a lista do histórico agora'+(msg?(' ('+esc(msg)+')'):'')+' — tente de novo';
-  const tb=$('tAnalise'); if(tb) tb.innerHTML='<tr><td class="dim" style="padding:14px">'+txt+'</td></tr>';
-  const cd=document.getElementById('anCards'); if(cd) cd.innerHTML='<div class="dim" style="padding:14px">'+txt+'</div>';
-  const rp=document.getElementById('anRodape'); if(rp){ rp.style.display='none'; rp.innerHTML=''; }
+  const bt = '<button class="chip" style="margin-left:8px" onclick="repetirHist()">↻ tentar de novo</button>';
+  const tb=$('tAnalise'); if(tb) tb.innerHTML='<tr><td class="dim" style="padding:14px">'+txt+bt+'</td></tr>';
+  const cd=document.getElementById('anCards'); if(cd) cd.innerHTML='<div class="dim" style="padding:14px">'+txt+bt+'</div>';
+  /* Codex (P2, PR#132): eu APAGAVA o paginador aqui — falhar a página 2 tirava justamente os
+     botões necessários pra tentar de novo, e só um F5 resolvia. O rodapé fica como está. */
+}
+/* refaz a última consulta de lista do histórico (a que falhou) */
+function repetirHist(){
+  const iv = anIntervalo();
+  carregarLinhasHist((HLIN&&HLIN._de)||iv.de, (HLIN&&HLIN._ate)||iv.ate, (HLIN&&HLIN.pagina)||1);
 }
 function histIrPagina(n){
   if(!HLIN) return;
@@ -2882,12 +2889,15 @@ function renderAnalise(){
      vendas do banco pelo renderHistLinhas. Tudo que vem daqui pra baixo é a versão LOCAL (cache
      de ~6 dias, vazio no Mês/Ano) e sobrescrevia os três — a tabela ficava "sem vendas no
      período" e o rodapé do histórico sumia, sem como abrir a página 2 (Codex, PR#131). */
+  /* Codex (P2, PR#132): este aviso ("não consegui buscar os nomes dos produtos") morava dentro do
+     bloco do rodapé LOCAL — com a saída nova ele nunca aparecia no período longo, e as linhas
+     ficavam sem descrição sem explicar por quê. Subiu pra antes da saída: vale nos dois modos. */
+  { const lg=document.getElementById('anLegenda');
+    if(lg && _nomesErro && lg.querySelectorAll('.avNome').length===0)
+      lg.insertAdjacentHTML('afterbegin','<span class="warn avNome" style="flex:1 1 100%">⚠ '+esc(_nomesErro)+'</span>'); }
   if(_usaHist) return;
   (function(){
     const rp = document.getElementById('anRodape'); if(!rp) return;
-    { const lg=document.getElementById('anLegenda');
-      if(lg && _nomesErro && lg.querySelectorAll('.avNome').length===0)
-        lg.insertAdjacentHTML('afterbegin','<span class="warn avNome" style="flex:1 1 100%">⚠ '+esc(_nomesErro)+'</span>'); }
     if(maxP<=0){ rp.style.display='none'; rp.innerHTML=''; return; }
     rp.style.display='flex';
     // 28/07: aviso, contador e setas ficavam cada um numa linha no celular. Agora o aviso encolhe
