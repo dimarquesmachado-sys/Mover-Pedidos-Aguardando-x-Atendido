@@ -509,7 +509,14 @@ async function completarTarifaTikTok(dias, opts) {
   const fs2 = require('fs'), path2 = require('path');
   const arq = path2.join(process.env.TIKTOK_CACHE_DIR || '/data', '_tiktok_financeiro_amb.json');
   const lerFinanceiro = () => { try { return (JSON.parse(fs2.readFileSync(arq, 'utf8')) || {}).pedidos || {}; } catch (e) { return {}; } };
-  return compLib.completarTarifas({ empresa: 'amb', supaReq, lerFinanceiro }, dias, opts || {});
+  const r = await compLib.completarTarifas({ empresa: 'amb', supaReq, lerFinanceiro }, dias, opts || {});
+  // Codex (#123): sem limpar o cache do histórico, o painel seguia mostrando a tarifa antiga
+  // por até 30 min e a correção parecia não ter funcionado — como já fazem o backfill e a
+  // reaplicação de imposto.
+  if (r && r.ok && !r.simulacao && r.linhas_atualizadas) {
+    try { for (const k of Object.keys(_histCache)) delete _histCache[k]; } catch (e) {}
+  }
+  return r;
 }
 
 const _noturna = criarNoturna({
@@ -525,6 +532,7 @@ const _noturna = criarNoturna({
   coletarDevolucoes: (d) => coletarDevolucoes(d || 45, pedirAoSync),
   conferirMarketplaces,   // 17/08: canário marketplace × Bling também na AMB
   completarTarifaTikTok,   // 18/08: corrige a tarifa das vendas que já liquidaram
+  coletarFinanceiroTikTok,   // Codex #123 (P1): sem passar aqui, a etapa de coleta da noturna era PULADA na AMB e o cache nunca se atualizava sozinho
   coletarAds,   // 14/08: ads da Shopee também se mantém sozinho
   coletarCarteira:   (d) => coletarCarteira(d || 30, pedirAoSync),
   VERSAO, validarSessao, ehAdmin, json
@@ -4750,6 +4758,9 @@ async function supaReq(empresa, metodo, pathQuery, body){
   if(!url || !key) return { ok:false, status:0, erro:'faltam SUPABASE_URL_VENDAS_'+String(empresa||'').toUpperCase()+' / SUPABASE_KEY_VENDAS_'+String(empresa||'').toUpperCase() };
   const h = { 'apikey': key, 'Authorization': 'Bearer '+key, 'Content-Type': 'application/json' };
   if(metodo==='POST') h['Prefer']='return=minimal';
+  // 18/08 (Codex #123): no PATCH precisamos SABER se alguma linha foi afetada — PATCH que casa
+  // zero linhas volta 200 do mesmo jeito. Com representation o corpo traz as linhas mexidas.
+  if(metodo==='PATCH') h['Prefer']='return=representation';
   try {
     const r = await fetch(url.replace(/\/+$/,'') + '/rest/v1/' + pathQuery, { method: metodo, headers: h, body: body?JSON.stringify(body):undefined });
     const txt = await r.text().catch(()=> '');
