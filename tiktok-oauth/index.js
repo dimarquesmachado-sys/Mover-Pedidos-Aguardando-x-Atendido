@@ -237,6 +237,27 @@ async function tratar(req, res, urlObj, json) {
     return true;
   }
 
+  // ── CALIBRAÇÃO DA REGRA DE TARIFA (19/08) ──────────────────────────────────────
+  // Confere a regra oficial do TikTok contra os pedidos que JÁ têm extrato e devolve o erro.
+  // É o passo que decide se dá pra ESTIMAR a tarifa dos pedidos sem extrato (como o frete
+  // previsto da Magalu) ou se estaríamos trocando um erro conhecido por um chute.
+  if (p === '/tiktok/calibrar-tarifa') {
+    if (!admOk()) { json(res, 404, { error: 'not found' }); return true; }
+    const loja = lojaDe(q);
+    const finLib = require('../lib/tiktok-financeiro');
+    const ctxC = {
+      CACHE_DIR: process.env.TIKTOK_CACHE_DIR || '/data', path,
+      readJson: (arqv, padrao) => { try { return JSON.parse(fs.readFileSync(arqv, 'utf8')); } catch (e) { return padrao; } },
+      writeJson: (arqv, v) => { try { fs.mkdirSync(path.dirname(arqv), { recursive: true }); } catch (e) {} fs.writeFileSync(arqv, JSON.stringify(v, null, 2)); },
+      chamar
+    };
+    const de = String(q.get('de') || '').slice(0, 10), ate = String(q.get('ate') || '').slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(de) || !/^\d{4}-\d{2}-\d{2}$/.test(ate)) { json(res, 400, { ok: false, erro: 'passe &de=AAAA-MM-DD&ate=AAAA-MM-DD' }); return true; }
+    if (de > ate) { json(res, 400, { ok: false, erro: 'período invertido' }); return true; }
+    json(res, 200, finLib.calibrarRegraTarifa(ctxC, loja, de, ate));
+    return true;
+  }
+
   // ── DEVOLUÇÕES (16/08): fecha o TikTok — ML e Shopee já tinham ──────────────────
   if (p === '/tiktok/devolucoes' || p === '/tiktok/devolucoes-coletar') {
     if (!admOk()) { json(res, 404, { error: 'not found' }); return true; }
