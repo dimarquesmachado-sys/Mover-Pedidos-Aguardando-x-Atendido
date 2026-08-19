@@ -2104,6 +2104,28 @@ function routes(readBody) {
 
 
     // ADMIN (sessão ou ?k=): sincronizador de custos em background. ?status=1 mostra progresso.
+
+    // ─── REAPLICAR CUSTO NO HISTÓRICO (19/08) ───────────────────────────────────
+    // ?de=&ate= obrigatórios · &simular=1 mostra o que MUDARIA sem gravar (recomendado antes)
+    // ?status=1 acompanha. Só admin.
+    if (method === 'GET' && p === '/girassol-backup-offline/reaplicar-custo') {
+      const kC = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const sC = validarSessao(req.headers['cookie']);
+      if (!((process.env.ADMIN_KEY && kC === process.env.ADMIN_KEY) || (sC && ehAdmin(sC)))) { json(res, 404, { error: 'not found' }); return true; }
+      if (urlObj.searchParams.get('status')) { json(res, 200, { ok: true, estado: _reapC }); return true; }
+      if (_reapC.rodando) { json(res, 200, { ok: true, ja_rodando: true, estado: _reapC }); return true; }
+      const deC = String(urlObj.searchParams.get('de') || '').slice(0, 10);
+      const ateC = String(urlObj.searchParams.get('ate') || '').slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(deC) || !/^\d{4}-\d{2}-\d{2}$/.test(ateC)) { json(res, 400, { ok: false, erro: 'passe &de=AAAA-MM-DD&ate=AAAA-MM-DD' }); return true; }
+      if (deC > ateC) { json(res, 400, { ok: false, erro: 'período invertido' }); return true; }
+      const _dataOk = t => { const d9 = new Date(t + 'T12:00:00-03:00'); return !isNaN(d9) && d9.toISOString().slice(0, 10) === t; };
+      if (!_dataOk(deC) || !_dataOk(ateC)) { json(res, 400, { ok: false, erro: 'data inexistente no calendário' }); return true; }
+      const simularC = urlObj.searchParams.get('simular') === '1';
+      if (simularC) { const r9 = await reaplicarCusto(deC, ateC, 'girassol', { simular: true }); json(res, 200, { ok: true, simulacao: true, resultado: r9 }); return true; }
+      reaplicarCusto(deC, ateC, 'girassol', {}).catch(() => {});
+      json(res, 200, { ok: true, iniciado: true, de: deC, ate: ateC, mensagem: 'reaplicando custo em background — ?status=1 p/ acompanhar' });
+      return true;
+    }
     if (method === 'GET' && p === '/girassol-backup-offline/custo-sync') {
       const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
       const sessC = validarSessao(req.headers['cookie']);
@@ -4490,6 +4512,84 @@ async function reaplicarImposto(meses, empresa){
   _reap.rodando = false; _reap.fim = new Date().toISOString(); _reap.mesAtual = null;
   console.log('[FISCAL] reaplicar imposto CONCLUÍDO — ' + _reap.atualizadas + ' linha(s) de ' + _reap.linhas + ' | erros: ' + _reap.erros);
   return _reap;
+}
+
+
+// ─── REAPLICAR CUSTO NO HISTÓRICO (19/08) ────────────────────────────────────────
+// Irmã do reaplicarImposto, e nasceu do mesmo tipo de problema: o custo do KIT estava
+// errado no banco (o Bling devolve, no bloco `fornecedor` de um produto com composição,
+// um número que não é o custo dele — 20,40 num kit de 34,00). Corrigir o `_custos.json`
+// arruma Hoje/Ontem, mas NÃO arruma o histórico: a leitura só REPÕE custo quando ele está
+// vazio; quando está ERRADO, o errado permanece. Sem isto, Mês e Ano seguem com a margem
+// inflada, e as rotas que leem a margem gravada (previsão, plano de compra) também.
+//
+// Regra: para cada linha, custo_certo = custo_do_SKU × quantidade. Se difere do gravado,
+// grava o novo custo e move a margem na mesma medida — exatamente como o imposto faz.
+// Linha cujo SKU não está no banco de custos é DEIXADA COMO ESTÁ (não apaga o que existe).
+let _reapC = { rodando:false, de:null, ate:null, linhas:0, atualizadas:0, sem_custo:0, erros:0, inicio:null, fim:null, msg:'', maiores:[] };
+async function reaplicarCusto(de, ate, empresa, opts){
+  if (_reapC.rodando) return _reapC;
+  empresa = empresa || 'girassol';
+  const simular = !!(opts && opts.simular);
+  const { url, key } = supaCfg(empresa);
+  if (!url || !key) { _reapC.msg = 'Supabase não configurado'; return _reapC; }
+  const H = { apikey: key, Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' };
+  const base = url.replace(/\/+$/, '') + '/rest/v1/vendas_historico';
+  const cc = readJson(path.join(CACHE_DIR, '_custos.json'), {});
+  const custoDe = sk => { const c = cc[String(sk || '').trim()]; return (c && c.custo != null && isFinite(Number(c.custo)) && Number(c.custo) > 0) ? Number(c.custo) : null; };
+
+  _reapC = { rodando:true, de, ate, empresa, simulacao:simular, linhas:0, atualizadas:0, sem_custo:0, erros:0,
+             inicio:new Date().toISOString(), fim:null, msg:'', maiores:[] };
+  console.log('[CUSTO-REAP] ' + (simular ? 'SIMULANDO' : 'reaplicando') + ' custo de ' + de + ' a ' + ate + ' (' + empresa + ')');
+  let dif_total = 0;
+  try {
+    let off = 0;
+    while (off < 300000) {
+      const rq = await fetch(base + '?empresa=eq.' + empresa + '&data_venda=gte.' + de + '&data_venda=lte.' + ate +
+        '&select=id,sku,quantidade,custo,margem,numero_pedido&order=data_venda.asc,numero_pedido.asc,sku.asc&limit=500&offset=' + off, { headers: H });
+      if (!rq.ok) { _reapC.erros++; break; }
+      const ln = await rq.json().catch(() => []);
+      if (!Array.isArray(ln) || !ln.length) break;
+      _reapC.linhas += ln.length;
+      const mudar = [];
+      for (const l of ln) {
+        const cu = custoDe(l.sku);
+        if (cu == null) { _reapC.sem_custo++; continue; }        // sem custo conhecido: não mexe
+        const q = Number(l.quantidade) || 0;
+        if (!(q > 0)) continue;
+        const novo = Math.round(cu * q * 100) / 100;
+        const c0 = (l.custo == null) ? null : Number(l.custo);
+        if (c0 != null && Math.abs(novo - c0) <= 0.005) continue;  // já está certo
+        // margem acompanha: custo maior derruba margem na mesma medida
+        const mg = (l.margem == null || c0 == null) ? null : Math.round((Number(l.margem) - (novo - c0)) * 100) / 100;
+        dif_total += (novo - (c0 || 0));
+        if (_reapC.maiores.length < 20) _reapC.maiores.push({ pedido: l.numero_pedido, sku: l.sku, custo_antes: c0, custo_agora: novo, diferenca: Math.round((novo - (c0 || 0)) * 100) / 100 });
+        mudar.push({ id: l.id, custo: novo, margem: mg });
+      }
+      if (!simular) {
+        for (let i = 0; i < mudar.length; i += 8) {
+          const lote = mudar.slice(i, i + 8);
+          await Promise.all(lote.map(async x => {
+            try {
+              const corpo = (x.margem == null) ? { custo: x.custo } : { custo: x.custo, margem: x.margem };
+              const rp = await fetch(base + '?id=eq.' + x.id, { method: 'PATCH', headers: H, body: JSON.stringify(corpo) });
+              if (rp.ok) _reapC.atualizadas++; else _reapC.erros++;
+            } catch (e) { _reapC.erros++; }
+          }));
+        }
+      } else { _reapC.atualizadas += mudar.length; }
+      if (ln.length < 500) break;
+      off += 500;
+    }
+    _reapC.diferenca_total_de_custo = Math.round(dif_total * 100) / 100;
+    _reapC.efeito_na_margem = Math.round(-dif_total * 100) / 100;
+    _reapC.maiores.sort((a, b) => Math.abs(b.diferenca) - Math.abs(a.diferenca));
+    if (!simular) { try { for (const k of Object.keys(_histCache)) delete _histCache[k]; } catch (e) {} }
+    _reapC.msg = simular ? 'simulação concluída — NADA foi gravado' : 'concluído';
+  } catch (e) { _reapC.msg = 'erro: ' + (e.message || e); _reapC.erros++; }
+  _reapC.rodando = false; _reapC.fim = new Date().toISOString();
+  console.log('[CUSTO-REAP] fim — ' + _reapC.atualizadas + ' de ' + _reapC.linhas + ' linha(s) | sem custo: ' + _reapC.sem_custo + ' | erros: ' + _reapC.erros);
+  return _reapC;
 }
 
 let _backfillAno = { rodando:false, mesAtual:null, feitos:[], inicio:null, fim:null };
