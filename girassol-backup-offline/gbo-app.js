@@ -5043,7 +5043,14 @@ function escolherProdutoAtivo(lista, sku, info, limitePedido) {
   const vivos = arr.filter(p => !_prodExcluido(p));
   if (!vivos.length) {
     const paginaCheia = limitePedido && arr.length >= limitePedido;
-    if (info && !paginaCheia) info.todos_excluidos = true;
+    // Codex (P2, 3ª rodada): o mesmo `info` atravessa as três variantes de caixa do SKU, e a flag
+    // era PEGAJOSA — uma variante com página curta marcava "todos excluídos" e a seguinte, com
+    // página cheia (logo, inconclusiva), não conseguia desmarcar. Agora o inconclusivo é registrado
+    // à parte e VENCE: basta uma variante inconclusiva para nada ser apagado.
+    if (info) {
+      if (paginaCheia) info.inconclusivo = true;
+      else info.todos_excluidos = true;
+    }
     if (paginaCheia) console.log('[PRODUTO] ' + (sku || '?') + ': ' + arr.length + ' cadastros na página e todos excluídos, MAS a página veio cheia — pode haver ativo adiante; não concluo nada (e não apago custo)');
     console.log('[PRODUTO] ' + (sku || '?') + ': todos os ' + arr.length + ' cadastros estão EXCLUÍDOS no Bling — ignorando (melhor sem dado do que com dado de cadastro apagado)');
     return null;
@@ -5120,9 +5127,12 @@ async function custoSync(fresh) {
       // cache e o próprio ?fresh=1 o regravava, ou seja, a correção não corrigia nada. Achou
       // cadastros e todos excluídos = o custo daquele SKU deixa de existir aqui também.
       // (busca vazia NÃO limpa: pode ser instabilidade do Bling, e apagar seria pior)
-      if (!prod && _infoSel.todos_excluidos && cc[sku]) {
+      // Codex (P1, 3ª rodada): eu tranquei TODA a limpeza atrás de `cc[sku]`. Se o custo tinha
+      // entrado só pelo sku-info (sem passar pelo custo-sync), nada era limpo e o valor do produto
+      // deletado voltava por lá. Só a remoção do permanente pode depender de ele existir.
+      if (!prod && _infoSel.todos_excluidos && !_infoSel.inconclusivo) {
         const _era = cc[sku] && cc[sku].custo;   // ler ANTES de apagar (senão o log sai 'undefined')
-        delete cc[sku]; desdeGravei++;
+        if (cc[sku]) { delete cc[sku]; desdeGravei++; }
         // Codex (P1, 2ª rodada): existe um SEGUNDO cache (o do sku-info, em memória e em
         // _skus-info.json) que também guarda custo — e ele RESTAURA o valor antigo quando o novo
         // vem nulo. Apagar só o permanente deixava o custo do produto deletado voltar por ali,
