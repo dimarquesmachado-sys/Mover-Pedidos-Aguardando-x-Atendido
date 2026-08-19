@@ -558,7 +558,9 @@ function cardVenda(o){
   nums.push('<div class="vcB"><i>custo</i><b>'+(o.custo!=null?BRL(o.custo):'—')+'</b></div>');
   // 28/07: quadrinho novo — soma TUDO que o marketplace e o governo levaram (fora o custo do produto):
   // comissão + imposto + frete do vendedor, menos o estorno. Antes isso ficava invisível no celular.
-  nums.push('<div class="vcB" title="'+esc(o.despDet||'comissão + imposto + frete do vendedor')+'"><i>Taxas, Frete e Imposto</i><b class="bad">'+(o.desp!=null?BRL(o.desp):'—')+'</b></div>');
+  /* Codex (P2, PR#138): abaixo de 760px a tabela some e ficam SÓ estes cartões — sem o selo, o
+     celular mostrava a margem inflada do TikTok sem nenhum aviso. O alerta vem junto do valor. */
+  nums.push('<div class="vcB" title="'+esc(o.despDet||'comissão + imposto + frete do vendedor')+'"><i>Taxas, Frete e Imposto</i><b class="bad">'+(o.desp!=null?BRL(o.desp):'—')+'</b>'+(o.tarProv?'<div style="font-size:10px;color:#fbbf24;font-weight:700">⚠ tarifa provisória — margem otimista</div>':'')+'</div>');
   nums.push('<div class="vcB"><i>💎 Lucro Bruto (M.C.)</i><b class="'+((o.mc||0)>=0?'ok':'bad')+'">'+(o.mc!=null?BRL(o.mc):'—')+(o.pc!=null?(' <span style="font-size:10px;opacity:.8">('+String(o.pc).replace('.',',')+'%)</span>'):'')+'</b></div>');
   return '<div class="vcard" style="border-left:3px solid '+cor+(o.cancelado?';opacity:.55':'')+'">'+
     '<div class="vcTopo">'+
@@ -655,6 +657,7 @@ function renderHistLinhas(iv){
     }).join('') : '<tr><td class="dim" colspan="12" style="padding:14px">sem vendas nesta página</td></tr>');
   const ini=(pgAtual-1)*(HLIN.por_pagina||100)+1, fim=ini+ps.length-1;
   renderCardsVenda(ps.map(function(o){
+    /* o cartão do HISTÓRICO não leva o aviso: ali a comissão já é a corrigida pelo extrato */
     return { numero:o.numero, canal:nomeCanal(canalKey(o.canal)), hora:String(o.data||'').slice(8,10)+'/'+String(o.data||'').slice(5,7),
              // 29/07: aqui NUNCA se montava a descrição — no Mês/Ano o cartão ficava só com o SKU,
              // independente de quantidade. Agora usa a mesma regra da lista do dia.
@@ -1665,6 +1668,33 @@ function montar(){
   setTimeout(bootSku, 400);
 }
 
+/* ⚠️ este bloco fica AQUI, acima de quem o usa: `const` não é içado como `function` —
+   se a apuração dos totais rodasse antes desta linha, seria ReferenceError e a tela
+   inteira morria. Testado: `const` acessado antes da declaração lança TDZ. */
+/* ═══ 19/08 — "TARIFA REAL (Bling)" ERA UMA PROMESSA FALSA NO TIKTOK ═══════════════
+   O Diego viu o pedido 119933 (TikTok, hoje) com "Tarifa REAL (Bling) R$ 4,19" — 12% de 34,90.
+   A tarifa REAL do TikTok, medida pelo extrato da própria plataforma, é ~31%. O Bling registra
+   ~11,6% e a diferença é o custo invisível de ~R$ 29,7 mil/ano que a gente já mediu.
+   Não é bug de cálculo: o extrato do TikTok sai POR PAGAMENTO e a liquidação demora dias, então
+   venda recente entra com a taxa do Bling e se corrige quando o extrato chega. O problema é o
+   RÓTULO: chamar de REAL o número que sabemos estar subestimado.
+   Onde o Bling foi MEDIDO e bate (Shopee: idêntico ao escrow, conferido em 100 pedidos), segue
+   REAL. No TikTok vira PROVISÓRIA, em laranja, dizendo o que falta. Canal sem medição fica
+   neutro — não afirmamos o que não conferimos. */
+const _BLING_SUBESTIMA = { tiktok: { real_pct: '~31%', bling_pct: '~12%' } };
+function _tarifaProvisoria(ck, feeReal, feeBling){
+  return feeReal == null && feeBling != null && !!_BLING_SUBESTIMA[ck];
+}
+function _seloTarifa(ck, feeReal, feeBling){
+  if (feeReal != null) return ' <span class="st ok" style="font-size:9px">REAL</span>';
+  if (feeBling == null) return '';
+  if (_tarifaProvisoria(ck, feeReal, feeBling)) {
+    const m = _BLING_SUBESTIMA[ck];
+    return ' <span class="st" style="font-size:9px;background:#78350f55;color:#fbbf24;border-color:#f59e0b55" title="taxa que o Bling importou ('+m.bling_pct+'). A tarifa REAL deste canal é '+m.real_pct+', medida no extrato do marketplace — esta margem está OTIMISTA. O extrato corrige o histórico (Mês/Ano); nesta linha do dia a taxa segue a do Bling">PROVISÓRIA</span>';
+  }
+  return ' <span class="st ok" style="font-size:9px">BLING</span>';
+}
+
 function render(){
   const defs = [['dia','Hoje'],['ontem','Ontem'],['7','7 dias'],['30','30 dias'],['mes','Mês'],['mesant','Mês anterior'],['ano','Ano'],['custom','Período…']];
   $('chips').innerHTML = defs.map(([k,l])=>'<button class="chip'+(periodo===k?' on':'')+'" onclick="setPeriodo(\''+k+'\')">'+l+'</button>').join('');
@@ -1705,7 +1735,9 @@ function render(){
     porCanal[mk].ped++;
     if(h.flex){ flex++; porCanal[mk].flex++; }
     if(canalKey(mk)==='ml'){ pedML++; if(h.tarifa_ml!=null) pedMLr++; }
-    if(h.tarifa_ml!=null || (h.taxa_mkt!=null && Number(h.taxa_mkt)>0)) pedTarReal++;
+    /* Codex (P2, PR#138): a pílula contava a taxa do Bling do TikTok como "tarifa real" — a tela
+       dizia PROVISÓRIA na linha e 100% real no topo, sobre o MESMO pedido. Provisória não conta. */
+    if(h.tarifa_ml!=null || (h.taxa_mkt!=null && Number(h.taxa_mkt)>0 && !_tarifaProvisoria(canalKey(h.marketplace), h.tarifa_ml, Number(h.taxa_mkt)))) pedTarReal++;
     if(h.valor!=null && isFinite(Number(h.valor))){ const v=Number(h.valor); fat+=v; comValor++; porDia[d].fat+=v; porCanal[mk].fat+=v; porCanal[mk].comValor++; }
     else semValor++;
     if(h.uf){ comUF++; const u=String(h.uf).toUpperCase(); if(!porUF[u]) porUF[u]={ped:0,fat:0}; porUF[u].ped++; if(h.valor!=null) porUF[u].fat+=Number(h.valor)||0; }
@@ -2376,29 +2408,6 @@ async function salvarCfg(){
 }
 
 // ── 🔍 busca & P&L por pedido ───────────────────────────────────────────────
-/* ═══ 19/08 — "TARIFA REAL (Bling)" ERA UMA PROMESSA FALSA NO TIKTOK ═══════════════
-   O Diego viu o pedido 119933 (TikTok, hoje) com "Tarifa REAL (Bling) R$ 4,19" — 12% de 34,90.
-   A tarifa REAL do TikTok, medida pelo extrato da própria plataforma, é ~31%. O Bling registra
-   ~11,6% e a diferença é o custo invisível de ~R$ 29,7 mil/ano que a gente já mediu.
-   Não é bug de cálculo: o extrato do TikTok sai POR PAGAMENTO e a liquidação demora dias, então
-   venda recente entra com a taxa do Bling e se corrige quando o extrato chega. O problema é o
-   RÓTULO: chamar de REAL o número que sabemos estar subestimado.
-   Onde o Bling foi MEDIDO e bate (Shopee: idêntico ao escrow, conferido em 100 pedidos), segue
-   REAL. No TikTok vira PROVISÓRIA, em laranja, dizendo o que falta. Canal sem medição fica
-   neutro — não afirmamos o que não conferimos. */
-const _BLING_SUBESTIMA = { tiktok: { real_pct: '~31%', bling_pct: '~12%' } };
-function _tarifaProvisoria(ck, feeReal, feeBling){
-  return feeReal == null && feeBling != null && !!_BLING_SUBESTIMA[ck];
-}
-function _seloTarifa(ck, feeReal, feeBling){
-  if (feeReal != null) return ' <span class="st ok" style="font-size:9px">REAL</span>';
-  if (feeBling == null) return '';
-  if (_tarifaProvisoria(ck, feeReal, feeBling)) {
-    const m = _BLING_SUBESTIMA[ck];
-    return ' <span class="st" style="font-size:9px;background:#78350f55;color:#fbbf24;border-color:#f59e0b55" title="taxa que o Bling importou ('+m.bling_pct+'). A tarifa REAL deste canal é '+m.real_pct+' — o extrato do marketplace ainda não chegou (leva alguns dias) e a margem vai cair quando chegar">PROVISÓRIA</span>';
-  }
-  return ' <span class="st ok" style="font-size:9px">BLING</span>';
-}
 function calcPL(h){
   const mes = diaVenda(h).slice(0,7);
   const ck = canalKey(h.marketplace);
@@ -2645,7 +2654,7 @@ function renderPL(h){
       : linha('🏷️ Produtos (nota fiscal)', rp)+linha('🚚 Frete embutido (receita)', frete))+
     linha('🏛 Imposto ('+(aliq!=null?aliq+'% de '+mesPorExtenso(mes):'<span class="warn">configure ⚙️ '+mesPorExtenso(mes)+'</span>')+')', imposto!=null?-imposto:null)+
     /* o rótulo dizia "REAL (ML)" até em pedido de Shopee/TikTok — agora nomeia o canal certo */
-    linha((rendaCanal!=null?'<span class="dim">🏪 Tarifa (já embutida no repasse)</span>':'🏪 Tarifa ')+ (rendaCanal!=null?'':(feeReal!=null?'<span class="ok">REAL ('+esc(nomeCanal(ck))+')</span>':(feeBling!=null?(_tarifaProvisoria(ck,feeReal,feeBling)?('<span class="warn">PROVISÓRIA — taxa do Bling ('+_BLING_SUBESTIMA[ck].bling_pct+'); a real do '+esc(nomeCanal(ck))+' é '+_BLING_SUBESTIMA[ck].real_pct+', chega com o extrato</span>'):'<span class="ok">Bling</span>'):(tx!=null?tx+'% est.':'<span class="warn">configure ⚙️</span>')))), tarifa!=null?(rendaCanal!=null?tarifa:-tarifa):null,
+    linha((rendaCanal!=null?'<span class="dim">🏪 Tarifa (já embutida no repasse)</span>':'🏪 Tarifa ')+ (rendaCanal!=null?'':(feeReal!=null?'<span class="ok">REAL ('+esc(nomeCanal(ck))+')</span>':(feeBling!=null?(_tarifaProvisoria(ck,feeReal,feeBling)?('<span class="warn">PROVISÓRIA — taxa do Bling ('+_BLING_SUBESTIMA[ck].bling_pct+'); a real do '+esc(nomeCanal(ck))+' é '+_BLING_SUBESTIMA[ck].real_pct+' (extrato corrige o Mês/Ano)</span>'):'<span class="ok">Bling</span>'):(tx!=null?tx+'% est.':'<span class="warn">configure ⚙️</span>')))), tarifa!=null?(rendaCanal!=null?tarifa:-tarifa):null,
       (ck==='ml'&&h.numero_loja&&feeReal==null?' <button class="btn" style="padding:3px 10px;font-size:10.5px" onclick="pegarFeeML(\''+h.id+'\',\''+esc(h.numero_loja)+'\')">buscar real</button>':''))+
     linha('📦 Custo ('+cusUn+'/'+unTot+' un. c/ custo)', (cusUn?-custo:null))+
     (rendaCanal!=null&&frV!=null&&ck!=='ml' ? linha('<span class="dim">🚛 Frete vendedor (já embutido no repasse)</span>', frV) :
@@ -3188,7 +3197,7 @@ function renderAnalise(){
       // sem nenhuma hora disponível (canal que não informa e venda ainda não bipada)
       return h.venda_dia ? (String(h.venda_dia).slice(8,10)+'/'+String(h.venda_dia).slice(5,7)) : '';
     })();
-    return { numero:(h.numero||h.id), canal:nomeCanal(P.ck), hora:dt,
+    return { numero:(h.numero||h.id), canal:nomeCanal(P.ck), hora:dt, tarProv:_tarifaProvisoria(P.ck,P.feeReal,P.feeBling),
              skus:((h.itens||[]).length
                     ? (h.itens||[]).map(function(i){
                         // 28/07: no celular mostra o NOME INTEIRO do produto embaixo do SKU
