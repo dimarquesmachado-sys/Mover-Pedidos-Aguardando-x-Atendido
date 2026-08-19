@@ -1321,7 +1321,7 @@ function routes(readBody) {
           let prod = null;
           for (const v of [...new Set([sku, sku.toUpperCase(), sku.toLowerCase()])]) {
             const r = await bg(`/produtos?codigo=${encodeURIComponent(v)}&limite=10&criterio=5`);
-            const it = escolherProdutoAtivo(r.ok && r.data && r.data.data, sku);   // 19/08: nunca um cadastro excluído
+            const it = escolherProdutoAtivo(r.ok && r.data && r.data.data, sku, null, 10);   // 19/08: nunca um cadastro excluído
             if (it && it.id) { const d = await bg(`/produtos/${it.id}`); prod = (d.ok && d.data && d.data.data) || it; break; }
             await new Promise(r0 => setTimeout(r0, 300));
           }
@@ -7056,12 +7056,17 @@ function _prodAtivo(p) {
 // todos estavam excluídos. Codex (P1): sem essa distinção, quem chama não sabe diferenciar
 // "o Bling não respondeu" de "o produto foi apagado" — e no segundo caso o custo velho precisa
 // ser JOGADO FORA do cache, senão o ?fresh=1 regrava o número do cadastro deletado.
-function escolherProdutoAtivo(lista, sku, info) {
+// `limitePedido`: quantos cabiam na resposta. Codex (P2): com mais de 10 cadastros duplicados, o
+// ativo pode estar FORA da página — concluir "todos excluídos" ali e apagar o custo destruiria um
+// dado bom. Página cheia = conclusão inconclusiva, e nada é apagado.
+function escolherProdutoAtivo(lista, sku, info, limitePedido) {
   const arr = (Array.isArray(lista) ? lista : []).filter(Boolean);
   if (!arr.length) return null;
   const vivos = arr.filter(p => !_prodExcluido(p));
   if (!vivos.length) {
-    if (info) info.todos_excluidos = true;
+    const paginaCheia = limitePedido && arr.length >= limitePedido;
+    if (info && !paginaCheia) info.todos_excluidos = true;
+    if (paginaCheia) console.log('[PRODUTO] ' + (sku || '?') + ': ' + arr.length + ' cadastros na página e todos excluídos, MAS a página veio cheia — pode haver ativo adiante; não concluo nada (e não apago custo)');
     console.log('[PRODUTO] ' + (sku || '?') + ': todos os ' + arr.length + ' cadastros estão EXCLUÍDOS no Bling — ignorando (melhor sem dado do que com dado de cadastro apagado)');
     return null;
   }
@@ -7129,7 +7134,7 @@ async function custoSync(fresh) {
         const r = await bg2(`/produtos?codigo=${encodeURIComponent(v)}&limite=10&criterio=5`);
         // 19/08: limite 1 pegava o PRIMEIRO da lista, que podia ser um cadastro EXCLUÍDO.
         // Traz até 10 e escolhe o ativo.
-        const it = escolherProdutoAtivo(r.ok && r.data && r.data.data, sku, _infoSel);
+        const it = escolherProdutoAtivo(r.ok && r.data && r.data.data, sku, _infoSel, 10);
         if (it && it.id) { const d = await bg2(`/produtos/${it.id}`); prod = (d.ok && d.data && d.data.data) || it; break; }
         await dorme(600);
       }
@@ -7140,7 +7145,16 @@ async function custoSync(fresh) {
       if (!prod && _infoSel.todos_excluidos && cc[sku]) {
         const _era = cc[sku] && cc[sku].custo;   // ler ANTES de apagar (senão o log sai 'undefined')
         delete cc[sku]; desdeGravei++;
-        console.log('[CUSTO] ' + sku + ': só havia cadastro EXCLUÍDO no Bling — custo removido do banco (era ' + JSON.stringify(_era) + ')');
+        // Codex (P1, 2ª rodada): existe um SEGUNDO cache (o do sku-info, em memória e em
+        // _skus-info.json) que também guarda custo — e ele RESTAURA o valor antigo quando o novo
+        // vem nulo. Apagar só o permanente deixava o custo do produto deletado voltar por ali,
+        // com carimbo novo, indefinidamente. Os dois têm que cair juntos.
+        try {
+          const _fSk = path.join(CACHE_DIR, '_skus-info.json');
+          if (!_skuInfoCache) _skuInfoCache = readJson(_fSk, {});
+          if (_skuInfoCache[sku]) { delete _skuInfoCache[sku]; writeJson(_fSk, _skuInfoCache); }
+        } catch (e) { console.log('[CUSTO] ' + sku + ': não consegui limpar o cache de sku-info (' + e.message + ')'); }
+        console.log('[CUSTO] ' + sku + ': só havia cadastro EXCLUÍDO no Bling — custo removido dos DOIS caches (era ' + JSON.stringify(_era) + ')');
       }
       if (prod && prod.id) {
         const forn = prod.fornecedor || {};
