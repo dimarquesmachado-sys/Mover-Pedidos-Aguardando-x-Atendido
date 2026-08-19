@@ -642,7 +642,7 @@ function renderHistLinhas(iv){
       const skus = (o.itens||[]).map(function(i){ return (i.qtd>1?i.qtd+'× ':'')+esc(i.sku||''); }).join('<br>');
       /* Codex (P2, PR#138): acima de 760px os cartões somem e fica ESTA tabela — que mostrava a
          margem otimista do TikTok como dado histórico comum, sem aviso nenhum. Mesmo sinal do cartão. */
-      const _tkP = (canalKey(o.canal)==='tiktok') && Number(o.vnota)>0 && (Number(o.comissao)||0) < Number(o.vnota)*0.15;
+      const _tkP = _tarifaVeioDoBling(canalKey(o.canal), o.vnota, o.comissao);
       return '<tr'+(_tkP?' title="tarifa ainda provisória (veio do Bling); o extrato do TikTok cobra mais — esta margem está otimista"':'')+'>'+
         '<td class="dim" style="white-space:nowrap">'+esc(String(o.data||'').slice(8,10)+'/'+String(o.data||'').slice(5,7))+'</td>'+
         '<td><b>'+esc(o.numero)+'</b>'+(o.numero_loja?'<div class="desc" style="font-size:10px">'+esc(o.numero_loja)+'</div>':'')+'</td>'+
@@ -665,7 +665,7 @@ function renderHistLinhas(iv){
        ficam com a taxa do Bling lá também. Como o histórico não guarda a ORIGEM da comissão, uso o
        único sinal disponível: comissão baixa demais para este canal. É estimativa, e o aviso é
        conservador de propósito — prefiro avisar a mais do que deixar margem inflada sem aviso. */
-    const _tkProv = (canalKey(o.canal)==='tiktok') && Number(o.vnota)>0 && (Number(o.comissao)||0) < Number(o.vnota)*0.15;
+    const _tkProv = _tarifaVeioDoBling(canalKey(o.canal), o.vnota, o.comissao);
     return { numero:o.numero, tarProv:_tkProv, canal:nomeCanal(canalKey(o.canal)), hora:String(o.data||'').slice(8,10)+'/'+String(o.data||'').slice(5,7),
              // 29/07: aqui NUNCA se montava a descrição — no Mês/Ano o cartão ficava só com o SKU,
              // independente de quantidade. Agora usa a mesma regra da lista do dia.
@@ -1698,6 +1698,19 @@ function montar(){
    um pedido de R$ 29,90 fica em 29,4% e um de R$ 199 em 15,0%. Prometer "27-31%" em cada linha
    seria afirmar de novo um número que os dados não sustentam — o mesmo erro do rótulo "REAL" que
    este PR existe para corrigir. Fica a DIREÇÃO (a real é maior) e o motivo da variação. */
+/* Codex (P2, PR#138): meu corte de "menos de 15%" marcava como provisório qualquer pedido de
+   TikTok com taxa efetiva baixa — e taxa baixa é NORMAL em ticket alto, porque a fixa por item
+   dilui (um pedido liquidado de R$ 117,70 fica em ~17%, um de R$ 199 em ~15%). Eu estaria
+   chamando de "otimista" uma margem já correta, que é o erro oposto do que este PR conserta.
+   O sinal certo é a ASSINATURA do Bling: ele registra 12% cravados do valor, sem taxa fixa.
+   Comissão que bate 12% quase exatos = veio do Bling; qualquer outro número veio do extrato. */
+function _tarifaVeioDoBling(canal, valor, comissao){
+  if (canal !== 'tiktok') return false;
+  const v = Number(valor) || 0, c = Number(comissao) || 0;
+  if (!(v > 0) || !(c > 0)) return false;
+  const tolerancia = Math.max(0.10, v * 0.005);
+  return Math.abs(c - v * 0.12) <= tolerancia;
+}
 const _BLING_SUBESTIMA = { tiktok: { real_pct: 'maior — quanto, depende do ticket e do afiliado (a taxa fixa por item pesa mais em pedido pequeno)', bling_pct: '~12%' } };
 function _tarifaProvisoria(ck, feeReal, feeBling){
   return feeReal == null && feeBling != null && !!_BLING_SUBESTIMA[ck];
