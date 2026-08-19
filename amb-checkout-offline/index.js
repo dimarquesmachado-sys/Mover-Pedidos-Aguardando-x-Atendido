@@ -7052,11 +7052,16 @@ function _prodAtivo(p) {
   const s = String((p && (p.situacao || p.situacaoProduto)) || '').trim().toUpperCase();
   return s === 'A' || s.startsWith('ATIV');
 }
-function escolherProdutoAtivo(lista, sku) {
+// `info` (opcional) volta preenchido: {todos_excluidos:true} quando a busca ACHOU cadastros mas
+// todos estavam excluídos. Codex (P1): sem essa distinção, quem chama não sabe diferenciar
+// "o Bling não respondeu" de "o produto foi apagado" — e no segundo caso o custo velho precisa
+// ser JOGADO FORA do cache, senão o ?fresh=1 regrava o número do cadastro deletado.
+function escolherProdutoAtivo(lista, sku, info) {
   const arr = (Array.isArray(lista) ? lista : []).filter(Boolean);
   if (!arr.length) return null;
   const vivos = arr.filter(p => !_prodExcluido(p));
   if (!vivos.length) {
+    if (info) info.todos_excluidos = true;
     console.log('[PRODUTO] ' + (sku || '?') + ': todos os ' + arr.length + ' cadastros estão EXCLUÍDOS no Bling — ignorando (melhor sem dado do que com dado de cadastro apagado)');
     return null;
   }
@@ -7119,13 +7124,23 @@ async function custoSync(fresh) {
   for (const sku of alvos) {
     try {
       let prod = null;
+      const _infoSel = {};   // avisa se a busca achou SÓ cadastros excluídos
       for (const v of [...new Set([sku, sku.toUpperCase(), sku.toLowerCase()])]) {
         const r = await bg2(`/produtos?codigo=${encodeURIComponent(v)}&limite=10&criterio=5`);
         // 19/08: limite 1 pegava o PRIMEIRO da lista, que podia ser um cadastro EXCLUÍDO.
         // Traz até 10 e escolhe o ativo.
-        const it = escolherProdutoAtivo(r.ok && r.data && r.data.data, sku);
+        const it = escolherProdutoAtivo(r.ok && r.data && r.data.data, sku, _infoSel);
         if (it && it.id) { const d = await bg2(`/produtos/${it.id}`); prod = (d.ok && d.data && d.data.data) || it; break; }
         await dorme(600);
+      }
+      // Codex (P1, PR#143): produto APAGADO no Bling — sem isto, o custo velho continuava no
+      // cache e o próprio ?fresh=1 o regravava, ou seja, a correção não corrigia nada. Achou
+      // cadastros e todos excluídos = o custo daquele SKU deixa de existir aqui também.
+      // (busca vazia NÃO limpa: pode ser instabilidade do Bling, e apagar seria pior)
+      if (!prod && _infoSel.todos_excluidos && cc[sku]) {
+        const _era = cc[sku] && cc[sku].custo;   // ler ANTES de apagar (senão o log sai 'undefined')
+        delete cc[sku]; desdeGravei++;
+        console.log('[CUSTO] ' + sku + ': só havia cadastro EXCLUÍDO no Bling — custo removido do banco (era ' + JSON.stringify(_era) + ')');
       }
       if (prod && prod.id) {
         const forn = prod.fornecedor || {};
