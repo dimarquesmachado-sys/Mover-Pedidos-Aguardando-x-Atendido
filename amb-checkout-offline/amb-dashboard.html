@@ -404,7 +404,7 @@ const MOD = '/amb-checkout-offline';
     return _f(u, o);
   };
 })();
-const DASH_BUILD = 'a30';
+const DASH_BUILD = 'a31';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -2531,6 +2531,15 @@ function _bqRender(q, hits, hh, erroH){
     }).join('')+'</table>'+
     (hh===null?'<div class="mut" style="font-size:11px;padding:6px 2px">buscando também no histórico…</div>'
       : (erroH?'<div class="mut" style="font-size:11px;padding:6px 2px">⚠ histórico indisponível agora ('+esc(erroH)+') — mostrando só o período recente</div>':''));
+  /* 19/08 (Diego): "faz de uma forma que já venha expandido. busquei, e já retorna expandido".
+     Resultado único abre a conta sozinho — que é o caso de quem cola um número de pedido. Com
+     vários resultados NÃO abre nada: seria escolher um por ele. */
+  const _totalHits = loc.length + extra.length;
+  if(_totalHits === 1){
+    if(loc.length === 1) abrirPL(String(loc[0].id));
+    else abrirPLHist(String(extra[0].numero));
+  }
+
 }
 function abrirPLHist(num){
   const h = (window._bhHist||{})[String(num)]; if(!h) return;
@@ -2584,24 +2593,33 @@ function mesPorExtenso(m){
 function renderPL(h){
   const card=$('plCard');
   setaAberta('pl_'+String(h.id));
-  const {mes,ck,rp,tot,frete,aliq,imposto,feeReal,feeBling,tx,tarifa,custo,cusUn,unTot,frV,frFonte,credito,completo,mc,magFreteFonte} = calcPL(h);
+  const {mes,ck,rp,tot,frete,aliq,imposto,feeReal,feeBling,tx,tarifa,custo,cusUn,unTot,frV,frFonte,credito,completo,mc,magFreteFonte,rendaCanal} = calcPL(h);
   const linha=(l,v,extra)=>'<tr><td>'+l+'</td><td class="num">'+(v!=null?BRL(v):'<span class="dim">—</span>')+(extra||'')+'</td></tr>';
   card.innerHTML =
     '<div class="sec" style="margin-top:12px;background:linear-gradient(160deg,#14201a,#131a30);border-color:#14b8a655">'+
     '<h2>💎 Pedido '+esc(h.numero||h.id)+' · '+esc(ck)+' · '+diaVenda(h)+
     (h.numero_loja?' <span class="badge">venda '+esc(h.numero_loja)+(linkMkt(h)?' <a class="lkM" href="'+linkMkt(h)+'" target="_blank" rel="noopener" title="abrir esta venda no '+esc(nomeCanal(canalKey(h.marketplace)))+'">↗</a>':'')+'</span>':'')+(h.nf_numero?' <span class="badge">NF '+esc(h.nf_numero)+'</span>':'')+'</h2>'+
     '<table>'+
-    linha('🏷️ Produtos (nota fiscal)', rp)+
-    linha('🚚 Frete embutido (receita)', frete)+
+    /* 19/08 — A CONTA ABERTA NÃO FECHAVA COM A M.C.: quando o marketplace informa o REPASSE
+       (escrow), a margem ancora nele, mas esta tabela seguia listando produtos da NF, frete
+       embutido e tarifa — que somavam OUTRO número. No pedido 119885 as linhas davam −4,31 e o
+       total dizia 20,47. Com repasse, a conta mostrada é a que realmente vale; produtos, frete
+       e tarifa viram REFERÊNCIA, marcados como fora da conta. */
+    (rendaCanal!=null
+      ? linha('💰 Repasse do '+esc(nomeCanal(ck))+' <span class="ok">(já líquido de tarifa e frete)</span>', rendaCanal)
+      : linha('🏷️ Produtos (nota fiscal)', rp)+linha('🚚 Frete embutido (receita)', frete))+
     linha('🏛 Imposto ('+(aliq!=null?aliq+'% de '+mesPorExtenso(mes):'<span class="warn">configure ⚙️ '+mesPorExtenso(mes)+'</span>')+')', imposto!=null?-imposto:null)+
-    linha('🏪 Tarifa '+ (feeReal!=null?'<span class="ok">REAL (ML)</span>':(feeBling!=null?'<span class="ok">REAL (Bling)</span>':(tx!=null?tx+'% est.':'<span class="warn">configure ⚙️</span>'))), tarifa!=null?-tarifa:null,
+    /* o rótulo dizia "REAL (ML)" até em pedido de Shopee/TikTok — agora nomeia o canal certo */
+    linha((rendaCanal!=null?'<span class="dim">🏪 Tarifa (já embutida no repasse)</span>':'🏪 Tarifa ')+ (rendaCanal!=null?'':(feeReal!=null?'<span class="ok">REAL ('+esc(nomeCanal(ck))+')</span>':(feeBling!=null?'<span class="ok">REAL (Bling)</span>':(tx!=null?tx+'% est.':'<span class="warn">configure ⚙️</span>')))), tarifa!=null?(rendaCanal!=null?tarifa:-tarifa):null,
       (ck==='ml'&&h.numero_loja&&feeReal==null?' <button class="btn" style="padding:3px 10px;font-size:10.5px" onclick="pegarFeeML(\''+h.id+'\',\''+esc(h.numero_loja)+'\')">buscar real</button>':''))+
     linha('📦 Custo ('+cusUn+'/'+unTot+' un. c/ custo)', (cusUn?-custo:null))+
-    (frV!=null ? linha('🚛 Frete vendedor <span class="'+(frFonte==='magalu'&&magFreteFonte==='prov'?'warn':'ok')+'">('+(frFonte==='ml'?'real ML':(frFonte==='magalu'?('Magalu '+(magFreteFonte==='prov'?'previsto':'real')):(frFonte==='bling'?'Bling':'FLEX ⚙️')))+')</span>', -frV) : (ck==='ml' ? linha('🚛 Frete vendedor <span class="ok">(real ML)</span>', null) : ''))+
+    (rendaCanal!=null&&frV!=null&&ck!=='ml' ? linha('<span class="dim">🚛 Frete vendedor (já embutido no repasse)</span>', frV) :
+     frV!=null ? linha('🚛 Frete vendedor <span class="'+(frFonte==='magalu'&&magFreteFonte==='prov'?'warn':'ok')+'">('+(frFonte==='ml'?'real ML':(frFonte==='magalu'?('Magalu '+(magFreteFonte==='prov'?'previsto':'real')):(frFonte==='bling'?'Bling':'FLEX ⚙️')))+')</span>', -frV) : (ck==='ml' ? linha('🚛 Frete vendedor <span class="ok">(real ML)</span>', null) : ''))+
     (credito!=null ? linha('💵 Estorno do ML <span class="ok">(compensação de envio)</span>', credito) : '')+
     '<tr><td style="border-top:2px solid var(--line2);font-weight:800">💎 Margem de contribuição</td>'+
     '<td class="num" style="border-top:2px solid var(--line2);font-weight:800">'+
       (mc!=null?('<span class="'+(mc>=0?'ok':'bad')+'">'+BRL(mc)+'</span><span class="dim" style="font-size:11px"> · '+(rp?Math.round(mc/rp*100):0)+'%</span>'):'<span class="warn">incompleto — resolva os "—" acima</span>')+'</td></tr>'+
+    (rendaCanal!=null ? '<tr><td colspan="2" class="dim" style="font-size:11px;padding-top:8px">📄 referência (não entra na conta acima): produtos na NF '+BRL(rp)+(frete!=null?(' · frete embutido '+BRL(frete)):'')+(tarifa!=null?(' · tarifa cobrada '+BRL(tarifa)):'')+'</td></tr>' : '')+
     '</table><div class="nota">ML: tarifa e frete do vendedor REAIS (pescados da API) quando disponíveis; demais canais: tarifa % configurada e frete recebido ≈ pago · imposto sobre o total do pedido</div></div>';
 }
 async function pegarFeeML(id, numeroLoja){
