@@ -6981,7 +6981,9 @@ async function reaplicarCusto(de, ate, empresa, opts){
   const custoDe = sk => { const c = cc[String(sk || '').trim()]; return (c && c.custo != null && isFinite(Number(c.custo)) && Number(c.custo) > 0) ? Number(c.custo) : null; };
 
   _reapC = { rodando:true, de, ate, empresa, simulacao:simular, linhas:0, atualizadas:0, sem_custo:0, erros:0,
+             linhas_ganhando_custo:0, custo_que_entra:0, linhas_com_custo_corrigido:0, efeito_real_na_margem:0,
              inicio:new Date().toISOString(), fim:null, msg:'', maiores:[] };
+  const _porSku = {};
   console.log('[CUSTO-REAP] ' + (simular ? 'SIMULANDO' : 'reaplicando') + ' custo de ' + de + ' a ' + ate + ' (' + empresa + ')');
   let dif_total = 0;
   try {
@@ -7004,8 +7006,18 @@ async function reaplicarCusto(de, ate, empresa, opts){
         if (c0 != null && Math.abs(novo - c0) <= 0.005) continue;  // já está certo
         // margem acompanha: custo maior derruba margem na mesma medida
         const mg = (l.margem == null || c0 == null) ? null : Math.round((Number(l.margem) - (novo - c0)) * 100) / 100;
-        dif_total += (novo - (c0 || 0));
-        if (_reapC.maiores.length < 20) _reapC.maiores.push({ pedido: l.numero_pedido, sku: l.sku, custo_antes: c0, custo_agora: novo, diferenca: Math.round((novo - (c0 || 0)) * 100) / 100 });
+        // 19/08 — DOIS CASOS DIFERENTES, que eu vinha somando no mesmo balde e enganavam o Diego:
+        //   (a) custo ERA nulo → a linha ganha custo, mas a margem NÃO muda (não há de onde tirar)
+        //   (b) custo estava ERRADO → a margem cai exatamente o que o custo sobe
+        // O "efeito na margem" só pode contar (b), senão promete um impacto que não acontece.
+        const _dif = novo - (c0 || 0);
+        dif_total += _dif;
+        if (c0 == null) { _reapC.linhas_ganhando_custo++; _reapC.custo_que_entra += _dif; }
+        else { _reapC.linhas_com_custo_corrigido++; _reapC.efeito_real_na_margem -= _dif; }
+        // agrupado por SKU: 20 linhas idênticas do mesmo produto não dizem nada; o que importa é
+        // QUAIS produtos mudam e quanto no total
+        const _g = _porSku[l.sku] || (_porSku[l.sku] = { sku: l.sku, linhas: 0, custo_antes: c0, custo_agora: novo, diferenca_total: 0, muda_margem: c0 != null });
+        _g.linhas++; _g.diferenca_total = Math.round((_g.diferenca_total + _dif) * 100) / 100;
         mudar.push({ id: l.id, custo: novo, margem: mg });
       }
       if (!simular) {
@@ -7024,8 +7036,14 @@ async function reaplicarCusto(de, ate, empresa, opts){
       off += 500;
     }
     _reapC.diferenca_total_de_custo = Math.round(dif_total * 100) / 100;
-    _reapC.efeito_na_margem = Math.round(-dif_total * 100) / 100;
-    _reapC.maiores.sort((a, b) => Math.abs(b.diferenca) - Math.abs(a.diferenca));
+    _reapC.custo_que_entra = Math.round(_reapC.custo_que_entra * 100) / 100;
+    _reapC.efeito_real_na_margem = Math.round(_reapC.efeito_real_na_margem * 100) / 100;
+    // o campo antigo somava os dois casos e superestimava o impacto — fica só como referência crua
+    _reapC.efeito_na_margem_BRUTO_nao_use = Math.round(-dif_total * 100) / 100;
+    _reapC.leia = 'efeito_real_na_margem é o que a margem MUDA de fato; custo_que_entra são linhas que estavam sem custo e ganham um (a margem delas fica como está)';
+    _reapC.por_sku = Object.values(_porSku).sort((a, b) => Math.abs(b.diferenca_total) - Math.abs(a.diferenca_total)).slice(0, 40);
+    _reapC.skus_afetados = Object.keys(_porSku).length;
+    delete _reapC.maiores;   // substituído pelo agrupamento por SKU
     if (!simular) { try { for (const k of Object.keys(_histCache)) delete _histCache[k]; } catch (e) {} }
     _reapC.msg = simular ? 'simulação concluída — NADA foi gravado' : 'concluído';
   } catch (e) { _reapC.msg = 'erro: ' + (e.message || e); _reapC.erros++; }
