@@ -741,7 +741,14 @@ function routes(readBody) {
           }
           if (prod && prod.id) {
             const forn = prod.fornecedor || {};
-            const cand = [forn.precoCusto, forn.precoCompra, prod.precoCusto, prod.custo].map(Number).filter(v => isFinite(v) && v > 0);
+            // 19/08: mesma armadilha do custo-sync — num produto COM COMPOSIÇÃO o
+            // `forn.precoCusto` do Bling não é o custo do kit (veio 20,40 num kit de 34,00).
+            // Aqui não dá pra somar a composição (seria uma chamada por componente, e esta rota
+            // é de resposta rápida), então o kit fica SEM custo por este caminho e quem resolve é
+            // o custo-sync, que soma a estrutura. Melhor sem custo do que com custo errado.
+            const _cmp = (prod.estrutura && (prod.estrutura.componentes || prod.estrutura.itens)) || prod.composicao || prod.componentes || null;
+            const cand = (Array.isArray(_cmp) && _cmp.length) ? []
+                       : [forn.precoCusto, forn.precoCompra, prod.precoCusto, prod.custo].map(Number).filter(v => isFinite(v) && v > 0);
             // 29/07: +nome. A rota nunca devolvia o NOME do produto, e por isso o dashboard não
             // conseguia preencher o título nos cartões de venda por esse caminho.
             ids[sku] = { id: prod.id, nome: (prod.nome || null), preco: (prod.preco != null && isFinite(Number(prod.preco))) ? Number(prod.preco) : null, custo: cand.length ? cand[0] : null };

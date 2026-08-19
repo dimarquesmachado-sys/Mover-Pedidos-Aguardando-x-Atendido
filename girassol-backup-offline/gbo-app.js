@@ -1135,7 +1135,14 @@ function routes(readBody) {
           }
           if (prod && prod.id) {
             const forn = prod.fornecedor || {};
-            const cand = [forn.precoCusto, forn.precoCompra, prod.precoCusto, prod.custo].map(Number).filter(v => isFinite(v) && v > 0);
+            // 19/08: mesma armadilha do custo-sync — num produto COM COMPOSIÇÃO o
+            // `forn.precoCusto` do Bling não é o custo do kit (veio 20,40 num kit de 34,00).
+            // Aqui não dá pra somar a composição (seria uma chamada por componente, e esta rota
+            // é de resposta rápida), então o kit fica SEM custo por este caminho e quem resolve é
+            // o custo-sync, que soma a estrutura. Melhor sem custo do que com custo errado.
+            const _cmp = (prod.estrutura && (prod.estrutura.componentes || prod.estrutura.itens)) || prod.composicao || prod.componentes || null;
+            const cand = (Array.isArray(_cmp) && _cmp.length) ? []
+                       : [forn.precoCusto, forn.precoCompra, prod.precoCusto, prod.custo].map(Number).filter(v => isFinite(v) && v > 0);
             // 29/07: +nome. A rota nunca devolvia o NOME do produto, e por isso o dashboard não
             // conseguia preencher o título nos cartões de venda por esse caminho.
             ids[sku] = { id: prod.id, nome: (prod.nome || null), preco: (prod.preco != null && isFinite(Number(prod.preco))) ? Number(prod.preco) : null, custo: cand.length ? cand[0] : null };
@@ -4961,7 +4968,20 @@ async function custoSync(fresh) {
       }
       if (prod && prod.id) {
         const forn = prod.fornecedor || {};
-        let cand = [forn.precoCusto, forn.precoCompra, forn.preco, forn.custo, prod.precoCusto, prod.custo, prod.precoCompra].map(Number).filter(v => isFinite(v) && v > 0);
+        // ⚠️ 19/08 — KIT: A COMPOSIÇÃO MANDA, NÃO O CAMPO DO FORNECEDOR.
+        // Caso real (AMB, 10xE14-5W-3000K-BIV): a tela do Bling mostra fornecedor 34,00 e
+        // "Preço Total de Custo" 34,00 (10 × 3,40), mas a API devolve no bloco `fornecedor` do
+        // KIT: precoCusto **20,40** e precoCompra **3,40** — dois números que não são o custo do
+        // kit (o 3,40 é o do COMPONENTE). Como `forn.precoCusto` era o primeiro candidato, o
+        // dashboard gravava 20,40 e a margem do kit saía inflada em quase R$ 14 por venda.
+        // O próprio Bling calcula o custo de um produto com composição SOMANDO os componentes —
+        // é o que a tela mostra. Fazemos igual: havendo estrutura, ela decide; os campos do
+        // fornecedor viram apenas reserva para quando a composição não fechar.
+        const _comps0 = (prod.estrutura && (prod.estrutura.componentes || prod.estrutura.itens))
+                     || prod.composicao || prod.componentes || null;
+        const _temComposicao = Array.isArray(_comps0) && _comps0.length > 0;
+        let cand = _temComposicao ? [] :
+                   [forn.precoCusto, forn.precoCompra, forn.preco, forn.custo, prod.precoCusto, prod.custo, prod.precoCompra].map(Number).filter(v => isFinite(v) && v > 0);
         if (!cand.length) {
           const rf = await bg2(`/produtos/fornecedores?idProduto=${prod.id}&limite=5`);
           const arr = (rf.ok && rf.data && rf.data.data) || [];
@@ -5028,6 +5048,13 @@ async function custoSync(fresh) {
             }
             if (completo && soma > 0) { cand = [Math.round(soma * 10000) / 10000]; console.log('[CUSTO] ' + sku + ': custo somado da COMPOSIÇÃO = ' + cand[0]); }
           }
+        }
+        // a composição não fechou (componente sem custo): aí sim vale o que o fornecedor traz —
+        // é aproximação, mas melhor que deixar o kit sem custo nenhum.
+        if (!cand.length && _temComposicao) {
+          cand = [forn.precoCusto, forn.precoCompra, forn.preco, forn.custo, prod.precoCusto, prod.custo, prod.precoCompra]
+                 .map(Number).filter(v => isFinite(v) && v > 0);
+          if (cand.length) console.log('[CUSTO] ' + sku + ': composição incompleta — usando campo do fornecedor (' + cand[0] + ') como reserva');
         }
         cc[sku] = { id: prod.id, preco: (prod.preco != null && isFinite(Number(prod.preco))) ? Number(prod.preco) : null, custo: cand.length ? Math.round(cand[0] * 10000) / 10000 : null, ts: Date.now() };
         _cst.ok++;
