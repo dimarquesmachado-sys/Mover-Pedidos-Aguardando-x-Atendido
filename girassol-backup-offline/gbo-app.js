@@ -1928,7 +1928,9 @@ function routes(readBody) {
                                    lista = Object.keys(cfgT.aliquotas || {}).filter(x => /^\d{4}-\d{2}$/.test(x)).sort(); }
       else lista = mm.split(',').map(x => x.trim()).filter(x => /^\d{4}-\d{2}$/.test(x));
       if (!lista.length) { json(res, 400, { ok: false, erro: 'informe ?meses=AAAA-MM,AAAA-MM ou ?meses=todos' }); return true; }
-      reaplicarImposto(lista, 'girassol').catch(e => console.log('[FISCAL] \u2717 ' + e.message));
+      // Codex (P2): a rota manual não escoava a fila — uma edição salva durante ESTA rodada ficava
+      // presa até a próxima reaplicação por outro caminho. Todo disparo escoa ao terminar.
+      reaplicarImposto(lista, 'girassol').then(escoarFilaReap).catch(e => console.log('[FISCAL] \u2717 ' + e.message));
       json(res, 202, { ok: true, msg: 'reaplicando imposto em background', meses: lista, status: '/girassol-backup-offline/reaplicar-status' });
       return true;
     }
@@ -3513,7 +3515,13 @@ function _migrarAliquotas() {
     // uma vez só, e uma decisão posterior dele sobrevive a qualquer reinício.
     const MARCA = 'aliq-2026-07-14.4007';
     if (cfg.migracoes && cfg.migracoes[MARCA]) return;
+    // Codex (P1): na 1ª tentativa o arquivo JÁ é gravado com julho em 14,4007 — então, se a
+    // reaplicação falhar, no boot seguinte nenhum dos ramos abaixo reelege julho (o valor já está
+    // certo lá) e o histórico fica com o imposto velho para sempre. A lista de pendentes é
+    // persistida no próprio arquivo e tem prioridade sobre a detecção.
+    const _pendentes = Array.isArray(cfg.migracao_pendente) ? cfg.migracao_pendente.slice() : null;
     let mudou = false; const mesesTocados = [];
+    if (_pendentes && _pendentes.length) { mesesTocados.push(..._pendentes); mudou = true; console.log('[fiscal] retomando migração pendente: ' + _pendentes.join(', ')); }
     if (Number(cfg.aliquotas['2026-07']) === 14.1) { cfg.aliquotas['2026-07'] = 14.4007; mudou = true; mesesTocados.push('2026-07'); }
     // sem valor salvo para julho, o histórico usou o padrão antigo (14,1) — reaplicar mesmo assim
     else if (cfg.aliquotas['2026-07'] == null) { mudou = true; mesesTocados.push('2026-07'); }
@@ -3537,6 +3545,7 @@ function _migrarAliquotas() {
     // /plano-compra leem a `margem` GRAVADA (não recalculam na leitura). Sem reaplicar, a migração
     // arrumava a tela e deixava o planejamento de compra decidindo por número velho.
     // A marca só é gravada DEPOIS que a reaplicação termina — se falhar, o próximo boot tenta de novo.
+    cfg.migracao_pendente = Array.from(new Set(mesesTocados)).filter(m => /^\d{4}-\d{2}$/.test(m)).sort();
     writeJson(f, cfg);   // as alíquotas corrigidas já valem, mesmo que a reaplicação demore
     console.log('[fiscal] alíquotas migradas: julho 14,1 -> 14,4007 e meses zerados removidos; reaplicando no histórico…');
     const _mesesMig = Array.from(new Set(mesesTocados)).filter(m => /^\d{4}-\d{2}$/.test(m)).sort();
@@ -3562,6 +3571,7 @@ function _migrarAliquotas() {
         const cfg2 = readJson(f, cfg);
         cfg2.migracoes = cfg2.migracoes || {};
         cfg2.migracoes[MARCA] = new Date().toISOString();
+        delete cfg2.migracao_pendente;   // só agora: reaplicação confirmada
         writeJson(f, cfg2);
         console.log('[fiscal] reaplicação concluída em ' + _mesesMig.join(', ') + ' — migração marcada');
       })
