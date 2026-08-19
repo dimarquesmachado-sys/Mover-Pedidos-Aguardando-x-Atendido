@@ -4544,6 +4544,7 @@ async function varrerCancelados(dias, empresa) {
 
 let _reap = { rodando:false, meses:[], mesAtual:null, linhas:0, atualizadas:0, erros:0, inicio:null, fim:null, msg:'' };
 const _filaReap = [];   // meses que o Diego salvou enquanto outra reaplicação rodava
+let _falhasFila = 0, _timerFila = null;   // espera crescente entre tentativas da fila
 function escoarFilaReap(){
   if (_reap.rodando || !_filaReap.length) return;
   const meses = _filaReap.splice(0, _filaReap.length);
@@ -4551,12 +4552,25 @@ function escoarFilaReap(){
   // Codex (P2): `reaplicarImposto` resolve normalmente mesmo com erro (vai em st.erros), e eu já
   // tinha tirado os meses da fila — eles sumiam em silêncio e o histórico ficava com o imposto
   // velho sem ninguém saber. Falhou, volta pra fila.
+  // Codex (P1): eu devolvia os meses à fila e chamava o escoador NA HORA — se o Supabase estiver
+  // fora, a rodada falha, reenfileira, tenta de novo, e assim indefinidamente: uma enxurrada de
+  // requisições e log durante toda a queda. Agora a nova tentativa espera, com espera crescente,
+  // e nunca é imediata.
   const devolver = (motivo) => {
     for (const m of meses) if (!_filaReap.includes(m)) _filaReap.unshift(m);
-    console.error('[FISCAL] fila: ' + motivo + ' — meses devolvidos para nova tentativa: ' + meses.join(', '));
+    _falhasFila++;
+    const espera = Math.min(15 * 60000, 30000 * Math.pow(2, _falhasFila - 1));   // 30s, 1min, 2min… até 15min
+    console.error('[FISCAL] fila: ' + motivo + ' — meses devolvidos; nova tentativa em ' + Math.round(espera / 1000) + 's: ' + meses.join(', '));
+    if (_timerFila) clearTimeout(_timerFila);
+    _timerFila = setTimeout(() => { _timerFila = null; escoarFilaReap(); }, espera);
+    if (_timerFila.unref) _timerFila.unref();   // não segura o processo
   };
   return reaplicarImposto(meses, 'girassol')
-    .then(st => { if (st && Number(st.erros || 0) > 0) devolver(Number(st.erros) + ' erro(s)'); return escoarFilaReap(); })
+    .then(st => {
+      if (st && Number(st.erros || 0) > 0) { devolver(Number(st.erros) + ' erro(s)'); return; }
+      _falhasFila = 0;   // rodada limpa: a espera volta ao início
+      return escoarFilaReap();
+    })
     .catch(e => devolver(e.message || String(e)));
 }
 
