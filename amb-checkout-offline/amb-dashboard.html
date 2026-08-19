@@ -1708,7 +1708,11 @@ function _tarifaVeioDoBling(canal, valor, comissao){
   if (canal !== 'tiktok') return false;
   const v = Number(valor) || 0, c = Number(comissao) || 0;
   if (!(v > 0) || !(c > 0)) return false;
-  const tolerancia = Math.max(0.10, v * 0.005);
+  /* Codex (P2): a tolerância proporcional (0,5%) chega a R$ 2,00 num pedido de R$ 400 — e a
+     diferença entre a taxa do Bling (12%) e a real sem afiliado (12% + R$ 2 fixos) é exatamente
+     R$ 2,00. Ou seja: em ticket alto eu classificaria uma comissão JÁ LIQUIDADA como provisória.
+     A tolerância fica presa abaixo do fixo, com folga: no máximo R$ 1,00. */
+  const tolerancia = Math.min(1.00, Math.max(0.10, v * 0.005));
   return Math.abs(c - v * 0.12) <= tolerancia;
 }
 const _BLING_SUBESTIMA = { tiktok: { real_pct: 'maior — quanto, depende do ticket e do afiliado (a taxa fixa por item pesa mais em pedido pequeno)', bling_pct: '~12%' } };
@@ -2833,7 +2837,11 @@ async function baixarHistoricoCompleto(iv){
           String(o.data||'').split('-').reverse().join('/'),
           o.numero, o.numero_loja||'', nomeCanal(canalKey(o.canal)),
           (o.itens||[]).map(i=>(Number(i.qtd)||1)+'x '+(i.sku||'')).join(' | '),
-          o.un, o.vnota, o.vprod, o.custo, o.imposto, o.comissao, o.frete, o.margem, pcm
+          o.un, o.vnota, o.vprod, o.custo, o.imposto, o.comissao, o.frete, o.margem, pcm,
+          /* Codex (P2, PR#138): a planilha levava a mesma comissão e margem otimistas SEM nenhuma
+             marca — e é justamente nela que o Diego soma coisas por fora. Coluna própria dizendo
+             se aquela linha ainda está com a tarifa provisória do Bling. */
+          (_tarifaVeioDoBling(canalKey(o.canal), o.vnota, o.comissao) ? 'PROVISORIA' : '')
         ]);
         if(btns.length) btns[0].textContent = '⏳ '+N(linhas.length)+' vendas…';
       }
@@ -2841,7 +2849,7 @@ async function baixarHistoricoCompleto(iv){
       if(d.total_paginas && pg>=d.total_paginas) break;
     }
     baixarPlanilha('analise-vendas-'+(anCanal?(canalArquivo(anCanal)+'-'):'')+iv.de+'_a_'+iv.ate,
-      ['Data','Pedido','Venda no marketplace','Canal','Produtos','Unidades','Venda (NF)','Produtos (R$)','Custo','Imposto','Comissao','Frete vendedor','Margem (M.C.)','Margem %'],
+      ['Data','Pedido','Venda no marketplace','Canal','Produtos','Unidades','Venda (NF)','Produtos (R$)','Custo','Imposto','Comissao','Frete vendedor','Margem (M.C.)','Margem %','Tarifa provisoria?'],
       linhas);
   }catch(e){ alert('não consegui montar a planilha: '+(e.message||e)); }
   btns.forEach(b=>{ b.disabled=false; b.textContent=b.dataset.txt||'⬇︎ Excel'; });
