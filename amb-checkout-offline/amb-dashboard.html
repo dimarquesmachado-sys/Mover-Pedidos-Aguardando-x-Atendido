@@ -934,7 +934,16 @@ async function carregarHistorico(de, ate){
   try{
     const r = await fetch(MOD+'/historico-longo?de='+de+'&ate='+ate, {credentials:'same-origin'});
     const d = await r.json().catch(()=>null);
-    if(d && d.ok){ HIST = d; _histFalhou = null; if(el) el.innerHTML=''; render(); renderAnalise(); restaurarAncora(); setTimeout(restaurarAncora,150); }
+    if(d && d.ok){
+      HIST = d; _histFalhou = null; if(el) el.innerHTML='';
+      /* Codex (P2, PR#135): a trava tem que cair ANTES de repintar. Se o usuário trocou de período
+         no meio da primeira busca, a segunda chamada voltou vazia na trava; com a trava ainda em pé
+         o render também não conseguia pedir o período NOVO, e a tela ficava em "carregando" pra
+         sempre — sem nenhuma requisição viva. Soltando aqui, o render pede o intervalo atual. */
+      _histCarregando = false;
+      render(); renderAnalise(); restaurarAncora(); setTimeout(restaurarAncora,150);
+      return;
+    }
     else { /* Codex (P2, PR#135): sem marcar a falha, a faixa ficava pedindo "aguarde" pra sempre
               — nada estava carregando. Agora a falha é registrada e a tela repintada pra dizer isso. */
       _histFalhou = { de:de, ate:ate, msg:((d && d.erro) ? String(d.erro) : '') };
