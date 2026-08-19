@@ -122,7 +122,8 @@
   .sku{font-weight:700} .desc{font-size:11px;color:var(--mut);line-height:1.3;
         display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden;
         white-space:normal;word-break:break-word}
-  .mut{color:var(--mut)} .dim{color:var(--dim)} .ok{color:var(--ok)} .warn{color:var(--warn)} .bad{color:var(--bad)}
+  .cvS{opacity:.65;font-size:11px;display:inline-block;width:9px}
+    .mut{color:var(--mut)} .dim{color:var(--dim)} .ok{color:var(--ok)} .warn{color:var(--warn)} .bad{color:var(--bad)}
   .cvg{font-size:10px;color:var(--warn);background:#f59e0b14;border:1px solid #f59e0b33;border-radius:5px;padding:1px 5px;margin-left:6px;white-space:nowrap}
   .st{display:inline-block;font-size:10.5px;font-weight:700;border-radius:6px;padding:2px 8px}
   .st.ok{background:#22c55e1a;color:var(--ok2);border:1px solid #22c55e33}
@@ -397,7 +398,7 @@ const MOD = '/amb-checkout-offline';
     return _f(u, o);
   };
 })();
-const DASH_BUILD = 'a27';
+const DASH_BUILD = 'a29';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -2455,9 +2456,12 @@ function _bqRender(q, hits, hh, erroH){
         const P = calcPL(h);
         if(P.mc==null) return '<td class="num dim" title="ainda falta detalhe ou custo deste pedido">—</td></tr>';
         const pc = (P.rp>0) ? Math.round(P.mc/P.rp*100) : null;
-        return '<td class="num"><a href="javascript:void(0)" onclick="abrirPL(\''+esc(h.id)+'\')" '+
+        /* 19/08 (Diego): o valor abre a conta aberta, mas NADA na tela dizia isso — ele só
+           descobriu clicando por acaso. A setinha ▸ marca o que é expansível, e ela gira pra ▾
+           quando a conta está aberta (o abrirPL cuida disso pelo id do <a>). */
+        return '<td class="num"><a id="pl_'+esc(h.id)+'" href="javascript:void(0)" onclick="abrirPL(\''+esc(h.id)+'\')" '+
                'style="text-decoration:none;font-weight:800" class="'+(P.mc>=0?'ok':'bad')+'" title="clique p/ ver a conta aberta">'+
-               BRL(P.mc)+'</a>'+(pc!=null?('<div class="mut" style="font-size:10px">'+pc+'%</div>'):'')+'</td></tr>';
+               '<span class="cvS">\u25b8</span> '+BRL(P.mc)+'</a>'+(pc!=null?('<div class="mut" style="font-size:10px">'+pc+'%</div>'):'')+'</td></tr>';
       })()).join('')+
     extra.map(h=>{
       const lm = linkMkt({marketplace:h.canal, numero_loja:h.numero_loja});
@@ -2472,7 +2476,7 @@ function _bqRender(q, hits, hh, erroH){
         '<td class="num">'+(h.vnota!=null?BRL(Number(h.vnota)):'<span class="dim">—</span>')+'</td>'+
         (h.mc==null
           ? '<td class="num dim" title="alguma linha deste pedido está sem margem no histórico">—</td></tr>'
-          : '<td class="num"><a href="javascript:void(0)" onclick="abrirPLHist(\''+esc(h.numero)+'\')" style="text-decoration:none;font-weight:800" class="'+(h.mc>=0?'ok':'bad')+'" title="'+(h.sem_custo?'há item SEM custo no cadastro — margem parcial · ':'')+'clique p/ ver a conta do histórico">'+BRL(h.mc)+'</a>'+(pc!=null?('<div class="mut" style="font-size:10px">'+pc+'%</div>'):'')+'</td></tr>');
+          : '<td class="num"><a id="plh_'+esc(h.numero)+'" href="javascript:void(0)" onclick="abrirPLHist(\''+esc(h.numero)+'\')" style="text-decoration:none;font-weight:800" class="'+(h.mc>=0?'ok':'bad')+'" title="'+(h.sem_custo?'há item SEM custo no cadastro — margem parcial · ':'')+'clique p/ ver a conta do histórico">'+'<span class="cvS">\u25b8</span> '+BRL(h.mc)+'</a>'+(pc!=null?('<div class="mut" style="font-size:10px">'+pc+'%</div>'):'')+'</td></tr>');
     }).join('')+'</table>'+
     (hh===null?'<div class="mut" style="font-size:11px;padding:6px 2px">buscando também no histórico…</div>'
       : (erroH?'<div class="mut" style="font-size:11px;padding:6px 2px">⚠ histórico indisponível agora ('+esc(erroH)+') — mostrando só o período recente</div>':''));
@@ -2480,6 +2484,7 @@ function _bqRender(q, hits, hh, erroH){
 function abrirPLHist(num){
   const h = (window._bhHist||{})[String(num)]; if(!h) return;
   const card=$('plCard');
+  setaAberta('plh_'+String(num));
   const linha=(l,v)=>'<tr><td>'+l+'</td><td class="num">'+(v!=null?BRL(v):'<span class="dim">—</span>')+'</td></tr>';
   card.innerHTML =
     '<div class="sec" style="margin-top:12px;background:linear-gradient(160deg,#14201a,#131a30);border-color:#14b8a655">'+
@@ -2507,8 +2512,27 @@ async function abrirPL(id){
   if(faltam.length){ try{ const r=await fetch(MOD+'/sku-info',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({skus:faltam})}); const d=await r.json(); if(d&&d.skus) Object.assign(SKUINFO,d.skus); }catch(e){} }
   renderPL(h);
 }
+/* 19/08: marca qual linha está expandida — a seta da linha aberta vira ▾ e as outras voltam a ▸.
+   Sem isso a setinha diria "dá pra abrir" mas nunca "está aberto". */
+function setaAberta(idDoLink){
+  document.querySelectorAll('.cvS').forEach(e=>{ e.textContent='\u25b8'; });   // a classe só existe nesses links, não precisa de escopo por card
+  const a = idDoLink ? document.getElementById(idDoLink) : null;
+  const s = a ? a.querySelector('.cvS') : null;
+  if(s) s.textContent='\u25be';
+}
+/* 19/08 (Diego): a conta aberta mostrava o mês como "2026-08" — formato de máquina.
+   Vira "Agosto 2026". Aceita 'AAAA-MM' e devolve o próprio texto se vier em outro formato. */
+function mesPorExtenso(m){
+  const t = String(m||'').trim();
+  const p = t.match(/^(\d{4})-(\d{2})$/);
+  if(!p) return t;
+  const N=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+  const i = Number(p[2]) - 1;
+  return (i>=0 && i<12) ? (N[i]+' '+p[1]) : t;
+}
 function renderPL(h){
   const card=$('plCard');
+  setaAberta('pl_'+String(h.id));
   const {mes,ck,rp,tot,frete,aliq,imposto,feeReal,feeBling,tx,tarifa,custo,cusUn,unTot,frV,frFonte,credito,completo,mc,magFreteFonte} = calcPL(h);
   const linha=(l,v,extra)=>'<tr><td>'+l+'</td><td class="num">'+(v!=null?BRL(v):'<span class="dim">—</span>')+(extra||'')+'</td></tr>';
   card.innerHTML =
@@ -2518,7 +2542,7 @@ function renderPL(h){
     '<table>'+
     linha('🏷️ Produtos (nota fiscal)', rp)+
     linha('🚚 Frete embutido (receita)', frete)+
-    linha('🏛 Imposto ('+(aliq!=null?aliq+'% de '+mes:'<span class="warn">configure ⚙️ '+mes+'</span>')+')', imposto!=null?-imposto:null)+
+    linha('🏛 Imposto ('+(aliq!=null?aliq+'% de '+mesPorExtenso(mes):'<span class="warn">configure ⚙️ '+mesPorExtenso(mes)+'</span>')+')', imposto!=null?-imposto:null)+
     linha('🏪 Tarifa '+ (feeReal!=null?'<span class="ok">REAL (ML)</span>':(feeBling!=null?'<span class="ok">REAL (Bling)</span>':(tx!=null?tx+'% est.':'<span class="warn">configure ⚙️</span>'))), tarifa!=null?-tarifa:null,
       (ck==='ml'&&h.numero_loja&&feeReal==null?' <button class="btn" style="padding:3px 10px;font-size:10.5px" onclick="pegarFeeML(\''+h.id+'\',\''+esc(h.numero_loja)+'\')">buscar real</button>':''))+
     linha('📦 Custo ('+cusUn+'/'+unTot+' un. c/ custo)', (cusUn?-custo:null))+
