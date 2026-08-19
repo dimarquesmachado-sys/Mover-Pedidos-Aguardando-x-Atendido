@@ -3490,8 +3490,12 @@ async function buscarDevolucoesML(tokenML, dorme) {
 function _migrarAliquotas() {
   try {
     const f = path.join(CACHE_DIR, '_config-fiscal.json');
-    const cfg = readJson(f, null);
-    if (!cfg || !cfg.aliquotas) return;
+    // Codex (P1): quem NUNCA salvou o ⚙️ (sem arquivo, ou com `aliquotas` vazio) também precisa da
+    // reaplicação — as linhas de julho no Supabase foram gravadas com o padrão ANTIGO de 14,1%.
+    // Eu saía fora nesses casos, deixando justamente as instalações que só usaram o padrão de
+    // fábrica com o imposto velho no histórico e na margem que a previsão/plano de compra leem.
+    const cfg = readJson(f, null) || { aliquotas: {} };
+    if (!cfg.aliquotas) cfg.aliquotas = {};
     // Codex (P2, PR#140): eu gravava `migrado_em` mas nunca conferia — a migração rodava a CADA
     // boot. Se o Diego salvasse julho de volta em 14,1 de propósito, o próximo restart desfaria a
     // escolha dele, contrariando a regra de que o que ele salva manda. Marcador versionado: roda
@@ -3500,6 +3504,8 @@ function _migrarAliquotas() {
     if (cfg.migracoes && cfg.migracoes[MARCA]) return;
     let mudou = false; const mesesTocados = [];
     if (Number(cfg.aliquotas['2026-07']) === 14.1) { cfg.aliquotas['2026-07'] = 14.4007; mudou = true; mesesTocados.push('2026-07'); }
+    // sem valor salvo para julho, o histórico usou o padrão antigo (14,1) — reaplicar mesmo assim
+    else if (cfg.aliquotas['2026-07'] == null) { mudou = true; mesesTocados.push('2026-07'); }
     for (const [k, v] of Object.entries(cfg.aliquotas)) {
       if (!(Number(v) > 0)) { delete cfg.aliquotas[k]; mudou = true; mesesTocados.push(k); }
     }
@@ -3517,9 +3523,25 @@ function _migrarAliquotas() {
     writeJson(f, cfg);   // as alíquotas corrigidas já valem, mesmo que a reaplicação demore
     console.log('[fiscal] alíquotas migradas: julho 14,1 -> 14,4007 e meses zerados removidos; reaplicando no histórico…');
     const _mesesMig = Array.from(new Set(mesesTocados)).filter(m => /^\d{4}-\d{2}$/.test(m)).sort();
+    const _t0Mig = Date.now();   // marco pra saber se o estado devolvido é DESTA reaplicação
     Promise.resolve()
       .then(() => reaplicarImposto(_mesesMig, 'girassol'))
-      .then(() => {
+      .then((st) => {
+        // Codex (P1): `reaplicarImposto` resolve normalmente mesmo com falha (ela vai em _reap.erros),
+        // e eu marcava sucesso do mesmo jeito. Um Supabase instável no boot deixaria julho com o
+        // imposto velho PARA SEMPRE, porque o próximo boot pularia a migração. Só marca quando o
+        // resultado veio sem erro E de fato rodou.
+        // buraco que eu mesmo deixaria: `reaplicarImposto` sai cedo devolvendo o _reap ANTIGO
+        // quando já há outra reaplicação rodando ou o Supabase não está configurado — um estado
+        // de sucesso VELHO marcaria a migração sem nada ter sido feito agora. Por isso confiro
+        // que o `inicio` é desta chamada.
+        const erros = st && Number(st.erros || 0);
+        const desta = st && st.inicio && Date.parse(st.inicio) >= _t0Mig;
+        const rodou = st && st.fim && desta;
+        if (erros > 0 || !rodou) {
+          console.error('[fiscal] reaplicação não confirmada (' + (erros > 0 ? erros + ' erro(s)' : (desta ? 'não terminou' : 'estado de outra execução')) + ') — marca NÃO gravada, o próximo boot tenta de novo');
+          return;
+        }
         const cfg2 = readJson(f, cfg);
         cfg2.migracoes = cfg2.migracoes || {};
         cfg2.migracoes[MARCA] = new Date().toISOString();
