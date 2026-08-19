@@ -3464,7 +3464,10 @@ async function buscarDevolucoesML(tokenML, dorme) {
 }
 
 // ─── BACKFILL do histórico de vendas pro Supabase ────────────────────────────────────────────
-const DEFAULT_ALIQ_BK = { '2026-01':11.409280, '2026-02':11.3254, '2026-03':12.3402, '2026-04':13.6001, '2026-05':13.9149, '2026-06':14.056, '2026-07':14.1, '2026-08':14.1, '2026-09':14.1, '2026-10':14.1, '2026-11':14.1, '2026-12':14.1 };
+// 19/08 — julho FECHOU em 14,4007% (Simples Nacional da Girassol; era 14,1 de estimativa) e
+// agosto fica pré-definido em 15% a pedido do Diego. Os meses seguintes seguem o mesmo 15%
+// como palpite, até cada apuração sair. O ⚙️ (_config-fiscal.json) sempre tem prioridade.
+const DEFAULT_ALIQ_BK = { '2026-01':11.409280, '2026-02':11.3254, '2026-03':12.3402, '2026-04':13.6001, '2026-05':13.9149, '2026-06':14.056, '2026-07':14.4007, '2026-08':15, '2026-09':15, '2026-10':15, '2026-11':15, '2026-12':15 };
 const _histCache = {};   // agregados do Supabase por período (10 min)
 let _backfill = { rodando:false, empresa:null, de:null, ate:null, pagina:0, pedidos:0, itens:0, gravados:0, erros:0, fase:'parado', inicio:null, fim:null, msg:'' };
 
@@ -3697,7 +3700,7 @@ async function backfillVendas(de, ate, empresa){
     _backfill.shopee = { escrow_fechou: 0, escrow_com_sobra: 0, escrow_sem_resposta: 0, escrow_erro: 0,
                          comissao_somada: 0, comissao_que_o_bling_dava: 0, frete_liquido_visto: 0,
                          modo: SHOPEE_TODOS ? 'todos os pedidos' : 'so quando o Bling nao trouxe taxa' };
-    const aliqBk = mes => (cfg.aliquotas && cfg.aliquotas[mes]!=null ? Number(cfg.aliquotas[mes]) : (DEFAULT_ALIQ_BK[mes]!=null?DEFAULT_ALIQ_BK[mes]:14.1));
+    const aliqBk = mes => (cfg.aliquotas && cfg.aliquotas[mes]!=null ? Number(cfg.aliquotas[mes]) : (DEFAULT_ALIQ_BK[mes]!=null?DEFAULT_ALIQ_BK[mes]:15));   // 19/08: o último recurso era 14,1 (estimativa velha de julho); virou 15, o padrão atual
     // 11/08 (herdado da AMB, achado pelo Codex): NADA é apagado antes da coleta terminar.
     // A versão antiga deletava o período aqui e gravava página a página — uma queda do Bling
     // no meio deixava o histórico MEIO VAZIO. Foi exatamente o que aconteceu em 03/08 e

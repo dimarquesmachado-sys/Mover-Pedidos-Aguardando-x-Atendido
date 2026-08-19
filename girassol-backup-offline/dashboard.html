@@ -396,7 +396,7 @@ const MOD = '/girassol-backup-offline';
     return _f(u, o);
   };
 })();
-const DASH_BUILD = 'd222';
+const DASH_BUILD = 'd223';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -405,7 +405,10 @@ let SKUINFO = {}, skuInfoCarregado = false, _skuLoading = false;
 let CFG = { aliquotas:{}, taxas:{}, ciencia_aliq:{} };   // alíquota Simples por mês (YYYY-MM: %) + tarifa % por canal + ciência das herdadas
 let MAG_NIVEL = '50';   // nível de desconto do frete Magalu (coparticipação): 'sem'|'25'|'50' (default 50%)
 // Alíquotas 2026 da GIRASSOL vindas de fábrica (editáveis no ⚙️; o que você salvar SOBREPÕE estas):
-const DEFAULT_ALIQ = { '2026-01':11.409280, '2026-02':11.3254, '2026-03':12.3402, '2026-04':13.6001, '2026-05':13.9149, '2026-06':14.056, '2026-07':14.1 };
+/* 19/08 — julho FECHOU: o Simples Nacional da Girassol saiu em 14,4007% (era 14,1 de estimativa).
+   Agosto fica pré-definido em 15% até a apuração sair, a pedido do Diego. Estes são PADRÕES:
+   o que ele salvar no ⚙️ (_config-fiscal.json) continua mandando. */
+const DEFAULT_ALIQ = { '2026-01':11.409280, '2026-02':11.3254, '2026-03':12.3402, '2026-04':13.6001, '2026-05':13.9149, '2026-06':14.056, '2026-07':14.4007, '2026-08':15 };
 // ── 05/08 (d189): ALIQUOTA ZERO E UMA BOMBA-RELOGIO ────────────────────────────
 // O ⚙️ salva 0 quando o campo tem 0, e set/out/nov/dez de 2026 estao zerados. No dia
 // 1º de setembro o imposto de TODA venda sairia ZERO e a margem apareceria inflada em
