@@ -398,7 +398,7 @@ const MOD = '/amb-checkout-offline';
     return _f(u, o);
   };
 })();
-const DASH_BUILD = 'a28';
+const DASH_BUILD = 'a29';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -2520,6 +2520,16 @@ function setaAberta(idDoLink){
   const s = a ? a.querySelector('.cvS') : null;
   if(s) s.textContent='\u25be';
 }
+/* 19/08 (Diego): a conta aberta mostrava o mês como "2026-08" — formato de máquina.
+   Vira "Agosto 2026". Aceita 'AAAA-MM' e devolve o próprio texto se vier em outro formato. */
+function mesPorExtenso(m){
+  const t = String(m||'').trim();
+  const p = t.match(/^(\d{4})-(\d{2})$/);
+  if(!p) return t;
+  const N=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+  const i = Number(p[2]) - 1;
+  return (i>=0 && i<12) ? (N[i]+' '+p[1]) : t;
+}
 function renderPL(h){
   const card=$('plCard');
   setaAberta('pl_'+String(h.id));
@@ -2532,7 +2542,7 @@ function renderPL(h){
     '<table>'+
     linha('🏷️ Produtos (nota fiscal)', rp)+
     linha('🚚 Frete embutido (receita)', frete)+
-    linha('🏛 Imposto ('+(aliq!=null?aliq+'% de '+mes:'<span class="warn">configure ⚙️ '+mes+'</span>')+')', imposto!=null?-imposto:null)+
+    linha('🏛 Imposto ('+(aliq!=null?aliq+'% de '+mesPorExtenso(mes):'<span class="warn">configure ⚙️ '+mesPorExtenso(mes)+'</span>')+')', imposto!=null?-imposto:null)+
     linha('🏪 Tarifa '+ (feeReal!=null?'<span class="ok">REAL (ML)</span>':(feeBling!=null?'<span class="ok">REAL (Bling)</span>':(tx!=null?tx+'% est.':'<span class="warn">configure ⚙️</span>'))), tarifa!=null?-tarifa:null,
       (ck==='ml'&&h.numero_loja&&feeReal==null?' <button class="btn" style="padding:3px 10px;font-size:10.5px" onclick="pegarFeeML(\''+h.id+'\',\''+esc(h.numero_loja)+'\')">buscar real</button>':''))+
     linha('📦 Custo ('+cusUn+'/'+unTot+' un. c/ custo)', (cusUn?-custo:null))+
