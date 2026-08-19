@@ -404,7 +404,7 @@ const MOD = '/amb-checkout-offline';
     return _f(u, o);
   };
 })();
-const DASH_BUILD = 'a31';
+const DASH_BUILD = 'a32';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -513,7 +513,19 @@ function prepararVendas(){
   // provisórias DIRETO DO ML (numero null, sem_bling) entram na tela por AQUI, e só
   // se o mesmo numero_loja ainda não estiver no histórico (sem contagem dupla).
   const _nljs = new Set((DADOS||[]).map(h=>String(h.numero_loja||'')).filter(Boolean));
-  SINT = (VENDAS||[]).filter(v=>v&&((v.numero!=null&&!_nums.has(String(v.numero)))||(v.sem_bling&&v.numero==null&&v.numero_loja&&!_nljs.has(String(v.numero_loja))))).map(v=>({
+  /* ═══════════════ 19/08 — "BIPAGEM MORRE NO DASHBOARD" (regra do Diego) ═══════════════
+   A venda ainda não bipada montava a linha por uma LISTA MANUAL de campos, e o pedido bipado
+   por outro caminho. Toda vez que um campo financeiro novo nascia (renda_canal, frete_recebido,
+   mag_frete_copart, mag_frete_fonte…), alguém tinha que lembrar de acrescentá-lo AQUI — e não
+   lembrava. Foram 3 bugs em 2 dias por isso, incluindo margem com o SINAL INVERTIDO na Shopee.
+   Agora a base da linha é a venda INTEIRA (cópia), e só o que precisa de forma diferente é
+   sobrescrito abaixo. Campo financeiro novo passa a chegar sozinho nos dois caminhos.
+   O que NÃO pode vazar da venda (nomes internos do sincronizador que confundiriam o calcPL ou
+   pesariam à toa) sai na lista de exclusão — curta e explícita, ao contrário da lista de
+   inclusão, que era infinita. */
+const _FORA_DA_LINHA = ['it','total','data','nf_em','pack_id','situacao','cancelado','id','det'];   /* 'det' é só a marca de "já busquei o detalhe no Bling"; os demais têm forma própria abaixo */
+SINT = (VENDAS||[]).filter(v=>v&&((v.numero!=null&&!_nums.has(String(v.numero)))||(v.sem_bling&&v.numero==null&&v.numero_loja&&!_nljs.has(String(v.numero_loja))))).map(v=>({
+    ...(function(){ const c={}; for(const k in v){ if(!_FORA_DA_LINHA.includes(k)) c[k]=v[k]; } return c; })(),
     sintetico:true, id:'s'+v.id, numero:v.numero, numero_loja:v.numero_loja||'', ml_pack:(v.pack_id||v.ml_pack||null), marketplace:v.marketplace||'outro',   /* Codex r6: o pack_id do cache não chegava ao SINT — sem ele o dedup não reconhecia o mesmo pedido vindo do histórico como ML-<order_id> */
     venda_em:v.venda_em||null, nf_emissao:(v.nf_em||null), venda_dia:v.data||null, valor:(v.total!=null?Number(v.total):null), cliente:v.cliente||'',
     itens:(v.it||[]).map(i2=>({sku:i2.sku,descricao:(i2.d||null),qtd:i2.qtd,valor_total:i2.vt,custo:(i2.custo!=null?i2.custo:null)})), taxa_mkt:(v.taxa_mkt!=null?v.taxa_mkt:null), frete_mkt:(v.frete_mkt!=null?v.frete_mkt:null),
