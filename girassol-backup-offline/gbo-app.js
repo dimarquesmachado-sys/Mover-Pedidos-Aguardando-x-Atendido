@@ -1930,7 +1930,15 @@ function routes(readBody) {
       if (!lista.length) { json(res, 400, { ok: false, erro: 'informe ?meses=AAAA-MM,AAAA-MM ou ?meses=todos' }); return true; }
       // Codex (P2): a rota manual não escoava a fila — uma edição salva durante ESTA rodada ficava
       // presa até a próxima reaplicação por outro caminho. Todo disparo escoa ao terminar.
-      reaplicarImposto(lista, 'girassol').then(escoarFilaReap).catch(e => console.log('[FISCAL] \u2717 ' + e.message));
+      // E (P2, rodada seguinte): se JÁ houver rodada em curso, `reaplicarImposto` volta na hora com
+      // o estado atual e o pedido do Diego simplesmente evapora — ele clica e nada acontece. Nesse
+      // caso o pedido entra na fila, como as edições do ⚙️.
+      if (_reap.rodando) {
+        for (const m of lista) if (!_filaReap.includes(m)) _filaReap.push(m);
+        console.log('[FISCAL] reaplicação já em curso — pedido manual ENFILEIRADO: ' + lista.join(', '));
+      } else {
+        reaplicarImposto(lista, 'girassol').then(escoarFilaReap).catch(e => console.log('[FISCAL] \u2717 ' + e.message));
+      }
       json(res, 202, { ok: true, msg: 'reaplicando imposto em background', meses: lista, status: '/girassol-backup-offline/reaplicar-status' });
       return true;
     }
@@ -4540,7 +4548,16 @@ function escoarFilaReap(){
   if (_reap.rodando || !_filaReap.length) return;
   const meses = _filaReap.splice(0, _filaReap.length);
   console.log('[FISCAL] escoando fila de reaplicação: ' + meses.join(', '));
-  return reaplicarImposto(meses, 'girassol').then(escoarFilaReap).catch(e => console.log('[FISCAL] ✗ fila: ' + e.message));
+  // Codex (P2): `reaplicarImposto` resolve normalmente mesmo com erro (vai em st.erros), e eu já
+  // tinha tirado os meses da fila — eles sumiam em silêncio e o histórico ficava com o imposto
+  // velho sem ninguém saber. Falhou, volta pra fila.
+  const devolver = (motivo) => {
+    for (const m of meses) if (!_filaReap.includes(m)) _filaReap.unshift(m);
+    console.error('[FISCAL] fila: ' + motivo + ' — meses devolvidos para nova tentativa: ' + meses.join(', '));
+  };
+  return reaplicarImposto(meses, 'girassol')
+    .then(st => { if (st && Number(st.erros || 0) > 0) devolver(Number(st.erros) + ' erro(s)'); return escoarFilaReap(); })
+    .catch(e => devolver(e.message || String(e)));
 }
 
 async function reaplicarImposto(meses, empresa){
