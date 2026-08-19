@@ -1320,8 +1320,8 @@ function routes(readBody) {
         try {
           let prod = null;
           for (const v of [...new Set([sku, sku.toUpperCase(), sku.toLowerCase()])]) {
-            const r = await bg(`/produtos?codigo=${encodeURIComponent(v)}&limite=1&criterio=5`);
-            const it = r.ok && r.data && r.data.data && r.data.data[0];
+            const r = await bg(`/produtos?codigo=${encodeURIComponent(v)}&limite=10&criterio=5`);
+            const it = escolherProdutoAtivo(r.ok && r.data && r.data.data, sku);   // 19/08: nunca um cadastro excluído
             if (it && it.id) { const d = await bg(`/produtos/${it.id}`); prod = (d.ok && d.data && d.data.data) || it; break; }
             await new Promise(r0 => setTimeout(r0, 300));
           }
@@ -7034,6 +7034,43 @@ async function reaplicarCusto(de, ate, empresa, opts){
   return _reapC;
 }
 
+
+// ─── 19/08: SÓ PRODUTO ATIVO ────────────────────────────────────────────────────
+// Caso real trazido pelo Diego: o SKU 10xE14-5W-3000K-BIV tinha DOIS cadastros no Bling —
+// o ativo (kit de 10, R$ 99,90) e um EXCLUÍDO (composição de 6, R$ 81,00). A busca por
+// código devolve os dois, a gente pegava o PRIMEIRO sem olhar a situação, e o custo do kit
+// virou 6 × 3,40 = R$ 20,40 em vez de 10 × 3,40 = R$ 34,00. Margem inflada em R$ 13,60 por
+// venda, com o número saindo de um cadastro que ele já tinha apagado.
+// Regra: cadastro excluído NUNCA é usado. Entre os que sobram, o ativo tem preferência.
+// Se sobrar mais de um ativo, devolve o primeiro E avisa no log — ambiguidade real merece
+// registro, não escolha silenciosa.
+function _prodExcluido(p) {
+  const s = String((p && (p.situacao || p.situacaoProduto)) || '').trim().toUpperCase();
+  return s === 'E' || s.startsWith('EXCL');
+}
+function _prodAtivo(p) {
+  const s = String((p && (p.situacao || p.situacaoProduto)) || '').trim().toUpperCase();
+  return s === 'A' || s.startsWith('ATIV');
+}
+function escolherProdutoAtivo(lista, sku) {
+  const arr = (Array.isArray(lista) ? lista : []).filter(Boolean);
+  if (!arr.length) return null;
+  const vivos = arr.filter(p => !_prodExcluido(p));
+  if (!vivos.length) {
+    console.log('[PRODUTO] ' + (sku || '?') + ': todos os ' + arr.length + ' cadastros estão EXCLUÍDOS no Bling — ignorando (melhor sem dado do que com dado de cadastro apagado)');
+    return null;
+  }
+  const ativos = vivos.filter(_prodAtivo);
+  const escolha = ativos.length ? ativos : vivos;
+  if (escolha.length > 1) {
+    console.log('[PRODUTO] ⚠ ' + (sku || '?') + ': ' + escolha.length + ' cadastros ATIVOS com o mesmo código (ids ' + escolha.map(p => p.id).join(', ') + ') — usando o primeiro, mas isso é duplicidade no Bling e merece conferência');
+  }
+  if (arr.length !== vivos.length) {
+    console.log('[PRODUTO] ' + (sku || '?') + ': ' + (arr.length - vivos.length) + ' cadastro(s) excluído(s) descartado(s)');
+  }
+  return escolha[0];
+}
+
 async function custoSync(fresh) {
   if (_cst.rodando) return;
   const CUSTO_FILE = path.join(CACHE_DIR, '_custos.json');
@@ -7083,8 +7120,10 @@ async function custoSync(fresh) {
     try {
       let prod = null;
       for (const v of [...new Set([sku, sku.toUpperCase(), sku.toLowerCase()])]) {
-        const r = await bg2(`/produtos?codigo=${encodeURIComponent(v)}&limite=1&criterio=5`);
-        const it = r.ok && r.data && r.data.data && r.data.data[0];
+        const r = await bg2(`/produtos?codigo=${encodeURIComponent(v)}&limite=10&criterio=5`);
+        // 19/08: limite 1 pegava o PRIMEIRO da lista, que podia ser um cadastro EXCLUÍDO.
+        // Traz até 10 e escolhe o ativo.
+        const it = escolherProdutoAtivo(r.ok && r.data && r.data.data, sku);
         if (it && it.id) { const d = await bg2(`/produtos/${it.id}`); prod = (d.ok && d.data && d.data.data) || it; break; }
         await dorme(600);
       }
