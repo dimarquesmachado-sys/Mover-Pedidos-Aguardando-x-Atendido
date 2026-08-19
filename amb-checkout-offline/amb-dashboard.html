@@ -123,6 +123,12 @@
         display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden;
         white-space:normal;word-break:break-word}
   .cvS{opacity:.65;font-size:11px;display:inline-block;width:9px}
+  /* 19/08 (Diego printou a tela a meio carregar e leu metade do faturamento como se fosse
+     o total): no período longo os cards ficavam mostrando o CACHE enquanto o histórico não
+     chegava, sem dizer nada. Agora eles ficam esmaecidos e uma faixa avisa. */
+  .kpis.carregando{opacity:.45;filter:saturate(.5)}
+  .avisoCarr{display:flex;align-items:center;gap:8px;margin:14px 0 -6px;padding:9px 14px;border-radius:10px;
+        background:#78350f22;border:1px solid #f59e0b55;color:#fbbf24;font-size:12.5px;font-weight:600}
     .mut{color:var(--mut)} .dim{color:var(--dim)} .ok{color:var(--ok)} .warn{color:var(--warn)} .bad{color:var(--bad)}
   .cvg{font-size:10px;color:var(--warn);background:#f59e0b14;border:1px solid #f59e0b33;border-radius:5px;padding:1px 5px;margin-left:6px;white-space:nowrap}
   .st{display:inline-block;font-size:10.5px;font-weight:700;border-radius:6px;padding:2px 8px}
@@ -398,7 +404,7 @@ const MOD = '/amb-checkout-offline';
     return _f(u, o);
   };
 })();
-const DASH_BUILD = 'a29';
+const DASH_BUILD = 'a30';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -1844,6 +1850,9 @@ function render(){
   // qualquer troca de período automaticamente.
   try{ window._MC_ULT = MC; desenharSemCusto(MC); }catch(e){}
   const usaHist = !!(HIST && HIST.de===de && HIST.ate===ate && HIST.totais);   // período longo: os números vêm do histórico
+  /* Enquanto o período longo espera o histórico, o que está nos cards é o CACHE (~6 dias):
+     número PARCIAL com cara de final. Esta flag governa o aviso e o esmaecimento. */
+  const carregandoHist = precisaHistorico(de) && !usaHist;
   const totPed = usaHist ? HIST.totais.pedidos : (PER.length + AGD.length);
   // 🔄 HOJE: confere cancelamentos no marketplace já na abertura (o automático de 10 min só viria depois)
   (function(){
@@ -1865,6 +1874,16 @@ function render(){
     if(_autoDet[chave]) return;
     _autoDet[chave] = 1;
     setTimeout(()=>completarDetalhes(), 400);
+  })();
+  (function(){
+    const k = $('kpis'); if(k) k.className = 'kpis' + (carregandoHist ? ' carregando' : '');
+    let av = document.getElementById('avisoCarr');
+    if(carregandoHist){
+      if(!av){ av = document.createElement('div'); av.id='avisoCarr'; av.className='avisoCarr';
+               if(k && k.parentNode) k.parentNode.insertBefore(av, k); }
+      av.innerHTML = '\u23f3 carregando as vendas do período no banco — <b>os números abaixo ainda são PARCIAIS</b> (só os últimos dias). Aguarde fechar antes de ler.';
+      av.style.display = 'flex';
+    } else if(av){ av.style.display = 'none'; }
   })();
   $('kpis').innerHTML =
     kpi('#34d399','💰','Faturamento Total', BRL(usaHist?HIST.totais.faturamento:fat), (usaHist?'📚 histórico · ':'')+'vendas aprovadas no período · '+N(totPed)+' pedidos') +
