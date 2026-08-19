@@ -5037,6 +5037,65 @@ function _prodAtivo(p) {
 // `limitePedido`: quantos cabiam na resposta. Codex (P2): com mais de 10 cadastros duplicados, o
 // ativo pode estar FORA da página — concluir "todos excluídos" ali e apagar o custo destruiria um
 // dado bom. Página cheia = conclusão inconclusiva, e nada é apagado.
+
+// ─── RESOLVER SKU → PRODUTO (reescrito 19/08, 4ª rodada do Codex no PR#143) ──────
+// Eu vinha empilhando guarda em cima de guarda e cada rodada achava um buraco novo, porque o
+// problema tem MAIS ESTADOS do que eu estava enxergando: três variantes de caixa do SKU, cada
+// busca podendo falhar, cada página podendo vir cheia (logo, incompleta), e o produto podendo
+// estar ativo, inativo, excluído ou ausente. Agora tudo isso é decidido num lugar só, com os
+// estados explícitos, e quem chama recebe um veredito pronto.
+//
+// Devolve { produto, ativo, todosExcluidos, inconclusivo, motivo }:
+//   · produto        — o cadastro escolhido (ativo tem prioridade absoluta), ou null
+//   · todosExcluidos — TODOS os cadastros encontrados estão excluídos, e vimos todos
+//   · inconclusivo   — alguma busca falhou OU alguma página veio cheia: NÃO dá pra concluir
+//                      que o produto sumiu, então nada pode ser apagado
+// limpa o cache de 6h do sku-info para um SKU (usado quando o produto some E quando ele é
+// re-resolvido: nos dois casos o valor guardado ali pode ser do cadastro errado)
+function _limparSkuInfo(sku) {
+  try {
+    const f = path.join(CACHE_DIR, '_skus-info.json');
+    if (!_skuInfoCache) _skuInfoCache = readJson(f, {});
+    if (_skuInfoCache[sku]) { delete _skuInfoCache[sku]; writeJson(f, _skuInfoCache); }
+  } catch (e) { console.log('[CUSTO] ' + sku + ': não consegui limpar o cache de sku-info (' + e.message + ')'); }
+}
+async function resolverProdutoPorSku(sku, buscar, limite) {
+  const lim = limite || 10;
+  const variantes = [...new Set([sku, String(sku).toUpperCase(), String(sku).toLowerCase()])];
+  let ativo = null, reserva = null, achouAlgum = false, algumVivo = false;
+  let inconclusivo = false, motivo = '';
+  for (const v of variantes) {
+    const r = await buscar(`/produtos?codigo=${encodeURIComponent(v)}&limite=${lim}&criterio=5`);
+    if (!r || !r.ok) {   // Codex (P2, 4ª rodada): variante que falhou (429, timeout) pode ser
+      inconclusivo = true;    // justamente a que tinha o cadastro ativo — nunca concluir sem ela
+      motivo = motivo || 'uma das buscas falhou (' + v + ')';
+      continue;
+    }
+    const arr = ((r.data && r.data.data) || []).filter(Boolean);
+    if (arr.length) achouAlgum = true;
+    if (arr.length >= lim) {   // página cheia = pode haver mais adiante
+      inconclusivo = true;
+      motivo = motivo || 'página cheia (' + arr.length + ' resultados para ' + v + '): pode haver cadastro fora dela';
+    }
+    for (const p of arr) {
+      if (_prodExcluido(p)) continue;
+      algumVivo = true;
+      if (_prodAtivo(p)) { if (!ativo) ativo = p; }
+      else if (!reserva) reserva = p;   // inativo ou sem status: só serve se nenhuma variante der ativo
+    }
+    if (ativo) break;   // ativo encontrado vence na hora; sem ele, continua procurando nas outras
+  }
+  // Codex (P2, 4ª rodada): a reserva (cadastro sem status ou inativo) só pode ser aceita DEPOIS de
+  // tentar todas as variantes — antes, a primeira variante devolvia a reserva e abortava o laço,
+  // deixando o ativo de outra variante para trás.
+  const produto = ativo || reserva || null;
+  return {
+    produto, ativo: !!ativo,
+    todosExcluidos: !produto && achouAlgum && !algumVivo && !inconclusivo,
+    inconclusivo, motivo
+  };
+}
+
 function escolherProdutoAtivo(lista, sku, info, limitePedido) {
   const arr = (Array.isArray(lista) ? lista : []).filter(Boolean);
   if (!arr.length) return null;
@@ -5105,7 +5164,13 @@ async function custoSync(fresh) {
     }
   } catch (e) {}
   const SETE_D = 7 * 24 * 3600 * 1000;
-  const alvos = [...todos].filter(sk => { const k = cc[sk]; return fresh || !k || !k.id || (Date.now() - (k.ts || 0)) > SETE_D || k.custo == null; });
+  // Codex (P2, 4ª rodada): SKU confirmadamente apagado no Bling continua no histórico de vendas
+  // pra sempre. Sem marca, o predicado abaixo (`!k`) o reelegia a cada rodada: três buscas por
+  // variante de caixa, nada encontrado, nada apagado — e de novo seis horas depois, para sempre.
+  // Conforme SKUs deletados se acumulam, isso queima cota da API e atrasa o custo dos produtos
+  // vivos. A LÁPIDE registra "conferido, não existe mais" e a rodada normal pula; o ?fresh=1 do
+  // operador ignora a lápide e reconfere (produto pode ser restaurado no Bling).
+  const alvos = [...todos].filter(sk => { const k = cc[sk]; if (!fresh && k && k.apagado_em) return false; return fresh || !k || !k.id || (Date.now() - (k.ts || 0)) > SETE_D || k.custo == null; });
   _cst = { rodando: true, feitos: 0, total: alvos.length, ok: 0, falhas: 0, inicio: new Date().toISOString() };
   console.log('[CUSTO] sync iniciando — ' + alvos.length + ' SKU(s) a resolver (tartaruga: ~1,2s/chamada)');
   const dorme = ms => new Promise(r => setTimeout(r, ms));
@@ -5114,15 +5179,17 @@ async function custoSync(fresh) {
   for (const sku of alvos) {
     try {
       let prod = null;
-      const _infoSel = {};   // avisa se a busca achou SÓ cadastros excluídos
-      for (const v of [...new Set([sku, sku.toUpperCase(), sku.toLowerCase()])]) {
-        const r = await bg2(`/produtos?codigo=${encodeURIComponent(v)}&limite=10&criterio=5`);
-        // 19/08: limite 1 pegava o PRIMEIRO da lista, que podia ser um cadastro EXCLUÍDO.
-        // Traz até 10 e escolhe o ativo.
-        const it = escolherProdutoAtivo(r.ok && r.data && r.data.data, sku, _infoSel, 10);
-        if (it && it.id) { const d = await bg2(`/produtos/${it.id}`); prod = (d.ok && d.data && d.data.data) || it; break; }
-        await dorme(600);
+      const _res = await resolverProdutoPorSku(sku, bg2, 10);
+      if (_res.produto && _res.produto.id) {
+        const d = await bg2(`/produtos/${_res.produto.id}`);
+        prod = (d.ok && d.data && d.data.data) || _res.produto;
       }
+      if (_res.inconclusivo) console.log('[CUSTO] ' + sku + ': resultado inconclusivo — ' + _res.motivo + ' (nada será apagado)');
+      // Codex (P2, 4ª rodada): resolver o cadastro ATIVO não bastava — o cache de 6h do sku-info
+      // podia estar com o custo/nome do cadastro EXCLUÍDO, e a sobreposição do permanente só cobre
+      // custo NULO. Ou seja, o ?fresh=1 corrigia o banco e a tela seguia mostrando o valor velho.
+      // Resolveu com sucesso: o cache secundário daquele SKU é invalidado para ser refeito.
+      if (prod && prod.id) _limparSkuInfo(sku);
       // Codex (P1, PR#143): produto APAGADO no Bling — sem isto, o custo velho continuava no
       // cache e o próprio ?fresh=1 o regravava, ou seja, a correção não corrigia nada. Achou
       // cadastros e todos excluídos = o custo daquele SKU deixa de existir aqui também.
@@ -5130,18 +5197,16 @@ async function custoSync(fresh) {
       // Codex (P1, 3ª rodada): eu tranquei TODA a limpeza atrás de `cc[sku]`. Se o custo tinha
       // entrado só pelo sku-info (sem passar pelo custo-sync), nada era limpo e o valor do produto
       // deletado voltava por lá. Só a remoção do permanente pode depender de ele existir.
-      if (!prod && _infoSel.todos_excluidos && !_infoSel.inconclusivo) {
+      if (!prod && _res.todosExcluidos) {
         const _era = cc[sku] && cc[sku].custo;   // ler ANTES de apagar (senão o log sai 'undefined')
         if (cc[sku]) { delete cc[sku]; desdeGravei++; }
+        // lápide: sem custo e sem id, só a marca de que já foi conferido e não existe mais
+        cc[sku] = { apagado_em: Date.now(), motivo: 'só havia cadastro excluído no Bling' };
         // Codex (P1, 2ª rodada): existe um SEGUNDO cache (o do sku-info, em memória e em
         // _skus-info.json) que também guarda custo — e ele RESTAURA o valor antigo quando o novo
         // vem nulo. Apagar só o permanente deixava o custo do produto deletado voltar por ali,
         // com carimbo novo, indefinidamente. Os dois têm que cair juntos.
-        try {
-          const _fSk = path.join(CACHE_DIR, '_skus-info.json');
-          if (!_skuInfoCache) _skuInfoCache = readJson(_fSk, {});
-          if (_skuInfoCache[sku]) { delete _skuInfoCache[sku]; writeJson(_fSk, _skuInfoCache); }
-        } catch (e) { console.log('[CUSTO] ' + sku + ': não consegui limpar o cache de sku-info (' + e.message + ')'); }
+        _limparSkuInfo(sku);
         console.log('[CUSTO] ' + sku + ': só havia cadastro EXCLUÍDO no Bling — custo removido dos DOIS caches (era ' + JSON.stringify(_era) + ')');
       }
       if (prod && prod.id) {
