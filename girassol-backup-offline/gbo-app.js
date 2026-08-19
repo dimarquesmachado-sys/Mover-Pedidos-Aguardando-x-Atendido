@@ -3498,15 +3498,35 @@ function _migrarAliquotas() {
     // uma vez só, e uma decisão posterior dele sobrevive a qualquer reinício.
     const MARCA = 'aliq-2026-07-14.4007';
     if (cfg.migracoes && cfg.migracoes[MARCA]) return;
-    let mudou = false;
-    if (Number(cfg.aliquotas['2026-07']) === 14.1) { cfg.aliquotas['2026-07'] = 14.4007; mudou = true; }
+    let mudou = false; const mesesTocados = [];
+    if (Number(cfg.aliquotas['2026-07']) === 14.1) { cfg.aliquotas['2026-07'] = 14.4007; mudou = true; mesesTocados.push('2026-07'); }
     for (const [k, v] of Object.entries(cfg.aliquotas)) {
-      if (!(Number(v) > 0)) { delete cfg.aliquotas[k]; mudou = true; }
+      if (!(Number(v) > 0)) { delete cfg.aliquotas[k]; mudou = true; mesesTocados.push(k); }
     }
     cfg.migracoes = cfg.migracoes || {};
-    cfg.migracoes[MARCA] = new Date().toISOString();
-    writeJson(f, cfg);   // grava sempre a marca, mesmo sem mudança, pra não reavaliar todo boot
-    if (mudou) console.log('[fiscal] alíquotas migradas: julho 14,1 -> 14,4007 e meses zerados removidos');
+    if (!mudou) {   // nada a corrigir: marca e pronto
+      cfg.migracoes[MARCA] = new Date().toISOString();
+      writeJson(f, cfg);
+      return;
+    }
+    // Codex (P1, PR#140): trocar a alíquota no arquivo NÃO conserta o que já está no Supabase —
+    // as linhas gravadas seguem com o imposto e a margem antigos, e rotas como /previsao-vendas e
+    // /plano-compra leem a `margem` GRAVADA (não recalculam na leitura). Sem reaplicar, a migração
+    // arrumava a tela e deixava o planejamento de compra decidindo por número velho.
+    // A marca só é gravada DEPOIS que a reaplicação termina — se falhar, o próximo boot tenta de novo.
+    writeJson(f, cfg);   // as alíquotas corrigidas já valem, mesmo que a reaplicação demore
+    console.log('[fiscal] alíquotas migradas: julho 14,1 -> 14,4007 e meses zerados removidos; reaplicando no histórico…');
+    const _mesesMig = Array.from(new Set(mesesTocados)).filter(m => /^\d{4}-\d{2}$/.test(m)).sort();
+    Promise.resolve()
+      .then(() => reaplicarImposto(_mesesMig, 'girassol'))
+      .then(() => {
+        const cfg2 = readJson(f, cfg);
+        cfg2.migracoes = cfg2.migracoes || {};
+        cfg2.migracoes[MARCA] = new Date().toISOString();
+        writeJson(f, cfg2);
+        console.log('[fiscal] reaplicação concluída em ' + _mesesMig.join(', ') + ' — migração marcada');
+      })
+      .catch(e => console.error('[fiscal] reaplicação falhou (' + e.message + ') — marca NÃO gravada, o próximo boot tenta de novo'));
   } catch (e) { console.error('[fiscal] migração falhou (segue com o padrão):', e.message); }
 }
 const DEFAULT_ALIQ_BK = { '2026-01':11.409280, '2026-02':11.3254, '2026-03':12.3402, '2026-04':13.6001, '2026-05':13.9149, '2026-06':14.056, '2026-07':14.4007, '2026-08':15, '2026-09':15, '2026-10':15, '2026-11':15, '2026-12':15 };
