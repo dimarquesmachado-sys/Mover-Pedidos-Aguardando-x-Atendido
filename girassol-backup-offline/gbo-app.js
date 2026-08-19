@@ -1275,8 +1275,13 @@ function routes(readBody) {
       // salva no disco, o navegador recebia "✗ falhou" e NENHUM mês era reaplicado.
       let _mudou = [];
       try {
-        for (const [_m, _v] of Object.entries(atual.aliquotas || {}))
-          if (Number(_aliqAntes[_m]) !== Number(_v)) _mudou.push(_m);
+        // Codex (P2, PR#140): eu percorria só o que SOBROU em `atual.aliquotas`, então o mês que o
+        // Diego APAGA (voltando ao padrão de fábrica) nunca era reaplicado — o Supabase seguia com
+        // o imposto e a margem do valor antigo, e quem lê a margem gravada (a previsão de vendas,
+        // por exemplo) continuava com o número velho. Agora a comparação cobre a UNIÃO das chaves
+        // de antes e de depois, então apagar também dispara o recálculo.
+        for (const _m of new Set([].concat(Object.keys(_aliqAntes || {}), Object.keys(atual.aliquotas || {}))))
+          if (Number(_aliqAntes[_m]) !== Number((atual.aliquotas || {})[_m])) _mudou.push(_m);
         _mudou = _mudou.filter(m => /^\d{4}-\d{2}$/.test(m)).sort();
       } catch (e) {}
       json(res, 200, { ok: true, config: atual, reaplicando: _mudou });
@@ -3487,16 +3492,21 @@ function _migrarAliquotas() {
     const f = path.join(CACHE_DIR, '_config-fiscal.json');
     const cfg = readJson(f, null);
     if (!cfg || !cfg.aliquotas) return;
+    // Codex (P2, PR#140): eu gravava `migrado_em` mas nunca conferia — a migração rodava a CADA
+    // boot. Se o Diego salvasse julho de volta em 14,1 de propósito, o próximo restart desfaria a
+    // escolha dele, contrariando a regra de que o que ele salva manda. Marcador versionado: roda
+    // uma vez só, e uma decisão posterior dele sobrevive a qualquer reinício.
+    const MARCA = 'aliq-2026-07-14.4007';
+    if (cfg.migracoes && cfg.migracoes[MARCA]) return;
     let mudou = false;
     if (Number(cfg.aliquotas['2026-07']) === 14.1) { cfg.aliquotas['2026-07'] = 14.4007; mudou = true; }
     for (const [k, v] of Object.entries(cfg.aliquotas)) {
       if (!(Number(v) > 0)) { delete cfg.aliquotas[k]; mudou = true; }
     }
-    if (mudou) {
-      cfg.migrado_em = new Date().toISOString();
-      writeJson(f, cfg);
-      console.log('[fiscal] alíquotas migradas: julho 14,1 -> 14,4007 e meses zerados removidos');
-    }
+    cfg.migracoes = cfg.migracoes || {};
+    cfg.migracoes[MARCA] = new Date().toISOString();
+    writeJson(f, cfg);   // grava sempre a marca, mesmo sem mudança, pra não reavaliar todo boot
+    if (mudou) console.log('[fiscal] alíquotas migradas: julho 14,1 -> 14,4007 e meses zerados removidos');
   } catch (e) { console.error('[fiscal] migração falhou (segue com o padrão):', e.message); }
 }
 const DEFAULT_ALIQ_BK = { '2026-01':11.409280, '2026-02':11.3254, '2026-03':12.3402, '2026-04':13.6001, '2026-05':13.9149, '2026-06':14.056, '2026-07':14.4007, '2026-08':15, '2026-09':15, '2026-10':15, '2026-11':15, '2026-12':15 };
