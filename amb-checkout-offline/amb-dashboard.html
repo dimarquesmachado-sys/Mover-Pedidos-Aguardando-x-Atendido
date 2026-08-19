@@ -640,7 +640,10 @@ function renderHistLinhas(iv){
     (ps.length? ps.map(function(o){
       const pcm = o.vnota>0 ? Math.round(o.margem/o.vnota*1000)/10 : null;
       const skus = (o.itens||[]).map(function(i){ return (i.qtd>1?i.qtd+'× ':'')+esc(i.sku||''); }).join('<br>');
-      return '<tr>'+
+      /* Codex (P2, PR#138): acima de 760px os cartões somem e fica ESTA tabela — que mostrava a
+         margem otimista do TikTok como dado histórico comum, sem aviso nenhum. Mesmo sinal do cartão. */
+      const _tkP = (canalKey(o.canal)==='tiktok') && Number(o.vnota)>0 && (Number(o.comissao)||0) < Number(o.vnota)*0.15;
+      return '<tr'+(_tkP?' title="tarifa ainda provisória (veio do Bling); o extrato do TikTok cobra mais — esta margem está otimista"':'')+'>'+
         '<td class="dim" style="white-space:nowrap">'+esc(String(o.data||'').slice(8,10)+'/'+String(o.data||'').slice(5,7))+'</td>'+
         '<td><b>'+esc(o.numero)+'</b>'+(o.numero_loja?'<div class="desc" style="font-size:10px">'+esc(o.numero_loja)+'</div>':'')+'</td>'+
         '<td>'+esc(nomeCanal(canalKey(o.canal)))+'</td>'+
@@ -651,7 +654,7 @@ function renderHistLinhas(iv){
         '<td class="num">'+BRL(o.imposto)+'</td>'+
         '<td class="num">'+BRL(o.comissao)+'</td>'+
         '<td class="num">'+(o.frete?BRL(o.frete):'—')+'</td>'+
-        '<td class="num '+(o.margem>=0?'ok':'bad')+'"><b>'+BRL(o.margem)+'</b></td>'+
+        '<td class="num '+(o.margem>=0?'ok':'bad')+'"><b>'+BRL(o.margem)+'</b>'+(_tkP?' <span style="color:#fbbf24;font-size:10px" title="tarifa provisória — margem otimista">⚠</span>':'')+'</td>'+
         '<td class="num '+(o.margem>=0?'ok':'bad')+'">'+(pcm!=null?(String(pcm).replace('.',',')+'%'):'—')+'</td>'+
       '</tr>';
     }).join('') : '<tr><td class="dim" colspan="12" style="padding:14px">sem vendas nesta página</td></tr>');
@@ -1690,7 +1693,12 @@ function montar(){
    registrada no gbo-app (julho/2026) é 27,5%, e agosto deu 31,1% — a taxa varia com o ticket
    (os R$ 2,00 fixos pesam mais em pedido pequeno) e com quanto foi por afiliado. Cravar um número
    é dar uma expectativa errada, o mesmo pecado do rótulo "REAL". Fica a FAIXA medida. */
-const _BLING_SUBESTIMA = { tiktok: { real_pct: 'entre ~27% e ~31% conforme ticket e afiliado', bling_pct: '~12%' } };
+/* Codex (P2, 2ª rodada): 27-31% é MÉDIA DO PERÍODO e não vale por pedido — a taxa fixa (R$ 4 ou
+   R$ 6 por item) pesa muito em pedido pequeno e quase nada em pedido grande: pela regra oficial,
+   um pedido de R$ 29,90 fica em 29,4% e um de R$ 199 em 15,0%. Prometer "27-31%" em cada linha
+   seria afirmar de novo um número que os dados não sustentam — o mesmo erro do rótulo "REAL" que
+   este PR existe para corrigir. Fica a DIREÇÃO (a real é maior) e o motivo da variação. */
+const _BLING_SUBESTIMA = { tiktok: { real_pct: 'maior — quanto, depende do ticket e do afiliado (a taxa fixa por item pesa mais em pedido pequeno)', bling_pct: '~12%' } };
 function _tarifaProvisoria(ck, feeReal, feeBling){
   return feeReal == null && feeBling != null && !!_BLING_SUBESTIMA[ck];
 }
@@ -1699,7 +1707,7 @@ function _seloTarifa(ck, feeReal, feeBling){
   if (feeBling == null) return '';
   if (_tarifaProvisoria(ck, feeReal, feeBling)) {
     const m = _BLING_SUBESTIMA[ck];
-    return ' <span class="st" style="font-size:9px;background:#78350f55;color:#fbbf24;border-color:#f59e0b55" title="taxa que o Bling importou ('+m.bling_pct+'). A tarifa REAL deste canal, medida no extrato do marketplace, fica '+m.real_pct+' — esta margem está OTIMISTA. O extrato corrige o histórico (Mês/Ano); nesta linha do dia a taxa segue a do Bling">PROVISÓRIA</span>';
+    return ' <span class="st" style="font-size:9px;background:#78350f55;color:#fbbf24;border-color:#f59e0b55" title="taxa que o Bling importou ('+m.bling_pct+'). A tarifa REAL deste canal, que vem no extrato do marketplace, é '+m.real_pct+' — esta margem está OTIMISTA. O extrato corrige o histórico (Mês/Ano); nesta linha do dia a taxa segue a do Bling">PROVISÓRIA</span>';
   }
   return ' <span class="st ok" style="font-size:9px">BLING</span>';
 }
@@ -2663,7 +2671,7 @@ function renderPL(h){
       : linha('🏷️ Produtos (nota fiscal)', rp)+linha('🚚 Frete embutido (receita)', frete))+
     linha('🏛 Imposto ('+(aliq!=null?aliq+'% de '+mesPorExtenso(mes):'<span class="warn">configure ⚙️ '+mesPorExtenso(mes)+'</span>')+')', imposto!=null?-imposto:null)+
     /* o rótulo dizia "REAL (ML)" até em pedido de Shopee/TikTok — agora nomeia o canal certo */
-    linha((rendaCanal!=null?'<span class="dim">🏪 Tarifa (já embutida no repasse)</span>':'🏪 Tarifa ')+ (rendaCanal!=null?'':(feeReal!=null?'<span class="ok">REAL ('+esc(nomeCanal(ck))+')</span>':(feeBling!=null?(_tarifaProvisoria(ck,feeReal,feeBling)?('<span class="warn">PROVISÓRIA — taxa do Bling ('+_BLING_SUBESTIMA[ck].bling_pct+'); a real do '+esc(nomeCanal(ck))+' fica '+_BLING_SUBESTIMA[ck].real_pct+' — o extrato corrige o Mês/Ano</span>'):'<span class="ok">Bling</span>'):(tx!=null?tx+'% est.':'<span class="warn">configure ⚙️</span>')))), tarifa!=null?(rendaCanal!=null?tarifa:-tarifa):null,
+    linha((rendaCanal!=null?'<span class="dim">🏪 Tarifa (já embutida no repasse)</span>':'🏪 Tarifa ')+ (rendaCanal!=null?'':(feeReal!=null?'<span class="ok">REAL ('+esc(nomeCanal(ck))+')</span>':(feeBling!=null?(_tarifaProvisoria(ck,feeReal,feeBling)?('<span class="warn">PROVISÓRIA — taxa do Bling ('+_BLING_SUBESTIMA[ck].bling_pct+'); a real do '+esc(nomeCanal(ck))+' é '+_BLING_SUBESTIMA[ck].real_pct+' — o extrato corrige o Mês/Ano</span>'):'<span class="ok">Bling</span>'):(tx!=null?tx+'% est.':'<span class="warn">configure ⚙️</span>')))), tarifa!=null?(rendaCanal!=null?tarifa:-tarifa):null,
       (ck==='ml'&&h.numero_loja&&feeReal==null?' <button class="btn" style="padding:3px 10px;font-size:10.5px" onclick="pegarFeeML(\''+h.id+'\',\''+esc(h.numero_loja)+'\')">buscar real</button>':''))+
     linha('📦 Custo ('+cusUn+'/'+unTot+' un. c/ custo)', (cusUn?-custo:null))+
     (rendaCanal!=null&&frV!=null&&ck!=='ml' ? linha('<span class="dim">🚛 Frete vendedor (já embutido no repasse)</span>', frV) :
