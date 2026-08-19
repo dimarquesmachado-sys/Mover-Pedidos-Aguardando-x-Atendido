@@ -923,6 +923,8 @@ function precisaHistorico(de){
   const lim = new Date(Date.now() - HIST_JANELA_DIAS*86400000).toISOString().slice(0,10);
   return String(de) < lim;
 }
+let _histFalhou = null;   // {de, ate, msg} quando a última tentativa do período falhou
+function tentarHistDeNovo(){ _histFalhou = null; try{ render(); }catch(e){} const iv = intervalo(); carregarHistorico(iv.de, iv.ate); }
 async function carregarHistorico(de, ate){
   if(_histCarregando) return;
   if(HIST && HIST.de===de && HIST.ate===ate) return;
@@ -932,9 +934,18 @@ async function carregarHistorico(de, ate){
   try{
     const r = await fetch(MOD+'/historico-longo?de='+de+'&ate='+ate, {credentials:'same-origin'});
     const d = await r.json().catch(()=>null);
-    if(d && d.ok){ HIST = d; if(el) el.innerHTML=''; render(); renderAnalise(); restaurarAncora(); setTimeout(restaurarAncora,150); }
-    else if(el) el.innerHTML = '<span class="warn">não consegui carregar o histórico</span>';
-  }catch(e){ if(el) el.innerHTML = '<span class="warn">'+(e.message||e)+'</span>'; }
+    if(d && d.ok){ HIST = d; _histFalhou = null; if(el) el.innerHTML=''; render(); renderAnalise(); restaurarAncora(); setTimeout(restaurarAncora,150); }
+    else { /* Codex (P2, PR#135): sem marcar a falha, a faixa ficava pedindo "aguarde" pra sempre
+              — nada estava carregando. Agora a falha é registrada e a tela repintada pra dizer isso. */
+      _histFalhou = { de:de, ate:ate, msg:((d && d.erro) ? String(d.erro) : '') };
+      if(el) el.innerHTML = '<span class="warn">não consegui carregar o histórico</span>';
+      _histCarregando = false; try{ render(); }catch(e2){} return;
+    }
+  }catch(e){
+    _histFalhou = { de:de, ate:ate, msg:String((e && e.message) || e) };
+    if(el) el.innerHTML = '<span class="warn">'+(e.message||e)+'</span>';
+    _histCarregando = false; try{ render(); }catch(e2){} return;
+  }
   _histCarregando = false;
 }
 
@@ -1852,7 +1863,9 @@ function render(){
   const usaHist = !!(HIST && HIST.de===de && HIST.ate===ate && HIST.totais);   // período longo: os números vêm do histórico
   /* Enquanto o período longo espera o histórico, o que está nos cards é o CACHE (~6 dias):
      número PARCIAL com cara de final. Esta flag governa o aviso e o esmaecimento. */
-  const carregandoHist = precisaHistorico(de) && !usaHist;
+  const faltaHist = precisaHistorico(de) && !usaHist;
+  const falhouHist = faltaHist && !!(_histFalhou && _histFalhou.de===de && _histFalhou.ate===ate);
+  const carregandoHist = faltaHist && !falhouHist;
   const totPed = usaHist ? HIST.totais.pedidos : (PER.length + AGD.length);
   // 🔄 HOJE: confere cancelamentos no marketplace já na abertura (o automático de 10 min só viria depois)
   (function(){
@@ -1876,12 +1889,14 @@ function render(){
     setTimeout(()=>completarDetalhes(), 400);
   })();
   (function(){
-    const k = $('kpis'); if(k) k.className = 'kpis' + (carregandoHist ? ' carregando' : '');
+    const k = $('kpis'); if(k) k.className = 'kpis' + (faltaHist ? ' carregando' : '');
     let av = document.getElementById('avisoCarr');
-    if(carregandoHist){
+    if(faltaHist){
       if(!av){ av = document.createElement('div'); av.id='avisoCarr'; av.className='avisoCarr';
                if(k && k.parentNode) k.parentNode.insertBefore(av, k); }
-      av.innerHTML = '\u23f3 carregando as vendas do período no banco — <b>os números abaixo ainda são PARCIAIS</b> (só os últimos dias). Aguarde fechar antes de ler.';
+      av.innerHTML = carregandoHist
+        ? '\u23f3 carregando as vendas do período no banco — <b>os números abaixo ainda são PARCIAIS</b> (só os últimos dias). Aguarde fechar antes de ler.'
+        : '\u26a0 não consegui carregar as vendas do período no banco'+((_histFalhou && _histFalhou.msg)?(' ('+esc(_histFalhou.msg)+')'):'')+' — <b>os números abaixo são PARCIAIS</b> (só os últimos dias). <a href="javascript:void(0)" onclick="tentarHistDeNovo()" style="color:#fbbf24;font-weight:800">tentar de novo</a>';
       av.style.display = 'flex';
     } else if(av){ av.style.display = 'none'; }
   })();
