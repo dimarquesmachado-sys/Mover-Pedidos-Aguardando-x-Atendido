@@ -254,7 +254,13 @@ async function tratar(req, res, urlObj, json) {
     const de = String(q.get('de') || '').slice(0, 10), ate = String(q.get('ate') || '').slice(0, 10);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(de) || !/^\d{4}-\d{2}-\d{2}$/.test(ate)) { json(res, 400, { ok: false, erro: 'passe &de=AAAA-MM-DD&ate=AAAA-MM-DD' }); return true; }
     if (de > ate) { json(res, 400, { ok: false, erro: 'período invertido' }); return true; }
-    json(res, 200, finLib.calibrarRegraTarifa(ctxC, loja, de, ate));
+    // Codex (P2): o formato AAAA-MM-DD sozinho aceita 2026-02-31, que o Node normaliza pra 03/03 —
+    // calibraríamos um período diferente do pedido, dizendo que era fevereiro. Confere a ida e volta.
+    const _dataReal = t => { const d2 = new Date(t + 'T12:00:00-03:00'); return !isNaN(d2) && d2.toISOString().slice(0, 10) === t; };
+    if (!_dataReal(de) || !_dataReal(ate)) { json(res, 400, { ok: false, erro: 'data inexistente no calendário' }); return true; }
+    const _pte = q.get('pte');
+    const pteInformado = (_pte === '1' || _pte === 'true') ? true : ((_pte === '0' || _pte === 'false') ? false : null);
+    json(res, 200, finLib.calibrarRegraTarifa(ctxC, loja, de, ate, pteInformado));
     return true;
   }
 
