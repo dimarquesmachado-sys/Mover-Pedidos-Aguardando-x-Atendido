@@ -396,7 +396,7 @@ const MOD = '/girassol-backup-offline';
     return _f(u, o);
   };
 })();
-const DASH_BUILD = 'd221';
+const DASH_BUILD = 'd222';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -497,7 +497,19 @@ function prepararVendas(){
   (DADOS||[]).forEach(h=>{ if(h.cancelado) h._cancelado=true;   // marca vinda do SERVIDOR — vale mesmo se o pedido não estiver na lista de vendas
     const v=_sit[String(h.numero)]; if(v){ h._sit=v.situacao||null; h._cancelado=(!!h.cancelado || /cancel/i.test(String(v.situacao||'')) || !!v.cancelado_mkt); if(v.data && !h.venda_dia) h.venda_dia=v.data; if(v.venda_em && !h.venda_em) h.venda_em=v.venda_em; if(v.tarifa_ml!=null && h.tarifa_ml==null) h.tarifa_ml=Number(v.tarifa_ml); if(v.frete_recebido!=null && h.frete_recebido==null) h.frete_recebido=Number(v.frete_recebido); if(!h.ml_costs_v3 && v.credito_ml!=null && h.credito_ml==null) h.credito_ml=Number(v.credito_ml); /* Codex: leitura autoritativa do ML manda — nao restaura valor que ela limpou */ if(!h.ml_costs_v3 && v.frete_ml!=null && Number(v.frete_ml)>0 && h.frete_ml==null) h.frete_ml=Number(v.frete_ml); if(h.frete_ml!=null && !(Number(h.frete_ml)>0)) h.frete_ml=null; /* Codex P1: zero JA GRAVADO no destino tambem some — senao o agregado pulava o motoboy */ /* Codex PR#48: zero nao e frete real — herdar 0 faria o agregado pular o motoboy do Flex */ if(v.logistica_ml && !h.logistica_ml) h.logistica_ml=v.logistica_ml; if(String(h.logistica_ml||'')==='self_service') h.flex=1; /* Codex: o Bling nao sabia que era Flex; o ML sabe — sem isto o pedido ganhava o bonus e nao pagava o motoboy */ if(v.renda_canal!=null && h.renda_canal==null) h.renda_canal=Number(v.renda_canal); if(v.devolucao){ h.devolucao=1; if(v.dev_frete_retorno!=null)h.dev_frete_retorno=Number(v.dev_frete_retorno); h.dev_destino=v.dev_destino; h.dev_status=v.dev_status; h.dev_aberta=v.dev_aberta; } } });   // d45: bipada herda dia/hora · d50: tarifa REAL · d51: frete recebido · d53: renda oficial · b39: devolução
   const _nums = new Set((DADOS||[]).map(h=>String(h.numero)));
-  SINT = (VENDAS||[]).filter(v=>v&&v.numero!=null&&!_nums.has(String(v.numero))).map(v=>({
+  /* ═══════════════ 19/08 — "BIPAGEM MORRE NO DASHBOARD" (regra do Diego) ═══════════════
+   A venda ainda não bipada montava a linha por uma LISTA MANUAL de campos, e o pedido bipado
+   por outro caminho. Toda vez que um campo financeiro novo nascia (renda_canal, frete_recebido,
+   mag_frete_copart, mag_frete_fonte…), alguém tinha que lembrar de acrescentá-lo AQUI — e não
+   lembrava. Foram 3 bugs em 2 dias por isso, incluindo margem com o SINAL INVERTIDO na Shopee.
+   Agora a base da linha é a venda INTEIRA (cópia), e só o que precisa de forma diferente é
+   sobrescrito abaixo. Campo financeiro novo passa a chegar sozinho nos dois caminhos.
+   O que NÃO pode vazar da venda (nomes internos do sincronizador que confundiriam o calcPL ou
+   pesariam à toa) sai na lista de exclusão — curta e explícita, ao contrário da lista de
+   inclusão, que era infinita. */
+const _FORA_DA_LINHA = ['it','total','data','nf_em','pack_id','situacao','cancelado','id','det'];   /* 'det' é só a marca de "já busquei o detalhe no Bling"; os demais têm forma própria abaixo */
+SINT = (VENDAS||[]).filter(v=>v&&v.numero!=null&&!_nums.has(String(v.numero))).map(v=>({
+    ...(function(){ const c={}; for(const k in v){ if(!_FORA_DA_LINHA.includes(k)) c[k]=v[k]; } return c; })(),
     sintetico:true, id:'s'+v.id, numero:v.numero, numero_loja:v.numero_loja||'', ml_pack:(v.pack_id||v.ml_pack||null), marketplace:v.marketplace||'outro',   /* Codex r6: o pack_id do cache não chegava ao SINT — sem ele o dedup não reconhecia o mesmo pedido vindo do histórico como ML-<order_id> */
     venda_em:v.venda_em||null, nf_emissao:(v.nf_em||null), venda_dia:v.data||null, valor:(v.total!=null?Number(v.total):null), cliente:v.cliente||'',
     itens:(v.it||[]).map(i2=>({sku:i2.sku,descricao:(i2.d||null),qtd:i2.qtd,valor_total:i2.vt,custo:(i2.custo!=null?i2.custo:null)})), taxa_mkt:(v.taxa_mkt!=null?v.taxa_mkt:null), frete_mkt:(v.frete_mkt!=null?v.frete_mkt:null),
