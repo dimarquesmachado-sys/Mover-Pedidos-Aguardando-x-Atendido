@@ -1852,7 +1852,15 @@ function render(){
     setTimeout(()=>checarCancelados(true), 900);
   })();
   // 📚 período longo → busca o agregado do histórico (Supabase)
-  if(precisaHistorico(de)){ if(!HIST || HIST.de!==de || HIST.ate!==ate) carregarHistorico(de, ate); }
+  /* Codex (P1, PR#135): eu repintava a tela na falha, e este ponto do render dispara a busca de
+     novo sempre que HIST está ausente — ou seja, cada resposta com erro iniciava outra requisição
+     na hora. Numa queda do banco, cada dashboard aberto martelaria o endpoint sem parar e
+     agravaria a queda. Enquanto a falha DESTE período estiver marcada, não tenta sozinho: quem
+     decide é o "tentar de novo" (que limpa a marca). Trocar de período tenta normalmente. */
+  if(precisaHistorico(de)){
+    const jaFalhou = !!(_histFalhou && _histFalhou.de===de && _histFalhou.ate===ate);
+    if(!jaFalhou && (!HIST || HIST.de!==de || HIST.ate!==ate)) carregarHistorico(de, ate);
+  }
   else if(HIST){ HIST = null; }
   // ⚡ AUTOMÁTICO: se o período que está na tela tem pedido sem detalhe, busca sozinho (1x por período)
   (function(){
