@@ -1293,8 +1293,19 @@ function routes(readBody) {
       // e REAPLICA nas linhas já gravadas do Supabase, só nos meses que mudaram de verdade.
       // Roda em background: a resposta volta na hora e o dashboard acompanha pelo /reaplicar-status.
       try {
-        if (_mudou.length) { console.log('[FISCAL] alíquota mudou em: ' + _mudou.join(', ') + ' — reaplicando no histórico');
-                             reaplicarImposto(_mudou, 'girassol').catch(e => console.log('[FISCAL] ✗ ' + e.message)); }
+        if (_mudou.length) {
+          // Codex (P2): se a reaplicação do BOOT ainda estiver rodando, `reaplicarImposto` volta na
+          // hora com o estado atual e a mudança que o Diego acabou de salvar NUNCA é aplicada —
+          // ele salva a alíquota certa e o histórico fica com a velha, sem nenhum aviso. Agora a
+          // edição entra numa fila que é processada quando a rodada em curso termina.
+          if (_reap.rodando) {
+            for (const m of _mudou) if (!_filaReap.includes(m)) _filaReap.push(m);
+            console.log('[FISCAL] alíquota mudou em: ' + _mudou.join(', ') + ' — reaplicação em curso, ENFILEIRADO');
+          } else {
+            console.log('[FISCAL] alíquota mudou em: ' + _mudou.join(', ') + ' — reaplicando no histórico');
+            reaplicarImposto(_mudou, 'girassol').then(escoarFilaReap).catch(e => console.log('[FISCAL] ✗ ' + e.message));
+          }
+        }
       } catch (e) {}
       return true;
     }
@@ -3506,6 +3517,12 @@ function _migrarAliquotas() {
     if (Number(cfg.aliquotas['2026-07']) === 14.1) { cfg.aliquotas['2026-07'] = 14.4007; mudou = true; mesesTocados.push('2026-07'); }
     // sem valor salvo para julho, o histórico usou o padrão antigo (14,1) — reaplicar mesmo assim
     else if (cfg.aliquotas['2026-07'] == null) { mudou = true; mesesTocados.push('2026-07'); }
+    // Codex (P1): AGOSTO em diante também mudou de padrão no backend (14,1 → 15). Quem não salvou
+    // nada tem essas linhas gravadas com 14,1 no Supabase; eu só reaplicava julho e deixava agosto
+    // com o imposto velho — justamente o mês corrente, que é o que ele mais olha.
+    for (const m of ['2026-08', '2026-09', '2026-10', '2026-11', '2026-12']) {
+      if (cfg.aliquotas[m] == null) { mudou = true; mesesTocados.push(m); }
+    }
     for (const [k, v] of Object.entries(cfg.aliquotas)) {
       if (!(Number(v) > 0)) { delete cfg.aliquotas[k]; mudou = true; mesesTocados.push(k); }
     }
@@ -3548,6 +3565,7 @@ function _migrarAliquotas() {
         writeJson(f, cfg2);
         console.log('[fiscal] reaplicação concluída em ' + _mesesMig.join(', ') + ' — migração marcada');
       })
+      .then(escoarFilaReap)
       .catch(e => console.error('[fiscal] reaplicação falhou (' + e.message + ') — marca NÃO gravada, o próximo boot tenta de novo'));
   } catch (e) { console.error('[fiscal] migração falhou (segue com o padrão):', e.message); }
 }
@@ -4507,6 +4525,13 @@ async function varrerCancelados(dias, empresa) {
 }
 
 let _reap = { rodando:false, meses:[], mesAtual:null, linhas:0, atualizadas:0, erros:0, inicio:null, fim:null, msg:'' };
+const _filaReap = [];   // meses que o Diego salvou enquanto outra reaplicação rodava
+function escoarFilaReap(){
+  if (_reap.rodando || !_filaReap.length) return;
+  const meses = _filaReap.splice(0, _filaReap.length);
+  console.log('[FISCAL] escoando fila de reaplicação: ' + meses.join(', '));
+  return reaplicarImposto(meses, 'girassol').then(escoarFilaReap).catch(e => console.log('[FISCAL] ✗ fila: ' + e.message));
+}
 
 async function reaplicarImposto(meses, empresa){
   if (_reap.rodando) return _reap;
