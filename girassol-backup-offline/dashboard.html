@@ -503,6 +503,11 @@ function prepararVendas(){
        pedido passava pelo outro caminho e se consertava sozinho — por isso nunca apareceu nos
        fechamentos. Os dois campos entram aqui; nenhuma fórmula muda. */
     renda_canal:(v.renda_canal!=null?v.renda_canal:null), frete_recebido:(v.frete_recebido!=null?v.frete_recebido:null),
+    /* Codex (P1, PR#133): trazer a renda SEM a metadata do frete Magalu criava um erro NOVO — no
+       Magalu liquidado o `renda_canal` já é líquido do frete, e o calcPL só sabe disso pelo
+       `mag_frete_fonte`. Sem ele, o frete do Bling era descontado DE NOVO e a margem do pedido
+       Magalu não bipado saía menor. Os dois campos andam junto com a renda, nunca separados. */
+    mag_frete_copart:(v.mag_frete_copart!=null?v.mag_frete_copart:null), mag_frete_fonte:(v.mag_frete_fonte||null),
     tarifa_ml:(v.tarifa_ml!=null?v.tarifa_ml:null), frete_ml:((v.frete_ml!=null && Number(v.frete_ml)>0)?Number(v.frete_ml):null),   /* Codex: zero na sintetica fazia o agregado pular o motoboy do Flex */ credito_ml:(v.credito_ml!=null?v.credito_ml:null),   // b31: comissão/frete/estorno REAIS do ML (fase ml_real) — o calcPL prioriza estes sobre o Bling
     logistica_ml:(v.logistica_ml||null), flex:((v.logistica_ml==='self_service')?1:0),   // Codex PR#48: sem isto a venda NÃO BIPADA somava o bônus e não descontava o motoboy do Flex — margem inflada
     devolucao:(v.devolucao?1:0), dev_frete_retorno:(v.dev_frete_retorno!=null?Number(v.dev_frete_retorno):null), dev_destino:v.dev_destino||null, dev_status:v.dev_status||null, dev_aberta:(v.dev_aberta?1:0),   // b39: devolução do ML
@@ -2252,7 +2257,13 @@ function calcPL(h){
   else if (ck==='magalu' && h.mag_frete_copart!=null && isFinite(Number(h.mag_frete_copart)) && Number(h.mag_frete_copart)>0) { frV = Number(h.mag_frete_copart); frFonte = 'magalu'; }   // frete de coparticipação Magalu (o frete REAL desse canal — não é motoboy, é logística Magalu)
   else if (h.flex) { const fx = flexDe(ck); if (fx!=null && fx>0) { frV = fx; frFonte = 'flex'; } }   // d52: FLEX deduz o MOTOBOY da config — o "frete" que o Bling importa num flex é o frete do COMPRADOR (entra como crédito via escrow), não custo do vendedor (caso BRS 260722C6YRDNC0)
   else if (h.frete_mkt!=null && isFinite(Number(h.frete_mkt)) && Number(h.frete_mkt)>0) { frV = Number(h.frete_mkt); frFonte = 'bling'; }
-  const completo = [rp,imposto,tarifa].every(v=>v!=null) && custoOk;
+  /* Codex (P2, PR#133): o ramo da renda oficial não usa `tarifa` em conta nenhuma, mas o
+     predicado exigia — pedido de tarifa zero/subsidiada com repasse conhecido ficava com M.C.
+     nula e FORA dos totais de margem. Renda oficial válida satisfaz a exigência de tarifa. */
+  /* `rendaCanal` só é declarado mais abaixo — usar a const aqui daria ReferenceError (TDZ) e
+     derrubaria o dashboard inteiro, que o node --check não pega. Checagem direta no campo. */
+  const _temRendaOficial = (h.renda_canal!=null && isFinite(Number(h.renda_canal)) && Number(h.renda_canal)>0);
+  const completo = [rp,imposto].every(v=>v!=null) && (tarifa!=null || _temRendaOficial) && custoOk;
   // ESTORNO do ML (compensação de envio, típica do Flex): crédito que o ML devolve pra loja — SOMA na M.C.
   const credito = (h.credito_ml!=null && isFinite(Number(h.credito_ml)) && Number(h.credito_ml)!==0) ? Number(h.credito_ml) : null;
   // d51: FINO no centavo (caso BRS 260722C6YRDNC0 x extrato Shopee) —
