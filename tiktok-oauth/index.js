@@ -269,12 +269,20 @@ async function tratar(req, res, urlObj, json) {
     if (!admOk()) { json(res, 404, { error: 'not found' }); return true; }
     const loja = lojaDe(q);
     const arqD = path.join(process.env.TIKTOK_CACHE_DIR || '/data', '_tiktok_devolucoes_' + loja + '.json');
-    // Só ENOENT significa "nunca coletou". Arquivo corrompido/meio-escrito/ilegível
-    // é OUTRA coisa e sai separado em `cache_erro` — senão a corrupção se disfarça
-    // de "sem cache" (apontado pelo Codex no PR #155).
-    let g = null, cacheErro = null;
-    try { g = JSON.parse(fs.readFileSync(arqD, 'utf8')); }
-    catch (e) { g = null; if (!e || e.code !== 'ENOENT') cacheErro = String((e && e.message) || e).slice(0, 160); }
+    // Só ENOENT significa "nunca coletou" — o caso é rastreado EXPLICITAMENTE.
+    // Arquivo corrompido/ilegível é OUTRA coisa e sai em `cache_erro`; e JSON
+    // válido com a forma errada (`null`, array, primitivo) também é cache_erro,
+    // porque o arquivo EXISTE — senão a corrupção se disfarça de "sem cache"
+    // (apontado pelo Codex no PR #155, rodadas 1 e 2).
+    let g = null, cacheErro = null, semCache = false;
+    try {
+      const parsed = JSON.parse(fs.readFileSync(arqD, 'utf8'));
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) g = parsed;
+      else cacheErro = 'conteudo do cache nao tem a forma esperada (veio ' + (parsed === null ? 'null' : Array.isArray(parsed) ? 'array' : typeof parsed) + ')';
+    } catch (e) {
+      if (e && e.code === 'ENOENT') semCache = true;
+      else cacheErro = String((e && e.message) || e).slice(0, 160);
+    }
     const todos = Object.values((g && g.devolucoes) || {})
       .sort((a, b) => (Number(b.criado_em) || 0) - (Number(a.criado_em) || 0));
     let limite = parseInt(q.get('limite') || '', 10);
@@ -285,7 +293,7 @@ async function tratar(req, res, urlObj, json) {
       guardadas: todos.length,
       // `sem_cache` separa "NUNCA coletou" (arquivo nem existe) de "coletou e veio
       // vazio" — sem isso, loja recém-conectada pareceria loja sem devoluções.
-      sem_cache: !g && !cacheErro,
+      sem_cache: semCache,
       cache_erro: cacheErro,
       atualizado: (g && g.atualizado) || null, coleta_ok_em: (g && g.ok_em) || null,
       cru_campos_uniao: cruCampos,
