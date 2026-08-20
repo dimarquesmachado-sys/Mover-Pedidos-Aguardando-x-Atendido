@@ -1761,7 +1761,7 @@ function render(){
     if(!PREV_MES || PREV_MES.mes !== _hj.getMonth() || PREV_MES.diaAtual !== _hj.getDate()) carregarPrevisaoMes();
   }catch(e){}
   { const ct=document.getElementById('coverTopo'), cd=document.getElementById('coverTopoDet');
-    if(ct) ct.innerHTML = (PER.length===0)
+    if(ct) ct.innerHTML = ((PER.length + AGD.length)===0)
       ? '<button class="pill w covResumo" onclick="toggleCobertura()">∅ sem vendas no período <b>▾</b></button>'
       : resumo.replace(/onclick="[^"]*"/, 'onclick="toggleCobertura()"');
     if(cd) cd.innerHTML = '<div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;margin-top:5px">'+
@@ -1772,7 +1772,12 @@ function render(){
       '<span class="pill '+(cNF>=95?'g':'w')+'" title="dos pedidos já bipados">nota fiscal <b>'+cNF+'%</b></span>'+
       '<span class="pill '+(cTar>=95?'g':'w')+'">tarifa real <b>'+cTar+'%</b></span>'+
       '</div>'; }   // no celular ele aparece aqui, sob o ← checkout
-  $('cover').innerHTML = PER.length === 0 ?
+  /* Codex (P2, PR#150): a condição olhava só PER (as BIPADAS). Num período em que todas as
+     vendas ainda não foram bipadas, PER é zero e AGD não — e o painel dizia 'sem vendas'
+     com os cards cheios logo abaixo. Era isto que o Diego estava vendo. As duas populações
+     contam, que é a mesma regra dos cards (PER.concat(AGD)). */
+  const _semVenda = (PER.length + AGD.length) === 0;
+  $('cover').innerHTML = _semVenda ?
     // 28/07: esse aviso foi escrito pro computador e no celular ocupava 4 linhas LOGO NO TOPO,
     // empurrando os cards pra baixo. Agora e uma linha curta no telefone e o texto completo no desktop.
     ('<span class="pill w covResumo" style="cursor:default">∅ sem vendas neste período</span>'+
