@@ -404,7 +404,7 @@ const MOD = '/amb-checkout-offline';
     return _f(u, o);
   };
 })();
-const DASH_BUILD = 'a32';
+const DASH_BUILD = 'a33';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -2376,6 +2376,27 @@ async function salvarCfg(){
 }
 
 // ── 🔍 busca & P&L por pedido ───────────────────────────────────────────────
+/* 19-20/08 — "TARIFA REAL (Bling)" ERA UMA PROMESSA FALSA NO TIKTOK
+   O Diego viu o pedido 119933 (TikTok) com "Tarifa REAL (Bling) R$ 4,19" — 12% de 34,90. A tarifa
+   real do TikTok, medida no extrato da própria plataforma, é bem maior. Não é erro de cálculo: o
+   extrato sai por pagamento e demora dias, então venda recente entra com a taxa do Bling e se
+   corrige depois. O erro estava no RÓTULO — chamar de REAL um número que sabemos subestimado.
+   Escopo deste PR, de propósito: SÓ o rótulo, e só onde o dado vem do cache. Marcar o histórico,
+   o card do topo e a planilha exige reconhecer a assinatura em pedido multi-item e na busca — vai
+   numa frente própria, para não travar esta correção. */
+const _BLING_SUBESTIMA = { tiktok: { real_pct: 'maior — quanto, depende do ticket e do afiliado (a taxa fixa por item pesa mais em pedido pequeno)', bling_pct: '~12%' } };
+function _tarifaProvisoria(ck, feeReal, feeBling){
+  return feeReal == null && feeBling != null && !!_BLING_SUBESTIMA[ck];
+}
+function _seloTarifa(ck, feeReal, feeBling){
+  if (feeReal != null) return ' <span class="st ok" style="font-size:9px">REAL</span>';
+  if (feeBling == null) return '';
+  if (_tarifaProvisoria(ck, feeReal, feeBling)) {
+    const m = _BLING_SUBESTIMA[ck];
+    return ' <span class="st" style="font-size:9px;background:#78350f55;color:#fbbf24;border-color:#f59e0b55" title="taxa que o Bling importou (' + m.bling_pct + '). A tarifa REAL deste canal, que vem no extrato do marketplace, é ' + m.real_pct + ' — esta margem está OTIMISTA">PROVISÓRIA</span>';
+  }
+  return ' <span class="st ok" style="font-size:9px">BLING</span>';
+}
 function calcPL(h){
   const mes = diaVenda(h).slice(0,7);
   const ck = canalKey(h.marketplace);
@@ -2622,7 +2643,7 @@ function renderPL(h){
       : linha('🏷️ Produtos (nota fiscal)', rp)+linha('🚚 Frete embutido (receita)', frete))+
     linha('🏛 Imposto ('+(aliq!=null?aliq+'% de '+mesPorExtenso(mes):'<span class="warn">configure ⚙️ '+mesPorExtenso(mes)+'</span>')+')', imposto!=null?-imposto:null)+
     /* o rótulo dizia "REAL (ML)" até em pedido de Shopee/TikTok — agora nomeia o canal certo */
-    linha((rendaCanal!=null?'<span class="dim">🏪 Tarifa (já embutida no repasse)</span>':'🏪 Tarifa ')+ (rendaCanal!=null?'':(feeReal!=null?'<span class="ok">REAL ('+esc(nomeCanal(ck))+')</span>':(feeBling!=null?'<span class="ok">REAL (Bling)</span>':(tx!=null?tx+'% est.':'<span class="warn">configure ⚙️</span>')))), tarifa!=null?(rendaCanal!=null?tarifa:-tarifa):null,
+    linha((rendaCanal!=null?'<span class="dim">🏪 Tarifa (já embutida no repasse)</span>':'🏪 Tarifa ')+ (rendaCanal!=null?'':(feeReal!=null?'<span class="ok">REAL ('+esc(nomeCanal(ck))+')</span>':(feeBling!=null?(_tarifaProvisoria(ck,feeReal,feeBling)?('<span class="warn">PROVIS\u00d3RIA — taxa do Bling ('+_BLING_SUBESTIMA[ck].bling_pct+'); a real do '+esc(nomeCanal(ck))+' \u00e9 '+_BLING_SUBESTIMA[ck].real_pct+'</span>'):'<span class="ok">Bling</span>'):(tx!=null?tx+'% est.':'<span class="warn">configure ⚙️</span>')))), tarifa!=null?(rendaCanal!=null?tarifa:-tarifa):null,
       (ck==='ml'&&h.numero_loja&&feeReal==null?' <button class="btn" style="padding:3px 10px;font-size:10.5px" onclick="pegarFeeML(\''+h.id+'\',\''+esc(h.numero_loja)+'\')">buscar real</button>':''))+
     linha('📦 Custo ('+cusUn+'/'+unTot+' un. c/ custo)', (cusUn?-custo:null))+
     (rendaCanal!=null&&frV!=null&&ck!=='ml' ? linha('<span class="dim">🚛 Frete vendedor (já embutido no repasse)</span>', frV) :
@@ -3296,7 +3317,7 @@ function renderAnalise(){
       '<td class="num">'+N(unid)+'</td>'+
       cel(P.tot)+cel(P.rp,'ok')+
       cel(P.custoOk?P.custo:null)+cel(P.imposto)+
-      '<td class="num">'+(P.tarifa!=null?BRL(P.tarifa)+(P.feeReal!=null?' <span class="st ok" style="font-size:9px">REAL</span>':(P.feeBling!=null?' <span class="st ok" style="font-size:9px">BLING</span>':''))+(P.rp?'<div class="desc">'+Math.round(P.tarifa/P.rp*100)+'%</div>':''):'<span class="dim">—</span>')+'</td>'+
+      '<td class="num">'+(P.tarifa!=null?BRL(P.tarifa)+_seloTarifa(P.ck,P.feeReal,P.feeBling)+(P.rp?'<div class="desc">'+Math.round(P.tarifa/P.rp*100)+'%</div>':''):'<span class="dim">—</span>')+'</td>'+
       '<td class="num">'+(P.frV!=null?(
           P.frFonte==='magalu'
             ? (P.magFreteFonte==='prov'
