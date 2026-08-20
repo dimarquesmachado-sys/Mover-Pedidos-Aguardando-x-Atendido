@@ -1248,7 +1248,17 @@ function routes(readBody) {
       let body = {}; try { const _rb = await readBody(req); body = (_rb && typeof _rb === 'object') ? _rb : JSON.parse(_rb || '{}'); } catch (e) {}   // tolerante: lib/http passou a devolver objeto ja parseado
       const atual = readJson(CFG_FILE, { aliquotas: {}, taxas: {} });
       const _aliqAntes = Object.assign({}, atual.aliquotas || {});   // 01/08: p/ saber o que mudou
-      if (body.aliquotas && typeof body.aliquotas === 'object') for (const [k2, v2] of Object.entries(body.aliquotas)) { const n2 = Number(v2); if (/^\d{4}-\d{2}$/.test(k2) && isFinite(n2) && n2 >= 0 && n2 <= 40) atual.aliquotas[k2] = n2; else if (v2 === null) delete atual.aliquotas[k2]; }
+      // ⚠️ 19/08 — BUG ANTIGO: o campo em BRANCO chega como `null`, e `Number(null)` é 0, que passa
+      // em `isFinite && >=0` ANTES do teste de null. Deixar um mês vazio no ⚙️ e salvar gravava
+      // **0%** — e alíquota zero salva vence o padrão, zerando o imposto daquele mês no histórico.
+      // O teste de null vem primeiro; zero explícito também não é aceito (no Simples não existe 0%).
+      if (body.aliquotas && typeof body.aliquotas === 'object') for (const [k2, v2] of Object.entries(body.aliquotas)) {
+        if (!/^\d{4}-\d{2}$/.test(k2)) continue;
+        if (v2 === null || v2 === '' || v2 === undefined) { delete atual.aliquotas[k2]; continue; }
+        const n2 = Number(v2);
+        if (isFinite(n2) && n2 > 0 && n2 <= 40) atual.aliquotas[k2] = n2;
+        else if (isFinite(n2) && n2 === 0) delete atual.aliquotas[k2];   // 0% = campo vazio, não configuração
+      }
       if (body.taxas && typeof body.taxas === 'object') for (const [k2, v2] of Object.entries(body.taxas)) { const n2 = Number(v2); if (isFinite(n2) && n2 >= 0 && n2 <= 50) atual.taxas[String(k2).toLowerCase()] = n2; else if (v2 === null) delete atual.taxas[String(k2).toLowerCase()]; }
       if (body.flex && typeof body.flex === 'object') { atual.flex = atual.flex || {}; for (const [k2, v2] of Object.entries(body.flex)) { const n2 = Number(v2); if (['ml', 'shopee', 'outros', 'geral'].indexOf(k2) >= 0 && isFinite(n2) && n2 >= 0 && n2 <= 100) atual.flex[k2] = n2; else if (v2 === null) delete atual.flex[k2]; } }
       // 05/08 (b115): CIÊNCIA da alíquota herdada. Quando um mês não tem alíquota própria
@@ -1271,8 +1281,12 @@ function routes(readBody) {
       // salva no disco, o navegador recebia "✗ falhou" e NENHUM mês era reaplicado.
       let _mudou = [];
       try {
-        for (const [_m, _v] of Object.entries(atual.aliquotas || {}))
-          if (Number(_aliqAntes[_m]) !== Number(_v)) _mudou.push(_m);
+        // Codex (P2): eu percorria só o que SOBROU, então o mês que o Diego APAGA (voltando ao
+        // padrão) nunca era reaplicado — o Supabase seguia com o imposto e a margem do valor
+        // removido, e quem lê a margem GRAVADA (previsão, plano de compra, pescaria) continuava
+        // com o número velho. A comparação cobre a união das chaves de antes e de depois.
+        for (const _m of new Set([].concat(Object.keys(_aliqAntes || {}), Object.keys(atual.aliquotas || {}))))
+          if (Number(_aliqAntes[_m]) !== Number((atual.aliquotas || {})[_m])) _mudou.push(_m);
         _mudou = _mudou.filter(m => /^\d{4}-\d{2}$/.test(m)).sort();
       } catch (e) {}
       json(res, 200, { ok: true, config: atual, reaplicando: _mudou });
@@ -3493,7 +3507,32 @@ async function buscarDevolucoesML(tokenML, dorme) {
 }
 
 // ─── BACKFILL do histórico de vendas pro Supabase ────────────────────────────────────────────
-const DEFAULT_ALIQ_BK = { '2026-01':11.409280, '2026-02':11.3254, '2026-03':12.3402, '2026-04':13.6001, '2026-05':13.9149, '2026-06':14.056, '2026-07':14.1, '2026-08':14.1, '2026-09':14.1, '2026-10':14.1, '2026-11':14.1, '2026-12':14.1 };
+// 19/08 — julho FECHOU em 14,4007% (era 14,1 de estimativa) e agosto fica pré-definido em 15%.
+// Os meses seguintes seguem 15% como palpite até cada apuração sair. O ⚙️ sempre tem prioridade.
+const DEFAULT_ALIQ_BK = { '2026-01':11.409280, '2026-02':11.3254, '2026-03':12.3402, '2026-04':13.6001, '2026-05':13.9149, '2026-06':14.056, '2026-07':14.4007, '2026-08':15, '2026-09':15, '2026-10':15, '2026-11':15, '2026-12':15 };
+// ─── 19/08: destravar o padrão novo de julho ────────────────────────────────────
+// Codex (P2): o ⚙️ preenche cada campo com o valor de fábrica em cinza e o salvamento envia TODOS
+// os campos — então quem salvou qualquer configuração alguma vez tem `2026-07: 14.1` gravado sem
+// nunca ter mexido em julho. Como valor salvo vence o padrão, a correção para 14,4007 não teria
+// efeito nenhum para essa pessoa: ela veria o número velho e acharia que estava ajustado.
+// Troca só esse caso exato (14.1, que só existe por ter sido o padrão) e roda uma vez.
+function _destravarJulho() {
+  try {
+    const f = path.join(CACHE_DIR, '_config-fiscal.json');
+    const cfg = readJson(f, null);
+    if (!cfg || !cfg.aliquotas) return;
+    if (cfg.migracoes && cfg.migracoes['julho-14.4007']) return;
+    if (Number(cfg.aliquotas['2026-07']) === 14.1) {
+      cfg.aliquotas['2026-07'] = 14.4007;
+      console.log('[fiscal] julho estava salvo com o padrão antigo (14,1) — trocado por 14,4007');
+    }
+    cfg.migracoes = cfg.migracoes || {};
+    cfg.migracoes['julho-14.4007'] = new Date().toISOString();
+    if (!cfg.taxas || typeof cfg.taxas !== 'object') cfg.taxas = {};   // o POST do ⚙️ assume que existe
+    writeJson(f, cfg);
+  } catch (e) { console.error('[fiscal] não consegui destravar julho (' + e.message + ') — segue com o salvo'); }
+}
+_destravarJulho();
 const _histCache = {};   // agregados do Supabase por período (10 min)
 let _backfill = { rodando:false, empresa:null, de:null, ate:null, pagina:0, pedidos:0, itens:0, gravados:0, erros:0, fase:'parado', inicio:null, fim:null, msg:'' };
 
@@ -3726,7 +3765,7 @@ async function backfillVendas(de, ate, empresa){
     _backfill.shopee = { escrow_fechou: 0, escrow_com_sobra: 0, escrow_sem_resposta: 0, escrow_erro: 0,
                          comissao_somada: 0, comissao_que_o_bling_dava: 0, frete_liquido_visto: 0,
                          modo: SHOPEE_TODOS ? 'todos os pedidos' : 'so quando o Bling nao trouxe taxa' };
-    const aliqBk = mes => (cfg.aliquotas && cfg.aliquotas[mes]!=null ? Number(cfg.aliquotas[mes]) : (DEFAULT_ALIQ_BK[mes]!=null?DEFAULT_ALIQ_BK[mes]:14.1));
+    const aliqBk = mes => ((cfg.aliquotas && Number(cfg.aliquotas[mes]) > 0) ? Number(cfg.aliquotas[mes]) : (DEFAULT_ALIQ_BK[mes]!=null?DEFAULT_ALIQ_BK[mes]:15));   // salvo <= 0 não é configuração: cai no padrão
     // 11/08 (herdado da AMB, achado pelo Codex): NADA é apagado antes da coleta terminar.
     // A versão antiga deletava o período aqui e gravava página a página — uma queda do Bling
     // no meio deixava o histórico MEIO VAZIO. Foi exatamente o que aconteceu em 03/08 e
@@ -4030,7 +4069,11 @@ async function backfillVendas(de, ate, empresa){
         if (seller) {
           const cfgF = readJson(path.join(CACHE_DIR, '_config-fiscal.json'), { aliquotas: {} });
           const aliqDe = m => { const a = cfgF.aliquotas && cfgF.aliquotas[m];
-            if (a != null && isFinite(Number(a))) return Number(a);
+            /* Codex (P1): este leitor (backfill só-ML) tinha ficado de fora do meu conserto e ainda
+               aceitava o 0 legado do bug do campo em branco — então um backfill com pedidos pagos do
+               ML que ainda não estão no Bling gravaria essas linhas com imposto ZERO e margem
+               inflada, no mesmo período em que as demais usam o padrão novo. Mesma regra dos outros. */
+            if (a != null && isFinite(Number(a)) && Number(a) > 0) return Number(a);
             return (DEFAULT_ALIQ_BK && DEFAULT_ALIQ_BK[m] != null) ? Number(DEFAULT_ALIQ_BK[m]) : 0; };
           const custos = readJson(path.join(CACHE_DIR, '_custos.json'), {});
           const cUn = sk => { const c = custos[String(sk || '').trim()]; return (c && c.custo != null && isFinite(Number(c.custo))) ? Number(c.custo) : null; };
@@ -4458,7 +4501,7 @@ async function reaplicarImposto(meses, empresa){
   const base = url.replace(/\/+$/, '') + '/rest/v1/vendas_historico';
   const cfg = readJson(path.join(CACHE_DIR, '_config-fiscal.json'), { aliquotas: {} });
   const aliqDe = m => { const a = cfg.aliquotas && cfg.aliquotas[m];
-    if (a != null && isFinite(Number(a))) return Number(a);
+    if (a != null && isFinite(Number(a)) && Number(a) > 0) return Number(a);   // 19/08: 0% salvo era campo em branco gravado por engano — cai no padrão
     return (DEFAULT_ALIQ_BK && DEFAULT_ALIQ_BK[m] != null) ? Number(DEFAULT_ALIQ_BK[m]) : null; };
 
   _reap = { rodando:true, meses:meses.slice(), mesAtual:null, linhas:0, atualizadas:0, erros:0,
