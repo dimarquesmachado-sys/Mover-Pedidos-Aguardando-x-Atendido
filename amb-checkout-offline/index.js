@@ -316,6 +316,20 @@ function shopeeUrlBusca(cookie, termo) {
 }
 
 // Chamada barata só pra Shopee renovar os cookies. Roda no cron 2x ao dia.
+
+// 20/08 (pedido do Diego: "quando vc fizer coisas pra acompanhar status, coloca o URL Completo.
+// assim eu vejo na tela e já acompanho. do jeito q tá, não consigo saber o caminho"): quem dispara
+// uma rotina longa recebe a mensagem "?status=1 p/ acompanhar" — e não tem como montar o caminho a
+// partir dela. A resposta passa a trazer a URL inteira, pronta pra clicar.
+function _urlStatus(req, caminho, extra) {
+  try {
+    const host = (req && req.headers && (req.headers['x-forwarded-host'] || req.headers.host)) || '';
+    const proto = (req && req.headers && req.headers['x-forwarded-proto']) || 'https';
+    const base = host ? (proto + '://' + host) : '';
+    return base + caminho + '?status=1' + (extra || '') + '&k=SUA_ADMIN_KEY';
+  } catch (e) { return caminho + '?status=1&k=SUA_ADMIN_KEY'; }
+}
+
 async function shopeeKeepAlive() {
   const sess = shopeeSessaoLer();
   if (!sess.cookie) { console.log('[AMBBKP] shopee keep-alive: sem cookie (env ' + SHOPEE_ENV_COOKIE + ' vazia) — nada a fazer'); return { ok: false, motivo: 'sem cookie' }; }
@@ -3033,7 +3047,7 @@ function routes(readBody) {
       const simularC = urlObj.searchParams.get('simular') === '1';
       if (simularC) { const r9 = await reaplicarCusto(deC, ateC, 'amb', { simular: true }); json(res, 200, { ok: true, simulacao: true, resultado: r9 }); return true; }
       reaplicarCusto(deC, ateC, 'amb', {}).catch(() => {});
-      json(res, 200, { ok: true, iniciado: true, de: deC, ate: ateC, mensagem: 'reaplicando custo em background — ?status=1 p/ acompanhar' });
+      json(res, 200, { ok: true, iniciado: true, de: deC, ate: ateC, mensagem: 'reaplicando custo em background — ?status=1 p/ acompanhar', acompanhe: _urlStatus(req, '/amb-checkout-offline/reaplicar-custo') });
       return true;
     }
     if (method === 'GET' && p === '/amb-checkout-offline/custo-sync') {
@@ -3065,7 +3079,7 @@ function routes(readBody) {
       if (skuProbe) { const ccP = readJson(path.join(CACHE_DIR, '_custos.json'), {}); json(res, 200, { ok: true, sku: skuProbe, no_cache_permanente: ccP[skuProbe] || null, total_no_cache: Object.keys(ccP).length }); return true; }
       if (_cst.rodando) { json(res, 200, { ok: true, ja_rodando: true, progresso: _cst.feitos + '/' + _cst.total }); return true; }
       custoSync(!!urlObj.searchParams.get('fresh')).catch(() => {});
-      json(res, 200, { ok: true, iniciado: true, mensagem: 'custo-sync rodando em background (tartaruga anti-429) — ?status=1 p/ acompanhar' });
+      json(res, 200, { ok: true, iniciado: true, mensagem: 'custo-sync rodando em background (tartaruga anti-429) — ?status=1 p/ acompanhar', acompanhe: _urlStatus(req, '/amb-checkout-offline/custo-sync') });
       return true;
     }
 
