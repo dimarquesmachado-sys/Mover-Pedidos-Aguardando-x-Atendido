@@ -260,6 +260,34 @@ async function tratar(req, res, urlObj, json) {
     return true;
   }
 
+  // ── DEVOLUÇÕES CRUAS (20/08): raio-X pro app de Devoluções ──────────────────────
+  // O resumo acima agrega e devolve só o top-20 por valor; pra frente de devoluções
+  // (bipe/espreita no app de Devoluções) o que importa é VER o que a API realmente
+  // mandou — os `cru_campos` que a coleta guarda por registro respondem, por exemplo,
+  // se existe campo de rastreio da reversa. Só LEITURA do cache; nada chama o TikTok.
+  if (p === '/tiktok/devolucoes-cru') {
+    if (!admOk()) { json(res, 404, { error: 'not found' }); return true; }
+    const loja = lojaDe(q);
+    const arqD = path.join(process.env.TIKTOK_CACHE_DIR || '/data', '_tiktok_devolucoes_' + loja + '.json');
+    let g = null;
+    try { g = JSON.parse(fs.readFileSync(arqD, 'utf8')); } catch (e) { g = null; }
+    const todos = Object.values((g && g.devolucoes) || {})
+      .sort((a, b) => (Number(b.criado_em) || 0) - (Number(a.criado_em) || 0));
+    let limite = parseInt(q.get('limite') || '', 10);
+    if (!Number.isFinite(limite) || limite < 1 || limite > 200) limite = 30;
+    const cruCampos = {};
+    for (const d of todos) for (const c of (d.cru_campos || [])) cruCampos[c] = (cruCampos[c] || 0) + 1;
+    json(res, 200, { ok: true, loja,
+      guardadas: todos.length,
+      // `sem_cache` separa "NUNCA coletou" (arquivo nem existe) de "coletou e veio
+      // vazio" — sem isso, loja recém-conectada pareceria loja sem devoluções.
+      sem_cache: !g,
+      atualizado: (g && g.atualizado) || null, coleta_ok_em: (g && g.ok_em) || null,
+      cru_campos_uniao: cruCampos,
+      registros: todos.slice(0, limite) });
+    return true;
+  }
+
   // ── QUEM NÃO FECHOU A IDENTIDADE (18/08) ────────────────────────────────────────
   // A coleta guarda `confere` por pedido: 0 = `receita − tarifa + frete + ajuste = repasse`.
   // Apareceu 1 pedido com sobra na AMB e 9 na Girassol — quero VER o que mudou, em vez de
