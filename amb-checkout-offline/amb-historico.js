@@ -310,6 +310,7 @@ function rotasHistorico(ctx) {
       let _repostos = 0;
       const T = { fat: 0, prod: 0, imp: 0, cus: 0, com: 0, fre: 0, mar: 0, un: 0, itens: 0, semCusto: 0 };
       const peds = new Set(), porCanal = {}, porSku = {}, porDia = {}, porUF = {}, semCustoSet = new Set();
+      const _pedProvSet = new Set();   // 20/08: pedidos com tarifa ainda provisória (TikTok) — o card do topo avisa
       // 31/07: o dashboard mostrava "17.351 pedidos sem alíquota" no filtro Ano porque cruzava o
       // TOTAL do histórico com a contagem dos dados LOCAIS (só ~6 dias). Agora o servidor conta de
       // verdade: pedido cujas linhas somam imposto ZERO, e de quais meses são.
@@ -396,6 +397,11 @@ function rotasHistorico(ctx) {
         totais: { faturamento: Math.round(T.fat * 100) / 100, produtos: Math.round(T.prod * 100) / 100, imposto: Math.round(T.imp * 100) / 100,
                   custo: Math.round(T.cus * 100) / 100, comissao: Math.round(T.com * 100) / 100, frete: Math.round(T.fre * 100) / 100,
                   margem: Math.round(T.mar * 100) / 100, pedidos: peds.size, unidades: T.un, itens: T.itens, un_sem_custo: T.semCusto,
+                  /* 20/08 (Codex, PR#138): no período longo o card do topo usa ESTES totais, e o contador
+                     de pedidos com tarifa provisória vinha do cache (~6 dias) — logo, o aviso sumia justo em
+                     Mês/Ano. Quem conta é quem soma: a assinatura do Bling no TikTok (12% dos produtos, ou
+                     comissão ausente) é reconhecida aqui, sobre as mesmas linhas que formam o total. */
+                  pedidos_tarifa_provisoria: _pedProvSet.size,
                   skus_sem_custo: Array.from(semCustoSet).slice(0, 60), custos_repostos: _repostos, impostos_recalculados: _impRecalc,
                   pedidos_sem_imposto: Object.values(pedImposto).filter(v => !(v > 0)).length,
                   // 01/08: não basta contar — o Diego perguntou "qual é o pedido?". Agora vai a lista,
