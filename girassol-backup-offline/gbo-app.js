@@ -3515,8 +3515,12 @@ function _migrarAliquotas() {
     // reaplicação — as linhas de julho no Supabase foram gravadas com o padrão ANTIGO de 14,1%.
     // Eu saía fora nesses casos, deixando justamente as instalações que só usaram o padrão de
     // fábrica com o imposto velho no histórico e na margem que a previsão/plano de compra leem.
-    const cfg = readJson(f, null) || { aliquotas: {} };
-    if (!cfg.aliquotas) cfg.aliquotas = {};
+    // Codex (P1): eu criava o arquivo só com `aliquotas`. O POST do ⚙️ escreve direto em
+    // `atual.taxas[...]` sem inicializar — então a PRIMEIRA vez que o Diego salvasse as configurações
+    // depois desta migração daria TypeError e o salvamento falharia. O arquivo nasce completo.
+    const cfg = readJson(f, null) || {};
+    if (!cfg.aliquotas || typeof cfg.aliquotas !== 'object') cfg.aliquotas = {};
+    if (!cfg.taxas || typeof cfg.taxas !== 'object') cfg.taxas = {};
     // Codex (P2, PR#140): eu gravava `migrado_em` mas nunca conferia — a migração rodava a CADA
     // boot. Se o Diego salvasse julho de volta em 14,1 de propósito, o próximo restart desfaria a
     // escolha dele, contrariando a regra de que o que ele salva manda. Marcador versionado: roda
