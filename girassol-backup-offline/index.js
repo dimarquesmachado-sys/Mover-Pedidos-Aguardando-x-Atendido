@@ -316,13 +316,17 @@ function shopeeUrlBusca(cookie, termo) {
 // assim eu vejo na tela e já acompanho. do jeito q tá, não consigo saber o caminho"): quem dispara
 // uma rotina longa recebe a mensagem "?status=1 p/ acompanhar" — e não tem como montar o caminho a
 // partir dela. A resposta passa a trazer a URL inteira, pronta pra clicar.
-function _urlStatus(req, caminho, extra) {
+function _urlStatus(req, caminho, extra, chave) {
   try {
     const host = (req && req.headers && (req.headers['x-forwarded-host'] || req.headers.host)) || '';
     const proto = (req && req.headers && req.headers['x-forwarded-proto']) || 'https';
     const base = host ? (proto + '://' + host) : '';
-    return base + caminho + '?status=1' + (extra || '') + '&k=SUA_ADMIN_KEY';
-  } catch (e) { return caminho + '?status=1&k=SUA_ADMIN_KEY'; }
+    // Codex (P2): quem dispara com ?k=<chave> e sem sessão recebia um link com o texto
+    // "SUA_ADMIN_KEY" — que não abre. O link tem que funcionar pra quem o recebeu: se veio com
+    // chave, ela volta; se foi por sessão (o cookie acompanha o clique), fica sem chave nenhuma.
+    const k = chave ? ('&k=' + encodeURIComponent(chave)) : '';
+    return base + caminho + '?status=1' + (extra || '') + k;
+  } catch (e) { return caminho + '?status=1'; }
 }
 
 async function shopeeKeepAlive() {
@@ -1594,7 +1598,7 @@ function routes(readBody) {
       if (skuProbe) { const ccP = readJson(path.join(CACHE_DIR, '_custos.json'), {}); json(res, 200, { ok: true, sku: skuProbe, no_cache_permanente: ccP[skuProbe] || null, total_no_cache: Object.keys(ccP).length }); return true; }
       if (_cst.rodando) { json(res, 200, { ok: true, ja_rodando: true, progresso: _cst.feitos + '/' + _cst.total }); return true; }
       custoSync(!!urlObj.searchParams.get('fresh')).catch(() => {});
-      json(res, 200, { ok: true, iniciado: true, mensagem: 'custo-sync rodando em background (tartaruga anti-429) — ?status=1 p/ acompanhar', acompanhe: _urlStatus(req, '/girassol-backup-offline/custo-sync') });
+      json(res, 200, { ok: true, iniciado: true, mensagem: 'custo-sync rodando em background (tartaruga anti-429) — ?status=1 p/ acompanhar', acompanhe: _urlStatus(req, '/girassol-backup-offline/custo-sync', '', k) });
       return true;
     }
 
