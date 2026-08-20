@@ -2892,7 +2892,7 @@ async function backfillVendas(de, ate, empresa){
     await tokenFee();
     _backfill.comissao = { bling: 0, billing: 0, sale_fee: 0, zero: 0, billing_no_mapa: Object.keys(comBill).length, token_ml: tkFee ? 'ok' : 'sem token' };
     _backfill.frete = { bling: 0, billing: 0, zero: 0, billing_no_mapa: Object.keys(freBill).length };
-    const aliqBk = mes => (cfg.aliquotas && cfg.aliquotas[mes]!=null ? Number(cfg.aliquotas[mes]) : (DEFAULT_ALIQ_BK[mes]!=null?DEFAULT_ALIQ_BK[mes]:14.1));
+    const aliqBk = mes => ((cfg.aliquotas && Number(cfg.aliquotas[mes]) > 0) ? Number(cfg.aliquotas[mes]) : (DEFAULT_ALIQ_BK[mes]!=null?DEFAULT_ALIQ_BK[mes]:15));   // 19/08: último leitor com a forma antiga — o zero legado passava por aqui, e o fallback final ainda era 14,1
     // idempotente: limpa o período antes (rodar de novo não duplica)
     await supaReq(empresa, 'DELETE', 'vendas_historico?empresa=eq.'+encodeURIComponent(empresa)+'&data_venda=gte.'+de+'&data_venda=lte.'+ate, null);
     _backfill.fase = 'varrendo';
