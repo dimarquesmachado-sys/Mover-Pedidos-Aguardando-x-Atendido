@@ -1281,8 +1281,12 @@ function routes(readBody) {
       // salva no disco, o navegador recebia "✗ falhou" e NENHUM mês era reaplicado.
       let _mudou = [];
       try {
-        for (const [_m, _v] of Object.entries(atual.aliquotas || {}))
-          if (Number(_aliqAntes[_m]) !== Number(_v)) _mudou.push(_m);
+        // Codex (P2): eu percorria só o que SOBROU, então o mês que o Diego APAGA (voltando ao
+        // padrão) nunca era reaplicado — o Supabase seguia com o imposto e a margem do valor
+        // removido, e quem lê a margem GRAVADA (previsão, plano de compra, pescaria) continuava
+        // com o número velho. A comparação cobre a união das chaves de antes e de depois.
+        for (const _m of new Set([].concat(Object.keys(_aliqAntes || {}), Object.keys(atual.aliquotas || {}))))
+          if (Number(_aliqAntes[_m]) !== Number((atual.aliquotas || {})[_m])) _mudou.push(_m);
         _mudou = _mudou.filter(m => /^\d{4}-\d{2}$/.test(m)).sort();
       } catch (e) {}
       json(res, 200, { ok: true, config: atual, reaplicando: _mudou });
@@ -4042,7 +4046,11 @@ async function backfillVendas(de, ate, empresa){
         if (seller) {
           const cfgF = readJson(path.join(CACHE_DIR, '_config-fiscal.json'), { aliquotas: {} });
           const aliqDe = m => { const a = cfgF.aliquotas && cfgF.aliquotas[m];
-            if (a != null && isFinite(Number(a))) return Number(a);
+            /* Codex (P1): este leitor (backfill só-ML) tinha ficado de fora do meu conserto e ainda
+               aceitava o 0 legado do bug do campo em branco — então um backfill com pedidos pagos do
+               ML que ainda não estão no Bling gravaria essas linhas com imposto ZERO e margem
+               inflada, no mesmo período em que as demais usam o padrão novo. Mesma regra dos outros. */
+            if (a != null && isFinite(Number(a)) && Number(a) > 0) return Number(a);
             return (DEFAULT_ALIQ_BK && DEFAULT_ALIQ_BK[m] != null) ? Number(DEFAULT_ALIQ_BK[m]) : 0; };
           const custos = readJson(path.join(CACHE_DIR, '_custos.json'), {});
           const cUn = sk => { const c = custos[String(sk || '').trim()]; return (c && c.custo != null && isFinite(Number(c.custo))) ? Number(c.custo) : null; };
