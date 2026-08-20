@@ -329,6 +329,24 @@ function shopeeUrlBusca(cookie, termo) {
 }
 
 // Chamada barata só pra Shopee renovar os cookies. Roda no cron 2x ao dia.
+
+// 20/08 (pedido do Diego: "quando vc fizer coisas pra acompanhar status, coloca o URL Completo.
+// assim eu vejo na tela e já acompanho. do jeito q tá, não consigo saber o caminho"): quem dispara
+// uma rotina longa recebe a mensagem "?status=1 p/ acompanhar" — e não tem como montar o caminho a
+// partir dela. A resposta passa a trazer a URL inteira, pronta pra clicar.
+function _urlStatus(req, caminho, extra, chave) {
+  try {
+    const host = (req && req.headers && (req.headers['x-forwarded-host'] || req.headers.host)) || '';
+    const proto = (req && req.headers && req.headers['x-forwarded-proto']) || 'https';
+    const base = host ? (proto + '://' + host) : '';
+    // Codex (P2): quem dispara com ?k=<chave> e sem sessão recebia um link com o texto
+    // "SUA_ADMIN_KEY" — que não abre. O link tem que funcionar pra quem o recebeu: se veio com
+    // chave, ela volta; se foi por sessão (o cookie acompanha o clique), fica sem chave nenhuma.
+    const k = chave ? ('&k=' + encodeURIComponent(chave)) : '';
+    return base + caminho + '?status=1' + (extra || '') + k;
+  } catch (e) { return caminho + '?status=1'; }
+}
+
 async function shopeeKeepAlive() {
   const sess = shopeeSessaoLer();
   if (!sess.cookie) { console.log('[GIRABKP] shopee keep-alive: sem cookie (env ' + SHOPEE_ENV_COOKIE + ' vazia) — nada a fazer'); return { ok: false, motivo: 'sem cookie' }; }
@@ -2137,7 +2155,7 @@ function routes(readBody) {
       const simularC = urlObj.searchParams.get('simular') === '1';
       if (simularC) { const r9 = await reaplicarCusto(deC, ateC, 'girassol', { simular: true }); json(res, 200, { ok: true, simulacao: true, resultado: r9 }); return true; }
       reaplicarCusto(deC, ateC, 'girassol', {}).catch(() => {});
-      json(res, 200, { ok: true, iniciado: true, de: deC, ate: ateC, mensagem: 'reaplicando custo em background — ?status=1 p/ acompanhar' });
+      json(res, 200, { ok: true, iniciado: true, de: deC, ate: ateC, mensagem: 'reaplicando custo em background — ?status=1 p/ acompanhar', acompanhe: _urlStatus(req, '/girassol-backup-offline/reaplicar-custo', '', kC) });
       return true;
     }
     if (method === 'GET' && p === '/girassol-backup-offline/custo-sync') {
@@ -2169,7 +2187,7 @@ function routes(readBody) {
       if (skuProbe) { const ccP = readJson(path.join(CACHE_DIR, '_custos.json'), {}); json(res, 200, { ok: true, sku: skuProbe, no_cache_permanente: ccP[skuProbe] || null, total_no_cache: Object.keys(ccP).length }); return true; }
       if (_cst.rodando) { json(res, 200, { ok: true, ja_rodando: true, progresso: _cst.feitos + '/' + _cst.total }); return true; }
       custoSync(!!urlObj.searchParams.get('fresh')).catch(() => {});
-      json(res, 200, { ok: true, iniciado: true, mensagem: 'custo-sync rodando em background (tartaruga anti-429) — ?status=1 p/ acompanhar' });
+      json(res, 200, { ok: true, iniciado: true, mensagem: 'custo-sync rodando em background (tartaruga anti-429) — ?status=1 p/ acompanhar', acompanhe: _urlStatus(req, '/girassol-backup-offline/custo-sync', '', k) });
       return true;
     }
 
