@@ -328,6 +328,15 @@ function rotasHistorico(ctx) {
             let cu = (l.custo == null ? null : Number(l.custo));
             if (cu == null) { const cx = _cuL(l.sku); if (cx != null) { cu = cx * q; _repostos++; } }   // custo cadastrado DEPOIS do backfill
             const co = Number(l.comissao) || 0, fr = Number(l.frete_vendedor) || 0;
+            /* 20/08 (Codex, PR#138): a assinatura da tarifa provisória do TikTok — 12% cravados dos
+               PRODUTOS (o Bling não cobra a taxa fixa), ou comissão ausente, que é o caso mais
+               otimista de todos. Contado por PEDIDO, aqui, sobre as MESMAS linhas que formam o total
+               do período — na tentativa anterior o contador foi devolvido sem ninguém alimentá-lo, e
+               o card lia zero em Mês/Ano. */
+            if (String(l.canal || '').toLowerCase() === 'tiktok' && vp > 0) {
+              const _tolP = Math.min(1.00, Math.max(0.10, vp * 0.005));
+              if (!(co > 0) || Math.abs(co - vp * 0.12) <= _tolP) _pedProvSet.add(String(l.numero_pedido));
+            }
             const _imGrav = Number(l.imposto) || 0;
             let im = _imGrav;
             { const _aq = _aliqL(String(l.data_venda || '').slice(0, 7));

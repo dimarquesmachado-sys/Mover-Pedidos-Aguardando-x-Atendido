@@ -2971,7 +2971,10 @@ async function baixarCSV(){
       txt(h.numero||h.id), txt(h.nf_numero||''), txt(h.numero_loja||''), txt(h.ml_pack||''), txt(h.ml_order||''),
       txt(nomeCanal(P.ck)), txt(h._sit||(h.sintetico?'nao bipada':'bipada')), txt(skus), unid,
       num(P.tot), num(P.rp), num(P.custoOk?P.custo:null), num(P.imposto), num(P.tarifa),
-      txt(P.feeReal!=null?'REAL (ML)':(P.feeBling!=null?'Bling':(P.tx!=null?'% configurada':''))),
+      /* Codex (P2, PR#138): a planilha do período CURTO exportava 'Bling' e nada mais — a margem
+         otimista do TikTok saía indistinguível da fechada, e é na planilha que ele soma por fora.
+         Mesma classificação da tabela, na mesma coluna. */
+      txt(P.feeReal!=null?'REAL (ML)':(_tarifaProvisoria(P.ck,P.feeReal,P.feeBling)?'Bling (PROVISORIA)':(P.feeBling!=null?'Bling':(P.tx!=null?'% configurada':'')))),
       num(P.frV), txt(P.frFonte==='ml'?'real ML':(P.frFonte==='magalu'?('Magalu '+(P.magFreteFonte==='prov'?'previsto':'real')):(P.frFonte==='bling'?'Bling':(P.frFonte==='flex'?'FLEX (config)':'')))),
       num(P.credito),
       num(P.mc), (P.mc!=null&&P.rp)?Math.round(P.mc/P.rp*100):''
