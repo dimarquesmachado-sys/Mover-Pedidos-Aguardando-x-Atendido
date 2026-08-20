@@ -314,7 +314,8 @@ function rotasHistorico(ctx) {
       let _repostos = 0;
       const T = { fat: 0, prod: 0, imp: 0, cus: 0, com: 0, fre: 0, mar: 0, un: 0, itens: 0, semCusto: 0 };
       const peds = new Set(), porCanal = {}, porSku = {}, porDia = {}, porUF = {}, semCustoSet = new Set();
-      let _tkEstimadas = 0;   // linhas do TikTok em que a regra substituiu a taxa do Bling
+      let _tkEstimadas = 0;
+      const _tkPed = {};   // TikTok agrupado por PEDIDO: a faixa e a taxa fixa são do pedido inteiro   // linhas do TikTok em que a regra substituiu a taxa do Bling
       // 31/07: o dashboard mostrava "17.351 pedidos sem alíquota" no filtro Ano porque cruzava o
       // TOTAL do histórico com a contagem dos dados LOCAIS (só ~6 dias). Agora o servidor conta de
       // verdade: pedido cujas linhas somam imposto ZERO, e de quais meses são.
@@ -341,13 +342,17 @@ function rotasHistorico(ctx) {
                passam a mostrar o número próximo do real sem regravar nada, e a substituição some
                sozinha quando o extrato chega. Não inclui afiliado (só existe se veio de creator).
                Vale a partir de 15/07/2026, quando a tabela passou a valer. */
-            if (String(l.canal || '').toLowerCase() === 'tiktok' && vp > 0 && String(l.data_venda || '') >= '2026-07-15') {
-              const _tolTk = Math.min(1.00, Math.max(0.10, vp * 0.005));
-              const _daBling = !(co > 0) || Math.abs(co - vp * 0.12) <= _tolTk;
-              if (_daBling) {
-                const _abaixo = vp < 50;
-                const _est = Math.round((vp * (_abaixo ? 0.10 : 0.06) + (_abaixo ? 4 : 6) * Math.max(1, q) + vp * 0.06) * 100) / 100;
-                if (_est > co) { co = _est; _tkEstimadas++; }
+            /* ═══ 20/08 — TikTok: a REGRA vale enquanto a comissão gravada é a do Bling ═══
+               Codex (P2): a faixa dos R$ 50 e a taxa fixa por item são do PEDIDO INTEIRO, não da
+               linha — dois itens de R$ 30 no mesmo pedido não são dois pedidos abaixo de 50. E a
+               base é o valor EFETIVO (com desconto), o mesmo que a margem reconhece. Por isso aqui
+               só JUNTO as linhas por pedido; a conta sai depois do laço, uma vez por pedido. */
+            if (String(l.canal || '').toLowerCase() === 'tiktok' && String(l.data_venda || '') >= '2026-07-15') {
+              const kTk = String(l.numero_pedido || l.numero_loja || '');
+              if (kTk) {
+                let g = _tkPed[kTk];
+                if (!g) g = _tkPed[kTk] = { vp: 0, vn: 0, q: 0, co: 0, linhas: 0 };
+                g.vp += vp; g.vn += vn; g.q += q; g.co += _coGrav; g.linhas++;
               }
             }
             const _imGrav = Number(l.imposto) || 0;
@@ -362,10 +367,7 @@ function rotasHistorico(ctx) {
                         if (!pedData[kp]) pedData[kp] = String(l.data_venda || '').slice(0, 10); } }
             let mg = (l.margem == null ? null : Number(l.margem));
             if (mg != null) mg -= (im - _imGrav);   // imposto recalculado: a margem acompanha
-            /* 20/08: e a comissão também. Sem esta linha eu somaria a tarifa maior em T.com e
-               deixaria a margem gravada intacta — o painel mostraria comissão nova com margem
-               velha, que é pior que não ter mexido. */
-            if (mg != null && co !== _coGrav) mg -= (co - _coGrav);
+
             if (mg != null && l.custo == null && cu != null) mg -= cu;   // margem gravada sem custo: desconta o custo reposto
             if (mg != null) T.mar += mg;
             if (l.numero_pedido) peds.add(String(l.numero_pedido));
@@ -401,6 +403,24 @@ function rotasHistorico(ctx) {
           offset += 1000;
         }
       } catch (e) { json(res, 500, { ok: false, erro: String(e.message || e) }); return true; }
+      /* A conta do TikTok, uma vez por PEDIDO (faixa e fixa são do pedido inteiro):
+         só entra quando a comissão somada tem a assinatura do Bling (~12% do produto, ou zero) e a
+         regra dá um valor MAIOR — nunca reduz tarifa já real. A margem acompanha na mesma medida. */
+      for (const g of Object.values(_tkPed)) {
+        const base = (g.vn > 0 && g.vn < g.vp) ? g.vn : g.vp;   // valor efetivo, como no calcPL
+        if (!(base > 0)) continue;
+        const tol = Math.min(1.00, Math.max(0.10, base * 0.005));
+        const daBling = !(g.co > 0) || Math.abs(g.co - base * 0.12) <= tol;
+        if (!daBling) continue;
+        const abaixo = base < 50;
+        const est = Math.round((base * (abaixo ? 0.10 : 0.06) + (abaixo ? 4 : 6) * Math.max(1, g.q) + base * 0.06) * 100) / 100;
+        if (!(est > g.co)) continue;
+        const dif = Math.round((est - g.co) * 100) / 100;
+        T.com += dif; T.mar -= dif; _tkEstimadas++;
+        // o canal também: senão o card Por Canal mostra número diferente do total
+        const ct = porCanal['tiktok'];
+        if (ct) { ct.com = (ct.com || 0) + dif; ct.mar = (ct.mar || 0) - dif; }
+      }
       const canais = {}; for (const c of Object.keys(porCanal)) canais[c] = {
         fat: Math.round(porCanal[c].fat * 100) / 100, un: porCanal[c].un,
         mar: Math.round(porCanal[c].mar * 100) / 100, pedidos: porCanal[c].peds.size,
@@ -421,7 +441,7 @@ function rotasHistorico(ctx) {
         totais: { faturamento: Math.round(T.fat * 100) / 100, produtos: Math.round(T.prod * 100) / 100, imposto: Math.round(T.imp * 100) / 100,
                   custo: Math.round(T.cus * 100) / 100, comissao: Math.round(T.com * 100) / 100, frete: Math.round(T.fre * 100) / 100,
                   margem: Math.round(T.mar * 100) / 100, pedidos: peds.size, unidades: T.un, itens: T.itens, un_sem_custo: T.semCusto,
-                  tiktok_tarifa_estimada: _tkEstimadas,   // quantas linhas ainda usam a REGRA (o extrato não chegou)
+                  tiktok_tarifa_estimada: _tkEstimadas,   // quantos PEDIDOS ainda usam a REGRA (o extrato não chegou)
                   skus_sem_custo: Array.from(semCustoSet).slice(0, 60), custos_repostos: _repostos, impostos_recalculados: _impRecalc,
                   pedidos_sem_imposto: Object.values(pedImposto).filter(v => !(v > 0)).length,
                   // 01/08: não basta contar — o Diego perguntou "qual é o pedido?". Agora vai a lista,
