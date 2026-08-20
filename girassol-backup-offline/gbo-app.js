@@ -3510,6 +3510,29 @@ async function buscarDevolucoesML(tokenML, dorme) {
 // 19/08 — julho FECHOU em 14,4007% (era 14,1 de estimativa) e agosto fica pré-definido em 15%.
 // Os meses seguintes seguem 15% como palpite até cada apuração sair. O ⚙️ sempre tem prioridade.
 const DEFAULT_ALIQ_BK = { '2026-01':11.409280, '2026-02':11.3254, '2026-03':12.3402, '2026-04':13.6001, '2026-05':13.9149, '2026-06':14.056, '2026-07':14.4007, '2026-08':15, '2026-09':15, '2026-10':15, '2026-11':15, '2026-12':15 };
+// ─── 19/08: destravar o padrão novo de julho ────────────────────────────────────
+// Codex (P2): o ⚙️ preenche cada campo com o valor de fábrica em cinza e o salvamento envia TODOS
+// os campos — então quem salvou qualquer configuração alguma vez tem `2026-07: 14.1` gravado sem
+// nunca ter mexido em julho. Como valor salvo vence o padrão, a correção para 14,4007 não teria
+// efeito nenhum para essa pessoa: ela veria o número velho e acharia que estava ajustado.
+// Troca só esse caso exato (14.1, que só existe por ter sido o padrão) e roda uma vez.
+function _destravarJulho() {
+  try {
+    const f = path.join(CACHE_DIR, '_config-fiscal.json');
+    const cfg = readJson(f, null);
+    if (!cfg || !cfg.aliquotas) return;
+    if (cfg.migracoes && cfg.migracoes['julho-14.4007']) return;
+    if (Number(cfg.aliquotas['2026-07']) === 14.1) {
+      cfg.aliquotas['2026-07'] = 14.4007;
+      console.log('[fiscal] julho estava salvo com o padrão antigo (14,1) — trocado por 14,4007');
+    }
+    cfg.migracoes = cfg.migracoes || {};
+    cfg.migracoes['julho-14.4007'] = new Date().toISOString();
+    if (!cfg.taxas || typeof cfg.taxas !== 'object') cfg.taxas = {};   // o POST do ⚙️ assume que existe
+    writeJson(f, cfg);
+  } catch (e) { console.error('[fiscal] não consegui destravar julho (' + e.message + ') — segue com o salvo'); }
+}
+_destravarJulho();
 const _histCache = {};   // agregados do Supabase por período (10 min)
 let _backfill = { rodando:false, empresa:null, de:null, ate:null, pagina:0, pedidos:0, itens:0, gravados:0, erros:0, fase:'parado', inicio:null, fim:null, msg:'' };
 

@@ -408,7 +408,10 @@ let MAG_NIVEL = '50';   // nível de desconto do frete Magalu (coparticipação)
 /* 19/08 — julho FECHOU: o Simples Nacional da Girassol saiu em 14,4007% (era 14,1 de estimativa).
    Agosto fica pré-definido em 15% até a apuração sair, a pedido do Diego. São PADRÕES: o que ele
    salvar no ⚙️ continua mandando. */
-const DEFAULT_ALIQ = { '2026-01':11.409280, '2026-02':11.3254, '2026-03':12.3402, '2026-04':13.6001, '2026-05':13.9149, '2026-06':14.056, '2026-07':14.4007, '2026-08':15 };
+const DEFAULT_ALIQ = { '2026-01':11.409280, '2026-02':11.3254, '2026-03':12.3402, '2026-04':13.6001, '2026-05':13.9149, '2026-06':14.056, '2026-07':14.4007, '2026-08':15, '2026-09':15, '2026-10':15, '2026-11':15, '2026-12':15 };
+/* Codex (P2): sem os meses futuros aqui, quando agosto for substituído pelo valor real a TELA
+   herdaria o agosto novo para setembro-dezembro, enquanto o backfill usaria 15% — mesmo mês
+   com imposto diferente em Dia e em Mês. O front espelha o backend. */
 // ── 05/08 (d189): ALIQUOTA ZERO E UMA BOMBA-RELOGIO ────────────────────────────
 // O ⚙️ salva 0 quando o campo tem 0, e set/out/nov/dez de 2026 estao zerados. No dia
 // 1º de setembro o imposto de TODA venda sairia ZERO e a margem apareceria inflada em
