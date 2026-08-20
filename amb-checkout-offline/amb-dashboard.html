@@ -640,7 +640,15 @@ function renderHistLinhas(iv){
       const skus = (o.itens||[]).map(function(i){ return (i.qtd>1?i.qtd+'× ':'')+esc(i.sku||''); }).join('<br>');
       return '<tr>'+
         '<td class="dim" style="white-space:nowrap">'+esc(String(o.data||'').slice(8,10)+'/'+String(o.data||'').slice(5,7))+'</td>'+
-        '<td><b>'+esc(o.numero)+'</b>'+(o.numero_loja?'<div class="desc" style="font-size:10px">'+esc(o.numero_loja)+'</div>':'')+'</td>'+
+        /* 20/08 (Diego notou que os links sumiam no período longo): esta tabela vem do BANCO e
+           nunca teve os links — a do cache tem. O histórico traz `numero_loja` e `canal`, que é
+           tudo que o link do marketplace precisa, então o MKTP↗ volta aqui. Os links do Bling e da
+           NF continuam de fora: o histórico não guarda o id interno do pedido nem o da nota, e
+           inventá-los daria link quebrado. Isso depende do backfill passar a gravá-los. */
+        '<td><b>'+esc(o.numero)+'</b>'+(o.numero_loja?('<div class="desc" style="font-size:10px">'+esc(o.numero_loja)+
+            (function(){ const lm = linkMkt({ marketplace:o.canal, numero_loja:o.numero_loja });
+                         return lm ? ' <a class="lkM" href="'+lm+'" target="_blank" rel="noopener" title="abrir esta venda no '+esc(nomeCanal(canalKey(o.canal)))+'">MKTP↗</a>' : ''; })()+
+            '</div>'):'')+'</td>'+
         '<td>'+esc(nomeCanal(canalKey(o.canal)))+'</td>'+
         '<td><div class="desc" style="max-width:200px">'+skus+'</div></td>'+
         '<td class="num">'+N(o.un)+'</td>'+
