@@ -241,7 +241,8 @@ function rotasHistorico(ctx) {
       // 01/08: mesmo recálculo do imposto na lista de vendas do período longo
       const _cfgR = readJson(path.join(CACHE_DIR, '_config-fiscal.json'), { aliquotas: {} });
       const _aliqR = mes => { const a = _cfgR.aliquotas && _cfgR.aliquotas[mes];
-        if (a != null && isFinite(Number(a))) return Number(a);
+        /* 19/08: 0% salvo era campo em branco gravado por engano — zero não é alíquota. */
+        if (a != null && isFinite(Number(a)) && Number(a) > 0) return Number(a);
         return (DEFAULT_ALIQ_BK && DEFAULT_ALIQ_BK[mes] != null) ? Number(DEFAULT_ALIQ_BK[mes]) : null; };
       const _cuR = sk => { const c = _ccR[String(sk || '').trim()]; return (c && c.custo != null && isFinite(Number(c.custo))) ? Number(c.custo) : null; };
       const ordem = [], mapa = {};
@@ -302,7 +303,8 @@ function rotasHistorico(ctx) {
       const _cfgL = readJson(path.join(CACHE_DIR, '_config-fiscal.json'), { aliquotas: {} });
       const _aliqL = mes => {
         const a = _cfgL.aliquotas && _cfgL.aliquotas[mes];
-        if (a != null && isFinite(Number(a))) return Number(a);
+        /* 19/08: 0% salvo era campo em branco gravado por engano — zero não é alíquota. */
+        if (a != null && isFinite(Number(a)) && Number(a) > 0) return Number(a);
         return (DEFAULT_ALIQ_BK && DEFAULT_ALIQ_BK[mes] != null) ? Number(DEFAULT_ALIQ_BK[mes]) : null;
       };
       let _impRecalc = 0;
@@ -622,7 +624,8 @@ function rotasHistorico(ctx) {
       const _cfgB = readJson(path.join(CACHE_DIR, '_config-fiscal.json'), { aliquotas: {} });
       const _aliqB = mes => {
         const a = _cfgB.aliquotas && _cfgB.aliquotas[mes];
-        if (a != null && isFinite(Number(a))) return Number(a);
+        /* 19/08: 0% salvo era campo em branco gravado por engano — zero não é alíquota. */
+        if (a != null && isFinite(Number(a)) && Number(a) > 0) return Number(a);
         return (DEFAULT_ALIQ_BK && DEFAULT_ALIQ_BK[mes] != null) ? Number(DEFAULT_ALIQ_BK[mes]) : null;
       };
       const porPed = new Map();
