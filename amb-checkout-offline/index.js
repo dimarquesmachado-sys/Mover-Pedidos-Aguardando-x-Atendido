@@ -6964,7 +6964,24 @@ async function vendasSync() {
             let nM = 0;
             for (const v of candM) {
               const fin = jM.pedidos[String(v.numero_loja)];
-              if (!fin) continue;   // ainda não apareceu na API (não entregue) — continua na fila
+              if (!fin) {
+                /* ═══ 20/08 — PEDIDO QUE A API DA MAGALU AINDA NÃO CONHECE ═══════════════════
+                   O Diego: "sim, tem q botar o frete previsto, senão eu vou olhar e ficar
+                   enganado". Ele estava certo: sem o registro financeiro, este pedido ficava SEM
+                   frete nenhum e a margem aparecia inflada — justamente nas vendas mais recentes,
+                   que são as que ele olha pra decidir preço. A TARIFA real depende da API mesmo e
+                   continua esperando, mas o FRETE previsto NÃO: sai do banco por SKU (média do
+                   frete real, auto-corretiva) ou da tabela por dimensão. Então entra agora, e o
+                   real substitui quando o pedido aparece. */
+                if (v.mag_frete_copart == null) {
+                  const estSemApi = await magaluFreteProvisorio(v);
+                  if (estSemApi != null) {
+                    v.mag_frete_copart = Math.round(estSemApi * 100) / 100;
+                    v.mag_frete_fonte = 'prov';
+                  }
+                }
+                continue;   // segue na fila: a tarifa real ainda vai chegar
+              }
               const liquidado = !!(fin.frete_debito && fin.frete_debito !== 0);
               // taxa base (sempre real): comissão(serviço+tech+frete-comissão) + MDR + tarifa fixa
               const taxaBase = Math.abs(fin.comissao) + Math.abs(fin.mdr) + Math.abs(fin.tarifa_fixa);
