@@ -312,6 +312,7 @@ function rotasHistorico(ctx) {
       let _repostos = 0;
       const T = { fat: 0, prod: 0, imp: 0, cus: 0, com: 0, fre: 0, mar: 0, un: 0, itens: 0, semCusto: 0 };
       const peds = new Set(), porCanal = {}, porSku = {}, porDia = {}, porUF = {}, semCustoSet = new Set();
+      let _tkEstimadas = 0;   // linhas do TikTok em que a regra substituiu a taxa do Bling
       // 31/07: o dashboard mostrava "17.351 pedidos sem alíquota" no filtro Ano porque cruzava o
       // TOTAL do histórico com a contagem dos dados LOCAIS (só ~6 dias). Agora o servidor conta de
       // verdade: pedido cujas linhas somam imposto ZERO, e de quais meses são.
@@ -328,7 +329,25 @@ function rotasHistorico(ctx) {
             const q = Number(l.quantidade) || 0, vp = Number(l.valor_produto) || 0, vn = Number(l.valor_nota) || 0;
             let cu = (l.custo == null ? null : Number(l.custo));
             if (cu == null) { const cx = _cuL(l.sku); if (cx != null) { cu = cx * q; _repostos++; } }   // custo cadastrado DEPOIS do backfill
-            const co = Number(l.comissao) || 0, fr = Number(l.frete_vendedor) || 0;
+            let co = Number(l.comissao) || 0; const _coGrav = co; const fr = Number(l.frete_vendedor) || 0;
+            /* ═══ 20/08 — TikTok: enquanto a comissão gravada ainda é a do BLING, vale a REGRA ═══
+               O extrato do TikTok chega dias depois e o completar substitui a comissão pela real —
+               e a coleta fecha 100% (0 sobras em 5.610 pedidos na Girassol e 33 na AMB), então o
+               ano já está certo em tudo que liquidou. Fica só a ponta recente com a taxa do Bling
+               (~12% cravados dos produtos, sem a taxa fixa por item — sempre otimista).
+               Aqui a regra oficial entra NA LEITURA, como já acontece com o imposto: Mês e Ano
+               passam a mostrar o número próximo do real sem regravar nada, e a substituição some
+               sozinha quando o extrato chega. Não inclui afiliado (só existe se veio de creator).
+               Vale a partir de 15/07/2026, quando a tabela passou a valer. */
+            if (String(l.canal || '').toLowerCase() === 'tiktok' && vp > 0 && String(l.data_venda || '') >= '2026-07-15') {
+              const _tolTk = Math.min(1.00, Math.max(0.10, vp * 0.005));
+              const _daBling = !(co > 0) || Math.abs(co - vp * 0.12) <= _tolTk;
+              if (_daBling) {
+                const _abaixo = vp < 50;
+                const _est = Math.round((vp * (_abaixo ? 0.10 : 0.06) + (_abaixo ? 4 : 6) * Math.max(1, q) + vp * 0.06) * 100) / 100;
+                if (_est > co) { co = _est; _tkEstimadas++; }
+              }
+            }
             const _imGrav = Number(l.imposto) || 0;
             let im = _imGrav;
             { const _aq = _aliqL(String(l.data_venda || '').slice(0, 7));
@@ -341,6 +360,10 @@ function rotasHistorico(ctx) {
                         if (!pedData[kp]) pedData[kp] = String(l.data_venda || '').slice(0, 10); } }
             let mg = (l.margem == null ? null : Number(l.margem));
             if (mg != null) mg -= (im - _imGrav);   // imposto recalculado: a margem acompanha
+            /* 20/08: e a comissão também. Sem esta linha eu somaria a tarifa maior em T.com e
+               deixaria a margem gravada intacta — o painel mostraria comissão nova com margem
+               velha, que é pior que não ter mexido. */
+            if (mg != null && co !== _coGrav) mg -= (co - _coGrav);
             if (mg != null && l.custo == null && cu != null) mg -= cu;   // margem gravada sem custo: desconta o custo reposto
             if (mg != null) T.mar += mg;
             // Codex PR#33: bônus de envio Flex (gravado na 1ª linha do pedido) entra na margem agregada
@@ -398,6 +421,7 @@ function rotasHistorico(ctx) {
         totais: { faturamento: Math.round(T.fat * 100) / 100, produtos: Math.round(T.prod * 100) / 100, imposto: Math.round(T.imp * 100) / 100,
                   custo: Math.round(T.cus * 100) / 100, comissao: Math.round(T.com * 100) / 100, frete: Math.round(T.fre * 100) / 100,
                   margem: Math.round(T.mar * 100) / 100, pedidos: peds.size, unidades: T.un, itens: T.itens, un_sem_custo: T.semCusto,
+                  tiktok_tarifa_estimada: _tkEstimadas,   // quantas linhas ainda usam a REGRA (o extrato não chegou)
                   skus_sem_custo: Array.from(semCustoSet).slice(0, 60), custos_repostos: _repostos, impostos_recalculados: _impRecalc,
                   pedidos_sem_imposto: Object.values(pedImposto).filter(v => !(v > 0)).length,
                   // 01/08: não basta contar — o Diego perguntou "qual é o pedido?". Agora vai a lista,
