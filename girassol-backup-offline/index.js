@@ -3054,7 +3054,7 @@ async function backfillVendas(de, ate, empresa){
         if (seller) {
           const cfgF = readJson(path.join(CACHE_DIR, '_config-fiscal.json'), { aliquotas: {} });
           const aliqDe = m => { const a = cfgF.aliquotas && cfgF.aliquotas[m];
-            if (a != null && isFinite(Number(a))) return Number(a);
+            if (a != null && isFinite(Number(a)) && Number(a) > 0) return Number(a);   // 19/08: 0% salvo era campo em branco gravado por engano — cai no padrão
             return (DEFAULT_ALIQ_BK && DEFAULT_ALIQ_BK[m] != null) ? Number(DEFAULT_ALIQ_BK[m]) : 0; };
           const custos = readJson(path.join(CACHE_DIR, '_custos.json'), {});
           const cUn = sk => { const c = custos[String(sk || '').trim()]; return (c && c.custo != null && isFinite(Number(c.custo))) ? Number(c.custo) : null; };
@@ -3441,7 +3441,7 @@ async function reaplicarImposto(meses, empresa){
   const base = url.replace(/\/+$/, '') + '/rest/v1/vendas_historico';
   const cfg = readJson(path.join(CACHE_DIR, '_config-fiscal.json'), { aliquotas: {} });
   const aliqDe = m => { const a = cfg.aliquotas && cfg.aliquotas[m];
-    if (a != null && isFinite(Number(a))) return Number(a);
+    if (a != null && isFinite(Number(a)) && Number(a) > 0) return Number(a);   // 19/08: 0% salvo era campo em branco gravado por engano — cai no padrão
     return (DEFAULT_ALIQ_BK && DEFAULT_ALIQ_BK[m] != null) ? Number(DEFAULT_ALIQ_BK[m]) : null; };
 
   _reap = { rodando:true, meses:meses.slice(), mesAtual:null, linhas:0, atualizadas:0, erros:0,
