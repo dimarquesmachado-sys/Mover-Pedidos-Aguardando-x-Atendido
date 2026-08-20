@@ -1759,7 +1759,11 @@ function render(){
     // empurrando os cards pra baixo. Agora e uma linha curta no telefone e o texto completo no desktop.
     ('<span class="pill w covResumo" style="cursor:default">∅ sem vendas neste período</span>'+
      '<span class="dim covItem">'+dBR(de)+' → '+dBR(ate)+'</span>'+
-     '<span class="dim covItem soDesk">0 vendas atribuídas a este período — as de fim de semana entram assim que forem bipadas (e caem no dia CERTO) · experimente <b>Ontem</b> ou <b>Mês</b> · a busca de pedido, lá embaixo, funciona independente do período</span>'+
+     /* 20/08 (Diego: "o q é esse texto de bipe? acho q não faz sentido não?"): o texto era de
+        quando a venda só aparecia depois de bipada, e ainda falava em fim de semana sem motivo.
+        Desde que "bipagem morre no dashboard", a venda entra independente do bipe — então o
+        aviso passa a dizer só o que é verdade: não há venda registrada neste período. */
+     '<span class="dim covItem soDesk">Nenhuma venda registrada neste período · experimente <b>Ontem</b> ou <b>Mês</b> · a busca de pedido, lá embaixo, funciona independente do período</span>'+
      '<span class="dim covItem soCel">experimente <b>Ontem</b> ou <b>Mês</b> no seletor aí em cima</span>') :
     resumo+
     '<span class="dim covItem">'+dBR(de)+' → '+dBR(ate)+'</span>'+
