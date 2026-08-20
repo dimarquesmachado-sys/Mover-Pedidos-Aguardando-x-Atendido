@@ -425,7 +425,7 @@ const DEFAULT_ALIQ = { '2026-01':4.0, '2026-02':4.0, '2026-03':4.0, '2026-04':4.
 // INTEIRO da margem. Entao: mes sem aliquota propria HERDA a do ultimo mes conhecido e
 // fica registrado em _aliqHerdadas, que o ⚙️ mostra como aviso.
 const _aliqHerdadas = new Set();
-const _aliqBruta = m => (CFG.aliquotas[m] != null ? CFG.aliquotas[m] : (DEFAULT_ALIQ[m] != null ? DEFAULT_ALIQ[m] : null));
+const _aliqBruta = m => (Number(CFG.aliquotas[m]) > 0 ? Number(CFG.aliquotas[m]) : (DEFAULT_ALIQ[m] != null ? DEFAULT_ALIQ[m] : null));   /* 19/08: com o zero legado, a TELA usava o mês anterior enquanto o histórico já usava o padrão — os dois discordavam até alguém resalvar o ⚙️ */
 const aliqDe = mes => {
   const v = _aliqBruta(mes);
   if (v != null && Number(v) > 0) return Number(v);

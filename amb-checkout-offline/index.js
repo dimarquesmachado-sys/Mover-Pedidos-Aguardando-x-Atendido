@@ -1475,8 +1475,11 @@ function routes(readBody) {
       // Agora: calcula o que mudou, RESPONDE, e só então dispara o resto.
       let _mudou = [];
       try {
-        for (const [_m, _v] of Object.entries(atual.aliquotas || {}))
-          if (Number(_aliqAntes[_m]) !== Number(_v)) _mudou.push(_m);
+        // 19/08 (Codex P2): mês APAGADO nunca era reaplicado — o Supabase seguia com o imposto do
+        // valor removido, e quem lê a margem GRAVADA (previsão de vendas) continuava com o número
+        // velho. Cobre a união das chaves de antes e de depois, como na Girassol.
+        for (const _m of new Set([].concat(Object.keys(_aliqAntes || {}), Object.keys(atual.aliquotas || {}))))
+          if (Number(_aliqAntes[_m]) !== Number((atual.aliquotas || {})[_m])) _mudou.push(_m);
         _mudou = _mudou.filter(m => /^\d{4}-\d{2}$/.test(m)).sort();
       } catch (e) {}
       json(res, 200, { ok: true, config: atual, reaplicando: _mudou });
@@ -5432,7 +5435,7 @@ async function backfillVendas(de, ate, empresa){
     _backfill.shopee = { escrow_fechou: 0, escrow_com_sobra: 0, escrow_sem_resposta: 0, escrow_erro: 0,
                          comissao_somada: 0, comissao_que_o_bling_dava: 0, frete_liquido_visto: 0,
                          modo: SHOPEE_TODOS ? 'todos os pedidos' : 'so quando o Bling nao trouxe taxa' };
-    const aliqBk = mes => (cfg.aliquotas && cfg.aliquotas[mes]!=null ? Number(cfg.aliquotas[mes]) : (DEFAULT_ALIQ_BK[mes]!=null?DEFAULT_ALIQ_BK[mes]:14.1));
+    const aliqBk = mes => ((cfg.aliquotas && Number(cfg.aliquotas[mes]) > 0) ? Number(cfg.aliquotas[mes]) : (DEFAULT_ALIQ_BK[mes]!=null?DEFAULT_ALIQ_BK[mes]:14.1));   // 19/08: escapou da minha varredura por ter forma diferente — o backfill das 03:45 gravaria imposto ZERO e margem inflada
     // 10/08 (Codex P1): NADA é apagado antes da coleta terminar. A versão antiga
     // deletava o período aqui e gravava página a página — uma queda do Bling no meio
     // deixava o histórico MEIO VAZIO (e a noturna roda isto sozinha às 03:45).
