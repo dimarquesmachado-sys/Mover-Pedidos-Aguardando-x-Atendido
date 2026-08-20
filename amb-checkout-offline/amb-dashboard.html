@@ -1852,7 +1852,16 @@ function render(){
       });
       // MARGEM: precisa de valor + alíquota + (tarifa real OU % configurada do canal)
       if(rp==null){ semCfg++; return; }
-      const tReal = (h.tarifa_ml!=null && isFinite(Number(h.tarifa_ml))) ? Number(h.tarifa_ml) : ((h.taxa_mkt!=null && isFinite(Number(h.taxa_mkt)) && Number(h.taxa_mkt)>0) ? Number(h.taxa_mkt) : null);
+      /* Codex (P1): o card do topo tem cascata PRÓPRIA e continuava tratando a taxa do Bling como
+         a tarifa — o Lucro Bruto ficaria inflado enquanto a linha da Análise já mostrava a margem
+         estimada, menor. O número mais visível da tela discordando do detalhe logo abaixo é pior
+         que não ter mudado nada. Mesma regra aqui. */
+      const _rpEfMC = (tot!=null && rp!=null && tot < rp) ? tot : rp;
+      const _estMC = (canalKey(h.marketplace)==='tiktok' && (h.tarifa_ml==null || !isFinite(Number(h.tarifa_ml))) && diaVenda(h) >= '2026-07-15')
+          ? tarifaEstimadaTikTok(_rpEfMC, (h.itens||[]).reduce((a,i)=>a+(Number(i.qtd)||1),0)) : null;
+      const tReal = (h.tarifa_ml!=null && isFinite(Number(h.tarifa_ml))) ? Number(h.tarifa_ml)
+                  : (_estMC != null ? _estMC
+                  : ((h.taxa_mkt!=null && isFinite(Number(h.taxa_mkt)) && Number(h.taxa_mkt)>0) ? Number(h.taxa_mkt) : null));
       let tx = CFG.taxas[canalKey(h.marketplace)];
       if(tx != null && !(Number(tx) > 0)) tx = null;   // 05/08: 0% nao existe em marketplace nenhum — 0 salvo no ⚙️ e "nao configurado", nao "sem comissao"
       if(canalKey(h.marketplace)==='madeira' && tx==null) tx = 17.6;
@@ -2437,8 +2446,16 @@ function calcPL(h){
   /* No TikTok a taxa do Bling é ~12% cravados, sem a fixa por item — sempre otimista. A regra
      oficial é melhor que ela em todo pedido, então entra na frente. O extrato (feeReal) continua
      mandando quando existe. */
-  const feeEstTk = (ck==='tiktok' && feeReal==null)
-      ? tarifaEstimadaTikTok(rp, (h.itens||[]).reduce((a,i)=>a+(Number(i.qtd)||1),0))
+  /* Codex (P2): a tabela só passou a valer em 15/07/2026 — antes disso era outra (6% para todos,
+     fixa de R$ 4). Pedido antigo aberto pela busca teria a tarifa da época trocada por uma que não
+     existia, e a margem sairia errada. E a base é o valor EFETIVO da venda (com desconto), o mesmo
+     que a margem reconhece: produtos de R$ 55 vendidos por R$ 45 pagam pela faixa de ABAIXO de 50. */
+  const _tkRegraDe = '2026-07-15';
+  // o mesmo critério do rpEf lá embaixo (NF menor que a soma dos itens = desconto ao cliente):
+  // aqui ele ainda não foi declarado, e usá-lo antes daria erro de inicialização.
+  const _rpTk = (tot != null && rp != null && tot < rp) ? tot : rp;
+  const feeEstTk = (ck==='tiktok' && feeReal==null && diaVenda(h) >= _tkRegraDe)
+      ? tarifaEstimadaTikTok(_rpTk, (h.itens||[]).reduce((a,i)=>a+(Number(i.qtd)||1),0))
       : null;
   let tarifa = (feeReal!=null)?feeReal:(feeEstTk!=null?feeEstTk:(feeBling!=null?feeBling:((tx!=null&&rp!=null)?rp*tx/100:null)));
   if(ck==='madeira' && feeReal==null && feeBling==null && tarifa!=null) tarifa += 5;   // Madeira Envios: taxa fixa R$ 5,00 por pedido
@@ -2656,7 +2673,7 @@ function mesPorExtenso(m){
 function renderPL(h){
   const card=$('plCard');
   setaAberta('pl_'+String(h.id));
-  const {mes,ck,rp,tot,frete,aliq,imposto,feeReal,feeBling,tx,tarifa,custo,cusUn,unTot,frV,frFonte,credito,completo,mc,magFreteFonte,rendaCanal} = calcPL(h);
+  const {mes,ck,rp,tot,frete,aliq,imposto,feeReal,feeBling,feeEstTk,tx,tarifa,custo,cusUn,unTot,frV,frFonte,credito,completo,mc,magFreteFonte,rendaCanal} = calcPL(h);
   const linha=(l,v,extra)=>'<tr><td>'+l+'</td><td class="num">'+(v!=null?BRL(v):'<span class="dim">—</span>')+(extra||'')+'</td></tr>';
   card.innerHTML =
     '<div class="sec" style="margin-top:12px;background:linear-gradient(160deg,#14201a,#131a30);border-color:#14b8a655">'+
@@ -2673,7 +2690,7 @@ function renderPL(h){
       : linha('🏷️ Produtos (nota fiscal)', rp)+linha('🚚 Frete embutido (receita)', frete))+
     linha('🏛 Imposto ('+(aliq!=null?aliq+'% de '+mesPorExtenso(mes):'<span class="warn">configure ⚙️ '+mesPorExtenso(mes)+'</span>')+')', imposto!=null?-imposto:null)+
     /* o rótulo dizia "REAL (ML)" até em pedido de Shopee/TikTok — agora nomeia o canal certo */
-    linha((rendaCanal!=null?'<span class="dim">🏪 Tarifa (já embutida no repasse)</span>':'🏪 Tarifa ')+ (rendaCanal!=null?'':(feeReal!=null?'<span class="ok">REAL ('+esc(nomeCanal(ck))+')</span>':(feeBling!=null?(_tarifaProvisoria(ck,feeReal,feeBling)?('<span class="warn">PROVIS\u00d3RIA — taxa do Bling ('+_BLING_SUBESTIMA[ck].bling_pct+'); a real do '+esc(nomeCanal(ck))+' \u00e9 '+_BLING_SUBESTIMA[ck].real_pct+'</span>'):'<span class="ok">Bling</span>'):(tx!=null?tx+'% est.':'<span class="warn">configure ⚙️</span>')))), tarifa!=null?(rendaCanal!=null?tarifa:-tarifa):null,
+    linha((rendaCanal!=null?'<span class="dim">🏪 Tarifa (já embutida no repasse)</span>':'🏪 Tarifa ')+ (rendaCanal!=null?'':(feeReal!=null?'<span class="ok">REAL ('+esc(nomeCanal(ck))+')</span>':(feeEstTk!=null?'<span class="warn">ESTIMADA pela tabela do TikTok (comiss\u00e3o + taxa fixa por item + Frete Gr\u00e1tis) \u2014 sem afiliado</span>':(feeBling!=null?(_tarifaProvisoria(ck,feeReal,feeBling)?('<span class="warn">PROVIS\u00d3RIA — taxa do Bling ('+_BLING_SUBESTIMA[ck].bling_pct+'); a real do '+esc(nomeCanal(ck))+' \u00e9 '+_BLING_SUBESTIMA[ck].real_pct+'</span>'):'<span class="ok">Bling</span>'):(tx!=null?tx+'% est.':'<span class="warn">configure ⚙️</span>'))))), tarifa!=null?(rendaCanal!=null?tarifa:-tarifa):null,
       (ck==='ml'&&h.numero_loja&&feeReal==null?' <button class="btn" style="padding:3px 10px;font-size:10.5px" onclick="pegarFeeML(\''+h.id+'\',\''+esc(h.numero_loja)+'\')">buscar real</button>':''))+
     linha('📦 Custo ('+cusUn+'/'+unTot+' un. c/ custo)', (cusUn?-custo:null))+
     (rendaCanal!=null&&frV!=null&&ck!=='ml' ? linha('<span class="dim">🚛 Frete vendedor (já embutido no repasse)</span>', frV) :
