@@ -4046,6 +4046,24 @@ async function backfillVendas(de, ate, empresa){
         if (_backfill.frete) _backfill.frete[freFonte] = (_backfill.frete[freFonte] || 0) + 1;
         if(ehOlist && (!comissao || comissao<=0)) comissao = Math.round(somaProd * 22 / 100 * 100)/100;   // OLIST cobrava ~22% (do Jodda) — o Bling não guarda a taxa dela
         if(ehOlist && (!frete || frete<=0)) frete = 12;   // OLIST: motoboy R$12/pedido (Diego) — o Bling não tem o frete de envio dela
+        /* ═══ 20/08 — CORREÇÃO DE RAIZ: o frete PREVISTO também vai pro banco ═══════════════
+           O Diego achou 106 pedidos Magalu da AMB com frete "—" no Mês e a margem inflada. A
+           exibição já foi corrigida (o histórico completa na leitura), mas quem lê a margem CRUA
+           do Supabase — /previsao-vendas e /plano-compra — continuava sem o frete. A raiz é esta:
+           o backfill gravava 0 quando o Bling não tinha o frete, em vez de usar o previsto que o
+           cache já usa. Regra dele: "tem que ser a mais próxima do real, e chegando os fechamentos
+           por API, tem que ser a real real" — então o previsto entra agora e o real substitui
+           quando o pedido liquida (o banco por SKU é a média do frete REAL, auto-corretiva). */
+        if ((!frete || frete <= 0) && canal === 'magalu') {
+          const _bancoFr = (typeof magaluFreteSkuLer === 'function') ? magaluFreteSkuLer() : {};
+          let _somaPrev = 0;
+          for (const it of itens) {
+            const b = _bancoFr[String(it.sku || '').trim()];
+            const m = b && Number(b.media);
+            if (m > 0) _somaPrev += m * (Number(it.qtd) || 1);
+          }
+          if (_somaPrev > 0) { frete = Math.round(_somaPrev * 100) / 100; freFonte = 'previsto'; }
+        }
         const numPed = String(det.numero!=null?det.numero:(p.numero!=null?p.numero:p.id));
         for(const it of itens){
           const frac = it.vt/somaProd;
