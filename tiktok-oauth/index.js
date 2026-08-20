@@ -269,8 +269,12 @@ async function tratar(req, res, urlObj, json) {
     if (!admOk()) { json(res, 404, { error: 'not found' }); return true; }
     const loja = lojaDe(q);
     const arqD = path.join(process.env.TIKTOK_CACHE_DIR || '/data', '_tiktok_devolucoes_' + loja + '.json');
-    let g = null;
-    try { g = JSON.parse(fs.readFileSync(arqD, 'utf8')); } catch (e) { g = null; }
+    // Só ENOENT significa "nunca coletou". Arquivo corrompido/meio-escrito/ilegível
+    // é OUTRA coisa e sai separado em `cache_erro` — senão a corrupção se disfarça
+    // de "sem cache" (apontado pelo Codex no PR #155).
+    let g = null, cacheErro = null;
+    try { g = JSON.parse(fs.readFileSync(arqD, 'utf8')); }
+    catch (e) { g = null; if (!e || e.code !== 'ENOENT') cacheErro = String((e && e.message) || e).slice(0, 160); }
     const todos = Object.values((g && g.devolucoes) || {})
       .sort((a, b) => (Number(b.criado_em) || 0) - (Number(a.criado_em) || 0));
     let limite = parseInt(q.get('limite') || '', 10);
@@ -281,7 +285,8 @@ async function tratar(req, res, urlObj, json) {
       guardadas: todos.length,
       // `sem_cache` separa "NUNCA coletou" (arquivo nem existe) de "coletou e veio
       // vazio" — sem isso, loja recém-conectada pareceria loja sem devoluções.
-      sem_cache: !g,
+      sem_cache: !g && !cacheErro,
+      cache_erro: cacheErro,
       atualizado: (g && g.atualizado) || null, coleta_ok_em: (g && g.ok_em) || null,
       cru_campos_uniao: cruCampos,
       registros: todos.slice(0, limite) });
