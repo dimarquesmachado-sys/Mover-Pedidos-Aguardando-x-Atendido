@@ -396,7 +396,7 @@ const MOD = '/girassol-backup-offline';
     return _f(u, o);
   };
 })();
-const DASH_BUILD = 'd223';
+const DASH_BUILD = 'd224';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -2316,14 +2316,38 @@ const _BLING_SUBESTIMA = { tiktok: { real_pct: 'maior — quanto, depende do tic
 function _tarifaProvisoria(ck, feeReal, feeBling){
   return feeReal == null && feeBling != null && !!_BLING_SUBESTIMA[ck];
 }
-function _seloTarifa(ck, feeReal, feeBling){
+function _seloTarifa(ck, feeReal, feeBling, feeEst){
   if (feeReal != null) return ' <span class="st ok" style="font-size:9px">REAL</span>';
+  if (feeEst != null) return ' <span class="st" style="font-size:9px;background:#78350f55;color:#fbbf24;border-color:#f59e0b55" title="calculada pela tabela do TikTok (comissão 10% abaixo de R$ 50 ou 6% acima + taxa fixa por item + 6% do Frete Grátis). NÃO inclui comissão de afiliado — se a venda veio de creator, a tarifa real virá um pouco maior. Quando o extrato chegar, vira REAL">ESTIMADA</span>';
   if (feeBling == null) return '';
   if (_tarifaProvisoria(ck, feeReal, feeBling)) {
     const m = _BLING_SUBESTIMA[ck];
     return ' <span class="st" style="font-size:9px;background:#78350f55;color:#fbbf24;border-color:#f59e0b55" title="taxa que o Bling importou (' + m.bling_pct + '). A tarifa REAL deste canal, que vem no extrato do marketplace, é ' + m.real_pct + ' — esta margem está OTIMISTA">PROVISÓRIA</span>';
   }
   return ' <span class="st ok" style="font-size:9px">BLING</span>';
+}
+/* ═══ 20/08 — TARIFA DO TIKTOK ESTIMADA PELA REGRA, NA HORA DA VENDA ═══════════════
+   O Diego: "preciso sempre do mais próximo da realidade... realmente tem q trabalhar assim no
+   tiktok? não tem mm como saber antes já certinho o lucro da venda de imediato?".
+   Tem. A tabela do TikTok é determinística e está publicada (vigente desde 15/07/2026):
+     · comissão      10% se o pedido for < R$ 50 · 6% de R$ 50 pra cima
+     · taxa fixa     R$ 4,00 (< R$ 50) · R$ 6,00 (>= R$ 50) — POR ITEM, não por pedido
+     · PTE           6% do produto (as duas lojas participam — confirmado pelo Diego em 19/08)
+   Só o AFILIADO não dá pra prever: depende de a venda ter vindo de creator.
+   Por que não usar a média do mês: a taxa fixa por item domina o pedido pequeno (R$ 4 num pedido
+   de R$ 10 é 40%) e some no grande — média achata exatamente a diferença que decide preço. No
+   pedido 3642 do print dele: produtos 10,90, Bling cobrou 1,23 (11%), a regra dá 5,74 (53%).
+   A estimativa vale só enquanto o extrato não chega; quando chega, vira REAL e o selo troca. */
+const TIKTOK_PTE = true;   // ambas as lojas no Programa de Frete Grátis
+function tarifaEstimadaTikTok(valorProdutos, itens){
+  const v = Number(valorProdutos) || 0;
+  if (!(v > 0)) return null;
+  const abaixo = v < 50;
+  const nItens = Math.max(1, Number(itens) || 1);
+  const comissao = v * (abaixo ? 0.10 : 0.06);
+  const fixa = (abaixo ? 4 : 6) * nItens;
+  const pte = TIKTOK_PTE ? v * 0.06 : 0;
+  return Math.round((comissao + fixa + pte) * 100) / 100;
 }
 function calcPL(h){
   const mes = diaVenda(h).slice(0,7);
@@ -2338,7 +2362,13 @@ function calcPL(h){
   let tx = CFG.taxas[ck];
   if(tx != null && !(Number(tx) > 0)) tx = null;   // idem: 0 salvo = nao configurado
   if(ck==='madeira' && tx==null) tx = 17.6;   // d50: tabela oficial MM (Diego 22/07) — padrão 17,6%; categorias variam 14,5–19%
-  let tarifa = (feeReal!=null)?feeReal:(feeBling!=null?feeBling:((tx!=null&&rp!=null)?rp*tx/100:null));
+  /* No TikTok a taxa do Bling é ~12% cravados, sem a fixa por item — sempre otimista. A regra
+     oficial é melhor que ela em todo pedido, então entra na frente. O extrato (feeReal) continua
+     mandando quando existe. */
+  const feeEstTk = (ck==='tiktok' && feeReal==null)
+      ? tarifaEstimadaTikTok(rp, (h.itens||[]).reduce((a,i)=>a+(Number(i.qtd)||1),0))
+      : null;
+  let tarifa = (feeReal!=null)?feeReal:(feeEstTk!=null?feeEstTk:(feeBling!=null?feeBling:((tx!=null&&rp!=null)?rp*tx/100:null)));
   if(ck==='madeira' && feeReal==null && feeBling==null && tarifa!=null) tarifa += 5;   // Madeira Envios: taxa fixa R$ 5,00 por pedido
   let custo=0, cusUn=0, unTot=0;
   (h.itens||[]).forEach(it=>{ const q=Number(it.qtd||1); unTot+=q; let c=(it.custo!=null&&isFinite(Number(it.custo)))?Number(it.custo):null; if(c==null){ const inf=SKUINFO[it.sku]; if(inf&&inf.custo!=null) c=Number(inf.custo); } if(c!=null){ custo+=c*q; cusUn+=q; } });   // 27/07: custo do SERVIDOR (banco _custos.json) primeiro; SKUINFO é reserva — antes a Análise e os cards usavam fontes diferentes e davam lucros diferentes
@@ -2375,7 +2405,7 @@ function calcPL(h){
   // No provisório (renda_canal null), a tarifa é só comissão, então o frete de frV É descontado (correto).
   const frVparaMC = (ck==='magalu' && frFonte==='magalu' && rendaCanal!=null) ? 0 : (frV||0);
   const mc = completo? (rendaCanal!=null ? (rendaCanal-imposto-custo-frVparaMC+(credito||0)) : (rpEf-imposto-tarifa-custo-frVparaMC+(credito||0)+(freteRec||0))) : null;
-  return {mes,ck,rp,rpEf,desconto,freteRec,rendaCanal,tot,frete,aliq,imposto,feeReal,feeBling,tx,tarifa,custo,cusUn,unTot,custoOk,frV,frFonte,credito,completo,mc,magFreteFonte,magFreteCopart};
+  return {mes,ck,rp,feeEstTk,rpEf,desconto,freteRec,rendaCanal,tot,frete,aliq,imposto,feeReal,feeBling,tx,tarifa,custo,cusUn,unTot,custoOk,frV,frFonte,credito,completo,mc,magFreteFonte,magFreteCopart};
 }
 let _bqTimer=null, _bqSeq=0;
 window._bhHist = {};
@@ -3243,7 +3273,7 @@ function renderAnalise(){
       '<td class="num">'+N(unid)+'</td>'+
       cel(P.tot)+cel(P.rp,'ok')+
       cel(P.custoOk?P.custo:null)+cel(P.imposto)+
-      '<td class="num">'+(P.tarifa!=null?BRL(P.tarifa)+_seloTarifa(P.ck,P.feeReal,P.feeBling)+(P.rp?'<div class="desc">'+Math.round(P.tarifa/P.rp*100)+'%</div>':''):'<span class="dim">—</span>')+'</td>'+
+      '<td class="num">'+(P.tarifa!=null?BRL(P.tarifa)+_seloTarifa(P.ck,P.feeReal,P.feeBling,P.feeEstTk)+(P.rp?'<div class="desc">'+Math.round(P.tarifa/P.rp*100)+'%</div>':''):'<span class="dim">—</span>')+'</td>'+
       '<td class="num">'+(P.frV!=null?(
           P.frFonte==='magalu'
             ? (P.magFreteFonte==='prov'
