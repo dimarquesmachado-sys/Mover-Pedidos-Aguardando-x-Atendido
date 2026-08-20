@@ -312,6 +312,28 @@ function rotasHistorico(ctx) {
       let _repostos = 0;
       const T = { fat: 0, prod: 0, imp: 0, cus: 0, com: 0, fre: 0, mar: 0, un: 0, itens: 0, semCusto: 0 };
       const peds = new Set(), porCanal = {}, porSku = {}, porDia = {}, porUF = {}, semCustoSet = new Set();
+      /* ═══════════════ 20/08 — O QUE O CACHE CALCULA, O HISTÓRICO TAMBÉM CALCULA ═══════════════
+         Terceira vez no mesmo dia que o Diego encontra o mesmo padrão: um número aparece em
+         Hoje/Ontem/7 dias e some no Mês/Ano. Aconteceu com os links do marketplace, com a tarifa
+         do TikTok e agora com o frete PREVISTO da Magalu (106 pedidos da AMB com frete "—" e a
+         margem inflada). A causa é sempre a mesma: o período curto passa pelo `calcPL`, que
+         COMPLETA o que falta; o período longo lê o banco cru, onde só está o que o backfill gravou.
+         Ele pediu: "já ajusta pra resolver em qqer marketplace e pra todos e sempre".
+         ESTE É O PONTO ÚNICO onde o histórico completa o que falta — para acrescentar um caso novo
+         (outro canal, outro campo), é aqui, e vale para qualquer canal.
+         Hoje trata: FRETE do vendedor ausente, pela mesma fonte do cache (a média do frete REAL
+         por SKU, que se corrige sozinha conforme os pedidos liquidam). Entra na soma e SAI da
+         margem, como qualquer custo. */
+      const _freteSkuBanco = (() => { try { return readJson(path.join(CACHE_DIR, '_magalu_frete_sku.json'), {}) || {}; } catch (e) { return {}; } })();
+      const _fretePrevistoDe = (canal, sku, qtd) => {
+        const ck = String(canal || '').toLowerCase();
+        if (ck !== 'magalu') return null;          // só a Magalu tem banco por SKU hoje; outros canais entram AQUI
+        const b = _freteSkuBanco[String(sku || '').trim()];
+        const m = b && Number(b.media);
+        if (!(m > 0)) return null;
+        return Math.round(m * Math.max(1, Number(qtd) || 1) * 100) / 100;
+      };
+      let _fretesPrevistos = 0;   // linhas em que o frete do vendedor foi completado pelo previsto
       let _tkEstimadas = 0;
       const _tkPed = {};   // TikTok agrupado por PEDIDO: a faixa e a taxa fixa são do pedido inteiro   // linhas do TikTok em que a regra substituiu a taxa do Bling
       // 31/07: o dashboard mostrava "17.351 pedidos sem alíquota" no filtro Ano porque cruzava o
@@ -330,7 +352,14 @@ function rotasHistorico(ctx) {
             const q = Number(l.quantidade) || 0, vp = Number(l.valor_produto) || 0, vn = Number(l.valor_nota) || 0;
             let cu = (l.custo == null ? null : Number(l.custo));
             if (cu == null) { const cx = _cuL(l.sku); if (cx != null) { cu = cx * q; _repostos++; } }   // custo cadastrado DEPOIS do backfill
-            let co = Number(l.comissao) || 0; const _coGrav = co; const fr = Number(l.frete_vendedor) || 0;
+            let co = Number(l.comissao) || 0; const _coGrav = co;
+            let fr = Number(l.frete_vendedor) || 0;
+            /* frete ausente: completa com o previsto (mesma fonte do cache) e conta como custo */
+            let _frPrev = 0;
+            if (!(fr > 0)) {
+              const _fp = _fretePrevistoDe(l.canal, l.sku, q);
+              if (_fp != null) { fr = _fp; _frPrev = _fp; _fretesPrevistos++; }
+            }
             /* ═══ 20/08 — TikTok: enquanto a comissão gravada ainda é a do BLING, vale a REGRA ═══
                O extrato do TikTok chega dias depois e o completar substitui a comissão pela real —
                e a coleta fecha 100% (0 sobras em 5.610 pedidos na Girassol e 33 na AMB), então o
@@ -365,6 +394,7 @@ function rotasHistorico(ctx) {
                         if (!pedData[kp]) pedData[kp] = String(l.data_venda || '').slice(0, 10); } }
             let mg = (l.margem == null ? null : Number(l.margem));
             if (mg != null) mg -= (im - _imGrav);   // imposto recalculado: a margem acompanha
+            if (mg != null && _frPrev > 0) mg -= _frPrev;   // frete completado: sai da margem, como qualquer custo
 
             if (mg != null && l.custo == null && cu != null) mg -= cu;   // margem gravada sem custo: desconta o custo reposto
             if (mg != null) T.mar += mg;
@@ -441,7 +471,8 @@ function rotasHistorico(ctx) {
         totais: { faturamento: Math.round(T.fat * 100) / 100, produtos: Math.round(T.prod * 100) / 100, imposto: Math.round(T.imp * 100) / 100,
                   custo: Math.round(T.cus * 100) / 100, comissao: Math.round(T.com * 100) / 100, frete: Math.round(T.fre * 100) / 100,
                   margem: Math.round(T.mar * 100) / 100, pedidos: peds.size, unidades: T.un, itens: T.itens, un_sem_custo: T.semCusto,
-                  tiktok_tarifa_estimada: _tkEstimadas,   // quantos PEDIDOS ainda usam a REGRA (o extrato não chegou)
+                  tiktok_tarifa_estimada: _tkEstimadas,
+                  fretes_previstos: _fretesPrevistos,   // frete que não estava gravado e foi completado na leitura   // quantos PEDIDOS ainda usam a REGRA (o extrato não chegou)
                   skus_sem_custo: Array.from(semCustoSet).slice(0, 60), custos_repostos: _repostos, impostos_recalculados: _impRecalc,
                   pedidos_sem_imposto: Object.values(pedImposto).filter(v => !(v > 0)).length,
                   // 01/08: não basta contar — o Diego perguntou "qual é o pedido?". Agora vai a lista,
