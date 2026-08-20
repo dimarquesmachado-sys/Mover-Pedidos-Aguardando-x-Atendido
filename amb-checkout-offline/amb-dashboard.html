@@ -642,7 +642,7 @@ function renderHistLinhas(iv){
       const skus = (o.itens||[]).map(function(i){ return (i.qtd>1?i.qtd+'× ':'')+esc(i.sku||''); }).join('<br>');
       /* Codex (P2, PR#138): acima de 760px os cartões somem e fica ESTA tabela — que mostrava a
          margem otimista do TikTok como dado histórico comum, sem aviso nenhum. Mesmo sinal do cartão. */
-      const _tkP = _tarifaVeioDoBling(canalKey(o.canal), o.vnota, o.comissao);
+      const _tkP = _tarifaVeioDoBling(canalKey(o.canal), (o.vprod != null ? o.vprod : o.vnota), o.comissao);   // produtos, não a NF com frete
       return '<tr'+(_tkP?' title="tarifa ainda provisória (veio do Bling); o extrato do TikTok cobra mais — esta margem está otimista"':'')+'>'+
         '<td class="dim" style="white-space:nowrap">'+esc(String(o.data||'').slice(8,10)+'/'+String(o.data||'').slice(5,7))+'</td>'+
         '<td><b>'+esc(o.numero)+'</b>'+(o.numero_loja?'<div class="desc" style="font-size:10px">'+esc(o.numero_loja)+'</div>':'')+'</td>'+
@@ -665,7 +665,9 @@ function renderHistLinhas(iv){
        ficam com a taxa do Bling lá também. Como o histórico não guarda a ORIGEM da comissão, uso o
        único sinal disponível: comissão baixa demais para este canal. É estimativa, e o aviso é
        conservador de propósito — prefiro avisar a mais do que deixar margem inflada sem aviso. */
-    const _tkProv = _tarifaVeioDoBling(canalKey(o.canal), o.vnota, o.comissao);
+    /* Codex (P2): a comissão de 12% incide sobre os PRODUTOS; `vnota` inclui o frete pago pelo
+       comprador, e 12% desse frete estoura a tolerância — a marca sumia justamente em quem tem frete. */
+    const _tkProv = _tarifaVeioDoBling(canalKey(o.canal), (o.vprod != null ? o.vprod : o.vnota), o.comissao);
     return { numero:o.numero, tarProv:_tkProv, canal:nomeCanal(canalKey(o.canal)), hora:String(o.data||'').slice(8,10)+'/'+String(o.data||'').slice(5,7),
              // 29/07: aqui NUNCA se montava a descrição — no Mês/Ano o cartão ficava só com o SKU,
              // independente de quantidade. Agora usa a mesma regra da lista do dia.
@@ -1707,7 +1709,12 @@ function montar(){
 function _tarifaVeioDoBling(canal, valor, comissao){
   if (canal !== 'tiktok') return false;
   const v = Number(valor) || 0, c = Number(comissao) || 0;
-  if (!(v > 0) || !(c > 0)) return false;
+  // Codex (P2): comissão AUSENTE ou zero é o caso MAIS otimista de todos — nenhuma tarifa
+  // descontada — e eu o classificava como definitivo por exigir um valor positivo. O Bling omite
+  // `taxaComissao` em pedido de TikTok e o completar só preenche quando o extrato chega: até lá,
+  // provisório.
+  if (!(v > 0)) return false;
+  if (!(c > 0)) return true;
   /* Codex (P2): a tolerância proporcional (0,5%) chega a R$ 2,00 num pedido de R$ 400 — e a
      diferença entre a taxa do Bling (12%) e a real sem afiliado (12% + R$ 2 fixos) é exatamente
      R$ 2,00. Ou seja: em ticket alto eu classificaria uma comissão JÁ LIQUIDADA como provisória.
@@ -1752,7 +1759,7 @@ function render(){
   const vbSoma = VBok.reduce((a,v)=>a+(Number(v.total)||0),0);
   const vbCanc = VB.length - VBok.length;
 
-  let fat=0, comValor=0, semValor=0, flex=0, unid=0, itensTot=0, itensComValor=0, comUF=0, fatProd=0, freteEmb=0, fretePed=0, pedML=0, pedMLr=0, pedTarReal=0;
+  let pedProv=0, fat=0, comValor=0, semValor=0, flex=0, unid=0, itensTot=0, itensComValor=0, comUF=0, fatProd=0, freteEmb=0, fretePed=0, pedML=0, pedMLr=0, pedTarReal=0;
   let fatNF=0, pedNF=0, freteNF=0, fretePedNF=0;   // fonte NOTA FISCAL (vprod_nf)
   const porDia={}, porProd={}, porUF={}; let porCanal={};
   const AGD = (SINT||[]).filter(s=>{ if(s._cancelado) return false; const d2=diaVenda(s); return d2>=de && d2<=ate; });
@@ -1772,6 +1779,10 @@ function render(){
     /* Codex (P2, PR#138): a pílula contava a taxa do Bling do TikTok como "tarifa real" — a tela
        dizia PROVISÓRIA na linha e 100% real no topo, sobre o MESMO pedido. Provisória não conta. */
     if(h.tarifa_ml!=null || (h.taxa_mkt!=null && Number(h.taxa_mkt)>0 && !_tarifaProvisoria(canalKey(h.marketplace), h.tarifa_ml, Number(h.taxa_mkt)))) pedTarReal++;
+    /* Codex (P2): eu tirava o pedido da COBERTURA mas o Lucro Bruto do topo seguia somando a
+       tarifa provisória sem marca nenhuma — o número mais visível da tela era o único sem aviso,
+       e é o primeiro que ele lê. Conta quantos são pra o card poder dizer. */
+    if(_tarifaProvisoria(canalKey(h.marketplace), h.tarifa_ml, (h.taxa_mkt!=null?Number(h.taxa_mkt):null))) pedProv++;
     if(h.valor!=null && isFinite(Number(h.valor))){ const v=Number(h.valor); fat+=v; comValor++; porDia[d].fat+=v; porCanal[mk].fat+=v; porCanal[mk].comValor++; }
     else semValor++;
     if(h.uf){ comUF++; const u=String(h.uf).toUpperCase(); if(!porUF[u]) porUF[u]={ped:0,fat:0}; porUF[u].ped++; if(h.valor!=null) porUF[u].fat+=Number(h.valor)||0; }
@@ -1809,6 +1820,7 @@ function render(){
   // ⚠️ UF e NF só existem no pedido JÁ BIPADO (a venda ainda não bipada não tem esses campos).
   // Medi-los contra o total derrubava a % e acendia o aviso de "cobertura baixa" sem motivo.
   const cUF = pc(comUF,PER.length||1), cNF = pc(pedNF,PER.length||1), cTar = pc(pedTarReal,nTot);
+  window._pedProvPeriodo = pedProv;   // quantos pedidos ainda têm tarifa provisória (o card do topo avisa)
 
   // resumo das pílulas: no celular fica só ele; toca e abre a lista completa
   const piores = [['valor',cVal],['valor/item',cItem],['UF',cUF],['nota fiscal',cNF],['tarifa real',cTar]]
@@ -2068,7 +2080,11 @@ function render(){
         const desp=Math.round((despML+despSHP)*100)/100;
         const mFin=mBase-desp;
         const fat2=(usaHist?HIST.totais.faturamento:fat);
-        return '<div class="kpi" style="--kc:#14b8a6"><span class="ic">\ud83d\udc8e</span><div class="l">Lucro Bruto (M.C.)</div><div class="v '+(mFin>=0?'ok':'bad')+'" '+
+        /* Codex (P2): o número mais visível da tela era o ÚNICO sem aviso — ele lê o Lucro Bruto
+           antes de chegar em qualquer linha marcada e toma por fechado. Se o período tem pedido de
+           TikTok com tarifa ainda provisória, o card diz. */
+        const _nProv = Number(window._pedProvPeriodo || 0);
+        return '<div class="kpi" style="--kc:#14b8a6"><span class="ic">\ud83d\udc8e</span><div class="l">Lucro Bruto (M.C.)'+(_nProv?' <span style="color:#fbbf24;font-size:10px;font-weight:800" title="'+_nProv+' pedido(s) do TikTok ainda com a tarifa provisória do Bling — a tarifa real é maior, então este lucro está OTIMISTA">\u26a0 provisório</span>':'')+'</div><div class="v '+(mFin>=0?'ok':'bad')+'" '+
                'title="venda \u2212 imposto \u2212 comiss\u00e3o \u2212 frete \u2212 custo'+(desp?(' \u2212 despesas do per\u00edodo: ML '+BRL(despML)+' (Ads, armazenagem Full e devolu\u00e7\u00f5es \u2014 as tarifas estornadas ficam de fora: s\u00e3o de venda cancelada, que j\u00e1 n\u00e3o conta no faturamento) + Shopee '+BRL(despSHP)+' (estorno de devolu\u00e7\u00e3o e ajustes tirados da carteira)'):'')+'">'+
                BRL(mFin)+(fat2>0?'<span style="font-size:13px;opacity:.8;font-weight:600"> \u00b7 '+(Math.round(mFin/fat2*1000)/10).toLocaleString('pt-BR')+'%</span>':'')+'</div>'+
                '<div class="s">venda \u2212 imposto \u2212 comiss\u00e3o \u2212 frete \u2212 custo'+(desp?(' \u2212 despesas ML'+(despSHP?' e Shopee':'')):'')+(usaHist?' \u00b7 \ud83d\udcda hist\u00f3rico completo':'')+'</div></div>';
@@ -2841,7 +2857,7 @@ async function baixarHistoricoCompleto(iv){
           /* Codex (P2, PR#138): a planilha levava a mesma comissão e margem otimistas SEM nenhuma
              marca — e é justamente nela que o Diego soma coisas por fora. Coluna própria dizendo
              se aquela linha ainda está com a tarifa provisória do Bling. */
-          (_tarifaVeioDoBling(canalKey(o.canal), o.vnota, o.comissao) ? 'PROVISORIA' : '')
+          (_tarifaVeioDoBling(canalKey(o.canal), (o.vprod != null ? o.vprod : o.vnota), o.comissao) ? 'PROVISORIA' : '')
         ]);
         if(btns.length) btns[0].textContent = '⏳ '+N(linhas.length)+' vendas…';
       }
