@@ -2500,6 +2500,63 @@ function routes(readBody) {
     // Uso: GET /amb-checkout-offline/sku-orfaos?de=AAAA-MM-DD&ate=AAAA-MM-DD&k=ADMIN_KEY
     // Só leitura. O catálogo é varrido INTEIRO (o filtro ?codigo= do Bling não é confiável —
     // ora volta vazio pra produto que existe, ora ignora o filtro), montando codigo → id.
+    /* ═══ 21/08 — DE-PARA AUTOMÁTICO DE SKU RENOMEADO ═══════════════════════════════════════
+    Nasceu do FL-1011-PRETO: renomeado no Bling para 3933398010054, o código antigo deixou de
+    existir e as 53 vendas antigas ficaram sem custo. O Diego resolveu à mão pela planilha, mas
+    isso vai acontecer de novo a cada rename.
+    COMO DESCOBRE: o Bling troca o CÓDIGO e mantém o `id` do produto. O cache de custos guarda
+    `{ id, custo }` por SKU — inclusive dos que já foram renomeados. Então: id do SKU velho no
+    cache × código que esse mesmo id tem HOJE no catálogo = o par antigo→novo. Funciona
+    retroativamente, não só pra renames futuros.
+    NÃO altera nada sozinho: devolve os pares e o Diego decide (o `sku-repara`, que já existe,
+    é quem troca no histórico). */
+    if (method === 'GET' && p === '/amb-checkout-offline/sku-depara') {
+      const kD = urlObj.searchParams.get('k') || '';
+      const sD = validarSessao(req.headers['cookie']);
+      if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sD && ehAdmin(sD)))) { json(res, 404, { error: 'not found' }); return true; }
+
+      const cc = readJson(path.join(CACHE_DIR, '_custos.json'), {}) || {};
+      const skusCache = Object.keys(cc);
+      if (!skusCache.length) { json(res, 200, { ok: false, erro: 'banco de custos vazio — rode o custo-sync antes' }); return true; }
+
+      /* catálogo inteiro: código → id. Mesmo cuidado da sku-orfaos — se uma página falhar, a
+         medição ABORTA, porque catálogo incompleto faz produto existente parecer renomeado. */
+      const porCodigo = {}; const porId = {};
+      let completo = false;
+      const TETO = 200;
+      try {
+        for (let pg = 1; pg <= TETO; pg++) {
+          const rc = await blingGet('/produtos?pagina=' + pg + '&limite=100&criterio=2');
+          if (!rc || !rc.ok) { json(res, 200, { ok: false, erro: 'catalogo incompleto: pagina ' + pg + ' falhou — abortado pra nao inventar de-para' }); return true; }
+          const lote = (rc.data && rc.data.data) || [];
+          for (const pr of lote) {
+            const cd = String(pr.codigo || '').trim();
+            if (cd) { porCodigo[cd] = pr.id; porId[String(pr.id)] = cd; }
+          }
+          if (lote.length < 100) { completo = true; break; }
+          await new Promise(r0 => setTimeout(r0, 250));
+        }
+      } catch (e) { json(res, 200, { ok: false, erro: 'catalogo: ' + String(e.message || e).slice(0, 140) }); return true; }
+      if (!completo) { json(res, 200, { ok: false, erro: 'catalogo maior que ' + (TETO * 100) + ' produtos — aumente o teto; abortado' }); return true; }
+
+      const pares = []; const semId = []; const sumiu = [];
+      for (const velho of skusCache) {
+        if (porCodigo[velho] != null) continue;              // código ainda existe: nada a fazer
+        const id = cc[velho] && cc[velho].id;
+        if (!id) { semId.push(velho); continue; }             // sem id guardado: não dá pra afirmar
+        const novo = porId[String(id)];
+        if (!novo) { sumiu.push({ sku: velho, produto_id: id }); continue; }   // id não está mais no catálogo
+        if (String(novo).toUpperCase() === String(velho).toUpperCase()) continue;   // só mudou a caixa
+        pares.push({ de: velho, para: novo, produto_id: id, custo_atual: (cc[velho] && cc[velho].custo) || null });
+      }
+      json(res, 200, { ok: true, catalogo: Object.keys(porCodigo).length, skus_no_cache: skusCache.length,
+        renomeados: pares.length, pares,
+        sem_produto_id: semId.length, sem_produto_id_lista: semId.slice(0, 20),
+        sumiram_do_catalogo: sumiu.length, sumiram_lista: sumiu.slice(0, 20),
+        leia: 'de = codigo antigo (ainda no historico) · para = codigo de hoje. Nada foi alterado: use o sku-repara pra trocar no historico' });
+      return true;
+    }
+
     if (method === 'GET' && p === '/amb-checkout-offline/sku-orfaos') {
       const kO = urlObj.searchParams.get('k') || '';
       const sO = validarSessao(req.headers['cookie']);
