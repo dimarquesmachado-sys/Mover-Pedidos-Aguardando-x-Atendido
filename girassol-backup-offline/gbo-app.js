@@ -499,6 +499,47 @@ function sugerirDeParaSku(velho, codigos) {
   return out;
 }
 
+
+/* Codex (revisão geral, 21/08): a varredura do catálogo é cara — 9.056 produtos na Girassol,
+   ~90 chamadas ao Bling. Sem cache, cada clique refazia tudo; e dois cliques ao mesmo tempo
+   disparavam DUAS varreduras completas, dobrando a pressão sobre o limite justo quando ele já
+   estava perto de estourar (foi o que fez a página 14 falhar).
+   Guarda 30 minutos e, principalmente, compartilha a mesma Promise entre chamadas simultâneas:
+   quem chegar durante uma varredura em andamento espera a mesma, em vez de abrir outra.
+   Resultado incompleto NUNCA é cacheado — o erro sobe e a próxima tentativa recomeça limpa. */
+let _catalogoDeParaCache = null;
+let _catalogoDeParaEmAndamento = null;
+async function carregarCatalogoDePara() {
+  if (_catalogoDeParaCache && (Date.now() - _catalogoDeParaCache.em) < 30 * 60 * 1000) return _catalogoDeParaCache;
+  if (_catalogoDeParaEmAndamento) return _catalogoDeParaEmAndamento;
+  _catalogoDeParaEmAndamento = (async () => {
+    const porCodigo = {}; const porId = {};
+    const TETO = 200;
+    for (let pg = 1; pg <= TETO; pg++) {
+      let rc = null;
+      for (let tent = 1; tent <= 4; tent++) {
+        rc = await blingGet('/produtos?pagina=' + pg + '&limite=100&criterio=2');
+        if (rc && rc.ok) break;
+        if (tent < 4) await new Promise(r => setTimeout(r, 1500 * tent));   // 1,5s · 3s · 4,5s
+      }
+      if (!rc || !rc.ok) throw new Error('catalogo incompleto: pagina ' + pg + ' falhou apos 4 tentativas');
+      const lote = (rc.data && rc.data.data) || [];
+      for (const pr of lote) {
+        const cd = String(pr.codigo || '').trim();
+        if (cd) { porCodigo[cd] = pr.id; porId[String(pr.id)] = cd; }
+      }
+      if (lote.length < 100) {
+        _catalogoDeParaCache = { porCodigo, porId, em: Date.now() };
+        return _catalogoDeParaCache;
+      }
+      await new Promise(r => setTimeout(r, 600));
+    }
+    throw new Error('catalogo maior que ' + (TETO * 100) + ' produtos — aumente o teto');
+  })();
+  try { return await _catalogoDeParaEmAndamento; }
+  finally { _catalogoDeParaEmAndamento = null; }
+}
+
 function lerCustosManuais() {
   try { return readJson(path.join(CACHE_DIR, '_custos-manuais.json'), {}) || {}; } catch (e) { return {}; }
 }
@@ -2372,6 +2413,11 @@ function routes(readBody) {
          Amazon e Olist ficam de fora por não termos API deles; registrado, em vez de fingir
          cobertura. Magalu depende de o serviço dela expor o status — próxima etapa. */
       const alvoTK = noPeriodo.filter(v => String(v.marketplace || '').toLowerCase() === 'tiktok');
+      /* Codex (revisão geral): se o cache financeiro do TikTok não abrir, o laço era pulado em
+         silêncio e a resposta AINDA dizia que o TikTok foi checado — a mesma família de engano
+         que perseguimos o dia todo (afirmar cobertura que não se tem). Sem pedido do canal no
+         período, não há o que checar e segue verdadeiro. */
+      let tiktokDisponivel = alvoTK.length === 0;
       if (alvoTK.length) {
         try {
           /* Codex (P1 x2): a coleta do TikTok grava em `/data` (TIKTOK_CACHE_DIR), NÃO no CACHE_DIR
@@ -2382,6 +2428,7 @@ function routes(readBody) {
           const gTK = readJson(fTK, null);
           const peds = (gTK && gTK.pedidos && typeof gTK.pedidos === 'object') ? gTK.pedidos : null;
           if (peds) {
+            tiktokDisponivel = true;
             for (const v of alvoTK) {
               const sn = String(v.numero_loja || '').trim();
               const reg = sn && peds[sn];
@@ -2423,7 +2470,9 @@ function routes(readBody) {
         } catch (e) {}
       }
       json(res, 200, { ok: true, checados, cancelados_agora: cancelados.length, numeros: cancelados.slice(0, 30),
-        canais_checados: ['ml', 'shopee', 'tiktok'], sem_cobertura: ['magalu', 'amazon', 'olist'] });
+        canais_checados: tiktokDisponivel ? ['ml', 'shopee', 'tiktok'] : ['ml', 'shopee'],
+        sem_cobertura: ['magalu', 'amazon', 'olist'].concat(tiktokDisponivel ? [] : ['tiktok']),
+        aviso_tiktok: tiktokDisponivel ? null : 'cache financeiro do TikTok indisponivel; nenhum pedido TikTok foi verificado' });
       return true;
     }
 
@@ -2785,34 +2834,17 @@ function routes(readBody) {
       const skusCache = Object.keys(cc);
       if (!skusCache.length) { json(res, 200, { ok: false, erro: 'banco de custos vazio — rode o custo-sync antes' }); return true; }
 
-      /* catálogo inteiro: código → id. Mesmo cuidado da sku-orfaos — se uma página falhar, a
-         medição ABORTA, porque catálogo incompleto faz produto existente parecer renomeado. */
-      const porCodigo = {}; const porId = {};
-      let completo = false;
-      const TETO = 200;
+      /* catálogo inteiro: código → id. Agora vem do cache compartilhado (30 min), que também
+         evita duas varreduras simultâneas. Mesmo cuidado de sempre: incompleto ABORTA, porque
+         catálogo cortado faz produto existente parecer renomeado. */
+      let porCodigo; let porId;
       try {
-        for (let pg = 1; pg <= TETO; pg++) {
-          /* 21/08 — a Girassol (1.769 SKUs, ~18 páginas) abortava na página 14: o Bling corta por
-             excesso de requisições. Abortar era o certo (catálogo cortado faria todo produto das
-             páginas seguintes parecer renomeado), mas dá pra insistir antes de desistir — mesmo
-             remédio da "tartaruga anti-429" do custo-sync: espera crescente e até 4 tentativas. */
-          let rc = null;
-          for (let tent = 1; tent <= 4; tent++) {
-            rc = await blingGet('/produtos?pagina=' + pg + '&limite=100&criterio=2');
-            if (rc && rc.ok) break;
-            if (tent < 4) await new Promise(r0 => setTimeout(r0, 1500 * tent));   // 1,5s · 3s · 4,5s
-          }
-          if (!rc || !rc.ok) { json(res, 200, { ok: false, erro: 'catalogo incompleto: pagina ' + pg + ' falhou apos 4 tentativas — abortado pra nao inventar de-para', paginas_lidas: pg - 1 }); return true; }
-          const lote = (rc.data && rc.data.data) || [];
-          for (const pr of lote) {
-            const cd = String(pr.codigo || '').trim();
-            if (cd) { porCodigo[cd] = pr.id; porId[String(pr.id)] = cd; }
-          }
-          if (lote.length < 100) { completo = true; break; }
-          await new Promise(r0 => setTimeout(r0, 600));   // 250ms era pouco pra 18 páginas seguidas
-        }
-      } catch (e) { json(res, 200, { ok: false, erro: 'catalogo: ' + String(e.message || e).slice(0, 140) }); return true; }
-      if (!completo) { json(res, 200, { ok: false, erro: 'catalogo maior que ' + (TETO * 100) + ' produtos — aumente o teto; abortado' }); return true; }
+        const cat = await carregarCatalogoDePara();
+        porCodigo = cat.porCodigo; porId = cat.porId;
+      } catch (e) {
+        json(res, 200, { ok: false, erro: String(e.message || e).slice(0, 180) + ' — abortado pra nao inventar de-para' });
+        return true;
+      }
 
       const pares = []; const semId = []; const sumiu = [];
       for (const velho of skusCache) {
