@@ -303,11 +303,17 @@ async function tratar(req, res, urlObj, json) {
        vazia. Agora a AUSÊNCIA do mapa também é erro de cache. */
     if (g && !Object.prototype.hasOwnProperty.call(g, 'devolucoes') && !cacheErro)
       cacheErro = 'cache sem o mapa devolucoes (arquivo incompleto?)';
-    if (g && Object.prototype.hasOwnProperty.call(g, 'devolucoes') &&
-        (g.devolucoes === null || typeof g.devolucoes !== 'object' || Array.isArray(g.devolucoes)) && !cacheErro)
-      cacheErro = 'campo devolucoes nao e objeto (veio ' +
-        (g.devolucoes === null ? 'null' : Array.isArray(g.devolucoes) ? 'array' : typeof g.devolucoes) + ')';
-    if (registrosPodres && !cacheErro) cacheErro = registrosPodres + ' registro(s) do cache estao malformados e foram ignorados';
+    /* Codex (P2, r5): faltava o caso do cache `{}` — gravação incompleta deixa um objeto sem o
+       mapa `devolucoes`, e o gate por hasOwnProperty pulava a validação: a rota respondia
+       sem_cache:false, cache_erro:null e zero registros, fazendo arquivo QUEBRADO parecer coleta
+       vazia. Agora a ausência do campo é erro tanto quanto a forma errada. */
+    if (g && !cacheErro) {
+      if (!Object.prototype.hasOwnProperty.call(g, 'devolucoes'))
+        cacheErro = 'cache sem o campo devolucoes (arquivo incompleto?)';
+      else if (g.devolucoes === null || typeof g.devolucoes !== 'object' || Array.isArray(g.devolucoes))
+        cacheErro = 'campo devolucoes nao e objeto (veio ' +
+          (g.devolucoes === null ? 'null' : Array.isArray(g.devolucoes) ? 'array' : typeof g.devolucoes) + ')';
+    }
     let limite = parseInt(q.get('limite') || '', 10);
     if (!Number.isFinite(limite) || limite < 1 || limite > 200) limite = 30;
     /* Codex (P2, rodada 5): `{}` herda constructor/toString/valueOf, e o nome do campo vem da API
@@ -318,8 +324,15 @@ async function tratar(req, res, urlObj, json) {
     for (const d of todos) {
       const cc = d.cru_campos;
       if (!Array.isArray(cc)) continue;   // registro sem a lista (ou com forma errada) não derruba a união
-      for (const c of cc) { const k = String(c); cruCampos[k] = (cruCampos[k] || 0) + 1; }
+      /* Codex (P2, r5): os nomes vêm da API do TikTok, ou seja, de fora. Um campo chamado
+         `constructor` ou `toString` fazia `cruCampos[k]` resolver o membro do PROTOTYPE em vez de
+         zero — somar 1 a uma função vira string, e o contador da rota de diagnóstico saía
+         mentindo. Mapa sem protótipo resolve na raiz. */
+      for (const c of cc) { const k = String(c); cruCampos[k] = (Object.prototype.hasOwnProperty.call(cruCampos, k) ? cruCampos[k] : 0) + 1; }
     }
+    /* a contagem só fecha DEPOIS do laço da união, que também marca registro sem `cru_campos`.
+       Montar a mensagem antes deixaria esses de fora do cache_erro. */
+    if (registrosPodres && !cacheErro) cacheErro = registrosPodres + ' registro(s) do cache estao malformados e foram ignorados';
     json(res, 200, { ok: true, loja,
       guardadas: todos.length,
       // `sem_cache` separa "NUNCA coletou" (arquivo nem existe) de "coletou e veio
