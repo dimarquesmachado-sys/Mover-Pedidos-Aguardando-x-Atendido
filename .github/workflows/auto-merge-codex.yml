@@ -22,13 +22,16 @@ jobs:
       github.event.pull_request.draft == false &&
       github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
+
     steps:
       - name: Pedir revisao do Codex
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
         run: |
-          gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body "@codex review"
+          gh pr comment "$PR" \
+            --repo "$GITHUB_REPOSITORY" \
+            --body "@codex review"
 
   codex-encontrou-problemas:
     if: >
@@ -37,8 +40,9 @@ jobs:
       github.event.review.state == 'commented' &&
       github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
+
     steps:
-      - name: Conferir revisao e chamar Claude
+      - name: Chamar Claude para corrigir
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
@@ -49,59 +53,78 @@ jobs:
           set -euo pipefail
           REPO="$GITHUB_REPOSITORY"
 
-          # Ignora revisão antiga se o PR já recebeu commit novo.
+          # Ignora revisao de commit antigo.
           if [ -n "$REVIEWED_SHA" ] && [ "$REVIEWED_SHA" != "$HEAD_SHA" ]; then
             echo "Revisao do Codex e de commit antigo. Ignorando."
             exit 0
           fi
 
-          # Não processa a mesma revisão duas vezes.
-          JA_PROCESSADA=$(gh api --paginate             "repos/$REPO/issues/$PR/comments?per_page=100"             --jq '.[].body' | grep -F "<!-- ai-codex-review:$REVIEW_ID -->" || true)
-          if [ -n "$JA_PROCESSADA" ]; then
-            exit 0
-          fi
-
-          # Se um humano já foi chamado, não volta ao automático sozinho.
+          # Nunca retoma automaticamente depois que um humano foi chamado.
           LABELS=$(gh api "repos/$REPO/pulls/$PR" --jq '.labels[].name' || true)
           if printf '%s\n' "$LABELS" | grep -Fxq "needs-human-review"; then
+            echo "PR exige revisao humana."
             exit 0
           fi
 
-          # Conta quantas correções automáticas o Claude já recebeu neste PR.
-          ROUNDS=$(gh api --paginate             "repos/$REPO/issues/$PR/comments?per_page=100"             --jq '.[].body' | grep -Fc "<!-- ai-codex-round -->" || true)
+          # Evita processar a mesma revisao duas vezes.
+          JA_PROCESSADA=$(
+            gh api --paginate "repos/$REPO/issues/$PR/comments?per_page=100" \
+              --jq '.[].body' |
+            grep -F "<!-- ai-codex-review:$REVIEW_ID -->" || true
+          )
+          if [ -n "$JA_PROCESSADA" ]; then
+            echo "Revisao ja processada."
+            exit 0
+          fi
+
+          # Conta quantas correcoes automaticas ja foram solicitadas.
+          ROUNDS=$(
+            gh api --paginate "repos/$REPO/issues/$PR/comments?per_page=100" \
+              --jq '.[].body' |
+            grep -Fc "<!-- ai-codex-round -->" || true
+          )
 
           if [ "$ROUNDS" -ge 5 ]; then
-            gh label create "needs-human-review"               --repo "$REPO"               --color "D73A4A"               --description "Automacao Claude/Codex parou e precisa de revisao humana"               --force >/dev/null 2>&1 || true
+            gh label create "needs-human-review" \
+              --repo "$REPO" \
+              --color "D73A4A" \
+              --description "Automacao Claude/Codex parou e precisa de revisao humana" \
+              --force >/dev/null 2>&1 || true
 
-            gh pr edit "$PR"               --repo "$REPO"               --add-label "needs-human-review" >/dev/null 2>&1 || true
+            gh pr edit "$PR" \
+              --repo "$REPO" \
+              --add-label "needs-human-review" >/dev/null 2>&1 || true
 
-            gh pr comment "$PR"               --repo "$REPO"               --body "<!-- ai-codex-review:$REVIEW_ID -->
-<!-- ai-human-stop -->
-🛑 **Automação pausada — revisão humana necessária**
+            gh pr comment "$PR" --repo "$REPO" --body-file - <<EOF
+          <!-- ai-codex-review:$REVIEW_ID -->
+          <!-- ai-human-stop -->
+          🛑 **Automação pausada — revisão humana necessária**
 
-O Codex ainda encontrou problemas depois de **5 rodadas automáticas de correção Claude ↔ Codex**.
+          O Codex ainda encontrou problemas depois de **5 rodadas automáticas de correção Claude ↔ Codex**.
 
-@dimarquesmachado-sys precisa revisar este PR. **Nada será mergeado automaticamente enquanto a label \`needs-human-review\` estiver presente.**"
+          @dimarquesmachado-sys precisa revisar este PR. Nada será mergeado automaticamente enquanto a label \`needs-human-review\` estiver presente.
+          EOF
             exit 0
           fi
 
           ROUND=$((ROUNDS + 1))
 
-          gh pr comment "$PR"             --repo "$REPO"             --body "<!-- ai-codex-review:$REVIEW_ID -->
-<!-- ai-codex-round -->
-🔁 **Rodada automática $ROUND/5 — Claude ↔ Codex**
+          gh pr comment "$PR" --repo "$REPO" --body-file - <<EOF
+          <!-- ai-codex-review:$REVIEW_ID -->
+          <!-- ai-codex-round -->
+          🔁 **Rodada automática $ROUND/5 — Claude ↔ Codex**
 
-@claude Leia **todos os apontamentos ativos do Codex neste PR**, inclusive comentários inline.
+          @claude Leia **todos os apontamentos ativos do Codex neste PR**, inclusive comentários inline.
 
-Faça o seguinte:
-1. Corrija todos os problemas apontados pelo Codex, sem ampliar o escopo da tarefa.
-2. Preserve o comportamento que já funcionava e evite regressões.
-3. Rode os testes/verificações disponíveis no repositório.
-4. Faça commit e push **na MESMA branch deste PR**.
-5. **Não abra outro PR e não faça merge.**
-6. Depois do push, pare. O workflow chamará o Codex novamente automaticamente.
+          1. Corrija todos os problemas apontados pelo Codex, sem ampliar o escopo.
+          2. Preserve o comportamento que já funcionava e evite regressões.
+          3. Rode os testes/verificações disponíveis.
+          4. Faça commit e push **na MESMA branch deste PR**.
+          5. **Não abra outro PR e não faça merge.**
+          6. Depois do push, pare. O workflow chamará o Codex novamente.
 
-Se algum apontamento do Codex estiver incorreto ou não puder ser corrigido com segurança, não improvise: explique no PR e não faça merge."
+          Se algum apontamento estiver incorreto ou não puder ser corrigido com segurança, não improvise: explique no PR e não faça merge.
+          EOF
 
   codex-aprovou:
     if: >
@@ -110,6 +133,7 @@ Se algum apontamento do Codex estiver incorreto ou não puder ser corrigido com 
       startsWith(github.event.comment.user.login, 'chatgpt-codex-connector') &&
       contains(github.event.comment.body, 'find any major issues')
     runs-on: ubuntu-latest
+
     steps:
       - name: Validar e fazer auto-merge
         env:
@@ -123,19 +147,31 @@ Se algum apontamento do Codex estiver incorreto ou não puder ser corrigido com 
           parar_humano () {
             MOTIVO="$1"
 
-            gh label create "needs-human-review"               --repo "$REPO"               --color "D73A4A"               --description "Automacao Claude/Codex parou e precisa de revisao humana"               --force >/dev/null 2>&1 || true
+            gh label create "needs-human-review" \
+              --repo "$REPO" \
+              --color "D73A4A" \
+              --description "Automacao Claude/Codex parou e precisa de revisao humana" \
+              --force >/dev/null 2>&1 || true
 
-            gh pr edit "$PR"               --repo "$REPO"               --add-label "needs-human-review" >/dev/null 2>&1 || true
+            gh pr edit "$PR" \
+              --repo "$REPO" \
+              --add-label "needs-human-review" >/dev/null 2>&1 || true
 
-            EXISTE=$(gh api --paginate               "repos/$REPO/issues/$PR/comments?per_page=100"               --jq '.[].body' | grep -F "<!-- ai-human-stop -->" || true)
+            EXISTE=$(
+              gh api --paginate "repos/$REPO/issues/$PR/comments?per_page=100" \
+                --jq '.[].body' |
+              grep -F "<!-- ai-human-stop -->" || true
+            )
 
             if [ -z "$EXISTE" ]; then
-              gh pr comment "$PR"                 --repo "$REPO"                 --body "<!-- ai-human-stop -->
-🛑 **Automação pausada — revisão humana necessária**
+              gh pr comment "$PR" --repo "$REPO" --body-file - <<EOF
+          <!-- ai-human-stop -->
+          🛑 **Automação pausada — revisão humana necessária**
 
-$MOTIVO
+          $MOTIVO
 
-@dimarquesmachado-sys precisa revisar este PR. Nenhum merge automático será feito enquanto a label \`needs-human-review\` estiver presente."
+          @dimarquesmachado-sys precisa revisar este PR. Nenhum merge automático será feito enquanto a label \`needs-human-review\` estiver presente.
+          EOF
             fi
           }
 
@@ -159,40 +195,52 @@ $MOTIVO
             exit 0
           fi
 
-          # O OK do Codex precisa corresponder ao commit atual.
-          REVIEWED=$(printf '%s\n' "$COMMENT_BODY"             | sed -nE 's/.*Reviewed commit:\*\* `([0-9a-f]+)`.*/\1/p'             | head -n 1)
+          # Confirma que o OK do Codex corresponde ao HEAD atual.
+          REVIEWED=$(
+            printf '%s\n' "$COMMENT_BODY" |
+            sed -nE 's/.*Reviewed commit:\*\* `([0-9a-f]+)`.*/\1/p' |
+            head -n 1
+          )
 
           if [ -z "$REVIEWED" ]; then
-            parar_humano "O Codex deu OK, mas não consegui identificar com segurança qual commit ele revisou."
+            parar_humano "O Codex deu OK, mas não consegui identificar qual commit ele revisou."
             exit 0
           fi
 
           case "$HEAD" in
             "$REVIEWED"*) ;;
             *)
-              gh pr comment "$PR" --repo "$REPO" --body "@codex review"
+              echo "OK do Codex e de commit antigo; pedindo nova revisao."
+              gh pr comment "$PR" \
+                --repo "$REPO" \
+                --body "@codex review"
               exit 0
               ;;
           esac
 
           # Guardrails nunca se autoaprovam.
-          FILES=$(gh api --paginate             "repos/$REPO/pulls/$PR/files?per_page=100"             --jq '.[].filename')
+          FILES=$(
+            gh api --paginate "repos/$REPO/pulls/$PR/files?per_page=100" \
+              --jq '.[].filename'
+          )
 
           if printf '%s\n' "$FILES" | grep -Eq '^\.github/workflows/|^scripts/verifica\.js$'; then
-            parar_humano "Este PR altera os próprios **guardrails da automação** (\`.github/workflows/\` ou \`scripts/verifica.js\`). Por segurança, esse tipo de mudança sempre precisa de humano."
+            parar_humano "Este PR altera os próprios guardrails da automação. Esse tipo de mudança sempre precisa de humano."
             exit 0
           fi
 
-          # Espera especificamente o check NOVO ai-safety do commit atual.
-          echo "Aguardando o check ai-safety..."
+          # Espera especificamente o check ai-safety do commit atual.
+          echo "Aguardando ai-safety..."
           RESULTADO=""
 
           for i in $(seq 1 60); do
-            RESULTADO=$(gh api               "repos/$REPO/commits/$HEAD/check-runs"               --jq '[.check_runs[] | select(.name == "ai-safety")] | sort_by(.started_at) | last | [.status, .conclusion] | @tsv'               2>/dev/null || true)
+            RESULTADO=$(
+              gh api "repos/$REPO/commits/$HEAD/check-runs" \
+                --jq '[.check_runs[] | select(.name == "ai-safety")] | sort_by(.started_at) | last | [.status, .conclusion] | @tsv' \
+                2>/dev/null || true
+            )
 
             STATUS=$(printf '%s' "$RESULTADO" | cut -f1)
-            CONCLUSAO=$(printf '%s' "$RESULTADO" | cut -f2)
-
             if [ "$STATUS" = "completed" ]; then
               break
             fi
@@ -213,5 +261,7 @@ $MOTIVO
             exit 0
           fi
 
-          # Codex aprovou o HEAD atual + ai-safety verde.
-          gh pr merge "$PR"             --repo "$REPO"             --auto             --squash
+          gh pr merge "$PR" \
+            --repo "$REPO" \
+            --auto \
+            --squash
