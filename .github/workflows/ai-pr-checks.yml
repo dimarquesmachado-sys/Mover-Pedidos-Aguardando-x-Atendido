@@ -1,0 +1,81 @@
+name: AI pre-merge safety
+
+on:
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+jobs:
+  ai-safety:
+    name: ai-safety
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Sintaxe de todos os arquivos JavaScript
+        shell: bash
+        run: |
+          set -euo pipefail
+          find . -type f -name '*.js'             ! -path './node_modules/*'             ! -path './.git/*'             ! -path './.github/*'             -print0 |
+          while IFS= read -r -d '' arquivo; do
+            echo "node --check $arquivo"
+            node --check "$arquivo"
+          done
+
+      - name: JavaScript embutido nos paineis
+        shell: bash
+        run: |
+          node <<'NODE'
+          'use strict';
+          const fs = require('fs');
+          const path = require('path');
+          const cp = require('child_process');
+          const os = require('os');
+
+          const cfg = JSON.parse(fs.readFileSync('.github/espelhos.json', 'utf8'));
+          let erros = 0;
+
+          for (const modulo of cfg.modulos) {
+            const arquivo = path.join(modulo, 'painel.html');
+
+            if (!fs.existsSync(arquivo)) {
+              console.error('Painel não existe:', arquivo);
+              erros++;
+              continue;
+            }
+
+            const html = fs.readFileSync(arquivo, 'utf8');
+            const blocos = [...html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)]
+              .map(x => x[1])
+              .sort((a, b) => b.length - a.length);
+
+            const maior = blocos[0] || '';
+            const tmp = path.join(os.tmpdir(), 'ai-check-' + modulo + '.js');
+
+            fs.writeFileSync(tmp, maior);
+
+            const r = cp.spawnSync('node', ['--check', tmp], {
+              encoding: 'utf8'
+            });
+
+            if (r.status !== 0) {
+              console.error(modulo + '/painel.html com JavaScript inválido');
+              console.error(r.stderr);
+              erros++;
+            } else {
+              console.log('OK:', modulo + '/painel.html');
+            }
+          }
+
+          process.exit(erros ? 1 : 0);
+          NODE
+
+      - name: Verificacao concluida
+        run: echo "ai-safety passou"
