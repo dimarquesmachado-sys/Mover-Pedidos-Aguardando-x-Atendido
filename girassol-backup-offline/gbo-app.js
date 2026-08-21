@@ -2668,15 +2668,24 @@ function routes(readBody) {
       const TETO = 200;
       try {
         for (let pg = 1; pg <= TETO; pg++) {
-          const rc = await blingGet('/produtos?pagina=' + pg + '&limite=100&criterio=2');
-          if (!rc || !rc.ok) { json(res, 200, { ok: false, erro: 'catalogo incompleto: pagina ' + pg + ' falhou — abortado pra nao inventar de-para' }); return true; }
+          /* 21/08 — a Girassol (1.769 SKUs, ~18 páginas) abortava na página 14: o Bling corta por
+             excesso de requisições. Abortar era o certo (catálogo cortado faria todo produto das
+             páginas seguintes parecer renomeado), mas dá pra insistir antes de desistir — mesmo
+             remédio da "tartaruga anti-429" do custo-sync: espera crescente e até 4 tentativas. */
+          let rc = null;
+          for (let tent = 1; tent <= 4; tent++) {
+            rc = await blingGet('/produtos?pagina=' + pg + '&limite=100&criterio=2');
+            if (rc && rc.ok) break;
+            if (tent < 4) await new Promise(r0 => setTimeout(r0, 1500 * tent));   // 1,5s · 3s · 4,5s
+          }
+          if (!rc || !rc.ok) { json(res, 200, { ok: false, erro: 'catalogo incompleto: pagina ' + pg + ' falhou apos 4 tentativas — abortado pra nao inventar de-para', paginas_lidas: pg - 1 }); return true; }
           const lote = (rc.data && rc.data.data) || [];
           for (const pr of lote) {
             const cd = String(pr.codigo || '').trim();
             if (cd) { porCodigo[cd] = pr.id; porId[String(pr.id)] = cd; }
           }
           if (lote.length < 100) { completo = true; break; }
-          await new Promise(r0 => setTimeout(r0, 250));
+          await new Promise(r0 => setTimeout(r0, 600));   // 250ms era pouco pra 18 páginas seguidas
         }
       } catch (e) { json(res, 200, { ok: false, erro: 'catalogo: ' + String(e.message || e).slice(0, 140) }); return true; }
       if (!completo) { json(res, 200, { ok: false, erro: 'catalogo maior que ' + (TETO * 100) + ' produtos — aumente o teto; abortado' }); return true; }
