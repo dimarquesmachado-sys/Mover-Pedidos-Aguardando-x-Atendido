@@ -1,28 +1,217 @@
-name: Auto-merge depois do Codex
+name: Claude x Codex - loop automatico
 
 on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+  pull_request_review:
+    types: [submitted]
   issue_comment:
     types: [created]
 
 permissions:
   contents: write
   pull-requests: write
+  issues: write
+  checks: read
+  actions: read
 
 jobs:
-  auto-merge:
+  pedir-codex:
     if: >
-      github.event.issue.pull_request &&
-      github.event.comment.user.login == 'chatgpt-codex-connector[bot]' &&
-      contains(github.event.comment.body, 'find any major issues')
-
+      github.event_name == 'pull_request_target' &&
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
-
     steps:
-      - name: Ativar auto-merge
+      - name: Pedir revisao do Codex
         env:
           GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
         run: |
-          gh pr merge "${{ github.event.issue.number }}" \
-            --repo "${{ github.repository }}" \
-            --auto \
-            --squash
+          gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body "@codex review"
+
+  codex-encontrou-problemas:
+    if: >
+      github.event_name == 'pull_request_review' &&
+      startsWith(github.event.review.user.login, 'chatgpt-codex-connector') &&
+      github.event.review.state == 'commented' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Conferir revisao e chamar Claude
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          REVIEW_ID: ${{ github.event.review.id }}
+          REVIEWED_SHA: ${{ github.event.review.commit_id }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          REPO="$GITHUB_REPOSITORY"
+
+          # Ignora revisão antiga se o PR já recebeu commit novo.
+          if [ -n "$REVIEWED_SHA" ] && [ "$REVIEWED_SHA" != "$HEAD_SHA" ]; then
+            echo "Revisao do Codex e de commit antigo. Ignorando."
+            exit 0
+          fi
+
+          # Não processa a mesma revisão duas vezes.
+          JA_PROCESSADA=$(gh api --paginate             "repos/$REPO/issues/$PR/comments?per_page=100"             --jq '.[].body' | grep -F "<!-- ai-codex-review:$REVIEW_ID -->" || true)
+          if [ -n "$JA_PROCESSADA" ]; then
+            exit 0
+          fi
+
+          # Se um humano já foi chamado, não volta ao automático sozinho.
+          LABELS=$(gh api "repos/$REPO/pulls/$PR" --jq '.labels[].name' || true)
+          if printf '%s\n' "$LABELS" | grep -Fxq "needs-human-review"; then
+            exit 0
+          fi
+
+          # Conta quantas correções automáticas o Claude já recebeu neste PR.
+          ROUNDS=$(gh api --paginate             "repos/$REPO/issues/$PR/comments?per_page=100"             --jq '.[].body' | grep -Fc "<!-- ai-codex-round -->" || true)
+
+          if [ "$ROUNDS" -ge 5 ]; then
+            gh label create "needs-human-review"               --repo "$REPO"               --color "D73A4A"               --description "Automacao Claude/Codex parou e precisa de revisao humana"               --force >/dev/null 2>&1 || true
+
+            gh pr edit "$PR"               --repo "$REPO"               --add-label "needs-human-review" >/dev/null 2>&1 || true
+
+            gh pr comment "$PR"               --repo "$REPO"               --body "<!-- ai-codex-review:$REVIEW_ID -->
+<!-- ai-human-stop -->
+🛑 **Automação pausada — revisão humana necessária**
+
+O Codex ainda encontrou problemas depois de **5 rodadas automáticas de correção Claude ↔ Codex**.
+
+@dimarquesmachado-sys precisa revisar este PR. **Nada será mergeado automaticamente enquanto a label \`needs-human-review\` estiver presente.**"
+            exit 0
+          fi
+
+          ROUND=$((ROUNDS + 1))
+
+          gh pr comment "$PR"             --repo "$REPO"             --body "<!-- ai-codex-review:$REVIEW_ID -->
+<!-- ai-codex-round -->
+🔁 **Rodada automática $ROUND/5 — Claude ↔ Codex**
+
+@claude Leia **todos os apontamentos ativos do Codex neste PR**, inclusive comentários inline.
+
+Faça o seguinte:
+1. Corrija todos os problemas apontados pelo Codex, sem ampliar o escopo da tarefa.
+2. Preserve o comportamento que já funcionava e evite regressões.
+3. Rode os testes/verificações disponíveis no repositório.
+4. Faça commit e push **na MESMA branch deste PR**.
+5. **Não abra outro PR e não faça merge.**
+6. Depois do push, pare. O workflow chamará o Codex novamente automaticamente.
+
+Se algum apontamento do Codex estiver incorreto ou não puder ser corrigido com segurança, não improvise: explique no PR e não faça merge."
+
+  codex-aprovou:
+    if: >
+      github.event_name == 'issue_comment' &&
+      github.event.issue.pull_request &&
+      startsWith(github.event.comment.user.login, 'chatgpt-codex-connector') &&
+      contains(github.event.comment.body, 'find any major issues')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validar e fazer auto-merge
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.issue.number }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
+        run: |
+          set -euo pipefail
+          REPO="$GITHUB_REPOSITORY"
+
+          parar_humano () {
+            MOTIVO="$1"
+
+            gh label create "needs-human-review"               --repo "$REPO"               --color "D73A4A"               --description "Automacao Claude/Codex parou e precisa de revisao humana"               --force >/dev/null 2>&1 || true
+
+            gh pr edit "$PR"               --repo "$REPO"               --add-label "needs-human-review" >/dev/null 2>&1 || true
+
+            EXISTE=$(gh api --paginate               "repos/$REPO/issues/$PR/comments?per_page=100"               --jq '.[].body' | grep -F "<!-- ai-human-stop -->" || true)
+
+            if [ -z "$EXISTE" ]; then
+              gh pr comment "$PR"                 --repo "$REPO"                 --body "<!-- ai-human-stop -->
+🛑 **Automação pausada — revisão humana necessária**
+
+$MOTIVO
+
+@dimarquesmachado-sys precisa revisar este PR. Nenhum merge automático será feito enquanto a label \`needs-human-review\` estiver presente."
+            fi
+          }
+
+          PR_JSON=$(gh api "repos/$REPO/pulls/$PR")
+          STATE=$(printf '%s' "$PR_JSON" | jq -r '.state')
+          DRAFT=$(printf '%s' "$PR_JSON" | jq -r '.draft')
+          HEAD=$(printf '%s' "$PR_JSON" | jq -r '.head.sha')
+          HEAD_REPO=$(printf '%s' "$PR_JSON" | jq -r '.head.repo.full_name')
+          LABELS=$(printf '%s' "$PR_JSON" | jq -r '.labels[].name')
+
+          if [ "$STATE" != "open" ] || [ "$DRAFT" = "true" ]; then
+            exit 0
+          fi
+
+          if [ "$HEAD_REPO" != "$REPO" ]; then
+            parar_humano "O PR vem de outro repositório/fork. Por segurança, não faço merge automático."
+            exit 0
+          fi
+
+          if printf '%s\n' "$LABELS" | grep -Fxq "needs-human-review"; then
+            exit 0
+          fi
+
+          # O OK do Codex precisa corresponder ao commit atual.
+          REVIEWED=$(printf '%s\n' "$COMMENT_BODY"             | sed -nE 's/.*Reviewed commit:\*\* `([0-9a-f]+)`.*/\1/p'             | head -n 1)
+
+          if [ -z "$REVIEWED" ]; then
+            parar_humano "O Codex deu OK, mas não consegui identificar com segurança qual commit ele revisou."
+            exit 0
+          fi
+
+          case "$HEAD" in
+            "$REVIEWED"*) ;;
+            *)
+              gh pr comment "$PR" --repo "$REPO" --body "@codex review"
+              exit 0
+              ;;
+          esac
+
+          # Guardrails nunca se autoaprovam.
+          FILES=$(gh api --paginate             "repos/$REPO/pulls/$PR/files?per_page=100"             --jq '.[].filename')
+
+          if printf '%s\n' "$FILES" | grep -Eq '^\.github/workflows/|^scripts/verifica\.js$'; then
+            parar_humano "Este PR altera os próprios **guardrails da automação** (\`.github/workflows/\` ou \`scripts/verifica.js\`). Por segurança, esse tipo de mudança sempre precisa de humano."
+            exit 0
+          fi
+
+          # Espera especificamente o check NOVO ai-safety do commit atual.
+          echo "Aguardando o check ai-safety..."
+          RESULTADO=""
+
+          for i in $(seq 1 60); do
+            RESULTADO=$(gh api               "repos/$REPO/commits/$HEAD/check-runs"               --jq '[.check_runs[] | select(.name == "ai-safety")] | sort_by(.started_at) | last | [.status, .conclusion] | @tsv'               2>/dev/null || true)
+
+            STATUS=$(printf '%s' "$RESULTADO" | cut -f1)
+            CONCLUSAO=$(printf '%s' "$RESULTADO" | cut -f2)
+
+            if [ "$STATUS" = "completed" ]; then
+              break
+            fi
+
+            sleep 5
+          done
+
+          STATUS=$(printf '%s' "$RESULTADO" | cut -f1)
+          CONCLUSAO=$(printf '%s' "$RESULTADO" | cut -f2)
+
+          if [ "$STATUS" != "completed" ]; then
+            parar_humano "O check \`ai-safety\` não terminou dentro de 5 minutos."
+            exit 0
+          fi
+
+          if [ "$CONCLUSAO" != "success" ]; then
+            parar_humano "O check \`ai-safety\` falhou. O PR não foi mergeado."
+            exit 0
+          fi
+
+          # Codex aprovou o HEAD atual + ai-safety verde.
+          gh pr merge "$PR"             --repo "$REPO"             --auto             --squash
