@@ -260,6 +260,92 @@ async function tratar(req, res, urlObj, json) {
     return true;
   }
 
+  // ── DEVOLUÇÕES CRUAS (20/08): raio-X pro app de Devoluções ──────────────────────
+  // O resumo acima agrega e devolve só o top-20 por valor; pra frente de devoluções
+  // (bipe/espreita no app de Devoluções) o que importa é VER o que a API realmente
+  // mandou — os `cru_campos` que a coleta guarda por registro respondem, por exemplo,
+  // se existe campo de rastreio da reversa. Só LEITURA do cache; nada chama o TikTok.
+  if (p === '/tiktok/devolucoes-cru') {
+    if (!admOk()) { json(res, 404, { error: 'not found' }); return true; }
+    const loja = lojaDe(q);
+    const arqD = path.join(process.env.TIKTOK_CACHE_DIR || '/data', '_tiktok_devolucoes_' + loja + '.json');
+    // Só ENOENT significa "nunca coletou" — o caso é rastreado EXPLICITAMENTE.
+    // Arquivo corrompido/ilegível é OUTRA coisa e sai em `cache_erro`; e JSON
+    // válido com a forma errada (`null`, array, primitivo) também é cache_erro,
+    // porque o arquivo EXISTE — senão a corrupção se disfarça de "sem cache"
+    // (apontado pelo Codex no PR #155, rodadas 1 e 2).
+    let g = null, cacheErro = null, semCache = false;
+    try {
+      const parsed = JSON.parse(fs.readFileSync(arqD, 'utf8'));
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) g = parsed;
+      else cacheErro = 'conteudo do cache nao tem a forma esperada (veio ' + (parsed === null ? 'null' : Array.isArray(parsed) ? 'array' : typeof parsed) + ')';
+    } catch (e) {
+      if (e && e.code === 'ENOENT') semCache = true;
+      else cacheErro = String((e && e.message) || e).slice(0, 160);
+    }
+    /* Codex (P2, rodada 3): eu validava só a RAIZ do cache. Um arquivo com a forma certa por fora
+       e registro podre dentro — {"devolucoes":{"x":null}} — passava na checagem e quebrava aqui,
+       devolvendo 500 em vez de dizer que o cache está corrompido. E 500 numa rota de diagnóstico é
+       o pior desfecho: ela existe justamente pra CONTAR o que há de errado. Agora cada registro é
+       conferido; os podres são contados e relatados, e os bons seguem sendo servidos. */
+    const brutos = Object.values((g && g.devolucoes && typeof g.devolucoes === 'object' && !Array.isArray(g.devolucoes)) ? g.devolucoes : {});
+    let registrosPodres = 0;
+    const todos = brutos
+      .filter(d => { const bom = d && typeof d === 'object' && !Array.isArray(d); if (!bom) registrosPodres++; return bom; })
+      .sort((a, b) => (Number(b.criado_em) || 0) - (Number(a.criado_em) || 0));
+    /* Codex (P2, rodada 4): eu exigia `g.devolucoes` VERDADEIRO antes de reclamar da forma, então
+       {"devolucoes":null} (ou 0, ou "") passava batido e a rota respondia ok:true com zero
+       registros — parecendo "coletou e não achou nada" quando o arquivo está corrompido. Basta o
+       campo EXISTIR: se existe e não é objeto simples, é erro de cache, seja qual for o valor. */
+    /* Codex (P2, rodada 5): faltava o caso do arquivo `{}` — gravação incompleta deixa a raiz com
+       a forma certa e SEM o mapa. Como eu só validava quando o campo existia, a rota respondia
+       sem_cache:false, cache_erro:null e zero registros: o pior desfecho, porque parece coleta
+       vazia. Agora a AUSÊNCIA do mapa também é erro de cache. */
+    if (g && !Object.prototype.hasOwnProperty.call(g, 'devolucoes') && !cacheErro)
+      cacheErro = 'cache sem o mapa devolucoes (arquivo incompleto?)';
+    /* Codex (P2, r5): faltava o caso do cache `{}` — gravação incompleta deixa um objeto sem o
+       mapa `devolucoes`, e o gate por hasOwnProperty pulava a validação: a rota respondia
+       sem_cache:false, cache_erro:null e zero registros, fazendo arquivo QUEBRADO parecer coleta
+       vazia. Agora a ausência do campo é erro tanto quanto a forma errada. */
+    if (g && !cacheErro) {
+      if (!Object.prototype.hasOwnProperty.call(g, 'devolucoes'))
+        cacheErro = 'cache sem o campo devolucoes (arquivo incompleto?)';
+      else if (g.devolucoes === null || typeof g.devolucoes !== 'object' || Array.isArray(g.devolucoes))
+        cacheErro = 'campo devolucoes nao e objeto (veio ' +
+          (g.devolucoes === null ? 'null' : Array.isArray(g.devolucoes) ? 'array' : typeof g.devolucoes) + ')';
+    }
+    let limite = parseInt(q.get('limite') || '', 10);
+    if (!Number.isFinite(limite) || limite < 1 || limite > 200) limite = 30;
+    /* Codex (P2, rodada 5): `{}` herda constructor/toString/valueOf, e o nome do campo vem da API
+       do TikTok — de fora. Com um campo chamado "constructor", o primeiro `cruCampos[k]` devolvia
+       a FUNÇÃO herdada em vez de zero, e somar 1 virava texto. Numa rota que existe pra catalogar
+       campos crus, isso é plausível. */
+    const cruCampos = Object.create(null);
+    for (const d of todos) {
+      const cc = d.cru_campos;
+      if (!Array.isArray(cc)) continue;   // registro sem a lista (ou com forma errada) não derruba a união
+      /* Codex (P2, r5): os nomes vêm da API do TikTok, ou seja, de fora. Um campo chamado
+         `constructor` ou `toString` fazia `cruCampos[k]` resolver o membro do PROTOTYPE em vez de
+         zero — somar 1 a uma função vira string, e o contador da rota de diagnóstico saía
+         mentindo. Mapa sem protótipo resolve na raiz. */
+      for (const c of cc) { const k = String(c); cruCampos[k] = (Object.prototype.hasOwnProperty.call(cruCampos, k) ? cruCampos[k] : 0) + 1; }
+    }
+    /* a contagem só fecha DEPOIS do laço da união, que também marca registro sem `cru_campos`.
+       Montar a mensagem antes deixaria esses de fora do cache_erro. */
+    if (registrosPodres && !cacheErro) cacheErro = registrosPodres + ' registro(s) do cache estao malformados e foram ignorados';
+    json(res, 200, { ok: true, loja,
+      guardadas: todos.length,
+      // `sem_cache` separa "NUNCA coletou" (arquivo nem existe) de "coletou e veio
+      // vazio" — sem isso, loja recém-conectada pareceria loja sem devoluções.
+      sem_cache: semCache,
+      cache_erro: cacheErro,
+      atualizado: (g && g.atualizado) || null, coleta_ok_em: (g && g.ok_em) || null,
+      registros_malformados: registrosPodres,   // contados e ignorados, em vez de derrubar a rota
+      cru_campos_uniao: cruCampos,
+      registros: todos.slice(0, limite) });
+    return true;
+  }
+
   // ── QUEM NÃO FECHOU A IDENTIDADE (18/08) ────────────────────────────────────────
   // A coleta guarda `confere` por pedido: 0 = `receita − tarifa + frete + ajuste = repasse`.
   // Apareceu 1 pedido com sobra na AMB e 9 na Girassol — quero VER o que mudou, em vez de
