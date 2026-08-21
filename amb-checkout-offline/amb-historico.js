@@ -37,6 +37,21 @@ const { detalhePedido } = require('./ciclo');
 
 function rotasHistorico(ctx) {
   const { validarSessao, supaCfg, DEFAULT_ALIQ_BK } = ctx;
+      /* 21/08 — sobreposição do custo MANUAL, atrás do Bling. Codex (P2): eu tinha posto isto só
+         no agregado; as LINHAS do Mês/Ano continuavam lendo só o _custos.json, então o card
+         mostrava o custo corrigido e a lista logo abaixo marcava o pedido como sem custo. */
+      const _comManual = (mapa) => {
+        const b = mapa || {};
+        let man = {};
+        try { man = readJson(path.join(CACHE_DIR, '_custos-manuais.json'), {}) || {}; } catch (e) { man = {}; }
+        const tem = k => { const c = b[k]; return c && Number(c.custo) > 0; };
+        for (const K of Object.keys(man)) {
+          const v = Number(man[K].custo); if (!(v > 0)) continue;
+          const nome = man[K].sku || K;
+          if (!tem(K) && !tem(nome)) b[nome] = { custo: v, manual: true };
+        }
+        return b;
+      };
   const _histCache = ctx.histCache;   // mesma referência do index — NÃO copiar
 
   return async function handleHistorico(req, res, urlObj) {
@@ -237,7 +252,7 @@ function rotasHistorico(ctx) {
           if (!Array.isArray(linhas)) linhas = [];
         }
       } catch (e) { json(res, 500, { ok: false, erro: String(e.message || e) }); return true; }
-      const _ccR = readJson(path.join(CACHE_DIR, '_custos.json'), {});
+      const _ccR = _comManual(readJson(path.join(CACHE_DIR, '_custos.json'), {}));
       // 01/08: mesmo recálculo do imposto na lista de vendas do período longo
       const _cfgR = readJson(path.join(CACHE_DIR, '_config-fiscal.json'), { aliquotas: {} });
       const _aliqR = mes => { const a = _cfgR.aliquotas && _cfgR.aliquotas[mes];
@@ -295,7 +310,10 @@ function rotasHistorico(ctx) {
       // 28/07: o backfill gravou o custo que existia NAQUELE dia. Depois o banco de custos cresceu
       // (de 288 pra 541 SKUs), então muita linha antiga ficou sem custo à toa. Aqui completamos na
       // LEITURA com o _custos.json atual — sem precisar refazer o backfill inteiro.
-      const _ccL = readJson(path.join(CACHE_DIR, '_custos.json'), {});
+      /* 21/08 — o custo MANUAL também vale no período longo: sem isto o número apareceria
+         em Hoje/7 dias e sumiria no Mês/Ano — o mesmo padrão que o Diego encontrou 3× em
+         20/08 (links, tarifa do TikTok, frete da Magalu). Atrás do Bling, como na tela. */
+      const _ccL = _comManual(readJson(path.join(CACHE_DIR, '_custos.json'), {}));
       // 01/08 — IMPOSTO CALCULADO NA LEITURA (mesma ideia do custo). Antes ele ficava CONGELADO na
       // linha, gravado no momento do backfill: editar a alíquota de um mês não mudava nada no
       // Mês/Ano, e só re-rodando o backfill daquele período. Agora a alíquota atual manda — editou,
@@ -528,7 +546,7 @@ function rotasHistorico(ctx) {
       // CUSTO PRONTO (27/07): o backend já tem o banco permanente de custos (_custos.json) — manda o custo
       // junto de cada item, em vez de o dashboard consultar o Bling ao vivo (lento e falha quando o Bling satura).
       try {
-        const _ccH = readJson(path.join(CACHE_DIR, '_custos.json'), {});
+        const _ccH = _comManual(readJson(path.join(CACHE_DIR, '_custos.json'), {}));
         const _cuH = sk => { const c = _ccH[String(sk || '').trim()]; return (c && c.custo != null && isFinite(Number(c.custo))) ? Number(c.custo) : null; };
         for (const h of itens) if (Array.isArray(h.itens)) h.itens = h.itens.map(it => Object.assign({}, it, { custo: _cuH(it.sku) }));
         for (const v of vendasB) if (Array.isArray(v.it)) v.it = v.it.map(it => Object.assign({}, it, { custo: _cuH(it.sku) }));
@@ -694,7 +712,7 @@ function rotasHistorico(ctx) {
       // Codex (P1, PR#128 r2): o historico-longo REPÕE o custo cadastrado depois do backfill
       // e RECALCULA o imposto com a alíquota atual do mês — a busca agregava os valores
       // CONGELADOS da linha e a M.C. divergia dos cards pro MESMO pedido. Mesma normalização.
-      const _ccB = readJson(path.join(CACHE_DIR, '_custos.json'), {});
+      const _ccB = _comManual(readJson(path.join(CACHE_DIR, '_custos.json'), {}));
       const _cuB = sk => { const c = _ccB[String(sk || '').trim()]; return (c && c.custo != null && isFinite(Number(c.custo))) ? Number(c.custo) : null; };
       const _cfgB = readJson(path.join(CACHE_DIR, '_config-fiscal.json'), { aliquotas: {} });
       const _aliqB = mes => {
