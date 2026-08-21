@@ -1460,8 +1460,45 @@ async function verCustoHist(){
       '</div>';
     el.querySelectorAll('button.chDel').forEach(function(b){ b.addEventListener('click', function(){ apagarFaixa(sku, b.getAttribute('data-de')); }); });
     const d=document.getElementById('chDe'); if(d && !d.value) d.value = new Date(Date.now()-3*3600000).toISOString().slice(0,10);
+    verDeParaSku();
   }catch(e){ el.innerHTML='<span class="bad">erro: '+esc(e.message)+'</span>'; }
 }
+
+/* ═══ 21/08 — DE-PARA no card do histórico de custo ═══════════════════════════════════════
+   Pro caso do "464"/"465": SKU antigo que o Bling não liga sozinho ao novo (sem produto_id).
+   O Diego declara e o custo passa a ser herdado do destino — continua vindo do Bling. */
+async function verDeParaSku(){
+  const sku=String((document.getElementById('chSku')||{}).value||'').trim();
+  const el=document.getElementById('chDP'); if(!el) return;
+  if(!sku){ el.innerHTML=''; return; }
+  try{
+    const r=await fetch(BASE+'/sku-depara-manual?k='+encodeURIComponent(ADMIN_K||'')+'&sugerir='+encodeURIComponent(sku));
+    const j=await r.json();
+    const sug=(j.sugestoes||[]);
+    el.innerHTML='<div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--line)">'+
+      '<div class="mut" style="font-size:12px;margin-bottom:6px">🔗 <b>Este SKU é o mesmo que outro?</b> — use quando o código antigo não existe mais e o Bling não liga sozinho. O custo passa a vir do destino.</div>'+
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">'+
+        '<input id="dpPara" placeholder="código de hoje" value="'+esc(sug[0]||'')+'" style="width:190px;background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:7px 10px;font-size:12px">'+
+        '<button class="btn" onclick="salvarDeParaSku()">🔗 ligar</button>'+
+        '<span id="dpMsg" class="mut" style="font-size:12px">'+(sug.length?('sugestão: '+sug.map(esc).join(', ')):'')+'</span>'+
+      '</div></div>';
+  }catch(e){ el.innerHTML=''; }
+}
+async function salvarDeParaSku(){
+  const de=String((document.getElementById('chSku')||{}).value||'').trim();
+  const para=String((document.getElementById('dpPara')||{}).value||'').trim();
+  const msg=document.getElementById('dpMsg');
+  if(!para){ if(msg){msg.textContent='digite o código de destino'; msg.style.color='#fbbf24';} return; }
+  try{
+    const r=await fetch(BASE+'/sku-depara-manual'+(ADMIN_K?('?k='+encodeURIComponent(ADMIN_K)):''),
+      {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({de,para})});
+    const j=await r.json();
+    if(!j.ok) throw new Error(j.erro||'falhou');
+    if(msg){ msg.textContent='✓ ligado a '+j.para+' — o custo vem de lá agora'; msg.style.color='#34d399'; }
+    verCustoHist();
+  }catch(e){ if(msg){msg.textContent='✗ '+e.message; msg.style.color='#f87171';} }
+}
+
 async function lancarCustoHist(){
   const sku = String((document.getElementById('chSku')||{}).value||'').trim();
   const custo = String((document.getElementById('chNovo')||{}).value||'').trim();
@@ -1737,6 +1774,7 @@ function montar(){
         '<button class="btn" onclick="verCustoHist()">\ud83d\udd0d ver hist\u00f3rico</button>'+
       '</div>'+
       '<div id="chRes" style="margin-top:10px"></div>'+
+      '<div id="chDP"></div>'+
       '<div class="nota" style="margin-top:8px">A linha do tempo se forma a partir da <b>primeira mudan\u00e7a de custo que o sync detectar</b> \u2014 o Bling guarda s\u00f3 o custo ATUAL, ent\u00e3o o que passou antes disso n\u00e3o d\u00e1 pra reconstruir. Voc\u00ea pode lan\u00e7ar faixas antigas \u00e0 m\u00e3o quando souber.</div>'+
     '</div>'+
     '<div class="sec" id="secCfg"><h2>⚙️ Impostos e Taxas <span class="hint">alíquota do Simples varia mês a mês · taxas de marketplace em % (estimativa; ML tem a REAL por pedido na busca)</span></h2>'+
