@@ -42,6 +42,29 @@ function rotasHistorico(ctx) {
          mostrava o custo corrigido e a lista logo abaixo marcava o pedido como sem custo. */
       const _comManual = (mapa) => {
         const b = mapa || {};
+        /* 21/08 — DE-PARA MANUAL no período longo. O Diego declarou "464 = HC-464-220v"; sem isto
+           o custo apareceria em Hoje/7 dias e sumiria no Mês/Ano — o mesmo padrão que ele
+           encontrou 3× em 20/08 (links, tarifa do TikTok, frete da Magalu). */
+        try {
+          const dp = readJson(path.join(CACHE_DIR, '_sku-depara.json'), {}) || {};
+          const resolve = (sku) => {
+            let a = String(sku || '').trim();
+            const vistos = new Set([a.toUpperCase()]);
+            for (let i = 0; i < 5; i++) {
+              const r = dp[a] || dp[a.toUpperCase()];
+              const prox = r && String(r.para || '').trim();
+              if (!prox || vistos.has(prox.toUpperCase())) break;
+              vistos.add(prox.toUpperCase()); a = prox;
+            }
+            return a;
+          };
+          for (const velho of Object.keys(dp)) {
+            if (b[velho] && Number(b[velho].custo) > 0) continue;
+            const d = resolve(velho);
+            const alvo = b[d] || b[Object.keys(b).find(k => String(k).toUpperCase() === String(d).toUpperCase())];
+            if (alvo && Number(alvo.custo) > 0) b[velho] = { custo: Number(alvo.custo), depara_de: d };
+          }
+        } catch (e) {}
         let man = {};
         try { man = readJson(path.join(CACHE_DIR, '_custos-manuais.json'), {}) || {}; } catch (e) { man = {}; }
         const tem = k => { const c = b[k]; return c && Number(c.custo) > 0; };

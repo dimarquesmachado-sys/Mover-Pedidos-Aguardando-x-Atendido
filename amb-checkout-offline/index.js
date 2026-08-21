@@ -441,6 +441,51 @@ function custoVigenteEm(sku, data) {
   return null;
 }
 
+
+/* ═══════════ 21/08 — DE-PARA MANUAL DE SKU ═══════════════════════════════════════════════
+   O /sku-depara resolve por `produto_id` (o Bling prova que é o mesmo produto). Mas o Diego
+   achou dois SKUs SEM id guardado: "464" e "465", que ele reconheceu na hora como
+   "HC-464-220v" e "HC-465-110v". Aí a ligação é julgamento DELE — o sistema não tem como
+   provar. Então fica declarado à mão e vale daí em diante.
+   Melhor que lançar custo manual nesses casos: o custo continua vindo do Bling e se atualiza
+   sozinho, e as vendas antigas se juntam ao produto certo nos relatórios por SKU.
+   Formato (_sku-depara.json): { "464": { para: "HC-464-220v", em: ISO } } */
+function lerDeParaSku() {
+  try { return readJson(path.join(CACHE_DIR, '_sku-depara.json'), {}) || {}; } catch (e) { return {}; }
+}
+function gravarDeParaSku(o) { writeJson(path.join(CACHE_DIR, '_sku-depara.json'), o || {}); }
+/* devolve o SKU de destino, ou o próprio quando não há de-para. Cadeia curta (A→B→C) é
+   seguida até 5 saltos; ciclo (A→B→A) para e devolve o último válido, sem travar. */
+function resolverDeParaSku(sku) {
+  const m = lerDeParaSku();
+  let atual = String(sku || '').trim();
+  const vistos = new Set([atual.toUpperCase()]);
+  for (let i = 0; i < 5; i++) {
+    const r = m[atual] || m[atual.toUpperCase()] || m[atual.toLowerCase()];
+    const prox = r && String(r.para || '').trim();
+    if (!prox || vistos.has(prox.toUpperCase())) break;
+    vistos.add(prox.toUpperCase());
+    atual = prox;
+  }
+  return atual;
+}
+/* sugestão por semelhança, só pra ELE conferir — nunca aplicada sozinha. "464" casa com
+   "HC-464-220v" porque o código antigo aparece inteiro, cercado por limite de palavra. */
+function sugerirDeParaSku(velho, codigos) {
+  const v = String(velho || '').trim();
+  if (!v || v.length < 2) return [];
+  const alvo = v.toUpperCase();
+  const re = new RegExp('(^|[^0-9A-Z])' + alvo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '([^0-9A-Z]|$)');
+  const out = [];
+  for (const c of codigos) {
+    const C = String(c).toUpperCase();
+    if (C === alvo) continue;
+    if (re.test(C)) out.push(c);
+    if (out.length >= 5) break;
+  }
+  return out;
+}
+
 function lerCustosManuais() {
   try { return readJson(path.join(CACHE_DIR, '_custos-manuais.json'), {}) || {}; } catch (e) { return {}; }
 }
@@ -465,6 +510,19 @@ function custoManualDe(sku, doBling) {
    que deixou o plano de compra dizendo "sem custo" enquanto a tela já mostrava o corrigido. */
 function comCustosManuais(mapaDoBling) {
   const b = mapaDoBling || {};
+  /* 21/08 — o DE-PARA MANUAL entra aqui: SKU antigo declarado (ex.: "464" → "HC-464-220v")
+     herda o custo do destino. Assim o custo continua vindo do Bling e se atualizando sozinho,
+     em vez de congelar num valor digitado à mão. */
+  try {
+    const dp = lerDeParaSku();
+    for (const velho of Object.keys(dp)) {
+      if (b[velho] && Number(b[velho].custo) > 0) continue;         // já tem custo próprio
+      const destino = resolverDeParaSku(velho);
+      const alvo = b[destino] || b[String(destino).toUpperCase()] ||
+                   b[Object.keys(b).find(k => String(k).toUpperCase() === String(destino).toUpperCase())];
+      if (alvo && Number(alvo.custo) > 0) b[velho] = { custo: Number(alvo.custo), id: alvo.id, depara_de: destino };
+    }
+  } catch (e) {}
   const man = lerCustosManuais();
   const temNoBling = k => { const c = b[k] || b[String(k).toLowerCase()]; return c && Number(c.custo) > 0; };
   for (const K of Object.keys(man)) {
@@ -3539,6 +3597,66 @@ function routes(readBody) {
         for (let i = 0; i < lista.length; i++) lista[i].ate = (i === lista.length - 1) ? null : _diaAntes(lista[i + 1].de);
         todas[sku] = lista; gravarVigencias(todas);
         json(res, 200, { ok: true, faixas: lista, vigente_hoje: custoVigenteEm(sku, _hojeISO()) });
+        return true;
+      }
+    }
+
+    /* ═══ 21/08 — DE-PARA MANUAL: rota (o card consome) ═══════════════════════════════════
+    GET  /amb-checkout-offline/sku-depara-manual            → lista os pares declarados
+    GET  /amb-checkout-offline/sku-depara-manual?sugerir=464 → candidatos no catálogo (só sugestão)
+    POST /amb-checkout-offline/sku-depara-manual {de,para}   → declara o par
+    POST /amb-checkout-offline/sku-depara-manual {apagar}    → remove
+    Pro caso do "464"/"465", que não têm produto_id e o Bling não consegue ligar sozinho. */
+    if (p === '/amb-checkout-offline/sku-depara-manual') {
+      const kM2 = urlObj.searchParams.get('k') || '';
+      const sM2 = validarSessao(req.headers['cookie']);
+      if (!((process.env.ADMIN_KEY && kM2 === process.env.ADMIN_KEY) || (sM2 && ehAdmin(sM2)))) { json(res, 404, { error: 'not found' }); return true; }
+
+      if (method === 'GET') {
+        const sug = String(urlObj.searchParams.get('sugerir') || '').trim();
+        if (sug) {
+          /* candidatos saem do banco de custos (SKUs que existem hoje) — sem varrer o catálogo
+             inteiro do Bling, que é lento e já tem rota própria. */
+          const cc = readJson(path.join(CACHE_DIR, '_custos.json'), {}) || {};
+          json(res, 200, { ok: true, de: sug, sugestoes: sugerirDeParaSku(sug, Object.keys(cc)),
+            leia: 'sugestao por semelhanca — confira antes de declarar; juntar produtos diferentes mistura as vendas' });
+          return true;
+        }
+        const m = lerDeParaSku();
+        json(res, 200, { ok: true, total: Object.keys(m).length,
+          pares: Object.keys(m).sort().map(k => ({ de: k, para: m[k].para, em: m[k].em || null })) });
+        return true;
+      }
+
+      if (method === 'POST') {
+        let corpo = '';
+        await new Promise(r => { req.on('data', c => { corpo += c; if (corpo.length > 1e6) req.destroy(); }); req.on('end', r); req.on('error', r); });
+        let b = {};
+        try { b = JSON.parse(corpo || '{}'); } catch (e) { json(res, 400, { ok: false, erro: 'JSON invalido' }); return true; }
+        const m = lerDeParaSku();
+
+        if (b.apagar) {
+          const k = String(b.apagar).trim();
+          const tinha = !!(m[k] || m[k.toUpperCase()]);
+          delete m[k]; delete m[k.toUpperCase()];
+          gravarDeParaSku(m);
+          json(res, 200, { ok: true, apagado: tinha ? k : null, total: Object.keys(m).length });
+          return true;
+        }
+
+        const de = String(b.de || '').trim();
+        const para = String(b.para || '').trim();
+        if (!de || !para) { json(res, 400, { ok: false, erro: 'informe de e para' }); return true; }
+        if (de.toUpperCase() === para.toUpperCase()) { json(res, 400, { ok: false, erro: 'de e para sao o mesmo SKU' }); return true; }
+        /* ciclo: se o destino já aponta de volta pra origem, recusa — senão a resolução ficaria
+           dando voltas e o Diego não entenderia por que o custo não aparece. */
+        const destinoResolve = resolverDeParaSku(para);
+        if (String(destinoResolve).toUpperCase() === de.toUpperCase()) {
+          json(res, 400, { ok: false, erro: 'isso criaria um ciclo: ' + para + ' ja aponta pra ' + de }); return true;
+        }
+        m[de] = { para, em: new Date().toISOString() };
+        gravarDeParaSku(m);
+        json(res, 200, { ok: true, de, para, resolve_para: resolverDeParaSku(de), total: Object.keys(m).length });
         return true;
       }
     }
