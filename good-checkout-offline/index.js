@@ -1610,15 +1610,25 @@ function routes(readBody) {
       if (method === 'GET') {
         const sku = String(urlObj.searchParams.get('sku') || '').trim();
         if (!sku) { json(res, 400, { ok: false, erro: 'informe ?sku=' }); return true; }
-        const faixas = (lerVigencias()[sku] || []).slice().sort((a, b) => String(a.de).localeCompare(String(b.de)));
         const cc = readJson(path.join(CACHE_DIR, '_custos.json'), {}) || {};
         const doBling = cc[sku] && Number(cc[sku].custo) > 0 ? Number(cc[sku].custo) : null;
+        /* 21/08 (Diego testou o PM1 e viu "sem histórico ainda" num produto que TEM custo):
+           eu só anotava quando o sync detectava MUDANÇA, então todo SKU que já estava no
+           _custos.json antes da vigência existir ficava com a linha do tempo vazia. Agora, na
+           primeira consulta, o custo que o Bling tem hoje abre a primeira faixa — a partir de
+           HOJE, porque não dá pra saber desde quando ele vale (o Bling não guarda isso). */
+        if (doBling != null && !(lerVigencias()[sku] || []).length) {
+          try { registrarCustoVigente(sku, doBling, 'bling'); } catch (e) {}
+        }
+        const faixas = (lerVigencias()[sku] || []).slice().sort((a, b) => String(a.de).localeCompare(String(b.de)));
         const man = lerCustosManuais()[sku.toUpperCase()];
         json(res, 200, { ok: true, sku, faixas,
           custo_atual_bling: doBling,
           custo_manual: man && Number(man.custo) > 0 ? Number(man.custo) : null,
           vigente_hoje: custoVigenteEm(sku, _hojeISO()),
-          leia: faixas.length ? null : 'sem histórico ainda — a linha do tempo começa a se formar na primeira mudança de custo que o sync detectar' });
+          leia: faixas.length ? null : (doBling == null
+            ? 'este SKU não tem custo no Bling — cadastre lá e rode o custo-sync, ou lance um custo manual aqui'
+            : 'sem histórico ainda') });
         return true;
       }
 
