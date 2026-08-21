@@ -990,7 +990,18 @@ async function checarCancelados(silencioso){
       const rh = await fetch(MOD+'/historico',{credentials:'same-origin'});
       const dh = await rh.json();
       if(dh && Array.isArray(dh.itens)){ DADOS=dh.itens; VENDAS=Array.isArray(dh.vendas_bling)?dh.vendas_bling:[]; prepararVendas(); render(); renderAnalise(); }
-      if(!silencioso && d.cancelados_agora) alert(d.cancelados_agora+' pedido(s) cancelados no marketplace foram marcados.');
+      /* Codex (P2, r2): a resposta passou a admitir quando um canal NÃO foi verificado, mas o
+         aviso morria aqui — só `cancelados_agora` era lido. De que adianta o backend ser honesto
+         se a tela não conta? Agora o aviso aparece junto, e também quando nada foi cancelado
+         (antes, sem cancelamento, o operador não via nada e supunha que estava tudo conferido). */
+      if(!silencioso){
+        const partes = [];
+        if(d.cancelados_agora) partes.push(d.cancelados_agora+' pedido(s) cancelados no marketplace foram marcados.');
+        if(d.aviso_tiktok) partes.push('⚠️ '+d.aviso_tiktok);
+        if(Array.isArray(d.sem_cobertura) && d.sem_cobertura.length) partes.push('Sem verificação: '+d.sem_cobertura.join(', ')+'.');
+        if(partes.length) alert(partes.join('\n\n'));
+        else alert('Nenhum cancelamento novo. Canais verificados: '+((d.canais_checados||[]).join(', ')||'—')+'.');
+      }
     }
   }catch(e){}
   _stMkt = false;
