@@ -1,0 +1,28 @@
+name: Auto-merge depois do Codex
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-merge:
+    if: >
+      github.event.issue.pull_request &&
+      github.event.comment.user.login == 'chatgpt-codex-connector[bot]' &&
+      contains(github.event.comment.body, 'find any major issues')
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Ativar auto-merge
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh pr merge "${{ github.event.issue.number }}" \
+            --repo "${{ github.repository }}" \
+            --auto \
+            --squash
