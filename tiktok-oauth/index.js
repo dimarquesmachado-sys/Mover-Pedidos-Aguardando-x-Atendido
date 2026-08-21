@@ -297,6 +297,12 @@ async function tratar(req, res, urlObj, json) {
        {"devolucoes":null} (ou 0, ou "") passava batido e a rota respondia ok:true com zero
        registros — parecendo "coletou e não achou nada" quando o arquivo está corrompido. Basta o
        campo EXISTIR: se existe e não é objeto simples, é erro de cache, seja qual for o valor. */
+    /* Codex (P2, rodada 5): faltava o caso do arquivo `{}` — gravação incompleta deixa a raiz com
+       a forma certa e SEM o mapa. Como eu só validava quando o campo existia, a rota respondia
+       sem_cache:false, cache_erro:null e zero registros: o pior desfecho, porque parece coleta
+       vazia. Agora a AUSÊNCIA do mapa também é erro de cache. */
+    if (g && !Object.prototype.hasOwnProperty.call(g, 'devolucoes') && !cacheErro)
+      cacheErro = 'cache sem o mapa devolucoes (arquivo incompleto?)';
     if (g && Object.prototype.hasOwnProperty.call(g, 'devolucoes') &&
         (g.devolucoes === null || typeof g.devolucoes !== 'object' || Array.isArray(g.devolucoes)) && !cacheErro)
       cacheErro = 'campo devolucoes nao e objeto (veio ' +
@@ -304,7 +310,11 @@ async function tratar(req, res, urlObj, json) {
     if (registrosPodres && !cacheErro) cacheErro = registrosPodres + ' registro(s) do cache estao malformados e foram ignorados';
     let limite = parseInt(q.get('limite') || '', 10);
     if (!Number.isFinite(limite) || limite < 1 || limite > 200) limite = 30;
-    const cruCampos = {};
+    /* Codex (P2, rodada 5): `{}` herda constructor/toString/valueOf, e o nome do campo vem da API
+       do TikTok — de fora. Com um campo chamado "constructor", o primeiro `cruCampos[k]` devolvia
+       a FUNÇÃO herdada em vez de zero, e somar 1 virava texto. Numa rota que existe pra catalogar
+       campos crus, isso é plausível. */
+    const cruCampos = Object.create(null);
     for (const d of todos) {
       const cc = d.cru_campos;
       if (!Array.isArray(cc)) continue;   // registro sem a lista (ou com forma errada) não derruba a união
