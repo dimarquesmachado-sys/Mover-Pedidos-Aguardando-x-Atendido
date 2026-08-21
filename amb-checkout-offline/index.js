@@ -3363,6 +3363,7 @@ function routes(readBody) {
          que perseguimos o dia todo (afirmar cobertura que não se tem). Sem pedido do canal no
          período, não há o que checar e segue verdadeiro. */
       let tiktokDisponivel = alvoTK.length === 0;
+      let tkComRegistro = 0, tkSemRegistro = 0;   // cobertura por PEDIDO, não por arquivo
       if (alvoTK.length) {
         try {
           /* Codex (P1 x2): a coleta do TikTok grava em `/data` (TIKTOK_CACHE_DIR), NÃO no CACHE_DIR
@@ -3373,11 +3374,15 @@ function routes(readBody) {
           const gTK = readJson(fTK, null);
           const peds = (gTK && gTK.pedidos && typeof gTK.pedidos === 'object') ? gTK.pedidos : null;
           if (peds) {
-            tiktokDisponivel = true;
+            /* Codex (P1, r2): abrir o arquivo NÃO é o mesmo que ter o pedido dentro dele. O cache
+               nasce dos extratos, então pedido recente ainda não está lá e caía no `continue`
+               silencioso — e a resposta seguia dizendo que o TikTok foi checado, justo quando os
+               pedidos que faltam são os que mais importam. Cobertura é por PEDIDO, não por arquivo. */
             for (const v of alvoTK) {
               const sn = String(v.numero_loja || '').trim();
               const reg = sn && peds[sn];
-              if (!reg) continue;   // sem registro financeiro ainda: não dá pra afirmar nada
+              if (!reg) { tkSemRegistro++; continue; }   // sem financeiro ainda: não afirmo nada sobre ele
+              tkComRegistro++;
               checados++;
               /* ═══ Codex (P1): DEVOLUÇÃO PARCIAL NÃO É CANCELAMENTO ═══════════════════════════
                  Pedido com 3 itens em que o cliente devolveu 1 registra tarifa devolvida e transação
@@ -3403,6 +3408,8 @@ function routes(readBody) {
           }
         } catch (e) {}
       }
+      /* só posso dizer que o canal foi checado se TODO pedido dele tinha registro financeiro. */
+      if (alvoTK.length) tiktokDisponivel = (tkComRegistro > 0 && tkSemRegistro === 0);
       try { writeJson(FS, atualS); } catch (e) {}
       // marca também nos CONFERIDOS (pedidos já bipados) — é de lá que o dashboard monta a linha
       if (cancelados.length) {
@@ -3417,7 +3424,11 @@ function routes(readBody) {
       json(res, 200, { ok: true, checados, cancelados_agora: cancelados.length, numeros: cancelados.slice(0, 30),
         canais_checados: tiktokDisponivel ? ['ml', 'shopee', 'tiktok'] : ['ml', 'shopee'],
         sem_cobertura: ['magalu', 'amazon', 'olist'].concat(tiktokDisponivel ? [] : ['tiktok']),
-        aviso_tiktok: tiktokDisponivel ? null : 'cache financeiro do TikTok indisponivel; nenhum pedido TikTok foi verificado' });
+        tiktok_pedidos: alvoTK.length, tiktok_com_financeiro: tkComRegistro, tiktok_sem_financeiro: tkSemRegistro,
+        aviso_tiktok: tiktokDisponivel ? null
+          : (tkComRegistro || tkSemRegistro)
+            ? (tkSemRegistro + ' de ' + alvoTK.length + ' pedido(s) do TikTok ainda nao tem financeiro (venda recente) — nao foram verificados')
+            : 'cache financeiro do TikTok indisponivel; nenhum pedido TikTok foi verificado' });
       return true;
     }
 
