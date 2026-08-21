@@ -3232,10 +3232,16 @@ function routes(readBody) {
                  pior que deixar um cancelado contado, então aqui só passa evidência de reversão
                  TOTAL: o repasse líquido do pedido zerou (ou virou negativo). Devolução parcial
                  deixa repasse positivo e não entra. */
+              /* Codex (P1, rodada 2): num reembolso normal a coleta MANTÉM o `repasse` original
+                 positivo e acumula o estorno em `ajustes_depois` — então "repasse <= 0" nunca
+                 acontecia e nenhum pedido reembolsado era pego. O líquido é a SOMA dos dois.
+                 (Isso apareceu no meu próprio teste como `custo_atual_bling: null` e eu não
+                 questionei; o valor inesperado ERA o sintoma.) */
               const receita = Number(reg.receita || 0);
-              const repasse = Number(reg.repasse != null ? reg.repasse : NaN);
+              const repBruto = Number(reg.repasse != null ? reg.repasse : NaN);
+              const liquido = isFinite(repBruto) ? (repBruto + Number(reg.ajustes_depois || 0)) : NaN;
               const estornou = Number(reg.tarifa_devolvida || 0) > 0;
-              const zerou = isFinite(repasse) && receita > 0 && repasse <= 0.01;
+              const zerou = isFinite(liquido) && receita > 0 && liquido <= 0.01;
               if (estornou && zerou) {
                 v.situacao = 'Cancelado no TikTok'; v.cancelado_mkt = 1; cancelados.push(v.numero);
               }
@@ -3407,7 +3413,12 @@ function routes(readBody) {
         const sku = resolverNomeSku(String(urlObj.searchParams.get('sku') || '').trim());
         if (!sku) { json(res, 400, { ok: false, erro: 'informe ?sku=' }); return true; }
         const cc = readJson(path.join(CACHE_DIR, '_custos.json'), {}) || {};
-        const doBling = cc[sku] && Number(cc[sku].custo) > 0 ? Number(cc[sku].custo) : null;
+        /* Codex (P2, r2): com histórico em "pm1" e Bling em "PM1", a busca exata devolvia null e o
+           card dizia que o produto NÃO tem custo no Bling — sugerindo cadastrar algo que já existe.
+           A grafia do histórico manda pra achar o histórico; pra achar o CUSTO, vale qualquer caixa. */
+        const _alvoCC = String(sku).toUpperCase();
+        const _kCC = cc[sku] ? sku : Object.keys(cc).find(k => String(k).toUpperCase() === _alvoCC);
+        const doBling = (_kCC && Number(cc[_kCC].custo) > 0) ? Number(cc[_kCC].custo) : null;
         /* 21/08 (Diego testou o PM1 e viu "sem histórico ainda" num produto que TEM custo):
            eu só anotava quando o sync detectava MUDANÇA, então todo SKU que já estava no
            _custos.json antes da vigência existir ficava com a linha do tempo vazia. Agora, na
