@@ -137,3 +137,5 @@ bling-automacao/
 - **Token renovado mid-flight:** se o token expirar durante uma execução, é renovado e a operação é retentada
 - **Memória diária:** pedidos já processados no F1 não são reprocessados no mesmo dia (reset à meia-noite)
 - **Sem banco de dados:** tokens em arquivo JSON em disco persistente; memória do dia em RAM
+
+Teste de revisão automática Claude + Codex.
