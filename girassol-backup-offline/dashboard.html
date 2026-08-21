@@ -2292,7 +2292,14 @@ function render(){
       '<td><div class="bar"><i style="width:'+p+'%"></i></div></td></tr>';}).join('')
     || '<tr><td class="dim" colspan="5">nenhum pedido com UF no período</td></tr>');
   renderMapaUF(porUF);
-  $('ufAviso').innerHTML = ((ufDoHist && ufSemDado) ? '<div class="aviso">⚠️ <b>'+N(ufSemDado)+' pedido(s)</b> do período foram gravados antes de o estado passar a ser guardado — eles ficam fora deste mapa. Rode o backfill do período pra preencher.</div>' : '') + ((PER.length+AGD.length)-comUF) ? '<div class="aviso">⚠️ '+N((PER.length+AGD.length)-comUF)+' pedido(s) sem UF — o backfill de detalhes preenche o retroativo.</div>' : '';
+  $('ufAviso').innerHTML = ((ufDoHist && ufSemDado) ? '<div class="aviso">⚠️ <b>'+N(ufSemDado)+' pedido(s)</b> do período foram gravados antes de o estado passar a ser guardado — eles ficam fora deste mapa. Rode o backfill do período pra preencher.</div>' : '') +
+    /* 21/08 (Diego: "faz só sumir essa 0 pedido(s) sem UF… quando tudo tiver completo, não precisa
+       de msg alguma") — faltava um parêntese: `A + (B) ? x : ''` soma ANTES de testar, então o
+       teste caía sempre sobre a concatenação (verdadeira) e o aviso aparecia até com ZERO. De
+       quebra, isso engolia o primeiro aviso quando os dois deviam aparecer. */
+    (((PER.length + AGD.length) - comUF) > 0
+      ? '<div class="aviso">⚠️ ' + N((PER.length + AGD.length) - comUF) + ' pedido(s) sem UF — o backfill de detalhes preenche o retroativo.</div>'
+      : '');
 
   renderProjChips(); renderProjecao();
   renderCfg();
