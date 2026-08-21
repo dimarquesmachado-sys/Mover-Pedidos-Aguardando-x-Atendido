@@ -984,11 +984,24 @@ async function checarCancelados(silencioso){
          aviso morria aqui — só `cancelados_agora` era lido. De que adianta o backend ser honesto
          se a tela não conta? Agora o aviso aparece junto, e também quando nada foi cancelado
          (antes, sem cancelamento, o operador não via nada e supunha que estava tudo conferido). */
+      /* Codex (P2, última rodada do #167): eu fiz o aviso EXISTIR, mas ele continuava atrás do
+         `if(!silencioso)` — e TODAS as chamadas internas passam silencioso=true (a verificação
+         automática de 10 em 10 minutos e a do carregamento). Na prática o aviso só aparecia se
+         ele clicasse no botão à mão, ou seja, quase nunca. Backend honesto que não chega na tela
+         é a mesma falha que perseguimos o dia todo, uma camada mais fundo.
+         Agora: alerta só no clique manual (não interromper quem está trabalhando), mas o aviso de
+         COBERTURA fica visível na tela sempre — inclusive nas verificações automáticas. */
+      const avisos = [];
+      if(d.aviso_tiktok) avisos.push(d.aviso_tiktok);
+      if(Array.isArray(d.sem_cobertura) && d.sem_cobertura.length) avisos.push('sem verificação: '+d.sem_cobertura.join(', '));
+      const elAv = document.getElementById('mktAviso');
+      if(elAv) elAv.innerHTML = avisos.length
+        ? '<div class="aviso">⚠️ Cancelamentos — '+esc(avisos.join(' · '))+'</div>'
+        : '';
       if(!silencioso){
         const partes = [];
         if(d.cancelados_agora) partes.push(d.cancelados_agora+' pedido(s) cancelados no marketplace foram marcados.');
-        if(d.aviso_tiktok) partes.push('⚠️ '+d.aviso_tiktok);
-        if(Array.isArray(d.sem_cobertura) && d.sem_cobertura.length) partes.push('Sem verificação: '+d.sem_cobertura.join(', ')+'.');
+        if(avisos.length) partes.push('⚠️ '+avisos.join('\n⚠️ '));
         if(partes.length) alert(partes.join('\n\n'));
         else alert('Nenhum cancelamento novo. Canais verificados: '+((d.canais_checados||[]).join(', ')||'—')+'.');
       }
@@ -1776,7 +1789,7 @@ function montar(){
       '<div id="grafTot" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px"></div>'+
       '<div id="grafProg" style="overflow-x:auto"></div>'+
       '<div class="nota" id="grafLeg"></div></div>'+
-    '<div class="sec" id="secUF"><h2>🗺️ Vendas por Estado</h2><div style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start;justify-content:center"><div style="flex:0 1 340px;min-width:260px"><div class="tw" id="twUF"><table id="tUF"></table></div><div id="ufAviso"></div></div><div id="ufMapa" style="flex:1 1 420px;min-width:300px;max-width:620px"></div></div></div>'+
+    '<div class="sec" id="secUF"><h2>🗺️ Vendas por Estado</h2><div style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start;justify-content:center"><div style="flex:0 1 340px;min-width:260px"><div class="tw" id="twUF"><table id="tUF"></table></div><div id="ufAviso"></div><div id="mktAviso"></div></div><div id="ufMapa" style="flex:1 1 420px;min-width:300px;max-width:620px"></div></div></div>'+
     '<div class="sec" id="secCustoHist"><h2>\ud83d\udcc8 Hist\u00f3rico de custo por SKU <span class="hint">o que valia em cada per\u00edodo \u00b7 venda antiga N\u00c3O muda quando o custo de hoje muda</span></h2>'+
       '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">'+
         '<input id="chSku" placeholder="digite o SKU e tecle Enter" onkeydown="if(event.key===&#39;Enter&#39;)verCustoHist()" '+
