@@ -4468,7 +4468,14 @@ async function backfillVendas(de, ate, empresa){
         const numPed = String(det.numero!=null?det.numero:(p.numero!=null?p.numero:p.id));
         for(const it of itens){
           const frac = it.vt/somaProd;
-          const cU = (custos[it.sku] && custos[it.sku].custo!=null) ? Number(custos[it.sku].custo) : null;
+          /* ═══ 21/08 — O CUSTO É O QUE VALIA NA DATA DA VENDA ═══════════════════════════
+             Sem isto, um backfill rodado hoje carimba o custo de HOJE sobre venda de janeiro — e
+             o Mês anterior passa a mostrar um lucro que nunca existiu. A linha do tempo responde
+             quanto valia naquele dia; sem faixa que cubra a data (produto novo, ou período
+             anterior ao primeiro registro), cai no custo atual, como sempre foi. */
+          let cU = null;
+          try { cU = custoVigenteEm(it.sku, String(dataV || '').slice(0, 10)); } catch (e) { cU = null; }
+          if (cU == null) cU = (custos[it.sku] && custos[it.sku].custo != null) ? Number(custos[it.sku].custo) : null;
           const custoItem = cU!=null ? Math.round(cU*it.qtd*100)/100 : null;
           const comItem = Math.round(comissao*frac*100)/100;
           const freteItem = Math.round(frete*frac*100)/100;
@@ -5016,7 +5023,15 @@ async function reaplicarCusto(de, ate, empresa, opts){
   const H = { apikey: key, Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' };
   const base = url.replace(/\/+$/, '') + '/rest/v1/vendas_historico';
   const cc = readJson(path.join(CACHE_DIR, '_custos.json'), {});
-  const custoDe = sk => { const c = cc[String(sk || '').trim()]; return (c && c.custo != null && isFinite(Number(c.custo)) && Number(c.custo) > 0) ? Number(c.custo) : null; };
+  /* 21/08 — o reaplicar passa a respeitar a DATA da venda: se existe faixa de vigência que
+     cubra aquele dia, é ela que vale. Sem isso, reaplicar o ano depois de uma alteração de preço
+     carimbaria o custo de hoje sobre janeiro — que é justamente o que o Diego não quer
+     ("isso do passado congelar é legal"). Sem faixa pra data, cai no custo atual, como antes. */
+  const custoDe = (sk, dataVenda) => {
+    if (dataVenda) { try { const v = custoVigenteEm(sk, String(dataVenda).slice(0, 10)); if (v > 0) return v; } catch (e) {} }
+    const c = cc[String(sk || '').trim()];
+    return (c && c.custo != null && isFinite(Number(c.custo)) && Number(c.custo) > 0) ? Number(c.custo) : null;
+  };
 
   _reapC = { rodando:true, de, ate, empresa, simulacao:simular, linhas:0, atualizadas:0, sem_custo:0, erros:0,
              linhas_ganhando_custo:0, custo_que_entra:0, linhas_com_custo_corrigido:0, efeito_real_na_margem:0,
@@ -5028,14 +5043,14 @@ async function reaplicarCusto(de, ate, empresa, opts){
     let off = 0;
     while (off < 300000) {
       const rq = await fetch(base + '?empresa=eq.' + empresa + '&data_venda=gte.' + de + '&data_venda=lte.' + ate +
-        '&select=id,sku,quantidade,custo,margem,numero_pedido&order=data_venda.asc,numero_pedido.asc,sku.asc&limit=500&offset=' + off, { headers: H });
+        '&select=id,sku,quantidade,custo,margem,data_venda,numero_pedido&order=data_venda.asc,numero_pedido.asc,sku.asc&limit=500&offset=' + off, { headers: H });
       if (!rq.ok) { _reapC.erros++; break; }
       const ln = await rq.json().catch(() => []);
       if (!Array.isArray(ln) || !ln.length) break;
       _reapC.linhas += ln.length;
       const mudar = [];
       for (const l of ln) {
-        const cu = custoDe(l.sku);
+        const cu = custoDe(l.sku, l.data_venda);
         if (cu == null) { _reapC.sem_custo++; continue; }        // sem custo conhecido: não mexe
         const q = Number(l.quantidade) || 0;
         if (!(q > 0)) continue;
