@@ -365,6 +365,26 @@ function _diaAntes(iso) {
   if (!isFinite(t)) return null;
   return new Date(t - 86400000).toISOString().slice(0, 10);
 }
+/* 21/08 (Diego: "tem como só aceitar tb pm1 ao invés de só PM1?") — o SKU é o mesmo produto
+   escrito de outro jeito. Aqui eu descubro como ele está GRAVADO (no banco de custos ou na
+   vigência) a partir do que foi digitado, para o card achar o produto e não criar uma segunda
+   linha do tempo para "pm1" separada da de "PM1". */
+function resolverNomeSku(digitado) {
+  const d = String(digitado || '').trim();
+  if (!d) return d;
+  const alvo = d.toUpperCase();
+  try {
+    const cc = readJson(path.join(CACHE_DIR, '_custos.json'), {}) || {};
+    if (cc[d]) return d;
+    for (const k of Object.keys(cc)) if (String(k).toUpperCase() === alvo) return k;
+  } catch (e) {}
+  try {
+    const vg = lerVigencias();
+    if (vg[d]) return d;
+    for (const k of Object.keys(vg)) if (String(k).toUpperCase() === alvo) return k;
+  } catch (e) {}
+  return d;
+}
 function lerVigencias() {
   try { return readJson(path.join(CACHE_DIR, '_custos-vigencia.json'), {}) || {}; } catch (e) { return {}; }
 }
@@ -403,7 +423,10 @@ function registrarCustoVigente(sku, novo, origem) {
 /* Custo que valia numa DATA (AAAA-MM-DD). Sem faixa que cubra a data, devolve null — quem chama
    decide o que fazer (hoje: cair no custo atual, como sempre foi). */
 function custoVigenteEm(sku, data) {
-  const lista = lerVigencias()[String(sku || '').trim()];
+  const vg = lerVigencias();
+  const kk = String(sku || '').trim();
+  const alvo = kk.toUpperCase();
+  const lista = vg[kk] || vg[Object.keys(vg).find(k => String(k).toUpperCase() === alvo)];
   if (!Array.isArray(lista) || !lista.length) return null;
   const d = String(data || '').slice(0, 10);
   if (!d) return null;
@@ -3172,6 +3195,38 @@ function routes(readBody) {
           } catch (e) {}
         }
       }
+      /* ═══ 21/08 — TIKTOK ENTRA NA VARREDURA ══════════════════════════════════════════════
+         O Diego cobrou a regra: "cancelada não deve nem aparecer lá. tem q bater qtdade igual o
+         análise de vendas e em todos períodos". A varredura só olhava ML e Shopee — cancelamento
+         de TikTok ficava no histórico e entrava em TODO card (mapa, margem, contagem). É o canal
+         de maior volume depois do ML (4.483 pedidos no ano da Girassol), então era o maior risco.
+         NÃO gasto chamada de API: a coleta financeira já guarda, por pedido, os tipos de
+         transação vistos. Quando o TikTok devolve a tarifa (`tarifa_devolvida > 0`) ou registra
+         transação de reembolso, é cancelamento ou devolução — e a venda não deve ser contada.
+         Amazon e Olist ficam de fora por não termos API deles; registrado, em vez de fingir
+         cobertura. Magalu depende de o serviço dela expor o status — próxima etapa. */
+      const alvoTK = noPeriodo.filter(v => String(v.marketplace || '').toLowerCase() === 'tiktok');
+      if (alvoTK.length) {
+        try {
+          const fTK = path.join(process.env.TIKTOK_CACHE_DIR || CACHE_DIR, '_tiktok_financeiro_' + (process.env.TIKTOK_LOJA || 'amb') + '.json');
+          const gTK = readJson(fTK, null);
+          const peds = (gTK && gTK.pedidos && typeof gTK.pedidos === 'object') ? gTK.pedidos : null;
+          if (peds) {
+            for (const v of alvoTK) {
+              const sn = String(v.numero_loja || '').trim();
+              const reg = sn && peds[sn];
+              if (!reg) continue;   // sem registro financeiro ainda: não dá pra afirmar nada
+              checados++;
+              const tipos = Array.isArray(reg.tipos_vistos) ? reg.tipos_vistos.map(t => String(t).toUpperCase()) : [];
+              const estornou = Number(reg.tarifa_devolvida || 0) > 0;
+              const temCancel = tipos.some(t => /CANCEL|REFUND|RETURN/.test(t));
+              if (estornou || temCancel) {
+                v.situacao = 'Cancelado no TikTok'; v.cancelado_mkt = 1; cancelados.push(v.numero);
+              }
+            }
+          }
+        } catch (e) {}
+      }
       try { writeJson(FS, atualS); } catch (e) {}
       // marca também nos CONFERIDOS (pedidos já bipados) — é de lá que o dashboard monta a linha
       if (cancelados.length) {
@@ -3183,7 +3238,8 @@ function routes(readBody) {
           if (mex) writeJson(CONFERIDOS_FILE, confM);
         } catch (e) {}
       }
-      json(res, 200, { ok: true, checados, cancelados_agora: cancelados.length, numeros: cancelados.slice(0, 30) });
+      json(res, 200, { ok: true, checados, cancelados_agora: cancelados.length, numeros: cancelados.slice(0, 30),
+        canais_checados: ['ml', 'shopee', 'tiktok'], sem_cobertura: ['magalu', 'amazon', 'olist'] });
       return true;
     }
 
@@ -3332,7 +3388,7 @@ function routes(readBody) {
       if (!((process.env.ADMIN_KEY && kH === process.env.ADMIN_KEY) || (sH && ehAdmin(sH)))) { json(res, 404, { error: 'not found' }); return true; }
 
       if (method === 'GET') {
-        const sku = String(urlObj.searchParams.get('sku') || '').trim();
+        const sku = resolverNomeSku(String(urlObj.searchParams.get('sku') || '').trim());
         if (!sku) { json(res, 400, { ok: false, erro: 'informe ?sku=' }); return true; }
         const cc = readJson(path.join(CACHE_DIR, '_custos.json'), {}) || {};
         const doBling = cc[sku] && Number(cc[sku].custo) > 0 ? Number(cc[sku].custo) : null;
@@ -3361,7 +3417,7 @@ function routes(readBody) {
         await new Promise(r => { req.on('data', c => { corpo += c; if (corpo.length > 1e6) req.destroy(); }); req.on('end', r); req.on('error', r); });
         let b = {};
         try { b = JSON.parse(corpo || '{}'); } catch (e) { json(res, 400, { ok: false, erro: 'JSON inválido' }); return true; }
-        const sku = String(b.sku || '').trim();
+        const sku = resolverNomeSku(String(b.sku || '').trim());
         if (!sku) { json(res, 400, { ok: false, erro: 'informe o sku' }); return true; }
         const todas = lerVigencias();
         let lista = Array.isArray(todas[sku]) ? todas[sku] : [];
