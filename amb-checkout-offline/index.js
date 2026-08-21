@@ -3618,7 +3618,13 @@ function routes(readBody) {
           /* candidatos saem do banco de custos (SKUs que existem hoje) — sem varrer o catálogo
              inteiro do Bling, que é lento e já tem rota própria. */
           const cc = readJson(path.join(CACHE_DIR, '_custos.json'), {}) || {};
+          /* 21/08 (Codex, revisão geral): o card não tinha como mostrar que o SKU JÁ está ligado —
+             o campo vinha preenchido com a sugestão e parecia ligado sem estar, e uma ligação
+             errada não tinha como ser desfeita pela tela. Devolvo o vínculo atual junto. */
+          const _dpAtual = lerDeParaSku();
+          const _kv = Object.keys(_dpAtual).find(k => String(k).toUpperCase() === sug.toUpperCase());
           json(res, 200, { ok: true, de: sug, sugestoes: sugerirDeParaSku(sug, Object.keys(cc)),
+            vinculo: _kv ? { de: _kv, para: _dpAtual[_kv].para, em: _dpAtual[_kv].em || null } : null,
             leia: 'sugestao por semelhanca — confira antes de declarar; juntar produtos diferentes mistura as vendas' });
           return true;
         }

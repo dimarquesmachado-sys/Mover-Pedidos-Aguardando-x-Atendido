@@ -1457,10 +1457,15 @@ async function verDeParaSku(){
     const r=await fetch(BASE+'/sku-depara-manual?k='+encodeURIComponent(ADMIN_K||'')+'&sugerir='+encodeURIComponent(sku));
     const j=await r.json();
     const sug=(j.sugestoes||[]);
+    /* Codex (revisão geral, 21/08): faltava mostrar que o SKU JÁ está ligado. O campo vinha
+       preenchido com a sugestão e parecia ligado sem estar — e uma ligação errada não tinha
+       como ser desfeita pela tela, só apagando o arquivo. */
+    const vinc=j.vinculo||null;
     el.innerHTML='<div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--line)">'+
       '<div class="mut" style="font-size:12px;margin-bottom:6px">🔗 <b>Este SKU é o mesmo que outro?</b> — use quando o código antigo não existe mais e o Bling não liga sozinho. O custo passa a vir do destino.</div>'+
+      (vinc?('<div style="font-size:12px;margin-bottom:8px">✅ Ligado a <b>'+esc(vinc.para)+'</b> · <button class="btn" onclick="apagarDeParaSku()" style="padding:3px 10px;font-size:11px">desfazer ligação</button></div>'):'')+
       '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">'+
-        '<input id="dpPara" placeholder="código de hoje" value="'+esc(sug[0]||'')+'" style="width:190px;background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:7px 10px;font-size:12px">'+
+        '<input id="dpPara" placeholder="código de hoje" value="'+esc((vinc&&vinc.para)||sug[0]||'')+'" style="width:190px;background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:7px 10px;font-size:12px">'+
         '<button class="btn" onclick="salvarDeParaSku()">🔗 ligar</button>'+
         '<span id="dpMsg" class="mut" style="font-size:12px">'+(sug.length?('sugestão: '+sug.map(esc).join(', ')):'')+'</span>'+
       '</div></div>';
@@ -1479,6 +1484,18 @@ async function salvarDeParaSku(){
     if(msg){ msg.textContent='✓ ligado a '+j.para+' — o custo vem de lá agora'; msg.style.color='#34d399'; }
     verCustoHist();
   }catch(e){ if(msg){msg.textContent='✗ '+e.message; msg.style.color='#f87171';} }
+}
+
+
+async function apagarDeParaSku(){
+  const de=String((document.getElementById('chSku')||{}).value||'').trim();
+  if(!de || !confirm('Desfazer a ligação manual de '+de+'?')) return;
+  try{
+    const r=await fetch(BASE+'/sku-depara-manual'+(ADMIN_K?('?k='+encodeURIComponent(ADMIN_K)):''),
+      {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({apagar:de})});
+    const j=await r.json(); if(!j.ok) throw new Error(j.erro||'falhou');
+    verCustoHist();
+  }catch(e){ const msg=document.getElementById('dpMsg'); if(msg){msg.textContent='✗ '+e.message; msg.style.color='#f87171';} }
 }
 
 async function lancarCustoHist(){
