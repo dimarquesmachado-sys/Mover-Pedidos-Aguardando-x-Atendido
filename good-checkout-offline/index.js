@@ -353,15 +353,19 @@ function resolverNomeSku(digitado) {
   const d = String(digitado || '').trim();
   if (!d) return d;
   const alvo = d.toUpperCase();
-  try {
-    const cc = readJson(path.join(CACHE_DIR, '_custos.json'), {}) || {};
-    if (cc[d]) return d;
-    for (const k of Object.keys(cc)) if (String(k).toUpperCase() === alvo) return k;
-  } catch (e) {}
+  /* Codex (P2): a VIGÊNCIA vem primeiro. Se já existe histórico gravado como "pm1" e o Bling tem
+     "PM1", resolver pela grafia do Bling ESCONDERIA o histórico do Diego e abriria uma segunda
+     linha do tempo — e os lançamentos seguintes iriam pra essa nova, não pra dele. O que ele já
+     gravou manda; a grafia do Bling só decide quando não há histórico nenhum. */
   try {
     const vg = lerVigencias();
     if (vg[d]) return d;
     for (const k of Object.keys(vg)) if (String(k).toUpperCase() === alvo) return k;
+  } catch (e) {}
+  try {
+    const cc = readJson(path.join(CACHE_DIR, '_custos.json'), {}) || {};
+    if (cc[d]) return d;
+    for (const k of Object.keys(cc)) if (String(k).toUpperCase() === alvo) return k;
   } catch (e) {}
   return d;
 }

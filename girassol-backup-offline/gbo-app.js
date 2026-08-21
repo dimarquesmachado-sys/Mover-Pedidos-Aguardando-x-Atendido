@@ -386,15 +386,19 @@ function resolverNomeSku(digitado) {
   const d = String(digitado || '').trim();
   if (!d) return d;
   const alvo = d.toUpperCase();
-  try {
-    const cc = readJson(path.join(CACHE_DIR, '_custos.json'), {}) || {};
-    if (cc[d]) return d;
-    for (const k of Object.keys(cc)) if (String(k).toUpperCase() === alvo) return k;
-  } catch (e) {}
+  /* Codex (P2): a VIGÊNCIA vem primeiro. Se já existe histórico gravado como "pm1" e o Bling tem
+     "PM1", resolver pela grafia do Bling ESCONDERIA o histórico do Diego e abriria uma segunda
+     linha do tempo — e os lançamentos seguintes iriam pra essa nova, não pra dele. O que ele já
+     gravou manda; a grafia do Bling só decide quando não há histórico nenhum. */
   try {
     const vg = lerVigencias();
     if (vg[d]) return d;
     for (const k of Object.keys(vg)) if (String(k).toUpperCase() === alvo) return k;
+  } catch (e) {}
+  try {
+    const cc = readJson(path.join(CACHE_DIR, '_custos.json'), {}) || {};
+    if (cc[d]) return d;
+    for (const k of Object.keys(cc)) if (String(k).toUpperCase() === alvo) return k;
   } catch (e) {}
   return d;
 }
@@ -2312,7 +2316,11 @@ function routes(readBody) {
       const alvoTK = noPeriodo.filter(v => String(v.marketplace || '').toLowerCase() === 'tiktok');
       if (alvoTK.length) {
         try {
-          const fTK = path.join(process.env.TIKTOK_CACHE_DIR || CACHE_DIR, '_tiktok_financeiro_' + (process.env.TIKTOK_LOJA || 'amb') + '.json');
+          /* Codex (P1 x2): a coleta do TikTok grava em `/data` (TIKTOK_CACHE_DIR), NÃO no CACHE_DIR
+             desta empresa — com o padrão, o arquivo nunca era encontrado e o TikTok era pulado em
+             silêncio, enquanto a resposta anunciava que tinha sido checado. E o nome traz a LOJA:
+             usar 'amb' na Girassol lia o arquivo da outra empresa (ou nenhum). */
+          const fTK = path.join(process.env.TIKTOK_CACHE_DIR || '/data', '_tiktok_financeiro_girassol.json');
           const gTK = readJson(fTK, null);
           const peds = (gTK && gTK.pedidos && typeof gTK.pedidos === 'object') ? gTK.pedidos : null;
           if (peds) {
@@ -2321,10 +2329,18 @@ function routes(readBody) {
               const reg = sn && peds[sn];
               if (!reg) continue;   // sem registro financeiro ainda: não dá pra afirmar nada
               checados++;
-              const tipos = Array.isArray(reg.tipos_vistos) ? reg.tipos_vistos.map(t => String(t).toUpperCase()) : [];
+              /* ═══ Codex (P1): DEVOLUÇÃO PARCIAL NÃO É CANCELAMENTO ═══════════════════════════
+                 Pedido com 3 itens em que o cliente devolveu 1 registra tarifa devolvida e transação
+                 de REFUND igual a uma reversão total. Do jeito que eu tinha feito, a venda INTEIRA
+                 sairia do histórico — incluindo o que o cliente ficou. Apagar faturamento real é
+                 pior que deixar um cancelado contado, então aqui só passa evidência de reversão
+                 TOTAL: o repasse líquido do pedido zerou (ou virou negativo). Devolução parcial
+                 deixa repasse positivo e não entra. */
+              const receita = Number(reg.receita || 0);
+              const repasse = Number(reg.repasse != null ? reg.repasse : NaN);
               const estornou = Number(reg.tarifa_devolvida || 0) > 0;
-              const temCancel = tipos.some(t => /CANCEL|REFUND|RETURN/.test(t));
-              if (estornou || temCancel) {
+              const zerou = isFinite(repasse) && receita > 0 && repasse <= 0.01;
+              if (estornou && zerou) {
                 v.situacao = 'Cancelado no TikTok'; v.cancelado_mkt = 1; cancelados.push(v.numero);
               }
             }
