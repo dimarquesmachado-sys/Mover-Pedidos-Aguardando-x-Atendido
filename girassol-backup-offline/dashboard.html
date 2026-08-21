@@ -1368,6 +1368,8 @@ function despesasSHPper(){
   return Number((SHP_PER.carteira && SHP_PER.carteira.sai_do_bolso) || 0) || 0;
 }
 // d193 — a tabela dos SKUs que venderam sem custo. Só aparece quando existe algum.
+const BASE = '/girassol-backup-offline';
+const ADMIN_K = new URLSearchParams(location.search).get('k') || '';
 function desenharSemCusto(MC){
   const sec = document.getElementById('secSemCusto'), el = document.getElementById('scTab');
   if(!sec || !el) return;
@@ -1380,15 +1382,48 @@ function desenharSemCusto(MC){
     '<div class="mut" style="font-size:12px;margin-bottom:6px"><b>'+N(L.length)+'</b> SKU(s) \u00b7 '+N(totU)+' unidade(s) \u00b7 '+BRL(totV)+' de faturamento fora da margem</div>'+
     '<table style="width:100%;font-size:12px"><thead><tr>'+
       '<th style="text-align:left">SKU</th><th style="text-align:left">Produto</th>'+
-      '<th style="text-align:right">un.</th><th style="text-align:right">pedidos</th><th style="text-align:right">R$ vendido</th></tr></thead><tbody>'+
+      '<th style="text-align:right">un.</th><th style="text-align:right">pedidos</th><th style="text-align:right">R$ vendido</th>'+
+      '<th style="text-align:right">custo/un. R$</th></tr></thead><tbody>'+
     L.slice(0,60).map(function(x){
-      return '<tr><td><b>'+x.sku+'</b></td><td class="mut">'+String(x.nome||'').slice(0,60)+'</td>'+
+      /* 21/08 (Diego: "o card lista os SKUs sem custo, você digita o custo ao lado de cada um e
+         salva. Sem sair do dashboard, sem página extra") — antes ele tinha que copiar a lista,
+         abrir outra URL e colar. O custo se resolve onde o problema aparece. */
+      return '<tr><td><b>'+esc(x.sku)+'</b></td><td class="mut">'+esc(String(x.nome||'').slice(0,60))+'</td>'+
              '<td style="text-align:right">'+N(x.un)+'</td>'+
              '<td style="text-align:right">'+N(x.pedidos)+'</td>'+
-             '<td style="text-align:right;color:#f87171">'+BRL(x.valor)+'</td></tr>';
+             '<td style="text-align:right;color:#f87171">'+BRL(x.valor)+'</td>'+
+             '<td style="text-align:right"><input class="scIn" data-sku="'+esc(x.sku)+'" inputmode="decimal" placeholder="0,00" '+
+               'style="width:88px;background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:7px;padding:5px 7px;font-size:12px;text-align:right"></td></tr>';
     }).join('')+'</tbody></table>'+
     (L.length>60 ? '<div class="mut" style="font-size:11px;margin-top:4px">mostrando os 60 de maior valor, de '+N(L.length)+'</div>' : '')+
-    '<button class="btn" style="margin-top:8px" onclick="copiarSemCusto()">\ud83d\udccb copiar a lista de SKUs</button>';
+    '<div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">'+
+      '<button class="btn" onclick="salvarCustosSemCusto(this)">\ud83d\udcbe salvar custos digitados</button>'+
+      '<button class="btn" onclick="copiarSemCusto()">\ud83d\udccb copiar a lista de SKUs</button>'+
+      '<span id="scMsg" class="mut" style="font-size:12px"></span>'+
+    '</div>';
+}
+/* Grava o que foi digitado na coluna de custo. Só manda o que tem valor — linha vazia é ignorada,
+   e o custo vale apenas onde o Bling não tem (o backend garante isso). */
+async function salvarCustosSemCusto(btn){
+  const ins = Array.prototype.slice.call(document.querySelectorAll('#scTab input.scIn'));
+  const itens = [];
+  for (const i of ins){
+    const bruto = String(i.value||'').trim().replace(/[R$\s]/gi,'').replace(',', '.');
+    const v = Number(bruto);
+    if (bruto && isFinite(v) && v > 0) itens.push({ sku: i.getAttribute('data-sku'), custo: v });
+  }
+  const msg = document.getElementById('scMsg');
+  if(!itens.length){ if(msg){ msg.textContent='digite o custo de pelo menos um SKU'; msg.style.color='#fbbf24'; } return; }
+  if(btn){ btn.disabled=true; btn.textContent='salvando…'; }
+  try{
+    const r = await fetch(BASE+'/custos-manuais'+(ADMIN_K?('?k='+encodeURIComponent(ADMIN_K)):''),
+      { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ itens }) });
+    const j = await r.json();
+    if(!j.ok) throw new Error(j.erro||'falhou');
+    if(msg){ msg.textContent='\u2713 '+j.gravados+' custo(s) salvo(s) — atualizando…'; msg.style.color='#34d399'; }
+    setTimeout(function(){ location.reload(); }, 900);
+  }catch(e){ if(msg){ msg.textContent='\u2717 '+e.message; msg.style.color='#f87171'; } }
+  finally{ if(btn){ btn.disabled=false; btn.textContent='\ud83d\udcbe salvar custos digitados'; } }
 }
 function copiarSemCusto(){
   const L = (window._MC_ULT && window._MC_ULT.semCustoDet) || [];
