@@ -345,6 +345,75 @@ function _urlStatus(req, caminho, extra, chave) {
    quando o cadastro passa a ter custo. Assim um preço digitado à mão nunca congela um custo
    que voltou a se atualizar sozinho.
    Guardado em _custos-manuais.json (arquivo próprio), pra um custo-sync nunca sobrescrever. */
+
+/* ═══════════ 21/08 — LINHA DO TEMPO DO CUSTO (vigência) ═══════════════════════════════════
+   O Diego: "se eu entro no cadastro do bling, em 1 produto, vou lá e mudo o custo, eu subscrevo,
+   apaga o antigo e fica por isso, o novo existindo." Exatamente — o Bling guarda SÓ o custo
+   atual. Então quem precisa registrar "de tal dia até tal dia valia X" é este lado, no momento
+   em que percebe a mudança. Sem isso, cada dia que passa é histórico perdido para sempre.
+
+   Regra que ele confirmou: venda JÁ GRAVADA fica congelada com o custo do dia dela. A vigência
+   serve para as vendas novas e para quando ele mandar recalcular um período de propósito — o
+   passado nunca muda sozinho, que é o que faz o Mês anterior continuar contando a mesma história.
+
+   Formato (_custos-vigencia.json): { SKU: [ {custo, de:'AAAA-MM-DD', ate:null|'AAAA-MM-DD',
+   origem:'bling'|'manual', em:ISO} ] } — `ate:null` = faixa aberta, valendo hoje.
+   ⚠️ A linha do tempo começa VAZIA e se forma a partir da primeira mudança detectada: o que já
+   passou não dá pra reconstruir, porque o Bling não guarda e nós não anotávamos. */
+function _diaAntes(iso) {
+  const t = Date.parse(String(iso) + 'T12:00:00Z');
+  if (!isFinite(t)) return null;
+  return new Date(t - 86400000).toISOString().slice(0, 10);
+}
+function lerVigencias() {
+  try { return readJson(path.join(CACHE_DIR, '_custos-vigencia.json'), {}) || {}; } catch (e) { return {}; }
+}
+function gravarVigencias(obj) { writeJson(path.join(CACHE_DIR, '_custos-vigencia.json'), obj || {}); }
+function _hojeISO() { return new Date(Date.now() - 3 * 3600000).toISOString().slice(0, 10); }   // dia no fuso -03:00
+function _ontemISO() { return new Date(Date.now() - 3 * 3600000 - 86400000).toISOString().slice(0, 10); }
+
+/* Registra que o custo do SKU passou a ser `novo` HOJE. Fecha a faixa aberta em ontem e abre
+   outra — a não ser que o valor seja o mesmo (nada a fazer) ou que a faixa aberta tenha começado
+   HOJE, caso em que só corrige o valor dela (duas mudanças no mesmo dia não viram duas faixas). */
+function registrarCustoVigente(sku, novo, origem) {
+  const v = Number(novo);
+  if (!(v > 0)) return null;
+  const k = String(sku || '').trim();
+  if (!k) return null;
+  const todas = lerVigencias();
+  const lista = Array.isArray(todas[k]) ? todas[k] : [];
+  const aberta = lista.find(f => !f.ate);
+  const hoje = _hojeISO();
+  if (aberta) {
+    if (Math.abs(Number(aberta.custo) - v) < 0.0001) return null;   // não mudou
+    if (aberta.de === hoje) { aberta.custo = v; aberta.origem = origem || aberta.origem; aberta.em = new Date().toISOString(); }
+    else {
+      aberta.ate = _ontemISO();
+      lista.push({ custo: v, de: hoje, ate: null, origem: origem || 'bling', em: new Date().toISOString() });
+    }
+  } else {
+    lista.push({ custo: v, de: hoje, ate: null, origem: origem || 'bling', em: new Date().toISOString() });
+  }
+  lista.sort((a, b) => String(a.de).localeCompare(String(b.de)));
+  todas[k] = lista;
+  gravarVigencias(todas);
+  return lista;
+}
+
+/* Custo que valia numa DATA (AAAA-MM-DD). Sem faixa que cubra a data, devolve null — quem chama
+   decide o que fazer (hoje: cair no custo atual, como sempre foi). */
+function custoVigenteEm(sku, data) {
+  const lista = lerVigencias()[String(sku || '').trim()];
+  if (!Array.isArray(lista) || !lista.length) return null;
+  const d = String(data || '').slice(0, 10);
+  if (!d) return null;
+  for (let i = lista.length - 1; i >= 0; i--) {
+    const f = lista[i];
+    if (String(f.de) <= d && (!f.ate || d <= String(f.ate))) { const c = Number(f.custo); if (c > 0) return c; }
+  }
+  return null;
+}
+
 function lerCustosManuais() {
   try { return readJson(path.join(CACHE_DIR, '_custos-manuais.json'), {}) || {}; } catch (e) { return {}; }
 }
@@ -3251,6 +3320,70 @@ function routes(readBody) {
     POST /amb-checkout-offline/custos-manuais        → grava {texto} ou {itens}
     GET  /amb-checkout-offline/custos-manuais?lista=1 → o que está gravado hoje
     A regra é a que ele definiu: o manual só vale onde o BLING não tem custo. */
+    /* ═══ 21/08 — ROTA DA LINHA DO TEMPO DO CUSTO (o card consome) ═══════════════════════
+    GET  /amb-checkout-offline/custo-historico?sku=          → faixas do SKU + custo atual do Bling
+    POST /amb-checkout-offline/custo-historico  {sku,custo,de}  → lança faixa manual (de = AAAA-MM-DD)
+    POST /amb-checkout-offline/custo-historico  {sku,apagar:'AAAA-MM-DD'} → remove a faixa que começa nessa data
+    Nasceu do desenho do Diego: "ter esse histórico fácil no card, e poder alterar manualmente,
+    ou pedir importação do bling". */
+    if (p === '/amb-checkout-offline/custo-historico') {
+      const kH = urlObj.searchParams.get('k') || '';
+      const sH = validarSessao(req.headers['cookie']);
+      if (!((process.env.ADMIN_KEY && kH === process.env.ADMIN_KEY) || (sH && ehAdmin(sH)))) { json(res, 404, { error: 'not found' }); return true; }
+
+      if (method === 'GET') {
+        const sku = String(urlObj.searchParams.get('sku') || '').trim();
+        if (!sku) { json(res, 400, { ok: false, erro: 'informe ?sku=' }); return true; }
+        const faixas = (lerVigencias()[sku] || []).slice().sort((a, b) => String(a.de).localeCompare(String(b.de)));
+        const cc = readJson(path.join(CACHE_DIR, '_custos.json'), {}) || {};
+        const doBling = cc[sku] && Number(cc[sku].custo) > 0 ? Number(cc[sku].custo) : null;
+        const man = lerCustosManuais()[sku.toUpperCase()];
+        json(res, 200, { ok: true, sku, faixas,
+          custo_atual_bling: doBling,
+          custo_manual: man && Number(man.custo) > 0 ? Number(man.custo) : null,
+          vigente_hoje: custoVigenteEm(sku, _hojeISO()),
+          leia: faixas.length ? null : 'sem histórico ainda — a linha do tempo começa a se formar na primeira mudança de custo que o sync detectar' });
+        return true;
+      }
+
+      if (method === 'POST') {
+        let corpo = '';
+        await new Promise(r => { req.on('data', c => { corpo += c; if (corpo.length > 1e6) req.destroy(); }); req.on('end', r); req.on('error', r); });
+        let b = {};
+        try { b = JSON.parse(corpo || '{}'); } catch (e) { json(res, 400, { ok: false, erro: 'JSON inválido' }); return true; }
+        const sku = String(b.sku || '').trim();
+        if (!sku) { json(res, 400, { ok: false, erro: 'informe o sku' }); return true; }
+        const todas = lerVigencias();
+        let lista = Array.isArray(todas[sku]) ? todas[sku] : [];
+
+        if (b.apagar) {
+          const de = String(b.apagar).slice(0, 10);
+          const antes = lista.length;
+          lista = lista.filter(f => String(f.de) !== de);
+          /* ao remover uma faixa, a anterior volta a valer até onde a removida ia — senão fica
+             um buraco na linha do tempo e a venda daquele período não acha custo nenhum. */
+          lista.sort((a, b2) => String(a.de).localeCompare(String(b2.de)));
+          for (let i = 0; i < lista.length; i++) lista[i].ate = (i === lista.length - 1) ? null : _diaAntes(lista[i + 1].de);
+          todas[sku] = lista; gravarVigencias(todas);
+          json(res, 200, { ok: true, removidas: antes - lista.length, faixas: lista });
+          return true;
+        }
+
+        const custo = Number(String(b.custo == null ? '' : b.custo).toString().replace(/[R$\s]/gi, '').replace(',', '.'));
+        const de = /^\d{4}-\d{2}-\d{2}$/.test(String(b.de || '')) ? String(b.de) : _hojeISO();
+        if (!isFinite(custo) || custo <= 0) { json(res, 400, { ok: false, erro: 'custo inválido' }); return true; }
+        /* Lançar no MEIO da linha do tempo: entra na ordem e as vizinhas se ajustam sozinhas —
+           é o caso de "descobri que desde 01/07 o custo era outro". */
+        lista = lista.filter(f => String(f.de) !== de);
+        lista.push({ custo: Math.round(custo * 10000) / 10000, de, ate: null, origem: 'manual', em: new Date().toISOString() });
+        lista.sort((a, b2) => String(a.de).localeCompare(String(b2.de)));
+        for (let i = 0; i < lista.length; i++) lista[i].ate = (i === lista.length - 1) ? null : _diaAntes(lista[i + 1].de);
+        todas[sku] = lista; gravarVigencias(todas);
+        json(res, 200, { ok: true, faixas: lista, vigente_hoje: custoVigenteEm(sku, _hojeISO()) });
+        return true;
+      }
+    }
+
     if (p === '/amb-checkout-offline/custos-manuais') {
       const kM = urlObj.searchParams.get('k') || '';
       const sM = validarSessao(req.headers['cookie']);
@@ -7671,7 +7804,11 @@ async function custoSync(fresh) {
                  .map(Number).filter(v => isFinite(v) && v > 0);
           if (cand.length) console.log('[CUSTO] ' + sku + ': composição incompleta — usando campo do fornecedor (' + cand[0] + ') como reserva');
         }
-        cc[sku] = { id: prod.id, preco: (prod.preco != null && isFinite(Number(prod.preco))) ? Number(prod.preco) : null, custo: cand.length ? Math.round(cand[0] * 10000) / 10000 : null, ts: Date.now() };
+        const _custoNovo = cand.length ? Math.round(cand[0] * 10000) / 10000 : null;
+        /* 21/08: antes de sobrescrever, anota a linha do tempo — o Bling só guarda o custo
+           ATUAL, então esta é a única chance de registrar que até ontem valia outro. */
+        if (_custoNovo != null) { try { registrarCustoVigente(sku, _custoNovo, 'bling'); } catch (e) {} }
+        cc[sku] = { id: prod.id, preco: (prod.preco != null && isFinite(Number(prod.preco))) ? Number(prod.preco) : null, custo: _custoNovo, ts: Date.now() };
         _cst.ok++;
       } else { _cst.falhas++; }
     } catch (e) { _cst.falhas++; }

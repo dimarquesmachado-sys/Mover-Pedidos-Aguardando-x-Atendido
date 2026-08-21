@@ -1411,7 +1411,7 @@ function desenharSemCusto(MC){
              '<td style="text-align:right">'+N(x.pedidos)+'</td>'+
              '<td style="text-align:right;color:#f87171">'+BRL(x.valor)+'</td>'+
              '<td style="text-align:right"><input class="scIn" data-sku="'+esc(x.sku)+'" inputmode="decimal" placeholder="0,00" '+
-               'style="width:88px;background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:7px;padding:5px 7px;font-size:12px;text-align:right"></td></tr>';
+               'style="width:96px;background:#0b1220;border:1px solid #4f46e5;color:var(--tx);border-radius:7px;padding:6px 8px;font-size:12px;text-align:right;box-shadow:0 0 0 1px #4f46e522"></td></tr>';
     }).join('')+'</tbody></table>'+
     (L.length>60 ? '<div class="mut" style="font-size:11px;margin-top:4px">mostrando os 60 de maior valor, de '+N(L.length)+'</div>' : '')+
     '<div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">'+
@@ -1422,6 +1422,67 @@ function desenharSemCusto(MC){
 }
 /* Grava o que foi digitado na coluna de custo. Só manda o que tem valor — linha vazia é ignorada,
    e o custo vale apenas onde o Bling não tem (o backend garante isso). */
+
+/* ═══ 21/08 — card do histórico de custo (desenho do Diego) ═══════════════════════════════
+   "um card, no final, lá antes dos impostos, só pra consultar sku, pra ver o histórico dele de
+   último preço configurado, a data até q ele tá valendo (…) e um campo pra cadastrar o novo
+   valor. e q eu pudesse ver o valor antigo, a data q ele vigorou, e a data do novo custo e valor" */
+async function verCustoHist(){
+  const sku = String((document.getElementById('chSku')||{}).value||'').trim();
+  const el = document.getElementById('chRes');
+  if(!el) return;
+  if(!sku){ el.innerHTML='<span class="mut">digite um SKU</span>'; return; }
+  el.innerHTML='<span class="mut">consultando…</span>';
+  try{
+    const r = await fetch(BASE+'/custo-historico?sku='+encodeURIComponent(sku)+(ADMIN_K?('&k='+encodeURIComponent(ADMIN_K)):''));
+    const j = await r.json();
+    if(!j.ok) throw new Error(j.erro||'falhou');
+    const f = j.faixas||[];
+    const linhas = f.length ? f.map(function(x){
+      const ate = x.ate ? x.ate.split('-').reverse().join('/') : '<b class="ok">hoje</b>';
+      return '<tr><td><b>'+BRL(x.custo)+'</b></td><td>'+x.de.split('-').reverse().join('/')+'</td><td>'+ate+'</td>'+
+             '<td class="mut">'+(x.origem==='manual'?'manual':'Bling')+'</td>'+
+             '<td style="text-align:right"><button class="chip chDel" data-de="'+esc(x.de)+'" style="padding:3px 8px;font-size:11px">apagar</button></td></tr>';
+    }).join('') : '<tr><td colspan="5" class="mut">sem histórico ainda</td></tr>';
+    el.innerHTML =
+      '<div class="mut" style="font-size:12px;margin-bottom:6px">'+
+        'custo no Bling hoje: <b>'+(j.custo_atual_bling!=null?BRL(j.custo_atual_bling):'—')+'</b>'+
+        (j.custo_manual!=null?(' · manual: <b>'+BRL(j.custo_manual)+'</b>'):'')+
+        (j.vigente_hoje!=null?(' · vigente: <b class="ok">'+BRL(j.vigente_hoje)+'</b>'):'')+
+      '</div>'+
+      '<table style="width:100%;font-size:12px"><thead><tr><th style="text-align:left">custo</th><th style="text-align:left">de</th>'+
+      '<th style="text-align:left">até</th><th style="text-align:left">origem</th><th></th></tr></thead><tbody>'+linhas+'</tbody></table>'+
+      '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">'+
+        '<input id="chNovo" placeholder="novo custo" inputmode="decimal" style="width:110px;background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:7px 10px;font-size:12px">'+
+        '<input id="chDe" type="date" style="background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:6px 10px;font-size:12px">'+
+        '<button class="btn" onclick="lancarCustoHist()">\ud83d\udcbe lançar</button>'+
+        '<span id="chMsg" class="mut" style="font-size:12px"></span>'+
+      '</div>';
+    el.querySelectorAll('button.chDel').forEach(function(b){ b.addEventListener('click', function(){ apagarFaixa(sku, b.getAttribute('data-de')); }); });
+    const d=document.getElementById('chDe'); if(d && !d.value) d.value = new Date(Date.now()-3*3600000).toISOString().slice(0,10);
+  }catch(e){ el.innerHTML='<span class="bad">erro: '+esc(e.message)+'</span>'; }
+}
+async function lancarCustoHist(){
+  const sku = String((document.getElementById('chSku')||{}).value||'').trim();
+  const custo = String((document.getElementById('chNovo')||{}).value||'').trim();
+  const de = String((document.getElementById('chDe')||{}).value||'').trim();
+  const msg = document.getElementById('chMsg');
+  if(!custo){ if(msg){msg.textContent='digite o custo'; msg.style.color='#fbbf24';} return; }
+  try{
+    const r = await fetch(BASE+'/custo-historico'+(ADMIN_K?('?k='+encodeURIComponent(ADMIN_K)):''),
+      {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sku,custo,de})});
+    const j = await r.json();
+    if(!j.ok) throw new Error(j.erro||'falhou');
+    verCustoHist();
+  }catch(e){ if(msg){msg.textContent='✗ '+e.message; msg.style.color='#f87171';} }
+}
+async function apagarFaixa(sku, de){
+  if(!confirm('Apagar a faixa que começa em '+de.split('-').reverse().join('/')+'?')) return;
+  await fetch(BASE+'/custo-historico'+(ADMIN_K?('?k='+encodeURIComponent(ADMIN_K)):''),
+    {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sku,apagar:de})});
+  verCustoHist();
+}
+
 async function salvarCustosSemCusto(btn){
   const ins = Array.prototype.slice.call(document.querySelectorAll('#scTab input.scIn'));
   const itens = [];
@@ -1521,7 +1582,7 @@ function montar(){
       '<option value="secCompra">🧮 Plano de Compra</option>'+
       '<option value="secProg">📉 Progressão do Período</option>'+
       '<option value="secUF">🗺️ Vendas por Estado</option>'+
-      '<option value="secCfg">⚙️ Impostos e Taxas</option>'+
+      '<option value="secCustoHist">📈 Histórico de custo</option>'+'<option value="secCfg">⚙️ Impostos e Taxas</option>'+
     '</select>'+
     '<div class="atalhos">'+
       '<span style="color:var(--mut);font-size:12px;margin-right:2px">ir para:</span>'+
@@ -1536,7 +1597,7 @@ function montar(){
         '<button class="chip" onclick="irPra(&#39;secCompra&#39;)" title="Plano de Compra">🧮 Plano</button>'+
         '<button class="chip" onclick="irPra(&#39;secProg&#39;)" title="Progressão do Período">📉 Progressão</button>'+
         '<button class="chip" onclick="irPra(&#39;secUF&#39;)" title="Vendas por Estado">🗺️ Por Estado</button>'+
-        '<button class="chip" onclick="irPra(&#39;secCfg&#39;)" title="Impostos e Taxas">⚙️ Impostos</button>'+
+        '<button class="chip" onclick="irPra(&#39;secCustoHist&#39;)" title="Histórico de custo por SKU">📈 Custo</button>'+'<button class="chip" onclick="irPra(&#39;secCfg&#39;)" title="Impostos e Taxas">⚙️ Impostos</button>'+
       '</div>'+
     '</div>'+
   '</div></div>'+
@@ -1669,6 +1730,15 @@ function montar(){
       '<div id="grafProg" style="overflow-x:auto"></div>'+
       '<div class="nota" id="grafLeg"></div></div>'+
     '<div class="sec" id="secUF"><h2>🗺️ Vendas por Estado</h2><div style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start;justify-content:center"><div style="flex:0 1 340px;min-width:260px"><div class="tw" id="twUF"><table id="tUF"></table></div><div id="ufAviso"></div></div><div id="ufMapa" style="flex:1 1 420px;min-width:300px;max-width:620px"></div></div></div>'+
+    '<div class="sec" id="secCustoHist"><h2>\ud83d\udcc8 Hist\u00f3rico de custo por SKU <span class="hint">o que valia em cada per\u00edodo \u00b7 venda antiga N\u00c3O muda quando o custo de hoje muda</span></h2>'+
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">'+
+        '<input id="chSku" placeholder="digite o SKU e tecle Enter" onkeydown="if(event.key===&#39;Enter&#39;)verCustoHist()" '+
+          'style="flex:1 1 260px;background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:9px;padding:9px 12px;font-size:13px">'+
+        '<button class="btn" onclick="verCustoHist()">\ud83d\udd0d ver hist\u00f3rico</button>'+
+      '</div>'+
+      '<div id="chRes" style="margin-top:10px"></div>'+
+      '<div class="nota" style="margin-top:8px">A linha do tempo se forma a partir da <b>primeira mudan\u00e7a de custo que o sync detectar</b> \u2014 o Bling guarda s\u00f3 o custo ATUAL, ent\u00e3o o que passou antes disso n\u00e3o d\u00e1 pra reconstruir. Voc\u00ea pode lan\u00e7ar faixas antigas \u00e0 m\u00e3o quando souber.</div>'+
+    '</div>'+
     '<div class="sec" id="secCfg"><h2>⚙️ Impostos e Taxas <span class="hint">alíquota do Simples varia mês a mês · taxas de marketplace em % (estimativa; ML tem a REAL por pedido na busca)</span></h2>'+
       '<div id="cfgBox"></div>'+
       '<div style="font-size:12px;color:var(--mut);margin:14px 0 6px">🚛 Motoboy do FLEX pago pela loja (R$) — de fábrica: <b>ML R$ 12</b> · <b>Shopee R$ 9</b> · <b>demais R$ 9</b>. Entra como custo quando o pedido é FLEX.</div>'+
