@@ -350,16 +350,34 @@ function lerCustosManuais() {
 }
 function gravarCustosManuais(obj) {
   writeJson(path.join(CACHE_DIR, '_custos-manuais.json'), obj || {});
+  /* Codex (P2): sem isto, apagar um custo manual mudava só o arquivo — o cache de 6h de SKU
+     continuava servindo o valor antigo e, ao vencer, o fallback o copiava de volta. O custo
+     apagado seguiria afetando a margem indefinidamente. Toda gravação derruba os dois caches. */
+  try { if (typeof _skuInfoCache === 'object' && _skuInfoCache) { for (const k of Object.keys(_skuInfoCache)) delete _skuInfoCache[k]; } } catch (e) {}
+  try { const f = path.join(CACHE_DIR, '_skus-info.json'); if (fs.existsSync(f)) fs.unlinkSync(f); } catch (e) {}
 }
 /* custo POR UNIDADE do SKU, ou null. `doBling` é o que o Bling já sabe: se ele tem custo,
    o manual não entra (regra do Diego). */
 function custoManualDe(sku, doBling) {
   if (doBling != null && isFinite(Number(doBling)) && Number(doBling) > 0) return null;
-  const m = lerCustosManuais();
-  const k = String(sku || '').trim();
-  const r = m[k] || m[k.toUpperCase()] || m[k.toLowerCase()];
+  const r = lerCustosManuais()[String(sku || '').trim().toUpperCase()];
   const v = r && Number(r.custo);
   return (v > 0) ? v : null;
+}
+/* Sobrepõe o manual num mapa de custos do Bling, sem nunca vencer um custo que o Bling tem.
+   Um lugar só: dashboards, histórico e plano de compra chamam esta função — foi a falta disso
+   que deixou o plano de compra dizendo "sem custo" enquanto a tela já mostrava o corrigido. */
+function comCustosManuais(mapaDoBling) {
+  const b = mapaDoBling || {};
+  const man = lerCustosManuais();
+  const temNoBling = k => { const c = b[k] || b[String(k).toLowerCase()]; return c && Number(c.custo) > 0; };
+  for (const K of Object.keys(man)) {
+    const v = Number(man[K].custo);
+    if (!(v > 0)) continue;
+    const nome = man[K].sku || K;
+    if (!temNoBling(K) && !temNoBling(nome)) b[nome] = { custo: v, manual: true };
+  }
+  return b;
 }
 /* Aceita planilha colada do Excel (SKU<TAB>custo), CSV com ; ou , e linhas soltas.
    ⚠️ O SEPARADOR É DECIDIDO POR LINHA, e a vírgula é a ÚLTIMA opção: em planilha brasileira
@@ -439,14 +457,19 @@ async function carregar(){
     const r=await fetch(MOD+'/custos-manuais'+(qs?qs+'&':'?')+'lista=1');
     const j=await r.json();
     if(!j.ok||!j.total){ el.innerHTML='<span class="dim">nenhum custo manual gravado</span>'; return; }
+    /* Codex (P2): o SKU ia para dentro de um onclick com só as aspas escapadas. O navegador
+       DECODIFICA entidades HTML antes de rodar o JS, então uma planilha com um SKU forjado
+       executaria script na sessão de admin — e planilha vem de fora. Agora o valor viaja em
+       data-attribute (que nunca é interpretado como código) e o clique é ligado por listener. */
     el.innerHTML='<table><tr><th>SKU</th><th>Custo/un.</th><th>Quando</th><th></th></tr>'+
       j.itens.map(i=>'<tr><td><code>'+esc(i.sku)+'</code></td><td>R$ '+Number(i.custo).toFixed(2).replace('.',',')+
       '</td><td class="dim">'+(i.em?String(i.em).slice(0,10).split('-').reverse().join('/'):'—')+
-      '</td><td><button class="sec" style="padding:3px 8px;font-size:11px" onclick="apagar('+JSON.stringify(i.sku).replace(/"/g,'&quot;')+')">apagar</button></td></tr>').join('')+
+      '</td><td><button class="sec del" style="padding:3px 8px;font-size:11px" data-sku="'+esc(i.sku)+'">apagar</button></td></tr>').join('')+
       '</table><div class="dim" style="margin-top:6px">'+j.total+' SKU(s)</div>';
+    el.querySelectorAll('button.del').forEach(b=>b.addEventListener('click',()=>apagar(b.getAttribute('data-sku'))));
   }catch(e){ el.innerHTML='<span class="bad">erro: '+e.message+'</span>'; }
 }
-function esc(s){ return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function esc(s){ return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 carregar();
 </script></div></body></html>`;
 }
@@ -466,8 +489,16 @@ function parsearCustosColados(txt) {
     return Number(b);
   };
   for (const ln of linhas) {
-    const l = ln.trim();
+    let l = ln.trim();
     if (!l) continue;
+    /* Codex (P2): CSV com aspas — "FL-1011-PRETO","33.82" — é o que o Excel exporta por PADRÃO,
+       e a linha inteira era rejeitada porque o número não terminava a linha (a aspa final
+       atrapalhava o casamento). A tela oferece "subir CSV", então o formato mais comum tem que
+       passar: tiro as aspas de cada campo antes de decidir o separador. */
+    if (l.indexOf('"') >= 0 || l.indexOf("'") >= 0) {
+      const campos = l.match(/"[^"]*"|'[^']*'|[^,;\t]+/g);
+      if (campos && campos.length >= 2) l = campos.map(c => c.trim().replace(/^["']|["']$/g, '')).join('\t');
+    }
     let partes;
     if (l.indexOf('\t') >= 0) partes = l.split('\t');
     else if (l.indexOf(';') >= 0) partes = l.split(';');
@@ -486,7 +517,9 @@ function parsearCustosColados(txt) {
     const sku = String(partes[0]).replace(/[\s,;]+$/, '');
     const custo = paraNumero(partes[partes.length - 1]);
     if (!sku || sku.toLowerCase() === 'sku' || !isFinite(custo) || custo <= 0) { ignoradas.push(l.slice(0, 60)); continue; }
-    itens[sku] = { custo: Math.round(custo * 10000) / 10000, em: new Date().toISOString() };
+    /* Codex (P2): a planilha pode vir 'abc-1' e a venda 'ABC-1'. Guardo a chave normalizada
+       (e o sku original pra exibir), e a leitura normaliza igual — senão o custo nunca aplica. */
+    itens[sku.toUpperCase()] = { custo: Math.round(custo * 10000) / 10000, sku: sku, em: new Date().toISOString() };
   }
   return { itens, ignoradas };
 }
@@ -1484,15 +1517,7 @@ function routes(readBody) {
       // 0) cache PERMANENTE de custos (_custos.json, populado pelo custo-sync em background)
       /* 21/08 — CUSTO MANUAL entra AQUI, atrás do Bling: só preenche o que o _custos.json não
          tem. Regra do Diego: "se o bling passar a ter custo, aí deixa mandar o Bling". */
-      const _ccAll = (() => {
-        const doBling = readJson(path.join(CACHE_DIR, '_custos.json'), {}) || {};
-        const man = lerCustosManuais();
-        for (const k of Object.keys(man)) {
-          const jaTem = doBling[k] && Number(doBling[k].custo) > 0;
-          if (!jaTem && Number(man[k].custo) > 0) doBling[k] = { custo: Number(man[k].custo), manual: true };
-        }
-        return doBling;
-      })();
+      const _ccAll = comCustosManuais(readJson(path.join(CACHE_DIR, '_custos.json'), {}));
       const ids = {};
       const aResolver = [];
       for (const sku of faltam) {
@@ -3255,7 +3280,21 @@ function routes(readBody) {
           return true;
         }
 
-        const r = parsearCustosColados(body.texto || '');
+        /* Codex (P2): a rota DOCUMENTA {texto} ou {itens}, mas só lia body.texto — quem mandasse
+           a forma estruturada recebia "nenhuma linha válida". Agora as duas funcionam. */
+        let r;
+        if (Array.isArray(body.itens)) {
+          const itens = {}; const ignoradas = [];
+          for (const it of body.itens) {
+            const sku = String((it && it.sku) || '').trim();
+            const custo = Number(it && it.custo);
+            if (!sku || !isFinite(custo) || custo <= 0) { ignoradas.push(JSON.stringify(it || null).slice(0, 60)); continue; }
+            itens[sku.toUpperCase()] = { custo: Math.round(custo * 10000) / 10000, sku, em: new Date().toISOString() };
+          }
+          r = { itens, ignoradas };
+        } else {
+          r = parsearCustosColados(body.texto || '');
+        }
         const novos = Object.keys(r.itens).length;
         if (!novos) { json(res, 400, { ok: false, erro: 'nenhuma linha válida', ignoradas: r.ignoradas.slice(0, 20) }); return true; }
         /* substitui o que veio e mantém o resto — subir uma planilha parcial não apaga o antigo */
