@@ -345,6 +345,30 @@ function _diaAntes(iso) {
   if (!isFinite(t)) return null;
   return new Date(t - 86400000).toISOString().slice(0, 10);
 }
+/* 21/08 (Diego: "tem como só aceitar tb pm1 ao invés de só PM1?") — o SKU é o mesmo produto
+   escrito de outro jeito. Aqui eu descubro como ele está GRAVADO (no banco de custos ou na
+   vigência) a partir do que foi digitado, para o card achar o produto e não criar uma segunda
+   linha do tempo para "pm1" separada da de "PM1". */
+function resolverNomeSku(digitado) {
+  const d = String(digitado || '').trim();
+  if (!d) return d;
+  const alvo = d.toUpperCase();
+  /* Codex (P2): a VIGÊNCIA vem primeiro. Se já existe histórico gravado como "pm1" e o Bling tem
+     "PM1", resolver pela grafia do Bling ESCONDERIA o histórico do Diego e abriria uma segunda
+     linha do tempo — e os lançamentos seguintes iriam pra essa nova, não pra dele. O que ele já
+     gravou manda; a grafia do Bling só decide quando não há histórico nenhum. */
+  try {
+    const vg = lerVigencias();
+    if (vg[d]) return d;
+    for (const k of Object.keys(vg)) if (String(k).toUpperCase() === alvo) return k;
+  } catch (e) {}
+  try {
+    const cc = readJson(path.join(CACHE_DIR, '_custos.json'), {}) || {};
+    if (cc[d]) return d;
+    for (const k of Object.keys(cc)) if (String(k).toUpperCase() === alvo) return k;
+  } catch (e) {}
+  return d;
+}
 function lerVigencias() {
   try { return readJson(path.join(CACHE_DIR, '_custos-vigencia.json'), {}) || {}; } catch (e) { return {}; }
 }
@@ -383,7 +407,10 @@ function registrarCustoVigente(sku, novo, origem) {
 /* Custo que valia numa DATA (AAAA-MM-DD). Sem faixa que cubra a data, devolve null — quem chama
    decide o que fazer (hoje: cair no custo atual, como sempre foi). */
 function custoVigenteEm(sku, data) {
-  const lista = lerVigencias()[String(sku || '').trim()];
+  const vg = lerVigencias();
+  const kk = String(sku || '').trim();
+  const alvo = kk.toUpperCase();
+  const lista = vg[kk] || vg[Object.keys(vg).find(k => String(k).toUpperCase() === alvo)];
   if (!Array.isArray(lista) || !lista.length) return null;
   const d = String(data || '').slice(0, 10);
   if (!d) return null;
@@ -1608,10 +1635,15 @@ function routes(readBody) {
       if (!((process.env.ADMIN_KEY && kH === process.env.ADMIN_KEY) || (sH && ehAdmin(sH)))) { json(res, 404, { error: 'not found' }); return true; }
 
       if (method === 'GET') {
-        const sku = String(urlObj.searchParams.get('sku') || '').trim();
+        const sku = resolverNomeSku(String(urlObj.searchParams.get('sku') || '').trim());
         if (!sku) { json(res, 400, { ok: false, erro: 'informe ?sku=' }); return true; }
         const cc = readJson(path.join(CACHE_DIR, '_custos.json'), {}) || {};
-        const doBling = cc[sku] && Number(cc[sku].custo) > 0 ? Number(cc[sku].custo) : null;
+        /* Codex (P2, r2): com histórico em "pm1" e Bling em "PM1", a busca exata devolvia null e o
+           card dizia que o produto NÃO tem custo no Bling — sugerindo cadastrar algo que já existe.
+           A grafia do histórico manda pra achar o histórico; pra achar o CUSTO, vale qualquer caixa. */
+        const _alvoCC = String(sku).toUpperCase();
+        const _kCC = cc[sku] ? sku : Object.keys(cc).find(k => String(k).toUpperCase() === _alvoCC);
+        const doBling = (_kCC && Number(cc[_kCC].custo) > 0) ? Number(cc[_kCC].custo) : null;
         /* 21/08 (Diego testou o PM1 e viu "sem histórico ainda" num produto que TEM custo):
            eu só anotava quando o sync detectava MUDANÇA, então todo SKU que já estava no
            _custos.json antes da vigência existir ficava com a linha do tempo vazia. Agora, na
@@ -1637,7 +1669,7 @@ function routes(readBody) {
         await new Promise(r => { req.on('data', c => { corpo += c; if (corpo.length > 1e6) req.destroy(); }); req.on('end', r); req.on('error', r); });
         let b = {};
         try { b = JSON.parse(corpo || '{}'); } catch (e) { json(res, 400, { ok: false, erro: 'JSON inválido' }); return true; }
-        const sku = String(b.sku || '').trim();
+        const sku = resolverNomeSku(String(b.sku || '').trim());
         if (!sku) { json(res, 400, { ok: false, erro: 'informe o sku' }); return true; }
         const todas = lerVigencias();
         let lista = Array.isArray(todas[sku]) ? todas[sku] : [];
