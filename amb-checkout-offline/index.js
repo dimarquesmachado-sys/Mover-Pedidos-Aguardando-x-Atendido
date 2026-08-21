@@ -334,6 +334,163 @@ function _urlStatus(req, caminho, extra, chave) {
   } catch (e) { return caminho + '?status=1'; }
 }
 
+
+/* ═══════════ 21/08 — CUSTO MANUAL POR PLANILHA ═══════════════════════════════════════════
+   Pedido do Diego: "uma área de subida de sku x custo. eu faço upload e pronto, resolve" —
+   como no Jodda e no MercadoTurbo. Nasceu de SKUs que venderam SEM custo no painel: o
+   FL-1011-PRETO da AMB (53 un.) foi RENOMEADO no Bling para 3933398010054, então o código
+   antigo não existe mais e o custo nunca é achado; na Girassol sobraram 2 casos parecidos.
+   REGRA QUE ELE ESCOLHEU: "se o bling passar a ter custo, aí deixa mandar o Bling". Ou seja,
+   o manual é PONTE, não substituto — vale enquanto o Bling não sabe, e sai de cena sozinho
+   quando o cadastro passa a ter custo. Assim um preço digitado à mão nunca congela um custo
+   que voltou a se atualizar sozinho.
+   Guardado em _custos-manuais.json (arquivo próprio), pra um custo-sync nunca sobrescrever. */
+function lerCustosManuais() {
+  try { return readJson(path.join(CACHE_DIR, '_custos-manuais.json'), {}) || {}; } catch (e) { return {}; }
+}
+function gravarCustosManuais(obj) {
+  writeJson(path.join(CACHE_DIR, '_custos-manuais.json'), obj || {});
+}
+/* custo POR UNIDADE do SKU, ou null. `doBling` é o que o Bling já sabe: se ele tem custo,
+   o manual não entra (regra do Diego). */
+function custoManualDe(sku, doBling) {
+  if (doBling != null && isFinite(Number(doBling)) && Number(doBling) > 0) return null;
+  const m = lerCustosManuais();
+  const k = String(sku || '').trim();
+  const r = m[k] || m[k.toUpperCase()] || m[k.toLowerCase()];
+  const v = r && Number(r.custo);
+  return (v > 0) ? v : null;
+}
+/* Aceita planilha colada do Excel (SKU<TAB>custo), CSV com ; ou , e linhas soltas.
+   ⚠️ O SEPARADOR É DECIDIDO POR LINHA, e a vírgula é a ÚLTIMA opção: em planilha brasileira
+   a vírgula é DECIMAL, e tratá-la como separador de coluna transforma "33,82" em 82 — um
+   custo errado sem nenhum aviso na tela é pior que custo faltando. Tab e ponto-e-vírgula
+   têm prioridade justamente por isso.
+   Devolve {itens, ignoradas} pra tela poder mostrar o que entrou e o que não. */
+
+/* Tela do custo manual: colar do Excel ou subir CSV. Sem framework, no mesmo estilo escuro
+   dos outros painéis. A lista do que já está gravado vem junto, com botão de apagar. */
+function telaCustosManuais(nomeEmpresa, mod) {
+  return `<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Custos manuais · ${nomeEmpresa}</title><style>
+*{box-sizing:border-box} body{margin:0;background:#0b1220;color:#e5e7eb;font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;padding:18px}
+.wrap{max-width:980px;margin:0 auto} h1{font-size:19px;margin:0 0 4px} .dim{color:#94a3b8;font-size:12px}
+.card{background:#111a2e;border:1px solid #1f2b45;border-radius:12px;padding:16px;margin:14px 0}
+textarea{width:100%;min-height:180px;background:#0b1220;color:#e5e7eb;border:1px solid #1f2b45;border-radius:8px;padding:10px;font:13px ui-monospace,Menlo,Consolas,monospace}
+button{background:#4f46e5;color:#fff;border:0;border-radius:8px;padding:10px 16px;font-weight:700;cursor:pointer}
+button.sec{background:#1f2b45}
+table{width:100%;border-collapse:collapse;margin-top:8px} th,td{text-align:left;padding:6px 8px;border-bottom:1px solid #1f2b45;font-size:13px}
+th{color:#94a3b8;font-weight:600;font-size:11px;text-transform:uppercase}
+.ok{color:#34d399} .warn{color:#fbbf24} .bad{color:#f87171} code{background:#0b1220;padding:1px 5px;border-radius:4px}
+</style></head><body><div class="wrap">
+<h1>💰 Custos manuais · ${nomeEmpresa}</h1>
+<div class="dim">O custo daqui <b>só vale onde o Bling não tem custo</b> para o SKU. Se o Bling passar a ter, ele volta a mandar — o manual é ponte, não substituto.</div>
+
+<div class="card">
+  <div style="margin-bottom:8px"><b>Colar do Excel</b> <span class="dim">— duas colunas: SKU e custo POR UNIDADE. Aceita tab, ponto-e-vírgula, vírgula, R$ e decimal brasileiro.</span></div>
+  <textarea id="txt" placeholder="FL-1011-PRETO&#9;33,82&#10;465;12,50&#10;10xE14-5W-3000K-BIV&#9;34,00"></textarea>
+  <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+    <button onclick="salvar()">Salvar custos</button>
+    <button class="sec" onclick="document.getElementById('arq').click()">Subir CSV</button>
+    <input type="file" id="arq" accept=".csv,.txt,.tsv" style="display:none" onchange="lerArq(this)">
+    <span id="msg" class="dim"></span>
+  </div>
+</div>
+
+<div class="card">
+  <div style="display:flex;justify-content:space-between;align-items:center">
+    <b>Gravados</b>
+    <button class="sec" onclick="carregar()">atualizar</button>
+  </div>
+  <div id="lista" class="dim" style="margin-top:8px">carregando…</div>
+</div>
+
+<div class="dim">Dica: no dashboard, o card <b>SKUs que venderam SEM custo</b> tem o botão <i>copiar a lista de SKUs</i> — cole aqui, preencha os custos e salve.</div>
+
+<script>
+const MOD='${mod}';
+const K=new URLSearchParams(location.search).get('k')||'';
+const qs=K?('?k='+encodeURIComponent(K)):'';
+function lerArq(el){ const f=el.files&&el.files[0]; if(!f) return;
+  const r=new FileReader(); r.onload=()=>{ document.getElementById('txt').value=r.result; msg('arquivo carregado — confira e clique em Salvar','warn'); }; r.readAsText(f,'utf-8'); }
+function msg(t,cls){ const m=document.getElementById('msg'); m.textContent=t; m.className=cls||'dim'; }
+async function salvar(){
+  const texto=document.getElementById('txt').value.trim();
+  if(!texto){ msg('cole alguma coisa primeiro','warn'); return; }
+  msg('salvando…');
+  try{
+    const r=await fetch(MOD+'/custos-manuais'+qs,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({texto})});
+    const j=await r.json();
+    if(!j.ok){ msg('✗ '+(j.erro||'falhou')+(j.ignoradas&&j.ignoradas.length?(' · ignoradas: '+j.ignoradas.length):''),'bad'); return; }
+    msg('✓ '+j.gravados+' custo(s) gravado(s)'+(j.ignoradas&&j.ignoradas.length?(' · '+j.ignoradas.length+' linha(s) ignorada(s)'):''),'ok');
+    document.getElementById('txt').value='';
+    carregar();
+  }catch(e){ msg('✗ '+e.message,'bad'); }
+}
+async function apagar(sku){
+  if(!confirm('Apagar o custo manual de '+sku+'?')) return;
+  await fetch(MOD+'/custos-manuais'+qs,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({apagar:sku})});
+  carregar();
+}
+async function carregar(){
+  const el=document.getElementById('lista');
+  try{
+    const r=await fetch(MOD+'/custos-manuais'+(qs?qs+'&':'?')+'lista=1');
+    const j=await r.json();
+    if(!j.ok||!j.total){ el.innerHTML='<span class="dim">nenhum custo manual gravado</span>'; return; }
+    el.innerHTML='<table><tr><th>SKU</th><th>Custo/un.</th><th>Quando</th><th></th></tr>'+
+      j.itens.map(i=>'<tr><td><code>'+esc(i.sku)+'</code></td><td>R$ '+Number(i.custo).toFixed(2).replace('.',',')+
+      '</td><td class="dim">'+(i.em?String(i.em).slice(0,10).split('-').reverse().join('/'):'—')+
+      '</td><td><button class="sec" style="padding:3px 8px;font-size:11px" onclick="apagar('+JSON.stringify(i.sku).replace(/"/g,'&quot;')+')">apagar</button></td></tr>').join('')+
+      '</table><div class="dim" style="margin-top:6px">'+j.total+' SKU(s)</div>';
+  }catch(e){ el.innerHTML='<span class="bad">erro: '+e.message+'</span>'; }
+}
+function esc(s){ return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+carregar();
+</script></div></body></html>`;
+}
+
+function parsearCustosColados(txt) {
+  const linhas = String(txt || '').split(/\r?\n/);
+  const itens = {}; const ignoradas = [];
+  const limpa = x => String(x || '').trim().replace(/^["']|["']$/g, '');
+  const paraNumero = s => {
+    let b = String(s || '').replace(/[R$\s]/gi, '');
+    if (!b) return NaN;
+    const temVirg = b.indexOf(',') >= 0, temPonto = b.indexOf('.') >= 0;
+    if (temVirg && temPonto) b = (b.lastIndexOf(',') > b.lastIndexOf('.'))
+        ? b.replace(/\./g, '').replace(',', '.')     // 1.234,56 → 1234.56
+        : b.replace(/,/g, '');                       // 1,234.56 → 1234.56
+    else if (temVirg) b = b.replace(',', '.');       // 33,82 → 33.82
+    return Number(b);
+  };
+  for (const ln of linhas) {
+    const l = ln.trim();
+    if (!l) continue;
+    let partes;
+    if (l.indexOf('\t') >= 0) partes = l.split('\t');
+    else if (l.indexOf(';') >= 0) partes = l.split(';');
+    else {
+      /* Sem tab nem ';', o valor é o ÚLTIMO CAMPO NUMÉRICO da linha e o SKU é todo o resto.
+         Achar isso cortando na última vírgula não funciona: em "R$ 8,90" a última vírgula está
+         DENTRO do número, e o corte devolvia custo 90. Então eu casco o número pelo FIM da linha
+         — aceitando R$, espaço, milhar e decimal — e o que sobra na frente é o SKU, mesmo que
+         tenha vírgulas ("KIT 10x LED, 3000K, 5W"). */
+      const m = l.match(/^(.*?)[\s,;]*(?:R\$\s*)?(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d+)?|\d+(?:[.,]\d+)?)\s*$/i);
+      if (m && m[1] && m[1].trim()) partes = [m[1], m[2]];
+      else partes = [l];   // sem número no fim: linha ignorada logo abaixo
+    }
+    partes = (partes || []).map(limpa).filter(x => x !== '');
+    if (partes.length < 2) { ignoradas.push(l.slice(0, 60)); continue; }
+    const sku = String(partes[0]).replace(/[\s,;]+$/, '');
+    const custo = paraNumero(partes[partes.length - 1]);
+    if (!sku || sku.toLowerCase() === 'sku' || !isFinite(custo) || custo <= 0) { ignoradas.push(l.slice(0, 60)); continue; }
+    itens[sku] = { custo: Math.round(custo * 10000) / 10000, em: new Date().toISOString() };
+  }
+  return { itens, ignoradas };
+}
+
 async function shopeeKeepAlive() {
   const sess = shopeeSessaoLer();
   if (!sess.cookie) { console.log('[AMBBKP] shopee keep-alive: sem cookie (env ' + SHOPEE_ENV_COOKIE + ' vazia) — nada a fazer'); return { ok: false, motivo: 'sem cookie' }; }
@@ -1325,7 +1482,17 @@ function routes(readBody) {
       const bg = async (pth) => { for (let t = 0; t < 3; t++) { const r = await blingGet(pth); if (r && r.ok) return r; await dorme(1100 + t * 500); } return await blingGet(pth); };   // anti-429: re-tenta com pausa crescente
       let resolveFalhas = 0;
       // 0) cache PERMANENTE de custos (_custos.json, populado pelo custo-sync em background)
-      const _ccAll = readJson(path.join(CACHE_DIR, '_custos.json'), {});
+      /* 21/08 — CUSTO MANUAL entra AQUI, atrás do Bling: só preenche o que o _custos.json não
+         tem. Regra do Diego: "se o bling passar a ter custo, aí deixa mandar o Bling". */
+      const _ccAll = (() => {
+        const doBling = readJson(path.join(CACHE_DIR, '_custos.json'), {}) || {};
+        const man = lerCustosManuais();
+        for (const k of Object.keys(man)) {
+          const jaTem = doBling[k] && Number(doBling[k].custo) > 0;
+          if (!jaTem && Number(man[k].custo) > 0) doBling[k] = { custo: Number(man[k].custo), manual: true };
+        }
+        return doBling;
+      })();
       const ids = {};
       const aResolver = [];
       for (const sku of faltam) {
@@ -3054,6 +3221,58 @@ function routes(readBody) {
       json(res, 200, { ok: true, iniciado: true, de: deC, ate: ateC, mensagem: 'reaplicando custo em background — ?status=1 p/ acompanhar', acompanhe: _urlStatus(req, '/amb-checkout-offline/reaplicar-custo', '', kC) });
       return true;
     }
+    /* ═══ 21/08 — CUSTOS MANUAIS: tela + gravação (pedido do Diego) ═══════════════════════
+    GET  /amb-checkout-offline/custos-manuais        → tela (colar do Excel ou subir CSV)
+    POST /amb-checkout-offline/custos-manuais        → grava {texto} ou {itens}
+    GET  /amb-checkout-offline/custos-manuais?lista=1 → o que está gravado hoje
+    A regra é a que ele definiu: o manual só vale onde o BLING não tem custo. */
+    if (p === '/amb-checkout-offline/custos-manuais') {
+      const kM = urlObj.searchParams.get('k') || '';
+      const sM = validarSessao(req.headers['cookie']);
+      if (!((process.env.ADMIN_KEY && kM === process.env.ADMIN_KEY) || (sM && ehAdmin(sM)))) { json(res, 404, { error: 'not found' }); return true; }
+
+      if (method === 'GET' && urlObj.searchParams.get('lista') === '1') {
+        const m = lerCustosManuais();
+        const itens = Object.keys(m).sort().map(k => ({ sku: k, custo: m[k].custo, em: m[k].em || null }));
+        json(res, 200, { ok: true, total: itens.length, itens });
+        return true;
+      }
+
+      if (method === 'POST') {
+        let corpo = '';
+        await new Promise(r => { req.on('data', c => { corpo += c; if (corpo.length > 4e6) req.destroy(); }); req.on('end', r); req.on('error', r); });
+        let body = {};
+        try { body = JSON.parse(corpo || '{}'); } catch (e) { json(res, 400, { ok: false, erro: 'JSON inválido' }); return true; }
+        const atual = lerCustosManuais();
+
+        if (body.apagar) {                       // apagar um SKU ou todos
+          if (body.apagar === '*') { gravarCustosManuais({}); json(res, 200, { ok: true, apagados: Object.keys(atual).length, total: 0 }); return true; }
+          const k = String(body.apagar).trim();
+          const tinha = !!atual[k];
+          delete atual[k];
+          gravarCustosManuais(atual);
+          json(res, 200, { ok: true, apagado: tinha ? k : null, total: Object.keys(atual).length });
+          return true;
+        }
+
+        const r = parsearCustosColados(body.texto || '');
+        const novos = Object.keys(r.itens).length;
+        if (!novos) { json(res, 400, { ok: false, erro: 'nenhuma linha válida', ignoradas: r.ignoradas.slice(0, 20) }); return true; }
+        /* substitui o que veio e mantém o resto — subir uma planilha parcial não apaga o antigo */
+        for (const k of Object.keys(r.itens)) atual[k] = r.itens[k];
+        gravarCustosManuais(atual);
+        json(res, 200, { ok: true, gravados: novos, ignoradas: r.ignoradas.slice(0, 20), total: Object.keys(atual).length,
+                         leia: 'o custo manual só vale onde o Bling não tem custo para o SKU' });
+        return true;
+      }
+
+      if (method === 'GET') {
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.end(telaCustosManuais('AMBTotal', '/amb-checkout-offline'));
+        return true;
+      }
+    }
+
     if (method === 'GET' && p === '/amb-checkout-offline/custo-sync') {
       const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
       const sessC = validarSessao(req.headers['cookie']);

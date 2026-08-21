@@ -295,7 +295,19 @@ function rotasHistorico(ctx) {
       // 28/07: o backfill gravou o custo que existia NAQUELE dia. Depois o banco de custos cresceu
       // (de 288 pra 541 SKUs), então muita linha antiga ficou sem custo à toa. Aqui completamos na
       // LEITURA com o _custos.json atual — sem precisar refazer o backfill inteiro.
-      const _ccL = readJson(path.join(CACHE_DIR, '_custos.json'), {});
+      /* 21/08 — o custo MANUAL também vale no período longo: sem isto o número apareceria
+         em Hoje/7 dias e sumiria no Mês/Ano — o mesmo padrão que o Diego encontrou 3× em
+         20/08 (links, tarifa do TikTok, frete da Magalu). Atrás do Bling, como na tela. */
+      const _ccL = (() => {
+        const b = readJson(path.join(CACHE_DIR, '_custos.json'), {}) || {};
+        let man = {};
+        try { man = readJson(path.join(CACHE_DIR, '_custos-manuais.json'), {}) || {}; } catch (e) { man = {}; }
+        for (const k of Object.keys(man)) {
+          const jaTem = b[k] && Number(b[k].custo) > 0;
+          if (!jaTem && Number(man[k].custo) > 0) b[k] = { custo: Number(man[k].custo), manual: true };
+        }
+        return b;
+      })();
       // 01/08 — IMPOSTO CALCULADO NA LEITURA (mesma ideia do custo). Antes ele ficava CONGELADO na
       // linha, gravado no momento do backfill: editar a alíquota de um mês não mudava nada no
       // Mês/Ano, e só re-rodando o backfill daquele período. Agora a alíquota atual manda — editou,
