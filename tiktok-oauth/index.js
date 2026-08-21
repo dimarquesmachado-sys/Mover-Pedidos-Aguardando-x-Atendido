@@ -293,8 +293,14 @@ async function tratar(req, res, urlObj, json) {
     const todos = brutos
       .filter(d => { const bom = d && typeof d === 'object' && !Array.isArray(d); if (!bom) registrosPodres++; return bom; })
       .sort((a, b) => (Number(b.criado_em) || 0) - (Number(a.criado_em) || 0));
-    if (g && g.devolucoes && (typeof g.devolucoes !== 'object' || Array.isArray(g.devolucoes)) && !cacheErro)
-      cacheErro = 'campo devolucoes nao e objeto (veio ' + (Array.isArray(g.devolucoes) ? 'array' : typeof g.devolucoes) + ')';
+    /* Codex (P2, rodada 4): eu exigia `g.devolucoes` VERDADEIRO antes de reclamar da forma, então
+       {"devolucoes":null} (ou 0, ou "") passava batido e a rota respondia ok:true com zero
+       registros — parecendo "coletou e não achou nada" quando o arquivo está corrompido. Basta o
+       campo EXISTIR: se existe e não é objeto simples, é erro de cache, seja qual for o valor. */
+    if (g && Object.prototype.hasOwnProperty.call(g, 'devolucoes') &&
+        (g.devolucoes === null || typeof g.devolucoes !== 'object' || Array.isArray(g.devolucoes)) && !cacheErro)
+      cacheErro = 'campo devolucoes nao e objeto (veio ' +
+        (g.devolucoes === null ? 'null' : Array.isArray(g.devolucoes) ? 'array' : typeof g.devolucoes) + ')';
     if (registrosPodres && !cacheErro) cacheErro = registrosPodres + ' registro(s) do cache estao malformados e foram ignorados';
     let limite = parseInt(q.get('limite') || '', 10);
     if (!Number.isFinite(limite) || limite < 1 || limite > 200) limite = 30;
