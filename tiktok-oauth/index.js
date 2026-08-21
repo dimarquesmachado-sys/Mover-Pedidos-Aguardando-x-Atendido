@@ -283,12 +283,27 @@ async function tratar(req, res, urlObj, json) {
       if (e && e.code === 'ENOENT') semCache = true;
       else cacheErro = String((e && e.message) || e).slice(0, 160);
     }
-    const todos = Object.values((g && g.devolucoes) || {})
+    /* Codex (P2, rodada 3): eu validava só a RAIZ do cache. Um arquivo com a forma certa por fora
+       e registro podre dentro — {"devolucoes":{"x":null}} — passava na checagem e quebrava aqui,
+       devolvendo 500 em vez de dizer que o cache está corrompido. E 500 numa rota de diagnóstico é
+       o pior desfecho: ela existe justamente pra CONTAR o que há de errado. Agora cada registro é
+       conferido; os podres são contados e relatados, e os bons seguem sendo servidos. */
+    const brutos = Object.values((g && g.devolucoes && typeof g.devolucoes === 'object' && !Array.isArray(g.devolucoes)) ? g.devolucoes : {});
+    let registrosPodres = 0;
+    const todos = brutos
+      .filter(d => { const bom = d && typeof d === 'object' && !Array.isArray(d); if (!bom) registrosPodres++; return bom; })
       .sort((a, b) => (Number(b.criado_em) || 0) - (Number(a.criado_em) || 0));
+    if (g && g.devolucoes && (typeof g.devolucoes !== 'object' || Array.isArray(g.devolucoes)) && !cacheErro)
+      cacheErro = 'campo devolucoes nao e objeto (veio ' + (Array.isArray(g.devolucoes) ? 'array' : typeof g.devolucoes) + ')';
+    if (registrosPodres && !cacheErro) cacheErro = registrosPodres + ' registro(s) do cache estao malformados e foram ignorados';
     let limite = parseInt(q.get('limite') || '', 10);
     if (!Number.isFinite(limite) || limite < 1 || limite > 200) limite = 30;
     const cruCampos = {};
-    for (const d of todos) for (const c of (d.cru_campos || [])) cruCampos[c] = (cruCampos[c] || 0) + 1;
+    for (const d of todos) {
+      const cc = d.cru_campos;
+      if (!Array.isArray(cc)) continue;   // registro sem a lista (ou com forma errada) não derruba a união
+      for (const c of cc) { const k = String(c); cruCampos[k] = (cruCampos[k] || 0) + 1; }
+    }
     json(res, 200, { ok: true, loja,
       guardadas: todos.length,
       // `sem_cache` separa "NUNCA coletou" (arquivo nem existe) de "coletou e veio
@@ -296,6 +311,7 @@ async function tratar(req, res, urlObj, json) {
       sem_cache: semCache,
       cache_erro: cacheErro,
       atualizado: (g && g.atualizado) || null, coleta_ok_em: (g && g.ok_em) || null,
+      registros_malformados: registrosPodres,   // contados e ignorados, em vez de derrubar a rota
       cru_campos_uniao: cruCampos,
       registros: todos.slice(0, limite) });
     return true;
