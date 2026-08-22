@@ -43,10 +43,13 @@ function primeiraImagem(prod) {
   const im = (prod.midia && prod.midia.imagens) || {};
   const ext = im.externas;
   if (ext && ext[0] && ext[0].link) return ext[0].link;
-  // 11/08 (herdado da AMB): kits apareciam sem foto porque a imagem deles é INTERNA
-  // (arquivo enviado ao Bling), e aqui só se lia a externa.
+  // 11/08: os KITS (10x, 7x, 6x…) apareciam sem foto no TOP Produtos mesmo tendo imagem no
+  // Bling — porque a imagem deles é INTERNA (arquivo enviado), e aqui só se lia a externa.
   const int = im.internas;
-  if (int && int[0] && (int[0].link || int[0].url)) return int[0].link || int[0].url;
+  // Codex (#183): o campo que traz a URL utilizável da imagem interna é `linkMiniatura`.
+  // Sem ele, esta correção não corrigia nada — os kits continuavam sem foto nas 3 empresas.
+  if (int && int[0] && (int[0].link || int[0].url || int[0].linkMiniatura))
+    return int[0].link || int[0].url || int[0].linkMiniatura;
   const url = im.imagensURL;
   if (url && url[0] && (url[0].link || url[0])) return url[0].link || url[0];
   return null;
