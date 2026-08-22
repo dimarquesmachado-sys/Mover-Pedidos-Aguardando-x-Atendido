@@ -107,15 +107,24 @@ function ehAdmin(nome) {
   return a.length === 0 || a.includes(String(nome || '').trim().toLowerCase());
 }
 
-async function blingGet(pathUrl, tentativas = 3) {
+/* 22/08 (Codex #183): 3º parâmetro OPCIONAL `signal`, pra quem chama poder CANCELAR de verdade.
+   Sem ele, o Promise.race do ciclo rejeitava só a espera — o fetch continuava vivo aqui dentro, e
+   cada página que estourava o prazo deixava até 4 conexões penduradas, acumulando a cada ciclo. */
+async function blingGet(pathUrl, tentativas = 3, signal = undefined) {
   let token;
   try { token = await garantirToken(); }
   catch (e) { return { ok: false, status: 401, data: null, erro: 'token: ' + e.message }; }
   for (let t = 0; t < tentativas; t++) {
+    if (signal && signal.aborted) return { ok: false, status: 0, data: null, erro: 'abortado' };
     let r;
     try {
-      r = await fetch(BLING_BASE + pathUrl, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } });
-    } catch (e) { await sleep(800); continue; }
+      const _op = { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } };
+      if (signal) _op.signal = signal;
+      r = await fetch(BLING_BASE + pathUrl, _op);
+    } catch (e) {
+      if (signal && signal.aborted) return { ok: false, status: 0, data: null, erro: 'abortado' };
+      await sleep(800); continue;
+    }
     if (r.status === 429) { await sleep(1500 * (t + 1)); continue; }
     const txt = await r.text();
     let data = null; try { data = JSON.parse(txt); } catch (e) {}
