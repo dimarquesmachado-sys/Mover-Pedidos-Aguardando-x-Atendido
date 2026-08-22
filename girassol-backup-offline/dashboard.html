@@ -977,9 +977,12 @@ async function checarCancelados(silencioso){
     const r = await fetch(MOD+'/status-mkt?de='+de+'&ate='+ate, {credentials:'same-origin'});
     const d = await r.json().catch(()=>null);
     if(d && d.ok){
-      const rh = await fetch(MOD+'/historico',{credentials:'same-origin'});
-      const dh = await rh.json();
-      if(dh && Array.isArray(dh.itens)){ DADOS=dh.itens; VENDAS=Array.isArray(dh.vendas_bling)?dh.vendas_bling:[]; prepararVendas(); render(); renderAnalise(); }
+      /* ═══ Codex + Claude (revisão do #172, item 4): O AVISO VEM ANTES DO HISTÓRICO ═══════
+         A ordem anterior era: buscar /historico → render → pintar o aviso. Como o `rh.json()` do
+         histórico não tem .catch(), se ele falhasse (ou o render lançasse) o fluxo pulava direto
+         pro catch e o aviso — que JÁ tinha sido obtido com sucesso — nunca era pintado. Ou seja:
+         justo quando algo dá errado, o operador perde o sinal de que algo não foi verificado.
+         Agora pinto o aviso assim que tenho a resposta, e só depois vou buscar o histórico. */
       /* Codex (P2, r2): a resposta passou a admitir quando um canal NÃO foi verificado, mas o
          aviso morria aqui — só `cancelados_agora` era lido. De que adianta o backend ser honesto
          se a tela não conta? Agora o aviso aparece junto, e também quando nada foi cancelado
@@ -998,6 +1001,9 @@ async function checarCancelados(silencioso){
       if(elAv) elAv.innerHTML = avisos.length
         ? '<div class="aviso">⚠️ Cancelamentos — '+esc(avisos.join(' · '))+'</div>'
         : '';
+      const rh = await fetch(MOD+'/historico',{credentials:'same-origin'});
+      const dh = await rh.json();
+      if(dh && Array.isArray(dh.itens)){ DADOS=dh.itens; VENDAS=Array.isArray(dh.vendas_bling)?dh.vendas_bling:[]; prepararVendas(); render(); renderAnalise(); }
       if(!silencioso){
         const partes = [];
         if(d.cancelados_agora) partes.push(d.cancelados_agora+' pedido(s) cancelados no marketplace foram marcados.');
@@ -1599,7 +1605,15 @@ function irPra(id){
   const y=el.getBoundingClientRect().top + window.pageYOffset - off;
   window.scrollTo({top:Math.max(0,y), behavior:'smooth'});
 }
-function setPeriodo(p){ periodo=p; espelharPeriodoNaAnalise(); window._anForce=true; comAncora(()=>{ render(); renderAnalise(); }); }
+/* Codex + Claude (revisão do #172, item 3): o aviso de cobertura vale pro período que foi
+   verificado. Como o auto-check só roda em 'dia', ao trocar de HOJE pra ONTEM ou 7 dias o texto
+   antigo continuava na tela como se fosse do novo intervalo — e sem botão manual não havia como
+   reverificar. Trocar de período limpa o aviso; ele volta na próxima verificação. */
+function setPeriodo(p){
+  periodo=p;
+  const _av=document.getElementById('mktAviso'); if(_av) _av.innerHTML='';
+  espelharPeriodoNaAnalise(); window._anForce=true; comAncora(()=>{ render(); renderAnalise(); });
+}
 // d48: o seletor do TOPO é o botão MASTER — escolheu lá, a Análise de Vendas obedece junto.
 // (os chips da própria Análise continuam funcionando pra quem quiser um recorte diferente só nela)
 function espelharPeriodoNaAnalise(){
@@ -1663,6 +1677,10 @@ function montar(){
   '</div></div>'+
   '<div class="wrap">'+
       '<div id="avisoAliq"></div>'+
+      /* Codex + Claude (revisão do #172, item 1): o aviso estava pendurado no secUF, no MEIO da
+         página, e o alerta só sai no clique manual — então quem trabalha no topo não via nada.
+         Sobe pra junto dos avisos que já existem ANTES dos KPIs. */
+      '<div id="mktAviso"></div>'+
       '<div id="histAviso" style="font-size:12px;color:var(--mut);margin:0 0 8px"></div>'+'<div class="kpis" id="kpis"></div>'+
     '<div class="sec" id="secSemCusto" style="display:none"><h2>\u26a0\ufe0f SKUs que venderam SEM custo <span class="hint">no per\u00edodo \u00b7 estes pedidos ficam FORA da margem</span></h2>'+
       '<div id="scTab" class="mut" style="font-size:12px"></div>'+
@@ -1789,7 +1807,7 @@ function montar(){
       '<div id="grafTot" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px"></div>'+
       '<div id="grafProg" style="overflow-x:auto"></div>'+
       '<div class="nota" id="grafLeg"></div></div>'+
-    '<div class="sec" id="secUF"><h2>🗺️ Vendas por Estado</h2><div style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start;justify-content:center"><div style="flex:0 1 340px;min-width:260px"><div class="tw" id="twUF"><table id="tUF"></table></div><div id="ufAviso"></div><div id="mktAviso"></div></div><div id="ufMapa" style="flex:1 1 420px;min-width:300px;max-width:620px"></div></div></div>'+
+    '<div class="sec" id="secUF"><h2>🗺️ Vendas por Estado</h2><div style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start;justify-content:center"><div style="flex:0 1 340px;min-width:260px"><div class="tw" id="twUF"><table id="tUF"></table></div><div id="ufAviso"></div></div><div id="ufMapa" style="flex:1 1 420px;min-width:300px;max-width:620px"></div></div></div>'+
     '<div class="sec" id="secCustoHist"><h2>\ud83d\udcc8 Hist\u00f3rico de custo por SKU <span class="hint">o que valia em cada per\u00edodo \u00b7 venda antiga N\u00c3O muda quando o custo de hoje muda</span></h2>'+
       '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">'+
         '<input id="chSku" placeholder="digite o SKU e tecle Enter" onkeydown="if(event.key===&#39;Enter&#39;)verCustoHist()" '+
