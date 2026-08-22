@@ -1,4 +1,4 @@
-name: Claude x Codex - loop automatico
+name: Claude x Codex - loop automatico v4
 
 on:
   pull_request_target:
@@ -27,9 +27,15 @@ jobs:
       - name: Pedir revisao do Codex
         env:
           GH_TOKEN: ${{ github.token }}
+          AI_TOKEN: ${{ secrets.AI_TRIGGER_TOKEN }}
           PR: ${{ github.event.pull_request.number }}
         run: |
-          gh pr comment "$PR" \
+          if [ -z "$AI_TOKEN" ]; then
+            echo "Secret AI_TRIGGER_TOKEN ausente."
+            exit 1
+          fi
+
+          GH_TOKEN="$AI_TOKEN" gh pr comment "$PR" \
             --repo "$GITHUB_REPOSITORY" \
             --body "@codex review"
 
@@ -45,6 +51,7 @@ jobs:
       - name: Chamar Claude para corrigir
         env:
           GH_TOKEN: ${{ github.token }}
+          AI_TOKEN: ${{ secrets.AI_TRIGGER_TOKEN }}
           PR: ${{ github.event.pull_request.number }}
           REVIEW_ID: ${{ github.event.review.id }}
           REVIEWED_SHA: ${{ github.event.review.commit_id }}
@@ -109,7 +116,12 @@ jobs:
 
           ROUND=$((ROUNDS + 1))
 
-          gh pr comment "$PR" --repo "$REPO" --body-file - <<EOF
+          if [ -z "$AI_TOKEN" ]; then
+            echo "Secret AI_TRIGGER_TOKEN ausente."
+            exit 1
+          fi
+
+          GH_TOKEN="$AI_TOKEN" gh pr comment "$PR" --repo "$REPO" --body-file - <<EOF
           <!-- ai-codex-review:$REVIEW_ID -->
           <!-- ai-codex-round -->
           🔁 **Rodada automática $ROUND/5 — Claude ↔ Codex**
@@ -138,6 +150,7 @@ jobs:
       - name: Validar e fazer auto-merge
         env:
           GH_TOKEN: ${{ github.token }}
+          AI_TOKEN: ${{ secrets.AI_TRIGGER_TOKEN }}
           PR: ${{ github.event.issue.number }}
           COMMENT_BODY: ${{ github.event.comment.body }}
         run: |
@@ -211,7 +224,12 @@ jobs:
             "$REVIEWED"*) ;;
             *)
               echo "OK do Codex e de commit antigo; pedindo nova revisao."
-              gh pr comment "$PR" \
+              if [ -z "$AI_TOKEN" ]; then
+                parar_humano "O secret AI_TRIGGER_TOKEN está ausente; não consigo pedir nova revisão ao Codex."
+                exit 0
+              fi
+
+              GH_TOKEN="$AI_TOKEN" gh pr comment "$PR" \
                 --repo "$REPO" \
                 --body "@codex review"
               exit 0
