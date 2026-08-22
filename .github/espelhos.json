@@ -54,10 +54,7 @@
     "danfe-simplificado.js",
     "fusao-etiqueta.js"
   ],
-  "identicos_gir_good": [
-    "ciclo.js",
-    "index.js"
-  ],
+  "identicos_gir_good": [],
   "assinaturas": {
     "painel.html": [
       "function souAdmin",
@@ -77,9 +74,20 @@
       "garantirToken"
     ],
     "ciclo.js": [
-      "skus_pick",
+      "TETO_MS",
+      "falhouNaPagina",
+      "listarAtendidos",
+      "paginasRefeitas",
+      "servicoDoPedido",
       "shipment_labels",
-      "servicoDoPedido"
+      "skus_pick"
+    ],
+    "index.js": [
+      "CONFERIDOS_FILE",
+      "ehAdmin",
+      "function routes",
+      "validarSessao"
     ]
-  }
+  },
+  "_nota_ciclo_index": "22/08: ciclo.js e index.js DEIXARAM de ser cobrados como arquivo idêntico. A GOOD tem o filtro de unidade de negócio Full (GOODBKP_UN_FULL) que as outras não têm, e o index.js dela é ~800 linhas menor por não ter dashboard/histórico/backfill. Exigir igualdade gerava um alarme que NUNCA fecha — e alarme que sempre acusa deixa de ser informação. Agora valem as ASSINATURAS: se alguém apagar a re-tentativa de página ou a trava de sessão, o verificador acusa; diferença legítima de funcionalidade, não."
 }

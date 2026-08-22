@@ -103,10 +103,9 @@ async function zplParaPdf(zpl) {
 async function etiquetaPdf(blingId, dir) {
   // 0) PDF já cacheado nesta pasta → usa direto (offline; não depende do Bling re-servir, ex: Amazon pós-despacho)
   if (dir) { try { const c = fs.readFileSync(path.join(dir, 'etiqueta.pdf')); if (c && c.length && c.slice(0, 4).toString('latin1') === '%PDF') return c; } catch (e) {} }
-  // 09/08 (b137, Codex): se o admin ANEXOU a etiqueta, o Bling NÃO manda mais aqui.
-  // O passo 1 pedia o PDF ao Bling ANTES de olhar o ZPL local — então, num pedido em que
-  // o admin substituiu a etiqueta por ZPL, o /etiqueta-pdf e o /imprimir voltavam a servir
-  // a etiqueta VELHA do Bling. Com o carimbo, pula direto pro ZPL que ele subiu.
+  // porte (Codex): se o admin ANEXOU a etiqueta, o Bling NÃO manda aqui. O passo 1
+  // pedia o PDF ao Bling ANTES do ZPL local — então /etiqueta-pdf e /imprimir voltavam
+  // a servir a etiqueta VELHA. Com o carimbo, pula direto pro ZPL que ele subiu.
   let _anexada = false;
   if (dir) { try { const _s = JSON.parse(fs.readFileSync(path.join(dir, 'pedido.json'), 'utf8')); _anexada = !!(_s && _s.etiqueta_anexada); } catch (e) {} }
   // 1) PDF nativo do Bling — o Bling gera o PDF da etiqueta de qualquer marketplace

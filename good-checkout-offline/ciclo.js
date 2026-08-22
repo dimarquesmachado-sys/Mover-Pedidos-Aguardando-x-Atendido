@@ -124,13 +124,32 @@ async function listarAtendidos() {
   const out = [];
   let fetchOk = false;
   let completa = false;              // só true se a paginação foi até o fim SEM falhar no meio
+  let paginasRefeitas = 0, falhouNaPagina = null;
   for (let pagina = 1; pagina <= 50; pagina++) {
-    const { ok, data } = await blingGet(`/pedidos/vendas?${qs}&pagina=${pagina}&limite=100`);
+    // 13/08 — uma falha isolada (429/timeout do Bling) fazia a lista voltar INCOMPLETA e a
+    // reconciliação era pulada TODA vez. Efeito medido na Girassol: 9 pedidos ML já despachados
+    // presos como "sem etiqueta" no painel. Agora cada página é re-tentada antes de desistir.
+    // (22/08: a GOOD estava sem esta proteção — mesmo risco, mesmo código.)
+    let ok = false, data = null;
+    for (let tent = 1; tent <= 4; tent++) {
+      // Codex PR#53: o node-fetch v2 usado pelo blingGet NÃO tem timeout por padrão — se o Bling
+      // aceita a conexão e não responde, o await ficava pendurado pra sempre: o ciclo travava e
+      // a re-tentativa (o motivo deste PR) nunca acontecia. Cada tentativa tem prazo próprio.
+      const TETO_MS = 45000;
+      try {
+        ({ ok, data } = await Promise.race([
+          blingGet(`/pedidos/vendas?${qs}&pagina=${pagina}&limite=100`),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('timeout ' + TETO_MS + 'ms na página ' + pagina)), TETO_MS))
+        ]));
+      } catch (e) { ok = false; data = null; console.log('[GOODBKP] página ' + pagina + ' tentativa ' + tent + ': ' + String(e.message || e).slice(0, 80)); }
+      if (ok) { if (tent > 1) paginasRefeitas++; break; }
+      await new Promise(r => setTimeout(r, 1200 * tent));
+    }
     if (pagina === 1) fetchOk = ok;        // marca se o Bling respondeu (p/ não limpar cache offline)
     const lista = (data && data.data) || [];
     // ⚠️ ANTES: um !ok na página 2+ saía do loop e a lista PARCIAL era devolvida como ok=true —
     // a reconciliação então apagava do cache todo pedido que faltou (levando junto etiqueta anexada).
-    if (!ok) break;                        // falhou no meio → completa fica FALSE
+    if (!ok) { falhouNaPagina = pagina; break; }   // falhou 4× → completa fica FALSE
     if (lista.length === 0) { completa = true; break; }
     out.push(...lista);
     if (lista.length < 100) { completa = true; break; }
@@ -181,7 +200,7 @@ async function listarAtendidos() {
     if (ocultosFull) console.log(`[GOODBKP] filtro Full: ${ocultosFull} pedido(s) ocultado(s) da fila do estoquista (UN ${UN_FULL.join(',')}; ${indefinidos.length} checado(s) por detalhe)`);
   }
 
-  return { ok: fetchOk, completa, pedidos, ocultosFull, idsFullVistos };
+  return { ok: fetchOk, completa, pedidos, ocultosFull, idsFullVistos, paginas_refeitas: paginasRefeitas, falhou_na_pagina: falhouNaPagina };
 }
 
 async function detalhePedido(id) {
@@ -450,7 +469,7 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
     const man      = manifest();
     const cacheEan = skuEanCache();
     const locC     = locCache();
-    const { ok: listaOk, completa: listaCompleta, pedidos: atendidos, idsFullVistos } = await listarAtendidos();
+    const { ok: listaOk, completa: listaCompleta, pedidos: atendidos, idsFullVistos, paginas_refeitas: pagRef, falhou_na_pagina: pagFalha } = await listarAtendidos();
     console.log(`[GOODBKP] ${atendidos.length} pedido(s) ATENDIDO(${SIT_ATENDIDO}) na janela de ${JANELA_DIAS}d (bling ok=${listaOk})`);
 
     // EXPURGO FULL: remove do cache os pedidos que a lista trouxe como Full
@@ -756,6 +775,8 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
       rodouEm: new Date().toISOString(),
       duracaoSeg: Math.round((Date.now() - t0) / 1000),
       blingOk: listaOk,                            // o Bling respondeu neste ciclo? (p/ o /saude)
+      paginasRefeitas: pagRef || 0,                // 22/08: quantas páginas precisaram de re-tentativa
+      falhouNaPagina: pagFalha || null,            // se a lista veio incompleta, em qual página parou
       total: ids.length,
       comEtiqueta: ids.filter(i => man[i].tem_etiqueta).length,
       semEtiqueta: ids.filter(i => !man[i].tem_etiqueta).length,
