@@ -970,6 +970,21 @@ async function carregarHistorico(de, ate){
 
 // 🔄 pergunta ao ML/Shopee se algum pedido do período foi CANCELADO pelo cliente
 let _stMkt = false;
+/* ═══ Codex (P2, revisão de b66f4e2): O AVISO É GUARDADO COM O INTERVALO QUE O GEROU ═════════
+   Na rodada anterior eu resolvi o "texto velho de HOJE aparecendo em ONTEM" do jeito mais bruto:
+   trocar de período apagava o aviso. Só que o auto-check roda UMA vez por período (`_autoDet`),
+   e não existe botão manual — então reclicar o chip HOJE, ou sair e voltar pra ele, apagava um
+   aviso legítimo que só reapareceria dez minutos depois. Apagar informação verdadeira é o mesmo
+   pecado de mostrar informação velha, invertido.
+   Agora guardo { de, ate, html }: quem pinta compara com o intervalo que está na tela. Se bate,
+   repinta; se não bate, some. Vale também pra corrida — se o Diego trocar de período no meio do
+   fetch, a resposta que chegar depois não se pinta no intervalo errado. */
+let _mktAviso = null;
+function pintarAvisoMkt(){
+  const el = document.getElementById('mktAviso'); if(!el) return;
+  const { de, ate } = intervalo();
+  el.innerHTML = (_mktAviso && _mktAviso.de===de && _mktAviso.ate===ate) ? _mktAviso.html : '';
+}
 async function checarCancelados(silencioso){
   if(_stMkt) return; _stMkt = true;
   try{
@@ -997,10 +1012,10 @@ async function checarCancelados(silencioso){
       const avisos = [];
       if(d.aviso_tiktok) avisos.push(d.aviso_tiktok);
       if(Array.isArray(d.sem_cobertura) && d.sem_cobertura.length) avisos.push('sem verificação: '+d.sem_cobertura.join(', '));
-      const elAv = document.getElementById('mktAviso');
-      if(elAv) elAv.innerHTML = avisos.length
+      _mktAviso = { de, ate, html: avisos.length
         ? '<div class="aviso">⚠️ Cancelamentos — '+esc(avisos.join(' · '))+'</div>'
-        : '';
+        : '' };
+      pintarAvisoMkt();
       const rh = await fetch(MOD+'/historico',{credentials:'same-origin'});
       const dh = await rh.json();
       if(dh && Array.isArray(dh.itens)){ DADOS=dh.itens; VENDAS=Array.isArray(dh.vendas_bling)?dh.vendas_bling:[]; prepararVendas(); render(); renderAnalise(); }
@@ -1608,10 +1623,11 @@ function irPra(id){
 /* Codex + Claude (revisão do #172, item 3): o aviso de cobertura vale pro período que foi
    verificado. Como o auto-check só roda em 'dia', ao trocar de HOJE pra ONTEM ou 7 dias o texto
    antigo continuava na tela como se fosse do novo intervalo — e sem botão manual não havia como
-   reverificar. Trocar de período limpa o aviso; ele volta na próxima verificação. */
+   reverificar. Trocar de período repinta a partir do que foi verificado PARA ESTE intervalo:
+   some no que não foi verificado, volta ao voltar pro HOJE (ver `pintarAvisoMkt`). */
 function setPeriodo(p){
   periodo=p;
-  const _av=document.getElementById('mktAviso'); if(_av) _av.innerHTML='';
+  pintarAvisoMkt();
   espelharPeriodoNaAnalise(); window._anForce=true; comAncora(()=>{ render(); renderAnalise(); });
 }
 // d48: o seletor do TOPO é o botão MASTER — escolheu lá, a Análise de Vendas obedece junto.
