@@ -1,5 +1,4 @@
 name: Claude Code
-
 on:
   issue_comment:
     types: [created]
@@ -9,7 +8,6 @@ on:
     types: [opened, assigned]
   pull_request_review:
     types: [submitted]
-
 jobs:
   claude:
     if: |
@@ -17,35 +15,21 @@ jobs:
       (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
       (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
       (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
-
     runs-on: ubuntu-latest
-
     permissions:
       contents: write
       pull-requests: write
       issues: write
       id-token: write
       actions: read
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
         with:
           fetch-depth: 1
-
       - name: Run Claude Code
         id: claude
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-
-          # Opcional: frase que dispara o Claude.
-          # O padrão já é @claude.
-          # trigger_phrase: "/claude"
-
-          # Opcional: aumentar autonomia do Claude.
-          # Eu deixaria comentado por enquanto até validar o OAuth.
-          #
-          # claude_args: |
-          #   --max-turns 30
-          #   --system-prompt "Trabalhe de forma autônoma até concluir integralmente a tarefa. Não pare após apenas analisar ou planejar. Implemente todos os itens solicitados, rode as verificações disponíveis, corrija problemas encontrados e continue sem pedir aprovação intermediária. Em PR existente, trabalhe na mesma branch. Só pare se houver bloqueio real que exija decisão humana, credencial ausente ou operação destrutiva/irreversível."
+          show_full_output: true
