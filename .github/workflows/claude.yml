@@ -17,13 +17,16 @@ jobs:
       (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
       (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
       (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
+
     runs-on: ubuntu-latest
+
     permissions:
       contents: write
       pull-requests: write
       issues: write
       id-token: write
-      actions: read # Required for Claude to read CI results on PRs
+      actions: read
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -34,24 +37,15 @@ jobs:
         id: claude
         uses: anthropics/claude-code-action@v1
         with:
-claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          # Optional: Customize the trigger phrase (default: @claude)
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+
+          # Opcional: frase que dispara o Claude.
+          # O padrão já é @claude.
           # trigger_phrase: "/claude"
 
-          # Optional: Trigger when specific user is assigned to an issue
-          # assignee_trigger: "claude-bot"
-
-          # Optional: Configure Claude's behavior with CLI arguments
+          # Opcional: aumentar autonomia do Claude.
+          # Eu deixaria comentado por enquanto até validar o OAuth.
+          #
           # claude_args: |
-          #   --model claude-opus-4-1-20250805
-          #   --max-turns 10
-          #   --allowedTools "Bash(npm install),Bash(npm run build),Bash(npm run test:*),Bash(npm run lint:*)"
-          #   --system-prompt "Follow our coding standards. Ensure all new code has tests. Use TypeScript for new files."
-
-          # Optional: Advanced settings configuration
-          # settings: |
-          #   {
-          #     "env": {
-          #       "NODE_ENV": "test"
-          #     }
-          #   }
+          #   --max-turns 30
+          #   --system-prompt "Trabalhe de forma autônoma até concluir integralmente a tarefa. Não pare após apenas analisar ou planejar. Implemente todos os itens solicitados, rode as verificações disponíveis, corrija problemas encontrados e continue sem pedir aprovação intermediária. Em PR existente, trabalhe na mesma branch. Só pare se houver bloqueio real que exija decisão humana, credencial ausente ou operação destrutiva/irreversível."
