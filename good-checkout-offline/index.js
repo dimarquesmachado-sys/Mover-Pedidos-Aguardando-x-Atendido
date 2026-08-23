@@ -1524,7 +1524,11 @@ function routes(readBody) {
         if (_ciclo) {
           json(res, 400, { ok: false, erro: 'isso criaria um ciclo: seguindo ' + para + ' se chega de volta em ' + de }); return true;
         }
-        m[de] = { para, em: new Date().toISOString() };
+        /* Codex (#185): mesmo bug de caixa do apagar, do outro lado. Gravar "Pm1 → A" e depois
+           "pm1 → B" deixava as DUAS chaves, e a resolução escolhia uma ou outra conforme a grafia
+           que chegasse. Reaproveito a chave que já existe (comparação normalizada). */
+        const _deReal = Object.keys(m).find(x => String(x).toUpperCase() === de.toUpperCase()) || de;
+        m[_deReal] = { para, em: new Date().toISOString() };
         gravarDeParaSku(m);
         json(res, 200, { ok: true, de, para, resolve_para: resolverDeParaSku(de), total: Object.keys(m).length });
         return true;

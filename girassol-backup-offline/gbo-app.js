@@ -2421,7 +2421,11 @@ function routes(readBody) {
         if (_ciclo) {
           json(res, 400, { ok: false, erro: 'isso criaria um ciclo: seguindo ' + para + ' se chega de volta em ' + de }); return true;
         }
-        m[de] = { para, em: new Date().toISOString() };
+        /* Codex (#185): mesmo bug de caixa do apagar, do outro lado. Gravar "Pm1 → A" e depois
+           "pm1 → B" deixava as DUAS chaves, e a resolução escolhia uma ou outra conforme a grafia
+           que chegasse. Reaproveito a chave que já existe (comparação normalizada). */
+        const _deReal = Object.keys(m).find(x => String(x).toUpperCase() === de.toUpperCase()) || de;
+        m[_deReal] = { para, em: new Date().toISOString() };
         gravarDeParaSku(m);
         json(res, 200, { ok: true, de, para, resolve_para: resolverDeParaSku(de), total: Object.keys(m).length });
         return true;
@@ -4217,6 +4221,14 @@ async function varrerFornecedores(max) {
 }
 
 async function backfillVendas(de, ate, empresa){
+  /* Codex (#185): eu tinha posto a trava do reparo SÓ numa das rotas — as outras entradas
+     (/backfill, /backfill-ano) e as chamadas diretas passavam por cima e desfaziam o reparo.
+     Mesmo motivo da trava do canário logo abaixo: o guarda tem que morar AQUI, onde todos
+     os caminhos passam, e não em cada rota. */
+  if (typeof _reparoAtivo !== 'undefined' && _reparoAtivo) {
+    console.log('[BACKFILL] adiado: reparo de SKU em andamento (mexe nas mesmas linhas)');
+    return Object.assign({}, _backfill, { adiado: 'reparo de SKU em andamento' });
+  }
   // Codex (#105): a noturna chama esta função DIRETO, sem passar pelas rotas — então a trava
   // do canário precisa morar aqui dentro, senão o backfill agendado dispara enquanto o
   // canário consulta o Bling e recria a disputa de cota que este PR existe pra evitar.
