@@ -5200,13 +5200,28 @@ async function backfillAnoTodo(ateMes){
   if(_backfillAno.rodando || _backfill.rodando) return;
   _backfillAno = { rodando:true, mesAtual:null, feitos:[], inicio:new Date().toISOString(), fim:null };
   const meses = ['01','02','03','04','05','06','07','08','09','10','11','12'].filter(m => m <= ateMes);
-  for(const m of meses){
-    _backfillAno.mesAtual = '2026-'+m;
-    await backfillVendas('2026-'+m+'-01', '2026-'+m+'-'+ULTIMO_DIA[m], 'girassol');   // espera cada mês terminar antes do próximo
-    _backfillAno.feitos.push({ mes:'2026-'+m, pedidos:_backfill.pedidos, itens:_backfill.itens, gravados:_backfill.gravados, erros:_backfill.erros });
-    await new Promise(r=>setTimeout(r,2500));
+  /* Codex (#185): o adiamento por reparo de SKU volta como retorno NORMAL — sem olhar, o laço
+     registrava o mês em `feitos` com os contadores VELHOS e seguia pro próximo, e o ano podia
+     terminar "concluído" tendo pulado meses inteiros em silêncio. Agora o adiamento PARA o ano
+     e fica anotado; lançar exceção aqui seria pior (o laço não tem catch e o `rodando` ficaria
+     de pé pra sempre). */
+  try {
+    for(const m of meses){
+      _backfillAno.mesAtual = '2026-'+m;
+      const r = await backfillVendas('2026-'+m+'-01', '2026-'+m+'-'+ULTIMO_DIA[m], 'girassol');   // espera cada mês terminar antes do próximo
+      if (r && r.adiado) {
+        _backfillAno.adiado = r.adiado;
+        _backfillAno.parou_em = '2026-'+m;
+        _backfillAno.faltam = meses.slice(meses.indexOf(m));
+        console.log('[BACKFILL-ANO] parou em 2026-' + m + ': ' + r.adiado);
+        break;
+      }
+      _backfillAno.feitos.push({ mes:'2026-'+m, pedidos:_backfill.pedidos, itens:_backfill.itens, gravados:_backfill.gravados, erros:_backfill.erros });
+      await new Promise(r=>setTimeout(r,2500));
+    }
+  } finally {
+    _backfillAno.rodando = false; _backfillAno.mesAtual = null; _backfillAno.fim = new Date().toISOString();
   }
-  _backfillAno.rodando = false; _backfillAno.mesAtual = null; _backfillAno.fim = new Date().toISOString();
 }
 
 async function vendasSync() {
