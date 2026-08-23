@@ -2217,16 +2217,20 @@ function routes(readBody) {
       if (!aplicar) { outR.msg = outR.linhas + ' linha(s) mudariam de ' + deSku + ' para ' + paraSku + '. Repita com &aplicar=1 pra gravar.'; json(res, 200, outR); return true; }
       // 3) aplica — um PATCH só, com filtro EXATO (nada de like/prefixo)
       const rp = await supaReq('amb', 'PATCH', 'vendas_historico?empresa=eq.amb&sku=eq.' + encodeURIComponent(deSku), { sku: paraSku, sku_anterior: deSku });
-      /* Codex (#185): o PATCH mudou o histórico, mas o _histCache guarda os agregados por até
+      /* Codex (#185/#186): o PATCH mudou o histórico, mas o _histCache guarda os agregados por até
          30 min — sem limpar, o dashboard segue mostrando o SKU ANTIGO e o reparo parece ter
-         falhado. Mesma limpeza que o backfill e a caça já fazem. */
-      try { for (const _k of Object.keys(_histCache)) delete _histCache[_k]; } catch (e) {}
+         falhado. Mesma limpeza que o backfill e a caça já fazem.
+         E limpa depois do PATCH que DEU CERTO, não antes do segundo: quando o primeiro falha e
+         entra o de reserva, uma consulta do dashboard no meio repovoava o cache com o dado velho,
+         e nada mais limpava — os agregados ficavam errados até o TTL vencer. */
+      const _limpaHist = () => { try { for (const _k of Object.keys(_histCache)) delete _histCache[_k]; } catch (e) {} };
       if (!rp.ok) {
         // sku_anterior pode não existir como coluna — tenta de novo só com o sku
         const rp2 = await supaReq('amb', 'PATCH', 'vendas_historico?empresa=eq.amb&sku=eq.' + encodeURIComponent(deSku), { sku: paraSku });
-        if (!rp2.ok) { json(res, 200, { ok: false, erro: 'PATCH falhou: HTTP ' + rp.status + ' / ' + rp2.status, detalhe: String(rp.body || '').slice(0, 200) }); return true; }
+        if (!rp2.ok) { _limpaHist(); json(res, 200, { ok: false, erro: 'PATCH falhou: HTTP ' + rp.status + ' / ' + rp2.status, detalhe: String(rp.body || '').slice(0, 200) }); return true; }
+        _limpaHist();
         outR.avisos.push('coluna sku_anterior não existe — gravado só o sku novo');
-      }
+      } else _limpaHist();
       // 4) confere: não pode sobrar linha com o SKU antigo
       let sobrou = 0;
       try {
