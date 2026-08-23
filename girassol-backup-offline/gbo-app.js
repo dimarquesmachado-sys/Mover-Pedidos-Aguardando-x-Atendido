@@ -2509,6 +2509,108 @@ function routes(readBody) {
       }
     }
 
+    // DE-PARA DE SKU RENOMEADO — conserto cirúrgico do rename no histórico do Supabase.
+    // (23/08: portada da AMB. A Girassol MENCIONAVA esta rota na resposta do /sku-depara e não
+    //  a tinha — quem seguisse a instrução batia num 404.)
+    // ⚠️ Match EXATO de propósito: existe FL-1011-PRETO-2LAMPS, que é OUTRO produto e não pode
+    // ser tocado (aviso do Diego). Nada de LIKE/prefixo aqui.
+    // Uso:  GET /girassol-backup-offline/sku-repara?de=SKU_ANTIGO&para=SKU_NOVO&k=ADMIN_KEY
+    //       (sem &aplicar=1 é SIMULAÇÃO: diz quantas linhas mudariam, sem gravar)
+    if (method === 'GET' && p === '/girassol-backup-offline/sku-repara') {
+      const kR = urlObj.searchParams.get('k') || '';
+      const sR = validarSessao(req.headers['cookie']);
+      if (!((process.env.ADMIN_KEY && kR === process.env.ADMIN_KEY) || (sR && ehAdmin(sR)))) { json(res, 404, { error: 'not found' }); return true; }
+      const deSku = String(urlObj.searchParams.get('de') || '').trim();
+      const paraSku = String(urlObj.searchParams.get('para') || '').trim();
+      const aplicar = urlObj.searchParams.get('aplicar') === '1';
+      if (!deSku || !paraSku) { json(res, 400, { ok: false, erro: 'use ?de=SKU_ANTIGO&para=SKU_NOVO&k=ADMIN_KEY (sem &aplicar=1 simula)' }); return true; }
+      if (deSku === paraSku) { json(res, 400, { ok: false, erro: 'de e para são iguais' }); return true; }
+      const outR = { ok: true, de: deSku, para: paraSku, simulacao: !aplicar, linhas: 0, atualizadas: 0, avisos: [] };
+      // o backfill/caça apagam e regravam o período — não mexer no histórico enquanto isso
+      if (_backfill && _backfill.rodando) { json(res, 409, { ok: false, erro: 'backfill rodando — tente depois' }); return true; }
+      /* Checar `_backfill.rodando` UMA vez não basta: a varredura do catálogo logo abaixo demora,
+         e um backfill iniciado no meio apaga e regrava o período com o SKU ANTIGO, desfazendo o
+         reparo em silêncio. O reparo levanta a própria trava e os dois lados a respeitam. */
+      if (_reparoAtivo) { json(res, 409, { ok: false, erro: 'outro reparo de SKU em andamento — tente depois' }); return true; }
+      _reparoAtivo = true;
+      try {
+      // (a trava da caça da Magalu não vem junto: `_mgc` só existe na AMB.)
+      // 1) o SKU de destino TEM que existir no catálogo (senão o de-para cria outro órfão).
+      //    Varredura completa: o filtro ?codigo= do Bling não é confiável.
+      let achouDestino = false, aindaExisteOrigem = false, completo = false;
+      try {
+        for (let pg = 1; pg <= 200; pg++) {
+          const rc = await blingGet('/produtos?pagina=' + pg + '&limite=100&criterio=2');
+          if (!rc || !rc.ok) { json(res, 200, { ok: false, erro: 'catálogo: página ' + pg + ' falhou — de-para abortado' }); return true; }
+          const lote = (rc.data && rc.data.data) || [];
+          for (const pr of lote) {
+            const cd = String(pr.codigo || '').trim();
+            if (cd === paraSku) achouDestino = true;
+            if (cd === deSku) aindaExisteOrigem = true;
+          }
+          if (lote.length < 100) { completo = true; break; }
+          await new Promise(r0 => setTimeout(r0, 250));
+        }
+      } catch (e) { json(res, 200, { ok: false, erro: 'catálogo: ' + String(e.message || e).slice(0, 140) }); return true; }
+      if (!completo) { json(res, 200, { ok: false, erro: 'catálogo maior que o teto — de-para abortado' }); return true; }
+      if (!achouDestino) { json(res, 200, { ok: false, erro: 'o SKU de destino (' + paraSku + ') NÃO existe no catálogo do Bling — de-para abortado' }); return true; }
+      if (aindaExisteOrigem) outR.avisos.push('atenção: ' + deSku + ' AINDA existe no catálogo — confirme que o rename é esse mesmo antes de aplicar');
+      // 2) quantas linhas do histórico têm exatamente esse SKU (paginação por chave)
+      let ultId = 0;
+      try {
+        for (let volta = 0; volta < 300; volta++) {
+          const q = 'vendas_historico?empresa=eq.girassol&sku=eq.' + encodeURIComponent(deSku) + '&id=gt.' + ultId + '&select=id&order=id.asc&limit=1000';
+          const rr = await supaReq('girassol', 'GET', q, null);
+          if (!rr.ok) { json(res, 200, { ok: false, erro: 'histórico: HTTP ' + rr.status }); return true; }
+          let arr = null; try { arr = JSON.parse(rr.body || 'null'); } catch (e) { arr = null; }
+          if (!Array.isArray(arr)) { json(res, 200, { ok: false, erro: 'histórico: resposta ilegível' }); return true; }
+          outR.linhas += arr.length;
+          for (const l of arr) { const idL = Number(l && l.id) || 0; if (idL > ultId) ultId = idL; }
+          if (arr.length < 1000) break;
+        }
+      } catch (e) { json(res, 200, { ok: false, erro: 'histórico: ' + String(e.message || e).slice(0, 140) }); return true; }
+      if (!outR.linhas) { outR.avisos.push('nenhuma linha com esse SKU exato no histórico'); json(res, 200, outR); return true; }
+      if (!aplicar) { outR.msg = outR.linhas + ' linha(s) mudariam de ' + deSku + ' para ' + paraSku + '. Repita com &aplicar=1 pra gravar.'; json(res, 200, outR); return true; }
+      // 3) aplica — um PATCH só, com filtro EXATO (nada de like/prefixo)
+      const rp = await supaReq('girassol', 'PATCH', 'vendas_historico?empresa=eq.girassol&sku=eq.' + encodeURIComponent(deSku), { sku: paraSku, sku_anterior: deSku });
+      /* Codex (#185/#186): o PATCH mudou o histórico, mas o _histCache guarda os agregados por até
+         30 min — sem limpar, o dashboard segue mostrando o SKU ANTIGO e o reparo parece ter
+         falhado. Mesma limpeza que o backfill e a caça já fazem.
+         E limpa depois do PATCH que DEU CERTO, não antes do segundo: quando o primeiro falha e
+         entra o de reserva, uma consulta do dashboard no meio repovoava o cache com o dado velho,
+         e nada mais limpava — os agregados ficavam errados até o TTL vencer. */
+      const _limpaHist = () => { try { for (const _k of Object.keys(_histCache)) delete _histCache[_k]; } catch (e) {} };
+      if (!rp.ok) {
+        // sku_anterior pode não existir como coluna — tenta de novo só com o sku
+        const rp2 = await supaReq('girassol', 'PATCH', 'vendas_historico?empresa=eq.girassol&sku=eq.' + encodeURIComponent(deSku), { sku: paraSku });
+        if (!rp2.ok) { _limpaHist(); json(res, 200, { ok: false, erro: 'PATCH falhou: HTTP ' + rp.status + ' / ' + rp2.status, detalhe: String(rp.body || '').slice(0, 200) }); return true; }
+        _limpaHist();
+        outR.avisos.push('coluna sku_anterior não existe — gravado só o sku novo');
+      } else _limpaHist();
+      // 4) confere: não pode sobrar linha com o SKU antigo
+      let sobrou = 0;
+      try {
+        const rc2 = await supaReq('girassol', 'GET', 'vendas_historico?empresa=eq.girassol&sku=eq.' + encodeURIComponent(deSku) + '&select=id&limit=5', null);
+        if (rc2.ok) { const a2 = JSON.parse(rc2.body || '[]'); sobrou = Array.isArray(a2) ? a2.length : 0; }
+      } catch (e) {}
+      outR.atualizadas = outR.linhas - sobrou;
+      outR.sobraram_com_sku_antigo = sobrou;
+      if (sobrou) outR.avisos.push('ainda sobraram linhas com o SKU antigo — rode de novo');
+      json(res, 200, outR);
+      return true;
+      } finally { _reparoAtivo = false; }
+
+
+    }
+
+    // SKU ÓRFÃO (13/08) — MEDIÇÃO pro caso do rename de SKU no Bling (achado no app de
+    // Devoluções: a venda antiga guarda o SKU velho e, depois do rename, ninguém acha o produto;
+    // o histórico do dashboard parte em dois no dia do rename). Antes de trocar a chave de
+    // agregação por produto_id, esta rota MEDE o tamanho do problema: quantos SKUs do histórico
+    // não existem mais no catálogo, e quanto faturamento está preso neles.
+    // Uso: GET /girassol-backup-offline/sku-orfaos?de=AAAA-MM-DD&ate=AAAA-MM-DD&k=ADMIN_KEY
+    // Só leitura. O catálogo é varrido INTEIRO (o filtro ?codigo= do Bling não é confiável —
+    // ora volta vazio pra produto que existe, ora ignora o filtro), montando codigo → id.
     /* ═══ 21/08 — DE-PARA AUTOMÁTICO DE SKU RENOMEADO ═══════════════════════════════════════
     Nasceu do FL-1011-PRETO: renomeado no Bling para 3933398010054, o código antigo deixou de
     existir e as 53 vendas antigas ficaram sem custo. O Diego resolveu à mão pela planilha, mas
@@ -3951,6 +4053,7 @@ function _destravarJulho() {
   } catch (e) { console.error('[fiscal] não consegui destravar julho (' + e.message + ') — segue com o salvo'); }
 }
 _destravarJulho();
+let _reparoAtivo = false;  // trava do sku-repara — backfill e caça checam antes de começar
 const _histCache = {};   // agregados do Supabase por período (10 min)
 let _backfill = { rodando:false, empresa:null, de:null, ate:null, pagina:0, pedidos:0, itens:0, gravados:0, erros:0, fase:'parado', inicio:null, fim:null, msg:'' };
 
@@ -4138,6 +4241,12 @@ async function varrerFornecedores(max) {
 }
 
 async function backfillVendas(de, ate, empresa){
+  /* O guarda mora AQUI, não em cada rota: a noturna e o /backfill-ano chamam esta função direto.
+     Mesmo lugar da trava do canário logo abaixo, pelo mesmo motivo. */
+  if (_reparoAtivo) {
+    console.log('[BACKFILL] adiado: reparo de SKU em andamento (mexe nas mesmas linhas)');
+    return Object.assign({}, _backfill, { adiado: 'reparo de SKU em andamento' });
+  }
   // Codex (#105): a noturna chama esta função DIRETO, sem passar pelas rotas — então a trava
   // do canário precisa morar aqui dentro, senão o backfill agendado dispara enquanto o
   // canário consulta o Bling e recria a disputa de cota que este PR existe pra evitar.
@@ -5115,7 +5224,15 @@ async function backfillAnoTodo(ateMes){
   try {
     for(const m of meses){
       _backfillAno.mesAtual = '2026-'+m;
-      await backfillVendas('2026-'+m+'-01', '2026-'+m+'-'+ULTIMO_DIA[m], 'girassol');   // espera cada mês terminar antes do próximo
+      const r = await backfillVendas('2026-'+m+'-01', '2026-'+m+'-'+ULTIMO_DIA[m], 'girassol');   // espera cada mês terminar antes do próximo
+      /* o adiamento volta como retorno NORMAL: sem olhar, o mês entraria em `feitos` com os
+         contadores VELHOS e o ano terminaria "concluído" tendo pulado meses em silêncio. */
+      if (r && r.adiado) {
+        _backfillAno.adiado = r.adiado; _backfillAno.parou_em = '2026-'+m;
+        _backfillAno.faltam = meses.slice(meses.indexOf(m));
+        console.log('[BACKFILL-ANO] parou em 2026-' + m + ': ' + r.adiado);
+        break;
+      }
       _backfillAno.feitos.push({ mes:'2026-'+m, pedidos:_backfill.pedidos, itens:_backfill.itens, gravados:_backfill.gravados, erros:_backfill.erros });
       await new Promise(r=>setTimeout(r,2500));
     }
