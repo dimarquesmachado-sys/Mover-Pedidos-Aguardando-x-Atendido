@@ -5452,6 +5452,13 @@ async function cacaMagalu(de, ate, empresa, opts) {
   const dorme = ms => new Promise(r => setTimeout(r, ms));
   empresa = empresa || 'amb';
   if (_mgc.rodando) return _mgc;
+  /* Codex (#185): a caça também apaga e reinsere linhas do vendas_historico (ainda mais com
+     ?refazer=1), então ela pode RECRIAR o SKU antigo por cima do PATCH do reparo. Mesma trava
+     do backfill, e aqui dentro pelo mesmo motivo: o cron horário chama esta função direto. */
+  if (typeof _reparoAtivo !== 'undefined' && _reparoAtivo) {
+    console.log('[MAGALU] adiada: reparo de SKU em andamento (mexe nas mesmas linhas)');
+    return Object.assign({}, _mgc, { adiado: 'reparo de SKU em andamento' });
+  }
   _mgc = { rodando: true, em: new Date().toISOString(), de, ate, na_magalu: 0, ja_tinha: 0, inseridos: 0, linhas: 0, removidos_cancelados: 0, erro: null, parcial: false };
   try {
     const jaTem = new Set();
