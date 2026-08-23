@@ -135,12 +135,17 @@ async function listarAtendidos() {
       // aceita a conexão e não responde, o await ficava pendurado pra sempre: o ciclo travava e
       // a re-tentativa (o motivo deste PR) nunca acontecia. Cada tentativa tem prazo próprio.
       const TETO_MS = 45000;
+      // Codex (#183): o Promise.race rejeitava só a ESPERA — o fetch seguia vivo dentro do
+      // blingGet, e cada página estourada deixava até 4 conexões penduradas, acumulando a cada
+      // ciclo até esgotar recurso. Agora o AbortController cancela a requisição de verdade, e o
+      // timer é limpo no sucesso pra não segurar o processo à toa.
+      const _ac = new AbortController();
+      const _tm = setTimeout(() => _ac.abort(), TETO_MS);
       try {
-        ({ ok, data } = await Promise.race([
-          blingGet(`/pedidos/vendas?${qs}&pagina=${pagina}&limite=100`),
-          new Promise((_, rej) => setTimeout(() => rej(new Error('timeout ' + TETO_MS + 'ms na página ' + pagina)), TETO_MS))
-        ]));
+        ({ ok, data } = await blingGet(`/pedidos/vendas?${qs}&pagina=${pagina}&limite=100`, 3, _ac.signal));
       } catch (e) { ok = false; data = null; console.log('[GIRABKP] página ' + pagina + ' tentativa ' + tent + ': ' + String(e.message || e).slice(0, 80)); }
+      finally { clearTimeout(_tm); }
+      if (!ok && _ac.signal.aborted) console.log('[GIRABKP] página ' + pagina + ' tentativa ' + tent + ': timeout ' + TETO_MS + 'ms (abortada)');
       if (ok) { if (tent > 1) paginasRefeitas++; break; }
       await new Promise(r => setTimeout(r, 1200 * tent));
     }

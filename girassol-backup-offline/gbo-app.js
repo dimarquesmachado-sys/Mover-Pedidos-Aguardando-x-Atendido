@@ -348,389 +348,32 @@ function _urlStatus(req, caminho, extra, chave) {
 }
 
 
-/* ═══════════ 21/08 — CUSTO MANUAL POR PLANILHA ═══════════════════════════════════════════
-   Pedido do Diego: "uma área de subida de sku x custo. eu faço upload e pronto, resolve" —
-   como no Jodda e no MercadoTurbo. Nasceu de SKUs que venderam SEM custo no painel: o
-   FL-1011-PRETO da AMB (53 un.) foi RENOMEADO no Bling para 3933398010054, então o código
-   antigo não existe mais e o custo nunca é achado; na Girassol sobraram 2 casos parecidos.
-   REGRA QUE ELE ESCOLHEU: "se o bling passar a ter custo, aí deixa mandar o Bling". Ou seja,
-   o manual é PONTE, não substituto — vale enquanto o Bling não sabe, e sai de cena sozinho
-   quando o cadastro passa a ter custo. Assim um preço digitado à mão nunca congela um custo
-   que voltou a se atualizar sozinho.
-   Guardado em _custos-manuais.json (arquivo próprio), pra um custo-sync nunca sobrescrever. */
-
-/* ═══════════ 21/08 — LINHA DO TEMPO DO CUSTO (vigência) ═══════════════════════════════════
-   O Diego: "se eu entro no cadastro do bling, em 1 produto, vou lá e mudo o custo, eu subscrevo,
-   apaga o antigo e fica por isso, o novo existindo." Exatamente — o Bling guarda SÓ o custo
-   atual. Então quem precisa registrar "de tal dia até tal dia valia X" é este lado, no momento
-   em que percebe a mudança. Sem isso, cada dia que passa é histórico perdido para sempre.
-
-   Regra que ele confirmou: venda JÁ GRAVADA fica congelada com o custo do dia dela. A vigência
-   serve para as vendas novas e para quando ele mandar recalcular um período de propósito — o
-   passado nunca muda sozinho, que é o que faz o Mês anterior continuar contando a mesma história.
-
-   Formato (_custos-vigencia.json): { SKU: [ {custo, de:'AAAA-MM-DD', ate:null|'AAAA-MM-DD',
-   origem:'bling'|'manual', em:ISO} ] } — `ate:null` = faixa aberta, valendo hoje.
-   ⚠️ A linha do tempo começa VAZIA e se forma a partir da primeira mudança detectada: o que já
-   passou não dá pra reconstruir, porque o Bling não guarda e nós não anotávamos. */
-function _diaAntes(iso) {
-  const t = Date.parse(String(iso) + 'T12:00:00Z');
-  if (!isFinite(t)) return null;
-  return new Date(t - 86400000).toISOString().slice(0, 10);
-}
-/* 21/08 (Diego: "tem como só aceitar tb pm1 ao invés de só PM1?") — o SKU é o mesmo produto
-   escrito de outro jeito. Aqui eu descubro como ele está GRAVADO (no banco de custos ou na
-   vigência) a partir do que foi digitado, para o card achar o produto e não criar uma segunda
-   linha do tempo para "pm1" separada da de "PM1". */
-function resolverNomeSku(digitado) {
-  const d = String(digitado || '').trim();
-  if (!d) return d;
-  const alvo = d.toUpperCase();
-  /* Codex (P2): a VIGÊNCIA vem primeiro. Se já existe histórico gravado como "pm1" e o Bling tem
-     "PM1", resolver pela grafia do Bling ESCONDERIA o histórico do Diego e abriria uma segunda
-     linha do tempo — e os lançamentos seguintes iriam pra essa nova, não pra dele. O que ele já
-     gravou manda; a grafia do Bling só decide quando não há histórico nenhum. */
-  try {
-    const vg = lerVigencias();
-    if (vg[d]) return d;
-    for (const k of Object.keys(vg)) if (String(k).toUpperCase() === alvo) return k;
-  } catch (e) {}
-  try {
-    const cc = readJson(path.join(CACHE_DIR, '_custos.json'), {}) || {};
-    if (cc[d]) return d;
-    for (const k of Object.keys(cc)) if (String(k).toUpperCase() === alvo) return k;
-  } catch (e) {}
-  return d;
-}
-function lerVigencias() {
-  try { return readJson(path.join(CACHE_DIR, '_custos-vigencia.json'), {}) || {}; } catch (e) { return {}; }
-}
-function gravarVigencias(obj) { writeJson(path.join(CACHE_DIR, '_custos-vigencia.json'), obj || {}); }
-function _hojeISO() { return new Date(Date.now() - 3 * 3600000).toISOString().slice(0, 10); }   // dia no fuso -03:00
-function _ontemISO() { return new Date(Date.now() - 3 * 3600000 - 86400000).toISOString().slice(0, 10); }
-
-/* Registra que o custo do SKU passou a ser `novo` HOJE. Fecha a faixa aberta em ontem e abre
-   outra — a não ser que o valor seja o mesmo (nada a fazer) ou que a faixa aberta tenha começado
-   HOJE, caso em que só corrige o valor dela (duas mudanças no mesmo dia não viram duas faixas). */
-function registrarCustoVigente(sku, novo, origem) {
-  const v = Number(novo);
-  if (!(v > 0)) return null;
-  const k = String(sku || '').trim();
-  if (!k) return null;
-  const todas = lerVigencias();
-  const lista = Array.isArray(todas[k]) ? todas[k] : [];
-  const aberta = lista.find(f => !f.ate);
-  const hoje = _hojeISO();
-  if (aberta) {
-    if (Math.abs(Number(aberta.custo) - v) < 0.0001) return null;   // não mudou
-    if (aberta.de === hoje) { aberta.custo = v; aberta.origem = origem || aberta.origem; aberta.em = new Date().toISOString(); }
-    else {
-      aberta.ate = _ontemISO();
-      lista.push({ custo: v, de: hoje, ate: null, origem: origem || 'bling', em: new Date().toISOString() });
-    }
-  } else {
-    lista.push({ custo: v, de: hoje, ate: null, origem: origem || 'bling', em: new Date().toISOString() });
-  }
-  lista.sort((a, b) => String(a.de).localeCompare(String(b.de)));
-  todas[k] = lista;
-  gravarVigencias(todas);
-  return lista;
-}
-
-/* Custo que valia numa DATA (AAAA-MM-DD). Sem faixa que cubra a data, devolve null — quem chama
-   decide o que fazer (hoje: cair no custo atual, como sempre foi). */
-function custoVigenteEm(sku, data) {
-  const vg = lerVigencias();
-  const kk = String(sku || '').trim();
-  const alvo = kk.toUpperCase();
-  const lista = vg[kk] || vg[Object.keys(vg).find(k => String(k).toUpperCase() === alvo)];
-  if (!Array.isArray(lista) || !lista.length) return null;
-  const d = String(data || '').slice(0, 10);
-  if (!d) return null;
-  for (let i = lista.length - 1; i >= 0; i--) {
-    const f = lista[i];
-    if (String(f.de) <= d && (!f.ate || d <= String(f.ate))) { const c = Number(f.custo); if (c > 0) return c; }
-  }
-  return null;
-}
-
-
-/* ═══════════ 21/08 — DE-PARA MANUAL DE SKU ═══════════════════════════════════════════════
-   O /sku-depara resolve por `produto_id` (o Bling prova que é o mesmo produto). Mas o Diego
-   achou dois SKUs SEM id guardado: "464" e "465", que ele reconheceu na hora como
-   "HC-464-220v" e "HC-465-110v". Aí a ligação é julgamento DELE — o sistema não tem como
-   provar. Então fica declarado à mão e vale daí em diante.
-   Melhor que lançar custo manual nesses casos: o custo continua vindo do Bling e se atualiza
-   sozinho, e as vendas antigas se juntam ao produto certo nos relatórios por SKU.
-   Formato (_sku-depara.json): { "464": { para: "HC-464-220v", em: ISO } } */
-function lerDeParaSku() {
-  try { return readJson(path.join(CACHE_DIR, '_sku-depara.json'), {}) || {}; } catch (e) { return {}; }
-}
-function gravarDeParaSku(o) { writeJson(path.join(CACHE_DIR, '_sku-depara.json'), o || {}); }
-/* devolve o SKU de destino, ou o próprio quando não há de-para. Cadeia curta (A→B→C) é
-   seguida até 5 saltos; ciclo (A→B→A) para e devolve o último válido, sem travar. */
-function resolverDeParaSku(sku) {
-  const m = lerDeParaSku();
-  let atual = String(sku || '').trim();
-  const vistos = new Set([atual.toUpperCase()]);
-  for (let i = 0; i < 5; i++) {
-    const r = m[atual] || m[atual.toUpperCase()] || m[atual.toLowerCase()];
-    const prox = r && String(r.para || '').trim();
-    if (!prox || vistos.has(prox.toUpperCase())) break;
-    vistos.add(prox.toUpperCase());
-    atual = prox;
-  }
-  return atual;
-}
-/* sugestão por semelhança, só pra ELE conferir — nunca aplicada sozinha. "464" casa com
-   "HC-464-220v" porque o código antigo aparece inteiro, cercado por limite de palavra. */
-function sugerirDeParaSku(velho, codigos) {
-  const v = String(velho || '').trim();
-  if (!v || v.length < 2) return [];
-  const alvo = v.toUpperCase();
-  const re = new RegExp('(^|[^0-9A-Z])' + alvo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '([^0-9A-Z]|$)');
-  const out = [];
-  for (const c of codigos) {
-    const C = String(c).toUpperCase();
-    if (C === alvo) continue;
-    if (re.test(C)) out.push(c);
-    if (out.length >= 5) break;
-  }
-  return out;
-}
-
-
-/* Codex (revisão geral, 21/08): a varredura do catálogo é cara — 9.056 produtos na Girassol,
-   ~90 chamadas ao Bling. Sem cache, cada clique refazia tudo; e dois cliques ao mesmo tempo
-   disparavam DUAS varreduras completas, dobrando a pressão sobre o limite justo quando ele já
-   estava perto de estourar (foi o que fez a página 14 falhar).
-   Guarda 30 minutos e, principalmente, compartilha a mesma Promise entre chamadas simultâneas:
-   quem chegar durante uma varredura em andamento espera a mesma, em vez de abrir outra.
-   Resultado incompleto NUNCA é cacheado — o erro sobe e a próxima tentativa recomeça limpa. */
-let _catalogoDeParaCache = null;
-let _catalogoDeParaEmAndamento = null;
-async function carregarCatalogoDePara() {
-  if (_catalogoDeParaCache && (Date.now() - _catalogoDeParaCache.em) < 30 * 60 * 1000) return _catalogoDeParaCache;
-  if (_catalogoDeParaEmAndamento) return _catalogoDeParaEmAndamento;
-  _catalogoDeParaEmAndamento = (async () => {
-    const porCodigo = {}; const porId = {};
-    const TETO = 200;
-    for (let pg = 1; pg <= TETO; pg++) {
-      let rc = null;
-      for (let tent = 1; tent <= 4; tent++) {
-        rc = await blingGet('/produtos?pagina=' + pg + '&limite=100&criterio=2');
-        if (rc && rc.ok) break;
-        if (tent < 4) await new Promise(r => setTimeout(r, 1500 * tent));   // 1,5s · 3s · 4,5s
-      }
-      if (!rc || !rc.ok) throw new Error('catalogo incompleto: pagina ' + pg + ' falhou apos 4 tentativas');
-      const lote = (rc.data && rc.data.data) || [];
-      for (const pr of lote) {
-        const cd = String(pr.codigo || '').trim();
-        if (cd) { porCodigo[cd] = pr.id; porId[String(pr.id)] = cd; }
-      }
-      if (lote.length < 100) {
-        _catalogoDeParaCache = { porCodigo, porId, em: Date.now() };
-        return _catalogoDeParaCache;
-      }
-      await new Promise(r => setTimeout(r, 600));
-    }
-    throw new Error('catalogo maior que ' + (TETO * 100) + ' produtos — aumente o teto');
-  })();
-  try { return await _catalogoDeParaEmAndamento; }
-  finally { _catalogoDeParaEmAndamento = null; }
-}
-
-function lerCustosManuais() {
-  try { return readJson(path.join(CACHE_DIR, '_custos-manuais.json'), {}) || {}; } catch (e) { return {}; }
-}
-function gravarCustosManuais(obj) {
-  writeJson(path.join(CACHE_DIR, '_custos-manuais.json'), obj || {});
-  /* Codex (P2): sem isto, apagar um custo manual mudava só o arquivo — o cache de 6h de SKU
-     continuava servindo o valor antigo e, ao vencer, o fallback o copiava de volta. O custo
-     apagado seguiria afetando a margem indefinidamente. Toda gravação derruba os dois caches. */
-  try { if (typeof _skuInfoCache === 'object' && _skuInfoCache) { for (const k of Object.keys(_skuInfoCache)) delete _skuInfoCache[k]; } } catch (e) {}
-  try { const f = path.join(CACHE_DIR, '_skus-info.json'); if (fs.existsSync(f)) fs.unlinkSync(f); } catch (e) {}
-}
-/* custo POR UNIDADE do SKU, ou null. `doBling` é o que o Bling já sabe: se ele tem custo,
-   o manual não entra (regra do Diego). */
-function custoManualDe(sku, doBling) {
-  if (doBling != null && isFinite(Number(doBling)) && Number(doBling) > 0) return null;
-  const r = lerCustosManuais()[String(sku || '').trim().toUpperCase()];
-  const v = r && Number(r.custo);
-  return (v > 0) ? v : null;
-}
-/* Sobrepõe o manual num mapa de custos do Bling, sem nunca vencer um custo que o Bling tem.
-   Um lugar só: dashboards, histórico e plano de compra chamam esta função — foi a falta disso
-   que deixou o plano de compra dizendo "sem custo" enquanto a tela já mostrava o corrigido. */
-function comCustosManuais(mapaDoBling) {
-  const b = mapaDoBling || {};
-  /* 21/08 — o DE-PARA MANUAL entra aqui: SKU antigo declarado (ex.: "464" → "HC-464-220v")
-     herda o custo do destino. Assim o custo continua vindo do Bling e se atualizando sozinho,
-     em vez de congelar num valor digitado à mão. */
-  try {
-    const dp = lerDeParaSku();
-    for (const velho of Object.keys(dp)) {
-      if (b[velho] && Number(b[velho].custo) > 0) continue;         // já tem custo próprio
-      const destino = resolverDeParaSku(velho);
-      const alvo = b[destino] || b[String(destino).toUpperCase()] ||
-                   b[Object.keys(b).find(k => String(k).toUpperCase() === String(destino).toUpperCase())];
-      if (alvo && Number(alvo.custo) > 0) b[velho] = { custo: Number(alvo.custo), id: alvo.id, depara_de: destino };
-    }
-  } catch (e) {}
-  const man = lerCustosManuais();
-  const temNoBling = k => { const c = b[k] || b[String(k).toLowerCase()]; return c && Number(c.custo) > 0; };
-  for (const K of Object.keys(man)) {
-    const v = Number(man[K].custo);
-    if (!(v > 0)) continue;
-    const nome = man[K].sku || K;
-    if (!temNoBling(K) && !temNoBling(nome)) b[nome] = { custo: v, manual: true };
-  }
-  return b;
-}
-/* Aceita planilha colada do Excel (SKU<TAB>custo), CSV com ; ou , e linhas soltas.
-   ⚠️ O SEPARADOR É DECIDIDO POR LINHA, e a vírgula é a ÚLTIMA opção: em planilha brasileira
-   a vírgula é DECIMAL, e tratá-la como separador de coluna transforma "33,82" em 82 — um
-   custo errado sem nenhum aviso na tela é pior que custo faltando. Tab e ponto-e-vírgula
-   têm prioridade justamente por isso.
-   Devolve {itens, ignoradas} pra tela poder mostrar o que entrou e o que não. */
-
-/* Tela do custo manual: colar do Excel ou subir CSV. Sem framework, no mesmo estilo escuro
-   dos outros painéis. A lista do que já está gravado vem junto, com botão de apagar. */
-function telaCustosManuais(nomeEmpresa, mod) {
-  return `<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Custos manuais · ${nomeEmpresa}</title><style>
-*{box-sizing:border-box} body{margin:0;background:#0b1220;color:#e5e7eb;font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;padding:18px}
-.wrap{max-width:980px;margin:0 auto} h1{font-size:19px;margin:0 0 4px} .dim{color:#94a3b8;font-size:12px}
-.card{background:#111a2e;border:1px solid #1f2b45;border-radius:12px;padding:16px;margin:14px 0}
-textarea{width:100%;min-height:180px;background:#0b1220;color:#e5e7eb;border:1px solid #1f2b45;border-radius:8px;padding:10px;font:13px ui-monospace,Menlo,Consolas,monospace}
-button{background:#4f46e5;color:#fff;border:0;border-radius:8px;padding:10px 16px;font-weight:700;cursor:pointer}
-button.sec{background:#1f2b45}
-table{width:100%;border-collapse:collapse;margin-top:8px} th,td{text-align:left;padding:6px 8px;border-bottom:1px solid #1f2b45;font-size:13px}
-th{color:#94a3b8;font-weight:600;font-size:11px;text-transform:uppercase}
-.ok{color:#34d399} .warn{color:#fbbf24} .bad{color:#f87171} code{background:#0b1220;padding:1px 5px;border-radius:4px}
-</style></head><body><div class="wrap">
-<h1>💰 Custos manuais · ${nomeEmpresa}</h1>
-<div class="dim">O custo daqui <b>só vale onde o Bling não tem custo</b> para o SKU. Se o Bling passar a ter, ele volta a mandar — o manual é ponte, não substituto.</div>
-
-<div class="card">
-  <div style="margin-bottom:8px"><b>Colar do Excel</b> <span class="dim">— duas colunas: SKU e custo POR UNIDADE. Aceita tab, ponto-e-vírgula, vírgula, R$ e decimal brasileiro.</span></div>
-  <textarea id="txt" placeholder="FL-1011-PRETO&#9;33,82&#10;465;12,50&#10;10xE14-5W-3000K-BIV&#9;34,00"></textarea>
-  <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-    <button onclick="salvar()">Salvar custos</button>
-    <button class="sec" onclick="document.getElementById('arq').click()">Subir CSV</button>
-    <input type="file" id="arq" accept=".csv,.txt,.tsv" style="display:none" onchange="lerArq(this)">
-    <span id="msg" class="dim"></span>
-  </div>
-</div>
-
-<div class="card">
-  <div style="display:flex;justify-content:space-between;align-items:center">
-    <b>Gravados</b>
-    <button class="sec" onclick="carregar()">atualizar</button>
-  </div>
-  <div id="lista" class="dim" style="margin-top:8px">carregando…</div>
-</div>
-
-<div class="dim">Dica: no dashboard, o card <b>SKUs que venderam SEM custo</b> tem o botão <i>copiar a lista de SKUs</i> — cole aqui, preencha os custos e salve.</div>
-
-<script>
-const MOD='${mod}';
-const K=new URLSearchParams(location.search).get('k')||'';
-const qs=K?('?k='+encodeURIComponent(K)):'';
-function lerArq(el){ const f=el.files&&el.files[0]; if(!f) return;
-  const r=new FileReader(); r.onload=()=>{ document.getElementById('txt').value=r.result; msg('arquivo carregado — confira e clique em Salvar','warn'); }; r.readAsText(f,'utf-8'); }
-function msg(t,cls){ const m=document.getElementById('msg'); m.textContent=t; m.className=cls||'dim'; }
-async function salvar(){
-  const texto=document.getElementById('txt').value.trim();
-  if(!texto){ msg('cole alguma coisa primeiro','warn'); return; }
-  msg('salvando…');
-  try{
-    const r=await fetch(MOD+'/custos-manuais'+qs,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({texto})});
-    const j=await r.json();
-    if(!j.ok){ msg('✗ '+(j.erro||'falhou')+(j.ignoradas&&j.ignoradas.length?(' · ignoradas: '+j.ignoradas.length):''),'bad'); return; }
-    msg('✓ '+j.gravados+' custo(s) gravado(s)'+(j.ignoradas&&j.ignoradas.length?(' · '+j.ignoradas.length+' linha(s) ignorada(s)'):''),'ok');
-    document.getElementById('txt').value='';
-    carregar();
-  }catch(e){ msg('✗ '+e.message,'bad'); }
-}
-async function apagar(sku){
-  if(!confirm('Apagar o custo manual de '+sku+'?')) return;
-  await fetch(MOD+'/custos-manuais'+qs,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({apagar:sku})});
-  carregar();
-}
-async function carregar(){
-  const el=document.getElementById('lista');
-  try{
-    const r=await fetch(MOD+'/custos-manuais'+(qs?qs+'&':'?')+'lista=1');
-    const j=await r.json();
-    if(!j.ok||!j.total){ el.innerHTML='<span class="dim">nenhum custo manual gravado</span>'; return; }
-    /* Codex (P2): o SKU ia para dentro de um onclick com só as aspas escapadas. O navegador
-       DECODIFICA entidades HTML antes de rodar o JS, então uma planilha com um SKU forjado
-       executaria script na sessão de admin — e planilha vem de fora. Agora o valor viaja em
-       data-attribute (que nunca é interpretado como código) e o clique é ligado por listener. */
-    el.innerHTML='<table><tr><th>SKU</th><th>Custo/un.</th><th>Quando</th><th></th></tr>'+
-      j.itens.map(i=>'<tr><td><code>'+esc(i.sku)+'</code></td><td>R$ '+Number(i.custo).toFixed(2).replace('.',',')+
-      '</td><td class="dim">'+(i.em?String(i.em).slice(0,10).split('-').reverse().join('/'):'—')+
-      '</td><td><button class="sec del" style="padding:3px 8px;font-size:11px" data-sku="'+esc(i.sku)+'">apagar</button></td></tr>').join('')+
-      '</table><div class="dim" style="margin-top:6px">'+j.total+' SKU(s)</div>';
-    el.querySelectorAll('button.del').forEach(b=>b.addEventListener('click',()=>apagar(b.getAttribute('data-sku'))));
-  }catch(e){ el.innerHTML='<span class="bad">erro: '+e.message+'</span>'; }
-}
-function esc(s){ return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
-carregar();
-</script></div></body></html>`;
-}
-
-function parsearCustosColados(txt) {
-  const linhas = String(txt || '').split(/\r?\n/);
-  const itens = {}; const ignoradas = [];
-  const limpa = x => String(x || '').trim().replace(/^["']|["']$/g, '');
-  const paraNumero = s => {
-    let b = String(s || '').replace(/[R$\s]/gi, '');
-    if (!b) return NaN;
-    const temVirg = b.indexOf(',') >= 0, temPonto = b.indexOf('.') >= 0;
-    if (temVirg && temPonto) b = (b.lastIndexOf(',') > b.lastIndexOf('.'))
-        ? b.replace(/\./g, '').replace(',', '.')     // 1.234,56 → 1234.56
-        : b.replace(/,/g, '');                       // 1,234.56 → 1234.56
-    else if (temVirg) b = b.replace(',', '.');       // 33,82 → 33.82
-    return Number(b);
-  };
-  for (const ln of linhas) {
-    let l = ln.trim();
-    if (!l) continue;
-    /* Codex (P2): CSV com aspas — "FL-1011-PRETO","33.82" — é o que o Excel exporta por PADRÃO,
-       e a linha inteira era rejeitada porque o número não terminava a linha (a aspa final
-       atrapalhava o casamento). A tela oferece "subir CSV", então o formato mais comum tem que
-       passar: tiro as aspas de cada campo antes de decidir o separador. */
-    if (l.indexOf('"') >= 0 || l.indexOf("'") >= 0) {
-      const campos = l.match(/"[^"]*"|'[^']*'|[^,;\t]+/g);
-      if (campos && campos.length >= 2) l = campos.map(c => c.trim().replace(/^["']|["']$/g, '')).join('\t');
-    }
-    let partes;
-    if (l.indexOf('\t') >= 0) partes = l.split('\t');
-    else if (l.indexOf(';') >= 0) partes = l.split(';');
-    else {
-      /* Sem tab nem ';', o valor é o ÚLTIMO CAMPO NUMÉRICO da linha e o SKU é todo o resto.
-         Achar isso cortando na última vírgula não funciona: em "R$ 8,90" a última vírgula está
-         DENTRO do número, e o corte devolvia custo 90. Então eu casco o número pelo FIM da linha
-         — aceitando R$, espaço, milhar e decimal — e o que sobra na frente é o SKU, mesmo que
-         tenha vírgulas ("KIT 10x LED, 3000K, 5W"). */
-      const m = l.match(/^(.*?)[\s,;]*(?:R\$\s*)?(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d+)?|\d+(?:[.,]\d+)?)\s*$/i);
-      if (m && m[1] && m[1].trim()) partes = [m[1], m[2]];
-      else partes = [l];   // sem número no fim: linha ignorada logo abaixo
-    }
-    partes = (partes || []).map(limpa).filter(x => x !== '');
-    if (partes.length < 2) { ignoradas.push(l.slice(0, 60)); continue; }
-    const sku = String(partes[0]).replace(/[\s,;]+$/, '');
-    const custo = paraNumero(partes[partes.length - 1]);
-    if (!sku || sku.toLowerCase() === 'sku' || !isFinite(custo) || custo <= 0) { ignoradas.push(l.slice(0, 60)); continue; }
-    /* Codex (P2): a planilha pode vir 'abc-1' e a venda 'ABC-1'. Guardo a chave normalizada
-       (e o sku original pra exibir), e a leitura normaliza igual — senão o custo nunca aplica. */
-    itens[sku.toUpperCase()] = { custo: Math.round(custo * 10000) / 10000, sku: sku, em: new Date().toISOString() };
-  }
-  return { itens, ignoradas };
-}
+/* ═══ 22/08 — CUSTO: agora vem de lib/custo.js (código único das 3 empresas) ═════════════
+   Estas funções estavam escritas 3× (uma por empresa) e a GOOD já tinha ficado sem 5 delas.
+   Aqui fica só a ponte: o ctx com o que é DESTA empresa; a regra vive num lugar só.
+   `skuInfoCache` vai por getter porque a lib limpa o cache de 6h quando o custo muda. */
+const _custoLib = require('../lib/custo');
+const _ctxCusto = { CACHE_DIR, path, fs, readJson, writeJson, blingGet,
+                    get skuInfoCache() { return typeof _skuInfoCache !== 'undefined' ? _skuInfoCache : null; } };
+const lerCustosManuais       = ()            => _custoLib.lerCustosManuais(_ctxCusto);
+const gravarCustosManuais    = (o)           => _custoLib.gravarCustosManuais(_ctxCusto, o);
+const custoManualDe          = (sku, b)      => _custoLib.custoManualDe(_ctxCusto, sku, b);
+const comCustosManuais       = (m)           => _custoLib.comCustosManuais(_ctxCusto, m);
+const parsearCustosColados   = (t)           => _custoLib.parsearCustosColados(t);
+const telaCustosManuais      = (nome, mod)   => _custoLib.telaCustosManuais(nome, mod);
+const lerVigencias           = ()            => _custoLib.lerVigencias(_ctxCusto);
+const gravarVigencias        = (o)           => _custoLib.gravarVigencias(_ctxCusto, o);
+const registrarCustoVigente  = (sku, v, org) => _custoLib.registrarCustoVigente(_ctxCusto, sku, v, org);
+const custoVigenteEm         = (sku, data)   => _custoLib.custoVigenteEm(_ctxCusto, sku, data);
+const lerDeParaSku           = ()            => _custoLib.lerDeParaSku(_ctxCusto);
+const gravarDeParaSku        = (o)           => _custoLib.gravarDeParaSku(_ctxCusto, o);
+const resolverDeParaSku      = (sku)         => _custoLib.resolverDeParaSku(_ctxCusto, sku);
+const sugerirDeParaSku       = (v, cods)     => _custoLib.sugerirDeParaSku(_ctxCusto, v, cods);
+const resolverNomeSku        = (d)           => _custoLib.resolverNomeSku(_ctxCusto, d);
+const carregarCatalogoDePara = ()            => _custoLib.carregarCatalogoDePara(_ctxCusto);
+const _hojeISO  = _custoLib._hojeISO;
+const _ontemISO = _custoLib._ontemISO;
+const _diaAntes = _custoLib._diaAntes;
 
 async function shopeeKeepAlive() {
   const sess = shopeeSessaoLer();
@@ -1501,6 +1144,10 @@ function routes(readBody) {
       if (!skus.length) { json(res, 200, { ok: true, skus: {} }); return true; }
       const CACHE_SKUINFO = path.join(CACHE_DIR, '_skus-info.json');
       if (!_skuInfoCache) _skuInfoCache = readJson(CACHE_SKUINFO, {});
+      /* Codex (#186): guarda a versão do custo/de-para agora. Se alguém mudar o mapa enquanto esta
+         requisição espera a rede, no fim a gente percebe e NÃO grava — senão o valor velho voltava
+         pro cache e era servido por mais 6h, mesmo com a limpeza feita na hora da mudança. */
+      const _epoca0 = _custoLib.epocaCusto(_ctxCusto);
       const TTL = 6 * 3600 * 1000;
       const out = {}; const faltam = [];
       let _ccTop = null;   // cache permanente de custos, carregado sob demanda
@@ -1524,7 +1171,7 @@ function routes(readBody) {
       const ids = {};
       const aResolver = [];
       for (const sku of faltam) {
-        const k2 = _ccAll[sku];
+        const k2 = _custoLib.custoDeSku(_ccAll, sku);
         if (k2 && k2.id && (Date.now() - (k2.ts || 0)) < 7 * 24 * 3600 * 1000) { ids[sku] = { id: k2.id, nome: (k2.nome || null), preco: (k2.preco != null ? k2.preco : null), custo: (k2.custo != null ? k2.custo : null) }; }
         else aResolver.push(sku);
       }
@@ -1589,12 +1236,17 @@ function routes(readBody) {
                         : { saldo: null, preco: null, custo: null, ts: Date.now() };
         // b20: o banco PERMANENTE (_custos.json) é SOBERANO — falha de consulta (429 do Bling) nunca mais
         // apaga um custo conhecido. Foi o que sumiu custos da tela em 22/07 (tempestade do re-cache SCHEMA 5).
-        if (info.custo == null) { const kP = _ccAll[sku]; if (kP && kP.custo != null) { info.custo = kP.custo; if (info.preco == null && kP.preco != null) info.preco = kP.preco; } }
+        if (info.custo == null) { const kP = _custoLib.custoDeSku(_ccAll, sku); if (kP && kP.custo != null) { info.custo = kP.custo; if (info.preco == null && kP.preco != null) info.preco = kP.preco; } }
         const c0 = _skuInfoCache[sku];
         if (info.custo == null && c0 && c0.custo != null) info.custo = c0.custo;   // e o valor antigo do cache de 6h também vale mais que um null novo
         _skuInfoCache[sku] = info; out[sku] = info;
       }
-      if (faltam.length) { try { writeJson(CACHE_SKUINFO, _skuInfoCache); } catch (e) {} }
+      const _mapaMudou = _custoLib.epocaCusto(_ctxCusto) !== _epoca0;
+      if (_mapaMudou) {
+        // o de-para/custo mudou no meio: o que resolvemos pode estar velho. Não contamina o cache.
+        try { for (const _k of Object.keys(_skuInfoCache)) delete _skuInfoCache[_k]; } catch (e) {}
+        try { if (fs.existsSync(CACHE_SKUINFO)) fs.unlinkSync(CACHE_SKUINFO); } catch (e) {}
+      } else if (faltam.length) { try { writeJson(CACHE_SKUINFO, _skuInfoCache); } catch (e) {} }
       json(res, 200, { ok: true, skus: out, consultados_agora: faltam.length, resolvidos: Object.keys(ids).filter(k2 => ids[k2]).length, nao_resolvidos: resolveFalhas });
       return true;
     }
@@ -2740,9 +2392,16 @@ function routes(readBody) {
         const m = lerDeParaSku();
 
         if (b.apagar) {
+          /* Codex (#185): o resto da rota trata SKU sem diferenciar maiúscula/minúscula, mas o
+             apagar só removia a grafia exata e a MAIÚSCULA. Um par gravado como "Pm1" sobrevivia
+             a um apagar "pm1" — e a rota ainda respondia ok, então parecia apagado e não estava. */
+          /* Codex (#186): apagar SÓ a primeira variante era REGRESSÃO — o save antigo permitia
+             "pm1" e "PM1" convivendo, e a versão anterior removia exata + MAIÚSCULA. Com uma
+             chave só sobrando, ela voltaria a valer sozinha. Apaga TODAS as variantes. */
           const k = String(b.apagar).trim();
-          const tinha = !!(m[k] || m[k.toUpperCase()]);
-          delete m[k]; delete m[k.toUpperCase()];
+          const kTodas = Object.keys(m).filter(x => String(x).trim().toUpperCase() === k.toUpperCase());
+          const tinha = kTodas.length > 0;
+          for (const kk of kTodas) delete m[kk];
           gravarDeParaSku(m);
           json(res, 200, { ok: true, apagado: tinha ? k : null, total: Object.keys(m).length });
           return true;
@@ -2754,11 +2413,35 @@ function routes(readBody) {
         if (de.toUpperCase() === para.toUpperCase()) { json(res, 400, { ok: false, erro: 'de e para sao o mesmo SKU' }); return true; }
         /* ciclo: se o destino já aponta de volta pra origem, recusa — senão a resolução ficaria
            dando voltas e o Diego não entenderia por que o custo não aparece. */
-        const destinoResolve = resolverDeParaSku(para);
-        if (String(destinoResolve).toUpperCase() === de.toUpperCase()) {
-          json(res, 400, { ok: false, erro: 'isso criaria um ciclo: ' + para + ' ja aponta pra ' + de }); return true;
+        /* Codex (#185): a checagem antiga resolvia o destino PELA ARESTA ANTIGA do próprio `de`,
+           e comparava só o resultado final. Com A→B e C→A, mudar A pra apontar pra C fazia
+           resolverDeParaSku('C') devolver B — passava, e gravava o ciclo A↔C. Agora percorro a
+           cadeia a partir de `para` IGNORANDO a aresta atual de `de`, e recuso se ela passar por
+           `de` em qualquer ponto. */
+        const _up = s => String(s || '').toUpperCase();
+        let _passo = para, _visit = new Set([_up(de)]), _ciclo = false;
+        for (let i = 0; i < 50 && _passo; i++) {
+          if (_up(_passo) === _up(de)) { _ciclo = true; break; }
+          if (_visit.has(_up(_passo))) break;            // ciclo que não envolve `de`: já existia
+          _visit.add(_up(_passo));
+          const _reg = m[_passo] || m[Object.keys(m).find(k => _up(k) === _up(_passo))];
+          _passo = _reg && _reg.para;
         }
-        m[de] = { para, em: new Date().toISOString() };
+        if (_ciclo) {
+          json(res, 400, { ok: false, erro: 'isso criaria um ciclo: seguindo ' + para + ' se chega de volta em ' + de }); return true;
+        }
+        /* Codex (#185): mesmo bug de caixa do apagar, do outro lado. Gravar "Pm1 → A" e depois
+           "pm1 → B" deixava as DUAS chaves, e a resolução escolhia uma ou outra conforme a grafia
+           que chegasse. Reaproveito a chave que já existe (comparação normalizada). */
+        /* Codex (#186): reaproveitar UMA chave não bastava. Com "pm1" e "PM1" legados convivendo
+           (o save antigo permitia), atualizar a primeira deixava a outra apontando pro destino
+           VELHO — e como a busca dá precedência à chave exata, resolver "PM1" ainda devolvia o
+           destino antigo. Mesma correção do apagar, do outro lado: some com todas as variantes e
+           deixa UMA, preservando a grafia que já estava gravada. */
+        const _vars = Object.keys(m).filter(x => String(x).trim().toUpperCase() === de.toUpperCase());
+        const _deReal = _vars[0] || de;
+        for (const _v of _vars) delete m[_v];
+        m[_deReal] = { para, em: new Date().toISOString() };
         gravarDeParaSku(m);
         json(res, 200, { ok: true, de, para, resolve_para: resolverDeParaSku(de), total: Object.keys(m).length });
         return true;
@@ -2826,6 +2509,108 @@ function routes(readBody) {
       }
     }
 
+    // DE-PARA DE SKU RENOMEADO — conserto cirúrgico do rename no histórico do Supabase.
+    // (23/08: portada da AMB. A Girassol MENCIONAVA esta rota na resposta do /sku-depara e não
+    //  a tinha — quem seguisse a instrução batia num 404.)
+    // ⚠️ Match EXATO de propósito: existe FL-1011-PRETO-2LAMPS, que é OUTRO produto e não pode
+    // ser tocado (aviso do Diego). Nada de LIKE/prefixo aqui.
+    // Uso:  GET /girassol-backup-offline/sku-repara?de=SKU_ANTIGO&para=SKU_NOVO&k=ADMIN_KEY
+    //       (sem &aplicar=1 é SIMULAÇÃO: diz quantas linhas mudariam, sem gravar)
+    if (method === 'GET' && p === '/girassol-backup-offline/sku-repara') {
+      const kR = urlObj.searchParams.get('k') || '';
+      const sR = validarSessao(req.headers['cookie']);
+      if (!((process.env.ADMIN_KEY && kR === process.env.ADMIN_KEY) || (sR && ehAdmin(sR)))) { json(res, 404, { error: 'not found' }); return true; }
+      const deSku = String(urlObj.searchParams.get('de') || '').trim();
+      const paraSku = String(urlObj.searchParams.get('para') || '').trim();
+      const aplicar = urlObj.searchParams.get('aplicar') === '1';
+      if (!deSku || !paraSku) { json(res, 400, { ok: false, erro: 'use ?de=SKU_ANTIGO&para=SKU_NOVO&k=ADMIN_KEY (sem &aplicar=1 simula)' }); return true; }
+      if (deSku === paraSku) { json(res, 400, { ok: false, erro: 'de e para são iguais' }); return true; }
+      const outR = { ok: true, de: deSku, para: paraSku, simulacao: !aplicar, linhas: 0, atualizadas: 0, avisos: [] };
+      // o backfill/caça apagam e regravam o período — não mexer no histórico enquanto isso
+      if (_backfill && _backfill.rodando) { json(res, 409, { ok: false, erro: 'backfill rodando — tente depois' }); return true; }
+      /* Checar `_backfill.rodando` UMA vez não basta: a varredura do catálogo logo abaixo demora,
+         e um backfill iniciado no meio apaga e regrava o período com o SKU ANTIGO, desfazendo o
+         reparo em silêncio. O reparo levanta a própria trava e os dois lados a respeitam. */
+      if (_reparoAtivo) { json(res, 409, { ok: false, erro: 'outro reparo de SKU em andamento — tente depois' }); return true; }
+      _reparoAtivo = true;
+      try {
+      // (a trava da caça da Magalu não vem junto: `_mgc` só existe na AMB.)
+      // 1) o SKU de destino TEM que existir no catálogo (senão o de-para cria outro órfão).
+      //    Varredura completa: o filtro ?codigo= do Bling não é confiável.
+      let achouDestino = false, aindaExisteOrigem = false, completo = false;
+      try {
+        for (let pg = 1; pg <= 200; pg++) {
+          const rc = await blingGet('/produtos?pagina=' + pg + '&limite=100&criterio=2');
+          if (!rc || !rc.ok) { json(res, 200, { ok: false, erro: 'catálogo: página ' + pg + ' falhou — de-para abortado' }); return true; }
+          const lote = (rc.data && rc.data.data) || [];
+          for (const pr of lote) {
+            const cd = String(pr.codigo || '').trim();
+            if (cd === paraSku) achouDestino = true;
+            if (cd === deSku) aindaExisteOrigem = true;
+          }
+          if (lote.length < 100) { completo = true; break; }
+          await new Promise(r0 => setTimeout(r0, 250));
+        }
+      } catch (e) { json(res, 200, { ok: false, erro: 'catálogo: ' + String(e.message || e).slice(0, 140) }); return true; }
+      if (!completo) { json(res, 200, { ok: false, erro: 'catálogo maior que o teto — de-para abortado' }); return true; }
+      if (!achouDestino) { json(res, 200, { ok: false, erro: 'o SKU de destino (' + paraSku + ') NÃO existe no catálogo do Bling — de-para abortado' }); return true; }
+      if (aindaExisteOrigem) outR.avisos.push('atenção: ' + deSku + ' AINDA existe no catálogo — confirme que o rename é esse mesmo antes de aplicar');
+      // 2) quantas linhas do histórico têm exatamente esse SKU (paginação por chave)
+      let ultId = 0;
+      try {
+        for (let volta = 0; volta < 300; volta++) {
+          const q = 'vendas_historico?empresa=eq.girassol&sku=eq.' + encodeURIComponent(deSku) + '&id=gt.' + ultId + '&select=id&order=id.asc&limit=1000';
+          const rr = await supaReq('girassol', 'GET', q, null);
+          if (!rr.ok) { json(res, 200, { ok: false, erro: 'histórico: HTTP ' + rr.status }); return true; }
+          let arr = null; try { arr = JSON.parse(rr.body || 'null'); } catch (e) { arr = null; }
+          if (!Array.isArray(arr)) { json(res, 200, { ok: false, erro: 'histórico: resposta ilegível' }); return true; }
+          outR.linhas += arr.length;
+          for (const l of arr) { const idL = Number(l && l.id) || 0; if (idL > ultId) ultId = idL; }
+          if (arr.length < 1000) break;
+        }
+      } catch (e) { json(res, 200, { ok: false, erro: 'histórico: ' + String(e.message || e).slice(0, 140) }); return true; }
+      if (!outR.linhas) { outR.avisos.push('nenhuma linha com esse SKU exato no histórico'); json(res, 200, outR); return true; }
+      if (!aplicar) { outR.msg = outR.linhas + ' linha(s) mudariam de ' + deSku + ' para ' + paraSku + '. Repita com &aplicar=1 pra gravar.'; json(res, 200, outR); return true; }
+      // 3) aplica — um PATCH só, com filtro EXATO (nada de like/prefixo)
+      const rp = await supaReq('girassol', 'PATCH', 'vendas_historico?empresa=eq.girassol&sku=eq.' + encodeURIComponent(deSku), { sku: paraSku, sku_anterior: deSku });
+      /* Codex (#185/#186): o PATCH mudou o histórico, mas o _histCache guarda os agregados por até
+         30 min — sem limpar, o dashboard segue mostrando o SKU ANTIGO e o reparo parece ter
+         falhado. Mesma limpeza que o backfill e a caça já fazem.
+         E limpa depois do PATCH que DEU CERTO, não antes do segundo: quando o primeiro falha e
+         entra o de reserva, uma consulta do dashboard no meio repovoava o cache com o dado velho,
+         e nada mais limpava — os agregados ficavam errados até o TTL vencer. */
+      const _limpaHist = () => { try { for (const _k of Object.keys(_histCache)) delete _histCache[_k]; } catch (e) {} };
+      if (!rp.ok) {
+        // sku_anterior pode não existir como coluna — tenta de novo só com o sku
+        const rp2 = await supaReq('girassol', 'PATCH', 'vendas_historico?empresa=eq.girassol&sku=eq.' + encodeURIComponent(deSku), { sku: paraSku });
+        if (!rp2.ok) { _limpaHist(); json(res, 200, { ok: false, erro: 'PATCH falhou: HTTP ' + rp.status + ' / ' + rp2.status, detalhe: String(rp.body || '').slice(0, 200) }); return true; }
+        _limpaHist();
+        outR.avisos.push('coluna sku_anterior não existe — gravado só o sku novo');
+      } else _limpaHist();
+      // 4) confere: não pode sobrar linha com o SKU antigo
+      let sobrou = 0;
+      try {
+        const rc2 = await supaReq('girassol', 'GET', 'vendas_historico?empresa=eq.girassol&sku=eq.' + encodeURIComponent(deSku) + '&select=id&limit=5', null);
+        if (rc2.ok) { const a2 = JSON.parse(rc2.body || '[]'); sobrou = Array.isArray(a2) ? a2.length : 0; }
+      } catch (e) {}
+      outR.atualizadas = outR.linhas - sobrou;
+      outR.sobraram_com_sku_antigo = sobrou;
+      if (sobrou) outR.avisos.push('ainda sobraram linhas com o SKU antigo — rode de novo');
+      json(res, 200, outR);
+      return true;
+      } finally { _reparoAtivo = false; }
+
+
+    }
+
+    // SKU ÓRFÃO (13/08) — MEDIÇÃO pro caso do rename de SKU no Bling (achado no app de
+    // Devoluções: a venda antiga guarda o SKU velho e, depois do rename, ninguém acha o produto;
+    // o histórico do dashboard parte em dois no dia do rename). Antes de trocar a chave de
+    // agregação por produto_id, esta rota MEDE o tamanho do problema: quantos SKUs do histórico
+    // não existem mais no catálogo, e quanto faturamento está preso neles.
+    // Uso: GET /girassol-backup-offline/sku-orfaos?de=AAAA-MM-DD&ate=AAAA-MM-DD&k=ADMIN_KEY
+    // Só leitura. O catálogo é varrido INTEIRO (o filtro ?codigo= do Bling não é confiável —
+    // ora volta vazio pra produto que existe, ora ignora o filtro), montando codigo → id.
     /* ═══ 21/08 — DE-PARA AUTOMÁTICO DE SKU RENOMEADO ═══════════════════════════════════════
     Nasceu do FL-1011-PRETO: renomeado no Bling para 3933398010054, o código antigo deixou de
     existir e as 53 vendas antigas ficaram sem custo. O Diego resolveu à mão pela planilha, mas
@@ -4268,6 +4053,7 @@ function _destravarJulho() {
   } catch (e) { console.error('[fiscal] não consegui destravar julho (' + e.message + ') — segue com o salvo'); }
 }
 _destravarJulho();
+let _reparoAtivo = false;  // trava do sku-repara — backfill e caça checam antes de começar
 const _histCache = {};   // agregados do Supabase por período (10 min)
 let _backfill = { rodando:false, empresa:null, de:null, ate:null, pagina:0, pedidos:0, itens:0, gravados:0, erros:0, fase:'parado', inicio:null, fim:null, msg:'' };
 
@@ -4455,6 +4241,12 @@ async function varrerFornecedores(max) {
 }
 
 async function backfillVendas(de, ate, empresa){
+  /* O guarda mora AQUI, não em cada rota: a noturna e o /backfill-ano chamam esta função direto.
+     Mesmo lugar da trava do canário logo abaixo, pelo mesmo motivo. */
+  if (_reparoAtivo) {
+    console.log('[BACKFILL] adiado: reparo de SKU em andamento (mexe nas mesmas linhas)');
+    return Object.assign({}, _backfill, { adiado: 'reparo de SKU em andamento' });
+  }
   // Codex (#105): a noturna chama esta função DIRETO, sem passar pelas rotas — então a trava
   // do canário precisa morar aqui dentro, senão o backfill agendado dispara enquanto o
   // canário consulta o Bling e recria a disputa de cota que este PR existe pra evitar.
@@ -5426,13 +5218,27 @@ async function backfillAnoTodo(ateMes){
   if(_backfillAno.rodando || _backfill.rodando) return;
   _backfillAno = { rodando:true, mesAtual:null, feitos:[], inicio:new Date().toISOString(), fim:null };
   const meses = ['01','02','03','04','05','06','07','08','09','10','11','12'].filter(m => m <= ateMes);
-  for(const m of meses){
-    _backfillAno.mesAtual = '2026-'+m;
-    await backfillVendas('2026-'+m+'-01', '2026-'+m+'-'+ULTIMO_DIA[m], 'girassol');   // espera cada mês terminar antes do próximo
-    _backfillAno.feitos.push({ mes:'2026-'+m, pedidos:_backfill.pedidos, itens:_backfill.itens, gravados:_backfill.gravados, erros:_backfill.erros });
-    await new Promise(r=>setTimeout(r,2500));
+  /* 22/08: o encerramento foi pra um `finally`. Antes, um erro no meio do ano deixava
+     `_backfillAno.rodando` de pé PRA SEMPRE — e com a flag presa, nenhum backfill novo começava
+     até reiniciar o serviço. (A detecção de adiamento por reparo de SKU vem no PR do sku-repara.) */
+  try {
+    for(const m of meses){
+      _backfillAno.mesAtual = '2026-'+m;
+      const r = await backfillVendas('2026-'+m+'-01', '2026-'+m+'-'+ULTIMO_DIA[m], 'girassol');   // espera cada mês terminar antes do próximo
+      /* o adiamento volta como retorno NORMAL: sem olhar, o mês entraria em `feitos` com os
+         contadores VELHOS e o ano terminaria "concluído" tendo pulado meses em silêncio. */
+      if (r && r.adiado) {
+        _backfillAno.adiado = r.adiado; _backfillAno.parou_em = '2026-'+m;
+        _backfillAno.faltam = meses.slice(meses.indexOf(m));
+        console.log('[BACKFILL-ANO] parou em 2026-' + m + ': ' + r.adiado);
+        break;
+      }
+      _backfillAno.feitos.push({ mes:'2026-'+m, pedidos:_backfill.pedidos, itens:_backfill.itens, gravados:_backfill.gravados, erros:_backfill.erros });
+      await new Promise(r=>setTimeout(r,2500));
+    }
+  } finally {
+    _backfillAno.rodando = false; _backfillAno.mesAtual = null; _backfillAno.fim = new Date().toISOString();
   }
-  _backfillAno.rodando = false; _backfillAno.mesAtual = null; _backfillAno.fim = new Date().toISOString();
 }
 
 async function vendasSync() {

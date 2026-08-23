@@ -1,4 +1,4 @@
-name: Claude x Codex - loop automatico v4
+name: Claude x Codex - loop automatico v5
 
 on:
   pull_request_target:
@@ -277,6 +277,45 @@ jobs:
           if [ "$CONCLUSAO" != "success" ]; then
             parar_humano "O check \`ai-safety\` falhou. O PR não foi mergeado."
             exit 0
+          fi
+
+          # Codex aprovou o HEAD atual. Agora resolve SOMENTE threads antigos
+          # do próprio Codex que ainda estejam abertos. Threads humanos ficam intactos.
+          OWNER="${REPO%%/*}"
+          REPO_NAME="${REPO#*/}"
+
+          THREADS=$(gh api graphql -f query='
+            query($owner:String!, $repo:String!, $number:Int!) {
+              repository(owner:$owner, name:$repo) {
+                pullRequest(number:$number) {
+                  reviewThreads(first:100) {
+                    nodes {
+                      id
+                      isResolved
+                      comments(first:20) {
+                        nodes {
+                          author { login }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }' -F owner="$OWNER" -F repo="$REPO_NAME" -F number="$PR"             --jq '.data.repository.pullRequest.reviewThreads.nodes[]
+                  | select(.isResolved == false)
+                  | select(any(.comments.nodes[]; (.author.login // "") | startswith("chatgpt-codex-connector")))
+                  | .id')
+
+          if [ -n "$THREADS" ]; then
+            echo "$THREADS" | while IFS= read -r THREAD_ID; do
+              [ -z "$THREAD_ID" ] && continue
+              gh api graphql -f query='
+                mutation($threadId:ID!) {
+                  resolveReviewThread(input:{threadId:$threadId}) {
+                    thread { id isResolved }
+                  }
+                }' -F threadId="$THREAD_ID" >/dev/null
+            done
           fi
 
           gh pr merge "$PR" \
