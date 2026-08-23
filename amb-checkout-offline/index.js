@@ -1361,7 +1361,7 @@ function routes(readBody) {
       const ids = {};
       const aResolver = [];
       for (const sku of faltam) {
-        const k2 = _ccAll[sku];
+        const k2 = _custoLib.custoDeSku(_ccAll, sku);
         if (k2 && k2.id && (Date.now() - (k2.ts || 0)) < 7 * 24 * 3600 * 1000) { ids[sku] = { id: k2.id, nome: (k2.nome || null), preco: (k2.preco != null ? k2.preco : null), custo: (k2.custo != null ? k2.custo : null) }; }
         else aResolver.push(sku);
       }
@@ -1426,7 +1426,7 @@ function routes(readBody) {
                         : { saldo: null, preco: null, custo: null, ts: Date.now() };
         // b20: o banco PERMANENTE (_custos.json) é SOBERANO — falha de consulta (429 do Bling) nunca mais
         // apaga um custo conhecido. Foi o que sumiu custos da tela em 22/07 (tempestade do re-cache SCHEMA 5).
-        if (info.custo == null) { const kP = _ccAll[sku]; if (kP && kP.custo != null) { info.custo = kP.custo; if (info.preco == null && kP.preco != null) info.preco = kP.preco; } }
+        if (info.custo == null) { const kP = _custoLib.custoDeSku(_ccAll, sku); if (kP && kP.custo != null) { info.custo = kP.custo; if (info.preco == null && kP.preco != null) info.preco = kP.preco; } }
         const c0 = _skuInfoCache[sku];
         if (info.custo == null && c0 && c0.custo != null) info.custo = c0.custo;   // e o valor antigo do cache de 6h também vale mais que um null novo
         _skuInfoCache[sku] = info; out[sku] = info;

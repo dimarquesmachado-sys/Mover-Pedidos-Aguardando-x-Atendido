@@ -1118,7 +1118,7 @@ function routes(readBody) {
       const ids = {};
       const aResolver = [];
       for (const sku of faltam) {
-        const k2 = _ccAll[sku];
+        const k2 = _custoLib.custoDeSku(_ccAll, sku);
         if (k2 && k2.id && (Date.now() - (k2.ts || 0)) < 7 * 24 * 3600 * 1000) { ids[sku] = { id: k2.id, preco: (k2.preco != null ? k2.preco : null), custo: (k2.custo != null ? k2.custo : null) }; }
         else aResolver.push(sku);
       }
