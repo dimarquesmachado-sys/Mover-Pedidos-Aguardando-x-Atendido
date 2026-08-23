@@ -2187,6 +2187,12 @@ function routes(readBody) {
       const outR = { ok: true, de: deSku, para: paraSku, simulacao: !aplicar, linhas: 0, atualizadas: 0, avisos: [] };
       // o backfill/caça apagam e regravam o período — não mexer no histórico enquanto isso
       if (_backfill && _backfill.rodando) { json(res, 409, { ok: false, erro: 'backfill rodando — tente depois' }); return true; }
+      /* Checar `_backfill.rodando` UMA vez não basta: a varredura do catálogo logo abaixo demora,
+         e um backfill iniciado no meio apaga e regrava o período com o SKU ANTIGO, desfazendo o
+         reparo em silêncio. O reparo levanta a própria trava e os dois lados a respeitam. */
+      if (_reparoAtivo) { json(res, 409, { ok: false, erro: 'outro reparo de SKU em andamento — tente depois' }); return true; }
+      _reparoAtivo = true;
+      try {
       if (_mgc && _mgc.rodando) { json(res, 409, { ok: false, erro: 'caça da Magalu rodando — tente depois' }); return true; }
       // 1) o SKU de destino TEM que existir no catálogo (senão o de-para cria outro órfão).
       //    Varredura completa: o filtro ?codigo= do Bling não é confiável.
@@ -2251,6 +2257,8 @@ function routes(readBody) {
       if (sobrou) outR.avisos.push('ainda sobraram linhas com o SKU antigo — rode de novo');
       json(res, 200, outR);
       return true;
+      } finally { _reparoAtivo = false; }
+
 
     }
 
@@ -5465,6 +5473,13 @@ async function cacaMagalu(de, ate, empresa, opts) {
   const dorme = ms => new Promise(r => setTimeout(r, ms));
   empresa = empresa || 'amb';
   if (_mgc.rodando) return _mgc;
+  /* A caça também apaga e reinsere linhas do vendas_historico (ainda mais com ?refazer=1), então
+     pode RECRIAR o SKU antigo por cima do PATCH do reparo. Aqui dentro pelo mesmo motivo do
+     backfill: o cron horário chama esta função direto, sem passar por rota. */
+  if (_reparoAtivo) {
+    console.log('[MAGALU] adiada: reparo de SKU em andamento (mexe nas mesmas linhas)');
+    return Object.assign({}, _mgc, { adiado: 'reparo de SKU em andamento' });
+  }
   _mgc = { rodando: true, em: new Date().toISOString(), de, ate, na_magalu: 0, ja_tinha: 0, inseridos: 0, linhas: 0, removidos_cancelados: 0, erro: null, parcial: false };
   try {
     const jaTem = new Set();
@@ -5642,6 +5657,7 @@ async function cacaMagaluCron() {
 //   jul/ago: ESTIMATIVAS pela curva do RBT12p com maio retificado (jul ~8,58 · ago ~8,82) —
 //   confirmar quando os DAS saírem e ajustar no ⚙️ (ou aqui) + reaplicar-imposto.
 const DEFAULT_ALIQ_BK = { '2026-01':4.0, '2026-02':4.0, '2026-03':4.0, '2026-04':4.0, '2026-05':5.2792, '2026-06':6.0414, '2026-07':8.58, '2026-08':8.82, '2026-09':8.82, '2026-10':8.82, '2026-11':8.82, '2026-12':8.82 };
+let _reparoAtivo = false;  // trava do sku-repara — backfill e caça checam antes de começar
 const _histCache = {};   // agregados do Supabase por período (10 min)
 let _backfill = { rodando:false, empresa:null, de:null, ate:null, pagina:0, pedidos:0, itens:0, gravados:0, erros:0, fase:'parado', inicio:null, fim:null, msg:'' };
 
@@ -5829,6 +5845,12 @@ async function varrerFornecedores(max) {
 }
 
 async function backfillVendas(de, ate, empresa){
+  /* O guarda mora AQUI, não em cada rota: a noturna e o /backfill-ano chamam esta função direto.
+     Mesmo lugar da trava do canário logo abaixo, pelo mesmo motivo. */
+  if (_reparoAtivo) {
+    console.log('[BACKFILL] adiado: reparo de SKU em andamento (mexe nas mesmas linhas)');
+    return Object.assign({}, _backfill, { adiado: 'reparo de SKU em andamento' });
+  }
   // Codex (#119): a trava só impedia o CANÁRIO quando havia backfill rodando. Se o canário
   // começa primeiro e alguém dispara backfill — ou a noturna chama esta função direto —, os
   // dois consultam o Bling juntos e o 429 volta. Exclusão nos DOIS sentidos.
@@ -6854,7 +6876,15 @@ async function backfillAnoTodo(ateMes){
   try {
     for(const m of meses){
       _backfillAno.mesAtual = '2026-'+m;
-      await backfillVendas('2026-'+m+'-01', '2026-'+m+'-'+ULTIMO_DIA[m], 'amb');   // espera cada mês terminar antes do próximo
+      const r = await backfillVendas('2026-'+m+'-01', '2026-'+m+'-'+ULTIMO_DIA[m], 'amb');   // espera cada mês terminar antes do próximo
+      /* o adiamento volta como retorno NORMAL: sem olhar, o mês entraria em `feitos` com os
+         contadores VELHOS e o ano terminaria "concluído" tendo pulado meses em silêncio. */
+      if (r && r.adiado) {
+        _backfillAno.adiado = r.adiado; _backfillAno.parou_em = '2026-'+m;
+        _backfillAno.faltam = meses.slice(meses.indexOf(m));
+        console.log('[BACKFILL-ANO] parou em 2026-' + m + ': ' + r.adiado);
+        break;
+      }
       _backfillAno.feitos.push({ mes:'2026-'+m, pedidos:_backfill.pedidos, itens:_backfill.itens, gravados:_backfill.gravados, erros:_backfill.erros });
       await new Promise(r=>setTimeout(r,2500));
     }
