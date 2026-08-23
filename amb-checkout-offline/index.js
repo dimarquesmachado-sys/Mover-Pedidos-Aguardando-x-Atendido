@@ -1338,6 +1338,10 @@ function routes(readBody) {
       if (!skus.length) { json(res, 200, { ok: true, skus: {} }); return true; }
       const CACHE_SKUINFO = path.join(CACHE_DIR, '_skus-info.json');
       if (!_skuInfoCache) _skuInfoCache = readJson(CACHE_SKUINFO, {});
+      /* Codex (#186): guarda a versão do custo/de-para agora. Se alguém mudar o mapa enquanto esta
+         requisição espera a rede, no fim a gente percebe e NÃO grava — senão o valor velho voltava
+         pro cache e era servido por mais 6h, mesmo com a limpeza feita na hora da mudança. */
+      const _epoca0 = _custoLib.epocaCusto(_ctxCusto);
       const TTL = 6 * 3600 * 1000;
       const out = {}; const faltam = [];
       let _ccTop = null;   // cache permanente de custos, carregado sob demanda
@@ -1361,7 +1365,7 @@ function routes(readBody) {
       const ids = {};
       const aResolver = [];
       for (const sku of faltam) {
-        const k2 = _ccAll[sku];
+        const k2 = _custoLib.custoDeSku(_ccAll, sku);
         if (k2 && k2.id && (Date.now() - (k2.ts || 0)) < 7 * 24 * 3600 * 1000) { ids[sku] = { id: k2.id, nome: (k2.nome || null), preco: (k2.preco != null ? k2.preco : null), custo: (k2.custo != null ? k2.custo : null) }; }
         else aResolver.push(sku);
       }
@@ -1426,12 +1430,17 @@ function routes(readBody) {
                         : { saldo: null, preco: null, custo: null, ts: Date.now() };
         // b20: o banco PERMANENTE (_custos.json) é SOBERANO — falha de consulta (429 do Bling) nunca mais
         // apaga um custo conhecido. Foi o que sumiu custos da tela em 22/07 (tempestade do re-cache SCHEMA 5).
-        if (info.custo == null) { const kP = _ccAll[sku]; if (kP && kP.custo != null) { info.custo = kP.custo; if (info.preco == null && kP.preco != null) info.preco = kP.preco; } }
+        if (info.custo == null) { const kP = _custoLib.custoDeSku(_ccAll, sku); if (kP && kP.custo != null) { info.custo = kP.custo; if (info.preco == null && kP.preco != null) info.preco = kP.preco; } }
         const c0 = _skuInfoCache[sku];
         if (info.custo == null && c0 && c0.custo != null) info.custo = c0.custo;   // e o valor antigo do cache de 6h também vale mais que um null novo
         _skuInfoCache[sku] = info; out[sku] = info;
       }
-      if (faltam.length) { try { writeJson(CACHE_SKUINFO, _skuInfoCache); } catch (e) {} }
+      const _mapaMudou = _custoLib.epocaCusto(_ctxCusto) !== _epoca0;
+      if (_mapaMudou) {
+        // o de-para/custo mudou no meio: o que resolvemos pode estar velho. Não contamina o cache.
+        try { for (const _k of Object.keys(_skuInfoCache)) delete _skuInfoCache[_k]; } catch (e) {}
+        try { if (fs.existsSync(CACHE_SKUINFO)) fs.unlinkSync(CACHE_SKUINFO); } catch (e) {}
+      } else if (faltam.length) { try { writeJson(CACHE_SKUINFO, _skuInfoCache); } catch (e) {} }
       json(res, 200, { ok: true, skus: out, consultados_agora: faltam.length, resolvidos: Object.keys(ids).filter(k2 => ids[k2]).length, nao_resolvidos: resolveFalhas });
       return true;
     }
@@ -2217,12 +2226,20 @@ function routes(readBody) {
       if (!aplicar) { outR.msg = outR.linhas + ' linha(s) mudariam de ' + deSku + ' para ' + paraSku + '. Repita com &aplicar=1 pra gravar.'; json(res, 200, outR); return true; }
       // 3) aplica — um PATCH só, com filtro EXATO (nada de like/prefixo)
       const rp = await supaReq('amb', 'PATCH', 'vendas_historico?empresa=eq.amb&sku=eq.' + encodeURIComponent(deSku), { sku: paraSku, sku_anterior: deSku });
+      /* Codex (#185/#186): o PATCH mudou o histórico, mas o _histCache guarda os agregados por até
+         30 min — sem limpar, o dashboard segue mostrando o SKU ANTIGO e o reparo parece ter
+         falhado. Mesma limpeza que o backfill e a caça já fazem.
+         E limpa depois do PATCH que DEU CERTO, não antes do segundo: quando o primeiro falha e
+         entra o de reserva, uma consulta do dashboard no meio repovoava o cache com o dado velho,
+         e nada mais limpava — os agregados ficavam errados até o TTL vencer. */
+      const _limpaHist = () => { try { for (const _k of Object.keys(_histCache)) delete _histCache[_k]; } catch (e) {} };
       if (!rp.ok) {
         // sku_anterior pode não existir como coluna — tenta de novo só com o sku
         const rp2 = await supaReq('amb', 'PATCH', 'vendas_historico?empresa=eq.amb&sku=eq.' + encodeURIComponent(deSku), { sku: paraSku });
-        if (!rp2.ok) { json(res, 200, { ok: false, erro: 'PATCH falhou: HTTP ' + rp.status + ' / ' + rp2.status, detalhe: String(rp.body || '').slice(0, 200) }); return true; }
+        if (!rp2.ok) { _limpaHist(); json(res, 200, { ok: false, erro: 'PATCH falhou: HTTP ' + rp.status + ' / ' + rp2.status, detalhe: String(rp.body || '').slice(0, 200) }); return true; }
+        _limpaHist();
         outR.avisos.push('coluna sku_anterior não existe — gravado só o sku novo');
-      }
+      } else _limpaHist();
       // 4) confere: não pode sobrar linha com o SKU antigo
       let sobrou = 0;
       try {
@@ -2234,6 +2251,7 @@ function routes(readBody) {
       if (sobrou) outR.avisos.push('ainda sobraram linhas com o SKU antigo — rode de novo');
       json(res, 200, outR);
       return true;
+
     }
 
     // SKU ÓRFÃO (13/08) — MEDIÇÃO pro caso do rename de SKU no Bling (achado no app de
@@ -3330,9 +3348,16 @@ function routes(readBody) {
         const m = lerDeParaSku();
 
         if (b.apagar) {
+          /* Codex (#185): o resto da rota trata SKU sem diferenciar maiúscula/minúscula, mas o
+             apagar só removia a grafia exata e a MAIÚSCULA. Um par gravado como "Pm1" sobrevivia
+             a um apagar "pm1" — e a rota ainda respondia ok, então parecia apagado e não estava. */
+          /* Codex (#186): apagar SÓ a primeira variante era REGRESSÃO — o save antigo permitia
+             "pm1" e "PM1" convivendo, e a versão anterior removia exata + MAIÚSCULA. Com uma
+             chave só sobrando, ela voltaria a valer sozinha. Apaga TODAS as variantes. */
           const k = String(b.apagar).trim();
-          const tinha = !!(m[k] || m[k.toUpperCase()]);
-          delete m[k]; delete m[k.toUpperCase()];
+          const kTodas = Object.keys(m).filter(x => String(x).trim().toUpperCase() === k.toUpperCase());
+          const tinha = kTodas.length > 0;
+          for (const kk of kTodas) delete m[kk];
           gravarDeParaSku(m);
           json(res, 200, { ok: true, apagado: tinha ? k : null, total: Object.keys(m).length });
           return true;
@@ -3344,11 +3369,35 @@ function routes(readBody) {
         if (de.toUpperCase() === para.toUpperCase()) { json(res, 400, { ok: false, erro: 'de e para sao o mesmo SKU' }); return true; }
         /* ciclo: se o destino já aponta de volta pra origem, recusa — senão a resolução ficaria
            dando voltas e o Diego não entenderia por que o custo não aparece. */
-        const destinoResolve = resolverDeParaSku(para);
-        if (String(destinoResolve).toUpperCase() === de.toUpperCase()) {
-          json(res, 400, { ok: false, erro: 'isso criaria um ciclo: ' + para + ' ja aponta pra ' + de }); return true;
+        /* Codex (#185): a checagem antiga resolvia o destino PELA ARESTA ANTIGA do próprio `de`,
+           e comparava só o resultado final. Com A→B e C→A, mudar A pra apontar pra C fazia
+           resolverDeParaSku('C') devolver B — passava, e gravava o ciclo A↔C. Agora percorro a
+           cadeia a partir de `para` IGNORANDO a aresta atual de `de`, e recuso se ela passar por
+           `de` em qualquer ponto. */
+        const _up = s => String(s || '').toUpperCase();
+        let _passo = para, _visit = new Set([_up(de)]), _ciclo = false;
+        for (let i = 0; i < 50 && _passo; i++) {
+          if (_up(_passo) === _up(de)) { _ciclo = true; break; }
+          if (_visit.has(_up(_passo))) break;            // ciclo que não envolve `de`: já existia
+          _visit.add(_up(_passo));
+          const _reg = m[_passo] || m[Object.keys(m).find(k => _up(k) === _up(_passo))];
+          _passo = _reg && _reg.para;
         }
-        m[de] = { para, em: new Date().toISOString() };
+        if (_ciclo) {
+          json(res, 400, { ok: false, erro: 'isso criaria um ciclo: seguindo ' + para + ' se chega de volta em ' + de }); return true;
+        }
+        /* Codex (#185): mesmo bug de caixa do apagar, do outro lado. Gravar "Pm1 → A" e depois
+           "pm1 → B" deixava as DUAS chaves, e a resolução escolhia uma ou outra conforme a grafia
+           que chegasse. Reaproveito a chave que já existe (comparação normalizada). */
+        /* Codex (#186): reaproveitar UMA chave não bastava. Com "pm1" e "PM1" legados convivendo
+           (o save antigo permitia), atualizar a primeira deixava a outra apontando pro destino
+           VELHO — e como a busca dá precedência à chave exata, resolver "PM1" ainda devolvia o
+           destino antigo. Mesma correção do apagar, do outro lado: some com todas as variantes e
+           deixa UMA, preservando a grafia que já estava gravada. */
+        const _vars = Object.keys(m).filter(x => String(x).trim().toUpperCase() === de.toUpperCase());
+        const _deReal = _vars[0] || de;
+        for (const _v of _vars) delete m[_v];
+        m[_deReal] = { para, em: new Date().toISOString() };
         gravarDeParaSku(m);
         json(res, 200, { ok: true, de, para, resolve_para: resolverDeParaSku(de), total: Object.keys(m).length });
         return true;
@@ -6799,13 +6848,19 @@ async function backfillAnoTodo(ateMes){
   if(_backfillAno.rodando || _backfill.rodando) return;
   _backfillAno = { rodando:true, mesAtual:null, feitos:[], inicio:new Date().toISOString(), fim:null };
   const meses = ['01','02','03','04','05','06','07','08','09','10','11','12'].filter(m => m <= ateMes);
-  for(const m of meses){
-    _backfillAno.mesAtual = '2026-'+m;
-    await backfillVendas('2026-'+m+'-01', '2026-'+m+'-'+ULTIMO_DIA[m], 'amb');   // espera cada mês terminar antes do próximo
-    _backfillAno.feitos.push({ mes:'2026-'+m, pedidos:_backfill.pedidos, itens:_backfill.itens, gravados:_backfill.gravados, erros:_backfill.erros });
-    await new Promise(r=>setTimeout(r,2500));
+  /* 22/08: o encerramento foi pra um `finally`. Antes, um erro no meio do ano deixava
+     `_backfillAno.rodando` de pé PRA SEMPRE — e com a flag presa, nenhum backfill novo começava
+     até reiniciar o serviço. (A detecção de adiamento por reparo de SKU vem no PR do sku-repara.) */
+  try {
+    for(const m of meses){
+      _backfillAno.mesAtual = '2026-'+m;
+      await backfillVendas('2026-'+m+'-01', '2026-'+m+'-'+ULTIMO_DIA[m], 'amb');   // espera cada mês terminar antes do próximo
+      _backfillAno.feitos.push({ mes:'2026-'+m, pedidos:_backfill.pedidos, itens:_backfill.itens, gravados:_backfill.gravados, erros:_backfill.erros });
+      await new Promise(r=>setTimeout(r,2500));
+    }
+  } finally {
+    _backfillAno.rodando = false; _backfillAno.mesAtual = null; _backfillAno.fim = new Date().toISOString();
   }
-  _backfillAno.rodando = false; _backfillAno.mesAtual = null; _backfillAno.fim = new Date().toISOString();
 }
 
 async function vendasSync() {
