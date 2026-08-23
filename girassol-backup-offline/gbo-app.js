@@ -2424,7 +2424,14 @@ function routes(readBody) {
         /* Codex (#185): mesmo bug de caixa do apagar, do outro lado. Gravar "Pm1 → A" e depois
            "pm1 → B" deixava as DUAS chaves, e a resolução escolhia uma ou outra conforme a grafia
            que chegasse. Reaproveito a chave que já existe (comparação normalizada). */
-        const _deReal = Object.keys(m).find(x => String(x).toUpperCase() === de.toUpperCase()) || de;
+        /* Codex (#186): reaproveitar UMA chave não bastava. Com "pm1" e "PM1" legados convivendo
+           (o save antigo permitia), atualizar a primeira deixava a outra apontando pro destino
+           VELHO — e como a busca dá precedência à chave exata, resolver "PM1" ainda devolvia o
+           destino antigo. Mesma correção do apagar, do outro lado: some com todas as variantes e
+           deixa UMA, preservando a grafia que já estava gravada. */
+        const _vars = Object.keys(m).filter(x => String(x).trim().toUpperCase() === de.toUpperCase());
+        const _deReal = _vars[0] || de;
+        for (const _v of _vars) delete m[_v];
         m[_deReal] = { para, em: new Date().toISOString() };
         gravarDeParaSku(m);
         json(res, 200, { ok: true, de, para, resolve_para: resolverDeParaSku(de), total: Object.keys(m).length });
