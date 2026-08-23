@@ -1338,6 +1338,10 @@ function routes(readBody) {
       if (!skus.length) { json(res, 200, { ok: true, skus: {} }); return true; }
       const CACHE_SKUINFO = path.join(CACHE_DIR, '_skus-info.json');
       if (!_skuInfoCache) _skuInfoCache = readJson(CACHE_SKUINFO, {});
+      /* Codex (#186): guarda a versão do custo/de-para agora. Se alguém mudar o mapa enquanto esta
+         requisição espera a rede, no fim a gente percebe e NÃO grava — senão o valor velho voltava
+         pro cache e era servido por mais 6h, mesmo com a limpeza feita na hora da mudança. */
+      const _epoca0 = _custoLib.epocaCusto(_ctxCusto);
       const TTL = 6 * 3600 * 1000;
       const out = {}; const faltam = [];
       let _ccTop = null;   // cache permanente de custos, carregado sob demanda
@@ -1431,7 +1435,12 @@ function routes(readBody) {
         if (info.custo == null && c0 && c0.custo != null) info.custo = c0.custo;   // e o valor antigo do cache de 6h também vale mais que um null novo
         _skuInfoCache[sku] = info; out[sku] = info;
       }
-      if (faltam.length) { try { writeJson(CACHE_SKUINFO, _skuInfoCache); } catch (e) {} }
+      const _mapaMudou = _custoLib.epocaCusto(_ctxCusto) !== _epoca0;
+      if (_mapaMudou) {
+        // o de-para/custo mudou no meio: o que resolvemos pode estar velho. Não contamina o cache.
+        try { for (const _k of Object.keys(_skuInfoCache)) delete _skuInfoCache[_k]; } catch (e) {}
+        try { if (fs.existsSync(CACHE_SKUINFO)) fs.unlinkSync(CACHE_SKUINFO); } catch (e) {}
+      } else if (faltam.length) { try { writeJson(CACHE_SKUINFO, _skuInfoCache); } catch (e) {} }
       json(res, 200, { ok: true, skus: out, consultados_agora: faltam.length, resolvidos: Object.keys(ids).filter(k2 => ids[k2]).length, nao_resolvidos: resolveFalhas });
       return true;
     }
