@@ -1489,9 +1489,13 @@ function routes(readBody) {
         const m = lerDeParaSku();
 
         if (b.apagar) {
+          /* Codex (#185): o resto da rota trata SKU sem diferenciar maiúscula/minúscula, mas o
+             apagar só removia a grafia exata e a MAIÚSCULA. Um par gravado como "Pm1" sobrevivia
+             a um apagar "pm1" — e a rota ainda respondia ok, então parecia apagado e não estava. */
           const k = String(b.apagar).trim();
-          const tinha = !!(m[k] || m[k.toUpperCase()]);
-          delete m[k]; delete m[k.toUpperCase()];
+          const kReal = Object.keys(m).find(x => String(x).toUpperCase() === k.toUpperCase());
+          const tinha = !!kReal;
+          if (kReal) delete m[kReal];
           gravarDeParaSku(m);
           json(res, 200, { ok: true, apagado: tinha ? k : null, total: Object.keys(m).length });
           return true;
@@ -1503,9 +1507,22 @@ function routes(readBody) {
         if (de.toUpperCase() === para.toUpperCase()) { json(res, 400, { ok: false, erro: 'de e para sao o mesmo SKU' }); return true; }
         /* ciclo: se o destino já aponta de volta pra origem, recusa — senão a resolução ficaria
            dando voltas e o Diego não entenderia por que o custo não aparece. */
-        const destinoResolve = resolverDeParaSku(para);
-        if (String(destinoResolve).toUpperCase() === de.toUpperCase()) {
-          json(res, 400, { ok: false, erro: 'isso criaria um ciclo: ' + para + ' ja aponta pra ' + de }); return true;
+        /* Codex (#185): a checagem antiga resolvia o destino PELA ARESTA ANTIGA do próprio `de`,
+           e comparava só o resultado final. Com A→B e C→A, mudar A pra apontar pra C fazia
+           resolverDeParaSku('C') devolver B — passava, e gravava o ciclo A↔C. Agora percorro a
+           cadeia a partir de `para` IGNORANDO a aresta atual de `de`, e recuso se ela passar por
+           `de` em qualquer ponto. */
+        const _up = s => String(s || '').toUpperCase();
+        let _passo = para, _visit = new Set([_up(de)]), _ciclo = false;
+        for (let i = 0; i < 50 && _passo; i++) {
+          if (_up(_passo) === _up(de)) { _ciclo = true; break; }
+          if (_visit.has(_up(_passo))) break;            // ciclo que não envolve `de`: já existia
+          _visit.add(_up(_passo));
+          const _reg = m[_passo] || m[Object.keys(m).find(k => _up(k) === _up(_passo))];
+          _passo = _reg && _reg.para;
+        }
+        if (_ciclo) {
+          json(res, 400, { ok: false, erro: 'isso criaria um ciclo: seguindo ' + para + ' se chega de volta em ' + de }); return true;
         }
         m[de] = { para, em: new Date().toISOString() };
         gravarDeParaSku(m);

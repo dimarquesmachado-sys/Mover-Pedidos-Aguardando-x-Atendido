@@ -1621,6 +1621,9 @@ function routes(readBody) {
       const sessD = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
       if (_backfill.rodando) { json(res, 200, { ok: false, msg: 'tem um backfill rodando — espere terminar (ou reinicie o serviço) antes de limpar' }); return true; }
+      // Codex (#185): o reparo de SKU altera as MESMAS linhas do vendas_historico, e o backfill
+      // apaga e regrava o período — começar por cima desfaria o reparo em silêncio.
+      if (_reparoAtivo) { json(res, 200, { ok: false, msg: 'tem um reparo de SKU em andamento — espere ele terminar' }); return true; }
       const del = await supaReq('amb', 'DELETE', 'vendas_historico?empresa=eq.amb', null);
       json(res, 200, { ok: del.ok, status: del.status, msg: del.ok ? '✅ tabela zerada (empresa amb). Pode rodar o backfill do zero, mês a mês.' : '❌ falhou ao limpar: ' + ((del.body||del.erro||'')+'').slice(0,150) });
       return true;
@@ -2176,8 +2179,14 @@ function routes(readBody) {
       if (!deSku || !paraSku) { json(res, 400, { ok: false, erro: 'use ?de=SKU_ANTIGO&para=SKU_NOVO&k=ADMIN_KEY (sem &aplicar=1 simula)' }); return true; }
       if (deSku === paraSku) { json(res, 400, { ok: false, erro: 'de e para são iguais' }); return true; }
       const outR = { ok: true, de: deSku, para: paraSku, simulacao: !aplicar, linhas: 0, atualizadas: 0, avisos: [] };
-      // o backfill/caça apagam e regravam o período — não mexer no histórico enquanto isso
+      /* Codex (#185): checar `_backfill.rodando` UMA vez não basta — a varredura do catálogo
+         demora, e um backfill iniciado no meio apaga e regrava o período com o SKU ANTIGO,
+         desfazendo o reparo em silêncio. Agora o reparo LEVANTA a própria trava, e o backfill
+         a respeita (ele já checa `_reparoAtivo` antes de começar). */
       if (_backfill && _backfill.rodando) { json(res, 409, { ok: false, erro: 'backfill rodando — tente depois' }); return true; }
+      if (_reparoAtivo) { json(res, 409, { ok: false, erro: 'outro reparo de SKU em andamento — tente depois' }); return true; }
+      _reparoAtivo = true;
+      try {
       if (_mgc && _mgc.rodando) { json(res, 409, { ok: false, erro: 'caça da Magalu rodando — tente depois' }); return true; }
       // 1) o SKU de destino TEM que existir no catálogo (senão o de-para cria outro órfão).
       //    Varredura completa: o filtro ?codigo= do Bling não é confiável.
@@ -2217,6 +2226,10 @@ function routes(readBody) {
       if (!aplicar) { outR.msg = outR.linhas + ' linha(s) mudariam de ' + deSku + ' para ' + paraSku + '. Repita com &aplicar=1 pra gravar.'; json(res, 200, outR); return true; }
       // 3) aplica — um PATCH só, com filtro EXATO (nada de like/prefixo)
       const rp = await supaReq('amb', 'PATCH', 'vendas_historico?empresa=eq.amb&sku=eq.' + encodeURIComponent(deSku), { sku: paraSku, sku_anterior: deSku });
+      /* Codex (#185): o PATCH mudou o histórico, mas o _histCache guarda os agregados por até
+         30 min — sem limpar, o dashboard segue mostrando o SKU ANTIGO e o reparo parece ter
+         falhado. Mesma limpeza que o backfill e a caça já fazem. */
+      try { for (const _k of Object.keys(_histCache)) delete _histCache[_k]; } catch (e) {}
       if (!rp.ok) {
         // sku_anterior pode não existir como coluna — tenta de novo só com o sku
         const rp2 = await supaReq('amb', 'PATCH', 'vendas_historico?empresa=eq.amb&sku=eq.' + encodeURIComponent(deSku), { sku: paraSku });
@@ -2234,6 +2247,8 @@ function routes(readBody) {
       if (sobrou) outR.avisos.push('ainda sobraram linhas com o SKU antigo — rode de novo');
       json(res, 200, outR);
       return true;
+      } finally { _reparoAtivo = false; }
+
     }
 
     // SKU ÓRFÃO (13/08) — MEDIÇÃO pro caso do rename de SKU no Bling (achado no app de
@@ -3330,9 +3345,13 @@ function routes(readBody) {
         const m = lerDeParaSku();
 
         if (b.apagar) {
+          /* Codex (#185): o resto da rota trata SKU sem diferenciar maiúscula/minúscula, mas o
+             apagar só removia a grafia exata e a MAIÚSCULA. Um par gravado como "Pm1" sobrevivia
+             a um apagar "pm1" — e a rota ainda respondia ok, então parecia apagado e não estava. */
           const k = String(b.apagar).trim();
-          const tinha = !!(m[k] || m[k.toUpperCase()]);
-          delete m[k]; delete m[k.toUpperCase()];
+          const kReal = Object.keys(m).find(x => String(x).toUpperCase() === k.toUpperCase());
+          const tinha = !!kReal;
+          if (kReal) delete m[kReal];
           gravarDeParaSku(m);
           json(res, 200, { ok: true, apagado: tinha ? k : null, total: Object.keys(m).length });
           return true;
@@ -3344,9 +3363,22 @@ function routes(readBody) {
         if (de.toUpperCase() === para.toUpperCase()) { json(res, 400, { ok: false, erro: 'de e para sao o mesmo SKU' }); return true; }
         /* ciclo: se o destino já aponta de volta pra origem, recusa — senão a resolução ficaria
            dando voltas e o Diego não entenderia por que o custo não aparece. */
-        const destinoResolve = resolverDeParaSku(para);
-        if (String(destinoResolve).toUpperCase() === de.toUpperCase()) {
-          json(res, 400, { ok: false, erro: 'isso criaria um ciclo: ' + para + ' ja aponta pra ' + de }); return true;
+        /* Codex (#185): a checagem antiga resolvia o destino PELA ARESTA ANTIGA do próprio `de`,
+           e comparava só o resultado final. Com A→B e C→A, mudar A pra apontar pra C fazia
+           resolverDeParaSku('C') devolver B — passava, e gravava o ciclo A↔C. Agora percorro a
+           cadeia a partir de `para` IGNORANDO a aresta atual de `de`, e recuso se ela passar por
+           `de` em qualquer ponto. */
+        const _up = s => String(s || '').toUpperCase();
+        let _passo = para, _visit = new Set([_up(de)]), _ciclo = false;
+        for (let i = 0; i < 50 && _passo; i++) {
+          if (_up(_passo) === _up(de)) { _ciclo = true; break; }
+          if (_visit.has(_up(_passo))) break;            // ciclo que não envolve `de`: já existia
+          _visit.add(_up(_passo));
+          const _reg = m[_passo] || m[Object.keys(m).find(k => _up(k) === _up(_passo))];
+          _passo = _reg && _reg.para;
+        }
+        if (_ciclo) {
+          json(res, 400, { ok: false, erro: 'isso criaria um ciclo: seguindo ' + para + ' se chega de volta em ' + de }); return true;
         }
         m[de] = { para, em: new Date().toISOString() };
         gravarDeParaSku(m);
@@ -5593,6 +5625,7 @@ async function cacaMagaluCron() {
 //   jul/ago: ESTIMATIVAS pela curva do RBT12p com maio retificado (jul ~8,58 · ago ~8,82) —
 //   confirmar quando os DAS saírem e ajustar no ⚙️ (ou aqui) + reaplicar-imposto.
 const DEFAULT_ALIQ_BK = { '2026-01':4.0, '2026-02':4.0, '2026-03':4.0, '2026-04':4.0, '2026-05':5.2792, '2026-06':6.0414, '2026-07':8.58, '2026-08':8.82, '2026-09':8.82, '2026-10':8.82, '2026-11':8.82, '2026-12':8.82 };
+let _reparoAtivo = false;  // 22/08 (Codex #185): trava do sku-repara — o backfill checa antes de começar
 const _histCache = {};   // agregados do Supabase por período (10 min)
 let _backfill = { rodando:false, empresa:null, de:null, ate:null, pagina:0, pedidos:0, itens:0, gravados:0, erros:0, fase:'parado', inicio:null, fim:null, msg:'' };
 
