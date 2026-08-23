@@ -3338,10 +3338,13 @@ function routes(readBody) {
           /* Codex (#185): o resto da rota trata SKU sem diferenciar maiúscula/minúscula, mas o
              apagar só removia a grafia exata e a MAIÚSCULA. Um par gravado como "Pm1" sobrevivia
              a um apagar "pm1" — e a rota ainda respondia ok, então parecia apagado e não estava. */
+          /* Codex (#186): apagar SÓ a primeira variante era REGRESSÃO — o save antigo permitia
+             "pm1" e "PM1" convivendo, e a versão anterior removia exata + MAIÚSCULA. Com uma
+             chave só sobrando, ela voltaria a valer sozinha. Apaga TODAS as variantes. */
           const k = String(b.apagar).trim();
-          const kReal = Object.keys(m).find(x => String(x).toUpperCase() === k.toUpperCase());
-          const tinha = !!kReal;
-          if (kReal) delete m[kReal];
+          const kTodas = Object.keys(m).filter(x => String(x).trim().toUpperCase() === k.toUpperCase());
+          const tinha = kTodas.length > 0;
+          for (const kk of kTodas) delete m[kk];
           gravarDeParaSku(m);
           json(res, 200, { ok: true, apagado: tinha ? k : null, total: Object.keys(m).length });
           return true;
