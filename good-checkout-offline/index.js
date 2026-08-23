@@ -1559,7 +1559,9 @@ function routes(readBody) {
         renomeados: pares.length, pares,
         sem_produto_id: semId.length, sem_produto_id_lista: semId.slice(0, 20),
         sumiram_do_catalogo: sumiu.length, sumiram_lista: sumiu.slice(0, 20),
-        leia: 'de = codigo antigo (ainda no historico) · para = codigo de hoje. Nada foi alterado: use o sku-repara pra trocar no historico' });
+        leia: 'de = codigo antigo · para = codigo de hoje. Nada foi alterado. Na GOOD o conserto e' +
+              ' pelo /sku-depara-manual (declara o par); o sku-repara das outras empresas troca o codigo' +
+              ' NO HISTORICO do Supabase, que a GOOD ainda nao tem.' });
       return true;
     }
 

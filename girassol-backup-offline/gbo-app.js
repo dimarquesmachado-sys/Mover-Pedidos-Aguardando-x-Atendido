@@ -2469,6 +2469,92 @@ function routes(readBody) {
       }
     }
 
+    // DE-PARA DE SKU RENOMEADO — conserto cirúrgico do rename no histórico do Supabase.
+    // (22/08: portada da AMB. A Girassol MENCIONAVA esta rota na resposta do /sku-depara mas
+    //  não a tinha — quem seguisse a instrução batia num 404.)
+    // ⚠️ Match EXATO de propósito: existe FL-1011-PRETO-2LAMPS, que é OUTRO produto e não pode
+    // ser tocado (aviso do Diego). Nada de LIKE/prefixo aqui.
+    // Uso:  GET /girassol-backup-offline/sku-repara?de=SKU_ANTIGO&para=SKU_NOVO&k=ADMIN_KEY
+    //       (sem &aplicar=1 é SIMULAÇÃO: diz quantas linhas mudariam, sem gravar)
+    if (method === 'GET' && p === '/girassol-backup-offline/sku-repara') {
+      const kR = urlObj.searchParams.get('k') || '';
+      const sR = validarSessao(req.headers['cookie']);
+      if (!((process.env.ADMIN_KEY && kR === process.env.ADMIN_KEY) || (sR && ehAdmin(sR)))) { json(res, 404, { error: 'not found' }); return true; }
+      const deSku = String(urlObj.searchParams.get('de') || '').trim();
+      const paraSku = String(urlObj.searchParams.get('para') || '').trim();
+      const aplicar = urlObj.searchParams.get('aplicar') === '1';
+      if (!deSku || !paraSku) { json(res, 400, { ok: false, erro: 'use ?de=SKU_ANTIGO&para=SKU_NOVO&k=ADMIN_KEY (sem &aplicar=1 simula)' }); return true; }
+      if (deSku === paraSku) { json(res, 400, { ok: false, erro: 'de e para são iguais' }); return true; }
+      const outR = { ok: true, de: deSku, para: paraSku, simulacao: !aplicar, linhas: 0, atualizadas: 0, avisos: [] };
+      // o backfill/caça apagam e regravam o período — não mexer no histórico enquanto isso
+      if (_backfill && _backfill.rodando) { json(res, 409, { ok: false, erro: 'backfill rodando — tente depois' }); return true; }
+      // (a trava da caça da Magalu não vem junto: `_mgc` só existe na AMB — lá essa varredura
+      //  apaga e regrava o período, aqui ela não existe.)
+      // 1) o SKU de destino TEM que existir no catálogo (senão o de-para cria outro órfão).
+      //    Varredura completa: o filtro ?codigo= do Bling não é confiável.
+      let achouDestino = false, aindaExisteOrigem = false, completo = false;
+      try {
+        for (let pg = 1; pg <= 200; pg++) {
+          const rc = await blingGet('/produtos?pagina=' + pg + '&limite=100&criterio=2');
+          if (!rc || !rc.ok) { json(res, 200, { ok: false, erro: 'catálogo: página ' + pg + ' falhou — de-para abortado' }); return true; }
+          const lote = (rc.data && rc.data.data) || [];
+          for (const pr of lote) {
+            const cd = String(pr.codigo || '').trim();
+            if (cd === paraSku) achouDestino = true;
+            if (cd === deSku) aindaExisteOrigem = true;
+          }
+          if (lote.length < 100) { completo = true; break; }
+          await new Promise(r0 => setTimeout(r0, 250));
+        }
+      } catch (e) { json(res, 200, { ok: false, erro: 'catálogo: ' + String(e.message || e).slice(0, 140) }); return true; }
+      if (!completo) { json(res, 200, { ok: false, erro: 'catálogo maior que o teto — de-para abortado' }); return true; }
+      if (!achouDestino) { json(res, 200, { ok: false, erro: 'o SKU de destino (' + paraSku + ') NÃO existe no catálogo do Bling — de-para abortado' }); return true; }
+      if (aindaExisteOrigem) outR.avisos.push('atenção: ' + deSku + ' AINDA existe no catálogo — confirme que o rename é esse mesmo antes de aplicar');
+      // 2) quantas linhas do histórico têm exatamente esse SKU (paginação por chave)
+      let ultId = 0;
+      try {
+        for (let volta = 0; volta < 300; volta++) {
+          const q = 'vendas_historico?empresa=eq.girassol&sku=eq.' + encodeURIComponent(deSku) + '&id=gt.' + ultId + '&select=id&order=id.asc&limit=1000';
+          const rr = await supaReq('girassol', 'GET', q, null);
+          if (!rr.ok) { json(res, 200, { ok: false, erro: 'histórico: HTTP ' + rr.status }); return true; }
+          let arr = null; try { arr = JSON.parse(rr.body || 'null'); } catch (e) { arr = null; }
+          if (!Array.isArray(arr)) { json(res, 200, { ok: false, erro: 'histórico: resposta ilegível' }); return true; }
+          outR.linhas += arr.length;
+          for (const l of arr) { const idL = Number(l && l.id) || 0; if (idL > ultId) ultId = idL; }
+          if (arr.length < 1000) break;
+        }
+      } catch (e) { json(res, 200, { ok: false, erro: 'histórico: ' + String(e.message || e).slice(0, 140) }); return true; }
+      if (!outR.linhas) { outR.avisos.push('nenhuma linha com esse SKU exato no histórico'); json(res, 200, outR); return true; }
+      if (!aplicar) { outR.msg = outR.linhas + ' linha(s) mudariam de ' + deSku + ' para ' + paraSku + '. Repita com &aplicar=1 pra gravar.'; json(res, 200, outR); return true; }
+      // 3) aplica — um PATCH só, com filtro EXATO (nada de like/prefixo)
+      const rp = await supaReq('girassol', 'PATCH', 'vendas_historico?empresa=eq.girassol&sku=eq.' + encodeURIComponent(deSku), { sku: paraSku, sku_anterior: deSku });
+      if (!rp.ok) {
+        // sku_anterior pode não existir como coluna — tenta de novo só com o sku
+        const rp2 = await supaReq('girassol', 'PATCH', 'vendas_historico?empresa=eq.girassol&sku=eq.' + encodeURIComponent(deSku), { sku: paraSku });
+        if (!rp2.ok) { json(res, 200, { ok: false, erro: 'PATCH falhou: HTTP ' + rp.status + ' / ' + rp2.status, detalhe: String(rp.body || '').slice(0, 200) }); return true; }
+        outR.avisos.push('coluna sku_anterior não existe — gravado só o sku novo');
+      }
+      // 4) confere: não pode sobrar linha com o SKU antigo
+      let sobrou = 0;
+      try {
+        const rc2 = await supaReq('girassol', 'GET', 'vendas_historico?empresa=eq.girassol&sku=eq.' + encodeURIComponent(deSku) + '&select=id&limit=5', null);
+        if (rc2.ok) { const a2 = JSON.parse(rc2.body || '[]'); sobrou = Array.isArray(a2) ? a2.length : 0; }
+      } catch (e) {}
+      outR.atualizadas = outR.linhas - sobrou;
+      outR.sobraram_com_sku_antigo = sobrou;
+      if (sobrou) outR.avisos.push('ainda sobraram linhas com o SKU antigo — rode de novo');
+      json(res, 200, outR);
+      return true;
+    }
+
+    // SKU ÓRFÃO (13/08) — MEDIÇÃO pro caso do rename de SKU no Bling (achado no app de
+    // Devoluções: a venda antiga guarda o SKU velho e, depois do rename, ninguém acha o produto;
+    // o histórico do dashboard parte em dois no dia do rename). Antes de trocar a chave de
+    // agregação por produto_id, esta rota MEDE o tamanho do problema: quantos SKUs do histórico
+    // não existem mais no catálogo, e quanto faturamento está preso neles.
+    // Uso: GET /girassol-backup-offline/sku-orfaos?de=AAAA-MM-DD&ate=AAAA-MM-DD&k=ADMIN_KEY
+    // Só leitura. O catálogo é varrido INTEIRO (o filtro ?codigo= do Bling não é confiável —
+    // ora volta vazio pra produto que existe, ora ignora o filtro), montando codigo → id.
     /* ═══ 21/08 — DE-PARA AUTOMÁTICO DE SKU RENOMEADO ═══════════════════════════════════════
     Nasceu do FL-1011-PRETO: renomeado no Bling para 3933398010054, o código antigo deixou de
     existir e as 53 vendas antigas ficaram sem custo. O Diego resolveu à mão pela planilha, mas
