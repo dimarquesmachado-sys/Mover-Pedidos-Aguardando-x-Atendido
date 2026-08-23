@@ -980,6 +980,21 @@ async function carregarHistorico(de, ate){
 
 // 🔄 pergunta ao ML/Shopee se algum pedido do período foi CANCELADO pelo cliente
 let _stMkt = false;
+/* ═══ Codex (P2, revisão de b66f4e2): O AVISO É GUARDADO COM O INTERVALO QUE O GEROU ═════════
+   Na rodada anterior eu resolvi o "texto velho de HOJE aparecendo em ONTEM" do jeito mais bruto:
+   trocar de período apagava o aviso. Só que o auto-check roda UMA vez por período (`_autoDet`),
+   e não existe botão manual — então reclicar o chip HOJE, ou sair e voltar pra ele, apagava um
+   aviso legítimo que só reapareceria dez minutos depois. Apagar informação verdadeira é o mesmo
+   pecado de mostrar informação velha, invertido.
+   Agora guardo { de, ate, html }: quem pinta compara com o intervalo que está na tela. Se bate,
+   repinta; se não bate, some. Vale também pra corrida — se o Diego trocar de período no meio do
+   fetch, a resposta que chegar depois não se pinta no intervalo errado. */
+let _mktAviso = null;
+function pintarAvisoMkt(){
+  const el = document.getElementById('mktAviso'); if(!el) return;
+  const { de, ate } = intervalo();
+  el.innerHTML = (_mktAviso && _mktAviso.de===de && _mktAviso.ate===ate) ? _mktAviso.html : '';
+}
 async function checarCancelados(silencioso){
   if(_stMkt) return; _stMkt = true;
   try{
@@ -987,18 +1002,37 @@ async function checarCancelados(silencioso){
     const r = await fetch(MOD+'/status-mkt?de='+de+'&ate='+ate, {credentials:'same-origin'});
     const d = await r.json().catch(()=>null);
     if(d && d.ok){
-      const rh = await fetch(MOD+'/historico',{credentials:'same-origin'});
-      const dh = await rh.json();
-      if(dh && Array.isArray(dh.itens)){ DADOS=dh.itens; VENDAS=Array.isArray(dh.vendas_bling)?dh.vendas_bling:[]; prepararVendas(); render(); renderAnalise(); }
+      /* ═══ Codex + Claude (revisão do #172, item 4): O AVISO VEM ANTES DO HISTÓRICO ═══════
+         A ordem anterior era: buscar /historico → render → pintar o aviso. Como o `rh.json()` do
+         histórico não tem .catch(), se ele falhasse (ou o render lançasse) o fluxo pulava direto
+         pro catch e o aviso — que JÁ tinha sido obtido com sucesso — nunca era pintado. Ou seja:
+         justo quando algo dá errado, o operador perde o sinal de que algo não foi verificado.
+         Agora pinto o aviso assim que tenho a resposta, e só depois vou buscar o histórico. */
       /* Codex (P2, r2): a resposta passou a admitir quando um canal NÃO foi verificado, mas o
          aviso morria aqui — só `cancelados_agora` era lido. De que adianta o backend ser honesto
          se a tela não conta? Agora o aviso aparece junto, e também quando nada foi cancelado
          (antes, sem cancelamento, o operador não via nada e supunha que estava tudo conferido). */
+      /* Codex (P2, última rodada do #167): eu fiz o aviso EXISTIR, mas ele continuava atrás do
+         `if(!silencioso)` — e TODAS as chamadas internas passam silencioso=true (a verificação
+         automática de 10 em 10 minutos e a do carregamento). Na prática o aviso só aparecia se
+         ele clicasse no botão à mão, ou seja, quase nunca. Backend honesto que não chega na tela
+         é a mesma falha que perseguimos o dia todo, uma camada mais fundo.
+         Agora: alerta só no clique manual (não interromper quem está trabalhando), mas o aviso de
+         COBERTURA fica visível na tela sempre — inclusive nas verificações automáticas. */
+      const avisos = [];
+      if(d.aviso_tiktok) avisos.push(d.aviso_tiktok);
+      if(Array.isArray(d.sem_cobertura) && d.sem_cobertura.length) avisos.push('sem verificação: '+d.sem_cobertura.join(', '));
+      _mktAviso = { de, ate, html: avisos.length
+        ? '<div class="aviso">⚠️ Cancelamentos — '+esc(avisos.join(' · '))+'</div>'
+        : '' };
+      pintarAvisoMkt();
+      const rh = await fetch(MOD+'/historico',{credentials:'same-origin'});
+      const dh = await rh.json();
+      if(dh && Array.isArray(dh.itens)){ DADOS=dh.itens; VENDAS=Array.isArray(dh.vendas_bling)?dh.vendas_bling:[]; prepararVendas(); render(); renderAnalise(); }
       if(!silencioso){
         const partes = [];
         if(d.cancelados_agora) partes.push(d.cancelados_agora+' pedido(s) cancelados no marketplace foram marcados.');
-        if(d.aviso_tiktok) partes.push('⚠️ '+d.aviso_tiktok);
-        if(Array.isArray(d.sem_cobertura) && d.sem_cobertura.length) partes.push('Sem verificação: '+d.sem_cobertura.join(', ')+'.');
+        if(avisos.length) partes.push('⚠️ '+avisos.join('\n⚠️ '));
         if(partes.length) alert(partes.join('\n\n'));
         else alert('Nenhum cancelamento novo. Canais verificados: '+((d.canais_checados||[]).join(', ')||'—')+'.');
       }
@@ -1604,7 +1638,16 @@ function irPra(id){
   const y=el.getBoundingClientRect().top + window.pageYOffset - off;
   window.scrollTo({top:Math.max(0,y), behavior:'smooth'});
 }
-function setPeriodo(p){ periodo=p; espelharPeriodoNaAnalise(); window._anForce=true; comAncora(()=>{ render(); renderAnalise(); }); }
+/* Codex + Claude (revisão do #172, item 3): o aviso de cobertura vale pro período que foi
+   verificado. Como o auto-check só roda em 'dia', ao trocar de HOJE pra ONTEM ou 7 dias o texto
+   antigo continuava na tela como se fosse do novo intervalo — e sem botão manual não havia como
+   reverificar. Trocar de período repinta a partir do que foi verificado PARA ESTE intervalo:
+   some no que não foi verificado, volta ao voltar pro HOJE (ver `pintarAvisoMkt`). */
+function setPeriodo(p){
+  periodo=p;
+  pintarAvisoMkt();
+  espelharPeriodoNaAnalise(); window._anForce=true; comAncora(()=>{ render(); renderAnalise(); });
+}
 // d48: o seletor do TOPO é o botão MASTER — escolheu lá, a Análise de Vendas obedece junto.
 // (os chips da própria Análise continuam funcionando pra quem quiser um recorte diferente só nela)
 function espelharPeriodoNaAnalise(){
@@ -1668,6 +1711,10 @@ function montar(){
   '</div></div>'+
   '<div class="wrap">'+
       '<div id="avisoAliq"></div>'+
+      /* Codex + Claude (revisão do #172, item 1): o aviso estava pendurado no secUF, no MEIO da
+         página, e o alerta só sai no clique manual — então quem trabalha no topo não via nada.
+         Sobe pra junto dos avisos que já existem ANTES dos KPIs. */
+      '<div id="mktAviso"></div>'+
       '<div id="histAviso" style="font-size:12px;color:var(--mut);margin:0 0 8px"></div>'+'<div class="kpis" id="kpis"></div>'+
     '<div class="sec" id="secSemCusto" style="display:none"><h2>\u26a0\ufe0f SKUs que venderam SEM custo <span class="hint">no per\u00edodo \u00b7 estes pedidos ficam FORA da margem</span></h2>'+
       '<div id="scTab" class="mut" style="font-size:12px"></div>'+
