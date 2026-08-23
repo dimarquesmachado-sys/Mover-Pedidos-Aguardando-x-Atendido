@@ -1136,7 +1136,17 @@ function routes(readBody) {
             const forn = prod.fornecedor || {};
             const cand = [forn.precoCusto, forn.precoCompra, prod.precoCusto, prod.custo].map(Number).filter(v => isFinite(v) && v > 0);
             ids[sku] = { id: prod.id, preco: (prod.preco != null && isFinite(Number(prod.preco))) ? Number(prod.preco) : null, custo: cand.length ? cand[0] : null };
-          } else { ids[sku] = null; if (resolveFalhas < 3) console.log('[SKU-INFO] nao resolveu', sku); resolveFalhas++; }
+          } else {
+            /* Codex (#186): a AMB e a Girassol caem no _ccAll quando a consulta falha — proteção
+               que nasceu em 22/07, quando um 429 do Bling apagou custos conhecidos da tela. A GOOD
+               nunca teve. Ficou visível agora: ao parar de inventar carimbo, o destino legado
+               virou "velho", cai aqui, e a consulta usa o SKU ANTIGO (que não existe mais no
+               Bling) — então o de-para novo gravava custo NULO justamente onde deveria herdar. */
+            const kP = _custoLib.custoDeSku(_ccAll, sku);
+            if (kP && kP.custo != null) {
+              ids[sku] = { id: kP.id || null, preco: (kP.preco != null ? kP.preco : null), custo: kP.custo };
+            } else { ids[sku] = null; if (resolveFalhas < 3) console.log('[SKU-INFO] nao resolveu', sku); resolveFalhas++; }
+          }
         } catch (e) { ids[sku] = null; if (resolveFalhas < 3) console.log('[SKU-INFO] erro em', sku, String(e.message || e).slice(0, 80)); resolveFalhas++; }
         await dorme(400);
       }
