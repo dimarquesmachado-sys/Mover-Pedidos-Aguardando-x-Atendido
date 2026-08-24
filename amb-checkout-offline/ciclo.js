@@ -182,6 +182,7 @@ async function listarAtendidos() {
   let ocultosFull = 0;
   let pedidos = out;
   const idsFullVistos = [];   // ids que se confirmaram Full (p/ expurgar do cache antigo)
+  let ocultosSemSerie = [];   // Full pela unidade, mas série não descoberta: esconde da fila, NÃO move
   if (UN_FULL.length) {
     const setFull = new Set(UN_FULL);
     // lê a unidade das duas formas possíveis na lista
@@ -222,38 +223,65 @@ async function listarAtendidos() {
       } catch (e) { /* se o detalhe falhar, não esconde — melhor mostrar que sumir por engano */ }
       await sleep(PAUSA_MS);
     }
-    /* ═══ SÉRIE 1 DERRUBA O FULL (24/08) ═══════════════════════════════════════════════
-       Clonar um pedido no Bling COPIA a unidade de negócio junto. Eles clonam vendas Full
-       pra mandar peça de reposição em garantia — e o clone nasce carimbado com a unidade
-       Full, mesmo saindo do galpão DELES. O dado fica errado, e o filtro acertava em cima
-       de um dado errado: escondia da fila do estoquista e mandava pra DESPACHADOS.
-       Caso real na AMB em 24/08: NF 3463, unidade "AMBTotal - FULL MLivre", SÉRIE 1.
-       O sinal é objetivo, não é palpite: Full de verdade tem a NF ESPELHADA do marketplace;
-       série 1 é emissão nossa, da matriz. Se a unidade diz Full mas a NF é série 1, vence
-       a NF — não é Full.
-       ⚠️ Só derruba com prova POSITIVA de série 1. Sem NF, ou se o Bling não responder,
-       mantém o que a unidade disse (o lado conservador: Full segue tratado como Full). */
+    /* ═══ SÉRIE DA NF DECIDE (24/08, revisto) ═════════════════════════════════════════════
+       Clonar pedido no Bling COPIA a unidade de negócio. O clone de uma venda Full nasce
+       carimbado como Full mesmo saindo do galpão DELES, e o filtro acertava em cima de um
+       dado errado. Série 1 = emissão nossa, da matriz → não é Full.
+
+       ⚠️ CORREÇÃO DO QUE FOI AO AR ÀS 20:12 DE 24/08: eu tratava "não consegui descobrir a
+       série" como se fosse Full, e o pedido era MOVIDO. O log provou o estrago: o pedido
+       26687588614 (NF 003464, série 1) foi protegido às 20:12 e MOVIDO às 20:15 — mesmo
+       pedido, 3 minutos depois. A diferença foi um 429 do Bling na consulta da NF (o log
+       está cheio deles). Não saber NÃO pode autorizar uma ação destrutiva.
+
+       Agora as duas decisões são separadas, porque o risco de errar é assimétrico:
+         · ESCONDER da fila  → na dúvida, ESCONDE (se for Full de verdade, o estoquista não
+           pode ir procurar mercadoria que está no galpão do marketplace)
+         · MOVER/EXPURGAR    → na dúvida, NÃO MEXE (mover é destrutivo e só se desfaz na mão;
+           deixar quieto custa um ciclo de espera até a consulta funcionar)
+
+       E a série descoberta fica GUARDADA por pedido: uma vez que se sabe, um 429 depois não
+       desfaz mais a proteção. */
     if (idsFullVistos.length) {
-      const derrubados = [];
+      const SERIE_FILE = path.join(CACHE_DIR, '_serie_nf.json');
+      const serieCache = readJson(SERIE_FILE, {});
+      const derrubados = [], semResposta = [];
+      let mudouCache = false;
       for (const idF of idsFullVistos.slice()) {
-        let nfF = null;
-        try { nfF = await serieDaNFdoPedido(idF); } catch (e) { nfF = null; }
-        await sleep(PAUSA_MS);
-        if (nfF && String(nfF.serie) === '1') {
-          derrubados.push({ id: idF, nf: nfF.numero });
+        let info = serieCache[String(idF)];                    // já sabíamos?
+        if (!info) {
+          let nfF = null;
+          try { nfF = await serieDaNFdoPedido(idF); } catch (e) { nfF = null; }
+          await sleep(PAUSA_MS);
+          if (nfF && nfF.serie) { info = { serie: String(nfF.serie), nf: nfF.numero || null }; serieCache[String(idF)] = info; mudouCache = true; }
+        }
+        if (info && String(info.serie) === '1') {
+          derrubados.push({ id: idF, nf: info.nf });
           const ix = idsFullVistos.indexOf(idF);
           if (ix >= 0) idsFullVistos.splice(ix, 1);
-          ocultosFull--;
+          ocultosFull--;                                        // sai da contagem: não é Full
+        } else if (!info) {
+          semResposta.push(String(idF));                        // continua escondido, mas NÃO move
         }
       }
+      if (mudouCache) { try { writeJson(SERIE_FILE, serieCache); } catch (e) {} }
       if (derrubados.length) {
         console.log(`[AMBBKP] série 1 derrubou o Full em ${derrubados.length} pedido(s) (emissão nossa, provável clone de venda Full): ` +
           derrubados.map(d => `pedido ${d.id}/NF ${d.nf}`).join(', '));
       }
+      if (semResposta.length) {
+        console.log(`[AMBBKP] série NÃO descoberta em ${semResposta.length} pedido(s) — NÃO vou mover (fica em ATENDIDO até dar pra conferir): ` + semResposta.join(', '));
+        // some da lista de move/expurgo, mas segue escondido da fila (risco assimétrico)
+        for (const idS of semResposta) {
+          const ix = idsFullVistos.indexOf(idS);
+          if (ix >= 0) idsFullVistos.splice(ix, 1);
+        }
+        ocultosSemSerie = semResposta.slice();
+      }
     }
 
-    // aplica: remove da fila tudo que se confirmou Full
-    const idsFullFinal = new Set(idsFullVistos.map(String));   // recalcula: a série 1 pode ter derrubado alguns
+    // aplica: esconde da fila os Full confirmados E os que ainda não deu pra conferir
+    const idsFullFinal = new Set(idsFullVistos.concat(ocultosSemSerie).map(String));
     pedidos = out.filter(p => !idsFullFinal.has(String(p.id)));
     if (ocultosFull) console.log(`[AMBBKP] filtro Full: ${ocultosFull} pedido(s) ocultado(s) da fila do estoquista (UN ${UN_FULL.join(',')}; ${indefinidos.length} checado(s) por detalhe)`);
   }
