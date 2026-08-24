@@ -8,44 +8,65 @@
 //  invalidação do cache só deixava de acontecer.
 //
 //  `node --check` não pega isso (a sintaxe está perfeita) e o Codex gasta uma rodada.
-//  Esta regra pega em 20 segundos, antes de abrir o PR.
+//  Esta regra pega em ~20s, antes de abrir o PR.
 //
-//  Rodar na mão:  npx eslint --no-config-lookup -c .github/eslint-orfaos.mjs .
+//  Rodar na mão (na raiz do repo):
+//     npm install --no-save eslint@9 eslint-plugin-html globals
+//     npx eslint --no-config-lookup -c .github/eslint-orfaos.mjs .
 // ════════════════════════════════════════════════════════════════════════════════
 
-const NODE = {
-  require:"readonly", module:"writable", exports:"writable", process:"readonly",
-  console:"readonly", Buffer:"readonly", __dirname:"readonly", __filename:"readonly",
-  setTimeout:"readonly", clearTimeout:"readonly", setInterval:"readonly", clearInterval:"readonly",
-  setImmediate:"readonly", fetch:"readonly", URL:"readonly", URLSearchParams:"readonly",
-  AbortController:"readonly", AbortSignal:"readonly", TextEncoder:"readonly", TextDecoder:"readonly",
-  globalThis:"readonly", structuredClone:"readonly", queueMicrotask:"readonly", crypto:"readonly"
+import globals from "globals";
+import html from "eslint-plugin-html";
+
+/* Lista OFICIAL do pacote `globals`, não escrita na mão: a minha versão anterior
+   esquecia global/Response/Headers/EventTarget e os acusaria como órfãos (Codex #190). */
+const SERVIDOR = globals.node;
+
+/* Tela: SÓ os globais de navegador. Antes eu espalhava os de Node aqui dentro, o que
+   deixava passar `process`/`require`/`Buffer` num arquivo de tela — que quebram no
+   navegador e são justamente o que este detector existe pra pegar (Codex #190). */
+/* Bibliotecas que entram por <script src> de CDN — existem em tempo de execução, mas o
+   eslint não tem como saber. Cada uma conferida no HTML antes de entrar nesta lista;
+   se uma sair do HTML, TIRE daqui também, senão o detector para de proteger aquele nome. */
+const CDN = {
+  XLSX: "readonly",                        // cdnjs xlsx 0.18.5 — planilhas
+  qz: "readonly",                          // jsdelivr qz-tray 2.2.6 — impressão nos painel.html
+  Chart: "readonly",                        // cdnjs Chart.js 4.4.1 — gráficos dos dashboard.html
+  sha256: "readonly",                      // jsdelivr js-sha256 0.11.0
+  Html5Qrcode: "readonly",                 // unpkg html5-qrcode 2.3.8 — leitor nos celular.html
+  Html5QrcodeSupportedFormats: "readonly"  // idem
 };
 
-// os arquivos de tela rodam no NAVEGADOR — ali document/window/alert são legítimos
-const NAVEGADOR = {
-  ...NODE,
-  window:"readonly", document:"readonly", location:"readonly", navigator:"readonly",
-  alert:"readonly", confirm:"readonly", prompt:"readonly", history:"readonly", screen:"readonly",
-  localStorage:"readonly", sessionStorage:"readonly", FileReader:"readonly", Blob:"readonly",
-  FormData:"readonly", Image:"readonly", DOMParser:"readonly", WebSocket:"readonly",
-  btoa:"readonly", atob:"readonly", getComputedStyle:"readonly", performance:"readonly",
-  requestAnimationFrame:"readonly", MutationObserver:"readonly", CustomEvent:"readonly",
-  Event:"readonly", Node:"readonly", HTMLElement:"readonly", chrome:"readonly",
-  SpeechSynthesisUtterance:"readonly", speechSynthesis:"readonly",
-  XLSX:"readonly"   // vem por <script> do CDN
-};
+const TELA = { ...globals.browser, ...CDN };
 
 export default [
   { ignores: ["node_modules/**", "**/node_modules/**"] },
+
+  /* servidor. O `ignores` aqui é OBRIGATÓRIO: no eslint os blocos se SOMAM, não se
+     substituem. Sem ele, um arquivo de public/ casaria com este bloco também e receberia
+     os globais de Node de volta — que é justamente o furo do Codex #190. Testado: sem o
+     ignores, um process/require/Buffer em public/*.js passa batido. */
   {
     files: ["**/*.js"],
-    languageOptions: { ecmaVersion: 2022, sourceType: "commonjs", globals: NODE },
+    ignores: ["public/**/*.js"],
+    languageOptions: { ecmaVersion: 2022, sourceType: "commonjs", globals: SERVIDOR },
     rules: { "no-undef": "error" }
   },
+
+  // arquivos de tela servidos direto
   {
     files: ["public/**/*.js"],
-    languageOptions: { ecmaVersion: 2022, sourceType: "script", globals: NAVEGADOR },
+    languageOptions: { ecmaVersion: 2022, sourceType: "script", globals: TELA },
+    rules: { "no-undef": "error" }
+  },
+
+  /* Script DENTRO do HTML. É onde mora a maior parte do código de tela — os painel.html
+     e os dashboard.html passam de 2.000 linhas cada. Sem isto, o comando acima diria
+     "repo inteiro" cobrindo só metade dele (Codex #190). */
+  {
+    files: ["**/*.html"],
+    plugins: { html },
+    languageOptions: { ecmaVersion: 2022, sourceType: "script", globals: TELA },
     rules: { "no-undef": "error" }
   }
 ];
