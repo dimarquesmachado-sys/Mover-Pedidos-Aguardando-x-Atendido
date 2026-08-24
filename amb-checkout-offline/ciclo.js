@@ -185,19 +185,30 @@ async function listarAtendidos() {
   if (UN_FULL.length) {
     const setFull = new Set(UN_FULL);
     // lê a unidade das duas formas possíveis na lista
-    const unDaLista = (p) => {
-      const a = p && p.loja && p.loja.unidadeNegocio && p.loja.unidadeNegocio.id;
-      const b = p && p.unidadeNegocio && p.unidadeNegocio.id;
-      return a || b || null;
-    };
+    /* ⚠️ 24/08 — SÓ VALE A UNIDADE DA LOJA. A sonda de 30/07 (comentário acima) já tinha
+       achado que a unidade do Full vem em `pedido.loja.unidadeNegocio.id`, e NÃO no topo do
+       pedido. Mesmo assim havia um segundo caminho lendo o topo — e era por ali que vazava:
+       pedido criado À MÃO dentro do Bling não tem loja de marketplace, escapava do caminho
+       certo, caía no topo e recebia a unidade PADRÃO da empresa. Se essa unidade estivesse na
+       lista do Full, TODO pedido interno virava "Full" e ia parar em DESPACHADOS.
+       Caso real na AMB em 24/08: pedidos 26687588614 e 3902 (26687728978), NF série 1 gerada
+       automaticamente, mandados pra DESPACHADOS no mesmo minuto, repetidamente a cada ciclo.
+       Full é venda de marketplace (Shopee Full, ML Full, Magalu Full); pedido sem loja NUNCA
+       é Full. Sem loja com unidade Full → devolve null e o pedido não é tocado. */
+    const unDaLista = (p) => (p && p.loja && p.loja.unidadeNegocio && p.loja.unidadeNegocio.id) || null;
     // 1ª passada: decide pelo que a lista trouxe; junta os "sem unidade" p/ checar no detalhe
     const indefinidos = [];
     for (const p of out) {
       const un = unDaLista(p);
       if (un != null) {
         if (setFull.has(String(un))) { ocultosFull++; idsFullVistos.push(String(p.id)); }
+      } else if (p && p.loja) {
+        indefinidos.push(p);   // TEM loja mas a lista omitiu a unidade → precisa do detalhe
       } else {
-        indefinidos.push(p);   // a lista não trouxe unidade → precisa do detalhe
+        /* 24/08: sem loja nenhuma = pedido criado à mão no Bling. Nunca é Full, então buscar o
+           detalhe não mudaria a classificação — só gastaria uma chamada + PAUSA_MS por pedido,
+           a cada 10 min, nos 5 dias da janela. Com muitos pedidos internos isso queima cota
+           do Bling e arrasta o ciclo inteiro. */
       }
     }
     // 2ª passada: só os indefinidos → busca o detalhe (que sempre traz a unidade)
@@ -205,8 +216,8 @@ async function listarAtendidos() {
     for (const p of indefinidos) {
       try {
         const det = await detalhePedido(p.id);
-        const un = (det && det.loja && det.loja.unidadeNegocio && det.loja.unidadeNegocio.id)
-                || (det && det.unidadeNegocio && det.unidadeNegocio.id) || null;
+        // mesma regra do unDaLista: só a unidade da LOJA vale (ver o porquê logo acima)
+        const un = (det && det.loja && det.loja.unidadeNegocio && det.loja.unidadeNegocio.id) || null;
         if (un != null && setFull.has(String(un))) { ocultosFull++; idsFullVistos.push(String(p.id)); idsFullSet.add(String(p.id)); }
       } catch (e) { /* se o detalhe falhar, não esconde — melhor mostrar que sumir por engano */ }
       await sleep(PAUSA_MS);
@@ -435,7 +446,9 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC, nfCtx) {
     numero: ped.numero || null,
     numero_loja: ped.numeroLoja || null,
     loja_id: lojaId || null,
-    un_id: String((ped.loja && ped.loja.unidadeNegocio && ped.loja.unidadeNegocio.id) || (ped.unidadeNegocio && ped.unidadeNegocio.id) || '') || null,   // unidade de negócio (p/ identificar Full) — vem em loja.unidadeNegocio
+    // 24/08: SÓ a unidade da LOJA (mesma regra do unDaLista). Gravar o topo do pedido aqui
+    // fazia a reconciliação (que lê este snapshot) reclassificar pedido interno como Full.
+    un_id: String((ped.loja && ped.loja.unidadeNegocio && ped.loja.unidadeNegocio.id) || ''),
     marketplace: mkt,
     servico: _servico,
     flex: ehFlex(_servico),
@@ -575,7 +588,12 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
           const setF = new Set(UN_FULL_REC);
           for (const id of Object.keys(man)) {
             const snap = readJson(path.join(CACHE_DIR, String(id), 'pedido.json'), null);
-            const un = snap && snap.un_id ? String(snap.un_id) : '';
+            /* 24/08: só confia no un_id de snapshot do SCHEMA atual. Os gravados antes traziam
+               o fallback do topo do pedido, então um pedido interno apareceria aqui como Full e
+               ficaria preso na fila offline até a retenção limpar. Snapshot velho é tratado como
+               NÃO-Full, que é o comportamento seguro: ele volta a ser removido normalmente ao
+               sair de ATENDIDO. O bump do SCHEMA reescreve esses snapshots sozinho. */
+            const un = (snap && snap.schema === SCHEMA && snap.un_id) ? String(snap.un_id) : '';
             if (un && setF.has(un)) idsFull.add(String(id));
           }
         } catch (e) {}
