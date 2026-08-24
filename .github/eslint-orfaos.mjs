@@ -25,8 +25,18 @@
 //  cruzar os nomes chamados com as funções declaradas no arquivo. Fica pra depois.
 //
 //  Rodar na mão (na raiz do repo):
-//     npm install --no-save eslint@9 eslint-plugin-html globals
+//     npm install --no-save eslint@9.39.5 eslint-plugin-html@8.1.4 globals@17.11.0
 //     npx eslint --no-config-lookup -c .github/eslint-orfaos.mjs .
+//
+//  ⚠️ VERSÕES FIXAS DE PROPÓSITO. A lista NAO_EXISTEM_NO_NODE_18 lá embaixo é uma foto
+//  de um release do `globals`; se ele ganhar um global novo do Node 20+ e a versão for
+//  flutuante, o nome novo não seria subtraído e passaria batido. Ao subir qualquer uma
+//  dessas versões, REGERE a lista com o comando anotado junto dela (Codex #190).
+//
+//  ⚠️ O eslint 9 pede Node ^18.18 || ^20.9 || >=21.1, e o package.json daqui declara
+//  apenas ">=18". Quem estiver num 18.0–18.17 não consegue instalar o eslint, mesmo que
+//  a aplicação rode. O CI usa Node 20, então lá funciona. Se for rodar na mão num Node
+//  antigo, suba o Node do ambiente — não precisa mexer no piso da aplicação (Codex #190).
 // ════════════════════════════════════════════════════════════════════════════════
 
 import globals from "globals";
@@ -50,11 +60,18 @@ import html from "eslint-plugin-html";
    faltavam Crypto e a família Performance, e MessageEvent estava aqui indevidamente —
    ele EXISTE no 18 e virava falso positivo (Codex #190).
 
-   Pra refazer se o piso mudar:
-     node -e "const g=require('globals');const m=new Set(['require','module','exports','__dirname','__filename','arguments']);console.log(JSON.stringify(Object.keys(g.node).filter(n=>!m.has(n)&&typeof globalThis[n]==='undefined')))"
-   rodado NA VERSÃO do piso. Se o package.json subir pra 20+, dá pra apagar tudo isto. */
+   ⚠️ A sonda TEM que rodar de um ARQUIVO .js, nunca com `node -e`: no Node 18 o `-e`
+   expõe `globalThis.crypto` como objeto, e `node arquivo.js` reporta undefined. Foi
+   exatamente assim que `crypto` escapou da minha primeira medição (Codex #190).
+
+   Pra refazer se o piso mudar, salve como sonda.js e rode NA VERSÃO do piso:
+     const g = require('globals');
+     const m = new Set(['require','module','exports','__dirname','__filename','arguments']);
+     console.log(JSON.stringify(Object.keys(g.node)
+       .filter(n => !m.has(n) && typeof globalThis[n] === 'undefined')));
+   Se o package.json subir pra 20+, dá pra apagar tudo isto. */
 const NAO_EXISTEM_NO_NODE_18 = [
-  'CloseEvent', 'Crypto', 'CryptoKey', 'CustomEvent', 'ErrorEvent', 'File',
+  'CloseEvent', 'crypto', 'Crypto', 'CryptoKey', 'CustomEvent', 'ErrorEvent', 'File',
   'localStorage', 'navigator', 'Navigator', 'PerformanceEntry', 'PerformanceMark',
   'PerformanceMeasure', 'PerformanceObserver', 'PerformanceObserverEntryList',
   'PerformanceResourceTiming', 'QuotaExceededError', 'sessionStorage', 'Storage',
