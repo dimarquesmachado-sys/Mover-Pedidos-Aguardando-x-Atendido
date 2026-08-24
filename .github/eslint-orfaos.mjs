@@ -25,19 +25,10 @@ const SERVIDOR = globals.node;
 /* Tela: SÓ os globais de navegador. Antes eu espalhava os de Node aqui dentro, o que
    deixava passar `process`/`require`/`Buffer` num arquivo de tela — que quebram no
    navegador e são justamente o que este detector existe pra pegar (Codex #190). */
-/* Bibliotecas que entram por <script src> de CDN — existem em tempo de execução, mas o
-   eslint não tem como saber. Cada uma conferida no HTML antes de entrar nesta lista;
-   se uma sair do HTML, TIRE daqui também, senão o detector para de proteger aquele nome. */
-const CDN = {
-  XLSX: "readonly",                        // cdnjs xlsx 0.18.5 — planilhas
-  qz: "readonly",                          // jsdelivr qz-tray 2.2.6 — impressão nos painel.html
-  Chart: "readonly",                        // cdnjs Chart.js 4.4.1 — gráficos dos dashboard.html
-  sha256: "readonly",                      // jsdelivr js-sha256 0.11.0
-  Html5Qrcode: "readonly",                 // unpkg html5-qrcode 2.3.8 — leitor nos celular.html
-  Html5QrcodeSupportedFormats: "readonly"  // idem
-};
-
-const TELA = { ...globals.browser, ...CDN };
+/* Tela: SÓ os globais de navegador. As bibliotecas de CDN NÃO entram aqui — vão em blocos
+   por página, mais abaixo. Se `qz` valesse pro repo todo, um `qz` esquecido no admin.html
+   do ponto passaria batido e quebraria só no navegador do usuário (Codex #190). */
+const TELA = { ...globals.browser };
 
 export default [
   { ignores: ["node_modules/**", "**/node_modules/**"] },
@@ -61,12 +52,39 @@ export default [
   },
 
   /* Script DENTRO do HTML. É onde mora a maior parte do código de tela — os painel.html
-     e os dashboard.html passam de 2.000 linhas cada. Sem isto, o comando acima diria
+     e os dashboard.html passam de 2.000 linhas cada. Sem isto, o comando lá em cima diria
      "repo inteiro" cobrindo só metade dele (Codex #190). */
   {
     files: ["**/*.html"],
     plugins: { html },
     languageOptions: { ecmaVersion: 2022, sourceType: "script", globals: TELA },
     rules: { "no-undef": "error" }
+  },
+
+  /* ─── Bibliotecas de CDN, liberadas SÓ na página que carrega cada uma ───────────────
+     Cada bloco abaixo foi conferido contra o <script src> real do arquivo. Liberar pro
+     repo todo criaria falso negativo: um `qz` esquecido em public/ponto/admin.html
+     passaria no detector e quebraria no navegador (Codex #190).
+     Se a biblioteca sair do HTML, TIRE o bloco — senão o nome fica desprotegido calado. */
+  { // qz-tray 2.2.6 (impressão) + js-sha256 0.11.0
+    files: ["amb-checkout-offline/painel.html", "girassol-backup-offline/painel.html",
+            "good-checkout-offline/painel.html"],
+    plugins: { html },
+    languageOptions: { globals: { qz: "readonly", sha256: "readonly" } }
+  },
+  { // Chart.js 4.4.1 (gráficos)
+    files: ["amb-checkout-offline/amb-dashboard.html", "girassol-backup-offline/dashboard.html"],
+    plugins: { html },
+    languageOptions: { globals: { Chart: "readonly" } }
+  },
+  { // html5-qrcode 2.3.8 (leitor de código no celular)
+    files: ["public/estoque/celular.html", "public/estoque-girassol/celular.html"],
+    plugins: { html },
+    languageOptions: { globals: { Html5Qrcode: "readonly", Html5QrcodeSupportedFormats: "readonly" } }
+  },
+  { // xlsx 0.18.5 — o <script src> está no index.html, o uso está no app.js da mesma pasta
+    files: ["public/fragil/**"],
+    plugins: { html },
+    languageOptions: { globals: { XLSX: "readonly" } }
   }
 ];
