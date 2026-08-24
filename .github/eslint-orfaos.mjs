@@ -42,12 +42,26 @@ import html from "eslint-plugin-html";
    aparecem são o cabeçalho HTTP `X-File-Name`, não o global) (Codex #190).
 
    ⚠️ Se o piso do package.json subir para 20+, dá pra apagar esta subtração inteira. */
-const SO_DO_NODE_20_EM_DIANTE = [
-  'File', 'CustomEvent', 'navigator', 'Navigator', 'WebSocket',
-  'localStorage', 'sessionStorage', 'CloseEvent', 'MessageEvent'
+/* Os 22 nomes que `globals.node` traz mas que NÃO existem no Node 18. Esta lista não foi
+   escrita de cabeça: foi MEDIDA rodando o Node 18.20.8 de verdade e filtrando
+   `globals.node` por `typeof globalThis[nome] === 'undefined'` (descontando require,
+   module, exports, __dirname, __filename e arguments, que são escopo de módulo e não
+   aparecem em globalThis). Eu tinha escrito na mão antes e errei nos dois sentidos:
+   faltavam Crypto e a família Performance, e MessageEvent estava aqui indevidamente —
+   ele EXISTE no 18 e virava falso positivo (Codex #190).
+
+   Pra refazer se o piso mudar:
+     node -e "const g=require('globals');const m=new Set(['require','module','exports','__dirname','__filename','arguments']);console.log(JSON.stringify(Object.keys(g.node).filter(n=>!m.has(n)&&typeof globalThis[n]==='undefined')))"
+   rodado NA VERSÃO do piso. Se o package.json subir pra 20+, dá pra apagar tudo isto. */
+const NAO_EXISTEM_NO_NODE_18 = [
+  'CloseEvent', 'Crypto', 'CryptoKey', 'CustomEvent', 'ErrorEvent', 'File',
+  'localStorage', 'navigator', 'Navigator', 'PerformanceEntry', 'PerformanceMark',
+  'PerformanceMeasure', 'PerformanceObserver', 'PerformanceObserverEntryList',
+  'PerformanceResourceTiming', 'QuotaExceededError', 'sessionStorage', 'Storage',
+  'SubtleCrypto', 'Temporal', 'URLPattern', 'WebSocket'
 ];
 const SERVIDOR = Object.fromEntries(
-  Object.entries(globals.node).filter(([nome]) => !SO_DO_NODE_20_EM_DIANTE.includes(nome))
+  Object.entries(globals.node).filter(([nome]) => !NAO_EXISTEM_NO_NODE_18.includes(nome))
 );
 
 /* Tela: SÓ os globais de navegador. Antes eu espalhava os de Node aqui dentro, o que
