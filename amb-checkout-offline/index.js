@@ -747,7 +747,10 @@ function routes(readBody) {
           total_paginado: acc.length,
           UN_FULL_lido: UN_FULL,
           por_pedido: acc.map(p => {
-            const raw = p.unidadeNegocio && p.unidadeNegocio.id;
+            // 24/08: a sonda tem que replicar o classificador de verdade — só a unidade da LOJA.
+            // Lendo o topo do pedido ela dizia bate:true pra pedido interno que o ciclo agora
+            // rejeita, dando prova contraditória justamente a quem está diagnosticando isto.
+            const raw = p.loja && p.loja.unidadeNegocio && p.loja.unidadeNegocio.id;
             const un = String(raw || '');
             return { numero: p.numero, un_raw: raw ?? null, un_str: un, bate: un && setFull.has(un) };
           })

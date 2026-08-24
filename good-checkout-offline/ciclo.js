@@ -193,8 +193,12 @@ async function listarAtendidos() {
       const un = unDaLista(p);
       if (un != null) {
         if (setFull.has(String(un))) { ocultosFull++; idsFullVistos.push(String(p.id)); }
+      } else if (p && p.loja) {
+        indefinidos.push(p);   // TEM loja mas a lista omitiu a unidade → precisa do detalhe
       } else {
-        indefinidos.push(p);
+        /* 24/08: sem loja nenhuma = pedido criado à mão no Bling. Nunca é Full, então buscar o
+           detalhe não mudaria a classificação — só gastaria uma chamada + PAUSA_MS por pedido,
+           a cada 10 min, nos 5 dias da janela. */
       }
     }
     const idsFullSet = new Set(idsFullVistos);
@@ -402,7 +406,9 @@ async function cachearPedido(ped, cacheEan, nfs, kitCache, locC, nfCtx) {
     numero: ped.numero || null,
     numero_loja: ped.numeroLoja || null,
     loja_id: lojaId || null,
-    un_id: String((ped.loja && ped.loja.unidadeNegocio && ped.loja.unidadeNegocio.id) || (ped.unidadeNegocio && ped.unidadeNegocio.id) || '') || null,   // unidade de negócio (p/ identificar Full) — vem em loja.unidadeNegocio
+    // 24/08: SÓ a unidade da LOJA (mesma regra do unDaLista). Gravar o topo do pedido aqui
+    // fazia a reconciliação (que lê este snapshot) reclassificar pedido interno como Full.
+    un_id: String((ped.loja && ped.loja.unidadeNegocio && ped.loja.unidadeNegocio.id) || ''),
     marketplace: mkt,
     servico: _servico,
     flex: ehFlex(_servico),
