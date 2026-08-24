@@ -5227,34 +5227,14 @@ async function pescarDadosML(nlRaw, tokenML, dorme) {
 }
 
 // ─── Supabase (histórico de vendas) — grava via REST; empresa escolhe as env vars ────────────
-function supaCfg(empresa){
-  const E = String(empresa||'amb').toUpperCase();
-  return { url: process.env['SUPABASE_URL_VENDAS_'+E], key: process.env['SUPABASE_KEY_VENDAS_'+E] };
-}
-async function supaReq(empresa, metodo, pathQuery, body){
-  const { url, key } = supaCfg(empresa);
-  if(!url || !key) return { ok:false, status:0, erro:'faltam SUPABASE_URL_VENDAS_'+String(empresa||'').toUpperCase()+' / SUPABASE_KEY_VENDAS_'+String(empresa||'').toUpperCase() };
-  const h = { 'apikey': key, 'Authorization': 'Bearer '+key, 'Content-Type': 'application/json' };
-  if(metodo==='POST') h['Prefer']='return=minimal';
-  // 18/08 (Codex #123): no PATCH precisamos SABER se alguma linha foi afetada — PATCH que casa
-  // zero linhas volta 200 do mesmo jeito. Com representation o corpo traz as linhas mexidas.
-  if(metodo==='PATCH') h['Prefer']='return=representation';
-  try {
-    const r = await fetch(url.replace(/\/+$/,'') + '/rest/v1/' + pathQuery, { method: metodo, headers: h, body: body?JSON.stringify(body):undefined });
-    const txt = await r.text().catch(()=> '');
-    return { ok: r.ok, status: r.status, body: txt };
-  } catch(e){ return { ok:false, status:0, erro:String(e.message||e) }; }
-}
-
-async function supaCount(empresa, filtro){
-  const { url, key } = supaCfg(empresa);
-  if(!url || !key) return null;
-  try {
-    const r = await fetch(url.replace(/\/+$/,'') + '/rest/v1/vendas_historico?empresa=eq.'+encodeURIComponent(empresa)+(filtro?('&'+filtro):'')+'&select=id', { method:'HEAD', headers:{ 'apikey':key, 'Authorization':'Bearer '+key, 'Prefer':'count=exact', 'Range':'0-0' } });
-    const cr = (r.headers.get('content-range')||'').split('/')[1];
-    return cr!=null ? Number(cr) : null;
-  } catch(e){ return null; }
-}
+/* ═══ 22/08 — SUPABASE: agora vem de lib/supabase.js (código único) ══════════════════════
+   supaReq e supaCount eram BYTE-A-BYTE idênticas entre AMB e Girassol; a supaCfg só mudava
+   no padrão da empresa, que virou parâmetro. As envs continuam as mesmas:
+   SUPABASE_URL_VENDAS_<EMPRESA> / SUPABASE_KEY_VENDAS_<EMPRESA>. */
+const _supa = require('../lib/supabase').para('amb');
+const supaCfg   = (empresa)                    => _supa.cfg(empresa);
+const supaReq   = (empresa, metodo, pq, body)  => _supa.req(empresa, metodo, pq, body);
+const supaCount = (empresa, filtro)            => _supa.count(empresa, filtro);
 
 // ─── Busca as DEVOLUÇÕES (type 'returns') recentes do ML + o frete de retorno de cada ──────
 // Retorna mapa { order_id(string): {claim_id, stage, aberta, data, frete_retorno, destino, dev_status} }.
