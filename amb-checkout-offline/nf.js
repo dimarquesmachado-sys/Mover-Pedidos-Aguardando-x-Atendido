@@ -18,6 +18,7 @@ function parseNF(nf) {
     chave: nf.chaveAcesso || nf.chave || null,
     situacao: (nf.situacao && (nf.situacao.id || nf.situacao)) || null,
     dataEmissao: nf.dataEmissao || null   // b10: hora OFICIAL da NF — antes era descartada aqui e o card 🕓 do painel nunca recebia o dado
+    ,serie: (nf.serie != null ? String(nf.serie) : null)   // 24/08: série 1 = emissão nossa da matriz (ver filtro Full)
   };
 }
 
@@ -40,6 +41,56 @@ async function acharNFporRange(pedidoId) {
     await sleep(PAUSA_MS);
   }
   return parseNF(melhor);
+}
+
+/* ═══ SÉRIE DA NF DO PEDIDO — só para o filtro Full (24/08) ═════════════════════════════
+   Deliberadamente SEPARADA do nfDoPedido, por dois motivos que o Codex apontou no #193:
+
+   1) nfDoPedido cai, no último passo, num palpite por FAIXA DE ID (acharNFporRange): pega
+      qualquer NF cujo id esteja entre o id do pedido e id+2000. Serve pra achar DANFE, mas
+      aqui decidiria se um pedido é Full ou não — e casar com a NF de OUTRO pedido, série 1,
+      exporia um Full de verdade à fila do estoquista. Aqui só vale NF POSITIVAMENTE
+      VINCULADA ao pedido.
+
+   2) /pedidos/vendas/{id}/nfe às vezes devolve um RESUMO sem o campo `serie` (o mesmo
+      endpoint já omite dataEmissao, e o repo já contorna isso buscando /nfe/{id}). Sem
+      hidratar, a série viria null, o clone seria tratado como Full e movido — anulando a
+      proteção em silêncio.
+
+   Devolve { numero, serie } ou null. null = não sei, e quem chama mantém o conservador. */
+async function serieDaNFdoPedido(id) {
+  const hidrata = async (nf) => {
+    if (!nf) return null;
+    if (nf.serie != null && String(nf.serie) !== '') return { numero: nf.numero || null, serie: String(nf.serie) };
+    if (!(Number(nf.id) > 0)) return null;
+    await sleep(PAUSA_MS);
+    const nd = await blingGet(`/nfe/${nf.id}`);
+    const det = nd && nd.data && nd.data.data;
+    if (det && det.serie != null) return { numero: det.numero || nf.numero || null, serie: String(det.serie) };
+    return null;
+  };
+  try {
+    const r = await blingGet(`/pedidos/vendas/${id}/nfe`);
+    if (r.ok) {
+      let nf = r.data && r.data.data;
+      if (Array.isArray(nf)) nf = nf[0];
+      const h = await hidrata(nf);
+      if (h) return h;
+    }
+    await sleep(PAUSA_MS);
+    const d = await blingGet(`/pedidos/vendas/${id}`);
+    const det = d && d.data && d.data.data;
+    const raw = det ? (det.notaFiscal != null ? det.notaFiscal : det.nfe) : null;
+    const nfId = (raw && typeof raw === 'object') ? raw.id : raw;
+    if (Number(nfId) > 0) {
+      await sleep(PAUSA_MS);
+      const nd = await blingGet(`/nfe/${nfId}`);
+      const nf2 = nd && nd.data && nd.data.data;
+      const h2 = await hidrata(nf2);
+      if (h2) return h2;
+    }
+  } catch (e) {}
+  return null;   // sem NF vinculada, ou série não descoberta → não sei
 }
 
 async function nfDoPedido(id) {
@@ -205,4 +256,5 @@ async function dadosNFSimp(nfId, numeroPedido) {
 }
 
 
-module.exports = { parseNF, acharNFporRange, nfDoPedido, carregarNFs, acharNFnaLista, baixarDanfe, parseXmlNF, baixarXmlNF, dadosNFSimp };
+module.exports = {
+  serieDaNFdoPedido, parseNF, acharNFporRange, nfDoPedido, carregarNFs, acharNFnaLista, baixarDanfe, parseXmlNF, baixarXmlNF, dadosNFSimp };
