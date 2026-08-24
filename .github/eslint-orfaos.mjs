@@ -10,6 +10,20 @@
 //  `node --check` não pega isso (a sintaxe está perfeita) e o Codex gasta uma rodada.
 //  Esta regra pega em ~20s, antes de abrir o PR.
 //
+//  O QUE ELE COBRE: os .js do servidor, os .js de tela e o miolo dos <script> dentro dos
+//  .html. Inclui nome usado só em `typeof x === 'function'` — o repo tem 96 guardas dessas,
+//  várias na rotina noturna, onde um erro de digitação desliga uma etapa EM SILÊNCIO.
+//
+//  O QUE ELE NÃO COBRE (não confie como se cobrisse): código dentro de atributo de evento
+//  no HTML — onclick, onchange e afins. São 671 no repo. O eslint-plugin-html lê o corpo
+//  dos <script>, não os atributos. Um extrator ingênuo de `on*="..."` não resolve porque
+//  164 desses casam DENTRO de <script>, em HTML montado por concatenação de string
+//  (ex.: onclick="histIrPagina('+(pgAtual-1)+')" na linha 688 do amb-dashboard.html, dentro
+//  do <script> que abre na 394) — tentar interpretar isso como JS dá falso positivo, e
+//  detector que grita à toa é detector que todo mundo passa a ignorar. Cobrir isso direito
+//  pede outro mecanismo: separar os <script> do resto, pegar só os atributos literais e
+//  cruzar os nomes chamados com as funções declaradas no arquivo. Fica pra depois.
+//
 //  Rodar na mão (na raiz do repo):
 //     npm install --no-save eslint@9 eslint-plugin-html globals
 //     npx eslint --no-config-lookup -c .github/eslint-orfaos.mjs .
@@ -41,14 +55,14 @@ export default [
     files: ["**/*.js"],
     ignores: ["public/**/*.js"],
     languageOptions: { ecmaVersion: 2022, sourceType: "commonjs", globals: SERVIDOR },
-    rules: { "no-undef": "error" }
+    rules: { "no-undef": ["error", { typeof: true }] }
   },
 
   // arquivos de tela servidos direto
   {
     files: ["public/**/*.js"],
     languageOptions: { ecmaVersion: 2022, sourceType: "script", globals: TELA },
-    rules: { "no-undef": "error" }
+    rules: { "no-undef": ["error", { typeof: true }] }
   },
 
   /* Script DENTRO do HTML. É onde mora a maior parte do código de tela — os painel.html
@@ -58,7 +72,7 @@ export default [
     files: ["**/*.html"],
     plugins: { html },
     languageOptions: { ecmaVersion: 2022, sourceType: "script", globals: TELA },
-    rules: { "no-undef": "error" }
+    rules: { "no-undef": ["error", { typeof: true }] }
   },
 
   /* ─── Bibliotecas de CDN, liberadas SÓ na página que carrega cada uma ───────────────
