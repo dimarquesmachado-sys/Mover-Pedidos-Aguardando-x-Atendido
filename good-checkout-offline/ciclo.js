@@ -237,12 +237,24 @@ async function listarAtendidos() {
       const derrubados = [], semResposta = [];
       let mudouCache = false;
       for (const idF of idsFullVistos.slice()) {
-        let info = serieCache[String(idF)];                    // já sabíamos?
-        if (!info) {
+        /* ⚠️ O cache tem VALIDADE (30 min). Sem isso, uma NF cancelada, substituída ou
+           corrigida com o pedido ainda em ATENDIDO deixaria a série velha presa pra sempre:
+           uma série não-1 obsoleta faria mover um pedido cuja NF nova é série 1, e uma
+           série 1 obsoleta exporia um Full de verdade à fila indefinidamente.
+           Dentro da validade usa o guardado; fora, tenta renovar — e se a renovação falhar
+           (429), MANTÉM o valor antigo, que é o motivo do cache existir. */
+        const chaveS = String(idF);
+        let info = serieCache[chaveS];
+        const venceu = !info || !info.ts || (Date.now() - Number(info.ts)) > 30 * 60 * 1000;
+        if (venceu) {
           let nfF = null;
           try { nfF = await serieDaNFdoPedido(idF); } catch (e) { nfF = null; }
           await sleep(PAUSA_MS);
-          if (nfF && nfF.serie) { info = { serie: String(nfF.serie), nf: nfF.numero || null }; serieCache[String(idF)] = info; mudouCache = true; }
+          if (nfF && nfF.serie) {
+            info = { serie: String(nfF.serie), nf: nfF.numero || null, ts: Date.now() };
+            serieCache[chaveS] = info; mudouCache = true;
+          }
+          // renovação falhou: segue com o `info` antigo, se houver
         }
         if (info && String(info.serie) === '1') {
           derrubados.push({ id: idF, nf: info.nf });
@@ -275,7 +287,8 @@ async function listarAtendidos() {
     if (ocultosFull) console.log(`[GOODBKP] filtro Full: ${ocultosFull} pedido(s) ocultado(s) da fila do estoquista (UN ${UN_FULL.join(',')}; ${indefinidos.length} checado(s) por detalhe)`);
   }
 
-  return { ok: fetchOk, completa, pedidos, ocultosFull, idsFullVistos, paginas_refeitas: paginasRefeitas, falhou_na_pagina: falhouNaPagina };
+  return { ok: fetchOk, completa, pedidos, ocultosFull, idsFullVistos, idsSemSerie: ocultosSemSerie,
+           paginas_refeitas: paginasRefeitas, falhou_na_pagina: falhouNaPagina };
 }
 
 async function detalhePedido(id) {
@@ -546,7 +559,7 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
     const man      = manifest();
     const cacheEan = skuEanCache();
     const locC     = locCache();
-    const { ok: listaOk, completa: listaCompleta, pedidos: atendidos, idsFullVistos, paginas_refeitas: pagRef, falhou_na_pagina: pagFalha } = await listarAtendidos();
+    const { ok: listaOk, completa: listaCompleta, pedidos: atendidos, idsFullVistos, idsSemSerie, paginas_refeitas: pagRef, falhou_na_pagina: pagFalha } = await listarAtendidos();
     console.log(`[GOODBKP] ${atendidos.length} pedido(s) ATENDIDO(${SIT_ATENDIDO}) na janela de ${JANELA_DIAS}d (bling ok=${listaOk})`);
 
     // EXPURGO FULL: remove do cache os pedidos que a lista trouxe como Full
@@ -610,7 +623,13 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
           }
         } catch (e) {}
       }
-      const aRemover = Object.keys(man).filter(id => !idsAtuais.has(String(id)) && !idsFull.has(String(id)));
+      /* ⚠️ PRESERVAR os de série desconhecida. Eles ficam escondidos da fila (não entram em
+         `atendidos`) e foram tirados do idsFullVistos pra NÃO serem movidos — então cairiam
+         nas duas peneiras e a reconciliação apagaria o cache deles como se tivessem saído de
+         ATENDIDO, levando junto a ETIQUETA ANEXADA. O próprio arquivo avisa em outro ponto
+         que é melhor não remover do que apagar etiqueta. */
+      const preservar = new Set((idsSemSerie || []).map(String));
+      const aRemover = Object.keys(man).filter(id => !idsAtuais.has(String(id)) && !idsFull.has(String(id)) && !preservar.has(String(id)));
       // TRAVA DE SEGURANÇA: sumir com muita coisa de uma vez quase sempre é lista ruim do Bling,
       // não 40% dos pedidos despachados no mesmo minuto. Melhor não remover do que apagar etiqueta anexada.
       const limiteSeguro = Math.max(5, Math.ceil(Object.keys(man).length * 0.4));
