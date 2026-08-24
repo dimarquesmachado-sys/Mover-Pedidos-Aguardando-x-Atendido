@@ -185,11 +185,17 @@ async function listarAtendidos() {
   if (UN_FULL.length) {
     const setFull = new Set(UN_FULL);
     // lê a unidade das duas formas possíveis na lista
-    const unDaLista = (p) => {
-      const a = p && p.loja && p.loja.unidadeNegocio && p.loja.unidadeNegocio.id;
-      const b = p && p.unidadeNegocio && p.unidadeNegocio.id;
-      return a || b || null;
-    };
+    /* ⚠️ 24/08 — SÓ VALE A UNIDADE DA LOJA. A sonda de 30/07 (comentário acima) já tinha
+       achado que a unidade do Full vem em `pedido.loja.unidadeNegocio.id`, e NÃO no topo do
+       pedido. Mesmo assim havia um segundo caminho lendo o topo — e era por ali que vazava:
+       pedido criado À MÃO dentro do Bling não tem loja de marketplace, escapava do caminho
+       certo, caía no topo e recebia a unidade PADRÃO da empresa. Se essa unidade estivesse na
+       lista do Full, TODO pedido interno virava "Full" e ia parar em DESPACHADOS.
+       Caso real na AMB em 24/08: pedidos 26687588614 e 3902 (26687728978), NF série 1 gerada
+       automaticamente, mandados pra DESPACHADOS no mesmo minuto, repetidamente a cada ciclo.
+       Full é venda de marketplace (Shopee Full, ML Full, Magalu Full); pedido sem loja NUNCA
+       é Full. Sem loja com unidade Full → devolve null e o pedido não é tocado. */
+    const unDaLista = (p) => (p && p.loja && p.loja.unidadeNegocio && p.loja.unidadeNegocio.id) || null;
     // 1ª passada: decide pelo que a lista trouxe; junta os "sem unidade" p/ checar no detalhe
     const indefinidos = [];
     for (const p of out) {
@@ -205,8 +211,8 @@ async function listarAtendidos() {
     for (const p of indefinidos) {
       try {
         const det = await detalhePedido(p.id);
-        const un = (det && det.loja && det.loja.unidadeNegocio && det.loja.unidadeNegocio.id)
-                || (det && det.unidadeNegocio && det.unidadeNegocio.id) || null;
+        // mesma regra do unDaLista: só a unidade da LOJA vale (ver o porquê logo acima)
+        const un = (det && det.loja && det.loja.unidadeNegocio && det.loja.unidadeNegocio.id) || null;
         if (un != null && setFull.has(String(un))) { ocultosFull++; idsFullVistos.push(String(p.id)); idsFullSet.add(String(p.id)); }
       } catch (e) { /* se o detalhe falhar, não esconde — melhor mostrar que sumir por engano */ }
       await sleep(PAUSA_MS);
@@ -545,27 +551,15 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
       // e o move é tentado no próximo ciclo. AMBBKP_SIT_DESPACHADOS controla o
       // destino; se ficar 0/vazio, o move é DESLIGADO (só o filtro age).
       if (SIT_DESPACHADOS && Array.isArray(idsFullVistos) && idsFullVistos.length) {
-        /* ⚠️ TRAVA (24/08, regra do Diego): DESPACHADOS só depois da BIPAGEM DO CHECKOUT.
-           Antes bastava a unidade de negócio bater com a lista do Full — e a unidade é lida
-           primeiro da LOJA, não do pedido, então a classificação valia pro canal inteiro e
-           pegava venda normal junto. Caso real na AMB (pedido 26687588614, 24/08): a NF foi
-           gerada às 17:48, o pedido caiu em ATENDIDO e no mesmo ciclo foi pra DESPACHADOS;
-           às 17:51 uma pessoa devolveu pra ATENDIDO e o ciclo das 17:55 levou de novo — o
-           robô desfazendo a correção humana a cada 10 min.
-           `conferidos.json` é onde o checkout grava quem passou pela bipagem, com
-           `conferido_em`. Sem esse carimbo, NÃO move. */
-        const confDesp = readJson(CONFERIDOS_FILE, {});
-        let movidos = 0, falhas = 0, semBipagem = 0;
+        let movidos = 0, falhas = 0;
         for (const id of idsFullVistos) {
-          const cDesp = confDesp[String(id)];
-          if (!cDesp || !cDesp.conferido_em) { semBipagem++; continue; }   // não passou pelo checkout → fica onde está
           try {
             const r = await moverSituacao(id, SIT_DESPACHADOS);
             if (r && r.ok !== false) movidos++; else falhas++;
           } catch (e) { falhas++; }
           await sleep(PAUSA_MS);
         }
-        console.log(`[AMBBKP] move Full → DESPACHADOS(${SIT_DESPACHADOS}): ${movidos} movido(s)${falhas ? `, ${falhas} falha(s) (retenta no próximo ciclo)` : ''}${semBipagem ? `, ${semBipagem} NÃO movido(s) por não terem passado pela bipagem` : ''}`);
+        console.log(`[AMBBKP] move Full → DESPACHADOS(${SIT_DESPACHADOS}): ${movidos} movido(s)${falhas ? `, ${falhas} falha(s) (retenta no próximo ciclo)` : ''}`);
       }
     }
 
