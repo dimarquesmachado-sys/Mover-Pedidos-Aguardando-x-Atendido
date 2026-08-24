@@ -211,7 +211,35 @@ async function listarAtendidos() {
       } catch (e) { /* detalhe falhou → não esconde */ }
       await sleep(PAUSA_MS);
     }
-    pedidos = out.filter(p => !idsFullSet.has(String(p.id)));
+    /* ═══ SÉRIE 1 DERRUBA O FULL (24/08) ═══════════════════════════════════════════════
+       Clonar um pedido no Bling COPIA a unidade de negócio junto. Ao clonar uma venda Full
+       pra mandar peça de reposição em garantia, o clone nasce carimbado com a unidade Full
+       mesmo saindo do galpão da empresa — e o filtro acertava em cima de um dado errado:
+       escondia da fila do estoquista e mandava pra DESPACHADOS.
+       O sinal é objetivo: Full de verdade tem a NF ESPELHADA do marketplace; série 1 é
+       emissão própria, da matriz. Unidade diz Full mas NF é série 1 → vence a NF.
+       ⚠️ Só derruba com prova POSITIVA de série 1. Sem NF, ou se o Bling não responder,
+       mantém o que a unidade disse (lado conservador). */
+    if (idsFullVistos.length) {
+      const derrubados = [];
+      for (const idF of idsFullVistos.slice()) {
+        let nfF = null;
+        try { nfF = await nfDoPedido(idF); } catch (e) { nfF = null; }
+        await sleep(PAUSA_MS);
+        if (nfF && String(nfF.serie) === '1') {
+          derrubados.push({ id: idF, nf: nfF.numero });
+          const ix = idsFullVistos.indexOf(idF);
+          if (ix >= 0) idsFullVistos.splice(ix, 1);
+          ocultosFull--;
+        }
+      }
+      if (derrubados.length) {
+        console.log(`[GOODBKP] série 1 derrubou o Full em ${derrubados.length} pedido(s) (emissão nossa, provável clone de venda Full): ` +
+          derrubados.map(d => `pedido ${d.id}/NF ${d.nf}`).join(', '));
+      }
+    }
+    const idsFullFinal = new Set(idsFullVistos.map(String));   // recalcula: a série 1 pode ter derrubado alguns
+    pedidos = out.filter(p => !idsFullFinal.has(String(p.id)));
     if (ocultosFull) console.log(`[GOODBKP] filtro Full: ${ocultosFull} pedido(s) ocultado(s) da fila do estoquista (UN ${UN_FULL.join(',')}; ${indefinidos.length} checado(s) por detalhe)`);
   }
 
@@ -517,7 +545,10 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
           } catch (e) { falhas++; }
           await sleep(PAUSA_MS);
         }
-        console.log(`[GOODBKP] move Full → DESPACHADOS(${SIT_DESPACHADOS}): ${movidos} movido(s)${falhas ? `, ${falhas} falha(s) (retenta no próximo ciclo)` : ''}`);
+        /* 24/08: o log dizia só "N movido(s)", sem dizer QUAIS — e foi por isso que levou horas
+           pra descobrir se os movidos eram Full de verdade ou pedido interno. Agora lista os ids. */
+        console.log(`[GOODBKP] move Full → DESPACHADOS(${SIT_DESPACHADOS}): ${movidos} movido(s)${falhas ? `, ${falhas} falha(s) (retenta no próximo ciclo)` : ''}` +
+          (idsFullVistos.length ? ` — pedidos: ${idsFullVistos.join(', ')}` : ''));
       }
     }
 

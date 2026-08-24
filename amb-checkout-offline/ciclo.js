@@ -222,8 +222,39 @@ async function listarAtendidos() {
       } catch (e) { /* se o detalhe falhar, não esconde — melhor mostrar que sumir por engano */ }
       await sleep(PAUSA_MS);
     }
+    /* ═══ SÉRIE 1 DERRUBA O FULL (24/08) ═══════════════════════════════════════════════
+       Clonar um pedido no Bling COPIA a unidade de negócio junto. Eles clonam vendas Full
+       pra mandar peça de reposição em garantia — e o clone nasce carimbado com a unidade
+       Full, mesmo saindo do galpão DELES. O dado fica errado, e o filtro acertava em cima
+       de um dado errado: escondia da fila do estoquista e mandava pra DESPACHADOS.
+       Caso real na AMB em 24/08: NF 3463, unidade "AMBTotal - FULL MLivre", SÉRIE 1.
+       O sinal é objetivo, não é palpite: Full de verdade tem a NF ESPELHADA do marketplace;
+       série 1 é emissão nossa, da matriz. Se a unidade diz Full mas a NF é série 1, vence
+       a NF — não é Full.
+       ⚠️ Só derruba com prova POSITIVA de série 1. Sem NF, ou se o Bling não responder,
+       mantém o que a unidade disse (o lado conservador: Full segue tratado como Full). */
+    if (idsFullVistos.length) {
+      const derrubados = [];
+      for (const idF of idsFullVistos.slice()) {
+        let nfF = null;
+        try { nfF = await nfDoPedido(idF); } catch (e) { nfF = null; }
+        await sleep(PAUSA_MS);
+        if (nfF && String(nfF.serie) === '1') {
+          derrubados.push({ id: idF, nf: nfF.numero });
+          const ix = idsFullVistos.indexOf(idF);
+          if (ix >= 0) idsFullVistos.splice(ix, 1);
+          ocultosFull--;
+        }
+      }
+      if (derrubados.length) {
+        console.log(`[AMBBKP] série 1 derrubou o Full em ${derrubados.length} pedido(s) (emissão nossa, provável clone de venda Full): ` +
+          derrubados.map(d => `pedido ${d.id}/NF ${d.nf}`).join(', '));
+      }
+    }
+
     // aplica: remove da fila tudo que se confirmou Full
-    pedidos = out.filter(p => !idsFullSet.has(String(p.id)));
+    const idsFullFinal = new Set(idsFullVistos.map(String));   // recalcula: a série 1 pode ter derrubado alguns
+    pedidos = out.filter(p => !idsFullFinal.has(String(p.id)));
     if (ocultosFull) console.log(`[AMBBKP] filtro Full: ${ocultosFull} pedido(s) ocultado(s) da fila do estoquista (UN ${UN_FULL.join(',')}; ${indefinidos.length} checado(s) por detalhe)`);
   }
 
@@ -566,7 +597,10 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
           } catch (e) { falhas++; }
           await sleep(PAUSA_MS);
         }
-        console.log(`[AMBBKP] move Full → DESPACHADOS(${SIT_DESPACHADOS}): ${movidos} movido(s)${falhas ? `, ${falhas} falha(s) (retenta no próximo ciclo)` : ''}`);
+        /* 24/08: o log dizia só "N movido(s)", sem dizer QUAIS — e foi por isso que levou horas
+           pra descobrir se os movidos eram Full de verdade ou pedido interno. Agora lista os ids. */
+        console.log(`[AMBBKP] move Full → DESPACHADOS(${SIT_DESPACHADOS}): ${movidos} movido(s)${falhas ? `, ${falhas} falha(s) (retenta no próximo ciclo)` : ''}` +
+          (idsFullVistos.length ? ` — pedidos: ${idsFullVistos.join(', ')}` : ''));
       }
     }
 
