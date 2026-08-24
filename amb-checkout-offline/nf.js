@@ -18,6 +18,7 @@ function parseNF(nf) {
     chave: nf.chaveAcesso || nf.chave || null,
     situacao: (nf.situacao && (nf.situacao.id || nf.situacao)) || null,
     dataEmissao: nf.dataEmissao || null   // b10: hora OFICIAL da NF — antes era descartada aqui e o card 🕓 do painel nunca recebia o dado
+    ,serie: (nf.serie != null ? String(nf.serie) : null)   // 24/08: série 1 = emissão nossa da matriz (ver filtro Full)
   };
 }
 
