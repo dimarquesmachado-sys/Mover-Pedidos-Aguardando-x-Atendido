@@ -36,7 +36,7 @@ const SMTP_PORT  = parseInt(process.env.GOODBKP_SMTP_PORT || '465', 10);
 const EMAIL_USER = process.env.GOODBKP_EMAIL_USER || '';   // conta da GOOD que ENVIA (login)
 const EMAIL_PASS = process.env.GOODBKP_EMAIL_PASS || '';   // senha normal dessa conta
 const EMAIL_DEST = process.env.GOODBKP_EMAIL_DEST || '';   // destino (estoquista) — SEM padrão cravado: configure a env no Render (aceita lista com vírgula)
-const SCHEMA = 5;  // versão do snapshot — bump força re-cache dos pedidos antigos (b10: nf.dataEmissao entra no snapshot)
+const SCHEMA = 6;  // versão do snapshot — bump força re-cache dos pedidos antigos (24/08: un_id passa a guardar SÓ a unidade da LOJA)
 
 // loja → marketplace (GOOD Import). Lojas confirmadas via diagnostico.
 // Pode adicionar/sobrescrever por env GOODBKP_LOJA_MKT no formato "idLoja:mkt,idLoja:mkt".

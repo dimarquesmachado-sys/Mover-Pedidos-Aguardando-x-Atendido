@@ -588,7 +588,12 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
           const setF = new Set(UN_FULL_REC);
           for (const id of Object.keys(man)) {
             const snap = readJson(path.join(CACHE_DIR, String(id), 'pedido.json'), null);
-            const un = snap && snap.un_id ? String(snap.un_id) : '';
+            /* 24/08: só confia no un_id de snapshot do SCHEMA atual. Os gravados antes traziam
+               o fallback do topo do pedido, então um pedido interno apareceria aqui como Full e
+               ficaria preso na fila offline até a retenção limpar. Snapshot velho é tratado como
+               NÃO-Full, que é o comportamento seguro: ele volta a ser removido normalmente ao
+               sair de ATENDIDO. O bump do SCHEMA reescreve esses snapshots sozinho. */
+            const un = (snap && snap.schema === SCHEMA && snap.un_id) ? String(snap.un_id) : '';
             if (un && setF.has(un)) idsFull.add(String(id));
           }
         } catch (e) {}
