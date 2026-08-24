@@ -545,15 +545,27 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
       // e o move é tentado no próximo ciclo. AMBBKP_SIT_DESPACHADOS controla o
       // destino; se ficar 0/vazio, o move é DESLIGADO (só o filtro age).
       if (SIT_DESPACHADOS && Array.isArray(idsFullVistos) && idsFullVistos.length) {
-        let movidos = 0, falhas = 0;
+        /* ⚠️ TRAVA (24/08, regra do Diego): DESPACHADOS só depois da BIPAGEM DO CHECKOUT.
+           Antes bastava a unidade de negócio bater com a lista do Full — e a unidade é lida
+           primeiro da LOJA, não do pedido, então a classificação valia pro canal inteiro e
+           pegava venda normal junto. Caso real na AMB (pedido 26687588614, 24/08): a NF foi
+           gerada às 17:48, o pedido caiu em ATENDIDO e no mesmo ciclo foi pra DESPACHADOS;
+           às 17:51 uma pessoa devolveu pra ATENDIDO e o ciclo das 17:55 levou de novo — o
+           robô desfazendo a correção humana a cada 10 min.
+           `conferidos.json` é onde o checkout grava quem passou pela bipagem, com
+           `conferido_em`. Sem esse carimbo, NÃO move. */
+        const confDesp = readJson(CONFERIDOS_FILE, {});
+        let movidos = 0, falhas = 0, semBipagem = 0;
         for (const id of idsFullVistos) {
+          const cDesp = confDesp[String(id)];
+          if (!cDesp || !cDesp.conferido_em) { semBipagem++; continue; }   // não passou pelo checkout → fica onde está
           try {
             const r = await moverSituacao(id, SIT_DESPACHADOS);
             if (r && r.ok !== false) movidos++; else falhas++;
           } catch (e) { falhas++; }
           await sleep(PAUSA_MS);
         }
-        console.log(`[AMBBKP] move Full → DESPACHADOS(${SIT_DESPACHADOS}): ${movidos} movido(s)${falhas ? `, ${falhas} falha(s) (retenta no próximo ciclo)` : ''}`);
+        console.log(`[AMBBKP] move Full → DESPACHADOS(${SIT_DESPACHADOS}): ${movidos} movido(s)${falhas ? `, ${falhas} falha(s) (retenta no próximo ciclo)` : ''}${semBipagem ? `, ${semBipagem} NÃO movido(s) por não terem passado pela bipagem` : ''}`);
       }
     }
 
