@@ -33,8 +33,22 @@ import globals from "globals";
 import html from "eslint-plugin-html";
 
 /* Lista OFICIAL do pacote `globals`, não escrita na mão: a minha versão anterior
-   esquecia global/Response/Headers/EventTarget e os acusaria como órfãos (Codex #190). */
-const SERVIDOR = globals.node;
+   esquecia global/Response/Headers/EventTarget e os acusaria como órfãos (Codex #190).
+
+   Mas `globals.node` não tem versão: traz nomes que só existem do Node 20/22 em diante,
+   e o package.json declara `"node": ">=18"`. Se algum dia isto rodar num 18, um `File` ou
+   `CustomEvent` no servidor passaria no detector e quebraria em produção. Então os que
+   não existem no 18 saem daqui — nenhum é usado no repo hoje (conferido: os 2 `File` que
+   aparecem são o cabeçalho HTTP `X-File-Name`, não o global) (Codex #190).
+
+   ⚠️ Se o piso do package.json subir para 20+, dá pra apagar esta subtração inteira. */
+const SO_DO_NODE_20_EM_DIANTE = [
+  'File', 'CustomEvent', 'navigator', 'Navigator', 'WebSocket',
+  'localStorage', 'sessionStorage', 'CloseEvent', 'MessageEvent'
+];
+const SERVIDOR = Object.fromEntries(
+  Object.entries(globals.node).filter(([nome]) => !SO_DO_NODE_20_EM_DIANTE.includes(nome))
+);
 
 /* Tela: SÓ os globais de navegador. Antes eu espalhava os de Node aqui dentro, o que
    deixava passar `process`/`require`/`Buffer` num arquivo de tela — que quebram no
