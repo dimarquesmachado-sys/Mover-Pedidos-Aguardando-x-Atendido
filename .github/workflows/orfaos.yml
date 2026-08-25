@@ -1,0 +1,21 @@
+# Pega identificador órfão ANTES do merge.
+# Por que existe: ver o cabeçalho de .github/eslint-orfaos.mjs
+# O eslint é instalado aqui na hora, de propósito: nada de node_modules no repo.
+name: orfaos
+on:
+  pull_request:
+    branches: [ main ]
+  push:
+    branches: [ main ]
+jobs:
+  orfaos:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Instalar eslint
+        run: npm install --no-save --no-audit --no-fund eslint@9 eslint-plugin-html globals
+      - name: Procurar identificador orfao
+        run: npx eslint --no-config-lookup -c .github/eslint-orfaos.mjs .
