@@ -1717,15 +1717,26 @@ function routes(readBody) {
             (ele é escrito de forma não atômica, então truncado é falha concreta). Aí todo
             pedido pareceria "nunca bipado". Melhor recusar do que listar em cima de prova
             que eu não consegui ler. */
-      if (!UN_FULL_E.length) {
-        json(res, 200, { ok: false, erro: 'AMBBKP_UN_FULL vazia ou inválida — sem ela não dá pra distinguir Full de engano, e a lista sairia toda errada' });
+      /* Não basta ter algum texto: id de unidade no Bling é NUMÉRICO. Se a env vier com
+         separador errado (ponto e vírgula, espaço) ou com um token não numérico, o split
+         produz um Set não vazio que NUNCA casa com nada — e aí Full de verdade que não está
+         no conferidos.json seria listado como "movido por engano". */
+      const unInvalidos = UN_FULL_E.filter(x => !/^\d+$/.test(x));
+      if (!UN_FULL_E.length || unInvalidos.length) {
+        json(res, 200, { ok: false,
+          erro: !UN_FULL_E.length
+            ? 'AMBBKP_UN_FULL vazia — sem ela não dá pra distinguir Full de engano, e a lista sairia toda errada'
+            : 'AMBBKP_UN_FULL tem valor que não é id numérico: ' + unInvalidos.join(', ') + ' — separe por vírgula, só números. Como está, nenhum pedido casaria e os Full apareceriam como engano' });
         return true;
       }
       let confE;
       try {
         const cruE = fs.readFileSync(CONFERIDOS_FILE, 'utf8');
         confE = JSON.parse(cruE);
-        if (!confE || typeof confE !== 'object') throw new Error('formato inesperado');
+        /* Array TAMBÉM é 'object'. E um array aqui é formato alcançável de verdade — a rota de
+           restauração aceita array em body.conferidos com a mesma checagem frouxa. Se passasse,
+           toda busca por id daria undefined e TODO pedido viraria "nunca bipado". */
+        if (!confE || typeof confE !== 'object' || Array.isArray(confE)) throw new Error('esperava um mapa de pedidos, veio ' + (Array.isArray(confE) ? 'uma lista' : typeof confE));
       } catch (eC) {
         if (eC && eC.code === 'ENOENT') {
           json(res, 200, { ok: false, erro: 'conferidos.json não existe — sem a prova de bipagem todo pedido pareceria não bipado; não vou listar' });
@@ -1785,7 +1796,11 @@ function routes(readBody) {
                (`bruto.filter(p => p.situacao?.id === statusId)`) porque a API às vezes devolve
                pedido de outra situação. Sem isto, um pedido que nem está em DESPACHADOS
                entraria na lista de "movidos por engano". */
-            if (ped.situacao && String(ped.situacao.id) !== String(SIT_DESPACHADOS)) continue;
+            /* Exige casamento EXATO. Se a listagem vier sem `situacao`, não dá pra afirmar que
+               o pedido está em DESPACHADOS — e o blingApi.js já documenta que o Bling às vezes
+               ignora o filtro de situação. Deixar passar "porque não veio o campo" colocaria
+               pedido de outro status na lista de reversão manual. */
+            if (!ped.situacao || String(ped.situacao.id) !== String(SIT_DESPACHADOS)) continue;
             vistos++;
             const idE = String(ped.id);
             let unE = (ped.loja && ped.loja.unidadeNegocio && ped.loja.unidadeNegocio.id) || null;
