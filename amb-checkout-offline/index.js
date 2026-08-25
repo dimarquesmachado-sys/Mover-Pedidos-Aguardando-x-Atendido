@@ -1708,9 +1708,24 @@ function routes(readBody) {
          o await fica pendurado pra sempre e a rota nunca devolve nada — o repo já documenta
          exatamente esse comportamento no listarAtendidos e usa AbortController lá. */
       const comPrazo = async (fn, ms) => {
+        const teto = ms || 45000;
         const ac = new AbortController();
-        const tm = setTimeout(() => ac.abort(), ms || 45000);
-        try { return await fn(ac.signal); } finally { clearTimeout(tm); }
+        const tm = setTimeout(() => ac.abort(), teto);
+        /* DUAS camadas, de propósito. O AbortController CANCELA o fetch da API — é o certo,
+           e é o padrão que o listarAtendidos já usa. Mas o blingGet chama garantirToken()
+           ANTES, e o gerenciador de token faz fetch próprio, que não recebe este signal: se
+           o travamento for lá, abortar não adianta porque a chamada da API nem começou.
+           A corrida garante que a rota SEMPRE responde. Ela não cancela o fetch do token
+           (a conexão fica pendurada até o SO derrubar), e por isso não substitui o abort —
+           some com ele e voltam as conexões penduradas que o PR #183 consertou. Para uma
+           rota de diagnóstico chamada de vez em quando, conexão vazando é bem menos ruim que
+           requisição que nunca volta. O certo mesmo é passar o prazo pro tokenManager, mas
+           ele é compartilhado pelas 3 empresas e por todos os fluxos — fica pra um PR
+           próprio, não pra dentro deste. */
+        let estouro;
+        const relogio = new Promise((_, rej) => { estouro = setTimeout(() => rej(new Error('o Bling não respondeu em ' + Math.round(teto / 1000) + 's (pode ser a etapa do token, que não aceita cancelamento)')), teto + 5000); });
+        try { return await Promise.race([fn(ac.signal), relogio]); }
+        finally { clearTimeout(tm); clearTimeout(estouro); }
       };
 
       const hojeE = new Date(); const iniE = new Date(hojeE); iniE.setDate(iniE.getDate() - diasE);
