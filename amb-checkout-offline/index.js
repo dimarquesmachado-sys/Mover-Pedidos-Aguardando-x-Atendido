@@ -1717,7 +1717,7 @@ function routes(readBody) {
        Uso: /amb-checkout-offline/despachados-por-engano?k=ADMIN_KEY[&dias=10] */
     /* ═══ SONDA TEMPORÁRIA (25/08): clones de garantia escondidos como Full ══════════════
        Pergunta pontual do dono: "quais NFs de agosto são SÉRIE 1 mas estão na unidade
-       AMB - FULL MLivre?" — ou seja, clones de reposição que nasceram carimbados como Full.
+       AMB - FULL MLivre?" — clones de reposição que nasceram carimbados como Full.
        SÓ LISTA, não altera nada. Remover quando não for mais útil.
        Uso: /amb-checkout-offline/sonda-clones-full?k=ADMIN_KEY[&de=2026-08-01&ate=2026-08-31][&un=2839148] */
     if (method === 'GET' && p === '/amb-checkout-offline/sonda-clones-full') {
@@ -1725,12 +1725,28 @@ function routes(readBody) {
       if (!(process.env.ADMIN_KEY && kS === process.env.ADMIN_KEY)) { json(res, 404, { error: 'not found' }); return true; }
       const deS  = urlObj.searchParams.get('de')  || '2026-08-01';
       const ateS = urlObj.searchParams.get('ate') || '2026-08-31';
-      const unS  = String(urlObj.searchParams.get('un') || '2839148');   // AMB - FULL MLivre
+      /* Codex #200 (P2): un mal formado (espaço colado, texto) nunca casaria com unidade
+         nenhuma e a rota devolveria ok:true com zero clones — erro de digitação vestido de
+         "não achei nada". Valida numérico, como a rota vizinha. */
+      const unS = String(urlObj.searchParams.get('un') || '2839148').trim();
+      if (!/^\d+$/.test(unS)) { json(res, 200, { ok: false, erro: 'un inválida: "' + unS.slice(0, 30) + '" — use só o número da unidade' }); return true; }
+      /* Codex #200 (P1): /pedidos/vendas quer dataInicial/dataFinal — com dataEmissaoInicial
+         o Bling IGNORA o filtro e devolve o histórico inteiro (documentado em
+         ambtotal/blingApi.js, sonda de 28/07). Eu tinha copiado do endpoint /nfe, que usa o
+         outro nome de verdade. dataFinal vai com +1 dia, como na rota vizinha. */
+      const ateMais1S = (() => { const d = new Date(ateS + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + 1); return d.toISOString().slice(0, 10); })();
+      /* Codex #200 (P2): sem prazo por chamada, um Bling que aceita a conexão e emudece
+         pendura a rota pra sempre — mesmo desenho da rota vizinha. */
+      const comPrazoS = async (fn, ms) => {
+        const ac = new AbortController();
+        const tt = setTimeout(() => ac.abort(), ms || 20000);
+        try { return await fn(ac.signal); } finally { clearTimeout(tt); }
+      };
       const clones = [], naoResolvidos = [];
-      let vistos = 0, daUnidade = 0;
+      let vistos = 0, daUnidade = 0, truncada = false;
       try {
         for (let pag = 1; pag <= 40; pag++) {
-          const rS = await blingGet(`/pedidos/vendas?dataEmissaoInicial=${deS}&dataEmissaoFinal=${ateS}&pagina=${pag}&limite=100`);
+          const rS = await comPrazoS(sig => blingGet(`/pedidos/vendas?dataInicial=${deS}&dataFinal=${ateMais1S}&pagina=${pag}&limite=100`, 3, sig));
           if (!rS || rS.ok === false) {
             json(res, 200, { ok: false, erro: 'o Bling falhou na página ' + pag + ' — varredura INCOMPLETA, rode de novo', parcial: { vistos, clones_ate_aqui: clones.length } });
             return true;
@@ -1740,11 +1756,22 @@ function routes(readBody) {
           for (const ped of arrS) {
             vistos++;
             // mesma regra do ciclo: só a unidade da LOJA identifica Full
-            const unP = (ped.loja && ped.loja.unidadeNegocio && ped.loja.unidadeNegocio.id) || null;
+            let unP = (ped.loja && ped.loja.unidadeNegocio && ped.loja.unidadeNegocio.id) || null;
+            /* Codex #200 (P1): a lista omite loja.unidadeNegocio de forma intermitente
+               (documentado no classificador do ciclo). Pular direto esconderia clone válido
+               num resultado "bem-sucedido". Com loja e sem unidade → busca o detalhe;
+               detalhe mudo → não_resolvido, nunca silêncio. */
+            if (unP == null && ped.loja) {
+              let detS = null;
+              try { detS = await comPrazoS(sig => detalhePedido(ped.id, sig)); } catch (e) { detS = null; }
+              await sleep(PAUSA_MS);
+              if (!detS) { naoResolvidos.push({ pedido: ped.numero, motivo: 'lista sem unidade e o detalhe não veio — rode de novo' }); continue; }
+              unP = (detS.loja && detS.loja.unidadeNegocio && detS.loja.unidadeNegocio.id) || null;
+            }
             if (String(unP) !== unS) continue;
             daUnidade++;
             let nfS = null;
-            try { nfS = await serieDaNFdoPedido(ped.id); } catch (e) { nfS = null; }
+            try { nfS = await comPrazoS(sig => serieDaNFdoPedido(ped.id, sig)); } catch (e) { nfS = null; }
             await sleep(PAUSA_MS);
             if (nfS && nfS.serie != null) {
               if (String(nfS.serie) === '1') clones.push({ pedido: ped.numero, pedido_id: String(ped.id), nf: nfS.numero, situacao: (ped.situacao && ped.situacao.id) || null });
@@ -1754,6 +1781,9 @@ function routes(readBody) {
               naoResolvidos.push({ pedido: ped.numero, motivo: 'série não lida (Bling falhou) — rode de novo mais tarde' });
             }
           }
+          /* Codex #200 (P2): página 40 CHEIA = tem mais além do teto. Devolver ok:true aqui
+             apresentaria lista truncada como completa. */
+          if (pag === 40 && arrS.length === 100) { truncada = true; break; }
           if (arrS.length < 100) break;
           await sleep(PAUSA_MS);
         }
@@ -1762,7 +1792,9 @@ function routes(readBody) {
         return true;
       }
       json(res, 200, {
-        ok: true, janela: { de: deS, ate: ateS }, unidade: unS,
+        ok: !truncada,
+        aviso: truncada ? 'INCOMPLETA: mais de 4.000 pedidos no período (teto de 40 páginas) — divida a janela com &de=/&ate=' : undefined,
+        janela: { de: deS, ate: ateS }, unidade: unS,
         resumo: { pedidos_vistos: vistos, da_unidade_full: daUnidade,
                   clones_serie_1: clones.length, nao_resolvidos: naoResolvidos.length },
         nfs_serie_1: clones.map(c => c.nf),
