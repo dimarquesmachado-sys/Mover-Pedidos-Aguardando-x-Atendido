@@ -235,6 +235,7 @@ async function listarAtendidos() {
       const SERIE_FILE = path.join(CACHE_DIR, '_serie_nf.json');
       const serieCache = readJson(SERIE_FILE, {});
       const derrubados = [], semResposta = [], venceuEspera = [];
+      const _consultaFalhou = new Set();   // Bling não respondeu — diferente de 'não tem NF'
       let mudouCache = false;
       for (const idF of idsFullVistos.slice()) {
         /* O cache tem VALIDADE (30 min) e a regra é simples: VENCIDO NÃO VALE.
@@ -255,8 +256,9 @@ async function listarAtendidos() {
         let info = valeAinda ? guardado : null;
         if (!valeAinda) {
           let nfF = null;
-          try { nfF = await serieDaNFdoPedido(idF); } catch (e) { nfF = null; }
+          try { nfF = await serieDaNFdoPedido(idF); } catch (e) { nfF = { falhou: true }; }
           await sleep(PAUSA_MS);
+          if (nfF && nfF.falhou) _consultaFalhou.add(String(idF));   // não foi "sem NF" — foi não perguntei
           if (nfF && nfF.serie) {
             info = { serie: String(nfF.serie), nf: nfF.numero || null, ts: Date.now() };
             serieCache[chaveS] = info; mudouCache = true;
@@ -277,15 +279,25 @@ async function listarAtendidos() {
              descobrir a série, movo — a unidade continua dizendo Full e já esperei o
              suficiente. O clone de garantia não é afetado: o Bling emite a NF dele ao
              SALVAR, então ele tem série 1 desde o primeiro minuto e cai no ramo de cima. */
-          const espera = serieCache['espera:' + chaveS];
-          if (!espera) {
-            serieCache['espera:' + chaveS] = { desde: Date.now() };
-            mudouCache = true;
-            semResposta.push(String(idF));                      // 1ª vez: escondido, não move
-          } else if ((Date.now() - Number(espera.desde)) < 6 * 60 * 60 * 1000) {
-            semResposta.push(String(idF));                      // dentro do prazo: ainda espera
+          /* ⚠️ O RELÓGIO SÓ CORRE QUANDO O BLING CONFIRMOU QUE NÃO HÁ NOTA (Codex #199).
+             `serieDaNFdoPedido` devolve vazio por DOIS motivos diferentes: o pedido não tem
+             NF, ou a consulta não foi (429, Bling fora). Contar os dois igual significaria
+             que 6h de 429 movem o pedido sem eu NUNCA ter olhado a nota — e se fosse um
+             clone de garantia, seria exatamente o estrago que esta trava existe pra impedir.
+             Consulta que falhou não avança o relógio: espera e tenta de novo. */
+          if (_consultaFalhou.has(String(idF))) {
+            semResposta.push(String(idF));                      // não perguntei ainda: espera, sem contar tempo
           } else {
-            venceuEspera.push(String(idF));                     // esperei demais: MOVE
+            const espera = serieCache['espera:' + chaveS];
+            if (!espera) {
+              serieCache['espera:' + chaveS] = { desde: Date.now() };
+              mudouCache = true;
+              semResposta.push(String(idF));                    // 1ª confirmação de "sem NF": começa o relógio
+            } else if ((Date.now() - Number(espera.desde)) < 6 * 60 * 60 * 1000) {
+              semResposta.push(String(idF));                    // dentro do prazo: ainda espera
+            } else {
+              venceuEspera.push(String(idF));                   // 6h CONFIRMADAS sem nota: MOVE
+            }
           }
         } else {
           delete serieCache['espera:' + chaveS];                // descobriu: limpa o relógio

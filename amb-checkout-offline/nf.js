@@ -69,8 +69,16 @@ async function serieDaNFdoPedido(id, signal) {   // signal opcional: sem prazo, 
     if (det && det.serie != null) return { numero: det.numero || nf.numero || null, serie: String(det.serie) };
     return null;
   };
+  /* ⚠️ DEVOLVE O MOTIVO, não só null (25/08, Codex #199). Antes "o pedido não tem NF" e
+     "não consegui perguntar ao Bling" chegavam iguais em quem chama — e o prazo de espera
+     do filtro Full contava nos DOIS casos. Com 6h de 429 o pedido seria movido sem eu nunca
+     ter conseguido olhar a nota; se fosse um clone de garantia, era o estrago que a trava
+     existe pra impedir. Agora: { serie } quando descobriu · { semNF:true } quando o Bling
+     RESPONDEU e não há nota vinculada · { falhou:true } quando a consulta não foi. */
+  let respondeu = false;   // o Bling chegou a responder alguma das chamadas?
   try {
     const r = await blingGet(`/pedidos/vendas/${id}/nfe`, 3, signal);
+    if (r && r.ok) respondeu = true;
     if (r.ok) {
       let nf = r.data && r.data.data;
       if (Array.isArray(nf)) nf = nf[0];
@@ -79,6 +87,7 @@ async function serieDaNFdoPedido(id, signal) {   // signal opcional: sem prazo, 
     }
     await sleep(PAUSA_MS);
     const d = await blingGet(`/pedidos/vendas/${id}`, 3, signal);
+    if (d && d.ok) respondeu = true;
     const det = d && d.data && d.data.data;
     const raw = det ? (det.notaFiscal != null ? det.notaFiscal : det.nfe) : null;
     const nfId = (raw && typeof raw === 'object') ? raw.id : raw;
@@ -89,8 +98,8 @@ async function serieDaNFdoPedido(id, signal) {   // signal opcional: sem prazo, 
       const h2 = await hidrata(nf2);
       if (h2) return h2;
     }
-  } catch (e) {}
-  return null;   // sem NF vinculada, ou série não descoberta → não sei
+  } catch (e) { return { falhou: true }; }
+  return respondeu ? { semNF: true } : { falhou: true };
 }
 
 async function nfDoPedido(id) {
