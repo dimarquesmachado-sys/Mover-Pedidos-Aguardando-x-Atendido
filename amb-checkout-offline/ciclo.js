@@ -9,6 +9,7 @@ const path  = require('path');
 const fetch = require('node-fetch');
 const base  = require('./base');
 const { BLING_BASE, CACHE_DIR, SIT_ATENDIDO, SIT_DESPACHADOS, SIT_VERIFICADO, SYNC_ON, JANELA_DIAS, PAUSA_MS, RETENCAO_DIAS, ETIQ_FORMATO, CRON_EXPR,
+let _cursorConfirmacao = 0;   // r6: onde a janela de conferência da reconciliação parou (gira pelo tamanho do lote; restart zera, sem prejuízo)
   MANIFEST_FILE, SKU_EAN_FILE, CONFERIDOS_FILE, RESERVAS_FILE, RESERVA_TTL_MS, KIT_CACHE_FILE, LOC_FILE, LOC_LOG_FILE, EAN_INDEX_FILE,
   ARQUIVO_DIR, ARQUIVO_DIAS, SMTP_HOST, SMTP_PORT, EMAIL_USER, EMAIL_PASS, EMAIL_DEST, SCHEMA, LOJA_MKT, MKT_NOME,
   sleep, ensureDir, readJson, writeJson, dataISO, json, html, manifest, salvarManifest, skuEanCache, locCache, salvarLoc,
@@ -815,9 +816,15 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
            nunca seria conferido apesar de "adiado". A janela agora GIRA com o relógio:
            cada ciclo começa de um ponto diferente da lista, e em poucos ciclos todo
            candidato passa pela conferência. */
-        const giroC = aRemover.length ? Math.floor(Date.now() / 60000) % aRemover.length : 0;
+        /* Codex r6: offset derivado do RELÓGIO entra em ressonância com o cron — com 60
+           candidatos e cron de 30 em 30 min, os inícios alternam entre 2 pontos e faixas
+           inteiras nunca são conferidas. O cursor agora PERSISTE em memória e avança pelo
+           tamanho REAL do lote: cobertura completa por construção, qualquer que seja o
+           cron. Restart zera o cursor — só recomeça a volta, nada se perde. */
+        const giroC = aRemover.length ? (_cursorConfirmacao % aRemover.length) : 0;
         const girado = aRemover.slice(giroC).concat(aRemover.slice(0, giroC));
         const loteConf = girado.slice(0, 15);
+        _cursorConfirmacao = aRemover.length ? (giroC + loteConf.length) % aRemover.length : 0;
         adiados = aRemover.length - loteConf.length;
         for (let iC = 0; iC < loteConf.length; iC++) {
           const id = loteConf[iC];
