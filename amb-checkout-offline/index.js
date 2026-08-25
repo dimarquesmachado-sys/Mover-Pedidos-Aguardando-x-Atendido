@@ -27,6 +27,35 @@
 
 const fs    = require('fs');
 const path  = require('path');
+
+/* 25/08 — reaplicarImposto e varrerCancelados saíram daqui: eram BYTE-A-BYTE iguais entre
+   AMB e Girassol (só a empresa padrão mudava). Moram em lib/imposto-cancelados.js, com o
+   ESTADO por empresa — uma variável só do módulo faria uma trancar a outra.
+
+   ⚠️ A ponte fica AQUI EM CIMA de propósito, e o ctx é montado SOB DEMANDA (getters).
+   A rotina noturna monta o contexto dela mais abaixo e passa `varrerCancelados` POR VALOR,
+   o que executa no carregamento do módulo — mas quase tudo que a lib precisa (blingGet,
+   readJson, supaCfg, CACHE_DIR, garantirSitCancel…) só nasce milhares de linhas adiante.
+   Montar o ctx aqui de forma direta daria "Cannot access X before initialization" e o
+   serviço nem subiria — foi o que o boot real acusou. Com getters, cada dependência só é
+   lida quando a função roda. */
+const _impLib = require('../lib/imposto-cancelados');
+const _ctxImp = {
+  get blingGet()          { return blingGet; },
+  get readJson()          { return readJson; },
+  get garantirToken()     { return garantirToken; },
+  get garantirSitCancel() { return garantirSitCancel; },
+  get supaCfg()           { return supaCfg; },
+  get CACHE_DIR()         { return CACHE_DIR; },
+  get DEFAULT_ALIQ_BK()   { return typeof DEFAULT_ALIQ_BK !== 'undefined' ? DEFAULT_ALIQ_BK : 0; },
+  get histCache()         { return typeof _histCache !== 'undefined' ? _histCache : null; },
+  get path()              { return path; },
+  log: console.log
+};
+const reaplicarImposto = (meses, empresa) => _impLib.reaplicarImposto(_ctxImp, meses, empresa);
+const varrerCancelados = (dias, empresa)  => _impLib.varrerCancelados(_ctxImp, dias, empresa);
+const estadoImposto    = () => _impLib.estadoReaplicarImposto('amb');
+const estadoCancelados = () => _impLib.estadoVarrerCancelados('amb');
 const fetch = require('node-fetch');
 const AdmZip = require('adm-zip');
 const crypto = require('crypto');
@@ -341,6 +370,7 @@ function _urlStatus(req, caminho, extra, chave) {
    outra". Aqui fica só a ponte: o ctx com o que é DESTA empresa; a regra vive num lugar só.
    `skuInfoCache` vai por getter porque a lib limpa o cache de 6h quando o custo muda. */
 const _custoLib = require('../lib/custo');
+
 const _ctxCusto = { CACHE_DIR, path, fs, readJson, writeJson, blingGet,
                     get skuInfoCache() { return typeof _skuInfoCache !== 'undefined' ? _skuInfoCache : null; } };
 const lerCustosManuais       = ()            => _custoLib.lerCustosManuais(_ctxCusto);
@@ -3147,13 +3177,13 @@ function routes(readBody) {
       return true;
     }
     if (method === 'GET' && p === '/amb-checkout-offline/varrer-cancelados-status') {
-      json(res, 200, { ok: true, status: _varre, situacoes_descobertas: _sitCancel }); return true;
+      json(res, 200, { ok: true, status: estadoCancelados(), situacoes_descobertas: _sitCancel }); return true;
     }
 
 
     // 01/08 — progresso do "reaplicar imposto" (o dashboard mostra no rodapé da seção Impostos)
     if (method === 'GET' && p === '/amb-checkout-offline/reaplicar-status') {
-      json(res, 200, { ok: true, status: _reap }); return true;
+      json(res, 200, { ok: true, status: estadoImposto() }); return true;
     }
     // disparo manual: ?meses=2026-07,2026-08  (ou ?meses=todos p/ o ano inteiro)
     if (method === 'GET' && p === '/amb-checkout-offline/reaplicar-imposto') {
@@ -6816,131 +6846,11 @@ async function aplicarCreditosFlex(de, ate) {
   return _mlcred;
 }
 
-let _varre = { rodando:false, dias:0, encontrados:0, apagados:0, erros:0, inicio:null, fim:null, situacoes:[], msg:'' };
 
-async function varrerCancelados(dias, empresa) {
-  if (_varre.rodando) return _varre;
-  empresa = empresa || 'amb';
-  dias = Math.min(400, Math.max(1, Number(dias) || 45));
-  const token = await garantirToken();
-  // 04/08 CONSERTO: 'dorme' nunca existiu neste escopo (o base exporta 'sleep'). Toda vez que uma
-  // pagina do Bling voltava CHEIA (100 itens) o await abaixo estourava ReferenceError, caia no catch
-  // la embaixo e a varredura morria calada com encontrados=0 — parecia "nao tem cancelado nenhum".
-  const dorme = ms => new Promise(r => setTimeout(r, ms));
-  const bg = async pth => { for (let t = 0; t < 4; t++) { const r = await blingGet(pth); if (r.ok || r.status === 404) return r; await dorme(1400 + t * 600); } return await blingGet(pth); };
-  const sc = await garantirSitCancel(bg);
-  _varre = { rodando:true, dias, encontrados:0, apagados:0, erros:0, inicio:new Date().toISOString(), fim:null,
-             situacoes: sc.nomes.slice(), msg: sc.ids.length ? '' : ('sem IDs de cancelamento: ' + (sc.erro || '?')) };
-  if (!sc.ids.length) { _varre.rodando = false; _varre.fim = new Date().toISOString(); return _varre; }
 
-  const hoje = new Date();
-  const ate = hoje.toISOString().slice(0, 10);
-  const de = new Date(hoje.getTime() - dias * 86400000).toISOString().slice(0, 10);
-  const nums = new Set();
-  try {
-    for (const sid of sc.ids) {
-      for (let pag = 1; pag <= 60; pag++) {
-        const r = await bg('/pedidos/vendas?idsSituacoes=' + sid + '&dataInicial=' + de + '&dataFinal=' + ate + '&limite=100&pagina=' + pag);
-        const lista = (r.ok && r.data && r.data.data) || [];
-        if (!lista.length) break;
-        for (const p of lista) { const n = String(p.numero || '').trim(); if (n) nums.add(n); }
-        if (lista.length < 100) break;
-        await dorme(420);
-      }
-    }
-    _varre.encontrados = nums.size;
-    console.log('[CANCEL] ' + nums.size + ' pedido(s) cancelado(s) no Bling nos últimos ' + dias + ' dias');
 
-    if (nums.size) {
-      const { url, key } = supaCfg(empresa);
-      if (url && key) {
-        const H = { apikey: key, Authorization: 'Bearer ' + key, 'Content-Type': 'application/json', Prefer: 'count=exact' };
-        const base = url.replace(/\/+$/, '') + '/rest/v1/vendas_historico';
-        const arr = Array.from(nums);
-        for (let i = 0; i < arr.length; i += 80) {
-          const lote = arr.slice(i, i + 80).map(x => '"' + x + '"').join(',');
-          try {
-            const rd = await fetch(base + '?empresa=eq.' + empresa + '&numero_pedido=in.(' + encodeURIComponent(lote) + ')', { method: 'DELETE', headers: H });
-            if (rd.ok) { const cr = rd.headers.get('content-range') || ''; const n2 = Number((cr.split('/')[0] || '').split('-').pop()) ; _varre.apagados += (isFinite(n2) ? n2 + 1 : 0) || 0; }
-            else _varre.erros++;
-          } catch (e) { _varre.erros++; }
-        }
-      }
-      try { for (const k of Object.keys(_histCache)) delete _histCache[k]; } catch (e) {}
-    }
-    _varre.msg = 'concluído';
-  } catch (e) { _varre.msg = 'erro: ' + (e.message || e); _varre.erros++; }
-  _varre.rodando = false; _varre.fim = new Date().toISOString();
-  console.log('[CANCEL] varredura concluída — ' + _varre.encontrados + ' cancelado(s), linhas removidas do histórico | erros: ' + _varre.erros);
-  return _varre;
-}
 
-let _reap = { rodando:false, meses:[], mesAtual:null, linhas:0, atualizadas:0, erros:0, inicio:null, fim:null, msg:'' };
 
-async function reaplicarImposto(meses, empresa){
-  if (_reap.rodando) return _reap;
-  empresa = empresa || 'amb';
-  const { url, key } = supaCfg(empresa);
-  if (!url || !key) { _reap.msg = 'Supabase não configurado'; return _reap; }
-  const H = { apikey: key, Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' };
-  const base = url.replace(/\/+$/, '') + '/rest/v1/vendas_historico';
-  const cfg = readJson(path.join(CACHE_DIR, '_config-fiscal.json'), { aliquotas: {} });
-  const aliqDe = m => { const a = cfg.aliquotas && cfg.aliquotas[m];
-    if (a != null && isFinite(Number(a)) && Number(a) > 0) return Number(a);   // 19/08: 0% salvo era campo em branco — cai no padrão
-    return (DEFAULT_ALIQ_BK && DEFAULT_ALIQ_BK[m] != null) ? Number(DEFAULT_ALIQ_BK[m]) : null; };
-
-  _reap = { rodando:true, meses:meses.slice(), mesAtual:null, linhas:0, atualizadas:0, erros:0,
-            inicio:new Date().toISOString(), fim:null, msg:'' };
-  console.log('[FISCAL] reaplicando imposto em: ' + meses.join(', '));
-  try {
-    for (const mes of meses) {
-      _reap.mesAtual = mes;
-      const aq = aliqDe(mes);
-      if (aq == null) { console.log('[FISCAL] ' + mes + ': sem alíquota — pulando'); continue; }
-      const ini = mes + '-01';
-      const d2 = new Date(Number(mes.slice(0,4)), Number(mes.slice(5,7)), 0);
-      const fim = mes + '-' + String(d2.getDate()).padStart(2,'0');
-      let off = 0;
-      while (off < 200000) {
-        const rq = await fetch(base + '?empresa=eq.' + empresa + '&data_venda=gte.' + ini + '&data_venda=lte.' + fim +
-          '&select=id,valor_nota,imposto,margem&order=data_venda.asc,numero_pedido.asc,sku.asc&limit=500&offset=' + off, { headers: H });
-        if (!rq.ok) { _reap.erros++; break; }
-        const ln = await rq.json().catch(() => []);
-        if (!Array.isArray(ln) || !ln.length) break;
-        _reap.linhas += ln.length;
-        const mudar = [];
-        for (const l of ln) {
-          const vn = Number(l.valor_nota) || 0, im0 = Number(l.imposto) || 0;
-          if (!(vn > 0)) continue;
-          const novo = Math.round(vn * aq / 100 * 100) / 100;
-          if (Math.abs(novo - im0) <= 0.005) continue;
-          const mg = (l.margem == null) ? null : Math.round((Number(l.margem) - (novo - im0)) * 100) / 100;
-          mudar.push({ id: l.id, imposto: novo, margem: mg });
-        }
-        // grava em paralelo, de 8 em 8 (PATCH por linha; o Supabase aguenta bem)
-        for (let i = 0; i < mudar.length; i += 8) {
-          const lote = mudar.slice(i, i + 8);
-          await Promise.all(lote.map(async x => {
-            try {
-              const corpo = (x.margem == null) ? { imposto: x.imposto } : { imposto: x.imposto, margem: x.margem };
-              const rp = await fetch(base + '?id=eq.' + x.id, { method: 'PATCH', headers: H, body: JSON.stringify(corpo) });
-              if (rp.ok) _reap.atualizadas++; else _reap.erros++;
-            } catch (e) { _reap.erros++; }
-          }));
-        }
-        if (ln.length < 500) break;
-        off += 500;
-      }
-      console.log('[FISCAL] ' + mes + ' (alíquota ' + aq + '%): ' + _reap.atualizadas + ' linha(s) atualizadas até agora');
-    }
-    // o agregado do Mês/Ano tem que refletir na hora
-    try { for (const k of Object.keys(_histCache)) delete _histCache[k]; } catch (e) {}
-    _reap.msg = 'concluído';
-  } catch (e) { _reap.msg = 'erro: ' + (e.message || e); _reap.erros++; }
-  _reap.rodando = false; _reap.fim = new Date().toISOString(); _reap.mesAtual = null;
-  console.log('[FISCAL] reaplicar imposto CONCLUÍDO — ' + _reap.atualizadas + ' linha(s) de ' + _reap.linhas + ' | erros: ' + _reap.erros);
-  return _reap;
-}
 
 let _backfillAno = { rodando:false, mesAtual:null, feitos:[], inicio:null, fim:null };
 async function backfillAnoTodo(ateMes){
