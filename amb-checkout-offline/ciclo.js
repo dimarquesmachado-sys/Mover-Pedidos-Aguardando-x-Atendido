@@ -803,7 +803,10 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
           if (!det) { semResposta++; continue; }                                  // Bling não respondeu → preserva
           const sitRaw = det.situacao != null ? (det.situacao.id != null ? det.situacao.id : det.situacao) : null;
           const sit = Number(sitRaw);
-          if (!Number.isFinite(sit)) { semResposta++; continue; }                 // situação omitida → NÃO confirmado → preserva
+          /* Number(null) é 0 — FINITO — então checar só isFinite deixaria a situação OMITIDA
+             passar como status 0 ≠ ATENDIDO e cair na remoção: o P1 de volta pela janela.
+             O null tem que ser barrado ANTES da conversão. (meu teste pegou) */
+          if (sitRaw == null || !Number.isFinite(sit)) { semResposta++; continue; }   // situação omitida/ilegível → NÃO confirmado → preserva
           if (sit === Number(SIT_ATENDIDO)) { mantidos++; continue; }             // ainda ATENDIDO → preserva
           try { fs.rmSync(path.join(CACHE_DIR, String(id)), { recursive: true, force: true }); } catch (e) {}
           delete man[id]; confirmados++;
