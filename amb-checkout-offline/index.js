@@ -1738,7 +1738,9 @@ function routes(readBody) {
         if (!_sondaClonesJob) { json(res, 200, { ok: true, status: 'nenhuma varredura iniciada (ou o serviço reiniciou) — chame com &acao=iniciar' }); return true; }
         const j = _sondaClonesJob;
         json(res, 200, {
-          ok: !j.erro, rodando: j.rodando, janela: j.janela, unidade: j.un,
+          /* Codex #201: truncada NÃO é sucesso — quem olha só o ok decidiria em cima de
+             lista incompleta. Igual à resposta síncrona anterior: aviso também derruba. */
+          ok: !j.erro && !j.aviso, rodando: j.rodando, janela: j.janela, unidade: j.un,
           progresso: { pagina: j.pagina, pedidos_vistos: j.vistos, da_unidade_full: j.daUnidade },
           resumo: { clones_serie_1: j.clones.length, descartadas_nao_autorizadas: j.descartadas.length, nao_resolvidos: j.naoResolvidos.length },
           nfs_serie_1: j.rodando ? undefined : j.clones.map(c => c.nf),
