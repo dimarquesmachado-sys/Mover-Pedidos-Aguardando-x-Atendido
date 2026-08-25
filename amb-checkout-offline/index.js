@@ -1690,14 +1690,39 @@ function routes(readBody) {
       const setFullE = new Set(UN_FULL_E);
       const confE = readJson(CONFERIDOS_FILE, {});
 
+      /* ⚠️ Sem AMBBKP_UN_FULL não existe classificador: setFullE fica vazio, NADA seria Full e
+         TODO pedido não bipado em DESPACHADOS entraria em "engano" — inclusive os Full de
+         verdade. Em simulação isso é só uma lista errada; com gravar=1 seria devolver Full
+         legítimo pra fila do estoquista. Modo destrutivo recusa. */
+      if (gravarE && !UN_FULL_E.length) {
+        json(res, 200, { ok: false, erro: 'AMBBKP_UN_FULL vazia ou inválida — sem ela tudo pareceria engano. Simulação continua liberada; gravar=1 não.' });
+        return true;
+      }
+      /* ⚠️ A prova de bipagem (conferidos.json) é purgada aos 30 dias pelo purgarConferidos().
+         Além disso, um pedido bipado de verdade perdeu o carimbo e pareceria engano. Simular
+         longe é útil pra enxergar; devolver, não. */
+      const RETENCAO_CONF_DIAS = 30;
+      if (gravarE && diasE > RETENCAO_CONF_DIAS) {
+        json(res, 200, { ok: false, erro: 'com gravar=1 a janela máxima é ' + RETENCAO_CONF_DIAS + ' dias — além disso a prova de bipagem já foi purgada e um pedido bipado pareceria engano. Use dias<=' + RETENCAO_CONF_DIAS + ', ou rode sem gravar=1 só pra ver.' });
+        return true;
+      }
+
       const hojeE = new Date(); const iniE = new Date(hojeE); iniE.setDate(iniE.getDate() - diasE);
       const suspeitos = [], full = [], bipados = [];
-      let vistos = 0, movidos = 0, falhas = 0, indeterminados = 0;
+      const naoResolvidos = [];
+      let vistos = 0, movidos = 0, falhas = 0, indeterminados = 0, pulados = 0;
       try {
         for (let pag = 1; pag <= 40; pag++) {
           const qsE = `idSituacao=${SIT_DESPACHADOS}&dataEmissaoInicial=${dataISO(iniE)}&dataEmissaoFinal=${dataISO(hojeE)}`;
           const rE = await blingGet(`/pedidos/vendas?${qsE}&pagina=${pag}&limite=100`);
-          const arrE = (rE && rE.data && rE.data.data) || [];
+          /* blingGet devolve {ok:false, data:null} em erro de HTTP/auth/limite — NÃO lança.
+             Sem esta checagem uma falha na 1ª página viraria "zero pedidos afetados" com
+             ok:true, e uma falha no meio entregaria lista incompleta como se fosse completa. */
+          if (!rE || rE.ok === false) {
+            json(res, 200, { ok: false, erro: 'o Bling falhou ao listar (página ' + pag + ') — varredura INCOMPLETA, não use este resultado', parcial: { vistos, encontrados_ate_aqui: suspeitos.length } });
+            return true;
+          }
+          const arrE = (rE.data && rE.data.data) || [];
           if (!arrE.length) break;
           for (const ped of arrE) {
             vistos++;
@@ -1706,12 +1731,20 @@ function routes(readBody) {
             let unE = (ped.loja && ped.loja.unidadeNegocio && ped.loja.unidadeNegocio.id) || null;
             let viaDetalhe = false;
             if (unE == null && ped.loja) {           // lista omitiu a unidade → detalhe (o Bling faz isso)
-              try {
-                const det = await detalhePedido(idE);
-                unE = (det && det.loja && det.loja.unidadeNegocio && det.loja.unidadeNegocio.id) || null;
-                viaDetalhe = true;
-              } catch (e) { indeterminados++; continue; }
+              /* detalhePedido() descarta o .ok do blingGet e devolve null quando o Bling
+                 falha — não lança. Sem tratar isso, um Full de verdade cujo detalhe não veio
+                 (token, limite de taxa, Bling fora) cairia em "engano" e o gravar=1 o
+                 devolveria pra ATENDIDO. Falhou = INDETERMINADO, nunca suspeito. */
+              let det = null;
+              try { det = await detalhePedido(idE); } catch (e) { det = null; }
               await sleep(PAUSA_MS);
+              if (!det) {
+                indeterminados++;
+                naoResolvidos.push({ id: idE, numero: ped.numero, motivo: 'o detalhe do pedido não veio do Bling — classificação não resolvida' });
+                continue;
+              }
+              unE = (det.loja && det.loja.unidadeNegocio && det.loja.unidadeNegocio.id) || null;
+              viaDetalhe = true;
             }
             const ehFullE = unE != null && setFullE.has(String(unE));
             const cE = confE[idE];
@@ -1732,7 +1765,19 @@ function routes(readBody) {
       }
 
       if (gravarE) {
+        /* A varredura pode levar minutos (até 40 páginas + detalhes + pausas). Nesse intervalo
+           alguém pode ter finalizado, cancelado ou bipado o pedido. Reconfere a situação ATUAL
+           logo antes do PATCH e pula quem já saiu de DESPACHADOS — senão a "correção"
+           sobrescreveria um estado mais novo. */
         for (const l of suspeitos.slice(0, maxE)) {
+          let atual = null;
+          try { atual = await detalhePedido(l.id); } catch (e) { atual = null; }
+          await sleep(PAUSA_MS);
+          if (!atual) { l.pulado = 'não consegui reconferir a situação atual'; pulados++; continue; }
+          const sitAtual = (atual.situacao && atual.situacao.id) || null;
+          if (String(sitAtual) !== String(SIT_DESPACHADOS)) {
+            l.pulado = 'mudou durante a varredura (situação atual ' + sitAtual + ') — não mexi'; pulados++; continue;
+          }
           try { const rm = await moverSituacao(l.id, SIT_ATENDIDO); if (rm && rm.ok !== false) { movidos++; l.devolvido = true; } else { falhas++; l.erro = true; } }
           catch (e) { falhas++; l.erro = true; }
           await sleep(PAUSA_MS);
@@ -1746,8 +1791,10 @@ function routes(readBody) {
         resumo: { vistos, movidos_por_engano: suspeitos.length, full_corretos: full.length,
                   bipados_corretos: bipados.length, indeterminados,
                   devolvidos: gravarE ? movidos : 0, falhas: gravarE ? falhas : 0,
+                  pulados_por_mudanca: gravarE ? pulados : undefined,
                   limite_por_chamada: gravarE ? maxE : undefined },
         movidos_por_engano: suspeitos,
+        nao_resolvidos: naoResolvidos,
         full_corretos: full.slice(0, 30),
         bipados_corretos: bipados.slice(0, 30)
       });
