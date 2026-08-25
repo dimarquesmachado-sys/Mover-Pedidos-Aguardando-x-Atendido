@@ -1715,6 +1715,152 @@ function routes(readBody) {
        esta rota faz.
 
        Uso: /amb-checkout-offline/despachados-por-engano?k=ADMIN_KEY[&dias=10] */
+    /* ═══ SONDA TEMPORÁRIA (25/08): clones de garantia escondidos como Full ══════════════
+       Pergunta pontual do dono: "quais NFs de agosto são SÉRIE 1 mas estão na unidade
+       AMB - FULL MLivre?" — clones de reposição que nasceram carimbados como Full.
+       SÓ LISTA, não altera nada. Remover quando não for mais útil.
+       Uso: /amb-checkout-offline/sonda-clones-full?k=ADMIN_KEY[&de=2026-08-01&ate=2026-08-31][&un=2839148] */
+    if (method === 'GET' && p === '/amb-checkout-offline/sonda-clones-full') {
+      const kS = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      if (!(process.env.ADMIN_KEY && kS === process.env.ADMIN_KEY)) { json(res, 404, { error: 'not found' }); return true; }
+      const deS  = urlObj.searchParams.get('de')  || '2026-08-01';
+      const ateS = urlObj.searchParams.get('ate') || '2026-08-31';
+      /* Codex #200 (P2, 2ª rodada): data mal digitada (2026-08-xx) estourava um RangeError
+         ANTES do try — erro de servidor em vez de resposta controlada. E de > ate iria
+         direto pra URL do Bling, voltando "sucesso" vazio. Valida as duas e a ordem. */
+      /* Codex #200 r3: Date.parse NORMALIZA data de calendário inválida (2026-02-30 vira
+         2 de março) em vez de recusar — a rota varreria outro intervalo ecoando a janela
+         digitada. Reconstruo o ISO e comparo com o que veio: só é válida se bater. */
+      const dataValida = (x) => {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(x)) return false;
+        const dX = new Date(x + 'T12:00:00Z');
+        return !isNaN(dX.getTime()) && dX.toISOString().slice(0, 10) === x;
+      };
+      if (!dataValida(deS) || !dataValida(ateS)) { json(res, 200, { ok: false, erro: 'data inválida — use AAAA-MM-DD em de/ate' }); return true; }
+      if (deS > ateS) { json(res, 200, { ok: false, erro: 'janela invertida: de=' + deS + ' > ate=' + ateS }); return true; }
+      /* Codex #200 (P2): un mal formado (espaço colado, texto) nunca casaria com unidade
+         nenhuma e a rota devolveria ok:true com zero clones — erro de digitação vestido de
+         "não achei nada". Valida numérico, como a rota vizinha. */
+      const unS = String(urlObj.searchParams.get('un') || '2839148').trim();
+      if (!/^\d+$/.test(unS)) { json(res, 200, { ok: false, erro: 'un inválida: "' + unS.slice(0, 30) + '" — use só o número da unidade' }); return true; }
+      /* Codex #200 (P1): /pedidos/vendas quer dataInicial/dataFinal — com dataEmissaoInicial
+         o Bling IGNORA o filtro e devolve o histórico inteiro (documentado em
+         ambtotal/blingApi.js, sonda de 28/07). Eu tinha copiado do endpoint /nfe, que usa o
+         outro nome de verdade. dataFinal vai com +1 dia, como na rota vizinha. */
+      const ateMais1S = (() => { const d = new Date(ateS + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + 1); return d.toISOString().slice(0, 10); })();
+      /* Codex #200 (P2, 2ª rodada): abortar o sinal NÃO basta — o blingGet espera o
+         garantirToken() ANTES de olhar o sinal, e o fetch do token não tem sinal nenhum.
+         Se o OAuth aceitar a conexão e emudecer, o await continuaria pendurado mesmo com o
+         abort disparado. O prazo tem que vencer POR FORA, numa corrida: estourou, a rota
+         segue com erro controlado, aconteça o que acontecer com a chamada por dentro. */
+      const comPrazoS = (fn, ms) => new Promise((resolva, rejeite) => {
+        const ac = new AbortController();
+        const tt = setTimeout(() => { ac.abort(); rejeite(new Error('prazo de ' + (ms || 20000) + 'ms estourado')); }, ms || 20000);
+        Promise.resolve().then(() => fn(ac.signal)).then(
+          (v) => { clearTimeout(tt); resolva(v); },
+          (e) => { clearTimeout(tt); rejeite(e); }
+        );
+      });
+      const clones = [], naoResolvidos = [], descartadas = [];
+      let vistos = 0, daUnidade = 0, truncada = false;
+      try {
+        for (let pag = 1; pag <= 40; pag++) {
+          const rS = await comPrazoS(sig => blingGet(`/pedidos/vendas?dataInicial=${deS}&dataFinal=${ateMais1S}&pagina=${pag}&limite=100`, 3, sig));
+          if (!rS || rS.ok === false) {
+            json(res, 200, { ok: false, erro: 'o Bling falhou na página ' + pag + ' — varredura INCOMPLETA, rode de novo', parcial: { vistos, clones_ate_aqui: clones.length } });
+            return true;
+          }
+          const arrS = (rS.data && rS.data.data) || null;
+          /* Codex #200 r5: 2xx com corpo malformado vira data:null no blingGet — sem esta
+             checagem, isso viraria "página vazia" e a rota diria ok:true com lista completa
+             de mentira. Forma inesperada = varredura INCOMPLETA, nunca sucesso. */
+          if (!Array.isArray(arrS)) {
+            json(res, 200, { ok: false, erro: 'resposta do Bling em forma inesperada na página ' + pag + ' — varredura INCOMPLETA, rode de novo', parcial: { vistos, clones_ate_aqui: clones.length } });
+            return true;
+          }
+          if (!arrS.length) break;
+          for (const ped of arrS) {
+            vistos++;
+            /* Codex #200 r4: o dataFinal vai com +1 dia (contorno do Bling), então a
+               resposta pode conter pedido do dia SEGUINTE ao ate pedido — clone de 1º de
+               setembro entraria na varredura "de agosto". Descarta fora da janela real. */
+            const dataP = String(ped.data || '').slice(0, 10);
+            if (dataP && (dataP > ateS || dataP < deS)) continue;
+            // mesma regra do ciclo: só a unidade da LOJA identifica Full
+            let unP = (ped.loja && ped.loja.unidadeNegocio && ped.loja.unidadeNegocio.id) || null;
+            /* Codex #200 (P1): a lista omite loja.unidadeNegocio de forma intermitente
+               (documentado no classificador do ciclo). Pular direto esconderia clone válido
+               num resultado "bem-sucedido". Com loja e sem unidade → busca o detalhe;
+               detalhe mudo → não_resolvido, nunca silêncio. */
+            if (unP == null && ped.loja) {
+              let detS = null;
+              try { detS = await comPrazoS(sig => detalhePedido(ped.id, sig)); } catch (e) { detS = null; }
+              await sleep(PAUSA_MS);
+              if (!detS) { naoResolvidos.push({ pedido: ped.numero, motivo: 'lista sem unidade e o detalhe não veio — rode de novo' }); continue; }
+              unP = (detS.loja && detS.loja.unidadeNegocio && detS.loja.unidadeNegocio.id) || null;
+            }
+            if (String(unP) !== unS) continue;
+            daUnidade++;
+            let nfS = null;
+            try { nfS = await comPrazoS(sig => serieDaNFdoPedido(ped.id, sig)); } catch (e) { nfS = null; }
+            await sleep(PAUSA_MS);
+            if (nfS && nfS.serie != null) {
+              if (String(nfS.serie) === '1') {
+                /* Pedido do dono (25/08): NF cancelada não entra na relação. O código de
+                   "cancelada" não está mapeado na casa e eu NÃO vou chutar — mas
+                   autorizada=2 está PROVADO em produção (nfFluxos.js). Então: só entra na
+                   lista a série 1 com NF AUTORIZADA; qualquer outra situação (cancelada,
+                   pendente, rejeitada…) vai pra `descartadas_nao_autorizadas` com o código
+                   à vista — nada some em silêncio. Situação ilegível fica na lista
+                   principal marcada situacao_nf:null, porque "não sei" não é "cancelada". */
+                let sitNF = nfS.situacao != null ? Number(nfS.situacao) : null;
+                /* Codex #200 r6: o resumo do /pedidos/vendas/{id}/nfe às vezes traz a série
+                   mas OMITE a situação — uma cancelada entraria na lista que existe pra
+                   excluí-las. Situação omitida → hidrata o detalhe da NF (só acontece nos
+                   série 1, que são poucos); ainda ilegível → nao_resolvidos, nunca a lista. */
+                if (sitNF === null && nfS.nfId) {
+                  try {
+                    const rNF = await comPrazoS(sig => blingGet(`/nfe/${nfS.nfId}`, 3, sig));
+                    const dNF = rNF && rNF.ok !== false && rNF.data && rNF.data.data;
+                    if (dNF && dNF.situacao != null) sitNF = Number(dNF.situacao.id || dNF.situacao);
+                  } catch (e) { /* fica null e cai no não-resolvido abaixo */ }
+                  await sleep(PAUSA_MS);
+                }
+                const linhaC = { pedido: ped.numero, pedido_id: String(ped.id), nf: nfS.numero, situacao_nf: sitNF, situacao_pedido: (ped.situacao && ped.situacao.id) || null };
+                if (sitNF === 2) clones.push(linhaC);
+                else if (sitNF === null) naoResolvidos.push({ pedido: ped.numero, nf: nfS.numero, motivo: 'série 1, mas a situação da NF não veio nem no detalhe — rode de novo' });
+                else descartadas.push(linhaC);
+              }
+            } else if (nfS && nfS.semNF) {
+              // sem nota ainda: não é clone (o clone tem NF automática desde o salvar)
+            } else {
+              naoResolvidos.push({ pedido: ped.numero, motivo: 'série não lida (Bling falhou) — rode de novo mais tarde' });
+            }
+          }
+          /* Codex #200 (P2): página 40 CHEIA = tem mais além do teto. Devolver ok:true aqui
+             apresentaria lista truncada como completa. */
+          if (pag === 40 && arrS.length === 100) { truncada = true; break; }
+          if (arrS.length < 100) break;
+          await sleep(PAUSA_MS);
+        }
+      } catch (e) {
+        json(res, 200, { ok: false, erro: String(e.message || e).slice(0, 180), parcial: { vistos, clones_ate_aqui: clones.length } });
+        return true;
+      }
+      json(res, 200, {
+        ok: !truncada,
+        aviso: truncada ? 'INCOMPLETA: mais de 4.000 pedidos no período (teto de 40 páginas) — divida a janela com &de=/&ate=' : undefined,
+        janela: { de: deS, ate: ateS }, unidade: unS,
+        resumo: { pedidos_vistos: vistos, da_unidade_full: daUnidade,
+                  clones_serie_1: clones.length, descartadas_nao_autorizadas: descartadas.length, nao_resolvidos: naoResolvidos.length },
+        nfs_serie_1: clones.map(c => c.nf),
+        detalhe: clones,
+        descartadas_nao_autorizadas: descartadas,
+        nao_resolvidos: naoResolvidos
+      });
+      return true;
+    }
+
     if (method === 'GET' && p === '/amb-checkout-offline/despachados-por-engano') {
       const kE = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
       const sE = validarSessao(req.headers['cookie']);

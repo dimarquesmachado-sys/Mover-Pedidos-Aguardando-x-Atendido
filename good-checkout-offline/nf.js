@@ -84,7 +84,9 @@ async function serieDaNFdoPedido(id, signal) {   // signal opcional: sem prazo, 
     } catch (e) { falhou = true; return null; }
   };
   const serieDe = (nf) => (nf && nf.serie != null && String(nf.serie) !== '')
-    ? { numero: nf.numero || null, serie: String(nf.serie) } : null;
+    ? { numero: nf.numero || null, serie: String(nf.serie),
+        situacao: (nf.situacao && (nf.situacao.id || nf.situacao)) || null,
+        nfId: (nf.id != null ? String(nf.id) : null) } : null;   /* 25/08: situação junto (autorizada=2 na prática da casa, ver nfFluxos.js) — a sonda usa pra não listar NF cancelada como clone vivo */
 
   // 1) NF vinculada direto ao pedido
   let nf = await pedir(`/pedidos/vendas/${id}/nfe`);
