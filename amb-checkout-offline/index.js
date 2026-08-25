@@ -1725,6 +1725,12 @@ function routes(readBody) {
       if (!(process.env.ADMIN_KEY && kS === process.env.ADMIN_KEY)) { json(res, 404, { error: 'not found' }); return true; }
       const deS  = urlObj.searchParams.get('de')  || '2026-08-01';
       const ateS = urlObj.searchParams.get('ate') || '2026-08-31';
+      /* Codex #200 (P2, 2ª rodada): data mal digitada (2026-08-xx) estourava um RangeError
+         ANTES do try — erro de servidor em vez de resposta controlada. E de > ate iria
+         direto pra URL do Bling, voltando "sucesso" vazio. Valida as duas e a ordem. */
+      const dataValida = (x) => /^\d{4}-\d{2}-\d{2}$/.test(x) && !isNaN(Date.parse(x + 'T12:00:00Z'));
+      if (!dataValida(deS) || !dataValida(ateS)) { json(res, 200, { ok: false, erro: 'data inválida — use AAAA-MM-DD em de/ate' }); return true; }
+      if (deS > ateS) { json(res, 200, { ok: false, erro: 'janela invertida: de=' + deS + ' > ate=' + ateS }); return true; }
       /* Codex #200 (P2): un mal formado (espaço colado, texto) nunca casaria com unidade
          nenhuma e a rota devolveria ok:true com zero clones — erro de digitação vestido de
          "não achei nada". Valida numérico, como a rota vizinha. */
@@ -1735,13 +1741,19 @@ function routes(readBody) {
          ambtotal/blingApi.js, sonda de 28/07). Eu tinha copiado do endpoint /nfe, que usa o
          outro nome de verdade. dataFinal vai com +1 dia, como na rota vizinha. */
       const ateMais1S = (() => { const d = new Date(ateS + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + 1); return d.toISOString().slice(0, 10); })();
-      /* Codex #200 (P2): sem prazo por chamada, um Bling que aceita a conexão e emudece
-         pendura a rota pra sempre — mesmo desenho da rota vizinha. */
-      const comPrazoS = async (fn, ms) => {
+      /* Codex #200 (P2, 2ª rodada): abortar o sinal NÃO basta — o blingGet espera o
+         garantirToken() ANTES de olhar o sinal, e o fetch do token não tem sinal nenhum.
+         Se o OAuth aceitar a conexão e emudecer, o await continuaria pendurado mesmo com o
+         abort disparado. O prazo tem que vencer POR FORA, numa corrida: estourou, a rota
+         segue com erro controlado, aconteça o que acontecer com a chamada por dentro. */
+      const comPrazoS = (fn, ms) => new Promise((resolva, rejeite) => {
         const ac = new AbortController();
-        const tt = setTimeout(() => ac.abort(), ms || 20000);
-        try { return await fn(ac.signal); } finally { clearTimeout(tt); }
-      };
+        const tt = setTimeout(() => { ac.abort(); rejeite(new Error('prazo de ' + (ms || 20000) + 'ms estourado')); }, ms || 20000);
+        Promise.resolve().then(() => fn(ac.signal)).then(
+          (v) => { clearTimeout(tt); resolva(v); },
+          (e) => { clearTimeout(tt); rejeite(e); }
+        );
+      });
       const clones = [], naoResolvidos = [];
       let vistos = 0, daUnidade = 0, truncada = false;
       try {
