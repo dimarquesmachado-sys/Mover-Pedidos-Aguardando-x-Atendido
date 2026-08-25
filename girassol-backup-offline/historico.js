@@ -37,6 +37,14 @@ const { detalhePedido } = require('./ciclo');
 
 function rotasHistorico(ctx) {
   const { validarSessao, supaCfg, DEFAULT_ALIQ_BK } = ctx;
+  /* 25/08 — parametrizado por empresa. Antes o nome da Girassol estava cravado em 14 pontos
+     (6 caminhos de rota + 8 acessos ao Supabase), o que obrigaria a COPIAR estas 796 linhas
+     pra ligar o dashboard na GOOD — exatamente o que as libs vêm eliminando.
+     Os padrões abaixo mantêm a Girassol byte-a-byte igual pra quem chama sem passar nada. */
+  const EMPRESA = String(ctx.empresa || 'girassol');
+  const MODULO  = String(ctx.modulo  || 'girassol-backup-offline');
+  const R = (nome) => '/' + MODULO + '/' + nome;                     // caminho da rota
+  const SUPA_EMP = '?empresa=eq.' + encodeURIComponent(EMPRESA);     // filtro do Supabase
       /* 21/08 — sobreposição do custo MANUAL, atrás do Bling. Codex (P2): eu tinha posto isto só
          no agregado; as LINHAS do Mês/Ano continuavam lendo só o _custos.json, então o card
          mostrava o custo corrigido e a lista logo abaixo marcava o pedido como sem custo. */
@@ -85,7 +93,7 @@ function rotasHistorico(ctx) {
     // Uso: /girassol-backup-offline/previsao-vendas?base=180  (dias de histórico usados como base)
     // Devolve, por SKU: o que vendeu na base, a média por dia, a TENDÊNCIA (últimos 30d x 30d
     // anteriores) e a projeção pra 7 / 30 / 90 / 180 / 365 dias.
-    if (method === 'GET' && p === '/girassol-backup-offline/previsao-vendas') {
+    if (method === 'GET' && p === R('previsao-vendas')) {
       const kP = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
       const sessP = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kP === process.env.ADMIN_KEY) || (sessP && ehAdmin(sessP)))) { json(res, 404, { error: 'not found' }); return true; }
@@ -97,7 +105,7 @@ function rotasHistorico(ctx) {
       // ?fresh=1 ignora o cache de 30 min — útil logo depois de um custo-sync
       const _frH = (urlObj.searchParams && urlObj.searchParams.get('fresh')) === '1';
       if (!_frH && _histCache[ck] && (Date.now() - _histCache[ck].ts) < 1800000) { json(res, 200, Object.assign({ cache: true }, _histCache[ck].dados)); return true; }
-      const { url: uP, key: kkP } = supaCfg('girassol');
+      const { url: uP, key: kkP } = supaCfg(EMPRESA);
       if (!uP || !kkP) { json(res, 500, { ok: false, erro: 'Supabase não configurado' }); return true; }
       const HP = { apikey: kkP, Authorization: 'Bearer ' + kkP };
       const corte30 = new Date(hojeP.getTime() - 30 * 86400000).toISOString().slice(0, 10);
@@ -106,7 +114,7 @@ function rotasHistorico(ctx) {
       let diasComVenda = new Set(), offP = 0, linhasLidas = 0;
       try {
         while (offP < 120000) {
-          const rq = await fetch(uP.replace(/\/+$/, '') + '/rest/v1/vendas_historico?empresa=eq.girassol&data_venda=gte.' + dePV + '&data_venda=lte.' + atePV +
+          const rq = await fetch(uP.replace(/\/+$/, '') + '/rest/v1/vendas_historico' + SUPA_EMP + '&data_venda=gte.' + dePV + '&data_venda=lte.' + atePV +
                     '&select=sku,descricao,quantidade,valor_produto,margem,data_venda&order=data_venda.asc,numero_pedido.asc,sku.asc&limit=1000&offset=' + offP, { headers: HP });
           if (!rq.ok) break;
           const ln = await rq.json().catch(() => []);
@@ -168,7 +176,7 @@ function rotasHistorico(ctx) {
 
     // LISTA do histórico, paginada por PEDIDO (o banco guarda 1 linha por ITEM, então agrupa antes).
     // Uso: /girassol-backup-offline/historico-linhas?de=&ate=&off=0&lim=100
-    if (method === 'GET' && p === '/girassol-backup-offline/historico-linhas') {
+    if (method === 'GET' && p === R('historico-linhas')) {
       const kR = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
       const sessR = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kR === process.env.ADMIN_KEY) || (sessR && ehAdmin(sessR)))) { json(res, 404, { error: 'not found' }); return true; }
@@ -177,10 +185,10 @@ function rotasHistorico(ctx) {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(deR) || !/^\d{4}-\d{2}-\d{2}$/.test(ateR)) { json(res, 400, { ok: false, erro: 'passe &de=&ate=' }); return true; }
       const lim = Math.min(200, Math.max(10, parseInt((urlObj.searchParams && urlObj.searchParams.get('lim')) || '100', 10) || 100));
       const pagina = Math.max(1, parseInt((urlObj.searchParams && urlObj.searchParams.get('pagina')) || '1', 10) || 1);
-      const { url: uR, key: kkR } = supaCfg('girassol');
+      const { url: uR, key: kkR } = supaCfg(EMPRESA);
       if (!uR || !kkR) { json(res, 500, { ok: false, erro: 'Supabase não configurado' }); return true; }
       const HH = { apikey: kkR, Authorization: 'Bearer ' + kkR };
-      const BASE = uR.replace(/\/+$/, '') + '/rest/v1/vendas_historico?empresa=eq.girassol&data_venda=gte.' + deR + '&data_venda=lte.' + ateR;
+      const BASE = uR.replace(/\/+$/, '') + '/rest/v1/vendas_historico' + SUPA_EMP + '&data_venda=gte.' + deR + '&data_venda=lte.' + ateR;
       // ÍNDICE DE PEDIDOS do período (só o número — leve) pra saber onde cada página começa.
       // Cacheado 10 min: permite pular direto pra qualquer página, sem varrer o banco de novo.
       // 01/08 — FILTRO DE CANAL NO SERVIDOR. Antes a lista do Mês/Ano IGNORAVA o canal escolhido:
@@ -313,7 +321,7 @@ function rotasHistorico(ctx) {
     // HISTÓRICO LONGO (Supabase): períodos que não cabem na janela local (Ano, 6 meses...).
     // Agrega no servidor e devolve pronto — o navegador não aguenta 23 mil linhas.
     // Uso: /girassol-backup-offline/historico-longo?de=YYYY-MM-DD&ate=YYYY-MM-DD
-    if (method === 'GET' && p === '/girassol-backup-offline/historico-longo') {
+    if (method === 'GET' && p === R('historico-longo')) {
       const kL = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
       const sessL = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kL === process.env.ADMIN_KEY) || (sessL && ehAdmin(sessL)))) { json(res, 404, { error: 'not found' }); return true; }
@@ -327,7 +335,7 @@ function rotasHistorico(ctx) {
       // já tinha. Sem ele nada muda (o cache continua valendo pro dashboard).
       const _freshL = (urlObj.searchParams && urlObj.searchParams.get('fresh')) === '1';
       if (!_freshL && _histCache[cacheKey] && (Date.now() - _histCache[cacheKey].ts) < 600000) { json(res, 200, Object.assign({ cache: true }, _histCache[cacheKey].dados)); return true; }
-      const { url: uL, key: kkL } = supaCfg('girassol');
+      const { url: uL, key: kkL } = supaCfg(EMPRESA);
       if (!uL || !kkL) { json(res, 500, { ok: false, erro: 'Supabase não configurado' }); return true; }
       const H = { apikey: kkL, Authorization: 'Bearer ' + kkL };
       const campos = 'numero_pedido,canal,data_venda,sku,descricao,quantidade,valor_produto,valor_nota,custo,comissao,frete_vendedor,imposto,margem,uf'   // 17/08: sem isto o historico-longo lia uf vazio em TODA linha (havia dois `campos` no arquivo e o uf tinha entrado no outro);
@@ -386,7 +394,7 @@ function rotasHistorico(ctx) {
       let offset = 0, paginas = 0;
       try {
         while (offset < 60000) {
-          const rq = await fetch(uL.replace(/\/+$/, '') + '/rest/v1/vendas_historico?empresa=eq.girassol&data_venda=gte.' + deL + '&data_venda=lte.' + ateL + '&select=' + campos + '&order=data_venda.asc,numero_pedido.asc,sku.asc&limit=1000&offset=' + offset, { headers: H });
+          const rq = await fetch(uL.replace(/\/+$/, '') + '/rest/v1/vendas_historico' + SUPA_EMP + '&data_venda=gte.' + deL + '&data_venda=lte.' + ateL + '&select=' + campos + '&order=data_venda.asc,numero_pedido.asc,sku.asc&limit=1000&offset=' + offset, { headers: H });
           if (!rq.ok) break;
           const linhas = await rq.json().catch(() => []);
           if (!Array.isArray(linhas) || !linhas.length) break;
@@ -527,7 +535,7 @@ function rotasHistorico(ctx) {
     }
 
     // HISTÓRICO — últimos pedidos finalizados (do conferidos.json), mais recentes primeiro
-    if (method === 'GET' && p === '/girassol-backup-offline/historico') {
+    if (method === 'GET' && p === R('historico')) {
       // Codex PR#38 (P1): o "NUNCA estoquista" vale pra INFORMAÇÃO, não só pra página do
       // dashboard. Em camadas: ADMIN (sessão de admin OU ?k=ADMIN_KEY) → resposta completa;
       // operador logado (estoquista) → itens SEM os campos financeiros (o modal 🕘 do painel
@@ -591,7 +599,7 @@ function rotasHistorico(ctx) {
 
     // BUSCAR PEDIDO por número (ou ID) em QUALQUER status — ao vivo no Bling.
     // Pra achar a NF de um pedido que não passou pelo Checkout Offline.
-    if (method === 'GET' && p === '/girassol-backup-offline/buscar-pedido') {
+    if (method === 'GET' && p === R('buscar-pedido')) {
       const q = String(urlObj.searchParams.get('q') || '').trim();
       if (!q) { json(res, 400, { ok: false, erro: 'use ?q=NUMERO' }); return true; }
       let ids = [], via = null;
@@ -653,7 +661,7 @@ function rotasHistorico(ctx) {
     // or= inteiro); q com letras casa sku/descricao por ilike. Agrupa por pedido e
     // devolve total e M.C. prontos do banco. Vírgula/parênteses/aspas saem do termo
     // porque quebram a sintaxe do or=() do PostgREST.
-    if (method === 'GET' && p === '/girassol-backup-offline/buscar-lucro') {
+    if (method === 'GET' && p === R('buscar-lucro')) {
       const kB = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
       const sessB = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kB === process.env.ADMIN_KEY) || (sessB && ehAdmin(sessB)))) { json(res, 404, { error: 'not found' }); return true; }
@@ -669,7 +677,7 @@ function rotasHistorico(ctx) {
       const limpoB = qB.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim();
       if (!limpoB) { json(res, 400, { ok: false, erro: 'termo inválido' }); return true; }
       const citaB = v => '"' + String(v).replace(/([\\"])/g, '\\$1') + '"';   // valor citado do PostgREST
-      const { url: uB, key: kkB } = supaCfg('girassol');
+      const { url: uB, key: kkB } = supaCfg(EMPRESA);
       if (!uB || !kkB) { json(res, 500, { ok: false, erro: 'Supabase não configurado' }); return true; }
       const HB = { apikey: kkB, Authorization: 'Bearer ' + kkB };
       // Codex (P1, PR#128): casar por SKU/descrição numa venda MULTI-ITEM devolvia só as
@@ -681,7 +689,7 @@ function rotasHistorico(ctx) {
       // Os EXATOS (nº do pedido / venda do marketplace) vêm numa consulta separada e
       // entram PRIMEIRO na lista — 15 achados recentes por título nunca expulsam o
       // pedido exato que motivou a busca.
-      const baseB = uB.replace(/\/+$/, '') + '/rest/v1/vendas_historico?empresa=eq.girassol';
+      const baseB = uB.replace(/\/+$/, '') + '/rest/v1/vendas_historico' + SUPA_EMP + '';
       const eqB = encodeURIComponent(citaB(limpoB));            // valor exato, citado
       // Codex (P2, PR#128 r6): `_` `%` `*` no termo viravam CORINGA do ilike — SKU "ABC_1"
       // casava "ABCX1" e o lixo podia empurrar o SKU pedido pra fora das 400 linhas lidas.
