@@ -1,5 +1,7 @@
 name: verifica-integridade
 on:
+  pull_request:
+    branches: [ main ]
   push:
     branches: [ main ]
 jobs:
@@ -7,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4a
         with:
           node-version: 20
       - name: Verificador de integridade (sintaxe + espelhos + features)
