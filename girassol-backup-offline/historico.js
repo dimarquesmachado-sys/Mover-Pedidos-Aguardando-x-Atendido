@@ -36,7 +36,7 @@ const base = require('./base');
    cliente Bling DA GIRASSOL — ou seja, custo, SKU, admin e pedidos da empresa errada.
    Agora cada um vem do ctx; o fallback abaixo é o módulo local, que mantém a Girassol
    idêntica pra quem chama sem passar nada. */
-const { PAUSA_MS, sleep, json } = base;   // não dependem de empresa
+const { sleep, json } = base;   // não dependem de empresa
 
 function rotasHistorico(ctx) {
   const { validarSessao, supaCfg, DEFAULT_ALIQ_BK } = ctx;
@@ -55,7 +55,20 @@ function rotasHistorico(ctx) {
   const blingGet        = ctx.blingGet        || base.blingGet;
   const nfDoPedido      = ctx.nfDoPedido      || require('./nf').nfDoPedido;
   const detalhePedido   = ctx.detalhePedido   || require('./ciclo').detalhePedido;
-  const R = (nome) => '/' + MODULO + '/' + nome;                     // caminho da rota
+  const PAUSA_MS        = (ctx.PAUSA_MS != null ? ctx.PAUSA_MS : base.PAUSA_MS);   // ritmo da API é por empresa
+  /* Cada rota pode ser RENOMEADA ou DESLIGADA sozinha, via ctx.rotas.
+     Motivo (Codex #197): em good-checkout-offline JÁ EXISTE /historico, e faz outra coisa —
+     lista os finalizados do conferidos.json, consumida pelo painel do estoquista em 2 pontos.
+     Só trocar o MODULO moveria as 6 rotas juntas e colidiria com ela: ou a nova fica
+     inalcançável, ou substitui um endpoint em uso. Agora dá pra passar
+     `rotas: { historico: 'historico-vendas' }` pra renomear, ou `historico: false` pra não
+     registrar. Sem ctx.rotas, tudo continua como sempre foi. */
+  const _rotas = ctx.rotas || {};
+  const R = (nome) => {
+    const alvo = Object.prototype.hasOwnProperty.call(_rotas, nome) ? _rotas[nome] : nome;
+    if (alvo === false || alvo == null) return '\u0000desligada:' + nome;   // nunca casa com um path real
+    return '/' + MODULO + '/' + alvo;
+  };
   const SUPA_EMP = '?empresa=eq.' + encodeURIComponent(EMPRESA);     // filtro do Supabase
       /* 21/08 — sobreposição do custo MANUAL, atrás do Bling. Codex (P2): eu tinha posto isto só
          no agregado; as LINHAS do Mês/Ano continuavam lendo só o _custos.json, então o card
