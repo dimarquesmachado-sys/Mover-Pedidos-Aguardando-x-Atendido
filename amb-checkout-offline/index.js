@@ -1669,14 +1669,22 @@ function routes(readBody) {
     // ADMIN (?k= ou sessão): RAIO-X DO PEDIDO CRU do Bling — mostra TODAS as chaves e qualquer campo
     // com cara de data/hora, pra decidirmos com o payload real se o Bling guarda a hora da venda.
     // Uso: /amb-checkout-offline/debug-pedido?id=116063  (o nº que aparece na coluna Pedido)
-    /* ═══ PEDIDOS MOVIDOS PRA DESPACHADOS POR ENGANO (24/08) ═══════════════════════════
-       Rastro do incidente: o filtro Full lia a unidade do TOPO do pedido, e pedido criado à
-       mão no Bling (que não tem loja de marketplace) caía nesse caminho e recebia a unidade
-       padrão da empresa — virava "Full" e ia pra DESPACHADOS a cada ciclo de 10 min.
-       Suspeito = está em DESPACHADOS + NÃO é Full pelo classificador corrigido (só unidade
-       da LOJA) + NÃO passou pela bipagem (sem carimbo em conferidos.json).
-       SIMULA POR PADRÃO: sem &gravar=1 não mexe em nada, só lista.
-       Uso: /amb-checkout-offline/despachados-por-engano?k=ADMIN_KEY&dias=10[&gravar=1] */
+    /* ═══ PEDIDOS MOVIDOS PRA DESPACHADOS POR ENGANO ══════════════════════════════════
+       Rastro do incidente de 24/08: clonar pedido no Bling COPIA a unidade de negócio, então
+       o clone de uma venda Full nascia com unidade Full mesmo saindo da matriz, e o ciclo o
+       mandava pra DESPACHADOS. O ciclo olha 5 dias, então há mais afetados que os poucos que
+       apareceram na tela.
+
+       ⚠️ SÓ LISTA. NÃO ALTERA NADA. Tinha um modo `gravar=1` que devolvia os pedidos pra
+       ATENDIDO em lote, e foi de onde vinham TODOS os riscos apontados na revisão — inclusive
+       um P1: se o conferidos.json estivesse ausente ou truncado, readJson devolve {} em
+       silêncio, todo pedido pareceria "nunca bipado" e centenas de pedidos legítimos seriam
+       devolvidos de uma vez. Tirei o modo inteiro, porque ele não é mais necessário: com o
+       PR #195 no ar, mover um pedido pra ATENDIDO na mão AGORA GRUDA — a trava da série
+       impede o ciclo de levar de volta. A parte difícil é DESCOBRIR quais são, e é isso que
+       esta rota faz.
+
+       Uso: /amb-checkout-offline/despachados-por-engano?k=ADMIN_KEY[&dias=10] */
     if (method === 'GET' && p === '/amb-checkout-offline/despachados-por-engano') {
       const kE = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
       const sE = validarSessao(req.headers['cookie']);
@@ -1684,40 +1692,27 @@ function routes(readBody) {
       if (!SIT_DESPACHADOS) { json(res, 200, { ok: false, erro: 'SIT_DESPACHADOS não configurado nesta empresa' }); return true; }
 
       const diasE = Math.min(60, Math.max(1, Number(urlObj.searchParams.get('dias')) || 10));
-      const gravarE = urlObj.searchParams.get('gravar') === '1';
-      const maxE = Math.min(500, Math.max(1, Number(urlObj.searchParams.get('max')) || 200));
       const UN_FULL_E = String(process.env.AMBBKP_UN_FULL || '').split(',').map(x => x.trim()).filter(Boolean);
       const setFullE = new Set(UN_FULL_E);
       const confE = readJson(CONFERIDOS_FILE, {});
 
-      /* ⚠️ Sem AMBBKP_UN_FULL não existe classificador: setFullE fica vazio, NADA seria Full e
-         TODO pedido não bipado em DESPACHADOS entraria em "engano" — inclusive os Full de
-         verdade. Em simulação isso é só uma lista errada; com gravar=1 seria devolver Full
-         legítimo pra fila do estoquista. Modo destrutivo recusa. */
-      if (gravarE && !UN_FULL_E.length) {
-        json(res, 200, { ok: false, erro: 'AMBBKP_UN_FULL vazia ou inválida — sem ela tudo pareceria engano. Simulação continua liberada; gravar=1 não.' });
-        return true;
-      }
-      /* ⚠️ A prova de bipagem (conferidos.json) é purgada aos 30 dias pelo purgarConferidos().
-         Além disso, um pedido bipado de verdade perdeu o carimbo e pareceria engano. Simular
-         longe é útil pra enxergar; devolver, não. */
-      const RETENCAO_CONF_DIAS = 30;
-      if (gravarE && diasE > RETENCAO_CONF_DIAS) {
-        json(res, 200, { ok: false, erro: 'com gravar=1 a janela máxima é ' + RETENCAO_CONF_DIAS + ' dias — além disso a prova de bipagem já foi purgada e um pedido bipado pareceria engano. Use dias<=' + RETENCAO_CONF_DIAS + ', ou rode sem gravar=1 só pra ver.' });
-        return true;
-      }
+      /* Toda chamada com prazo. Sem isto, se o Bling aceitar a conexão e parar de responder,
+         o await fica pendurado pra sempre e a rota nunca devolve nada — o repo já documenta
+         exatamente esse comportamento no listarAtendidos e usa AbortController lá. */
+      const comPrazo = async (fn, ms) => {
+        const ac = new AbortController();
+        const tm = setTimeout(() => ac.abort(), ms || 45000);
+        try { return await fn(ac.signal); } finally { clearTimeout(tm); }
+      };
 
       const hojeE = new Date(); const iniE = new Date(hojeE); iniE.setDate(iniE.getDate() - diasE);
-      const suspeitos = [], full = [], bipados = [];
-      const naoResolvidos = [];
-      let vistos = 0, movidos = 0, falhas = 0, indeterminados = 0, pulados = 0;
+      const suspeitos = [], full = [], bipados = [], naoResolvidos = [];
+      let vistos = 0, indeterminados = 0, truncou = false;
+      const TETO_PAG = 40;
       try {
-        for (let pag = 1; pag <= 40; pag++) {
+        for (let pag = 1; pag <= TETO_PAG; pag++) {
           const qsE = `idSituacao=${SIT_DESPACHADOS}&dataEmissaoInicial=${dataISO(iniE)}&dataEmissaoFinal=${dataISO(hojeE)}`;
-          const rE = await blingGet(`/pedidos/vendas?${qsE}&pagina=${pag}&limite=100`);
-          /* blingGet devolve {ok:false, data:null} em erro de HTTP/auth/limite — NÃO lança.
-             Sem esta checagem uma falha na 1ª página viraria "zero pedidos afetados" com
-             ok:true, e uma falha no meio entregaria lista incompleta como se fosse completa. */
+          const rE = await comPrazo(sig => blingGet(`/pedidos/vendas?${qsE}&pagina=${pag}&limite=100`, 3, sig));
           if (!rE || rE.ok === false) {
             json(res, 200, { ok: false, erro: 'o Bling falhou ao listar (página ' + pag + ') — varredura INCOMPLETA, não use este resultado', parcial: { vistos, encontrados_ate_aqui: suspeitos.length } });
             return true;
@@ -1727,22 +1722,13 @@ function routes(readBody) {
           for (const ped of arrE) {
             vistos++;
             const idE = String(ped.id);
-            // mesmo classificador do ciclo: SÓ a unidade da LOJA
             let unE = (ped.loja && ped.loja.unidadeNegocio && ped.loja.unidadeNegocio.id) || null;
             let viaDetalhe = false;
-            if (unE == null && ped.loja) {           // lista omitiu a unidade → detalhe (o Bling faz isso)
-              /* detalhePedido() descarta o .ok do blingGet e devolve null quando o Bling
-                 falha — não lança. Sem tratar isso, um Full de verdade cujo detalhe não veio
-                 (token, limite de taxa, Bling fora) cairia em "engano" e o gravar=1 o
-                 devolveria pra ATENDIDO. Falhou = INDETERMINADO, nunca suspeito. */
+            if (unE == null && ped.loja) {
               let det = null;
-              try { det = await detalhePedido(idE); } catch (e) { det = null; }
+              try { det = await comPrazo(sig => detalhePedido(idE, sig)); } catch (e) { det = null; }
               await sleep(PAUSA_MS);
-              if (!det) {
-                indeterminados++;
-                naoResolvidos.push({ id: idE, numero: ped.numero, motivo: 'o detalhe do pedido não veio do Bling — classificação não resolvida' });
-                continue;
-              }
+              if (!det) { indeterminados++; naoResolvidos.push({ id: idE, numero: ped.numero, motivo: 'o detalhe do pedido não veio do Bling' }); continue; }
               unE = (det.loja && det.loja.unidadeNegocio && det.loja.unidadeNegocio.id) || null;
               viaDetalhe = true;
             }
@@ -1753,33 +1739,25 @@ function routes(readBody) {
                             loja: (ped.loja && (ped.loja.nome || ped.loja.id)) || null,
                             un_da_loja: unE, via_detalhe: viaDetalhe || undefined };
 
-            /* ⚠️ A UNIDADE SOZINHA NÃO BASTA — descoberto depois que esta rota foi escrita.
-               Clonar pedido no Bling copia a unidade de negócio, então o clone de uma venda
-               Full nasce com unidade Full mesmo saindo da matriz. Sem checar a série, esses
-               pedidos cairiam em "full_corretos" e ficariam FORA da lista — ou seja, a rota
-               não acharia justamente os casos que ela existe pra achar (ex.: 26687588614,
-               unidade "AMBTotal - FULL MLivre", NF 003464 série 1).
-               Série 1 = emissão nossa, da matriz. Mesma regra do ciclo (PR #195). */
+            /* A unidade sozinha não basta: o clone de uma venda Full tem unidade Full. Série 1
+               = emissão nossa, da matriz. Mesma regra do ciclo (PR #195). Sem isto a rota não
+               acharia justamente os pedidos que existe pra achar. */
             let serieE = null;
             if (ehPelaUnidade) {
               try { const nfE = await serieDaNFdoPedido(idE); serieE = nfE && nfE.serie ? String(nfE.serie) : null; }
               catch (e) { serieE = null; }
               await sleep(PAUSA_MS);
               if (serieE) linha.serie_nf = serieE;
-              if (!serieE) {
-                /* não consegui conferir: NÃO afirmo que é engano (devolver Full legítimo é
-                   pior que deixar de listar um). Vai pro balde dos não resolvidos. */
-                indeterminados++;
-                naoResolvidos.push({ id: idE, numero: ped.numero, motivo: 'unidade é Full mas não consegui descobrir a série da NF' });
-                continue;
-              }
+              else { indeterminados++; naoResolvidos.push({ id: idE, numero: ped.numero, motivo: 'unidade é Full mas não consegui descobrir a série da NF' }); continue; }
             }
-            const ehFullE = ehPelaUnidade && serieE !== '1';
-            if (ehFullE) { full.push(linha); continue; }          // Full de verdade — DESPACHADOS está certo
-            if (bipadoE) { bipados.push(linha); continue; }       // passou pelo checkout — está certo
+            if (ehPelaUnidade && serieE !== '1') { full.push(linha); continue; }   // Full de verdade
+            if (bipadoE) { bipados.push(linha); continue; }                        // passou pelo checkout
             if (ehPelaUnidade) linha.motivo = 'unidade Full mas NF série 1 — clone da matriz';
             suspeitos.push(linha);
           }
+          /* Página cheia no teto = ainda há pedidos que eu não olhei. Dizer ok:true aqui seria
+             afirmar que a varredura foi completa sem ter sido. */
+          if (pag === TETO_PAG && arrE.length === 100) truncou = true;
           if (arrE.length < 100) break;
           await sleep(PAUSA_MS);
         }
@@ -1788,35 +1766,15 @@ function routes(readBody) {
         return true;
       }
 
-      if (gravarE) {
-        /* A varredura pode levar minutos (até 40 páginas + detalhes + pausas). Nesse intervalo
-           alguém pode ter finalizado, cancelado ou bipado o pedido. Reconfere a situação ATUAL
-           logo antes do PATCH e pula quem já saiu de DESPACHADOS — senão a "correção"
-           sobrescreveria um estado mais novo. */
-        for (const l of suspeitos.slice(0, maxE)) {
-          let atual = null;
-          try { atual = await detalhePedido(l.id); } catch (e) { atual = null; }
-          await sleep(PAUSA_MS);
-          if (!atual) { l.pulado = 'não consegui reconferir a situação atual'; pulados++; continue; }
-          const sitAtual = (atual.situacao && atual.situacao.id) || null;
-          if (String(sitAtual) !== String(SIT_DESPACHADOS)) {
-            l.pulado = 'mudou durante a varredura (situação atual ' + sitAtual + ') — não mexi'; pulados++; continue;
-          }
-          try { const rm = await moverSituacao(l.id, SIT_ATENDIDO); if (rm && rm.ok !== false) { movidos++; l.devolvido = true; } else { falhas++; l.erro = true; } }
-          catch (e) { falhas++; l.erro = true; }
-          await sleep(PAUSA_MS);
-        }
-      }
-
       json(res, 200, {
         ok: true,
-        modo: gravarE ? 'GRAVOU — pedidos devolvidos pra ATENDIDO' : 'SIMULAÇÃO — nada foi alterado (use &gravar=1 pra devolver)',
+        modo: 'SÓ LISTA — esta rota não altera nenhum pedido',
+        como_corrigir: 'mova cada um pra ATENDIDO no Bling; com a trava da série (PR #195) no ar, ele não volta mais pra DESPACHADOS',
+        varredura_completa: !truncou,
+        aviso: truncou ? `parei em ${TETO_PAG} páginas e a última veio cheia — há pedidos NÃO examinados; rode com dias menor` : undefined,
         janela_dias: diasE, situacao_lida: SIT_DESPACHADOS, un_full_configurado: UN_FULL_E,
         resumo: { vistos, movidos_por_engano: suspeitos.length, full_corretos: full.length,
-                  bipados_corretos: bipados.length, indeterminados,
-                  devolvidos: gravarE ? movidos : 0, falhas: gravarE ? falhas : 0,
-                  pulados_por_mudanca: gravarE ? pulados : undefined,
-                  limite_por_chamada: gravarE ? maxE : undefined },
+                  bipados_corretos: bipados.length, nao_resolvidos: indeterminados },
         movidos_por_engano: suspeitos,
         nao_resolvidos: naoResolvidos,
         full_corretos: full.slice(0, 30),
