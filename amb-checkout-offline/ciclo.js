@@ -245,7 +245,7 @@ async function listarAtendidos() {
     if (idsFullVistos.length) {
       const SERIE_FILE = path.join(CACHE_DIR, '_serie_nf.json');
       const serieCache = readJson(SERIE_FILE, {});
-      const derrubados = [], semResposta = [];
+      const derrubados = [], semResposta = [], venceuEspera = [];
       let mudouCache = false;
       for (const idF of idsFullVistos.slice()) {
         /* O cache tem VALIDADE (30 min) e a regra é simples: VENCIDO NÃO VALE.
@@ -279,13 +279,36 @@ async function listarAtendidos() {
           if (ix >= 0) idsFullVistos.splice(ix, 1);
           ocultosFull--;                                        // sai da contagem: não é Full
         } else if (!info) {
-          semResposta.push(String(idF));                        // continua escondido, mas NÃO move
+          /* ⚠️ "não sei a série" é CEDO, não é PARA SEMPRE (corrigido 25/08).
+             A NF do Full vem ESPELHADA do marketplace e demora a chegar no Bling — nas
+             primeiras horas o pedido legitimamente não tem nota. Eu tratei isso como estado
+             permanente e o resultado foi 3 Full de verdade (2 Shopee Full + 1 Magalu Full)
+             parados em ATENDIDO indefinidamente, ciclo após ciclo.
+             Agora a espera tem PRAZO: marco quando comecei a tentar e, passadas 6h sem
+             descobrir a série, movo — a unidade continua dizendo Full e já esperei o
+             suficiente. O clone de garantia não é afetado: o Bling emite a NF dele ao
+             SALVAR, então ele tem série 1 desde o primeiro minuto e cai no ramo de cima. */
+          const espera = serieCache['espera:' + chaveS];
+          if (!espera) {
+            serieCache['espera:' + chaveS] = { desde: Date.now() };
+            mudouCache = true;
+            semResposta.push(String(idF));                      // 1ª vez: escondido, não move
+          } else if ((Date.now() - Number(espera.desde)) < 6 * 60 * 60 * 1000) {
+            semResposta.push(String(idF));                      // dentro do prazo: ainda espera
+          } else {
+            venceuEspera.push(String(idF));                     // esperei demais: MOVE
+          }
+        } else {
+          delete serieCache['espera:' + chaveS];                // descobriu: limpa o relógio
         }
       }
       if (mudouCache) { try { writeJson(SERIE_FILE, serieCache); } catch (e) {} }
       if (derrubados.length) {
         console.log(`[AMBBKP] série 1 derrubou o Full em ${derrubados.length} pedido(s) (emissão nossa, provável clone de venda Full): ` +
           derrubados.map(d => `pedido ${d.id}/NF ${d.nf}`).join(', '));
+      }
+      if (venceuEspera.length) {
+        console.log(`[AMBBKP] série não veio em 6h — movendo assim mesmo (a unidade diz Full e a NF do marketplace não chegou): ` + venceuEspera.join(', '));
       }
       if (semResposta.length) {
         console.log(`[AMBBKP] série NÃO descoberta em ${semResposta.length} pedido(s) — NÃO vou mover (fica em ATENDIDO até dar pra conferir): ` + semResposta.join(', '));
