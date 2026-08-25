@@ -1691,7 +1691,15 @@ function routes(readBody) {
       if (!((process.env.ADMIN_KEY && kE === process.env.ADMIN_KEY) || (sE && ehAdmin(sE)))) { json(res, 404, { error: 'not found' }); return true; }
       if (!SIT_DESPACHADOS) { json(res, 200, { ok: false, erro: 'SIT_DESPACHADOS não configurado nesta empresa' }); return true; }
 
-      const diasE = Math.min(60, Math.max(1, Number(urlObj.searchParams.get('dias')) || 10));
+      /* ⚠️ TETO DE 30 DIAS, que é a retenção do conferidos.json (purgarConferidos apaga os
+         sincronizados depois disso). Além dessa janela, um pedido bipado DE VERDADE já perdeu
+         o carimbo e apareceria como "movido por engano" — e como a resposta manda o admin
+         mover cada listado pra ATENDIDO, um falso positivo aqui vira trabalho errado na mão.
+         Melhor não listar do que listar errado. */
+      const RETENCAO_CONF_DIAS = 30;
+      const diasPedido = Number(urlObj.searchParams.get('dias')) || 10;
+      const diasE = Math.min(RETENCAO_CONF_DIAS, Math.max(1, diasPedido));
+      const limitouJanela = diasPedido > RETENCAO_CONF_DIAS;
       const UN_FULL_E = String(process.env.AMBBKP_UN_FULL || '').split(',').map(x => x.trim()).filter(Boolean);
       const setFullE = new Set(UN_FULL_E);
       const confE = readJson(CONFERIDOS_FILE, {});
@@ -1744,7 +1752,7 @@ function routes(readBody) {
                acharia justamente os pedidos que existe pra achar. */
             let serieE = null;
             if (ehPelaUnidade) {
-              try { const nfE = await serieDaNFdoPedido(idE); serieE = nfE && nfE.serie ? String(nfE.serie) : null; }
+              try { const nfE = await comPrazo(sig => serieDaNFdoPedido(idE, sig)); serieE = nfE && nfE.serie ? String(nfE.serie) : null; }
               catch (e) { serieE = null; }
               await sleep(PAUSA_MS);
               if (serieE) linha.serie_nf = serieE;
@@ -1772,7 +1780,9 @@ function routes(readBody) {
         como_corrigir: 'mova cada um pra ATENDIDO no Bling; com a trava da série (PR #195) no ar, ele não volta mais pra DESPACHADOS',
         varredura_completa: !truncou,
         aviso: truncou ? `parei em ${TETO_PAG} páginas e a última veio cheia — há pedidos NÃO examinados; rode com dias menor` : undefined,
-        janela_dias: diasE, situacao_lida: SIT_DESPACHADOS, un_full_configurado: UN_FULL_E,
+        janela_dias: diasE,
+        janela_limitada: limitouJanela ? `você pediu ${diasPedido} dias, mas ${RETENCAO_CONF_DIAS} é o limite: além disso a prova de bipagem já foi apagada e pedido bipado apareceria como engano` : undefined,
+        situacao_lida: SIT_DESPACHADOS, un_full_configurado: UN_FULL_E,
         resumo: { vistos, movidos_por_engano: suspeitos.length, full_corretos: full.length,
                   bipados_corretos: bipados.length, nao_resolvidos: indeterminados },
         movidos_por_engano: suspeitos,
