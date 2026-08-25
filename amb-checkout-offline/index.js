@@ -1774,6 +1774,11 @@ function routes(readBody) {
           if (!arrS.length) break;
           for (const ped of arrS) {
             vistos++;
+            /* Codex #200 r4: o dataFinal vai com +1 dia (contorno do Bling), então a
+               resposta pode conter pedido do dia SEGUINTE ao ate pedido — clone de 1º de
+               setembro entraria na varredura "de agosto". Descarta fora da janela real. */
+            const dataP = String(ped.data || '').slice(0, 10);
+            if (dataP && (dataP > ateS || dataP < deS)) continue;
             // mesma regra do ciclo: só a unidade da LOJA identifica Full
             let unP = (ped.loja && ped.loja.unidadeNegocio && ped.loja.unidadeNegocio.id) || null;
             /* Codex #200 (P1): a lista omite loja.unidadeNegocio de forma intermitente
