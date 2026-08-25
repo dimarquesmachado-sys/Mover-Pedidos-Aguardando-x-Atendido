@@ -265,7 +265,16 @@ async function listarAtendidos() {
             info = { serie: String(nfF.serie), nf: nfF.numero || null, ts: Date.now() };
             serieCache[chaveS] = info; mudouCache = true;
           }
-          // renovação falhou: segue com o `info` antigo, se houver
+          /* ⚠️ Renovação falhou (429). Manter o valor vencido só é seguro quando ele IMPEDE
+             uma ação — é a mesma assimetria de sempre, que eu tinha aplicado ao "nunca soube"
+             mas esquecido no "soube e venceu":
+               · série 1 vencida  → mantém. Só evita mover; no pior caso deixa um pedido
+                 parado um ciclo a mais, o que não custa nada.
+               · série não-1 vencida → vira DESCONHECIDA. Ela AUTORIZA mover e expurgar, e
+                 fazer isso com dado velho que não consegui conferir é exatamente o erro que
+                 este PR existe pra corrigir. Se a NF tiver sido substituída por uma série 1,
+                 o pedido seria movido com base num dado que já não vale. */
+          if (info && String(info.serie) !== '1') info = null;
         }
         if (info && String(info.serie) === '1') {
           derrubados.push({ id: idF, nf: info.nf });
