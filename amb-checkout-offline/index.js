@@ -1728,7 +1728,14 @@ function routes(readBody) {
       /* Codex #200 (P2, 2ª rodada): data mal digitada (2026-08-xx) estourava um RangeError
          ANTES do try — erro de servidor em vez de resposta controlada. E de > ate iria
          direto pra URL do Bling, voltando "sucesso" vazio. Valida as duas e a ordem. */
-      const dataValida = (x) => /^\d{4}-\d{2}-\d{2}$/.test(x) && !isNaN(Date.parse(x + 'T12:00:00Z'));
+      /* Codex #200 r3: Date.parse NORMALIZA data de calendário inválida (2026-02-30 vira
+         2 de março) em vez de recusar — a rota varreria outro intervalo ecoando a janela
+         digitada. Reconstruo o ISO e comparo com o que veio: só é válida se bater. */
+      const dataValida = (x) => {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(x)) return false;
+        const dX = new Date(x + 'T12:00:00Z');
+        return !isNaN(dX.getTime()) && dX.toISOString().slice(0, 10) === x;
+      };
       if (!dataValida(deS) || !dataValida(ateS)) { json(res, 200, { ok: false, erro: 'data inválida — use AAAA-MM-DD em de/ate' }); return true; }
       if (deS > ateS) { json(res, 200, { ok: false, erro: 'janela invertida: de=' + deS + ' > ate=' + ateS }); return true; }
       /* Codex #200 (P2): un mal formado (espaço colado, texto) nunca casaria com unidade
