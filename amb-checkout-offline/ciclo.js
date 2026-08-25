@@ -801,10 +801,24 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
             (ee) => { clearTimeout(tt); rejeite(ee); }
           );
         });
-        let confirmados = 0, mantidos = 0, semResposta = 0;
-        for (const id of aRemover) {
-          let det = null;
-          try { det = await prazoDet(sig => detalhePedido(id, sig)); } catch (e) { det = null; }
+        /* Codex #205 r4 (P1×2 + P2): (a) TETO de 15 conferências por ciclo — 46 candidatos
+           mudos × 20s dariam 15+ min e o watchdog empilharia um 2º ciclo mexendo no MESMO
+           cache; o resto fica adiado e morre nos ciclos seguintes. (b) prazo estourado =
+           OAuth/Bling MUDO: os próximos travariam igual, então a conferência do ciclo
+           ABORTA na hora — no máximo 1 socket pendurado, não um por candidato (o fetch do
+           token não aceita sinal; ver tokenManager). (c) a PAUSA vale pra TODO candidato,
+           inclusive os preservados — antes só o removido pausava e os "ainda ATENDIDO"
+           saíam em rajada, furando o ritmo e convidando 429. */
+        let confirmados = 0, mantidos = 0, semResposta = 0, adiados = 0, mudo = false;
+        const loteConf = aRemover.slice(0, 15);
+        adiados = aRemover.length - loteConf.length;
+        for (let iC = 0; iC < loteConf.length; iC++) {
+          const id = loteConf[iC];
+          let det = null, estourou = false;
+          try { det = await prazoDet(sig => detalhePedido(id, sig)); }
+          catch (e) { det = null; estourou = /prazo/.test(String((e && e.message) || '')); }
+          await new Promise(r => setTimeout(r, PAUSA_MS || 220));                 // pausa SEMPRE, preservado incluso
+          if (estourou) { mudo = true; adiados += (loteConf.length - iC); break; }
           if (!det) { semResposta++; continue; }                                  // Bling não respondeu → preserva
           const sitRaw = det.situacao != null ? (det.situacao.id != null ? det.situacao.id : det.situacao) : null;
           /* Codex #205 r2: Number(null), Number('') e Number('   ') são TODOS 0 — finito e
@@ -821,10 +835,9 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
           if (sit === Number(SIT_ATENDIDO)) { mantidos++; continue; }             // ainda ATENDIDO → preserva
           try { fs.rmSync(path.join(CACHE_DIR, String(id)), { recursive: true, force: true }); } catch (e) {}
           delete man[id]; confirmados++;
-          await new Promise(r => setTimeout(r, PAUSA_MS || 220));
         }
         if (confirmados) salvarManifest(man);
-        console.log(`[AMBBKP] reconciliação conferida: ${confirmados} removido(s) · ${mantidos} seguem em ATENDIDO · ${semResposta} sem resposta do Bling (preservados)`);
+        console.log(`[AMBBKP] reconciliação conferida: ${confirmados} removido(s) · ${mantidos} seguem em ATENDIDO · ${semResposta} sem resposta do Bling (preservados) — ${adiados} adiado(s) p/ o próximo ciclo${mudo ? ' — BLING MUDO: conferência ABORTADA neste ciclo, tenta no próximo' : ''}`);
       } else if (aRemover.length) {
         for (const id of aRemover) {
           try { fs.rmSync(path.join(CACHE_DIR, String(id)), { recursive: true, force: true }); } catch (e) {}
