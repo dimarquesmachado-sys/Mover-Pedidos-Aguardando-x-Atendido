@@ -237,16 +237,23 @@ async function listarAtendidos() {
       const derrubados = [], semResposta = [];
       let mudouCache = false;
       for (const idF of idsFullVistos.slice()) {
-        /* ⚠️ O cache tem VALIDADE (30 min). Sem isso, uma NF cancelada, substituída ou
-           corrigida com o pedido ainda em ATENDIDO deixaria a série velha presa pra sempre:
-           uma série não-1 obsoleta faria mover um pedido cuja NF nova é série 1, e uma
-           série 1 obsoleta exporia um Full de verdade à fila indefinidamente.
-           Dentro da validade usa o guardado; fora, tenta renovar — e se a renovação falhar
-           (429), MANTÉM o valor antigo, que é o motivo do cache existir. */
+        /* O cache tem VALIDADE (30 min) e a regra é simples: VENCIDO NÃO VALE.
+           Se a renovação funcionar, usa o valor novo. Se falhar (429), fica DESCONHECIDA —
+           que já é o estado seguro: esconde da fila e NÃO move.
+
+           Eu tinha tentado ser esperto aqui, mantendo o valor vencido quando ele era série 1,
+           e errei nos dois sentidos (Codex #195):
+             · uma série 1 vencida cuja NF foi trocada por uma Full faria o pedido APARECER
+               pro estoquista, que iria procurar mercadoria parada no galpão do marketplace;
+             · e a linha que anulava o vencido rodava mesmo quando a renovação tinha dado
+               certo — um Full confirmado voltava pra "desconhecida" e nunca era movido.
+           Vencido = desconhecido resolve os dois, e não perde o objetivo original: um 429
+           continua não conseguindo MOVER nada. */
         const chaveS = String(idF);
-        let info = serieCache[chaveS];
-        const venceu = !info || !info.ts || (Date.now() - Number(info.ts)) > 30 * 60 * 1000;
-        if (venceu) {
+        const guardado = serieCache[chaveS];
+        const valeAinda = guardado && guardado.ts && (Date.now() - Number(guardado.ts)) <= 30 * 60 * 1000;
+        let info = valeAinda ? guardado : null;
+        if (!valeAinda) {
           let nfF = null;
           try { nfF = await serieDaNFdoPedido(idF); } catch (e) { nfF = null; }
           await sleep(PAUSA_MS);
@@ -254,16 +261,6 @@ async function listarAtendidos() {
             info = { serie: String(nfF.serie), nf: nfF.numero || null, ts: Date.now() };
             serieCache[chaveS] = info; mudouCache = true;
           }
-          /* ⚠️ Renovação falhou (429). Manter o valor vencido só é seguro quando ele IMPEDE
-             uma ação — é a mesma assimetria de sempre, que eu tinha aplicado ao "nunca soube"
-             mas esquecido no "soube e venceu":
-               · série 1 vencida  → mantém. Só evita mover; no pior caso deixa um pedido
-                 parado um ciclo a mais, o que não custa nada.
-               · série não-1 vencida → vira DESCONHECIDA. Ela AUTORIZA mover e expurgar, e
-                 fazer isso com dado velho que não consegui conferir é exatamente o erro que
-                 este PR existe pra corrigir. Se a NF tiver sido substituída por uma série 1,
-                 o pedido seria movido com base num dado que já não vale. */
-          if (info && String(info.serie) !== '1') info = null;
         }
         if (info && String(info.serie) === '1') {
           derrubados.push({ id: idF, nf: info.nf });
