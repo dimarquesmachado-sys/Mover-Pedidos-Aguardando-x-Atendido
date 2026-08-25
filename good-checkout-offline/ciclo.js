@@ -234,7 +234,8 @@ async function listarAtendidos() {
     if (idsFullVistos.length) {
       const SERIE_FILE = path.join(CACHE_DIR, '_serie_nf.json');
       const serieCache = readJson(SERIE_FILE, {});
-      const derrubados = [], semResposta = [];
+      const derrubados = [], semResposta = [], venceuEspera = [];
+      const _consultaFalhou = new Set();   // Bling não respondeu — diferente de 'não tem NF'
       let mudouCache = false;
       for (const idF of idsFullVistos.slice()) {
         /* O cache tem VALIDADE (30 min) e a regra é simples: VENCIDO NÃO VALE.
@@ -255,26 +256,92 @@ async function listarAtendidos() {
         let info = valeAinda ? guardado : null;
         if (!valeAinda) {
           let nfF = null;
-          try { nfF = await serieDaNFdoPedido(idF); } catch (e) { nfF = null; }
+          try { nfF = await serieDaNFdoPedido(idF); } catch (e) { nfF = { falhou: true }; }
           await sleep(PAUSA_MS);
+          if (nfF && nfF.falhou) _consultaFalhou.add(String(idF));   // não foi "sem NF" — foi não perguntei
           if (nfF && nfF.serie) {
             info = { serie: String(nfF.serie), nf: nfF.numero || null, ts: Date.now() };
             serieCache[chaveS] = info; mudouCache = true;
           }
         }
+        /* ⚠️ LIMPA O RELÓGIO SEMPRE QUE DESCOBRIU A SÉRIE — inclusive na série 1 (Codex #199).
+           Antes a limpeza só acontecia no ramo do Full confirmado. Um clone visto primeiro
+           SEM nota e depois identificado como série 1 ficava com o `espera:` antigo gravado;
+           passados os 30 min do cache da série, uma consulta que temporariamente não achasse
+           a nota leria aquele carimbo como "6h já se passaram" e MOVERIA o clone protegido,
+           em vez de começar uma espera nova. */
+        /* ⚠️ marcar mudouCache: apagar só na memória não reescreve o _serie_nf.json, e o
+           carimbo velho ressuscita no próximo boot — voltando a autorizar o move do clone
+           protegido. Só marca quando a chave EXISTIA, pra não gravar o arquivo à toa. */
+        if (info && serieCache['espera:' + chaveS]) { delete serieCache['espera:' + chaveS]; mudouCache = true; }
         if (info && String(info.serie) === '1') {
           derrubados.push({ id: idF, nf: info.nf });
           const ix = idsFullVistos.indexOf(idF);
           if (ix >= 0) idsFullVistos.splice(ix, 1);
           ocultosFull--;                                        // sai da contagem: não é Full
         } else if (!info) {
-          semResposta.push(String(idF));                        // continua escondido, mas NÃO move
+          /* ⚠️ "não sei a série" é CEDO, não é PARA SEMPRE (corrigido 25/08).
+             A NF do Full vem ESPELHADA do marketplace e demora a chegar no Bling — nas
+             primeiras horas o pedido legitimamente não tem nota. Eu tratei isso como estado
+             permanente e o resultado foi 3 Full de verdade (2 Shopee Full + 1 Magalu Full)
+             parados em ATENDIDO indefinidamente, ciclo após ciclo.
+             Agora a espera tem PRAZO: marco quando comecei a tentar e, passadas 6h sem
+             descobrir a série, movo — a unidade continua dizendo Full e já esperei o
+             suficiente. O clone de garantia não é afetado: o Bling emite a NF dele ao
+             SALVAR, então ele tem série 1 desde o primeiro minuto e cai no ramo de cima. */
+          /* ⚠️ O RELÓGIO SÓ CORRE QUANDO O BLING CONFIRMOU QUE NÃO HÁ NOTA (Codex #199).
+             `serieDaNFdoPedido` devolve vazio por DOIS motivos diferentes: o pedido não tem
+             NF, ou a consulta não foi (429, Bling fora). Contar os dois igual significaria
+             que 6h de 429 movem o pedido sem eu NUNCA ter olhado a nota — e se fosse um
+             clone de garantia, seria exatamente o estrago que esta trava existe pra impedir.
+             Consulta que falhou não avança o relógio: espera e tenta de novo. */
+          if (_consultaFalhou.has(String(idF))) {
+            semResposta.push(String(idF));                      // não perguntei ainda: espera, sem contar tempo
+          } else {
+            /* ⚠️ Codex #199 (P1): o relógio conta TEMPO CONFIRMADO, não tempo de parede.
+               O desenho anterior guardava só o `desde`: se o marcador nascesse e viessem 6h
+               de 429, a PRIMEIRA resposta boa depois da pane encontraria o carimbo velho e
+               moveria o pedido na hora — 6h "vencidas" sem NENHUMA confirmação no meio.
+               Agora cada resposta "sem NF" soma ao acumulado apenas o intervalo desde a
+               confirmação anterior, com teto de 30 min por passo: ciclos normais (10 min)
+               somam inteiros; uma pane de horas entre duas confirmações soma no máximo 30
+               min. Falha continua sem tocar no marcador (ramo do _consultaFalhou acima).
+               Marcador antigo, só com `desde`, recomeça do zero — o lado seguro. */
+            const espera = serieCache['espera:' + chaveS];
+            const agoraE = Date.now();
+            if (!espera || !espera.ult) {
+              serieCache['espera:' + chaveS] = { desde: agoraE, ult: agoraE, acum: 0 };
+              mudouCache = true;
+              semResposta.push(String(idF));                    // 1ª confirmação de "sem NF": começa o relógio
+            } else {
+              const passo = Math.max(0, Math.min(agoraE - Number(espera.ult), 30 * 60 * 1000));
+              espera.acum = Number(espera.acum || 0) + passo;
+              espera.ult = agoraE;
+              mudouCache = true;
+              if (espera.acum < 6 * 60 * 60 * 1000) {
+                semResposta.push(String(idF));                  // ainda não somou 6h confirmadas
+              } else {
+                venceuEspera.push(String(idF));                 // 6h CONFIRMADAS sem nota: MOVE
+              }
+            }
+          }
         }
       }
       if (mudouCache) { try { writeJson(SERIE_FILE, serieCache); } catch (e) {} }
       if (derrubados.length) {
         console.log(`[GOODBKP] série 1 derrubou o Full em ${derrubados.length} pedido(s) (emissão nossa, provável clone de venda Full): ` +
           derrubados.map(d => `pedido ${d.id}/NF ${d.nf}`).join(', '));
+      }
+      if (venceuEspera.length) {
+        /* Codex #199 (P2): na GOOD o destino vem DESLIGADO por padrão (SIT_DESPACHADOS=0,
+           id da conta nunca configurado) e o bloco do move lá embaixo nem roda. Anunciar
+           "movendo" aqui mentiria a cada ciclo, escondendo exatamente a condição de pedido
+           preso que este log existe pra diagnosticar. */
+        if (SIT_DESPACHADOS) {
+          console.log(`[GOODBKP] série não veio em 6h — movendo assim mesmo (a unidade diz Full e a NF do marketplace não chegou): ` + venceuEspera.join(', '));
+        } else {
+          console.log(`[GOODBKP] série não veio em 6h em ${venceuEspera.length} pedido(s), mas o move está DESLIGADO (GOODBKP_SIT_DESPACHADOS não configurado) — ficam em ATENDIDO: ` + venceuEspera.join(', '));
+        }
       }
       if (semResposta.length) {
         console.log(`[GOODBKP] série NÃO descoberta em ${semResposta.length} pedido(s) — NÃO vou mover (fica em ATENDIDO até dar pra conferir): ` + semResposta.join(', '));

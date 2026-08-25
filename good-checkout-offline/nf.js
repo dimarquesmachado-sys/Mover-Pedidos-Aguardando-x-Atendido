@@ -59,38 +59,69 @@ async function acharNFporRange(pedidoId) {
 
    Devolve { numero, serie } ou null. null = não sei, e quem chama mantém o conservador. */
 async function serieDaNFdoPedido(id, signal) {   // signal opcional: sem prazo, um Bling mudo pendura o await pra sempre
-  const hidrata = async (nf) => {
-    if (!nf) return null;
-    if (nf.serie != null && String(nf.serie) !== '') return { numero: nf.numero || null, serie: String(nf.serie) };
-    if (!(Number(nf.id) > 0)) return null;
-    await sleep(PAUSA_MS);
-    const nd = await blingGet(`/nfe/${nf.id}`, 3, signal);
-    const det = nd && nd.data && nd.data.data;
-    if (det && det.serie != null) return { numero: det.numero || nf.numero || null, serie: String(det.serie) };
-    return null;
+  /* ⚠️ UMA REGRA SÓ PRA TODA A FUNÇÃO (reescrita em 25/08, 3ª rodada do Codex #199).
+     Três vezes seguidas o mesmo defeito apareceu em pontos diferentes: uma chamada ao Bling
+     falhava e o resultado era reportado como "sem NF". Eu vinha corrigindo o ponto apontado
+     em vez de tratar a função inteira — então reescrevi com UMA regra que vale pra todas as
+     chamadas: TODO acesso ao Bling passa por `pedir()`, e QUALQUER falha dele marca `falhou`.
+     Não existe mais caminho onde uma consulta que não foi vira "não tem nota".
+
+     Por que isso importa: "sem NF" faz o relógio de 6h do filtro Full correr; ao vencer, o
+     pedido é MOVIDO. Se a nota existisse e fosse série 1 (clone de reposição em garantia),
+     ela seria movida sem ninguém nunca ter lido a série — o estrago que a trava existe pra
+     impedir.
+
+     Devolve: { serie } · { semNF:true } (o Bling RESPONDEU e não há nota) · { falhou:true } */
+  let falhou = false;                                  // alguma chamada não foi?
+  let nfVinculada = false;                             // o Bling CONFIRMOU que existe uma NF ligada ao pedido?
+  let respondeu = false;                               // alguma chamada respondeu?
+  const pedir = async (url) => {
+    try {
+      const r = await blingGet(url, 3, signal);
+      if (!r || r.ok === false) { falhou = true; return null; }
+      respondeu = true;
+      return (r.data && r.data.data) || null;
+    } catch (e) { falhou = true; return null; }
   };
-  try {
-    const r = await blingGet(`/pedidos/vendas/${id}/nfe`, 3, signal);
-    if (r.ok) {
-      let nf = r.data && r.data.data;
-      if (Array.isArray(nf)) nf = nf[0];
-      const h = await hidrata(nf);
-      if (h) return h;
-    }
+  const serieDe = (nf) => (nf && nf.serie != null && String(nf.serie) !== '')
+    ? { numero: nf.numero || null, serie: String(nf.serie) } : null;
+
+  // 1) NF vinculada direto ao pedido
+  let nf = await pedir(`/pedidos/vendas/${id}/nfe`);
+  if (Array.isArray(nf)) nf = nf[0];
+  let achou = serieDe(nf);
+  if (achou) return achou;
+  if (nf && Number(nf.id) > 0) {                       // veio resumo sem série → busca o detalhe
+    nfVinculada = true;
     await sleep(PAUSA_MS);
-    const d = await blingGet(`/pedidos/vendas/${id}`, 3, signal);
-    const det = d && d.data && d.data.data;
+    achou = serieDe(await pedir(`/nfe/${nf.id}`));
+    if (achou) return achou;
+  }
+
+  // 2) pelo detalhe do pedido (notaFiscal.id)
+  if (!achou) {
+    await sleep(PAUSA_MS);
+    const det = await pedir(`/pedidos/vendas/${id}`);
     const raw = det ? (det.notaFiscal != null ? det.notaFiscal : det.nfe) : null;
     const nfId = (raw && typeof raw === 'object') ? raw.id : raw;
     if (Number(nfId) > 0) {
+      nfVinculada = true;
       await sleep(PAUSA_MS);
-      const nd = await blingGet(`/nfe/${nfId}`, 3, signal);
-      const nf2 = nd && nd.data && nd.data.data;
-      const h2 = await hidrata(nf2);
-      if (h2) return h2;
+      achou = serieDe(await pedir(`/nfe/${nfId}`));
+      if (achou) return achou;
     }
-  } catch (e) {}
-  return null;   // sem NF vinculada, ou série não descoberta → não sei
+  }
+
+  /* Só posso afirmar "não tem nota" se NENHUMA chamada falhou. Basta uma ter falhado pra
+     virar `falhou` — na dúvida o relógio não corre e a gente tenta de novo no próximo ciclo. */
+  if (falhou) return { falhou: true };
+  /* ⚠️ Codex #199 (P1): se o Bling CONFIRMOU que existe NF vinculada mas a série não veio
+     em nenhuma leitura, isso NÃO é "sem nota" — é "não consegui ler a série de uma nota que
+     existe". Devolver semNF aqui deixaria o relógio das 6h correr e o pedido ser movido sem
+     a série NUNCA ter sido lida: se fosse um clone série 1, é o incidente de 24/08 voltando
+     por outra porta. Falha = não conta tempo, tenta de novo. */
+  if (nfVinculada) return { falhou: true };
+  return respondeu ? { semNF: true } : { falhou: true };
 }
 
 async function nfDoPedido(id) {
