@@ -767,7 +767,12 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
          ATENDIDO, levando junto a ETIQUETA ANEXADA. O próprio arquivo avisa em outro ponto
          que é melhor não remover do que apagar etiqueta. */
       const preservar = new Set((idsSemSerie || []).map(String));
-      const aRemover = Object.keys(man).filter(id => !idsAtuais.has(String(id)) && !idsFull.has(String(id)) && !preservar.has(String(id)));
+      /* Codex #205 r3 (P2): no caminho de FILA VAZIA (só-confirmação) as entradas marcadas
+         Full também entram na conferência — a exclusão delas existia pra protegê-las da
+         remoção EM MASSA, mas aqui cada uma é confirmada no Bling individualmente: ainda
+         ATENDIDO preserva, comprovadamente saiu remove. Sem isso, fantasma Full ficava
+         imortal até a retenção. Com fila cheia a exclusão continua valendo. */
+      const aRemover = Object.keys(man).filter(id => !idsAtuais.has(String(id)) && !preservar.has(String(id)) && (atendidos.length === 0 || !idsFull.has(String(id))));
       // TRAVA DE SEGURANÇA: sumir com muita coisa de uma vez quase sempre é lista ruim do Bling,
       // não 40% dos pedidos despachados no mesmo minuto. Melhor não remover do que apagar etiqueta anexada.
       const limiteSeguro = Math.max(5, Math.ceil(Object.keys(man).length * 0.4));
@@ -809,6 +814,10 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
           const sitTxt = String(sitRaw == null ? '' : sitRaw).trim();
           if (!/^\d+$/.test(sitTxt)) { semResposta++; continue; }                 // omitida/vazia/ilegível → NÃO confirmado → preserva
           const sit = Number(sitTxt);
+          /* Codex #205 r3: situacao 0 / {id:0} / "0" passa na régua dos dígitos, e 0 ≠
+             ATENDIDO cairia na remoção — mas 0 NÃO é id de situação válido no Bling, é a
+             forma numérica do "ausente". Status confirmado tem que ser POSITIVO. */
+          if (sit <= 0) { semResposta++; continue; }
           if (sit === Number(SIT_ATENDIDO)) { mantidos++; continue; }             // ainda ATENDIDO → preserva
           try { fs.rmSync(path.join(CACHE_DIR, String(id)), { recursive: true, force: true }); } catch (e) {}
           delete man[id]; confirmados++;
