@@ -5444,6 +5444,9 @@ async function pescarDadosML(nlRaw, tokenML, dorme) {
       if (rs.ok && ds) {
         const logi = (ds.logistic && ds.logistic.type) || ds.logistic_type || null;
         if (logi) reg.logistica = logi;
+        reg.ship_ok = true;   /* 25/08: prova que /shipments respondeu. A Girassol já gravava
+                                 (Codex PR#48) e a AMB não — sem isso o merge lá embaixo apaga
+                                 crédito Flex quando só o /costs falha (429). */
         ehFlex = (logi === 'self_service');
         const bc = Number(ds.base_cost); if (isFinite(bc) && bc > 0) baseCost = bc;
         const so = ds.shipping_option || {};
@@ -7856,7 +7859,7 @@ async function mlSyncFees(dias) {
   const salvar = () => {
     if (!Object.keys(pend).length) return;
     const c2 = readJson(CONFERIDOS_FILE, {});
-    for (const [cid, d] of Object.entries(pend)) { if (!c2[cid]) continue; if (d.fee != null) c2[cid].tarifa_ml = d.fee; if (d.frete != null) c2[cid].frete_ml = d.frete; if (d.venda) c2[cid].venda_em = d.venda; if (d.credito != null) c2[cid].credito_ml = d.credito; if (d.credito_fonte) c2[cid].credito_fonte = d.credito_fonte; if (d.logistica) c2[cid].logistica_ml = d.logistica; if (d.pack) c2[cid].ml_pack = d.pack; if (d.order) c2[cid].ml_order = d.order; if (d.costs_ok) { c2[cid].ml_costs_v3 = 1; if (d.credito == null && c2[cid].credito_fonte !== 'billing' && c2[cid].credito_fonte !== 'costs_gross') delete c2[cid].credito_ml; /* Codex PR#40: /costs vazio não apaga crédito do billing */ if (d.frete == null) delete c2[cid].frete_ml; } }
+    for (const [cid, d] of Object.entries(pend)) { if (!c2[cid]) continue; if (d.fee != null) c2[cid].tarifa_ml = d.fee; if (d.frete != null) c2[cid].frete_ml = d.frete; if (d.venda) c2[cid].venda_em = d.venda; if (d.credito != null) c2[cid].credito_ml = d.credito; if (d.credito_fonte) c2[cid].credito_fonte = d.credito_fonte; if (d.logistica) c2[cid].logistica_ml = d.logistica; if (d.pack) c2[cid].ml_pack = d.pack; if (d.order) c2[cid].ml_order = d.order; if (d.costs_ok && d.ship_ok) { c2[cid].ml_costs_v3 = 1; if (d.credito == null && c2[cid].credito_fonte !== 'billing') delete c2[cid].credito_ml;   /* 25/08: 'costs_gross' NÃO é exceção aqui — ele nasce da própria resposta do /costs, então uma leitura FRESCA e COMPLETA (costs_ok E ship_ok) que diz "sem crédito" desmente o valor velho. Protegê-lo seria blindar o dado contra a própria atualização, e o ml_costs_v3 avança logo abaixo: passada a rejanela de 3 dias, o crédito obsoleto pararia de ser reconferido e inflaria a margem pra sempre. Falha ou 429 já são barrados por costs_ok/ship_ok. 'billing' continua exceção: vem do relatório oficial de faturamento, outra fonte. */ /* Codex PR#40: /costs vazio não apaga crédito do billing */ if (d.frete == null) delete c2[cid].frete_ml; } }
     writeJson(CONFERIDOS_FILE, c2);
     for (const cid of Object.keys(pend)) delete pend[cid];
   };
@@ -7908,6 +7911,7 @@ async function mlSyncFees(dias) {
             if (rs.ok && ds) {
               const logi = (ds.logistic && ds.logistic.type) || ds.logistic_type || null;
               if (logi) reg.logistica = logi;
+              reg.ship_ok = true;   /* 25/08: idem — ver o comentário do outro ponto */
               ehFlex = (logi === 'self_service');   // self_service = Mercado Envios FLEX (quem entrega e o vendedor)
               const bc = Number(ds.base_cost);
               if (isFinite(bc) && bc > 0) baseCost = bc;   // bonificacao que o ML paga pela entrega Flex
