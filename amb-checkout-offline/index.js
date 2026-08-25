@@ -73,7 +73,7 @@ const { BLING_BASE, CACHE_DIR, SIT_ATENDIDO, SIT_DESPACHADOS, SIT_VERIFICADO, SY
   ARQUIVO_DIR, ARQUIVO_DIAS, SMTP_HOST, SMTP_PORT, EMAIL_USER, EMAIL_PASS, EMAIL_DEST, SCHEMA, LOJA_MKT, MKT_NOME,
   sleep, ensureDir, readJson, writeJson, dataISO, json, html, manifest, salvarManifest, skuEanCache, locCache, salvarLoc,
   salvarSkuEan, lerIndiceEan, lerReservas, lerOperadores, lerAdmins, ehAdmin, blingGet, blingWrite, moverSituacao } = base;
-const { parseNF, acharNFporRange, nfDoPedido, carregarNFs, acharNFnaLista, baixarDanfe, parseXmlNF, baixarXmlNF, dadosNFSimp } = require('./nf');
+const { parseNF, acharNFporRange, nfDoPedido, serieDaNFdoPedido, carregarNFs, acharNFnaLista, baixarDanfe, parseXmlNF, baixarXmlNF, dadosNFSimp } = require('./nf');
 const { baixarEtiqueta, baixarEtiquetaPDF, labelaryPost, zplParaPdf, etiquetaPdf } = require('./etiquetas');
 // ─── Módulos extraídos (Lote 1: comum/produtos/arquivo/separacao/email-docs) ────────
 const { servicoDoPedido, ehFlex, cronDeveriaTerRodado, kitIncompletoNoCache, zplEscape, bannerVolumeZpl } = require('./comum');
@@ -1746,14 +1746,38 @@ function routes(readBody) {
               unE = (det.loja && det.loja.unidadeNegocio && det.loja.unidadeNegocio.id) || null;
               viaDetalhe = true;
             }
-            const ehFullE = unE != null && setFullE.has(String(unE));
+            const ehPelaUnidade = unE != null && setFullE.has(String(unE));
             const cE = confE[idE];
             const bipadoE = !!(cE && cE.conferido_em);
             const linha = { id: idE, numero: ped.numero, data: ped.data || null,
                             loja: (ped.loja && (ped.loja.nome || ped.loja.id)) || null,
                             un_da_loja: unE, via_detalhe: viaDetalhe || undefined };
+
+            /* ⚠️ A UNIDADE SOZINHA NÃO BASTA — descoberto depois que esta rota foi escrita.
+               Clonar pedido no Bling copia a unidade de negócio, então o clone de uma venda
+               Full nasce com unidade Full mesmo saindo da matriz. Sem checar a série, esses
+               pedidos cairiam em "full_corretos" e ficariam FORA da lista — ou seja, a rota
+               não acharia justamente os casos que ela existe pra achar (ex.: 26687588614,
+               unidade "AMBTotal - FULL MLivre", NF 003464 série 1).
+               Série 1 = emissão nossa, da matriz. Mesma regra do ciclo (PR #195). */
+            let serieE = null;
+            if (ehPelaUnidade) {
+              try { const nfE = await serieDaNFdoPedido(idE); serieE = nfE && nfE.serie ? String(nfE.serie) : null; }
+              catch (e) { serieE = null; }
+              await sleep(PAUSA_MS);
+              if (serieE) linha.serie_nf = serieE;
+              if (!serieE) {
+                /* não consegui conferir: NÃO afirmo que é engano (devolver Full legítimo é
+                   pior que deixar de listar um). Vai pro balde dos não resolvidos. */
+                indeterminados++;
+                naoResolvidos.push({ id: idE, numero: ped.numero, motivo: 'unidade é Full mas não consegui descobrir a série da NF' });
+                continue;
+              }
+            }
+            const ehFullE = ehPelaUnidade && serieE !== '1';
             if (ehFullE) { full.push(linha); continue; }          // Full de verdade — DESPACHADOS está certo
             if (bipadoE) { bipados.push(linha); continue; }       // passou pelo checkout — está certo
+            if (ehPelaUnidade) linha.motivo = 'unidade Full mas NF série 1 — clone da matriz';
             suspeitos.push(linha);
           }
           if (arrE.length < 100) break;
