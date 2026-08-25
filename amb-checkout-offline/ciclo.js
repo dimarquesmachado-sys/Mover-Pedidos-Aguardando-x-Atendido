@@ -810,7 +810,7 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
            token não aceita sinal; ver tokenManager). (c) a PAUSA vale pra TODO candidato,
            inclusive os preservados — antes só o removido pausava e os "ainda ATENDIDO"
            saíam em rajada, furando o ritmo e convidando 429. */
-        let confirmados = 0, mantidos = 0, semResposta = 0, adiados = 0, mudo = false;
+        let confirmados = 0, mantidos = 0, semResposta = 0, adiados = 0, mudo = false, tentados = 0;
         /* Codex #205 r5: fatia FIXA daria fome — os mesmos 15 primeiros seriam tentados em
            todo ciclo (a ordem do manifest é estável) e, se preservados, o 16º em diante
            nunca seria conferido apesar de "adiado". A janela agora GIRA com o relógio:
@@ -824,10 +824,10 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
         const giroC = aRemover.length ? (_cursorConfirmacao % aRemover.length) : 0;
         const girado = aRemover.slice(giroC).concat(aRemover.slice(0, giroC));
         const loteConf = girado.slice(0, 15);
-        _cursorConfirmacao = aRemover.length ? (giroC + loteConf.length) % aRemover.length : 0;
         adiados = aRemover.length - loteConf.length;
         for (let iC = 0; iC < loteConf.length; iC++) {
           const id = loteConf[iC];
+          tentados++;
           let det = null, estourou = false;
           try { det = await prazoDet(sig => detalhePedido(id, sig)); }
           catch (e) { det = null; estourou = /prazo/.test(String((e && e.message) || '')); }
@@ -850,6 +850,11 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
           try { fs.rmSync(path.join(CACHE_DIR, String(id)), { recursive: true, force: true }); } catch (e) {}
           delete man[id]; confirmados++;
         }
+        /* Codex r7: o cursor avança pelo que foi DE FATO tentado — adiantá-lo pelo lote
+           inteiro fazia o aborto por mudez pular 14 candidatos nunca olhados (com o veneno
+           no índice 0, as voltas começariam em 0/15/30/45 e faixas inteiras escapariam).
+           Mínimo 1 pra não emperrar eternamente em cima de um candidato que sempre estoura. */
+        _cursorConfirmacao = aRemover.length ? (giroC + Math.max(1, tentados)) % aRemover.length : 0;
         if (confirmados) salvarManifest(man);
         console.log(`[AMBBKP] reconciliação conferida: ${confirmados} removido(s) · ${mantidos} seguem em ATENDIDO · ${semResposta} sem resposta do Bling (preservados) — ${adiados} adiado(s) p/ o próximo ciclo${mudo ? ' — BLING MUDO: conferência ABORTADA neste ciclo, tenta no próximo' : ''}`);
       } else if (aRemover.length) {
