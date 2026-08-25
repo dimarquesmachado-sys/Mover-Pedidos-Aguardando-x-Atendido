@@ -781,13 +781,30 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
         // quem o Bling confirmar que existe e NÃO está mais em ATENDIDO. Lista ruim do Bling continua
         // sem apagar nada (a consulta individual falha ou devolve ATENDIDO), e limpeza legítima passa.
         console.log(`[AMBBKP] reconciliação: ${aRemover.length} de ${Object.keys(man).length} candidatos a sair — acima do limite (${limiteSeguro}), conferindo um a um no Bling…`);
+        /* Codex #205 (P1×2): (a) o detalhePedido daqui não tinha prazo — Bling que aceita a
+           conexão e emudece penduraria o ciclo inteiro, e o watchdog de 15 min empilharia
+           ciclos por cima; o prazo vence POR FORA, numa corrida, porque o blingGet espera o
+           token ANTES de olhar o sinal. (b) resposta com `situacao` OMITIDA caía no rmSync —
+           deletar sem confirmação é exatamente o que este ramo não pode fazer, e o repo já
+           documenta que o Bling omite situacao de vez em quando. Agora: só deleta com status
+           NUMÉRICO e explicitamente ≠ ATENDIDO; omitido/ilegível conta como sem resposta. */
+        const prazoDet = (fn, ms) => new Promise((resolva, rejeite) => {
+          const ac = new AbortController();
+          const tt = setTimeout(() => { ac.abort(); rejeite(new Error('prazo estourado')); }, ms || 20000);
+          Promise.resolve().then(() => fn(ac.signal)).then(
+            (vv) => { clearTimeout(tt); resolva(vv); },
+            (ee) => { clearTimeout(tt); rejeite(ee); }
+          );
+        });
         let confirmados = 0, mantidos = 0, semResposta = 0;
         for (const id of aRemover) {
           let det = null;
-          try { det = await detalhePedido(id); } catch (e) { det = null; }
+          try { det = await prazoDet(sig => detalhePedido(id, sig)); } catch (e) { det = null; }
           if (!det) { semResposta++; continue; }                                  // Bling não respondeu → preserva
-          const sit = det.situacao && Number(det.situacao.id);
-          if (sit && sit === Number(SIT_ATENDIDO)) { mantidos++; continue; }      // ainda ATENDIDO → preserva
+          const sitRaw = det.situacao != null ? (det.situacao.id != null ? det.situacao.id : det.situacao) : null;
+          const sit = Number(sitRaw);
+          if (!Number.isFinite(sit)) { semResposta++; continue; }                 // situação omitida → NÃO confirmado → preserva
+          if (sit === Number(SIT_ATENDIDO)) { mantidos++; continue; }             // ainda ATENDIDO → preserva
           try { fs.rmSync(path.join(CACHE_DIR, String(id)), { recursive: true, force: true }); } catch (e) {}
           delete man[id]; confirmados++;
           await new Promise(r => setTimeout(r, PAUSA_MS || 220));
