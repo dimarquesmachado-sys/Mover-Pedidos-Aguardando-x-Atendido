@@ -264,6 +264,13 @@ async function listarAtendidos() {
             serieCache[chaveS] = info; mudouCache = true;
           }
         }
+        /* ⚠️ LIMPA O RELÓGIO SEMPRE QUE DESCOBRIU A SÉRIE — inclusive na série 1 (Codex #199).
+           Antes a limpeza só acontecia no ramo do Full confirmado. Um clone visto primeiro
+           SEM nota e depois identificado como série 1 ficava com o `espera:` antigo gravado;
+           passados os 30 min do cache da série, uma consulta que temporariamente não achasse
+           a nota leria aquele carimbo como "6h já se passaram" e MOVERIA o clone protegido,
+           em vez de começar uma espera nova. */
+        if (info) { delete serieCache['espera:' + chaveS]; }
         if (info && String(info.serie) === '1') {
           derrubados.push({ id: idF, nf: info.nf });
           const ix = idsFullVistos.indexOf(idF);
@@ -299,8 +306,6 @@ async function listarAtendidos() {
               venceuEspera.push(String(idF));                   // 6h CONFIRMADAS sem nota: MOVE
             }
           }
-        } else {
-          delete serieCache['espera:' + chaveS];                // descobriu: limpa o relógio
         }
       }
       if (mudouCache) { try { writeJson(SERIE_FILE, serieCache); } catch (e) {} }
