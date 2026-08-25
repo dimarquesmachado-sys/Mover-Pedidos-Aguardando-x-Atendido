@@ -281,7 +281,10 @@ async function listarAtendidos() {
            passados os 30 min do cache da série, uma consulta que temporariamente não achasse
            a nota leria aquele carimbo como "6h já se passaram" e MOVERIA o clone protegido,
            em vez de começar uma espera nova. */
-        if (info) { delete serieCache['espera:' + chaveS]; }
+        /* ⚠️ marcar mudouCache: apagar só na memória não reescreve o _serie_nf.json, e o
+           carimbo velho ressuscita no próximo boot — voltando a autorizar o move do clone
+           protegido. Só marca quando a chave EXISTIA, pra não gravar o arquivo à toa. */
+        if (info && serieCache['espera:' + chaveS]) { delete serieCache['espera:' + chaveS]; mudouCache = true; }
         if (info && String(info.serie) === '1') {
           derrubados.push({ id: idF, nf: info.nf });
           const ix = idsFullVistos.indexOf(idF);
