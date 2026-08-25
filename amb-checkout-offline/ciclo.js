@@ -730,7 +730,15 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
     if (listaOk && !listaCompleta) {
       console.log('[AMBBKP] ⚠️ lista do Bling veio INCOMPLETA (falhou no meio da paginação) — reconciliação PULADA, cache preservado');
     }
-    if (listaOk && listaCompleta && atendidos.length > 0) {
+    /* 25/08 (fantasmas imortais): a guarda `atendidos.length > 0` protegia o cache de uma
+       lista vazia suspeita — mas na AMB a fila fica LEGITIMAMENTE vazia (todos os pedidos de
+       ATENDIDO são Full e somem no filtro), então a reconciliação era PULADA em silêncio em
+       TODO ciclo e pasta órfã nunca saía (5 fantasmas com dias de idade, um deles o card
+       "sem etiqueta" da Denise). Agora ela roda também com fila vazia DESDE QUE haja cache a
+       conferir — e, nesse caso, SÓ pelo caminho da confirmação individual lá embaixo: pedido
+       a pedido no Bling, nunca remoção em massa apoiada numa lista vazia. O espírito da
+       guarda fica: lista vazia continua não podendo apagar nada sozinha. */
+    if (listaOk && listaCompleta && (atendidos.length > 0 || Object.keys(man).length > 0)) {
       const idsAtuais = new Set(atendidos.map(p => String(p.id)));
       // Pedidos que estão em ATENDIDO mas foram OCULTADOS pelo filtro Full
       // (unidade de negócio de fulfillment) não podem contar como "sumiram":
@@ -763,7 +771,8 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
       // TRAVA DE SEGURANÇA: sumir com muita coisa de uma vez quase sempre é lista ruim do Bling,
       // não 40% dos pedidos despachados no mesmo minuto. Melhor não remover do que apagar etiqueta anexada.
       const limiteSeguro = Math.max(5, Math.ceil(Object.keys(man).length * 0.4));
-      if (aRemover.length > limiteSeguro) {
+      /* fila vazia => confirmação individual OBRIGATÓRIA, qualquer que seja a proporção */
+      if (aRemover.length > limiteSeguro || atendidos.length === 0) {
         // 02/08 — ANTES: abortava TUDO e o cache nunca encolhia. Numa empresa de volume menor a
         // remoção normal passa dos 40% com facilidade (AMB: 49 de 71 = 69%), então a trava disparava
         // em TODO ciclo. Pior: pedido preso no cache também nunca mais era reprocessado, porque a
