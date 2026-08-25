@@ -810,7 +810,14 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
            inclusive os preservados — antes só o removido pausava e os "ainda ATENDIDO"
            saíam em rajada, furando o ritmo e convidando 429. */
         let confirmados = 0, mantidos = 0, semResposta = 0, adiados = 0, mudo = false;
-        const loteConf = aRemover.slice(0, 15);
+        /* Codex #205 r5: fatia FIXA daria fome — os mesmos 15 primeiros seriam tentados em
+           todo ciclo (a ordem do manifest é estável) e, se preservados, o 16º em diante
+           nunca seria conferido apesar de "adiado". A janela agora GIRA com o relógio:
+           cada ciclo começa de um ponto diferente da lista, e em poucos ciclos todo
+           candidato passa pela conferência. */
+        const giroC = aRemover.length ? Math.floor(Date.now() / 60000) % aRemover.length : 0;
+        const girado = aRemover.slice(giroC).concat(aRemover.slice(0, giroC));
+        const loteConf = girado.slice(0, 15);
         adiados = aRemover.length - loteConf.length;
         for (let iC = 0; iC < loteConf.length; iC++) {
           const id = loteConf[iC];
