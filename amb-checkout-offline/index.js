@@ -1735,7 +1735,13 @@ function routes(readBody) {
       const acaoS = urlObj.searchParams.get('acao') || 'status';
 
       if (acaoS !== 'iniciar') {
-        if (!_sondaClonesJob) { json(res, 200, { ok: true, status: 'nenhuma varredura iniciada (ou o serviço reiniciou) — chame com &acao=iniciar' }); return true; }
+        if (!_sondaClonesJob) {
+          /* Codex #201 r2: isto NÃO pode ser ok:true — depois de um restart, quem segue o
+             contrato "recarregue até rodando:false" leria a varredura PERDIDA como
+             concluída (rodando ausente ≈ false). Estado terminal explícito e sem sucesso. */
+          json(res, 200, { ok: false, rodando: false, perdida: true, status: 'nenhuma varredura em memória (não iniciada, ou o serviço reiniciou no meio) — chame com &acao=iniciar' });
+          return true;
+        }
         const j = _sondaClonesJob;
         json(res, 200, {
           /* Codex #201: truncada NÃO é sucesso — quem olha só o ok decidiria em cima de
