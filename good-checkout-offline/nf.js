@@ -59,15 +59,23 @@ async function acharNFporRange(pedidoId) {
 
    Devolve { numero, serie } ou null. null = não sei, e quem chama mantém o conservador. */
 async function serieDaNFdoPedido(id, signal) {   // signal opcional: sem prazo, um Bling mudo pendura o await pra sempre
+  /* ⚠️ A HIDRATAÇÃO TAMBÉM PODE FALHAR, e isso NÃO é "sem NF" (Codex #199, 2ª rodada).
+     Se o endpoint de vínculo devolve um resumo sem `serie` mas o /nfe/{id} leva 429, a nota
+     EXISTE e eu só não consegui ler a série. Reportar isso como semNF faria o relógio de 6h
+     começar (ou vencer) e mover um clone série 1 sem nunca ter lido a série dele — o mesmo
+     erro do apontamento anterior, sobrevivendo num segundo ponto. `falhou` sobe pra quem
+     chama, e ali vira { falhou: true }. */
   const hidrata = async (nf) => {
     if (!nf) return null;
     if (nf.serie != null && String(nf.serie) !== '') return { numero: nf.numero || null, serie: String(nf.serie) };
     if (!(Number(nf.id) > 0)) return null;
     await sleep(PAUSA_MS);
-    const nd = await blingGet(`/nfe/${nf.id}`, 3, signal);
-    const det = nd && nd.data && nd.data.data;
+    let nd = null;
+    try { nd = await blingGet(`/nfe/${nf.id}`, 3, signal); } catch (e) { return { falhou: true }; }
+    if (!nd || nd.ok === false) return { falhou: true };          // a nota existe, a consulta é que não foi
+    const det = nd.data && nd.data.data;
     if (det && det.serie != null) return { numero: det.numero || nf.numero || null, serie: String(det.serie) };
-    return null;
+    return { falhou: true };   // veio resposta sem série: não sei a série, não é "sem NF"
   };
   /* ⚠️ DEVOLVE O MOTIVO, não só null (25/08, Codex #199). Antes "o pedido não tem NF" e
      "não consegui perguntar ao Bling" chegavam iguais em quem chama — e o prazo de espera
@@ -83,6 +91,7 @@ async function serieDaNFdoPedido(id, signal) {   // signal opcional: sem prazo, 
       let nf = r.data && r.data.data;
       if (Array.isArray(nf)) nf = nf[0];
       const h = await hidrata(nf);
+      if (h && h.falhou) return { falhou: true };
       if (h) return h;
     }
     await sleep(PAUSA_MS);
@@ -96,6 +105,7 @@ async function serieDaNFdoPedido(id, signal) {   // signal opcional: sem prazo, 
       const nd = await blingGet(`/nfe/${nfId}`, 3, signal);
       const nf2 = nd && nd.data && nd.data.data;
       const h2 = await hidrata(nf2);
+      if (h2 && h2.falhou) return { falhou: true };
       if (h2) return h2;
     }
   } catch (e) { return { falhou: true }; }
