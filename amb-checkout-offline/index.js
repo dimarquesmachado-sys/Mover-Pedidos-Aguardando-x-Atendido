@@ -1715,6 +1715,63 @@ function routes(readBody) {
        esta rota faz.
 
        Uso: /amb-checkout-offline/despachados-por-engano?k=ADMIN_KEY[&dias=10] */
+    /* ═══ SONDA TEMPORÁRIA (25/08): clones de garantia escondidos como Full ══════════════
+       Pergunta pontual do dono: "quais NFs de agosto são SÉRIE 1 mas estão na unidade
+       AMB - FULL MLivre?" — ou seja, clones de reposição que nasceram carimbados como Full.
+       SÓ LISTA, não altera nada. Remover quando não for mais útil.
+       Uso: /amb-checkout-offline/sonda-clones-full?k=ADMIN_KEY[&de=2026-08-01&ate=2026-08-31][&un=2839148] */
+    if (method === 'GET' && p === '/amb-checkout-offline/sonda-clones-full') {
+      const kS = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      if (!(process.env.ADMIN_KEY && kS === process.env.ADMIN_KEY)) { json(res, 404, { error: 'not found' }); return true; }
+      const deS  = urlObj.searchParams.get('de')  || '2026-08-01';
+      const ateS = urlObj.searchParams.get('ate') || '2026-08-31';
+      const unS  = String(urlObj.searchParams.get('un') || '2839148');   // AMB - FULL MLivre
+      const clones = [], naoResolvidos = [];
+      let vistos = 0, daUnidade = 0;
+      try {
+        for (let pag = 1; pag <= 40; pag++) {
+          const rS = await blingGet(`/pedidos/vendas?dataEmissaoInicial=${deS}&dataEmissaoFinal=${ateS}&pagina=${pag}&limite=100`);
+          if (!rS || rS.ok === false) {
+            json(res, 200, { ok: false, erro: 'o Bling falhou na página ' + pag + ' — varredura INCOMPLETA, rode de novo', parcial: { vistos, clones_ate_aqui: clones.length } });
+            return true;
+          }
+          const arrS = (rS.data && rS.data.data) || [];
+          if (!arrS.length) break;
+          for (const ped of arrS) {
+            vistos++;
+            // mesma regra do ciclo: só a unidade da LOJA identifica Full
+            const unP = (ped.loja && ped.loja.unidadeNegocio && ped.loja.unidadeNegocio.id) || null;
+            if (String(unP) !== unS) continue;
+            daUnidade++;
+            let nfS = null;
+            try { nfS = await serieDaNFdoPedido(ped.id); } catch (e) { nfS = null; }
+            await sleep(PAUSA_MS);
+            if (nfS && nfS.serie != null) {
+              if (String(nfS.serie) === '1') clones.push({ pedido: ped.numero, pedido_id: String(ped.id), nf: nfS.numero, situacao: (ped.situacao && ped.situacao.id) || null });
+            } else if (nfS && nfS.semNF) {
+              // sem nota ainda: não é clone (o clone tem NF automática desde o salvar)
+            } else {
+              naoResolvidos.push({ pedido: ped.numero, motivo: 'série não lida (Bling falhou) — rode de novo mais tarde' });
+            }
+          }
+          if (arrS.length < 100) break;
+          await sleep(PAUSA_MS);
+        }
+      } catch (e) {
+        json(res, 200, { ok: false, erro: String(e.message || e).slice(0, 180), parcial: { vistos, clones_ate_aqui: clones.length } });
+        return true;
+      }
+      json(res, 200, {
+        ok: true, janela: { de: deS, ate: ateS }, unidade: unS,
+        resumo: { pedidos_vistos: vistos, da_unidade_full: daUnidade,
+                  clones_serie_1: clones.length, nao_resolvidos: naoResolvidos.length },
+        nfs_serie_1: clones.map(c => c.nf),
+        detalhe: clones,
+        nao_resolvidos: naoResolvidos
+      });
+      return true;
+    }
+
     if (method === 'GET' && p === '/amb-checkout-offline/despachados-por-engano') {
       const kE = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
       const sE = validarSessao(req.headers['cookie']);
