@@ -31,9 +31,12 @@ const path = require('path');
 const fetch = require('node-fetch');
 
 const base = require('./base');
-const { CACHE_DIR, PAUSA_MS, CONFERIDOS_FILE, sleep, readJson, writeJson, json, ehAdmin, blingGet } = base;
-const { nfDoPedido } = require('./nf');
-const { detalhePedido } = require('./ciclo');
+/* ⚠️ 25/08 (Codex #197): estes NÃO podem ficar amarrados aqui. Trocar só o filtro do
+   Supabase deixava a GOOD lendo CACHE_DIR, CONFERIDOS_FILE, ehAdmin (GIRABKP_ADMIN) e o
+   cliente Bling DA GIRASSOL — ou seja, custo, SKU, admin e pedidos da empresa errada.
+   Agora cada um vem do ctx; o fallback abaixo é o módulo local, que mantém a Girassol
+   idêntica pra quem chama sem passar nada. */
+const { PAUSA_MS, sleep, json } = base;   // não dependem de empresa
 
 function rotasHistorico(ctx) {
   const { validarSessao, supaCfg, DEFAULT_ALIQ_BK } = ctx;
@@ -43,6 +46,15 @@ function rotasHistorico(ctx) {
      Os padrões abaixo mantêm a Girassol byte-a-byte igual pra quem chama sem passar nada. */
   const EMPRESA = String(ctx.empresa || 'girassol');
   const MODULO  = String(ctx.modulo  || 'girassol-backup-offline');
+  /* dependências DA EMPRESA — ctx manda; sem ctx, cai no módulo local (Girassol) */
+  const CACHE_DIR       = ctx.CACHE_DIR       || base.CACHE_DIR;
+  const CONFERIDOS_FILE = ctx.CONFERIDOS_FILE || base.CONFERIDOS_FILE;
+  const readJson        = ctx.readJson        || base.readJson;
+  const writeJson       = ctx.writeJson       || base.writeJson;
+  const ehAdmin         = ctx.ehAdmin         || base.ehAdmin;
+  const blingGet        = ctx.blingGet        || base.blingGet;
+  const nfDoPedido      = ctx.nfDoPedido      || require('./nf').nfDoPedido;
+  const detalhePedido   = ctx.detalhePedido   || require('./ciclo').detalhePedido;
   const R = (nome) => '/' + MODULO + '/' + nome;                     // caminho da rota
   const SUPA_EMP = '?empresa=eq.' + encodeURIComponent(EMPRESA);     // filtro do Supabase
       /* 21/08 — sobreposição do custo MANUAL, atrás do Bling. Codex (P2): eu tinha posto isto só
@@ -83,7 +95,18 @@ function rotasHistorico(ctx) {
         }
         return b;
       };
-  const _histCache = ctx.histCache;   // mesma referência do index — NÃO copiar
+  const _histCacheBruto = ctx.histCache;   // mesma referência do index — NÃO copiar
+  /* ⚠️ TODA chave leva a empresa. Sem isso, duas empresas compartilhando o mesmo objeto
+     de cache fariam a consulta de uma devolver o resultado JÁ PRONTO da outra por até 30
+     min — vazamento de venda entre CNPJs. É o mesmo erro do cache do catálogo em
+     lib/custo.js (Codex #197). */
+  const _pfx = EMPRESA + '|';
+  const _histCache = new Proxy(_histCacheBruto || {}, {
+    get:            (o, k) => (typeof k === 'string' ? o[_pfx + k] : o[k]),
+    set:            (o, k, v) => { if (typeof k === 'string') o[_pfx + k] = v; else o[k] = v; return true; },
+    has:            (o, k) => (typeof k === 'string' ? (_pfx + k) in o : k in o),
+    deleteProperty: (o, k) => { if (typeof k === 'string') delete o[_pfx + k]; else delete o[k]; return true; }
+  });
 
   return async function handleHistorico(req, res, urlObj) {
     const { method } = req;
@@ -553,7 +576,7 @@ function rotasHistorico(ctx) {
       const itens = Object.keys(conf).map(id => ({ id, ...conf[id] }))
         .sort((a, b) => String(b.conferido_em || '').localeCompare(String(a.conferido_em || '')));
       const reenvios = readJson(CONFERIDOS_FILE.replace('conferidos.json', 'reenvios.json'), {});
-      const reenvioDireto = String(process.env.CHECKOUT_REENVIO_DIRETO_EMPRESAS || '').toLowerCase().split(',').map(s => s.trim()).includes('girassol');
+      const reenvioDireto = String(process.env.CHECKOUT_REENVIO_DIRETO_EMPRESAS || '').toLowerCase().split(',').map(s => s.trim()).includes(EMPRESA);
       const vendasB = Object.values(readJson(path.join(CACHE_DIR, '_vendas_dia.json'), {}));
       // CANCELADO PRONTO (27/07): o servidor decide, o navegador só desenha. Antes o dashboard tentava
       // casar cada pedido bipado com a lista de vendas pra descobrir se estava cancelado — se o pedido
