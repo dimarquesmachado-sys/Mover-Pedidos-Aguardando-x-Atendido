@@ -162,8 +162,9 @@ async function listarAtendidos() {
   return { ok: fetchOk, completa, pedidos: out, paginas_refeitas: paginasRefeitas, falhou_na_pagina: falhouNaPagina };
 }
 
-async function detalhePedido(id) {
-  const { data } = await blingGet(`/pedidos/vendas/${id}`);
+async function detalhePedido(id, signal) {
+  // signal opcional: sem prazo, uma resposta que nunca chega pendura o await pra sempre
+  const { data } = await blingGet(`/pedidos/vendas/${id}`, 3, signal);
   return data && data.data;
 }
 

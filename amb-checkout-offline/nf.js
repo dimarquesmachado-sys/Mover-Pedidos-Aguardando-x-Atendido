@@ -58,19 +58,19 @@ async function acharNFporRange(pedidoId) {
       proteção em silêncio.
 
    Devolve { numero, serie } ou null. null = não sei, e quem chama mantém o conservador. */
-async function serieDaNFdoPedido(id) {
+async function serieDaNFdoPedido(id, signal) {   // signal opcional: sem prazo, um Bling mudo pendura o await pra sempre
   const hidrata = async (nf) => {
     if (!nf) return null;
     if (nf.serie != null && String(nf.serie) !== '') return { numero: nf.numero || null, serie: String(nf.serie) };
     if (!(Number(nf.id) > 0)) return null;
     await sleep(PAUSA_MS);
-    const nd = await blingGet(`/nfe/${nf.id}`);
+    const nd = await blingGet(`/nfe/${nf.id}`, 3, signal);
     const det = nd && nd.data && nd.data.data;
     if (det && det.serie != null) return { numero: det.numero || nf.numero || null, serie: String(det.serie) };
     return null;
   };
   try {
-    const r = await blingGet(`/pedidos/vendas/${id}/nfe`);
+    const r = await blingGet(`/pedidos/vendas/${id}/nfe`, 3, signal);
     if (r.ok) {
       let nf = r.data && r.data.data;
       if (Array.isArray(nf)) nf = nf[0];
@@ -78,13 +78,13 @@ async function serieDaNFdoPedido(id) {
       if (h) return h;
     }
     await sleep(PAUSA_MS);
-    const d = await blingGet(`/pedidos/vendas/${id}`);
+    const d = await blingGet(`/pedidos/vendas/${id}`, 3, signal);
     const det = d && d.data && d.data.data;
     const raw = det ? (det.notaFiscal != null ? det.notaFiscal : det.nfe) : null;
     const nfId = (raw && typeof raw === 'object') ? raw.id : raw;
     if (Number(nfId) > 0) {
       await sleep(PAUSA_MS);
-      const nd = await blingGet(`/nfe/${nfId}`);
+      const nd = await blingGet(`/nfe/${nfId}`, 3, signal);
       const nf2 = nd && nd.data && nd.data.data;
       const h2 = await hidrata(nf2);
       if (h2) return h2;
