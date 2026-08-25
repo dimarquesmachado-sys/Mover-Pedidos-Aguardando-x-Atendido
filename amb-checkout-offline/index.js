@@ -1761,7 +1761,7 @@ function routes(readBody) {
           (e) => { clearTimeout(tt); rejeite(e); }
         );
       });
-      const clones = [], naoResolvidos = [];
+      const clones = [], naoResolvidos = [], descartadas = [];
       let vistos = 0, daUnidade = 0, truncada = false;
       try {
         for (let pag = 1; pag <= 40; pag++) {
@@ -1770,7 +1770,14 @@ function routes(readBody) {
             json(res, 200, { ok: false, erro: 'o Bling falhou na página ' + pag + ' — varredura INCOMPLETA, rode de novo', parcial: { vistos, clones_ate_aqui: clones.length } });
             return true;
           }
-          const arrS = (rS.data && rS.data.data) || [];
+          const arrS = (rS.data && rS.data.data) || null;
+          /* Codex #200 r5: 2xx com corpo malformado vira data:null no blingGet — sem esta
+             checagem, isso viraria "página vazia" e a rota diria ok:true com lista completa
+             de mentira. Forma inesperada = varredura INCOMPLETA, nunca sucesso. */
+          if (!Array.isArray(arrS)) {
+            json(res, 200, { ok: false, erro: 'resposta do Bling em forma inesperada na página ' + pag + ' — varredura INCOMPLETA, rode de novo', parcial: { vistos, clones_ate_aqui: clones.length } });
+            return true;
+          }
           if (!arrS.length) break;
           for (const ped of arrS) {
             vistos++;
@@ -1798,7 +1805,19 @@ function routes(readBody) {
             try { nfS = await comPrazoS(sig => serieDaNFdoPedido(ped.id, sig)); } catch (e) { nfS = null; }
             await sleep(PAUSA_MS);
             if (nfS && nfS.serie != null) {
-              if (String(nfS.serie) === '1') clones.push({ pedido: ped.numero, pedido_id: String(ped.id), nf: nfS.numero, situacao: (ped.situacao && ped.situacao.id) || null });
+              if (String(nfS.serie) === '1') {
+                /* Pedido do dono (25/08): NF cancelada não entra na relação. O código de
+                   "cancelada" não está mapeado na casa e eu NÃO vou chutar — mas
+                   autorizada=2 está PROVADO em produção (nfFluxos.js). Então: só entra na
+                   lista a série 1 com NF AUTORIZADA; qualquer outra situação (cancelada,
+                   pendente, rejeitada…) vai pra `descartadas_nao_autorizadas` com o código
+                   à vista — nada some em silêncio. Situação ilegível fica na lista
+                   principal marcada situacao_nf:null, porque "não sei" não é "cancelada". */
+                const sitNF = nfS.situacao != null ? Number(nfS.situacao) : null;
+                const linhaC = { pedido: ped.numero, pedido_id: String(ped.id), nf: nfS.numero, situacao_nf: sitNF, situacao_pedido: (ped.situacao && ped.situacao.id) || null };
+                if (sitNF === null || sitNF === 2) clones.push(linhaC);
+                else descartadas.push(linhaC);
+              }
             } else if (nfS && nfS.semNF) {
               // sem nota ainda: não é clone (o clone tem NF automática desde o salvar)
             } else {
@@ -1820,9 +1839,10 @@ function routes(readBody) {
         aviso: truncada ? 'INCOMPLETA: mais de 4.000 pedidos no período (teto de 40 páginas) — divida a janela com &de=/&ate=' : undefined,
         janela: { de: deS, ate: ateS }, unidade: unS,
         resumo: { pedidos_vistos: vistos, da_unidade_full: daUnidade,
-                  clones_serie_1: clones.length, nao_resolvidos: naoResolvidos.length },
+                  clones_serie_1: clones.length, descartadas_nao_autorizadas: descartadas.length, nao_resolvidos: naoResolvidos.length },
         nfs_serie_1: clones.map(c => c.nf),
         detalhe: clones,
+        descartadas_nao_autorizadas: descartadas,
         nao_resolvidos: naoResolvidos
       });
       return true;
