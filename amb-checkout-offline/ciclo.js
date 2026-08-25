@@ -183,6 +183,20 @@ async function listarAtendidos() {
   let pedidos = out;
   const idsFullVistos = [];   // ids que se confirmaram Full (p/ expurgar do cache antigo)
   let ocultosSemSerie = [];   // Full pela unidade, mas série não descoberta: esconde da fila, NÃO move
+  /* ⚠️ 25/08, corrigido À NOITE com o dono: o ML FULL EMITE SÉRIE 1 — POR NÓS.
+     A regra de ontem ("série 1 = emissão própria = NÃO é Full") nasceu do padrão da Shopee
+     e Magalu Full, onde a NF vem ESPELHADA do marketplace (série ≠1). No ML a premissa é
+     FALSA: as 407 notas de agosto da filial Full MLivre são todas série 1, emitidas pela
+     matriz — e o ML posta do galpão dele mesmo assim. Resultado da regra antiga: venda Full
+     real do ML era "desescondida" e aparecia na fila do estoquista como sem-etiqueta (4
+     pedidos em <24h de deploy, e ia crescer um a cada venda).
+     Nas unidades listadas aqui, série 1 NÃO derruba o Full — ela é a nota final do pedido,
+     e confirma o move. O custo assumido (decisão do dono): clone de garantia de venda ML
+     Full volta a ser movido como era antes do incidente — não há como separar pelo número
+     da série, já que ambos são série 1. Shopee/Magalu Full seguem com a trava intacta. */
+  const UN_EMISSAO_PROPRIA = new Set(String(process.env.AMBBKP_UN_FULL_EMISSAO_PROPRIA || '2839148')
+    .split(',').map(s => s.trim()).filter(Boolean));
+  const unPorFull = new Map();                                 // id do pedido -> unidade que o classificou
   if (UN_FULL.length) {
     const setFull = new Set(UN_FULL);
     // lê a unidade das duas formas possíveis na lista
@@ -202,7 +216,7 @@ async function listarAtendidos() {
     for (const p of out) {
       const un = unDaLista(p);
       if (un != null) {
-        if (setFull.has(String(un))) { ocultosFull++; idsFullVistos.push(String(p.id)); }
+        if (setFull.has(String(un))) { ocultosFull++; idsFullVistos.push(String(p.id)); unPorFull.set(String(p.id), String(un)); }
       } else if (p && p.loja) {
         indefinidos.push(p);   // TEM loja mas a lista omitiu a unidade → precisa do detalhe
       } else {
@@ -219,7 +233,7 @@ async function listarAtendidos() {
         const det = await detalhePedido(p.id);
         // mesma regra do unDaLista: só a unidade da LOJA vale (ver o porquê logo acima)
         const un = (det && det.loja && det.loja.unidadeNegocio && det.loja.unidadeNegocio.id) || null;
-        if (un != null && setFull.has(String(un))) { ocultosFull++; idsFullVistos.push(String(p.id)); idsFullSet.add(String(p.id)); }
+        if (un != null && setFull.has(String(un))) { ocultosFull++; idsFullVistos.push(String(p.id)); unPorFull.set(String(p.id), String(un)); idsFullSet.add(String(p.id)); }
       } catch (e) { /* se o detalhe falhar, não esconde — melhor mostrar que sumir por engano */ }
       await sleep(PAUSA_MS);
     }
@@ -285,7 +299,7 @@ async function listarAtendidos() {
            carimbo velho ressuscita no próximo boot — voltando a autorizar o move do clone
            protegido. Só marca quando a chave EXISTIA, pra não gravar o arquivo à toa. */
         if (info && serieCache['espera:' + chaveS]) { delete serieCache['espera:' + chaveS]; mudouCache = true; }
-        if (info && String(info.serie) === '1') {
+        if (info && String(info.serie) === '1' && !UN_EMISSAO_PROPRIA.has(String(unPorFull.get(String(idF)) || ''))) {
           derrubados.push({ id: idF, nf: info.nf });
           const ix = idsFullVistos.indexOf(idF);
           if (ix >= 0) idsFullVistos.splice(ix, 1);
