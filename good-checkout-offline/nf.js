@@ -73,6 +73,7 @@ async function serieDaNFdoPedido(id, signal) {   // signal opcional: sem prazo, 
 
      Devolve: { serie } · { semNF:true } (o Bling RESPONDEU e não há nota) · { falhou:true } */
   let falhou = false;                                  // alguma chamada não foi?
+  let nfVinculada = false;                             // o Bling CONFIRMOU que existe uma NF ligada ao pedido?
   let respondeu = false;                               // alguma chamada respondeu?
   const pedir = async (url) => {
     try {
@@ -91,6 +92,7 @@ async function serieDaNFdoPedido(id, signal) {   // signal opcional: sem prazo, 
   let achou = serieDe(nf);
   if (achou) return achou;
   if (nf && Number(nf.id) > 0) {                       // veio resumo sem série → busca o detalhe
+    nfVinculada = true;
     await sleep(PAUSA_MS);
     achou = serieDe(await pedir(`/nfe/${nf.id}`));
     if (achou) return achou;
@@ -103,6 +105,7 @@ async function serieDaNFdoPedido(id, signal) {   // signal opcional: sem prazo, 
     const raw = det ? (det.notaFiscal != null ? det.notaFiscal : det.nfe) : null;
     const nfId = (raw && typeof raw === 'object') ? raw.id : raw;
     if (Number(nfId) > 0) {
+      nfVinculada = true;
       await sleep(PAUSA_MS);
       achou = serieDe(await pedir(`/nfe/${nfId}`));
       if (achou) return achou;
@@ -112,6 +115,12 @@ async function serieDaNFdoPedido(id, signal) {   // signal opcional: sem prazo, 
   /* Só posso afirmar "não tem nota" se NENHUMA chamada falhou. Basta uma ter falhado pra
      virar `falhou` — na dúvida o relógio não corre e a gente tenta de novo no próximo ciclo. */
   if (falhou) return { falhou: true };
+  /* ⚠️ Codex #199 (P1): se o Bling CONFIRMOU que existe NF vinculada mas a série não veio
+     em nenhuma leitura, isso NÃO é "sem nota" — é "não consegui ler a série de uma nota que
+     existe". Devolver semNF aqui deixaria o relógio das 6h correr e o pedido ser movido sem
+     a série NUNCA ter sido lida: se fosse um clone série 1, é o incidente de 24/08 voltando
+     por outra porta. Falha = não conta tempo, tenta de novo. */
+  if (nfVinculada) return { falhou: true };
   return respondeu ? { semNF: true } : { falhou: true };
 }
 

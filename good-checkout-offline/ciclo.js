@@ -298,15 +298,31 @@ async function listarAtendidos() {
           if (_consultaFalhou.has(String(idF))) {
             semResposta.push(String(idF));                      // não perguntei ainda: espera, sem contar tempo
           } else {
+            /* ⚠️ Codex #199 (P1): o relógio conta TEMPO CONFIRMADO, não tempo de parede.
+               O desenho anterior guardava só o `desde`: se o marcador nascesse e viessem 6h
+               de 429, a PRIMEIRA resposta boa depois da pane encontraria o carimbo velho e
+               moveria o pedido na hora — 6h "vencidas" sem NENHUMA confirmação no meio.
+               Agora cada resposta "sem NF" soma ao acumulado apenas o intervalo desde a
+               confirmação anterior, com teto de 30 min por passo: ciclos normais (10 min)
+               somam inteiros; uma pane de horas entre duas confirmações soma no máximo 30
+               min. Falha continua sem tocar no marcador (ramo do _consultaFalhou acima).
+               Marcador antigo, só com `desde`, recomeça do zero — o lado seguro. */
             const espera = serieCache['espera:' + chaveS];
-            if (!espera) {
-              serieCache['espera:' + chaveS] = { desde: Date.now() };
+            const agoraE = Date.now();
+            if (!espera || !espera.ult) {
+              serieCache['espera:' + chaveS] = { desde: agoraE, ult: agoraE, acum: 0 };
               mudouCache = true;
               semResposta.push(String(idF));                    // 1ª confirmação de "sem NF": começa o relógio
-            } else if ((Date.now() - Number(espera.desde)) < 6 * 60 * 60 * 1000) {
-              semResposta.push(String(idF));                    // dentro do prazo: ainda espera
             } else {
-              venceuEspera.push(String(idF));                   // 6h CONFIRMADAS sem nota: MOVE
+              const passo = Math.max(0, Math.min(agoraE - Number(espera.ult), 30 * 60 * 1000));
+              espera.acum = Number(espera.acum || 0) + passo;
+              espera.ult = agoraE;
+              mudouCache = true;
+              if (espera.acum < 6 * 60 * 60 * 1000) {
+                semResposta.push(String(idF));                  // ainda não somou 6h confirmadas
+              } else {
+                venceuEspera.push(String(idF));                 // 6h CONFIRMADAS sem nota: MOVE
+              }
             }
           }
         }
@@ -317,7 +333,15 @@ async function listarAtendidos() {
           derrubados.map(d => `pedido ${d.id}/NF ${d.nf}`).join(', '));
       }
       if (venceuEspera.length) {
-        console.log(`[GOODBKP] série não veio em 6h — movendo assim mesmo (a unidade diz Full e a NF do marketplace não chegou): ` + venceuEspera.join(', '));
+        /* Codex #199 (P2): na GOOD o destino vem DESLIGADO por padrão (SIT_DESPACHADOS=0,
+           id da conta nunca configurado) e o bloco do move lá embaixo nem roda. Anunciar
+           "movendo" aqui mentiria a cada ciclo, escondendo exatamente a condição de pedido
+           preso que este log existe pra diagnosticar. */
+        if (SIT_DESPACHADOS) {
+          console.log(`[GOODBKP] série não veio em 6h — movendo assim mesmo (a unidade diz Full e a NF do marketplace não chegou): ` + venceuEspera.join(', '));
+        } else {
+          console.log(`[GOODBKP] série não veio em 6h em ${venceuEspera.length} pedido(s), mas o move está DESLIGADO (GOODBKP_SIT_DESPACHADOS não configurado) — ficam em ATENDIDO: ` + venceuEspera.join(', '));
+        }
       }
       if (semResposta.length) {
         console.log(`[GOODBKP] série NÃO descoberta em ${semResposta.length} pedido(s) — NÃO vou mover (fica em ATENDIDO até dar pra conferir): ` + semResposta.join(', '));
