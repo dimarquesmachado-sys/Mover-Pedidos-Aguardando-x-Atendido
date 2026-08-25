@@ -1813,9 +1813,22 @@ function routes(readBody) {
                    pendente, rejeitada…) vai pra `descartadas_nao_autorizadas` com o código
                    à vista — nada some em silêncio. Situação ilegível fica na lista
                    principal marcada situacao_nf:null, porque "não sei" não é "cancelada". */
-                const sitNF = nfS.situacao != null ? Number(nfS.situacao) : null;
+                let sitNF = nfS.situacao != null ? Number(nfS.situacao) : null;
+                /* Codex #200 r6: o resumo do /pedidos/vendas/{id}/nfe às vezes traz a série
+                   mas OMITE a situação — uma cancelada entraria na lista que existe pra
+                   excluí-las. Situação omitida → hidrata o detalhe da NF (só acontece nos
+                   série 1, que são poucos); ainda ilegível → nao_resolvidos, nunca a lista. */
+                if (sitNF === null && nfS.nfId) {
+                  try {
+                    const rNF = await comPrazoS(sig => blingGet(`/nfe/${nfS.nfId}`, 3, sig));
+                    const dNF = rNF && rNF.ok !== false && rNF.data && rNF.data.data;
+                    if (dNF && dNF.situacao != null) sitNF = Number(dNF.situacao.id || dNF.situacao);
+                  } catch (e) { /* fica null e cai no não-resolvido abaixo */ }
+                  await sleep(PAUSA_MS);
+                }
                 const linhaC = { pedido: ped.numero, pedido_id: String(ped.id), nf: nfS.numero, situacao_nf: sitNF, situacao_pedido: (ped.situacao && ped.situacao.id) || null };
-                if (sitNF === null || sitNF === 2) clones.push(linhaC);
+                if (sitNF === 2) clones.push(linhaC);
+                else if (sitNF === null) naoResolvidos.push({ pedido: ped.numero, nf: nfS.numero, motivo: 'série 1, mas a situação da NF não veio nem no detalhe — rode de novo' });
                 else descartadas.push(linhaC);
               }
             } else if (nfS && nfS.semNF) {
