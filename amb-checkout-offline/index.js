@@ -1696,13 +1696,44 @@ function routes(readBody) {
          o carimbo e apareceria como "movido por engano" — e como a resposta manda o admin
          mover cada listado pra ATENDIDO, um falso positivo aqui vira trabalho errado na mão.
          Melhor não listar do que listar errado. */
-      const RETENCAO_CONF_DIAS = 30;
+      /* ⚠️ 28, não 30. A purga do conferidos apaga com timestamp EXATO de 30 dias rolantes,
+         mas o dataISO() corta a data pura — então pedir 30 dias faz a consulta pegar o dia da
+         borda INTEIRO, e os pedidos da parte da manhã desse dia já perderam a prova de
+         bipagem. Eles apareceriam como "engano" e o admin iria mexer neles à toa. Dois dias
+         de folga cobrem a diferença com sobra. */
+      const RETENCAO_CONF_DIAS = 28;
       const diasPedido = Number(urlObj.searchParams.get('dias')) || 10;
       const diasE = Math.min(RETENCAO_CONF_DIAS, Math.max(1, diasPedido));
       const limitouJanela = diasPedido > RETENCAO_CONF_DIAS;
       const UN_FULL_E = String(process.env.AMBBKP_UN_FULL || '').split(',').map(x => x.trim()).filter(Boolean);
       const setFullE = new Set(UN_FULL_E);
-      const confE = readJson(CONFERIDOS_FILE, {});
+
+      /* ⚠️ FALHA FECHADA nas duas provas de que esta rota depende. Ela não altera nada, mas
+         a resposta manda o admin mover cada listado pra ATENDIDO — então listar errado vira
+         trabalho errado na mão, e é tão ruim quanto alterar errado.
+         1) sem AMBBKP_UN_FULL não existe classificador: nada seria Full e TODO pedido não
+            bipado viraria "engano", inclusive os Full de verdade.
+         2) readJson devolve {} EM SILÊNCIO se o conferidos.json estiver ausente ou truncado
+            (ele é escrito de forma não atômica, então truncado é falha concreta). Aí todo
+            pedido pareceria "nunca bipado". Melhor recusar do que listar em cima de prova
+            que eu não consegui ler. */
+      if (!UN_FULL_E.length) {
+        json(res, 200, { ok: false, erro: 'AMBBKP_UN_FULL vazia ou inválida — sem ela não dá pra distinguir Full de engano, e a lista sairia toda errada' });
+        return true;
+      }
+      let confE;
+      try {
+        const cruE = fs.readFileSync(CONFERIDOS_FILE, 'utf8');
+        confE = JSON.parse(cruE);
+        if (!confE || typeof confE !== 'object') throw new Error('formato inesperado');
+      } catch (eC) {
+        if (eC && eC.code === 'ENOENT') {
+          json(res, 200, { ok: false, erro: 'conferidos.json não existe — sem a prova de bipagem todo pedido pareceria não bipado; não vou listar' });
+          return true;
+        }
+        json(res, 200, { ok: false, erro: 'não consegui ler o conferidos.json (' + String(eC.message || eC).slice(0, 80) + ') — sem a prova de bipagem a lista sairia errada' });
+        return true;
+      }
 
       /* Toda chamada com prazo. Sem isto, se o Bling aceitar a conexão e parar de responder,
          o await fica pendurado pra sempre e a rota nunca devolve nada — o repo já documenta
@@ -1734,7 +1765,14 @@ function routes(readBody) {
       const TETO_PAG = 40;
       try {
         for (let pag = 1; pag <= TETO_PAG; pag++) {
-          const qsE = `idSituacao=${SIT_DESPACHADOS}&dataEmissaoInicial=${dataISO(iniE)}&dataEmissaoFinal=${dataISO(hojeE)}`;
+          /* ⚠️ PARÂMETROS CERTOS. O repo já documenta isto em ambtotal/blingApi.js desde 28/07:
+             /pedidos/vendas quer dataInicial/dataFinal — com dataEmissaoInicial/Final o Bling
+             IGNORA o filtro e devolve TODOS os pedidos daquela situação, de todos os tempos.
+             Aqui isso seria grave: o `dias` viraria decoração, a varredura pegaria o histórico
+             inteiro, e pedido antigo cuja prova de bipagem já foi purgada apareceria como
+             "movido por engano" — mandando o admin mexer em pedido que estava certo.
+             (o endpoint /nfe usa dataEmissaoInicial de verdade; o de pedidos, não) */
+          const qsE = `idsSituacoes=${SIT_DESPACHADOS}&dataInicial=${dataISO(iniE)}&dataFinal=${dataISO(hojeE)}`;
           const rE = await comPrazo(sig => blingGet(`/pedidos/vendas?${qsE}&pagina=${pag}&limite=100`, 3, sig));
           if (!rE || rE.ok === false) {
             json(res, 200, { ok: false, erro: 'o Bling falhou ao listar (página ' + pag + ') — varredura INCOMPLETA, não use este resultado', parcial: { vistos, encontrados_ate_aqui: suspeitos.length } });
@@ -1743,6 +1781,11 @@ function routes(readBody) {
           const arrE = (rE.data && rE.data.data) || [];
           if (!arrE.length) break;
           for (const ped of arrE) {
+            /* confere a situação AQUI também: o mesmo blingApi.js filtra localmente
+               (`bruto.filter(p => p.situacao?.id === statusId)`) porque a API às vezes devolve
+               pedido de outra situação. Sem isto, um pedido que nem está em DESPACHADOS
+               entraria na lista de "movidos por engano". */
+            if (ped.situacao && String(ped.situacao.id) !== String(SIT_DESPACHADOS)) continue;
             vistos++;
             const idE = String(ped.id);
             let unE = (ped.loja && ped.loja.unidadeNegocio && ped.loja.unidadeNegocio.id) || null;
