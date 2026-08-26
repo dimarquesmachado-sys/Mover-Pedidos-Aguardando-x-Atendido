@@ -79,6 +79,16 @@ async function serieDaNFdoPedido(id, signal) {   // signal opcional: sem prazo, 
   const pedir = async (url) => {
     try {
       const r = await blingGet(url, 3, signal);
+      /* 26/08 (14 Full acampados em ATENDIDO, log "14 falhada(s), sem contar tempo" todo
+         ciclo com o Bling saudável): 404 aqui NÃO é falha — é o Bling RESPONDENDO que o
+         recurso não existe. É o caso NORMAL do Full espelhado: o pedido nunca tem NF
+         emitida dele (a NF vem do marketplace via XML), então /pedidos/vendas/{id}/nfe
+         devolve 404 e a resposta certa é "respondeu, sem dado" → {semNF} → o relógio de
+         6h confirmadas corre e o pedido MOVE ao vencer. Tratar como falha parava o
+         relógio pra sempre = acampamento eterno. Terceira aparição do mesmo padrão hoje
+         (#211/#212: 404 é resposta). A trava do clone série 1 segue intacta: ela mora na
+         leitura da série, não aqui. */
+      if (r && Number(r.status) === 404) { respondeu = true; return null; }
       if (!r || r.ok === false) { falhou = true; return null; }
       respondeu = true;
       return (r.data && r.data.data) || null;
