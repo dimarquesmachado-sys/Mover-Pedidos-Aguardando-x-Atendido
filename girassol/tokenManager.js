@@ -37,8 +37,20 @@ function basicAuth() {
   return 'Basic ' + Buffer.from(`${id}:${sec}`).toString('base64');
 }
 
+/* 26/08 (follow-up prometido no PR #205): Bling/OAuth que aceita a conexão e emudece
+   pendurava este await PARA SEMPRE — e como TODO blingGet espera o garantirToken antes de
+   olhar o próprio sinal, um token mudo pendurava junto qualquer chamada do serviço (o caso
+   que o Codex demonstrou na reconciliação). Prazo de 20s aqui na FONTE: estourou, vira erro
+   comum e o chamador trata como falha de rede — nada fica pendurado indefinidamente. */
+const fetchComPrazo = async (url, opts, ms) => {
+  const ac = new AbortController();
+  const tt = setTimeout(() => ac.abort(), ms || 20000);
+  try { return await fetch(url, { ...(opts || {}), signal: ac.signal }); }
+  finally { clearTimeout(tt); }
+};
+
 async function postOAuth(body) {
-  const resp = await fetch('https://api.bling.com.br/Api/v3/oauth/token', {
+  const resp = await fetchComPrazo('https://api.bling.com.br/Api/v3/oauth/token', {
     method: 'POST',
     headers: {
       Authorization: basicAuth(),
@@ -129,7 +141,7 @@ async function garantirToken() {
 
   // token salvo por versão antiga (sem expira_em): valida com 1 chamada; se 401, renova.
   // Na 1ª renovação o expira_em passa a existir e daí em diante cai no caminho rápido acima.
-  const resp = await fetch('https://api.bling.com.br/Api/v3/produtos?limite=1', {
+  const resp = await fetchComPrazo('https://api.bling.com.br/Api/v3/produtos?limite=1', {
     headers: { Authorization: `Bearer ${access_token}` }
   });
   if (resp.status === 401) {
