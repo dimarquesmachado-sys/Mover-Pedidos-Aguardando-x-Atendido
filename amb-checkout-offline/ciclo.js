@@ -388,8 +388,13 @@ async function listarAtendidos() {
 
 async function detalhePedido(id, signal) {
   // signal opcional: sem prazo, uma resposta que nunca chega pendura o await pra sempre
-  const { data } = await blingGet(`/pedidos/vendas/${id}`, 3, signal);
-  return data && data.data;
+  const r = await blingGet(`/pedidos/vendas/${id}`, 3, signal);
+  /* Codex #211: 404 virava null (= "não respondeu") e um pedido APAGADO no Bling era
+     preservado no cache pra sempre — e, marcado Full, ainda prendia a reconciliação
+     inteira no modo individual todo ciclo. 404 é resposta, e das mais claras: o pedido
+     não existe mais, logo com certeza não está em ATENDIDO. */
+  if (r && Number(r.status) === 404) return { naoExiste: true };
+  return r && r.data && r.data.data;
 }
 
 async function cachearPedido(ped, cacheEan, nfs, kitCache, locC, nfCtx) {
@@ -843,13 +848,23 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
            inteiras nunca são conferidas. O cursor agora PERSISTE em memória e avança pelo
            tamanho REAL do lote: cobertura completa por construção, qualquer que seja o
            cron. Restart zera o cursor — só recomeça a volta, nada se perde. */
-        const giroC = aRemover.length ? (_cursorConfirmacao % aRemover.length) : 0;
-        const girado = aRemover.slice(giroC).concat(aRemover.slice(0, giroC));
-        const loteConf = girado.slice(0, 15);
+        /* Codex #211: os Full-marcados — justamente quem FORÇOU o modo individual — podiam
+           ficar ciclos fora do lote de 15 esperando o cursor sortear a faixa deles. Agora
+           eles entram PRIMEIRO (são poucos por natureza), e o cursor gira só sobre os
+           comuns, preenchendo o resto do lote — a garantia de cobertura dos comuns fica
+           intacta, e o fantasma que abriu o modo é conferido já no primeiro ciclo. */
+        const loteFull = aRemover.filter(id => idsFull.has(String(id))).slice(0, 15);
+        const comunsC = aRemover.filter(id => !idsFull.has(String(id)));
+        const vagas = Math.max(0, 15 - loteFull.length);
+        const giroC = comunsC.length ? (_cursorConfirmacao % comunsC.length) : 0;
+        const girado = comunsC.slice(giroC).concat(comunsC.slice(0, giroC));
+        const loteConf = loteFull.concat(girado.slice(0, vagas));
         adiados = aRemover.length - loteConf.length;
+        let tentadosComuns = 0;
         for (let iC = 0; iC < loteConf.length; iC++) {
           const id = loteConf[iC];
           tentados++;
+          if (!idsFull.has(String(id))) tentadosComuns++;
           let det = null, estourou = false;
           const pd = prazoDet(sig => detalhePedido(id, sig));
           try { det = await pd; }
@@ -863,6 +878,7 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
             break;
           }
           if (!det) { semResposta++; continue; }                                  // Bling não respondeu → preserva
+          if (!det.naoExiste) {                                                   // 404 = apagado no Bling: pula direto pra remoção
           const sitRaw = det.situacao != null ? (det.situacao.id != null ? det.situacao.id : det.situacao) : null;
           /* Codex #205 r2: Number(null), Number('') e Number('   ') são TODOS 0 — finito e
              ≠ ATENDIDO — então qualquer forma vazia de situacao cairia na remoção como se
@@ -876,6 +892,7 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
              forma numérica do "ausente". Status confirmado tem que ser POSITIVO. */
           if (sit <= 0) { semResposta++; continue; }
           if (sit === Number(SIT_ATENDIDO)) { mantidos++; continue; }             // ainda ATENDIDO → preserva
+          }                                                                       // fim do !naoExiste
           try { fs.rmSync(path.join(CACHE_DIR, String(id)), { recursive: true, force: true }); } catch (e) {}
           delete man[id]; confirmados++;
         }
@@ -883,7 +900,7 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
            inteiro fazia o aborto por mudez pular 14 candidatos nunca olhados (com o veneno
            no índice 0, as voltas começariam em 0/15/30/45 e faixas inteiras escapariam).
            Mínimo 1 pra não emperrar eternamente em cima de um candidato que sempre estoura. */
-        _cursorConfirmacao = aRemover.length ? (giroC + Math.max(1, tentados)) % aRemover.length : 0;
+        _cursorConfirmacao = comunsC.length ? (giroC + Math.max(1, tentadosComuns)) % comunsC.length : 0;
         if (confirmados) salvarManifest(man);
         console.log(`[AMBBKP] reconciliação conferida: ${confirmados} removido(s) · ${mantidos} seguem em ATENDIDO · ${semResposta} sem resposta do Bling (preservados) — ${adiados} adiado(s) p/ o próximo ciclo${mudo ? ' — BLING MUDO: conferência ABORTADA neste ciclo, tenta no próximo' : ''}`);
         }
