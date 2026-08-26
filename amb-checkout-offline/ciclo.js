@@ -13,6 +13,8 @@ const { BLING_BASE, CACHE_DIR, SIT_ATENDIDO, SIT_DESPACHADOS, SIT_VERIFICADO, SY
   ARQUIVO_DIR, ARQUIVO_DIAS, SMTP_HOST, SMTP_PORT, EMAIL_USER, EMAIL_PASS, EMAIL_DEST, SCHEMA, LOJA_MKT, MKT_NOME,
   sleep, ensureDir, readJson, writeJson, dataISO, json, html, manifest, salvarManifest, skuEanCache, locCache, salvarLoc,
   salvarSkuEan, lerIndiceEan, lerReservas, lerOperadores, lerAdmins, ehAdmin, blingGet, blingWrite, moverSituacao } = base;
+let _cursorConfirmacao = 0;   // r6: onde a janela de conferência da reconciliação parou (gira pelo tamanho do lote; restart zera, sem prejuízo)
+let _sondaPendente = null;    // r7: chamada de token/detalhe pendurada de um ciclo anterior — enquanto não assentar, a conferência é pulada (não empilha soquete)
 const { parseNF, acharNFporRange, nfDoPedido, serieDaNFdoPedido, carregarNFs, acharNFnaLista, baixarDanfe, parseXmlNF, baixarXmlNF, dadosNFSimp } = require('./nf');
 const { baixarEtiqueta, baixarEtiquetaPDF, labelaryPost, zplParaPdf, etiquetaPdf } = require('./etiquetas');
 const { servicoDoPedido, ehFlex, cronDeveriaTerRodado, kitIncompletoNoCache, zplEscape, bannerVolumeZpl } = require('./comum');
@@ -730,7 +732,15 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
     if (listaOk && !listaCompleta) {
       console.log('[AMBBKP] ⚠️ lista do Bling veio INCOMPLETA (falhou no meio da paginação) — reconciliação PULADA, cache preservado');
     }
-    if (listaOk && listaCompleta && atendidos.length > 0) {
+    /* 25/08 (fantasmas imortais): a guarda `atendidos.length > 0` protegia o cache de uma
+       lista vazia suspeita — mas na AMB a fila fica LEGITIMAMENTE vazia (todos os pedidos de
+       ATENDIDO são Full e somem no filtro), então a reconciliação era PULADA em silêncio em
+       TODO ciclo e pasta órfã nunca saía (5 fantasmas com dias de idade, um deles o card
+       "sem etiqueta" da Denise). Agora ela roda também com fila vazia DESDE QUE haja cache a
+       conferir — e, nesse caso, SÓ pelo caminho da confirmação individual lá embaixo: pedido
+       a pedido no Bling, nunca remoção em massa apoiada numa lista vazia. O espírito da
+       guarda fica: lista vazia continua não podendo apagar nada sozinha. */
+    if (listaOk && listaCompleta && (atendidos.length > 0 || Object.keys(man).length > 0)) {
       const idsAtuais = new Set(atendidos.map(p => String(p.id)));
       // Pedidos que estão em ATENDIDO mas foram OCULTADOS pelo filtro Full
       // (unidade de negócio de fulfillment) não podem contar como "sumiram":
@@ -759,11 +769,17 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
          ATENDIDO, levando junto a ETIQUETA ANEXADA. O próprio arquivo avisa em outro ponto
          que é melhor não remover do que apagar etiqueta. */
       const preservar = new Set((idsSemSerie || []).map(String));
-      const aRemover = Object.keys(man).filter(id => !idsAtuais.has(String(id)) && !idsFull.has(String(id)) && !preservar.has(String(id)));
+      /* Codex #205 r3 (P2): no caminho de FILA VAZIA (só-confirmação) as entradas marcadas
+         Full também entram na conferência — a exclusão delas existia pra protegê-las da
+         remoção EM MASSA, mas aqui cada uma é confirmada no Bling individualmente: ainda
+         ATENDIDO preserva, comprovadamente saiu remove. Sem isso, fantasma Full ficava
+         imortal até a retenção. Com fila cheia a exclusão continua valendo. */
+      const aRemover = Object.keys(man).filter(id => !idsAtuais.has(String(id)) && !preservar.has(String(id)) && (atendidos.length === 0 || !idsFull.has(String(id))));
       // TRAVA DE SEGURANÇA: sumir com muita coisa de uma vez quase sempre é lista ruim do Bling,
       // não 40% dos pedidos despachados no mesmo minuto. Melhor não remover do que apagar etiqueta anexada.
       const limiteSeguro = Math.max(5, Math.ceil(Object.keys(man).length * 0.4));
-      if (aRemover.length > limiteSeguro) {
+      /* fila vazia => confirmação individual OBRIGATÓRIA, qualquer que seja a proporção */
+      if (aRemover.length > limiteSeguro || atendidos.length === 0) {
         // 02/08 — ANTES: abortava TUDO e o cache nunca encolhia. Numa empresa de volume menor a
         // remoção normal passa dos 40% com facilidade (AMB: 49 de 71 = 69%), então a trava disparava
         // em TODO ciclo. Pior: pedido preso no cache também nunca mais era reprocessado, porque a
@@ -772,19 +788,97 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
         // quem o Bling confirmar que existe e NÃO está mais em ATENDIDO. Lista ruim do Bling continua
         // sem apagar nada (a consulta individual falha ou devolve ATENDIDO), e limpeza legítima passa.
         console.log(`[AMBBKP] reconciliação: ${aRemover.length} de ${Object.keys(man).length} candidatos a sair — acima do limite (${limiteSeguro}), conferindo um a um no Bling…`);
-        let confirmados = 0, mantidos = 0, semResposta = 0;
-        for (const id of aRemover) {
-          let det = null;
-          try { det = await detalhePedido(id); } catch (e) { det = null; }
+        /* Codex #205 (P1×2): (a) o detalhePedido daqui não tinha prazo — Bling que aceita a
+           conexão e emudece penduraria o ciclo inteiro, e o watchdog de 15 min empilharia
+           ciclos por cima; o prazo vence POR FORA, numa corrida, porque o blingGet espera o
+           token ANTES de olhar o sinal. (b) resposta com `situacao` OMITIDA caía no rmSync —
+           deletar sem confirmação é exatamente o que este ramo não pode fazer, e o repo já
+           documenta que o Bling omite situacao de vez em quando. Agora: só deleta com status
+           NUMÉRICO e explicitamente ≠ ATENDIDO; omitido/ilegível conta como sem resposta. */
+        /* r7: o prazo vence por fora, mas a chamada de baixo (token sem sinal) segue viva —
+           a promessa EM VOO fica exposta: quem estourar o prazo pendura ela em
+           _sondaPendente e os ciclos seguintes PULAM a conferência até ela assentar.
+           1 soquete no máximo por processo, nunca um por ciclo. */
+        const prazoDet = (fn, ms) => {
+          const ac = new AbortController();
+          let emVoo = null;
+          const pr = new Promise((resolva, rejeite) => {
+            const tt = setTimeout(() => { ac.abort(); rejeite(new Error('prazo estourado')); }, ms || 20000);
+            emVoo = Promise.resolve().then(() => fn(ac.signal));
+            emVoo.then(
+              (vv) => { clearTimeout(tt); resolva(vv); },
+              (ee) => { clearTimeout(tt); rejeite(ee); }
+            );
+          });
+          pr.emVoo = () => emVoo;
+          return pr;
+        };
+        /* Codex #205 r4 (P1×2 + P2): (a) TETO de 15 conferências por ciclo — 46 candidatos
+           mudos × 20s dariam 15+ min e o watchdog empilharia um 2º ciclo mexendo no MESMO
+           cache; o resto fica adiado e morre nos ciclos seguintes. (b) prazo estourado =
+           OAuth/Bling MUDO: os próximos travariam igual, então a conferência do ciclo
+           ABORTA na hora — no máximo 1 socket pendurado, não um por candidato (o fetch do
+           token não aceita sinal; ver tokenManager). (c) a PAUSA vale pra TODO candidato,
+           inclusive os preservados — antes só o removido pausava e os "ainda ATENDIDO"
+           saíam em rajada, furando o ritmo e convidando 429. */
+        let confirmados = 0, mantidos = 0, semResposta = 0, adiados = 0, mudo = false, tentados = 0;
+        if (_sondaPendente) {
+          console.log(`[AMBBKP] reconciliação: conferência PULADA — chamada do ciclo anterior ainda pendurada no token; ${aRemover.length} candidato(s) adiado(s)`);
+        } else {
+        /* Codex #205 r5: fatia FIXA daria fome — os mesmos 15 primeiros seriam tentados em
+           todo ciclo (a ordem do manifest é estável) e, se preservados, o 16º em diante
+           nunca seria conferido apesar de "adiado". A janela agora GIRA com o relógio:
+           cada ciclo começa de um ponto diferente da lista, e em poucos ciclos todo
+           candidato passa pela conferência. */
+        /* Codex r6: offset derivado do RELÓGIO entra em ressonância com o cron — com 60
+           candidatos e cron de 30 em 30 min, os inícios alternam entre 2 pontos e faixas
+           inteiras nunca são conferidas. O cursor agora PERSISTE em memória e avança pelo
+           tamanho REAL do lote: cobertura completa por construção, qualquer que seja o
+           cron. Restart zera o cursor — só recomeça a volta, nada se perde. */
+        const giroC = aRemover.length ? (_cursorConfirmacao % aRemover.length) : 0;
+        const girado = aRemover.slice(giroC).concat(aRemover.slice(0, giroC));
+        const loteConf = girado.slice(0, 15);
+        adiados = aRemover.length - loteConf.length;
+        for (let iC = 0; iC < loteConf.length; iC++) {
+          const id = loteConf[iC];
+          tentados++;
+          let det = null, estourou = false;
+          const pd = prazoDet(sig => detalhePedido(id, sig));
+          try { det = await pd; }
+          catch (e) { det = null; estourou = /prazo/.test(String((e && e.message) || '')); }
+          await new Promise(r => setTimeout(r, PAUSA_MS || 220));                 // pausa SEMPRE, preservado incluso
+          if (estourou) {
+            mudo = true; adiados += (loteConf.length - iC);
+            /* r7fix: a pendurada é registrada ANTES do break — depois dele é código morto
+               (foi exatamente o que o Codex pegou na primeira versão disto). */
+            _sondaPendente = pd.emVoo().catch(() => {}).then(() => { _sondaPendente = null; });
+            break;
+          }
           if (!det) { semResposta++; continue; }                                  // Bling não respondeu → preserva
-          const sit = det.situacao && Number(det.situacao.id);
-          if (sit && sit === Number(SIT_ATENDIDO)) { mantidos++; continue; }      // ainda ATENDIDO → preserva
+          const sitRaw = det.situacao != null ? (det.situacao.id != null ? det.situacao.id : det.situacao) : null;
+          /* Codex #205 r2: Number(null), Number('') e Number('   ') são TODOS 0 — finito e
+             ≠ ATENDIDO — então qualquer forma vazia de situacao cairia na remoção como se
+             fosse um status real. Confirmação exige DÍGITOS de verdade: só texto não-vazio
+             composto de números vira status; o resto é "não confirmado" e preserva. */
+          const sitTxt = String(sitRaw == null ? '' : sitRaw).trim();
+          if (!/^\d+$/.test(sitTxt)) { semResposta++; continue; }                 // omitida/vazia/ilegível → NÃO confirmado → preserva
+          const sit = Number(sitTxt);
+          /* Codex #205 r3: situacao 0 / {id:0} / "0" passa na régua dos dígitos, e 0 ≠
+             ATENDIDO cairia na remoção — mas 0 NÃO é id de situação válido no Bling, é a
+             forma numérica do "ausente". Status confirmado tem que ser POSITIVO. */
+          if (sit <= 0) { semResposta++; continue; }
+          if (sit === Number(SIT_ATENDIDO)) { mantidos++; continue; }             // ainda ATENDIDO → preserva
           try { fs.rmSync(path.join(CACHE_DIR, String(id)), { recursive: true, force: true }); } catch (e) {}
           delete man[id]; confirmados++;
-          await new Promise(r => setTimeout(r, PAUSA_MS || 220));
         }
+        /* Codex r7: o cursor avança pelo que foi DE FATO tentado — adiantá-lo pelo lote
+           inteiro fazia o aborto por mudez pular 14 candidatos nunca olhados (com o veneno
+           no índice 0, as voltas começariam em 0/15/30/45 e faixas inteiras escapariam).
+           Mínimo 1 pra não emperrar eternamente em cima de um candidato que sempre estoura. */
+        _cursorConfirmacao = aRemover.length ? (giroC + Math.max(1, tentados)) % aRemover.length : 0;
         if (confirmados) salvarManifest(man);
-        console.log(`[AMBBKP] reconciliação conferida: ${confirmados} removido(s) · ${mantidos} seguem em ATENDIDO · ${semResposta} sem resposta do Bling (preservados)`);
+        console.log(`[AMBBKP] reconciliação conferida: ${confirmados} removido(s) · ${mantidos} seguem em ATENDIDO · ${semResposta} sem resposta do Bling (preservados) — ${adiados} adiado(s) p/ o próximo ciclo${mudo ? ' — BLING MUDO: conferência ABORTADA neste ciclo, tenta no próximo' : ''}`);
+        }
       } else if (aRemover.length) {
         for (const id of aRemover) {
           try { fs.rmSync(path.join(CACHE_DIR, String(id)), { recursive: true, force: true }); } catch (e) {}
