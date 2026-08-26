@@ -14,6 +14,7 @@ const { BLING_BASE, CACHE_DIR, SIT_ATENDIDO, SIT_DESPACHADOS, SIT_VERIFICADO, SY
   sleep, ensureDir, readJson, writeJson, dataISO, json, html, manifest, salvarManifest, skuEanCache, locCache, salvarLoc,
   salvarSkuEan, lerIndiceEan, lerReservas, lerOperadores, lerAdmins, ehAdmin, blingGet, blingWrite, moverSituacao } = base;
 let _cursorConfirmacao = 0;   // porte do #205 (AMB): onde a janela de conferência da reconciliação parou — gira pelo tamanho do lote; restart zera, sem prejuízo
+let _cursorFull = 0;          // Codex #212: os Full preservados também giram — ≥16 deles travaria a fatia fixa nos mesmos 15 pra sempre
 let _sondaPendente = null;    // porte do #205: chamada de token/detalhe pendurada de um ciclo anterior — enquanto não assentar, a conferência é pulada (não empilha soquete)
 const { parseNF, acharNFporRange, nfDoPedido, serieDaNFdoPedido, carregarNFs, acharNFnaLista, baixarDanfe, parseXmlNF, baixarXmlNF, dadosNFSimp } = require('./nf');
 const { baixarEtiqueta, baixarEtiquetaPDF, labelaryPost, zplParaPdf, etiquetaPdf } = require('./etiquetas');
@@ -371,6 +372,16 @@ async function detalhePedido(id, signal) {
   const { data } = await blingGet(`/pedidos/vendas/${id}`, 3, signal);
   return data && data.data;
 }
+/* Codex #212: o sentinela do 404 NÃO pode morar no helper compartilhado — ele tem 4
+   chamadores e três (classificador de unidade, cachear, curas) só checam `if (!det)`:
+   o objeto {naoExiste} passaria por pedido de verdade, com direito a /undefined e pasta
+   CACHE_DIR/undefined. O sentinela vive AQUI, num invólucro exclusivo da reconciliação —
+   único lugar onde "apagado no Bling" tem significado de remoção. */
+async function detalheParaReconciliacao(id, signal) {
+  const r = await blingGet(`/pedidos/vendas/${id}`, 3, signal);
+  if (r && Number(r.status) === 404) return { naoExiste: true };   // apagado: com certeza não está em ATENDIDO
+  return r && r.data && r.data.data;
+}
 
 async function cachearPedido(ped, cacheEan, nfs, kitCache, locC, nfCtx) {
   const id  = ped.id;
@@ -711,15 +722,20 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
          ATENDIDO, levando junto a ETIQUETA ANEXADA. O próprio arquivo avisa em outro ponto
          que é melhor não remover do que apagar etiqueta. */
       const preservar = new Set((idsSemSerie || []).map(String));
-      /* Porte do #205: na FILA VAZIA (só-confirmação) as entradas marcadas Full também entram
-         na conferência — a exclusão delas protege da remoção EM MASSA, que não existe nesse
-         caminho; cada uma é confirmada no Bling individualmente. Com fila cheia, continua. */
-      const aRemover = Object.keys(man).filter(id => !idsAtuais.has(String(id)) && !preservar.has(String(id)) && (atendidos.length === 0 || !idsFull.has(String(id))));
+      /* Porte do #211 (a Denise da AMB sobreviveu à noite e revelou o furo): Full-marcado
+         só entrar na limpeza com FILA VAZIA supunha que a fila zera — em horário comercial
+         ela nunca zera, então fantasma marcado Full era imortal na prática. Regra nova:
+         Full-marcado ausente da lista SEMPRE é candidato, e QUALQUER um deles força o modo
+         de confirmação individual logo abaixo — seguro por definição: Full de verdade ainda
+         em ATENDIDO responde 9 e é mantido. A remoção EM MASSA continua nunca tocando em
+         Full-marcado, agora por construção (o modo forçado impede). */
+      const aRemover = Object.keys(man).filter(id => !idsAtuais.has(String(id)) && !preservar.has(String(id)));
+      const fullNoLote = aRemover.filter(id => idsFull.has(String(id))).length;
       // TRAVA DE SEGURANÇA: sumir com muita coisa de uma vez quase sempre é lista ruim do Bling,
       // não 40% dos pedidos despachados no mesmo minuto. Melhor não remover do que apagar etiqueta anexada.
       const limiteSeguro = Math.max(5, Math.ceil(Object.keys(man).length * 0.4));
-      /* fila vazia => confirmação individual OBRIGATÓRIA, qualquer que seja a proporção */
-      if (aRemover.length > limiteSeguro || atendidos.length === 0) {
+      /* fila vazia OU qualquer Full-marcado no lote => confirmação individual OBRIGATÓRIA */
+      if (aRemover.length > limiteSeguro || atendidos.length === 0 || fullNoLote > 0) {
         // 02/08 — ANTES: abortava TUDO e o cache nunca encolhia. Numa empresa de volume menor a
         // remoção normal passa dos 40% com facilidade, então a trava disparava em TODO ciclo.
         // Pior: pedido preso no cache também nunca mais era reprocessado, porque a fila parte da
@@ -727,7 +743,7 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
         // AGORA: em vez de confiar na proporção, PERGUNTAMOS ao Bling um por um. Só sai do cache
         // quem o Bling confirmar que existe e NÃO está mais em ATENDIDO. (Validado na AMBTotal em
         // 02/08: removeu os fantasmas e os 5 cards "sem etiqueta" sumiram junto.)
-        console.log(`[GOODBKP] reconciliação: ${aRemover.length} de ${Object.keys(man).length} candidatos a sair — acima do limite (${limiteSeguro}), conferindo um a um no Bling…`);
+        console.log(`[GOODBKP] reconciliação: ${aRemover.length} de ${Object.keys(man).length} candidatos a sair — acima do limite (${limiteSeguro}), conferindo um a um no Bling…${fullNoLote ? ` — ${fullNoLote} marcado(s) Full no lote: modo individual forçado` : ''}`);
         /* Laço portado do #205 da AMB com as 8 rodadas de blindagem do Codex: prazo por
            corrida (o token não aceita sinal), status POSITIVO de dígitos de verdade
            (Number(null)=Number('')=Number('   ')=0, todos finitos), teto de 15 por ciclo,
@@ -752,38 +768,67 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
           pr.emVoo = () => emVoo;
           return pr;
         };
-        const giroC = aRemover.length ? (_cursorConfirmacao % aRemover.length) : 0;
-        const girado = aRemover.slice(giroC).concat(aRemover.slice(0, giroC));
-        const loteConf = girado.slice(0, 15);
+        /* Porte do #211: os Full-marcados — quem FORÇOU o modo — entram PRIMEIRO no lote
+           (são poucos por natureza); o cursor gira só sobre os comuns, preenchendo o resto.
+           Cobertura dos comuns intacta; o fantasma que abriu o modo é conferido já no 1º ciclo. */
+        /* Codex #212: com ≥16 Full preservados (ainda ATENDIDO), a fatia fixa repetia os
+           mesmos 15 e nunca alcançava o 16º — nem sobrava vaga pra comum nenhum. Agora os
+           Full têm cursor rotativo PRÓPRIO e teto de 10: todos passam pela conferência ao
+           longo dos ciclos, e sempre sobram ≥5 vagas pros comuns. */
+        const fullTodos = aRemover.filter(id => idsFull.has(String(id)));
+        const gF = fullTodos.length ? (_cursorFull % fullTodos.length) : 0;
+        const fullGirado = fullTodos.slice(gF).concat(fullTodos.slice(0, gF));
+        const loteFull = fullGirado.slice(0, 10);
+        const comunsC = aRemover.filter(id => !idsFull.has(String(id)));
+        const vagas = Math.max(0, 15 - loteFull.length);
+        const giroC = comunsC.length ? (_cursorConfirmacao % comunsC.length) : 0;
+        const girado = comunsC.slice(giroC).concat(comunsC.slice(0, giroC));
+        /* Codex #212 r2+r3: qualquer id fixo na frente vira gargalo se for cronicamente
+           mudo (um Full doente matava os comuns; um comum doente único viraria canário
+           eterno e mataria os Full). REGRA UNIFORME, sem caso especial: o 1º estouro —
+           seja de quem for — pula o pedido e testa o PRÓXIMO; DOIS ids diferentes mudos
+           no mesmo ciclo = mudez do token, aborta. Teto de 2 soquetes vivos por ciclo,
+           e nenhum pedido doente consegue parar a limpeza sozinho. Um comum abre o lote
+           só pela ordem (barato responde primeiro); não decide mais nada. */
+        const loteConf = girado.slice(0, 1).concat(loteFull, girado.slice(1, vagas));
         adiados = aRemover.length - loteConf.length;
         /* Codex #207: o cursor avança pelo TENTADO, não pelo lote — no estouro por mudez o
            lote inteiro era pulado tendo tentado um só, e com um candidato cronicamente mudo
            na posição 0 os 14 seguintes nunca seriam conferidos (0→15→30→45 pra sempre). */
-        let tentados = 0;
+        let tentados = 0, tentadosComuns = 0, tentadosFull = 0, estouros = 0;
         for (let iC = 0; iC < loteConf.length; iC++) {
           const id = loteConf[iC];
           tentados = iC + 1;
+          if (idsFull.has(String(loteConf[iC]))) tentadosFull++; else tentadosComuns++;
           let det = null, estourou = false;
-          const pd = prazoDet(sig => detalhePedido(id, sig));
+          const pd = prazoDet(sig => detalheParaReconciliacao(id, sig));
           try { det = await pd; }
           catch (e) { det = null; estourou = /prazo/.test(String((e && e.message) || '')); }
           await new Promise(r => setTimeout(r, PAUSA_MS || 220));                 // pausa SEMPRE, preservado incluso
           if (estourou) {
-            mudo = true; adiados += (loteConf.length - iC);
+            estouros++;
+            if (estouros < 2) {                         // 1º estouro: pode ser só ESTE pedido doente — pula e testa o próximo
+              adiados++;
+              continue;
+            }
+            mudo = true; adiados += (loteConf.length - iC);   // 2º: dois ids diferentes mudos = token; aborta
             _sondaPendente = pd.emVoo().catch(() => {}).then(() => { _sondaPendente = null; });
             break;
           }
           if (!det) { semResposta++; continue; }                                  // Bling não respondeu → preserva
+          if (!det.naoExiste) {                                                   // 404 = apagado no Bling: pula direto pra remoção
           const sitRaw = det.situacao != null ? (det.situacao.id != null ? det.situacao.id : det.situacao) : null;
           const sitTxt = String(sitRaw == null ? '' : sitRaw).trim();
           if (!/^\d+$/.test(sitTxt)) { semResposta++; continue; }                 // omitida/vazia/ilegível → NÃO confirmado → preserva
           const sit = Number(sitTxt);
           if (sit <= 0) { semResposta++; continue; }                              // 0 é a forma numérica do "ausente", não status
           if (sit === Number(SIT_ATENDIDO)) { mantidos++; continue; }             // ainda ATENDIDO → preserva
+          }                                                                       // fim do !naoExiste
           try { fs.rmSync(path.join(CACHE_DIR, String(id)), { recursive: true, force: true }); } catch (e) {}
           delete man[id]; confirmados++;
         }
-        _cursorConfirmacao = aRemover.length ? (giroC + tentados) % aRemover.length : 0;
+        _cursorConfirmacao = comunsC.length ? (giroC + Math.max(1, tentadosComuns)) % comunsC.length : 0;
+        _cursorFull = fullTodos.length ? (gF + Math.max(1, tentadosFull)) % fullTodos.length : 0;
         if (confirmados) salvarManifest(man);
         console.log(`[GOODBKP] reconciliação conferida: ${confirmados} removido(s) — ${mantidos} seguem em ATENDIDO — ${semResposta} sem resposta (preservados) — ${adiados} adiado(s) p/ o próximo ciclo${mudo ? ' — BLING MUDO: conferência ABORTADA neste ciclo, tenta no próximo' : ''}`);
         }
