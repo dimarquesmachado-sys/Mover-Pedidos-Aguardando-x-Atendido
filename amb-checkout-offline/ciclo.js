@@ -847,8 +847,12 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
           try { det = await pd; }
           catch (e) { det = null; estourou = /prazo/.test(String((e && e.message) || '')); }
           await new Promise(r => setTimeout(r, PAUSA_MS || 220));                 // pausa SEMPRE, preservado incluso
-          if (estourou) { mudo = true; adiados += (loteConf.length - iC); break;
+          if (estourou) {
+            mudo = true; adiados += (loteConf.length - iC);
+            /* r7fix: a pendurada é registrada ANTES do break — depois dele é código morto
+               (foi exatamente o que o Codex pegou na primeira versão disto). */
             _sondaPendente = pd.emVoo().catch(() => {}).then(() => { _sondaPendente = null; });
+            break;
           }
           if (!det) { semResposta++; continue; }                                  // Bling não respondeu → preserva
           const sitRaw = det.situacao != null ? (det.situacao.id != null ? det.situacao.id : det.situacao) : null;
