@@ -60,11 +60,44 @@ function gerarUrlAutorizacao() {
 /**
  * Troca o auth_code pelos access_token + refresh_token
  */
+/* 26/08 (prometido no PR #205): fetch SEM prazo aqui pendurava qualquer blingGet pra sempre
+   quando o Bling aceitava a conexão e emudecia — e cada ciclo novo empilhava mais um soquete
+   (o Codex mediu: um por invocação). O prazo LANÇA erro, e todo chamador já trata: o blingGet
+   embrulha garantirToken em try/catch e devolve {ok:false} — falha normal, tenta no próximo.
+   O OAuth ganha 60s DE PROPÓSITO: abortar uma rotação de refresh que o Bling processou mas
+   não respondeu perderia o refresh novo (empresa fora do ar até reautorizar na mão) — 60s só
+   corta buraco-negro de verdade. A sonda, leitura pura, corta em 20s sem risco nenhum. */
+const fetchComPrazo = async (ms, rotulo, url, opts) => {
+  /* Codex #210 (P1): devolver o resp cru reabria o hang pela porta dos fundos — o node-fetch
+     resolve assim que os CABEÇALHOS chegam, o finally desarmava o timer, e um corpo mudo
+     pendurava o resp.json() de fora com _renovando preso pra sempre (e a sonda nem consumia
+     o corpo, deixando soquete parado vivo). Agora o CORPO é lido AQUI, ainda dentro do
+     prazo, e o chamador recebe o já-lido: status + json() síncrono sobre texto em memória. */
+  const ac = new AbortController();
+  const tt = setTimeout(() => ac.abort(), ms);
+  try {
+    const resp = await fetch(url, Object.assign({}, opts, { signal: ac.signal }));
+    const corpo = await resp.text();                       // consome dentro do prazo; abort derruba a leitura
+    return {
+      status: resp.status,
+      ok: resp.ok,
+      text: () => corpo,   // exposto aqui: estes gerenciadores satélites leem o corpo como texto
+      json: () => {
+        try { return JSON.parse(corpo); }
+        catch (e2) { throw new Error(rotulo + ': resposta não é JSON (' + String(corpo).slice(0, 80) + ')'); }
+      }
+    };
+  } catch (e) {
+    if (ac.signal.aborted) throw new Error(rotulo + ': prazo de ' + Math.round(ms / 1000) + 's estourado (Bling mudo)');
+    throw e;
+  } finally { clearTimeout(tt); }
+};
+
 async function trocarCodigoPorToken(authCode) {
   if (!configurado()) throw new Error('Client ID/Secret não configurados nas env vars');
   if (!authCode) throw new Error('auth_code é obrigatório');
 
-  const r = await fetch('https://api.mercadolibre.com/oauth/token', {
+  const r = await fetchComPrazo(60 * 1000, 'OAuth ML (código)', 'https://api.mercadolibre.com/oauth/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
@@ -98,7 +131,7 @@ async function refreshToken() {
   const t = lerTokens();
   if (!t || !t.refresh_token) throw new Error('Nenhum refresh_token salvo. Refaça autorização.');
 
-  const r = await fetch('https://api.mercadolibre.com/oauth/token', {
+  const r = await fetchComPrazo(60 * 1000, 'OAuth ML (refresh)', 'https://api.mercadolibre.com/oauth/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
