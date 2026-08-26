@@ -29,8 +29,16 @@ const { BLING_BASE, CACHE_DIR, SIT_ATENDIDO, SIT_DESPACHADOS, SIT_VERIFICADO, SY
    nunca vence prazo nenhum segue sendo o perigoso: NF vinculada cuja leitura falhou. Configurável sem deploy: AMBBKP_ESPERA_FULL_MIN. */
 /* Codex #218 (P2): typo na env (ex. "60m") dava NaN, e NaN na comparação movia NA HORA —
    o oposto da trava. Valor inválido ou ≤0 cai no padrão de 60; válido tem piso de 5. */
+/* 26/08, ordem do dono ("tem que identificar que é FULL e tirar dali NA HORA"): o padrão
+   virou ZERO — Full com "sem NF" CONFIRMADO pelo Bling, ou com nota de espelho lida sem
+   série, MOVE NA PRIMEIRA CONFERÊNCIA. É seguro pelo invariante verificado da casa (b83):
+   clone nasce com NF vinculada e série 1 legível no instante em que o Bling salva — logo
+   cai no ramo da série lida e nunca chega aqui; "sem NF confirmado" é fisicamente
+   incompatível com clone. O caso genuinamente cego segue protegido sem prazo nenhum:
+   NF vinculada cuja leitura FALHOU nunca move (é ele que guarda o incidente de 24/08).
+   Quem quiser margem de relógio põe AMBBKP_ESPERA_FULL_MIN>0 no Render (piso 5). */
 const _espEnv = Number(process.env.AMBBKP_ESPERA_FULL_MIN);
-const ESPERA_FULL_MS = (Number.isFinite(_espEnv) && _espEnv > 0 ? Math.max(5, _espEnv) : 60) * 60 * 1000;
+const ESPERA_FULL_MS = (Number.isFinite(_espEnv) && _espEnv > 0 ? Math.max(5, _espEnv) : 0) * 60 * 1000;
 let _cursorConfirmacao = 0;   // r6: onde a janela de conferência da reconciliação parou (gira pelo tamanho do lote; restart zera, sem prejuízo)
 let _cursorFull = 0;          // Codex #212: os Full preservados também giram — ≥16 deles travaria a fatia fixa nos mesmos 15 pra sempre
 let _sondaPendente = null;    // r7: chamada de token/detalhe pendurada de um ciclo anterior — enquanto não assentar, a conferência é pulada (não empilha soquete)
@@ -367,6 +375,10 @@ async function listarAtendidos() {
                somam inteiros; uma pane de horas entre duas confirmações soma no máximo 30
                min. Falha continua sem tocar no marcador (ramo do _consultaFalhou acima).
                Marcador antigo, só com `desde`, recomeça do zero — o lado seguro. */
+            if (ESPERA_FULL_MS <= 0) {                       // ordem do dono: NA HORA
+              venceuEspera.push(String(idF));
+              continue;
+            }
             const espera = serieCache['espera:' + chaveS];
             const agoraE = Date.now();
             if (!espera || !espera.ult) {
