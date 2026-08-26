@@ -39,6 +39,20 @@ const { BLING_BASE, CACHE_DIR, SIT_ATENDIDO, SIT_DESPACHADOS, SIT_VERIFICADO, SY
    Quem quiser margem de relógio põe AMBBKP_ESPERA_FULL_MIN>0 no Render (piso 5). */
 const _espEnv = Number(process.env.AMBBKP_ESPERA_FULL_MIN);
 const ESPERA_FULL_MS = (Number.isFinite(_espEnv) && _espEnv > 0 ? Math.max(5, _espEnv) : 0) * 60 * 1000;
+/* 26/08, ordem do dono ("vc tem que editar pro novo identificador... senão as vendas não
+   sairão do ATENDIDO"): as unidades Full CONHECIDAS DA CASA ficam EMBUTIDAS no código, e a
+   env AMBBKP_UN_FULL passa a ACRESCENTAR em vez de ser a única fonte — antes, unidade nova
+   criada no Bling (a reorganização de hoje: filial "AMBTotal - FULLFILMENT MLivre") exigia
+   lembrar de editar env no Render, e esquecer = ML Full acampando em ATENDIDO de novo.
+   Mapa: 2920348 Full Shopee · 2920232 Full Magalu · 2839148 FULL ML (unidade original) ·
+   3456195 FULLFILMENT MLivre (filial nova de 26/08). Emissão própria (série 1 pela matriz
+   é o fluxo NORMAL, não clone): as duas do MLivre. Env correspondente só acrescenta. */
+const UNS_FULL_CASA = ['2920348', '2920232', '2839148', '3456195'];
+const UNS_EMISSAO_PROPRIA_CASA = ['2839148', '3456195'];
+const unsFullEfetivas = () => {
+  const extra = String(process.env.AMBBKP_UN_FULL || '').split(',').map(x => x.trim()).filter(Boolean);
+  return Array.from(new Set(UNS_FULL_CASA.concat(extra)));
+};
 let _cursorConfirmacao = 0;   // r6: onde a janela de conferência da reconciliação parou (gira pelo tamanho do lote; restart zera, sem prejuízo)
 let _cursorFull = 0;          // Codex #212: os Full preservados também giram — ≥16 deles travaria a fatia fixa nos mesmos 15 pra sempre
 let _sondaPendente = null;    // r7: chamada de token/detalhe pendurada de um ciclo anterior — enquanto não assentar, a conferência é pulada (não empilha soquete)
@@ -218,8 +232,7 @@ async function listarAtendidos() {
   //
   // Configurável por env AMBBKP_UN_FULL = "2920348,2920232". VAZIA = não
   // filtra nada (idêntico ao comportamento antigo).
-  const UN_FULL = String(process.env.AMBBKP_UN_FULL || '')
-    .split(',').map(s => s.trim()).filter(Boolean);
+  const UN_FULL = unsFullEfetivas();   // casa + env (a env só acrescenta — ver UNS_FULL_CASA)
   let ocultosFull = 0;
   let pedidos = out;
   const idsFullVistos = [];   // ids que se confirmaram Full (p/ expurgar do cache antigo)
@@ -235,8 +248,7 @@ async function listarAtendidos() {
      e confirma o move. O custo assumido (decisão do dono): clone de garantia de venda ML
      Full volta a ser movido como era antes do incidente — não há como separar pelo número
      da série, já que ambos são série 1. Shopee/Magalu Full seguem com a trava intacta. */
-  const UN_EMISSAO_PROPRIA = new Set(String(process.env.AMBBKP_UN_FULL_EMISSAO_PROPRIA || '2839148')
-    .split(',').map(s => s.trim()).filter(Boolean));
+  const UN_EMISSAO_PROPRIA = new Set(UNS_EMISSAO_PROPRIA_CASA.concat(String(process.env.AMBBKP_UN_FULL_EMISSAO_PROPRIA || '').split(',').map(x => x.trim()).filter(Boolean)));
   const unPorFull = new Map();                                 // id do pedido -> unidade que o classificou
   if (UN_FULL.length) {
     const setFull = new Set(UN_FULL);
@@ -802,7 +814,7 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
       // (unidade de negócio de fulfillment) não podem contar como "sumiram":
       // eles continuam no Bling, só não aparecem na fila. Se já entraram no
       // cache numa versão anterior, mantemos — nunca removê-los aqui.
-      const UN_FULL_REC = String(process.env.AMBBKP_UN_FULL || '').split(',').map(s => s.trim()).filter(Boolean);
+      const UN_FULL_REC = unsFullEfetivas();   // mesma união casa+env do filtro
       let idsFull = new Set();
       if (UN_FULL_REC.length) {
         try {
@@ -1212,4 +1224,4 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
   return ultimoResumo;
 }
 
-module.exports = { indexarCatalogoCompleto, sincronizarConferidos, listarAtendidos, detalhePedido, cachearPedido, rodarCiclo, getUltimoResumo, getUltimoSync, getIdxStatus };
+module.exports = { indexarCatalogoCompleto, sincronizarConferidos, listarAtendidos, detalhePedido, cachearPedido, rodarCiclo, getUltimoResumo, getUltimoSync, getIdxStatus, unsFullEfetivas, UNS_EMISSAO_PROPRIA_CASA };
