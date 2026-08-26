@@ -772,17 +772,22 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
          ATENDIDO, levando junto a ETIQUETA ANEXADA. O próprio arquivo avisa em outro ponto
          que é melhor não remover do que apagar etiqueta. */
       const preservar = new Set((idsSemSerie || []).map(String));
-      /* Codex #205 r3 (P2): no caminho de FILA VAZIA (só-confirmação) as entradas marcadas
-         Full também entram na conferência — a exclusão delas existia pra protegê-las da
-         remoção EM MASSA, mas aqui cada uma é confirmada no Bling individualmente: ainda
-         ATENDIDO preserva, comprovadamente saiu remove. Sem isso, fantasma Full ficava
-         imortal até a retenção. Com fila cheia a exclusão continua valendo. */
-      const aRemover = Object.keys(man).filter(id => !idsAtuais.has(String(id)) && !preservar.has(String(id)) && (atendidos.length === 0 || !idsFull.has(String(id))));
+      /* 26/08 de manhã (a Denise sobreviveu à noite): a regra anterior — Full-marcado só
+         entra na limpeza com FILA VAZIA — tinha um furo de horário comercial: a fila nunca
+         zera durante o dia, então fantasma marcado Full era imortal na prática (o pedido
+         dela estava CANCELADO no Bling e o card seguia no painel, madrugada adentro).
+         Regra nova: Full-marcado ausente da lista SEMPRE entra como candidato, e a presença
+         de QUALQUER um deles força o modo de confirmação individual logo abaixo — que é
+         seguro por definição: um Full de verdade ainda em ATENDIDO responde 9 e é mantido;
+         só sai quem o Bling confirmar que saiu. A remoção EM MASSA continua nunca tocando
+         em Full-marcado (o modo forçado garante isso por construção). */
+      const aRemover = Object.keys(man).filter(id => !idsAtuais.has(String(id)) && !preservar.has(String(id)));
+      const fullNoLote = aRemover.filter(id => idsFull.has(String(id))).length;
       // TRAVA DE SEGURANÇA: sumir com muita coisa de uma vez quase sempre é lista ruim do Bling,
       // não 40% dos pedidos despachados no mesmo minuto. Melhor não remover do que apagar etiqueta anexada.
       const limiteSeguro = Math.max(5, Math.ceil(Object.keys(man).length * 0.4));
-      /* fila vazia => confirmação individual OBRIGATÓRIA, qualquer que seja a proporção */
-      if (aRemover.length > limiteSeguro || atendidos.length === 0) {
+      /* fila vazia OU qualquer Full-marcado no lote => confirmação individual OBRIGATÓRIA */
+      if (aRemover.length > limiteSeguro || atendidos.length === 0 || fullNoLote > 0) {
         // 02/08 — ANTES: abortava TUDO e o cache nunca encolhia. Numa empresa de volume menor a
         // remoção normal passa dos 40% com facilidade (AMB: 49 de 71 = 69%), então a trava disparava
         // em TODO ciclo. Pior: pedido preso no cache também nunca mais era reprocessado, porque a
@@ -790,7 +795,7 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
         // AGORA: em vez de confiar na proporção, PERGUNTAMOS ao Bling um por um. Só sai do cache
         // quem o Bling confirmar que existe e NÃO está mais em ATENDIDO. Lista ruim do Bling continua
         // sem apagar nada (a consulta individual falha ou devolve ATENDIDO), e limpeza legítima passa.
-        console.log(`[AMBBKP] reconciliação: ${aRemover.length} de ${Object.keys(man).length} candidatos a sair — acima do limite (${limiteSeguro}), conferindo um a um no Bling…`);
+        console.log(`[AMBBKP] reconciliação: ${aRemover.length} de ${Object.keys(man).length} candidatos a sair — acima do limite (${limiteSeguro}), conferindo um a um no Bling…${fullNoLote ? ` — ${fullNoLote} marcado(s) Full no lote: modo individual forçado` : ''}`);
         /* Codex #205 (P1×2): (a) o detalhePedido daqui não tinha prazo — Bling que aceita a
            conexão e emudece penduraria o ciclo inteiro, e o watchdog de 15 min empilharia
            ciclos por cima; o prazo vence POR FORA, numa corrida, porque o blingGet espera o
