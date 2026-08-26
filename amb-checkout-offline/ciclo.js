@@ -13,6 +13,15 @@ const { BLING_BASE, CACHE_DIR, SIT_ATENDIDO, SIT_DESPACHADOS, SIT_VERIFICADO, SY
   ARQUIVO_DIR, ARQUIVO_DIAS, SMTP_HOST, SMTP_PORT, EMAIL_USER, EMAIL_PASS, EMAIL_DEST, SCHEMA, LOJA_MKT, MKT_NOME,
   sleep, ensureDir, readJson, writeJson, dataISO, json, html, manifest, salvarManifest, skuEanCache, locCache, salvarLoc,
   salvarSkuEan, lerIndiceEan, lerReservas, lerOperadores, lerAdmins, ehAdmin, blingGet, blingWrite, moverSituacao } = base;
+/* 26/08, decisão do dono ("vai ficar 6h parado poluindo minha tela?"): a espera de 6h
+   foi calibrada pro risco ERRADO neste ramo. Ela nasceu do incidente de 24/08 — mover
+   pedido cuja NF EXISTE mas a série nunca foi lida (podia ser clone série 1) — e ESSE
+   caso continua protegido pra sempre, sem prazo: NF vinculada sem série lida NUNCA move.
+   Aqui é outro caso: o Bling AFIRMANDO que não há NF nenhuma (404 confirmado), o normal
+   do Full espelhado. Clone nasce com NF vinculada e legível desde o primeiro minuto, então
+   o único risco real é o ML Full recém-criado minutos antes de a matriz emitir a série 1
+   própria — e pra isso 1 hora sobra. Configurável sem deploy: AMBBKP_ESPERA_FULL_MIN. */
+const ESPERA_FULL_MS = Math.max(5, Number(process.env.AMBBKP_ESPERA_FULL_MIN || 60)) * 60 * 1000;
 let _cursorConfirmacao = 0;   // r6: onde a janela de conferência da reconciliação parou (gira pelo tamanho do lote; restart zera, sem prejuízo)
 let _cursorFull = 0;          // Codex #212: os Full preservados também giram — ≥16 deles travaria a fatia fixa nos mesmos 15 pra sempre
 let _sondaPendente = null;    // r7: chamada de token/detalhe pendurada de um ciclo anterior — enquanto não assentar, a conferência é pulada (não empilha soquete)
@@ -341,7 +350,7 @@ async function listarAtendidos() {
             semResposta.push(String(idF));                      // não perguntei ainda: espera, sem contar tempo
           } else {
             /* ⚠️ Codex #199 (P1): o relógio conta TEMPO CONFIRMADO, não tempo de parede.
-               O desenho anterior guardava só o `desde`: se o marcador nascesse e viessem 6h
+               O desenho anterior guardava só o `desde`: se o marcador nascesse e viessem ${Math.round(ESPERA_FULL_MS/60000)}min
                de 429, a PRIMEIRA resposta boa depois da pane encontraria o carimbo velho e
                moveria o pedido na hora — 6h "vencidas" sem NENHUMA confirmação no meio.
                Agora cada resposta "sem NF" soma ao acumulado apenas o intervalo desde a
@@ -360,7 +369,7 @@ async function listarAtendidos() {
               espera.acum = Number(espera.acum || 0) + passo;
               espera.ult = agoraE;
               mudouCache = true;
-              if (espera.acum < 6 * 60 * 60 * 1000) {
+              if (espera.acum < ESPERA_FULL_MS) {
                 semResposta.push(String(idF));                  // ainda não somou 6h confirmadas
               } else {
                 venceuEspera.push(String(idF));                 // 6h CONFIRMADAS sem nota: MOVE
@@ -375,11 +384,11 @@ async function listarAtendidos() {
           derrubados.map(d => `pedido ${d.id}/NF ${d.nf}`).join(', '));
       }
       if (venceuEspera.length) {
-        console.log(`[AMBBKP] série não veio em 6h — movendo assim mesmo (a unidade diz Full e a NF do marketplace não chegou): ` + venceuEspera.join(', '));
+        console.log(`[AMBBKP] série não veio em ${Math.round(ESPERA_FULL_MS/60000)}min — movendo assim mesmo (a unidade diz Full e a NF do marketplace não chegou): ` + venceuEspera.join(', '));
       }
       if (semResposta.length) {
         console.log(`[AMBBKP] série NÃO descoberta em ${semResposta.length} pedido(s) — NÃO vou mover (fica em ATENDIDO até dar pra conferir): ` +
-          ` (${_consultaFalhou.size} falhada(s), sem contar tempo; ${semResposta.filter(i => _notaIlegivel.has(String(i))).length} com nota lida sem série, relógio corre; demais aguardando 6h)` + semResposta.join(', '));
+          ` (${_consultaFalhou.size} falhada(s), sem contar tempo; ${semResposta.filter(i => _notaIlegivel.has(String(i))).length} com nota lida sem série, relógio corre; demais aguardando ${Math.round(ESPERA_FULL_MS/60000)}min)` + semResposta.join(', '));
         // some da lista de move/expurgo, mas segue escondido da fila (risco assimétrico)
         for (const idS of semResposta) {
           const ix = idsFullVistos.indexOf(idS);
