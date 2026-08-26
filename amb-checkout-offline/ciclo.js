@@ -263,6 +263,7 @@ async function listarAtendidos() {
       const serieCache = readJson(SERIE_FILE, {});
       const derrubados = [], semResposta = [], venceuEspera = [];
       const _consultaFalhou = new Set();   // Bling não respondeu — diferente de 'não tem NF'
+      const _notaIlegivel = new Set();     // nota vinculada LIDA sem série no corpo (XML importado) — confirmação, relógio corre
       let mudouCache = false;
       for (const idF of idsFullVistos.slice()) {
         /* O cache tem VALIDADE (30 min) e a regra é simples: VENCIDO NÃO VALE.
@@ -286,6 +287,7 @@ async function listarAtendidos() {
           try { nfF = await serieDaNFdoPedido(idF); } catch (e) { nfF = { falhou: true }; }
           await sleep(PAUSA_MS);
           if (nfF && nfF.falhou) _consultaFalhou.add(String(idF));   // não foi "sem NF" — foi não perguntei
+          if (nfF && nfF.nfSemSerie) _notaIlegivel.add(String(idF));  // nota lida, série ausente: CONFIRMA e o relógio corre
           if (nfF && nfF.serie) {
             info = { serie: String(nfF.serie), nf: nfF.numero || null, ts: Date.now() };
             serieCache[chaveS] = info; mudouCache = true;
@@ -363,7 +365,8 @@ async function listarAtendidos() {
         console.log(`[AMBBKP] série não veio em 6h — movendo assim mesmo (a unidade diz Full e a NF do marketplace não chegou): ` + venceuEspera.join(', '));
       }
       if (semResposta.length) {
-        console.log(`[AMBBKP] série NÃO descoberta em ${semResposta.length} pedido(s) — NÃO vou mover (fica em ATENDIDO até dar pra conferir): ` + semResposta.join(', '));
+        console.log(`[AMBBKP] série NÃO descoberta em ${semResposta.length} pedido(s) — NÃO vou mover (fica em ATENDIDO até dar pra conferir): ` +
+          ` (${_consultaFalhou.size} falhada(s), sem contar tempo; ${_notaIlegivel.size} com nota lida sem série, relógio corre; demais aguardando 6h)` + semResposta.join(', '));
         // some da lista de move/expurgo, mas segue escondido da fila (risco assimétrico)
         for (const idS of semResposta) {
           const ix = idsFullVistos.indexOf(idS);

@@ -8,7 +8,7 @@ const { fs, path, fetch, garantirToken, QZ_CERT, QZ_PRIVKEY, VERSAO, BLING_BASE,
   sleep, ensureDir, readJson, writeJson, dataISO, json, html, manifest, salvarManifest, skuEanCache, locCache, salvarLoc,
   salvarSkuEan, lerIndiceEan, lerReservas, lerOperadores, lerAdmins, ehAdmin, blingGet, blingWrite, moverSituacao } = require('./base');
 
-const EMITENTE_FALLBACK = { razao: 'GOOD Import Ltda', cnpj: '27548456000147', ie: '675.374.241.113', endereco: 'Rua Jose Ruscitto, 150, BOX 1 - Galpao, Taboao da Serra - SP' };
+const EMITENTE_FALLBACK = { razao: 'Magazine Girassol Ltda', cnpj: '27548456000147', ie: '675.374.241.113', endereco: 'Rua Jose Ruscitto, 150, BOX 1 - Galpao, Taboao da Serra - SP' };
 
 function parseNF(nf) {
   if (!nf) return null;
@@ -75,6 +75,7 @@ async function serieDaNFdoPedido(id, signal) {   // signal opcional: sem prazo, 
   let falhou = false;                                  // alguma chamada não foi?
   let nfVinculada = false;                             // o Bling CONFIRMOU que existe uma NF ligada ao pedido?
   let respondeu = false;                               // alguma chamada respondeu?
+  let leuNotaSemSerie = false;                         // li a NOTA (o Bling respondeu com ela) e a série não veio no corpo
   const pedir = async (url) => {
     try {
       const r = await blingGet(url, 3, signal);
@@ -96,8 +97,10 @@ async function serieDaNFdoPedido(id, signal) {   // signal opcional: sem prazo, 
   if (nf && Number(nf.id) > 0) {                       // veio resumo sem série → busca o detalhe
     nfVinculada = true;
     await sleep(PAUSA_MS);
-    achou = serieDe(await pedir(`/nfe/${nf.id}`));
+    const detNf = await pedir(`/nfe/${nf.id}`);
+    achou = serieDe(detNf);
     if (achou) return achou;
+    if (detNf) leuNotaSemSerie = true;                 // a nota veio inteira e mesmo assim sem série
   }
 
   // 2) pelo detalhe do pedido (notaFiscal.id)
@@ -109,8 +112,10 @@ async function serieDaNFdoPedido(id, signal) {   // signal opcional: sem prazo, 
     if (Number(nfId) > 0) {
       nfVinculada = true;
       await sleep(PAUSA_MS);
-      achou = serieDe(await pedir(`/nfe/${nfId}`));
+      const detNf2 = await pedir(`/nfe/${nfId}`);
+      achou = serieDe(detNf2);
       if (achou) return achou;
+      if (detNf2) leuNotaSemSerie = true;              // idem: nota lida, série ausente do corpo
     }
   }
 
@@ -122,7 +127,18 @@ async function serieDaNFdoPedido(id, signal) {   // signal opcional: sem prazo, 
      existe". Devolver semNF aqui deixaria o relógio das 6h correr e o pedido ser movido sem
      a série NUNCA ter sido lida: se fosse um clone série 1, é o incidente de 24/08 voltando
      por outra porta. Falha = não conta tempo, tenta de novo. */
-  if (nfVinculada) return { falhou: true };
+  /* 26/08 (7 Full Shopee/Magalu acampados em ATENDIDO): a regra acima estava certa pra
+     falha TRANSITÓRIA (429 não pode mover clone sem ler a série) — mas pra nota IMPORTADA
+     por XML (Shopee Full/Magalu Full, espelhada pela extensão) a série pode ser
+     estruturalmente ausente do corpo. "Falha, tenta de novo" virava PARA SEMPRE: o relógio
+     das 6h nunca corria e o pedido acampava em ATENDIDO indefinidamente, poluindo a tela
+     de situações do Bling ciclo após ciclo.
+     A distinção que faltava: se eu LI a nota (o Bling respondeu com ela) e a série não está
+     no corpo, isso NÃO é "não consegui perguntar" — é uma CONFIRMAÇÃO. E nota vinculada
+     ilegível não é clone: clone é emitido pelo Bling ao salvar e nasce com série 1 legível
+     desde o primeiro minuto. Esse caso devolve { nfSemSerie } e conta no MESMO relógio de
+     6h confirmadas do chamador — falha de verdade segue { falhou }, sem contar tempo. */
+  if (nfVinculada) return leuNotaSemSerie ? { nfSemSerie: true } : { falhou: true };
   return respondeu ? { semNF: true } : { falhou: true };
 }
 
