@@ -366,7 +366,7 @@ async function listarAtendidos() {
       }
       if (semResposta.length) {
         console.log(`[AMBBKP] série NÃO descoberta em ${semResposta.length} pedido(s) — NÃO vou mover (fica em ATENDIDO até dar pra conferir): ` +
-          ` (${_consultaFalhou.size} falhada(s), sem contar tempo; ${_notaIlegivel.size} com nota lida sem série, relógio corre; demais aguardando 6h)` + semResposta.join(', '));
+          ` (${_consultaFalhou.size} falhada(s), sem contar tempo; ${semResposta.filter(i => _notaIlegivel.has(String(i))).length} com nota lida sem série, relógio corre; demais aguardando 6h)` + semResposta.join(', '));
         // some da lista de move/expurgo, mas segue escondido da fila (risco assimétrico)
         for (const idS of semResposta) {
           const ix = idsFullVistos.indexOf(idS);

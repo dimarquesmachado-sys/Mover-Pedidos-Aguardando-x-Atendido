@@ -8,7 +8,7 @@ const { fs, path, fetch, garantirToken, QZ_CERT, QZ_PRIVKEY, VERSAO, BLING_BASE,
   sleep, ensureDir, readJson, writeJson, dataISO, json, html, manifest, salvarManifest, skuEanCache, locCache, salvarLoc,
   salvarSkuEan, lerIndiceEan, lerReservas, lerOperadores, lerAdmins, ehAdmin, blingGet, blingWrite, moverSituacao } = require('./base');
 
-const EMITENTE_FALLBACK = { razao: 'Magazine Girassol Ltda', cnpj: '27548456000147', ie: '675.374.241.113', endereco: 'Rua Jose Ruscitto, 150, BOX 1 - Galpao, Taboao da Serra - SP' };
+const EMITENTE_FALLBACK = { razao: 'GOOD Import Ltda', cnpj: '27548456000147', ie: '675.374.241.113', endereco: 'Rua Jose Ruscitto, 150, BOX 1 - Galpao, Taboao da Serra - SP' };
 
 function parseNF(nf) {
   if (!nf) return null;
@@ -121,24 +121,23 @@ async function serieDaNFdoPedido(id, signal) {   // signal opcional: sem prazo, 
 
   /* Só posso afirmar "não tem nota" se NENHUMA chamada falhou. Basta uma ter falhado pra
      virar `falhou` — na dúvida o relógio não corre e a gente tenta de novo no próximo ciclo. */
+  /* Codex #206: a nota LIDA vence falha alheia. Se `/nfe/{id}` respondeu com a nota (sem
+     série no corpo) mas uma chamada REDUNDANTE depois falhou (429), `falhou` mascararia a
+     confirmação e o relógio das 6h não andaria — no ambiente rate-limitado que este ajuste
+     mira, isso seria o "para sempre" de volta. A leitura confirmada decide primeiro. */
+  if (leuNotaSemSerie) return { nfSemSerie: true };
   if (falhou) return { falhou: true };
   /* ⚠️ Codex #199 (P1): se o Bling CONFIRMOU que existe NF vinculada mas a série não veio
      em nenhuma leitura, isso NÃO é "sem nota" — é "não consegui ler a série de uma nota que
      existe". Devolver semNF aqui deixaria o relógio das 6h correr e o pedido ser movido sem
      a série NUNCA ter sido lida: se fosse um clone série 1, é o incidente de 24/08 voltando
      por outra porta. Falha = não conta tempo, tenta de novo. */
-  /* 26/08 (7 Full Shopee/Magalu acampados em ATENDIDO): a regra acima estava certa pra
-     falha TRANSITÓRIA (429 não pode mover clone sem ler a série) — mas pra nota IMPORTADA
-     por XML (Shopee Full/Magalu Full, espelhada pela extensão) a série pode ser
-     estruturalmente ausente do corpo. "Falha, tenta de novo" virava PARA SEMPRE: o relógio
-     das 6h nunca corria e o pedido acampava em ATENDIDO indefinidamente, poluindo a tela
-     de situações do Bling ciclo após ciclo.
-     A distinção que faltava: se eu LI a nota (o Bling respondeu com ela) e a série não está
-     no corpo, isso NÃO é "não consegui perguntar" — é uma CONFIRMAÇÃO. E nota vinculada
-     ilegível não é clone: clone é emitido pelo Bling ao salvar e nasce com série 1 legível
-     desde o primeiro minuto. Esse caso devolve { nfSemSerie } e conta no MESMO relógio de
-     6h confirmadas do chamador — falha de verdade segue { falhou }, sem contar tempo. */
-  if (nfVinculada) return leuNotaSemSerie ? { nfSemSerie: true } : { falhou: true };
+  /* 26/08 (7 Full Shopee/Magalu acampados): vinculada mas a nota NUNCA foi lida = falha
+     transitória, tenta de novo sem contar tempo — o caso estrutural (nota lida sem série,
+     típico de XML importado pela extensão) já retornou { nfSemSerie } lá em cima e conta
+     no relógio de 6h confirmadas. Nota ilegível não é clone: clone é emitido pelo Bling ao
+     salvar e nasce com série 1 legível desde o primeiro minuto. */
+  if (nfVinculada) return { falhou: true };
   return respondeu ? { semNF: true } : { falhou: true };
 }
 
