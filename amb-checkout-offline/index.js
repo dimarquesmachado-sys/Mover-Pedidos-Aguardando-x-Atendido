@@ -170,7 +170,7 @@ function backfillNFLocal(dias) {
 }
 const { montarSeparacao, montarSeparacaoPorPedido } = require('./separacao');
 const { enviarEmailDocs } = require('./email-docs');
-const { listarAtendidos, detalhePedido, sincronizarConferidos, indexarCatalogoCompleto, cachearPedido, rodarCiclo, getUltimoResumo, getUltimoSync, getIdxStatus } = require('./ciclo');
+const { listarAtendidos, detalhePedido, sincronizarConferidos, indexarCatalogoCompleto, cachearPedido, rodarCiclo, getUltimoResumo, getUltimoSync, getIdxStatus, unsFullEfetivas, UNS_EMISSAO_PROPRIA_CASA } = require('./ciclo');
 
 // ─── Config (env prefixo AMBBKP_, defaults sãos) ───────────────────────
 // presença entre PCs: quem está separando cada pedido. Limpa reservas vencidas a cada leitura.
@@ -1622,8 +1622,12 @@ function routes(readBody) {
       const diasPedido = Number(urlObj.searchParams.get('dias')) || 10;
       const diasE = Math.min(RETENCAO_CONF_DIAS, Math.max(1, diasPedido));
       const limitouJanela = diasPedido > RETENCAO_CONF_DIAS;
-      const UN_FULL_E = String(process.env.AMBBKP_UN_FULL || '').split(',').map(x => x.trim()).filter(Boolean);
+      /* Codex #220 (P1): a rota tinha CÓPIA PRÓPRIA da leitura de env — com a filial nova
+         (3456195) ela divergiria do ciclo: pedido legítimo série 1 do MLivre movido pelo
+         ciclo apareceria aqui como "clone movido por engano". Fonte ÚNICA do ciclo.js. */
+      const UN_FULL_E = unsFullEfetivas();
       const setFullE = new Set(UN_FULL_E);
+      const setEmissaoPropriaE = new Set(UNS_EMISSAO_PROPRIA_CASA.concat(String(process.env.AMBBKP_UN_FULL_EMISSAO_PROPRIA || '').split(',').map(x => x.trim()).filter(Boolean)));
 
       /* ⚠️ FALHA FECHADA nas duas provas de que esta rota depende. Ela não altera nada, mas
          a resposta manda o admin mover cada listado pra ATENDIDO — então listar errado vira
@@ -1748,7 +1752,10 @@ function routes(readBody) {
               if (serieE) linha.serie_nf = serieE;
               else { indeterminados++; naoResolvidos.push({ id: idE, numero: ped.numero, motivo: 'unidade é Full mas não consegui descobrir a série da NF' }); continue; }
             }
-            if (ehPelaUnidade && serieE !== '1') { full.push(linha); continue; }   // Full de verdade
+            /* Codex #220 (P1): série 1 SÓ é clone fora das unidades de emissão própria — no
+               MLivre (2839148 e a nova 3456195) série 1 pela matriz é o fluxo NORMAL (#202). */
+            const emissaoPropriaE = ehPelaUnidade && setEmissaoPropriaE.has(String(unE || ''));
+            if (ehPelaUnidade && (serieE !== '1' || emissaoPropriaE)) { full.push(linha); continue; }   // Full de verdade
             if (bipadoE) { bipados.push(linha); continue; }                        // passou pelo checkout
             if (ehPelaUnidade) linha.motivo = 'unidade Full mas NF série 1 — clone da matriz';
             suspeitos.push(linha);
