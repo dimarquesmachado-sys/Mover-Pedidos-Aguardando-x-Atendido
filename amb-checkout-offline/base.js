@@ -14,7 +14,7 @@ const SIT_ATENDIDO  = Number(process.env.AMBBKP_SIT_ATENDIDO  || 9);            
 const SIT_DESPACHADOS = Number(process.env.AMBBKP_SIT_DESPACHADOS || 745123);     // DESPACHADOS (destino do Full: já saiu pela Shopee)
 const SIT_VERIFICADO = Number(process.env.AMBBKP_SIT_VERIFICADO || 24);           // VERIFICADO (destino do sync Fase 3)
 const SYNC_ON       = process.env.AMBBKP_SYNC_ON === '1';                          // liga o sync automático no cron (Fase 3)
-const JANELA_DIAS   = Number(process.env.AMBBKP_JANELA_DIAS   || 5);
+const JANELA_DIAS   = Number(process.env.AMBBKP_JANELA_DIAS   || 60)   /* 26/08: 60d reais (decisão do dono) — antes o valor era decorativo, o filtro nem chegava no Bling */;
 const PAUSA_MS      = Number(process.env.AMBBKP_PAUSA_MS      || 350);            // ~3 req/s
 const RETENCAO_DIAS = Number(process.env.AMBBKP_RETENCAO_DIAS || 7);
 const ETIQ_FORMATO  = (process.env.AMBBKP_ETIQ_FORMATO || 'ZPL').toUpperCase();   // ZPL | PDF
