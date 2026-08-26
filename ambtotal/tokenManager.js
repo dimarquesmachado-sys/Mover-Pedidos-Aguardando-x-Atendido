@@ -4,6 +4,24 @@ const fs    = require('fs');
 const path  = require('path');
 const fetch = require('node-fetch');
 
+/* 26/08 (prometido no PR #205): fetch SEM prazo aqui pendurava qualquer blingGet pra sempre
+   quando o Bling aceitava a conexão e emudecia — e cada ciclo novo empilhava mais um soquete
+   (o Codex mediu: um por invocação). O prazo LANÇA erro, e todo chamador já trata: o blingGet
+   embrulha garantirToken em try/catch e devolve {ok:false} — falha normal, tenta no próximo.
+   O OAuth ganha 60s DE PROPÓSITO: abortar uma rotação de refresh que o Bling processou mas
+   não respondeu perderia o refresh novo (empresa fora do ar até reautorizar na mão) — 60s só
+   corta buraco-negro de verdade. A sonda, leitura pura, corta em 20s sem risco nenhum. */
+const fetchComPrazo = async (ms, rotulo, url, opts) => {
+  const ac = new AbortController();
+  const tt = setTimeout(() => ac.abort(), ms);
+  try { return await fetch(url, Object.assign({}, opts, { signal: ac.signal })); }
+  catch (e) {
+    if (ac.signal.aborted) throw new Error(rotulo + ': prazo de ' + Math.round(ms / 1000) + 's estourado (Bling mudo)');
+    throw e;
+  } finally { clearTimeout(tt); }
+};
+
+
 const TOKEN_FILE = process.env.AMB_TOKEN_FILE || '/data/ambtotal/bling-tokens.json';
 
 // ── I/O ───────────────────────────────────────────────────────────────
@@ -35,7 +53,7 @@ function basicAuth() {
 }
 
 async function postOAuth(body) {
-  const resp = await fetch('https://api.bling.com.br/Api/v3/oauth/token', {
+  const resp = await fetchComPrazo(60000, 'renovação OAuth', 'https://api.bling.com.br/Api/v3/oauth/token', {
     method: 'POST',
     headers: {
       Authorization: basicAuth(),
@@ -94,7 +112,7 @@ async function garantirToken() {
     return renovarToken();
   }
 
-  const resp = await fetch('https://api.bling.com.br/Api/v3/produtos?limite=1', {
+  const resp = await fetchComPrazo(20000, 'sonda de token', 'https://api.bling.com.br/Api/v3/produtos?limite=1', {
     headers: { Authorization: `Bearer ${access_token}` }
   });
 
