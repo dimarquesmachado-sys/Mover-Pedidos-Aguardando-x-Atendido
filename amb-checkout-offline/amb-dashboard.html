@@ -2840,6 +2840,27 @@ function _bqRender(q, hits, hh, erroH){
     '<th class="num" title="comissão do marketplace — REAL quando o canal informa; senão a % que você configurou · no histórico é o valor gravado na época, sem selo">Tarifa (−)</th><th class="num" title="frete que sai do SEU bolso: real do ML, motoboy do Flex ou estimativa do Bling">Frete vend. (−)</th><th class="num" title="crédito devolvido pelo marketplace (ex.: tarifa estornada) — SOMA na margem">Estorno (+)</th><th class="num" title="margem de contribuição: venda − imposto − comissão − frete − custo · clique no valor pra ver a conta aberta">💎 M.C.</th><th class="num" title="a margem em % sobre o valor dos produtos">MC %</th></tr>'+
     loc.map(h=>{
       const P = calcPL(h);
+      /* Codex (P2, PR#223): SINT recém-sincronizado SEM itens ainda não tem margem — o caminho
+         normal mostrava o ✓ laranja de "margem já calculada" com a M.C. em "—" (informação
+         falsa). A Análise trata este exato estado com linha resumida e ⏳ (linha ~3629);
+         mesma renderização aqui: total do Bling na Venda NF, cliente na vaga do Produto
+         (como lá) e o ⏳ com o aviso de que a margem entra sozinha na próxima rodada. */
+      if(h.sintetico && !((h.itens||[]).length)){
+        const _dv = diaVenda(h);
+        const dtx = _dv ? (String(_dv).slice(8,10)+'/'+String(_dv).slice(5,7)) : '—';
+        const tag = h._cancelado ? '<span class="st bad">CANCELADA</span>' : '<span class="dim" style="font-size:10px" title="o sync ainda não trouxe os itens desta venda do Bling — a margem entra sozinha na próxima rodada (até 5 min)">⏳</span>';
+        return '<tr style="'+estiloLinha(h)+'">'+
+          '<td class="dim">'+dtx+'</td>'+
+          '<td>'+(h._cancelado?'<span style="color:#64748b;font-weight:800" title="CANCELADO no Bling">✕</span> ':'<span style="color:#f59e0b;font-weight:800" title="aguardando bipagem">✓</span> ')+'<b>'+esc(h.numero||h.id)+'</b>'+(h.devolucao?' <span class="st bad" style="font-size:9px" title="DEVOLU\u00c7\u00c3O no ML">\ud83d\udd34 DEVOLV.</span>':'')+'<br><span class="dim" style="font-size:10px">'+esc(h._sit||'')+'</span></td>'+
+          '<td class="dim" style="font-size:11px;max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(h.numero_loja?esc(h.numero_loja)+(linkMkt(h)?' <a class="lkM" href="'+linkMkt(h)+'" target="_blank" rel="noopener">↗</a>':''):'—')+'</td>'+
+          '<td>'+esc(nomeCanal(canalKey(h.marketplace)))+'</td>'+
+          '<td><div class="desc" style="max-width:200px">'+esc(h.cliente||'')+'</div></td>'+
+          '<td class="num dim">—</td>'+
+          '<td class="num'+(h._cancelado?' dim':'')+'" title="total do pedido no Bling (NF ainda não emitida)">'+(h.valor!=null?BRL(h.valor):'—')+'</td>'+
+          '<td class="num dim">—</td><td class="num dim">—</td><td class="num dim">—</td><td class="num dim">—</td><td class="num dim">—</td><td class="num dim">—</td>'+
+          '<td class="num">'+tag+'</td><td class="num dim">—</td>'+
+        '</tr>';
+      }
       const unid=(h.itens||[]).reduce((a,i)=>a+Number(i.qtd||1),0);
       const carrinho=((h.itens||[]).length>1)||unid>1;
       const pmc = (P.mc!=null&&P.rp)?Math.round(P.mc/P.rp*100):null;
