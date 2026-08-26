@@ -75,6 +75,7 @@ async function serieDaNFdoPedido(id, signal) {   // signal opcional: sem prazo, 
   let falhou = false;                                  // alguma chamada não foi?
   let nfVinculada = false;                             // o Bling CONFIRMOU que existe uma NF ligada ao pedido?
   let respondeu = false;                               // alguma chamada respondeu?
+  let leuNotaSemSerie = false;                         // li a NOTA (o Bling respondeu com ela) e a série não veio no corpo
   const pedir = async (url) => {
     try {
       const r = await blingGet(url, 3, signal);
@@ -96,8 +97,10 @@ async function serieDaNFdoPedido(id, signal) {   // signal opcional: sem prazo, 
   if (nf && Number(nf.id) > 0) {                       // veio resumo sem série → busca o detalhe
     nfVinculada = true;
     await sleep(PAUSA_MS);
-    achou = serieDe(await pedir(`/nfe/${nf.id}`));
+    const detNf = await pedir(`/nfe/${nf.id}`);
+    achou = serieDe(detNf);
     if (achou) return achou;
+    if (detNf) leuNotaSemSerie = true;                 // a nota veio inteira e mesmo assim sem série
   }
 
   // 2) pelo detalhe do pedido (notaFiscal.id)
@@ -109,19 +112,31 @@ async function serieDaNFdoPedido(id, signal) {   // signal opcional: sem prazo, 
     if (Number(nfId) > 0) {
       nfVinculada = true;
       await sleep(PAUSA_MS);
-      achou = serieDe(await pedir(`/nfe/${nfId}`));
+      const detNf2 = await pedir(`/nfe/${nfId}`);
+      achou = serieDe(detNf2);
       if (achou) return achou;
+      if (detNf2) leuNotaSemSerie = true;              // idem: nota lida, série ausente do corpo
     }
   }
 
   /* Só posso afirmar "não tem nota" se NENHUMA chamada falhou. Basta uma ter falhado pra
      virar `falhou` — na dúvida o relógio não corre e a gente tenta de novo no próximo ciclo. */
+  /* Codex #206: a nota LIDA vence falha alheia. Se `/nfe/{id}` respondeu com a nota (sem
+     série no corpo) mas uma chamada REDUNDANTE depois falhou (429), `falhou` mascararia a
+     confirmação e o relógio das 6h não andaria — no ambiente rate-limitado que este ajuste
+     mira, isso seria o "para sempre" de volta. A leitura confirmada decide primeiro. */
+  if (leuNotaSemSerie) return { nfSemSerie: true };
   if (falhou) return { falhou: true };
   /* ⚠️ Codex #199 (P1): se o Bling CONFIRMOU que existe NF vinculada mas a série não veio
      em nenhuma leitura, isso NÃO é "sem nota" — é "não consegui ler a série de uma nota que
      existe". Devolver semNF aqui deixaria o relógio das 6h correr e o pedido ser movido sem
      a série NUNCA ter sido lida: se fosse um clone série 1, é o incidente de 24/08 voltando
      por outra porta. Falha = não conta tempo, tenta de novo. */
+  /* 26/08 (7 Full Shopee/Magalu acampados): vinculada mas a nota NUNCA foi lida = falha
+     transitória, tenta de novo sem contar tempo — o caso estrutural (nota lida sem série,
+     típico de XML importado pela extensão) já retornou { nfSemSerie } lá em cima e conta
+     no relógio de 6h confirmadas. Nota ilegível não é clone: clone é emitido pelo Bling ao
+     salvar e nasce com série 1 legível desde o primeiro minuto. */
   if (nfVinculada) return { falhou: true };
   return respondeu ? { semNF: true } : { falhou: true };
 }
