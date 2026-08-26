@@ -883,14 +883,14 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
         const vagas = Math.max(0, 15 - loteFull.length);
         const giroC = comunsC.length ? (_cursorConfirmacao % comunsC.length) : 0;
         const girado = comunsC.slice(giroC).concat(comunsC.slice(0, giroC));
-        /* Codex #212 r2: um único Full cronicamente mudo na FRENTE do lote mataria os
-           comuns de fome — todo ciclo tenta ele primeiro, estoura, aborta. Um COMUM abre o
-           lote como CANÁRIO: se o canário estoura, a mudez é do token (aborta tudo, como
-           antes); se um Full estoura com o canário vivo, o problema é DAQUELE pedido —
-           pula só ele e segue, com teto de 2 estouros por ciclo (cada estouro deixa 1
-           soquete vivo; 2 é o preço de não parar a limpeza por um pedido doente). */
-        const canario = girado.slice(0, 1);
-        const loteConf = canario.concat(loteFull, girado.slice(1, vagas));
+        /* Codex #212 r2+r3: qualquer id fixo na frente vira gargalo se for cronicamente
+           mudo (um Full doente matava os comuns; um comum doente único viraria canário
+           eterno e mataria os Full). REGRA UNIFORME, sem caso especial: o 1º estouro —
+           seja de quem for — pula o pedido e testa o PRÓXIMO; DOIS ids diferentes mudos
+           no mesmo ciclo = mudez do token, aborta. Teto de 2 soquetes vivos por ciclo,
+           e nenhum pedido doente consegue parar a limpeza sozinho. Um comum abre o lote
+           só pela ordem (barato responde primeiro); não decide mais nada. */
+        const loteConf = girado.slice(0, 1).concat(loteFull, girado.slice(1, vagas));
         adiados = aRemover.length - loteConf.length;
         let tentadosComuns = 0, tentadosFull = 0, estouros = 0;
         for (let iC = 0; iC < loteConf.length; iC++) {
@@ -904,12 +904,11 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
           await new Promise(r => setTimeout(r, PAUSA_MS || 220));                 // pausa SEMPRE, preservado incluso
           if (estourou) {
             estouros++;
-            const eraCanario = (canario.length && iC === 0);
-            if (!eraCanario && estouros < 2) {          // pedido doente: pula só ele, a limpeza segue
+            if (estouros < 2) {                         // 1º estouro: pode ser só ESTE pedido doente — pula e testa o próximo
               adiados++;
               continue;
             }
-            mudo = true; adiados += (loteConf.length - iC);
+            mudo = true; adiados += (loteConf.length - iC);   // 2º: dois ids diferentes mudos = token; aborta
             /* r7fix: a pendurada é registrada ANTES do break — depois dele é código morto
                (foi exatamente o que o Codex pegou na primeira versão disto). */
             _sondaPendente = pd.emVoo().catch(() => {}).then(() => { _sondaPendente = null; });
