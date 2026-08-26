@@ -13,6 +13,24 @@ const { BLING_BASE, CACHE_DIR, SIT_ATENDIDO, SIT_DESPACHADOS, SIT_VERIFICADO, SY
   ARQUIVO_DIR, ARQUIVO_DIAS, SMTP_HOST, SMTP_PORT, EMAIL_USER, EMAIL_PASS, EMAIL_DEST, SCHEMA, LOJA_MKT, MKT_NOME,
   sleep, ensureDir, readJson, writeJson, dataISO, json, html, manifest, salvarManifest, skuEanCache, locCache, salvarLoc,
   salvarSkuEan, lerIndiceEan, lerReservas, lerOperadores, lerAdmins, ehAdmin, blingGet, blingWrite, moverSituacao } = base;
+/* 26/08, decisão do dono ("vai ficar 6h parado poluindo minha tela?"): a espera de 6h
+   foi calibrada pro risco ERRADO neste ramo. Ela nasceu do incidente de 24/08 — mover
+   pedido cuja NF EXISTE mas a série nunca foi lida (podia ser clone série 1) — e ESSE
+   caso continua protegido pra sempre, sem prazo: NF vinculada sem série lida NUNCA move.
+   Aqui é outro caso: o Bling AFIRMANDO que não há NF nenhuma (404 confirmado), o normal
+   do Full espelhado. Clone nasce com NF vinculada e legível desde o primeiro minuto, então
+   o único risco real é o ML Full recém-criado minutos antes de a matriz emitir a série 1
+   própria — e pra isso 1 hora sobra.
+   Codex #218 (P1): o prazo alcança TAMBÉM o ramo "nota lida sem série" — e é seguro pelo
+   mesmo invariante, já verificado na casa (b83): clone é emitido pelo Bling ao salvar e
+   NASCE com série 1 legível desde o primeiro minuto, então cai no ramo {serie}, nunca
+   aqui. Nota lida sem série no corpo é, por definição, espelho de marketplace — a NF já
+   existe do lado de lá; mover é ainda MAIS justificado que no 404. O único caso que
+   nunca vence prazo nenhum segue sendo o perigoso: NF vinculada cuja leitura falhou. Configurável sem deploy: GOODBKP_ESPERA_FULL_MIN. */
+/* Codex #218 (P2): typo na env (ex. "60m") dava NaN, e NaN na comparação movia NA HORA —
+   o oposto da trava. Valor inválido ou ≤0 cai no padrão de 60; válido tem piso de 5. */
+const _espEnv = Number(process.env.GOODBKP_ESPERA_FULL_MIN);
+const ESPERA_FULL_MS = (Number.isFinite(_espEnv) && _espEnv > 0 ? Math.max(5, _espEnv) : 60) * 60 * 1000;
 let _cursorConfirmacao = 0;   // porte do #205 (AMB): onde a janela de conferência da reconciliação parou — gira pelo tamanho do lote; restart zera, sem prejuízo
 let _cursorFull = 0;          // Codex #212: os Full preservados também giram — ≥16 deles travaria a fatia fixa nos mesmos 15 pra sempre
 let _sondaPendente = null;    // porte do #205: chamada de token/detalhe pendurada de um ciclo anterior — enquanto não assentar, a conferência é pulada (não empilha soquete)
@@ -309,7 +327,7 @@ async function listarAtendidos() {
             semResposta.push(String(idF));                      // não perguntei ainda: espera, sem contar tempo
           } else {
             /* ⚠️ Codex #199 (P1): o relógio conta TEMPO CONFIRMADO, não tempo de parede.
-               O desenho anterior guardava só o `desde`: se o marcador nascesse e viessem 6h
+               O desenho anterior guardava só o `desde`: se o marcador nascesse e viessem horas
                de 429, a PRIMEIRA resposta boa depois da pane encontraria o carimbo velho e
                moveria o pedido na hora — 6h "vencidas" sem NENHUMA confirmação no meio.
                Agora cada resposta "sem NF" soma ao acumulado apenas o intervalo desde a
@@ -328,7 +346,7 @@ async function listarAtendidos() {
               espera.acum = Number(espera.acum || 0) + passo;
               espera.ult = agoraE;
               mudouCache = true;
-              if (espera.acum < 6 * 60 * 60 * 1000) {
+              if (espera.acum < ESPERA_FULL_MS) {
                 semResposta.push(String(idF));                  // ainda não somou 6h confirmadas
               } else {
                 venceuEspera.push(String(idF));                 // 6h CONFIRMADAS sem nota: MOVE
@@ -348,9 +366,9 @@ async function listarAtendidos() {
            "movendo" aqui mentiria a cada ciclo, escondendo exatamente a condição de pedido
            preso que este log existe pra diagnosticar. */
         if (SIT_DESPACHADOS) {
-          console.log(`[GOODBKP] série não veio em 6h — movendo assim mesmo (a unidade diz Full e a NF do marketplace não chegou): ` + venceuEspera.join(', '));
+          console.log(`[GOODBKP] série não veio em ${Math.round(ESPERA_FULL_MS/60000)}min — movendo assim mesmo (a unidade diz Full e a NF do marketplace não chegou): ` + venceuEspera.join(', '));
         } else {
-          console.log(`[GOODBKP] série não veio em 6h em ${venceuEspera.length} pedido(s), mas o move está DESLIGADO (GOODBKP_SIT_DESPACHADOS não configurado) — ficam em ATENDIDO: ` + venceuEspera.join(', '));
+          console.log(`[GOODBKP] série não veio em ${Math.round(ESPERA_FULL_MS/60000)}min em ${venceuEspera.length} pedido(s), mas o move está DESLIGADO (GOODBKP_SIT_DESPACHADOS não configurado) — ficam em ATENDIDO: ` + venceuEspera.join(', '));
         }
       }
       if (semResposta.length) {
