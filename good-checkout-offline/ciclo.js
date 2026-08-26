@@ -755,10 +755,14 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
         const giroC = aRemover.length ? (_cursorConfirmacao % aRemover.length) : 0;
         const girado = aRemover.slice(giroC).concat(aRemover.slice(0, giroC));
         const loteConf = girado.slice(0, 15);
-        _cursorConfirmacao = aRemover.length ? (giroC + loteConf.length) % aRemover.length : 0;
         adiados = aRemover.length - loteConf.length;
+        /* Codex #207: o cursor avança pelo TENTADO, não pelo lote — no estouro por mudez o
+           lote inteiro era pulado tendo tentado um só, e com um candidato cronicamente mudo
+           na posição 0 os 14 seguintes nunca seriam conferidos (0→15→30→45 pra sempre). */
+        let tentados = 0;
         for (let iC = 0; iC < loteConf.length; iC++) {
           const id = loteConf[iC];
+          tentados = iC + 1;
           let det = null, estourou = false;
           const pd = prazoDet(sig => detalhePedido(id, sig));
           try { det = await pd; }
@@ -779,6 +783,7 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
           try { fs.rmSync(path.join(CACHE_DIR, String(id)), { recursive: true, force: true }); } catch (e) {}
           delete man[id]; confirmados++;
         }
+        _cursorConfirmacao = aRemover.length ? (giroC + tentados) % aRemover.length : 0;
         if (confirmados) salvarManifest(man);
         console.log(`[GOODBKP] reconciliação conferida: ${confirmados} removido(s) — ${mantidos} seguem em ATENDIDO — ${semResposta} sem resposta (preservados) — ${adiados} adiado(s) p/ o próximo ciclo${mudo ? ' — BLING MUDO: conferência ABORTADA neste ciclo, tenta no próximo' : ''}`);
         }
