@@ -14,6 +14,7 @@ const { BLING_BASE, CACHE_DIR, SIT_ATENDIDO, SIT_DESPACHADOS, SIT_VERIFICADO, SY
   sleep, ensureDir, readJson, writeJson, dataISO, json, html, manifest, salvarManifest, skuEanCache, locCache, salvarLoc,
   salvarSkuEan, lerIndiceEan, lerReservas, lerOperadores, lerAdmins, ehAdmin, blingGet, blingWrite, moverSituacao } = base;
 let _cursorConfirmacao = 0;   // r6: onde a janela de conferência da reconciliação parou (gira pelo tamanho do lote; restart zera, sem prejuízo)
+let _sondaPendente = null;    // r7: chamada de token/detalhe pendurada de um ciclo anterior — enquanto não assentar, a conferência é pulada (não empilha soquete)
 const { parseNF, acharNFporRange, nfDoPedido, serieDaNFdoPedido, carregarNFs, acharNFnaLista, baixarDanfe, parseXmlNF, baixarXmlNF, dadosNFSimp } = require('./nf');
 const { baixarEtiqueta, baixarEtiquetaPDF, labelaryPost, zplParaPdf, etiquetaPdf } = require('./etiquetas');
 const { servicoDoPedido, ehFlex, cronDeveriaTerRodado, kitIncompletoNoCache, zplEscape, bannerVolumeZpl } = require('./comum');
@@ -794,14 +795,24 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
            deletar sem confirmação é exatamente o que este ramo não pode fazer, e o repo já
            documenta que o Bling omite situacao de vez em quando. Agora: só deleta com status
            NUMÉRICO e explicitamente ≠ ATENDIDO; omitido/ilegível conta como sem resposta. */
-        const prazoDet = (fn, ms) => new Promise((resolva, rejeite) => {
+        /* r7: o prazo vence por fora, mas a chamada de baixo (token sem sinal) segue viva —
+           a promessa EM VOO fica exposta: quem estourar o prazo pendura ela em
+           _sondaPendente e os ciclos seguintes PULAM a conferência até ela assentar.
+           1 soquete no máximo por processo, nunca um por ciclo. */
+        const prazoDet = (fn, ms) => {
           const ac = new AbortController();
-          const tt = setTimeout(() => { ac.abort(); rejeite(new Error('prazo estourado')); }, ms || 20000);
-          Promise.resolve().then(() => fn(ac.signal)).then(
-            (vv) => { clearTimeout(tt); resolva(vv); },
-            (ee) => { clearTimeout(tt); rejeite(ee); }
-          );
-        });
+          let emVoo = null;
+          const pr = new Promise((resolva, rejeite) => {
+            const tt = setTimeout(() => { ac.abort(); rejeite(new Error('prazo estourado')); }, ms || 20000);
+            emVoo = Promise.resolve().then(() => fn(ac.signal));
+            emVoo.then(
+              (vv) => { clearTimeout(tt); resolva(vv); },
+              (ee) => { clearTimeout(tt); rejeite(ee); }
+            );
+          });
+          pr.emVoo = () => emVoo;
+          return pr;
+        };
         /* Codex #205 r4 (P1×2 + P2): (a) TETO de 15 conferências por ciclo — 46 candidatos
            mudos × 20s dariam 15+ min e o watchdog empilharia um 2º ciclo mexendo no MESMO
            cache; o resto fica adiado e morre nos ciclos seguintes. (b) prazo estourado =
@@ -811,6 +822,9 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
            inclusive os preservados — antes só o removido pausava e os "ainda ATENDIDO"
            saíam em rajada, furando o ritmo e convidando 429. */
         let confirmados = 0, mantidos = 0, semResposta = 0, adiados = 0, mudo = false, tentados = 0;
+        if (_sondaPendente) {
+          console.log(`[AMBBKP] reconciliação: conferência PULADA — chamada do ciclo anterior ainda pendurada no token; ${aRemover.length} candidato(s) adiado(s)`);
+        } else {
         /* Codex #205 r5: fatia FIXA daria fome — os mesmos 15 primeiros seriam tentados em
            todo ciclo (a ordem do manifest é estável) e, se preservados, o 16º em diante
            nunca seria conferido apesar de "adiado". A janela agora GIRA com o relógio:
@@ -829,10 +843,13 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
           const id = loteConf[iC];
           tentados++;
           let det = null, estourou = false;
-          try { det = await prazoDet(sig => detalhePedido(id, sig)); }
+          const pd = prazoDet(sig => detalhePedido(id, sig));
+          try { det = await pd; }
           catch (e) { det = null; estourou = /prazo/.test(String((e && e.message) || '')); }
           await new Promise(r => setTimeout(r, PAUSA_MS || 220));                 // pausa SEMPRE, preservado incluso
-          if (estourou) { mudo = true; adiados += (loteConf.length - iC); break; }
+          if (estourou) { mudo = true; adiados += (loteConf.length - iC); break;
+            _sondaPendente = pd.emVoo().catch(() => {}).then(() => { _sondaPendente = null; });
+          }
           if (!det) { semResposta++; continue; }                                  // Bling não respondeu → preserva
           const sitRaw = det.situacao != null ? (det.situacao.id != null ? det.situacao.id : det.situacao) : null;
           /* Codex #205 r2: Number(null), Number('') e Number('   ') são TODOS 0 — finito e
@@ -857,6 +874,7 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
         _cursorConfirmacao = aRemover.length ? (giroC + Math.max(1, tentados)) % aRemover.length : 0;
         if (confirmados) salvarManifest(man);
         console.log(`[AMBBKP] reconciliação conferida: ${confirmados} removido(s) · ${mantidos} seguem em ATENDIDO · ${semResposta} sem resposta do Bling (preservados) — ${adiados} adiado(s) p/ o próximo ciclo${mudo ? ' — BLING MUDO: conferência ABORTADA neste ciclo, tenta no próximo' : ''}`);
+        }
       } else if (aRemover.length) {
         for (const id of aRemover) {
           try { fs.rmSync(path.join(CACHE_DIR, String(id)), { recursive: true, force: true }); } catch (e) {}
