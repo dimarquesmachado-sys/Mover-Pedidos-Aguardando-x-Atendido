@@ -20,8 +20,17 @@ const { BLING_BASE, CACHE_DIR, SIT_ATENDIDO, SIT_DESPACHADOS, SIT_VERIFICADO, SY
    Aqui é outro caso: o Bling AFIRMANDO que não há NF nenhuma (404 confirmado), o normal
    do Full espelhado. Clone nasce com NF vinculada e legível desde o primeiro minuto, então
    o único risco real é o ML Full recém-criado minutos antes de a matriz emitir a série 1
-   própria — e pra isso 1 hora sobra. Configurável sem deploy: GOODBKP_ESPERA_FULL_MIN. */
-const ESPERA_FULL_MS = Math.max(5, Number(process.env.GOODBKP_ESPERA_FULL_MIN || 60)) * 60 * 1000;
+   própria — e pra isso 1 hora sobra.
+   Codex #218 (P1): o prazo alcança TAMBÉM o ramo "nota lida sem série" — e é seguro pelo
+   mesmo invariante, já verificado na casa (b83): clone é emitido pelo Bling ao salvar e
+   NASCE com série 1 legível desde o primeiro minuto, então cai no ramo {serie}, nunca
+   aqui. Nota lida sem série no corpo é, por definição, espelho de marketplace — a NF já
+   existe do lado de lá; mover é ainda MAIS justificado que no 404. O único caso que
+   nunca vence prazo nenhum segue sendo o perigoso: NF vinculada cuja leitura falhou. Configurável sem deploy: GOODBKP_ESPERA_FULL_MIN. */
+/* Codex #218 (P2): typo na env (ex. "60m") dava NaN, e NaN na comparação movia NA HORA —
+   o oposto da trava. Valor inválido ou ≤0 cai no padrão de 60; válido tem piso de 5. */
+const _espEnv = Number(process.env.GOODBKP_ESPERA_FULL_MIN);
+const ESPERA_FULL_MS = (Number.isFinite(_espEnv) && _espEnv > 0 ? Math.max(5, _espEnv) : 60) * 60 * 1000;
 let _cursorConfirmacao = 0;   // porte do #205 (AMB): onde a janela de conferência da reconciliação parou — gira pelo tamanho do lote; restart zera, sem prejuízo
 let _cursorFull = 0;          // Codex #212: os Full preservados também giram — ≥16 deles travaria a fatia fixa nos mesmos 15 pra sempre
 let _sondaPendente = null;    // porte do #205: chamada de token/detalhe pendurada de um ciclo anterior — enquanto não assentar, a conferência é pulada (não empilha soquete)
