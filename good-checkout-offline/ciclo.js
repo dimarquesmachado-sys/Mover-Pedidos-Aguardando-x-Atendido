@@ -123,7 +123,14 @@ async function sincronizarConferidos() {
 async function listarAtendidos() {
   const hoje = new Date();
   const ini  = new Date(hoje); ini.setDate(ini.getDate() - JANELA_DIAS);
-  const qs = `idSituacao=${SIT_ATENDIDO}&dataEmissaoInicial=${dataISO(ini)}&dataEmissaoFinal=${dataISO(hoje)}`;
+  /* Porte do #213 (decisão do dono): a "janela" antiga era FICTÍCIA — dataEmissaoInicial/
+     Final não existem no /pedidos/vendas e o Bling ignorava o filtro, listando TODOS os
+     ATENDIDO. Oficializado: janela REAL de 60 dias com o parâmetro CERTO da v3
+     (dataInicial/dataFinal). E dataFinal = AMANHÃ por causa do bug documentado do Bling
+     de omitir as vendas do próprio dia (o P1 que o Codex pegou no #213 — o canário já
+     contorna igual). */
+  const fimJanela = new Date(hoje); fimJanela.setDate(fimJanela.getDate() + 1);
+  const qs = `idSituacao=${SIT_ATENDIDO}&dataInicial=${dataISO(ini)}&dataFinal=${dataISO(fimJanela)}`;
   const out = [];
   let fetchOk = false;
   let completa = false;              // só true se a paginação foi até o fim SEM falhar no meio
