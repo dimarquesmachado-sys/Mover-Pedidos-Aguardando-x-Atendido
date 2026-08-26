@@ -12,10 +12,25 @@ const fetch = require('node-fetch');
    não respondeu perderia o refresh novo (empresa fora do ar até reautorizar na mão) — 60s só
    corta buraco-negro de verdade. A sonda, leitura pura, corta em 20s sem risco nenhum. */
 const fetchComPrazo = async (ms, rotulo, url, opts) => {
+  /* Codex #210 (P1): devolver o resp cru reabria o hang pela porta dos fundos — o node-fetch
+     resolve assim que os CABEÇALHOS chegam, o finally desarmava o timer, e um corpo mudo
+     pendurava o resp.json() de fora com _renovando preso pra sempre (e a sonda nem consumia
+     o corpo, deixando soquete parado vivo). Agora o CORPO é lido AQUI, ainda dentro do
+     prazo, e o chamador recebe o já-lido: status + json() síncrono sobre texto em memória. */
   const ac = new AbortController();
   const tt = setTimeout(() => ac.abort(), ms);
-  try { return await fetch(url, Object.assign({}, opts, { signal: ac.signal })); }
-  catch (e) {
+  try {
+    const resp = await fetch(url, Object.assign({}, opts, { signal: ac.signal }));
+    const corpo = await resp.text();                       // consome dentro do prazo; abort derruba a leitura
+    return {
+      status: resp.status,
+      ok: resp.ok,
+      json: () => {
+        try { return JSON.parse(corpo); }
+        catch (e2) { throw new Error(rotulo + ': resposta não é JSON (' + String(corpo).slice(0, 80) + ')'); }
+      }
+    };
+  } catch (e) {
     if (ac.signal.aborted) throw new Error(rotulo + ': prazo de ' + Math.round(ms / 1000) + 's estourado (Bling mudo)');
     throw e;
   } finally { clearTimeout(tt); }
