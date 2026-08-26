@@ -783,12 +783,19 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
         const vagas = Math.max(0, 15 - loteFull.length);
         const giroC = comunsC.length ? (_cursorConfirmacao % comunsC.length) : 0;
         const girado = comunsC.slice(giroC).concat(comunsC.slice(0, giroC));
-        const loteConf = loteFull.concat(girado.slice(0, vagas));
+        /* Codex #212 r2: um único Full cronicamente mudo na FRENTE do lote mataria os
+           comuns de fome — todo ciclo tenta ele primeiro, estoura, aborta. Um COMUM abre o
+           lote como CANÁRIO: se o canário estoura, a mudez é do token (aborta tudo, como
+           antes); se um Full estoura com o canário vivo, o problema é DAQUELE pedido —
+           pula só ele e segue, com teto de 2 estouros por ciclo (cada estouro deixa 1
+           soquete vivo; 2 é o preço de não parar a limpeza por um pedido doente). */
+        const canario = girado.slice(0, 1);
+        const loteConf = canario.concat(loteFull, girado.slice(1, vagas));
         adiados = aRemover.length - loteConf.length;
         /* Codex #207: o cursor avança pelo TENTADO, não pelo lote — no estouro por mudez o
            lote inteiro era pulado tendo tentado um só, e com um candidato cronicamente mudo
            na posição 0 os 14 seguintes nunca seriam conferidos (0→15→30→45 pra sempre). */
-        let tentados = 0, tentadosComuns = 0, tentadosFull = 0;
+        let tentados = 0, tentadosComuns = 0, tentadosFull = 0, estouros = 0;
         for (let iC = 0; iC < loteConf.length; iC++) {
           const id = loteConf[iC];
           tentados = iC + 1;
@@ -799,6 +806,12 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
           catch (e) { det = null; estourou = /prazo/.test(String((e && e.message) || '')); }
           await new Promise(r => setTimeout(r, PAUSA_MS || 220));                 // pausa SEMPRE, preservado incluso
           if (estourou) {
+            estouros++;
+            const eraCanario = (canario.length && iC === 0);
+            if (!eraCanario && estouros < 2) {          // pedido doente: pula só ele, a limpeza segue
+              adiados++;
+              continue;
+            }
             mudo = true; adiados += (loteConf.length - iC);
             _sondaPendente = pd.emVoo().catch(() => {}).then(() => { _sondaPendente = null; });
             break;
