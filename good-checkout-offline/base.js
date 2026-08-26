@@ -14,7 +14,7 @@ const SIT_ATENDIDO  = Number(process.env.GOODBKP_SIT_ATENDIDO  || 9);           
 const SIT_DESPACHADOS = Number(process.env.GOODBKP_SIT_DESPACHADOS || 0);          // DESPACHADOS do Full — 0 = move DESLIGADO até configurar o id desta conta
 const SIT_VERIFICADO = Number(process.env.GOODBKP_SIT_VERIFICADO || 24);           // VERIFICADO (destino do sync Fase 3)
 const SYNC_ON       = process.env.GOODBKP_SYNC_ON === '1';                          // liga o sync automático no cron (Fase 3)
-const JANELA_DIAS   = Number(process.env.GOODBKP_JANELA_DIAS   || 5);
+const JANELA_DIAS   = Number(process.env.GOODBKP_JANELA_DIAS   || 60);   /* 26/08: 60d reais (decisão do dono, porte do #213) — antes o valor era decorativo, o filtro nem chegava no Bling */
 const PAUSA_MS      = Number(process.env.GOODBKP_PAUSA_MS      || 350);            // ~3 req/s
 const RETENCAO_DIAS = Number(process.env.GOODBKP_RETENCAO_DIAS || 7);
 const ETIQ_FORMATO  = (process.env.GOODBKP_ETIQ_FORMATO || 'ZPL').toUpperCase();   // ZPL | PDF
