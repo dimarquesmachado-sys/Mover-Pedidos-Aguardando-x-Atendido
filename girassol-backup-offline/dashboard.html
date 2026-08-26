@@ -2752,10 +2752,17 @@ function _bqRender(q, hits, hh, erroH){
      inventado. A coluna Cliente saiu junto com o header antigo: a Análise não a tem (o nome segue
      no checkout e no Bling). PRESERVADO do card antigo: dedup das 15 vagas, assento garantido do
      exato, links Bling↗/MKTP↗/NF e a conta aberta clicável dos dois lados — a M.C. segue sendo o
-     link (▸/▾), agora na 14ª coluna, com o MC% na 15ª. */
+     link (▸/▾), agora na 14ª coluna, com o MC% na 15ª.
+     Codex (P2, rodada 1): (a) o overflow-x do .tw só existe nas media queries de celular, e
+     html/body usam overflow-x:clip — em janela de desktop mais estreita que as 15 colunas a
+     direita ficava CORTADA sem barra de rolagem; o wrapper liga o overflow sempre (o header
+     deixa de grudar dentro da área de rolagem — troca aceita: tabela curta, alcançar Estorno/
+     M.C./MC% importa mais). (b) custo PARCIAL do histórico (sem_custo=true soma só os SKUs
+     com custo) saía como se fosse o custo completo — agora segue o padrão do historico-linhas:
+     warn + ⚠ e título explicando que é soma parcial. */
   const cel=(v,cls)=>'<td class="num'+(cls?' '+cls:'')+'">'+(v!=null?BRL(v):'<span class="dim">—</span>')+'</td>';
   const nz=v=>(v==null||v===''||!isFinite(Number(v)))?null:Number(v);
-  res.innerHTML = '<div class="tw"><table>'+
+  res.innerHTML = '<div class="tw" style="overflow-x:auto;max-width:100%"><table>'+
     '<tr><th title="quando a venda aconteceu — hora REAL do canal quando ele informa; senão a hora da nota ou da conferência · no histórico só o dia">Data/hora</th><th title="número do pedido no Bling · ✓ verde = já bipado · ✓ laranja = aguardando bipagem · ✕ = cancelado · 📚 = veio do histórico (Supabase)">Pedido</th><th title="número da venda no marketplace — clique pra copiar">Venda (mkt)</th><th title="onde a venda aconteceu">Canal</th><th title="SKU(s) do pedido">Produto</th><th class="num" title="total de unidades do pedido">Un.</th>'+
     '<th class="num" title="total da NOTA FISCAL (com frete embutido, quando o canal lança)">Venda NF</th><th class="num" title="só os produtos: preço × quantidade">R$ Produtos</th><th class="num" title="quanto a mercadoria custou: custo unitário × quantidade, do banco de custos do Bling">Custo (−)</th><th class="num" title="Simples Nacional — alíquota do MÊS da venda aplicada sobre o valor da nota">Imposto (−)</th>'+
     '<th class="num" title="comissão do marketplace — REAL quando o canal informa; senão a % que você configurou · no histórico é o valor gravado na época, sem selo">Tarifa (−)</th><th class="num" title="frete que sai do SEU bolso: real do ML, motoboy do Flex ou estimativa do Bling">Frete vend. (−)</th><th class="num" title="crédito devolvido pelo marketplace (ex.: tarifa estornada) — SOMA na margem">Estorno (+)</th><th class="num" title="margem de contribuição: venda − imposto − comissão − frete − custo · clique no valor pra ver a conta aberta">💎 M.C.</th><th class="num" title="a margem em % sobre o valor dos produtos">MC %</th></tr>'+
@@ -2824,7 +2831,7 @@ function _bqRender(q, hits, hh, erroH){
           : '<span class="dim">—</span>')+'</div></td>'+
         '<td class="num">'+(unid?N(unid):'<span class="dim">—</span>')+'</td>'+
         cel(nz(h.vnota))+cel(vPr,'ok')+
-        cel(nz(h.custo))+cel(nz(h.imposto))+
+        '<td class="num'+(h.sem_custo?' warn':'')+'"'+(h.sem_custo?' title="há item SEM custo cadastrado — soma PARCIAL dos custos conhecidos, não o custo total do pedido"':'')+'>'+(nz(h.custo)?BRL(nz(h.custo)):'<span class="dim">—</span>')+(h.sem_custo?' ⚠':'')+'</td>'+cel(nz(h.imposto))+
         '<td class="num">'+(vCom!=null?BRL(vCom)+(vPr>0?'<div class="desc">'+Math.round(vCom/vPr*100)+'%</div>':''):'<span class="dim">—</span>')+'</td>'+
         cel(nz(h.frete))+
         '<td class="num">'+(h.credito?('<span class="'+(Number(h.credito)>=0?'ok':'bad')+'">'+(Number(h.credito)>=0?'+':'')+BRL(Number(h.credito))+'</span>'):'<span class="dim">—</span>')+'</td>'+
