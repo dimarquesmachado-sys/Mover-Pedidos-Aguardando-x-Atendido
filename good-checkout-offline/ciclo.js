@@ -318,7 +318,7 @@ async function listarAtendidos() {
             semResposta.push(String(idF));                      // não perguntei ainda: espera, sem contar tempo
           } else {
             /* ⚠️ Codex #199 (P1): o relógio conta TEMPO CONFIRMADO, não tempo de parede.
-               O desenho anterior guardava só o `desde`: se o marcador nascesse e viessem ${Math.round(ESPERA_FULL_MS/60000)}min
+               O desenho anterior guardava só o `desde`: se o marcador nascesse e viessem horas
                de 429, a PRIMEIRA resposta boa depois da pane encontraria o carimbo velho e
                moveria o pedido na hora — 6h "vencidas" sem NENHUMA confirmação no meio.
                Agora cada resposta "sem NF" soma ao acumulado apenas o intervalo desde a
