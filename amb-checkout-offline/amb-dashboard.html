@@ -404,7 +404,7 @@ const MOD = '/amb-checkout-offline';
     return _f(u, o);
   };
 })();
-const DASH_BUILD = 'a34';
+const DASH_BUILD = 'a35';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -2813,44 +2813,127 @@ function _bqRender(q, hits, hh, erroH){
       : (erroH ? '⚠ nada no cache recente, e o histórico está indisponível agora ('+esc(erroH)+') — tente de novo' : 'nada encontrado (nem no histórico)'))+'</div>';
     return;
   }
-  const dtBR = s => { const m=String(s||'').match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? (m[3]+'/'+m[2]) : ''; };
-    res.innerHTML = '<table><tr><th title="dia da venda">Data</th><th title="número do pedido no Bling · ✓ verde = já bipado · ✓ laranja = aguardando bipagem · ✕ = cancelado">Pedido</th><th title="onde a venda aconteceu">Canal</th><th title="nome do comprador no marketplace">Cliente</th><th class="num" title="valor total do pedido">Total</th><th class="num" title="margem de contribuição do pedido: venda − imposto − comissão − frete − custo · clique no valor pra ver a conta aberta">💎 M.C.</th></tr>'+
-    loc.map(h=>'<tr><td class="dim">'+diaVenda(h)+'</td><td><b>'+esc(h.numero||h.id)+'</b>'+
-      (blingId(h)?' <a class="lkB" href="https://www.bling.com.br/vendas.php#edit/'+esc(blingId(h))+'" target="_blank" rel="noopener" title="abrir o pedido no Bling" style="font-size:10px">Bling↗</a>':'')+
-      /* d200: FALTAVA o link pro pedido dentro do marketplace — o Diego pediu, e a
-         funcao linkMkt() ja existia e ja era usada na Analise. Era so nao estar aqui. */
-      (linkMkt(h)?' <a class="lkM" href="'+linkMkt(h)+'" target="_blank" rel="noopener" title="abrir esta venda no '+esc(nomeCanal(canalKey(h.marketplace)))+'" style="font-size:10px">MKTP↗</a>':'')+
-      (h.nf_numero?'<div class="desc">NF '+esc(h.nf_numero)+(h.nf_id?' <a class="lkN" href="https://www.bling.com.br/notas.fiscais.php#edit/'+esc(h.nf_id)+'" target="_blank" rel="noopener" title="abrir a NF no Bling">↗</a>':'')+'</div>':'')+'</td>'+
-      '<td>'+esc(canalKey(h.marketplace))+'</td><td class="desc" style="max-width:200px">'+esc(h.cliente||'')+'</td>'+
-      '<td class="num">'+(h.valor!=null?BRL(Number(h.valor)):'<span class="dim">—</span>')+'</td>'+
-      // 28/07: era um botão "💎 lucro" que não dizia nada (e não funcionava nas vendas ainda não
-      // bipadas). Virou o VALOR da margem, clicável pra abrir a conta aberta embaixo.
-      (function(){
-        const P = calcPL(h);
-        if(P.mc==null) return '<td class="num dim" title="ainda falta detalhe ou custo deste pedido">—</td></tr>';
-        const pc = (P.rp>0) ? Math.round(P.mc/P.rp*100) : null;
-        /* 19/08 (Diego): o valor abre a conta aberta, mas NADA na tela dizia isso — ele só
-           descobriu clicando por acaso. A setinha ▸ marca o que é expansível, e ela gira pra ▾
-           quando a conta está aberta (o abrirPL cuida disso pelo id do <a>). */
-        return '<td class="num"><a id="pl_'+esc(h.id)+'" href="javascript:void(0)" onclick="abrirPL(\''+esc(h.id)+'\')" '+
-               'style="text-decoration:none;font-weight:800" class="'+(P.mc>=0?'ok':'bad')+'" title="clique p/ ver a conta aberta">'+
-               '<span class="cvS">\u25b8</span> '+BRL(P.mc)+'</a>'+(pc!=null?('<div class="mut" style="font-size:10px">'+pc+'%</div>'):'')+'</td></tr>';
-      })()).join('')+
+  const dtHist = s => { const m=String(s||'').match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? (m[3]+'/'+m[2]) : ''; };
+  /* d225 — o card com as MESMAS colunas da Análise (pedido do Diego em 19/08; reconhecimento de
+     26/08). O header antigo (Data|Pedido|Canal|Cliente|Total|M.C.) dizia pouco: pra decidir preço
+     ele precisa da leitura completa — produto, unidades, custo, imposto, tarifa, frete, estorno,
+     M.C. e MC%. A Análise monta a linha inline (não há função de linha reaproveitável), então este
+     renderizador IMITA coluna a coluna: hit LOCAL sai do calcPL(h) — os mesmos números, selos e
+     tags da Análise —; hit do HISTÓRICO usa os agregados do buscar-lucro, e campo que o banco não
+     guarda (hora da venda, fonte/selo da tarifa, NF, id do Bling) fica "—"/sem selo — nunca
+     inventado. A coluna Cliente saiu junto com o header antigo: a Análise não a tem (o nome segue
+     no checkout e no Bling). PRESERVADO do card antigo: dedup das 15 vagas, assento garantido do
+     exato, links Bling↗/MKTP↗/NF e a conta aberta clicável dos dois lados — a M.C. segue sendo o
+     link (▸/▾), agora na 14ª coluna, com o MC% na 15ª.
+     Codex (P2, rodada 1): (a) o overflow-x do .tw só existe nas media queries de celular, e
+     html/body usam overflow-x:clip — em janela de desktop mais estreita que as 15 colunas a
+     direita ficava CORTADA sem barra de rolagem; o wrapper liga o overflow sempre (o header
+     deixa de grudar dentro da área de rolagem — troca aceita: tabela curta, alcançar Estorno/
+     M.C./MC% importa mais). (b) custo PARCIAL do histórico (sem_custo=true soma só os SKUs
+     com custo) saía como se fosse o custo completo — agora segue o padrão do historico-linhas:
+     warn + ⚠ e título explicando que é soma parcial. */
+  const cel=(v,cls)=>'<td class="num'+(cls?' '+cls:'')+'">'+(v!=null?BRL(v):'<span class="dim">—</span>')+'</td>';
+  const nz=v=>(v==null||v===''||!isFinite(Number(v)))?null:Number(v);
+  res.innerHTML = '<div class="tw" style="overflow-x:auto;max-width:100%"><table>'+
+    '<tr><th title="quando a venda aconteceu — hora REAL do canal quando ele informa; senão a hora da nota ou da conferência · no histórico só o dia">Data/hora</th><th title="número do pedido no Bling · ✓ verde = já bipado · ✓ laranja = aguardando bipagem · ✕ = cancelado · 📚 = veio do histórico (Supabase)">Pedido</th><th title="número da venda no marketplace — clique pra copiar">Venda (mkt)</th><th title="onde a venda aconteceu">Canal</th><th title="SKU(s) do pedido">Produto</th><th class="num" title="total de unidades do pedido">Un.</th>'+
+    '<th class="num" title="total da NOTA FISCAL (com frete embutido, quando o canal lança)">Venda NF</th><th class="num" title="só os produtos: preço × quantidade">R$ Produtos</th><th class="num" title="quanto a mercadoria custou: custo unitário × quantidade, do banco de custos do Bling">Custo (−)</th><th class="num" title="Simples Nacional — alíquota do MÊS da venda aplicada sobre o valor da nota">Imposto (−)</th>'+
+    '<th class="num" title="comissão do marketplace — REAL quando o canal informa; senão a % que você configurou · no histórico é o valor gravado na época, sem selo">Tarifa (−)</th><th class="num" title="frete que sai do SEU bolso: real do ML, motoboy do Flex ou estimativa do Bling">Frete vend. (−)</th><th class="num" title="crédito devolvido pelo marketplace (ex.: tarifa estornada) — SOMA na margem">Estorno (+)</th><th class="num" title="margem de contribuição: venda − imposto − comissão − frete − custo · clique no valor pra ver a conta aberta">💎 M.C.</th><th class="num" title="a margem em % sobre o valor dos produtos">MC %</th></tr>'+
+    loc.map(h=>{
+      const P = calcPL(h);
+      /* Codex (P2, PR#223): SINT recém-sincronizado SEM itens ainda não tem margem — o caminho
+         normal mostrava o ✓ laranja de "margem já calculada" com a M.C. em "—" (informação
+         falsa). A Análise trata este exato estado com linha resumida e ⏳ (linha ~3629);
+         mesma renderização aqui: total do Bling na Venda NF, cliente na vaga do Produto
+         (como lá) e o ⏳ com o aviso de que a margem entra sozinha na próxima rodada. */
+      if(h.sintetico && !((h.itens||[]).length)){
+        const _dv = diaVenda(h);
+        const dtx = _dv ? (String(_dv).slice(8,10)+'/'+String(_dv).slice(5,7)) : '—';
+        const tag = h._cancelado ? '<span class="st bad">CANCELADA</span>' : '<span class="dim" style="font-size:10px" title="o sync ainda não trouxe os itens desta venda do Bling — a margem entra sozinha na próxima rodada (até 5 min)">⏳</span>';
+        return '<tr style="'+estiloLinha(h)+'">'+
+          '<td class="dim">'+dtx+'</td>'+
+          '<td>'+(h._cancelado?'<span style="color:#64748b;font-weight:800" title="CANCELADO no Bling">✕</span> ':'<span style="color:#f59e0b;font-weight:800" title="aguardando bipagem">✓</span> ')+'<b>'+esc(h.numero||h.id)+'</b>'+(h.devolucao?' <span class="st bad" style="font-size:9px" title="DEVOLU\u00c7\u00c3O no ML">\ud83d\udd34 DEVOLV.</span>':'')+'<br><span class="dim" style="font-size:10px">'+esc(h._sit||'')+'</span></td>'+
+          '<td class="dim" style="font-size:11px;max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(h.numero_loja?esc(h.numero_loja)+(linkMkt(h)?' <a class="lkM" href="'+linkMkt(h)+'" target="_blank" rel="noopener">↗</a>':''):'—')+'</td>'+
+          '<td>'+esc(nomeCanal(canalKey(h.marketplace)))+'</td>'+
+          '<td><div class="desc" style="max-width:200px">'+esc(h.cliente||'')+'</div></td>'+
+          '<td class="num dim">—</td>'+
+          '<td class="num'+(h._cancelado?' dim':'')+'" title="total do pedido no Bling (NF ainda não emitida)">'+(h.valor!=null?BRL(h.valor):'—')+'</td>'+
+          '<td class="num dim">—</td><td class="num dim">—</td><td class="num dim">—</td><td class="num dim">—</td><td class="num dim">—</td><td class="num dim">—</td>'+
+          '<td class="num">'+tag+'</td><td class="num dim">—</td>'+
+        '</tr>';
+      }
+      const unid=(h.itens||[]).reduce((a,i)=>a+Number(i.qtd||1),0);
+      const carrinho=((h.itens||[]).length>1)||unid>1;
+      const pmc = (P.mc!=null&&P.rp)?Math.round(P.mc/P.rp*100):null;
+      return '<tr style="'+estiloLinha(h)+'"'+(h._cancelado?' title="pedido CANCELADO no Bling — fora dos totais"':(h.devolucao?(' title="DEVOLU\u00c7\u00c3O'+(h.dev_aberta?' em andamento (dinheiro ainda n\u00e3o resolvido no Mercado Pago)':' consolidada')+'"'):''))+'>'+
+        '<td class="dim" style="white-space:nowrap" title="'+(h.venda_em?('venda: '+dtBR(h.venda_em)+' · '):(h.venda_dia?('venda: '+String(h.venda_dia).slice(8,10)+'/'+String(h.venda_dia).slice(5,7)+' · '):''))+'conferido: '+dtBR(h.conferido_em)+'">'+(h.venda_em?dtBR(h.venda_em):(h.venda_dia?(String(h.venda_dia).slice(8,10)+'/'+String(h.venda_dia).slice(5,7)+(h.nf_emissao?(' '+String(h.nf_emissao).replace(' ','T').slice(11,16)+' <span style="font-size:9px" title="hora da EMISSÃO da NF no Bling — a hora exata da venda só a API do canal dá">🧾</span>'):' <span style="font-size:9px" title="dia da venda (Bling) — hora só com a API do canal">🕘</span>')):(h.nf_emissao?(String(h.nf_emissao).slice(8,10)+'/'+String(h.nf_emissao).slice(5,7)+' '+String(h.nf_emissao).replace(' ','T').slice(11,16)+' <span style="font-size:9px" title="hora da EMISSÃO da NF no Bling — a hora exata da venda só a API do canal dá">🧾</span>'):(dtBR(h.conferido_em)+' <span style="font-size:9px" title="hora da conferência">🕘</span>'))))+'</td>'+
+        '<td>'+(h._cancelado?'<span style="color:#64748b;font-weight:800" title="CANCELADO — fora dos totais">✕</span> <span class="st bad" style="font-size:9px">CANCELADA</span> ':(h.sintetico?'<span style="color:#f59e0b;font-weight:800" title="aguardando bipagem — margem já calculada">✓</span> ':'<span style="color:#34d399;font-weight:800" title="bipagem confirmada">✓</span> '))+'<b>'+esc(h.numero||h.id)+'</b>'+(blingId(h)?' <a class="lkB" href="https://www.bling.com.br/vendas.php#edit/'+esc(blingId(h))+'" target="_blank" rel="noopener" title="abrir o pedido no Bling" style="font-size:10px">Bling↗</a>':'')+(carrinho?' <span class="badge" title="'+unid+' unidades">🛒 '+unid+'</span>':'')+(h.devolucao?' <span class="st bad" style="font-size:9px" title="DEVOLU\u00c7\u00c3O no ML'+(h.dev_frete_retorno!=null?' \u00b7 frete de retorno '+BRL(h.dev_frete_retorno):'')+(h.dev_destino==='seller_address'?' \u00b7 mercadoria volta pro galp\u00e3o':(h.dev_destino==='warehouse'?' \u00b7 mercadoria foi pro ML':''))+(h.dev_aberta?' \u00b7 EM ABERTO':' \u00b7 fechada')+'">\ud83d\udd34 DEVOLV.</span>':'')+
+          (h.nf_numero?'<div class="desc">NF '+esc(h.nf_numero)+(h.nf_id?' <a class="lkN" href="https://www.bling.com.br/notas.fiscais.php#edit/'+esc(h.nf_id)+'" target="_blank" rel="noopener" title="abrir a NF no Bling">↗</a>':'')+'</div>':'')+'</td>'+
+        (function(){
+          const nlV = String(h.numero_loja||'');
+          const par = [h.ml_pack, h.ml_order].map(x=>x!=null?String(x):null).find(x=>x && x!==nlV) || null;
+          const um = (v,dim)=>'<span data-nl="'+esc(v)+'" onclick="copiaNL(this)" style="cursor:pointer;display:inline-block;max-width:126px;overflow:hidden;text-overflow:ellipsis;vertical-align:middle'+(dim?';opacity:.55;font-size:10px':'')+'" title="clique = copiar · '+esc(v)+'">'+esc(v)+'</span>';
+          return '<td style="font-size:11px;max-width:170px;white-space:nowrap;color:var(--tx)">'+(nlV?(
+            um(nlV,false)+(linkMkt(h)?' <a class="lkM" href="'+linkMkt(h)+'" target="_blank" rel="noopener" style="font-size:12px" title="abrir esta venda no '+esc(nomeCanal(canalKey(h.marketplace)))+'">↗</a>':'')+
+            (par?'<br>'+um(par,true):'')
+          ):'—')+'</td>';
+        })()+
+        '<td>'+esc(nomeCanal(P.ck))+'</td>'+
+        '<td><div class="desc" style="max-width:330px">'+((h.itens||[]).length
+          ? (h.itens||[]).map(function(ix){
+              var q2 = Number(ix.qtd||1);
+              var nm2 = ix.descricao || (SKUINFO[ix.sku] && SKUINFO[ix.sku].nome) || '';
+              return '<div style="margin-bottom:2px"><b style="color:#7dd3fc">'+q2+'\u00d7</b> '+esc(ix.sku||'')+
+                     (nm2?'<div style="color:var(--mut);font-size:10px;font-weight:400;line-height:1.25">'+esc(nm2)+'</div>':'')+'</div>';
+            }).join('')
+          : '<span class="dim">—</span>')+'</div></td>'+
+        '<td class="num">'+(unid?N(unid):'<span class="dim">—</span>')+'</td>'+
+        cel(P.tot)+cel(P.rp,'ok')+
+        cel(P.custoOk?P.custo:null)+cel(P.imposto)+
+        '<td class="num">'+(P.tarifa!=null?BRL(P.tarifa)+_seloTarifa(P.ck,P.feeReal,P.feeBling,P.feeEstTk)+(P.rp?'<div class="desc">'+Math.round(P.tarifa/P.rp*100)+'%</div>':''):'<span class="dim">—</span>')+'</td>'+
+        '<td class="num">'+(P.frV!=null?(
+            P.frFonte==='magalu'
+              ? (P.magFreteFonte==='prov'
+                  ? '<span class="warn">'+BRL(P.frV)+'</span> <span class="st w" style="font-size:9px" title="frete de coparticipação Magalu ESTIMADO pela tabela — o valor real chega quando o pedido é entregue">PREVISTO</span>'
+                  : '<span class="ok">'+BRL(P.frV)+'</span> <span class="st ok" style="font-size:9px" title="frete de coparticipação REAL, da API financeira da Magalu">REAL</span>')
+              : BRL(P.frV)+(P.frFonte==='flex'?' <span class="st warn" style="font-size:9px">FLEX</span>':'')
+          ):'<span class="dim">—</span>')+'</td>'+
+        '<td class="num">'+(P.credito!=null?('<span class="'+(P.credito>=0?'ok':'bad')+'">'+(P.credito>=0?'+':'')+BRL(P.credito)+'</span>'):'<span class="dim">—</span>')+'</td>'+
+        (P.mc==null
+          ? '<td class="num dim" title="ainda falta detalhe ou custo deste pedido">—</td>'
+          : '<td class="num" style="font-weight:800"><a id="pl_'+esc(h.id)+'" href="javascript:void(0)" onclick="abrirPL(\''+esc(h.id)+'\')" style="text-decoration:none" class="'+(P.mc>=0?'ok':'bad')+'" title="clique p/ ver a conta aberta"><span class="cvS">\u25b8</span> '+BRL(P.mc)+'</a></td>')+
+        '<td class="num '+(pmc!=null?(pmc>=0?'ok':'bad'):'dim')+'">'+(pmc!=null?pmc+'%':'—')+'</td>'+
+      '</tr>';
+    }).join('')+
     extra.map(h=>{
       const lm = linkMkt({marketplace:h.canal, numero_loja:h.numero_loja});
+      const unid=(h.itens||[]).reduce((a,i)=>a+Number(i.qtd||1),0);
       const pc = (h.mc!=null && h.vprod>0) ? Math.round(h.mc/h.vprod*100) : null;
-      return '<tr><td class="dim">'+dtBR(h.data)+'</td><td><b>'+esc(h.numero)+'</b>'+
-        (lm?' <a class="lkM" href="'+lm+'" target="_blank" rel="noopener" title="abrir esta venda no marketplace" style="font-size:10px">MKTP↗</a>':'')+
-        '<div class="desc mut" style="font-size:10px">📚 histórico'+(h.numero_loja?(' · venda '+esc(h.numero_loja)):'')+'</div>'+
-        /* Codex (P2, PR#128 r4): a descrição do produto saía na coluna CLIENTE — o histórico não
-           tem nome de comprador, e produto rotulado de cliente confunde. Desceu pro nº do pedido. */
-        ((h.itens&&h.itens[0]&&h.itens[0].descricao)?('<div class="desc" style="font-size:10px;max-width:260px">'+esc(h.itens[0].descricao)+(h.itens.length>1?(' +'+(h.itens.length-1)):'')+'</div>'):'')+'</td>'+
-        '<td>'+esc(h.canal||'')+'</td><td class="dim">—</td>'+
-        '<td class="num">'+(h.vnota!=null?BRL(Number(h.vnota)):'<span class="dim">—</span>')+'</td>'+
+      const vCom = nz(h.comissao), vPr = nz(h.vprod);
+      return '<tr>'+
+        '<td class="dim" title="dia da venda — o histórico não guarda a hora">'+(dtHist(h.data)||'—')+'</td>'+
+        '<td><b>'+esc(h.numero)+'</b><div class="desc mut" style="font-size:10px">📚 histórico</div></td>'+
+        '<td style="font-size:11px;max-width:170px;white-space:nowrap;color:var(--tx)">'+(h.numero_loja?('<span data-nl="'+esc(h.numero_loja)+'" onclick="copiaNL(this)" style="cursor:pointer;display:inline-block;max-width:126px;overflow:hidden;text-overflow:ellipsis;vertical-align:middle" title="clique = copiar · '+esc(h.numero_loja)+'">'+esc(h.numero_loja)+'</span>'+(lm?' <a class="lkM" href="'+lm+'" target="_blank" rel="noopener" style="font-size:12px" title="abrir esta venda no marketplace">↗</a>':'')):'—')+'</td>'+
+        '<td>'+esc(nomeCanal(canalKey(h.canal||'')))+'</td>'+
+        '<td><div class="desc" style="max-width:330px">'+((h.itens||[]).length
+          ? (h.itens||[]).map(function(ix){
+              var q2 = Number(ix.qtd||1);
+              var nm2 = ix.descricao || (SKUINFO[ix.sku] && SKUINFO[ix.sku].nome) || '';
+              return '<div style="margin-bottom:2px"><b style="color:#7dd3fc">'+q2+'\u00d7</b> '+esc(ix.sku||'')+
+                     (nm2?'<div style="color:var(--mut);font-size:10px;font-weight:400;line-height:1.25">'+esc(nm2)+'</div>':'')+'</div>';
+            }).join('')
+          : '<span class="dim">—</span>')+'</div></td>'+
+        '<td class="num">'+(unid?N(unid):'<span class="dim">—</span>')+'</td>'+
+        cel(nz(h.vnota))+cel(vPr,'ok')+
+        '<td class="num'+(h.sem_custo?' warn':'')+'"'+(h.sem_custo?' title="há item SEM custo cadastrado — soma PARCIAL dos custos conhecidos, não o custo total do pedido"':'')+'>'+(nz(h.custo)?BRL(nz(h.custo)):'<span class="dim">—</span>')+(h.sem_custo?' ⚠':'')+'</td>'+cel(nz(h.imposto))+
+        '<td class="num">'+(vCom!=null?BRL(vCom)+(vPr>0?'<div class="desc">'+Math.round(vCom/vPr*100)+'%</div>':''):'<span class="dim">—</span>')+'</td>'+
+        cel(nz(h.frete))+
+        '<td class="num">'+(h.credito?('<span class="'+(Number(h.credito)>=0?'ok':'bad')+'">'+(Number(h.credito)>=0?'+':'')+BRL(Number(h.credito))+'</span>'):'<span class="dim">—</span>')+'</td>'+
         (h.mc==null
-          ? '<td class="num dim" title="alguma linha deste pedido está sem margem no histórico">—</td></tr>'
-          : '<td class="num"><a id="plh_'+esc(h.numero)+'" href="javascript:void(0)" onclick="abrirPLHist(\''+esc(h.numero)+'\')" style="text-decoration:none;font-weight:800" class="'+(h.mc>=0?'ok':'bad')+'" title="'+(h.sem_custo?'há item SEM custo no cadastro — margem parcial · ':'')+'clique p/ ver a conta do histórico">'+'<span class="cvS">\u25b8</span> '+BRL(h.mc)+'</a>'+(pc!=null?('<div class="mut" style="font-size:10px">'+pc+'%</div>'):'')+'</td></tr>');
-    }).join('')+'</table>'+
+          ? '<td class="num dim" title="alguma linha deste pedido está sem margem no histórico">—</td>'
+          : '<td class="num" style="font-weight:800"><a id="plh_'+esc(h.numero)+'" href="javascript:void(0)" onclick="abrirPLHist(\''+esc(h.numero)+'\')" style="text-decoration:none" class="'+(h.mc>=0?'ok':'bad')+'" title="'+(h.sem_custo?'há item SEM custo no cadastro — margem parcial · ':'')+'clique p/ ver a conta do histórico"><span class="cvS">\u25b8</span> '+BRL(h.mc)+'</a></td>')+
+        '<td class="num '+(pc!=null?(pc>=0?'ok':'bad'):'dim')+'">'+(pc!=null?pc+'%':'—')+'</td>'+
+      '</tr>';
+    }).join('')+'</table></div>'+
     (hh===null?'<div class="mut" style="font-size:11px;padding:6px 2px">buscando também no histórico…</div>'
       : (erroH?'<div class="mut" style="font-size:11px;padding:6px 2px">⚠ histórico indisponível agora ('+esc(erroH)+') — mostrando só o período recente</div>':''));
   /* 19/08 (Diego): "faz de uma forma que já venha expandido. busquei, e já retorna expandido".
