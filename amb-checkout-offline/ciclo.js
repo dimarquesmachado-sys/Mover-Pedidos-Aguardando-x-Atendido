@@ -122,7 +122,19 @@ async function sincronizarConferidos() {
 async function listarAtendidos() {
   const hoje = new Date();
   const ini  = new Date(hoje); ini.setDate(ini.getDate() - JANELA_DIAS);
-  const qs = `idSituacao=${SIT_ATENDIDO}&dataEmissaoInicial=${dataISO(ini)}&dataEmissaoFinal=${dataISO(hoje)}`;
+  /* Codex #213 (P1, teria congelado a fila HOJE): o Bling tem o bug documentado de OMITIR
+     as vendas do próprio dia quando dataFinal = hoje — o canário já contorna somando +1
+     (ver _listarNoBlingCanario). Com o parâmetro antigo ignorado o bug nunca mordia; ao
+     ativar o filtro de verdade, venda nova ficaria invisível pro estoquista até amanhã. */
+  const fimJanela = new Date(hoje); fimJanela.setDate(fimJanela.getDate() + 1);
+  /* 26/08, decisão do dono: a "janela" antiga era FICTÍCIA — dataEmissaoInicial/Final não
+     existem no /pedidos/vendas e o Bling ignorava o filtro, listando TODOS os ATENDIDO de
+     qualquer idade (foi isso, aliás, que manteve os 7 Full acampados visíveis pra
+     reconciliação). Oficializado: janela REAL de 60 dias com o parâmetro CERTO da API v3
+     (dataInicial/dataFinal — o mesmo que o backfill provou com `fora: 0`). Dois meses pega
+     tudo que legitimamente vive em ATENDIDO; mais velho que isso é ruído que ele decidiu
+     cortar. */
+  const qs = `idSituacao=${SIT_ATENDIDO}&dataInicial=${dataISO(ini)}&dataFinal=${dataISO(fimJanela)}`;
   const out = [];
   let fetchOk = false;
   let completa = false;              // só true se a paginação foi até o fim SEM falhar no meio
