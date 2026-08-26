@@ -14,6 +14,7 @@ const { BLING_BASE, CACHE_DIR, SIT_ATENDIDO, SIT_DESPACHADOS, SIT_VERIFICADO, SY
   sleep, ensureDir, readJson, writeJson, dataISO, json, html, manifest, salvarManifest, skuEanCache, locCache, salvarLoc,
   salvarSkuEan, lerIndiceEan, lerReservas, lerOperadores, lerAdmins, ehAdmin, blingGet, blingWrite, moverSituacao } = base;
 let _cursorConfirmacao = 0;   // r6: onde a janela de conferência da reconciliação parou (gira pelo tamanho do lote; restart zera, sem prejuízo)
+let _cursorFull = 0;          // Codex #212: os Full preservados também giram — ≥16 deles travaria a fatia fixa nos mesmos 15 pra sempre
 let _sondaPendente = null;    // r7: chamada de token/detalhe pendurada de um ciclo anterior — enquanto não assentar, a conferência é pulada (não empilha soquete)
 const { parseNF, acharNFporRange, nfDoPedido, serieDaNFdoPedido, carregarNFs, acharNFnaLista, baixarDanfe, parseXmlNF, baixarXmlNF, dadosNFSimp } = require('./nf');
 const { baixarEtiqueta, baixarEtiquetaPDF, labelaryPost, zplParaPdf, etiquetaPdf } = require('./etiquetas');
@@ -400,12 +401,17 @@ async function listarAtendidos() {
 
 async function detalhePedido(id, signal) {
   // signal opcional: sem prazo, uma resposta que nunca chega pendura o await pra sempre
+  const { data } = await blingGet(`/pedidos/vendas/${id}`, 3, signal);
+  return data && data.data;
+}
+/* Codex #212 (o achado vale aqui também — o #211 pôs o sentinela no helper ERRADO): o
+   detalhePedido tem 4 chamadores e três (classificador de unidade, cachear, curas) só
+   checam `if (!det)` — o objeto {naoExiste} passaria por pedido de verdade, com direito a
+   /undefined e pasta CACHE_DIR/undefined. O sentinela vive AQUI, num invólucro exclusivo
+   da reconciliação — único lugar onde "apagado no Bling" significa remoção. */
+async function detalheParaReconciliacao(id, signal) {
   const r = await blingGet(`/pedidos/vendas/${id}`, 3, signal);
-  /* Codex #211: 404 virava null (= "não respondeu") e um pedido APAGADO no Bling era
-     preservado no cache pra sempre — e, marcado Full, ainda prendia a reconciliação
-     inteira no modo individual todo ciclo. 404 é resposta, e das mais claras: o pedido
-     não existe mais, logo com certeza não está em ATENDIDO. */
-  if (r && Number(r.status) === 404) return { naoExiste: true };
+  if (r && Number(r.status) === 404) return { naoExiste: true };   // apagado: com certeza não está em ATENDIDO
   return r && r.data && r.data.data;
 }
 
@@ -865,20 +871,27 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
            eles entram PRIMEIRO (são poucos por natureza), e o cursor gira só sobre os
            comuns, preenchendo o resto do lote — a garantia de cobertura dos comuns fica
            intacta, e o fantasma que abriu o modo é conferido já no primeiro ciclo. */
-        const loteFull = aRemover.filter(id => idsFull.has(String(id))).slice(0, 15);
+        /* Codex #212: com ≥16 Full preservados (ainda ATENDIDO), a fatia fixa repetia os
+           mesmos 15 e nunca alcançava o 16º — nem sobrava vaga pra comum nenhum. Agora os
+           Full têm cursor rotativo PRÓPRIO e teto de 10: todos passam pela conferência ao
+           longo dos ciclos, e sempre sobram ≥5 vagas pros comuns. */
+        const fullTodos = aRemover.filter(id => idsFull.has(String(id)));
+        const gF = fullTodos.length ? (_cursorFull % fullTodos.length) : 0;
+        const fullGirado = fullTodos.slice(gF).concat(fullTodos.slice(0, gF));
+        const loteFull = fullGirado.slice(0, 10);
         const comunsC = aRemover.filter(id => !idsFull.has(String(id)));
         const vagas = Math.max(0, 15 - loteFull.length);
         const giroC = comunsC.length ? (_cursorConfirmacao % comunsC.length) : 0;
         const girado = comunsC.slice(giroC).concat(comunsC.slice(0, giroC));
         const loteConf = loteFull.concat(girado.slice(0, vagas));
         adiados = aRemover.length - loteConf.length;
-        let tentadosComuns = 0;
+        let tentadosComuns = 0, tentadosFull = 0;
         for (let iC = 0; iC < loteConf.length; iC++) {
           const id = loteConf[iC];
           tentados++;
-          if (!idsFull.has(String(id))) tentadosComuns++;
+          if (idsFull.has(String(id))) tentadosFull++; else tentadosComuns++;
           let det = null, estourou = false;
-          const pd = prazoDet(sig => detalhePedido(id, sig));
+          const pd = prazoDet(sig => detalheParaReconciliacao(id, sig));
           try { det = await pd; }
           catch (e) { det = null; estourou = /prazo/.test(String((e && e.message) || '')); }
           await new Promise(r => setTimeout(r, PAUSA_MS || 220));                 // pausa SEMPRE, preservado incluso
@@ -913,6 +926,7 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
            no índice 0, as voltas começariam em 0/15/30/45 e faixas inteiras escapariam).
            Mínimo 1 pra não emperrar eternamente em cima de um candidato que sempre estoura. */
         _cursorConfirmacao = comunsC.length ? (giroC + Math.max(1, tentadosComuns)) % comunsC.length : 0;
+        _cursorFull = fullTodos.length ? (gF + Math.max(1, tentadosFull)) % fullTodos.length : 0;
         if (confirmados) salvarManifest(man);
         console.log(`[AMBBKP] reconciliação conferida: ${confirmados} removido(s) · ${mantidos} seguem em ATENDIDO · ${semResposta} sem resposta do Bling (preservados) — ${adiados} adiado(s) p/ o próximo ciclo${mudo ? ' — BLING MUDO: conferência ABORTADA neste ciclo, tenta no próximo' : ''}`);
         }
