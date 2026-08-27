@@ -59,6 +59,53 @@ function rotasHistorico(ctx) {
      historico-longo; vem do chamador porque a tabela, o nível de desconto e o cliente Bling
      moram lá. Sem ctx (chamador antigo), o completar comporta exatamente como antes. */
   const magaluFretePrevistoSku = ctx.magaluFretePrevistoSku || null;
+  /* Codex #225 r2 (P1): o completar do frete Magalu virou FÁBRICA, usada pelo /historico-longo
+     (linha a linha) e pelo /historico-linhas (pedido agrupado) — os cards e a lista têm que
+     mostrar o MESMO número (o padrão do custo manual, de novo). Regras:
+     · banco e tabela dão o frete do PACOTE (o magaluFreteSkuGravar grava o freteCopart do pedido
+       inteiro no 1º SKU) → o pedido leva UM frete, de UMA fonte — a 1ª linha que resolver
+       (banco: média×qtd, o formato de sempre; senão tabela: valor do pacote, sem ×qtd);
+     · SKU renomeado resolve pela mesma cadeia do custo manual (_sku-depara.json);
+     · memo por SKU + orçamento (8 consultas / 6s) por requisição — o resto entra nas próximas. */
+  const _freteMagaluFabrica = () => {
+    const banco = (() => { try { return readJson(path.join(CACHE_DIR, '_magalu_frete_sku.json'), {}) || {}; } catch (e) { return {}; } })();
+    const depara = (() => { try { return readJson(path.join(CACHE_DIR, '_sku-depara.json'), {}) || {}; } catch (e) { return {}; } })();
+    const resolve = (sku) => {
+      let a = String(sku || '').trim();
+      const vistos = new Set([a.toUpperCase()]);
+      for (let i = 0; i < 5; i++) {
+        const r = depara[a] || depara[a.toUpperCase()];
+        const prox = r && String(r.para || '').trim();
+        if (!prox || vistos.has(prox.toUpperCase())) break;
+        vistos.add(prox.toUpperCase()); a = prox;
+      }
+      return a;
+    };
+    const memo = {};
+    const orc = { bling: 0, max: 8, ate: Date.now() + 6000 };
+    const pedidoJa = new Set();
+    const porLinha = async (canal, sku, qtd, pedido) => {
+      const ck = String(canal || '').toLowerCase();
+      if (ck !== 'magalu') return null;          // só a Magalu tem previsão de frete hoje; outros canais entram AQUI
+      const s0 = String(sku || '').trim();
+      const s = resolve(s0);
+      const kPed = String(pedido || '').trim() || ('sku:' + s);
+      if (pedidoJa.has(kPed)) return null;       // o pedido já levou o frete do pacote (de qualquer fonte)
+      const b = banco[s0] || banco[s];           // banco: primeiro o código gravado (comportamento de sempre), senão o resolvido
+      const m = b && Number(b.media);
+      if (m > 0) { pedidoJa.add(kPed); return Math.round(m * Math.max(1, Number(qtd) || 1) * 100) / 100; }
+      if (!magaluFretePrevistoSku) return null;  // sem ctx (chamador antigo): comporta exatamente como antes
+      let fp;
+      if (s in memo) fp = memo[s];               // mesmo SKU noutro pedido: memo serve, sem re-consulta
+      else {
+        try { fp = await magaluFretePrevistoSku(s, orc); } catch (e) { fp = null; }
+        memo[s] = (fp == null ? null : fp);
+      }
+      if (fp != null) pedidoJa.add(kPed);
+      return fp;
+    };
+    return { porLinha };
+  };
   const PAUSA_MS        = (ctx.PAUSA_MS != null ? ctx.PAUSA_MS : base.PAUSA_MS);   // ritmo da API é por empresa
   /* Cada rota pode ser RENOMEADA ou DESLIGADA sozinha, via ctx.rotas.
      Motivo (Codex #197): em good-checkout-offline JÁ EXISTE /historico, e faz outra coisa —
@@ -349,6 +396,18 @@ function rotasHistorico(ctx) {
         o.comissao += Number(l.comissao) || 0; o.frete += Number(l.frete_vendedor) || 0;
         o.imposto += Number(l.imposto) || 0; if (l.margem != null) o.margem += Number(l.margem);
       }
+      /* Codex #225 r2 (P1): a LISTA tem que mostrar o mesmo frete que o agregado completa — senão
+         o card diz uma margem e as linhas outra. Pedido agrupado (a página traz pedidos inteiros,
+         pelo índice): a 1ª linha que resolver leva o frete; entra no frete e SAI da margem, como lá. */
+      const _freteMgL = _freteMagaluFabrica();
+      for (const kF of ordem) {
+        const oF = mapa[kF];
+        if (String(oF.canal || '').toLowerCase() !== 'magalu' || oF.frete > 0) continue;
+        for (const itF of oF.itens) {
+          const fpF = await _freteMgL.porLinha(oF.canal, itF.sku, itF.qtd, oF.numero);
+          if (fpF != null) { oF.frete += fpF; oF.margem -= fpF; break; }
+        }
+      }
       const pedidos = ordem.map(k => {
         const o = mapa[k];
         ['vprod','vnota','custo','comissao','frete','imposto','margem'].forEach(c => { o[c] = Math.round(o[c] * 100) / 100; });
@@ -415,52 +474,7 @@ function rotasHistorico(ctx) {
          Hoje trata: FRETE do vendedor ausente, pela mesma fonte do cache (a média do frete REAL
          por SKU, que se corrige sozinha conforme os pedidos liquidam). Entra na soma e SAI da
          margem, como qualquer custo. */
-      const _freteSkuBanco = (() => { try { return readJson(path.join(CACHE_DIR, '_magalu_frete_sku.json'), {}) || {}; } catch (e) { return {}; } })();
-      const _dimMemo = {};                    // por requisição: SKU → frete previsto (ou null, inclusive por teto)
-      const _dimOrc = { bling: 0, max: 8, ate: Date.now() + 6000 };   // teto de consultas E prazo total — o que ficar de fora entra nas próximas leituras
-      /* Codex #225 (P2): SKU RENOMEADO — o histórico velho guarda o código antigo e o catálogo
-         do Bling só tem o novo; sem o de-para, o SKU nunca acharia as dimensões. Mesma cadeia
-         (até 5 saltos, case-insensitive) que o custo manual já usa. */
-      const _skuDeparaFr = (() => { try { return readJson(path.join(CACHE_DIR, '_sku-depara.json'), {}) || {}; } catch (e) { return {}; } })();
-      const _skuResolveFr = (sku) => {
-        let a = String(sku || '').trim();
-        const vistos = new Set([a.toUpperCase()]);
-        for (let i = 0; i < 5; i++) {
-          const r = _skuDeparaFr[a] || _skuDeparaFr[a.toUpperCase()];
-          const prox = r && String(r.para || '').trim();
-          if (!prox || vistos.has(prox.toUpperCase())) break;
-          vistos.add(prox.toUpperCase()); a = prox;
-        }
-        return a;
-      };
-      /* Codex #225 (P1): a tabela por dimensão dá o frete do PACOTE — em pedido com 2+ linhas
-         sem banco, cada linha levava o pacote INTEIRO e o frete do pedido dobrava. A estimativa
-         entra UMA vez por PEDIDO (as linhas vêm ordenadas por numero_pedido; as demais ficam 0). */
-      const _fretePedidoPrevisto = new Set();
-      const _fretePrevistoDe = async (canal, sku, qtd, pedido) => {
-        const ck = String(canal || '').toLowerCase();
-        if (ck !== 'magalu') return null;          // só a Magalu tem banco por SKU hoje; outros canais entram AQUI
-        const s0 = String(sku || '').trim();
-        const s = _skuResolveFr(s0);
-        const b = _freteSkuBanco[s0] || _freteSkuBanco[s];   // banco: primeiro o código gravado (comportamento de sempre), senão o resolvido
-        const m = b && Number(b.media);
-        if (m > 0) return Math.round(m * Math.max(1, Number(qtd) || 1) * 100) / 100;
-        /* 26/08 — a última sobra do frete zerado: SKU que NUNCA liquidou não tem banco. Cai na
-           tabela por dimensão via ctx (a MESMA conta do caminho do dia — frete do PACOTE, por
-           isso sem ×qtd), com memo por requisição e teto/prazo de consultas ao Bling; o cache
-           em disco do wrapper faz as próximas leituras saírem de graça. */
-        if (!magaluFretePrevistoSku) return null;
-        const kPed = String(pedido || '').trim() || ('sku:' + s);
-        if (_fretePedidoPrevisto.has(kPed)) return null;   // outra linha DESTE pedido já levou o frete do pacote
-        let fp;
-        if (s in _dimMemo) fp = _dimMemo[s];   // mesmo SKU noutro pedido: usa o memo, sem re-consulta
-        else {
-          try { fp = await magaluFretePrevistoSku(s, _dimOrc); } catch (e) { fp = null; }
-          _dimMemo[s] = (fp == null ? null : fp);
-        }
-        if (fp != null) _fretePedidoPrevisto.add(kPed);
-        return fp;
-      };
+      const _freteMg = _freteMagaluFabrica();   // Codex #225 r2: mesma fábrica das duas rotas
       let _fretesPrevistos = 0;   // linhas em que o frete do vendedor foi completado pelo previsto
       let _tkEstimadas = 0;
       const _tkPed = {};   // TikTok agrupado por PEDIDO: a faixa e a taxa fixa são do pedido inteiro   // linhas do TikTok em que a regra substituiu a taxa do Bling
@@ -485,7 +499,7 @@ function rotasHistorico(ctx) {
             /* frete ausente: completa com o previsto (mesma fonte do cache) e conta como custo */
             let _frPrev = 0;
             if (!(fr > 0)) {
-              const _fp = await _fretePrevistoDe(l.canal, l.sku, q, l.numero_pedido);
+              const _fp = await _freteMg.porLinha(l.canal, l.sku, q, l.numero_pedido);
               if (_fp != null) { fr = _fp; _frPrev = _fp; _fretesPrevistos++; }
             }
             /* ═══ 20/08 — TikTok: enquanto a comissão gravada ainda é a do BLING, vale a REGRA ═══

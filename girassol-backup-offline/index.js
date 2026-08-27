@@ -2656,13 +2656,17 @@ async function magaluDimSku(sku) {
   if (_dimCache[sku] !== undefined) return _dimCache[sku];
   try {
     const rb = await blingGet('/produtos?codigo=' + encodeURIComponent(sku) + '&criterio=5');
-    const p0 = rb && rb.ok && rb.data && rb.data.data && rb.data.data[0];
+    /* Codex #225 r2: falha de transporte/API (401, 500, rede) NÃO é "produto sem dimensão" —
+       devolve marcador de erro SEM cachear, pra ninguém persistir a falha como miss de 3 dias. */
+    if (!rb || !rb.ok) return { erro: true };
+    const p0 = rb.data && rb.data.data && rb.data.data[0];
     if (!p0 || !p0.id) { _dimCache[sku] = null; return null; }
     const rd = await blingGet('/produtos/' + p0.id);
-    const prod = (rd && rd.ok && rd.data && rd.data.data) || null;
+    if (!rd || !rd.ok) return { erro: true };
+    const prod = (rd.data && rd.data.data) || null;
     const out = prod ? { dim: prod.dimensoes, peso: prod.pesoBruto } : null;
     _dimCache[sku] = out; return out;
-  } catch (e) { _dimCache[sku] = null; return null; }
+  } catch (e) { return { erro: true }; }
 }
 // frete provisório de um pedido: histórico do SKU (se já vendeu) senão a tabela pela dimensão.
 async function magaluFreteProvisorio(v) {
@@ -2710,16 +2714,17 @@ async function magaluFretePrevistoSku(sku, orc) {
     if (orc && orc.ate != null && AGORA > orc.ate) return null;        // Codex #225: prazo TOTAL da requisição — Bling lento não pendura o dashboard
     if (orc && orc.max != null && orc.bling >= orc.max) return null;   // teto de consultas da requisição
     if (orc) orc.bling++;
+    delete _dimCache[s];   // Codex #225 r2: o cache de MEMÓRIA não expira — sem isto, o TTL do disco re-gravava o dado velho (ou o null) pra sempre em processo longevo
     // prazo PRÓPRIO da consulta: se o Bling travar, a resposta segue sem este SKU (e sem gravar miss — pode ser rede)
     let _tt = null;
     const prazo = new Promise(res => { _tt = setTimeout(() => res('__prazo__'), 4000); });
     d = await Promise.race([magaluDimSku(s), prazo]);
     if (_tt) clearTimeout(_tt);
-    if (d === '__prazo__') return null;
+    if (d === '__prazo__' || (d && d.erro)) return null;   // Codex #225 r2: timeout e falha de API/transporte não viram miss — re-tenta na próxima leitura
     try {
       const dd = readJson(_MAGALU_DIM_DISCO, {});
       if (d && d.dim) dd[s] = { dim: d.dim, peso: d.peso, em: new Date().toISOString() };
-      else dd[s] = { miss: true, em: new Date().toISOString() };   // produto sem dimensão: miss com TTL, não queima orçamento das próximas
+      else dd[s] = { miss: true, em: new Date().toISOString() };   // produto DE VERDADE sem dimensão/não achado: miss com TTL, não queima orçamento das próximas
       writeJson(_MAGALU_DIM_DISCO, dd);
     } catch (e) {}
   }
