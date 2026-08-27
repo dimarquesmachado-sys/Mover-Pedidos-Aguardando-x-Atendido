@@ -72,7 +72,19 @@ function rotasHistorico(ctx) {
     /* Codex #225 r4: o banco aprende na caixa do PEDIDO ("PM1") e a linha histórica pode vir "pm1"
        — índice UPPER→registro, como o resolver canônico do custo faz com as chaves. */
     const bancoIdx = {};
-    for (const kB of Object.keys(banco)) { const kU = String(kB).toUpperCase(); if (bancoIdx[kU] === undefined) bancoIdx[kU] = banco[kB]; }
+    for (const kB of Object.keys(banco)) {
+      const kU = String(kB).toUpperCase();
+      const eB = banco[kB] || {};
+      const jB = bancoIdx[kU];
+      if (!jB) bancoIdx[kU] = { soma: Number(eB.soma) || 0, n: Number(eB.n) || 0, media: Number(eB.media) || 0 };
+      else {
+        /* Codex #226 r4: o gravar usa a chave exata - PM1 e pm1 viram historicos separados. Aqui as
+           variantes de caixa se FUNDEM (soma + n, media recalculada) em vez de a 1a descartar a 2a. */
+        jB.soma = Math.round((jB.soma + (Number(eB.soma) || 0)) * 100) / 100;
+        jB.n = jB.n + (Number(eB.n) || 0);
+        jB.media = jB.n > 0 ? Math.round((jB.soma / jB.n) * 100) / 100 : (Number(eB.media) || jB.media || 0);
+      }
+    }
     const depara = (() => { try { return readJson(path.join(CACHE_DIR, '_sku-depara.json'), {}) || {}; } catch (e) { return {}; } })();
     /* Codex #225 r3: chave do de-para em QUALQUER caixa — o resolver canônico do custo varre as
        chaves normalizando; "Pm1" gravado tem que casar com "pm1" da linha antiga. Índice UPPER→regra. */
@@ -90,7 +102,7 @@ function rotasHistorico(ctx) {
       return a;
     };
     const memo = {};
-    const orc = { bling: 0, max: 8, ate: null };   // Codex r4: o prazo NASCE na 1ª ida ao Bling — o scan de um Ano no Supabase pode levar mais de 6s sozinho
+    const orc = { bling: 0, max: 8, ate: null };   // ate nasce DENTRO do wrapper, na 1ª consulta real (Codex r4 + #226 r2)
     const pedidoJa = new Set();
     let pendentes = 0;   // SKUs que ficaram SEM tentativa (orçamento/prazo/falha transitória) — resultado é PARCIAL, não cachear
     const _bancoDe = (s0, s) => {
@@ -112,26 +124,40 @@ function rotasHistorico(ctx) {
       const its = (Array.isArray(itens) ? itens : []).map(it => ({ s0: String((it && it.sku) || '').trim() }))
         .filter(it => it.s0).sort((a, b) => a.s0.localeCompare(b.s0));
       if (!its.length) return null;
-      const kPed = String(pedido || '').trim() || ('sku:' + its[0].s0);
-      if (pedidoJa.has(kPed)) return null;       // o pedido já levou o frete do pacote (de qualquer fonte)
+      /* Codex #226 r2: SEM número de pedido não há como saber se duas vendas são o mesmo pacote —
+         cada chamada decide sozinha (sem Set), em vez de fundir vendas distintas do mesmo SKU. */
+      const kPed = String(pedido || '').trim();
+      if (kPed && pedidoJa.has(kPed)) return null;   // o pedido já levou o frete do pacote (de qualquer fonte)
       for (const it of its) {                    // fase 1: banco (média real do pacote)
         const fp = _bancoDe(it.s0, resolve(it.s0));
-        if (fp != null) { pedidoJa.add(kPed); return { fp, sku: it.s0 }; }
+        if (fp != null) { if (kPed) pedidoJa.add(kPed); return { fp, sku: it.s0 }; }
       }
       if (!magaluFretePrevistoSku) return null;  // sem ctx (chamador antigo): comporta exatamente como antes
       for (const it of its) {                    // fase 2: tabela por dimensão
         const s = resolve(it.s0);
+        const sM = s.toUpperCase();              // Codex #226: memo por caixa normalizada (pm1 e PM1 são o mesmo SKU)
         let fp;
-        if (s in memo) fp = memo[s];             // mesmo SKU noutro pedido: memo serve, sem re-consulta
+        if (sM in memo) {
+          fp = memo[sM];                         // mesmo SKU noutro pedido: memo serve, sem re-consulta
+          /* Codex #226 r3: transitório JÁ visto NESTA requisição não re-tenta (pouparia orçamento/
+             prazo dos SKUs seguintes), mas segue contando pendente — o agregado continua parcial
+             e a PRÓXIMA leitura re-tenta, porque o memo morre com a requisição. */
+          if (fp === '__falha__') { pendentes++; fp = null; }
+        }
         else {
-          if (orc.ate == null) orc.ate = Date.now() + 6000;   // o prazo conta a partir da 1ª ida ao Bling
+          /* Codex #226 r2: o prazo agora nasce DENTRO do wrapper, na 1ª ida REAL ao Bling —
+             candidato servido pelo cache de disco não gasta relógio dos que vêm depois. */
           let r;
           try { r = await magaluFretePrevistoSku(s, orc); } catch (e) { r = '__transitorio__'; }
-          if (r === '__orcamento__' || r === '__transitorio__') { pendentes++; continue; }   // Codex r3/r4: corte não memoiza — a próxima leitura re-tenta; o chamador não cacheia o parcial
-          memo[s] = (r == null ? null : r);
+          if (r === '__orcamento__' || r === '__transitorio__') {
+            pendentes++;
+            if (r === '__transitorio__') memo[sM] = '__falha__';   // Codex #226 r3: dentro da requisição não re-tenta; entre requisições sim (memo morre com ela)
+            continue;
+          }
+          memo[sM] = (r == null ? null : r);
           fp = r;
         }
-        if (fp != null) { pedidoJa.add(kPed); return { fp, sku: it.s0 }; }
+        if (fp != null) { if (kPed) pedidoJa.add(kPed); return { fp, sku: it.s0 }; }
       }
       return null;
     };
@@ -410,7 +436,7 @@ function rotasHistorico(ctx) {
         if (a != null && isFinite(Number(a)) && Number(a) > 0) return Number(a);
         return (DEFAULT_ALIQ_BK && DEFAULT_ALIQ_BK[mes] != null) ? Number(DEFAULT_ALIQ_BK[mes]) : null; };
       const _cuR = sk => { const c = _ccR[String(sk || '').trim()]; return (c && c.custo != null && isFinite(Number(c.custo))) ? Number(c.custo) : null; };
-      const ordem = [], mapa = {}, _mgTem = {};   // _mgTem: pedido com margem gravada em alguma linha (Codex r5)
+      const ordem = [], mapa = {}, _vpMg = {};   // _vpMg: valor_produto das linhas COM margem, por pedido (Codex #226: prorrata da margem parcial)
       for (const l of linhas) {
         const k = String(l.numero_pedido || '(sem número)');
         if (!mapa[k]) { mapa[k] = { numero: k, numero_loja: l.numero_loja || null, canal: l.canal || 'outro', data: l.data_venda, itens: [], un: 0, vprod: 0, vnota: 0, custo: 0, semCusto: 0, comissao: 0, frete: 0, imposto: 0, margem: 0 }; ordem.push(k); }
@@ -425,7 +451,7 @@ function rotasHistorico(ctx) {
         if (l.custo != null) o.custo += Number(l.custo);
         else { const cxR = _cuR(l.sku); if (cxR != null) o.custo += cxR * q; else o.semCusto += q; }
         o.comissao += Number(l.comissao) || 0; o.frete += Number(l.frete_vendedor) || 0;
-        o.imposto += Number(l.imposto) || 0; if (l.margem != null) { o.margem += Number(l.margem); _mgTem[k] = 1; }
+        o.imposto += Number(l.imposto) || 0; if (l.margem != null) { o.margem += Number(l.margem); _vpMg[k] = (_vpMg[k] || 0) + (Number(l.valor_produto) || 0); }
       }
       /* Codex #225 r2 (P1): a LISTA tem que mostrar o mesmo frete que o agregado completa — senão
          o card diz uma margem e as linhas outra. Pedido agrupado (a página traz pedidos inteiros,
@@ -434,8 +460,17 @@ function rotasHistorico(ctx) {
       for (const kF of ordem) {
         const oF = mapa[kF];
         if (String(oF.canal || '').toLowerCase() !== 'magalu' || oF.frete > 0) continue;
+        if (kF === '(sem número)') continue;   // Codex #226 r3: o agrupamento funde as vendas sem número — estimar UM pacote pro agregado seria errado em qualquer valor
         const rF = await _freteMgL.porPedido(oF.canal, oF.itens, oF.numero);   // Codex r4: mesma decisão determinística das outras rotas
-        if (rF) { oF.frete += rF.fp; if (_mgTem[kF]) oF.margem -= rF.fp; }   // Codex r5: margem que NUNCA existiu nao vira negativo inventado
+        if (rF) {
+          oF.frete += rF.fp;
+          /* Codex #226: margem PARCIAL — desconta só a FRAÇÃO das linhas com margem (fp × vpMg/vpTot),
+             a mesma régua do longo, que desconta o quinhão por valor de cada linha com margem.
+             Pedido sem margem nenhuma continua intacto (fração 0). */
+          const _vm = _vpMg[kF] || 0;
+          const _fra = oF.vprod > 0 ? rF.fp * Math.min(1, _vm / oF.vprod) : (_vm > 0 ? rF.fp : 0);
+          if (_fra > 0) oF.margem -= _fra;
+        }
       }
       const pedidos = ordem.map(k => {
         const o = mapa[k];
@@ -466,7 +501,7 @@ function rotasHistorico(ctx) {
       const { url: uL, key: kkL } = supaCfg(EMPRESA);
       if (!uL || !kkL) { json(res, 500, { ok: false, erro: 'Supabase não configurado' }); return true; }
       const H = { apikey: kkL, Authorization: 'Bearer ' + kkL };
-      const campos = 'numero_pedido,canal,data_venda,sku,descricao,quantidade,valor_produto,valor_nota,custo,comissao,frete_vendedor,imposto,margem,uf'   // 17/08: sem isto o historico-longo lia uf vazio em TODA linha (havia dois `campos` no arquivo e o uf tinha entrado no outro);
+      const campos = 'numero_pedido,numero_loja,canal,data_venda,sku,descricao,quantidade,valor_produto,valor_nota,custo,comissao,frete_vendedor,imposto,margem,uf'   // 17/08: sem isto o historico-longo lia uf vazio em TODA linha (havia dois `campos` no arquivo e o uf tinha entrado no outro);
       // 28/07: o backfill gravou o custo que existia NAQUELE dia. Depois o banco de custos cresceu
       // (de 288 pra 541 SKUs), então muita linha antiga ficou sem custo à toa. Aqui completamos na
       // LEITURA com o _custos.json atual — sem precisar refazer o backfill inteiro.
@@ -534,8 +569,12 @@ function rotasHistorico(ctx) {
             let _frCand = null;
             { const _ckM = String(l.canal || '').toLowerCase();
               if (_ckM === 'magalu') {
-                if (fr > 0) { if (l.numero_pedido) _pedComFrete.add(String(l.numero_pedido)); }
-                else _frCand = { sku: l.sku, q, vp, pedido: String(l.numero_pedido || '') };   // vp: quinhao da distribuicao (Codex r5)
+                /* Codex #226 r5: sem numero_pedido, o numero_loja (id nativo do marketplace) ainda
+                   agrupa as linhas do MESMO pedido - linha#i fica so pra quem nao tem NENHUM id,
+                   senao um pedido legado multi-item vira N pacotes. */
+                const _kPedM = String(l.numero_pedido || '').trim() || (String(l.numero_loja || '').trim() ? ('loja:' + String(l.numero_loja).trim()) : '');
+                if (fr > 0) { if (_kPedM) _pedComFrete.add(_kPedM); }
+                else _frCand = { sku: l.sku, q, vp, i: _frCands.length, pedido: _kPedM };   // vp: quinhao; i: chave propria se nao houver id nenhum
               } }
             /* ═══ 20/08 — TikTok: enquanto a comissão gravada ainda é a do BLING, vale a REGRA ═══
                O extrato do TikTok chega dias depois e o completar substitui a comissão pela real —
@@ -614,7 +653,7 @@ function rotasHistorico(ctx) {
       const _porPedCand = new Map();   // Codex r4: decisão por PEDIDO inteiro, não pela ordem do stream
       for (const cF of _frCands) {
         if (cF.pedido && _pedComFrete.has(cF.pedido)) continue;
-        const kP = cF.pedido || ('sku:' + String(cF.sku || ''));
+        const kP = cF.pedido || ('linha#' + cF.i);   // Codex #226 r2: sem numero, cada venda e seu proprio grupo — nada de fundir por SKU
         if (!_porPedCand.has(kP)) _porPedCand.set(kP, []);
         _porPedCand.get(kP).push(cF);
       }
@@ -954,6 +993,7 @@ function rotasHistorico(ctx) {
       const _freteMgB = _freteMagaluFabrica();
       for (const gB of gruposB) {
         if (String(gB.canal || '').toLowerCase() !== 'magalu' || gB.frete > 0) continue;
+        if (String(gB.numero || '') === '(sem número)') continue;   // Codex #226 r3: grupo fundido não ganha estimativa
         const rB = await _freteMgB.porPedido(gB.canal, gB.itens, gB.numero);   // Codex r4: mesma decisão determinística das outras rotas
         if (rB) { gB.frete = r2c(gB.frete + rB.fp); if (!gB.mc_incompleta) gB.mc = r2c(gB.mc - rB.fp); }
       }
