@@ -2693,17 +2693,37 @@ async function magaluFretePrevistoSku(sku, orc) {
   if (!s) return null;
   const banco = magaluFreteSkuLer();
   if (banco[s] && banco[s].media > 0) return banco[s].media;
+  const AGORA = Date.now();
+  const TTL_DIM = 14 * 24 * 3600 * 1000;    // Codex #225: dimensão corrigida no Bling tem que chegar — o cache vence em 14 dias e re-consulta
+  const TTL_MISS = 3 * 24 * 3600 * 1000;    // Codex #225: MISS persistido (produto sem dimensão/não achado) — re-tenta em 3 dias e, até lá, NÃO gasta orçamento
   let d = null;
-  try { const dd = readJson(_MAGALU_DIM_DISCO, {}); if (dd && dd[s] && dd[s].dim) d = dd[s]; } catch (e) {}
-  if (!d) {
-    if (orc && orc.max != null && orc.bling >= orc.max) return null;   // teto da requisição
-    if (orc) orc.bling++;
-    d = await magaluDimSku(s);
-    if (d && d.dim) {
-      try { const dd = readJson(_MAGALU_DIM_DISCO, {}); dd[s] = { dim: d.dim, peso: d.peso, em: new Date().toISOString() }; writeJson(_MAGALU_DIM_DISCO, dd); } catch (e) {}
+  try {
+    const dd = readJson(_MAGALU_DIM_DISCO, {});
+    const e0 = dd && dd[s];
+    if (e0) {
+      const idade = AGORA - (Date.parse(e0.em || 0) || 0);
+      if (e0.dim && idade < TTL_DIM) d = e0;
+      else if (e0.miss && idade < TTL_MISS) return null;   // miss fresco: corta antes do orçamento e do Bling
     }
+  } catch (e) {}
+  if (!d) {
+    if (orc && orc.ate != null && AGORA > orc.ate) return null;        // Codex #225: prazo TOTAL da requisição — Bling lento não pendura o dashboard
+    if (orc && orc.max != null && orc.bling >= orc.max) return null;   // teto de consultas da requisição
+    if (orc) orc.bling++;
+    // prazo PRÓPRIO da consulta: se o Bling travar, a resposta segue sem este SKU (e sem gravar miss — pode ser rede)
+    let _tt = null;
+    const prazo = new Promise(res => { _tt = setTimeout(() => res('__prazo__'), 4000); });
+    d = await Promise.race([magaluDimSku(s), prazo]);
+    if (_tt) clearTimeout(_tt);
+    if (d === '__prazo__') return null;
+    try {
+      const dd = readJson(_MAGALU_DIM_DISCO, {});
+      if (d && d.dim) dd[s] = { dim: d.dim, peso: d.peso, em: new Date().toISOString() };
+      else dd[s] = { miss: true, em: new Date().toISOString() };   // produto sem dimensão: miss com TTL, não queima orçamento das próximas
+      writeJson(_MAGALU_DIM_DISCO, dd);
+    } catch (e) {}
   }
-  if (!d) return null;
+  if (!d || !d.dim) return null;
   return magaluFreteTabela(d.dim, d.peso);
 }
 
