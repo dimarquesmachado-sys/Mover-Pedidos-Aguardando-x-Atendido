@@ -637,7 +637,7 @@ function routes(readBody) {
 
   // histórico/análise: histCache vai por REFERÊNCIA — o backfill e o /backfill-limpar
   // esvaziam esse mesmo objeto aqui no index e isso tem que valer lá dentro também.
-  const hist = rotasHistorico({ validarSessao, supaCfg, DEFAULT_ALIQ_BK, histCache: _histCache });
+  const hist = rotasHistorico({ validarSessao, supaCfg, DEFAULT_ALIQ_BK, histCache: _histCache, magaluFretePrevistoSku });
   const pesca = rotasPescaria({ validarSessao, supaCfg, supaReq, pescarDadosML });
   const canario = rotasCanario({ VERSAO, validarSessao });
   const limpeza = rotasLimpeza({ validarSessao });
@@ -5267,18 +5267,22 @@ function magaluFreteSkuGravar(sku, freteReal) {
 }
 // cache das dimensões por SKU (evita re-consultar o Bling toda rodada)
 const _dimCache = {};
-async function magaluDimSku(sku) {
+async function magaluDimSku(sku, signal) {
   if (!sku) return null;
   if (_dimCache[sku] !== undefined) return _dimCache[sku];
   try {
-    const rb = await blingGet('/produtos?codigo=' + encodeURIComponent(sku) + '&criterio=5');
-    const p0 = rb && rb.ok && rb.data && rb.data.data && rb.data.data[0];
+    const rb = await blingGet('/produtos?codigo=' + encodeURIComponent(sku) + '&criterio=5', undefined, signal);
+    /* Codex #225 r2: falha de transporte/API (401, 500, rede, abort) NÃO é "produto sem dimensão" —
+       devolve marcador de erro SEM cachear, pra ninguém persistir a falha como miss de 3 dias. */
+    if (!rb || !rb.ok) return { erro: true };
+    const p0 = rb.data && rb.data.data && rb.data.data[0];
     if (!p0 || !p0.id) { _dimCache[sku] = null; return null; }
-    const rd = await blingGet('/produtos/' + p0.id);
-    const prod = (rd && rd.ok && rd.data && rd.data.data) || null;
+    const rd = await blingGet('/produtos/' + p0.id, undefined, signal);
+    if (!rd || !rd.ok) return { erro: true };
+    const prod = (rd.data && rd.data.data) || null;
     const out = prod ? { dim: prod.dimensoes, peso: prod.pesoBruto } : null;
     _dimCache[sku] = out; return out;
-  } catch (e) { _dimCache[sku] = null; return null; }
+  } catch (e) { return { erro: true }; }
 }
 // frete provisório de um pedido: histórico do SKU (se já vendeu) senão a tabela pela dimensão.
 async function magaluFreteProvisorio(v) {
@@ -5289,6 +5293,78 @@ async function magaluFreteProvisorio(v) {
   if (banco[sku] && banco[sku].media > 0) return banco[sku].media;   // histórico real do SKU manda
   const d = await magaluDimSku(sku);
   if (!d) return null;
+  return magaluFreteTabela(d.dim, d.peso);
+}
+const _MAGALU_DIM_DISCO = path.join(CACHE_DIR, '_magalu_dim_sku.json');
+
+// ─── frete PREVISTO por SKU pro completar do histórico (26/08) ─────────────────
+// O completar na leitura do /historico-longo (20/08) só cobria SKU que JÁ liquidou
+// alguma vez (banco por SKU). SKU Magalu que nunca liquidou continuava com frete 0
+// em julho — a última sobra do frete zerado. Este wrapper fecha o buraco com a MESMA
+// conta do caminho do dia: banco por SKU manda; senão a tabela por dimensão (frete do
+// PACOTE de 1 unidade — mesma premissa do magaluFreteProvisorio: o 1º item define a
+// faixa e a maioria dos pedidos é 1 SKU ×1). As dimensões ganham cache em DISCO
+// (_magalu_dim_sku.json): a 1ª leitura consulta o Bling e grava; as próximas saem do
+// disco — o historico-longo não pode pendurar em 2 GETs do Bling por SKU toda vez.
+// `orc` é o orçamento da requisição ({ bling, max }): estourou o teto, devolve null e
+// o SKU fica pra próxima leitura (o dado entra sozinho, sem segurar a resposta).
+function _dimUsavel(e) {   // Codex #225 r5: dimensão só é "sucesso" se a tabela consegue usá-la
+  const dm = e && e.dim;
+  return !!(dm && Number(dm.largura) > 0 && Number(dm.altura) > 0 && Number(dm.profundidade) > 0);
+}
+async function magaluFretePrevistoSku(sku, orc) {
+  const s = String(sku || '').trim();
+  if (!s) return null;
+  /* Codex #225 r5: numa leitura de 60 mil linhas o wrapper era chamado por pedido — re-ler e
+     re-parsear os DOIS JSONs do disco a cada chamada travava o event loop. O `orc` (o estado da
+     requisição) agora carrega as leituras: 1× por requisição, atualizadas quando o próprio
+     wrapper grava. Sem orc (chamador avulso), lê na hora como antes. */
+  let banco;
+  if (orc && orc._banco) banco = orc._banco;
+  else { banco = magaluFreteSkuLer(); if (orc) orc._banco = banco; }
+  if (banco[s] && banco[s].media > 0) return banco[s].media;
+  const AGORA = Date.now();
+  const TTL_DIM = 14 * 24 * 3600 * 1000;    // Codex #225: dimensão corrigida no Bling tem que chegar — o cache vence em 14 dias e re-consulta
+  const TTL_MISS = 3 * 24 * 3600 * 1000;    // Codex #225: MISS persistido (produto sem dimensão/não achado) — re-tenta em 3 dias e, até lá, NÃO gasta orçamento
+  let d = null;
+  try {
+    let dd;
+    if (orc && orc._disco) dd = orc._disco;
+    else { dd = readJson(_MAGALU_DIM_DISCO, {}); if (orc) orc._disco = dd; }
+    const e0 = dd && dd[s];
+    if (e0) {
+      const idade = AGORA - (Date.parse(e0.em || 0) || 0);
+      if (_dimUsavel(e0) && idade < TTL_DIM) d = e0;   // Codex r5: entrada antiga com dimensão zerada NÃO é sucesso — cai pra re-consulta/miss
+      else if (e0.miss && idade < TTL_MISS) return null;   // miss fresco: corta antes do orçamento e do Bling
+    }
+  } catch (e) {}
+  if (!d) {
+    /* Codex #225 r4: o DISCO já foi olhado ACIMA — o orçamento só decide a ida ao BLING. Cortes
+       devolvem MARCADOR (não null): o chamador conta como pendente, não memoiza e não cacheia o
+       agregado — null de verdade fica só pro miss (produto sem dimensão). */
+    if (orc && orc.ate != null && AGORA > orc.ate) return '__orcamento__';   // prazo TOTAL — Bling lento não pendura o dashboard
+    if (orc && orc.max != null && orc.bling >= orc.max) return '__orcamento__';   // teto de consultas da requisição
+    if (orc) orc.bling++;
+    delete _dimCache[s];   // Codex #225 r2: o cache de MEMÓRIA não expira — sem isto, o TTL do disco re-gravava o dado velho (ou o null) pra sempre em processo longevo
+    /* prazo PRÓPRIO da consulta + CANCELAMENTO REAL (Codex r4): o abort mata o fetch junto com o
+       prazo — sem ele, cada leitura acumulava conexões vivas com o Bling atrás do race. */
+    const _ac = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+    let _tt = null;
+    const prazo = new Promise(res => { _tt = setTimeout(() => { try { if (_ac) _ac.abort(); } catch (e2) {} res('__prazo__'); }, 4000); });
+    d = await Promise.race([magaluDimSku(s, _ac ? _ac.signal : undefined), prazo]);
+    if (_tt) clearTimeout(_tt);
+    if (d === '__prazo__' || (d && d.erro)) return '__transitorio__';   // Codex r2/r4: timeout e falha de API/transporte não viram miss nem congelam agregado — re-tenta na próxima leitura
+    try {
+      const dd = readJson(_MAGALU_DIM_DISCO, {});
+      /* Codex r5: dimensão INUTILIZÁVEL (objeto existe, medidas zeradas/faltando) grava como MISS
+         (3 dias) e não como sucesso (14) — corrigir o cadastro no Bling volta a valer rápido. */
+      if (_dimUsavel(d)) dd[s] = { dim: d.dim, peso: d.peso, em: new Date().toISOString() };
+      else dd[s] = { miss: true, em: new Date().toISOString() };   // não achado, sem dimensão ou dimensão zerada: miss com TTL
+      writeJson(_MAGALU_DIM_DISCO, dd);
+      if (orc) orc._disco = dd;   // a leitura cacheada da requisição acompanha o que acabou de ser gravado
+    } catch (e) {}
+  }
+  if (!d || !d.dim) return null;
   return magaluFreteTabela(d.dim, d.peso);
 }
 
