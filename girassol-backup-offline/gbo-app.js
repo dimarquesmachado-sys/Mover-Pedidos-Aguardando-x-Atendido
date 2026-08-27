@@ -829,6 +829,27 @@ function routes(readBody) {
         json(res, 200, { ok: !!idIr, sn: snIr, order_id: idIr, destino: idIr ? ('https://seller.shopee.com.br/portal/sale/order/' + idIr) : buscaIr, ids_em_cache: Object.keys(mapaIr).length, versao: VERSAO, passos: passosIr });
         return true;
       }
+      if (!idIr) {
+        /* 27/08 (pedido de 13-18/08): o fallback pra BUSCA era SILENCIOSO e a sessao morta so era
+           descoberta clicando. Quando a causa APARENTA ser sessao (sem cookie, ou a consulta nao
+           respondeu como logada), mostra o aviso com o caminho do conserto; pedido apenas nao
+           encontrado com sessao viva (code:0) segue direto pra busca, sem incomodar. */
+        const _semCk = passosIr.some(x => x.passo === 'cookie');
+        const _naoLog = passosIr.some(x => x.passo === 'consulta' && !(x.status === 200 && /"code"\s*:\s*0/.test(String(x.corpo || ''))));
+        if (_semCk || _naoLog) {
+          res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+          res.end('<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sessao Shopee expirou</title>'
+            + '<body style="font-family:system-ui;background:#0a0e1a;color:#e8eaf2;display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0">'
+            + '<div style="max-width:430px;padding:28px;text-align:center">'
+            + '<div style="font-size:42px">\u26a0\ufe0f</div>'
+            + '<h2 style="margin:10px 0">Sess\u00e3o do Seller Center expirou</h2>'
+            + '<p style="color:#9aa3b5;line-height:1.5">O link vai abrir pela <b>busca</b> em vez de ir direto ao pedido. Pra voltar ao link direto, renove o cookie da loja no Render (aba Environment, vari\u00e1vel <code style="color:#cdd6ea">' + SHOPEE_ENV_COOKIE + '</code>).</p>'
+            + '<p><a href="' + buscaIr.replace(/"/g, '&quot;') + '" style="display:inline-block;background:#2e6ef7;color:#fff;padding:12px 22px;border-radius:10px;text-decoration:none;font-weight:600">Continuar pela busca \u2192</a></p>'
+            + '<p style="font-size:12px"><a href="/girassol-backup-offline/shopee-sessao" style="color:#7f9dd0">diagn\u00f3stico da sess\u00e3o</a></p>'
+            + '</div>');
+          return true;
+        }
+      }
       vai(idIr ? ('https://seller.shopee.com.br/portal/sale/order/' + idIr) : buscaIr);
       return true;
     }
@@ -6068,6 +6089,6 @@ module.exports = {
   nome: 'Girassol Backup Offline',
   rotinas: { backupCache: () => rodarCiclo('cron'), backfillNF: () => backfillNFLocal(45), mlSyncFees: () => mlSyncFees(14), shopeeKeepAlive: () => shopeeKeepAlive(), noturna: () => _noturna.rotinaNoturna('cron') },
   routes,
-  crons: { backupCache: CRON_EXPR, backfillNF: '15 4 * * *', mlSyncFees: '40 4 * * *', shopeeKeepAlive: '20 5,17 * * *', noturna: '30 3 * * *' },
+  crons: { backupCache: CRON_EXPR, backfillNF: '15 4 * * *', mlSyncFees: '40 4 * * *', shopeeKeepAlive: '20 */3 * * *'   /* 27/08: 2x/dia deixava a sessao morrer por desuso; a cada 3h cada toque renova cookies via set-cookie */, noturna: '30 3 * * *' },
   bootstrap
 };
