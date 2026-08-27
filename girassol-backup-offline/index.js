@@ -2680,13 +2680,16 @@ async function magaluDimSku(sku, signal) {
 }
 // frete provisório de um pedido: histórico do SKU (se já vendeu) senão a tabela pela dimensão.
 async function magaluFreteProvisorio(v) {
-  const it = (v.it || [])[0];   // 1º item define a faixa (a maioria dos pedidos é 1 SKU)
-  const sku = it && it.sku;
-  if (!sku) return null;
+  /* Acerto (Codex #226 final): a MESMA regra de seleção do leitor do histórico — itens ordenados
+     por SKU, banco de QUALQUER item vence (a média é o PACOTE), senão a dimensão do 1º ordenado.
+     Sem isto, o mesmo pedido multi-item mostrava um frete no dia e outro no Mês/Ano. */
+  const its = (v.it || []).map(x => ({ sku: String((x && x.sku) || '').trim() })).filter(x => x.sku)
+    .sort((a, b) => a.sku.localeCompare(b.sku));
+  if (!its.length) return null;
   const banco = magaluFreteSkuLer();
-  if (banco[sku] && banco[sku].media > 0) return banco[sku].media;   // histórico real do SKU manda
-  const d = await magaluDimSku(sku);
-  if (!d) return null;
+  for (const x of its) { const b = banco[x.sku]; const m = b && Number(b.media); if (m > 0) return m; }
+  const d = await magaluDimSku(its[0].sku);
+  if (!d || !d.dim) return null;   // {erro:true} do dimSku também cai aqui
   return magaluFreteTabela(d.dim, d.peso);
 }
 const _MAGALU_DIM_DISCO = path.join(CACHE_DIR, '_magalu_dim_sku.json');
