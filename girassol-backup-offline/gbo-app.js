@@ -3894,7 +3894,13 @@ async function magaluDimSku(sku, signal) {
        todas as rotas. O resolverProdutoPorSku aplica as regras da casa (ativo > reserva, variantes
        de caixa, inconclusivo quando uma busca falha). Inconclusivo = transitório (nada persiste);
        não achado/todos excluídos = miss com TTL. */
-    const rr = await resolverProdutoPorSku(sku, (p) => blingGet(p, undefined, signal), 10);
+    const rr = await resolverProdutoPorSku(sku, async (p) => {
+      const r = await blingGet(p, undefined, signal);
+      /* Codex #228 r2: 400/404/422 da BUSCA é resposta DEFINITIVA (SKU inválido/inexistente) —
+         vira página vazia pro resolver (→ produto null → miss com TTL), não falha transitória. */
+      if (r && !r.ok && (r.status === 404 || r.status === 400 || r.status === 422)) return { ok: true, data: { data: [] } };
+      return r;
+    }, 50);   // Codex #228 r2: limite 50 num request só — ativo atrás de 10+ duplicatas aparece sem paginar; >50 cadastros do MESMO código é patológico e segue transitório (inconclusivo sem ativo)
     /* Codex #228: ATIVO achado é conclusivo mesmo com página cheia (o resolver marca inconclusivo
        junto) — só rejeita inconclusivo SEM ativo (a variante que falhou pode ser a do cadastro). */
     if (rr && rr.inconclusivo && !rr.ativo) return { erro: true };
@@ -3926,6 +3932,7 @@ async function magaluFreteProvisorio(v) {
      o custo das repetições. */
   for (const x of its) {
     const d = await magaluDimSku(x.sku);
+    if (d && d.erro) break;   // Codex #228 r2: falha TRANSITÓRIA do Bling (429/5xx/rede) atinge tudo — parar em vez de re-tentar item a item e pendurar o sync inteiro na indisponibilidade
     if (d && d.dim) { const f = magaluFreteTabela(d.dim, d.peso); if (f != null) return f; }
   }
   return null;

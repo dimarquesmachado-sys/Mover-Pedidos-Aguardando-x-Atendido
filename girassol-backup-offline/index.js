@@ -2693,6 +2693,7 @@ async function magaluFreteProvisorio(v) {
      o custo das repetições. */
   for (const x of its) {
     const d = await magaluDimSku(x.sku);
+    if (d && d.erro) break;   // Codex #228 r2: falha TRANSITÓRIA do Bling (429/5xx/rede) atinge tudo — parar em vez de re-tentar item a item e pendurar o sync inteiro na indisponibilidade
     if (d && d.dim) { const f = magaluFreteTabela(d.dim, d.peso); if (f != null) return f; }
   }
   return null;
