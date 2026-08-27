@@ -2656,13 +2656,23 @@ async function magaluDimSku(sku, signal) {
   if (_dimCache[sku] !== undefined) return _dimCache[sku];
   try {
     const rb = await blingGet('/produtos?codigo=' + encodeURIComponent(sku) + '&criterio=5', undefined, signal);
-    /* Codex #225 r2: falha de transporte/API (401, 500, rede, abort) NÃO é "produto sem dimensão" —
-       devolve marcador de erro SEM cachear, pra ninguém persistir a falha como miss de 3 dias. */
-    if (!rb || !rb.ok) return { erro: true };
+    /* Codex #225 r2 + #226 r2: falha de transporte/API (401, 429, 5xx, rede, abort) NÃO é "produto
+       sem dimensão" — marcador de erro SEM cachear. Mas resposta DEFINITIVA do cliente (404/400/422,
+       SKU que não existe ou é inválido) é miss de verdade: vira null e ganha o TTL de 3 dias, em vez
+       de re-gastar o orçamento a cada leitura pra sempre. */
+    if (!rb || !rb.ok) {
+      const st = rb && rb.status;
+      if (st === 404 || st === 400 || st === 422) { _dimCache[sku] = null; return null; }
+      return { erro: true };
+    }
     const p0 = rb.data && rb.data.data && rb.data.data[0];
     if (!p0 || !p0.id) { _dimCache[sku] = null; return null; }
     const rd = await blingGet('/produtos/' + p0.id, undefined, signal);
-    if (!rd || !rd.ok) return { erro: true };
+    if (!rd || !rd.ok) {
+      const st2 = rd && rd.status;
+      if (st2 === 404 || st2 === 400 || st2 === 422) { _dimCache[sku] = null; return null; }   // Codex #226 r2: definitivo = miss com TTL
+      return { erro: true };
+    }
     const prod = (rd.data && rd.data.data) || null;
     const out = prod ? { dim: prod.dimensoes, peso: prod.pesoBruto } : null;
     _dimCache[sku] = out; return out;
@@ -2715,7 +2725,19 @@ async function magaluFretePrevistoSku(sku, orc) {
     let dd;
     if (orc && orc._disco) dd = orc._disco;
     else { dd = readJson(_MAGALU_DIM_DISCO, {}); if (orc) orc._disco = dd; }
-    const e0 = dd && dd[s];
+    let e0 = dd && dd[s];
+    /* Codex #226: caixa diferente (PM1 gravado × pm1 na linha) não pode gastar outra consulta —
+       índice UPPER→chave montado 1× por requisição (no orc); sem orc, varredura simples. */
+    if (!e0 && dd) {
+      if (orc) {
+        if (!orc._discoIdx) { orc._discoIdx = {}; for (const kD of Object.keys(dd)) { const kU = kD.toUpperCase(); if (orc._discoIdx[kU] === undefined) orc._discoIdx[kU] = kD; } }
+        const kR = orc._discoIdx[s.toUpperCase()];
+        if (kR !== undefined && dd[kR]) e0 = dd[kR];
+      } else {
+        const kR = Object.keys(dd).find(kD => kD.toUpperCase() === s.toUpperCase());
+        if (kR) e0 = dd[kR];
+      }
+    }
     if (e0) {
       const idade = AGORA - (Date.parse(e0.em || 0) || 0);
       if (_dimUsavel(e0) && idade < TTL_DIM) d = e0;   // Codex r5: entrada antiga com dimensão zerada NÃO é sucesso — cai pra re-consulta/miss
@@ -2726,7 +2748,8 @@ async function magaluFretePrevistoSku(sku, orc) {
     /* Codex #225 r4: o DISCO já foi olhado ACIMA — o orçamento só decide a ida ao BLING. Cortes
        devolvem MARCADOR (não null): o chamador conta como pendente, não memoiza e não cacheia o
        agregado — null de verdade fica só pro miss (produto sem dimensão). */
-    if (orc && orc.ate != null && AGORA > orc.ate) return '__orcamento__';   // prazo TOTAL — Bling lento não pendura o dashboard
+    if (orc && orc.ate == null) orc.ate = Date.now() + 6000;   // Codex #226 r2: o prazo nasce AQUI, na 1ª ida REAL ao Bling — candidatos servidos pelo cache não gastam relógio
+    if (orc && orc.ate != null && Date.now() > orc.ate) return '__orcamento__';   // prazo TOTAL — Bling lento não pendura o dashboard
     if (orc && orc.max != null && orc.bling >= orc.max) return '__orcamento__';   // teto de consultas da requisição
     if (orc) orc.bling++;
     delete _dimCache[s];   // Codex #225 r2: o cache de MEMÓRIA não expira — sem isto, o TTL do disco re-gravava o dado velho (ou o null) pra sempre em processo longevo
@@ -2734,18 +2757,26 @@ async function magaluFretePrevistoSku(sku, orc) {
        prazo — sem ele, cada leitura acumulava conexões vivas com o Bling atrás do race. */
     const _ac = (typeof AbortController !== 'undefined') ? new AbortController() : null;
     let _tt = null;
-    const prazo = new Promise(res => { _tt = setTimeout(() => { try { if (_ac) _ac.abort(); } catch (e2) {} res('__prazo__'); }, 4000); });
+    /* Codex #226 r4: o prazo da consulta respeita o RESTANTE do prazo compartilhado - consulta que
+       comeca a 300ms do orc.ate nao ganha 4s inteiros (3 lentas seguidas seguravam a rota ~10s). */
+    const _resta = (orc && orc.ate != null) ? Math.max(200, orc.ate - Date.now()) : 4000;
+    const _prazoMs = Math.min(4000, _resta);
+    const prazo = new Promise(res => { _tt = setTimeout(() => { try { if (_ac) _ac.abort(); } catch (e2) {} res('__prazo__'); }, _prazoMs); });
     d = await Promise.race([magaluDimSku(s, _ac ? _ac.signal : undefined), prazo]);
     if (_tt) clearTimeout(_tt);
     if (d === '__prazo__' || (d && d.erro)) return '__transitorio__';   // Codex r2/r4: timeout e falha de API/transporte não viram miss nem congelam agregado — re-tenta na próxima leitura
     try {
       const dd = readJson(_MAGALU_DIM_DISCO, {});
+      /* Codex #226: gravar na chave que JÁ existe com outra caixa — senão PM1 e pm1 viram duas
+         entradas e a leitura fica ambígua. */
+      const kEx = (dd[s] !== undefined) ? s : Object.keys(dd).find(kD => kD.toUpperCase() === s.toUpperCase());
+      const kGr = kEx || s;
       /* Codex r5: dimensão INUTILIZÁVEL (objeto existe, medidas zeradas/faltando) grava como MISS
          (3 dias) e não como sucesso (14) — corrigir o cadastro no Bling volta a valer rápido. */
-      if (_dimUsavel(d)) dd[s] = { dim: d.dim, peso: d.peso, em: new Date().toISOString() };
-      else dd[s] = { miss: true, em: new Date().toISOString() };   // não achado, sem dimensão ou dimensão zerada: miss com TTL
+      if (_dimUsavel(d)) dd[kGr] = { dim: d.dim, peso: d.peso, em: new Date().toISOString() };
+      else dd[kGr] = { miss: true, em: new Date().toISOString() };   // não achado, sem dimensão ou dimensão zerada: miss com TTL
       writeJson(_MAGALU_DIM_DISCO, dd);
-      if (orc) orc._disco = dd;   // a leitura cacheada da requisição acompanha o que acabou de ser gravado
+      if (orc) { orc._disco = dd; orc._discoIdx = null; }   // a leitura cacheada acompanha; o índice de caixa regenera
     } catch (e) {}
   }
   if (!d || !d.dim) return null;
