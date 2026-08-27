@@ -111,7 +111,7 @@ function rotasHistorico(ctx) {
       return a;
     };
     const memo = {};
-    const orc = { bling: 0, max: 8, ate: null };   // Codex r4: o prazo NASCE na 1ª ida ao Bling — o scan de um Ano no Supabase pode levar mais de 6s sozinho
+    const orc = { bling: 0, max: 8, ate: null };   // ate nasce DENTRO do wrapper, na 1ª consulta real (Codex r4 + #226 r2)
     const pedidoJa = new Set();
     let pendentes = 0;   // SKUs que ficaram SEM tentativa (orçamento/prazo/falha transitória) — resultado é PARCIAL, não cachear
     const _bancoDe = (s0, s) => {
@@ -133,11 +133,13 @@ function rotasHistorico(ctx) {
       const its = (Array.isArray(itens) ? itens : []).map(it => ({ s0: String((it && it.sku) || '').trim() }))
         .filter(it => it.s0).sort((a, b) => a.s0.localeCompare(b.s0));
       if (!its.length) return null;
-      const kPed = String(pedido || '').trim() || ('sku:' + its[0].s0);
-      if (pedidoJa.has(kPed)) return null;       // o pedido já levou o frete do pacote (de qualquer fonte)
+      /* Codex #226 r2: SEM número de pedido não há como saber se duas vendas são o mesmo pacote —
+         cada chamada decide sozinha (sem Set), em vez de fundir vendas distintas do mesmo SKU. */
+      const kPed = String(pedido || '').trim();
+      if (kPed && pedidoJa.has(kPed)) return null;   // o pedido já levou o frete do pacote (de qualquer fonte)
       for (const it of its) {                    // fase 1: banco (média real do pacote)
         const fp = _bancoDe(it.s0, resolve(it.s0));
-        if (fp != null) { pedidoJa.add(kPed); return { fp, sku: it.s0 }; }
+        if (fp != null) { if (kPed) pedidoJa.add(kPed); return { fp, sku: it.s0 }; }
       }
       if (!magaluFretePrevistoSku) return null;  // sem ctx (chamador antigo): comporta exatamente como antes
       for (const it of its) {                    // fase 2: tabela por dimensão
@@ -146,14 +148,15 @@ function rotasHistorico(ctx) {
         let fp;
         if (sM in memo) fp = memo[sM];           // mesmo SKU noutro pedido: memo serve, sem re-consulta
         else {
-          if (orc.ate == null) orc.ate = Date.now() + 6000;   // o prazo conta a partir da 1ª ida ao Bling
+          /* Codex #226 r2: o prazo agora nasce DENTRO do wrapper, na 1ª ida REAL ao Bling —
+             candidato servido pelo cache de disco não gasta relógio dos que vêm depois. */
           let r;
           try { r = await magaluFretePrevistoSku(s, orc); } catch (e) { r = '__transitorio__'; }
           if (r === '__orcamento__' || r === '__transitorio__') { pendentes++; continue; }   // Codex r3/r4: corte não memoiza — a próxima leitura re-tenta; o chamador não cacheia o parcial
           memo[sM] = (r == null ? null : r);
           fp = r;
         }
-        if (fp != null) { pedidoJa.add(kPed); return { fp, sku: it.s0 }; }
+        if (fp != null) { if (kPed) pedidoJa.add(kPed); return { fp, sku: it.s0 }; }
       }
       return null;
     };
@@ -498,7 +501,7 @@ function rotasHistorico(ctx) {
             { const _ckM = String(l.canal || '').toLowerCase();
               if (_ckM === 'magalu') {
                 if (fr > 0) { if (l.numero_pedido) _pedComFrete.add(String(l.numero_pedido)); }
-                else _frCand = { sku: l.sku, q, vp, pedido: String(l.numero_pedido || '') };   // vp: quinhao da distribuicao (Codex r5)
+                else _frCand = { sku: l.sku, q, vp, i: _frCands.length, pedido: String(l.numero_pedido || '') };   // vp: quinhao; i: chave propria se vier sem numero (Codex #226 r2)
               } }
             /* ═══ 20/08 — TikTok: enquanto a comissão gravada ainda é a do BLING, vale a REGRA ═══
                O extrato do TikTok chega dias depois e o completar substitui a comissão pela real —
@@ -575,7 +578,7 @@ function rotasHistorico(ctx) {
       const _porPedCand = new Map();   // Codex r4: decisão por PEDIDO inteiro, não pela ordem do stream
       for (const cF of _frCands) {
         if (cF.pedido && _pedComFrete.has(cF.pedido)) continue;
-        const kP = cF.pedido || ('sku:' + String(cF.sku || ''));
+        const kP = cF.pedido || ('linha#' + cF.i);   // Codex #226 r2: sem numero, cada venda e seu proprio grupo — nada de fundir por SKU
         if (!_porPedCand.has(kP)) _porPedCand.set(kP, []);
         _porPedCand.get(kP).push(cF);
       }

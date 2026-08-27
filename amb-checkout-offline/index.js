@@ -5272,13 +5272,23 @@ async function magaluDimSku(sku, signal) {
   if (_dimCache[sku] !== undefined) return _dimCache[sku];
   try {
     const rb = await blingGet('/produtos?codigo=' + encodeURIComponent(sku) + '&criterio=5', undefined, signal);
-    /* Codex #225 r2: falha de transporte/API (401, 500, rede, abort) NÃO é "produto sem dimensão" —
-       devolve marcador de erro SEM cachear, pra ninguém persistir a falha como miss de 3 dias. */
-    if (!rb || !rb.ok) return { erro: true };
+    /* Codex #225 r2 + #226 r2: falha de transporte/API (401, 429, 5xx, rede, abort) NÃO é "produto
+       sem dimensão" — marcador de erro SEM cachear. Mas resposta DEFINITIVA do cliente (404/400/422,
+       SKU que não existe ou é inválido) é miss de verdade: vira null e ganha o TTL de 3 dias, em vez
+       de re-gastar o orçamento a cada leitura pra sempre. */
+    if (!rb || !rb.ok) {
+      const st = rb && rb.status;
+      if (st === 404 || st === 400 || st === 422) { _dimCache[sku] = null; return null; }
+      return { erro: true };
+    }
     const p0 = rb.data && rb.data.data && rb.data.data[0];
     if (!p0 || !p0.id) { _dimCache[sku] = null; return null; }
     const rd = await blingGet('/produtos/' + p0.id, undefined, signal);
-    if (!rd || !rd.ok) return { erro: true };
+    if (!rd || !rd.ok) {
+      const st2 = rd && rd.status;
+      if (st2 === 404 || st2 === 400 || st2 === 422) { _dimCache[sku] = null; return null; }   // Codex #226 r2: definitivo = miss com TTL
+      return { erro: true };
+    }
     const prod = (rd.data && rd.data.data) || null;
     const out = prod ? { dim: prod.dimensoes, peso: prod.pesoBruto } : null;
     _dimCache[sku] = out; return out;
@@ -5354,7 +5364,8 @@ async function magaluFretePrevistoSku(sku, orc) {
     /* Codex #225 r4: o DISCO já foi olhado ACIMA — o orçamento só decide a ida ao BLING. Cortes
        devolvem MARCADOR (não null): o chamador conta como pendente, não memoiza e não cacheia o
        agregado — null de verdade fica só pro miss (produto sem dimensão). */
-    if (orc && orc.ate != null && AGORA > orc.ate) return '__orcamento__';   // prazo TOTAL — Bling lento não pendura o dashboard
+    if (orc && orc.ate == null) orc.ate = Date.now() + 6000;   // Codex #226 r2: o prazo nasce AQUI, na 1ª ida REAL ao Bling — candidatos servidos pelo cache não gastam relógio
+    if (orc && orc.ate != null && Date.now() > orc.ate) return '__orcamento__';   // prazo TOTAL — Bling lento não pendura o dashboard
     if (orc && orc.max != null && orc.bling >= orc.max) return '__orcamento__';   // teto de consultas da requisição
     if (orc) orc.bling++;
     delete _dimCache[s];   // Codex #225 r2: o cache de MEMÓRIA não expira — sem isto, o TTL do disco re-gravava o dado velho (ou o null) pra sempre em processo longevo
