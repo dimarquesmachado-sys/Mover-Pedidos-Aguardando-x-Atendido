@@ -2698,6 +2698,9 @@ async function magaluFreteProvisorio(v) {
   }
   return null;
 }
+/* Codex #229: este módulo é LEGADO (o raiz monta o gbo-app desde 05/08) e ainda resolve o produto
+   pelo data[0] cru — por isso fica no namespace V1, ISOLADO do cache v2 que os módulos vivos
+   populam pelas regras do resolverProdutoPorSku. Se um dia voltar a rodar, não contamina o v2. */
 const _MAGALU_DIM_DISCO = path.join(CACHE_DIR, '_magalu_dim_sku.json');
 
 // ─── frete PREVISTO por SKU pro completar do histórico (26/08) ─────────────────
