@@ -142,14 +142,15 @@ function rotasHistorico(ctx) {
       if (!magaluFretePrevistoSku) return null;  // sem ctx (chamador antigo): comporta exatamente como antes
       for (const it of its) {                    // fase 2: tabela por dimensão
         const s = resolve(it.s0);
+        const sM = s.toUpperCase();              // Codex #226: memo por caixa normalizada (pm1 e PM1 são o mesmo SKU)
         let fp;
-        if (s in memo) fp = memo[s];             // mesmo SKU noutro pedido: memo serve, sem re-consulta
+        if (sM in memo) fp = memo[sM];           // mesmo SKU noutro pedido: memo serve, sem re-consulta
         else {
           if (orc.ate == null) orc.ate = Date.now() + 6000;   // o prazo conta a partir da 1ª ida ao Bling
           let r;
           try { r = await magaluFretePrevistoSku(s, orc); } catch (e) { r = '__transitorio__'; }
           if (r === '__orcamento__' || r === '__transitorio__') { pendentes++; continue; }   // Codex r3/r4: corte não memoiza — a próxima leitura re-tenta; o chamador não cacheia o parcial
-          memo[s] = (r == null ? null : r);
+          memo[sM] = (r == null ? null : r);
           fp = r;
         }
         if (fp != null) { pedidoJa.add(kPed); return { fp, sku: it.s0 }; }
@@ -365,7 +366,7 @@ function rotasHistorico(ctx) {
         if (a != null && isFinite(Number(a)) && Number(a) > 0) return Number(a);
         return (DEFAULT_ALIQ_BK && DEFAULT_ALIQ_BK[mes] != null) ? Number(DEFAULT_ALIQ_BK[mes]) : null; };
       const _cuR = sk => { const c = _ccR[String(sk || '').trim()]; return (c && c.custo != null && isFinite(Number(c.custo))) ? Number(c.custo) : null; };
-      const ordem = [], mapa = {}, _mgTem = {};   // _mgTem: pedido com margem gravada em alguma linha (Codex r5)
+      const ordem = [], mapa = {}, _vpMg = {};   // _vpMg: valor_produto das linhas COM margem, por pedido (Codex #226: prorrata da margem parcial)
       for (const l of linhas) {
         const k = String(l.numero_pedido || '(sem número)');
         if (!mapa[k]) { mapa[k] = { numero: k, numero_loja: l.numero_loja || null, canal: l.canal || 'outro', data: l.data_venda, itens: [], un: 0, vprod: 0, vnota: 0, custo: 0, semCusto: 0, comissao: 0, frete: 0, imposto: 0, margem: 0 }; ordem.push(k); }
@@ -380,7 +381,7 @@ function rotasHistorico(ctx) {
         if (l.custo != null) o.custo += Number(l.custo);
         else { const cxR = _cuR(l.sku); if (cxR != null) o.custo += cxR * q; else o.semCusto += q; }
         o.comissao += Number(l.comissao) || 0; o.frete += Number(l.frete_vendedor) || 0;
-        o.imposto += Number(l.imposto) || 0; if (l.margem != null) { o.margem += Number(l.margem); _mgTem[k] = 1; }
+        o.imposto += Number(l.imposto) || 0; if (l.margem != null) { o.margem += Number(l.margem); _vpMg[k] = (_vpMg[k] || 0) + (Number(l.valor_produto) || 0); }
       }
       /* Codex #225 r2 (P1): a LISTA tem que mostrar o mesmo frete que o agregado completa — senão
          o card diz uma margem e as linhas outra. Pedido agrupado (a página traz pedidos inteiros,
@@ -390,7 +391,15 @@ function rotasHistorico(ctx) {
         const oF = mapa[kF];
         if (String(oF.canal || '').toLowerCase() !== 'magalu' || oF.frete > 0) continue;
         const rF = await _freteMgL.porPedido(oF.canal, oF.itens, oF.numero);   // Codex r4: mesma decisão determinística das outras rotas
-        if (rF) { oF.frete += rF.fp; if (_mgTem[kF]) oF.margem -= rF.fp; }   // Codex r5: margem que NUNCA existiu nao vira negativo inventado
+        if (rF) {
+          oF.frete += rF.fp;
+          /* Codex #226: margem PARCIAL — desconta só a FRAÇÃO das linhas com margem (fp × vpMg/vpTot),
+             a mesma régua do longo, que desconta o quinhão por valor de cada linha com margem.
+             Pedido sem margem nenhuma continua intacto (fração 0). */
+          const _vm = _vpMg[kF] || 0;
+          const _fra = oF.vprod > 0 ? rF.fp * Math.min(1, _vm / oF.vprod) : (_vm > 0 ? rF.fp : 0);
+          if (_fra > 0) oF.margem -= _fra;
+        }
       }
       const pedidos = ordem.map(k => {
         const o = mapa[k];

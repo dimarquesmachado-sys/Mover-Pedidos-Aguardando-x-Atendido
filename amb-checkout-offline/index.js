@@ -5331,7 +5331,19 @@ async function magaluFretePrevistoSku(sku, orc) {
     let dd;
     if (orc && orc._disco) dd = orc._disco;
     else { dd = readJson(_MAGALU_DIM_DISCO, {}); if (orc) orc._disco = dd; }
-    const e0 = dd && dd[s];
+    let e0 = dd && dd[s];
+    /* Codex #226: caixa diferente (PM1 gravado × pm1 na linha) não pode gastar outra consulta —
+       índice UPPER→chave montado 1× por requisição (no orc); sem orc, varredura simples. */
+    if (!e0 && dd) {
+      if (orc) {
+        if (!orc._discoIdx) { orc._discoIdx = {}; for (const kD of Object.keys(dd)) { const kU = kD.toUpperCase(); if (orc._discoIdx[kU] === undefined) orc._discoIdx[kU] = kD; } }
+        const kR = orc._discoIdx[s.toUpperCase()];
+        if (kR !== undefined && dd[kR]) e0 = dd[kR];
+      } else {
+        const kR = Object.keys(dd).find(kD => kD.toUpperCase() === s.toUpperCase());
+        if (kR) e0 = dd[kR];
+      }
+    }
     if (e0) {
       const idade = AGORA - (Date.parse(e0.em || 0) || 0);
       if (_dimUsavel(e0) && idade < TTL_DIM) d = e0;   // Codex r5: entrada antiga com dimensão zerada NÃO é sucesso — cai pra re-consulta/miss
@@ -5356,12 +5368,16 @@ async function magaluFretePrevistoSku(sku, orc) {
     if (d === '__prazo__' || (d && d.erro)) return '__transitorio__';   // Codex r2/r4: timeout e falha de API/transporte não viram miss nem congelam agregado — re-tenta na próxima leitura
     try {
       const dd = readJson(_MAGALU_DIM_DISCO, {});
+      /* Codex #226: gravar na chave que JÁ existe com outra caixa — senão PM1 e pm1 viram duas
+         entradas e a leitura fica ambígua. */
+      const kEx = (dd[s] !== undefined) ? s : Object.keys(dd).find(kD => kD.toUpperCase() === s.toUpperCase());
+      const kGr = kEx || s;
       /* Codex r5: dimensão INUTILIZÁVEL (objeto existe, medidas zeradas/faltando) grava como MISS
          (3 dias) e não como sucesso (14) — corrigir o cadastro no Bling volta a valer rápido. */
-      if (_dimUsavel(d)) dd[s] = { dim: d.dim, peso: d.peso, em: new Date().toISOString() };
-      else dd[s] = { miss: true, em: new Date().toISOString() };   // não achado, sem dimensão ou dimensão zerada: miss com TTL
+      if (_dimUsavel(d)) dd[kGr] = { dim: d.dim, peso: d.peso, em: new Date().toISOString() };
+      else dd[kGr] = { miss: true, em: new Date().toISOString() };   // não achado, sem dimensão ou dimensão zerada: miss com TTL
       writeJson(_MAGALU_DIM_DISCO, dd);
-      if (orc) orc._disco = dd;   // a leitura cacheada da requisição acompanha o que acabou de ser gravado
+      if (orc) { orc._disco = dd; orc._discoIdx = null; }   // a leitura cacheada acompanha; o índice de caixa regenera
     } catch (e) {}
   }
   if (!d || !d.dim) return null;
