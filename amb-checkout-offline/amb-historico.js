@@ -456,7 +456,7 @@ function rotasHistorico(ctx) {
       const { url: uL, key: kkL } = supaCfg('amb');
       if (!uL || !kkL) { json(res, 500, { ok: false, erro: 'Supabase não configurado' }); return true; }
       const H = { apikey: kkL, Authorization: 'Bearer ' + kkL };
-      const campos = 'numero_pedido,canal,data_venda,sku,descricao,quantidade,valor_produto,valor_nota,custo,comissao,frete_vendedor,imposto,margem,credito_ml,uf'   // 17/08: sem isto o historico-longo lia uf vazio em TODA linha (havia dois `campos` no arquivo e o uf tinha entrado no outro);
+      const campos = 'numero_pedido,numero_loja,canal,data_venda,sku,descricao,quantidade,valor_produto,valor_nota,custo,comissao,frete_vendedor,imposto,margem,credito_ml,uf'   // 17/08: sem isto o historico-longo lia uf vazio em TODA linha (havia dois `campos` no arquivo e o uf tinha entrado no outro);
       // 28/07: o backfill gravou o custo que existia NAQUELE dia. Depois o banco de custos cresceu
       // (de 288 pra 541 SKUs), então muita linha antiga ficou sem custo à toa. Aqui completamos na
       // LEITURA com o _custos.json atual — sem precisar refazer o backfill inteiro.
@@ -523,8 +523,12 @@ function rotasHistorico(ctx) {
             let _frCand = null;
             { const _ckM = String(l.canal || '').toLowerCase();
               if (_ckM === 'magalu') {
-                if (fr > 0) { if (l.numero_pedido) _pedComFrete.add(String(l.numero_pedido)); }
-                else _frCand = { sku: l.sku, q, vp, i: _frCands.length, pedido: String(l.numero_pedido || '') };   // vp: quinhao; i: chave propria se vier sem numero (Codex #226 r2)
+                /* Codex #226 r5: sem numero_pedido, o numero_loja (id nativo do marketplace) ainda
+                   agrupa as linhas do MESMO pedido - linha#i fica so pra quem nao tem NENHUM id,
+                   senao um pedido legado multi-item vira N pacotes. */
+                const _kPedM = String(l.numero_pedido || '').trim() || (String(l.numero_loja || '').trim() ? ('loja:' + String(l.numero_loja).trim()) : '');
+                if (fr > 0) { if (_kPedM) _pedComFrete.add(_kPedM); }
+                else _frCand = { sku: l.sku, q, vp, i: _frCands.length, pedido: _kPedM };   // vp: quinhao; i: chave propria se nao houver id nenhum
               } }
             /* ═══ 20/08 — TikTok: enquanto a comissão gravada ainda é a do BLING, vale a REGRA ═══
                O extrato do TikTok chega dias depois e o completar substitui a comissão pela real —
