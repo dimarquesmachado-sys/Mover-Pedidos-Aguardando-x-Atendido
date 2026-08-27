@@ -70,11 +70,15 @@ function rotasHistorico(ctx) {
   const _freteMagaluFabrica = () => {
     const banco = (() => { try { return readJson(path.join(CACHE_DIR, '_magalu_frete_sku.json'), {}) || {}; } catch (e) { return {}; } })();
     const depara = (() => { try { return readJson(path.join(CACHE_DIR, '_sku-depara.json'), {}) || {}; } catch (e) { return {}; } })();
+    /* Codex #225 r3: chave do de-para em QUALQUER caixa — o resolver canônico do custo varre as
+       chaves normalizando; "Pm1" gravado tem que casar com "pm1" da linha antiga. Índice UPPER→regra. */
+    const dpIdx = {};
+    for (const kD of Object.keys(depara)) { const kU = String(kD).toUpperCase(); if (dpIdx[kU] === undefined) dpIdx[kU] = depara[kD]; }
     const resolve = (sku) => {
       let a = String(sku || '').trim();
       const vistos = new Set([a.toUpperCase()]);
       for (let i = 0; i < 5; i++) {
-        const r = depara[a] || depara[a.toUpperCase()];
+        const r = dpIdx[a.toUpperCase()];
         const prox = r && String(r.para || '').trim();
         if (!prox || vistos.has(prox.toUpperCase())) break;
         vistos.add(prox.toUpperCase()); a = prox;
@@ -84,6 +88,7 @@ function rotasHistorico(ctx) {
     const memo = {};
     const orc = { bling: 0, max: 8, ate: Date.now() + 6000 };
     const pedidoJa = new Set();
+    let pendentes = 0;   // SKUs que ficaram SEM tentativa porque o orçamento/prazo acabou
     const porLinha = async (canal, sku, qtd, pedido) => {
       const ck = String(canal || '').toLowerCase();
       if (ck !== 'magalu') return null;          // só a Magalu tem previsão de frete hoje; outros canais entram AQUI
@@ -97,6 +102,7 @@ function rotasHistorico(ctx) {
       if (!magaluFretePrevistoSku) return null;  // sem ctx (chamador antigo): comporta exatamente como antes
       let fp;
       if (s in memo) fp = memo[s];               // mesmo SKU noutro pedido: memo serve, sem re-consulta
+      else if (orc.bling >= orc.max || Date.now() > orc.ate) { pendentes++; return null; }   // Codex r3: orçamento já era — conta o que ficou pra trás, pro chamador saber que o resultado é PARCIAL (e não cacheá-lo)
       else {
         try { fp = await magaluFretePrevistoSku(s, orc); } catch (e) { fp = null; }
         memo[s] = (fp == null ? null : fp);
@@ -104,7 +110,7 @@ function rotasHistorico(ctx) {
       if (fp != null) pedidoJa.add(kPed);
       return fp;
     };
-    return { porLinha };
+    return { porLinha, pendentes: () => pendentes };
   };
   const PAUSA_MS        = (ctx.PAUSA_MS != null ? ctx.PAUSA_MS : base.PAUSA_MS);   // ritmo da API é por empresa
   /* Cada rota pode ser RENOMEADA ou DESLIGADA sozinha, via ctx.rotas.
@@ -475,6 +481,8 @@ function rotasHistorico(ctx) {
          por SKU, que se corrige sozinha conforme os pedidos liquidam). Entra na soma e SAI da
          margem, como qualquer custo. */
       const _freteMg = _freteMagaluFabrica();   // Codex #225 r2: mesma fábrica das duas rotas
+      const _pedComFrete = new Set();   // Codex r3: pedidos magalu com frete gravado em QUALQUER linha
+      const _frCands = [];              // linhas zeradas candidatas — a decisão fica pro FIM do laço
       let _fretesPrevistos = 0;   // linhas em que o frete do vendedor foi completado pelo previsto
       let _tkEstimadas = 0;
       const _tkPed = {};   // TikTok agrupado por PEDIDO: a faixa e a taxa fixa são do pedido inteiro   // linhas do TikTok em que a regra substituiu a taxa do Bling
@@ -496,12 +504,16 @@ function rotasHistorico(ctx) {
             if (cu == null) { const cx = _cuL(l.sku); if (cx != null) { cu = cx * q; _repostos++; } }   // custo cadastrado DEPOIS do backfill
             let co = Number(l.comissao) || 0; const _coGrav = co;
             let fr = Number(l.frete_vendedor) || 0;
-            /* frete ausente: completa com o previsto (mesma fonte do cache) e conta como custo */
-            let _frPrev = 0;
-            if (!(fr > 0)) {
-              const _fp = await _freteMg.porLinha(l.canal, l.sku, q, l.numero_pedido);
-              if (_fp != null) { fr = _fp; _frPrev = _fp; _fretesPrevistos++; }
-            }
+            /* Codex #225 r3 (P2): a decisão do frete previsto SAI do laço — o backfill distribui o
+               frete real entre as linhas do pedido e uma linha pode arredondar a 0 tendo IRMÃ com o
+               frete (que ainda nem chegou no stream). Aqui só registra; decide no fim, com o
+               período inteiro conhecido. */
+            let _frCand = null;
+            { const _ckM = String(l.canal || '').toLowerCase();
+              if (_ckM === 'magalu') {
+                if (fr > 0) { if (l.numero_pedido) _pedComFrete.add(String(l.numero_pedido)); }
+                else _frCand = { sku: l.sku, q, pedido: String(l.numero_pedido || '') };
+              } }
             /* ═══ 20/08 — TikTok: enquanto a comissão gravada ainda é a do BLING, vale a REGRA ═══
                O extrato do TikTok chega dias depois e o completar substitui a comissão pela real —
                e a coleta fecha 100% (0 sobras em 5.610 pedidos na Girassol e 33 na AMB), então o
@@ -536,8 +548,6 @@ function rotasHistorico(ctx) {
                         if (!pedData[kp]) pedData[kp] = String(l.data_venda || '').slice(0, 10); } }
             let mg = (l.margem == null ? null : Number(l.margem));
             if (mg != null) mg -= (im - _imGrav);   // imposto recalculado: a margem acompanha
-            if (mg != null && _frPrev > 0) mg -= _frPrev;   // frete completado: sai da margem, como qualquer custo
-
             if (mg != null && l.custo == null && cu != null) mg -= cu;   // margem gravada sem custo: desconta o custo reposto
             if (mg != null) T.mar += mg;
             if (l.numero_pedido) peds.add(String(l.numero_pedido));
@@ -568,11 +578,27 @@ function rotasHistorico(ctx) {
             if (!porUF[kUF]) porUF[kUF] = { uf: kUF, fat: 0, un: 0, mar: 0, peds: new Set() };
             porUF[kUF].fat += vn; porUF[kUF].un += q; porUF[kUF].mar += (mg || 0);
             if (l.numero_pedido) porUF[kUF].peds.add(String(l.numero_pedido));
+            if (_frCand) { _frCand.temMg = (mg != null); _frCand.pc = porCanal[cn]; _frCand.pd = dd ? porDia[dd] : null; _frCand.ps = porSku[sk]; _frCand.pu = porUF[kUF]; _frCands.push(_frCand); }
           }
           if (linhas.length < 1000) break;
           offset += 1000;
         }
       } catch (e) { json(res, 500, { ok: false, erro: String(e.message || e) }); return true; }
+      /* Codex #225 r3: aplica o frete previsto AGORA, com o período inteiro conhecido — pedido que
+         tem frete gravado em qualquer linha não ganha estimativa por cima. A fábrica segue
+         garantindo UM frete por pedido, de-para e orçamento; o previsto entra no frete e SAI das
+         margens exatamente onde a linha tinha somado (total, canal, dia, SKU, UF). */
+      for (const cF of _frCands) {
+        if (cF.pedido && _pedComFrete.has(cF.pedido)) continue;
+        const fpF = await _freteMg.porLinha('magalu', cF.sku, cF.q, cF.pedido);
+        if (fpF == null) continue;
+        _fretesPrevistos++;
+        T.fre += fpF; if (cF.temMg) T.mar -= fpF;
+        if (cF.pc) { cF.pc.fre += fpF; if (cF.temMg) cF.pc.mar -= fpF; }
+        if (cF.pd) { cF.pd.fre += fpF; if (cF.temMg) cF.pd.mar -= fpF; }
+        if (cF.ps && cF.temMg) cF.ps.mar -= fpF;
+        if (cF.pu && cF.temMg) cF.pu.mar -= fpF;
+      }
       /* A conta do TikTok, uma vez por PEDIDO (faixa e fixa são do pedido inteiro):
          só entra quando a comissão somada tem a assinatura do Bling (~12% do produto, ou zero) e a
          regra dá um valor MAIOR — nunca reduz tarifa já real. A margem acompanha na mesma medida. */
@@ -620,7 +646,9 @@ function rotasHistorico(ctx) {
                   pedidos_sem_imposto_lista: Object.keys(pedImposto).filter(k2 => !(pedImposto[k2] > 0))
                                                .slice(0, 20).map(k2 => ({ pedido: k2, data: pedData[k2] || null })) },
         canais, dias, skus };
-      _histCache[cacheKey] = { ts: Date.now(), dados };
+      /* Codex #225 r3: resultado PARCIAL (o orçamento do frete acabou com SKU na fila) não congela
+         por 10 min — sem cachear, a próxima abertura avança o backlog em mais uma leva. */
+      if (_freteMg.pendentes() === 0) _histCache[cacheKey] = { ts: Date.now(), dados };
       json(res, 200, dados);
       return true;
     }
@@ -880,10 +908,23 @@ function rotasHistorico(ctx) {
       }
       // Codex (P1, PR#128): o historico-longo soma o credito_ml na margem — aqui a M.C.
       // saía sem o crédito e o detalhamento não reconciliava. Mesma regra dos cards agora.
-      const pedidosB = numsB.map(nk => porPed.get(nk)).filter(Boolean).slice(0, 15)
+      /* Codex #225 r3 (P1): a busca global mostra o MESMO frete que o Mês/Ano completa — pedido
+         magalu sem NENHUM frete gravado ganha o previsto na 1ª linha que resolver (g.frete>0 já
+         cobre a irmã com o frete do pedido, porque aqui o pedido chega inteiro e agrupado).
+         Entra no frete e sai da M.C., como lá. Só os 15 exibidos — orçamento não vaza pro resto. */
+      const gruposB = numsB.map(nk => porPed.get(nk)).filter(Boolean).slice(0, 15);
+      const _freteMgB = _freteMagaluFabrica();
+      for (const gB of gruposB) {
+        if (String(gB.canal || '').toLowerCase() !== 'magalu' || gB.frete > 0) continue;
+        for (const itB of gB.itens) {
+          const fpB = await _freteMgB.porLinha(gB.canal, itB.sku, itB.qtd, gB.numero);
+          if (fpB != null) { gB.frete = r2c(gB.frete + fpB); if (!gB.mc_incompleta) gB.mc = r2c(gB.mc - fpB); break; }
+        }
+      }
+      const pedidosB = gruposB
         .map(g => Object.assign({}, g, { mc: g.mc_incompleta ? null : Math.round((g.mc + g.credito) * 100) / 100 }));
       const dadosB = { ok: true, q: qB, pedidos: pedidosB, linhas_lidas: linhasB.length, pedidos_achados: porPed.size };
-      _histCache[ckB] = { ts: Date.now(), dados: dadosB };
+      if (_freteMgB.pendentes() === 0) _histCache[ckB] = { ts: Date.now(), dados: dadosB };   // parcial não congela (Codex r3)
       json(res, 200, dadosB);
       return true;
     }
