@@ -3895,7 +3895,9 @@ async function magaluDimSku(sku, signal) {
        de caixa, inconclusivo quando uma busca falha). Inconclusivo = transitório (nada persiste);
        não achado/todos excluídos = miss com TTL. */
     const rr = await resolverProdutoPorSku(sku, (p) => blingGet(p, undefined, signal), 10);
-    if (rr && rr.inconclusivo) return { erro: true };
+    /* Codex #228: ATIVO achado é conclusivo mesmo com página cheia (o resolver marca inconclusivo
+       junto) — só rejeita inconclusivo SEM ativo (a variante que falhou pode ser a do cadastro). */
+    if (rr && rr.inconclusivo && !rr.ativo) return { erro: true };
     const p0 = rr && rr.produto;
     if (!p0 || !p0.id) { _dimCache[sku] = null; return null; }
     const rd = await blingGet('/produtos/' + p0.id, undefined, signal);
@@ -3919,9 +3921,14 @@ async function magaluFreteProvisorio(v) {
   if (!its.length) return null;
   const banco = magaluFreteSkuLer();
   for (const x of its) { const b = banco[x.sku]; const m = b && Number(b.media); if (m > 0) return m; }
-  const d = await magaluDimSku(its[0].sku);
-  if (!d || !d.dim) return null;   // {erro:true} do dimSku também cai aqui
-  return magaluFreteTabela(d.dim, d.peso);
+  /* Codex #228: como no leitor, a fase dimensão itera TODOS os itens ordenados até um resolver —
+     parar no 1º sem dimensão era regressão pra pedido [B-com-dim, A-sem-dim]. O _dimCache segura
+     o custo das repetições. */
+  for (const x of its) {
+    const d = await magaluDimSku(x.sku);
+    if (d && d.dim) { const f = magaluFreteTabela(d.dim, d.peso); if (f != null) return f; }
+  }
+  return null;
 }
 const _MAGALU_DIM_DISCO = path.join(CACHE_DIR, '_magalu_dim_sku.json');
 
