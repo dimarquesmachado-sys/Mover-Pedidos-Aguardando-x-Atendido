@@ -2680,14 +2680,23 @@ async function magaluDimSku(sku, signal) {
 }
 // frete provisório de um pedido: histórico do SKU (se já vendeu) senão a tabela pela dimensão.
 async function magaluFreteProvisorio(v) {
-  const it = (v.it || [])[0];   // 1º item define a faixa (a maioria dos pedidos é 1 SKU)
-  const sku = it && it.sku;
-  if (!sku) return null;
+  /* Acerto (Codex #226 final): a MESMA regra de seleção do leitor do histórico — itens ordenados
+     por SKU, banco de QUALQUER item vence (a média é o PACOTE), senão a dimensão do 1º ordenado.
+     Sem isto, o mesmo pedido multi-item mostrava um frete no dia e outro no Mês/Ano. */
+  const its = (v.it || []).map(x => ({ sku: String((x && x.sku) || '').trim() })).filter(x => x.sku)
+    .sort((a, b) => a.sku.localeCompare(b.sku));
+  if (!its.length) return null;
   const banco = magaluFreteSkuLer();
-  if (banco[sku] && banco[sku].media > 0) return banco[sku].media;   // histórico real do SKU manda
-  const d = await magaluDimSku(sku);
-  if (!d) return null;
-  return magaluFreteTabela(d.dim, d.peso);
+  for (const x of its) { const b = banco[x.sku]; const m = b && Number(b.media); if (m > 0) return m; }
+  /* Codex #228: como no leitor, a fase dimensão itera TODOS os itens ordenados até um resolver —
+     parar no 1º sem dimensão era regressão pra pedido [B-com-dim, A-sem-dim]. O _dimCache segura
+     o custo das repetições. */
+  for (const x of its) {
+    const d = await magaluDimSku(x.sku);
+    if (d && d.erro) break;   // Codex #228 r2: falha TRANSITÓRIA do Bling (429/5xx/rede) atinge tudo — parar em vez de re-tentar item a item e pendurar o sync inteiro na indisponibilidade
+    if (d && d.dim) { const f = magaluFreteTabela(d.dim, d.peso); if (f != null) return f; }
+  }
+  return null;
 }
 const _MAGALU_DIM_DISCO = path.join(CACHE_DIR, '_magalu_dim_sku.json');
 

@@ -5271,17 +5271,22 @@ async function magaluDimSku(sku, signal) {
   if (!sku) return null;
   if (_dimCache[sku] !== undefined) return _dimCache[sku];
   try {
-    const rb = await blingGet('/produtos?codigo=' + encodeURIComponent(sku) + '&criterio=5', undefined, signal);
-    /* Codex #225 r2 + #226 r2: falha de transporte/API (401, 429, 5xx, rede, abort) NÃO é "produto
-       sem dimensão" — marcador de erro SEM cachear. Mas resposta DEFINITIVA do cliente (404/400/422,
-       SKU que não existe ou é inválido) é miss de verdade: vira null e ganha o TTL de 3 dias, em vez
-       de re-gastar o orçamento a cada leitura pra sempre. */
-    if (!rb || !rb.ok) {
-      const st = rb && rb.status;
-      if (st === 404 || st === 400 || st === 422) { _dimCache[sku] = null; return null; }
-      return { erro: true };
-    }
-    const p0 = rb.data && rb.data.data && rb.data.data[0];
+    /* Acerto (Codex #226 final): em catálogo com duplicata, o data[0] cru podia ser cadastro
+       EXCLUÍDO/inativo — e a dimensão errada ficava 14 dias no cache aplicando a faixa errada em
+       todas as rotas. O resolverProdutoPorSku aplica as regras da casa (ativo > reserva, variantes
+       de caixa, inconclusivo quando uma busca falha). Inconclusivo = transitório (nada persiste);
+       não achado/todos excluídos = miss com TTL. */
+    const rr = await resolverProdutoPorSku(sku, async (p) => {
+      const r = await blingGet(p, undefined, signal);
+      /* Codex #228 r2: 400/404/422 da BUSCA é resposta DEFINITIVA (SKU inválido/inexistente) —
+         vira página vazia pro resolver (→ produto null → miss com TTL), não falha transitória. */
+      if (r && !r.ok && (r.status === 404 || r.status === 400 || r.status === 422)) return { ok: true, data: { data: [] } };
+      return r;
+    }, 50);   // Codex #228 r2: limite 50 num request só — ativo atrás de 10+ duplicatas aparece sem paginar; >50 cadastros do MESMO código é patológico e segue transitório (inconclusivo sem ativo)
+    /* Codex #228: ATIVO achado é conclusivo mesmo com página cheia (o resolver marca inconclusivo
+       junto) — só rejeita inconclusivo SEM ativo (a variante que falhou pode ser a do cadastro). */
+    if (rr && rr.inconclusivo && !rr.ativo) return { erro: true };
+    const p0 = rr && rr.produto;
     if (!p0 || !p0.id) { _dimCache[sku] = null; return null; }
     const rd = await blingGet('/produtos/' + p0.id, undefined, signal);
     if (!rd || !rd.ok) {
@@ -5296,14 +5301,23 @@ async function magaluDimSku(sku, signal) {
 }
 // frete provisório de um pedido: histórico do SKU (se já vendeu) senão a tabela pela dimensão.
 async function magaluFreteProvisorio(v) {
-  const it = (v.it || [])[0];   // 1º item define a faixa (a maioria dos pedidos é 1 SKU)
-  const sku = it && it.sku;
-  if (!sku) return null;
+  /* Acerto (Codex #226 final): a MESMA regra de seleção do leitor do histórico — itens ordenados
+     por SKU, banco de QUALQUER item vence (a média é o PACOTE), senão a dimensão do 1º ordenado.
+     Sem isto, o mesmo pedido multi-item mostrava um frete no dia e outro no Mês/Ano. */
+  const its = (v.it || []).map(x => ({ sku: String((x && x.sku) || '').trim() })).filter(x => x.sku)
+    .sort((a, b) => a.sku.localeCompare(b.sku));
+  if (!its.length) return null;
   const banco = magaluFreteSkuLer();
-  if (banco[sku] && banco[sku].media > 0) return banco[sku].media;   // histórico real do SKU manda
-  const d = await magaluDimSku(sku);
-  if (!d) return null;
-  return magaluFreteTabela(d.dim, d.peso);
+  for (const x of its) { const b = banco[x.sku]; const m = b && Number(b.media); if (m > 0) return m; }
+  /* Codex #228: como no leitor, a fase dimensão itera TODOS os itens ordenados até um resolver —
+     parar no 1º sem dimensão era regressão pra pedido [B-com-dim, A-sem-dim]. O _dimCache segura
+     o custo das repetições. */
+  for (const x of its) {
+    const d = await magaluDimSku(x.sku);
+    if (d && d.erro) break;   // Codex #228 r2: falha TRANSITÓRIA do Bling (429/5xx/rede) atinge tudo — parar em vez de re-tentar item a item e pendurar o sync inteiro na indisponibilidade
+    if (d && d.dim) { const f = magaluFreteTabela(d.dim, d.peso); if (f != null) return f; }
+  }
+  return null;
 }
 const _MAGALU_DIM_DISCO = path.join(CACHE_DIR, '_magalu_dim_sku.json');
 
@@ -5644,9 +5658,12 @@ async function magaluLinhas(de, ate, empresa, jaTem) {
        quando o pedido liquida. */
     let freTot = freteDe[cod] != null ? freteDe[cod] : 0;
     if (!(freTot > 0)) {
+      /* Acerto (Codex #226 final): a média é o PACOTE — um por pedido, decidido como no leitor
+         (1º item por SKU com banco), em vez de somar media×qtd e persistir inflado. */
       const _bf = magaluFreteSkuLer();
       let _sp = 0;
-      for (const x of its) { const b = _bf[String(x.sku || '').trim()]; const m = b && Number(b.media); if (m > 0) _sp += m * (Number(x.qtd) || 1); }
+      const _skOrd = its.map(x => String(x.sku || '').trim()).filter(Boolean).sort((a, b) => a.localeCompare(b));
+      for (const sk of _skOrd) { const b = _bf[sk]; const m = b && Number(b.media); if (m > 0) { _sp = m; break; } }
       if (_sp > 0) freTot = Math.round(_sp * 100) / 100;
     }
     for (const x of its) {
@@ -6289,14 +6306,15 @@ async function backfillVendas(de, ate, empresa){
            por API, tem que ser a real real" — então o previsto entra agora e o real substitui
            quando o pedido liquida (o banco por SKU é a média do frete REAL, auto-corretiva). */
         if ((!frete || frete <= 0) && canal === 'magalu') {
+          /* Acerto (Codex #226 final): a média do banco é o freteCopart do PEDIDO — um PACOTE.
+             Antes somava media×qtd por item e o provisório persistia multiplicado; como fica >0,
+             o completar da leitura nunca o substituía e a margem gravada saía inflada. Agora o
+             pedido leva UM pacote, decidido como no leitor: 1º item (por SKU) com banco. */
           const _bancoFr = (typeof magaluFreteSkuLer === 'function') ? magaluFreteSkuLer() : {};
-          let _somaPrev = 0;
-          for (const it of itens) {
-            const b = _bancoFr[String(it.sku || '').trim()];
-            const m = b && Number(b.media);
-            if (m > 0) _somaPrev += m * (Number(it.qtd) || 1);
-          }
-          if (_somaPrev > 0) { frete = Math.round(_somaPrev * 100) / 100; freFonte = 'previsto'; }
+          let _pacotePrev = 0;
+          const _skuOrd = itens.map(it => String(it.sku || '').trim()).filter(Boolean).sort((a, b) => a.localeCompare(b));
+          for (const sk of _skuOrd) { const b = _bancoFr[sk]; const m = b && Number(b.media); if (m > 0) { _pacotePrev = m; break; } }
+          if (_pacotePrev > 0) { frete = Math.round(_pacotePrev * 100) / 100; freFonte = 'previsto'; }
         }
         const numPed = String(det.numero!=null?det.numero:(p.numero!=null?p.numero:p.id));
         for(const it of itens){
