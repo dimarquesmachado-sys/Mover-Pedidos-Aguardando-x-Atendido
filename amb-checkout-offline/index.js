@@ -5373,7 +5373,11 @@ async function magaluFretePrevistoSku(sku, orc) {
        prazo — sem ele, cada leitura acumulava conexões vivas com o Bling atrás do race. */
     const _ac = (typeof AbortController !== 'undefined') ? new AbortController() : null;
     let _tt = null;
-    const prazo = new Promise(res => { _tt = setTimeout(() => { try { if (_ac) _ac.abort(); } catch (e2) {} res('__prazo__'); }, 4000); });
+    /* Codex #226 r4: o prazo da consulta respeita o RESTANTE do prazo compartilhado - consulta que
+       comeca a 300ms do orc.ate nao ganha 4s inteiros (3 lentas seguidas seguravam a rota ~10s). */
+    const _resta = (orc && orc.ate != null) ? Math.max(200, orc.ate - Date.now()) : 4000;
+    const _prazoMs = Math.min(4000, _resta);
+    const prazo = new Promise(res => { _tt = setTimeout(() => { try { if (_ac) _ac.abort(); } catch (e2) {} res('__prazo__'); }, _prazoMs); });
     d = await Promise.race([magaluDimSku(s, _ac ? _ac.signal : undefined), prazo]);
     if (_tt) clearTimeout(_tt);
     if (d === '__prazo__' || (d && d.erro)) return '__transitorio__';   // Codex r2/r4: timeout e falha de API/transporte não viram miss nem congelam agregado — re-tenta na próxima leitura

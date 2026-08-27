@@ -93,7 +93,19 @@ function rotasHistorico(ctx) {
     /* Codex #225 r4: o banco aprende na caixa do PEDIDO ("PM1") e a linha histórica pode vir "pm1"
        — índice UPPER→registro, como o resolver canônico do custo faz com as chaves. */
     const bancoIdx = {};
-    for (const kB of Object.keys(banco)) { const kU = String(kB).toUpperCase(); if (bancoIdx[kU] === undefined) bancoIdx[kU] = banco[kB]; }
+    for (const kB of Object.keys(banco)) {
+      const kU = String(kB).toUpperCase();
+      const eB = banco[kB] || {};
+      const jB = bancoIdx[kU];
+      if (!jB) bancoIdx[kU] = { soma: Number(eB.soma) || 0, n: Number(eB.n) || 0, media: Number(eB.media) || 0 };
+      else {
+        /* Codex #226 r4: o gravar usa a chave exata - PM1 e pm1 viram historicos separados. Aqui as
+           variantes de caixa se FUNDEM (soma + n, media recalculada) em vez de a 1a descartar a 2a. */
+        jB.soma = Math.round((jB.soma + (Number(eB.soma) || 0)) * 100) / 100;
+        jB.n = jB.n + (Number(eB.n) || 0);
+        jB.media = jB.n > 0 ? Math.round((jB.soma / jB.n) * 100) / 100 : (Number(eB.media) || jB.media || 0);
+      }
+    }
     const depara = (() => { try { return readJson(path.join(CACHE_DIR, '_sku-depara.json'), {}) || {}; } catch (e) { return {}; } })();
     /* Codex #225 r3: chave do de-para em QUALQUER caixa — o resolver canônico do custo varre as
        chaves normalizando; "Pm1" gravado tem que casar com "pm1" da linha antiga. Índice UPPER→regra. */
