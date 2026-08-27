@@ -360,7 +360,7 @@ function routes(readBody) {
   const diag = rotasDiagnostico({ VERSAO, validarSessao, supaCfg, readBody });
   // histórico/análise: histCache vai por REFERÊNCIA — o backfill e o /backfill-limpar
   // esvaziam esse mesmo objeto aqui no index e isso tem que valer lá dentro também.
-  const hist = rotasHistorico({ validarSessao, supaCfg, DEFAULT_ALIQ_BK, histCache: _histCache });
+  const hist = rotasHistorico({ validarSessao, supaCfg, DEFAULT_ALIQ_BK, histCache: _histCache, magaluFretePrevistoSku });
   const pesca = rotasPescaria({ validarSessao, supaCfg, supaReq, pescarDadosML });
   const canario = rotasCanario({ VERSAO, validarSessao });
   const limpeza = rotasLimpeza({ validarSessao });
@@ -2672,6 +2672,37 @@ async function magaluFreteProvisorio(v) {
   const banco = magaluFreteSkuLer();
   if (banco[sku] && banco[sku].media > 0) return banco[sku].media;   // histórico real do SKU manda
   const d = await magaluDimSku(sku);
+  if (!d) return null;
+  return magaluFreteTabela(d.dim, d.peso);
+}
+const _MAGALU_DIM_DISCO = path.join(CACHE_DIR, '_magalu_dim_sku.json');
+
+// ─── frete PREVISTO por SKU pro completar do histórico (26/08) ─────────────────
+// O completar na leitura do /historico-longo (20/08) só cobria SKU que JÁ liquidou
+// alguma vez (banco por SKU). SKU Magalu que nunca liquidou continuava com frete 0
+// em julho — a última sobra do frete zerado. Este wrapper fecha o buraco com a MESMA
+// conta do caminho do dia: banco por SKU manda; senão a tabela por dimensão (frete do
+// PACOTE de 1 unidade — mesma premissa do magaluFreteProvisorio: o 1º item define a
+// faixa e a maioria dos pedidos é 1 SKU ×1). As dimensões ganham cache em DISCO
+// (_magalu_dim_sku.json): a 1ª leitura consulta o Bling e grava; as próximas saem do
+// disco — o historico-longo não pode pendurar em 2 GETs do Bling por SKU toda vez.
+// `orc` é o orçamento da requisição ({ bling, max }): estourou o teto, devolve null e
+// o SKU fica pra próxima leitura (o dado entra sozinho, sem segurar a resposta).
+async function magaluFretePrevistoSku(sku, orc) {
+  const s = String(sku || '').trim();
+  if (!s) return null;
+  const banco = magaluFreteSkuLer();
+  if (banco[s] && banco[s].media > 0) return banco[s].media;
+  let d = null;
+  try { const dd = readJson(_MAGALU_DIM_DISCO, {}); if (dd && dd[s] && dd[s].dim) d = dd[s]; } catch (e) {}
+  if (!d) {
+    if (orc && orc.max != null && orc.bling >= orc.max) return null;   // teto da requisição
+    if (orc) orc.bling++;
+    d = await magaluDimSku(s);
+    if (d && d.dim) {
+      try { const dd = readJson(_MAGALU_DIM_DISCO, {}); dd[s] = { dim: d.dim, peso: d.peso, em: new Date().toISOString() }; writeJson(_MAGALU_DIM_DISCO, dd); } catch (e) {}
+    }
+  }
   if (!d) return null;
   return magaluFreteTabela(d.dim, d.peso);
 }
