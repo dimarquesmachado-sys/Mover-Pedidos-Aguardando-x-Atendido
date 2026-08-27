@@ -3061,6 +3061,97 @@ function routes(readBody) {
     }
 
     // 01/08 — varredura de cancelados: apaga do histórico quem foi cancelado no Bling
+    /* 27/08 — CLASSIFICADOR das vendas 'faltando' do /ml-vendas-faltando: consulta o status REAL
+       de cada uma na API do ML. Motivo: o billing pode lançar o ESTORNO da comissão noutra
+       categoria, então venda CANCELADA fica no mapa com comissão cheia — indistinguível de venda
+       perdida sem olhar o status. Separa: cancelada (ok, o histórico exclui de propósito) ×
+       carrinho que o billing não mapeou (ok, está no nosso pelo número do pack) × PAGA-E-AUSENTE
+       (o buraco real a importar). Máx 250 por chamada (~1min) — rode em fatias se precisar. */
+    if (method === 'GET' && p === '/amb-checkout-offline/ml-faltantes-classificar') {
+      const kF = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const sF = validarSessao(req.headers['cookie']);
+      if (!((process.env.ADMIN_KEY && kF === process.env.ADMIN_KEY) || (sF && ehAdmin(sF)))) { json(res, 404, { error: 'not found' }); return true; }
+      const deF = String(urlObj.searchParams.get('de') || '').slice(0, 10);
+      const ateF = String(urlObj.searchParams.get('ate') || '').slice(0, 10);
+      if (!deF || !ateF) { json(res, 400, { ok: false, erro: 'informe ?de=2026-01-01&ate=2026-08-27' }); return true; }
+      const maxC = Math.min(250, Math.max(10, parseInt((urlObj.searchParams.get('max') || '150'), 10) || 150));
+      // 1) vendas que o ML cobrou comiss\u00e3o no per\u00edodo
+      const b = readJson(MLB_FILE(), { tarifas: {} });
+      // 02/08 \u2014 O MAPA VENDA\u2192PACK VEM DE **TODAS** AS TARIFAS, n\u00e3o s\u00f3 das comiss\u00f5es.
+      // O shipping_info (onde mora o pack_id) nem sempre vem na linha da comiss\u00e3o \u2014 na amostra que
+      // o ML mandou ele apareceu numa TAXA DE PARCELAMENTO. Filtrar por comiss\u00e3o antes de montar o
+      // mapa jogava fora justamente a linha que tinha o pack, e metade da lista vinha com pack:null.
+      // O pack \u00e9 propriedade do pedido, ent\u00e3o o mapa ignora data e categoria.
+      const packDe = new Map();
+      for (const t of Object.values(b.tarifas || {})) if (t.o && t.p) packDe.set(String(t.o), String(t.p));
+      const doML = new Map();   // numero da venda -> { comiss\u00e3o somada, pack }
+      let semPack = 0;
+      for (const t of Object.values(b.tarifas || {})) {
+        if (!t.o || !t.d) continue;
+        if (t.d < deF || t.d > ateF) continue;
+        if (t.c !== 'comissao') continue;
+        { const at = doML.get(String(t.o)) || { com: 0, pack: null };
+          doML.set(String(t.o), { com: Math.round((at.com + t.v) * 100) / 100, pack: t.p || at.pack || packDe.get(String(t.o)) || null }); }
+      }
+
+      // 2) o que temos no hist\u00f3rico
+      const { url: uF, key: kSup } = supaCfg('amb');
+      const nosso = new Set();
+      if (uF && kSup) {
+        const HF = { apikey: kSup, Authorization: 'Bearer ' + kSup };
+        const BF = uF.replace(/\/+$/, '') + '/rest/v1/vendas_historico?empresa=eq.amb&canal=eq.ml' +
+                   '&data_venda=gte.' + deF + '&data_venda=lte.' + ateF;
+        for (let off = 0; off < 80000; off += 1000) {
+          const rF = await fetch(BF + '&select=numero_loja&order=data_venda.asc,numero_pedido.asc,sku.asc&limit=1000&offset=' + off, { headers: HF });
+          if (!rF.ok) break;
+          const ln = await rF.json().catch(() => []);
+          if (!Array.isArray(ln) || !ln.length) break;
+          for (const l of ln) if (l.numero_loja) nosso.add(String(l.numero_loja).trim());
+          if (ln.length < 1000) break;
+        }
+      }
+
+      // 3) o que o ML tem e n\u00f3s n\u00e3o. Aten\u00e7\u00e3o ao CARRINHO: o Bling junta o pack num pedido s\u00f3,
+      // ent\u00e3o uma venda "faltando" pode estar dentro de um pedido nosso com outro n\u00famero.
+      // 02/08: s\u00f3 conta como faltando se NEM a venda NEM o carrinho estiverem no nosso hist\u00f3rico
+      const faltam = []; let achadasPeloPack = 0;
+      for (const [venda, info] of doML.entries()) {
+        if (nosso.has(venda)) continue;
+        if (info.pack && nosso.has(String(info.pack))) { achadasPeloPack++; continue; }
+        if (!info.pack) semPack++;
+        faltam.push({ venda, pack: info.pack || null, comissao_ml: info.com });
+      }
+      faltam.sort((a, b2) => b2.comissao_ml - a.comissao_ml);   // os de maior comissão primeiro
+      const alvo = faltam.slice(0, maxC);
+      let tokenML = null;
+      try { const { garantirTokenML } = require('../ambtotal/mlTokenManager'); tokenML = await garantirTokenML(); } catch (e) {}
+      if (!tokenML) { json(res, 500, { ok: false, erro: 'sem token do ML' }); return true; }
+      const classes = { cancelada: 0, paga_ausente: 0, carrinho_descoberto_agora: 0, outra_situacao: 0, erro_consulta: 0 };
+      const amostras = { cancelada: [], paga_ausente: [], carrinho_descoberto_agora: [], outra_situacao: [] };
+      let comPagas = 0;
+      for (const f of alvo) {
+        try {
+          const r = await fetch('https://api.mercadolibre.com/orders/' + f.venda, { headers: { Authorization: 'Bearer ' + tokenML } });
+          const d = await r.json().catch(() => null);
+          if (!r.ok || !d) { classes.erro_consulta++; }
+          else {
+            const st = String(d.status || '');
+            const packAgora = d.pack_id ? String(d.pack_id) : null;
+            if (st === 'cancelled') { classes.cancelada++; if (amostras.cancelada.length < 6) amostras.cancelada.push({ venda: f.venda, comissao_ml: f.comissao_ml }); }
+            else if (packAgora && nosso.has(packAgora)) { classes.carrinho_descoberto_agora++; if (amostras.carrinho_descoberto_agora.length < 6) amostras.carrinho_descoberto_agora.push({ venda: f.venda, pack: packAgora }); }
+            else if (st === 'paid') { classes.paga_ausente++; comPagas = Math.round((comPagas + f.comissao_ml) * 100) / 100; if (amostras.paga_ausente.length < 10) amostras.paga_ausente.push({ venda: f.venda, comissao_ml: f.comissao_ml, data: (d.date_created || '').slice(0, 10) }); }
+            else { classes.outra_situacao++; if (amostras.outra_situacao.length < 6) amostras.outra_situacao.push({ venda: f.venda, status: st }); }
+          }
+        } catch (e) { classes.erro_consulta++; }
+        await new Promise(r2 => setTimeout(r2, 120));   // gentileza com o rate limit do ML
+      }
+      json(res, 200, { ok: true, de: deF, ate: ateF, faltantes_total: faltam.length, classificadas: alvo.length,
+        classes, comissao_das_pagas_ausentes: comPagas,
+        estimativa_faturamento_pagas_ausentes: Math.round(comPagas / 0.125 * 100) / 100,
+        amostras,
+        leia: 'cancelada e carrinho_descoberto_agora estao OK — PAGA_AUSENTE e o buraco real. Se faltantes_total > classificadas, rode de novo: as ja classificadas nao mudam de lista, entao o retrato por CLASSE e representativo do topo (maior comissao primeiro)' });
+      return true;
+    }
     if (method === 'GET' && p === '/amb-checkout-offline/varrer-cancelados') {
       const kV = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
       const sV = validarSessao(req.headers['cookie']);
