@@ -3937,7 +3937,10 @@ async function magaluFreteProvisorio(v) {
   }
   return null;
 }
-const _MAGALU_DIM_DISCO = path.join(CACHE_DIR, '_magalu_dim_sku.json');
+/* Codex #228 (pós-merge): o cache v1 foi populado HOJE pelo data[0] cru — podia carregar dimensão
+   de cadastro EXCLUÍDO por 14 dias mesmo com o resolver novo no ar. Bump pra v2 = cache antigo
+   ignorado; o novo se popula já pelas regras do resolverProdutoPorSku (ativo > reserva). */
+const _MAGALU_DIM_DISCO = path.join(CACHE_DIR, '_magalu_dim_sku_v2.json');
 
 // ─── frete PREVISTO por SKU pro completar do histórico (26/08) ─────────────────
 // O completar na leitura do /historico-longo (20/08) só cobria SKU que JÁ liquidou
