@@ -113,6 +113,15 @@ function contasDoEscrow(resp) {
   // `order_ams_commission_fee`: a COMISSAO DE AFILIADO. E custo do vendedor e tem
   // coluna propria no MercadoTurbo ("Comissao Afiliado", R$ 2.428,50 no ano).
   const afiliado = num(oi.order_ams_commission_fee);
+  // ── 27/08 — O CAMPO DA AMB (a instrumentacao entregou de novo): nos 30/30 que sobravam,
+  // `ads_escrow_top_up_fee_or_technical_support_fee` era EXATAMENTE a sobra (0,50 / 0,87 /
+  // 0,60 / 1,80). E o SHOPEE ADS descontado NO REPASSE (top-up do saldo de Ads pelo escrow)
+  // — a AMB paga Ads assim; a Girassol nao, por isso la fecha 100% e o campo vem 0.
+  // DECISAO: entra na IDENTIDADE (o escrow fecha) mas FICA FORA da `tarifa` — e custo de
+  // PUBLICIDADE, nao de venda: a tarifa vira a comissao gravada no historico, e o CONSUMO
+  // das campanhas ja e contado pela frente do painel de Ads ([[shopee-ads]]); somar aqui
+  // tambem seria Ads em dobro na visao de custo.
+  const adsEscrow = num(oi.ads_escrow_top_up_fee_or_technical_support_fee);
   const tarifa   = Math.round((comissao + servico + rebate + afiliado + seg + campanha + processa) * 100) / 100;
   // ── 06/08, rodada 3: o SINAL do final_shipping_fee ────────────────────────────
   // Eu tratava valor positivo como CUSTO de frete. O pedido 260805JQ6X1DUT provou o
@@ -147,7 +156,7 @@ function contasDoEscrow(resp) {
   const credito_frete = Math.round(Math.max(0, fsf) * 100) / 100;
   const escrow   = num(oi.escrow_amount_after_adjustment !== undefined ? oi.escrow_amount_after_adjustment : oi.escrow_amount);
   // se a formula estiver certa, isto tem que dar ~0 em todo pedido
-  const sobra = Math.round((produtos + frete_do_comprador - tarifa + fsf - escrow) * 100) / 100;
+  const sobra = Math.round((produtos + frete_do_comprador - tarifa - adsEscrow + fsf - escrow) * 100) / 100;   // 27/08: ads do escrow na identidade
   return {
     produtos, comissao, servico, rebate, afiliado, seguro_envio: seg, transacao, transacao_cartao_informada, campanha, processa,
     // 06/08: os itens com a tarifa RATEADA por valor. É o que permite responder
@@ -164,7 +173,7 @@ function contasDoEscrow(resp) {
                  valor: v2, tarifa: Math.round(tarifa * parte * 100) / 100 };
       });
     })(),
-    tarifa, frete_do_comprador, frete, frete_liquido_vendedor, credito_frete, escrow, sobra,
+    tarifa, ads_escrow: adsEscrow, frete_do_comprador, frete, frete_liquido_vendedor, credito_frete, escrow, sobra,
     final_shipping_fee: num(oi.final_shipping_fee), shopee_shipping_rebate: num(oi.shopee_shipping_rebate),
     comissao_bruta: num(oi.commission_fee), servico_bruto: num(oi.service_fee),   // confere: bruta+bruto tem que dar a mesma tarifa
     pct_tarifa: produtos > 0 ? Math.round(tarifa / produtos * 1000) / 10 : null,
@@ -645,7 +654,7 @@ function rotasShopee(ctx) {
         ok: true, so_leitura: true, conferidos: cand.length,
         fecharam: fecharam.length, nao_fecharam: nao_fecharam.length, falhas: falhas.length,
         taxa_media_pct: somaProdutos > 0 ? Math.round(somaTarifa / somaProdutos * 1000) / 10 : null,
-        formula: 'tarifa = net_comissao + net_servico + seller_product_rebate + campanha + processamento (equivale a comissao BRUTA + servico BRUTO) · credito_frete = max(0, final_shipping_fee) e SOMA (e subsidio, nao custo) · o escrow nao cobra frete desta loja · a taxa de cartao NAO entra · confere a identidade produtos + frete_do_comprador − tarifa + final_shipping_fee = escrow',
+        formula: 'tarifa = net_comissao + net_servico + seller_product_rebate + campanha + processamento (equivale a comissao BRUTA + servico BRUTO) · ads_escrow (top-up de Shopee Ads no repasse, tipico da AMB) entra na identidade mas FORA da tarifa · credito_frete = max(0, final_shipping_fee) e SOMA (e subsidio, nao custo) · o escrow nao cobra frete desta loja · a taxa de cartao NAO entra · confere a identidade produtos + frete_do_comprador − tarifa − ads_escrow + final_shipping_fee = escrow',
         exemplos_que_fecharam: fecharam.slice(0, 3),
         os_que_nao_fecharam: nao_fecharam.slice(0, 4),   // com o cru junto, 4 ja e bastante texto
         falhas_detalhe: falhas.slice(0, 5)
