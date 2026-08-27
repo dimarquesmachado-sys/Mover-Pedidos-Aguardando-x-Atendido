@@ -2698,10 +2698,10 @@ async function magaluFreteProvisorio(v) {
   }
   return null;
 }
-/* Codex #228 (pós-merge): o cache v1 foi populado HOJE pelo data[0] cru — podia carregar dimensão
-   de cadastro EXCLUÍDO por 14 dias mesmo com o resolver novo no ar. Bump pra v2 = cache antigo
-   ignorado; o novo se popula já pelas regras do resolverProdutoPorSku (ativo > reserva). */
-const _MAGALU_DIM_DISCO = path.join(CACHE_DIR, '_magalu_dim_sku_v2.json');
+/* Codex #229: este módulo é LEGADO (o raiz monta o gbo-app desde 05/08) e ainda resolve o produto
+   pelo data[0] cru — por isso fica no namespace V1, ISOLADO do cache v2 que os módulos vivos
+   populam pelas regras do resolverProdutoPorSku. Se um dia voltar a rodar, não contamina o v2. */
+const _MAGALU_DIM_DISCO = path.join(CACHE_DIR, '_magalu_dim_sku.json');
 
 // ─── frete PREVISTO por SKU pro completar do histórico (26/08) ─────────────────
 // O completar na leitura do /historico-longo (20/08) só cobria SKU que JÁ liquidou
