@@ -146,13 +146,23 @@ function rotasHistorico(ctx) {
         const s = resolve(it.s0);
         const sM = s.toUpperCase();              // Codex #226: memo por caixa normalizada (pm1 e PM1 são o mesmo SKU)
         let fp;
-        if (sM in memo) fp = memo[sM];           // mesmo SKU noutro pedido: memo serve, sem re-consulta
+        if (sM in memo) {
+          fp = memo[sM];                         // mesmo SKU noutro pedido: memo serve, sem re-consulta
+          /* Codex #226 r3: transitório JÁ visto NESTA requisição não re-tenta (pouparia orçamento/
+             prazo dos SKUs seguintes), mas segue contando pendente — o agregado continua parcial
+             e a PRÓXIMA leitura re-tenta, porque o memo morre com a requisição. */
+          if (fp === '__falha__') { pendentes++; fp = null; }
+        }
         else {
           /* Codex #226 r2: o prazo agora nasce DENTRO do wrapper, na 1ª ida REAL ao Bling —
              candidato servido pelo cache de disco não gasta relógio dos que vêm depois. */
           let r;
           try { r = await magaluFretePrevistoSku(s, orc); } catch (e) { r = '__transitorio__'; }
-          if (r === '__orcamento__' || r === '__transitorio__') { pendentes++; continue; }   // Codex r3/r4: corte não memoiza — a próxima leitura re-tenta; o chamador não cacheia o parcial
+          if (r === '__orcamento__' || r === '__transitorio__') {
+            pendentes++;
+            if (r === '__transitorio__') memo[sM] = '__falha__';   // Codex #226 r3: dentro da requisição não re-tenta; entre requisições sim (memo morre com ela)
+            continue;
+          }
           memo[sM] = (r == null ? null : r);
           fp = r;
         }
@@ -393,6 +403,7 @@ function rotasHistorico(ctx) {
       for (const kF of ordem) {
         const oF = mapa[kF];
         if (String(oF.canal || '').toLowerCase() !== 'magalu' || oF.frete > 0) continue;
+        if (kF === '(sem número)') continue;   // Codex #226 r3: o agrupamento funde as vendas sem número — estimar UM pacote pro agregado seria errado em qualquer valor
         const rF = await _freteMgL.porPedido(oF.canal, oF.itens, oF.numero);   // Codex r4: mesma decisão determinística das outras rotas
         if (rF) {
           oF.frete += rF.fp;
@@ -917,6 +928,7 @@ function rotasHistorico(ctx) {
       const _freteMgB = _freteMagaluFabrica();
       for (const gB of gruposB) {
         if (String(gB.canal || '').toLowerCase() !== 'magalu' || gB.frete > 0) continue;
+        if (String(gB.numero || '') === '(sem número)') continue;   // Codex #226 r3: grupo fundido não ganha estimativa
         const rB = await _freteMgB.porPedido(gB.canal, gB.itens, gB.numero);   // Codex r4: mesma decisão determinística das outras rotas
         if (rB) { gB.frete = r2c(gB.frete + rB.fp); if (!gB.mc_incompleta) gB.mc = r2c(gB.mc - rB.fp); }
       }
