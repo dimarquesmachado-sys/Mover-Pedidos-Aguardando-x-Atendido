@@ -410,7 +410,7 @@ function rotasHistorico(ctx) {
         if (a != null && isFinite(Number(a)) && Number(a) > 0) return Number(a);
         return (DEFAULT_ALIQ_BK && DEFAULT_ALIQ_BK[mes] != null) ? Number(DEFAULT_ALIQ_BK[mes]) : null; };
       const _cuR = sk => { const c = _ccR[String(sk || '').trim()]; return (c && c.custo != null && isFinite(Number(c.custo))) ? Number(c.custo) : null; };
-      const ordem = [], mapa = {};
+      const ordem = [], mapa = {}, _mgTem = {};   // _mgTem: pedido com margem gravada em alguma linha (Codex r5)
       for (const l of linhas) {
         const k = String(l.numero_pedido || '(sem número)');
         if (!mapa[k]) { mapa[k] = { numero: k, numero_loja: l.numero_loja || null, canal: l.canal || 'outro', data: l.data_venda, itens: [], un: 0, vprod: 0, vnota: 0, custo: 0, semCusto: 0, comissao: 0, frete: 0, imposto: 0, margem: 0 }; ordem.push(k); }
@@ -425,7 +425,7 @@ function rotasHistorico(ctx) {
         if (l.custo != null) o.custo += Number(l.custo);
         else { const cxR = _cuR(l.sku); if (cxR != null) o.custo += cxR * q; else o.semCusto += q; }
         o.comissao += Number(l.comissao) || 0; o.frete += Number(l.frete_vendedor) || 0;
-        o.imposto += Number(l.imposto) || 0; if (l.margem != null) o.margem += Number(l.margem);
+        o.imposto += Number(l.imposto) || 0; if (l.margem != null) { o.margem += Number(l.margem); _mgTem[k] = 1; }
       }
       /* Codex #225 r2 (P1): a LISTA tem que mostrar o mesmo frete que o agregado completa — senão
          o card diz uma margem e as linhas outra. Pedido agrupado (a página traz pedidos inteiros,
@@ -435,7 +435,7 @@ function rotasHistorico(ctx) {
         const oF = mapa[kF];
         if (String(oF.canal || '').toLowerCase() !== 'magalu' || oF.frete > 0) continue;
         const rF = await _freteMgL.porPedido(oF.canal, oF.itens, oF.numero);   // Codex r4: mesma decisão determinística das outras rotas
-        if (rF) { oF.frete += rF.fp; oF.margem -= rF.fp; }
+        if (rF) { oF.frete += rF.fp; if (_mgTem[kF]) oF.margem -= rF.fp; }   // Codex r5: margem que NUNCA existiu nao vira negativo inventado
       }
       const pedidos = ordem.map(k => {
         const o = mapa[k];
@@ -535,7 +535,7 @@ function rotasHistorico(ctx) {
             { const _ckM = String(l.canal || '').toLowerCase();
               if (_ckM === 'magalu') {
                 if (fr > 0) { if (l.numero_pedido) _pedComFrete.add(String(l.numero_pedido)); }
-                else _frCand = { sku: l.sku, q, pedido: String(l.numero_pedido || '') };
+                else _frCand = { sku: l.sku, q, vp, pedido: String(l.numero_pedido || '') };   // vp: quinhao da distribuicao (Codex r5)
               } }
             /* ═══ 20/08 — TikTok: enquanto a comissão gravada ainda é a do BLING, vale a REGRA ═══
                O extrato do TikTok chega dias depois e o completar substitui a comissão pela real —
@@ -622,13 +622,20 @@ function rotasHistorico(ctx) {
         const kP = ent[0], cands = ent[1];
         const rF = await _freteMg.porPedido('magalu', cands.map(c => ({ sku: c.sku })), kP);
         if (!rF) continue;
-        const alvo = cands.find(c => String(c.sku || '') === String(rF.sku)) || cands[0];
         _fretesPrevistos++;
-        T.fre += rF.fp; if (alvo.temMg) T.mar -= rF.fp;
-        if (alvo.pc) { alvo.pc.fre += rF.fp; if (alvo.temMg) alvo.pc.mar -= rF.fp; }
-        if (alvo.pd) { alvo.pd.fre += rF.fp; if (alvo.temMg) alvo.pd.mar -= rF.fp; }
-        if (alvo.ps && alvo.temMg) alvo.ps.mar -= rF.fp;
-        if (alvo.pu && alvo.temMg) alvo.pu.mar -= rF.fp;
+        /* Codex r5: o frete REAL e distribuido entre as linhas por VALOR (backfill) - o previsto
+           segue a mesma regua: cada linha leva seu quinhao do pacote, o Top Produtos nao pendura
+           o pacote inteiro num SKU so, e a soma continua sendo UM pacote por pedido. */
+        const _somaVp = cands.reduce((sV, c) => sV + (Number(c.vp) || 0), 0);
+        for (const c of cands) {
+          const quinhao = _somaVp > 0 ? rF.fp * (Number(c.vp) || 0) / _somaVp : rF.fp / cands.length;
+          if (!(quinhao > 0)) continue;
+          T.fre += quinhao; if (c.temMg) T.mar -= quinhao;
+          if (c.pc) { c.pc.fre += quinhao; if (c.temMg) c.pc.mar -= quinhao; }
+          if (c.pd) { c.pd.fre += quinhao; if (c.temMg) c.pd.mar -= quinhao; }
+          if (c.ps && c.temMg) c.ps.mar -= quinhao;
+          if (c.pu && c.temMg) c.pu.mar -= quinhao;
+        }
       }
       /* A conta do TikTok, uma vez por PEDIDO (faixa e fixa são do pedido inteiro):
          só entra quando a comissão somada tem a assinatura do Bling (~12% do produto, ou zero) e a
