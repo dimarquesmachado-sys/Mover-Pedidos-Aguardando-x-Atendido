@@ -1003,6 +1003,20 @@ $("novo-senha").addEventListener("keydown", (e) => { if (e.key === "Enter") cria
 
 // IMPORT/EXPORT
 $("btn-importar").addEventListener("click", abrirModalImport);
+/* 28/08: esvaziar a lista DESTA empresa — a migração copiou a lista única pras 3 e o dono
+   precisa zerar as que não são donas dela, sem clicar ✕ 102 vezes. Só limpa a TABELA;
+   gravar continua sendo o Salvar (e a auditoria registra as exclusões uma a uma). */
+$("btn-esvaziar").addEventListener("click", () => {
+  const emp = empresaAtiva();
+  const nome = EMP_NOMES[emp] || emp;
+  const qtd = $tbody().querySelectorAll("tr").length;
+  if (!qtd) { status("A lista de " + nome + " já está vazia.", true); return; }
+  if (!confirm("Apagar TODOS os " + qtd + " SKUs da lista de " + nome + "?\n\nAs outras empresas não são afetadas. Nada é gravado até você clicar em Salvar.")) return;
+  preencherTabelaDoMapa({});
+  atualizarContador();
+  status("Lista de " + nome + " limpa na tela — clique em Salvar pra gravar.", true);
+});
+
 $("btn-exportar").addEventListener("click", exportarExcel);
 $("import-fechar").addEventListener("click", fecharModalImport);
 $("import-cancelar").addEventListener("click", fecharModalImport);
