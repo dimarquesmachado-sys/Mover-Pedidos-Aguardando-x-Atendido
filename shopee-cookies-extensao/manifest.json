@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "Shopee Sessão → Checkout",
+  "version": "1.0.0",
+  "description": "Envia os cookies da sessão logada do Seller Center direto pro serviço (Girassol / AMB / GOOD) — sem DevTools.",
+  "permissions": ["cookies", "storage"],
+  "host_permissions": [
+    "https://*.shopee.com.br/*",
+    "https://mover-pedidos-aguardando-x-atendido.onrender.com/*"
+  ],
+  "action": { "default_popup": "popup.html", "default_title": "Shopee Sessão → Checkout" }
+}
