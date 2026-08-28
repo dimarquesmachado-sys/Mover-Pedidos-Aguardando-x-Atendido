@@ -12,6 +12,10 @@
     // /vendas/novo/mensagens/<id>/reclamacao/<id>            → reclamacoes
     // /vendas/novo/mensagens/<id>/mediacao/<id>              → reclamacoes
     const matchMensagens = /\/vendas\/novo\/mensagens\/\d+/i.test(url);
+    /* 28/08: a tela de PERGUNTAS de anúncio (/perguntas/vendedor) fica fora de /vendas/ e
+       nunca teve painel. O dono pediu o painel ali com as MESMAS respostas de 'mensagens',
+       então a categoria enviada à API é 'mensagens' — nada muda no cadastro das respostas. */
+    if (/\/perguntas\//i.test(url)) return 'mensagens';
     if (!matchMensagens) return null;
     if (/\/reclamacao\//i.test(url) || /\/mediacao\//i.test(url)) {
       return 'reclamacoes';
