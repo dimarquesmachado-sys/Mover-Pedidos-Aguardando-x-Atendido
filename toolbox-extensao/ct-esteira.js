@@ -1067,6 +1067,7 @@
     setCampo(precoEl, brPreco(item.preco));
     var promoEl = document.getElementById('vinculoLoja[' + N + '][precoPromocional]');
     if (promoEl && item.promo != null) setCampo(promoEl, brPreco(item.promo));
+    else if (promoEl && item.promoLimpar) setCampo(promoEl, '');   /* Codex #238 r2: limpar explicito apaga a promocao */
 
     var motivo = document.getElementById('vinculoLojaMotivoAlteracaoPrecoShein' + N);
     if (motivo && !motivo.value) {
@@ -1142,7 +1143,13 @@
     var _skusFalhosR = [];
     log('=== ROBO DE PREENCHIMENTO: ' + plano.length + ' produto(s) ===');
     for (var i = 0; i < plano.length; i++) {
-      if (pararPedido) { log('Robo interrompido pelo usuario.', 'aviso'); break; }
+      if (pararPedido) {
+        /* Codex #238 r2 (P1): parar no meio saia com placar limpo e o caller sincronizava o
+           plano INTEIRO como se tudo tivesse gravado — o restante agora conta como falha. */
+        log('Robo interrompido pelo usuario — ' + (plano.length - i) + ' produto(s) restantes NAO gravados.', 'aviso');
+        for (var iR = i; iR < plano.length; iR++) { falhaT += plano[iR].itens.length; _skusFalhosR.push(plano[iR].sku); }
+        break;
+      }
       var p = plano[i];
       atualizarPill('\uD83E\uDD16 ' + (i + 1) + '/' + plano.length + ' ' + p.sku);
       log('-> ' + p.sku + ' (' + p.itens.map(function (it) { return it.mk; }).join(', ') + ')');
@@ -1158,6 +1165,9 @@
         // verificacao pos-salvar: o vinculo realmente existe agora?
         var d = await buscarVinculos(p.idp);
         var vincs = (d && d.vinculosLojas) || [];
+        var _falhouVerif = false;   /* Codex #238 r2 (P1): a verificacao incrementava falhaT
+           sem por o SKU na lista — e o caller filtra a sincronizacao PELA LISTA, entao o
+           produto nao confirmado era sincronizado mesmo assim. */
         p.itens.forEach(function (it) {
           var v = null;
           for (var m = 0; m < vincs.length; m++) {
@@ -1166,16 +1176,22 @@
           var pLido = v ? precoNum(v.preco) : null;
           var acao = it.atualizacao ? 'atualizado' : 'vinculado';
           if (v && vinculoReal(v) && pLido != null && Math.abs(pLido - it.preco) < 0.011) {
-            okT++;
-            log('   [OK] ' + p.sku + ' x ' + it.mk + ' ' + acao + ' (' + brPreco(it.preco) + ')', 'ok');
+            if (it.promoLimpar && precoNum(v.precoPromocional) != null) {
+              falhaT++; _falhouVerif = true;
+              log('   [FALHOU] ' + p.sku + ' x ' + it.mk + ' - a promocao NAO limpou (Bling ainda mostra ' + brPreco(precoNum(v.precoPromocional)) + ')', 'erro');
+            } else {
+              okT++;
+              log('   [OK] ' + p.sku + ' x ' + it.mk + ' ' + acao + ' (' + brPreco(it.preco) + ')', 'ok');
+            }
           } else if (v && vinculoReal(v)) {
-            falhaT++;
+            falhaT++; _falhouVerif = true;
             log('   [FALHOU] ' + p.sku + ' x ' + it.mk + ' - preco nao confirmou (Bling mostra ' + (pLido == null ? '?' : brPreco(pLido)) + ')', 'erro');
           } else {
-            falhaT++;
+            falhaT++; _falhouVerif = true;
             log('   [FALHOU] ' + p.sku + ' x ' + it.mk + ' - vinculo nao confirmado apos salvar', 'erro');
           }
         });
+        if (_falhouVerif && _skusFalhosR.indexOf(p.sku) < 0) _skusFalhosR.push(p.sku);
       } catch (e) {
         falhaT += p.itens.length;
         _skusFalhosR.push(p.sku);
@@ -1542,7 +1558,9 @@
       setSelect(selDep, valorDep);
       await espera(300);
     } else {
-      log('Aviso: deposito "Geral" nao encontrado; mantendo o padrao do Bling.', 'aviso');
+      /* Codex #238 r2 (P1): a rodada e apresentada como "deposito Geral" — seguir com o
+         deposito default do Bling exportaria ESTOQUE DE OUTRO DEPOSITO em silencio. */
+      throw new Error('Deposito "Geral" nao encontrado no modal — exportacao abortada pra nao usar o deposito errado.');
     }
 
     var dlg = dialogoVisivelContendo(SEL_LOJAS);
@@ -2665,7 +2683,7 @@
       var marcado = !!gradeMarcados[ri];
       rows += '<tr class="g-linha' + (ehOrigem ? ' g-origem' : '') + '" data-linha="' + ri + '">';
       rows += '<td class="g-chk"><input type="checkbox" class="g-rowchk" data-r="' + ri + '"' + (marcado ? ' checked' : '') + '></td>';
-      rows += '<td class="g-sku">' + (ehOrigem ? '<span class="g-tag-origem">ORIGEM</span> ' : '') + (row.sku || '<span style="color:#6b7280">(sem SKU)</span>') + '</td>';
+      rows += '<td class="g-sku">' + (ehOrigem ? '<span class="g-tag-origem">ORIGEM</span> ' : '') + (row.sku ? escId(row.sku) : '<span style="color:#6b7280">(sem SKU)</span>') + '</td>';   /* Codex #238 r2: SKU com HTML nao corrompe a grade */
       rows += '<td class="g-prod" title="' + escId(row.nome) + '">' + escId(row.nome) + (row.kit ? '<span class="g-kit">KIT</span>' : '') + '</td>';
       var custoCell;
       if (row.custoErro) {
@@ -2808,7 +2826,14 @@
     var v = precoNum(inp.value);
     var row = gradeDados[ri];
     if (!row || !row.p[mk]) return;
-    if (campo === 'promo') row.p[mk].promo = v;
+    if (campo === 'promo') {
+      /* Codex #238 r2 (P1): apagar a promo do input precisa APAGAR no Bling — null puro
+         significa "nunca teve" e pula o campo; o limpar explicito vira promoLimpar. */
+      var _promoAntes = row.p[mk].promo;
+      row.p[mk].promo = v;
+      if (v == null && _promoAntes != null) row.p[mk].promoLimpar = true;
+      if (v != null) row.p[mk].promoLimpar = false;
+    }
     else row.p[mk].preco = v;
     if (row.p[mk].vinc) row.p[mk].alterado = true;
     marcarAlteracaoGrade();
@@ -3100,6 +3125,8 @@
     return { custo: (num != null && num !== 0 ? Math.round(num * 100) / 100 : null), temFornecedor: true, erro: custoErro };
   }
 
+  var _custosCarregando = false;   /* Codex #238 r2 (P1): salvar durante o fetch de custos
+     passava pelo piso com custo null — o salvar espera o carregamento terminar */
   async function carregarCustosGrade() {
     var btn = document.getElementById('gradeBtnCustos');
     var pendentes = gradeDados.filter(function (r) { return r.custo == null; });
@@ -3107,6 +3134,7 @@
     if (btn) { btn.disabled = true; btn.style.opacity = '.6'; btn.style.cursor = 'default'; }
     gradeAviso('');
     var total = pendentes.length, feitos = 0, semForn = 0, custoErro = 0;
+    _custosCarregando = true;
     var cacheCusto = await lerCacheCusto();
 
     await mapaComLimite(pendentes, 4, async function (row) {
@@ -3135,6 +3163,7 @@
     if (custoErro) avisos.push(custoErro + ' SKU(s) com FORNECEDOR mas SEM custo (erro de cadastro - vermelho na coluna Custo)');
     if (semForn) avisos.push(semForn + ' sem fornecedor (custo em branco - normal p/ pai de varia\u00e7\u00e3o)');
     gradeAviso(avisos.join(' \u00b7 '));
+    _custosCarregando = false;
   }
 
   // atualiza so a celula de custo + recalcula margens da linha (durante o carregamento)
@@ -3310,6 +3339,7 @@
 
   // ---- Salvar alteracoes da grade via robo (reusa o preenchimento do painel) ----
   async function salvarGrade(modo) {
+    if (_custosCarregando) { gradeAviso('Aguarde o carregamento dos custos terminar antes de salvar.'); return; }
     // monta plano so com o que mudou
     var idLojaPorMk = {};
     (cacheLojas || []).forEach(function (l) { idLojaPorMk[l.texto] = String(l.valor || '').split(';')[0]; });
@@ -3337,7 +3367,7 @@
           /* Codex #238 (P1): promo vazio viajava como o preco cheio e o painel GRAVAVA uma
              promocao igual ao preco — promocao fantasma em edicao que nem tocou promo. Null
              viaja null; o preencherLojaNoPainel ja pula o campo quando promo == null. */
-          mk: mk, idLoja: idLojaPorMk[mk], preco: c.preco, promo: c.promo,
+          mk: mk, idLoja: idLojaPorMk[mk], preco: c.preco, promo: c.promo, promoLimpar: !!c.promoLimpar,
           catNome: c.cat || '', catId: catId, atualizacao: !ehNovo
         });
       });
