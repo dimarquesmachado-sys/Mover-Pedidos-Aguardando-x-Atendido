@@ -1212,7 +1212,13 @@
           for (var iR2 = i + 1; iR2 < plano.length; iR2++) { falhaT += plano[iR2].itens.length; _skusFalhosR.push(plano[iR2].sku); }
           break;
         }
-        if (/saiu da listagem/.test(String(e))) { log('Robo abortado: a pagina mudou. Volte para a listagem de Produtos.', 'erro'); break; }
+        if (/saiu da listagem/.test(String(e))) {
+          /* Codex #238 r4 (P1): o irmao gemeo do abort por Stop — sair da listagem tambem
+             precisa marcar os produtos restantes, senao eles sincronizam sem ter gravado. */
+          for (var iR3 = i + 1; iR3 < plano.length; iR3++) { falhaT += plano[iR3].itens.length; _skusFalhosR.push(plano[iR3].sku); }
+          log('Robo abortado: a pagina mudou. Volte para a listagem de Produtos. ' + (plano.length - i - 1) + ' produto(s) restantes NAO gravados.', 'erro');
+          break;
+        }
       }
       await espera(800);
     }
