@@ -892,12 +892,15 @@ function status(txt, ok) {
 }
 
 let _carregandoEmpresa = false;   /* Codex #240: trocar de empresa e salvar no vao gravaria os dados da ANTERIOR na nova */
+let _cargaSeq = 0;                /* Codex #240 r2: 2 trocas rapidas — so o carregar MAIS NOVO solta a trava e preenche a tela */
 async function carregar() {
+  const _meuSeq = ++_cargaSeq;
   _carregandoEmpresa = true;
   if ($("btn-salvar")) $("btn-salvar").disabled = true;
   try {
     const r = await fetch("/fragil/api/skus" + qEmp());
     const j = await r.json();
+    if (_meuSeq !== _cargaSeq) return;   /* resposta de uma troca antiga: descarta */
     preencherTabelaDoMapa(j.skus || {});
     $("tempo").value = j.config?.tempoMinimoSegundos ?? 2;
     $("msgPadrao").value = j.config?.mensagemPadrao || "";
@@ -915,8 +918,10 @@ async function carregar() {
   } catch (e) {
     status("Erro ao carregar: " + e.message, false);
   } finally {
-    _carregandoEmpresa = false;
-    if ($("btn-salvar")) $("btn-salvar").disabled = false;
+    if (_meuSeq === _cargaSeq) {         /* so a carga mais recente destrava o salvar */
+      _carregandoEmpresa = false;
+      if ($("btn-salvar")) $("btn-salvar").disabled = false;
+    }
   }
 }
 

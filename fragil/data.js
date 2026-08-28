@@ -80,22 +80,21 @@ function lerDados(empresa) {
     }
     return dados;
   }
-  /* COMPAT (extensao antiga, sem ?empresa): a UNIAO das 3 listas — o alerta continua
-     tocando pra qualquer SKU fragil de qualquer empresa, como era na lista unica. */
+  /* COMPAT (extensao antiga, sem ?empresa): a UNIAO das 3 — o alerta continua tocando pra
+     qualquer SKU fragil. Codex #240 r2 (P1): empresa AINDA NAO migrada entra pela lista
+     LEGADA — senao, assim que a primeira empresa migrasse e enxugasse sua lista, os SKUs
+     das outras sumiriam da uniao e o alerta antigo silenciaria pra elas. */
   const uniao = dadosPadrao();
+  const legado = lerArquivo(DATA_FILE);
   let temConfig = false;
   for (const emp of EMPRESAS) {
-    const d2 = lerArquivo(arquivoEmpresa(emp));
+    const d2 = lerArquivo(arquivoEmpresa(emp)) || legado;
     if (!d2) continue;
     Object.assign(uniao.skus, d2.skus);
     if (!temConfig) { uniao.config = d2.config; temConfig = true; }
     if (d2.atualizadoEm && (!uniao.atualizadoEm || d2.atualizadoEm > uniao.atualizadoEm)) {
       uniao.atualizadoEm = d2.atualizadoEm; uniao.atualizadoPor = d2.atualizadoPor;
     }
-  }
-  if (!temConfig) {
-    const legado = lerArquivo(DATA_FILE);
-    if (legado) return legado;
   }
   return uniao;
 }
@@ -128,7 +127,10 @@ function lerAuditoria(empresa, limite) {
        consulta viraria custo crescente. Le so o rabo (ate 512 KB), mais que o bastante pros
        ate 2000 eventos que a rota devolve. */
     const st = fs.statSync(fp);
-    const TAIL = 512 * 1024;
+    const n0 = Math.max(1, Math.min(2000, parseInt(limite, 10) || 200));
+    /* Codex #240 r2: janela proporcional ao pedido — evento de edicao carrega antes+depois
+       (config de ate 500 chars dos dois lados ~1,5 KB); 2 KB por evento cobre com folga. */
+    const TAIL = Math.max(512 * 1024, n0 * 2048);
     let bruto;
     if (st.size <= TAIL) {
       bruto = fs.readFileSync(fp, 'utf8');
