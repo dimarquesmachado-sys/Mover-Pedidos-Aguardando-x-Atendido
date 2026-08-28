@@ -1134,7 +1134,9 @@
     }
     if (!hookAtivo) {
       log('ERRO: page-hook.js nao detectado. A esteira agora tem 3 ARQUIVOS - adicione o page-hook.js na pasta, recarregue a extensao e de F5.', 'erro');
-      return;
+      /* Codex #238 r3 (P1): o return vazio virava {falhas:0} no caller — que anunciava
+         gravado e SINCRONIZAVA preco de quem nunca gravou. Abortar e falha TOTAL. */
+      return { ok: 0, falhas: plano.reduce(function (s, p) { return s + p.itens.length; }, 0), skusFalhos: plano.map(function (p) { return p.sku; }) };
     }
     rodando = true;
     pararPedido = false;
@@ -1176,9 +1178,15 @@
           var pLido = v ? precoNum(v.preco) : null;
           var acao = it.atualizacao ? 'atualizado' : 'vinculado';
           if (v && vinculoReal(v) && pLido != null && Math.abs(pLido - it.preco) < 0.011) {
-            if (it.promoLimpar && precoNum(v.precoPromocional) != null) {
+            var _prLido = precoNum(v.precoPromocional);
+            /* Codex #238 r3 (P1): promo criada/alterada tambem precisa confirmar — o Bling
+               reter outra promo contava como sucesso e sincronizava o valor errado. */
+            if (it.promo != null && (_prLido == null || Math.abs(_prLido - it.promo) >= 0.011)) {
               falhaT++; _falhouVerif = true;
-              log('   [FALHOU] ' + p.sku + ' x ' + it.mk + ' - a promocao NAO limpou (Bling ainda mostra ' + brPreco(precoNum(v.precoPromocional)) + ')', 'erro');
+              log('   [FALHOU] ' + p.sku + ' x ' + it.mk + ' - promo nao confirmou (Bling mostra ' + (_prLido == null ? 'vazio' : brPreco(_prLido)) + ', esperado ' + brPreco(it.promo) + ')', 'erro');
+            } else if (it.promoLimpar && _prLido != null) {
+              falhaT++; _falhouVerif = true;
+              log('   [FALHOU] ' + p.sku + ' x ' + it.mk + ' - a promocao NAO limpou (Bling ainda mostra ' + brPreco(_prLido) + ')', 'erro');
             } else {
               okT++;
               log('   [OK] ' + p.sku + ' x ' + it.mk + ' ' + acao + ' (' + brPreco(it.preco) + ')', 'ok');
@@ -1198,7 +1206,12 @@
         log('   [FALHA] ' + p.sku + ': ' + (e && e.message || e), 'erro');
         try { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); } catch (e2) {}
         await espera(900);
-        if (/interrompido/.test(String(e))) break;
+        if (/interrompido/.test(String(e))) {
+          /* Codex #238 r3 (P1): abortar NO MEIO do item saia marcando so o atual — os
+             restantes ficavam fora de skusFalhos e sincronizavam sem ter gravado. */
+          for (var iR2 = i + 1; iR2 < plano.length; iR2++) { falhaT += plano[iR2].itens.length; _skusFalhosR.push(plano[iR2].sku); }
+          break;
+        }
         if (/saiu da listagem/.test(String(e))) { log('Robo abortado: a pagina mudou. Volte para a listagem de Produtos.', 'erro'); break; }
       }
       await espera(800);
@@ -3011,7 +3024,7 @@
         var c = row.p[mk];
         if (!c || (!c.vinc && !c.ativar)) return;
         if (alvoPreco === 'ambos' || alvoPreco === 'preco') { if (c.preco != null) { c.preco = reaj(c.preco); if (c.vinc) c.alterado = true; n++; } }
-        if (alvoPreco === 'ambos' || alvoPreco === 'promo') { if (c.promo != null) { c.promo = reaj(c.promo); if (c.vinc) c.alterado = true; } }
+        if (alvoPreco === 'ambos' || alvoPreco === 'promo') { if (c.promo != null) { c.promo = reaj(c.promo); if (c.vinc) c.alterado = true; n++; } }   /* Codex #238 r3: So Promo mutava e reportava "nada ajustado" sem re-renderizar */
       });
     });
     if (!n) { gradeAviso('Nenhum preco para reajustar nos marcados/marketplaces alvo.'); return; }
@@ -3157,6 +3170,14 @@
     });
 
     salvarCacheCusto(cacheCusto);
+    /* Codex #238 r3 (P1): o snapshot do Desfazer foi tirado com custo null — desfazer
+       depois dos custos carregados restaurava null e o piso voltava cego. O snapshot
+       aprende os custos (custo nao e coisa que o Desfazer deva desfazer). */
+    if (gradeSnapshot) {
+      var _custoPorIdp = {};
+      gradeDados.forEach(function (r2) { _custoPorIdp[r2.idp] = { c: r2.custo, f: r2.custoFonte, e: r2.custoErro, tf: r2.temFornecedor }; });
+      gradeSnapshot.forEach(function (r2) { var u = _custoPorIdp[r2.idp]; if (u) { r2.custo = u.c; r2.custoFonte = u.f; r2.custoErro = u.e; r2.temFornecedor = u.tf; } });
+    }
     renderGrade();
     if (btn) { btn.textContent = 'Custos carregados \u2713'; }
     var avisos = [];
