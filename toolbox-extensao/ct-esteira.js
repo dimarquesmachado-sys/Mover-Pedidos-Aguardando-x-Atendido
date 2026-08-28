@@ -2693,7 +2693,7 @@
       '</style>';
 
     var thead = '<tr><th class="g-chk"><input type="checkbox" id="gChkTodos" title="Marcar/desmarcar todos"></th><th class="g-sku">SKU</th><th class="g-prod">Produto</th><th class="g-custo">Custo</th>';
-    GRADE_MK.forEach(function (mk) { thead += '<th class="mk">' + mk + '<br><span style="font-weight:400;color:#6b7280;font-size:10px">pre\u00e7o \u00b7 margem \u00b7 categoria</span></th>'; });
+    GRADE_MK.forEach(function (mk) { thead += '<th class="mk">' + escId(mk) + '<br><span style="font-weight:400;color:#6b7280;font-size:10px">pre\u00e7o \u00b7 margem \u00b7 categoria</span></th>'; });
     thead += '<th style="text-align:center">Copiar interno</th></tr>';
 
     var rows = '';
@@ -2912,7 +2912,11 @@
       var c = row.p[mk];
       if (c && (c.vinc || c.ativar)) {
         c.preco = basePreco;
-        if (basePromo != null) c.promo = basePromo;
+        /* ACERTO (Codex #238 r4): origem SEM promo + destino COM promo mantinha a promo
+           antiga do destino — "igualar" deixava de igualar. Usa o promoLimpar criado no
+           #238 pra apagar de fato no Bling. */
+        if (basePromo != null) { c.promo = basePromo; c.promoLimpar = false; }
+        else if (c.promo != null) { c.promo = null; c.promoLimpar = true; }
         if (c.vinc) c.alterado = true;
         if (baseCat && (gradeCats[mk] || []).some(function (x) { return x.nome === baseCat; })) {
           c.cat = baseCat; c.catAlterada = true;
@@ -3147,12 +3151,13 @@
   var _custosCarregando = false;   /* Codex #238 r2 (P1): salvar durante o fetch de custos
      passava pelo piso com custo null — o salvar espera o carregamento terminar */
   async function carregarCustosGrade() {
+    pararPedido = false;   /* ACERTO (Codex #238 r4): apos um Stop a flag ficava armada e o mapaComLimite rejeitava TUDO ate o F5 */
     var btn = document.getElementById('gradeBtnCustos');
     var pendentes = gradeDados.filter(function (r) { return r.custo == null; });
     if (!pendentes.length) { gradeAviso('Todos os custos j\u00e1 carregados.'); return; }
     if (btn) { btn.disabled = true; btn.style.opacity = '.6'; btn.style.cursor = 'default'; }
     gradeAviso('');
-    var total = pendentes.length, feitos = 0, semForn = 0, custoErro = 0;
+    var total = pendentes.length, feitos = 0, semForn = 0, custoErro = 0, buscaFalhou = 0;
     _custosCarregando = true;
     var cacheCusto = await lerCacheCusto();
 
@@ -3160,6 +3165,7 @@
       if (btn) btn.textContent = 'Carregando custos ' + (++feitos) + '/' + total + '...';
       try {
         var res = await buscarCustoProduto(row.idp);
+        row.custoBuscaFalhou = false;
         row.custo = res.custo;
         row.custoErro = res.erro;
         row.temFornecedor = res.temFornecedor;
@@ -3170,7 +3176,12 @@
           cacheCusto[String(row.idp)] = { v: res.custo, fonte: row.custoFonte, t: Date.now() };
         }
       } catch (e) {
+        /* ACERTO (Codex #238 r3): busca FALHADA (rede/HTTP) e diferente de produto SEM
+           FORNECEDOR — a primeira deixa o piso custo+10% cego sem ninguem saber. Marca a
+           linha e o salvar trava enquanto houver falha (sem-fornecedor segue passando). */
         row.custoFonte = 'erro';
+        row.custoBuscaFalhou = true;
+        buscaFalhou++;
       }
       atualizarLinhaCusto(row);
     });
@@ -3187,6 +3198,7 @@
     renderGrade();
     if (btn) { btn.textContent = 'Custos carregados \u2713'; }
     var avisos = [];
+    if (buscaFalhou) avisos.push('\u26A0 ' + buscaFalhou + ' SKU(s) com FALHA ao buscar o custo (rede/Bling) - clique em Custos de novo; salvar fica bloqueado ate resolver');
     if (custoErro) avisos.push(custoErro + ' SKU(s) com FORNECEDOR mas SEM custo (erro de cadastro - vermelho na coluna Custo)');
     if (semForn) avisos.push(semForn + ' sem fornecedor (custo em branco - normal p/ pai de varia\u00e7\u00e3o)');
     gradeAviso(avisos.join(' \u00b7 '));
@@ -3220,7 +3232,8 @@
       for (var i = 0; i < marcadas.length; i++) {
         var mk = marcadas[i];
         var loja = acharLojaSync(lojas, mk);
-        if (!loja) { log('   [pular] ' + mk + ': loja nao encontrada', 'aviso'); continue; }
+        if (loja && loja.__ambiguo) { erroT++; log('   [ERRO] ' + mk + ': nome bate com mais de uma loja (' + loja.__ambiguo.join(', ') + ') — renomeie no Bling ou sincronize por la', 'erro'); continue; }
+        if (!loja) { erroT++; log('   [ERRO] ' + mk + ': loja nao encontrada', 'erro'); continue; }
         try {
           var res = await sincronizarPrecoLoja(loja, ids);
           if (res.ok) { okT++; log('   [OK] ' + mk + ' - ' + ids.length + ' produto(s)' + (res.async ? ' (assincrono, confira a area de gestao)' : ''), 'ok'); }
@@ -3290,15 +3303,19 @@
     return gradeLojasSync;
   }
 
+  /* ACERTO (Codex #238 r5, P1 — 1o da fila): o match tolerante pegava a PRIMEIRA loja
+     parecida. Com "Amazon" e "Amazon Full" na mesma conta, sincronizar podia empurrar
+     preco pra loja ERRADA, em silencio. Agora: exato vence; sem exato, so aceita se o
+     parcial for UNICO — ambiguo devolve a lista pra quem chamou avisar e PULAR. */
   function acharLojaSync(lojas, nomeMk) {
     var chave = String(nomeMk || '').trim().toLowerCase();
     if (lojas[chave]) return lojas[chave];
-    // match tolerante: primeira loja cujo nome contenha ou esteja contido
-    var achado = null;
-    Object.keys(lojas).forEach(function (k) {
-      if (!achado && (k.indexOf(chave) !== -1 || chave.indexOf(k) !== -1)) achado = lojas[k];
+    var candidatos = Object.keys(lojas).filter(function (k) {
+      return k.indexOf(chave) !== -1 || chave.indexOf(k) !== -1;
     });
-    return achado;
+    if (candidatos.length === 1) return lojas[candidatos[0]];
+    if (candidatos.length > 1) return { __ambiguo: candidatos.slice() };
+    return null;
   }
 
   function xjxProdutos(ids) {
@@ -3350,7 +3367,10 @@
     for (var mk in porMk) {
       if (!porMk.hasOwnProperty(mk)) continue;
       var loja = acharLojaSync(lojas, mk);
-      if (!loja) { log('   [pular] ' + mk + ': loja nao encontrada para sincronizar', 'aviso'); continue; }
+      /* ACERTO: alvo nao resolvido agora CONTA como erro (o resumo dizia "0 com erro"
+         mesmo sem ter sincronizado nada) e ambiguo PULA em vez de chutar a loja. */
+      if (loja && loja.__ambiguo) { erroT++; log('   [ERRO] ' + mk + ': nome bate com mais de uma loja (' + loja.__ambiguo.join(', ') + ') — renomeie no Bling ou sincronize por la', 'erro'); continue; }
+      if (!loja) { erroT++; log('   [ERRO] ' + mk + ': loja nao encontrada para sincronizar', 'erro'); continue; }
       var ids = Object.keys(porMk[mk]);
       try {
         var res = await sincronizarPrecoLoja(loja, ids);
@@ -3367,6 +3387,8 @@
   // ---- Salvar alteracoes da grade via robo (reusa o preenchimento do painel) ----
   async function salvarGrade(modo) {
     if (_custosCarregando) { gradeAviso('Aguarde o carregamento dos custos terminar antes de salvar.'); return; }
+    var _falhosCusto = gradeDados.filter(function (r2) { return r2.custoBuscaFalhou; });
+    if (_falhosCusto.length) { gradeAviso(_falhosCusto.length + ' SKU(s) com falha ao buscar o custo (' + _falhosCusto.slice(0, 3).map(function (r2) { return r2.sku; }).join(', ') + (_falhosCusto.length > 3 ? '...' : '') + ') - clique em Custos pra tentar de novo antes de salvar.'); return; }
     // monta plano so com o que mudou
     var idLojaPorMk = {};
     (cacheLojas || []).forEach(function (l) { idLojaPorMk[l.texto] = String(l.valor || '').split(';')[0]; });
