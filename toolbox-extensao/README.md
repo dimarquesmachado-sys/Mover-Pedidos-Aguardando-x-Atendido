@@ -22,8 +22,10 @@ Popup → cada cartão pede a própria chave: MM (…_MM_SYNC_KEY da empresa), R
 botão **Configurar** nos cartões dentro do Bling.
 
 ## Migrando da GOOD Toolbox (Edge)
-A `good-toolbox-extensao` virou esta. No Edge: instale a Toolbox, escolha GOOD, reconfigure
-as chaves, desative a GOOD Toolbox antiga, teste os fluxos e remova a antiga.
+A `good-toolbox-extensao` virou esta e foi REMOVIDA do repo (absorvida) — o mesmo valeu pra
+`shopee-cookies-extensao`. No Edge: instale a Toolbox, escolha GOOD, reconfigure as chaves,
+desative a GOOD Toolbox antiga que estiver carregada na máquina, teste os fluxos e remova.
+Precisou do código antigo? Ele está no histórico do git (antes da remoção).
 
 ## Roteiro de teste (antes de aposentar extensões antigas do navegador)
 Com a Toolbox instalada e as antigas DESATIVADAS (não removidas), um fluxo de cada módulo
