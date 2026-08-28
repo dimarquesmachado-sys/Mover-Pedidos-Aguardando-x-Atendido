@@ -51,6 +51,9 @@
   });
 
   function pingarHook() {
+    /* Codex #238: o hook agora e ADORMECIDO por padrao — os patches de XHR/fetch so entram
+       quando o content (que roda o gate de instancia) manda ativar. Ping ativa junto. */
+    try { window.postMessage({ __esteiraHookAtivar: true }, '*'); } catch (e) {}
     try { window.postMessage({ __esteiraHookPing: true }, '*'); } catch (e) {}
   } // [{id, rotulo, nome}] da ultima pre-checagem
   var pararPedido = false;
@@ -433,7 +436,16 @@
   }
 
   function precoNum(s) {
-    s = String(s == null ? '' : s).split('.').join('').split(',').join('.');
+    s = String(s == null ? '' : s).trim();
+    if (!s) return null;
+    /* Codex #238 (P1): "99.90" digitado com PONTO decimal (inputmode=decimal permite) era
+       lido como milhar e virava 9990 — e ia pro marketplace 100x maior. Sem virgula e com
+       um unico ponto seguido de 1-2 casas, o ponto E o decimal. */
+    if (s.indexOf(',') < 0 && /^\d+\.\d{1,2}$/.test(s)) {
+      var nD = parseFloat(s);
+      return isNaN(nD) ? null : Math.round(nD * 100) / 100;
+    }
+    s = s.split('.').join('').split(',').join('.');
     var n = parseFloat(s);
     return isNaN(n) ? null : Math.round(n * 100) / 100;
   }
@@ -1127,6 +1139,7 @@
     pararPedido = false;
     atualizarBotoes();
     var okT = 0, falhaT = 0;
+    var _skusFalhosR = [];
     log('=== ROBO DE PREENCHIMENTO: ' + plano.length + ' produto(s) ===');
     for (var i = 0; i < plano.length; i++) {
       if (pararPedido) { log('Robo interrompido pelo usuario.', 'aviso'); break; }
@@ -1165,6 +1178,7 @@
         });
       } catch (e) {
         falhaT += p.itens.length;
+        _skusFalhosR.push(p.sku);
         log('   [FALHA] ' + p.sku + ': ' + (e && e.message || e), 'erro');
         try { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); } catch (e2) {}
         await espera(900);
@@ -1177,6 +1191,9 @@
     atualizarPill(falhaT ? '\u26A0 Robo: ' + okT + ' ok, ' + falhaT + ' falha' : '\u2713 Robo: tudo ok');
     rodando = false;
     atualizarBotoes();
+    /* Codex #238 (P1): o caller precisa saber O QUE gravou — devolve o placar e os produtos
+       que FALHARAM, pra nao anunciar "tudo gravado" nem sincronizar preco de quem nao gravou. */
+    return { ok: okT, falhas: falhaT, skusFalhos: _skusFalhosR.slice() };
   }
 
   async function processarPlanilhaSubida(arquivo) {
@@ -2350,6 +2367,10 @@
           };
         });
         var cc = cacheCusto[String(id)];
+        /* Codex #238 (P1): custo em cache valia PRA SEMPRE e o piso custo+10% comparava com
+           fornecedor velho. O t ja era gravado e ninguem lia: vencido (>24h) volta a null e o
+           botao de custos re-busca (ele pega os null). */
+        if (cc && cc.t && (Date.now() - cc.t) > 86400000) cc = null;
         return {
           idp: String(id), sku: sku, nome: nome, kit: isKit,
           custo: (cc && typeof cc.v === 'number') ? cc.v : null,
@@ -2463,7 +2484,7 @@
     menuSalvar.innerHTML =
       '<button class="gSalvOpt" data-modo="salvar" style="display:block;width:100%;text-align:left;cursor:pointer;border:0;border-radius:5px;background:transparent;color:#e7e9ee;padding:8px 10px;font-size:12px">\uD83D\uDCBE <b>Salvar</b><br><span style="color:#9aa2b1;font-size:10px">Grava preco/categoria no Bling (nao envia ao marketplace)</span></button>' +
       '<button class="gSalvOpt" data-modo="sincronizar" style="display:block;width:100%;text-align:left;cursor:pointer;border:0;border-radius:5px;background:transparent;color:#e7e9ee;padding:8px 10px;font-size:12px">\uD83D\uDD04 <b>Salvar + Sincronizar Pre\u00e7os</b><br><span style="color:#9aa2b1;font-size:10px">Grava e empurra SO o preco para o marketplace (rapido)</span></button>' +
-      '<button class="gSalvOpt" data-modo="exportar" style="display:block;width:100%;text-align:left;cursor:pointer;border:0;border-radius:5px;background:transparent;color:#e7e9ee;padding:8px 10px;font-size:12px">\uD83D\uDCE6 <b>Salvar + Exportar SKU</b><br><span style="color:#9aa2b1;font-size:10px">Grava e reexporta o produto todo (preco, estoque, imagens, atributos)</span></button>';
+      '<button class="gSalvOpt" data-modo="exportar" style="display:block;width:100%;text-align:left;cursor:pointer;border:0;border-radius:5px;background:transparent;color:#e7e9ee;padding:8px 10px;font-size:12px">\uD83D\uDCE6 <b>Salvar e listar p/ exportar</b><br><span style="color:#9aa2b1;font-size:10px">Grava no Bling e lista os SKUs; a exporta\u00e7\u00e3o completa voc\u00ea dispara na listagem (EXPORTAR MARKETPLACES)</span></button>';
     btnSalvar.addEventListener('click', function (e) {
       e.stopPropagation();
       menuSalvar.style.display = (menuSalvar.style.display === 'none') ? 'block' : 'none';
@@ -2667,7 +2688,7 @@
           var opcoesCat = (gradeCats[mk] || []);
           var catAtual = c.cat || '';
           var selHtml = '<select class="g-catsel ' + (catAtual ? '' : 'vazia') + '" data-r="' + ri + '" data-mk="' + escId(mk) + '">';
-          selHtml += '<option value="">— categoria —</option>';
+          selHtml += '<option value="">(n\u00e3o alterar categoria)</option>';   /* Codex #238: o rotulo antigo sugeria remocao; vazio sempre significou NAO MEXER */
           var achouCat = false;
           opcoesCat.forEach(function (cat) {
             var sel = (cat.nome === catAtual) ? ' selected' : '';
@@ -2811,6 +2832,7 @@
     row.p[mk].catAlterada = true;
     sel.classList.toggle('vazia', !sel.value);
     marcarAlteracaoGrade();
+    atualizarBtnSalvarGrade();   /* Codex #238: edicao SO de categoria escondia o botao Salvar */
   }
 
   function destacarBaseIgualar(ri, mk) {
@@ -3241,15 +3263,19 @@
       headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Requested-With': 'XMLHttpRequest' },
       body: body
     });
+    /* Codex #238 (P1): HTTP de erro, tela de login ou corpo estranho caiam no "ok" e o log
+       dizia [OK] sem nada ter sincronizado. Agora: r.ok primeiro, e corpo nao reconhecido
+       e FALHA com amostra pro log. So os contratos conhecidos ("" / [] / error:false) passam. */
+    if (!r.ok) return { ok: false, msg: 'HTTP ' + r.status + ' na sincronizacao' };
     var txt = await r.text();
-    // respostas: {"error":false,"isAsync":true,...} ok assincrono | [] ou "" ok | {"error":true,"msg":...} erro
     if (!txt || txt === '[]') return { ok: true, async: false };
     try {
       var j = JSON.parse(txt);
       if (j.error === false) return { ok: true, async: !!j.isAsync };
       if (j.error === true) return { ok: false, msg: (j.msg || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim() };
+      return { ok: false, msg: 'resposta nao reconhecida: ' + txt.slice(0, 120) };
     } catch (e) {}
-    return { ok: true, async: false };
+    return { ok: false, msg: 'resposta nao-JSON (login caiu?): ' + txt.slice(0, 120) };
   }
 
   // sincroniza preco dos produtos alterados, por marketplace afetado
@@ -3308,7 +3334,10 @@
           for (var i = 0; i < lista.length; i++) { if (lista[i].nome === c.cat) { catId = lista[i].id; break; } }
         }
         porProduto[row.idp].itens.push({
-          mk: mk, idLoja: idLojaPorMk[mk], preco: c.preco, promo: c.promo != null ? c.promo : c.preco,
+          /* Codex #238 (P1): promo vazio viajava como o preco cheio e o painel GRAVAVA uma
+             promocao igual ao preco — promocao fantasma em edicao que nem tocou promo. Null
+             viaja null; o preencherLojaNoPainel ja pula o campo quando promo == null. */
+          mk: mk, idLoja: idLojaPorMk[mk], preco: c.preco, promo: c.promo,
           catNome: c.cat || '', catId: catId, atualizacao: !ehNovo
         });
       });
@@ -3327,15 +3356,26 @@
     if (gradeOverlay) { gradeOverlay.remove(); gradeOverlay = null; }
     if (typeof abrirPainel === 'function') abrirPainel();
     log('=== SALVANDO ALTERACOES DA GRADE (' + totalItens + ' item(ns) em ' + plano.length + ' produto(s)) ===');
-    await rodarRoboPreenchimento(plano);
-    log('Precos/categorias gravados no Bling.', 'ok');
+    var _resR = await rodarRoboPreenchimento(plano) || { ok: 0, falhas: 0, skusFalhos: [] };
+    if (_resR.falhas > 0) {
+      log('\u26A0 ' + _resR.falhas + ' item(ns) NAO gravaram (' + _resR.skusFalhos.join(', ') + ') — confira antes de seguir.', 'erro');
+      /* so os produtos que GRAVARAM seguem pra sincronizacao/exportacao */
+      plano = plano.filter(function (p) { return _resR.skusFalhos.indexOf(p.sku) < 0; });
+    } else {
+      log('Precos/categorias gravados no Bling.', 'ok');
+    }
+    if (!plano.length) { log('Nada gravado — nada a sincronizar/exportar.', 'erro'); return; }
 
     if (modo === 'sincronizar') {
       await sincronizarPrecosGrade(plano);
     } else if (modo === 'exportar') {
-      log('--- Exportando SKUs completos para os marketplaces ---');
-      log('Selecione os SKUs na listagem e use "EXPORTAR MARKETPLACES" para reexportar tudo (imagens, atributos, estoque).', 'aviso');
-      // exportacao completa reusa o fluxo da esteira; disparamos aviso pois exige selecao na listagem
+      /* Codex #238 (P1): o botao PROMETIA reexportar e este branch so logava — agora o rotulo
+         diz a verdade (gravar + listar) e o log entrega a lista pronta dos SKUs pra selecionar.
+         Automatizar a exportacao completa (rodarEsteira com selecao programatica) exige teste
+         no Bling real — fica anotado como proximo passo, nao entra as cegas. */
+      var _skusExp = plano.map(function (p) { return p.sku; }).filter(Boolean);
+      log('--- SKUs gravados, prontos pra exportacao completa ---');
+      log('Selecione na listagem e use "EXPORTAR MARKETPLACES": ' + (_skusExp.join(', ') || '(sem SKU)'), 'aviso');
     }
     log('=== FIM: alteracoes da grade aplicadas. Reabra a grade para conferir. ===', 'ok');
   }

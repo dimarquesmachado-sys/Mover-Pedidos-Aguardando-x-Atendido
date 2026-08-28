@@ -111,7 +111,7 @@
   "browser_specific_settings": {
     "gecko": {
       "id": "toolbox@mover-pedidos",
-      "strict_min_version": "115.0"
+      "strict_min_version": "128.0"
     }
   }
 }
