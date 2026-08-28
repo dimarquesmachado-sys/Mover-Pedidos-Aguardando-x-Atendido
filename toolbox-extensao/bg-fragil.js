@@ -50,7 +50,10 @@ let _syncSeq = 0;   /* Codex #241 r2: o fluxo "trocar" REMOVE tb_empresa (sync s
    Remocao nao dispara sync; e cada sync carrega um token: resultado velho nao grava. */
 chrome.storage.onChanged.addListener((mudancas, area) => {
   if (area === "local" && mudancas.tb_empresa && mudancas.tb_empresa.newValue !== undefined) {
-    sincronizar().catch(() => {});
+    /* Codex #241 r3: LIMPA o cache da empresa anterior ANTES de sincronizar — se a sync
+       falhar ou demorar, sem lista = sem alerta, que e melhor que alerta da empresa errada
+       tocando no galpao; a sync repoe assim que responder. */
+    chrome.storage.local.remove(STORAGE_KEY_DADOS, () => { sincronizar().catch(() => {}); });
   }
 });
 
