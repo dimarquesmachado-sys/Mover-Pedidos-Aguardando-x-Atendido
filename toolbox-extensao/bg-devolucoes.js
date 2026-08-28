@@ -847,6 +847,7 @@ function fluxoDevolucaoNaPagina(p) {
           ok: resp.ok,
           resultado: resp.resultado,
           erro: resp.erro,
+          codigo: resp.codigo,   /* PR #239: sem isto o JA_EXISTE da aba caia como FALHA no background */
         });
       } catch (e) { /* extensao recarregada no meio; nada a fazer */ }
     });

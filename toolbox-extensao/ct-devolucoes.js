@@ -31,14 +31,22 @@ window.addEventListener('message', async (event) => {
 
   const requisicaoId = event.data.requisicaoId;
 
-  function responder(ok, resultado, erro) {
-    window.postMessage({
+  function responder(ok, resultado, erro, extras) {
+    /* PR #239: o envelope derrubava os campos novos (codigo/idNotaDevolucao/numero) — o
+       postMessage e exatamente a via do script de lote, que precisa do codigo estavel. */
+    const m = {
       tipo: 'GOOD_BRIDGE_RESPOSTA',
       requisicaoId,
       ok,
       resultado,
       erro,
-    }, '*');
+    };
+    if (extras) {
+      if (extras.codigo != null) m.codigo = extras.codigo;
+      if (extras.idNotaDevolucao != null) m.idNotaDevolucao = extras.idNotaDevolucao;
+      if (extras.numero != null) m.numero = extras.numero;
+    }
+    window.postMessage(m, '*');
   }
 
   // Se a extensao foi recarregada/atualizada, esta pagina ficou com a
@@ -59,11 +67,11 @@ window.addEventListener('message', async (event) => {
     ]);
 
     if (!resposta) {
-      responder(false, null, 'A extensao nao respondeu em 100s. A NF PODE ter sido criada mesmo assim - recarregue o painel (Ctrl+Shift+R) e clique em Gerar de novo que o sistema confere e vincula.');
+      responder(false, null, 'A extensao nao respondeu em 100s. A NF PODE ter sido criada mesmo assim - recarregue o painel (Ctrl+Shift+R) e clique em Gerar de novo que o sistema confere e vincula.', { codigo: 'TIMEOUT' });
       return;
     }
 
-    responder(resposta.ok, resposta.resultado, resposta.erro);
+    responder(resposta.ok, resposta.resultado, resposta.erro, resposta);
 
   } catch (err) {
     // Erro ao falar com background (extensao foi desabilitada/recarregada)
