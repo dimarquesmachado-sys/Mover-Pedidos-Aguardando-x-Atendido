@@ -51,13 +51,23 @@ function mostrar(emp) {
   if (!emp) return;
   document.getElementById('empNome').textContent = NOMES[emp] || emp;
   document.getElementById('cards').innerHTML = CARTOES.filter(c => c.emp.includes(emp)).map(c => c.html).join('');
-  const links = (LINKS[emp] || []).map(l =>
-    '<a class="lnk" href="#" data-url="' + l[1] + '">🔗 ' + l[0] + '</a>'
-  ).join('');
-  document.getElementById('links').innerHTML = links ? '<div class="lnk-titulo">Páginas dos serviços</div>' + links : '';
-  for (const a of document.querySelectorAll('#links a.lnk')) {
-    a.addEventListener('click', (ev) => { ev.preventDefault(); chrome.tabs.create({ url: a.dataset.url }); });
-  }
+  /* Codex #243 r3: o link do Respostas deriva do servidor CONFIGURADO (apiUrl do cartao),
+     como o botao da tela de configuracao — edicao e leitura no mesmo servidor. Os demais
+     atalhos sao paginas fixas dos servicos e ficam estaticos por desenho. */
+  chrome.storage.sync.get(['apiUrl'], (cfgS) => {
+    let baseResp = 'https://mover-pedidos-aguardando-x-atendido.onrender.com';
+    try { if (cfgS.apiUrl) baseResp = new URL(cfgS.apiUrl).origin; } catch (e) { /* invalida: producao */ }
+    const linksEmp = (LINKS[emp] || []).map(l => {
+      const url = l[0].indexOf('Respostas') >= 0
+        ? l[1].replace('https://mover-pedidos-aguardando-x-atendido.onrender.com', baseResp)
+        : l[1];
+      return '<a class="lnk" href="#" data-url="' + url + '">🔗 ' + l[0] + '</a>';
+    }).join('');
+    document.getElementById('links').innerHTML = linksEmp ? '<div class="lnk-titulo">Páginas dos serviços</div>' + linksEmp : '';
+    for (const a of document.querySelectorAll('#links a.lnk')) {
+      a.addEventListener('click', (ev) => { ev.preventDefault(); chrome.tabs.create({ url: a.dataset.url }); });
+    }
+  });
   document.getElementById('autos').textContent = AUTOS[emp] || '';
 }
 
