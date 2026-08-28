@@ -21,7 +21,8 @@
 const fs   = require('fs');
 const path = require('path');
 
-const { lerDados, salvarDados } = require('./data');
+const dataMod = require('./data');
+const { lerDados, salvarDados } = dataMod;
 const auth         = require('./auth');
 const tokenManager = require('./tokenManager');
 const blingProdutos = require('./blingProdutos');
@@ -55,10 +56,23 @@ function setCors(res) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Session-Token');
 }
 
-// Pega usuário da sessão (header X-Session-Token)
+// Pega a sessao (header X-Session-Token) → { usuario, empresas } ou null
 function pegarUsuario(req) {
   const token = req.headers['x-session-token'] || '';
   return auth.validarSessao(token);
+}
+
+// 28/08: resolve e AUTORIZA a empresa da requisicao (?empresa= contra as da sessao)
+function empresaDaSessao(urlObj, sess) {
+  const pedida = (urlObj.searchParams.get('empresa') || '').toLowerCase();
+  const permitidas = (sess && sess.empresas) || [];
+  if (pedida) {
+    if (!dataMod.EMPRESAS.includes(pedida)) return { erro: 'Empresa desconhecida: ' + pedida };
+    if (!permitidas.includes(pedida)) return { erro: 'Sem acesso à empresa ' + pedida };
+    return { empresa: pedida };
+  }
+  if (permitidas.length === 1) return { empresa: permitidas[0] };
+  return { erro: 'Informe ?empresa= (você tem acesso a: ' + (permitidas.join(', ') || 'nenhuma') + ')' };
 }
 
 // Mensagem usada nas rotas de escrita de usuário (agora gerenciados no Render)
@@ -149,11 +163,13 @@ function routes(readBody) {
       const { usuario, senha } = body || {};
       const r = auth.autenticar(usuario, senha);
       if (!r.ok) { json(res, 401, { ok: false, erro: r.erro }); return true; }
-      const token = auth.criarSessao(r.usuario);
-      console.log(`[fragil LOGIN] ${r.usuario}`);
+      if (!r.empresas || !r.empresas.length) { json(res, 403, { ok: false, erro: 'Usuário sem empresa atribuída — confira as envs FRAGIL_USUARIOS_*.' }); return true; }
+      const token = auth.criarSessao(r.usuario, r.empresas);
+      console.log(`[fragil LOGIN] ${r.usuario} (${r.empresas.join(',')})`);
       json(res, 200, {
         ok: true, token,
         usuario: r.usuario, perfil: r.perfil, nome: r.nome,
+        empresas: r.empresas,
         chaveMestra: false,
         expiraHoras: auth.SESSAO_HORAS
       });
@@ -162,8 +178,8 @@ function routes(readBody) {
 
     // ─ LOGOUT ─
     if (method === 'POST' && p === '/fragil/api/logout') {
-      const usuario = pegarUsuario(req);
-      if (!usuario) { json(res, 401, { erro: 'Sessão inválida' }); return true; }
+      const sess = pegarUsuario(req);
+      if (!sess) { json(res, 401, { erro: 'Sessão inválida' }); return true; }
       auth.removerSessao(req.headers['x-session-token']);
       json(res, 200, { ok: true });
       return true;
@@ -171,14 +187,15 @@ function routes(readBody) {
 
     // ─ ME ─
     if (method === 'GET' && p === '/fragil/api/me') {
-      const usuario = pegarUsuario(req);
-      if (!usuario) { json(res, 401, { erro: 'Sessão inválida' }); return true; }
+      const sess = pegarUsuario(req);
+      if (!sess) { json(res, 401, { erro: 'Sessão inválida' }); return true; }
       const lista = auth.listarUsuarios();
-      const u = lista.find(x => (x.usuario || '').toLowerCase() === usuario.toLowerCase());
+      const u = lista.find(x => (x.usuario || '').toLowerCase() === sess.usuario.toLowerCase());
       json(res, 200, {
-        ok: true, usuario,
-        nome: u?.nome || usuario,
+        ok: true, usuario: sess.usuario,
+        nome: u?.nome || sess.usuario,
         perfil: u?.perfil || 'admin',
+        empresas: sess.empresas,
         chaveMestra: false
       });
       return true;
@@ -186,12 +203,14 @@ function routes(readBody) {
 
     // ─ USUÁRIOS (somente leitura — gerenciados na env var FRAGIL_USUARIOS) ─
     if (method === 'GET' && p === '/fragil/api/usuarios') {
-      const usuario = pegarUsuario(req);
-      if (!usuario) { json(res, 401, { erro: 'Sessão inválida' }); return true; }
-      // NUNCA devolve senha — só login, nome e perfil
-      const lista = auth.listarUsuarios().map(u => ({
-        usuario: u.usuario, nome: u.nome, perfil: u.perfil
-      }));
+      const sess = pegarUsuario(req);
+      if (!sess) { json(res, 401, { erro: 'Sessão inválida' }); return true; }
+      // NUNCA devolve senha — e o diretorio e ESCOPADO (Codex #240): cada um ve so os
+      // colegas que compartilham empresa com ele, e so as empresas em comum.
+      const minhas = sess.empresas || [];
+      const lista = auth.listarUsuarios()
+        .map(u => ({ usuario: u.usuario, nome: u.nome, perfil: u.perfil, empresas: (u.empresas || []).filter(e => minhas.includes(e)) }))
+        .filter(u => u.empresas.length > 0);
       json(res, 200, {
         ok: true,
         usuarios: lista,
@@ -220,16 +239,24 @@ function routes(readBody) {
 
     // ─ SKUs frágeis (GET público — extensão consulta aqui) ─
     if (method === 'GET' && p === '/fragil/api/skus') {
-      json(res, 200, lerDados());
+      /* GET continua PUBLICO (o alerta do checkout nao tem login).
+         ?empresa=girassol|good|ambtotal → a lista daquela empresa;
+         sem ?empresa (extensao antiga) → a UNIAO das 3, como era a lista unica. */
+      const emp = (urlObj.searchParams.get('empresa') || '').toLowerCase();
+      if (emp && !dataMod.EMPRESAS.includes(emp)) { json(res, 400, { erro: 'Empresa desconhecida: ' + emp }); return true; }
+      json(res, 200, lerDados(emp || null));
       return true;
     }
 
     if (method === 'POST' && p === '/fragil/api/skus') {
-      const usuario = pegarUsuario(req);
-      if (!usuario) { json(res, 401, { erro: 'Sessão inválida' }); return true; }
+      const sess = pegarUsuario(req);
+      if (!sess) { json(res, 401, { erro: 'Sessão inválida' }); return true; }
+      const rEmp = empresaDaSessao(urlObj, sess);
+      if (rEmp.erro) { json(res, 403, { erro: rEmp.erro }); return true; }
+      const usuario = sess.usuario;
       try {
         const body = await readBody(req);
-        const atual = lerDados();
+        const atual = lerDados(rEmp.empresa);
         const novo = {
           config: {
             tempoMinimoSegundos: clampInt(body?.config?.tempoMinimoSegundos, 0, 30, atual.config.tempoMinimoSegundos),
@@ -244,8 +271,25 @@ function routes(readBody) {
           },
           skus: typeof body.skus === 'object' && body.skus !== null ? body.skus : atual.skus
         };
-        const salvo = salvarDados(novo, usuario);
-        console.log(`[fragil SAVE] ${usuario} salvou ${Object.keys(salvo.skus).length} SKUs`);
+        /* AUDITORIA (28/08): diff antes → depois, uma linha por mudanca */
+        const ts = new Date().toISOString();
+        const audit = [];
+        const antigos = atual.skus || {}, novos = novo.skus || {};
+        for (const sku of Object.keys(novos)) {
+          if (!(sku in antigos)) audit.push({ ts, usuario, acao: 'adicionou', sku, depois: novos[sku] });
+          else if (JSON.stringify(antigos[sku]) !== JSON.stringify(novos[sku])) audit.push({ ts, usuario, acao: 'editou', sku, antes: antigos[sku], depois: novos[sku] });
+        }
+        for (const sku of Object.keys(antigos)) {
+          if (!(sku in novos)) audit.push({ ts, usuario, acao: 'excluiu', sku, antes: antigos[sku] });
+        }
+        if (JSON.stringify(atual.config) !== JSON.stringify(novo.config)) {
+          audit.push({ ts, usuario, acao: 'config', antes: atual.config, depois: novo.config });
+        }
+        /* Codex #240: registrar SO depois do save dar certo — senao a trilha afirma
+           mudancas que um 500 desfez. */
+        const salvo = salvarDados(novo, usuario, rEmp.empresa);
+        dataMod.registrarAuditoria(rEmp.empresa, audit);
+        console.log(`[fragil SAVE ${rEmp.empresa}] ${usuario} salvou ${Object.keys(salvo.skus).length} SKUs (${audit.length} mudança(s) auditada(s))`);
         json(res, 200, salvo);
       } catch (e) {
         console.error('[fragil] POST /api/skus:', e);
@@ -254,10 +298,20 @@ function routes(readBody) {
       return true;
     }
 
+    // ─ Auditoria (quem mudou o que — 28/08) ─
+    if (method === 'GET' && p === '/fragil/api/auditoria') {
+      const sess = pegarUsuario(req);
+      if (!sess) { json(res, 401, { erro: 'Sessão inválida' }); return true; }
+      const rEmp = empresaDaSessao(urlObj, sess);
+      if (rEmp.erro) { json(res, 403, { erro: rEmp.erro }); return true; }
+      json(res, 200, { ok: true, empresa: rEmp.empresa, eventos: dataMod.lerAuditoria(rEmp.empresa, urlObj.searchParams.get('limite')) });
+      return true;
+    }
+
     // ─ Buscar produtos (autocomplete) ─
     if (method === 'GET' && p === '/fragil/api/buscar') {
-      const usuario = pegarUsuario(req);
-      if (!usuario) { json(res, 401, { erro: 'Sessão inválida' }); return true; }
+      const sess = pegarUsuario(req);
+      if (!sess) { json(res, 401, { erro: 'Sessão inválida' }); return true; }
       const termo = urlObj.searchParams.get('q') || '';
       const limite = urlObj.searchParams.get('limite') || '50';
       const r = blingProdutos.buscar(termo, limite);
@@ -273,13 +327,16 @@ function routes(readBody) {
     // ─ Migração de dados (rota de admin, importa skus externos) ─
     // Usuários NÃO são mais importados aqui — vivem na env var FRAGIL_USUARIOS.
     if (method === 'POST' && p === '/fragil/admin/importar') {
-      const usuario = pegarUsuario(req);
-      if (!usuario) { json(res, 401, { erro: 'Sessão inválida' }); return true; }
+      const sess = pegarUsuario(req);
+      if (!sess) { json(res, 401, { erro: 'Sessão inválida' }); return true; }
+      const rEmp = empresaDaSessao(urlObj, sess);
+      if (rEmp.erro) { json(res, 403, { erro: rEmp.erro }); return true; }
       const body = await readBody(req);
       try {
         if (body.skus && typeof body.skus === 'object') {
-          salvarDados(body.skus, usuario);
-          console.log(`[fragil IMPORTAR] ${usuario} importou skus.json (${Object.keys(body.skus.skus || {}).length} SKUs)`);
+          salvarDados(body.skus, sess.usuario, rEmp.empresa);
+          dataMod.registrarAuditoria(rEmp.empresa, [{ ts: new Date().toISOString(), usuario: sess.usuario, acao: 'importou', depois: { skus: Object.keys(body.skus.skus || {}).length } }]);
+          console.log(`[fragil IMPORTAR ${rEmp.empresa}] ${sess.usuario} importou skus.json (${Object.keys(body.skus.skus || {}).length} SKUs)`);
         }
         json(res, 200, {
           ok: true,

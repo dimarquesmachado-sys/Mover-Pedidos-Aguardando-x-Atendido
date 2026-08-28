@@ -33,6 +33,42 @@ async function api(path, options = {}) {
 // ============================================================
 // LOGIN
 // ============================================================
+// ── 28/08: empresa ativa (multi-empresa) ─────────────────────────────
+const EMP_NOMES = { girassol: "Girassol", good: "GOOD Import", ambtotal: "AMBTotal" };
+function empresaAtiva() {
+  const sess = getSession();
+  const emps = sess?.empresas || [];
+  const salva = sessionStorage.getItem("fragil.empresa");
+  if (salva && emps.includes(salva)) return salva;
+  return emps[0] || "";
+}
+function setEmpresaAtiva(emp) { sessionStorage.setItem("fragil.empresa", emp); }
+function qEmp() { return "?empresa=" + encodeURIComponent(empresaAtiva()); }
+
+function montarSeletorEmpresa() {
+  const sess = getSession();
+  const emps = sess?.empresas || [];
+  const alvo = $("user-nome")?.parentElement;
+  if (!alvo) return;
+  document.getElementById("sel-empresa")?.remove();   /* Codex #240: relogin/troca de usuario recria o seletor com as empresas ATUAIS */
+  const sel = document.createElement("select");
+  sel.id = "sel-empresa";
+  sel.style.cssText = "margin-right:12px;padding:6px 10px;border:2px solid #dee2e6;border-radius:8px;font-size:14px;font-weight:bold;";
+  for (const e of emps) {
+    const o = document.createElement("option");
+    o.value = e; o.textContent = EMP_NOMES[e] || e;
+    if (e === empresaAtiva()) o.selected = true;
+    sel.appendChild(o);
+  }
+  sel.addEventListener("change", () => {
+    setEmpresaAtiva(sel.value);
+    carregar();
+    carregarAuditoria();
+  });
+  if (emps.length <= 1) sel.disabled = true;   // um acesso so: mostra travado, sem escolha
+  alvo.insertBefore(sel, alvo.firstChild);
+}
+
 async function inicializar() {
   // Verifica se já tem sessão válida
   const sess = getSession();
@@ -109,9 +145,32 @@ function mostrarConteudo() {
     $("user-nome").textContent += " (chave-mestra)";
   }
   $("conteudo").classList.remove("escondido");
+  montarSeletorEmpresa();
   carregarStatus();
   carregar();
   carregarUsuarios();
+  carregarAuditoria();
+}
+
+// ============================================================
+// AUDITORIA (quem mudou o que — 28/08)
+// ============================================================
+async function carregarAuditoria() {
+  const box = document.getElementById("auditoria-lista");
+  if (!box) return;
+  try {
+    const j = await api("/fragil/api/auditoria" + qEmp() + "&limite=100");
+    if (!j.ok) { box.textContent = j.erro || "Erro"; return; }
+    if (!j.eventos.length) { box.textContent = "Nenhuma mudança registrada ainda nesta empresa."; return; }
+    box.innerHTML = j.eventos.map(ev => {
+      const quando = new Date(ev.ts).toLocaleString("pt-BR");
+      const oque = ev.acao === "config" ? "alterou as configurações"
+        : ev.acao === "importou" ? ("importou " + (ev.depois?.skus ?? "?") + " SKU(s)")
+        : (ev.acao + " o SKU <b>" + escapeHtml(ev.sku || "?") + "</b>");
+      return '<div style="padding:6px 0;border-bottom:1px solid #eee;font-size:13px;">' +
+        '<span style="color:#888">' + quando + '</span> — <b>' + escapeHtml(ev.usuario || "?") + '</b> ' + oque + '</div>';
+    }).join("");
+  } catch (e) { box.textContent = "Erro ao carregar auditoria: " + e.message; }
 }
 
 // ============================================================
@@ -832,10 +891,16 @@ function status(txt, ok) {
   if (txt) setTimeout(() => { $("status").textContent = ""; $("status").className = ""; }, 4000);
 }
 
+let _carregandoEmpresa = false;   /* Codex #240: trocar de empresa e salvar no vao gravaria os dados da ANTERIOR na nova */
+let _cargaSeq = 0;                /* Codex #240 r2: 2 trocas rapidas — so o carregar MAIS NOVO solta a trava e preenche a tela */
 async function carregar() {
+  const _meuSeq = ++_cargaSeq;
+  _carregandoEmpresa = true;
+  if ($("btn-salvar")) $("btn-salvar").disabled = true;
   try {
-    const r = await fetch("/fragil/api/skus");
+    const r = await fetch("/fragil/api/skus" + qEmp());
     const j = await r.json();
+    if (_meuSeq !== _cargaSeq) return;   /* resposta de uma troca antiga: descarta */
     preencherTabelaDoMapa(j.skus || {});
     $("tempo").value = j.config?.tempoMinimoSegundos ?? 2;
     $("msgPadrao").value = j.config?.mensagemPadrao || "";
@@ -852,10 +917,16 @@ async function carregar() {
     }
   } catch (e) {
     status("Erro ao carregar: " + e.message, false);
+  } finally {
+    if (_meuSeq === _cargaSeq) {         /* so a carga mais recente destrava o salvar */
+      _carregandoEmpresa = false;
+      if ($("btn-salvar")) $("btn-salvar").disabled = false;
+    }
   }
 }
 
 async function salvar() {
+  if (_carregandoEmpresa) { status("Aguarde terminar de carregar a empresa selecionada.", false); return; }
   $("btn-salvar").disabled = true;
   try {
     const linhas = $tbody().querySelectorAll("tr");
@@ -881,12 +952,13 @@ async function salvar() {
       },
       skus: lerTabelaParaMapa()
     };
-    const j = await api("/fragil/api/skus", { method: "POST", body: JSON.stringify(corpo) });
+    const j = await api("/fragil/api/skus" + qEmp(), { method: "POST", body: JSON.stringify(corpo) });
     if (j.atualizadoEm) {
       const por = j.atualizadoPor ? ` por ${j.atualizadoPor}` : "";
       $("atualizadoEm").textContent = "Última atualização: " + new Date(j.atualizadoEm).toLocaleString("pt-BR") + por;
     }
     status("✓ Salvo! " + Object.keys(j.skus).length + " SKUs ativos", true);
+    carregarAuditoria();
   } catch (e) {
     status("Erro ao salvar: " + e.message, false);
   } finally {

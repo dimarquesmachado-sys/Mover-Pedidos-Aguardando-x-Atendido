@@ -21,7 +21,17 @@ const crypto = require('crypto');
 
 const SESSAO_HORAS = 8;
 
-// ── Parse da env var ──────────────────────────────────────────────────
+// ── Parse das env vars (28/08: POR EMPRESA) ───────────────────────────
+// FRAGIL_USUARIOS_GIRASSOL / FRAGIL_USUARIOS_GOOD / FRAGIL_USUARIOS_AMBTOTAL
+//   → o usuario so ve e edita a(s) empresa(s) em que aparece.
+// FRAGIL_USUARIOS (legado) → acesso as TRES (o dono). Mesmo login em mais de
+// uma env: as empresas se somam; a SENHA que vale e a da primeira env lida.
+const ENVS_EMPRESA = [
+  ['girassol', 'FRAGIL_USUARIOS_GIRASSOL'],
+  ['good',     'FRAGIL_USUARIOS_GOOD'],
+  ['ambtotal', 'FRAGIL_USUARIOS_AMBTOTAL'],
+];
+
 function parseUsuarios(raw) {
   const out = [];
   if (!raw) return out;
@@ -34,16 +44,30 @@ function parseUsuarios(raw) {
     const usuario = t.slice(0, i).trim();
     const senha   = t.slice(i + 1).trim();
     if (!usuario || !senha) continue;
-    // Se o mesmo login aparecer duas vezes, vale o primeiro
     if (out.some(u => u.usuario.toLowerCase() === usuario.toLowerCase())) continue;
     out.push({ usuario, senha, nome: usuario, perfil: 'admin' });
   }
   return out;
 }
 
-// Lista pública (sem senha nunca sai daqui pra fora — quem chama decide o que expor)
+// Lista publica (sem senha pra fora — quem chama decide o que expor)
 function listarUsuarios() {
-  return parseUsuarios(process.env.FRAGIL_USUARIOS);
+  const mapa = new Map();   // login(lower) -> {usuario, senha, nome, perfil, empresas:[]}
+  for (const [emp, env] of ENVS_EMPRESA) {
+    for (const u of parseUsuarios(process.env[env])) {
+      const k = u.usuario.toLowerCase();
+      if (!mapa.has(k)) mapa.set(k, { ...u, empresas: [] });
+      const m = mapa.get(k);
+      if (!m.empresas.includes(emp)) m.empresas.push(emp);
+    }
+  }
+  for (const u of parseUsuarios(process.env.FRAGIL_USUARIOS)) {
+    const k = u.usuario.toLowerCase();
+    if (!mapa.has(k)) mapa.set(k, { ...u, empresas: [] });
+    const m = mapa.get(k);
+    for (const [emp] of ENVS_EMPRESA) if (!m.empresas.includes(emp)) m.empresas.push(emp);
+  }
+  return Array.from(mapa.values());
 }
 
 // ── Comparação resistente a timing attack ─────────────────────────────
@@ -67,33 +91,36 @@ function autenticar(usuario, senha) {
   const u = lista.find(x => x.usuario.toLowerCase() === login);
   if (!u) return { ok: false, erro: 'Usuário ou senha incorretos.' };
   if (!comparar(u.senha, String(senha || ''))) return { ok: false, erro: 'Usuário ou senha incorretos.' };
-  return { ok: true, usuario: u.usuario, perfil: u.perfil, nome: u.nome };
+  return { ok: true, usuario: u.usuario, perfil: u.perfil, nome: u.nome, empresas: u.empresas || [] };
 }
 
 // ── Sessões (em memória) ──────────────────────────────────────────────
 const sessoes = new Map();
 
-function criarSessao(usuario) {
+function criarSessao(usuario, empresas) {
   const token = crypto.randomBytes(32).toString('hex');
   const agora = Date.now();
   sessoes.set(token, {
     usuario,
+    empresas: Array.isArray(empresas) ? empresas.slice() : [],
     criadoEm: agora,
     expiraEm: agora + SESSAO_HORAS * 60 * 60 * 1000
   });
   return token;
 }
 
+/* 28/08: devolve OBJETO { usuario, empresas } (antes era a string do usuario).
+   As empresas sao RELIDAS da env a cada validacao — tirar alguem de uma empresa
+   no Render vale na hora, sem esperar a sessao cair. */
 function validarSessao(token) {
   if (!token) return null;
   const s = sessoes.get(token);
   if (!s) return null;
   if (s.expiraEm < Date.now()) { sessoes.delete(token); return null; }
-  // Se o usuário foi removido da env var, a sessão dele cai na hora
   const lista = listarUsuarios();
-  const aindaExiste = lista.some(u => u.usuario.toLowerCase() === s.usuario.toLowerCase());
-  if (!aindaExiste) { sessoes.delete(token); return null; }
-  return s.usuario;
+  const u = lista.find(x => x.usuario.toLowerCase() === s.usuario.toLowerCase());
+  if (!u) { sessoes.delete(token); return null; }
+  return { usuario: s.usuario, empresas: u.empresas || [] };
 }
 
 function removerSessao(token) {
