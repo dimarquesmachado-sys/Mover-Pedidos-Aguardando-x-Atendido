@@ -55,10 +55,16 @@ $('sync').onclick = async function () {
     /* Codex #236: o timer fixo de 1.6s lia o status ANTERIOR quando o Render demorava
        (cold start) — agora escuta a GRAVACAO do background e atualiza na hora certa;
        o timer vira so um fallback longo. */
+    /* Codex #236 r2: o motivo ('manual'/'load'/'timer') JA viaja ate o ultimoStatus — o
+       listener aceita SO a gravacao do sync MANUAL feita apos o clique, senao um sync
+       automatico em voo mostraria um sucesso que nao e o desta acao. */
+    const _t0 = Date.now();
     const _ouvinte = function (mud, area) {
       if (area === 'local' && mud.ultimoStatus) {
+        const nv = mud.ultimoStatus.newValue || {};
+        if (nv.motivo !== 'manual' || !(nv.quando >= _t0)) return;   // nao e o meu: segue ouvindo
         chrome.storage.onChanged.removeListener(_ouvinte);
-        mostrarStatus(mud.ultimoStatus.newValue);
+        mostrarStatus(nv);
       }
     };
     chrome.storage.onChanged.addListener(_ouvinte);

@@ -526,7 +526,9 @@
       msg('Configuração salva. Verificando…');
       verificar(true);
     });
-    elBtn.addEventListener('click', () => rodar(true));
+    /* Codex #236 r2: com "Buscar de novo" na tela (sem pendencia), o rodar(true) retornava
+       cedo e o clique nao fazia NADA — agora sem pendencia o clique re-verifica com busca. */
+    elBtn.addEventListener('click', () => { if (pendente && pendente.precisa) rodar(true); else verificar(true); });
     wrap.querySelector('#nfshopee-fechar').addEventListener('click', ev => { ev.stopPropagation(); esconder(); });
 
     // Ctrl + Alt + S chama o painel Shopee (o Magalu usa Ctrl+Alt+M).
@@ -627,8 +629,23 @@
         } catch (e) { /* se a busca falhar, ainda lê o que já há em disco */ }
       }
 
+      /* Codex #236 r2 — TRAVA DE CONTA (o Magalu ja tinha, aqui faltava): no mesmo navegador
+         com outra conta do Bling logada, a config sp_loja mandaria processar o ZIP da OUTRA
+         empresa nesta sessao. O vinculo loja→idEmpresa e APRENDIDO na 1a importacao que dá
+         certo; sessao diferente do vinculo = recusa com aviso. O idEmpresa tambem segue na
+         query do estado, como no Magalu, pra validacao do lado do servidor. */
+      try {
+        const _vk = 'sp_vinculo_' + cfg.sp_loja;
+        const _vv = (await chrome.storage.local.get([_vk]))[_vk];
+        if (_vv && String(_vv) !== String(idEmpresa)) {
+          msg('⛔ Esta sessão do Bling (empresa ' + idEmpresa + ') NÃO é a da loja configurada (' + cfg.sp_loja + ', vinculada à empresa ' + _vv + ').\nConfira a loja em Configurar antes de importar aqui.', '#f28b82');
+          elBtn.disabled = true; elBtn.textContent = 'Conta errada';
+          if (forcado) abrir();
+          return;
+        }
+      } catch (eV) {}
       // lê o estado (instantâneo: só conta as novas do ZIP que o cron já baixou)
-      const r = await fetch(cfg.sp_servidor + '/' + encodeURIComponent(cfg.sp_loja) + '/fbs/ext/estado?k=' + encodeURIComponent(cfg.sp_chave));
+      const r = await fetch(cfg.sp_servidor + '/' + encodeURIComponent(cfg.sp_loja) + '/fbs/ext/estado?k=' + encodeURIComponent(cfg.sp_chave) + '&idEmpresa=' + encodeURIComponent(idEmpresa));
       const j = await r.json();
       if (!j.ok) throw new Error(j.erro || j.motivo || 'servidor recusou');
       pendente = Object.assign({ idEmpresa }, j);
@@ -695,6 +712,7 @@
       await rodada('S', pendente.url_zip_saida, pendente.novas_saida, 'saída');
       if (pendente.novas_entrada && pendente.url_zip_entrada) await rodada('E', pendente.url_zip_entrada, pendente.novas_entrada, 'entrada');
 
+      try { await chrome.storage.local.set({ ['sp_vinculo_' + cfg.sp_loja]: String(pendente.idEmpresa) }); } catch (eV2) {}   // Codex #236 r2: aprende o vinculo loja→empresa na 1a importacao ok
       const _falhasS = feito.reduce((s, f) => s + (f.res.nao_importados || 0), 0);
       msg((_falhasS ? '⚠ Quase: ' : '✓ Pronto.') + '\n' + feito.map(f => f.quantas + ' de ' + f.rotulo + ' enviadas' + (f.res.ja_registradas ? ' — ' + f.res.ja_registradas + ' já estavam lá' : '') + (f.res.nao_importados ? ' — ' + f.res.nao_importados + ' NÃO importadas (vão re-tentar)' : '')).join('\n'), _falhasS ? '#fdd663' : '#81c995');
       elBtn.textContent = 'Importar de novo';
