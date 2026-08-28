@@ -19,7 +19,8 @@
     "https://painelmarketplace.madeiramadeira.com.br/*",
     "https://www.mercadolivre.com.br/*",
     "https://mercadolivre.com.br/*",
-    "https://*.shopee.com.br/*"
+    "https://*.shopee.com.br/*",
+    "https://vendedores.mercadolivre.com.br/*"
   ],
   "content_scripts": [
     {
@@ -50,7 +51,8 @@
     {
       "matches": [
         "https://www.mercadolivre.com.br/vendas/*",
-        "https://mercadolivre.com.br/vendas/*"
+        "https://mercadolivre.com.br/vendas/*",
+        "https://vendedores.mercadolivre.com.br/vendas/*"
       ],
       "js": [
         "ct-respostas.js"
