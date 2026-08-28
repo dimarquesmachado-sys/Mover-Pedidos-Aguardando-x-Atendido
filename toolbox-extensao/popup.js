@@ -8,11 +8,11 @@ const CARTOES = [
   { emp: ['girassol', 'good'], html: '<a class="mod" href="mm.html">📦 Etiquetas Madeira Madeira<small>sincronizar lotes do painel MM</small></a>' },
   { emp: ['girassol', 'good', 'amb'], html: '<a class="mod" href="respostas.html">💬 Respostas Rápidas ML<small>configuração das respostas nas vendas</small></a>' },
   { emp: ['girassol', 'good', 'amb'], html: '<a class="mod" href="shopee.html">🍪 Sessão Shopee<small>enviar cookies do Seller Center (sem DevTools)</small></a>' },
-  { emp: ['girassol'], html: '<a class="mod" href="bling.html">🔑 Cookie Bling<small>enviar a sessão do Bling pro importador</small></a>' },
+  { emp: ['good', 'amb'], html: '<a class="mod" href="bling.html">🔑 Cookie Bling<small>sessão do Bling pro importador NF Magalu Full</small></a>' },
   { emp: ['girassol', 'good', 'amb'], html: '<a class="mod" href="options.html" target="_blank">⚠️ Alerta Frágil<small>configurações do alerta no checkout do Bling</small></a>' },
 ];
 const AUTOS = {
-  girassol: 'Rodam sozinhos: Alerta Frágil (se configurado). A Esteira do Bling entra na próxima versão.',
+  girassol: 'Rodam sozinhos: Alerta Frágil (se configurado). NF-e Fulfillment é só GOOD/AMB e fica dormente aqui. A Esteira do Bling entra na próxima versão.',
   good: 'Rodam sozinhos: Alerta Frágil · NF-e Fulfillment Magalu+Shopee (Bling) · Devoluções Bridge.',
   amb: 'Rodam sozinhos: Alerta Frágil · NF-e Fulfillment Magalu+Shopee (Bling) · Devoluções Bridge.',
 };

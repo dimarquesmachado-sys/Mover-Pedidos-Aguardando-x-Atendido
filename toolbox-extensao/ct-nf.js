@@ -417,6 +417,10 @@
   // ── inicio ──────────────────────────────────────────────────────────
   (async function () {
     montarPainel();
+    /* Toolbox 2.0 (Codex #237 r1): o importador de NF e coisa de GOOD/AMB — numa instancia
+       Girassol este bloco NAO acorda (nada de painel pedindo ADMIN_KEY pra quem nao importa). */
+    const _tbEmp = (await new Promise(ok => { try { chrome.storage.local.get(['tb_empresa'], v => ok(v.tb_empresa)); } catch (e) { ok(null); } }));
+    if (_tbEmp && _tbEmp !== 'good' && _tbEmp !== 'amb') return;
     cfg = await lerCfg();
     const w = document.getElementById('nfmagalu-painel');
     w.querySelector('#nfmagalu-serv').value = cfg.servidor;
@@ -777,6 +781,10 @@
 
   (async function () {
     montarPainel();
+    /* Toolbox 2.0 (Codex #237 r1): o importador de NF e coisa de GOOD/AMB — numa instancia
+       Girassol este bloco NAO acorda (nada de painel pedindo ADMIN_KEY pra quem nao importa). */
+    const _tbEmp = (await new Promise(ok => { try { chrome.storage.local.get(['tb_empresa'], v => ok(v.tb_empresa)); } catch (e) { ok(null); } }));
+    if (_tbEmp && _tbEmp !== 'good' && _tbEmp !== 'amb') return;
     cfg = await lerCfg();
     const w = document.getElementById('nfshopee-painel');
     w.querySelector('#nfshopee-serv').value = cfg.sp_servidor;

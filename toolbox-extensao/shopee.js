@@ -4,11 +4,12 @@
 const HOST = 'https://mover-pedidos-aguardando-x-atendido.onrender.com';
 const $ = (id) => document.getElementById(id);
 
-/* Toolbox 2.0: o default segue a EMPRESA da instância (tb_empresa); o seletor continua
-   disponível pra casos excepcionais. */
+/* Toolbox 2.0 (Codex #237 r1): a EMPRESA DA INSTÂNCIA manda no default — o alvo escolhido
+   no seletor NÃO fica salvo (era o bug: depois de 'trocar a empresa', o alvo antigo salvo
+   vencia e os cookies iam pro checkout da empresa errada). O seletor vale pro envio atual. */
 const MAPA_EMP = { girassol: 'girassol-backup-offline', good: 'good-checkout-offline', amb: 'amb-checkout-offline' };
-chrome.storage.local.get(['sceKey', 'sceEmp', 'tb_empresa'], (v) => {
-  $('emp').value = v.sceEmp || MAPA_EMP[v.tb_empresa] || 'good-checkout-offline';
+chrome.storage.local.get(['sceKey', 'tb_empresa'], (v) => {
+  $('emp').value = MAPA_EMP[v.tb_empresa] || 'good-checkout-offline';
   if (v.sceKey) $('key').value = v.sceKey;
 });
 
@@ -17,10 +18,21 @@ $('btn').addEventListener('click', async () => {
   const emp = $('emp').value;
   const res = $('res');
   if (!key) { res.innerHTML = '<span class="err">cole a ADMIN_KEY primeiro</span>'; return; }
-  chrome.storage.local.set({ sceKey: key, sceEmp: emp });
+  chrome.storage.local.set({ sceKey: key });   // so a chave persiste; o alvo segue a instância
   $('btn').disabled = true;
   res.textContent = '⏳ capturando cookies…';
   try {
+    /* Firefox (AMB): as permissões de host NÃO vêm concedidas na instalação — sem isto o
+       getAll volta vazio e o fetch é bloqueado. No Chrome/Edge é um no-op. (Fix que estava
+       no PR #235 da extensão avulsa e a toolbox não tinha herdado.) */
+    try {
+      const quer = { origins: ['https://*.shopee.com.br/*', 'https://mover-pedidos-aguardando-x-atendido.onrender.com/*'] };
+      const tem = await chrome.permissions.contains(quer);
+      if (!tem) {
+        const deu = await chrome.permissions.request(quer);
+        if (!deu) { res.innerHTML = '<span class="err">sem permissão de acesso aos sites — aceite o pedido pra extensão funcionar</span>'; $('btn').disabled = false; return; }
+      }
+    } catch (ePerm) {}
     /* Codex #236 r5: captura pelo URL do Seller Center — o navegador resolve dominio/path e
        devolve SO o que seria enviado ao seller (cookie de outro subdominio fica fora). */
     const todos = await chrome.cookies.getAll({ url: 'https://seller.shopee.com.br/' });
