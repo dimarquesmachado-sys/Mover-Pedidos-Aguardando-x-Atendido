@@ -210,7 +210,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   gerarDevolucao(msg.payload, painelTab)
     .then(resultado => sendResponse({ ok: true, resultado }))
-    .catch(err => sendResponse({ ok: false, erro: err.message || String(err) }));
+    /* 28/08 (pedido do lote de devoluções): CODIGO ESTAVEL junto do erro — o script de lote
+       classificava por texto da mensagem, que quebrava se alguem reescrevesse a frase.
+       Contrato: JA_EXISTE (anti-duplicata) | TIMEOUT (90s, indeterminado) |
+       RASCUNHO_CRIADO (NF criada, emissao/registro falhou — vem idNotaDevolucao/numero) |
+       FALHA (resto). Os textos permanecem intactos. */
+    .catch(err => sendResponse({
+      ok: false,
+      codigo: err.codigo || 'FALHA',
+      erro: err.message || String(err),
+      idNotaDevolucao: err.idNotaDevolucao || null,
+      numero: err.numero || null,
+    }));
 
   return true; // mantem o canal aberto pra resposta async
 });
@@ -318,7 +329,13 @@ async function gerarDevolucao(payload, painelTab) {
          o operador consegue vincular na mao em vez de re-emitir em duplicidade. */
       const _idInfo = (!_rascunhoRegistrado && resposta.resultado && resposta.resultado.idNotaDevolucao)
         ? ' [ATENCAO: a NF de devolucao JA FOI CRIADA no Bling — id ' + resposta.resultado.idNotaDevolucao + (resposta.resultado.numero ? ', numero ' + resposta.resultado.numero : '') + ' — vincule pelo painel em vez de gerar de novo]' : '';
-      throw new Error((resposta.erro || 'Erro desconhecido dentro da aba do Bling') + _idInfo);
+      const _eF = new Error((resposta.erro || 'Erro desconhecido dentro da aba do Bling') + _idInfo);
+      _eF.codigo = resposta.codigo || ((resposta.resultado && resposta.resultado.idNotaDevolucao) ? 'RASCUNHO_CRIADO' : 'FALHA');
+      if (resposta.resultado && resposta.resultado.idNotaDevolucao) {
+        _eF.idNotaDevolucao = String(resposta.resultado.idNotaDevolucao);
+        _eF.numero = String(resposta.resultado.numero || '');
+      }
+      throw _eF;
     }
 
     // v1.4.2: GRAVA o resultado direto no sistema (nao depende do painel
@@ -350,7 +367,9 @@ async function gerarDevolucao(payload, painelTab) {
   // Trava de seguranca: nunca deixa o painel esperando mais de 90s (SEFAZ tem dias lentos)
   const limite = new Promise((_, reject) => {
     setTimeout(() => {
-      reject(new Error('A extensao travou na etapa "' + etapa + '" (90s). A NF PODE ter sido criada mesmo assim - clique em Gerar de novo que o sistema confere e vincula. Se persistir, recarregue a aba do Bling (F5) e a pagina do painel (Ctrl+Shift+R) e tente de novo.'));
+      const eT = new Error('A extensao travou na etapa "' + etapa + '" (90s). A NF PODE ter sido criada mesmo assim - clique em Gerar de novo que o sistema confere e vincula. Se persistir, recarregue a aba do Bling (F5) e a pagina do painel (Ctrl+Shift+R) e tente de novo.');
+      eT.codigo = 'TIMEOUT';   // resultado INDETERMINADO — o consumidor tardio pode registrar depois
+      reject(eT);
     }, 90000);
   });
 
@@ -656,7 +675,7 @@ function fluxoDevolucaoNaPagina(p) {
 
     // ---------- PASSO 2: anti-duplicata ----------
     if (dados.devolucaoExistente === true) {
-      return { ok: false, erro: 'Esta NF ja possui devolucao efetuada no Bling. Nada foi criado (protecao anti-duplicata).' };
+      return { ok: false, codigo: 'JA_EXISTE', erro: 'Esta NF ja possui devolucao efetuada no Bling. Nada foi criado (protecao anti-duplicata).' };
     }
 
     // ═══════════════════════════════════════════════════════════════
