@@ -52,11 +52,21 @@ $('sync').onclick = async function () {
       $('status').textContent = 'Recarregue a página do Madeira Madeira (F5) e tente de novo.';
       return;
     }
-    // o status real é gravado pelo background; recarrega depois de 1.6s
+    /* Codex #236: o timer fixo de 1.6s lia o status ANTERIOR quando o Render demorava
+       (cold start) — agora escuta a GRAVACAO do background e atualiza na hora certa;
+       o timer vira so um fallback longo. */
+    const _ouvinte = function (mud, area) {
+      if (area === 'local' && mud.ultimoStatus) {
+        chrome.storage.onChanged.removeListener(_ouvinte);
+        mostrarStatus(mud.ultimoStatus.newValue);
+      }
+    };
+    chrome.storage.onChanged.addListener(_ouvinte);
     setTimeout(async function () {
+      chrome.storage.onChanged.removeListener(_ouvinte);
       const c = await chrome.storage.local.get(['ultimoStatus']);
       mostrarStatus(c.ultimoStatus);
-    }, 1600);
+    }, 30000);
   });
 };
 

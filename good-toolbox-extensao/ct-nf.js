@@ -361,12 +361,19 @@
         const res = resumir(await processar(tmp, pendente.empresa, tipo));
         feito.push({ tipo, rotulo, quantas, res });
 
-        try {
-          await fetch(cfg.servidor + '/magalu/nf-full/ext/registrar?k=' + encodeURIComponent(cfg.chave), {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ empresa: pendente.empresa, arquivo: pendente.arquivo, tipo: tipo, resumo: res })
-          });
-        } catch (e) { /* registrar e bonus, nao pode derrubar o resultado */ }
+        /* Codex #236 (P1): so registra o lote como importado quando o Bling NAO recusou nenhum
+           XML — antes, 200 com "XML nao importado" no corpo registrava tudo mesmo assim, a nota
+           falhada sumia do /ext/estado e nunca re-tentava (o painel dizia "Pronto"). Com falha,
+           o lote fica pendente e re-tenta inteiro: as que ja entraram viram "ja esta registrada"
+           (inofensivo) e o registro acontece quando a rodada fechar limpa. */
+        if (!res.nao_importados) {
+          try {
+            await fetch(cfg.servidor + '/magalu/nf-full/ext/registrar?k=' + encodeURIComponent(cfg.chave), {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ empresa: pendente.empresa, arquivo: pendente.arquivo, tipo: tipo, resumo: res })
+            });
+          } catch (e) { /* registrar e bonus, nao pode derrubar o resultado */ }
+        }
       }
 
       const qS = (typeof pendente.novas_saida === 'number') ? pendente.novas_saida : (pendente.novas || 0);
@@ -375,10 +382,12 @@
       await rodada('S', pendente.url_zip_saida, qS, 'saída');
       if (qE && pendente.url_zip_entrada) await rodada('E', pendente.url_zip_entrada, qE, 'entrada');
 
-      msg('✓ Pronto.\n' + feito.map(f =>
+      const _falhas = feito.reduce((s, f) => s + (f.res.nao_importados || 0), 0);
+      msg((_falhas ? '⚠ Quase: ' : '✓ Pronto.') + '\n' + feito.map(f =>
             f.quantas + ' de ' + f.rotulo + ' enviadas' +
-            (f.res.ja_registradas ? ' — ' + f.res.ja_registradas + ' já estavam lá' : '')
-          ).join('\n'), '#81c995');
+            (f.res.ja_registradas ? ' — ' + f.res.ja_registradas + ' já estavam lá' : '') +
+            (f.res.nao_importados ? ' — ' + f.res.nao_importados + ' NÃO importadas (vão re-tentar na próxima)' : '')
+          ).join('\n'), _falhas ? '#fdd663' : '#81c995');
 
       elBtn.textContent = 'Importar de novo';
       sumirDepois(8000);   // deu certo: some sozinho, nao fica atrapalhando
@@ -674,15 +683,20 @@
         const res = resumir(await processar(tmp, pendente.empresa, tipo));
         feito.push({ tipo, rotulo, quantas, res });
         // marca as chaves como importadas (extrai o nome do arquivo da própria URL)
-        try {
-          const nomeArq = decodeURIComponent((url.split('/fbs/zip/')[1] || '').split('?')[0]);
-          if (nomeArq) await fetch(cfg.sp_servidor + '/' + encodeURIComponent(cfg.sp_loja) + '/fbs/ext/registrar?k=' + encodeURIComponent(cfg.sp_chave) + '&arquivo=' + encodeURIComponent(nomeArq));
-        } catch (e) { /* registrar é bônus */ }
+        // Codex #236 (P1): SO quando o Bling nao recusou nenhum XML — com falha o lote fica
+        // pendente e re-tenta (as ja importadas viram "ja esta registrada", inofensivo).
+        if (!res.nao_importados) {
+          try {
+            const nomeArq = decodeURIComponent((url.split('/fbs/zip/')[1] || '').split('?')[0]);
+            if (nomeArq) await fetch(cfg.sp_servidor + '/' + encodeURIComponent(cfg.sp_loja) + '/fbs/ext/registrar?k=' + encodeURIComponent(cfg.sp_chave) + '&arquivo=' + encodeURIComponent(nomeArq));
+          } catch (e) { /* registrar é bônus */ }
+        }
       }
       await rodada('S', pendente.url_zip_saida, pendente.novas_saida, 'saída');
       if (pendente.novas_entrada && pendente.url_zip_entrada) await rodada('E', pendente.url_zip_entrada, pendente.novas_entrada, 'entrada');
 
-      msg('✓ Pronto.\n' + feito.map(f => f.quantas + ' de ' + f.rotulo + ' enviadas' + (f.res.ja_registradas ? ' — ' + f.res.ja_registradas + ' já estavam lá' : '')).join('\n'), '#81c995');
+      const _falhasS = feito.reduce((s, f) => s + (f.res.nao_importados || 0), 0);
+      msg((_falhasS ? '⚠ Quase: ' : '✓ Pronto.') + '\n' + feito.map(f => f.quantas + ' de ' + f.rotulo + ' enviadas' + (f.res.ja_registradas ? ' — ' + f.res.ja_registradas + ' já estavam lá' : '') + (f.res.nao_importados ? ' — ' + f.res.nao_importados + ' NÃO importadas (vão re-tentar)' : '')).join('\n'), _falhasS ? '#fdd663' : '#81c995');
       elBtn.textContent = 'Importar de novo';
       sumirDepois(8000);
     } catch (e) {
