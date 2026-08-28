@@ -70,5 +70,12 @@ function showStatus(msg, ok) {
 const _btnPainelResp = document.getElementById('abrir-painel-respostas');
 if (_btnPainelResp) _btnPainelResp.addEventListener('click', function (ev) {
   ev.preventDefault();
-  chrome.tabs.create({ url: 'https://mover-pedidos-aguardando-x-atendido.onrender.com/respostas-rapidas/painel' });
+  /* Codex #243: o painel generico expoe TODAS as lojas — abre o painel DA LOJA da
+     instancia (girassol→girassol, good→gimpo, amb→ambtotal), que trava o editor nela. */
+  chrome.storage.local.get(['tb_empresa'], function (r) {
+    const mapa = { girassol: 'girassol', good: 'gimpo', amb: 'ambtotal' };
+    const loja = mapa[r.tb_empresa] || '';
+    const url = 'https://mover-pedidos-aguardando-x-atendido.onrender.com/respostas-rapidas/' + (loja ? loja + '/painel' : 'painel');
+    chrome.tabs.create({ url });
+  });
 });
