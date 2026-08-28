@@ -14,7 +14,7 @@ Pasta a carregar: `toolbox-extensao` (baixe o repositório em Code → Download 
 ## Módulos por empresa
 - **Todas**: Respostas Rápidas ML · Sessão Shopee · Alerta Frágil (config nas opções) · NF-e Fulfillment Magalu+Shopee (config dentro do Bling — Ctrl+Alt+S força o cartão da Shopee) · Devoluções Bridge
 - **Girassol e GOOD**: Etiquetas Madeira Madeira (a rota segue a empresa escolhida)
-- **Só Girassol**: Cookie Bling → importador. (A Esteira do Bling entra na próxima versão.)
+- **Girassol e GOOD/AMB**: Cookie Bling → importador NF Magalu Full (cartão nas instâncias GOOD/AMB). **Só Girassol**: Esteira do Bling (botão flutuante em produtos.php — automática, sem cartão).
 
 ## Configurar (1x por navegador — nada migra sozinho)
 Popup → cada cartão pede a própria chave: MM (…_MM_SYNC_KEY da empresa), Respostas

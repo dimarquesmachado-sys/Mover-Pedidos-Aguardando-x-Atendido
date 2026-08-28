@@ -12,7 +12,7 @@ const CARTOES = [
   { emp: ['girassol', 'good', 'amb'], html: '<a class="mod" href="options.html" target="_blank">⚠️ Alerta Frágil<small>configurações do alerta no checkout do Bling</small></a>' },
 ];
 const AUTOS = {
-  girassol: 'Rodam sozinhos: Alerta Frágil (se configurado). NF-e Fulfillment é só GOOD/AMB e fica dormente aqui. A Esteira do Bling entra na próxima versão.',
+  girassol: 'Rodam sozinhos: Alerta Frágil (se configurado) · Esteira do Bling (botão flutuante em produtos.php). NF-e Fulfillment é só GOOD/AMB e fica dormente aqui.',
   good: 'Rodam sozinhos: Alerta Frágil · NF-e Fulfillment Magalu+Shopee (Bling) · Devoluções Bridge.',
   amb: 'Rodam sozinhos: Alerta Frágil · NF-e Fulfillment Magalu+Shopee (Bling) · Devoluções Bridge.',
 };
