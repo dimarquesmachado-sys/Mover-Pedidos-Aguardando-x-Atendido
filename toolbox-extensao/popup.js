@@ -16,12 +16,14 @@ const CARTOES = [
 const LINKS = {
   girassol: [
     ['⚠️ Painel Frágil', 'https://mover-pedidos-aguardando-x-atendido.onrender.com/fragil/'],
+    ['💬 Respostas Rápidas (editar respostas)', 'https://mover-pedidos-aguardando-x-atendido.onrender.com/respostas-rapidas/painel'],
     ['🛒 Checkout offline Girassol', 'https://mover-pedidos-aguardando-x-atendido.onrender.com/girassol-backup-offline/'],
     ['🍪 Painel Shopee (multi-loja)', 'https://girassol-shopee-sync-organizar-envio.onrender.com/'],
     ['⚙️ Render (envs e serviços)', 'https://dashboard.render.com/'],
   ],
   good: [
     ['⚠️ Painel Frágil', 'https://mover-pedidos-aguardando-x-atendido.onrender.com/fragil/'],
+    ['💬 Respostas Rápidas (editar respostas)', 'https://mover-pedidos-aguardando-x-atendido.onrender.com/respostas-rapidas/painel'],
     ['🛒 Checkout offline GOOD', 'https://mover-pedidos-aguardando-x-atendido.onrender.com/good-checkout-offline/'],
     ['↩️ Devoluções GOOD', 'https://good-devolucoes-x-marketplaces-x-nfsbling.onrender.com/'],
     ['🍪 Painel Shopee (multi-loja)', 'https://girassol-shopee-sync-organizar-envio.onrender.com/'],
@@ -29,6 +31,7 @@ const LINKS = {
   ],
   amb: [
     ['⚠️ Painel Frágil', 'https://mover-pedidos-aguardando-x-atendido.onrender.com/fragil/'],
+    ['💬 Respostas Rápidas (editar respostas)', 'https://mover-pedidos-aguardando-x-atendido.onrender.com/respostas-rapidas/painel'],
     ['🛒 Checkout offline AMBTotal', 'https://mover-pedidos-aguardando-x-atendido.onrender.com/amb-checkout-offline/'],
     ['↩️ Devoluções AMB', 'https://good-devolucoes-x-marketplaces-x-nfsbling.onrender.com/amb/'],
     ['🍪 Painel Shopee (multi-loja)', 'https://girassol-shopee-sync-organizar-envio.onrender.com/'],
