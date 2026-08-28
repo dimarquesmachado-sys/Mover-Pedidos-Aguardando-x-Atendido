@@ -43,13 +43,30 @@ function getConfig() {
   });
 }
 
+// 28/08: mapeia a empresa da instância (tb_empresa) pro id do servidor do Frágil
+function empresaFragil() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(["tb_empresa"], (d) => {
+      const e = d.tb_empresa || "";
+      resolve(e === "amb" ? "ambtotal" : e);   // girassol/good já batem
+    });
+  });
+}
+
 async function sincronizar() {
   const cfg = await getConfig();
   if (!cfg.servidorUrl) {
     return { ok: false, erro: "URL do servidor não configurada" };
   }
   try {
-    const url = cfg.servidorUrl.replace(/\/+$/, "") + "/api/skus";
+    /* 28/08 (a URL virou à prova de operador): aceita colada COM ou SEM o /fragil no fim —
+       o 404 da primeira instalação veio exatamente da raiz colada sem o caminho. */
+    let base = cfg.servidorUrl.replace(/\/+$/, "");
+    if (!/\/fragil$/.test(base)) base += "/fragil";
+    /* multi-empresa: sincroniza a LISTA DA EMPRESA da instância; servidor antigo ignora
+       a query e devolve a lista única — compatível nos dois sentidos. */
+    const emp = await empresaFragil();
+    const url = base + "/api/skus" + (emp ? "?empresa=" + encodeURIComponent(emp) : "");
     const r = await fetch(url, { method: "GET", cache: "no-store" });
     if (!r.ok) throw new Error("HTTP " + r.status);
     const dados = await r.json();

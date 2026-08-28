@@ -11,6 +11,31 @@ const CARTOES = [
   { emp: ['good', 'amb'], html: '<a class="mod" href="bling.html">🔑 Cookie Bling<small>sessão do Bling pro importador NF Magalu Full</small></a>' },
   { emp: ['girassol', 'good', 'amb'], html: '<a class="mod" href="options.html" target="_blank">⚠️ Alerta Frágil<small>configurações do alerta no checkout do Bling</small></a>' },
 ];
+/* 28/08 (pedido do dono): links rápidos — clicar e cair na página certa da instância.
+   href="#" + data-url porque popup usa CSP de extensão; abre via chrome.tabs.create. */
+const LINKS = {
+  girassol: [
+    ['⚠️ Painel Frágil', 'https://mover-pedidos-aguardando-x-atendido.onrender.com/fragil/'],
+    ['🛒 Checkout offline Girassol', 'https://mover-pedidos-aguardando-x-atendido.onrender.com/girassol-backup-offline/'],
+    ['🍪 Painel Shopee (multi-loja)', 'https://girassol-shopee-sync-organizar-envio.onrender.com/'],
+    ['⚙️ Render (envs e serviços)', 'https://dashboard.render.com/'],
+  ],
+  good: [
+    ['⚠️ Painel Frágil', 'https://mover-pedidos-aguardando-x-atendido.onrender.com/fragil/'],
+    ['🛒 Checkout offline GOOD', 'https://mover-pedidos-aguardando-x-atendido.onrender.com/good-checkout-offline/'],
+    ['↩️ Devoluções GOOD', 'https://good-devolucoes-x-marketplaces-x-nfsbling.onrender.com/'],
+    ['🍪 Painel Shopee (multi-loja)', 'https://girassol-shopee-sync-organizar-envio.onrender.com/'],
+    ['⚙️ Render (envs e serviços)', 'https://dashboard.render.com/'],
+  ],
+  amb: [
+    ['⚠️ Painel Frágil', 'https://mover-pedidos-aguardando-x-atendido.onrender.com/fragil/'],
+    ['🛒 Checkout offline AMBTotal', 'https://mover-pedidos-aguardando-x-atendido.onrender.com/amb-checkout-offline/'],
+    ['↩️ Devoluções AMB', 'https://good-devolucoes-x-marketplaces-x-nfsbling.onrender.com/amb/'],
+    ['🍪 Painel Shopee (multi-loja)', 'https://girassol-shopee-sync-organizar-envio.onrender.com/'],
+    ['⚙️ Render (envs e serviços)', 'https://dashboard.render.com/'],
+  ],
+};
+
 const AUTOS = {
   girassol: 'Rodam sozinhos: Alerta Frágil (se configurado) · Esteira do Bling (botão flutuante em produtos.php). NF-e Fulfillment é só GOOD/AMB e fica dormente aqui.',
   good: 'Rodam sozinhos: Alerta Frágil · NF-e Fulfillment Magalu+Shopee (Bling) · Devoluções Bridge.',
@@ -23,6 +48,13 @@ function mostrar(emp) {
   if (!emp) return;
   document.getElementById('empNome').textContent = NOMES[emp] || emp;
   document.getElementById('cards').innerHTML = CARTOES.filter(c => c.emp.includes(emp)).map(c => c.html).join('');
+  const links = (LINKS[emp] || []).map(l =>
+    '<a class="lnk" href="#" data-url="' + l[1] + '">🔗 ' + l[0] + '</a>'
+  ).join('');
+  document.getElementById('links').innerHTML = links ? '<div class="lnk-titulo">Páginas dos serviços</div>' + links : '';
+  for (const a of document.querySelectorAll('#links a.lnk')) {
+    a.addEventListener('click', (ev) => { ev.preventDefault(); chrome.tabs.create({ url: a.dataset.url }); });
+  }
   document.getElementById('autos').textContent = AUTOS[emp] || '';
 }
 
