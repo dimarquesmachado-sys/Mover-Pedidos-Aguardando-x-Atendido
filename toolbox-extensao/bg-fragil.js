@@ -45,8 +45,11 @@ function getConfig() {
 
 /* Codex #241: trocar a empresa da instância re-sincroniza NA HORA — sem isto o alerta
    do checkout ficava com a lista da empresa anterior até a próxima sync agendada. */
+let _syncSeq = 0;   /* Codex #241 r2: o fluxo "trocar" REMOVE tb_empresa (sync sem empresa = uniao)
+   e depois grava a nova — sem ordem, a uniao podia terminar DEPOIS e sobrescrever o cache.
+   Remocao nao dispara sync; e cada sync carrega um token: resultado velho nao grava. */
 chrome.storage.onChanged.addListener((mudancas, area) => {
-  if (area === "local" && mudancas.tb_empresa) {
+  if (area === "local" && mudancas.tb_empresa && mudancas.tb_empresa.newValue !== undefined) {
     sincronizar().catch(() => {});
   }
 });
@@ -62,6 +65,7 @@ function empresaFragil() {
 }
 
 async function sincronizar() {
+  const _meuSync = ++_syncSeq;
   const cfg = await getConfig();
   if (!cfg.servidorUrl) {
     return { ok: false, erro: "URL do servidor não configurada" };
@@ -84,9 +88,12 @@ async function sincronizar() {
     }
     if (!r.ok) throw new Error("HTTP " + r.status);
     const dados = await r.json();
+    if (_meuSync !== _syncSeq) return { ok: false, erro: "sync substituida por outra mais nova" };
     await new Promise((resolve) =>
       chrome.storage.local.set({ [STORAGE_KEY_DADOS]: dados, ultimaSync: new Date().toISOString() }, resolve)
     );
+    /* Codex #241 r2: guarda a BASE que funcionou — o "Abrir painel online" usa a mesma */
+    chrome.storage.local.set({ fragil_base_ok: base });
     console.log("[SYNC OK]", Object.keys(dados.skus || {}).length, "SKUs");
     return { ok: true, skus: Object.keys(dados.skus || {}).length, atualizadoEm: dados.atualizadoEm };
   } catch (e) {

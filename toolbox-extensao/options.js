@@ -94,9 +94,14 @@ function abrirPainel() {
     status("Configure a URL do servidor primeiro", false);
     return;
   }
-  /* Codex #241: mesma normalização do sync — raiz colada sem /fragil abria o JSON de status */
-  if (!/\/fragil$/.test(url)) url += "/fragil";
-  chrome.tabs ? chrome.tabs.create({ url }) : window.open(url, "_blank");
+  /* Codex #241 r2: a sync grava a BASE que respondeu (com ou sem /fragil, standalone
+     incluso) — o botão abre a mesma; sem sync ainda, normaliza como o sync faria. */
+  chrome.storage.local.get(["fragil_base_ok"], (d) => {
+    if (d.fragil_base_ok && d.fragil_base_ok.indexOf(url) === 0) { abrir(d.fragil_base_ok); return; }
+    if (!/\/fragil$/.test(url)) url += "/fragil";
+    abrir(url);
+  });
+  function abrir(u) { chrome.tabs ? chrome.tabs.create({ url: u }) : window.open(u, "_blank"); }
 }
 
 $btnSalvar.addEventListener("click", salvarUrl);
