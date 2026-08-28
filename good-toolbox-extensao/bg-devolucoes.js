@@ -301,6 +301,7 @@ async function gerarDevolucao(payload, painelTab) {
       /* Codex #236 r4 (P1): se a falha veio DEPOIS de a nota existir (emissao recusada), o
          rascunho e registrado ANTES de reportar o erro — senao o vinculo se perde e o
          proximo clique emite em DUPLICIDADE. */
+      let _rascunhoRegistrado = false;   // Codex #236 r5
       if (payload.devolucaoId && resposta.resultado && resposta.resultado.idNotaDevolucao) {
         try {
           const _prefR = (String(payload.empresa || 'good').toLowerCase().indexOf('amb') === 0) ? '/amb' : '';
@@ -308,10 +309,16 @@ async function gerarDevolucao(payload, painelTab) {
             method: 'PUT', credentials: 'include', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ nf_devolucao_id_bling: String(resposta.resultado.idNotaDevolucao), nf_devolucao_numero: String(resposta.resultado.numero || '') }),
           });
-          console.log('[Bridge] rascunho registrado apesar da falha de emissao:', rR2.status);
-        } catch (e2) { console.log('[Bridge] registro do rascunho tambem falhou:', e2.message || e2); }
+          if (!rR2.ok) throw new Error('HTTP ' + rR2.status);   // Codex #236 r5: 401/500 aqui NAO e recuperacao — cai no catch como falha
+          console.log('[Bridge] rascunho registrado apesar da falha de emissao: ok (' + rR2.status + ')');
+          _rascunhoRegistrado = true;
+        } catch (e2) { console.log('[Bridge] registro do rascunho FALHOU (vincule manualmente):', e2.message || e2); }
       }
-      throw new Error(resposta.erro || 'Erro desconhecido dentro da aba do Bling');
+      /* Codex #236 r5: quando o registro do rascunho nao confirmou, o id viaja na mensagem —
+         o operador consegue vincular na mao em vez de re-emitir em duplicidade. */
+      const _idInfo = (!_rascunhoRegistrado && resposta.resultado && resposta.resultado.idNotaDevolucao)
+        ? ' [ATENCAO: a NF de devolucao JA FOI CRIADA no Bling — id ' + resposta.resultado.idNotaDevolucao + (resposta.resultado.numero ? ', numero ' + resposta.resultado.numero : '') + ' — vincule pelo painel em vez de gerar de novo]' : '';
+      throw new Error((resposta.erro || 'Erro desconhecido dentro da aba do Bling') + _idInfo);
     }
 
     // v1.4.2: GRAVA o resultado direto no sistema (nao depende do painel
@@ -351,7 +358,29 @@ async function gerarDevolucao(payload, painelTab) {
     return await Promise.race([trabalho, limite]);
   } finally {
     // limpeza + volta pro painel (mesmo em erro/timeout)
-    if (execId) aguardandoResultado.delete(execId);
+    /* Codex #236 r5 (P1): no TIMEOUT a operacao na aba do Bling CONTINUA — deletar o resolver
+       jogava fora o resultado tardio (a NF podia ter sido criada e ninguem registrava). Agora
+       o lugar do resolver recebe um consumidor tardio que faz o auto-registro quando (e se) o
+       resultado chegar, por ate 15 min; fluxo normal segue deletando. */
+    if (execId) {
+      const _aindaEsperando = aguardandoResultado.has(execId);
+      aguardandoResultado.delete(execId);
+      if (_aindaEsperando && payload && payload.devolucaoId) {
+        aguardandoResultado.set(execId, async function (mTard) {
+          try {
+            const rTard = mTard && mTard.resultado;
+            if (!(rTard && rTard.idNotaDevolucao)) return;
+            const _prefT = (String(payload.empresa || 'good').toLowerCase().indexOf('amb') === 0) ? '/amb' : '';
+            const rT = await fetch(API_SISTEMA + _prefT + '/api/admin/registrar-devolucao-gerada/' + encodeURIComponent(payload.devolucaoId), {
+              method: 'PUT', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ nf_devolucao_id_bling: String(rTard.idNotaDevolucao), nf_devolucao_numero: String(rTard.numero || '') }),
+            });
+            console.log('[Bridge] resultado TARDIO (pos-timeout) registrado:', rT.status, rT.ok ? '' : '(FALHOU)');
+          } catch (eT) { console.log('[Bridge] registro tardio falhou:', eT.message || eT); }
+        });
+        setTimeout(function () { aguardandoResultado.delete(execId); }, 900000);
+      }
+    }
     if (painelTab && painelTab.id != null) {
       try {
         await chrome.tabs.update(painelTab.id, { active: true });
@@ -727,8 +756,11 @@ function fluxoDevolucaoNaPagina(p) {
     }
 
     // ---------- PASSO 4: emitir no SEFAZ ----------
+    /* Codex #236 r5 (P1): a partir do salvar a nota existe — TODO caminho de falha daqui em
+       diante carrega o rascunho (inclusive este, que rodava antes da declaracao). */
+    const _rascunho = { idNotaDevolucao: idNotaDevolucao, numero: numero, emitida: false, situacao: '1' };
     if (!idDeposito) {
-      return { ok: false, erro: 'Nao foi possivel emitir: idDeposito ausente nos dados da NF.' };
+      return { ok: false, erro: 'Nao foi possivel emitir: idDeposito ausente nos dados da NF.', resultado: _rascunho };
     }
     const bodyEmitir =
       'xajax=emitirNotaDevolucaoCertificadoArmazenado' +
@@ -746,11 +778,6 @@ function fluxoDevolucaoNaPagina(p) {
       referrer: refBase || 'about:client',
       body: bodyEmitir,
     });
-    /* Codex #236 r4 (P1): a partir daqui a nota JA EXISTE no Bling (idNotaDevolucao veio do
-       salvar) — falha da EMISSAO nao pode descartar o id, senao o rascunho fica sem vinculo
-       no sistema e o proximo clique cria OUTRA nota (duplicidade). O id viaja junto do erro
-       e o consumidor registra o rascunho antes de reportar a falha. */
-    const _rascunho = { idNotaDevolucao: idNotaDevolucao, numero: numero, emitida: false, situacao: '1' };
     if (!r4.ok) {
       return { ok: false, erro: 'Bling respondeu HTTP ' + r4.status + ' (emitir devolucao).', resultado: _rascunho };
     }

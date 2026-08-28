@@ -246,9 +246,11 @@
       if (detectada) loja = detectada;
     }
     _lojaMontada = loja;   // Codex #236 r3: o observer compara contra a loja do painel atual
+    const _g = ++_geracao;   // Codex #236 r5: request de um init antigo nao escreve no painel novo
     montarPainel(loja, categoria);
     try {
       const respostas = await buscarRespostas(cfg, loja, categoria);
+      if (_g !== _geracao) return;   // outro init assumiu enquanto este esperava a rede
       renderizarBotoes(respostas);
     } catch (e) {
       const body = document.getElementById('amb-rr-body');
@@ -260,6 +262,7 @@
 
   let urlAtual = location.href;
   let _lojaMontada = null;
+  let _geracao = 0;   // Codex #236 r5
   let _debHeader = null;
   const observer = new MutationObserver(() => {
     if (location.href !== urlAtual) {
