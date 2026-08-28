@@ -326,6 +326,7 @@
 </style>
 </head>
 <body>
+<script src="/comum/nav.js" data-so-admin></script>
 <div class="loginback" id="loginback">
   <div class="loginbox">
     <div class="logoBig"></div>
@@ -746,7 +747,7 @@ function iniciarHeartbeat(id){ pararHeartbeat(); hbTimer = setInterval(()=>{ pos
 function pararHeartbeat(){ if(hbTimer){ clearInterval(hbTimer); hbTimer=null; } }
 function liberarReserva(id){ if(id) postJson('/girassol-backup-offline/liberar', {id}).catch(()=>{}); }
 
-function _revelaRelatorio(){ const b=document.getElementById('btnRelatorio'); if(b) b.style.display = souAdmin()? '' : 'none'; const b2=document.getElementById('btnBlingAgora'); if(b2) b2.style.display = souAdmin()? '' : 'none'; const b4=document.getElementById('btnDashboard'); if(b4) b4.style.display = souAdmin()? '' : 'none'; }
+function _revelaRelatorio(){ const b=document.getElementById('btnRelatorio'); if(b) b.style.display = souAdmin()? '' : 'none'; const b2=document.getElementById('btnBlingAgora'); if(b2) b2.style.display = souAdmin()? '' : 'none'; const b4=document.getElementById('btnDashboard'); if(b4) b4.style.display = souAdmin()? '' : 'none';  if(souAdmin() && window.navPaineisMostrar) window.navPaineisMostrar(); }
 async function blingAgora(){
   if(!souAdmin()) return;
   const b=$('btnBlingAgora'); if(b) b.disabled=true;
