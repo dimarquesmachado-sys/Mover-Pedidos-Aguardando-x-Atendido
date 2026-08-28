@@ -33,6 +33,41 @@ async function api(path, options = {}) {
 // ============================================================
 // LOGIN
 // ============================================================
+// ── 28/08: empresa ativa (multi-empresa) ─────────────────────────────
+const EMP_NOMES = { girassol: "Girassol", good: "GOOD Import", ambtotal: "AMBTotal" };
+function empresaAtiva() {
+  const sess = getSession();
+  const emps = sess?.empresas || [];
+  const salva = sessionStorage.getItem("fragil.empresa");
+  if (salva && emps.includes(salva)) return salva;
+  return emps[0] || "";
+}
+function setEmpresaAtiva(emp) { sessionStorage.setItem("fragil.empresa", emp); }
+function qEmp() { return "?empresa=" + encodeURIComponent(empresaAtiva()); }
+
+function montarSeletorEmpresa() {
+  const sess = getSession();
+  const emps = sess?.empresas || [];
+  const alvo = $("user-nome")?.parentElement;
+  if (!alvo || document.getElementById("sel-empresa")) return;
+  const sel = document.createElement("select");
+  sel.id = "sel-empresa";
+  sel.style.cssText = "margin-right:12px;padding:6px 10px;border:2px solid #dee2e6;border-radius:8px;font-size:14px;font-weight:bold;";
+  for (const e of emps) {
+    const o = document.createElement("option");
+    o.value = e; o.textContent = EMP_NOMES[e] || e;
+    if (e === empresaAtiva()) o.selected = true;
+    sel.appendChild(o);
+  }
+  sel.addEventListener("change", () => {
+    setEmpresaAtiva(sel.value);
+    carregar();
+    carregarAuditoria();
+  });
+  if (emps.length <= 1) sel.disabled = true;   // um acesso so: mostra travado, sem escolha
+  alvo.insertBefore(sel, alvo.firstChild);
+}
+
 async function inicializar() {
   // Verifica se já tem sessão válida
   const sess = getSession();
@@ -109,9 +144,32 @@ function mostrarConteudo() {
     $("user-nome").textContent += " (chave-mestra)";
   }
   $("conteudo").classList.remove("escondido");
+  montarSeletorEmpresa();
   carregarStatus();
   carregar();
   carregarUsuarios();
+  carregarAuditoria();
+}
+
+// ============================================================
+// AUDITORIA (quem mudou o que — 28/08)
+// ============================================================
+async function carregarAuditoria() {
+  const box = document.getElementById("auditoria-lista");
+  if (!box) return;
+  try {
+    const j = await api("/fragil/api/auditoria" + qEmp() + "&limite=100");
+    if (!j.ok) { box.textContent = j.erro || "Erro"; return; }
+    if (!j.eventos.length) { box.textContent = "Nenhuma mudança registrada ainda nesta empresa."; return; }
+    box.innerHTML = j.eventos.map(ev => {
+      const quando = new Date(ev.ts).toLocaleString("pt-BR");
+      const oque = ev.acao === "config" ? "alterou as configurações"
+        : ev.acao === "importou" ? ("importou " + (ev.depois?.skus ?? "?") + " SKU(s)")
+        : (ev.acao + " o SKU <b>" + escapeHtml(ev.sku || "?") + "</b>");
+      return '<div style="padding:6px 0;border-bottom:1px solid #eee;font-size:13px;">' +
+        '<span style="color:#888">' + quando + '</span> — <b>' + escapeHtml(ev.usuario || "?") + '</b> ' + oque + '</div>';
+    }).join("");
+  } catch (e) { box.textContent = "Erro ao carregar auditoria: " + e.message; }
 }
 
 // ============================================================
@@ -834,7 +892,7 @@ function status(txt, ok) {
 
 async function carregar() {
   try {
-    const r = await fetch("/fragil/api/skus");
+    const r = await fetch("/fragil/api/skus" + qEmp());
     const j = await r.json();
     preencherTabelaDoMapa(j.skus || {});
     $("tempo").value = j.config?.tempoMinimoSegundos ?? 2;
@@ -881,12 +939,13 @@ async function salvar() {
       },
       skus: lerTabelaParaMapa()
     };
-    const j = await api("/fragil/api/skus", { method: "POST", body: JSON.stringify(corpo) });
+    const j = await api("/fragil/api/skus" + qEmp(), { method: "POST", body: JSON.stringify(corpo) });
     if (j.atualizadoEm) {
       const por = j.atualizadoPor ? ` por ${j.atualizadoPor}` : "";
       $("atualizadoEm").textContent = "Última atualização: " + new Date(j.atualizadoEm).toLocaleString("pt-BR") + por;
     }
     status("✓ Salvo! " + Object.keys(j.skus).length + " SKUs ativos", true);
+    carregarAuditoria();
   } catch (e) {
     status("Erro ao salvar: " + e.message, false);
   } finally {
