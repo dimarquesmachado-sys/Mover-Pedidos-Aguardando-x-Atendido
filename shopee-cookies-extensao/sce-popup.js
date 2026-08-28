@@ -18,6 +18,17 @@ $('btn').addEventListener('click', async () => {
   $('btn').disabled = true;
   res.textContent = '⏳ capturando cookies…';
   try {
+    /* Firefox (AMB): as permissões de host NÃO vêm concedidas na instalação (diferente do
+       Chrome/Edge) — sem isto o getAll volta vazio e o fetch é bloqueado. Pede na 1ª vez;
+       no Chrome/Edge já vem tudo concedido e isto é um no-op. */
+    try {
+      const quer = { origins: ['https://*.shopee.com.br/*', 'https://mover-pedidos-aguardando-x-atendido.onrender.com/*'] };
+      const tem = await chrome.permissions.contains(quer);
+      if (!tem) {
+        const deu = await chrome.permissions.request(quer);
+        if (!deu) { res.innerHTML = '<span class="err">sem permissão de acesso aos sites — aceite o pedido pra extensão funcionar</span>'; $('btn').disabled = false; return; }
+      }
+    } catch (ePerm) {}
     const todos = await chrome.cookies.getAll({ domain: 'shopee.com.br' });
     if (!todos || !todos.length) { res.innerHTML = '<span class="err">nenhum cookie da Shopee — entre no seller.shopee.com.br primeiro</span>'; $('btn').disabled = false; return; }
     const porNome = new Map();
