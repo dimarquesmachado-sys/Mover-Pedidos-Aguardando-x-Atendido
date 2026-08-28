@@ -130,7 +130,9 @@
       msg('Configuração salva. Verificando…');
       verificar();
     });
-    elBtn.addEventListener('click', () => rodar(true));
+    /* Codex #236 r4: com 'Importar de novo' sem lote novo, o rodar(true) subia ZERO e dizia
+       Pronto — agora sem novas o clique re-le o estado (que pode ter novidade do cron). */
+    elBtn.addEventListener('click', () => { const _q = pendente ? (((typeof pendente.novas_saida === 'number') ? pendente.novas_saida : (pendente.novas || 0)) + (pendente.novas_entrada || 0)) : 0; if (_q > 0) rodar(true); else verificar(); });
     wrap.querySelector('#nfmagalu-fechar').addEventListener('click', ev => { ev.stopPropagation(); esconder(); });
 
     // Ctrl + Alt + M chama o painel a qualquer momento (mesma ideia do
@@ -224,6 +226,10 @@
     });
     const txt = await r.text();
     if (/location\.href\s*=\s*["'][^"']*\/login/i.test(txt)) throw new Error('SESSAO: o Bling pediu login ao processar');
+    /* Codex #236 r4 (P1): 4xx/5xx que nao e login devolvia o corpo do ERRO pro resumir — sem a
+       frase "XML nao importado" ali, contava zero falhas e o lote era registrado como importado
+       sem o Bling ter processado NADA. Agora vira erro e cai no vermelho de 'Tentar de novo'. */
+    if (!r.ok) throw new Error('Bling respondeu HTTP ' + r.status + ' ao processar o lote');
     return txt;
   }
 
@@ -342,6 +348,7 @@
     abrir();
     try {
       const feito = [];
+      let _regFalhou = null;   // Codex #236 r4
 
       // Uma rodada por tipo. E a MESMA tela do Bling — o que muda e o campo
       // Tipo (S ou E). Por isso sao dois envios, nao dois importadores.
@@ -368,11 +375,12 @@
            (inofensivo) e o registro acontece quando a rodada fechar limpa. */
         if (!res.nao_importados) {
           try {
-            await fetch(cfg.servidor + '/magalu/nf-full/ext/registrar?k=' + encodeURIComponent(cfg.chave), {
+            const rReg = await fetch(cfg.servidor + '/magalu/nf-full/ext/registrar?k=' + encodeURIComponent(cfg.chave), {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ empresa: pendente.empresa, arquivo: pendente.arquivo, tipo: tipo, resumo: res })
             });
-          } catch (e) { /* registrar e bonus, nao pode derrubar o resultado */ }
+            if (!rReg.ok) _regFalhou = 'HTTP ' + rReg.status;   // Codex #236 r4: 401/500 aqui nao pode virar "Pronto" verde — o servidor NAO gravou e o lote reaparece
+          } catch (e) { _regFalhou = String(e.message || e); }
         }
       }
 
@@ -383,14 +391,15 @@
       if (qE && pendente.url_zip_entrada) await rodada('E', pendente.url_zip_entrada, qE, 'entrada');
 
       const _falhas = feito.reduce((s, f) => s + (f.res.nao_importados || 0), 0);
-      msg((_falhas ? '⚠ Quase: ' : '✓ Pronto.') + '\n' + feito.map(f =>
+      if (_regFalhou) msg('⚠ Importadas no Bling, mas o REGISTRO no servidor falhou (' + _regFalhou + ') — o lote vai reaparecer na próxima checagem (re-importar é inofensivo: viram "já registrada").', '#fdd663');
+      else msg((_falhas ? '⚠ Quase: ' : '✓ Pronto.') + '\n' + feito.map(f =>
             f.quantas + ' de ' + f.rotulo + ' enviadas' +
             (f.res.ja_registradas ? ' — ' + f.res.ja_registradas + ' já estavam lá' : '') +
             (f.res.nao_importados ? ' — ' + f.res.nao_importados + ' NÃO importadas (vão re-tentar na próxima)' : '')
           ).join('\n'), _falhas ? '#fdd663' : '#81c995');
 
       elBtn.textContent = 'Importar de novo';
-      sumirDepois(8000);   // deu certo: some sozinho, nao fica atrapalhando
+      if (!_regFalhou) sumirDepois(8000);   // deu certo: some sozinho (registro falhado FICA na tela)
     } catch (e) {
       const t = String(e.message || e);
       msg(t.indexOf('SESSAO') === 0 ? 'Sessão do Bling caiu. Faça login e recarregue.' : '✗ ' + t, '#f28b82');
@@ -598,6 +607,10 @@
     });
     const txt = await r.text();
     if (/location\.href\s*=\s*["'][^"']*\/login/i.test(txt)) throw new Error('SESSAO: o Bling pediu login ao processar');
+    /* Codex #236 r4 (P1): 4xx/5xx que nao e login devolvia o corpo do ERRO pro resumir — sem a
+       frase "XML nao importado" ali, contava zero falhas e o lote era registrado como importado
+       sem o Bling ter processado NADA. Agora vira erro e cai no vermelho de 'Tentar de novo'. */
+    if (!r.ok) throw new Error('Bling respondeu HTTP ' + r.status + ' ao processar o lote');
     return txt;
   }
 
@@ -697,6 +710,7 @@
     if (ocupado || !pendente || !pendente.precisa) return;
     ocupado = true; elBtn.disabled = true; abrir();
     try {
+      let _regFalhou = null;   // Codex #236 r4
       const feito = [];
       async function rodada(tipo, url, quantas, rotulo) {
         if (!quantas || !url) return;
@@ -718,14 +732,16 @@
         if (!res.nao_importados) {
           try {
             const nomeArq = decodeURIComponent((url.split('/fbs/zip/')[1] || '').split('?')[0]);
-            if (nomeArq) await fetch(cfg.sp_servidor + '/' + encodeURIComponent(cfg.sp_loja) + '/fbs/ext/registrar?k=' + encodeURIComponent(cfg.sp_chave) + '&arquivo=' + encodeURIComponent(nomeArq));
-          } catch (e) { /* registrar é bônus */ }
+            if (nomeArq) { const rReg = await fetch(cfg.sp_servidor + '/' + encodeURIComponent(cfg.sp_loja) + '/fbs/ext/registrar?k=' + encodeURIComponent(cfg.sp_chave) + '&arquivo=' + encodeURIComponent(nomeArq)); if (!rReg.ok) _regFalhou = 'HTTP ' + rReg.status; }
+          } catch (e) { _regFalhou = String(e.message || e); }
         }
       }
       await rodada('S', pendente.url_zip_saida, pendente.novas_saida, 'saída');
       if (pendente.novas_entrada && pendente.url_zip_entrada) await rodada('E', pendente.url_zip_entrada, pendente.novas_entrada, 'entrada');
 
       const _falhasS = feito.reduce((s, f) => s + (f.res.nao_importados || 0), 0);
+      if (_regFalhou) { msg('⚠ Importadas no Bling, mas o REGISTRO no servidor falhou (' + _regFalhou + ') — o lote vai reaparecer na próxima checagem.', '#fdd663'); elBtn.textContent = 'Importar de novo'; }
+      else {
       /* Codex #236 r3 (P1): o vinculo so e aprendido quando a rodada fechou LIMPA — gravar com
          "XML nao importado" no corpo (ex.: sessao da empresa errada) envenenava a trava e a
          sessao CERTA passava a ser recusada. */
@@ -733,6 +749,7 @@
       msg((_falhasS ? '⚠ Quase: ' : '✓ Pronto.') + '\n' + feito.map(f => f.quantas + ' de ' + f.rotulo + ' enviadas' + (f.res.ja_registradas ? ' — ' + f.res.ja_registradas + ' já estavam lá' : '') + (f.res.nao_importados ? ' — ' + f.res.nao_importados + ' NÃO importadas (vão re-tentar)' : '')).join('\n'), _falhasS ? '#fdd663' : '#81c995');
       elBtn.textContent = 'Importar de novo';
       sumirDepois(8000);
+      }
     } catch (e) {
       const t = String(e.message || e);
       msg(t.indexOf('SESSAO') === 0 ? 'Sessão do Bling caiu. Faça login e recarregue.' : '✗ ' + t, '#f28b82');

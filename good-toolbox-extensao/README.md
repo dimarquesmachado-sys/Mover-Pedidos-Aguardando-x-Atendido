@@ -18,7 +18,7 @@ A antiga "Localização Estoque" ficou de fora de propósito: o checkout offline
    - **Respostas Rápidas** (popup → Respostas): URL do serviço + RESPOSTAS_API_KEY + loja.
    - **Sessão Shopee** (popup → Sessão Shopee): ADMIN_KEY.
    - **Alerta Frágil** (popup → Alerta Frágil, abre as opções): URL do servidor — sem ela o alerta NÃO sincroniza os SKUs.
-   - **NF-e Fulfillment Magalu** e **Shopee Full**: a config é no PRÓPRIO painel que a extensão mostra dentro do Bling — abra o Bling, e quando o cartão da importação aparecer, clique em **Configurar** em cada um (Magalu e Shopee) e cole servidor + chave. ⚠️ Sem isso a importação de NF fica MUDA (o da Shopee nem avisa que está sem chave) e nota do Full deixa de entrar no Bling.
+   - **NF-e Fulfillment Magalu** e **Shopee Full**: a config é no PRÓPRIO painel que a extensão mostra dentro do Bling. ⚠️ Numa instalação nova, o cartão da **Shopee NÃO aparece sozinho** (sem chave ele fica mudo de propósito): com o Bling aberto, aperte **Ctrl+Alt+S** pra forçar o cartão e clique em **Configurar**; o da Magalu aparece sozinho quando há trabalho, e a config é pelo mesmo botão. Sem isso, nota do Full deixa de entrar no Bling.
 
 ## Roteiro de teste antes de aposentar as antigas
 Com a Toolbox instalada e as antigas AINDA ativas, DESATIVE as 5 antigas (não desinstale) em `edge://extensions` e confira um fluxo de cada:

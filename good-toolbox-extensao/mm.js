@@ -59,19 +59,25 @@ $('sync').onclick = async function () {
        listener aceita SO a gravacao do sync MANUAL feita apos o clique, senao um sync
        automatico em voo mostraria um sucesso que nao e o desta acao. */
     const _t0 = Date.now();
+    let _fb = null;   // Codex #236 r4: o fallback e CANCELADO quando o status correlato chega
     const _ouvinte = function (mud, area) {
       if (area === 'local' && mud.ultimoStatus) {
         const nv = mud.ultimoStatus.newValue || {};
         if (nv.motivo !== 'manual' || !(nv.quando >= _t0)) return;   // nao e o meu: segue ouvindo
         chrome.storage.onChanged.removeListener(_ouvinte);
+        clearTimeout(_fb);
         mostrarStatus(nv);
       }
     };
     chrome.storage.onChanged.addListener(_ouvinte);
-    setTimeout(async function () {
+    _fb = setTimeout(async function () {
       chrome.storage.onChanged.removeListener(_ouvinte);
       const c = await chrome.storage.local.get(['ultimoStatus']);
-      mostrarStatus(c.ultimoStatus);
+      const s = c.ultimoStatus || null;
+      /* Codex #236 r4: o fallback so exibe o status se for O MEU (manual, pos-clique) —
+         status alheio/antigo nao passa por resposta do sync manual. */
+      if (s && s.motivo === 'manual' && s.quando >= _t0) mostrarStatus(s);
+      else $('status').textContent = '⏳ O sync manual ainda não respondeu (30s). A página do MM está aberta e logada? Tente de novo.';
     }, 30000);
   });
 };

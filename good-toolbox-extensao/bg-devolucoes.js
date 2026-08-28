@@ -298,6 +298,19 @@ async function gerarDevolucao(payload, painelTab) {
     const resposta = await promResultado;
 
     if (!resposta.ok) {
+      /* Codex #236 r4 (P1): se a falha veio DEPOIS de a nota existir (emissao recusada), o
+         rascunho e registrado ANTES de reportar o erro — senao o vinculo se perde e o
+         proximo clique emite em DUPLICIDADE. */
+      if (payload.devolucaoId && resposta.resultado && resposta.resultado.idNotaDevolucao) {
+        try {
+          const _prefR = (String(payload.empresa || 'good').toLowerCase().indexOf('amb') === 0) ? '/amb' : '';
+          const rR2 = await fetch(API_SISTEMA + _prefR + '/api/admin/registrar-devolucao-gerada/' + encodeURIComponent(payload.devolucaoId), {
+            method: 'PUT', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ nf_devolucao_id_bling: String(resposta.resultado.idNotaDevolucao), nf_devolucao_numero: String(resposta.resultado.numero || '') }),
+          });
+          console.log('[Bridge] rascunho registrado apesar da falha de emissao:', rR2.status);
+        } catch (e2) { console.log('[Bridge] registro do rascunho tambem falhou:', e2.message || e2); }
+      }
       throw new Error(resposta.erro || 'Erro desconhecido dentro da aba do Bling');
     }
 
@@ -733,15 +746,20 @@ function fluxoDevolucaoNaPagina(p) {
       referrer: refBase || 'about:client',
       body: bodyEmitir,
     });
+    /* Codex #236 r4 (P1): a partir daqui a nota JA EXISTE no Bling (idNotaDevolucao veio do
+       salvar) — falha da EMISSAO nao pode descartar o id, senao o rascunho fica sem vinculo
+       no sistema e o proximo clique cria OUTRA nota (duplicidade). O id viaja junto do erro
+       e o consumidor registra o rascunho antes de reportar a falha. */
+    const _rascunho = { idNotaDevolucao: idNotaDevolucao, numero: numero, emitida: false, situacao: '1' };
     if (!r4.ok) {
-      return { ok: false, erro: 'Bling respondeu HTTP ' + r4.status + ' (emitir devolucao).' };
+      return { ok: false, erro: 'Bling respondeu HTTP ' + r4.status + ' (emitir devolucao).', resultado: _rascunho };
     }
     const emissao = await lerJson(r4, 'emitir devolucao');
-    if (emissao.__erro) return { ok: false, erro: emissao.__erro };
+    if (emissao.__erro) return { ok: false, erro: emissao.__erro, resultado: _rascunho };
 
     if (emissao.situacao !== 2) {
       const erroMsg = emissao.erros || emissao.mensagem || JSON.stringify(emissao).slice(0, 300);
-      return { ok: false, erro: 'SEFAZ nao autorizou (situacao ' + emissao.situacao + '): ' + erroMsg };
+      return { ok: false, erro: 'SEFAZ nao autorizou (situacao ' + emissao.situacao + '): ' + erroMsg, resultado: Object.assign({}, _rascunho, { situacao: String(emissao.situacao || '1') }) };
     }
 
     return {

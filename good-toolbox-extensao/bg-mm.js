@@ -34,7 +34,7 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
   if (msg && msg.tipo === 'MM_LOTES') {
     (async function () {
       if (!msg.ok) {
-        await registrarStatus({ etapa: 'ler_mm', ok: false, status: msg.status || null, erro: msg.erro || 'falha ao ler lotes do MM' });
+        await registrarStatus({ etapa: 'ler_mm', ok: false, motivo: msg.motivo, status: msg.status || null, erro: msg.erro || 'falha ao ler lotes do MM' });   // Codex #236 r4: sem o motivo, o popup ignorava a FALHA do sync manual e ficava em 'Sincronizando...'
         sendResponse({ ok: false });
         return;
       }
