@@ -72,10 +72,16 @@ if (_btnPainelResp) _btnPainelResp.addEventListener('click', function (ev) {
   ev.preventDefault();
   /* Codex #243: o painel generico expoe TODAS as lojas — abre o painel DA LOJA da
      instancia (girassol→girassol, good→gimpo, amb→ambtotal), que trava o editor nela. */
-  chrome.storage.local.get(['tb_empresa'], function (r) {
-    const mapa = { girassol: 'girassol', good: 'gimpo', amb: 'ambtotal' };
-    const loja = mapa[r.tb_empresa] || '';
-    const url = 'https://mover-pedidos-aguardando-x-atendido.onrender.com/respostas-rapidas/' + (loja ? loja + '/painel' : 'painel');
-    chrome.tabs.create({ url });
+  /* Codex #243 r2: o painel abre no SERVIDOR CONFIGURADO (apiUrl), nao em producao fixa —
+     senao, num deploy proprio/staging, a edicao cairia num servidor e a extensao leria de outro. */
+  chrome.storage.sync.get(['apiUrl'], function (cfgS) {
+    chrome.storage.local.get(['tb_empresa'], function (r) {
+      const mapa = { girassol: 'girassol', good: 'gimpo', amb: 'ambtotal' };
+      const loja = mapa[r.tb_empresa] || '';
+      let base = 'https://mover-pedidos-aguardando-x-atendido.onrender.com';
+      try { if (cfgS.apiUrl) base = new URL(cfgS.apiUrl).origin; } catch (e) { /* apiUrl invalida: fica a producao */ }
+      const url = base + '/respostas-rapidas/' + (loja ? loja + '/painel' : 'painel');
+      chrome.tabs.create({ url });
+    });
   });
 });
