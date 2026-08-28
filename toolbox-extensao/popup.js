@@ -16,12 +16,14 @@ const CARTOES = [
 const LINKS = {
   girassol: [
     ['⚠️ Painel Frágil', 'https://mover-pedidos-aguardando-x-atendido.onrender.com/fragil/'],
+    ['💬 Respostas Rápidas (editar respostas)', 'https://mover-pedidos-aguardando-x-atendido.onrender.com/respostas-rapidas/girassol/painel'],
     ['🛒 Checkout offline Girassol', 'https://mover-pedidos-aguardando-x-atendido.onrender.com/girassol-backup-offline/'],
     ['🍪 Painel Shopee (multi-loja)', 'https://girassol-shopee-sync-organizar-envio.onrender.com/'],
     ['⚙️ Render (envs e serviços)', 'https://dashboard.render.com/'],
   ],
   good: [
     ['⚠️ Painel Frágil', 'https://mover-pedidos-aguardando-x-atendido.onrender.com/fragil/'],
+    ['💬 Respostas Rápidas (editar respostas)', 'https://mover-pedidos-aguardando-x-atendido.onrender.com/respostas-rapidas/gimpo/painel'],
     ['🛒 Checkout offline GOOD', 'https://mover-pedidos-aguardando-x-atendido.onrender.com/good-checkout-offline/'],
     ['↩️ Devoluções GOOD', 'https://good-devolucoes-x-marketplaces-x-nfsbling.onrender.com/'],
     ['🍪 Painel Shopee (multi-loja)', 'https://girassol-shopee-sync-organizar-envio.onrender.com/'],
@@ -29,6 +31,7 @@ const LINKS = {
   ],
   amb: [
     ['⚠️ Painel Frágil', 'https://mover-pedidos-aguardando-x-atendido.onrender.com/fragil/'],
+    ['💬 Respostas Rápidas (editar respostas)', 'https://mover-pedidos-aguardando-x-atendido.onrender.com/respostas-rapidas/ambtotal/painel'],
     ['🛒 Checkout offline AMBTotal', 'https://mover-pedidos-aguardando-x-atendido.onrender.com/amb-checkout-offline/'],
     ['↩️ Devoluções AMB', 'https://good-devolucoes-x-marketplaces-x-nfsbling.onrender.com/amb/'],
     ['🍪 Painel Shopee (multi-loja)', 'https://girassol-shopee-sync-organizar-envio.onrender.com/'],
@@ -48,13 +51,23 @@ function mostrar(emp) {
   if (!emp) return;
   document.getElementById('empNome').textContent = NOMES[emp] || emp;
   document.getElementById('cards').innerHTML = CARTOES.filter(c => c.emp.includes(emp)).map(c => c.html).join('');
-  const links = (LINKS[emp] || []).map(l =>
-    '<a class="lnk" href="#" data-url="' + l[1] + '">🔗 ' + l[0] + '</a>'
-  ).join('');
-  document.getElementById('links').innerHTML = links ? '<div class="lnk-titulo">Páginas dos serviços</div>' + links : '';
-  for (const a of document.querySelectorAll('#links a.lnk')) {
-    a.addEventListener('click', (ev) => { ev.preventDefault(); chrome.tabs.create({ url: a.dataset.url }); });
-  }
+  /* Codex #243 r3: o link do Respostas deriva do servidor CONFIGURADO (apiUrl do cartao),
+     como o botao da tela de configuracao — edicao e leitura no mesmo servidor. Os demais
+     atalhos sao paginas fixas dos servicos e ficam estaticos por desenho. */
+  chrome.storage.sync.get(['apiUrl'], (cfgS) => {
+    let baseResp = 'https://mover-pedidos-aguardando-x-atendido.onrender.com';
+    try { if (cfgS.apiUrl) baseResp = new URL(cfgS.apiUrl).origin; } catch (e) { /* invalida: producao */ }
+    const linksEmp = (LINKS[emp] || []).map(l => {
+      const url = l[0].indexOf('Respostas') >= 0
+        ? l[1].replace('https://mover-pedidos-aguardando-x-atendido.onrender.com', baseResp)
+        : l[1];
+      return '<a class="lnk" href="#" data-url="' + url + '">🔗 ' + l[0] + '</a>';
+    }).join('');
+    document.getElementById('links').innerHTML = linksEmp ? '<div class="lnk-titulo">Páginas dos serviços</div>' + linksEmp : '';
+    for (const a of document.querySelectorAll('#links a.lnk')) {
+      a.addEventListener('click', (ev) => { ev.preventDefault(); chrome.tabs.create({ url: a.dataset.url }); });
+    }
+  });
   document.getElementById('autos').textContent = AUTOS[emp] || '';
 }
 
