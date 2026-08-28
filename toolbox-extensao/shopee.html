@@ -1,0 +1,25 @@
+<!doctype html>
+<meta charset="utf-8">
+<style>
+  body{font-family:system-ui;background:#0a0e1a;color:#e8eaf2;width:320px;margin:0;padding:16px}
+  h3{margin:0 0 10px;font-size:15px}
+  label{font-size:11px;color:#9aa3b5;display:block;margin:10px 0 4px}
+  select,input{width:100%;box-sizing:border-box;background:#141a2e;color:#e8eaf2;border:1px solid #26304d;border-radius:8px;padding:8px;font-size:13px}
+  button{width:100%;margin-top:14px;background:#2e6ef7;color:#fff;border:0;border-radius:10px;padding:12px;font-size:14px;font-weight:700;cursor:pointer}
+  button:disabled{opacity:.5;cursor:default}
+  #res{margin-top:12px;font-size:12px;line-height:1.5;min-height:18px}
+  .ok{color:#34d399}.err{color:#f87171}.dim{color:#9aa3b5;font-size:11px;margin-top:8px}
+</style>
+<h3>📤 Shopee Sessão → Checkout</h3>
+<label>Empresa (a conta LOGADA no Seller Center tem que ser a dela)</label>
+<select id="emp">
+  <option value="girassol-backup-offline">Girassol</option>
+  <option value="amb-checkout-offline">AMB</option>
+  <option value="good-checkout-offline">GOOD</option>
+</select>
+<label>Chave (ADMIN_KEY — fica salva aqui)</label>
+<input id="key" type="password" placeholder="cole a ADMIN_KEY uma vez">
+<button id="btn">Enviar sessão atual</button>
+<div id="res"></div>
+<div class="dim">Como usar: entre no seller.shopee.com.br com a conta da empresa, escolha a empresa acima e clique em enviar. O serviço testa a sessão na hora e responde se ficou viva.</div>
+<script src="shopee.js"></script>
