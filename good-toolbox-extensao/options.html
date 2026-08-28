@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <title>GOOD - Alerta Produto Frágil — Configurações da Extensão</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: Arial, Helvetica, sans-serif; background: #f5f5f5; margin: 0; padding: 24px; color: #212529; }
+    .container { max-width: 760px; margin: 0 auto; }
+    h1 { color: #dc3545; margin-top: 0; display: flex; align-items: center; gap: 10px; }
+    h1 .ico { font-size: 36px; }
+    h2 { color: #495057; font-size: 18px; margin-top: 0; }
+    .card { background: white; border-radius: 12px; padding: 24px; box-shadow: 0 2px 6px rgba(0,0,0,0.08); margin-bottom: 20px; }
+    .info { background: #e3f2fd; border-left: 5px solid #2196f3; padding: 14px 18px; border-radius: 6px; margin-bottom: 18px; font-size: 14px; line-height: 1.5; }
+    label { display: block; font-weight: bold; margin-bottom: 8px; color: #495057; }
+    input[type=text], input[type=url] { width: 100%; font-family: 'Courier New', Courier, monospace; font-size: 14px; padding: 10px 12px; border: 2px solid #dee2e6; border-radius: 8px; }
+    input:focus { outline: none; border-color: #dc3545; }
+    .acoes { display: flex; gap: 12px; margin-top: 16px; flex-wrap: wrap; align-items: center; }
+    button { padding: 12px 28px; font-size: 15px; font-weight: bold; border: none; border-radius: 8px; cursor: pointer; transition: opacity 0.15s; }
+    button:hover { opacity: 0.85; }
+    .btn-salvar { background: #28a745; color: white; }
+    .btn-sync { background: #007bff; color: white; }
+    .btn-link { background: #6f42c1; color: white; }
+    #status { margin-left: auto; font-weight: bold; font-size: 14px; }
+    .ok { color: #28a745; }
+    .erro { color: #dc3545; }
+    .meta { font-size: 13px; color: #6c757d; margin-top: 6px; }
+    .resumo { background: #f8f9fa; padding: 14px; border-radius: 8px; border: 1px solid #dee2e6; font-size: 14px; line-height: 1.6; }
+    .resumo b { color: #dc3545; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1><span class="ico">⚠️</span> Alerta Produto Frágil — Configurações</h1>
+
+    <div class="card">
+      <h2>🌐 Servidor Online (sincronização)</h2>
+      <div class="info">
+        Configure abaixo a URL do painel online (Render). A extensão vai buscar a lista de SKUs e configurações
+        deste servidor automaticamente. Para editar a lista, abra o painel pelo botão <b>"Abrir painel online"</b>.
+      </div>
+
+      <label for="servidor">URL do servidor</label>
+      <input type="url" id="servidor" placeholder="https://good-alerta-fragil.onrender.com" />
+      <div class="meta">Cole aqui a URL do seu serviço Render. Sem barra no final.</div>
+
+      <div class="acoes">
+        <button class="btn-salvar" id="btn-salvar">💾 Salvar URL</button>
+        <button class="btn-sync" id="btn-sync">🔄 Sincronizar agora</button>
+        <button class="btn-link" id="btn-abrir-painel">🚀 Abrir painel online</button>
+        <span id="status"></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>📊 Status atual (lista em cache local)</h2>
+      <div class="resumo" id="resumo">Carregando...</div>
+    </div>
+
+    <div class="card">
+      <h2>📍 Onde a extensão funciona</h2>
+      <p style="margin:0;font-size:14px;">
+        <code>https://www.bling.com.br/vendas.checkout.php</code><br>
+        <code>https://www.bling.com.br/b/vendas.checkout.php</code>
+      </p>
+      <p style="font-size:13px;color:#6c757d;margin-bottom:0;">
+        🔊 Som: usa a voz do sistema. Para ouvir, o som do PC precisa estar ligado e o estoquista
+        precisa ter clicado pelo menos uma vez na página antes do alerta disparar.
+      </p>
+    </div>
+  </div>
+
+  <script src="options.js"></script>
+</body>
+</html>
