@@ -43,19 +43,60 @@ function getConfig() {
   });
 }
 
+/* Codex #241: trocar a empresa da instância re-sincroniza NA HORA — sem isto o alerta
+   do checkout ficava com a lista da empresa anterior até a próxima sync agendada. */
+let _syncSeq = 0;   /* Codex #241 r2: o fluxo "trocar" REMOVE tb_empresa (sync sem empresa = uniao)
+   e depois grava a nova — sem ordem, a uniao podia terminar DEPOIS e sobrescrever o cache.
+   Remocao nao dispara sync; e cada sync carrega um token: resultado velho nao grava. */
+chrome.storage.onChanged.addListener((mudancas, area) => {
+  if (area === "local" && mudancas.tb_empresa && mudancas.tb_empresa.newValue !== undefined) {
+    /* Codex #241 r3: LIMPA o cache da empresa anterior ANTES de sincronizar — se a sync
+       falhar ou demorar, sem lista = sem alerta, que e melhor que alerta da empresa errada
+       tocando no galpao; a sync repoe assim que responder. */
+    chrome.storage.local.remove(STORAGE_KEY_DADOS, () => { sincronizar().catch(() => {}); });
+  }
+});
+
+// 28/08: mapeia a empresa da instância (tb_empresa) pro id do servidor do Frágil
+function empresaFragil() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(["tb_empresa"], (d) => {
+      const e = d.tb_empresa || "";
+      resolve(e === "amb" ? "ambtotal" : e);   // girassol/good já batem
+    });
+  });
+}
+
 async function sincronizar() {
+  const _meuSync = ++_syncSeq;
   const cfg = await getConfig();
   if (!cfg.servidorUrl) {
     return { ok: false, erro: "URL do servidor não configurada" };
   }
   try {
-    const url = cfg.servidorUrl.replace(/\/+$/, "") + "/api/skus";
-    const r = await fetch(url, { method: "GET", cache: "no-store" });
+    /* 28/08 (a URL virou à prova de operador): aceita colada COM ou SEM o /fragil no fim —
+       o 404 da primeira instalação veio exatamente da raiz colada sem o caminho. */
+    const raiz = cfg.servidorUrl.replace(/\/+$/, "");
+    let base = /\/fragil$/.test(raiz) ? raiz : raiz + "/fragil";
+    /* multi-empresa: sincroniza a LISTA DA EMPRESA da instância; servidor antigo ignora
+       a query e devolve a lista única — compatível nos dois sentidos. */
+    const emp = await empresaFragil();
+    const q = emp ? "?empresa=" + encodeURIComponent(emp) : "";
+    let r = await fetch(base + "/api/skus" + q, { method: "GET", cache: "no-store" });
+    /* Codex #241: um servidor Frágil STANDALONE serve /api/skus na RAIZ — se o /fragil
+       anexado devolver 404 e a URL não o tinha, tenta a forma original antes de falhar. */
+    if (r.status === 404 && base !== raiz) {
+      base = raiz;
+      r = await fetch(base + "/api/skus" + q, { method: "GET", cache: "no-store" });
+    }
     if (!r.ok) throw new Error("HTTP " + r.status);
     const dados = await r.json();
+    if (_meuSync !== _syncSeq) return { ok: false, erro: "sync substituida por outra mais nova" };
     await new Promise((resolve) =>
       chrome.storage.local.set({ [STORAGE_KEY_DADOS]: dados, ultimaSync: new Date().toISOString() }, resolve)
     );
+    /* Codex #241 r2: guarda a BASE que funcionou — o "Abrir painel online" usa a mesma */
+    chrome.storage.local.set({ fragil_base_ok: base });
     console.log("[SYNC OK]", Object.keys(dados.skus || {}).length, "SKUs");
     return { ok: true, skus: Object.keys(dados.skus || {}).length, atualizadoEm: dados.atualizadoEm };
   } catch (e) {

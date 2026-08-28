@@ -89,12 +89,21 @@ function sincronizar() {
 }
 
 function abrirPainel() {
-  const url = ($servidor.value || "").trim().replace(/\/+$/, "");
+  let url = ($servidor.value || "").trim().replace(/\/+$/, "");
   if (!url) {
     status("Configure a URL do servidor primeiro", false);
     return;
   }
-  chrome.tabs ? chrome.tabs.create({ url }) : window.open(url, "_blank");
+  /* Codex #241 r2: a sync grava a BASE que respondeu (com ou sem /fragil, standalone
+     incluso) — o botão abre a mesma; sem sync ainda, normaliza como o sync faria. */
+  chrome.storage.local.get(["fragil_base_ok"], (d) => {
+    /* Codex #241 r3: igualdade exata (crua ou com /fragil) — indexOf aceitava base VELHA
+       quando a URL nova era prefixo da anterior. */
+    if (d.fragil_base_ok && (d.fragil_base_ok === url || d.fragil_base_ok === url + "/fragil")) { abrir(d.fragil_base_ok); return; }
+    if (!/\/fragil$/.test(url)) url += "/fragil";
+    abrir(url);
+  });
+  function abrir(u) { chrome.tabs ? chrome.tabs.create({ url: u }) : window.open(u, "_blank"); }
 }
 
 $btnSalvar.addEventListener("click", salvarUrl);
