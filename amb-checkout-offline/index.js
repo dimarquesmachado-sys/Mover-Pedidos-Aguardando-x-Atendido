@@ -943,6 +943,29 @@ function routes(readBody) {
 
     // SAÚDE DA SESSÃO SHOPEE (b18) — admin. Diz se o cookie está vivo, de onde ele
     // veio (env ou renovado sozinho) e quando foi atualizado pela última vez.
+    /* 27/08 (pedido de 13/08) — RECEBE OS COOKIES DA EXTENSÃO: mata o DevTools. A extensão do
+       navegador captura os cookies da sessão LOGADA do Seller Center e manda pra cá; grava no
+       _shopee-sessao.json com a SEMENTE da env preservada (assim o cookie novo prevalece sem a
+       env 'mandar' de volta — a semente só dispara quando a PRÓPRIA env muda) e testa a sessão
+       na hora com o keep-alive, devolvendo se ficou viva. A env do Render vira só a semente de
+       emergência. */
+    if (method === 'POST' && p === '/amb-checkout-offline/shopee-sessao-cookies') {
+      const kC = ((urlObj.searchParams && urlObj.searchParams.get('k')) || String(req.headers['x-admin-key'] || '')).trim();
+      if (!(process.env.ADMIN_KEY && kC === process.env.ADMIN_KEY)) { json(res, 404, { error: 'not found' }); return true; }
+      let corpo = '';
+      await new Promise(r => { req.on('data', c => { corpo += c; if (corpo.length > 262144) req.destroy(); }); req.on('end', r); req.on('error', r); });
+      let b = {};
+      try { b = JSON.parse(corpo || '{}'); } catch (e) { json(res, 400, { ok: false, erro: 'JSON inválido' }); return true; }
+      const ck = String(b.cookie || '').replace(/[\r\n]+/g, ' ').trim();
+      if (ck.length < 40 || ck.indexOf('=') < 0) { json(res, 400, { ok: false, erro: 'cookie ausente ou curto demais — capture com a extensão logado no Seller Center' }); return true; }
+      const envS = String(process.env[SHOPEE_ENV_COOKIE] || '').trim();
+      const novoS = { cookie: ck, semente: envS ? _shopeeHash(envS) : '', origem: 'extensao', atualizado: new Date().toISOString(), renovacoes: 0 };
+      try { ensureDir(CACHE_DIR); writeJson(SHOPEE_SESSAO_FILE, novoS); } catch (e) { json(res, 500, { ok: false, erro: 'não consegui gravar: ' + String(e.message || e) }); return true; }
+      let testeS = null;
+      try { testeS = await shopeeKeepAlive(); } catch (e) { testeS = { ok: false, motivo: String(e.message || e) }; }
+      json(res, 200, { ok: true, gravado: true, tamanho: ck.length, viva: !!(testeS && testeS.ok), teste: testeS });
+      return true;
+    }
     if (method === 'GET' && p === '/amb-checkout-offline/shopee-sessao') {
       const opSh = validarSessao(req.headers['cookie']);
       if (!opSh || !ehAdmin(opSh)) { json(res, 403, { ok: false, erro: 'apenas admin' }); return true; }
