@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Toolbox — Girassol · GOOD · AMB",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Todas as ferramentas das 3 empresas numa extensão só. Instale nos 3 navegadores e escolha a empresa da instância na primeira configuração.",
   "permissions": [
     "storage",
@@ -67,6 +67,27 @@
       "js": [
         "ct-devolucoes.js"
       ]
+    },
+    {
+      "matches": [
+        "https://*.bling.com.br/produtos.php*"
+      ],
+      "js": [
+        "ct-esteira.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": false
+    },
+    {
+      "matches": [
+        "https://*.bling.com.br/produtos.php*"
+      ],
+      "js": [
+        "esteira-hook.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": false,
+      "world": "MAIN"
     }
   ],
   "background": {
