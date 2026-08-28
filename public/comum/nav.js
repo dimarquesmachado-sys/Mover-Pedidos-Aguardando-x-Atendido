@@ -49,6 +49,13 @@
     document.body.insertBefore(bar, document.body.firstChild);
   }
 
+  /* Painéis operados pelo GALPÃO (checkout offline) carregam com data-so-admin: a barra
+     NÃO nasce sozinha — a página chama window.navPaineisMostrar() só quando o operador
+     logado é admin (mesmo gancho souAdmin() que já esconde Dashboard e links MKTP↗).
+     Estoquista nunca vê os atalhos administrativos. */
+  var soAdmin = !!(document.currentScript && document.currentScript.dataset && document.currentScript.dataset.soAdmin !== undefined);
+  window.navPaineisMostrar = montar;
+  if (soAdmin) return;
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', montar);
   else montar();
 })();
