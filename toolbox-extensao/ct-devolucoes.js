@@ -52,7 +52,7 @@ window.addEventListener('message', async (event) => {
   // Se a extensao foi recarregada/atualizada, esta pagina ficou com a
   // "ponte velha" pendurada - avisa na hora em vez de travar 45s.
   if (!chrome.runtime || !chrome.runtime.id) {
-    responder(false, null, 'A extensao foi recarregada e esta pagina ficou com a versao antiga da ponte. Recarregue esta pagina do painel (Ctrl+Shift+R) e tente de novo.');
+    responder(false, null, 'A extensao foi recarregada e esta pagina ficou com a versao antiga da ponte. Recarregue esta pagina do painel (Ctrl+Shift+R) e tente de novo.', { codigo: 'FALHA' });
     return;
   }
 
@@ -75,7 +75,7 @@ window.addEventListener('message', async (event) => {
 
   } catch (err) {
     // Erro ao falar com background (extensao foi desabilitada/recarregada)
-    responder(false, null, 'Extensao indisponivel: ' + (err.message || String(err)) + '. Se voce acabou de recarregar a extensao, recarregue esta pagina do painel (Ctrl+Shift+R).');
+    responder(false, null, 'Extensao indisponivel: ' + (err.message || String(err)) + '. Se voce acabou de recarregar a extensao, recarregue esta pagina do painel (Ctrl+Shift+R).', { codigo: 'FALHA' });
   }
 });
 
