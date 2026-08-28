@@ -794,6 +794,10 @@ function fluxoDevolucaoNaPagina(p) {
     if (!idDeposito) {
       return { ok: false, erro: 'Nao foi possivel emitir: idDeposito ausente nos dados da NF.', resultado: _rascunho };
     }
+    /* Codex #239 r3 (P1): excecao de REDE na emissao (fetch rejeitado) caia no catch generico
+       la fora, que nao enxerga o _rascunho — RASCUNHO_CRIADO virava FALHA sem id. O try aqui
+       garante que qualquer estouro pos-salvar carrega o rascunho na resposta. */
+    try {
     const bodyEmitir =
       'xajax=emitirNotaDevolucaoCertificadoArmazenado' +
       '&xajaxr=' + Date.now() +
@@ -832,6 +836,9 @@ function fluxoDevolucaoNaPagina(p) {
         idDeposito: idDeposito,
       },
     };
+    } catch (eEm) {
+      return { ok: false, erro: 'Falha na emissao: ' + ((eEm && eEm.message) ? eEm.message : String(eEm)), resultado: _rascunho };
+    }
   }
 
   // Roda e devolve o resultado por MENSAGEM (canal que nao congela)
