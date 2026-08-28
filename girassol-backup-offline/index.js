@@ -3863,7 +3863,7 @@ async function vendasSync() {
       const SH_KEY = process.env.SHOPEE_SYNC_KEY || '';
       if (SH_KEY) {
         const candS = Object.values(atual)
-          .filter(v => v && v.marketplace === 'shopee' && v.numero_loja && (v.venda_em == null || v.tarifa_ml == null || v.frete_recebido == null || v.renda_canal == null))   // b18/b19: frete_recebido e renda_canal também entram na fila (backfill)
+          .filter(v => v && v.marketplace === 'shopee' && v.numero_loja && (v.venda_em == null || v.tarifa_ml == null || v.frete_recebido == null || v.renda_canal == null || v.ads_escrow == null))   // b18/b19: frete_recebido e renda_canal também entram na fila (backfill)
           .sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')))
           .slice(0, 20);
         if (candS.length) {
@@ -3891,6 +3891,16 @@ async function vendasSync() {
                 // cupons (dela e teus) e frete do comprador. É a âncora da M.C. no dashboard (caso das 170 moedas = R$ 1,70 que a Shopee banca).
                 const ra = Number(es.escrow_amount_after_adjustment != null ? es.escrow_amount_after_adjustment : es.escrow_amount);
                 if (isFinite(ra) && ra > 0) v.renda_canal = Math.round(ra * 100) / 100;
+              }
+              if (es && v.ads_escrow == null) {
+                /* 27/08 (aprovado pelo Diego) — Shopee Ads descontado NO REPASSE (top-up do saldo
+                   de Ads pelo escrow, campo ads_escrow_top_up_fee_or_technical_support_fee): o
+                   desembolso que se escondia como "recebi menos". Gravado POR PEDIDO pro resumo
+                   somar a linha "Ads pago no repasse". 0 = confirmado sem ads no repasse (sai da
+                   fila). Na Girassol vem sempre 0 (ela não paga Ads nessa modalidade). NÃO entra
+                   na margem: o renda_canal já vem líquido dele — somar lá seria em dobro. */
+                const ae = Number(es.ads_escrow_top_up_fee_or_technical_support_fee);
+                v.ads_escrow = (isFinite(ae) && ae > 0) ? Math.round(ae * 100) / 100 : 0;
               }
             }
             if (nS) console.log('[VENDAS-SYNC] shopee: hora/comissão real em ' + nS + ' venda(s)');

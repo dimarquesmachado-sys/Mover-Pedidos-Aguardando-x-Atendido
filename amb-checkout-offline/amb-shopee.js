@@ -448,6 +448,23 @@ function resumoShopee(de, ate) {
   // ads é INFORMATIVO: consumo de crédito, não desembolso (o desembolso aparece na
   // carteira como SPM_DEDUCT e já está somado aqui). Não entra no sai_do_bolso.
   const saiTotal = saiDoBolso;
+  /* 27/08 (aprovado pelo Diego) — ADS PAGO NO REPASSE: o top-up do saldo de Ads descontado no
+     escrow de cada pedido (campo ads_escrow, gravado pelo vendas-sync). É desembolso REAL que não
+     passa pela carteira — discriminado AO LADO do SPM_DEDUCT. NÃO entra no sai_do_bolso nem na
+     margem: quem consome o sai_do_bolso pode estar subtraindo de agregados que já usam a renda
+     líquida do escrow (contar lá seria Ads em dobro). Janela: soma o que está no cache de vendas
+     (~60 dias); período mais antigo sai parcial. */
+  let adsRepasse = 0, adsRepassePed = 0;
+  try {
+    const vd3 = readJson(path.join(CACHE_DIR, '_vendas_dia.json'), {}) || {};
+    for (const v3 of Object.values(vd3)) {
+      if (!v3 || v3.marketplace !== 'shopee') continue;
+      const d3 = String(v3.data || '').slice(0, 10);
+      if (!d3 || d3 < de || d3 > ate) continue;
+      const a3 = Number(v3.ads_escrow);
+      if (isFinite(a3) && a3 > 0) { adsRepasse = Math.round((adsRepasse + a3) * 100) / 100; adsRepassePed++; }
+    }
+  } catch (e3) {}
   return {
     devolucoes: {
       quantidade: devQtd, valor_devolvido: Math.round(devTotal * 100) / 100,
@@ -477,7 +494,9 @@ function resumoShopee(de, ate) {
     // estrito. TACOS não sai daqui: depende do faturamento do canal, que o dashboard tem.
     ads,
     // sai_do_bolso agora inclui ads; carteira_sai_do_bolso é a parte que vem da carteira
-    carteira: { por_tipo: porTipo, custo_por_tipo: custoPorTipo, carteira_sai_do_bolso: saiDoBolso, ads_consumo_nao_somado: adsGasto, sai_do_bolso: saiTotal },
+    carteira: { por_tipo: porTipo, custo_por_tipo: custoPorTipo, carteira_sai_do_bolso: saiDoBolso, ads_consumo_nao_somado: adsGasto, sai_do_bolso: saiTotal,
+      ads_pago_no_repasse: adsRepasse, ads_pago_no_repasse_pedidos: adsRepassePed,
+      nota_ads_repasse: 'top-up de Shopee Ads descontado no escrow (por pedido, via vendas-sync) — desembolso fora da carteira; NAO somado no sai_do_bolso nem na margem (o renda_canal ja vem liquido dele)' },
     atualizado: {
       devolucoes: readJson(ARQ_DEV(), {}).atualizado || null,
       carteira: readJson(ARQ_CAR(), {}).atualizado || null,
