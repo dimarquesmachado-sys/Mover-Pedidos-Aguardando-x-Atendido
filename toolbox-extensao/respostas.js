@@ -64,3 +64,11 @@ function showStatus(msg, ok) {
   els.status.textContent = msg;
   els.status.className = 'status ' + (ok ? 'ok' : 'err');
 }
+
+/* 28/08: botao 'Editar as respostas' — inline script nao roda em pagina de extensao MV3
+   (CSP script-src 'self'), o listener vive aqui. */
+const _btnPainelResp = document.getElementById('abrir-painel-respostas');
+if (_btnPainelResp) _btnPainelResp.addEventListener('click', function (ev) {
+  ev.preventDefault();
+  chrome.tabs.create({ url: 'https://mover-pedidos-aguardando-x-atendido.onrender.com/respostas-rapidas/painel' });
+});
