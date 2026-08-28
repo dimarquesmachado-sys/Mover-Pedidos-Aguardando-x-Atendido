@@ -19,6 +19,7 @@ const LINKS = {
     ['💬 Respostas Rápidas (editar respostas)', 'https://mover-pedidos-aguardando-x-atendido.onrender.com/respostas-rapidas/girassol/painel'],
     ['🛒 Checkout offline Girassol', 'https://mover-pedidos-aguardando-x-atendido.onrender.com/girassol-backup-offline/'],
     ['🍪 Painel Shopee (multi-loja)', 'https://girassol-shopee-sync-organizar-envio.onrender.com/'],
+    ['⏱️ Ponto (admin)', 'https://mover-pedidos-aguardando-x-atendido.onrender.com/ponto/admin.html'],
     ['⚙️ Render (envs e serviços)', 'https://dashboard.render.com/'],
   ],
   good: [
@@ -27,6 +28,7 @@ const LINKS = {
     ['🛒 Checkout offline GOOD', 'https://mover-pedidos-aguardando-x-atendido.onrender.com/good-checkout-offline/'],
     ['↩️ Devoluções GOOD', 'https://good-devolucoes-x-marketplaces-x-nfsbling.onrender.com/'],
     ['🍪 Painel Shopee (multi-loja)', 'https://girassol-shopee-sync-organizar-envio.onrender.com/'],
+    ['⏱️ Ponto (admin)', 'https://mover-pedidos-aguardando-x-atendido.onrender.com/ponto/admin.html'],
     ['⚙️ Render (envs e serviços)', 'https://dashboard.render.com/'],
   ],
   amb: [
@@ -35,6 +37,7 @@ const LINKS = {
     ['🛒 Checkout offline AMBTotal', 'https://mover-pedidos-aguardando-x-atendido.onrender.com/amb-checkout-offline/'],
     ['↩️ Devoluções AMB', 'https://good-devolucoes-x-marketplaces-x-nfsbling.onrender.com/amb/'],
     ['🍪 Painel Shopee (multi-loja)', 'https://girassol-shopee-sync-organizar-envio.onrender.com/'],
+    ['⏱️ Ponto (admin)', 'https://mover-pedidos-aguardando-x-atendido.onrender.com/ponto/admin.html'],
     ['⚙️ Render (envs e serviços)', 'https://dashboard.render.com/'],
   ],
 };

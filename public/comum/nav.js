@@ -10,7 +10,7 @@
     ['🛒 Checkout GOOD',     '/good-checkout-offline/'],
     ['🛒 Checkout AMB',      '/amb-checkout-offline/'],
     ['📍 Estoque',       '/estoque/celular.html'],
-    ['⏱️ Ponto',         '/ponto/'],
+    ['⏱️ Ponto (admin)', '/ponto/admin.html'],   /* o dono usa o painel de GESTOR; /ponto/ e a tela de registro do funcionario */
     ['↩️ Devoluções',    'https://good-devolucoes-x-marketplaces-x-nfsbling.onrender.com/'],
   ];
 
