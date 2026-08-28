@@ -375,8 +375,21 @@ async function gerarDevolucao(payload, painelTab) {
               method: 'PUT', credentials: 'include', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ nf_devolucao_id_bling: String(rTard.idNotaDevolucao), nf_devolucao_numero: String(rTard.numero || '') }),
             });
-            console.log('[Bridge] resultado TARDIO (pos-timeout) registrado:', rT.status, rT.ok ? '' : '(FALHOU)');
-          } catch (eT) { console.log('[Bridge] registro tardio falhou:', eT.message || eT); }
+            if (!rT.ok) throw new Error('HTTP ' + rT.status);
+            console.log('[Bridge] resultado TARDIO (pos-timeout) registrado: ok');
+          } catch (eT) {
+            /* Codex #236 r6 (P1): falha aqui deixava o rascunho orfao pra sempre (e a proxima
+               geracao travada pelo devolucaoExistente). Agora a pendencia PERSISTE no storage
+               e re-tenta: na hora (3x com espera crescente) e em toda subida do worker. */
+            console.log('[Bridge] registro tardio falhou (vai re-tentar):', eT.message || eT);
+            try {
+              const kP = 'reg_pendentes';
+              const atu = (await chrome.storage.local.get([kP]))[kP] || [];
+              atu.push({ devolucaoId: payload.devolucaoId, empresa: payload.empresa || 'good', id: String(mTard.resultado.idNotaDevolucao), numero: String(mTard.resultado.numero || ''), quando: Date.now() });
+              await chrome.storage.local.set({ [kP]: atu.slice(-30) });
+            } catch (eP) {}
+            drenarRegPendentes(30000);
+          }
         });
         setTimeout(function () { aguardandoResultado.delete(execId); }, 900000);
       }
@@ -826,3 +839,28 @@ function fluxoDevolucaoNaPagina(p) {
 chrome.runtime.onInstalled.addListener(() => {
   console.log('[GOOD Devolucoes Bridge] v1.4.3 instalada com sucesso');
 });
+
+/* Codex #236 r6: re-tenta os registros de rascunho que falharam (401/500) — chamada no load
+   do worker (o MV3 acorda em qualquer evento) e apos cada falha, com espera. Cada item so
+   sai da fila quando o PUT confirmar 2xx; para de insistir apos 7 dias (vincular manualmente). */
+async function drenarRegPendentes(esperaMs) {
+  if (esperaMs) await new Promise(r => setTimeout(r, esperaMs));
+  let fila = [];
+  try { fila = (await chrome.storage.local.get(['reg_pendentes'])).reg_pendentes || []; } catch (e) { return; }
+  if (!fila.length) return;
+  const resto = [];
+  for (const it of fila) {
+    if (Date.now() - (it.quando || 0) > 604800000) continue;   // 7 dias: desiste (vinculo manual)
+    try {
+      const pref = (String(it.empresa || 'good').toLowerCase().indexOf('amb') === 0) ? '/amb' : '';
+      const r = await fetch(API_SISTEMA + pref + '/api/admin/registrar-devolucao-gerada/' + encodeURIComponent(it.devolucaoId), {
+        method: 'PUT', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nf_devolucao_id_bling: it.id, nf_devolucao_numero: it.numero }),
+      });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      console.log('[Bridge] pendencia de registro resolvida:', it.devolucaoId);
+    } catch (e) { resto.push(it); }
+  }
+  try { await chrome.storage.local.set({ reg_pendentes: resto }); } catch (e) {}
+}
+drenarRegPendentes(0);

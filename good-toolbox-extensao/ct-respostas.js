@@ -253,6 +253,7 @@
       if (_g !== _geracao) return;   // outro init assumiu enquanto este esperava a rede
       renderizarBotoes(respostas);
     } catch (e) {
+      if (_g !== _geracao) return;   // Codex #236 r6: falha de request VELHO nao suja o painel novo
       const body = document.getElementById('amb-rr-body');
       if (body) {
         body.innerHTML = `<div class="amb-rr-error">❌ Erro ao carregar: ${e.message}</div>`;

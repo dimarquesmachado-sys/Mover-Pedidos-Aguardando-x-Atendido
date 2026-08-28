@@ -48,20 +48,24 @@
   //  sem precisar de dois arquivos.
   const API = (typeof browser !== 'undefined' && browser.storage) ? browser : chrome;
 
+  /* Codex #236 r6 (P1): no Firefox o storage e promise-only — passar callback faz a chamada
+     LANCAR, o catch engolia e a config nunca persistia (nem dava pra configurar a chave).
+     Ramifica pela API: browser = so promise; chrome = callback classico. */
   function lerCfg() {
+    if (API !== chrome) {
+      return API.storage.local.get(CFG_PADRAO)
+        .then(v => Object.assign({}, CFG_PADRAO, v || {}))
+        .catch(() => Object.assign({}, CFG_PADRAO));
+    }
     return new Promise(ok => {
-      try {
-        const r = API.storage.local.get(CFG_PADRAO, v => ok(Object.assign({}, CFG_PADRAO, v || {})));
-        if (r && typeof r.then === 'function') r.then(v => ok(Object.assign({}, CFG_PADRAO, v || {})));
-      } catch (e) { ok(Object.assign({}, CFG_PADRAO)); }
+      try { chrome.storage.local.get(CFG_PADRAO, v => ok(Object.assign({}, CFG_PADRAO, v || {}))); }
+      catch (e) { ok(Object.assign({}, CFG_PADRAO)); }
     });
   }
   function salvarCfg(v) {
+    if (API !== chrome) return API.storage.local.set(v).catch(() => {});
     return new Promise(ok => {
-      try {
-        const r = API.storage.local.set(v, ok);
-        if (r && typeof r.then === 'function') r.then(ok, ok);
-      } catch (e) { ok(); }
+      try { chrome.storage.local.set(v, ok); } catch (e) { ok(); }
     });
   }
 
@@ -454,20 +458,24 @@
   let ocupado = false;
   const API = (typeof browser !== 'undefined' && browser.storage) ? browser : chrome;
 
+  /* Codex #236 r6 (P1): no Firefox o storage e promise-only — passar callback faz a chamada
+     LANCAR, o catch engolia e a config nunca persistia (nem dava pra configurar a chave).
+     Ramifica pela API: browser = so promise; chrome = callback classico. */
   function lerCfg() {
+    if (API !== chrome) {
+      return API.storage.local.get(CFG_PADRAO)
+        .then(v => Object.assign({}, CFG_PADRAO, v || {}))
+        .catch(() => Object.assign({}, CFG_PADRAO));
+    }
     return new Promise(ok => {
-      try {
-        const r = API.storage.local.get(CFG_PADRAO, v => ok(Object.assign({}, CFG_PADRAO, v || {})));
-        if (r && typeof r.then === 'function') r.then(v => ok(Object.assign({}, CFG_PADRAO, v || {})));
-      } catch (e) { ok(Object.assign({}, CFG_PADRAO)); }
+      try { chrome.storage.local.get(CFG_PADRAO, v => ok(Object.assign({}, CFG_PADRAO, v || {}))); }
+      catch (e) { ok(Object.assign({}, CFG_PADRAO)); }
     });
   }
   function salvarCfg(v) {
+    if (API !== chrome) return API.storage.local.set(v).catch(() => {});
     return new Promise(ok => {
-      try {
-        const r = API.storage.local.set(v, ok);
-        if (r && typeof r.then === 'function') r.then(ok, ok);
-      } catch (e) { ok(); }
+      try { chrome.storage.local.set(v, ok); } catch (e) { ok(); }
     });
   }
 
@@ -645,12 +653,14 @@
       // o que houver de mais novo AGORA. No modo automático (abrir o Bling), NÃO
       // busca — só lê o que o cron do servidor (6h/12h/18h/23h) já deixou pronto.
       // Assim abrir o Bling é instantâneo e não fica pesando.
+      let _buscaFalhou = null;   // Codex #236 r6: busca forcada que falha NAO pode fingir estado fresco
       if (forcado) {
         msg('Buscando notas na Shopee… (pode levar ~1 min)');
         abrir();
         try {
-          await fetch(cfg.sp_servidor + '/' + encodeURIComponent(cfg.sp_loja) + '/fbs/ext/buscar?k=' + encodeURIComponent(cfg.sp_chave));
-        } catch (e) { /* se a busca falhar, ainda lê o que já há em disco */ }
+          const rB = await fetch(cfg.sp_servidor + '/' + encodeURIComponent(cfg.sp_loja) + '/fbs/ext/buscar?k=' + encodeURIComponent(cfg.sp_chave));
+          if (!rB.ok) _buscaFalhou = 'HTTP ' + rB.status;
+        } catch (e) { _buscaFalhou = String(e.message || e); }
       }
 
       /* Codex #236 r2 — TRAVA DE CONTA (o Magalu ja tinha, aqui faltava): no mesmo navegador
@@ -681,6 +691,12 @@
         // NADA novo pra importar → fica INVISÍVEL (não chama abrir()). Só
         // atualiza a mensagem interna, pra quando você abrir com Ctrl+Alt+S.
         // É assim que o Magalu funciona: só aparece quando há trabalho.
+        if (_buscaFalhou) {
+          msg('⚠ A BUSCA forçada falhou (' + _buscaFalhou + ') — mostrando o último estado que o servidor já tinha (pode estar desatualizado). Tente de novo ou confira o serviço.', '#fdd663');
+          elBtn.disabled = false; elBtn.textContent = 'Buscar de novo';
+          if (forcado) abrir();
+          return;
+        }
         msg(quem + ': nada novo pra importar da Shopee Full.', '#81c995');
         elBtn.disabled = false; elBtn.textContent = 'Buscar de novo';
         if (forcado) abrir();   // se você chamou na mão, mostra (pra ver que está tudo ok)
