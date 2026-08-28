@@ -134,6 +134,23 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
+  /* Estáticos COMUNS a todos os painéis (28/08): /comum/<arquivo> — hoje a barra de
+     navegação (nav.js), peça ÚNICA que cada painel carrega com uma linha de <script>.
+     Só serve arquivos existentes dentro de public/comum, sem path traversal. */
+  if (path.startsWith('/comum/')) {
+    const rel = path.replace('/comum/', '');
+    const dirComum = require('path').join(__dirname, 'public', 'comum');
+    const full = require('path').join(dirComum, rel);
+    const fsx = require('fs');
+    if (full.startsWith(dirComum) && fsx.existsSync(full) && fsx.statSync(full).isFile()) {
+      const ext = require('path').extname(full).toLowerCase();
+      const mime = { '.js': 'application/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8' }[ext] || 'application/octet-stream';
+      res.writeHead(200, { 'Content-Type': mime, 'Cache-Control': 'no-cache' });
+      return fsx.createReadStream(full).pipe(res);
+    }
+    res.writeHead(404); return res.end('not found');
+  }
+
   // Rota global de health
   if (path === '/health' || path === '/') {
     return json(res, 200, {
