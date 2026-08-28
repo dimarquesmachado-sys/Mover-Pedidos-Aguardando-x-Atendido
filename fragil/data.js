@@ -60,14 +60,23 @@ function lerArquivo(fp) {
 function lerDados(empresa) {
   if (empresa && EMPRESAS.includes(empresa)) {
     const fp = arquivoEmpresa(empresa);
-    let dados = lerArquivo(fp);
-    if (!dados) {
+    /* Codex #240: migrar SO quando o arquivo NAO EXISTE. lerArquivo devolve null tambem pra
+       arquivo presente mas ilegivel (parse quebrado, leitura interrompida) — nesse caso
+       sobrescrever com o legado APAGARIA a lista da empresa; devolve padrao SEM regravar
+       e deixa o arquivo no disco pra recuperacao manual. */
+    if (!fs.existsSync(fp)) {
       const legado = lerArquivo(DATA_FILE);
-      dados = legado || dadosPadrao();
+      const dados = legado || dadosPadrao();
       try {
         fs.writeFileSync(fp, JSON.stringify(dados, null, 2), 'utf8');
         console.log('[fragil/data] migracao: ' + empresa + ' herdou ' + Object.keys(dados.skus).length + ' SKU(s) do legado');
       } catch (e) { console.error('[fragil/data] migracao falhou (' + empresa + '):', e.message); }
+      return dados;
+    }
+    const dados = lerArquivo(fp);
+    if (!dados) {
+      console.error('[fragil/data] ' + fp + ' existe mas esta ilegivel — devolvendo padrao SEM sobrescrever (recupere o arquivo no disco).');
+      return dadosPadrao();
     }
     return dados;
   }
@@ -115,7 +124,25 @@ function lerAuditoria(empresa, limite) {
   try {
     const fp = arquivoAuditoria(empresa);
     if (!fs.existsSync(fp)) return [];
-    const linhas = fs.readFileSync(fp, 'utf8').trim().split('\n').filter(Boolean);
+    /* Codex #240: o jsonl e append-only e cresce pra sempre — ler o arquivo INTEIRO a cada
+       consulta viraria custo crescente. Le so o rabo (ate 512 KB), mais que o bastante pros
+       ate 2000 eventos que a rota devolve. */
+    const st = fs.statSync(fp);
+    const TAIL = 512 * 1024;
+    let bruto;
+    if (st.size <= TAIL) {
+      bruto = fs.readFileSync(fp, 'utf8');
+    } else {
+      const fd = fs.openSync(fp, 'r');
+      try {
+        const buf = Buffer.alloc(TAIL);
+        fs.readSync(fd, buf, 0, TAIL, st.size - TAIL);
+        bruto = buf.toString('utf8');
+        const i = bruto.indexOf('\n');                 // descarta a linha cortada no inicio
+        bruto = i >= 0 ? bruto.slice(i + 1) : bruto;
+      } finally { fs.closeSync(fd); }
+    }
+    const linhas = bruto.trim().split('\n').filter(Boolean);
     const n = Math.max(1, Math.min(2000, parseInt(limite, 10) || 200));
     return linhas.slice(-n).reverse().map(l => { try { return JSON.parse(l); } catch (_) { return null; } }).filter(Boolean);
   } catch (e) {

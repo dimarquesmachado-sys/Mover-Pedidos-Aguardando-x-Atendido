@@ -205,10 +205,12 @@ function routes(readBody) {
     if (method === 'GET' && p === '/fragil/api/usuarios') {
       const sess = pegarUsuario(req);
       if (!sess) { json(res, 401, { erro: 'Sessão inválida' }); return true; }
-      // NUNCA devolve senha — só login, nome, perfil e empresas
-      const lista = auth.listarUsuarios().map(u => ({
-        usuario: u.usuario, nome: u.nome, perfil: u.perfil, empresas: u.empresas || []
-      }));
+      // NUNCA devolve senha — e o diretorio e ESCOPADO (Codex #240): cada um ve so os
+      // colegas que compartilham empresa com ele, e so as empresas em comum.
+      const minhas = sess.empresas || [];
+      const lista = auth.listarUsuarios()
+        .map(u => ({ usuario: u.usuario, nome: u.nome, perfil: u.perfil, empresas: (u.empresas || []).filter(e => minhas.includes(e)) }))
+        .filter(u => u.empresas.length > 0);
       json(res, 200, {
         ok: true,
         usuarios: lista,
@@ -283,8 +285,10 @@ function routes(readBody) {
         if (JSON.stringify(atual.config) !== JSON.stringify(novo.config)) {
           audit.push({ ts, usuario, acao: 'config', antes: atual.config, depois: novo.config });
         }
-        dataMod.registrarAuditoria(rEmp.empresa, audit);
+        /* Codex #240: registrar SO depois do save dar certo — senao a trilha afirma
+           mudancas que um 500 desfez. */
         const salvo = salvarDados(novo, usuario, rEmp.empresa);
+        dataMod.registrarAuditoria(rEmp.empresa, audit);
         console.log(`[fragil SAVE ${rEmp.empresa}] ${usuario} salvou ${Object.keys(salvo.skus).length} SKUs (${audit.length} mudança(s) auditada(s))`);
         json(res, 200, salvo);
       } catch (e) {
@@ -330,8 +334,8 @@ function routes(readBody) {
       const body = await readBody(req);
       try {
         if (body.skus && typeof body.skus === 'object') {
-          dataMod.registrarAuditoria(rEmp.empresa, [{ ts: new Date().toISOString(), usuario: sess.usuario, acao: 'importou', depois: { skus: Object.keys(body.skus.skus || {}).length } }]);
           salvarDados(body.skus, sess.usuario, rEmp.empresa);
+          dataMod.registrarAuditoria(rEmp.empresa, [{ ts: new Date().toISOString(), usuario: sess.usuario, acao: 'importou', depois: { skus: Object.keys(body.skus.skus || {}).length } }]);
           console.log(`[fragil IMPORTAR ${rEmp.empresa}] ${sess.usuario} importou skus.json (${Object.keys(body.skus.skus || {}).length} SKUs)`);
         }
         json(res, 200, {

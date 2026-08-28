@@ -49,7 +49,8 @@ function montarSeletorEmpresa() {
   const sess = getSession();
   const emps = sess?.empresas || [];
   const alvo = $("user-nome")?.parentElement;
-  if (!alvo || document.getElementById("sel-empresa")) return;
+  if (!alvo) return;
+  document.getElementById("sel-empresa")?.remove();   /* Codex #240: relogin/troca de usuario recria o seletor com as empresas ATUAIS */
   const sel = document.createElement("select");
   sel.id = "sel-empresa";
   sel.style.cssText = "margin-right:12px;padding:6px 10px;border:2px solid #dee2e6;border-radius:8px;font-size:14px;font-weight:bold;";
@@ -890,7 +891,10 @@ function status(txt, ok) {
   if (txt) setTimeout(() => { $("status").textContent = ""; $("status").className = ""; }, 4000);
 }
 
+let _carregandoEmpresa = false;   /* Codex #240: trocar de empresa e salvar no vao gravaria os dados da ANTERIOR na nova */
 async function carregar() {
+  _carregandoEmpresa = true;
+  if ($("btn-salvar")) $("btn-salvar").disabled = true;
   try {
     const r = await fetch("/fragil/api/skus" + qEmp());
     const j = await r.json();
@@ -910,10 +914,14 @@ async function carregar() {
     }
   } catch (e) {
     status("Erro ao carregar: " + e.message, false);
+  } finally {
+    _carregandoEmpresa = false;
+    if ($("btn-salvar")) $("btn-salvar").disabled = false;
   }
 }
 
 async function salvar() {
+  if (_carregandoEmpresa) { status("Aguarde terminar de carregar a empresa selecionada.", false); return; }
   $("btn-salvar").disabled = true;
   try {
     const linhas = $tbody().querySelectorAll("tr");
