@@ -305,7 +305,10 @@ async function gerarDevolucao(payload, painelTab) {
     // estar esperando - se o painel der timeout, nada se perde).
     if (payload.devolucaoId && resposta.resultado && resposta.resultado.idNotaDevolucao) {
       try {
-        const rReg = await fetch(API_SISTEMA + '/api/admin/registrar-devolucao-gerada/' + encodeURIComponent(payload.devolucaoId), {
+        /* Codex #236 r3: a AMB responde na PROPRIA area (/amb) — a sessao dela nao chega na
+           raiz, entao registrar na rota da GOOD nunca autenticava e o fallback falhava calado. */
+        const _prefEmp = (String(payload.empresa || 'good').toLowerCase().indexOf('amb') === 0) ? '/amb' : '';
+        const rReg = await fetch(API_SISTEMA + _prefEmp + '/api/admin/registrar-devolucao-gerada/' + encodeURIComponent(payload.devolucaoId), {
           method: 'PUT',
           credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
@@ -314,7 +317,8 @@ async function gerarDevolucao(payload, painelTab) {
             nf_devolucao_numero: String(resposta.resultado.numero || ''),
           }),
         });
-        console.log('[Bridge] auto-registro no sistema:', rReg.status);
+        if (!rReg.ok) throw new Error('auto-registro recusado: HTTP ' + rReg.status);   // Codex #236 r3: nao-2xx e FALHA, nao um numero no log
+        console.log('[Bridge] auto-registro no sistema: ok (' + rReg.status + ')');
       } catch (e) {
         console.log('[Bridge] auto-registro falhou (painel deve registrar):', e.message || e);
       }

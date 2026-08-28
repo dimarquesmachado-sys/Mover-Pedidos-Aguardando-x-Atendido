@@ -245,6 +245,7 @@
       const detectada = detectarLoja();
       if (detectada) loja = detectada;
     }
+    _lojaMontada = loja;   // Codex #236 r3: o observer compara contra a loja do painel atual
     montarPainel(loja, categoria);
     try {
       const respostas = await buscarRespostas(cfg, loja, categoria);
@@ -258,11 +259,22 @@
   }
 
   let urlAtual = location.href;
+  let _lojaMontada = null;
+  let _debHeader = null;
   const observer = new MutationObserver(() => {
     if (location.href !== urlAtual) {
       urlAtual = location.href;
       setTimeout(init, 600);
+      return;
     }
+    /* Codex #236 r3: o header do ML pode renderizar DEPOIS do init (ou a conta trocar sem a
+       URL mudar) — re-detecta com debounce e so re-monta se a loja detectada DIFERIR da do
+       painel atual (detectarLoja e barato: le o DOM). */
+    clearTimeout(_debHeader);
+    _debHeader = setTimeout(() => {
+      const d = detectarLoja();
+      if (d && _lojaMontada && d !== _lojaMontada) init();
+    }, 800);
   });
   observer.observe(document.body, { childList: true, subtree: true });
   setTimeout(init, 500);
