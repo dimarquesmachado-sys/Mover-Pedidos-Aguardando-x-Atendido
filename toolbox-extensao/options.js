@@ -89,11 +89,13 @@ function sincronizar() {
 }
 
 function abrirPainel() {
-  const url = ($servidor.value || "").trim().replace(/\/+$/, "");
+  let url = ($servidor.value || "").trim().replace(/\/+$/, "");
   if (!url) {
     status("Configure a URL do servidor primeiro", false);
     return;
   }
+  /* Codex #241: mesma normalização do sync — raiz colada sem /fragil abria o JSON de status */
+  if (!/\/fragil$/.test(url)) url += "/fragil";
   chrome.tabs ? chrome.tabs.create({ url }) : window.open(url, "_blank");
 }
 
