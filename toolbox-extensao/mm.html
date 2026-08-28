@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="pt-br"><head><meta charset="utf-8">
+<style>
+  body{font-family:system-ui,Segoe UI,Arial;width:330px;padding:14px;color:#1a1a1a}
+  h1{font-size:15px;margin:0 0 4px}
+  .sub{font-size:11px;color:#888;margin-bottom:10px}
+  label{font-size:12px;color:#444;display:block;margin-top:10px;font-weight:600}
+  input{width:100%;padding:8px;border:1px solid #ccc;border-radius:6px;box-sizing:border-box;font-size:13px}
+  .row{display:flex;gap:8px}
+  button{margin-top:12px;width:100%;padding:10px;color:#fff;border:0;border-radius:7px;font-weight:600;font-size:14px;cursor:pointer}
+  #salvar{background:#6b7280}#sync{background:#157347}
+  .status{margin-top:12px;font-size:12px;background:#f4f4f5;border-radius:6px;padding:9px;white-space:pre-wrap;word-break:break-word;line-height:1.4}
+  .dim{color:#888;font-size:11px;margin-top:8px;line-height:1.4}
+</style></head>
+<body>
+<div style="margin-bottom:8px"><a href="popup.html" style="font-size:12px;text-decoration:none;color:#2563eb">← voltar ao menu</a></div>
+  <h1>Etiquetas Madeira Madeira → checkout</h1>
+  <div class="sub">Mantenha uma aba do Madeira Madeira (painel) aberta e logada.</div>
+
+  <label>URL do Render</label>
+  <input id="base" placeholder="https://...onrender.com">
+
+  <label>Chave MM da empresa desta instância (GIRASSOL_MM_SYNC_KEY ou GOOD_MM_SYNC_KEY)</label>
+  <input id="key" type="password" placeholder="cole a senha que você criou no Render">
+
+  <div class="row">
+    <button id="salvar">Salvar</button>
+    <button id="sync">Sincronizar agora</button>
+  </div>
+
+  <div class="dim">A sincronização também acontece sozinha a cada 1 minuto enquanto a aba do Madeira Madeira estiver aberta.</div>
+  <div id="status" class="status">—</div>
+
+  <script src="mm.js"></script>
+</body></html>

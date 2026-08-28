@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="pt-br"><head><meta charset="utf-8">
+<style>
+  body{font-family:system-ui,Segoe UI,Arial;width:300px;margin:0;padding:14px;background:#0a0e1a;color:#e8eaf2}
+  h1{font-size:15px;margin:0 0 2px}
+  .sub{font-size:11px;color:#8a93a8;margin-bottom:12px}
+  a.mod,button.emp{display:block;width:100%;box-sizing:border-box;text-align:left;background:#141a2e;border:1px solid #26304d;border-radius:10px;padding:11px 12px;margin-bottom:8px;text-decoration:none;color:#e8eaf2;font-size:13px;font-weight:600;cursor:pointer}
+  a.mod:hover,button.emp:hover{border-color:#2e6ef7}
+  a.mod small{display:block;font-weight:400;color:#8a93a8;font-size:11px;margin-top:2px}
+  .auto{font-size:10px;color:#5b6478;margin-top:10px;line-height:1.5}
+  .troca{font-size:10px;color:#5b6478}.troca a{color:#4d7ef7;cursor:pointer}
+  #selEmpresa,#menu{display:none}
+</style></head>
+<body>
+  <div id="selEmpresa">
+    <h1>🧰 Toolbox</h1>
+    <div class="sub">Primeira configuração: esta instalação (este navegador) é de qual empresa?</div>
+    <button class="emp" data-emp="girassol">🌻 Magazine Girassol</button>
+    <button class="emp" data-emp="good">📦 GOOD Import</button>
+    <button class="emp" data-emp="amb">🔧 AMBTotal</button>
+  </div>
+  <div id="menu">
+    <h1>🧰 Toolbox — <span id="empNome"></span></h1>
+    <div class="sub troca">todas as ferramentas num lugar só · <a id="trocar">trocar a empresa</a></div>
+    <div id="cards"></div>
+    <div class="auto" id="autos"></div>
+  </div>
+  <script src="popup.js"></script>
+</body></html>

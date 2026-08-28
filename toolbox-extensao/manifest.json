@@ -1,0 +1,96 @@
+{
+  "manifest_version": 3,
+  "name": "Toolbox — Girassol · GOOD · AMB",
+  "version": "2.0.0",
+  "description": "Todas as ferramentas das 3 empresas numa extensão só. Instale nos 3 navegadores e escolha a empresa da instância na primeira configuração.",
+  "permissions": [
+    "storage",
+    "alarms",
+    "activeTab",
+    "clipboardWrite",
+    "cookies",
+    "scripting",
+    "webRequest"
+  ],
+  "host_permissions": [
+    "https://www.bling.com.br/*",
+    "https://*.bling.com.br/*",
+    "https://*.onrender.com/*",
+    "https://painelmarketplace.madeiramadeira.com.br/*",
+    "https://www.mercadolivre.com.br/*",
+    "https://mercadolivre.com.br/*",
+    "https://*.shopee.com.br/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.bling.com.br/vendas.checkout.php*",
+        "https://www.bling.com.br/b/vendas.checkout.php*"
+      ],
+      "js": [
+        "ct-fragil.js"
+      ]
+    },
+    {
+      "matches": [
+        "https://www.bling.com.br/*"
+      ],
+      "js": [
+        "ct-nf.js"
+      ]
+    },
+    {
+      "matches": [
+        "https://painelmarketplace.madeiramadeira.com.br/*"
+      ],
+      "js": [
+        "ct-mm.js"
+      ]
+    },
+    {
+      "matches": [
+        "https://www.mercadolivre.com.br/vendas/*",
+        "https://mercadolivre.com.br/vendas/*"
+      ],
+      "js": [
+        "ct-respostas.js"
+      ],
+      "css": [
+        "respostas.css"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://good-devolucoes-x-marketplaces-x-nfsbling.onrender.com/*"
+      ],
+      "js": [
+        "ct-devolucoes.js"
+      ]
+    }
+  ],
+  "background": {
+    "service_worker": "bg-toolbox.js",
+    "scripts": [
+      "bg-fragil.js",
+      "bg-mm.js",
+      "bg-devolucoes.js"
+    ]
+  },
+  "options_page": "options.html",
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "GOOD Toolbox"
+  },
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "toolbox@mover-pedidos",
+      "strict_min_version": "115.0"
+    }
+  }
+}

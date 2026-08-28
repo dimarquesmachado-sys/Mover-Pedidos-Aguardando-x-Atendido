@@ -92,7 +92,7 @@ const TELA = { ...globals.browser };
 export default [
   /* 28/08: as pastas de EXTENSÃO de navegador ficam fora — usam as APIs chrome/browser e rodam
      noutro ambiente; o detector foi desenhado pros .js do servidor e de tela (ver cabeçalho). */
-  { ignores: ["node_modules/**", "**/node_modules/**", "good-toolbox-extensao/**", "shopee-cookies-extensao/**"] },
+  { ignores: ["node_modules/**", "**/node_modules/**", "good-toolbox-extensao/**", "toolbox-extensao/**", "shopee-cookies-extensao/**"] },
 
   /* servidor. O `ignores` aqui é OBRIGATÓRIO: no eslint os blocos se SOMAM, não se
      substituem. Sem ele, um arquivo de public/ casaria com este bloco também e receberia
