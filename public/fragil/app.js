@@ -1003,6 +1003,36 @@ $("novo-senha").addEventListener("keydown", (e) => { if (e.key === "Enter") cria
 
 // IMPORT/EXPORT
 $("btn-importar").addEventListener("click", abrirModalImport);
+/* Zerar a lista DESTA empresa — versão ATÔMICA (28/08). A primeira versão só limpava a
+   tabela e deixava o Salvar por conta do usuário: o dono zerou Girassol e AMBTotal, não
+   houve o clique final e NADA foi gravado (o atualizadoEm do arquivo nem mudou). Agora
+   o botão grava direto no servidor e só então redesenha, com confirmação por digitação. */
+$("btn-zerar").addEventListener("click", async () => {
+  const emp = empresaAtiva();
+  const nome = EMP_NOMES[emp] || emp;
+  const qtd = $tbody().querySelectorAll("tr").length;
+  if (!qtd) { status("A lista de " + nome + " já está vazia.", true); return; }
+  const digitou = prompt("Isto APAGA E GRAVA a lista de " + nome + " (" + qtd + " SKUs). As outras empresas não são afetadas e a auditoria registra tudo.\n\nPara confirmar, digite: ZERAR");
+  if ((digitou || "").trim().toUpperCase() !== "ZERAR") { status("Cancelado — nada foi alterado.", true); return; }
+  $("btn-zerar").disabled = true;
+  try {
+    const cfgAtual = await (await fetch("/fragil/api/skus" + qEmp())).json();
+    const j = await api("/fragil/api/skus" + qEmp(), {
+      method: "POST",
+      body: JSON.stringify({ config: cfgAtual.config, skus: {} })
+    });
+    preencherTabelaDoMapa(j.skus || {});
+    atualizarContador();
+    status("Lista de " + nome + " zerada e GRAVADA (" + qtd + " SKUs removidos).", true);
+    carregarAuditoria();
+    carregarStatus();
+  } catch (e) {
+    status("Erro ao zerar: " + e.message + " — nada foi alterado.", false);
+  } finally {
+    $("btn-zerar").disabled = false;
+  }
+});
+
 $("btn-exportar").addEventListener("click", exportarExcel);
 $("import-fechar").addEventListener("click", fecharModalImport);
 $("import-cancelar").addEventListener("click", fecharModalImport);
