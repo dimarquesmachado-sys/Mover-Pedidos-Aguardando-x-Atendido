@@ -70,7 +70,12 @@
     }
   ],
   "background": {
-    "service_worker": "bg-toolbox.js"
+    "service_worker": "bg-toolbox.js",
+    "scripts": [
+      "bg-fragil.js",
+      "bg-mm.js",
+      "bg-devolucoes.js"
+    ]
   },
   "options_page": "options.html",
   "action": {
