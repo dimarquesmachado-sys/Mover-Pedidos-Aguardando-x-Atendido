@@ -9,7 +9,7 @@
     ['🛒 Checkout Girassol', '/girassol-backup-offline/'],
     ['🛒 Checkout GOOD',     '/good-checkout-offline/'],
     ['🛒 Checkout AMB',      '/amb-checkout-offline/'],
-    ['📍 Estoque',       '/estoque/celular.html'],
+
     ['⏱️ Ponto (admin)', '/ponto/admin.html'],   /* o dono usa o painel de GESTOR; /ponto/ e a tela de registro do funcionario */
 
   ];
@@ -25,6 +25,15 @@
      A Girassol não tem devoluções nesse app. Num painel de empresa, mostra só o dela
      (no da Girassol, nenhum); nos painéis neutros (Frágil, Respostas, Ponto), os dois. */
   var DEV_HOST = 'https://good-devolucoes-x-marketplaces-x-nfsbling.onrender.com';
+  /* Estoque (localizacao no galpao) tambem e por empresa e a ROTA e /estoque/celular —
+     sem .html (o .html e o nome do arquivo, nao da rota: por isso o botao abria nada). */
+  function itensEstoque() {
+    var aqui = window.location.pathname;
+    if (aqui.indexOf('/girassol-backup-offline') === 0) return [['📍 Estoque Girassol', '/estoque-girassol/celular']];
+    if (aqui.indexOf('/good-checkout-offline') === 0 || aqui.indexOf('/amb-checkout-offline') === 0) return [['📍 Estoque', '/estoque/celular']];
+    return [['📍 Estoque', '/estoque/celular'], ['📍 Estoque Girassol', '/estoque-girassol/celular']];
+  }
+
   function itensDevolucoes() {
     var aqui = window.location.pathname;
     if (aqui.indexOf('/girassol-backup-offline') === 0) return [];
@@ -44,7 +53,7 @@
     titulo.style.cssText = 'color:#9aa2b1;font-size:12px;margin-right:4px;';
     bar.appendChild(titulo);
 
-    PAINEIS.concat(itensDevolucoes()).forEach(function (p) {
+    PAINEIS.concat(itensEstoque()).concat(itensDevolucoes()).forEach(function (p) {
       var atual = ehAtual(p[1]);
       var el = document.createElement(atual ? 'span' : 'a');
       el.textContent = p[0];
