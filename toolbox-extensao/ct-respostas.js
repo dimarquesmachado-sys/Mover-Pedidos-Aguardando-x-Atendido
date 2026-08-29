@@ -56,6 +56,9 @@
   }
 
   function montarPainel(loja, categoria) {
+    /* 29/08: sinal de vida — o painel MONTOU de verdade nesta página. É o que permite
+       descobrir depois que ele parou de aparecer (URL do marketplace mudou, etc). */
+    try { if (window.tbSinalDeVida) window.tbSinalDeVida('respostas'); } catch (e) {}
     const antigo = document.getElementById('amb-rr-panel');
     if (antigo) antigo.remove();
     const painel = document.createElement('div');

@@ -57,6 +57,7 @@
         "https://www.mercadolivre.com.br/perguntas/*"
       ],
       "js": [
+        "tb-sinal.js",
         "ct-respostas.js"
       ],
       "css": [
