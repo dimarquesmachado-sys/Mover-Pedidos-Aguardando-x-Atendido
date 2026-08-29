@@ -329,6 +329,10 @@ try { if (window.tbSinalDeVida) window.tbSinalDeVida('esteira', 'carregou'); } c
 
   function csvCampo(v) {
     v = String(v == null ? '' : v);
+    /* ACERTO (Codex #238 r5): campo começando com = + - @ vira FÓRMULA ao abrir no Excel —
+       um nome de produto assim executaria conteúdo na planilha do dono. Prefixo apóstrofo
+       neutraliza sem mudar o que se lê na célula. */
+    if (/^[=+\-@]/.test(v)) v = "'" + v;
     return (v.indexOf(';') !== -1 || v.indexOf('"') !== -1 || v.indexOf('\n') !== -1)
       ? '"' + v.replace(/"/g, '""') + '"' : v;
   }
@@ -1246,13 +1250,19 @@ try { if (window.tbSinalDeVida) window.tbSinalDeVida('esteira', 'carregou'); } c
 
       var candidatos = [];
       var meioPreenchidas = [];
+      var limpandoPromo = 0;
       linhas.forEach(function (l) {
         var temP = l.preco != null;
         var temPr = l.promo != null;
         if (temP && temPr) candidatos.push(l);
-        else if (temP !== temPr) meioPreenchidas.push(l.sku + ' x ' + l.mk + ': faltou ' + (temP ? 'PrecoPromocional' : 'Preco'));
+        /* ACERTO (Codex #238 r4): preço preenchido e promoção VAZIA é intenção legítima —
+           "este SKU não tem mais promoção". Antes a linha era descartada e a promo velha
+           ficava viva no marketplace. Agora vira promoLimpar, o mecanismo do #238. */
+        else if (temP && !temPr) { l.promoLimpar = true; candidatos.push(l); limpandoPromo++; }
+        else if (temPr && !temP) meioPreenchidas.push(l.sku + ' x ' + l.mk + ': faltou Preco (promoção sozinha não é aplicada)');
         // os 2 em branco: ignorada em silencio (nao mexe no marketplace)
       });
+      if (limpandoPromo) log('   ' + limpandoPromo + ' linha(s) com PrecoPromocional vazio = LIMPAR a promoção nesses marketplaces.', 'aviso');
       meioPreenchidas.forEach(function (m) { log('   \u26A0 ' + m + ' (linha ignorada - arrume e suba de novo)', 'aviso'); });
       if (!candidatos.length) {
         log('Nenhuma linha com os 2 precos preenchidos. Nada a fazer.', 'aviso');
@@ -1272,7 +1282,7 @@ try { if (window.tbSinalDeVida) window.tbSinalDeVida('esteira', 'carregou'); } c
         var idLoja = idLojaPorMk[String(l.mk || '').toLowerCase()];
         if (!idLoja) { problemas.push(l.sku + ' x ' + l.mk + ': marketplace desconhecido nesta conta'); return; }
         if (!porProduto[l.idp]) { porProduto[l.idp] = { idp: l.idp, sku: l.sku, nome: l.prod || '', itens: [] }; ordem.push(l.idp); }
-        porProduto[l.idp].itens.push({ mk: l.mk, idLoja: idLoja, preco: l.preco, promo: l.promo, catNome: l.cat || '', catId: '' });
+        porProduto[l.idp].itens.push({ mk: l.mk, idLoja: idLoja, preco: l.preco, promo: l.promo, promoLimpar: !!l.promoLimpar, catNome: l.cat || '', catId: '' });   /* ACERTO: sem isto o promoLimpar da planilha morria aqui */
       });
       var plano = ordem.map(function (id) { return porProduto[id]; });
 
@@ -2329,8 +2339,12 @@ try { if (window.tbSinalDeVida) window.tbSinalDeVida('esteira', 'carregou'); } c
     chrome.storage.local.set({ esteira_custo_cache: mapa });
   }
 
+  var _gradeGen = 0;   /* ACERTO (Codex #238 r2): fechar e reabrir a grade com requests em voo
+     misturava o carregamento antigo com o novo. Cada abertura tem seu token; resposta de
+     geração vencida é descartada. */
   async function abrirGrade() {
     if (rodando || ocupado) { log('Aguarde a operacao atual terminar para abrir a grade.', 'aviso'); return; }
+    var _meuGen = ++_gradeGen;
     var ids = idsProdutosSelecionados();
     if (!ids.length) { log('Selecione os SKUs na listagem antes de abrir a grade.', 'aviso'); return; }
     if (!(cacheLojas || []).length) { log('Clique em "Ler marketplaces do Bling" antes de abrir a grade.', 'aviso'); return; }
@@ -2346,6 +2360,7 @@ try { if (window.tbSinalDeVida) window.tbSinalDeVida('esteira', 'carregou'); } c
     gradeStatus('Lendo precos, categorias e vinculos de ' + ids.length + ' SKU(s)...');
 
     try {
+      if (_meuGen !== _gradeGen) return;   // outra abertura começou: esta carga não vale mais
       var dados = await mapaComLimite(ids, 4, function (id) { return buscarVinculos(id); });
       var cacheCusto = await lerCacheCusto();
 
@@ -2471,10 +2486,15 @@ try { if (window.tbSinalDeVida) window.tbSinalDeVida('esteira', 'carregou'); } c
       chk.type = 'checkbox';
       chk.checked = !gradeMkOcultos[mk];
       chk.addEventListener('change', function () {
+        var reexibindo = chk.checked && gradeMkOcultos[mk];
         if (chk.checked) delete gradeMkOcultos[mk]; else gradeMkOcultos[mk] = true;
         salvarMkOcultos();
         aplicarMkVisiveis();
         renderGrade();
+        /* ACERTO (Codex #238 r1): marketplace que estava OCULTO quando a grade carregou não
+           teve os vínculos lidos — ao reexibir, a coluna aparecia vazia e o operador achava
+           que não havia vínculo. Avisa que precisa reabrir pra carregar. */
+        if (reexibindo) gradeAviso('"' + mk + '" foi reexibido — feche e abra a grade de novo pra carregar os vínculos dele.');
       });
       lin.appendChild(chk);
       lin.appendChild(document.createTextNode(mk));
@@ -2994,7 +3014,7 @@ try { if (window.tbSinalDeVida) window.tbSinalDeVida('esteira', 'carregou'); } c
       alvos.forEach(function (mk) {
         var cm = modelo.p[mk];
         if (!cm || (!cm.vinc && !cm.ativar)) return;
-        if (cm.preco == null && cm.promo == null && !cm.cat) return;
+        if (cm.preco == null && cm.promo == null && !cm.cat && !cm.promoLimpar) return;   /* ACERTO: limpar promo é mudança */
         if (!destino.p[mk]) destino.p[mk] = { vinc: false };
         var cd = destino.p[mk];
         if (!cd.vinc) { cd.ativar = true; totalAtiv++; }
