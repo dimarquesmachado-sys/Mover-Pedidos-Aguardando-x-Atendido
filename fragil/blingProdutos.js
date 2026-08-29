@@ -273,10 +273,22 @@ async function buscarNaEmpresa(empresa, termo, limite = 20) {
   const lim = Math.min(parseInt(limite, 10) || 20, 100);
   const url = 'https://api.bling.com.br/Api/v3/produtos?pagina=1&limite=' + lim +
               '&criterio=2&pesquisa=' + encodeURIComponent(String(termo).trim());
-  const r = await fetch(url, { headers: { Authorization: 'Bearer ' + token, Accept: 'application/json' } });
-  if (!r.ok) throw new Error('Bling respondeu ' + r.status + ' na busca de produtos');
-  let d = {};
-  try { d = await r.json(); } catch (e) { d = {}; }
+  /* Codex #271: sem prazo, um Bling que aceita a conexão e trava não rejeita NUNCA — a rota
+     jamais chegaria ao fallback que eu anunciei e o autocomplete ficaria pendurado. 8s é
+     folgado pra uma busca e curto o bastante pra não travar quem está digitando. */
+  const ctrl = new AbortController();
+  const prazo = setTimeout(() => ctrl.abort(), 8000);
+  let r, d = {};
+  try {
+    r = await fetch(url, { headers: { Authorization: 'Bearer ' + token, Accept: 'application/json' }, signal: ctrl.signal });
+    if (!r.ok) throw new Error('Bling respondeu ' + r.status + ' na busca de produtos');
+    try { d = await r.json(); } catch (e) { d = {}; }   /* o corpo também corre contra o mesmo prazo */
+  } catch (e) {
+    if (e && e.name === 'AbortError') throw new Error('Bling não respondeu em 8s');
+    throw e;
+  } finally {
+    clearTimeout(prazo);
+  }
   const lista = Array.isArray(d.data) ? d.data : [];
   const resultados = lista.map(p => ({
     id: String(p.id || ''),
