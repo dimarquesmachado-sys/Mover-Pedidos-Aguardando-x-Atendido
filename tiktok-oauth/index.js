@@ -300,6 +300,47 @@ async function tratar(req, res, urlObj, json) {
      Só LÊ o que coletarFinanceiro já guardou; não chama a API. Serve as 3 lojas. */
   /* 29/08 — CONCILIAÇÃO devoluções × financeiro, POR PEDIDO (pedido do dono ao ver a tela
      de reembolsos: ~60 solicitações, com o mesmo pedido repetido). Só lê caches. */
+  /* 29/08 — SONDA de detalhe da devolução (pergunta da conversa do Devoluções: existe
+     endpoint que diga se a CAIXA CHEGOU?). Nenhum dos 27 campos da busca traz isso:
+     return_status é o estado da SOLICITAÇÃO, não do pacote. Em vez de chutar o caminho,
+     esta rota tenta os candidatos plausíveis com um return_id REAL e mostra o que cada um
+     responde — a resposta vem do TikTok, não da minha memória. */
+  if (p === '/tiktok/sonda-devolucao') {
+    if (!admOk()) { json(res, 404, { error: 'not found' }); return true; }
+    const loja = String(q.get('loja') || '').trim().toLowerCase();
+    if (LOJAS.indexOf(loja) < 0) { json(res, 400, { ok: false, erro: 'informe ?loja= (' + LOJAS.join(', ') + ')' }); return true; }
+    const rid = String(q.get('return_id') || '').trim();
+    const oid = String(q.get('order_id') || '').trim();
+    if (!rid) { json(res, 400, { ok: false, erro: 'informe ?return_id= (pegue um em /tiktok/devolucoes-cru)' }); return true; }
+
+    const candidatos = [
+      { nome: 'detalhe da devolução', caminho: '/return_refund/202309/returns/' + encodeURIComponent(rid), metodo: 'GET', extras: {} },
+      { nome: 'busca com o id (traz mais campos?)', caminho: '/return_refund/202309/returns/search', metodo: 'POST', extras: { page_size: '1' }, body: { return_ids: [rid] } },
+      { nome: 'registro de rastreio da devolução', caminho: '/return_refund/202309/returns/' + encodeURIComponent(rid) + '/records', metodo: 'GET', extras: {} },
+      { nome: 'rastreio pelo pedido (logística)', caminho: '/logistics/202309/orders/' + encodeURIComponent(oid || '0') + '/tracking', metodo: 'GET', extras: {}, exige: 'order_id' },
+    ];
+    const saida = [];
+    for (const c of candidatos) {
+      if (c.exige === 'order_id' && !oid) { saida.push({ nome: c.nome, caminho: c.caminho, pulado: 'passe também ?order_id=' }); continue; }
+      let r = null;
+      try { r = await chamar(c.caminho, c.extras, { metodo: c.metodo, body: c.body }, loja); }
+      catch (e) { saida.push({ nome: c.nome, caminho: c.caminho, erro: String(e.message || e).slice(0, 160) }); continue; }
+      const corpo = r && r.corpo;
+      const dados = (corpo && corpo.data) || null;
+      saida.push({
+        nome: c.nome, caminho: c.caminho, http: r && r.http,
+        code: corpo && corpo.code, message: corpo && corpo.message,
+        /* o que interessa é o NOME dos campos: é neles que o status da caixa estaria */
+        campos_no_topo: dados ? Object.keys(dados) : null,
+        amostra: dados ? JSON.parse(JSON.stringify(dados)) : (r && r.cru) || null,
+      });
+      await new Promise(s => setTimeout(s, 300));
+    }
+    json(res, 200, { ok: true, loja, return_id: rid, order_id: oid || null, tentativas: saida,
+      leia: 'procure nos campos_no_topo algo como delivery/tracking/status do pacote. Nenhum caminho aqui é oficialmente confirmado — a sonda existe pra descobrir com dado real qual responde.' });
+    return true;
+  }
+
   if (p === '/tiktok/conciliar') {
     if (!admOk()) { json(res, 404, { error: 'not found' }); return true; }
     const concLib = require('../lib/tiktok-conciliar');
