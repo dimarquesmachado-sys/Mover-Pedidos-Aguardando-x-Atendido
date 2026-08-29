@@ -173,7 +173,12 @@ const server = http.createServer(async (req, res) => {
      POST é aberto (a extensão não tem ADMIN_KEY e o dado não é sensível), mas só aceita
      ids conhecidos e tem teto de registros — id estranho é ignorado, não incha nada.
      Detalhes exigem ADMIN_KEY; /alerta é público e devolve só o que a barra precisa. */
+  if (path === '/diagnostico/modulos' && method === 'OPTIONS') {
+    res.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' });
+    return res.end();
+  }
   if (path === '/diagnostico/modulos' && method === 'POST') {
+    res.setHeader('Access-Control-Allow-Origin', '*');   /* sinal vem de páginas de terceiros (Bling, ML, MM) */
     const canario = require('./lib/canario-modulos');
     return readBody(req).then(body => {
       const ok = canario.registrar(body && body.modulo, body && body.empresa, body && body.versao);
