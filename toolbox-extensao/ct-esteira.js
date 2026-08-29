@@ -331,7 +331,9 @@ try { if (window.tbSinalDeVida) window.tbSinalDeVida('esteira', 'carregou'); } c
        neutraliza sem mudar o que se lê na célula. */
     if (/^[=+\-@\t\r\n]/.test(v)) v = "'" + v;   /* Codex #269 r2: tab/CR/LF no início também
        viram separador de célula no Excel e o que vem depois pode ser avaliado como fórmula */
-    return (v.indexOf(';') !== -1 || v.indexOf('"') !== -1 || v.indexOf('\n') !== -1)
+    /* Codex #269 r3: o apóstrofo não resolve sozinho — um \r cru TERMINA o registro do CSV e
+       joga o resto pra próxima linha, sem prefixo. Qualquer controle força aspas. */
+    return (v.indexOf(';') !== -1 || v.indexOf('"') !== -1 || /[\r\n\t]/.test(v))
       ? '"' + v.replace(/"/g, '""') + '"' : v;
   }
 
@@ -2355,6 +2357,9 @@ try { if (window.tbSinalDeVida) window.tbSinalDeVida('esteira', 'carregou'); } c
 
     GRADE_MK_TODOS = cacheLojas.filter(function (l) { return !RX_MK_FORA_GRADE.test(l.texto); }).map(function (l) { return l.texto; });
     gradeMkOcultos = await lerMkOcultos();
+    /* Codex #269 r3: a chamada ANTIGA podia retomar aqui depois da nova, resetar a seleção
+       e trocar o overlay já renderizado — deixando um "carregando" eterno na tela. */
+    if (_meuGen !== _gradeGen) return;
     gradeOrigemRi = null;
     gradeMarcados = {};
     gradeMkAlvo = {};
