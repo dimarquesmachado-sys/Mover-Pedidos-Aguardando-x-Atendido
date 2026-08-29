@@ -302,11 +302,8 @@ try { if (window.tbSinalDeVida) window.tbSinalDeVida('esteira', 'carregou'); } c
 
   function exportarPlanilha(check) {
     if (!check || check.falhou || !(check.produtos || []).length) return;
-    function campo(v) {
-      v = String(v == null ? '' : v);
-      return (v.indexOf(';') !== -1 || v.indexOf('"') !== -1 || v.indexOf('\n') !== -1)
-        ? '"' + v.replace(/"/g, '""') + '"' : v;
-    }
+    var campo = csvCampo;   /* Codex #269: este export tinha helper PRÓPRIO e ficou de fora da
+       neutralização de fórmula — SKU/nome começando com = + - @ continuava executável no Excel. */
     var linhas = [];
     linhas.push(['SKU', 'Produto'].concat(check.marcadas).map(campo).join(';'));
     check.produtos.forEach(function (p) {
@@ -329,7 +326,14 @@ try { if (window.tbSinalDeVida) window.tbSinalDeVida('esteira', 'carregou'); } c
 
   function csvCampo(v) {
     v = String(v == null ? '' : v);
-    return (v.indexOf(';') !== -1 || v.indexOf('"') !== -1 || v.indexOf('\n') !== -1)
+    /* ACERTO (Codex #238 r5): campo começando com = + - @ vira FÓRMULA ao abrir no Excel —
+       um nome de produto assim executaria conteúdo na planilha do dono. Prefixo apóstrofo
+       neutraliza sem mudar o que se lê na célula. */
+    if (/^[=+\-@\t\r\n]/.test(v)) v = "'" + v;   /* Codex #269 r2: tab/CR/LF no início também
+       viram separador de célula no Excel e o que vem depois pode ser avaliado como fórmula */
+    /* Codex #269 r3: o apóstrofo não resolve sozinho — um \r cru TERMINA o registro do CSV e
+       joga o resto pra próxima linha, sem prefixo. Qualquer controle força aspas. */
+    return (v.indexOf(';') !== -1 || v.indexOf('"') !== -1 || /[\r\n\t]/.test(v))
       ? '"' + v.replace(/"/g, '""') + '"' : v;
   }
 
@@ -1246,13 +1250,19 @@ try { if (window.tbSinalDeVida) window.tbSinalDeVida('esteira', 'carregou'); } c
 
       var candidatos = [];
       var meioPreenchidas = [];
+      var limpandoPromo = 0;
       linhas.forEach(function (l) {
         var temP = l.preco != null;
         var temPr = l.promo != null;
         if (temP && temPr) candidatos.push(l);
-        else if (temP !== temPr) meioPreenchidas.push(l.sku + ' x ' + l.mk + ': faltou ' + (temP ? 'PrecoPromocional' : 'Preco'));
+        /* ACERTO (Codex #238 r4): preço preenchido e promoção VAZIA é intenção legítima —
+           "este SKU não tem mais promoção". Antes a linha era descartada e a promo velha
+           ficava viva no marketplace. Agora vira promoLimpar, o mecanismo do #238. */
+        else if (temP && !temPr) { l.promoLimpar = true; candidatos.push(l); limpandoPromo++; }
+        else if (temPr && !temP) meioPreenchidas.push(l.sku + ' x ' + l.mk + ': faltou Preco (promoção sozinha não é aplicada)');
         // os 2 em branco: ignorada em silencio (nao mexe no marketplace)
       });
+      if (limpandoPromo) log('   ' + limpandoPromo + ' linha(s) com PrecoPromocional vazio = LIMPAR a promoção nesses marketplaces.', 'aviso');
       meioPreenchidas.forEach(function (m) { log('   \u26A0 ' + m + ' (linha ignorada - arrume e suba de novo)', 'aviso'); });
       if (!candidatos.length) {
         log('Nenhuma linha com os 2 precos preenchidos. Nada a fazer.', 'aviso');
@@ -1272,7 +1282,7 @@ try { if (window.tbSinalDeVida) window.tbSinalDeVida('esteira', 'carregou'); } c
         var idLoja = idLojaPorMk[String(l.mk || '').toLowerCase()];
         if (!idLoja) { problemas.push(l.sku + ' x ' + l.mk + ': marketplace desconhecido nesta conta'); return; }
         if (!porProduto[l.idp]) { porProduto[l.idp] = { idp: l.idp, sku: l.sku, nome: l.prod || '', itens: [] }; ordem.push(l.idp); }
-        porProduto[l.idp].itens.push({ mk: l.mk, idLoja: idLoja, preco: l.preco, promo: l.promo, catNome: l.cat || '', catId: '' });
+        porProduto[l.idp].itens.push({ mk: l.mk, idLoja: idLoja, preco: l.preco, promo: l.promo, promoLimpar: !!l.promoLimpar, catNome: l.cat || '', catId: '' });   /* ACERTO: sem isto o promoLimpar da planilha morria aqui */
       });
       var plano = ordem.map(function (id) { return porProduto[id]; });
 
@@ -1312,8 +1322,14 @@ try { if (window.tbSinalDeVida) window.tbSinalDeVida('esteira', 'carregou'); } c
           if (jaVinc) {
             var pAtual = precoNum(v.preco);
             var prAtual = precoNum(v.precoPromocional);
-            var mesmoPreco = pAtual != null && prAtual != null &&
-              Math.abs(pAtual - it.preco) < 0.011 && Math.abs(prAtual - it.promo) < 0.011;
+            /* Codex #269 (P1 do meu próprio fix): linha SEM promoção na planilha só vira
+               promoLimpar se o Bling TEM promoção hoje. Senão, TODA linha sem promo (a
+               maioria de uma planilha gerada) viraria gravação inútil no marketplace. */
+            if (it.promoLimpar && prAtual == null) it.promoLimpar = false;
+            var mesmoPreco = pAtual != null && Math.abs(pAtual - it.preco) < 0.011 &&
+              (it.promoLimpar ? false
+                : (it.promo == null ? prAtual == null
+                   : (prAtual != null && Math.abs(prAtual - it.promo) < 0.011)));
             var mesmaCat = !it.catNome || marcada[it.idLoja] === it.catNome.trim().toLowerCase();
             if (mesmoPreco && mesmaCat) { semMudanca++; return false; }
             it.atualizacao = true;
@@ -2329,14 +2345,21 @@ try { if (window.tbSinalDeVida) window.tbSinalDeVida('esteira', 'carregou'); } c
     chrome.storage.local.set({ esteira_custo_cache: mapa });
   }
 
+  var _gradeGen = 0;   /* ACERTO (Codex #238 r2): fechar e reabrir a grade com requests em voo
+     misturava o carregamento antigo com o novo. Cada abertura tem seu token; resposta de
+     geração vencida é descartada. */
   async function abrirGrade() {
     if (rodando || ocupado) { log('Aguarde a operacao atual terminar para abrir a grade.', 'aviso'); return; }
+    var _meuGen = ++_gradeGen;
     var ids = idsProdutosSelecionados();
     if (!ids.length) { log('Selecione os SKUs na listagem antes de abrir a grade.', 'aviso'); return; }
     if (!(cacheLojas || []).length) { log('Clique em "Ler marketplaces do Bling" antes de abrir a grade.', 'aviso'); return; }
 
     GRADE_MK_TODOS = cacheLojas.filter(function (l) { return !RX_MK_FORA_GRADE.test(l.texto); }).map(function (l) { return l.texto; });
     gradeMkOcultos = await lerMkOcultos();
+    /* Codex #269 r3: a chamada ANTIGA podia retomar aqui depois da nova, resetar a seleção
+       e trocar o overlay já renderizado — deixando um "carregando" eterno na tela. */
+    if (_meuGen !== _gradeGen) return;
     gradeOrigemRi = null;
     gradeMarcados = {};
     gradeMkAlvo = {};
@@ -2346,10 +2369,14 @@ try { if (window.tbSinalDeVida) window.tbSinalDeVida('esteira', 'carregou'); } c
     gradeStatus('Lendo precos, categorias e vinculos de ' + ids.length + ' SKU(s)...');
 
     try {
+      if (_meuGen !== _gradeGen) return;   // outra abertura começou: esta carga não vale mais
       var dados = await mapaComLimite(ids, 4, function (id) { return buscarVinculos(id); });
       var cacheCusto = await lerCacheCusto();
 
       // arvore de categorias por marketplace (para os dropdowns)
+      if (_meuGen !== _gradeGen) return;   /* Codex #269 r2: gradeCats era LIMPO e reconstruído
+         antes da minha checagem — a grade antiga terminando por último deixava a nova com
+         categorias erradas. Checa antes de tocar em qualquer estado compartilhado. */
       gradeCats = {};
       var arvorePorIdLoja = {};
       dados.forEach(function (d) {
@@ -2375,6 +2402,11 @@ try { if (window.tbSinalDeVida) window.tbSinalDeVida('esteira', 'carregou'); } c
         if (listaCat.length) gradeCats[mkNome] = listaCat;
       });
 
+      /* Codex #269 (P1 do meu fix): checar a geração UMA vez no início não bastava — as
+         leituras são await e a grade A podia terminar DEPOIS da B, sobrescrevendo
+         gradeDados/gradeCats e pintando os produtos antigos no overlay novo. Recheca aqui,
+         imediatamente antes de escrever o estado compartilhado. */
+      if (_meuGen !== _gradeGen) return;
       gradeDados = ids.map(function (id, i) {
         var d = dados[i] || {};
         var vincs = d.vinculosLojas || [];
@@ -2471,10 +2503,15 @@ try { if (window.tbSinalDeVida) window.tbSinalDeVida('esteira', 'carregou'); } c
       chk.type = 'checkbox';
       chk.checked = !gradeMkOcultos[mk];
       chk.addEventListener('change', function () {
+        var reexibindo = chk.checked && gradeMkOcultos[mk];
         if (chk.checked) delete gradeMkOcultos[mk]; else gradeMkOcultos[mk] = true;
         salvarMkOcultos();
         aplicarMkVisiveis();
         renderGrade();
+        /* ACERTO (Codex #238 r1): marketplace que estava OCULTO quando a grade carregou não
+           teve os vínculos lidos — ao reexibir, a coluna aparecia vazia e o operador achava
+           que não havia vínculo. Avisa que precisa reabrir pra carregar. */
+        if (reexibindo) gradeAviso('"' + mk + '" foi reexibido — feche e abra a grade de novo pra carregar os vínculos dele.');
       });
       lin.appendChild(chk);
       lin.appendChild(document.createTextNode(mk));
@@ -2994,12 +3031,15 @@ try { if (window.tbSinalDeVida) window.tbSinalDeVida('esteira', 'carregou'); } c
       alvos.forEach(function (mk) {
         var cm = modelo.p[mk];
         if (!cm || (!cm.vinc && !cm.ativar)) return;
-        if (cm.preco == null && cm.promo == null && !cm.cat) return;
+        if (cm.preco == null && cm.promo == null && !cm.cat && !cm.promoLimpar) return;   /* ACERTO: limpar promo é mudança */
         if (!destino.p[mk]) destino.p[mk] = { vinc: false };
         var cd = destino.p[mk];
         if (!cd.vinc) { cd.ativar = true; totalAtiv++; }
         if (cm.preco != null) cd.preco = cm.preco;
-        if (cm.promo != null) cd.promo = cm.promo;
+        /* Codex #269: eu deixei a cópia PASSAR quando a origem tinha promoLimpar, mas não
+           propagava nada — o destino era reportado como copiado e ficava com a promo velha. */
+        if (cm.promoLimpar) { cd.promo = null; cd.promoLimpar = true; }
+        else if (cm.promo != null) { cd.promo = cm.promo; cd.promoLimpar = false; }
         if (cm.cat && (gradeCats[mk] || []).some(function (x) { return x.nome === cm.cat; })) {
           cd.cat = cm.cat; cd.catAlterada = true;
         }
