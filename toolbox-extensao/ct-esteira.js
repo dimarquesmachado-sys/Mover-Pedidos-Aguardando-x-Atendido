@@ -1,3 +1,7 @@
+/* 29/08 canário: CARREGOU — o script foi injetado nesta página-alvo. Se depois disso
+   ele não conseguir MONTAR, o servidor sabe que é quebra e não inatividade. */
+try { if (window.tbSinalDeVida) window.tbSinalDeVida('esteira', 'carregou'); } catch (e) {}
+
 /* =========================================================
    ESTEIRA BLING - EXPORTADOR MULTILOJA v0.4.0
    ---------------------------------------------------------
