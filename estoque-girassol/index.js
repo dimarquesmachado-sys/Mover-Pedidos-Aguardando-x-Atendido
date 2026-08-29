@@ -234,6 +234,17 @@ function routes(readBody) {
     }
 
     // ─ Health ─
+    /* 29/08: o PWA guarda a sessão no localStorage e mostrava a BUSCA direto se o prazo local
+       não tivesse vencido — mas as sessões do servidor são em memória e caem no deploy, então
+       o usuário digitava o SKU e tomava erro, tendo que sair e entrar. Esta rota diz se a
+       sessão guardada ainda vale, pra tela decidir com a verdade do servidor. */
+    if (method === 'GET' && p === '/estoque-girassol/api/sessao') {
+      const sess = pegarUsuario(req);
+      if (!sess) { json(res, 401, { ok: false }); return true; }
+      json(res, 200, { ok: true, usuario: sess.usuario || sess });
+      return true;
+    }
+
     if (method === 'GET' && p === '/estoque-girassol/health') {
       const tokens = tokenManager.lerTokens();
       return json(res, 200, {
