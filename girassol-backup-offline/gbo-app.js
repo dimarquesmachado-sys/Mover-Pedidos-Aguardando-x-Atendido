@@ -1778,6 +1778,33 @@ function routes(readBody) {
     }
     // resumo de um período, pros cards do dashboard
     // ── COMPLETAR TARIFA DO TIKTOK (18/08) ────────────────────────────────────────
+    /* 29/08 — CUSTO DE DEVOLUÇÕES DO TIKTOK pro dashboard (linha própria no período, decisão
+       do dono). Não abate na venda de propósito: no caso 584628284730475569, o custo veio de
+       mandar o ITEM ERRADO (frete ida+volta + taxa = R$ 276,70) e o produto voltou pro
+       estoque — abater no SKU faria o MP3G parecer ruim, quando o problema foi expedição. */
+    if (method === 'GET' && p === '/girassol-backup-offline/tiktok-custo-devolucoes') {
+      const kT = urlObj.searchParams.get('k') || '';
+      const sT = validarSessao(req.headers['cookie']);
+      if (!((process.env.ADMIN_KEY && kT === process.env.ADMIN_KEY) || (sT && ehAdmin(sT)))) { json(res, 404, { error: 'not found' }); return true; }
+      try {
+        const custoLib = require('../lib/tiktok-custo-devolucoes');
+        const fsx = require('fs'), pathx = require('path');
+        const CACHE = process.env.TIKTOK_CACHE_DIR || '/data';
+        const ler = (a) => { try { return JSON.parse(fsx.readFileSync(a, 'utf8')); } catch (e) { return null; } };
+        const dev = ler(pathx.join(CACHE, '_tiktok_devolucoes_girassol.json'));
+        const fin = ler(pathx.join(CACHE, '_tiktok_financeiro_girassol.json'));
+        if (!dev || !fin) { json(res, 200, { ok: true, indisponivel: 'faltam caches do TikTok', custo_total: 0 }); return true; }
+        const de = urlObj.searchParams.get('de'), ate = urlObj.searchParams.get('ate');
+        const ini = de ? Math.floor(Date.parse(de + 'T00:00:00-03:00') / 1000) : Math.floor((Date.now() - 30 * 86400000) / 1000);
+        const fim = ate ? Math.floor(Date.parse(ate + 'T23:59:59-03:00') / 1000) : Math.floor(Date.now() / 1000);
+        json(res, 200, Object.assign({ ok: true }, custoLib.custoNoPeriodo(dev, fin, ini, fim)));
+      } catch (e) {
+        /* nunca derruba o dashboard por causa desta linha */
+        json(res, 200, { ok: false, erro: String(e.message || e).slice(0, 160), custo_total: 0 });
+      }
+      return true;
+    }
+
     if (method === 'GET' && p === '/girassol-backup-offline/tiktok-completar-tarifa') {
       const kT = urlObj.searchParams.get('k') || '';
       const sT = validarSessao(req.headers['cookie']);
