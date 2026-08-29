@@ -29,9 +29,9 @@
      sem .html (o .html e o nome do arquivo, nao da rota: por isso o botao abria nada). */
   function itensEstoque() {
     var aqui = window.location.pathname;
-    if (aqui.indexOf('/girassol-backup-offline') === 0) return [['📍 Estoque Girassol', '/estoque-girassol/celular']];
-    if (aqui.indexOf('/good-checkout-offline') === 0 || aqui.indexOf('/amb-checkout-offline') === 0) return [['📍 Estoque', '/estoque/celular']];
-    return [['📍 Estoque', '/estoque/celular'], ['📍 Estoque Girassol', '/estoque-girassol/celular']];
+    if (aqui.indexOf('/girassol-backup-offline') === 0) return [['📱 Estoque Girassol (celular)', '/estoque-girassol/celular']];
+    if (aqui.indexOf('/good-checkout-offline') === 0 || aqui.indexOf('/amb-checkout-offline') === 0) return [['📱 Estoque (celular)', '/estoque/celular']];
+    return [['📱 Estoque (celular)', '/estoque/celular'], ['📱 Estoque Girassol (celular)', '/estoque-girassol/celular']];
   }
 
   function itensDevolucoes() {
@@ -68,6 +68,17 @@
       bar.appendChild(el);
     });
     document.body.insertBefore(bar, document.body.firstChild);
+
+    /* Aviso do canário de tokens: só um booleano vem do servidor (sem detalhes), e o item
+       aparece apenas quando algum módulo está com o refresh do Bling quebrado. */
+    fetch('/diagnostico/tokens/alerta').then(function (r) { return r.json(); }).then(function (j) {
+      if (!j || !j.alerta) return;
+      var al = document.createElement('span');
+      al.textContent = '⚠️ Token do Bling vencido em um módulo';
+      al.title = 'Um módulo com OAuth próprio (Estoque / Frágil) não conseguiu renovar. Reautorize em /<modulo>/auth/bling';
+      al.style.cssText = 'font-size:12px;padding:5px 10px;border-radius:6px;background:#b91c1c;color:#fff;font-weight:bold;';
+      bar.appendChild(al);
+    }).catch(function () { /* silencioso: aviso é bônus, nunca atrapalha a barra */ });
   }
 
   /* Painéis operados pelo GALPÃO (checkout offline) carregam com data-so-admin: a barra
