@@ -305,6 +305,54 @@ async function tratar(req, res, urlObj, json) {
      return_status é o estado da SOLICITAÇÃO, não do pacote. Em vez de chutar o caminho,
      esta rota tenta os candidatos plausíveis com um return_id REAL e mostra o que cada um
      responde — a resposta vem do TikTok, não da minha memória. */
+  /* 29/08 — EVENTOS das devoluções em lote (o que a sonda descobriu vira rotina).
+     Para cada devolução guardada, busca /returns/{id}/records e resume: quando o cliente
+     POSTOU, quando houve REEMBOLSO e se houve REVELIA (aprovado por falta de análise no
+     prazo). É o dado que faltava pra saber se a caixa chegou e pra medir o relógio. */
+  if (p === '/tiktok/devolucoes-eventos') {
+    if (!admOk()) { json(res, 404, { error: 'not found' }); return true; }
+    const loja = String(q.get('loja') || '').trim().toLowerCase();
+    if (LOJAS.indexOf(loja) < 0) { json(res, 400, { ok: false, erro: 'informe ?loja= (' + LOJAS.join(', ') + ')' }); return true; }
+    const evLib = require('../lib/tiktok-eventos');
+    const CACHE = process.env.TIKTOK_CACHE_DIR || '/data';
+    const arq = path.join(CACHE, '_tiktok_devolucoes_' + loja + '.json');
+    let g = null;
+    try { g = JSON.parse(fs.readFileSync(arq, 'utf8')); } catch (e) { g = null; }
+    if (!g || !g.devolucoes) { json(res, 400, { ok: false, erro: 'sem cache de devoluções — rode /tiktok/devolucoes-coletar?loja=' + loja }); return true; }
+    /* limite baixo por padrão: cada devolução é UMA chamada à API. */
+    const limite = Math.min(200, Math.max(1, Number(q.get('limite')) || 25));
+    const refazer = q.get('refazer') === '1';
+    const alvos = Object.values(g.devolucoes)
+      .filter(d => d && d.id && (refazer || !d.eventos))
+      .sort((a, b) => (Number(b.criado_em) || 0) - (Number(a.criado_em) || 0))
+      .slice(0, limite);
+    let ok = 0, falhou = 0, revelias = 0;
+    for (const d of alvos) {
+      let r = null;
+      try { r = await chamar('/return_refund/202309/returns/' + encodeURIComponent(d.id) + '/records', {}, {}, loja); }
+      catch (e) { falhou++; continue; }
+      const recs = r && r.corpo && r.corpo.data && r.corpo.data.records;
+      if (!r || !r.ok || !Array.isArray(recs)) { falhou++; continue; }
+      d.eventos = evLib.resumirEventos(recs);
+      if (d.eventos.perdeu_por_revelia) revelias++;
+      ok++;
+      await new Promise(s => setTimeout(s, 250));   // respeita o rate limit
+    }
+    try { fs.writeFileSync(arq, JSON.stringify(g, null, 2), 'utf8'); } catch (e) {}
+    const comEventos = Object.values(g.devolucoes).filter(d => d && d.eventos);
+    const totalRevelia = comEventos.filter(d => d.eventos.perdeu_por_revelia);
+    const aguardando = comEventos.filter(d => d.eventos.aguardando_analise);
+    json(res, 200, {
+      ok: true, loja, processadas_agora: ok, falharam: falhou, revelias_agora: revelias,
+      total_com_eventos: comEventos.length, faltam: Object.keys(g.devolucoes).length - comEventos.length,
+      perdidas_por_revelia: totalRevelia.length,
+      valor_perdido_por_revelia: Math.round(totalRevelia.reduce((s, d) => s + (Number(d.valor) || 0), 0) * 100) / 100,
+      aguardando_analise: aguardando.map(d => ({ id: d.id, order_id: d.order_id, valor: d.valor, postado_em: d.eventos.postado_em })),
+      leia: 'revelia = aprovado por falta de análise no prazo (evento ...TIMEOUT). Nos casos reais, caiu 6 e 7 dias após a postagem — quem está em aguardando_analise há mais que isso corre risco.'
+    });
+    return true;
+  }
+
   if (p === '/tiktok/sonda-devolucao') {
     if (!admOk()) { json(res, 404, { error: 'not found' }); return true; }
     const loja = String(q.get('loja') || '').trim().toLowerCase();
