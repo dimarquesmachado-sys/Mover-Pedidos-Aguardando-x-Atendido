@@ -215,6 +215,158 @@ async function tratar(req, res, urlObj, json) {
   // ── FINANCEIRO (15/08): coleta e resumo, pela lib compartilhada ─────────────────
   // A fórmula foi MEDIDA no dado real antes de existir parser: identidade
   // `receita − tarifa + frete = repasse` fechou em 3 de 3, e a tarifa é R$ 2,00 + 12%.
+  /* 29/08 — DEVOLUÇÕES PRO APP DE DEVOLUÇÕES (pedido da conversa de lá; a ponte
+     lib/tiktok-ponte.js já existe e testada, esperando estas duas rotas).
+     Por que aqui e não lá: os tokens do TikTok moram NESTE serviço (arquivo por loja);
+     duplicar a autorização criaria DOIS refresh do mesmo app — a armadilha que já mordeu
+     com o ML, onde a renovação de um derruba a sessão do outro.
+     CONTRATO exigido pela ponte: ?loja=<good|amb|girassol> e a resposta DEVOLVE o campo
+     `loja` com o mesmo valor pedido. Aqui a loja inválida é RECUSADA (400) em vez de
+     trocada pela padrão em silêncio — a ponte recusaria a resposta de qualquer forma, e
+     entregar dado da loja errada achando que deu certo seria pior que falhar. */
+  if (p === '/tiktok/devolucoes-cru' || p === '/tiktok/devolucoes-coletar') {
+    if (!admOk()) { json(res, 404, { error: 'not found' }); return true; }
+    const lojaPedida = String(q.get('loja') || '').trim().toLowerCase();
+    if (!lojaPedida) { json(res, 400, { ok: false, erro: 'informe ?loja= (' + LOJAS.join(', ') + ')' }); return true; }
+    if (LOJAS.indexOf(lojaPedida) < 0) { json(res, 400, { ok: false, erro: 'loja desconhecida: ' + lojaPedida + ' (conhecidas: ' + LOJAS.join(', ') + ')' }); return true; }
+    const loja = lojaPedida;
+    const devLib = require('../lib/tiktok-financeiro');
+    const ctxDev = {
+      CACHE_DIR: process.env.TIKTOK_CACHE_DIR || '/data', path,
+      readJson: (arqv, padrao) => { try { return JSON.parse(fs.readFileSync(arqv, 'utf8')); } catch (e) { return padrao; } },
+      writeJson: (arqv, v) => { try { fs.mkdirSync(path.dirname(arqv), { recursive: true }); } catch (e) {} fs.writeFileSync(arqv, JSON.stringify(v, null, 2)); },
+      chamar
+    };
+    const arqDev = path.join(ctxDev.CACHE_DIR, '_tiktok_devolucoes_' + loja + '.json');
+    /* Codex #272: readJson devolve o padrão tanto pra "não existe" quanto pra ARQUIVO
+       CORROMPIDO — a ponte veria ok:true com zero devoluções nos dois casos. Aqui os dois
+       são distinguidos: existe mas não lê = erro explícito, não silêncio. */
+    const lerGuardadas = () => {
+      if (!fs.existsSync(arqDev)) return { devolucoes: {}, atualizado: null, _novo: true };
+      try {
+        const parsed = JSON.parse(fs.readFileSync(arqDev, 'utf8'));
+        /* Codex #272 r2: JSON VÁLIDO mas de formato errado ({}, [], null) passava e virava
+           "ok com zero" — mesmo silêncio do arquivo corrompido, por outro caminho. */
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { _ilegivel: 'formato inesperado no cache (esperado objeto com devolucoes)' };
+        /* Codex #272 r3: cache que EXISTE precisa ter o mapa; {} ou devolucoes:null passavam
+           e viravam "ok com zero", o mesmo silêncio pela terceira porta. */
+        if (!parsed.devolucoes || typeof parsed.devolucoes !== 'object' || Array.isArray(parsed.devolucoes)) return { _ilegivel: 'cache sem o mapa devolucoes (formato inesperado)' };
+        return parsed;
+      } catch (e) { return { _ilegivel: String(e.message || e).slice(0, 160) }; }
+    };
+
+    if (p === '/tiktok/devolucoes-coletar') {
+      /* A coleta varre janelas de 30 dias e pode passar do timeout do Render (a conversa de
+         lá viu 502 com 60 dias). Roda em BACKGROUND e responde na hora; o andamento fica
+         no mesmo arquivo, que a rota -cru já lê. */
+      const dias = Math.min(365, Math.max(1, Number(q.get('dias')) || 30));
+      if (q.get('esperar') === '1') {
+        /* Codex #272 r2: este caminho pulava o marcarColeta e o ultima_coleta continuava
+           descrevendo uma coleta ANTIGA — inclusive depois de esta falhar. */
+        if (!global.__tkColetando) global.__tkColetando = {};
+        if (global.__tkColetando[loja]) {
+          json(res, 409, { ok: false, loja, erro: 'já existe uma coleta em andamento para esta loja' });
+          return true;
+        }
+        global.__tkColetando[loja] = true;
+        const marcar = (v) => {
+          try {
+            const g2 = ctxDev.readJson(arqDev, { devolucoes: {} });
+            g2.ultima_coleta = Object.assign({ em: new Date().toISOString(), dias, esperou: true }, v);
+            ctxDev.writeJson(arqDev, g2);
+          } catch (e) {}
+        };
+        try {
+          const r = await devLib.coletarDevolucoesTikTok(ctxDev, loja, dias);
+          marcar({ estado: r && r.erro ? 'falhou' : 'ok', erro: (r && r.erro) || null, vistas: r && r.vistas, novas: r && r.novas });
+          const g = lerGuardadas();
+          /* Codex #272 r3: a coleta RESOLVE com {ok:false, erro} — responder 200 fazia
+             monitoramento por status HTTP achar que deu certo. */
+          json(res, (r && r.erro) ? 502 : 200, { ok: !(r && r.erro), loja, dias, ...r, guardadas: Object.keys((g && g.devolucoes) || {}).length });
+        } catch (e) {
+          marcar({ estado: 'falhou', erro: String(e && e.message || e).slice(0, 200) });
+          json(res, 502, { ok: false, loja, dias, erro: String(e && e.message || e).slice(0, 200) });
+        } finally {
+          delete global.__tkColetando[loja];
+        }
+        return true;
+      }
+      /* Codex #272 (P1): a coleta RESOLVE com {ok:false, erro} em vez de rejeitar, então
+         registrar só no log deixaria a ponte vendo "0 devoluções" e concluindo que está
+         tudo certo — falha silenciosa, que é o defeito que estamos caçando o dia todo.
+         O desfecho fica gravado no MESMO arquivo e a rota -cru o devolve. */
+      /* Codex #272 r2 (P1): com 202 imediato ficou fácil disparar duas coletas da MESMA loja;
+         cada uma lê o cache inteiro antes do primeiro await e grava o próprio snapshot no
+         fim — a segunda apagaria o que a primeira achou. Trava simples por loja, em memória
+         do processo (é um processo só), com validade pra não travar pra sempre se algo
+         morrer no meio. */
+      if (!global.__tkColetando) global.__tkColetando = {};
+      /* Codex #272 r3: validade de 30 min expirava DURANTE uma coleta longa (365 dias) e
+         admitia a segunda — o atropelo que a trava veio impedir. A trava agora vale até a
+         coleta terminar; o processo reiniciando já limpa (global some), que era o único
+         motivo real de existir a validade. */
+      if (global.__tkColetando[loja]) {
+        const gJa = lerGuardadas();
+        json(res, 409, { ok: false, loja, erro: 'já existe uma coleta em andamento para esta loja — aguarde e chame -cru',
+          guardadas: Object.keys((gJa && gJa.devolucoes) || {}).length, ultima_coleta: (gJa && gJa.ultima_coleta) || null });
+        return true;
+      }
+      global.__tkColetando[loja] = true;
+
+      const marcarColeta = (v) => {
+        try {
+          const g2 = ctxDev.readJson(arqDev, { devolucoes: {} });
+          g2.ultima_coleta = Object.assign({ em: new Date().toISOString(), dias }, v);
+          ctxDev.writeJson(arqDev, g2);
+        } catch (e) { console.error('[tiktok devolucoes ' + loja + '] nao gravou desfecho:', e.message); }
+      };
+      marcarColeta({ estado: 'rodando', erro: null });
+      devLib.coletarDevolucoesTikTok(ctxDev, loja, dias)
+        .then(r => {
+          delete global.__tkColetando[loja];
+          const falhou = r && r.erro;
+          marcarColeta({ estado: falhou ? 'falhou' : 'ok', erro: falhou || null, vistas: r && r.vistas, novas: r && r.novas });
+          console.log('[tiktok devolucoes ' + loja + '] coleta terminou:', JSON.stringify(r).slice(0, 200));
+        })
+        .catch(e => {
+          delete global.__tkColetando[loja];
+          marcarColeta({ estado: 'falhou', erro: String(e && e.message || e).slice(0, 200) });
+          console.error('[tiktok devolucoes ' + loja + '] coleta falhou:', e.message);
+        });
+      const gAntes = lerGuardadas();
+      json(res, 202, {
+        ok: true, loja, dias, em_background: true,
+        guardadas_antes: Object.keys(gAntes.devolucoes || {}).length,
+        acompanhe: '/tiktok/devolucoes-cru?loja=' + loja + '&k=SUA_ADMIN_KEY',
+        nota: 'coleta rodando; chame -cru daqui a alguns minutos. Use &esperar=1 para bloquear até terminar (pode dar 502 com muitos dias).'
+      });
+      return true;
+    }
+
+    /* -cru: devolve o que está guardado + a UNIÃO dos campos que a API do TikTok mandou.
+       É por essa união que a conversa do Devoluções decide o que dá pra bipar na triagem
+       (principalmente se vem rastreio da reversa) — sem ela, o casamento de lá seria chute. */
+    const limite = Math.min(500, Math.max(1, Number(q.get('limite')) || 30));
+    const g = lerGuardadas();
+    if (g._ilegivel) { json(res, 500, { ok: false, loja, erro: 'cache de devoluções ilegível (' + g._ilegivel + ') — rode /tiktok/devolucoes-coletar?loja=' + loja + ' pra refazer' }); return true; }
+    const todas = Object.values(g.devolucoes || {}).filter(d => d && typeof d === 'object');   /* Codex #272 r2: entrada nula no mapa quebraria a união */
+    todas.sort((a, b) => (Number(b.criado_em) || 0) - (Number(a.criado_em) || 0));
+    /* Codex #272: campo cru chamado "constructor"/"toString"/"__proto__" cairia no
+       prototype de um objeto comum e a contagem sairia errada (ou mutaria herdado). */
+    const uniao = Object.create(null);
+    for (const d of todas) for (const c of (d.cru_campos || [])) uniao[c] = (uniao[c] || 0) + 1;
+    json(res, 200, {
+      ok: true, loja,
+      total_guardadas: todas.length,
+      atualizado: g.atualizado || null,
+      ultima_coleta: g.ultima_coleta || null,   /* Codex #272: a ponte enxerga se a última coleta falhou */
+      cru_campos_uniao: Object.keys(uniao).sort(),
+      cru_campos_contagem: uniao,
+      devolucoes: todas.slice(0, limite)
+    });
+    return true;
+  }
+
   if (p === '/tiktok/financeiro' || p === '/tiktok/financeiro-coletar') {
     if (!admOk()) { json(res, 404, { error: 'not found' }); return true; }
     const loja = lojaDe(q);
