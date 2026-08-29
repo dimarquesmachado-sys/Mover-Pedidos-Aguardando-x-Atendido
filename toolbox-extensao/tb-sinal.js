@@ -7,6 +7,11 @@ window.tbSinalDeVida = function (modulo) {
     var hoje = new Date().toISOString().slice(0, 10);
     chrome.storage.local.get([chaveDia, 'tb_empresa', 'tb_servidor'], function (cfg) {
       if (cfg[chaveDia] === hoje) return;                       // já sinalizou hoje
+      /* 29/08 (visto em produção): numa instalação nova o módulo pode montar ANTES de o dono
+         escolher a empresa no popup — o sinal ia como "sem-empresa" e criava registro órfão.
+         Sem empresa definida, não sinaliza: na próxima montagem, já configurado, sinaliza
+         certo (e o dia não é marcado, então nada se perde). */
+      if (!cfg.tb_empresa) return;
       var base = cfg.tb_servidor || 'https://mover-pedidos-aguardando-x-atendido.onrender.com';
       /* 29/08: o POST com Content-Type JSON é cross-origin a partir da página do Bling/ML e
          o navegador o BLOQUEIA no preflight — nenhum sinal chegava. sendBeacon envia uma
