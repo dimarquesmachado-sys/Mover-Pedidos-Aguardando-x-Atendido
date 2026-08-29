@@ -302,11 +302,8 @@ try { if (window.tbSinalDeVida) window.tbSinalDeVida('esteira', 'carregou'); } c
 
   function exportarPlanilha(check) {
     if (!check || check.falhou || !(check.produtos || []).length) return;
-    function campo(v) {
-      v = String(v == null ? '' : v);
-      return (v.indexOf(';') !== -1 || v.indexOf('"') !== -1 || v.indexOf('\n') !== -1)
-        ? '"' + v.replace(/"/g, '""') + '"' : v;
-    }
+    var campo = csvCampo;   /* Codex #269: este export tinha helper PRÓPRIO e ficou de fora da
+       neutralização de fórmula — SKU/nome começando com = + - @ continuava executável no Excel. */
     var linhas = [];
     linhas.push(['SKU', 'Produto'].concat(check.marcadas).map(campo).join(';'));
     check.produtos.forEach(function (p) {
@@ -1322,8 +1319,14 @@ try { if (window.tbSinalDeVida) window.tbSinalDeVida('esteira', 'carregou'); } c
           if (jaVinc) {
             var pAtual = precoNum(v.preco);
             var prAtual = precoNum(v.precoPromocional);
-            var mesmoPreco = pAtual != null && prAtual != null &&
-              Math.abs(pAtual - it.preco) < 0.011 && Math.abs(prAtual - it.promo) < 0.011;
+            /* Codex #269 (P1 do meu próprio fix): linha SEM promoção na planilha só vira
+               promoLimpar se o Bling TEM promoção hoje. Senão, TODA linha sem promo (a
+               maioria de uma planilha gerada) viraria gravação inútil no marketplace. */
+            if (it.promoLimpar && prAtual == null) it.promoLimpar = false;
+            var mesmoPreco = pAtual != null && Math.abs(pAtual - it.preco) < 0.011 &&
+              (it.promoLimpar ? false
+                : (it.promo == null ? prAtual == null
+                   : (prAtual != null && Math.abs(prAtual - it.promo) < 0.011)));
             var mesmaCat = !it.catNome || marcada[it.idLoja] === it.catNome.trim().toLowerCase();
             if (mesmoPreco && mesmaCat) { semMudanca++; return false; }
             it.atualizacao = true;
@@ -2390,6 +2393,11 @@ try { if (window.tbSinalDeVida) window.tbSinalDeVida('esteira', 'carregou'); } c
         if (listaCat.length) gradeCats[mkNome] = listaCat;
       });
 
+      /* Codex #269 (P1 do meu fix): checar a geração UMA vez no início não bastava — as
+         leituras são await e a grade A podia terminar DEPOIS da B, sobrescrevendo
+         gradeDados/gradeCats e pintando os produtos antigos no overlay novo. Recheca aqui,
+         imediatamente antes de escrever o estado compartilhado. */
+      if (_meuGen !== _gradeGen) return;
       gradeDados = ids.map(function (id, i) {
         var d = dados[i] || {};
         var vincs = d.vinculosLojas || [];
@@ -3019,7 +3027,10 @@ try { if (window.tbSinalDeVida) window.tbSinalDeVida('esteira', 'carregou'); } c
         var cd = destino.p[mk];
         if (!cd.vinc) { cd.ativar = true; totalAtiv++; }
         if (cm.preco != null) cd.preco = cm.preco;
-        if (cm.promo != null) cd.promo = cm.promo;
+        /* Codex #269: eu deixei a cópia PASSAR quando a origem tinha promoLimpar, mas não
+           propagava nada — o destino era reportado como copiado e ficava com a promo velha. */
+        if (cm.promoLimpar) { cd.promo = null; cd.promoLimpar = true; }
+        else if (cm.promo != null) { cd.promo = cm.promo; cd.promoLimpar = false; }
         if (cm.cat && (gradeCats[mk] || []).some(function (x) { return x.nome === cm.cat; })) {
           cd.cat = cm.cat; cd.catAlterada = true;
         }
