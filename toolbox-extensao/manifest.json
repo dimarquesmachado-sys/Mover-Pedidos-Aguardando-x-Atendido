@@ -10,7 +10,8 @@
     "clipboardWrite",
     "cookies",
     "scripting",
-    "webRequest"
+    "webRequest",
+    "tabs"
   ],
   "host_permissions": [
     "https://www.bling.com.br/*",
