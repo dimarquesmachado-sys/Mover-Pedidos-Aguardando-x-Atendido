@@ -29,7 +29,9 @@
      sem .html (o .html e o nome do arquivo, nao da rota: por isso o botao abria nada). */
   function itensEstoque() {
     var aqui = window.location.pathname;
-    if (aqui.indexOf('/girassol-backup-offline') === 0) return [['📱 Estoque Girassol (celular)', '/estoque-girassol/celular']];
+    /* dentro do painel de uma empresa o nome dela é redundante (pedido do dono) — nos
+       painéis neutros os dois continuam identificados, aí a distinção é necessária. */
+    if (aqui.indexOf('/girassol-backup-offline') === 0) return [['📱 Estoque (celular)', '/estoque-girassol/celular']];
     if (aqui.indexOf('/good-checkout-offline') === 0 || aqui.indexOf('/amb-checkout-offline') === 0) return [['📱 Estoque (celular)', '/estoque/celular']];
     return [['📱 Estoque (celular)', '/estoque/celular'], ['📱 Estoque Girassol (celular)', '/estoque-girassol/celular']];
   }
