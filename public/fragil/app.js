@@ -1043,26 +1043,19 @@ $("btn-zerar").addEventListener("click", async () => {
   if ($("btn-salvar")) $("btn-salvar").disabled = true;
   _zerando = true;
   try {
-    /* Codex #254: fetch NÃO rejeita em 4xx/5xx — sem checar ok, a config viria undefined
-       e o POST destrutivo seguiria assim mesmo. Falhou a leitura, não apaga nada. */
-    const rCfg = await fetch("/fragil/api/skus" + q);
-    if (!rCfg.ok) { status("Não consegui ler a configuração atual (HTTP " + rCfg.status + ") — NADA foi alterado.", false); return; }
-    const cfgAtual = await rCfg.json();
-    if (!cfgAtual || !cfgAtual.config) { status("Resposta inesperada do servidor — NADA foi alterado.", false); return; }
-    const j = await api("/fragil/api/skus" + q, {
-      method: "POST",
-      body: JSON.stringify({ config: cfgAtual.config, skus: {} })
-    });
-    if (emp === empresaAtiva()) {   // só redesenha se o seletor ainda está na empresa zerada
+    /* 29/08: uma chamada só — o servidor lê a config e grava a lista vazia no mesmo passo
+       (clear atômico), então não há mais janela pra outro admin ter a config desfeita, e a
+       CONTAGEM vem de quem realmente apagou, não da tabela da tela. */
+    const j = await api("/fragil/api/skus/limpar" + q, { method: "POST" });
+    const removidos = (j && typeof j.removidos === "number") ? j.removidos : qtd;
+    if (emp === empresaAtiva()) {
       preencherTabelaDoMapa(j.skus || {});
       atualizarContador();
-      /* Codex #254: o rótulo de última atualização vem da resposta — antes ficava exibindo
-         o carimbo velho, que foi justamente o sinal que denunciou o zeramento não gravado. */
       if ($("atualizadoEm") && j.atualizadoEm) {
         $("atualizadoEm").textContent = "Última atualização: " + new Date(j.atualizadoEm).toLocaleString("pt-BR") + (j.atualizadoPor ? " por " + j.atualizadoPor : "");
       }
     }
-    status("Lista de " + nome + " zerada e GRAVADA (" + qtd + " SKUs removidos).", true);
+    status("Lista de " + nome + " zerada e GRAVADA (" + removidos + " SKUs removidos).", true);
     carregarAuditoria();
     carregarStatus();
   } catch (e) {
