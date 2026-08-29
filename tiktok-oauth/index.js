@@ -313,6 +313,36 @@ async function tratar(req, res, urlObj, json) {
      extrato, por PEDIDO. Responde a pergunta certa: dos casos aprovados por falta de
      resposta, quanto de fato saiu do caixa? (O valor da tela não serve — já provamos que
      difere: 36,00 na tela × 41,01 debitado num caso, e em outros houve compensação.) */
+  /* 29/08 — CUSTO das devoluções num período: o número que o DASHBOARD consome.
+     Soma débito do extrato + frete pago pela loja − compensação do TikTok. */
+  if (p === '/tiktok/custo-devolucoes') {
+    if (!admOk()) { json(res, 404, { error: 'not found' }); return true; }
+    const pedida = String(q.get('loja') || '').trim().toLowerCase();
+    if (pedida && LOJAS.indexOf(pedida) < 0) { json(res, 400, { ok: false, erro: 'loja desconhecida: ' + pedida }); return true; }
+    const alvo = pedida ? [pedida] : LOJAS;
+    const custoLib = require('../lib/tiktok-custo-devolucoes');
+    const CACHE = process.env.TIKTOK_CACHE_DIR || '/data';
+    const leiaArq = (a) => { try { return JSON.parse(fs.readFileSync(a, 'utf8')); } catch (e) { return null; } };
+    /* de/ate em AAAA-MM-DD (horário de Brasília, como o resto do painel) */
+    const de = q.get('de'), ate = q.get('ate');
+    const iniTs = de ? Math.floor(Date.parse(de + 'T00:00:00-03:00') / 1000) : Math.floor((Date.now() - 30 * 86400000) / 1000);
+    const fimTs = ate ? Math.floor(Date.parse(ate + 'T23:59:59-03:00') / 1000) : Math.floor(Date.now() / 1000);
+    if (!isFinite(iniTs) || !isFinite(fimTs)) { json(res, 400, { ok: false, erro: 'datas inválidas — use ?de=AAAA-MM-DD&ate=AAAA-MM-DD' }); return true; }
+    const saida = {};
+    let custoTotal = 0;
+    for (const loja of alvo) {
+      const dev = leiaArq(path.join(CACHE, '_tiktok_devolucoes_' + loja + '.json'));
+      const fin = leiaArq(path.join(CACHE, '_tiktok_financeiro_' + loja + '.json'));
+      if (!dev || !fin) { saida[loja] = { erro: 'faltam caches — rode devolucoes-coletar e financeiro-coletar desta loja' }; continue; }
+      const r = custoLib.custoNoPeriodo(dev, fin, iniTs, fimTs);
+      custoTotal = Math.round((custoTotal + r.custo_total) * 100) / 100;
+      saida[loja] = r;
+    }
+    json(res, 200, { ok: true, de: de || null, ate: ate || null, por_loja: saida, custo_total_geral: custoTotal,
+      leia: 'custo_total = |débito do extrato| + frete de devolução pago pela loja − compensação recebida. Pedido sem lançamento NÃO entra (aparece em pedidos_sem_lancamento) — vai cair depois.' });
+    return true;
+  }
+
   if (p === '/tiktok/revelia-impacto') {
     if (!admOk()) { json(res, 404, { error: 'not found' }); return true; }
     const loja = String(q.get('loja') || '').trim().toLowerCase();
