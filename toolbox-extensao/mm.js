@@ -41,7 +41,11 @@ $('salvar').onclick = async function () {
 $('sync').onclick = async function () {
   await salvarCfg();
   $('status').textContent = 'Sincronizando...';
-  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+  /* Codex #264 (P1): com a tela abrindo em ABA própria, a aba ATIVA passou a ser a da
+     extensão — o sync manual olhava pra ela e quebrava. Procura a aba do painel MM;
+     se não achar, cai na aba ativa (comportamento antigo) e o erro segue explicando. */
+  let tabs = await chrome.tabs.query({ url: 'https://painelmarketplace.madeiramadeira.com.br/*' });
+  if (!tabs || !tabs.length) tabs = await chrome.tabs.query({ active: true, currentWindow: true });
   const tab = tabs && tabs[0];
   if (!tab || !/painelmarketplace\.madeiramadeira\.com\.br/.test(tab.url || '')) {
     $('status').textContent = 'Abra a aba do Madeira Madeira (painel), faça login e tente de novo.';
