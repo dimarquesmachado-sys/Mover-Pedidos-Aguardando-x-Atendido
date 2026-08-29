@@ -88,8 +88,15 @@ async function chamar(caminho, extras, opts, loja) {
    /api/v2/token/refresh do app; o refresh em si só expira em 2125, então renovar cedo e
    sempre resolve sem depender de ninguém lembrar. */
 async function renovarLoja(loja) {
+  /* Codex #278 (P1): renovação do agendador e a manual (/tiktok/renovar) podiam rodar
+     JUNTAS na mesma loja, ler o mesmo refresh e rotacionar duas vezes — a segunda gravaria
+     um refresh que o TikTok já invalidou e a loja cairia de vez, exigindo autorizar na mão.
+     É o mesmo atropelo que a coleta teve no #272; aqui o preço é perder a corrente. */
+  if (!global.__tkRenovando) global.__tkRenovando = Object.create(null);
+  if (global.__tkRenovando[loja]) return { loja, ok: false, erro: 'já existe uma renovação em andamento para esta loja' };
+  global.__tkRenovando[loja] = true;
   const t = lerToken(loja);
-  if (!t || !t.refresh_token) return { loja, ok: false, erro: 'sem refresh_token — precisa autorizar uma vez' };
+  if (!t || !t.refresh_token) { delete global.__tkRenovando[loja]; return { loja, ok: false, erro: 'sem refresh_token — precisa autorizar uma vez' }; }
   try {
     const r = await fetch(AUTH + '/api/v2/token/refresh?app_key=' + encodeURIComponent(APP_KEY) +
       '&app_secret=' + encodeURIComponent(APP_SECRET) + '&refresh_token=' + encodeURIComponent(t.refresh_token) +
@@ -107,6 +114,8 @@ async function renovarLoja(loja) {
     return { loja, ok: true, expira_em: d.access_token_expire_in ? new Date(d.access_token_expire_in * 1000).toISOString() : null };
   } catch (e) {
     return { loja, ok: false, erro: String(e.message || e).slice(0, 160) };
+  } finally {
+    delete global.__tkRenovando[loja];
   }
 }
 
