@@ -169,6 +169,29 @@ const server = http.createServer(async (req, res) => {
     return json(res, 200, { alerta: canario.temAlerta() });
   }
 
+  /* Canário dos MÓDULOS de extensão (29/08): a extensão manda sinal de vida ao montar.
+     POST é aberto (a extensão não tem ADMIN_KEY e o dado não é sensível), mas só aceita
+     ids conhecidos e tem teto de registros — id estranho é ignorado, não incha nada.
+     Detalhes exigem ADMIN_KEY; /alerta é público e devolve só o que a barra precisa. */
+  if (path === '/diagnostico/modulos' && method === 'POST') {
+    const canario = require('./lib/canario-modulos');
+    return readBody(req).then(body => {
+      const ok = canario.registrar(body && body.modulo, body && body.empresa, body && body.versao);
+      json(res, ok ? 200 : 400, { ok });
+    }).catch(() => json(res, 400, { ok: false }));
+  }
+  if (path === '/diagnostico/modulos' && method === 'GET') {
+    const canario = require('./lib/canario-modulos');
+    const ADMIN_KEY_M = process.env.ADMIN_KEY || '';
+    if (!ADMIN_KEY_M || urlObj.searchParams.get('k') !== ADMIN_KEY_M) { res.writeHead(404); return res.end('not found'); }
+    return json(res, 200, canario.estadoCompleto());
+  }
+  if (path === '/diagnostico/modulos/alerta') {
+    const canario = require('./lib/canario-modulos');
+    const m = canario.mudos();
+    return json(res, 200, { alerta: m.length > 0, mudos: m.map(x => ({ modulo: x.modulo, empresa: x.empresa, dias: x.dias })) });
+  }
+
   // Rota global de health
   if (path === '/health' || path === '/') {
     return json(res, 200, {

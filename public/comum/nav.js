@@ -99,6 +99,19 @@
       al.style.cssText = 'font-size:12px;padding:5px 10px;border-radius:6px;background:#b91c1c;color:#fff;font-weight:bold;';
       bar.appendChild(al);
     }).catch(function () { /* silencioso: aviso é bônus, nunca atrapalha a barra */ });
+
+    /* Canário dos módulos de extensão: amarelo (atenção), distinto do vermelho de token.
+       Só acende pra módulo que TINHA rotina e ficou mudo — o padrão silencioso que fez o
+       dono passar semanas sem saber que o Respostas tinha parado. */
+    fetch('/diagnostico/modulos/alerta').then(function (r) { return r.json(); }).then(function (j) {
+      if (!j || !j.alerta || !j.mudos || !j.mudos.length) return;
+      var nomes = j.mudos.map(function (m) { return m.modulo + (m.empresa ? '/' + m.empresa : ''); }).join(', ');
+      var el = document.createElement('span');
+      el.textContent = '⚠️ Extensão sem sinal: ' + nomes;
+      el.title = 'Estes módulos apareciam todo dia e pararam. Provável: o site mudou de URL, a extensão foi desativada ou precisa ser recarregada.';
+      el.style.cssText = 'font-size:12px;padding:5px 10px;border-radius:6px;background:#b45309;color:#fff;font-weight:bold;';
+      bar.appendChild(el);
+    }).catch(function () { /* silencioso */ });
   }
 
   /* Painéis operados pelo GALPÃO (checkout offline) carregam com data-so-admin: a barra
