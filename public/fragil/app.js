@@ -1010,6 +1010,9 @@ $("btn-importar").addEventListener("click", abrirModalImport);
 $("btn-zerar").addEventListener("click", async () => {
   /* Codex #254: a empresa é FIXADA aqui e usada nas duas chamadas — trocar o seletor
      durante a operação não pode desviar o POST destrutivo pra outra empresa. */
+  /* Codex #254 r2 (P1): trocar o seletor e clicar antes de carregar() terminar mostrava a
+     tabela da empresa ANTERIOR — a confirmação diria a contagem errada. Mesma trava do salvar. */
+  if (_carregandoEmpresa) { status("Aguarde terminar de carregar a empresa selecionada.", false); return; }
   const emp = empresaAtiva();
   const nome = EMP_NOMES[emp] || emp;
   const q = "?empresa=" + encodeURIComponent(emp);
@@ -1017,10 +1020,22 @@ $("btn-zerar").addEventListener("click", async () => {
      branco, então contar <tr> dizia "1 SKU" numa lista já vazia. */
   const qtd = Array.from($tbody().querySelectorAll("tr"))
     .filter(tr => (tr.querySelector(".input-sku")?.value || "").trim()).length;
-  if (!qtd) { status("A lista de " + nome + " já está vazia.", true); return; }
+  /* Codex #254 r2: tabela local vazia não prova servidor vazio (o operador pode ter apagado
+     as linhas sem salvar). Só sai cedo se o SERVIDOR também estiver vazio. */
+  if (!qtd) {
+    try {
+      const rV = await fetch("/fragil/api/skus" + q);
+      const dV = rV.ok ? await rV.json() : null;
+      if (dV && Object.keys(dV.skus || {}).length === 0) { status("A lista de " + nome + " já está vazia.", true); return; }
+    } catch (e) { /* sem confirmação do servidor, segue e deixa o usuário decidir */ }
+  }
   const digitou = prompt("Isto APAGA E GRAVA a lista de " + nome + " (" + qtd + " SKUs). As outras empresas não são afetadas e a auditoria registra tudo.\n\nPara confirmar, digite: ZERAR");
   if ((digitou || "").trim().toUpperCase() !== "ZERAR") { status("Cancelado — nada foi alterado.", true); return; }
   $("btn-zerar").disabled = true;
+  /* Codex #254 r2: sem isto, o Salvar (botão ou Ctrl+S) podia rodar durante o GET/POST e
+     regravar os SKUs visíveis DEPOIS do clear — desfazendo o zeramento em silêncio. */
+  if ($("btn-salvar")) $("btn-salvar").disabled = true;
+  _carregandoEmpresa = true;
   try {
     /* Codex #254: fetch NÃO rejeita em 4xx/5xx — sem checar ok, a config viria undefined
        e o POST destrutivo seguiria assim mesmo. Falhou a leitura, não apaga nada. */
@@ -1049,6 +1064,8 @@ $("btn-zerar").addEventListener("click", async () => {
        recria o falso-estado que este botão veio matar. Estado INDETERMINADO: manda conferir. */
     status("Não deu pra confirmar o resultado (" + e.message + "). A lista PODE ter sido zerada — recarregue a página e confira antes de tentar de novo.", false);
   } finally {
+    _carregandoEmpresa = false;
+    if ($("btn-salvar")) $("btn-salvar").disabled = false;
     $("btn-zerar").disabled = false;
   }
 });
