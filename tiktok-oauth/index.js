@@ -215,6 +215,75 @@ async function tratar(req, res, urlObj, json) {
   // ── FINANCEIRO (15/08): coleta e resumo, pela lib compartilhada ─────────────────
   // A fórmula foi MEDIDA no dado real antes de existir parser: identidade
   // `receita − tarifa + frete = repasse` fechou em 3 de 3, e a tarifa é R$ 2,00 + 12%.
+  /* 29/08 — DEVOLUÇÕES PRO APP DE DEVOLUÇÕES (pedido da conversa de lá; a ponte
+     lib/tiktok-ponte.js já existe e testada, esperando estas duas rotas).
+     Por que aqui e não lá: os tokens do TikTok moram NESTE serviço (arquivo por loja);
+     duplicar a autorização criaria DOIS refresh do mesmo app — a armadilha que já mordeu
+     com o ML, onde a renovação de um derruba a sessão do outro.
+     CONTRATO exigido pela ponte: ?loja=<good|amb|girassol> e a resposta DEVOLVE o campo
+     `loja` com o mesmo valor pedido. Aqui a loja inválida é RECUSADA (400) em vez de
+     trocada pela padrão em silêncio — a ponte recusaria a resposta de qualquer forma, e
+     entregar dado da loja errada achando que deu certo seria pior que falhar. */
+  if (p === '/tiktok/devolucoes-cru' || p === '/tiktok/devolucoes-coletar') {
+    if (!admOk()) { json(res, 404, { error: 'not found' }); return true; }
+    const lojaPedida = String(q.get('loja') || '').trim().toLowerCase();
+    if (!lojaPedida) { json(res, 400, { ok: false, erro: 'informe ?loja= (' + LOJAS.join(', ') + ')' }); return true; }
+    if (LOJAS.indexOf(lojaPedida) < 0) { json(res, 400, { ok: false, erro: 'loja desconhecida: ' + lojaPedida + ' (conhecidas: ' + LOJAS.join(', ') + ')' }); return true; }
+    const loja = lojaPedida;
+    const devLib = require('../lib/tiktok-financeiro');
+    const ctxDev = {
+      CACHE_DIR: process.env.TIKTOK_CACHE_DIR || '/data', path,
+      readJson: (arqv, padrao) => { try { return JSON.parse(fs.readFileSync(arqv, 'utf8')); } catch (e) { return padrao; } },
+      writeJson: (arqv, v) => { try { fs.mkdirSync(path.dirname(arqv), { recursive: true }); } catch (e) {} fs.writeFileSync(arqv, JSON.stringify(v, null, 2)); },
+      chamar
+    };
+    const arqDev = path.join(ctxDev.CACHE_DIR, '_tiktok_devolucoes_' + loja + '.json');
+    const lerGuardadas = () => ctxDev.readJson(arqDev, { devolucoes: {}, atualizado: null });
+
+    if (p === '/tiktok/devolucoes-coletar') {
+      /* A coleta varre janelas de 30 dias e pode passar do timeout do Render (a conversa de
+         lá viu 502 com 60 dias). Roda em BACKGROUND e responde na hora; o andamento fica
+         no mesmo arquivo, que a rota -cru já lê. */
+      const dias = Math.min(365, Math.max(1, Number(q.get('dias')) || 30));
+      if (q.get('esperar') === '1') {
+        const r = await devLib.coletarDevolucoesTikTok(ctxDev, loja, dias);
+        const g = lerGuardadas();
+        json(res, 200, { ok: true, loja, dias, ...r, guardadas: Object.keys(g.devolucoes || {}).length });
+        return true;
+      }
+      devLib.coletarDevolucoesTikTok(ctxDev, loja, dias)
+        .then(r => console.log('[tiktok devolucoes ' + loja + '] coleta terminou:', JSON.stringify(r).slice(0, 200)))
+        .catch(e => console.error('[tiktok devolucoes ' + loja + '] coleta falhou:', e.message));
+      const gAntes = lerGuardadas();
+      json(res, 202, {
+        ok: true, loja, dias, em_background: true,
+        guardadas_antes: Object.keys(gAntes.devolucoes || {}).length,
+        acompanhe: '/tiktok/devolucoes-cru?loja=' + loja + '&k=SUA_ADMIN_KEY',
+        nota: 'coleta rodando; chame -cru daqui a alguns minutos. Use &esperar=1 para bloquear até terminar (pode dar 502 com muitos dias).'
+      });
+      return true;
+    }
+
+    /* -cru: devolve o que está guardado + a UNIÃO dos campos que a API do TikTok mandou.
+       É por essa união que a conversa do Devoluções decide o que dá pra bipar na triagem
+       (principalmente se vem rastreio da reversa) — sem ela, o casamento de lá seria chute. */
+    const limite = Math.min(500, Math.max(1, Number(q.get('limite')) || 30));
+    const g = lerGuardadas();
+    const todas = Object.values(g.devolucoes || {});
+    todas.sort((a, b) => (Number(b.criado_em) || 0) - (Number(a.criado_em) || 0));
+    const uniao = {};
+    for (const d of todas) for (const c of (d.cru_campos || [])) uniao[c] = (uniao[c] || 0) + 1;
+    json(res, 200, {
+      ok: true, loja,
+      total_guardadas: todas.length,
+      atualizado: g.atualizado || null,
+      cru_campos_uniao: Object.keys(uniao).sort(),
+      cru_campos_contagem: uniao,
+      devolucoes: todas.slice(0, limite)
+    });
+    return true;
+  }
+
   if (p === '/tiktok/financeiro' || p === '/tiktok/financeiro-coletar') {
     if (!admOk()) { json(res, 404, { error: 'not found' }); return true; }
     const loja = lojaDe(q);
