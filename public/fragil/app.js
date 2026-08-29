@@ -187,7 +187,12 @@ async function carregarStatus() {
     } catch (_) {}
 
     const itens = [];
-    itens.push(badge(h.blingConfigurado ? "ok" : "erro", "Bling configurado", h.blingConfigurado ? "✅ Sim" : "❌ Não"));
+    /* Codex #271 r2: o autocomplete agora usa o token de CADA empresa; o OAuth legado do
+       Frágil só serve ao índice antigo. Se as empresas estão disponíveis, isso é o que
+       importa — o legado vira informação secundária, não um ❌ que assusta. */
+    const nEmp = (h.buscaPorEmpresa || []).length;
+    if (nEmp) itens.push(badge("ok", "Busca por empresa", "✅ " + nEmp + " empresa(s)"));
+    itens.push(badge(h.blingConfigurado ? "ok" : (nEmp ? "aviso" : "erro"), "Bling do Frágil (índice)", h.blingConfigurado ? "✅ Sim" : (nEmp ? "— não usado" : "❌ Não")));
     itens.push(badge(h.blingLogado ? "ok" : "erro", "Bling logado", h.blingLogado ? "✅ Sim" : "❌ Não"));
     if (cache) {
       const skuStatus = cache.skusIndexados > 0 ? "ok" : "aviso";
@@ -365,13 +370,24 @@ async function executarBusca() {
   $("busca-btn").textContent = "Buscando...";
   $("status-busca").textContent = "";
   try {
-    const data = await api("/fragil/api/buscar?q=" + encodeURIComponent(q) + "&limite=100");
+    /* 29/08: busca no catálogo da EMPRESA selecionada — antes sugeria sempre o catálogo da
+       conta que autorizou o OAuth do módulo, então cadastrar SKU da Girassol mostrava
+       produtos da GOOD. */
+    const empBusca = empresaAtiva();
+    const data = await api("/fragil/api/buscar?q=" + encodeURIComponent(q) + "&limite=100" +
+      (empBusca ? "&empresa=" + encodeURIComponent(empBusca) : ""));
     resultadosBusca = data.resultados || [];
     renderResultadosBusca();
     const cs = data.cacheStatus || {};
-    $("busca-info-total").textContent =
-      `${data.total} resultado(s) · cache: ${cs.detalhesEmCache}/${cs.skusIndexados}` +
-      (cs.eansCarregados ? " (completo)" : " (carregando...)");
+    if (data.avisoEmpresa) {
+      $("busca-info-total").textContent = `${data.total} resultado(s) · ⚠ ${data.avisoEmpresa}`;
+    } else if (data.empresa) {
+      $("busca-info-total").textContent = `${data.total} resultado(s) no catálogo de ${EMP_NOMES[data.empresa] || data.empresa}`;
+    } else {
+      $("busca-info-total").textContent =
+        `${data.total} resultado(s) · cache: ${cs.detalhesEmCache}/${cs.skusIndexados}` +
+        (cs.eansCarregados ? " (completo)" : " (carregando...)");
+    }
   } catch (e) {
     $("status-busca").textContent = "Erro: " + e.message;
     $("status-busca").className = "erro";

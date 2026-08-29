@@ -249,3 +249,77 @@ module.exports = {
   buscar,
   getCacheStatus
 };
+
+/* ── 29/08: busca POR EMPRESA (autocomplete) ──────────────────────────
+   O índice acima vive de UMA conta Bling (a que autorizou /fragil/auth/bling), então o
+   autocomplete sugeria só o catálogo dela — o dono cadastrava SKU da Girassol vendo
+   produtos da GOOD. Cada empresa já tem tokenManager próprio (girassol/, good/,
+   ambtotal/), usados pelos checkouts: reaproveitamos ESSES tokens em vez de criar mais
+   um OAuth por empresa (mais token = mais coisa pra expirar sem ninguém ver).
+   Aqui a busca é DIRETA na API, sem índice: autocomplete não precisa de cache, precisa
+   de resposta certa da conta certa. */
+const TM_POR_EMPRESA = {
+  girassol: '../girassol/tokenManager',
+  good:     '../good/tokenManager',
+  ambtotal: '../ambtotal/tokenManager',
+};
+
+async function buscarNaEmpresa(empresa, termo, limite = 20) {
+  const mod = TM_POR_EMPRESA[String(empresa || '').toLowerCase()];
+  if (!mod) throw new Error('empresa inválida: ' + empresa);
+  if (!termo || !String(termo).trim()) return { total: 0, resultados: [], empresa };
+  const { garantirToken } = require(mod);
+  const lim = Math.min(parseInt(limite, 10) || 20, 100);
+  /* Codex #271 r3: o prazo começa ANTES de pegar o token — garantirToken pode renovar no
+     Bling e travar lá, e o autocomplete ficaria pendurado antes mesmo da busca sair. */
+  const ctrl = new AbortController();
+  const prazo = setTimeout(() => ctrl.abort(), 8000);
+  let token;
+  try {
+    token = await Promise.race([
+      garantirToken(),
+      new Promise((_, rej) => ctrl.signal.addEventListener('abort', () => rej(new Error('Bling não respondeu em 8s (token)')))),
+    ]);
+  } catch (e) { clearTimeout(prazo); throw e; }
+  /* Codex #271 r3: criterio=2 é 'contém no nome/código' e NÃO encontra por EAN — o dono
+     cadastra SKU frágil bipando o código de barras. Termo só de dígitos e comprido tenta
+     primeiro o GTIN, e cai na busca por texto se não achar. */
+  const termoLimpo = String(termo).trim();
+  const soDigitos = /^\d{8,14}$/.test(termoLimpo.replace(/\s/g, ''));
+  const url = soDigitos
+    ? 'https://api.bling.com.br/Api/v3/produtos?pagina=1&limite=' + lim + '&gtin=' + encodeURIComponent(termoLimpo.replace(/\s/g, ''))
+    : 'https://api.bling.com.br/Api/v3/produtos?pagina=1&limite=' + lim + '&criterio=2&pesquisa=' + encodeURIComponent(termoLimpo);
+  let r, d = {};
+  try {
+    r = await fetch(url, { headers: { Authorization: 'Bearer ' + token, Accept: 'application/json' }, signal: ctrl.signal });
+    if (!r.ok) throw new Error('Bling respondeu ' + r.status + ' na busca de produtos');
+    /* Codex #271 r2: o catch interno engolia o AbortError do CORPO e devolvia lista vazia —
+       o timeout que acabei de pôr não chegava ao fallback. Abort sobe; JSON inválido, não. */
+    try { d = await r.json(); }
+    catch (e) { if (e && e.name === 'AbortError') throw e; d = {}; }
+  } catch (e) {
+    if (e && e.name === 'AbortError') throw new Error('Bling não respondeu em 8s');
+    throw e;
+  } finally {
+    clearTimeout(prazo);
+  }
+  let lista = Array.isArray(d.data) ? d.data : [];
+  if (!lista.length && soDigitos) {
+    /* EAN não achou: o número pode ser o próprio SKU. Tenta por texto no MESMO prazo. */
+    try {
+      const url2 = 'https://api.bling.com.br/Api/v3/produtos?pagina=1&limite=' + lim + '&criterio=2&pesquisa=' + encodeURIComponent(termoLimpo);
+      const r2 = await fetch(url2, { headers: { Authorization: 'Bearer ' + token, Accept: 'application/json' }, signal: ctrl.signal });
+      if (r2.ok) { const d2 = await r2.json(); lista = Array.isArray(d2.data) ? d2.data : []; }
+    } catch (e) { if (e && e.name === 'AbortError') throw new Error('Bling não respondeu em 8s'); }
+  }
+  const resultados = lista.map(p => ({
+    id: String(p.id || ''),
+    codigo: p.codigo || '',
+    nome: p.nome || '',
+    imagem: (p.imagemURL || (p.midia && p.midia.imagens && p.midia.imagens[0] && p.midia.imagens[0].link) || ''),
+    ean: p.gtin || '',
+  })).filter(p => p.codigo);   /* Codex #271 r2: a lista é de SKUs — produto sem codigo entraria e seria salvo com SKU vazio */
+  return { total: resultados.length, resultados, empresa };
+}
+
+module.exports.buscarNaEmpresa = buscarNaEmpresa;

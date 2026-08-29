@@ -152,6 +152,17 @@ function routes(readBody) {
         usuariosViaEnv: true,
         chaveMestraAtiva: false,
         blingConfigurado: !!process.env.FRAGIL_BLING_CLIENT_ID && !!process.env.FRAGIL_BLING_CLIENT_SECRET,
+        /* Codex #271 r2: com a busca POR EMPRESA, o OAuth próprio do Frágil deixou de ser
+           obrigatório — quem manda são os tokenManagers de cada empresa. O painel mostrava
+           "Bling configurado: ❌ Não" e assustava mesmo com tudo funcionando. */
+        /* Codex #271 r3: a pasta do módulo SEMPRE existe — o require passava mesmo sem
+           credencial e o painel dizia que a busca por empresa estava pronta quando não
+           estava. Agora confere as envs de cada empresa, que é o que faz a busca funcionar. */
+        buscaPorEmpresa: [
+          ['girassol', 'BLING_CLIENT_ID'],      /* nomes CONFERIDOS nos tokenManager de cada */
+          ['good', 'GOOD_BLING_CLIENT_ID'],     /* empresa — os que eu tinha suposto estavam */
+          ['ambtotal', 'AMB_BLING_CLIENT_ID'],  /* errados em 2 dos 3 */
+        ].filter(([, env]) => !!process.env[env]).map(([e]) => e),
         blingLogado: !!(tokens.access_token || tokens.refresh_token)
       });
       return true;
@@ -338,6 +349,25 @@ function routes(readBody) {
       if (!sess) { json(res, 401, { erro: 'Sessão inválida' }); return true; }
       const termo = urlObj.searchParams.get('q') || '';
       const limite = urlObj.searchParams.get('limite') || '50';
+      /* 29/08: com ?empresa=, busca no catálogo DAQUELA empresa (token do módulo dela);
+         sem ?empresa, o índice antigo — que segue servindo e é mais rápido. Se a busca por
+         empresa falhar (token do módulo vencido, Bling fora), cai no índice com um aviso,
+         em vez de deixar o dono sem autocomplete nenhum. */
+      const empBusca = (urlObj.searchParams.get('empresa') || '').toLowerCase();
+      if (empBusca) {
+        if (!sess.empresas || !sess.empresas.includes(empBusca)) { json(res, 403, { erro: 'Sem acesso à empresa ' + empBusca }); return true; }
+        try {
+          const rEmpresa = await blingProdutos.buscarNaEmpresa(empBusca, termo, limite);
+          json(res, 200, { ok: true, ...rEmpresa });
+        } catch (e) {
+          /* Codex #271 r3: cair no índice antigo mostraria o catálogo de OUTRA empresa —
+             exatamente o bug que este PR veio consertar (o dono cadastrando SKU da Girassol
+             e vendo produtos da GOOD). Sem resultados é melhor que resultados errados. */
+          json(res, 200, { ok: true, total: 0, resultados: [], empresa: empBusca,
+            avisoEmpresa: 'não deu pra consultar o catálogo de ' + empBusca + ' agora (' + e.message + ') — tente de novo em instantes' });
+        }
+        return true;
+      }
       const r = blingProdutos.buscar(termo, limite);
       json(res, 200, { ok: true, ...r });
       return true;
