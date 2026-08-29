@@ -296,6 +296,36 @@ async function tratar(req, res, urlObj, json) {
     return true;
   }
 
+  /* 29/08 — DESFECHO FINANCEIRO POR PEDIDO (o prejuízo que hoje não chega ao dashboard).
+     Só LÊ o que coletarFinanceiro já guardou; não chama a API. Serve as 3 lojas. */
+  if (p === '/tiktok/desfechos') {
+    if (!admOk()) { json(res, 404, { error: 'not found' }); return true; }
+    const desfLib = require('../lib/tiktok-desfecho');
+    const pedida = String(q.get('loja') || '').trim().toLowerCase();
+    if (pedida && LOJAS.indexOf(pedida) < 0) { json(res, 400, { ok: false, erro: 'loja desconhecida: ' + pedida }); return true; }
+    const alvo = pedida ? [pedida] : LOJAS;
+    const limite = Math.min(500, Math.max(1, Number(q.get('limite')) || 50));
+    const CACHE = process.env.TIKTOK_CACHE_DIR || '/data';
+    const saida = {};
+    let somaNeg = 0, somaPos = 0;
+    for (const loja of alvo) {
+      const arq = path.join(CACHE, '_tiktok_financeiro_' + loja + '.json');
+      let cache = null;
+      try { cache = JSON.parse(fs.readFileSync(arq, 'utf8')); } catch (e) { cache = null; }
+      if (!cache) { saida[loja] = { erro: 'sem cache financeiro — rode /tiktok/financeiro-coletar?loja=' + loja }; continue; }
+      const r = desfLib.desfechosDaLoja(cache, { limite });
+      somaNeg = Math.round((somaNeg + r.impacto_negativo) * 100) / 100;
+      somaPos = Math.round((somaPos + r.impacto_positivo) * 100) / 100;
+      saida[loja] = r;
+    }
+    json(res, 200, {
+      ok: true, lojas: alvo, por_loja: saida,
+      impacto_negativo_total: somaNeg, impacto_positivo_total: somaPos,
+      leia: 'impacto NEGATIVO é prejuízo pós-venda que hoje não aparece no dashboard (reembolso parcial, débito de mediação); POSITIVO é compensação a favor da loja. Nada aqui altera dado — é diagnóstico.'
+    });
+    return true;
+  }
+
   if (p === '/tiktok/devolucoes-cru' || p === '/tiktok/devolucoes-coletar') {
     if (!admOk()) { json(res, 404, { error: 'not found' }); return true; }
     const lojaPedida = String(q.get('loja') || '').trim().toLowerCase();
