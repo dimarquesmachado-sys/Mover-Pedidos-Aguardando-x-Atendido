@@ -52,7 +52,9 @@
       "matches": [
         "https://www.mercadolivre.com.br/vendas/*",
         "https://mercadolivre.com.br/vendas/*",
-        "https://vendedores.mercadolivre.com.br/vendas/*"
+        "https://vendedores.mercadolivre.com.br/vendas/*",
+        "https://vendedores.mercadolivre.com.br/perguntas/*",
+        "https://www.mercadolivre.com.br/perguntas/*"
       ],
       "js": [
         "ct-respostas.js"
