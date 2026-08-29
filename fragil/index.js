@@ -155,9 +155,14 @@ function routes(readBody) {
         /* Codex #271 r2: com a busca POR EMPRESA, o OAuth próprio do Frágil deixou de ser
            obrigatório — quem manda são os tokenManagers de cada empresa. O painel mostrava
            "Bling configurado: ❌ Não" e assustava mesmo com tudo funcionando. */
-        buscaPorEmpresa: ['girassol', 'good', 'ambtotal'].filter(e => {
-          try { require('../' + (e === 'ambtotal' ? 'ambtotal' : e) + '/tokenManager'); return true; } catch (x) { return false; }
-        }),
+        /* Codex #271 r3: a pasta do módulo SEMPRE existe — o require passava mesmo sem
+           credencial e o painel dizia que a busca por empresa estava pronta quando não
+           estava. Agora confere as envs de cada empresa, que é o que faz a busca funcionar. */
+        buscaPorEmpresa: [
+          ['girassol', 'BLING_CLIENT_ID'],      /* nomes CONFERIDOS nos tokenManager de cada */
+          ['good', 'GOOD_BLING_CLIENT_ID'],     /* empresa — os que eu tinha suposto estavam */
+          ['ambtotal', 'AMB_BLING_CLIENT_ID'],  /* errados em 2 dos 3 */
+        ].filter(([, env]) => !!process.env[env]).map(([e]) => e),
         blingLogado: !!(tokens.access_token || tokens.refresh_token)
       });
       return true;
@@ -355,8 +360,11 @@ function routes(readBody) {
           const rEmpresa = await blingProdutos.buscarNaEmpresa(empBusca, termo, limite);
           json(res, 200, { ok: true, ...rEmpresa });
         } catch (e) {
-          const r2 = blingProdutos.buscar(termo, limite);
-          json(res, 200, { ok: true, ...r2, avisoEmpresa: 'catálogo de ' + empBusca + ' indisponível (' + e.message + ') — mostrando o catálogo padrão' });
+          /* Codex #271 r3: cair no índice antigo mostraria o catálogo de OUTRA empresa —
+             exatamente o bug que este PR veio consertar (o dono cadastrando SKU da Girassol
+             e vendo produtos da GOOD). Sem resultados é melhor que resultados errados. */
+          json(res, 200, { ok: true, total: 0, resultados: [], empresa: empBusca,
+            avisoEmpresa: 'não deu pra consultar o catálogo de ' + empBusca + ' agora (' + e.message + ') — tente de novo em instantes' });
         }
         return true;
       }
