@@ -3,15 +3,23 @@
    igual em todos; painel novo = uma linha de <script>, não uma cópia de HTML.
    O item da página atual fica destacado e sem link. */
 (function () {
+  /* 29/08 — ORDEM PEDIDA PELO DONO: agrupada POR EMPRESA (checkout → dashboard → devoluções
+     de cada uma, na ordem Girassol, GOOD, AMB) e, no fim, o que é comum às três: Respostas,
+     Frágil, Estoque (celular) e Ponto. Devoluções da Girassol entra aqui quando existir. */
   var PAINEIS = [
-    ['⚠️ Frágil',        '/fragil/'],
-    ['💬 Respostas',     '/respostas-rapidas/painel'],
-    ['🛒 Checkout Girassol', '/girassol-backup-offline/'],
-    ['🛒 Checkout GOOD',     '/good-checkout-offline/'],
-    ['🛒 Checkout AMB',      '/amb-checkout-offline/'],
+    ['🛒 Checkout Girassol',  '/girassol-backup-offline/'],
+    ['📊 Dashboard Girassol', '/girassol-backup-offline/dashboard'],
+    ['🛒 Checkout GOOD',      '/good-checkout-offline/'],
+    ['📊 Dashboard GOOD',     '/good-checkout-offline/dashboard'],
+    ['🛒 Checkout AMB',       '/amb-checkout-offline/'],
+    ['📊 Dashboard AMB',      '/amb-checkout-offline/dashboard'],
+  ];
 
-    ['⏱️ Ponto (admin)', '/ponto/admin.html'],   /* o dono usa o painel de GESTOR; /ponto/ e a tela de registro do funcionario */
-
+  /* comuns às três, sempre no fim */
+  var COMUNS = [
+    ['💬 Respostas', '/respostas-rapidas/painel'],
+    ['⚠️ Frágil',    '/fragil/'],
+    ['⏱️ Ponto (admin)', '/ponto/admin.html'],
   ];
 
   function ehAtual(href) {
@@ -55,7 +63,17 @@
     titulo.style.cssText = 'color:#9aa2b1;font-size:12px;margin-right:4px;';
     bar.appendChild(titulo);
 
-    PAINEIS.concat(itensEstoque()).concat(itensDevolucoes()).forEach(function (p) {
+    /* Devoluções de cada empresa entra logo depois do bloco dela; Estoque e Ponto no fim. */
+    var lista = [];
+    var devs = itensDevolucoes();
+    function devDe(emp) { return devs.filter(function (d) { return d[0].indexOf(emp) >= 0; }); }
+    PAINEIS.forEach(function (p) {
+      lista.push(p);
+      if (p[0].indexOf('Dashboard GOOD') >= 0) lista = lista.concat(devDe('GOOD'));
+      if (p[0].indexOf('Dashboard AMB') >= 0)  lista = lista.concat(devDe('AMB'));
+    });
+    lista = lista.concat(COMUNS.slice(0, 2)).concat(itensEstoque()).concat(COMUNS.slice(2));
+    lista.forEach(function (p) {
       var atual = ehAtual(p[1]);
       var el = document.createElement(atual ? 'span' : 'a');
       el.textContent = p[0];
