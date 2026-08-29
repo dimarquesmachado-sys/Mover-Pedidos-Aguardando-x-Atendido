@@ -891,6 +891,9 @@ function status(txt, ok) {
   if (txt) setTimeout(() => { $("status").textContent = ""; $("status").className = ""; }, 4000);
 }
 
+let _zerando = false;   /* Codex #254 r3: trava PROPRIA do zeramento — reusar _carregandoEmpresa
+   deixava um carregar() paralelo (trocar empresa / Recarregar) soltar a trava no finally dele
+   e reabilitar o Salvar no meio da operação destrutiva. */
 let _carregandoEmpresa = false;   /* Codex #240: trocar de empresa e salvar no vao gravaria os dados da ANTERIOR na nova */
 let _cargaSeq = 0;                /* Codex #240 r2: 2 trocas rapidas — so o carregar MAIS NOVO solta a trava e preenche a tela */
 async function carregar() {
@@ -920,12 +923,14 @@ async function carregar() {
   } finally {
     if (_meuSeq === _cargaSeq) {         /* so a carga mais recente destrava o salvar */
       _carregandoEmpresa = false;
+    if (_zerando && $("btn-salvar")) $("btn-salvar").disabled = true;   /* Codex #254 r3: carregar() nao reabilita o Salvar durante o zeramento */
       if ($("btn-salvar")) $("btn-salvar").disabled = false;
     }
   }
 }
 
 async function salvar() {
+  if (_zerando) { status("Aguarde o zeramento terminar.", false); return; }
   if (_carregandoEmpresa) { status("Aguarde terminar de carregar a empresa selecionada.", false); return; }
   $("btn-salvar").disabled = true;
   try {
@@ -1012,6 +1017,7 @@ $("btn-zerar").addEventListener("click", async () => {
      durante a operação não pode desviar o POST destrutivo pra outra empresa. */
   /* Codex #254 r2 (P1): trocar o seletor e clicar antes de carregar() terminar mostrava a
      tabela da empresa ANTERIOR — a confirmação diria a contagem errada. Mesma trava do salvar. */
+  if (_zerando) { status("Zeramento em andamento — aguarde.", false); return; }
   if (_carregandoEmpresa) { status("Aguarde terminar de carregar a empresa selecionada.", false); return; }
   const emp = empresaAtiva();
   const nome = EMP_NOMES[emp] || emp;
@@ -1035,7 +1041,7 @@ $("btn-zerar").addEventListener("click", async () => {
   /* Codex #254 r2: sem isto, o Salvar (botão ou Ctrl+S) podia rodar durante o GET/POST e
      regravar os SKUs visíveis DEPOIS do clear — desfazendo o zeramento em silêncio. */
   if ($("btn-salvar")) $("btn-salvar").disabled = true;
-  _carregandoEmpresa = true;
+  _zerando = true;
   try {
     /* Codex #254: fetch NÃO rejeita em 4xx/5xx — sem checar ok, a config viria undefined
        e o POST destrutivo seguiria assim mesmo. Falhou a leitura, não apaga nada. */
@@ -1064,7 +1070,7 @@ $("btn-zerar").addEventListener("click", async () => {
        recria o falso-estado que este botão veio matar. Estado INDETERMINADO: manda conferir. */
     status("Não deu pra confirmar o resultado (" + e.message + "). A lista PODE ter sido zerada — recarregue a página e confira antes de tentar de novo.", false);
   } finally {
-    _carregandoEmpresa = false;
+    _zerando = false;
     if ($("btn-salvar")) $("btn-salvar").disabled = false;
     $("btn-zerar").disabled = false;
   }
