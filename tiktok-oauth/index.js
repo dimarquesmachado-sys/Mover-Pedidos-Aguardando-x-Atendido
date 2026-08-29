@@ -81,6 +81,57 @@ async function chamar(caminho, extras, opts, loja) {
   return { http: r.status, ok: r.ok, corpo: j, cru: j ? null : txt.slice(0, 600) };
 }
 
+/* ── 29/08 — RENOVAÇÃO AUTOMÁTICA (a resposta pra "por que os 3 tokens venceram") ─────
+   Não existia. O refresh_token era GRAVADO e nunca usado: o access dura poucos dias, então
+   cada loja morria sozinha na data em que o dela venceu — foi exatamente o padrão que a
+   conversa do Devoluções observou (22/08, 24/08, 27/08). O endpoint de refresh é o mesmo
+   /api/v2/token/refresh do app; o refresh em si só expira em 2125, então renovar cedo e
+   sempre resolve sem depender de ninguém lembrar. */
+async function renovarLoja(loja) {
+  const t = lerToken(loja);
+  if (!t || !t.refresh_token) return { loja, ok: false, erro: 'sem refresh_token — precisa autorizar uma vez' };
+  try {
+    const r = await fetch(AUTH + '/api/v2/token/refresh?app_key=' + encodeURIComponent(APP_KEY) +
+      '&app_secret=' + encodeURIComponent(APP_SECRET) + '&refresh_token=' + encodeURIComponent(t.refresh_token) +
+      '&grant_type=refresh_token');
+    const j = await r.json().catch(() => null);
+    const d = (j && j.data) || null;
+    if (!d || !d.access_token) return { loja, ok: false, erro: 'TikTok não devolveu token: ' + JSON.stringify(j || {}).slice(0, 160) };
+    salvarToken(loja, Object.assign({}, t, {
+      access_token: d.access_token,
+      refresh_token: d.refresh_token || t.refresh_token,   /* o TikTok pode ROTACIONAR: grava o novo quando vier */
+      expira_em: d.access_token_expire_in ? new Date(d.access_token_expire_in * 1000).toISOString() : null,
+      refresh_expira_em: d.refresh_token_expire_in ? new Date(d.refresh_token_expire_in * 1000).toISOString() : t.refresh_expira_em,
+      renovado_em: new Date().toISOString()
+    }));
+    return { loja, ok: true, expira_em: d.access_token_expire_in ? new Date(d.access_token_expire_in * 1000).toISOString() : null };
+  } catch (e) {
+    return { loja, ok: false, erro: String(e.message || e).slice(0, 160) };
+  }
+}
+
+/* Renova quem está perto de vencer (ou já venceu). Roda no boot e a cada 6h. */
+async function renovarTodasSeNecessario(forcar) {
+  const LIMITE_MS = 24 * 60 * 60 * 1000;   // renova com 1 dia de folga
+  const saida = [];
+  for (const loja of LOJAS) {
+    const t = lerToken(loja);
+    if (!t || !t.refresh_token) { saida.push({ loja, ok: false, erro: 'nunca autorizada' }); continue; }
+    const venceEm = t.expira_em ? Date.parse(t.expira_em) : 0;
+    if (!forcar && venceEm && (venceEm - Date.now()) > LIMITE_MS) { saida.push({ loja, ok: true, pulou: 'ainda válido até ' + t.expira_em }); continue; }
+    const r = await renovarLoja(loja);
+    saida.push(r);
+    console.log('[tiktok renovacao] ' + loja + ': ' + (r.ok ? 'renovado' : 'FALHOU — ' + r.erro));
+  }
+  return saida;
+}
+
+function agendarRenovacaoTikTok() {
+  const rodar = () => renovarTodasSeNecessario(false).catch(e => console.error('[tiktok renovacao]', e.message));
+  setTimeout(rodar, 3 * 60 * 1000);            // 3 min após o boot
+  setInterval(rodar, 6 * 60 * 60 * 1000);      // e a cada 6h
+}
+
 async function tratar(req, res, urlObj, json) {
   const p = urlObj.pathname;
   const q = urlObj.searchParams;
@@ -224,6 +275,18 @@ async function tratar(req, res, urlObj, json) {
      `loja` com o mesmo valor pedido. Aqui a loja inválida é RECUSADA (400) em vez de
      trocada pela padrão em silêncio — a ponte recusaria a resposta de qualquer forma, e
      entregar dado da loja errada achando que deu certo seria pior que falhar. */
+  /* Renovação sob demanda: /tiktok/renovar?k=… (todas) ou &loja=… (uma). Útil pra conferir
+     na hora, sem esperar o ciclo de 6h. */
+  if (p === '/tiktok/renovar') {
+    if (!admOk()) { json(res, 404, { error: 'not found' }); return true; }
+    const umaLoja = String(q.get('loja') || '').trim().toLowerCase();
+    if (umaLoja && LOJAS.indexOf(umaLoja) < 0) { json(res, 400, { ok: false, erro: 'loja desconhecida: ' + umaLoja }); return true; }
+    const r = umaLoja ? [await renovarLoja(umaLoja)] : await renovarTodasSeNecessario(q.get('forcar') === '1');
+    const falhou = r.some(x => !x.ok);
+    json(res, falhou ? 502 : 200, { ok: !falhou, resultado: r });
+    return true;
+  }
+
   if (p === '/tiktok/devolucoes-cru' || p === '/tiktok/devolucoes-coletar') {
     if (!admOk()) { json(res, 404, { error: 'not found' }); return true; }
     const lojaPedida = String(q.get('loja') || '').trim().toLowerCase();
@@ -579,4 +642,4 @@ async function tratar(req, res, urlObj, json) {
   return false;
 }
 
-module.exports = { tratar, chamar, lerToken, LOJAS, LOJA_PADRAO };
+module.exports = { tratar, chamar, lerToken, LOJAS, LOJA_PADRAO, agendarRenovacaoTikTok, renovarLoja };

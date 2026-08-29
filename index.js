@@ -299,6 +299,11 @@ server.listen(PORT, () => {
   console.log(`\n🌐 HTTP ouvindo na porta ${PORT}\n`);
   /* Canário de tokens Bling: 1a checagem 5 min após o boot, depois 1x/dia. Renova de
      verdade — arquivo existir não prova que o Bling ainda aceita o refresh. */
+  /* 29/08: renovação automática dos tokens do TikTok — não existia, e por isso as 3 lojas
+     venceram sozinhas em datas diferentes (22, 24 e 27/08). */
+  try { require('./tiktok-oauth').agendarRenovacaoTikTok(); console.log('[tiktok renovacao] agendada (boot + 6h)'); }
+  catch (e) { console.error('[tiktok renovacao] nao iniciou:', e.message); }
+
   try { require('./lib/canario-tokens').iniciar(); console.log('[canario-tokens] agendado'); }
   catch (e) { console.error('[canario-tokens] nao iniciou:', e.message); }
 
