@@ -298,6 +298,30 @@ function routes(readBody) {
       return true;
     }
 
+    /* 29/08 — CLEAR ATÔMICO (Codex #254): zerar pelo front exigia GET (ler config) + POST
+       (gravar vazio), e nesse vão outro admin podia salvar config e ter a alteração
+       desfeita. Aqui a config é lida e regravada no MESMO passo, do lado do servidor. */
+    if (method === 'POST' && p === '/fragil/api/skus/limpar') {
+      const sess = pegarUsuario(req);
+      if (!sess) { json(res, 401, { erro: 'Sessão inválida' }); return true; }
+      const rEmp = empresaDaSessao(urlObj, sess);
+      if (rEmp.erro) { json(res, 403, { erro: rEmp.erro }); return true; }
+      try {
+        const atual = lerDados(rEmp.empresa);
+        const antigos = atual.skus || {};
+        const qtd = Object.keys(antigos).length;
+        const ts = new Date().toISOString();
+        const audit = Object.keys(antigos).map(sku => ({ ts, usuario: sess.usuario, acao: 'excluiu', sku, antes: antigos[sku] }));
+        dataMod.registrarAuditoria(rEmp.empresa, audit);
+        const salvo = salvarDados({ config: atual.config, skus: {} }, sess.usuario, rEmp.empresa);
+        console.log(`[fragil LIMPAR ${rEmp.empresa}] ${sess.usuario} zerou ${qtd} SKU(s)`);
+        json(res, 200, { ...salvo, removidos: qtd });
+      } catch (e) {
+        json(res, 500, { erro: e.message });
+      }
+      return true;
+    }
+
     // ─ Auditoria (quem mudou o que — 28/08) ─
     if (method === 'GET' && p === '/fragil/api/auditoria') {
       const sess = pegarUsuario(req);

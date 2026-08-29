@@ -86,7 +86,9 @@ try { if (window.tbSinalDeVida) window.tbSinalDeVida('nf', 'carregou'); } catch 
     wrap.id = 'nfmagalu-painel';
     wrap.innerHTML = `
       <style>
-        #nfmagalu-painel{position:fixed;right:16px;bottom:16px;z-index:999999;display:none;
+        /* 29/08 (pedido do dono): cartão à ESQUERDA. O da Shopee já vive em left:16/bottom:16,
+           então o Magalu sobe pra bottom:360 e os dois convivem sem se cobrir. */
+        #nfmagalu-painel{position:fixed;left:16px;bottom:360px;z-index:999999;display:none;
           font:13px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
           background:#181b21;color:#e8eaed;border:1px solid #2a2f3a;border-radius:10px;
           width:290px;box-shadow:0 6px 24px rgba(0,0,0,.35);overflow:hidden}
