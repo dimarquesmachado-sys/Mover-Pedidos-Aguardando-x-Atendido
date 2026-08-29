@@ -365,13 +365,24 @@ async function executarBusca() {
   $("busca-btn").textContent = "Buscando...";
   $("status-busca").textContent = "";
   try {
-    const data = await api("/fragil/api/buscar?q=" + encodeURIComponent(q) + "&limite=100");
+    /* 29/08: busca no catálogo da EMPRESA selecionada — antes sugeria sempre o catálogo da
+       conta que autorizou o OAuth do módulo, então cadastrar SKU da Girassol mostrava
+       produtos da GOOD. */
+    const empBusca = empresaAtiva();
+    const data = await api("/fragil/api/buscar?q=" + encodeURIComponent(q) + "&limite=100" +
+      (empBusca ? "&empresa=" + encodeURIComponent(empBusca) : ""));
     resultadosBusca = data.resultados || [];
     renderResultadosBusca();
     const cs = data.cacheStatus || {};
-    $("busca-info-total").textContent =
-      `${data.total} resultado(s) · cache: ${cs.detalhesEmCache}/${cs.skusIndexados}` +
-      (cs.eansCarregados ? " (completo)" : " (carregando...)");
+    if (data.avisoEmpresa) {
+      $("busca-info-total").textContent = `${data.total} resultado(s) · ⚠ ${data.avisoEmpresa}`;
+    } else if (data.empresa) {
+      $("busca-info-total").textContent = `${data.total} resultado(s) no catálogo de ${EMP_NOMES[data.empresa] || data.empresa}`;
+    } else {
+      $("busca-info-total").textContent =
+        `${data.total} resultado(s) · cache: ${cs.detalhesEmCache}/${cs.skusIndexados}` +
+        (cs.eansCarregados ? " (completo)" : " (carregando...)");
+    }
   } catch (e) {
     $("status-busca").textContent = "Erro: " + e.message;
     $("status-busca").className = "erro";

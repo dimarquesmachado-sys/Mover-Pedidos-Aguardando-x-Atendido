@@ -338,6 +338,22 @@ function routes(readBody) {
       if (!sess) { json(res, 401, { erro: 'Sessão inválida' }); return true; }
       const termo = urlObj.searchParams.get('q') || '';
       const limite = urlObj.searchParams.get('limite') || '50';
+      /* 29/08: com ?empresa=, busca no catálogo DAQUELA empresa (token do módulo dela);
+         sem ?empresa, o índice antigo — que segue servindo e é mais rápido. Se a busca por
+         empresa falhar (token do módulo vencido, Bling fora), cai no índice com um aviso,
+         em vez de deixar o dono sem autocomplete nenhum. */
+      const empBusca = (urlObj.searchParams.get('empresa') || '').toLowerCase();
+      if (empBusca) {
+        if (!sess.empresas || !sess.empresas.includes(empBusca)) { json(res, 403, { erro: 'Sem acesso à empresa ' + empBusca }); return true; }
+        try {
+          const rEmpresa = await blingProdutos.buscarNaEmpresa(empBusca, termo, limite);
+          json(res, 200, { ok: true, ...rEmpresa });
+        } catch (e) {
+          const r2 = blingProdutos.buscar(termo, limite);
+          json(res, 200, { ok: true, ...r2, avisoEmpresa: 'catálogo de ' + empBusca + ' indisponível (' + e.message + ') — mostrando o catálogo padrão' });
+        }
+        return true;
+      }
       const r = blingProdutos.buscar(termo, limite);
       json(res, 200, { ok: true, ...r });
       return true;

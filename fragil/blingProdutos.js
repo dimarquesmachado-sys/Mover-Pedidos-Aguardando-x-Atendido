@@ -249,3 +249,43 @@ module.exports = {
   buscar,
   getCacheStatus
 };
+
+/* ── 29/08: busca POR EMPRESA (autocomplete) ──────────────────────────
+   O índice acima vive de UMA conta Bling (a que autorizou /fragil/auth/bling), então o
+   autocomplete sugeria só o catálogo dela — o dono cadastrava SKU da Girassol vendo
+   produtos da GOOD. Cada empresa já tem tokenManager próprio (girassol/, good/,
+   ambtotal/), usados pelos checkouts: reaproveitamos ESSES tokens em vez de criar mais
+   um OAuth por empresa (mais token = mais coisa pra expirar sem ninguém ver).
+   Aqui a busca é DIRETA na API, sem índice: autocomplete não precisa de cache, precisa
+   de resposta certa da conta certa. */
+const TM_POR_EMPRESA = {
+  girassol: '../girassol/tokenManager',
+  good:     '../good/tokenManager',
+  ambtotal: '../ambtotal/tokenManager',
+};
+
+async function buscarNaEmpresa(empresa, termo, limite = 20) {
+  const mod = TM_POR_EMPRESA[String(empresa || '').toLowerCase()];
+  if (!mod) throw new Error('empresa inválida: ' + empresa);
+  if (!termo || !String(termo).trim()) return { total: 0, resultados: [], empresa };
+  const { garantirToken } = require(mod);
+  const token = await garantirToken();
+  const lim = Math.min(parseInt(limite, 10) || 20, 100);
+  const url = 'https://api.bling.com.br/Api/v3/produtos?pagina=1&limite=' + lim +
+              '&criterio=2&pesquisa=' + encodeURIComponent(String(termo).trim());
+  const r = await fetch(url, { headers: { Authorization: 'Bearer ' + token, Accept: 'application/json' } });
+  if (!r.ok) throw new Error('Bling respondeu ' + r.status + ' na busca de produtos');
+  let d = {};
+  try { d = await r.json(); } catch (e) { d = {}; }
+  const lista = Array.isArray(d.data) ? d.data : [];
+  const resultados = lista.map(p => ({
+    id: String(p.id || ''),
+    codigo: p.codigo || '',
+    nome: p.nome || '',
+    imagem: (p.imagemURL || (p.midia && p.midia.imagens && p.midia.imagens[0] && p.midia.imagens[0].link) || ''),
+    ean: p.gtin || '',
+  })).filter(p => p.codigo || p.nome);
+  return { total: resultados.length, resultados, empresa };
+}
+
+module.exports.buscarNaEmpresa = buscarNaEmpresa;
