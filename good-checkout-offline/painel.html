@@ -416,7 +416,9 @@ let FRAGIL_DIAG = 'nao carregou';
 let FRAGIL_MSGS = {};   // SKU -> mensagem propria (o painel /fragil/ permite uma por SKU)
 async function carregarFrageis(){
   try{
-    const r = await fetch('/fragil/api/skus', {credentials:'same-origin'});
+    /* 29/08: sem ?empresa= a rota devolve a UNIÃO das três — eu tinha AFIRMADO que este
+       checkout não usava o alerta e a review provou o contrário (a chamada está aqui). */
+    const r = await fetch('/fragil/api/skus?empresa=good', {credentials:'same-origin'});
     if(!r.ok){ FRAGIL_DIAG = 'HTTP '+r.status; return; }
     const d = await r.json();
     if(d && d.skus){
