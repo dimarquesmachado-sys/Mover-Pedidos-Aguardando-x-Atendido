@@ -292,17 +292,31 @@ async function buscarNaEmpresa(empresa, termo, limite = 20) {
   let r, d = {};
   try {
     r = await fetch(url, { headers: { Authorization: 'Bearer ' + token, Accept: 'application/json' }, signal: ctrl.signal });
-    if (!r.ok) throw new Error('Bling respondeu ' + r.status + ' na busca de produtos');
+    /* acerto #271 r3: o 401 precisa PASSAR daqui pro retry com renovação logo abaixo —
+       com o throw antes, o retry que escrevi seria código morto. */
+    if (!r.ok && r.status !== 401) throw new Error('Bling respondeu ' + r.status + ' na busca de produtos');
     /* Codex #271 r2: o catch interno engolia o AbortError do CORPO e devolvia lista vazia —
        o timeout que acabei de pôr não chegava ao fallback. Abort sobe; JSON inválido, não. */
-    try { d = await r.json(); }
-    catch (e) { if (e && e.name === 'AbortError') throw e; d = {}; }
+    if (r.ok) { try { d = await r.json(); } catch (e) { if (e && e.name === 'AbortError') throw e; d = {}; } }
   } catch (e) {
     if (e && e.name === 'AbortError') throw new Error('Bling não respondeu em 8s');
     throw e;
   } finally {
     clearTimeout(prazo);
   }
+  /* acerto #271 r3: 401 no meio da busca não tentava renovar — o dono via 'tente de novo'
+     e a segunda tentativa é que funcionava. Renova uma vez e refaz, dentro do mesmo prazo. */
+  if (r.status === 401) {
+    try {
+      const { renovarToken } = require(mod);
+      if (typeof renovarToken === 'function') {
+        const novo = await renovarToken();
+        const r401 = await fetch(url, { headers: { Authorization: 'Bearer ' + novo, Accept: 'application/json' }, signal: ctrl.signal });
+        if (r401.ok) { try { d = await r401.json(); } catch (e) { d = {}; } }
+      }
+    } catch (e) { if (e && e.name === 'AbortError') throw new Error('Bling não respondeu em 8s'); }
+  }
+  if (r.status === 401 && !d.data) throw new Error('Bling recusou o token da loja ' + empresa + ' (401) mesmo após renovar — reautorize o módulo dela');
   let lista = Array.isArray(d.data) ? d.data : [];
   if (!lista.length && soDigitos) {
     /* EAN não achou: o número pode ser o próprio SKU. Tenta por texto no MESMO prazo. */

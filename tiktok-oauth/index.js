@@ -263,7 +263,7 @@ async function tratar(req, res, urlObj, json) {
       if (q.get('esperar') === '1') {
         /* Codex #272 r2: este caminho pulava o marcarColeta e o ultima_coleta continuava
            descrevendo uma coleta ANTIGA — inclusive depois de esta falhar. */
-        if (!global.__tkColetando) global.__tkColetando = {};
+        if (!global.__tkColetando) global.__tkColetando = Object.create(null);   /* acerto #272 r4 */
         if (global.__tkColetando[loja]) {
           json(res, 409, { ok: false, loja, erro: 'já existe uma coleta em andamento para esta loja' });
           return true;
@@ -349,12 +349,21 @@ async function tratar(req, res, urlObj, json) {
     const limite = Math.min(500, Math.max(1, Number(q.get('limite')) || 30));
     const g = lerGuardadas();
     if (g._ilegivel) { json(res, 500, { ok: false, loja, erro: 'cache de devoluções ilegível (' + g._ilegivel + ') — rode /tiktok/devolucoes-coletar?loja=' + loja + ' pra refazer' }); return true; }
+    /* acerto #272 r4: 'rodando' gravado antes de um restart fica no arquivo pra sempre — a
+       trava em memória some no restart, então nada está de fato rodando. Se não há trava
+       viva pra esta loja, o estado é reportado como interrompido em vez de mentir 'rodando'. */
+    if (g.ultima_coleta && g.ultima_coleta.estado === 'rodando' && !(global.__tkColetando && global.__tkColetando[loja])) {
+      g.ultima_coleta = Object.assign({}, g.ultima_coleta, { estado: 'interrompida', erro: 'o serviço reiniciou durante a coleta — rode -coletar de novo' });
+    }
     const todas = Object.values(g.devolucoes || {}).filter(d => d && typeof d === 'object');   /* Codex #272 r2: entrada nula no mapa quebraria a união */
     todas.sort((a, b) => (Number(b.criado_em) || 0) - (Number(a.criado_em) || 0));
     /* Codex #272: campo cru chamado "constructor"/"toString"/"__proto__" cairia no
        prototype de um objeto comum e a contagem sairia errada (ou mutaria herdado). */
     const uniao = Object.create(null);
-    for (const d of todas) for (const c of (d.cru_campos || [])) uniao[c] = (uniao[c] || 0) + 1;
+    for (const d of todas) {
+      const campos = Array.isArray(d.cru_campos) ? d.cru_campos : [];   /* acerto #272 r4: cru_campos não-array faria o for-of lançar */
+      for (const c of campos) if (typeof c === 'string') uniao[c] = (uniao[c] || 0) + 1;
+    }
     json(res, 200, {
       ok: true, loja,
       total_guardadas: todas.length,
