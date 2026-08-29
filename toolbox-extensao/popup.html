@@ -15,6 +15,13 @@
 #links .lnk-titulo{font-size:11px;color:#9aa2b1;margin-bottom:4px}
 #links a.lnk{display:block;padding:5px 8px;border-radius:6px;color:#cfd6e4;font-size:12px;text-decoration:none}
 #links a.lnk:hover{background:#232837}
+#ajuda{margin-top:10px;border-top:1px solid #2c3140;padding-top:8px}
+#ajuda .aj-tit{font-size:11px;color:#9aa2b1;cursor:pointer;user-select:none}
+#ajuda .aj-corpo{display:none;margin-top:6px}
+#ajuda.aberto .aj-corpo{display:block}
+#ajuda .aj-item{font-size:11px;color:#cfd6e4;padding:3px 0;line-height:1.35}
+#ajuda .aj-item b{color:#e7e9ee}
+#ajuda kbd{background:#2c3140;border:1px solid #3a4152;border-radius:4px;padding:0 4px;font-size:10px}
 </style>
 </head>
 <body>
@@ -30,6 +37,7 @@
     <div class="sub troca">todas as ferramentas num lugar só · <a id="trocar">trocar a empresa</a></div>
     <div id="links"></div>
     <div id="cards"></div>
+    <div id="ajuda"></div>
     <div class="auto" id="autos"></div>
   </div>
   <script src="popup.js"></script>
