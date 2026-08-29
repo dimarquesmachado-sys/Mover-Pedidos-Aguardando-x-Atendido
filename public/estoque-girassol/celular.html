@@ -811,7 +811,23 @@ document.getElementById("novoLocal").addEventListener("touchstart", handleNovoLo
   });
 
   // ===== INIT =====
-  if (obterSessao()) aplicarLoginNaTela();
+  /* 29/08: confirma no SERVIDOR antes de mostrar a busca — a sessão do servidor é em memória
+     e cai no deploy, então o prazo do localStorage não prova nada. Sem isso, o operador
+     digitava o SKU, tomava erro e só resolvia saindo e entrando. */
+  (async () => {
+    if (!obterSessao()) return;                 // sem sessão local: fica na tela de login
+    aplicarLoginNaTela();                        // otimista, pra não piscar em rede lenta
+    try {
+      const r = await fetch("/estoque-girassol/api/sessao", { headers: { "X-Session-Token": SESSION_TOKEN || "" } });
+      if (r.status === 401) {
+        localStorage.removeItem("bling_login");
+        SESSION_TOKEN = null;
+        document.getElementById("sistema").style.display = "none";
+        document.getElementById("loginBox").style.display = "block";
+        mostrarToast("Sua sessão expirou — entre de novo.", "erro");   // mesmo canal de aviso do login
+      }
+    } catch (e) { /* offline: mantém a tela; o erro aparece na busca, como antes */ }
+  })();
 </script>
 </body>
 </html>
