@@ -248,7 +248,9 @@ async function tratar(req, res, urlObj, json) {
         /* Codex #272 r2: JSON VÁLIDO mas de formato errado ({}, [], null) passava e virava
            "ok com zero" — mesmo silêncio do arquivo corrompido, por outro caminho. */
         if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { _ilegivel: 'formato inesperado no cache (esperado objeto com devolucoes)' };
-        if (parsed.devolucoes != null && (typeof parsed.devolucoes !== 'object' || Array.isArray(parsed.devolucoes))) return { _ilegivel: 'campo devolucoes com formato inesperado' };
+        /* Codex #272 r3: cache que EXISTE precisa ter o mapa; {} ou devolucoes:null passavam
+           e viravam "ok com zero", o mesmo silêncio pela terceira porta. */
+        if (!parsed.devolucoes || typeof parsed.devolucoes !== 'object' || Array.isArray(parsed.devolucoes)) return { _ilegivel: 'cache sem o mapa devolucoes (formato inesperado)' };
         return parsed;
       } catch (e) { return { _ilegivel: String(e.message || e).slice(0, 160) }; }
     };
@@ -262,11 +264,11 @@ async function tratar(req, res, urlObj, json) {
         /* Codex #272 r2: este caminho pulava o marcarColeta e o ultima_coleta continuava
            descrevendo uma coleta ANTIGA — inclusive depois de esta falhar. */
         if (!global.__tkColetando) global.__tkColetando = {};
-        if (global.__tkColetando[loja] && global.__tkColetando[loja] > Date.now()) {
+        if (global.__tkColetando[loja]) {
           json(res, 409, { ok: false, loja, erro: 'já existe uma coleta em andamento para esta loja' });
           return true;
         }
-        global.__tkColetando[loja] = Date.now() + 30 * 60000;
+        global.__tkColetando[loja] = true;
         const marcar = (v) => {
           try {
             const g2 = ctxDev.readJson(arqDev, { devolucoes: {} });
@@ -278,7 +280,9 @@ async function tratar(req, res, urlObj, json) {
           const r = await devLib.coletarDevolucoesTikTok(ctxDev, loja, dias);
           marcar({ estado: r && r.erro ? 'falhou' : 'ok', erro: (r && r.erro) || null, vistas: r && r.vistas, novas: r && r.novas });
           const g = lerGuardadas();
-          json(res, 200, { ok: !(r && r.erro), loja, dias, ...r, guardadas: Object.keys((g && g.devolucoes) || {}).length });
+          /* Codex #272 r3: a coleta RESOLVE com {ok:false, erro} — responder 200 fazia
+             monitoramento por status HTTP achar que deu certo. */
+          json(res, (r && r.erro) ? 502 : 200, { ok: !(r && r.erro), loja, dias, ...r, guardadas: Object.keys((g && g.devolucoes) || {}).length });
         } catch (e) {
           marcar({ estado: 'falhou', erro: String(e && e.message || e).slice(0, 200) });
           json(res, 502, { ok: false, loja, dias, erro: String(e && e.message || e).slice(0, 200) });
@@ -297,14 +301,17 @@ async function tratar(req, res, urlObj, json) {
          do processo (é um processo só), com validade pra não travar pra sempre se algo
          morrer no meio. */
       if (!global.__tkColetando) global.__tkColetando = {};
-      const travaAte = global.__tkColetando[loja];
-      if (travaAte && travaAte > Date.now()) {
+      /* Codex #272 r3: validade de 30 min expirava DURANTE uma coleta longa (365 dias) e
+         admitia a segunda — o atropelo que a trava veio impedir. A trava agora vale até a
+         coleta terminar; o processo reiniciando já limpa (global some), que era o único
+         motivo real de existir a validade. */
+      if (global.__tkColetando[loja]) {
         const gJa = lerGuardadas();
         json(res, 409, { ok: false, loja, erro: 'já existe uma coleta em andamento para esta loja — aguarde e chame -cru',
           guardadas: Object.keys((gJa && gJa.devolucoes) || {}).length, ultima_coleta: (gJa && gJa.ultima_coleta) || null });
         return true;
       }
-      global.__tkColetando[loja] = Date.now() + 30 * 60000;   // 30 min de validade
+      global.__tkColetando[loja] = true;
 
       const marcarColeta = (v) => {
         try {
