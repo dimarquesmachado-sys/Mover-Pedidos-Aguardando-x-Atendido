@@ -418,7 +418,10 @@ let FRAGIL_CFG = { mensagemPadrao:'Aten\u00e7\u00e3o! Produto fr\u00e1gil. Embal
 const normSku = s => String(s||'').trim().toUpperCase();
 async function carregarFrageis(){
   try{
-    const r = await fetch('/fragil/api/skus', {credentials:'same-origin'});
+    /* 29/08: sem ?empresa= a rota devolve a UNIÃO das três (compat com a extensão antiga) —
+       este checkout mostrava 104 SKUs somando GOOD+Girassol, e podia ALERTAR por SKU frágil
+       de outra empresa. Pede a lista desta. */
+    const r = await fetch('/fragil/api/skus?empresa=ambtotal', {credentials:'same-origin'});
     if(!r.ok){ FRAGIL_DIAG = 'HTTP '+r.status; return; }
     const d = await r.json();
     if(d && d.skus){
