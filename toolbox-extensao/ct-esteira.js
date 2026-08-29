@@ -329,7 +329,8 @@ try { if (window.tbSinalDeVida) window.tbSinalDeVida('esteira', 'carregou'); } c
     /* ACERTO (Codex #238 r5): campo começando com = + - @ vira FÓRMULA ao abrir no Excel —
        um nome de produto assim executaria conteúdo na planilha do dono. Prefixo apóstrofo
        neutraliza sem mudar o que se lê na célula. */
-    if (/^[=+\-@]/.test(v)) v = "'" + v;
+    if (/^[=+\-@\t\r\n]/.test(v)) v = "'" + v;   /* Codex #269 r2: tab/CR/LF no início também
+       viram separador de célula no Excel e o que vem depois pode ser avaliado como fórmula */
     return (v.indexOf(';') !== -1 || v.indexOf('"') !== -1 || v.indexOf('\n') !== -1)
       ? '"' + v.replace(/"/g, '""') + '"' : v;
   }
@@ -2368,6 +2369,9 @@ try { if (window.tbSinalDeVida) window.tbSinalDeVida('esteira', 'carregou'); } c
       var cacheCusto = await lerCacheCusto();
 
       // arvore de categorias por marketplace (para os dropdowns)
+      if (_meuGen !== _gradeGen) return;   /* Codex #269 r2: gradeCats era LIMPO e reconstruído
+         antes da minha checagem — a grade antiga terminando por último deixava a nova com
+         categorias erradas. Checa antes de tocar em qualquer estado compartilhado. */
       gradeCats = {};
       var arvorePorIdLoja = {};
       dados.forEach(function (d) {
