@@ -152,6 +152,12 @@ function routes(readBody) {
         usuariosViaEnv: true,
         chaveMestraAtiva: false,
         blingConfigurado: !!process.env.FRAGIL_BLING_CLIENT_ID && !!process.env.FRAGIL_BLING_CLIENT_SECRET,
+        /* Codex #271 r2: com a busca POR EMPRESA, o OAuth próprio do Frágil deixou de ser
+           obrigatório — quem manda são os tokenManagers de cada empresa. O painel mostrava
+           "Bling configurado: ❌ Não" e assustava mesmo com tudo funcionando. */
+        buscaPorEmpresa: ['girassol', 'good', 'ambtotal'].filter(e => {
+          try { require('../' + (e === 'ambtotal' ? 'ambtotal' : e) + '/tokenManager'); return true; } catch (x) { return false; }
+        }),
         blingLogado: !!(tokens.access_token || tokens.refresh_token)
       });
       return true;

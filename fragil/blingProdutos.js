@@ -282,7 +282,10 @@ async function buscarNaEmpresa(empresa, termo, limite = 20) {
   try {
     r = await fetch(url, { headers: { Authorization: 'Bearer ' + token, Accept: 'application/json' }, signal: ctrl.signal });
     if (!r.ok) throw new Error('Bling respondeu ' + r.status + ' na busca de produtos');
-    try { d = await r.json(); } catch (e) { d = {}; }   /* o corpo também corre contra o mesmo prazo */
+    /* Codex #271 r2: o catch interno engolia o AbortError do CORPO e devolvia lista vazia —
+       o timeout que acabei de pôr não chegava ao fallback. Abort sobe; JSON inválido, não. */
+    try { d = await r.json(); }
+    catch (e) { if (e && e.name === 'AbortError') throw e; d = {}; }
   } catch (e) {
     if (e && e.name === 'AbortError') throw new Error('Bling não respondeu em 8s');
     throw e;
@@ -296,7 +299,7 @@ async function buscarNaEmpresa(empresa, termo, limite = 20) {
     nome: p.nome || '',
     imagem: (p.imagemURL || (p.midia && p.midia.imagens && p.midia.imagens[0] && p.midia.imagens[0].link) || ''),
     ean: p.gtin || '',
-  })).filter(p => p.codigo || p.nome);
+  })).filter(p => p.codigo);   /* Codex #271 r2: a lista é de SKUs — produto sem codigo entraria e seria salvo com SKU vazio */
   return { total: resultados.length, resultados, empresa };
 }
 

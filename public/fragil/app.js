@@ -187,7 +187,12 @@ async function carregarStatus() {
     } catch (_) {}
 
     const itens = [];
-    itens.push(badge(h.blingConfigurado ? "ok" : "erro", "Bling configurado", h.blingConfigurado ? "✅ Sim" : "❌ Não"));
+    /* Codex #271 r2: o autocomplete agora usa o token de CADA empresa; o OAuth legado do
+       Frágil só serve ao índice antigo. Se as empresas estão disponíveis, isso é o que
+       importa — o legado vira informação secundária, não um ❌ que assusta. */
+    const nEmp = (h.buscaPorEmpresa || []).length;
+    if (nEmp) itens.push(badge("ok", "Busca por empresa", "✅ " + nEmp + " empresa(s)"));
+    itens.push(badge(h.blingConfigurado ? "ok" : (nEmp ? "aviso" : "erro"), "Bling do Frágil (índice)", h.blingConfigurado ? "✅ Sim" : (nEmp ? "— não usado" : "❌ Não")));
     itens.push(badge(h.blingLogado ? "ok" : "erro", "Bling logado", h.blingLogado ? "✅ Sim" : "❌ Não"));
     if (cache) {
       const skuStatus = cache.skusIndexados > 0 ? "ok" : "aviso";
