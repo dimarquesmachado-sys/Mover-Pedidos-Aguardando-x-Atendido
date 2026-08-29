@@ -54,6 +54,18 @@ function mostrar(emp) {
   if (!emp) return;
   document.getElementById('empNome').textContent = NOMES[emp] || emp;
   document.getElementById('cards').innerHTML = CARTOES.filter(c => c.emp.includes(emp)).map(c => c.html).join('');
+  /* 29/08: as telas de configuração abrem em ABA, não dentro do popup. O popup FECHA ao
+     perder o foco (regra do navegador, pior no Firefox) — e como as chaves são copiadas de
+     outra janela (Render, Bling), era impossível colar sem perder tudo o que foi digitado. */
+  for (const a of document.querySelectorAll('#cards a.mod')) {
+    a.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      const destino = a.getAttribute('href');
+      if (!destino) return;
+      chrome.tabs.create({ url: chrome.runtime.getURL(destino) });
+      window.close();
+    });
+  }
   /* Codex #243 r3: o link do Respostas deriva do servidor CONFIGURADO (apiUrl do cartao),
      como o botao da tela de configuracao — edicao e leitura no mesmo servidor. Os demais
      atalhos sao paginas fixas dos servicos e ficam estaticos por desenho. */
