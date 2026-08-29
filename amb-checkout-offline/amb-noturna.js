@@ -119,8 +119,15 @@ function criarNoturna(ctx) {
     // alguém abria a URL na mão: pedido novo ficava sem tarifa real E sem hora da venda no
     // painel, e o recurso ia silenciosamente parando de funcionar conforme o cache envelhecia.
     if (typeof coletarFinanceiroTikTok === 'function') {
-      await etapa('financeiro do TikTok (35 dias)', async () => {
-        const r = await coletarFinanceiroTikTok(35);
+      /* 29/08 — JANELA LONGA: eram 35 dias, e a ação do TikTok chega MUITO depois da venda.
+         Casos reais conferidos: crédito e débito lançados 8 dias após a venda, e mediação
+         aprovada por revelia semanas depois; com 35 dias, um ajuste no dia 50 nunca era
+         coletado e o prejuízo nunca chegava ao dashboard. 120 dias cobre o ciclo real de
+         devolução + mediação + lançamento. A coleta é por id, então repetir não duplica —
+         o custo é tempo de varredura, uma vez por noite. */
+      const DIAS_TIKTOK = Number(process.env.TIKTOK_FINANCEIRO_DIAS) || 120;
+      await etapa('financeiro do TikTok (' + DIAS_TIKTOK + ' dias)', async () => {
+        const r = await coletarFinanceiroTikTok(DIAS_TIKTOK);
         if (!r || r.ok === false) throw new Error('coleta do TikTok falhou' + (r && r.erro ? ': ' + r.erro : ''));
         return r.pedidos_novos + ' pedido(s) novo(s) · ' + r.guardados + ' no total' +
                (r.nao_fecharam ? ' ⚠️ ' + r.nao_fecharam + ' não fecharam a identidade' : '');
