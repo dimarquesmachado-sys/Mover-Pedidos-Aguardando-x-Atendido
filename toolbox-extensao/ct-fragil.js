@@ -328,6 +328,8 @@
     if (!document.body) { setTimeout(iniciarObserver, 200); return; }
     observer.observe(document.body, { childList: true, subtree: true, characterData: true });
     escanear();
+    /* 29/08 canário de módulos: prova de vida deste módulo. */
+    try { if (window.tbSinalDeVida) window.tbSinalDeVida('fragil'); } catch (e) {}
   }
 
   // ---------------- BOOT ----------------

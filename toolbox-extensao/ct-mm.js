@@ -16,6 +16,8 @@
       let data = null;
       try { data = await r.json(); } catch (e) { /* veio HTML (provável tela de login) */ }
       if (!r.ok) return { ok: false, status: r.status, lotes: [] };
+      /* 29/08 canário de módulos: prova de vida deste módulo. */
+      try { if (window.tbSinalDeVida) window.tbSinalDeVida('mm'); } catch (e) {}
       const lotes = Array.isArray(data) ? data : (data && (data.data || data.lotes)) || [];
       if (!Array.isArray(lotes)) return { ok: false, status: r.status, erro: 'resposta sem lista de lotes', lotes: [] };
       return { ok: true, status: r.status, lotes };

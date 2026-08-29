@@ -17,6 +17,9 @@ window.postMessage({
 window.addEventListener('message', (event) => {
   if (event.source !== window) return;
   if (!event.data || event.data.tipo !== 'GOOD_BRIDGE_PING') return;
+  /* 29/08 canário de módulos: prova de vida deste módulo. */
+  try { if (window.tbSinalDeVida) window.tbSinalDeVida('devolucoes'); } catch (e) {}
+
 
   window.postMessage({
     tipo: 'GOOD_BRIDGE_PONG',

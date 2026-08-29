@@ -1913,6 +1913,9 @@
   }
 
   function montarInterface() {
+    /* 29/08 canário de módulos: prova de vida deste módulo. */
+    try { if (window.tbSinalDeVida) window.tbSinalDeVida('esteira'); } catch (e) {}
+
     if (document.getElementById('esteiraPill')) return;
 
     // barras de rolagem visiveis no painel escuro

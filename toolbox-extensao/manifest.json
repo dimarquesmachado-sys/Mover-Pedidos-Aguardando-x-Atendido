@@ -29,6 +29,7 @@
         "https://www.bling.com.br/b/vendas.checkout.php*"
       ],
       "js": [
+        "tb-sinal.js",
         "ct-fragil.js"
       ]
     },
@@ -37,6 +38,7 @@
         "https://www.bling.com.br/*"
       ],
       "js": [
+        "tb-sinal.js",
         "ct-nf.js"
       ]
     },
@@ -45,6 +47,7 @@
         "https://painelmarketplace.madeiramadeira.com.br/*"
       ],
       "js": [
+        "tb-sinal.js",
         "ct-mm.js"
       ]
     },
@@ -70,6 +73,7 @@
         "https://good-devolucoes-x-marketplaces-x-nfsbling.onrender.com/*"
       ],
       "js": [
+        "tb-sinal.js",
         "ct-devolucoes.js"
       ]
     },
@@ -78,6 +82,7 @@
         "https://*.bling.com.br/produtos.php*"
       ],
       "js": [
+        "tb-sinal.js",
         "ct-esteira.js"
       ],
       "run_at": "document_idle",

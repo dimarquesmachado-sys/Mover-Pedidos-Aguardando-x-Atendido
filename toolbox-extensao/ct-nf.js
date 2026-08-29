@@ -73,6 +73,9 @@
   let elPainel, elMsg, elBtn;
 
   function montarPainel() {
+    /* 29/08 canário de módulos: prova de vida deste módulo. */
+    try { if (window.tbSinalDeVida) window.tbSinalDeVida('nf'); } catch (e) {}
+
     if (document.getElementById('nfmagalu-painel')) return;
 
     const wrap = document.createElement('div');
@@ -486,6 +489,9 @@
   let elPainel, elMsg, elBtn, sumirEm = null;
 
   function montarPainel() {
+    /* 29/08 canário de módulos: prova de vida deste módulo. */
+    try { if (window.tbSinalDeVida) window.tbSinalDeVida('nf'); } catch (e) {}
+
     if (document.getElementById('nfshopee-painel')) return;
     const wrap = document.createElement('div');
     wrap.id = 'nfshopee-painel';
