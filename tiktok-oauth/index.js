@@ -327,12 +327,19 @@ async function tratar(req, res, urlObj, json) {
       catch (e) { saida.push({ nome: c.nome, caminho: c.caminho, erro: String(e.message || e).slice(0, 160) }); continue; }
       const corpo = r && r.corpo;
       const dados = (corpo && corpo.data) || null;
+      /* Codex #283: na busca, `data` é ENVELOPE de paginação (total_count, next_page_token)
+         e o registro vem dentro da lista — mostrar só o topo exibiria a paginação e a sonda
+         não responderia nada. Desce pra dentro da lista quando ela existir. */
+      const lista = dados && (dados.return_orders || dados.returns || dados.refund_orders);
+      const item = Array.isArray(lista) && lista.length ? lista[0] : null;
+      const alvo = item || dados;
       saida.push({
         nome: c.nome, caminho: c.caminho, http: r && r.http,
         code: corpo && corpo.code, message: corpo && corpo.message,
-        /* o que interessa é o NOME dos campos: é neles que o status da caixa estaria */
-        campos_no_topo: dados ? Object.keys(dados) : null,
-        amostra: dados ? JSON.parse(JSON.stringify(dados)) : (r && r.cru) || null,
+        envelope: item ? Object.keys(dados) : null,          // o que veio por fora, se houve lista
+        /* o que interessa é o NOME dos campos DO REGISTRO: é neles que o status da caixa estaria */
+        campos_no_topo: alvo ? Object.keys(alvo) : null,
+        amostra: alvo ? JSON.parse(JSON.stringify(alvo)) : (r && r.cru) || null,
       });
       await new Promise(s => setTimeout(s, 300));
     }
