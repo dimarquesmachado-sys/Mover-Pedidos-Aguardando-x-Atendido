@@ -901,6 +901,9 @@ async function carregar() {
     const r = await fetch("/fragil/api/skus" + qEmp());
     const j = await r.json();
     if (_meuSeq !== _cargaSeq) return;   /* resposta de uma troca antiga: descarta */
+    /* Codex #254 r4 (P1): se um zeramento começou enquanto este GET estava em voo, o snapshot
+       lido é PRÉ-clear — aplicá-lo repinta os SKUs apagados e um Salvar depois os ressuscita. */
+    if (_zerando) return;
     preencherTabelaDoMapa(j.skus || {});
     $("tempo").value = j.config?.tempoMinimoSegundos ?? 2;
     $("msgPadrao").value = j.config?.mensagemPadrao || "";
