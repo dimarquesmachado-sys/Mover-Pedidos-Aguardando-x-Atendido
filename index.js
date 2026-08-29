@@ -151,6 +151,24 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(404); return res.end('not found');
   }
 
+  /* Canário de tokens Bling (28/08): detalhes exigem ADMIN_KEY; o /alerta é público mas só
+     devolve um booleano — a barra de navegação usa pra mostrar o aviso sem expor nada. */
+  if (path === '/diagnostico/tokens') {
+    const canario = require('./lib/canario-tokens');
+    const ADMIN_KEY_D = process.env.ADMIN_KEY || '';
+    if (!ADMIN_KEY_D || urlObj.searchParams.get('k') !== ADMIN_KEY_D) {
+      res.writeHead(404); return res.end('not found');
+    }
+    if (urlObj.searchParams.get('agora') === '1') {
+      return canario.verificarTodos().then(e => json(res, 200, e)).catch(e => json(res, 500, { erro: e.message }));
+    }
+    return json(res, 200, canario.lerEstado());
+  }
+  if (path === '/diagnostico/tokens/alerta') {
+    const canario = require('./lib/canario-tokens');
+    return json(res, 200, { alerta: canario.temAlerta() });
+  }
+
   // Rota global de health
   if (path === '/health' || path === '/') {
     return json(res, 200, {
@@ -237,6 +255,11 @@ const server = http.createServer(async (req, res) => {
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log(`\n🌐 HTTP ouvindo na porta ${PORT}\n`);
+  /* Canário de tokens Bling: 1a checagem 5 min após o boot, depois 1x/dia. Renova de
+     verdade — arquivo existir não prova que o Bling ainda aceita o refresh. */
+  try { require('./lib/canario-tokens').iniciar(); console.log('[canario-tokens] agendado'); }
+  catch (e) { console.error('[canario-tokens] nao iniciou:', e.message); }
+
   // Bootstrap de módulos que precisam (ex: fragil carrega índice de produtos)
   for (const e of empresas) {
     if (typeof e.bootstrap === 'function') {
