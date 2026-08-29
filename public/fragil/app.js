@@ -891,6 +891,9 @@ function status(txt, ok) {
   if (txt) setTimeout(() => { $("status").textContent = ""; $("status").className = ""; }, 4000);
 }
 
+let _zerando = false;   /* Codex #254 r3: trava PROPRIA do zeramento — reusar _carregandoEmpresa
+   deixava um carregar() paralelo (trocar empresa / Recarregar) soltar a trava no finally dele
+   e reabilitar o Salvar no meio da operação destrutiva. */
 let _carregandoEmpresa = false;   /* Codex #240: trocar de empresa e salvar no vao gravaria os dados da ANTERIOR na nova */
 let _cargaSeq = 0;                /* Codex #240 r2: 2 trocas rapidas — so o carregar MAIS NOVO solta a trava e preenche a tela */
 async function carregar() {
@@ -920,12 +923,14 @@ async function carregar() {
   } finally {
     if (_meuSeq === _cargaSeq) {         /* so a carga mais recente destrava o salvar */
       _carregandoEmpresa = false;
+    if (_zerando && $("btn-salvar")) $("btn-salvar").disabled = true;   /* Codex #254 r3: carregar() nao reabilita o Salvar durante o zeramento */
       if ($("btn-salvar")) $("btn-salvar").disabled = false;
     }
   }
 }
 
 async function salvar() {
+  if (_zerando) { status("Aguarde o zeramento terminar.", false); return; }
   if (_carregandoEmpresa) { status("Aguarde terminar de carregar a empresa selecionada.", false); return; }
   $("btn-salvar").disabled = true;
   try {
@@ -1003,6 +1008,74 @@ $("novo-senha").addEventListener("keydown", (e) => { if (e.key === "Enter") cria
 
 // IMPORT/EXPORT
 $("btn-importar").addEventListener("click", abrirModalImport);
+/* Zerar a lista DESTA empresa — versão ATÔMICA (28/08). A primeira versão só limpava a
+   tabela e deixava o Salvar por conta do usuário: o dono zerou Girassol e AMBTotal, não
+   houve o clique final e NADA foi gravado (o atualizadoEm do arquivo nem mudou). Agora
+   o botão grava direto no servidor e só então redesenha, com confirmação por digitação. */
+$("btn-zerar").addEventListener("click", async () => {
+  /* Codex #254: a empresa é FIXADA aqui e usada nas duas chamadas — trocar o seletor
+     durante a operação não pode desviar o POST destrutivo pra outra empresa. */
+  /* Codex #254 r2 (P1): trocar o seletor e clicar antes de carregar() terminar mostrava a
+     tabela da empresa ANTERIOR — a confirmação diria a contagem errada. Mesma trava do salvar. */
+  if (_zerando) { status("Zeramento em andamento — aguarde.", false); return; }
+  if (_carregandoEmpresa) { status("Aguarde terminar de carregar a empresa selecionada.", false); return; }
+  const emp = empresaAtiva();
+  const nome = EMP_NOMES[emp] || emp;
+  const q = "?empresa=" + encodeURIComponent(emp);
+  /* Codex #254: contar SKUs de verdade — preencherTabelaDoMapa({}) deixa UMA linha em
+     branco, então contar <tr> dizia "1 SKU" numa lista já vazia. */
+  const qtd = Array.from($tbody().querySelectorAll("tr"))
+    .filter(tr => (tr.querySelector(".input-sku")?.value || "").trim()).length;
+  /* Codex #254 r2: tabela local vazia não prova servidor vazio (o operador pode ter apagado
+     as linhas sem salvar). Só sai cedo se o SERVIDOR também estiver vazio. */
+  if (!qtd) {
+    try {
+      const rV = await fetch("/fragil/api/skus" + q);
+      const dV = rV.ok ? await rV.json() : null;
+      if (dV && Object.keys(dV.skus || {}).length === 0) { status("A lista de " + nome + " já está vazia.", true); return; }
+    } catch (e) { /* sem confirmação do servidor, segue e deixa o usuário decidir */ }
+  }
+  const digitou = prompt("Isto APAGA E GRAVA a lista de " + nome + " (" + qtd + " SKUs). As outras empresas não são afetadas e a auditoria registra tudo.\n\nPara confirmar, digite: ZERAR");
+  if ((digitou || "").trim().toUpperCase() !== "ZERAR") { status("Cancelado — nada foi alterado.", true); return; }
+  $("btn-zerar").disabled = true;
+  /* Codex #254 r2: sem isto, o Salvar (botão ou Ctrl+S) podia rodar durante o GET/POST e
+     regravar os SKUs visíveis DEPOIS do clear — desfazendo o zeramento em silêncio. */
+  if ($("btn-salvar")) $("btn-salvar").disabled = true;
+  _zerando = true;
+  try {
+    /* Codex #254: fetch NÃO rejeita em 4xx/5xx — sem checar ok, a config viria undefined
+       e o POST destrutivo seguiria assim mesmo. Falhou a leitura, não apaga nada. */
+    const rCfg = await fetch("/fragil/api/skus" + q);
+    if (!rCfg.ok) { status("Não consegui ler a configuração atual (HTTP " + rCfg.status + ") — NADA foi alterado.", false); return; }
+    const cfgAtual = await rCfg.json();
+    if (!cfgAtual || !cfgAtual.config) { status("Resposta inesperada do servidor — NADA foi alterado.", false); return; }
+    const j = await api("/fragil/api/skus" + q, {
+      method: "POST",
+      body: JSON.stringify({ config: cfgAtual.config, skus: {} })
+    });
+    if (emp === empresaAtiva()) {   // só redesenha se o seletor ainda está na empresa zerada
+      preencherTabelaDoMapa(j.skus || {});
+      atualizarContador();
+      /* Codex #254: o rótulo de última atualização vem da resposta — antes ficava exibindo
+         o carimbo velho, que foi justamente o sinal que denunciou o zeramento não gravado. */
+      if ($("atualizadoEm") && j.atualizadoEm) {
+        $("atualizadoEm").textContent = "Última atualização: " + new Date(j.atualizadoEm).toLocaleString("pt-BR") + (j.atualizadoPor ? " por " + j.atualizadoPor : "");
+      }
+    }
+    status("Lista de " + nome + " zerada e GRAVADA (" + qtd + " SKUs removidos).", true);
+    carregarAuditoria();
+    carregarStatus();
+  } catch (e) {
+    /* Codex #254: se a conexão cair DEPOIS de o servidor gravar, dizer "nada foi alterado"
+       recria o falso-estado que este botão veio matar. Estado INDETERMINADO: manda conferir. */
+    status("Não deu pra confirmar o resultado (" + e.message + "). A lista PODE ter sido zerada — recarregue a página e confira antes de tentar de novo.", false);
+  } finally {
+    _zerando = false;
+    if ($("btn-salvar")) $("btn-salvar").disabled = false;
+    $("btn-zerar").disabled = false;
+  }
+});
+
 $("btn-exportar").addEventListener("click", exportarExcel);
 $("import-fechar").addEventListener("click", fecharModalImport);
 $("import-cancelar").addEventListener("click", fecharModalImport);
