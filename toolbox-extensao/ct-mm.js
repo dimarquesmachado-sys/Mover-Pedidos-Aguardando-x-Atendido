@@ -1,4 +1,8 @@
 'use strict';
+/* 29/08 canário: CARREGOU — o script foi injetado nesta página-alvo. Se depois disso
+   ele não conseguir MONTAR, o servidor sabe que é quebra e não inatividade. */
+try { if (window.tbSinalDeVida) window.tbSinalDeVida('mm', 'carregou'); } catch (e) {}
+
 // content.js — roda DENTRO das páginas do painel Madeira Madeira.
 // Como roda na própria página (mesma origem), o fetch leva os cookies da sua
 // sessão logada. Lê a lista de lotes e manda pro background, que envia ao Render.

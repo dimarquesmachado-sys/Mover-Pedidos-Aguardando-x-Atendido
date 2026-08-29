@@ -105,11 +105,14 @@
        dono passar semanas sem saber que o Respostas tinha parado. */
     fetch('/diagnostico/modulos/alerta').then(function (r) { return r.json(); }).then(function (j) {
       if (!j || !j.alerta || !j.mudos || !j.mudos.length) return;
-      var nomes = j.mudos.map(function (m) { return m.modulo + (m.empresa ? '/' + m.empresa : ''); }).join(', ');
+      /* quebra confirmada (a página abriu e o módulo não apareceu) pesa mais que silêncio. */
+      var quebras = j.mudos.filter(function (m) { return m.tipo === 'quebra'; });
+      var lista = quebras.length ? quebras : j.mudos;
+      var nomes = lista.map(function (m) { return m.modulo + (m.empresa ? '/' + m.empresa : ''); }).join(', ');
       var el = document.createElement('span');
-      el.textContent = '⚠️ Extensão sem sinal: ' + nomes;
+      el.textContent = (quebras.length ? '⚠️ Extensão QUEBRADA: ' : '⚠️ Extensão sem sinal: ') + nomes;
       el.title = 'Estes módulos apareciam todo dia e pararam. Provável: o site mudou de URL, a extensão foi desativada ou precisa ser recarregada.';
-      el.style.cssText = 'font-size:12px;padding:5px 10px;border-radius:6px;background:#b45309;color:#fff;font-weight:bold;';
+      el.style.cssText = 'font-size:12px;padding:5px 10px;border-radius:6px;color:#fff;font-weight:bold;background:' + (quebras.length ? '#c2410c' : '#b45309') + ';';
       bar.appendChild(el);
     }).catch(function () { /* silencioso */ });
   }

@@ -1,9 +1,10 @@
 /* Sinal de vida dos módulos da Toolbox (29/08). Chamado quando o módulo MONTA de verdade —
    não no load do script: o que interessa saber é se ele ainda consegue aparecer na página.
    Limitado a 1x por dia por módulo (storage local), pra não virar tráfego nem ruído. */
-window.tbSinalDeVida = function (modulo) {
+window.tbSinalDeVida = function (modulo, fase) {
   try {
-    var chaveDia = 'tb_sinal_' + modulo;
+    fase = (fase === 'carregou') ? 'carregou' : 'montou';
+    var chaveDia = 'tb_sinal_' + modulo + '_' + fase;
     var hoje = new Date().toISOString().slice(0, 10);
     chrome.storage.local.get([chaveDia, 'tb_empresa', 'tb_servidor'], function (cfg) {
       if (cfg[chaveDia] === hoje) return;                       // já sinalizou hoje
@@ -12,7 +13,7 @@ window.tbSinalDeVida = function (modulo) {
          o navegador o BLOQUEIA no preflight — nenhum sinal chegava. sendBeacon envia uma
          requisição SIMPLES (text/plain), que atravessa sem preflight e sem esperar resposta;
          o servidor faz JSON.parse do corpo de qualquer forma. */
-      var corpo = JSON.stringify({ modulo: modulo, empresa: cfg.tb_empresa || '', versao: (chrome.runtime.getManifest() || {}).version });
+      var corpo = JSON.stringify({ modulo: modulo, empresa: cfg.tb_empresa || '', fase: fase, versao: (chrome.runtime.getManifest() || {}).version });
       var url = base + '/diagnostico/modulos';
       var enviado = false;
       try {

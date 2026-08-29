@@ -1,3 +1,7 @@
+/* 29/08 canário: CARREGOU — o script foi injetado nesta página-alvo. Se depois disso
+   ele não conseguir MONTAR, o servidor sabe que é quebra e não inatividade. */
+try { if (window.tbSinalDeVida) window.tbSinalDeVida('fragil', 'carregou'); } catch (e) {}
+
 /* =====================================================================
    GOOD - Alerta Produto Frágil — v2.0.0
    - Lê lista de SKUs e configurações de chrome.storage.local (sincronizado pelo background)
