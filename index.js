@@ -181,10 +181,24 @@ const server = http.createServer(async (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');   /* sinal vem de páginas de terceiros (Bling, ML, MM) */
     const canario = require('./lib/canario-modulos');
     return readBody(req).then(body => {
-      const ok = canario.registrar(body && body.modulo, body && body.empresa, body && body.versao);
+      const ok = canario.registrar(body && body.modulo, body && body.empresa, body && body.versao, body && body.fase);
       json(res, ok ? 200 : 400, { ok });
     }).catch(() => json(res, 400, { ok: false }));
   }
+  /* Heartbeat da extensão (1x/dia por empresa) — separa extensão removida de módulo não usado. */
+  if (path === '/diagnostico/modulos/vivo' && method === 'OPTIONS') {
+    res.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' });
+    return res.end();
+  }
+  if (path === '/diagnostico/modulos/vivo' && method === 'POST') {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    const canario = require('./lib/canario-modulos');
+    return readBody(req).then(body => {
+      const ok = canario.registrarVivo(body && body.empresa, body && body.versao);
+      json(res, ok ? 200 : 400, { ok });
+    }).catch(() => json(res, 400, { ok: false }));
+  }
+
   if (path === '/diagnostico/modulos' && method === 'GET') {
     const canario = require('./lib/canario-modulos');
     const ADMIN_KEY_M = process.env.ADMIN_KEY || '';

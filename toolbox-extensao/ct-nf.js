@@ -1,4 +1,8 @@
 'use strict';
+/* 29/08 canário: CARREGOU — o script foi injetado nesta página-alvo. Se depois disso
+   ele não conseguir MONTAR, o servidor sabe que é quebra e não inatividade. */
+try { if (window.tbSinalDeVida) window.tbSinalDeVida('nf', 'carregou'); } catch (e) {}
+
 // ══════════════════════════════════════════════════════════════════════
 //  NF-e FULFILLMENT MAGALU -> BLING  (extensao — Edge e Firefox)
 // ══════════════════════════════════════════════════════════════════════
