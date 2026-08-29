@@ -298,6 +298,38 @@ async function tratar(req, res, urlObj, json) {
 
   /* 29/08 — DESFECHO FINANCEIRO POR PEDIDO (o prejuízo que hoje não chega ao dashboard).
      Só LÊ o que coletarFinanceiro já guardou; não chama a API. Serve as 3 lojas. */
+  /* 29/08 — CONCILIAÇÃO devoluções × financeiro, POR PEDIDO (pedido do dono ao ver a tela
+     de reembolsos: ~60 solicitações, com o mesmo pedido repetido). Só lê caches. */
+  if (p === '/tiktok/conciliar') {
+    if (!admOk()) { json(res, 404, { error: 'not found' }); return true; }
+    const concLib = require('../lib/tiktok-conciliar');
+    const pedida = String(q.get('loja') || '').trim().toLowerCase();
+    if (pedida && LOJAS.indexOf(pedida) < 0) { json(res, 400, { ok: false, erro: 'loja desconhecida: ' + pedida }); return true; }
+    const alvo = pedida ? [pedida] : LOJAS;
+    const limite = Math.min(500, Math.max(1, Number(q.get('limite')) || 100));
+    const CACHE = process.env.TIKTOK_CACHE_DIR || '/data';
+    const leia = (arqv) => { try { return JSON.parse(fs.readFileSync(arqv, 'utf8')); } catch (e) { return null; } };
+    const saida = {};
+    let perdaTotal = 0, ganhoTotal = 0;
+    for (const loja of alvo) {
+      const dev = leia(path.join(CACHE, '_tiktok_devolucoes_' + loja + '.json'));
+      const fin = leia(path.join(CACHE, '_tiktok_financeiro_' + loja + '.json'));
+      if (!dev && !fin) { saida[loja] = { erro: 'sem caches — rode devolucoes-coletar e financeiro-coletar desta loja' }; continue; }
+      if (!dev) { saida[loja] = { erro: 'sem cache de devoluções — rode /tiktok/devolucoes-coletar?loja=' + loja }; continue; }
+      if (!fin) { saida[loja] = { erro: 'sem cache financeiro — rode /tiktok/financeiro-coletar?loja=' + loja }; continue; }
+      const r = concLib.conciliar(dev, fin, { limite });
+      perdaTotal = Math.round((perdaTotal + r.perda_confirmada) * 100) / 100;
+      ganhoTotal = Math.round((ganhoTotal + r.compensacao_recebida) * 100) / 100;
+      saida[loja] = r;
+    }
+    json(res, 200, {
+      ok: true, lojas: alvo, por_loja: saida,
+      perda_total: perdaTotal, compensacao_total: ganhoTotal,
+      leia: 'agrupado por PEDIDO (solicitações repetidas do mesmo pedido colapsam); valor vem do EXTRATO, não da tela de devoluções; solicitação cancelada não vira perda; devolução sem lançamento fica como PENDENTE, não como zero'
+    });
+    return true;
+  }
+
   if (p === '/tiktok/desfechos') {
     if (!admOk()) { json(res, 404, { error: 'not found' }); return true; }
     const desfLib = require('../lib/tiktok-desfecho');
