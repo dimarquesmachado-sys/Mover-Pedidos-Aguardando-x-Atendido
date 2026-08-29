@@ -238,7 +238,14 @@ async function tratar(req, res, urlObj, json) {
       chamar
     };
     const arqDev = path.join(ctxDev.CACHE_DIR, '_tiktok_devolucoes_' + loja + '.json');
-    const lerGuardadas = () => ctxDev.readJson(arqDev, { devolucoes: {}, atualizado: null });
+    /* Codex #272: readJson devolve o padrão tanto pra "não existe" quanto pra ARQUIVO
+       CORROMPIDO — a ponte veria ok:true com zero devoluções nos dois casos. Aqui os dois
+       são distinguidos: existe mas não lê = erro explícito, não silêncio. */
+    const lerGuardadas = () => {
+      if (!fs.existsSync(arqDev)) return { devolucoes: {}, atualizado: null, _novo: true };
+      try { return JSON.parse(fs.readFileSync(arqDev, 'utf8')); }
+      catch (e) { return { _ilegivel: String(e.message || e).slice(0, 160) }; }
+    };
 
     if (p === '/tiktok/devolucoes-coletar') {
       /* A coleta varre janelas de 30 dias e pode passar do timeout do Render (a conversa de
@@ -251,9 +258,28 @@ async function tratar(req, res, urlObj, json) {
         json(res, 200, { ok: true, loja, dias, ...r, guardadas: Object.keys(g.devolucoes || {}).length });
         return true;
       }
+      /* Codex #272 (P1): a coleta RESOLVE com {ok:false, erro} em vez de rejeitar, então
+         registrar só no log deixaria a ponte vendo "0 devoluções" e concluindo que está
+         tudo certo — falha silenciosa, que é o defeito que estamos caçando o dia todo.
+         O desfecho fica gravado no MESMO arquivo e a rota -cru o devolve. */
+      const marcarColeta = (v) => {
+        try {
+          const g2 = ctxDev.readJson(arqDev, { devolucoes: {} });
+          g2.ultima_coleta = Object.assign({ em: new Date().toISOString(), dias }, v);
+          ctxDev.writeJson(arqDev, g2);
+        } catch (e) { console.error('[tiktok devolucoes ' + loja + '] nao gravou desfecho:', e.message); }
+      };
+      marcarColeta({ estado: 'rodando', erro: null });
       devLib.coletarDevolucoesTikTok(ctxDev, loja, dias)
-        .then(r => console.log('[tiktok devolucoes ' + loja + '] coleta terminou:', JSON.stringify(r).slice(0, 200)))
-        .catch(e => console.error('[tiktok devolucoes ' + loja + '] coleta falhou:', e.message));
+        .then(r => {
+          const falhou = r && r.erro;
+          marcarColeta({ estado: falhou ? 'falhou' : 'ok', erro: falhou || null, vistas: r && r.vistas, novas: r && r.novas });
+          console.log('[tiktok devolucoes ' + loja + '] coleta terminou:', JSON.stringify(r).slice(0, 200));
+        })
+        .catch(e => {
+          marcarColeta({ estado: 'falhou', erro: String(e && e.message || e).slice(0, 200) });
+          console.error('[tiktok devolucoes ' + loja + '] coleta falhou:', e.message);
+        });
       const gAntes = lerGuardadas();
       json(res, 202, {
         ok: true, loja, dias, em_background: true,
@@ -269,14 +295,18 @@ async function tratar(req, res, urlObj, json) {
        (principalmente se vem rastreio da reversa) — sem ela, o casamento de lá seria chute. */
     const limite = Math.min(500, Math.max(1, Number(q.get('limite')) || 30));
     const g = lerGuardadas();
+    if (g._ilegivel) { json(res, 500, { ok: false, loja, erro: 'cache de devoluções ilegível (' + g._ilegivel + ') — rode /tiktok/devolucoes-coletar?loja=' + loja + ' pra refazer' }); return true; }
     const todas = Object.values(g.devolucoes || {});
     todas.sort((a, b) => (Number(b.criado_em) || 0) - (Number(a.criado_em) || 0));
-    const uniao = {};
+    /* Codex #272: campo cru chamado "constructor"/"toString"/"__proto__" cairia no
+       prototype de um objeto comum e a contagem sairia errada (ou mutaria herdado). */
+    const uniao = Object.create(null);
     for (const d of todas) for (const c of (d.cru_campos || [])) uniao[c] = (uniao[c] || 0) + 1;
     json(res, 200, {
       ok: true, loja,
       total_guardadas: todas.length,
       atualizado: g.atualizado || null,
+      ultima_coleta: g.ultima_coleta || null,   /* Codex #272: a ponte enxerga se a última coleta falhou */
       cru_campos_uniao: Object.keys(uniao).sort(),
       cru_campos_contagem: uniao,
       devolucoes: todas.slice(0, limite)
