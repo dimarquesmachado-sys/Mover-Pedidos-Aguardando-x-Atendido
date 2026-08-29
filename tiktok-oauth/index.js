@@ -309,6 +309,65 @@ async function tratar(req, res, urlObj, json) {
      Para cada devolução guardada, busca /returns/{id}/records e resume: quando o cliente
      POSTOU, quando houve REEMBOLSO e se houve REVELIA (aprovado por falta de análise no
      prazo). É o dado que faltava pra saber se a caixa chegou e pra medir o relógio. */
+  /* 29/08 — IMPACTO REAL das devoluções que tiveram REVELIA: cruza a linha do tempo com o
+     extrato, por PEDIDO. Responde a pergunta certa: dos casos aprovados por falta de
+     resposta, quanto de fato saiu do caixa? (O valor da tela não serve — já provamos que
+     difere: 36,00 na tela × 41,01 debitado num caso, e em outros houve compensação.) */
+  if (p === '/tiktok/revelia-impacto') {
+    if (!admOk()) { json(res, 404, { error: 'not found' }); return true; }
+    const loja = String(q.get('loja') || '').trim().toLowerCase();
+    if (LOJAS.indexOf(loja) < 0) { json(res, 400, { ok: false, erro: 'informe ?loja= (' + LOJAS.join(', ') + ')' }); return true; }
+    const desfLib = require('../lib/tiktok-desfecho');
+    const CACHE = process.env.TIKTOK_CACHE_DIR || '/data';
+    const leia = (a) => { try { return JSON.parse(fs.readFileSync(a, 'utf8')); } catch (e) { return null; } };
+    const dev = leia(path.join(CACHE, '_tiktok_devolucoes_' + loja + '.json'));
+    const fin = leia(path.join(CACHE, '_tiktok_financeiro_' + loja + '.json'));
+    if (!dev || !dev.devolucoes) { json(res, 400, { ok: false, erro: 'sem cache de devoluções — rode /tiktok/devolucoes-coletar?loja=' + loja }); return true; }
+    if (!fin || !fin.pedidos) { json(res, 400, { ok: false, erro: 'sem cache financeiro — rode /tiktok/financeiro-coletar?loja=' + loja }); return true; }
+
+    /* agrupa POR PEDIDO: várias solicitações do mesmo pedido não podem contar duas vezes */
+    const pedidos = Object.create(null);
+    let semEventos = 0;
+    for (const d of Object.values(dev.devolucoes)) {
+      if (!d || !d.order_id) continue;
+      if (!d.eventos) { semEventos++; continue; }
+      if (!d.eventos.perdeu_por_revelia) continue;
+      const oid = String(d.order_id);
+      if (!pedidos[oid]) pedidos[oid] = { order_id: oid, revelias: 0, valor_tela: 0, postado_em: null, revelia_em: null };
+      const p = pedidos[oid];
+      p.revelias++;
+      p.valor_tela = Math.round((p.valor_tela + (Number(d.valor) || 0)) * 100) / 100;
+      if (d.eventos.postado_em && (!p.postado_em || d.eventos.postado_em < p.postado_em)) p.postado_em = d.eventos.postado_em;
+      if (d.eventos.revelia_em && (!p.revelia_em || d.eventos.revelia_em > p.revelia_em)) p.revelia_em = d.eventos.revelia_em;
+    }
+
+    const linhas = [];
+    let impactoReal = 0, telaTotal = 0, semExtrato = 0;
+    for (const oid of Object.keys(pedidos)) {
+      const p = pedidos[oid];
+      telaTotal = Math.round((telaTotal + p.valor_tela) * 100) / 100;
+      const reg = fin.pedidos[oid];
+      const desf = reg ? desfLib.desfechoDoPedido(reg) : null;
+      if (!desf) { semExtrato++; linhas.push(Object.assign(p, { situacao: 'sem_extrato', impacto: null })); continue; }
+      const imp = Number(desf.impacto || 0);
+      impactoReal = Math.round((impactoReal + imp) * 100) / 100;
+      linhas.push(Object.assign(p, { situacao: desf.desfecho, impacto: imp, receita: desf.receita, liquido: desf.liquido }));
+    }
+    linhas.sort((a, b) => (a.impacto == null ? 1 : b.impacto == null ? -1 : a.impacto - b.impacto));
+
+    json(res, 200, {
+      ok: true, loja,
+      pedidos_com_revelia: linhas.length,
+      devolucoes_sem_eventos_coletados: semEventos,
+      valor_pela_tela: telaTotal,               // o número que assusta
+      impacto_pelo_extrato: impactoReal,        // o número que se defende
+      pedidos_sem_extrato: semExtrato,          // ainda não lançados — nem zero, nem perda
+      linhas: linhas.slice(0, Math.min(200, Math.max(1, Number(q.get('limite')) || 100))),
+      leia: 'valor_pela_tela é o reembolso ao cliente; impacto_pelo_extrato é o que saiu (ou entrou) de fato na conta. A diferença entre os dois é taxa que não volta e compensação do TikTok. Pedido sem extrato ainda não foi lançado — não conte como zero.'
+    });
+    return true;
+  }
+
   if (p === '/tiktok/devolucoes-eventos') {
     if (!admOk()) { json(res, 404, { error: 'not found' }); return true; }
     const loja = String(q.get('loja') || '').trim().toLowerCase();
@@ -346,9 +405,13 @@ async function tratar(req, res, urlObj, json) {
       ok: true, loja, processadas_agora: ok, falharam: falhou, revelias_agora: revelias,
       total_com_eventos: comEventos.length, faltam: Object.keys(g.devolucoes).length - comEventos.length,
       perdidas_por_revelia: totalRevelia.length,
-      valor_perdido_por_revelia: Math.round(totalRevelia.reduce((s, d) => s + (Number(d.valor) || 0), 0) * 100) / 100,
+      /* 29/08 — RÓTULO CORRIGIDO: isto é a soma do valor DA DEVOLUÇÃO (o que a tela mostra),
+         não o prejuízo líquido. O que saiu do caixa está no extrato e pode ser maior (taxas
+         que não voltam) ou menor (o TikTok compensou). Nome que promete mais do que o dado
+         entrega é como se erra caro depois. O impacto real está em /tiktok/revelia-impacto. */
+      valor_das_devolucoes_com_revelia: Math.round(totalRevelia.reduce((s, d) => s + (Number(d.valor) || 0), 0) * 100) / 100,
       aguardando_analise: aguardando.map(d => ({ id: d.id, order_id: d.order_id, valor: d.valor, postado_em: d.eventos.postado_em })),
-      leia: 'revelia = aprovado por falta de análise no prazo (evento ...TIMEOUT). Nos casos reais, caiu 6 e 7 dias após a postagem — quem está em aguardando_analise há mais que isso corre risco.'
+      leia: 'revelia = aprovado por falta de análise no prazo (evento ...TIMEOUT), caiu 6-7 dias após a postagem nos casos reais. ATENÇÃO: valor_das_devolucoes_com_revelia é o valor da TELA, não o prejuízo — o impacto real (extrato) está em /tiktok/revelia-impacto?loja='
     });
     return true;
   }
