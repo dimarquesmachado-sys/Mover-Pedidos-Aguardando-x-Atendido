@@ -243,8 +243,14 @@ async function tratar(req, res, urlObj, json) {
        são distinguidos: existe mas não lê = erro explícito, não silêncio. */
     const lerGuardadas = () => {
       if (!fs.existsSync(arqDev)) return { devolucoes: {}, atualizado: null, _novo: true };
-      try { return JSON.parse(fs.readFileSync(arqDev, 'utf8')); }
-      catch (e) { return { _ilegivel: String(e.message || e).slice(0, 160) }; }
+      try {
+        const parsed = JSON.parse(fs.readFileSync(arqDev, 'utf8'));
+        /* Codex #272 r2: JSON VÁLIDO mas de formato errado ({}, [], null) passava e virava
+           "ok com zero" — mesmo silêncio do arquivo corrompido, por outro caminho. */
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { _ilegivel: 'formato inesperado no cache (esperado objeto com devolucoes)' };
+        if (parsed.devolucoes != null && (typeof parsed.devolucoes !== 'object' || Array.isArray(parsed.devolucoes))) return { _ilegivel: 'campo devolucoes com formato inesperado' };
+        return parsed;
+      } catch (e) { return { _ilegivel: String(e.message || e).slice(0, 160) }; }
     };
 
     if (p === '/tiktok/devolucoes-coletar') {
@@ -253,15 +259,53 @@ async function tratar(req, res, urlObj, json) {
          no mesmo arquivo, que a rota -cru já lê. */
       const dias = Math.min(365, Math.max(1, Number(q.get('dias')) || 30));
       if (q.get('esperar') === '1') {
-        const r = await devLib.coletarDevolucoesTikTok(ctxDev, loja, dias);
-        const g = lerGuardadas();
-        json(res, 200, { ok: true, loja, dias, ...r, guardadas: Object.keys(g.devolucoes || {}).length });
+        /* Codex #272 r2: este caminho pulava o marcarColeta e o ultima_coleta continuava
+           descrevendo uma coleta ANTIGA — inclusive depois de esta falhar. */
+        if (!global.__tkColetando) global.__tkColetando = {};
+        if (global.__tkColetando[loja] && global.__tkColetando[loja] > Date.now()) {
+          json(res, 409, { ok: false, loja, erro: 'já existe uma coleta em andamento para esta loja' });
+          return true;
+        }
+        global.__tkColetando[loja] = Date.now() + 30 * 60000;
+        const marcar = (v) => {
+          try {
+            const g2 = ctxDev.readJson(arqDev, { devolucoes: {} });
+            g2.ultima_coleta = Object.assign({ em: new Date().toISOString(), dias, esperou: true }, v);
+            ctxDev.writeJson(arqDev, g2);
+          } catch (e) {}
+        };
+        try {
+          const r = await devLib.coletarDevolucoesTikTok(ctxDev, loja, dias);
+          marcar({ estado: r && r.erro ? 'falhou' : 'ok', erro: (r && r.erro) || null, vistas: r && r.vistas, novas: r && r.novas });
+          const g = lerGuardadas();
+          json(res, 200, { ok: !(r && r.erro), loja, dias, ...r, guardadas: Object.keys((g && g.devolucoes) || {}).length });
+        } catch (e) {
+          marcar({ estado: 'falhou', erro: String(e && e.message || e).slice(0, 200) });
+          json(res, 502, { ok: false, loja, dias, erro: String(e && e.message || e).slice(0, 200) });
+        } finally {
+          delete global.__tkColetando[loja];
+        }
         return true;
       }
       /* Codex #272 (P1): a coleta RESOLVE com {ok:false, erro} em vez de rejeitar, então
          registrar só no log deixaria a ponte vendo "0 devoluções" e concluindo que está
          tudo certo — falha silenciosa, que é o defeito que estamos caçando o dia todo.
          O desfecho fica gravado no MESMO arquivo e a rota -cru o devolve. */
+      /* Codex #272 r2 (P1): com 202 imediato ficou fácil disparar duas coletas da MESMA loja;
+         cada uma lê o cache inteiro antes do primeiro await e grava o próprio snapshot no
+         fim — a segunda apagaria o que a primeira achou. Trava simples por loja, em memória
+         do processo (é um processo só), com validade pra não travar pra sempre se algo
+         morrer no meio. */
+      if (!global.__tkColetando) global.__tkColetando = {};
+      const travaAte = global.__tkColetando[loja];
+      if (travaAte && travaAte > Date.now()) {
+        const gJa = lerGuardadas();
+        json(res, 409, { ok: false, loja, erro: 'já existe uma coleta em andamento para esta loja — aguarde e chame -cru',
+          guardadas: Object.keys((gJa && gJa.devolucoes) || {}).length, ultima_coleta: (gJa && gJa.ultima_coleta) || null });
+        return true;
+      }
+      global.__tkColetando[loja] = Date.now() + 30 * 60000;   // 30 min de validade
+
       const marcarColeta = (v) => {
         try {
           const g2 = ctxDev.readJson(arqDev, { devolucoes: {} });
@@ -272,11 +316,13 @@ async function tratar(req, res, urlObj, json) {
       marcarColeta({ estado: 'rodando', erro: null });
       devLib.coletarDevolucoesTikTok(ctxDev, loja, dias)
         .then(r => {
+          delete global.__tkColetando[loja];
           const falhou = r && r.erro;
           marcarColeta({ estado: falhou ? 'falhou' : 'ok', erro: falhou || null, vistas: r && r.vistas, novas: r && r.novas });
           console.log('[tiktok devolucoes ' + loja + '] coleta terminou:', JSON.stringify(r).slice(0, 200));
         })
         .catch(e => {
+          delete global.__tkColetando[loja];
           marcarColeta({ estado: 'falhou', erro: String(e && e.message || e).slice(0, 200) });
           console.error('[tiktok devolucoes ' + loja + '] coleta falhou:', e.message);
         });
@@ -296,7 +342,7 @@ async function tratar(req, res, urlObj, json) {
     const limite = Math.min(500, Math.max(1, Number(q.get('limite')) || 30));
     const g = lerGuardadas();
     if (g._ilegivel) { json(res, 500, { ok: false, loja, erro: 'cache de devoluções ilegível (' + g._ilegivel + ') — rode /tiktok/devolucoes-coletar?loja=' + loja + ' pra refazer' }); return true; }
-    const todas = Object.values(g.devolucoes || {});
+    const todas = Object.values(g.devolucoes || {}).filter(d => d && typeof d === 'object');   /* Codex #272 r2: entrada nula no mapa quebraria a união */
     todas.sort((a, b) => (Number(b.criado_em) || 0) - (Number(a.criado_em) || 0));
     /* Codex #272: campo cru chamado "constructor"/"toString"/"__proto__" cairia no
        prototype de um objeto comum e a contagem sairia errada (ou mutaria herdado). */
