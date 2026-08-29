@@ -286,9 +286,17 @@ async function buscarNaEmpresa(empresa, termo, limite = 20) {
      primeiro o GTIN, e cai na busca por texto se não achar. */
   const termoLimpo = String(termo).trim();
   const soDigitos = /^\d{8,14}$/.test(termoLimpo.replace(/\s/g, ''));
-  const url = soDigitos
-    ? 'https://api.bling.com.br/Api/v3/produtos?pagina=1&limite=' + lim + '&gtin=' + encodeURIComponent(termoLimpo.replace(/\s/g, ''))
-    : 'https://api.bling.com.br/Api/v3/produtos?pagina=1&limite=' + lim + '&criterio=2&pesquisa=' + encodeURIComponent(termoLimpo);
+  /* 29/08 — O FILTRO ESTAVA SENDO IGNORADO: buscar "PM1" devolvia 100 produtos sem relação
+     nenhuma (os primeiros da conta). Ou seja, o par criterio=2 + pesquisa= não filtra nesta
+     API — provavelmente 'criterio' é situação, não texto. Duas defesas agora:
+     1) filtros que a v3 aceita de fato (codigo e nome), em chamadas separadas;
+     2) FILTRO LOCAL sobre o que voltar — assim, mesmo que o Bling ignore o parâmetro de
+        novo, o operador nunca mais vê uma lista aleatória: ou vem o que casa, ou vem vazio. */
+  const urls = soDigitos
+    ? ['https://api.bling.com.br/Api/v3/produtos?pagina=1&limite=' + lim + '&gtin=' + encodeURIComponent(termoLimpo.replace(/\s/g, ''))]
+    : ['https://api.bling.com.br/Api/v3/produtos?pagina=1&limite=' + lim + '&codigo=' + encodeURIComponent(termoLimpo),
+       'https://api.bling.com.br/Api/v3/produtos?pagina=1&limite=' + lim + '&nome=' + encodeURIComponent(termoLimpo)];
+  const url = urls[0];
   let r, d = {};
   try {
     r = await fetch(url, { headers: { Authorization: 'Bearer ' + token, Accept: 'application/json' }, signal: ctrl.signal });
@@ -318,6 +326,13 @@ async function buscarNaEmpresa(empresa, termo, limite = 20) {
   }
   if (r.status === 401 && !d.data) throw new Error('Bling recusou o token da loja ' + empresa + ' (401) mesmo após renovar — reautorize o módulo dela');
   let lista = Array.isArray(d.data) ? d.data : [];
+  /* nada por código: tenta por nome, no mesmo prazo */
+  if (!lista.length && urls[1]) {
+    try {
+      const rN = await fetch(urls[1], { headers: { Authorization: 'Bearer ' + token, Accept: 'application/json' }, signal: ctrl.signal });
+      if (rN.ok) { const dN = await rN.json(); lista = Array.isArray(dN.data) ? dN.data : []; }
+    } catch (e) { if (e && e.name === 'AbortError') throw new Error('Bling não respondeu em 8s'); }
+  }
   if (!lista.length && soDigitos) {
     /* EAN não achou: o número pode ser o próprio SKU. Tenta por texto no MESMO prazo. */
     try {
@@ -333,6 +348,13 @@ async function buscarNaEmpresa(empresa, termo, limite = 20) {
     imagem: (p.imagemURL || (p.midia && p.midia.imagens && p.midia.imagens[0] && p.midia.imagens[0].link) || ''),
     ean: p.gtin || '',
   })).filter(p => p.codigo);   /* Codex #271 r2: a lista é de SKUs — produto sem codigo entraria e seria salvo com SKU vazio */
+  /* Filtro local: a rede de segurança contra parâmetro ignorado pela API. Busca por número
+     (EAN) não filtra, porque o casamento ali é do gtin, não do texto. */
+  if (!soDigitos) {
+    const alvo = termoLimpo.toLowerCase();
+    const casam = resultados.filter(p => (p.codigo || '').toLowerCase().includes(alvo) || (p.nome || '').toLowerCase().includes(alvo));
+    return { total: casam.length, resultados: casam, empresa, filtradoLocal: casam.length !== resultados.length };
+  }
   return { total: resultados.length, resultados, empresa };
 }
 
