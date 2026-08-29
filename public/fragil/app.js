@@ -1008,26 +1008,46 @@ $("btn-importar").addEventListener("click", abrirModalImport);
    houve o clique final e NADA foi gravado (o atualizadoEm do arquivo nem mudou). Agora
    o botão grava direto no servidor e só então redesenha, com confirmação por digitação. */
 $("btn-zerar").addEventListener("click", async () => {
+  /* Codex #254: a empresa é FIXADA aqui e usada nas duas chamadas — trocar o seletor
+     durante a operação não pode desviar o POST destrutivo pra outra empresa. */
   const emp = empresaAtiva();
   const nome = EMP_NOMES[emp] || emp;
-  const qtd = $tbody().querySelectorAll("tr").length;
+  const q = "?empresa=" + encodeURIComponent(emp);
+  /* Codex #254: contar SKUs de verdade — preencherTabelaDoMapa({}) deixa UMA linha em
+     branco, então contar <tr> dizia "1 SKU" numa lista já vazia. */
+  const qtd = Array.from($tbody().querySelectorAll("tr"))
+    .filter(tr => (tr.querySelector(".input-sku")?.value || "").trim()).length;
   if (!qtd) { status("A lista de " + nome + " já está vazia.", true); return; }
   const digitou = prompt("Isto APAGA E GRAVA a lista de " + nome + " (" + qtd + " SKUs). As outras empresas não são afetadas e a auditoria registra tudo.\n\nPara confirmar, digite: ZERAR");
   if ((digitou || "").trim().toUpperCase() !== "ZERAR") { status("Cancelado — nada foi alterado.", true); return; }
   $("btn-zerar").disabled = true;
   try {
-    const cfgAtual = await (await fetch("/fragil/api/skus" + qEmp())).json();
-    const j = await api("/fragil/api/skus" + qEmp(), {
+    /* Codex #254: fetch NÃO rejeita em 4xx/5xx — sem checar ok, a config viria undefined
+       e o POST destrutivo seguiria assim mesmo. Falhou a leitura, não apaga nada. */
+    const rCfg = await fetch("/fragil/api/skus" + q);
+    if (!rCfg.ok) { status("Não consegui ler a configuração atual (HTTP " + rCfg.status + ") — NADA foi alterado.", false); return; }
+    const cfgAtual = await rCfg.json();
+    if (!cfgAtual || !cfgAtual.config) { status("Resposta inesperada do servidor — NADA foi alterado.", false); return; }
+    const j = await api("/fragil/api/skus" + q, {
       method: "POST",
       body: JSON.stringify({ config: cfgAtual.config, skus: {} })
     });
-    preencherTabelaDoMapa(j.skus || {});
-    atualizarContador();
+    if (emp === empresaAtiva()) {   // só redesenha se o seletor ainda está na empresa zerada
+      preencherTabelaDoMapa(j.skus || {});
+      atualizarContador();
+      /* Codex #254: o rótulo de última atualização vem da resposta — antes ficava exibindo
+         o carimbo velho, que foi justamente o sinal que denunciou o zeramento não gravado. */
+      if ($("atualizadoEm") && j.atualizadoEm) {
+        $("atualizadoEm").textContent = "Última atualização: " + new Date(j.atualizadoEm).toLocaleString("pt-BR") + (j.atualizadoPor ? " por " + j.atualizadoPor : "");
+      }
+    }
     status("Lista de " + nome + " zerada e GRAVADA (" + qtd + " SKUs removidos).", true);
     carregarAuditoria();
     carregarStatus();
   } catch (e) {
-    status("Erro ao zerar: " + e.message + " — nada foi alterado.", false);
+    /* Codex #254: se a conexão cair DEPOIS de o servidor gravar, dizer "nada foi alterado"
+       recria o falso-estado que este botão veio matar. Estado INDETERMINADO: manda conferir. */
+    status("Não deu pra confirmar o resultado (" + e.message + "). A lista PODE ter sido zerada — recarregue a página e confira antes de tentar de novo.", false);
   } finally {
     $("btn-zerar").disabled = false;
   }
