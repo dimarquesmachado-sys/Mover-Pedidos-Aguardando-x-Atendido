@@ -1285,6 +1285,60 @@ ${andamento}
      'pago_cancelado_com_nf', nenhum 'nao_pago') e a suspeita é que a LISTAGEM de pedidos
      não traz invoices/payments — eles apareceram só no DETALHE, na sonda anterior. Em vez
      de chutar, esta rota mostra o pedido CRU como a listagem devolve. */
+  /* 30/08 — CRUZAMENTO: separa "NF de produto que nunca saiu" de "produto perdido".
+     Os pedidos pago_cancelado_com_nf são ambíguos: NF emitida e sem devolução registrada
+     pode ser cancelamento ANTES do despacho (cancela a nota, recupera o imposto) ou produto
+     que foi e o cliente ficou com ele (prejuízo de verdade). Duas pontas respondem:
+       • a conversa do Devoluções diz se VOLTOU (remessa reversa do ticket Magalu);
+       • daqui se diz se SAIU (etiqueta anexada no checkout).
+     Esta rota chama a primeira e devolve o cruzamento; a etiqueta entra quando o módulo do
+     checkout responder — por ora vem como indefinido, que é honesto e não inventa conclusão. */
+  if (method === 'GET' && p === '/magalu/cruzar-cancelados') {
+    const emp = String(q.get('empresa') || '').toLowerCase().trim();
+    if (!EMPRESAS_VALIDAS.includes(emp)) { json(res, 400, { ok: false, erro: 'empresa inválida' }); return true; }
+    const cancLib = require('../lib/magalu-cancelados');
+    const cruzLib = require('../lib/magalu-cruzar');
+    const arqC = path.join(DATA_DIR, 'cancelados-' + emp + '.json');
+    let g = null;
+    try { g = JSON.parse(fs.readFileSync(arqC, 'utf8')); } catch (e) { g = null; }
+    if (!g || !g.pedidos) { json(res, 400, { ok: false, erro: 'sem cache — rode /magalu/cancelados-coletar?empresa=' + emp }); return true; }
+
+    /* só os que têm NF: sem nota não há imposto a recuperar nem decisão a tomar */
+    const comNF = Object.values(g.pedidos).filter(x => x && x.tem_nf);
+    const codes = comNF.map(x => String(x.code)).filter(Boolean);
+    if (!codes.length) { json(res, 200, { ok: true, empresa: emp, total: 0, nota: 'nenhum cancelado com NF no cache' }); return true; }
+
+    /* ponta 1: remessas reversas (serviço de Devoluções) */
+    const HOST_DEV = process.env.DEVOLUCOES_HOST || 'https://good-devolucoes-x-marketplaces-x-nfsbling.onrender.com';
+    const chave = process.env.ADMIN_KEY || '';
+    let reversas = {}, erroRev = null;
+    try {
+      const url = HOST_DEV + '/api/magalu/reversas-por-pedido?codes=' + encodeURIComponent(codes.join(',')) + '&k=' + encodeURIComponent(chave);
+      const ctrl = new AbortController();
+      const prazo = setTimeout(() => ctrl.abort(), 20000);
+      let rr;
+      try { rr = await fetch(url, { signal: ctrl.signal }); } finally { clearTimeout(prazo); }
+      if (!rr.ok) { erroRev = 'HTTP ' + rr.status; }
+      else {
+        const dd = await rr.json().catch(() => null);
+        const lista = Array.isArray(dd) ? dd : (dd && (dd.resultado || dd.linhas || dd.pedidos)) || [];
+        for (const it of lista) {
+          const c = String(it && (it.code || it.order_code) || '');
+          if (c) reversas[c] = { tem_reversa: !!(it.tem_reversa || it.reverse_code), reverse_code: it.reverse_code || null, ticket_id: it.ticket_id || null };
+        }
+      }
+    } catch (e) { erroRev = String(e.message || e).slice(0, 140); }
+
+    /* ponta 2: SAIU? — ainda não ligada; declarada como desconhecida em vez de suposta */
+    const saiu = {};
+
+    const r = cruzLib.cruzar(comNF, reversas, saiu);
+    json(res, 200, Object.assign({ ok: true, empresa: emp, consultados: codes.length,
+      reversas_respondidas: Object.keys(reversas).length, erro_reversas: erroRev,
+      leia: 'situacao nf_sem_saida = cancelar a NF ou emitir devolução SEM entrada de estoque (recupera o imposto); saiu_e_nao_voltou = prejuízo real, produto perdido; indefinido = falta a etiqueta do checkout pra decidir' }, r));
+    return true;
+  }
+
   if (method === 'GET' && p === '/magalu/sonda-listagem') {
     const emp = String(q.get('empresa') || '').toLowerCase().trim();
     if (!EMPRESAS_VALIDAS.includes(emp)) { json(res, 400, { ok: false, erro: 'empresa inválida' }); return true; }
