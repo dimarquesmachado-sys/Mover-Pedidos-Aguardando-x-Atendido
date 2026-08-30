@@ -1270,6 +1270,48 @@ function desenharDevolucoesML(d){
   if(d.atualizado) h += '<div class="mut" style="font-size:10px;margin-top:5px">ML atualizado em '+dBR(String(d.atualizado).slice(0,10))+'</div>';
   el.innerHTML = h;
 }
+let _tkSeq = 0;   /* Codex #291: trocar o período com um pedido em voo deixava a resposta
+   ANTIGA pintar o card por último — custo de outro período com cara de atual. */
+async function carregarDespesasTikTok(){
+  const iv = intervalo(); const meu = ++_tkSeq;
+  const el = document.getElementById('tkCards'); if(!el) return;
+  try{
+    const r = await fetch(MOD+'/tiktok-custo-devolucoes?de='+iv.de+'&ate='+iv.ate, {credentials:'same-origin'});
+    const d = await r.json().catch(()=>null);
+    if(meu !== _tkSeq) return;   /* o período já mudou: esta resposta é de outro intervalo */
+    if(!d){ el.innerHTML = '<span class="dim">n\u00e3o consegui ler as devolu\u00e7\u00f5es do TikTok</span>'; return; }
+    /* indisponível NÃO é zero: mostrar R$ 0,00 faria concluir que não houve devolução */
+    if(d.indisponivel || d.custo_total === null || d.custo_total === undefined){
+      el.innerHTML = '<span class="dim">\u26a0 ' + (d.indisponivel || 'n\u00e3o deu pra calcular agora') + '</span>';
+      return;
+    }
+    desenharDespesasTikTok(d);
+  }catch(e){ if(meu === _tkSeq) el.innerHTML = '<span class="dim">n\u00e3o consegui ler as devolu\u00e7\u00f5es do TikTok</span>'; }
+}
+function desenharDespesasTikTok(d){
+  const el = document.getElementById('tkCards'); if(!el) return;
+  const linhas = [
+    ['\ud83d\udcb8 D\u00e9bito no extrato', Math.abs(d.debito_extrato||0), '#f87171', 'estorno, reembolso parcial e taxa que o TikTok debitou'],
+    ['\ud83d\ude9a Frete de devolu\u00e7\u00e3o', d.frete_devolucao_loja||0,   '#fb923c', 'frete da volta pago pela loja \u2014 s\u00f3 o que ainda N\u00c3O est\u00e1 dentro do d\u00e9bito acima'],
+    ['\ud83d\udc9a Compensa\u00e7\u00e3o', d.compensacao_recebida||0,          '#34d399', 'o TikTok assumiu a culpa e devolveu \u2014 abate do custo'],
+  ];
+  let h = '<div style="display:flex;flex-wrap:wrap;gap:10px">';
+  for(const [nome,val,cor,dica] of linhas){
+    h += '<div class="miniTot" title="'+dica+'" style="border-color:'+cor+'"><div class="mut" style="font-size:11px">'+nome+'</div><div style="font-size:16px;color:'+cor+'"><b>'+BRL(val)+'</b></div></div>';
+  }
+  h += '<div class="miniTot" style="border-color:#e879f9"><div class="mut" style="font-size:11px">\ud83e\uddfe Custo total</div><div style="font-size:18px;color:#e879f9"><b>'+BRL(d.custo_total||0)+'</b></div></div>';
+  h += '</div>';
+  const avisos = [];
+  if(d.pedidos_sem_lancamento) avisos.push(d.pedidos_sem_lancamento+' devolu\u00e7\u00e3o(\u00f5es) ainda <b>sem lan\u00e7amento</b> no extrato \u2014 o custo do per\u00edodo pode subir depois');
+  if(d.custo_de_venda_anterior) avisos.push(BRL(Math.abs(d.custo_de_venda_anterior))+' vem de <b>venda anterior</b> a este per\u00edodo (estorno tardio)');
+  if(d.frete_ja_embutido_no_debito) avisos.push(BRL(d.frete_ja_embutido_no_debito)+' de frete j\u00e1 est\u00e3o <b>dentro</b> do d\u00e9bito \u2014 n\u00e3o somados de novo');
+  if(typeof d.horas_desde_a_coleta === 'number' && d.horas_desde_a_coleta > 48) avisos.push('coleta do TikTok tem <b>'+d.horas_desde_a_coleta+'h</b> \u2014 o n\u00famero pode estar incompleto');
+  if(d.nunca_coletou) avisos.push('\u26a0 nunca houve coleta bem-sucedida de <b>'+d.nunca_coletou.join(' e ')+'</b> \u2014 este total N\u00c3O \u00e9 confi\u00e1vel');
+  else if(d.coleta_falhando) avisos.push('\u26a0 a \u00faltima coleta do TikTok <b>falhou</b> \u2014 o n\u00famero \u00e9 do que j\u00e1 estava guardado');
+  if(d.periodo_parcial) avisos.push('per\u00edodo <b>anterior</b> ao que foi coletado (desde '+(d.coberto_desde||'?')+') \u2014 total PARCIAL');
+  if(avisos.length) h += '<div class="mut" style="font-size:11px;margin-top:8px">' + avisos.map(a=>'\u2022 '+a).join('<br>') + '</div>';
+  el.innerHTML = h;
+}
 async function carregarDespesasShopee(){
   const iv = intervalo(); const ck = iv.de + '|' + iv.ate;
   const el = document.getElementById('shpCards'); if(!el) return;
@@ -1778,6 +1820,10 @@ function montar(){
       '<div id="shpCards" class="mut" style="font-size:12px">carregando\u2026</div>'+
       '<div class="nota" style="margin-top:8px">V\u00eam da <b>API oficial da Shopee</b> (carteira e devolu\u00e7\u00f5es), coletadas de madrugada. <b>Nada disso passa pelo Bling.</b> O maior item costuma ser o estorno ap\u00f3s devolu\u00e7\u00e3o: a Shopee j\u00e1 tinha pago, o cliente devolveu e ela tirou o dinheiro de volta da carteira. Como s\u00e3o cobran\u00e7as do <b>per\u00edodo</b>, ainda <b>n\u00e3o entram</b> no Lucro Bruto (M.C.) l\u00e1 em cima \u2014 desconte para o lucro do m\u00eas.</div>'+
     '</div>'+
+    '<div class="sec" id="secTK"><h2>\u21a9\ufe0f Devolu\u00e7\u00f5es do TikTok <span class="hint">do per\u00edodo \u00b7 fora da margem por pedido</span></h2>'+
+      '<div id="tkCards" class="mut" style="font-size:12px">carregando\u2026</div>'+
+      '<div class="nota" style="margin-top:8px">Vem do <b>extrato</b> do TikTok (n\u00e3o da tela de devolu\u00e7\u00f5es, que mostra o reembolso ao cliente e costuma diferir do que sai da conta). Soma o d\u00e9bito lan\u00e7ado + o frete de devolu\u00e7\u00e3o que a loja paga, menos a compensa\u00e7\u00e3o quando o TikTok assume a culpa. Fica <b>em linha pr\u00f3pria</b> de prop\u00f3sito: quando o custo vem de erro de expedi\u00e7\u00e3o (item errado), abater no SKU faria um produto bom parecer ruim.</div>'+
+    '</div>'+
     '<div class="sec" id="secCanal"><h2>🛒 Por Canal</h2><div class="tw twFit"><table id="tCanal"></table></div></div>'+
     '<div class="grid2">'+
       '<div class="sec" id="secDia"><h2 id="hGrafPed">📈 Pedidos por Dia</h2><div class="chartbox"><canvas id="cPed"></canvas></div></div>'+
@@ -1979,7 +2025,7 @@ function render(){
   // 28/07: o indicador vive ao lado do "← checkout" e ABRE ALI MESMO. Antes ele mandava abrir
   // um bloco que fica noutro canto da tela, e por isso parecia que o clique não fazia nada.
   try{ carregarDespesasML(); }catch(e){}   // 02/08: despesas do ML do período
-  try{ carregarDespesasShopee(); try{ carregarDevolucoesML(); }catch(e){} }catch(e){}   // 06/08 (d191): carteira e devoluções da Shopee
+  try{ carregarDespesasShopee(); try{ carregarDevolucoesML(); }catch(e){} try{ carregarDespesasTikTok(); }catch(e){} }catch(e){}   // 06/08 (d191): carteira e devoluções da Shopee
   // d196: a previsão do mês é buscada UMA vez (é sempre o mês corrente, não muda
   // com o período). Se já veio, não busca de novo — a não ser que o dia tenha virado.
   try{

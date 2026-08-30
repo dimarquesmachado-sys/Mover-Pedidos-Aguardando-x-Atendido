@@ -1424,6 +1424,26 @@ function routes(readBody) {
     }
 
     // DASHBOARD — página (amb-dashboard.html do módulo)
+    /* 30/08 — CUSTO DE DEVOLUÇÕES DO TIKTOK (mesma lib da Girassol, empresa como parâmetro:
+       lib/tiktok-custo-devolucoes.js não é cópia). Linha própria no período, não abatimento
+       na venda — quando o custo vem de erro de expedição, abater no SKU culpa o produto. */
+    if (method === 'GET' && p === '/amb-checkout-offline/tiktok-custo-devolucoes') {
+      const kT = urlObj.searchParams.get('k') || '';
+      const sT = validarSessao(req.headers['cookie']);
+      if (!((process.env.ADMIN_KEY && kT === process.env.ADMIN_KEY) || (sT && ehAdmin(sT)))) { json(res, 404, { error: 'not found' }); return true; }
+      /* 30/08 (Codex #291): a montagem inteira vive em lib/tiktok-custo-devolucoes.js —
+         a review achou 5 defeitos que existiam nas DUAS cópias desta rota, então ela deixou
+         de ser código de módulo. Aqui fica só o guard e a loja. */
+      try {
+        const { responderCusto } = require('../lib/tiktok-custo-devolucoes');
+        const r = responderCusto({ loja: 'amb', de: urlObj.searchParams.get('de'), ate: urlObj.searchParams.get('ate') });
+        json(res, r.http, r.corpo);
+      } catch (e) {
+        json(res, 200, { ok: false, erro: String(e.message || e).slice(0, 160), custo_total: null });
+      }
+      return true;
+    }
+
     if (method === 'GET' && p === '/amb-checkout-offline/dashboard') {
       // NUNCA estoquista (pedido do Diego, 11/08): a página exige ADMIN — sessão de admin
       // logado OU ?k=ADMIN_KEY. Não-admin volta pro painel, sem alarde (302).
