@@ -1424,6 +1424,38 @@ function routes(readBody) {
     }
 
     // DASHBOARD — página (amb-dashboard.html do módulo)
+    /* 30/08 — CUSTO DE DEVOLUÇÕES DO TIKTOK (mesma lib da Girassol, empresa como parâmetro:
+       lib/tiktok-custo-devolucoes.js não é cópia). Linha própria no período, não abatimento
+       na venda — quando o custo vem de erro de expedição, abater no SKU culpa o produto. */
+    if (method === 'GET' && p === '/amb-checkout-offline/tiktok-custo-devolucoes') {
+      const kT = urlObj.searchParams.get('k') || '';
+      const sT = validarSessao(req.headers['cookie']);
+      if (!((process.env.ADMIN_KEY && kT === process.env.ADMIN_KEY) || (sT && ehAdmin(sT)))) { json(res, 404, { error: 'not found' }); return true; }
+      try {
+        const custoLib = require('../lib/tiktok-custo-devolucoes');
+        const fsx = require('fs'), pathx = require('path');
+        const CACHE = process.env.TIKTOK_CACHE_DIR || '/data';
+        const ler = (a) => { try { return JSON.parse(fsx.readFileSync(a, 'utf8')); } catch (e) { return null; } };
+        /* a loja da AMB no TikTok chama-se 'amb' (env TIKTOK_LOJAS) */
+        const dev = ler(pathx.join(CACHE, '_tiktok_devolucoes_amb.json'));
+        const fin = ler(pathx.join(CACHE, '_tiktok_financeiro_amb.json'));
+        const faltando = [];
+        if (!dev || !dev.devolucoes || typeof dev.devolucoes !== 'object') faltando.push('devoluções');
+        if (!fin || !fin.pedidos || typeof fin.pedidos !== 'object') faltando.push('financeiro');
+        if (faltando.length) { json(res, 200, { ok: false, indisponivel: 'cache de ' + faltando.join(' e ') + ' ausente ou inválido — rode as coletas do TikTok da AMB', custo_total: null }); return true; }
+        const atualizadoEm = dev.atualizado ? Date.parse(dev.atualizado) : null;
+        const horasDesde = atualizadoEm ? Math.round((Date.now() - atualizadoEm) / 3600000) : null;
+        const de = urlObj.searchParams.get('de'), ate = urlObj.searchParams.get('ate');
+        const ini = de ? Math.floor(Date.parse(de + 'T00:00:00-03:00') / 1000) : Math.floor((Date.now() - 30 * 86400000) / 1000);
+        const fim = ate ? Math.floor(Date.parse(ate + 'T23:59:59-03:00') / 1000) : Math.floor(Date.now() / 1000);
+        if (!isFinite(ini) || !isFinite(fim) || ini > fim) { json(res, 400, { ok: false, erro: 'período inválido — use ?de=AAAA-MM-DD&ate=AAAA-MM-DD', custo_total: null }); return true; }
+        json(res, 200, Object.assign({ ok: true, cache_atualizado_em: dev.atualizado || null, horas_desde_a_coleta: horasDesde }, custoLib.custoNoPeriodo(dev, fin, ini, fim)));
+      } catch (e) {
+        json(res, 200, { ok: false, erro: String(e.message || e).slice(0, 160), custo_total: null });
+      }
+      return true;
+    }
+
     if (method === 'GET' && p === '/amb-checkout-offline/dashboard') {
       // NUNCA estoquista (pedido do Diego, 11/08): a página exige ADMIN — sessão de admin
       // logado OU ?k=ADMIN_KEY. Não-admin volta pro painel, sem alarde (302).
