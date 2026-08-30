@@ -118,14 +118,69 @@ function criarNoturna(ctx) {
     // Sem isto o cache só era atualizado quando
     // alguém abria a URL na mão: pedido novo ficava sem tarifa real E sem hora da venda no
     // painel, e o recurso ia silenciosamente parando de funcionar conforme o cache envelhecia.
+    /* 30/08 — JANELA LONGA (o dono cobrou o retrabalho manual): 35 dias não alcança a ação
+       tardia do TikTok — mediação e estorno chegam semanas depois da venda. 120 cobre o
+       ciclo real; a coleta é por id, então repetir não duplica. */
+    const DIAS_TIKTOK = Number(process.env.TIKTOK_FINANCEIRO_DIAS) || 120;
     if (typeof coletarFinanceiroTikTok === 'function') {
-      await etapa('financeiro do TikTok (35 dias)', async () => {
-        const r = await coletarFinanceiroTikTok(35);
+      await etapa('financeiro do TikTok (' + DIAS_TIKTOK + ' dias)', async () => {
+        const r = await coletarFinanceiroTikTok(DIAS_TIKTOK);
         if (!r || r.ok === false) throw new Error('coleta do TikTok falhou' + (r && r.erro ? ': ' + r.erro : ''));
         return r.pedidos_novos + ' pedido(s) novo(s) · ' + r.guardados + ' no total' +
                (r.nao_fecharam ? ' ⚠️ ' + r.nao_fecharam + ' não fecharam a identidade' : '');
       });
       await dorme(2000);
+    }
+
+    /* 30/08 — DEVOLUÇÕES DO TIKTOK, AUTOMÁTICAS (antes era tudo na mão: o dono tinha que
+       chamar coletar, depois eventos, 25 por vez, toda vez que quisesse o número). Agora a
+       noturna faz as duas coisas: coleta as devoluções da janela e completa a linha do
+       tempo (postagem, reembolso, revelia) das que ainda não têm. Sem isso, a linha do
+       dashboard envelhece sozinha e volta a exigir trabalho manual. */
+    try {
+      const tkOauth = require('../tiktok-oauth');
+      const devLib = require('../lib/tiktok-financeiro');
+      const evLib = require('../lib/tiktok-eventos');
+      const fsx = require('fs'), pathx = require('path');
+      const CACHE = process.env.TIKTOK_CACHE_DIR || '/data';
+      const ctxDev = {
+        CACHE_DIR: CACHE, path: pathx,
+        readJson: (a, p) => { try { return JSON.parse(fsx.readFileSync(a, 'utf8')); } catch (e) { return p; } },
+        writeJson: (a, v) => { try { fsx.mkdirSync(pathx.dirname(a), { recursive: true }); } catch (e) {} fsx.writeFileSync(a, JSON.stringify(v, null, 2)); },
+        chamar: tkOauth.chamar,
+      };
+      await etapa('devoluções do TikTok (' + DIAS_TIKTOK + ' dias)', async () => {
+        const r = await devLib.coletarDevolucoesTikTok(ctxDev, 'amb', DIAS_TIKTOK);
+        if (!r || r.erro) throw new Error('coleta de devoluções falhou' + (r && r.erro ? ': ' + r.erro : ''));
+        return r.vistas + ' vista(s) · ' + r.novas + ' nova(s)';
+      });
+      await dorme(2000);
+      await etapa('linha do tempo das devoluções do TikTok', async () => {
+        const arqD = pathx.join(CACHE, '_tiktok_devolucoes_amb.json');
+        const g = ctxDev.readJson(arqD, null);
+        if (!g || !g.devolucoes) return 'sem cache — nada a fazer';
+        /* só as que ainda não têm eventos, e no máximo 40 por noite: cada uma é uma
+           chamada à API, e o rate limit já nos mordeu antes. */
+        const faltam = Object.values(g.devolucoes).filter(d => d && d.id && !d.eventos).slice(0, 40);
+        let ok = 0, revelias = 0;
+        for (const d of faltam) {
+          try {
+            const r = await tkOauth.chamar('/return_refund/202309/returns/' + encodeURIComponent(d.id) + '/records', {}, {}, 'amb');
+            const recs = r && r.corpo && r.corpo.data && r.corpo.data.records;
+            if (!Array.isArray(recs)) continue;
+            d.eventos = evLib.resumirEventos(recs);
+            if (d.eventos.perdeu_por_revelia) revelias++;
+            ok++;
+          } catch (e) { /* uma falhar não derruba a noite */ }
+          await new Promise(s2 => setTimeout(s2, 250));
+        }
+        ctxDev.writeJson(arqD, g);
+        const semEventos = Object.values(g.devolucoes).filter(d => d && !d.eventos).length;
+        return ok + ' processada(s) · ' + revelias + ' com revelia · ' + semEventos + ' ainda sem linha do tempo';
+      });
+      await dorme(2000);
+    } catch (e) {
+      console.error('[noturna] devoluções do TikTok não rodaram:', e.message);
     }
 
     // 18/08 — corrige a tarifa do TikTok das vendas que JÁ liquidaram. Roda depois do
