@@ -1778,6 +1778,53 @@ function routes(readBody) {
     }
     // resumo de um período, pros cards do dashboard
     // ── COMPLETAR TARIFA DO TIKTOK (18/08) ────────────────────────────────────────
+    /* 29/08 — CUSTO DE DEVOLUÇÕES DO TIKTOK pro dashboard (linha própria no período, decisão
+       do dono). Não abate na venda de propósito: no caso 584628284730475569, o custo veio de
+       mandar o ITEM ERRADO (frete ida+volta + taxa = R$ 276,70) e o produto voltou pro
+       estoque — abater no SKU faria o MP3G parecer ruim, quando o problema foi expedição. */
+    if (method === 'GET' && p === '/girassol-backup-offline/tiktok-custo-devolucoes') {
+      const kT = urlObj.searchParams.get('k') || '';
+      const sT = validarSessao(req.headers['cookie']);
+      if (!((process.env.ADMIN_KEY && kT === process.env.ADMIN_KEY) || (sT && ehAdmin(sT)))) { json(res, 404, { error: 'not found' }); return true; }
+      try {
+        const custoLib = require('../lib/tiktok-custo-devolucoes');
+        const fsx = require('fs'), pathx = require('path');
+        const CACHE = process.env.TIKTOK_CACHE_DIR || '/data';
+        const ler = (a) => { try { return JSON.parse(fsx.readFileSync(a, 'utf8')); } catch (e) { return null; } };
+        const dev = ler(pathx.join(CACHE, '_tiktok_devolucoes_girassol.json'));
+        const fin = ler(pathx.join(CACHE, '_tiktok_financeiro_girassol.json'));
+        /* Codex #287 (P1): cache ausente/ilegível NÃO é custo zero — o dashboard mostraria
+           'R$ 0,00 de devoluções' e o dono concluiria que não houve. Devolve indisponível,
+           SEM custo_total, pra tela poder dizer 'não deu pra calcular'. */
+        const faltando = [];
+        /* Codex #287 r2: Array também é 'object' — um cache que virou [] passaria e daria zero. */
+        const mapaOk = (m) => !!m && typeof m === 'object' && !Array.isArray(m);
+        if (!mapaOk(dev) || !mapaOk(dev.devolucoes)) faltando.push('devoluções');
+        if (!mapaOk(fin) || !mapaOk(fin.pedidos)) faltando.push('financeiro');
+        if (faltando.length) { json(res, 200, { ok: false, indisponivel: 'cache de ' + faltando.join(' e ') + ' ausente ou inválido — rode as coletas do TikTok', custo_total: null }); return true; }
+        /* Codex #287: cache VELHO também engana — se a última coleta é antiga, o total do
+           período está incompleto e a tela precisa saber. */
+        /* Codex #287 r2: os DOIS caches envelhecem; o financeiro velho engana igual. */
+        const idade = (iso) => { const p = iso ? Date.parse(iso) : NaN; return isFinite(p) ? Math.round((Date.now() - p) / 3600000) : null; };
+        const horasDesde = idade(dev.atualizado);
+        const horasFinanceiro = idade(fin.atualizado || (fin.ultima_coleta && fin.ultima_coleta.em));
+        const de = urlObj.searchParams.get('de'), ate = urlObj.searchParams.get('ate');
+        const ini = de ? Math.floor(Date.parse(de + 'T00:00:00-03:00') / 1000) : Math.floor((Date.now() - 30 * 86400000) / 1000);
+        const fim = ate ? Math.floor(Date.parse(ate + 'T23:59:59-03:00') / 1000) : Math.floor(Date.now() / 1000);
+        /* Codex #287: data inválida virava epoch zero (ini) ou agora (fim) — o período pedido
+           era ignorado em silêncio e o número saía errado sem ninguém notar. */
+        /* Codex #287 r2: Date.parse aceita 2026-02-31 e rola pra março — a data tem que ser
+           de calendário de verdade, senão o período pedido não é o calculado. */
+        const dataOk = (s) => { if (!s) return true; if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false; const [A_, M_, D_] = s.split('-').map(Number); const dt = new Date(Date.UTC(A_, M_ - 1, D_)); return dt.getUTCFullYear() === A_ && dt.getUTCMonth() === M_ - 1 && dt.getUTCDate() === D_; };
+        if (!dataOk(de) || !dataOk(ate) || !isFinite(ini) || !isFinite(fim) || ini > fim) { json(res, 400, { ok: false, erro: 'período inválido — use ?de=AAAA-MM-DD&ate=AAAA-MM-DD (datas de calendário)', custo_total: null }); return true; }
+        json(res, 200, Object.assign({ ok: true, cache_devolucoes_atualizado_em: dev.atualizado || null, horas_desde_coleta_devolucoes: horasDesde, horas_desde_coleta_financeiro: horasFinanceiro }, custoLib.custoNoPeriodo(dev, fin, ini, fim)));
+      } catch (e) {
+        /* nunca derruba o dashboard por causa desta linha */
+        json(res, 200, { ok: false, erro: String(e.message || e).slice(0, 160), custo_total: 0 });
+      }
+      return true;
+    }
+
     if (method === 'GET' && p === '/girassol-backup-offline/tiktok-completar-tarifa') {
       const kT = urlObj.searchParams.get('k') || '';
       const sT = validarSessao(req.headers['cookie']);
