@@ -1312,7 +1312,24 @@ ${andamento}
        fora e é contado, pra ficar claro que existe e precisa de recoleta. */
     const todosNF = Object.values(g.pedidos).filter(x => x && x.tem_nf && x.classe !== 'pedido_teste');
     const semSeller = todosNF.filter(x => !x.seller).length;
-    const comNF = todosNF.filter(x => sellerEsperado ? String(x.seller || '').toLowerCase() === sellerEsperado : !!x.seller);
+    /* Codex #300 r3: o seller pode vir como NOME ('ambtotal') ou como ID ('GENPUB.<uuid>'),
+       dependendo de como o registro foi gravado. Comparação estrita pelo nome descartaria
+       tudo e o dono veria resultado VAZIO sem entender por quê. Aceita os dois: bate se o
+       nome confere OU se o valor contém o nome esperado. */
+    const doSeller = (v) => {
+      const s = String(v || '').toLowerCase();
+      if (!s) return false;
+      if (!sellerEsperado) return true;
+      return s === sellerEsperado || s.includes(sellerEsperado) || sellerEsperado.includes(s);
+    };
+    const comNF = todosNF.filter(x => doSeller(x.seller));
+    /* Codex #300 r3: se sobrou nada MAS havia registros sem seller, dizer isso em vez de
+       devolver lista vazia sem explicação. */
+    if (!comNF.length && semSeller) {
+      json(res, 200, { ok: true, empresa: emp, total: 0, ignorados_sem_seller: semSeller,
+        nota: semSeller + ' registro(s) no cache não têm o campo seller (gravados antes) — rode /magalu/cancelados-coletar?empresa=' + emp + ' pra incluí-los' });
+      return true;
+    }
     const codes = comNF.map(x => String(x.code)).filter(Boolean);
     if (!codes.length) { json(res, 200, { ok: true, empresa: emp, total: 0, nota: 'nenhum cancelado com NF no cache' }); return true; }
 
