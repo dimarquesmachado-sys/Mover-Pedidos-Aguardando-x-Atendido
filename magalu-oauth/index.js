@@ -1285,6 +1285,110 @@ ${andamento}
      'pago_cancelado_com_nf', nenhum 'nao_pago') e a suspeita é que a LISTAGEM de pedidos
      não traz invoices/payments — eles apareceram só no DETALHE, na sonda anterior. Em vez
      de chutar, esta rota mostra o pedido CRU como a listagem devolve. */
+  /* 30/08 — CRUZAMENTO: separa "NF de produto que nunca saiu" de "produto perdido".
+     Os pedidos pago_cancelado_com_nf são ambíguos: NF emitida e sem devolução registrada
+     pode ser cancelamento ANTES do despacho (cancela a nota, recupera o imposto) ou produto
+     que foi e o cliente ficou com ele (prejuízo de verdade). Duas pontas respondem:
+       • a conversa do Devoluções diz se VOLTOU (remessa reversa do ticket Magalu);
+       • daqui se diz se SAIU (etiqueta anexada no checkout).
+     Esta rota chama a primeira e devolve o cruzamento; a etiqueta entra quando o módulo do
+     checkout responder — por ora vem como indefinido, que é honesto e não inventa conclusão. */
+  if (method === 'GET' && p === '/magalu/cruzar-cancelados') {
+    const emp = String(q.get('empresa') || '').toLowerCase().trim();
+    if (!EMPRESAS_VALIDAS.includes(emp)) { json(res, 400, { ok: false, erro: 'empresa inválida' }); return true; }
+    const cancLib = require('../lib/magalu-cancelados');
+    const cruzLib = require('../lib/magalu-cruzar');
+    const arqC = path.join(DATA_DIR, 'cancelados-' + emp + '.json');
+    let g = null;
+    try { g = JSON.parse(fs.readFileSync(arqC, 'utf8')); } catch (e) { g = null; }
+    if (!g || !g.pedidos) { json(res, 400, { ok: false, erro: 'sem cache — rode /magalu/cancelados-coletar?empresa=' + emp }); return true; }
+
+    /* só os que têm NF: sem nota não há imposto a recuperar nem decisão a tomar */
+    /* Codex #300: se a coleta rodou sem &seller=, o cache pode ter pedido de OUTRO seller
+       (o token do Magalu alcança). Filtra pelo seller da empresa quando ele é conhecido. */
+    const sellerEsperado = { girassol: 'magazinegirassol', amb: 'ambtotal', good: 'goodimport-magazine' }[emp];
+    /* Codex #300 r2: registro SEM seller (cache antigo, gravado antes de guardarmos o campo)
+       não pode passar por padrão — pode ser de outro seller que o token alcança. Fica de
+       fora e é contado, pra ficar claro que existe e precisa de recoleta. */
+    const todosNF = Object.values(g.pedidos).filter(x => x && x.tem_nf && x.classe !== 'pedido_teste');
+    const semSeller = todosNF.filter(x => !x.seller).length;
+    /* Codex #300 r3: o seller pode vir como NOME ('ambtotal') ou como ID ('GENPUB.<uuid>'),
+       dependendo de como o registro foi gravado. Comparação estrita pelo nome descartaria
+       tudo e o dono veria resultado VAZIO sem entender por quê. Aceita os dois: bate se o
+       nome confere OU se o valor contém o nome esperado. */
+    const doSeller = (v) => {
+      const s = String(v || '').toLowerCase();
+      if (!s) return false;
+      if (!sellerEsperado) return true;
+      return s === sellerEsperado || s.includes(sellerEsperado) || sellerEsperado.includes(s);
+    };
+    const comNF = todosNF.filter(x => doSeller(x.seller));
+    /* Codex #300 r3: se sobrou nada MAS havia registros sem seller, dizer isso em vez de
+       devolver lista vazia sem explicação. */
+    if (!comNF.length && semSeller) {
+      json(res, 200, { ok: true, empresa: emp, total: 0, ignorados_sem_seller: semSeller,
+        nota: semSeller + ' registro(s) no cache não têm o campo seller (gravados antes) — rode /magalu/cancelados-coletar?empresa=' + emp + ' pra incluí-los' });
+      return true;
+    }
+    const codes = comNF.map(x => String(x.code)).filter(Boolean);
+    if (!codes.length) { json(res, 200, { ok: true, empresa: emp, total: 0, nota: 'nenhum cancelado com NF no cache' }); return true; }
+
+    /* ponta 1: remessas reversas (serviço de Devoluções) */
+    /* Codex #300: usar as envs que o resto do sistema já usa pra falar com o serviço de
+       Devoluções (lib/avisar-devolucoes.js), em vez de inventar host e reaproveitar a
+       ADMIN_KEY daqui — as duas aplicações podem ter chaves diferentes. */
+    const HOST_DEV = (process.env.DEVOLUCOES_URL || 'https://good-devolucoes-x-marketplaces-x-nfsbling.onrender.com').replace(/\/+$/, '');
+    const chave = process.env.DEVOLUCOES_KEY || '';
+    if (!chave) { json(res, 200, { ok: false, erro: 'DEVOLUCOES_KEY não configurada — sem ela não dá pra consultar as remessas reversas' }); return true; }
+    let reversas = {}, erroRev = null;
+    try {
+      /* Codex #300: em LOTES — uma querystring com dezenas de códigos estoura o limite de
+         URL e o servidor pode truncar em silêncio. 25 por vez, com pausa. */
+      for (let i = 0; i < codes.length; i += 25) {
+        const lote = codes.slice(i, i + 25);
+        const url = HOST_DEV + '/api/magalu/reversas-por-pedido?codes=' + encodeURIComponent(lote.join(',')) + '&k=' + encodeURIComponent(chave);
+        const ctrl = new AbortController();
+        const prazo = setTimeout(() => ctrl.abort(), 20000);
+        let dd = null;
+        try {
+          const rr = await fetch(url, { signal: ctrl.signal });
+          if (!rr.ok) { erroRev = 'HTTP ' + rr.status; break; }
+          /* Codex #300: o prazo tem que cobrir a LEITURA do corpo também */
+          dd = await rr.json();
+        } catch (e) {
+          erroRev = (e && e.name === 'AbortError') ? 'serviço de Devoluções não respondeu em 20s' : String(e.message || e).slice(0, 140);
+          break;
+        } finally { clearTimeout(prazo); }
+        const lista = Array.isArray(dd) ? dd : (dd && (dd.resultado || dd.linhas || dd.pedidos));
+        /* Codex #300: 200 com corpo inesperado é FALHA, não "nenhuma reversa" — senão
+           tudo apareceria como sem pacote voltando, que é a conclusão perigosa. */
+        if (!Array.isArray(lista)) { erroRev = 'resposta em formato inesperado do serviço de Devoluções'; break; }
+        for (const it of lista) {
+          const c = String(it && (it.code || it.order_code) || '');
+          if (c) reversas[c] = { tem_reversa: !!(it.tem_reversa || it.reverse_code), reverse_code: it.reverse_code || null,
+                                 ticket_id: it.ticket_id || null, motivo: it.motivo || null,
+                                 tem_ticket: it.tem_ticket == null ? null : !!it.tem_ticket };
+        }
+        await new Promise(s => setTimeout(s, 250));
+      }
+      /* se a consulta falhou, NÃO seguir com reversas vazias: classificaria tudo como sem
+         pacote voltando e alguém cancelaria NF de produto que está voltando. */
+      if (erroRev) reversas = null;
+    } catch (e) { erroRev = String(e.message || e).slice(0, 140); }
+
+    /* ponta 2: SAIU? — ainda não ligada; declarada como desconhecida em vez de suposta */
+    const saiu = {};
+
+    if (!reversas) { json(res, 200, { ok: false, empresa: emp, erro_reversas: erroRev,
+      erro: 'não deu pra consultar as remessas reversas — sem isso a classificação seria enganosa' }); return true; }
+    const r = cruzLib.cruzar(comNF, reversas, saiu);
+    json(res, 200, Object.assign({ ok: true, empresa: emp, consultados: codes.length,
+      ignorados_sem_seller: semSeller,   /* recolete pra incluí-los: /magalu/cancelados-coletar */
+      reversas_respondidas: Object.keys(reversas).length, erro_reversas: erroRev,
+      leia: 'situacao nf_sem_saida = cancelar a NF ou emitir devolução SEM entrada de estoque (recupera o imposto); saiu_e_nao_voltou = prejuízo real, produto perdido; indefinido = falta a etiqueta do checkout pra decidir' }, r));
+    return true;
+  }
+
   /* 30/08 — SONDA DOS EVENTOS DO PACOTE. Conferindo 4 dos 14 cancelados-com-NF da GOOD à
      mão, apareceram QUATRO tratamentos diferentes, e o que os separa está no HISTÓRICO DO
      PACOTE, não nos campos que já leio:
