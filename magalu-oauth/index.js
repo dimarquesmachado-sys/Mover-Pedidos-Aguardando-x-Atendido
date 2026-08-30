@@ -1389,6 +1389,104 @@ ${andamento}
     return true;
   }
 
+  /* 30/08 — SONDA DOS EVENTOS DO PACOTE. Conferindo 4 dos 14 cancelados-com-NF da GOOD à
+     mão, apareceram QUATRO tratamentos diferentes, e o que os separa está no HISTÓRICO DO
+     PACOTE, não nos campos que já leio:
+       · "Pedido Recebido em Loja" e para          → nunca saiu do CD (NF sem estoque)
+       · "retornou a Filial por Insucesso"          → voltou (NF com estoque)
+       · "produto foi entregue" ANTES do estorno    → devolução do cliente (NF com estoque)
+       · "produto foi entregue" DEPOIS do estorno   → prejuízo total (contestar)
+     O pedido cru traz deliveries[].events[], mas na amostra veio só {event_external_id,
+     event_date} — sem descrição. Esta rota mostra os eventos crus de um pedido específico
+     pra saber se dá pra classificar por eles ou se o id precisa de um de-para. */
+  if (method === 'GET' && p === '/magalu/sonda-eventos') {
+    const emp = String(q.get('empresa') || '').toLowerCase().trim();
+    if (!EMPRESAS_VALIDAS.includes(emp)) { json(res, 400, { ok: false, erro: 'empresa inválida' }); return true; }
+    const code = String(q.get('code') || '').trim();
+    if (!code) { json(res, 400, { ok: false, erro: 'informe ?code=<numero do pedido>' }); return true; }
+    let tok = '';
+    try { tok = await getAccessToken(emp); }
+    catch (e) { json(res, 502, { ok: false, erro: 'token: ' + String(e.message || e).slice(0, 140) }); return true; }
+    const H = { Authorization: 'Bearer ' + tok, Accept: 'application/json' };
+
+    /* acha o pedido varrendo a listagem de cancelados (o mesmo caminho que funciona hoje) */
+    let pedido = null, falhaBusca = null, truncouTudo = false;
+    const desdeISO = new Date(Date.now() - 365 * 86400000).toISOString();
+    for (const st of ['cancelled', 'canceled']) {
+      let truncouBusca = false;
+      for (let off = 0; off < 2000 && !pedido; off += 50) {
+        /* Codex #301 r2: bater no teto de 2000 sem achar não é "pedido inexistente" — a
+           varredura é que acabou antes. Dizer 404 aí mandaria alguém procurar em outro
+           lugar um pedido que existe. */
+        if (off + 50 >= 2000) truncouBusca = true;
+        let rr = null;
+        /* Codex #301: falha de rede/HTTP não pode virar "pedido não existe" — quem lê
+           concluiria que o pedido sumiu quando a listagem é que falhou. */
+        try { rr = await fetch('https://api.magalu.com/seller/v1/orders?_limit=50&_offset=' + off + '&status=' + st + '&updated_at__gte=' + encodeURIComponent(desdeISO), { headers: H }); }
+        catch (e) { falhaBusca = String(e.message || e).slice(0, 120); break; }
+        if (!rr.ok) { falhaBusca = 'HTTP ' + rr.status + ' na listagem'; break; }
+        const dd = await rr.json().catch(() => null);
+        const lista = Array.isArray(dd) ? dd : (dd && (dd.results || dd.data || dd.orders)) || [];
+        if (!lista.length) break;
+        pedido = lista.find(x => String(x && x.code || '') === code) || null;
+        if (lista.length < 50) break;
+        await new Promise(s => setTimeout(s, 200));
+      }
+      if (truncouBusca) truncouTudo = true;
+      if (pedido) break;
+    }
+    if (!pedido) {
+      const parcial = falhaBusca || truncouTudo;
+      json(res, parcial ? 502 : 404, { ok: false,
+        erro: falhaBusca ? ('não deu pra varrer a listagem: ' + falhaBusca + ' — o pedido pode existir')
+            : truncouTudo ? ('varredura parou no limite de páginas sem achar ' + code + ' — o pedido pode existir mais atrás')
+            : ('pedido ' + code + ' não encontrado entre os cancelados'),
+        falha_na_busca: !!falhaBusca, busca_truncada: !!truncouTudo });
+      return true;
+    }
+
+    /* Codex #301: pedido pode ter VÁRIAS entregas (split) — olhar só a primeira esconderia
+       justamente a que teve o insucesso ou a entrega tardia. */
+    const entregas = Array.isArray(pedido.deliveries) ? pedido.deliveries : [];
+    const ent = entregas[0] || {};
+    const eventos = [];
+    entregas.forEach((d, i) => (Array.isArray(d && d.events) ? d.events : []).forEach(e => eventos.push(Object.assign({ _entrega: i, _entrega_status: d.status }, e))));
+    /* tentativas de trazer o histórico com TEXTO, que é o que classificaria sozinho */
+    const tentativas = [];
+    for (const cam of [
+      '/seller/v1/orders/' + encodeURIComponent(pedido.id || '') + '/events',
+      '/seller/v1/orders/' + encodeURIComponent(pedido.id || '') + '/deliveries/' + encodeURIComponent(ent.id || '') + '/events',
+      '/seller/v1/orders/' + encodeURIComponent(pedido.id || '') + '/tracking',
+    ]) {
+      if (/\/\/|undefined/.test(cam)) continue;
+      let r2 = null;
+      try { r2 = await fetch('https://api.magalu.com' + cam, { headers: H }); }
+      catch (e) { tentativas.push({ caminho: cam, erro: String(e.message || e).slice(0, 100) }); continue; }
+      const corpo = await r2.json().catch(() => null);
+      tentativas.push({ caminho: cam, http: r2.status,
+        campos: corpo && typeof corpo === 'object' ? Object.keys(Array.isArray(corpo) ? (corpo[0] || {}) : corpo) : null,
+        amostra: corpo ? JSON.parse(JSON.stringify(corpo)).slice ? corpo.slice(0, 3) : corpo : null });
+      await new Promise(s => setTimeout(s, 250));
+    }
+    json(res, 200, { ok: true, empresa: emp, code,
+      status_pedido: pedido.status, status_entrega: ent.status,
+      /* o que já temos hoje */
+      eventos_da_entrega: eventos,
+      campos_do_evento: eventos.length ? Object.keys(eventos[0]) : null,
+      shipping_cancelled_at: (ent.shipping && ent.shipping.cancelled_at) || null,
+      /* Codex #301: sem a data do ESTORNO não dá pra saber se a entrega veio antes ou
+         depois dele — e é exatamente essa ordem que separa 'devolução do cliente' de
+         'prejuízo integral' (no 1545570114294804 o estorno foi 13/07 21:02 e a entrega
+         14/07 09:10, no dia seguinte). */
+      returns_da_entrega: entregas.map((d, i) => ({ entrega: i, returns: Array.isArray(d.returns) ? d.returns : [] })),
+      atualizado_em: pedido.updated_at || null, comprado_em: pedido.purchased_at || null,
+      campos_do_shipping: ent.shipping ? Object.keys(ent.shipping) : null,
+      /* onde o texto pode estar */
+      tentativas,
+      leia: 'procuro um evento com TEXTO (entregue / retornou a filial / recebido em loja). Se só vier event_external_id, precisamos do de-para desses ids.' });
+    return true;
+  }
+
   if (method === 'GET' && p === '/magalu/sonda-listagem') {
     const emp = String(q.get('empresa') || '').toLowerCase().trim();
     if (!EMPRESAS_VALIDAS.includes(emp)) { json(res, 400, { ok: false, erro: 'empresa inválida' }); return true; }
