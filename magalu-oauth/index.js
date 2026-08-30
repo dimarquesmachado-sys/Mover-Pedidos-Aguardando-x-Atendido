@@ -56,7 +56,10 @@ const SCOPES = (process.env.MAGALU_SCOPES
   || 'open:order-order-seller:read open:order-delivery-seller:read open:order-delivery-seller:write open:order-invoice-seller:read open:order-logistics-seller:read open:order-logistics-seller:write open:order-financial-report-seller:read open:portfolio-prices-seller:read open:portfolio-prices-seller:write open:portfolio-skus-seller:read open:portfolio-skus-seller:write open:portfolio-stocks-seller:read open:portfolio-stocks-seller:write open:logistic-carrier-shippings:read'
 ).trim();
 
-const EMPRESAS_VALIDAS = ['girassol', 'good', 'amb'];
+/* 30/08: a lista vem de lib/empresas.js (env EMPRESAS) — antes era fixa aqui e empresa
+   nova exigiria mexer no código. Getter porque a env pode mudar sem reiniciar o módulo. */
+const _empresas = require('../lib/empresas');
+const EMPRESAS_VALIDAS = new Proxy([], { get(_, p) { const l = _empresas.lista(); return typeof l[p] === 'function' ? l[p].bind(l) : l[p]; } });
 
 // ── util de disco ────────────────────────────────────────────────────
 function ensureDir(d) { try { fs.mkdirSync(d, { recursive: true }); } catch (e) {} }
