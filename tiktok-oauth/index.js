@@ -430,11 +430,15 @@ async function tratar(req, res, urlObj, json) {
     try { fs.writeFileSync(arq, JSON.stringify(g, null, 2), 'utf8'); } catch (e) {}
     const comEventos = Object.values(g.devolucoes).filter(d => d && d.eventos);
     const totalRevelia = comEventos.filter(d => d.eventos.perdeu_por_revelia);
+    /* 30/08: separa o que é a FAVOR da loja — cliente não postou ou não contestou. Antes
+       caía tudo em 'revelia' e o número apontava culpa onde não havia. */
+    const aFavor = comEventos.filter(d => d.eventos.fechado_por_inacao_do_cliente);
     const aguardando = comEventos.filter(d => d.eventos.aguardando_analise);
     json(res, 200, {
       ok: true, loja, processadas_agora: ok, falharam: falhou, revelias_agora: revelias,
       total_com_eventos: comEventos.length, faltam: Object.keys(g.devolucoes).length - comEventos.length,
       perdidas_por_revelia: totalRevelia.length,
+      fechadas_por_inacao_do_cliente: aFavor.length,   /* a favor da loja, não é perda */
       /* 29/08 — RÓTULO CORRIGIDO: isto é a soma do valor DA DEVOLUÇÃO (o que a tela mostra),
          não o prejuízo líquido. O que saiu do caixa está no extrato e pode ser maior (taxas
          que não voltam) ou menor (o TikTok compensou). Nome que promete mais do que o dado
