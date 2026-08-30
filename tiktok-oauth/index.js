@@ -33,7 +33,7 @@ const AUTH = process.env.TIKTOK_AUTH_BASE || 'https://auth.tiktok-shops.com';
 // e cada loja autoriza separadamente → um token por loja, num arquivo por loja.
 // Plugar uma empresa nova = autorizar e pronto; nenhuma linha de código muda.
 // A lista sai da env TIKTOK_LOJAS (padrão: as três de hoje).
-const LOJAS = String(process.env.TIKTOK_LOJAS || 'girassol,amb,good')
+const LOJAS = String(process.env.TIKTOK_LOJAS || require('../lib/empresas').lista().join(','))   /* 30/08: sem TIKTOK_LOJAS, usa a lista geral */
   .split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
 const LOJA_PADRAO = LOJAS[0] || 'girassol';
 const lojaDe = q => {
