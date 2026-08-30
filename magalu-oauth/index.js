@@ -1344,14 +1344,22 @@ ${andamento}
     g.pedidos = g.pedidos || {};
     let vistos = 0, novos = 0, paginas = 0, erro = null;
     const desdeISO = new Date(Date.now() - dias * 86400000).toISOString();
-    /* a API omite cancelados na listagem padrão — por isso o status vai explícito */
+    /* 30/08 — DOIS CONSERTOS, achados conferindo com o portal (pedido 1549670115870461 da
+       AMB: pago 02/07, NF 02/07, ENTREGUE 06/07, estorno 09/07, cancelado 15/07):
+       1) filtrar por purchased_at NÃO alcança cancelamento tardio — o pedido some da janela
+          se a compra for antiga. Passa a varrer por updated_at, que é quando o cancelamento
+          mexeu no pedido.
+       2) o token alcança pedidos que NÃO são da empresa (apareceram vendas de R$ 5,90 e
+          R$ 10,00 num catálogo que não tem nada abaixo de R$ 100). O pedido traz channel e
+          a entrega traz seller — guardamos os dois pra dar pra filtrar e conferir. */
+    const seller = String(q.get('seller') || '').trim();   // opcional: filtra por seller
     for (const status of ['cancelled', 'canceled']) {
       let offset = 0;
-      for (let volta = 0; volta < 20; volta++) {
+      for (let volta = 0; volta < 40; volta++) {
         let r = null;
         try {
           r = await fetch('https://api.magalu.com/seller/v1/orders?_limit=50&_offset=' + offset +
-            '&status=' + encodeURIComponent(status) + '&purchased_at__gte=' + encodeURIComponent(desdeISO), { headers: H });
+            '&status=' + encodeURIComponent(status) + '&updated_at__gte=' + encodeURIComponent(desdeISO), { headers: H });
         } catch (e) { erro = String(e.message || e).slice(0, 140); break; }
         if (!r.ok) { if (r.status === 400 || r.status === 422) break; erro = 'HTTP ' + r.status; break; }
         let d = {};
@@ -1363,6 +1371,7 @@ ${andamento}
           vistos++;
           const resumo = cancLib.resumirPedido(ped);
           if (!resumo || !resumo.code) continue;
+          if (seller && String(resumo.seller || '') !== seller) continue;   // filtro opcional
           if (!g.pedidos[resumo.code]) novos++;
           g.pedidos[resumo.code] = resumo;
         }
