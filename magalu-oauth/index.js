@@ -1304,34 +1304,62 @@ ${andamento}
     if (!g || !g.pedidos) { json(res, 400, { ok: false, erro: 'sem cache — rode /magalu/cancelados-coletar?empresa=' + emp }); return true; }
 
     /* só os que têm NF: sem nota não há imposto a recuperar nem decisão a tomar */
-    const comNF = Object.values(g.pedidos).filter(x => x && x.tem_nf);
+    /* Codex #300: se a coleta rodou sem &seller=, o cache pode ter pedido de OUTRO seller
+       (o token do Magalu alcança). Filtra pelo seller da empresa quando ele é conhecido. */
+    const sellerEsperado = { girassol: 'magazinegirassol', amb: 'ambtotal', good: 'goodimport-magazine' }[emp];
+    const comNF = Object.values(g.pedidos).filter(x => x && x.tem_nf &&
+      (!sellerEsperado || !x.seller || String(x.seller).toLowerCase() === sellerEsperado));
     const codes = comNF.map(x => String(x.code)).filter(Boolean);
     if (!codes.length) { json(res, 200, { ok: true, empresa: emp, total: 0, nota: 'nenhum cancelado com NF no cache' }); return true; }
 
     /* ponta 1: remessas reversas (serviço de Devoluções) */
-    const HOST_DEV = process.env.DEVOLUCOES_HOST || 'https://good-devolucoes-x-marketplaces-x-nfsbling.onrender.com';
-    const chave = process.env.ADMIN_KEY || '';
+    /* Codex #300: usar as envs que o resto do sistema já usa pra falar com o serviço de
+       Devoluções (lib/avisar-devolucoes.js), em vez de inventar host e reaproveitar a
+       ADMIN_KEY daqui — as duas aplicações podem ter chaves diferentes. */
+    const HOST_DEV = (process.env.DEVOLUCOES_URL || 'https://good-devolucoes-x-marketplaces-x-nfsbling.onrender.com').replace(/\/+$/, '');
+    const chave = process.env.DEVOLUCOES_KEY || '';
+    if (!chave) { json(res, 200, { ok: false, erro: 'DEVOLUCOES_KEY não configurada — sem ela não dá pra consultar as remessas reversas' }); return true; }
     let reversas = {}, erroRev = null;
     try {
-      const url = HOST_DEV + '/api/magalu/reversas-por-pedido?codes=' + encodeURIComponent(codes.join(',')) + '&k=' + encodeURIComponent(chave);
-      const ctrl = new AbortController();
-      const prazo = setTimeout(() => ctrl.abort(), 20000);
-      let rr;
-      try { rr = await fetch(url, { signal: ctrl.signal }); } finally { clearTimeout(prazo); }
-      if (!rr.ok) { erroRev = 'HTTP ' + rr.status; }
-      else {
-        const dd = await rr.json().catch(() => null);
-        const lista = Array.isArray(dd) ? dd : (dd && (dd.resultado || dd.linhas || dd.pedidos)) || [];
+      /* Codex #300: em LOTES — uma querystring com dezenas de códigos estoura o limite de
+         URL e o servidor pode truncar em silêncio. 25 por vez, com pausa. */
+      for (let i = 0; i < codes.length; i += 25) {
+        const lote = codes.slice(i, i + 25);
+        const url = HOST_DEV + '/api/magalu/reversas-por-pedido?codes=' + encodeURIComponent(lote.join(',')) + '&k=' + encodeURIComponent(chave);
+        const ctrl = new AbortController();
+        const prazo = setTimeout(() => ctrl.abort(), 20000);
+        let dd = null;
+        try {
+          const rr = await fetch(url, { signal: ctrl.signal });
+          if (!rr.ok) { erroRev = 'HTTP ' + rr.status; break; }
+          /* Codex #300: o prazo tem que cobrir a LEITURA do corpo também */
+          dd = await rr.json();
+        } catch (e) {
+          erroRev = (e && e.name === 'AbortError') ? 'serviço de Devoluções não respondeu em 20s' : String(e.message || e).slice(0, 140);
+          break;
+        } finally { clearTimeout(prazo); }
+        const lista = Array.isArray(dd) ? dd : (dd && (dd.resultado || dd.linhas || dd.pedidos));
+        /* Codex #300: 200 com corpo inesperado é FALHA, não "nenhuma reversa" — senão
+           tudo apareceria como sem pacote voltando, que é a conclusão perigosa. */
+        if (!Array.isArray(lista)) { erroRev = 'resposta em formato inesperado do serviço de Devoluções'; break; }
         for (const it of lista) {
           const c = String(it && (it.code || it.order_code) || '');
-          if (c) reversas[c] = { tem_reversa: !!(it.tem_reversa || it.reverse_code), reverse_code: it.reverse_code || null, ticket_id: it.ticket_id || null };
+          if (c) reversas[c] = { tem_reversa: !!(it.tem_reversa || it.reverse_code), reverse_code: it.reverse_code || null,
+                                 ticket_id: it.ticket_id || null, motivo: it.motivo || null,
+                                 tem_ticket: it.tem_ticket == null ? null : !!it.tem_ticket };
         }
+        await new Promise(s => setTimeout(s, 250));
       }
+      /* se a consulta falhou, NÃO seguir com reversas vazias: classificaria tudo como sem
+         pacote voltando e alguém cancelaria NF de produto que está voltando. */
+      if (erroRev) reversas = null;
     } catch (e) { erroRev = String(e.message || e).slice(0, 140); }
 
     /* ponta 2: SAIU? — ainda não ligada; declarada como desconhecida em vez de suposta */
     const saiu = {};
 
+    if (!reversas) { json(res, 200, { ok: false, empresa: emp, erro_reversas: erroRev,
+      erro: 'não deu pra consultar as remessas reversas — sem isso a classificação seria enganosa' }); return true; }
     const r = cruzLib.cruzar(comNF, reversas, saiu);
     json(res, 200, Object.assign({ ok: true, empresa: emp, consultados: codes.length,
       reversas_respondidas: Object.keys(reversas).length, erro_reversas: erroRev,
