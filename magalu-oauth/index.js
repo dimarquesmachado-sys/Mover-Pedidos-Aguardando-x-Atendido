@@ -1306,14 +1306,16 @@ ${andamento}
     const H = { Authorization: 'Bearer ' + tok, Accept: 'application/json' };
 
     /* acha o pedido varrendo a listagem de cancelados (o mesmo caminho que funciona hoje) */
-    let pedido = null;
+    let pedido = null, falhaBusca = null;
     const desdeISO = new Date(Date.now() - 365 * 86400000).toISOString();
     for (const st of ['cancelled', 'canceled']) {
       for (let off = 0; off < 2000 && !pedido; off += 50) {
         let rr = null;
+        /* Codex #301: falha de rede/HTTP não pode virar "pedido não existe" — quem lê
+           concluiria que o pedido sumiu quando a listagem é que falhou. */
         try { rr = await fetch('https://api.magalu.com/seller/v1/orders?_limit=50&_offset=' + off + '&status=' + st + '&updated_at__gte=' + encodeURIComponent(desdeISO), { headers: H }); }
-        catch (e) { break; }
-        if (!rr.ok) break;
+        catch (e) { falhaBusca = String(e.message || e).slice(0, 120); break; }
+        if (!rr.ok) { falhaBusca = 'HTTP ' + rr.status + ' na listagem'; break; }
         const dd = await rr.json().catch(() => null);
         const lista = Array.isArray(dd) ? dd : (dd && (dd.results || dd.data || dd.orders)) || [];
         if (!lista.length) break;
@@ -1323,10 +1325,19 @@ ${andamento}
       }
       if (pedido) break;
     }
-    if (!pedido) { json(res, 404, { ok: false, erro: 'pedido ' + code + ' não encontrado entre os cancelados' }); return true; }
+    if (!pedido) {
+      json(res, falhaBusca ? 502 : 404, { ok: false,
+        erro: falhaBusca ? ('não deu pra varrer a listagem: ' + falhaBusca + ' — o pedido pode existir') : ('pedido ' + code + ' não encontrado entre os cancelados'),
+        falha_na_busca: !!falhaBusca });
+      return true;
+    }
 
-    const ent = (pedido.deliveries || [])[0] || {};
-    const eventos = Array.isArray(ent.events) ? ent.events : [];
+    /* Codex #301: pedido pode ter VÁRIAS entregas (split) — olhar só a primeira esconderia
+       justamente a que teve o insucesso ou a entrega tardia. */
+    const entregas = Array.isArray(pedido.deliveries) ? pedido.deliveries : [];
+    const ent = entregas[0] || {};
+    const eventos = [];
+    entregas.forEach((d, i) => (Array.isArray(d && d.events) ? d.events : []).forEach(e => eventos.push(Object.assign({ _entrega: i, _entrega_status: d.status }, e))));
     /* tentativas de trazer o histórico com TEXTO, que é o que classificaria sozinho */
     const tentativas = [];
     for (const cam of [
@@ -1350,6 +1361,12 @@ ${andamento}
       eventos_da_entrega: eventos,
       campos_do_evento: eventos.length ? Object.keys(eventos[0]) : null,
       shipping_cancelled_at: (ent.shipping && ent.shipping.cancelled_at) || null,
+      /* Codex #301: sem a data do ESTORNO não dá pra saber se a entrega veio antes ou
+         depois dele — e é exatamente essa ordem que separa 'devolução do cliente' de
+         'prejuízo integral' (no 1545570114294804 o estorno foi 13/07 21:02 e a entrega
+         14/07 09:10, no dia seguinte). */
+      returns_da_entrega: entregas.map((d, i) => ({ entrega: i, returns: Array.isArray(d.returns) ? d.returns : [] })),
+      atualizado_em: pedido.updated_at || null, comprado_em: pedido.purchased_at || null,
       campos_do_shipping: ent.shipping ? Object.keys(ent.shipping) : null,
       /* onde o texto pode estar */
       tentativas,
