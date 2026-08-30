@@ -179,6 +179,9 @@ function criarNoturna(ctx) {
         return ok + ' processada(s) · ' + revelias + ' com revelia · ' + semEventos + ' ainda sem linha do tempo';
       });
       await dorme(2000);
+    } catch (e) {
+      console.error('[noturna] devoluções do TikTok não rodaram:', e.message);
+    }
 
     /* 30/08 — CANCELAMENTOS DO MAGALU (o card do dashboard dependia de coleta MANUAL, e
        dado que só existe se alguém lembrar de rodar foi o problema que passamos o dia
@@ -197,9 +200,6 @@ function criarNoturna(ctx) {
       }
     } catch (e) {
       console.error('[noturna] cancelamentos do Magalu não rodaram:', e.message);
-    }
-    } catch (e) {
-      console.error('[noturna] devoluções do TikTok não rodaram:', e.message);
     }
 
     // 18/08 — corrige a tarifa do TikTok das vendas que JÁ liquidaram. Roda depois do
