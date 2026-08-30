@@ -1281,6 +1281,40 @@ ${andamento}
      1535770109894199: a API FINANCEIRA não mostra o estorno (agrupa pela janela da COMPRA,
      15 dias), mas a API de PEDIDOS traz status 'cancelled' e deliveries[].returns[] com a
      data. Então a fonte aqui é o pedido, não o extrato — diferente do TikTok. */
+  /* 30/08 — SONDA DA LISTAGEM: a classificação saiu errada (todos os 33 como
+     'pago_cancelado_com_nf', nenhum 'nao_pago') e a suspeita é que a LISTAGEM de pedidos
+     não traz invoices/payments — eles apareceram só no DETALHE, na sonda anterior. Em vez
+     de chutar, esta rota mostra o pedido CRU como a listagem devolve. */
+  if (method === 'GET' && p === '/magalu/sonda-listagem') {
+    const emp = String(q.get('empresa') || '').toLowerCase().trim();
+    if (!EMPRESAS_VALIDAS.includes(emp)) { json(res, 400, { ok: false, erro: 'empresa inválida' }); return true; }
+    let tok = '';
+    try { tok = await getAccessToken(emp); }
+    catch (e) { json(res, 502, { ok: false, erro: 'token: ' + String(e.message || e).slice(0, 140) }); return true; }
+    const H = { Authorization: 'Bearer ' + tok, Accept: 'application/json' };
+    const status = String(q.get('status') || 'cancelled');
+    const desdeISO = new Date(Date.now() - (Number(q.get('dias')) || 90) * 86400000).toISOString();
+    let r = null;
+    try { r = await fetch('https://api.magalu.com/seller/v1/orders?_limit=3&status=' + encodeURIComponent(status) + '&purchased_at__gte=' + encodeURIComponent(desdeISO), { headers: H }); }
+    catch (e) { json(res, 502, { ok: false, erro: String(e.message || e).slice(0, 140) }); return true; }
+    let d = {};
+    try { d = await r.json(); } catch (e) { d = {}; }
+    const lista = Array.isArray(d) ? d : (d.results || d.data || d.orders || []);
+    const um = lista[0] || null;
+    const entrega0 = um && Array.isArray(um.deliveries) ? um.deliveries[0] : null;
+    json(res, 200, {
+      ok: true, empresa: emp, http: r.status, status_pedido_filtrado: status, itens_na_pagina: lista.length,
+      /* é isto que decide o conserto: quais campos a LISTAGEM traz */
+      chaves_do_pedido: um ? Object.keys(um) : null,
+      tem_payments: !!(um && um.payments), tem_approved_at: !!(um && um.approved_at),
+      chaves_da_entrega: entrega0 ? Object.keys(entrega0) : null,
+      tem_invoices_na_entrega: !!(entrega0 && entrega0.invoices),
+      amostra_status: lista.map(x => ({ code: x && x.code, status: x && x.status, approved_at: x && x.approved_at || null })),
+      pedido_cru: um,
+    });
+    return true;
+  }
+
   if (method === 'GET' && (p === '/magalu/cancelados-coletar' || p === '/magalu/cancelados')) {
     /* o guard de ADMIN_KEY destas rotas vive no index.js da RAIZ, como nas demais /magalu/* */
     const emp = String(q.get('empresa') || '').toLowerCase().trim();
