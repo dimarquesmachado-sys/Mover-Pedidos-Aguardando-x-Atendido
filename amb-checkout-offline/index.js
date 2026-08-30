@@ -1427,6 +1427,32 @@ function routes(readBody) {
     /* 30/08 — CUSTO DE DEVOLUÇÕES DO TIKTOK (mesma lib da Girassol, empresa como parâmetro:
        lib/tiktok-custo-devolucoes.js não é cópia). Linha própria no período, não abatimento
        na venda — quando o custo vem de erro de expedição, abater no SKU culpa o produto. */
+    /* 30/08 — CANCELAMENTOS DO MAGALU pro dashboard. Mesma decisão do TikTok: linha própria
+       no período, não abatimento na venda. E aqui só entra o que CHEGOU a virar faturamento:
+       pedido que o cliente não pagou nunca somou, então descontá-lo inventaria prejuízo —
+       na Girassol isso seria R$ 8.549 de perda fictícia. */
+    if (method === 'GET' && p === '/amb-checkout-offline/magalu-cancelados') {
+      const kM = urlObj.searchParams.get('k') || '';
+      const sM = validarSessao(req.headers['cookie']);
+      if (!((process.env.ADMIN_KEY && kM === process.env.ADMIN_KEY) || (sM && ehAdmin(sM)))) { json(res, 404, { error: 'not found' }); return true; }
+      try {
+        const cancLib = require('../lib/magalu-cancelados');
+        const fsx = require('fs'), pathx = require('path');
+        const DIR = process.env.MAGALU_DATA_DIR || '/data/magalu';
+        let g = null;
+        try { g = JSON.parse(fsx.readFileSync(pathx.join(DIR, 'cancelados-amb.json'), 'utf8')); } catch (e) { g = null; }
+        if (!g || !g.pedidos) { json(res, 200, { ok: false, indisponivel: 'sem coleta de cancelados do Magalu', valor_a_descontar: null }); return true; }
+        const de = urlObj.searchParams.get('de') || null, ate = urlObj.searchParams.get('ate') || null;
+        const r = cancLib.totalNoPeriodo(Object.values(g.pedidos), de, ate);
+        json(res, 200, Object.assign({ ok: true, coleta_ok_em: g.ok_em || null,
+          horas_desde_a_coleta: g.ok_em ? Math.round((Date.now() - Date.parse(g.ok_em)) / 3600000) : null }, r));
+      } catch (e) {
+        /* nunca derruba o dashboard por causa desta linha */
+        json(res, 200, { ok: false, erro: String(e.message || e).slice(0, 160), valor_a_descontar: null });
+      }
+      return true;
+    }
+
     if (method === 'GET' && p === '/amb-checkout-offline/tiktok-custo-devolucoes') {
       const kT = urlObj.searchParams.get('k') || '';
       const sT = validarSessao(req.headers['cookie']);
