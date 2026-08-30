@@ -1546,7 +1546,9 @@ ${andamento}
     /* Codex #305: a rota manual usa a MESMA função da noturna — antes havia duas
        implementações escrevendo o mesmo cache, e só uma gravava truncou_paginas. */
     try {
-      const r = await coletarCancelados(emp, q.get('dias') || 90);
+      /* Codex #305 r2: ao unificar as rotas perdi o &seller= que a manual aceitava —
+         regressão minha. Volta como parâmetro da função. */
+      const r = await coletarCancelados(emp, q.get('dias') || 90, { seller: q.get('seller') || '' });
       json(res, r.ok ? 200 : 502, Object.assign({}, r, {
         leia: 'a data que vale é a do ESTORNO (deliveries[].returns[].date), não a da compra — foi por isso que a API financeira não achava' }));
     } catch (e) {
@@ -2474,6 +2476,7 @@ async function coletarCancelados(empresa, dias, opcoes) {
   try { g = JSON.parse(fs.readFileSync(arqC, 'utf8')); } catch (e) { g = { pedidos: {}, atualizado: null, ok_em: null }; }
   g.pedidos = g.pedidos || {};
   const total = Math.min(365, Math.max(1, Number(dias) || 90));
+  const filtroSeller = String(o.seller || '').trim();
   const tok = await getAccessToken(emp);
   const H = { Authorization: 'Bearer ' + tok, Accept: 'application/json' };
   const desdeISO = new Date(Date.now() - total * 86400000).toISOString();
@@ -2497,6 +2500,7 @@ async function coletarCancelados(empresa, dias, opcoes) {
         vistos++;
         const resumo = cancLib.resumirPedido(ped);
         if (!resumo || !resumo.code) continue;
+        if (filtroSeller && String(resumo.seller || '').toLowerCase() !== filtroSeller.toLowerCase()) continue;
         if (!g.pedidos[resumo.code]) novos++;
         g.pedidos[resumo.code] = resumo;
       }
@@ -2515,8 +2519,13 @@ async function coletarCancelados(empresa, dias, opcoes) {
   if (!erro && !respondeu && recusas >= 2) erro = 'a API recusou a consulta nos dois status (400/422) — filtro pode ter mudado';
   g.atualizado = new Date().toISOString();
   if (!erro) { g.ok_em = g.atualizado; g.varreu_dias = total; g.truncou_paginas = truncou; }
-  try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(arqC, JSON.stringify(g, null, 2)); } catch (e) {}
-  return { ok: !erro, empresa: emp, dias: total, paginas, vistos, novos, truncou, guardados: Object.keys(g.pedidos).length, erro };
+  /* Codex #305 r2: falha ao GRAVAR era engolida e a coleta se dizia bem-sucedida — o cache
+     ficava velho e o dashboard mostrava número antigo achando que era o de hoje. */
+  let erroGravacao = null;
+  try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(arqC, JSON.stringify(g, null, 2)); }
+  catch (e) { erroGravacao = 'não deu pra gravar o cache: ' + String(e.message || e).slice(0, 120); }
+  const falhou = erro || erroGravacao;
+  return { ok: !falhou, empresa: emp, dias: total, paginas, vistos, novos, truncou, guardados: Object.keys(g.pedidos).length, erro: falhou || null };
 }
 
 module.exports = { tratar, getAccessToken, coletarCancelados, VERSAO, EMPRESAS_VALIDAS };
