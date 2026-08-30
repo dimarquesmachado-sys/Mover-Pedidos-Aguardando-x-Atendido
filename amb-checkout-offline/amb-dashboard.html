@@ -1291,7 +1291,7 @@ async function carregarDespesasMagalu(){
 function desenharDespesasMagalu(d){
   const el = document.getElementById('mgCards'); if(!el) return;
   const linhas = [
-    ['\ud83e\uddfe Vendas canceladas', d.valor_a_descontar||0, '#f87171', 'vendas que foram faturadas e depois canceladas ou estornadas \u2014 saem do faturamento'],
+    ['\ud83e\uddfe Vendas canceladas', d.valor_a_descontar||0, '#f87171', 'vendas faturadas e depois canceladas/estornadas \u2014 J\u00c1 saem do faturamento pelo Bling; aqui \u00e9 pra tratar a NF'],
     ['\ud83c\udfea Comiss\u00e3o envolvida', d.comissao_a_descontar||0, '#fb923c', 'comiss\u00e3o do Magalu nessas vendas'],
   ];
   let h = '<div style="display:flex;flex-wrap:wrap;gap:10px">';
@@ -1307,6 +1307,13 @@ function desenharDespesasMagalu(d){
   if(det) avisos.push(det);
   if(cls.entregue_apos_estorno) avisos.push('\u26a0 <b>'+cls.entregue_apos_estorno+'</b> pedido(s) foram ENTREGUES depois do estorno \u2014 cliente ficou com produto e dinheiro, vale contestar');
   if(d.nao_pagos_ignorados) avisos.push(d.nao_pagos_ignorados+' cancelamento(s) de venda <b>n\u00e3o paga</b> ignorados ('+BRL(d.valor_nao_pago_ignorado||0)+') \u2014 nunca entraram no faturamento');
+  /* Codex #304: o dashboard JÁ exclui do faturamento a venda marcada como cancelada pelo
+     Bling (_cancelado / cancelado_mkt). Somar esta linha ao lucro seria descontar a mesma
+     coisa DUAS vezes — o mesmo erro que evitamos com os não pagos. Por isso a seção é
+     INFORMATIVA: mostra o que o Magalu cancelou e o que fazer com a NF, sem entrar na conta
+     de novo. Dito na tela pra ninguém somar por engano. */
+  avisos.push('\u2139 estas vendas <b>j\u00e1 saem do faturamento</b> quando o Bling as marca como canceladas \u2014 esta se\u00e7\u00e3o \u00e9 pra <b>tratar a NF</b> (imposto) e ver o que voltou, n\u00e3o pra descontar de novo');
+  if(d.periodo_parcial) avisos.push('\u26a0 per\u00edodo anterior \u00e0 coleta (desde '+(d.coberto_desde||'?')+') \u2014 total PARCIAL');
   if(typeof d.horas_desde_a_coleta === 'number' && d.horas_desde_a_coleta > 48) avisos.push('coleta do Magalu tem <b>'+d.horas_desde_a_coleta+'h</b> \u2014 o n\u00famero pode estar incompleto');
   if(avisos.length) h += '<div class="mut" style="font-size:11px;margin-top:8px">' + avisos.map(a=>'\u2022 '+a).join('<br>') + '</div>';
   el.innerHTML = h;
@@ -1866,7 +1873,7 @@ function montar(){
     '</div>'+
     '<div class="sec" id="secMG"><h2>\ud83d\udfe6 Cancelamentos do Magalu <span class="hint">do per\u00edodo \u00b7 fora da margem por pedido</span></h2>'+
       '<div id="mgCards" class="mut" style="font-size:12px">carregando\u2026</div>'+
-      '<div class="nota" style="margin-top:8px">Vendas do Magalu que foram <b>canceladas ou estornadas depois de faturadas</b> \u2014 a NF saiu, o imposto foi pago, e a venda n\u00e3o existiu. Pedido que o cliente <b>n\u00e3o pagou</b> N\u00c3O entra: nunca somou no faturamento, e descont\u00e1-lo inventaria preju\u00edzo. A data que vale \u00e9 a do <b>estorno</b>, n\u00e3o a da compra \u2014 por isso venda antiga aparece em m\u00eas recente. A API financeira do Magalu n\u00e3o mostra esses estornos; vem da API de pedidos.</div>'+
+      '<div class="nota" style="margin-top:8px"><b>Se\u00e7\u00e3o informativa \u2014 estes valores N\u00c3O s\u00e3o descontados aqui</b> (o Bling j\u00e1 tira a venda cancelada do faturamento). Serve pra <b>tratar a NF</b> e recuperar o imposto. Vendas do Magalu que foram <b>canceladas ou estornadas depois de faturadas</b> \u2014 a NF saiu, o imposto foi pago, e a venda n\u00e3o existiu. Pedido que o cliente <b>n\u00e3o pagou</b> N\u00c3O entra: nunca somou no faturamento, e descont\u00e1-lo inventaria preju\u00edzo. A data que vale \u00e9 a do <b>estorno</b>, n\u00e3o a da compra \u2014 por isso venda antiga aparece em m\u00eas recente. A API financeira do Magalu n\u00e3o mostra esses estornos; vem da API de pedidos.</div>'+
     '</div>'+
     '<div class="sec" id="secCanal"><h2>🛒 Por Canal</h2><div class="tw twFit"><table id="tCanal"></table></div></div>'+
     '<div class="grid2">'+

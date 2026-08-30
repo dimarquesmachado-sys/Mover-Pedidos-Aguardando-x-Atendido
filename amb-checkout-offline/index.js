@@ -1441,10 +1441,23 @@ function routes(readBody) {
         const DIR = process.env.MAGALU_DATA_DIR || '/data/magalu';
         let g = null;
         try { g = JSON.parse(fsx.readFileSync(pathx.join(DIR, 'cancelados-amb.json'), 'utf8')); } catch (e) { g = null; }
-        if (!g || !g.pedidos) { json(res, 200, { ok: false, indisponivel: 'sem coleta de cancelados do Magalu', valor_a_descontar: null }); return true; }
+        /* Codex #304: cache criado por uma coleta que FALHOU tem pedidos {} e ok_em null —
+           objeto vazio é truthy e isso passaria como "zero cancelamentos", que é a conclusão
+           errada. Sem coleta bem-sucedida, não há número. */
+        if (!g || !g.pedidos || !g.ok_em) { json(res, 200, { ok: false, indisponivel: g && !g.ok_em ? 'a coleta de cancelados do Magalu nunca terminou com sucesso' : 'sem coleta de cancelados do Magalu', valor_a_descontar: null }); return true; }
         const de = urlObj.searchParams.get('de') || null, ate = urlObj.searchParams.get('ate') || null;
-        const r = cancLib.totalNoPeriodo(Object.values(g.pedidos), de, ate);
+        /* Codex #304: o token do Magalu alcança pedidos de OUTROS sellers e a coleta pode ter
+           rodado sem o filtro — a rota de cruzamento já filtra, esta não filtrava. */
+        const sellerEsperado = { girassol: 'magazinegirassol', amb: 'ambtotal', good: 'goodimport-magazine' }['amb'];
+        const doSeller = (v) => { const s = String(v || '').toLowerCase(); return !!s && (s === sellerEsperado || s.includes(sellerEsperado) || sellerEsperado.includes(s)); };
+        const doaLoja = Object.values(g.pedidos).filter(x => x && (!x.seller || doSeller(x.seller)));
+        const r = cancLib.totalNoPeriodo(doaLoja, de, ate);
+        /* Codex #304: período ANTERIOR ao que foi coletado devolvia total com cara de completo.
+           A coleta grava varreu_dias; se o pedido é mais antigo, avisa que é parcial. */
+        const cobertoDesde = g.varreu_dias ? new Date(Date.parse(g.ok_em) - g.varreu_dias * 86400000).toISOString().slice(0, 10) : null;
+        const parcial = !!(cobertoDesde && de && de < cobertoDesde);
         json(res, 200, Object.assign({ ok: true, coleta_ok_em: g.ok_em || null,
+          periodo_parcial: parcial, coberto_desde: cobertoDesde,
           horas_desde_a_coleta: g.ok_em ? Math.round((Date.now() - Date.parse(g.ok_em)) / 3600000) : null }, r));
       } catch (e) {
         /* nunca derruba o dashboard por causa desta linha */
