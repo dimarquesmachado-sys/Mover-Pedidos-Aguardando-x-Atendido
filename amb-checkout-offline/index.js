@@ -1450,14 +1450,19 @@ function routes(readBody) {
            rodado sem o filtro — a rota de cruzamento já filtra, esta não filtrava. */
         const sellerEsperado = { girassol: 'magazinegirassol', amb: 'ambtotal', good: 'goodimport-magazine' }['amb'];
         const doSeller = (v) => { const s = String(v || '').toLowerCase(); return !!s && (s === sellerEsperado || s.includes(sellerEsperado) || sellerEsperado.includes(s)); };
-        const doaLoja = Object.values(g.pedidos).filter(x => x && (!x.seller || doSeller(x.seller)));
+        /* Codex #304 r2: registro SEM seller (cache antigo) fica de fora — pode ser de outro
+           seller que o token alcança. É contado pra ficar claro que basta recoletar. */
+        const semSeller = Object.values(g.pedidos).filter(x => x && !x.seller).length;
+        const doaLoja = Object.values(g.pedidos).filter(x => x && doSeller(x.seller));
         const r = cancLib.totalNoPeriodo(doaLoja, de, ate);
         /* Codex #304: período ANTERIOR ao que foi coletado devolvia total com cara de completo.
            A coleta grava varreu_dias; se o pedido é mais antigo, avisa que é parcial. */
         const cobertoDesde = g.varreu_dias ? new Date(Date.parse(g.ok_em) - g.varreu_dias * 86400000).toISOString().slice(0, 10) : null;
-        const parcial = !!(cobertoDesde && de && de < cobertoDesde);
+        /* Codex #304 r2: se a COLETA truncou, a cobertura declarada não vale. */
+        const parcial = !!g.truncou_paginas || !!(cobertoDesde && de && de < cobertoDesde);
         json(res, 200, Object.assign({ ok: true, coleta_ok_em: g.ok_em || null,
           periodo_parcial: parcial, coberto_desde: cobertoDesde,
+          ignorados_sem_seller: semSeller,
           horas_desde_a_coleta: g.ok_em ? Math.round((Date.now() - Date.parse(g.ok_em)) / 3600000) : null }, r));
       } catch (e) {
         /* nunca derruba o dashboard por causa desta linha */
