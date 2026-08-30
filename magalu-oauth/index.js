@@ -1376,8 +1376,14 @@ ${andamento}
       if (erroRev) reversas = null;
     } catch (e) { erroRev = String(e.message || e).slice(0, 140); }
 
-    /* ponta 2: SAIU? — ainda não ligada; declarada como desconhecida em vez de suposta */
+    /* Codex #303: o "saiu" agora vem das DATAS que a coleta já gravou, não de uma consulta
+       ao checkout que ficou desnecessária. Sem isso, as linhas saíam com saiu_conhecido
+       false mesmo tendo a informação. */
     const saiu = {};
+    for (const x of comNF) {
+      if (x.entregue_em || x.enviado_em) saiu[String(x.code)] = true;
+      else if (x.classe === 'nf_sem_saida') saiu[String(x.code)] = false;
+    }
 
     if (!reversas) { json(res, 200, { ok: false, empresa: emp, erro_reversas: erroRev,
       erro: 'não deu pra consultar as remessas reversas — sem isso a classificação seria enganosa' }); return true; }
@@ -1385,7 +1391,9 @@ ${andamento}
     json(res, 200, Object.assign({ ok: true, empresa: emp, consultados: codes.length,
       ignorados_sem_seller: semSeller,   /* recolete pra incluí-los: /magalu/cancelados-coletar */
       reversas_respondidas: Object.keys(reversas).length, erro_reversas: erroRev,
-      leia: 'situacao nf_sem_saida = cancelar a NF ou emitir devolução SEM entrada de estoque (recupera o imposto); saiu_e_nao_voltou = prejuízo real, produto perdido; indefinido = falta a etiqueta do checkout pra decidir' }, r));
+      /* Codex #303: o texto ainda mandava "esperar a etiqueta do checkout", que não existe
+         mais como dependência — indefinido agora significa cache velho, sem as datas. */
+      leia: 'nf_sem_saida = cancelar a NF ou devolução SEM entrada de estoque (recupera o imposto) · saiu_e_nao_entregou = o produto deve ter voltado, conferir no recebimento · entregue_e_cancelado = conferir se voltou antes de dar baixa · entregue_apos_estorno = prejuízo integral, vale contestar · estorno_sem_remessa = pode haver pacote a caminho · indefinido = registro sem as datas do shipping, rode /magalu/cancelados-coletar pra atualizar' }, r));
     return true;
   }
 
