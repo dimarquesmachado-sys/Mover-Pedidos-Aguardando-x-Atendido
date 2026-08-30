@@ -1307,8 +1307,12 @@ ${andamento}
     /* Codex #300: se a coleta rodou sem &seller=, o cache pode ter pedido de OUTRO seller
        (o token do Magalu alcança). Filtra pelo seller da empresa quando ele é conhecido. */
     const sellerEsperado = { girassol: 'magazinegirassol', amb: 'ambtotal', good: 'goodimport-magazine' }[emp];
-    const comNF = Object.values(g.pedidos).filter(x => x && x.tem_nf &&
-      (!sellerEsperado || !x.seller || String(x.seller).toLowerCase() === sellerEsperado));
+    /* Codex #300 r2: registro SEM seller (cache antigo, gravado antes de guardarmos o campo)
+       não pode passar por padrão — pode ser de outro seller que o token alcança. Fica de
+       fora e é contado, pra ficar claro que existe e precisa de recoleta. */
+    const todosNF = Object.values(g.pedidos).filter(x => x && x.tem_nf && x.classe !== 'pedido_teste');
+    const semSeller = todosNF.filter(x => !x.seller).length;
+    const comNF = todosNF.filter(x => sellerEsperado ? String(x.seller || '').toLowerCase() === sellerEsperado : !!x.seller);
     const codes = comNF.map(x => String(x.code)).filter(Boolean);
     if (!codes.length) { json(res, 200, { ok: true, empresa: emp, total: 0, nota: 'nenhum cancelado com NF no cache' }); return true; }
 
@@ -1362,6 +1366,7 @@ ${andamento}
       erro: 'não deu pra consultar as remessas reversas — sem isso a classificação seria enganosa' }); return true; }
     const r = cruzLib.cruzar(comNF, reversas, saiu);
     json(res, 200, Object.assign({ ok: true, empresa: emp, consultados: codes.length,
+      ignorados_sem_seller: semSeller,   /* recolete pra incluí-los: /magalu/cancelados-coletar */
       reversas_respondidas: Object.keys(reversas).length, erro_reversas: erroRev,
       leia: 'situacao nf_sem_saida = cancelar a NF ou emitir devolução SEM entrada de estoque (recupera o imposto); saiu_e_nao_voltou = prejuízo real, produto perdido; indefinido = falta a etiqueta do checkout pra decidir' }, r));
     return true;
