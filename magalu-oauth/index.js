@@ -1276,6 +1276,77 @@ ${andamento}
   // retorno. Só retorna pedidos Entregue/Cancelado a partir de 05/05/2026. Precisa do
   // escopo open:order-financial-report-seller:read (já autorizado nas 3 empresas).
   // Descobre o endpoint certo testando candidatos e mostra as transações cruas.
+  /* 30/08 — CANCELAMENTOS E DEVOLUÇÕES DO MAGALU (o dono achou o buraco: venda cancelada
+     continua contando como lucro no dashboard). Descoberto por sonda no pedido real
+     1535770109894199: a API FINANCEIRA não mostra o estorno (agrupa pela janela da COMPRA,
+     15 dias), mas a API de PEDIDOS traz status 'cancelled' e deliveries[].returns[] com a
+     data. Então a fonte aqui é o pedido, não o extrato — diferente do TikTok. */
+  if (method === 'GET' && (p === '/magalu/cancelados-coletar' || p === '/magalu/cancelados')) {
+    /* o guard de ADMIN_KEY destas rotas vive no index.js da RAIZ, como nas demais /magalu/* */
+    const emp = String(q.get('empresa') || '').toLowerCase().trim();
+    if (!EMPRESAS_VALIDAS.includes(emp)) { json(res, 400, { ok: false, erro: 'empresa inválida (' + EMPRESAS_VALIDAS.join(', ') + ')' }); return true; }
+    const cancLib = require('../lib/magalu-cancelados');
+    const arqC = path.join(DATA_DIR, 'cancelados-' + emp + '.json');
+    const lerC = () => { try { return JSON.parse(fs.readFileSync(arqC, 'utf8')); } catch (e) { return { pedidos: {}, atualizado: null, ok_em: null }; } };
+
+    if (p === '/magalu/cancelados') {
+      const g = lerC();
+      const lista = Object.values(g.pedidos || {});
+      const de = q.get('de') || null, ate = q.get('ate') || null;
+      const r = cancLib.totalNoPeriodo(lista, de, ate);
+      json(res, 200, Object.assign({ ok: true, empresa: emp, atualizado: g.atualizado || null,
+        coleta_ok_em: g.ok_em || null, guardados: lista.length }, r));
+      return true;
+    }
+
+    /* COLETA: varre a listagem de pedidos por status cancelado. A varredura é por PÁGINA,
+       e o guard de 40 páginas evita prender o processo; o que não coube fica pra próxima. */
+    const dias = Math.min(365, Math.max(1, Number(q.get('dias')) || 90));
+    let tok = '';
+    try { tok = await getAccessToken(emp); }
+    catch (e) { json(res, 502, { ok: false, erro: 'token: ' + String(e.message || e).slice(0, 140) }); return true; }
+    const H = { Authorization: 'Bearer ' + tok, Accept: 'application/json' };
+    const g = lerC();
+    g.pedidos = g.pedidos || {};
+    let vistos = 0, novos = 0, paginas = 0, erro = null;
+    const desdeISO = new Date(Date.now() - dias * 86400000).toISOString();
+    /* a API omite cancelados na listagem padrão — por isso o status vai explícito */
+    for (const status of ['cancelled', 'canceled']) {
+      let offset = 0;
+      for (let volta = 0; volta < 20; volta++) {
+        let r = null;
+        try {
+          r = await fetch('https://api.magalu.com/seller/v1/orders?_limit=50&_offset=' + offset +
+            '&status=' + encodeURIComponent(status) + '&purchased_at__gte=' + encodeURIComponent(desdeISO), { headers: H });
+        } catch (e) { erro = String(e.message || e).slice(0, 140); break; }
+        if (!r.ok) { if (r.status === 400 || r.status === 422) break; erro = 'HTTP ' + r.status; break; }
+        let d = {};
+        try { d = await r.json(); } catch (e) { d = {}; }
+        const lista = Array.isArray(d) ? d : (d.results || d.data || d.orders || []);
+        if (!lista.length) break;
+        paginas++;
+        for (const ped of lista) {
+          vistos++;
+          const resumo = cancLib.resumirPedido(ped);
+          if (!resumo || !resumo.code) continue;
+          if (!g.pedidos[resumo.code]) novos++;
+          g.pedidos[resumo.code] = resumo;
+        }
+        if (lista.length < 50) break;
+        offset += 50;
+        await new Promise(s => setTimeout(s, 250));
+      }
+      if (erro) break;
+    }
+    g.atualizado = new Date().toISOString();
+    if (!erro) { g.ok_em = g.atualizado; g.varreu_dias = dias; }
+    try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(arqC, JSON.stringify(g, null, 2)); } catch (e) {}
+    json(res, erro ? 502 : 200, { ok: !erro, empresa: emp, dias, paginas, vistos, novos,
+      guardados: Object.keys(g.pedidos).length, erro,
+      leia: 'a data que vale é a do ESTORNO (deliveries[].returns[].date), não a da compra — foi por isso que a API financeira não achava' });
+    return true;
+  }
+
   if (method === 'GET' && p === '/magalu/financeiro') {
     const emp = String(q.get('empresa') || '').toLowerCase().trim();
     if (!EMPRESAS_VALIDAS.includes(emp)) { json(res, 400, { ok: false, erro: 'empresa inválida' }); return true; }
