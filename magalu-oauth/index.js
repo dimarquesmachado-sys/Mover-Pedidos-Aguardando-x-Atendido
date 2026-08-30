@@ -1543,70 +1543,17 @@ ${andamento}
       return true;
     }
 
-    /* COLETA: varre a listagem de pedidos por status cancelado. A varredura é por PÁGINA,
-       e o guard de 40 páginas evita prender o processo; o que não coube fica pra próxima. */
-    const dias = Math.min(365, Math.max(1, Number(q.get('dias')) || 90));
-    let tok = '';
-    try { tok = await getAccessToken(emp); }
-    catch (e) { json(res, 502, { ok: false, erro: 'token: ' + String(e.message || e).slice(0, 140) }); return true; }
-    const H = { Authorization: 'Bearer ' + tok, Accept: 'application/json' };
-    const g = lerC();
-    g.pedidos = g.pedidos || {};
-    let vistos = 0, novos = 0, paginas = 0, erro = null, semDetalhe = 0;
-    const desdeISO = new Date(Date.now() - dias * 86400000).toISOString();
-    /* 30/08 — DOIS CONSERTOS, achados conferindo com o portal (pedido 1549670115870461 da
-       AMB: pago 02/07, NF 02/07, ENTREGUE 06/07, estorno 09/07, cancelado 15/07):
-       1) filtrar por purchased_at NÃO alcança cancelamento tardio — o pedido some da janela
-          se a compra for antiga. Passa a varrer por updated_at, que é quando o cancelamento
-          mexeu no pedido.
-       2) o token alcança pedidos que NÃO são da empresa (apareceram vendas de R$ 5,90 e
-          R$ 10,00 num catálogo que não tem nada abaixo de R$ 100). O pedido traz channel e
-          a entrega traz seller — guardamos os dois pra dar pra filtrar e conferir. */
-    const seller = String(q.get('seller') || '').trim();   // opcional: filtra por seller
-    for (const status of ['cancelled', 'canceled']) {
-      let offset = 0;
-      for (let volta = 0; volta < 40; volta++) {
-        let r = null;
-        try {
-          r = await fetch('https://api.magalu.com/seller/v1/orders?_limit=50&_offset=' + offset +
-            '&status=' + encodeURIComponent(status) + '&updated_at__gte=' + encodeURIComponent(desdeISO), { headers: H });
-        } catch (e) { erro = String(e.message || e).slice(0, 140); break; }
-        if (!r.ok) { if (r.status === 400 || r.status === 422) break; erro = 'HTTP ' + r.status; break; }
-        let d = {};
-        try { d = await r.json(); } catch (e) { d = {}; }
-        const lista = Array.isArray(d) ? d : (d.results || d.data || d.orders || []);
-        if (!lista.length) break;
-        paginas++;
-        for (const ped of lista) {
-          vistos++;
-          /* 30/08 — VOLTANDO ATRÁS: eu tinha concluído que a listagem era pobre e passei a
-             buscar o detalhe de cada pedido — e o resultado veio sem_detalhe = 100%, ou seja,
-             nenhuma dessas chamadas funcionou. Investigando, a rota /magalu/valores (que
-             funcionou o tempo todo e trouxe NF, returns e approved_at) NUNCA buscou detalhe:
-             ela acha o pedido na PRÓPRIA LISTAGEM. A listagem tem os campos; o que me
-             enganou foi a sonda ter olhado o PRIMEIRO item, que era o pedido de homologação
-             do Magalu — cancelado antes de faturar e, por isso, legitimamente sem NF.
-             Conclusão: usar a listagem, e deixar que a classificação diga o que falta. */
-          const resumo = cancLib.resumirPedido(ped);
-          if (!resumo || !resumo.code) continue;
-          if (!resumo.tem_nf) semDetalhe++;
-          if (seller && String(resumo.seller || '').toLowerCase() !== seller.toLowerCase()) continue;
-          if (!g.pedidos[resumo.code]) novos++;
-          g.pedidos[resumo.code] = resumo;
-        }
-        if (lista.length < 50) break;
-        offset += 50;
-        await new Promise(s => setTimeout(s, 250));
-      }
-      if (erro) break;
+    /* Codex #305: a rota manual usa a MESMA função da noturna — antes havia duas
+       implementações escrevendo o mesmo cache, e só uma gravava truncou_paginas. */
+    try {
+      /* Codex #305 r2: ao unificar as rotas perdi o &seller= que a manual aceitava —
+         regressão minha. Volta como parâmetro da função. */
+      const r = await coletarCancelados(emp, q.get('dias') || 90, { seller: q.get('seller') || '' });
+      json(res, r.ok ? 200 : 502, Object.assign({}, r, {
+        leia: 'a data que vale é a do ESTORNO (deliveries[].returns[].date), não a da compra — foi por isso que a API financeira não achava' }));
+    } catch (e) {
+      json(res, 502, { ok: false, erro: String(e.message || e).slice(0, 160) });
     }
-    g.atualizado = new Date().toISOString();
-    if (!erro) { g.ok_em = g.atualizado; g.varreu_dias = dias; }
-    try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(arqC, JSON.stringify(g, null, 2)); } catch (e) {}
-    json(res, erro ? 502 : 200, { ok: !erro, empresa: emp, dias, paginas, vistos, novos,
-      sem_nf: semDetalhe,   /* pedidos sem nota fiscal — a maioria é cancelamento antes de faturar */
-      guardados: Object.keys(g.pedidos).length, erro,
-      leia: 'a data que vale é a do ESTORNO (deliveries[].returns[].date), não a da compra — foi por isso que a API financeira não achava' });
     return true;
   }
 
@@ -2516,4 +2463,69 @@ try {
   console.error('[magalu-nf] nao consegui agendar o cron:', e.message);
 }
 
-module.exports = { tratar, getAccessToken, VERSAO, EMPRESAS_VALIDAS };
+/* 30/08 — a coleta de cancelados vira função pra rodar TAMBÉM na noturna. Antes só existia
+   dentro da rota, então o card do dashboard envelhecia até alguém lembrar de chamar na mão —
+   e "dado que só existe se alguém rodar" foi o problema que passamos o dia consertando. */
+async function coletarCancelados(empresa, dias, opcoes) {
+  const o = opcoes || {};
+  const emp = String(empresa || '').toLowerCase().trim();
+  if (!EMPRESAS_VALIDAS.includes(emp)) throw new Error('empresa inválida: ' + emp);
+  const cancLib = require('../lib/magalu-cancelados');
+  const arqC = path.join(DATA_DIR, 'cancelados-' + emp + '.json');
+  let g;
+  try { g = JSON.parse(fs.readFileSync(arqC, 'utf8')); } catch (e) { g = { pedidos: {}, atualizado: null, ok_em: null }; }
+  g.pedidos = g.pedidos || {};
+  const total = Math.min(365, Math.max(1, Number(dias) || 90));
+  const filtroSeller = String(o.seller || '').trim();
+  const tok = await getAccessToken(emp);
+  const H = { Authorization: 'Bearer ' + tok, Accept: 'application/json' };
+  const desdeISO = new Date(Date.now() - total * 86400000).toISOString();
+  let vistos = 0, novos = 0, paginas = 0, erro = null, truncou = false, recusas = 0, respondeu = false;
+  for (const status of ['cancelled', 'canceled']) {
+    let offset = 0;
+    for (let volta = 0; volta < 40; volta++) {
+      let r = null;
+      try {
+        r = await fetch('https://api.magalu.com/seller/v1/orders?_limit=50&_offset=' + offset +
+          '&status=' + encodeURIComponent(status) + '&updated_at__gte=' + encodeURIComponent(desdeISO), { headers: H });
+      } catch (e) { erro = String(e.message || e).slice(0, 140); break; }
+      if (!r.ok) { if (r.status === 400 || r.status === 422) { recusas++; break; } erro = 'HTTP ' + r.status; break; }
+      let d = {};
+      try { d = await r.json(); } catch (e) { d = {}; }
+      const lista = Array.isArray(d) ? d : (d.results || d.data || d.orders || []);
+      if (!lista.length) break;
+      paginas++;
+      respondeu = true;
+      for (const ped of lista) {
+        vistos++;
+        const resumo = cancLib.resumirPedido(ped);
+        if (!resumo || !resumo.code) continue;
+        if (filtroSeller && String(resumo.seller || '').toLowerCase() !== filtroSeller.toLowerCase()) continue;
+        if (!g.pedidos[resumo.code]) novos++;
+        g.pedidos[resumo.code] = resumo;
+      }
+      if (lista.length < 50) break;
+      /* estourar as 40 voltas com página pendente é varredura TRUNCADA — quem lê precisa
+         saber, senão o período aparece como coberto sem ter sido. */
+      if (volta === 39) truncou = true;
+      offset += 50;
+      await new Promise(s => setTimeout(s, 250));
+    }
+    if (erro) break;
+  }
+  /* Codex #305: os DOIS status recusados com 400/422 (ex.: a API mudou o filtro de data) não
+     é "não há cancelados" — é a consulta que foi rejeitada. Marcar ok_em aí faria o dashboard
+     mostrar zero com cara de número bom, que é o silêncio que este trabalho todo veio matar. */
+  if (!erro && !respondeu && recusas >= 2) erro = 'a API recusou a consulta nos dois status (400/422) — filtro pode ter mudado';
+  g.atualizado = new Date().toISOString();
+  if (!erro) { g.ok_em = g.atualizado; g.varreu_dias = total; g.truncou_paginas = truncou; }
+  /* Codex #305 r2: falha ao GRAVAR era engolida e a coleta se dizia bem-sucedida — o cache
+     ficava velho e o dashboard mostrava número antigo achando que era o de hoje. */
+  let erroGravacao = null;
+  try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(arqC, JSON.stringify(g, null, 2)); }
+  catch (e) { erroGravacao = 'não deu pra gravar o cache: ' + String(e.message || e).slice(0, 120); }
+  const falhou = erro || erroGravacao;
+  return { ok: !falhou, empresa: emp, dias: total, paginas, vistos, novos, truncou, guardados: Object.keys(g.pedidos).length, erro: falhou || null };
+}
+
+module.exports = { tratar, getAccessToken, coletarCancelados, VERSAO, EMPRESAS_VALIDAS };

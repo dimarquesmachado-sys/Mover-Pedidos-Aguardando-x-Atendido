@@ -1314,6 +1314,8 @@ function desenharDespesasMagalu(d){
      de novo. Dito na tela pra ninguém somar por engano. */
   avisos.push('\u2139 estas vendas <b>j\u00e1 saem do faturamento</b> quando o Bling as marca como canceladas \u2014 esta se\u00e7\u00e3o \u00e9 pra <b>tratar a NF</b> (imposto) e ver o que voltou, n\u00e3o pra descontar de novo');
   if(d.periodo_parcial) avisos.push('\u26a0 per\u00edodo anterior \u00e0 coleta (desde '+(d.coberto_desde||'?')+') \u2014 total PARCIAL');
+  if(d.nfs_ja_canceladas) avisos.push(d.nfs_ja_canceladas+' NF(s) <b>j\u00e1 canceladas</b> ('+BRL(d.valor_nfs_ja_canceladas||0)+') \u2014 fora da lista de trabalho, nada a fazer');
+  if(d.ignorados_sem_seller) avisos.push(d.ignorados_sem_seller+' registro(s) sem identifica\u00e7\u00e3o de loja ficaram de fora \u2014 recolete os cancelados pra inclu\u00ed-los');
   if(typeof d.horas_desde_a_coleta === 'number' && d.horas_desde_a_coleta > 48) avisos.push('coleta do Magalu tem <b>'+d.horas_desde_a_coleta+'h</b> \u2014 o n\u00famero pode estar incompleto');
   if(avisos.length) h += '<div class="mut" style="font-size:11px;margin-top:8px">' + avisos.map(a=>'\u2022 '+a).join('<br>') + '</div>';
   el.innerHTML = h;
