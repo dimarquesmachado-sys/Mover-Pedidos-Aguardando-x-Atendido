@@ -252,6 +252,17 @@ const server = http.createServer(async (req, res) => {
   /* 30/08 — EMBARCAR EMPRESA: um comando pra ligar uma empresa nova, em vez de caçar token,
      histórico e coleta um por um. Diagnóstico com ?so_conferir=1 (não mexe em nada) e o
      embarque de verdade sem ele. Rota GLOBAL porque o embarque atravessa vários módulos. */
+  /* 30/08 (Codex #307) — COLETA DIÁRIA DE TODAS AS EMPRESAS DA LISTA. As noturnas existem
+     só pras empresas que têm checkout (Girassol e AMB); uma empresa nova entraria em
+     EMPRESAS, seria embarcada... e depois NUNCA MAIS coletaria — o /embarcar prometia que
+     "as coletas diárias já cobrem ela" e não era verdade. Este agendador roda as coletas de
+     marketplace de cada empresa da lista, uma vez ao dia, sem depender de checkout. */
+  if (path === '/coletas-diarias/estado') {
+    if (!ADMIN_KEY || urlObj.searchParams.get('k') !== ADMIN_KEY) { json(res, 404, { error: 'not found' }); return; }
+    json(res, 200, global.__coletasDiarias || { nunca_rodou: true });
+    return;
+  }
+
   if (path === '/embarcar') {
     if (!ADMIN_KEY || urlObj.searchParams.get('k') !== ADMIN_KEY) { json(res, 404, { error: 'not found' }); return; }
     const emb = require('./lib/embarcar-empresa');
@@ -274,7 +285,9 @@ const server = http.createServer(async (req, res) => {
     const passos = [
       { nome: 'cancelamentos do Magalu', rodar: async (e, d) => {
           const m = require('./magalu-oauth');
-          const r = await m.coletarCancelados(e, d);
+          /* Codex #307: passa o seller da empresa — o <EMPRESA>_MAGALU_SELLER que criei não
+             tinha efeito nenhum porque ninguém o usava. */
+          const r = await m.coletarCancelados(e, d, { seller: require('./lib/empresas').sellerMagalu(e) });
           return { ok: r.ok, erro: r.erro, resumo: r.vistos + ' visto(s), ' + r.novos + ' novo(s)' };
       } },
       { nome: 'financeiro do TikTok', rodar: async (e, d) => {
@@ -363,6 +376,30 @@ server.listen(PORT, () => {
      verdade — arquivo existir não prova que o Bling ainda aceita o refresh. */
   /* 29/08: renovação automática dos tokens do TikTok — não existia, e por isso as 3 lojas
      venceram sozinhas em datas diferentes (22, 24 e 27/08). */
+  /* Codex #307: coletas diárias por EMPRESA (não por checkout) — sem isto, empresa nova
+     ficava sem coleta depois do embarque. Roda 10 min após o boot e a cada 24h. */
+  try {
+    const rodarColetas = async () => {
+      const empresas = require('./lib/empresas').lista();
+      const feito = { em: new Date().toISOString(), empresas: {} };
+      for (const emp of empresas) {
+        const r = {};
+        try {
+          const mag = require('./magalu-oauth');
+          const x = await mag.coletarCancelados(emp, Number(process.env.MAGALU_CANCELADOS_DIAS) || 120, { seller: require('./lib/empresas').sellerMagalu(emp) });
+          r.magalu = x.ok ? (x.vistos + ' visto(s)') : ('falhou: ' + x.erro);
+        } catch (e) { r.magalu = 'erro: ' + String(e.message || e).slice(0, 80); }
+        feito.empresas[emp] = r;
+        await new Promise(s => setTimeout(s, 1000));
+      }
+      global.__coletasDiarias = feito;
+      console.log('[coletas diarias]', JSON.stringify(feito).slice(0, 200));
+    };
+    setTimeout(() => rodarColetas().catch(e => console.error('[coletas diarias]', e.message)), 10 * 60000);
+    setInterval(() => rodarColetas().catch(e => console.error('[coletas diarias]', e.message)), 24 * 3600000);
+    console.log('[coletas diarias] agendadas (boot + 24h)');
+  } catch (e) { console.error('[coletas diarias] nao iniciou:', e.message); }
+
   try { require('./tiktok-oauth').agendarRenovacaoTikTok(); console.log('[tiktok renovacao] agendada (boot + 6h)'); }
   catch (e) { console.error('[tiktok renovacao] nao iniciou:', e.message); }
 
