@@ -136,6 +136,25 @@ function criarNoturna(ctx) {
         return ok + ' processada(s) · ' + revelias + ' com revelia · ' + semEventos + ' ainda sem linha do tempo';
       });
       await dorme(2000);
+
+    /* 30/08 — CANCELAMENTOS DO MAGALU (o card do dashboard dependia de coleta MANUAL, e
+       dado que só existe se alguém lembrar de rodar foi o problema que passamos o dia
+       consertando). 120 dias: o estorno do Magalu chega semanas depois da venda, e a data
+       que vale é a dele, não a da compra. */
+    try {
+      const magalu = require('../magalu-oauth');
+      if (typeof magalu.coletarCancelados === 'function') {
+        const DIAS_MG = Number(process.env.MAGALU_CANCELADOS_DIAS) || 120;
+        await etapa('cancelamentos do Magalu (' + DIAS_MG + ' dias)', async () => {
+          const r = await magalu.coletarCancelados('girassol', DIAS_MG);
+          if (!r || r.ok === false) throw new Error('coleta falhou' + (r && r.erro ? ': ' + r.erro : ''));
+          return r.vistos + ' visto(s) · ' + r.novos + ' novo(s)' + (r.truncou ? ' ⚠️ varredura truncada' : '');
+        });
+        await dorme(2000);
+      }
+    } catch (e) {
+      console.error('[noturna] cancelamentos do Magalu não rodaram:', e.message);
+    }
     } catch (e) {
       console.error('[noturna] devoluções do TikTok não rodaram:', e.message);
     }

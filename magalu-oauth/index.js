@@ -2516,4 +2516,57 @@ try {
   console.error('[magalu-nf] nao consegui agendar o cron:', e.message);
 }
 
-module.exports = { tratar, getAccessToken, VERSAO, EMPRESAS_VALIDAS };
+/* 30/08 — a coleta de cancelados vira função pra rodar TAMBÉM na noturna. Antes só existia
+   dentro da rota, então o card do dashboard envelhecia até alguém lembrar de chamar na mão —
+   e "dado que só existe se alguém rodar" foi o problema que passamos o dia consertando. */
+async function coletarCancelados(empresa, dias, opcoes) {
+  const o = opcoes || {};
+  const emp = String(empresa || '').toLowerCase().trim();
+  if (!EMPRESAS_VALIDAS.includes(emp)) throw new Error('empresa inválida: ' + emp);
+  const cancLib = require('../lib/magalu-cancelados');
+  const arqC = path.join(DATA_DIR, 'cancelados-' + emp + '.json');
+  let g;
+  try { g = JSON.parse(fs.readFileSync(arqC, 'utf8')); } catch (e) { g = { pedidos: {}, atualizado: null, ok_em: null }; }
+  g.pedidos = g.pedidos || {};
+  const total = Math.min(365, Math.max(1, Number(dias) || 90));
+  const tok = await getAccessToken(emp);
+  const H = { Authorization: 'Bearer ' + tok, Accept: 'application/json' };
+  const desdeISO = new Date(Date.now() - total * 86400000).toISOString();
+  let vistos = 0, novos = 0, paginas = 0, erro = null, truncou = false;
+  for (const status of ['cancelled', 'canceled']) {
+    let offset = 0;
+    for (let volta = 0; volta < 40; volta++) {
+      let r = null;
+      try {
+        r = await fetch('https://api.magalu.com/seller/v1/orders?_limit=50&_offset=' + offset +
+          '&status=' + encodeURIComponent(status) + '&updated_at__gte=' + encodeURIComponent(desdeISO), { headers: H });
+      } catch (e) { erro = String(e.message || e).slice(0, 140); break; }
+      if (!r.ok) { if (r.status === 400 || r.status === 422) break; erro = 'HTTP ' + r.status; break; }
+      let d = {};
+      try { d = await r.json(); } catch (e) { d = {}; }
+      const lista = Array.isArray(d) ? d : (d.results || d.data || d.orders || []);
+      if (!lista.length) break;
+      paginas++;
+      for (const ped of lista) {
+        vistos++;
+        const resumo = cancLib.resumirPedido(ped);
+        if (!resumo || !resumo.code) continue;
+        if (!g.pedidos[resumo.code]) novos++;
+        g.pedidos[resumo.code] = resumo;
+      }
+      if (lista.length < 50) break;
+      /* estourar as 40 voltas com página pendente é varredura TRUNCADA — quem lê precisa
+         saber, senão o período aparece como coberto sem ter sido. */
+      if (volta === 39) truncou = true;
+      offset += 50;
+      await new Promise(s => setTimeout(s, 250));
+    }
+    if (erro) break;
+  }
+  g.atualizado = new Date().toISOString();
+  if (!erro) { g.ok_em = g.atualizado; g.varreu_dias = total; g.truncou_paginas = truncou; }
+  try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(arqC, JSON.stringify(g, null, 2)); } catch (e) {}
+  return { ok: !erro, empresa: emp, dias: total, paginas, vistos, novos, truncou, guardados: Object.keys(g.pedidos).length, erro };
+}
+
+module.exports = { tratar, getAccessToken, coletarCancelados, VERSAO, EMPRESAS_VALIDAS };
