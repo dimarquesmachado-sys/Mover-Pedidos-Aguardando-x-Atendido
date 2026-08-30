@@ -1431,25 +1431,13 @@ function routes(readBody) {
       const kT = urlObj.searchParams.get('k') || '';
       const sT = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kT === process.env.ADMIN_KEY) || (sT && ehAdmin(sT)))) { json(res, 404, { error: 'not found' }); return true; }
+      /* 30/08 (Codex #291): a montagem inteira vive em lib/tiktok-custo-devolucoes.js —
+         a review achou 5 defeitos que existiam nas DUAS cópias desta rota, então ela deixou
+         de ser código de módulo. Aqui fica só o guard e a loja. */
       try {
-        const custoLib = require('../lib/tiktok-custo-devolucoes');
-        const fsx = require('fs'), pathx = require('path');
-        const CACHE = process.env.TIKTOK_CACHE_DIR || '/data';
-        const ler = (a) => { try { return JSON.parse(fsx.readFileSync(a, 'utf8')); } catch (e) { return null; } };
-        /* a loja da AMB no TikTok chama-se 'amb' (env TIKTOK_LOJAS) */
-        const dev = ler(pathx.join(CACHE, '_tiktok_devolucoes_amb.json'));
-        const fin = ler(pathx.join(CACHE, '_tiktok_financeiro_amb.json'));
-        const faltando = [];
-        if (!dev || !dev.devolucoes || typeof dev.devolucoes !== 'object') faltando.push('devoluções');
-        if (!fin || !fin.pedidos || typeof fin.pedidos !== 'object') faltando.push('financeiro');
-        if (faltando.length) { json(res, 200, { ok: false, indisponivel: 'cache de ' + faltando.join(' e ') + ' ausente ou inválido — rode as coletas do TikTok da AMB', custo_total: null }); return true; }
-        const atualizadoEm = dev.atualizado ? Date.parse(dev.atualizado) : null;
-        const horasDesde = atualizadoEm ? Math.round((Date.now() - atualizadoEm) / 3600000) : null;
-        const de = urlObj.searchParams.get('de'), ate = urlObj.searchParams.get('ate');
-        const ini = de ? Math.floor(Date.parse(de + 'T00:00:00-03:00') / 1000) : Math.floor((Date.now() - 30 * 86400000) / 1000);
-        const fim = ate ? Math.floor(Date.parse(ate + 'T23:59:59-03:00') / 1000) : Math.floor(Date.now() / 1000);
-        if (!isFinite(ini) || !isFinite(fim) || ini > fim) { json(res, 400, { ok: false, erro: 'período inválido — use ?de=AAAA-MM-DD&ate=AAAA-MM-DD', custo_total: null }); return true; }
-        json(res, 200, Object.assign({ ok: true, cache_atualizado_em: dev.atualizado || null, horas_desde_a_coleta: horasDesde }, custoLib.custoNoPeriodo(dev, fin, ini, fim)));
+        const { responderCusto } = require('../lib/tiktok-custo-devolucoes');
+        const r = responderCusto({ loja: 'amb', de: urlObj.searchParams.get('de'), ate: urlObj.searchParams.get('ate') });
+        json(res, r.http, r.corpo);
       } catch (e) {
         json(res, 200, { ok: false, erro: String(e.message || e).slice(0, 160), custo_total: null });
       }

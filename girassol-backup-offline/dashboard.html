@@ -1260,12 +1260,15 @@ function desenharDevolucoesML(d){
   if(d.atualizado) h += '<div class="mut" style="font-size:10px;margin-top:5px">ML atualizado em '+dBR(String(d.atualizado).slice(0,10))+'</div>';
   el.innerHTML = h;
 }
+let _tkSeq = 0;   /* Codex #291: trocar o período com um pedido em voo deixava a resposta
+   ANTIGA pintar o card por último — custo de outro período com cara de atual. */
 async function carregarDespesasTikTok(){
-  const iv = intervalo();
+  const iv = intervalo(); const meu = ++_tkSeq;
   const el = document.getElementById('tkCards'); if(!el) return;
   try{
     const r = await fetch(MOD+'/tiktok-custo-devolucoes?de='+iv.de+'&ate='+iv.ate, {credentials:'same-origin'});
     const d = await r.json().catch(()=>null);
+    if(meu !== _tkSeq) return;   /* o período já mudou: esta resposta é de outro intervalo */
     if(!d){ el.innerHTML = '<span class="dim">n\u00e3o consegui ler as devolu\u00e7\u00f5es do TikTok</span>'; return; }
     /* indisponível NÃO é zero: mostrar R$ 0,00 faria concluir que não houve devolução */
     if(d.indisponivel || d.custo_total === null || d.custo_total === undefined){
@@ -1273,7 +1276,7 @@ async function carregarDespesasTikTok(){
       return;
     }
     desenharDespesasTikTok(d);
-  }catch(e){ el.innerHTML = '<span class="dim">n\u00e3o consegui ler as devolu\u00e7\u00f5es do TikTok</span>'; }
+  }catch(e){ if(meu === _tkSeq) el.innerHTML = '<span class="dim">n\u00e3o consegui ler as devolu\u00e7\u00f5es do TikTok</span>'; }
 }
 function desenharDespesasTikTok(d){
   const el = document.getElementById('tkCards'); if(!el) return;
@@ -1293,6 +1296,7 @@ function desenharDespesasTikTok(d){
   if(d.custo_de_venda_anterior) avisos.push(BRL(Math.abs(d.custo_de_venda_anterior))+' vem de <b>venda anterior</b> a este per\u00edodo (estorno tardio)');
   if(d.frete_ja_embutido_no_debito) avisos.push(BRL(d.frete_ja_embutido_no_debito)+' de frete j\u00e1 est\u00e3o <b>dentro</b> do d\u00e9bito \u2014 n\u00e3o somados de novo');
   if(typeof d.horas_desde_a_coleta === 'number' && d.horas_desde_a_coleta > 48) avisos.push('coleta do TikTok tem <b>'+d.horas_desde_a_coleta+'h</b> \u2014 o n\u00famero pode estar incompleto');
+  if(d.periodo_parcial) avisos.push('per\u00edodo <b>anterior</b> ao que foi coletado (desde '+(d.coberto_desde||'?')+') \u2014 total PARCIAL');
   if(avisos.length) h += '<div class="mut" style="font-size:11px;margin-top:8px">' + avisos.map(a=>'\u2022 '+a).join('<br>') + '</div>';
   el.innerHTML = h;
 }
