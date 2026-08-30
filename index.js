@@ -249,6 +249,65 @@ const server = http.createServer(async (req, res) => {
   // Bloco IRMÃO do magalu (não aninhado — aninhar faria a rota nunca ser alcançada).
   // Só admin: todas as rotas /tiktok/* exigem ?k=ADMIN_KEY, exceto /tiktok/callback,
   // que é o retorno do OAuth e chega sem chave.
+  /* 30/08 — EMBARCAR EMPRESA: um comando pra ligar uma empresa nova, em vez de caçar token,
+     histórico e coleta um por um. Diagnóstico com ?so_conferir=1 (não mexe em nada) e o
+     embarque de verdade sem ele. Rota GLOBAL porque o embarque atravessa vários módulos. */
+  if (path === '/embarcar') {
+    if (!ADMIN_KEY || urlObj.searchParams.get('k') !== ADMIN_KEY) { json(res, 404, { error: 'not found' }); return; }
+    const emb = require('./lib/embarcar-empresa');
+    const empresa = String(urlObj.searchParams.get('empresa') || '').toLowerCase().trim();
+    if (!empresa) { json(res, 400, { ok: false, erro: 'informe ?empresa=<girassol|good|amb>' }); return; }
+    if (urlObj.searchParams.get('so_conferir') === '1') { json(res, 200, emb.conferir(empresa)); return; }
+
+    /* os passos são as coletas que JÁ existem — nada aqui reimplementa nada */
+    /* o ctx do TikTok é o mesmo que a noturna monta — escrito aqui porque eu tinha chamado
+       duas funções que NÃO existem (ctxTikTok/lojaTikTok); o node --check não pega isso,
+       só quebraria na hora de rodar. */
+    const fsE = require('fs'), pathE = require('path');
+    const ctxTk = {
+      CACHE_DIR: process.env.TIKTOK_CACHE_DIR || '/data', path: pathE,
+      readJson: (a, p) => { try { return JSON.parse(fsE.readFileSync(a, 'utf8')); } catch (e) { return p; } },
+      writeJson: (a, v) => { try { fsE.mkdirSync(pathE.dirname(a), { recursive: true }); } catch (e) {} fsE.writeFileSync(a, JSON.stringify(v, null, 2)); },
+      chamar: require('./tiktok-oauth').chamar,
+    };
+    /* a loja no TikTok é o próprio nome da empresa (env TIKTOK_LOJAS) */
+    const passos = [
+      { nome: 'cancelamentos do Magalu', rodar: async (e, d) => {
+          const m = require('./magalu-oauth');
+          const r = await m.coletarCancelados(e, d);
+          return { ok: r.ok, erro: r.erro, resumo: r.vistos + ' visto(s), ' + r.novos + ' novo(s)' };
+      } },
+      { nome: 'financeiro do TikTok', rodar: async (e, d) => {
+          const fin = require('./lib/tiktok-financeiro');
+          const r = await fin.coletarFinanceiro(ctxTk, e, d, {});
+          return { ok: !r.erro, erro: r.erro, resumo: r.pedidos_novos + ' pedido(s) novo(s)' };
+      } },
+      { nome: 'devoluções do TikTok', rodar: async (e, d) => {
+          const fin = require('./lib/tiktok-financeiro');
+          const r = await fin.coletarDevolucoesTikTok(ctxTk, e, d);
+          return { ok: !r.erro, erro: r.erro, resumo: r.vistas + ' vista(s), ' + r.novas + ' nova(s)' };
+      } },
+    ];
+    /* roda em BACKGROUND: o embarque leva minutos e o navegador desistiria antes */
+    const idEmb = Date.now().toString(36);
+    if (!global.__embarques) global.__embarques = {};
+    global.__embarques[empresa] = { id: idEmb, estado: 'rodando', iniciado: new Date().toISOString() };
+    emb.embarcar(empresa, passos, { dias: urlObj.searchParams.get('dias'), forcar: urlObj.searchParams.get('forcar') === '1' })
+      .then(r => { global.__embarques[empresa] = Object.assign({ id: idEmb, estado: r.ok ? 'ok' : 'com falhas', terminado: new Date().toISOString() }, r); })
+      .catch(e => { global.__embarques[empresa] = { id: idEmb, estado: 'erro', erro: String(e.message || e).slice(0, 160) }; });
+    json(res, 202, { ok: true, empresa, em_background: true,
+      acompanhe: '/embarcar/status?empresa=' + empresa + '&k=SUA_ADMIN_KEY',
+      conferencia: emb.conferir(empresa) });
+    return;
+  }
+  if (path === '/embarcar/status') {
+    if (!ADMIN_KEY || urlObj.searchParams.get('k') !== ADMIN_KEY) { json(res, 404, { error: 'not found' }); return; }
+    const empresa = String(urlObj.searchParams.get('empresa') || '').toLowerCase().trim();
+    const st = (global.__embarques || {})[empresa];
+    json(res, 200, st || { ok: false, erro: 'nenhum embarque para ' + empresa + ' neste processo' });
+    return;
+  }
+
   if (path.startsWith('/tiktok/')) {
     if (path !== '/tiktok/callback') {
       if (!ADMIN_KEY || urlObj.searchParams.get('k') !== ADMIN_KEY) {
