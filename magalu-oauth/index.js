@@ -1410,10 +1410,15 @@ ${andamento}
     const H = { Authorization: 'Bearer ' + tok, Accept: 'application/json' };
 
     /* acha o pedido varrendo a listagem de cancelados (o mesmo caminho que funciona hoje) */
-    let pedido = null, falhaBusca = null;
+    let pedido = null, falhaBusca = null, truncouTudo = false;
     const desdeISO = new Date(Date.now() - 365 * 86400000).toISOString();
     for (const st of ['cancelled', 'canceled']) {
+      let truncouBusca = false;
       for (let off = 0; off < 2000 && !pedido; off += 50) {
+        /* Codex #301 r2: bater no teto de 2000 sem achar não é "pedido inexistente" — a
+           varredura é que acabou antes. Dizer 404 aí mandaria alguém procurar em outro
+           lugar um pedido que existe. */
+        if (off + 50 >= 2000) truncouBusca = true;
         let rr = null;
         /* Codex #301: falha de rede/HTTP não pode virar "pedido não existe" — quem lê
            concluiria que o pedido sumiu quando a listagem é que falhou. */
@@ -1427,12 +1432,16 @@ ${andamento}
         if (lista.length < 50) break;
         await new Promise(s => setTimeout(s, 200));
       }
+      if (truncouBusca) truncouTudo = true;
       if (pedido) break;
     }
     if (!pedido) {
-      json(res, falhaBusca ? 502 : 404, { ok: false,
-        erro: falhaBusca ? ('não deu pra varrer a listagem: ' + falhaBusca + ' — o pedido pode existir') : ('pedido ' + code + ' não encontrado entre os cancelados'),
-        falha_na_busca: !!falhaBusca });
+      const parcial = falhaBusca || truncouTudo;
+      json(res, parcial ? 502 : 404, { ok: false,
+        erro: falhaBusca ? ('não deu pra varrer a listagem: ' + falhaBusca + ' — o pedido pode existir')
+            : truncouTudo ? ('varredura parou no limite de páginas sem achar ' + code + ' — o pedido pode existir mais atrás')
+            : ('pedido ' + code + ' não encontrado entre os cancelados'),
+        falha_na_busca: !!falhaBusca, busca_truncada: !!truncouTudo });
       return true;
     }
 
