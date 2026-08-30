@@ -229,7 +229,7 @@ const server = http.createServer(async (req, res) => {
   if (path.startsWith('/magalu/')) {
     const precisaAdmin = (path === '/magalu/conectar' || path === '/magalu/status' || path === '/magalu/teste' || path === '/magalu/sonda' || path === '/magalu/valores' || path === '/magalu/financeiro' || path === '/magalu/financeiro-lote' ||
       /* 30/08: cancelamentos/devoluções do Magalu — dado financeiro, mesmo guard das demais */
-      path === '/magalu/cancelados' || path === '/magalu/cancelados-coletar' || path === '/magalu/sonda-listagem');
+      path === '/magalu/cancelados' || path === '/magalu/cancelados-coletar' || path === '/magalu/sonda-listagem' || path === '/magalu/sonda-eventos');
     if (precisaAdmin) {
       if (!ADMIN_KEY || urlObj.searchParams.get('k') !== ADMIN_KEY) {
         return json(res, 404, { error: 'not found', path });
