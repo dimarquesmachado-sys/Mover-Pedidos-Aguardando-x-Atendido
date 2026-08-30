@@ -1342,7 +1342,7 @@ ${andamento}
     const H = { Authorization: 'Bearer ' + tok, Accept: 'application/json' };
     const g = lerC();
     g.pedidos = g.pedidos || {};
-    let vistos = 0, novos = 0, paginas = 0, erro = null;
+    let vistos = 0, novos = 0, paginas = 0, erro = null, semDetalhe = 0;
     const desdeISO = new Date(Date.now() - dias * 86400000).toISOString();
     /* 30/08 — DOIS CONSERTOS, achados conferindo com o portal (pedido 1549670115870461 da
        AMB: pago 02/07, NF 02/07, ENTREGUE 06/07, estorno 09/07, cancelado 15/07):
@@ -1369,9 +1369,26 @@ ${andamento}
         paginas++;
         for (const ped of lista) {
           vistos++;
-          const resumo = cancLib.resumirPedido(ped);
+          /* 30/08 — A LISTAGEM NÃO CLASSIFICA. Medido na sonda: ela não traz approved_at
+             nem invoices (tem_invoices_na_entrega: false), e payments vem sem status. Com
+             isso os dois critérios da classificação ficavam cegos e TODOS caíam na mesma
+             classe. O detalhe do pedido é rico (foi nele que achamos NF aprovada, returns
+             com data e approved_at), então buscamos o detalhe de cada cancelado. São poucas
+             dezenas por empresa; o custo é uma chamada por pedido, uma vez. */
+          const codeLista = String(ped && ped.code || '');
+          const idLista = String(ped && ped.id || '');
+          let detalhe = ped;
+          if (idLista) {
+            try {
+              const rd = await fetch('https://api.magalu.com/seller/v1/orders/' + encodeURIComponent(idLista), { headers: H });
+              if (rd.ok) { const dd = await rd.json().catch(() => null); if (dd && (dd.code || dd.id)) detalhe = dd; else semDetalhe++; }
+              else semDetalhe++;
+            } catch (e) { semDetalhe++; }
+            await new Promise(s => setTimeout(s, 200));   // respeita a API
+          }
+          const resumo = cancLib.resumirPedido(detalhe);
           if (!resumo || !resumo.code) continue;
-          if (seller && String(resumo.seller || '') !== seller) continue;   // filtro opcional
+          if (seller && String(resumo.seller || '').toLowerCase() !== seller.toLowerCase()) continue;
           if (!g.pedidos[resumo.code]) novos++;
           g.pedidos[resumo.code] = resumo;
         }
@@ -1385,6 +1402,7 @@ ${andamento}
     if (!erro) { g.ok_em = g.atualizado; g.varreu_dias = dias; }
     try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(arqC, JSON.stringify(g, null, 2)); } catch (e) {}
     json(res, erro ? 502 : 200, { ok: !erro, empresa: emp, dias, paginas, vistos, novos,
+      sem_detalhe: semDetalhe,   /* caíram no dado pobre da listagem — classificação incerta */
       guardados: Object.keys(g.pedidos).length, erro,
       leia: 'a data que vale é a do ESTORNO (deliveries[].returns[].date), não a da compra — foi por isso que a API financeira não achava' });
     return true;
