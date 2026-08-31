@@ -4460,7 +4460,18 @@ async function custoDoProduto(id, dorme) {
 }
 
 
-async function backfillVendas(de, ate, empresa){
+/* 30/08 — o backfill passa a aceitar um CONTEXTO opcional, pra rodar por outra empresa.
+   Medido antes de mexer: o corpo usa 4 coisas do escopo da Girassol — blingGet (lê os
+   pedidos), CACHE_DIR e readJson (custos e config fiscal) e supaReq (grava). O parâmetro
+   `empresa` já existia, mas só mandava no RÓTULO da linha gravada: o leitor continuava o da
+   Girassol, então rodar com empresa=good gravaria pedido da Girassol marcado como GOOD.
+   Sem ctx, tudo segue exatamente como era. */
+async function backfillVendas(de, ate, empresa, ctx){
+  const _ctx = ctx || null;
+  const _blingGet  = _ctx && _ctx.blingGet  ? _ctx.blingGet  : blingGet;
+  const _readJson  = _ctx && _ctx.readJson  ? _ctx.readJson  : readJson;
+  const _CACHE_DIR = _ctx && _ctx.CACHE_DIR ? _ctx.CACHE_DIR : CACHE_DIR;
+  const _supaReq   = _ctx && _ctx.supaReq   ? _ctx.supaReq   : supaReq;
   /* O guarda mora AQUI, não em cada rota: a noturna e o /backfill-ano chamam esta função direto.
      Mesmo lugar da trava do canário logo abaixo, pelo mesmo motivo. */
   if (_reparoAtivo) {
@@ -4476,12 +4487,12 @@ async function backfillVendas(de, ate, empresa){
   }
   if(_backfill.rodando) return;
   _backfill = { rodando:true, empresa, de, ate, pagina:0, pedidos:0, itens:0, gravados:0, erros:0, fase:'preparando', inicio:new Date().toISOString(), fim:null, msg:'' };
-  try { await garantirSitCancel(async p2 => await blingGet(p2)); } catch (e) {}
+  try { await garantirSitCancel(async p2 => await _blingGet(p2)); } catch (e) {}
   const jaNoBling = new Set();   // 02/08: números de venda que o Bling JÁ trouxe — impede duplicar quando o ML entrar depois   // 01/08: IDs de cancelamento p/ o filtro abaixo
   const dorme = ms => new Promise(r=>setTimeout(r,ms));
   try {
-    const custos = readJson(path.join(CACHE_DIR,'_custos.json'), {});
-    const cfg = readJson(path.join(CACHE_DIR,'_config-fiscal.json'), {aliquotas:{}});
+    const custos = _readJson(path.join(_CACHE_DIR,'_custos.json'), {});
+    const cfg = _readJson(path.join(_CACHE_DIR,'_config-fiscal.json'), {aliquotas:{}});
     // cascata da comissao: mapa do faturamento oficial (de graca, ja esta no disco) + token do ML
     const { com: comBill, fre: freBill } = _mapasBilling();
     // 05/08: o token do ML vale ~6h e a rodada do ano leva ~6h — pegar UMA vez no começo
@@ -4537,7 +4548,7 @@ async function backfillVendas(de, ate, empresa){
       // ERRO EXPLÍCITO (fase='erro') em vez de fingir sucesso — aí é só rodar de novo.
       let lista = null;
       for (let tent = 1; tent <= 6; tent++) {
-        const r = await blingGet('/pedidos/vendas?dataInicial='+de+'&dataFinal='+ate+'&pagina='+pg+'&limite=100');
+        const r = await _blingGet('/pedidos/vendas?dataInicial='+de+'&dataFinal='+ate+'&pagina='+pg+'&limite=100');
         if (r && r.ok) { lista = (r.data && r.data.data) || []; break; }
         const espera = [5, 10, 20, 40, 60, 60][tent - 1] * 1000;
         console.log('[BACKFILL] página ' + pg + ' falhou (HTTP ' + (r && r.status) + ') — tentativa ' + tent + '/6, aguardando ' + (espera/1000) + 's');
@@ -4596,7 +4607,7 @@ async function backfillVendas(de, ate, empresa){
         // (Foi o que produziu o `erros: 1` da rodada de 10/02.)
         let det=null;
         for (let td = 1; td <= 4; td++) {
-          try { const rd = await blingGet('/pedidos/vendas/'+p.id); det = (rd&&rd.ok&&rd.data&&rd.data.data)||null; } catch(e){}
+          try { const rd = await _blingGet('/pedidos/vendas/'+p.id); det = (rd&&rd.ok&&rd.data&&rd.data.data)||null; } catch(e){}
           if (det) break;
           const espD = [3, 8, 20, 40][td - 1] * 1000;
           console.log('[BACKFILL] detalhe do pedido ' + p.id + ' falhou — tentativa ' + td + '/4, aguardando ' + (espD/1000) + 's');
@@ -4727,7 +4738,7 @@ async function backfillVendas(de, ate, empresa){
               let _motoboy = 0;
               try {
                 if (ehFlex(servicoDoPedido(det))) {
-                  const _cfgSh = readJson(path.join(CACHE_DIR, '_config-fiscal.json'), {});
+                  const _cfgSh = _readJson(path.join(_CACHE_DIR, '_config-fiscal.json'), {});
                   const _fx = (_cfgSh && _cfgSh.flex) || {};
                   // P1 do Codex (09/08): eu caía pra ZERO quando a config nunca foi salva,
                   // mas o dashboard usa DEFAULT_FLEX = { ml:12, shopee:9, outros:9 }. Na Girassol
@@ -4840,7 +4851,7 @@ async function backfillVendas(de, ate, empresa){
         const me = rme.ok ? await rme.json().catch(() => null) : null;
         const seller = me && me.id;
         if (seller) {
-          const cfgF = readJson(path.join(CACHE_DIR, '_config-fiscal.json'), { aliquotas: {} });
+          const cfgF = _readJson(path.join(_CACHE_DIR, '_config-fiscal.json'), { aliquotas: {} });
           const aliqDe = m => { const a = cfgF.aliquotas && cfgF.aliquotas[m];
             /* Codex (P1): este leitor (backfill só-ML) tinha ficado de fora do meu conserto e ainda
                aceitava o 0 legado do bug do campo em branco — então um backfill com pedidos pagos do
@@ -4848,10 +4859,10 @@ async function backfillVendas(de, ate, empresa){
                inflada, no mesmo período em que as demais usam o padrão novo. Mesma regra dos outros. */
             if (a != null && isFinite(Number(a)) && Number(a) > 0) return Number(a);
             return (DEFAULT_ALIQ_BK && DEFAULT_ALIQ_BK[m] != null) ? Number(DEFAULT_ALIQ_BK[m]) : 0; };
-          const custos = readJson(path.join(CACHE_DIR, '_custos.json'), {});
+          const custos = _readJson(path.join(_CACHE_DIR, '_custos.json'), {});
           const cUn = sk => { const c = custos[String(sk || '').trim()]; return (c && c.custo != null && isFinite(Number(c.custo))) ? Number(c.custo) : null; };
           // comissao REAL do faturamento do ML, quando ja existir pra essa venda
-          const bill = readJson(path.join(CACHE_DIR, '_ml_billing.json'), { tarifas: {} });
+          const bill = _readJson(path.join(_CACHE_DIR, '_ml_billing.json'), { tarifas: {} });
           const comDe = {}, freDe = {};
           for (const t of Object.values(bill.tarifas || {})) {
             if (!t.o) continue;
@@ -4952,7 +4963,7 @@ async function backfillVendas(de, ate, empresa){
         return;
       }
     } catch (e) { console.log('[BACKFILL] guarda de sanidade não pôde conferir: ' + (e.message || e)); }
-    await supaReq(empresa, 'DELETE', 'vendas_historico?empresa=eq.'+encodeURIComponent(empresa)+'&data_venda=gte.'+de+'&data_venda=lte.'+ate, null);
+    await _supaReq(empresa, 'DELETE', 'vendas_historico?empresa=eq.'+encodeURIComponent(empresa)+'&data_venda=gte.'+de+'&data_venda=lte.'+ate, null);
     for (let i0 = 0; i0 < estoque.length; i0 += 200) {
       const lote = estoque.slice(i0, i0 + 200);
       // 17/08 — PGRST102 "All object keys must match": o Supabase RECUSA o lote inteiro quando
@@ -4963,7 +4974,7 @@ async function backfillVendas(de, ate, empresa){
       const _chaves = new Set();
       for (const _o of lote) for (const _k of Object.keys(_o)) _chaves.add(_k);
       for (const _o of lote) for (const _k of _chaves) if (!(_k in _o)) _o[_k] = null;
-      const ins = await supaReq(empresa,'POST','vendas_historico', lote);
+      const ins = await _supaReq(empresa,'POST','vendas_historico', lote);
       if(ins.ok) _backfill.gravados += lote.length;
       else { _backfill.erros += lote.length; _backfill.msg = 'erro Supabase status '+ins.status+' '+((ins.body||ins.erro||'')+'').slice(0,140); }
       await dorme(120);
@@ -6182,7 +6193,7 @@ async function mlSyncFees(dias) {
   return _mls;
 }
 
-module.exports = {
+module.exports = { backfillVendas,   /* 30/08: exportado pra GOOD reusar com o ctx dela */
   id: 'girassol-backup-offline',
   nome: 'Girassol Backup Offline',
   rotinas: { backupCache: () => rodarCiclo('cron'), backfillNF: () => backfillNFLocal(45), mlSyncFees: () => mlSyncFees(14), shopeeKeepAlive: () => shopeeKeepAlive(), noturna: () => _noturna.rotinaNoturna('cron') },

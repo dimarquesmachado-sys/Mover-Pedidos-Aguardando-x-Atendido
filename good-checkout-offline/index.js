@@ -457,6 +457,9 @@ function routes(readBody) {
         p === '/good-checkout-offline/saude' || p.includes('/callback') ||
         p === '/good-checkout-offline/qz-cert' || p === '/good-checkout-offline/qz-sign' ||
         p === '/good-checkout-offline/danfes-lote' ||
+        /* 30/08: o backfill tem guard PRÓPRIO por ADMIN_KEY (não é rota de operador), então
+           passa pelo gate de sessão como as outras rotas administrativas. */
+        p === '/good-checkout-offline/backfill-vendas' ||
         p === '/good-checkout-offline/shopee-sessao-cookies' ||  // 27/08: auth própria por ADMIN_KEY (?k= ou X-Admin-Key) — mesma razão do danfes-lote  // Codex PR#41: auth própria na rota (302+admin) — o gate devolvia 401 JSON antes do redirect
         p === '/good-checkout-offline/custos-manuais' ||  // 21/08: idem — valida ADMIN_KEY por conta própria (igual custo-sync); sem isto o gate devolvia 401 antes de a rota rodar
         p === '/good-checkout-offline/custo-historico' ||  // 22/08: mesma coisa — nasceram AGORA, com a lib de custo
@@ -494,6 +497,43 @@ function routes(readBody) {
     // mesmo depois que o cookie vencer.
     // Falhou por qualquer motivo? Redireciona pra URL de busca (o comportamento
     // de hoje). Nunca fica pior do que já era. Com &diag=1 devolve o passo a passo.
+    /* 30/08 — BACKFILL DE VENDAS DA GOOD: é o que falta pra ela ter dashboard de margem.
+       Reusa a função da Girassol (já testada em produção há meses) injetando o CONTEXTO da
+       GOOD: o blingGet dela (token próprio), o cache dela e o supaReq dela. Sem o ctx, a
+       função lia os pedidos da GIRASSOL e gravava rotulados como GOOD — o parâmetro empresa
+       só mandava no rótulo. Nada aqui reimplementa o backfill. */
+    if ((method === 'GET' || method === 'POST') && p === '/good-checkout-offline/backfill-vendas') {
+      const kB = urlObj.searchParams.get('k') || '';
+      if (!(process.env.ADMIN_KEY && kB === process.env.ADMIN_KEY)) { json(res, 404, { error: 'not found' }); return true; }
+      const de = urlObj.searchParams.get('de') || '';
+      const ate = urlObj.searchParams.get('ate') || '';
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(de) || !/^\d{4}-\d{2}-\d{2}$/.test(ate)) {
+        json(res, 400, { ok: false, erro: 'use ?de=AAAA-MM-DD&ate=AAAA-MM-DD' }); return true;
+      }
+      if (de > ate) { json(res, 400, { ok: false, erro: 'de maior que ate' }); return true; }
+      try {
+        const gbo = require('../girassol-backup-offline/gbo-app');
+        const supaGood = require('../lib/supabase').para('good');
+        const ctxGood = {
+          blingGet,                          /* token da GOOD */
+          readJson,                          /* custos e config fiscal da GOOD */
+          CACHE_DIR,
+          /* conferido em lib/supabase.js: req é (empresa, metodo, pathQuery, body) — eu tinha
+             escrito com a assinatura errada e o corpo iria pro lugar do pathQuery. */
+          supaReq: (empresa, metodo, pq, body) => supaGood.req(empresa, metodo, pq, body),
+        };
+        /* roda em BACKGROUND: um mês de backfill leva minutos e o navegador desiste antes */
+        gbo.backfillVendas(de, ate, 'good', ctxGood)
+          .then(r => console.log('[GOOD backfill]', JSON.stringify(r).slice(0, 200)))
+          .catch(e => console.error('[GOOD backfill] falhou:', e.message));
+        json(res, 202, { ok: true, empresa: 'good', de, ate, em_background: true,
+          nota: 'acompanhe pelo log do serviço; rode um mês por vez pra não estourar o tempo' });
+      } catch (e) {
+        json(res, 500, { ok: false, erro: String(e.message || e).slice(0, 160) });
+      }
+      return true;
+    }
+
     if (method === 'GET' && p === '/good-checkout-offline/ir-shopee') {
       const snIr  = String((urlObj.searchParams && urlObj.searchParams.get('sn')) || '').trim();
       const diagIr = ((urlObj.searchParams && urlObj.searchParams.get('diag')) || '') === '1';
