@@ -541,11 +541,19 @@ function routes(readBody) {
                justamente quando tudo dera certo. E quando ele RECUSA rodar (canário usando o
                Bling, conserto de SKU em andamento, ou outro backfill já ativo) devolve
                { ok:false, msg }: marcar isso como 'ok' faria o dono achar que rodou. */
-            const recusou = r && r.ok === false;
+            /* Codex #309 r2: undefined NÃO significa sucesso — a função também sai assim
+               quando ABORTA após 6 tentativas na mesma página. A verdade está na fase do
+               estado interno, que agora o gbo-app expõe. */
+            const est = (typeof gbo.backfillEstado === 'function') ? gbo.backfillEstado() : {};
+            const recusou = (r && r.ok === false) || !!(r && r.adiado);
+            const abortou = est.fase === 'erro';
             global.__bfGood = Object.assign({
-              estado: recusou ? 'nao_rodou' : 'ok', de, ate, terminado: new Date().toISOString(),
-              motivo: recusou ? (r.msg || 'o backfill recusou iniciar — veja se há outro rodando') : null,
-            }, r || {});
+              estado: recusou ? 'nao_rodou' : (abortou ? 'falhou' : (est.fase === 'concluido_com_erros' ? 'concluido_com_erros' : 'ok')),
+              de, ate, terminado: new Date().toISOString(),
+              motivo: recusou ? ((r && (r.msg || r.adiado)) || 'recusou iniciar — veja se há outro backfill rodando')
+                    : (abortou ? (est.msg || 'abortado') : null),
+              fase: est.fase || null, pedidos: est.pedidos, itens: est.itens, gravados: est.gravados, erros: est.erros,
+            }, (r && typeof r === 'object') ? r : {});
             console.log('[GOOD backfill]', JSON.stringify(r || { ok: true }).slice(0, 200));
           })
           .catch(e => {

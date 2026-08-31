@@ -6194,6 +6194,10 @@ async function mlSyncFees(dias) {
 }
 
 module.exports = { backfillVendas,   /* 30/08: exportado pra GOOD reusar com o ctx dela */
+  /* Codex #309 r2: o desfecho REAL está no _backfill.fase (erro / concluido /
+     concluido_com_erros) — a função retorna undefined tanto no sucesso quanto ao ABORTAR
+     depois de 6 tentativas na mesma página. Quem chama de fora precisa poder ler isso. */
+  backfillEstado: () => Object.assign({}, _backfill),
   id: 'girassol-backup-offline',
   nome: 'Girassol Backup Offline',
   rotinas: { backupCache: () => rodarCiclo('cron'), backfillNF: () => backfillNFLocal(45), mlSyncFees: () => mlSyncFees(14), shopeeKeepAlive: () => shopeeKeepAlive(), noturna: () => _noturna.rotinaNoturna('cron') },
