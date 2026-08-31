@@ -460,6 +460,7 @@ function routes(readBody) {
         /* 30/08: o backfill tem guard PRÓPRIO por ADMIN_KEY (não é rota de operador), então
            passa pelo gate de sessão como as outras rotas administrativas. */
         p === '/good-checkout-offline/backfill-vendas' ||
+        p === '/good-checkout-offline/backfill-status' ||
         p === '/good-checkout-offline/shopee-sessao-cookies' ||  // 27/08: auth própria por ADMIN_KEY (?k= ou X-Admin-Key) — mesma razão do danfes-lote  // Codex PR#41: auth própria na rota (302+admin) — o gate devolvia 401 JSON antes do redirect
         p === '/good-checkout-offline/custos-manuais' ||  // 21/08: idem — valida ADMIN_KEY por conta própria (igual custo-sync); sem isto o gate devolvia 401 antes de a rota rodar
         p === '/good-checkout-offline/custo-historico' ||  // 22/08: mesma coisa — nasceram AGORA, com a lib de custo
@@ -502,6 +503,13 @@ function routes(readBody) {
        GOOD: o blingGet dela (token próprio), o cache dela e o supaReq dela. Sem o ctx, a
        função lia os pedidos da GIRASSOL e gravava rotulados como GOOD — o parâmetro empresa
        só mandava no rótulo. Nada aqui reimplementa o backfill. */
+    if (method === 'GET' && p === '/good-checkout-offline/backfill-status') {
+      const kS = urlObj.searchParams.get('k') || '';
+      if (!(process.env.ADMIN_KEY && kS === process.env.ADMIN_KEY)) { json(res, 404, { error: 'not found' }); return true; }
+      json(res, 200, global.__bfGood || { estado: 'nunca rodou neste processo' });
+      return true;
+    }
+
     if ((method === 'GET' || method === 'POST') && p === '/good-checkout-offline/backfill-vendas') {
       const kB = urlObj.searchParams.get('k') || '';
       if (!(process.env.ADMIN_KEY && kB === process.env.ADMIN_KEY)) { json(res, 404, { error: 'not found' }); return true; }
@@ -523,11 +531,21 @@ function routes(readBody) {
           supaReq: (empresa, metodo, pq, body) => supaGood.req(empresa, metodo, pq, body),
         };
         /* roda em BACKGROUND: um mês de backfill leva minutos e o navegador desiste antes */
+        /* 30/08: guarda o estado pra dar pra acompanhar sem caçar no log do Render — foi a
+           primeira coisa que o dono precisou e não existia (o TikTok e o Magalu têm). */
+        global.__bfGood = { estado: 'rodando', de, ate, iniciado: new Date().toISOString() };
         gbo.backfillVendas(de, ate, 'good', ctxGood)
-          .then(r => console.log('[GOOD backfill]', JSON.stringify(r).slice(0, 200)))
-          .catch(e => console.error('[GOOD backfill] falhou:', e.message));
+          .then(r => {
+            global.__bfGood = Object.assign({ estado: 'ok', de, ate, terminado: new Date().toISOString() }, r || {});
+            console.log('[GOOD backfill]', JSON.stringify(r).slice(0, 200));
+          })
+          .catch(e => {
+            global.__bfGood = { estado: 'falhou', de, ate, erro: String(e.message || e).slice(0, 200), terminado: new Date().toISOString() };
+            console.error('[GOOD backfill] falhou:', e.message);
+          });
         json(res, 202, { ok: true, empresa: 'good', de, ate, em_background: true,
-          nota: 'acompanhe pelo log do serviço; rode um mês por vez pra não estourar o tempo' });
+          acompanhe: '/good-checkout-offline/backfill-status?k=SUA_ADMIN_KEY',
+          nota: 'rode um mês por vez pra não estourar o tempo' });
       } catch (e) {
         json(res, 500, { ok: false, erro: String(e.message || e).slice(0, 160) });
       }
