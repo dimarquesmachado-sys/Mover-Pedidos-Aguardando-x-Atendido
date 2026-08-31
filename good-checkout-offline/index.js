@@ -566,7 +566,10 @@ function routes(readBody) {
                  a mensagem original explica qual foi. */
               abortado: ['falhou', d.msg || 'abortado — NADA foi apagado, rode de novo'],
               ja_rodando: ['nao_rodou', d.msg || 'já havia um backfill em andamento'],
-              adiado: ['nao_rodou', d.adiado || 'adiado'],
+              /* Codex #309: o adiamento vem de dois lugares com campos diferentes — o
+                 reparo de SKU usa `adiado` e o canário usa `msg`. Lendo só um, o operador
+                 via 'adiado' sem saber o motivo. */
+              adiado: ['nao_rodou', d.adiado || d.msg || 'adiado (canário ou reparo de SKU em andamento)'],
               nao_rodou: ['nao_rodou', d.msg || 'recusou iniciar'],
             };
             const [estado, motivo] = MAPA[desf] || ['ok', null];
