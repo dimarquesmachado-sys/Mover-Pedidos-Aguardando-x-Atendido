@@ -561,7 +561,10 @@ function routes(readBody) {
               ok: ['ok', null],
               com_erros: ['concluido_com_erros', 'terminou, mas houve erros em itens — confira antes de seguir'],
               erro: ['falhou', d.msg || 'erro durante o backfill'],
-              abortado: ['falhou', d.msg || 'abortado por falhas seguidas do Bling — NADA foi apagado, rode de novo'],
+              /* 'abortado' vem de DOIS lugares: 6 falhas seguidas do Bling, e a trava de
+                 sanidade (dados novos < 60% do guardado). Nos dois casos NADA foi apagado —
+                 a mensagem original explica qual foi. */
+              abortado: ['falhou', d.msg || 'abortado — NADA foi apagado, rode de novo'],
               ja_rodando: ['nao_rodou', d.msg || 'já havia um backfill em andamento'],
               adiado: ['nao_rodou', d.adiado || 'adiado'],
               nao_rodou: ['nao_rodou', d.msg || 'recusou iniciar'],
