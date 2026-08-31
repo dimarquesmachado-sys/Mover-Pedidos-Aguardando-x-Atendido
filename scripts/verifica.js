@@ -97,7 +97,14 @@ for (const m of cfg.modulos) {
     const s = fs.readFileSync(p, 'utf8');
     if (!s.includes('/' + m + '/')) { falha(m + '/' + f + ' NÃO referencia as rotas do próprio módulo — arquivo de outra empresa colado aqui?'); idErr++; }
     for (const outro of cfg.modulos) {
-      if (outro !== m && s.includes('/' + outro + '/')) { falha(m + '/' + f + ' contém rotas de ' + outro + ' — colou o arquivo da empresa ERRADA!'); idErr++; }
+      if (outro === m) continue;
+      /* 30/08: a regra procurava o nome do outro módulo em QUALQUER lugar do texto, e passou
+         a acusar require de código COMPARTILHADO — o backfill da GOOD reusa a função da
+         Girassol de propósito, em vez de copiar 515 linhas que divergiriam depois. Reusar é
+         o que queremos; o que o teste tem que pegar é ROTA colada errada. Então ignoramos as
+         linhas de require/import e olhamos o resto. */
+      const semRequires = s.split('\n').filter(l => !/require\s*\(|^\s*import\s/.test(l)).join('\n');
+      if (semRequires.includes('/' + outro + '/')) { falha(m + '/' + f + ' contém rotas de ' + outro + ' — colou o arquivo da empresa ERRADA!'); idErr++; }
     }
   }
 }
