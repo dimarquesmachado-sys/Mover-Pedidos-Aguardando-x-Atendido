@@ -541,7 +541,10 @@ function routes(readBody) {
         if (jaAtivo) {
           json(res, 409, { ok: false, empresa: 'good', de, ate,
             erro: 'já existe um backfill da GOOD em andamento (' + (global.__bfGood.de || '') + '→' + (global.__bfGood.ate || '') + ') — aguarde terminar',
-            acompanhe: '/good-checkout-offline/backfill-status?k=SUA_ADMIN_KEY' });
+            /* Codex #309 r5: sobrou o placeholder aqui quando corrigi o outro — mesmo
+               problema, link que não abre, na resposta que o dono mais vai ver (a de
+               "já tem um rodando"). */
+            acompanhe: '/good-checkout-offline/backfill-status?k=' + encodeURIComponent(kB) });
           return true;
         }
         const marca = Date.now().toString(36);
