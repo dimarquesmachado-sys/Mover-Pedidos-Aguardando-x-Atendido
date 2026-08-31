@@ -551,35 +551,28 @@ function routes(readBody) {
         global.__bfGood = { estado: 'rodando', de, ate, marca, iniciado: new Date().toISOString() };
         gbo.backfillVendas(de, ate, 'good', ctxGood)
           .then(r => {
-            /* Codex #309: no caminho de SUCESSO o backfillVendas termina sem return, então r
-               é undefined e JSON.stringify(undefined) também — o .slice() estourava
-               justamente quando tudo dera certo. E quando ele RECUSA rodar (canário usando o
-               Bling, conserto de SKU em andamento, ou outro backfill já ativo) devolve
-               { ok:false, msg }: marcar isso como 'ok' faria o dono achar que rodou. */
-            /* Codex #309 r2: undefined NÃO significa sucesso — a função também sai assim
-               quando ABORTA após 6 tentativas na mesma página. A verdade está na fase do
-               estado interno, que agora o gbo-app expõe. */
-            const est = (typeof gbo.backfillEstado === 'function') ? gbo.backfillEstado() : {};
-            /* Codex #309 r3: há um terceiro caminho de undefined — 'if (_backfill.rodando)
-               return;'. Se o backfill da Girassol (ou outro da GOOD) já estiver ativo, o
-               nosso nem começa e apareceria como 'ok'. Descobre-se comparando o período do
-               estado com o que pedimos: se for outro, quem está rodando não é o nosso. */
-            /* se o estado global já não é o nosso, outra rodada assumiu no meio */
-            const nossaAindaVale = global.__bfGood && global.__bfGood.marca === marca;
-            const outroRodando = (!!est.rodando && (est.de !== de || est.ate !== ate || est.empresa !== 'good')) || !nossaAindaVale;
-            const recusou = (r && r.ok === false) || !!(r && r.adiado) || outroRodando;
-            const abortou = est.fase === 'erro';
-            global.__bfGood = Object.assign({
-              estado: recusou ? 'nao_rodou' : (abortou ? 'falhou' : (est.fase === 'concluido_com_erros' ? 'concluido_com_erros' : 'ok')),
-              de, ate, terminado: new Date().toISOString(),
-              motivo: recusou ? ((r && (r.msg || r.adiado)) || (outroRodando ? ('outro backfill já estava rodando (' + (est.empresa || '?') + ' ' + (est.de || '') + '→' + (est.ate || '') + ') — o da GOOD nem começou; rode de novo depois') : 'recusou iniciar'))
-                    : (abortou ? (est.msg || 'abortado') : null),
-              fase: est.fase || null, pedidos: est.pedidos, itens: est.itens, gravados: est.gravados, erros: est.erros,
-            }, (r && typeof r === 'object') ? r : {},
-            /* Codex #309 r3: o Object.assign do retorno sobrescrevia de/ate com os do estado
-               de OUTRA rodada — o dono veria um período que não foi o que ele pediu. */
-            { de, ate });
-            console.log('[GOOD backfill]', JSON.stringify(r || { ok: true }).slice(0, 200));
+            /* 31/08 — agora a função DIZ o que aconteceu: toda saída dela devolve `desfecho`
+               (ok / com_erros / erro / abortado / ja_rodando / adiado). Antes eu inferia isso
+               de fora comparando período, lendo fase e marcando rodada — três remendos que
+               nasceram do mesmo defeito e cada um deixava um caso passar. */
+            const d = r || {};
+            const desf = d.desfecho || (d.adiado ? 'adiado' : (d.ok === false ? 'nao_rodou' : 'ok'));
+            const MAPA = {
+              ok: ['ok', null],
+              com_erros: ['concluido_com_erros', 'terminou, mas houve erros em itens — confira antes de seguir'],
+              erro: ['falhou', d.msg || 'erro durante o backfill'],
+              abortado: ['falhou', d.msg || 'abortado por falhas seguidas do Bling — NADA foi apagado, rode de novo'],
+              ja_rodando: ['nao_rodou', d.msg || 'já havia um backfill em andamento'],
+              adiado: ['nao_rodou', d.adiado || 'adiado'],
+              nao_rodou: ['nao_rodou', d.msg || 'recusou iniciar'],
+            };
+            const [estado, motivo] = MAPA[desf] || ['ok', null];
+            global.__bfGood = {
+              estado, motivo, desfecho: desf, de, ate, marca,
+              terminado: new Date().toISOString(),
+              pedidos: d.pedidos, itens: d.itens, gravados: d.gravados, erros: d.erros, fase: d.fase || null,
+            };
+            console.log('[GOOD backfill]', desf, JSON.stringify(d).slice(0, 180));
           })
           .catch(e => {
             global.__bfGood = { estado: 'falhou', de, ate, erro: String(e.message || e).slice(0, 200), terminado: new Date().toISOString() };
