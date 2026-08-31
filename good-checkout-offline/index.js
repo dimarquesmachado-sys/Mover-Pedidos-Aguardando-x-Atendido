@@ -533,7 +533,19 @@ function routes(readBody) {
         /* roda em BACKGROUND: um mês de backfill leva minutos e o navegador desiste antes */
         /* 30/08: guarda o estado pra dar pra acompanhar sem caçar no log do Render — foi a
            primeira coisa que o dono precisou e não existia (o TikTok e o Magalu têm). */
-        global.__bfGood = { estado: 'rodando', de, ate, iniciado: new Date().toISOString() };
+        /* Codex #309 r4: minha detecção de "outro rodando" comparava o período — se alguém
+           dispara DUAS vezes o MESMO mês, os períodos batem e o segundo apareceria como
+           sucesso. Marco de quem é a rodada, decidido ANTES de disparar, resolve sem
+           depender de comparar datas. */
+        const jaAtivo = global.__bfGood && global.__bfGood.estado === 'rodando';
+        if (jaAtivo) {
+          json(res, 409, { ok: false, empresa: 'good', de, ate,
+            erro: 'já existe um backfill da GOOD em andamento (' + (global.__bfGood.de || '') + '→' + (global.__bfGood.ate || '') + ') — aguarde terminar',
+            acompanhe: '/good-checkout-offline/backfill-status?k=SUA_ADMIN_KEY' });
+          return true;
+        }
+        const marca = Date.now().toString(36);
+        global.__bfGood = { estado: 'rodando', de, ate, marca, iniciado: new Date().toISOString() };
         gbo.backfillVendas(de, ate, 'good', ctxGood)
           .then(r => {
             /* Codex #309: no caminho de SUCESSO o backfillVendas termina sem return, então r
@@ -549,7 +561,9 @@ function routes(readBody) {
                return;'. Se o backfill da Girassol (ou outro da GOOD) já estiver ativo, o
                nosso nem começa e apareceria como 'ok'. Descobre-se comparando o período do
                estado com o que pedimos: se for outro, quem está rodando não é o nosso. */
-            const outroRodando = !!est.rodando && (est.de !== de || est.ate !== ate || est.empresa !== 'good');
+            /* se o estado global já não é o nosso, outra rodada assumiu no meio */
+            const nossaAindaVale = global.__bfGood && global.__bfGood.marca === marca;
+            const outroRodando = (!!est.rodando && (est.de !== de || est.ate !== ate || est.empresa !== 'good')) || !nossaAindaVale;
             const recusou = (r && r.ok === false) || !!(r && r.adiado) || outroRodando;
             const abortou = est.fase === 'erro';
             global.__bfGood = Object.assign({
@@ -569,7 +583,8 @@ function routes(readBody) {
             console.error('[GOOD backfill] falhou:', e.message);
           });
         json(res, 202, { ok: true, empresa: 'good', de, ate, em_background: true,
-          acompanhe: '/good-checkout-offline/backfill-status?k=SUA_ADMIN_KEY',
+          /* Codex #309 r4: o placeholder não abre; devolve o link com a chave que veio */
+          acompanhe: '/good-checkout-offline/backfill-status?k=' + encodeURIComponent(kB),
           nota: 'rode um mês por vez pra não estourar o tempo' });
       } catch (e) {
         json(res, 500, { ok: false, erro: String(e.message || e).slice(0, 160) });
