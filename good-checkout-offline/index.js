@@ -536,8 +536,17 @@ function routes(readBody) {
         global.__bfGood = { estado: 'rodando', de, ate, iniciado: new Date().toISOString() };
         gbo.backfillVendas(de, ate, 'good', ctxGood)
           .then(r => {
-            global.__bfGood = Object.assign({ estado: 'ok', de, ate, terminado: new Date().toISOString() }, r || {});
-            console.log('[GOOD backfill]', JSON.stringify(r).slice(0, 200));
+            /* Codex #309: no caminho de SUCESSO o backfillVendas termina sem return, então r
+               é undefined e JSON.stringify(undefined) também — o .slice() estourava
+               justamente quando tudo dera certo. E quando ele RECUSA rodar (canário usando o
+               Bling, conserto de SKU em andamento, ou outro backfill já ativo) devolve
+               { ok:false, msg }: marcar isso como 'ok' faria o dono achar que rodou. */
+            const recusou = r && r.ok === false;
+            global.__bfGood = Object.assign({
+              estado: recusou ? 'nao_rodou' : 'ok', de, ate, terminado: new Date().toISOString(),
+              motivo: recusou ? (r.msg || 'o backfill recusou iniciar — veja se há outro rodando') : null,
+            }, r || {});
+            console.log('[GOOD backfill]', JSON.stringify(r || { ok: true }).slice(0, 200));
           })
           .catch(e => {
             global.__bfGood = { estado: 'falhou', de, ate, erro: String(e.message || e).slice(0, 200), terminado: new Date().toISOString() };
