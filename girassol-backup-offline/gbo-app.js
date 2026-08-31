@@ -4466,6 +4466,12 @@ async function custoDoProduto(id, dorme) {
    `empresa` já existia, mas só mandava no RÓTULO da linha gravada: o leitor continuava o da
    Girassol, então rodar com empresa=good gravaria pedido da Girassol marcado como GOOD.
    Sem ctx, tudo segue exatamente como era. */
+/* 31/08 — CONSERTO DE RAIZ (5 rodadas de review no #309 apontaram para isto): a funcao
+   tinha QUATRO saidas e nenhuma dizia o que aconteceu. Tres devolviam undefined — sucesso,
+   aborto apos 6 tentativas na mesma pagina, e "ja tem um rodando" — e quem chamasse de fora
+   nao tinha como distinguir. Cada tentativa de adivinhar de fora (comparar periodo, ler a
+   fase, marcar a rodada) tapava um caso e deixava outro passar. Agora TODA saida devolve o
+   estado com um campo `desfecho` explicito. */
 async function backfillVendas(de, ate, empresa, ctx){
   const _ctx = ctx || null;
   const _blingGet  = _ctx && _ctx.blingGet  ? _ctx.blingGet  : blingGet;
@@ -4476,16 +4482,17 @@ async function backfillVendas(de, ate, empresa, ctx){
      Mesmo lugar da trava do canário logo abaixo, pelo mesmo motivo. */
   if (_reparoAtivo) {
     console.log('[BACKFILL] adiado: reparo de SKU em andamento (mexe nas mesmas linhas)');
-    return Object.assign({}, _backfill, { adiado: 'reparo de SKU em andamento' });
+    return Object.assign({}, _backfill, { desfecho: 'adiado', ok: false, adiado: 'reparo de SKU em andamento' });
   }
   // Codex (#105): a noturna chama esta função DIRETO, sem passar pelas rotas — então a trava
   // do canário precisa morar aqui dentro, senão o backfill agendado dispara enquanto o
   // canário consulta o Bling e recria a disputa de cota que este PR existe pra evitar.
   if (_canario.rodando) {
     console.log('[BACKFILL] adiado: o canário está conferindo o Bling (desde ' + _canario.desde + ')');
-    return { ok: false, msg: 'canário conferindo o Bling agora — backfill adiado' };
+    return { ok: false, desfecho: 'adiado', msg: 'canário conferindo o Bling agora — backfill adiado' };
   }
-  if(_backfill.rodando) return;
+  if(_backfill.rodando) return Object.assign({}, _backfill, { desfecho: 'ja_rodando', ok: false,
+    msg: 'ja existe um backfill em andamento (' + (_backfill.empresa || '?') + ' ' + (_backfill.de || '') + '->' + (_backfill.ate || '') + ')' });
   _backfill = { rodando:true, empresa, de, ate, pagina:0, pedidos:0, itens:0, gravados:0, erros:0, fase:'preparando', inicio:new Date().toISOString(), fim:null, msg:'' };
   try { await garantirSitCancel(async p2 => await _blingGet(p2)); } catch (e) {}
   const jaNoBling = new Set();   // 02/08: números de venda que o Bling JÁ trouxe — impede duplicar quando o ML entrar depois   // 01/08: IDs de cancelamento p/ o filtro abaixo
@@ -4560,7 +4567,7 @@ async function backfillVendas(de, ate, empresa, ctx){
         _backfill.msg = 'a página ' + pg + ' falhou 6 vezes seguidas — rodada ABORTADA e NADA foi apagado: o histórico antigo do período continua inteiro. Rode de novo mais tarde.';
         console.log('[BACKFILL] ✗ abortado na página ' + pg + ' — histórico do período ficou incompleto, rode de novo');
         _backfill.rodando = false; _backfill.fim = new Date().toISOString();
-        return;
+        return Object.assign({}, _backfill, { desfecho: 'abortado', ok: false });
       }
       if(!lista.length) break;
       // ── b122 (06/08): ESCROW EM LOTE, POR PÁGINA ────────────────────────────────
@@ -4960,7 +4967,7 @@ async function backfillVendas(de, ate, empresa, ctx){
                         vouGravar + ' (menos de 60%). Nada foi apagado. Rode de novo — se repetir, a coleta é que está incompleta.';
         console.log('[BACKFILL] ⚠️ ' + _backfill.msg);
         _backfill.rodando = false; _backfill.fim = new Date().toISOString();
-        return;
+        return Object.assign({}, _backfill, { desfecho: 'abortado', ok: false });   /* trava de sanidade: dados novos < 60% do guardado — NADA foi apagado */
       }
     } catch (e) { console.log('[BACKFILL] guarda de sanidade não pôde conferir: ' + (e.message || e)); }
     await _supaReq(empresa, 'DELETE', 'vendas_historico?empresa=eq.'+encodeURIComponent(empresa)+'&data_venda=gte.'+de+'&data_venda=lte.'+ate, null);
@@ -4985,6 +4992,14 @@ async function backfillVendas(de, ate, empresa, ctx){
     _backfill.fase = _backfill.erros ? 'concluido_com_erros' : 'concluido';
   } catch(e){ _backfill.fase='erro'; _backfill.msg = String(e.message||e); }
   _backfill.rodando = false; _backfill.fim = new Date().toISOString();
+  /* fim normal: 'erro' quando o catch pegou excecao, 'com_erros' quando gravou mas houve
+     falhas de item, 'ok' quando fechou limpo. */
+  return Object.assign({}, _backfill, {
+    /* 31/08: 'abortado' é fase própria (trava de sanidade) e precisa contar como falha —
+       era a SEXTA saída, que eu não tinha visto na primeira análise. */
+    desfecho: (_backfill.fase === 'erro') ? 'erro' : (_backfill.fase === 'abortado') ? 'abortado' : (_backfill.erros ? 'com_erros' : 'ok'),
+    ok: _backfill.fase !== 'erro' && _backfill.fase !== 'abortado',
+  });
 }
 
 const ULTIMO_DIA = { '01':'31','02':'28','03':'31','04':'30','05':'31','06':'30','07':'31','08':'31','09':'30','10':'31','11':'30','12':'31' };
@@ -5248,6 +5263,15 @@ async function backfillAnoTodo(ateMes){
       const r = await backfillVendas('2026-'+m+'-01', '2026-'+m+'-'+ULTIMO_DIA[m], 'girassol');   // espera cada mês terminar antes do próximo
       /* o adiamento volta como retorno NORMAL: sem olhar, o mês entraria em `feitos` com os
          contadores VELHOS e o ano terminaria "concluído" tendo pulado meses em silêncio. */
+      /* 31/08: com o `desfecho` explícito, o ano também para quando um mês ABORTA — antes
+         só o adiamento era visto, e um mês abortado (6 falhas seguidas do Bling) entrava em
+         `feitos` e o ano terminava "concluído" com um mês pela metade. */
+      if (r && (r.desfecho === 'abortado' || r.desfecho === 'erro')) {
+        _backfillAno.erro = r.msg || ('mês ' + m + ' ' + r.desfecho);
+        _backfillAno.parou_em = '2026-' + m;
+        _backfillAno.faltam = meses.slice(meses.indexOf(m));
+        break;
+      }
       if (r && r.adiado) {
         _backfillAno.adiado = r.adiado; _backfillAno.parou_em = '2026-'+m;
         _backfillAno.faltam = meses.slice(meses.indexOf(m));
@@ -6194,6 +6218,10 @@ async function mlSyncFees(dias) {
 }
 
 module.exports = { backfillVendas,   /* 30/08: exportado pra GOOD reusar com o ctx dela */
+  /* Codex #309 r2: o desfecho REAL está no _backfill.fase (erro / concluido /
+     concluido_com_erros) — a função retorna undefined tanto no sucesso quanto ao ABORTAR
+     depois de 6 tentativas na mesma página. Quem chama de fora precisa poder ler isso. */
+  backfillEstado: () => Object.assign({}, _backfill),
   id: 'girassol-backup-offline',
   nome: 'Girassol Backup Offline',
   rotinas: { backupCache: () => rodarCiclo('cron'), backfillNF: () => backfillNFLocal(45), mlSyncFees: () => mlSyncFees(14), shopeeKeepAlive: () => shopeeKeepAlive(), noturna: () => _noturna.rotinaNoturna('cron') },

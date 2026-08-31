@@ -460,6 +460,7 @@ function routes(readBody) {
         /* 30/08: o backfill tem guard PRÓPRIO por ADMIN_KEY (não é rota de operador), então
            passa pelo gate de sessão como as outras rotas administrativas. */
         p === '/good-checkout-offline/backfill-vendas' ||
+        p === '/good-checkout-offline/backfill-status' ||
         p === '/good-checkout-offline/shopee-sessao-cookies' ||  // 27/08: auth própria por ADMIN_KEY (?k= ou X-Admin-Key) — mesma razão do danfes-lote  // Codex PR#41: auth própria na rota (302+admin) — o gate devolvia 401 JSON antes do redirect
         p === '/good-checkout-offline/custos-manuais' ||  // 21/08: idem — valida ADMIN_KEY por conta própria (igual custo-sync); sem isto o gate devolvia 401 antes de a rota rodar
         p === '/good-checkout-offline/custo-historico' ||  // 22/08: mesma coisa — nasceram AGORA, com a lib de custo
@@ -502,6 +503,13 @@ function routes(readBody) {
        GOOD: o blingGet dela (token próprio), o cache dela e o supaReq dela. Sem o ctx, a
        função lia os pedidos da GIRASSOL e gravava rotulados como GOOD — o parâmetro empresa
        só mandava no rótulo. Nada aqui reimplementa o backfill. */
+    if (method === 'GET' && p === '/good-checkout-offline/backfill-status') {
+      const kS = urlObj.searchParams.get('k') || '';
+      if (!(process.env.ADMIN_KEY && kS === process.env.ADMIN_KEY)) { json(res, 404, { error: 'not found' }); return true; }
+      json(res, 200, global.__bfGood || { estado: 'nunca rodou neste processo' });
+      return true;
+    }
+
     if ((method === 'GET' || method === 'POST') && p === '/good-checkout-offline/backfill-vendas') {
       const kB = urlObj.searchParams.get('k') || '';
       if (!(process.env.ADMIN_KEY && kB === process.env.ADMIN_KEY)) { json(res, 404, { error: 'not found' }); return true; }
@@ -523,11 +531,63 @@ function routes(readBody) {
           supaReq: (empresa, metodo, pq, body) => supaGood.req(empresa, metodo, pq, body),
         };
         /* roda em BACKGROUND: um mês de backfill leva minutos e o navegador desiste antes */
+        /* 30/08: guarda o estado pra dar pra acompanhar sem caçar no log do Render — foi a
+           primeira coisa que o dono precisou e não existia (o TikTok e o Magalu têm). */
+        /* Codex #309 r4: minha detecção de "outro rodando" comparava o período — se alguém
+           dispara DUAS vezes o MESMO mês, os períodos batem e o segundo apareceria como
+           sucesso. Marco de quem é a rodada, decidido ANTES de disparar, resolve sem
+           depender de comparar datas. */
+        const jaAtivo = global.__bfGood && global.__bfGood.estado === 'rodando';
+        if (jaAtivo) {
+          json(res, 409, { ok: false, empresa: 'good', de, ate,
+            erro: 'já existe um backfill da GOOD em andamento (' + (global.__bfGood.de || '') + '→' + (global.__bfGood.ate || '') + ') — aguarde terminar',
+            /* Codex #309 r5: sobrou o placeholder aqui quando corrigi o outro — mesmo
+               problema, link que não abre, na resposta que o dono mais vai ver (a de
+               "já tem um rodando"). */
+            acompanhe: '/good-checkout-offline/backfill-status?k=' + encodeURIComponent(kB) });
+          return true;
+        }
+        const marca = Date.now().toString(36);
+        global.__bfGood = { estado: 'rodando', de, ate, marca, iniciado: new Date().toISOString() };
         gbo.backfillVendas(de, ate, 'good', ctxGood)
-          .then(r => console.log('[GOOD backfill]', JSON.stringify(r).slice(0, 200)))
-          .catch(e => console.error('[GOOD backfill] falhou:', e.message));
+          .then(r => {
+            /* 31/08 — agora a função DIZ o que aconteceu: toda saída dela devolve `desfecho`
+               (ok / com_erros / erro / abortado / ja_rodando / adiado). Antes eu inferia isso
+               de fora comparando período, lendo fase e marcando rodada — três remendos que
+               nasceram do mesmo defeito e cada um deixava um caso passar. */
+            const d = r || {};
+            const desf = d.desfecho || (d.adiado ? 'adiado' : (d.ok === false ? 'nao_rodou' : 'ok'));
+            const MAPA = {
+              ok: ['ok', null],
+              com_erros: ['concluido_com_erros', 'terminou, mas houve erros em itens — confira antes de seguir'],
+              erro: ['falhou', d.msg || 'erro durante o backfill'],
+              /* 'abortado' vem de DOIS lugares: 6 falhas seguidas do Bling, e a trava de
+                 sanidade (dados novos < 60% do guardado). Nos dois casos NADA foi apagado —
+                 a mensagem original explica qual foi. */
+              abortado: ['falhou', d.msg || 'abortado — NADA foi apagado, rode de novo'],
+              ja_rodando: ['nao_rodou', d.msg || 'já havia um backfill em andamento'],
+              /* Codex #309: o adiamento vem de dois lugares com campos diferentes — o
+                 reparo de SKU usa `adiado` e o canário usa `msg`. Lendo só um, o operador
+                 via 'adiado' sem saber o motivo. */
+              adiado: ['nao_rodou', d.adiado || d.msg || 'adiado (canário ou reparo de SKU em andamento)'],
+              nao_rodou: ['nao_rodou', d.msg || 'recusou iniciar'],
+            };
+            const [estado, motivo] = MAPA[desf] || ['ok', null];
+            global.__bfGood = {
+              estado, motivo, desfecho: desf, de, ate, marca,
+              terminado: new Date().toISOString(),
+              pedidos: d.pedidos, itens: d.itens, gravados: d.gravados, erros: d.erros, fase: d.fase || null,
+            };
+            console.log('[GOOD backfill]', desf, JSON.stringify(d).slice(0, 180));
+          })
+          .catch(e => {
+            global.__bfGood = { estado: 'falhou', de, ate, erro: String(e.message || e).slice(0, 200), terminado: new Date().toISOString() };
+            console.error('[GOOD backfill] falhou:', e.message);
+          });
         json(res, 202, { ok: true, empresa: 'good', de, ate, em_background: true,
-          nota: 'acompanhe pelo log do serviço; rode um mês por vez pra não estourar o tempo' });
+          /* Codex #309 r4: o placeholder não abre; devolve o link com a chave que veio */
+          acompanhe: '/good-checkout-offline/backfill-status?k=' + encodeURIComponent(kB),
+          nota: 'rode um mês por vez pra não estourar o tempo' });
       } catch (e) {
         json(res, 500, { ok: false, erro: String(e.message || e).slice(0, 160) });
       }
