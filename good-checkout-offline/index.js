@@ -545,15 +545,23 @@ function routes(readBody) {
                quando ABORTA após 6 tentativas na mesma página. A verdade está na fase do
                estado interno, que agora o gbo-app expõe. */
             const est = (typeof gbo.backfillEstado === 'function') ? gbo.backfillEstado() : {};
-            const recusou = (r && r.ok === false) || !!(r && r.adiado);
+            /* Codex #309 r3: há um terceiro caminho de undefined — 'if (_backfill.rodando)
+               return;'. Se o backfill da Girassol (ou outro da GOOD) já estiver ativo, o
+               nosso nem começa e apareceria como 'ok'. Descobre-se comparando o período do
+               estado com o que pedimos: se for outro, quem está rodando não é o nosso. */
+            const outroRodando = !!est.rodando && (est.de !== de || est.ate !== ate || est.empresa !== 'good');
+            const recusou = (r && r.ok === false) || !!(r && r.adiado) || outroRodando;
             const abortou = est.fase === 'erro';
             global.__bfGood = Object.assign({
               estado: recusou ? 'nao_rodou' : (abortou ? 'falhou' : (est.fase === 'concluido_com_erros' ? 'concluido_com_erros' : 'ok')),
               de, ate, terminado: new Date().toISOString(),
-              motivo: recusou ? ((r && (r.msg || r.adiado)) || 'recusou iniciar — veja se há outro backfill rodando')
+              motivo: recusou ? ((r && (r.msg || r.adiado)) || (outroRodando ? ('outro backfill já estava rodando (' + (est.empresa || '?') + ' ' + (est.de || '') + '→' + (est.ate || '') + ') — o da GOOD nem começou; rode de novo depois') : 'recusou iniciar'))
                     : (abortou ? (est.msg || 'abortado') : null),
               fase: est.fase || null, pedidos: est.pedidos, itens: est.itens, gravados: est.gravados, erros: est.erros,
-            }, (r && typeof r === 'object') ? r : {});
+            }, (r && typeof r === 'object') ? r : {},
+            /* Codex #309 r3: o Object.assign do retorno sobrescrevia de/ate com os do estado
+               de OUTRA rodada — o dono veria um período que não foi o que ele pediu. */
+            { de, ate });
             console.log('[GOOD backfill]', JSON.stringify(r || { ok: true }).slice(0, 200));
           })
           .catch(e => {
