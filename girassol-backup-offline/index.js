@@ -1,5 +1,12 @@
 'use strict';
 
+/* ⚠️ 01/09 — ARQUIVO MORTO, NÃO EDITE.
+   O servidor carrega o gbo-app.js desta pasta (config/empresas.js linha 30, desde 05/08).
+   Este index.js não é carregado por ninguém e está DESATUALIZADO: a pesca do ML aqui tinha
+   72 linhas contra 85 da versão viva, atrasada em duas correções. Já houve edição no arquivo
+   errado por causa disso. Mantido por ora só como referência histórica; quem for mexer na
+   Girassol, mexa em gbo-app.js. */
+
 // ════════════════════════════════════════════════════════════════════════
 //  GIRASSOL · BACKUP OFFLINE — FASE 1 (poller) + FASE 2 (bipagem)   (Mover-Pedidos)
 // ════════════════════════════════════════════════════════════════════════
