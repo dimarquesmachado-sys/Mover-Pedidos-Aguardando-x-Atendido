@@ -107,7 +107,7 @@ const _dorme = ms => new Promise(r => setTimeout(r, ms));
    eram cópia IDÊNTICA nas duas empresas (conferido byte a byte), dívida nº 2 do doc de
    paridade. O corpo é o mesmo; a lib recebe readJson/writeJson por ctx. */
 const _shDev = require('../lib/shopee-devolucoes');
-const _ctxSh = { readJson, writeJson };
+const _ctxSh = { readJson, writeJson, ARQ_DEV, ARQ_CAR };   /* Codex #310: faltavam os caminhos de arquivo */
 const coletarDevolucoes = (dias, pedirAoSync) => _shDev.coletarDevolucoes(_ctxSh, dias, pedirAoSync);
 const coletarCarteira   = (dias, pedirAoSync) => _shDev.coletarCarteira(_ctxSh, dias, pedirAoSync);
 
