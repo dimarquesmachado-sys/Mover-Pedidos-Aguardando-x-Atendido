@@ -457,6 +457,7 @@ function routes(readBody) {
         p === '/good-checkout-offline/saude' || p.includes('/callback') ||
         p === '/good-checkout-offline/qz-cert' || p === '/good-checkout-offline/qz-sign' ||
         p === '/good-checkout-offline/danfes-lote' ||
+        p === '/good-checkout-offline/duplicatas' ||
         /* 30/08: o backfill tem guard PRÓPRIO por ADMIN_KEY (não é rota de operador), então
            passa pelo gate de sessão como as outras rotas administrativas. */
         p === '/good-checkout-offline/backfill-vendas' ||
@@ -503,6 +504,28 @@ function routes(readBody) {
        GOOD: o blingGet dela (token próprio), o cache dela e o supaReq dela. Sem o ctx, a
        função lia os pedidos da GIRASSOL e gravava rotulados como GOOD — o parâmetro empresa
        só mandava no rótulo. Nada aqui reimplementa o backfill. */
+    /* 01/09 — CAÇA DUPLICATA: agosto da AMB fecha R$ 259 mil no Bling contra R$ 208 mil no
+       Jodda e R$ 207 mil no nosso dashboard. Os dois independentes concordam, então a sobra
+       está no Bling — provavelmente venda importada duas vezes. Esta rota procura, do sinal
+       mais forte pro mais fraco: mesmo número de venda do marketplace (duplicata quase
+       certa), mesmo cliente+valor+data, e mesmo cliente+valor em até 2 dias. */
+    if (method === 'GET' && p === '/good-checkout-offline/duplicatas') {
+      const kD = urlObj.searchParams.get('k') || '';
+      if (!(process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY)) { json(res, 404, { error: 'not found' }); return true; }
+      const de = urlObj.searchParams.get('de') || '', ate = urlObj.searchParams.get('ate') || '';
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(de) || !/^\d{4}-\d{2}-\d{2}$/.test(ate)) {
+        json(res, 400, { ok: false, erro: 'use ?de=AAAA-MM-DD&ate=AAAA-MM-DD' }); return true;
+      }
+      try {
+        const dupLib = require('../lib/bling-duplicatas');
+        const r = await dupLib.procurar(blingGet, de, ate, { paginas: urlObj.searchParams.get('paginas') });
+        json(res, 200, Object.assign({ ok: !r.erro }, r));
+      } catch (e) {
+        json(res, 500, { ok: false, erro: String(e.message || e).slice(0, 160) });
+      }
+      return true;
+    }
+
     if (method === 'GET' && p === '/good-checkout-offline/backfill-status') {
       const kS = urlObj.searchParams.get('k') || '';
       if (!(process.env.ADMIN_KEY && kS === process.env.ADMIN_KEY)) { json(res, 404, { error: 'not found' }); return true; }

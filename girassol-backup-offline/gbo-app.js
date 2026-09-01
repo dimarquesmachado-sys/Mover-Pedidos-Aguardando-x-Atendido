@@ -759,6 +759,28 @@ function routes(readBody) {
     // mesmo depois que o cookie vencer.
     // Falhou por qualquer motivo? Redireciona pra URL de busca (o comportamento
     // de hoje). Nunca fica pior do que já era. Com &diag=1 devolve o passo a passo.
+    /* 01/09 — CAÇA DUPLICATA: agosto da AMB fecha R$ 259 mil no Bling contra R$ 208 mil no
+       Jodda e R$ 207 mil no nosso dashboard. Os dois independentes concordam, então a sobra
+       está no Bling — provavelmente venda importada duas vezes. Esta rota procura, do sinal
+       mais forte pro mais fraco: mesmo número de venda do marketplace (duplicata quase
+       certa), mesmo cliente+valor+data, e mesmo cliente+valor em até 2 dias. */
+    if (method === 'GET' && p === '/girassol-backup-offline/duplicatas') {
+      const kD = urlObj.searchParams.get('k') || '';
+      if (!(process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY)) { json(res, 404, { error: 'not found' }); return true; }
+      const de = urlObj.searchParams.get('de') || '', ate = urlObj.searchParams.get('ate') || '';
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(de) || !/^\d{4}-\d{2}-\d{2}$/.test(ate)) {
+        json(res, 400, { ok: false, erro: 'use ?de=AAAA-MM-DD&ate=AAAA-MM-DD' }); return true;
+      }
+      try {
+        const dupLib = require('../lib/bling-duplicatas');
+        const r = await dupLib.procurar(blingGet, de, ate, { paginas: urlObj.searchParams.get('paginas') });
+        json(res, 200, Object.assign({ ok: !r.erro }, r));
+      } catch (e) {
+        json(res, 500, { ok: false, erro: String(e.message || e).slice(0, 160) });
+      }
+      return true;
+    }
+
     if (method === 'GET' && p === '/girassol-backup-offline/ir-shopee') {
       const snIr  = String((urlObj.searchParams && urlObj.searchParams.get('sn')) || '').trim();
       const diagIr = ((urlObj.searchParams && urlObj.searchParams.get('diag')) || '') === '1';
