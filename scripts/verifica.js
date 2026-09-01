@@ -77,7 +77,16 @@ for (const f of cfg.identicos_gir_good) {
 console.log('\n═ 4. Paridade de features (assinaturas) ═');
 for (const [f, sigs] of Object.entries(cfg.assinaturas || {})) {
   for (const m of cfg.modulos) {
-    const p = path.join(RAIZ, m, f);
+    /* 01/09: a Girassol não tem index.js — o módulo dela é o gbo-app.js (renomeado em 05/08
+       porque havia 21 index.js no repo e isso causava upload na pasta errada). O index.js
+       que sobrava era CÓDIGO MORTO, ninguém o carregava, e ficou 2 correções atrás da
+       versão viva justamente porque alguém editou o arquivo errado. Removido; aqui o teste
+       passa a olhar o arquivo que de fato roda. */
+    let p = path.join(RAIZ, m, f);
+    if (f === 'index.js' && !fs.existsSync(p)) {
+      const alt = path.join(RAIZ, m, 'gbo-app.js');
+      if (fs.existsSync(alt)) p = alt;
+    }
     if (!fs.existsSync(p)) { falha(m + '/' + f + ' NÃO EXISTE'); continue; }
     const s = fs.readFileSync(p, 'utf8');
     const faltam = sigs.filter(x => !s.includes(x));
@@ -92,7 +101,11 @@ console.log('\n═ 5. Identidade dos arquivos (empresa certa na pasta certa) ═
 let idErr = 0;
 for (const m of cfg.modulos) {
   for (const f of ['painel.html', 'index.js']) {
-    const p = path.join(RAIZ, m, f);
+    let p = path.join(RAIZ, m, f);
+    if (f === 'index.js' && !fs.existsSync(p)) {
+      const alt = path.join(RAIZ, m, 'gbo-app.js');
+      if (fs.existsSync(alt)) p = alt;   /* mesma razão do bloco 4 */
+    }
     if (!fs.existsSync(p)) continue;
     const s = fs.readFileSync(p, 'utf8');
     if (!s.includes('/' + m + '/')) { falha(m + '/' + f + ' NÃO referencia as rotas do próprio módulo — arquivo de outra empresa colado aqui?'); idErr++; }
