@@ -6751,7 +6751,10 @@ function _mlbCategoria(det) {
   if (/afiliado|con afiliados/.test(t))           return 'comissao';
   if (/diferencial de al[ií]quota|difa/.test(t))  return 'imposto';
   if (/minha p[áa]gina|manuten[çc][ãa]o da minha/.test(t)) return 'assinatura';
-  if (/programa decola/.test(t))                  return 'outros';   /* garantia: nem custo nem crédito */
+  /* 02/09 (o dono confirmou): a garantia do Programa Decola da AMB NÃO foi reembolsada —
+     não atendemos aos requisitos e o ML ficou com os R$ 250. Deixou de ser caução e virou
+     custo, então entra como despesa do período em vez de ficar escondida em 'outros'. */
+  if (/programa decola/.test(t))                  return 'decola';
   if (/cancelamento|bonifica/.test(t))            return 'credito';
   if (/publicidade|product ads/.test(t))          return 'ads';
   if (/armazenamento|full/.test(t))               return 'full';
