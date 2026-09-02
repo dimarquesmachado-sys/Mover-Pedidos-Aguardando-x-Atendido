@@ -10,6 +10,22 @@
 const fs = require('fs'), path = require('path'), cp = require('child_process'), os = require('os');
 const RAIZ = process.cwd();
 const cfg = JSON.parse(fs.readFileSync(path.join(RAIZ, '.github', 'espelhos.json'), 'utf8'));
+
+/* Codex #315: qual arquivo cada módulo REALMENTE carrega, lido do config/empresas.js — a
+   fonte da verdade é quem o servidor requer, não o nome do arquivo. Assim, se um index.js
+   morto reaparecer na pasta, o teste continua conferindo o arquivo vivo. */
+const MODULO_VIVO = (() => {
+  const mapa = {};
+  try {
+    const src = fs.readFileSync(path.join(RAIZ, 'config', 'empresas.js'), 'utf8');
+    for (const m of cfg.modulos) {
+      const re = new RegExp("require\\('\\.\\./" + m.replace(/[-/]/g, '\\$&') + "/([a-zA-Z0-9_.-]+)'\\)");
+      const achou = src.match(re);
+      if (achou) mapa[m] = achou[1].endsWith('.js') ? achou[1] : achou[1] + '.js';
+    }
+  } catch (e) {}
+  return mapa;
+})();
 let erros = 0, avisos = 0;
 const falha = m => { console.log('  ✗ ' + m); erros++; };
 const ok    = m => console.log('  ✓ ' + m);
@@ -77,17 +93,14 @@ for (const f of cfg.identicos_gir_good) {
 console.log('\n═ 4. Paridade de features (assinaturas) ═');
 for (const [f, sigs] of Object.entries(cfg.assinaturas || {})) {
   for (const m of cfg.modulos) {
-    /* 01/09: a Girassol não tem index.js — o módulo dela é o gbo-app.js (renomeado em 05/08
-       porque havia 21 index.js no repo e isso causava upload na pasta errada). O index.js
-       que sobrava era CÓDIGO MORTO, ninguém o carregava, e ficou 2 correções atrás da
-       versão viva justamente porque alguém editou o arquivo errado. Removido; aqui o teste
-       passa a olhar o arquivo que de fato roda. */
+    /* 01/09 (Codex #315): o teste tem que olhar o arquivo que o SERVIDOR carrega, sempre.
+       Minha primeira versão só caía no gbo-app.js quando o index.js não existia — se alguém
+       recriasse o index (exatamente o acidente que esta limpeza quer evitar), o teste
+       voltaria a conferir código morto e um gbo-app quebrado passaria batido. Agora o
+       arquivo vivo é decidido por quem o config/empresas.js requer. */
     let p = path.join(RAIZ, m, f);
-    if (f === 'index.js' && !fs.existsSync(p)) {
-      const alt = path.join(RAIZ, m, 'gbo-app.js');
-      if (fs.existsSync(alt)) p = alt;
-    }
-    if (!fs.existsSync(p)) { falha(m + '/' + f + ' NÃO EXISTE'); continue; }
+    if (f === 'index.js' && MODULO_VIVO[m]) p = path.join(RAIZ, m, MODULO_VIVO[m]);
+    if (!fs.existsSync(p)) { falha(m + '/' + (path.basename(p)) + ' NÃO EXISTE'); continue; }
     const s = fs.readFileSync(p, 'utf8');
     const faltam = sigs.filter(x => !s.includes(x));
     if (faltam.length) falha(m + '/' + f + ' SEM as features: ' + faltam.join(', ') + ' — versão desatualizada colada?');
@@ -102,10 +115,7 @@ let idErr = 0;
 for (const m of cfg.modulos) {
   for (const f of ['painel.html', 'index.js']) {
     let p = path.join(RAIZ, m, f);
-    if (f === 'index.js' && !fs.existsSync(p)) {
-      const alt = path.join(RAIZ, m, 'gbo-app.js');
-      if (fs.existsSync(alt)) p = alt;   /* mesma razão do bloco 4 */
-    }
+    if (f === 'index.js' && MODULO_VIVO[m]) p = path.join(RAIZ, m, MODULO_VIVO[m]);   /* mesma razão do bloco 4 */
     if (!fs.existsSync(p)) continue;
     const s = fs.readFileSync(p, 'utf8');
     if (!s.includes('/' + m + '/')) { falha(m + '/' + f + ' NÃO referencia as rotas do próprio módulo — arquivo de outra empresa colado aqui?'); idErr++; }
