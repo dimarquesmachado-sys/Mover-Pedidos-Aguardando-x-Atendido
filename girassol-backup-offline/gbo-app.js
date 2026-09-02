@@ -5041,6 +5041,24 @@ const MLB_FILE = () => path.join(CACHE_DIR, '_ml_billing.json');
 
 function _mlbCategoria(det) {
   const t = String(det || '').toLowerCase();
+  /* 02/09 — regras nascidas da LISTA real do que sobrou em 'outros' (rota ml-billing-outros),
+     não de suposição. O que apareceu nas duas empresas:
+       "Anulación del cargo por campaña de publicidad"  → ESTORNO de ads, e vinha em espanhol:
+          são -R$ 849 na AMB que o ML devolveu e não apareciam em card nenhum (dinheiro A FAVOR
+          do dono, sumido). O 'cancelamento|bonifica' não pega porque o texto usa 'anulación'.
+       "Cargo por venta con afiliados"                  → comissão do programa de afiliados,
+          R$ 1.103 na Girassol e R$ 149 na AMB — é custo por VENDA, entra como comissão.
+       "Cobrança do diferencial de alíquota (ICMS-DIFAL)" → R$ 1.571 na Girassol; a regra de
+          imposto não pegava porque o texto vem com 'diferencial de alíquota' e o DIFAL só
+          aparece entre parênteses, abreviado como ICMS-DIFA.
+       "Tarifa de manutenção da Minha página"           → R$ 1.089; a regra pedia 'minha página'
+          exato e o texto tem 'manutenção da' no meio.
+       "Tarifa de venda"                                → sobrou por acento/variação. */
+  if (/anulaci[oó]n|estorno de cargo/.test(t))    return 'credito';
+  if (/afiliado|con afiliados/.test(t))           return 'comissao';
+  if (/diferencial de al[ií]quota|difa/.test(t))  return 'imposto';
+  if (/minha p[áa]gina|manuten[çc][ãa]o da minha/.test(t)) return 'assinatura';
+  if (/programa decola/.test(t))                  return 'outros';   /* garantia: nem custo nem crédito */
   if (/cancelamento|bonifica/.test(t))            return 'credito';
   if (/publicidade|product ads/.test(t))          return 'ads';
   if (/armazenamento|full/.test(t))               return 'full';
@@ -5185,7 +5203,7 @@ async function mlBillingSync(maxPeriodos) {
             // venda; quando \u00e9 carrinho, o Bling grava o PACK em numero_loja. Sem os dois, o ca\u00e7ador
             // acusou 5.012 faltando quando o buraco real \u00e9 de ~635.
             const pk = String((sh && (sh.pack_id || sh.packId)) || '') || null;
-            base.tarifas[idT] = { d: dia, v: Math.round(val * 100) / 100, c: _mlbCategoria(txt), o: ord, p: (pk && pk !== ord ? pk : null), t: txt.slice(0, 60) };
+            base.tarifas[idT] = { d: dia, v: Math.round(val * 100) / 100, c: _mlbCategoria(txt), o: ord, p: (pk && pk !== ord ? pk : null), t: txt.slice(0, 90)   /* 02/09: era 60 e cortava descrições no meio — 'ICMS-DIFAL' virava 'ICMS-DIFA' e a regra não casava */ };
             _mlb.gravadas++;
           }
           _mlb.linhas += its.length;
