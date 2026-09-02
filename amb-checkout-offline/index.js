@@ -6521,7 +6521,7 @@ async function backfillVendas(de, ate, empresa){
           const comDe = {}, freDe = {};
           for (const t of Object.values(bill.tarifas || {})) {
             if (!t.o) continue;
-            if (t.c === 'comissao' || t.c === 'mp' || t.c === 'parcelamento') comDe[t.o] = Math.round(((comDe[t.o] || 0) + t.v) * 100) / 100;   // 05/08: parcelamento e custo DA VENDA (doc do ML), entra junto
+            if (t.c === 'comissao' || t.c === 'mp' || t.c === 'parcelamento' || t.c === 'antecipacao') comDe[t.o] = Math.round(((comDe[t.o] || 0) + t.v) * 100) / 100;   // 05/08: parcelamento e custo DA VENDA (doc do ML), entra junto
             if (t.c === 'frete') freDe[t.o] = Math.round(((freDe[t.o] || 0) + t.v) * 100) / 100;
           }
           // 03/08 \u2014 o /orders/search do ML tem TETO de 1.000 resultados (offset+limit). Junho teve
@@ -6872,12 +6872,13 @@ async function mlBillingSync(maxPeriodos) {
     for (const t of Object.values(base.tarifas)) {
       if (!t.d) continue;
       if (!porDia[t.d]) porDia[t.d] = {};
-      /* Codex #317: a categoria fica gravada no cache, então mudar o classificador não
-         reclassificava o que já estava lá — e a sincronização só busca os 3 últimos períodos,
-         de modo que tarifas antigas ficariam invisíveis PARA SEMPRE em 'outros'. Reclassifica
-         na leitura, usando o texto original (t.t), e cai no valor gravado quando não há texto. */
-      const cat = t.t ? _mlbCategoria(t.t) : t.c;
-      porDia[t.d][cat] = Math.round(((porDia[t.d][cat] || 0) + t.v) * 100) / 100;
+      /* Codex #317 r2: reclassificar só aqui não bastava — _mapasBilling() e o backfill direto
+         leem o campo GRAVADO (t.c), então o custo por pedido continuaria errado. Agora o
+         próprio registro é atualizado, e todos os consumidores passam a enxergar a categoria
+         nova. A sincronização só busca 3 períodos, então sem isto a tarifa antiga ficaria em
+         'outros' para sempre. */
+      if (t.t) { const nc = _mlbCategoria(t.t); if (nc !== t.c) t.c = nc; }
+      porDia[t.d][t.c] = Math.round(((porDia[t.d][t.c] || 0) + t.v) * 100) / 100;
     }
     base.porDia = porDia; base.atualizado = new Date().toISOString();
     writeJson(MLB_FILE(), base);

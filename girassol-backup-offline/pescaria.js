@@ -362,7 +362,9 @@ function rotasPescaria(ctx) {
         const d = String((x && x.d) || '');
         if (!d || d < de || d > ate) continue;
         const m = d.slice(0, 7);
-        ml[m] = ml[m] || { comissao: 0, mp: 0, frete: 0, parcelamento: 0, ads: 0, full: 0, devolucao: 0, credito: 0, outros: 0 };
+        /* Codex #317: sem as chaves novas, a auditoria jogava antecipacao/assinatura/imposto
+           em 'outros' — justamente as categorias que este PR veio tornar visíveis. */
+        ml[m] = ml[m] || { comissao: 0, mp: 0, frete: 0, parcelamento: 0, ads: 0, full: 0, devolucao: 0, credito: 0, antecipacao: 0, assinatura: 0, imposto: 0, outros: 0 };
         const c = x.c || 'outros';
         if (ml[m][c] == null) ml[m].outros += Number(x.v) || 0;
         else ml[m][c] += Number(x.v) || 0;
