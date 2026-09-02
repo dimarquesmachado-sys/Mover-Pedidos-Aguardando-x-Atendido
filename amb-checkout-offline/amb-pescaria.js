@@ -402,7 +402,10 @@ function rotasPescaria(ctx) {
         // conforme a doc do ML). Se o comparador não somar ele deste lado, o "temos" aparece
         // ~R$ 84 mil maior que o "ml_cobrou" e parece erro grave — quando na verdade os dois
         // lados é que estariam medindo coisas diferentes.
-        const mlCom = (a2m.comissao || 0) + (a2m.mp || 0) + (a2m.parcelamento || 0);
+        /* Codex #317: o pedido agora guarda a antecipação junto da comissão, então a
+           auditoria precisa somá-la aqui também — senão compara critérios diferentes e
+           acusa divergência que não existe. */
+        const mlCom = (a2m.comissao || 0) + (a2m.mp || 0) + (a2m.parcelamento || 0) + (a2m.antecipacao || 0);
         // 05/08: o billing cobra a comissao da venda e ESTORNA quando ela e cancelada (categoria
         // 'credito', que vem NEGATIVA). Como o nosso historico nao guarda venda cancelada, esse
         // estorno tem que sair do "ml_cobrou" — senao a auditoria acusa uma falta que nao existe.
