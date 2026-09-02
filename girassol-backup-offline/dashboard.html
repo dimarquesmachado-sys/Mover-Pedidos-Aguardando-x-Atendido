@@ -1464,20 +1464,27 @@ function desenharDespesasML(d){
     ['\ud83d\udce2 Publicidade (Ads)', c.ads||0,        '#f59e0b', 'tarifas de campanha de an\u00fancios no per\u00edodo'],
     ['\ud83d\udce6 Armazenagem Full',  c.full||0,        '#a78bfa', 'custo de guardar seu estoque no Full'],
     ['\u21a9\ufe0f Devolu\u00e7\u00f5es',       c.devolucao||0,   '#f87171', 'tarifa de devolu\u00e7\u00e3o e frete de retorno'],
+    /* 02/09: conferido contra a fatura de agosto da AMB — estas duas linhas existiam na
+       cobrança e caíam em 'outros', então não apareciam na tela. São pequenas hoje, mas o
+       imposto (ICMS-DIFAL) tende a crescer e é dinheiro que sai do bolso igual. */
+    ['\ud83d\udcc4 Minha p\u00e1gina',    c.assinatura||0,  '#60a5fa', 'assinatura da p\u00e1gina do vendedor no ML'],
+    ['\ud83c\udfdb\ufe0f Impostos (DIFAL)', c.imposto||0,     '#fb923c', 'ICMS-DIFAL e outros impostos cobrados pelo ML'],
     ['\ud83d\udcb5 Tarifas devolvidas', c.credito||0,    '#34d399', 'cobran\u00e7as que o ML estornou \u2014 quase todas de venda CANCELADA, que j\u00e1 est\u00e1 fora do faturamento. Por isso ficam FORA da soma: cont\u00e1-las seria ganhar duas vezes.']
   ];
   // 02/08 — CONSERTO: o crédito (tarifas que o ML estornou) NÃO entra na soma. Ele é quase todo
   // estorno de comissão/frete de venda CANCELADA — e a venda cancelada já está fora do
   // faturamento. Creditar de novo fazia o lucro SUBIR ao descontar despesa, que é absurdo
   // (julho mostrava 184.409 virando 185.057).
-  const soma = (c.ads||0)+(c.full||0)+(c.devolucao||0);
+  /* 02/09: entram também a assinatura da Minha página e os impostos (ICMS-DIFAL) — estavam
+     na fatura, caíam em 'outros' e ficavam fora da soma. O crédito segue fora de propósito. */
+  const soma = (c.ads||0)+(c.full||0)+(c.devolucao||0)+(c.assinatura||0)+(c.imposto||0);
   el.innerHTML = '<div style="display:flex;gap:8px;flex-wrap:wrap">'+
     linhas.map(function(l){
       return '<div class="miniTot" style="background:var(--card);border:1px solid var(--line);border-radius:9px;padding:7px 11px" title="'+l[3]+'">'+
              '<div class="mut" style="font-size:9.5px;text-transform:uppercase;letter-spacing:.03em">'+l[0]+'</div>'+
              '<div style="font-weight:800;font-size:13px;color:'+l[2]+'">'+BRL(l[1])+'</div></div>';
     }).join('')+
-    '<div class="miniTot" style="background:var(--bg2);border:1px solid var(--line2);border-radius:9px;padding:7px 11px" title="publicidade + armazenagem + devolu\u00e7\u00f5es \u2014 as tarifas devolvidas ficam de fora de prop\u00f3sito">'+
+    '<div class="miniTot" style="background:var(--bg2);border:1px solid var(--line2);border-radius:9px;padding:7px 11px" title="publicidade + armazenagem + devolu\u00e7\u00f5es + assinatura + impostos \u2014 as tarifas devolvidas ficam de fora de prop\u00f3sito">'+
       '<div class="mut" style="font-size:9.5px;text-transform:uppercase;letter-spacing:.03em">\u2211 sai do bolso</div>'+
       '<div style="font-weight:800;font-size:13px" class="'+(soma>0?'bad':'ok')+'">'+BRL(soma)+'</div></div>'+
     '</div>'+

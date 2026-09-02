@@ -5013,9 +5013,19 @@ function _mlbCategoria(det) {
   if (/armazenamento|full/.test(t))               return 'full';
   if (/devolu/.test(t))                           return 'devolucao';
   if (/envio|frete/.test(t))                      return 'frete';
-  if (/vender no mercado livre/.test(t))          return 'comissao';
+  /* 02/09: o resumo da fatura usa "Tarifas de venda" (é a MAIOR linha, R$ 16.897 em agosto);
+     o detalhe usa "Custo por vender no Mercado Livre". Os dois são comissão. */
+  if (/vender no mercado livre|tarifas? de venda/.test(t))  return 'comissao';
+  if (/antecipa/.test(t))                         return 'antecipacao';
   if (/cobrar no mercado pago|recebimento/.test(t)) return 'mp';
   if (/parcelamento/.test(t))                     return 'parcelamento';
+  /* 02/09 — conferido contra a fatura de agosto/2026 da AMB (R$ 45.926,80): duas linhas
+     caíam em 'outros' e sumiam da tela, porque o card só desenha as categorias que conhece.
+     São pequenas mas são dinheiro que sai do bolso, e a de imposto tende a crescer:
+       "Tarifas da Minha página"  R$ 99,00
+       "Impostos" (ICMS-DIFAL)    R$ 22,95                                            */
+  if (/minha p[áa]gina|minha-pagina/.test(t))     return 'assinatura';
+  if (/imposto|difal|icms|iss/.test(t))           return 'imposto';
   return 'outros';
 }
 
