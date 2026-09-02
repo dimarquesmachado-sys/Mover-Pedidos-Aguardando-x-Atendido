@@ -1957,6 +1957,24 @@ function routes(readBody) {
        que o ML devolveu e o dashboard não mostra — dinheiro faltando a favor do dono. Esta rota
        lista as descrições que não casaram com nenhuma regra, agrupadas, pra fechar de vez em
        vez de adivinhar. Só lê o cache; não chama a API nem grava nada. */
+    /* 02/09 — FATURA DO CARTÃO do ML, pelo ciclo do ML (13→12), com composição. Vem do campo
+       debited_from_operation que a coleta passou a gravar; sem re-sincronizar, os registros
+       antigos não têm a marca e aparecem em sem_marca. Só lê o cache. */
+    if (method === 'GET' && p === '/girassol-backup-offline/ml-fatura-cartao') {
+      const kF = urlObj.searchParams.get('k') || '';
+      const sF = validarSessao(req.headers['cookie']);
+      if (!((process.env.ADMIN_KEY && kF === process.env.ADMIN_KEY) || (sF && ehAdmin(sF)))) { json(res, 404, { error: 'not found' }); return true; }
+      try {
+        const lib = require('../lib/ml-fatura-cartao');
+        const b = readJson(MLB_FILE(), { tarifas: {} });
+        const ref = urlObj.searchParams.get('ref') || null;
+        const r = ref ? lib.faturas(b.tarifas, { referencia: ref }) : lib.faturas(b.tarifas, { limite: 6 });
+        json(res, 200, Object.assign({ ok: true, atualizado: b.atualizado || null,
+          leia: 'a fatura do ML fecha dia 12 e é debitada dia 18; o card mostra o CICLO, não o mês do calendário. sem_marca = tarifas antigas sem o campo debited_from_operation: re-sincronize pra completar' }, r));
+      } catch (e) { json(res, 500, { ok: false, erro: String(e.message || e).slice(0, 160) }); }
+      return true;
+    }
+
     if (method === 'GET' && p === '/girassol-backup-offline/ml-billing-outros') {
       const kO = urlObj.searchParams.get('k') || '';
       if (!(process.env.ADMIN_KEY && kO === process.env.ADMIN_KEY)) { json(res, 404, { error: 'not found' }); return true; }
@@ -5206,7 +5224,12 @@ async function mlBillingSync(maxPeriodos) {
             // venda; quando \u00e9 carrinho, o Bling grava o PACK em numero_loja. Sem os dois, o ca\u00e7ador
             // acusou 5.012 faltando quando o buraco real \u00e9 de ~635.
             const pk = String((sh && (sh.pack_id || sh.packId)) || '') || null;
-            base.tarifas[idT] = { d: dia, v: Math.round(val * 100) / 100, c: _mlbCategoria(txt), o: ord, p: (pk && pk !== ord ? pk : null), t: txt.slice(0, 90)   /* 02/09: era 60 e cortava descrições no meio — 'ICMS-DIFAL' virava 'ICMS-DIFA' e a regra não casava */ };
+            base.tarifas[idT] = { d: dia, v: Math.round(val * 100) / 100, c: _mlbCategoria(txt), o: ord, p: (pk && pk !== ord ? pk : null), t: txt.slice(0, 90),   /* 02/09: era 60 e cortava descrições no meio — 'ICMS-DIFAL' virava 'ICMS-DIFA' e a regra não casava */
+              /* 02/09 — o ML diz em cada tarifa se ela foi descontada na venda (YES) ou vai
+                 pra fatura do cartão (NO). É o que separa "custo do pedido" de "débito
+                 mensal", e o dono pediu um card com a composição da fatura. Antes era
+                 deduzido pela categoria; agora vem da fonte. */
+              cartao: String(ci.debited_from_operation || '').toUpperCase() === 'NO' };
             _mlb.gravadas++;
           }
           _mlb.linhas += its.length;
