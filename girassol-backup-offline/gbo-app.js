@@ -4334,7 +4334,11 @@ function _mapasBilling() {
   for (const x of Object.values(bill.tarifas || {})) {
     if (!x) continue;
     const v = Number(x.v) || 0;
-    const alvo = (x.c === 'comissao' || x.c === 'mp' || x.c === 'parcelamento') ? com
+    /* Codex #317: a antecipação também nasce de uma VENDA (o vendedor antecipa o recebível
+       daquele pedido), e o relatório do Mercado Pago confirma: vem marcada como "cobrado na
+       operação". Então é custo do PEDIDO, junto de comissão/MP/parcelamento — e não despesa
+       do período. Sem isto, a categoria que criei não teria consumidor nenhum. */
+    const alvo = (x.c === 'comissao' || x.c === 'mp' || x.c === 'parcelamento' || x.c === 'antecipacao') ? com
                : (x.c === 'frete') ? fre : null;
     if (!alvo) continue;
     poe(alvo, x.o, v);
@@ -5025,7 +5029,9 @@ function _mlbCategoria(det) {
        "Tarifas da Minha página"  R$ 99,00
        "Impostos" (ICMS-DIFAL)    R$ 22,95                                            */
   if (/minha p[áa]gina|minha-pagina/.test(t))     return 'assinatura';
-  if (/imposto|difal|icms|iss/.test(t))           return 'imposto';
+  /* Codex #317: 'iss' solto casava DENTRO de comissão e emissão, e como imposto agora entra
+     na despesa do período, uma comissão seria descontada no lugar errado. Palavra inteira. */
+  if (/imposto|difal|icms|\biss\b/.test(t))       return 'imposto';
   return 'outros';
 }
 
@@ -5174,7 +5180,12 @@ async function mlBillingSync(maxPeriodos) {
     for (const t of Object.values(base.tarifas)) {
       if (!t.d) continue;
       if (!porDia[t.d]) porDia[t.d] = {};
-      porDia[t.d][t.c] = Math.round(((porDia[t.d][t.c] || 0) + t.v) * 100) / 100;
+      /* Codex #317: a categoria fica gravada no cache, então mudar o classificador não
+         reclassificava o que já estava lá — e a sincronização só busca os 3 últimos períodos,
+         de modo que tarifas antigas ficariam invisíveis PARA SEMPRE em 'outros'. Reclassifica
+         na leitura, usando o texto original (t.t), e cai no valor gravado quando não há texto. */
+      const cat = t.t ? _mlbCategoria(t.t) : t.c;
+      porDia[t.d][cat] = Math.round(((porDia[t.d][cat] || 0) + t.v) * 100) / 100;
     }
     base.porDia = porDia; base.atualizado = new Date().toISOString();
     writeJson(MLB_FILE(), base);

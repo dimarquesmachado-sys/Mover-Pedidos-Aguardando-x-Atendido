@@ -1510,7 +1510,7 @@ function despesasMLper(){
   const iv2 = intervalo();
   if(!(MLB_PER && MLB_CK === (iv2.de+'|'+iv2.ate))) return 0;
   const c = MLB_PER.categorias || {};
-  return (c.ads||0)+(c.full||0)+(c.devolucao||0);   // SEM o cr\u00e9dito, igual ao card e ao painel de despesas
+  return (c.ads||0)+(c.full||0)+(c.devolucao||0)+(c.assinatura||0)+(c.imposto||0);   // SEM o cr\u00e9dito, igual ao card e ao painel de despesas
 }
 // d192 — o mesmo papel do despesasMLper(), do lado da Shopee. Só entra o que ELA
 // tirou da carteira e que não é saque nem renda de pedido: estorno de devolução
@@ -2317,7 +2317,7 @@ function render(){
       const iv3=intervalo();
       const temD3=(MLB_PER && MLB_CK===(iv3.de+'|'+iv3.ate));
       const c3=temD3?(MLB_PER.categorias||{}):{};
-      const despML3=(c3.ads||0)+(c3.full||0)+(c3.devolucao||0);
+      const despML3=(c3.ads||0)+(c3.full||0)+(c3.devolucao||0)+(c3.assinatura||0)+(c3.imposto||0);
       const despSHP3=despesasSHPper();
       const mBase3=(usaHist?HIST.totais.margem:MC.mc);
       const mFin3=mBase3-Math.round((despML3+despSHP3)*100)/100;
@@ -2347,7 +2347,7 @@ function render(){
         const iv2=intervalo();
         const temD=(MLB_PER && MLB_CK===(iv2.de+'|'+iv2.ate));
         const c=temD?(MLB_PER.categorias||{}):{};
-        const despML=(c.ads||0)+(c.full||0)+(c.devolucao||0);   // SEM o crédito, de propósito
+        const despML=(c.ads||0)+(c.full||0)+(c.devolucao||0)+(c.assinatura||0)+(c.imposto||0);   // SEM o crédito, de propósito
         const despSHP=despesasSHPper();   // d192: estorno de devolução + ajustes da Shopee
         const desp=Math.round((despML+despSHP)*100)/100;
         const mFin=mBase-desp;
