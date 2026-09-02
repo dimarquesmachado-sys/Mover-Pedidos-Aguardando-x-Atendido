@@ -432,7 +432,7 @@ function rotasPescaria(ctx) {
           parcelamento_dentro_da_comissao: r2(tot.ml_parcelamento)
         },
         por_mes,
-        leia: 'comissao.ml_cobrou = categorias comissao+mp+parcelamento do faturamento oficial (desde o b111 o parcelamento entra na comissao do pedido). falta_liquida ja desconta os estornos de venda cancelada (categoria credito), que o ML cobrou e devolveu e que o nosso historico nao guarda. E a falta_liquida que importa.'
+        leia: 'comissao.ml_cobrou = categorias comissao+mp+parcelamento+antecipacao do faturamento oficial (desde o b111 o parcelamento entra na comissao do pedido). falta_liquida ja desconta os estornos de venda cancelada (categoria credito), que o ML cobrou e devolveu e que o nosso historico nao guarda. E a falta_liquida que importa.'
       });
       return true;
     }
