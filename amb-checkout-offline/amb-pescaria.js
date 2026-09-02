@@ -362,7 +362,9 @@ function rotasPescaria(ctx) {
         const d = String((x && x.d) || '');
         if (!d || d < de || d > ate) continue;
         const m = d.slice(0, 7);
-        ml[m] = ml[m] || { comissao: 0, mp: 0, frete: 0, parcelamento: 0, ads: 0, full: 0, devolucao: 0, credito: 0, outros: 0 };
+        /* Codex #317: sem as chaves novas, a auditoria jogava antecipacao/assinatura/imposto
+           em 'outros' — justamente as categorias que este PR veio tornar visíveis. */
+        ml[m] = ml[m] || { comissao: 0, mp: 0, frete: 0, parcelamento: 0, ads: 0, full: 0, devolucao: 0, credito: 0, antecipacao: 0, assinatura: 0, imposto: 0, outros: 0 };
         const c = x.c || 'outros';
         if (ml[m][c] == null) ml[m].outros += Number(x.v) || 0;
         else ml[m][c] += Number(x.v) || 0;
@@ -400,7 +402,10 @@ function rotasPescaria(ctx) {
         // conforme a doc do ML). Se o comparador não somar ele deste lado, o "temos" aparece
         // ~R$ 84 mil maior que o "ml_cobrou" e parece erro grave — quando na verdade os dois
         // lados é que estariam medindo coisas diferentes.
-        const mlCom = (a2m.comissao || 0) + (a2m.mp || 0) + (a2m.parcelamento || 0);
+        /* Codex #317: o pedido agora guarda a antecipação junto da comissão, então a
+           auditoria precisa somá-la aqui também — senão compara critérios diferentes e
+           acusa divergência que não existe. */
+        const mlCom = (a2m.comissao || 0) + (a2m.mp || 0) + (a2m.parcelamento || 0) + (a2m.antecipacao || 0);
         // 05/08: o billing cobra a comissao da venda e ESTORNA quando ela e cancelada (categoria
         // 'credito', que vem NEGATIVA). Como o nosso historico nao guarda venda cancelada, esse
         // estorno tem que sair do "ml_cobrou" — senao a auditoria acusa uma falta que nao existe.
@@ -427,7 +432,7 @@ function rotasPescaria(ctx) {
           parcelamento_dentro_da_comissao: r2(tot.ml_parcelamento)
         },
         por_mes,
-        leia: 'comissao.ml_cobrou = categorias comissao+mp+parcelamento do faturamento oficial (desde o b111 o parcelamento entra na comissao do pedido). falta_liquida ja desconta os estornos de venda cancelada (categoria credito), que o ML cobrou e devolveu e que o nosso historico nao guarda. E a falta_liquida que importa.'
+        leia: 'comissao.ml_cobrou = categorias comissao+mp+parcelamento+antecipacao do faturamento oficial (desde o b111 o parcelamento entra na comissao do pedido). falta_liquida ja desconta os estornos de venda cancelada (categoria credito), que o ML cobrou e devolveu e que o nosso historico nao guarda. E a falta_liquida que importa.'
       });
       return true;
     }
