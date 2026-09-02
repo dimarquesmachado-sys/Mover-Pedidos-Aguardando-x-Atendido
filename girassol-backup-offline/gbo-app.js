@@ -1952,6 +1952,35 @@ function routes(readBody) {
       return true;
     }
 
+    /* 02/09 — O QUE SOBROU EM 'outros': depois de classificar 4 categorias novas, a AMB ainda
+       tem -R$ 450 e a Girassol R$ 4.286 nesse balde. Como o valor da AMB é NEGATIVO, é crédito
+       que o ML devolveu e o dashboard não mostra — dinheiro faltando a favor do dono. Esta rota
+       lista as descrições que não casaram com nenhuma regra, agrupadas, pra fechar de vez em
+       vez de adivinhar. Só lê o cache; não chama a API nem grava nada. */
+    if (method === 'GET' && p === '/girassol-backup-offline/ml-billing-outros') {
+      const kO = urlObj.searchParams.get('k') || '';
+      if (!(process.env.ADMIN_KEY && kO === process.env.ADMIN_KEY)) { json(res, 404, { error: 'not found' }); return true; }
+      try {
+        const b = readJson(MLB_FILE(), { tarifas: {} });
+        const grupos = {};
+        for (const t2 of Object.values(b.tarifas || {})) {
+          if (!t2 || t2.c !== 'outros') continue;
+          const txt = String(t2.t || '(sem descrição)').trim();
+          const g = grupos[txt] || (grupos[txt] = { descricao: txt, qtd: 0, valor: 0, exemplo_dia: t2.d || null });
+          g.qtd++; g.valor = Math.round((g.valor + (Number(t2.v) || 0)) * 100) / 100;
+        }
+        const lista = Object.values(grupos).sort((x, y) => Math.abs(y.valor) - Math.abs(x.valor));
+        json(res, 200, { ok: true, empresa: 'girassol-backup-offline',
+          linhas_em_outros: lista.reduce((s, g) => s + g.qtd, 0),
+          valor_em_outros: Math.round(lista.reduce((s, g) => s + g.valor, 0) * 100) / 100,
+          descricoes: lista.slice(0, 60),
+          leia: 'cada linha é uma descrição que nenhuma regra de _mlbCategoria reconheceu. Valor negativo = crédito que o ML devolveu e que hoje não aparece em nenhum card.' });
+      } catch (e) {
+        json(res, 500, { ok: false, erro: String(e.message || e).slice(0, 160) });
+      }
+      return true;
+    }
+
     if (method === 'GET' && p === '/girassol-backup-offline/ml-billing-resumo') {
       // Codex PR#38 (P1): financeiro é SÓ ADMIN — mesma guarda das rotas irmãs do dashboard
       const sBil = validarSessao(req.headers['cookie']);
