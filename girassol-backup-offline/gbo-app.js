@@ -1968,7 +1968,9 @@ function routes(readBody) {
         const lib = require('../lib/ml-fatura-cartao');
         const b = readJson(MLB_FILE(), { tarifas: {} });
         const ref = urlObj.searchParams.get('ref') || null;
-        const r = ref ? lib.faturas(b.tarifas, { referencia: ref }) : lib.faturas(b.tarifas, { limite: 6 });
+        /* Codex #322 r4: a lib recebe o `atualizado` do cache — é ele que decide se o dado é
+           atual, não uma dedução por dentro */
+        const r = lib.faturas(b.tarifas, Object.assign({ atualizado: b.atualizado || null }, ref ? { referencia: ref } : { limite: 6 }));
         json(res, 200, Object.assign({ ok: true, atualizado: b.atualizado || null,
           leia: 'a fatura do ML fecha dia 12 e é debitada dia 18; o card mostra o CICLO, não o mês do calendário. sem_marca = tarifas antigas sem o campo debited_from_operation: re-sincronize pra completar' }, r));
       } catch (e) { json(res, 500, { ok: false, erro: String(e.message || e).slice(0, 160) }); }
