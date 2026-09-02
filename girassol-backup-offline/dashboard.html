@@ -1185,22 +1185,40 @@ let _mlbCache = {}, MLB_PER = null, MLB_CK = '';   // despesas do ML do período
 async function carregarFaturaCartao(){
   const el = document.getElementById('mlFatura'); if(!el) return;
   try{
-    const iv = intervalo();
-    const r = await fetch(MOD+'/ml-fatura-cartao?ref='+iv.ate, {credentials:'same-origin'});
+    /* 02/09 (pedido do dono): mostrar DUAS faturas — a última fechada (valor definitivo, com a
+       data de débito) e a que está em andamento (acumulando). No dia 13 uma fecha e outra
+       começa ao mesmo tempo; com um card só, uma delas sumiria. Independe do período
+       selecionado, porque a fatura segue o ciclo do ML. */
+    const r = await fetch(MOD+'/ml-fatura-cartao', {credentials:'same-origin'});
     const d = await r.json().catch(()=>null);
     if(!d || !d.ok){ el.innerHTML = '<span class="dim">n\u00e3o consegui ler a fatura do cart\u00e3o</span>'; return; }
-    const f = d.fatura;
-    if(!f){ el.innerHTML = '<span class="dim">\ud83d\udcb3 fatura do cart\u00e3o: sem dado pra este ciclo' + (d.sem_marca ? ' \u2014 ' + d.sem_marca + ' tarifa(s) antigas sem a marca; re-sincronize o faturamento do ML' : '') + '</span>'; return; }
+    const lista = d.faturas || [];
+    const idade = (typeof d.idade_horas === 'number') ? d.idade_horas : null;
+    const idadeTxt = idade == null ? 'sem data de sincroniza\u00e7\u00e3o' : (idade < 1 ? 'sincronizado h\u00e1 menos de 1h' : 'sincronizado h\u00e1 ' + idade + 'h');
+    if(!lista.length){ el.innerHTML = '<span class="dim">\ud83d\udcb3 fatura do cart\u00e3o: sem dado (' + idadeTxt + ')' + (d.sem_marca ? ' \u2014 ' + d.sem_marca + ' tarifa(s) antigas sem a marca; re-sincronize o faturamento do ML' : '') + '</span>'; return; }
+    const emAndamento = lista.find(f => f.situacao === 'em andamento');
+    const fechadas = lista.filter(f => f.situacao !== 'em andamento');
+    const ultimaFechada = fechadas[0] || null;
     const fmtD = s => s ? s.slice(8,10)+'/'+s.slice(5,7) : '';
-    let h = '<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:stretch">';
-    h += '<div class="miniTot" style="border-color:#e879f9"><div class="mut" style="font-size:11px">\ud83d\udcb3 Fatura do cart\u00e3o \u00b7 ' + f.rotulo + '</div>'
-       + '<div style="font-size:18px;color:#e879f9"><b>' + BRL(f.total) + '</b></div>'
-       + '<div class="mut" style="font-size:10px">ciclo ' + fmtD(f.de) + ' \u2192 ' + fmtD(f.ate) + ' \u00b7 d\u00e9bito ' + fmtD(f.debito) + ' \u00b7 ' + f.situacao + '</div></div>';
-    for(const c of (f.composicao||[])){
-      h += '<div class="miniTot" style="border-color:#475569"><div class="mut" style="font-size:11px">' + c.rotulo + '</div><div style="font-size:14px"><b>' + BRL(c.valor) + '</b></div></div>';
-    }
-    h += '</div>';
-    h += '<div class="mut" style="font-size:10.5px;margin-top:6px">\u2139 s\u00f3 o que o ML cobra FORA da venda vai pro cart\u00e3o (o resto ele desconta no repasse). A fatura fecha dia 12 e \u00e9 debitada dia 18, ent\u00e3o o ciclo n\u00e3o coincide com o m\u00eas do calend\u00e1rio \u2014 este card segue o ciclo do ML de prop\u00f3sito, pra bater com o e-mail da fatura.'
+    const bloco = (f, destaque) => {
+      const cor = destaque ? '#c084fc' : '#e879f9';
+      const sit = f.situacao === 'em andamento'
+        ? '<b style="color:#c084fc">em andamento</b>'
+        : (f.situacao.indexOf('em andamento') === 0 ? '<b style="color:#f87171">' + f.situacao + '</b>'
+        : (f.situacao.indexOf('debitada') === 0 ? '<b style="color:#4ade80">debitada em ' + fmtD(f.debito) + '</b>' : '<b style="color:#fbbf24">' + f.situacao + '</b>'));
+      let h = '<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:stretch;margin-bottom:6px">';
+      h += '<div class="miniTot" style="border-color:' + cor + ';min-width:230px"><div class="mut" style="font-size:11px">\ud83d\udcb3 Fatura do cart\u00e3o \u00b7 <b>' + f.rotulo + '</b></div>'
+         + '<div style="font-size:18px;color:' + cor + '"><b>' + BRL(f.total) + '</b></div>'
+         + '<div class="mut" style="font-size:10px">ciclo ' + fmtD(f.de) + ' \u2192 ' + fmtD(f.ate) + ' \u00b7 ' + sit + '</div></div>';
+      for(const c of (f.composicao||[])){
+        h += '<div class="miniTot" style="border-color:#475569"><div class="mut" style="font-size:11px">' + c.rotulo + '</div><div style="font-size:14px"><b>' + BRL(c.valor) + '</b></div></div>';
+      }
+      return h + '</div>';
+    };
+    let h = '';
+    if(ultimaFechada) h += bloco(ultimaFechada, false);
+    if(emAndamento) h += bloco(emAndamento, true);
+    h += '<div class="mut" style="font-size:10.5px;margin-top:4px">\u2139 s\u00f3 o que o ML cobra FORA da venda vai pro cart\u00e3o (o resto ele desconta no repasse). A fatura fecha dia 12 e \u00e9 debitada dia 18; a de cima \u00e9 a \u00faltima fechada, a de baixo acumula at\u00e9 o pr\u00f3ximo fechamento. ' + idadeTxt + '.'
        + (d.sem_marca ? ' \u26a0 ' + d.sem_marca + ' tarifa(s) antigas ainda sem a marca de cobran\u00e7a.' : '') + '</div>';
     el.innerHTML = h;
   }catch(e){ el.innerHTML = '<span class="dim">n\u00e3o consegui ler a fatura do cart\u00e3o</span>'; }
