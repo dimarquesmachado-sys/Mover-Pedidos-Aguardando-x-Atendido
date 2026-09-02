@@ -1189,6 +1189,32 @@ function dBR(d){
 // por isso nunca apareceram no dashboard. Vêm da API oficial de faturamento do ML, guardada em
 // disco pela rotina diária — aqui só lemos o resumo do período escolhido.
 let _mlbCache = {}, MLB_PER = null, MLB_CK = '';   // despesas do ML do período em exibição
+/* 02/09 — FATURA DO CARTÃO: o que o ML debita no cartão todo dia 18, pelo CICLO do ML (13→12)
+   e não pelo período selecionado — cobrança mensal não rateia por dia sem mentir. A composição
+   mostra ads, Full, Minha página e impostos, pra fechar com a fatura que chega no e-mail. */
+async function carregarFaturaCartao(){
+  const el = document.getElementById('mlFatura'); if(!el) return;
+  try{
+    const iv = intervalo();
+    const r = await fetch(MOD+'/ml-fatura-cartao?ref='+iv.ate, {credentials:'same-origin'});
+    const d = await r.json().catch(()=>null);
+    if(!d || !d.ok){ el.innerHTML = '<span class="dim">n\u00e3o consegui ler a fatura do cart\u00e3o</span>'; return; }
+    const f = d.fatura;
+    if(!f){ el.innerHTML = '<span class="dim">\ud83d\udcb3 fatura do cart\u00e3o: sem dado pra este ciclo' + (d.sem_marca ? ' \u2014 ' + d.sem_marca + ' tarifa(s) antigas sem a marca; re-sincronize o faturamento do ML' : '') + '</span>'; return; }
+    const fmtD = s => s ? s.slice(8,10)+'/'+s.slice(5,7) : '';
+    let h = '<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:stretch">';
+    h += '<div class="miniTot" style="border-color:#e879f9"><div class="mut" style="font-size:11px">\ud83d\udcb3 Fatura do cart\u00e3o \u00b7 ' + f.rotulo + '</div>'
+       + '<div style="font-size:18px;color:#e879f9"><b>' + BRL(f.total) + '</b></div>'
+       + '<div class="mut" style="font-size:10px">ciclo ' + fmtD(f.de) + ' \u2192 ' + fmtD(f.ate) + ' \u00b7 d\u00e9bito ' + fmtD(f.debito) + ' \u00b7 ' + f.situacao + '</div></div>';
+    for(const c of (f.composicao||[])){
+      h += '<div class="miniTot" style="border-color:#475569"><div class="mut" style="font-size:11px">' + c.rotulo + '</div><div style="font-size:14px"><b>' + BRL(c.valor) + '</b></div></div>';
+    }
+    h += '</div>';
+    h += '<div class="mut" style="font-size:10.5px;margin-top:6px">\u2139 s\u00f3 o que o ML cobra FORA da venda vai pro cart\u00e3o (o resto ele desconta no repasse). A fatura fecha dia 12 e \u00e9 debitada dia 18, ent\u00e3o o ciclo n\u00e3o coincide com o m\u00eas do calend\u00e1rio \u2014 este card segue o ciclo do ML de prop\u00f3sito, pra bater com o e-mail da fatura.'
+       + (d.sem_marca ? ' \u26a0 ' + d.sem_marca + ' tarifa(s) antigas ainda sem a marca de cobran\u00e7a.' : '') + '</div>';
+    el.innerHTML = h;
+  }catch(e){ el.innerHTML = '<span class="dim">n\u00e3o consegui ler a fatura do cart\u00e3o</span>'; }
+}
 async function carregarDespesasML(){
   const iv = intervalo(); const ck = iv.de + '|' + iv.ate;
   const el = document.getElementById('mlbCards'); if(!el) return;
@@ -1865,6 +1891,7 @@ function montar(){
       '<div class="tw twFit"><table id="tProd"></table></div><div id="prodAviso"></div></div>'+
     '<div class="sec" id="secMLB"><h2>\ud83d\udcb8 Despesas e Devolu\u00e7\u00f5es do Mercado Livre <span class="hint">do per\u00edodo \u00b7 fora da margem por pedido</span></h2>'+
       '<div id="mlbCards" class="mut" style="font-size:12px">carregando\u2026</div>'+
+      '<div id="mlFatura" class="mut" style="font-size:12px;margin-top:10px">carregando fatura do cart\u00e3o\u2026</div>'+
       '<div class="nota" style="margin-top:8px">Vêm do <b>faturamento oficial do ML</b> (o mesmo dos relat\u00f3rios em Faturamento \u2192 Relat\u00f3rios). S\u00e3o cobran\u00e7as do <b>per\u00edodo</b>, n\u00e3o de um pedido \u2014 por isso <b>n\u00e3o entram</b> no Lucro Bruto (M.C.) acima, que \u00e9 margem por venda. Para o lucro do m\u00eas, desconte estes valores.</div>'+
       '<div style="border-top:1px solid var(--line2);margin:12px 0 10px"></div>'+
       '<div class="mut" style="font-size:11px;margin-bottom:6px">\u21a9\ufe0f <b>Devolu\u00e7\u00f5es</b> \u2014 o que voltou e por qu\u00ea</div>'+
@@ -2085,7 +2112,7 @@ function render(){
     : '<button class="pill g covResumo" onclick="document.getElementById(\'cover\').classList.toggle(\'aberto\')">\u2705 dados completos <b>\u25be</b></button>';
   // 28/07: o indicador vive ao lado do "← checkout" e ABRE ALI MESMO. Antes ele mandava abrir
   // um bloco que fica noutro canto da tela, e por isso parecia que o clique não fazia nada.
-  try{ carregarDespesasML(); }catch(e){}   // 02/08: despesas do ML do período
+  try{ carregarDespesasML(); }catch(e){} try{ carregarFaturaCartao(); }catch(e){}   // 02/08: despesas do ML do período
   try{ carregarDespesasShopee(); try{ carregarDevolucoesML(); }catch(e){} try{ carregarDespesasTikTok(); }catch(e){} try{ carregarDespesasMagalu(); }catch(e){} }catch(e){}   // 06/08 (d191): carteira e devoluções da Shopee
   // d196: a previsão do mês é buscada UMA vez (é sempre o mês corrente, não muda
   // com o período). Se já veio, não busca de novo — a não ser que o dia tenha virado.
