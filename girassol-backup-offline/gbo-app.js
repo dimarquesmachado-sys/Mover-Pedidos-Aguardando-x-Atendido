@@ -4471,6 +4471,7 @@ async function custoDoProduto(id, dorme) {
    fase, marcar a rodada) tapava um caso e deixava outro passar. Agora TODA saida devolve o
    estado com um campo `desfecho` explicito. */
 async function backfillVendas(de, ate, empresa, ctx){
+  let _arqEstoqueAtual = null;   /* 03/09: caminho do temporário, visível na limpeza do fim */
   const _ctx = ctx || null;
   const _blingGet  = _ctx && _ctx.blingGet  ? _ctx.blingGet  : blingGet;
   const _readJson  = _ctx && _ctx.readJson  ? _ctx.readJson  : readJson;
@@ -4545,7 +4546,7 @@ async function backfillVendas(de, ate, empresa, ctx){
        total antes de apagar. O que muda é ONDE acumula: cada flush escreve as linhas num
        arquivo JSONL temporário; no fim, conta, confere a guarda, apaga o período e regrava
        lendo o arquivo em lotes de 200. RAM constante, segurança igual. */
-    const arqEstoque = path.join(_CACHE_DIR, '_backfill_estoque_' + empresa + '_' + de + '.jsonl');
+    const arqEstoque = _arqEstoqueAtual = path.join(_CACHE_DIR, '_backfill_estoque_' + empresa + '_' + de + '.jsonl');
     try { fs.mkdirSync(_CACHE_DIR, { recursive: true }); fs.writeFileSync(arqEstoque, ''); } catch (e) {}
     let coletados = 0;
     const flush = async () => {
@@ -5030,7 +5031,7 @@ async function backfillVendas(de, ate, empresa, ctx){
     _backfill.fase = _backfill.erros ? 'concluido_com_erros' : 'concluido';
   } catch(e){ _backfill.fase='erro'; _backfill.msg = String(e.message||e); }
   _backfill.rodando = false; _backfill.fim = new Date().toISOString();
-  try { fs.unlinkSync(arqEstoque); } catch (e) {}   /* 03/09: o temporário em disco some ao terminar */
+  try { if (_arqEstoqueAtual) fs.unlinkSync(_arqEstoqueAtual); } catch (e) {}   /* 03/09: temporário em disco some ao terminar */
   /* fim normal: 'erro' quando o catch pegou excecao, 'com_erros' quando gravou mas houve
      falhas de item, 'ok' quando fechou limpo. */
   return Object.assign({}, _backfill, {

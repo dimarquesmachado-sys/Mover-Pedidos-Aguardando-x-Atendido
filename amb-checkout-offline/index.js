@@ -6186,6 +6186,7 @@ async function backfillVendas(de, ate, empresa){
     return { ok: false, msg: 'canário conferindo o Bling agora — backfill adiado' };
   }
   if(_backfill.rodando) return;
+  let _arqEstoqueAtual = null;   /* 03/09: caminho do temporário, visível na limpeza do fim */
   _backfill = { rodando:true, empresa, de, ate, pagina:0, pedidos:0, itens:0, gravados:0, erros:0, fase:'preparando', inicio:new Date().toISOString(), fim:null, msg:'' };
   try { await garantirSitCancel(async p2 => await blingGet(p2)); } catch (e) {}
   const jaNoBling = new Set();   // 02/08: números de venda que o Bling JÁ trouxe — impede duplicar quando o ML entrar depois   // 01/08: IDs de cancelamento p/ o filtro abaixo
@@ -6232,7 +6233,7 @@ async function backfillVendas(de, ate, empresa){
     let buffer = [];
     /* 03/09: estoque em DISCO, não em memória — ver o comentário no gbo-app.js. A AMB é
        menor, mas cresce (agosto já teve 1.473 pedidos) e o serviço é um só. */
-    const arqEstoque = path.join(CACHE_DIR, '_backfill_estoque_' + empresa + '_' + de + '.jsonl');
+    const arqEstoque = _arqEstoqueAtual = path.join(CACHE_DIR, '_backfill_estoque_' + empresa + '_' + de + '.jsonl');
     try { fs.mkdirSync(CACHE_DIR, { recursive: true }); fs.writeFileSync(arqEstoque, ''); } catch (e) {}
     let coletados = 0;
     const flush = async () => {
@@ -6681,12 +6682,15 @@ async function backfillVendas(de, ate, empresa){
     // gravação final, junto com Bling e ML.
     try {
       if (empresa === 'amb') {
+        /* 03/09: o estoque agora vive em disco — os numero_loja já gravados vêm do arquivo,
+           e as linhas do Magalu são APENDADAS nele (o lint 'orfaos' pegou o array antigo
+           sobrando aqui; teria quebrado em produção com 'estoque is not defined'). */
         const jaBl = new Set();
-        for (const l of estoque) if (l && l.canal === 'magalu' && l.numero_loja) jaBl.add(String(l.numero_loja));
+        for (const lote of lerLotes(500)) for (const l of lote) if (l && l.canal === 'magalu' && l.numero_loja) jaBl.add(String(l.numero_loja));
         const resMg = await magaluLinhas(de, ate, empresa, jaBl);
         if (resMg.erro) { _backfill.msg_magalu = resMg.erro; }
         else {
-          for (const l of resMg.linhas) { estoque.push(l); _backfill.itens++; }
+          if (resMg.linhas.length) { fs.appendFileSync(arqEstoque, resMg.linhas.map(l => JSON.stringify(l)).join('\n') + '\n'); coletados += resMg.linhas.length; _backfill.itens += resMg.linhas.length; }
           _backfill.do_magalu = { vendas: resMg.pedidos, linhas: resMg.linhas.length, parcial: resMg.parcial, na_magalu: resMg.na_magalu };
           if (resMg.pedidos) console.log('[BACKFILL] + ' + resMg.pedidos + ' venda(s) vieram DIRETO da Magalu (o Bling ainda nao tinha)');
         }
@@ -6717,7 +6721,7 @@ async function backfillVendas(de, ate, empresa){
     // Codex PR#33: a reconstrução apaga+reinsere sem credito_ml — redistribui os bônus do período
     try { aplicarCreditosFlex(de, ate).catch(() => {}); } catch (e9) {}
   } catch(e){ _backfill.fase='erro'; _backfill.msg = String(e.message||e); }
-  try { fs.unlinkSync(arqEstoque); } catch (e) {}   /* 03/09: temporário em disco some ao terminar */
+  try { if (_arqEstoqueAtual) fs.unlinkSync(_arqEstoqueAtual); } catch (e) {}   /* 03/09: temporário em disco some ao terminar */
   _backfill.rodando = false; _backfill.fim = new Date().toISOString();
 }
 
