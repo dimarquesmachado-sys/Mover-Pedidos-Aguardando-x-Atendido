@@ -114,6 +114,7 @@ async function blingGet(pathUrl, tentativas = 3, signal = undefined) {
   let token;
   try { token = await garantirToken(); }
   catch (e) { return { ok: false, status: 401, data: null, erro: 'token: ' + e.message }; }
+  let viu429 = false, viuRede = false;
   for (let t = 0; t < tentativas; t++) {
     if (signal && signal.aborted) return { ok: false, status: 0, data: null, erro: 'abortado' };
     let r;
@@ -123,14 +124,19 @@ async function blingGet(pathUrl, tentativas = 3, signal = undefined) {
       r = await fetch(BLING_BASE + pathUrl, _op);
     } catch (e) {
       if (signal && signal.aborted) return { ok: false, status: 0, data: null, erro: 'abortado' };
+      viuRede = true;   /* 03/09: falha de REDE (DNS, socket) — não é o Bling limitando */
       await sleep(800); continue;
     }
-    if (r.status === 429) { await sleep(1500 * (t + 1)); continue; }
+    if (r.status === 429) { viu429 = true; await sleep(1500 * (t + 1)); continue; }
     const txt = await r.text();
     let data = null; try { data = JSON.parse(txt); } catch (e) {}
     return { ok: r.ok, status: r.status, data };
   }
-  return { ok: false, status: 429, data: null };
+  /* 03/09 (Codex #323): este 429 de "esgotou as tentativas" era devolvido igual pra limite
+     REAL do Bling e pra rede caída — e o backfill passou a esperar 2/4/8 min no 429, o que
+     numa queda de rede só atrasa sem ajudar. O status continua 429 (quem já o lê não muda),
+     mas `limite` diz se o Bling de fato respondeu 429 em alguma tentativa. */
+  return { ok: false, status: 429, data: null, limite: viu429 && !viuRede, rede: viuRede };
 }
 
 async function blingWrite(method, pathUrl, body) {
