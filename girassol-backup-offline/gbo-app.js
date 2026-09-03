@@ -4471,6 +4471,9 @@ async function custoDoProduto(id, dorme) {
    fase, marcar a rodada) tapava um caso e deixava outro passar. Agora TODA saida devolve o
    estado com um campo `desfecho` explicito. */
 async function backfillVendas(de, ate, empresa, ctx){
+  let _arqEstoqueAtual = null;   /* 03/09: caminho do temporário, visível na limpeza do fim */
+  let _spoolFalhou = null;       /* Codex #325: falha de gravação do temporário é fatal */
+  const _limparSpool = () => { try { if (_arqEstoqueAtual) fs.unlinkSync(_arqEstoqueAtual); } catch (e) {} };
   const _ctx = ctx || null;
   const _blingGet  = _ctx && _ctx.blingGet  ? _ctx.blingGet  : blingGet;
   const _readJson  = _ctx && _ctx.readJson  ? _ctx.readJson  : readJson;
@@ -4536,12 +4539,57 @@ async function backfillVendas(de, ate, empresa, ctx){
     // acontecem no fim, com a coleta completa em mãos. Falhou no meio? Aborta sem apagar.
     _backfill.fase = 'varrendo';
     let buffer = [];
-    const estoque = [];   // a coleta inteira, aguardando a gravação do final
+    /* 03/09 — ESTOQUE EM DISCO, NÃO EM MEMÓRIA. Três quedas do serviço hoje (status 134 =
+       heap do Node estourou), sempre ~2h30 depois do backfill da Girassol começar: um mês
+       dela são ~2.300 pedidos com detalhe, itens, custo e tarifa, tudo acumulado num array
+       até a gravação do fim. E como é o mesmo processo, derrubava checkout, dashboard, tudo.
+       O desenho "acumula tudo, grava no fim" fica — ele existe por um motivo bom (03/08: o
+       DELETE no começo + falha no meio perdeu 5.813 pedidos) e a guarda dos 60% precisa do
+       total antes de apagar. O que muda é ONDE acumula: cada flush escreve as linhas num
+       arquivo JSONL temporário; no fim, conta, confere a guarda, apaga o período e regrava
+       lendo o arquivo em lotes de 200. RAM constante, segurança igual. */
+    /* Codex #325: rodada que MORREU (queda do processo) não passa por nenhum return — o
+       spool dela fica. Varre e apaga os órfãos antes de começar, pra não acumular no cache. */
+    try { for (const f of fs.readdirSync(_CACHE_DIR)) if (/^_backfill_estoque_/.test(f)) { try { fs.unlinkSync(path.join(_CACHE_DIR, f)); } catch (e) {} } } catch (e) {}
+    const arqEstoque = _arqEstoqueAtual = path.join(_CACHE_DIR, '_backfill_estoque_' + empresa + '_' + de + '.jsonl');
+    try { fs.mkdirSync(_CACHE_DIR, { recursive: true }); fs.writeFileSync(arqEstoque, ''); } catch (e) {}
+    let coletados = 0;
     const flush = async () => {
       if(!buffer.length) return;
-      for (const it of buffer) estoque.push(it);
-      _backfill.coletados = estoque.length;
+      /* Codex #325: se o append falhar (disco cheio), NÃO pode ser engolido pelo catch de
+         marketplace e seguir pro DELETE com o spool incompleto. Marca fatal e aborta. */
+      try { fs.appendFileSync(arqEstoque, buffer.map(it => JSON.stringify(it)).join('\n') + '\n'); }
+      catch (e) { _spoolFalhou = 'não deu pra gravar o temporário em disco: ' + String(e.message || e).slice(0, 120); throw e; }
+      coletados += buffer.length;
+      _backfill.coletados = coletados;
       buffer = [];
+    };
+    /* lê o arquivo em lotes, sem carregar tudo de uma vez */
+    /* Codex #325: ler em STREAM, linha a linha — a versão anterior fazia readFileSync do
+       arquivo inteiro numa string, então o pico de memória continuava crescendo com o mês, e
+       o PR existe justamente pra parar o status 134. Também VALIDA cada linha: uma linha
+       truncada (disco cheio, queda no meio do append) é erro declarado, não JSON.parse
+       explodindo depois do DELETE. */
+    const lerLotes = async function* (tamanho) {
+      const rlmod = require('readline');
+      const rl = rlmod.createInterface({ input: fs.createReadStream(arqEstoque, { encoding: 'utf8' }), crlfDelay: Infinity });
+      let lote = [], n = 0;
+      for await (const linha of rl) {
+        if (!linha) continue;
+        n++;
+        let obj;
+        try { obj = JSON.parse(linha); } catch (e) { throw new Error('spool corrompido na linha ' + n + ' — nada foi apagado'); }
+        lote.push(obj);
+        if (lote.length >= tamanho) { yield lote; lote = []; }
+      }
+      if (lote.length) yield lote;
+    };
+    /* Codex #325: conferir o spool INTEIRO antes de apagar o período — se uma linha estiver
+       truncada, descobrir depois do DELETE deixaria o mês vazio. */
+    const validarSpool = async () => {
+      let n = 0;
+      for await (const lote of lerLotes(500)) n += lote.length;
+      return n;
     };
     let foraDoPeriodo = 0;
     for(let pg=1; pg<=500; pg++){
@@ -4582,7 +4630,7 @@ async function backfillVendas(de, ate, empresa, ctx){
         _backfill.msg = 'a página ' + pg + ' falhou 6 vezes seguidas — rodada ABORTADA e NADA foi apagado: o histórico antigo do período continua inteiro. Rode de novo mais tarde.';
         console.log('[BACKFILL] ✗ abortado na página ' + pg + ' — histórico do período ficou incompleto, rode de novo');
         _backfill.rodando = false; _backfill.fim = new Date().toISOString();
-        return Object.assign({}, _backfill, { desfecho: 'abortado', ok: false });
+        _limparSpool(); return Object.assign({}, _backfill, { desfecho: 'abortado', ok: false });
       }
       if(!lista.length) break;
       // ── b122 (06/08): ESCROW EM LOTE, POR PÁGINA ────────────────────────────────
@@ -4973,7 +5021,7 @@ async function backfillVendas(de, ate, empresa, ctx){
     // Melhor um backfill que falha avisando do que um que apaga e não repõe.
     try {
       const jaTinha = await supaCount(empresa, 'data_venda=gte.' + de + '&data_venda=lte.' + ate);
-      const vouGravar = estoque.length;
+      const vouGravar = coletados;
       _backfill.ja_tinha = jaTinha; _backfill.vou_gravar = vouGravar;
       if (jaTinha > 50 && vouGravar < jaTinha * 0.6) {
         _backfill.fase = 'abortado';
@@ -4982,12 +5030,26 @@ async function backfillVendas(de, ate, empresa, ctx){
                         vouGravar + ' (menos de 60%). Nada foi apagado. Rode de novo — se repetir, a coleta é que está incompleta.';
         console.log('[BACKFILL] ⚠️ ' + _backfill.msg);
         _backfill.rodando = false; _backfill.fim = new Date().toISOString();
-        return Object.assign({}, _backfill, { desfecho: 'abortado', ok: false });   /* trava de sanidade: dados novos < 60% do guardado — NADA foi apagado */
+        _limparSpool(); return Object.assign({}, _backfill, { desfecho: 'abortado', ok: false });   /* trava de sanidade: dados novos < 60% do guardado — NADA foi apagado */
       }
     } catch (e) { console.log('[BACKFILL] guarda de sanidade não pôde conferir: ' + (e.message || e)); }
+    /* Codex #325: dois portões ANTES de apagar — o spool gravou tudo? e está íntegro? Um
+       'não' em qualquer um aborta com o período intacto. */
+    if (_spoolFalhou) {
+      _backfill.fase = 'abortado'; _backfill.erros++; _backfill.msg = 'ABORTADO: ' + _spoolFalhou + ' — nada foi apagado';
+      _backfill.rodando = false; _backfill.fim = new Date().toISOString();
+      _limparSpool(); return Object.assign({}, _backfill, { desfecho: 'abortado', ok: false });
+    }
+    try {
+      const nSpool = await validarSpool();
+      if (nSpool !== coletados) throw new Error('spool tem ' + nSpool + ' linha(s) mas foram coletadas ' + coletados);
+    } catch (e) {
+      _backfill.fase = 'abortado'; _backfill.erros++; _backfill.msg = 'ABORTADO: temporário em disco inválido (' + String(e.message || e).slice(0, 120) + ') — nada foi apagado';
+      _backfill.rodando = false; _backfill.fim = new Date().toISOString();
+      _limparSpool(); return Object.assign({}, _backfill, { desfecho: 'abortado', ok: false });
+    }
     await _supaReq(empresa, 'DELETE', 'vendas_historico?empresa=eq.'+encodeURIComponent(empresa)+'&data_venda=gte.'+de+'&data_venda=lte.'+ate, null);
-    for (let i0 = 0; i0 < estoque.length; i0 += 200) {
-      const lote = estoque.slice(i0, i0 + 200);
+    for await (const lote of lerLotes(200)) {
       // 17/08 — PGRST102 "All object keys must match": o Supabase RECUSA o lote inteiro quando
       // os objetos não têm o MESMO conjunto de chaves. Aconteceu de verdade nesta madrugada: a
       // venda trazida direto do marketplace não tinha `uf` e a do Bling tinha → 112 de 312
@@ -5007,6 +5069,7 @@ async function backfillVendas(de, ate, empresa, ctx){
     _backfill.fase = _backfill.erros ? 'concluido_com_erros' : 'concluido';
   } catch(e){ _backfill.fase='erro'; _backfill.msg = String(e.message||e); }
   _backfill.rodando = false; _backfill.fim = new Date().toISOString();
+  _limparSpool();   /* 03/09: temporário em disco some ao terminar */
   /* fim normal: 'erro' quando o catch pegou excecao, 'com_erros' quando gravou mas houve
      falhas de item, 'ok' quando fechou limpo. */
   return Object.assign({}, _backfill, {
