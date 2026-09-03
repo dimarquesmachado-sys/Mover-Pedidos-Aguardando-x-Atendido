@@ -4552,9 +4552,26 @@ async function backfillVendas(de, ate, empresa, ctx){
       // AGORA: a MESMA página é tentada até 6x com esperas crescentes; se esgotar, a rodada vira
       // ERRO EXPLÍCITO (fase='erro') em vez de fingir sucesso — aí é só rodar de novo.
       let lista = null;
+      /* 03/09 — RATE LIMIT DO BLING: a rodada do ano da Girassol abortou em janeiro depois de
+         2h30 (página 25, 6 falhas seguidas, 30 pedidos sem detalhe). Não era bug: a Girassol
+         tem ~2.300 pedidos/mês e depois de horas batendo na API o Bling passa a recusar (429).
+         As 6 tentativas somavam ~3 min de espera — pouco pra um limite que dura mais. Agora
+         429 tem tratamento próprio: espera LONGA (2, 4, 8 min) e só desiste se o Bling não
+         voltar mesmo. Outras falhas (5xx, rede) mantêm as esperas curtas de antes. */
+      let esperas429 = 0;
       for (let tent = 1; tent <= 6; tent++) {
         const r = await _blingGet('/pedidos/vendas?dataInicial='+de+'&dataFinal='+ate+'&pagina='+pg+'&limite=100');
         if (r && r.ok) { lista = (r.data && r.data.data) || []; break; }
+        const ehLimite = r && (r.status === 429);
+        if (ehLimite && esperas429 < 3) {
+          esperas429++;
+          const esperaL = [120, 240, 480][esperas429 - 1] * 1000;
+          console.log('[BACKFILL] página ' + pg + ': rate limit do Bling — aguardando ' + (esperaL/60000) + ' min (' + esperas429 + '/3)');
+          _backfill.msg = 'página ' + pg + ': limite do Bling, aguardando ' + (esperaL/60000) + ' min (' + esperas429 + '/3)';
+          await dorme(esperaL);
+          tent--;   // a espera longa não gasta uma das 6 tentativas normais
+          continue;
+        }
         const espera = [5, 10, 20, 40, 60, 60][tent - 1] * 1000;
         console.log('[BACKFILL] página ' + pg + ' falhou (HTTP ' + (r && r.status) + ') — tentativa ' + tent + '/6, aguardando ' + (espera/1000) + 's');
         _backfill.msg = 'página ' + pg + ': tentativa ' + tent + '/6 após HTTP ' + (r && r.status);
