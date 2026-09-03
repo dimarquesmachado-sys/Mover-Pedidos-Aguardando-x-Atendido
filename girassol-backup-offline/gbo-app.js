@@ -4536,12 +4536,36 @@ async function backfillVendas(de, ate, empresa, ctx){
     // acontecem no fim, com a coleta completa em mãos. Falhou no meio? Aborta sem apagar.
     _backfill.fase = 'varrendo';
     let buffer = [];
-    const estoque = [];   // a coleta inteira, aguardando a gravação do final
+    /* 03/09 — ESTOQUE EM DISCO, NÃO EM MEMÓRIA. Três quedas do serviço hoje (status 134 =
+       heap do Node estourou), sempre ~2h30 depois do backfill da Girassol começar: um mês
+       dela são ~2.300 pedidos com detalhe, itens, custo e tarifa, tudo acumulado num array
+       até a gravação do fim. E como é o mesmo processo, derrubava checkout, dashboard, tudo.
+       O desenho "acumula tudo, grava no fim" fica — ele existe por um motivo bom (03/08: o
+       DELETE no começo + falha no meio perdeu 5.813 pedidos) e a guarda dos 60% precisa do
+       total antes de apagar. O que muda é ONDE acumula: cada flush escreve as linhas num
+       arquivo JSONL temporário; no fim, conta, confere a guarda, apaga o período e regrava
+       lendo o arquivo em lotes de 200. RAM constante, segurança igual. */
+    const arqEstoque = path.join(_CACHE_DIR, '_backfill_estoque_' + empresa + '_' + de + '.jsonl');
+    try { fs.mkdirSync(_CACHE_DIR, { recursive: true }); fs.writeFileSync(arqEstoque, ''); } catch (e) {}
+    let coletados = 0;
     const flush = async () => {
       if(!buffer.length) return;
-      for (const it of buffer) estoque.push(it);
-      _backfill.coletados = estoque.length;
+      fs.appendFileSync(arqEstoque, buffer.map(it => JSON.stringify(it)).join('\n') + '\n');
+      coletados += buffer.length;
+      _backfill.coletados = coletados;
       buffer = [];
+    };
+    /* lê o arquivo em lotes, sem carregar tudo de uma vez */
+    const lerLotes = function* (tamanho) {
+      const rl = fs.readFileSync(arqEstoque, 'utf8');   // string única, não N objetos vivos
+      let lote = [], ini = 0;
+      for (let i = 0; i <= rl.length; i++) {
+        if (i === rl.length || rl[i] === '\n') {
+          if (i > ini) { lote.push(JSON.parse(rl.slice(ini, i))); if (lote.length >= tamanho) { yield lote; lote = []; } }
+          ini = i + 1;
+        }
+      }
+      if (lote.length) yield lote;
     };
     let foraDoPeriodo = 0;
     for(let pg=1; pg<=500; pg++){
@@ -4973,7 +4997,7 @@ async function backfillVendas(de, ate, empresa, ctx){
     // Melhor um backfill que falha avisando do que um que apaga e não repõe.
     try {
       const jaTinha = await supaCount(empresa, 'data_venda=gte.' + de + '&data_venda=lte.' + ate);
-      const vouGravar = estoque.length;
+      const vouGravar = coletados;
       _backfill.ja_tinha = jaTinha; _backfill.vou_gravar = vouGravar;
       if (jaTinha > 50 && vouGravar < jaTinha * 0.6) {
         _backfill.fase = 'abortado';
@@ -4986,8 +5010,7 @@ async function backfillVendas(de, ate, empresa, ctx){
       }
     } catch (e) { console.log('[BACKFILL] guarda de sanidade não pôde conferir: ' + (e.message || e)); }
     await _supaReq(empresa, 'DELETE', 'vendas_historico?empresa=eq.'+encodeURIComponent(empresa)+'&data_venda=gte.'+de+'&data_venda=lte.'+ate, null);
-    for (let i0 = 0; i0 < estoque.length; i0 += 200) {
-      const lote = estoque.slice(i0, i0 + 200);
+    for (const lote of lerLotes(200)) {
       // 17/08 — PGRST102 "All object keys must match": o Supabase RECUSA o lote inteiro quando
       // os objetos não têm o MESMO conjunto de chaves. Aconteceu de verdade nesta madrugada: a
       // venda trazida direto do marketplace não tinha `uf` e a do Bling tinha → 112 de 312
@@ -5007,6 +5030,7 @@ async function backfillVendas(de, ate, empresa, ctx){
     _backfill.fase = _backfill.erros ? 'concluido_com_erros' : 'concluido';
   } catch(e){ _backfill.fase='erro'; _backfill.msg = String(e.message||e); }
   _backfill.rodando = false; _backfill.fim = new Date().toISOString();
+  try { fs.unlinkSync(arqEstoque); } catch (e) {}   /* 03/09: o temporário em disco some ao terminar */
   /* fim normal: 'erro' quando o catch pegou excecao, 'com_erros' quando gravou mas houve
      falhas de item, 'ok' quando fechou limpo. */
   return Object.assign({}, _backfill, {

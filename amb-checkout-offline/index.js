@@ -6230,12 +6230,28 @@ async function backfillVendas(de, ate, empresa){
     // no final, com a coleta completa em mãos. Falhou no meio? Aborta sem apagar.
     _backfill.fase = 'varrendo';
     let buffer = [];
-    const estoque = [];   // a coleta inteira, aguardando a gravação do final
+    /* 03/09: estoque em DISCO, não em memória — ver o comentário no gbo-app.js. A AMB é
+       menor, mas cresce (agosto já teve 1.473 pedidos) e o serviço é um só. */
+    const arqEstoque = path.join(CACHE_DIR, '_backfill_estoque_' + empresa + '_' + de + '.jsonl');
+    try { fs.mkdirSync(CACHE_DIR, { recursive: true }); fs.writeFileSync(arqEstoque, ''); } catch (e) {}
+    let coletados = 0;
     const flush = async () => {
       if(!buffer.length) return;
-      for (const it of buffer) estoque.push(it);
-      _backfill.coletados = estoque.length;
+      fs.appendFileSync(arqEstoque, buffer.map(it => JSON.stringify(it)).join('\n') + '\n');
+      coletados += buffer.length;
+      _backfill.coletados = coletados;
       buffer = [];
+    };
+    const lerLotes = function* (tamanho) {
+      const rl = fs.readFileSync(arqEstoque, 'utf8');
+      let lote = [], ini = 0;
+      for (let i = 0; i <= rl.length; i++) {
+        if (i === rl.length || rl[i] === '\n') {
+          if (i > ini) { lote.push(JSON.parse(rl.slice(ini, i))); if (lote.length >= tamanho) { yield lote; lote = []; } }
+          ini = i + 1;
+        }
+      }
+      if (lote.length) yield lote;
     };
     let foraDoPeriodo = 0;
     for(let pg=1; pg<=500; pg++){
@@ -6680,8 +6696,7 @@ async function backfillVendas(de, ate, empresa){
     // coleta completa — só AGORA o período antigo dá lugar ao novo
     _backfill.fase = 'gravando';
     await supaReq(empresa, 'DELETE', 'vendas_historico?empresa=eq.'+encodeURIComponent(empresa)+'&data_venda=gte.'+de+'&data_venda=lte.'+ate, null);
-    for (let i0 = 0; i0 < estoque.length; i0 += 200) {
-      const lote = estoque.slice(i0, i0 + 200);
+    for (const lote of lerLotes(200)) {
       // 17/08 — PGRST102 "All object keys must match": o Supabase RECUSA o lote inteiro quando
       // os objetos não têm o MESMO conjunto de chaves. Aconteceu de verdade nesta madrugada: a
       // venda trazida direto do marketplace não tinha `uf` e a do Bling tinha → 112 de 312
@@ -6702,6 +6717,7 @@ async function backfillVendas(de, ate, empresa){
     // Codex PR#33: a reconstrução apaga+reinsere sem credito_ml — redistribui os bônus do período
     try { aplicarCreditosFlex(de, ate).catch(() => {}); } catch (e9) {}
   } catch(e){ _backfill.fase='erro'; _backfill.msg = String(e.message||e); }
+  try { fs.unlinkSync(arqEstoque); } catch (e) {}   /* 03/09: temporário em disco some ao terminar */
   _backfill.rodando = false; _backfill.fim = new Date().toISOString();
 }
 
