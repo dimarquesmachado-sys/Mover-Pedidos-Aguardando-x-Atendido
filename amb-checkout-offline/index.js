@@ -6251,7 +6251,7 @@ async function backfillVendas(de, ate, empresa){
       for (let tent = 1; tent <= 6; tent++) {
         const r = await blingGet('/pedidos/vendas?dataInicial='+de+'&dataFinal='+ate+'&pagina='+pg+'&limite=100');
         if (r && r.ok) { lista = (r.data && r.data.data) || []; break; }
-        const ehLimite = r && (r.status === 429);
+        const ehLimite = r && r.status === 429 && r.limite !== false && !r.rede;   /* 03/09: só limite REAL, não rede caída */
         if (ehLimite && esperas429 < 3) {
           esperas429++;
           const esperaL = [120, 240, 480][esperas429 - 1] * 1000;
@@ -6316,9 +6316,24 @@ async function backfillVendas(de, ate, empresa){
         // ano são ~20 mil detalhes a 2,3 req/s durante 6h — dava pra perder dezenas assim.
         // (Foi o que produziu o `erros: 1` da rodada de 10/02.)
         let det=null;
+        /* 03/09 (Codex #323): o DETALHE também precisa da espera longa no 429. A listagem
+           ganhou 2/4/8 min, mas o detalhe seguia com 3/8/20/40 s: se o limite pegasse aqui,
+           o pedido virava sem_detalhe e a rodada seguia até o DELETE — trocando o histórico
+           antigo por um NOVO com buracos. Foram 30 assim em janeiro. Agora o 429 no detalhe
+           espera igual, e quando o limite passa a varredura continua inteira. */
+        let esperas429d = 0;
         for (let td = 1; td <= 4; td++) {
-          try { const rd = await blingGet('/pedidos/vendas/'+p.id); det = (rd&&rd.ok&&rd.data&&rd.data.data)||null; } catch(e){}
+          let rd = null;
+          try { rd = await blingGet('/pedidos/vendas/'+p.id); det = (rd&&rd.ok&&rd.data&&rd.data.data)||null; } catch(e){}
           if (det) break;
+          if (rd && rd.status === 429 && rd.limite !== false && !rd.rede && esperas429d < 3) {   /* só limite real */
+            esperas429d++;
+            const esperaL = [120, 240, 480][esperas429d - 1] * 1000;
+            _backfill.msg = 'detalhe do pedido ' + p.id + ': limite do Bling, aguardando ' + (esperaL/60000) + ' min (' + esperas429d + '/3)';
+            await dorme(esperaL);
+            td--;
+            continue;
+          }
           const espD = [3, 8, 20, 40][td - 1] * 1000;
           console.log('[BACKFILL] detalhe do pedido ' + p.id + ' falhou — tentativa ' + td + '/4, aguardando ' + (espD/1000) + 's');
           _backfill.msg = 'detalhe do pedido ' + p.id + ': tentativa ' + td + '/4';
