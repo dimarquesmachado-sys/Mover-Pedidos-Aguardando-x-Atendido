@@ -6310,7 +6310,7 @@ async function backfillVendas(de, ate, empresa){
         _backfill.msg = 'a página ' + pg + ' falhou 6 vezes seguidas — rodada ABORTADA e NADA foi apagado: o histórico antigo do período continua inteiro. Rode de novo mais tarde.';
         console.log('[BACKFILL] ✗ abortado na página ' + pg + ' — histórico do período ficou incompleto, rode de novo');
         _backfill.rodando = false; _backfill.fim = new Date().toISOString();
-        return;
+        _limparSpool(); return;   /* Codex #325 r2: limpa o spool ao esgotar as tentativas */
       }
       if(!lista.length) break;
       // ── b122 (06/08): ESCROW EM LOTE, POR PÁGINA ────────────────────────────────
@@ -6709,11 +6709,21 @@ async function backfillVendas(de, ate, empresa){
            e as linhas do Magalu são APENDADAS nele (o lint 'orfaos' pegou o array antigo
            sobrando aqui; teria quebrado em produção com 'estoque is not defined'). */
         const jaBl = new Set();
-        for (const lote of lerLotes(500)) for (const l of lote) if (l && l.canal === 'magalu' && l.numero_loja) jaBl.add(String(l.numero_loja));
+        /* Codex #325 r2: lerLotes é async generator — 'for...of' síncrono lança TypeError na
+           hora, o catch do Magalu engolia, e o backfill seguia pro DELETE SEM as vendas do
+           Magalu. Bug real, teria acontecido em produção. */
+        for await (const lote of lerLotes(500)) for (const l of lote) if (l && l.canal === 'magalu' && l.numero_loja) jaBl.add(String(l.numero_loja));
         const resMg = await magaluLinhas(de, ate, empresa, jaBl);
         if (resMg.erro) { _backfill.msg_magalu = resMg.erro; }
         else {
-          if (resMg.linhas.length) { fs.appendFileSync(arqEstoque, resMg.linhas.map(l => JSON.stringify(l)).join('\n') + '\n'); coletados += resMg.linhas.length; _backfill.itens += resMg.linhas.length; }
+          /* Codex #325 r2: o append do Magalu passa pelo MESMO caminho fatal do flush — se
+             falhar, marca _spoolFalhou e o portão antes do DELETE aborta. Antes o catch do
+             Magalu engolia e o mês era regravado sem essas vendas. */
+          if (resMg.linhas.length) {
+            try { fs.appendFileSync(arqEstoque, resMg.linhas.map(l => JSON.stringify(l)).join('\n') + '\n'); }
+            catch (e) { _spoolFalhou = 'não deu pra gravar as vendas do Magalu no temporário: ' + String(e.message || e).slice(0, 120); throw e; }
+            coletados += resMg.linhas.length; _backfill.itens += resMg.linhas.length;
+          }
           _backfill.do_magalu = { vendas: resMg.pedidos, linhas: resMg.linhas.length, parcial: resMg.parcial, na_magalu: resMg.na_magalu };
           if (resMg.pedidos) console.log('[BACKFILL] + ' + resMg.pedidos + ' venda(s) vieram DIRETO da Magalu (o Bling ainda nao tinha)');
         }
