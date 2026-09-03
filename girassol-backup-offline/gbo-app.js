@@ -4472,6 +4472,8 @@ async function custoDoProduto(id, dorme) {
    estado com um campo `desfecho` explicito. */
 async function backfillVendas(de, ate, empresa, ctx){
   let _arqEstoqueAtual = null;   /* 03/09: caminho do temporário, visível na limpeza do fim */
+  let _spoolFalhou = null;       /* Codex #325: falha de gravação do temporário é fatal */
+  const _limparSpool = () => { try { if (_arqEstoqueAtual) fs.unlinkSync(_arqEstoqueAtual); } catch (e) {} };
   const _ctx = ctx || null;
   const _blingGet  = _ctx && _ctx.blingGet  ? _ctx.blingGet  : blingGet;
   const _readJson  = _ctx && _ctx.readJson  ? _ctx.readJson  : readJson;
@@ -4546,27 +4548,48 @@ async function backfillVendas(de, ate, empresa, ctx){
        total antes de apagar. O que muda é ONDE acumula: cada flush escreve as linhas num
        arquivo JSONL temporário; no fim, conta, confere a guarda, apaga o período e regrava
        lendo o arquivo em lotes de 200. RAM constante, segurança igual. */
+    /* Codex #325: rodada que MORREU (queda do processo) não passa por nenhum return — o
+       spool dela fica. Varre e apaga os órfãos antes de começar, pra não acumular no cache. */
+    try { for (const f of fs.readdirSync(_CACHE_DIR)) if (/^_backfill_estoque_/.test(f)) { try { fs.unlinkSync(path.join(_CACHE_DIR, f)); } catch (e) {} } } catch (e) {}
     const arqEstoque = _arqEstoqueAtual = path.join(_CACHE_DIR, '_backfill_estoque_' + empresa + '_' + de + '.jsonl');
     try { fs.mkdirSync(_CACHE_DIR, { recursive: true }); fs.writeFileSync(arqEstoque, ''); } catch (e) {}
     let coletados = 0;
     const flush = async () => {
       if(!buffer.length) return;
-      fs.appendFileSync(arqEstoque, buffer.map(it => JSON.stringify(it)).join('\n') + '\n');
+      /* Codex #325: se o append falhar (disco cheio), NÃO pode ser engolido pelo catch de
+         marketplace e seguir pro DELETE com o spool incompleto. Marca fatal e aborta. */
+      try { fs.appendFileSync(arqEstoque, buffer.map(it => JSON.stringify(it)).join('\n') + '\n'); }
+      catch (e) { _spoolFalhou = 'não deu pra gravar o temporário em disco: ' + String(e.message || e).slice(0, 120); throw e; }
       coletados += buffer.length;
       _backfill.coletados = coletados;
       buffer = [];
     };
     /* lê o arquivo em lotes, sem carregar tudo de uma vez */
-    const lerLotes = function* (tamanho) {
-      const rl = fs.readFileSync(arqEstoque, 'utf8');   // string única, não N objetos vivos
-      let lote = [], ini = 0;
-      for (let i = 0; i <= rl.length; i++) {
-        if (i === rl.length || rl[i] === '\n') {
-          if (i > ini) { lote.push(JSON.parse(rl.slice(ini, i))); if (lote.length >= tamanho) { yield lote; lote = []; } }
-          ini = i + 1;
-        }
+    /* Codex #325: ler em STREAM, linha a linha — a versão anterior fazia readFileSync do
+       arquivo inteiro numa string, então o pico de memória continuava crescendo com o mês, e
+       o PR existe justamente pra parar o status 134. Também VALIDA cada linha: uma linha
+       truncada (disco cheio, queda no meio do append) é erro declarado, não JSON.parse
+       explodindo depois do DELETE. */
+    const lerLotes = async function* (tamanho) {
+      const rlmod = require('readline');
+      const rl = rlmod.createInterface({ input: fs.createReadStream(arqEstoque, { encoding: 'utf8' }), crlfDelay: Infinity });
+      let lote = [], n = 0;
+      for await (const linha of rl) {
+        if (!linha) continue;
+        n++;
+        let obj;
+        try { obj = JSON.parse(linha); } catch (e) { throw new Error('spool corrompido na linha ' + n + ' — nada foi apagado'); }
+        lote.push(obj);
+        if (lote.length >= tamanho) { yield lote; lote = []; }
       }
       if (lote.length) yield lote;
+    };
+    /* Codex #325: conferir o spool INTEIRO antes de apagar o período — se uma linha estiver
+       truncada, descobrir depois do DELETE deixaria o mês vazio. */
+    const validarSpool = async () => {
+      let n = 0;
+      for await (const lote of lerLotes(500)) n += lote.length;
+      return n;
     };
     let foraDoPeriodo = 0;
     for(let pg=1; pg<=500; pg++){
@@ -4607,7 +4630,7 @@ async function backfillVendas(de, ate, empresa, ctx){
         _backfill.msg = 'a página ' + pg + ' falhou 6 vezes seguidas — rodada ABORTADA e NADA foi apagado: o histórico antigo do período continua inteiro. Rode de novo mais tarde.';
         console.log('[BACKFILL] ✗ abortado na página ' + pg + ' — histórico do período ficou incompleto, rode de novo');
         _backfill.rodando = false; _backfill.fim = new Date().toISOString();
-        return Object.assign({}, _backfill, { desfecho: 'abortado', ok: false });
+        _limparSpool(); return Object.assign({}, _backfill, { desfecho: 'abortado', ok: false });
       }
       if(!lista.length) break;
       // ── b122 (06/08): ESCROW EM LOTE, POR PÁGINA ────────────────────────────────
@@ -5007,11 +5030,26 @@ async function backfillVendas(de, ate, empresa, ctx){
                         vouGravar + ' (menos de 60%). Nada foi apagado. Rode de novo — se repetir, a coleta é que está incompleta.';
         console.log('[BACKFILL] ⚠️ ' + _backfill.msg);
         _backfill.rodando = false; _backfill.fim = new Date().toISOString();
-        return Object.assign({}, _backfill, { desfecho: 'abortado', ok: false });   /* trava de sanidade: dados novos < 60% do guardado — NADA foi apagado */
+        _limparSpool(); return Object.assign({}, _backfill, { desfecho: 'abortado', ok: false });   /* trava de sanidade: dados novos < 60% do guardado — NADA foi apagado */
       }
     } catch (e) { console.log('[BACKFILL] guarda de sanidade não pôde conferir: ' + (e.message || e)); }
+    /* Codex #325: dois portões ANTES de apagar — o spool gravou tudo? e está íntegro? Um
+       'não' em qualquer um aborta com o período intacto. */
+    if (_spoolFalhou) {
+      _backfill.fase = 'abortado'; _backfill.erros++; _backfill.msg = 'ABORTADO: ' + _spoolFalhou + ' — nada foi apagado';
+      _backfill.rodando = false; _backfill.fim = new Date().toISOString();
+      _limparSpool(); return Object.assign({}, _backfill, { desfecho: 'abortado', ok: false });
+    }
+    try {
+      const nSpool = await validarSpool();
+      if (nSpool !== coletados) throw new Error('spool tem ' + nSpool + ' linha(s) mas foram coletadas ' + coletados);
+    } catch (e) {
+      _backfill.fase = 'abortado'; _backfill.erros++; _backfill.msg = 'ABORTADO: temporário em disco inválido (' + String(e.message || e).slice(0, 120) + ') — nada foi apagado';
+      _backfill.rodando = false; _backfill.fim = new Date().toISOString();
+      _limparSpool(); return Object.assign({}, _backfill, { desfecho: 'abortado', ok: false });
+    }
     await _supaReq(empresa, 'DELETE', 'vendas_historico?empresa=eq.'+encodeURIComponent(empresa)+'&data_venda=gte.'+de+'&data_venda=lte.'+ate, null);
-    for (const lote of lerLotes(200)) {
+    for await (const lote of lerLotes(200)) {
       // 17/08 — PGRST102 "All object keys must match": o Supabase RECUSA o lote inteiro quando
       // os objetos não têm o MESMO conjunto de chaves. Aconteceu de verdade nesta madrugada: a
       // venda trazida direto do marketplace não tinha `uf` e a do Bling tinha → 112 de 312
@@ -5031,7 +5069,7 @@ async function backfillVendas(de, ate, empresa, ctx){
     _backfill.fase = _backfill.erros ? 'concluido_com_erros' : 'concluido';
   } catch(e){ _backfill.fase='erro'; _backfill.msg = String(e.message||e); }
   _backfill.rodando = false; _backfill.fim = new Date().toISOString();
-  try { if (_arqEstoqueAtual) fs.unlinkSync(_arqEstoqueAtual); } catch (e) {}   /* 03/09: temporário em disco some ao terminar */
+  _limparSpool();   /* 03/09: temporário em disco some ao terminar */
   /* fim normal: 'erro' quando o catch pegou excecao, 'com_erros' quando gravou mas houve
      falhas de item, 'ok' quando fechou limpo. */
   return Object.assign({}, _backfill, {

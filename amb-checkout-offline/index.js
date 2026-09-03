@@ -6187,6 +6187,8 @@ async function backfillVendas(de, ate, empresa){
   }
   if(_backfill.rodando) return;
   let _arqEstoqueAtual = null;   /* 03/09: caminho do temporário, visível na limpeza do fim */
+  let _spoolFalhou = null;       /* Codex #325: falha de gravação do temporário é fatal */
+  const _limparSpool = () => { try { if (_arqEstoqueAtual) fs.unlinkSync(_arqEstoqueAtual); } catch (e) {} };
   _backfill = { rodando:true, empresa, de, ate, pagina:0, pedidos:0, itens:0, gravados:0, erros:0, fase:'preparando', inicio:new Date().toISOString(), fim:null, msg:'' };
   try { await garantirSitCancel(async p2 => await blingGet(p2)); } catch (e) {}
   const jaNoBling = new Set();   // 02/08: números de venda que o Bling JÁ trouxe — impede duplicar quando o ML entrar depois   // 01/08: IDs de cancelamento p/ o filtro abaixo
@@ -6233,26 +6235,47 @@ async function backfillVendas(de, ate, empresa){
     let buffer = [];
     /* 03/09: estoque em DISCO, não em memória — ver o comentário no gbo-app.js. A AMB é
        menor, mas cresce (agosto já teve 1.473 pedidos) e o serviço é um só. */
+    /* Codex #325: rodada que MORREU (queda do processo) não passa por nenhum return — o
+       spool dela fica. Varre e apaga os órfãos antes de começar, pra não acumular no cache. */
+    try { for (const f of fs.readdirSync(CACHE_DIR)) if (/^_backfill_estoque_/.test(f)) { try { fs.unlinkSync(path.join(CACHE_DIR, f)); } catch (e) {} } } catch (e) {}
     const arqEstoque = _arqEstoqueAtual = path.join(CACHE_DIR, '_backfill_estoque_' + empresa + '_' + de + '.jsonl');
     try { fs.mkdirSync(CACHE_DIR, { recursive: true }); fs.writeFileSync(arqEstoque, ''); } catch (e) {}
     let coletados = 0;
     const flush = async () => {
       if(!buffer.length) return;
-      fs.appendFileSync(arqEstoque, buffer.map(it => JSON.stringify(it)).join('\n') + '\n');
+      /* Codex #325: se o append falhar (disco cheio), NÃO pode ser engolido pelo catch de
+         marketplace e seguir pro DELETE com o spool incompleto. Marca fatal e aborta. */
+      try { fs.appendFileSync(arqEstoque, buffer.map(it => JSON.stringify(it)).join('\n') + '\n'); }
+      catch (e) { _spoolFalhou = 'não deu pra gravar o temporário em disco: ' + String(e.message || e).slice(0, 120); throw e; }
       coletados += buffer.length;
       _backfill.coletados = coletados;
       buffer = [];
     };
-    const lerLotes = function* (tamanho) {
-      const rl = fs.readFileSync(arqEstoque, 'utf8');
-      let lote = [], ini = 0;
-      for (let i = 0; i <= rl.length; i++) {
-        if (i === rl.length || rl[i] === '\n') {
-          if (i > ini) { lote.push(JSON.parse(rl.slice(ini, i))); if (lote.length >= tamanho) { yield lote; lote = []; } }
-          ini = i + 1;
-        }
+    /* Codex #325: ler em STREAM, linha a linha — a versão anterior fazia readFileSync do
+       arquivo inteiro numa string, então o pico de memória continuava crescendo com o mês, e
+       o PR existe justamente pra parar o status 134. Também VALIDA cada linha: uma linha
+       truncada (disco cheio, queda no meio do append) é erro declarado, não JSON.parse
+       explodindo depois do DELETE. */
+    const lerLotes = async function* (tamanho) {
+      const rlmod = require('readline');
+      const rl = rlmod.createInterface({ input: fs.createReadStream(arqEstoque, { encoding: 'utf8' }), crlfDelay: Infinity });
+      let lote = [], n = 0;
+      for await (const linha of rl) {
+        if (!linha) continue;
+        n++;
+        let obj;
+        try { obj = JSON.parse(linha); } catch (e) { throw new Error('spool corrompido na linha ' + n + ' — nada foi apagado'); }
+        lote.push(obj);
+        if (lote.length >= tamanho) { yield lote; lote = []; }
       }
       if (lote.length) yield lote;
+    };
+    /* Codex #325: conferir o spool INTEIRO antes de apagar o período — se uma linha estiver
+       truncada, descobrir depois do DELETE deixaria o mês vazio. */
+    const validarSpool = async () => {
+      let n = 0;
+      for await (const lote of lerLotes(500)) n += lote.length;
+      return n;
     };
     let foraDoPeriodo = 0;
     for(let pg=1; pg<=500; pg++){
@@ -6699,8 +6722,23 @@ async function backfillVendas(de, ate, empresa){
 
     // coleta completa — só AGORA o período antigo dá lugar ao novo
     _backfill.fase = 'gravando';
+    /* Codex #325: dois portões ANTES de apagar — o spool gravou tudo? e está íntegro? Um
+       'não' em qualquer um aborta com o período intacto. */
+    if (_spoolFalhou) {
+      _backfill.fase = 'abortado'; _backfill.erros++; _backfill.msg = 'ABORTADO: ' + _spoolFalhou + ' — nada foi apagado';
+      _backfill.rodando = false; _backfill.fim = new Date().toISOString();
+      _limparSpool(); return Object.assign({}, _backfill, { desfecho: 'abortado', ok: false });
+    }
+    try {
+      const nSpool = await validarSpool();
+      if (nSpool !== coletados) throw new Error('spool tem ' + nSpool + ' linha(s) mas foram coletadas ' + coletados);
+    } catch (e) {
+      _backfill.fase = 'abortado'; _backfill.erros++; _backfill.msg = 'ABORTADO: temporário em disco inválido (' + String(e.message || e).slice(0, 120) + ') — nada foi apagado';
+      _backfill.rodando = false; _backfill.fim = new Date().toISOString();
+      _limparSpool(); return Object.assign({}, _backfill, { desfecho: 'abortado', ok: false });
+    }
     await supaReq(empresa, 'DELETE', 'vendas_historico?empresa=eq.'+encodeURIComponent(empresa)+'&data_venda=gte.'+de+'&data_venda=lte.'+ate, null);
-    for (const lote of lerLotes(200)) {
+    for await (const lote of lerLotes(200)) {
       // 17/08 — PGRST102 "All object keys must match": o Supabase RECUSA o lote inteiro quando
       // os objetos não têm o MESMO conjunto de chaves. Aconteceu de verdade nesta madrugada: a
       // venda trazida direto do marketplace não tinha `uf` e a do Bling tinha → 112 de 312
@@ -6721,7 +6759,7 @@ async function backfillVendas(de, ate, empresa){
     // Codex PR#33: a reconstrução apaga+reinsere sem credito_ml — redistribui os bônus do período
     try { aplicarCreditosFlex(de, ate).catch(() => {}); } catch (e9) {}
   } catch(e){ _backfill.fase='erro'; _backfill.msg = String(e.message||e); }
-  try { if (_arqEstoqueAtual) fs.unlinkSync(_arqEstoqueAtual); } catch (e) {}   /* 03/09: temporário em disco some ao terminar */
+  _limparSpool();   /* 03/09: temporário em disco some ao terminar */
   _backfill.rodando = false; _backfill.fim = new Date().toISOString();
 }
 
