@@ -1616,7 +1616,27 @@ function routes(readBody) {
       // Codex (#105): mão dupla — se o canário está consultando o Bling AGORA, o backfill
       // espera. Sem isto, iniciar um por cima recriava o 429 que acabamos de evitar.
       if (_canario.rodando) { json(res, 200, { ok: false, msg: 'o canário está conferindo o Bling agora (desde ' + _canario.desde + ') — espere alguns segundos e tente de novo' }); return true; }
-      if (_backfill.rodando) { json(res, 200, { ok: false, msg: 'já tem um backfill rodando — acompanhe em /backfill-status', status: _backfill }); return true; }
+      if (_backfill.rodando) {
+        /* 04/09 — ECO DA PRÓPRIA CHAMADA: o navegador faz duas requisições ao abrir a URL
+           (a página e o favicon/retry). A primeira dispara; a segunda chega segundos depois,
+           vê o estado já 'rodando' e respondia "já tem um backfill rodando" — mostrando o
+           backfill que o próprio usuário acabou de criar. Parecia recusa e confundiu o dono
+           várias vezes. Se o período pedido é o MESMO e a rodada começou há poucos segundos,
+           é eco: responde 'iniciado'. Só quando é outro período (ou rodada antiga) é recusa
+           de verdade. */
+        const mesmoPeriodo = _backfill.de === de && _backfill.ate === ate;
+        const segundos = _backfill.inicio ? (Date.now() - Date.parse(_backfill.inicio)) / 1000 : 1e9;
+        if (mesmoPeriodo && segundos < 30) {
+          json(res, 200, { ok: true, msg: '✅ backfill deste período já foi iniciado (há ' + Math.round(segundos) + 's) — acompanhe em /backfill-status', de, ate, status: _backfill });
+          return true;
+        }
+        json(res, 200, { ok: false,
+          msg: mesmoPeriodo
+            ? ('já tem um backfill DESTE período rodando desde ' + String(_backfill.inicio || '').slice(11, 16) + ' — acompanhe em /backfill-status')
+            : ('já tem um backfill rodando (' + _backfill.de + ' a ' + _backfill.ate + ') — espere terminar; acompanhe em /backfill-status'),
+          status: _backfill });
+        return true;
+      }
       const de = String((urlObj.searchParams && urlObj.searchParams.get('de')) || '2026-01-01').slice(0, 10);
       const ate = String((urlObj.searchParams && urlObj.searchParams.get('ate')) || new Date().toISOString().slice(0, 10)).slice(0, 10);
       backfillVendas(de, ate, 'girassol');   // NÃO await — roda em background
