@@ -37,6 +37,12 @@ const {
   marcarProcessado
 } = require('./blingApi');
 const { enviarNFeParaML } = require('./mlApi');
+/* 04/09 — NFs que o ML recusa por erro PERMANENTE (CEP importado errado pelo Bling, doc
+   inválido) não podem ser retransmitidas para sempre: nos logs de hoje a mesma NF apareceu
+   de 04:22 a 08:31 batendo no ML a cada 10 min, e ninguém ficava sabendo. Agora registra e
+   para; o checkout mostra a lista pra intervenção manual (cancelar, reemitir, subir XML). */
+const _travadas = require('../lib/nf-travadas');
+const _CACHE_TRAV = process.env.CACHE_DIR || '/data';
 
 const MAX_NFE = parseInt(process.env.GOOD_MAX_NFE_ML || '60');
 
@@ -169,7 +175,15 @@ async function _fluxoNFeML(tokenBling) {
         }
         semPendencia++;
       } else {
-        console.error(`[GOOD F3-NFeML] Erro ao enviar NF ${nf.numero} (pedido ML ${numeroPedidoLoja}):`, msg);
+        const _perm = _travadas.registrar(_CACHE_TRAV, { nfeId, numero: nf.numero, pedidoML: numeroPedidoLoja, shipment: nf.shipment || null, erro: msg });
+        if (_perm.permanente) {
+          /* erro que só mão humana resolve: marca processada pra não tentar de novo e
+             fica na lista de travadas, que o checkout mostra */
+          marcarProcessado('F3', nfeId);
+          console.error(`[GOOD F3-NFeML] NF ${nf.numero} (pedido ML ${numeroPedidoLoja}) TRAVADA — ${_perm.registro.motivo}. Parei de tentar; resolva no Bling e ela sai da lista.`);
+        } else {
+          console.error(`[GOOD F3-NFeML] Erro ao enviar NF ${nf.numero} (pedido ML ${numeroPedidoLoja}):`, msg);
+        }
         erros++;
       }
     }

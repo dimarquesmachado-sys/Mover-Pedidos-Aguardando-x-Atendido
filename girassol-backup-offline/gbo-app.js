@@ -713,7 +713,8 @@ function routes(readBody) {
       const _meu = p.startsWith('/girassol-backup-offline'); // guarda só age nas rotas DESTE módulo
       const _pub = (
         p === '/girassol-backup-offline' || p === '/girassol-backup-offline/' ||
-        p === '/girassol-backup-offline/painel' || p === '/girassol-backup-offline/login' ||
+        p === '/girassol-backup-offline/painel' ||
+      p === '/girassol-backup-offline/nf-travadas' ||   /* 04/09: leitura pro card de NFs travadas */ p === '/girassol-backup-offline/login' ||
         p === '/girassol-backup-offline/operadores' || p === '/girassol-backup-offline/health' ||
         p === '/girassol-backup-offline/saude' || p.includes('/callback') ||
         p === '/girassol-backup-offline/qz-cert' || p === '/girassol-backup-offline/qz-sign' ||
@@ -764,6 +765,27 @@ function routes(readBody) {
        está no Bling — provavelmente venda importada duas vezes. Esta rota procura, do sinal
        mais forte pro mais fraco: mesmo número de venda do marketplace (duplicata quase
        certa), mesmo cliente+valor+data, e mesmo cliente+valor em até 2 dias. */
+    /* 04/09 — NFs TRAVADAS: o ML recusa por erro que só mão humana resolve (CEP que o Bling
+       importou errado, documento inválido). A F3 parou de retransmitir; aqui o checkout
+       mostra quais precisam de intervenção, com o que fazer em cada uma. */
+    if (method === 'GET' && p === '/girassol-backup-offline/nf-travadas') {
+      try {
+        const trav = require('../lib/nf-travadas');
+        const kT = urlObj.searchParams.get('k') || '';
+        const resolver = urlObj.searchParams.get('resolver');
+        if (resolver) {
+          if (!(process.env.ADMIN_KEY && kT === process.env.ADMIN_KEY)) { json(res, 404, { error: 'not found' }); return true; }
+          const ok = trav.resolver(CACHE_DIR, resolver);
+          json(res, 200, { ok, msg: ok ? ('NF ' + resolver + ' saiu da lista') : ('NF ' + resolver + ' nao estava na lista') });
+          return true;
+        }
+        const l = trav.lista(CACHE_DIR);
+        json(res, 200, { ok: true, total: l.length, travadas: l,
+          leia: 'estas NFs o ML recusou por erro permanente e a rotina parou de tentar. Resolva no Bling (cancelar, corrigir, reemitir, subir o XML) e chame ?resolver=<id>&k= pra tirar da lista.' });
+      } catch (e) { json(res, 500, { ok: false, erro: String(e.message || e).slice(0, 160) }); }
+      return true;
+    }
+
     if (method === 'GET' && p === '/girassol-backup-offline/duplicatas') {
       const kD = urlObj.searchParams.get('k') || '';
       if (!(process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY)) { json(res, 404, { error: 'not found' }); return true; }
