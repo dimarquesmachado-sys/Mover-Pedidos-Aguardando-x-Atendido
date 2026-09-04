@@ -424,4 +424,22 @@ process.on('SIGINT',  () => { server.close(); process.exit(0); });
 
 // Rede de segurança p/ operacao desassistida: uma promise rejeitada nao tratada
 // NAO derruba mais o processo (Node 22 mataria) — so loga e o servico segue de pe.
+/* 04/09 — VIGIA DE MEMÓRIA. O Node, sem o --max-old-space-size, assume ~2.1 GB de heap e só
+   coleta lixo agressivamente perto disso; o container do Render tem 512 MB, então ele era
+   MORTO (status 134) antes de o V8 achar que precisava limpar. Foi a causa de fundo das
+   quedas: o backfill não tinha uma estrutura grande — tinha lixo que nunca era recolhido.
+   Agora o limite é declarado no start (340 MB) e este vigia avisa e força a coleta quando
+   passa de 75%, pra o problema aparecer no log ANTES de virar queda. */
+setInterval(() => {
+  try {
+    const u = process.memoryUsage();
+    const lim = require('v8').getHeapStatistics().heap_size_limit;
+    const pct = u.heapUsed / lim;
+    if (pct > 0.75) {
+      console.warn('[memoria] heap em ' + Math.round(pct * 100) + '% (' + Math.round(u.heapUsed / 1e6) + ' de ' + Math.round(lim / 1e6) + ' MB) — forçando coleta');
+      if (global.gc) global.gc();
+    }
+  } catch (e) {}
+}, 60000);
+
 process.on('unhandledRejection', (e) => { console.error('[server] unhandledRejection (ignorado p/ nao derrubar):', (e && e.message) || e); });
