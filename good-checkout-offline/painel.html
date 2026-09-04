@@ -359,6 +359,9 @@
   </div>
   <div class="stats" id="stats">carregando…</div>
 </header>
+<!-- 04/09: NFs que o ML recusou por erro permanente (CEP que o Bling importou errado, doc
+     inválido). A rotina parou de retransmitir; aqui fica o aviso pra intervenção manual. -->
+<div id="nfTravadas" style="display:none;margin:8px 12px;padding:10px 14px;border-radius:8px;background:#7f1d1d;color:#fee2e2;font-size:13px;line-height:1.5"></div>
 
 <div class="main">
   <aside class="sidebar">
@@ -793,6 +796,27 @@ async function carregarLista(){
 }
 
 // força uma sincronia real com o Bling (roda 1 ciclo → reconcilia o que saiu do ATENDIDO)
+
+/* 04/09 — aviso de NF TRAVADA no topo do painel. O ML recusa por erro que só mão humana
+   resolve (CEP importado errado pelo Bling); a rotina F3 parou de tentar e registra aqui,
+   pra não ficar só no log do servidor onde ninguém vê. */
+async function checarNFTravadas(){
+  const el = document.getElementById('nfTravadas'); if(!el) return;
+  try{
+    const r = await fetch('/good-checkout-offline/nf-travadas', {credentials:'same-origin'});
+    const d = await r.json().catch(()=>null);
+    if(!d || !d.ok || !d.total){ el.style.display='none'; return; }
+    let h = '<b>\u26a0\ufe0f ' + d.total + ' nota' + (d.total>1?'s':'') + ' fiscal' + (d.total>1?'is':'') + ' travada' + (d.total>1?'s':'') + ' \u2014 o Mercado Livre recusou e a rotina parou de tentar.</b><br>';
+    for(const t of d.travadas.slice(0,6)){
+      h += '<div style="margin-top:6px">\u2022 <b>NF ' + (t.numero||t.nfe_id) + '</b>'
+         + (t.pedido_ml ? ' \u00b7 pedido ML ' + t.pedido_ml : '')
+         + '<br><span style="opacity:.85">' + t.motivo + ' \u2014 ' + t.como_resolver + '</span></div>';
+    }
+    if(d.total>6) h += '<div style="margin-top:6px;opacity:.8">\u2026 e mais ' + (d.total-6) + '</div>';
+    el.innerHTML = h; el.style.display='';
+  }catch(e){ el.style.display='none'; }
+}
+setInterval(checarNFTravadas, 5*60000);
 async function sincronizar(){
   const b = $('btnSync');
   const orig = b ? b.textContent : '';
