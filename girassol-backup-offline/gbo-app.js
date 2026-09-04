@@ -4748,10 +4748,16 @@ async function backfillVendas(de, ate, empresa, ctx){
         // ── CASCATA (04/08): billing → sale_fee → o zero do Bling ──────────────────────
         let comFonte = (comissao > 0) ? 'bling' : 'zero';
         let freteShopee = null;
-        if ((!comissao || comissao <= 0) && canal === 'ml' && nl) {
+        /* 04/09 — BILLING ANTES DO BLING (decisão do dono). Até aqui o billing só entrava
+           quando a comissão estava zerada, então em abril/2026, com o Bling tendo trazido
+           1.909 comissões, só 3 pedidos usaram o valor real: o resto ficou na ESTIMATIVA.
+           O billing é o que o ML COBROU de fato — mesma régua que já usamos na Shopee (escrow)
+           e no TikTok (extrato), onde o marketplace manda e o Bling é o palpite. Sem dado no
+           billing, a cascata segue igual: sale_fee e depois o que o Bling deu. */
+        if (canal === 'ml' && nl) {
           const cB = Number(comBill[String(nl).trim()] || 0);
           if (cB > 0) { comissao = cB; comFonte = 'billing'; }
-          else {
+          else if (!comissao || comissao <= 0) {
             const tkAgora = await tokenFee();
             const f = tkAgora ? await _feeMLLeve(nl, tkAgora) : 0;
             if (f > 0) { comissao = f; comFonte = 'sale_fee'; await dorme(120); }
@@ -4862,7 +4868,10 @@ async function backfillVendas(de, ate, empresa, ctx){
         // TikTok entra ANTES do Bling na escolha do frete (é o dado do próprio marketplace)
         if (freteTiktok != null) frete = freteTiktok;
         let freFonte = (freteShopee != null) ? 'escrow' : (freteTiktok != null ? 'tiktok' : ((frete > 0) ? 'bling' : 'zero'));
-        if ((!frete || frete <= 0) && canal === 'ml' && nl) {
+        /* 04/09: mesma inversão da comissão — o frete cobrado no faturamento do ML vale mais
+           que o previsto do Bling. O escrow da Shopee e o extrato do TikTok já tinham essa
+           precedência; o ML estava atrás. */
+        if (canal === 'ml' && nl) {
           const fB = Number(freBill[String(nl).trim()] || 0);
           if (fB > 0) { frete = fB; freFonte = 'billing'; }
         }
