@@ -4398,25 +4398,16 @@ let _backfill = { rodando:false, empresa:null, de:null, ate:null, pagina:0, pedi
 // (comissao) + processamento do pagamento (Mercado Pago) + parcelamento/antecipacao
 // quando aplicavel. Sao os tres custos DA VENDA, entao pertencem ao pedido, nao ao mes.
 // Sem isso eram R$ 84.671,54 no ano que a margem simplesmente nao via.
-function _mapasBilling() {
-  const bill = readJson(path.join(CACHE_DIR, '_ml_billing.json'), { tarifas: {} });
-  const com = {}, fre = {};
-  const poe = (alvo, chave, v) => { if (!chave) return; const k = String(chave); alvo[k] = Math.round(((alvo[k] || 0) + v) * 100) / 100; };
-  for (const x of Object.values(bill.tarifas || {})) {
-    if (!x) continue;
-    const v = Number(x.v) || 0;
-    /* Codex #317: a antecipação também nasce de uma VENDA (o vendedor antecipa o recebível
-       daquele pedido), e o relatório do Mercado Pago confirma: vem marcada como "cobrado na
-       operação". Então é custo do PEDIDO, junto de comissão/MP/parcelamento — e não despesa
-       do período. Sem isto, a categoria que criei não teria consumidor nenhum. */
-    const alvo = (x.c === 'comissao' || x.c === 'mp' || x.c === 'parcelamento' || x.c === 'antecipacao') ? com
-               : (x.c === 'frete') ? fre : null;
-    if (!alvo) continue;
-    poe(alvo, x.o, v);
-    // a mesma tarifa e indexada tambem pelo PACK: o numeroPedidoLoja do Bling as vezes e o carrinho
-    if (x.p && x.p !== x.o) poe(alvo, x.p, v);
-  }
-  return { com, fre };
+/* 04/09 — o mapa agora vem de lib/ml-billing-mapa.js, que lê o billing em STREAM e guarda
+   um índice pequeno em disco. O jeito antigo dava JSON.parse no _ml_billing.json inteiro —
+   96.293 tarifas, 26 MB de heap POR CHAMADA, em 7 pontos do arquivo. Foi isso que estourou
+   os 512 MB do Render e derrubou o serviço 5 vezes entre 03 e 04/09 (status 134), inclusive
+   com o backfill tendo varrido só 14 pedidos. Agora: 8 MB na primeira montagem, 3 ms nas
+   seguintes. Continua síncrono pra quem chama — o await fica aqui dentro. */
+async function _mapasBilling() {
+  const lib = require('../lib/ml-billing-mapa');
+  const m = await lib.mapas(CACHE_DIR);
+  return { com: m.com || {}, fre: m.fre || {} };
 }
 // 1 chamada por venda (o pescarDadosML faz 3-4 e so o sale_fee interessa aqui)
 async function _feeMLLeve(nl, tk) {
@@ -4524,7 +4515,7 @@ async function backfillVendas(de, ate, empresa, ctx){
     const custos = _readJson(path.join(_CACHE_DIR,'_custos.json'), {});
     const cfg = _readJson(path.join(_CACHE_DIR,'_config-fiscal.json'), {aliquotas:{}});
     // cascata da comissao: mapa do faturamento oficial (de graca, ja esta no disco) + token do ML
-    const { com: comBill, fre: freBill } = _mapasBilling();
+    const { com: comBill, fre: freBill } = await _mapasBilling();
     // 05/08: o token do ML vale ~6h e a rodada do ano leva ~6h — pegar UMA vez no começo
     // fazia o fim da varredura rodar com token vencido e o _feeMLLeve devolver 0 CALADO.
     // Agora renova a cada 2h (o garantirTokenML já cuida do refresh de verdade).
