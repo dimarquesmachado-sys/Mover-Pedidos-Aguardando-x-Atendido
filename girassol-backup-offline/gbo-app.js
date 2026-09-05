@@ -673,7 +673,7 @@ async function completarTarifaTikTok(dias, opts) {
 }
 
 const _noturna = criarNoturna({
-  mlBillingSync, backfillVendas, mlSyncFees, varrerCancelados, 
+  mlBillingSync, backfillVendas, backfillEstado, mlSyncFees, varrerCancelados, 
   // 11/08 (herdado da AMB): o canário PRECISA do contexto — sem ele rotasCanario(undefined)
   // explodia no destructure, o catch engolia, e a etapa noturna dizia "conferido" sem ter
   // conferido NADA. Estava mudo aqui desde que a noturna existe.
@@ -1609,6 +1609,31 @@ function routes(readBody) {
     }
 
     // DISPARA o backfill de um período (roda em BACKGROUND). Uso: /girassol-backup-offline/backfill?de=2026-01-01&ate=2026-01-31
+    /* 05/09 — BACKFILL FATIADO. O container tem 512 MB e um MÊS da Girassol (~3.000 pedidos)
+       estoura: 5 quedas com status 134, 3 delas já com o heap limitado pelo #329. O Bling
+       não é o gargalo (zero erros até cair) — é tamanho de trabalho contra tamanho de
+       container. Aqui o período longo vira fatias de 10 dias, rodadas uma por vez, com o
+       progresso EM DISCO: se o processo cair, o boot retoma de onde parou, sozinho. */
+    if (method === 'GET' && p === '/girassol-backup-offline/backfill-plano') {
+      const kP = urlObj.searchParams.get('k') || '';
+      if (!(process.env.ADMIN_KEY && kP === process.env.ADMIN_KEY)) { json(res, 404, { error: 'not found' }); return true; }
+      const fat = require('../lib/backfill-fatiado');
+      const acao = urlObj.searchParams.get('acao') || 'status';
+      if (acao === 'parar')    { json(res, 200, { ok: fat.parar(CACHE_DIR), msg: 'plano parado: a fatia em curso termina e ele não segue' }); return true; }
+      if (acao === 'retentar') { const n = fat.retentar(CACHE_DIR); tocarPlano(); json(res, 200, { ok: true, msg: n + ' fatia(s) com erro voltaram pra fila' }); return true; }
+      if (acao === 'criar') {
+        const de = urlObj.searchParams.get('de') || '', ate = urlObj.searchParams.get('ate') || '';
+        const dias = Math.min(31, Math.max(1, Number(urlObj.searchParams.get('dias')) || 10));
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(de) || !/^\d{4}-\d{2}-\d{2}$/.test(ate)) { json(res, 400, { ok: false, erro: 'use ?acao=criar&de=AAAA-MM-DD&ate=AAAA-MM-DD&dias=10' }); return true; }
+        const pl = fat.criar(CACHE_DIR, de, ate, dias);
+        tocarPlano();
+        json(res, 200, { ok: true, msg: '✅ plano criado: ' + pl.fatias.length + ' fatias de ' + dias + ' dias. Roda sozinho, uma por vez, e retoma se o serviço reiniciar.', resumo: fat.resumo(pl) });
+        return true;
+      }
+      json(res, 200, Object.assign({ ok: true }, fat.resumo(fat.ler(CACHE_DIR))));
+      return true;
+    }
+
     if (method === 'GET' && p === '/girassol-backup-offline/backfill') {
       const kD = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
       const sessD = validarSessao(req.headers['cookie']);
@@ -4483,6 +4508,30 @@ async function custoDoProduto(id, dorme) {
    nao tinha como distinguir. Cada tentativa de adivinhar de fora (comparar periodo, ler a
    fase, marcar a rodada) tapava um caso e deixava outro passar. Agora TODA saida devolve o
    estado com um campo `desfecho` explicito. */
+/* 05/09 — MOTOR DO PLANO FATIADO: roda uma fatia por vez, cede se houver backfill manual em
+   curso, e é chamado no boot pra retomar o que ficou depois de uma queda. */
+/* 05/09: estado do backfill, usado pelo motor do plano (abaixo) e pela cessão da noturna */
+function backfillEstado() { return Object.assign({}, _backfill); }
+
+let _planoRodando = false;
+async function tocarPlano() {
+  if (_planoRodando) return;
+  const fat = require('../lib/backfill-fatiado');
+  const pl = fat.ler(CACHE_DIR);
+  if (!pl || pl.parado || !fat.proxima(pl)) return;
+  _planoRodando = true;
+  console.log('[plano] ' + fat.resumo(pl).faltam + ' fatia(s) pendentes — retomando');
+  try {
+    await fat.executar(CACHE_DIR,
+      ({ de, ate }) => backfillVendas(de, ate, 'girassol'),
+      { estaOcupado: () => backfillEstado().rodando, pausaMs: 20000 });
+    console.log('[plano] progresso: ' + fat.resumo(fat.ler(CACHE_DIR)).progresso);
+  } catch (e) { console.error('[plano] erro:', e.message); }
+  _planoRodando = false;
+}
+/* 3 min depois do boot: se ficou plano pela metade (queda), retoma sem ninguém pedir */
+setTimeout(() => { tocarPlano().catch(e => console.error('[plano] boot:', e.message)); }, 3 * 60000);
+
 async function backfillVendas(de, ate, empresa, ctx){
   let _arqEstoqueAtual = null;   /* 03/09: caminho do temporário, visível na limpeza do fim */
   let _spoolFalhou = null;       /* Codex #325: falha de gravação do temporário é fatal */
@@ -6365,7 +6414,7 @@ module.exports = { backfillVendas,   /* 30/08: exportado pra GOOD reusar com o c
   /* Codex #309 r2: o desfecho REAL está no _backfill.fase (erro / concluido /
      concluido_com_erros) — a função retorna undefined tanto no sucesso quanto ao ABORTAR
      depois de 6 tentativas na mesma página. Quem chama de fora precisa poder ler isso. */
-  backfillEstado: () => Object.assign({}, _backfill),
+  backfillEstado,
   id: 'girassol-backup-offline',
   nome: 'Girassol Backup Offline',
   rotinas: { backupCache: () => rodarCiclo('cron'), backfillNF: () => backfillNFLocal(45), mlSyncFees: () => mlSyncFees(14), shopeeKeepAlive: () => shopeeKeepAlive(), noturna: () => _noturna.rotinaNoturna('cron') },
