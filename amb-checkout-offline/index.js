@@ -618,7 +618,7 @@ const _noturna = criarNoturna({
   // 10/08 (Codex P2): o canário PRECISA do contexto — sem ele, rotasCanario(undefined)
   // explodia no destructure, o catch engolia, e a etapa noturna dizia "conferido"
   // sem ter conferido NADA. (A Girassol tem o mesmo defeito — consertar lá também.)
-  mlBillingSync, backfillVendas, mlSyncFees, varrerCancelados,
+  mlBillingSync, backfillVendas, backfillEstado, mlSyncFees, varrerCancelados,
   canarioCron: () => canarioCron({ VERSAO, validarSessao }),
       // AMB: a poda do bucket de expedição roda UMA vez, na noturna da Girassol (bucket é compartilhado)
       podarExpedicao: async () => ({ ok: true, pulado: 'poda do bucket roda na noturna da Girassol' }),
@@ -6183,6 +6183,10 @@ async function custoDoProduto(id, dorme) {
   return v;
 }
 
+
+/* 05/09: a noturna precisa saber se há backfill em curso pra ceder — a Girassol ganhou isso
+   no #309, a AMB estava sem (mais uma da lista de paridade). */
+function backfillEstado() { return Object.assign({}, _backfill); }
 
 async function backfillVendas(de, ate, empresa){
   /* O guarda mora AQUI, não em cada rota: a noturna e o /backfill-ano chamam esta função direto.
