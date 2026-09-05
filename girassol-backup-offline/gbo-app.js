@@ -673,7 +673,7 @@ async function completarTarifaTikTok(dias, opts) {
 }
 
 const _noturna = criarNoturna({
-  mlBillingSync, backfillVendas, mlSyncFees, varrerCancelados, 
+  mlBillingSync, backfillVendas, backfillEstado, mlSyncFees, varrerCancelados, 
   // 11/08 (herdado da AMB): o canário PRECISA do contexto — sem ele rotasCanario(undefined)
   // explodia no destructure, o catch engolia, e a etapa noturna dizia "conferido" sem ter
   // conferido NADA. Estava mudo aqui desde que a noturna existe.
@@ -4483,6 +4483,10 @@ async function custoDoProduto(id, dorme) {
    nao tinha como distinguir. Cada tentativa de adivinhar de fora (comparar periodo, ler a
    fase, marcar a rodada) tapava um caso e deixava outro passar. Agora TODA saida devolve o
    estado com um campo `desfecho` explicito. */
+/* 05/09: função nomeada (era arrow dentro do module.exports) porque a noturna também usa
+   — ver a cessão em noturna.js */
+function backfillEstado() { return Object.assign({}, _backfill); }
+
 async function backfillVendas(de, ate, empresa, ctx){
   let _arqEstoqueAtual = null;   /* 03/09: caminho do temporário, visível na limpeza do fim */
   let _spoolFalhou = null;       /* Codex #325: falha de gravação do temporário é fatal */
@@ -6365,7 +6369,7 @@ module.exports = { backfillVendas,   /* 30/08: exportado pra GOOD reusar com o c
   /* Codex #309 r2: o desfecho REAL está no _backfill.fase (erro / concluido /
      concluido_com_erros) — a função retorna undefined tanto no sucesso quanto ao ABORTAR
      depois de 6 tentativas na mesma página. Quem chama de fora precisa poder ler isso. */
-  backfillEstado: () => Object.assign({}, _backfill),
+  backfillEstado,
   id: 'girassol-backup-offline',
   nome: 'Girassol Backup Offline',
   rotinas: { backupCache: () => rodarCiclo('cron'), backfillNF: () => backfillNFLocal(45), mlSyncFees: () => mlSyncFees(14), shopeeKeepAlive: () => shopeeKeepAlive(), noturna: () => _noturna.rotinaNoturna('cron') },

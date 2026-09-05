@@ -35,7 +35,7 @@ let _not = {
 const hojeMenos = d => new Date(Date.now() - d * 864e5).toISOString().slice(0, 10);
 
 function criarNoturna(ctx) {
-  const { mlBillingSync, backfillVendas, mlSyncFees, varrerCancelados, canarioCron, podarExpedicao,
+  const { mlBillingSync, backfillVendas, backfillEstado, mlSyncFees, varrerCancelados, canarioCron, podarExpedicao,
           coletarDevolucoes, coletarCarteira, coletarAds, conferirMarketplaces, coletarFinanceiroTikTok, completarTarifaTikTok, VERSAO, validarSessao, ehAdmin, json } = ctx;
   const dorme = ms => new Promise(r => setTimeout(r, ms));
 
@@ -71,6 +71,12 @@ function criarNoturna(ctx) {
 
     // 2. histórico dos últimos 3 dias, já com o billing fresco
     await etapa('backfill dos últimos 3 dias', async () => {
+      /* 05/09: mesma cessão da Girassol — ver o comentário lá */
+      const _est = (typeof backfillEstado === 'function') ? backfillEstado() : null;
+      if (_est && _est.rodando) {
+        console.log('[amb-noturna] backfill de ' + _est.de + ' a ' + _est.ate + ' em curso — pulei os 3 dias');
+        return 'PULADO: backfill manual em curso (' + _est.de + ' a ' + _est.ate + ')';
+      }
       await backfillVendas(hojeMenos(3), hojeMenos(0), 'amb');
       return 'periodo ' + hojeMenos(3) + ' a ' + hojeMenos(0);
     });

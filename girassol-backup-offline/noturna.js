@@ -35,7 +35,7 @@ let _not = {
 const hojeMenos = d => new Date(Date.now() - d * 864e5).toISOString().slice(0, 10);
 
 function criarNoturna(ctx) {
-  const { mlBillingSync, backfillVendas, mlSyncFees, varrerCancelados, canarioCron, podarExpedicao,
+  const { mlBillingSync, backfillVendas, backfillEstado, mlSyncFees, varrerCancelados, canarioCron, podarExpedicao,
           coletarDevolucoes, coletarCarteira, coletarAds, conferirMarketplaces, coletarFinanceiroTikTok, completarTarifaTikTok, VERSAO, validarSessao, ehAdmin, json } = ctx;
   const dorme = ms => new Promise(r => setTimeout(r, ms));
 
@@ -162,6 +162,17 @@ function criarNoturna(ctx) {
 
     // 2. histórico dos últimos 3 dias, já com o billing fresco
     await etapa('backfill dos últimos 3 dias', async () => {
+      /* 05/09 — A NOTURNA CEDE. Ela roda às 3:30 e faz o backfill dos últimos 3 dias; quando
+         o dono está rodando um MÊS de histórico à noite (o único horário em que pode, por
+         causa da cota do Bling), ela assumia o estado e matava a rodada dele no meio. Hoje
+         isso aconteceu: julho morreu aos 20 minutos porque a noturna começou. Ela roda todo
+         dia — o mês de histórico não. Havendo backfill em curso, esta etapa se declara
+         pulada e a noite segue nas outras. */
+      const _est = (typeof backfillEstado === 'function') ? backfillEstado() : null;
+      if (_est && _est.rodando) {
+        console.log('[noturna] backfill de ' + _est.de + ' a ' + _est.ate + ' em curso — pulei os 3 dias pra não atropelar');
+        return 'PULADO: backfill manual em curso (' + _est.de + ' a ' + _est.ate + ')';
+      }
       const rB = await backfillVendas(hojeMenos(3), hojeMenos(0), 'girassol');
       // Codex (#105): o retorno era ignorado — se a trava do canário adiasse o backfill, a
       // etapa dizia "concluída" e a única atualização diária do histórico sumia em silêncio.
