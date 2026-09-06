@@ -2044,6 +2044,54 @@ function routes(readBody) {
     // ⚠️ PRINCÍPIO (Codex, 8 apontamentos no #104): FALHA NUNCA VIRA "TUDO CERTO".
     // Se a consulta falhar, vier truncada, ou o Bling não responder, o canal fica NÃO
     // VERIFICADO e o veredito é INDETERMINADO — nunca ✅.
+    /* 06/09 — RAIO-X DE UMA VENDA. O canário insistia em acusar a 2000018258015754 mesmo com
+       ela no Bling (entregue, NF emitida), e passamos cinco rodadas de conserto no escuro
+       porque eu só via o resultado da comparação, nunca os dois lados. Esta rota mostra o que
+       o ML responde e o que o Bling tem, lado a lado — pra o próximo caso ser resolvido em
+       minutos em vez de rodadas. */
+    if (method === 'GET' && p === '/girassol-backup-offline/raio-x-venda') {
+      const kR = urlObj.searchParams.get('k') || '';
+      if (!(process.env.ADMIN_KEY && kR === process.env.ADMIN_KEY)) { json(res, 404, { error: 'not found' }); return true; }
+      const venda = String(urlObj.searchParams.get('venda') || '').replace(/\D/g, '');
+      if (!venda) { json(res, 400, { ok: false, erro: 'use ?venda=2000018258015754&k=SUA_ADMIN_KEY' }); return true; }
+      const out = { ok: true, venda, ml: {}, bling: {}, veredito: null };
+      try {
+        const { garantirTokenML } = require('../girassol/mlTokenManager');
+        const tk = await garantirTokenML();
+        const r = await fetch('https://api.mercadolibre.com/orders/' + venda, { headers: { Authorization: 'Bearer ' + tk } });
+        out.ml.orders_status = r.status;
+        if (r.ok) {
+          const d = await r.json().catch(() => null);
+          out.ml.id = d && d.id ? String(d.id) : null;
+          out.ml.pack_id = d && d.pack_id ? String(d.pack_id) : null;
+          out.ml.status = d && d.status;
+          out.ml.date_created = d && d.date_created;
+          if (out.ml.pack_id) {
+            const rp = await fetch('https://api.mercadolibre.com/packs/' + out.ml.pack_id, { headers: { Authorization: 'Bearer ' + tk } });
+            out.ml.packs_status = rp.status;
+            const dp = rp.ok ? await rp.json().catch(() => null) : null;
+            out.ml.ordens_do_pack = (dp && Array.isArray(dp.orders)) ? dp.orders.map(o => String(o.id)) : null;
+          }
+        } else { out.ml.corpo = String(await r.text().catch(() => '')).slice(0, 200); }
+      } catch (e) { out.ml.erro = String(e.message || e).slice(0, 200); }
+      /* o que o Bling tem: procura pelo número da venda E pelo pack */
+      const candidatos = [venda, out.ml.pack_id].filter(Boolean).concat(out.ml.ordens_do_pack || []);
+      out.bling.procurei_por = [...new Set(candidatos)];
+      out.bling.achados = [];
+      for (const num of out.bling.procurei_por) {
+        try {
+          const rb = await blingGet('/pedidos/vendas?numeroLoja=' + encodeURIComponent(num));
+          const arr = (rb && rb.ok && rb.data && rb.data.data) || [];
+          for (const pd of arr) out.bling.achados.push({ procurado: num, id: pd.id, numero: pd.numero, numeroLoja: pd.numeroLoja || pd.numeroPedidoLoja || null, situacao: pd.situacao && pd.situacao.valor });
+        } catch (e) { /* segue */ }
+      }
+      out.veredito = out.bling.achados.length
+        ? ('ESTÁ no Bling — encontrado procurando por ' + [...new Set(out.bling.achados.map(a => a.procurado))].join(', '))
+        : 'NÃO achei no Bling por nenhum dos números acima';
+      json(res, 200, out);
+      return true;
+    }
+
     if (method === 'GET' && p === '/girassol-backup-offline/canario-marketplaces') {
       const kC = urlObj.searchParams.get('k') || '';
       const sC = validarSessao(req.headers['cookie']);
