@@ -531,6 +531,28 @@ const _listarNoBlingCanario = async (de, ate) => {
   return porCanal;
 };
 
+/* 06/09 - o pack de UMA venda, perguntado ao ML. A doc do ML diz que TODA ordem tem pack_id,
+   mas a busca por periodo nem sempre o devolve; sem ele, a venda que o Bling gravou pelo
+   pacote parece sumida (foi o caso da 2000018258015754, entregue e com NF). So roda nos
+   faltantes que sobram, com cache de 1h. */
+const _packCacheVenda = new Map();
+const _packDaVendaCanario = async (canal, venda) => {
+  if (canal !== 'ml') return null;
+  const k = String(venda);
+  const em = _packCacheVenda.get(k);
+  if (em && (Date.now() - em.ts) < 60 * 60000) return em.pack;
+  try {
+    const { garantirTokenML } = require('../girassol/mlTokenManager');
+    const tk = await garantirTokenML();
+    const r = await fetch('https://api.mercadolibre.com/orders/' + k, { headers: { Authorization: 'Bearer ' + tk } });
+    if (!r.ok) return null;
+    const d = await r.json().catch(() => null);
+    const pack = d && d.pack_id ? String(d.pack_id) : null;
+    _packCacheVenda.set(k, { pack, ts: Date.now() });
+    return pack;
+  } catch (e) { return null; }
+};
+
 const _listarNoMarketplaceCanario = async (canal, deTs, ateTs) => {
   if (canal === 'shopee') {
     if (!process.env.SHOPEE_SYNC_KEY) return null;
@@ -695,7 +717,7 @@ async function conferirMarketplaces(dias, canais, opts) {
   const canLib = require('../lib/canario-marketplace');
   _canario.ativos++; _canario.desde = _canario.desde || new Date().toISOString();
   try {
-    return await canLib.conferir({ empresa: 'girassol', listarNoBling: _listarNoBlingCanario, listarNoMarketplace: _listarNoMarketplaceCanario },
+    return await canLib.conferir({ empresa: 'girassol', listarNoBling: _listarNoBlingCanario, listarNoMarketplace: _listarNoMarketplaceCanario, packDaVenda: _packDaVendaCanario },
       dias || 3, Array.isArray(canais) ? canais : [], opts || {});
   } finally {
     _canario.ativos = Math.max(0, _canario.ativos - 1);
