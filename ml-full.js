@@ -54,12 +54,15 @@ const MANAGERS = {
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-/* Codex #344 r2: os garantirTokenML() dos managers validam o token com fetch SEM
-   timeout — se o ML pendurar ali, a sonda travaria antes do mlGet. O prazo aqui
-   (race) devolve o erro transitório prometido em vez de nunca responder, sem
-   mexer nos managers compartilhados que o F3 usa. */
+/* Codex #344 r2+r3: o abort DE VERDADE mora nos managers — toda chamada fetch
+   deles agora carrega timeout: 20000 (node-fetch v2 destrói o socket ao estourar,
+   então a requisição pendurada morre na fonte; o F3 herda a mesma proteção).
+   Este prazo externo fica como cinto de segurança pra qualquer outra pendurada,
+   e ENGOLE o settle tardio do perdedor da corrida — sem unhandledRejection nem
+   refresh atrasado disparando depois da resposta. */
 function comPrazo(promessa, ms, rotulo) {
   let t;
+  promessa.catch(() => {}); // o perdedor da corrida não vira unhandledRejection
   const prazo = new Promise((_, rej) => { t = setTimeout(() => rej(new Error(rotulo + ' demorou >' + Math.round(ms / 1000) + 's (ML instável?) — rode de novo em ~1 min')), ms); });
   return Promise.race([promessa, prazo]).finally(() => clearTimeout(t));
 }

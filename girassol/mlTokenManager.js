@@ -22,6 +22,7 @@ function salvarTokens(tokens) {
 
 async function trocarCodigoPorToken(code) {
   const resp = await fetch('https://api.mercadolibre.com/oauth/token', {
+    timeout: 20000, // Codex #344: sem isto, conexão aceita e nunca respondida pendura quem chama (node-fetch v2 destrói o socket ao estourar)
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
@@ -47,6 +48,7 @@ async function renovarTokenML() {
   if (!tokens?.refresh_token) throw new Error('ML: sem refresh_token salvo');
 
   const resp = await fetch('https://api.mercadolibre.com/oauth/token', {
+    timeout: 20000, // Codex #344: sem isto, conexão aceita e nunca respondida pendura quem chama (node-fetch v2 destrói o socket ao estourar)
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
@@ -72,6 +74,7 @@ async function garantirTokenML() {
 
   // Testar se token ainda é válido
   const resp = await fetch('https://api.mercadolibre.com/users/me', {
+    timeout: 20000, // Codex #344: sem isto, conexão aceita e nunca respondida pendura quem chama (node-fetch v2 destrói o socket ao estourar)
     headers: { Authorization: `Bearer ${tokens.access_token}` }
   });
 

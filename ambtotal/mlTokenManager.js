@@ -29,6 +29,7 @@ async function trocarCodigoPorToken(code) {
     throw new Error('AMB_ML_CLIENT_ID / AMB_ML_CLIENT_SECRET não definidos');
   }
   const resp = await fetch('https://api.mercadolibre.com/oauth/token', {
+    timeout: 20000, // Codex #344: sem isto, conexão aceita e nunca respondida pendura quem chama (node-fetch v2 destrói o socket ao estourar)
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
@@ -53,6 +54,7 @@ async function renovarTokenML() {
   const tokens = lerTokens();
   if (!tokens?.refresh_token) throw new Error('AMB ML: sem refresh_token salvo');
   const resp = await fetch('https://api.mercadolibre.com/oauth/token', {
+    timeout: 20000, // Codex #344: sem isto, conexão aceita e nunca respondida pendura quem chama (node-fetch v2 destrói o socket ao estourar)
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
@@ -76,6 +78,7 @@ async function garantirTokenML() {
   const tokens = lerTokens();
   if (!tokens?.access_token) throw new Error('AMB ML: token não configurado. Acesse /amb/setup-ml.');
   const resp = await fetch('https://api.mercadolibre.com/users/me', {
+    timeout: 20000, // Codex #344: sem isto, conexão aceita e nunca respondida pendura quem chama (node-fetch v2 destrói o socket ao estourar)
     headers: { Authorization: `Bearer ${tokens.access_token}` }
   });
   if (resp.ok) return tokens.access_token;

@@ -147,3 +147,18 @@ function fetchDeTabela(tabela) {
 
   console.log('OK: ' + cen + ' cenários da matriz passaram (' + mf.VERSAO + ')');
 })().catch(e => { console.error('FALHOU:', e.message); process.exit(1); });
+
+/* Cenário 11 (fonte, não caixa-preta): TODA chamada fetch dos 3 mlTokenManager
+   precisa carregar timeout — é a classe do apontamento r3 do Codex (#344): sem
+   isso, conexão aceita e nunca respondida pendura a sonda E o F3. Reintroduzir
+   um fetch sem timeout num manager derruba este teste. */
+const fsG = require('fs');
+for (const m of ['ambtotal', 'girassol', 'good']) {
+  const src = fsG.readFileSync(__dirname + '/../' + m + '/mlTokenManager.js', 'utf8');
+  const chamadas = src.split(/await fetch\(/).slice(1);
+  if (!chamadas.length) { console.error('FALHOU: nenhum fetch achado em ' + m + ' (o teste envelheceu?)'); process.exit(1); }
+  for (const c of chamadas) {
+    if (!/timeout:\s*\d+/.test(c.slice(0, 300))) { console.error('FALHOU: fetch sem timeout em ' + m + '/mlTokenManager.js'); process.exit(1); }
+  }
+}
+console.log('OK: cenário 11 — os 3 managers só têm fetch com timeout');
