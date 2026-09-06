@@ -2834,7 +2834,7 @@ function routes(readBody) {
       try {
         const { garantirTokenML } = require('../ambtotal/mlTokenManager');
         const tk = await garantirTokenML();
-        const HD = { headers: { Authorization: 'Bearer ' + tk }, signal: AbortSignal.timeout(15000) }   /* Codex #343 r2: ML que aceita a conexão e não responde deixaria a rota pendurada */;
+        const HD = { headers: { Authorization: 'Bearer ' + tk } }   /* Codex #343 r4: objeto REUSADO em várias requisições — sinal aqui abortaria todas as seguintes junto com a primeira; timeout é por requisição, em quem chama */;
 
         const ro = await fetch('https://api.mercadolibre.com/orders/' + encodeURIComponent(vendaD), HD);
         // Codex PR#46: corpo de ERRO (401/403/429/404) nao pode virar "order" — a rota existe
@@ -3043,7 +3043,13 @@ function routes(readBody) {
       const out = { ok: true, venda, ml: {}, bling: {}, veredito: null };
       try {
         const { garantirTokenML } = require('../ambtotal/mlTokenManager');
-        const tk = await garantirTokenML();
+        /* Codex #343 r4: garantirTokenML() sonda /users/me e pode renovar, nenhum dos dois com
+           timeout — ML que aceita a conexão e não responde deixaria o diagnóstico pendurado
+           antes mesmo de começar. Aqui a espera tem limite: sem token em 20s, é indeterminado. */
+        const tk = await Promise.race([
+          garantirTokenML(),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('o ML não respondeu em 20s ao validar o token')), 20000))
+        ]);
         const r = await fetch('https://api.mercadolibre.com/orders/' + venda, { headers: { Authorization: 'Bearer ' + tk }, signal: AbortSignal.timeout(15000) }   /* Codex #343 r2: ML que aceita a conexão e não responde deixaria a rota pendurada */);
         out.ml.orders_status = r.status;
         /* Codex #343: o número pode ser um PACK — o Bling grava ora um, ora outro. Aí /orders
@@ -6315,7 +6321,7 @@ async function _mapasBilling() {
 async function _feeMLLeve(nl, tk) {
   const id = String(nl || '').replace(/\D/g, '');
   if (!id || !tk) return 0;
-  const H = { headers: { Authorization: 'Bearer ' + tk }, signal: AbortSignal.timeout(15000) }   /* Codex #343 r2: ML que aceita a conexão e não responde deixaria a rota pendurada */;
+  const H = { headers: { Authorization: 'Bearer ' + tk } }   /* Codex #343 r4: objeto REUSADO em várias requisições — sinal aqui abortaria todas as seguintes junto com a primeira; timeout é por requisição, em quem chama */;
   const soma = ords => { let f = 0; for (const od of ords) for (const it of (od.order_items || [])) { const q = Number(it.quantity || 1), sf = Number(it.sale_fee || 0); if (isFinite(sf)) f += sf * q; } return Math.round(f * 100) / 100; };
   try {
     const r = await fetch('https://api.mercadolibre.com/orders/' + id, H);
