@@ -482,6 +482,15 @@ const _listarNoBlingCanario = async (de, ate) => {
   // Codex (P1): o Bling tem bug conhecido no MESMO DIA — o vendasSync já contorna
   // pedindo um dia a mais. Sem isso, venda de hoje sumiria e seria acusada de falta.
   const ateMais1 = new Date(Date.parse(ate + 'T12:00:00Z') + 86400000).toISOString().slice(0, 10);
+  /* 06/09 — UM DIA PRA TRÁS TAMBÉM, e agora com prova. A venda 2000018258015754 foi acusada de
+     sumida por dias; o raio-x mostrou que ela ESTÁ no Bling (pedido 121197, gravado pelo pack
+     2000014842564493) — só que com data 02/09, enquanto o ML a registra em 03/09 00:29 no
+     horário de Brasília (23:29 do dia 2 no fuso -04:00 que o ML usa). Como o canário buscava no
+     Bling a partir de 03/09, o pedido caía fora da janela e era contado como ausente.
+     Não é atraso de importação — o Bling importa na aprovação. É a data de registro caindo do
+     outro lado da meia-noite conforme o fuso. Venda perto da virada do dia sempre correu esse
+     risco; um dia de folga em cada ponta resolve, e o custo é só ler mais algumas páginas. */
+  const deMenos1 = new Date(Date.parse(de + 'T12:00:00Z') - 86400000).toISOString().slice(0, 10);
   const MAX_PG = 200;
   for (let pg = 1; pg <= MAX_PG; pg++) {
     // 16/08 — MEDIDO em produção: rodar o canário JUNTO com o backfill estourou a cota do
@@ -489,7 +498,7 @@ const _listarNoBlingCanario = async (de, ate) => {
     // então espera e tenta de novo. Erro de verdade (401/404) aborta na hora, sem insistir.
     let r = null;
     for (let tent = 1; tent <= 4; tent++) {
-      r = await blingGet('/pedidos/vendas?dataInicial=' + de + '&dataFinal=' + ateMais1 + '&pagina=' + pg + '&limite=100');
+      r = await blingGet('/pedidos/vendas?dataInicial=' + deMenos1 + '&dataFinal=' + ateMais1 + '&pagina=' + pg + '&limite=100');
       if (r && r.ok) break;
       const st429 = (r && r.status) || 0;
       if (st429 !== 429 && st429 !== 0 && st429 < 500) break;
