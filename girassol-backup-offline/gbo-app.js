@@ -553,6 +553,27 @@ const _packDaVendaCanario = async (canal, venda) => {
   } catch (e) { return null; }
 };
 
+/* 06/09 (Codex #335) - as ordens de um pacote, pelo endpoint que a doc do ML recomenda:
+   /marketplace/orders/pack/{id} devolve todas as ordens do carrinho. Serve pro caso em que o
+   Bling gravou o numero de uma IRMA, nem o pack nem a venda consultada. */
+const _packOrdensCache = new Map();
+const _ordensDoPackCanario = async (canal, pack) => {
+  if (canal !== 'ml') return null;
+  const k = String(pack);
+  const em = _packOrdensCache.get(k);
+  if (em && (Date.now() - em.ts) < 60 * 60000) return em.ordens;
+  try {
+    const { garantirTokenML } = require('../girassol/mlTokenManager');
+    const tk = await garantirTokenML();
+    const r = await fetch('https://api.mercadolibre.com/marketplace/orders/pack/' + k, { headers: { Authorization: 'Bearer ' + tk } });
+    if (!r.ok) return null;
+    const d = await r.json().catch(() => null);
+    const ordens = (d && Array.isArray(d.orders)) ? d.orders.map(o => String(o.id)) : null;
+    if (ordens) _packOrdensCache.set(k, { ordens, ts: Date.now() });
+    return ordens;
+  } catch (e) { return null; }
+};
+
 const _listarNoMarketplaceCanario = async (canal, deTs, ateTs) => {
   if (canal === 'shopee') {
     if (!process.env.SHOPEE_SYNC_KEY) return null;
@@ -717,7 +738,7 @@ async function conferirMarketplaces(dias, canais, opts) {
   const canLib = require('../lib/canario-marketplace');
   _canario.ativos++; _canario.desde = _canario.desde || new Date().toISOString();
   try {
-    return await canLib.conferir({ empresa: 'girassol', listarNoBling: _listarNoBlingCanario, listarNoMarketplace: _listarNoMarketplaceCanario, packDaVenda: _packDaVendaCanario },
+    return await canLib.conferir({ empresa: 'girassol', listarNoBling: _listarNoBlingCanario, listarNoMarketplace: _listarNoMarketplaceCanario, packDaVenda: _packDaVendaCanario, ordensDoPack: _ordensDoPackCanario },
       dias || 3, Array.isArray(canais) ? canais : [], opts || {});
   } finally {
     _canario.ativos = Math.max(0, _canario.ativos - 1);
