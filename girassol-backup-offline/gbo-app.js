@@ -531,41 +531,46 @@ const _listarNoBlingCanario = async (de, ate) => {
   return porCanal;
 };
 
-/* 06/09 - o pack de UMA venda, perguntado ao ML. A doc do ML diz que TODA ordem tem pack_id,
-   mas a busca por periodo nem sempre o devolve; sem ele, a venda que o Bling gravou pelo
-   pacote parece sumida (foi o caso da 2000018258015754, entregue e com NF). So roda nos
-   faltantes que sobram, com cache de 1h. */
+/* 06/09 (Codex #335 r2) — pack e ordens do pacote, para o canário conferir os faltantes.
+   ENDPOINT: /packs/{id} com data.orders, que é o que o repo já usa em girassol/importarPedido.js
+   (eu tinha pego /marketplace/orders/pack/{id} da documentação; o Codex mostrou que o caminho
+   consolidado aqui é outro, e coerência com o que já funciona vale mais que a doc).
+   TOKEN: pego UMA vez por rodada e passado adiante — garantirTokenML() faz um /users/me a cada
+   chamada, então validar por candidato multiplicava as requisições justamente quando há muitos
+   faltantes, que é quando o ML já está sob pressão. */
 const _packCacheVenda = new Map();
+const _packOrdensCache = new Map();
+let _tkCanario = { tk: null, ts: 0 };
+async function _tokenMLCanario() {
+  if (_tkCanario.tk && (Date.now() - _tkCanario.ts) < 20 * 60000) return _tkCanario.tk;
+  const { garantirTokenML } = require('../girassol/mlTokenManager');
+  const tk = await garantirTokenML();
+  _tkCanario = { tk, ts: Date.now() };
+  return tk;
+}
 const _packDaVendaCanario = async (canal, venda) => {
   if (canal !== 'ml') return null;
   const k = String(venda);
   const em = _packCacheVenda.get(k);
-  if (em && (Date.now() - em.ts) < 60 * 60000) return em.pack;
+  if (em && (Date.now() - em.ts) < 60 * 60000) return { pack: em.pack, doCache: true };
   try {
-    const { garantirTokenML } = require('../girassol/mlTokenManager');
-    const tk = await garantirTokenML();
+    const tk = await _tokenMLCanario();
     const r = await fetch('https://api.mercadolibre.com/orders/' + k, { headers: { Authorization: 'Bearer ' + tk } });
     if (!r.ok) return null;
     const d = await r.json().catch(() => null);
     const pack = d && d.pack_id ? String(d.pack_id) : null;
     _packCacheVenda.set(k, { pack, ts: Date.now() });
-    return pack;
+    return { pack, doCache: false };
   } catch (e) { return null; }
 };
-
-/* 06/09 (Codex #335) - as ordens de um pacote, pelo endpoint que a doc do ML recomenda:
-   /marketplace/orders/pack/{id} devolve todas as ordens do carrinho. Serve pro caso em que o
-   Bling gravou o numero de uma IRMA, nem o pack nem a venda consultada. */
-const _packOrdensCache = new Map();
 const _ordensDoPackCanario = async (canal, pack) => {
   if (canal !== 'ml') return null;
   const k = String(pack);
   const em = _packOrdensCache.get(k);
   if (em && (Date.now() - em.ts) < 60 * 60000) return em.ordens;
   try {
-    const { garantirTokenML } = require('../girassol/mlTokenManager');
-    const tk = await garantirTokenML();
-    const r = await fetch('https://api.mercadolibre.com/marketplace/orders/pack/' + k, { headers: { Authorization: 'Bearer ' + tk } });
+    const tk = await _tokenMLCanario();
+    const r = await fetch('https://api.mercadolibre.com/packs/' + k, { headers: { Authorization: 'Bearer ' + tk } });
     if (!r.ok) return null;
     const d = await r.json().catch(() => null);
     const ordens = (d && Array.isArray(d.orders)) ? d.orders.map(o => String(o.id)) : null;
