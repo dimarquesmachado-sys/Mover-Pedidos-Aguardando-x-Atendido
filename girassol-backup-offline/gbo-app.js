@@ -2092,10 +2092,25 @@ function routes(readBody) {
       const alvo = new Set(out.bling.procurei_por.map(String));
       let vistos = 0;
       for (let pg = 1; pg <= 30; pg++) {
+        /* 06/09 (3ª versão) — ESPERAR O 429. A versão anterior desistia na primeira recusa do
+           Bling: varreu 100 de ~700 pedidos e mesmo assim afirmou "NÃO achei". Veredito sobre
+           14% da janela não prova nada, e ainda por cima aponta o dedo pra integração que pode
+           estar perfeita. O resto do sistema já espera nesses casos (o canário e o backfill
+           fazem isso); aqui faltava. */
         let rb = null;
-        try { rb = await blingGet('/pedidos/vendas?dataInicial=' + deB + '&dataFinal=' + ateB + '&pagina=' + pg + '&limite=100'); }
-        catch (e) { out.bling.erro = String(e.message || e).slice(0, 160); break; }
-        if (!rb || !rb.ok) { out.bling.erro = 'Bling respondeu ' + ((rb && rb.status) || '?') + ' na página ' + pg; break; }
+        for (let tent = 1; tent <= 5; tent++) {
+          try { rb = await blingGet('/pedidos/vendas?dataInicial=' + deB + '&dataFinal=' + ateB + '&pagina=' + pg + '&limite=100'); }
+          catch (e) { rb = null; }
+          if (rb && rb.ok) break;
+          const st = (rb && rb.status) || 0;
+          if (st !== 429 && st !== 0 && st < 500) break;         /* erro real: não insiste */
+          if (tent < 5) await new Promise(r2 => setTimeout(r2, tent * 5000));
+        }
+        if (!rb || !rb.ok) {
+          out.bling.erro = 'Bling respondeu ' + ((rb && rb.status) || '?') + ' na página ' + pg + ' mesmo após 5 tentativas';
+          out.bling.varredura_completa = false;
+          break;
+        }
         const arr = (rb.data && rb.data.data) || [];
         if (!arr.length) break;
         vistos += arr.length;
@@ -2107,9 +2122,12 @@ function routes(readBody) {
         await new Promise(r2 => setTimeout(r2, 120));
       }
       out.bling.pedidos_varridos = vistos;
+      if (out.bling.varredura_completa !== false) out.bling.varredura_completa = true;
       out.veredito = out.bling.achados.length
         ? ('ESTÁ no Bling (pedido ' + out.bling.achados.map(a => a.numero).join(', ') + ') — o Bling gravou pelo número ' + [...new Set(out.bling.achados.map(a => a.casou_com))].join(', '))
-        : ('NÃO achei no Bling entre os ' + vistos + ' pedidos de ' + deB + ' a ' + ateB + ' — procurei por ' + out.bling.procurei_por.join(', '));
+        : (out.bling.varredura_completa === false
+            ? ('INDETERMINADO: o Bling parou de responder no meio (' + (out.bling.erro || '') + '). Varri só ' + vistos + ' pedidos de ' + deB + ' a ' + ateB + ' — NÃO dá pra dizer que a venda não está lá. Tente de novo em alguns minutos.')
+            : ('NÃO achei no Bling entre os ' + vistos + ' pedidos de ' + deB + ' a ' + ateB + ' (varredura completa) — procurei por ' + out.bling.procurei_por.join(', ')));
       json(res, 200, out);
       return true;
     }
