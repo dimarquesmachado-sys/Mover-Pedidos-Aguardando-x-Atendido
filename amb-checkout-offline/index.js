@@ -431,6 +431,41 @@ async function shopeeKeepAlive() {
 // A rotina noturna precisa das funcoes deste arquivo, entao e montada aqui.
 // O agendador da RAIZ registra sozinho qualquer chave nova de `crons` que tenha
 // uma funcao de mesmo nome em `rotinas` — nao precisa mexer no index da raiz.
+/* 06/09 — mapa venda↔pack do faturamento do ML, pra o canário fechar os carrinhos. O billing
+   guarda a venda em `o` e o pack em `p`; com isso dá pra saber quais vendas são o mesmo
+   pacote. Monta uma vez por rodada e reusa (o arquivo tem ~96 mil tarifas; ler a cada pedido
+   seria o mesmo erro de memória do #327). */
+let _packCache = { em: 0, porVenda: null, doPack: null };
+function _carregarPacks() {
+  if (_packCache.porVenda && (Date.now() - _packCache.em) < 30 * 60000) return _packCache;
+  const porVenda = new Map(), doPack = new Map();
+  try {
+    const b = readJson(MLB_FILE(), { tarifas: {} });
+    for (const t of Object.values(b.tarifas || {})) {
+      if (!t || !t.o || !t.p) continue;
+      const venda = String(t.o), pack = String(t.p);
+      if (venda === pack) continue;
+      porVenda.set(venda, pack);
+      if (!doPack.has(pack)) doPack.set(pack, new Set());
+      doPack.get(pack).add(venda);
+    }
+  } catch (e) {}
+  _packCache = { em: Date.now(), porVenda, doPack };
+  return _packCache;
+}
+/** as OUTRAS vendas do mesmo carrinho (inclui o próprio pack_id, que o Bling às vezes grava) */
+function _irmasDoPack(numeroLoja) {
+  const { porVenda, doPack } = _carregarPacks();
+  if (!porVenda) return null;
+  const n = String(numeroLoja);
+  const pack = porVenda.get(n) || (doPack.has(n) ? n : null);
+  if (!pack) return null;
+  const irmas = new Set(doPack.get(pack) || []);
+  irmas.add(pack);
+  irmas.delete(n);
+  return irmas.size ? irmas : null;
+}
+
 const _listarNoBlingCanario = async (de, ate) => {
   const porCanal = {};
   // Codex (P1): o Bling tem bug conhecido no MESMO DIA — o vendasSync já contorna
@@ -466,6 +501,10 @@ const _listarNoBlingCanario = async (de, ate) => {
       const nl = String(pd.numeroPedidoLoja || pd.numeroLoja || '').trim();
       if (!nl) continue;
       (porCanal[canal] = porCanal[canal] || new Set()).add(nl);
+      /* 06/09: carrinho — ver o comentário no gbo-app.js. O ML dá um número por item, o Bling
+         junta num pedido só, e as irmãs eram acusadas de sumidas. */
+      const irmas = _irmasDoPack(nl);
+      if (irmas) for (const irma of irmas) porCanal[canal].add(irma);
     }
     if (arr.length < 100) break;
     // Codex (P2): página cheia no teto = lista truncada, e truncada não vale comparar
