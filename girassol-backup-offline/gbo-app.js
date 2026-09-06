@@ -547,6 +547,39 @@ const _listarNoBlingCanario = async (de, ate) => {
    TOKEN: pego UMA vez por rodada e passado adiante — garantirTokenML() faz um /users/me a cada
    chamada, então validar por candidato multiplicava as requisições justamente quando há muitos
    faltantes, que é quando o ML já está sob pressão. */
+/* 06/09 — CONSERTO AUTOMÁTICO do que o canário achou. Reimporta a venda que não chegou ao
+   Bling, uma a uma e só quando são poucas; acima do teto vira aviso, porque muita falta é
+   integração caída e reimportar não resolveria. Antes de criar, reconfere se já está lá — o
+   canário errou 54 vezes esta semana e criar duplicata mexe em estoque, NF e imposto. */
+async function _consertarDoCanario(resultado) {
+  const cons = require('../lib/canario-conserto');
+  return await cons.consertar(resultado, {
+    cacheDir: CACHE_DIR,
+    maxAuto: Number(process.env.CANARIO_MAX_AUTO || 5),
+    jaEstaNoBling: async (canal, venda) => {
+      if (canal !== 'ml') return false;
+      try {
+        const hoje = new Date();
+        const de = new Date(hoje.getTime() - 10 * 86400000).toISOString().slice(0, 10);
+        const ate = new Date(hoje.getTime() + 86400000).toISOString().slice(0, 10);
+        const mapa = await _listarNoBlingCanario(de, ate);
+        const set = (mapa && mapa[canal]) || new Set();
+        if (set.has(String(venda))) return true;
+        const rp = await _packDaVendaCanario(canal, venda);
+        const pack = rp && typeof rp === 'object' ? rp.pack : rp;
+        return !!(pack && set.has(String(pack)));
+      } catch (e) { return true; }   /* na dúvida, NÃO cria: duplicar é pior que deixar faltando */
+    },
+    reimportar: async (canal, venda) => {
+      if (canal !== 'ml') return { ok: false, erro: 'conserto automático só implementado pro ML' };
+      const { testarImportarPedido } = require('../girassol/importarPedido');
+      const r = await testarImportarPedido(String(venda), true);
+      if (r && (r.criado || r.pedido || r.ok)) return { ok: true, pedido: (r.pedido && r.pedido.numero) || r.numero || null };
+      return { ok: false, erro: (r && (r.erro || r.msg)) || 'importação não confirmou criação' };
+    }
+  });
+}
+
 const _packCacheVenda = new Map();
 const _packOrdensCache = new Map();
 /* Codex #335 r4: eu escrevi que garantirTokenML() tem cache próprio — NÃO TEM. Ele faz um
@@ -799,7 +832,13 @@ const _noturna = criarNoturna({
   // 11/08 (herdado da AMB): o canário PRECISA do contexto — sem ele rotasCanario(undefined)
   // explodia no destructure, o catch engolia, e a etapa noturna dizia "conferido" sem ter
   // conferido NADA. Estava mudo aqui desde que a noturna existe.
-  canarioCron: () => canarioCron({ VERSAO, validarSessao }), podarExpedicao,
+  /* 06/09: depois de conferir, o canário CONSERTA o que dá — pouca venda fora do Bling volta
+     sozinha; muita falta vira aviso na tela, porque aí é integração e precisa de você. */
+  canarioCron: async () => {
+    const r = await canarioCron({ VERSAO, validarSessao });
+    try { await _consertarDoCanario(r); } catch (e) { console.error('[canário] conserto:', e.message); }
+    return r;
+  }, podarExpedicao,
   // 06/08: a Shopee tambem passa a se manter sozinha — devolucoes (por SKU e motivo) e
   // carteira (ads, ajustes, reembolsos), as duas em janelas de 15 dias, guardando no disco.
   coletarDevolucoes: (d) => coletarDevolucoes(d || 45, pedirAoSync),
@@ -835,6 +874,7 @@ function routes(readBody) {
       const _meu = p.startsWith('/girassol-backup-offline'); // guarda só age nas rotas DESTE módulo
       const _pub = (
         p === '/girassol-backup-offline' || p === '/girassol-backup-offline/' ||
+        p === '/girassol-backup-offline/canario-estado' ||   /* leitura pro aviso na tela */
         p === '/girassol-backup-offline/painel' ||
       p === '/girassol-backup-offline/nf-travadas' ||   /* 04/09: leitura pro card de NFs travadas */ p === '/girassol-backup-offline/login' ||
         p === '/girassol-backup-offline/operadores' || p === '/girassol-backup-offline/health' ||
@@ -2138,6 +2178,29 @@ function routes(readBody) {
             ? ('INDETERMINADO: o Bling parou de responder no meio (' + (out.bling.erro || '') + '). Varri só ' + vistos + ' pedidos de ' + deB + ' a ' + ateB + ' — NÃO dá pra dizer que a venda não está lá. Tente de novo em alguns minutos.')
             : ('NÃO achei no Bling entre os ' + vistos + ' pedidos de ' + deB + ' a ' + ateB + ' (varredura completa) — procurei por ' + out.bling.procurei_por.join(', ')));
       json(res, 200, out);
+      return true;
+    }
+
+    /* 06/09 — O QUE O CANÁRIO ACHOU E O QUE FEZ. O dono perguntou por que a venda que o canário
+       encontra não volta pro Bling sozinha; a resposta era que ninguém tinha feito. Agora: pouca
+       falta é reimportada automaticamente (com reconferência antes de criar, pra não duplicar),
+       e muita falta vira aviso na tela — porque aí é integração caída e só reautorizar no
+       navegador resolve. Esta rota alimenta o aviso do checkout e do dashboard. */
+    if (method === 'GET' && p === '/girassol-backup-offline/canario-estado') {
+      try {
+        const cons = require('../lib/canario-conserto');
+        const h = cons.historico(CACHE_DIR, 20);
+        const ultimo = h[0] || null;
+        const pendente = (ultimo && (ultimo.nao_automatico || []).length) ? ultimo.nao_automatico[0] : null;
+        json(res, 200, { ok: true,
+          precisa_de_voce: !!pendente,
+          aviso: pendente ? {
+            titulo: 'Vendas do ' + String(pendente.canal || 'marketplace').toUpperCase() + ' não estão chegando ao Bling',
+            detalhe: pendente.faltando + ' de ' + pendente.de + ' vendas (' + pendente.pct + '%) — ' + pendente.motivo,
+            o_que_fazer: pendente.o_que_fazer || 'Bling → Canais de venda → reautorizar; depois rode o backfill do período'
+          } : null,
+          ultimo_conserto: ultimo, historico: h });
+      } catch (e) { json(res, 500, { ok: false, erro: String(e.message || e).slice(0, 160) }); }
       return true;
     }
 
