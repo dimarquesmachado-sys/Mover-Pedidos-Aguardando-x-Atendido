@@ -531,6 +531,68 @@ const _listarNoBlingCanario = async (de, ate) => {
   return porCanal;
 };
 
+/* 06/09 (Codex #335 r2) — pack e ordens do pacote, para o canário conferir os faltantes.
+   ENDPOINT: /packs/{id} com data.orders, que é o que o repo já usa em girassol/importarPedido.js
+   (eu tinha pego /marketplace/orders/pack/{id} da documentação; o Codex mostrou que o caminho
+   consolidado aqui é outro, e coerência com o que já funciona vale mais que a doc).
+   TOKEN: pego UMA vez por rodada e passado adiante — garantirTokenML() faz um /users/me a cada
+   chamada, então validar por candidato multiplicava as requisições justamente quando há muitos
+   faltantes, que é quando o ML já está sob pressão. */
+const _packCacheVenda = new Map();
+const _packOrdensCache = new Map();
+/* Codex #335 r4: eu escrevi que garantirTokenML() tem cache próprio — NÃO TEM. Ele faz um
+   /users/me a cada chamada (mlTokenManager.js:69-78), então uma rodada com muitos faltantes
+   dispara uma validação por candidato. Cache curto aqui, dentro de UMA rodada: 60 segundos
+   resolve a rajada e é curto demais pra segurar um token que expirou. */
+let _tkCanario = { tk: null, ts: 0 };
+async function _tokenMLCanario() {
+  if (_tkCanario.tk && (Date.now() - _tkCanario.ts) < 60000) return _tkCanario.tk;
+  const { garantirTokenML } = require('../girassol/mlTokenManager');
+  const tk = await garantirTokenML();
+  _tkCanario = { tk, ts: Date.now() };
+  return tk;
+}
+const _packDaVendaCanario = async (canal, venda) => {
+  if (canal !== 'ml') return null;
+  const k = String(venda);
+  const em = _packCacheVenda.get(k);
+  if (em && (Date.now() - em.ts) < (em.ttl || 60 * 60000)) return { pack: em.pack, doCache: true };
+  try {
+    const tk = await _tokenMLCanario();
+    const r = await fetch('https://api.mercadolibre.com/orders/' + k, { headers: { Authorization: 'Bearer ' + tk } });
+    /* Codex #335 r5: cachear TAMBÉM o erro HTTP (404, 429, 5xx). Eu tinha cacheado só a
+       resposta vazia; com erro, a venda voltava a ser consultada em toda rodada, consumia o
+       teto, e os candidatos seguintes nunca eram inspecionados — o mesmo furo do orçamento
+       pela quarta porta. TTL curto (15 min) porque erro pode ser transitório. */
+    if (!r.ok) { _packCacheVenda.set(k, { pack: null, ts: Date.now(), ttl: 15 * 60000 }); return { pack: null, doCache: false }; }
+    const d = await r.json().catch(() => null);
+    const pack = d && d.pack_id ? String(d.pack_id) : null;
+    /* mesma razão do /packs: sem cachear a resposta vazia, a venda sem pack volta em toda rodada */
+    _packCacheVenda.set(k, { pack, ts: Date.now(), ttl: pack ? 60 * 60000 : 15 * 60000 });
+    return { pack, doCache: false };
+  } catch (e) { _packCacheVenda.set(k, { pack: null, ts: Date.now(), ttl: 15 * 60000 }); return { pack: null, doCache: false }; }
+};
+const _ordensDoPackCanario = async (canal, pack) => {
+  if (canal !== 'ml') return null;
+  const k = String(pack);
+  const em = _packOrdensCache.get(k);
+  if (em && (Date.now() - em.ts) < (em.ttl || 60 * 60000)) return { ordens: em.ordens, doCache: true };
+  try {
+    const tk = await _tokenMLCanario();
+    const r = await fetch('https://api.mercadolibre.com/packs/' + k, { headers: { Authorization: 'Bearer ' + tk } });
+    /* mesma razão do /orders acima */
+    if (!r.ok) { _packOrdensCache.set(k, { ordens: null, ts: Date.now(), ttl: 15 * 60000 }); return { ordens: null, doCache: false }; }
+    const d = await r.json().catch(() => null);
+    const ordens = (d && Array.isArray(d.orders)) ? d.orders.map(o => String(o.id)) : null;
+    /* Codex #335 r4: cachear TAMBÉM quando não deu (404, erro, resposta sem orders). Sem isso,
+       um pack que sempre falha volta a ser consultado em toda rodada e consome o teto pra
+       sempre — o lote nunca avança pros seguintes, que é o furo que este orçamento veio
+       evitar. Falha fica 15 min no cache; sucesso, 1h. */
+    _packOrdensCache.set(k, { ordens, ts: Date.now(), ttl: ordens ? 60 * 60000 : 15 * 60000 });
+    return { ordens, doCache: false };
+  } catch (e) { _packOrdensCache.set(k, { ordens: null, ts: Date.now(), ttl: 15 * 60000 }); return { ordens: null, doCache: false }; }
+};
+
 const _listarNoMarketplaceCanario = async (canal, deTs, ateTs) => {
   if (canal === 'shopee') {
     if (!process.env.SHOPEE_SYNC_KEY) return null;
@@ -695,7 +757,7 @@ async function conferirMarketplaces(dias, canais, opts) {
   const canLib = require('../lib/canario-marketplace');
   _canario.ativos++; _canario.desde = _canario.desde || new Date().toISOString();
   try {
-    return await canLib.conferir({ empresa: 'girassol', listarNoBling: _listarNoBlingCanario, listarNoMarketplace: _listarNoMarketplaceCanario },
+    return await canLib.conferir({ empresa: 'girassol', listarNoBling: _listarNoBlingCanario, listarNoMarketplace: _listarNoMarketplaceCanario, packDaVenda: _packDaVendaCanario, ordensDoPack: _ordensDoPackCanario },
       dias || 3, Array.isArray(canais) ? canais : [], opts || {});
   } finally {
     _canario.ativos = Math.max(0, _canario.ativos - 1);
