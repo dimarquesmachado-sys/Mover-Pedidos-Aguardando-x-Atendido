@@ -2834,7 +2834,7 @@ function routes(readBody) {
       try {
         const { garantirTokenML } = require('../ambtotal/mlTokenManager');
         const tk = await garantirTokenML();
-        const HD = { headers: { Authorization: 'Bearer ' + tk } };
+        const HD = { headers: { Authorization: 'Bearer ' + tk }, signal: AbortSignal.timeout(15000) }   /* Codex #343 r2: ML que aceita a conexão e não responde deixaria a rota pendurada */;
 
         const ro = await fetch('https://api.mercadolibre.com/orders/' + encodeURIComponent(vendaD), HD);
         // Codex PR#46: corpo de ERRO (401/403/429/404) nao pode virar "order" — a rota existe
@@ -3044,13 +3044,13 @@ function routes(readBody) {
       try {
         const { garantirTokenML } = require('../ambtotal/mlTokenManager');
         const tk = await garantirTokenML();
-        const r = await fetch('https://api.mercadolibre.com/orders/' + venda, { headers: { Authorization: 'Bearer ' + tk } });
+        const r = await fetch('https://api.mercadolibre.com/orders/' + venda, { headers: { Authorization: 'Bearer ' + tk }, signal: AbortSignal.timeout(15000) }   /* Codex #343 r2: ML que aceita a conexão e não responde deixaria a rota pendurada */);
         out.ml.orders_status = r.status;
         /* Codex #343: o número pode ser um PACK — o Bling grava ora um, ora outro. Aí /orders
            dá 404 e a rota desistia, perdendo justamente as ordens do pacote, que são o que
            interessa. Se o /orders não achou, tenta como pack. */
         if (!r.ok && r.status === 404) {
-          const rp0 = await fetch('https://api.mercadolibre.com/packs/' + venda, { headers: { Authorization: 'Bearer ' + tk } });
+          const rp0 = await fetch('https://api.mercadolibre.com/packs/' + venda, { headers: { Authorization: 'Bearer ' + tk }, signal: AbortSignal.timeout(15000) }   /* Codex #343 r2: ML que aceita a conexão e não responde deixaria a rota pendurada */);
           out.ml.packs_status = rp0.status;
           if (rp0.ok) {
             const dp0 = await rp0.json().catch(() => null);
@@ -3058,6 +3058,14 @@ function routes(readBody) {
             out.ml.pack_id = String(venda);
             out.ml.ordens_do_pack = (dp0 && Array.isArray(dp0.orders)) ? dp0.orders.map(o => String(o.id)) : null;
             if (out.ml.ordens_do_pack === null) out.ml.pack_incompleto = true;
+            /* Codex #343 r2: com o pack aberto eu tinha as ordens mas NÃO a data — e sem data
+               a rota caía sempre no INDETERMINADO, ou seja, meu próprio conserto do apontamento
+               anterior deixou o caminho do pack inútil. Busca a data numa das ordens. */
+            const prim = (out.ml.ordens_do_pack || [])[0];
+            if (prim) {
+              const ro = await fetch('https://api.mercadolibre.com/orders/' + prim, { headers: { Authorization: 'Bearer ' + tk }, signal: AbortSignal.timeout(15000) });
+              if (ro.ok) { const dor = await ro.json().catch(() => null); if (dor && dor.date_created) { out.ml.date_created = dor.date_created; out.ml.status = dor.status; } }
+            }
           }
         }
         if (r.ok) {
@@ -3067,7 +3075,7 @@ function routes(readBody) {
           out.ml.status = d && d.status;
           out.ml.date_created = d && d.date_created;
           if (out.ml.pack_id) {
-            const rp = await fetch('https://api.mercadolibre.com/packs/' + out.ml.pack_id, { headers: { Authorization: 'Bearer ' + tk } });
+            const rp = await fetch('https://api.mercadolibre.com/packs/' + out.ml.pack_id, { headers: { Authorization: 'Bearer ' + tk }, signal: AbortSignal.timeout(15000) }   /* Codex #343 r2: ML que aceita a conexão e não responde deixaria a rota pendurada */);
             out.ml.packs_status = rp.status;
             const dp = rp.ok ? await rp.json().catch(() => null) : null;
             out.ml.ordens_do_pack = (dp && Array.isArray(dp.orders)) ? dp.orders.map(o => String(o.id)) : null;
@@ -3122,8 +3130,16 @@ function routes(readBody) {
           out.bling.varredura_completa = false;
           break;
         }
-        const arr = (rb.data && rb.data.data) || [];
-        if (!arr.length) break;
+        /* Codex #343 r2: 2xx com JSON inválido ou envelope mudado devolve data:null, e tratar
+           isso como "página vazia" transformava falha em varredura completa — o mesmo vício de
+           dar veredito sem ter olhado, agora pela quarta porta. */
+        if (!rb.data || !Array.isArray(rb.data.data)) {
+          out.bling.varredura_completa = false;
+          out.bling.erro = 'o Bling respondeu ' + rb.status + ' mas com corpo inesperado na página ' + pg;
+          break;
+        }
+        const arr = rb.data.data;
+        if (!arr.length) { out.bling.fim_real = true; break; }
         vistos += arr.length;
         for (const pd of arr) {
           const nl = String(pd.numeroPedidoLoja || pd.numeroLoja || '').trim();
@@ -6295,7 +6311,7 @@ async function _mapasBilling() {
 async function _feeMLLeve(nl, tk) {
   const id = String(nl || '').replace(/\D/g, '');
   if (!id || !tk) return 0;
-  const H = { headers: { Authorization: 'Bearer ' + tk } };
+  const H = { headers: { Authorization: 'Bearer ' + tk }, signal: AbortSignal.timeout(15000) }   /* Codex #343 r2: ML que aceita a conexão e não responde deixaria a rota pendurada */;
   const soma = ords => { let f = 0; for (const od of ords) for (const it of (od.order_items || [])) { const q = Number(it.quantity || 1), sf = Number(it.sale_fee || 0); if (isFinite(sf)) f += sf * q; } return Math.round(f * 100) / 100; };
   try {
     const r = await fetch('https://api.mercadolibre.com/orders/' + id, H);
@@ -6798,7 +6814,7 @@ async function backfillVendas(de, ate, empresa){
       if (empresa === 'amb') {
         const { garantirTokenML } = require('../ambtotal/mlTokenManager');
         const tk = await garantirTokenML();
-        const HML = { headers: { Authorization: 'Bearer ' + tk } };
+        const HML = { headers: { Authorization: 'Bearer ' + tk }, signal: AbortSignal.timeout(15000) }   /* Codex #343 r2: ML que aceita a conexão e não responde deixaria a rota pendurada */;
         const rme = await fetch('https://api.mercadolibre.com/users/me', HML);
         const me = rme.ok ? await rme.json().catch(() => null) : null;
         const seller = me && me.id;
