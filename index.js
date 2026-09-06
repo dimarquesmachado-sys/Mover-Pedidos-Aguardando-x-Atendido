@@ -354,6 +354,23 @@ const server = http.createServer(async (req, res) => {
     return json(res, 404, { error: 'not found', path });
   }
 
+  // ── ML FULL (06/09) — NF-e que o PRÓPRIO ML emite no Fulfillment (série 2) ────
+  // Fase sonda: provar o contrato da API de invoices com vendas reais antes do motor.
+  // Tudo atrás da ADMIN_KEY (sem callback: usa os mlTokenManager que já existem).
+  if (path.startsWith('/ml-full/')) {
+    if (!ADMIN_KEY || urlObj.searchParams.get('k') !== ADMIN_KEY) {
+      return json(res, 404, { error: 'not found', path });
+    }
+    try {
+      const tratou = await require('./ml-full').tratar(req, res, urlObj, json);
+      if (tratou) return;
+    } catch (e) {
+      console.error('[ml-full] erro:', e.message);
+      return json(res, 500, { ok: false, erro: String(e.message || e).slice(0, 200) });
+    }
+    return json(res, 404, { error: 'not found', path });
+  }
+
   // Tenta cada handler de empresa
   try {
     for (const h of handlers) {
