@@ -139,3 +139,12 @@ bling-automacao/
 - **Sem banco de dados:** tokens em arquivo JSON em disco persistente; memória do dia em RAM
 
 Teste de revisão automática Claude + Codex.
+
+---
+
+## Contexto para assistentes e planejamento
+
+Antes de iniciar uma conversa nova sobre arquitetura, integrações, dashboard ou onboarding de
+empresas, leia o [contexto geral para o Claude](docs/CONTEXTO-NOVA-CONVERSA-CLAUDE.md). O documento
+registra o mapa atual do sistema, erros recorrentes nas revisões, regras de trabalho, prioridades
+técnicas e recomendações para Mercado Livre, Shopee, Magalu e TikTok Shop.
