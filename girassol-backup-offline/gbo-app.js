@@ -2078,16 +2078,38 @@ function routes(readBody) {
       const candidatos = [venda, out.ml.pack_id].filter(Boolean).concat(out.ml.ordens_do_pack || []);
       out.bling.procurei_por = [...new Set(candidatos)];
       out.bling.achados = [];
-      for (const num of out.bling.procurei_por) {
-        try {
-          const rb = await blingGet('/pedidos/vendas?numeroLoja=' + encodeURIComponent(num));
-          const arr = (rb && rb.ok && rb.data && rb.data.data) || [];
-          for (const pd of arr) out.bling.achados.push({ procurado: num, id: pd.id, numero: pd.numero, numeroLoja: pd.numeroLoja || pd.numeroPedidoLoja || null, situacao: pd.situacao && pd.situacao.valor });
-        } catch (e) { /* segue */ }
+      /* 06/09 (2ª versão) — O BLING IGNORA ?numeroLoja. A primeira versão desta rota usava esse
+         filtro e o Bling devolveu os 100 pedidos MAIS RECENTES, sem filtrar nada — o veredito
+         então dizia "ESTÁ no Bling" porque achava tudo, não porque achava aquilo. Falso
+         positivo numa ferramenta de diagnóstico é pior que não ter a ferramenta.
+         Agora varremos a janela de datas em volta da venda e comparamos NÓS mesmos, que é o
+         que o canário faz — assim o raio-x enxerga exatamente o que ele enxerga. */
+      const diaML = String(out.ml.date_created || '').slice(0, 10);
+      const base = diaML ? Date.parse(diaML + 'T12:00:00Z') : Date.now();
+      const _d = ms => new Date(ms).toISOString().slice(0, 10);
+      const deB = _d(base - 3 * 86400000), ateB = _d(base + 3 * 86400000);
+      out.bling.janela = { de: deB, ate: ateB, nota: 'o Bling ignora ?numeroLoja — varremos por data e comparamos aqui' };
+      const alvo = new Set(out.bling.procurei_por.map(String));
+      let vistos = 0;
+      for (let pg = 1; pg <= 30; pg++) {
+        let rb = null;
+        try { rb = await blingGet('/pedidos/vendas?dataInicial=' + deB + '&dataFinal=' + ateB + '&pagina=' + pg + '&limite=100'); }
+        catch (e) { out.bling.erro = String(e.message || e).slice(0, 160); break; }
+        if (!rb || !rb.ok) { out.bling.erro = 'Bling respondeu ' + ((rb && rb.status) || '?') + ' na página ' + pg; break; }
+        const arr = (rb.data && rb.data.data) || [];
+        if (!arr.length) break;
+        vistos += arr.length;
+        for (const pd of arr) {
+          const nl = String(pd.numeroPedidoLoja || pd.numeroLoja || '').trim();
+          if (alvo.has(nl)) out.bling.achados.push({ casou_com: nl, id: pd.id, numero: pd.numero, numeroLoja: nl, situacao: pd.situacao && pd.situacao.valor, data: pd.data });
+        }
+        if (arr.length < 100) break;
+        await new Promise(r2 => setTimeout(r2, 120));
       }
+      out.bling.pedidos_varridos = vistos;
       out.veredito = out.bling.achados.length
-        ? ('ESTÁ no Bling — encontrado procurando por ' + [...new Set(out.bling.achados.map(a => a.procurado))].join(', '))
-        : 'NÃO achei no Bling por nenhum dos números acima';
+        ? ('ESTÁ no Bling (pedido ' + out.bling.achados.map(a => a.numero).join(', ') + ') — o Bling gravou pelo número ' + [...new Set(out.bling.achados.map(a => a.casou_com))].join(', '))
+        : ('NÃO achei no Bling entre os ' + vistos + ' pedidos de ' + deB + ' a ' + ateB + ' — procurei por ' + out.bling.procurei_por.join(', '));
       json(res, 200, out);
       return true;
     }
