@@ -2834,7 +2834,7 @@ function routes(readBody) {
       try {
         const { garantirTokenML } = require('../ambtotal/mlTokenManager');
         const tk = await garantirTokenML();
-        const HD = { headers: { Authorization: 'Bearer ' + tk } };
+        const HD = { headers: { Authorization: 'Bearer ' + tk } }   /* Codex #343 r4: objeto REUSADO em várias requisições — sinal aqui abortaria todas as seguintes junto com a primeira; timeout é por requisição, em quem chama */;
 
         const ro = await fetch('https://api.mercadolibre.com/orders/' + encodeURIComponent(vendaD), HD);
         // Codex PR#46: corpo de ERRO (401/403/429/404) nao pode virar "order" — a rota existe
@@ -3030,6 +3030,166 @@ function routes(readBody) {
     // token da integração expirar em silêncio. Vem pra cá porque agosto da AMB fechou com 723
     // linhas (~43/dia contra ~54/dia em julho): sem conferir, não dá pra saber se é venda menor
     // ou pedido que não chegou. A lib é a mesma; só as fontes mudam de empresa.
+    /* 06/09 — RAIO-X DE UMA VENDA. O canário insistia em acusar a 2000018258015754 mesmo com
+       ela no Bling (entregue, NF emitida), e passamos cinco rodadas de conserto no escuro
+       porque eu só via o resultado da comparação, nunca os dois lados. Esta rota mostra o que
+       o ML responde e o que o Bling tem, lado a lado — pra o próximo caso ser resolvido em
+       minutos em vez de rodadas. */
+    if (method === 'GET' && p === '/amb-checkout-offline/raio-x-venda') {
+      const kR = urlObj.searchParams.get('k') || '';
+      if (!(process.env.ADMIN_KEY && kR === process.env.ADMIN_KEY)) { json(res, 404, { error: 'not found' }); return true; }
+      const venda = String(urlObj.searchParams.get('venda') || '').replace(/\D/g, '');
+      if (!venda) { json(res, 400, { ok: false, erro: 'use ?venda=2000018258015754&k=SUA_ADMIN_KEY' }); return true; }
+      const out = { ok: true, venda, ml: {}, bling: {}, veredito: null };
+      try {
+        const { garantirTokenML } = require('../ambtotal/mlTokenManager');
+        /* Codex #343 r4: garantirTokenML() sonda /users/me e pode renovar, nenhum dos dois com
+           timeout — ML que aceita a conexão e não responde deixaria o diagnóstico pendurado
+           antes mesmo de começar. Aqui a espera tem limite: sem token em 20s, é indeterminado. */
+        const tk = await Promise.race([
+          garantirTokenML(),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('o ML não respondeu em 20s ao validar o token')), 20000))
+        ]);
+        const r = await fetch('https://api.mercadolibre.com/orders/' + venda, { headers: { Authorization: 'Bearer ' + tk }, signal: AbortSignal.timeout(15000) }   /* Codex #343 r2: ML que aceita a conexão e não responde deixaria a rota pendurada */);
+        out.ml.orders_status = r.status;
+        /* Codex #343: o número pode ser um PACK — o Bling grava ora um, ora outro. Aí /orders
+           dá 404 e a rota desistia, perdendo justamente as ordens do pacote, que são o que
+           interessa. Se o /orders não achou, tenta como pack. */
+        if (!r.ok && r.status === 404) {
+          const rp0 = await fetch('https://api.mercadolibre.com/packs/' + venda, { headers: { Authorization: 'Bearer ' + tk }, signal: AbortSignal.timeout(15000) }   /* Codex #343 r2: ML que aceita a conexão e não responde deixaria a rota pendurada */);
+          out.ml.packs_status = rp0.status;
+          if (rp0.ok) {
+            const dp0 = await rp0.json().catch(() => null);
+            out.ml.era_pack = true;
+            out.ml.pack_id = String(venda);
+            out.ml.ordens_do_pack = (dp0 && Array.isArray(dp0.orders)) ? dp0.orders.map(o => String(o.id)) : null;
+            if (out.ml.ordens_do_pack === null) out.ml.pack_incompleto = true;
+            /* Codex #343 r2: com o pack aberto eu tinha as ordens mas NÃO a data — e sem data
+               a rota caía sempre no INDETERMINADO, ou seja, meu próprio conserto do apontamento
+               anterior deixou o caminho do pack inútil. Busca a data numa das ordens. */
+            const prim = (out.ml.ordens_do_pack || [])[0];
+            if (prim) {
+              /* Codex #343 r5: com timeout esta chamada LANÇA, e sem try local a exceção sairia
+                 pro catch de fora perdendo as ordens do pack já apuradas. */
+              try {
+                const ro = await fetch('https://api.mercadolibre.com/orders/' + prim, { headers: { Authorization: 'Bearer ' + tk }, signal: AbortSignal.timeout(15000) });
+                if (ro.ok) { const dor = await ro.json().catch(() => null); if (dor && dor.date_created) { out.ml.date_created = dor.date_created; out.ml.status = dor.status; } }
+              } catch (eOrd) { out.ml.data_erro = String(eOrd.message || eOrd).slice(0, 120); }
+            }
+          }
+        }
+        if (r.ok) {
+          const d = await r.json().catch(() => null);
+          out.ml.id = d && d.id ? String(d.id) : null;
+          out.ml.pack_id = d && d.pack_id ? String(d.pack_id) : null;
+          out.ml.status = d && d.status;
+          out.ml.date_created = d && d.date_created;
+          if (out.ml.pack_id) {
+            /* Codex #343 r5: o timeout que EU acabei de pôr faz esta chamada LANÇAR quando
+               estoura — e a exceção pulava pro catch de fora sem marcar pack_incompleto. Como
+               a date_created já tinha sido capturada, a rota seguia e dava veredito definitivo
+               sem conhecer as irmãs do carrinho. O try local marca o que não deu pra saber. */
+            try {
+              const rp = await fetch('https://api.mercadolibre.com/packs/' + out.ml.pack_id, { headers: { Authorization: 'Bearer ' + tk }, signal: AbortSignal.timeout(15000) });
+              out.ml.packs_status = rp.status;
+              const dp = rp.ok ? await rp.json().catch(() => null) : null;
+              out.ml.ordens_do_pack = (dp && Array.isArray(dp.orders)) ? dp.orders.map(o => String(o.id)) : null;
+            } catch (ePack) {
+              out.ml.ordens_do_pack = null;
+              out.ml.packs_erro = String(ePack.message || ePack).slice(0, 120);
+            }
+            /* Codex #343: pack que não abriu (429/5xx/JSON ruim) deixa o conjunto de candidatos
+               incompleto — e num carrinho o Bling pode ter gravado o número de uma IRMÃ. Sem
+               marcar isso, um 'NÃO achei' sairia sem ter procurado por todos os números. */
+            if (out.ml.ordens_do_pack === null) out.ml.pack_incompleto = true;
+          }
+        } else { out.ml.corpo = String(await r.text().catch(() => '')).slice(0, 200); }
+      } catch (e) { out.ml.erro = String(e.message || e).slice(0, 200); }
+      /* o que o Bling tem: procura pelo número da venda E pelo pack */
+      const candidatos = [venda, out.ml.pack_id].filter(Boolean).concat(out.ml.ordens_do_pack || []);
+      out.bling.procurei_por = [...new Set(candidatos)];
+      out.bling.achados = [];
+      /* 06/09 (2ª versão) — O BLING IGNORA ?numeroLoja. A primeira versão desta rota usava esse
+         filtro e o Bling devolveu os 100 pedidos MAIS RECENTES, sem filtrar nada — o veredito
+         então dizia "ESTÁ no Bling" porque achava tudo, não porque achava aquilo. Falso
+         positivo numa ferramenta de diagnóstico é pior que não ter a ferramenta.
+         Agora varremos a janela de datas em volta da venda e comparamos NÓS mesmos, que é o
+         que o canário faz — assim o raio-x enxerga exatamente o que ele enxerga. */
+      /* Codex #343: sem date_created (token falhou, /orders falhou, JSON ruim) a janela caía
+         em HOJE — e uma venda antiga seria declarada ausente depois de varrer a semana errada.
+         Sem data do ML, não há veredito. */
+      const diaML = String(out.ml.date_created || '').slice(0, 10);
+      if (!diaML) {
+        out.veredito = 'INDETERMINADO: não consegui a data da venda no ML (' + (out.ml.erro || ('HTTP ' + out.ml.orders_status)) + ') — sem ela eu varreria a janela errada no Bling e o resultado não valeria nada.';
+        json(res, 200, out); return true;
+      }
+      const base = Date.parse(diaML + 'T12:00:00Z');
+      const _d = ms => new Date(ms).toISOString().slice(0, 10);
+      const deB = _d(base - 3 * 86400000), ateB = _d(base + 3 * 86400000);
+      out.bling.janela = { de: deB, ate: ateB, nota: 'o Bling ignora ?numeroLoja — varremos por data e comparamos aqui' };
+      const alvo = new Set(out.bling.procurei_por.map(String));
+      let vistos = 0;
+      for (let pg = 1; pg <= 30; pg++) {
+        /* 06/09 (3ª versão) — ESPERAR O 429. A versão anterior desistia na primeira recusa do
+           Bling: varreu 100 de ~700 pedidos e mesmo assim afirmou "NÃO achei". Veredito sobre
+           14% da janela não prova nada, e ainda por cima aponta o dedo pra integração que pode
+           estar perfeita. O resto do sistema já espera nesses casos (o canário e o backfill
+           fazem isso); aqui faltava. */
+        let rb = null;
+        for (let tent = 1; tent <= 5; tent++) {
+          /* Codex #343 r3: o blingGet aceita um AbortSignal (3º parâmetro) e eu não estava
+             passando — Bling que trava na conexão deixaria a primeira tentativa pendurada pra
+             sempre, e as 5 tentativas nunca aconteceriam. Sinal NOVO a cada requisição: um
+             sinal compartilhado abortaria as tentativas seguintes junto com a primeira. */
+          try { rb = await blingGet('/pedidos/vendas?dataInicial=' + deB + '&dataFinal=' + ateB + '&pagina=' + pg + '&limite=100', 3, AbortSignal.timeout(20000)); }
+          catch (e) { rb = null; }
+          if (rb && rb.ok) break;
+          const st = (rb && rb.status) || 0;
+          if (st !== 429 && st !== 0 && st < 500) break;         /* erro real: não insiste */
+          if (tent < 5) await new Promise(r2 => setTimeout(r2, tent * 5000));
+        }
+        if (!rb || !rb.ok) {
+          out.bling.erro = 'Bling respondeu ' + ((rb && rb.status) || '?') + ' na página ' + pg + ' mesmo após 5 tentativas';
+          out.bling.varredura_completa = false;
+          break;
+        }
+        /* Codex #343 r2: 2xx com JSON inválido ou envelope mudado devolve data:null, e tratar
+           isso como "página vazia" transformava falha em varredura completa — o mesmo vício de
+           dar veredito sem ter olhado, agora pela quarta porta. */
+        if (!rb.data || !Array.isArray(rb.data.data)) {
+          out.bling.varredura_completa = false;
+          out.bling.erro = 'o Bling respondeu ' + rb.status + ' mas com corpo inesperado na página ' + pg;
+          break;
+        }
+        const arr = rb.data.data;
+        if (!arr.length) { out.bling.fim_real = true; break; }
+        vistos += arr.length;
+        for (const pd of arr) {
+          const nl = String(pd.numeroPedidoLoja || pd.numeroLoja || '').trim();
+          if (alvo.has(nl)) out.bling.achados.push({ casou_com: nl, id: pd.id, numero: pd.numero, numeroLoja: nl, situacao: pd.situacao && (pd.situacao.id != null ? pd.situacao.id : pd.situacao.valor)   /* Codex #343: a LISTAGEM do Bling manda o id, não o nome em .valor */, data: pd.data });
+        }
+        if (arr.length < 100) { out.bling.fim_real = true; break; }
+        if (pg === 30) { out.bling.varredura_completa = false; out.bling.erro = 'mais de 3.000 pedidos na janela — varredura truncada no teto de páginas'; }
+        await new Promise(r2 => setTimeout(r2, 120));
+      }
+      out.bling.pedidos_varridos = vistos;
+      if (out.bling.varredura_completa !== false) out.bling.varredura_completa = true;
+      out.veredito = out.bling.achados.length
+        ? ('ESTÁ no Bling (pedido ' + out.bling.achados.map(a => a.numero).join(', ') + ') — o Bling gravou pelo número ' + [...new Set(out.bling.achados.map(a => a.casou_com))].join(', '))
+        : (out.ml.pack_incompleto
+            ? ('INDETERMINADO: o pacote ' + out.ml.pack_id + ' não abriu no ML, então não sei todos os números do carrinho — o Bling pode tê-la gravado por uma das irmãs. Tente de novo em alguns minutos.')
+            : out.bling.varredura_completa === false
+            ? ('INDETERMINADO: o Bling parou de responder no meio (' + (out.bling.erro || '') + '). Varri só ' + vistos + ' pedidos de ' + deB + ' a ' + ateB + ' — NÃO dá pra dizer que a venda não está lá. Tente de novo em alguns minutos.')
+            : ('NÃO achei no Bling entre os ' + vistos + ' pedidos de ' + deB + ' a ' + ateB + ' (varredura completa) — procurei por ' + out.bling.procurei_por.join(', ')));
+      json(res, 200, out);
+      return true;
+    }
+
+    /* 06/09 — O QUE O CANÁRIO ACHOU E O QUE FEZ. O dono perguntou por que a venda que o canário
+       encontra não volta pro Bling sozinha; a resposta era que ninguém tinha feito. Agora: pouca
+       falta é reimportada automaticamente (com reconferência antes de criar, pra não duplicar),
+       e muita falta vira aviso na tela — porque aí é integração caída e só reautorizar no
+       navegador resolve. Esta rota alimenta o aviso do checkout e do dashboard. */
     if (method === 'GET' && p === '/amb-checkout-offline/canario-marketplaces') {
       const kC = urlObj.searchParams.get('k') || '';
       const sC = validarSessao(req.headers['cookie']);
@@ -6174,7 +6334,7 @@ async function _mapasBilling() {
 async function _feeMLLeve(nl, tk) {
   const id = String(nl || '').replace(/\D/g, '');
   if (!id || !tk) return 0;
-  const H = { headers: { Authorization: 'Bearer ' + tk } };
+  const H = { headers: { Authorization: 'Bearer ' + tk } }   /* Codex #343 r4: objeto REUSADO em várias requisições — sinal aqui abortaria todas as seguintes junto com a primeira; timeout é por requisição, em quem chama */;
   const soma = ords => { let f = 0; for (const od of ords) for (const it of (od.order_items || [])) { const q = Number(it.quantity || 1), sf = Number(it.sale_fee || 0); if (isFinite(sf)) f += sf * q; } return Math.round(f * 100) / 100; };
   try {
     const r = await fetch('https://api.mercadolibre.com/orders/' + id, H);
@@ -6677,6 +6837,11 @@ async function backfillVendas(de, ate, empresa){
       if (empresa === 'amb') {
         const { garantirTokenML } = require('../ambtotal/mlTokenManager');
         const tk = await garantirTokenML();
+        /* Codex #343 r3: meu replace de timeout da rodada anterior atingiu ESTE objeto, que é
+           REUSADO em todas as páginas do backfill — um único AbortSignal de 15s abortaria a
+           paginação inteira no meio, e o catch de fora registraria erro e deixaria o backfill
+           "concluir" sem os dados. Efeito colateral fora do escopo do PR: aqui fica só o header,
+           como era. Timeout por requisição é responsabilidade de quem chama, não do objeto. */
         const HML = { headers: { Authorization: 'Bearer ' + tk } };
         const rme = await fetch('https://api.mercadolibre.com/users/me', HML);
         const me = rme.ok ? await rme.json().catch(() => null) : null;
