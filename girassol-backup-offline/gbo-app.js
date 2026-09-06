@@ -540,25 +540,31 @@ const _listarNoBlingCanario = async (de, ate) => {
    faltantes, que é quando o ML já está sob pressão. */
 const _packCacheVenda = new Map();
 const _packOrdensCache = new Map();
-/* Codex #335 r3: NÃO cachear o token por conta própria. O garantirTokenML() é quem conhece a
-   validade e renova quando precisa; guardar por 20 min aqui devolveria um token já expirado
-   quando outra rodada o renovasse no meio. Ele tem cache próprio — chamar direto é seguro. */
+/* Codex #335 r4: eu escrevi que garantirTokenML() tem cache próprio — NÃO TEM. Ele faz um
+   /users/me a cada chamada (mlTokenManager.js:69-78), então uma rodada com muitos faltantes
+   dispara uma validação por candidato. Cache curto aqui, dentro de UMA rodada: 60 segundos
+   resolve a rajada e é curto demais pra segurar um token que expirou. */
+let _tkCanario = { tk: null, ts: 0 };
 async function _tokenMLCanario() {
+  if (_tkCanario.tk && (Date.now() - _tkCanario.ts) < 60000) return _tkCanario.tk;
   const { garantirTokenML } = require('../girassol/mlTokenManager');
-  return await garantirTokenML();
+  const tk = await garantirTokenML();
+  _tkCanario = { tk, ts: Date.now() };
+  return tk;
 }
 const _packDaVendaCanario = async (canal, venda) => {
   if (canal !== 'ml') return null;
   const k = String(venda);
   const em = _packCacheVenda.get(k);
-  if (em && (Date.now() - em.ts) < 60 * 60000) return { pack: em.pack, doCache: true };
+  if (em && (Date.now() - em.ts) < (em.ttl || 60 * 60000)) return { pack: em.pack, doCache: true };
   try {
     const tk = await _tokenMLCanario();
     const r = await fetch('https://api.mercadolibre.com/orders/' + k, { headers: { Authorization: 'Bearer ' + tk } });
     if (!r.ok) return null;
     const d = await r.json().catch(() => null);
     const pack = d && d.pack_id ? String(d.pack_id) : null;
-    _packCacheVenda.set(k, { pack, ts: Date.now() });
+    /* mesma razão do /packs: sem cachear a resposta vazia, a venda sem pack volta em toda rodada */
+    _packCacheVenda.set(k, { pack, ts: Date.now(), ttl: pack ? 60 * 60000 : 15 * 60000 });
     return { pack, doCache: false };
   } catch (e) { return null; }
 };
@@ -566,14 +572,18 @@ const _ordensDoPackCanario = async (canal, pack) => {
   if (canal !== 'ml') return null;
   const k = String(pack);
   const em = _packOrdensCache.get(k);
-  if (em && (Date.now() - em.ts) < 60 * 60000) return { ordens: em.ordens, doCache: true };
+  if (em && (Date.now() - em.ts) < (em.ttl || 60 * 60000)) return { ordens: em.ordens, doCache: true };
   try {
     const tk = await _tokenMLCanario();
     const r = await fetch('https://api.mercadolibre.com/packs/' + k, { headers: { Authorization: 'Bearer ' + tk } });
     if (!r.ok) return null;
     const d = await r.json().catch(() => null);
     const ordens = (d && Array.isArray(d.orders)) ? d.orders.map(o => String(o.id)) : null;
-    if (ordens) _packOrdensCache.set(k, { ordens, ts: Date.now() });
+    /* Codex #335 r4: cachear TAMBÉM quando não deu (404, erro, resposta sem orders). Sem isso,
+       um pack que sempre falha volta a ser consultado em toda rodada e consome o teto pra
+       sempre — o lote nunca avança pros seguintes, que é o furo que este orçamento veio
+       evitar. Falha fica 15 min no cache; sucesso, 1h. */
+    _packOrdensCache.set(k, { ordens, ts: Date.now(), ttl: ordens ? 60 * 60000 : 15 * 60000 });
     return { ordens, doCache: false };
   } catch (e) { return null; }
 };
