@@ -8,6 +8,7 @@ process.env.ML_FULL_DIR = require('os').tmpdir() + '/ml-full-teste-' + Date.now(
 const assert = require('assert');
 const mf = require('../ml-full');
 const { sondarVenda, extrairChave, _trocarFetchParaTeste } = mf._interno;
+void mf._interno.comPrazo; // usado no cenário 10
 
 const XML = '<?xml version="1.0"?><NFe><infNFe Id="NFe12345678901234567890123456789012345678901234"></infNFe></NFe>';
 
@@ -129,6 +130,15 @@ function fetchDeTabela(tabela) {
   assert.strictEqual(r[0].resultado, 'nota_encontrada_sem_xml', 'HTML 2xx não vira xml_salvo');
   assert.ok(r[0].passos.some(p => String(p.corpo).includes('SEM chave de NF-e')), 'passo explica a recusa');
   assert.ok(!r[0].arquivo, 'nada foi salvo em disco');
+  cen++;
+
+  // 10) (Codex r2) comPrazo: promessa pendurada estoura no prazo com mensagem transitória
+  const pendurada = new Promise(() => {});
+  let estourou = null;
+  try { await mf._interno.comPrazo(pendurada, 120, 'validação do token ML da amb'); }
+  catch (e) { estourou = e.message; }
+  assert.ok(/demorou/.test(estourou || ''), 'prazo estourado vira erro com "demorou"');
+  assert.ok((await mf._interno.comPrazo(Promise.resolve('tk'), 120, 'x')) === 'tk', 'prazo não atrapalha quem responde');
   cen++;
 
   // extras de unidade

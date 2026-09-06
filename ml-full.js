@@ -54,11 +54,21 @@ const MANAGERS = {
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
+/* Codex #344 r2: os garantirTokenML() dos managers validam o token com fetch SEM
+   timeout — se o ML pendurar ali, a sonda travaria antes do mlGet. O prazo aqui
+   (race) devolve o erro transitório prometido em vez de nunca responder, sem
+   mexer nos managers compartilhados que o F3 usa. */
+function comPrazo(promessa, ms, rotulo) {
+  let t;
+  const prazo = new Promise((_, rej) => { t = setTimeout(() => rej(new Error(rotulo + ' demorou >' + Math.round(ms / 1000) + 's (ML instável?) — rode de novo em ~1 min')), ms); });
+  return Promise.race([promessa, prazo]).finally(() => clearTimeout(t));
+}
+
 async function garantirToken(empresa) {
   const mk = MANAGERS[empresa];
   if (!mk) throw new Error('empresa desconhecida: ' + empresa + ' (use amb, girassol ou good)');
   try {
-    const tk = await mk().garantirTokenML();
+    const tk = await comPrazo(Promise.resolve().then(() => mk().garantirTokenML()), 30000, 'validação do token ML da ' + empresa);
     if (!tk) throw new Error('manager devolveu token vazio');
     return tk;
   } catch (e) {
@@ -299,7 +309,7 @@ async function tratar(req, res, urlObj, json) {
 module.exports = {
   tratar, VERSAO,
   _interno: {
-    sondarVenda, sondarUmaOrder, mlGet, extrairChave, garantirToken, listarArquivos,
+    sondarVenda, sondarUmaOrder, mlGet, extrairChave, garantirToken, listarArquivos, comPrazo,
     _trocarFetchParaTeste(f) { _fetchRef.fn = f; },
   },
 };
