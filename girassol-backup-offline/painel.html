@@ -359,6 +359,10 @@
   </div>
   <div class="stats" id="stats">carregando…</div>
 </header>
+<!-- 06/09: venda do marketplace que não está chegando ao Bling e que o conserto automático
+     NÃO resolve (integração caída / token vencido) — só reautorizar no navegador resolve,
+     então precisa aparecer onde o dono olha, não só no log. -->
+<div id="canarioAviso" style="display:none;margin:8px 12px;padding:10px 14px;border-radius:8px;background:#7f1d1d;color:#fee2e2;font-size:13px;line-height:1.5"></div>
 <!-- 04/09: NFs que o ML recusou por erro permanente (CEP que o Bling importou errado, doc
      inválido). A rotina parou de retransmitir; aqui fica o aviso pra intervenção manual. -->
 <div id="nfTravadas" style="display:none;margin:8px 12px;padding:10px 14px;border-radius:8px;background:#7f1d1d;color:#fee2e2;font-size:13px;line-height:1.5"></div>
@@ -816,6 +820,23 @@ async function checarNFTravadas(){
   }catch(e){ el.style.display='none'; }
 }
 setInterval(checarNFTravadas, 5*60000);
+
+/* 06/09 — aviso de venda que não chega ao Bling. Só aparece quando o conserto automático não
+   dá conta (muita falta = integração caída); pouca falta o canário reimporta sozinho. */
+async function checarCanario(){
+  const el = document.getElementById('canarioAviso'); if(!el) return;
+  try{
+    const r = await fetch('/girassol-backup-offline/canario-estado', {credentials:'same-origin'});
+    const d = await r.json().catch(()=>null);
+    if(!d || !d.ok || !d.precisa_de_voce || !d.aviso){ el.style.display='none'; return; }
+    el.innerHTML = '<b>\u26a0\ufe0f ' + d.aviso.titulo + '</b><br>' + d.aviso.detalhe
+      + '<div style="margin-top:6px;opacity:.9"><b>O que fazer:</b> ' + d.aviso.o_que_fazer + '</div>';
+    el.style.display='';
+  }catch(e){ el.style.display='none'; }
+}
+setInterval(checarCanario, 10*60000);
+try{ checarCanario(); }catch(e){}
+
 async function sincronizar(){
   const b = $('btnSync');
   const orig = b ? b.textContent : '';
