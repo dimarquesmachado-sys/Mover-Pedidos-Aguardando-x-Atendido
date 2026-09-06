@@ -874,7 +874,6 @@ function routes(readBody) {
       const _meu = p.startsWith('/girassol-backup-offline'); // guarda só age nas rotas DESTE módulo
       const _pub = (
         p === '/girassol-backup-offline' || p === '/girassol-backup-offline/' ||
-        p === '/girassol-backup-offline/canario-estado' ||   /* leitura pro aviso na tela */
         p === '/girassol-backup-offline/painel' ||
       p === '/girassol-backup-offline/nf-travadas' ||   /* 04/09: leitura pro card de NFs travadas */ p === '/girassol-backup-offline/login' ||
         p === '/girassol-backup-offline/operadores' || p === '/girassol-backup-offline/health' ||
@@ -2187,6 +2186,16 @@ function routes(readBody) {
        e muita falta vira aviso na tela — porque aí é integração caída e só reautorizar no
        navegador resolve. Esta rota alimenta o aviso do checkout e do dashboard. */
     if (method === 'GET' && p === '/girassol-backup-offline/canario-estado') {
+      /* 06/09 — SÓ ADMIN. Eu tinha liberado esta rota do gate de sessão e o painel do checkout
+         é usado pelos ESTOQUISTAS: eles veriam uma faixa vermelha mandando reautorizar a
+         integração do Bling — instrução que não é pra eles, que não têm acesso pra executar, e
+         que só serviria pra preocupar quem está com o pacote na mão. O dono pediu explícito:
+         só admin vê; pro estoquista, nada. Sem sessão de admin a rota responde 404, como as
+         outras administrativas — e o painel simplesmente não desenha a faixa. */
+      const sC = validarSessao(req.headers['cookie']);
+      const kC = urlObj.searchParams.get('k') || '';
+      const ehAdm = (sC && ehAdmin(sC)) || (process.env.ADMIN_KEY && kC === process.env.ADMIN_KEY);
+      if (!ehAdm) { json(res, 404, { error: 'not found' }); return true; }
       try {
         const cons = require('../lib/canario-conserto');
         const h = cons.historico(CACHE_DIR, 20);
