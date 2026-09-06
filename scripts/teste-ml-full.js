@@ -148,17 +148,28 @@ function fetchDeTabela(tabela) {
   console.log('OK: ' + cen + ' cenários da matriz passaram (' + mf.VERSAO + ')');
 })().catch(e => { console.error('FALHOU:', e.message); process.exit(1); });
 
-/* Cenário 11 (fonte, não caixa-preta): TODA chamada fetch dos 3 mlTokenManager
-   precisa carregar timeout — é a classe do apontamento r3 do Codex (#344): sem
-   isso, conexão aceita e nunca respondida pendura a sonda E o F3. Reintroduzir
-   um fetch sem timeout num manager derruba este teste. */
+/* Cenário 11 (fonte, não caixa-preta) — reescrito no r4: o contrato agora é
+   ASSIMÉTRICO de propósito. users/me (idempotente) TEM abort (signal); os dois
+   POSTs oauth/token (NÃO-idempotentes: o ML rotaciona refresh token de uso
+   único) NÃO têm teto e carregam a justificativa por escrito. Reintroduzir
+   timeout no refresh — o furo que o Codex pegou no r3 — derruba este teste. */
 const fsG = require('fs');
 for (const m of ['ambtotal', 'girassol', 'good']) {
   const src = fsG.readFileSync(__dirname + '/../' + m + '/mlTokenManager.js', 'utf8');
-  const chamadas = src.split(/await fetch\(/).slice(1);
-  if (!chamadas.length) { console.error('FALHOU: nenhum fetch achado em ' + m + ' (o teste envelheceu?)'); process.exit(1); }
-  for (const c of chamadas) {
-    if (!/timeout:\s*\d+/.test(c.slice(0, 300))) { console.error('FALHOU: fetch sem timeout em ' + m + '/mlTokenManager.js'); process.exit(1); }
+  const partes = src.split('await fetch(');
+  if (partes.length !== 4) { console.error('FALHOU: esperava 3 fetch em ' + m + ', achei ' + (partes.length - 1)); process.exit(1); }
+  for (let i = 1; i < partes.length; i++) {
+    const antes = partes[i - 1].slice(-600);
+    const chamada = partes[i].slice(0, 400);
+    if (chamada.startsWith("'https://api.mercadolibre.com/oauth/token'")) {
+      if (/timeout:|signal:/.test(chamada)) { console.error('FALHOU: oauth/token com teto em ' + m + ' — POST não-idempotente NÃO pode abortar'); process.exit(1); }
+      if (!/NÃO-idempotente/.test(antes)) { console.error('FALHOU: oauth/token sem a justificativa escrita em ' + m); process.exit(1); }
+    } else if (chamada.startsWith("'https://api.mercadolibre.com/users/me'")) {
+      if (!/signal:/.test(chamada)) { console.error('FALHOU: users/me sem AbortController em ' + m); process.exit(1); }
+    } else { console.error('FALHOU: fetch inesperado em ' + m + ': ' + chamada.slice(0, 60)); process.exit(1); }
   }
 }
-console.log('OK: cenário 11 — os 3 managers só têm fetch com timeout');
+if (!/new AbortController\(\)/.test(fsG.readFileSync(__dirname + '/../ml-full.js', 'utf8'))) {
+  console.error('FALHOU: mlGet sem AbortController'); process.exit(1);
+}
+console.log('OK: cenário 11 — abort onde é idempotente, teto nenhum onde o ML rotaciona token');

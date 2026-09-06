@@ -21,8 +21,13 @@ function salvarTokens(tokens) {
 }
 
 async function trocarCodigoPorToken(code) {
+  /* Codex #344 r4: SEM teto aqui, DE PROPÓSITO — POST NÃO-idempotente. O ML
+     rotaciona o refresh token (uso único) ao processar; abortar depois disso e
+     antes de ler a resposta perderia o token novo pra sempre (só OAuth manual
+     recupera). Quem chama limita a PRÓPRIA espera (ex.: comPrazo no ml-full) e
+     esta promessa conclui em background, salvando o token rotacionado quando a
+     resposta chegar. */
   const resp = await fetch('https://api.mercadolibre.com/oauth/token', {
-    timeout: 20000, // Codex #344: sem isto, conexão aceita e nunca respondida pendura quem chama (node-fetch v2 destrói o socket ao estourar)
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
@@ -47,8 +52,13 @@ async function renovarTokenML() {
   const tokens = lerTokens();
   if (!tokens?.refresh_token) throw new Error('ML: sem refresh_token salvo');
 
+  /* Codex #344 r4: SEM teto aqui, DE PROPÓSITO — POST NÃO-idempotente. O ML
+     rotaciona o refresh token (uso único) ao processar; abortar depois disso e
+     antes de ler a resposta perderia o token novo pra sempre (só OAuth manual
+     recupera). Quem chama limita a PRÓPRIA espera (ex.: comPrazo no ml-full) e
+     esta promessa conclui em background, salvando o token rotacionado quando a
+     resposta chegar. */
   const resp = await fetch('https://api.mercadolibre.com/oauth/token', {
-    timeout: 20000, // Codex #344: sem isto, conexão aceita e nunca respondida pendura quem chama (node-fetch v2 destrói o socket ao estourar)
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
@@ -73,10 +83,20 @@ async function garantirTokenML() {
   if (!tokens?.access_token) throw new Error('ML: token não configurado. Acesse /setup-ml para autorizar.');
 
   // Testar se token ainda é válido
-  const resp = await fetch('https://api.mercadolibre.com/users/me', {
-    timeout: 20000, // Codex #344: sem isto, conexão aceita e nunca respondida pendura quem chama (node-fetch v2 destrói o socket ao estourar)
-    headers: { Authorization: `Bearer ${tokens.access_token}` }
-  });
+  /* Codex #344 r4: sonda idempotente com ABORT de verdade — o timeout do
+     node-fetch v2 é timer de corpo, e corpo nunca consumido (este fluxo só olha
+     resp.ok) deixaria o socket vivo. O AbortController mata no prazo e o
+     abort() final encerra o corpo não lido. */
+  const acSonda = new AbortController();
+  const tSonda = setTimeout(() => acSonda.abort(), 20000);
+  let resp;
+  try {
+    resp = await fetch('https://api.mercadolibre.com/users/me', {
+      signal: acSonda.signal, timeout: 20000,
+      headers: { Authorization: `Bearer ${tokens.access_token}` }
+    });
+  } finally { clearTimeout(tSonda); }
+  acSonda.abort(); // corpo não consumido: encerra já, sem socket pendurado
 
   if (resp.ok) return tokens.access_token;
 

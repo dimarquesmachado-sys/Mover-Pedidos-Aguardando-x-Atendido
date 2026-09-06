@@ -85,15 +85,21 @@ async function garantirToken(empresa) {
 async function mlGet(token, url, auth = 'bearer') {
   let ultimo = null;
   for (let tent = 1; tent <= 2; tent++) {
+    /* Codex #344 r4: o timeout do node-fetch v2 não destrói corpo TRAVADO — o
+       retry recomeçava com o socket anterior vivo. O AbortController aborta de
+       verdade, e o timer só é limpo depois do text() (corpo travado também
+       precisa do abort). */
+    const ac = new AbortController();
+    const tAb = setTimeout(() => ac.abort(), 30000);
     try {
       const headers = auth === 'bearer' ? { Authorization: 'Bearer ' + token } : {};
-      const r = await _fetchRef.fn(url, { headers, timeout: 30000 });
+      const r = await _fetchRef.fn(url, { headers, signal: ac.signal, timeout: 30000 });
       const texto = await r.text();
       const transitorio = r.status === 429 || r.status >= 500;
       ultimo = { status: r.status, ok: r.status >= 200 && r.status < 300, texto, transitorio };
     } catch (e) {
       ultimo = { status: 0, ok: false, texto: 'rede/timeout: ' + String(e.message || e).slice(0, 160), transitorio: true };
-    }
+    } finally { clearTimeout(tAb); }
     if (!ultimo.transitorio) return ultimo;
     if (tent === 1) await sleep(4000);
   }
