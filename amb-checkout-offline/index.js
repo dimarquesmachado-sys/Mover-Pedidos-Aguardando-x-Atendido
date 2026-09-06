@@ -3046,6 +3046,20 @@ function routes(readBody) {
         const tk = await garantirTokenML();
         const r = await fetch('https://api.mercadolibre.com/orders/' + venda, { headers: { Authorization: 'Bearer ' + tk } });
         out.ml.orders_status = r.status;
+        /* Codex #343: o número pode ser um PACK — o Bling grava ora um, ora outro. Aí /orders
+           dá 404 e a rota desistia, perdendo justamente as ordens do pacote, que são o que
+           interessa. Se o /orders não achou, tenta como pack. */
+        if (!r.ok && r.status === 404) {
+          const rp0 = await fetch('https://api.mercadolibre.com/packs/' + venda, { headers: { Authorization: 'Bearer ' + tk } });
+          out.ml.packs_status = rp0.status;
+          if (rp0.ok) {
+            const dp0 = await rp0.json().catch(() => null);
+            out.ml.era_pack = true;
+            out.ml.pack_id = String(venda);
+            out.ml.ordens_do_pack = (dp0 && Array.isArray(dp0.orders)) ? dp0.orders.map(o => String(o.id)) : null;
+            if (out.ml.ordens_do_pack === null) out.ml.pack_incompleto = true;
+          }
+        }
         if (r.ok) {
           const d = await r.json().catch(() => null);
           out.ml.id = d && d.id ? String(d.id) : null;
@@ -3057,6 +3071,10 @@ function routes(readBody) {
             out.ml.packs_status = rp.status;
             const dp = rp.ok ? await rp.json().catch(() => null) : null;
             out.ml.ordens_do_pack = (dp && Array.isArray(dp.orders)) ? dp.orders.map(o => String(o.id)) : null;
+            /* Codex #343: pack que não abriu (429/5xx/JSON ruim) deixa o conjunto de candidatos
+               incompleto — e num carrinho o Bling pode ter gravado o número de uma IRMÃ. Sem
+               marcar isso, um 'NÃO achei' sairia sem ter procurado por todos os números. */
+            if (out.ml.ordens_do_pack === null) out.ml.pack_incompleto = true;
           }
         } else { out.ml.corpo = String(await r.text().catch(() => '')).slice(0, 200); }
       } catch (e) { out.ml.erro = String(e.message || e).slice(0, 200); }
@@ -3070,8 +3088,15 @@ function routes(readBody) {
          positivo numa ferramenta de diagnóstico é pior que não ter a ferramenta.
          Agora varremos a janela de datas em volta da venda e comparamos NÓS mesmos, que é o
          que o canário faz — assim o raio-x enxerga exatamente o que ele enxerga. */
+      /* Codex #343: sem date_created (token falhou, /orders falhou, JSON ruim) a janela caía
+         em HOJE — e uma venda antiga seria declarada ausente depois de varrer a semana errada.
+         Sem data do ML, não há veredito. */
       const diaML = String(out.ml.date_created || '').slice(0, 10);
-      const base = diaML ? Date.parse(diaML + 'T12:00:00Z') : Date.now();
+      if (!diaML) {
+        out.veredito = 'INDETERMINADO: não consegui a data da venda no ML (' + (out.ml.erro || ('HTTP ' + out.ml.orders_status)) + ') — sem ela eu varreria a janela errada no Bling e o resultado não valeria nada.';
+        json(res, 200, out); return true;
+      }
+      const base = Date.parse(diaML + 'T12:00:00Z');
       const _d = ms => new Date(ms).toISOString().slice(0, 10);
       const deB = _d(base - 3 * 86400000), ateB = _d(base + 3 * 86400000);
       out.bling.janela = { de: deB, ate: ateB, nota: 'o Bling ignora ?numeroLoja — varremos por data e comparamos aqui' };
@@ -3102,16 +3127,19 @@ function routes(readBody) {
         vistos += arr.length;
         for (const pd of arr) {
           const nl = String(pd.numeroPedidoLoja || pd.numeroLoja || '').trim();
-          if (alvo.has(nl)) out.bling.achados.push({ casou_com: nl, id: pd.id, numero: pd.numero, numeroLoja: nl, situacao: pd.situacao && pd.situacao.valor, data: pd.data });
+          if (alvo.has(nl)) out.bling.achados.push({ casou_com: nl, id: pd.id, numero: pd.numero, numeroLoja: nl, situacao: pd.situacao && (pd.situacao.id != null ? pd.situacao.id : pd.situacao.valor)   /* Codex #343: a LISTAGEM do Bling manda o id, não o nome em .valor */, data: pd.data });
         }
-        if (arr.length < 100) break;
+        if (arr.length < 100) { out.bling.fim_real = true; break; }
+        if (pg === 30) { out.bling.varredura_completa = false; out.bling.erro = 'mais de 3.000 pedidos na janela — varredura truncada no teto de páginas'; }
         await new Promise(r2 => setTimeout(r2, 120));
       }
       out.bling.pedidos_varridos = vistos;
       if (out.bling.varredura_completa !== false) out.bling.varredura_completa = true;
       out.veredito = out.bling.achados.length
         ? ('ESTÁ no Bling (pedido ' + out.bling.achados.map(a => a.numero).join(', ') + ') — o Bling gravou pelo número ' + [...new Set(out.bling.achados.map(a => a.casou_com))].join(', '))
-        : (out.bling.varredura_completa === false
+        : (out.ml.pack_incompleto
+            ? ('INDETERMINADO: o pacote ' + out.ml.pack_id + ' não abriu no ML, então não sei todos os números do carrinho — o Bling pode tê-la gravado por uma das irmãs. Tente de novo em alguns minutos.')
+            : out.bling.varredura_completa === false
             ? ('INDETERMINADO: o Bling parou de responder no meio (' + (out.bling.erro || '') + '). Varri só ' + vistos + ' pedidos de ' + deB + ' a ' + ateB + ' — NÃO dá pra dizer que a venda não está lá. Tente de novo em alguns minutos.')
             : ('NÃO achei no Bling entre os ' + vistos + ' pedidos de ' + deB + ' a ' + ateB + ' (varredura completa) — procurei por ' + out.bling.procurei_por.join(', ')));
       json(res, 200, out);
