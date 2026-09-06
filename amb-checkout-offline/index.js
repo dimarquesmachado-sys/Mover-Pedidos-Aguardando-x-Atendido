@@ -3030,6 +3030,99 @@ function routes(readBody) {
     // token da integração expirar em silêncio. Vem pra cá porque agosto da AMB fechou com 723
     // linhas (~43/dia contra ~54/dia em julho): sem conferir, não dá pra saber se é venda menor
     // ou pedido que não chegou. A lib é a mesma; só as fontes mudam de empresa.
+    /* 06/09 — RAIO-X DE UMA VENDA. O canário insistia em acusar a 2000018258015754 mesmo com
+       ela no Bling (entregue, NF emitida), e passamos cinco rodadas de conserto no escuro
+       porque eu só via o resultado da comparação, nunca os dois lados. Esta rota mostra o que
+       o ML responde e o que o Bling tem, lado a lado — pra o próximo caso ser resolvido em
+       minutos em vez de rodadas. */
+    if (method === 'GET' && p === '/amb-checkout-offline/raio-x-venda') {
+      const kR = urlObj.searchParams.get('k') || '';
+      if (!(process.env.ADMIN_KEY && kR === process.env.ADMIN_KEY)) { json(res, 404, { error: 'not found' }); return true; }
+      const venda = String(urlObj.searchParams.get('venda') || '').replace(/\D/g, '');
+      if (!venda) { json(res, 400, { ok: false, erro: 'use ?venda=2000018258015754&k=SUA_ADMIN_KEY' }); return true; }
+      const out = { ok: true, venda, ml: {}, bling: {}, veredito: null };
+      try {
+        const { garantirTokenML } = require('../ambtotal/mlTokenManager');
+        const tk = await garantirTokenML();
+        const r = await fetch('https://api.mercadolibre.com/orders/' + venda, { headers: { Authorization: 'Bearer ' + tk } });
+        out.ml.orders_status = r.status;
+        if (r.ok) {
+          const d = await r.json().catch(() => null);
+          out.ml.id = d && d.id ? String(d.id) : null;
+          out.ml.pack_id = d && d.pack_id ? String(d.pack_id) : null;
+          out.ml.status = d && d.status;
+          out.ml.date_created = d && d.date_created;
+          if (out.ml.pack_id) {
+            const rp = await fetch('https://api.mercadolibre.com/packs/' + out.ml.pack_id, { headers: { Authorization: 'Bearer ' + tk } });
+            out.ml.packs_status = rp.status;
+            const dp = rp.ok ? await rp.json().catch(() => null) : null;
+            out.ml.ordens_do_pack = (dp && Array.isArray(dp.orders)) ? dp.orders.map(o => String(o.id)) : null;
+          }
+        } else { out.ml.corpo = String(await r.text().catch(() => '')).slice(0, 200); }
+      } catch (e) { out.ml.erro = String(e.message || e).slice(0, 200); }
+      /* o que o Bling tem: procura pelo número da venda E pelo pack */
+      const candidatos = [venda, out.ml.pack_id].filter(Boolean).concat(out.ml.ordens_do_pack || []);
+      out.bling.procurei_por = [...new Set(candidatos)];
+      out.bling.achados = [];
+      /* 06/09 (2ª versão) — O BLING IGNORA ?numeroLoja. A primeira versão desta rota usava esse
+         filtro e o Bling devolveu os 100 pedidos MAIS RECENTES, sem filtrar nada — o veredito
+         então dizia "ESTÁ no Bling" porque achava tudo, não porque achava aquilo. Falso
+         positivo numa ferramenta de diagnóstico é pior que não ter a ferramenta.
+         Agora varremos a janela de datas em volta da venda e comparamos NÓS mesmos, que é o
+         que o canário faz — assim o raio-x enxerga exatamente o que ele enxerga. */
+      const diaML = String(out.ml.date_created || '').slice(0, 10);
+      const base = diaML ? Date.parse(diaML + 'T12:00:00Z') : Date.now();
+      const _d = ms => new Date(ms).toISOString().slice(0, 10);
+      const deB = _d(base - 3 * 86400000), ateB = _d(base + 3 * 86400000);
+      out.bling.janela = { de: deB, ate: ateB, nota: 'o Bling ignora ?numeroLoja — varremos por data e comparamos aqui' };
+      const alvo = new Set(out.bling.procurei_por.map(String));
+      let vistos = 0;
+      for (let pg = 1; pg <= 30; pg++) {
+        /* 06/09 (3ª versão) — ESPERAR O 429. A versão anterior desistia na primeira recusa do
+           Bling: varreu 100 de ~700 pedidos e mesmo assim afirmou "NÃO achei". Veredito sobre
+           14% da janela não prova nada, e ainda por cima aponta o dedo pra integração que pode
+           estar perfeita. O resto do sistema já espera nesses casos (o canário e o backfill
+           fazem isso); aqui faltava. */
+        let rb = null;
+        for (let tent = 1; tent <= 5; tent++) {
+          try { rb = await blingGet('/pedidos/vendas?dataInicial=' + deB + '&dataFinal=' + ateB + '&pagina=' + pg + '&limite=100'); }
+          catch (e) { rb = null; }
+          if (rb && rb.ok) break;
+          const st = (rb && rb.status) || 0;
+          if (st !== 429 && st !== 0 && st < 500) break;         /* erro real: não insiste */
+          if (tent < 5) await new Promise(r2 => setTimeout(r2, tent * 5000));
+        }
+        if (!rb || !rb.ok) {
+          out.bling.erro = 'Bling respondeu ' + ((rb && rb.status) || '?') + ' na página ' + pg + ' mesmo após 5 tentativas';
+          out.bling.varredura_completa = false;
+          break;
+        }
+        const arr = (rb.data && rb.data.data) || [];
+        if (!arr.length) break;
+        vistos += arr.length;
+        for (const pd of arr) {
+          const nl = String(pd.numeroPedidoLoja || pd.numeroLoja || '').trim();
+          if (alvo.has(nl)) out.bling.achados.push({ casou_com: nl, id: pd.id, numero: pd.numero, numeroLoja: nl, situacao: pd.situacao && pd.situacao.valor, data: pd.data });
+        }
+        if (arr.length < 100) break;
+        await new Promise(r2 => setTimeout(r2, 120));
+      }
+      out.bling.pedidos_varridos = vistos;
+      if (out.bling.varredura_completa !== false) out.bling.varredura_completa = true;
+      out.veredito = out.bling.achados.length
+        ? ('ESTÁ no Bling (pedido ' + out.bling.achados.map(a => a.numero).join(', ') + ') — o Bling gravou pelo número ' + [...new Set(out.bling.achados.map(a => a.casou_com))].join(', '))
+        : (out.bling.varredura_completa === false
+            ? ('INDETERMINADO: o Bling parou de responder no meio (' + (out.bling.erro || '') + '). Varri só ' + vistos + ' pedidos de ' + deB + ' a ' + ateB + ' — NÃO dá pra dizer que a venda não está lá. Tente de novo em alguns minutos.')
+            : ('NÃO achei no Bling entre os ' + vistos + ' pedidos de ' + deB + ' a ' + ateB + ' (varredura completa) — procurei por ' + out.bling.procurei_por.join(', ')));
+      json(res, 200, out);
+      return true;
+    }
+
+    /* 06/09 — O QUE O CANÁRIO ACHOU E O QUE FEZ. O dono perguntou por que a venda que o canário
+       encontra não volta pro Bling sozinha; a resposta era que ninguém tinha feito. Agora: pouca
+       falta é reimportada automaticamente (com reconferência antes de criar, pra não duplicar),
+       e muita falta vira aviso na tela — porque aí é integração caída e só reautorizar no
+       navegador resolve. Esta rota alimenta o aviso do checkout e do dashboard. */
     if (method === 'GET' && p === '/amb-checkout-offline/canario-marketplaces') {
       const kC = urlObj.searchParams.get('k') || '';
       const sC = validarSessao(req.headers['cookie']);
