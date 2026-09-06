@@ -560,13 +560,17 @@ const _packDaVendaCanario = async (canal, venda) => {
   try {
     const tk = await _tokenMLCanario();
     const r = await fetch('https://api.mercadolibre.com/orders/' + k, { headers: { Authorization: 'Bearer ' + tk } });
-    if (!r.ok) return null;
+    /* Codex #335 r5: cachear TAMBÉM o erro HTTP (404, 429, 5xx). Eu tinha cacheado só a
+       resposta vazia; com erro, a venda voltava a ser consultada em toda rodada, consumia o
+       teto, e os candidatos seguintes nunca eram inspecionados — o mesmo furo do orçamento
+       pela quarta porta. TTL curto (15 min) porque erro pode ser transitório. */
+    if (!r.ok) { _packCacheVenda.set(k, { pack: null, ts: Date.now(), ttl: 15 * 60000 }); return { pack: null, doCache: false }; }
     const d = await r.json().catch(() => null);
     const pack = d && d.pack_id ? String(d.pack_id) : null;
     /* mesma razão do /packs: sem cachear a resposta vazia, a venda sem pack volta em toda rodada */
     _packCacheVenda.set(k, { pack, ts: Date.now(), ttl: pack ? 60 * 60000 : 15 * 60000 });
     return { pack, doCache: false };
-  } catch (e) { return null; }
+  } catch (e) { _packCacheVenda.set(k, { pack: null, ts: Date.now(), ttl: 15 * 60000 }); return { pack: null, doCache: false }; }
 };
 const _ordensDoPackCanario = async (canal, pack) => {
   if (canal !== 'ml') return null;
@@ -576,7 +580,8 @@ const _ordensDoPackCanario = async (canal, pack) => {
   try {
     const tk = await _tokenMLCanario();
     const r = await fetch('https://api.mercadolibre.com/packs/' + k, { headers: { Authorization: 'Bearer ' + tk } });
-    if (!r.ok) return null;
+    /* mesma razão do /orders acima */
+    if (!r.ok) { _packOrdensCache.set(k, { ordens: null, ts: Date.now(), ttl: 15 * 60000 }); return { ordens: null, doCache: false }; }
     const d = await r.json().catch(() => null);
     const ordens = (d && Array.isArray(d.orders)) ? d.orders.map(o => String(o.id)) : null;
     /* Codex #335 r4: cachear TAMBÉM quando não deu (404, erro, resposta sem orders). Sem isso,
@@ -585,7 +590,7 @@ const _ordensDoPackCanario = async (canal, pack) => {
        evitar. Falha fica 15 min no cache; sucesso, 1h. */
     _packOrdensCache.set(k, { ordens, ts: Date.now(), ttl: ordens ? 60 * 60000 : 15 * 60000 });
     return { ordens, doCache: false };
-  } catch (e) { return null; }
+  } catch (e) { _packOrdensCache.set(k, { ordens: null, ts: Date.now(), ttl: 15 * 60000 }); return { ordens: null, doCache: false }; }
 };
 
 const _listarNoMarketplaceCanario = async (canal, deTs, ateTs) => {
