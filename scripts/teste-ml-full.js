@@ -108,6 +108,29 @@ function fetchDeTabela(tabela) {
   assert.ok(r[0].passos[0].corpo.includes('PolicyAgent'));
   cen++;
 
+  // 8) (Codex r1) nota OK mas os caminhos de XML dão 429 → transitorio, NUNCA "sem xml"
+  _trocarFetchParaTeste(fetchDeTabela([
+    ['/orders/888', resposta(200, { id: 888 })],
+    ['/invoices/orders/888', resposta(200, { id: 999888 })],
+    ['/invoices/documents/xml/999888/authorized', resposta(429, { message: 'rate limited' })],
+  ]));
+  r = await sondarVenda('tk', 999, 'amb', '888', false);
+  assert.strictEqual(r[0].resultado, 'transitorio_tente_de_novo', 'XML transitório propaga');
+  cen++;
+
+  // 9) (Codex r1) 2xx com HTML (começa com '<' mas SEM chave NF-e) → não salva, não é xml_salvo
+  _trocarFetchParaTeste(fetchDeTabela([
+    ['/orders/999', resposta(200, { id: 999 })],
+    ['/invoices/orders/999', resposta(200, { id: 111999, xml_location: 'https://storage.exemplo.com/pagina' })],
+    ['storage.exemplo.com', resposta(200, '<html><body>faça login para continuar</body></html>')],
+    ['/invoices/documents/xml/111999/authorized', resposta(200, '<html>erro</html>')],
+  ]));
+  r = await sondarVenda('tk', 999, 'amb', '999', false);
+  assert.strictEqual(r[0].resultado, 'nota_encontrada_sem_xml', 'HTML 2xx não vira xml_salvo');
+  assert.ok(r[0].passos.some(p => String(p.corpo).includes('SEM chave de NF-e')), 'passo explica a recusa');
+  assert.ok(!r[0].arquivo, 'nada foi salvo em disco');
+  cen++;
+
   // extras de unidade
   assert.strictEqual(extrairChave('nada aqui'), null);
   assert.strictEqual(mf.VERSAO.includes('b1'), true);

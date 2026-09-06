@@ -112,23 +112,37 @@ function salvarXml(empresa, orderId, invoiceId, xml) {
 }
 
 /* Tenta os dois caminhos de XML documentados, na ordem, e diz qual serviu.
-   Sucesso = corpo que começa com '<' (XML de verdade, não JSON de erro). */
+   ACEITE (Codex #344): só corpo com CHAVE de NF-e (44 dígitos) — 2xx com HTML de
+   erro/login ou outro XML qualquer NÃO vira arquivo salvo (iria quebrar a
+   importação no Bling); nesse caso o corpo fica visível no passo, que é ouro
+   de diagnóstico. Transitório (429/5xx/timeout) nos caminhos de XML PROPAGA —
+   nunca vira "sem XML". */
 async function buscarXml(token, uid, invoiceId, corpoNota, passos, cru) {
+  let houveTransitorio = false;
+  const tentar = async (rotulo, urlX, auth) => {
+    const r = await mlGet(token, urlX, auth);
+    if (r.transitorio) houveTransitorio = true;
+    const chave = r.ok ? extrairChave(r.texto) : null;
+    const resumo = chave
+      ? '(NF-e de ' + r.texto.length + ' bytes, chave ' + chave + ')'
+      : (r.ok ? '(2xx SEM chave de NF-e no corpo — não aceito) ' + r.texto : r.texto);
+    registrar(passos, rotulo, urlX, { ...r, texto: resumo }, cru);
+    return chave ? { xml: r.texto, chave } : null;
+  };
+
   const mLoc = String(corpoNota || '').match(/"xml_location"\s*:\s*"([^"]+)"/);
   if (mLoc) {
     const urlX = mLoc[1].replace(/\\\//g, '/');
     const auth = urlX.startsWith(ML_API) ? 'bearer' : 'nenhuma';
-    const r = await mlGet(token, urlX, auth);
-    registrar(passos, 'xml via xml_location (' + auth + ')', urlX, { ...r, texto: r.ok ? '(xml de ' + r.texto.length + ' bytes)' : r.texto }, cru);
-    if (r.ok && r.texto.trimStart().startsWith('<')) return { xml: r.texto, via: 'xml_location' };
+    const ok = await tentar('xml via xml_location (' + auth + ')', urlX, auth);
+    if (ok) return { xml: ok.xml, chave: ok.chave, via: 'xml_location' };
   }
   if (invoiceId) {
     const urlD = ML_API + '/users/' + uid + '/invoices/documents/xml/' + invoiceId + '/authorized';
-    const r = await mlGet(token, urlD);
-    registrar(passos, 'xml via documents/authorized', urlD, { ...r, texto: r.ok ? '(xml de ' + r.texto.length + ' bytes)' : r.texto }, cru);
-    if (r.ok && r.texto.trimStart().startsWith('<')) return { xml: r.texto, via: 'documents/authorized' };
+    const ok = await tentar('xml via documents/authorized', urlD, 'bearer');
+    if (ok) return { xml: ok.xml, chave: ok.chave, via: 'documents/authorized' };
   }
-  return null;
+  return houveTransitorio ? { transitorio: true } : null;
 }
 
 /* Sonda a NOTA de UM order id (já resolvido de pack, se era o caso). */
@@ -149,12 +163,13 @@ async function sondarUmaOrder(token, uid, empresa, orderId, cru) {
     if (mInv) invoiceId = mInv[1];
   }
   const encontrado = await buscarXml(token, uid, invoiceId, rN.texto, passos, cru);
+  if (encontrado && encontrado.transitorio) return { resultado: 'transitorio_tente_de_novo', invoice_id: invoiceId || null, passos };
   if (!encontrado) return { resultado: 'nota_encontrada_sem_xml', invoice_id: invoiceId || null, passos };
 
   const arquivo = salvarXml(empresa, orderId, invoiceId, encontrado.xml);
   return {
     resultado: 'xml_salvo', via: encontrado.via, invoice_id: invoiceId || null,
-    arquivo, chave: extrairChave(encontrado.xml), passos,
+    arquivo, chave: encontrado.chave, passos,
   };
 }
 
