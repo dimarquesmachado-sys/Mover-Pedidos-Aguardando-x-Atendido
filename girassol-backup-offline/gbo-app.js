@@ -635,9 +635,15 @@ const _listarNoMarketplaceCanario = async (canal, deTs, ateTs) => {
         const arr = d.results || [];
         for (const o of arr) {
           if (String(o.status || '') !== 'paid') continue;
-          ids.push(String(o.id));
-          // o Bling ora guarda o pedido, ora o PACK (carrinho): os dois valem como presença
-          if (o.pack_id) ids.push(String(o.pack_id));
+          /* 06/09 — UMA VENDA, UMA ENTRADA. Antes empurrávamos o id E o pack_id na mesma
+             lista "pra os dois valerem como presença" — mas isso INFLA o lado do ML: cada
+             venda com pack (e o ML cria pack até com item único) virava DUAS entradas,
+             enquanto o Bling tem UMA. A metade sem correspondência era acusada de sumida.
+             Foi o que deu 🔴 com 54 de 174 hoje, mandando reautorizar uma integração que
+             estava perfeita — o dono conferiu venda por venda no Bling, com NF emitida.
+             Agora cada venda entra UMA vez, levando junto seus apelidos: o comparador aceita
+             o id OU o pack como prova de presença. */
+          ids.push({ id: String(o.id), apelidos: o.pack_id ? [String(o.id), String(o.pack_id)] : [String(o.id)] });
         }
         if (!arr.length) break;
         await new Promise(r2 => setTimeout(r2, 150));
