@@ -3069,8 +3069,12 @@ function routes(readBody) {
                anterior deixou o caminho do pack inútil. Busca a data numa das ordens. */
             const prim = (out.ml.ordens_do_pack || [])[0];
             if (prim) {
-              const ro = await fetch('https://api.mercadolibre.com/orders/' + prim, { headers: { Authorization: 'Bearer ' + tk }, signal: AbortSignal.timeout(15000) });
-              if (ro.ok) { const dor = await ro.json().catch(() => null); if (dor && dor.date_created) { out.ml.date_created = dor.date_created; out.ml.status = dor.status; } }
+              /* Codex #343 r5: com timeout esta chamada LANÇA, e sem try local a exceção sairia
+                 pro catch de fora perdendo as ordens do pack já apuradas. */
+              try {
+                const ro = await fetch('https://api.mercadolibre.com/orders/' + prim, { headers: { Authorization: 'Bearer ' + tk }, signal: AbortSignal.timeout(15000) });
+                if (ro.ok) { const dor = await ro.json().catch(() => null); if (dor && dor.date_created) { out.ml.date_created = dor.date_created; out.ml.status = dor.status; } }
+              } catch (eOrd) { out.ml.data_erro = String(eOrd.message || eOrd).slice(0, 120); }
             }
           }
         }
