@@ -540,13 +540,12 @@ const _listarNoBlingCanario = async (de, ate) => {
    faltantes, que é quando o ML já está sob pressão. */
 const _packCacheVenda = new Map();
 const _packOrdensCache = new Map();
-let _tkCanario = { tk: null, ts: 0 };
+/* Codex #335 r3: NÃO cachear o token por conta própria. O garantirTokenML() é quem conhece a
+   validade e renova quando precisa; guardar por 20 min aqui devolveria um token já expirado
+   quando outra rodada o renovasse no meio. Ele tem cache próprio — chamar direto é seguro. */
 async function _tokenMLCanario() {
-  if (_tkCanario.tk && (Date.now() - _tkCanario.ts) < 20 * 60000) return _tkCanario.tk;
   const { garantirTokenML } = require('../girassol/mlTokenManager');
-  const tk = await garantirTokenML();
-  _tkCanario = { tk, ts: Date.now() };
-  return tk;
+  return await garantirTokenML();
 }
 const _packDaVendaCanario = async (canal, venda) => {
   if (canal !== 'ml') return null;
@@ -567,7 +566,7 @@ const _ordensDoPackCanario = async (canal, pack) => {
   if (canal !== 'ml') return null;
   const k = String(pack);
   const em = _packOrdensCache.get(k);
-  if (em && (Date.now() - em.ts) < 60 * 60000) return em.ordens;
+  if (em && (Date.now() - em.ts) < 60 * 60000) return { ordens: em.ordens, doCache: true };
   try {
     const tk = await _tokenMLCanario();
     const r = await fetch('https://api.mercadolibre.com/packs/' + k, { headers: { Authorization: 'Bearer ' + tk } });
@@ -575,7 +574,7 @@ const _ordensDoPackCanario = async (canal, pack) => {
     const d = await r.json().catch(() => null);
     const ordens = (d && Array.isArray(d.orders)) ? d.orders.map(o => String(o.id)) : null;
     if (ordens) _packOrdensCache.set(k, { ordens, ts: Date.now() });
-    return ordens;
+    return { ordens, doCache: false };
   } catch (e) { return null; }
 };
 
