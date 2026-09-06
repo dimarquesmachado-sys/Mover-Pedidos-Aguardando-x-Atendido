@@ -3118,7 +3118,11 @@ function routes(readBody) {
            fazem isso); aqui faltava. */
         let rb = null;
         for (let tent = 1; tent <= 5; tent++) {
-          try { rb = await blingGet('/pedidos/vendas?dataInicial=' + deB + '&dataFinal=' + ateB + '&pagina=' + pg + '&limite=100'); }
+          /* Codex #343 r3: o blingGet aceita um AbortSignal (3º parâmetro) e eu não estava
+             passando — Bling que trava na conexão deixaria a primeira tentativa pendurada pra
+             sempre, e as 5 tentativas nunca aconteceriam. Sinal NOVO a cada requisição: um
+             sinal compartilhado abortaria as tentativas seguintes junto com a primeira. */
+          try { rb = await blingGet('/pedidos/vendas?dataInicial=' + deB + '&dataFinal=' + ateB + '&pagina=' + pg + '&limite=100', 3, AbortSignal.timeout(20000)); }
           catch (e) { rb = null; }
           if (rb && rb.ok) break;
           const st = (rb && rb.status) || 0;
@@ -6814,7 +6818,12 @@ async function backfillVendas(de, ate, empresa){
       if (empresa === 'amb') {
         const { garantirTokenML } = require('../ambtotal/mlTokenManager');
         const tk = await garantirTokenML();
-        const HML = { headers: { Authorization: 'Bearer ' + tk }, signal: AbortSignal.timeout(15000) }   /* Codex #343 r2: ML que aceita a conexão e não responde deixaria a rota pendurada */;
+        /* Codex #343 r3: meu replace de timeout da rodada anterior atingiu ESTE objeto, que é
+           REUSADO em todas as páginas do backfill — um único AbortSignal de 15s abortaria a
+           paginação inteira no meio, e o catch de fora registraria erro e deixaria o backfill
+           "concluir" sem os dados. Efeito colateral fora do escopo do PR: aqui fica só o header,
+           como era. Timeout por requisição é responsabilidade de quem chama, não do objeto. */
+        const HML = { headers: { Authorization: 'Bearer ' + tk } };
         const rme = await fetch('https://api.mercadolibre.com/users/me', HML);
         const me = rme.ok ? await rme.json().catch(() => null) : null;
         const seller = me && me.id;
