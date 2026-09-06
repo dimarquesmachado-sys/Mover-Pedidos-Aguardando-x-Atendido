@@ -3081,10 +3081,19 @@ function routes(readBody) {
           out.ml.status = d && d.status;
           out.ml.date_created = d && d.date_created;
           if (out.ml.pack_id) {
-            const rp = await fetch('https://api.mercadolibre.com/packs/' + out.ml.pack_id, { headers: { Authorization: 'Bearer ' + tk }, signal: AbortSignal.timeout(15000) }   /* Codex #343 r2: ML que aceita a conexão e não responde deixaria a rota pendurada */);
-            out.ml.packs_status = rp.status;
-            const dp = rp.ok ? await rp.json().catch(() => null) : null;
-            out.ml.ordens_do_pack = (dp && Array.isArray(dp.orders)) ? dp.orders.map(o => String(o.id)) : null;
+            /* Codex #343 r5: o timeout que EU acabei de pôr faz esta chamada LANÇAR quando
+               estoura — e a exceção pulava pro catch de fora sem marcar pack_incompleto. Como
+               a date_created já tinha sido capturada, a rota seguia e dava veredito definitivo
+               sem conhecer as irmãs do carrinho. O try local marca o que não deu pra saber. */
+            try {
+              const rp = await fetch('https://api.mercadolibre.com/packs/' + out.ml.pack_id, { headers: { Authorization: 'Bearer ' + tk }, signal: AbortSignal.timeout(15000) });
+              out.ml.packs_status = rp.status;
+              const dp = rp.ok ? await rp.json().catch(() => null) : null;
+              out.ml.ordens_do_pack = (dp && Array.isArray(dp.orders)) ? dp.orders.map(o => String(o.id)) : null;
+            } catch (ePack) {
+              out.ml.ordens_do_pack = null;
+              out.ml.packs_erro = String(ePack.message || ePack).slice(0, 120);
+            }
             /* Codex #343: pack que não abriu (429/5xx/JSON ruim) deixa o conjunto de candidatos
                incompleto — e num carrinho o Bling pode ter gravado o número de uma IRMÃ. Sem
                marcar isso, um 'NÃO achei' sairia sem ter procurado por todos os números. */
