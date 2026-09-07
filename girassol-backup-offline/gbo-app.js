@@ -614,7 +614,7 @@ const _packDaVendaCanario = async (canal, venda) => {
     const d = await r.json().catch(() => null);
     if (!d) { _packCacheVenda.set(k, { pack: null, erro: true, ts: Date.now(), ttl: 15 * 60000 }); return { pack: null, erro: true, doCache: false }; }
     const pack = d.pack_id ? String(d.pack_id) : null;
-    _packCacheVenda.set(k, { pack, ts: Date.now(), ttl: 26 * 3600000 });
+    _packCacheVenda.set(k, { pack, ts: Date.now(), ttl: 7 * 86400000 });
     return { pack, doCache: false };
   } catch (e) { _packCacheVenda.set(k, { pack: null, erro: true, ts: Date.now(), ttl: 15 * 60000 }); return { pack: null, erro: true, doCache: false }; }
 };
@@ -636,7 +636,7 @@ const _ordensDoPackCanario = async (canal, pack) => {
        um pack que sempre falha volta a ser consultado em toda rodada e consome o teto pra
        sempre — o lote nunca avança pros seguintes, que é o furo que este orçamento veio
        evitar. Falha fica 15 min no cache; sucesso, 1h. */
-    _packOrdensCache.set(k, { ordens, ts: Date.now(), ttl: 26 * 3600000 });
+    _packOrdensCache.set(k, { ordens, ts: Date.now(), ttl: 7 * 86400000 });
     return { ordens, doCache: false };
   } catch (e) { _packOrdensCache.set(k, { ordens: null, erro: true, ts: Date.now(), ttl: 15 * 60000 }); return { ordens: null, erro: true, doCache: false }; }
 };
@@ -729,14 +729,15 @@ const _listarNoMarketplaceCanario = async (canal, deTs, ateTs) => {
     } catch (e) {}
     if (!sellerId) throw new Error('não consegui identificar o vendedor no ML (/users/me)');
     const ids = [];
-    const d1 = new Date(deTs * 1000), d2 = new Date(ateTs * 1000);
-    for (let cur = new Date(d1); cur <= d2; cur.setDate(cur.getDate() + 5)) {
-      const jIni = new Date(cur), jFim = new Date(cur);
-      jFim.setDate(jFim.getDate() + 4);
-      if (jFim > d2) jFim.setTime(d2.getTime());
+    /* Codex #347 r2 (P2): a janela por DIA-CALENDÁRIO em UTC começava até 3h DEPOIS de deTs
+       (deTs entre 00:00-02:59Z caía no dia -03 seguinte) — e filtro nenhum restaura o que a
+       query nem buscou. Limites agora são o INSTANTE EXATO, expresso em -03 como o ML espera. */
+    const _iso03 = ts => new Date((ts - 10800) * 1000).toISOString().slice(0, 23) + '-03:00';
+    for (let ini = deTs; ini <= ateTs; ini += 5 * 86400) {
+      const fimJ = Math.min(ini + 5 * 86400 - 1, ateTs);
       const base = 'https://api.mercadolibre.com/orders/search?seller=' + sellerId +
-                   '&order.date_created.from=' + encodeURIComponent(jIni.toISOString().slice(0, 10) + 'T00:00:00.000-03:00') +
-                   '&order.date_created.to=' + encodeURIComponent(jFim.toISOString().slice(0, 10) + 'T23:59:59.999-03:00') +
+                   '&order.date_created.from=' + encodeURIComponent(_iso03(ini)) +
+                   '&order.date_created.to=' + encodeURIComponent(_iso03(fimJ)) +
                    '&sort=date_asc&limit=50';
       let totalML = Infinity;
       for (let off = 0; off < 1000 && off < totalML; off += 50) {

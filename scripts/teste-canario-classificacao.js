@@ -40,7 +40,8 @@ function ctx(idsML, blingSet, packMapa) {
   r = await conferir(ctx(['x1', 'x2'], [], { x1: { pack: null, erro: true }, x2: null }), 3, ['ml'], {});
   assert.strictEqual(r.por_canal.ml.faltando_no_bling, 0);
   assert.strictEqual(r.por_canal.ml.nao_confirmadas, 2);
-  assert.ok(r.veredito.indexOf('INDETERMINADO') >= 0 && /SEM confirma/i.test(r.veredito), 'veredito não pode dar ✅: ' + r.veredito);
+  assert.ok(r.veredito.indexOf('INDETERMINADO') >= 0, 'veredito não pode dar ✅: ' + r.veredito);
+  assert.ok(r.nao_verificados.includes('ml'), 'pendência de confirmação marca o canal como NÃO verificado (contrato das noturnas)');
 
   // 4) regressão do caminho feliz: apelido no Bling ⇒ ✅ limpo, sem resíduo
   r = await conferir(ctx(['z1'], ['pz'], { z1: { pack: 'pz' } }), 3, ['ml'], {});
@@ -48,5 +49,19 @@ function ctx(idsML, blingSet, packMapa) {
   assert.ok(!r.por_canal.ml.nao_confirmadas, 'sem pendência inventada');
   assert.ok(r.veredito.startsWith('✅'), 'feliz segue ✅: ' + r.veredito);
 
-  console.log('OK: 4 cenários — erro e orçamento nunca viram ausência; ✅ só com tudo confirmado');
+  // 5) a segunda chance é SÓ do ML: venda sumida da Shopee segue FALTANDO (alerta vivo),
+  //    mesmo com o ajudante devolvendo null pra esse canal — regressão do P1 da rodada 2
+  const c5 = {
+    empresa: 'teste',
+    listarNoBling: async () => ({ shopee: new Set() }),
+    listarNoMarketplace: async (canal) => (canal === 'shopee' ? ['SP1', 'SP2'] : null),
+    packDaVenda: async () => null,
+    ordensDoPack: async () => null,
+  };
+  r = await conferir(c5, 3, ['shopee'], {});
+  assert.strictEqual(r.por_canal.shopee.faltando_no_bling, 2, 'Shopee sumida é FALTANDO, não pendência');
+  assert.ok(!r.por_canal.shopee.nao_confirmadas, 'fallback do ML não contamina outros canais');
+  assert.strictEqual(r.alertas.length, 1, 'o alerta da Shopee segue vivo');
+
+  console.log('OK: 5 cenários — erro e orçamento nunca viram ausência; fallback preso ao ML; ✅ só com tudo confirmado');
 })().catch(e => { console.error('FALHOU:', e.message); process.exit(1); });
