@@ -126,8 +126,8 @@ _trocarFetchParaTeste(async (url) => {
   fs.rmSync(process.env.ML_FULL_DIR, { recursive: true, force: true });
   fs.mkdirSync(process.env.ML_FULL_DIR, { recursive: true });
   const r6 = await varrerLote('amb', '20260901', '20260901', 1, { tokenML: 'tk' }); // SEM tokenBling: aquisição real (fake)
-  assert.strictEqual(r6.consultas_bling, 1, 'o probe do token é a 1ª consulta');
-  assert.ok(JSON.stringify(r6.lista_nao_conferidas || []).includes('validação do token'), 'teto=1 consumido pela validação, nomeado');
+  assert.ok(r6.consultas_bling <= 1, 'aquisição do token fica FORA do teto (declarada em nota_cota)');
+  assert.ok(String(r6.nota_cota || '').includes('fora'), 'nota_cota declara o trabalho opaco do manager');
 
   // r3: ciclo de vida — depois que o operador importa, a salva é re-conferida e ARQUIVADA
   fs.rmSync(process.env.ML_FULL_DIR, { recursive: true, force: true });
@@ -154,5 +154,45 @@ _trocarFetchParaTeste(async (url) => {
   assert.strictEqual(rC.arquivadas_no_bling, 0, 'arquivada não volta ao ciclo');
   assert.strictEqual(rC.pendentes_novas, 0, 'nem vira nova de novo (Bling a tem)');
 
-  console.log('OK: motor fase 1 — matriz completa, ciclo de vida fechado (salva → importada → arquivada), teto contando até o probe do token');
+  // r4: PRESENÇA confirmada vira cache — na re-varredura da mesma janela, zero consulta
+  // nelas (ausentes salvas SEGUEM re-conferidas de propósito: é como a arquivadora
+  // detecta o import do operador). Cenário isolado: janela onde TUDO está no Bling.
+  fs.rmSync(process.env.ML_FULL_DIR, { recursive: true, force: true });
+  fs.mkdirSync(process.env.ML_FULL_DIR, { recursive: true });
+  _trocarFetchParaTeste(async (url) => {
+    if (url.includes('period/stream')) return { status: 200, buffer: async () => z.toBuffer(), text: async () => '' };
+    if (url.includes('/users/me')) return { status: 200, text: async () => JSON.stringify({ id: 999 }) };
+    const mL = url.match(/\/nfe\?chaveAcesso=(\d{44})/);
+    if (mL) return { status: 200, text: async () => JSON.stringify({ data: [{ id: 'i' + mL[1] }] }) };
+    const mD = url.match(/\/nfe\/i(\d{44})/);
+    if (mD) return { status: 200, text: async () => JSON.stringify({ data: { id: 'i' + mD[1], chaveAcesso: mD[1] } }) };
+    throw new Error('não previsto: ' + url);
+  });
+  const rD1 = await varrerLote('amb', '20260901', '20260901', 60, { tokenML: 'tk', tokenBling: 'tb' });
+  assert.ok(rD1.ja_no_bling >= 3 && rD1.consultas_bling > 0, '1ª varredura confirma gastando consulta');
+  const rD2 = await varrerLote('amb', '20260901', '20260901', 60, { tokenML: 'tk', tokenBling: 'tb' });
+  assert.strictEqual(rD2.consultas_bling, 0, 'presenças em cache: zero consulta na re-varredura');
+  assert.strictEqual(rD2.ja_no_bling, rD1.ja_no_bling, 'mesmo retrato, sem gastar');
+
+  // r4: reconferência de SALVA que falha aparece nomeada (nunca varredura 'completa' de mentira)
+  fs.rmSync(process.env.ML_FULL_DIR, { recursive: true, force: true });
+  fs.mkdirSync(process.env.ML_FULL_DIR, { recursive: true });
+  _trocarFetchParaTeste(async (url) => {
+    if (url.includes('period/stream')) return { status: 200, buffer: async () => z.toBuffer(), text: async () => '' };
+    if (url.includes('/users/me')) return { status: 200, text: async () => JSON.stringify({ id: 999 }) };
+    if (url.includes('/nfe?chaveAcesso=')) return { status: 200, text: async () => JSON.stringify({ data: [] }) };
+    throw new Error('não previsto: ' + url);
+  });
+  await varrerLote('amb', '20260901', '20260901', 60, { tokenML: 'tk', tokenBling: 'tb' }); // salva as ausentes
+  _trocarFetchParaTeste(async (url) => {
+    if (url.includes('period/stream')) return { status: 200, buffer: async () => z.toBuffer(), text: async () => '' };
+    if (url.includes('/users/me')) return { status: 200, text: async () => JSON.stringify({ id: 999 }) };
+    if (url.includes('/nfe?chaveAcesso=')) return { status: 500, text: async () => 'instável' };
+    throw new Error('não previsto: ' + url);
+  });
+  const rE = await varrerLote('amb', '20260901', '20260901', 60, { tokenML: 'tk', tokenBling: 'tb' });
+  assert.ok(rE.nao_conferidas >= 1 && JSON.stringify(rE.lista_nao_conferidas).includes('reconferência falhou'), 'salva com reconferência falhada é reportada');
+  assert.ok(rE.aviso, 'aviso presente — nunca varredura completa de mentira');
+
+  console.log('OK: motor fase 1 — ciclo fechado, cache de confirmadas, fila rotativa, reconferência honesta, cota declarada');
 })().catch(e => { console.error('FALHOU (motor):', e.message); process.exit(1); });

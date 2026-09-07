@@ -85,6 +85,14 @@ function dataValida(aaaammdd) {
   return new Date(ts).toISOString().slice(0, 10) === iso ? ts : null;
 }
 
+/* Codex #349 r4 (P1 — a MESMA classe que o canário levou hoje, agora portada): com
+   teto finito, as notas presentes que abrem o lote re-gastavam consulta em toda rodada
+   e uma faltante lá no fim ficava inalcançável pra sempre. Receita idêntica ao #347:
+   presença CONFIRMADA vira cache de 7 dias (não re-gasta) e a fila de candidatas
+   ROTACIONA com o dia — avança mesmo com cache frio pós-deploy. */
+const _confirmadasNoBling = new Map(); // chave → ts da confirmação
+const TTL_CONFIRMADA = 7 * 86400000;
+
 async function garantirTokenBling(empresa) {
   const mk = BLING_TOKENS[empresa];
   if (!mk) throw new Error('empresa desconhecida: ' + empresa);
@@ -223,6 +231,7 @@ async function varrerLote(empresa, de, ate, teto, deps) {
     fs.renameSync(caminho, path.join(dest, path.basename(caminho)));
   };
 
+  const candidatas = [];
   for (const en of zip.getEntries()) {
     if (en.isDirectory) continue;
     const c = classificarEntradaZip(en.entryName);
@@ -235,6 +244,23 @@ async function varrerLote(empresa, de, ate, teto, deps) {
     if (chaveXml !== c.chave) { anomalias.push({ arquivo: c.caminho, chave_nome: c.chave, chave_xml: chaveXml }); continue; }
     const tipo = lerTpNF(xml);
     if (!tipo) { anomalias.push({ arquivo: c.caminho, erro: 'sem tpNF legível' }); continue; }
+    candidatas.push({ c, xml, tipo });
+  }
+
+  const _rot = new Date().getUTCDate() % Math.max(1, candidatas.length);
+  const fila = candidatas.slice(_rot).concat(candidatas.slice(0, _rot));
+
+  for (const cand of fila) {
+    const c = cand.c, xml = cand.xml, tipo = cand.tipo;
+
+    /* presença confirmada há menos de 7 dias: não gasta consulta */
+    const conf = _confirmadasNoBling.get(c.chave);
+    if (conf && (Date.now() - conf) < TTL_CONFIRMADA) {
+      const salvaConf = chavesDisco.get(c.chave);
+      if (salvaConf) { arquivar(salvaConf); chavesDisco.delete(c.chave); arquivadas++; }
+      else jaNoBling++;
+      continue;
+    }
 
     const nomeDisco = empresa + '-' + c.invoice_id + '-' + c.chave + '.xml';
     const destino = path.join(DIR, tipo, nomeDisco);
@@ -252,19 +278,23 @@ async function varrerLote(empresa, de, ate, teto, deps) {
     if (!tokenBling) {
       try { tokenBling = await garantirTokenBling(empresa); }
       catch (e) { return { ok: false, resultado: 'sem_token_bling', detalhe: String(e.message || e) }; }
-      /* Codex #349 r3: o garantirToken() do manager SONDA o Bling ao validar — é uma
-         requisição real da conta e entra no teto, senão teto=1 faz 2 chamadas. */
-      consultasBling += 1;
-      if (consultasBling >= teto) {
-        if (jaSalva) { jaBaixadas++; continue; }
-        naoConferidas.push({ chave: c.chave, tipo, motivo: 'teto consumido pela validação do token — rode de novo' });
-        continue;
-      }
+      /* Codex #349 r4 (encerrando a classe pela via que o revisor ofereceu): a aquisição
+         do token é trabalho OPACO do manager — 1 sonda e, com token vencido, +1 refresh
+         OAuth; somar um número fixo aqui seria chute (r3 somava 1 e errava no vencido).
+         Fica DECLARADO fora do teto: o teto governa as consultas DO VARREDOR; a
+         aquisição acontece no máximo 1× por varredura e a resposta avisa em nota_cota. */
     }
     if (jaSalva) {
       const b0 = await blingTemChave(tokenBling, c.chave, teto - consultasBling);
       consultasBling += b0.chamadas || 1;
-      if (b0.verificada && b0.esta_no_bling) { arquivar(jaSalva); chavesDisco.delete(c.chave); arquivadas++; }
+      if (b0.verificada && b0.esta_no_bling) { _confirmadasNoBling.set(c.chave, Date.now()); arquivar(jaSalva); chavesDisco.delete(c.chave); arquivadas++; }
+      else if (!b0.verificada) {
+        /* Codex #349 r4: reconferência que falhou NÃO pode sumir como ja_baixada — o
+           relatório pareceria completo com status jamais verificado. O arquivo fica,
+           e a pendência aparece nomeada. */
+        jaBaixadas++;
+        naoConferidas.push({ chave: c.chave, tipo, motivo: 'salva no disco; reconferência falhou: ' + b0.erro });
+      }
       else jaBaixadas++;
       continue;
     }
@@ -272,7 +302,7 @@ async function varrerLote(empresa, de, ate, teto, deps) {
     consultasBling += b.chamadas || 1;
 
     if (!b.verificada) { naoConferidas.push({ chave: c.chave, tipo, motivo: b.erro }); continue; }
-    if (b.esta_no_bling) { jaNoBling++; continue; }
+    if (b.esta_no_bling) { _confirmadasNoBling.set(c.chave, Date.now()); jaNoBling++; continue; }
 
     fs.mkdirSync(path.join(DIR, tipo), { recursive: true });
     fs.writeFileSync(destino, xml);
@@ -291,6 +321,7 @@ async function varrerLote(empresa, de, ate, teto, deps) {
     nao_conferidas: naoConferidas.length,
     anomalias: anomalias.length ? anomalias : undefined,
     consultas_bling: consultasBling,
+    nota_cota: 'o teto cobre as consultas do varredor; a aquisição do token Bling (1-2 req do manager, no máx. 1x por varredura) fica fora dele',
     novas,
     lista_nao_conferidas: naoConferidas.length ? naoConferidas : undefined,
     aviso: naoConferidas.length ? 'nao_conferidas NÃO são veredito — erro/teto na consulta; rode de novo que a varredura é idempotente' : undefined,
