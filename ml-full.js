@@ -37,7 +37,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const VERSAO = 'ml-full b1 (sonda)';
+const VERSAO = 'ml-full b2 (sonda)';
 const ML_API = 'https://api.mercadolibre.com';
 const DIR = process.env.ML_FULL_DIR || '/data/ml-full';
 
@@ -151,7 +151,10 @@ async function buscarXml(token, uid, invoiceId, corpoNota, passos, cru) {
 
   const mLoc = String(corpoNota || '').match(/"xml_location"\s*:\s*"([^"]+)"/);
   if (mLoc) {
-    const urlX = mLoc[1].replace(/\\\//g, '/');
+    let urlX = mLoc[1].replace(/\\\//g, '/');
+    // b2 (cobaia de 07/09): o ML devolve xml_location RELATIVO (/users/...) — sem resolver
+    // contra a API, o fetch recusava ('Only absolute URLs') e o rótulo saía transitório errado.
+    if (urlX.startsWith('/')) urlX = ML_API + urlX;
     const auth = urlX.startsWith(ML_API) ? 'bearer' : 'nenhuma';
     const ok = await tentar('xml via xml_location (' + auth + ')', urlX, auth);
     if (ok) return { xml: ok.xml, chave: ok.chave, via: 'xml_location' };
@@ -190,6 +193,29 @@ async function sondarUmaOrder(token, uid, empresa, orderId, cru) {
     resultado: 'xml_salvo', via: encontrado.via, invoice_id: invoiceId || null,
     arquivo, chave: encontrado.chave, passos,
   };
+}
+
+/* Sonda uma NOTA direto pelo id dela (b2) — a cobaia provou que invoices/orders/{order}
+   devolve SÓ a nota de venda; a DEVOLUÇÃO tem id próprio e não aparece por aquele fio.
+   Aqui provamos se detalhe e XML saem por id — o caminho que o motor usará pras entradas. */
+async function sondarNota(token, uid, empresa, notaId, cru) {
+  const passos = [];
+  const urlD = ML_API + '/users/' + uid + '/invoices/' + notaId;
+  const rD = await mlGet(token, urlD);
+  registrar(passos, 'detalhe da nota por id (endpoint em prova)', urlD, rD, cru);
+
+  const urlX = ML_API + '/users/' + uid + '/invoices/documents/xml/' + notaId + '/authorized';
+  const rX = await mlGet(token, urlX);
+  const chave = rX.ok ? extrairChave(rX.texto) : null;
+  registrar(passos, 'xml por id (documents/authorized)', urlX,
+    { ...rX, texto: chave ? '(NF-e de ' + rX.texto.length + ' bytes, chave ' + chave + ')' : (rX.ok ? '(2xx SEM chave de NF-e — não aceito) ' + rX.texto : rX.texto) }, cru);
+
+  if (chave) {
+    const arquivo = salvarXml(empresa, 'nota', notaId, rX.texto);
+    return { nota: String(notaId), resultado: 'xml_salvo', via: 'documents/authorized (por id)', arquivo, chave, passos };
+  }
+  if (rX.transitorio) return { nota: String(notaId), resultado: 'transitorio_tente_de_novo', passos };
+  return { nota: String(notaId), resultado: rX.status === 404 ? 'sem_xml_para_esta_nota_404' : 'sem_xml_aceito_' + rX.status, passos };
 }
 
 /* Sonda UMA venda como o dono a enxerga (número que pode ser order OU pack —
@@ -287,6 +313,48 @@ async function tratar(req, res, urlObj, json) {
     return true;
   }
 
+  if (p === '/ml-full/sonda-nota') {
+    const empresa = String(urlObj.searchParams.get('empresa') || 'amb').toLowerCase().trim();
+    const cru = urlObj.searchParams.get('cru') === '1';
+    const notas = String(urlObj.searchParams.get('notas') || '').split(',').map(x => x.trim()).filter(Boolean);
+    if (!MANAGERS[empresa]) { json(res, 400, { ok: false, erro: 'empresa deve ser amb, girassol ou good' }); return true; }
+    if (!notas.length) { json(res, 400, { ok: false, erro: 'passe &notas=ID,ID (id da nota no ML, ex.: 6888307616)' }); return true; }
+    let token; try { token = await garantirToken(empresa); } catch (e) { json(res, 200, { ok: false, erro: String(e.message || e) }); return true; }
+    const rMe = await mlGet(token, ML_API + '/users/me');
+    const me = jsonSeguro(rMe.texto) || {};
+    if (!rMe.ok || !me.id) { json(res, 200, { ok: false, erro: rMe.transitorio ? 'ML instável agora — rode de novo em ~1 min' : 'users/me falhou (HTTP ' + rMe.status + ')' }); return true; }
+    const saida = [];
+    for (const id of notas) { saida.push(await sondarNota(token, me.id, empresa, id, cru)); await sleep(400); }
+    const resumo = {}; for (const e2 of saida) resumo[e2.resultado] = (resumo[e2.resultado] || 0) + 1;
+    json(res, 200, { ok: true, versao: VERSAO, empresa, uid: me.id, resumo, notas: saida });
+    return true;
+  }
+
+  /* Sonda do LOTE por período (b2) — a peça que o motor precisa provar antes do cron.
+     &q= é a QUERYSTRING CRUA repassada ao ML (itera parâmetros sem redeploy: o erro do
+     ML costuma nomear o que falta) e &caminho= troca o sufixo, sempre PRESO ao prefixo
+     /users/{uid}/invoices/ — sonda, não proxy. Só leitura. */
+  if (p === '/ml-full/sonda-lote') {
+    const empresa = String(urlObj.searchParams.get('empresa') || 'amb').toLowerCase().trim();
+    if (!MANAGERS[empresa]) { json(res, 400, { ok: false, erro: 'empresa deve ser amb, girassol ou good' }); return true; }
+    let token; try { token = await garantirToken(empresa); } catch (e) { json(res, 200, { ok: false, erro: String(e.message || e) }); return true; }
+    const rMe = await mlGet(token, ML_API + '/users/me');
+    const me = jsonSeguro(rMe.texto) || {};
+    if (!rMe.ok || !me.id) { json(res, 200, { ok: false, erro: rMe.transitorio ? 'ML instável agora — rode de novo em ~1 min' : 'users/me falhou (HTTP ' + rMe.status + ')' }); return true; }
+    const caminho = String(urlObj.searchParams.get('caminho') || 'sites/MLB/batch_request/period/stream').replace(/^\/+/, '');
+    if (caminho.indexOf('..') >= 0) { json(res, 400, { ok: false, erro: 'caminho inválido' }); return true; }
+    const q = String(urlObj.searchParams.get('q') || '');
+    const url = ML_API + '/users/' + me.id + '/invoices/' + caminho + (q ? ('?' + q) : '');
+    const r = await mlGet(token, url);
+    json(res, 200, {
+      ok: true, versao: VERSAO, empresa, uid: me.id, url, status: r.status,
+      transitorio: r.transitorio || undefined,
+      corpo: String(r.texto || '').slice(0, 8000),
+      dica: 'itere por &q= (querystring crua pro ML) e &caminho= (sufixo depois de /invoices/) — o erro do ML costuma nomear o parâmetro que falta',
+    });
+    return true;
+  }
+
   if (p === '/ml-full/zip') {
     const empresa = String(urlObj.searchParams.get('empresa') || 'amb').toLowerCase().trim();
     if (!MANAGERS[empresa]) { json(res, 400, { ok: false, erro: 'empresa deve ser amb, girassol ou good' }); return true; }
@@ -318,7 +386,7 @@ async function tratar(req, res, urlObj, json) {
 module.exports = {
   tratar, VERSAO,
   _interno: {
-    sondarVenda, sondarUmaOrder, mlGet, extrairChave, garantirToken, listarArquivos, comPrazo,
+    sondarVenda, sondarUmaOrder, sondarNota, mlGet, extrairChave, garantirToken, listarArquivos, comPrazo,
     _trocarFetchParaTeste(f) { _fetchRef.fn = f; },
   },
 };
