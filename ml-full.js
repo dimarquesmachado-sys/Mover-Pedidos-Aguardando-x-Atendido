@@ -122,35 +122,42 @@ function lerTpNF(xml) {
    a LISTA é representação resumida (sem chaveAcesso confiável) e o filtro já foi
    visto sendo IGNORADO — então lista vazia absolve, lista com item só condena
    depois que o DETALHE confirmar a chave. Qualquer outra coisa: verificada:false. */
-async function blingTemChave(tokenBling, chave) {
+async function blingTemChave(tokenBling, chave, orcamentoRestante) {
+  /* Codex #349 (P2 ×2): o ritmo vale ANTES de CADA GET (lista E detalhe — senão lote
+     cheio de presentes dispara ~2 req/350ms e os 429 viram nao_conferidas), e o teto é
+     de CHAMADAS REAIS: `chamadas` volta na resposta e o detalhe nem começa sem orçamento
+     pra ele. */
   try {
+    await sleep(350);
     const ac1 = new AbortController(); const t1 = setTimeout(() => ac1.abort(), 20000);
     let r, corpo;
     try {
       r = await _fetchRef.fn(BLING_BASE + '/nfe?chaveAcesso=' + chave, { headers: { Authorization: 'Bearer ' + tokenBling, Accept: 'application/json' }, signal: ac1.signal, timeout: 20000 });
       corpo = await r.text();
     } finally { clearTimeout(t1); }
-    if (!r || (r.status !== 200)) return { verificada: false, erro: 'HTTP ' + (r ? r.status : 0) + ' na lista' };
+    if (!r || (r.status !== 200)) return { verificada: false, erro: 'HTTP ' + (r ? r.status : 0) + ' na lista', chamadas: 1 };
     const j = jsonSeguro(corpo);
     const arr = (j && Array.isArray(j.data)) ? j.data : null;
-    if (!arr) return { verificada: false, erro: 'lista ilegível' };
-    if (!arr.length) return { verificada: true, esta_no_bling: false };
-    if (arr.length > 3) return { verificada: false, erro: 'filtro chaveAcesso parece ignorado (' + arr.length + ' itens)' };
+    if (!arr) return { verificada: false, erro: 'lista ilegível', chamadas: 1 };
+    if (!arr.length) return { verificada: true, esta_no_bling: false, chamadas: 1 };
+    if (arr.length > 3) return { verificada: false, erro: 'filtro chaveAcesso parece ignorado (' + arr.length + ' itens)', chamadas: 1 };
     const id = arr[0] && arr[0].id;
-    if (!id) return { verificada: false, erro: 'item sem id na lista' };
+    if (!id) return { verificada: false, erro: 'item sem id na lista', chamadas: 1 };
+    if (Number(orcamentoRestante) < 2) return { verificada: false, erro: 'teto no meio — lista feita, detalhe adiado pra próxima rodada', chamadas: 1 };
+    await sleep(350);
     const ac2 = new AbortController(); const t2 = setTimeout(() => ac2.abort(), 20000);
     let r2, corpo2;
     try {
       r2 = await _fetchRef.fn(BLING_BASE + '/nfe/' + id, { headers: { Authorization: 'Bearer ' + tokenBling, Accept: 'application/json' }, signal: ac2.signal, timeout: 20000 });
       corpo2 = await r2.text();
     } finally { clearTimeout(t2); }
-    if (!r2 || r2.status !== 200) return { verificada: false, erro: 'HTTP ' + (r2 ? r2.status : 0) + ' no detalhe' };
+    if (!r2 || r2.status !== 200) return { verificada: false, erro: 'HTTP ' + (r2 ? r2.status : 0) + ' no detalhe', chamadas: 2 };
     const det = jsonSeguro(corpo2);
     const chaveDet = det && det.data && det.data.chaveAcesso ? String(det.data.chaveAcesso) : null;
-    if (chaveDet === chave) return { verificada: true, esta_no_bling: true, id };
-    return { verificada: false, erro: 'detalhe com outra chave (filtro ignorado?)' };
+    if (chaveDet === chave) return { verificada: true, esta_no_bling: true, id, chamadas: 2 };
+    return { verificada: false, erro: 'detalhe com outra chave (filtro ignorado?)', chamadas: 2 };
   } catch (e) {
-    return { verificada: false, erro: String(e.message || e).slice(0, 160) };
+    return { verificada: false, erro: String(e.message || e).slice(0, 160), chamadas: 1 };
   }
 }
 
@@ -202,9 +209,8 @@ async function varrerLote(empresa, de, ate, teto, deps) {
       try { tokenBling = await garantirTokenBling(empresa); }
       catch (e) { return { ok: false, resultado: 'sem_token_bling', detalhe: String(e.message || e) }; }
     }
-    const b = await blingTemChave(tokenBling, c.chave);
-    consultasBling += b.esta_no_bling === true ? 2 : 1;
-    await sleep(350);
+    const b = await blingTemChave(tokenBling, c.chave, teto - consultasBling);
+    consultasBling += b.chamadas || 1;
     if (!b.verificada) { naoConferidas.push({ chave: c.chave, tipo, motivo: b.erro }); continue; }
     if (b.esta_no_bling) { jaNoBling++; continue; }
 
@@ -305,10 +311,12 @@ function salvarXml(empresa, orderId, invoiceId, xml) {
   return nome;
 }
 
-/* b3: o motor separa por tipo em subpastas; a raiz (legado das sondas) conta como saída */
-function _pastasDoTipo(tipo) {
-  if (tipo === 'entrada') return [path.join(DIR, 'entrada')];
-  if (tipo === 'saida') return [DIR, path.join(DIR, 'saida')];
+/* Codex #349 (P1): a raiz (legado das sondas) NÃO pode ser assumida como saída — a
+   própria sonda-nota nasceu pra buscar DEVOLUÇÃO e salvou a 7935 (tpNF 0) ali; mapear
+   raiz=saída poria uma entrada no ZIP de saída, direção fiscal errada. Arquivo de raiz
+   é classificado pelo tpNF do PRÓPRIO XML; ilegível fica fora dos ZIPs tipados
+   (aparece só no /status como 'desconhecido'). */
+function _pastasDeVarredura() {
   return [DIR, path.join(DIR, 'saida'), path.join(DIR, 'entrada')];
 }
 
@@ -454,15 +462,21 @@ function urlDoLote(uid, caminho, q) {
 
 function listarArquivos(empresa, tipo) {
   const saida = [];
-  for (const pasta of _pastasDoTipo(tipo)) {
+  for (const pasta of _pastasDeVarredura()) {
     let nomes = [];
     try { nomes = fs.readdirSync(pasta); } catch (e) { continue; }
+    const daRaiz = pasta === DIR;
     for (const n of nomes) {
       if (!n.endsWith('.xml') || (empresa && !n.startsWith(empresa + '-'))) continue;
       const cheio = path.join(pasta, n);
       let st; try { st = fs.statSync(cheio); } catch (e) { continue; }
       if (!st.isFile()) continue;
-      saida.push({ arquivo: n, caminho: cheio, tipo: pasta.endsWith('entrada') ? 'entrada' : 'saida', bytes: st.size, em: st.mtime.toISOString() });
+      let t;
+      if (daRaiz) {
+        try { t = lerTpNF(fs.readFileSync(cheio, 'utf8')) || 'desconhecido'; } catch (e) { t = 'desconhecido'; }
+      } else t = pasta.endsWith('entrada') ? 'entrada' : 'saida';
+      if (tipo && t !== tipo) continue;
+      saida.push({ arquivo: n, caminho: cheio, tipo: t, bytes: st.size, em: st.mtime.toISOString() });
     }
   }
   return saida.sort((a, b) => (a.em < b.em ? 1 : -1));
@@ -530,8 +544,9 @@ async function tratar(req, res, urlObj, json) {
     }
     const dDe = Date.parse(de.slice(0, 4) + '-' + de.slice(4, 6) + '-' + de.slice(6, 8) + 'T12:00:00Z');
     const dAte = Date.parse(ate.slice(0, 4) + '-' + ate.slice(4, 6) + '-' + ate.slice(6, 8) + 'T12:00:00Z');
-    if (!dDe || !dAte || dAte < dDe || (dAte - dDe) > 7 * 86400000) {
-      json(res, 400, { ok: false, erro: 'janela inválida — no máximo 7 dias por varredura (cota do Bling)' });
+    if (!dDe || !dAte || dAte < dDe || (dAte - dDe) >= 7 * 86400000) {
+      /* Codex #349 (P2): de/ate são datas INCLUSIVAS — 01→08 são 8 dias corridos e passava */
+      json(res, 400, { ok: false, erro: 'janela inválida — no máximo 7 dias corridos, inclusive as pontas (cota do Bling)' });
       return true;
     }
     const teto = Math.max(1, Math.min(200, Number(urlObj.searchParams.get('teto')) || 60));

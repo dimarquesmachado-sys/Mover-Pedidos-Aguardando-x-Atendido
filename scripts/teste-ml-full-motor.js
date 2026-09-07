@@ -54,5 +54,24 @@ _trocarFetchParaTeste(async (url) => {
   assert.strictEqual(r2.pendentes_novas, 0, 'idempotente: já salvas não repetem');
   assert.strictEqual(r2.ja_baixadas, 2);
 
-  console.log('OK: motor fase 1 — matriz completa nas 2 varreduras');
+  // r1: teto HONESTO — orçamento 1 não banca lista+detalhe; conta a chamada real
+  fs.rmSync(process.env.ML_FULL_DIR, { recursive: true, force: true });
+  fs.mkdirSync(process.env.ML_FULL_DIR, { recursive: true });
+  const r3 = await varrerLote('amb', '20260901', '20260901', 1, { tokenML: 'tk', tokenBling: 'tb' });
+  assert.ok(r3.consultas_bling <= 1, 'teto=1 nunca passa de 1 chamada real (fez ' + r3.consultas_bling + ')');
+  assert.ok(r3.nao_conferidas >= 1 && JSON.stringify(r3.lista_nao_conferidas).includes('teto'), 'cortadas pelo teto ficam nomeadas');
+
+  // r1: raiz NÃO é saída — arquivo legado é classificado pelo tpNF (o caso real da 7935)
+  const { listarArquivos } = mf._interno;
+  fs.writeFileSync(path.join(process.env.ML_FULL_DIR, 'amb-nota-777.xml'), xmlDe(CHV(7), 0)); // devolução na raiz
+  fs.writeFileSync(path.join(process.env.ML_FULL_DIR, 'amb-nota-778.xml'), xmlDe(CHV(8), 1)); // venda na raiz
+  fs.writeFileSync(path.join(process.env.ML_FULL_DIR, 'amb-nota-779.xml'), 'lixo sem tpNF');
+  const ent = listarArquivos('amb', 'entrada').map(x => x.arquivo);
+  const sai = listarArquivos('amb', 'saida').map(x => x.arquivo);
+  assert.ok(ent.includes('amb-nota-777.xml') && !sai.includes('amb-nota-777.xml'), 'devolução da raiz vai pro ZIP de ENTRADA');
+  assert.ok(sai.includes('amb-nota-778.xml') && !ent.includes('amb-nota-778.xml'), 'venda da raiz vai pro ZIP de saída');
+  assert.ok(!ent.includes('amb-nota-779.xml') && !sai.includes('amb-nota-779.xml'), 'ilegível fica fora dos tipados');
+  assert.strictEqual(listarArquivos('amb', null).find(x => x.arquivo === 'amb-nota-779.xml').tipo, 'desconhecido');
+
+  console.log('OK: motor fase 1 — matriz completa nas 2 varreduras + teto honesto + raiz classificada');
 })().catch(e => { console.error('FALHOU (motor):', e.message); process.exit(1); });
