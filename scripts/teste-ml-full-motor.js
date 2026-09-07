@@ -175,6 +175,8 @@ _trocarFetchParaTeste(async (url) => {
   assert.strictEqual(rD2.ja_no_bling, rD1.ja_no_bling, 'mesmo retrato, sem gastar');
 
   // r4: reconferência de SALVA que falha aparece nomeada (nunca varredura 'completa' de mentira)
+  // (cache de confirmadas é module-level de propósito — produção quer; o teste reseta)
+  mf._interno._limparCacheConfirmadasParaTeste();
   fs.rmSync(process.env.ML_FULL_DIR, { recursive: true, force: true });
   fs.mkdirSync(process.env.ML_FULL_DIR, { recursive: true });
   _trocarFetchParaTeste(async (url) => {

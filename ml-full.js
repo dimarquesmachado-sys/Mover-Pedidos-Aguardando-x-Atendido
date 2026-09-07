@@ -732,7 +732,8 @@ module.exports = {
   _interno: {
     sondarVenda, sondarUmaOrder, sondarNota, urlDoLote, mlGet, extrairChave, garantirToken, listarArquivos,
     varrerLote, classificarEntradaZip, lerTpNF, blingTemChave, dataValida,
-    _trocarBlingTokensParaTeste(m) { _blingTokensRef.map = m; }, comPrazo,
+    _trocarBlingTokensParaTeste(m) { _blingTokensRef.map = m; },
+    _limparCacheConfirmadasParaTeste() { _confirmadasNoBling.clear(); }, comPrazo,
     _trocarFetchParaTeste(f) { _fetchRef.fn = f; },
   },
 };
