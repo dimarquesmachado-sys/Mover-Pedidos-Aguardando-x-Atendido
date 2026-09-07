@@ -92,6 +92,10 @@ function dataValida(aaaammdd) {
    ROTACIONA com o dia — avança mesmo com cache frio pós-deploy. */
 const _confirmadasNoBling = new Map(); // chave → ts da confirmação
 const TTL_CONFIRMADA = 7 * 86400000;
+/* Codex #349 r5 (P2, no acerto): duas varreduras simultâneas da MESMA empresa dobram
+   o tráfego e a segunda quebra no renameSync do que a primeira arquivou (ENOENT).
+   Trava simples por empresa; a rota devolve 409 amigável. */
+const _varrendo = new Set();
 
 async function garantirTokenBling(empresa) {
   const mk = BLING_TOKENS[empresa];
@@ -132,6 +136,10 @@ function classificarEntradaZip(nome) {
   return { invoice_id: m[1], chave: m[2], pasta: pastas[pastas.length - 1] || '', caminho: String(nome) };
 }
 const RE_PASTA_IGNORADA = /simb[oó]lic|transfer[eê]ncia|retiro/i;
+/* Acerto pós-varredura de fogo (07/09): o censo real mostrou que vendas e devoluções
+   vêm juntas em 'Autorizadas' — e existe a pasta 'Canceladas'. NF cancelada não se
+   importa; ela é insumo da futura fila 'cancelada no ML × viva no Bling' (anotado). */
+const RE_PASTA_CANCELADA = /(^|\/)Canceladas(\/|$)/i;
 
 function lerTpNF(xml) {
   const m = String(xml || '').match(/<tpNF>([01])<\/tpNF>/);
@@ -193,6 +201,14 @@ async function blingTemChave(tokenBling, chave, orcamentoRestante) {
    ignorada_simbolica · ja_baixada · ja_no_bling · pendente_nova · nao_conferida
    (erro/teto — NUNCA conclui) · anomalia (chave do nome ≠ chave do XML). */
 async function varrerLote(empresa, de, ate, teto, deps) {
+  if (_varrendo.has(empresa)) return { ok: false, resultado: 'ja_ha_varredura_em_andamento', detalhe: 'espere a varredura atual da ' + empresa + ' terminar (a resposta dela traz o resultado)' };
+  _varrendo.add(empresa);
+  try {
+    return await _varrerLoteInterno(empresa, de, ate, teto, deps);
+  } finally { _varrendo.delete(empresa); }
+}
+
+async function _varrerLoteInterno(empresa, de, ate, teto, deps) {
   const tokenML = deps && deps.tokenML ? deps.tokenML : await garantirToken(empresa);
   const rMe = await mlGet(tokenML, ML_API + '/users/me');
   const me = jsonSeguro(rMe.texto) || {};
@@ -213,6 +229,7 @@ async function varrerLote(empresa, de, ate, teto, deps) {
   const censo = {};
   const novas = [], naoConferidas = [], anomalias = [];
   let ignoradasSimbolicas = 0, jaBaixadas = 0, jaNoBling = 0, consultasBling = 0;
+  const canceladasNoLote = [];
   let tokenBling = (deps && deps.tokenBling) || null;
 
   /* Codex #349 r2: a sonda salvou legados na RAIZ com outro padrão de nome — conferir
@@ -238,6 +255,7 @@ async function varrerLote(empresa, de, ate, teto, deps) {
     if (!c) continue;
     censo[c.pasta] = (censo[c.pasta] || 0) + 1;
     if (RE_PASTA_IGNORADA.test(c.caminho)) { ignoradasSimbolicas++; continue; }
+    if (RE_PASTA_CANCELADA.test(c.caminho)) { canceladasNoLote.push({ invoice_id: c.invoice_id, chave: c.chave }); continue; }
 
     const xml = en.getData().toString('utf8');
     const chaveXml = extrairChave(xml);
@@ -247,7 +265,11 @@ async function varrerLote(empresa, de, ate, teto, deps) {
     candidatas.push({ c, xml, tipo });
   }
 
-  const _rot = new Date().getUTCDate() % Math.max(1, candidatas.length);
+  /* Codex #349 r5 (P1, no acerto): getUTCDate só alcança offsets 1-31 — com 100+
+     candidatas persistentes, os índices altos nunca abriam a fila. Offset ALEATÓRIO
+     cobre o alcance inteiro; junto do cache de presenças, toda posição eventualmente
+     abre uma rodada. */
+  const _rot = Math.floor(Math.random() * Math.max(1, candidatas.length));
   const fila = candidatas.slice(_rot).concat(candidatas.slice(0, _rot));
 
   for (const cand of fila) {
@@ -314,6 +336,8 @@ async function varrerLote(empresa, de, ate, teto, deps) {
     ok: true, janela: { de, ate }, uid: me.id,
     censo_pastas: censo,
     ignoradas_simbolicas: ignoradasSimbolicas,
+    canceladas_no_lote: canceladasNoLote.length || undefined,
+    canceladas: canceladasNoLote.length ? canceladasNoLote : undefined,
     ja_baixadas: jaBaixadas,
     arquivadas_no_bling: arquivadas,
     ja_no_bling: jaNoBling,

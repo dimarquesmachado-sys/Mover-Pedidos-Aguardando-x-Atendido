@@ -19,6 +19,7 @@ const CHV = (n) => '3526096428909100010055002' + String(n).padStart(9, '0') + '1
 const xmlDe = (chave, tp) => '<?xml version="1.0"?><NFe><infNFe Id="NFe' + chave + '"><ide><tpNF>' + tp + '</tpNF></ide></infNFe></NFe>';
 
 const z = new AdmZip();
+z.addFile('Emitidas_Mercado_Livre/Canceladas/117_' + '3526096428909100010055002' + '000000117'.padStart(9, '0') + '1234567890' + '-procNFe.xml', Buffer.from(xmlDe('3526096428909100010055002' + '000000117' + '1234567890', 1)));
 z.addFile('Emitidas_Mercado_Livre/Notas de venda/111_' + CHV(1) + '-procNFe.xml', Buffer.from(xmlDe(CHV(1), 1)));
 z.addFile('Emitidas_Mercado_Livre/Notas de venda/112_' + CHV(2) + '-procNFe.xml', Buffer.from(xmlDe(CHV(2), 1)));
 z.addFile('Emitidas_Mercado_Livre/Notas de devolução/113_' + CHV(3) + '-procNFe.xml', Buffer.from(xmlDe(CHV(3), 0)));
@@ -44,6 +45,8 @@ _trocarFetchParaTeste(async (url) => {
   const r = await varrerLote('amb', '20260901', '20260901', 60, { tokenML: 'tk', tokenBling: 'tb' });
   assert.strictEqual(r.ok, true, JSON.stringify(r).slice(0, 200));
   assert.strictEqual(r.ignoradas_simbolicas, 1, 'retiro simbólica fora (política v1)');
+  assert.strictEqual(r.canceladas_no_lote, 1, 'pasta Canceladas fora das candidatas (censo real de 07/09)');
+  assert.ok(!r.novas.some(n => n.invoice_id === '117'), 'cancelada nunca vira pendente de importação');
   assert.strictEqual(r.ja_no_bling, 1, 'presente no Bling não vira arquivo');
   assert.strictEqual(r.pendentes_novas, 2, 'ausentes viram arquivo');
   assert.ok(r.novas.some(n => n.tipo === 'entrada' && n.chave === CHV(3)), 'devolução caiu em entrada/');
@@ -196,5 +199,12 @@ _trocarFetchParaTeste(async (url) => {
   assert.ok(rE.nao_conferidas >= 1 && JSON.stringify(rE.lista_nao_conferidas).includes('reconferência falhou'), 'salva com reconferência falhada é reportada');
   assert.ok(rE.aviso, 'aviso presente — nunca varredura completa de mentira');
 
-  console.log('OK: motor fase 1 — ciclo fechado, cache de confirmadas, fila rotativa, reconferência honesta, cota declarada');
+  // acerto r5: varreduras simultâneas da mesma empresa — a 2ª recusa educadamente
+  const [pA, pB] = [varrerLote('amb', '20260901', '20260901', 60, { tokenML: 'tk', tokenBling: 'tb' }),
+                    varrerLote('amb', '20260901', '20260901', 60, { tokenML: 'tk', tokenBling: 'tb' })];
+  const [ra2, rb2] = await Promise.all([pA, pB]);
+  const recusas = [ra2, rb2].filter(x => x.resultado === 'ja_ha_varredura_em_andamento').length;
+  assert.strictEqual(recusas, 1, 'exatamente uma das duas é recusada pela trava');
+
+  console.log('OK: motor fase 1 — ciclo fechado, canceladas fora, trava de simultâneas, rotação de alcance completo');
 })().catch(e => { console.error('FALHOU (motor):', e.message); process.exit(1); });
