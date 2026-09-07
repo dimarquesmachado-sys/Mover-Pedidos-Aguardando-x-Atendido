@@ -108,5 +108,51 @@ _trocarFetchParaTeste(async (url) => {
   assert.strictEqual(b9.verificada, false);
   assert.strictEqual(b9.chamadas, 2, 'exceção no detalhe devolve 2 chamadas, não 1');
 
-  console.log('OK: motor fase 1 — matriz completa + teto honesto + raiz classificada + dedup por chave + filtro-ignorado + contagem na exceção');
+  // r3: datas que o V8 normaliza são recusadas (provado: 2026-02-30 → 2 de março)
+  const { dataValida } = mf._interno;
+  assert.strictEqual(dataValida('20260230'), null, '30 de fevereiro não passa');
+  assert.strictEqual(dataValida('20260431'), null, '31 de abril não passa');
+  assert.ok(dataValida('20260907'), 'data real passa');
+
+  // r3: a sonda do garantirToken conta no teto (produção); teto=1 é consumido por ela
+  const { _trocarBlingTokensParaTeste } = mf._interno;
+  _trocarBlingTokensParaTeste({ amb: () => ({ garantirToken: async () => 'tb' }) });
+  _trocarFetchParaTeste(async (url) => {
+    if (url.includes('period/stream')) return { status: 200, buffer: async () => z.toBuffer(), text: async () => '' };
+    if (url.includes('/users/me')) return { status: 200, text: async () => JSON.stringify({ id: 999 }) };
+    if (url.includes('/nfe?chaveAcesso=')) return { status: 200, text: async () => JSON.stringify({ data: [] }) };
+    throw new Error('não previsto: ' + url);
+  });
+  fs.rmSync(process.env.ML_FULL_DIR, { recursive: true, force: true });
+  fs.mkdirSync(process.env.ML_FULL_DIR, { recursive: true });
+  const r6 = await varrerLote('amb', '20260901', '20260901', 1, { tokenML: 'tk' }); // SEM tokenBling: aquisição real (fake)
+  assert.strictEqual(r6.consultas_bling, 1, 'o probe do token é a 1ª consulta');
+  assert.ok(JSON.stringify(r6.lista_nao_conferidas || []).includes('validação do token'), 'teto=1 consumido pela validação, nomeado');
+
+  // r3: ciclo de vida — depois que o operador importa, a salva é re-conferida e ARQUIVADA
+  fs.rmSync(process.env.ML_FULL_DIR, { recursive: true, force: true });
+  fs.mkdirSync(process.env.ML_FULL_DIR, { recursive: true });
+  let noBlingAgora = [];
+  _trocarFetchParaTeste(async (url) => {
+    if (url.includes('period/stream')) return { status: 200, buffer: async () => z.toBuffer(), text: async () => '' };
+    if (url.includes('/users/me')) return { status: 200, text: async () => JSON.stringify({ id: 999 }) };
+    for (const ch of noBlingAgora) {
+      if (url.includes('/nfe?chaveAcesso=' + ch)) return { status: 200, text: async () => JSON.stringify({ data: [{ id: 5 }] }) };
+    }
+    if (url.includes('/nfe/5')) { const ch = noBlingAgora[0]; return { status: 200, text: async () => JSON.stringify({ data: { id: 5, chaveAcesso: ch } }) }; }
+    if (url.includes('/nfe?chaveAcesso=')) return { status: 200, text: async () => JSON.stringify({ data: [] }) };
+    throw new Error('não previsto: ' + url);
+  });
+  const rA = await varrerLote('amb', '20260901', '20260901', 60, { tokenML: 'tk', tokenBling: 'tb' });
+  assert.ok(rA.novas.some(n => n.chave === CHV(2)), '1ª varredura salva a CHV2');
+  noBlingAgora = [CHV(2)]; // operador importou
+  const rB = await varrerLote('amb', '20260901', '20260901', 60, { tokenML: 'tk', tokenBling: 'tb' });
+  assert.strictEqual(rB.arquivadas_no_bling, 1, 'salva que chegou no Bling é arquivada');
+  const { listarArquivos: la2 } = mf._interno;
+  assert.ok(!la2('amb', 'saida').some(x => x.arquivo.includes(CHV(2))), 'arquivada some do ZIP de saída');
+  const rC = await varrerLote('amb', '20260901', '20260901', 60, { tokenML: 'tk', tokenBling: 'tb' });
+  assert.strictEqual(rC.arquivadas_no_bling, 0, 'arquivada não volta ao ciclo');
+  assert.strictEqual(rC.pendentes_novas, 0, 'nem vira nova de novo (Bling a tem)');
+
+  console.log('OK: motor fase 1 — matriz completa, ciclo de vida fechado (salva → importada → arquivada), teto contando até o probe do token');
 })().catch(e => { console.error('FALHOU (motor):', e.message); process.exit(1); });

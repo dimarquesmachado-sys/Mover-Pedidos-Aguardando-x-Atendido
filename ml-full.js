@@ -67,11 +67,23 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
    fecha (idempotente: salvo não re-salva, presente cai fora de novo). Cron fica
    DESLIGADO até o dono validar a varredura manual. */
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
-const BLING_TOKENS = {
+const _blingTokensRef = { map: {
   amb:      () => require('./ambtotal/tokenManager'),
   girassol: () => require('./girassol/tokenManager'),
   good:     () => require('./good/tokenManager'),
-};
+} };
+const BLING_TOKENS = new Proxy({}, { get: (_, k) => _blingTokensRef.map[k], has: (_, k) => k in _blingTokensRef.map });
+
+/* Codex #349 r3 (provado no interpretador antes de escrever): o parser ISO do V8
+   NORMALIZA o dia — '2026-02-30T12Z' vira 2 de março, '04-31' vira 1º de maio; só
+   mês >12 dá NaN. Round-trip: reconstitui AAAAMMDD do timestamp e exige igualdade. */
+function dataValida(aaaammdd) {
+  if (!/^\d{8}$/.test(String(aaaammdd))) return null;
+  const iso = aaaammdd.slice(0, 4) + '-' + aaaammdd.slice(4, 6) + '-' + aaaammdd.slice(6, 8);
+  const ts = Date.parse(iso + 'T12:00:00Z');
+  if (!ts) return null;
+  return new Date(ts).toISOString().slice(0, 10) === iso ? ts : null;
+}
 
 async function garantirTokenBling(empresa) {
   const mk = BLING_TOKENS[empresa];
@@ -198,12 +210,18 @@ async function varrerLote(empresa, de, ate, teto, deps) {
   /* Codex #349 r2: a sonda salvou legados na RAIZ com outro padrão de nome — conferir
      só o destino tipado deixaria o /varrer gravar uma SEGUNDA cópia da mesma chave e o
      ZIP apresentaria a NF-e duas vezes. O dedup é por CHAVE, atravessando raiz+tipadas. */
-  const chavesDisco = new Set();
+  const chavesDisco = new Map(); // chave → caminho no disco (raiz legada inclusa)
   for (const a of listarArquivos(empresa, null)) {
     const mNome = a.arquivo.match(/-(\d{44})\.xml$/);
-    if (mNome) { chavesDisco.add(mNome[1]); continue; }
-    try { const ch = extrairChave(fs.readFileSync(a.caminho, 'utf8')); if (ch) chavesDisco.add(ch); } catch (e) {}
+    if (mNome) { chavesDisco.set(mNome[1], a.caminho); continue; }
+    try { const ch = extrairChave(fs.readFileSync(a.caminho, 'utf8')); if (ch) chavesDisco.set(ch, a.caminho); } catch (e) {}
   }
+  let arquivadas = 0;
+  const arquivar = (caminho) => {
+    const dest = path.join(DIR, 'importadas');
+    fs.mkdirSync(dest, { recursive: true });
+    fs.renameSync(caminho, path.join(dest, path.basename(caminho)));
+  };
 
   for (const en of zip.getEntries()) {
     if (en.isDirectory) continue;
@@ -220,21 +238,45 @@ async function varrerLote(empresa, de, ate, teto, deps) {
 
     const nomeDisco = empresa + '-' + c.invoice_id + '-' + c.chave + '.xml';
     const destino = path.join(DIR, tipo, nomeDisco);
-    if (chavesDisco.has(c.chave) || fs.existsSync(destino)) { jaBaixadas++; continue; }
+    /* Codex #349 r3: arquivo salvo NÃO é destino final — depois que o operador importa,
+       a chave passa a existir no Bling e o ZIP precisa parar de re-apresentá-la. Salva
+       re-encontrada no lote é RE-CONFERIDA (dentro do teto) e, presente no Bling, vai
+       pra importadas/ (fora dos ZIPs, histórico preservado); ausente/erro segue no ZIP. */
+    const jaSalva = chavesDisco.get(c.chave) || (fs.existsSync(destino) ? destino : null);
 
-    if (consultasBling >= teto) { naoConferidas.push({ chave: c.chave, tipo, motivo: 'teto de ' + teto + ' consultas ao Bling — rode de novo' }); continue; }
+    if (consultasBling >= teto) {
+      if (jaSalva) { jaBaixadas++; continue; }
+      naoConferidas.push({ chave: c.chave, tipo, motivo: 'teto de ' + teto + ' consultas ao Bling — rode de novo' });
+      continue;
+    }
     if (!tokenBling) {
       try { tokenBling = await garantirTokenBling(empresa); }
       catch (e) { return { ok: false, resultado: 'sem_token_bling', detalhe: String(e.message || e) }; }
+      /* Codex #349 r3: o garantirToken() do manager SONDA o Bling ao validar — é uma
+         requisição real da conta e entra no teto, senão teto=1 faz 2 chamadas. */
+      consultasBling += 1;
+      if (consultasBling >= teto) {
+        if (jaSalva) { jaBaixadas++; continue; }
+        naoConferidas.push({ chave: c.chave, tipo, motivo: 'teto consumido pela validação do token — rode de novo' });
+        continue;
+      }
+    }
+    if (jaSalva) {
+      const b0 = await blingTemChave(tokenBling, c.chave, teto - consultasBling);
+      consultasBling += b0.chamadas || 1;
+      if (b0.verificada && b0.esta_no_bling) { arquivar(jaSalva); chavesDisco.delete(c.chave); arquivadas++; }
+      else jaBaixadas++;
+      continue;
     }
     const b = await blingTemChave(tokenBling, c.chave, teto - consultasBling);
     consultasBling += b.chamadas || 1;
+
     if (!b.verificada) { naoConferidas.push({ chave: c.chave, tipo, motivo: b.erro }); continue; }
     if (b.esta_no_bling) { jaNoBling++; continue; }
 
     fs.mkdirSync(path.join(DIR, tipo), { recursive: true });
     fs.writeFileSync(destino, xml);
-    chavesDisco.add(c.chave);
+    chavesDisco.set(c.chave, destino);
     novas.push({ tipo, invoice_id: c.invoice_id, chave: c.chave, arquivo: nomeDisco, numero: String(Number(c.chave.slice(25, 34))) });
   }
 
@@ -243,6 +285,7 @@ async function varrerLote(empresa, de, ate, teto, deps) {
     censo_pastas: censo,
     ignoradas_simbolicas: ignoradasSimbolicas,
     ja_baixadas: jaBaixadas,
+    arquivadas_no_bling: arquivadas,
     ja_no_bling: jaNoBling,
     pendentes_novas: novas.length,
     nao_conferidas: naoConferidas.length,
@@ -561,8 +604,8 @@ async function tratar(req, res, urlObj, json) {
       json(res, 400, { ok: false, erro: 'passe &de=AAAAMMDD&ate=AAAAMMDD', exemplo: '/ml-full/varrer?empresa=amb&de=20260901&ate=20260907&k=SUA_ADMIN_KEY' });
       return true;
     }
-    const dDe = Date.parse(de.slice(0, 4) + '-' + de.slice(4, 6) + '-' + de.slice(6, 8) + 'T12:00:00Z');
-    const dAte = Date.parse(ate.slice(0, 4) + '-' + ate.slice(4, 6) + '-' + ate.slice(6, 8) + 'T12:00:00Z');
+    const dDe = dataValida(de);
+    const dAte = dataValida(ate);
     if (!dDe || !dAte || dAte < dDe || (dAte - dDe) >= 7 * 86400000) {
       /* Codex #349 (P2): de/ate são datas INCLUSIVAS — 01→08 são 8 dias corridos e passava */
       json(res, 400, { ok: false, erro: 'janela inválida — no máximo 7 dias corridos, inclusive as pontas (cota do Bling)' });
@@ -657,7 +700,8 @@ module.exports = {
   tratar, VERSAO,
   _interno: {
     sondarVenda, sondarUmaOrder, sondarNota, urlDoLote, mlGet, extrairChave, garantirToken, listarArquivos,
-    varrerLote, classificarEntradaZip, lerTpNF, blingTemChave, comPrazo,
+    varrerLote, classificarEntradaZip, lerTpNF, blingTemChave, dataValida,
+    _trocarBlingTokensParaTeste(m) { _blingTokensRef.map = m; }, comPrazo,
     _trocarFetchParaTeste(f) { _fetchRef.fn = f; },
   },
 };
