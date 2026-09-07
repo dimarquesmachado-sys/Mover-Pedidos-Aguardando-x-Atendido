@@ -127,8 +127,13 @@ async function blingTemChave(tokenBling, chave, orcamentoRestante) {
      cheio de presentes dispara ~2 req/350ms e os 429 viram nao_conferidas), e o teto é
      de CHAMADAS REAIS: `chamadas` volta na resposta e o detalhe nem começa sem orçamento
      pra ele. */
+  /* Codex #349 r2: `feitas` conta no INSTANTE em que cada GET começa — assim até a
+     exceção (timeout no corpo do detalhe, p.ex.) devolve a contagem verdadeira e o
+     teto nunca é ultrapassado por chamada fantasma. */
+  let feitas = 0;
   try {
     await sleep(350);
+    feitas = 1;
     const ac1 = new AbortController(); const t1 = setTimeout(() => ac1.abort(), 20000);
     let r, corpo;
     try {
@@ -140,11 +145,14 @@ async function blingTemChave(tokenBling, chave, orcamentoRestante) {
     const arr = (j && Array.isArray(j.data)) ? j.data : null;
     if (!arr) return { verificada: false, erro: 'lista ilegível', chamadas: 1 };
     if (!arr.length) return { verificada: true, esta_no_bling: false, chamadas: 1 };
-    if (arr.length > 3) return { verificada: false, erro: 'filtro chaveAcesso parece ignorado (' + arr.length + ' itens)', chamadas: 1 };
+    /* Codex #349 r2: chave é ÚNICA — mais de 1 item já é filtro ignorado; olhar só o
+       arr[0] deixava a nota certa presa em nao_conferida pra sempre quando vinha em 2º */
+    if (arr.length > 1) return { verificada: false, erro: 'lista com ' + arr.length + ' itens pra chave única (filtro ignorado?)', chamadas: 1 };
     const id = arr[0] && arr[0].id;
     if (!id) return { verificada: false, erro: 'item sem id na lista', chamadas: 1 };
     if (Number(orcamentoRestante) < 2) return { verificada: false, erro: 'teto no meio — lista feita, detalhe adiado pra próxima rodada', chamadas: 1 };
     await sleep(350);
+    feitas = 2;
     const ac2 = new AbortController(); const t2 = setTimeout(() => ac2.abort(), 20000);
     let r2, corpo2;
     try {
@@ -157,7 +165,7 @@ async function blingTemChave(tokenBling, chave, orcamentoRestante) {
     if (chaveDet === chave) return { verificada: true, esta_no_bling: true, id, chamadas: 2 };
     return { verificada: false, erro: 'detalhe com outra chave (filtro ignorado?)', chamadas: 2 };
   } catch (e) {
-    return { verificada: false, erro: String(e.message || e).slice(0, 160), chamadas: 1 };
+    return { verificada: false, erro: String(e.message || e).slice(0, 160), chamadas: feitas || 1 };
   }
 }
 
@@ -187,6 +195,16 @@ async function varrerLote(empresa, de, ate, teto, deps) {
   let ignoradasSimbolicas = 0, jaBaixadas = 0, jaNoBling = 0, consultasBling = 0;
   let tokenBling = (deps && deps.tokenBling) || null;
 
+  /* Codex #349 r2: a sonda salvou legados na RAIZ com outro padrão de nome — conferir
+     só o destino tipado deixaria o /varrer gravar uma SEGUNDA cópia da mesma chave e o
+     ZIP apresentaria a NF-e duas vezes. O dedup é por CHAVE, atravessando raiz+tipadas. */
+  const chavesDisco = new Set();
+  for (const a of listarArquivos(empresa, null)) {
+    const mNome = a.arquivo.match(/-(\d{44})\.xml$/);
+    if (mNome) { chavesDisco.add(mNome[1]); continue; }
+    try { const ch = extrairChave(fs.readFileSync(a.caminho, 'utf8')); if (ch) chavesDisco.add(ch); } catch (e) {}
+  }
+
   for (const en of zip.getEntries()) {
     if (en.isDirectory) continue;
     const c = classificarEntradaZip(en.entryName);
@@ -202,7 +220,7 @@ async function varrerLote(empresa, de, ate, teto, deps) {
 
     const nomeDisco = empresa + '-' + c.invoice_id + '-' + c.chave + '.xml';
     const destino = path.join(DIR, tipo, nomeDisco);
-    if (fs.existsSync(destino)) { jaBaixadas++; continue; }
+    if (chavesDisco.has(c.chave) || fs.existsSync(destino)) { jaBaixadas++; continue; }
 
     if (consultasBling >= teto) { naoConferidas.push({ chave: c.chave, tipo, motivo: 'teto de ' + teto + ' consultas ao Bling — rode de novo' }); continue; }
     if (!tokenBling) {
@@ -216,6 +234,7 @@ async function varrerLote(empresa, de, ate, teto, deps) {
 
     fs.mkdirSync(path.join(DIR, tipo), { recursive: true });
     fs.writeFileSync(destino, xml);
+    chavesDisco.add(c.chave);
     novas.push({ tipo, invoice_id: c.invoice_id, chave: c.chave, arquivo: nomeDisco, numero: String(Number(c.chave.slice(25, 34))) });
   }
 

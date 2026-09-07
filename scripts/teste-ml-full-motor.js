@@ -4,9 +4,12 @@
    Exercita varrerLote de produção com ZIP fixture REAL (adm-zip) e Bling falso.
    Matriz: simbólica ignorada · ausente vira arquivo (por tipo) · presente não vira ·
    erro de consulta NÃO conclui · anomalia chave nome≠XML · idempotência.
-   Rodar: ML_FULL_DIR=$(mktemp -d) node scripts/teste-ml-full-motor.js */
+   Rodar: node scripts/teste-ml-full-motor.js (ele aloca o próprio tmp — env é ignorada) */
 const os = require('os'); const fs = require('fs'); const path = require('path');
-if (!process.env.ML_FULL_DIR) process.env.ML_FULL_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'mlf-motor-'));
+/* Codex #349 r2: o teste SEMPRE aloca diretório PRÓPRIO — herdar ML_FULL_DIR do
+   ambiente e depois dar rmSync nele apagaria /data/ml-full de verdade se alguém
+   rodasse o teste dentro do container. Env herdada é ignorada de propósito. */
+process.env.ML_FULL_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'mlf-motor-'));
 const assert = require('assert');
 const AdmZip = require('adm-zip');
 const mf = require('../ml-full');
@@ -73,5 +76,37 @@ _trocarFetchParaTeste(async (url) => {
   assert.ok(!ent.includes('amb-nota-779.xml') && !sai.includes('amb-nota-779.xml'), 'ilegível fica fora dos tipados');
   assert.strictEqual(listarArquivos('amb', null).find(x => x.arquivo === 'amb-nota-779.xml').tipo, 'desconhecido');
 
-  console.log('OK: motor fase 1 — matriz completa nas 2 varreduras + teto honesto + raiz classificada');
+  // r2: legado da RAIZ com a MESMA chave não vira segunda cópia (dedup por chave)
+  fs.rmSync(process.env.ML_FULL_DIR, { recursive: true, force: true });
+  fs.mkdirSync(process.env.ML_FULL_DIR, { recursive: true });
+  fs.writeFileSync(path.join(process.env.ML_FULL_DIR, 'amb-nota-999.xml'), xmlDe(CHV(3), 0)); // devolução legada, nome sem chave
+  const r4 = await varrerLote('amb', '20260901', '20260901', 60, { tokenML: 'tk', tokenBling: 'tb' });
+  assert.ok(!r4.novas.some(n => n.chave === CHV(3)), 'chave já na raiz legada não grava cópia tipada');
+  assert.ok(r4.ja_baixadas >= 1, 'legado conta como já baixada');
+
+  // r2: lista com 2 itens pra chave única = filtro ignorado ⇒ nao_conferida (nunca conclui)
+  _trocarFetchParaTeste(async (url) => {
+    if (url.includes('period/stream')) return { status: 200, buffer: async () => z.toBuffer(), text: async () => '' };
+    if (url.includes('/users/me')) return { status: 200, text: async () => JSON.stringify({ id: 999 }) };
+    if (url.includes('/nfe?chaveAcesso=')) return { status: 200, text: async () => JSON.stringify({ data: [{ id: 1 }, { id: 2 }] }) };
+    throw new Error('não previsto: ' + url);
+  });
+  fs.rmSync(process.env.ML_FULL_DIR, { recursive: true, force: true });
+  fs.mkdirSync(process.env.ML_FULL_DIR, { recursive: true });
+  const r5 = await varrerLote('amb', '20260901', '20260901', 60, { tokenML: 'tk', tokenBling: 'tb' });
+  assert.strictEqual(r5.pendentes_novas, 0, 'filtro ignorado nunca conclui ausência');
+  assert.ok(JSON.stringify(r5.lista_nao_conferidas).includes('filtro ignorado'), 'motivo nomeado');
+
+  // r2: exceção no DETALHE conta as 2 chamadas reais (o teto não é furado por fantasma)
+  const { blingTemChave } = mf._interno;
+  _trocarFetchParaTeste(async (url) => {
+    if (url.includes('/nfe?chaveAcesso=')) return { status: 200, text: async () => JSON.stringify({ data: [{ id: 9 }] }) };
+    if (url.includes('/nfe/9')) throw new Error('ETIMEDOUT no detalhe');
+    throw new Error('não previsto: ' + url);
+  });
+  const b9 = await blingTemChave('tb', CHV(1), 60);
+  assert.strictEqual(b9.verificada, false);
+  assert.strictEqual(b9.chamadas, 2, 'exceção no detalhe devolve 2 chamadas, não 1');
+
+  console.log('OK: motor fase 1 — matriz completa + teto honesto + raiz classificada + dedup por chave + filtro-ignorado + contagem na exceção');
 })().catch(e => { console.error('FALHOU (motor):', e.message); process.exit(1); });
