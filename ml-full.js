@@ -37,7 +37,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const VERSAO = 'ml-full b2 (sonda)';
+const VERSAO = 'ml-full b3 (motor fase 1 — varredura manual)';
 const ML_API = 'https://api.mercadolibre.com';
 const DIR = process.env.ML_FULL_DIR || '/data/ml-full';
 
@@ -53,6 +53,280 @@ const MANAGERS = {
 };
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+/* ═══ FASE 1 DO MOTOR (b3) — provada pelas 3 sondas de 07/09 ═══════════════════
+   Lote: GET period/stream é ZIP SÍNCRONO com pastas por categoria e arquivo
+   {invoice_id}_{chave}-procNFe.xml. O motor: abre em memória, IGNORA simbólicas/
+   transferência/retiro (política v1 — vira chave liga/desliga se o dono quiser),
+   tira o tpNF do PRÓPRIO XML (nome de pasta de venda/devolução a gente ainda não
+   viu — o censo de pastas sai na resposta e ensina), cruza a CHAVE com o Bling
+   (2 passos: lista filtrada + DETALHE confirma — a lista do Bling é resumida e o
+   filtro já foi visto sendo ignorado; lição do raio-x do snf) e SÓ o que falta
+   vira arquivo em {DIR}/saida|entrada pro /ml-full/zip servir. Falha de consulta
+   e teto de cota NUNCA concluem: caem em nao_conferidas e a rodada seguinte
+   fecha (idempotente: salvo não re-salva, presente cai fora de novo). Cron fica
+   DESLIGADO até o dono validar a varredura manual. */
+const BLING_BASE = 'https://api.bling.com.br/Api/v3';
+const _blingTokensRef = { map: {
+  amb:      () => require('./ambtotal/tokenManager'),
+  girassol: () => require('./girassol/tokenManager'),
+  good:     () => require('./good/tokenManager'),
+} };
+const BLING_TOKENS = new Proxy({}, { get: (_, k) => _blingTokensRef.map[k], has: (_, k) => k in _blingTokensRef.map });
+
+/* Codex #349 r3 (provado no interpretador antes de escrever): o parser ISO do V8
+   NORMALIZA o dia — '2026-02-30T12Z' vira 2 de março, '04-31' vira 1º de maio; só
+   mês >12 dá NaN. Round-trip: reconstitui AAAAMMDD do timestamp e exige igualdade. */
+function dataValida(aaaammdd) {
+  if (!/^\d{8}$/.test(String(aaaammdd))) return null;
+  const iso = aaaammdd.slice(0, 4) + '-' + aaaammdd.slice(4, 6) + '-' + aaaammdd.slice(6, 8);
+  const ts = Date.parse(iso + 'T12:00:00Z');
+  if (!ts) return null;
+  return new Date(ts).toISOString().slice(0, 10) === iso ? ts : null;
+}
+
+/* Codex #349 r4 (P1 — a MESMA classe que o canário levou hoje, agora portada): com
+   teto finito, as notas presentes que abrem o lote re-gastavam consulta em toda rodada
+   e uma faltante lá no fim ficava inalcançável pra sempre. Receita idêntica ao #347:
+   presença CONFIRMADA vira cache de 7 dias (não re-gasta) e a fila de candidatas
+   ROTACIONA com o dia — avança mesmo com cache frio pós-deploy. */
+const _confirmadasNoBling = new Map(); // chave → ts da confirmação
+const TTL_CONFIRMADA = 7 * 86400000;
+
+async function garantirTokenBling(empresa) {
+  const mk = BLING_TOKENS[empresa];
+  if (!mk) throw new Error('empresa desconhecida: ' + empresa);
+  try {
+    const tk = await mk().garantirToken();
+    if (!tk) throw new Error('token vazio');
+    return tk;
+  } catch (e) { throw new Error('sem token Bling da ' + empresa + ': ' + String(e.message || e).slice(0, 160)); }
+}
+
+/* GET binário no ML (o stream do lote) — corpo em Buffer, abort de 60s, 1 retentativa
+   pra transitório. Nunca conclui nada: devolve o que veio. */
+async function mlGetBuffer(token, url) {
+  let ultimo = null;
+  for (let tent = 1; tent <= 2; tent++) {
+    const ac = new AbortController();
+    const t = setTimeout(() => ac.abort(), 60000);
+    try {
+      const r = await _fetchRef.fn(url, { headers: { Authorization: 'Bearer ' + token }, signal: ac.signal, timeout: 60000 });
+      const buf = await r.buffer();
+      const transitorio = r.status === 429 || r.status >= 500;
+      ultimo = { status: r.status, ok: r.status >= 200 && r.status < 300, buf, transitorio };
+    } catch (e) {
+      ultimo = { status: 0, ok: false, buf: Buffer.from('rede/timeout: ' + String(e.message || e).slice(0, 160)), transitorio: true };
+    } finally { clearTimeout(t); }
+    if (!ultimo.transitorio) return ultimo;
+    if (tent === 1) await sleep(4000);
+  }
+  return ultimo;
+}
+
+/* {invoice_id}_{chave}-procNFe.xml dentro de pastas por categoria */
+function classificarEntradaZip(nome) {
+  const m = String(nome || '').match(/(?:^|\/)(\d+)_(\d{44})-procNFe\.xml$/);
+  if (!m) return null;
+  const pastas = String(nome).split('/').slice(0, -1);
+  return { invoice_id: m[1], chave: m[2], pasta: pastas[pastas.length - 1] || '', caminho: String(nome) };
+}
+const RE_PASTA_IGNORADA = /simb[oó]lic|transfer[eê]ncia|retiro/i;
+
+function lerTpNF(xml) {
+  const m = String(xml || '').match(/<tpNF>([01])<\/tpNF>/);
+  return m ? (m[1] === '1' ? 'saida' : 'entrada') : null;
+}
+
+/* A chave está no Bling? Dois passos, como o raio-x do snf aprendeu na marra:
+   a LISTA é representação resumida (sem chaveAcesso confiável) e o filtro já foi
+   visto sendo IGNORADO — então lista vazia absolve, lista com item só condena
+   depois que o DETALHE confirmar a chave. Qualquer outra coisa: verificada:false. */
+async function blingTemChave(tokenBling, chave, orcamentoRestante) {
+  /* Codex #349 (P2 ×2): o ritmo vale ANTES de CADA GET (lista E detalhe — senão lote
+     cheio de presentes dispara ~2 req/350ms e os 429 viram nao_conferidas), e o teto é
+     de CHAMADAS REAIS: `chamadas` volta na resposta e o detalhe nem começa sem orçamento
+     pra ele. */
+  /* Codex #349 r2: `feitas` conta no INSTANTE em que cada GET começa — assim até a
+     exceção (timeout no corpo do detalhe, p.ex.) devolve a contagem verdadeira e o
+     teto nunca é ultrapassado por chamada fantasma. */
+  let feitas = 0;
+  try {
+    await sleep(350);
+    feitas = 1;
+    const ac1 = new AbortController(); const t1 = setTimeout(() => ac1.abort(), 20000);
+    let r, corpo;
+    try {
+      r = await _fetchRef.fn(BLING_BASE + '/nfe?chaveAcesso=' + chave, { headers: { Authorization: 'Bearer ' + tokenBling, Accept: 'application/json' }, signal: ac1.signal, timeout: 20000 });
+      corpo = await r.text();
+    } finally { clearTimeout(t1); }
+    if (!r || (r.status !== 200)) return { verificada: false, erro: 'HTTP ' + (r ? r.status : 0) + ' na lista', chamadas: 1 };
+    const j = jsonSeguro(corpo);
+    const arr = (j && Array.isArray(j.data)) ? j.data : null;
+    if (!arr) return { verificada: false, erro: 'lista ilegível', chamadas: 1 };
+    if (!arr.length) return { verificada: true, esta_no_bling: false, chamadas: 1 };
+    /* Codex #349 r2: chave é ÚNICA — mais de 1 item já é filtro ignorado; olhar só o
+       arr[0] deixava a nota certa presa em nao_conferida pra sempre quando vinha em 2º */
+    if (arr.length > 1) return { verificada: false, erro: 'lista com ' + arr.length + ' itens pra chave única (filtro ignorado?)', chamadas: 1 };
+    const id = arr[0] && arr[0].id;
+    if (!id) return { verificada: false, erro: 'item sem id na lista', chamadas: 1 };
+    if (Number(orcamentoRestante) < 2) return { verificada: false, erro: 'teto no meio — lista feita, detalhe adiado pra próxima rodada', chamadas: 1 };
+    await sleep(350);
+    feitas = 2;
+    const ac2 = new AbortController(); const t2 = setTimeout(() => ac2.abort(), 20000);
+    let r2, corpo2;
+    try {
+      r2 = await _fetchRef.fn(BLING_BASE + '/nfe/' + id, { headers: { Authorization: 'Bearer ' + tokenBling, Accept: 'application/json' }, signal: ac2.signal, timeout: 20000 });
+      corpo2 = await r2.text();
+    } finally { clearTimeout(t2); }
+    if (!r2 || r2.status !== 200) return { verificada: false, erro: 'HTTP ' + (r2 ? r2.status : 0) + ' no detalhe', chamadas: 2 };
+    const det = jsonSeguro(corpo2);
+    const chaveDet = det && det.data && det.data.chaveAcesso ? String(det.data.chaveAcesso) : null;
+    if (chaveDet === chave) return { verificada: true, esta_no_bling: true, id, chamadas: 2 };
+    return { verificada: false, erro: 'detalhe com outra chave (filtro ignorado?)', chamadas: 2 };
+  } catch (e) {
+    return { verificada: false, erro: String(e.message || e).slice(0, 160), chamadas: feitas || 1 };
+  }
+}
+
+/* A varredura da fase 1 — manual, com teto de cota e matriz explícita:
+   ignorada_simbolica · ja_baixada · ja_no_bling · pendente_nova · nao_conferida
+   (erro/teto — NUNCA conclui) · anomalia (chave do nome ≠ chave do XML). */
+async function varrerLote(empresa, de, ate, teto, deps) {
+  const tokenML = deps && deps.tokenML ? deps.tokenML : await garantirToken(empresa);
+  const rMe = await mlGet(tokenML, ML_API + '/users/me');
+  const me = jsonSeguro(rMe.texto) || {};
+  if (!rMe.ok || !me.id) {
+    return { ok: false, resultado: rMe.transitorio ? 'transitorio_tente_de_novo' : 'erro_users_me_' + rMe.status };
+  }
+  const q = 'start=' + de + '&end=' + ate + '&sale=all&return=all&full=all&others=all&file_types=xml&simple_folder=false';
+  const urlLote = ML_API + '/users/' + me.id + '/invoices/sites/MLB/batch_request/period/stream?' + q;
+  const rz = await mlGetBuffer(tokenML, urlLote);
+  if (rz.transitorio) return { ok: false, resultado: 'transitorio_tente_de_novo', detalhe: rz.buf.toString().slice(0, 200) };
+  if (!rz.ok) return { ok: false, resultado: 'erro_lote_' + rz.status, detalhe: rz.buf.toString().slice(0, 400) };
+  if (rz.buf.slice(0, 2).toString() !== 'PK') return { ok: false, resultado: 'lote_nao_veio_zip', detalhe: rz.buf.toString().slice(0, 400) };
+
+  const AdmZip = require('adm-zip');
+  let zip;
+  try { zip = new AdmZip(rz.buf); } catch (e) { return { ok: false, resultado: 'zip_ilegivel', detalhe: String(e.message || e).slice(0, 200) }; }
+
+  const censo = {};
+  const novas = [], naoConferidas = [], anomalias = [];
+  let ignoradasSimbolicas = 0, jaBaixadas = 0, jaNoBling = 0, consultasBling = 0;
+  let tokenBling = (deps && deps.tokenBling) || null;
+
+  /* Codex #349 r2: a sonda salvou legados na RAIZ com outro padrão de nome — conferir
+     só o destino tipado deixaria o /varrer gravar uma SEGUNDA cópia da mesma chave e o
+     ZIP apresentaria a NF-e duas vezes. O dedup é por CHAVE, atravessando raiz+tipadas. */
+  const chavesDisco = new Map(); // chave → caminho no disco (raiz legada inclusa)
+  for (const a of listarArquivos(empresa, null)) {
+    const mNome = a.arquivo.match(/-(\d{44})\.xml$/);
+    if (mNome) { chavesDisco.set(mNome[1], a.caminho); continue; }
+    try { const ch = extrairChave(fs.readFileSync(a.caminho, 'utf8')); if (ch) chavesDisco.set(ch, a.caminho); } catch (e) {}
+  }
+  let arquivadas = 0;
+  const arquivar = (caminho) => {
+    const dest = path.join(DIR, 'importadas');
+    fs.mkdirSync(dest, { recursive: true });
+    fs.renameSync(caminho, path.join(dest, path.basename(caminho)));
+  };
+
+  const candidatas = [];
+  for (const en of zip.getEntries()) {
+    if (en.isDirectory) continue;
+    const c = classificarEntradaZip(en.entryName);
+    if (!c) continue;
+    censo[c.pasta] = (censo[c.pasta] || 0) + 1;
+    if (RE_PASTA_IGNORADA.test(c.caminho)) { ignoradasSimbolicas++; continue; }
+
+    const xml = en.getData().toString('utf8');
+    const chaveXml = extrairChave(xml);
+    if (chaveXml !== c.chave) { anomalias.push({ arquivo: c.caminho, chave_nome: c.chave, chave_xml: chaveXml }); continue; }
+    const tipo = lerTpNF(xml);
+    if (!tipo) { anomalias.push({ arquivo: c.caminho, erro: 'sem tpNF legível' }); continue; }
+    candidatas.push({ c, xml, tipo });
+  }
+
+  const _rot = new Date().getUTCDate() % Math.max(1, candidatas.length);
+  const fila = candidatas.slice(_rot).concat(candidatas.slice(0, _rot));
+
+  for (const cand of fila) {
+    const c = cand.c, xml = cand.xml, tipo = cand.tipo;
+
+    /* presença confirmada há menos de 7 dias: não gasta consulta */
+    const conf = _confirmadasNoBling.get(c.chave);
+    if (conf && (Date.now() - conf) < TTL_CONFIRMADA) {
+      const salvaConf = chavesDisco.get(c.chave);
+      if (salvaConf) { arquivar(salvaConf); chavesDisco.delete(c.chave); arquivadas++; }
+      else jaNoBling++;
+      continue;
+    }
+
+    const nomeDisco = empresa + '-' + c.invoice_id + '-' + c.chave + '.xml';
+    const destino = path.join(DIR, tipo, nomeDisco);
+    /* Codex #349 r3: arquivo salvo NÃO é destino final — depois que o operador importa,
+       a chave passa a existir no Bling e o ZIP precisa parar de re-apresentá-la. Salva
+       re-encontrada no lote é RE-CONFERIDA (dentro do teto) e, presente no Bling, vai
+       pra importadas/ (fora dos ZIPs, histórico preservado); ausente/erro segue no ZIP. */
+    const jaSalva = chavesDisco.get(c.chave) || (fs.existsSync(destino) ? destino : null);
+
+    if (consultasBling >= teto) {
+      if (jaSalva) { jaBaixadas++; continue; }
+      naoConferidas.push({ chave: c.chave, tipo, motivo: 'teto de ' + teto + ' consultas ao Bling — rode de novo' });
+      continue;
+    }
+    if (!tokenBling) {
+      try { tokenBling = await garantirTokenBling(empresa); }
+      catch (e) { return { ok: false, resultado: 'sem_token_bling', detalhe: String(e.message || e) }; }
+      /* Codex #349 r4 (encerrando a classe pela via que o revisor ofereceu): a aquisição
+         do token é trabalho OPACO do manager — 1 sonda e, com token vencido, +1 refresh
+         OAuth; somar um número fixo aqui seria chute (r3 somava 1 e errava no vencido).
+         Fica DECLARADO fora do teto: o teto governa as consultas DO VARREDOR; a
+         aquisição acontece no máximo 1× por varredura e a resposta avisa em nota_cota. */
+    }
+    if (jaSalva) {
+      const b0 = await blingTemChave(tokenBling, c.chave, teto - consultasBling);
+      consultasBling += b0.chamadas || 1;
+      if (b0.verificada && b0.esta_no_bling) { _confirmadasNoBling.set(c.chave, Date.now()); arquivar(jaSalva); chavesDisco.delete(c.chave); arquivadas++; }
+      else if (!b0.verificada) {
+        /* Codex #349 r4: reconferência que falhou NÃO pode sumir como ja_baixada — o
+           relatório pareceria completo com status jamais verificado. O arquivo fica,
+           e a pendência aparece nomeada. */
+        jaBaixadas++;
+        naoConferidas.push({ chave: c.chave, tipo, motivo: 'salva no disco; reconferência falhou: ' + b0.erro });
+      }
+      else jaBaixadas++;
+      continue;
+    }
+    const b = await blingTemChave(tokenBling, c.chave, teto - consultasBling);
+    consultasBling += b.chamadas || 1;
+
+    if (!b.verificada) { naoConferidas.push({ chave: c.chave, tipo, motivo: b.erro }); continue; }
+    if (b.esta_no_bling) { _confirmadasNoBling.set(c.chave, Date.now()); jaNoBling++; continue; }
+
+    fs.mkdirSync(path.join(DIR, tipo), { recursive: true });
+    fs.writeFileSync(destino, xml);
+    chavesDisco.set(c.chave, destino);
+    novas.push({ tipo, invoice_id: c.invoice_id, chave: c.chave, arquivo: nomeDisco, numero: String(Number(c.chave.slice(25, 34))) });
+  }
+
+  return {
+    ok: true, janela: { de, ate }, uid: me.id,
+    censo_pastas: censo,
+    ignoradas_simbolicas: ignoradasSimbolicas,
+    ja_baixadas: jaBaixadas,
+    arquivadas_no_bling: arquivadas,
+    ja_no_bling: jaNoBling,
+    pendentes_novas: novas.length,
+    nao_conferidas: naoConferidas.length,
+    anomalias: anomalias.length ? anomalias : undefined,
+    consultas_bling: consultasBling,
+    nota_cota: 'o teto cobre as consultas do varredor; a aquisição do token Bling (1-2 req do manager, no máx. 1x por varredura) fica fora dele',
+    novas,
+    lista_nao_conferidas: naoConferidas.length ? naoConferidas : undefined,
+    aviso: naoConferidas.length ? 'nao_conferidas NÃO são veredito — erro/teto na consulta; rode de novo que a varredura é idempotente' : undefined,
+  };
+}
 
 /* Codex #344 r2+r3: o abort DE VERDADE mora nos managers — toda chamada fetch
    deles agora carrega timeout: 20000 (node-fetch v2 destrói o socket ao estourar,
@@ -128,6 +402,15 @@ function salvarXml(empresa, orderId, invoiceId, xml) {
   const nome = empresa + '-' + orderId + '-' + (invoiceId || 'sem-id') + '.xml';
   fs.writeFileSync(path.join(DIR, nome), xml);
   return nome;
+}
+
+/* Codex #349 (P1): a raiz (legado das sondas) NÃO pode ser assumida como saída — a
+   própria sonda-nota nasceu pra buscar DEVOLUÇÃO e salvou a 7935 (tpNF 0) ali; mapear
+   raiz=saída poria uma entrada no ZIP de saída, direção fiscal errada. Arquivo de raiz
+   é classificado pelo tpNF do PRÓPRIO XML; ilegível fica fora dos ZIPs tipados
+   (aparece só no /status como 'desconhecido'). */
+function _pastasDeVarredura() {
+  return [DIR, path.join(DIR, 'saida'), path.join(DIR, 'entrada')];
 }
 
 /* Tenta os dois caminhos de XML documentados, na ordem, e diz qual serviu.
@@ -270,13 +553,26 @@ function urlDoLote(uid, caminho, q) {
   return { ok: true, url: u.toString() };
 }
 
-function listarArquivos(empresa) {
-  try {
-    return fs.readdirSync(DIR)
-      .filter(n => n.endsWith('.xml') && (!empresa || n.startsWith(empresa + '-')))
-      .map(n => { const st = fs.statSync(path.join(DIR, n)); return { arquivo: n, bytes: st.size, em: st.mtime.toISOString() }; })
-      .sort((a, b) => (a.em < b.em ? 1 : -1));
-  } catch (e) { return []; }
+function listarArquivos(empresa, tipo) {
+  const saida = [];
+  for (const pasta of _pastasDeVarredura()) {
+    let nomes = [];
+    try { nomes = fs.readdirSync(pasta); } catch (e) { continue; }
+    const daRaiz = pasta === DIR;
+    for (const n of nomes) {
+      if (!n.endsWith('.xml') || (empresa && !n.startsWith(empresa + '-'))) continue;
+      const cheio = path.join(pasta, n);
+      let st; try { st = fs.statSync(cheio); } catch (e) { continue; }
+      if (!st.isFile()) continue;
+      let t;
+      if (daRaiz) {
+        try { t = lerTpNF(fs.readFileSync(cheio, 'utf8')) || 'desconhecido'; } catch (e) { t = 'desconhecido'; }
+      } else t = pasta.endsWith('entrada') ? 'entrada' : 'saida';
+      if (tipo && t !== tipo) continue;
+      saida.push({ arquivo: n, caminho: cheio, tipo: t, bytes: st.size, em: st.mtime.toISOString() });
+    }
+  }
+  return saida.sort((a, b) => (a.em < b.em ? 1 : -1));
 }
 
 /* Handler no padrão da casa (tiktok-oauth): tratar(req,res,urlObj,json) → true se tratou.
@@ -328,6 +624,36 @@ async function tratar(req, res, urlObj, json) {
     return true;
   }
 
+  /* FASE 1 DO MOTOR: varredura MANUAL por janela (cron só depois de validada).
+     Gasta cota do Bling (1-2 GETs por nota nova) — rodar fora do horário do galpão. */
+  if (p === '/ml-full/varrer') {
+    const empresa = String(urlObj.searchParams.get('empresa') || 'amb').toLowerCase().trim();
+    if (!MANAGERS[empresa]) { json(res, 400, { ok: false, erro: 'empresa deve ser amb, girassol ou good' }); return true; }
+    const de = String(urlObj.searchParams.get('de') || '');
+    const ate = String(urlObj.searchParams.get('ate') || '');
+    if (!/^\d{8}$/.test(de) || !/^\d{8}$/.test(ate)) {
+      json(res, 400, { ok: false, erro: 'passe &de=AAAAMMDD&ate=AAAAMMDD', exemplo: '/ml-full/varrer?empresa=amb&de=20260901&ate=20260907&k=SUA_ADMIN_KEY' });
+      return true;
+    }
+    const dDe = dataValida(de);
+    const dAte = dataValida(ate);
+    if (!dDe || !dAte || dAte < dDe || (dAte - dDe) >= 7 * 86400000) {
+      /* Codex #349 (P2): de/ate são datas INCLUSIVAS — 01→08 são 8 dias corridos e passava */
+      json(res, 400, { ok: false, erro: 'janela inválida — no máximo 7 dias corridos, inclusive as pontas (cota do Bling)' });
+      return true;
+    }
+    const teto = Math.max(1, Math.min(200, Number(urlObj.searchParams.get('teto')) || 60));
+    let tokenML;
+    try { tokenML = await garantirToken(empresa); }
+    catch (e) { json(res, 200, { ok: false, erro: String(e.message || e) }); return true; }
+    const r = await varrerLote(empresa, de, ate, teto, { tokenML });
+    json(res, r.ok ? 200 : 200, Object.assign({ versao: VERSAO, empresa }, r, r.ok ? {
+      baixar_saida: 'https://mover-pedidos-aguardando-x-atendido.onrender.com/ml-full/zip?empresa=' + empresa + '&tipo=saida&k=SUA_ADMIN_KEY',
+      baixar_entrada: 'https://mover-pedidos-aguardando-x-atendido.onrender.com/ml-full/zip?empresa=' + empresa + '&tipo=entrada&k=SUA_ADMIN_KEY',
+    } : {}));
+    return true;
+  }
+
   if (p === '/ml-full/sonda-nota') {
     const empresa = String(urlObj.searchParams.get('empresa') || 'amb').toLowerCase().trim();
     const cru = urlObj.searchParams.get('cru') === '1';
@@ -374,16 +700,18 @@ async function tratar(req, res, urlObj, json) {
   if (p === '/ml-full/zip') {
     const empresa = String(urlObj.searchParams.get('empresa') || 'amb').toLowerCase().trim();
     if (!MANAGERS[empresa]) { json(res, 400, { ok: false, erro: 'empresa deve ser amb, girassol ou good' }); return true; }
-    const arquivos = listarArquivos(empresa);
-    if (!arquivos.length) { json(res, 200, { ok: false, erro: 'nenhum XML salvo ainda para ' + empresa + ' — rode /ml-full/sonda primeiro' }); return true; }
+    const tipo = String(urlObj.searchParams.get('tipo') || 'saida').toLowerCase().trim();
+    if (tipo !== 'saida' && tipo !== 'entrada') { json(res, 400, { ok: false, erro: 'tipo deve ser saida ou entrada' }); return true; }
+    const arquivos = listarArquivos(empresa, tipo);
+    if (!arquivos.length) { json(res, 200, { ok: false, erro: 'nenhum XML de ' + tipo + ' salvo para ' + empresa + ' — rode /ml-full/varrer (ou a sonda) primeiro' }); return true; }
     const AdmZip = require('adm-zip');
     const zip = new AdmZip();
-    for (const a of arquivos) zip.addLocalFile(path.join(DIR, a.arquivo));
+    for (const a of arquivos) zip.addLocalFile(a.caminho);
     const buf = zip.toBuffer();
     const hoje = new Date().toISOString().slice(0, 10);
     res.writeHead(200, {
       'Content-Type': 'application/zip',
-      'Content-Disposition': 'attachment; filename="nf-ml-full-' + empresa + '-' + hoje + '.zip"',
+      'Content-Disposition': 'attachment; filename="nf-ml-full-' + empresa + '-' + tipo + '-' + hoje + '.zip"',
       'Content-Length': buf.length,
     });
     res.end(buf);
@@ -392,7 +720,7 @@ async function tratar(req, res, urlObj, json) {
 
   if (p === '/ml-full/status') {
     const empresa = String(urlObj.searchParams.get('empresa') || '').toLowerCase().trim() || null;
-    json(res, 200, { ok: true, versao: VERSAO, dir: DIR, empresa: empresa || '(todas)', arquivos: listarArquivos(empresa) });
+    json(res, 200, { ok: true, versao: VERSAO, dir: DIR, empresa: empresa || '(todas)', arquivos: listarArquivos(empresa, null) });
     return true;
   }
 
@@ -402,7 +730,10 @@ async function tratar(req, res, urlObj, json) {
 module.exports = {
   tratar, VERSAO,
   _interno: {
-    sondarVenda, sondarUmaOrder, sondarNota, urlDoLote, mlGet, extrairChave, garantirToken, listarArquivos, comPrazo,
+    sondarVenda, sondarUmaOrder, sondarNota, urlDoLote, mlGet, extrairChave, garantirToken, listarArquivos,
+    varrerLote, classificarEntradaZip, lerTpNF, blingTemChave, dataValida,
+    _trocarBlingTokensParaTeste(m) { _blingTokensRef.map = m; },
+    _limparCacheConfirmadasParaTeste() { _confirmadasNoBling.clear(); }, comPrazo,
     _trocarFetchParaTeste(f) { _fetchRef.fn = f; },
   },
 };
