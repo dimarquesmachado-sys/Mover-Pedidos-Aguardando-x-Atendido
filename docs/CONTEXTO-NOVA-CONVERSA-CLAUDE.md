@@ -74,7 +74,8 @@ A extração da Shopee (escrow, carteira e devoluções) **já está concluída*
 tem hoje integração financeira Shopee (a lacuna é decidir se/quando embarcá-la, não reextrair).
 Continuam como dívida importante:
 
-1. unificar a coleta de faturamento e tarifas do Mercado Livre;
+1. no Mercado Livre, a pesca já é compartilhada (`lib/ml-pesca.js`, consumida por Girassol e
+   AMB) — o que resta duplicado é a **orquestração** (`mlSyncFees`/`mlBillingSync`);
 2. extrair histórico/backfill;
 3. só então criar componentes comuns do dashboard.
 
@@ -87,8 +88,10 @@ regras ainda divergentes.
 
 ### Segurança e operação
 
-- rotas administrativas relevantes usam `ADMIN_KEY` ou sessão e respondem como não existentes
-  quando o acesso não é autorizado;
+- rotas administrativas usam `ADMIN_KEY` ou sessão; as gateadas centralmente no `index.js`
+  raiz respondem como não existentes (404), mas dentro dos módulos o padrão é misto (ex.:
+  401 sem sessão no gate do checkout da Girassol, 403 explícito em rotas admin como
+  `ciclo-agora`) — não assumir ocultação universal numa revisão de segurança;
 - callbacks OAuth são tratados separadamente para não bloquear o retorno do provedor;
 - alertas administrativos não devem aparecer para estoquistas;
 - crons têm identificação por empresa e várias rotinas têm lock/watchdog;
@@ -110,7 +113,10 @@ regras ainda divergentes.
 
 Existem três guardrails úteis:
 
-1. `ai-pr-checks.yml`: valida a sintaxe de todos os `.js` e do maior `<script>` dos painéis;
+1. `ai-pr-checks.yml`: valida a sintaxe de todos os `.js` e do maior `<script>` **apenas dos
+   três `painel.html` listados em `.github/espelhos.json`** (checkouts Girassol/AMB/GOOD) —
+   dashboards standalone como `dashboard.html`, `amb-dashboard.html` e `public/ponto/admin.html`
+   ficam fora desse passo;
 2. `verifica.yml` + `scripts/verifica.js`: procura cópia divergente, feature apagada e arquivo
    da empresa errada;
 3. `orfaos.yml`: usa ESLint para achar identificadores órfãos.
@@ -216,7 +222,9 @@ Para cada apontamento do Codex, produzir uma pequena tabela no PR:
 |---|---|---|---|---|
 
 Depois executar, no mínimo (o ESLint e seus plugins não estão no `package.json`; instalar
-primeiro com o comando pinado do cabeçalho de `.github/eslint-orfaos.mjs`, o mesmo que o CI usa):
+primeiro com os pinos do cabeçalho de `.github/eslint-orfaos.mjs`. Atenção: o CI em
+`orfaos.yml` instala **sem pino** — resultado local e CI podem divergir quando sair release
+nova; pendência do dono: pinar o workflow com estas mesmas versões):
 
 ```bash
 npm install --no-save eslint@9.39.5 eslint-plugin-html@8.1.4 globals@17.11.0
@@ -535,7 +543,7 @@ unicidade e migração.
 ### Semanas 6–8: eliminar cópias caras
 
 - concluir Shopee compartilhada;
-- unificar pesca/billing ML;
+- unificar a orquestração `mlSyncFees`/`mlBillingSync` do ML (a pesca em si já vive em `lib/ml-pesca.js`);
 - extrair histórico/backfill;
 - testes de contrato com fixtures anonimizadas de cada provedor.
 
