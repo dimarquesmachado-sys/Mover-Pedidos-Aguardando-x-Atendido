@@ -523,6 +523,61 @@ const _listarNoBlingCanario = async (de, ate) => {
   return porCanal;
 };
 
+const _packCacheVenda = new Map();
+const _packOrdensCache = new Map();
+/* Codex #335 r4: eu escrevi que garantirTokenML() tem cache próprio — NÃO TEM. Ele faz um
+   /users/me a cada chamada (mlTokenManager.js:69-78), então uma rodada com muitos faltantes
+   dispara uma validação por candidato. Cache curto aqui, dentro de UMA rodada: 60 segundos
+   resolve a rajada e é curto demais pra segurar um token que expirou. */
+let _tkCanario = { tk: null, ts: 0 };
+async function _tokenMLCanario() {
+  if (_tkCanario.tk && (Date.now() - _tkCanario.ts) < 60000) return _tkCanario.tk;
+  const { garantirTokenML } = require('../ambtotal/mlTokenManager');
+  const tk = await garantirTokenML();
+  _tkCanario = { tk, ts: Date.now() };
+  return tk;
+}
+const _packDaVendaCanario = async (canal, venda) => {
+  if (canal !== 'ml') return null;
+  const k = String(venda);
+  const em = _packCacheVenda.get(k);
+  if (em && (Date.now() - em.ts) < (em.ttl || 60 * 60000)) return { pack: em.pack, doCache: true };
+  try {
+    const tk = await _tokenMLCanario();
+    const r = await fetch('https://api.mercadolibre.com/orders/' + k, { headers: { Authorization: 'Bearer ' + tk } });
+    /* Codex #335 r5: cachear TAMBÉM o erro HTTP (404, 429, 5xx). Eu tinha cacheado só a
+       resposta vazia; com erro, a venda voltava a ser consultada em toda rodada, consumia o
+       teto, e os candidatos seguintes nunca eram inspecionados — o mesmo furo do orçamento
+       pela quarta porta. TTL curto (15 min) porque erro pode ser transitório. */
+    if (!r.ok) { _packCacheVenda.set(k, { pack: null, ts: Date.now(), ttl: 15 * 60000 }); return { pack: null, doCache: false }; }
+    const d = await r.json().catch(() => null);
+    const pack = d && d.pack_id ? String(d.pack_id) : null;
+    /* mesma razão do /packs: sem cachear a resposta vazia, a venda sem pack volta em toda rodada */
+    _packCacheVenda.set(k, { pack, ts: Date.now(), ttl: pack ? 60 * 60000 : 15 * 60000 });
+    return { pack, doCache: false };
+  } catch (e) { _packCacheVenda.set(k, { pack: null, ts: Date.now(), ttl: 15 * 60000 }); return { pack: null, doCache: false }; }
+};
+const _ordensDoPackCanario = async (canal, pack) => {
+  if (canal !== 'ml') return null;
+  const k = String(pack);
+  const em = _packOrdensCache.get(k);
+  if (em && (Date.now() - em.ts) < (em.ttl || 60 * 60000)) return { ordens: em.ordens, doCache: true };
+  try {
+    const tk = await _tokenMLCanario();
+    const r = await fetch('https://api.mercadolibre.com/packs/' + k, { headers: { Authorization: 'Bearer ' + tk } });
+    /* mesma razão do /orders acima */
+    if (!r.ok) { _packOrdensCache.set(k, { ordens: null, ts: Date.now(), ttl: 15 * 60000 }); return { ordens: null, doCache: false }; }
+    const d = await r.json().catch(() => null);
+    const ordens = (d && Array.isArray(d.orders)) ? d.orders.map(o => String(o.id)) : null;
+    /* Codex #335 r4: cachear TAMBÉM quando não deu (404, erro, resposta sem orders). Sem isso,
+       um pack que sempre falha volta a ser consultado em toda rodada e consome o teto pra
+       sempre — o lote nunca avança pros seguintes, que é o furo que este orçamento veio
+       evitar. Falha fica 15 min no cache; sucesso, 1h. */
+    _packOrdensCache.set(k, { ordens, ts: Date.now(), ttl: ordens ? 60 * 60000 : 15 * 60000 });
+    return { ordens, doCache: false };
+  } catch (e) { _packOrdensCache.set(k, { ordens: null, ts: Date.now(), ttl: 15 * 60000 }); return { ordens: null, doCache: false }; }
+};
+
 const _listarNoMarketplaceCanario = async (canal, deTs, ateTs) => {
   if (canal === 'shopee') {
     // Codex (#119): o resto da AMB usa AMBBKP_SHOPEE_SYNC_KEY OU a global (ver linhas 2823 e
@@ -592,7 +647,63 @@ const _listarNoMarketplaceCanario = async (canal, deTs, ateTs) => {
     }
     return ids;
   }
-  return null;   // ML entra quando tiver listagem própria aqui
+  if (canal === 'ml') {
+    // 17/08 — o ML era o buraco do canário: ficava "sem fonte", e na AMB ele é 3.262 das 4.903
+    // linhas do ano. Sem ele o veredito não cobria o canal que mais pesa.
+    // Reusa o padrão que o backfill já usa: janelas de 5 DIAS (o /orders/search tem teto de
+    // 1.000 e período grande perderia o excedente EM SILÊNCIO) e só pedido `paid` — não pago ou
+    // cancelado não desce pro Bling e viraria alarme falso.
+    let tkML = null;
+    try { const { garantirTokenML: _gt } = require('../ambtotal/mlTokenManager'); tkML = await _gt(); }
+    catch (e) { return null; }
+    if (!tkML) return null;
+    const HML = { headers: { Authorization: 'Bearer ' + tkML } };
+    let sellerId = null;
+    try {
+      const rm = await fetch('https://api.mercadolibre.com/users/me', HML);
+      const dm = await rm.json().catch(() => null);
+      if (rm.ok && dm && dm.id) sellerId = dm.id;
+    } catch (e) {}
+    if (!sellerId) throw new Error('não consegui identificar o vendedor no ML (/users/me)');
+    const ids = [];
+    const d1 = new Date(deTs * 1000), d2 = new Date(ateTs * 1000);
+    for (let cur = new Date(d1); cur <= d2; cur.setDate(cur.getDate() + 5)) {
+      const jIni = new Date(cur), jFim = new Date(cur);
+      jFim.setDate(jFim.getDate() + 4);
+      if (jFim > d2) jFim.setTime(d2.getTime());
+      const base = 'https://api.mercadolibre.com/orders/search?seller=' + sellerId +
+                   '&order.date_created.from=' + encodeURIComponent(jIni.toISOString().slice(0, 10) + 'T00:00:00.000-03:00') +
+                   '&order.date_created.to=' + encodeURIComponent(jFim.toISOString().slice(0, 10) + 'T23:59:59.999-03:00') +
+                   '&sort=date_asc&limit=50';
+      let totalML = Infinity;
+      for (let off = 0; off < 1000 && off < totalML; off += 50) {
+        const r = await fetch(base + '&offset=' + off, HML);
+        if (!r.ok) throw new Error('ML não respondeu (HTTP ' + r.status + ')');
+        const d = await r.json().catch(() => null);
+        if (!d) throw new Error('ML devolveu resposta ilegível');
+        totalML = (d.paging && Number(d.paging.total)) || 0;
+        const arr = d.results || [];
+        for (const o of arr) {
+          if (String(o.status || '') !== 'paid') continue;
+          /* 06/09 — UMA VENDA, UMA ENTRADA. Antes empurrávamos o id E o pack_id na mesma
+             lista "pra os dois valerem como presença" — mas isso INFLA o lado do ML: cada
+             venda com pack (e o ML cria pack até com item único) virava DUAS entradas,
+             enquanto o Bling tem UMA. A metade sem correspondência era acusada de sumida.
+             Foi o que deu 🔴 com 54 de 174 hoje, mandando reautorizar uma integração que
+             estava perfeita — o dono conferiu venda por venda no Bling, com NF emitida.
+             Agora cada venda entra UMA vez, levando junto seus apelidos: o comparador aceita
+             o id OU o pack como prova de presença. */
+          ids.push({ id: String(o.id), apelidos: o.pack_id ? [String(o.id), String(o.pack_id)] : [String(o.id)] });
+        }
+        if (!arr.length) break;
+        await new Promise(r2 => setTimeout(r2, 150));
+      }
+      if (totalML > 1000) return { incompleto: true, motivo: 'mais de 1.000 pedidos numa janela de 5 dias no ML' };
+      await new Promise(r2 => setTimeout(r2, 200));
+    }
+    return ids;
+  }
+  return null;
 };
 
 // Codex (P1 do #104): sem isto o canário só existiria se alguém lembrasse de abrir a URL —
@@ -634,7 +745,7 @@ async function conferirMarketplaces(dias, canais, opts) {
   const canLib = require('../lib/canario-marketplace');
   _canario.ativos++; _canario.desde = _canario.desde || new Date().toISOString();
   try {
-    return await canLib.conferir({ empresa: 'amb', listarNoBling: _listarNoBlingCanario, listarNoMarketplace: _listarNoMarketplaceCanario },
+    return await canLib.conferir({ empresa: 'amb', listarNoBling: _listarNoBlingCanario, listarNoMarketplace: _listarNoMarketplaceCanario, packDaVenda: _packDaVendaCanario, ordensDoPack: _ordensDoPackCanario },
       dias || 3, Array.isArray(canais) ? canais : [], opts || {});
   } finally {
     _canario.ativos = Math.max(0, _canario.ativos - 1);
