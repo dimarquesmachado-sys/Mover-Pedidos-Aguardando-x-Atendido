@@ -37,7 +37,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const VERSAO = 'ml-full b2 (sonda)';
+const VERSAO = 'ml-full b3 (motor fase 1 — varredura manual)';
 const ML_API = 'https://api.mercadolibre.com';
 const DIR = process.env.ML_FULL_DIR || '/data/ml-full';
 
@@ -53,6 +53,181 @@ const MANAGERS = {
 };
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+/* ═══ FASE 1 DO MOTOR (b3) — provada pelas 3 sondas de 07/09 ═══════════════════
+   Lote: GET period/stream é ZIP SÍNCRONO com pastas por categoria e arquivo
+   {invoice_id}_{chave}-procNFe.xml. O motor: abre em memória, IGNORA simbólicas/
+   transferência/retiro (política v1 — vira chave liga/desliga se o dono quiser),
+   tira o tpNF do PRÓPRIO XML (nome de pasta de venda/devolução a gente ainda não
+   viu — o censo de pastas sai na resposta e ensina), cruza a CHAVE com o Bling
+   (2 passos: lista filtrada + DETALHE confirma — a lista do Bling é resumida e o
+   filtro já foi visto sendo ignorado; lição do raio-x do snf) e SÓ o que falta
+   vira arquivo em {DIR}/saida|entrada pro /ml-full/zip servir. Falha de consulta
+   e teto de cota NUNCA concluem: caem em nao_conferidas e a rodada seguinte
+   fecha (idempotente: salvo não re-salva, presente cai fora de novo). Cron fica
+   DESLIGADO até o dono validar a varredura manual. */
+const BLING_BASE = 'https://api.bling.com.br/Api/v3';
+const BLING_TOKENS = {
+  amb:      () => require('./ambtotal/tokenManager'),
+  girassol: () => require('./girassol/tokenManager'),
+  good:     () => require('./good/tokenManager'),
+};
+
+async function garantirTokenBling(empresa) {
+  const mk = BLING_TOKENS[empresa];
+  if (!mk) throw new Error('empresa desconhecida: ' + empresa);
+  try {
+    const tk = await mk().garantirToken();
+    if (!tk) throw new Error('token vazio');
+    return tk;
+  } catch (e) { throw new Error('sem token Bling da ' + empresa + ': ' + String(e.message || e).slice(0, 160)); }
+}
+
+/* GET binário no ML (o stream do lote) — corpo em Buffer, abort de 60s, 1 retentativa
+   pra transitório. Nunca conclui nada: devolve o que veio. */
+async function mlGetBuffer(token, url) {
+  let ultimo = null;
+  for (let tent = 1; tent <= 2; tent++) {
+    const ac = new AbortController();
+    const t = setTimeout(() => ac.abort(), 60000);
+    try {
+      const r = await _fetchRef.fn(url, { headers: { Authorization: 'Bearer ' + token }, signal: ac.signal, timeout: 60000 });
+      const buf = await r.buffer();
+      const transitorio = r.status === 429 || r.status >= 500;
+      ultimo = { status: r.status, ok: r.status >= 200 && r.status < 300, buf, transitorio };
+    } catch (e) {
+      ultimo = { status: 0, ok: false, buf: Buffer.from('rede/timeout: ' + String(e.message || e).slice(0, 160)), transitorio: true };
+    } finally { clearTimeout(t); }
+    if (!ultimo.transitorio) return ultimo;
+    if (tent === 1) await sleep(4000);
+  }
+  return ultimo;
+}
+
+/* {invoice_id}_{chave}-procNFe.xml dentro de pastas por categoria */
+function classificarEntradaZip(nome) {
+  const m = String(nome || '').match(/(?:^|\/)(\d+)_(\d{44})-procNFe\.xml$/);
+  if (!m) return null;
+  const pastas = String(nome).split('/').slice(0, -1);
+  return { invoice_id: m[1], chave: m[2], pasta: pastas[pastas.length - 1] || '', caminho: String(nome) };
+}
+const RE_PASTA_IGNORADA = /simb[oó]lic|transfer[eê]ncia|retiro/i;
+
+function lerTpNF(xml) {
+  const m = String(xml || '').match(/<tpNF>([01])<\/tpNF>/);
+  return m ? (m[1] === '1' ? 'saida' : 'entrada') : null;
+}
+
+/* A chave está no Bling? Dois passos, como o raio-x do snf aprendeu na marra:
+   a LISTA é representação resumida (sem chaveAcesso confiável) e o filtro já foi
+   visto sendo IGNORADO — então lista vazia absolve, lista com item só condena
+   depois que o DETALHE confirmar a chave. Qualquer outra coisa: verificada:false. */
+async function blingTemChave(tokenBling, chave) {
+  try {
+    const ac1 = new AbortController(); const t1 = setTimeout(() => ac1.abort(), 20000);
+    let r, corpo;
+    try {
+      r = await _fetchRef.fn(BLING_BASE + '/nfe?chaveAcesso=' + chave, { headers: { Authorization: 'Bearer ' + tokenBling, Accept: 'application/json' }, signal: ac1.signal, timeout: 20000 });
+      corpo = await r.text();
+    } finally { clearTimeout(t1); }
+    if (!r || (r.status !== 200)) return { verificada: false, erro: 'HTTP ' + (r ? r.status : 0) + ' na lista' };
+    const j = jsonSeguro(corpo);
+    const arr = (j && Array.isArray(j.data)) ? j.data : null;
+    if (!arr) return { verificada: false, erro: 'lista ilegível' };
+    if (!arr.length) return { verificada: true, esta_no_bling: false };
+    if (arr.length > 3) return { verificada: false, erro: 'filtro chaveAcesso parece ignorado (' + arr.length + ' itens)' };
+    const id = arr[0] && arr[0].id;
+    if (!id) return { verificada: false, erro: 'item sem id na lista' };
+    const ac2 = new AbortController(); const t2 = setTimeout(() => ac2.abort(), 20000);
+    let r2, corpo2;
+    try {
+      r2 = await _fetchRef.fn(BLING_BASE + '/nfe/' + id, { headers: { Authorization: 'Bearer ' + tokenBling, Accept: 'application/json' }, signal: ac2.signal, timeout: 20000 });
+      corpo2 = await r2.text();
+    } finally { clearTimeout(t2); }
+    if (!r2 || r2.status !== 200) return { verificada: false, erro: 'HTTP ' + (r2 ? r2.status : 0) + ' no detalhe' };
+    const det = jsonSeguro(corpo2);
+    const chaveDet = det && det.data && det.data.chaveAcesso ? String(det.data.chaveAcesso) : null;
+    if (chaveDet === chave) return { verificada: true, esta_no_bling: true, id };
+    return { verificada: false, erro: 'detalhe com outra chave (filtro ignorado?)' };
+  } catch (e) {
+    return { verificada: false, erro: String(e.message || e).slice(0, 160) };
+  }
+}
+
+/* A varredura da fase 1 — manual, com teto de cota e matriz explícita:
+   ignorada_simbolica · ja_baixada · ja_no_bling · pendente_nova · nao_conferida
+   (erro/teto — NUNCA conclui) · anomalia (chave do nome ≠ chave do XML). */
+async function varrerLote(empresa, de, ate, teto, deps) {
+  const tokenML = deps && deps.tokenML ? deps.tokenML : await garantirToken(empresa);
+  const rMe = await mlGet(tokenML, ML_API + '/users/me');
+  const me = jsonSeguro(rMe.texto) || {};
+  if (!rMe.ok || !me.id) {
+    return { ok: false, resultado: rMe.transitorio ? 'transitorio_tente_de_novo' : 'erro_users_me_' + rMe.status };
+  }
+  const q = 'start=' + de + '&end=' + ate + '&sale=all&return=all&full=all&others=all&file_types=xml&simple_folder=false';
+  const urlLote = ML_API + '/users/' + me.id + '/invoices/sites/MLB/batch_request/period/stream?' + q;
+  const rz = await mlGetBuffer(tokenML, urlLote);
+  if (rz.transitorio) return { ok: false, resultado: 'transitorio_tente_de_novo', detalhe: rz.buf.toString().slice(0, 200) };
+  if (!rz.ok) return { ok: false, resultado: 'erro_lote_' + rz.status, detalhe: rz.buf.toString().slice(0, 400) };
+  if (rz.buf.slice(0, 2).toString() !== 'PK') return { ok: false, resultado: 'lote_nao_veio_zip', detalhe: rz.buf.toString().slice(0, 400) };
+
+  const AdmZip = require('adm-zip');
+  let zip;
+  try { zip = new AdmZip(rz.buf); } catch (e) { return { ok: false, resultado: 'zip_ilegivel', detalhe: String(e.message || e).slice(0, 200) }; }
+
+  const censo = {};
+  const novas = [], naoConferidas = [], anomalias = [];
+  let ignoradasSimbolicas = 0, jaBaixadas = 0, jaNoBling = 0, consultasBling = 0;
+  let tokenBling = (deps && deps.tokenBling) || null;
+
+  for (const en of zip.getEntries()) {
+    if (en.isDirectory) continue;
+    const c = classificarEntradaZip(en.entryName);
+    if (!c) continue;
+    censo[c.pasta] = (censo[c.pasta] || 0) + 1;
+    if (RE_PASTA_IGNORADA.test(c.caminho)) { ignoradasSimbolicas++; continue; }
+
+    const xml = en.getData().toString('utf8');
+    const chaveXml = extrairChave(xml);
+    if (chaveXml !== c.chave) { anomalias.push({ arquivo: c.caminho, chave_nome: c.chave, chave_xml: chaveXml }); continue; }
+    const tipo = lerTpNF(xml);
+    if (!tipo) { anomalias.push({ arquivo: c.caminho, erro: 'sem tpNF legível' }); continue; }
+
+    const nomeDisco = empresa + '-' + c.invoice_id + '-' + c.chave + '.xml';
+    const destino = path.join(DIR, tipo, nomeDisco);
+    if (fs.existsSync(destino)) { jaBaixadas++; continue; }
+
+    if (consultasBling >= teto) { naoConferidas.push({ chave: c.chave, tipo, motivo: 'teto de ' + teto + ' consultas ao Bling — rode de novo' }); continue; }
+    if (!tokenBling) {
+      try { tokenBling = await garantirTokenBling(empresa); }
+      catch (e) { return { ok: false, resultado: 'sem_token_bling', detalhe: String(e.message || e) }; }
+    }
+    const b = await blingTemChave(tokenBling, c.chave);
+    consultasBling += b.esta_no_bling === true ? 2 : 1;
+    await sleep(350);
+    if (!b.verificada) { naoConferidas.push({ chave: c.chave, tipo, motivo: b.erro }); continue; }
+    if (b.esta_no_bling) { jaNoBling++; continue; }
+
+    fs.mkdirSync(path.join(DIR, tipo), { recursive: true });
+    fs.writeFileSync(destino, xml);
+    novas.push({ tipo, invoice_id: c.invoice_id, chave: c.chave, arquivo: nomeDisco, numero: String(Number(c.chave.slice(25, 34))) });
+  }
+
+  return {
+    ok: true, janela: { de, ate }, uid: me.id,
+    censo_pastas: censo,
+    ignoradas_simbolicas: ignoradasSimbolicas,
+    ja_baixadas: jaBaixadas,
+    ja_no_bling: jaNoBling,
+    pendentes_novas: novas.length,
+    nao_conferidas: naoConferidas.length,
+    anomalias: anomalias.length ? anomalias : undefined,
+    consultas_bling: consultasBling,
+    novas,
+    lista_nao_conferidas: naoConferidas.length ? naoConferidas : undefined,
+    aviso: naoConferidas.length ? 'nao_conferidas NÃO são veredito — erro/teto na consulta; rode de novo que a varredura é idempotente' : undefined,
+  };
+}
 
 /* Codex #344 r2+r3: o abort DE VERDADE mora nos managers — toda chamada fetch
    deles agora carrega timeout: 20000 (node-fetch v2 destrói o socket ao estourar,
@@ -128,6 +303,13 @@ function salvarXml(empresa, orderId, invoiceId, xml) {
   const nome = empresa + '-' + orderId + '-' + (invoiceId || 'sem-id') + '.xml';
   fs.writeFileSync(path.join(DIR, nome), xml);
   return nome;
+}
+
+/* b3: o motor separa por tipo em subpastas; a raiz (legado das sondas) conta como saída */
+function _pastasDoTipo(tipo) {
+  if (tipo === 'entrada') return [path.join(DIR, 'entrada')];
+  if (tipo === 'saida') return [DIR, path.join(DIR, 'saida')];
+  return [DIR, path.join(DIR, 'saida'), path.join(DIR, 'entrada')];
 }
 
 /* Tenta os dois caminhos de XML documentados, na ordem, e diz qual serviu.
@@ -270,13 +452,20 @@ function urlDoLote(uid, caminho, q) {
   return { ok: true, url: u.toString() };
 }
 
-function listarArquivos(empresa) {
-  try {
-    return fs.readdirSync(DIR)
-      .filter(n => n.endsWith('.xml') && (!empresa || n.startsWith(empresa + '-')))
-      .map(n => { const st = fs.statSync(path.join(DIR, n)); return { arquivo: n, bytes: st.size, em: st.mtime.toISOString() }; })
-      .sort((a, b) => (a.em < b.em ? 1 : -1));
-  } catch (e) { return []; }
+function listarArquivos(empresa, tipo) {
+  const saida = [];
+  for (const pasta of _pastasDoTipo(tipo)) {
+    let nomes = [];
+    try { nomes = fs.readdirSync(pasta); } catch (e) { continue; }
+    for (const n of nomes) {
+      if (!n.endsWith('.xml') || (empresa && !n.startsWith(empresa + '-'))) continue;
+      const cheio = path.join(pasta, n);
+      let st; try { st = fs.statSync(cheio); } catch (e) { continue; }
+      if (!st.isFile()) continue;
+      saida.push({ arquivo: n, caminho: cheio, tipo: pasta.endsWith('entrada') ? 'entrada' : 'saida', bytes: st.size, em: st.mtime.toISOString() });
+    }
+  }
+  return saida.sort((a, b) => (a.em < b.em ? 1 : -1));
 }
 
 /* Handler no padrão da casa (tiktok-oauth): tratar(req,res,urlObj,json) → true se tratou.
@@ -328,6 +517,35 @@ async function tratar(req, res, urlObj, json) {
     return true;
   }
 
+  /* FASE 1 DO MOTOR: varredura MANUAL por janela (cron só depois de validada).
+     Gasta cota do Bling (1-2 GETs por nota nova) — rodar fora do horário do galpão. */
+  if (p === '/ml-full/varrer') {
+    const empresa = String(urlObj.searchParams.get('empresa') || 'amb').toLowerCase().trim();
+    if (!MANAGERS[empresa]) { json(res, 400, { ok: false, erro: 'empresa deve ser amb, girassol ou good' }); return true; }
+    const de = String(urlObj.searchParams.get('de') || '');
+    const ate = String(urlObj.searchParams.get('ate') || '');
+    if (!/^\d{8}$/.test(de) || !/^\d{8}$/.test(ate)) {
+      json(res, 400, { ok: false, erro: 'passe &de=AAAAMMDD&ate=AAAAMMDD', exemplo: '/ml-full/varrer?empresa=amb&de=20260901&ate=20260907&k=SUA_ADMIN_KEY' });
+      return true;
+    }
+    const dDe = Date.parse(de.slice(0, 4) + '-' + de.slice(4, 6) + '-' + de.slice(6, 8) + 'T12:00:00Z');
+    const dAte = Date.parse(ate.slice(0, 4) + '-' + ate.slice(4, 6) + '-' + ate.slice(6, 8) + 'T12:00:00Z');
+    if (!dDe || !dAte || dAte < dDe || (dAte - dDe) > 7 * 86400000) {
+      json(res, 400, { ok: false, erro: 'janela inválida — no máximo 7 dias por varredura (cota do Bling)' });
+      return true;
+    }
+    const teto = Math.max(1, Math.min(200, Number(urlObj.searchParams.get('teto')) || 60));
+    let tokenML;
+    try { tokenML = await garantirToken(empresa); }
+    catch (e) { json(res, 200, { ok: false, erro: String(e.message || e) }); return true; }
+    const r = await varrerLote(empresa, de, ate, teto, { tokenML });
+    json(res, r.ok ? 200 : 200, Object.assign({ versao: VERSAO, empresa }, r, r.ok ? {
+      baixar_saida: 'https://mover-pedidos-aguardando-x-atendido.onrender.com/ml-full/zip?empresa=' + empresa + '&tipo=saida&k=SUA_ADMIN_KEY',
+      baixar_entrada: 'https://mover-pedidos-aguardando-x-atendido.onrender.com/ml-full/zip?empresa=' + empresa + '&tipo=entrada&k=SUA_ADMIN_KEY',
+    } : {}));
+    return true;
+  }
+
   if (p === '/ml-full/sonda-nota') {
     const empresa = String(urlObj.searchParams.get('empresa') || 'amb').toLowerCase().trim();
     const cru = urlObj.searchParams.get('cru') === '1';
@@ -374,16 +592,18 @@ async function tratar(req, res, urlObj, json) {
   if (p === '/ml-full/zip') {
     const empresa = String(urlObj.searchParams.get('empresa') || 'amb').toLowerCase().trim();
     if (!MANAGERS[empresa]) { json(res, 400, { ok: false, erro: 'empresa deve ser amb, girassol ou good' }); return true; }
-    const arquivos = listarArquivos(empresa);
-    if (!arquivos.length) { json(res, 200, { ok: false, erro: 'nenhum XML salvo ainda para ' + empresa + ' — rode /ml-full/sonda primeiro' }); return true; }
+    const tipo = String(urlObj.searchParams.get('tipo') || 'saida').toLowerCase().trim();
+    if (tipo !== 'saida' && tipo !== 'entrada') { json(res, 400, { ok: false, erro: 'tipo deve ser saida ou entrada' }); return true; }
+    const arquivos = listarArquivos(empresa, tipo);
+    if (!arquivos.length) { json(res, 200, { ok: false, erro: 'nenhum XML de ' + tipo + ' salvo para ' + empresa + ' — rode /ml-full/varrer (ou a sonda) primeiro' }); return true; }
     const AdmZip = require('adm-zip');
     const zip = new AdmZip();
-    for (const a of arquivos) zip.addLocalFile(path.join(DIR, a.arquivo));
+    for (const a of arquivos) zip.addLocalFile(a.caminho);
     const buf = zip.toBuffer();
     const hoje = new Date().toISOString().slice(0, 10);
     res.writeHead(200, {
       'Content-Type': 'application/zip',
-      'Content-Disposition': 'attachment; filename="nf-ml-full-' + empresa + '-' + hoje + '.zip"',
+      'Content-Disposition': 'attachment; filename="nf-ml-full-' + empresa + '-' + tipo + '-' + hoje + '.zip"',
       'Content-Length': buf.length,
     });
     res.end(buf);
@@ -392,7 +612,7 @@ async function tratar(req, res, urlObj, json) {
 
   if (p === '/ml-full/status') {
     const empresa = String(urlObj.searchParams.get('empresa') || '').toLowerCase().trim() || null;
-    json(res, 200, { ok: true, versao: VERSAO, dir: DIR, empresa: empresa || '(todas)', arquivos: listarArquivos(empresa) });
+    json(res, 200, { ok: true, versao: VERSAO, dir: DIR, empresa: empresa || '(todas)', arquivos: listarArquivos(empresa, null) });
     return true;
   }
 
@@ -402,7 +622,8 @@ async function tratar(req, res, urlObj, json) {
 module.exports = {
   tratar, VERSAO,
   _interno: {
-    sondarVenda, sondarUmaOrder, sondarNota, urlDoLote, mlGet, extrairChave, garantirToken, listarArquivos, comPrazo,
+    sondarVenda, sondarUmaOrder, sondarNota, urlDoLote, mlGet, extrairChave, garantirToken, listarArquivos,
+    varrerLote, classificarEntradaZip, lerTpNF, blingTemChave, comPrazo,
     _trocarFetchParaTeste(f) { _fetchRef.fn = f; },
   },
 };
