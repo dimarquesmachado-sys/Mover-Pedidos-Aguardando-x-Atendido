@@ -541,41 +541,47 @@ const _packDaVendaCanario = async (canal, venda) => {
   if (canal !== 'ml') return null;
   const k = String(venda);
   const em = _packCacheVenda.get(k);
-  if (em && (Date.now() - em.ts) < (em.ttl || 60 * 60000)) return { pack: em.pack, doCache: true };
+  if (em && (Date.now() - em.ts) < (em.ttl || 60 * 60000)) return { pack: em.pack, erro: em.erro || undefined, doCache: true };
   try {
     const tk = await _tokenMLCanario();
-    const r = await fetch('https://api.mercadolibre.com/orders/' + k, { headers: { Authorization: 'Bearer ' + tk } });
+    const r = await fetch('https://api.mercadolibre.com/orders/' + k, { headers: { Authorization: 'Bearer ' + tk }, signal: AbortSignal.timeout(15000) });
     /* Codex #335 r5: cachear TAMBÉM o erro HTTP (404, 429, 5xx). Eu tinha cacheado só a
        resposta vazia; com erro, a venda voltava a ser consultada em toda rodada, consumia o
        teto, e os candidatos seguintes nunca eram inspecionados — o mesmo furo do orçamento
        pela quarta porta. TTL curto (15 min) porque erro pode ser transitório. */
-    if (!r.ok) { _packCacheVenda.set(k, { pack: null, ts: Date.now(), ttl: 15 * 60000 }); return { pack: null, doCache: false }; }
+    /* Codex #347 (P1): falha de consulta NÃO é "sem pack" — o flag `erro` deixa a lib jogar
+       o candidato em NAO_CONFIRMADAS em vez de acusar ausência. E o CONCLUSIVO agora vive 26h
+       (o cron é diário; com 1h, toda noturna re-gastava o teto nos mesmos primeiros e o resto
+       nunca era inspecionado). Erro segue 15 min. */
+    if (!r.ok) { _packCacheVenda.set(k, { pack: null, erro: true, ts: Date.now(), ttl: 15 * 60000 }); return { pack: null, erro: true, doCache: false }; }
     const d = await r.json().catch(() => null);
-    const pack = d && d.pack_id ? String(d.pack_id) : null;
-    /* mesma razão do /packs: sem cachear a resposta vazia, a venda sem pack volta em toda rodada */
-    _packCacheVenda.set(k, { pack, ts: Date.now(), ttl: pack ? 60 * 60000 : 15 * 60000 });
+    if (!d) { _packCacheVenda.set(k, { pack: null, erro: true, ts: Date.now(), ttl: 15 * 60000 }); return { pack: null, erro: true, doCache: false }; }
+    const pack = d.pack_id ? String(d.pack_id) : null;
+    _packCacheVenda.set(k, { pack, ts: Date.now(), ttl: 26 * 3600000 });
     return { pack, doCache: false };
-  } catch (e) { _packCacheVenda.set(k, { pack: null, ts: Date.now(), ttl: 15 * 60000 }); return { pack: null, doCache: false }; }
+  } catch (e) { _packCacheVenda.set(k, { pack: null, erro: true, ts: Date.now(), ttl: 15 * 60000 }); return { pack: null, erro: true, doCache: false }; }
 };
 const _ordensDoPackCanario = async (canal, pack) => {
   if (canal !== 'ml') return null;
   const k = String(pack);
   const em = _packOrdensCache.get(k);
-  if (em && (Date.now() - em.ts) < (em.ttl || 60 * 60000)) return { ordens: em.ordens, doCache: true };
+  if (em && (Date.now() - em.ts) < (em.ttl || 60 * 60000)) return { ordens: em.ordens, erro: em.erro || undefined, doCache: true };
   try {
     const tk = await _tokenMLCanario();
-    const r = await fetch('https://api.mercadolibre.com/packs/' + k, { headers: { Authorization: 'Bearer ' + tk } });
+    const r = await fetch('https://api.mercadolibre.com/packs/' + k, { headers: { Authorization: 'Bearer ' + tk }, signal: AbortSignal.timeout(15000) });
     /* mesma razão do /orders acima */
-    if (!r.ok) { _packOrdensCache.set(k, { ordens: null, ts: Date.now(), ttl: 15 * 60000 }); return { ordens: null, doCache: false }; }
+    if (!r.ok) { _packOrdensCache.set(k, { ordens: null, erro: true, ts: Date.now(), ttl: 15 * 60000 }); return { ordens: null, erro: true, doCache: false }; }
     const d = await r.json().catch(() => null);
     const ordens = (d && Array.isArray(d.orders)) ? d.orders.map(o => String(o.id)) : null;
+    /* Codex #347 (P1): resposta sem `orders` legível é falha de leitura, não pack vazio */
+    if (!ordens) { _packOrdensCache.set(k, { ordens: null, erro: true, ts: Date.now(), ttl: 15 * 60000 }); return { ordens: null, erro: true, doCache: false }; }
     /* Codex #335 r4: cachear TAMBÉM quando não deu (404, erro, resposta sem orders). Sem isso,
        um pack que sempre falha volta a ser consultado em toda rodada e consome o teto pra
        sempre — o lote nunca avança pros seguintes, que é o furo que este orçamento veio
        evitar. Falha fica 15 min no cache; sucesso, 1h. */
-    _packOrdensCache.set(k, { ordens, ts: Date.now(), ttl: ordens ? 60 * 60000 : 15 * 60000 });
+    _packOrdensCache.set(k, { ordens, ts: Date.now(), ttl: 26 * 3600000 });
     return { ordens, doCache: false };
-  } catch (e) { _packOrdensCache.set(k, { ordens: null, ts: Date.now(), ttl: 15 * 60000 }); return { ordens: null, doCache: false }; }
+  } catch (e) { _packOrdensCache.set(k, { ordens: null, erro: true, ts: Date.now(), ttl: 15 * 60000 }); return { ordens: null, erro: true, doCache: false }; }
 };
 
 const _listarNoMarketplaceCanario = async (canal, deTs, ateTs) => {
@@ -657,10 +663,13 @@ const _listarNoMarketplaceCanario = async (canal, deTs, ateTs) => {
     try { const { garantirTokenML: _gt } = require('../ambtotal/mlTokenManager'); tkML = await _gt(); }
     catch (e) { return null; }
     if (!tkML) return null;
-    const HML = { headers: { Authorization: 'Bearer ' + tkML } };
+    /* Codex #347 (P1): sem abort, conexão pendurada no ML segurava a noturna e o
+       _canario.ativos nunca zerava — backfill bloqueado pra sempre. 15s no padrão do
+       raio-x-venda, com signal NOVO por chamada (AbortSignal.timeout dispara uma vez só). */
+    const _HML = () => ({ headers: { Authorization: 'Bearer ' + tkML }, signal: AbortSignal.timeout(15000) });
     let sellerId = null;
     try {
-      const rm = await fetch('https://api.mercadolibre.com/users/me', HML);
+      const rm = await fetch('https://api.mercadolibre.com/users/me', _HML());
       const dm = await rm.json().catch(() => null);
       if (rm.ok && dm && dm.id) sellerId = dm.id;
     } catch (e) {}
@@ -677,7 +686,7 @@ const _listarNoMarketplaceCanario = async (canal, deTs, ateTs) => {
                    '&sort=date_asc&limit=50';
       let totalML = Infinity;
       for (let off = 0; off < 1000 && off < totalML; off += 50) {
-        const r = await fetch(base + '&offset=' + off, HML);
+        const r = await fetch(base + '&offset=' + off, _HML());
         if (!r.ok) throw new Error('ML não respondeu (HTTP ' + r.status + ')');
         const d = await r.json().catch(() => null);
         if (!d) throw new Error('ML devolveu resposta ilegível');
@@ -685,6 +694,12 @@ const _listarNoMarketplaceCanario = async (canal, deTs, ateTs) => {
         const arr = d.results || [];
         for (const o of arr) {
           if (String(o.status || '') !== 'paid') continue;
+          /* Codex #347 (P1): a janela consulta DIAS INTEIROS em UTC — sem filtrar pelo
+             instante, venda criada DEPOIS do fim (dentro da folga de graça) entrava na
+             comparação contra um Bling fotografado antes, e a borda de meia-noite podia
+             puxar o dia local errado. O instante exato decide. */
+          const tsCr = Date.parse(o.date_created || '') / 1000;
+          if (!tsCr || tsCr < deTs || tsCr > ateTs) continue;
           /* 06/09 — UMA VENDA, UMA ENTRADA. Antes empurrávamos o id E o pack_id na mesma
              lista "pra os dois valerem como presença" — mas isso INFLA o lado do ML: cada
              venda com pack (e o ML cria pack até com item único) virava DUAS entradas,
