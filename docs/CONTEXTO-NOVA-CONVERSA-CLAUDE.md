@@ -222,9 +222,11 @@ Para cada apontamento do Codex, produzir uma pequena tabela no PR:
 |---|---|---|---|---|
 
 Depois executar, no mínimo (o ESLint e seus plugins não estão no `package.json`; instalar
-primeiro com os pinos do cabeçalho de `.github/eslint-orfaos.mjs`. Atenção: o CI em
-`orfaos.yml` instala **sem pino** — resultado local e CI podem divergir quando sair release
-nova; pendência do dono: pinar o workflow com estas mesmas versões):
+primeiro com os pinos do cabeçalho de `.github/eslint-orfaos.mjs`. Pré-requisito: ESLint 9
+exige Node ^18.18, ^20.9 ou ≥21.1 — o `engines` do repo diz só `>=18`, então um Node
+18.0–18.17 "suportado" não roda este passo. Atenção: o CI em `orfaos.yml` instala **sem
+pino** — resultado local e CI podem divergir quando sair release nova; pendência do dono:
+pinar o workflow com estas mesmas versões):
 
 ```bash
 npm install --no-save eslint@9.39.5 eslint-plugin-html@8.1.4 globals@17.11.0
@@ -249,8 +251,13 @@ subir o servidor com integrações mockadas e provar autenticação, retorno e e
    adicionar teste de regressão.
 7. Na terceira rodada do mesmo tema, chamar humano mesmo que a automação permita cinco; custo e
    risco já indicam que falta entendimento do domínio.
-8. Nunca dar merge. O responsável humano decide, especialmente em estoque, fiscal, financeiro,
-   autenticação e guardrails.
+8. O assistente nunca clica em merge. Atenção ao que isso NÃO garante: o repositório tem
+   auto-merge (`gh pr merge --auto` no `auto-merge-codex.yml`) que mergeia sozinho quando o
+   Codex aprova o `HEAD` atual e o `ai-safety` passa — sem aprovação humana, exceto nos
+   caminhos protegidos (`.github/workflows/`, `scripts/verifica.js`). Ou seja: hoje, mudança
+   de estoque, fiscal, financeiro e autenticação pode entrar só com a revisão do Codex.
+   Exigir humano nessas áreas é decisão do dono e mudança no workflow, não uma regra já
+   vigente.
 
 ---
 
