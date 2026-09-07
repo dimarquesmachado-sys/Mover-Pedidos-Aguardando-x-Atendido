@@ -255,6 +255,21 @@ async function sondarVenda(token, uid, empresa, venda, cru) {
   return [{ venda, resultado: 'erro_' + rO.status, passos }];
 }
 
+/* Codex #348: o check literal de '..' era pouco — %252e no navegador vira %2e no
+   searchParams.get() e o WHATWG resolve como ponto-ponto NA HORA DO FETCH, escapando
+   do confinamento e transformando a sonda em proxy autenticado do ML. A validação
+   certa é no PATHNAME NORMALIZADO — exatamente a URL que o fetch vai usar. */
+function urlDoLote(uid, caminho, q) {
+  const prefixo = '/users/' + uid + '/invoices/';
+  let u;
+  try { u = new URL(ML_API + prefixo + String(caminho || '').replace(/^\/+/, '') + (q ? ('?' + q) : '')); }
+  catch (e) { return { ok: false, erro: 'caminho/q inválidos' }; }
+  if (u.origin + '/' !== ML_API + '/' || !u.pathname.startsWith(prefixo)) {
+    return { ok: false, erro: 'caminho fora de ' + prefixo + ' — isto é sonda, não proxy' };
+  }
+  return { ok: true, url: u.toString() };
+}
+
 function listarArquivos(empresa) {
   try {
     return fs.readdirSync(DIR)
@@ -341,10 +356,11 @@ async function tratar(req, res, urlObj, json) {
     const rMe = await mlGet(token, ML_API + '/users/me');
     const me = jsonSeguro(rMe.texto) || {};
     if (!rMe.ok || !me.id) { json(res, 200, { ok: false, erro: rMe.transitorio ? 'ML instável agora — rode de novo em ~1 min' : 'users/me falhou (HTTP ' + rMe.status + ')' }); return true; }
-    const caminho = String(urlObj.searchParams.get('caminho') || 'sites/MLB/batch_request/period/stream').replace(/^\/+/, '');
-    if (caminho.indexOf('..') >= 0) { json(res, 400, { ok: false, erro: 'caminho inválido' }); return true; }
+    const caminho = String(urlObj.searchParams.get('caminho') || 'sites/MLB/batch_request/period/stream');
     const q = String(urlObj.searchParams.get('q') || '');
-    const url = ML_API + '/users/' + me.id + '/invoices/' + caminho + (q ? ('?' + q) : '');
+    const alvo = urlDoLote(me.id, caminho, q);
+    if (!alvo.ok) { json(res, 400, { ok: false, erro: alvo.erro }); return true; }
+    const url = alvo.url;
     const r = await mlGet(token, url);
     json(res, 200, {
       ok: true, versao: VERSAO, empresa, uid: me.id, url, status: r.status,
@@ -386,7 +402,7 @@ async function tratar(req, res, urlObj, json) {
 module.exports = {
   tratar, VERSAO,
   _interno: {
-    sondarVenda, sondarUmaOrder, sondarNota, mlGet, extrairChave, garantirToken, listarArquivos, comPrazo,
+    sondarVenda, sondarUmaOrder, sondarNota, urlDoLote, mlGet, extrairChave, garantirToken, listarArquivos, comPrazo,
     _trocarFetchParaTeste(f) { _fetchRef.fn = f; },
   },
 };

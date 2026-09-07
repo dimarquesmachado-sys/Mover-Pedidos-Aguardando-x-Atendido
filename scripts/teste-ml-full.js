@@ -176,6 +176,14 @@ function fetchDeTabela(tabela) {
   assert.strictEqual(n.resultado, 'transitorio_tente_de_novo');
   cen++;
 
+  // 15) confinamento do sonda-lote: traversal (mesmo duplo-codificado) é recusado
+  const { urlDoLote } = mf._interno;
+  assert.strictEqual(urlDoLote(999, 'sites/MLB/batch_request/period/stream', 'a=1').ok, true);
+  assert.strictEqual(urlDoLote(999, '%2e%2e/%2e%2e/%2e%2e/orders/1', '').ok, false, 'ponto-ponto codificado não escapa');
+  assert.strictEqual(urlDoLote(999, '../../../orders/1', '').ok, false);
+  assert.strictEqual(urlDoLote(999, 'x/../../../../orders/1', '').ok, false);
+  cen++;
+
   console.log('OK: ' + cen + ' cenários da matriz passaram (' + mf.VERSAO + ')');
 })().catch(e => { console.error('FALHOU:', e.message); process.exit(1); });
 
