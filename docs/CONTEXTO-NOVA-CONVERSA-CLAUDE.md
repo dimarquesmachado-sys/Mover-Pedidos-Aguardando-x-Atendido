@@ -45,8 +45,8 @@ real; depois formar a hipótese; por último corrigir.
 
 | Área | Onde está | Papel |
 |---|---|---|
-| Processo principal | `index.js` | servidor HTTP, segurança central, handlers globais e crons |
-| Módulos ativos | `config/empresas.js` | lista tudo o que sobe no processo |
+| Processo principal | `index.js` | servidor HTTP, segurança central, handlers globais e crons — **inventário completo** do que sobe no processo (inclui Magalu, TikTok Shop/Ads, `ml-full` e coletores globais que não passam por `config/empresas.js`) |
+| Módulos ativos | `config/empresas.js` | registro dos handlers/crons **por empresa**; não é o inventário completo — ver `index.js` |
 | Cadastro lógico | `lib/empresas.js` | lista de empresas, nomes de env e compatibilidade histórica |
 | Novo embarque | `lib/embarcar-empresa.js` | pré-checagem e orquestração inicial de coletores |
 | Persistência analítica | `lib/supabase.js` | histórico multiempresa no Supabase |
@@ -69,12 +69,14 @@ da Girassol, **129 na AMB** e **77 na GOOD**. A GOOD não tem ainda o mesmo bloc
 outras duas. Esse número é um retrato, não um contrato: rode novamente um inventário antes de
 planejar a próxima migração.
 
-Já foram compartilhadas peças relevantes da Shopee, mas continuam como dívida importante:
+A extração da Shopee (escrow, carteira e devoluções) **já está concluída** em
+`lib/shopee-escrow.js` e `lib/shopee-devolucoes.js`, consumidas por Girassol e AMB; a GOOD não
+tem hoje integração financeira Shopee (a lacuna é decidir se/quando embarcá-la, não reextrair).
+Continuam como dívida importante:
 
-1. terminar a extração de escrow/carteira/devoluções;
-2. unificar a coleta de faturamento e tarifas do Mercado Livre;
-3. extrair histórico/backfill;
-4. só então criar componentes comuns do dashboard.
+1. unificar a coleta de faturamento e tarifas do Mercado Livre;
+2. extrair histórico/backfill;
+3. só então criar componentes comuns do dashboard.
 
 Migrar o HTML primeiro seria inverter a dependência: a tela comum ficaria apoiada em dados e
 regras ainda divergentes.
@@ -120,7 +122,7 @@ O loop Claude ↔ Codex também passou a:
 - limitar rodadas automáticas;
 - exigir revisão humana quando o limite é atingido;
 - conferir se o “OK” do Codex pertence ao `HEAD` atual;
-- impedir automerge de mudança nos próprios guardrails;
+- impedir automerge de mudança em `.github/workflows/` e `scripts/verifica.js` (atenção: `.github/espelhos.json` e `.github/eslint-orfaos.mjs` ainda **não** são cobertos — mudança neles pode passar pelo automerge);
 - aguardar o check `ai-safety` antes do merge.
 
 Esses controles devem ser mantidos. O que precisa melhorar é a qualidade **antes** de enviar
@@ -213,9 +215,11 @@ Para cada apontamento do Codex, produzir uma pequena tabela no PR:
 | Apontamento | Causa raiz | Arquivo/linha | Teste que falhava | Resultado depois |
 |---|---|---|---|---|
 
-Depois executar, no mínimo:
+Depois executar, no mínimo (o ESLint e seus plugins não estão no `package.json`; instalar
+primeiro com o comando pinado do cabeçalho de `.github/eslint-orfaos.mjs`, o mesmo que o CI usa):
 
 ```bash
+npm install --no-save eslint@9.39.5 eslint-plugin-html@8.1.4 globals@17.11.0
 node scripts/verifica.js
 npx eslint --no-config-lookup -c .github/eslint-orfaos.mjs .
 ```
@@ -349,8 +353,8 @@ da mesma interface.
 
 Melhorias recomendadas:
 
-- concluir a extração das três cópias de escrow, carteira e devoluções para uma biblioteca
-  multiempresa;
+- estender a biblioteca multiempresa já extraída (`lib/shopee-escrow.js`, `lib/shopee-devolucoes.js`)
+  — as lacunas reais são a GOOD (sem Shopee financeira hoje) e os componentes comuns de dashboard;
 - implementar ingestão incremental com cursor/checkpoint e reconciliação sobreposta;
 - guardar ledger financeiro por entrada, pedido e SKU, preservando sinal/moeda/tipo original antes
   de calcular comissão, frete, proteção do vendedor, ajuste, anúncio e reembolso;
