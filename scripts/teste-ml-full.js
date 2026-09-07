@@ -143,7 +143,46 @@ function fetchDeTabela(tabela) {
 
   // extras de unidade
   assert.strictEqual(extrairChave('nada aqui'), null);
-  assert.strictEqual(mf.VERSAO.includes('b1'), true);
+  assert.strictEqual(mf.VERSAO.includes('b2'), true);
+
+  // 12) b2: xml_location RELATIVO agora resolve contra a API (bug provado na cobaia)
+  _trocarFetchParaTeste(fetchDeTabela([
+    ['/orders/888', resposta(200, { id: 888 })],
+    ['/invoices/orders/888', resposta(200, { id: 999888, xml_location: '/users/999/invoices/documents/xml/999888/authorized' })],
+    ['/users/999/invoices/documents/xml/999888/authorized', resposta(200, XML)],
+  ]));
+  r = await sondarVenda('tk', 999, 'amb', '888', false);
+  assert.strictEqual(r[0].resultado, 'xml_salvo');
+  assert.strictEqual(r[0].via, 'xml_location', 'relativo resolvido vira o caminho principal');
+  cen++;
+
+  // 13) b2: sondarNota por id — detalhe pode nem existir (404), o XML por id decide
+  const { sondarNota } = mf._interno;
+  _trocarFetchParaTeste(fetchDeTabela([
+    ['/invoices/777001', resposta(404, { message: 'not found' })],
+    ['/invoices/documents/xml/777001/authorized', resposta(200, XML)],
+  ]));
+  let n = await sondarNota('tk', 999, 'amb', '777001', false);
+  assert.strictEqual(n.resultado, 'xml_salvo');
+  assert.ok(n.arquivo.indexOf('amb-nota-777001') === 0);
+  cen++;
+
+  // 14) b2: sondarNota com 429 nas duas tentativas → transitório, nunca 'não existe'
+  _trocarFetchParaTeste(fetchDeTabela([
+    ['/invoices/777002', resposta(200, {})],
+    ['/invoices/documents/xml/777002/authorized', resposta(429, { message: 'rate' })],
+  ]));
+  n = await sondarNota('tk', 999, 'amb', '777002', false);
+  assert.strictEqual(n.resultado, 'transitorio_tente_de_novo');
+  cen++;
+
+  // 15) confinamento do sonda-lote: traversal (mesmo duplo-codificado) é recusado
+  const { urlDoLote } = mf._interno;
+  assert.strictEqual(urlDoLote(999, 'sites/MLB/batch_request/period/stream', 'a=1').ok, true);
+  assert.strictEqual(urlDoLote(999, '%2e%2e/%2e%2e/%2e%2e/orders/1', '').ok, false, 'ponto-ponto codificado não escapa');
+  assert.strictEqual(urlDoLote(999, '../../../orders/1', '').ok, false);
+  assert.strictEqual(urlDoLote(999, 'x/../../../../orders/1', '').ok, false);
+  cen++;
 
   console.log('OK: ' + cen + ' cenários da matriz passaram (' + mf.VERSAO + ')');
 })().catch(e => { console.error('FALHOU:', e.message); process.exit(1); });
