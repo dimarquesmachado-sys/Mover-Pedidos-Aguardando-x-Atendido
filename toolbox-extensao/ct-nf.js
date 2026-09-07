@@ -246,19 +246,10 @@ try { if (window.tbSinalDeVida) window.tbSinalDeVida('nf', 'carregou'); } catch 
     return txt;
   }
 
-  function resumir(txt) {
-    // tira os marcadores de CDATA antes das tags, senao sobra "]]>" no fim
-    const limpo = String(txt || '')
-      .replace(/<!\[CDATA\[/g, ' ').replace(/\]\]>/g, ' ')
-      .replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
-    const conta = re => (limpo.match(re) || []).length;
-    return {
-      ja_registradas: conta(/já está registrada|ja esta registrada/gi),
-      eram_de_entrada: conta(/Para importar notas de entrada/gi),
-      nao_importados: conta(/XML não importado|XML nao importado/gi),
-      trecho: limpo.trim().slice(0, 300)
-    };
-  }
+  // 07/09: a contagem virou tb-importacao.js (compartilhada com o bloco Shopee e
+  // testável em Node) — o raio-x provou que duplicada contada como falha travava
+  // o registro desde 03/09. Invariante e janela de classificação: ver a lib.
+  const resumir = resumirImportacaoBling;
 
   // ── verificar o que esta pendente ───────────────────────────────────
   let pendente = null;
@@ -381,12 +372,13 @@ try { if (window.tbSinalDeVida) window.tbSinalDeVida('nf', 'carregou'); } catch 
         const res = resumir(await processar(tmp, pendente.empresa, tipo));
         feito.push({ tipo, rotulo, quantas, res });
 
-        /* Codex #236 (P1): so registra o lote como importado quando o Bling NAO recusou nenhum
-           XML — antes, 200 com "XML nao importado" no corpo registrava tudo mesmo assim, a nota
-           falhada sumia do /ext/estado e nunca re-tentava (o painel dizia "Pronto"). Com falha,
-           o lote fica pendente e re-tenta inteiro: as que ja entraram viram "ja esta registrada"
-           (inofensivo) e o registro acontece quando a rodada fechar limpa. */
-        if (!res.nao_importados) {
+        /* Codex #236 (P1) + raio-x 07/09: o gate antigo (nao_importados===0) tinha o furo
+           inverso, provado com dado — a mensagem de DUPLICADA casa as DUAS frases, contava como
+           falha, o registro nunca rodava e toda nota importada virou pendente eterno (bola de
+           neve de 31 na AMB; _importado parado desde 03/09). Agora: só FALHA REAL segura o
+           registro (duplicada é presença confirmada) — e corpo VAZIO também segura, porque 200
+           sem conteúdo não é evidência de o Bling ter processado nada. */
+        if (!res.falhas_reais && !res.corpo_vazio) {
           try {
             const rReg = await fetch(cfg.servidor + '/magalu/nf-full/ext/registrar?k=' + encodeURIComponent(cfg.chave), {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -403,13 +395,15 @@ try { if (window.tbSinalDeVida) window.tbSinalDeVida('nf', 'carregou'); } catch 
       await rodada('S', pendente.url_zip_saida, qS, 'saída');
       if (qE && pendente.url_zip_entrada) await rodada('E', pendente.url_zip_entrada, qE, 'entrada');
 
-      const _falhas = feito.reduce((s, f) => s + (f.res.nao_importados || 0), 0);
+      const _falhas = feito.reduce((s, f) => s + (f.res.falhas_reais || 0), 0);
+      const _vazios = feito.reduce((s, f) => s + (f.res.corpo_vazio ? 1 : 0), 0);
       if (_regFalhou) msg('⚠ Importadas no Bling, mas o REGISTRO no servidor falhou (' + _regFalhou + ') — o lote vai reaparecer na próxima checagem (re-importar é inofensivo: viram "já registrada").', '#fdd663');
-      else msg((_falhas ? '⚠ Quase: ' : '✓ Pronto.') + '\n' + feito.map(f =>
+      else msg(((_falhas || _vazios) ? '⚠ Quase: ' : '✓ Pronto.') + '\n' + feito.map(f =>
             f.quantas + ' de ' + f.rotulo + ' enviadas' +
-            (f.res.ja_registradas ? ' — ' + f.res.ja_registradas + ' já estavam lá' : '') +
-            (f.res.nao_importados ? ' — ' + f.res.nao_importados + ' NÃO importadas (vão re-tentar na próxima)' : '')
-          ).join('\n'), _falhas ? '#fdd663' : '#81c995');
+            (f.res.ja_registradas ? ' — ' + f.res.ja_registradas + ' já estavam no Bling (ok)' : '') +
+            (f.res.falhas_reais ? ' — ' + f.res.falhas_reais + ' falharam DE VERDADE (vão re-tentar na próxima)' : '') +
+            (f.res.corpo_vazio ? ' — resposta VAZIA do Bling (nada registrado)' : '')
+          ).join('\n'), (_falhas || _vazios) ? '#fdd663' : '#81c995');
 
       elBtn.textContent = 'Importar de novo';
       if (!_regFalhou) sumirDepois(8000);   // deu certo: some sozinho (registro falhado FICA na tela)
@@ -638,16 +632,8 @@ try { if (window.tbSinalDeVida) window.tbSinalDeVida('nf', 'carregou'); } catch 
     return txt;
   }
 
-  function resumir(txt) {
-    const limpo = String(txt || '').replace(/<!\[CDATA\[/g, ' ').replace(/\]\]>/g, ' ').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
-    const conta = re => (limpo.match(re) || []).length;
-    return {
-      ja_registradas: conta(/já está registrada|ja esta registrada/gi),
-      eram_de_entrada: conta(/Para importar notas de entrada/gi),
-      nao_importados: conta(/XML não importado|XML nao importado/gi),
-      trecho: limpo.trim().slice(0, 300)
-    };
-  }
+  // 07/09: contagem compartilhada em tb-importacao.js (ver invariante lá)
+  const resumir = resumirImportacaoBling;
 
   // ── verificar o que há de novo (fala o dialeto /fbs/ext/estado) ──
   let pendente = null;
@@ -759,9 +745,10 @@ try { if (window.tbSinalDeVida) window.tbSinalDeVida('nf', 'carregou'); } catch 
         const res = resumir(await processar(tmp, pendente.empresa, tipo));
         feito.push({ tipo, rotulo, quantas, res });
         // marca as chaves como importadas (extrai o nome do arquivo da própria URL)
-        // Codex #236 (P1): SO quando o Bling nao recusou nenhum XML — com falha o lote fica
-        // pendente e re-tenta (as ja importadas viram "ja esta registrada", inofensivo).
-        if (!res.nao_importados) {
+        // Raio-x 07/09: só FALHA REAL segura o registro — duplicada casa as duas frases e o
+        // gate antigo travou o _importado desde 03/09 (bola de neve de 31, todas no Bling).
+        // Corpo vazio também segura: 200 sem conteúdo não é evidência de processamento.
+        if (!res.falhas_reais && !res.corpo_vazio) {
           try {
             const nomeArq = decodeURIComponent((url.split('/fbs/zip/')[1] || '').split('?')[0]);
             if (nomeArq) { const rReg = await fetch(cfg.sp_servidor + '/' + encodeURIComponent(cfg.sp_loja) + '/fbs/ext/registrar?k=' + encodeURIComponent(cfg.sp_chave) + '&arquivo=' + encodeURIComponent(nomeArq)); if (!rReg.ok) _regFalhou = 'HTTP ' + rReg.status; }
@@ -771,14 +758,15 @@ try { if (window.tbSinalDeVida) window.tbSinalDeVida('nf', 'carregou'); } catch 
       await rodada('S', pendente.url_zip_saida, pendente.novas_saida, 'saída');
       if (pendente.novas_entrada && pendente.url_zip_entrada) await rodada('E', pendente.url_zip_entrada, pendente.novas_entrada, 'entrada');
 
-      const _falhasS = feito.reduce((s, f) => s + (f.res.nao_importados || 0), 0);
+      const _falhasS = feito.reduce((s, f) => s + (f.res.falhas_reais || 0), 0);
+      const _vaziosS = feito.reduce((s, f) => s + (f.res.corpo_vazio ? 1 : 0), 0);
       if (_regFalhou) { msg('⚠ Importadas no Bling, mas o REGISTRO no servidor falhou (' + _regFalhou + ') — o lote vai reaparecer na próxima checagem.', '#fdd663'); elBtn.textContent = 'Importar de novo'; }
       else {
       /* Codex #236 r3 (P1): o vinculo so e aprendido quando a rodada fechou LIMPA — gravar com
          "XML nao importado" no corpo (ex.: sessao da empresa errada) envenenava a trava e a
          sessao CERTA passava a ser recusada. */
-      if (!_falhasS) { try { await chrome.storage.local.set({ ['sp_vinculo_' + cfg.sp_loja]: String(pendente.idEmpresa) }); } catch (eV2) {} }
-      msg((_falhasS ? '⚠ Quase: ' : '✓ Pronto.') + '\n' + feito.map(f => f.quantas + ' de ' + f.rotulo + ' enviadas' + (f.res.ja_registradas ? ' — ' + f.res.ja_registradas + ' já estavam lá' : '') + (f.res.nao_importados ? ' — ' + f.res.nao_importados + ' NÃO importadas (vão re-tentar)' : '')).join('\n'), _falhasS ? '#fdd663' : '#81c995');
+      if (!_falhasS && !_vaziosS) { try { await chrome.storage.local.set({ ['sp_vinculo_' + cfg.sp_loja]: String(pendente.idEmpresa) }); } catch (eV2) {} }
+      msg(((_falhasS || _vaziosS) ? '⚠ Quase: ' : '✓ Pronto.') + '\n' + feito.map(f => f.quantas + ' de ' + f.rotulo + ' enviadas' + (f.res.ja_registradas ? ' — ' + f.res.ja_registradas + ' já estavam no Bling (ok)' : '') + (f.res.falhas_reais ? ' — ' + f.res.falhas_reais + ' falharam DE VERDADE (vão re-tentar)' : '') + (f.res.corpo_vazio ? ' — resposta VAZIA do Bling (nada registrado)' : '')).join('\n'), (_falhasS || _vaziosS) ? '#fdd663' : '#81c995');
       elBtn.textContent = 'Importar de novo';
       sumirDepois(8000);
       }
