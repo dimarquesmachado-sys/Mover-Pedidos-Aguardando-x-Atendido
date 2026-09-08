@@ -218,10 +218,11 @@ _trocarFetchParaTeste(async (url) => {
   });
   const vistas = new Set();
   for (let i = 0; i < 3; i++) {
-    const ri = await varrerLote('amb', '20260901', '20260901', 2, { tokenML: 'tk', tokenBling: 'tb' });
+    // custo novo (visão de canceladas): AUSENTE = 2 listas — teto=4 banca 2 posições/rodada
+    const ri = await varrerLote('amb', '20260901', '20260901', 4, { tokenML: 'tk', tokenBling: 'tb' });
     for (const n of ri.novas) { assert.ok(!vistas.has(n.chave), 'faixas disjuntas: ' + n.chave + ' repetiu na rodada ' + i); vistas.add(n.chave); }
   }
-  assert.ok(vistas.size >= 4, 'três rodadas de teto=2 cobrem posições distintas (cobriu ' + vistas.size + ')');
+  assert.ok(vistas.size >= 4, 'três rodadas de teto=4 cobrem posições distintas (cobriu ' + vistas.size + ')');
 
   // #350 r1 (P1): cancelada já SALVA vai pra quarentena e some do ZIP
   mf._interno._limparCacheConfirmadasParaTeste();
@@ -253,7 +254,8 @@ _trocarFetchParaTeste(async (url) => {
   fs.mkdirSync(process.env.ML_FULL_DIR, { recursive: true }); // some o disco, fica o cache
   const alcancadas = new Set();
   for (let i = 0; i < 8; i++) {
-    const ri = await varrerLote('amb', '20260901', '20260901', 1, { tokenML: 'tk', tokenBling: 'tb' });
+    // custo novo: ausente = 2 listas ⇒ teto=2 banca exatamente 1 posição por rodada (o espírito do exemplo)
+    const ri = await varrerLote('amb', '20260901', '20260901', 2, { tokenML: 'tk', tokenBling: 'tb' });
     for (const n of ri.novas) alcancadas.add(n.chave);
   }
   assert.ok(alcancadas.size >= 3, 'com cache no meio e teto=1, o cursor contíguo alcança todas as posições (alcançou ' + alcancadas.size + ')');
@@ -301,5 +303,41 @@ _trocarFetchParaTeste(async (url) => {
   const rj2 = await varrerLote('amb', '20260901', '20260901', 2, { tokenML: 'tk', tokenBling: 'tb' });
   for (const n of rj2.novas) { assert.ok(!vJ.has(n.chave), 'janela intercalada não reseta o cursor da primeira'); vJ.add(n.chave); }
 
-  console.log('OK: motor fase 1 — aquisição única de token, cursor por janela, tudo verde');
+  // Visão de canceladas e entradas (o conserto dos 7 falso-ausentes de 07-08/09)
+  const CH_C = CHV(1);
+  // (a) cancelada: lista padrão vazia → 2ª lista com situacao=2 acha → detalhe confirma
+  _trocarFetchParaTeste(async (url) => {
+    if (url.includes('situacao=2') && url.includes(CH_C)) return { status: 200, text: async () => JSON.stringify({ data: [{ id: 'c1' }] }) };
+    if (url.includes('/nfe?chaveAcesso=' + CH_C)) return { status: 200, text: async () => JSON.stringify({ data: [] }) };
+    if (url.includes('/nfe/c1')) return { status: 200, text: async () => JSON.stringify({ data: { id: 'c1', chaveAcesso: CH_C, situacao: 2 } }) };
+    throw new Error('não previsto: ' + url);
+  });
+  let bv = await blingTemChave('tb', CH_C, 60, 'saida');
+  assert.ok(bv.verificada && bv.esta_no_bling && bv.cancelada === true, 'cancelada agora é PRESENTE (era o falso-ausente)');
+  assert.strictEqual(bv.chamadas, 3, 'duas listas + detalhe contadas de verdade');
+
+  // (b) entrada: a query leva tipo=0 (a cegueira das 8150/8086)
+  let viuTipo0 = false;
+  _trocarFetchParaTeste(async (url) => {
+    if (url.includes('/nfe?chaveAcesso=' + CH_C)) { viuTipo0 = viuTipo0 || url.includes('tipo=0'); return { status: 200, text: async () => JSON.stringify({ data: [{ id: 'e1' }] }) }; }
+    if (url.includes('/nfe/e1')) return { status: 200, text: async () => JSON.stringify({ data: { id: 'e1', chaveAcesso: CH_C, situacao: 5 } }) };
+    throw new Error('não previsto: ' + url);
+  });
+  bv = await blingTemChave('tb', CH_C, 60, 'entrada');
+  assert.ok(bv.verificada && bv.esta_no_bling && viuTipo0, 'entrada consulta com tipo=0');
+  assert.ok(!bv.cancelada, 'achada na primeira lista não é cancelada');
+
+  // (c) ausente DE VERDADE agora exige as DUAS listas vazias
+  _trocarFetchParaTeste(async (url) => {
+    if (url.includes('/nfe?chaveAcesso=')) return { status: 200, text: async () => JSON.stringify({ data: [] }) };
+    throw new Error('não previsto: ' + url);
+  });
+  bv = await blingTemChave('tb', CH_C, 60, 'saida');
+  assert.ok(bv.verificada && bv.esta_no_bling === false && bv.chamadas === 2, 'ausente conclusivo só com padrão E canceladas vazias');
+
+  // (d) teto no meio das duas listas: nunca conclui
+  bv = await blingTemChave('tb', CH_C, 1, 'saida');
+  assert.ok(!bv.verificada && bv.teto === true, 'orçamento insuficiente pra 2ª lista adia, não conclui');
+
+  console.log('OK: motor fase 1 — visão completa: canceladas (situacao=2) e entradas (tipo=0) enxergadas; ausente exige as duas listas vazias');
 })().catch(e => { console.error('FALHOU (motor):', e.message); process.exit(1); });

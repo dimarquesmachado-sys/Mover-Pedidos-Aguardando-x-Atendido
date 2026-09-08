@@ -169,11 +169,20 @@ function lerTpNF(xml) {
   return m ? (m[1] === '1' ? 'saida' : 'entrada') : null;
 }
 
+/* Sonda-situação de 08/09 (nota 3795, detalhe confirmando chave E situação):
+   no Bling v3, situacao=2 é CANCELADA — e a lista padrão NÃO as devolve. */
+const SITUACAO_CANCELADA_BLING = 2;
+
 /* A chave está no Bling? Dois passos, como o raio-x do snf aprendeu na marra:
    a LISTA é representação resumida (sem chaveAcesso confiável) e o filtro já foi
    visto sendo IGNORADO — então lista vazia absolve, lista com item só condena
    depois que o DETALHE confirmar a chave. Qualquer outra coisa: verificada:false. */
-async function blingTemChave(tokenBling, chave, orcamentoRestante) {
+async function blingTemChave(tokenBling, chave, orcamentoRestante, tipo) {
+  /* Conserto da CEGUEIRA (provada em 07-08/09 com 7 falso-ausentes): a lista padrão não
+     devolve CANCELADAS (segunda tentativa com situacao=2) nem, pela evidência das
+     entradas 8150/8086 presentes-e-invisíveis, notas de ENTRADA (tipo=0 na query quando
+     o tpNF do XML é entrada — o motor sempre o tem). Ausente conclusivo agora exige as
+     DUAS listas vazias. */
   /* Codex #349 (P2 ×2): o ritmo vale ANTES de CADA GET (lista E detalhe — senão lote
      cheio de presentes dispara ~2 req/350ms e os 429 viram nao_conferidas), e o teto é
      de CHAMADAS REAIS: `chamadas` volta na resposta e o detalhe nem começa sem orçamento
@@ -182,39 +191,53 @@ async function blingTemChave(tokenBling, chave, orcamentoRestante) {
      exceção (timeout no corpo do detalhe, p.ex.) devolve a contagem verdadeira e o
      teto nunca é ultrapassado por chamada fantasma. */
   let feitas = 0;
-  try {
+  const sufTipo = tipo === 'entrada' ? '&tipo=0' : '';
+  const listar = async (extra) => {
     await sleep(350);
-    feitas = 1;
-    const ac1 = new AbortController(); const t1 = setTimeout(() => ac1.abort(), 20000);
-    let r, corpo;
+    feitas++;
+    const ac = new AbortController(); const t = setTimeout(() => ac.abort(), 20000);
     try {
-      r = await _fetchRef.fn(BLING_BASE + '/nfe?chaveAcesso=' + chave, { headers: { Authorization: 'Bearer ' + tokenBling, Accept: 'application/json' }, signal: ac1.signal, timeout: 20000 });
-      corpo = await r.text();
-    } finally { clearTimeout(t1); }
-    if (!r || (r.status !== 200)) return { verificada: false, erro: 'HTTP ' + (r ? r.status : 0) + ' na lista', chamadas: 1 };
+      const r = await _fetchRef.fn(BLING_BASE + '/nfe?chaveAcesso=' + chave + sufTipo + extra, { headers: { Authorization: 'Bearer ' + tokenBling, Accept: 'application/json' }, signal: ac.signal, timeout: 20000 });
+      return { r, corpo: await r.text() };
+    } finally { clearTimeout(t); }
+  };
+  try {
+    let { r, corpo } = await listar('');
+    if (!r || (r.status !== 200)) return { verificada: false, erro: 'HTTP ' + (r ? r.status : 0) + ' na lista', chamadas: feitas };
     const j = jsonSeguro(corpo);
     const arr = (j && Array.isArray(j.data)) ? j.data : null;
-    if (!arr) return { verificada: false, erro: 'lista ilegível', chamadas: 1 };
-    if (!arr.length) return { verificada: true, esta_no_bling: false, chamadas: 1 };
+    if (!arr) return { verificada: false, erro: 'lista ilegível', chamadas: feitas };
+    let cancelada = false;
+    if (!arr.length) {
+      if (Number(orcamentoRestante) - feitas < 1) return { verificada: false, teto: true, erro: 'teto no meio — lista de canceladas adiada', chamadas: feitas };
+      const seg = await listar('&situacao=' + SITUACAO_CANCELADA_BLING);
+      if (!seg.r || seg.r.status !== 200) return { verificada: false, erro: 'HTTP ' + (seg.r ? seg.r.status : 0) + ' na lista de canceladas', chamadas: feitas };
+      const j2 = jsonSeguro(seg.corpo);
+      const arr2 = (j2 && Array.isArray(j2.data)) ? j2.data : null;
+      if (!arr2) return { verificada: false, erro: 'lista de canceladas ilegível', chamadas: feitas };
+      if (!arr2.length) return { verificada: true, esta_no_bling: false, chamadas: feitas };
+      arr.push(...arr2);
+      cancelada = true;
+    }
     /* Codex #349 r2: chave é ÚNICA — mais de 1 item já é filtro ignorado; olhar só o
        arr[0] deixava a nota certa presa em nao_conferida pra sempre quando vinha em 2º */
-    if (arr.length > 1) return { verificada: false, erro: 'lista com ' + arr.length + ' itens pra chave única (filtro ignorado?)', chamadas: 1 };
+    if (arr.length > 1) return { verificada: false, erro: 'lista com ' + arr.length + ' itens pra chave única (filtro ignorado?)', chamadas: feitas };
     const id = arr[0] && arr[0].id;
-    if (!id) return { verificada: false, erro: 'item sem id na lista', chamadas: 1 };
-    if (Number(orcamentoRestante) < 2) return { verificada: false, teto: true, erro: 'teto no meio — lista feita, detalhe adiado pra próxima rodada', chamadas: 1 };
+    if (!id) return { verificada: false, erro: 'item sem id na lista', chamadas: feitas };
+    if (Number(orcamentoRestante) - feitas < 1) return { verificada: false, teto: true, erro: 'teto no meio — lista feita, detalhe adiado pra próxima rodada', chamadas: feitas };
     await sleep(350);
-    feitas = 2;
+    feitas++;
     const ac2 = new AbortController(); const t2 = setTimeout(() => ac2.abort(), 20000);
     let r2, corpo2;
     try {
       r2 = await _fetchRef.fn(BLING_BASE + '/nfe/' + id, { headers: { Authorization: 'Bearer ' + tokenBling, Accept: 'application/json' }, signal: ac2.signal, timeout: 20000 });
       corpo2 = await r2.text();
     } finally { clearTimeout(t2); }
-    if (!r2 || r2.status !== 200) return { verificada: false, erro: 'HTTP ' + (r2 ? r2.status : 0) + ' no detalhe', chamadas: 2 };
+    if (!r2 || r2.status !== 200) return { verificada: false, erro: 'HTTP ' + (r2 ? r2.status : 0) + ' no detalhe', chamadas: feitas };
     const det = jsonSeguro(corpo2);
     const chaveDet = det && det.data && det.data.chaveAcesso ? String(det.data.chaveAcesso) : null;
-    if (chaveDet === chave) return { verificada: true, esta_no_bling: true, id, chamadas: 2 };
-    return { verificada: false, erro: 'detalhe com outra chave (filtro ignorado?)', chamadas: 2 };
+    if (chaveDet === chave) return { verificada: true, esta_no_bling: true, cancelada: cancelada || undefined, id, chamadas: feitas };
+    return { verificada: false, erro: 'detalhe com outra chave (filtro ignorado?)', chamadas: feitas };
   } catch (e) {
     return { verificada: false, erro: String(e.message || e).slice(0, 160), chamadas: feitas || 1 };
   }
@@ -376,7 +399,7 @@ async function _varrerLoteInterno(empresa, de, ate, teto, deps) {
          aquisição acontece no máximo 1× por varredura e a resposta avisa em nota_cota. */
     }
     if (jaSalva) {
-      const b0 = await blingTemChave(tokenBling, c.chave, teto - consultasBling);
+      const b0 = await blingTemChave(tokenBling, c.chave, teto - consultasBling, tipo);
       consultasBling += b0.chamadas || 1;
       if (b0.verificada && b0.esta_no_bling) {
         _confirmadasNoBling.set(c.chave, Date.now());
@@ -395,7 +418,7 @@ async function _varrerLoteInterno(empresa, de, ate, teto, deps) {
       else jaBaixadas++;
       continue;
     }
-    const b = await blingTemChave(tokenBling, c.chave, teto - consultasBling);
+    const b = await blingTemChave(tokenBling, c.chave, teto - consultasBling, tipo);
     consultasBling += b.chamadas || 1;
 
     if (!b.verificada) {
