@@ -852,7 +852,10 @@ async function tratar(req, res, urlObj, json) {
               const corpo2 = await r2.text();
               if (!r2 || r2.status !== 200) { linha.detalhe_falhou = 'HTTP ' + (r2 ? r2.status : 0); continue; }
               const det = jsonSeguro(corpo2);
-              const chaveDet = det && det.data && det.data.chaveAcesso ? String(det.data.chaveAcesso) : null;
+              /* Codex #351 r4: detalhe 200 ILEGÍVEL é falha, não mismatch — senão viraria
+                 negativo conclusivo com o detalhe quebrado. */
+              if (!det || !det.data) { linha.detalhe_falhou = 'detalhe 200 ilegível'; continue; }
+              const chaveDet = det.data.chaveAcesso ? String(det.data.chaveAcesso) : null;
               if (chaveDet === chave) {
                 linha.chave_confirmada = true;
                 linha.situacao_da_nota = det.data.situacao;
