@@ -363,5 +363,24 @@ _trocarFetchParaTeste(async (url) => {
   bv = await blingTemChave('tb', CH_Y, 60, 'saida');
   assert.ok(!bv.verificada && String(bv.erro).includes('inconclusivo'), 'padrão inconclusiva nunca vira ausência: ' + JSON.stringify(bv));
 
-  console.log('OK: motor fase 1 — visão completa: canceladas, entradas, mismatch cai pra canceladas, e ausência só com AMBAS conclusivas');
+  // #352 r3: multi-item e item-sem-id na padrão também caem pra canceladas (e nunca viram ausência)
+  const CH_M = CHV(4);
+  _trocarFetchParaTeste(async (url) => {
+    if (url.includes('situacao=2') && url.includes(CH_M)) return { status: 200, text: async () => JSON.stringify({ data: [{ id: 'cm' }] }) };
+    if (url.includes('/nfe?chaveAcesso=' + CH_M)) return { status: 200, text: async () => JSON.stringify({ data: [{ id: 'a1' }, { id: 'a2' }] }) };
+    if (url.includes('/nfe/cm')) return { status: 200, text: async () => JSON.stringify({ data: { id: 'cm', chaveAcesso: CH_M, situacao: 2 } }) };
+    throw new Error('não previsto: ' + url);
+  });
+  bv = await blingTemChave('tb', CH_M, 60, 'saida');
+  assert.ok(bv.verificada && bv.cancelada === true, 'multi-item na padrão ainda acha a cancelada: ' + JSON.stringify(bv));
+  const CH_N = CHV(5);
+  _trocarFetchParaTeste(async (url) => {
+    if (url.includes('situacao=2') && url.includes(CH_N)) return { status: 200, text: async () => JSON.stringify({ data: [] }) };
+    if (url.includes('/nfe?chaveAcesso=' + CH_N)) return { status: 200, text: async () => JSON.stringify({ data: [{ numero: 'sem-id' }] }) };
+    throw new Error('não previsto: ' + url);
+  });
+  bv = await blingTemChave('tb', CH_N, 60, 'saida');
+  assert.ok(!bv.verificada && String(bv.erro).includes('inconclusivo'), 'item sem id nunca vira ausência: ' + JSON.stringify(bv));
+
+  console.log('OK: motor fase 1 — visão completa e classe fechada: padrão inconclusiva SEMPRE cai pra canceladas, ausência só com ambas conclusivas');
 })().catch(e => { console.error('FALHOU (motor):', e.message); process.exit(1); });

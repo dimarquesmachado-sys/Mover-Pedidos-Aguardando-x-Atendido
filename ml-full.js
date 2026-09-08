@@ -212,15 +212,25 @@ async function blingTemChave(tokenBling, chave, orcamentoRestante, tipo) {
     const j = jsonSeguro(res.corpo);
     const arr = (j && Array.isArray(j.data)) ? j.data : null;
     if (!arr) return { erro: rotulo + ' ilegível' };
-    if (arr.length > 1) return { erro: rotulo + ' com ' + arr.length + ' itens pra chave única (filtro ignorado?)' };
+    if (arr.length > 1) return { erro: rotulo + ' com ' + arr.length + ' itens pra chave única (filtro ignorado?)', filtroIgnorado: true };
     return { arr };
   };
   try {
+    /* #352 r3: QUALQUER resultado não-conclusivo da lista padrão (multi-item, item sem
+       id, detalhe com outra chave) marca padraoInconclusiva e SEGUE pra canceladas —
+       encerrar aqui deixava cancelada existente eternamente inconclusiva, e cair sem a
+       flag transformava padrão-quebrada em ausência conclusiva. Só falha de transporte
+       (HTTP/ilegível) retorna direto: é transitória e a próxima rodada resolve. */
     const l1 = lerLista(await listar(''), 'lista');
-    if (l1.erro) return { verificada: false, erro: l1.erro, chamadas: feitas };
-
-    let candidato = l1.arr.length ? l1.arr[0] : null;
     let padraoInconclusiva = false;
+    let candidato = null;
+    if (l1.erro) {
+      if (!l1.filtroIgnorado) return { verificada: false, erro: l1.erro, chamadas: feitas };
+      padraoInconclusiva = true;
+    } else {
+      candidato = l1.arr.length ? l1.arr[0] : null;
+      if (candidato && !candidato.id) { padraoInconclusiva = true; candidato = null; }
+    }
 
     if (candidato && candidato.id) {
       if (Number(orcamentoRestante) - feitas < 1) return { verificada: false, teto: true, erro: 'teto no meio — lista feita, detalhe adiado pra próxima rodada', chamadas: feitas };
