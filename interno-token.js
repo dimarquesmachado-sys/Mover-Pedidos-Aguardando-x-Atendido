@@ -2,11 +2,14 @@
 /* ROTA INTERNA DE LEITURA DE TOKEN — passo 2 do contrato de empresas (v4).
    O Mover-Pedidos é o DONO ELEITO de todos os tokens; o Devoluções passa a LER o
    vigente em vez de renovar (o refresh do ML é de uso único — dois renovadores é
-   corrida ativa). Contrato combinado entre os dois serviços, registrado em
-   contrato-empresas.json → passo_2_eleicao.mecanica:
+   corrida ativa). Mecânica combinada entre os dois serviços; a formalização no
+   contrato (passo_2_eleicao.mecanica) chega com o PR #354, que sincroniza a
+   versão nova — o contrato desta árvore ainda é o anterior, de propósito:
 
      GET /interno/token/:empresa/:integracao
-     Auth: TOKEN_LEITURA_KEY (chave DEDICADA — nunca a ADMIN_KEY geral)
+     Auth: TOKEN_LEITURA_KEY SÓ pelo header x-token-leitura (Codex #355: credencial
+     em querystring fica em log de proxy/acesso/trace e em URL copiada — pra uma
+     rota que entrega SEGREDOS vivos, não existe forma tolerável na URL)
      → { access, expira_em, versao }
 
    Decisões respondidas ao Devoluções (INSTRUCAO-5):
@@ -20,6 +23,29 @@
    Sem TOKEN_LEITURA_KEY no ambiente a rota responde 503: nasce DESLIGADA. */
 const crypto = require('crypto');
 const CONTRATO = require('./contrato-empresas.json');
+
+/* Codex #355 (P1 ×2): chamar a fábrica direto reintroduzia DENTRO da rota a corrida
+   que ela existe pra matar — duas leituras concorrentes de /ml disparariam dois
+   renovarTokenML no refresh de USO ÚNICO; e o await sem teto deixava a resposta HTTP
+   pendurada num refresh travado (os managers não têm timeout por design — o teto é
+   do chamador). Aquisição vira PROMESSA ÚNICA por (empresa, integração) com prazo
+   próprio da rota; o refresh segue vivo em background e persiste o token novo. */
+const _emVoo = new Map();
+function _adquirirUnica(chave, fab) {
+  let p = _emVoo.get(chave);
+  if (!p) {
+    p = Promise.resolve().then(fab).finally(() => _emVoo.delete(chave));
+    p.catch(() => {});
+    _emVoo.set(chave, p);
+  }
+  return p;
+}
+function _comPrazo(promessa, ms) {
+  return new Promise((res, rej) => {
+    const t = setTimeout(() => rej(new Error('prazo de ' + ms + 'ms estourado — a renovação segue em background; re-peça em instantes')), ms);
+    promessa.then(v => { clearTimeout(t); res(v); }, e => { clearTimeout(t); rej(e); });
+  });
+}
 
 const _fabricasRef = { map: null };
 function _fabricas() {
@@ -60,7 +86,7 @@ const INTEGRACOES_CONHECIDAS = (() => {
   return s;
 })();
 
-async function responder(caminho, chaveInformada) {
+async function responder(caminho, chaveInformada, prazoMs) {
   const KEY = process.env.TOKEN_LEITURA_KEY || '';
   if (!KEY) return { status: 503, corpo: { ok: false, erro: 'rota desligada — configure TOKEN_LEITURA_KEY no serviço (chave dedicada de leitura, não a ADMIN_KEY)' } };
   if (!chaveInformada || !chaveConfere(chaveInformada, KEY)) return { status: 401, corpo: { ok: false, erro: 'chave de leitura inválida' } };
@@ -85,7 +111,7 @@ async function responder(caminho, chaveInformada) {
   if (!fab) return { status: 501, corpo: { ok: false, erro: 'integração "' + integ + '" ainda não exposta pela rota — entra quando houver leitor (hoje: bling, ml, bling_nfe)' } };
 
   let access;
-  try { access = await fab(); }
+  try { access = await _comPrazo(_adquirirUnica(canonico + '|' + integ, fab), prazoMs || 25000); }
   catch (e) { return { status: 502, corpo: { ok: false, erro: 'aquisição do token falhou: ' + String(e.message || e).slice(0, 160) } }; }
   if (!access) return { status: 502, corpo: { ok: false, erro: 'manager devolveu token vazio' } };
 
@@ -109,7 +135,9 @@ async function tratar(req, res, urlObj, json) {
   const p = urlObj.pathname;
   if (!p.startsWith('/interno/token/')) return false;
   if (req.method !== 'GET') { json(res, 405, { ok: false, erro: 'só GET' }); return true; }
-  const chave = req.headers['x-token-leitura'] || urlObj.searchParams.get('k') || '';
+  /* Codex #355 (P1): SÓ header — ?k= aqui iria pra log de proxy e URL copiada */
+  if (urlObj.searchParams.get('k')) { json(res, 400, { ok: false, erro: 'credencial na URL não é aceita nesta rota — use o header x-token-leitura' }); return true; }
+  const chave = req.headers['x-token-leitura'] || '';
   const r = await responder(p, chave);
   json(res, r.status, r.corpo);
   return true;

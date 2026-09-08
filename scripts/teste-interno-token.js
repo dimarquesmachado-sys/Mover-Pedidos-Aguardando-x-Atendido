@@ -58,5 +58,27 @@ _trocarFabricasParaTeste({
   r = await responder('/interno/token/naoexiste/ml', 'chave-de-leitura');
   assert.strictEqual(r.status, 404, 'empresa fora do contrato ⇒ 404');
 
-  console.log('OK: rota de leitura — desligada sem env, alias normalizado, 404/400/501/502 no lugar certo, versao viva');
+  // r1: aquisições CONCORRENTES da mesma (empresa, integração) = UMA execução da fábrica
+  let execs = 0;
+  it._interno._trocarFabricasParaTeste({
+    girassol: { ml: async () => { execs++; await new Promise(r => setTimeout(r, 60)); return 'tk-serial'; } },
+  });
+  const [c1, c2] = await Promise.all([
+    responder('/interno/token/girassol/ml', 'chave-de-leitura'),
+    responder('/interno/token/girassol/ml', 'chave-de-leitura'),
+  ]);
+  assert.strictEqual(execs, 1, 'duas leituras concorrentes ⇒ UMA aquisição (a corrida que a rota existe pra matar)');
+  assert.ok(c1.corpo.access === 'tk-serial' && c2.corpo.access === 'tk-serial');
+
+  // r1: fábrica pendurada não pendura a resposta — o prazo da rota devolve 502 declarado
+  it._interno._trocarFabricasParaTeste({
+    girassol: { bling: () => new Promise(() => {}) },
+  });
+  const antes = Date.now();
+  const rP = await responder('/interno/token/girassol/bling', 'chave-de-leitura', 150);
+  assert.strictEqual(rP.status, 502);
+  assert.ok(/prazo/.test(rP.corpo.erro), 'erro nomeia o prazo: ' + rP.corpo.erro);
+  assert.ok(Date.now() - antes < 5000, 'respondeu pelo prazo curto do teste, não pendurou');
+
+  console.log('OK: rota de leitura — matriz completa + aquisição única concorrente + prazo que não pendura');
 })().catch(e => { console.error('FALHOU:', e.message); process.exit(1); });
