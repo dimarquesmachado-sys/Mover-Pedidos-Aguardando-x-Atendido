@@ -1,0 +1,124 @@
+'use strict';
+/* ROTA INTERNA DE LEITURA DE TOKEN — passo 2 do contrato de empresas (v4).
+   O Mover-Pedidos é o DONO ELEITO de todos os tokens; o Devoluções passa a LER o
+   vigente em vez de renovar (o refresh do ML é de uso único — dois renovadores é
+   corrida ativa). Contrato combinado entre os dois serviços, registrado em
+   contrato-empresas.json → passo_2_eleicao.mecanica:
+
+     GET /interno/token/:empresa/:integracao
+     Auth: TOKEN_LEITURA_KEY (chave DEDICADA — nunca a ADMIN_KEY geral)
+     → { access, expira_em, versao }
+
+   Decisões respondidas ao Devoluções (INSTRUCAO-5):
+   - :empresa aceita o id canônico ('ambtotal') E os aliases do contrato ('amb') —
+     normaliza pro canônico na resposta;
+   - empresa sem a integração (GOOD/tiktok) → 404, como eles preferiram — difícil
+     de confundir com token vazio;
+   - bling_nfe exposta desde o dia 1, como pediram;
+   - magalu/tiktok: 501 declarado até existir leitor (o dono_hoje já é só daqui —
+     não há corrida a matar nesses eixos, e rota sem consumidor é superfície à toa).
+   Sem TOKEN_LEITURA_KEY no ambiente a rota responde 503: nasce DESLIGADA. */
+const crypto = require('crypto');
+const CONTRATO = require('./contrato-empresas.json');
+
+const _fabricasRef = { map: null };
+function _fabricas() {
+  if (!_fabricasRef.map) {
+    _fabricasRef.map = {};
+    for (const id of Object.keys(CONTRATO.empresas)) {
+      _fabricasRef.map[id] = {
+        bling:     () => require('./' + id + '/tokenManager').garantirToken(),
+        ml:        () => require('./' + id + '/mlTokenManager').garantirTokenML(),
+        bling_nfe: () => require('./' + id + '/nfTokenManager').garantirTokenNF(),
+      };
+    }
+  }
+  return _fabricasRef.map;
+}
+
+function _norm(x) { return String(x || '').toLowerCase().trim(); }
+
+function canonicoDe(nome) {
+  const n = _norm(decodeURIComponent(String(nome || '')));
+  for (const [id, e] of Object.entries(CONTRATO.empresas)) {
+    if ((e.aliases || []).some(a => _norm(a) === n)) return id;
+  }
+  return null;
+}
+
+/* comparação em tempo constante — hash iguala os tamanhos antes do timingSafeEqual */
+function chaveConfere(informada, esperada) {
+  const h = (x) => crypto.createHash('sha256').update(String(x)).digest();
+  return crypto.timingSafeEqual(h(informada), h(esperada));
+}
+
+const INTEGRACOES_CONHECIDAS = (() => {
+  const s = new Set();
+  for (const e of Object.values(CONTRATO.empresas)) {
+    for (const k of Object.keys(e.dono_hoje || {})) if (!k.startsWith('_')) s.add(k);
+  }
+  return s;
+})();
+
+async function responder(caminho, chaveInformada) {
+  const KEY = process.env.TOKEN_LEITURA_KEY || '';
+  if (!KEY) return { status: 503, corpo: { ok: false, erro: 'rota desligada — configure TOKEN_LEITURA_KEY no serviço (chave dedicada de leitura, não a ADMIN_KEY)' } };
+  if (!chaveInformada || !chaveConfere(chaveInformada, KEY)) return { status: 401, corpo: { ok: false, erro: 'chave de leitura inválida' } };
+
+  const m = String(caminho || '').match(/^\/interno\/token\/([^/]+)\/([^/]+)$/);
+  if (!m) return { status: 400, corpo: { ok: false, erro: 'use GET /interno/token/:empresa/:integracao', exemplo: '/interno/token/ambtotal/ml' } };
+
+  const canonico = canonicoDe(m[1]);
+  if (!canonico) return { status: 404, corpo: { ok: false, erro: 'empresa fora do contrato: ' + decodeURIComponent(m[1]) } };
+
+  const integ = _norm(decodeURIComponent(m[2]));
+  const emp = CONTRATO.empresas[canonico];
+  if (!INTEGRACOES_CONHECIDAS.has(integ)) {
+    return { status: 400, corpo: { ok: false, erro: 'integração desconhecida: ' + integ, conhecidas: [...INTEGRACOES_CONHECIDAS].sort() } };
+  }
+  if (!Object.prototype.hasOwnProperty.call(emp.dono_hoje || {}, integ)) {
+    /* GOOD sem TikTok cai aqui: 404 como o Devoluções preferiu — nunca {access:null} */
+    return { status: 404, corpo: { ok: false, erro: canonico + ' não tem a integração "' + integ + '" (contrato)' } };
+  }
+
+  const fab = _fabricas()[canonico] && _fabricas()[canonico][integ];
+  if (!fab) return { status: 501, corpo: { ok: false, erro: 'integração "' + integ + '" ainda não exposta pela rota — entra quando houver leitor (hoje: bling, ml, bling_nfe)' } };
+
+  let access;
+  try { access = await fab(); }
+  catch (e) { return { status: 502, corpo: { ok: false, erro: 'aquisição do token falhou: ' + String(e.message || e).slice(0, 160) } }; }
+  if (!access) return { status: 502, corpo: { ok: false, erro: 'manager devolveu token vazio' } };
+
+  return {
+    status: 200,
+    corpo: {
+      ok: true,
+      empresa: canonico,
+      integracao: integ,
+      access,
+      /* os managers renovam por 401 e não expõem o instante de expiração; o contrato
+         de leitura combinado cobre isso (401 no marketplace → re-pedir a rota). O campo
+         passa a vir preenchido quando os managers expuserem o dado. */
+      expira_em: null,
+      versao: crypto.createHash('sha1').update(String(access)).digest('hex').slice(0, 10),
+    },
+  };
+}
+
+async function tratar(req, res, urlObj, json) {
+  const p = urlObj.pathname;
+  if (!p.startsWith('/interno/token/')) return false;
+  if (req.method !== 'GET') { json(res, 405, { ok: false, erro: 'só GET' }); return true; }
+  const chave = req.headers['x-token-leitura'] || urlObj.searchParams.get('k') || '';
+  const r = await responder(p, chave);
+  json(res, r.status, r.corpo);
+  return true;
+}
+
+module.exports = {
+  tratar,
+  _interno: {
+    responder, canonicoDe, chaveConfere,
+    _trocarFabricasParaTeste(m) { _fabricasRef.map = m; },
+  },
+};
