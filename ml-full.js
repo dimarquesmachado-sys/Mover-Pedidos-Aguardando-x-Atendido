@@ -834,14 +834,36 @@ async function tratar(req, res, urlObj, json) {
         const arr = (j && Array.isArray(j.data)) ? j.data : null;
         linha.status = r.status;
         linha.itens = arr ? arr.length : null;
-        if (arr && arr.length) linha.primeiro = { id: arr[0].id, numero: arr[0].numero, serie: arr[0].serie, situacao: arr[0].situacao };
+        /* Codex #351: itens>0 NÃO basta — o filtro pode ter sido ignorado (lição já
+           codificada no blingTemChave). O DETALHE confirma a chave antes de a situação
+           entrar em reveladoras. */
+        if (arr && arr.length && arr[0].id) {
+          await sleep(350);
+          const ac2 = new AbortController(); const t2 = setTimeout(() => ac2.abort(), 20000);
+          try {
+            const r2 = await _fetchRef.fn(BLING_BASE + '/nfe/' + arr[0].id, { headers: { Authorization: 'Bearer ' + tokenBling, Accept: 'application/json' }, signal: ac2.signal, timeout: 20000 });
+            const det = jsonSeguro(await r2.text());
+            const chaveDet = det && det.data && det.data.chaveAcesso ? String(det.data.chaveAcesso) : null;
+            linha.primeiro = { id: arr[0].id, numero: arr[0].numero, serie: arr[0].serie, situacao: det && det.data ? det.data.situacao : arr[0].situacao };
+            linha.chave_confirmada = chaveDet === chave;
+            if (chaveDet !== chave) linha.filtro_ignorado = true;
+          } finally { clearTimeout(t2); }
+        }
       } catch (e) { linha.erro = String(e.message || e).slice(0, 120); }
       resultados.push(linha);
     }
-    const reveladoras = resultados.filter(x => x.itens > 0).map(x => x.situacao);
+    /* Codex #351: falha de consulta é INCONCLUSIVO, nunca veredito — 429/timeout numa
+       das 12 podia levar o experimento único à conclusão errada. */
+    const falharam = resultados.filter(x => x.erro || x.status !== 200).length;
+    const reveladoras = resultados.filter(x => x.chave_confirmada === true).map(x => x.situacao);
     json(res, 200, {
       ok: true, versao: VERSAO, empresa, chave,
-      veredito: reveladoras.length ? 'a(s) situação(ões) ' + reveladoras.join(', ') + ' revela(m) esta chave' : 'nenhuma situação 1-12 revelou a chave — ou ela não está no Bling, ou o filtro combinado não funciona',
+      veredito: falharam
+        ? 'INCONCLUSIVO — ' + falharam + ' das 12 consultas falharam (429/timeout/etc); rode de novo'
+        : (reveladoras.length
+            ? 'a(s) situação(ões) ' + reveladoras.join(', ') + ' revela(m) esta chave (confirmada pelo detalhe)'
+            : 'as 12 consultas responderam e nenhuma revelou a chave — ou ela não está no Bling, ou o filtro combinado não funciona'),
+      consultas_falhas: falharam || undefined,
       resultados,
     });
     return true;
