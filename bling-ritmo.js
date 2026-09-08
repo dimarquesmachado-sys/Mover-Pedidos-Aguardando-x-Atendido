@@ -27,10 +27,21 @@
 const fs = require('fs');
 const path = require('path');
 
-const TETO_POR_SEG = 2.5;      /* conservador sob o 3/s do Bling — sobra pra imprevisto */
-const RESERVA_OPERACAO = 2.0;  /* 'fundo' só usa o que sobra da reserva: até 0.5/s */
+/* Codex #356: taxa fracionária com contagem inteira arredondava pra CIMA (len<2.5
+   admitia 3/s; len<0.5 admitia 1/s — o dobro do fundo e zero folga). A janela virou
+   2s e os tetos, INTEIROS EXATOS: 5/2s = 2.5/s, reserva 4/2s = 2/s, fundo 1/2s. */
+const JANELA_MS = 2000;
+const TETO_JANELA = 5;             /* 2.5/s reais */
+const TETO_FUNDO_JANELA = 1;       /* 0.5/s reais — nunca come a reserva da operação */
 const ESCADA_PAUSA_S = [15, 30, 60, 120, 300];
-const ARQ = path.join(__dirname, 'bling-ritmo-estado.json');
+/* Codex #356: 120k/dia também é da conta — sem checar, o porteiro deixava esgotar.
+   Fundo barra antes (reserva diária pro fim do dia ser da operação). */
+const TETO_DIA_OPERACAO = 110000;
+const TETO_DIA_FUNDO = 100000;
+/* Codex #356: o render.yaml monta disco persistente em /data — estado no diretório
+   da aplicação morria no deploy, contrariando a promessa de sobreviver a restart. */
+const DIR_ESTADO = process.env.BLING_RITMO_DIR || (fs.existsSync('/data') ? '/data' : __dirname);
+const ARQ = path.join(DIR_ESTADO, 'bling-ritmo-estado.json');
 
 const _contas = new Map(); /* conta → { fichas: [ts...], pausaAte: 0, degrau: 0, dia: 'aaaammdd', usadasDia: 0 } */
 const _agoraRef = { fn: () => Date.now() }; /* injetável no teste */
@@ -64,16 +75,21 @@ function permissao(conta, prioridade) {
   if (c.pausaAte > agora) {
     return { ok: false, pausa_s: Math.ceil((c.pausaAte - agora) / 1000), motivo: '429 recente na conta — pausa global (degrau ' + c.degrau + ')' };
   }
-  c.fichas = c.fichas.filter(ts => agora - ts < 1000);
-  const teto = prioridade === 'operacao' ? TETO_POR_SEG : (TETO_POR_SEG - RESERVA_OPERACAO);
+  const dia = _diaDe(agora);
+  if (c.dia !== dia) { c.dia = dia; c.usadasDia = 0; _persistir(); }
+  const tetoDia = prioridade === 'operacao' ? TETO_DIA_OPERACAO : TETO_DIA_FUNDO;
+  if (c.usadasDia >= tetoDia) {
+    const meiaNoite = new Date(agora); meiaNoite.setUTCHours(24, 0, 0, 0);
+    return { ok: false, pausa_s: Math.ceil((meiaNoite.getTime() - agora) / 1000), motivo: 'cota diária da conta (' + tetoDia + ') esgotada pra prioridade ' + prioridade };
+  }
+  c.fichas = c.fichas.filter(ts => agora - ts < JANELA_MS);
+  const teto = prioridade === 'operacao' ? TETO_JANELA : TETO_FUNDO_JANELA;
   if (c.fichas.length < teto) {
     c.fichas.push(agora);
-    const dia = _diaDe(agora);
-    if (c.dia !== dia) { c.dia = dia; c.usadasDia = 0; }
     c.usadasDia++;
     return { ok: true };
   }
-  const esperar = Math.max(50, (c.fichas[0] + 1000) - agora);
+  const esperar = Math.max(50, (c.fichas[0] + JANELA_MS) - agora);
   return { ok: false, esperar_ms: esperar };
 }
 
@@ -83,13 +99,20 @@ function aviso429(conta, retryAfterS) {
   const escada = ESCADA_PAUSA_S[Math.min(c.degrau, ESCADA_PAUSA_S.length - 1)];
   const pausaS = Number(retryAfterS) > 0 ? Math.max(Number(retryAfterS), 5) : escada;
   c.degrau = Math.min(c.degrau + 1, ESCADA_PAUSA_S.length - 1);
-  c.pausaAte = agora + pausaS * 1000;
+  /* Codex #356: aviso posterior NUNCA encurta pausa ativa — um Retry-After de 300s
+     seguido de um 429 sem header mantinha só o degrau curto e liberava cedo demais. */
+  c.pausaAte = Math.max(c.pausaAte, agora + pausaS * 1000);
   _persistir();
-  return { ok: true, pausa_s: pausaS, degrau: c.degrau };
+  return { ok: true, pausa_s: Math.ceil((c.pausaAte - agora) / 1000), degrau: c.degrau };
 }
 
 function avisoOk(conta) {
   const c = _conta(conta);
+  const agora = _agoraRef.fn();
+  /* Codex #356: sucesso ATRASADO (permissão antiga terminando fora de ordem) não pode
+     cancelar pausa recém-instalada — durante a pausa não saem permissões novas, então
+     sucesso chegando com pausa ativa é necessariamente de antes dela: ignorado. */
+  if (c.pausaAte > agora) return { ok: true, ignorado: true, motivo: 'pausa ativa — sucesso é de permissão anterior ao 429' };
   c.degrau = 0; c.pausaAte = 0;
   _persistir();
   return { ok: true };
@@ -100,8 +123,9 @@ function estado(conta) {
   const agora = _agoraRef.fn();
   return {
     ok: true, conta,
-    fichas_ultimo_seg: c.fichas.filter(ts => agora - ts < 1000).length,
-    teto_por_seg: TETO_POR_SEG, reserva_operacao: RESERVA_OPERACAO,
+    fichas_na_janela: c.fichas.filter(ts => agora - ts < JANELA_MS).length,
+    janela_ms: JANELA_MS, teto_janela: TETO_JANELA, teto_fundo_janela: TETO_FUNDO_JANELA,
+    teto_dia_operacao: TETO_DIA_OPERACAO, teto_dia_fundo: TETO_DIA_FUNDO,
     pausa_s: c.pausaAte > agora ? Math.ceil((c.pausaAte - agora) / 1000) : 0,
     degrau: c.degrau, usadas_no_dia: c.usadasDia, dia: c.dia || null,
   };
