@@ -80,5 +80,25 @@ _trocarFabricasParaTeste({
   assert.ok(/prazo/.test(rP.corpo.erro), 'erro nomeia o prazo: ' + rP.corpo.erro);
   assert.ok(Date.now() - antes < 5000, 'respondeu pelo prazo curto do teste, não pendurou');
 
-  console.log('OK: rota de leitura — matriz completa + aquisição única concorrente + prazo que não pendura');
+  // r2: entrada pendurada EXPIRA do mapa — a tentativa seguinte cria aquisição nova
+  it._interno._ttlEmVoo.ms = 120;
+  let tentativas = 0;
+  it._interno._trocarFabricasParaTeste({
+    good: { ml: () => { tentativas++; return new Promise(() => {}); } },
+  });
+  await responder('/interno/token/good/ml', 'chave-de-leitura', 50).catch(() => {});
+  await new Promise(r => setTimeout(r, 200)); // deixa o TTL da entrada vencer
+  await responder('/interno/token/good/ml', 'chave-de-leitura', 50).catch(() => {});
+  assert.strictEqual(tentativas, 2, 'após o TTL, a promessa morta sai do mapa e nasce aquisição NOVA (antes: 502 eterno)');
+  it._interno._ttlEmVoo.ms = 90000;
+
+  // r2: toda resposta da rota sai com no-store (intermediário nunca cacheia token)
+  const headers = {};
+  const resFake = { setHeader: (k, v) => { headers[k.toLowerCase()] = v; } };
+  const jsonFake = () => {};
+  await it.tratar({ method: 'GET', headers: {} }, resFake, { pathname: '/interno/token/amb/ml', searchParams: new URLSearchParams() }, jsonFake);
+  assert.ok(String(headers['cache-control']).includes('no-store'), 'Cache-Control: no-store presente');
+  assert.strictEqual(headers['vary'], 'x-token-leitura');
+
+  console.log('OK: rota de leitura — matriz completa, aquisição única, prazo, TTL do em-voo e no-store');
 })().catch(e => { console.error('FALHOU:', e.message); process.exit(1); });

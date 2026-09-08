@@ -31,11 +31,21 @@ const CONTRATO = require('./contrato-empresas.json');
    do chamador). Aquisição vira PROMESSA ÚNICA por (empresa, integração) com prazo
    próprio da rota; o refresh segue vivo em background e persiste o token novo. */
 const _emVoo = new Map();
+const _TTL_EM_VOO = { ms: 90000 };
 function _adquirirUnica(chave, fab) {
   let p = _emVoo.get(chave);
   if (!p) {
-    p = Promise.resolve().then(fab).finally(() => _emVoo.delete(chave));
+    p = Promise.resolve().then(fab);
     p.catch(() => {});
+    /* Codex #355 r2: promessa PENDURADA (validação sem timeout no manager) ficava no
+       mapa pra sempre — toda leitura futura coalescia num 502 eterno. A entrada tem
+       prazo de vida: estourou, sai do mapa e a próxima tentativa cria aquisição nova
+       (a velha, se acordar, só persiste token — e o lock central do manager impede
+       refresh concorrente entre a velha e a nova). */
+    const vida = setTimeout(() => { if (_emVoo.get(chave) === p) _emVoo.delete(chave); }, _TTL_EM_VOO.ms);
+    /* o finally cria promessa DERIVADA — sem catch próprio ela vira unhandled quando
+       a fábrica rejeita (o crash foi visto no teste antes deste catch existir) */
+    p.finally(() => { clearTimeout(vida); if (_emVoo.get(chave) === p) _emVoo.delete(chave); }).catch(() => {});
     _emVoo.set(chave, p);
   }
   return p;
@@ -134,6 +144,11 @@ async function responder(caminho, chaveInformada, prazoMs) {
 async function tratar(req, res, urlObj, json) {
   const p = urlObj.pathname;
   if (!p.startsWith('/interno/token/')) return false;
+  /* Codex #355 r2: intermediário que cacheia GET por heurística poderia REPLAY do
+     access pra requisição sem chave (o header custom não entra na cache key). Toda
+     resposta desta rota é no-store, e Vary declara o header por redundância. */
+  res.setHeader('Cache-Control', 'no-store, no-cache, private');
+  res.setHeader('Vary', 'x-token-leitura');
   if (req.method !== 'GET') { json(res, 405, { ok: false, erro: 'só GET' }); return true; }
   /* Codex #355 (P1): SÓ header — ?k= aqui iria pra log de proxy e URL copiada */
   if (urlObj.searchParams.get('k')) { json(res, 400, { ok: false, erro: 'credencial na URL não é aceita nesta rota — use o header x-token-leitura' }); return true; }
@@ -148,5 +163,6 @@ module.exports = {
   _interno: {
     responder, canonicoDe, chaveConfere,
     _trocarFabricasParaTeste(m) { _fabricasRef.map = m; },
+    _ttlEmVoo: _TTL_EM_VOO,
   },
 };
