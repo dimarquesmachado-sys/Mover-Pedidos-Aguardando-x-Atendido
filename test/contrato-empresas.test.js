@@ -17,12 +17,14 @@ const path = require('path');
 const contrato = require('../contrato-empresas.json');
 const EMPRESAS_ORIG = process.env.EMPRESAS;
 {
-  /* união com o DEFAULT da lib (os aliases que ESTE repo usa) — injetar aliases do
-     contrato que o repo não conhece ('ambtotal') fazia o envBling derivar env
-     inventada (AMBTOTAL_...) e o teste acusar divergência falsa; provado ao rodar. */
+  /* Codex #354 r2: a lista fixa de 3 congelava o embarque — no CI (sem EMPRESAS) a 4ª
+     empresa do contrato seria rejeitada mesmo com módulos prontos. A fonte dos aliases
+     que ESTE repo conhece é o COMPAT_BLING da própria lib (a 4ª ganha entrada lá ao
+     ser embarcada e entra aqui sozinha); injetar alias que o repo NÃO conhece
+     ('ambtotal') fazia o envBling derivar env inventada — provado ao rodar. */
   const atuais = String(EMPRESAS_ORIG || '').split(',').map(x => x.toLowerCase().trim()).filter(Boolean);
-  const padrao = ['girassol', 'good', 'amb'];
-  process.env.EMPRESAS = [...new Set([...padrao, ...atuais])].join(',');
+  const doRepo = Object.keys(require('../lib/empresas').COMPAT_BLING);
+  process.env.EMPRESAS = [...new Set([...doRepo, ...atuais])].join(',');
 }
 process.on('exit', () => { if (EMPRESAS_ORIG !== undefined) process.env.EMPRESAS = EMPRESAS_ORIG; else delete process.env.EMPRESAS; });
 
@@ -35,7 +37,12 @@ const SERVICO = 'mover-pedidos';
 assert.ok(contrato.servicos && Array.isArray(contrato.servicos.lista), 'v4+: campo servicos.lista existe');
 const SERVICOS_VALIDOS = new Set(contrato.servicos.lista);
 assert.ok(SERVICOS_VALIDOS.has('mover-pedidos'), 'este serviço consta em servicos.lista');
-assert.ok(contrato.servicos.repos && contrato.servicos.repos['mover-pedidos'], 'repo deste serviço nomeado no contrato');
+/* Codex #354 r2: TODO serviço da lista precisa de repo nomeado — serviço 'válido'
+   mas ilocalizável derrotaria o propósito da v4. */
+for (const svc of contrato.servicos.lista) {
+  const repo = contrato.servicos.repos && contrato.servicos.repos[svc];
+  assert.ok(typeof repo === 'string' && /^[\w.-]+\/[\w.-]+$/.test(repo), 'servicos.repos["' + svc + '"] precisa ser owner/repo — veio: ' + JSON.stringify(repo));
+}
 const es = contrato.empresas;
 
 /* Codex #353: chave de empresa DUPLICADA no JSON é engolida pelo parser (a última

@@ -149,7 +149,8 @@ try {
    do contrato remoto é conclusivo e derruba (guarda cega não pode ficar verde). */
 try {
   const saida = require('child_process').execFileSync(process.execPath, [path.join(RAIZ, 'scripts', 'teste-contrato-paridade-remota.js')], { stdio: 'pipe' }).toString().trim();
-  console.log('  ✓ ' + saida.split('\n').pop());
+  if (!saida) { falha('paridade remota terminou SEM veredito — saída vazia não é sucesso'); }
+  else console.log('  ✓ ' + saida.split('\n').pop());
 } catch (e) {
   falha('paridade remota do contrato VERMELHA: ' + String((e.stdout || '') + (e.stderr || '')).slice(-300));
 }
