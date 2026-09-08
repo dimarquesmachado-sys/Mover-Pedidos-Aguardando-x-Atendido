@@ -339,5 +339,18 @@ _trocarFetchParaTeste(async (url) => {
   bv = await blingTemChave('tb', CH_C, 1, 'saida');
   assert.ok(!bv.verificada && bv.teto === true, 'orçamento insuficiente pra 2ª lista adia, não conclui');
 
-  console.log('OK: motor fase 1 — visão completa: canceladas (situacao=2) e entradas (tipo=0) enxergadas; ausente exige as duas listas vazias');
+  // #352 r1 (P2): filtro ignorado na lista padrão NÃO encerra — cai pra canceladas e confirma
+  const CH_X = CHV(2);
+  _trocarFetchParaTeste(async (url) => {
+    if (url.includes('situacao=2') && url.includes(CH_X)) return { status: 200, text: async () => JSON.stringify({ data: [{ id: 'c9' }] }) };
+    if (url.includes('/nfe?chaveAcesso=' + CH_X)) return { status: 200, text: async () => JSON.stringify({ data: [{ id: 'errado' }] }) };
+    if (url.includes('/nfe/errado')) return { status: 200, text: async () => JSON.stringify({ data: { id: 'errado', chaveAcesso: '9'.repeat(44) } }) };
+    if (url.includes('/nfe/c9')) return { status: 200, text: async () => JSON.stringify({ data: { id: 'c9', chaveAcesso: CH_X, situacao: 2 } }) };
+    throw new Error('não previsto: ' + url);
+  });
+  bv = await blingTemChave('tb', CH_X, 60, 'saida');
+  assert.ok(bv.verificada && bv.esta_no_bling && bv.cancelada === true, 'mismatch na padrão cai pra canceladas e confirma');
+  assert.strictEqual(bv.chamadas, 4, 'caminho completo: 4 chamadas contadas');
+
+  console.log('OK: motor fase 1 — visão completa: canceladas (situacao=2) e entradas (tipo=0); mismatch cai pra canceladas; ausente exige as duas listas vazias');
 })().catch(e => { console.error('FALHOU (motor):', e.message); process.exit(1); });

@@ -178,18 +178,15 @@ const SITUACAO_CANCELADA_BLING = 2;
    visto sendo IGNORADO — então lista vazia absolve, lista com item só condena
    depois que o DETALHE confirmar a chave. Qualquer outra coisa: verificada:false. */
 async function blingTemChave(tokenBling, chave, orcamentoRestante, tipo) {
-  /* Conserto da CEGUEIRA (provada em 07-08/09 com 7 falso-ausentes): a lista padrão não
-     devolve CANCELADAS (segunda tentativa com situacao=2) nem, pela evidência das
-     entradas 8150/8086 presentes-e-invisíveis, notas de ENTRADA (tipo=0 na query quando
-     o tpNF do XML é entrada — o motor sempre o tem). Ausente conclusivo agora exige as
-     DUAS listas vazias. */
-  /* Codex #349 (P2 ×2): o ritmo vale ANTES de CADA GET (lista E detalhe — senão lote
-     cheio de presentes dispara ~2 req/350ms e os 429 viram nao_conferidas), e o teto é
-     de CHAMADAS REAIS: `chamadas` volta na resposta e o detalhe nem começa sem orçamento
-     pra ele. */
-  /* Codex #349 r2: `feitas` conta no INSTANTE em que cada GET começa — assim até a
-     exceção (timeout no corpo do detalhe, p.ex.) devolve a contagem verdadeira e o
-     teto nunca é ultrapassado por chamada fantasma. */
+  /* Conserto da CEGUEIRA (provada em 07-08/09 com 7 falso-ausentes) + #352 r1:
+     a lista padrão não devolve CANCELADAS (situacao=2, cravado pela sonda) nem,
+     pela evidência das entradas 8150/8086, notas de ENTRADA (tipo=0 quando o
+     tpNF do XML é entrada). Sequência: lista padrão → se vazia OU se o candidato
+     não confirmar a chave no detalhe (filtro ignorado), lista de canceladas →
+     detalhe confirma. Ausente conclusivo exige as DUAS listas vazias. Cada GET
+     conta em `feitas` NO INSTANTE em que começa; teto no meio adia com flag,
+     nunca conclui. Cancelada confirmada custa até 4 chamadas — por isso o teto
+     mínimo público subiu (rota). */
   let feitas = 0;
   const sufTipo = tipo === 'entrada' ? '&tipo=0' : '';
   const listar = async (extra) => {
@@ -201,51 +198,60 @@ async function blingTemChave(tokenBling, chave, orcamentoRestante, tipo) {
       return { r, corpo: await r.text() };
     } finally { clearTimeout(t); }
   };
-  try {
-    let { r, corpo } = await listar('');
-    if (!r || (r.status !== 200)) return { verificada: false, erro: 'HTTP ' + (r ? r.status : 0) + ' na lista', chamadas: feitas };
-    const j = jsonSeguro(corpo);
-    const arr = (j && Array.isArray(j.data)) ? j.data : null;
-    if (!arr) return { verificada: false, erro: 'lista ilegível', chamadas: feitas };
-    let cancelada = false;
-    if (!arr.length) {
-      if (Number(orcamentoRestante) - feitas < 1) return { verificada: false, teto: true, erro: 'teto no meio — lista de canceladas adiada', chamadas: feitas };
-      const seg = await listar('&situacao=' + SITUACAO_CANCELADA_BLING);
-      if (!seg.r || seg.r.status !== 200) return { verificada: false, erro: 'HTTP ' + (seg.r ? seg.r.status : 0) + ' na lista de canceladas', chamadas: feitas };
-      const j2 = jsonSeguro(seg.corpo);
-      const arr2 = (j2 && Array.isArray(j2.data)) ? j2.data : null;
-      if (!arr2) return { verificada: false, erro: 'lista de canceladas ilegível', chamadas: feitas };
-      if (!arr2.length) return { verificada: true, esta_no_bling: false, chamadas: feitas };
-      arr.push(...arr2);
-      cancelada = true;
-    }
-    /* Codex #349 r2: chave é ÚNICA — mais de 1 item já é filtro ignorado; olhar só o
-       arr[0] deixava a nota certa presa em nao_conferida pra sempre quando vinha em 2º */
-    if (arr.length > 1) return { verificada: false, erro: 'lista com ' + arr.length + ' itens pra chave única (filtro ignorado?)', chamadas: feitas };
-    const id = arr[0] && arr[0].id;
-    if (!id) return { verificada: false, erro: 'item sem id na lista', chamadas: feitas };
-    if (Number(orcamentoRestante) - feitas < 1) return { verificada: false, teto: true, erro: 'teto no meio — lista feita, detalhe adiado pra próxima rodada', chamadas: feitas };
+  const detalhar = async (id) => {
     await sleep(350);
     feitas++;
-    const ac2 = new AbortController(); const t2 = setTimeout(() => ac2.abort(), 20000);
-    let r2, corpo2;
+    const ac = new AbortController(); const t = setTimeout(() => ac.abort(), 20000);
     try {
-      r2 = await _fetchRef.fn(BLING_BASE + '/nfe/' + id, { headers: { Authorization: 'Bearer ' + tokenBling, Accept: 'application/json' }, signal: ac2.signal, timeout: 20000 });
-      corpo2 = await r2.text();
-    } finally { clearTimeout(t2); }
-    if (!r2 || r2.status !== 200) return { verificada: false, erro: 'HTTP ' + (r2 ? r2.status : 0) + ' no detalhe', chamadas: feitas };
-    const det = jsonSeguro(corpo2);
-    const chaveDet = det && det.data && det.data.chaveAcesso ? String(det.data.chaveAcesso) : null;
-    if (chaveDet === chave) return { verificada: true, esta_no_bling: true, cancelada: cancelada || undefined, id, chamadas: feitas };
-    return { verificada: false, erro: 'detalhe com outra chave (filtro ignorado?)', chamadas: feitas };
+      const r = await _fetchRef.fn(BLING_BASE + '/nfe/' + id, { headers: { Authorization: 'Bearer ' + tokenBling, Accept: 'application/json' }, signal: ac.signal, timeout: 20000 });
+      return { r, corpo: await r.text() };
+    } finally { clearTimeout(t); }
+  };
+  const lerLista = (res, rotulo) => {
+    if (!res.r || res.r.status !== 200) return { erro: 'HTTP ' + (res.r ? res.r.status : 0) + ' na ' + rotulo };
+    const j = jsonSeguro(res.corpo);
+    const arr = (j && Array.isArray(j.data)) ? j.data : null;
+    if (!arr) return { erro: rotulo + ' ilegível' };
+    if (arr.length > 1) return { erro: rotulo + ' com ' + arr.length + ' itens pra chave única (filtro ignorado?)' };
+    return { arr };
+  };
+  try {
+    const l1 = lerLista(await listar(''), 'lista');
+    if (l1.erro) return { verificada: false, erro: l1.erro, chamadas: feitas };
+
+    let candidato = l1.arr.length ? l1.arr[0] : null;
+
+    if (candidato && candidato.id) {
+      if (Number(orcamentoRestante) - feitas < 1) return { verificada: false, teto: true, erro: 'teto no meio — lista feita, detalhe adiado pra próxima rodada', chamadas: feitas };
+      const d1 = await detalhar(candidato.id);
+      if (!d1.r || d1.r.status !== 200) return { verificada: false, erro: 'HTTP ' + (d1.r ? d1.r.status : 0) + ' no detalhe', chamadas: feitas };
+      const det1 = jsonSeguro(d1.corpo);
+      if (!det1 || !det1.data) return { verificada: false, erro: 'detalhe 200 ilegível', chamadas: feitas };
+      if (String(det1.data.chaveAcesso || '') === chave) return { verificada: true, esta_no_bling: true, id: candidato.id, chamadas: feitas };
+      /* #352 r1 (P2): candidato ERRADO (filtro ignorado) não encerra — a cancelada
+         ainda pode existir; cai pra segunda lista em vez de inconcluir pra sempre. */
+    }
+
+    if (Number(orcamentoRestante) - feitas < 1) return { verificada: false, teto: true, erro: 'teto no meio — lista de canceladas adiada', chamadas: feitas };
+    const l2 = lerLista(await listar('&situacao=' + SITUACAO_CANCELADA_BLING), 'lista de canceladas');
+    if (l2.erro) return { verificada: false, erro: l2.erro, chamadas: feitas };
+    if (!l2.arr.length) {
+      return { verificada: true, esta_no_bling: false, chamadas: feitas };
+    }
+    const cand2 = l2.arr[0];
+    if (!cand2 || !cand2.id) return { verificada: false, erro: 'item sem id na lista de canceladas', chamadas: feitas };
+    if (Number(orcamentoRestante) - feitas < 1) return { verificada: false, teto: true, erro: 'teto no meio — detalhe da cancelada adiado', chamadas: feitas };
+    const d2 = await detalhar(cand2.id);
+    if (!d2.r || d2.r.status !== 200) return { verificada: false, erro: 'HTTP ' + (d2.r ? d2.r.status : 0) + ' no detalhe da cancelada', chamadas: feitas };
+    const det2 = jsonSeguro(d2.corpo);
+    if (!det2 || !det2.data) return { verificada: false, erro: 'detalhe da cancelada 200 ilegível', chamadas: feitas };
+    if (String(det2.data.chaveAcesso || '') === chave) return { verificada: true, esta_no_bling: true, cancelada: true, id: cand2.id, chamadas: feitas };
+    return { verificada: false, erro: 'detalhes com outra chave nas duas listas (filtro ignorado?)', chamadas: feitas };
   } catch (e) {
     return { verificada: false, erro: String(e.message || e).slice(0, 160), chamadas: feitas || 1 };
   }
 }
 
-/* A varredura da fase 1 — manual, com teto de cota e matriz explícita:
-   ignorada_simbolica · ja_baixada · ja_no_bling · pendente_nova · nao_conferida
-   (erro/teto — NUNCA conclui) · anomalia (chave do nome ≠ chave do XML). */
 async function varrerLote(empresa, de, ate, teto, deps) {
   if (_varrendo.has(empresa)) return { ok: false, resultado: 'ja_ha_varredura_em_andamento', detalhe: 'espere a varredura atual da ' + empresa + ' terminar (a resposta dela traz o resultado)' };
   _varrendo.add(empresa);
@@ -770,10 +776,10 @@ async function tratar(req, res, urlObj, json) {
       json(res, 400, { ok: false, erro: 'janela inválida — no máximo 7 dias corridos, inclusive as pontas (cota do Bling)' });
       return true;
     }
-    /* Codex #350 r3 (P1): teto=1 pina o cursor — a 1ª chave presente gasta a única
-       chamada na lista, o detalhe fica adiado, primeiroCorte=0 e toda rodada recomeça
-       na mesma chave inconcluível. Confirmar presença custa 2; o mínimo é 2. */
-    const teto = Math.max(2, Math.min(200, Number(urlObj.searchParams.get('teto')) || 60));
+    /* Codex #350 r3 + #352 r1: teto pequeno pina o cursor numa chave inconcluível —
+       e a CANCELADA confirmada custa até 4 chamadas (filtro-ignorado no caminho:
+       lista + detalhe errado + lista de canceladas + detalhe). Mínimo público: 4. */
+    const teto = Math.max(4, Math.min(200, Number(urlObj.searchParams.get('teto')) || 60));
     /* Codex #350 r1: o token ML entra DENTRO do lock (o refresh do ML é de uso único —
        duas aquisições simultâneas podiam corromper a renovação antes mesmo da trava);
        e a recusa de concorrência sai como 409 de verdade, não 200. */
