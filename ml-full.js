@@ -805,6 +805,48 @@ async function tratar(req, res, urlObj, json) {
     return true;
   }
 
+  /* SONDA-SITUAÇÃO (07/09): a lista GET /nfe?chaveAcesso= NÃO enxerga canceladas
+     (provado com as 3795/3858, canceladas no Bling e invisíveis pra busca) — e a doc
+     pública não publica o enum de situacao. Esta sonda varre situacao=1..12 com uma
+     chave de cancelada CONHECIDA e revela qual código a torna visível; com o código
+     na mão, o blingTemChave ganha a segunda consulta e canceladas presentes deixam
+     de virar falso-ausente. 12 GETs com o ritmo da casa, uma vez, só leitura. */
+  if (p === '/ml-full/sonda-situacao') {
+    const empresa = String(urlObj.searchParams.get('empresa') || 'amb').toLowerCase().trim();
+    if (!MANAGERS[empresa]) { json(res, 400, { ok: false, erro: 'empresa deve ser amb, girassol ou good' }); return true; }
+    const chave = String(urlObj.searchParams.get('chave') || '').trim();
+    if (!/^\d{44}$/.test(chave)) { json(res, 400, { ok: false, erro: 'passe &chave= com os 44 dígitos de uma nota que você SABE estar cancelada no Bling' }); return true; }
+    let tokenBling;
+    try { tokenBling = await garantirTokenBling(empresa); }
+    catch (e) { json(res, 200, { ok: false, erro: String(e.message || e) }); return true; }
+    const resultados = [];
+    for (let sit = 1; sit <= 12; sit++) {
+      await sleep(350);
+      let linha = { situacao: sit };
+      try {
+        const ac = new AbortController(); const t = setTimeout(() => ac.abort(), 20000);
+        let r, corpo;
+        try {
+          r = await _fetchRef.fn(BLING_BASE + '/nfe?chaveAcesso=' + chave + '&situacao=' + sit, { headers: { Authorization: 'Bearer ' + tokenBling, Accept: 'application/json' }, signal: ac.signal, timeout: 20000 });
+          corpo = await r.text();
+        } finally { clearTimeout(t); }
+        const j = jsonSeguro(corpo);
+        const arr = (j && Array.isArray(j.data)) ? j.data : null;
+        linha.status = r.status;
+        linha.itens = arr ? arr.length : null;
+        if (arr && arr.length) linha.primeiro = { id: arr[0].id, numero: arr[0].numero, serie: arr[0].serie, situacao: arr[0].situacao };
+      } catch (e) { linha.erro = String(e.message || e).slice(0, 120); }
+      resultados.push(linha);
+    }
+    const reveladoras = resultados.filter(x => x.itens > 0).map(x => x.situacao);
+    json(res, 200, {
+      ok: true, versao: VERSAO, empresa, chave,
+      veredito: reveladoras.length ? 'a(s) situação(ões) ' + reveladoras.join(', ') + ' revela(m) esta chave' : 'nenhuma situação 1-12 revelou a chave — ou ela não está no Bling, ou o filtro combinado não funciona',
+      resultados,
+    });
+    return true;
+  }
+
   if (p === '/ml-full/zip') {
     const empresa = String(urlObj.searchParams.get('empresa') || 'amb').toLowerCase().trim();
     if (!MANAGERS[empresa]) { json(res, 400, { ok: false, erro: 'empresa deve ser amb, girassol ou good' }); return true; }
