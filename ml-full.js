@@ -805,6 +805,104 @@ async function tratar(req, res, urlObj, json) {
     return true;
   }
 
+  /* SONDA-SITUAÇÃO (07/09): a lista GET /nfe?chaveAcesso= NÃO enxerga canceladas
+     (provado com as 3795/3858, canceladas no Bling e invisíveis pra busca) — e a doc
+     pública não publica o enum de situacao. Esta sonda varre situacao=1..12 com uma
+     chave de cancelada CONHECIDA e revela qual código a torna visível; com o código
+     na mão, o blingTemChave ganha a segunda consulta e canceladas presentes deixam
+     de virar falso-ausente. 12 GETs com o ritmo da casa, uma vez, só leitura. */
+  if (p === '/ml-full/sonda-situacao') {
+    const empresa = String(urlObj.searchParams.get('empresa') || 'amb').toLowerCase().trim();
+    if (!MANAGERS[empresa]) { json(res, 400, { ok: false, erro: 'empresa deve ser amb, girassol ou good' }); return true; }
+    const chave = String(urlObj.searchParams.get('chave') || '').trim();
+    if (!/^\d{44}$/.test(chave)) { json(res, 400, { ok: false, erro: 'passe &chave= com os 44 dígitos de uma nota que você SABE estar cancelada no Bling' }); return true; }
+    let tokenBling;
+    try { tokenBling = await garantirTokenBling(empresa); }
+    catch (e) { json(res, 200, { ok: false, erro: String(e.message || e) }); return true; }
+    const resultados = [];
+    for (let sit = 1; sit <= 12; sit++) {
+      await sleep(350);
+      let linha = { situacao: sit };
+      try {
+        const ac = new AbortController(); const t = setTimeout(() => ac.abort(), 20000);
+        let r, corpo;
+        try {
+          r = await _fetchRef.fn(BLING_BASE + '/nfe?chaveAcesso=' + chave + '&situacao=' + sit, { headers: { Authorization: 'Bearer ' + tokenBling, Accept: 'application/json' }, signal: ac.signal, timeout: 20000 });
+          corpo = await r.text();
+        } finally { clearTimeout(t); }
+        const j = jsonSeguro(corpo);
+        const arr = (j && Array.isArray(j.data)) ? j.data : null;
+        linha.status = r.status;
+        linha.itens = arr ? arr.length : null;
+        /* Codex #351 r3: 200 com corpo ilegível não é sucesso — sem isto, contribuía
+           pro veredito negativo conclusivo. */
+        if (r.status === 200 && arr === null) linha.erro = 'corpo 200 ilegível';
+        /* Codex #351 r2: TODOS os candidatos (até 3) são inspecionados — a nota certa pode
+           vir em arr[1] com o filtro ignorado; falha do DETALHE conta como falha da linha;
+           e a evidência definitiva do enum é o situacao DO DETALHE da nota confirmada
+           (o filtro situacao também pode ser ignorado — chave batendo com sit errado não
+           revela nada, mas ENTREGA a situação real, que é a resposta que queremos). */
+        if (arr && arr.length) {
+          for (const cand of arr.slice(0, 3)) {
+            if (!cand || !cand.id) continue;
+            await sleep(350);
+            const ac2 = new AbortController(); const t2 = setTimeout(() => ac2.abort(), 20000);
+            try {
+              const r2 = await _fetchRef.fn(BLING_BASE + '/nfe/' + cand.id, { headers: { Authorization: 'Bearer ' + tokenBling, Accept: 'application/json' }, signal: ac2.signal, timeout: 20000 });
+              const corpo2 = await r2.text();
+              if (!r2 || r2.status !== 200) { linha.detalhe_falhou = 'HTTP ' + (r2 ? r2.status : 0); continue; }
+              const det = jsonSeguro(corpo2);
+              /* Codex #351 r4: detalhe 200 ILEGÍVEL é falha, não mismatch — senão viraria
+                 negativo conclusivo com o detalhe quebrado. */
+              if (!det || !det.data) { linha.detalhe_falhou = 'detalhe 200 ilegível'; continue; }
+              const chaveDet = det.data.chaveAcesso ? String(det.data.chaveAcesso) : null;
+              if (chaveDet === chave) {
+                linha.chave_confirmada = true;
+                linha.situacao_da_nota = det.data.situacao;
+                linha.primeiro = { id: cand.id, numero: det.data.numero, serie: det.data.serie, situacao: det.data.situacao };
+                break;
+              }
+            } catch (e) { linha.detalhe_falhou = String(e.message || e).slice(0, 80); } finally { clearTimeout(t2); }
+          }
+          if (!linha.chave_confirmada && !linha.detalhe_falhou) {
+            /* Codex #351 r3: com mais de 3 candidatos, a chave pode estar além do corte —
+               a linha vira INCONCLUSIVA (conta como falha), nunca negativo conclusivo. */
+            if (arr.length > 3) linha.inconclusiva = 'lista com ' + arr.length + ' itens, só 3 inspecionados';
+            else linha.filtro_ignorado = true;
+          }
+        }
+      } catch (e) { linha.erro = String(e.message || e).slice(0, 120); }
+      resultados.push(linha);
+    }
+    /* Codex #351 r2 — precedência epistemológica: positivo CONFIRMADO vale mesmo com
+       falhas alheias (falha só impede o veredito NEGATIVO); reveladora exige o situacao
+       do detalhe casando com o sit pedido; e a situação REAL da nota (do detalhe) sai
+       na resposta ainda que nenhum filtro tenha funcionado — é ela a resposta final. */
+    const falharam = resultados.filter(x => x.erro || x.status !== 200 || x.detalhe_falhou || x.inconclusiva).length;
+    const reveladoras = resultados.filter(x => x.chave_confirmada === true && String(x.situacao_da_nota) === String(x.situacao)).map(x => x.situacao);
+    const confirmadaQualquer = resultados.find(x => x.chave_confirmada === true);
+    const situacaoReal = confirmadaQualquer ? confirmadaQualquer.situacao_da_nota : null;
+    let veredito;
+    if (reveladoras.length) {
+      veredito = 'a(s) situação(ões) ' + reveladoras.join(', ') + ' revela(m) esta chave (detalhe confirmou chave E situação)'
+        + (falharam ? ' — ' + falharam + ' outras consultas falharam, sem afetar o positivo' : '');
+    } else if (situacaoReal != null) {
+      veredito = 'a nota ESTÁ no Bling com situacao=' + situacaoReal + ' (detalhe confirmou a chave), mas nenhum filtro situacao pedido casou — o filtro parece ignorado; use situacao=' + situacaoReal + ' no conserto';
+    } else if (falharam) {
+      veredito = 'INCONCLUSIVO — ' + falharam + ' das consultas falharam (429/timeout/detalhe); rode de novo';
+    } else {
+      veredito = 'as 12 consultas e detalhes responderam e nenhuma revelou a chave — ou ela não está no Bling, ou o filtro combinado não funciona';
+    }
+    json(res, 200, {
+      ok: true, versao: VERSAO, empresa, chave,
+      veredito,
+      situacao_real_da_nota: situacaoReal != null ? situacaoReal : undefined,
+      consultas_falhas: falharam || undefined,
+      resultados,
+    });
+    return true;
+  }
+
   if (p === '/ml-full/zip') {
     const empresa = String(urlObj.searchParams.get('empresa') || 'amb').toLowerCase().trim();
     if (!MANAGERS[empresa]) { json(res, 400, { ok: false, erro: 'empresa deve ser amb, girassol ou good' }); return true; }
