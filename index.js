@@ -356,7 +356,7 @@ const server = http.createServer(async (req, res) => {
 
   // ── LEITURA DE TOKEN (08/09) — passo 2 do contrato de empresas ────────────────
   // O Devoluções LÊ o token vigente aqui em vez de renovar (dono eleito: este serviço;
-  // o refresh do ML é de uso único). Chave PRÓPRIA (TOKEN_LEITURA_KEY), nunca a
+  // o refresh do ML é de uso único). Chave PRÓPRIA (ADMIN_TOKEN_LEITURA_KEY), nunca a
   // ADMIN_KEY — e sem a env a rota nasce desligada (503). Contrato e decisões:
   // contrato-empresas.json → passo_2_eleicao.mecanica e interno-token.js.
   if (path.startsWith('/interno/token/')) {

@@ -7,7 +7,7 @@
    versão nova — o contrato desta árvore ainda é o anterior, de propósito:
 
      GET /interno/token/:empresa/:integracao
-     Auth: TOKEN_LEITURA_KEY SÓ pelo header x-token-leitura (Codex #355: credencial
+     Auth: ADMIN_TOKEN_LEITURA_KEY SÓ pelo header x-token-leitura (Codex #355: credencial
      em querystring fica em log de proxy/acesso/trace e em URL copiada — pra uma
      rota que entrega SEGREDOS vivos, não existe forma tolerável na URL)
      → { access, expira_em, versao }
@@ -20,7 +20,7 @@
    - bling_nfe exposta desde o dia 1, como pediram;
    - magalu/tiktok: 501 declarado até existir leitor (o dono_hoje já é só daqui —
      não há corrida a matar nesses eixos, e rota sem consumidor é superfície à toa).
-   Sem TOKEN_LEITURA_KEY no ambiente a rota responde 503: nasce DESLIGADA. */
+   Sem ADMIN_TOKEN_LEITURA_KEY no ambiente a rota responde 503: nasce DESLIGADA. */
 const crypto = require('crypto');
 const CONTRATO = require('./contrato-empresas.json');
 
@@ -97,8 +97,8 @@ const INTEGRACOES_CONHECIDAS = (() => {
 })();
 
 async function responder(caminho, chaveInformada, prazoMs) {
-  const KEY = process.env.TOKEN_LEITURA_KEY || '';
-  if (!KEY) return { status: 503, corpo: { ok: false, erro: 'rota desligada — configure TOKEN_LEITURA_KEY no serviço (chave dedicada de leitura, não a ADMIN_KEY)' } };
+  const KEY = process.env.ADMIN_TOKEN_LEITURA_KEY || '';
+  if (!KEY) return { status: 503, corpo: { ok: false, erro: 'rota desligada — configure ADMIN_TOKEN_LEITURA_KEY no serviço (chave dedicada de leitura, não a ADMIN_KEY)' } };
   if (!chaveInformada || !chaveConfere(chaveInformada, KEY)) return { status: 401, corpo: { ok: false, erro: 'chave de leitura inválida' } };
 
   const m = String(caminho || '').match(/^\/interno\/token\/([^/]+)\/([^/]+)$/);

@@ -21,11 +21,11 @@ _trocarFabricasParaTeste({
 });
 
 (async () => {
-  delete process.env.TOKEN_LEITURA_KEY;
+  delete process.env.ADMIN_TOKEN_LEITURA_KEY;
   let r = await responder('/interno/token/amb/ml', 'qualquer');
   assert.strictEqual(r.status, 503, 'sem env a rota nasce DESLIGADA');
 
-  process.env.TOKEN_LEITURA_KEY = 'chave-de-leitura';
+  process.env.ADMIN_TOKEN_LEITURA_KEY = 'chave-de-leitura';
   r = await responder('/interno/token/amb/ml', 'errada');
   assert.strictEqual(r.status, 401);
 
