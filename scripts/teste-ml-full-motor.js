@@ -276,5 +276,30 @@ _trocarFetchParaTeste(async (url) => {
   assert.ok(!mf._interno.listarArquivos('amb', 'saida').some(x => x.arquivo.includes(chC)), 'cópia tipada quarentenada');
   assert.ok(!mf._interno.listarArquivos('amb', null).some(x => x.arquivo.includes('amb-nota-117')), 'cópia da raiz TAMBÉM quarentenada');
 
-  console.log('OK: motor fase 1 — cursor contíguo (exemplo do Codex), quarentena de todas as cópias, cancelada validada pelo XML');
+  // #350 r3 (P1): aquisição de token ML é promessa ÚNICA — 2 chamadores concorrentes,
+  // 1 execução do manager (nunca dois refresh de uso único em voo)
+  let execucoes = 0;
+  mf._interno._trocarManagersMLParaTeste({ amb: () => ({ garantirTokenML: async () => { execucoes++; await new Promise(r => setTimeout(r, 60)); return 'tk-unico'; } }) });
+  const [t1, t2] = await Promise.all([mf._interno.garantirToken('amb'), mf._interno.garantirToken('amb')]);
+  assert.strictEqual(execucoes, 1, 'dois chamadores concorrentes, UMA aquisição');
+  assert.ok(t1 === 'tk-unico' && t2 === 'tk-unico');
+
+  // #350 r3 (P1): cursor tem identidade de JANELA — varrer outra data não apaga o progresso
+  mf._interno._limparCacheConfirmadasParaTeste();
+  fs.rmSync(process.env.ML_FULL_DIR, { recursive: true, force: true });
+  fs.mkdirSync(process.env.ML_FULL_DIR, { recursive: true });
+  _trocarFetchParaTeste(async (url) => {
+    if (url.includes('period/stream')) return { status: 200, buffer: async () => z.toBuffer(), text: async () => '' };
+    if (url.includes('/users/me')) return { status: 200, text: async () => JSON.stringify({ id: 999 }) };
+    if (url.includes('/nfe?chaveAcesso=')) return { status: 200, text: async () => JSON.stringify({ data: [] }) };
+    throw new Error('não previsto: ' + url);
+  });
+  const vJ = new Set();
+  const rj1 = await varrerLote('amb', '20260901', '20260901', 2, { tokenML: 'tk', tokenBling: 'tb' });
+  rj1.novas.forEach(n => vJ.add(n.chave));
+  await varrerLote('amb', '20260902', '20260902', 2, { tokenML: 'tk', tokenBling: 'tb' }); // OUTRA janela no meio
+  const rj2 = await varrerLote('amb', '20260901', '20260901', 2, { tokenML: 'tk', tokenBling: 'tb' });
+  for (const n of rj2.novas) { assert.ok(!vJ.has(n.chave), 'janela intercalada não reseta o cursor da primeira'); vJ.add(n.chave); }
+
+  console.log('OK: motor fase 1 — aquisição única de token, cursor por janela, tudo verde');
 })().catch(e => { console.error('FALHOU (motor):', e.message); process.exit(1); });

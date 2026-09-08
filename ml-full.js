@@ -46,11 +46,30 @@ const _fetchRef = { fn: require('node-fetch') };
 
 /* empresa como PARÂMETRO desde o nascimento — os três managers têm o mesmo contrato
    (garantirTokenML() → access_token), conferido nos exports antes de escrever isto */
-const MANAGERS = {
+const _mlManagersRef = { map: {
   amb:      () => require('./ambtotal/mlTokenManager'),
   girassol: () => require('./girassol/mlTokenManager'),
   good:     () => require('./good/mlTokenManager'),
-};
+} };
+const MANAGERS = new Proxy({}, { get: (_, k) => _mlManagersRef.map[k], has: (_, k) => k in _mlManagersRef.map });
+
+/* Codex #350 r3 (P1): o comPrazo estoura, o refresh de USO ÚNICO segue em background
+   por design (#344) — e o lock da varredura solta no finally: outra varredura podia
+   entrar e disparar um SEGUNDO refresh concorrente, queimando o token. A aquisição
+   agora é uma PROMESSA ÚNICA por empresa: todo chamador espera a mesma (cada um com
+   o próprio prazo); nunca há dois garantirTokenML em voo pra mesma empresa. */
+const _tokenMLEmVoo = new Map();
+function _aquisicaoTokenML(empresa) {
+  let p = _tokenMLEmVoo.get(empresa);
+  if (!p) {
+    const mk = _mlManagersRef.map[empresa];
+    if (!mk) return Promise.reject(new Error('empresa desconhecida: ' + empresa));
+    p = Promise.resolve().then(() => mk().garantirTokenML()).finally(() => _tokenMLEmVoo.delete(empresa));
+    p.catch(() => {});
+    _tokenMLEmVoo.set(empresa, p);
+  }
+  return p;
+}
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
@@ -256,14 +275,16 @@ async function _varrerLoteInterno(empresa, de, ate, teto, deps) {
     chavesDisco.get(ch).push(a.caminho);
   }
   let arquivadas = 0;
+  /* Codex #350 r3 (P2): rename que falha não pode sumir — o chamador reportaria
+     arquivada/quarentenada com a cópia ainda sendo servida pelo /zip. */
   const moverTodas = (caminhos, subpasta) => {
     const dest = path.join(DIR, subpasta);
     fs.mkdirSync(dest, { recursive: true });
-    let movidos = 0;
+    let movidos = 0, falhas = 0;
     for (const cam of caminhos) {
-      try { fs.renameSync(cam, path.join(dest, path.basename(cam))); movidos++; } catch (e) {}
+      try { fs.renameSync(cam, path.join(dest, path.basename(cam))); movidos++; } catch (e) { falhas++; }
     }
-    return movidos;
+    return { movidos, falhas };
   };
 
   const candidatas = [];
@@ -285,8 +306,9 @@ async function _varrerLoteInterno(empresa, de, ate, teto, deps) {
          cópias vão pra quarentena canceladas/ (r2: inclusive raiz+tipada da mesma chave). */
       const caminhosCanc = chavesDisco.get(c.chave);
       if (caminhosCanc && caminhosCanc.length) {
-        quarentenadas += moverTodas(caminhosCanc, 'canceladas') ? 1 : 0;
-        chavesDisco.delete(c.chave);
+        const mv = moverTodas(caminhosCanc, 'canceladas');
+        if (!mv.falhas) { quarentenadas++; chavesDisco.delete(c.chave); }
+        else anomalias.push({ chave: c.chave, erro: 'quarentena parcial: ' + mv.falhas + ' cópia(s) não movida(s) — a chave segue no ZIP até a próxima rodada' });
       }
       continue;
     }
@@ -299,7 +321,10 @@ async function _varrerLoteInterno(empresa, de, ate, teto, deps) {
     candidatas.push({ c, xml, tipo });
   }
 
-  const _rot = candidatas.length ? (_cursorFila.get(empresa) || 0) % candidatas.length : 0;
+  /* Codex #350 r3 (P1): cursor por empresa colidia entre JANELAS — varrer outra data
+     sobrescrevia o progresso da primeira. A identidade do cursor é empresa+janela. */
+  const chaveCursor = empresa + '|' + de + '|' + ate;
+  const _rot = candidatas.length ? (_cursorFila.get(chaveCursor) || 0) % candidatas.length : 0;
   const fila = candidatas.slice(_rot).concat(candidatas.slice(0, _rot));
   /* Codex #350 r2 (P1): avançar por CONTAGEM de resolvidas pulava posições — cache-hit
      DEPOIS do corte contava, a cortada no meio não, e (6 candidatas, última em cache,
@@ -317,7 +342,11 @@ async function _varrerLoteInterno(empresa, de, ate, teto, deps) {
     const conf = _confirmadasNoBling.get(c.chave);
     if (conf && (Date.now() - conf) < TTL_CONFIRMADA) {
       const salvaConf = chavesDisco.get(c.chave);
-      if (salvaConf && salvaConf.length) { moverTodas(salvaConf, 'importadas'); chavesDisco.delete(c.chave); arquivadas++; }
+      if (salvaConf && salvaConf.length) {
+        const mv = moverTodas(salvaConf, 'importadas');
+        if (!mv.falhas) { chavesDisco.delete(c.chave); arquivadas++; }
+        else { jaBaixadas++; naoConferidas.push({ chave: c.chave, tipo, motivo: 'no Bling, mas arquivamento parcial (' + mv.falhas + ' cópia(s))' }); }
+      }
       else jaNoBling++;
       continue;
     }
@@ -349,7 +378,12 @@ async function _varrerLoteInterno(empresa, de, ate, teto, deps) {
     if (jaSalva) {
       const b0 = await blingTemChave(tokenBling, c.chave, teto - consultasBling);
       consultasBling += b0.chamadas || 1;
-      if (b0.verificada && b0.esta_no_bling) { _confirmadasNoBling.set(c.chave, Date.now()); moverTodas(caminhosSalvos, 'importadas'); chavesDisco.delete(c.chave); arquivadas++; }
+      if (b0.verificada && b0.esta_no_bling) {
+        _confirmadasNoBling.set(c.chave, Date.now());
+        const mv = moverTodas(caminhosSalvos, 'importadas');
+        if (!mv.falhas) { chavesDisco.delete(c.chave); arquivadas++; }
+        else { jaBaixadas++; naoConferidas.push({ chave: c.chave, tipo, motivo: 'no Bling, mas arquivamento parcial (' + mv.falhas + ' cópia(s)) — segue no ZIP até mover' }); }
+      }
       else if (!b0.verificada) {
         if (b0.teto && primeiroCorte === null) primeiroCorte = idxFila;
         /* Codex #349 r4: reconferência que falhou NÃO pode sumir como ja_baixada — o
@@ -377,7 +411,7 @@ async function _varrerLoteInterno(empresa, de, ate, teto, deps) {
     novas.push({ tipo, invoice_id: c.invoice_id, chave: c.chave, arquivo: nomeDisco, numero: String(Number(c.chave.slice(25, 34))) });
   }
 
-  if (candidatas.length) _cursorFila.set(empresa, (_rot + (primeiroCorte === null ? fila.length : primeiroCorte)) % candidatas.length);
+  if (candidatas.length) _cursorFila.set(chaveCursor, (_rot + (primeiroCorte === null ? fila.length : primeiroCorte)) % candidatas.length);
   return {
     ok: true, janela: { de, ate }, uid: me.id,
     censo_pastas: censo,
@@ -416,7 +450,7 @@ async function garantirToken(empresa) {
   const mk = MANAGERS[empresa];
   if (!mk) throw new Error('empresa desconhecida: ' + empresa + ' (use amb, girassol ou good)');
   try {
-    const tk = await comPrazo(Promise.resolve().then(() => mk().garantirTokenML()), 30000, 'validação do token ML da ' + empresa);
+    const tk = await comPrazo(_aquisicaoTokenML(empresa), 30000, 'validação do token ML da ' + empresa);
     if (!tk) throw new Error('manager devolveu token vazio');
     return tk;
   } catch (e) {
@@ -713,7 +747,10 @@ async function tratar(req, res, urlObj, json) {
       json(res, 400, { ok: false, erro: 'janela inválida — no máximo 7 dias corridos, inclusive as pontas (cota do Bling)' });
       return true;
     }
-    const teto = Math.max(1, Math.min(200, Number(urlObj.searchParams.get('teto')) || 60));
+    /* Codex #350 r3 (P1): teto=1 pina o cursor — a 1ª chave presente gasta a única
+       chamada na lista, o detalhe fica adiado, primeiroCorte=0 e toda rodada recomeça
+       na mesma chave inconcluível. Confirmar presença custa 2; o mínimo é 2. */
+    const teto = Math.max(2, Math.min(200, Number(urlObj.searchParams.get('teto')) || 60));
     /* Codex #350 r1: o token ML entra DENTRO do lock (o refresh do ML é de uso único —
        duas aquisições simultâneas podiam corromper a renovação antes mesmo da trava);
        e a recusa de concorrência sai como 409 de verdade, não 200. */
@@ -804,6 +841,7 @@ module.exports = {
     sondarVenda, sondarUmaOrder, sondarNota, urlDoLote, mlGet, extrairChave, garantirToken, listarArquivos,
     varrerLote, classificarEntradaZip, lerTpNF, blingTemChave, dataValida,
     _trocarBlingTokensParaTeste(m) { _blingTokensRef.map = m; },
+    _trocarManagersMLParaTeste(m) { _mlManagersRef.map = m; },
     _limparCacheConfirmadasParaTeste() { _confirmadasNoBling.clear(); }, comPrazo,
     _trocarFetchParaTeste(f) { _fetchRef.fn = f; },
   },
