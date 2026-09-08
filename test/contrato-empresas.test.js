@@ -10,28 +10,42 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
-/* Codex #353: EMPRESAS (env) é lista de ATIVAÇÃO do ambiente — paridade é sobre o
-   REGISTRO. Com EMPRESAS=good o teste quebrava sem divergência nenhuma; a env é
-   neutralizada durante o teste (a lib a lê a cada chamada) e restaurada no fim. */
-const EMPRESAS_ORIG = process.env.EMPRESAS;
-delete process.env.EMPRESAS;
-process.on('exit', () => { if (EMPRESAS_ORIG !== undefined) process.env.EMPRESAS = EMPRESAS_ORIG; });
-
+/* Codex #353→#354: EMPRESAS (env) é ativação, não registro — mas DELETÁ-LA voltava ao
+   default de três e esconderia uma 4ª empresa embarcada por env (não existe registro
+   independente por trás: lista() lê a env). O certo é a UNIÃO: preserva o que está
+   configurado e acrescenta o que o contrato exige, só durante o teste. */
 const contrato = require('../contrato-empresas.json');
+const EMPRESAS_ORIG = process.env.EMPRESAS;
+{
+  /* união com o DEFAULT da lib (os aliases que ESTE repo usa) — injetar aliases do
+     contrato que o repo não conhece ('ambtotal') fazia o envBling derivar env
+     inventada (AMBTOTAL_...) e o teste acusar divergência falsa; provado ao rodar. */
+  const atuais = String(EMPRESAS_ORIG || '').split(',').map(x => x.toLowerCase().trim()).filter(Boolean);
+  const padrao = ['girassol', 'good', 'amb'];
+  process.env.EMPRESAS = [...new Set([...padrao, ...atuais])].join(',');
+}
+process.on('exit', () => { if (EMPRESAS_ORIG !== undefined) process.env.EMPRESAS = EMPRESAS_ORIG; else delete process.env.EMPRESAS; });
+
 const emp = require('../lib/empresas');
 
 const SERVICO = 'mover-pedidos';
-/* Codex #353: dono declarado com typo ('mover-pedido') passava por ser string — os
-   nomes válidos de serviço são finitos e conhecidos. (v4 do contrato deve trazê-los
-   num campo `servicos` pro conjunto sair do próprio dado — pedido enviado.) */
-const SERVICOS_VALIDOS = new Set(['devolucoes', 'mover-pedidos']);
+/* Codex #353 → v4: os serviços válidos saem DO PRÓPRIO CONTRATO (campo servicos,
+   que a v4 trouxe com os repos nomeados) — dono com typo não passa, e o conjunto
+   nunca mais diverge do dado. Sanity: este serviço precisa constar. */
+assert.ok(contrato.servicos && Array.isArray(contrato.servicos.lista), 'v4+: campo servicos.lista existe');
+const SERVICOS_VALIDOS = new Set(contrato.servicos.lista);
+assert.ok(SERVICOS_VALIDOS.has('mover-pedidos'), 'este serviço consta em servicos.lista');
+assert.ok(contrato.servicos.repos && contrato.servicos.repos['mover-pedidos'], 'repo deste serviço nomeado no contrato');
 const es = contrato.empresas;
 
 /* Codex #353: chave de empresa DUPLICADA no JSON é engolida pelo parser (a última
    vence) e a unicidade por Object.keys viraria teatro — conferida no texto CRU. */
 const cru = fs.readFileSync(path.join(__dirname, '..', 'contrato-empresas.json'), 'utf8');
 for (const id of Object.keys(es)) {
-  assert.strictEqual(cru.split('"' + id + '":').length - 1, 1, 'chave "' + id + '" aparece mais de uma vez no JSON cru — o parser engoliria a primeira');
+  /* Codex #354: JSON aceita espaço antes do dois-pontos — split literal não via
+     '"good" : {'; a contagem virou regex com \s* entre nome e colon. */
+  const ocorrencias = (cru.match(new RegExp('"' + id + '"\\s*:', 'g')) || []).length;
+  assert.strictEqual(ocorrencias, 1, 'chave "' + id + '" aparece ' + ocorrencias + 'x no JSON cru — o parser engoliria a primeira');
 }
 
 /* ── (a) coerência interna: nada colide entre empresas ── */

@@ -144,6 +144,15 @@ try {
 } catch (e) {
   falha('teste do contrato de empresas VERMELHO: ' + String((e.stdout || '') + (e.stderr || '')).slice(-300));
 }
+/* Codex #354: a paridade REMOTA também roda aqui — o CI executa o verifica e tem
+   saída pra internet; sem rede o script avisa e sai 0 (transitório), mas 404 na URL
+   do contrato remoto é conclusivo e derruba (guarda cega não pode ficar verde). */
+try {
+  const saida = require('child_process').execFileSync(process.execPath, [path.join(RAIZ, 'scripts', 'teste-contrato-paridade-remota.js')], { stdio: 'pipe' }).toString().trim();
+  console.log('  ✓ ' + saida.split('\n').pop());
+} catch (e) {
+  falha('paridade remota do contrato VERMELHA: ' + String((e.stdout || '') + (e.stderr || '')).slice(-300));
+}
 
 console.log('\n' + (erros ? '✗✗✗ ' + erros + ' PROBLEMA(S) — NÃO deixe assim em produção!' : '✓✓✓ TUDO CERTO — deploy consistente.'));
 process.exit(erros ? 1 : 0);
