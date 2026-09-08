@@ -19,6 +19,7 @@ const CHV = (n) => '3526096428909100010055002' + String(n).padStart(9, '0') + '1
 const xmlDe = (chave, tp) => '<?xml version="1.0"?><NFe><infNFe Id="NFe' + chave + '"><ide><tpNF>' + tp + '</tpNF></ide></infNFe></NFe>';
 
 const z = new AdmZip();
+z.addFile('Emitidas_Mercado_Livre/Canceladas/117_' + '3526096428909100010055002' + '000000117'.padStart(9, '0') + '1234567890' + '-procNFe.xml', Buffer.from(xmlDe('3526096428909100010055002' + '000000117' + '1234567890', 1)));
 z.addFile('Emitidas_Mercado_Livre/Notas de venda/111_' + CHV(1) + '-procNFe.xml', Buffer.from(xmlDe(CHV(1), 1)));
 z.addFile('Emitidas_Mercado_Livre/Notas de venda/112_' + CHV(2) + '-procNFe.xml', Buffer.from(xmlDe(CHV(2), 1)));
 z.addFile('Emitidas_Mercado_Livre/Notas de devolução/113_' + CHV(3) + '-procNFe.xml', Buffer.from(xmlDe(CHV(3), 0)));
@@ -44,6 +45,8 @@ _trocarFetchParaTeste(async (url) => {
   const r = await varrerLote('amb', '20260901', '20260901', 60, { tokenML: 'tk', tokenBling: 'tb' });
   assert.strictEqual(r.ok, true, JSON.stringify(r).slice(0, 200));
   assert.strictEqual(r.ignoradas_simbolicas, 1, 'retiro simbólica fora (política v1)');
+  assert.strictEqual(r.canceladas_no_lote, 1, 'pasta Canceladas fora das candidatas (censo real de 07/09)');
+  assert.ok(!r.novas.some(n => n.invoice_id === '117'), 'cancelada nunca vira pendente de importação');
   assert.strictEqual(r.ja_no_bling, 1, 'presente no Bling não vira arquivo');
   assert.strictEqual(r.pendentes_novas, 2, 'ausentes viram arquivo');
   assert.ok(r.novas.some(n => n.tipo === 'entrada' && n.chave === CHV(3)), 'devolução caiu em entrada/');
@@ -196,5 +199,107 @@ _trocarFetchParaTeste(async (url) => {
   assert.ok(rE.nao_conferidas >= 1 && JSON.stringify(rE.lista_nao_conferidas).includes('reconferência falhou'), 'salva com reconferência falhada é reportada');
   assert.ok(rE.aviso, 'aviso presente — nunca varredura completa de mentira');
 
-  console.log('OK: motor fase 1 — ciclo fechado, cache de confirmadas, fila rotativa, reconferência honesta, cota declarada');
+  // acerto r5: varreduras simultâneas da mesma empresa — a 2ª recusa educadamente
+  const [pA, pB] = [varrerLote('amb', '20260901', '20260901', 60, { tokenML: 'tk', tokenBling: 'tb' }),
+                    varrerLote('amb', '20260901', '20260901', 60, { tokenML: 'tk', tokenBling: 'tb' })];
+  const [ra2, rb2] = await Promise.all([pA, pB]);
+  const recusas = [ra2, rb2].filter(x => x.resultado === 'ja_ha_varredura_em_andamento').length;
+  assert.strictEqual(recusas, 1, 'exatamente uma das duas é recusada pela trava');
+
+  // #350 r1: cursor monotônico — rodadas sucessivas cobrem faixas DISJUNTAS até a volta
+  mf._interno._limparCacheConfirmadasParaTeste();
+  fs.rmSync(process.env.ML_FULL_DIR, { recursive: true, force: true });
+  fs.mkdirSync(process.env.ML_FULL_DIR, { recursive: true });
+  _trocarFetchParaTeste(async (url) => {
+    if (url.includes('period/stream')) return { status: 200, buffer: async () => z.toBuffer(), text: async () => '' };
+    if (url.includes('/users/me')) return { status: 200, text: async () => JSON.stringify({ id: 999 }) };
+    if (url.includes('/nfe?chaveAcesso=')) return { status: 200, text: async () => JSON.stringify({ data: [] }) };
+    throw new Error('não previsto: ' + url);
+  });
+  const vistas = new Set();
+  for (let i = 0; i < 3; i++) {
+    const ri = await varrerLote('amb', '20260901', '20260901', 2, { tokenML: 'tk', tokenBling: 'tb' });
+    for (const n of ri.novas) { assert.ok(!vistas.has(n.chave), 'faixas disjuntas: ' + n.chave + ' repetiu na rodada ' + i); vistas.add(n.chave); }
+  }
+  assert.ok(vistas.size >= 4, 'três rodadas de teto=2 cobrem posições distintas (cobriu ' + vistas.size + ')');
+
+  // #350 r1 (P1): cancelada já SALVA vai pra quarentena e some do ZIP
+  mf._interno._limparCacheConfirmadasParaTeste();
+  fs.rmSync(process.env.ML_FULL_DIR, { recursive: true, force: true });
+  fs.mkdirSync(process.env.ML_FULL_DIR, { recursive: true });
+  const chCanc = '3526096428909100010055002' + '000000117'.padStart(9, '0') + '1234567890';
+  fs.mkdirSync(path.join(process.env.ML_FULL_DIR, 'saida'), { recursive: true });
+  fs.writeFileSync(path.join(process.env.ML_FULL_DIR, 'saida', 'amb-117-' + chCanc + '.xml'), xmlDe(chCanc, 1));
+  const rq = await varrerLote('amb', '20260901', '20260901', 60, { tokenML: 'tk', tokenBling: 'tb' });
+  assert.strictEqual(rq.canceladas_quarentenadas, 1, 'cancelada salva foi quarentenada');
+  assert.ok(!mf._interno.listarArquivos('amb', 'saida').some(x => x.arquivo.includes(chCanc)), 'cancelada sumiu do ZIP de saída');
+
+  // #350 r2 (P1): o EXEMPLO do Codex vira teste — última em cache, teto=1: com o cursor
+  // por prefixo contíguo, NENHUMA posição fica pra trás através das rodadas
+  mf._interno._limparCacheConfirmadasParaTeste();
+  fs.rmSync(process.env.ML_FULL_DIR, { recursive: true, force: true });
+  fs.mkdirSync(process.env.ML_FULL_DIR, { recursive: true });
+  const soUltima = CHV(6);
+  _trocarFetchParaTeste(async (url) => {
+    if (url.includes('period/stream')) return { status: 200, buffer: async () => z.toBuffer(), text: async () => '' };
+    if (url.includes('/users/me')) return { status: 200, text: async () => JSON.stringify({ id: 999 }) };
+    if (url.includes('/nfe?chaveAcesso=' + soUltima)) return { status: 200, text: async () => JSON.stringify({ data: [{ id: 'i6' }] }) };
+    if (url.includes('/nfe/i6')) return { status: 200, text: async () => JSON.stringify({ data: { id: 'i6', chaveAcesso: soUltima } }) };
+    if (url.includes('/nfe?chaveAcesso=')) return { status: 200, text: async () => JSON.stringify({ data: [] }) };
+    throw new Error('não previsto: ' + url);
+  });
+  await varrerLote('amb', '20260901', '20260901', 60, { tokenML: 'tk', tokenBling: 'tb' }); // popula o cache (CHV6 presente) e salva as ausentes
+  fs.rmSync(process.env.ML_FULL_DIR, { recursive: true, force: true });
+  fs.mkdirSync(process.env.ML_FULL_DIR, { recursive: true }); // some o disco, fica o cache
+  const alcancadas = new Set();
+  for (let i = 0; i < 8; i++) {
+    const ri = await varrerLote('amb', '20260901', '20260901', 1, { tokenML: 'tk', tokenBling: 'tb' });
+    for (const n of ri.novas) alcancadas.add(n.chave);
+  }
+  assert.ok(alcancadas.size >= 3, 'com cache no meio e teto=1, o cursor contíguo alcança todas as posições (alcançou ' + alcancadas.size + ')');
+  assert.ok(!alcancadas.has(soUltima), 'a cacheada nunca vira pendente');
+
+  // #350 r2 (P1): chave com DUAS cópias (raiz legada + tipada) cancelada ⇒ AMBAS quarentenadas
+  mf._interno._limparCacheConfirmadasParaTeste();
+  fs.rmSync(process.env.ML_FULL_DIR, { recursive: true, force: true });
+  fs.mkdirSync(path.join(process.env.ML_FULL_DIR, 'saida'), { recursive: true });
+  const chC = '3526096428909100010055002' + '000000117'.padStart(9, '0') + '1234567890';
+  fs.writeFileSync(path.join(process.env.ML_FULL_DIR, 'amb-nota-117.xml'), xmlDe(chC, 1)); // raiz legada
+  fs.writeFileSync(path.join(process.env.ML_FULL_DIR, 'saida', 'amb-117-' + chC + '.xml'), xmlDe(chC, 1)); // tipada
+  _trocarFetchParaTeste(async (url) => {
+    if (url.includes('period/stream')) return { status: 200, buffer: async () => z.toBuffer(), text: async () => '' };
+    if (url.includes('/users/me')) return { status: 200, text: async () => JSON.stringify({ id: 999 }) };
+    if (url.includes('/nfe?chaveAcesso=')) return { status: 200, text: async () => JSON.stringify({ data: [] }) };
+    throw new Error('não previsto: ' + url);
+  });
+  await varrerLote('amb', '20260901', '20260901', 60, { tokenML: 'tk', tokenBling: 'tb' });
+  assert.ok(!mf._interno.listarArquivos('amb', 'saida').some(x => x.arquivo.includes(chC)), 'cópia tipada quarentenada');
+  assert.ok(!mf._interno.listarArquivos('amb', null).some(x => x.arquivo.includes('amb-nota-117')), 'cópia da raiz TAMBÉM quarentenada');
+
+  // #350 r3 (P1): aquisição de token ML é promessa ÚNICA — 2 chamadores concorrentes,
+  // 1 execução do manager (nunca dois refresh de uso único em voo)
+  let execucoes = 0;
+  mf._interno._trocarManagersMLParaTeste({ amb: () => ({ garantirTokenML: async () => { execucoes++; await new Promise(r => setTimeout(r, 60)); return 'tk-unico'; } }) });
+  const [t1, t2] = await Promise.all([mf._interno.garantirToken('amb'), mf._interno.garantirToken('amb')]);
+  assert.strictEqual(execucoes, 1, 'dois chamadores concorrentes, UMA aquisição');
+  assert.ok(t1 === 'tk-unico' && t2 === 'tk-unico');
+
+  // #350 r3 (P1): cursor tem identidade de JANELA — varrer outra data não apaga o progresso
+  mf._interno._limparCacheConfirmadasParaTeste();
+  fs.rmSync(process.env.ML_FULL_DIR, { recursive: true, force: true });
+  fs.mkdirSync(process.env.ML_FULL_DIR, { recursive: true });
+  _trocarFetchParaTeste(async (url) => {
+    if (url.includes('period/stream')) return { status: 200, buffer: async () => z.toBuffer(), text: async () => '' };
+    if (url.includes('/users/me')) return { status: 200, text: async () => JSON.stringify({ id: 999 }) };
+    if (url.includes('/nfe?chaveAcesso=')) return { status: 200, text: async () => JSON.stringify({ data: [] }) };
+    throw new Error('não previsto: ' + url);
+  });
+  const vJ = new Set();
+  const rj1 = await varrerLote('amb', '20260901', '20260901', 2, { tokenML: 'tk', tokenBling: 'tb' });
+  rj1.novas.forEach(n => vJ.add(n.chave));
+  await varrerLote('amb', '20260902', '20260902', 2, { tokenML: 'tk', tokenBling: 'tb' }); // OUTRA janela no meio
+  const rj2 = await varrerLote('amb', '20260901', '20260901', 2, { tokenML: 'tk', tokenBling: 'tb' });
+  for (const n of rj2.novas) { assert.ok(!vJ.has(n.chave), 'janela intercalada não reseta o cursor da primeira'); vJ.add(n.chave); }
+
+  console.log('OK: motor fase 1 — aquisição única de token, cursor por janela, tudo verde');
 })().catch(e => { console.error('FALHOU (motor):', e.message); process.exit(1); });

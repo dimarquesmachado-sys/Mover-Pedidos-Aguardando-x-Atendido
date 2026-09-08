@@ -46,11 +46,30 @@ const _fetchRef = { fn: require('node-fetch') };
 
 /* empresa como PARÂMETRO desde o nascimento — os três managers têm o mesmo contrato
    (garantirTokenML() → access_token), conferido nos exports antes de escrever isto */
-const MANAGERS = {
+const _mlManagersRef = { map: {
   amb:      () => require('./ambtotal/mlTokenManager'),
   girassol: () => require('./girassol/mlTokenManager'),
   good:     () => require('./good/mlTokenManager'),
-};
+} };
+const MANAGERS = new Proxy({}, { get: (_, k) => _mlManagersRef.map[k], has: (_, k) => k in _mlManagersRef.map });
+
+/* Codex #350 r3 (P1): o comPrazo estoura, o refresh de USO ÚNICO segue em background
+   por design (#344) — e o lock da varredura solta no finally: outra varredura podia
+   entrar e disparar um SEGUNDO refresh concorrente, queimando o token. A aquisição
+   agora é uma PROMESSA ÚNICA por empresa: todo chamador espera a mesma (cada um com
+   o próprio prazo); nunca há dois garantirTokenML em voo pra mesma empresa. */
+const _tokenMLEmVoo = new Map();
+function _aquisicaoTokenML(empresa) {
+  let p = _tokenMLEmVoo.get(empresa);
+  if (!p) {
+    const mk = _mlManagersRef.map[empresa];
+    if (!mk) return Promise.reject(new Error('empresa desconhecida: ' + empresa));
+    p = Promise.resolve().then(() => mk().garantirTokenML()).finally(() => _tokenMLEmVoo.delete(empresa));
+    p.catch(() => {});
+    _tokenMLEmVoo.set(empresa, p);
+  }
+  return p;
+}
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
@@ -92,6 +111,14 @@ function dataValida(aaaammdd) {
    ROTACIONA com o dia — avança mesmo com cache frio pós-deploy. */
 const _confirmadasNoBling = new Map(); // chave → ts da confirmação
 const TTL_CONFIRMADA = 7 * 86400000;
+/* Codex #349 r5 (P2, no acerto): duas varreduras simultâneas da MESMA empresa dobram
+   o tráfego e a segunda quebra no renameSync do que a primeira arquivou (ENOENT).
+   Trava simples por empresa; a rota devolve 409 amigável. */
+const _varrendo = new Set();
+/* Codex #350 r1: rotação ALEATÓRIA pode repetir faixas e deixar posições sem visita por
+   muitas rodadas — o cursor monotônico por empresa avança exatamente pelo que a rodada
+   COBRIU, então rodadas sucessivas percorrem faixas disjuntas até dar a volta. */
+const _cursorFila = new Map(); // empresa → próxima posição de partida
 
 async function garantirTokenBling(empresa) {
   const mk = BLING_TOKENS[empresa];
@@ -132,6 +159,10 @@ function classificarEntradaZip(nome) {
   return { invoice_id: m[1], chave: m[2], pasta: pastas[pastas.length - 1] || '', caminho: String(nome) };
 }
 const RE_PASTA_IGNORADA = /simb[oó]lic|transfer[eê]ncia|retiro/i;
+/* Acerto pós-varredura de fogo (07/09): o censo real mostrou que vendas e devoluções
+   vêm juntas em 'Autorizadas' — e existe a pasta 'Canceladas'. NF cancelada não se
+   importa; ela é insumo da futura fila 'cancelada no ML × viva no Bling' (anotado). */
+const RE_PASTA_CANCELADA = /(^|\/)Canceladas(\/|$)/i;
 
 function lerTpNF(xml) {
   const m = String(xml || '').match(/<tpNF>([01])<\/tpNF>/);
@@ -170,7 +201,7 @@ async function blingTemChave(tokenBling, chave, orcamentoRestante) {
     if (arr.length > 1) return { verificada: false, erro: 'lista com ' + arr.length + ' itens pra chave única (filtro ignorado?)', chamadas: 1 };
     const id = arr[0] && arr[0].id;
     if (!id) return { verificada: false, erro: 'item sem id na lista', chamadas: 1 };
-    if (Number(orcamentoRestante) < 2) return { verificada: false, erro: 'teto no meio — lista feita, detalhe adiado pra próxima rodada', chamadas: 1 };
+    if (Number(orcamentoRestante) < 2) return { verificada: false, teto: true, erro: 'teto no meio — lista feita, detalhe adiado pra próxima rodada', chamadas: 1 };
     await sleep(350);
     feitas = 2;
     const ac2 = new AbortController(); const t2 = setTimeout(() => ac2.abort(), 20000);
@@ -193,6 +224,16 @@ async function blingTemChave(tokenBling, chave, orcamentoRestante) {
    ignorada_simbolica · ja_baixada · ja_no_bling · pendente_nova · nao_conferida
    (erro/teto — NUNCA conclui) · anomalia (chave do nome ≠ chave do XML). */
 async function varrerLote(empresa, de, ate, teto, deps) {
+  if (_varrendo.has(empresa)) return { ok: false, resultado: 'ja_ha_varredura_em_andamento', detalhe: 'espere a varredura atual da ' + empresa + ' terminar (a resposta dela traz o resultado)' };
+  _varrendo.add(empresa);
+  try {
+    return await _varrerLoteInterno(empresa, de, ate, teto, deps);
+  } catch (e) {
+    return { ok: false, resultado: 'erro_varredura', detalhe: String(e.message || e).slice(0, 200) };
+  } finally { _varrendo.delete(empresa); }
+}
+
+async function _varrerLoteInterno(empresa, de, ate, teto, deps) {
   const tokenML = deps && deps.tokenML ? deps.tokenML : await garantirToken(empresa);
   const rMe = await mlGet(tokenML, ML_API + '/users/me');
   const me = jsonSeguro(rMe.texto) || {};
@@ -213,22 +254,37 @@ async function varrerLote(empresa, de, ate, teto, deps) {
   const censo = {};
   const novas = [], naoConferidas = [], anomalias = [];
   let ignoradasSimbolicas = 0, jaBaixadas = 0, jaNoBling = 0, consultasBling = 0;
+  const canceladasNoLote = [];
+  const chavesCanceladas = new Set();
+  let quarentenadas = 0;
   let tokenBling = (deps && deps.tokenBling) || null;
 
   /* Codex #349 r2: a sonda salvou legados na RAIZ com outro padrão de nome — conferir
      só o destino tipado deixaria o /varrer gravar uma SEGUNDA cópia da mesma chave e o
      ZIP apresentaria a NF-e duas vezes. O dedup é por CHAVE, atravessando raiz+tipadas. */
-  const chavesDisco = new Map(); // chave → caminho no disco (raiz legada inclusa)
+  /* Codex #350 r2 (P1): a MESMA chave pode existir em MAIS de um caminho (legado da raiz
+     + cópia tipada — estado histórico real deste módulo); Map chave→um caminho movia só
+     uma cópia e o ZIP continuava servindo a outra. Vale pra quarentena E pro arquivar. */
+  const chavesDisco = new Map(); // chave → TODOS os caminhos no disco
   for (const a of listarArquivos(empresa, null)) {
     const mNome = a.arquivo.match(/-(\d{44})\.xml$/);
-    if (mNome) { chavesDisco.set(mNome[1], a.caminho); continue; }
-    try { const ch = extrairChave(fs.readFileSync(a.caminho, 'utf8')); if (ch) chavesDisco.set(ch, a.caminho); } catch (e) {}
+    let ch = mNome ? mNome[1] : null;
+    if (!ch) { try { ch = extrairChave(fs.readFileSync(a.caminho, 'utf8')); } catch (e) {} }
+    if (!ch) continue;
+    if (!chavesDisco.has(ch)) chavesDisco.set(ch, []);
+    chavesDisco.get(ch).push(a.caminho);
   }
   let arquivadas = 0;
-  const arquivar = (caminho) => {
-    const dest = path.join(DIR, 'importadas');
+  /* Codex #350 r3 (P2): rename que falha não pode sumir — o chamador reportaria
+     arquivada/quarentenada com a cópia ainda sendo servida pelo /zip. */
+  const moverTodas = (caminhos, subpasta) => {
+    const dest = path.join(DIR, subpasta);
     fs.mkdirSync(dest, { recursive: true });
-    fs.renameSync(caminho, path.join(dest, path.basename(caminho)));
+    let movidos = 0, falhas = 0;
+    for (const cam of caminhos) {
+      try { fs.renameSync(cam, path.join(dest, path.basename(cam))); movidos++; } catch (e) { falhas++; }
+    }
+    return { movidos, falhas };
   };
 
   const candidatas = [];
@@ -238,6 +294,24 @@ async function varrerLote(empresa, de, ate, teto, deps) {
     if (!c) continue;
     censo[c.pasta] = (censo[c.pasta] || 0) + 1;
     if (RE_PASTA_IGNORADA.test(c.caminho)) { ignoradasSimbolicas++; continue; }
+    if (RE_PASTA_CANCELADA.test(c.caminho)) {
+      /* Codex #350 r2 (P2): o nome do arquivo pode mentir — o ramo autorizado valida a
+         chave do XML e o cancelado pulava a validação, quarentenando pela fé no nome.
+         Mismatch é anomalia aqui também, sem quarentena e sem marcar a chave. */
+      const chaveXmlCanc = extrairChave(en.getData().toString('utf8'));
+      if (chaveXmlCanc !== c.chave) { anomalias.push({ arquivo: c.caminho, chave_nome: c.chave, chave_xml: chaveXmlCanc }); continue; }
+      canceladasNoLote.push({ invoice_id: c.invoice_id, chave: c.chave });
+      chavesCanceladas.add(c.chave);
+      /* Codex #350 r1 (P1): cancelada JÁ SALVA ficaria no ZIP pra sempre — TODAS as
+         cópias vão pra quarentena canceladas/ (r2: inclusive raiz+tipada da mesma chave). */
+      const caminhosCanc = chavesDisco.get(c.chave);
+      if (caminhosCanc && caminhosCanc.length) {
+        const mv = moverTodas(caminhosCanc, 'canceladas');
+        if (!mv.falhas) { quarentenadas++; chavesDisco.delete(c.chave); }
+        else anomalias.push({ chave: c.chave, erro: 'quarentena parcial: ' + mv.falhas + ' cópia(s) não movida(s) — a chave segue no ZIP até a próxima rodada' });
+      }
+      continue;
+    }
 
     const xml = en.getData().toString('utf8');
     const chaveXml = extrairChave(xml);
@@ -247,17 +321,32 @@ async function varrerLote(empresa, de, ate, teto, deps) {
     candidatas.push({ c, xml, tipo });
   }
 
-  const _rot = new Date().getUTCDate() % Math.max(1, candidatas.length);
+  /* Codex #350 r3 (P1): cursor por empresa colidia entre JANELAS — varrer outra data
+     sobrescrevia o progresso da primeira. A identidade do cursor é empresa+janela. */
+  const chaveCursor = empresa + '|' + de + '|' + ate;
+  const _rot = candidatas.length ? (_cursorFila.get(chaveCursor) || 0) % candidatas.length : 0;
   const fila = candidatas.slice(_rot).concat(candidatas.slice(0, _rot));
+  /* Codex #350 r2 (P1): avançar por CONTAGEM de resolvidas pulava posições — cache-hit
+     DEPOIS do corte contava, a cortada no meio não, e (6 candidatas, última em cache,
+     teto=1) visitava só 1,3,5 pra sempre. O cursor avança até a PRIMEIRA cortada por
+     teto: prefixo contíguo resolvido, nada fica pra trás. */
+  let primeiroCorte = null;
+  let idxFila = -1;
 
   for (const cand of fila) {
+    idxFila++;
     const c = cand.c, xml = cand.xml, tipo = cand.tipo;
+    if (chavesCanceladas.has(c.chave)) continue; // apareceu também em Canceladas: nunca importa
 
     /* presença confirmada há menos de 7 dias: não gasta consulta */
     const conf = _confirmadasNoBling.get(c.chave);
     if (conf && (Date.now() - conf) < TTL_CONFIRMADA) {
       const salvaConf = chavesDisco.get(c.chave);
-      if (salvaConf) { arquivar(salvaConf); chavesDisco.delete(c.chave); arquivadas++; }
+      if (salvaConf && salvaConf.length) {
+        const mv = moverTodas(salvaConf, 'importadas');
+        if (!mv.falhas) { chavesDisco.delete(c.chave); arquivadas++; }
+        else { jaBaixadas++; naoConferidas.push({ chave: c.chave, tipo, motivo: 'no Bling, mas arquivamento parcial (' + mv.falhas + ' cópia(s))' }); }
+      }
       else jaNoBling++;
       continue;
     }
@@ -268,9 +357,11 @@ async function varrerLote(empresa, de, ate, teto, deps) {
        a chave passa a existir no Bling e o ZIP precisa parar de re-apresentá-la. Salva
        re-encontrada no lote é RE-CONFERIDA (dentro do teto) e, presente no Bling, vai
        pra importadas/ (fora dos ZIPs, histórico preservado); ausente/erro segue no ZIP. */
-    const jaSalva = chavesDisco.get(c.chave) || (fs.existsSync(destino) ? destino : null);
+    const caminhosSalvos = chavesDisco.get(c.chave) || (fs.existsSync(destino) ? [destino] : null);
+    const jaSalva = !!(caminhosSalvos && caminhosSalvos.length);
 
     if (consultasBling >= teto) {
+      if (primeiroCorte === null) primeiroCorte = idxFila;
       if (jaSalva) { jaBaixadas++; continue; }
       naoConferidas.push({ chave: c.chave, tipo, motivo: 'teto de ' + teto + ' consultas ao Bling — rode de novo' });
       continue;
@@ -287,8 +378,14 @@ async function varrerLote(empresa, de, ate, teto, deps) {
     if (jaSalva) {
       const b0 = await blingTemChave(tokenBling, c.chave, teto - consultasBling);
       consultasBling += b0.chamadas || 1;
-      if (b0.verificada && b0.esta_no_bling) { _confirmadasNoBling.set(c.chave, Date.now()); arquivar(jaSalva); chavesDisco.delete(c.chave); arquivadas++; }
+      if (b0.verificada && b0.esta_no_bling) {
+        _confirmadasNoBling.set(c.chave, Date.now());
+        const mv = moverTodas(caminhosSalvos, 'importadas');
+        if (!mv.falhas) { chavesDisco.delete(c.chave); arquivadas++; }
+        else { jaBaixadas++; naoConferidas.push({ chave: c.chave, tipo, motivo: 'no Bling, mas arquivamento parcial (' + mv.falhas + ' cópia(s)) — segue no ZIP até mover' }); }
+      }
       else if (!b0.verificada) {
+        if (b0.teto && primeiroCorte === null) primeiroCorte = idxFila;
         /* Codex #349 r4: reconferência que falhou NÃO pode sumir como ja_baixada — o
            relatório pareceria completo com status jamais verificado. O arquivo fica,
            e a pendência aparece nomeada. */
@@ -301,19 +398,27 @@ async function varrerLote(empresa, de, ate, teto, deps) {
     const b = await blingTemChave(tokenBling, c.chave, teto - consultasBling);
     consultasBling += b.chamadas || 1;
 
-    if (!b.verificada) { naoConferidas.push({ chave: c.chave, tipo, motivo: b.erro }); continue; }
+    if (!b.verificada) {
+      if (b.teto && primeiroCorte === null) primeiroCorte = idxFila;
+      naoConferidas.push({ chave: c.chave, tipo, motivo: b.erro });
+      continue;
+    }
     if (b.esta_no_bling) { _confirmadasNoBling.set(c.chave, Date.now()); jaNoBling++; continue; }
 
     fs.mkdirSync(path.join(DIR, tipo), { recursive: true });
     fs.writeFileSync(destino, xml);
-    chavesDisco.set(c.chave, destino);
+    chavesDisco.set(c.chave, [destino]);
     novas.push({ tipo, invoice_id: c.invoice_id, chave: c.chave, arquivo: nomeDisco, numero: String(Number(c.chave.slice(25, 34))) });
   }
 
+  if (candidatas.length) _cursorFila.set(chaveCursor, (_rot + (primeiroCorte === null ? fila.length : primeiroCorte)) % candidatas.length);
   return {
     ok: true, janela: { de, ate }, uid: me.id,
     censo_pastas: censo,
     ignoradas_simbolicas: ignoradasSimbolicas,
+    canceladas_no_lote: canceladasNoLote.length || undefined,
+    canceladas_quarentenadas: quarentenadas || undefined,
+    canceladas: canceladasNoLote.length ? canceladasNoLote : undefined,
     ja_baixadas: jaBaixadas,
     arquivadas_no_bling: arquivadas,
     ja_no_bling: jaNoBling,
@@ -345,7 +450,7 @@ async function garantirToken(empresa) {
   const mk = MANAGERS[empresa];
   if (!mk) throw new Error('empresa desconhecida: ' + empresa + ' (use amb, girassol ou good)');
   try {
-    const tk = await comPrazo(Promise.resolve().then(() => mk().garantirTokenML()), 30000, 'validação do token ML da ' + empresa);
+    const tk = await comPrazo(_aquisicaoTokenML(empresa), 30000, 'validação do token ML da ' + empresa);
     if (!tk) throw new Error('manager devolveu token vazio');
     return tk;
   } catch (e) {
@@ -642,12 +747,15 @@ async function tratar(req, res, urlObj, json) {
       json(res, 400, { ok: false, erro: 'janela inválida — no máximo 7 dias corridos, inclusive as pontas (cota do Bling)' });
       return true;
     }
-    const teto = Math.max(1, Math.min(200, Number(urlObj.searchParams.get('teto')) || 60));
-    let tokenML;
-    try { tokenML = await garantirToken(empresa); }
-    catch (e) { json(res, 200, { ok: false, erro: String(e.message || e) }); return true; }
-    const r = await varrerLote(empresa, de, ate, teto, { tokenML });
-    json(res, r.ok ? 200 : 200, Object.assign({ versao: VERSAO, empresa }, r, r.ok ? {
+    /* Codex #350 r3 (P1): teto=1 pina o cursor — a 1ª chave presente gasta a única
+       chamada na lista, o detalhe fica adiado, primeiroCorte=0 e toda rodada recomeça
+       na mesma chave inconcluível. Confirmar presença custa 2; o mínimo é 2. */
+    const teto = Math.max(2, Math.min(200, Number(urlObj.searchParams.get('teto')) || 60));
+    /* Codex #350 r1: o token ML entra DENTRO do lock (o refresh do ML é de uso único —
+       duas aquisições simultâneas podiam corromper a renovação antes mesmo da trava);
+       e a recusa de concorrência sai como 409 de verdade, não 200. */
+    const r = await varrerLote(empresa, de, ate, teto, null);
+    json(res, r.resultado === 'ja_ha_varredura_em_andamento' ? 409 : 200, Object.assign({ versao: VERSAO, empresa }, r, r.ok ? {
       baixar_saida: 'https://mover-pedidos-aguardando-x-atendido.onrender.com/ml-full/zip?empresa=' + empresa + '&tipo=saida&k=SUA_ADMIN_KEY',
       baixar_entrada: 'https://mover-pedidos-aguardando-x-atendido.onrender.com/ml-full/zip?empresa=' + empresa + '&tipo=entrada&k=SUA_ADMIN_KEY',
     } : {}));
@@ -733,6 +841,7 @@ module.exports = {
     sondarVenda, sondarUmaOrder, sondarNota, urlDoLote, mlGet, extrairChave, garantirToken, listarArquivos,
     varrerLote, classificarEntradaZip, lerTpNF, blingTemChave, dataValida,
     _trocarBlingTokensParaTeste(m) { _blingTokensRef.map = m; },
+    _trocarManagersMLParaTeste(m) { _mlManagersRef.map = m; },
     _limparCacheConfirmadasParaTeste() { _confirmadasNoBling.clear(); }, comPrazo,
     _trocarFetchParaTeste(f) { _fetchRef.fn = f; },
   },
