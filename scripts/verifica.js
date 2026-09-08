@@ -133,5 +133,27 @@ for (const m of cfg.modulos) {
 }
 if (!idErr) console.log('  ✓ cada arquivo está na pasta da sua empresa');
 
+console.log('\n═ 6. Contrato de empresas (paridade com o registro local) ═');
+/* Codex #353: o CI roda o verifica mas nenhum workflow rodava o teste do contrato —
+   PR com contrato inválido passava verde. Agora o verifica o executa (rápido, sem
+   rede; a paridade REMOTA fica no scripts/teste-contrato-paridade-remota.js da
+   bateria, que precisa de internet). */
+try {
+  require('child_process').execFileSync(process.execPath, [path.join(RAIZ, 'test', 'contrato-empresas.test.js')], { stdio: 'pipe' });
+  console.log('  ✓ contrato coerente e espelhado no registro local');
+} catch (e) {
+  falha('teste do contrato de empresas VERMELHO: ' + String((e.stdout || '') + (e.stderr || '')).slice(-300));
+}
+/* Codex #354: a paridade REMOTA também roda aqui — o CI executa o verifica e tem
+   saída pra internet; sem rede o script avisa e sai 0 (transitório), mas 404 na URL
+   do contrato remoto é conclusivo e derruba (guarda cega não pode ficar verde). */
+try {
+  const saida = require('child_process').execFileSync(process.execPath, [path.join(RAIZ, 'scripts', 'teste-contrato-paridade-remota.js')], { stdio: 'pipe' }).toString().trim();
+  if (!saida) { falha('paridade remota terminou SEM veredito — saída vazia não é sucesso'); }
+  else console.log('  ✓ ' + saida.split('\n').pop());
+} catch (e) {
+  falha('paridade remota do contrato VERMELHA: ' + String((e.stdout || '') + (e.stderr || '')).slice(-300));
+}
+
 console.log('\n' + (erros ? '✗✗✗ ' + erros + ' PROBLEMA(S) — NÃO deixe assim em produção!' : '✓✓✓ TUDO CERTO — deploy consistente.'));
 process.exit(erros ? 1 : 0);

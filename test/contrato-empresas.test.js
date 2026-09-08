@@ -10,11 +10,50 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+/* Codex #353→#354: EMPRESAS (env) é ativação, não registro — mas DELETÁ-LA voltava ao
+   default de três e esconderia uma 4ª empresa embarcada por env (não existe registro
+   independente por trás: lista() lê a env). O certo é a UNIÃO: preserva o que está
+   configurado e acrescenta o que o contrato exige, só durante o teste. */
 const contrato = require('../contrato-empresas.json');
+const EMPRESAS_ORIG = process.env.EMPRESAS;
+{
+  /* Codex #354 r2: a lista fixa de 3 congelava o embarque — no CI (sem EMPRESAS) a 4ª
+     empresa do contrato seria rejeitada mesmo com módulos prontos. A fonte dos aliases
+     que ESTE repo conhece é o COMPAT_BLING da própria lib (a 4ª ganha entrada lá ao
+     ser embarcada e entra aqui sozinha); injetar alias que o repo NÃO conhece
+     ('ambtotal') fazia o envBling derivar env inventada — provado ao rodar. */
+  const atuais = String(EMPRESAS_ORIG || '').split(',').map(x => x.toLowerCase().trim()).filter(Boolean);
+  const doRepo = Object.keys(require('../lib/empresas').COMPAT_BLING);
+  process.env.EMPRESAS = [...new Set([...doRepo, ...atuais])].join(',');
+}
+process.on('exit', () => { if (EMPRESAS_ORIG !== undefined) process.env.EMPRESAS = EMPRESAS_ORIG; else delete process.env.EMPRESAS; });
+
 const emp = require('../lib/empresas');
 
 const SERVICO = 'mover-pedidos';
+/* Codex #353 → v4: os serviços válidos saem DO PRÓPRIO CONTRATO (campo servicos,
+   que a v4 trouxe com os repos nomeados) — dono com typo não passa, e o conjunto
+   nunca mais diverge do dado. Sanity: este serviço precisa constar. */
+assert.ok(contrato.servicos && Array.isArray(contrato.servicos.lista), 'v4+: campo servicos.lista existe');
+const SERVICOS_VALIDOS = new Set(contrato.servicos.lista);
+assert.ok(SERVICOS_VALIDOS.has('mover-pedidos'), 'este serviço consta em servicos.lista');
+/* Codex #354 r2: TODO serviço da lista precisa de repo nomeado — serviço 'válido'
+   mas ilocalizável derrotaria o propósito da v4. */
+for (const svc of contrato.servicos.lista) {
+  const repo = contrato.servicos.repos && contrato.servicos.repos[svc];
+  assert.ok(typeof repo === 'string' && /^[\w.-]+\/[\w.-]+$/.test(repo), 'servicos.repos["' + svc + '"] precisa ser owner/repo — veio: ' + JSON.stringify(repo));
+}
 const es = contrato.empresas;
+
+/* Codex #353: chave de empresa DUPLICADA no JSON é engolida pelo parser (a última
+   vence) e a unicidade por Object.keys viraria teatro — conferida no texto CRU. */
+const cru = fs.readFileSync(path.join(__dirname, '..', 'contrato-empresas.json'), 'utf8');
+for (const id of Object.keys(es)) {
+  /* Codex #354: JSON aceita espaço antes do dois-pontos — split literal não via
+     '"good" : {'; a contagem virou regex com \s* entre nome e colon. */
+  const ocorrencias = (cru.match(new RegExp('"' + id + '"\\s*:', 'g')) || []).length;
+  assert.strictEqual(ocorrencias, 1, 'chave "' + id + '" aparece ' + ocorrencias + 'x no JSON cru — o parser engoliria a primeira');
+}
 
 /* ── (a) coerência interna: nada colide entre empresas ── */
 const ids = Object.keys(es);
@@ -23,8 +62,11 @@ const aliasDe = new Map(), sufixoDe = new Map(), slugDe = new Map(), envDe = new
 for (const [id, e] of Object.entries(es)) {
   assert.strictEqual(e.id_canonico, id, 'id_canonico bate com a chave do mapa');
   for (const a of e.aliases) {
-    assert.ok(!aliasDe.has(a), 'alias "' + a + '" pertence a duas empresas: ' + aliasDe.get(a) + ' e ' + id);
-    aliasDe.set(a, id);
+    /* Codex #353: a lib normaliza com toLowerCase().trim() — colisão só de caixa
+       ('AMB' × 'amb') passava aqui e colidia em runtime; normalizamos igual. */
+    const an = String(a).toLowerCase().trim();
+    assert.ok(!aliasDe.has(an), 'alias "' + a + '" (normalizado "' + an + '") pertence a duas empresas: ' + aliasDe.get(an) + ' e ' + id);
+    aliasDe.set(an, id);
   }
   assert.ok(!sufixoDe.has(e.sufixo_tabelas), 'sufixo_tabelas "' + e.sufixo_tabelas + '" compartilhado por ' + sufixoDe.get(e.sufixo_tabelas) + ' e ' + id);
   sufixoDe.set(e.sufixo_tabelas, id);
@@ -34,11 +76,12 @@ for (const [id, e] of Object.entries(es)) {
   envDe.set(e.prefixo_env, id);
   for (const [integ, alvo] of Object.entries(e.dono_alvo)) {
     if (integ.startsWith('_')) continue;
-    assert.ok(alvo === null || typeof alvo === 'string', 'dono_alvo.' + integ + ' de ' + id + ': decidido é UM serviço (string) ou null — nunca lista');
+    assert.ok(alvo === null || SERVICOS_VALIDOS.has(alvo), 'dono_alvo.' + integ + ' de ' + id + ' = "' + alvo + '" não é serviço conhecido (' + [...SERVICOS_VALIDOS].join(', ') + ')');
   }
   for (const [integ, donos] of Object.entries(e.dono_hoje)) {
     if (integ.startsWith('_')) continue;
     assert.ok(Array.isArray(donos) && donos.length >= 1, 'dono_hoje.' + integ + ' de ' + id + ' declara ao menos um serviço');
+    for (const d of donos) assert.ok(SERVICOS_VALIDOS.has(d), 'dono_hoje.' + integ + ' de ' + id + ' inclui "' + d + '" — serviço desconhecido');
   }
 }
 
@@ -69,11 +112,17 @@ for (const [id, e] of Object.entries(es)) {
     assert.ok(e.dono_hoje.tiktok.includes(SERVICO), 'dono_hoje.tiktok de ' + id + ' declara este serviço');
   }
 }
-/* prova material: os renovadores existem por empresa neste repo — inclusive NF-e e TikTok */
-for (const pasta of ['girassol', 'good', 'ambtotal']) {
-  assert.ok(fs.existsSync(path.join(__dirname, '..', pasta, 'tokenManager.js')), pasta + '/tokenManager.js (Bling) existe');
-  assert.ok(fs.existsSync(path.join(__dirname, '..', pasta, 'mlTokenManager.js')), pasta + '/mlTokenManager.js (ML) existe');
-  assert.ok(fs.existsSync(path.join(__dirname, '..', pasta, 'nfTokenManager.js')), pasta + '/nfTokenManager.js (app de NF-e) existe');
+/* prova material DERIVADA DO CONTRATO (Codex #353: hardcode das 3 pastas deixaria a
+   4ª empresa entrar sem renovador e o teste calado — embarcar CNPJ novo é o propósito
+   disto tudo): pra cada empresa cujo dono_hoje declara este serviço, os módulos têm
+   que existir na pasta do id_canonico. */
+const MODULO_DE = { bling: 'tokenManager.js', ml: 'mlTokenManager.js', bling_nfe: 'nfTokenManager.js' };
+for (const [id, e] of Object.entries(es)) {
+  for (const [integ, arq] of Object.entries(MODULO_DE)) {
+    if ((e.dono_hoje[integ] || []).includes(SERVICO)) {
+      assert.ok(fs.existsSync(path.join(__dirname, '..', id, arq)), id + '/' + arq + ' não existe — mas o contrato diz que este serviço renova ' + integ + ' da ' + id);
+    }
+  }
 }
 assert.ok(fs.existsSync(path.join(__dirname, '..', 'tiktok-oauth')), 'tiktok-oauth/ existe — a renovação do TikTok mora aqui');
 
@@ -82,7 +131,7 @@ assert.ok(fs.existsSync(path.join(__dirname, '..', 'tiktok-oauth')), 'tiktok-oau
 const ele = contrato.passo_2_eleicao;
 assert.ok(ele && ele.dono_eleito, 'eleição registrada');
 for (const [integ, dono] of Object.entries(ele.dono_eleito)) {
-  assert.strictEqual(typeof dono, 'string', 'dono eleito de ' + integ + ' é UM serviço');
+  assert.ok(SERVICOS_VALIDOS.has(dono), 'dono eleito de ' + integ + ' = "' + dono + '" não é serviço conhecido');
 }
 assert.strictEqual(ele.dono_eleito.ml, 'mover-pedidos', 'no ML o dono único é obrigação (refresh de uso único)');
 
