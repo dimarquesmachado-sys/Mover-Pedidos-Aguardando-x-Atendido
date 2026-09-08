@@ -834,35 +834,58 @@ async function tratar(req, res, urlObj, json) {
         const arr = (j && Array.isArray(j.data)) ? j.data : null;
         linha.status = r.status;
         linha.itens = arr ? arr.length : null;
-        /* Codex #351: itens>0 NÃO basta — o filtro pode ter sido ignorado (lição já
-           codificada no blingTemChave). O DETALHE confirma a chave antes de a situação
-           entrar em reveladoras. */
-        if (arr && arr.length && arr[0].id) {
-          await sleep(350);
-          const ac2 = new AbortController(); const t2 = setTimeout(() => ac2.abort(), 20000);
-          try {
-            const r2 = await _fetchRef.fn(BLING_BASE + '/nfe/' + arr[0].id, { headers: { Authorization: 'Bearer ' + tokenBling, Accept: 'application/json' }, signal: ac2.signal, timeout: 20000 });
-            const det = jsonSeguro(await r2.text());
-            const chaveDet = det && det.data && det.data.chaveAcesso ? String(det.data.chaveAcesso) : null;
-            linha.primeiro = { id: arr[0].id, numero: arr[0].numero, serie: arr[0].serie, situacao: det && det.data ? det.data.situacao : arr[0].situacao };
-            linha.chave_confirmada = chaveDet === chave;
-            if (chaveDet !== chave) linha.filtro_ignorado = true;
-          } finally { clearTimeout(t2); }
+        /* Codex #351 r2: TODOS os candidatos (até 3) são inspecionados — a nota certa pode
+           vir em arr[1] com o filtro ignorado; falha do DETALHE conta como falha da linha;
+           e a evidência definitiva do enum é o situacao DO DETALHE da nota confirmada
+           (o filtro situacao também pode ser ignorado — chave batendo com sit errado não
+           revela nada, mas ENTREGA a situação real, que é a resposta que queremos). */
+        if (arr && arr.length) {
+          for (const cand of arr.slice(0, 3)) {
+            if (!cand || !cand.id) continue;
+            await sleep(350);
+            const ac2 = new AbortController(); const t2 = setTimeout(() => ac2.abort(), 20000);
+            try {
+              const r2 = await _fetchRef.fn(BLING_BASE + '/nfe/' + cand.id, { headers: { Authorization: 'Bearer ' + tokenBling, Accept: 'application/json' }, signal: ac2.signal, timeout: 20000 });
+              const corpo2 = await r2.text();
+              if (!r2 || r2.status !== 200) { linha.detalhe_falhou = 'HTTP ' + (r2 ? r2.status : 0); continue; }
+              const det = jsonSeguro(corpo2);
+              const chaveDet = det && det.data && det.data.chaveAcesso ? String(det.data.chaveAcesso) : null;
+              if (chaveDet === chave) {
+                linha.chave_confirmada = true;
+                linha.situacao_da_nota = det.data.situacao;
+                linha.primeiro = { id: cand.id, numero: det.data.numero, serie: det.data.serie, situacao: det.data.situacao };
+                break;
+              }
+            } catch (e) { linha.detalhe_falhou = String(e.message || e).slice(0, 80); } finally { clearTimeout(t2); }
+          }
+          if (!linha.chave_confirmada && !linha.detalhe_falhou) linha.filtro_ignorado = true;
         }
       } catch (e) { linha.erro = String(e.message || e).slice(0, 120); }
       resultados.push(linha);
     }
-    /* Codex #351: falha de consulta é INCONCLUSIVO, nunca veredito — 429/timeout numa
-       das 12 podia levar o experimento único à conclusão errada. */
-    const falharam = resultados.filter(x => x.erro || x.status !== 200).length;
-    const reveladoras = resultados.filter(x => x.chave_confirmada === true).map(x => x.situacao);
+    /* Codex #351 r2 — precedência epistemológica: positivo CONFIRMADO vale mesmo com
+       falhas alheias (falha só impede o veredito NEGATIVO); reveladora exige o situacao
+       do detalhe casando com o sit pedido; e a situação REAL da nota (do detalhe) sai
+       na resposta ainda que nenhum filtro tenha funcionado — é ela a resposta final. */
+    const falharam = resultados.filter(x => x.erro || x.status !== 200 || x.detalhe_falhou).length;
+    const reveladoras = resultados.filter(x => x.chave_confirmada === true && String(x.situacao_da_nota) === String(x.situacao)).map(x => x.situacao);
+    const confirmadaQualquer = resultados.find(x => x.chave_confirmada === true);
+    const situacaoReal = confirmadaQualquer ? confirmadaQualquer.situacao_da_nota : null;
+    let veredito;
+    if (reveladoras.length) {
+      veredito = 'a(s) situação(ões) ' + reveladoras.join(', ') + ' revela(m) esta chave (detalhe confirmou chave E situação)'
+        + (falharam ? ' — ' + falharam + ' outras consultas falharam, sem afetar o positivo' : '');
+    } else if (situacaoReal != null) {
+      veredito = 'a nota ESTÁ no Bling com situacao=' + situacaoReal + ' (detalhe confirmou a chave), mas nenhum filtro situacao pedido casou — o filtro parece ignorado; use situacao=' + situacaoReal + ' no conserto';
+    } else if (falharam) {
+      veredito = 'INCONCLUSIVO — ' + falharam + ' das consultas falharam (429/timeout/detalhe); rode de novo';
+    } else {
+      veredito = 'as 12 consultas e detalhes responderam e nenhuma revelou a chave — ou ela não está no Bling, ou o filtro combinado não funciona';
+    }
     json(res, 200, {
       ok: true, versao: VERSAO, empresa, chave,
-      veredito: falharam
-        ? 'INCONCLUSIVO — ' + falharam + ' das 12 consultas falharam (429/timeout/etc); rode de novo'
-        : (reveladoras.length
-            ? 'a(s) situação(ões) ' + reveladoras.join(', ') + ' revela(m) esta chave (confirmada pelo detalhe)'
-            : 'as 12 consultas responderam e nenhuma revelou a chave — ou ela não está no Bling, ou o filtro combinado não funciona'),
+      veredito,
+      situacao_real_da_nota: situacaoReal != null ? situacaoReal : undefined,
       consultas_falhas: falharam || undefined,
       resultados,
     });
