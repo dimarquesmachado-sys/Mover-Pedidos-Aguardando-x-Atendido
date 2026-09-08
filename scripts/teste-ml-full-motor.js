@@ -234,5 +234,47 @@ _trocarFetchParaTeste(async (url) => {
   assert.strictEqual(rq.canceladas_quarentenadas, 1, 'cancelada salva foi quarentenada');
   assert.ok(!mf._interno.listarArquivos('amb', 'saida').some(x => x.arquivo.includes(chCanc)), 'cancelada sumiu do ZIP de saída');
 
-  console.log('OK: motor fase 1 — canceladas quarentenadas, cursor disjunto, trava com 409, token no lock');
+  // #350 r2 (P1): o EXEMPLO do Codex vira teste — última em cache, teto=1: com o cursor
+  // por prefixo contíguo, NENHUMA posição fica pra trás através das rodadas
+  mf._interno._limparCacheConfirmadasParaTeste();
+  fs.rmSync(process.env.ML_FULL_DIR, { recursive: true, force: true });
+  fs.mkdirSync(process.env.ML_FULL_DIR, { recursive: true });
+  const soUltima = CHV(6);
+  _trocarFetchParaTeste(async (url) => {
+    if (url.includes('period/stream')) return { status: 200, buffer: async () => z.toBuffer(), text: async () => '' };
+    if (url.includes('/users/me')) return { status: 200, text: async () => JSON.stringify({ id: 999 }) };
+    if (url.includes('/nfe?chaveAcesso=' + soUltima)) return { status: 200, text: async () => JSON.stringify({ data: [{ id: 'i6' }] }) };
+    if (url.includes('/nfe/i6')) return { status: 200, text: async () => JSON.stringify({ data: { id: 'i6', chaveAcesso: soUltima } }) };
+    if (url.includes('/nfe?chaveAcesso=')) return { status: 200, text: async () => JSON.stringify({ data: [] }) };
+    throw new Error('não previsto: ' + url);
+  });
+  await varrerLote('amb', '20260901', '20260901', 60, { tokenML: 'tk', tokenBling: 'tb' }); // popula o cache (CHV6 presente) e salva as ausentes
+  fs.rmSync(process.env.ML_FULL_DIR, { recursive: true, force: true });
+  fs.mkdirSync(process.env.ML_FULL_DIR, { recursive: true }); // some o disco, fica o cache
+  const alcancadas = new Set();
+  for (let i = 0; i < 8; i++) {
+    const ri = await varrerLote('amb', '20260901', '20260901', 1, { tokenML: 'tk', tokenBling: 'tb' });
+    for (const n of ri.novas) alcancadas.add(n.chave);
+  }
+  assert.ok(alcancadas.size >= 3, 'com cache no meio e teto=1, o cursor contíguo alcança todas as posições (alcançou ' + alcancadas.size + ')');
+  assert.ok(!alcancadas.has(soUltima), 'a cacheada nunca vira pendente');
+
+  // #350 r2 (P1): chave com DUAS cópias (raiz legada + tipada) cancelada ⇒ AMBAS quarentenadas
+  mf._interno._limparCacheConfirmadasParaTeste();
+  fs.rmSync(process.env.ML_FULL_DIR, { recursive: true, force: true });
+  fs.mkdirSync(path.join(process.env.ML_FULL_DIR, 'saida'), { recursive: true });
+  const chC = '3526096428909100010055002' + '000000117'.padStart(9, '0') + '1234567890';
+  fs.writeFileSync(path.join(process.env.ML_FULL_DIR, 'amb-nota-117.xml'), xmlDe(chC, 1)); // raiz legada
+  fs.writeFileSync(path.join(process.env.ML_FULL_DIR, 'saida', 'amb-117-' + chC + '.xml'), xmlDe(chC, 1)); // tipada
+  _trocarFetchParaTeste(async (url) => {
+    if (url.includes('period/stream')) return { status: 200, buffer: async () => z.toBuffer(), text: async () => '' };
+    if (url.includes('/users/me')) return { status: 200, text: async () => JSON.stringify({ id: 999 }) };
+    if (url.includes('/nfe?chaveAcesso=')) return { status: 200, text: async () => JSON.stringify({ data: [] }) };
+    throw new Error('não previsto: ' + url);
+  });
+  await varrerLote('amb', '20260901', '20260901', 60, { tokenML: 'tk', tokenBling: 'tb' });
+  assert.ok(!mf._interno.listarArquivos('amb', 'saida').some(x => x.arquivo.includes(chC)), 'cópia tipada quarentenada');
+  assert.ok(!mf._interno.listarArquivos('amb', null).some(x => x.arquivo.includes('amb-nota-117')), 'cópia da raiz TAMBÉM quarentenada');
+
+  console.log('OK: motor fase 1 — cursor contíguo (exemplo do Codex), quarentena de todas as cópias, cancelada validada pelo XML');
 })().catch(e => { console.error('FALHOU (motor):', e.message); process.exit(1); });

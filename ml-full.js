@@ -182,7 +182,7 @@ async function blingTemChave(tokenBling, chave, orcamentoRestante) {
     if (arr.length > 1) return { verificada: false, erro: 'lista com ' + arr.length + ' itens pra chave única (filtro ignorado?)', chamadas: 1 };
     const id = arr[0] && arr[0].id;
     if (!id) return { verificada: false, erro: 'item sem id na lista', chamadas: 1 };
-    if (Number(orcamentoRestante) < 2) return { verificada: false, erro: 'teto no meio — lista feita, detalhe adiado pra próxima rodada', chamadas: 1 };
+    if (Number(orcamentoRestante) < 2) return { verificada: false, teto: true, erro: 'teto no meio — lista feita, detalhe adiado pra próxima rodada', chamadas: 1 };
     await sleep(350);
     feitas = 2;
     const ac2 = new AbortController(); const t2 = setTimeout(() => ac2.abort(), 20000);
@@ -243,17 +243,27 @@ async function _varrerLoteInterno(empresa, de, ate, teto, deps) {
   /* Codex #349 r2: a sonda salvou legados na RAIZ com outro padrão de nome — conferir
      só o destino tipado deixaria o /varrer gravar uma SEGUNDA cópia da mesma chave e o
      ZIP apresentaria a NF-e duas vezes. O dedup é por CHAVE, atravessando raiz+tipadas. */
-  const chavesDisco = new Map(); // chave → caminho no disco (raiz legada inclusa)
+  /* Codex #350 r2 (P1): a MESMA chave pode existir em MAIS de um caminho (legado da raiz
+     + cópia tipada — estado histórico real deste módulo); Map chave→um caminho movia só
+     uma cópia e o ZIP continuava servindo a outra. Vale pra quarentena E pro arquivar. */
+  const chavesDisco = new Map(); // chave → TODOS os caminhos no disco
   for (const a of listarArquivos(empresa, null)) {
     const mNome = a.arquivo.match(/-(\d{44})\.xml$/);
-    if (mNome) { chavesDisco.set(mNome[1], a.caminho); continue; }
-    try { const ch = extrairChave(fs.readFileSync(a.caminho, 'utf8')); if (ch) chavesDisco.set(ch, a.caminho); } catch (e) {}
+    let ch = mNome ? mNome[1] : null;
+    if (!ch) { try { ch = extrairChave(fs.readFileSync(a.caminho, 'utf8')); } catch (e) {} }
+    if (!ch) continue;
+    if (!chavesDisco.has(ch)) chavesDisco.set(ch, []);
+    chavesDisco.get(ch).push(a.caminho);
   }
   let arquivadas = 0;
-  const arquivar = (caminho) => {
-    const dest = path.join(DIR, 'importadas');
+  const moverTodas = (caminhos, subpasta) => {
+    const dest = path.join(DIR, subpasta);
     fs.mkdirSync(dest, { recursive: true });
-    fs.renameSync(caminho, path.join(dest, path.basename(caminho)));
+    let movidos = 0;
+    for (const cam of caminhos) {
+      try { fs.renameSync(cam, path.join(dest, path.basename(cam))); movidos++; } catch (e) {}
+    }
+    return movidos;
   };
 
   const candidatas = [];
@@ -264,16 +274,19 @@ async function _varrerLoteInterno(empresa, de, ate, teto, deps) {
     censo[c.pasta] = (censo[c.pasta] || 0) + 1;
     if (RE_PASTA_IGNORADA.test(c.caminho)) { ignoradasSimbolicas++; continue; }
     if (RE_PASTA_CANCELADA.test(c.caminho)) {
+      /* Codex #350 r2 (P2): o nome do arquivo pode mentir — o ramo autorizado valida a
+         chave do XML e o cancelado pulava a validação, quarentenando pela fé no nome.
+         Mismatch é anomalia aqui também, sem quarentena e sem marcar a chave. */
+      const chaveXmlCanc = extrairChave(en.getData().toString('utf8'));
+      if (chaveXmlCanc !== c.chave) { anomalias.push({ arquivo: c.caminho, chave_nome: c.chave, chave_xml: chaveXmlCanc }); continue; }
       canceladasNoLote.push({ invoice_id: c.invoice_id, chave: c.chave });
       chavesCanceladas.add(c.chave);
-      /* Codex #350 r1 (P1): cancelada JÁ SALVA por varredura anterior (inclusive pelas
-         rodadas reais que motivaram este acerto) ficaria no ZIP pra sempre — vai pra
-         quarentena canceladas/, fora dos ZIPs, histórico preservado. */
-      const salvaCanc = chavesDisco.get(c.chave);
-      if (salvaCanc) {
-        const destC = path.join(DIR, 'canceladas');
-        fs.mkdirSync(destC, { recursive: true });
-        try { fs.renameSync(salvaCanc, path.join(destC, path.basename(salvaCanc))); quarentenadas++; chavesDisco.delete(c.chave); } catch (e) {}
+      /* Codex #350 r1 (P1): cancelada JÁ SALVA ficaria no ZIP pra sempre — TODAS as
+         cópias vão pra quarentena canceladas/ (r2: inclusive raiz+tipada da mesma chave). */
+      const caminhosCanc = chavesDisco.get(c.chave);
+      if (caminhosCanc && caminhosCanc.length) {
+        quarentenadas += moverTodas(caminhosCanc, 'canceladas') ? 1 : 0;
+        chavesDisco.delete(c.chave);
       }
       continue;
     }
@@ -288,18 +301,23 @@ async function _varrerLoteInterno(empresa, de, ate, teto, deps) {
 
   const _rot = candidatas.length ? (_cursorFila.get(empresa) || 0) % candidatas.length : 0;
   const fila = candidatas.slice(_rot).concat(candidatas.slice(0, _rot));
-  let cobertas = 0; // candidatas resolvidas nesta rodada (teto-cortadas NÃO contam)
+  /* Codex #350 r2 (P1): avançar por CONTAGEM de resolvidas pulava posições — cache-hit
+     DEPOIS do corte contava, a cortada no meio não, e (6 candidatas, última em cache,
+     teto=1) visitava só 1,3,5 pra sempre. O cursor avança até a PRIMEIRA cortada por
+     teto: prefixo contíguo resolvido, nada fica pra trás. */
+  let primeiroCorte = null;
+  let idxFila = -1;
 
   for (const cand of fila) {
+    idxFila++;
     const c = cand.c, xml = cand.xml, tipo = cand.tipo;
-    if (chavesCanceladas.has(c.chave)) { cobertas++; continue; } // apareceu também em Canceladas: nunca importa
+    if (chavesCanceladas.has(c.chave)) continue; // apareceu também em Canceladas: nunca importa
 
     /* presença confirmada há menos de 7 dias: não gasta consulta */
     const conf = _confirmadasNoBling.get(c.chave);
     if (conf && (Date.now() - conf) < TTL_CONFIRMADA) {
-      cobertas++;
       const salvaConf = chavesDisco.get(c.chave);
-      if (salvaConf) { arquivar(salvaConf); chavesDisco.delete(c.chave); arquivadas++; }
+      if (salvaConf && salvaConf.length) { moverTodas(salvaConf, 'importadas'); chavesDisco.delete(c.chave); arquivadas++; }
       else jaNoBling++;
       continue;
     }
@@ -310,14 +328,15 @@ async function _varrerLoteInterno(empresa, de, ate, teto, deps) {
        a chave passa a existir no Bling e o ZIP precisa parar de re-apresentá-la. Salva
        re-encontrada no lote é RE-CONFERIDA (dentro do teto) e, presente no Bling, vai
        pra importadas/ (fora dos ZIPs, histórico preservado); ausente/erro segue no ZIP. */
-    const jaSalva = chavesDisco.get(c.chave) || (fs.existsSync(destino) ? destino : null);
+    const caminhosSalvos = chavesDisco.get(c.chave) || (fs.existsSync(destino) ? [destino] : null);
+    const jaSalva = !!(caminhosSalvos && caminhosSalvos.length);
 
     if (consultasBling >= teto) {
+      if (primeiroCorte === null) primeiroCorte = idxFila;
       if (jaSalva) { jaBaixadas++; continue; }
       naoConferidas.push({ chave: c.chave, tipo, motivo: 'teto de ' + teto + ' consultas ao Bling — rode de novo' });
       continue;
     }
-    cobertas++;
     if (!tokenBling) {
       try { tokenBling = await garantirTokenBling(empresa); }
       catch (e) { return { ok: false, resultado: 'sem_token_bling', detalhe: String(e.message || e) }; }
@@ -330,8 +349,9 @@ async function _varrerLoteInterno(empresa, de, ate, teto, deps) {
     if (jaSalva) {
       const b0 = await blingTemChave(tokenBling, c.chave, teto - consultasBling);
       consultasBling += b0.chamadas || 1;
-      if (b0.verificada && b0.esta_no_bling) { _confirmadasNoBling.set(c.chave, Date.now()); arquivar(jaSalva); chavesDisco.delete(c.chave); arquivadas++; }
+      if (b0.verificada && b0.esta_no_bling) { _confirmadasNoBling.set(c.chave, Date.now()); moverTodas(caminhosSalvos, 'importadas'); chavesDisco.delete(c.chave); arquivadas++; }
       else if (!b0.verificada) {
+        if (b0.teto && primeiroCorte === null) primeiroCorte = idxFila;
         /* Codex #349 r4: reconferência que falhou NÃO pode sumir como ja_baixada — o
            relatório pareceria completo com status jamais verificado. O arquivo fica,
            e a pendência aparece nomeada. */
@@ -344,16 +364,20 @@ async function _varrerLoteInterno(empresa, de, ate, teto, deps) {
     const b = await blingTemChave(tokenBling, c.chave, teto - consultasBling);
     consultasBling += b.chamadas || 1;
 
-    if (!b.verificada) { naoConferidas.push({ chave: c.chave, tipo, motivo: b.erro }); continue; }
+    if (!b.verificada) {
+      if (b.teto && primeiroCorte === null) primeiroCorte = idxFila;
+      naoConferidas.push({ chave: c.chave, tipo, motivo: b.erro });
+      continue;
+    }
     if (b.esta_no_bling) { _confirmadasNoBling.set(c.chave, Date.now()); jaNoBling++; continue; }
 
     fs.mkdirSync(path.join(DIR, tipo), { recursive: true });
     fs.writeFileSync(destino, xml);
-    chavesDisco.set(c.chave, destino);
+    chavesDisco.set(c.chave, [destino]);
     novas.push({ tipo, invoice_id: c.invoice_id, chave: c.chave, arquivo: nomeDisco, numero: String(Number(c.chave.slice(25, 34))) });
   }
 
-  if (candidatas.length) _cursorFila.set(empresa, (_rot + cobertas) % candidatas.length);
+  if (candidatas.length) _cursorFila.set(empresa, (_rot + (primeiroCorte === null ? fila.length : primeiroCorte)) % candidatas.length);
   return {
     ok: true, janela: { de, ate }, uid: me.id,
     censo_pastas: censo,
