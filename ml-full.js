@@ -220,6 +220,7 @@ async function blingTemChave(tokenBling, chave, orcamentoRestante, tipo) {
     if (l1.erro) return { verificada: false, erro: l1.erro, chamadas: feitas };
 
     let candidato = l1.arr.length ? l1.arr[0] : null;
+    let padraoInconclusiva = false;
 
     if (candidato && candidato.id) {
       if (Number(orcamentoRestante) - feitas < 1) return { verificada: false, teto: true, erro: 'teto no meio — lista feita, detalhe adiado pra próxima rodada', chamadas: feitas };
@@ -230,12 +231,17 @@ async function blingTemChave(tokenBling, chave, orcamentoRestante, tipo) {
       if (String(det1.data.chaveAcesso || '') === chave) return { verificada: true, esta_no_bling: true, id: candidato.id, chamadas: feitas };
       /* #352 r1 (P2): candidato ERRADO (filtro ignorado) não encerra — a cancelada
          ainda pode existir; cai pra segunda lista em vez de inconcluir pra sempre. */
+      padraoInconclusiva = true;
     }
 
     if (Number(orcamentoRestante) - feitas < 1) return { verificada: false, teto: true, erro: 'teto no meio — lista de canceladas adiada', chamadas: feitas };
     const l2 = lerLista(await listar('&situacao=' + SITUACAO_CANCELADA_BLING), 'lista de canceladas');
     if (l2.erro) return { verificada: false, erro: l2.erro, chamadas: feitas };
     if (!l2.arr.length) {
+      /* #352 r2 (P1): ausência só é CONCLUSIVA se a lista padrão também foi conclusiva —
+         com o filtro ignorado lá, a nota pode existir autorizada sem ter aparecido;
+         concluir ausência re-ofereceria pro import uma NF que já está no Bling. */
+      if (padraoInconclusiva) return { verificada: false, erro: 'padrão com filtro ignorado e canceladas vazia — inconclusivo', chamadas: feitas };
       return { verificada: true, esta_no_bling: false, chamadas: feitas };
     }
     const cand2 = l2.arr[0];

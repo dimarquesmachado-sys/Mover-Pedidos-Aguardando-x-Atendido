@@ -352,5 +352,16 @@ _trocarFetchParaTeste(async (url) => {
   assert.ok(bv.verificada && bv.esta_no_bling && bv.cancelada === true, 'mismatch na padrão cai pra canceladas e confirma');
   assert.strictEqual(bv.chamadas, 4, 'caminho completo: 4 chamadas contadas');
 
-  console.log('OK: motor fase 1 — visão completa: canceladas (situacao=2) e entradas (tipo=0); mismatch cai pra canceladas; ausente exige as duas listas vazias');
+  // #352 r2 (P1): mismatch na padrão + canceladas VAZIA = inconclusivo, nunca ausência
+  const CH_Y = CHV(3);
+  _trocarFetchParaTeste(async (url) => {
+    if (url.includes('situacao=2') && url.includes(CH_Y)) return { status: 200, text: async () => JSON.stringify({ data: [] }) };
+    if (url.includes('/nfe?chaveAcesso=' + CH_Y)) return { status: 200, text: async () => JSON.stringify({ data: [{ id: 'zz' }] }) };
+    if (url.includes('/nfe/zz')) return { status: 200, text: async () => JSON.stringify({ data: { id: 'zz', chaveAcesso: '8'.repeat(44) } }) };
+    throw new Error('não previsto: ' + url);
+  });
+  bv = await blingTemChave('tb', CH_Y, 60, 'saida');
+  assert.ok(!bv.verificada && String(bv.erro).includes('inconclusivo'), 'padrão inconclusiva nunca vira ausência: ' + JSON.stringify(bv));
+
+  console.log('OK: motor fase 1 — visão completa: canceladas, entradas, mismatch cai pra canceladas, e ausência só com AMBAS conclusivas');
 })().catch(e => { console.error('FALHOU (motor):', e.message); process.exit(1); });
