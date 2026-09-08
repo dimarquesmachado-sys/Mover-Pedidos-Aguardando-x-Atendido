@@ -834,6 +834,9 @@ async function tratar(req, res, urlObj, json) {
         const arr = (j && Array.isArray(j.data)) ? j.data : null;
         linha.status = r.status;
         linha.itens = arr ? arr.length : null;
+        /* Codex #351 r3: 200 com corpo ilegível não é sucesso — sem isto, contribuía
+           pro veredito negativo conclusivo. */
+        if (r.status === 200 && arr === null) linha.erro = 'corpo 200 ilegível';
         /* Codex #351 r2: TODOS os candidatos (até 3) são inspecionados — a nota certa pode
            vir em arr[1] com o filtro ignorado; falha do DETALHE conta como falha da linha;
            e a evidência definitiva do enum é o situacao DO DETALHE da nota confirmada
@@ -858,7 +861,12 @@ async function tratar(req, res, urlObj, json) {
               }
             } catch (e) { linha.detalhe_falhou = String(e.message || e).slice(0, 80); } finally { clearTimeout(t2); }
           }
-          if (!linha.chave_confirmada && !linha.detalhe_falhou) linha.filtro_ignorado = true;
+          if (!linha.chave_confirmada && !linha.detalhe_falhou) {
+            /* Codex #351 r3: com mais de 3 candidatos, a chave pode estar além do corte —
+               a linha vira INCONCLUSIVA (conta como falha), nunca negativo conclusivo. */
+            if (arr.length > 3) linha.inconclusiva = 'lista com ' + arr.length + ' itens, só 3 inspecionados';
+            else linha.filtro_ignorado = true;
+          }
         }
       } catch (e) { linha.erro = String(e.message || e).slice(0, 120); }
       resultados.push(linha);
@@ -867,7 +875,7 @@ async function tratar(req, res, urlObj, json) {
        falhas alheias (falha só impede o veredito NEGATIVO); reveladora exige o situacao
        do detalhe casando com o sit pedido; e a situação REAL da nota (do detalhe) sai
        na resposta ainda que nenhum filtro tenha funcionado — é ela a resposta final. */
-    const falharam = resultados.filter(x => x.erro || x.status !== 200 || x.detalhe_falhou).length;
+    const falharam = resultados.filter(x => x.erro || x.status !== 200 || x.detalhe_falhou || x.inconclusiva).length;
     const reveladoras = resultados.filter(x => x.chave_confirmada === true && String(x.situacao_da_nota) === String(x.situacao)).map(x => x.situacao);
     const confirmadaQualquer = resultados.find(x => x.chave_confirmada === true);
     const situacaoReal = confirmadaQualquer ? confirmadaQualquer.situacao_da_nota : null;
