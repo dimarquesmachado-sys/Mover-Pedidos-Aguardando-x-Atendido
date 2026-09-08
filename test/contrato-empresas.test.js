@@ -55,24 +55,37 @@ assert.ok(es.ambtotal && es.ambtotal.aliases.includes('amb') && !es.amb,
   '"amb" é ALIAS de "ambtotal", nunca identidade própria — a inversão disso quebra o Devoluções');
 assert.ok(emp.valida('amb'), 'o registro local conhece o alias "amb"');
 
-/* ── (c) dono_hoje diz a verdade sobre ESTE serviço ── */
+/* ── (c) dono_hoje diz a verdade sobre ESTE serviço — inclusive nos eixos da v3 ── */
 for (const [id, e] of Object.entries(es)) {
-  for (const integ of ['bling', 'ml', 'magalu']) {
-    assert.ok(e.dono_hoje[integ].includes(SERVICO),
+  for (const integ of ['bling', 'ml', 'magalu', 'bling_nfe']) {
+    assert.ok(e.dono_hoje[integ] && e.dono_hoje[integ].includes(SERVICO),
       'dono_hoje.' + integ + ' de ' + id + ' omite "' + SERVICO + '" — mas este serviço renova essa conta (contrato mentindo é pior que contrato nenhum)');
   }
+  /* v3: TikTok medido dos DOIS lados — só a GOOD não tem; nas outras, quem renova é este serviço */
+  const tt = e.conta_marketplace.tiktok;
+  if (id === 'good') assert.strictEqual(tt, 'nao_se_aplica', 'GOOD não tem TikTok');
+  else {
+    assert.strictEqual(tt, 'propria', id + ' TEM TikTok (a v2 dizia nao_se_aplica e estava errada)');
+    assert.ok(e.dono_hoje.tiktok.includes(SERVICO), 'dono_hoje.tiktok de ' + id + ' declara este serviço');
+  }
 }
-/* prova material: os renovadores existem por empresa neste repo */
+/* prova material: os renovadores existem por empresa neste repo — inclusive NF-e e TikTok */
 for (const pasta of ['girassol', 'good', 'ambtotal']) {
   assert.ok(fs.existsSync(path.join(__dirname, '..', pasta, 'tokenManager.js')), pasta + '/tokenManager.js (Bling) existe');
   assert.ok(fs.existsSync(path.join(__dirname, '..', pasta, 'mlTokenManager.js')), pasta + '/mlTokenManager.js (ML) existe');
+  assert.ok(fs.existsSync(path.join(__dirname, '..', pasta, 'nfTokenManager.js')), pasta + '/nfTokenManager.js (app de NF-e) existe');
 }
+assert.ok(fs.existsSync(path.join(__dirname, '..', 'tiktok-oauth')), 'tiktok-oauth/ existe — a renovação do TikTok mora aqui');
 
-/* Pendências declaradas pra v3 do contrato (NÃO falham — contrato é versionado):
-   1. eixo "bling_nfe": o nfTokenManager deste repo renova o app de NF-e das 3 empresas
-      — a v2 não modela essa integração (o próprio autor pediu o acréscimo);
-   2. conta_marketplace.tiktok = "nao_se_aplica" está ERRADO pra girassol e ambtotal:
-      as duas têm TikTok Shop com tokens renovados POR ESTE serviço (tiktok-oauth);
-   3. slug_http reflete o lado do Devoluções; aqui a inversão é a girassol sem prefixo
-      de rota — se um dia o campo virar por-serviço, este teste passa a conferi-lo. */
+/* v3: a ELEIÇÃO está registrada como acordo, não como feito — o teste confere a forma,
+   nunca "obedece": ninguém desliga renovação até o desenho do passo 2 estar pronto. */
+const ele = contrato.passo_2_eleicao;
+assert.ok(ele && ele.dono_eleito, 'eleição registrada');
+for (const [integ, dono] of Object.entries(ele.dono_eleito)) {
+  assert.strictEqual(typeof dono, 'string', 'dono eleito de ' + integ + ' é UM serviço');
+}
+assert.strictEqual(ele.dono_eleito.ml, 'mover-pedidos', 'no ML o dono único é obrigação (refresh de uso único)');
+
+/* Pendência remanescente (não falha): slug_http reflete o lado do Devoluções; aqui a
+   inversão é a girassol sem prefixo de rota — se o campo virar por-serviço, conferimos. */
 console.log('OK: contrato v' + contrato.versao + ' coerente e espelhado — registro local bate, dono_hoje diz a verdade sobre este serviço');

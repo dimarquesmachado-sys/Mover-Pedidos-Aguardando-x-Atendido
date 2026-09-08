@@ -1,26 +1,25 @@
 {
   "_leia_me": [
-    "CONTRATO DE EMPRESAS — v2 (07/09/2026)",
+    "CONTRATO DE EMPRESAS — v3 (07/09/2026)",
     "",
-    "Nasceu da revisão do Codex (docs/REVISAO-MULTIEMPRESA-2026-09-07.md) e a",
-    "v2 vem do PARECER DO MOVER-PEDIDOS, que corrigiu duas coisas da v1.",
+    "Dado, não código. Os dois repositórios (Devoluções e Mover-Pedidos) leem",
+    "este mesmo arquivo, byte a byte, e cada um tem um teste de paridade — a",
+    "divergência aparece no teste, não em produção.",
     "",
-    "É DADO, não código. Os dois repositórios leem este mesmo arquivo e cada",
-    "um tem um teste de paridade contra ele — a divergência aparece no teste,",
-    "não em produção.",
+    "⚠️ NÃO CONTÉM SEGREDO. Só identidade e NOMES de variáveis.",
     "",
-    "⚠️ NÃO CONTÉM SEGREDO. Só identidade da empresa e NOMES de variáveis.",
+    "HISTÓRICO:",
+    "  v1  primeira versão (Devoluções)",
+    "  v2  parecer do Mover-Pedidos: `dono_hoje`/`dono_alvo` (eu tinha",
+    "      inventado o dono) e `prefixo_env_historico` por serviço",
+    "  v3  parecer do Mover-Pedidos: eixo `bling_nfe` (2º app Bling, que eu",
+    "      não sabia existir) e TikTok corrigido — `nao_se_aplica` estava",
+    "      errado para ambtotal e girassol",
     "",
-    "MUDOU NA v2:",
-    "  1. `dono_dos_tokens` virou `dono_hoje` + `dono_alvo`. A v1 dizia que o",
-    "     Devoluções renovava Bling e ML — ERRADO: o Mover-Pedidos renova em",
-    "     produção, pelos tokenManagers dele. O conflito do P1 está ATIVO, não",
-    "     prevenido. Declarar a verdade é o primeiro passo pra consertar.",
-    "  2. `prefixo_env_historico` virou objeto POR SERVIÇO. Um campo único não",
-    "     comportava a inversão que o próprio documento destacou, e o teste",
-    "     espelho do Mover-Pedidos quebraria por desenho do contrato."
+    "As três versões saíram de correção externa. Vale dizer: o que eu escrevo",
+    "sozinho sobre o outro serviço tem errado."
   ],
-  "versao": 2,
+  "versao": 3,
   "atualizado_em": "2026-09-07",
   "empresas": {
     "good": {
@@ -58,13 +57,18 @@
         ],
         "magalu": [
           "mover-pedidos"
-        ]
+        ],
+        "bling_nfe": [
+          "mover-pedidos"
+        ],
+        "_nota_bling_nfe": "o `bling_nfe` e um SEGUNDO app do Bling, com credencial propria, e o `nfTokenManager` do Mover-Pedidos o renova. MEDIDO no Devolucoes em 07/09: este repo NAO toca nele — usa um app por empresa (BLING_CLIENT_ID / AMB_ / GOOD_), sem credencial de NF-e separada."
       },
       "dono_alvo": {
         "_nota": "a eleger no passo 2. `null` = ainda não decidido — não obedecer.",
         "bling": null,
         "ml": null,
-        "magalu": "mover-pedidos"
+        "magalu": "mover-pedidos",
+        "bling_nfe": "mover-pedidos"
       }
     },
     "ambtotal": {
@@ -88,7 +92,8 @@
         "ml": "propria",
         "shopee": "propria",
         "magalu": "compartilhada",
-        "tiktok": "nao_se_aplica"
+        "tiktok": "propria",
+        "_nota_tiktok": "MEDIDO no Devolucoes em 07/09: este repo NAO renova token de TikTok — fala com o Mover-Pedidos por ponte servidor-a-servidor (lib/tiktok-ponte.js), autenticando com a ADMIN_KEY de la."
       },
       "dono_hoje": {
         "_nota": "⚠️ A VERDADE DE HOJE, não o desejado. Mais de um serviço = conflito ATIVO.",
@@ -102,13 +107,21 @@
         ],
         "magalu": [
           "mover-pedidos"
+        ],
+        "bling_nfe": [
+          "mover-pedidos"
+        ],
+        "tiktok": [
+          "mover-pedidos"
         ]
       },
       "dono_alvo": {
         "_nota": "a eleger no passo 2. `null` = ainda não decidido — não obedecer.",
         "bling": null,
         "ml": null,
-        "magalu": "mover-pedidos"
+        "magalu": "mover-pedidos",
+        "bling_nfe": "mover-pedidos",
+        "tiktok": "mover-pedidos"
       }
     },
     "girassol": {
@@ -137,7 +150,7 @@
         "ml": "propria",
         "shopee": "propria",
         "magalu": "compartilhada",
-        "tiktok": "nao_se_aplica"
+        "tiktok": "propria"
       },
       "dono_hoje": {
         "_nota": "⚠️ A VERDADE DE HOJE, não o desejado. Mais de um serviço = conflito ATIVO.",
@@ -151,13 +164,21 @@
         ],
         "magalu": [
           "mover-pedidos"
+        ],
+        "bling_nfe": [
+          "mover-pedidos"
+        ],
+        "tiktok": [
+          "mover-pedidos"
         ]
       },
       "dono_alvo": {
         "_nota": "a eleger no passo 2. `null` = ainda não decidido — não obedecer.",
         "bling": null,
         "ml": null,
-        "magalu": "mover-pedidos"
+        "magalu": "mover-pedidos",
+        "bling_nfe": "mover-pedidos",
+        "tiktok": "mover-pedidos"
       }
     }
   },
@@ -179,5 +200,19 @@
       "prova": "lib/ml.js:43 e :161 deste repo; #344 do Mover-Pedidos",
       "resolve_em": "passo 2 — eleger dono único não é preferência, é obrigação"
     }
+  },
+  "passo_2_eleicao": {
+    "_nota": "os dois serviços concordaram em 07/09. Ainda NÃO implementado — ninguém desliga renovação até o desenho estar pronto e testado.",
+    "dono_eleito": {
+      "bling": "mover-pedidos",
+      "ml": "mover-pedidos",
+      "bling_nfe": "mover-pedidos",
+      "magalu": "mover-pedidos",
+      "tiktok": "mover-pedidos"
+    },
+    "por_que": "F1/F2, F3 NF→ML, o motor ML Full e o canário dependem da renovação local do Mover-Pedidos. Mover isso de lugar é a maior cirurgia possível; manter é a menor.",
+    "o_que_muda_no_devolucoes": "passa a LER o token vigente em vez de renovar",
+    "mecanica": "a decidir juntos: rota interna assinada × tabela com versão",
+    "inegociavel": "no ML, dono único é obrigação — o refresh é de uso único"
   }
 }
