@@ -354,6 +354,24 @@ const server = http.createServer(async (req, res) => {
     return json(res, 404, { error: 'not found', path });
   }
 
+  // ── PORTEIRO DE RITMO DO BLING (08/09) — a cota é POR CONTA (CNPJ) ────────────
+  // Expedição e módulos daqui dividem a MESMA cota da Girassol (3/s pra conta toda);
+  // o porteiro dá permissão antes da chamada, com reserva pra operação (bipagem) e
+  // pausa global de 429 em que todos recuam juntos. Contrato: bling-ritmo.js.
+  if (path.startsWith('/bling-ritmo/')) {
+    if (!ADMIN_KEY || urlObj.searchParams.get('k') !== ADMIN_KEY) {
+      return json(res, 404, { error: 'not found', path });
+    }
+    try {
+      const tratou = await require('./bling-ritmo').tratar(req, res, urlObj, json);
+      if (tratou) return;
+    } catch (e) {
+      console.error('[bling-ritmo] erro:', e.message);
+      return json(res, 500, { ok: false, erro: String(e.message || e).slice(0, 200) });
+    }
+    return json(res, 404, { error: 'not found', path });
+  }
+
   // ── ML FULL (06/09) — NF-e que o PRÓPRIO ML emite no Fulfillment (série 2) ────
   // Fase sonda: provar o contrato da API de invoices com vendas reais antes do motor.
   // Tudo atrás da ADMIN_KEY (sem callback: usa os mlTokenManager que já existem).
