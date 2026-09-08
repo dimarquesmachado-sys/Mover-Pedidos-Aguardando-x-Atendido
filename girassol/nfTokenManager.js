@@ -67,14 +67,22 @@ async function gerarTokenInicialNF(auth_code) {
 
 // ── Renovar token ────────────────────────────────────────────────────
 
-let _renovandoNF = false;
+let _renovacaoEmVoo = null;
 
-async function renovarTokenNF() {
-  if (_renovandoNF) {
-    await new Promise(r => setTimeout(r, 2000));
-    return lerTokensNF().access_token;
+/* Codex #355 r3: a espera cega pelo refresh em curso lia o arquivo podendo devolver
+   token EXPIRADO ao chamador (F3, cron, rota de leitura). Agora todo chamador espera
+   a MESMA promessa — sem sono cego, sem token velho. O refresh do Bling também
+   rotaciona, então a promessa única ainda evita refresh queimado. */
+
+function renovarTokenNF() {
+  if (!_renovacaoEmVoo) {
+    _renovacaoEmVoo = _renovarTokenNFDeVerdade().finally(() => { _renovacaoEmVoo = null; });
+    _renovacaoEmVoo.catch(() => {});
   }
-  _renovandoNF = true;
+  return _renovacaoEmVoo;
+}
+
+async function _renovarTokenNFDeVerdade() {
   try {
     console.log('[nfTokenManager] Renovando token NF...');
     const { refresh_token } = lerTokensNF();
@@ -84,9 +92,7 @@ async function renovarTokenNF() {
     salvarTokensNF(data.access_token, data.refresh_token);
     console.log('[nfTokenManager] Token NF renovado ✓');
     return data.access_token;
-  } finally {
-    _renovandoNF = false;
-  }
+  } finally { /* o wrapper de promessa única limpa o em-voo */ }
 }
 
 // ── Garantir token válido ────────────────────────────────────────────

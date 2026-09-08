@@ -8,6 +8,10 @@
 const assert = require('assert');
 const it = require('../interno-token');
 const { responder, _trocarFabricasParaTeste } = it._interno;
+/* Codex #355 r3 (P2): TTL curto DESDE O INÍCIO — o cenário do prazo cria promessa
+   pendurada, e com o TTL de produção (90s) o timer referenciado segurava o processo
+   vivo muito depois do OK; restaurado só no fim. */
+it._interno._ttlEmVoo.ms = 300;
 
 let tokenAtual = 'tk-A';
 _trocarFabricasParaTeste({
@@ -82,6 +86,7 @@ _trocarFabricasParaTeste({
 
   // r2: entrada pendurada EXPIRA do mapa — a tentativa seguinte cria aquisição nova
   it._interno._ttlEmVoo.ms = 120;
+  await new Promise(r => setTimeout(r, 350)); // deixa entradas anteriores (TTL 300ms) vencerem
   let tentativas = 0;
   it._interno._trocarFabricasParaTeste({
     good: { ml: () => { tentativas++; return new Promise(() => {}); } },
@@ -90,7 +95,7 @@ _trocarFabricasParaTeste({
   await new Promise(r => setTimeout(r, 200)); // deixa o TTL da entrada vencer
   await responder('/interno/token/good/ml', 'chave-de-leitura', 50).catch(() => {});
   assert.strictEqual(tentativas, 2, 'após o TTL, a promessa morta sai do mapa e nasce aquisição NOVA (antes: 502 eterno)');
-  it._interno._ttlEmVoo.ms = 90000;
+  it._interno._ttlEmVoo.ms = 300; // segue curto até o fim do teste — nada de timer de 90s vivo
 
   // r2: toda resposta da rota sai com no-store (intermediário nunca cacheia token)
   const headers = {};

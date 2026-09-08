@@ -98,15 +98,22 @@ async function gerarTokenInicial(auth_code) {
 
 // ── Renovar token (com retry em falha transitória) ───────────────────
 
-let _renovando = false; // evita refresh duplo simultâneo
+let _renovacaoEmVoo = null;
 
-async function renovarToken() {
-  if (_renovando) {
-    // aguarda o refresh em andamento terminar (até ~10s) e devolve o token já renovado
-    for (let i = 0; i < 20 && _renovando; i++) await new Promise(r => setTimeout(r, 500));
-    return lerTokens().access_token;
+/* Codex #355 r3: a espera cega pelo refresh em curso lia o arquivo podendo devolver
+   token EXPIRADO ao chamador (F3, cron, rota de leitura). Agora todo chamador espera
+   a MESMA promessa — sem sono cego, sem token velho. O refresh do Bling também
+   rotaciona, então a promessa única ainda evita refresh queimado. */
+
+function renovarToken() {
+  if (!_renovacaoEmVoo) {
+    _renovacaoEmVoo = _renovarTokenDeVerdade().finally(() => { _renovacaoEmVoo = null; });
+    _renovacaoEmVoo.catch(() => {});
   }
-  _renovando = true;
+  return _renovacaoEmVoo;
+}
+
+async function _renovarTokenDeVerdade() {
   try {
     console.log('[tokenManager] Renovando token...');
     const { refresh_token } = lerTokens();
@@ -133,9 +140,7 @@ async function renovarToken() {
     salvarTokens(data.access_token, data.refresh_token, data.expires_in);
     console.log('[tokenManager] Token renovado ✓');
     return data.access_token;
-  } finally {
-    _renovando = false;
-  }
+  } finally { /* o wrapper de promessa única limpa o em-voo */ }
 }
 
 // ── Garantir token válido ────────────────────────────────────────────
