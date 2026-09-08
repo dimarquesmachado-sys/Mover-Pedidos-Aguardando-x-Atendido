@@ -10,11 +10,29 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+/* Codex #353: EMPRESAS (env) é lista de ATIVAÇÃO do ambiente — paridade é sobre o
+   REGISTRO. Com EMPRESAS=good o teste quebrava sem divergência nenhuma; a env é
+   neutralizada durante o teste (a lib a lê a cada chamada) e restaurada no fim. */
+const EMPRESAS_ORIG = process.env.EMPRESAS;
+delete process.env.EMPRESAS;
+process.on('exit', () => { if (EMPRESAS_ORIG !== undefined) process.env.EMPRESAS = EMPRESAS_ORIG; });
+
 const contrato = require('../contrato-empresas.json');
 const emp = require('../lib/empresas');
 
 const SERVICO = 'mover-pedidos';
+/* Codex #353: dono declarado com typo ('mover-pedido') passava por ser string — os
+   nomes válidos de serviço são finitos e conhecidos. (v4 do contrato deve trazê-los
+   num campo `servicos` pro conjunto sair do próprio dado — pedido enviado.) */
+const SERVICOS_VALIDOS = new Set(['devolucoes', 'mover-pedidos']);
 const es = contrato.empresas;
+
+/* Codex #353: chave de empresa DUPLICADA no JSON é engolida pelo parser (a última
+   vence) e a unicidade por Object.keys viraria teatro — conferida no texto CRU. */
+const cru = fs.readFileSync(path.join(__dirname, '..', 'contrato-empresas.json'), 'utf8');
+for (const id of Object.keys(es)) {
+  assert.strictEqual(cru.split('"' + id + '":').length - 1, 1, 'chave "' + id + '" aparece mais de uma vez no JSON cru — o parser engoliria a primeira');
+}
 
 /* ── (a) coerência interna: nada colide entre empresas ── */
 const ids = Object.keys(es);
@@ -23,8 +41,11 @@ const aliasDe = new Map(), sufixoDe = new Map(), slugDe = new Map(), envDe = new
 for (const [id, e] of Object.entries(es)) {
   assert.strictEqual(e.id_canonico, id, 'id_canonico bate com a chave do mapa');
   for (const a of e.aliases) {
-    assert.ok(!aliasDe.has(a), 'alias "' + a + '" pertence a duas empresas: ' + aliasDe.get(a) + ' e ' + id);
-    aliasDe.set(a, id);
+    /* Codex #353: a lib normaliza com toLowerCase().trim() — colisão só de caixa
+       ('AMB' × 'amb') passava aqui e colidia em runtime; normalizamos igual. */
+    const an = String(a).toLowerCase().trim();
+    assert.ok(!aliasDe.has(an), 'alias "' + a + '" (normalizado "' + an + '") pertence a duas empresas: ' + aliasDe.get(an) + ' e ' + id);
+    aliasDe.set(an, id);
   }
   assert.ok(!sufixoDe.has(e.sufixo_tabelas), 'sufixo_tabelas "' + e.sufixo_tabelas + '" compartilhado por ' + sufixoDe.get(e.sufixo_tabelas) + ' e ' + id);
   sufixoDe.set(e.sufixo_tabelas, id);
@@ -34,11 +55,12 @@ for (const [id, e] of Object.entries(es)) {
   envDe.set(e.prefixo_env, id);
   for (const [integ, alvo] of Object.entries(e.dono_alvo)) {
     if (integ.startsWith('_')) continue;
-    assert.ok(alvo === null || typeof alvo === 'string', 'dono_alvo.' + integ + ' de ' + id + ': decidido é UM serviço (string) ou null — nunca lista');
+    assert.ok(alvo === null || SERVICOS_VALIDOS.has(alvo), 'dono_alvo.' + integ + ' de ' + id + ' = "' + alvo + '" não é serviço conhecido (' + [...SERVICOS_VALIDOS].join(', ') + ')');
   }
   for (const [integ, donos] of Object.entries(e.dono_hoje)) {
     if (integ.startsWith('_')) continue;
     assert.ok(Array.isArray(donos) && donos.length >= 1, 'dono_hoje.' + integ + ' de ' + id + ' declara ao menos um serviço');
+    for (const d of donos) assert.ok(SERVICOS_VALIDOS.has(d), 'dono_hoje.' + integ + ' de ' + id + ' inclui "' + d + '" — serviço desconhecido');
   }
 }
 
@@ -69,11 +91,17 @@ for (const [id, e] of Object.entries(es)) {
     assert.ok(e.dono_hoje.tiktok.includes(SERVICO), 'dono_hoje.tiktok de ' + id + ' declara este serviço');
   }
 }
-/* prova material: os renovadores existem por empresa neste repo — inclusive NF-e e TikTok */
-for (const pasta of ['girassol', 'good', 'ambtotal']) {
-  assert.ok(fs.existsSync(path.join(__dirname, '..', pasta, 'tokenManager.js')), pasta + '/tokenManager.js (Bling) existe');
-  assert.ok(fs.existsSync(path.join(__dirname, '..', pasta, 'mlTokenManager.js')), pasta + '/mlTokenManager.js (ML) existe');
-  assert.ok(fs.existsSync(path.join(__dirname, '..', pasta, 'nfTokenManager.js')), pasta + '/nfTokenManager.js (app de NF-e) existe');
+/* prova material DERIVADA DO CONTRATO (Codex #353: hardcode das 3 pastas deixaria a
+   4ª empresa entrar sem renovador e o teste calado — embarcar CNPJ novo é o propósito
+   disto tudo): pra cada empresa cujo dono_hoje declara este serviço, os módulos têm
+   que existir na pasta do id_canonico. */
+const MODULO_DE = { bling: 'tokenManager.js', ml: 'mlTokenManager.js', bling_nfe: 'nfTokenManager.js' };
+for (const [id, e] of Object.entries(es)) {
+  for (const [integ, arq] of Object.entries(MODULO_DE)) {
+    if ((e.dono_hoje[integ] || []).includes(SERVICO)) {
+      assert.ok(fs.existsSync(path.join(__dirname, '..', id, arq)), id + '/' + arq + ' não existe — mas o contrato diz que este serviço renova ' + integ + ' da ' + id);
+    }
+  }
 }
 assert.ok(fs.existsSync(path.join(__dirname, '..', 'tiktok-oauth')), 'tiktok-oauth/ existe — a renovação do TikTok mora aqui');
 
@@ -82,7 +110,7 @@ assert.ok(fs.existsSync(path.join(__dirname, '..', 'tiktok-oauth')), 'tiktok-oau
 const ele = contrato.passo_2_eleicao;
 assert.ok(ele && ele.dono_eleito, 'eleição registrada');
 for (const [integ, dono] of Object.entries(ele.dono_eleito)) {
-  assert.strictEqual(typeof dono, 'string', 'dono eleito de ' + integ + ' é UM serviço');
+  assert.ok(SERVICOS_VALIDOS.has(dono), 'dono eleito de ' + integ + ' = "' + dono + '" não é serviço conhecido');
 }
 assert.strictEqual(ele.dono_eleito.ml, 'mover-pedidos', 'no ML o dono único é obrigação (refresh de uso único)');
 

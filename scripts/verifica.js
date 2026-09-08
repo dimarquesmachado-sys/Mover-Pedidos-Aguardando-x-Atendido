@@ -133,5 +133,17 @@ for (const m of cfg.modulos) {
 }
 if (!idErr) console.log('  ✓ cada arquivo está na pasta da sua empresa');
 
+console.log('\n═ 6. Contrato de empresas (paridade com o registro local) ═');
+/* Codex #353: o CI roda o verifica mas nenhum workflow rodava o teste do contrato —
+   PR com contrato inválido passava verde. Agora o verifica o executa (rápido, sem
+   rede; a paridade REMOTA fica no scripts/teste-contrato-paridade-remota.js da
+   bateria, que precisa de internet). */
+try {
+  require('child_process').execFileSync(process.execPath, [path.join(RAIZ, 'test', 'contrato-empresas.test.js')], { stdio: 'pipe' });
+  console.log('  ✓ contrato coerente e espelhado no registro local');
+} catch (e) {
+  falha('teste do contrato de empresas VERMELHO: ' + String((e.stdout || '') + (e.stderr || '')).slice(-300));
+}
+
 console.log('\n' + (erros ? '✗✗✗ ' + erros + ' PROBLEMA(S) — NÃO deixe assim em produção!' : '✓✓✓ TUDO CERTO — deploy consistente.'));
 process.exit(erros ? 1 : 0);
