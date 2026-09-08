@@ -31,8 +31,13 @@ const path = require('path');
    admitia 3/s; len<0.5 admitia 1/s — o dobro do fundo e zero folga). A janela virou
    2s e os tetos, INTEIROS EXATOS: 5/2s = 2.5/s, reserva 4/2s = 2/s, fundo 1/2s. */
 const JANELA_MS = 2000;
-const TETO_JANELA = 5;             /* 2.5/s reais */
-const TETO_FUNDO_JANELA = 1;       /* 0.5/s reais — nunca come a reserva da operação */
+const TETO_JANELA = 5;             /* 2.5/s médios */
+const TETO_FUNDO_JANELA = 1;       /* 0.5/s do FUNDO, contado à parte (uma operação por
+                                      segundo não pode estrangular o fundo pra sempre) */
+/* Codex #356 r2: média de 2.5/s em 2s ainda permitia 5 no MESMO segundo — o limite do
+   Bling é instantâneo (3/s). Regra DUPLA: nunca mais que 3 em qualquer 1s deslizante,
+   nunca mais que 5 em 2s. Burst máximo real: 3+2. */
+const TETO_SEGUNDO = 3;
 const ESCADA_PAUSA_S = [15, 30, 60, 120, 300];
 /* Codex #356: 120k/dia também é da conta — sem checar, o porteiro deixava esgotar.
    Fundo barra antes (reserva diária pro fim do dia ser da operação). */
@@ -82,15 +87,20 @@ function permissao(conta, prioridade) {
     const meiaNoite = new Date(agora); meiaNoite.setUTCHours(24, 0, 0, 0);
     return { ok: false, pausa_s: Math.ceil((meiaNoite.getTime() - agora) / 1000), motivo: 'cota diária da conta (' + tetoDia + ') esgotada pra prioridade ' + prioridade };
   }
-  c.fichas = c.fichas.filter(ts => agora - ts < JANELA_MS);
-  const teto = prioridade === 'operacao' ? TETO_JANELA : TETO_FUNDO_JANELA;
-  if (c.fichas.length < teto) {
-    c.fichas.push(agora);
+  c.fichas = c.fichas.filter(f => agora - f.ts < JANELA_MS);
+  const noSegundo = c.fichas.filter(f => agora - f.ts < 1000);
+  const doFundo = c.fichas.filter(f => f.pri === 'fundo');
+  /* fundo tem cota PRÓPRIA (contada à parte — Codex #356 r2: comparar o fundo com as
+     fichas totais deixava 1 operação a cada 2s estrangular o fundo indefinidamente),
+     e AMBOS respeitam o teto instantâneo do segundo e o total da janela. */
+  const cabeClasse = prioridade === 'operacao' ? c.fichas.length < TETO_JANELA : doFundo.length < TETO_FUNDO_JANELA;
+  if (cabeClasse && noSegundo.length < TETO_SEGUNDO && c.fichas.length < TETO_JANELA) {
+    c.fichas.push({ ts: agora, pri: prioridade });
     c.usadasDia++;
     return { ok: true };
   }
-  const esperar = Math.max(50, (c.fichas[0] + JANELA_MS) - agora);
-  return { ok: false, esperar_ms: esperar };
+  const maisAntiga = noSegundo.length >= TETO_SEGUNDO ? (noSegundo[0].ts + 1000) : (c.fichas.length ? c.fichas[0].ts + JANELA_MS : agora + 200);
+  return { ok: false, esperar_ms: Math.max(50, maisAntiga - agora) };
 }
 
 function aviso429(conta, retryAfterS) {
@@ -123,7 +133,8 @@ function estado(conta) {
   const agora = _agoraRef.fn();
   return {
     ok: true, conta,
-    fichas_na_janela: c.fichas.filter(ts => agora - ts < JANELA_MS).length,
+    fichas_na_janela: c.fichas.filter(f => agora - f.ts < JANELA_MS).length,
+    fichas_no_segundo: c.fichas.filter(f => agora - f.ts < 1000).length,
     janela_ms: JANELA_MS, teto_janela: TETO_JANELA, teto_fundo_janela: TETO_FUNDO_JANELA,
     teto_dia_operacao: TETO_DIA_OPERACAO, teto_dia_fundo: TETO_DIA_FUNDO,
     pausa_s: c.pausaAte > agora ? Math.ceil((c.pausaAte - agora) / 1000) : 0,
@@ -136,6 +147,14 @@ const CONTAS_VALIDAS = new Set(['girassol', 'good', 'amb']);
 async function tratar(req, res, urlObj, json) {
   const p = urlObj.pathname;
   if (!p.startsWith('/bling-ritmo/')) return false;
+  /* Codex #356 r2 (P1, usando o PRÓPRIO contrato deste PR contra o desenho): ?k= na
+     URL é o P0 conhecido — e o porteiro é chamado por OUTRO serviço pela internet a
+     cada chamada ao Bling, então a exposição em log de proxy é máxima. Credencial SÓ
+     pelo header x-admin-key; ?k= leva 400 pedagógico. O gate do index não se aplica
+     a este prefixo (ver index.js). */
+  if (urlObj.searchParams.get('k')) { json(res, 400, { ok: false, erro: 'credencial na URL não é aceita nesta rota — use o header x-admin-key' }); return true; }
+  const ADMIN = process.env.ADMIN_KEY || '';
+  if (!ADMIN || req.headers['x-admin-key'] !== ADMIN) { json(res, 404, { error: 'not found', path: p }); return true; }
   const conta = String(urlObj.searchParams.get('conta') || '').toLowerCase().trim();
   if (!CONTAS_VALIDAS.has(conta)) { json(res, 400, { ok: false, erro: 'conta inválida — use conta=girassol|good|amb (a cota do Bling é por CNPJ)' }); return true; }
   if (p === '/bling-ritmo/permissao' && req.method === 'POST') {

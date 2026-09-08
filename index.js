@@ -359,9 +359,9 @@ const server = http.createServer(async (req, res) => {
   // o porteiro dá permissão antes da chamada, com reserva pra operação (bipagem) e
   // pausa global de 429 em que todos recuam juntos. Contrato: bling-ritmo.js.
   if (path.startsWith('/bling-ritmo/')) {
-    if (!ADMIN_KEY || urlObj.searchParams.get('k') !== ADMIN_KEY) {
-      return json(res, 404, { error: 'not found', path });
-    }
+    /* auth DENTRO do módulo, por header x-admin-key — ?k= foi banido desta rota
+       (Codex #356: credencial em querystring num endpoint chamado por outro serviço
+       pela internet a cada requisição = exposição máxima em log de proxy). */
     try {
       const tratou = await require('./bling-ritmo').tratar(req, res, urlObj, json);
       if (tratou) return;

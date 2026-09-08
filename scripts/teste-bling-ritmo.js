@@ -3,6 +3,11 @@
    Rodar: node scripts/teste-bling-ritmo.js */
 const assert = require('assert');
 const fs = require('fs');
+const os = require('os');
+const path = require('path');
+/* Codex #356 r2: o teste apagava o ARQ REAL quando BLING_RITMO_DIR//data apontavam pro
+   disco do deploy — isolado num tmpdir próprio ANTES do require. */
+process.env.BLING_RITMO_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'bling-ritmo-teste-'));
 const br = require('../bling-ritmo');
 const { permissao, aviso429, avisoOk, estado, _agoraRef, _contas, ARQ } = br._interno;
 
@@ -11,16 +16,22 @@ _agoraRef.fn = () => agora;
 _contas.clear();
 try { fs.unlinkSync(ARQ); } catch (e) {}
 
-// ritmo: janela de 2s com tetos INTEIROS exatos — operacao 5/2s (2.5/s), nunca 6
-for (let i = 0; i < 5; i++) assert.ok(permissao('girassol', 'operacao').ok, 'operacao ' + (i + 1) + '/5 na janela');
+// regra DUPLA: nunca >3 no MESMO segundo (limite instantâneo do Bling), nunca >5 em 2s
+for (let i = 0; i < 3; i++) assert.ok(permissao('girassol', 'operacao').ok, 'operacao ' + (i + 1) + '/3 no segundo');
+const rBurst = permissao('girassol', 'operacao');
+assert.ok(!rBurst.ok, 'a 4ª no MESMO segundo é barrada — burst nunca passa do 3/s do Bling');
+agora += 1100;
+assert.ok(permissao('girassol', 'operacao').ok, '4ª na janela (2º segundo)');
+assert.ok(permissao('girassol', 'operacao').ok, '5ª na janela');
 const r6 = permissao('girassol', 'operacao');
-assert.ok(!r6.ok && r6.esperar_ms > 0, 'a 6ª na janela é barrada ⇒ 2.5/s REAIS, sem arredondar pra cima');
+assert.ok(!r6.ok && r6.esperar_ms > 0, 'a 6ª em 2s é barrada ⇒ média 2.5/s de verdade');
 
-// reserva: fundo é 1/2s (0.5/s real) e NUNCA come a reserva
+// fundo: cota PRÓPRIA de 1/2s — e operação no meio NÃO estrangula o fundo
 agora += 3000;
-assert.ok(permissao('girassol', 'fundo').ok, 'fundo cabe: 1 por janela');
+assert.ok(permissao('girassol', 'operacao').ok, 'uma operação passa');
+assert.ok(permissao('girassol', 'fundo').ok, 'o fundo AINDA cabe — cota separada, não estrangulado pela operação');
 const rf = permissao('girassol', 'fundo');
-assert.ok(!rf.ok, 'a 2ª do fundo na janela é barrada — 0.5/s real, não 1/s');
+assert.ok(!rf.ok, 'a 2ª do fundo na janela é barrada — 0.5/s real');
 assert.ok(permissao('girassol', 'operacao').ok, 'a operação segue passando onde o fundo parou');
 
 // contas independentes (a cota é por CNPJ)
