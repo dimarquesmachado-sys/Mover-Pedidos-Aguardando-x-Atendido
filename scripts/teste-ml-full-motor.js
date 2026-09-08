@@ -206,5 +206,33 @@ _trocarFetchParaTeste(async (url) => {
   const recusas = [ra2, rb2].filter(x => x.resultado === 'ja_ha_varredura_em_andamento').length;
   assert.strictEqual(recusas, 1, 'exatamente uma das duas é recusada pela trava');
 
-  console.log('OK: motor fase 1 — ciclo fechado, canceladas fora, trava de simultâneas, rotação de alcance completo');
+  // #350 r1: cursor monotônico — rodadas sucessivas cobrem faixas DISJUNTAS até a volta
+  mf._interno._limparCacheConfirmadasParaTeste();
+  fs.rmSync(process.env.ML_FULL_DIR, { recursive: true, force: true });
+  fs.mkdirSync(process.env.ML_FULL_DIR, { recursive: true });
+  _trocarFetchParaTeste(async (url) => {
+    if (url.includes('period/stream')) return { status: 200, buffer: async () => z.toBuffer(), text: async () => '' };
+    if (url.includes('/users/me')) return { status: 200, text: async () => JSON.stringify({ id: 999 }) };
+    if (url.includes('/nfe?chaveAcesso=')) return { status: 200, text: async () => JSON.stringify({ data: [] }) };
+    throw new Error('não previsto: ' + url);
+  });
+  const vistas = new Set();
+  for (let i = 0; i < 3; i++) {
+    const ri = await varrerLote('amb', '20260901', '20260901', 2, { tokenML: 'tk', tokenBling: 'tb' });
+    for (const n of ri.novas) { assert.ok(!vistas.has(n.chave), 'faixas disjuntas: ' + n.chave + ' repetiu na rodada ' + i); vistas.add(n.chave); }
+  }
+  assert.ok(vistas.size >= 4, 'três rodadas de teto=2 cobrem posições distintas (cobriu ' + vistas.size + ')');
+
+  // #350 r1 (P1): cancelada já SALVA vai pra quarentena e some do ZIP
+  mf._interno._limparCacheConfirmadasParaTeste();
+  fs.rmSync(process.env.ML_FULL_DIR, { recursive: true, force: true });
+  fs.mkdirSync(process.env.ML_FULL_DIR, { recursive: true });
+  const chCanc = '3526096428909100010055002' + '000000117'.padStart(9, '0') + '1234567890';
+  fs.mkdirSync(path.join(process.env.ML_FULL_DIR, 'saida'), { recursive: true });
+  fs.writeFileSync(path.join(process.env.ML_FULL_DIR, 'saida', 'amb-117-' + chCanc + '.xml'), xmlDe(chCanc, 1));
+  const rq = await varrerLote('amb', '20260901', '20260901', 60, { tokenML: 'tk', tokenBling: 'tb' });
+  assert.strictEqual(rq.canceladas_quarentenadas, 1, 'cancelada salva foi quarentenada');
+  assert.ok(!mf._interno.listarArquivos('amb', 'saida').some(x => x.arquivo.includes(chCanc)), 'cancelada sumiu do ZIP de saída');
+
+  console.log('OK: motor fase 1 — canceladas quarentenadas, cursor disjunto, trava com 409, token no lock');
 })().catch(e => { console.error('FALHOU (motor):', e.message); process.exit(1); });

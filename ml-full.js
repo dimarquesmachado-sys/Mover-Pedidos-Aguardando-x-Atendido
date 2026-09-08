@@ -96,6 +96,10 @@ const TTL_CONFIRMADA = 7 * 86400000;
    o tráfego e a segunda quebra no renameSync do que a primeira arquivou (ENOENT).
    Trava simples por empresa; a rota devolve 409 amigável. */
 const _varrendo = new Set();
+/* Codex #350 r1: rotação ALEATÓRIA pode repetir faixas e deixar posições sem visita por
+   muitas rodadas — o cursor monotônico por empresa avança exatamente pelo que a rodada
+   COBRIU, então rodadas sucessivas percorrem faixas disjuntas até dar a volta. */
+const _cursorFila = new Map(); // empresa → próxima posição de partida
 
 async function garantirTokenBling(empresa) {
   const mk = BLING_TOKENS[empresa];
@@ -205,6 +209,8 @@ async function varrerLote(empresa, de, ate, teto, deps) {
   _varrendo.add(empresa);
   try {
     return await _varrerLoteInterno(empresa, de, ate, teto, deps);
+  } catch (e) {
+    return { ok: false, resultado: 'erro_varredura', detalhe: String(e.message || e).slice(0, 200) };
   } finally { _varrendo.delete(empresa); }
 }
 
@@ -230,6 +236,8 @@ async function _varrerLoteInterno(empresa, de, ate, teto, deps) {
   const novas = [], naoConferidas = [], anomalias = [];
   let ignoradasSimbolicas = 0, jaBaixadas = 0, jaNoBling = 0, consultasBling = 0;
   const canceladasNoLote = [];
+  const chavesCanceladas = new Set();
+  let quarentenadas = 0;
   let tokenBling = (deps && deps.tokenBling) || null;
 
   /* Codex #349 r2: a sonda salvou legados na RAIZ com outro padrão de nome — conferir
@@ -255,7 +263,20 @@ async function _varrerLoteInterno(empresa, de, ate, teto, deps) {
     if (!c) continue;
     censo[c.pasta] = (censo[c.pasta] || 0) + 1;
     if (RE_PASTA_IGNORADA.test(c.caminho)) { ignoradasSimbolicas++; continue; }
-    if (RE_PASTA_CANCELADA.test(c.caminho)) { canceladasNoLote.push({ invoice_id: c.invoice_id, chave: c.chave }); continue; }
+    if (RE_PASTA_CANCELADA.test(c.caminho)) {
+      canceladasNoLote.push({ invoice_id: c.invoice_id, chave: c.chave });
+      chavesCanceladas.add(c.chave);
+      /* Codex #350 r1 (P1): cancelada JÁ SALVA por varredura anterior (inclusive pelas
+         rodadas reais que motivaram este acerto) ficaria no ZIP pra sempre — vai pra
+         quarentena canceladas/, fora dos ZIPs, histórico preservado. */
+      const salvaCanc = chavesDisco.get(c.chave);
+      if (salvaCanc) {
+        const destC = path.join(DIR, 'canceladas');
+        fs.mkdirSync(destC, { recursive: true });
+        try { fs.renameSync(salvaCanc, path.join(destC, path.basename(salvaCanc))); quarentenadas++; chavesDisco.delete(c.chave); } catch (e) {}
+      }
+      continue;
+    }
 
     const xml = en.getData().toString('utf8');
     const chaveXml = extrairChave(xml);
@@ -265,19 +286,18 @@ async function _varrerLoteInterno(empresa, de, ate, teto, deps) {
     candidatas.push({ c, xml, tipo });
   }
 
-  /* Codex #349 r5 (P1, no acerto): getUTCDate só alcança offsets 1-31 — com 100+
-     candidatas persistentes, os índices altos nunca abriam a fila. Offset ALEATÓRIO
-     cobre o alcance inteiro; junto do cache de presenças, toda posição eventualmente
-     abre uma rodada. */
-  const _rot = Math.floor(Math.random() * Math.max(1, candidatas.length));
+  const _rot = candidatas.length ? (_cursorFila.get(empresa) || 0) % candidatas.length : 0;
   const fila = candidatas.slice(_rot).concat(candidatas.slice(0, _rot));
+  let cobertas = 0; // candidatas resolvidas nesta rodada (teto-cortadas NÃO contam)
 
   for (const cand of fila) {
     const c = cand.c, xml = cand.xml, tipo = cand.tipo;
+    if (chavesCanceladas.has(c.chave)) { cobertas++; continue; } // apareceu também em Canceladas: nunca importa
 
     /* presença confirmada há menos de 7 dias: não gasta consulta */
     const conf = _confirmadasNoBling.get(c.chave);
     if (conf && (Date.now() - conf) < TTL_CONFIRMADA) {
+      cobertas++;
       const salvaConf = chavesDisco.get(c.chave);
       if (salvaConf) { arquivar(salvaConf); chavesDisco.delete(c.chave); arquivadas++; }
       else jaNoBling++;
@@ -297,6 +317,7 @@ async function _varrerLoteInterno(empresa, de, ate, teto, deps) {
       naoConferidas.push({ chave: c.chave, tipo, motivo: 'teto de ' + teto + ' consultas ao Bling — rode de novo' });
       continue;
     }
+    cobertas++;
     if (!tokenBling) {
       try { tokenBling = await garantirTokenBling(empresa); }
       catch (e) { return { ok: false, resultado: 'sem_token_bling', detalhe: String(e.message || e) }; }
@@ -332,11 +353,13 @@ async function _varrerLoteInterno(empresa, de, ate, teto, deps) {
     novas.push({ tipo, invoice_id: c.invoice_id, chave: c.chave, arquivo: nomeDisco, numero: String(Number(c.chave.slice(25, 34))) });
   }
 
+  if (candidatas.length) _cursorFila.set(empresa, (_rot + cobertas) % candidatas.length);
   return {
     ok: true, janela: { de, ate }, uid: me.id,
     censo_pastas: censo,
     ignoradas_simbolicas: ignoradasSimbolicas,
     canceladas_no_lote: canceladasNoLote.length || undefined,
+    canceladas_quarentenadas: quarentenadas || undefined,
     canceladas: canceladasNoLote.length ? canceladasNoLote : undefined,
     ja_baixadas: jaBaixadas,
     arquivadas_no_bling: arquivadas,
@@ -667,11 +690,11 @@ async function tratar(req, res, urlObj, json) {
       return true;
     }
     const teto = Math.max(1, Math.min(200, Number(urlObj.searchParams.get('teto')) || 60));
-    let tokenML;
-    try { tokenML = await garantirToken(empresa); }
-    catch (e) { json(res, 200, { ok: false, erro: String(e.message || e) }); return true; }
-    const r = await varrerLote(empresa, de, ate, teto, { tokenML });
-    json(res, r.ok ? 200 : 200, Object.assign({ versao: VERSAO, empresa }, r, r.ok ? {
+    /* Codex #350 r1: o token ML entra DENTRO do lock (o refresh do ML é de uso único —
+       duas aquisições simultâneas podiam corromper a renovação antes mesmo da trava);
+       e a recusa de concorrência sai como 409 de verdade, não 200. */
+    const r = await varrerLote(empresa, de, ate, teto, null);
+    json(res, r.resultado === 'ja_ha_varredura_em_andamento' ? 409 : 200, Object.assign({ versao: VERSAO, empresa }, r, r.ok ? {
       baixar_saida: 'https://mover-pedidos-aguardando-x-atendido.onrender.com/ml-full/zip?empresa=' + empresa + '&tipo=saida&k=SUA_ADMIN_KEY',
       baixar_entrada: 'https://mover-pedidos-aguardando-x-atendido.onrender.com/ml-full/zip?empresa=' + empresa + '&tipo=entrada&k=SUA_ADMIN_KEY',
     } : {}));
