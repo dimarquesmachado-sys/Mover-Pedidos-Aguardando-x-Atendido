@@ -8213,11 +8213,21 @@ async function custoDiario() {
   const concluirDia = () => { try { const c2 = readJson(CUSTO_FILE, {}); c2._custoDiarioDia = d0; fs.writeFileSync(CUSTO_FILE, JSON.stringify(c2)); } catch (e) {} };
   try {
     if (!cc._sementeCompleta) {
-      st.modo = 'semente_completa (1ª noite — fresh total constrói o mapa de estruturas)';
+      /* Codex #358 r2: na 1ª passada o cache legado não tem comps e o sort empata —
+         kit antes do componente somaria custo velho. A semente roda em DUAS passadas:
+         a 1ª busca tudo e constrói os comps; a 2ª re-busca só os kits (agora com os
+         componentes frescos no cache). Custo extra: nº de kits, uma vez na vida. */
+      st.modo = 'semente_completa em 2 passadas (1ª noite — constrói o mapa e recalcula kits)';
       await custoSync(true);
       const c2 = readJson(CUSTO_FILE, {});
-      c2._sementeCompleta = Date.now();
+      let _kitsSemente = 0;
+      for (const sk of Object.keys(c2)) { if (!sk.startsWith('_') && c2[sk] && Array.isArray(c2[sk].comps)) { c2[sk].ts = 0; _kitsSemente++; } }
       fs.writeFileSync(CUSTO_FILE, JSON.stringify(c2));
+      if (_kitsSemente) await custoSync(false);
+      const c3 = readJson(CUSTO_FILE, {});
+      c3._sementeCompleta = Date.now();
+      fs.writeFileSync(CUSTO_FILE, JSON.stringify(c3));
+      st.kits_recalculados_na_semente = _kitsSemente;
       concluirDia();
       st.terminou = new Date().toISOString();
       return;
@@ -8249,12 +8259,29 @@ async function custoDiario() {
       return;
     }
     const alvo = new Set();
+    const marcados = new Set(alterados); /* em minúsculas — cresce com kits pra pegar kit-de-kit */
     for (const sk of Object.keys(cc)) {
       if (sk.startsWith('_')) continue;
-      const skL = sk.toLowerCase();
-      if (alterados.has(skL)) { alvo.add(sk); continue; }
       const v = cc[sk];
-      if (v && Array.isArray(v.comps) && v.comps.some(c => alterados.has(String(c).toLowerCase()))) { alvo.add(sk); st.kits_dependentes++; }
+      if (alterados.has(sk.toLowerCase())) {
+        alvo.add(sk);
+        /* Codex #358 r2: o Bling reportou alteração num SKU com LÁPIDE = produto
+           restaurado/recriado — a lápide cai na hora, senão ficava sem custo 30 dias */
+        if (v && v.apagado_em) cc[sk] = { ts: 0 };
+      }
+    }
+    /* Codex #358 r2: expansão TRANSITIVA — kit que contém kit alterado também entra
+       (compara contra o conjunto que cresce, até ponto fixo) */
+    let _cresceu = true;
+    while (_cresceu) {
+      _cresceu = false;
+      for (const sk of Object.keys(cc)) {
+        if (sk.startsWith('_') || alvo.has(sk)) continue;
+        const v = cc[sk];
+        if (v && Array.isArray(v.comps) && v.comps.some(c => marcados.has(String(c).toLowerCase()))) {
+          alvo.add(sk); marcados.add(sk.toLowerCase()); st.kits_dependentes++; _cresceu = true;
+        }
+      }
     }
     st.alvo = alvo.size;
     if (alvo.size) {
@@ -8264,7 +8291,23 @@ async function custoDiario() {
     /* alterado que ainda NEM está no cache (vendeu hoje, sync das 6h não passou):
        a fila natural do custoSync nasce das VENDAS e pega quem tem custo nulo —
        por isso a rodada roda sempre que houve alteração, mesmo com alvo 0 */
-    if (alvo.size || alterados.size) await custoSync(false);
+    if (alvo.size || alterados.size) {
+      /* Codex #358 r2: o dia só FECHA se o sync rodou de verdade e sem falhas novas —
+         sync engolindo 429 (ou nem rodando por concorrência) fechava o dia com custos
+         velhos até o TTL. Teto de 3 tentativas por noite, depois fecha DECLARADO. */
+      const _f0 = _cst.falhas, _i0 = _cst.inicio;
+      await custoSync(false);
+      const rodou = _cst.inicio !== _i0;
+      const falhou = _cst.falhas > _f0;
+      _cstDiario.tentativas = (_cstDiario.tentativas || 0) + 1;
+      if ((!rodou || falhou) && _cstDiario.tentativas < 3) {
+        st.modo = (rodou ? 'parcial — ' + (_cst.falhas - _f0) + ' falhas na re-busca' : 'sync ocupado — não rodou') + '; novo tick re-tenta (tentativa ' + _cstDiario.tentativas + '/3)';
+        st.terminou = new Date().toISOString();
+        return;
+      }
+      if (!rodou || falhou) st.modo += ' | fechado com pendências declaradas após 3 tentativas (TTL de 7d cobre)';
+      _cstDiario.tentativas = 0;
+    }
     concluirDia();
     st.terminou = new Date().toISOString();
   } catch (e) { st.erro = String(e.message || e).slice(0, 200); }
@@ -8453,9 +8496,11 @@ async function custoSync(fresh) {
   for (const sku of alvos) {
     try {
       let prod = null;
+      let _falhaConsulta = false; /* Codex #358 r2: distingue custo AUSENTE por decisão (limpar) de custo ausente por 429/erro (preservar) */
       const _res = await resolverProdutoPorSku(sku, bg2, 10);
       if (_res.produto && _res.produto.id) {
         const d = await bg2(`/produtos/${_res.produto.id}`);
+        if (!d || !d.ok) _falhaConsulta = true; /* Codex #358 r2: falha ≠ conclusivo */
         prod = (d.ok && d.data && d.data.data) || _res.produto;
       }
       if (_res.inconclusivo) console.log('[CUSTO] ' + sku + ': resultado inconclusivo — ' + _res.motivo + ' (nada será apagado)');
@@ -8501,6 +8546,7 @@ async function custoSync(fresh) {
                    [forn.precoCusto, forn.precoCompra, forn.preco, forn.custo, prod.precoCusto, prod.custo, prod.precoCompra].map(Number).filter(v => isFinite(v) && v > 0);
         if (!cand.length) {
           const rf = await bg2(`/produtos/fornecedores?idProduto=${prod.id}&limite=5`);
+          if (!rf || !rf.ok) _falhaConsulta = true;
           const arr = (rf.ok && rf.data && rf.data.data) || [];
           const pref = arr.find(x => x && x.padrao) || arr[0];
           // 27/07: o nome do campo varia na resposta do Bling — aceita todos os candidatos
@@ -8581,14 +8627,19 @@ async function custoSync(fresh) {
            incremental usa pra saber quais kits re-buscar quando um unitário muda */
         const _compsSkus = (((prod.estrutura && (prod.estrutura.componentes || prod.estrutura.itens)) || prod.composicao || prod.componentes) || [])
           .map(cp => String((cp.produto && cp.produto.codigo) || cp.codigo || '')).filter(Boolean);
-        /* Codex #358: falha transitória (detalhe/fornecedor em 429) devolvia _custoNovo
-           null e APAGAVA custo bom com carimbo novo — a varredura noturna sem vigia
-           podia zerar margens do dashboard inteiro. Preserva o valor antigo e NÃO
-           avança o ts, pra tartaruga re-tentar logo. */
+        /* Codex #358 r1+r2: três destinos possíveis pro custo nulo — (a) FALHA de consulta
+           (429/erro no detalhe ou fornecedores): preserva custo antigo SEM avançar ts, a
+           tartaruga re-tenta; (b) resposta CONCLUSIVA sem candidato (custo removido/zerado
+           de propósito no Bling): grava null com ts novo — manter o velho esconderia pra
+           sempre um produto que ficou sem custo; (c) custo novo: grava. E os comps só são
+           substituídos quando a fonte atual TROUXE estrutura — detalhe falhado caía no
+           resumo sem composição e apagava o mapa de dependência do kit. */
         const _antigo = cc[sku];
-        const _custoFinal = (_custoNovo != null) ? _custoNovo : ((_antigo && _antigo.custo != null) ? _antigo.custo : null);
-        const _tsFinal = (_custoNovo != null) ? Date.now() : ((_antigo && _antigo.ts) || 0);
-        cc[sku] = Object.assign({ id: prod.id, preco: (prod.preco != null && isFinite(Number(prod.preco))) ? Number(prod.preco) : null, custo: _custoFinal, ts: _tsFinal }, _compsSkus.length ? { comps: _compsSkus } : {});
+        const _conclusivo = !_falhaConsulta;
+        const _custoFinal = (_custoNovo != null) ? _custoNovo : (_conclusivo ? null : ((_antigo && _antigo.custo != null) ? _antigo.custo : null));
+        const _tsFinal = (_custoNovo != null || _conclusivo) ? Date.now() : ((_antigo && _antigo.ts) || 0);
+        const _compsFinais = _compsSkus.length ? _compsSkus : ((!_conclusivo && _antigo && _antigo.comps) ? _antigo.comps : null);
+        cc[sku] = Object.assign({ id: prod.id, preco: (prod.preco != null && isFinite(Number(prod.preco))) ? Number(prod.preco) : null, custo: _custoFinal, ts: _tsFinal }, _compsFinais && _compsFinais.length ? { comps: _compsFinais } : {});
         _cst.ok++;
       } else { _cst.falhas++; }
     } catch (e) { _cst.falhas++; }
