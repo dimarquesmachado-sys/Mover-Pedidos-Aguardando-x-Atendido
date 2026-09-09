@@ -113,9 +113,16 @@ async function garantirTokenML() {
   acSonda.abort(); // corpo não consumido: encerra já, sem socket pendurado
 
   if (resp.ok) return tokens.access_token;
-
-  // Token expirado — renovar
-  console.log('[mlToken] Token expirado, renovando...');
+  /* Auditoria de 09/09 (Codex) + fato de campo do Devoluções (março): renovar em
+     QUALQUER não-2xx queimava o refresh de USO ÚNICO por indisponibilidade
+     transitória (429/5xx) — e na janela de sobreposição isso multiplica a chance
+     dos dois serviços renovarem juntos. Mas o ML responde 403 com token VENCIDO
+     (documentado em produção lá), então renovar só no 401 deixaria token morto.
+     Vencimento provado = 401 OU 403 → renova; o resto é transitório → preserva. */
+  if (resp.status !== 401 && resp.status !== 403) {
+    throw new Error('mlToken ML: sonda inconclusiva (HTTP ' + resp.status + '); refresh preservado — transitório, tente de novo');
+  }
+  console.log('[mlToken] Token ML vencido (HTTP ' + resp.status + '), renovando...');
   return await _renovarUmaVez();
 }
 
