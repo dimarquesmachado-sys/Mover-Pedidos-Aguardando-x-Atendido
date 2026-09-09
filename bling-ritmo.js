@@ -53,6 +53,10 @@ const ARQ = path.join(DIR_ESTADO, 'bling-ritmo-estado.json');
 const _contas = new Map(); /* conta → { fichas: [ts...], pausaAte: 0, degrau: 0, dia: 'aaaammdd', usadasDia: 0 } */
 const _agoraRef = { fn: () => Date.now() }; /* injetável no teste */
 
+/* Codex #356 r5: ficha única ENTRE restarts — sem o prefixo de boot, o processo novo
+   reemitiria 'f1' e um sucesso atrasado do processo anterior casaria com a permissão
+   nova, derrotando a correlação exata. */
+const _bootId = Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
 let _serieFicha = 0;
 function _conta(nome) {
   if (!_contas.has(nome)) _contas.set(nome, { fichas: [], pausaAte: 0, degrau: 0, dia: '', usadasDia: 0, fichasVivas: new Map() });
@@ -75,7 +79,11 @@ function _carregar() {
   try {
     if (!fs.existsSync(ARQ)) return;
     const dump = JSON.parse(fs.readFileSync(ARQ, 'utf8'));
-    for (const [k, v] of Object.entries(dump)) _contas.set(k, { fichas: [], pausaAte: v.pausaAte || 0, degrau: v.degrau || 0, dia: v.dia || '', usadasDia: v.usadasDia || 0, ts429: v.ts429 || 0, tsUltimaPermissao: v.tsUltimaPermissao || 0 });
+    /* Codex #356 r5: as fichas da janela não sobrevivem ao restart, mas as chamadas
+       pré-restart AINDA contam nas janelas do Bling — resfriamento de boot de uma
+       janela (2s) por conta carregada elimina o burst combinado. */
+    const boot = _agoraRef.fn();
+    for (const [k, v] of Object.entries(dump)) _contas.set(k, { fichas: [], pausaAte: Math.max(v.pausaAte || 0, boot + JANELA_MS), degrau: v.degrau || 0, dia: v.dia || '', usadasDia: v.usadasDia || 0, ts429: v.ts429 || 0, tsUltimaPermissao: v.tsUltimaPermissao || 0, fichasVivas: new Map() });
   } catch (e) { /* arquivo corrompido: começa limpo */ }
 }
 _carregar();
@@ -86,7 +94,7 @@ function permissao(conta, prioridade) {
   const c = _conta(conta);
   const agora = _agoraRef.fn();
   if (c.pausaAte > agora) {
-    return { ok: false, pausa_s: Math.ceil((c.pausaAte - agora) / 1000), motivo: '429 recente na conta — pausa global (degrau ' + c.degrau + ')' };
+    return { ok: false, pausa_s: Math.ceil((c.pausaAte - agora) / 1000), motivo: 'pausa global da conta (429 recente ou resfriamento de boot; degrau ' + c.degrau + ')' };
   }
   const dia = _diaDe(agora);
   if (c.dia !== dia) { c.dia = dia; c.usadasDia = 0; _persistir(); }
@@ -109,7 +117,7 @@ function permissao(conta, prioridade) {
     /* Codex #356 r4: sucesso precisa CORRELACIONAR com a permissão que o gerou — o
        cheque só-por-timestamps da conta aceitava ok de pedido pré-429 lento chegando
        depois de uma permissão nova. A permissão emite FICHA; o aviso-ok a devolve. */
-    const ficha = 'f' + (++_serieFicha);
+    const ficha = _bootId + '-' + (++_serieFicha);
     c.fichasVivas.set(ficha, agora);
     if (c.fichasVivas.size > 500) { const k1 = c.fichasVivas.keys().next().value; c.fichasVivas.delete(k1); }
     /* Codex #356 r4: usadasDia só persistia em 429/ok — restart no meio esquecia
@@ -142,27 +150,23 @@ function aviso429(conta, retryAfterS) {
 function avisoOk(conta, ficha) {
   const c = _conta(conta);
   const agora = _agoraRef.fn();
-  /* Codex #356 r4: com a ficha, a correlação é exata — só zera se a PERMISSÃO que
-     gerou o sucesso saiu depois do último 429. Sem ficha (cliente antigo), vale a
-     regra dos timestamps da conta. */
-  if (ficha) {
-    const tsFicha = c.fichasVivas.get(String(ficha));
-    if (tsFicha === undefined) return { ok: true, ignorado: true, motivo: 'ficha desconhecida ou expirada' };
-    c.fichasVivas.delete(String(ficha));
-    if (c.ts429 && tsFicha <= c.ts429) return { ok: true, ignorado: true, motivo: 'a permissão desta ficha é anterior ao último 429' };
-    c.degrau = 0; c.pausaAte = 0;
-    _persistir();
-    return { ok: true };
-  }
+  /* Codex #356 r4+r5: a correlação exata exige a FICHA — o caminho de compatibilidade
+     sem ela mantinha vivo o furo do sucesso pré-429 atrasado, então morreu: aviso-ok
+     sem ficha é ignorado com instrução. Só zera se a permissão DAQUELA ficha saiu
+     depois do último 429. */
+  if (!ficha) return { ok: true, ignorado: true, motivo: 'ficha obrigatória — mande a ficha devolvida pela permissão que teve o sucesso' };
+  const tsFicha = c.fichasVivas.get(String(ficha));
+  if (tsFicha === undefined) return { ok: true, ignorado: true, motivo: 'ficha desconhecida, expirada ou de processo anterior' };
+  c.fichasVivas.delete(String(ficha));
+  if (c.ts429 && tsFicha <= c.ts429) return { ok: true, ignorado: true, motivo: 'a permissão desta ficha é anterior ao último 429' };
+  c.degrau = 0; c.pausaAte = 0;
+  _persistir();
+  return { ok: true };
   /* Codex #356 r2+r3: sucesso legítimo é o de permissão POSTERIOR ao último 429 —
      a checagem só-por-pausa deixava um pedido de 16s (permitido antes de uma pausa
      de 15s) chegar DEPOIS dela vencer e zerar a escada sem nenhum sucesso pós-429
      real. A âncora é o par de timestamps, não o relógio da pausa. */
   if (c.pausaAte > agora) return { ok: true, ignorado: true, motivo: 'pausa ativa — sucesso é de permissão anterior ao 429' };
-  if (c.ts429 && !(c.tsUltimaPermissao > c.ts429)) return { ok: true, ignorado: true, motivo: 'nenhuma permissão saiu desde o último 429 — sucesso é anterior a ele' };
-  c.degrau = 0; c.pausaAte = 0;
-  _persistir();
-  return { ok: true };
 }
 
 function estado(conta) {
@@ -179,7 +183,9 @@ function estado(conta) {
   };
 }
 
-const CONTAS_VALIDAS = new Set(['girassol', 'good', 'amb']);
+/* Codex #356 r5: as contas saem do REGISTRO de empresas (env-driven) — a 4ª empresa
+   embarcada via EMPRESAS entra no porteiro sozinha, sem novo deploy desta lista. */
+function contasValidas() { return new Set(require('./lib/empresas').lista()); }
 
 async function tratar(req, res, urlObj, json) {
   const p = urlObj.pathname;
@@ -193,7 +199,7 @@ async function tratar(req, res, urlObj, json) {
   if (!CHAVE) { json(res, 503, { ok: false, erro: 'porteiro desligado — configure BLING_RITMO_KEY no serviço (chave dedicada, não a ADMIN_KEY)' }); return true; }
   if (req.headers['x-ritmo-key'] !== CHAVE) { json(res, 404, { error: 'not found', path: p }); return true; }
   const conta = String(urlObj.searchParams.get('conta') || '').toLowerCase().trim();
-  if (!CONTAS_VALIDAS.has(conta)) { json(res, 400, { ok: false, erro: 'conta inválida — use conta=girassol|good|amb (a cota do Bling é por CNPJ)' }); return true; }
+  if (!contasValidas().has(conta)) { json(res, 400, { ok: false, erro: 'conta fora do registro de empresas (a cota do Bling é por CNPJ) — válidas: ' + [...contasValidas()].join(', ') }); return true; }
   if (p === '/bling-ritmo/permissao' && req.method === 'POST') {
     const pri = urlObj.searchParams.get('prioridade') === 'operacao' ? 'operacao' : 'fundo';
     json(res, 200, permissao(conta, pri)); return true;

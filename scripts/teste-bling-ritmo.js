@@ -64,14 +64,12 @@ assert.strictEqual(p3.pausa_s, 90, 'Retry-After do Bling tem precedência');
 const p4 = aviso429('girassol');
 assert.ok(p4.pausa_s >= 89, 'aviso posterior NUNCA encurta a pausa ativa (ficou ' + p4.pausa_s + 's)');
 const okIgnorado = avisoOk('girassol');
-assert.ok(okIgnorado.ignorado, 'sucesso ATRASADO com pausa ativa é ignorado — não cancela o recuo');
+assert.ok(okIgnorado.ignorado, 'sem ficha o aviso-ok é sempre ignorado (ficha obrigatória): ' + okIgnorado.motivo);
 agora += (p4.pausa_s + 1) * 1000; // o degrau da escada pode ter passado do Retry-After — avanço dinâmico
-const okVelho = avisoOk('girassol');
-assert.ok(okVelho.ignorado, 'sucesso após a pausa MAS sem permissão pós-429 também é ignorado (pedido de 16s numa pausa de 15s)');
 const pNova = permissao('girassol', 'operacao');
-assert.ok(pNova.ok && pNova.ficha, 'permissão nova pós-429 sai COM ficha');
-const okFichaVelha = avisoOk('girassol', 'f1');
-assert.ok(okFichaVelha.ignorado, 'ficha pré-429 (ou desconhecida) não zera a escada — correlação exata');
+assert.ok(pNova.ok && pNova.ficha && pNova.ficha.includes('-'), 'permissão sai com ficha prefixada pelo boot (única entre restarts)');
+const okFichaVelha = avisoOk('girassol', 'processoantigo-1');
+assert.ok(okFichaVelha.ignorado, 'ficha de outro processo/desconhecida não zera a escada');
 avisoOk('girassol', pNova.ficha);
 assert.ok(!estado('girassol').pausa_s, 'sucesso de permissão pós-429 libera de verdade');
 assert.strictEqual(estado('girassol').degrau, 0);
@@ -82,5 +80,12 @@ _contas.clear();
 br._interno._carregar();
 const eg = estado('good');
 assert.ok(eg.pausa_s > 100, 'pausa recarregada do disco após restart: ' + eg.pausa_s + 's');
+// r5: resfriamento de boot — conta carregada SEM pausa ganha ao menos uma janela (2s)
+aviso429('amb', '5'); avisoOk('amb', 'x'); // amb persiste com pausa curta que expira já
+agora += 10000;
+_contas.clear();
+br._interno._carregar();
+const ea = estado('amb');
+assert.ok(ea.pausa_s >= 1 && ea.pausa_s <= 3, 'resfriamento de boot de uma janela pós-restart: ' + ea.pausa_s + 's');
 
 console.log('OK: porteiro — ritmo por conta, reserva da operação, escada de 429, Retry-After, liberação e persistência');
