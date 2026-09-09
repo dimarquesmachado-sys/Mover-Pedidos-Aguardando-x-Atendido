@@ -37,6 +37,15 @@ assert.ok(permissao('girassol', 'operacao').ok, 'a operação segue passando ond
 // contas independentes (a cota é por CNPJ)
 assert.ok(permissao('amb', 'fundo').ok, 'balde da amb não vê as fichas da girassol');
 
+// r6: alias e canônico compartilham o MESMO balde (senão seriam 6/s no mesmo CNPJ)
+{
+  const { contaCanonica } = br._interno;
+  assert.strictEqual(contaCanonica('amb'), 'ambtotal');
+  assert.strictEqual(contaCanonica('ambtotal'), 'ambtotal');
+  assert.strictEqual(contaCanonica('AMB '), 'ambtotal', 'normaliza caixa e espaço');
+  assert.strictEqual(contaCanonica('xpto'), null);
+}
+
 // cota diária: fundo barra em 100k, operação segue até 110k (reserva do fim do dia)
 {
   const c = br._interno._contas.get('girassol');

@@ -183,9 +183,18 @@ function estado(conta) {
   };
 }
 
-/* Codex #356 r5: as contas saem do REGISTRO de empresas (env-driven) — a 4ª empresa
-   embarcada via EMPRESAS entra no porteiro sozinha, sem novo deploy desta lista. */
-function contasValidas() { return new Set(require('./lib/empresas').lista()); }
+/* Codex #356 r5+r6: a conta do balde é o ID CANÔNICO do contrato de empresas — 'amb'
+   e 'ambtotal' são o MESMO CNPJ e precisam do MESMO balde (dois baldes = 6/s na
+   mesma conta, o dobro do limite; rejeitar o canônico jogaria o cliente fail-open
+   pra fora da coordenação). Qualquer alias do contrato entra; o balde é um só. */
+const _CONTRATO = require('./contrato-empresas.json');
+function contaCanonica(nome) {
+  const n = String(nome || '').toLowerCase().trim();
+  for (const [id, e] of Object.entries(_CONTRATO.empresas)) {
+    if ((e.aliases || []).some(a => String(a).toLowerCase().trim() === n)) return id;
+  }
+  return null;
+}
 
 async function tratar(req, res, urlObj, json) {
   const p = urlObj.pathname;
@@ -198,8 +207,8 @@ async function tratar(req, res, urlObj, json) {
   const CHAVE = process.env.BLING_RITMO_KEY || '';
   if (!CHAVE) { json(res, 503, { ok: false, erro: 'porteiro desligado — configure BLING_RITMO_KEY no serviço (chave dedicada, não a ADMIN_KEY)' }); return true; }
   if (req.headers['x-ritmo-key'] !== CHAVE) { json(res, 404, { error: 'not found', path: p }); return true; }
-  const conta = String(urlObj.searchParams.get('conta') || '').toLowerCase().trim();
-  if (!contasValidas().has(conta)) { json(res, 400, { ok: false, erro: 'conta fora do registro de empresas (a cota do Bling é por CNPJ) — válidas: ' + [...contasValidas()].join(', ') }); return true; }
+  const conta = contaCanonica(urlObj.searchParams.get('conta'));
+  if (!conta) { json(res, 400, { ok: false, erro: 'conta fora do contrato de empresas (a cota do Bling é por CNPJ) — use um id canônico ou alias do contrato: ' + Object.entries(_CONTRATO.empresas).map(([i, e]) => e.aliases.join('/')).join(', ') }); return true; }
   if (p === '/bling-ritmo/permissao' && req.method === 'POST') {
     const pri = urlObj.searchParams.get('prioridade') === 'operacao' ? 'operacao' : 'fundo';
     json(res, 200, permissao(conta, pri)); return true;
@@ -213,5 +222,5 @@ async function tratar(req, res, urlObj, json) {
 
 module.exports = {
   tratar,
-  _interno: { permissao, aviso429, avisoOk, estado, _agoraRef, _contas, ARQ, _carregar },
+  _interno: { permissao, aviso429, avisoOk, estado, contaCanonica, _agoraRef, _contas, ARQ, _carregar },
 };
