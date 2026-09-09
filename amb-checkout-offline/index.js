@@ -8518,6 +8518,25 @@ function bootstrap() {
   setTimeout(() => { try { console.log('[ML-FEES] pesca automática pós-deploy iniciando…'); mlSyncFees(14).catch(() => {}); } catch (e) {} }, 90 * 1000);
   setTimeout(() => { try { custoSync(false).catch(() => {}); } catch (e) {} }, 240 * 1000);   // custos: tartaruga pós-boot, só o que falta
   setInterval(() => { try { custoSync(false).catch(() => {}); } catch (e) {} }, 6 * 3600 * 1000);
+
+  /* 09/09 (pedido do Diego): re-busca COMPLETA do custo TODO DIA às 23h00 — mudança de
+     preço de fornecedor no Bling passa a valer no MESMO dia (o TTL de 7 dias vira rede
+     de segurança, não relógio). 23h00 = galpão fechado (regra da cota: rotina pesada só
+     fora do horário) e ANTES da noturna das 03:45, que então grava o dia com o custo
+     novo. Trava por dia — reinício do serviço não repete a rodada. */
+  let _custoDiarioDia = '';
+  setInterval(() => {
+    try {
+      const ag = new Date();
+      const dia = ag.toISOString().slice(0, 10);
+      if (ag.getHours() === 23 && ag.getMinutes() >= 0 && _custoDiarioDia !== dia) {
+        _custoDiarioDia = dia;
+        console.log('[custo-diario] re-busca completa das 23h00 iniciando');
+        custoSync(true).catch(() => {});
+      }
+    } catch (e) {}
+  }, 60 * 1000);
+
 // 01/08 — CANCELADOS TODO DIA. Diego: "pedido cancelado tem que atualizar sempre, os outros
 // sistemas abatem". O ao-vivo (Hoje/7 dias) já marca em tempo real; o que faltava era o
 // HISTÓRICO — pedido cancelado DEPOIS do backfill ficava lá somando pra sempre.
