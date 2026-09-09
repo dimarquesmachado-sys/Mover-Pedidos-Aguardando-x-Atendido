@@ -6225,7 +6225,13 @@ function _diaLocalHoje() {
 }
 async function custoDiario() {
   const CUSTO_FILE = path.join(CACHE_DIR, '_custos.json');
-  const d0 = _diaLocalHoje();
+  /* Codex #358 r3: adiado no último tick das 23h morria à meia-noite (data nova) e o
+     dia útil ficava sem scan até o TTL. Antes das 23h o dia-alvo é ONTEM (janela de
+     recuperação da madrugada); o filtro dataAlteracaoInicial pega de lá até agora. */
+  const ag0 = new Date();
+  const d0 = (ag0.getHours() >= 23)
+    ? _diaLocalHoje()
+    : new Date(ag0.getTime() - ag0.getTimezoneOffset() * 60000 - 86400000).toISOString().slice(0, 10);
   if (_cstDiario.rodando) return;
   if (_cst.rodando) { _cstDiario.ultimo = { adiado: 'custo-sync em curso — novo tick tenta de novo', em: new Date().toISOString() }; return; }
   let cc = readJson(CUSTO_FILE, {});
@@ -6247,6 +6253,17 @@ async function custoDiario() {
       for (const sk of Object.keys(c2)) { if (!sk.startsWith('_') && c2[sk] && Array.isArray(c2[sk].comps)) { c2[sk].ts = 0; _kitsSemente++; } }
       fs.writeFileSync(CUSTO_FILE, JSON.stringify(c2));
       if (_kitsSemente) await custoSync(false);
+      /* Codex #358 r3: semente com FALHAS não fecha — o componente falhado guardou ts
+         antigo e ficaria fora dos próximos ciclos como se estivesse fresco. Até 3
+         tentativas por noite; na 3ª fecha com as pendências declaradas (TTL cobre). */
+      _cstDiario.tentativas = (_cstDiario.tentativas || 0) + 1;
+      if (_cst.falhas > 0 && _cstDiario.tentativas < 3) {
+        st.modo += ' | ' + _cst.falhas + ' falhas — semente NÃO fechada; novo tick re-tenta (' + _cstDiario.tentativas + '/3)';
+        st.terminou = new Date().toISOString();
+        return;
+      }
+      if (_cst.falhas > 0) st.modo += ' | fechada com ' + _cst.falhas + ' pendências declaradas (TTL cobre)';
+      _cstDiario.tentativas = 0;
       const c3 = readJson(CUSTO_FILE, {});
       c3._sementeCompleta = Date.now();
       fs.writeFileSync(CUSTO_FILE, JSON.stringify(c3));
@@ -6261,7 +6278,11 @@ async function custoDiario() {
       const r = await blingGet('/produtos?dataAlteracaoInicial=' + encodeURIComponent(d0 + ' 00:00:00') + '&pagina=' + pg + '&limite=100');
       if (!r || !r.ok) { paginaFalhou = true; break; }
       const arr = (r.data && Array.isArray(r.data.data)) ? r.data.data : [];
-      for (const p2 of arr) { const cod = p2 && p2.codigo; if (cod) alterados.add(String(cod).toLowerCase()); }
+      for (const p2 of arr) {
+        if (!p2) continue;
+        if (p2.codigo) alterados.add(String(p2.codigo).toLowerCase());
+        if (p2.id) alterados.add('id:' + p2.id); /* comps podem estar mapeados por id */
+      }
       if (arr.length < 100) break;
       if (pg === 8) traiu = true;
       await new Promise(r2 => setTimeout(r2, 700));
@@ -6301,7 +6322,7 @@ async function custoDiario() {
       for (const sk of Object.keys(cc)) {
         if (sk.startsWith('_') || alvo.has(sk)) continue;
         const v = cc[sk];
-        if (v && Array.isArray(v.comps) && v.comps.some(c => marcados.has(String(c).toLowerCase()))) {
+        if (v && Array.isArray(v.comps) && v.comps.some(c => marcados.has(String(c)))) {
           alvo.add(sk); marcados.add(sk.toLowerCase()); st.kits_dependentes++; _cresceu = true;
         }
       }
@@ -6318,10 +6339,12 @@ async function custoDiario() {
       /* Codex #358 r2: o dia só FECHA se o sync rodou de verdade e sem falhas novas —
          sync engolindo 429 (ou nem rodando por concorrência) fechava o dia com custos
          velhos até o TTL. Teto de 3 tentativas por noite, depois fecha DECLARADO. */
-      const _f0 = _cst.falhas, _i0 = _cst.inicio;
+      /* Codex #358 r3: custoSync RECRIA o _cst — comparar com o contador da corrida
+         anterior mascarava falha igual. A corrida atual fala por si. */
+      const _i0 = _cst.inicio;
       await custoSync(false);
       const rodou = _cst.inicio !== _i0;
-      const falhou = _cst.falhas > _f0;
+      const falhou = rodou && _cst.falhas > 0;
       _cstDiario.tentativas = (_cstDiario.tentativas || 0) + 1;
       if ((!rodou || falhou) && _cstDiario.tentativas < 3) {
         st.modo = (rodou ? 'parcial — ' + (_cst.falhas - _f0) + ' falhas na re-busca' : 'sync ocupado — não rodou') + '; novo tick re-tenta (tentativa ' + _cstDiario.tentativas + '/3)';
@@ -6495,9 +6518,23 @@ async function custoSync(fresh) {
   // vivos. A LÁPIDE registra "conferido, não existe mais" e a rodada normal pula; o ?fresh=1 do
   // operador ignora a lápide e reconfere (produto pode ser restaurado no Bling).
   const alvos = [...todos].filter(sk => { const k = cc[sk]; if (k && k.apagado_em) { if (!fresh) return false; if ((Date.now() - k.apagado_em) < 30 * 86400000) return false; /* Codex #358: fresh diário revisitando TODA lápide devolvia os apagados ao resolvedor caro toda noite */ } return fresh || !k || !k.id || (Date.now() - (k.ts || 0)) > SETE_D || k.custo == null; });
-  /* Codex #358: componentes ANTES dos kits na fila — kit processado antes do componente
-     alterado somaria o custo de ontem do cache e cristalizaria até o próximo ciclo */
-  alvos.sort((x, y) => (((cc[x] || {}).comps ? 1 : 0) - ((cc[y] || {}).comps ? 1 : 0)));
+  /* Codex #358 r2+r3: fila em ordem de PROFUNDIDADE de dependência — componente (0),
+     kit (1), kit-de-kit (2)... Empatar todos os kits deixava o kit EXTERNO poder vir
+     antes do interno e somar o agregado velho. Memoizado, teto 6 contra ciclo. */
+  const _idxLower = {}; for (const sk0 of Object.keys(cc)) { if (!sk0.startsWith('_')) _idxLower[sk0.toLowerCase()] = sk0; }
+  const _prof = {};
+  const _profDe = (sk0, nivel) => {
+    if (nivel > 6) return 6;
+    if (_prof[sk0] != null) return _prof[sk0];
+    const v0 = cc[sk0];
+    if (!v0 || !Array.isArray(v0.comps) || !v0.comps.length) { _prof[sk0] = 0; return 0; }
+    _prof[sk0] = 6; /* sentinela anti-ciclo enquanto calcula */
+    let m = 0;
+    for (const c0 of v0.comps) { const real = _idxLower[String(c0).toLowerCase()]; if (real) m = Math.max(m, _profDe(real, nivel + 1)); }
+    _prof[sk0] = 1 + m;
+    return _prof[sk0];
+  };
+  alvos.sort((x, y) => _profDe(x, 0) - _profDe(y, 0));
   _cst = { rodando: true, feitos: 0, total: alvos.length, ok: 0, falhas: 0, inicio: new Date().toISOString() };
   console.log('[CUSTO] sync iniciando — ' + alvos.length + ' SKU(s) a resolver (tartaruga: ~1,2s/chamada)');
   const dorme = ms => new Promise(r => setTimeout(r, ms));
@@ -6604,6 +6641,7 @@ async function custoSync(fresh) {
               if (cu == null) {
                 if (!idc) { completo = false; break; }
                 const dc = await bg2(`/produtos/${idc}`);
+                if (!dc || !dc.ok) _falhaConsulta = true; /* Codex #358 r3: componente falhado ≠ conclusivo */
                 const pc = (dc.ok && dc.data && dc.data.data) || null;
                 if (pc) {
                   const f2 = pc.fornecedor || {};
@@ -6633,10 +6671,21 @@ async function custoSync(fresh) {
         /* 21/08: antes de sobrescrever, anota a linha do tempo — o Bling só guarda o custo
            ATUAL, então esta é a única chance de registrar que até ontem valia outro. */
         if (_custoNovo != null) { try { registrarCustoVigente(sku, _custoNovo, 'bling'); } catch (e) {} }
+        else if (_conclusivo && _antigo && _antigo.custo != null) { try { registrarCustoVigente(sku, null, 'remocao-bling'); } catch (e) {} }
         /* 09/09: grava os CÓDIGOS dos componentes — é o mapa reverso que o custo diário
            incremental usa pra saber quais kits re-buscar quando um unitário muda */
+        /* Codex #358 r3: a estrutura do Bling normalmente vem SÓ com o ID do componente
+           (prova: ciclo.js resolve por c.produto.id) — mapear só por codigo deixava o
+           mapa de dependência VAZIO e o incremental nunca acharia kit nenhum. Guarda
+           codigo (minúsculo) quando vier, senão 'id:<id>'; o scan de alterados marca
+           pelos dois. */
         const _compsSkus = (((prod.estrutura && (prod.estrutura.componentes || prod.estrutura.itens)) || prod.composicao || prod.componentes) || [])
-          .map(cp => String((cp.produto && cp.produto.codigo) || cp.codigo || '')).filter(Boolean);
+          .map(cp => {
+            const cod = (cp.produto && cp.produto.codigo) || cp.codigo;
+            if (cod) return String(cod).toLowerCase().trim();
+            const idc2 = (cp.produto && cp.produto.id) || cp.produto || cp.id || cp.idProduto;
+            return idc2 ? ('id:' + idc2) : '';
+          }).filter(Boolean);
         /* Codex #358 r1+r2: três destinos possíveis pro custo nulo — (a) FALHA de consulta
            (429/erro no detalhe ou fornecedores): preserva custo antigo SEM avançar ts, a
            tartaruga re-tenta; (b) resposta CONCLUSIVA sem candidato (custo removido/zerado
@@ -6688,7 +6737,8 @@ function bootstrap() {
   setInterval(() => {
     try {
       const ag = new Date();
-      if (ag.getHours() === 23 && ag.getMinutes() >= 15) custoDiario().catch(() => {});
+      /* 23h = rodada do dia; madrugada (até 6h) = recuperação de dia adiado */
+      if ((ag.getHours() === 23 && ag.getMinutes() >= 15) || ag.getHours() < 6) custoDiario().catch(() => {});
     } catch (e) {}
   }, 60 * 1000);
 
