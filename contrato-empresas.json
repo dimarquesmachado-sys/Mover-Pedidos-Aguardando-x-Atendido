@@ -1,6 +1,6 @@
 {
   "_leia_me": [
-    "CONTRATO DE EMPRESAS — v6 (08/09/2026)",
+    "CONTRATO DE EMPRESAS — v7 (08/09/2026)",
     "",
     "Dado, não código. Os dois repositórios leem este mesmo arquivo, byte a",
     "byte. O Mover-Pedidos tem um script que baixa o contrato da main do",
@@ -28,9 +28,13 @@
     "  v6  o desenho do cache (decidido pelo dono dos tokens) e a",
     "      autenticação SÓ por header — o `?k=` foi banido da rota de",
     "      leitura. Mesmo achado do P0 da auditoria de 26/08, e aqui é",
-    "      mais grave: a rota entrega segredo VIVO."
+    "      mais grave: a rota entrega segredo VIVO.",
+    "  v7  o gatilho de invalidação do cache passa a dizer 401 OU 403.",
+    "      O ML responde 403 com token vencido (achado do Devoluções em",
+    "      março, v3.40) — quem implementasse só o 401 deixaria o token",
+    "      morto no cache pela janela inteira do TTL."
   ],
-  "versao": 6,
+  "versao": 7,
   "atualizado_em": "2026-09-08",
   "servicos": {
     "_nota": "os serviços que leem este contrato. `dono_hoje`/`dono_alvo` só podem citar nomes daqui.",
@@ -268,8 +272,9 @@
         "o_que_sobrevive": "o ACCESS antigo segue válido até expirar",
         "consequencia": "quem só LÊ o access nunca fica sem token por causa de uma renovação",
         "aquisicao_no_dono": "promessa única por empresa (#350 do Mover-Pedidos): a rota espera a renovação em voo com prazo curto e devolve o token novo",
-        "contrato_de_leitura": "usar o que a rota der; 401 esporádico -> re-pedir (retry curto)",
-        "ler_versao_anterior": "desnecessário"
+        "contrato_de_leitura": "usar o que a rota der; 401 OU 403 esporádico -> re-pedir (retry curto)",
+        "ler_versao_anterior": "desnecessário",
+        "_nota_403": "⚠️ v7: o ML responde 403 com token vencido, não só 401 — achado do Devoluções em março (lib/ml.js, v3.40). O Mover-Pedidos conferiu e os managers de lá renovam em QUALQUER não-2xx da sonda, então já cobrem por desenho, sem lista de status. Mas o TEXTO do contrato dizia só 401, e quem implementasse ao pé da letra deixaria o token morto no cache pela janela inteira do TTL."
       },
       "ordem_do_corte": {
         "1": "Devolucoes passa a LER, com a renovacao local ainda ligada como rede",
@@ -288,10 +293,11 @@
         "_nota": "decidido pelo Mover-Pedidos (dono dos tokens) em 08/09. O Devoluções implementa.",
         "onde": "memória do processo, por (empresa, integração)",
         "ttl": "5 min (sugestão do dono)",
-        "invalidacao": "⚠️ OS DOIS invalidam: o TTL expira E o primeiro 401 do marketplace derruba a entrada na hora (re-pede a rota e substitui). O TTL NÃO substitui o 401.",
+        "invalidacao": "⚠️ OS DOIS invalidam: o TTL expira E o primeiro 401 OU 403 do marketplace derruba a entrada na hora (re-pede a rota e substitui). O TTL NÃO substitui o 401/403.",
         "nunca_em_disco": "⚠️ memória só — reinício limpa. Token vivo não vai pra disco.",
         "por_que_cachear": "a latência da bipagem é o que o estoquista sente",
-        "custo_aceito": "token revogado vive até o 401 ou o TTL; revogação manual é rara e o 401 já é o sinal combinado"
+        "custo_aceito": "token revogado vive até o 401 ou o TTL; revogação manual é rara e o 401 já é o sinal combinado",
+        "_nota_403": "v7: era só 401. Ver `janela_de_renovacao._nota_403` — o 403 do ML é o mesmo sinal, e quem lê 'invalidar no 401' tende a implementar literal."
       }
     },
     "inegociavel": "no ML, dono único é obrigação — o refresh é de uso único"
