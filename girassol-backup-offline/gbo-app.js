@@ -6211,6 +6211,89 @@ async function vendasSync() {
 // e grava em cache PERMANENTE em disco (_custos.json, validade 7d). O sku-info lê daqui — instantâneo.
 let _cst = { rodando: false, feitos: 0, total: 0, ok: 0, falhas: 0, inicio: null };
 
+/* ── CUSTO DIÁRIO INCREMENTAL (09/09, v3 pós-Codex) ──────────────────────────────
+   Module-level de propósito: a rota ?status=1 vive em função irmã (o Codex pegou o
+   ReferenceError da v2). Data em FUSO LOCAL (às 23h de São Paulo o toISOString já
+   virou o dia UTC seguinte — o scan olharia um dia vazio). O dia só é dado por
+   FEITO ao concluir com êxito (persistido no cache: restart não repete, sync
+   concorrente não engole o tick — os dois P1 do agendamento) e página falhada
+   deixa o dia ABERTO pro próximo tick re-tentar, nunca parcial silencioso. */
+const _cstDiario = { rodando: false, ultimo: null };
+function _diaLocalHoje() {
+  const ag = new Date();
+  return new Date(ag.getTime() - ag.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+}
+async function custoDiario() {
+  const CUSTO_FILE = path.join(CACHE_DIR, '_custos.json');
+  const d0 = _diaLocalHoje();
+  if (_cstDiario.rodando) return;
+  if (_cst.rodando) { _cstDiario.ultimo = { adiado: 'custo-sync em curso — novo tick tenta de novo', em: new Date().toISOString() }; return; }
+  let cc = readJson(CUSTO_FILE, {});
+  if (cc._custoDiarioDia === d0) return; /* já concluiu hoje (sobrevive a restart) */
+  _cstDiario.rodando = true;
+  const st = { iniciado: new Date().toISOString(), dia: d0, modo: 'incremental', alterados_no_bling: 0, alvo: 0, kits_dependentes: 0 };
+  _cstDiario.ultimo = st;
+  const concluirDia = () => { try { const c2 = readJson(CUSTO_FILE, {}); c2._custoDiarioDia = d0; fs.writeFileSync(CUSTO_FILE, JSON.stringify(c2)); } catch (e) {} };
+  try {
+    if (!cc._sementeCompleta) {
+      st.modo = 'semente_completa (1ª noite — fresh total constrói o mapa de estruturas)';
+      await custoSync(true);
+      const c2 = readJson(CUSTO_FILE, {});
+      c2._sementeCompleta = Date.now();
+      fs.writeFileSync(CUSTO_FILE, JSON.stringify(c2));
+      concluirDia();
+      st.terminou = new Date().toISOString();
+      return;
+    }
+    const alterados = new Set(); /* SEMPRE em minúsculas — cache e Bling divergem de caixa */
+    let traiu = false, paginaFalhou = false;
+    for (let pg = 1; pg <= 8; pg++) {
+      const r = await blingGet('/produtos?dataAlteracaoInicial=' + encodeURIComponent(d0 + ' 00:00:00') + '&pagina=' + pg + '&limite=100');
+      if (!r || !r.ok) { paginaFalhou = true; break; }
+      const arr = (r.data && Array.isArray(r.data.data)) ? r.data.data : [];
+      for (const p2 of arr) { const cod = p2 && p2.codigo; if (cod) alterados.add(String(cod).toLowerCase()); }
+      if (arr.length < 100) break;
+      if (pg === 8) traiu = true;
+      await new Promise(r2 => setTimeout(r2, 700));
+    }
+    st.alterados_no_bling = alterados.size;
+    if (paginaFalhou) {
+      /* dia fica ABERTO — o próximo tick re-varre; parcial calado deixaria mudança
+         das páginas seguintes esperando o TTL de 7 dias */
+      st.modo = 'parcial — página da lista falhou (429/erro); nova tentativa no próximo tick';
+      st.terminou = new Date().toISOString();
+      return;
+    }
+    if (traiu || alterados.size > 600) {
+      st.modo = 'fresh_completo (fallback: filtro de data suspeito — ' + alterados.size + '+ alterados no dia)';
+      await custoSync(true);
+      concluirDia();
+      st.terminou = new Date().toISOString();
+      return;
+    }
+    const alvo = new Set();
+    for (const sk of Object.keys(cc)) {
+      if (sk.startsWith('_')) continue;
+      const skL = sk.toLowerCase();
+      if (alterados.has(skL)) { alvo.add(sk); continue; }
+      const v = cc[sk];
+      if (v && Array.isArray(v.comps) && v.comps.some(c => alterados.has(String(c).toLowerCase()))) { alvo.add(sk); st.kits_dependentes++; }
+    }
+    st.alvo = alvo.size;
+    if (alvo.size) {
+      for (const sk of alvo) { if (cc[sk]) cc[sk].ts = 0; }
+      fs.writeFileSync(CUSTO_FILE, JSON.stringify(cc));
+    }
+    /* alterado que ainda NEM está no cache (vendeu hoje, sync das 6h não passou):
+       a fila natural do custoSync nasce das VENDAS e pega quem tem custo nulo —
+       por isso a rodada roda sempre que houve alteração, mesmo com alvo 0 */
+    if (alvo.size || alterados.size) await custoSync(false);
+    concluirDia();
+    st.terminou = new Date().toISOString();
+  } catch (e) { st.erro = String(e.message || e).slice(0, 200); }
+  finally { _cstDiario.rodando = false; }
+}
+
 // ─── 19/08: SÓ PRODUTO ATIVO ────────────────────────────────────────────────────
 // Caso real trazido pelo Diego: o SKU 10xE14-5W-3000K-BIV tinha DOIS cadastros no Bling —
 // o ativo (kit de 10, R$ 99,90) e um EXCLUÍDO (composição de 6, R$ 81,00). A busca por
@@ -6368,7 +6451,10 @@ async function custoSync(fresh) {
   // Conforme SKUs deletados se acumulam, isso queima cota da API e atrasa o custo dos produtos
   // vivos. A LÁPIDE registra "conferido, não existe mais" e a rodada normal pula; o ?fresh=1 do
   // operador ignora a lápide e reconfere (produto pode ser restaurado no Bling).
-  const alvos = [...todos].filter(sk => { const k = cc[sk]; if (!fresh && k && k.apagado_em) return false; return fresh || !k || !k.id || (Date.now() - (k.ts || 0)) > SETE_D || k.custo == null; });
+  const alvos = [...todos].filter(sk => { const k = cc[sk]; if (k && k.apagado_em) { if (!fresh) return false; if ((Date.now() - k.apagado_em) < 30 * 86400000) return false; /* Codex #358: fresh diário revisitando TODA lápide devolvia os apagados ao resolvedor caro toda noite */ } return fresh || !k || !k.id || (Date.now() - (k.ts || 0)) > SETE_D || k.custo == null; });
+  /* Codex #358: componentes ANTES dos kits na fila — kit processado antes do componente
+     alterado somaria o custo de ontem do cache e cristalizaria até o próximo ciclo */
+  alvos.sort((x, y) => (((cc[x] || {}).comps ? 1 : 0) - ((cc[y] || {}).comps ? 1 : 0)));
   _cst = { rodando: true, feitos: 0, total: alvos.length, ok: 0, falhas: 0, inicio: new Date().toISOString() };
   console.log('[CUSTO] sync iniciando — ' + alvos.length + ' SKU(s) a resolver (tartaruga: ~1,2s/chamada)');
   const dorme = ms => new Promise(r => setTimeout(r, ms));
@@ -6505,7 +6591,14 @@ async function custoSync(fresh) {
            incremental usa pra saber quais kits re-buscar quando um unitário muda */
         const _compsSkus = (((prod.estrutura && (prod.estrutura.componentes || prod.estrutura.itens)) || prod.composicao || prod.componentes) || [])
           .map(cp => String((cp.produto && cp.produto.codigo) || cp.codigo || '')).filter(Boolean);
-        cc[sku] = Object.assign({ id: prod.id, preco: (prod.preco != null && isFinite(Number(prod.preco))) ? Number(prod.preco) : null, custo: _custoNovo, ts: Date.now() }, _compsSkus.length ? { comps: _compsSkus } : {});
+        /* Codex #358: falha transitória (detalhe/fornecedor em 429) devolvia _custoNovo
+           null e APAGAVA custo bom com carimbo novo — a varredura noturna sem vigia
+           podia zerar margens do dashboard inteiro. Preserva o valor antigo e NÃO
+           avança o ts, pra tartaruga re-tentar logo. */
+        const _antigo = cc[sku];
+        const _custoFinal = (_custoNovo != null) ? _custoNovo : ((_antigo && _antigo.custo != null) ? _antigo.custo : null);
+        const _tsFinal = (_custoNovo != null) ? Date.now() : ((_antigo && _antigo.ts) || 0);
+        cc[sku] = Object.assign({ id: prod.id, preco: (prod.preco != null && isFinite(Number(prod.preco))) ? Number(prod.preco) : null, custo: _custoFinal, ts: _tsFinal }, _compsSkus.length ? { comps: _compsSkus } : {});
         _cst.ok++;
       } else { _cst.falhas++; }
     } catch (e) { _cst.falhas++; }
@@ -6534,82 +6627,17 @@ function bootstrap() {
   setInterval(() => { try { custoSync(false).catch(() => {}); } catch (e) {} }, 6 * 3600 * 1000);
 
 
-const _cstDiario = { ultimo: null };
-async function custoDiario() {
-  /* 09/09 v2 (o Diego pegou o furo do desenho bruto: a girassol tem ~9.000 SKUs —
-     fresh completo diário queimaria 10-15% da cota do Bling à toa e ~2h de tartaruga
-     pra achar meia dúzia de mudanças): INCREMENTAL. Pergunta ao Bling só o que MUDOU
-     no dia (filtro dataAlteracao), soma os KITS que dependem dos alterados (mapa
-     reverso `comps` que o próprio sync grava ao somar estruturas) e re-busca SÓ
-     esses — zerando o carimbo e deixando a própria tartaruga do custoSync trabalhar
-     (herda anti-429, lápides e a soma de estrutura). Guardas: a 1ª noite semeia com
-     fresh completo (constrói os comps); filtro de data traído (lista gigante — o
-     clássico do Bling) cai pro fresh completo DECLARADO no status. */
-  const CUSTO_FILE = path.join(CACHE_DIR, '_custos.json');
-  const st = { iniciado: new Date().toISOString(), modo: 'incremental', alterados_no_bling: 0, alvo: 0, kits_dependentes: 0 };
-  _cstDiario.ultimo = st;
-  try {
-    let cc = readJson(CUSTO_FILE, {});
-    if (!cc._sementeCompleta) {
-      st.modo = 'semente_completa (1ª noite — fresh total constrói o mapa de estruturas)';
-      await custoSync(true);
-      cc = readJson(CUSTO_FILE, {});
-      cc._sementeCompleta = Date.now();
-      fs.writeFileSync(CUSTO_FILE, JSON.stringify(cc));
-      st.terminou = new Date().toISOString();
-      return;
-    }
-    const d0 = new Date().toISOString().slice(0, 10);
-    const alterados = new Set();
-    let traiu = false;
-    for (let pg = 1; pg <= 8; pg++) {
-      const r = await blingGet('/produtos?dataAlteracaoInicial=' + encodeURIComponent(d0 + ' 00:00:00') + '&pagina=' + pg + '&limite=100');
-      if (!r || !r.ok) break;
-      const arr = (r.data && Array.isArray(r.data.data)) ? r.data.data : [];
-      for (const p2 of arr) { const cod = p2 && p2.codigo; if (cod) alterados.add(String(cod)); }
-      if (arr.length < 100) break;
-      if (pg === 8) traiu = true;
-      await new Promise(r2 => setTimeout(r2, 450));
-    }
-    st.alterados_no_bling = alterados.size;
-    if (traiu || alterados.size > 600) {
-      st.modo = 'fresh_completo (fallback: filtro de data suspeito — ' + alterados.size + '+ alterados no dia)';
-      await custoSync(true);
-      st.terminou = new Date().toISOString();
-      return;
-    }
-    const alvo = new Set();
-    for (const sk of Object.keys(cc)) {
-      if (sk.startsWith('_')) continue;
-      if (alterados.has(sk)) { alvo.add(sk); continue; }
-      const v = cc[sk];
-      if (v && Array.isArray(v.comps) && v.comps.some(c => alterados.has(String(c)))) { alvo.add(sk); st.kits_dependentes++; }
-    }
-    st.alvo = alvo.size;
-    if (alvo.size) {
-      for (const sk of alvo) { if (cc[sk]) cc[sk].ts = 0; }
-      fs.writeFileSync(CUSTO_FILE, JSON.stringify(cc));
-      await custoSync(false); /* a tartaruga re-busca só quem teve o carimbo zerado */
-    }
-    st.terminou = new Date().toISOString();
-  } catch (e) { st.erro = String(e.message || e).slice(0, 200); }
-}
+
 
   /* 09/09 (pedido do Diego): rodada de custo TODO DIA às 23h15 — mudança de
      preço de fornecedor no Bling passa a valer no MESMO dia (o TTL de 7 dias vira rede
      de segurança, não relógio). 23h15 = galpão fechado (regra da cota: rotina pesada só
      fora do horário) e ANTES da noturna das 03:45, que então grava o dia com o custo
      novo. Trava por dia — reinício do serviço não repete a rodada. */
-  let _custoDiarioDia = '';
   setInterval(() => {
     try {
       const ag = new Date();
-      const dia = ag.toISOString().slice(0, 10);
-      if (ag.getHours() === 23 && ag.getMinutes() >= 15 && _custoDiarioDia !== dia) {
-        _custoDiarioDia = dia;
-        console.log('[custo-diario] rodada incremental das 23h15 iniciando');
-        custoDiario().catch(() => {});
-      }
+      if (ag.getHours() === 23 && ag.getMinutes() >= 15) custoDiario().catch(() => {});
     } catch (e) {}
   }, 60 * 1000);
 
