@@ -7,6 +7,12 @@ services:
     startCommand: node index.js
     healthCheckPath: /health
     envVars:
+      # chaves dedicadas (Codex #356 r4: sem declarar aqui, um blueprint deploy as
+      # perderia e as rotas nasceriam desligadas em silêncio) — valor só no dashboard
+      - key: ADMIN_TOKEN_LEITURA_KEY
+        sync: false
+      - key: BLING_RITMO_KEY
+        sync: false
       - key: TZ
         value: America/Sao_Paulo
       - key: NODE_ENV
