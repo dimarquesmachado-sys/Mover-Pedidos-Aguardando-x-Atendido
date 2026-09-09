@@ -48,6 +48,9 @@ const TETO_DIA_FUNDO = 100000;
 /* Codex #356: o render.yaml monta disco persistente em /data — estado no diretório
    da aplicação morria no deploy, contrariando a promessa de sobreviver a restart. */
 const DIR_ESTADO = process.env.BLING_RITMO_DIR || (fs.existsSync('/data') ? '/data' : __dirname);
+/* Codex #356 r7: diretório configurado que não existe fazia todo _persistir morrer em
+   ENOENT engolido — a configurabilidade prometida virava perda silenciosa no restart. */
+try { fs.mkdirSync(DIR_ESTADO, { recursive: true }); } catch (e) { /* já existe ou sem permissão — o catch do _persistir cobre */ }
 const ARQ = path.join(DIR_ESTADO, 'bling-ritmo-estado.json');
 
 const _contas = new Map(); /* conta → { fichas: [ts...], pausaAte: 0, degrau: 0, dia: 'aaaammdd', usadasDia: 0 } */
