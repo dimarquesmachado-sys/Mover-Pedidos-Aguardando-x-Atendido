@@ -53,7 +53,12 @@ async function _nfFetch(url, opts) {
 }
 
 async function postOAuthNF(body) {
-  const resp = await _nfFetch('https://api.bling.com.br/Api/v3/oauth/token', {
+  /* Codex #355 r5: a TROCA do refresh ROTATIVO nunca é abortada — o servidor pode já
+     ter rotacionado quando o prazo estourasse, e abortar a leitura perderia o token
+     novo pra sempre (reautorização manual). Mesma decisão do mlTokenManager (#344):
+     o teto é do CHAMADOR (rota/fluxo), e a promessa única segue viva em background
+     até persistir. A VALIDAÇÃO (GET idempotente) continua com prazo no _nfFetch. */
+  const resp = await fetch('https://api.bling.com.br/Api/v3/oauth/token', {
     method: 'POST',
     headers: {
       Authorization: basicAuthNF(),
@@ -63,7 +68,14 @@ async function postOAuthNF(body) {
     },
     body: new URLSearchParams(body)
   });
-  const data = resp.json() || {};
+  const cru = await resp.text();
+  let data = null; try { data = JSON.parse(cru); } catch (e) { data = null; }
+  /* Codex #355 r5: resposta não-JSON (HTML de 502, corpo truncado) virava {} sem
+     data.error e o caminho salvava credencial undefined — APAGANDO o refresh ainda
+     válido. Forma validada ANTES de qualquer salvamento. */
+  if (!resp.ok || !data || !data.access_token || !data.refresh_token) {
+    throw new Error('AMB NF OAuth: resposta inválida (HTTP ' + resp.status + '): ' + String(cru).slice(0, 120));
+  }
   if (data.error) throw new Error(`AMB NF OAuth error: ${JSON.stringify(data)}`);
   return data;
 }
