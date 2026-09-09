@@ -38,7 +38,26 @@ function basicAuthNF() {
   return 'Basic ' + Buffer.from(`${id}:${sec}`).toString('base64');
 }
 
+/* Codex #355 r4: fetch SEM teto — com a promessa única, UMA chamada travada pendurava
+   TODOS os chamadores pra sempre (antes, o sono cego de 2s 'protegia' por acidente).
+   Prazo de 20s com abort de verdade e corpo lido DENTRO do prazo (receita do
+   tokenManager reformado). */
+async function _nfFetch(url, opts) {
+  const ac = new AbortController();
+  const t = setTimeout(() => ac.abort(), 20000);
+  try {
+    const resp = await fetch(url, Object.assign({}, opts, { signal: ac.signal }));
+    const texto = await resp.text();
+    return { status: resp.status, json: () => { try { return JSON.parse(texto); } catch (e) { return null; } } };
+  } finally { clearTimeout(t); }
+}
+
 async function postOAuthNF(body) {
+  /* Codex #355 r5: a TROCA do refresh ROTATIVO nunca é abortada — o servidor pode já
+     ter rotacionado quando o prazo estourasse, e abortar a leitura perderia o token
+     novo pra sempre (reautorização manual). Mesma decisão do mlTokenManager (#344):
+     o teto é do CHAMADOR (rota/fluxo), e a promessa única segue viva em background
+     até persistir. A VALIDAÇÃO (GET idempotente) continua com prazo no _nfFetch. */
   const resp = await fetch('https://api.bling.com.br/Api/v3/oauth/token', {
     method: 'POST',
     headers: {
@@ -49,7 +68,14 @@ async function postOAuthNF(body) {
     },
     body: new URLSearchParams(body)
   });
-  const data = await resp.json();
+  const cru = await resp.text();
+  let data = null; try { data = JSON.parse(cru); } catch (e) { data = null; }
+  /* Codex #355 r5: resposta não-JSON (HTML de 502, corpo truncado) virava {} sem
+     data.error e o caminho salvava credencial undefined — APAGANDO o refresh ainda
+     válido. Forma validada ANTES de qualquer salvamento. */
+  if (!resp.ok || !data || !data.access_token || !data.refresh_token) {
+    throw new Error('AMB NF OAuth: resposta inválida (HTTP ' + resp.status + '): ' + String(cru).slice(0, 120));
+  }
   if (data.error) throw new Error(`AMB NF OAuth error: ${JSON.stringify(data)}`);
   return data;
 }
@@ -62,14 +88,21 @@ async function gerarTokenInicialNF(auth_code) {
   return { ok: true };
 }
 
-let _renovandoNF = false;
+let _renovacaoEmVoo = null;
 
-async function renovarTokenNF() {
-  if (_renovandoNF) {
-    await new Promise(r => setTimeout(r, 2000));
-    return lerTokensNF().access_token;
+/* Codex #355 r3: a espera FIXA de 2s lia o arquivo com a renovação ainda em curso
+   e devolvia token EXPIRADO ao chamador (F3, cron, rota de leitura). Agora todo
+   chamador espera a MESMA promessa — sem sono cego, sem token velho. O refresh do
+   Bling também rotaciona, então a promessa única ainda evita refresh queimado. */
+function renovarTokenNF() {
+  if (!_renovacaoEmVoo) {
+    _renovacaoEmVoo = _renovarTokenNFDeVerdade().finally(() => { _renovacaoEmVoo = null; });
+    _renovacaoEmVoo.catch(() => {});
   }
-  _renovandoNF = true;
+  return _renovacaoEmVoo;
+}
+
+async function _renovarTokenNFDeVerdade() {
   try {
     console.log('[AMB nfTokenManager] Renovando token NF...');
     const { refresh_token } = lerTokensNF();
@@ -79,9 +112,7 @@ async function renovarTokenNF() {
     salvarTokensNF(data.access_token, data.refresh_token);
     console.log('[AMB nfTokenManager] Token NF renovado ✓');
     return data.access_token;
-  } finally {
-    _renovandoNF = false;
-  }
+  } finally { /* o wrapper de promessa única limpa o em-voo */ }
 }
 
 async function garantirTokenNF() {
@@ -93,7 +124,7 @@ async function garantirTokenNF() {
   }
 
   // Valida usando /nfe (mesmo scope do app) em vez de /produtos
-  const resp = await fetch('https://api.bling.com.br/Api/v3/nfe?limite=1', {
+  const resp = await _nfFetch('https://api.bling.com.br/Api/v3/nfe?limite=1', {
     headers: { Authorization: `Bearer ${access_token}` }
   });
 
