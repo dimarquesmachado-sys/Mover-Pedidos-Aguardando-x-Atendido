@@ -1,6 +1,6 @@
 {
   "_leia_me": [
-    "CONTRATO DE EMPRESAS — v7 (08/09/2026)",
+    "CONTRATO DE EMPRESAS — v8 (09/09/2026)",
     "",
     "Dado, não código. Os dois repositórios leem este mesmo arquivo, byte a",
     "byte. O Mover-Pedidos tem um script que baixa o contrato da main do",
@@ -32,10 +32,16 @@
     "  v7  o gatilho de invalidação do cache passa a dizer 401 OU 403.",
     "      O ML responde 403 com token vencido (achado do Devoluções em",
     "      março, v3.40) — quem implementasse só o 401 deixaria o token",
-    "      morto no cache pela janela inteira do TTL."
+    "      morto no cache pela janela inteira do TTL.",
+    "  v8  a nota da v7 sobre o dono ficou DESATUALIZADA no mesmo dia: ele",
+    "      renovava em qualquer não-2xx e passou a renovar SÓ em 401/403,",
+    "      porque renovar em 429/5xx transitório QUEIMA o refresh de uso",
+    "      único. O gatilho do contrato (401 ou 403) não muda — o que",
+    "      muda é a explicação, que agora descreveria algo que não",
+    "      existe mais."
   ],
-  "versao": 7,
-  "atualizado_em": "2026-09-08",
+  "versao": 8,
+  "atualizado_em": "2026-09-09",
   "servicos": {
     "_nota": "os serviços que leem este contrato. `dono_hoje`/`dono_alvo` só podem citar nomes daqui.",
     "lista": [
@@ -274,7 +280,7 @@
         "aquisicao_no_dono": "promessa única por empresa (#350 do Mover-Pedidos): a rota espera a renovação em voo com prazo curto e devolve o token novo",
         "contrato_de_leitura": "usar o que a rota der; 401 OU 403 esporádico -> re-pedir (retry curto)",
         "ler_versao_anterior": "desnecessário",
-        "_nota_403": "⚠️ v7: o ML responde 403 com token vencido, não só 401 — achado do Devoluções em março (lib/ml.js, v3.40). O Mover-Pedidos conferiu e os managers de lá renovam em QUALQUER não-2xx da sonda, então já cobrem por desenho, sem lista de status. Mas o TEXTO do contrato dizia só 401, e quem implementasse ao pé da letra deixaria o token morto no cache pela janela inteira do TTL."
+        "_nota_403": "⚠️ O ML responde 403 com token vencido, não só 401 — achado do Devoluções em março (lib/ml.js, v3.40). v8: o Mover-Pedidos renovava em QUALQUER não-2xx e mudou para renovar SÓ em 401/403, porque renovar em 429 ou 5xx transitório QUEIMA o refresh de uso único. Os dois lados agora usam o mesmo gatilho seletivo, por motivos diferentes: eles para não queimar o refresh, nós para invalidar o cache na hora certa."
       },
       "ordem_do_corte": {
         "1": "Devolucoes passa a LER, com a renovacao local ainda ligada como rede",
@@ -298,6 +304,22 @@
         "por_que_cachear": "a latência da bipagem é o que o estoquista sente",
         "custo_aceito": "token revogado vive até o 401 ou o TTL; revogação manual é rara e o 401 já é o sinal combinado",
         "_nota_403": "v7: era só 401. Ver `janela_de_renovacao._nota_403` — o 403 do ML é o mesmo sinal, e quem lê 'invalidar no 401' tende a implementar literal."
+      },
+      "renovacao_seletiva": {
+        "_nota": "v8 — o que dispara renovação/invalidação, e o que NÃO pode disparar.",
+        "dispara": [
+          "401",
+          "403"
+        ],
+        "nao_dispara": [
+          "429",
+          "5xx",
+          "timeout",
+          "erro de rede"
+        ],
+        "por_que": "⚠️ o refresh do ML é de USO ÚNICO: renovar por um 429 transitório queima o refresh à toa e pode deixar a conta sem token — o erro era passageiro e a resposta permanente",
+        "devolucoes": "Bling: 401. ML: 401 ou 403. Já era seletivo — conferido em 09/09",
+        "mover_pedidos": "sonda seletiva desde 09/09, com teste de regressão"
       }
     },
     "inegociavel": "no ML, dono único é obrigação — o refresh é de uso único"

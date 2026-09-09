@@ -287,7 +287,16 @@ async function _varrerLoteInterno(empresa, de, ate, teto, deps) {
   }
   const q = 'start=' + de + '&end=' + ate + '&sale=all&return=all&full=all&others=all&file_types=xml&simple_folder=false';
   const urlLote = ML_API + '/users/' + me.id + '/invoices/sites/MLB/batch_request/period/stream?' + q;
-  const rz = await mlGetBuffer(tokenML, urlLote);
+  /* 09/09 (a melhoria anotada virou necessidade): 2º dia seguido de 429 no lote fazendo
+     o dono de office-boy do relógio (ontem AMB, hoje GOOD) — e cada tentativa manual
+     REARMA o limite. O motor agora espera sozinho: até 3 tentativas com pausa crescente
+     (90s, 180s) SÓ pra transitório do lote; esgotou, devolve o transitorio de sempre. */
+  let rz;
+  for (let tent = 1; ; tent++) {
+    rz = await mlGetBuffer(tokenML, urlLote);
+    if (!rz.transitorio || tent >= 3) break;
+    await sleep(tent * 90000);
+  }
   if (rz.transitorio) return { ok: false, resultado: 'transitorio_tente_de_novo', detalhe: rz.buf.toString().slice(0, 200) };
   if (!rz.ok) return { ok: false, resultado: 'erro_lote_' + rz.status, detalhe: rz.buf.toString().slice(0, 400) };
   if (rz.buf.slice(0, 2).toString() !== 'PK') return { ok: false, resultado: 'lote_nao_veio_zip', detalhe: rz.buf.toString().slice(0, 400) };
