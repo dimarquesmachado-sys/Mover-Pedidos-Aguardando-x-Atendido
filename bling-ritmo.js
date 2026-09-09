@@ -53,9 +53,12 @@ const ARQ = path.join(DIR_ESTADO, 'bling-ritmo-estado.json');
 const _contas = new Map(); /* conta → { fichas: [ts...], pausaAte: 0, degrau: 0, dia: 'aaaammdd', usadasDia: 0 } */
 const _agoraRef = { fn: () => Date.now() }; /* injetável no teste */
 
+let _serieFicha = 0;
 function _conta(nome) {
-  if (!_contas.has(nome)) _contas.set(nome, { fichas: [], pausaAte: 0, degrau: 0, dia: '', usadasDia: 0 });
-  return _contas.get(nome);
+  if (!_contas.has(nome)) _contas.set(nome, { fichas: [], pausaAte: 0, degrau: 0, dia: '', usadasDia: 0, fichasVivas: new Map() });
+  const c = _contas.get(nome);
+  if (!c.fichasVivas) c.fichasVivas = new Map();
+  return c;
 }
 
 function _persistir() {
@@ -103,7 +106,16 @@ function permissao(conta, prioridade) {
     c.fichas.push({ ts: agora, pri: prioridade });
     c.usadasDia++;
     c.tsUltimaPermissao = agora;
-    return { ok: true };
+    /* Codex #356 r4: sucesso precisa CORRELACIONAR com a permissão que o gerou — o
+       cheque só-por-timestamps da conta aceitava ok de pedido pré-429 lento chegando
+       depois de uma permissão nova. A permissão emite FICHA; o aviso-ok a devolve. */
+    const ficha = 'f' + (++_serieFicha);
+    c.fichasVivas.set(ficha, agora);
+    if (c.fichasVivas.size > 500) { const k1 = c.fichasVivas.keys().next().value; c.fichasVivas.delete(k1); }
+    /* Codex #356 r4: usadasDia só persistia em 429/ok — restart no meio esquecia
+       chamadas que o Bling contou; persistência com throttle (a cada 20). */
+    if (c.usadasDia % 20 === 0) _persistir();
+    return { ok: true, ficha };
   }
   const maisAntiga = noSegundo.length >= TETO_SEGUNDO ? (noSegundo[0].ts + 1000) : (c.fichas.length ? c.fichas[0].ts + JANELA_MS : agora + 200);
   return { ok: false, esperar_ms: Math.max(50, maisAntiga - agora) };
@@ -113,7 +125,11 @@ function aviso429(conta, retryAfterS) {
   const c = _conta(conta);
   const agora = _agoraRef.fn();
   const escada = ESCADA_PAUSA_S[Math.min(c.degrau, ESCADA_PAUSA_S.length - 1)];
-  const pausaS = Number(retryAfterS) > 0 ? Math.max(Number(retryAfterS), 5) : escada;
+  /* Codex #356 r4: Retry-After não-finito (Infinity/NaN de cliente bugado) travava a
+     conta PRA SEMPRE (toda permissão negada, todo ok ignorado como durante-pausa).
+     Só finito, com teto de 1h. */
+  const ra = Number(retryAfterS);
+  const pausaS = (Number.isFinite(ra) && ra > 0) ? Math.min(Math.max(ra, 5), 3600) : escada;
   c.degrau = Math.min(c.degrau + 1, ESCADA_PAUSA_S.length - 1);
   c.ts429 = agora;
   /* Codex #356: aviso posterior NUNCA encurta pausa ativa — um Retry-After de 300s
@@ -123,9 +139,21 @@ function aviso429(conta, retryAfterS) {
   return { ok: true, pausa_s: Math.ceil((c.pausaAte - agora) / 1000), degrau: c.degrau };
 }
 
-function avisoOk(conta) {
+function avisoOk(conta, ficha) {
   const c = _conta(conta);
   const agora = _agoraRef.fn();
+  /* Codex #356 r4: com a ficha, a correlação é exata — só zera se a PERMISSÃO que
+     gerou o sucesso saiu depois do último 429. Sem ficha (cliente antigo), vale a
+     regra dos timestamps da conta. */
+  if (ficha) {
+    const tsFicha = c.fichasVivas.get(String(ficha));
+    if (tsFicha === undefined) return { ok: true, ignorado: true, motivo: 'ficha desconhecida ou expirada' };
+    c.fichasVivas.delete(String(ficha));
+    if (c.ts429 && tsFicha <= c.ts429) return { ok: true, ignorado: true, motivo: 'a permissão desta ficha é anterior ao último 429' };
+    c.degrau = 0; c.pausaAte = 0;
+    _persistir();
+    return { ok: true };
+  }
   /* Codex #356 r2+r3: sucesso legítimo é o de permissão POSTERIOR ao último 429 —
      a checagem só-por-pausa deixava um pedido de 16s (permitido antes de uma pausa
      de 15s) chegar DEPOIS dela vencer e zerar a escada sem nenhum sucesso pós-429
@@ -171,7 +199,7 @@ async function tratar(req, res, urlObj, json) {
     json(res, 200, permissao(conta, pri)); return true;
   }
   if (p === '/bling-ritmo/aviso-429' && req.method === 'POST') { json(res, 200, aviso429(conta, urlObj.searchParams.get('retry_after_s'))); return true; }
-  if (p === '/bling-ritmo/aviso-ok' && req.method === 'POST') { json(res, 200, avisoOk(conta)); return true; }
+  if (p === '/bling-ritmo/aviso-ok' && req.method === 'POST') { json(res, 200, avisoOk(conta, urlObj.searchParams.get('ficha'))); return true; }
   if (p === '/bling-ritmo/estado' && req.method === 'GET') { json(res, 200, estado(conta)); return true; }
   json(res, 404, { ok: false, erro: 'rotas: POST permissao | POST aviso-429 | POST aviso-ok | GET estado' });
   return true;

@@ -57,6 +57,8 @@ assert.ok(!neg.ok && neg.pausa_s > 0, 'pausa barra até a operação — recuo �
 agora += 16000;
 const p2 = aviso429('girassol');
 assert.strictEqual(p2.pausa_s, 30, '2º 429 ⇒ 30s (escada)');
+const pInf = aviso429('girassol', 'Infinity');
+assert.ok(pInf.pausa_s <= 3600, 'Retry-After não-finito não trava a conta pra sempre (caiu na escada/teto: ' + pInf.pausa_s + 's)');
 const p3 = aviso429('girassol', '90');
 assert.strictEqual(p3.pausa_s, 90, 'Retry-After do Bling tem precedência');
 const p4 = aviso429('girassol');
@@ -66,8 +68,11 @@ assert.ok(okIgnorado.ignorado, 'sucesso ATRASADO com pausa ativa é ignorado —
 agora += (p4.pausa_s + 1) * 1000; // o degrau da escada pode ter passado do Retry-After — avanço dinâmico
 const okVelho = avisoOk('girassol');
 assert.ok(okVelho.ignorado, 'sucesso após a pausa MAS sem permissão pós-429 também é ignorado (pedido de 16s numa pausa de 15s)');
-assert.ok(permissao('girassol', 'operacao').ok, 'permissão nova pós-429 sai');
-avisoOk('girassol');
+const pNova = permissao('girassol', 'operacao');
+assert.ok(pNova.ok && pNova.ficha, 'permissão nova pós-429 sai COM ficha');
+const okFichaVelha = avisoOk('girassol', 'f1');
+assert.ok(okFichaVelha.ignorado, 'ficha pré-429 (ou desconhecida) não zera a escada — correlação exata');
+avisoOk('girassol', pNova.ficha);
 assert.ok(!estado('girassol').pausa_s, 'sucesso de permissão pós-429 libera de verdade');
 assert.strictEqual(estado('girassol').degrau, 0);
 
