@@ -64,8 +64,11 @@ assert.ok(p4.pausa_s >= 89, 'aviso posterior NUNCA encurta a pausa ativa (ficou 
 const okIgnorado = avisoOk('girassol');
 assert.ok(okIgnorado.ignorado, 'sucesso ATRASADO com pausa ativa é ignorado — não cancela o recuo');
 agora += (p4.pausa_s + 1) * 1000; // o degrau da escada pode ter passado do Retry-After — avanço dinâmico
+const okVelho = avisoOk('girassol');
+assert.ok(okVelho.ignorado, 'sucesso após a pausa MAS sem permissão pós-429 também é ignorado (pedido de 16s numa pausa de 15s)');
+assert.ok(permissao('girassol', 'operacao').ok, 'permissão nova pós-429 sai');
 avisoOk('girassol');
-assert.ok(permissao('girassol', 'operacao').ok, 'sucesso APÓS a pausa vencer libera e zera a escada');
+assert.ok(!estado('girassol').pausa_s, 'sucesso de permissão pós-429 libera de verdade');
 assert.strictEqual(estado('girassol').degrau, 0);
 
 // persistência: pausa sobrevive a "restart" (reload do estado do arquivo)

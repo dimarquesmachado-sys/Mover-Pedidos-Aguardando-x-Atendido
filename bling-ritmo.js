@@ -7,18 +7,20 @@
    'operacao' (bipagem/despacho — o estoquista está com o pacote na mão) tem reserva
    garantida; 'fundo' (backfill, varredura, cron) pega o resto.
 
-   CONTRATO (combinado com o app de Expedição):
-     POST /bling-ritmo/permissao?conta=girassol&prioridade=operacao|fundo&k=ADMIN_KEY
+   CONTRATO (combinado com o app de Expedição) — auth pelo header
+   x-ritmo-key: <BLING_RITMO_KEY> em TODAS as chamadas (credencial DEDICADA do
+   porteiro, nunca a ADMIN_KEY geral; ?k= na URL leva 400 — Codex #356 r2/r3):
+     POST /bling-ritmo/permissao?conta=girassol&prioridade=operacao|fundo
        → 200 {"ok":true}                          pode chamar AGORA
        → 200 {"ok":false,"esperar_ms":250}        aguarde e peça de novo
        → 200 {"ok":false,"pausa_s":120,"motivo"}  429 recente: pausa global da conta
-     POST /bling-ritmo/aviso-429?conta=girassol&retry_after_s=60&k=ADMIN_KEY
+     POST /bling-ritmo/aviso-429?conta=girassol&retry_after_s=60
        quem levou 429 avisa — TODOS recuam juntos (escada 15s→30s→1m→2m→5m,
        Retry-After do Bling tem precedência quando informado)
-     POST /bling-ritmo/aviso-ok?conta=girassol&k=ADMIN_KEY
-       um sucesso real no Bling libera a pausa e zera a escada
-     GET  /bling-ritmo/estado?conta=girassol&k=ADMIN_KEY
-       visibilidade: fichas do último segundo, pausa, degrau, usadas no dia
+     POST /bling-ritmo/aviso-ok?conta=girassol
+       sucesso real no Bling (de permissão POSTERIOR ao 429) libera e zera a escada
+     GET  /bling-ritmo/estado?conta=girassol
+       visibilidade: fichas do segundo/janela, pausa, degrau, usadas no dia
 
    FALHAR ABERTO é responsabilidade do CLIENTE: se esta rota não responder em ~1s,
    use o ritmo local e siga — o porteiro nunca pode ser ponto único de falha da
@@ -59,15 +61,18 @@ function _conta(nome) {
 function _persistir() {
   try {
     const dump = {};
-    for (const [k, v] of _contas) dump[k] = { pausaAte: v.pausaAte, degrau: v.degrau, dia: v.dia, usadasDia: v.usadasDia };
-    fs.writeFileSync(ARQ, JSON.stringify(dump));
+    for (const [k, v] of _contas) dump[k] = { pausaAte: v.pausaAte, degrau: v.degrau, dia: v.dia, usadasDia: v.usadasDia, ts429: v.ts429 || 0, tsUltimaPermissao: v.tsUltimaPermissao || 0 };
+    /* Codex #356 r3: write atômico — morte no meio do writeFileSync truncava o arquivo
+       e o restart 'sujo' recomeçava sem pausa nenhuma, exatamente quando mais importa. */
+    fs.writeFileSync(ARQ + '.tmp', JSON.stringify(dump));
+    fs.renameSync(ARQ + '.tmp', ARQ);
   } catch (e) { /* persistência é conveniência — nunca derruba o porteiro */ }
 }
 function _carregar() {
   try {
     if (!fs.existsSync(ARQ)) return;
     const dump = JSON.parse(fs.readFileSync(ARQ, 'utf8'));
-    for (const [k, v] of Object.entries(dump)) _contas.set(k, { fichas: [], pausaAte: v.pausaAte || 0, degrau: v.degrau || 0, dia: v.dia || '', usadasDia: v.usadasDia || 0 });
+    for (const [k, v] of Object.entries(dump)) _contas.set(k, { fichas: [], pausaAte: v.pausaAte || 0, degrau: v.degrau || 0, dia: v.dia || '', usadasDia: v.usadasDia || 0, ts429: v.ts429 || 0, tsUltimaPermissao: v.tsUltimaPermissao || 0 });
   } catch (e) { /* arquivo corrompido: começa limpo */ }
 }
 _carregar();
@@ -97,6 +102,7 @@ function permissao(conta, prioridade) {
   if (cabeClasse && noSegundo.length < TETO_SEGUNDO && c.fichas.length < TETO_JANELA) {
     c.fichas.push({ ts: agora, pri: prioridade });
     c.usadasDia++;
+    c.tsUltimaPermissao = agora;
     return { ok: true };
   }
   const maisAntiga = noSegundo.length >= TETO_SEGUNDO ? (noSegundo[0].ts + 1000) : (c.fichas.length ? c.fichas[0].ts + JANELA_MS : agora + 200);
@@ -109,6 +115,7 @@ function aviso429(conta, retryAfterS) {
   const escada = ESCADA_PAUSA_S[Math.min(c.degrau, ESCADA_PAUSA_S.length - 1)];
   const pausaS = Number(retryAfterS) > 0 ? Math.max(Number(retryAfterS), 5) : escada;
   c.degrau = Math.min(c.degrau + 1, ESCADA_PAUSA_S.length - 1);
+  c.ts429 = agora;
   /* Codex #356: aviso posterior NUNCA encurta pausa ativa — um Retry-After de 300s
      seguido de um 429 sem header mantinha só o degrau curto e liberava cedo demais. */
   c.pausaAte = Math.max(c.pausaAte, agora + pausaS * 1000);
@@ -119,10 +126,12 @@ function aviso429(conta, retryAfterS) {
 function avisoOk(conta) {
   const c = _conta(conta);
   const agora = _agoraRef.fn();
-  /* Codex #356: sucesso ATRASADO (permissão antiga terminando fora de ordem) não pode
-     cancelar pausa recém-instalada — durante a pausa não saem permissões novas, então
-     sucesso chegando com pausa ativa é necessariamente de antes dela: ignorado. */
+  /* Codex #356 r2+r3: sucesso legítimo é o de permissão POSTERIOR ao último 429 —
+     a checagem só-por-pausa deixava um pedido de 16s (permitido antes de uma pausa
+     de 15s) chegar DEPOIS dela vencer e zerar a escada sem nenhum sucesso pós-429
+     real. A âncora é o par de timestamps, não o relógio da pausa. */
   if (c.pausaAte > agora) return { ok: true, ignorado: true, motivo: 'pausa ativa — sucesso é de permissão anterior ao 429' };
+  if (c.ts429 && !(c.tsUltimaPermissao > c.ts429)) return { ok: true, ignorado: true, motivo: 'nenhuma permissão saiu desde o último 429 — sucesso é anterior a ele' };
   c.degrau = 0; c.pausaAte = 0;
   _persistir();
   return { ok: true };
@@ -147,14 +156,14 @@ const CONTAS_VALIDAS = new Set(['girassol', 'good', 'amb']);
 async function tratar(req, res, urlObj, json) {
   const p = urlObj.pathname;
   if (!p.startsWith('/bling-ritmo/')) return false;
-  /* Codex #356 r2 (P1, usando o PRÓPRIO contrato deste PR contra o desenho): ?k= na
-     URL é o P0 conhecido — e o porteiro é chamado por OUTRO serviço pela internet a
-     cada chamada ao Bling, então a exposição em log de proxy é máxima. Credencial SÓ
-     pelo header x-admin-key; ?k= leva 400 pedagógico. O gate do index não se aplica
-     a este prefixo (ver index.js). */
-  if (urlObj.searchParams.get('k')) { json(res, 400, { ok: false, erro: 'credencial na URL não é aceita nesta rota — use o header x-admin-key' }); return true; }
-  const ADMIN = process.env.ADMIN_KEY || '';
-  if (!ADMIN || req.headers['x-admin-key'] !== ADMIN) { json(res, 404, { error: 'not found', path: p }); return true; }
+  /* Codex #356 r2+r3: ?k= na URL é o P0 conhecido, e compartilhar a ADMIN_KEY geral
+     com a Expedição expandiria um comprometimento de lá pra TODAS as rotas
+     administrativas daqui. Credencial DEDICADA do porteiro (BLING_RITMO_KEY) pelo
+     header x-ritmo-key; sem a env a rota nasce DESLIGADA (503); ?k= leva 400. */
+  if (urlObj.searchParams.get('k')) { json(res, 400, { ok: false, erro: 'credencial na URL não é aceita nesta rota — use o header x-ritmo-key' }); return true; }
+  const CHAVE = process.env.BLING_RITMO_KEY || '';
+  if (!CHAVE) { json(res, 503, { ok: false, erro: 'porteiro desligado — configure BLING_RITMO_KEY no serviço (chave dedicada, não a ADMIN_KEY)' }); return true; }
+  if (req.headers['x-ritmo-key'] !== CHAVE) { json(res, 404, { error: 'not found', path: p }); return true; }
   const conta = String(urlObj.searchParams.get('conta') || '').toLowerCase().trim();
   if (!CONTAS_VALIDAS.has(conta)) { json(res, 400, { ok: false, erro: 'conta inválida — use conta=girassol|good|amb (a cota do Bling é por CNPJ)' }); return true; }
   if (p === '/bling-ritmo/permissao' && req.method === 'POST') {
