@@ -95,14 +95,21 @@ async function gerarTokenInicial(auth_code) {
 
 // ── Renovar token ─────────────────────────────────────────────────────
 
-let _renovando = false;
+let _renovacaoEmVoo = null;
 
-async function renovarToken() {
-  if (_renovando) {
-    await new Promise(r => setTimeout(r, 2000));
-    return lerTokens().access_token;
+/* Codex #355 r3: a espera FIXA de 2s lia o arquivo com a renovação ainda em curso
+   e devolvia token EXPIRADO ao chamador (F3, cron, rota de leitura). Agora todo
+   chamador espera a MESMA promessa — sem sono cego, sem token velho. O refresh do
+   Bling também rotaciona, então a promessa única ainda evita refresh queimado. */
+function renovarToken() {
+  if (!_renovacaoEmVoo) {
+    _renovacaoEmVoo = _renovarTokenDeVerdade().finally(() => { _renovacaoEmVoo = null; });
+    _renovacaoEmVoo.catch(() => {});
   }
-  _renovando = true;
+  return _renovacaoEmVoo;
+}
+
+async function _renovarTokenDeVerdade() {
   try {
     console.log('[AMB tokenManager] Renovando token Bling...');
     const { refresh_token } = lerTokens();
@@ -112,9 +119,7 @@ async function renovarToken() {
     salvarTokens(data.access_token, data.refresh_token);
     console.log('[AMB tokenManager] Token Bling renovado ✓');
     return data.access_token;
-  } finally {
-    _renovando = false;
-  }
+  } finally { /* o wrapper de promessa única limpa o em-voo */ }
 }
 
 // ── Garantir token válido ────────────────────────────────────────────

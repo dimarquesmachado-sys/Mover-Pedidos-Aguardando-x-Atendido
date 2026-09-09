@@ -78,6 +78,20 @@ async function renovarTokenML() {
   return data.access_token;
 }
 
+/* Codex #355 (P1): o refresh do ML é de USO ÚNICO e este manager é chamado por
+   MUITOS caminhos (F3, canário, motor ML Full, rota de leitura, crons) — dois
+   chamadores cruzando a expiração ao mesmo tempo disparavam renovações
+   concorrentes e uma queimava o refresh da outra. A RENOVAÇÃO agora é promessa
+   ÚNICA module-level: todo chamador, de qualquer módulo, espera a MESMA. */
+let _renovacaoEmVoo = null;
+function _renovarUmaVez() {
+  if (!_renovacaoEmVoo) {
+    _renovacaoEmVoo = renovarTokenML().finally(() => { _renovacaoEmVoo = null; });
+    _renovacaoEmVoo.catch(() => {});
+  }
+  return _renovacaoEmVoo;
+}
+
 async function garantirTokenML() {
   const tokens = lerTokens();
   if (!tokens?.access_token) throw new Error('ML: token não configurado. Acesse /setup-ml para autorizar.');
@@ -102,7 +116,7 @@ async function garantirTokenML() {
 
   // Token expirado — renovar
   console.log('[mlToken] Token expirado, renovando...');
-  return await renovarTokenML();
+  return await _renovarUmaVez();
 }
 
 function gerarUrlAutorizacao() {

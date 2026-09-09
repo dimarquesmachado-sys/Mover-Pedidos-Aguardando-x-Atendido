@@ -359,14 +359,29 @@ const server = http.createServer(async (req, res) => {
   // o porteiro dá permissão antes da chamada, com reserva pra operação (bipagem) e
   // pausa global de 429 em que todos recuam juntos. Contrato: bling-ritmo.js.
   if (path.startsWith('/bling-ritmo/')) {
-    /* auth DENTRO do módulo, por header x-admin-key — ?k= foi banido desta rota
-       (Codex #356: credencial em querystring num endpoint chamado por outro serviço
-       pela internet a cada requisição = exposição máxima em log de proxy). */
+    /* auth DENTRO do módulo, por header x-ritmo-key com chave DEDICADA (BLING_RITMO_KEY)
+       — ?k= foi banido e a ADMIN_KEY geral não serve aqui (Codex #356 r2/r3). */
     try {
       const tratou = await require('./bling-ritmo').tratar(req, res, urlObj, json);
       if (tratou) return;
     } catch (e) {
       console.error('[bling-ritmo] erro:', e.message);
+      return json(res, 500, { ok: false, erro: String(e.message || e).slice(0, 200) });
+    }
+    return json(res, 404, { error: 'not found', path });
+  }
+
+  // ── LEITURA DE TOKEN (08/09) — passo 2 do contrato de empresas ────────────────
+  // O Devoluções LÊ o token vigente aqui em vez de renovar (dono eleito: este serviço;
+  // o refresh do ML é de uso único). Chave PRÓPRIA (ADMIN_TOKEN_LEITURA_KEY), nunca a
+  // ADMIN_KEY — e sem a env a rota nasce desligada (503). Contrato e decisões:
+  // contrato-empresas.json → passo_2_eleicao.mecanica e interno-token.js.
+  if (path.startsWith('/interno/token/')) {
+    try {
+      const tratou = await require('./interno-token').tratar(req, res, urlObj, json);
+      if (tratou) return;
+    } catch (e) {
+      console.error('[interno-token] erro:', e.message);
       return json(res, 500, { ok: false, erro: String(e.message || e).slice(0, 200) });
     }
     return json(res, 404, { error: 'not found', path });
