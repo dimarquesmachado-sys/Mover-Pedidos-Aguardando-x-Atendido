@@ -4260,7 +4260,7 @@ function routes(readBody) {
       const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
       const sessC = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || (sessC && ehAdmin(sessC)))) { json(res, 404, { error: 'not found' }); return true; }
-      if (urlObj.searchParams.get('status')) { json(res, 200, { ok: true, rodando: !!_cst.rodando, progresso: _cst.feitos + '/' + _cst.total, ok_ate_agora: _cst.ok, falhas: _cst.falhas, inicio: _cst.inicio }); return true; }
+      if (urlObj.searchParams.get('status')) { json(res, 200, { ok: true, rodando: !!_cst.rodando, progresso: _cst.feitos + '/' + _cst.total, ok_ate_agora: _cst.ok, falhas: _cst.falhas, inicio: _cst.inicio, diario: _cstDiario.ultimo }); return true; }
       const skuProbe = urlObj.searchParams.get('sku');
       if (skuProbe && urlObj.searchParams.get('raw')) {
         // raio-X do que o Bling devolve pra esse SKU (pra entender custo faltando)
@@ -8491,7 +8491,11 @@ async function custoSync(fresh) {
         /* 21/08: antes de sobrescrever, anota a linha do tempo — o Bling só guarda o custo
            ATUAL, então esta é a única chance de registrar que até ontem valia outro. */
         if (_custoNovo != null) { try { registrarCustoVigente(sku, _custoNovo, 'bling'); } catch (e) {} }
-        cc[sku] = { id: prod.id, preco: (prod.preco != null && isFinite(Number(prod.preco))) ? Number(prod.preco) : null, custo: _custoNovo, ts: Date.now() };
+        /* 09/09: grava os CÓDIGOS dos componentes — é o mapa reverso que o custo diário
+           incremental usa pra saber quais kits re-buscar quando um unitário muda */
+        const _compsSkus = (((prod.estrutura && (prod.estrutura.componentes || prod.estrutura.itens)) || prod.composicao || prod.componentes) || [])
+          .map(cp => String((cp.produto && cp.produto.codigo) || cp.codigo || '')).filter(Boolean);
+        cc[sku] = Object.assign({ id: prod.id, preco: (prod.preco != null && isFinite(Number(prod.preco))) ? Number(prod.preco) : null, custo: _custoNovo, ts: Date.now() }, _compsSkus.length ? { comps: _compsSkus } : {});
         _cst.ok++;
       } else { _cst.falhas++; }
     } catch (e) { _cst.falhas++; }
@@ -8519,7 +8523,69 @@ function bootstrap() {
   setTimeout(() => { try { custoSync(false).catch(() => {}); } catch (e) {} }, 240 * 1000);   // custos: tartaruga pós-boot, só o que falta
   setInterval(() => { try { custoSync(false).catch(() => {}); } catch (e) {} }, 6 * 3600 * 1000);
 
-  /* 09/09 (pedido do Diego): re-busca COMPLETA do custo TODO DIA às 23h00 — mudança de
+
+const _cstDiario = { ultimo: null };
+async function custoDiario() {
+  /* 09/09 v2 (o Diego pegou o furo do desenho bruto: a girassol tem ~9.000 SKUs —
+     fresh completo diário queimaria 10-15% da cota do Bling à toa e ~2h de tartaruga
+     pra achar meia dúzia de mudanças): INCREMENTAL. Pergunta ao Bling só o que MUDOU
+     no dia (filtro dataAlteracao), soma os KITS que dependem dos alterados (mapa
+     reverso `comps` que o próprio sync grava ao somar estruturas) e re-busca SÓ
+     esses — zerando o carimbo e deixando a própria tartaruga do custoSync trabalhar
+     (herda anti-429, lápides e a soma de estrutura). Guardas: a 1ª noite semeia com
+     fresh completo (constrói os comps); filtro de data traído (lista gigante — o
+     clássico do Bling) cai pro fresh completo DECLARADO no status. */
+  const CUSTO_FILE = path.join(CACHE_DIR, '_custos.json');
+  const st = { iniciado: new Date().toISOString(), modo: 'incremental', alterados_no_bling: 0, alvo: 0, kits_dependentes: 0 };
+  _cstDiario.ultimo = st;
+  try {
+    let cc = readJson(CUSTO_FILE, {});
+    if (!cc._sementeCompleta) {
+      st.modo = 'semente_completa (1ª noite — fresh total constrói o mapa de estruturas)';
+      await custoSync(true);
+      cc = readJson(CUSTO_FILE, {});
+      cc._sementeCompleta = Date.now();
+      fs.writeFileSync(CUSTO_FILE, JSON.stringify(cc));
+      st.terminou = new Date().toISOString();
+      return;
+    }
+    const d0 = new Date().toISOString().slice(0, 10);
+    const alterados = new Set();
+    let traiu = false;
+    for (let pg = 1; pg <= 8; pg++) {
+      const r = await blingGet('/produtos?dataAlteracaoInicial=' + encodeURIComponent(d0 + ' 00:00:00') + '&pagina=' + pg + '&limite=100');
+      if (!r || !r.ok) break;
+      const arr = (r.data && Array.isArray(r.data.data)) ? r.data.data : [];
+      for (const p2 of arr) { const cod = p2 && p2.codigo; if (cod) alterados.add(String(cod)); }
+      if (arr.length < 100) break;
+      if (pg === 8) traiu = true;
+      await new Promise(r2 => setTimeout(r2, 450));
+    }
+    st.alterados_no_bling = alterados.size;
+    if (traiu || alterados.size > 600) {
+      st.modo = 'fresh_completo (fallback: filtro de data suspeito — ' + alterados.size + '+ alterados no dia)';
+      await custoSync(true);
+      st.terminou = new Date().toISOString();
+      return;
+    }
+    const alvo = new Set();
+    for (const sk of Object.keys(cc)) {
+      if (sk.startsWith('_')) continue;
+      if (alterados.has(sk)) { alvo.add(sk); continue; }
+      const v = cc[sk];
+      if (v && Array.isArray(v.comps) && v.comps.some(c => alterados.has(String(c)))) { alvo.add(sk); st.kits_dependentes++; }
+    }
+    st.alvo = alvo.size;
+    if (alvo.size) {
+      for (const sk of alvo) { if (cc[sk]) cc[sk].ts = 0; }
+      fs.writeFileSync(CUSTO_FILE, JSON.stringify(cc));
+      await custoSync(false); /* a tartaruga re-busca só quem teve o carimbo zerado */
+    }
+    st.terminou = new Date().toISOString();
+  } catch (e) { st.erro = String(e.message || e).slice(0, 200); }
+}
+
+  /* 09/09 (pedido do Diego): rodada de custo TODO DIA às 23h00 — mudança de
      preço de fornecedor no Bling passa a valer no MESMO dia (o TTL de 7 dias vira rede
      de segurança, não relógio). 23h00 = galpão fechado (regra da cota: rotina pesada só
      fora do horário) e ANTES da noturna das 03:45, que então grava o dia com o custo
@@ -8531,8 +8597,8 @@ function bootstrap() {
       const dia = ag.toISOString().slice(0, 10);
       if (ag.getHours() === 23 && ag.getMinutes() >= 0 && _custoDiarioDia !== dia) {
         _custoDiarioDia = dia;
-        console.log('[custo-diario] re-busca completa das 23h00 iniciando');
-        custoSync(true).catch(() => {});
+        console.log('[custo-diario] rodada incremental das 23h00 iniciando');
+        custoDiario().catch(() => {});
       }
     } catch (e) {}
   }, 60 * 1000);
