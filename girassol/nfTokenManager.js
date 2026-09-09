@@ -39,8 +39,22 @@ function basicAuthNF() {
   return 'Basic ' + Buffer.from(`${id}:${sec}`).toString('base64');
 }
 
+/* Codex #355 r4: fetch SEM teto — com a promessa única, UMA chamada travada pendurava
+   TODOS os chamadores pra sempre (antes, o sono cego de 2s 'protegia' por acidente).
+   Prazo de 20s com abort de verdade e corpo lido DENTRO do prazo (receita do
+   tokenManager reformado). */
+async function _nfFetch(url, opts) {
+  const ac = new AbortController();
+  const t = setTimeout(() => ac.abort(), 20000);
+  try {
+    const resp = await fetch(url, Object.assign({}, opts, { signal: ac.signal }));
+    const texto = await resp.text();
+    return { status: resp.status, json: () => { try { return JSON.parse(texto); } catch (e) { return null; } } };
+  } finally { clearTimeout(t); }
+}
+
 async function postOAuthNF(body) {
-  const resp = await fetch('https://api.bling.com.br/Api/v3/oauth/token', {
+  const resp = await _nfFetch('https://api.bling.com.br/Api/v3/oauth/token', {
     method: 'POST',
     headers: {
       Authorization: basicAuthNF(),
@@ -50,7 +64,7 @@ async function postOAuthNF(body) {
     },
     body: new URLSearchParams(body)
   });
-  const data = await resp.json();
+  const data = resp.json() || {};
   if (data.error) throw new Error(`OAuth NF error: ${JSON.stringify(data)}`);
   return data;
 }
@@ -105,7 +119,7 @@ async function garantirTokenNF() {
     return renovarTokenNF();
   }
 
-  const resp = await fetch('https://api.bling.com.br/Api/v3/produtos?limite=1', {
+  const resp = await _nfFetch('https://api.bling.com.br/Api/v3/produtos?limite=1', {
     headers: { Authorization: `Bearer ${access_token}` }
   });
 
