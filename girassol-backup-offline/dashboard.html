@@ -3792,7 +3792,7 @@ function renderAnalise(){
                 ? '<span class="warn">'+BRL(P.frV)+'</span> <span class="st w" style="font-size:9px" title="frete de coparticipação Magalu ESTIMADO pela tabela — o valor real chega quando o pedido é entregue">PREVISTO</span>'
                 : '<span class="ok">'+BRL(P.frV)+'</span> <span class="st ok" style="font-size:9px" title="frete de coparticipação REAL, da API financeira da Magalu">REAL</span>')
             : BRL(P.frV)+(P.frFonte==='flex'?' <span class="st warn" style="font-size:9px">FLEX</span>':'')
-        ):'<span class="dim">—</span>')+'</td>'+
+        ):(!h._cancelado?'<span class="st warn" style="font-size:9px;cursor:help" title="\u23f3 dado do marketplace ainda POR VIR \u2014 na Shopee o frete do vendedor s\u00f3 assenta no escrow perto da conclus\u00e3o; a noturna regrava e preenche sozinha. At\u00e9 l\u00e1 a M.C. desta linha \u00e9 PARCIAL.">\u23f3 AGUARDANDO</span>':'<span class="dim">—</span>'))+'</td>'+
       '<td class="num">'+(P.credito!=null?('<span class="'+(P.credito>=0?'ok':'bad')+'">'+(P.credito>=0?'+':'')+BRL(P.credito)+'</span>'):'<span class="dim">—</span>')+'</td>'+
       '<td class="num" style="font-weight:800">'+(P.mc!=null?('<span class="'+(P.mc>=0?'ok':'bad')+'">'+BRL(P.mc)+'</span>'+(P.frV==null&&!h._cancelado?'<span class="warn" style="cursor:help" title="\u23f3 MARGEM PARCIAL \u2014 o frete do vendedor ainda n\u00e3o consolidou (na Shopee ele s\u00f3 assenta no escrow perto da conclus\u00e3o do pedido). Quando chegar, a M.C. atualiza sozinha \u2014 e tende a CAIR."> \u23f3</span>':'')):'<span class="warn" title="falta config/custo">—</span>')+'</td>'+
       '<td class="num '+(pmc!=null?(pmc>=0?'ok':'bad'):'dim')+'">'+(pmc!=null?pmc+'%':'—')+'</td>'+
