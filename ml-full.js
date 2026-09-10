@@ -114,6 +114,7 @@ function dataValida(aaaammdd) {
    re-custando consultas ao Bling que já tinham sido pagas. Persistidas em /data
    (write atômico, salvamento com throttle); TTL de 30 dias no carregamento pra o
    arquivo não crescer pra sempre. */
+const _serie = {};  /* estado das séries encadeadas por empresa (10/09) */
 const _confirmadasNoBling = new Map(); // chave → ts da confirmação
 const _CONF_ARQ = (() => {
   try { return require('fs').existsSync('/data') ? '/data/ml-full-conferidas.json' : require('path').join(__dirname, 'ml-full-conferidas.json'); }
@@ -859,6 +860,85 @@ async function tratar(req, res, urlObj, json) {
 
   /* FASE 1 DO MOTOR: varredura MANUAL por janela (cron só depois de validada).
      Gasta cota do Bling (1-2 GETs por nota nova) — rodar fora do horário do galpão. */
+  /* 10/09 — SÉRIE ENCADEADA (pedido do dono): a janela de 7 dias faz o ML devolver
+     429 no lote e cada rodada manual custava um URL editado à mão. Esta rota parte a
+     janela em pedaços (padrão 2 dias), roda um DEPOIS do outro sozinha, respeitando o
+     backoff de cada um, e ainda dá um respiro entre pedaços pra não competir com a
+     operação pela cota. Uma URL só; o progresso sai em &status=1. */
+  if (p === '/ml-full/varrer-serie') {
+    const empresa = String(urlObj.searchParams.get('empresa') || 'amb').toLowerCase().trim();
+    if (!MANAGERS[empresa]) { json(res, 400, { ok: false, erro: 'empresa deve ser amb, girassol ou good' }); return true; }
+    if (urlObj.searchParams.get('status') === '1') {
+      const st = _serie[empresa] || null;
+      json(res, 200, { ok: true, versao: VERSAO, empresa, serie: st || 'nenhuma série rodada nesta instância' });
+      return true;
+    }
+    const de = String(urlObj.searchParams.get('de') || '');
+    const ate = String(urlObj.searchParams.get('ate') || '');
+    if (!/^\d{8}$/.test(de) || !/^\d{8}$/.test(ate)) {
+      json(res, 400, { ok: false, erro: 'passe &de=AAAAMMDD&ate=AAAAMMDD', exemplo: '/ml-full/varrer-serie?empresa=good&de=20260901&ate=20260907&k=SUA_ADMIN_KEY' });
+      return true;
+    }
+    const dDe = dataValida(de), dAte = dataValida(ate);
+    if (!dDe || !dAte || dAte < dDe || (dAte - dDe) >= 31 * 86400000) {
+      json(res, 400, { ok: false, erro: 'janela inválida — no máximo 31 dias corridos na série' });
+      return true;
+    }
+    if (_serie[empresa] && _serie[empresa].rodando) {
+      json(res, 409, { ok: false, resultado: 'ja_ha_serie_em_andamento', empresa, serie: _serie[empresa] });
+      return true;
+    }
+    const passo = Math.max(1, Math.min(7, Number(urlObj.searchParams.get('passo')) || 2));
+    const teto = Math.max(4, Math.min(200, Number(urlObj.searchParams.get('teto')) || 200));
+    const respiroS = Math.max(0, Math.min(600, Number(urlObj.searchParams.get('respiro')) || 60));
+    const iso = (d) => d.toISOString().slice(0, 10).replace(/-/g, '');
+    const pedacos = [];
+    for (let t = dDe.getTime(); t <= dAte.getTime(); t += passo * 86400000) {
+      const ini = new Date(t);
+      const fim = new Date(Math.min(t + (passo - 1) * 86400000, dAte.getTime()));
+      pedacos.push({ de: iso(ini), ate: iso(fim) });
+    }
+    const st = _serie[empresa] = {
+      rodando: true, comecou: new Date().toISOString(), terminou: null,
+      pedacos: pedacos.length, feitos: 0, passo, teto, respiro_s: respiroS,
+      total_ja_no_bling: 0, total_pendentes_novas: 0, total_nao_conferidas: 0,
+      resultados: [], erro: null,
+    };
+    (async () => {
+      try {
+        for (const pc of pedacos) {
+          let r = null;
+          /* cada pedaço ganha até 3 tentativas: o backoff interno já espera o 429 do ML;
+             se ainda assim vier transitório, esperamos mais e tentamos de novo antes de
+             seguir — pedaço que não fecha NÃO interrompe a série (fica declarado). */
+          for (let t = 1; t <= 3; t++) {
+            r = await varrerLote(empresa, pc.de, pc.ate, teto, null);
+            if (r.ok || r.resultado === 'ja_ha_varredura_em_andamento') break;
+            await sleep(t * 120000);
+          }
+          st.feitos++;
+          if (r && r.ok) {
+            st.total_ja_no_bling += Number(r.ja_no_bling || 0);
+            st.total_pendentes_novas += Number(r.pendentes_novas || 0);
+            st.total_nao_conferidas += Number(r.nao_conferidas || 0);
+            st.resultados.push({ de: pc.de, ate: pc.ate, ok: true, ja_no_bling: r.ja_no_bling, pendentes_novas: r.pendentes_novas, nao_conferidas: r.nao_conferidas, novas: (r.novas || []).length });
+          } else {
+            st.resultados.push({ de: pc.de, ate: pc.ate, ok: false, resultado: (r && r.resultado) || 'sem_resposta', detalhe: (r && (r.detalheRetry || r.detalhe)) || '' });
+          }
+          if (st.feitos < pedacos.length && respiroS) await sleep(respiroS * 1000);
+        }
+      } catch (e) { st.erro = String(e.message || e).slice(0, 200); }
+      finally { st.rodando = false; st.terminou = new Date().toISOString(); }
+    })().catch(() => {});
+    json(res, 200, {
+      ok: true, versao: VERSAO, empresa, iniciada: true,
+      pedacos: pedacos.map(x => x.de + '→' + x.ate),
+      mensagem: 'série rodando em background (' + pedacos.length + ' pedaços de ' + passo + ' dia(s), respiro de ' + respiroS + 's entre eles) — acompanhe em &status=1',
+      acompanhe: 'https://mover-pedidos-aguardando-x-atendido.onrender.com/ml-full/varrer-serie?empresa=' + empresa + '&status=1&k=SUA_ADMIN_KEY',
+    });
+    return true;
+  }
+
   if (p === '/ml-full/varrer') {
     const empresa = String(urlObj.searchParams.get('empresa') || 'amb').toLowerCase().trim();
     if (!MANAGERS[empresa]) { json(res, 400, { ok: false, erro: 'empresa deve ser amb, girassol ou good' }); return true; }
