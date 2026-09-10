@@ -8345,7 +8345,7 @@ async function custoDiario() {
       const falhou = rodou && _cst.falhas > 0;
       _cstDiario.tentativas = (_cstDiario.tentativas || 0) + 1;
       if ((!rodou || falhou) && _cstDiario.tentativas < 3) {
-        st.modo = (rodou ? 'parcial — ' + (_cst.falhas - _f0) + ' falhas na re-busca' : 'sync ocupado — não rodou') + '; novo tick re-tenta (tentativa ' + _cstDiario.tentativas + '/3)';
+        st.modo = (rodou ? 'parcial — ' + _cst.falhas + ' falhas na re-busca' : 'sync ocupado — não rodou') + '; novo tick re-tenta (tentativa ' + _cstDiario.tentativas + '/3)';
         st.terminou = new Date().toISOString();
         return;
       }
