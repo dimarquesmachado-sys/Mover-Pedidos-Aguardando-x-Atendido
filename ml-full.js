@@ -145,7 +145,12 @@ async function mlGetBuffer(token, url, umaSo) {
       const r = await _fetchRef.fn(url, { headers: { Authorization: 'Bearer ' + token }, signal: ac.signal, timeout: 60000 });
       const buf = await r.buffer();
       const transitorio = r.status === 429 || r.status >= 500;
-      const _ra = Number(r.headers && r.headers.get && r.headers.get('retry-after'));
+      /* Codex #359 r4: a RFC permite Retry-After como HTTP-date além de segundos —
+         Number() daria NaN e o header seria descartado, com o tiro prematuro
+         rearmando o limite. Parse duplo: segundos, senão data absoluta. */
+      const _raBruto = r.headers && r.headers.get && r.headers.get('retry-after');
+      let _ra = Number(_raBruto);
+      if (!Number.isFinite(_ra) && _raBruto) { const _d = Date.parse(_raBruto); if (Number.isFinite(_d)) _ra = Math.ceil((_d - Date.now()) / 1000); }
       ultimo = { status: r.status, ok: r.status >= 200 && r.status < 300, buf, transitorio, retryAfterS: (Number.isFinite(_ra) && _ra > 0) ? _ra : null };
     } catch (e) {
       ultimo = { status: 0, ok: false, buf: Buffer.from('rede/timeout: ' + String(e.message || e).slice(0, 160)), transitorio: true };
