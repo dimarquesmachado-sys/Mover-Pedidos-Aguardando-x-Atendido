@@ -59,6 +59,12 @@ _trocarFabricasParaTeste({
   r = await responder('/interno/token/good/bling_nfe', 'chave-de-leitura');
   assert.strictEqual(r.status, 200, 'bling_nfe exposta desde o dia 1, como o Devoluções pediu');
 
+  // auditoria 09/09: URL malformada é erro de CLIENTE (400), nunca exceção/500
+  r = await responder('/interno/token/%ZZ/ml', 'chave-de-leitura');
+  assert.strictEqual(r.status, 400, 'escape URL inválido na empresa ⇒ 400, nunca exceção/500');
+  r = await responder('/interno/token/amb/%E0%A4%A', 'chave-de-leitura');
+  assert.strictEqual(r.status, 400, 'UTF-8 truncado na integração ⇒ 400, nunca exceção/500');
+
   r = await responder('/interno/token/naoexiste/ml', 'chave-de-leitura');
   assert.strictEqual(r.status, 404, 'empresa fora do contrato ⇒ 404');
 
