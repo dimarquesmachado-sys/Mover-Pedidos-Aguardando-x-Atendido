@@ -298,18 +298,25 @@ async function _varrerLoteInterno(empresa, de, ate, teto, deps) {
      (90s, 180s) SÓ pra transitório do lote; esgotou, devolve o transitorio de sempre. */
   let rz;
   for (let tent = 1; ; tent++) {
-    /* Codex #359 r2: o token pode VENCER durante as pausas de minutos — re-adquirir a
-       cada tentativa (o manager devolve o vigente ou renova); e a pausa honra o
-       Retry-After do ML quando maior que a escada (com teto de 5 min — a rota é
-       síncrona), senão o tiro prematuro rearma o limite e as 3 tentativas se gastam
-       sem nunca esperar o suficiente. */
-    const tokTent = tent === 1 ? tokenML : await garantirToken(empresa);
+    /* Codex #359 r2+r3: o token pode VENCER durante as pausas — re-adquirir a cada
+       tentativa, mas com TOLERÂNCIA: o garantirToken sonda a MESMA API limitada
+       (/users/me), que durante o rate-limit devolve 429 e o manager seletivo lança;
+       nesse caso o token anterior segue em uso (se tiver vencido de verdade, o lote
+       responde 401/403 não-transitório e a saída é declarada). */
+    let tokTent = tokenML;
+    if (tent > 1) { try { tokTent = await garantirToken(empresa); } catch (e) { /* sonda limitada — segue com o anterior */ } }
     rz = await mlGetBuffer(tokTent, urlLote, true); /* umaSo: 3 requisições REAIS, não 6 */
     if (!rz.transitorio || tent >= 3) break;
+    /* Retry-After MAIOR que a janela da rota síncrona: re-tentar antes rearmaria o
+       limite — sai AGORA, declarando quando voltar (Codex #359 r3). */
+    if ((rz.retryAfterS || 0) > 300) {
+      rz.detalheRetry = 'Retry-After de ' + rz.retryAfterS + 's excede a janela desta rota — rode de novo depois desse tempo';
+      break;
+    }
     const esperaMs = Math.min(Math.max(tent * 90, rz.retryAfterS || 0), 300) * 1000;
     await sleep(esperaMs);
   }
-  if (rz.transitorio) return { ok: false, resultado: 'transitorio_tente_de_novo', detalhe: rz.buf.toString().slice(0, 200) };
+  if (rz.transitorio) return { ok: false, resultado: 'transitorio_tente_de_novo', detalhe: rz.detalheRetry || rz.buf.toString().slice(0, 200) };
   if (!rz.ok) return { ok: false, resultado: 'erro_lote_' + rz.status, detalhe: rz.buf.toString().slice(0, 400) };
   if (rz.buf.slice(0, 2).toString() !== 'PK') return { ok: false, resultado: 'lote_nao_veio_zip', detalhe: rz.buf.toString().slice(0, 400) };
 
