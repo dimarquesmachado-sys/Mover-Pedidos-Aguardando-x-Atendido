@@ -303,6 +303,7 @@ async function _varrerLoteInterno(empresa, de, ate, teto, deps) {
      (90s, 180s) SÓ pra transitório do lote; esgotou, devolve o transitorio de sempre. */
   let rz;
   let tokTent = tokenML;
+  let _reAuthFeita = false;
   for (let tent = 1; ; tent++) {
     /* Codex #359 r2+r3: o token pode VENCER durante as pausas — re-adquirir a cada
        tentativa, mas com TOLERÂNCIA: o garantirToken sonda a MESMA API limitada
@@ -314,6 +315,13 @@ async function _varrerLoteInterno(empresa, de, ate, teto, deps) {
        BOM persiste entre as voltas. */
     if (tent > 1) { try { tokTent = await garantirToken(empresa); } catch (e) { /* sonda limitada — segue com o último bom */ } }
     rz = await mlGetBuffer(tokTent, urlLote, true); /* umaSo: 3 requisições REAIS, não 6 */
+    /* Codex #359 r6: token vencido EM VOO (ou retido após sonda limitada) devolve
+       401/403 do LOTE — uma única volta extra de autenticação re-adquire e tenta de
+       novo antes de desistir como não-transitório. */
+    if (!rz.transitorio && (rz.status === 401 || rz.status === 403) && !_reAuthFeita) {
+      _reAuthFeita = true;
+      try { tokTent = await garantirToken(empresa); continue; } catch (e) { /* sem token novo — sai com o erro real */ }
+    }
     if (!rz.transitorio || tent >= 3) break;
     /* Retry-After MAIOR que a janela da rota síncrona: re-tentar antes rearmaria o
        limite — sai AGORA, declarando quando voltar (Codex #359 r3). */
