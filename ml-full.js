@@ -318,10 +318,12 @@ async function _varrerLoteInterno(empresa, de, ate, teto, deps) {
        novo antes de desistir como não-transitório. */
     if (!rz.transitorio && (rz.status === 401 || rz.status === 403) && !_reAuthFeita) {
       _reAuthFeita = true;
-      /* Codex #359 r8: a volta de autenticação NÃO consome tentativa do lote — sem o
-         decremento, um 401 no meio roubava um dos 3 tiros (ou esticava pra um 4º,
-         conforme o ponto do vencimento). */
-      try { tokTent = await garantirToken(empresa); tent--; continue; } catch (e) { /* sem token novo — sai com o erro real */ }
+      /* Codex #359 r8+r9: a volta de autenticação não consome tentativa (tent--), e
+         NÃO SONDA — o 401/403 do lote JÁ É a prova do vencimento; sondar /users/me de
+         novo podia levar 429/5xx e derrubar a cortesia por motivo alheio. Renovação
+         DIRETA pela promessa única do manager (renovarUmaVez — nunca o cru: o refresh
+         é rotativo e dois em voo queimariam o token). */
+      try { const _mod = MANAGERS[empresa](); tokTent = await (_mod.renovarUmaVez ? _mod.renovarUmaVez() : _mod.garantirTokenML()); tent--; continue; } catch (e) { /* sem token novo — sai com o erro real */ }
     }
     if (!rz.transitorio || tent >= 3) break;
     /* Retry-After MAIOR que a janela da rota síncrona: re-tentar antes rearmaria o

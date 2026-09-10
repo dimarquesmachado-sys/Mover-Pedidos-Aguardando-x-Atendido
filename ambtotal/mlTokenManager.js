@@ -136,4 +136,4 @@ function gerarUrlAutorizacao() {
   return `https://auth.mercadolivre.com.br/authorization?response_type=code&client_id=${ML_CLIENT_ID}&redirect_uri=${encodeURIComponent(ML_REDIRECT_URI)}`;
 }
 
-module.exports = { garantirTokenML, renovarTokenML, trocarCodigoPorToken, gerarUrlAutorizacao };
+module.exports = { garantirTokenML, renovarTokenML, renovarUmaVez: _renovarUmaVez, trocarCodigoPorToken, gerarUrlAutorizacao };
