@@ -144,6 +144,24 @@ jobs:
             done
             [ "$N" -gt 0 ] && echo "  ✅ $N conversa(s) resolvida(s)"
 
+            # ── 4.5) a main mudou: RE-DISPARA o ciclo ────────────────────
+            #
+            # ⚠️ Dor medida (10/09, duas vezes no mesmo dia): o ciclo so acorda
+            # com push novo na branch ou revisao nova do Codex. Quando o conserto
+            # do PROPRIO workflow entra na main depois da ultima revisao, nada
+            # re-dispara — e workflow novo so vale da execucao seguinte. Um PR
+            # ficou 50 minutos parado assim, esperando gatilho que nao vinha.
+            #
+            # So em push, e so quando NAO ha apontamento novo esperando (a trava
+            # do passo 1 ja cuidou disso: com apontamento pendente o loop nem
+            # chega aqui). Falha do re-disparo nao quebra nada — segue o fluxo.
+            if [ "${{ github.event_name }}" = "push" ]; then
+              echo "  🔄 a main mudou — re-disparo o ciclo neste PR"
+              gh workflow run auto-merge-codex.yml -f pr="$PR" >/dev/null 2>&1 \
+                && echo "     ✅ ciclo re-disparado" \
+                || echo "     ⚠️ nao consegui re-disparar (segue o fluxo normal)"
+            fi
+
             # ── 5) e avisa se ficou pronto ───────────────────────────────
             #
             # ⚠️ So comenta se MUDOU alguma coisa — senao vira spam a cada
