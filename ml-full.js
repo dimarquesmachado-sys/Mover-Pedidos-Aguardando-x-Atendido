@@ -132,9 +132,13 @@ async function garantirTokenBling(empresa) {
 
 /* GET binário no ML (o stream do lote) — corpo em Buffer, abort de 60s, 1 retentativa
    pra transitório. Nunca conclui nada: devolve o que veio. */
-async function mlGetBuffer(token, url) {
+async function mlGetBuffer(token, url, umaSo) {
+  /* Codex #359: o chamador com backoff PRÓPRIO passa umaSo=true — a retentativa
+     interna de 4s duplicaria as requisições (6 em vez de 3) e o 2º tiro prematuro
+     REARMA o limite do ML, o exato vício que o backoff quer curar. */
   let ultimo = null;
-  for (let tent = 1; tent <= 2; tent++) {
+  const maxTent = umaSo ? 1 : 2;
+  for (let tent = 1; tent <= maxTent; tent++) {
     const ac = new AbortController();
     const t = setTimeout(() => ac.abort(), 60000);
     try {
@@ -146,7 +150,7 @@ async function mlGetBuffer(token, url) {
       ultimo = { status: 0, ok: false, buf: Buffer.from('rede/timeout: ' + String(e.message || e).slice(0, 160)), transitorio: true };
     } finally { clearTimeout(t); }
     if (!ultimo.transitorio) return ultimo;
-    if (tent === 1) await sleep(4000);
+    if (tent < maxTent) await sleep(4000);
   }
   return ultimo;
 }
@@ -293,7 +297,7 @@ async function _varrerLoteInterno(empresa, de, ate, teto, deps) {
      (90s, 180s) SÓ pra transitório do lote; esgotou, devolve o transitorio de sempre. */
   let rz;
   for (let tent = 1; ; tent++) {
-    rz = await mlGetBuffer(tokenML, urlLote);
+    rz = await mlGetBuffer(tokenML, urlLote, true); /* umaSo: 3 requisições REAIS, não 6 */
     if (!rz.transitorio || tent >= 3) break;
     await sleep(tent * 90000);
   }
