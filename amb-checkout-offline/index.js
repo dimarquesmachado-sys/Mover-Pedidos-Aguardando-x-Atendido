@@ -8634,7 +8634,12 @@ async function custoSync(fresh) {
           const comps = (prod.estrutura && (prod.estrutura.componentes || prod.estrutura.itens))
                      || prod.composicao || prod.componentes || null;
           if (Array.isArray(comps) && comps.length) {
-            let soma = 0, completo = true;
+            /* Codex #367: composição TRUNCADA não pode virar custo — o slice(0,30) somaria só
+               parte e, com completo=true, gravaria um custo menor que o real (antes deste PR
+               esses kits caíam no fornecedor e escapavam; a mudança de precedência os trouxe
+               pra cá). Passando de 30, a composição não fecha e a reserva assume. */
+            let soma = 0, completo = comps.length <= 30;
+            if (!completo) console.log('[CUSTO] ' + sku + ': composição com ' + comps.length + ' componentes (teto 30) — não somo parcial, vai pra reserva');
             for (const cp of comps.slice(0, 30)) {
               const idc = (cp.produto && cp.produto.id) || cp.idProduto || cp.id || null;
               const qc = Number(cp.quantidade != null ? cp.quantidade : (cp.qtd != null ? cp.qtd : 1)) || 1;
