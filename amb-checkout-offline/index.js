@@ -8634,19 +8634,38 @@ async function custoSync(fresh) {
               // precisava de 5 chamadas seguidas dando certo. Agora tentamos duas fontes de graça
               // antes de gastar chamada:
 
-              // 1) o próprio objeto do componente já costuma trazer o custo (a tela do Bling
-              //    mostra "Preço custo" por componente, então o dado existe na estrutura)
+              /* 10/09 — PRECEDÊNCIA INVERTIDA, achada num caso real: o Diego mudou o custo do
+                 E14-5W-3000K-BIV pra 4,00 no Bling; o banco pegou (4,00, conferido), mas o kit
+                 2xE14-5W-3000K-BIV seguiu com 6,80 (2 × 3,40 VELHO) e a venda 4575 saiu com
+                 margem inflada. Duas falhas somadas:
+                   (a) o custo EMBUTIDO NA ESTRUTURA vinha primeiro — e é um retrato que o Bling
+                       NÃO atualiza quando o custo do produto muda;
+                   (b) o banco só era consultado por SKU, e a estrutura normalmente traz só o ID
+                       (é por isso que o próprio `comps` guarda "id:16632923552").
+                 Resultado: NENHUM kit absorvia mudança de custo de componente — nem a segunda
+                 passada do custo diário resolvia, porque re-somava pelo mesmo caminho.
+                 Agora o NOSSO BANCO manda (é ele que a sincronização mantém, com fornecedor e
+                 cascata), resolvido por ID ou por SKU; a estrutura vira 2ª opção e a chamada
+                 à API segue sendo a última. */
               {
+                const skuC = String((cp.produto && cp.produto.codigo) || cp.codigo || '').trim();
+                let _doBanco = null;
+                if (skuC && cc[skuC] && cc[skuC].custo != null && Number(cc[skuC].custo) > 0) _doBanco = Number(cc[skuC].custo);
+                if (_doBanco == null && idc) {
+                  for (const _sk of Object.keys(cc)) {
+                    if (_sk.startsWith('_')) continue;
+                    const _v = cc[_sk];
+                    if (_v && String(_v.id) === String(idc) && _v.custo != null && Number(_v.custo) > 0) { _doBanco = Number(_v.custo); break; }
+                  }
+                }
+                if (_doBanco != null) cu = _doBanco;
+              }
+              // 2) o retrato da estrutura — só quando o banco ainda não conhece o componente
+              if (cu == null) {
                 const cs0 = [cp.precoCusto, cp.custo, cp.valorCusto,
                              (cp.produto && cp.produto.precoCusto), (cp.produto && cp.produto.custo)]
                             .map(Number).filter(v => isFinite(v) && v > 0);
                 if (cs0.length) cu = cs0[0];
-              }
-              // 2) o nosso banco permanente — componente de kit quase sempre é um SKU que já
-              //    sincronizamos (ex.: 10-lisa-125mm-80). Custo zero de chamada.
-              if (cu == null) {
-                const skuC = String((cp.produto && cp.produto.codigo) || cp.codigo || '').trim();
-                if (skuC && cc[skuC] && cc[skuC].custo != null && Number(cc[skuC].custo) > 0) cu = Number(cc[skuC].custo);
               }
               // 3) só agora vale gastar uma chamada
               if (cu == null) {
