@@ -131,7 +131,11 @@ async function garantirTokenNF() {
     return renovarTokenNF();
   }
 
-  const resp = await _nfFetch('https://api.bling.com.br/Api/v3/produtos?limite=1', {
+  /* 10/09 (anotação de 09/09 paga): a sonda validava /produtos — escopo que NÃO é o
+     da emissão; um token NF com o escopo de notas quebrado PASSAVA na validação e só
+     falhava na hora de emitir, o pior momento. AMB e GOOD já sondam /nfe (o recurso
+     que o app realmente usa); a Girassol unifica. */
+  const resp = await _nfFetch('https://api.bling.com.br/Api/v3/nfe?limite=1', {
     headers: { Authorization: `Bearer ${access_token}` }
   });
 
