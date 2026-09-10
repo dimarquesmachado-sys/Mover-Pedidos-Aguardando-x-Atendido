@@ -318,7 +318,10 @@ async function _varrerLoteInterno(empresa, de, ate, teto, deps) {
        novo antes de desistir como não-transitório. */
     if (!rz.transitorio && (rz.status === 401 || rz.status === 403) && !_reAuthFeita) {
       _reAuthFeita = true;
-      try { tokTent = await garantirToken(empresa); continue; } catch (e) { /* sem token novo — sai com o erro real */ }
+      /* Codex #359 r8: a volta de autenticação NÃO consome tentativa do lote — sem o
+         decremento, um 401 no meio roubava um dos 3 tiros (ou esticava pra um 4º,
+         conforme o ponto do vencimento). */
+      try { tokTent = await garantirToken(empresa); tent--; continue; } catch (e) { /* sem token novo — sai com o erro real */ }
     }
     if (!rz.transitorio || tent >= 3) break;
     /* Retry-After MAIOR que a janela da rota síncrona: re-tentar antes rearmaria o
