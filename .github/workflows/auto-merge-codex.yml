@@ -1,324 +1,242 @@
-name: Claude x Codex - loop automatico v5
+# .github/workflows/auto-merge-codex.yml — MOVER-PEDIDOS
+# (replicado do Devolucoes em 10/09/2026, onde o ciclo passou a funcionar;
+#  as notas de batalha [b213-b265] sao de la e ficam como historico vivo)
+#
+# O LOOP: Codex revisa -> se apontar, o Claude corrige -> repete.
+# (o merge e do dono; automatizar so depois que a automacao funcionar)
+#
+# [stated] "não tem um jeito de ficar revisando esse PR sem eu ter q avisar?"
+#
+# Sem isto, o dono precisa dizer "unable" a cada rodada pra eu ir buscar a
+# revisao. Sao 10+ rodadas num PR grande — avisos que nao deveriam existir.
+#
+# ⚠️ AUTENTICACAO — historico do chamado com a Anthropic:
+#
+#   1. O suporte (Warren, 27/08) apontou que qualquer variavel `ANTHROPIC_*`
+#      num bloco `env:` SOBRESCREVE o token OAuth em silencio.
+#      ⚠️ DESCARTADO EM 08/09: ele confirmou por e-mail que NAO e a causa
+#      aqui — nenhuma variavel dessas existe neste repo, e o issue citado
+#      (claude-code#34826) e sobre o CLI, nao sobre a action.
+#
+#   2. O token vai em `with:`, como `claude_code_oauth_token`. NUNCA em
+#      `env:`. Isto continua valendo e ja esta correto abaixo.
+#
+#   3. A assinatura Max dele COBRE isto — nao e cobrado por uso, ao contrario
+#      da autenticacao por API key.
+#
+# ⚠️ ESTADO EM 09/09: o passo do Claude falha com `401 Invalid bearer token`.
+#   O token chega e a API rejeita. O caso esta com a engenharia da Anthropic
+#   (log bruto enviado). Ate la, este workflow NAO corrige nada — quem
+#   corrige sou eu, na conversa. O `continue-on-error` abaixo existe pra
+#   isso nao bloquear a entrega.
+#
+# ⚠️ PRE-REQUISITO: o app do Claude precisa estar instalado NESTE repo.
+#   https://github.com/apps/claude -> Configure -> marcar este repositorio.
+#   Sem isso a action falha com "Claude Code is not installed on this
+#   repository", que foi o que aconteceu na primeira tentativa. Estar
+#   instalado noutro repo (Mover-Pedidos) nao vale — e por repositorio.
+#
+# LIMITES DE PROPOSITO:
+#   - no maximo 5 rodadas por PR (loop que nao converge nao vira acerto)
+#   - ⚠️ AINDA NAO MERGEIA. O nome e o destino, nao o estado atual: hoje
+#     este workflow so CORRIGE e etiqueta; quem mergeia e o dono.
+#
+#     O merge automatico entra DEPOIS que a automacao funcionar (decisao
+#     dele em 09/09) — automatizar o merge enquanto o Claude nem consegue
+#     rodar seria construir o ultimo andar sem o primeiro, e um merge que
+#     dispara com a correcao NAO tendo acontecido e o pior cenario.
+#
+#     Quando entrar, tem que esperar o `ai-safety` (que roda em outro
+#     arquivo) ficar VERDE — hoje este aqui nem o consulta.
+#   - se nao fechar, poe `needs-human-review` e para
+
+name: auto-merge-codex
 
 on:
-  pull_request_target:
-    types: [opened, synchronize, reopened, ready_for_review]
-  pull_request_review:
-    types: [submitted]
-  issue_comment:
+  pull_request_review_comment:
     types: [created]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: 'Numero do PR'
+        required: true
 
 permissions:
   contents: write
   pull-requests: write
-  issues: write
   checks: read
-  actions: read
+  id-token: write
+
+concurrency:
+  # uma execucao por PR: duas em paralelo brigariam pela mesma branch
+  group: auto-merge-${{ github.event.pull_request.number || github.event.inputs.pr }}
+  cancel-in-progress: false
 
 jobs:
-  pedir-codex:
+  ciclo:
+    # b217: NUNCA bloquear o merge.
+    #
+    # Este workflow virou check obrigatorio sem querer, e quando o token
+    # OAuth falha ele trava o PR — a automacao que veio ajudar impedindo a
+    # entrega. A funcao dele e CORRIGIR, nao aprovar: se nao rodar, o
+    # trabalho segue pelo caminho manual.
+    #
+    # `continue-on-error` faz o job terminar verde mesmo falhando. Quem
+    # decide se o codigo presta e o `ai-safety`, que roda testes e boot.
+    continue-on-error: true
+    # so reage a apontamento do Codex, nao a comentario de gente
     if: >
-      github.event_name == 'pull_request_target' &&
-      github.event.pull_request.draft == false &&
-      github.event.pull_request.head.repo.full_name == github.repository
+      github.event_name == 'workflow_dispatch' ||
+      startsWith(github.event.comment.user.login, 'chatgpt')
     runs-on: ubuntu-latest
-
     steps:
-      - name: Pedir revisao do Codex
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Contar rodadas
+        id: rodadas
+        # b261 - CONTAR nao pode travar. Se o `gh pr view` falhar, o passo
+        # seguinte simplesmente nao roda — e isso ja e o comportamento
+        # seguro. Derrubar o check por causa da contagem seria bloquear o
+        # PR por um detalhe do proprio robo.
+        continue-on-error: true
         env:
-          GH_TOKEN: ${{ github.token }}
-          AI_TOKEN: ${{ secrets.AI_TRIGGER_TOKEN }}
-          PR: ${{ github.event.pull_request.number }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if [ -z "$AI_TOKEN" ]; then
-            echo "Secret AI_TRIGGER_TOKEN ausente."
-            exit 1
-          fi
+          PR="${{ github.event.pull_request.number || github.event.inputs.pr }}"
+          # ⚠️ conta os COMMITS do Claude, nao comentarios.
+          #
+          # O gatilho e `pull_request_review_comment` (comentario inline),
+          # mas `gh pr view --json comments` devolve os comentarios GERAIS
+          # — outro objeto. No #198 eram 1 geral contra 11 inline.
+          #
+          # E o filtro procurava autor comecando com "claude": como o
+          # Claude nunca conseguiu escrever (401), o contador SEMPRE deu
+          # zero e o limite de 5 rodadas nunca valeu.
+          #
+          # Commit e o que a rodada de fato produz — se o Claude corrigiu,
+          # ha commit; se nao corrigiu, nao ha rodada a contar.
+          N=$(gh pr view "$PR" --json commits \
+              --jq '[.commits[] | select(.authors[]?.login // "" | startswith("claude"))] | length')
+          [ -z "$N" ] && N=0
+          echo "n=$N" >> $GITHUB_OUTPUT
+          echo "rodada $N de 5"
 
-          GH_TOKEN="$AI_TOKEN" gh pr comment "$PR" \
-            --repo "$GITHUB_REPOSITORY" \
-            --body "@codex review"
+      - name: Claude corrige os apontamentos
+        if: steps.rodadas.outputs.n < 5
+        # b261 - ⚠️ NAO PODE DERRUBAR O CHECK.
+        #
+        # O OAuth deste passo falha desde agosto (401, na engenharia da
+        # Anthropic). O workflow ja era "NUNCA bloquear" — mas o PASSO
+        # falhando pintava o check `ciclo` de VERMELHO, e o GitHub mostrava
+        # isso como impedimento no PR.
+        #
+        # Resultado: TODO PR parecia travado, e o dono tinha que avisar
+        # "unable" pra eu descobrir que era infraestrutura, nao codigo.
+        # Perdemos varias rodadas em 09/09 exatamente nisso.
+        continue-on-error: true
+        uses: anthropics/claude-code-action@v1
+        with:
+          # ⚠️ AQUI, em `with:` — nunca num bloco `env:`
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 
-  codex-encontrou-problemas:
-    if: >
-      github.event_name == 'pull_request_review' &&
-      startsWith(github.event.review.user.login, 'chatgpt-codex-connector') &&
-      github.event.review.state == 'commented' &&
-      github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: ubuntu-latest
+          # ═══════════════════════════════════════════════════════════════
+          # b265 - ⚠️ O BASH NAO VEM LIGADO, E ERA POR ISSO QUE ELE NAO
+          #        CORRIGIA NADA.
+          #
+          # DIAGNOSTICO (execucao #327, log com `show_full_output`): o
+          # Claude rodou 29 segundos, tentou CINCO comandos e levou negacao
+          # em TODOS:
+          #
+          #   permission_denials:
+          #     git status && git branch -a && git log --oneline -10
+          #     gh pr list --state open
+          #     gh pr view 203 --json ...        (3 tentativas)
+          #
+          # Ele queria ENTENDER o PR antes de mexer — o que e o certo — e
+          # nao conseguia nem rodar `git status`. Encerrou com
+          # `stop_reason: end_turn`, e o passo ficou VERDE sem ter feito
+          # nada. Custou US$ 0,074 pra nao fazer nada.
+          #
+          # ⚠️ A CAUSA: a action NAO inclui Bash no conjunto padrao. Ela vem
+          # com operacoes de arquivo, comentarios e ferramentas do GitHub.
+          # `--allowedTools` ADICIONA a lista de permitidos — sem ele, o
+          # Bash simplesmente nao existe pro modelo.
+          #
+          # E ha um comportamento conhecido (claude-code#49874): UMA negacao
+          # faz o modelo concluir que "Bash esta todo bloqueado" e desistir
+          # de tudo, mesmo tendo ferramentas de arquivo disponiveis.
+          #
+          # 📌 LIBERO O NECESSARIO, NAO `Bash(*)`:
+          #   git    ler estado, diff, e commitar na branch do PR
+          #   gh     ler os apontamentos do Codex (a materia-prima do ciclo)
+          #   node   rodar `verifica.js` e os testes ANTES de subir
+          #   npm    instalar dependencias (o clone nasce sem node_modules)
+          #
+          # ⚠️ O QUE NAO LIBERO, de proposito: `rm`, `curl`, `sudo` e o
+          # coringa `Bash(*)`. Um agente que roda sozinho num repo de
+          # producao nao precisa de shell irrestrito — a diferenca entre
+          # "corrige o PR" e "faz qualquer coisa" e essa lista.
+          claude_args: |
+            --allowedTools "Bash(git:*),Bash(gh:*),Bash(node:*),Bash(npm:*)"
+          # ═══════════════════════════════════════════════════════════════
 
-    steps:
-      - name: Chamar Claude para corrigir
+          # b215: MOSTRAR o que o Claude fez.
+          #
+          # Sem isto o erro e so "result is_error:true", que nao diz nada —
+          # nem pra mim nem pro dono. Com `show_full_output`, o log traz o
+          # que ele tentou e onde parou, que e como achamos as cinco causas
+          # anteriores. Foi tambem o que o suporte da Anthropic pediu.
+          show_full_output: 'true'
+
+          # b214: LIBERAR o Codex, que e bot.
+          #
+          # A action recusa acionamento por bot por padrao — "Workflow
+          # initiated by non-human actor". E uma trava de seguranca sensata:
+          # sem ela, qualquer bot com acesso ao repo poderia mandar o Claude
+          # mexer no codigo.
+          #
+          # Libero SO o Codex, nao `*`. Ele e quem revisa, entao e quem tem
+          # motivo pra disparar o ciclo; abrir pra todos os bots seria uma
+          # porta aberta sem necessidade.
+          allowed_bots: 'chatgpt-codex-connector'
+
+          # b213: o parametro e `prompt` — `direct_prompt` nao existe nesta
+          # versao da action, e ela lista os validos no erro. Conferi contra
+          # a lista que o log devolveu.
+          prompt: |
+            Leia os comentarios de revisao do Codex neste PR e corrija o que
+            proceder, commitando na MESMA branch do PR.
+
+            Voce TEM Bash liberado para: git, gh, node e npm. Use `gh api`
+            para ler os apontamentos INLINE — eles nao aparecem em
+            `gh pr view --json comments`, que traz so os comentarios gerais.
+
+            REGRAS DA CASA:
+            - analise cada apontamento antes de obedecer; se nao proceder,
+              explique por escrito no PR em vez de mudar o codigo
+            - ⚠️ o primeiro apontamento de uma funcao e SINTOMA: audite a
+              funcao INTEIRA e suba UMA vez, em vez de consertar so o ponto
+              apontado e voltar pra fila (isso custou 10 apontamentos em 3
+              rodadas no #203)
+            - rode `node scripts/verifica.js` antes de subir — e o unico
+              comando da casa; ele so aceita ✅ PODE SUBIR
+            - mexeu em .js de front, bumpe o ?v= no HTML que o carrega
+              (GOOD: public/index.html; AMB: index-AMB.html)
+            - ao consertar UMA empresa (girassol/good/amb), confira as
+              outras DUAS antes de subir — os modulos sao espelhados
+            - NUNCA mergeie por conta propria
+
+      - name: Marcar pra revisao humana
+        if: steps.rodadas.outputs.n >= 5
+        # b261 - por ETIQUETA nao pode travar o merge. Se o `gh` falhar
+        # (rate limit, permissao, label removida a mao), o PR fica valido do
+        # mesmo jeito — a etiqueta e um aviso, nao um portao.
+        continue-on-error: true
         env:
-          GH_TOKEN: ${{ github.token }}
-          AI_TOKEN: ${{ secrets.AI_TRIGGER_TOKEN }}
-          PR: ${{ github.event.pull_request.number }}
-          REVIEW_ID: ${{ github.event.review.id }}
-          REVIEWED_SHA: ${{ github.event.review.commit_id }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set -euo pipefail
-          REPO="$GITHUB_REPOSITORY"
-
-          # Ignora revisao de commit antigo.
-          if [ -n "$REVIEWED_SHA" ] && [ "$REVIEWED_SHA" != "$HEAD_SHA" ]; then
-            echo "Revisao do Codex e de commit antigo. Ignorando."
-            exit 0
-          fi
-
-          # Nunca retoma automaticamente depois que um humano foi chamado.
-          LABELS=$(gh api "repos/$REPO/pulls/$PR" --jq '.labels[].name' || true)
-          if printf '%s\n' "$LABELS" | grep -Fxq "needs-human-review"; then
-            echo "PR exige revisao humana."
-            exit 0
-          fi
-
-          # Evita processar a mesma revisao duas vezes.
-          JA_PROCESSADA=$(
-            gh api --paginate "repos/$REPO/issues/$PR/comments?per_page=100" \
-              --jq '.[].body' |
-            grep -F "<!-- ai-codex-review:$REVIEW_ID -->" || true
-          )
-          if [ -n "$JA_PROCESSADA" ]; then
-            echo "Revisao ja processada."
-            exit 0
-          fi
-
-          # Conta quantas correcoes automaticas ja foram solicitadas.
-          ROUNDS=$(
-            gh api --paginate "repos/$REPO/issues/$PR/comments?per_page=100" \
-              --jq '.[].body' |
-            grep -Fc "<!-- ai-codex-round -->" || true
-          )
-
-          if [ "$ROUNDS" -ge 5 ]; then
-            gh label create "needs-human-review" \
-              --repo "$REPO" \
-              --color "D73A4A" \
-              --description "Automacao Claude/Codex parou e precisa de revisao humana" \
-              --force >/dev/null 2>&1 || true
-
-            gh pr edit "$PR" \
-              --repo "$REPO" \
-              --add-label "needs-human-review" >/dev/null 2>&1 || true
-
-            gh pr comment "$PR" --repo "$REPO" --body-file - <<EOF
-          <!-- ai-codex-review:$REVIEW_ID -->
-          <!-- ai-human-stop -->
-          🛑 **Automação pausada — revisão humana necessária**
-
-          O Codex ainda encontrou problemas depois de **5 rodadas automáticas de correção Claude ↔ Codex**.
-
-          @dimarquesmachado-sys precisa revisar este PR. Nada será mergeado automaticamente enquanto a label \`needs-human-review\` estiver presente.
-          EOF
-            exit 0
-          fi
-
-          ROUND=$((ROUNDS + 1))
-
-          if [ -z "$AI_TOKEN" ]; then
-            echo "Secret AI_TRIGGER_TOKEN ausente."
-            exit 1
-          fi
-
-          GH_TOKEN="$AI_TOKEN" gh pr comment "$PR" --repo "$REPO" --body-file - <<EOF
-          <!-- ai-codex-review:$REVIEW_ID -->
-          <!-- ai-codex-round -->
-          🔁 **Rodada automática $ROUND/5 — Claude ↔ Codex**
-
-          @claude Leia **todos os apontamentos ativos do Codex neste PR**, inclusive comentários inline.
-
-          1. Corrija todos os problemas apontados pelo Codex, sem ampliar o escopo.
-          2. Preserve o comportamento que já funcionava e evite regressões.
-          3. Rode os testes/verificações disponíveis.
-          4. Faça commit e push **na MESMA branch deste PR**.
-          5. **Não abra outro PR e não faça merge.**
-          6. Depois do push, pare. O workflow chamará o Codex novamente.
-
-          Se algum apontamento estiver incorreto ou não puder ser corrigido com segurança, não improvise: explique no PR e não faça merge.
-          EOF
-
-  codex-aprovou:
-    if: >
-      github.event_name == 'issue_comment' &&
-      github.event.issue.pull_request &&
-      startsWith(github.event.comment.user.login, 'chatgpt-codex-connector') &&
-      contains(github.event.comment.body, 'find any major issues')
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Validar e fazer auto-merge
-        env:
-          GH_TOKEN: ${{ github.token }}
-          AI_TOKEN: ${{ secrets.AI_TRIGGER_TOKEN }}
-          PR: ${{ github.event.issue.number }}
-          COMMENT_BODY: ${{ github.event.comment.body }}
-        run: |
-          set -euo pipefail
-          REPO="$GITHUB_REPOSITORY"
-
-          parar_humano () {
-            MOTIVO="$1"
-
-            gh label create "needs-human-review" \
-              --repo "$REPO" \
-              --color "D73A4A" \
-              --description "Automacao Claude/Codex parou e precisa de revisao humana" \
-              --force >/dev/null 2>&1 || true
-
-            gh pr edit "$PR" \
-              --repo "$REPO" \
-              --add-label "needs-human-review" >/dev/null 2>&1 || true
-
-            EXISTE=$(
-              gh api --paginate "repos/$REPO/issues/$PR/comments?per_page=100" \
-                --jq '.[].body' |
-              grep -F "<!-- ai-human-stop -->" || true
-            )
-
-            if [ -z "$EXISTE" ]; then
-              gh pr comment "$PR" --repo "$REPO" --body-file - <<EOF
-          <!-- ai-human-stop -->
-          🛑 **Automação pausada — revisão humana necessária**
-
-          $MOTIVO
-
-          @dimarquesmachado-sys precisa revisar este PR. Nenhum merge automático será feito enquanto a label \`needs-human-review\` estiver presente.
-          EOF
-            fi
-          }
-
-          PR_JSON=$(gh api "repos/$REPO/pulls/$PR")
-          STATE=$(printf '%s' "$PR_JSON" | jq -r '.state')
-          DRAFT=$(printf '%s' "$PR_JSON" | jq -r '.draft')
-          HEAD=$(printf '%s' "$PR_JSON" | jq -r '.head.sha')
-          HEAD_REPO=$(printf '%s' "$PR_JSON" | jq -r '.head.repo.full_name')
-          LABELS=$(printf '%s' "$PR_JSON" | jq -r '.labels[].name')
-
-          if [ "$STATE" != "open" ] || [ "$DRAFT" = "true" ]; then
-            exit 0
-          fi
-
-          if [ "$HEAD_REPO" != "$REPO" ]; then
-            parar_humano "O PR vem de outro repositório/fork. Por segurança, não faço merge automático."
-            exit 0
-          fi
-
-          if printf '%s\n' "$LABELS" | grep -Fxq "needs-human-review"; then
-            exit 0
-          fi
-
-          # Confirma que o OK do Codex corresponde ao HEAD atual.
-          REVIEWED=$(
-            printf '%s\n' "$COMMENT_BODY" |
-            sed -nE 's/.*Reviewed commit:\*\* `([0-9a-f]+)`.*/\1/p' |
-            head -n 1
-          )
-
-          if [ -z "$REVIEWED" ]; then
-            parar_humano "O Codex deu OK, mas não consegui identificar qual commit ele revisou."
-            exit 0
-          fi
-
-          case "$HEAD" in
-            "$REVIEWED"*) ;;
-            *)
-              echo "OK do Codex e de commit antigo; pedindo nova revisao."
-              if [ -z "$AI_TOKEN" ]; then
-                parar_humano "O secret AI_TRIGGER_TOKEN está ausente; não consigo pedir nova revisão ao Codex."
-                exit 0
-              fi
-
-              GH_TOKEN="$AI_TOKEN" gh pr comment "$PR" \
-                --repo "$REPO" \
-                --body "@codex review"
-              exit 0
-              ;;
-          esac
-
-          # Guardrails nunca se autoaprovam.
-          FILES=$(
-            gh api --paginate "repos/$REPO/pulls/$PR/files?per_page=100" \
-              --jq '.[].filename'
-          )
-
-          if printf '%s\n' "$FILES" | grep -Eq '^\.github/workflows/|^scripts/verifica\.js$'; then
-            parar_humano "Este PR altera os próprios guardrails da automação. Esse tipo de mudança sempre precisa de humano."
-            exit 0
-          fi
-
-          # Espera especificamente o check ai-safety do commit atual.
-          echo "Aguardando ai-safety..."
-          RESULTADO=""
-
-          for i in $(seq 1 60); do
-            RESULTADO=$(
-              gh api "repos/$REPO/commits/$HEAD/check-runs" \
-                --jq '[.check_runs[] | select(.name == "ai-safety")] | sort_by(.started_at) | last | [.status, .conclusion] | @tsv' \
-                2>/dev/null || true
-            )
-
-            STATUS=$(printf '%s' "$RESULTADO" | cut -f1)
-            if [ "$STATUS" = "completed" ]; then
-              break
-            fi
-
-            sleep 5
-          done
-
-          STATUS=$(printf '%s' "$RESULTADO" | cut -f1)
-          CONCLUSAO=$(printf '%s' "$RESULTADO" | cut -f2)
-
-          if [ "$STATUS" != "completed" ]; then
-            parar_humano "O check \`ai-safety\` não terminou dentro de 5 minutos."
-            exit 0
-          fi
-
-          if [ "$CONCLUSAO" != "success" ]; then
-            parar_humano "O check \`ai-safety\` falhou. O PR não foi mergeado."
-            exit 0
-          fi
-
-          # Codex aprovou o HEAD atual. Agora resolve SOMENTE threads antigos
-          # do próprio Codex que ainda estejam abertos. Threads humanos ficam intactos.
-          OWNER="${REPO%%/*}"
-          REPO_NAME="${REPO#*/}"
-
-          THREADS=$(gh api graphql -f query='
-            query($owner:String!, $repo:String!, $number:Int!) {
-              repository(owner:$owner, name:$repo) {
-                pullRequest(number:$number) {
-                  reviewThreads(first:100) {
-                    nodes {
-                      id
-                      isResolved
-                      comments(first:20) {
-                        nodes {
-                          author { login }
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }' -F owner="$OWNER" -F repo="$REPO_NAME" -F number="$PR"             --jq '.data.repository.pullRequest.reviewThreads.nodes[]
-                  | select(.isResolved == false)
-                  | select(any(.comments.nodes[]; (.author.login // "") | startswith("chatgpt-codex-connector")))
-                  | .id')
-
-          if [ -n "$THREADS" ]; then
-            echo "$THREADS" | while IFS= read -r THREAD_ID; do
-              [ -z "$THREAD_ID" ] && continue
-              gh api graphql -f query='
-                mutation($threadId:ID!) {
-                  resolveReviewThread(input:{threadId:$threadId}) {
-                    thread { id isResolved }
-                  }
-                }' -F threadId="$THREAD_ID" >/dev/null
-            done
-          fi
-
-          gh pr merge "$PR" \
-            --repo "$REPO" \
-            --auto \
-            --squash
+          PR="${{ github.event.pull_request.number || github.event.inputs.pr }}"
+          gh pr edit "$PR" --add-label needs-human-review
+          gh pr comment "$PR" --body "⚠️ 5 rodadas sem fechar. Parei o loop — vale olhar se ha decisao de produto aqui, nao so de codigo."
