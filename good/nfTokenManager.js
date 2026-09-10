@@ -126,9 +126,27 @@ async function garantirTokenNF() {
     headers: { Authorization: `Bearer ${access_token}` }
   });
 
+  /* Codex #362 r1: o cenário-ALVO da sonda /nfe — token sem a permissão de notas —
+     responde 403 insufficient_scope, e cair no caminho do "segue o token" devolvia
+     um token inútil que falharia na emissão. Renovar não conserta escopo (o refresh
+     preserva as permissões): o 403 LANÇA com instrução de reautorizar. */
+  if (resp.status === 403) {
+    throw new Error('token NF sem a permissão de notas fiscais (403 na sonda /nfe) — reautorize o app NF em /good/setup-nf');
+  }
   if (resp.status === 401) {
     console.log('[GOOD nfTokenManager] Token NF expirado (401) — renovando');
-    return renovarTokenNF();
+    /* Codex #362 r2: o RENOVADO saía direto, sem a checagem de escopo — se o app não
+       tem a permissão de notas, renovar devolve um token igualmente inútil. O token
+       novo passa pela MESMA sonda /nfe uma vez (custo só no caminho raro da
+       renovação); 403 nele lança a mesma instrução. */
+    const _novo = await renovarTokenNF();
+    const _r2 = await _nfFetch('https://api.bling.com.br/Api/v3/nfe?limite=1', {
+      headers: { Authorization: `Bearer ${_novo}`, Accept: 'application/json' }
+    });
+    if (_r2.status === 403) {
+      throw new Error('token NF renovado SEM a permissão de notas fiscais (403 na sonda) — reautorize o app NF em /good/setup-nf');
+    }
+    return _novo;
   }
 
   return access_token;
