@@ -8602,21 +8602,32 @@ async function custoSync(fresh) {
         const _temComposicao = Array.isArray(_comps0) && _comps0.length > 0;
         let cand = _temComposicao ? [] :
                    [forn.precoCusto, forn.precoCompra, forn.preco, forn.custo, prod.precoCusto, prod.custo, prod.precoCompra].map(Number).filter(v => isFinite(v) && v > 0);
-        if (!cand.length) {
+        /* 10/09 — O BURACO QUE FALTAVA FECHAR DE 19/08: a regra "a composição manda" blindou
+           os CAMPOS do produto, mas esta consulta ao ENDPOINT de fornecedores continuava
+           rodando ANTES da composição e preenchia `cand` com o preço registrado no fornecedor
+           (retrato que não acompanha o custo do componente). Com `cand` cheio, o bloco da
+           composição — que só roda `if (!cand.length)` — NUNCA executava para kit nenhum.
+           Caso real: 2xE14-5W-3000K-BIV seguiu 6,80 mesmo com o componente a 4,00 no Bling e
+           no nosso banco, e a venda 4575 saiu com margem inflada. Agora, tendo composição, ela
+           decide; o fornecedor só entra como RESERVA se ela não fechar. */
+        const _candDosFornecedores = async () => {
           const rf = await bg2(`/produtos/fornecedores?idProduto=${prod.id}&limite=5`);
-          if (!rf || !rf.ok) _falhaConsulta = true;
+          if (!rf || !rf.ok) { _falhaConsulta = true; return []; }
           const arr = (rf.ok && rf.data && rf.data.data) || [];
           const pref = arr.find(x => x && x.padrao) || arr[0];
           // 27/07: o nome do campo varia na resposta do Bling — aceita todos os candidatos
-          if (pref) cand = [pref.precoCusto, pref.precoCompra, pref.preco, pref.custo, pref.valor, pref.valorCusto]
-                            .map(Number).filter(v => isFinite(v) && v > 0);
-          if (!cand.length && arr.length) {
+          let c = [];
+          if (pref) c = [pref.precoCusto, pref.precoCompra, pref.preco, pref.custo, pref.valor, pref.valorCusto]
+                        .map(Number).filter(v => isFinite(v) && v > 0);
+          if (!c.length && arr.length) {
             for (const fx of arr) {
               const vs = Object.keys(fx || {}).filter(k => /pre(c|ç)o|custo|valor/i.test(k)).map(k => Number(fx[k])).filter(v => isFinite(v) && v > 0);
-              if (vs.length) { cand = [Math.min.apply(null, vs)]; break; }
+              if (vs.length) { c = [Math.min.apply(null, vs)]; break; }
             }
           }
-        }
+          return c;
+        };
+        if (!cand.length && !_temComposicao) cand = await _candDosFornecedores();
         // KIT / produto COM COMPOSIÇÃO (27/07): o Bling não preenche o custo do kit em si —
         // ele mostra "Preço Total de Custo" somando os componentes. Fazemos o mesmo.
         if (!cand.length) {
@@ -8695,7 +8706,11 @@ async function custoSync(fresh) {
         if (!cand.length && _temComposicao) {
           cand = [forn.precoCusto, forn.precoCompra, forn.preco, forn.custo, prod.precoCusto, prod.custo, prod.precoCompra]
                  .map(Number).filter(v => isFinite(v) && v > 0);
-          if (cand.length) console.log('[CUSTO] ' + sku + ': composição incompleta — usando campo do fornecedor (' + cand[0] + ') como reserva');
+          /* a rede de segurança que existia antes não se perde: sem campo no produto, ainda
+             vale perguntar ao endpoint de fornecedores — só que AGORA como reserva, depois
+             de a composição ter tido a primeira palavra. */
+          if (!cand.length) cand = await _candDosFornecedores();
+          if (cand.length) console.log('[CUSTO] ' + sku + ': composição incompleta — usando fornecedor (' + cand[0] + ') como reserva');
         }
         const _custoNovo = cand.length ? Math.round(cand[0] * 10000) / 10000 : null;
         /* 21/08: antes de sobrescrever, anota a linha do tempo — o Bling só guarda o custo
