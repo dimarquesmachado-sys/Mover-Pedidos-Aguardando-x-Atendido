@@ -109,7 +109,38 @@ function dataValida(aaaammdd) {
    e uma faltante lá no fim ficava inalcançável pra sempre. Receita idêntica ao #347:
    presença CONFIRMADA vira cache de 7 dias (não re-gasta) e a fila de candidatas
    ROTACIONA com o dia — avança mesmo com cache frio pós-deploy. */
+/* 10/09: as conferências viviam SÓ em memória — os 3 deploys da noite zeraram o
+   progresso da varredura da GOOD (113 conferidas viraram 55 na rodada seguinte),
+   re-custando consultas ao Bling que já tinham sido pagas. Persistidas em /data
+   (write atômico, salvamento com throttle); TTL de 30 dias no carregamento pra o
+   arquivo não crescer pra sempre. */
 const _confirmadasNoBling = new Map(); // chave → ts da confirmação
+const _CONF_ARQ = (() => {
+  try { return require('fs').existsSync('/data') ? '/data/ml-full-conferidas.json' : require('path').join(__dirname, 'ml-full-conferidas.json'); }
+  catch (e) { return require('path').join(__dirname, 'ml-full-conferidas.json'); }
+})();
+(() => {
+  try {
+    const fs = require('fs');
+    const dump = JSON.parse(fs.readFileSync(_CONF_ARQ, 'utf8'));
+    const corte = Date.now() - 30 * 86400000;
+    for (const [k, ts] of Object.entries(dump)) { if (ts > corte) _confirmadasNoBling.set(k, ts); }
+    console.log('[ml-full] conferidas carregadas do disco:', _confirmadasNoBling.size);
+  } catch (e) { /* primeira execução ou arquivo ausente — normal */ }
+})();
+let _confSujas = 0;
+function _salvarConferidas(forcar) {
+  _confSujas++;
+  if (!forcar && _confSujas < 20) return;
+  _confSujas = 0;
+  try {
+    const fs = require('fs');
+    const dump = {};
+    for (const [k, ts] of _confirmadasNoBling) dump[k] = ts;
+    fs.writeFileSync(_CONF_ARQ + '.tmp', JSON.stringify(dump));
+    fs.renameSync(_CONF_ARQ + '.tmp', _CONF_ARQ);
+  } catch (e) { /* melhor-esforço: sem disco, segue em memória */ }
+}
 const TTL_CONFIRMADA = 7 * 86400000;
 /* Codex #349 r5 (P2, no acerto): duas varreduras simultâneas da MESMA empresa dobram
    o tráfego e a segunda quebra no renameSync do que a primeira arquivou (ENOENT).
@@ -476,6 +507,7 @@ async function _varrerLoteInterno(empresa, de, ate, teto, deps) {
       consultasBling += b0.chamadas || 1;
       if (b0.verificada && b0.esta_no_bling) {
         _confirmadasNoBling.set(c.chave, Date.now());
+        _salvarConferidas();
         const mv = moverTodas(caminhosSalvos, 'importadas');
         if (!mv.falhas) { chavesDisco.delete(c.chave); arquivadas++; }
         else { jaBaixadas++; naoConferidas.push({ chave: c.chave, tipo, motivo: 'no Bling, mas arquivamento parcial (' + mv.falhas + ' cópia(s)) — segue no ZIP até mover' }); }
@@ -499,7 +531,7 @@ async function _varrerLoteInterno(empresa, de, ate, teto, deps) {
       naoConferidas.push({ chave: c.chave, tipo, motivo: b.erro });
       continue;
     }
-    if (b.esta_no_bling) { _confirmadasNoBling.set(c.chave, Date.now()); jaNoBling++; continue; }
+    if (b.esta_no_bling) { _confirmadasNoBling.set(c.chave, Date.now()); _salvarConferidas(); jaNoBling++; continue; }
 
     fs.mkdirSync(path.join(DIR, tipo), { recursive: true });
     fs.writeFileSync(destino, xml);
@@ -517,7 +549,7 @@ async function _varrerLoteInterno(empresa, de, ate, teto, deps) {
     canceladas: canceladasNoLote.length ? canceladasNoLote : undefined,
     ja_baixadas: jaBaixadas,
     arquivadas_no_bling: arquivadas,
-    ja_no_bling: jaNoBling,
+    ja_no_bling: (_salvarConferidas(true), jaNoBling), /* flush do resto ao montar o resultado */
     pendentes_novas: novas.length,
     nao_conferidas: naoConferidas.length,
     anomalias: anomalias.length ? anomalias : undefined,
