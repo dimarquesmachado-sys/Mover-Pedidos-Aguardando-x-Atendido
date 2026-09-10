@@ -549,7 +549,7 @@ function cardVenda(o){
   // 28/07: quadrinho novo — soma TUDO que o marketplace e o governo levaram (fora o custo do produto):
   // comissão + imposto + frete do vendedor, menos o estorno. Antes isso ficava invisível no celular.
   nums.push('<div class="vcB" title="'+esc(o.despDet||'comissão + imposto + frete do vendedor')+'"><i>Taxas, Frete e Imposto</i><b class="bad">'+(o.desp!=null?BRL(o.desp):'—')+'</b></div>');
-  nums.push('<div class="vcB"><i>💎 Lucro Bruto (M.C.)</i><b class="'+((o.mc||0)>=0?'ok':'bad')+'">'+(o.mc!=null?BRL(o.mc):'—')+(o.pc!=null?(' <span style="font-size:10px;opacity:.8">('+String(o.pc).replace('.',',')+'%)</span>'):'')+'</b></div>');
+  nums.push('<div class="vcB"><i>💎 Lucro Bruto (M.C.)'+(o.frPend?' <span class="st warn" style="font-size:9px">\u23f3 AGUARDANDO frete</span>':'')+'</i><b class="'+((o.mc||0)>=0?'ok':'bad')+'">'+(o.mc!=null?BRL(o.mc):'—')+(o.pc!=null?(' <span style="font-size:10px;opacity:.8">('+String(o.pc).replace('.',',')+'%)</span>'):'')+'</b>'+(o.frPend?'<div class="dim" style="font-size:10px">frete do marketplace ainda por vir \u2014 margem PARCIAL, atualiza sozinha</div>':'')+'</div>');
   return '<div class="vcard" style="border-left:3px solid '+cor+(o.cancelado?';opacity:.55':'')+'">'+
     '<div class="vcTopo">'+
       (o.cancelado?'<span style="color:#64748b;font-weight:800">✕</span>':'<span style="color:#34d399;font-weight:800">✓</span>')+
@@ -3668,7 +3668,7 @@ function renderAnalise(){
                       }).join('')
                     : '<span class="dim">detalhe a caminho\u2026</span>'),
              venda:(P.tot!=null?P.tot:(h.valor!=null?Number(h.valor):null)), custo:(P.custo!=null?P.custo:null),
-             mc:(P.mc!=null?P.mc:null), pc:(P.mc!=null&&P.tot?Math.round(P.mc/P.tot*1000)/10:null),
+             mc:(P.mc!=null?P.mc:null), frPend:_frPend?1:0, pc:(P.mc!=null&&P.tot?Math.round(P.mc/P.tot*1000)/10:null),
              // 28/07: NÃO somar os componentes na mão. A margem muda de fórmula por canal (Shopee/Magalu
              // com renda líquida já embutem a comissão; no Magalu o frete às vezes é só exibição; há ainda
              // frete recebido e desconto do marketplace). Somando à mão, o quadrinho mentiria em vários
@@ -3723,7 +3723,7 @@ function renderAnalise(){
   LP.forEach(x=>{ if(x.h._cancelado) return; const d2=diaVenda(x.h); const t=totDia[d2]||(totDia[d2]={n:0,rp:0,tot:0,mc:0,mcN:0});
     t.n++; if(x.P.rp!=null)t.rp+=x.P.rp; if(x.P.tot!=null)t.tot+=x.P.tot; if(x.P.mc!=null){t.mc+=x.P.mc;t.mcN++;} });
   let _diaAnt = null;
-  const linhas = pagPL.map(x=>{
+  const linhas = pagPL.map(x=>{ const _vd=new Date(String(h.venda_dia||h.data||'')); const _frPend=(P.mc!=null&&P.frV==null&&!h._cancelado&&isFinite(_vd.getTime())&&(Date.now()-_vd.getTime())<10*86400000); /* Codex #365: o AGUARDANDO expira em 10 dias — frV null em venda antiga é frete zero legitimo, nao pendencia */
     const h=x.h, P=x.P;
     const _d = diaVenda(h);
     let sep = '';
@@ -3792,9 +3792,9 @@ function renderAnalise(){
                 ? '<span class="warn">'+BRL(P.frV)+'</span> <span class="st w" style="font-size:9px" title="frete de coparticipação Magalu ESTIMADO pela tabela — o valor real chega quando o pedido é entregue">PREVISTO</span>'
                 : '<span class="ok">'+BRL(P.frV)+'</span> <span class="st ok" style="font-size:9px" title="frete de coparticipação REAL, da API financeira da Magalu">REAL</span>')
             : BRL(P.frV)+(P.frFonte==='flex'?' <span class="st warn" style="font-size:9px">FLEX</span>':'')
-        ):(!h._cancelado?'<span class="st warn" style="font-size:9px;cursor:help" title="\u23f3 dado do marketplace ainda POR VIR \u2014 na Shopee o frete do vendedor s\u00f3 assenta no escrow perto da conclus\u00e3o; a noturna regrava e preenche sozinha. At\u00e9 l\u00e1 a M.C. desta linha \u00e9 PARCIAL.">\u23f3 AGUARDANDO</span>':'<span class="dim">—</span>'))+'</td>'+
+        ):(_frPend?'<span class="st warn" style="font-size:9px;cursor:help" title="\u23f3 dado do marketplace ainda POR VIR \u2014 na Shopee o frete do vendedor s\u00f3 assenta no escrow perto da conclus\u00e3o; a noturna regrava e preenche sozinha. At\u00e9 l\u00e1 a M.C. desta linha \u00e9 PARCIAL.">\u23f3 AGUARDANDO</span>':'<span class="dim">—</span>'))+'</td>'+
       '<td class="num">'+(P.credito!=null?('<span class="'+(P.credito>=0?'ok':'bad')+'">'+(P.credito>=0?'+':'')+BRL(P.credito)+'</span>'):'<span class="dim">—</span>')+'</td>'+
-      '<td class="num" style="font-weight:800">'+(P.mc!=null?('<span class="'+(P.mc>=0?'ok':'bad')+'">'+BRL(P.mc)+'</span>'+(P.frV==null&&!h._cancelado?'<span class="warn" style="cursor:help" title="\u23f3 MARGEM PARCIAL \u2014 o frete do vendedor ainda n\u00e3o consolidou (na Shopee ele s\u00f3 assenta no escrow perto da conclus\u00e3o do pedido). Quando chegar, a M.C. atualiza sozinha \u2014 e tende a CAIR."> \u23f3</span>':'')):'<span class="warn" title="falta config/custo">—</span>')+'</td>'+
+      '<td class="num" style="font-weight:800">'+(P.mc!=null?('<span class="'+(P.mc>=0?'ok':'bad')+'">'+BRL(P.mc)+'</span>'+(_frPend?'<span class="warn" style="cursor:help" title="\u23f3 MARGEM PARCIAL \u2014 o frete do vendedor ainda n\u00e3o consolidou (na Shopee ele s\u00f3 assenta no escrow perto da conclus\u00e3o do pedido). Quando chegar, a M.C. atualiza sozinha \u2014 e tende a CAIR."> \u23f3</span>':'')):'<span class="warn" title="falta config/custo">—</span>')+'</td>'+
       '<td class="num '+(pmc!=null?(pmc>=0?'ok':'bad'):'dim')+'">'+(pmc!=null?pmc+'%':'—')+'</td>'+
     '</tr>';
   }).join('');
