@@ -1,0 +1,158 @@
+# .github/workflows/destrava-pr.yml — MOVER-PEDIDOS
+# (replicado do Devolucoes em 10/09/2026 — generico por design, nada a adaptar)
+#
+# ⚠️ POR QUE ISTO EXISTE
+#
+# [stated] "não tem como automatizar isso? pra eu não ter q ficar vindo aqui
+# e falar, olha deu erro, tá unable"
+#
+# Em 10/09 o dono avisou "unable" umas 15 vezes, e MEDINDO a causa:
+#
+#   conversas pendentes .......... ~8x   ← mecanico
+#   branch atras da main ......... ~2x   ← mecanico
+#   check `ciclo` vermelho ....... ~5x   ← ja resolvido (continue-on-error)
+#   apontamento real ............. varias ← trabalho do Claude, ja funciona
+#   conflito de CONTEUDO ......... 1x    ← precisa de gente
+#
+# Uns 80% eram mecanicos: o Codex ja tinha revisado, nao havia apontamento
+# novo, e THREADS ANTIGAS seguravam o merge. Nenhum julgamento envolvido —
+# so alguem clicando "resolve" 27 vezes.
+#
+# ⚠️ O QUE ESTE WORKFLOW **NAO** FAZ, DE PROPOSITO:
+#
+#   - NAO MERGEIA. Regra da casa: quem mergeia e o dono, sempre.
+#   - NAO resolve conflito de CONTEUDO. Isso e julgamento: escolher um lado
+#     apaga trabalho do outro. Ele ETIQUETA e para.
+#   - NAO resolve thread se houver apontamento NOVO sem tratar. Seria
+#     esconder trabalho pendente — o oposto do que serve.
+
+name: destrava-pr
+
+on:
+  # depois que o Codex termina de revisar
+  pull_request_review:
+    types: [submitted]
+  # e quando a main anda (a branch pode ter ficado atras)
+  push:
+    branches: [main]
+  # e sob demanda
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: 'Numero do PR (vazio = todos os abertos)'
+        required: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: destrava-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  destravar:
+    # ⚠️ NUNCA bloquear. Este workflow existe pra DESTRAVAR — se ele proprio
+    # travar o PR, fica pior que nao existir.
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Destravar o que for mecanico
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set +e   # nenhum passo aqui pode derrubar o job
+
+          ALVO="${{ github.event.pull_request.number || github.event.inputs.pr }}"
+          if [ -n "$ALVO" ]; then
+            PRS="$ALVO"
+          else
+            PRS=$(gh pr list --state open --json number --jq '.[].number')
+          fi
+
+          for PR in $PRS; do
+            echo "════════ PR #$PR ════════"
+
+            # ── 1) ha apontamento NOVO, depois do ultimo commit? ─────────
+            #
+            # ⚠️ ESTA E A TRAVA MAIS IMPORTANTE DESTE ARQUIVO. Se o Codex
+            # apontou algo depois do ultimo push, ha TRABALHO PENDENTE —
+            # resolver as threads aqui esconderia isso, e o PR seria
+            # mergeado com apontamento por tratar.
+            ULT_COMMIT=$(gh pr view "$PR" --json commits \
+                          --jq '.commits[-1].committedDate' 2>/dev/null)
+            NOVOS=$(gh api "repos/${{ github.repository }}/pulls/$PR/comments?per_page=100" \
+                     --jq "[.[] | select(.user.login|startswith(\"chatgpt\")) | select(.created_at > \"$ULT_COMMIT\")] | length" 2>/dev/null)
+            NOVOS=${NOVOS:-0}
+
+            if [ "$NOVOS" -gt 0 ]; then
+              echo "  ⏭️  $NOVOS apontamento(s) novo(s) sem tratar — NAO mexo."
+              echo "     (o Claude do ciclo cuida disso; resolver thread aqui esconderia)"
+              continue
+            fi
+
+            # ── 2) a branch esta atras da main? ──────────────────────────
+            #
+            # `update-branch` faz o merge da main na branch. Se der conflito
+            # de CONTEUDO, o GitHub recusa — e ai e caso de gente.
+            ESTADO=$(gh pr view "$PR" --json mergeStateStatus --jq '.mergeStateStatus' 2>/dev/null)
+            if [ "$ESTADO" = "BEHIND" ]; then
+              echo "  🔄 branch atras da main — atualizando"
+              gh api -X PUT "repos/${{ github.repository }}/pulls/$PR/update-branch" >/dev/null 2>&1 \
+                && echo "     ✅ atualizada (⚠️ isso REABRE as threads; resolvo abaixo)" \
+                || echo "     ⚠️ nao consegui — provavelmente conflito de conteudo"
+              sleep 5
+            fi
+
+            # ── 3) conflito de CONTEUDO: etiqueta e PARA ─────────────────
+            #
+            # ⚠️ NAO tento resolver. Escolher um lado apaga trabalho do
+            # outro — hoje mesmo o conflito era a linha de versao, e a
+            # resolucao certa era JUNTAR as duas descricoes, nao escolher.
+            # Isso e julgamento.
+            ESTADO=$(gh pr view "$PR" --json mergeStateStatus --jq '.mergeStateStatus' 2>/dev/null)
+            if [ "$ESTADO" = "DIRTY" ]; then
+              echo "  ⛔ CONFLITO DE CONTEUDO — isso precisa de gente"
+              gh pr edit "$PR" --add-label "conflito" >/dev/null 2>&1
+              gh pr comment "$PR" --body "⛔ **Conflito com a \`main\`.** Não resolvo automaticamente: escolher um lado apaga trabalho do outro. Precisa de revisão." >/dev/null 2>&1
+              continue
+            fi
+
+            # ── 4) resolver as conversas ─────────────────────────────────
+            #
+            # Chegou aqui = o Codex revisou, ZERO apontamento novo, e a
+            # branch esta em dia. As threads que sobraram sao de rodadas
+            # anteriores, ja tratadas.
+            IDS=$(gh api graphql -f query='
+              query($owner:String!,$repo:String!,$pr:Int!){
+                repository(owner:$owner,name:$repo){
+                  pullRequest(number:$pr){
+                    reviewThreads(first:100){ nodes{ id isResolved } }
+                  }
+                }
+              }' -F owner="${{ github.repository_owner }}" \
+                 -F repo="${{ github.event.repository.name }}" \
+                 -F pr="$PR" \
+                 --jq '.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved==false) | .id' 2>/dev/null)
+
+            N=0
+            for ID in $IDS; do
+              gh api graphql -f query='
+                mutation($id:ID!){ resolveReviewThread(input:{threadId:$id}){ thread{ isResolved } } }' \
+                -F id="$ID" >/dev/null 2>&1 && N=$((N+1))
+            done
+            [ "$N" -gt 0 ] && echo "  ✅ $N conversa(s) resolvida(s)"
+
+            # ── 5) e avisa se ficou pronto ───────────────────────────────
+            #
+            # ⚠️ So comenta se MUDOU alguma coisa — senao vira spam a cada
+            # push, e aviso que sempre aparece para de ser lido.
+            FINAL=$(gh pr view "$PR" --json mergeStateStatus --jq '.mergeStateStatus' 2>/dev/null)
+            if [ "$FINAL" = "CLEAN" ] && [ "$N" -gt 0 ]; then
+              gh pr comment "$PR" --body "✅ **Pronto pra merge.** Destravei o que era mecânico ($N conversa(s) de rodadas anteriores). Zero apontamento sem tratar." >/dev/null 2>&1
+              echo "  🔔 PR #$PR pronto — avisado"
+            fi
+          done
+
+          exit 0
