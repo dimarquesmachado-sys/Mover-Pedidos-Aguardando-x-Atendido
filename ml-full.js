@@ -879,8 +879,11 @@ async function tratar(req, res, urlObj, json) {
       json(res, 400, { ok: false, erro: 'passe &de=AAAAMMDD&ate=AAAAMMDD', exemplo: '/ml-full/varrer-serie?empresa=good&de=20260901&ate=20260907&k=SUA_ADMIN_KEY' });
       return true;
     }
-    const dDe = dataValida(de), dAte = dataValida(ate);
-    if (!dDe || !dAte || dAte < dDe || (dAte - dDe) >= 31 * 86400000) {
+    /* dataValida devolve TIMESTAMP (number), não Date — a rota /ml-full/varrer sempre
+       usou assim (subtração direta); eu chamei .getTime() por cima e a série morria com
+       "dDe.getTime is not a function" na primeira chamada real. Ler o produtor antes. */
+    const tDe = dataValida(de), tAte = dataValida(ate);
+    if (!tDe || !tAte || tAte < tDe || (tAte - tDe) >= 31 * 86400000) {
       json(res, 400, { ok: false, erro: 'janela inválida — no máximo 31 dias corridos na série' });
       return true;
     }
@@ -891,12 +894,10 @@ async function tratar(req, res, urlObj, json) {
     const passo = Math.max(1, Math.min(7, Number(urlObj.searchParams.get('passo')) || 2));
     const teto = Math.max(4, Math.min(200, Number(urlObj.searchParams.get('teto')) || 200));
     const respiroS = Math.max(0, Math.min(600, Number(urlObj.searchParams.get('respiro')) || 60));
-    const iso = (d) => d.toISOString().slice(0, 10).replace(/-/g, '');
+    const iso = (ts) => new Date(ts).toISOString().slice(0, 10).replace(/-/g, '');
     const pedacos = [];
-    for (let t = dDe.getTime(); t <= dAte.getTime(); t += passo * 86400000) {
-      const ini = new Date(t);
-      const fim = new Date(Math.min(t + (passo - 1) * 86400000, dAte.getTime()));
-      pedacos.push({ de: iso(ini), ate: iso(fim) });
+    for (let t = tDe; t <= tAte; t += passo * 86400000) {
+      pedacos.push({ de: iso(t), ate: iso(Math.min(t + (passo - 1) * 86400000, tAte)) });
     }
     const st = _serie[empresa] = {
       rodando: true, comecou: new Date().toISOString(), terminou: null,
