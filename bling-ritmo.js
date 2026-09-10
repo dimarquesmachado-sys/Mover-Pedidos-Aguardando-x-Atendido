@@ -152,7 +152,6 @@ function aviso429(conta, retryAfterS) {
 
 function avisoOk(conta, ficha) {
   const c = _conta(conta);
-  const agora = _agoraRef.fn();
   /* Codex #356 r4+r5: a correlação exata exige a FICHA — o caminho de compatibilidade
      sem ela mantinha vivo o furo do sucesso pré-429 atrasado, então morreu: aviso-ok
      sem ficha é ignorado com instrução. Só zera se a permissão DAQUELA ficha saiu
@@ -165,11 +164,6 @@ function avisoOk(conta, ficha) {
   c.degrau = 0; c.pausaAte = 0;
   _persistir();
   return { ok: true };
-  /* Codex #356 r2+r3: sucesso legítimo é o de permissão POSTERIOR ao último 429 —
-     a checagem só-por-pausa deixava um pedido de 16s (permitido antes de uma pausa
-     de 15s) chegar DEPOIS dela vencer e zerar a escada sem nenhum sucesso pós-429
-     real. A âncora é o par de timestamps, não o relógio da pausa. */
-  if (c.pausaAte > agora) return { ok: true, ignorado: true, motivo: 'pausa ativa — sucesso é de permissão anterior ao 429' };
 }
 
 function estado(conta) {
