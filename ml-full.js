@@ -332,6 +332,10 @@ async function _varrerLoteInterno(empresa, de, ate, teto, deps) {
     const esperaMs = Math.min(Math.max(tent * 90, rz.retryAfterS || 0), 300) * 1000;
     await sleep(esperaMs);
   }
+  /* Codex #359 r7 (o item final): a 3ª tentativa levando 429 COM Retry-After quebrava
+     o loop antes de qualquer tratamento do header — o chamador ouvia 'tente de novo'
+     sem saber QUANDO, e a re-tentativa manual de ~1 min rearmava o limite. */
+  if (rz.transitorio && rz.retryAfterS && !rz.detalheRetry) rz.detalheRetry = 'ML pediu Retry-After de ' + rz.retryAfterS + 's — rode de novo depois desse tempo';
   if (rz.transitorio) return { ok: false, resultado: 'transitorio_tente_de_novo', detalhe: rz.detalheRetry || rz.buf.toString().slice(0, 200) };
   if (!rz.ok) return { ok: false, resultado: 'erro_lote_' + rz.status, detalhe: rz.buf.toString().slice(0, 400) };
   if (rz.buf.slice(0, 2).toString() !== 'PK') return { ok: false, resultado: 'lote_nao_veio_zip', detalhe: rz.buf.toString().slice(0, 400) };
