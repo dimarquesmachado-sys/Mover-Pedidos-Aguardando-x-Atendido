@@ -305,15 +305,13 @@ async function _varrerLoteInterno(empresa, de, ate, teto, deps) {
   let tokTent = tokenML;
   let _reAuthFeita = false;
   for (let tent = 1; ; tent++) {
-    /* Codex #359 r2+r3: o token pode VENCER durante as pausas — re-adquirir a cada
-       tentativa, mas com TOLERÂNCIA: o garantirToken sonda a MESMA API limitada
-       (/users/me), que durante o rate-limit devolve 429 e o manager seletivo lança;
-       nesse caso o token anterior segue em uso (se tiver vencido de verdade, o lote
-       responde 401/403 não-transitório e a saída é declarada). */
-    /* Codex #359 r5: o fallback voltava ao token capturado ANTES do loop — se a
-       tentativa 2 renovou (rotativo!), a 3 usaria o token já substituído. O último
-       BOM persiste entre as voltas. */
-    if (tent > 1) { try { tokTent = await garantirToken(empresa); } catch (e) { /* sonda limitada — segue com o último bom */ } }
+    /* Codex #359 r7 (simplificando a classe): NADA de sonda durante o backoff —
+       re-adquirir a cada volta chamava /users/me, que no rate-limit ativo queima
+       mais uma requisição exatamente onde cada uma conta, e o manager seletivo
+       lança (o catch do r3 só escondia o desperdício). O token corrente (último
+       bom, r5) segue nas voltas; vencimento REAL aparece como 401/403 do próprio
+       lote, onde a volta única de re-autenticação (r6) cura — o único momento em
+       que sondar vale o custo. */
     rz = await mlGetBuffer(tokTent, urlLote, true); /* umaSo: 3 requisições REAIS, não 6 */
     /* Codex #359 r6: token vencido EM VOO (ou retido após sonda limitada) devolve
        401/403 do LOTE — uma única volta extra de autenticação re-adquire e tenta de
