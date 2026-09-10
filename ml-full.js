@@ -302,14 +302,17 @@ async function _varrerLoteInterno(empresa, de, ate, teto, deps) {
      REARMA o limite. O motor agora espera sozinho: até 3 tentativas com pausa crescente
      (90s, 180s) SÓ pra transitório do lote; esgotou, devolve o transitorio de sempre. */
   let rz;
+  let tokTent = tokenML;
   for (let tent = 1; ; tent++) {
     /* Codex #359 r2+r3: o token pode VENCER durante as pausas — re-adquirir a cada
        tentativa, mas com TOLERÂNCIA: o garantirToken sonda a MESMA API limitada
        (/users/me), que durante o rate-limit devolve 429 e o manager seletivo lança;
        nesse caso o token anterior segue em uso (se tiver vencido de verdade, o lote
        responde 401/403 não-transitório e a saída é declarada). */
-    let tokTent = tokenML;
-    if (tent > 1) { try { tokTent = await garantirToken(empresa); } catch (e) { /* sonda limitada — segue com o anterior */ } }
+    /* Codex #359 r5: o fallback voltava ao token capturado ANTES do loop — se a
+       tentativa 2 renovou (rotativo!), a 3 usaria o token já substituído. O último
+       BOM persiste entre as voltas. */
+    if (tent > 1) { try { tokTent = await garantirToken(empresa); } catch (e) { /* sonda limitada — segue com o último bom */ } }
     rz = await mlGetBuffer(tokTent, urlLote, true); /* umaSo: 3 requisições REAIS, não 6 */
     if (!rz.transitorio || tent >= 3) break;
     /* Retry-After MAIOR que a janela da rota síncrona: re-tentar antes rearmaria o
