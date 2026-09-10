@@ -132,21 +132,31 @@ async function garantirTokenBling(empresa) {
 
 /* GET binário no ML (o stream do lote) — corpo em Buffer, abort de 60s, 1 retentativa
    pra transitório. Nunca conclui nada: devolve o que veio. */
-async function mlGetBuffer(token, url) {
+async function mlGetBuffer(token, url, umaSo) {
+  /* Codex #359: o chamador com backoff PRÓPRIO passa umaSo=true — a retentativa
+     interna de 4s duplicaria as requisições (6 em vez de 3) e o 2º tiro prematuro
+     REARMA o limite do ML, o exato vício que o backoff quer curar. */
   let ultimo = null;
-  for (let tent = 1; tent <= 2; tent++) {
+  const maxTent = umaSo ? 1 : 2;
+  for (let tent = 1; tent <= maxTent; tent++) {
     const ac = new AbortController();
     const t = setTimeout(() => ac.abort(), 60000);
     try {
       const r = await _fetchRef.fn(url, { headers: { Authorization: 'Bearer ' + token }, signal: ac.signal, timeout: 60000 });
       const buf = await r.buffer();
       const transitorio = r.status === 429 || r.status >= 500;
-      ultimo = { status: r.status, ok: r.status >= 200 && r.status < 300, buf, transitorio };
+      /* Codex #359 r4: a RFC permite Retry-After como HTTP-date além de segundos —
+         Number() daria NaN e o header seria descartado, com o tiro prematuro
+         rearmando o limite. Parse duplo: segundos, senão data absoluta. */
+      const _raBruto = r.headers && r.headers.get && r.headers.get('retry-after');
+      let _ra = Number(_raBruto);
+      if (!Number.isFinite(_ra) && _raBruto) { const _d = Date.parse(_raBruto); if (Number.isFinite(_d)) _ra = Math.ceil((_d - Date.now()) / 1000); }
+      ultimo = { status: r.status, ok: r.status >= 200 && r.status < 300, buf, transitorio, retryAfterS: (Number.isFinite(_ra) && _ra > 0) ? _ra : null };
     } catch (e) {
       ultimo = { status: 0, ok: false, buf: Buffer.from('rede/timeout: ' + String(e.message || e).slice(0, 160)), transitorio: true };
     } finally { clearTimeout(t); }
     if (!ultimo.transitorio) return ultimo;
-    if (tent === 1) await sleep(4000);
+    if (tent < maxTent) await sleep(4000);
   }
   return ultimo;
 }
@@ -287,8 +297,49 @@ async function _varrerLoteInterno(empresa, de, ate, teto, deps) {
   }
   const q = 'start=' + de + '&end=' + ate + '&sale=all&return=all&full=all&others=all&file_types=xml&simple_folder=false';
   const urlLote = ML_API + '/users/' + me.id + '/invoices/sites/MLB/batch_request/period/stream?' + q;
-  const rz = await mlGetBuffer(tokenML, urlLote);
-  if (rz.transitorio) return { ok: false, resultado: 'transitorio_tente_de_novo', detalhe: rz.buf.toString().slice(0, 200) };
+  /* 09/09 (a melhoria anotada virou necessidade): 2º dia seguido de 429 no lote fazendo
+     o dono de office-boy do relógio (ontem AMB, hoje GOOD) — e cada tentativa manual
+     REARMA o limite. O motor agora espera sozinho: até 3 tentativas com pausa crescente
+     (90s, 180s) SÓ pra transitório do lote; esgotou, devolve o transitorio de sempre. */
+  let rz;
+  let tokTent = tokenML;
+  let _reAuthFeita = false;
+  for (let tent = 1; ; tent++) {
+    /* Codex #359 r7 (simplificando a classe): NADA de sonda durante o backoff —
+       re-adquirir a cada volta chamava /users/me, que no rate-limit ativo queima
+       mais uma requisição exatamente onde cada uma conta, e o manager seletivo
+       lança (o catch do r3 só escondia o desperdício). O token corrente (último
+       bom, r5) segue nas voltas; vencimento REAL aparece como 401/403 do próprio
+       lote, onde a volta única de re-autenticação (r6) cura — o único momento em
+       que sondar vale o custo. */
+    rz = await mlGetBuffer(tokTent, urlLote, true); /* umaSo: 3 requisições REAIS, não 6 */
+    /* Codex #359 r6: token vencido EM VOO (ou retido após sonda limitada) devolve
+       401/403 do LOTE — uma única volta extra de autenticação re-adquire e tenta de
+       novo antes de desistir como não-transitório. */
+    if (!rz.transitorio && (rz.status === 401 || rz.status === 403) && !_reAuthFeita) {
+      _reAuthFeita = true;
+      /* Codex #359 r8+r9: a volta de autenticação não consome tentativa (tent--), e
+         NÃO SONDA — o 401/403 do lote JÁ É a prova do vencimento; sondar /users/me de
+         novo podia levar 429/5xx e derrubar a cortesia por motivo alheio. Renovação
+         DIRETA pela promessa única do manager (renovarUmaVez — nunca o cru: o refresh
+         é rotativo e dois em voo queimariam o token). */
+      try { const _mod = MANAGERS[empresa](); tokTent = await (_mod.renovarUmaVez ? _mod.renovarUmaVez() : _mod.garantirTokenML()); tent--; continue; } catch (e) { /* sem token novo — sai com o erro real */ }
+    }
+    if (!rz.transitorio || tent >= 3) break;
+    /* Retry-After MAIOR que a janela da rota síncrona: re-tentar antes rearmaria o
+       limite — sai AGORA, declarando quando voltar (Codex #359 r3). */
+    if ((rz.retryAfterS || 0) > 300) {
+      rz.detalheRetry = 'Retry-After de ' + rz.retryAfterS + 's excede a janela desta rota — rode de novo depois desse tempo';
+      break;
+    }
+    const esperaMs = Math.min(Math.max(tent * 90, rz.retryAfterS || 0), 300) * 1000;
+    await sleep(esperaMs);
+  }
+  /* Codex #359 r7 (o item final): a 3ª tentativa levando 429 COM Retry-After quebrava
+     o loop antes de qualquer tratamento do header — o chamador ouvia 'tente de novo'
+     sem saber QUANDO, e a re-tentativa manual de ~1 min rearmava o limite. */
+  if (rz.transitorio && rz.retryAfterS && !rz.detalheRetry) rz.detalheRetry = 'ML pediu Retry-After de ' + rz.retryAfterS + 's — rode de novo depois desse tempo';
+  if (rz.transitorio) return { ok: false, resultado: 'transitorio_tente_de_novo', detalhe: rz.detalheRetry || rz.buf.toString().slice(0, 200) };
   if (!rz.ok) return { ok: false, resultado: 'erro_lote_' + rz.status, detalhe: rz.buf.toString().slice(0, 400) };
   if (rz.buf.slice(0, 2).toString() !== 'PK') return { ok: false, resultado: 'lote_nao_veio_zip', detalhe: rz.buf.toString().slice(0, 400) };
 
