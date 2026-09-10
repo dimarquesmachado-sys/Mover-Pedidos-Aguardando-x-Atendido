@@ -128,6 +128,13 @@ async function garantirTokenNF() {
     headers: { Authorization: `Bearer ${access_token}` }
   });
 
+  /* Codex #362 r1: o cenário-ALVO da sonda /nfe — token sem a permissão de notas —
+     responde 403 insufficient_scope, e cair no caminho do "segue o token" devolvia
+     um token inútil que falharia na emissão. Renovar não conserta escopo (o refresh
+     preserva as permissões): o 403 LANÇA com instrução de reautorizar. */
+  if (resp.status === 403) {
+    throw new Error('token NF sem a permissão de notas fiscais (403 na sonda /nfe) — reautorize o app NF em /amb/setup-nf');
+  }
   if (resp.status === 401) {
     console.log('[AMB nfTokenManager] Token NF expirado (401) — renovando');
     return renovarTokenNF();
