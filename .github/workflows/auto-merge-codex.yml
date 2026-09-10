@@ -161,7 +161,14 @@ jobs:
           #
           # ⚠️ A CAUSA: a action NAO inclui Bash no conjunto padrao. Ela vem
           # com operacoes de arquivo, comentarios e ferramentas do GitHub.
-          # `--allowedTools` ADICIONA a lista de permitidos — sem ele, o
+          # ⚠️ CORREÇÃO 10/09 (medida no PR #216 do Devolucoes): `--allowedTools`
+          # SUBSTITUI o conjunto de ferramentas, NAO acrescenta ao padrao. Listando
+          # so os Bash, tiravamos Edit/Write/Read sem perceber: o robo roda, le o PR,
+          # entende o que fazer e NAO PODE ESCREVER — termina "sucesso" sem commitar
+          # (no log: "estou bloqueado esperando permissao de edicao para server.js";
+          # 6 tentativas de edicao negadas em 4min34). Por isso a lista abaixo traz
+          # as de arquivo ANTES das de Bash.
+          # `--allowedTools` define a lista de permitidos — sem ele, o
           # Bash simplesmente nao existe pro modelo.
           #
           # E ha um comportamento conhecido (claude-code#49874): UMA negacao
@@ -179,7 +186,7 @@ jobs:
           # producao nao precisa de shell irrestrito — a diferenca entre
           # "corrige o PR" e "faz qualquer coisa" e essa lista.
           claude_args: |
-            --allowedTools "Bash(git:*),Bash(gh:*),Bash(node:*),Bash(npm:*)"
+            --allowedTools "Edit,MultiEdit,Write,Read,Glob,Grep,Bash(git:*),Bash(gh:*),Bash(node:*),Bash(npm:*)"
           # ═══════════════════════════════════════════════════════════════
 
           # b215: MOSTRAR o que o Claude fez.
