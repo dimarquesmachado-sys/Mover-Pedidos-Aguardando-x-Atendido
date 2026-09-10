@@ -2074,6 +2074,8 @@ function routes(readBody) {
       const kD = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
       const sessD = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
+      const de = String((urlObj.searchParams && urlObj.searchParams.get('de')) || '2026-01-01').slice(0, 10);
+      const ate = String((urlObj.searchParams && urlObj.searchParams.get('ate')) || new Date().toISOString().slice(0, 10)).slice(0, 10);
       if (_backfill.rodando) {
         /* 04/09 — ECO DA PRÓPRIA CHAMADA: o navegador faz duas requisições ao abrir a URL
            (a página e o favicon/retry). A primeira dispara; a segunda chega segundos depois,
@@ -2090,13 +2092,11 @@ function routes(readBody) {
         }
         json(res, 200, { ok: false,
           msg: mesmoPeriodo
-            ? ('já tem um backfill DESTE período rodando desde ' + String(_backfill.inicio || '').slice(11, 16) + ' — acompanhe em /backfill-status')
+            ? ('já tem um backfill DESTE período rodando desde ' + (_backfill.inicio ? new Date(_backfill.inicio).toLocaleString('sv-SE', { timeZone: 'America/Sao_Paulo' }).slice(11, 16) : '?') + ' — acompanhe em /backfill-status')
             : ('já tem um backfill rodando (' + _backfill.de + ' a ' + _backfill.ate + ') — espere terminar; acompanhe em /backfill-status'),
           status: _backfill });
         return true;
       }
-      const de = String((urlObj.searchParams && urlObj.searchParams.get('de')) || '2026-01-01').slice(0, 10);
-      const ate = String((urlObj.searchParams && urlObj.searchParams.get('ate')) || new Date().toISOString().slice(0, 10)).slice(0, 10);
       backfillVendas(de, ate, 'amb');   // NÃO await — roda em background
       json(res, 200, { ok: true, msg: '✅ backfill iniciado em background (só AMBTotal). Acompanhe em /backfill-status. Ele deleta o período antes e regrava, então pode rodar de novo sem duplicar.', de, ate });
       return true;

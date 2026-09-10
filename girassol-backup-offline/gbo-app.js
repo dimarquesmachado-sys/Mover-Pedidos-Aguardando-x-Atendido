@@ -1616,6 +1616,8 @@ function routes(readBody) {
       // Codex (#105): mão dupla — se o canário está consultando o Bling AGORA, o backfill
       // espera. Sem isto, iniciar um por cima recriava o 429 que acabamos de evitar.
       if (_canario.rodando) { json(res, 200, { ok: false, msg: 'o canário está conferindo o Bling agora (desde ' + _canario.desde + ') — espere alguns segundos e tente de novo' }); return true; }
+      const de = String((urlObj.searchParams && urlObj.searchParams.get('de')) || '2026-01-01').slice(0, 10);
+      const ate = String((urlObj.searchParams && urlObj.searchParams.get('ate')) || new Date().toISOString().slice(0, 10)).slice(0, 10);
       if (_backfill.rodando) {
         /* 04/09 — ECO DA PRÓPRIA CHAMADA: o navegador faz duas requisições ao abrir a URL
            (a página e o favicon/retry). A primeira dispara; a segunda chega segundos depois,
@@ -1632,13 +1634,11 @@ function routes(readBody) {
         }
         json(res, 200, { ok: false,
           msg: mesmoPeriodo
-            ? ('já tem um backfill DESTE período rodando desde ' + String(_backfill.inicio || '').slice(11, 16) + ' — acompanhe em /backfill-status')
+            ? ('já tem um backfill DESTE período rodando desde ' + (_backfill.inicio ? new Date(_backfill.inicio).toLocaleString('sv-SE', { timeZone: 'America/Sao_Paulo' }).slice(11, 16) : '?') + ' — acompanhe em /backfill-status')
             : ('já tem um backfill rodando (' + _backfill.de + ' a ' + _backfill.ate + ') — espere terminar; acompanhe em /backfill-status'),
           status: _backfill });
         return true;
       }
-      const de = String((urlObj.searchParams && urlObj.searchParams.get('de')) || '2026-01-01').slice(0, 10);
-      const ate = String((urlObj.searchParams && urlObj.searchParams.get('ate')) || new Date().toISOString().slice(0, 10)).slice(0, 10);
       backfillVendas(de, ate, 'girassol');   // NÃO await — roda em background
       json(res, 200, { ok: true, msg: '✅ backfill iniciado em background (só Girassol). Acompanhe em /backfill-status. Ele deleta o período antes e regrava, então pode rodar de novo sem duplicar.', de, ate });
       return true;
