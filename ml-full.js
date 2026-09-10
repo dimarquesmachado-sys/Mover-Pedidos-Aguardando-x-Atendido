@@ -145,7 +145,8 @@ async function mlGetBuffer(token, url, umaSo) {
       const r = await _fetchRef.fn(url, { headers: { Authorization: 'Bearer ' + token }, signal: ac.signal, timeout: 60000 });
       const buf = await r.buffer();
       const transitorio = r.status === 429 || r.status >= 500;
-      ultimo = { status: r.status, ok: r.status >= 200 && r.status < 300, buf, transitorio };
+      const _ra = Number(r.headers && r.headers.get && r.headers.get('retry-after'));
+      ultimo = { status: r.status, ok: r.status >= 200 && r.status < 300, buf, transitorio, retryAfterS: (Number.isFinite(_ra) && _ra > 0) ? _ra : null };
     } catch (e) {
       ultimo = { status: 0, ok: false, buf: Buffer.from('rede/timeout: ' + String(e.message || e).slice(0, 160)), transitorio: true };
     } finally { clearTimeout(t); }
@@ -297,9 +298,16 @@ async function _varrerLoteInterno(empresa, de, ate, teto, deps) {
      (90s, 180s) SÓ pra transitório do lote; esgotou, devolve o transitorio de sempre. */
   let rz;
   for (let tent = 1; ; tent++) {
-    rz = await mlGetBuffer(tokenML, urlLote, true); /* umaSo: 3 requisições REAIS, não 6 */
+    /* Codex #359 r2: o token pode VENCER durante as pausas de minutos — re-adquirir a
+       cada tentativa (o manager devolve o vigente ou renova); e a pausa honra o
+       Retry-After do ML quando maior que a escada (com teto de 5 min — a rota é
+       síncrona), senão o tiro prematuro rearma o limite e as 3 tentativas se gastam
+       sem nunca esperar o suficiente. */
+    const tokTent = tent === 1 ? tokenML : await garantirToken(empresa);
+    rz = await mlGetBuffer(tokTent, urlLote, true); /* umaSo: 3 requisições REAIS, não 6 */
     if (!rz.transitorio || tent >= 3) break;
-    await sleep(tent * 90000);
+    const esperaMs = Math.min(Math.max(tent * 90, rz.retryAfterS || 0), 300) * 1000;
+    await sleep(esperaMs);
   }
   if (rz.transitorio) return { ok: false, resultado: 'transitorio_tente_de_novo', detalhe: rz.buf.toString().slice(0, 200) };
   if (!rz.ok) return { ok: false, resultado: 'erro_lote_' + rz.status, detalhe: rz.buf.toString().slice(0, 400) };
