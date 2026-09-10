@@ -1,6 +1,6 @@
 {
   "_leia_me": [
-    "CONTRATO DE EMPRESAS — v8 (09/09/2026)",
+    "CONTRATO DE EMPRESAS — v9 (10/09/2026)",
     "",
     "Dado, não código. Os dois repositórios leem este mesmo arquivo, byte a",
     "byte. O Mover-Pedidos tem um script que baixa o contrato da main do",
@@ -38,10 +38,17 @@
     "      porque renovar em 429/5xx transitório QUEIMA o refresh de uso",
     "      único. O gatilho do contrato (401 ou 403) não muda — o que",
     "      muda é a explicação, que agora descreveria algo que não",
-    "      existe mais."
+    "      existe mais.",
+    "  v9  o gatilho vira POR INTEGRAÇÃO. A v8 tinha `dispara: [401, 403]`",
+    "      genérico, e o texto ao lado dizia 'Bling: 401. ML: 401 ou 403'",
+    "      — duas fontes da mesma verdade, e a estruturada estava errada",
+    "      pro Bling. Quem lesse só ela renovaria o Bling em 403, à toa,",
+    "      queimando refresh rotativo. Pedido do Mover-Pedidos.",
+    "      E separa RENOVAÇÃO (do dono) de INVALIDAÇÃO DE CACHE (do leitor):",
+    "      são gatilhos diferentes e estavam misturados."
   ],
-  "versao": 8,
-  "atualizado_em": "2026-09-09",
+  "versao": 9,
+  "atualizado_em": "2026-09-10",
   "servicos": {
     "_nota": "os serviços que leem este contrato. `dono_hoje`/`dono_alvo` só podem citar nomes daqui.",
     "lista": [
@@ -306,20 +313,42 @@
         "_nota_403": "v7: era só 401. Ver `janela_de_renovacao._nota_403` — o 403 do ML é o mesmo sinal, e quem lê 'invalidar no 401' tende a implementar literal."
       },
       "renovacao_seletiva": {
-        "_nota": "v8 — o que dispara renovação/invalidação, e o que NÃO pode disparar.",
-        "dispara": [
-          "401",
-          "403"
-        ],
-        "nao_dispara": [
-          "429",
-          "5xx",
-          "timeout",
-          "erro de rede"
-        ],
-        "por_que": "⚠️ o refresh do ML é de USO ÚNICO: renovar por um 429 transitório queima o refresh à toa e pode deixar a conta sem token — o erro era passageiro e a resposta permanente",
-        "devolucoes": "Bling: 401. ML: 401 ou 403. Já era seletivo — conferido em 09/09",
-        "mover_pedidos": "sonda seletiva desde 09/09, com teste de regressão"
+        "_nota": "v9 — o gatilho é POR INTEGRAÇÃO. A lista genérica da v8 conflitava com o detalhamento em prosa do próprio arquivo.",
+        "_duas_coisas_diferentes": "⚠️ RENOVAR e INVALIDAR CACHE não são a mesma decisão, e a v8 misturava. Renovar é do DONO (gasta refresh, é permanente, e errar queima a conta). Invalidar cache é do LEITOR (é barato, o pior caso é uma releitura à toa). Por isso a invalidação pode ser mais frouxa que a renovação.",
+        "renovacao_pelo_dono": {
+          "_o_que_e": "o dono troca o refresh por um access novo. Gasta refresh de uso único (ML) ou rotativo (Bling): errar aqui custa.",
+          "bling": [
+            401
+          ],
+          "ml": [
+            401,
+            403
+          ],
+          "bling_nfe": [
+            401
+          ],
+          "_por_que_o_ml_tem_403": "⚠️ o ML responde 403 com token vencido, não só 401 — achado do Devoluções em março (lib/ml.js, v3.40). O Bling NÃO faz isso: 403 dele é permissão, e renovar não resolve.",
+          "nunca_dispara": [
+            "429",
+            "5xx",
+            "timeout",
+            "erro de rede"
+          ],
+          "_por_que_nunca": "⚠️ renovar por erro TRANSITÓRIO queima refresh à toa — o erro era passageiro e a renovação é permanente. Numa rajada de 429 isso torra o refresh sem nada estar errado com o token."
+        },
+        "invalidacao_do_cache_do_leitor": {
+          "_o_que_e": "o consumidor esquece o token que guardou e re-pede ao dono. Barato: o pior caso é uma releitura desnecessária.",
+          "todas_as_integracoes": [
+            401,
+            403
+          ],
+          "_por_que_mais_frouxa": "aqui vale incluir o 403 de qualquer integração: se for permissão, a releitura devolve o mesmo token e nada se perde; se for vencimento, a releitura corrige. O custo de errar é uma chamada, não um refresh.",
+          "_ttl_nao_substitui": "⚠️ OS DOIS invalidam: o TTL expira E o 401/403 derruba na hora."
+        },
+        "_estado_dos_dois_lados": {
+          "devolucoes": "lib/bling.js renova só em 401; lib/ml.js em 401 ou 403. O leitor invalida nos dois. Conferido em 09-10/09.",
+          "mover_pedidos": "sonda seletiva desde 09/09, com teste de regressão nas 3 empresas. A guarda de paridade sincroniza quando a v9 pousar."
+        }
       }
     },
     "inegociavel": "no ML, dono único é obrigação — o refresh é de uso único"
