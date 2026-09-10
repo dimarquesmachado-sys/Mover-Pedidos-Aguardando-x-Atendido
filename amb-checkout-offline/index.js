@@ -8484,6 +8484,9 @@ function escolherProdutoAtivo(lista, sku, info, limitePedido) {
 }
 
 async function custoSync(fresh) {
+  /* Codex #367 r2: componente resolvido pela API vale pra TODOS os kits desta varredura —
+     sem o memo, cada kit que usa a mesma lâmpada pagaria a consulta de novo. */
+  const _memoComp = new Map();
   if (_cst.rodando) return;
   const CUSTO_FILE = path.join(CACHE_DIR, '_custos.json');
   const cc = readJson(CUSTO_FILE, {});
@@ -8640,7 +8643,7 @@ async function custoSync(fresh) {
                pra cá). Passando de 30, a composição não fecha e a reserva assume. */
             let soma = 0, completo = comps.length <= 30;
             if (!completo) console.log('[CUSTO] ' + sku + ': composição com ' + comps.length + ' componentes (teto 30) — não somo parcial, vai pra reserva');
-            for (const cp of comps.slice(0, 30)) {
+            for (const cp of (completo ? comps.slice(0, 30) : [])) {   /* Codex #367 r2: composição acima do teto nem entra no laço — resolver 30 componentes pra descartar a soma queimaria cota do Bling à toa */
               const idc = (cp.produto && cp.produto.id) || cp.idProduto || cp.id || null;
               const qc = Number(cp.quantidade != null ? cp.quantidade : (cp.qtd != null ? cp.qtd : 1)) || 1;
               let cu = null;
@@ -8676,14 +8679,12 @@ async function custoSync(fresh) {
                 }
                 if (_doBanco != null) cu = _doBanco;
               }
-              // 2) o retrato da estrutura — só quando o banco ainda não conhece o componente
-              if (cu == null) {
-                const cs0 = [cp.precoCusto, cp.custo, cp.valorCusto,
-                             (cp.produto && cp.produto.precoCusto), (cp.produto && cp.produto.custo)]
-                            .map(Number).filter(v => isFinite(v) && v > 0);
-                if (cs0.length) cu = cs0[0];
-              }
-              // 3) só agora vale gastar uma chamada
+              /* Codex #367 r2: componente que NUNCA foi vendido sozinho não está no banco (o
+                 alvo da sincronização nasce das vendas) — e aí o retrato embutido na estrutura
+                 ganhava da consulta real e o kit ficava com o total velho pra sempre, que é
+                 justamente o que este PR quer curar. Ordem certa: banco → CONSULTA ao produto
+                 do componente → retrato embutido só como último recurso. */
+              if (cu == null && idc && _memoComp.has(String(idc))) cu = _memoComp.get(String(idc));
               if (cu == null) {
                 if (!idc) { completo = false; break; }
                 const dc = await bg2(`/produtos/${idc}`);
@@ -8695,6 +8696,15 @@ async function custoSync(fresh) {
                   if (cs.length) cu = cs[0];
                 }
                 await dorme(420);
+                if (cu != null && idc) _memoComp.set(String(idc), cu);
+              }
+              /* último recurso: o retrato embutido na estrutura — melhor que kit sem custo,
+                 mas só depois de banco e consulta real terem falhado (Codex #367 r2). */
+              if (cu == null) {
+                const cs0 = [cp.precoCusto, cp.custo, cp.valorCusto,
+                             (cp.produto && cp.produto.precoCusto), (cp.produto && cp.produto.custo)]
+                            .map(Number).filter(v => isFinite(v) && v > 0);
+                if (cs0.length) { cu = cs0[0]; console.log('[CUSTO] ' + sku + ': componente ' + String(idc) + ' pelo retrato da estrutura (' + cu + ') — banco e consulta não deram'); }
               }
               if (cu == null) {
                 completo = false;
