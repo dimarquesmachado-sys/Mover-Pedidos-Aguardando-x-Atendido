@@ -1,6 +1,6 @@
 {
   "_leia_me": [
-    "CONTRATO DE EMPRESAS — v9 (10/09/2026)",
+    "CONTRATO DE EMPRESAS — v10 (10/09/2026)",
     "",
     "Dado, não código. Os dois repositórios leem este mesmo arquivo, byte a",
     "byte. O Mover-Pedidos tem um script que baixa o contrato da main do",
@@ -45,9 +45,13 @@
     "      pro Bling. Quem lesse só ela renovaria o Bling em 403, à toa,",
     "      queimando refresh rotativo. Pedido do Mover-Pedidos.",
     "      E separa RENOVAÇÃO (do dono) de INVALIDAÇÃO DE CACHE (do leitor):",
-    "      são gatilhos diferentes e estavam misturados."
+    "      são gatilhos diferentes e estavam misturados.",
+    "  v10 registra que 403 de ROTA RESTRITA não indica token — medido em",
+    "      6h de operação real. Sem isso, um consumidor futuro",
+    "      reintroduz a invalidação de cache que a gente acabou de tirar.",
+    "      Sugestão do Mover-Pedidos."
   ],
-  "versao": 9,
+  "versao": 10,
   "atualizado_em": "2026-09-10",
   "servicos": {
     "_nota": "os serviços que leem este contrato. `dono_hoje`/`dono_alvo` só podem citar nomes daqui.",
@@ -343,7 +347,9 @@
             403
           ],
           "_por_que_mais_frouxa": "aqui vale incluir o 403 de qualquer integração: se for permissão, a releitura devolve o mesmo token e nada se perde; se for vencimento, a releitura corrige. O custo de errar é uma chamada, não um refresh.",
-          "_ttl_nao_substitui": "⚠️ OS DOIS invalidam: o TTL expira E o 401/403 derruba na hora."
+          "_ttl_nao_substitui": "⚠️ OS DOIS invalidam: o TTL expira E o 401/403 derruba na hora.",
+          "_excecao_rota_restrita": "⚠️ 403 DE ROTA RESTRITA AO DONO DO RECURSO NÃO INDICA TOKEN — e não deve invalidar o cache. Medido no Devoluções em 10/09, 6h de operação real: 30 respostas 403 e ZERO 401, todas concentradas em UMA rota. Token vencido daria 401 também, e daria em TODAS as rotas. O caso: `/shipments/{id}` do ML — o envio pertence ao COMPRADOR, e o vendedor tem acesso limitado por design. Nenhum token resolve. Invalidar ali é releitura por nada: o dono devolve o mesmo token. COMO DISTINGUIR: 403 concentrado numa rota, sem 401 junto, e que não melhora com token novo. O Devoluções marca a rota e para de invalidar por ela; o 403 continua sendo devolvido a quem chamou.",
+          "_onde_o_403_AINDA_e_vencimento": "⚠️ E o contrário também precisa estar escrito, senão a exceção acima vira desculpa para ignorar 403 legítimo: na SONDA do dono (`/users/me` do ML), 403 SEGUE sendo vencimento e deve renovar. É rota sem restrição de recurso — se ela recusa, é o token. Confirmado pelo Mover-Pedidos em 10/09."
         },
         "_estado_dos_dois_lados": {
           "devolucoes": "lib/bling.js renova só em 401; lib/ml.js em 401 ou 403. O leitor invalida nos dois. Conferido em 09-10/09.",
