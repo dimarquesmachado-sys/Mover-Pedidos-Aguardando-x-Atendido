@@ -75,7 +75,7 @@ function _fabricas() {
 function _norm(x) { return String(x || '').toLowerCase().trim(); }
 
 function canonicoDe(nome) {
-  const n = _norm(decodeURIComponent(String(nome || '')));
+  const n = _norm(nome);
   for (const [id, e] of Object.entries(CONTRATO.empresas)) {
     if ((e.aliases || []).some(a => _norm(a) === n)) return id;
   }
@@ -104,10 +104,20 @@ async function responder(caminho, chaveInformada, prazoMs) {
   const m = String(caminho || '').match(/^\/interno\/token\/([^/]+)\/([^/]+)$/);
   if (!m) return { status: 400, corpo: { ok: false, erro: 'use GET /interno/token/:empresa/:integracao', exemplo: '/interno/token/ambtotal/ml' } };
 
-  const canonico = canonicoDe(m[1]);
-  if (!canonico) return { status: 404, corpo: { ok: false, erro: 'empresa fora do contrato: ' + decodeURIComponent(m[1]) } };
+  /* Auditoria 09/09 (Codex): %ZZ ou UTF-8 truncado no segmento fazia o
+     decodeURIComponent LANÇAR e a rota respondia 500 — entrada ruim é erro de
+     CLIENTE. Decodifica UMA vez, sob try, e devolve 400 limpo. */
+  let empresaPedida, integracaoPedida;
+  try {
+    empresaPedida = decodeURIComponent(m[1]);
+    integracaoPedida = decodeURIComponent(m[2]);
+  } catch (e) {
+    return { status: 400, corpo: { ok: false, erro: 'empresa ou integração com codificação URL inválida' } };
+  }
+  const canonico = canonicoDe(empresaPedida);
+  if (!canonico) return { status: 404, corpo: { ok: false, erro: 'empresa fora do contrato: ' + empresaPedida } };
 
-  const integ = _norm(decodeURIComponent(m[2]));
+  const integ = _norm(integracaoPedida);
   const emp = CONTRATO.empresas[canonico];
   if (!INTEGRACOES_CONHECIDAS.has(integ)) {
     return { status: 400, corpo: { ok: false, erro: 'integração desconhecida: ' + integ, conhecidas: [...INTEGRACOES_CONHECIDAS].sort() } };
