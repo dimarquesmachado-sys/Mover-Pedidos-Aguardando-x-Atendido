@@ -6695,8 +6695,11 @@ async function custoSync(fresh) {
                  justamente o que este PR quer curar. Ordem certa: banco → CONSULTA ao produto
                  do componente → retrato embutido só como último recurso. */
               if (cu == null && idc && _memoComp.has(String(idc))) cu = _memoComp.get(String(idc));
-              if (cu == null) {
-                if (!idc) { completo = false; break; }
+              /* Codex #367 r3: exigir o ID antes de olhar o custo embutido era REGRESSÃO deste
+                 PR — linha de composição que traz `codigo` e custo mas não traz id abortava a
+                 soma, quando antes o valor embutido resolvia. Sem id: pula a consulta, tenta o
+                 embutido logo abaixo, e só então declara incompleta. */
+              if (cu == null && idc) {
                 const dc = await bg2(`/produtos/${idc}`);
                 if (!dc || !dc.ok) _falhaConsulta = true; /* Codex #358 r3: componente falhado ≠ conclusivo */
                 const pc = (dc.ok && dc.data && dc.data.data) || null;
