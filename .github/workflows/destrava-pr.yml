@@ -35,6 +35,18 @@ on:
   # e quando a main anda (a branch pode ter ficado atras)
   push:
     branches: [main]
+  # ⚠️ E QUANDO QUALQUER BRANCH DE PR RECEBE PUSH (trazido do Devolucoes em 11/09,
+  # onde a mesma dor foi medida: tres "unable" seguidos no mesmo dia).
+  #
+  # Motivo: a correcao sobe DEPOIS da ultima revisao do Codex, entao nao ha
+  # `pull_request_review` novo e este workflow nunca acorda — as conversas antigas
+  # ficam segurando o merge e so o dono percebe. Foi exatamente o padrao de hoje
+  # aqui (#376, #377 e o #14 do Shopee, todos "unable" com o trabalho ja feito).
+  #
+  # Com `synchronize`, todo push num PR aberto re-avalia: nao havendo apontamento
+  # novo (a trava do passo 1 cuida disso), destrava sozinho.
+  pull_request:
+    types: [synchronize, reopened]
   # e sob demanda
   workflow_dispatch:
     inputs:
