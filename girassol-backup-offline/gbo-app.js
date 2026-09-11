@@ -370,36 +370,18 @@ async function shopeeKeepAlive() {
    guarda a venda em `o` e o pack em `p`; com isso dá pra saber quais vendas são o mesmo
    pacote. Monta uma vez por rodada e reusa (o arquivo tem ~96 mil tarifas; ler a cada pedido
    seria o mesmo erro de memória do #327). */
-let _packCache = { em: 0, porVenda: null, doPack: null };
-function _carregarPacks() {
-  if (_packCache.porVenda && (Date.now() - _packCache.em) < 30 * 60000) return _packCache;
-  const porVenda = new Map(), doPack = new Map();
-  try {
-    const b = readJson(MLB_FILE(), { tarifas: {} });
-    for (const t of Object.values(b.tarifas || {})) {
-      if (!t || !t.o || !t.p) continue;
-      const venda = String(t.o), pack = String(t.p);
-      if (venda === pack) continue;
-      porVenda.set(venda, pack);
-      if (!doPack.has(pack)) doPack.set(pack, new Set());
-      doPack.get(pack).add(venda);
-    }
-  } catch (e) {}
-  _packCache = { em: Date.now(), porVenda, doPack };
-  return _packCache;
-}
-/** as OUTRAS vendas do mesmo carrinho (inclui o próprio pack_id, que o Bling às vezes grava) */
-function _irmasDoPack(numeroLoja) {
-  const { porVenda, doPack } = _carregarPacks();
-  if (!porVenda) return null;
-  const n = String(numeroLoja);
-  const pack = porVenda.get(n) || (doPack.has(n) ? n : null);
-  if (!pack) return null;
-  const irmas = new Set(doPack.get(pack) || []);
-  irmas.add(pack);
-  irmas.delete(n);
-  return irmas.size ? irmas : null;
-}
+/* 11/09 — fatia 4 da desduplicação: packs do ML (carrinho) em lib/checkout/packs-ml.js.
+   Eram 29 linhas iguais nas duas empresas; resolvem uma coisa só — quais números de pedido
+   são irmãos do mesmo carrinho, pra não cobrar frete duas vezes nem separar em duas caixas. */
+const _packsML = require('../lib/checkout/packs-ml').criar({
+  /* preguiçoso: MLB_FILE é declarado ADIANTE neste arquivo, e passar o valor aqui dava
+     "Cannot access before initialization" no boot — o mesmo tropeço da fatia 2, pego de
+     novo pelo boot real do CI e não pela sintaxe. */
+  MLB_FILE: (...a) => MLB_FILE(...a),
+  readJson,
+});
+const { _carregarPacks, _irmasDoPack } = _packsML;
+
 
 const _listarNoBlingCanario = async (de, ate) => {
   const porCanal = {};
