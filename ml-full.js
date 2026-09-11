@@ -144,6 +144,10 @@ function _salvarConferidas(forcar) {
     const fs = require('fs');
     const dump = {};
     for (const [k, ts] of _confirmadasNoBling) dump[k] = ts;
+    /* Codex #377 (P2): com ML_FULL_DIR customizado e nenhum XML novo salvo na
+       varredura (tudo já confirmado no Bling), nada mais cria o diretório — sem
+       isso o writeFileSync abaixo cai no catch silencioso e a confirmação se perde. */
+    fs.mkdirSync(path.dirname(_CONF_ARQ), { recursive: true });
     fs.writeFileSync(_CONF_ARQ + '.tmp', JSON.stringify(dump));
     fs.renameSync(_CONF_ARQ + '.tmp', _CONF_ARQ);
   } catch (e) { /* melhor-esforço: sem disco, segue em memória */ }
