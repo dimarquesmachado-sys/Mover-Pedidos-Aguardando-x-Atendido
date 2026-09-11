@@ -6712,9 +6712,50 @@ async function custoSync(fresh) {
                 if (!dc || !dc.ok) _falhaConsulta = true; /* Codex #358 r3: componente falhado ≠ conclusivo */
                 const pc = (dc.ok && dc.data && dc.data.data) || null;
                 if (pc) {
-                  const f2 = pc.fornecedor || {};
-                  const cs = [f2.precoCusto, f2.precoCompra, pc.precoCusto, pc.custo].map(Number).filter(v => isFinite(v) && v > 0);
-                  if (cs.length) cu = cs[0];
+                  /* KIT DENTRO DE KIT (11/09, apontado pelo Codex no #367 e feito agora como
+                     frente própria): se o componente é ELE MESMO um produto com composição,
+                     os campos de fornecedor dele são o mesmo retrato velho que enganou o kit
+                     de fora — a composição dele tem que mandar também. Uma ÚNICA camada a
+                     mais, resolvida SEM gastar chamada nova: banco (por id/sku) e retrato
+                     embutido dos netos. Não fechando, cai nos campos do componente como
+                     antes — nada regride. */
+                  const compsN = (pc.estrutura && (pc.estrutura.componentes || pc.estrutura.itens))
+                              || pc.composicao || pc.componentes || null;
+                  if (Array.isArray(compsN) && compsN.length && compsN.length <= 30) {
+                    let somaN = 0, completoN = true;
+                    for (const cn of compsN) {
+                      const idn = (cn.produto && cn.produto.id) || cn.idProduto || cn.id || null;
+                      const qn = Number(cn.quantidade != null ? cn.quantidade : (cn.qtd != null ? cn.qtd : 1)) || 1;
+                      let cun = null;
+                      const skuN = String((cn.produto && cn.produto.codigo) || cn.codigo || '').trim();
+                      if (skuN && cc[skuN] && cc[skuN].custo != null && Number(cc[skuN].custo) > 0) cun = Number(cc[skuN].custo);
+                      if (cun == null && idn) {
+                        if (_memoComp.has(String(idn))) cun = _memoComp.get(String(idn));
+                        else for (const _sk of Object.keys(cc)) {
+                          if (_sk.startsWith('_')) continue;
+                          const _v = cc[_sk];
+                          if (_v && String(_v.id) === String(idn) && _v.custo != null && Number(_v.custo) > 0) { cun = Number(_v.custo); break; }
+                        }
+                      }
+                      if (cun == null) {
+                        const csn = [cn.precoCusto, cn.custo, cn.valorCusto,
+                                     (cn.produto && cn.produto.precoCusto), (cn.produto && cn.produto.custo)]
+                                    .map(Number).filter(v => isFinite(v) && v > 0);
+                        if (csn.length) cun = csn[0];
+                      }
+                      if (cun == null) { completoN = false; break; }
+                      somaN += cun * qn;
+                    }
+                    if (completoN && somaN > 0) {
+                      cu = Math.round(somaN * 10000) / 10000;
+                      console.log('[CUSTO] ' + sku + ': componente ' + String(idc) + ' é kit — somei a composição DELE = ' + cu);
+                    }
+                  }
+                  if (cu == null) {
+                    const f2 = pc.fornecedor || {};
+                    const cs = [f2.precoCusto, f2.precoCompra, pc.precoCusto, pc.custo].map(Number).filter(v => isFinite(v) && v > 0);
+                    if (cs.length) cu = cs[0];
+                  }
                 }
                 await dorme(420);
                 if (cu != null && idc) _memoComp.set(String(idc), cu);
