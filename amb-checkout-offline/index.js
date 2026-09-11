@@ -4261,7 +4261,7 @@ function routes(readBody) {
       const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
       const sessC = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || (sessC && ehAdmin(sessC)))) { json(res, 404, { error: 'not found' }); return true; }
-      if (urlObj.searchParams.get('status')) { json(res, 200, { ok: true, rodando: !!_cst.rodando, progresso: _cst.feitos + '/' + _cst.total, ok_ate_agora: _cst.ok, falhas: _cst.falhas, inicio: _cst.inicio, diario: _cstDiario.ultimo }); return true; }
+      if (urlObj.searchParams.get('status')) { json(res, 200, { ok: true, rodando: !!_cst.rodando, progresso: _cst.feitos + '/' + _cst.total, ok_ate_agora: _cst.ok, falhas: _cst.falhas, inicio: _cst.inicio, diario: _cstDiario.ultimo, diario_dia_fechado: (readJson(CUSTO_FILE, {})._custoDiarioDia || null) }); return true; }
       const skuProbe = urlObj.searchParams.get('sku');
       if (skuProbe && urlObj.searchParams.get('raw')) {
         // raio-X do que o Bling devolve pra esse SKU (pra entender custo faltando)
