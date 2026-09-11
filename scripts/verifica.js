@@ -170,7 +170,14 @@ console.log('\n═ 7. Bateria de testes ═');
       require('child_process').execFileSync(process.execPath, [path.join(dirT, t)], { stdio: 'pipe', timeout: 120000 });
       console.log('  ✓ ' + t);
     } catch (e) {
-      falha('teste VERMELHO: ' + t + ' — ' + String((e.stdout || '') + (e.stderr || '')).slice(-300));
+      const saida = String((e.stdout || '') + (e.stderr || ''));
+      /* Codex #377 (P1): em checkout limpo do CI não há node_modules e o teste morre com
+         MODULE_NOT_FOUND de PACOTE (não de arquivo nosso) — isso é ambiente, não código,
+         e vira "teste vermelho" enigmático. A falha agora NOMEIA a dependência e diz o
+         que fazer; o passo de npm install vai no workflow. */
+      const m = saida.match(/Cannot find module '([^'.][^']*)'/);
+      if (m) falha('teste ' + t + ' não rodou: falta a dependência "' + m[1] + '" — o CI precisa de `npm install` antes do verifica');
+      else falha('teste VERMELHO: ' + t + ' — ' + saida.slice(-300));
     }
   }
   if (!testes.length) falha('nenhum teste encontrado em scripts/ — a varredura da bateria está cega');
