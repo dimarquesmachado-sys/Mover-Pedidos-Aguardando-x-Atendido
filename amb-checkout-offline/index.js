@@ -4261,7 +4261,7 @@ function routes(readBody) {
       const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
       const sessC = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || (sessC && ehAdmin(sessC)))) { json(res, 404, { error: 'not found' }); return true; }
-      if (urlObj.searchParams.get('status')) { json(res, 200, { ok: true, rodando: !!_cst.rodando, progresso: _cst.feitos + '/' + _cst.total, ok_ate_agora: _cst.ok, falhas: _cst.falhas, inicio: _cst.inicio, diario: _cstDiario.ultimo, diario_dia_fechado: (readJson(CUSTO_FILE, {})._custoDiarioDia || null) }); return true; }
+      if (urlObj.searchParams.get('status')) { json(res, 200, { ok: true, rodando: !!_cst.rodando, progresso: _cst.feitos + '/' + _cst.total, ok_ate_agora: _cst.ok, falhas: _cst.falhas, inicio: _cst.inicio, diario: _cstDiario.ultimo, diario_dia_fechado: _diaFechadoDoDisco() }); return true; }
       const skuProbe = urlObj.searchParams.get('sku');
       if (skuProbe && urlObj.searchParams.get('raw')) {
         // raio-X do que o Bling devolve pra esse SKU (pra entender custo faltando)
@@ -8197,6 +8197,14 @@ let _cst = { rodando: false, feitos: 0, total: 0, ok: 0, falhas: 0, inicio: null
    concorrente não engole o tick — os dois P1 do agendamento) e página falhada
    deixa o dia ABERTO pro próximo tick re-tentar, nunca parcial silencioso. */
 const _cstDiario = { rodando: false, ultimo: null };
+/* Codex #374 (P1, apontado 18s depois do merge e pego pelo check orfaos): a rota de status
+   lia CUSTO_FILE, que só existe como const LOCAL dentro de custoSync e custoDiario — toda
+   chamada a ?status=1 morreria com ReferenceError, justo o endereço que o dono usa pra
+   acompanhar as rotinas. O caminho é montado aqui, no escopo que a rota enxerga. */
+function _diaFechadoDoDisco() {
+  try { return readJson(path.join(CACHE_DIR, '_custos.json'), {})._custoDiarioDia || null; }
+  catch (e) { return null; }
+}
 function _diaLocalHoje() {
   const ag = new Date();
   return new Date(ag.getTime() - ag.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
