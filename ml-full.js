@@ -372,14 +372,17 @@ async function _varrerLoteInterno(empresa, de, ate, teto, deps) {
      sem saber QUANDO, e a re-tentativa manual de ~1 min rearmava o limite. */
   if (rz.transitorio && rz.retryAfterS && !rz.detalheRetry) rz.detalheRetry = 'ML pediu Retry-After de ' + rz.retryAfterS + 's — rode de novo depois desse tempo';
   if (rz.transitorio) {
-    /* 10/09: a série da GOOD levou 1h46 recusada com `detalhe` VAZIO — corpo vazio do ML
-       não dizia se era 429 (limite) ou 5xx (lado deles), e sem isso não dá pra decidir
-       entre esperar, reduzir a janela ou parar. O status HTTP agora vem sempre. */
+    /* União das duas frentes (11/09): a instrumentação do #373 (status_ml + frase quando o
+       corpo vem vazio — a série da GOOD ficou 1h46 sem dizer se era 429 ou 5xx) MAIS o campo
+       que o loop da série consome pra honrar o Retry-After (#372). Os dois nomes convivem:
+       retry_after_s é o que aparece no JSON pro dono, retryAfterS é o que a série lê. */
     const corpo = String(rz.buf || '').slice(0, 200).trim();
+    const _ra = rz.retryAfterS || null;
     return {
       ok: false, resultado: 'transitorio_tente_de_novo',
       status_ml: rz.status,
-      retry_after_s: rz.retryAfterS || null,
+      retry_after_s: _ra,
+      retryAfterS: _ra,
       detalhe: rz.detalheRetry || corpo || ('HTTP ' + rz.status + (rz.status === 429 ? ' — limite do ML (sem corpo)' : rz.status >= 500 ? ' — erro no lado do ML (sem corpo)' : rz.status === 0 ? ' — rede/timeout' : ' — sem corpo')),
     };
   }
@@ -904,7 +907,12 @@ async function tratar(req, res, urlObj, json) {
     }
     const passo = Math.max(1, Math.min(7, Number(urlObj.searchParams.get('passo')) || 2));
     const teto = Math.max(4, Math.min(200, Number(urlObj.searchParams.get('teto')) || 200));
-    const respiroS = Math.max(0, Math.min(600, Number(urlObj.searchParams.get('respiro')) || 60));
+    /* Codex #370 r2 (P2): respiro=0 é valor válido (desliga o intervalo entre pedaços) —
+       "Number(...) || 60" trocava o zero explícito pelo padrão; só cai em 60 quando o
+       parâmetro não veio ou é lixo. */
+    const _respiroRaw = urlObj.searchParams.get('respiro');
+    const _respiroNum = (_respiroRaw === null || _respiroRaw === '') ? 60 : Number(_respiroRaw);
+    const respiroS = Math.max(0, Math.min(600, Number.isFinite(_respiroNum) ? _respiroNum : 60));
     const iso = (ts) => new Date(ts).toISOString().slice(0, 10).replace(/-/g, '');
     const pedacos = [];
     for (let t = tDe; t <= tAte; t += passo * 86400000) {
@@ -921,12 +929,19 @@ async function tratar(req, res, urlObj, json) {
         for (const pc of pedacos) {
           let r = null;
           /* cada pedaço ganha até 3 tentativas: o backoff interno já espera o 429 do ML;
-             se ainda assim vier transitório, esperamos mais e tentamos de novo antes de
-             seguir — pedaço que não fecha NÃO interrompe a série (fica declarado). */
+             se ainda assim vier transitório (ML) OU houver outra varredura da MESMA
+             empresa em andamento (trava local, sem gastar cota — Codex #370 r2), esperamos
+             mais e tentamos de novo antes de seguir. Falha DETERMINÍSTICA (lote 400/404,
+             zip ilegível, users/me com erro...) não entra aqui: esperar não resolve, e só
+             atrasaria o pedaço declarado como falho. Se o ML mandou Retry-After, a espera
+             respeita o valor pedido em vez do backoff fixo (Codex #370 r2) — reagir antes
+             rearmaria o limite. Pedaço que não fecha NÃO interrompe a série (fica
+             declarado). */
           for (let t = 1; t <= 3; t++) {
             r = await varrerLote(empresa, pc.de, pc.ate, teto, null);
-            if (r.ok || r.resultado === 'ja_ha_varredura_em_andamento') break;
-            await sleep(t * 120000);
+            const transiente = !r.ok && (r.resultado === 'transitorio_tente_de_novo' || r.resultado === 'ja_ha_varredura_em_andamento');
+            if (r.ok || !transiente) break;
+            if (t < 3) await sleep(Math.max(t * 120000, (r.retryAfterS || 0) * 1000));
           }
           st.feitos++;
           if (r && r.ok) {
