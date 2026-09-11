@@ -12,5 +12,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - name: Verificador de integridade (sintaxe + espelhos + features)
+      # ⚠️ 11/09: o verifica passou a RODAR a bateria de scripts/teste-*.js (antes ela não
+      # rodava em lugar nenhum — testes eram decoração, e foi assim que o custo de kit levou
+      # 4 PRs). Testes de verdade precisam das dependências: sem este passo, o checkout limpo
+      # do CI derruba o verifica com "Cannot find module 'adm-zip'" e o PR fica vermelho por
+      # ambiente, não por código. O repo não versiona package-lock, por isso `npm install`.
+      - name: Dependências
+        run: npm install --no-audit --no-fund
+      - name: Verificador de integridade (sintaxe + espelhos + features + bateria)
         run: node scripts/verifica.js
