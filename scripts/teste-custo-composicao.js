@@ -79,6 +79,19 @@ const teste = async (nome, fn) => { try { await fn(); console.log('  ✓ ' + nom
     assert.strictEqual(r.custo, 20);
   });
 
+  await teste('composição incompleta sem campos do produto ainda cai no endpoint de fornecedores', async () => {
+    let chamou = 0;
+    const kit = { estrutura: { componentes: [{ produto: { id: 9 }, quantidade: 1 }] } };   // sem fornecedor.precoCusto nem custo
+    const r = await decidirCustoDoProduto(kit, {
+      banco: {}, memo: new Map(),
+      consultarProduto: async () => ({ ok: true, produto: { id: 9 } }),
+      consultarFornecedores: async () => { chamou++; return 20; },
+    });
+    assert.strictEqual(chamou, 1, 'campos do produto não fecharam — o fornecedor é a ÚLTIMA reserva, não pode ser pulado');
+    assert.strictEqual(r.custo, 20);
+    assert.strictEqual(r.completo, false);
+  });
+
   await teste('consulta falhada marca falhaConsulta (429 ≠ veredito)', async () => {
     const kit = { estrutura: { componentes: [{ produto: { id: 9 }, quantidade: 1 }] }, fornecedor: { precoCusto: 20 } };
     const r = await decidirCustoDoProduto(kit, { banco: {}, memo: new Map(), consultarProduto: async () => ({ ok: false }) });
