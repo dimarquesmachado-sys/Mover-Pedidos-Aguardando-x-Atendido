@@ -155,5 +155,33 @@ try {
   falha('paridade remota do contrato VERMELHA: ' + String((e.stdout || '') + (e.stderr || '')).slice(-300));
 }
 
+/* 11/09: a bateria de scripts/teste-*.js não rodava em lugar NENHUM deste repo — nem
+   no verifica, nem em workflow. Testes que ninguém executa não travam erro nenhum (foi
+   assim que o custo de kit levou 4 PRs). Agora todos rodam aqui, e o verifica só fica
+   verde com todos verdes. Os que precisam de INTERNET ficam de fora desta varredura
+   (o do contrato remoto já tem tratamento próprio logo acima). */
+console.log('\n═ 7. Bateria de testes ═');
+{
+  const dirT = path.join(RAIZ, 'scripts');
+  const pulaRede = new Set(['teste-contrato-paridade-remota.js']);
+  const testes = fs.readdirSync(dirT).filter(f => /^teste-.*\.js$/.test(f) && !pulaRede.has(f)).sort();
+  for (const t of testes) {
+    try {
+      require('child_process').execFileSync(process.execPath, [path.join(dirT, t)], { stdio: 'pipe', timeout: 120000 });
+      console.log('  ✓ ' + t);
+    } catch (e) {
+      const saida = String((e.stdout || '') + (e.stderr || ''));
+      /* Codex #377 (P1): em checkout limpo do CI não há node_modules e o teste morre com
+         MODULE_NOT_FOUND de PACOTE (não de arquivo nosso) — isso é ambiente, não código,
+         e vira "teste vermelho" enigmático. A falha agora NOMEIA a dependência e diz o
+         que fazer; o passo de npm install vai no workflow. */
+      const m = saida.match(/Cannot find module '([^'.][^']*)'/);
+      if (m) falha('teste ' + t + ' não rodou: falta a dependência "' + m[1] + '" — o CI precisa de `npm install` antes do verifica');
+      else falha('teste VERMELHO: ' + t + ' — ' + saida.slice(-300));
+    }
+  }
+  if (!testes.length) falha('nenhum teste encontrado em scripts/ — a varredura da bateria está cega');
+}
+
 console.log('\n' + (erros ? '✗✗✗ ' + erros + ' PROBLEMA(S) — NÃO deixe assim em produção!' : '✓✓✓ TUDO CERTO — deploy consistente.'));
 process.exit(erros ? 1 : 0);

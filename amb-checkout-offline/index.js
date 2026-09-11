@@ -370,6 +370,7 @@ function _urlStatus(req, caminho, extra, chave) {
    outra". Aqui fica só a ponte: o ctx com o que é DESTA empresa; a regra vive num lugar só.
    `skuInfoCache` vai por getter porque a lib limpa o cache de 6h quando o custo muda. */
 const _custoLib = require('../lib/custo');
+const _custoComp = require('../lib/custo-composicao');
 
 const _ctxCusto = { CACHE_DIR, path, fs, readJson, writeJson, blingGet,
                     get skuInfoCache() { return typeof _skuInfoCache !== 'undefined' ? _skuInfoCache : null; } };
@@ -8608,24 +8609,6 @@ async function custoSync(fresh) {
         // O próprio Bling calcula o custo de um produto com composição SOMANDO os componentes —
         // é o que a tela mostra. Fazemos igual: havendo estrutura, ela decide; os campos do
         // fornecedor viram apenas reserva para quando a composição não fechar.
-        const _comps0 = (prod.estrutura && (prod.estrutura.componentes || prod.estrutura.itens))
-                     || prod.composicao || prod.componentes || null;
-        const _temComposicao = Array.isArray(_comps0) && _comps0.length > 0;
-        /* Codex (P2, kit-dentro-de-kit): os netos (componentes do componente) resolvidos
-           abaixo precisam entrar no `comps` do kit externo — senão a varredura incremental
-           (linha ~8326) nunca conecta "neto mudou no Bling" a "este kit precisa recalcular",
-           e o agregado fica preso até o TTL de 7 dias. */
-        const _netos = [];
-        let cand = _temComposicao ? [] :
-                   [forn.precoCusto, forn.precoCompra, forn.preco, forn.custo, prod.precoCusto, prod.custo, prod.precoCompra].map(Number).filter(v => isFinite(v) && v > 0);
-        /* 10/09 — O BURACO QUE FALTAVA FECHAR DE 19/08: a regra "a composição manda" blindou
-           os CAMPOS do produto, mas esta consulta ao ENDPOINT de fornecedores continuava
-           rodando ANTES da composição e preenchia `cand` com o preço registrado no fornecedor
-           (retrato que não acompanha o custo do componente). Com `cand` cheio, o bloco da
-           composição — que só roda `if (!cand.length)` — NUNCA executava para kit nenhum.
-           Caso real: 2xE14-5W-3000K-BIV seguiu 6,80 mesmo com o componente a 4,00 no Bling e
-           no nosso banco, e a venda 4575 saiu com margem inflada. Agora, tendo composição, ela
-           decide; o fornecedor só entra como RESERVA se ela não fechar. */
         const _candDosFornecedores = async () => {
           const rf = await bg2(`/produtos/fornecedores?idProduto=${prod.id}&limite=5`);
           if (!rf || !rf.ok) { _falhaConsulta = true; return []; }
@@ -8643,150 +8626,33 @@ async function custoSync(fresh) {
           }
           return c;
         };
-        if (!cand.length && !_temComposicao) cand = await _candDosFornecedores();
-        // KIT / produto COM COMPOSIÇÃO (27/07): o Bling não preenche o custo do kit em si —
-        // ele mostra "Preço Total de Custo" somando os componentes. Fazemos o mesmo.
-        if (!cand.length) {
-          const comps = (prod.estrutura && (prod.estrutura.componentes || prod.estrutura.itens))
-                     || prod.composicao || prod.componentes || null;
-          if (Array.isArray(comps) && comps.length) {
-            /* Codex #367: composição TRUNCADA não pode virar custo — o slice(0,30) somaria só
-               parte e, com completo=true, gravaria um custo menor que o real (antes deste PR
-               esses kits caíam no fornecedor e escapavam; a mudança de precedência os trouxe
-               pra cá). Passando de 30, a composição não fecha e a reserva assume. */
-            let soma = 0, completo = comps.length <= 30;
-            if (!completo) console.log('[CUSTO] ' + sku + ': composição com ' + comps.length + ' componentes (teto 30) — não somo parcial, vai pra reserva');
-            for (const cp of (completo ? comps.slice(0, 30) : [])) {   /* Codex #367 r2: composição acima do teto nem entra no laço — resolver 30 componentes pra descartar a soma queimaria cota do Bling à toa */
-              const idc = (cp.produto && cp.produto.id) || cp.idProduto || cp.id || null;
-              const qc = Number(cp.quantidade != null ? cp.quantidade : (cp.qtd != null ? cp.qtd : 1)) || 1;
-              let cu = null;
-
-              // 31/07 — ANTES: uma chamada ao Bling POR COMPONENTE, e se qualquer uma falhasse
-              // (429, que hoje é constante) o kit INTEIRO era descartado. Um kit de 5 componentes
-              // precisava de 5 chamadas seguidas dando certo. Agora tentamos duas fontes de graça
-              // antes de gastar chamada:
-
-              /* 10/09 — PRECEDÊNCIA INVERTIDA, achada num caso real: o Diego mudou o custo do
-                 E14-5W-3000K-BIV pra 4,00 no Bling; o banco pegou (4,00, conferido), mas o kit
-                 2xE14-5W-3000K-BIV seguiu com 6,80 (2 × 3,40 VELHO) e a venda 4575 saiu com
-                 margem inflada. Duas falhas somadas:
-                   (a) o custo EMBUTIDO NA ESTRUTURA vinha primeiro — e é um retrato que o Bling
-                       NÃO atualiza quando o custo do produto muda;
-                   (b) o banco só era consultado por SKU, e a estrutura normalmente traz só o ID
-                       (é por isso que o próprio `comps` guarda "id:16632923552").
-                 Resultado: NENHUM kit absorvia mudança de custo de componente — nem a segunda
-                 passada do custo diário resolvia, porque re-somava pelo mesmo caminho.
-                 Agora o NOSSO BANCO manda (é ele que a sincronização mantém, com fornecedor e
-                 cascata), resolvido por ID ou por SKU; a estrutura vira 2ª opção e a chamada
-                 à API segue sendo a última. */
-              {
-                const skuC = String((cp.produto && cp.produto.codigo) || cp.codigo || '').trim();
-                let _doBanco = null;
-                /* Codex (P2, kit-dentro-de-kit): lookup exato perdia o custo quando a caixa do
-                   SKU na composição divergia da caixa gravada no cache — `_idxLower` (mesmo
-                   índice usado pra profundidade, mantido vivo abaixo) resolve os dois lados. */
-                const _realC = skuC && (cc[skuC] ? skuC : _idxLower[skuC.toLowerCase()]);
-                if (_realC && cc[_realC] && cc[_realC].custo != null && Number(cc[_realC].custo) > 0) _doBanco = Number(cc[_realC].custo);
-                if (_doBanco == null && idc) {
-                  const _realCid = _idxLower['id:' + idc];
-                  if (_realCid && cc[_realCid] && cc[_realCid].custo != null && Number(cc[_realCid].custo) > 0) _doBanco = Number(cc[_realCid].custo);
-                }
-                if (_doBanco != null) cu = _doBanco;
-              }
-              /* Codex #367 r2: componente que NUNCA foi vendido sozinho não está no banco (o
-                 alvo da sincronização nasce das vendas) — e aí o retrato embutido na estrutura
-                 ganhava da consulta real e o kit ficava com o total velho pra sempre, que é
-                 justamente o que este PR quer curar. Ordem certa: banco → CONSULTA ao produto
-                 do componente → retrato embutido só como último recurso. */
-              if (cu == null && idc && _memoComp.has(String(idc))) cu = _memoComp.get(String(idc));
-              /* Codex #367 r3: exigir o ID antes de olhar o custo embutido era REGRESSÃO deste
-                 PR — linha de composição que traz `codigo` e custo mas não traz id abortava a
-                 soma, quando antes o valor embutido resolvia. Sem id: pula a consulta, tenta o
-                 embutido logo abaixo, e só então declara incompleta. */
-              if (cu == null && idc) {
-                const dc = await bg2(`/produtos/${idc}`);
-                if (!dc || !dc.ok) _falhaConsulta = true; /* Codex #358 r3: componente falhado ≠ conclusivo */
-                const pc = (dc.ok && dc.data && dc.data.data) || null;
-                if (pc) {
-                  /* KIT DENTRO DE KIT (11/09, apontado pelo Codex no #367 e feito agora como
-                     frente própria): se o componente é ELE MESMO um produto com composição,
-                     os campos de fornecedor dele são o mesmo retrato velho que enganou o kit
-                     de fora — a composição dele tem que mandar também. Uma ÚNICA camada a
-                     mais, resolvida SEM gastar chamada nova: banco (por id/sku) e retrato
-                     embutido dos netos. Não fechando, cai nos campos do componente como
-                     antes — nada regride. */
-                  const compsN = (pc.estrutura && (pc.estrutura.componentes || pc.estrutura.itens))
-                              || pc.composicao || pc.componentes || null;
-                  if (Array.isArray(compsN) && compsN.length && compsN.length <= 30) {
-                    let somaN = 0, completoN = true;
-                    for (const cn of compsN) {
-                      const idn = (cn.produto && cn.produto.id) || cn.idProduto || cn.id || null;
-                      const qn = Number(cn.quantidade != null ? cn.quantidade : (cn.qtd != null ? cn.qtd : 1)) || 1;
-                      let cun = null;
-                      const skuN = String((cn.produto && cn.produto.codigo) || cn.codigo || '').trim();
-                      /* Codex (P2, kit-dentro-de-kit): neto entra no `comps` do kit externo —
-                         é o que deixa a varredura incremental achar esta cadeia sem esperar o TTL. */
-                      if (skuN) _netos.push(skuN.toLowerCase()); else if (idn != null) _netos.push('id:' + idn);
-                      // Codex (P2): mesmo ajuste de caixa do nível de cima — sku divergente não pode
-                      // esconder um custo que já está no banco.
-                      const _realN = skuN && (cc[skuN] ? skuN : _idxLower[skuN.toLowerCase()]);
-                      if (_realN && cc[_realN] && cc[_realN].custo != null && Number(cc[_realN].custo) > 0) cun = Number(cc[_realN].custo);
-                      if (cun == null && idn) {
-                        if (_memoComp.has(String(idn))) cun = _memoComp.get(String(idn));
-                        else { const _realNid = _idxLower['id:' + idn]; if (_realNid && cc[_realNid] && cc[_realNid].custo != null && Number(cc[_realNid].custo) > 0) cun = Number(cc[_realNid].custo); }
-                      }
-                      if (cun == null) {
-                        const csn = [cn.precoCusto, cn.custo, cn.valorCusto,
-                                     (cn.produto && cn.produto.precoCusto), (cn.produto && cn.produto.custo)]
-                                    .map(Number).filter(v => isFinite(v) && v > 0);
-                        if (csn.length) cun = csn[0];
-                      }
-                      if (cun == null) { completoN = false; break; }
-                      somaN += cun * qn;
-                    }
-                    if (completoN && somaN > 0) {
-                      cu = Math.round(somaN * 10000) / 10000;
-                      console.log('[CUSTO] ' + sku + ': componente ' + String(idc) + ' é kit — somei a composição DELE = ' + cu);
-                    }
-                  }
-                  if (cu == null) {
-                    const f2 = pc.fornecedor || {};
-                    const cs = [f2.precoCusto, f2.precoCompra, pc.precoCusto, pc.custo].map(Number).filter(v => isFinite(v) && v > 0);
-                    if (cs.length) cu = cs[0];
-                  }
-                }
-                await dorme(420);
-                if (cu != null && idc) _memoComp.set(String(idc), cu);
-              }
-              /* último recurso: o retrato embutido na estrutura — melhor que kit sem custo,
-                 mas só depois de banco e consulta real terem falhado (Codex #367 r2). */
-              if (cu == null) {
-                const cs0 = [cp.precoCusto, cp.custo, cp.valorCusto,
-                             (cp.produto && cp.produto.precoCusto), (cp.produto && cp.produto.custo)]
-                            .map(Number).filter(v => isFinite(v) && v > 0);
-                if (cs0.length) { cu = cs0[0]; console.log('[CUSTO] ' + sku + ': componente ' + String(idc) + ' pelo retrato da estrutura (' + cu + ') — banco e consulta não deram'); }
-              }
-              if (cu == null) {
-                completo = false;
-                console.log('[CUSTO] ' + sku + ': componente ' + String((cp.produto && cp.produto.codigo) || cp.codigo || idc) + ' sem custo \u2014 kit fica sem custo');
-                break;
-              }
-              soma += cu * qc;
-            }
-            if (completo && soma > 0) { cand = [Math.round(soma * 10000) / 10000]; console.log('[CUSTO] ' + sku + ': custo somado da COMPOSIÇÃO = ' + cand[0]); }
-          }
-        }
-        // a composição não fechou (componente sem custo): aí sim vale o que o fornecedor traz —
-        // é aproximação, mas melhor que deixar o kit sem custo nenhum.
-        if (!cand.length && _temComposicao) {
-          cand = [forn.precoCusto, forn.precoCompra, forn.preco, forn.custo, prod.precoCusto, prod.custo, prod.precoCompra]
-                 .map(Number).filter(v => isFinite(v) && v > 0);
-          /* a rede de segurança que existia antes não se perde: sem campo no produto, ainda
-             vale perguntar ao endpoint de fornecedores — só que AGORA como reserva, depois
-             de a composição ter tido a primeira palavra. */
-          if (!cand.length) cand = await _candDosFornecedores();
-          if (cand.length) console.log('[CUSTO] ' + sku + ': composição incompleta — usando fornecedor (' + cand[0] + ') como reserva');
-        }
+        /* 11/09 — A DECISÃO DE CUSTO MUDOU-SE PARA lib/custo-composicao.js. Por quê: ela
+           levou QUATRO PRs pra ficar certa em 10/09 (o endpoint de fornecedores rodando
+           antes da composição, o retrato embutido ganhando do banco, o banco consultado só
+           por SKU quando a estrutura traz ID, a soma truncada virando custo, o kit aninhado
+           pelo fornecedor) e vivia solta aqui dentro, sem como testar sem subir o serviço e
+           falar com o Bling. Agora a regra está num lugar só, é a MESMA das duas empresas e
+           tem teste (scripts/teste-custo-composicao.js, 11 cenários, incluindo o caso real
+           do 2xE14). A rede continua sendo por aqui: a lib não fala com o Bling, recebe as
+           consultas por injeção. */
+        const _dec = await _custoComp.decidirCustoDoProduto(prod, {
+          banco: cc,
+          memo: _memoComp,
+          consultarProduto: async (id) => {
+            const dc = await bg2(`/produtos/${id}`);
+            await dorme(420);
+            if (!dc || !dc.ok) return { ok: false };
+            return { ok: true, produto: (dc.data && dc.data.data) || null };
+          },
+          consultarFornecedores: async () => {
+            const c = await _candDosFornecedores();
+            return c.length ? c[0] : null;
+          },
+        });
+        if (_dec.falhaConsulta) _falhaConsulta = true;
+        if (_dec.motivo) console.log('[CUSTO] ' + sku + ': ' + _dec.motivo + ' — via ' + _dec.via);
+        else console.log('[CUSTO] ' + sku + ': custo ' + (_dec.custo == null ? 'NAO resolvido' : _dec.custo) + ' via ' + _dec.via);
+        const cand = _dec.custo != null ? [_dec.custo] : [];
         const _custoNovo = cand.length ? Math.round(cand[0] * 10000) / 10000 : null;
         /* 21/08: antes de sobrescrever, anota a linha do tempo — o Bling só guarda o custo
            ATUAL, então esta é a única chance de registrar que até ontem valia outro. */
@@ -8799,19 +8665,13 @@ async function custoSync(fresh) {
            mapa de dependência VAZIO e o incremental nunca acharia kit nenhum. Guarda
            codigo (minúsculo) quando vier, senão 'id:<id>'; o scan de alterados marca
            pelos dois. */
-        /* Codex (P2, kit-dentro-de-kit): os netos coletados durante a soma da composição do
-           componente (quando ele mesmo é kit) entram aqui — sem isso o `comps` do kit externo
-           só tem o filho direto, e o scan incremental nunca liga "neto mudou" a este kit. */
-        const _compsSkus = [...new Set(
-          (((prod.estrutura && (prod.estrutura.componentes || prod.estrutura.itens)) || prod.composicao || prod.componentes) || [])
+        const _compsSkus = (((prod.estrutura && (prod.estrutura.componentes || prod.estrutura.itens)) || prod.composicao || prod.componentes) || [])
           .map(cp => {
             const cod = (cp.produto && cp.produto.codigo) || cp.codigo;
             if (cod) return String(cod).toLowerCase().trim();
             const idc2 = (cp.produto && cp.produto.id) || cp.produto || cp.id || cp.idProduto;
             return idc2 ? ('id:' + idc2) : '';
-          }).filter(Boolean)
-          .concat(_netos)
-        )];
+          }).filter(Boolean);
         /* Codex #358 r1+r2: três destinos possíveis pro custo nulo — (a) FALHA de consulta
            (429/erro no detalhe ou fornecedores): preserva custo antigo SEM avançar ts, a
            tartaruga re-tenta; (b) resposta CONCLUSIVA sem candidato (custo removido/zerado
@@ -8825,11 +8685,6 @@ async function custoSync(fresh) {
         const _tsFinal = (_custoNovo != null || _conclusivo) ? Date.now() : ((_antigo && _antigo.ts) || 0);
         const _compsFinais = _compsSkus.length ? _compsSkus : ((!_conclusivo && _antigo && _antigo.comps) ? _antigo.comps : null);
         cc[sku] = Object.assign({ id: prod.id, preco: (prod.preco != null && isFinite(Number(prod.preco))) ? Number(prod.preco) : null, custo: _custoFinal, ts: _tsFinal }, _compsFinais && _compsFinais.length ? { comps: _compsFinais } : {});
-        /* mantém o índice de caixa/id vivo durante a própria rodada — sem isto, um componente
-           resolvido mais cedo nesta mesma varredura (a fila roda em ordem de profundidade,
-           componente antes do kit) não seria achado pelos lookups acima. */
-        _idxLower[sku.toLowerCase()] = sku;
-        if (prod.id != null) _idxLower['id:' + prod.id] = sku;
         if (_custoNovo != null) { try { registrarCustoVigente(sku, _custoNovo, 'bling'); } catch (e) {} }
         else if (_conclusivo && _antigo && _antigo.custo != null) { try { registrarCustoVigente(sku, null, 'remocao-bling'); } catch (e) {} }
         _cst.ok++;
