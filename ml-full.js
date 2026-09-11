@@ -371,7 +371,18 @@ async function _varrerLoteInterno(empresa, de, ate, teto, deps) {
      o loop antes de qualquer tratamento do header — o chamador ouvia 'tente de novo'
      sem saber QUANDO, e a re-tentativa manual de ~1 min rearmava o limite. */
   if (rz.transitorio && rz.retryAfterS && !rz.detalheRetry) rz.detalheRetry = 'ML pediu Retry-After de ' + rz.retryAfterS + 's — rode de novo depois desse tempo';
-  if (rz.transitorio) return { ok: false, resultado: 'transitorio_tente_de_novo', detalhe: rz.detalheRetry || rz.buf.toString().slice(0, 200) };
+  if (rz.transitorio) {
+    /* 10/09: a série da GOOD levou 1h46 recusada com `detalhe` VAZIO — corpo vazio do ML
+       não dizia se era 429 (limite) ou 5xx (lado deles), e sem isso não dá pra decidir
+       entre esperar, reduzir a janela ou parar. O status HTTP agora vem sempre. */
+    const corpo = String(rz.buf || '').slice(0, 200).trim();
+    return {
+      ok: false, resultado: 'transitorio_tente_de_novo',
+      status_ml: rz.status,
+      retry_after_s: rz.retryAfterS || null,
+      detalhe: rz.detalheRetry || corpo || ('HTTP ' + rz.status + (rz.status === 429 ? ' — limite do ML (sem corpo)' : rz.status >= 500 ? ' — erro no lado do ML (sem corpo)' : rz.status === 0 ? ' — rede/timeout' : ' — sem corpo')),
+    };
+  }
   if (!rz.ok) return { ok: false, resultado: 'erro_lote_' + rz.status, detalhe: rz.buf.toString().slice(0, 400) };
   if (rz.buf.slice(0, 2).toString() !== 'PK') return { ok: false, resultado: 'lote_nao_veio_zip', detalhe: rz.buf.toString().slice(0, 400) };
 
@@ -924,7 +935,7 @@ async function tratar(req, res, urlObj, json) {
             st.total_nao_conferidas += Number(r.nao_conferidas || 0);
             st.resultados.push({ de: pc.de, ate: pc.ate, ok: true, ja_no_bling: r.ja_no_bling, pendentes_novas: r.pendentes_novas, nao_conferidas: r.nao_conferidas, novas: (r.novas || []).length });
           } else {
-            st.resultados.push({ de: pc.de, ate: pc.ate, ok: false, resultado: (r && r.resultado) || 'sem_resposta', detalhe: (r && (r.detalheRetry || r.detalhe)) || '' });
+            st.resultados.push({ de: pc.de, ate: pc.ate, ok: false, resultado: (r && r.resultado) || 'sem_resposta', status_ml: (r && r.status_ml) || null, retry_after_s: (r && r.retry_after_s) || null, detalhe: (r && (r.detalheRetry || r.detalhe)) || '' });
           }
           if (st.feitos < pedacos.length && respiroS) await sleep(respiroS * 1000);
         }
