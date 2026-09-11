@@ -8611,6 +8611,11 @@ async function custoSync(fresh) {
         const _comps0 = (prod.estrutura && (prod.estrutura.componentes || prod.estrutura.itens))
                      || prod.composicao || prod.componentes || null;
         const _temComposicao = Array.isArray(_comps0) && _comps0.length > 0;
+        /* Codex (P2, kit-dentro-de-kit): os netos (componentes do componente) resolvidos
+           abaixo precisam entrar no `comps` do kit externo — senão a varredura incremental
+           (linha ~8326) nunca conecta "neto mudou no Bling" a "este kit precisa recalcular",
+           e o agregado fica preso até o TTL de 7 dias. */
+        const _netos = [];
         let cand = _temComposicao ? [] :
                    [forn.precoCusto, forn.precoCompra, forn.preco, forn.custo, prod.precoCusto, prod.custo, prod.precoCompra].map(Number).filter(v => isFinite(v) && v > 0);
         /* 10/09 — O BURACO QUE FALTAVA FECHAR DE 19/08: a regra "a composição manda" blindou
@@ -8677,13 +8682,14 @@ async function custoSync(fresh) {
               {
                 const skuC = String((cp.produto && cp.produto.codigo) || cp.codigo || '').trim();
                 let _doBanco = null;
-                if (skuC && cc[skuC] && cc[skuC].custo != null && Number(cc[skuC].custo) > 0) _doBanco = Number(cc[skuC].custo);
+                /* Codex (P2, kit-dentro-de-kit): lookup exato perdia o custo quando a caixa do
+                   SKU na composição divergia da caixa gravada no cache — `_idxLower` (mesmo
+                   índice usado pra profundidade, mantido vivo abaixo) resolve os dois lados. */
+                const _realC = skuC && (cc[skuC] ? skuC : _idxLower[skuC.toLowerCase()]);
+                if (_realC && cc[_realC] && cc[_realC].custo != null && Number(cc[_realC].custo) > 0) _doBanco = Number(cc[_realC].custo);
                 if (_doBanco == null && idc) {
-                  for (const _sk of Object.keys(cc)) {
-                    if (_sk.startsWith('_')) continue;
-                    const _v = cc[_sk];
-                    if (_v && String(_v.id) === String(idc) && _v.custo != null && Number(_v.custo) > 0) { _doBanco = Number(_v.custo); break; }
-                  }
+                  const _realCid = _idxLower['id:' + idc];
+                  if (_realCid && cc[_realCid] && cc[_realCid].custo != null && Number(cc[_realCid].custo) > 0) _doBanco = Number(cc[_realCid].custo);
                 }
                 if (_doBanco != null) cu = _doBanco;
               }
@@ -8718,14 +8724,16 @@ async function custoSync(fresh) {
                       const qn = Number(cn.quantidade != null ? cn.quantidade : (cn.qtd != null ? cn.qtd : 1)) || 1;
                       let cun = null;
                       const skuN = String((cn.produto && cn.produto.codigo) || cn.codigo || '').trim();
-                      if (skuN && cc[skuN] && cc[skuN].custo != null && Number(cc[skuN].custo) > 0) cun = Number(cc[skuN].custo);
+                      /* Codex (P2, kit-dentro-de-kit): neto entra no `comps` do kit externo —
+                         é o que deixa a varredura incremental achar esta cadeia sem esperar o TTL. */
+                      if (skuN) _netos.push(skuN.toLowerCase()); else if (idn != null) _netos.push('id:' + idn);
+                      // Codex (P2): mesmo ajuste de caixa do nível de cima — sku divergente não pode
+                      // esconder um custo que já está no banco.
+                      const _realN = skuN && (cc[skuN] ? skuN : _idxLower[skuN.toLowerCase()]);
+                      if (_realN && cc[_realN] && cc[_realN].custo != null && Number(cc[_realN].custo) > 0) cun = Number(cc[_realN].custo);
                       if (cun == null && idn) {
                         if (_memoComp.has(String(idn))) cun = _memoComp.get(String(idn));
-                        else for (const _sk of Object.keys(cc)) {
-                          if (_sk.startsWith('_')) continue;
-                          const _v = cc[_sk];
-                          if (_v && String(_v.id) === String(idn) && _v.custo != null && Number(_v.custo) > 0) { cun = Number(_v.custo); break; }
-                        }
+                        else { const _realNid = _idxLower['id:' + idn]; if (_realNid && cc[_realNid] && cc[_realNid].custo != null && Number(cc[_realNid].custo) > 0) cun = Number(cc[_realNid].custo); }
                       }
                       if (cun == null) {
                         const csn = [cn.precoCusto, cn.custo, cn.valorCusto,
@@ -8791,13 +8799,19 @@ async function custoSync(fresh) {
            mapa de dependência VAZIO e o incremental nunca acharia kit nenhum. Guarda
            codigo (minúsculo) quando vier, senão 'id:<id>'; o scan de alterados marca
            pelos dois. */
-        const _compsSkus = (((prod.estrutura && (prod.estrutura.componentes || prod.estrutura.itens)) || prod.composicao || prod.componentes) || [])
+        /* Codex (P2, kit-dentro-de-kit): os netos coletados durante a soma da composição do
+           componente (quando ele mesmo é kit) entram aqui — sem isso o `comps` do kit externo
+           só tem o filho direto, e o scan incremental nunca liga "neto mudou" a este kit. */
+        const _compsSkus = [...new Set(
+          (((prod.estrutura && (prod.estrutura.componentes || prod.estrutura.itens)) || prod.composicao || prod.componentes) || [])
           .map(cp => {
             const cod = (cp.produto && cp.produto.codigo) || cp.codigo;
             if (cod) return String(cod).toLowerCase().trim();
             const idc2 = (cp.produto && cp.produto.id) || cp.produto || cp.id || cp.idProduto;
             return idc2 ? ('id:' + idc2) : '';
-          }).filter(Boolean);
+          }).filter(Boolean)
+          .concat(_netos)
+        )];
         /* Codex #358 r1+r2: três destinos possíveis pro custo nulo — (a) FALHA de consulta
            (429/erro no detalhe ou fornecedores): preserva custo antigo SEM avançar ts, a
            tartaruga re-tenta; (b) resposta CONCLUSIVA sem candidato (custo removido/zerado
@@ -8811,6 +8825,11 @@ async function custoSync(fresh) {
         const _tsFinal = (_custoNovo != null || _conclusivo) ? Date.now() : ((_antigo && _antigo.ts) || 0);
         const _compsFinais = _compsSkus.length ? _compsSkus : ((!_conclusivo && _antigo && _antigo.comps) ? _antigo.comps : null);
         cc[sku] = Object.assign({ id: prod.id, preco: (prod.preco != null && isFinite(Number(prod.preco))) ? Number(prod.preco) : null, custo: _custoFinal, ts: _tsFinal }, _compsFinais && _compsFinais.length ? { comps: _compsFinais } : {});
+        /* mantém o índice de caixa/id vivo durante a própria rodada — sem isto, um componente
+           resolvido mais cedo nesta mesma varredura (a fila roda em ordem de profundidade,
+           componente antes do kit) não seria achado pelos lookups acima. */
+        _idxLower[sku.toLowerCase()] = sku;
+        if (prod.id != null) _idxLower['id:' + prod.id] = sku;
         if (_custoNovo != null) { try { registrarCustoVigente(sku, _custoNovo, 'bling'); } catch (e) {} }
         else if (_conclusivo && _antigo && _antigo.custo != null) { try { registrarCustoVigente(sku, null, 'remocao-bling'); } catch (e) {} }
         _cst.ok++;
