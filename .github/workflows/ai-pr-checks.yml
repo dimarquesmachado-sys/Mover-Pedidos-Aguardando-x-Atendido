@@ -19,6 +19,26 @@ jobs:
         with:
           node-version: 20
 
+      # ⚠️ 11/09 (trazido do Devolucoes): sem instalar, os passos seguintes morrem com
+      # "Cannot find module" e o erro aparece disfarcado de bug de codigo. O repo nao
+      # versiona package-lock, entao `npm ci` falha com EUSAGE — usar `npm install`.
+      # E confere se CADA dependencia declarada resolve, em vez de descobrir passos
+      # adiante: a instalacao que "passou" mas nao instalou custou horas la.
+      - name: Dependencias
+        shell: bash
+        run: |
+          set -e
+          npm install --silent --no-audit --no-fund || { echo "npm install FALHOU"; exit 1; }
+          node -e "
+            const p = require('./package.json');
+            let falta = 0;
+            for (const d of Object.keys(p.dependencies || {})) {
+              try { require.resolve(d); console.log('  ok    ' + d); }
+              catch { console.log('  FALTA ' + d); falta = 1; }
+            }
+            process.exit(falta);
+          "
+
       - name: Sintaxe de todos os arquivos JavaScript
         shell: bash
         run: |
@@ -77,5 +97,70 @@ jobs:
           process.exit(erros ? 1 : 0);
           NODE
 
+      # ⚠️ 11/09 — BOOT REAL, o passo que faltava neste repo.
+      #
+      # Motivo medido em UM DIA: o `node --check` e a bateria passaram e mesmo assim
+      # foram pra producao (a) uma variavel fora de escopo que derrubava ?status=1 com
+      # ReferenceError (CUSTO_FILE, #374) e (b) um `opts is not defined` que quebrou o
+      # cron inteiro do servico do Shopee. Os dois so aparecem quando o processo SOBE.
+      #
+      # O servidor sobe numa porta propria, com ADMIN_KEY de teste e as pastas de dados
+      # apontadas pra area temporaria do runner (nada toca /data de verdade), e o passo
+      # so passa se a raiz responder.
+      - name: Boot real + rotas de status
+        shell: bash
+        env:
+          PORT: '3979'
+          ADMIN_KEY: teste-ci
+          ML_FULL_DIR: ${{ runner.temp }}/ml-full
+          ML_FULL_CONF_ARQ: ${{ runner.temp }}/ml-full-conferidas.json
+        run: |
+          node <<'NODE'
+          const cp = require('child_process');
+          const filho = cp.spawn('node', ['index.js'], { env: process.env, stdio: 'pipe' });
+          let log = '', saiu = false;
+          filho.stdout.on('data', d => log += d);
+          filho.stderr.on('data', d => log += d);
+          filho.on('exit', () => { saiu = true; });
+          (async () => {
+            const t0 = Date.now();
+            while (Date.now() - t0 < 30000) {
+              await new Promise(r => setTimeout(r, 500));
+              if (saiu) { console.log('BOOT FALHOU — o processo morreu:\n' + log.slice(-2000)); process.exit(1); }
+              try {
+                const r = await fetch('http://localhost:' + process.env.PORT + '/');
+                console.log('BOOT OK — a raiz respondeu HTTP ' + r.status);
+                /* ⚠️ O boot sozinho NAO basta — medido: reintroduzi de proposito a variavel
+                   fora de escopo do #374 e o servidor subiu igual, porque o ReferenceError
+                   so acontece quando a ROTA e chamada. Por isso as rotas de status (que so
+                   leem memoria e disco, nao falam com o Bling) sao batidas aqui: qualquer
+                   500 derruba o check. Foi assim que o ?status=1 quebrado chegou em
+                   producao hoje de manha. */
+                const rotas = [
+                  '/amb-checkout-offline/custo-sync?status=1&k=' + process.env.ADMIN_KEY,
+                  '/girassol-backup-offline/custo-sync?status=1&k=' + process.env.ADMIN_KEY,
+                  '/ml-full/varrer-serie?empresa=good&status=1&k=' + process.env.ADMIN_KEY,
+                ];
+                let ruins = 0;
+                for (const rota of rotas) {
+                  try {
+                    const rr = await fetch('http://localhost:' + process.env.PORT + rota);
+                    const corpo = (await rr.text()).slice(0, 200);
+                    if (rr.status >= 500) { console.log('  ✗ ' + rota.split('?')[0] + ' → HTTP ' + rr.status + ' ' + corpo); ruins++; }
+                    else console.log('  ✓ ' + rota.split('?')[0] + ' → HTTP ' + rr.status);
+                  } catch (e) { console.log('  ✗ ' + rota.split('?')[0] + ' → ' + e.message); ruins++; }
+                }
+                filho.kill('SIGKILL');
+                if (ruins) { console.log('\n' + ruins + ' rota(s) de status quebrada(s) — nao sobe assim'); process.exit(1); }
+                console.log('rotas de status respondendo');
+                process.exit(0);
+              } catch (e) { /* ainda subindo */ }
+            }
+            console.log('BOOT FALHOU — nao respondeu em 30s:\n' + log.slice(-2000));
+            filho.kill('SIGKILL');
+            process.exit(1);
+          })();
+          NODE
+
       - name: Verificacao concluida
-        run: echo "ai-safety passou"
+        run: echo "ai-safety passou (sintaxe + paineis + dependencias + boot real)"
