@@ -116,9 +116,15 @@ function dataValida(aaaammdd) {
    arquivo não crescer pra sempre. */
 const _serie = {};  /* estado das séries encadeadas por empresa (10/09) */
 const _confirmadasNoBling = new Map(); // chave → ts da confirmação
+/* Codex #377 (P1): ML_FULL_DIR isolava o ZIP mas NÃO este arquivo — o teste do
+   motor troca ML_FULL_DIR pra um tmpdir próprio (Codex #349 r2), mas quem checava
+   era sempre fs.existsSync('/data'), então rodar o teste dentro do container do
+   Render (que TEM /data montado) sobrescrevia as conferidas de produção de verdade.
+   Com ML_FULL_DIR setado, o arquivo mora dentro do mesmo tmpdir isolado. */
 const _CONF_ARQ = (() => {
-  try { return require('fs').existsSync('/data') ? '/data/ml-full-conferidas.json' : require('path').join(__dirname, 'ml-full-conferidas.json'); }
-  catch (e) { return require('path').join(__dirname, 'ml-full-conferidas.json'); }
+  if (process.env.ML_FULL_DIR) return path.join(DIR, 'ml-full-conferidas.json');
+  try { return fs.existsSync('/data') ? '/data/ml-full-conferidas.json' : path.join(__dirname, 'ml-full-conferidas.json'); }
+  catch (e) { return path.join(__dirname, 'ml-full-conferidas.json'); }
 })();
 (() => {
   try {
