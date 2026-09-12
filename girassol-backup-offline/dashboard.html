@@ -2807,6 +2807,15 @@ function calcPL(h){
   else if (ck==='magalu' && h.mag_frete_copart!=null && isFinite(Number(h.mag_frete_copart)) && Number(h.mag_frete_copart)>0) { frV = Number(h.mag_frete_copart); frFonte = 'magalu'; }   // frete de coparticipação Magalu (o frete REAL desse canal — não é motoboy, é logística Magalu)
   else if (h.flex) { const fx = flexDe(ck); if (fx!=null && fx>0) { frV = fx; frFonte = 'flex'; } }   // d52: FLEX deduz o MOTOBOY da config — o "frete" que o Bling importa num flex é o frete do COMPRADOR (entra como crédito via escrow), não custo do vendedor (caso BRS 260722C6YRDNC0)
   else if (h.frete_mkt!=null && isFinite(Number(h.frete_mkt)) && Number(h.frete_mkt)>0) { frV = Number(h.frete_mkt); frFonte = 'bling'; }
+  /* 12/09 — SHOPEE COM ESCROW FECHADO E FRETE ZERO ≠ FRETE FALTANDO. O dono estranhou
+     vendas de 06 e 07/09 ainda em ⏳ AGUARDANDO; o escrow cru do 260907DUQHVFRW mostrou o
+     repasse LIBERADO (escrow_amount 88,71) com final_shipping_fee 0 — a Shopee cobrou o
+     frete (21,44) e devolveu integralmente (shopee_shipping_rebate 21,44), ou seja o
+     vendedor não pagou NADA de frete nesse pedido. Como todos os ramos acima exigem
+     `> 0`, o zero legítimo caía no mesmo balde de "sem dado" e o selo ficava pendurado
+     pra sempre, sugerindo que a margem ainda ia piorar — quando ela já estava fechada.
+     Regra: se a tarifa veio REAL (o escrow respondeu), frete ausente é ZERO de verdade. */
+  else if (ck==='shopee' && feeReal!=null) { frV = 0; frFonte = 'escrow-zero'; }
   /* Codex (P2, PR#133): o ramo da renda oficial não usa `tarifa` em conta nenhuma, mas o
      predicado exigia — pedido de tarifa zero/subsidiada com repasse conhecido ficava com M.C.
      nula e FORA dos totais de margem. Renda oficial válida satisfaz a exigência de tarifa. */
