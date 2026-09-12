@@ -5931,175 +5931,27 @@ let _cst = { rodando: false, feitos: 0, total: 0, ok: 0, falhas: 0, inicio: null
    FEITO ao concluir com êxito (persistido no cache: restart não repete, sync
    concorrente não engole o tick — os dois P1 do agendamento) e página falhada
    deixa o dia ABERTO pro próximo tick re-tentar, nunca parcial silencioso. */
-const _cstDiario = { rodando: false, ultimo: null };
-/* Codex #374 (P1, apontado 18s depois do merge e pego pelo check orfaos): a rota de status
-   lia CUSTO_FILE, que só existe como const LOCAL dentro de custoSync e custoDiario — toda
-   chamada a ?status=1 morreria com ReferenceError, justo o endereço que o dono usa pra
-   acompanhar as rotinas. O caminho é montado aqui, no escopo que a rota enxerga. */
-function _diaFechadoDoDisco() {
-  try { return readJson(path.join(CACHE_DIR, '_custos.json'), {})._custoDiarioDia || null; }
-  catch (e) { return null; }
-}
-function _diaLocalHoje() {
-  const ag = new Date();
-  return new Date(ag.getTime() - ag.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
-}
-async function custoDiario() {
-  const CUSTO_FILE = path.join(CACHE_DIR, '_custos.json');
-  /* Codex #358 r3: adiado no último tick das 23h morria à meia-noite (data nova) e o
-     dia útil ficava sem scan até o TTL. Antes das 23h o dia-alvo é ONTEM (janela de
-     recuperação da madrugada); o filtro dataAlteracaoInicial pega de lá até agora. */
-  const ag0 = new Date();
-  const d0 = (ag0.getHours() >= 23)
-    ? _diaLocalHoje()
-    : new Date(ag0.getTime() - ag0.getTimezoneOffset() * 60000 - 86400000).toISOString().slice(0, 10);
-  if (_cstDiario.rodando) return;
-  if (_cst.rodando) { _cstDiario.ultimo = { adiado: 'custo-sync em curso — novo tick tenta de novo', em: new Date().toISOString() }; return; }
-  let cc = readJson(CUSTO_FILE, {});
-  if (cc._custoDiarioDia === d0) return; /* já concluiu hoje (sobrevive a restart) */
-  _cstDiario.rodando = true;
-  const st = { iniciado: new Date().toISOString(), dia: d0, modo: 'incremental', alterados_no_bling: 0, alvo: 0, kits_dependentes: 0 };
-  _cstDiario.ultimo = st;
-  const concluirDia = () => { try { const c2 = readJson(CUSTO_FILE, {}); c2._custoDiarioDia = d0; fs.writeFileSync(CUSTO_FILE, JSON.stringify(c2)); } catch (e) {} };
-  try {
-    if (!cc._sementeCompleta) {
-      /* Codex #358 r2: na 1ª passada o cache legado não tem comps e o sort empata —
-         kit antes do componente somaria custo velho. A semente roda em DUAS passadas:
-         a 1ª busca tudo e constrói os comps; a 2ª re-busca só os kits (agora com os
-         componentes frescos no cache). Custo extra: nº de kits, uma vez na vida. */
-      st.modo = 'semente_completa em 2 passadas (1ª noite — constrói o mapa e recalcula kits)';
-      await custoSync(true);
-      const _falhas1 = _cst.falhas; /* Codex #358 r4: a 2ª passada RECRIA o _cst e engolia as falhas da 1ª */
-      const c2 = readJson(CUSTO_FILE, {});
-      let _kitsSemente = 0;
-      for (const sk of Object.keys(c2)) { if (!sk.startsWith('_') && c2[sk] && Array.isArray(c2[sk].comps)) { c2[sk].ts = 0; _kitsSemente++; } }
-      fs.writeFileSync(CUSTO_FILE, JSON.stringify(c2));
-      if (_kitsSemente) await custoSync(false);
-      _cst.falhas = _cst.falhas + (_kitsSemente ? _falhas1 : 0); /* soma das DUAS passadas pro gate abaixo */
-      /* Codex #358 r3: semente com FALHAS não fecha — o componente falhado guardou ts
-         antigo e ficaria fora dos próximos ciclos como se estivesse fresco. Até 3
-         tentativas por noite; na 3ª fecha com as pendências declaradas (TTL cobre). */
-      _cstDiario.tentativas = (_cstDiario.tentativas || 0) + 1;
-      if (_cst.falhas > 0 && _cstDiario.tentativas < 3) {
-        st.modo += ' | ' + _cst.falhas + ' falhas — semente NÃO fechada; novo tick re-tenta (' + _cstDiario.tentativas + '/3)';
-        st.terminou = new Date().toISOString();
-        return;
-      }
-      if (_cst.falhas > 0) st.modo += ' | fechada com ' + _cst.falhas + ' pendências declaradas (TTL cobre)';
-      _cstDiario.tentativas = 0;
-      const c3 = readJson(CUSTO_FILE, {});
-      c3._sementeCompleta = Date.now();
-      fs.writeFileSync(CUSTO_FILE, JSON.stringify(c3));
-      st.kits_recalculados_na_semente = _kitsSemente;
-      concluirDia();
-      st.terminou = new Date().toISOString();
-      return;
-    }
-    const alterados = new Set(); /* SEMPRE em minúsculas — cache e Bling divergem de caixa */
-    let traiu = false, paginaFalhou = false;
-    for (let pg = 1; pg <= 8; pg++) {
-      const r = await blingGet('/produtos?dataAlteracaoInicial=' + encodeURIComponent(d0 + ' 00:00:00') + '&pagina=' + pg + '&limite=100');
-      if (!r || !r.ok) { paginaFalhou = true; break; }
-      const arr = (r.data && Array.isArray(r.data.data)) ? r.data.data : [];
-      for (const p2 of arr) {
-        if (!p2) continue;
-        if (p2.codigo) alterados.add(String(p2.codigo).toLowerCase());
-        if (p2.id) alterados.add('id:' + p2.id); /* comps podem estar mapeados por id */
-      }
-      if (arr.length < 100) break;
-      if (pg === 8) traiu = true;
-      await new Promise(r2 => setTimeout(r2, 700));
-    }
-    st.alterados_no_bling = alterados.size;
-    if (paginaFalhou) {
-      /* dia fica ABERTO — o próximo tick re-varre; parcial calado deixaria mudança
-         das páginas seguintes esperando o TTL de 7 dias */
-      st.modo = 'parcial — página da lista falhou (429/erro); nova tentativa no próximo tick';
-      st.terminou = new Date().toISOString();
-      return;
-    }
-    if (traiu || alterados.size > 600) {
-      st.modo = 'fresh_completo (fallback: filtro de data suspeito — ' + alterados.size + '+ alterados no dia)';
-      /* Codex #358 r4: o fallback fechava o dia SEM validar o sync — falha por SKU ou
-         sync que nem rodou (6h em curso) fechava com custos velhos até o TTL. */
-      const _i0f = _cst.inicio;
-      await custoSync(true);
-      const rodouF = _cst.inicio !== _i0f;
-      const falhouF = rodouF && _cst.falhas > 0;
-      _cstDiario.tentativas = (_cstDiario.tentativas || 0) + 1;
-      if ((!rodouF || falhouF) && _cstDiario.tentativas < 3) {
-        st.modo += ' | ' + (rodouF ? _cst.falhas + ' falhas' : 'sync ocupado — não rodou') + '; novo tick re-tenta (' + _cstDiario.tentativas + '/3)';
-        st.terminou = new Date().toISOString();
-        return;
-      }
-      if (!rodouF || falhouF) st.modo += ' | fechado com pendências declaradas após 3 tentativas (TTL cobre)';
-      _cstDiario.tentativas = 0;
-      concluirDia();
-      st.terminou = new Date().toISOString();
-      return;
-    }
-    const alvo = new Set();
-    const marcados = new Set(alterados); /* em minúsculas — cresce com kits pra pegar kit-de-kit */
-    for (const sk of Object.keys(cc)) {
-      if (sk.startsWith('_')) continue;
-      const v = cc[sk];
-      if (alterados.has(sk.toLowerCase())) {
-        alvo.add(sk);
-        /* Codex #358 r2: o Bling reportou alteração num SKU com LÁPIDE = produto
-           restaurado/recriado — a lápide cai na hora, senão ficava sem custo 30 dias */
-        if (v && v.apagado_em) cc[sk] = { ts: 0 };
-      }
-    }
-    /* Codex #358 r2: expansão TRANSITIVA — kit que contém kit alterado também entra
-       (compara contra o conjunto que cresce, até ponto fixo) */
-    let _cresceu = true;
-    while (_cresceu) {
-      _cresceu = false;
-      for (const sk of Object.keys(cc)) {
-        if (sk.startsWith('_') || alvo.has(sk)) continue;
-        const v = cc[sk];
-        if (v && Array.isArray(v.comps) && v.comps.some(c => marcados.has(String(c)))) {
-          alvo.add(sk); marcados.add(sk.toLowerCase());
-          if (v.id) marcados.add('id:' + v.id); /* Codex #358 r4: kit externo mapeado por id do interno também fecha */
-          st.kits_dependentes++; _cresceu = true;
-        }
-      }
-    }
-    st.alvo = alvo.size;
-    if (alvo.size) {
-      for (const sk of alvo) { if (cc[sk]) cc[sk].ts = 0; }
-      fs.writeFileSync(CUSTO_FILE, JSON.stringify(cc));
-    }
-    /* alterado que ainda NEM está no cache (vendeu hoje, sync das 6h não passou):
-       a fila natural do custoSync nasce das VENDAS e pega quem tem custo nulo —
-       por isso a rodada roda sempre que houve alteração, mesmo com alvo 0 */
-    /* Codex #358 r4: mudança achada na RECUPERAÇÃO valeu no dia varrido (ontem) —
-       a vigência nasce datada dele, e o ref volta ao normal no finally. */
-    _vigenciaDeRef.valor = (d0 !== _diaLocalHoje()) ? d0 : null;
-    if (alvo.size || alterados.size) {
-      /* Codex #358 r2: o dia só FECHA se o sync rodou de verdade e sem falhas novas —
-         sync engolindo 429 (ou nem rodando por concorrência) fechava o dia com custos
-         velhos até o TTL. Teto de 3 tentativas por noite, depois fecha DECLARADO. */
-      /* Codex #358 r3: custoSync RECRIA o _cst — comparar com o contador da corrida
-         anterior mascarava falha igual. A corrida atual fala por si. */
-      const _i0 = _cst.inicio;
-      await custoSync(false);
-      const rodou = _cst.inicio !== _i0;
-      const falhou = rodou && _cst.falhas > 0;
-      _cstDiario.tentativas = (_cstDiario.tentativas || 0) + 1;
-      if ((!rodou || falhou) && _cstDiario.tentativas < 3) {
-        st.modo = (rodou ? 'parcial — ' + _cst.falhas + ' falhas na re-busca' : 'sync ocupado — não rodou') + '; novo tick re-tenta (tentativa ' + _cstDiario.tentativas + '/3)';
-        st.terminou = new Date().toISOString();
-        return;
-      }
-      if (!rodou || falhou) st.modo += ' | fechado com pendências declaradas após 3 tentativas (TTL de 7d cobre)';
-      _cstDiario.tentativas = 0;
-    }
-    concluirDia();
-    st.terminou = new Date().toISOString();
-  } catch (e) { st.erro = String(e.message || e).slice(0, 200); }
-  finally { _cstDiario.rodando = false; _vigenciaDeRef.valor = null; }
-}
+const CUSTO_FILE_DIARIO = path.join(CACHE_DIR, '_custos.json');   /* o mesmo caminho que o custoSync monta local */
+/* 11/09 — fatia 5: o CUSTO DIÁRIO (164 linhas idênticas nas duas empresas) foi pra
+   lib/checkout/custo-diario.js. Por ser a rotina que decide a margem do dia seguinte, ela
+   só saiu daqui COM TESTE ESCRITO ANTES (scripts/teste-custo-diario.js — 6 promessas lidas
+   no próprio código). O estado do custo-sync entra por FUNÇÃO (o host recria o objeto a
+   cada varredura) e a vigência retroativa da madrugada por acessor. */
+const _custoDiarioMod = require('../lib/checkout/custo-diario').criar({
+  CUSTO_FILE: CUSTO_FILE_DIARIO,
+  readJson,
+  escrever: (p, o) => fs.writeFileSync(p, JSON.stringify(o)),
+  estadoSync: () => _cst,
+  custoSync: (...a) => custoSync(...a),
+  blingGet: (...a) => blingGet(...a),
+  registrarCustoVigente: (...a) => registrarCustoVigente(...a),
+  lerVigenciaDe: () => _vigenciaDeRef.valor,
+  gravarVigenciaDe: (v) => { _vigenciaDeRef.valor = v; },
+});
+const custoDiario = (...a) => _custoDiarioMod.custoDiario(...a);
+const _cstDiario = _custoDiarioMod._cstDiario;
+const _diaFechadoDoDisco = _custoDiarioMod._diaFechadoDoDisco;
+
 
 // ─── 19/08: SÓ PRODUTO ATIVO + RESOLVER SKU → PRODUTO ───────────────────────────
 /* 11/09 — fatia 2 da desduplicação: estas 111 linhas eram byte a byte iguais aqui e na
