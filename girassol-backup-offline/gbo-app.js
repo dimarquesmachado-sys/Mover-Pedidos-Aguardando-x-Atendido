@@ -3259,9 +3259,11 @@ function routes(readBody) {
         ok: true, iniciado: true,
         dia: dia || '(o padrão da rotina: ontem antes das 23h, hoje a partir das 23h)',
         aviso: 'roda em background e CONSOME COTA do Bling — evite no horário do galpão',
-        /* Codex #387 (P2): caminho relativo e SEM chave — o link antigo trazia o host de
-           produção fixo e o literal SUA_ADMIN_KEY, que não autentica ninguém. */
-        acompanhe: '/girassol-backup-offline/custo-sync?status=1 (acrescente &k= com a sua chave)',
+        /* Codex #387 (P3, polimento): a correção anterior tirou o link quebrado (host fixo
+           de produção + literal SUA_ADMIN_KEY) mas também tirou o URL CLICÁVEL que o Diego
+           pediu pras rotas de acompanhamento (mesmo padrão de custo-sync/reaplicar-custo,
+           via _urlStatus — preserva host da requisição e devolve a chave de quem chamou). */
+        acompanhe: _urlStatus(req, '/girassol-backup-offline/custo-sync', '', kD),
       });
       return true;
     }

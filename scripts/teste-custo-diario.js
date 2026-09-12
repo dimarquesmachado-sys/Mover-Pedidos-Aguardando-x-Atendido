@@ -82,7 +82,22 @@ function ambiente(cacheInicial) {
     await e.api.custoDiario();
     assert.ok(e.ler()._custoDiarioDia, 'sem falhas, o dia fecha');
   }
-  console.log('OK: custo diário — não re-roda dia fechado, adia com sync em curso, semente em 2 passadas, falha não fecha, 3ª tentativa declara, dia limpo carimba');
+  // 7) #387 — DISPARO MANUAL: diaForcado escaneia o dia PEDIDO, não o do relógio.
+  // Sem isto, `?dia=` na rota manual só limpava o carimbo e a rotina rodava ontem
+  // do mesmo jeito (apontado pelo Codex no PR — a mesma promessa que a rota manual anuncia).
+  {
+    const e = ambiente({ _sementeCompleta: 1, A1: { id: 9, custo: 3, ts: 1 } });
+    await e.api.custoDiario('2020-01-01');
+    assert.strictEqual(e.ler()._custoDiarioDia, '2020-01-01', 'diaForcado tem que virar o dia escaneado, não o que o relógio calcularia');
+  }
+  // 8) diaForcado com formato inválido é IGNORADO — cai no cálculo normal do relógio,
+  // nunca escaneia um dia arbitrário vindo de query mal formada.
+  {
+    const e = ambiente({ _sementeCompleta: 1, A1: { id: 9, custo: 3, ts: 1 } });
+    await e.api.custoDiario('lixo');
+    assert.strictEqual(e.ler()._custoDiarioDia, e0Dia(), 'diaForcado inválido tem que ser ignorado, não escanear "lixo"');
+  }
+  console.log('OK: custo diário — não re-roda dia fechado, adia com sync em curso, semente em 2 passadas, falha não fecha, 3ª tentativa declara, dia limpo carimba, diaForcado manda no dia escaneado (e é validado)');
 })().catch(e => { console.error('FALHOU:', e.message); process.exit(1); });
 
 function e0Dia() {
