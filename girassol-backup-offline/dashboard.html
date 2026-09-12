@@ -2814,7 +2814,15 @@ function calcPL(h){
      vendedor não pagou NADA de frete nesse pedido. Como todos os ramos acima exigem
      `> 0`, o zero legítimo caía no mesmo balde de "sem dado" e o selo ficava pendurado
      pra sempre, sugerindo que a margem ainda ia piorar — quando ela já estava fechada.
-     Regra: se a tarifa veio REAL (o escrow respondeu), frete ausente é ZERO de verdade. */
+     Codex (P2, PR#388): a regra original usava `feeReal!=null` como prova de frete zero —
+     mas a tarifa só prova que o escrow RESPONDEU, não que o final_shipping_fee fechou em
+     zero. O VENDAS-SYNC (sync rápido dos últimos 6 dias) gravava a tarifa mas nunca o
+     frete líquido, então um pedido com frete REAL cobrado do vendedor (final_shipping_fee
+     negativo) caía no mesmo zero por engano. Primeiro ramo usa o valor que o próprio
+     escrow calculou (frete_shopee_liq, gravado junto da tarifa — mesma fórmula do
+     lib/shopee-escrow.js); o `escrow-zero` de baixo vira só reserva pra pedido que ainda
+     não tem esse campo (fila do sync reprocessa até preencher). */
+  else if (ck==='shopee' && h.frete_shopee_liq!=null && isFinite(Number(h.frete_shopee_liq))) { frV = Math.max(0, Number(h.frete_shopee_liq)); frFonte = 'escrow'; }
   else if (ck==='shopee' && feeReal!=null) { frV = 0; frFonte = 'escrow-zero'; }
   /* Codex (P2, PR#133): o ramo da renda oficial não usa `tarifa` em conta nenhuma, mas o
      predicado exigia — pedido de tarifa zero/subsidiada com repasse conhecido ficava com M.C.
@@ -2841,7 +2849,12 @@ function calcPL(h){
   // M.C.: quando o pedido Magalu LIQUIDOU, renda_canal (saldo líquido oficial) JÁ desconta o frete real —
   // então o frete Magalu que aparece em frV é só pra EXIBIÇÃO e não pode ser descontado de novo (senão conta 2x).
   // No provisório (renda_canal null), a tarifa é só comissão, então o frete de frV É descontado (correto).
-  const frVparaMC = (ck==='magalu' && frFonte==='magalu' && rendaCanal!=null) ? 0 : (frV||0);
+  // Codex (P2, PR#388): o mesmo vale pra Shopee agora que frV pode vir >0 do escrow (frFonte
+  // 'escrow'/'escrow-zero') — a identidade do lib/shopee-escrow.js já embute esse frete DENTRO
+  // do renda_canal (escrow = produtos + frete_do_comprador - tarifa + final_shipping_fee), então
+  // descontar frV de novo contaria 2x. Antes disso não mordia porque frV de Shopee nunca passava
+  // de 0 (não existia ramo que gravasse valor >0).
+  const frVparaMC = (rendaCanal!=null && ((ck==='magalu' && frFonte==='magalu') || (ck==='shopee' && (frFonte==='escrow' || frFonte==='escrow-zero')))) ? 0 : (frV||0);
   const mc = completo? (rendaCanal!=null ? (rendaCanal-imposto-custo-frVparaMC+(credito||0)) : (rpEf-imposto-tarifa-custo-frVparaMC+(credito||0)+(freteRec||0))) : null;
   return {mes,ck,rp,feeEstTk,rpEf,desconto,freteRec,rendaCanal,tot,frete,aliq,imposto,feeReal,feeBling,tx,tarifa,custo,cusUn,unTot,custoOk,frV,frFonte,credito,completo,mc,magFreteFonte,magFreteCopart};
 }
@@ -3126,7 +3139,7 @@ function renderPL(h){
       (ck==='ml'&&h.numero_loja&&feeReal==null?' <button class="btn" style="padding:3px 10px;font-size:10.5px" onclick="pegarFeeML(\''+h.id+'\',\''+esc(h.numero_loja)+'\')">buscar real</button>':''))+
     linha('📦 Custo ('+cusUn+'/'+unTot+' un. c/ custo)', (cusUn?-custo:null))+
     (rendaCanal!=null&&frV!=null&&ck!=='ml' ? linha('<span class="dim">🚛 Frete vendedor (já embutido no repasse)</span>', frV) :
-     frV!=null ? linha('🚛 Frete vendedor <span class="'+(frFonte==='magalu'&&magFreteFonte==='prov'?'warn':'ok')+'">('+(frFonte==='ml'?'real ML':(frFonte==='magalu'?('Magalu '+(magFreteFonte==='prov'?'previsto':'real')):(frFonte==='bling'?'Bling':'FLEX ⚙️')))+')</span>', -frV) : (ck==='ml' ? linha('🚛 Frete vendedor <span class="ok">(real ML)</span>', null) : ''))+
+     frV!=null ? linha('🚛 Frete vendedor <span class="'+(frFonte==='magalu'&&magFreteFonte==='prov'?'warn':'ok')+'">('+(frFonte==='ml'?'real ML':(frFonte==='magalu'?('Magalu '+(magFreteFonte==='prov'?'previsto':'real')):(frFonte==='bling'?'Bling':((frFonte==='escrow'||frFonte==='escrow-zero')?'real Shopee (escrow)':'FLEX ⚙️'))))+')</span>', -frV) : (ck==='ml' ? linha('🚛 Frete vendedor <span class="ok">(real ML)</span>', null) : ''))+
     (credito!=null ? linha('💵 Estorno do ML <span class="ok">(compensação de envio)</span>', credito) : '')+
     '<tr><td style="border-top:2px solid var(--line2);font-weight:800">💎 Margem de contribuição</td>'+
     '<td class="num" style="border-top:2px solid var(--line2);font-weight:800">'+
@@ -3461,7 +3474,7 @@ async function baixarCSV(){
       txt(nomeCanal(P.ck)), txt(h._sit||(h.sintetico?'nao bipada':'bipada')), txt(skus), unid,
       num(P.tot), num(P.rp), num(P.custoOk?P.custo:null), num(P.imposto), num(P.tarifa),
       txt(P.feeReal!=null?'REAL (ML)':(P.feeBling!=null?'Bling':(P.tx!=null?'% configurada':''))),
-      num(P.frV), txt(P.frFonte==='ml'?'real ML':(P.frFonte==='magalu'?('Magalu '+(P.magFreteFonte==='prov'?'previsto':'real')):(P.frFonte==='bling'?'Bling':(P.frFonte==='flex'?'FLEX (config)':'')))),
+      num(P.frV), txt(P.frFonte==='ml'?'real ML':(P.frFonte==='magalu'?('Magalu '+(P.magFreteFonte==='prov'?'previsto':'real')):(P.frFonte==='bling'?'Bling':(P.frFonte==='flex'?'FLEX (config)':((P.frFonte==='escrow'||P.frFonte==='escrow-zero')?'real Shopee (escrow)':''))))),
       num(P.credito),
       num(P.mc), (P.mc!=null&&P.rp)?Math.round(P.mc/P.rp*100):''
     ];
@@ -3702,6 +3715,7 @@ function renderAnalise(){
                  var qual = P.frFonte==='flex'   ? 'Flex'
                           : P.frFonte==='ml'     ? 'frete real'
                           : P.frFonte==='magalu' ? (P.rendaCanal!=null ? 'frete real' : 'frete provis\u00f3rio')
+                          : (P.frFonte==='escrow'||P.frFonte==='escrow-zero') ? 'frete real (escrow Shopee)'
                           : 'frete provis\u00f3rio';
                  p.push('frete '+BRL(P.frV)+' ('+qual+')');
                }

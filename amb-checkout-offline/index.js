@@ -7778,7 +7778,7 @@ async function vendasSync() {
           // b121 (06/08): `!v.tarifa_shopee_v2` entra na fila pra REPROCESSAR quem já tem
           // tarifa gravada pela fórmula antiga (net+net). Sem isso os pedidos antigos ficariam
           // com o valor subestimado pra sempre, porque o filtro só pegava tarifa_ml == null.
-          .filter(v => v && v.marketplace === 'shopee' && v.numero_loja && (v.venda_em == null || v.tarifa_ml == null || !v.tarifa_shopee_v2 || v.frete_recebido == null || v.renda_canal == null || v.ads_escrow == null))   // b18/b19: frete_recebido e renda_canal também entram na fila (backfill)
+          .filter(v => v && v.marketplace === 'shopee' && v.numero_loja && (v.venda_em == null || v.tarifa_ml == null || !v.tarifa_shopee_v2 || v.frete_recebido == null || v.renda_canal == null || v.ads_escrow == null || v.frete_shopee_liq == null))   // b18/b19: frete_recebido e renda_canal também entram na fila (backfill) · Codex (P2, PR#388): frete_shopee_liq idem
           .sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')))
           .slice(0, 20);
         if (candS.length) {
@@ -7820,6 +7820,19 @@ async function vendasSync() {
               if (es && v.frete_recebido == null) {
                 const frB = Number(es.buyer_paid_shipping_fee) || 0;   // b18: frete que o COMPRADOR pagou (extrato: "Subtotal estimado do frete") — crédito na M.C.
                 v.frete_recebido = frB > 0 ? Math.round(frB * 100) / 100 : 0;   // 0 = confirmado sem frete do comprador (sai da fila)
+              }
+              // ── Codex (P2, PR#388): o dashboard tinha uma regra que via a tarifa (comissão)
+              // presente e ASSUMIA frete zero — mas a tarifa só prova que o escrow respondeu,
+              // não que o final_shipping_fee fechou em zero. Pedido com frete real cobrado do
+              // vendedor (final_shipping_fee negativo) caía no mesmo "zero" por engano, porque
+              // este sync rápido nunca gravava o frete líquido — só a tarifa. Agora grava, com a
+              // MESMA fórmula do lib/shopee-escrow.js (frete_liquido_vendedor): positivo = saiu
+              // do bolso do vendedor, negativo = sobrou (subsídio da Shopee). 0 é valor legítimo
+              // e também sai da fila — só não fecha aqui NUNCA (fica esperando `es`).
+              if (es && v.frete_shopee_liq == null) {
+                const frB2 = Number(es.buyer_paid_shipping_fee) || 0;
+                const fsf2 = Number(es.final_shipping_fee) || 0;
+                v.frete_shopee_liq = Math.round(-(frB2 + fsf2) * 100) / 100;
               }
               if (es && v.renda_canal == null) {
                 // b19: a RENDA OFICIAL do pedido (o que a Shopee deposita) — já liquida taxas, moedas Shopee,
