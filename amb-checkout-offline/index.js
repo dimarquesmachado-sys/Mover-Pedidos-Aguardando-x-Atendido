@@ -4175,18 +4175,25 @@ function routes(readBody) {
       const sessD = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
       const dia = String(urlObj.searchParams.get('dia') || '').trim();
+      /* Codex #387 (P2): com o custo-sync em curso a rotina volta na hora e, FORA da janela
+         automática, não há tick que re-tente — dizer 'iniciado' seria mentira. */
+      if (_cst.rodando) { json(res, 409, { ok: false, erro: 'custo-sync em curso — tente de novo em alguns minutos (fora das 23h-6h não há tick automático que re-tente)' }); return true; }
       if (dia && /^\d{4}-\d{2}-\d{2}$/.test(dia)) {
         try {
           const c = readJson(CUSTO_FILE_DIARIO, {});
           if (c._custoDiarioDia === dia) { delete c._custoDiarioDia; fs.writeFileSync(CUSTO_FILE_DIARIO, JSON.stringify(c)); }
         } catch (e) {}
       }
-      custoDiario().catch(() => {});
+      /* Codex #387 (P1): o dia pedido é IMPOSTO à rotina — antes ela derivava o dela e
+         rodava outro dia, enquanto a resposta dizia que tinha refeito o pedido. */
+      custoDiario(dia || undefined).catch(() => {});
       json(res, 200, {
         ok: true, iniciado: true,
+        dia: dia || '(o padrão da rotina: ontem antes das 23h, hoje a partir das 23h)',
         aviso: 'roda em background e CONSOME COTA do Bling — evite no horário do galpão',
-        dia_refeito: dia || null,
-        acompanhe: 'https://mover-pedidos-aguardando-x-atendido.onrender.com/amb-checkout-offline/custo-sync?status=1&k=SUA_ADMIN_KEY',
+        /* Codex #387 (P2): caminho relativo e SEM chave — o link antigo trazia o host de
+           produção fixo e o literal SUA_ADMIN_KEY, que não autentica ninguém. */
+        acompanhe: '/amb-checkout-offline/custo-sync?status=1 (acrescente &k= com a sua chave)',
       });
       return true;
     }
