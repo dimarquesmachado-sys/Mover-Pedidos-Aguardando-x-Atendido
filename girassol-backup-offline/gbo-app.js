@@ -3230,6 +3230,35 @@ function routes(readBody) {
       return true;
     }
 
+    /* 12/09 — DISPARO MANUAL do custo diário. Antes só existia o relógio (23h, e a janela
+       de recuperação até 6h), então não havia como TESTAR a rotina nem recuperar uma noite
+       perdida sem esperar o dia seguinte. Dois cuidados: `dia` permite refazer um dia já
+       carimbado (senão a rotina recusa na hora, que é o certo no automático), e a chamada
+       avisa que vai consumir cota do Bling — a regra da casa é rotina pesada fora do
+       horário do galpão. */
+    if (method === 'GET' && p === '/girassol-backup-offline/custo-diario') {
+      /* mesma porta da rota vizinha (lida no arquivo, não inventada): chave de admin na
+         query OU sessão de admin no cookie; sem isso, 404 — o lint pegou meu chaveOk fantasma. */
+      const kD = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const sessD = validarSessao(req.headers['cookie']);
+      if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
+      const dia = String(urlObj.searchParams.get('dia') || '').trim();
+      if (dia && /^\d{4}-\d{2}-\d{2}$/.test(dia)) {
+        try {
+          const c = readJson(CUSTO_FILE_DIARIO, {});
+          if (c._custoDiarioDia === dia) { delete c._custoDiarioDia; fs.writeFileSync(CUSTO_FILE_DIARIO, JSON.stringify(c)); }
+        } catch (e) {}
+      }
+      custoDiario().catch(() => {});
+      json(res, 200, {
+        ok: true, iniciado: true,
+        aviso: 'roda em background e CONSOME COTA do Bling — evite no horário do galpão',
+        dia_refeito: dia || null,
+        acompanhe: 'https://mover-pedidos-aguardando-x-atendido.onrender.com/girassol-backup-offline/custo-sync?status=1&k=SUA_ADMIN_KEY',
+      });
+      return true;
+    }
+
     if (method === 'GET' && p === '/girassol-backup-offline/custo-sync') {
       const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
       const sessC = validarSessao(req.headers['cookie']);
