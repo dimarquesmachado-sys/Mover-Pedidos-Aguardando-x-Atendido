@@ -51,10 +51,17 @@ function lerTokens() {
   }
 }
 
-function salvarTokens(access_token, refresh_token) {
+/* 13/09 — PORTE DA GIRASSOL (decisão do dono: "uma tem, outra não; agora ambas têm").
+   Guardar QUANDO o token vence permite renovar proativo e devolver o token direto enquanto
+   ele está fresco, em vez de gastar uma chamada de sonda no Bling a CADA operação. Numa casa
+   onde a cota do Bling já derrubou bipagem de galpão, isso não é elegância: é chamada que
+   deixa de ser feita o dia inteiro. */
+function salvarTokens(access_token, refresh_token, expires_in) {
   const dir = path.dirname(TOKEN_FILE);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(TOKEN_FILE, JSON.stringify({ access_token, refresh_token }, null, 2));
+  const obj = { access_token, refresh_token };
+  if (expires_in) obj.expira_em = Date.now() + (Number(expires_in) * 1000);
+  fs.writeFileSync(TOKEN_FILE, JSON.stringify(obj, null, 2));
   console.log('[AMB tokenManager] Tokens Bling salvos em disco ✓');
 }
 
@@ -89,7 +96,7 @@ async function gerarTokenInicial(auth_code) {
   if (!auth_code) throw new Error('auth_code obrigatório');
   const redirect_uri = process.env.AMB_BLING_REDIRECT_URI || '';
   const data = await postOAuth({ grant_type: 'authorization_code', code: auth_code, redirect_uri });
-  salvarTokens(data.access_token, data.refresh_token);
+  salvarTokens(data.access_token, data.refresh_token, data.expires_in);   /* expires_in: sem ele o vencimento não é guardado e a economia de chamada não acontece */
   return { ok: true };
 }
 
@@ -116,7 +123,7 @@ async function _renovarTokenDeVerdade() {
     if (!refresh_token) throw new Error('refresh_token ausente — rode /amb/setup primeiro');
     const redirect_uri = process.env.AMB_BLING_REDIRECT_URI || '';
     const data = await postOAuth({ grant_type: 'refresh_token', refresh_token, redirect_uri });
-    salvarTokens(data.access_token, data.refresh_token);
+    salvarTokens(data.access_token, data.refresh_token, data.expires_in);   /* expires_in: sem ele o vencimento não é guardado e a economia de chamada não acontece */
     console.log('[AMB tokenManager] Token Bling renovado ✓');
     return data.access_token;
   } finally { /* o wrapper de promessa única limpa o em-voo */ }
@@ -125,11 +132,25 @@ async function _renovarTokenDeVerdade() {
 // ── Garantir token válido ────────────────────────────────────────────
 
 async function garantirToken() {
-  const { access_token } = lerTokens();
+  const _tok = lerTokens();                     /* 13/09: o objeto inteiro, pra ler o expira_em */
+  const { access_token } = _tok;
 
   if (!access_token || access_token.length < 10) {
     console.log('[AMB tokenManager] Token Bling ausente — renovando');
     return renovarToken();
+  }
+
+  /* 13/09 — PORTE DA GIRASSOL: se sabemos a validade, renova ANTES de vencer e devolve o
+     token direto enquanto está fresco. A sonda abaixo (1 chamada ao Bling por operação) só
+     roda pra token gravado por versão antiga, sem expira_em; na 1ª renovação o campo passa a
+     existir e daí em diante o caminho rápido assume. */
+  if (_tok.expira_em) {
+    const MARGEM = 5 * 60 * 1000;                 // renova 5 min antes de expirar
+    if (Date.now() >= (_tok.expira_em - MARGEM)) {
+      console.log('[AMB tokenManager] Token perto de vencer — renovando proativo');
+      return renovarToken();
+    }
+    return access_token;
   }
 
   const resp = await fetchComPrazo(20000, 'sonda de token', 'https://api.bling.com.br/Api/v3/produtos?limite=1', {

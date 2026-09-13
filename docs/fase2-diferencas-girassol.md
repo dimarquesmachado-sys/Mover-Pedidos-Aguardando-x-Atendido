@@ -87,7 +87,8 @@ Aplicado até agora:
   `baixarXmlNFe`, que existia nas três mas a Girassol não exportava, passou a ser exportado
   por todas. ✅ feito.
 - **envio nativo do Bling no reenvio manual** — pendente de portar para AMB e GOOD.
-- **`expira_em` (renovação proativa do token)** — pendente de portar para AMB e GOOD.
+- **`expira_em` (renovação proativa do token)** — ✅ portado para AMB e GOOD (PR #413): elas
+  gastavam uma chamada de sonda no Bling a cada operação para descobrir o que o campo já diz.
 - **caminho do arquivo de token da Girassol** — não é capacidade, é estado: preservar, não unificar.
 
 ## Achado do passo 2.5: cada lado tem uma função que falta no outro
