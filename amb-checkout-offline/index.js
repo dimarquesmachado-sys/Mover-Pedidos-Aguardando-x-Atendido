@@ -8368,53 +8368,25 @@ async function custoSync(fresh) {
   console.log('[CUSTO] sync concluiu — ok=' + _cst.ok + ' falhas=' + _cst.falhas + ' de ' + _cst.total);
 }
 
-function bootstrap() {
-  // PESCA AUTOMÁTICA PÓS-DEPLOY: todo deploy mata a pesca em andamento; aqui ela renasce sozinha
-  // 90s depois do boot (após o ciclo inicial). Com dias=14 só re-checa os recentes — barato e idempotente.
-  setTimeout(() => { try { console.log('[ML-FEES] pesca automática pós-deploy iniciando…'); mlSyncFees(14).catch(() => {}); } catch (e) {} }, 90 * 1000);
-  setTimeout(() => { try { custoSync(false).catch(() => {}); } catch (e) {} }, 240 * 1000);   // custos: tartaruga pós-boot, só o que falta
-  setInterval(() => { try { custoSync(false).catch(() => {}); } catch (e) {} }, 6 * 3600 * 1000);
-
-
-
-
-  /* 09/09 (pedido do Diego): rodada de custo TODO DIA às 23h00 — mudança de
-     preço de fornecedor no Bling passa a valer no MESMO dia (o TTL de 7 dias vira rede
-     de segurança, não relógio). 23h00 = galpão fechado (regra da cota: rotina pesada só
-     fora do horário) e ANTES da noturna das 03:45, que então grava o dia com o custo
-     novo. Trava por dia — reinício do serviço não repete a rodada. */
-  setInterval(() => {
-    try {
-      const ag = new Date();
-      /* 23h = rodada do dia; madrugada (até 6h) = recuperação de dia adiado */
-      if ((ag.getHours() === 23 && ag.getMinutes() >= 0) || ag.getHours() < 6) custoDiario().catch(() => {});
-    } catch (e) {}
-  }, 60 * 1000);
-
-// 01/08 — CANCELADOS TODO DIA. Diego: "pedido cancelado tem que atualizar sempre, os outros
-// sistemas abatem". O ao-vivo (Hoje/7 dias) já marca em tempo real; o que faltava era o
-// HISTÓRICO — pedido cancelado DEPOIS do backfill ficava lá somando pra sempre.
-// Varre os últimos 45 dias, que cobre folgado a janela em que um cancelamento ainda aparece.
-// Custa pouco: consulta o Bling FILTRANDO pela situação cancelada (poucas páginas), não varre tudo.
-setTimeout(() => { varrerCancelados(45, 'amb').catch(() => {}); }, 15 * 60 * 1000);
-setTimeout(() => { mlBillingSync(3).catch(() => {}); }, 25 * 60 * 1000);   // 01/08: faturamento ML, 1x/dia (a doc do ML pede cache e baixa frequência)
-setInterval(() => { try { mlBillingSync(3).catch(() => {}); } catch (e) {} }, 24 * 3600 * 1000);
-setInterval(() => { try { varrerCancelados(45, 'amb').catch(() => {}); } catch (e) {} }, 24 * 3600 * 1000);   // b20: o banco de custos se mantém completo SOZINHO (a cada 6h, só faltantes/vencidos)
-  setTimeout(() => { try { vendasSync().catch(() => {}); } catch (e) {} }, 150 * 1000);
-  setInterval(() => { try { vendasSync().catch(() => {}); } catch (e) {} }, 5 * 60 * 1000);   // vendas do Bling: análise quase em tempo real
-  // ETIQUETA PARADA: enquanto existir pedido sem etiqueta, tenta de novo a cada 5 min (o cron normal é 10/10).
-  // Em dia limpo (0 sem etiqueta) NADA extra roda — custo zero. Cobre etiqueta que o canal demora a gerar.
-  setInterval(() => {
-    try {
-      const r = getUltimoResumo();
-      if (r && r.semEtiqueta > 0) { console.log('[CICLO-EXTRA] ' + r.semEtiqueta + ' pedido(s) sem etiqueta \u2014 rodando ciclo extra'); rodarCiclo('auto-etiqueta').catch(() => {}); }
-    } catch (e) {}
-  }, 5 * 60 * 1000);
-
-  ensureDir(CACHE_DIR);
-  console.log(`[AMBBKP] ${VERSAO} ativo — ATENDIDO=${SIT_ATENDIDO}, janela=${JANELA_DIAS}d, cron="${CRON_EXPR}", formato=${ETIQ_FORMATO}`);
-  setTimeout(() => rodarCiclo('boot'), 20000);
-}
+/* 13/09 — fatia 7 da desduplicação: o AGENDADOR (as 47 linhas do bootstrap) era igual nas
+   duas empresas, com três diferenças — a chave da empresa, o minuto da rodada de custo
+   (23h00 aqui, 23h15 na outra, separadas de propósito pra não disputarem cota do Bling) e
+   comentários. Virou lib/checkout/agendador.js com isso como parâmetro. Aqui mora o relógio
+   da operação, e rotina que deixa de ser agendada não falha: ela simplesmente não acontece,
+   em silêncio — por isso o teste novo confere os 12 agendamentos um a um. */
+const bootstrap = require('../lib/checkout/agendador').criarAgendador({
+  empresa: 'amb',
+  minutoCustoDiario: 0,
+  mlSyncFees: (...a) => mlSyncFees(...a),
+  custoSync: (...a) => custoSync(...a),
+  custoDiario: (...a) => custoDiario(...a),
+  varrerCancelados: (...a) => varrerCancelados(...a),
+  mlBillingSync: (...a) => mlBillingSync(...a),
+  vendasSync: (...a) => vendasSync(...a),
+  rodarCiclo: (...a) => rodarCiclo(...a),
+  getUltimoResumo: () => (typeof getUltimoResumo === 'function' ? getUltimoResumo() : null),
+  log: console.log,
+});
 
 // ═══ PESCA POSTERIOR (ML): busca tarifa REAL (sale_fee) e frete do vendedor nos pedidos ML
 // recentes e grava no conferido (tarifa_ml / frete_ml). Roda no cron diário e sob demanda.
