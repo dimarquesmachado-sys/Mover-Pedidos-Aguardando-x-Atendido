@@ -144,6 +144,12 @@ Teste de revisão automática Claude + Codex.
 
 ## Contexto para assistentes e planejamento
 
+Para a consolidação multiempresa (juntar o que é comum às empresas e fazer uma empresa nova
+entrar só com configuração), o arquivo a abrir primeiro é o
+[plano multiloja em passos](docs/plano-multiloja-passos.md): ele diz onde paramos, o que vem a
+seguir e a receita de cada extração. Ele existe porque conversa não é memória — a análise já
+foi feita duas vezes, e a primeira se perdeu.
+
 Antes de iniciar uma conversa nova sobre arquitetura, integrações, dashboard ou onboarding de
 empresas, leia o [contexto geral para o Claude](docs/CONTEXTO-NOVA-CONVERSA-CLAUDE.md). O documento
 registra o mapa atual do sistema, erros recorrentes nas revisões, regras de trabalho, prioridades
