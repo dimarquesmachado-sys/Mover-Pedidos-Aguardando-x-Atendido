@@ -3285,7 +3285,17 @@ function routes(readBody) {
       const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
       const sessV = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || sessV)) { json(res, 404, { error: 'not found' }); return true; }
-      if (urlObj.searchParams.get('status')) { json(res, 200, { ok: true, rodando: _vsy.rodando, fase: _vsy.fase || null, vendas_na_janela: _vsy.total, atualizado_em: _vsy.atualizado_em, erro: _vsy.erro }); return true; }
+      if (urlObj.searchParams.get('status')) { json(res, 200, { ok: true, rodando: _vsy.rodando, fase: _vsy.fase || null, vendas_na_janela: _vsy.total, atualizado_em: _vsy.atualizado_em, erro: _vsy.erro,
+        // Codex P2 (espelhado da AMB): as fases direto-do-marketplace precisam APARECER —
+        // sem isto o status diz 'fim' sem contar se o ML/Shopee/Magalu trouxeram alguma
+        // coisa (ou por que não), e o diagnóstico rico de falha da Shopee fica invisível.
+        rodada_em: _vsy.rodada_em || null,
+        ml_direto: _vsy.ml_direto || null, shopee_direto: _vsy.shopee_direto || null, mg_direto: _vsy.mg_direto || null,
+        provisorias: (() => { try { const a2 = readJson(path.join(CACHE_DIR, '_vendas_dia.json'), {}) || {};
+          let ml = 0, sh = 0, mg = 0;
+          for (const k2 of Object.keys(a2)) { if (k2.startsWith('ml:')) ml++; else if (k2.startsWith('sh:')) sh++; else if (k2.startsWith('mg:')) mg++; }
+          return { ml, shopee: sh, magalu: mg, total_no_arquivo: Object.keys(a2).length };
+        } catch (e) { return null; } })() }); return true; }
       vendasSync().catch(() => {});
       json(res, 200, { ok: true, iniciado: true });
       return true;
@@ -5494,6 +5504,11 @@ async function backfillAnoTodo(ateMes){
 async function vendasSync() {
   let _nfHoraOrc = 0;   // teto de consultas de hora da NF por rodada
   if (_vsy.rodando) return;
+  // b35 (Codex PR#13, espelhado da AMB): os resultados por marketplace são DESTA rodada —
+  // zerar aqui, senão o status mostra o número da rodada anterior enquanto a atual ainda nem
+  // chegou na fase (ou pulou por falta de chave/token), fingindo um dado que não é.
+  _vsy.ml_direto = null; _vsy.shopee_direto = null; _vsy.mg_direto = null;
+  _vsy.rodada_em = new Date().toISOString();
   _vsy.rodando = true; _vsy.erro = null; _vsy.fase = 'listagem';
   try {
     const isoD = dt => dt.toISOString().slice(0, 10);
@@ -5536,11 +5551,27 @@ async function vendasSync() {
           loja_id: (p.loja && p.loja.id) || null,
           atualizado_em: new Date().toISOString()
         });
+        // b30/b31 (Codex P1, espelhado da AMB): o Bling FINALMENTE importou este pedido? A
+        // entrada provisória que veio DIRETO do marketplace ('ml:'/'sh:'/'mg:' + id) cede o
+        // lugar — sem duplicata. Sem isto, a provisória da Shopee/Magalu sobrevive até 6 dias
+        // no arquivo mesmo depois do Bling ter o pedido, inflando contagem de status e
+        // duplicando a venda no dashboard quando a renderização de provisórias for ligada.
+        if (nl) { delete atual['ml:' + String(nl)]; delete atual['sh:' + String(nl)]; delete atual['mg:' + String(nl)]; }
       }
       if (lista.length < 100) break;
       await new Promise(r2 => setTimeout(r2, 450));
     }
     writeJson(F, atual);   // b12: grava JÁ após a fase 1 — o 🔄 do dashboard espera 6s e recarrega; antes, o arquivo só era gravado no fim da rodada (~1 min) e o botão sempre mostrava a rodada anterior
+    /* 13/09 — FASE DIRETA DO MARKETPLACE, que a Girassol nunca teve. Nasceu na AMB em 02/08
+       do princípio que o dono repete: "se dá pra pegar pela API do marketplace, é esse o
+       caminho inicial; o Bling é conferência depois". Sem ela, o dia vive magro no painel —
+       o Bling só enxerga a venda quando a nota desce. Achado medindo a duplicação: as cópias
+       do vendasSync divergiram e este conserto (mais o diagnóstico rico de falha da Shopee,
+       que mora dentro dele) ficou só de um lado. Agora é a MESMA lib nas duas. */
+    try {
+      await _faseDireta({ _vsy, atual, isoD, json, writeJson, F, hoje, fim, magEmpresa: MAG_EMPRESA });
+    } catch (e) { console.log('[VENDAS-SYNC] fase direta falhou: ' + String(e && e.message || e).slice(0, 120)); }
+
     _vsy.fase = 'detalhes';
     // b21: esta fase virou a PRIMEIRA depois da listagem — é ela que dá MARGEM às vendas ainda não bipadas
     // (itens → custo/R$ produtos; taxas → tarifa). Estava por último atrás de NF/Shopee e pedido novo ficava
@@ -6050,6 +6081,17 @@ const _diaFechadoDoDisco = _custoDiarioMod._diaFechadoDoDisco;
    outra empresa, e guardam a regra que nasceu de um caso caro do dono (cadastro EXCLUÍDO
    do 10xE14 fazia o custo do kit virar 20,40 em vez de 34,00). Duas cópias de uma regra
    dessas são duas chances de divergir. Agora vive em lib/checkout/produto-ativo.js. */
+const _faseDireta = require('../lib/checkout/fase-direta').criarFaseDireta({
+  empresa: 'girassol',
+  mlTokenManager: () => require('../girassol/mlTokenManager'),
+  shopeeKey: process.env.GBO_SHOPEE_SYNC_KEY || process.env.SHOPEE_SYNC_KEY || '',
+  shopeeUrlEnv: process.env.GBO_SHOPEE_SYNC_URL || process.env.SHOPEE_SYNC_URL || 'https://girassol-shopee-sync-organizar-envio.onrender.com',
+  shopeeLoja: process.env.GBO_SHOPEE_SYNC_LOJA || 'girassol',   // Codex P1: a URL do serviço Shopee usa a LOJA configurada, não o nome da empresa
+  adminKey: process.env.ADMIN_KEY || '',
+  porta: process.env.PORT || 3000,
+  fetch,   // Codex P2: o MESMO node-fetch (com suporte a `timeout`) que o resto do arquivo usa
+  log: console.log,
+});
 const _rotaDeParaSku = require('../lib/checkout/rota-depara-sku').criarRotaDeParaSku({
   prefixo: '/girassol-backup-offline', path, CACHE_DIR, json,
   readJson: (...a) => readJson(...a),
