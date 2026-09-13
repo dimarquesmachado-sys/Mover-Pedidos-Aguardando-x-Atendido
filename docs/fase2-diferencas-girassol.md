@@ -86,6 +86,12 @@ decidiu mudar.
 - `tokenManager.js` da Girassol guarda tokens em `data/tokens.json` **relativo ao módulo**,
   enquanto AMB/GOOD usam `/data/<empresa>/`. Isso é caminho de disco, não regra — mas mexer
   nele sem migrar o arquivo existente derrubaria a autenticação da empresa mais antiga.
+- **(Codex #409, 2ª rodada)** o `nfTokenManager.js` da Girassol grava o token fiscal em
+  `<módulo>/data/nf_tokens.json` — caminho **relativo ao código** —, enquanto AMB e GOOD usam
+  `/data/<empresa>/nf-tokens.json`. Isso é estado vivo, não organização: trocar o caminho na
+  extração faria a empresa "perder" o token e exigir nova autorização no Bling no meio do
+  expediente. Ou o caminho vira parâmetro e permanece, ou há migração explícita do arquivo —
+  nunca troca silenciosa.
 - **(Codex #409)** o `tokenManager.js` da Girassol também **persiste o vencimento do token**
   (`expira_em`, gravado a partir de `expires_in`) para renovar de forma proativa sem gastar
   uma chamada-teste a cada uso. AMB e GOOD não guardam isso. É comportamento real, não
