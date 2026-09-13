@@ -47,7 +47,7 @@ arriscado. Cada linha é um PR.
 |---|---|---:|---:|---:|---|
 | 2.1 | `nfFluxos.js` | 324 | 100% | 100% | ✅ PR #405 — a diferença era **uma linha** (env do cooldown) |
 | 2.2 | `nfBlingApi.js` | 340 | 89% | 88% | ✅ PR #407 — 54-58 linhas eram só RÓTULO; config real: cache de IE por empresa e nome do intermediador |
-| 2.3 | `mlTokenManager.js` | 140 | 90% | 85% | ⬜ |
+| 2.3 | `mlTokenManager.js` | 140 | 90% | 85% | ✅ PR #408 — só env/rótulo; teste guarda o ISOLAMENTO (token trocado fala com a conta errada em silêncio) |
 | 2.4 | `nfeMlFluxo.js` | 227 | 92% | 83% | ⬜ |
 | 2.5 | `mlApi.js` | 119 | 88% | 81% | ⬜ |
 | 2.6 | `nfTokenManager.js` | 158 | 84% | 80% | ⬜ |
