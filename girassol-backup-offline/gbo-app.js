@@ -4485,7 +4485,21 @@ async function custoDoProduto(id, dorme) {
    estado com um campo `desfecho` explicito. */
 /* 05/09: função nomeada (era arrow dentro do module.exports) porque a noturna também usa
    — ver a cessão em noturna.js */
-function backfillEstado() { return Object.assign({}, _backfill); }
+/* Codex (revisão do #331): `_backfill.rodando` fica FALSO nos 2,5s de respiro entre os
+   meses do backfill do ANO (backfillAnoTodo) — quem só olhasse isso via "sem backfill" bem
+   no meio de um ano rodando e atropelava do mesmo jeito que o bug original. Agora, faltando
+   `_backfill.rodando`, ainda checa `_backfillAno.rodando` (mesmo padrão do conferirMarketplaces
+   acima) antes de dizer que está livre. */
+function backfillEstado() {
+  if (_backfill.rodando) return Object.assign({}, _backfill);
+  const anoR = (typeof _backfillAno !== 'undefined') && _backfillAno && _backfillAno.rodando;
+  if (anoR) {
+    const mes = _backfillAno.mesAtual;   // formato '2026-07'
+    return Object.assign({}, _backfill, { rodando: true, do_ano: true,
+      de: mes + '-01', ate: mes + '-' + ULTIMO_DIA[mes.slice(-2)] });
+  }
+  return Object.assign({}, _backfill);
+}
 
 async function backfillVendas(de, ate, empresa, ctx){
   let _arqEstoqueAtual = null;   /* 03/09: caminho do temporário, visível na limpeza do fim */
