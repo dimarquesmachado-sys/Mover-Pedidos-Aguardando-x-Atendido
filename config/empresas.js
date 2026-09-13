@@ -64,20 +64,18 @@ function _lojasAtivas() {
   const ids = Object.keys(LOJAS);
   let escolhidas = ids;
   if (_registro) {
-    try {
-      const ativas = _registro.ativas();
-      escolhidas = ativas.map(e => e.id).filter(id => ids.includes(id));
-      /* loja no contrato e ativa na env, mas sem pasta aqui: avisa ALTO em vez de sumir em
-         silêncio — é exatamente o caso da "quarta empresa" enquanto a fábrica não existe. */
-      for (const e of ativas) {
-        if (!ids.includes(e.id)) {
-          console.warn('[config] a loja "' + e.id + '" está no contrato e ativa, mas ainda não tem módulo fiscal aqui — ' +
-                       'ela NÃO sobe rotas nem crons (falta a fábrica de módulo fiscal, próximo passo da auditoria)');
-        }
+    /* EMPRESAS com typo ou empresa fora do contrato tem que ABORTAR o boot, não subir
+       "todas as lojas conhecidas" — isso seria abrir rotas e crons de lojas que o deploy
+       pediu pra NÃO ligar. Falha alto e não se recupera: deixa o erro subir. */
+    const ativas = _registro.ativas();
+    escolhidas = ativas.map(e => e.id).filter(id => ids.includes(id));
+    /* loja no contrato e ativa na env, mas sem pasta aqui: avisa ALTO em vez de sumir em
+       silêncio — é exatamente o caso da "quarta empresa" enquanto a fábrica não existe. */
+    for (const e of ativas) {
+      if (!ids.includes(e.id)) {
+        console.warn('[config] a loja "' + e.id + '" está no contrato e ativa, mas ainda não tem módulo fiscal aqui — ' +
+                     'ela NÃO sobe rotas nem crons (falta a fábrica de módulo fiscal, próximo passo da auditoria)');
       }
-    } catch (e) {
-      console.warn('[config] EMPRESAS inválida (' + (e.message || e) + ') — subindo todas as lojas conhecidas');
-      escolhidas = ids;
     }
   }
   return escolhidas.filter(id => {
