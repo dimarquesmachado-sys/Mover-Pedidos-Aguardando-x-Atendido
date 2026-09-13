@@ -501,7 +501,7 @@ function estiloLinha(h){
 function prepararVendas(){
   const _sit = {}; (VENDAS||[]).forEach(v=>{ if(v&&v.numero!=null) _sit[String(v.numero)]=v; });
   (DADOS||[]).forEach(h=>{ if(h.cancelado) h._cancelado=true;   // marca vinda do SERVIDOR — vale mesmo se o pedido não estiver na lista de vendas
-    const v=_sit[String(h.numero)]; if(v){ h._sit=v.situacao||null; h._cancelado=(!!h.cancelado || /cancel/i.test(String(v.situacao||'')) || !!v.cancelado_mkt); if(v.data && !h.venda_dia) h.venda_dia=v.data; if(v.venda_em && !h.venda_em) h.venda_em=v.venda_em; if(v.tarifa_ml!=null && h.tarifa_ml==null) h.tarifa_ml=Number(v.tarifa_ml); if(v.frete_recebido!=null && h.frete_recebido==null) h.frete_recebido=Number(v.frete_recebido); if(!h.ml_costs_v3 && v.credito_ml!=null && h.credito_ml==null) h.credito_ml=Number(v.credito_ml); /* Codex: leitura autoritativa do ML manda — nao restaura valor que ela limpou */ if(!h.ml_costs_v3 && v.frete_ml!=null && Number(v.frete_ml)>0 && h.frete_ml==null) h.frete_ml=Number(v.frete_ml); if(h.frete_ml!=null && !(Number(h.frete_ml)>0)) h.frete_ml=null; /* Codex P1: zero JA GRAVADO no destino tambem some — senao o agregado pulava o motoboy */ /* Codex PR#48: zero nao e frete real — herdar 0 faria o agregado pular o motoboy do Flex */ if(v.logistica_ml && !h.logistica_ml) h.logistica_ml=v.logistica_ml; if(String(h.logistica_ml||'')==='self_service') h.flex=1; /* Codex: o Bling nao sabia que era Flex; o ML sabe — sem isto o pedido ganhava o bonus e nao pagava o motoboy */ if(v.renda_canal!=null && h.renda_canal==null) h.renda_canal=Number(v.renda_canal); if(v.devolucao){ h.devolucao=1; if(v.dev_frete_retorno!=null)h.dev_frete_retorno=Number(v.dev_frete_retorno); h.dev_destino=v.dev_destino; h.dev_status=v.dev_status; h.dev_aberta=v.dev_aberta; } } });   // d45: bipada herda dia/hora · d50: tarifa REAL · d51: frete recebido · d53: renda oficial · b39: devolução
+    const v=_sit[String(h.numero)]; if(v){ h._sit=v.situacao||null; h._cancelado=(!!h.cancelado || /cancel/i.test(String(v.situacao||'')) || !!v.cancelado_mkt); if(v.data && !h.venda_dia) h.venda_dia=v.data; if(v.venda_em && !h.venda_em) h.venda_em=v.venda_em; if(v.tarifa_ml!=null && h.tarifa_ml==null) h.tarifa_ml=Number(v.tarifa_ml); if(v.frete_recebido!=null && h.frete_recebido==null) h.frete_recebido=Number(v.frete_recebido); if(!h.ml_costs_v3 && v.credito_ml!=null && h.credito_ml==null) h.credito_ml=Number(v.credito_ml); /* Codex: leitura autoritativa do ML manda — nao restaura valor que ela limpou */ if(!h.ml_costs_v3 && v.frete_ml!=null && Number(v.frete_ml)>0 && h.frete_ml==null) h.frete_ml=Number(v.frete_ml); if(h.frete_ml!=null && !(Number(h.frete_ml)>0)) h.frete_ml=null; /* Codex P1: zero JA GRAVADO no destino tambem some — senao o agregado pulava o motoboy */ /* Codex PR#48: zero nao e frete real — herdar 0 faria o agregado pular o motoboy do Flex */ if(v.logistica_ml && !h.logistica_ml) h.logistica_ml=v.logistica_ml; if(String(h.logistica_ml||'')==='self_service') h.flex=1; /* Codex: o Bling nao sabia que era Flex; o ML sabe — sem isto o pedido ganhava o bonus e nao pagava o motoboy */ if(v.renda_canal!=null && h.renda_canal==null) h.renda_canal=Number(v.renda_canal); /* Codex #389: a venda BIPADA (h em DADOS) nunca herdava escrow_final/escrow_sobra/frete_vendedor_shopee — só a SINTÉTICA pegava por spread. Sem isso o ramo de frete Shopee fechado (calcPL) era inalcançável pra venda já escaneada, e o ⏳ AGUARDANDO nunca saía mesmo com o escrow fechado. */ if(v.escrow_final && !h.escrow_final) h.escrow_final=1; if(v.escrow_sobra!=null && h.escrow_sobra==null) h.escrow_sobra=Number(v.escrow_sobra); if(v.frete_vendedor_shopee!=null && h.frete_vendedor_shopee==null) h.frete_vendedor_shopee=Number(v.frete_vendedor_shopee); if(v.devolucao){ h.devolucao=1; if(v.dev_frete_retorno!=null)h.dev_frete_retorno=Number(v.dev_frete_retorno); h.dev_destino=v.dev_destino; h.dev_status=v.dev_status; h.dev_aberta=v.dev_aberta; } } });   // d45: bipada herda dia/hora · d50: tarifa REAL · d51: frete recebido · d53: renda oficial · b39: devolução
   const _nums = new Set((DADOS||[]).map(h=>String(h.numero)));
   /* ═══════════════ 19/08 — "BIPAGEM MORRE NO DASHBOARD" (regra do Diego) ═══════════════
    A venda ainda não bipada montava a linha por uma LISTA MANUAL de campos, e o pedido bipado
@@ -2813,7 +2813,15 @@ function calcPL(h){
      oposto ao do selo. Com escrow_final o zero é fato e a linha fica fechada; sem ele, o
      ⏳ AGUARDANDO continua e a releitura do escrow (que agora insiste até fechar) traz o
      número certo sozinha. */
-  else if (ck==='shopee' && h.escrow_final) { frV = 0; frFonte = 'escrow-zero'; }
+  else if (ck==='shopee' && h.escrow_final) {
+    /* Codex #389: frete ZERO valia pra TODO pedido Shopee fechado, mas quando o
+       final_shipping_fee negativo não é totalmente coberto pelo frete do comprador sobra
+       custo REAL de frete pro vendedor (a mesma identidade de lib/shopee-escrow.js:
+       frete_liquido_vendedor = -(comprador + final)). Zerar ali subestimava o "Frete
+       vendedor" e o total do período — o mesmo pecado que o escrow_final foi criado pra evitar. */
+    frV = (h.frete_vendedor_shopee!=null && isFinite(Number(h.frete_vendedor_shopee)) && Number(h.frete_vendedor_shopee)>0) ? Number(h.frete_vendedor_shopee) : 0;
+    frFonte = frV>0 ? 'escrow' : 'escrow-zero';
+  }
   /* Codex (P2, PR#133): o ramo da renda oficial não usa `tarifa` em conta nenhuma, mas o
      predicado exigia — pedido de tarifa zero/subsidiada com repasse conhecido ficava com M.C.
      nula e FORA dos totais de margem. Renda oficial válida satisfaz a exigência de tarifa. */
@@ -2839,7 +2847,10 @@ function calcPL(h){
   // M.C.: quando o pedido Magalu LIQUIDOU, renda_canal (saldo líquido oficial) JÁ desconta o frete real —
   // então o frete Magalu que aparece em frV é só pra EXIBIÇÃO e não pode ser descontado de novo (senão conta 2x).
   // No provisório (renda_canal null), a tarifa é só comissão, então o frete de frV É descontado (correto).
-  const frVparaMC = (ck==='magalu' && frFonte==='magalu' && rendaCanal!=null) ? 0 : (frV||0);
+  // Codex #389: mesma regra do Magalu — quando o frete vendedor Shopee vem do PRÓPRIO
+  // escrow (frFonte 'escrow'/'escrow-zero'), o repasse (rendaCanal) já é líquido dele;
+  // descontar de novo em frVparaMC seria o frete saindo 2x da margem.
+  const frVparaMC = ((ck==='magalu' && frFonte==='magalu' && rendaCanal!=null) || (ck==='shopee' && (frFonte==='escrow' || frFonte==='escrow-zero') && rendaCanal!=null)) ? 0 : (frV||0);
   const mc = completo? (rendaCanal!=null ? (rendaCanal-imposto-custo-frVparaMC+(credito||0)) : (rpEf-imposto-tarifa-custo-frVparaMC+(credito||0)+(freteRec||0))) : null;
   return {mes,ck,rp,feeEstTk,rpEf,desconto,freteRec,rendaCanal,tot,frete,aliq,imposto,feeReal,feeBling,tx,tarifa,custo,cusUn,unTot,custoOk,frV,frFonte,credito,completo,mc,magFreteFonte,magFreteCopart};
 }
