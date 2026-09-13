@@ -105,6 +105,24 @@ No `mlApi.js`, medido em 13/09:
 Não é hierarquia de "mais moderna": as três seguiram caminhos diferentes e cada uma ganhou
 uma peça que as outras não ganharam. Unificar sem decidir apagaria uma das duas pontas.
 
+## Achado do passo 2.9: a Girassol não tinha o callback do Bling
+
+Medido em 13/09, comparando as rotas dos três `index.js`:
+
+| rota | AMB | GOOD | Girassol |
+|---|:-:|:-:|:-:|
+| callback do Bling | ✅ | ✅ | ❌ → ✅ portado (PR #417) |
+| callback do Bling NF | ✅ | ✅ | ✅ |
+| callback do ML | ✅ | ✅ | ✅ |
+
+Sem essa rota, reautorizar o Bling na Girassol exigia **copiar o `code` da barra de endereços
+e postar à mão** em `/setup` — no meio de uma situação que já é urgente (token caiu, nota
+parada). Portado.
+
+Os **crons** são a exceção que continua diferente de propósito: o F3 roda nos minutos 0, 2 e
+4 de cada dezena (Girassol, AMB, GOOD). É escalonamento para as três não competirem pela
+cota do Bling ao mesmo tempo — igualar seria criar o problema que o escalonamento evita.
+
 ## Demais diferenças (classificação rápida)
 
 - `mlApi.js`: diff é só **rótulo de log** (`[mlApi]` vs `[AMB mlApi]`) e a lista de exports (a

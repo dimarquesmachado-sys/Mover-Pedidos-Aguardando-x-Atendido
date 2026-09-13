@@ -60,6 +60,21 @@ function routes(readBody) {
       } catch (e) { json(res, 400, { ok: false, error: e.message }); }
       return true;
     }
+    /* 13/09 — PORTE (decisão do dono: "uma tem, agora ambas têm"). AMB e GOOD já tinham o
+       callback do Bling: o navegador volta da autorização com o `code` na URL e o token é
+       gerado sozinho. Aqui não existia — quem autorizava precisava COPIAR o código da barra
+       de endereços e postar à mão em /setup, no meio de uma situação que já é urgente
+       (token do Bling caiu, nota parada). Achado ao medir o passo 2.9. */
+    if (p === '/callback' && method === 'GET') {
+      const code = urlObj.searchParams.get('code');
+      if (!code) { html(res, 400, '<h2>❌ Girassol: Código não encontrado</h2>'); return true; }
+      try {
+        await gerarTokenInicial(code);
+        html(res, 200, '<h2>✅ Girassol: Token Bling obtido. Pode fechar.</h2>');
+      } catch (e) { html(res, 500, `<h2>❌ Girassol Erro: ${e.message}</h2>`); }
+      return true;
+    }
+
     if (p === '/callback-nf' && method === 'GET') {
       const code = urlObj.searchParams.get('code');
       if (!code) { html(res, 400, '<h2>❌ Código não encontrado na URL</h2>'); return true; }
