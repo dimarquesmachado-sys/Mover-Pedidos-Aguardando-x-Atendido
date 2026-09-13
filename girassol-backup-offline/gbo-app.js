@@ -5797,13 +5797,31 @@ async function vendasSync() {
       const SH_URL = process.env.SHOPEE_SYNC_URL || 'https://girassol-shopee-sync-organizar-envio.onrender.com';
       const SH_KEY = process.env.SHOPEE_SYNC_KEY || '';
       if (SH_KEY) {
-        const candS = Object.values(atual)
-          // b121 (06/08): `!v.tarifa_shopee_v2` entra na fila pra REPROCESSAR quem já tem
-          // tarifa gravada pela fórmula antiga (net+net). Sem isso os pedidos antigos ficariam
-          // com o valor subestimado pra sempre, porque o filtro só pegava tarifa_ml == null.
-          .filter(v => v && v.marketplace === 'shopee' && v.numero_loja && (v.venda_em == null || v.tarifa_ml == null || !v.tarifa_shopee_v2 || v.frete_recebido == null || v.renda_canal == null || v.ads_escrow == null))   // b18/b19: frete_recebido e renda_canal também entram na fila (backfill)
-          .sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')))
-          .slice(0, 20);
+        // b121 (06/08): `!v.tarifa_shopee_v2` entra na fila pra REPROCESSAR quem já tem
+        // tarifa gravada pela fórmula antiga (net+net). Sem isso os pedidos antigos ficariam
+        // com o valor subestimado pra sempre, porque o filtro só pegava tarifa_ml == null.
+        /* 12/09 — O ESCROW PROVISÓRIO CONGELAVA. A fila só pegava pedido com campo VAZIO,
+           então o primeiro retrato do escrow virava definitivo: o 4407 (07/09) tinha
+           tarifa 43,63 gravada enquanto a final é 44,12 (faltava o seguro de envio de
+           0,49, que a Shopee só lança depois), e o frete do vendedor nunca chegava —
+           ficava eternamente 'aguardando' no painel. A Shopee leva dias pra consolidar.
+           Agora o pedido continua na fila ENQUANTO o escrow não fechar: fechado é aquele
+           cuja identidade bate (produtos + frete do comprador − tarifa − ads = repasse),
+           o mesmo critério que o relatório usa. Marcado com escrow_final, sai da fila. */
+        const _shSemLeitura = v => v.venda_em == null || v.tarifa_ml == null || !v.tarifa_shopee_v2;
+        const _shAguardando = v => v.frete_recebido == null || v.renda_canal == null || v.ads_escrow == null || !v.escrow_final;
+        /* Codex #389: o lote de 20 ordenado só por data (mais novo primeiro) deixava pedido
+           AGUARDANDO fechamento (a Shopee leva dias) preso no topo pra sempre — e venda nova
+           empurrava pra fora quem ainda nem tinha tido a PRIMEIRA leitura, faminto dos dois
+           lados. Agora são duas filas com orçamento próprio: primeira leitura (mais novo
+           primeiro, pra saber o valor logo) e reconsolidação (mais ANTIGO primeiro — FIFO,
+           quem espera há mais tempo tem prioridade e sai da fila assim que fechar). */
+        const _shCandidatos = Object.values(atual).filter(v => v && v.marketplace === 'shopee' && v.numero_loja && (_shSemLeitura(v) || _shAguardando(v)));
+        const _shSemLeituraLote = _shCandidatos.filter(_shSemLeitura)
+          .sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')));
+        const _shAguardandoLote = _shCandidatos.filter(v => !_shSemLeitura(v) && _shAguardando(v))
+          .sort((a, b) => String(a.data || '').localeCompare(String(b.data || '')));
+        const candS = _shSemLeituraLote.slice(0, 12).concat(_shAguardandoLote.slice(0, 8));
         if (candS.length) {
           const rS = await fetch(SH_URL + '/girassol/interno/margem-pedidos?k=' + encodeURIComponent(SH_KEY) + '&order_sns=' + encodeURIComponent(candS.map(v => v.numero_loja).join(',')), { timeout: 90000 });
           const jS = await rS.json().catch(() => null);
@@ -5825,7 +5843,13 @@ async function vendasSync() {
               //   rebate.amount  = os dois offsets somados
               // Logo net + net + rebate == comissão BRUTA + serviço BRUTO.
               // Fórmula conferida em 100 de 100 pedidos, sobra ZERO em todos.
-              if (es && (v.tarifa_ml == null || !v.tarifa_shopee_v2)) {
+              /* Codex #389: os 4 blocos abaixo checavam `!v.escrow_final` DEPOIS que o primeiro
+                 já tinha acabado de gravá-lo — na passada em que o escrow FECHA pela primeira
+                 vez, os 3 últimos viam escrow_final=1 (recém-setado) e pulavam a atualização,
+                 deixando renda/frete/ads com o valor PROVISÓRIO ancorando a margem mesmo com a
+                 tarifa já final. `wasFinal` congela o estado de ANTES desta passada. */
+              const wasFinal = !!v.escrow_final;
+              if (es && (v.tarifa_ml == null || !v.tarifa_shopee_v2 || !wasFinal)) {
                 const nS2 = x => { const n = Number(x); return isFinite(n) ? n : 0; };
                 const com = nS2(es.net_commission_fee != null ? es.net_commission_fee : es.commission_fee);
                 const srv = nS2(es.net_service_fee != null ? es.net_service_fee : es.service_fee);
@@ -5839,18 +5863,40 @@ async function vendasSync() {
                 const seg = nS2(es.shipping_seller_protection_fee_amount);
                 const tS = Math.round((com + srv + rbt + afi + seg + cam + prc) * 100) / 100;
                 if (tS > 0) { v.tarifa_ml = tS; v.tarifa_shopee_v2 = 1; }   // o dashboard exibe pela mesma via da tarifa REAL do ML
+                /* fechou? a identidade do escrow é o juiz (a mesma do relatório): produtos +
+                   frete do comprador − tarifa − ads = repasse, com 2 centavos de folga.
+                   Enquanto não fechar, o pedido VOLTA na próxima passada.
+                   Codex #389: `produtos` e `repasse` têm que ser os MESMOS campos que
+                   lib/shopee-escrow.js usa — senão a identidade nunca fecha (ou fecha errado)
+                   num pedido com desconto ou com ajuste pós-escrow. */
+                const _prod = nS2(es.order_discounted_price) || nS2(es.cost_of_goods_sold) || nS2(es.order_selling_price);
+                const _frCo = nS2(es.buyer_paid_shipping_fee);
+                const _ads  = nS2(es.ads_escrow_top_up_fee_or_technical_support_fee);
+                const _fsf  = nS2(es.final_shipping_fee);
+                const _esc  = nS2(es.escrow_amount_after_adjustment != null ? es.escrow_amount_after_adjustment : es.escrow_amount);
+                const _sobra = Math.round((_prod + _frCo - tS - _ads + _fsf - _esc) * 100) / 100;
+                v.escrow_final = (_esc > 0 && Math.abs(_sobra) <= 0.02) ? 1 : 0;
+                v.escrow_sobra = _sobra;
               }
-              if (es && v.frete_recebido == null) {
+              if (es && (v.frete_recebido == null || !wasFinal)) {
                 const frB = Number(es.buyer_paid_shipping_fee) || 0;   // b18: frete que o COMPRADOR pagou (extrato: "Subtotal estimado do frete") — crédito na M.C.
                 v.frete_recebido = frB > 0 ? Math.round(frB * 100) / 100 : 0;   // 0 = confirmado sem frete do comprador (sai da fila)
+                /* Codex #389: quando final_shipping_fee negativo não é totalmente coberto pelo
+                   frete do comprador, sobra custo de frete REAL pro vendedor (mesma identidade
+                   de lib/shopee-escrow.js: frete_liquido_vendedor = -(comprador + final)).
+                   Sem isto o dashboard mostrava frete ZERO em todo pedido Shopee fechado sem
+                   outra fonte de frete, subestimando custo. */
+                const fsfFr = Number(es.final_shipping_fee) || 0;
+                const freteLiquidoVendedor = Math.round(-(frB + fsfFr) * 100) / 100;
+                v.frete_vendedor_shopee = freteLiquidoVendedor > 0 ? freteLiquidoVendedor : 0;
               }
-              if (es && v.renda_canal == null) {
+              if (es && (v.renda_canal == null || !wasFinal)) {
                 // b19: a RENDA OFICIAL do pedido (o que a Shopee deposita) — já liquida taxas, moedas Shopee,
                 // cupons (dela e teus) e frete do comprador. É a âncora da M.C. no dashboard (caso das 170 moedas = R$ 1,70 que a Shopee banca).
                 const ra = Number(es.escrow_amount_after_adjustment != null ? es.escrow_amount_after_adjustment : es.escrow_amount);
                 if (isFinite(ra) && ra > 0) v.renda_canal = Math.round(ra * 100) / 100;
               }
-              if (es && v.ads_escrow == null) {
+              if (es && (v.ads_escrow == null || !wasFinal)) {
                 /* 27/08 (aprovado pelo Diego) — Shopee Ads descontado NO REPASSE (top-up do saldo
                    de Ads pelo escrow, campo ads_escrow_top_up_fee_or_technical_support_fee): o
                    desembolso que se escondia como "recebi menos". Gravado POR PEDIDO pro resumo
