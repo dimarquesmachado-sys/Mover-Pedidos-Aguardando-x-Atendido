@@ -58,7 +58,7 @@ const _ctxImp = {
     const key = process.env.GBO_SHOPEE_SYNC_KEY || process.env.SHOPEE_SYNC_KEY || '';
     if (!key) return [];
     const loja = process.env.GBO_SHOPEE_SYNC_LOJA || 'girassol';
-    const r = await fetch(url + '/' + loja + '/interno/cancelados?dias=' + Math.min(60, Number(dias) || 30) + '&k=' + encodeURIComponent(key), { timeout: 60000 });
+    const r = await fetch(url + '/' + loja + '/interno/cancelados?dias=' + Math.min(400, Number(dias) || 30) + '&k=' + encodeURIComponent(key), { timeout: 60000 });
     const j = await r.json().catch(() => null);
     if (!j || !j.ok) throw new Error((j && j.erro) || ('HTTP ' + r.status));
     return j.order_sns || [];
