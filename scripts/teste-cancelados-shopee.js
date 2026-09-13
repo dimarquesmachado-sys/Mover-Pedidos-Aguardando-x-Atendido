@@ -10,9 +10,14 @@
 
    13/09 (2ª leitura, Codex #391) — indicePorNumeroLoja passou a devolver um ARRAY por
    numero_loja (duplicata do Bling — lib/bling-duplicatas.js — não podia sumir atrás de um
-   mapa escalar), a lib passou a chamar ctx.marcarCanceladoMkt (tombstone pro backfill não
-   trazer de volta o que a Shopee já cancelou) e a avisar quando `dias` pedido passa do teto
-   de 60 dias que o cliente da Shopee aceita por chamada. Os testes abaixo cobrem os três. */
+   mapa escalar) e a lib passou a chamar ctx.marcarCanceladoMkt (tombstone pro backfill não
+   trazer de volta o que a Shopee já cancelou). Os testes abaixo cobrem os dois.
+
+   13/09 (PR #392, Codex P2) — o teste de "dias > 60 avisa" foi removido: o serviço da
+   Shopee passou a fatiar de 15 em 15 dias e paginar por dentro, então o teto de 60 por
+   chamada que motivava o aviso não existe mais (o teto real agora é o Math.min(400, ...)
+   da própria varrerCancelados). Manter aquele teste faria a lib avisar cobertura que ela
+   já não tem mais o problema de não ter. */
 const assert = require('assert');
 const { varrerCancelados } = require('../lib/imposto-cancelados');
 
@@ -52,7 +57,7 @@ const respDeletePedido = (n) => ({ ok: true, headers: { get: (h) => h === 'conte
     assert.strictEqual(v1.situacao, 'Cancelado na Shopee', 'a situação cacheada tem que ser SUBSTITUÍDA, não só preenchida se vazia');
     assert.deepStrictEqual(marcados, ['SN1'], 'tombstone tem que ser gravado pro backfill não trazer a venda de volta');
   }
-  console.log('OK 1/6: token do Bling vencido não impede a fase Shopee (antes matava a função inteira)');
+  console.log('OK 1/5: token do Bling vencido não impede a fase Shopee (antes matava a função inteira)');
 
   // ── mesmo pedido cancelado nos DOIS lados — da_shopee conta o match, não só o exclusivo ──
   {
@@ -72,7 +77,7 @@ const respDeletePedido = (n) => ({ ok: true, headers: { get: (h) => h === 'conte
     assert.strictEqual(r.do_bling, 1, 'o Bling achou o 200');
     assert.strictEqual(r.da_shopee, 1, 'a Shopee TAMBÉM confirmou o 200 — tem que contar, não ficar em 0');
   }
-  console.log('OK 2/6: cancelamento visto pelos DOIS lados soma 1 em cada contador, não zera a Shopee');
+  console.log('OK 2/5: cancelamento visto pelos DOIS lados soma 1 em cada contador, não zera a Shopee');
 
   // ── serviço da Shopee fora do ar: não derruba a varredura, vale o que veio do Bling ──
   {
@@ -92,7 +97,7 @@ const respDeletePedido = (n) => ({ ok: true, headers: { get: (h) => h === 'conte
     assert.strictEqual(r.do_bling, 1);
     assert.strictEqual(r.encontrados, 1, 'vale o que veio do Bling');
   }
-  console.log('OK 3/6: Shopee fora do ar não derruba a varredura — vale o que veio do Bling');
+  console.log('OK 3/5: Shopee fora do ar não derruba a varredura — vale o que veio do Bling');
 
   // ── duplicata do Bling: DOIS pedidos com o mesmo numero_loja — as duas têm que sumir ──
   {
@@ -113,23 +118,7 @@ const respDeletePedido = (n) => ({ ok: true, headers: { get: (h) => h === 'conte
     assert.strictEqual(v4b.situacao, 'Cancelado na Shopee');
     assert.strictEqual(r.encontrados, 2, 'os DOIS pedidos do Bling com o mesmo numero_loja saem do histórico');
   }
-  console.log('OK 4/6: duplicata do Bling com o mesmo numero_loja — as DUAS linhas são marcadas, não só a última');
-
-  // ── dias > 60: a Shopee só cobre 60 por chamada, a rota tem que avisar o excedente ──
-  {
-    global.fetch = async (url) => {
-      if (String(url).includes('numero_pedido=in.')) return respDeletePedido(1);
-      throw new Error('chamada inesperada: ' + url);
-    };
-    const ctx = mkCtx({
-      canceladosNoMarketplace: async () => [],
-      indicePorNumeroLoja: () => ({}),
-      gravarIndice: () => {},
-    });
-    const r = await varrerCancelados(ctx, 120, 'teste-janela-shopee');
-    assert.ok(r.aviso_shopee, 'acima de 60 dias tem que avisar que a Shopee não cobre o período inteiro: ' + JSON.stringify(r));
-  }
-  console.log('OK 5/6: pedido de mais de 60 dias avisa que a Shopee não cobre o excedente');
+  console.log('OK 4/5: duplicata do Bling com o mesmo numero_loja — as DUAS linhas são marcadas, não só a última');
 
   // ── tombstone grava mesmo quando o cancelamento está fora da janela do índice local ──
   {
@@ -148,7 +137,7 @@ const respDeletePedido = (n) => ({ ok: true, headers: { get: (h) => h === 'conte
     assert.deepStrictEqual(marcados6, ['SN6'], 'tombstone tem que ser gravado mesmo pro cancelamento fora da janela do índice — é o que o backfill vai consultar');
     assert.strictEqual(r.fora_do_indice, 1);
   }
-  console.log('OK 6/6: tombstone grava mesmo quando o pedido está fora da janela do índice local');
+  console.log('OK 5/5: tombstone grava mesmo quando o pedido está fora da janela do índice local');
 
-  console.log('OK: varredura de cancelados — token do Bling vencido não bloqueia a Shopee, contagem soma quando os dois lados concordam, Shopee fora do ar não derruba a varredura, duplicata do Bling não perde linha, janela > 60 dias avisa, tombstone grava sempre');
+  console.log('OK: varredura de cancelados — token do Bling vencido não bloqueia a Shopee, contagem soma quando os dois lados concordam, Shopee fora do ar não derruba a varredura, duplicata do Bling não perde linha, tombstone grava sempre');
 })().catch(e => { console.error('FALHOU (cancelados-shopee):', e.message); process.exit(1); });
