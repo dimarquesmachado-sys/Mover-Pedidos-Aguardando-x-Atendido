@@ -5541,6 +5541,16 @@ async function vendasSync() {
       await new Promise(r2 => setTimeout(r2, 450));
     }
     writeJson(F, atual);   // b12: grava JÁ após a fase 1 — o 🔄 do dashboard espera 6s e recarrega; antes, o arquivo só era gravado no fim da rodada (~1 min) e o botão sempre mostrava a rodada anterior
+    /* 13/09 — FASE DIRETA DO MARKETPLACE, que a Girassol nunca teve. Nasceu na AMB em 02/08
+       do princípio que o dono repete: "se dá pra pegar pela API do marketplace, é esse o
+       caminho inicial; o Bling é conferência depois". Sem ela, o dia vive magro no painel —
+       o Bling só enxerga a venda quando a nota desce. Achado medindo a duplicação: as cópias
+       do vendasSync divergiram e este conserto (mais o diagnóstico rico de falha da Shopee,
+       que mora dentro dele) ficou só de um lado. Agora é a MESMA lib nas duas. */
+    try {
+      await _faseDireta({ _vsy, atual, isoD, json, writeJson, F, hoje, fim, magEmpresa: MAG_EMPRESA });
+    } catch (e) { console.log('[VENDAS-SYNC] fase direta falhou: ' + String(e && e.message || e).slice(0, 120)); }
+
     _vsy.fase = 'detalhes';
     // b21: esta fase virou a PRIMEIRA depois da listagem — é ela que dá MARGEM às vendas ainda não bipadas
     // (itens → custo/R$ produtos; taxas → tarifa). Estava por último atrás de NF/Shopee e pedido novo ficava
@@ -6050,6 +6060,15 @@ const _diaFechadoDoDisco = _custoDiarioMod._diaFechadoDoDisco;
    outra empresa, e guardam a regra que nasceu de um caso caro do dono (cadastro EXCLUÍDO
    do 10xE14 fazia o custo do kit virar 20,40 em vez de 34,00). Duas cópias de uma regra
    dessas são duas chances de divergir. Agora vive em lib/checkout/produto-ativo.js. */
+const _faseDireta = require('../lib/checkout/fase-direta').criarFaseDireta({
+  empresa: 'girassol',
+  mlTokenManager: () => require('../girassol/mlTokenManager'),
+  shopeeKey: process.env.GBO_SHOPEE_SYNC_KEY || process.env.SHOPEE_SYNC_KEY || '',
+  shopeeUrlEnv: process.env.GBO_SHOPEE_SYNC_URL || process.env.SHOPEE_SYNC_URL || 'https://girassol-shopee-sync-organizar-envio.onrender.com',
+  adminKey: process.env.ADMIN_KEY || '',
+  porta: process.env.PORT || 3000,
+  log: console.log,
+});
 const _rotaDeParaSku = require('../lib/checkout/rota-depara-sku').criarRotaDeParaSku({
   prefixo: '/girassol-backup-offline', path, CACHE_DIR, json,
   readJson: (...a) => readJson(...a),
