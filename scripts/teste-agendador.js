@@ -20,6 +20,19 @@ function montar(empresa, minuto, extra) {
   return agendados;
 }
 
+/* Codex #400, complemento: o conserto garante que o CACHE_DIR é criado — mas o valor real
+   está na ORDEM. Se a criação acontecer DEPOIS de algum agendamento, um disco novo volta a
+   ter janela de gravação sem pasta, que foi exatamente o defeito. Este caso trava isso. */
+{
+  const ordem = [];
+  montar('amb', 0, {
+    aoIniciar: () => ordem.push('pastas'),
+    setTimeout: () => ordem.push('agendou'),
+    setInterval: () => ordem.push('agendou'),
+  });
+  assert.strictEqual(ordem[0], 'pastas', 'a pasta de cache tem que nascer ANTES do primeiro agendamento: ' + ordem.slice(0, 3).join(','));
+}
+
 const ag = montar('amb', 0);
 const chave = ag.map(a => a.tipo[0] + a.ms).sort();
 const esperado = [
