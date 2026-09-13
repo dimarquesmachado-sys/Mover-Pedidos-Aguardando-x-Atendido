@@ -38,7 +38,7 @@ desligar a renovação local.
 - [x] teste prova a quarta empresa sintética nascendo só de dado
 - [ ] `config/empresas.js` passa a montar módulos por empresa/capacidade (hoje ainda é lista fixa)
 
-## Fase 2 — fábrica fiscal  🔄 EM ANDAMENTO
+## Fase 2 — fábrica fiscal  🔄 EM ANDAMENTO (só o 2.9 em aberto)
 
 Ordem por medição (semelhança entre as pastas, medida em 13/09) — do mais fácil ao mais
 arriscado. Cada linha é um PR.
@@ -52,7 +52,7 @@ arriscado. Cada linha é um PR.
 | 2.5 | `mlApi.js` | 119 | 88% | 81% | ✅ PR #411 — as TRÊS unificadas por UNIÃO (getShipmentRaw da Girassol pras outras; baixarXmlNFe exportado em todas) |
 | 2.6 | `nfTokenManager.js` | 158 | 84% | 80% | ⬜ LIBERADO — ⚠️ a Girassol guarda o token em `<módulo>/data/nf_tokens.json`; preservar o caminho ou migrar o arquivo, nunca trocar em silêncio |
 | 2.7 | `blingApi.js` | 202 | 90% | 78% | ✅ PR #415 — após os portes, só rótulo/env; pausas seguem POR EMPRESA (cota do Bling é da conta) |
-| 2.8 | `tokenManager.js` | 148 | 88% | 74% | ⚠️ atenção: a Girassol persiste `expira_em` (renovação proativa) — não perder na extração |
+| 2.8 | `tokenManager.js` | 148 | 88% | 74% | ✅ PR #416 — caminho do arquivo PRESERVADO por empresa (o da Girassol é relativo ao módulo) |
 | 2.9 | `index.js` + `fluxos.js` | 534 | 78% | 54-60% | ⬜ — aqui mora a diferença REAL |
 
 **Receita de cada passo** (a que funcionou no 2.1, para repetir sem improviso):
