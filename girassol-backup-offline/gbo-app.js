@@ -2994,7 +2994,19 @@ function routes(readBody) {
            igual e recusa ciclo. */
         const deG = String(urlObj.searchParams.get('de') || '').trim();
         const paraG = String(urlObj.searchParams.get('para') || '').trim();
-        if (deG && paraG) {
+        if (deG || paraG) {
+          /* Codex (#397 P2): só um dos dois lados caía direto na listagem — 200 ok:true sem
+             gravar nada, e quem digitou errado achava que tinha declarado o par. */
+          if (!deG || !paraG) { json(res, 400, { ok: false, erro: 'informe de e para' }); return true; }
+          /* Codex (#397 P1): GET que grava é alvo de CSRF — o cookie de sessão é SameSite=Lax,
+             que ainda viaja numa navegação top-level (um link/imagem noutro site abriria esta
+             URL já logado e reescreveria o par). Navegadores atuais marcam esse caso com
+             Sec-Fetch-Site: cross-site; só bloqueio esse caso — digitar a URL ou abrir por um
+             link dentro do próprio sistema continua funcionando normalmente. */
+          if (String(req.headers['sec-fetch-site'] || '').toLowerCase() === 'cross-site') {
+            json(res, 403, { ok: false, erro: 'requisicao cross-site bloqueada (protecao contra CSRF) — abra o sistema e declare o par por lá' });
+            return true;
+          }
           if (deG.toUpperCase() === paraG.toUpperCase()) { json(res, 400, { ok: false, erro: 'de e para sao o mesmo SKU' }); return true; }
           const mG = lerDeParaSku();
           /* ciclo: seguindo a cadeia a partir de `para`, ela não pode voltar em `de` */
