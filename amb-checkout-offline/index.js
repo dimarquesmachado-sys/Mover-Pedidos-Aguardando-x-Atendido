@@ -7999,14 +7999,14 @@ async function vendasSync() {
         if (_faltam.length) {
           let tkH = null;
           try { tkH = require('../tiktok-oauth'); } catch (e) {}
-          if (tkH && typeof tkH.chamar === 'function' && tkH.lerToken && tkH.lerToken('girassol')) {
+          if (tkH && typeof tkH.chamar === 'function' && tkH.lerToken && tkH.lerToken('amb')) {
             const mapa = {};
             const desdeH = Math.floor(Date.now() / 1000) - 10 * 86400;
             let tokenH = '';
             for (let v2 = 0; v2 < 40; v2++) {
               const rH = await tkH.chamar('/order/202309/orders/search',
                 Object.assign({ page_size: '50' }, tokenH ? { page_token: tokenH } : {}),
-                { metodo: 'POST', body: { create_time_ge: desdeH } }, 'girassol');
+                { metodo: 'POST', body: { create_time_ge: desdeH } }, 'amb');
               if (!rH || !rH.ok || !rH.corpo || rH.corpo.code !== 0) break;
               const dH = rH.corpo.data || {};
               for (const o of (dH.orders || [])) if (o && o.id && o.create_time) mapa[String(o.id)] = Number(o.create_time);
@@ -8020,7 +8020,10 @@ async function vendasSync() {
             }
           }
         }
-        if (_tkHoras) console.log('[AMBBKP] hora real da venda preenchida em ' + _tkHoras + ' pedido(s) do TikTok');
+        // Codex (P1): tudo acima muta `atual` em memória, mas o writeJson(F, atual) da poda
+        // já rodou antes deste bloco — sem gravar de novo aqui, venda_em nunca chega no disco
+        // e o /historico (que reparsa o arquivo) continua vendo meio-dia.
+        if (_tkHoras) { writeJson(F, atual); console.log('[AMBBKP] hora real da venda preenchida em ' + _tkHoras + ' pedido(s) do TikTok'); }
       } catch (e) {}
 
     _vsy.total = Object.keys(atual).length; _vsy.atualizado_em = new Date().toISOString(); _vsy.fase = 'fim';
