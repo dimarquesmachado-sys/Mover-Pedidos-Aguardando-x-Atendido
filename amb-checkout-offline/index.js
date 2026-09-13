@@ -46,7 +46,7 @@ const _ctxImp = {
      cancelou no período, a outra deixa a lib achar o pedido no índice pelo número da loja.
      Sem env do serviço, a lib simplesmente não chama — e a varredura segue como antes. */
   canceladosNoMarketplace: async (dias) => {
-    const url = process.env.AMBBKP_SHOPEE_SYNC_URL || 'https://girassol-shopee-sync-organizar-envio.onrender.com';
+    const url = process.env.AMBBKP_SHOPEE_SYNC_URL || process.env.SHOPEE_SYNC_URL || 'https://girassol-shopee-sync-organizar-envio.onrender.com';
     const key = process.env.AMBBKP_SHOPEE_SYNC_KEY || process.env.SHOPEE_SYNC_KEY || '';
     if (!key) return [];
     const loja = process.env.AMBBKP_SHOPEE_SYNC_LOJA || 'amb';
