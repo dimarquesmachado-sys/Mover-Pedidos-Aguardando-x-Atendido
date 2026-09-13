@@ -34,4 +34,16 @@ const rot = ['ambtotal', 'good', 'girassol'].map(p =>
 assert.ok(rot.every(Boolean), 'toda fachada declara rótulo: ' + rot.join(', '));
 assert.strictEqual(new Set(rot).size, 3, 'os rótulos têm que ser distintos: ' + rot.join(', '));
 
+/* Codex #411: nome de empresa FIXO no texto de um erro é pior que erro sem nome — ele manda
+   quem investiga olhar o CNPJ errado. Com as três na mesma lib, isso vira classe de erro, e
+   o teste varre o fonte em vez de conferir caso a caso. */
+{
+  const fonte = fs.readFileSync(path.join(__dirname, '..', 'lib', 'fiscal', 'ml-api.js'), 'utf8');
+  const presos = fonte.split('\n')
+    .filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l))
+    .filter(l => /throw new Error|console\.(log|warn|error)/.test(l))
+    .filter(l => /\b(AMB|AMBTOTAL|GOOD|GIMPO|GIRASSOL|MAGAZINEGIRASSOL)\b/.test(l));
+  assert.deepStrictEqual(presos, [], 'mensagem com empresa fixa no texto (com 3 empresas na mesma lib, isso aponta pro CNPJ errado): ' + presos.join(' | '));
+}
+
 console.log('OK: cliente ML fiscal — as TRÊS empresas com a união das funções e rótulo próprio');
