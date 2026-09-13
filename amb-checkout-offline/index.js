@@ -2419,7 +2419,7 @@ function routes(readBody) {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(deM) || !/^\d{4}-\d{2}-\d{2}$/.test(ateM)) { json(res, 400, { ok: false, erro: 'passe &de=AAAA-MM-DD&ate=AAAA-MM-DD' }); return true; }
       if (_mgc.rodando) { json(res, 200, { ok: true, ja_rodando: true, status: _mgc }); return true; }
       cacaMagalu(deM, ateM, 'amb', { refazer: urlObj.searchParams.get('refazer') === '1' }).catch(e => console.log('[CACA-MAGALU] ' + (e.message || e)));
-      json(res, 200, { ok: true, msg: '🛒 caça da Magalu iniciada em background (' + deM + ' a ' + ateM + ') — acompanhe em /amb-checkout-offline/magalu-caca?status=1&k=', de: deM, ate: ateM });
+      json(res, 200, { ok: true, msg: '🛒 caça da Magalu iniciada em background (' + deM + ' a ' + ateM + ') — acompanhe em /amb-checkout-offline/magalu-caca?status=1 (acrescente &k= com a sua chave)', de: deM, ate: ateM });
       return true;
     }
 
