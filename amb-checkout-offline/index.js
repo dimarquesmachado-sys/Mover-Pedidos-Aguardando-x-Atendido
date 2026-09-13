@@ -41,6 +41,35 @@ const path  = require('path');
    lida quando a função roda. */
 const _impLib = require('../lib/imposto-cancelados');
 const _ctxImp = {
+  /* 13/09: a varredura de cancelados passa a perguntar à SHOPEE (fonte da verdade) além do
+     Bling (espelho). As duas funções abaixo são a ponte: uma lista o que o marketplace
+     cancelou no período, a outra deixa a lib achar o pedido no índice pelo número da loja.
+     Sem env do serviço, a lib simplesmente não chama — e a varredura segue como antes. */
+  canceladosNoMarketplace: async (dias) => {
+    const url = process.env.AMBBKP_SHOPEE_SYNC_URL || 'https://girassol-shopee-sync-organizar-envio.onrender.com';
+    const key = process.env.AMBBKP_SHOPEE_SYNC_KEY || process.env.SHOPEE_SYNC_KEY || '';
+    if (!key) return [];
+    const loja = process.env.AMBBKP_SHOPEE_SYNC_LOJA || 'amb';
+    const r = await fetch(url + '/' + loja + '/interno/cancelados?dias=' + Math.min(60, Number(dias) || 30) + '&k=' + encodeURIComponent(key), { timeout: 60000 });
+    const j = await r.json().catch(() => null);
+    if (!j || !j.ok) throw new Error((j && j.erro) || ('HTTP ' + r.status));
+    return j.order_sns || [];
+  },
+  /* o índice de vendas do dia vive em _vendas_dia.json (nome lido no arquivo, não chutado:
+     a 1ª versão usou um IDX_FILE inexistente e o lint acusaria na hora). A lib recebe um
+     mapa por número do pedido na loja e o gravador, pra marcação sobreviver ao restart. */
+  indicePorNumeroLoja: () => {
+    const idx = {};
+    try {
+      const at = readJson(path.join(CACHE_DIR, '_vendas_dia.json'), {});
+      for (const v of Object.values(at)) { const nl = v && String(v.numero_loja || '').trim(); if (nl) idx[nl] = v; }
+      idx.__arquivo = at;
+    } catch (e) {}
+    return idx;
+  },
+  gravarIndice: (mapa) => {
+    try { if (mapa && mapa.__arquivo) writeJson(path.join(CACHE_DIR, '_vendas_dia.json'), mapa.__arquivo); } catch (e) {}
+  },
   get blingGet()          { return blingGet; },
   get readJson()          { return readJson; },
   get garantirToken()     { return garantirToken; },
