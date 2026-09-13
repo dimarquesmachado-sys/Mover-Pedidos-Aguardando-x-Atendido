@@ -174,6 +174,27 @@ async function getNFeDetalhe(token, nfeId) {
   return data.data || null;
 }
 
+/* 13/09 — PORTE DA GIRASSOL (decisão do dono: "uma tem, agora ambas têm"). Envio NATIVO
+   Bling → marketplace: o Bling é integrador oficial do ML e faz o handshake fiscal que o
+   push cru de XML não faz. A Girassol usa isso como 1ª tentativa no reenvio MANUAL — que é
+   justamente quando o automático já falhou —, e aqui não existia: a AMB/GOOD só repetiam o
+   mesmo push que não tinha funcionado. */
+async function enviarNFeParaLojaVirtual(token, nfeId) {
+  const url = `${BLING_API}/nfe/${nfeId}/enviar-loja-virtual`;
+  await esperarSlot(PAUSA_MS);
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'application/json' }
+  });
+  const data = await resp.json().catch(() => ({}));
+  console.log(`[GOOD blingApi] NF ${nfeId} → enviar-loja-virtual HTTP ${resp.status} ${JSON.stringify(data).slice(0, 400)}`);
+  if (resp.status === 401) throw Object.assign(new Error('TOKEN_EXPIRADO'), { code: 401 });
+  if (!(resp.status >= 200 && resp.status < 300)) {
+    throw new Error(`Bling enviar-loja-virtual NF=${nfeId} HTTP ${resp.status}: ${JSON.stringify(data).slice(0, 400)}`);
+  }
+  return { httpStatus: resp.status, data };
+}
+
 // ─── Memória do dia ──────────────────────────────────────────────────
 const _mem = new Map();
 const hojeStr = () => new Date().toISOString().split('T')[0];
@@ -190,6 +211,7 @@ function limparMemoriaAntiga() {
 }
 
 module.exports = {
+  enviarNFeParaLojaVirtual,
   SITUACAO_ATENDIDO, SITUACAO_AGUARDANDO, ME_LOJA_IDS,
   getPeriodo, sleep,
   getPedidosPorStatus, getPedidoDetalhe,
