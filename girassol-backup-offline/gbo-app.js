@@ -6197,6 +6197,22 @@ async function custoSync(fresh) {
   // Conforme SKUs deletados se acumulam, isso queima cota da API e atrasa o custo dos produtos
   // vivos. A LÁPIDE registra "conferido, não existe mais" e a rodada normal pula; o ?fresh=1 do
   // operador ignora a lápide e reconfere (produto pode ser restaurado no Bling).
+  /* 13/09 — O SYNC PASSA A RESPEITAR O DE-PARA. O dono ligou FL-1011-PRETO ao SKU novo
+     (3933398010054, renomeado no Bling) e a falha diária CONTINUOU: a varredura montava a
+     lista de alvos direto do histórico e perguntava ao Bling pelo código VELHO, sem nunca
+     consultar o de-para — a peça existia e não era usada neste caminho. Agora o código
+     velho é traduzido antes: some da fila (não gasta consulta nem gera alarme) e, se o
+     destino ainda não estiver na lista, ele entra no lugar. */
+  const _traduzido = new Map();
+  for (const sk of [...todos]) {
+    let destino = null;
+    try { destino = resolverDeParaSku(sk); } catch (e) { destino = null; }
+    if (destino && String(destino).toUpperCase() !== String(sk).toUpperCase()) _traduzido.set(sk, String(destino));
+  }
+  if (_traduzido.size) {
+    for (const [velho, novo] of _traduzido) { todos.delete(velho); todos.add(novo); }
+    console.log('[CUSTO] de-para aplicado em ' + _traduzido.size + ' SKU(s): ' + [..._traduzido].map(([v, n]) => v + '→' + n).join(', '));
+  }
   const alvos = [...todos].filter(sk => { const k = cc[sk]; if (k && k.apagado_em) { if (!fresh) return false; if ((Date.now() - k.apagado_em) < 30 * 86400000) return false; /* Codex #358: fresh diário revisitando TODA lápide devolvia os apagados ao resolvedor caro toda noite */ } return fresh || !k || !k.id || (Date.now() - (k.ts || 0)) > SETE_D || k.custo == null; });
   /* Codex #358 r2+r3: fila em ordem de PROFUNDIDADE de dependência — componente (0),
      kit (1), kit-de-kit (2)... Empatar todos os kits deixava o kit EXTERNO poder vir
