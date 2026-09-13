@@ -193,8 +193,17 @@ function fetchDeTabela(tabela) {
    único) NÃO têm teto e carregam a justificativa por escrito. Reintroduzir
    timeout no refresh — o furo que o Codex pegou no r3 — derruba este teste. */
 const fsG = require('fs');
+/* 13/09 (passo 2.3 do plano multiloja): os três mlTokenManager viraram FACHADAS e o código
+   com os fetch passou a viver em lib/fiscal/ml-token-manager.js. A garantia deste teste não
+   muda — ela é sobre o refresh de USO ÚNICO não poder abortar —, só mudou de endereço: agora
+   basta olhar a lib uma vez, e as fachadas são conferidas por NÃO terem fetch nenhum (se
+   alguém reintroduzir chamada solta numa pasta de empresa, o teste acusa). */
 for (const m of ['ambtotal', 'girassol', 'good']) {
-  const src = fsG.readFileSync(__dirname + '/../' + m + '/mlTokenManager.js', 'utf8');
+  const fach = fsG.readFileSync(__dirname + '/../' + m + '/mlTokenManager.js', 'utf8');
+  if (/await fetch\(/.test(fach)) { console.error('FALHOU: ' + m + '/mlTokenManager.js voltou a ter fetch próprio — a regra do refresh tem que ficar na lib'); process.exit(1); }
+}
+for (const m of ['lib/fiscal']) {
+  const src = fsG.readFileSync(__dirname + '/../' + m + '/ml-token-manager.js', 'utf8');
   const partes = src.split('await fetch(');
   if (partes.length !== 4) { console.error('FALHOU: esperava 3 fetch em ' + m + ', achei ' + (partes.length - 1)); process.exit(1); }
   for (let i = 1; i < partes.length; i++) {
