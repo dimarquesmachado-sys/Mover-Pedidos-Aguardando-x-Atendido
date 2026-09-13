@@ -685,22 +685,14 @@ Object.defineProperty(_canario, 'rodando', { get() { return this.ativos > 0; } }
 
 // Codex (#105): o cache do TikTok só era escrito pela rota admin — envelhecia sozinho e
 // levava junto a tarifa real e a hora da venda. A noturna passa a atualizá-lo.
-async function coletarFinanceiroTikTok(dias) {
-  const finLib = require('../lib/tiktok-financeiro');
-  const fs2 = require('fs'), path2 = require('path');
-  let tk = null;
-  try { tk = require('../tiktok-oauth'); } catch (e) { return { ok: true, pulado: 'módulo do TikTok indisponível', pedidos_novos: 0, guardados: 0 }; }
-  if (!tk || typeof tk.chamar !== 'function' || !tk.lerToken || !tk.lerToken('amb')) {
-    return { ok: true, pulado: 'TikTok não conectado nesta empresa', pedidos_novos: 0, guardados: 0 };
-  }
-  const ctxFin = {
-    CACHE_DIR: process.env.TIKTOK_CACHE_DIR || '/data', path: path2,
-    readJson: (a, p) => { try { return JSON.parse(fs2.readFileSync(a, 'utf8')); } catch (e) { return p; } },
-    writeJson: (a, v) => { try { fs2.mkdirSync(path2.dirname(a), { recursive: true }); } catch (e) {} fs2.writeFileSync(a, JSON.stringify(v, null, 2)); },
-    chamar: tk.chamar
-  };
-  return finLib.coletarFinanceiro(ctxFin, 'amb', dias || 35, {});
-}
+/* 13/09 — fatia 6 da desduplicação: este wrapper era idêntico nas duas empresas, com a
+   ÚNICA diferença sendo a chave 'amb'. Foi pra lib/tiktok-financeiro.js com a empresa como
+   PARÂMETRO — o caso mais puro da regra da casa, e o que faz empresa nova só precisar
+   passar a própria chave em vez de herdar mais uma cópia. */
+const coletarFinanceiroTikTok = require('../lib/tiktok-financeiro').criarColetorDaEmpresa('amb', {
+  carregarTikTok: () => require('../tiktok-oauth'),
+  fs: require('fs'), path: require('path'),
+});
 
 async function conferirMarketplaces(dias, canais, opts) {
   const anoR = (typeof _backfillAno !== 'undefined') && _backfillAno && _backfillAno.rodando;
