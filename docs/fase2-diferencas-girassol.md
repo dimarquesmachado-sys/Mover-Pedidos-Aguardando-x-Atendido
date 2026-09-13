@@ -123,6 +123,15 @@ Os **crons** são a exceção que continua diferente de propósito: o F3 roda no
 4 de cada dezena (Girassol, AMB, GOOD). É escalonamento para as três não competirem pela
 cota do Bling ao mesmo tempo — igualar seria criar o problema que o escalonamento evita.
 
+## Achado do passo 2.9 (2º): a prova do "desfeito pelo Bling"
+
+A Girassol guardava **a que horas nós movemos** cada pedido e, quando ele reaparecia em
+ATENDIDO, registrava os dois horários no log — é o que permite abrir ticket no Bling dizendo
+"movemos às X e vocês desfizeram Y minutos depois". AMB e GOOD percebiam o retorno (o
+contador de re-move), mas sem a prova; o ticket viraria discussão de opinião.
+
+Portado para as três (PR #418), com o contador aparecendo no resumo do F1 só quando acontece.
+
 ## Demais diferenças (classificação rápida)
 
 - `mlApi.js`: diff é só **rótulo de log** (`[mlApi]` vs `[AMB mlApi]`) e a lista de exports (a

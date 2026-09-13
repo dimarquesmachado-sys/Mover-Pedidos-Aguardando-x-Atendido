@@ -31,6 +31,9 @@ const MAX_F2 = parseInt(process.env.GOOD_MAX_PEDIDOS_F2 || '60');
 // temEtiquetaML passa a devolver true e o F1 simplesmente para de mover.
 const REMOVE_MAX       = parseInt(process.env.GOOD_F1_REMOVE_MAX || '8');
 const REMOVE_ESPERA_MS = parseInt(process.env.GOOD_F1_REMOVE_ESPERA_MIN || '15') * 60000;
+/* 13/09 — memória do que MOVEMOS, pra detectar quando o Bling desfaz (porte da Girassol).
+   Um deploy zera o mapa; o que permanece é o log, e é o log que serve de prova. */
+const _movidosPorNos = new Map();
 const _reMove = new Map();   // idPedido -> { dia, n, ultimo }
 function _tentativas(id) {
   const hoje = new Date().toISOString().slice(0, 10);
@@ -110,8 +113,25 @@ async function _fluxo1(token) {
   try { mlToken = await garantirTokenML(); } catch (e) {
     console.warn('[GOOD F1] Sem token ML:', e.message);
   }
-  let movidos = 0, pulados = 0, ignorados = 0;
+  let movidos = 0, pulados = 0, ignorados = 0, desfeitos = 0;
   for (const p of batch) {
+    /* 13/09 — PORTE DA GIRASSOL (decisão do dono: "uma tem, agora ambas têm"). Esta empresa
+       já percebia que um pedido voltou pra ATENDIDO (o contador de re-move), mas sem a
+       PROVA: não guardava a que horas NÓS movemos, então o log não permitia dizer ao
+       suporte do Bling "movemos às X e vocês desfizeram Y minutos depois". Sem os dois
+       horários, o ticket vira discussão de opinião. */
+    {
+      const marca = _movidosPorNos.get(String(p.id));
+      if (marca) {
+        const min = Math.round((Date.now() - marca.em) / 60000);
+        console.error(`[GOOD F1] \u21a9\ufe0f DESFEITO PELO BLING — pedido ${p.id}` +
+          (marca.numero ? ` (nº ${marca.numero})` : '') +
+          `: nós movemos pra AGUARDANDO em ${new Date(marca.em).toISOString()} e ele está em ATENDIDO de novo ` +
+          `${min} min depois (agora ${new Date().toISOString()}). Não foi a nossa API — provável mapeamento automático do ML no Bling.`);
+        _movidosPorNos.delete(String(p.id));
+        desfeitos++;
+      }
+    }
     if (jaProcessado('F1', p.id)) { pulados++; continue; }
     // Ja movemos este pedido hoje e ele voltou pra ATENDIDO: espera o intervalo antes de
     // insistir. Fica ANTES do detalhe de proposito — evita gastar chamada do Bling a toa.
@@ -151,6 +171,9 @@ async function _fluxo1(token) {
     try {
       await alterarSituacao(token, p.id, SITUACAO_AGUARDANDO);
       movidos++;
+      /* guarda QUANDO movemos: é o outro lado do horário que prova o desfeito. Vive em
+         memória — deploy zera o mapa, mas as linhas já escritas no log do Render ficam. */
+      _movidosPorNos.set(String(p.id), { em: Date.now(), numero: p.numero || null });
       _rm.n++; _rm.ultimo = Date.now();
       if (_rm.n > 1) console.log(`[GOOD F1] Pedido ${p.id} tinha VOLTADO pra ATENDIDO (o Bling desfez) — movido de novo | tentativa ${_rm.n}/${REMOVE_MAX} hoje`);
       if (_rm.n >= REMOVE_MAX) {
@@ -162,7 +185,9 @@ async function _fluxo1(token) {
       console.error(`[GOOD F1] Erro ao mover ${p.id}:`, e.message);
     }
   }
-  console.log(`[GOOD F1] movidos=${movidos} | ignorados=${ignorados} | já processados=${pulados}`);
+  console.log(`[GOOD F1] movidos=${movidos} | ignorados=${ignorados} | já processados=${pulados}` +
+    /* o desfeito só aparece quando acontece: linha limpa no dia normal, e bem visível no dia em que o Bling desfaz */
+    (desfeitos ? ` | \u21a9\ufe0f DESFEITOS PELO BLING=${desfeitos}` : ''));
 }
 
 // ── Fluxo 2 — AGUARDANDO → ATENDIDO ────────────────────────────────────────────
