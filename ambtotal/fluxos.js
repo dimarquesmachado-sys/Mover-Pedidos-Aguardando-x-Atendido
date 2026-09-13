@@ -109,7 +109,7 @@ async function _fluxo1(token) {
   try { mlToken = await garantirTokenML(); } catch (e) {
     console.warn('[AMB F1] Sem token ML:', e.message);
   }
-  let movidos = 0, pulados = 0, ignorados = 0, desfeitos = 0;
+  let movidos = 0, pulados = 0, ignorados = 0, desfeitos = 0, naoAplicados = 0;
   for (const p of batch) {
     /* 13/09 — PORTE DA GIRASSOL (decisão do dono: "uma tem, agora ambas têm"). Esta empresa
        já percebia que um pedido voltou pra ATENDIDO (o contador de re-move), mas sem a
@@ -166,10 +166,36 @@ async function _fluxo1(token) {
     // Sem etiqueta → move para AGUARDANDO
     try {
       await alterarSituacao(token, p.id, SITUACAO_AGUARDANDO);
-      movidos++;
-      /* guarda QUANDO movemos: é o outro lado do horário que prova o desfeito. Vive em
-         memória — deploy zera o mapa, mas as linhas já escritas no log do Render ficam. */
-      _movidosPorNos.set(String(p.id), { em: Date.now(), numero: p.numero || null });
+      /* 13/09 — PORTE DA GIRASSOL (decisão do dono: "uma tem, agora ambas têm"). O Bling
+         responde 200 e NEM SEMPRE aplica: esta empresa marcava o pedido como resolvido em
+         cima da resposta, então a falha ficava invisível e o pedido dormia em ATENDIDO.
+         Agora relemos e só marcamos como feito se a situação mudou de verdade.
+         Custo: 1 leitura por pedido movido. É cota do Bling gasta de propósito — bem mais
+         barata que um pedido parado que ninguém vê. */
+      await new Promise(r => setTimeout(r, 1200));   // fôlego pro Bling aplicar
+      let conferiu = null;
+      try {
+        const pv = await getPedidoDetalhe(token, p.id);
+        conferiu = pv && pv.situacao ? Number(pv.situacao.id) : null;
+      } catch (e2) { console.warn(`[AMB F1] não consegui reler ${p.id} p/ conferir: ${e2.message}`); }
+
+      if (conferiu === SITUACAO_AGUARDANDO) {
+        movidos++;
+        /* guarda QUANDO movemos: é o outro lado do horário que prova o desfeito. Vive em
+           memória — deploy zera o mapa, mas as linhas já escritas no log do Render ficam. */
+        _movidosPorNos.set(String(p.id), { em: Date.now(), numero: p.numero || null });
+      } else if (conferiu === null) {
+        /* não deu pra conferir: conta como movido (a chamada foi aceita) mas NÃO marca como
+           feito, pra o próximo ciclo verificar de novo */
+        movidos++;
+        console.warn(`[AMB F1] Pedido ${p.id} — chamada aceita, mas não consegui CONFERIR. Não vou marcar como feito; o próximo ciclo revê.`);
+      } else {
+        naoAplicados++;
+        console.error(`[AMB F1] ⚠️ BLING ACEITOU MAS NÃO APLICOU — pedido ${p.id}` +
+          (p.numero ? ` (nº ${p.numero})` : '') +
+          `: pedi situação ${SITUACAO_AGUARDANDO} (AGUARDANDO) e ao reler ele está em ${conferiu}. ` +
+          `Sem marcar como feito — o próximo ciclo tenta de novo. Registrado em ${new Date().toISOString()}`);
+      }
       _rm.n++; _rm.ultimo = Date.now();
       if (_rm.n > 1) console.log(`[AMB F1] Pedido ${p.id} tinha VOLTADO pra ATENDIDO (o Bling desfez) — movido de novo | tentativa ${_rm.n}/${REMOVE_MAX} hoje`);
       if (_rm.n >= REMOVE_MAX) {
@@ -183,7 +209,10 @@ async function _fluxo1(token) {
   }
   console.log(`[AMB F1] movidos=${movidos} | ignorados=${ignorados} | já processados=${pulados}` +
     /* o desfeito só aparece quando acontece: linha limpa no dia normal, e bem visível no dia em que o Bling desfaz */
-    (desfeitos ? ` | \u21a9\ufe0f DESFEITOS PELO BLING=${desfeitos}` : ''));
+    (desfeitos ? ` | \u21a9\ufe0f DESFEITOS PELO BLING=${desfeitos}` : '') +
+    /* o 'aceitou e não aplicou' também só aparece quando acontece — e quando aparece,
+       é a diferença entre um pedido dormindo em ATENDIDO e alguém sabendo disso */
+    (naoAplicados ? ` | \u26a0\ufe0f ACEITOS E NÃO APLICADOS=${naoAplicados}` : ''));
 }
 
 // ── Fluxo 2 — AGUARDANDO → ATENDIDO ──────────────────────────────────

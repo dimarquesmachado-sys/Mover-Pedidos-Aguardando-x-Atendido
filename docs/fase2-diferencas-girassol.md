@@ -132,6 +132,18 @@ contador de re-move), mas sem a prova; o ticket viraria discussão de opinião.
 
 Portado para as três (PR #418), com o contador aparecendo no resumo do F1 só quando acontece.
 
+## Achado do passo 2.9 (3º): "o Bling aceitou mas não aplicou"
+
+A Girassol **relê o pedido depois de mover** e só considera feito se a situação mudou de
+verdade. AMB e GOOD confiavam no `200 OK` — e o Bling responde 200 sem aplicar de vez em
+quando. Resultado nas duas: pedido dormindo em ATENDIDO, invisível.
+
+Portado (PR #419), com os três desfechos tratados — aplicou, não deu pra conferir (não vira
+sucesso nem falha) e aceitou-e-não-aplicou — e o contador no resumo do F1.
+
+**Custo consciente:** uma leitura a mais por pedido movido. É cota do Bling gasta de
+propósito, bem mais barata que um pedido parado que ninguém vê.
+
 ## Demais diferenças (classificação rápida)
 
 - `mlApi.js`: diff é só **rótulo de log** (`[mlApi]` vs `[AMB mlApi]`) e a lista de exports (a
