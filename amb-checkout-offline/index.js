@@ -8386,6 +8386,10 @@ const bootstrap = require('../lib/checkout/agendador').criarAgendador({
   rodarCiclo: (...a) => rodarCiclo(...a),
   getUltimoResumo: () => (typeof getUltimoResumo === 'function' ? getUltimoResumo() : null),
   log: console.log,
+  aoIniciar: () => {
+    ensureDir(CACHE_DIR);
+    console.log(`[AMBBKP] ${VERSAO} ativo — ATENDIDO=${SIT_ATENDIDO}, janela=${JANELA_DIAS}d, cron="${CRON_EXPR}", formato=${ETIQ_FORMATO}`);
+  },
 });
 
 // ═══ PESCA POSTERIOR (ML): busca tarifa REAL (sale_fee) e frete do vendedor nos pedidos ML

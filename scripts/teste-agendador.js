@@ -32,6 +32,15 @@ assert.deepStrictEqual(chave, esperado, 'os 12 agendamentos do bootstrap antigo 
 assert.throws(() => criarAgendador({ empresa: 'amb' }), /falta /);
 assert.throws(() => criarAgendador({}), /falta empresa/);
 
+// aoIniciar (ensureDir do CACHE_DIR + log de versão) roda SÍNCRONO, antes de qualquer timer
+// ser sequer registrado — Codex #400: sem isso, a primeira gravação num disco novo falha
+// em silêncio até o ciclo de boot rodar, 20s depois.
+{
+  let chamou = false;
+  montar('amb', 0, { aoIniciar: () => { chamou = true; } });
+  assert.strictEqual(chamou, true, 'aoIniciar tem que rodar ao montar o agendador');
+}
+
 // o minuto do custo diário é POR EMPRESA (23h00 x 23h15 — separadas pra não disputar cota)
 for (const [empresa, minuto, horaTeste, minutoTeste, deveRodar] of [
   ['amb', 0, 23, 5, true], ['girassol', 15, 23, 5, false], ['girassol', 15, 23, 20, true],
