@@ -2986,6 +2986,33 @@ function routes(readBody) {
             leia: 'sugestao por semelhanca — confira antes de declarar; juntar produtos diferentes mistura as vendas' });
           return true;
         }
+        /* 13/09 — DECLARAR O PAR PELO NAVEGADOR. A rota só aceitava POST com JSON, e o dono
+           opera pelo navegador (a casa já tem outras rotas em GET por esse mesmo motivo).
+           O caso que motivou: FL-1011-PRETO foi renomeado pra 3933398010054 no Bling, e o
+           banco de custos seguia procurando o código velho — uma falha por rodada, todo dia,
+           no produto que mais vende. Mesmas travas do POST: exige os dois lados, recusa par
+           igual e recusa ciclo. */
+        const deG = String(urlObj.searchParams.get('de') || '').trim();
+        const paraG = String(urlObj.searchParams.get('para') || '').trim();
+        if (deG && paraG) {
+          if (deG.toUpperCase() === paraG.toUpperCase()) { json(res, 400, { ok: false, erro: 'de e para sao o mesmo SKU' }); return true; }
+          const mG = lerDeParaSku();
+          /* ciclo: seguindo a cadeia a partir de `para`, ela não pode voltar em `de` */
+          let passo = paraG, voltas = 0;
+          while (passo && voltas++ < 20) {
+            const kk = Object.keys(mG).find(x => String(x).toUpperCase() === String(passo).toUpperCase());
+            if (!kk) break;
+            const prox = mG[kk] && mG[kk].para;
+            if (prox && String(prox).toUpperCase() === deG.toUpperCase()) { json(res, 400, { ok: false, erro: 'esse par criaria um ciclo (' + deG + ' ↔ ' + paraG + ')' }); return true; }
+            passo = prox;
+          }
+          for (const kk of Object.keys(mG).filter(x => String(x).trim().toUpperCase() === deG.toUpperCase())) delete mG[kk];
+          mG[deG] = { para: paraG, em: new Date().toISOString() };
+          gravarDeParaSku(mG);
+          json(res, 200, { ok: true, ligado: { de: deG, para: paraG }, total: Object.keys(mG).length,
+            leia: 'o histórico e o custo passam a resolver ' + deG + ' como ' + paraG + ' — confira que são o MESMO produto, porque juntar produtos diferentes mistura as vendas' });
+          return true;
+        }
         const m = lerDeParaSku();
         json(res, 200, { ok: true, total: Object.keys(m).length,
           pares: Object.keys(m).sort().map(k => ({ de: k, para: m[k].para, em: m[k].em || null })) });
