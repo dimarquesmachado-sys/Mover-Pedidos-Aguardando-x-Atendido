@@ -47,4 +47,18 @@ for (const pasta of ['ambtotal', 'good', 'girassol']) {
   assert.strictEqual(Object.keys(m).length, 10, 'a fachada de ' + pasta + ' mudou o que exporta');
 }
 
+/* Codex #407, complemento: o robô consertou a chamada do CEP, mas o conserto sozinho não
+   impede a REPETIÇÃO — e esta é uma classe de erro fácil de reintroduzir ao extrair as
+   próximas peças fiscais (o rótulo entre aspas comuns vira texto literal e o log perde a
+   empresa). A varredura abaixo olha só linha de código onde o rótulo é passado adiante entre
+   aspas: a versão ampla dela dava falso positivo com o comentário e com IE="..." dentro de
+   crase, e falso positivo ensina a ignorar vermelho. */
+{
+  const fonte = fs.readFileSync(require('path').join(__dirname, '..', 'lib', 'fiscal', 'nf-bling-api.js'), 'utf8');
+  const suspeitas = fonte.split('\n')
+    .filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l))
+    .filter(l => /(['"])\[\$\{rotulo\}[^`]*\1/.test(l));
+  assert.deepStrictEqual(suspeitas, [], 'o rótulo está entre aspas comuns e vira texto literal: ' + suspeitas.join(' | '));
+}
+
 console.log('OK: cliente de NF único — deps obrigatórias, contrato das 3 fachadas intacto, e cache de IE / intermediador / rótulo seguem DIFERENTES por empresa');
