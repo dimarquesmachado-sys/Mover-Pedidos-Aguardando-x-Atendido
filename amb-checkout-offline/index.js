@@ -7970,6 +7970,62 @@ async function vendasSync() {
     const corteS = isoD(corte);
     for (const [k, v] of Object.entries(atual)) { if (!v || !v.data || v.data < corteS) delete atual[k]; }
     writeJson(F, atual);
+      // ── HORA REAL DA VENDA NO TIKTOK (16/08 na Girassol, PORTADO pra cá em 13/09) ───
+      // Achado ao medir a duplicação entre os dois checkouts: este conserto existia só na
+      // Girassol e a AMB seguia carimbando MEIO-DIA nas vendas do TikTok — elas apareciam
+      // fora de ordem no eixo do tempo do painel, exatamente o sintoma que o dono relatou
+      // lá em agosto. É a dívida da cópia cobrando juros: conserto que entra num lado e
+      // não no outro.
+      // O Diego notou: "os tiktok tão tudo sem horário no dashboard". Motivo: `venda_em` só
+      // era preenchido por ML e Shopee; sem ele o painel carimba MEIO-DIA e a venda aparece
+      // fora de ordem no eixo do tempo. O dado já existe — o financeiro do TikTok guarda
+      // `criado_em` (order_create_time) por pedido. Aqui é só transportar; custo zero de API.
+      try {
+        const _tkArqH = require('path').join(process.env.TIKTOK_CACHE_DIR || '/data', '_tiktok_financeiro_amb.json');
+        let _tkPedH = {};
+        try { _tkPedH = (JSON.parse(require('fs').readFileSync(_tkArqH, 'utf8')) || {}).pedidos || {}; } catch (e) {}
+        let _tkHoras = 0;
+        const _faltam = [];
+        for (const v of Object.values(atual)) {
+          if (!v || v.marketplace !== 'tiktok' || !v.numero_loja || v.venda_em) continue;
+          const reg = _tkPedH[String(v.numero_loja).trim()];
+          const ts = reg && Number(reg.criado_em);
+          if (ts && isFinite(ts)) { v.venda_em = new Date(ts * 1000).toISOString(); _tkHoras++; }
+          else _faltam.push(v);
+        }
+        // Codex (#105): venda RECENTE ainda não tem extrato (a liquidação demora dias), então o
+        // cache do financeiro não a conhece — e ela é justamente a que aparece no painel agora.
+        // A API de PEDIDOS do TikTok já traz `create_time`: uma consulta por janela resolve.
+        if (_faltam.length) {
+          let tkH = null;
+          try { tkH = require('../tiktok-oauth'); } catch (e) {}
+          if (tkH && typeof tkH.chamar === 'function' && tkH.lerToken && tkH.lerToken('amb')) {
+            const mapa = {};
+            const desdeH = Math.floor(Date.now() / 1000) - 10 * 86400;
+            let tokenH = '';
+            for (let v2 = 0; v2 < 40; v2++) {
+              const rH = await tkH.chamar('/order/202309/orders/search',
+                Object.assign({ page_size: '50' }, tokenH ? { page_token: tokenH } : {}),
+                { metodo: 'POST', body: { create_time_ge: desdeH } }, 'amb');
+              if (!rH || !rH.ok || !rH.corpo || rH.corpo.code !== 0) break;
+              const dH = rH.corpo.data || {};
+              for (const o of (dH.orders || [])) if (o && o.id && o.create_time) mapa[String(o.id)] = Number(o.create_time);
+              tokenH = dH.next_page_token || '';
+              if (!tokenH) break;
+              await new Promise(r5 => setTimeout(r5, 200));
+            }
+            for (const v of _faltam) {
+              const ts2 = mapa[String(v.numero_loja).trim()];
+              if (ts2 && isFinite(ts2)) { v.venda_em = new Date(ts2 * 1000).toISOString(); _tkHoras++; }
+            }
+          }
+        }
+        // Codex (P1): tudo acima muta `atual` em memória, mas o writeJson(F, atual) da poda
+        // já rodou antes deste bloco — sem gravar de novo aqui, venda_em nunca chega no disco
+        // e o /historico (que reparsa o arquivo) continua vendo meio-dia.
+        if (_tkHoras) { writeJson(F, atual); console.log('[AMBBKP] hora real da venda preenchida em ' + _tkHoras + ' pedido(s) do TikTok'); }
+      } catch (e) {}
+
     _vsy.total = Object.keys(atual).length; _vsy.atualizado_em = new Date().toISOString(); _vsy.fase = 'fim';
     console.log('[VENDAS-SYNC] ok — ' + _vsy.total + ' venda(s) na janela (' + paginas + ' página(s))');
   } catch (e) { _vsy.erro = String(e.message || e).slice(0, 140); console.log('[VENDAS-SYNC] falhou: ' + _vsy.erro); }
