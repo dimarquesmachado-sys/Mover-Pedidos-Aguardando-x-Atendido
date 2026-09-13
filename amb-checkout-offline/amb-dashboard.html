@@ -3009,7 +3009,7 @@ function _bqRender(q, hits, hh, erroH){
     '<th class="num" title="total da NOTA FISCAL (com frete embutido, quando o canal lança)">Venda NF</th><th class="num" title="só os produtos: preço × quantidade">R$ Produtos</th><th class="num" title="quanto a mercadoria custou: custo unitário × quantidade, do banco de custos do Bling">Custo (−)</th><th class="num" title="Simples Nacional — alíquota do MÊS da venda aplicada sobre o valor da nota">Imposto (−)</th>'+
     '<th class="num" title="comissão do marketplace — REAL quando o canal informa; senão a % que você configurou · no histórico é o valor gravado na época, sem selo">Tarifa (−)</th><th class="num" title="frete que sai do SEU bolso: real do ML, motoboy do Flex ou estimativa do Bling">Frete vend. (−)</th><th class="num" title="crédito devolvido pelo marketplace (ex.: tarifa estornada) — SOMA na margem">Estorno (+)</th><th class="num" title="margem de contribuição: venda − imposto − comissão − frete − custo · clique no valor pra ver a conta aberta">💎 M.C.</th><th class="num" title="a margem em % sobre o valor dos produtos">MC %</th></tr>'+
     loc.map(h=>{
-      const P = calcPL(h);
+      let P = calcPL(h);   /* let: a linha cancelada substitui os valores por nulo logo abaixo */
       /* Codex (P2, PR#223): SINT recém-sincronizado SEM itens ainda não tem margem — o caminho
          normal mostrava o ✓ laranja de "margem já calculada" com a M.C. em "—" (informação
          falsa). A Análise trata este exato estado com linha resumida e ⏳ (linha ~3629);
@@ -3033,7 +3033,14 @@ function _bqRender(q, hits, hh, erroH){
       }
       const unid=(h.itens||[]).reduce((a,i)=>a+Number(i.qtd||1),0);
       const carrinho=((h.itens||[]).length>1)||unid>1;
-      const pmc = (P.mc!=null&&P.rp)?Math.round(P.mc/P.rp*100):null;
+      /* 13/09 — VENDA CANCELADA NÃO MOSTRA NÚMERO. O dono viu o 4645 já marcado ✕ CANCELADA e
+       ainda exibindo custo 36,00 e imposto 7,93: esses valores não entram em total nenhum,
+       mas número numa venda que não aconteceu confunde quem bate o olho — e a régua da casa
+       é exatamente essa (melhor sem número do que com número errado). Zerado AQUI, num
+       lugar só, em vez de mexer nas nove células: cada uma já sabe desenhar traço quando o
+       valor é nulo. */
+    if (h._cancelado) P = Object.assign({}, P, { tot: null, rp: null, custo: null, custoOk: false, imposto: null, tarifa: null, frV: null, credito: null, mc: null });
+    const pmc = (P.mc!=null&&P.rp)?Math.round(P.mc/P.rp*100):null;
       return '<tr style="'+estiloLinha(h)+'"'+(h._cancelado?' title="pedido CANCELADO no Bling — fora dos totais"':(h.devolucao?(' title="DEVOLU\u00c7\u00c3O'+(h.dev_aberta?' em andamento (dinheiro ainda n\u00e3o resolvido no Mercado Pago)':' consolidada')+'"'):''))+'>'+
         '<td class="dim" style="white-space:nowrap" title="'+(h.venda_em?('venda: '+dtBR(h.venda_em)+' · '):(h.venda_dia?('venda: '+String(h.venda_dia).slice(8,10)+'/'+String(h.venda_dia).slice(5,7)+' · '):''))+'conferido: '+dtBR(h.conferido_em)+'">'+(h.venda_em?dtBR(h.venda_em):(h.venda_dia?(String(h.venda_dia).slice(8,10)+'/'+String(h.venda_dia).slice(5,7)+(h.nf_emissao?(' '+String(h.nf_emissao).replace(' ','T').slice(11,16)+' <span style="font-size:9px" title="hora da EMISSÃO da NF no Bling — a hora exata da venda só a API do canal dá">🧾</span>'):' <span style="font-size:9px" title="dia da venda (Bling) — hora só com a API do canal">🕘</span>')):(h.nf_emissao?(String(h.nf_emissao).slice(8,10)+'/'+String(h.nf_emissao).slice(5,7)+' '+String(h.nf_emissao).replace(' ','T').slice(11,16)+' <span style="font-size:9px" title="hora da EMISSÃO da NF no Bling — a hora exata da venda só a API do canal dá">🧾</span>'):(dtBR(h.conferido_em)+' <span style="font-size:9px" title="hora da conferência">🕘</span>'))))+'</td>'+
         '<td>'+(h._cancelado?'<span style="color:#64748b;font-weight:800" title="CANCELADO — fora dos totais">✕</span> <span class="st bad" style="font-size:9px">CANCELADA</span> ':(h.sintetico?'<span style="color:#f59e0b;font-weight:800" title="aguardando bipagem — margem já calculada">✓</span> ':'<span style="color:#34d399;font-weight:800" title="bipagem confirmada">✓</span> '))+'<b>'+esc(h.numero||h.id)+'</b>'+(blingId(h)?' <a class="lkB" href="https://www.bling.com.br/vendas.php#edit/'+esc(blingId(h))+'" target="_blank" rel="noopener" title="abrir o pedido no Bling" style="font-size:10px">Bling↗</a>':'')+(carrinho?' <span class="badge" title="'+unid+' unidades">🛒 '+unid+'</span>':'')+(h.devolucao?' <span class="st bad" style="font-size:9px" title="DEVOLU\u00c7\u00c3O no ML'+(h.dev_frete_retorno!=null?' \u00b7 frete de retorno '+BRL(h.dev_frete_retorno):'')+(h.dev_destino==='seller_address'?' \u00b7 mercadoria volta pro galp\u00e3o':(h.dev_destino==='warehouse'?' \u00b7 mercadoria foi pro ML':''))+(h.dev_aberta?' \u00b7 EM ABERTO':' \u00b7 fechada')+'">\ud83d\udd34 DEVOLV.</span>':'')+
@@ -3280,7 +3287,7 @@ function renderGrafico(){
     if(!h.conferido_em && !h.sintetico) return;
     if(h._cancelado) return;
     const d=diaVenda(h); if(d<iv.de||d>iv.ate) return;
-    const P=calcPL(h);
+    let P=calcPL(h);   /* let: a linha cancelada substitui os valores por nulo logo abaixo */
     const o=dias[d]||(dias[d]={mc:0,imp:0,tar:0,frv:0});
     if(P.mc!=null)o.mc+=P.mc; if(P.imposto!=null)o.imp+=P.imposto;
     if(P.tarifa!=null)o.tar+=P.tarifa; if(P.frV!=null)o.frv+=P.frV;
@@ -3715,7 +3722,15 @@ function renderAnalise(){
   })();
   garantirNomes(pagPL);   // busca os nomes que faltarem e redesenha
   renderCardsVenda(pagPL.map(function(x){
-    const h=x.h, P=x.P; const _vd=new Date(String(h.venda_dia||h.data||'')); const _frPend=(P.mc!=null&&P.frV==null&&!h._cancelado&&!h.escrow_final&&isFinite(_vd.getTime())&&(Date.now()-_vd.getTime())<10*86400000); /* Codex #365: expira em 10 dias — frV null antigo é frete zero legítimo */
+    const h=x.h; let P=x.P; const _vd=new Date(String(h.venda_dia||h.data||'')); const _frPend=(P.mc!=null&&P.frV==null&&!h._cancelado&&!h.escrow_final&&isFinite(_vd.getTime())&&(Date.now()-_vd.getTime())<10*86400000); /* Codex #365: expira em 10 dias — frV null antigo é frete zero legítimo */
+    /* Codex (P2, PR#394): o card do celular montava venda/custo/M.C. do P original — a mesma
+       venda cancelada que a tabela já zera aqui seguia mostrando número no card, porque essa
+       cópia de P nunca passava pela máscara. Mesma regra da tabela, direto na fonte do card.
+       Auditando a função inteira achei mais dois campos fora da máscara: freteRec e desconto
+       não entram no cálculo de venda/custo/M.C. acima, mas alimentam o despDet (o texto do
+       tooltip "Taxas, Frete e Imposto") — sem eles aqui, uma cancelada com frete recebido ou
+       desconto do marketplace ainda mostraria número nesse tooltip. */
+    if (h._cancelado) P = Object.assign({}, P, { tot: null, rp: null, custo: null, custoOk: false, imposto: null, tarifa: null, frV: null, credito: null, mc: null, freteRec: null, desconto: null });
     // 29/07: canais como o TikTok não informam a hora da venda, e o cartão caía pra data — no
     // filtro HOJE isso não diz nada (a data já é hoje). Agora usa a melhor fonte que existir,
     // com um selo dizendo de onde veio: 🧾 hora da NF · 🕘 hora da conferência.
@@ -3741,7 +3756,7 @@ function renderAnalise(){
                                (nomeP?'<div style="color:var(--mut);font-size:11px;font-family:system-ui;font-weight:400;line-height:1.3;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden">'+esc(nomeP)+'</div>':'')+'</div>';
                       }).join('')
                     : '<span class="dim">detalhe a caminho\u2026</span>'),
-             venda:(P.tot!=null?P.tot:(h.valor!=null?Number(h.valor):null)), custo:(P.custo!=null?P.custo:null),
+             venda:(h._cancelado?null:(P.tot!=null?P.tot:(h.valor!=null?Number(h.valor):null))), custo:(P.custo!=null?P.custo:null),
              mc:(P.mc!=null?P.mc:null), frPend:_frPend?1:0, pc:(P.mc!=null&&P.tot?Math.round(P.mc/P.tot*1000)/10:null),
              // 28/07: NÃO somar os componentes na mão. A margem muda de fórmula por canal (Shopee/Magalu
              // com renda líquida já embutem a comissão; no Magalu o frete às vezes é só exibição; há ainda
@@ -3798,7 +3813,7 @@ function renderAnalise(){
     t.n++; if(x.P.rp!=null)t.rp+=x.P.rp; if(x.P.tot!=null)t.tot+=x.P.tot; if(x.P.mc!=null){t.mc+=x.P.mc;t.mcN++;} });
   let _diaAnt = null;
   const linhas = pagPL.map(x=>{
-    const h=x.h, P=x.P; const _vd=new Date(String(h.venda_dia||h.data||'')); const _frPend=(P.mc!=null&&P.frV==null&&!h._cancelado&&!h.escrow_final&&isFinite(_vd.getTime())&&(Date.now()-_vd.getTime())<10*86400000); /* Codex #365: expira em 10 dias — frV null antigo é frete zero legítimo */
+    const h=x.h; let P=x.P; const _vd=new Date(String(h.venda_dia||h.data||'')); const _frPend=(P.mc!=null&&P.frV==null&&!h._cancelado&&!h.escrow_final&&isFinite(_vd.getTime())&&(Date.now()-_vd.getTime())<10*86400000); /* Codex #365: expira em 10 dias — frV null antigo é frete zero legítimo */
     const _d = diaVenda(h);
     let sep = '';
     if(_d !== _diaAnt){
@@ -3816,6 +3831,13 @@ function renderAnalise(){
       if(P.mc!=null){ T.mc+=P.mc; T.mcN++; }
     }
     const it0=(h.itens||[])[0]||{};
+    /* 13/09 — VENDA CANCELADA NÃO MOSTRA NÚMERO. O dono viu o 4645 já marcado ✕ CANCELADA e
+       ainda exibindo custo 36,00 e imposto 7,93: esses valores não entram em total nenhum,
+       mas número numa venda que não aconteceu confunde quem bate o olho — e a régua da casa
+       é exatamente essa (melhor sem número do que com número errado). Zerado AQUI, num
+       lugar só, em vez de mexer nas nove células: cada uma já sabe desenhar traço quando o
+       valor é nulo. */
+    if (h._cancelado) P = Object.assign({}, P, { tot: null, rp: null, custo: null, custoOk: false, imposto: null, tarifa: null, frV: null, credito: null, mc: null });
     const pmc = (P.mc!=null&&P.rp)?Math.round(P.mc/P.rp*100):null;
     if(h.sintetico && !((h.itens||[]).length)){   // detalhe ainda não chegou — linha resumida
       const dtx = _d ? (_d.slice(8,10)+'/'+_d.slice(5,7)) : '—';
