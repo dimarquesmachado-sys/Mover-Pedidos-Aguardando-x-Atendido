@@ -35,6 +35,8 @@ const {
   ME_LOJA_IDS,
   jaProcessado,
   marcarProcessado
+,
+  enviarNFeParaLojaVirtual
 } = require('./blingApi');
 const { enviarNFeParaML } = require('./mlApi');
 /* 04/09 — NFs que o ML recusa por erro PERMANENTE (CEP importado errado pelo Bling, doc
@@ -213,13 +215,33 @@ async function enviarNFeUnica(nfeId) {
     const nf = await getNFeDetalhe(tokenBling, nfeId);
     if (!nf) throw new Error(`NF ${nfeId} não encontrada`);
     if (!nf.xml) throw new Error(`NF ${nfeId} (nº ${nf.numero}) sem XML — não está autorizada`);
-    if (!nf.numeroPedidoLoja) throw new Error(`NF ${nfeId} (nº ${nf.numero}) sem numeroPedidoLoja`);
+    /* 13/09 — PORTE DA GIRASSOL (decisão do dono: "uma tem, agora ambas têm"). 1ª tentativa:
+       envio NATIVO do Bling → marketplace. O Bling é integrador oficial do ML e faz o
+       handshake fiscal que o push cru de XML não faz. Isto aqui é o REENVIO MANUAL, ou seja,
+       o caso em que o automático já falhou — antes, esta empresa só repetia o mesmo push que
+       não tinha funcionado. O push direto continua como reserva. */
+    try {
+      const result = await enviarNFeParaLojaVirtual(tokenBling, nfeId);
+      marcarProcessado('F3', nfeId);
+      _semPendenciaCount.delete(nfeId);
+      return { ok: true, via: 'bling-loja-virtual', nfeId, numero: nf.numero, result };
+    } catch (eBling) {
+      if (eBling.code === 401 || eBling.message === 'TOKEN_EXPIRADO') throw eBling;
+      console.warn(`[AMB F3-NFeML] envio nativo Bling falhou NF ${nfeId}: ${eBling.message} — tentando push direto no ML`);
 
-    const mlToken = await garantirTokenML();
-    const result = await enviarNFeParaML(mlToken, nf.numeroPedidoLoja, nf);
-    marcarProcessado('F3', nfeId);
-    _semPendenciaCount.delete(nfeId);
-    return { ok: true, nfeId, numero: nf.numero, numeroPedidoLoja: nf.numeroPedidoLoja, result };
+      if (!nf.numeroPedidoLoja) {
+        throw new Error(`Bling enviar-loja-virtual falhou (${eBling.message}) e NF sem numeroPedidoLoja pro fallback`);
+      }
+      const mlToken = await garantirTokenML();
+      try {
+        const result = await enviarNFeParaML(mlToken, nf.numeroPedidoLoja, nf);
+        marcarProcessado('F3', nfeId);
+        _semPendenciaCount.delete(nfeId);
+        return { ok: true, via: 'ml-direto (bling falhou)', nfeId, numero: nf.numero, numeroPedidoLoja: nf.numeroPedidoLoja, result };
+      } catch (eML) {
+        throw new Error(`Ambos falharam — Bling: [${eBling.message}] | ML: [${eML.message}]`);
+      }
+    }
   });
 }
 
