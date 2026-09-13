@@ -306,11 +306,15 @@ function _urlStatus(req, caminho, extra, chave) {
     const host = (req && req.headers && (req.headers['x-forwarded-host'] || req.headers.host)) || '';
     const proto = (req && req.headers && req.headers['x-forwarded-proto']) || 'https';
     const base = host ? (proto + '://' + host) : '';
-    // Codex (P2): quem dispara com ?k=<chave> e sem sessão recebia um link com o texto
-    // "SUA_ADMIN_KEY" — que não abre. O link tem que funcionar pra quem o recebeu: se veio com
-    // chave, ela volta; se foi por sessão (o cookie acompanha o clique), fica sem chave nenhuma.
-    const k = chave ? ('&k=' + encodeURIComponent(chave)) : '';
-    return base + caminho + '?status=1' + (extra || '') + k;
+    /* 13/09 — A CHAVE NÃO VOLTA MAIS NA RESPOSTA. Uma versão anterior devolvia a chave
+       recebida pra o link "funcionar no clique", e o efeito colateral apareceu na prática:
+       a ADMIN_KEY passou a sair em toda resposta de disparo e foi parar em print, chat e
+       log — o dono notou e teve razão. Conveniência de um clique não paga o vazamento de
+       uma credencial que abre TODAS as rotas de admin. O link vai sem chave; quem abriu
+       por sessão (cookie) clica e funciona, e quem usa chave acrescenta a sua.
+       Codex (P1, PR#399): esta cópia local (GOOD nunca migrou pra lib/checkout/shopee-sessao.js)
+       tinha ficado de fora do conserto — a chave voltava só aqui. */
+    return base + caminho + '?status=1' + (extra || '');
   } catch (e) { return caminho + '?status=1'; }
 }
 
