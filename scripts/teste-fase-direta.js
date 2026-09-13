@@ -13,11 +13,11 @@ const { criarFaseDireta } = require('../lib/checkout/fase-direta');
 
   // a empresa chega na chamada do serviço da Shopee (não pode consultar a loja errada)
   let urlVista = null;
-  global.fetch = async (u) => { urlVista = String(u); throw new Error('rede fechada no teste'); };
+  const _fetchFake = async (u) => { urlVista = String(u); throw new Error('rede fechada no teste'); };
   const _vsy = {};
   const fase = criarFaseDireta({
     empresa: 'girassol', mlTokenManager: () => ({ garantirTokenML: async () => null }),
-    shopeeKey: 'K', shopeeUrlEnv: 'https://servico', adminKey: 'A', porta: 3000, log: () => {},
+    shopeeKey: 'K', shopeeUrlEnv: 'https://servico', adminKey: 'A', porta: 3000, fetch: _fetchFake, log: () => {},
   });
   await fase({ _vsy, atual: {}, isoD: (d) => d.toISOString().slice(0, 10), json: () => {},
                writeJson: () => {}, F: '/tmp/x.json', hoje: new Date(), fim: new Date(), magEmpresa: 'girassol' });
@@ -25,5 +25,19 @@ const { criarFaseDireta } = require('../lib/checkout/fase-direta');
   assert.ok(String(urlVista || '').includes('/girassol/'), 'a fase tem que consultar a loja da PRÓPRIA empresa: ' + urlVista);
   // falha de canal vira diagnóstico, não silêncio
   assert.ok(_vsy.shopee_direto && _vsy.shopee_direto.erro, 'falha da Shopee tem que deixar rastro no status: ' + JSON.stringify(_vsy));
-  console.log('OK: fase direta — exige deps, consulta a loja da própria empresa e registra a falha em vez de silenciar');
+
+  // Codex P1: quando a loja da Shopee é configurada separado da empresa (caso da AMB, que
+  // roda como 'amb' mas a loja no serviço pode ter outro slug), a URL usa a LOJA — não o nome
+  // interno da empresa.
+  let urlVista2 = null;
+  const fase2 = criarFaseDireta({
+    empresa: 'amb', mlTokenManager: () => ({ garantirTokenML: async () => null }),
+    shopeeKey: 'K', shopeeUrlEnv: 'https://servico', shopeeLoja: 'loja-diferente',
+    adminKey: 'A', porta: 3000, fetch: async (u) => { urlVista2 = String(u); throw new Error('rede fechada no teste'); }, log: () => {},
+  });
+  await fase2({ _vsy: {}, atual: {}, isoD: (d) => d.toISOString().slice(0, 10), json: () => {},
+                writeJson: () => {}, F: '/tmp/x.json', hoje: new Date(), fim: new Date(), magEmpresa: 'amb' });
+  assert.ok(String(urlVista2 || '').includes('/loja-diferente/'), 'shopeeLoja tem que valer sobre o nome da empresa: ' + urlVista2);
+
+  console.log('OK: fase direta — exige deps, consulta a loja da própria empresa (ou a LOJA configurada) e registra a falha em vez de silenciar');
 })().catch(e => { console.error('FALHOU:', e.message); process.exit(1); });

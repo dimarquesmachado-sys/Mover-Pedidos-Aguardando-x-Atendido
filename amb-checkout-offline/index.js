@@ -7887,8 +7887,10 @@ const _faseDireta = require('../lib/checkout/fase-direta').criarFaseDireta({
   mlTokenManager: () => require('../ambtotal/mlTokenManager'),
   shopeeKey: process.env.AMBBKP_SHOPEE_SYNC_KEY || process.env.SHOPEE_SYNC_KEY || '',
   shopeeUrlEnv: process.env.AMBBKP_SHOPEE_SYNC_URL || process.env.SHOPEE_SYNC_URL || 'https://girassol-shopee-sync-organizar-envio.onrender.com',
+  shopeeLoja: process.env.AMBBKP_SHOPEE_SYNC_LOJA || 'amb',   // Codex P1: a URL do serviço Shopee usa a LOJA configurada, não o nome da empresa
   adminKey: process.env.ADMIN_KEY || '',
   porta: process.env.PORT || 3000,
+  fetch,   // Codex P2: o MESMO node-fetch (com suporte a `timeout`) que o resto do arquivo usa
   log: console.log,
 });
 const _rotaDeParaSku = require('../lib/checkout/rota-depara-sku').criarRotaDeParaSku({
