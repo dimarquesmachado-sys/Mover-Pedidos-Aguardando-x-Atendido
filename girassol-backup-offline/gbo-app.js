@@ -47,6 +47,52 @@ const path  = require('path');
    lida quando a função roda. */
 const _impLib = require('../lib/imposto-cancelados');
 const _ctxImp = {
+  /* 13/09: a varredura de cancelados passa a perguntar à SHOPEE (fonte da verdade) além do
+     Bling (espelho). As duas funções abaixo são a ponte: uma lista o que o marketplace
+     cancelou no período, a outra deixa a lib achar o pedido no índice pelo número da loja.
+     Sem env do serviço, a lib simplesmente não chama — e a varredura segue como antes. */
+  canceladosNoMarketplace: async (dias) => {
+    /* Codex #391: a env documentada da casa é SHOPEE_SYNC_URL; ignorá-la mandaria o pedido
+       pro host fixo mesmo quando o deploy aponta pra outro lugar. */
+    const url = process.env.GBO_SHOPEE_SYNC_URL || process.env.SHOPEE_SYNC_URL || 'https://girassol-shopee-sync-organizar-envio.onrender.com';
+    const key = process.env.GBO_SHOPEE_SYNC_KEY || process.env.SHOPEE_SYNC_KEY || '';
+    if (!key) return [];
+    const loja = process.env.GBO_SHOPEE_SYNC_LOJA || 'girassol';
+    const r = await fetch(url + '/' + loja + '/interno/cancelados?dias=' + Math.min(60, Number(dias) || 30) + '&k=' + encodeURIComponent(key), { timeout: 60000 });
+    const j = await r.json().catch(() => null);
+    if (!j || !j.ok) throw new Error((j && j.erro) || ('HTTP ' + r.status));
+    return j.order_sns || [];
+  },
+  /* o índice de vendas do dia vive em _vendas_dia.json (nome lido no arquivo, não chutado:
+     a 1ª versão usou um IDX_FILE inexistente e o lint acusaria na hora). A lib recebe um
+     mapa por número do pedido na loja e o gravador, pra marcação sobreviver ao restart.
+     Codex #391 (2ª leitura, P1): o mapa é por ARRAY — o Bling pode ter mais de um pedido com
+     o mesmo numero_loja (duplicata, o mesmo caso que lib/bling-duplicatas.js caça); um mapa
+     escalar mantinha só o último e deixava o(s) outro(s) contando faturamento e imposto. */
+  indicePorNumeroLoja: () => {
+    const idx = {};
+    try {
+      const at = readJson(path.join(CACHE_DIR, '_vendas_dia.json'), {});
+      for (const v of Object.values(at)) { const nl = v && String(v.numero_loja || '').trim(); if (nl) (idx[nl] = idx[nl] || []).push(v); }
+      idx.__arquivo = at;
+    } catch (e) {}
+    return idx;
+  },
+  gravarIndice: (mapa) => {
+    try { if (mapa && mapa.__arquivo) writeJson(path.join(CACHE_DIR, '_vendas_dia.json'), mapa.__arquivo); } catch (e) {}
+  },
+  /* Codex #391 (2ª leitura, P1): tombstone persistente por numero_loja — sem isso, um
+     backfill (que reconstrói o período direto do Bling) não tinha como saber que a Shopee
+     já cancelou um pedido que o Bling ainda mostra como válido, e a venda fantasma
+     reaparecia, inclusive fora da janela de 45 dias que a varredura de cancelados cobre. */
+  marcarCanceladoMkt: (numeroLoja) => {
+    try {
+      const arq = path.join(CACHE_DIR, '_cancelados_shopee.json');
+      const at = readJson(arq, {});
+      at[numeroLoja] = new Date().toISOString();
+      writeJson(arq, at);
+    } catch (e) {}
+  },
   get blingGet()          { return blingGet; },
   get readJson()          { return readJson; },
   get garantirToken()     { return garantirToken; },
@@ -4606,6 +4652,12 @@ async function backfillVendas(de, ate, empresa, ctx){
   _backfill = { rodando:true, empresa, de, ate, pagina:0, pedidos:0, itens:0, gravados:0, erros:0, fase:'preparando', inicio:new Date().toISOString(), fim:null, msg:'' };
   try { await garantirSitCancel(async p2 => await _blingGet(p2)); } catch (e) {}
   const jaNoBling = new Set();   // 02/08: números de venda que o Bling JÁ trouxe — impede duplicar quando o ML entrar depois   // 01/08: IDs de cancelamento p/ o filtro abaixo
+  /* Codex #391 (2ª leitura, P1): tombstone da varredura de cancelados (lib/imposto-cancelados)
+     — pedidos que a SHOPEE já cancelou e o Bling, por ser espelho, pode não ter acompanhado.
+     Sem consultar isso aqui, o backfill reconstrói o período só pela situação do Bling e traz
+     de volta a venda fantasma (faturamento + imposto), inclusive fora da janela de 45 dias
+     que a varredura cobre. */
+  const canceladosMkt = new Set(Object.keys(_readJson(path.join(_CACHE_DIR, '_cancelados_shopee.json'), {})));
   const dorme = ms => new Promise(r=>setTimeout(r,ms));
   try {
     const custos = _readJson(path.join(_CACHE_DIR,'_custos.json'), {});
@@ -4771,12 +4823,17 @@ async function backfillVendas(de, ate, empresa, ctx){
         // jaNoBling. Resultado: pedido CANCELADO no Bling era pulado, o ML ainda o dava como
         // "paid", e a parte do marketplace o trazia de volta — desfazendo a limpeza de cancelados.
         // Agora basta o Bling CONHECER a venda pra que o ML não a acrescente.
-        { const nl0 = String((p && p.numeroLoja) || '').trim(); if (nl0) jaNoBling.add(nl0); }
+        const nl0 = String((p && p.numeroLoja) || '').trim();
+        if (nl0) jaNoBling.add(nl0);
         if(dtP && (dtP < de || dtP > ate)){ foraDoPeriodo++; continue; }   // TRAVA: só o período pedido (caso o filtro do Bling falhe)
         // 01/08 — CONSERTADO: o teste antigo era /cancel/i em situacao.valor, mas o Bling manda
         // valor NUMÉRICO (0/1) e não manda nome na listagem — nunca dava true, e cancelado entrava
         // no histórico somando faturamento e lucro. Agora compara com os IDs descobertos no Bling.
         if (_sitCancel.ids.length && _sitCancel.ids.indexOf(Number(p.situacao && p.situacao.id)) >= 0) { _backfill.cancelados = (_backfill.cancelados||0) + 1; continue; }
+        // Codex #391 (2ª leitura, P1): o Bling é espelho — se a Shopee já cancelou e o Bling
+        // não acompanhou, a checagem acima não pega. O tombstone gravado pela varredura de
+        // cancelados (marcarCanceladoMkt) é a segunda checagem, pela fonte da verdade.
+        if (nl0 && canceladosMkt.has(nl0)) { _backfill.cancelados = (_backfill.cancelados||0) + 1; continue; }
         _backfill.pedidos++;
         // ── 05/08: RETRY NO DETALHE (o buraco que faltava) ────────────────────────────
         // A LISTAGEM já era tentada 6x desde o b104, mas o DETALHE de cada pedido era uma
