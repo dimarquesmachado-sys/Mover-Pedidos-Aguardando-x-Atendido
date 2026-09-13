@@ -16,7 +16,7 @@ assert.throws(() => criarNfTokenManager({ rotulo: 'X' }), /falta /);
 
 const api = criarNfTokenManager({
   rotulo: 'X', envTokenFile: 'X_NF_TOKEN_FILE', arquivoToken: '/tmp/x-nf.json',
-  envId: 'X_ID', envSecret: 'X_SEC', envRedirect: 'X_URI',
+  envId: 'X_ID', envSecret: 'X_SEC', envRedirect: 'X_URI', rotaSetup: '/x/setup-nf',
 });
 assert.deepStrictEqual(Object.keys(api).sort(), ['garantirTokenNF', 'gerarTokenInicialNF', 'renovarTokenNF']);
 
