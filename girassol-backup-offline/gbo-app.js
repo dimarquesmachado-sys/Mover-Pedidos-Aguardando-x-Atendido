@@ -3308,7 +3308,7 @@ function routes(readBody) {
       const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
       const sessC = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || (sessC && ehAdmin(sessC)))) { json(res, 404, { error: 'not found' }); return true; }
-      if (urlObj.searchParams.get('status')) { json(res, 200, { ok: true, rodando: !!_cst.rodando, progresso: _cst.feitos + '/' + _cst.total, ok_ate_agora: _cst.ok, falhas: _cst.falhas, inicio: _cst.inicio, diario: _cstDiario.ultimo, diario_dia_fechado: _diaFechadoDoDisco() }); return true; }
+      if (urlObj.searchParams.get('status')) { json(res, 200, { ok: true, rodando: !!_cst.rodando, progresso: _cst.feitos + '/' + _cst.total, ok_ate_agora: _cst.ok, falhas: _cst.falhas, falhas_detalhe: _cst.falhas_detalhe || [], inicio: _cst.inicio, diario: _cstDiario.ultimo, diario_dia_fechado: _diaFechadoDoDisco() }); return true; }
       const skuProbe = urlObj.searchParams.get('sku');
       if (skuProbe && urlObj.searchParams.get('raw')) {
         // raio-X do que o Bling devolve pra esse SKU (pra entender custo faltando)
@@ -6053,7 +6053,18 @@ async function vendasSync() {
 
 // ═══ CUSTO-SYNC (background): resolve custo/preço de TODOS os SKUs vendidos, devagar (anti-429),
 // e grava em cache PERMANENTE em disco (_custos.json, validade 7d). O sku-info lê daqui — instantâneo.
-let _cst = { rodando: false, feitos: 0, total: 0, ok: 0, falhas: 0, inicio: null };
+let _cst = { rodando: false, feitos: 0, total: 0, ok: 0, falhas: 0, inicio: null, falhas_detalhe: [] };
+/* 13/09 — A FALHA AGORA SE IDENTIFICA. Toda rodada do custo-sync fechava com "falhas: 1" e
+   nada mais: sem SKU nem motivo, não dava pra saber se era um produto irrelevante ou
+   justamente um que decide margem — o dono perguntou por isso mais de uma vez e a resposta
+   honesta era "não sei". Guarda as últimas 10, com hora, e o ?status=1 mostra. */
+function _anotarFalhaCusto(sku, motivo) {
+  try {
+    if (!Array.isArray(_cst.falhas_detalhe)) _cst.falhas_detalhe = [];
+    _cst.falhas_detalhe.unshift({ sku: String(sku || '?'), motivo: String(motivo || '?'), em: new Date().toISOString() });
+    if (_cst.falhas_detalhe.length > 10) _cst.falhas_detalhe.length = 10;
+  } catch (e) {}
+}
 
 /* ── CUSTO DIÁRIO INCREMENTAL (09/09, v3 pós-Codex) ──────────────────────────────
    Module-level de propósito: a rota ?status=1 vive em função irmã (o Codex pegou o
@@ -6165,7 +6176,7 @@ async function custoSync(fresh) {
     return _prof[sk0];
   };
   alvos.sort((x, y) => _profDe(x, 0) - _profDe(y, 0));
-  _cst = { rodando: true, feitos: 0, total: alvos.length, ok: 0, falhas: 0, inicio: new Date().toISOString() };
+  _cst = { rodando: true, feitos: 0, total: alvos.length, ok: 0, falhas: 0, inicio: new Date().toISOString(), falhas_detalhe: [] };
   console.log('[CUSTO] sync iniciando — ' + alvos.length + ' SKU(s) a resolver (tartaruga: ~1,2s/chamada)');
   const dorme = ms => new Promise(r => setTimeout(r, ms));
   const bg2 = async (pth) => { for (let t = 0; t < 4; t++) { const r = await blingGet(pth); if (r && r.ok) return r; await dorme(1500 + t * 700); } return await blingGet(pth); };
@@ -6295,8 +6306,8 @@ async function custoSync(fresh) {
         if (_custoNovo != null) { try { registrarCustoVigente(sku, _custoNovo, 'bling'); } catch (e) {} }
         else if (_conclusivo && _antigo && _antigo.custo != null) { try { registrarCustoVigente(sku, null, 'remocao-bling'); } catch (e) {} }
         _cst.ok++;
-      } else { _cst.falhas++; }
-    } catch (e) { _cst.falhas++; }
+      } else { _cst.falhas++; _anotarFalhaCusto(sku, 'o Bling não devolveu o produto (resposta sem dados)'); }
+    } catch (e) { _cst.falhas++; _anotarFalhaCusto(sku, String((e && e.message) || e).slice(0, 160)); }
     _cst.feitos++; desdeGravei++;
     if (desdeGravei >= 10) { desdeGravei = 0; try { writeJson(path.join(CACHE_DIR, '_custos.json'), cc); } catch (e) {} }
     await dorme(1200);
