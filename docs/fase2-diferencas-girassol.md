@@ -20,24 +20,33 @@ desalinha e infla a contagem)*
 o fiscal dela seguiu outro caminho. Isso não é "código velho" por definição — em pelo menos um
 ponto, o caminho dela é o **mais correto**.
 
-## Achado principal: o F3 da Girassol usa o envio NATIVO do Bling
+## Achado principal: o envio MANUAL da Girassol usa o caminho nativo do Bling
 
-No `nfeMlFluxo.js` da Girassol, a primeira tentativa de mandar a NF-e ao Mercado Livre é
-`enviarNFeParaLojaVirtual` — o envio nativo Bling → marketplace. O push de XML cru é só a
-reserva. O comentário no código explica a razão:
+> **Correção (Codex, revisão do PR #409).** A primeira versão deste documento dizia que "o
+> F3 da Girassol" usava o caminho nativo. Está errado e a diferença importa para a decisão:
+> o caminho nativo vive em `enviarNFeUnica` (linha 219 — o envio **manual**, disparado por
+> rota). A rotina agendada é `rotinaNFeML`, que o cron chama a cada 10 min, e ela manda com
+> `enviarNFeParaML` — o push direto, igual às outras duas empresas. Conferido no código antes
+> de aceitar o apontamento.
+
+No envio manual da Girassol, a primeira tentativa é `enviarNFeParaLojaVirtual` — o envio
+nativo Bling → marketplace. O push de XML cru é só a reserva. O comentário no código explica:
 
 > o Bling é integrador oficial do ML e faz o handshake fiscal que o push cru de XML não faz —
 > é o caminho correto.
 
 **AMB e GOOD não têm essa função** (`enviarNFeParaLojaVirtual` não existe no `blingApi.js`
-delas). Ou seja: nas duas, o F3 vai direto pelo caminho reserva.
+delas), embora tenham o `enviarNFeUnica`. Ou seja: no envio manual, a Girassol tenta o caminho
+oficial antes; as outras duas só têm o push direto. **Na rotina automática, as três se
+comportam igual.**
 
 ### O que isso significa na prática
 
-Não é um bug silencioso — as NFs chegam ao ML nas três empresas. Mas é assimetria fiscal:
-a Girassol tenta primeiro o caminho oficial e cai no alternativo; as outras duas só têm o
-alternativo. Se o push de XML falhar por algo que o handshake nativo resolveria, na Girassol
-a NF passa e nas outras não.
+Não é um bug silencioso — as NFs chegam ao ML nas três empresas, e a rotina automática é
+idêntica nas três. A assimetria aparece **quando alguém reenvia uma NF à mão**, que costuma
+ser justamente o caso em que o envio automático já falhou: aí a Girassol ainda tem uma
+segunda via (o handshake oficial do Bling) e a AMB/GOOD não têm — repetem o mesmo push que
+já não funcionou.
 
 ### Decisão que cabe ao dono
 
@@ -64,3 +73,8 @@ sem arriscar comportamento que ninguém decidiu mudar.
 - `tokenManager.js` da Girassol guarda tokens em `data/tokens.json` **relativo ao módulo**,
   enquanto AMB/GOOD usam `/data/<empresa>/`. Isso é caminho de disco, não regra — mas mexer
   nele sem migrar o arquivo existente derrubaria a autenticação da empresa mais antiga.
+- **(Codex #409)** o `tokenManager.js` da Girassol também **persiste o vencimento do token**
+  (`expira_em`, gravado a partir de `expires_in`) para renovar de forma proativa sem gastar
+  uma chamada-teste a cada uso. AMB e GOOD não guardam isso. É comportamento real, não
+  rótulo: ao extrair o passo 2.8, ou o campo vira parte da lib (e as outras passam a
+  aproveitá-lo) ou ele se perde em silêncio.

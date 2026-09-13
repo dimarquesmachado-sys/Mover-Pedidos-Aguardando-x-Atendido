@@ -50,9 +50,9 @@ arriscado. Cada linha é um PR.
 | 2.3 | `mlTokenManager.js` | 140 | 90% | 85% | ✅ PR #408 — só env/rótulo; teste guarda o ISOLAMENTO (token trocado fala com a conta errada em silêncio) |
 | 2.4 | `nfeMlFluxo.js` | 227 | 92% | 83% | ⚠️ PARADO — a Girassol usa o envio NATIVO do Bling e AMB/GOOD não; ver [diferenças da Girassol](fase2-diferencas-girassol.md) |
 | 2.5 | `mlApi.js` | 119 | 88% | 81% | ⚠️ depende da decisão do 2.4 |
-| 2.6 | `nfTokenManager.js` | 158 | 84% | 80% | ⚠️ depende da decisão do 2.4 |
+| 2.6 | `nfTokenManager.js` | 158 | 84% | 80% | ⬜ LIBERADO — não depende do 2.4 (nenhum nfeMlFluxo importa o nfTokenManager) |
 | 2.7 | `blingApi.js` | 202 | 90% | 78% | ⚠️ depende da decisão do 2.4 |
-| 2.8 | `tokenManager.js` | 148 | 88% | 74% | ⚠️ depende da decisão do 2.4 |
+| 2.8 | `tokenManager.js` | 148 | 88% | 74% | ⚠️ atenção: a Girassol persiste `expira_em` (renovação proativa) — não perder na extração |
 | 2.9 | `index.js` + `fluxos.js` | 534 | 78% | 54-60% | ⬜ — aqui mora a diferença REAL |
 
 **Receita de cada passo** (a que funcionou no 2.1, para repetir sem improviso):
