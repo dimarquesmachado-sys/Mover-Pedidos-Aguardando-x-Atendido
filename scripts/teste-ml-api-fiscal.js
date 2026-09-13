@@ -1,33 +1,37 @@
 'use strict';
-/* Passo 2.5 (13/09): o cliente ML fiscal de AMB e GOOD virou peça única — elas diferiam por
-   UM comentário. A Girassol ficou de fora de propósito, e este teste guarda os dois lados:
-     • AMB e GOOD mantêm exatamente as 4 funções de antes e cada uma com o próprio rótulo
-       (sem ele, erro do ML não diz de qual CNPJ é);
-     • a Girassol continua INTACTA, com as funções dela — inclusive a que as outras não têm.
-   O teste falha se alguém unificar a Girassol sem decisão, que é o risco real aqui. */
+/* Passo 2.5 (13/09), versão UNIÃO. O dono cravou o critério ao ver a primeira medição:
+   "uma tem, outra não; agora ambas têm". Então este teste deixou de guardar a SEPARAÇÃO
+   (que era o estado provisório de algumas horas atrás) e passa a guardar o contrário:
+     • as TRÊS empresas expõem o mesmo conjunto de funções — nenhuma fica sem capacidade
+       que outra tem, que era a dívida silenciosa entre elas;
+     • cada uma mantém o próprio rótulo no log, senão erro do ML não diz de qual CNPJ é.
+   Teste que guarda decisão velha é pior que teste nenhum: ele impede a decisão nova. */
 const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
 const { criarMlApi } = require('../lib/fiscal/ml-api');
 
+const UNIAO = ['baixarXmlNFe', 'enviarNFeParaML', 'getShipmentInfo', 'getShipmentRaw', 'getShipmentSubstatus'];
+
 assert.throws(() => criarMlApi({}), /falta rotulo/);
-const api = criarMlApi({ rotulo: 'X' });
-assert.deepStrictEqual(Object.keys(api).sort(), ['baixarXmlNFe', 'enviarNFeParaML', 'getShipmentInfo', 'getShipmentSubstatus']);
+assert.deepStrictEqual(Object.keys(criarMlApi({ rotulo: 'X' })).sort(), UNIAO);
 
-const amb = require('../ambtotal/mlApi.js');
-const good = require('../good/mlApi.js');
-const gir = require('../girassol/mlApi.js');
+for (const emp of ['ambtotal', 'good', 'girassol']) {
+  const m = require('../' + emp + '/mlApi.js');
+  assert.deepStrictEqual(Object.keys(m).sort(), UNIAO, emp + ' não tem a união das funções');
+}
 
-assert.deepStrictEqual(Object.keys(amb).sort(), Object.keys(good).sort(), 'as gêmeas têm que seguir idênticas');
+/* getShipmentRaw veio da Girassol; baixarXmlNFe existia nas três mas ela não exportava.
+   Os dois casos são a mesma dívida vista de lados opostos. */
+for (const emp of ['ambtotal', 'good', 'girassol']) {
+  const m = require('../' + emp + '/mlApi.js');
+  assert.strictEqual(typeof m.getShipmentRaw, 'function', emp + ' precisa do getShipmentRaw (veio da Girassol)');
+  assert.strictEqual(typeof m.baixarXmlNFe, 'function', emp + ' precisa exportar baixarXmlNFe');
+}
 
-/* a Girassol tem getShipmentRaw (as outras não) e NÃO tem baixarXmlNFe (as outras têm) —
-   cada lado tem uma função que falta no outro. Está documentado em
-   docs/fase2-diferencas-girassol.md e é decisão do dono, não de refatoração. */
-assert.ok(typeof gir.getShipmentRaw === 'function', 'a Girassol tem getShipmentRaw — não pode sumir numa unificação');
-assert.ok(typeof amb.getShipmentRaw === 'undefined', 'se a AMB ganhou getShipmentRaw, foi decisão? então atualize o documento');
-assert.ok(typeof amb.baixarXmlNFe === 'function', 'AMB/GOOD têm baixarXmlNFe');
-assert.ok(typeof gir.baixarXmlNFe === 'undefined', 'se a Girassol ganhou baixarXmlNFe, foi decisão? então atualize o documento');
+const rot = ['ambtotal', 'good', 'girassol'].map(p =>
+  (/rotulo: '([^']+)'/.exec(fs.readFileSync(path.join(__dirname, '..', p, 'mlApi.js'), 'utf8')) || [])[1]);
+assert.ok(rot.every(Boolean), 'toda fachada declara rótulo: ' + rot.join(', '));
+assert.strictEqual(new Set(rot).size, 3, 'os rótulos têm que ser distintos: ' + rot.join(', '));
 
-const fs = require('fs'); const path = require('path');
-const rot = ['ambtotal', 'good'].map(p => (/rotulo: '([^']+)'/.exec(fs.readFileSync(path.join(__dirname, '..', p, 'mlApi.js'), 'utf8')) || [])[1]);
-assert.strictEqual(new Set(rot).size, 2, 'AMB e GOOD precisam de rótulos distintos no log: ' + rot.join(', '));
-
-console.log('OK: cliente ML fiscal — gêmeas unificadas com rótulo próprio, e a Girassol intacta com as funções que só ela tem');
+console.log('OK: cliente ML fiscal — as TRÊS empresas com a união das funções e rótulo próprio');

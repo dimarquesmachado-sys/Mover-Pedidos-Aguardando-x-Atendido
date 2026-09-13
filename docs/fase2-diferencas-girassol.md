@@ -72,13 +72,33 @@ decisão acima for tomada. É menos bonito que "uma lib para as três de uma vez
 honesto: a duplicação some onde não há comportamento em disputa, sem arriscar o que ninguém
 decidiu mudar.
 
+## ✅ DECISÃO DO DONO (13/09): união, não interseção
+
+> "uma tem outra não, agora ambas tem. e vai turbinando e melhorando."
+
+O critério vale para todas as diferenças listadas neste documento: **capacidade que existe
+numa empresa é portada para as outras**, em vez de apagada ou deixada de lado. O objetivo
+declarado: empresa nova (ou o dashboard da GOOD) entrar sem redundância, sem quebrar e sem
+faltar peça.
+
+Aplicado até agora:
+
+- **`mlApi.js` (passo 2.5)** — `getShipmentRaw`, que era só da Girassol, passou às três; o
+  `baixarXmlNFe`, que existia nas três mas a Girassol não exportava, passou a ser exportado
+  por todas. ✅ feito.
+- **envio nativo do Bling no reenvio manual** — pendente de portar para AMB e GOOD.
+- **`expira_em` (renovação proativa do token)** — pendente de portar para AMB e GOOD.
+- **caminho do arquivo de token da Girassol** — não é capacidade, é estado: preservar, não unificar.
+
 ## Achado do passo 2.5: cada lado tem uma função que falta no outro
 
 No `mlApi.js`, medido em 13/09:
 
 - a **Girassol** tem `getShipmentRaw` (devolve o shipment cru) e retorna o `status` do envio
   além do substatus — a AMB e a GOOD não têm nem uma coisa nem outra;
-- a **AMB e a GOOD** têm `baixarXmlNFe`, que **a Girassol não tem**.
+- a **AMB e a GOOD** exportam `baixarXmlNFe`; a Girassol **tem a função, mas não exportava**
+  (correção: a primeira versão deste parágrafo dizia que ela não tinha — conferido depois no
+  código, e a diferença era só o export).
 
 Não é hierarquia de "mais moderna": as três seguiram caminhos diferentes e cada uma ganhou
 uma peça que as outras não ganharam. Unificar sem decidir apagaria uma das duas pontas.
