@@ -14,4 +14,5 @@ module.exports = criarMlTokenManager({
   envClientId: 'AMB_ML_CLIENT_ID',
   envClientSecret: 'AMB_ML_CLIENT_SECRET',
   envRedirect: 'AMB_ML_REDIRECT_URI',
+  rotaSetup: '/amb/setup-ml',
 });

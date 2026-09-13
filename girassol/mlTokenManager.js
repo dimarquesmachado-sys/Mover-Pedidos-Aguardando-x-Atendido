@@ -14,4 +14,6 @@ module.exports = criarMlTokenManager({
   envClientId: 'ML_CLIENT_ID',
   envClientSecret: 'ML_CLIENT_SECRET',
   envRedirect: 'ML_REDIRECT_URI',
+  redirectPadrao: 'https://mover-pedidos-aguardando-x-atendido.onrender.com/callback-ml',
+  rotaSetup: '/setup-ml',
 });

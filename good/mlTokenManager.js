@@ -14,4 +14,5 @@ module.exports = criarMlTokenManager({
   envClientId: 'GOOD_ML_CLIENT_ID',
   envClientSecret: 'GOOD_ML_CLIENT_SECRET',
   envRedirect: 'GOOD_ML_REDIRECT_URI',
+  rotaSetup: '/good/setup-ml',
 });
