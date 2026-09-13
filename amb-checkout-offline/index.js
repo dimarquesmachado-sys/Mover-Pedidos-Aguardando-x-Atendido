@@ -7793,7 +7793,11 @@ async function vendasSync() {
            lados. Agora são duas filas com orçamento próprio: primeira leitura (mais novo
            primeiro, pra saber o valor logo) e reconsolidação (mais ANTIGO primeiro — FIFO,
            quem espera há mais tempo tem prioridade e sai da fila assim que fechar). */
-        const _shCandidatos = Object.values(atual).filter(v => v && v.marketplace === 'shopee' && v.numero_loja && (_shSemLeitura(v) || _shAguardando(v)));
+        /* Codex (P2): pedido cancelado nunca ganha venda_em/tarifa_shopee_v2 (não há escrow a
+           ler), então `_shSemLeitura` continuava true PARA SEMPRE mesmo com escrow_final=1 —
+           ele consumia uma das 12 vagas de primeira leitura em toda passada, faminto pro resto
+           da vida. `!v.cancelado_mkt` tira-o de vez da fila; a Girassol tem o mesmo espelho. */
+        const _shCandidatos = Object.values(atual).filter(v => v && v.marketplace === 'shopee' && v.numero_loja && !v.cancelado_mkt && (_shSemLeitura(v) || _shAguardando(v)));
         const _shSemLeituraLote = _shCandidatos.filter(_shSemLeitura)
           .sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')));
         const _shAguardandoLote = _shCandidatos.filter(v => !_shSemLeitura(v) && _shAguardando(v))
@@ -7805,6 +7809,7 @@ async function vendasSync() {
           if (jS && jS.ok && Array.isArray(jS.pedidos)) {
             const porSn = {}; jS.pedidos.forEach(pS => { if (pS && pS.order_sn) porSn[pS.order_sn] = pS; });
             let nS = 0;
+            const cancelS = [];
             for (const v of candS) {
               const pS = porSn[v.numero_loja]; if (!pS) continue;
               /* 13/09 — PEDIDO CANCELADO NA SHOPEE CONTINUAVA CONTANDO COMO VENDA. Caso do
@@ -7817,6 +7822,12 @@ async function vendasSync() {
               if (/cancel/i.test(String(pS.order_status || ''))) {
                 if (!v.cancelado_mkt) { v.cancelado_mkt = 1; v.situacao = v.situacao || 'Cancelado na Shopee'; nS++; }
                 v.escrow_final = 1;   /* não há escrow a esperar: sai da fila */
+                /* Codex (P2): isto só marcava o cache CURTO (_vendas_dia.json, podado em 6 dias
+                   pelo vendasSync). Sem eco no CONFERIDOS_FILE — onde o /status-mkt também grava —
+                   um pedido já bipado voltava a contar receita/imposto/margem no histórico assim
+                   que o cache expirasse, porque o endpoint de histórico zera `h.cancelado` quando
+                   não acha mais o par no cache. */
+                cancelS.push(v.numero);
                 continue;
               }
               if (pS.create_time && v.venda_em == null) { v.venda_em = new Date(Number(pS.create_time) * 1000).toISOString(); nS++; }
@@ -7898,6 +7909,17 @@ async function vendasSync() {
             }
             if (nS) console.log('[VENDAS-SYNC] shopee: hora/comissão real em ' + nS + ' venda(s)');
             writeJson(F, atual);
+            // eco no CONFERIDOS (pedidos já bipados) — mesmo padrão do /status-mkt: sem isto o
+            // cancelamento some do histórico quando o vendasSync poda este cache em 6 dias.
+            if (cancelS.length) {
+              try {
+                const confSh = readJson(CONFERIDOS_FILE, {});
+                const alvoSh = new Set(cancelS.map(x => String(x)));
+                let mexSh = 0;
+                for (const k of Object.keys(confSh)) { const c = confSh[k]; if (c && alvoSh.has(String(c.numero))) { c.cancelado = 1; mexSh++; } }
+                if (mexSh) writeJson(CONFERIDOS_FILE, confSh);
+              } catch (e) {}
+            }
           }
         }
       }
