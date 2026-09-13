@@ -3722,7 +3722,11 @@ function renderAnalise(){
   })();
   garantirNomes(pagPL);   // busca os nomes que faltarem e redesenha
   renderCardsVenda(pagPL.map(function(x){
-    const h=x.h, P=x.P; const _vd=new Date(String(h.venda_dia||h.data||'')); const _frPend=(P.mc!=null&&P.frV==null&&!h._cancelado&&!h.escrow_final&&isFinite(_vd.getTime())&&(Date.now()-_vd.getTime())<10*86400000); /* Codex #365: expira em 10 dias — frV null antigo é frete zero legítimo */
+    const h=x.h; let P=x.P; const _vd=new Date(String(h.venda_dia||h.data||'')); const _frPend=(P.mc!=null&&P.frV==null&&!h._cancelado&&!h.escrow_final&&isFinite(_vd.getTime())&&(Date.now()-_vd.getTime())<10*86400000); /* Codex #365: expira em 10 dias — frV null antigo é frete zero legítimo */
+    /* Codex (P2, PR#394): o card do celular montava venda/custo/M.C. do P original — a mesma
+       venda cancelada que a tabela já zera aqui seguia mostrando número no card, porque essa
+       cópia de P nunca passava pela máscara. Mesma regra da tabela, direto na fonte do card. */
+    if (h._cancelado) P = Object.assign({}, P, { tot: null, rp: null, custo: null, custoOk: false, imposto: null, tarifa: null, frV: null, credito: null, mc: null });
     // 29/07: canais como o TikTok não informam a hora da venda, e o cartão caía pra data — no
     // filtro HOJE isso não diz nada (a data já é hoje). Agora usa a melhor fonte que existir,
     // com um selo dizendo de onde veio: 🧾 hora da NF · 🕘 hora da conferência.
@@ -3748,7 +3752,7 @@ function renderAnalise(){
                                (nomeP?'<div style="color:var(--mut);font-size:11px;font-family:system-ui;font-weight:400;line-height:1.3;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden">'+esc(nomeP)+'</div>':'')+'</div>';
                       }).join('')
                     : '<span class="dim">detalhe a caminho\u2026</span>'),
-             venda:(P.tot!=null?P.tot:(h.valor!=null?Number(h.valor):null)), custo:(P.custo!=null?P.custo:null),
+             venda:(h._cancelado?null:(P.tot!=null?P.tot:(h.valor!=null?Number(h.valor):null))), custo:(P.custo!=null?P.custo:null),
              mc:(P.mc!=null?P.mc:null), frPend:_frPend?1:0, pc:(P.mc!=null&&P.tot?Math.round(P.mc/P.tot*1000)/10:null),
              // 28/07: NÃO somar os componentes na mão. A margem muda de fórmula por canal (Shopee/Magalu
              // com renda líquida já embutem a comissão; no Magalu o frete às vezes é só exibição; há ainda
@@ -3805,7 +3809,7 @@ function renderAnalise(){
     t.n++; if(x.P.rp!=null)t.rp+=x.P.rp; if(x.P.tot!=null)t.tot+=x.P.tot; if(x.P.mc!=null){t.mc+=x.P.mc;t.mcN++;} });
   let _diaAnt = null;
   const linhas = pagPL.map(x=>{
-    const h=x.h, P=x.P; const _vd=new Date(String(h.venda_dia||h.data||'')); const _frPend=(P.mc!=null&&P.frV==null&&!h._cancelado&&!h.escrow_final&&isFinite(_vd.getTime())&&(Date.now()-_vd.getTime())<10*86400000); /* Codex #365: expira em 10 dias — frV null antigo é frete zero legítimo */
+    const h=x.h; let P=x.P; const _vd=new Date(String(h.venda_dia||h.data||'')); const _frPend=(P.mc!=null&&P.frV==null&&!h._cancelado&&!h.escrow_final&&isFinite(_vd.getTime())&&(Date.now()-_vd.getTime())<10*86400000); /* Codex #365: expira em 10 dias — frV null antigo é frete zero legítimo */
     const _d = diaVenda(h);
     let sep = '';
     if(_d !== _diaAnt){
