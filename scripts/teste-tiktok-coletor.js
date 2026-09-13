@@ -22,13 +22,15 @@ const { criarColetorDaEmpresa } = require('../lib/tiktok-financeiro');
   r = await criarColetorDaEmpresa('girassol', { carregarTikTok: () => tkFalso, fs, path })(1);
   assert.ok(/não conectado/.test(r.pulado), 'coletor da girassol não pode usar o token da amb');
 
-  // e quando o token é da própria empresa, chega a chamar a coleta
-  let chamou = null;
-  const libMock = require('../lib/tiktok-financeiro');
-  const orig = libMock.coletarFinanceiro;
-  libMock.coletarFinanceiro = async (ctx, emp, dias) => { chamou = { emp, dias }; return { ok: true }; };
-  try {
-    await criarColetorDaEmpresa('amb', { carregarTikTok: () => tkFalso, fs, path })(7);
-  } finally { libMock.coletarFinanceiro = orig; }
-  console.log('OK: coletor do TikTok por empresa — exige empresa e dependência, pula sem módulo, respeita o token da PRÓPRIA empresa');
+  // com token da própria empresa, a coleta recebe a EMPRESA certa (prova de verdade agora:
+  // a versão anterior trocava o export e não interceptava nada — o Codex pegou)
+  let visto = null;
+  const r2 = await criarColetorDaEmpresa('amb', {
+    carregarTikTok: () => tkFalso, fs, path,
+    coletar: async (ctx, emp, dias) => { visto = { emp, dias }; return { ok: true, marcador: 1 }; },
+  })(7);
+  assert.deepStrictEqual(visto, { emp: 'amb', dias: 7 }, 'a empresa e o período têm que chegar na coleta');
+  assert.strictEqual(r2.marcador, 1, 'o resultado da coleta é repassado a quem chamou');
+
+  console.log('OK: coletor do TikTok por empresa — exige empresa e dependência, pula sem módulo, respeita o token da PRÓPRIA empresa e repassa empresa/período pra coleta');
 })().catch(e => { console.error('FALHOU:', e.message); process.exit(1); });
