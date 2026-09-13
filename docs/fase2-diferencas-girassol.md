@@ -55,21 +55,34 @@ já não funcionou.
 2. **Manter como está** se houver razão fiscal para a AMB/GOOD não usarem o envio nativo
    (contrato com o marketplace, regime, natureza da operação).
 
-Enquanto essa decisão não existe, **as peças 2.4 a 2.8 não devem ser unificadas com a
-Girassol** — unificar apagaria o caminho nativo ou o imporia às outras sem decisão.
+Enquanto essa decisão não existe, **`nfeMlFluxo.js` (2.4) e `blingApi.js` (2.7) não devem ser
+unificados com a Girassol** — só esses dois têm código ligado ao caminho nativo; unificar
+apagaria o caminho nativo ou o imporia às outras sem decisão. `mlApi.js` (2.5) e
+`nfTokenManager.js` (2.6) já foram liberados no plano — nenhum dos dois tem código ligado a
+essa escolha (ver "Demais diferenças" abaixo). `tokenManager.js` (2.8) segue à parte, por
+conta do vencimento do token (ver abaixo).
 
 ## Caminho seguro enquanto isso
 
-AMB e GOOD podem ser unificadas **entre si** agora (0 a 20 linhas de diferença), com a
-Girassol permanecendo na própria implementação e entrando na lib quando a decisão acima for
-tomada. É menos bonito que "uma lib para as três", mas é honesto: metade da duplicação some
-sem arriscar comportamento que ninguém decidiu mudar.
+`mlApi.js` (2.5) e `nfTokenManager.js` (2.6) já podem ser unificados **nas três empresas** —
+liberados no plano, sem código ligado à decisão pendente. Para `nfeMlFluxo.js` (2.4) e
+`blingApi.js` (2.7), AMB e GOOD podem ser unificadas **entre si** (0 a 20 linhas de
+diferença), com a Girassol permanecendo na própria implementação e entrando na lib quando a
+decisão acima for tomada. É menos bonito que "uma lib para as três de uma vez", mas é
+honesto: a duplicação some onde não há comportamento em disputa, sem arriscar o que ninguém
+decidiu mudar.
 
 ## Demais diferenças (classificação rápida)
 
-- `mlApi.js`, `blingApi.js`, `tokenManager.js`, `nfTokenManager.js`: o grosso é **nome de env
-  sem prefixo** (a Girassol nasceu antes do padrão) e **rótulo de log**. O registro canônico
-  já resolve os nomes; o rótulo já é parâmetro nas peças unificadas.
+- `mlApi.js`: diff é só **rótulo de log** (`[mlApi]` vs `[AMB mlApi]`) e a lista de exports (a
+  Girassol expõe `getShipmentRaw`, de rota de debug). Não toca `enviarNFeParaLojaVirtual` nem
+  nada ligado ao achado principal — por isso já liberado (2.5).
+- `nfTokenManager.js`: não tem relação com `nfeMlFluxo.js` — nenhuma das três o importa; ele
+  serve o fluxo separado de Corrigir-NFs (`nfFluxos.js` → `nfBlingApi.js`) e rotas de setup.
+  Por isso já liberado (2.6).
+- `blingApi.js`, `tokenManager.js`: o grosso é **nome de env sem prefixo** (a Girassol nasceu
+  antes do padrão) e **rótulo de log**. O registro canônico já resolve os nomes; o rótulo já é
+  parâmetro nas peças unificadas.
 - `tokenManager.js` da Girassol guarda tokens em `data/tokens.json` **relativo ao módulo**,
   enquanto AMB/GOOD usam `/data/<empresa>/`. Isso é caminho de disco, não regra — mas mexer
   nele sem migrar o arquivo existente derrubaria a autenticação da empresa mais antiga.
