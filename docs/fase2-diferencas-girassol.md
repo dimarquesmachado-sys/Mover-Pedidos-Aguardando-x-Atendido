@@ -72,6 +72,17 @@ decisão acima for tomada. É menos bonito que "uma lib para as três de uma vez
 honesto: a duplicação some onde não há comportamento em disputa, sem arriscar o que ninguém
 decidiu mudar.
 
+## Achado do passo 2.5: cada lado tem uma função que falta no outro
+
+No `mlApi.js`, medido em 13/09:
+
+- a **Girassol** tem `getShipmentRaw` (devolve o shipment cru) e retorna o `status` do envio
+  além do substatus — a AMB e a GOOD não têm nem uma coisa nem outra;
+- a **AMB e a GOOD** têm `baixarXmlNFe`, que **a Girassol não tem**.
+
+Não é hierarquia de "mais moderna": as três seguiram caminhos diferentes e cada uma ganhou
+uma peça que as outras não ganharam. Unificar sem decidir apagaria uma das duas pontas.
+
 ## Demais diferenças (classificação rápida)
 
 - `mlApi.js`: diff é só **rótulo de log** (`[mlApi]` vs `[AMB mlApi]`) e a lista de exports (a
