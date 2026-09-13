@@ -5830,6 +5830,18 @@ async function vendasSync() {
             let nS = 0;
             for (const v of candS) {
               const pS = porSn[v.numero_loja]; if (!pS) continue;
+              /* 13/09 — PEDIDO CANCELADO NA SHOPEE CONTINUAVA CONTANDO COMO VENDA. Caso do
+                 dono: o 4645 (260911PBX043JJ) foi cancelado porque o comprador não pagou —
+                 está Cancelado no Bling, sem NF — e mesmo assim aparecia na Análise com
+                 custo 36,00 e imposto 7,93, com tarifa/frete/M.C. em '—' pra sempre, já que
+                 cancelado NUNCA gera escrow. O serviço já devolvia order_status aqui; a fila
+                 só olhava o escrow e ignorava isso. Agora o cancelamento é gravado no índice
+                 e a venda sai do faturamento, do imposto e da margem. */
+              if (/cancel/i.test(String(pS.order_status || ''))) {
+                if (!v.cancelado_mkt) { v.cancelado_mkt = 1; v.situacao = v.situacao || 'Cancelado na Shopee'; nS++; }
+                v.escrow_final = 1;   /* não há escrow a esperar: sai da fila */
+                continue;
+              }
               if (pS.create_time && v.venda_em == null) { v.venda_em = new Date(Number(pS.create_time) * 1000).toISOString(); nS++; }
               const es = pS.escrow || null;
               // ── b121 (06/08): A FÓRMULA CERTA DA SHOPEE ────────────────────────────
