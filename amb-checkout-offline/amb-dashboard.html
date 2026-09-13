@@ -3725,8 +3725,12 @@ function renderAnalise(){
     const h=x.h; let P=x.P; const _vd=new Date(String(h.venda_dia||h.data||'')); const _frPend=(P.mc!=null&&P.frV==null&&!h._cancelado&&!h.escrow_final&&isFinite(_vd.getTime())&&(Date.now()-_vd.getTime())<10*86400000); /* Codex #365: expira em 10 dias — frV null antigo é frete zero legítimo */
     /* Codex (P2, PR#394): o card do celular montava venda/custo/M.C. do P original — a mesma
        venda cancelada que a tabela já zera aqui seguia mostrando número no card, porque essa
-       cópia de P nunca passava pela máscara. Mesma regra da tabela, direto na fonte do card. */
-    if (h._cancelado) P = Object.assign({}, P, { tot: null, rp: null, custo: null, custoOk: false, imposto: null, tarifa: null, frV: null, credito: null, mc: null });
+       cópia de P nunca passava pela máscara. Mesma regra da tabela, direto na fonte do card.
+       Auditando a função inteira achei mais dois campos fora da máscara: freteRec e desconto
+       não entram no cálculo de venda/custo/M.C. acima, mas alimentam o despDet (o texto do
+       tooltip "Taxas, Frete e Imposto") — sem eles aqui, uma cancelada com frete recebido ou
+       desconto do marketplace ainda mostraria número nesse tooltip. */
+    if (h._cancelado) P = Object.assign({}, P, { tot: null, rp: null, custo: null, custoOk: false, imposto: null, tarifa: null, frV: null, credito: null, mc: null, freteRec: null, desconto: null });
     // 29/07: canais como o TikTok não informam a hora da venda, e o cartão caía pra data — no
     // filtro HOJE isso não diz nada (a data já é hoje). Agora usa a melhor fonte que existir,
     // com um selo dizendo de onde veio: 🧾 hora da NF · 🕘 hora da conferência.
