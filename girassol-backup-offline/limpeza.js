@@ -1,4 +1,9 @@
 'use strict';
+
+/* 14/09 (auditoria, P2): a chave passa a ser lida do HEADER primeiro; a query
+   continua aceita porque há dezenas de URLs salvas com &k= — cortar de uma vez
+   quebraria o trabalho de quem opera pelo navegador. */
+const { lerChaveAdmin } = require('../lib/http/chave-admin');
 // ════════════════════════════════════════════════════════════════════════
 //  PODA DO BUCKET DE EXPEDIÇÃO (Supabase Storage) — 05/08/2026
 // ════════════════════════════════════════════════════════════════════════
@@ -79,7 +84,7 @@ function rotasLimpeza(ctx) {
   const dorme = ms => new Promise(r => setTimeout(r, ms));
 
   function admOk(req, urlObj) {
-    const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+    const k = lerChaveAdmin(req, urlObj);
     const s = validarSessao(req.headers['cookie']);
     return (process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || (s && ehAdmin(s));
   }

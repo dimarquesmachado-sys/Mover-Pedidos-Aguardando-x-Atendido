@@ -1,4 +1,9 @@
 'use strict';
+
+/* 14/09 (auditoria, P2): a chave passa a ser lida do HEADER primeiro; a query
+   continua aceita porque há dezenas de URLs salvas com &k= — cortar de uma vez
+   quebraria o trabalho de quem opera pelo navegador. */
+const { lerChaveAdmin } = require('../lib/http/chave-admin');
 // ════════════════════════════════════════════════════════════════════════
 //  GIRASSOL · BACKUP OFFLINE — MÓDULO DE HISTÓRICO E ANÁLISE
 //  (extraído do index.js em 04/08/2026 — Lote 3 da modularização)
@@ -238,7 +243,7 @@ function rotasHistorico(ctx) {
     // Devolve, por SKU: o que vendeu na base, a média por dia, a TENDÊNCIA (últimos 30d x 30d
     // anteriores) e a projeção pra 7 / 30 / 90 / 180 / 365 dias.
     if (method === 'GET' && p === R('previsao-vendas')) {
-      const kP = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const kP = lerChaveAdmin(req, urlObj);
       const sessP = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kP === process.env.ADMIN_KEY) || (sessP && ehAdmin(sessP)))) { json(res, 404, { error: 'not found' }); return true; }
       const baseDias = Math.min(730, Math.max(30, parseInt((urlObj.searchParams && urlObj.searchParams.get('base')) || '180', 10) || 180));
@@ -321,7 +326,7 @@ function rotasHistorico(ctx) {
     // LISTA do histórico, paginada por PEDIDO (o banco guarda 1 linha por ITEM, então agrupa antes).
     // Uso: /girassol-backup-offline/historico-linhas?de=&ate=&off=0&lim=100
     if (method === 'GET' && p === R('historico-linhas')) {
-      const kR = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const kR = lerChaveAdmin(req, urlObj);
       const sessR = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kR === process.env.ADMIN_KEY) || (sessR && ehAdmin(sessR)))) { json(res, 404, { error: 'not found' }); return true; }
       const deR = String((urlObj.searchParams && urlObj.searchParams.get('de')) || '').slice(0, 10);
@@ -485,7 +490,7 @@ function rotasHistorico(ctx) {
     // Agrega no servidor e devolve pronto — o navegador não aguenta 23 mil linhas.
     // Uso: /girassol-backup-offline/historico-longo?de=YYYY-MM-DD&ate=YYYY-MM-DD
     if (method === 'GET' && p === R('historico-longo')) {
-      const kL = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const kL = lerChaveAdmin(req, urlObj);
       const sessL = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kL === process.env.ADMIN_KEY) || (sessL && ehAdmin(sessL)))) { json(res, 404, { error: 'not found' }); return true; }
       const deL = String((urlObj.searchParams && urlObj.searchParams.get('de')) || '').slice(0, 10);
@@ -737,7 +742,7 @@ function rotasHistorico(ctx) {
       // operador logado (estoquista) → itens SEM os campos financeiros (o modal 🕘 do painel
       // só precisa de identificação/etiqueta); sem sessão e sem chave → 401.
       const sessH9 = validarSessao(req.headers['cookie']);
-      const kH9 = urlObj.searchParams.get('k') || '';
+      const kH9 = lerChaveAdmin(req, urlObj);
       const admH9 = (process.env.ADMIN_KEY && kH9 === process.env.ADMIN_KEY) || (sessH9 && ehAdmin(sessH9));
       if (!admH9 && !sessH9) { json(res, 401, { ok: false, erro: 'Sessão necessária. Faça login.' }); return true; }
       const conf = readJson(CONFERIDOS_FILE, {});
@@ -858,7 +863,7 @@ function rotasHistorico(ctx) {
     // devolve total e M.C. prontos do banco. Vírgula/parênteses/aspas saem do termo
     // porque quebram a sintaxe do or=() do PostgREST.
     if (method === 'GET' && p === R('buscar-lucro')) {
-      const kB = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const kB = lerChaveAdmin(req, urlObj);
       const sessB = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kB === process.env.ADMIN_KEY) || (sessB && ehAdmin(sessB)))) { json(res, 404, { error: 'not found' }); return true; }
       const qB = Array.from(String((urlObj.searchParams && urlObj.searchParams.get('q')) || '').trim()).slice(0, 60).join('');   // Codex (P2, PR#128 r9): slice(0,60) corta no meio de emoji/caractere astral e o encodeURIComponent estoura URIError ANTES do try — 500 em vez de resultado. Cortar por CARACTERE, não por unidade UTF-16

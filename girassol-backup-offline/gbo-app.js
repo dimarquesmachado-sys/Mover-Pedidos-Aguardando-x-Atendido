@@ -1,4 +1,9 @@
 'use strict';
+
+/* 14/09 (auditoria, P2): a chave passa a ser lida do HEADER primeiro; a query
+   continua aceita porque há dezenas de URLs salvas com &k= — cortar de uma vez
+   quebraria o trabalho de quem opera pelo navegador. */
+const { lerChaveAdmin } = require('../lib/http/chave-admin');
 // ⚠️ ESTE ARQUIVO ERA O index.js DESTA PASTA — renomeado em 05/08/2026 a pedido do Diego.
 // Motivo: existiam 21 arquivos chamados "index.js" no repositório, e baixar dois deles pra
 // mesma pasta de Downloads já causou incidente (arquivo da AMB subiu dentro da Girassol e
@@ -854,7 +859,7 @@ function routes(readBody) {
           // ?k= do dashboard chama /historico-longo, /previsao-vendas, /plano-compra, /sku-info
           // etc., e todas morriam aqui no 401 antes de a guarda admin própria delas avaliar a
           // chave. Cada rota de dados continua revalidando (chave OU sessão admin) por conta.
-          const _kG = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+          const _kG = lerChaveAdmin(req, urlObj);
           if (process.env.ADMIN_KEY && _kG === process.env.ADMIN_KEY) { req._op = 'admin-key'; }
           else { json(res, 401, { ok: false, erro: 'Sessão necessária. Faça login.' }); return true; }
         } else { req._op = _op; }
@@ -892,7 +897,7 @@ function routes(readBody) {
     if (method === 'GET' && p === '/girassol-backup-offline/nf-travadas') {
       try {
         const trav = require('../lib/nf-travadas');
-        const kT = urlObj.searchParams.get('k') || '';
+        const kT = lerChaveAdmin(req, urlObj);
         const resolver = urlObj.searchParams.get('resolver');
         if (resolver) {
           if (!(process.env.ADMIN_KEY && kT === process.env.ADMIN_KEY)) { json(res, 404, { error: 'not found' }); return true; }
@@ -908,7 +913,7 @@ function routes(readBody) {
     }
 
     if (method === 'GET' && p === '/girassol-backup-offline/duplicatas') {
-      const kD = urlObj.searchParams.get('k') || '';
+      const kD = lerChaveAdmin(req, urlObj);
       if (!(process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY)) { json(res, 404, { error: 'not found' }); return true; }
       const de = urlObj.searchParams.get('de') || '', ate = urlObj.searchParams.get('ate') || '';
       if (!/^\d{4}-\d{2}-\d{2}$/.test(de) || !/^\d{4}-\d{2}-\d{2}$/.test(ate)) {
@@ -1071,7 +1076,7 @@ function routes(readBody) {
       // Codex PR#38 (3ª rodada): "apenas admin" aceita TAMBÉM a ADMIN_KEY — mesma credencial
       // que o gate e as rotas irmãs já honram; sem isso o fluxo ?k= recebia 403 aqui e o
       // dashboard carregava config fiscal default em silêncio (números errados).
-      const _kAdm = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const _kAdm = lerChaveAdmin(req, urlObj);
       const _okAdm = (process.env.ADMIN_KEY && _kAdm === process.env.ADMIN_KEY) || (opSess && ehAdmin(opSess));
       if (!_okAdm) { json(res, 403, { ok: false, erro: 'apenas admin' }); return true; }
       const agora = Date.now();
@@ -1182,7 +1187,7 @@ function routes(readBody) {
       // Codex PR#38 (3ª rodada): "apenas admin" aceita TAMBÉM a ADMIN_KEY — mesma credencial
       // que o gate e as rotas irmãs já honram; sem isso o fluxo ?k= recebia 403 aqui e o
       // dashboard carregava config fiscal default em silêncio (números errados).
-      const _kAdm = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const _kAdm = lerChaveAdmin(req, urlObj);
       const _okAdm = (process.env.ADMIN_KEY && _kAdm === process.env.ADMIN_KEY) || (opSess && ehAdmin(opSess));
       if (!_okAdm) { json(res, 403, { ok: false, erro: 'apenas admin' }); return true; }
       let body = {}; try { const _rb = await readBody(req); body = (_rb && typeof _rb === 'object') ? _rb : JSON.parse(_rb || '{}'); } catch (e) {}
@@ -1276,7 +1281,7 @@ function routes(readBody) {
     // retroativamente. Uso: /girassol-backup-offline/backfill-valores?k=ADMIN_KEY&dias=31
     // Roda em background (~400ms por pedido, respeitando o rate limit). Chame de novo p/ ver o progresso.
     if ((method === 'POST' || method === 'GET') && p === '/girassol-backup-offline/backfill-valores') {
-      const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const k = lerChaveAdmin(req, urlObj);
       if (!process.env.ADMIN_KEY || k !== process.env.ADMIN_KEY) { json(res, 404, { error: 'not found' }); return true; }
       if (_bf.rodando) { json(res, 200, { ok: true, rodando: true, progresso: _bf.feitos + '/' + _bf.total, ok_ate_agora: _bf.ok, falhas: _bf.falhas, iniciado_em: _bf.iniciado_em }); return true; }
       const dias = Math.max(1, Math.min(120, Number(urlObj.searchParams.get('dias') || 31)));
@@ -1319,7 +1324,7 @@ function routes(readBody) {
     // ADMIN (?k=): BACKFILL DE DETALHES — preenche UF + valor POR ITEM dos já finalizados
     // Uso: /girassol-backup-offline/backfill-detalhes?k=ADMIN_KEY&dias=31
     if ((method === 'POST' || method === 'GET') && p === '/girassol-backup-offline/backfill-detalhes') {
-      const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const k = lerChaveAdmin(req, urlObj);
       if (!process.env.ADMIN_KEY || k !== process.env.ADMIN_KEY) { json(res, 404, { error: 'not found' }); return true; }
       if (_bfd.rodando) { json(res, 200, { ok: true, rodando: true, progresso: _bfd.feitos + '/' + _bfd.total, ok_ate_agora: _bfd.ok, falhas: _bfd.falhas, iniciado_em: _bfd.iniciado_em }); return true; }
       const dias = Math.max(1, Math.min(120, Number(urlObj.searchParams.get('dias') || 31)));
@@ -1392,7 +1397,7 @@ function routes(readBody) {
       // Codex PR#38 (3ª rodada): "apenas admin" aceita TAMBÉM a ADMIN_KEY — mesma credencial
       // que o gate e as rotas irmãs já honram; sem isso o fluxo ?k= recebia 403 aqui e o
       // dashboard carregava config fiscal default em silêncio (números errados).
-      const _kAdm = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const _kAdm = lerChaveAdmin(req, urlObj);
       const _okAdm = (process.env.ADMIN_KEY && _kAdm === process.env.ADMIN_KEY) || (opSess && ehAdmin(opSess));
       if (!_okAdm) { json(res, 403, { ok: false, erro: 'apenas admin' }); return true; }
       let body = {}; try { const _rb = await readBody(req); body = (_rb && typeof _rb === 'object') ? _rb : JSON.parse(_rb || '{}'); } catch (e) {}   // tolerante: lib/http passou a devolver objeto ja parseado
@@ -1512,7 +1517,7 @@ function routes(readBody) {
       // NUNCA estoquista (pedido do Diego, 11/08): a página exige ADMIN — sessão de admin
       // logado OU ?k=ADMIN_KEY. Não-admin volta pro painel, sem alarde (302).
       const sD = validarSessao(req.headers['cookie']);
-      const kD = urlObj.searchParams.get('k') || '';
+      const kD = lerChaveAdmin(req, urlObj);
       if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sD && ehAdmin(sD)))) { res.writeHead(302, { Location: '/girassol-backup-offline/painel' }); res.end(); return true; }
       const fdash = path.join(__dirname, 'dashboard.html');
       if (!fs.existsSync(fdash)) { json(res, 404, { ok: false, erro: 'dashboard ainda não habilitado nesta empresa' }); return true; }
@@ -1527,7 +1532,7 @@ function routes(readBody) {
       // Codex PR#38 (3ª rodada): "apenas admin" aceita TAMBÉM a ADMIN_KEY — mesma credencial
       // que o gate e as rotas irmãs já honram; sem isso o fluxo ?k= recebia 403 aqui e o
       // dashboard carregava config fiscal default em silêncio (números errados).
-      const _kAdm = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const _kAdm = lerChaveAdmin(req, urlObj);
       const _okAdm = (process.env.ADMIN_KEY && _kAdm === process.env.ADMIN_KEY) || (opSess && ehAdmin(opSess));
       if (!_okAdm) { json(res, 403, { ok: false, erro: 'apenas admin' }); return true; }
       json(res, 200, { ok: true, ...backfillNFLocal(45) });
@@ -1538,7 +1543,7 @@ function routes(readBody) {
     // Preenche vprod_nf (Σ itens da NOTA) nos finalizados → produtos EXATO + frete EXATO (valor − vprod_nf), retroativo.
     // Uso: /girassol-backup-offline/backfill-nf?k=ADMIN_KEY&dias=45   (roda em segundos)
     if ((method === 'POST' || method === 'GET') && p === '/girassol-backup-offline/backfill-nf') {
-      const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const k = lerChaveAdmin(req, urlObj);
       const sessB = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || (sessB && ehAdmin(sessB)))) { json(res, 404, { error: 'not found' }); return true; }
       const r = backfillNFLocal(urlObj.searchParams.get('dias'));
@@ -1553,7 +1558,7 @@ function routes(readBody) {
       // Codex PR#38 (3ª rodada): "apenas admin" aceita TAMBÉM a ADMIN_KEY — mesma credencial
       // que o gate e as rotas irmãs já honram; sem isso o fluxo ?k= recebia 403 aqui e o
       // dashboard carregava config fiscal default em silêncio (números errados).
-      const _kAdm = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const _kAdm = lerChaveAdmin(req, urlObj);
       const _okAdm = (process.env.ADMIN_KEY && _kAdm === process.env.ADMIN_KEY) || (opSess && ehAdmin(opSess));
       if (!_okAdm) { json(res, 403, { ok: false, erro: 'apenas admin' }); return true; }
       const CFG_FILE = path.join(CACHE_DIR, '_config-fiscal.json');
@@ -1623,7 +1628,7 @@ function routes(readBody) {
       // Codex PR#38 (3ª rodada): "apenas admin" aceita TAMBÉM a ADMIN_KEY — mesma credencial
       // que o gate e as rotas irmãs já honram; sem isso o fluxo ?k= recebia 403 aqui e o
       // dashboard carregava config fiscal default em silêncio (números errados).
-      const _kAdm = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const _kAdm = lerChaveAdmin(req, urlObj);
       const _okAdm = (process.env.ADMIN_KEY && _kAdm === process.env.ADMIN_KEY) || (opSess && ehAdmin(opSess));
       if (!_okAdm) { json(res, 403, { ok: false, erro: 'apenas admin' }); return true; }
       let body = {}; try { const _rb = await readBody(req); body = (_rb && typeof _rb === 'object') ? _rb : JSON.parse(_rb || '{}'); } catch (e) {}   // tolerante: lib/http passou a devolver objeto ja parseado
@@ -1651,7 +1656,7 @@ function routes(readBody) {
     // ADMIN (?k=): PESCA de tarifas/frete REAIS do ML agora (também roda sozinha todo dia às 04:40)
     // Uso: /girassol-backup-offline/ml-sync-fees?k=ADMIN_KEY&dias=31 — chame de novo p/ ver o progresso
     if ((method === 'POST' || method === 'GET') && p === '/girassol-backup-offline/ml-sync-fees') {
-      const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const k = lerChaveAdmin(req, urlObj);
       const sessA = validarSessao(req.headers['cookie']);
       const autorizado = (process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || (sessA && ehAdmin(sessA));
       if (!autorizado) { json(res, 404, { error: 'not found' }); return true; }
@@ -1665,7 +1670,7 @@ function routes(readBody) {
 
     // LIMPA toda a tabela (empresa girassol) — pra recomeçar o backfill do zero. Uso: /girassol-backup-offline/backfill-limpar
     if (method === 'GET' && p === '/girassol-backup-offline/backfill-limpar') {
-      const kD = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const kD = lerChaveAdmin(req, urlObj);
       const sessD = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
       if (_backfill.rodando) { json(res, 200, { ok: false, msg: 'tem um backfill rodando — espere terminar (ou reinicie o serviço) antes de limpar' }); return true; }
@@ -1676,7 +1681,7 @@ function routes(readBody) {
 
     // CONFERE o que foi gravado no Supabase — conta registros por MÊS e por CANAL. Uso: /girassol-backup-offline/backfill-conferir
     if (method === 'GET' && p === '/girassol-backup-offline/backfill-conferir') {
-      const kD = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const kD = lerChaveAdmin(req, urlObj);
       const sessD = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
       const out = { ok: true, total: null, por_mes: {}, por_canal: {} };
@@ -1716,7 +1721,7 @@ function routes(readBody) {
 
     // DISPARA o backfill do ANO TODO — roda os meses de janeiro até 'ate' EM SEQUÊNCIA, sozinho. Uso: /girassol-backup-offline/backfill-ano  (ou &ate=07 pra parar em julho)
     if (method === 'GET' && p === '/girassol-backup-offline/backfill-ano') {
-      const kD = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const kD = lerChaveAdmin(req, urlObj);
       const sessD = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
       // Codex: a trava do canário estava só no backfill MENSAL; o do ANO entrava por cima e
@@ -1736,7 +1741,7 @@ function routes(readBody) {
        container. Aqui o período longo vira fatias de 10 dias, rodadas uma por vez, com o
        progresso EM DISCO: se o processo cair, o boot retoma de onde parou, sozinho. */
     if (method === 'GET' && p === '/girassol-backup-offline/backfill-plano') {
-      const kP = urlObj.searchParams.get('k') || '';
+      const kP = lerChaveAdmin(req, urlObj);
       if (!(process.env.ADMIN_KEY && kP === process.env.ADMIN_KEY)) { json(res, 404, { error: 'not found' }); return true; }
       const fat = require('../lib/backfill-fatiado');
       const acao = urlObj.searchParams.get('acao') || 'status';
@@ -1756,7 +1761,7 @@ function routes(readBody) {
     }
 
     if (method === 'GET' && p === '/girassol-backup-offline/backfill') {
-      const kD = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const kD = lerChaveAdmin(req, urlObj);
       const sessD = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
       // Codex (#105): mão dupla — se o canário está consultando o Bling AGORA, o backfill
@@ -1803,7 +1808,7 @@ function routes(readBody) {
     // o quanto isso custa e QUANTO LUCRO ESTÁ EM RISCO se faltar. Ordenado pelo risco, não pelo volume.
     // Uso: /girassol-backup-offline/plano-compra?lead=4&cob=5&seg=0.5&base=180&curva=A
     if (method === 'GET' && p === '/girassol-backup-offline/plano-compra') {
-      const kC = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const kC = lerChaveAdmin(req, urlObj);
       const sessC = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kC === process.env.ADMIN_KEY) || (sessC && ehAdmin(sessC)))) { json(res, 404, { error: 'not found' }); return true; }
       const par = n => Number((urlObj.searchParams && urlObj.searchParams.get(n)) || '');
@@ -1942,7 +1947,7 @@ function routes(readBody) {
 
     // 01/08 — faturamento do ML (billing oficial): dispara, status e resumo por período
     if (method === 'GET' && p === '/girassol-backup-offline/ml-billing') {
-      const kB = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const kB = lerChaveAdmin(req, urlObj);
       const sB = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kB === process.env.ADMIN_KEY) || (sB && ehAdmin(sB)))) { json(res, 404, { error: 'not found' }); return true; }
       // 02/08: uma rodada presa bloqueava todas as seguintes (a fun\u00e7\u00e3o volta na hora se j\u00e1 estiver
@@ -1977,7 +1982,7 @@ function routes(readBody) {
        pedido que o cliente não pagou nunca somou, então descontá-lo inventaria prejuízo —
        na Girassol isso seria R$ 10.496 de perda fictícia. */
     if (method === 'GET' && p === '/girassol-backup-offline/magalu-cancelados') {
-      const kM = urlObj.searchParams.get('k') || '';
+      const kM = lerChaveAdmin(req, urlObj);
       const sM = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kM === process.env.ADMIN_KEY) || (sM && ehAdmin(sM)))) { json(res, 404, { error: 'not found' }); return true; }
       try {
@@ -2017,7 +2022,7 @@ function routes(readBody) {
     }
 
     if (method === 'GET' && p === '/girassol-backup-offline/tiktok-custo-devolucoes') {
-      const kT = urlObj.searchParams.get('k') || '';
+      const kT = lerChaveAdmin(req, urlObj);
       const sT = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kT === process.env.ADMIN_KEY) || (sT && ehAdmin(sT)))) { json(res, 404, { error: 'not found' }); return true; }
       /* 30/08 (Codex #291): a montagem inteira vive em lib/tiktok-custo-devolucoes.js —
@@ -2034,7 +2039,7 @@ function routes(readBody) {
     }
 
     if (method === 'GET' && p === '/girassol-backup-offline/tiktok-completar-tarifa') {
-      const kT = urlObj.searchParams.get('k') || '';
+      const kT = lerChaveAdmin(req, urlObj);
       const sT = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kT === process.env.ADMIN_KEY) || (sT && ehAdmin(sT)))) { json(res, 404, { error: 'not found' }); return true; }
       const r = await completarTarifaTikTok(urlObj.searchParams.get('dias'), { simular: urlObj.searchParams.get('simular') === '1' });
@@ -2058,7 +2063,7 @@ function routes(readBody) {
        o ML responde e o que o Bling tem, lado a lado — pra o próximo caso ser resolvido em
        minutos em vez de rodadas. */
     if (method === 'GET' && p === '/girassol-backup-offline/raio-x-venda') {
-      const kR = urlObj.searchParams.get('k') || '';
+      const kR = lerChaveAdmin(req, urlObj);
       if (!(process.env.ADMIN_KEY && kR === process.env.ADMIN_KEY)) { json(res, 404, { error: 'not found' }); return true; }
       const venda = String(urlObj.searchParams.get('venda') || '').replace(/\D/g, '');
       if (!venda) { json(res, 400, { ok: false, erro: 'use ?venda=2000018258015754&k=SUA_ADMIN_KEY' }); return true; }
@@ -2153,7 +2158,7 @@ function routes(readBody) {
          só admin vê; pro estoquista, nada. Sem sessão de admin a rota responde 404, como as
          outras administrativas — e o painel simplesmente não desenha a faixa. */
       const sC = validarSessao(req.headers['cookie']);
-      const kC = urlObj.searchParams.get('k') || '';
+      const kC = lerChaveAdmin(req, urlObj);
       const ehAdm = (sC && ehAdmin(sC)) || (process.env.ADMIN_KEY && kC === process.env.ADMIN_KEY);
       if (!ehAdm) { json(res, 404, { error: 'not found' }); return true; }
       try {
@@ -2174,7 +2179,7 @@ function routes(readBody) {
     }
 
     if (method === 'GET' && p === '/girassol-backup-offline/canario-marketplaces') {
-      const kC = urlObj.searchParams.get('k') || '';
+      const kC = lerChaveAdmin(req, urlObj);
       const sC = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kC === process.env.ADMIN_KEY) || (sC && ehAdmin(sC)))) { json(res, 404, { error: 'not found' }); return true; }
       // 16/08: canário + backfill juntos = 429. Mesma trava da conciliação da Shopee.
@@ -2196,7 +2201,7 @@ function routes(readBody) {
     // só `returns` é devolução (dos 12 abertos da Girassol, 5 eram). O SKU não vem do ML;
     // sai do nosso cache de bipados pelo número do pedido.
     if (method === 'GET' && (p === '/girassol-backup-offline/ml-devolucoes' || p === '/girassol-backup-offline/ml-devolucoes-coletar')) {
-      const kV = urlObj.searchParams.get('k') || '';
+      const kV = lerChaveAdmin(req, urlObj);
       const sV = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kV === process.env.ADMIN_KEY) || (sV && ehAdmin(sV)))) { json(res, 404, { error: 'not found' }); return true; }
       const mlDevLib = require('../lib/ml-devolucoes');
@@ -2250,7 +2255,7 @@ function routes(readBody) {
        debited_from_operation que a coleta passou a gravar; sem re-sincronizar, os registros
        antigos não têm a marca e aparecem em sem_marca. Só lê o cache. */
     if (method === 'GET' && p === '/girassol-backup-offline/ml-fatura-cartao') {
-      const kF = urlObj.searchParams.get('k') || '';
+      const kF = lerChaveAdmin(req, urlObj);
       const sF = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kF === process.env.ADMIN_KEY) || (sF && ehAdmin(sF)))) { json(res, 404, { error: 'not found' }); return true; }
       try {
@@ -2267,7 +2272,7 @@ function routes(readBody) {
     }
 
     if (method === 'GET' && p === '/girassol-backup-offline/ml-billing-outros') {
-      const kO = urlObj.searchParams.get('k') || '';
+      const kO = lerChaveAdmin(req, urlObj);
       if (!(process.env.ADMIN_KEY && kO === process.env.ADMIN_KEY)) { json(res, 404, { error: 'not found' }); return true; }
       try {
         const b = readJson(MLB_FILE(), { tarifas: {} });
@@ -2293,7 +2298,7 @@ function routes(readBody) {
     if (method === 'GET' && p === '/girassol-backup-offline/ml-billing-resumo') {
       // Codex PR#38 (P1): financeiro é SÓ ADMIN — mesma guarda das rotas irmãs do dashboard
       const sBil = validarSessao(req.headers['cookie']);
-      const kBil = urlObj.searchParams.get('k') || '';
+      const kBil = lerChaveAdmin(req, urlObj);
       if (!((process.env.ADMIN_KEY && kBil === process.env.ADMIN_KEY) || (sBil && ehAdmin(sBil)))) { json(res, 404, { error: 'not found' }); return true; }
       const b = readJson(MLB_FILE(), { porDia: {} });
       const deB = String(urlObj.searchParams.get('de') || '').slice(0, 10);
@@ -2314,7 +2319,7 @@ function routes(readBody) {
     // nao tenha organizado o envio e o Bling nem saiba dela (envio agendado, Fulfillment, etc).
     // ESTE E O PASSO 1: so LE do ML e compara com o que temos. Nao muda nada em producao.
     if (method === 'GET' && p === '/girassol-backup-offline/ml-vendas-do-dia') {
-      const kV = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const kV = lerChaveAdmin(req, urlObj);
       const sV = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kV === process.env.ADMIN_KEY) || (sV && ehAdmin(sV)))) { json(res, 404, { error: 'not found' }); return true; }
       const deV  = String(urlObj.searchParams.get('de')  || new Date().toISOString().slice(0,10)).slice(0,10);
@@ -2400,7 +2405,7 @@ function routes(readBody) {
     }
 
     if (method === 'GET' && p === '/girassol-backup-offline/ml-vendas-faltando') {
-      const kF = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const kF = lerChaveAdmin(req, urlObj);
       const sF = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kF === process.env.ADMIN_KEY) || (sF && ehAdmin(sF)))) { json(res, 404, { error: 'not found' }); return true; }
       const deF = String(urlObj.searchParams.get('de') || '').slice(0, 10);
@@ -2472,7 +2477,7 @@ function routes(readBody) {
        carrinho que o billing não mapeou (ok, está no nosso pelo número do pack) × PAGA-E-AUSENTE
        (o buraco real a importar). Máx 250 por chamada (~1min) — rode em fatias se precisar. */
     if (method === 'GET' && p === '/girassol-backup-offline/ml-faltantes-classificar') {
-      const kF = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const kF = lerChaveAdmin(req, urlObj);
       const sF = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kF === process.env.ADMIN_KEY) || (sF && ehAdmin(sF)))) { json(res, 404, { error: 'not found' }); return true; }
       const deF = String(urlObj.searchParams.get('de') || '').slice(0, 10);
@@ -2558,7 +2563,7 @@ function routes(readBody) {
     }
     // 01/08 — varredura de cancelados: apaga do histórico quem foi cancelado no Bling
     if (method === 'GET' && p === '/girassol-backup-offline/varrer-cancelados') {
-      const kV = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const kV = lerChaveAdmin(req, urlObj);
       const sV = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kV === process.env.ADMIN_KEY) || (sV && ehAdmin(sV)))) { json(res, 404, { error: 'not found' }); return true; }
       const dV = Number((urlObj.searchParams && urlObj.searchParams.get('dias')) || 45);
@@ -2577,7 +2582,7 @@ function routes(readBody) {
     }
     // disparo manual: ?meses=2026-07,2026-08  (ou ?meses=todos p/ o ano inteiro)
     if (method === 'GET' && p === '/girassol-backup-offline/reaplicar-imposto') {
-      const kR = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const kR = lerChaveAdmin(req, urlObj);
       const sR = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kR === process.env.ADMIN_KEY) || (sR && ehAdmin(sR)))) { json(res, 404, { error: 'not found' }); return true; }
       let mm = String((urlObj.searchParams && urlObj.searchParams.get('meses')) || '').trim();
@@ -2599,7 +2604,7 @@ function routes(readBody) {
     // O Bling demora (ou não) pra refletir isso; o dashboard precisa mostrar cinza na hora.
     // Uso: /girassol-backup-offline/status-mkt?de=YYYY-MM-DD&ate=YYYY-MM-DD
     if (method === 'GET' && p === '/girassol-backup-offline/status-mkt') {
-      const kS = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const kS = lerChaveAdmin(req, urlObj);
       const sessS = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kS === process.env.ADMIN_KEY) || (sessS && ehAdmin(sessS)))) { json(res, 404, { error: 'not found' }); return true; }
       const deS = String((urlObj.searchParams && urlObj.searchParams.get('de')) || '').slice(0, 10);
@@ -2750,7 +2755,7 @@ function routes(readBody) {
     // Uso: /girassol-backup-offline/completar-detalhes?de=YYYY-MM-DD&ate=YYYY-MM-DD
     // Processa um lote curto e devolve quantos faltam — o dashboard chama em sequência até zerar.
     if (method === 'GET' && p === '/girassol-backup-offline/completar-detalhes') {
-      const kD = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const kD = lerChaveAdmin(req, urlObj);
       const sessD = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
       const deD = String((urlObj.searchParams && urlObj.searchParams.get('de')) || '').slice(0, 10);
@@ -2814,7 +2819,7 @@ function routes(readBody) {
 
     // STATUS do backfill em andamento. Uso: /girassol-backup-offline/backfill-status
     if (method === 'GET' && p === '/girassol-backup-offline/backfill-status') {
-      const kD = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const kD = lerChaveAdmin(req, urlObj);
       const sessD = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
       json(res, 200, { ok: true, status: _backfill, ano: (_backfillAno.rodando || _backfillAno.fim) ? _backfillAno : undefined });
@@ -2824,7 +2829,7 @@ function routes(readBody) {
     // TESTE de conexão com o Supabase (histórico) — grava e apaga 1 registro. Confirma antes do backfill.
     // Uso: /girassol-backup-offline/backfill-teste
     if (method === 'GET' && p === '/girassol-backup-offline/backfill-teste') {
-      const kD = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const kD = lerChaveAdmin(req, urlObj);
       const sessD = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
       const out = { ok: true };
@@ -2857,7 +2862,7 @@ function routes(readBody) {
     // ?de=&ate= obrigatórios · &simular=1 mostra o que MUDARIA sem gravar (recomendado antes)
     // ?status=1 acompanha. Só admin.
     if (method === 'GET' && p === '/girassol-backup-offline/reaplicar-custo') {
-      const kC = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const kC = lerChaveAdmin(req, urlObj);
       const sC = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kC === process.env.ADMIN_KEY) || (sC && ehAdmin(sC)))) { json(res, 404, { error: 'not found' }); return true; }
       const _estC = estadoReapCusto();
@@ -2887,7 +2892,7 @@ function routes(readBody) {
     Nasceu do desenho do Diego: "ter esse histórico fácil no card, e poder alterar manualmente,
     ou pedir importação do bling". */
     if (p === '/girassol-backup-offline/custo-historico') {
-      const kH = urlObj.searchParams.get('k') || '';
+      const kH = lerChaveAdmin(req, urlObj);
       const sH = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kH === process.env.ADMIN_KEY) || (sH && ehAdmin(sH)))) { json(res, 404, { error: 'not found' }); return true; }
 
@@ -2973,7 +2978,7 @@ function routes(readBody) {
     if (await _rotaDeParaSku(req, res, urlObj, method, p)) return true;
 
     if (p === '/girassol-backup-offline/custos-manuais') {
-      const kM = urlObj.searchParams.get('k') || '';
+      const kM = lerChaveAdmin(req, urlObj);
       const sM = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kM === process.env.ADMIN_KEY) || (sM && ehAdmin(sM)))) { json(res, 404, { error: 'not found' }); return true; }
 
@@ -3041,7 +3046,7 @@ function routes(readBody) {
     // Uso:  GET /girassol-backup-offline/sku-repara?de=SKU_ANTIGO&para=SKU_NOVO&k=ADMIN_KEY
     //       (sem &aplicar=1 é SIMULAÇÃO: diz quantas linhas mudariam, sem gravar)
     if (method === 'GET' && p === '/girassol-backup-offline/sku-repara') {
-      const kR = urlObj.searchParams.get('k') || '';
+      const kR = lerChaveAdmin(req, urlObj);
       const sR = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kR === process.env.ADMIN_KEY) || (sR && ehAdmin(sR)))) { json(res, 404, { error: 'not found' }); return true; }
       const deSku = String(urlObj.searchParams.get('de') || '').trim();
@@ -3146,7 +3151,7 @@ function routes(readBody) {
     NÃO altera nada sozinho: devolve os pares e o Diego decide (o `sku-repara`, que já existe,
     é quem troca no histórico). */
     if (method === 'GET' && p === '/girassol-backup-offline/sku-depara') {
-      const kD = urlObj.searchParams.get('k') || '';
+      const kD = lerChaveAdmin(req, urlObj);
       const sD = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sD && ehAdmin(sD)))) { json(res, 404, { error: 'not found' }); return true; }
 
@@ -3193,7 +3198,7 @@ function routes(readBody) {
     if (method === 'GET' && p === '/girassol-backup-offline/custo-diario') {
       /* mesma porta da rota vizinha (lida no arquivo, não inventada): chave de admin na
          query OU sessão de admin no cookie; sem isso, 404 — o lint pegou meu chaveOk fantasma. */
-      const kD = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const kD = lerChaveAdmin(req, urlObj);
       const sessD = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
       const dia = String(urlObj.searchParams.get('dia') || '').trim();
@@ -3228,7 +3233,7 @@ function routes(readBody) {
     }
 
     if (method === 'GET' && p === '/girassol-backup-offline/custo-sync') {
-      const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const k = lerChaveAdmin(req, urlObj);
       const sessC = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || (sessC && ehAdmin(sessC)))) { json(res, 404, { error: 'not found' }); return true; }
       if (urlObj.searchParams.get('status')) { json(res, 200, { ok: true, rodando: !!_cst.rodando, progresso: _cst.feitos + '/' + _cst.total, ok_ate_agora: _cst.ok, falhas: _cst.falhas, falhas_detalhe: _cst.falhas_detalhe || [], inicio: _cst.inicio, diario: _cstDiario.ultimo, diario_dia_fechado: _diaFechadoDoDisco() }); return true; }
@@ -3275,7 +3280,7 @@ function routes(readBody) {
       // Codex PR#38 (3ª rodada): "apenas admin" aceita TAMBÉM a ADMIN_KEY — mesma credencial
       // que o gate e as rotas irmãs já honram; sem isso o fluxo ?k= recebia 403 aqui e o
       // dashboard carregava config fiscal default em silêncio (números errados).
-      const _kAdm = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const _kAdm = lerChaveAdmin(req, urlObj);
       const _okAdm = (process.env.ADMIN_KEY && _kAdm === process.env.ADMIN_KEY) || (opSess && ehAdmin(opSess));
       if (!_okAdm) { json(res, 403, { ok: false, erro: 'apenas admin' }); return true; }
       const CFG = path.join(CACHE_DIR, '_config-frete-magalu.json');
@@ -3294,7 +3299,7 @@ function routes(readBody) {
     // produto cru). As dimensões vêm de blingGet('/produtos/{id}').dimensoes, já confirmado.
 
     if (method === 'GET' && p === '/girassol-backup-offline/vendas-sync') {
-      const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const k = lerChaveAdmin(req, urlObj);
       const sessV = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || sessV)) { json(res, 404, { error: 'not found' }); return true; }
       if (urlObj.searchParams.get('status')) { json(res, 200, { ok: true, rodando: _vsy.rodando, fase: _vsy.fase || null, vendas_na_janela: _vsy.total, atualizado_em: _vsy.atualizado_em, erro: _vsy.erro,
@@ -4259,7 +4264,7 @@ function routes(readBody) {
 
     // ─── VARREDURA dos fornecedores (só leitura) ──────────────────────────────
     if (method === 'GET' && (p === '/girassol-backup-offline/varrer-fornecedores' || p === '/girassol-backup-offline/varrer-fornecedores-status')) {
-      const kV = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const kV = lerChaveAdmin(req, urlObj);
       const sV = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kV === process.env.ADMIN_KEY) || (sV && ehAdmin(sV)))) { json(res, 404, { error: 'not found' }); return true; }
       const _estV = estadoVarrerForn();
@@ -4280,7 +4285,7 @@ function routes(readBody) {
     // Só GET, só admin, e o caminho tem que começar com / (nada de passagem livre).
     // Uso: /girassol-backup-offline/bling-cru?caminho=/produtos/fornecedores&q=idProduto=16433181895
     if (method === 'GET' && p === '/girassol-backup-offline/bling-cru') {
-      const kB = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const kB = lerChaveAdmin(req, urlObj);
       const sB = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kB === process.env.ADMIN_KEY) || (sB && ehAdmin(sB)))) { json(res, 404, { error: 'not found' }); return true; }
       const cam = String((urlObj.searchParams && urlObj.searchParams.get('caminho')) || '').trim();
@@ -4311,7 +4316,7 @@ function routes(readBody) {
     // devolve os fornecedores no detalhe do produto. Esta rota mostra o CRU.
     // Uso: /girassol-backup-offline/produto-cru?id=16433181895&k=ADMIN_KEY
     if (method === 'GET' && p === '/girassol-backup-offline/produto-cru') {
-      const kPr = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const kPr = lerChaveAdmin(req, urlObj);
       const sPr = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kPr === process.env.ADMIN_KEY) || (sPr && ehAdmin(sPr)))) { json(res, 404, { error: 'not found' }); return true; }
       const idP = String((urlObj.searchParams && urlObj.searchParams.get('id')) || '').replace(/\D/g, '');
