@@ -29,6 +29,14 @@ empresa errada.
 
 Esse desenho é o alvo. A AMB ainda usa caminho fixo.
 
+## Estado (14/09)
+
+- [x] **passos 1 e 2 feitos** (PR #436): o histórico virou `lib/checkout/historico.js`, com
+      AMB e Girassol ligadas nele por fachada. A diferença real era de 17 e 39 linhas.
+- [ ] **passo 3** — conferir, rota a rota, que os números não mudaram, contra as fotos de
+      referência. **Este é o passo que não pode ser pulado.**
+- [ ] **passo 4** — ligar a GOOD e entregar o dashboard dela.
+
 ## Caminho recomendado
 
 1. **Ampliar o `ctx`** do histórico da Girassol para cobrir o que a AMB usa de diferente
