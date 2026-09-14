@@ -12,23 +12,33 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 
+/* 14/09: o F3 saiu das três pastas e virou lib/fiscal/nfe-ml-fluxo.js (as gêmeas eram
+   idênticas; a Girassol diferia só em env e rótulo). A garantia deste teste não mudou — a
+   cadeia nativo → reserva —, mas agora é conferida UMA vez na lib, e cada empresa é
+   conferida por ainda expor a função nativa e por delegar. */
+{
+  const fluxo = fs.readFileSync(path.join(__dirname, '..', 'lib', 'fiscal', 'nfe-ml-fluxo.js'), 'utf8');
+  const i = fluxo.indexOf('async function enviarNFeUnica');
+  assert.ok(i > 0, 'não achei o reenvio manual na lib');
+  const trecho = fluxo.slice(i, i + 2500);
+  const posNativo = trecho.indexOf('enviarNFeParaLojaVirtual');
+  const posPush = trecho.indexOf('enviarNFeParaML');
+  assert.ok(posNativo > 0 && posPush > 0 && posNativo < posPush,
+    'o nativo tem que vir ANTES do push, e o push seguir existindo como reserva');
+  assert.ok(/TOKEN_EXPIRADO|code === 401/.test(trecho),
+    'token expirado precisa subir, não virar fallback — senão o push roda com token morto');
+}
+
 for (const emp of ['ambtotal', 'good', 'girassol']) {
   const api = require('../' + emp + '/blingApi.js');
   assert.strictEqual(typeof api.enviarNFeParaLojaVirtual, 'function', emp + ': falta enviarNFeParaLojaVirtual');
 
-  const fluxo = fs.readFileSync(path.join(__dirname, '..', emp, 'nfeMlFluxo.js'), 'utf8');
-  const i = fluxo.indexOf('async function enviarNFeUnica');
-  assert.ok(i > 0, emp + ': não achei o reenvio manual');
-  const trecho = fluxo.slice(i, i + 2500);
+  const fachada = fs.readFileSync(path.join(__dirname, '..', emp, 'nfeMlFluxo.js'), 'utf8');
+  assert.ok(/criarFluxoNFeML\(/.test(fachada), emp + ': a fachada do F3 tem que delegar pra lib');
+  assert.ok(!/async function rotinaNFeML/.test(fachada), emp + ': lógica do F3 voltou pra pasta — a divergência volta por aí');
+  const mod = require('../' + emp + '/nfeMlFluxo.js');
+  assert.deepStrictEqual(Object.keys(mod).sort(), ['enviarNFeUnica', 'rotinaNFeML'], emp + ': contrato do F3 mudou');
 
-  const posNativo = trecho.indexOf('enviarNFeParaLojaVirtual');
-  const posPush = trecho.indexOf('enviarNFeParaML');
-  assert.ok(posNativo > 0, emp + ': o reenvio manual não usa o envio nativo');
-  assert.ok(posPush > 0, emp + ': o push direto tem que continuar como RESERVA — sem ele, falha do nativo deixa a NF sem saída');
-  assert.ok(posNativo < posPush, emp + ': o nativo tem que vir ANTES do push (é o caminho oficial)');
-
-  assert.ok(/TOKEN_EXPIRADO|code === 401/.test(trecho),
-    emp + ': token expirado precisa subir, não virar fallback — senão o push roda com token morto');
 }
 
 console.log('OK: envio nativo nas TRÊS — função exportada, tentada antes do push, push mantido como reserva e token expirado subindo');

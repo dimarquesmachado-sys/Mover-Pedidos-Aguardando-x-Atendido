@@ -63,7 +63,7 @@ arriscado. Cada linha é um PR.
 | 2.1 | `nfFluxos.js` | 324 | 100% | 100% | ✅ PR #405 — a diferença era **uma linha** (env do cooldown) |
 | 2.2 | `nfBlingApi.js` | 340 | 89% | 88% | ✅ PR #407 — 54-58 linhas eram só RÓTULO; config real: cache de IE por empresa e nome do intermediador |
 | 2.3 | `mlTokenManager.js` | 140 | 90% | 85% | ✅ PR #408 — só env/rótulo; teste guarda o ISOLAMENTO (token trocado fala com a conta errada em silêncio) |
-| 2.4 | `nfeMlFluxo.js` | 227 | 92% | 83% | ⚠️ PARADO — a Girassol usa o envio NATIVO do Bling e AMB/GOOD não; ver [diferenças da Girassol](fase2-diferencas-girassol.md) |
+| 2.4 | `nfeMlFluxo.js` | 227 | 92% | 83% | ✅ COMPLETO — capacidade portada (#414) e peça extraída pra `lib/fiscal/nfe-ml-fluxo.js` (#427); tetos seguem por empresa |
 | 2.5 | `mlApi.js` | 119 | 88% | 81% | ✅ PR #411 — as TRÊS unificadas por UNIÃO (getShipmentRaw da Girassol pras outras; baixarXmlNFe exportado em todas) |
 | 2.6 | `nfTokenManager.js` | 158 | 84% | 80% | ⬜ LIBERADO — ⚠️ a Girassol guarda o token em `<módulo>/data/nf_tokens.json`; preservar o caminho ou migrar o arquivo, nunca trocar em silêncio |
 | 2.7 | `blingApi.js` | 202 | 90% | 78% | ✅ PR #415 — após os portes, só rótulo/env; pausas seguem POR EMPRESA (cota do Bling é da conta) |
