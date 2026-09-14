@@ -46,8 +46,12 @@ desligar a renovação local.
       FECHADO: capacidade fora da lista derruba o boot, em vez de virar recurso desligado em
       silêncio. ⚠️ o contrato é espelhado byte a byte com o Devoluções: mudança aqui exige o
       PR gêmeo lá (Devoluções #283)
-- [ ] fábrica de módulo fiscal: hoje a loja ainda precisa de pasta + `require` (o config
-      **avisa alto** quando há loja no contrato sem módulo, em vez de sumir em silêncio)
+- [x] **fábrica de módulo fiscal** (PR #424): rotas, helpers e a forma do módulo saíram das
+      três pastas para `lib/fiscal/criar-modulo.js` — o que sobra em cada pasta é fiação
+      (quais peças entram) e os crons, que seguem por empresa porque o F3 é escalonado
+- [ ] as PEÇAS (fluxos, tokens, cliente Bling) também nascerem do registro — é o que falta
+      para a loja existir sem pasta nenhuma. Hoje o config **avisa alto** quando há loja no
+      contrato sem módulo, em vez de ela sumir em silêncio
 
 ## Fase 2 — fábrica fiscal  ✅ FILA CONCLUÍDA (13/09)
 
