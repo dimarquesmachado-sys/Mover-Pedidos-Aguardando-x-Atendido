@@ -46,8 +46,6 @@
     ]
   },
   "identicos": [
-    "comum.js",
-    "produtos.js",
     "nf.js",
     "etiquetas.js",
     "email-docs.js",
@@ -91,5 +89,6 @@
     ]
   },
   "_nota_ciclo_index": "22/08: ciclo.js e index.js DEIXARAM de ser cobrados como arquivo idêntico. A GOOD tem o filtro de unidade de negócio Full (GOODBKP_UN_FULL) que as outras não têm, e o index.js dela é ~800 linhas menor por não ter dashboard/histórico/backfill. Exigir igualdade gerava um alarme que NUNCA fecha — e alarme que sempre acusa deixa de ser informação. Agora valem as ASSINATURAS: se alguém apagar a re-tentativa de página ou a trava de sessão, o verificador acusa; diferença legítima de funcionalidade, não.",
-  "_nota_assinaturas_index": "22/08 (Codex #183): 'validarSessao' sozinho NAO protegia — o verificador faz includes no arquivo inteiro, e a definicao da funcao sempre existe por causa das outras rotas. Se alguem apagasse o guarda de UMA rota sensivel, passava. Agora as assinaturas sao TRECHOS DE USO — a chamada com o cookie, o teste da ADMIN_KEY e o 404 de rota inexistente — que so aparecem quando o guarda esta de fato aplicado numa rota."
+  "_nota_assinaturas_index": "22/08 (Codex #183): 'validarSessao' sozinho NAO protegia — o verificador faz includes no arquivo inteiro, e a definicao da funcao sempre existe por causa das outras rotas. Se alguem apagasse o guarda de UMA rota sensivel, passava. Agora as assinaturas sao TRECHOS DE USO — a chamada com o cookie, o teste da ADMIN_KEY e o 404 de rota inexistente — que so aparecem quando o guarda esta de fato aplicado numa rota.",
+  "_nota_ignorar": "14/09 (Codex #430): comum.js e produtos.js saíram de `identicos` — a lista que o verifica REALMENTE lê. Eu tinha criado uma chave `ignorar_arquivos` que nenhum código consultava: o espelho seguia comparando os arquivos e eu achava que não. Chave morta em config é pior que nada, porque dá sensação de proteção configurada. Os dois viraram fachadas de lib/checkout/ e quem os protege agora é scripts/teste-checkout-comum.js."
 }

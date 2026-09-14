@@ -120,7 +120,10 @@ Maior dívida restante (os arquivos centrais somam ~18 mil linhas). Já saíram 
 resta dentro do `vendasSync` **já divergiu** entre as empresas (677 × 509 linhas), então aqui
 vale a mesma regra do 2.9: medir e classificar antes de fundir.
 
-1. mover os arquivos ainda espelhados para import direto da lib
+1. mover os arquivos ainda espelhados para import direto da lib — 🔄 em andamento:
+   `comum.js` e `produtos.js` feitos (PR #430); faltam `nf.js` (319 linhas), `etiquetas.js`
+   (136) e `email-docs.js` (135). Os dois últimos já eram fachada (`danfe-simplificado`,
+   `fusao-etiqueta`)
 2. extrair repositório de manifesto/cache e o ciclo base
 3. extrair histórico/backfill/vendas-sync sobre um contexto de checkout explícito
 4. consolidar rotas em registradores por capacidade
