@@ -42,23 +42,30 @@ function comContrato(empresas) {
   return () => carregar({ caminho: arq, servico: 'mover-pedidos' });
 }
 assert.throws(comContrato({
-  a: { id_canonico: 'a', aliases: ['x'], slug_http: '/a', sufixo_tabelas: '_a' },
-  b: { id_canonico: 'b', aliases: ['x'], slug_http: '/b', sufixo_tabelas: '_b' },
+  a: { id_canonico: 'a', aliases: ['x'], slug_http: '/a', sufixo_tabelas: '_a', capacidades: [] },
+  b: { id_canonico: 'b', aliases: ['x'], slug_http: '/b', sufixo_tabelas: '_b', capacidades: [] },
 }), /alias "x" aponta pra duas/, 'alias repetido tem que explodir');
 assert.throws(comContrato({
-  a: { id_canonico: 'a', slug_http: '/mesmo', sufixo_tabelas: '_a' },
-  b: { id_canonico: 'b', slug_http: '/mesmo', sufixo_tabelas: '_b' },
+  a: { id_canonico: 'a', slug_http: '/mesmo', sufixo_tabelas: '_a', capacidades: [] },
+  b: { id_canonico: 'b', slug_http: '/mesmo', sufixo_tabelas: '_b', capacidades: [] },
 }), /slug_http .* colide/, 'slug repetido tem que explodir');
 assert.throws(comContrato({
-  a: { id_canonico: 'a', slug_http: '/a', sufixo_tabelas: '_igual' },
-  b: { id_canonico: 'b', slug_http: '/b', sufixo_tabelas: '_igual' },
+  a: { id_canonico: 'a', slug_http: '/a', sufixo_tabelas: '_igual', capacidades: [] },
+  b: { id_canonico: 'b', slug_http: '/b', sufixo_tabelas: '_igual', capacidades: [] },
 }), /sufixo_tabelas .* colide/, 'tabela compartilhada entre empresas tem que explodir');
 assert.throws(comContrato({ a: { nome: 'sem id' } }), /sem id_canonico/);
 
+// 4b) `capacidades` é OBRIGATÓRIA (Codex, P2) — ausente, ou de outro tipo, tem que explodir,
+// não virar null silencioso em temCapacidade() pra uma empresa que esqueceu de declarar
+assert.throws(comContrato({ a: { id_canonico: 'a', slug_http: '/a', sufixo_tabelas: '_a' } }),
+  /não declara `capacidades`/, 'empresa sem `capacidades` tem que explodir, não herdar null');
+assert.throws(comContrato({ a: { id_canonico: 'a', slug_http: '/a', sufixo_tabelas: '_a', capacidades: 'fiscal' } }),
+  /não declara `capacidades`/, 'capacidades que não é lista tem que explodir');
+
 // 5) QUARTA empresa só com dado — o critério de sucesso da auditoria
 const quarta = comContrato({
-  ambtotal: { id_canonico: 'ambtotal', aliases: ['amb'], slug_http: '/amb', prefixo_env: 'AMB_', sufixo_tabelas: '_amb' },
-  nova: { id_canonico: 'nova', aliases: ['nv'], slug_http: '/nova', prefixo_env: 'NOVA_', sufixo_tabelas: '_nova' },
+  ambtotal: { id_canonico: 'ambtotal', aliases: ['amb'], slug_http: '/amb', prefixo_env: 'AMB_', sufixo_tabelas: '_amb', capacidades: [] },
+  nova: { id_canonico: 'nova', aliases: ['nv'], slug_http: '/nova', prefixo_env: 'NOVA_', sufixo_tabelas: '_nova', capacidades: [] },
 })();
 assert.strictEqual(quarta.normalizar('nv'), 'nova', 'a empresa nova existe sem uma linha de código novo');
 assert.strictEqual(quarta.nomeEnv('nova', 'BLING_CLIENT_ID'), 'NOVA_BLING_CLIENT_ID');

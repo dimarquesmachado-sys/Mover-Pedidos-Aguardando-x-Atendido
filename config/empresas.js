@@ -22,9 +22,18 @@
  * UM contrato de ativação — sem isso, a fábrica nasceria sobre a mesma ambiguidade.
  */
 
+const _registroLib = require('../lib/empresas/registro');
 const _registro = (() => {
-  try { return require('../lib/empresas/registro').carregar({ servico: 'mover-pedidos' }); }
-  catch (e) { console.warn('[config] registro indisponível (' + (e.message || e) + ') — ativação no modo antigo'); return null; }
+  try { return _registroLib.carregar({ servico: 'mover-pedidos' }); }
+  catch (e) {
+    /* 14/09 (auditoria do Codex, P1) — só o contrato ILEGÍVEL (arquivo ausente, JSON
+       quebrado) cai pro modo antigo. Contrato LIDO mas com regra violada (alias colidindo,
+       capacidade fora do vocabulário) é bug de configuração: subir mesmo assim é o oposto
+       do que a validação existe pra garantir — deixa o erro derrubar o boot. */
+    if (e instanceof _registroLib.ContratoInvalidoError) throw e;
+    console.warn('[config] registro indisponível (' + (e.message || e) + ') — ativação no modo antigo');
+    return null;
+  }
 })();
 
 /* LOJAS: os módulos fiscais. A chave é o id canônico do contrato; o require continua

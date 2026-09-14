@@ -1,6 +1,9 @@
 {
   "_leia_me": [
-    "CONTRATO DE EMPRESAS — v10 (10/09/2026)",
+    "CONTRATO DE EMPRESAS — v11 (14/09/2026)",
+    "  v11 declara as CAPACIDADES de cada empresa (fiscal, checkout, ml, ml-full, shopee,",
+    "  magalu, tiktok, madeira-madeira), derivadas do código e com vocabulário fechado: capacidade",
+    "  fora da lista derruba o boot, em vez de virar recurso desligado em silêncio.",
     "",
     "Dado, não código. Os dois repositórios leem este mesmo arquivo, byte a",
     "byte. O Mover-Pedidos tem um script que baixa o contrato da main do",
@@ -51,7 +54,7 @@
     "      reintroduz a invalidação de cache que a gente acabou de tirar.",
     "      Sugestão do Mover-Pedidos."
   ],
-  "versao": 10,
+  "versao": 11,
   "atualizado_em": "2026-09-10",
   "servicos": {
     "_nota": "os serviços que leem este contrato. `dono_hoje`/`dono_alvo` só podem citar nomes daqui.",
@@ -112,7 +115,17 @@
         "ml": null,
         "magalu": "mover-pedidos",
         "bling_nfe": "mover-pedidos"
-      }
+      },
+      "capacidades": [
+        "fiscal",
+        "checkout",
+        "ml",
+        "ml-full",
+        "shopee",
+        "magalu",
+        "madeira-madeira"
+      ],
+      "_nota_capacidades": "declaradas em 14/09 DERIVANDO do código, não de memória (auditoria multiloja, P2): fiscal=pasta do módulo; checkout=pasta de checkout; ml-full=ml-full.js resolve token das três; tiktok=quem usa criarColetorDaEmpresa (amb e girassol); madeira-madeira=quem tem pasta *-mm-etiquetas. Sem isso temCapacidade() devolvia null e cada tela decidia sozinha."
     },
     "ambtotal": {
       "id_canonico": "ambtotal",
@@ -165,7 +178,17 @@
         "magalu": "mover-pedidos",
         "bling_nfe": "mover-pedidos",
         "tiktok": "mover-pedidos"
-      }
+      },
+      "capacidades": [
+        "fiscal",
+        "checkout",
+        "ml",
+        "ml-full",
+        "shopee",
+        "magalu",
+        "tiktok"
+      ],
+      "_nota_capacidades": "declaradas em 14/09 DERIVANDO do código, não de memória (auditoria multiloja, P2): fiscal=pasta do módulo; checkout=pasta de checkout; ml-full=ml-full.js resolve token das três; tiktok=quem usa criarColetorDaEmpresa (amb e girassol); madeira-madeira=quem tem pasta *-mm-etiquetas. Sem isso temCapacidade() devolvia null e cada tela decidia sozinha."
     },
     "girassol": {
       "id_canonico": "girassol",
@@ -222,7 +245,18 @@
         "magalu": "mover-pedidos",
         "bling_nfe": "mover-pedidos",
         "tiktok": "mover-pedidos"
-      }
+      },
+      "capacidades": [
+        "fiscal",
+        "checkout",
+        "ml",
+        "ml-full",
+        "shopee",
+        "magalu",
+        "tiktok",
+        "madeira-madeira"
+      ],
+      "_nota_capacidades": "declaradas em 14/09 DERIVANDO do código, não de memória (auditoria multiloja, P2): fiscal=pasta do módulo; checkout=pasta de checkout; ml-full=ml-full.js resolve token das três; tiktok=quem usa criarColetorDaEmpresa (amb e girassol); madeira-madeira=quem tem pasta *-mm-etiquetas. Sem isso temCapacidade() devolvia null e cada tela decidia sozinha."
     }
   },
   "invariantes": {
