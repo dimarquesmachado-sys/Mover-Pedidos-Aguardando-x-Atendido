@@ -31,8 +31,14 @@ const cfg = fs.readFileSync(path.join(__dirname, '..', 'config', 'empresas.js'),
 assert.ok(/const LOJAS = \{/.test(cfg), 'o config tem que declarar LOJAS separadamente');
 assert.ok(/const APLICACOES = \[/.test(cfg), 'o config tem que declarar APLICACOES separadamente');
 assert.ok(/_registro\.ativas\(\)/.test(cfg), 'as lojas ativas têm que vir do registro, não de lista fixa');
-assert.ok(/ainda não tem módulo fiscal aqui/.test(cfg),
-  'loja no contrato sem módulo tem que AVISAR alto — senão a quarta empresa some em silêncio');
+/* 14/09 — a promessa EVOLUIU: ontem, loja no contrato sem pasta só era avisada; hoje ela é
+   MONTADA a partir do registro (lib/fiscal/montar-empresa.js). Teste que guarda a promessa
+   velha impediria a nova, então ele passa a exigir o comportamento atual — e o aviso de
+   falha continua existindo pra o caso de a montagem não dar certo. */
+assert.ok(/montarEmpresa\(/.test(cfg),
+  'loja no contrato sem pasta tem que ser MONTADA pelo registro — é o critério de aceitação da auditoria');
+assert.ok(/não consegui montar a loja/.test(cfg),
+  'se a montagem falhar, tem que gritar — silêncio aqui esconderia uma empresa inteira fora do ar');
 assert.ok(/SKIP_EMPRESAS/.test(cfg) && /normalizar/.test(cfg),
   'o SKIP tem que passar pelo registro, senão "amb" e "ambtotal" desligam coisas diferentes');
 /* 14/09 (Codex, P1) — contrato LIDO mas com regra violada (alias colidindo, capacidade
