@@ -1,6 +1,9 @@
 {
   "_leia_me": [
-    "CONTRATO DE EMPRESAS — v10 (10/09/2026)",
+    "CONTRATO DE EMPRESAS — v11 (14/09/2026)",
+    "  v11 declara as CAPACIDADES de cada empresa (fiscal, checkout, ml, ml-full, shopee,",
+    "  magalu, tiktok, madeira-madeira), derivadas do código e com vocabulário fechado: capacidade",
+    "  fora da lista derruba o boot, em vez de virar recurso desligado em silêncio.",
     "",
     "Dado, não código. Os dois repositórios leem este mesmo arquivo, byte a",
     "byte. O Mover-Pedidos tem um script que baixa o contrato da main do",
