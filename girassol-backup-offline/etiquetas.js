@@ -4,4 +4,4 @@
    regra vive em lib/checkout/etiquetas.js. Aqui fica a tag desta empresa, que é o que
    identifica a linha no log quando há problema de impressão. */
 
-module.exports = require('../lib/checkout/etiquetas').criar({ tag: 'GIRABKP', base: require('./base') });
+module.exports = require('../lib/checkout/etiquetas').criar({ tag: 'GIRABKP', base: require('./base'), mm: require('../girassol-mm-etiquetas') });

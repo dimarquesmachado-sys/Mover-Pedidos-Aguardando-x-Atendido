@@ -4,4 +4,5 @@
    regra vive em lib/checkout/etiquetas.js. Aqui fica a tag desta empresa, que é o que
    identifica a linha no log quando há problema de impressão. */
 
+// AMBTotal não vende no canal Madeira Madeira, por isso não passa `mm` (a lib pula o passo 3 sem ele).
 module.exports = require('../lib/checkout/etiquetas').criar({ tag: 'AMBBKP', base: require('./base') });
