@@ -1,23 +1,42 @@
 'use strict';
 
 /**
- * Lista de empresas ATIVAS no orquestrador.
+ * Módulos carregados pelo orquestrador — separados em LOJAS e APLICAÇÕES (13/09/2026).
  *
- * Para adicionar uma nova empresa no futuro:
- *  1. Cria a pasta da empresa (ex: /good) com os arquivos do módulo
- *  2. Adiciona uma linha aqui requerendo o módulo
- *  3. Configura as env vars correspondentes no Render
+ * A auditoria do Codex apontou o problema com precisão: este arquivo era uma lista só, em
+ * que as três empresas conviviam com quinze módulos que não são empresa nenhuma (ponto,
+ * imagens, backup, respostas rápidas). Duas consequências ruins:
  *
- * Para desativar uma empresa temporariamente: comenta a linha aqui.
+ *   • quem lia não sabia dizer o que é loja e o que é aplicação auxiliar;
+ *   • havia DOIS mecanismos de ativação com semânticas diferentes — `EMPRESAS` no registro
+ *     canônico e `SKIP_EMPRESAS` aqui —, então desativar uma loja dependia de qual dos dois
+ *     o leitor conhecia.
  *
- * rev 27/06/2026 — good-checkout-offline restaurado (tinha sido sobrescrito)
- *                  + good-mm-etiquetas (uma vez só).
+ * Agora as lojas saem do REGISTRO (contrato-empresas.json) e as aplicações ficam na lista
+ * própria. A ativação é uma coisa só: `EMPRESAS` diz quais LOJAS sobem; `SKIP_EMPRESAS`
+ * desliga qualquer módulo, loja ou aplicação, por id ou alias — os dois normalizados pelo
+ * registro, então "amb" e "ambtotal" valem igual.
+ *
+ * ⚠️ O que este arquivo NÃO faz, de propósito: criar loja a partir do contrato sem a pasta.
+ * Isso é a fábrica de módulo fiscal, o passo seguinte da auditoria. Aqui o ganho é clareza e
+ * UM contrato de ativação — sem isso, a fábrica nasceria sobre a mesma ambiguidade.
  */
 
-const empresas = [
-  require('../girassol'),
-  require('../ambtotal'),
-  require('../good'),
+const _registro = (() => {
+  try { return require('../lib/empresas/registro').carregar({ servico: 'mover-pedidos' }); }
+  catch (e) { console.warn('[config] registro indisponível (' + (e.message || e) + ') — ativação no modo antigo'); return null; }
+})();
+
+/* LOJAS: os módulos fiscais. A chave é o id canônico do contrato; o require continua
+   explícito porque a pasta ainda é necessária (ver aviso acima). */
+const LOJAS = {
+  girassol: () => require('../girassol'),
+  ambtotal: () => require('../ambtotal'),
+  good: () => require('../good'),
+};
+
+/* APLICAÇÕES: tudo o que NÃO é empresa — ferramentas que atendem uma ou mais lojas. */
+const APLICACOES = [
   require('../fragil'),
   require('../estoque'),
   require('../estoque-girassol'),
@@ -37,13 +56,47 @@ const empresas = [
   require('../backup-github'),
 ];
 
-// Filtra empresas marcadas como inativas via env var (ex: SKIP_EMPRESAS=girassol,good)
-const SKIP = (process.env.SKIP_EMPRESAS || '').split(',').map(s => s.trim()).filter(Boolean);
+/* ── ATIVAÇÃO: um contrato só ────────────────────────────────────────────────── */
+const _skipBruto = (process.env.SKIP_EMPRESAS || '').split(',').map(s => s.trim()).filter(Boolean);
+const SKIP = new Set(_skipBruto.map(x => (_registro && _registro.normalizar(x)) || x.toLowerCase()));
 
-module.exports = empresas.filter(e => {
-  if (SKIP.includes(e.id)) {
-    console.log(`[config] Empresa "${e.id}" pulada (SKIP_EMPRESAS)`);
-    return false;
+function _lojasAtivas() {
+  const ids = Object.keys(LOJAS);
+  let escolhidas = ids;
+  if (_registro) {
+    /* EMPRESAS com typo ou empresa fora do contrato tem que ABORTAR o boot, não subir
+       "todas as lojas conhecidas" — isso seria abrir rotas e crons de lojas que o deploy
+       pediu pra NÃO ligar. Falha alto e não se recupera: deixa o erro subir. */
+    const ativas = _registro.ativas();
+    escolhidas = ativas.map(e => e.id).filter(id => ids.includes(id));
+    /* loja no contrato e ativa na env, mas sem pasta aqui: avisa ALTO em vez de sumir em
+       silêncio — é exatamente o caso da "quarta empresa" enquanto a fábrica não existe. */
+    for (const e of ativas) {
+      if (!ids.includes(e.id)) {
+        console.warn('[config] a loja "' + e.id + '" está no contrato e ativa, mas ainda não tem módulo fiscal aqui — ' +
+                     'ela NÃO sobe rotas nem crons (falta a fábrica de módulo fiscal, próximo passo da auditoria)');
+      }
+    }
   }
+  return escolhidas.filter(id => {
+    if (SKIP.has(id)) { console.log('[config] loja "' + id + '" pulada (SKIP_EMPRESAS)'); return false; }
+    return true;
+  });
+}
+
+const lojas = _lojasAtivas().map(id => LOJAS[id]());
+
+const aplicacoes = APLICACOES.filter(m => {
+  const id = String((m && m.id) || '').toLowerCase();
+  const canon = (_registro && _registro.normalizar(id)) || id;
+  if (SKIP.has(id) || SKIP.has(canon)) { console.log('[config] aplicação "' + id + '" pulada (SKIP_EMPRESAS)'); return false; }
   return true;
 });
+
+console.log('[config] lojas: ' + (lojas.map(l => l.id).join(', ') || '(nenhuma)') + ' | aplicações: ' + aplicacoes.length);
+
+/* o orquestrador continua recebendo UMA lista — a separação é de leitura e de ativação, não
+   de contrato com quem consome. */
+module.exports = lojas.concat(aplicacoes);
+module.exports.lojas = lojas;
+module.exports.aplicacoes = aplicacoes;

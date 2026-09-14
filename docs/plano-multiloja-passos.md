@@ -36,7 +36,14 @@ desligar a renovação local.
 - [x] `lib/empresas.js` vira fachada, com retorno idêntico nas três empresas
 - [x] `EMPRESAS` é filtro de ativação, nunca cadastro implícito
 - [x] teste prova a quarta empresa sintética nascendo só de dado
-- [ ] `config/empresas.js` passa a montar módulos por empresa/capacidade (hoje ainda é lista fixa)
+- [x] `config/empresas.js` separa **lojas** de **aplicações**, com as lojas vindas do registro
+      e **um único contrato de ativação** (`EMPRESAS` escolhe lojas, `SKIP_EMPRESAS` desliga
+      qualquer módulo — os dois normalizados pelo registro) — PR #421
+- [x] `valida()` aceita alias **ou** id canônico; `listaCanonica()` para código novo. `lista()`
+      preservada de propósito: há estado gravado com esses nomes (o token do Magalu é o
+      arquivo `/data/<empresa>.json`) — PR #421
+- [ ] fábrica de módulo fiscal: hoje a loja ainda precisa de pasta + `require` (o config
+      **avisa alto** quando há loja no contrato sem módulo, em vez de sumir em silêncio)
 
 ## Fase 2 — fábrica fiscal  ✅ FILA CONCLUÍDA (13/09)
 
