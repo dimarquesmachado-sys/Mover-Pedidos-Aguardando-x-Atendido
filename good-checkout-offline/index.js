@@ -1917,7 +1917,12 @@ function routes(readBody) {
       const skuProbe = urlObj.searchParams.get('sku');
       if (skuProbe) { const ccP = readJson(path.join(CACHE_DIR, '_custos.json'), {}); json(res, 200, { ok: true, sku: skuProbe, no_cache_permanente: ccP[skuProbe] || null, total_no_cache: Object.keys(ccP).length }); return true; }
       if (_cst.rodando) { json(res, 200, { ok: true, ja_rodando: true, progresso: _cst.feitos + '/' + _cst.total }); return true; }
-      custoSync(!!urlObj.searchParams.get('fresh')).catch(() => {});
+      /* 14/09 — trava do processo ocupada (qualquer uma das outras duas empresas, ou a
+         tartaruga desta mesma): custoSyncTravado adia sem rodar nada; dizer "iniciado: true"
+         aqui seria mentira (mesmo apontamento do Codex no #422 pro AMB/Girassol). */
+      const _travaOcupadaS = travaPesada.quemEsta();
+      if (_travaOcupadaS) { json(res, 409, { ok: false, erro: 'rotina pesada em curso (' + _travaOcupadaS.nome + ', há ' + _travaOcupadaS.ha_min + ' min) — tente de novo em alguns minutos' }); return true; }
+      custoSyncTravado(!!urlObj.searchParams.get('fresh')).catch(() => {});
       json(res, 200, { ok: true, iniciado: true, mensagem: 'custo-sync rodando em background (tartaruga anti-429) — ?status=1 p/ acompanhar', acompanhe: _urlStatus(req, '/good-checkout-offline/custo-sync', '', k) });
       return true;
     }
@@ -3398,6 +3403,13 @@ function routes(readBody) {
 // roda 1 ciclo logo após o boot do serviço
 // ═══ CUSTO-SYNC (background): resolve custo/preço de TODOS os SKUs vendidos, devagar (anti-429),
 // e grava em cache PERMANENTE em disco (_custos.json, validade 7d). O sku-info lê daqui — instantâneo.
+/* 14/09 — Codex P1 do #422 (AMB/Girassol) vale igual aqui: as três empresas (girassol, amb,
+   good — config/empresas.js) sobem no MESMO processo (--max-old-space-size=340, o heap do
+   incidente), e a tartaruga pós-boot da GOOD roda no MESMO instante (240s) que a das outras
+   duas. Sem a trava, a GOOD ficava de fora da correção — livre pra sobrepor quem quer que
+   esteja rodando a rodada pesada da vez, recriando o mesmo 503. custoSyncTravado cobre as
+   duas portas desta empresa (tartaruga e disparo manual); a GOOD não tem custo-diário. */
+const travaPesada = require('../lib/checkout/trava-pesada');
 let _cst = { rodando: false, feitos: 0, total: 0, ok: 0, falhas: 0, inicio: null };
 async function custoSync(fresh) {
   if (_cst.rodando) return;
@@ -3441,6 +3453,11 @@ async function custoSync(fresh) {
     } catch (e) { _cst.falhas++; }
     _cst.feitos++; desdeGravei++;
     if (desdeGravei >= 10) { desdeGravei = 0; try { writeJson(path.join(CACHE_DIR, '_custos.json'), cc); } catch (e) {} }
+    /* Codex P1 (trava-pesada): fila grande o bastante (a 1,2s/SKU, ~4.500 SKUs) passa dos 90
+       min do teto — sem sinal de vida, o relógio destrancaria uma rodada que ainda está viva,
+       exatamente a sobreposição que a trava existe pra evitar. Renovar a cada SKU prova que
+       segue em pé. */
+    travaPesada.renovar();
     await dorme(1200);
   }
   try { writeJson(path.join(CACHE_DIR, '_custos.json'), cc); } catch (e) {}
@@ -3448,11 +3465,25 @@ async function custoSync(fresh) {
   console.log('[CUSTO] sync concluiu — ok=' + _cst.ok + ' falhas=' + _cst.falhas + ' de ' + _cst.total);
 }
 
+/* 14/09 — cobre as duas portas que chamam custoSync nesta empresa (tartaruga pós-boot e
+   disparo manual) com a trava do processo. Adia sem enfileirar — não é opcional: sem isto,
+   a rodada de custo daqui podia sobrepor a rodada pesada de QUALQUER uma das outras duas
+   empresas do mesmo processo, recriando o 503 de 13/09. */
+async function custoSyncTravado(fresh) {
+  const _t = travaPesada.tentarEntrar('custo-sync:good');
+  if (!_t.ok) {
+    console.log('[CUSTO] sync adiado — outra rotina pesada em curso (' + _t.ocupadoPor + ', há ' + _t.haMin + ' min)');
+    return;
+  }
+  try { await custoSync(fresh); }
+  finally { travaPesada.sair('custo-sync:good'); }
+}
+
 function bootstrap() {
   // PESCA AUTOMÁTICA PÓS-DEPLOY: todo deploy mata a pesca em andamento; aqui ela renasce sozinha
   // 90s depois do boot (após o ciclo inicial). Com dias=14 só re-checa os recentes — barato e idempotente.
   setTimeout(() => { try { console.log('[ML-FEES] pesca automática pós-deploy iniciando…'); mlSyncFees(14).catch(() => {}); } catch (e) {} }, 90 * 1000);
-  setTimeout(() => { try { custoSync(false).catch(() => {}); } catch (e) {} }, 240 * 1000);   // custos: tartaruga pós-boot, só o que falta
+  setTimeout(() => { try { custoSyncTravado(false).catch(() => {}); } catch (e) {} }, 240 * 1000);   // custos: tartaruga pós-boot, só o que falta — trava do processo (14/09)
   // ETIQUETA PARADA: enquanto existir pedido sem etiqueta, tenta de novo a cada 5 min (o cron normal é 10/10).
   // Em dia limpo (0 sem etiqueta) NADA extra roda — custo zero. Cobre etiqueta que o canal demora a gerar.
   setInterval(() => {

@@ -3200,6 +3200,13 @@ function routes(readBody) {
       /* Codex #387 (P2): com o custo-sync em curso a rotina volta na hora e, FORA da janela
          automática, não há tick que re-tente — dizer 'iniciado' seria mentira. */
       if (_cst.rodando) { json(res, 409, { ok: false, erro: 'custo-sync em curso — tente de novo em alguns minutos (fora das 23h-6h não há tick automático que re-tente)' }); return true; }
+      /* 14/09 — Codex P2: com a trava do PROCESSO (14/09), custoDiario() podia estar ocupado
+         (a outra empresa, ou a tartaruga/6h desta mesma) e simplesmente devolver sem rodar
+         nada — a resposta abaixo dizia "iniciado: true" do mesmo jeito, e fora da janela
+         23h-6h nenhum tick automático re-tenta o pedido descartado. Checa a trava ANTES de
+         chamar, mesma honestidade do _cst.rodando acima. */
+      const _travaOcupadaD = travaPesada.quemEsta();
+      if (_travaOcupadaD) { json(res, 409, { ok: false, erro: 'rotina pesada em curso (' + _travaOcupadaD.nome + ', há ' + _travaOcupadaD.ha_min + ' min) — tente de novo em alguns minutos (fora das 23h-6h não há tick automático que re-tente)' }); return true; }
       if (dia && /^\d{4}-\d{2}-\d{2}$/.test(dia)) {
         try {
           const c = readJson(CUSTO_FILE_DIARIO, {});
@@ -3248,7 +3255,12 @@ function routes(readBody) {
       }
       if (skuProbe) { const ccP = readJson(path.join(CACHE_DIR, '_custos.json'), {}); json(res, 200, { ok: true, sku: skuProbe, no_cache_permanente: ccP[skuProbe] || null, total_no_cache: Object.keys(ccP).length }); return true; }
       if (_cst.rodando) { json(res, 200, { ok: true, ja_rodando: true, progresso: _cst.feitos + '/' + _cst.total }); return true; }
-      custoSync(!!urlObj.searchParams.get('fresh')).catch(() => {});
+      /* 14/09 — mesma honestidade da rota /custo-diario: com a trava do processo ocupada (a
+         outra empresa, ou o custoDiario desta mesma) custoSyncTravado adia sem rodar nada;
+         dizer "iniciado: true" aqui seria a mesma mentira que o Codex apontou lá. */
+      const _travaOcupadaS = travaPesada.quemEsta();
+      if (_travaOcupadaS) { json(res, 409, { ok: false, erro: 'rotina pesada em curso (' + _travaOcupadaS.nome + ', há ' + _travaOcupadaS.ha_min + ' min) — tente de novo em alguns minutos' }); return true; }
+      custoSyncTravado(!!urlObj.searchParams.get('fresh')).catch(() => {});
       json(res, 200, { ok: true, iniciado: true, mensagem: 'custo-sync rodando em background (tartaruga anti-429) — ?status=1 p/ acompanhar', acompanhe: _urlStatus(req, '/girassol-backup-offline/custo-sync', '', k) });
       return true;
     }
@@ -6055,12 +6067,21 @@ function _anotarFalhaCusto(sku, motivo) {
    concorrente não engole o tick — os dois P1 do agendamento) e página falhada
    deixa o dia ABERTO pro próximo tick re-tentar, nunca parcial silencioso. */
 const CUSTO_FILE_DIARIO = path.join(CACHE_DIR, '_custos.json');   /* o mesmo caminho que o custoSync monta local */
+/* 14/09 — Codex P1: a trava só protegia quem passava pelo custoDiario. A tartaruga pós-boot
+   (240s), a manutenção de 6 em 6h (agendador.js) e o disparo manual do operador chamam
+   custoSync DIRETO, sem nunca ver a trava — as duas empresas voltavam a rodar juntas por
+   esses caminhos. custoSyncTravado (definida logo após custoSync) cobre essas três portas;
+   custoDiario continua chamando o custoSync CRU, porque ele já segura a trava por fora, pelo
+   corpo inteiro do seu próprio run — travar de novo aqui dentro seria a rotina brigando com
+   ela mesma pela própria trava. */
+const travaPesada = require('../lib/checkout/trava-pesada');
 /* 11/09 — fatia 5: o CUSTO DIÁRIO (164 linhas idênticas nas duas empresas) foi pra
    lib/checkout/custo-diario.js. Por ser a rotina que decide a margem do dia seguinte, ela
    só saiu daqui COM TESTE ESCRITO ANTES (scripts/teste-custo-diario.js — 6 promessas lidas
    no próprio código). O estado do custo-sync entra por FUNÇÃO (o host recria o objeto a
    cada varredura) e a vigência retroativa da madrugada por acessor. */
 const _custoDiarioMod = require('../lib/checkout/custo-diario').criar({
+  empresa: 'girassol',                                 /* identifica quem segura a trava pesada */
   CUSTO_FILE: CUSTO_FILE_DIARIO,
   readJson,
   escrever: (p, o) => fs.writeFileSync(p, JSON.stringify(o)),
@@ -6328,6 +6349,11 @@ async function custoSync(fresh) {
     } catch (e) { _cst.falhas++; _anotarFalhaCusto(sku, String((e && e.message) || e).slice(0, 160)); }
     _cst.feitos++; desdeGravei++;
     if (desdeGravei >= 10) { desdeGravei = 0; try { writeJson(path.join(CACHE_DIR, '_custos.json'), cc); } catch (e) {} }
+    /* Codex P1 (trava-pesada): fila grande o bastante (a 1,2s/SKU, ~4.500 SKUs) passa dos 90
+       min do teto — sem sinal de vida, o relógio destrancaria uma rodada que ainda está viva,
+       exatamente a sobreposição que a trava existe pra evitar. Renovar a cada SKU prova que
+       segue em pé. */
+    travaPesada.renovar();
     await dorme(1200);
   }
   try { writeJson(path.join(CACHE_DIR, '_custos.json'), cc); } catch (e) {}
@@ -6343,6 +6369,20 @@ async function custoSync(fresh) {
   console.log('[CUSTO] sync concluiu — ok=' + _cst.ok + ' falhas=' + _cst.falhas + ' de ' + _cst.total);
 }
 
+/* 14/09 — Codex P1: cobre as portas que chamam custoSync DIRETO (tartaruga pós-boot, manutenção
+   de 6h, disparo manual) com a trava do processo. Adia sem enfileirar, igual ao custoDiario —
+   e não é opcional: sem isto, a rodada de custo daqui podia sobrepor a rodada pesada da OUTRA
+   empresa (ou o custoDiario desta mesma), recriando o 503 de 13/09. */
+async function custoSyncTravado(fresh) {
+  const _t = travaPesada.tentarEntrar('custo-sync:girassol');
+  if (!_t.ok) {
+    console.log('[CUSTO] sync adiado — outra rotina pesada em curso (' + _t.ocupadoPor + ', há ' + _t.haMin + ' min)');
+    return;
+  }
+  try { await custoSync(fresh); }
+  finally { travaPesada.sair('custo-sync:girassol'); }
+}
+
 /* 13/09 — fatia 7 da desduplicação: o AGENDADOR (as 47 linhas do bootstrap) era igual nas
    duas empresas, com três diferenças — a chave da empresa, o minuto da rodada de custo
    (23h00 aqui, 23h15 na outra, separadas de propósito pra não disputarem cota do Bling) e
@@ -6353,7 +6393,7 @@ const bootstrap = require('../lib/checkout/agendador').criarAgendador({
   empresa: 'girassol',
   minutoCustoDiario: 15,
   mlSyncFees: (...a) => mlSyncFees(...a),
-  custoSync: (...a) => custoSync(...a),
+  custoSync: (...a) => custoSyncTravado(...a),   /* tartaruga pós-boot e manutenção de 6h — trava do processo */
   custoDiario: (...a) => custoDiario(...a),
   varrerCancelados: (...a) => varrerCancelados(...a),
   mlBillingSync: (...a) => mlBillingSync(...a),
