@@ -8,7 +8,10 @@ const { fs, path, fetch, garantirToken, QZ_CERT, QZ_PRIVKEY, VERSAO, BLING_BASE,
   sleep, ensureDir, readJson, writeJson, dataISO, json, html, manifest, salvarManifest, skuEanCache, locCache, salvarLoc,
   salvarSkuEan, lerIndiceEan, lerReservas, lerOperadores, lerAdmins, ehAdmin, blingGet, blingWrite, moverSituacao } = require('./base');
 
-const EMITENTE_FALLBACK = { razao: 'GOOD Import Ltda', cnpj: '27548456000147', ie: '675.374.241.113', endereco: 'Rua Jose Ruscitto, 150, BOX 1 - Galpao, Taboao da Serra - SP' };
+/* dados do emitente ficam em arquivo PRÓPRIO de cada empresa: eles são impressos na DANFE,
+   e manter isso dentro do código compartilhado foi o que permitiu a AMB e a GOOD carregarem
+   o CNPJ da Girassol sem ninguém notar (a linha vivia na lista de exceções do espelho). */
+const EMITENTE_FALLBACK = require('./emitente-fallback');
 
 function parseNF(nf) {
   if (!nf) return null;
@@ -292,7 +295,13 @@ async function dadosNFSimp(nfId, numeroPedido) {
   });
   const c = nf.contato || {};
   return {
-    emitente: (x.emit && x.emit.razao) ? x.emit : EMITENTE_FALLBACK,
+    /* fallback ausente não pode virar bloco de OUTRA empresa: sai vazio e avisa. Vale nas
+       três de propósito — o nf.js é espelhado, e regra que vale só numa empresa é a porta
+       por onde a divergência volta. */
+    emitente: (x.emit && x.emit.razao) ? x.emit : (EMITENTE_FALLBACK || (() => {
+      console.warn('[nf] XML sem emitente e esta empresa nao tem fallback proprio — DANFE sai sem o bloco do emitente (melhor que sair com CNPJ de outra empresa)');
+      return { razao: '', cnpj: '', ie: '', endereco: '' };
+    })()),
     chave: nf.chaveAcesso || nf.chave || '',
     protocolo: x.protocolo || '',
     dataProtocolo: x.dataProtocolo || '',
