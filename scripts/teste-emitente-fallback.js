@@ -39,8 +39,15 @@ for (const [emp, cnpj] of usados) {
 /* quem não tem dados próprios não pode inventar: fallback nulo e bloco vazio */
 for (const emp of EMPRESAS) {
   const s = fonte(emp);
-  /* o tratamento do nulo vale nas TRÊS: regra que existe só numa empresa é a porta por onde a
-     divergência volta (e aqui quebraria o espelho, que é o que acusou isso). */
+  /* desde 14/09 as TRÊS têm dados próprios (o dono informou os da GOOD no mesmo dia), então
+     nenhuma pode voltar a ficar sem: fallback ausente significaria DANFE sem emitente, e o
+     conserto é dado, não código. */
+  assert.ok(dados(emp), emp + ': perdeu os dados próprios do emitente — a DANFE sairia sem o bloco');
+  assert.ok(String(dados(emp).cnpj || '').length >= 14, emp + ': CNPJ do emitente parece inválido');
+  assert.ok(String(dados(emp).ie || '').length > 0, emp + ': falta a IE do emitente');
+
+  /* o tratamento do nulo continua no código: é a rede pra empresa NOVA, que entra sem dados.
+     Vale nas três — regra que existe só numa empresa é a porta por onde a divergência volta. */
   assert.ok(/EMITENTE_FALLBACK \|\|/.test(s), emp + ': falta tratar o fallback nulo');
   assert.ok(/razao: '', cnpj: '', ie: ''/.test(s), emp + ': o bloco vazio tem que ser explícito');
 }

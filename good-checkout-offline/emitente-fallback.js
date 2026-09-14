@@ -1,9 +1,6 @@
 'use strict';
 
-/* ⚠️ SEM DADOS PRÓPRIOS AINDA. Até 14/09 este arquivo trazia o CNPJ e a IE da MAGAZINE
-   GIRASSOL — e eles são IMPRESSOS na DANFE quando o XML não traz o emitente, ou seja, um
-   documento da GOOD podia sair com o CNPJ de outra empresa.
-   Enquanto a razão, o CNPJ, a IE e o endereço da GOOD não forem informados, o fallback é
-   NULO de propósito: a DANFE sai sem o bloco do emitente. Documento incompleto é problema
-   visível, que alguém conserta; documento com CNPJ errado é erro fiscal que passa batido. */
-module.exports = null;
+/* Dados do emitente desta empresa, usados na DANFE quando o XML não traz o bloco.
+   Informados pelo dono em 14/09, depois de este arquivo ter passado meses com o CNPJ e a IE
+   da MAGAZINE GIRASSOL — que iam impressos no documento dentro da caixa. */
+module.exports = { razao: 'GOOD IMPORT MAGAZINE LTDA', cnpj: '32461988000182', ie: '675.374.437.111', endereco: 'Rua Jose Ruscitto, 162, Vila das Oliveiras, Taboao da Serra - SP' };
