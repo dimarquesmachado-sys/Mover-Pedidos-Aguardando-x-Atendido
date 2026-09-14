@@ -978,7 +978,7 @@ function routes(readBody) {
     // (SPC_ST etc.) que a captura manual pra env AMBBKP_SHOPEE_COOKIE
     // nao pega. Guarda: ?k=ADMIN_KEY. POST body {curl:"..."} OU {cookie:"..."}.
     if (method === 'POST' && p === '/amb-checkout-offline/shopee-semear') {
-      const kSe = String((urlObj.searchParams && urlObj.searchParams.get('k')) || '');
+      const kSe = lerChaveAdmin(req, urlObj);
       if (!process.env.ADMIN_KEY || kSe !== process.env.ADMIN_KEY) { json(res, 404, { error: 'not found' }); return true; }
       let bodySe = {}; try { const _rb = await readBody(req); bodySe = (_rb && typeof _rb === 'object') ? _rb : JSON.parse(_rb || '{}'); } catch (e) {}
       let bruto = String(bodySe.cookie || bodySe.curl || '').trim();
@@ -1007,7 +1007,7 @@ function routes(readBody) {
     // Guarda: ?k=ADMIN_KEY OU sessão de admin do checkout. &diag=1 = passos.
     // Entregue é terminal → cache permanente em _shopee-devolucoes.json.
     if (method === 'GET' && p === '/amb-checkout-offline/shopee-devolucao') {
-      const kSd = String((urlObj.searchParams && urlObj.searchParams.get('k')) || '');
+      const kSd = lerChaveAdmin(req, urlObj);
       const opSd = validarSessao(req.headers['cookie']);
       const podeSd = (process.env.ADMIN_KEY && kSd === process.env.ADMIN_KEY) || (opSd && ehAdmin(opSd));
       if (!podeSd) { json(res, 404, { error: 'not found' }); return true; }
@@ -1119,7 +1119,7 @@ function routes(readBody) {
        na hora com o keep-alive, devolvendo se ficou viva. A env do Render vira só a semente de
        emergência. */
     if (method === 'POST' && p === '/amb-checkout-offline/shopee-sessao-cookies') {
-      const kC = ((urlObj.searchParams && urlObj.searchParams.get('k')) || String(req.headers['x-admin-key'] || '')).trim();
+      const kC = lerChaveAdmin(req, urlObj);
       if (!(process.env.ADMIN_KEY && kC === process.env.ADMIN_KEY)) { json(res, 404, { error: 'not found' }); return true; }
       let corpo = '';
       await new Promise(r => { req.on('data', c => { corpo += c; if (corpo.length > 262144) req.destroy(); }); req.on('end', r); req.on('error', r); });

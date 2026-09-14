@@ -12,6 +12,7 @@ try { require('net').setDefaultAutoSelectFamily(false); } catch (e) { console.wa
 const http = require('http');
 const cron = require('node-cron');
 const { json, readBody } = require('./lib/http');
+const { lerChaveAdmin } = require('./lib/http/chave-admin');
 const empresas = require('./config/empresas');
 const magaluOauth = require('./magalu-oauth');   // handler global das rotas /magalu/*
 const tiktokOauth = require('./tiktok-oauth');
@@ -117,9 +118,15 @@ const server = http.createServer(async (req, res) => {
   // Rotas administrativas que disparam rotinas reais (/run, /robo, /forcar),
   // trocam tokens (/setup*) ou VAZAM credenciais/dados (/debug*). Estavam
   // abertas p/ internet nos módulos fiscais (girassol/amb/good, auth=0) e no
-  // auto-mensagens. Agora exigem ?k=ADMIN_KEY. Sem a env, ficam 404 (seguro).
+  // auto-mensagens. Agora exigem ADMIN_KEY (header ou ?k=). Sem a env, ficam
+  // 404 (seguro).
   // NÃO afeta: callbacks OAuth (Bling/ML/Shopee redirecionam pra cá) nem o
   // login/painéis dos módulos com autenticação própria (ponto, estoque, etc).
+  //
+  // 14/09 (Codex, P2): esta trava rodava ANTES da leitura por header dos módulos
+  // (lerChaveAdmin), então uma chamada só-com-header pra /debug-cobertura, /setup*
+  // ou /run das empresas morria aqui com 404 antes de a rota migrada nem ver o
+  // header. Agora a trava central lê pela mesma função.
   const ADMIN_KEY = process.env.ADMIN_KEY || '';
   const ehCallback = path.includes('/callback'); // OAuth — nunca trancar
   let ehAdmin =
@@ -129,7 +136,7 @@ const server = http.createServer(async (req, res) => {
     path.includes('/setup')  ||
     path.includes('/debug/') || path.includes('/debug-') || path.endsWith('/debug');
   if (ehAdmin && !ehCallback) {
-    if (!ADMIN_KEY || urlObj.searchParams.get('k') !== ADMIN_KEY) {
+    if (!ADMIN_KEY || lerChaveAdmin(req, urlObj) !== ADMIN_KEY) {
       return json(res, 404, { error: 'not found', path });
     }
   }
@@ -156,7 +163,7 @@ const server = http.createServer(async (req, res) => {
   if (path === '/diagnostico/tokens') {
     const canario = require('./lib/canario-tokens');
     const ADMIN_KEY_D = process.env.ADMIN_KEY || '';
-    if (!ADMIN_KEY_D || urlObj.searchParams.get('k') !== ADMIN_KEY_D) {
+    if (!ADMIN_KEY_D || lerChaveAdmin(req, urlObj) !== ADMIN_KEY_D) {
       res.writeHead(404); return res.end('not found');
     }
     if (urlObj.searchParams.get('agora') === '1') {
@@ -202,7 +209,7 @@ const server = http.createServer(async (req, res) => {
   if (path === '/diagnostico/modulos' && method === 'GET') {
     const canario = require('./lib/canario-modulos');
     const ADMIN_KEY_M = process.env.ADMIN_KEY || '';
-    if (!ADMIN_KEY_M || urlObj.searchParams.get('k') !== ADMIN_KEY_M) { res.writeHead(404); return res.end('not found'); }
+    if (!ADMIN_KEY_M || lerChaveAdmin(req, urlObj) !== ADMIN_KEY_M) { res.writeHead(404); return res.end('not found'); }
     return json(res, 200, canario.estadoCompleto());
   }
   if (path === '/diagnostico/modulos/alerta') {
@@ -232,7 +239,7 @@ const server = http.createServer(async (req, res) => {
       path === '/magalu/cancelados' || path === '/magalu/cancelados-coletar' || path === '/magalu/sonda-listagem' ||
       path === '/magalu/cruzar-cancelados' || path === '/magalu/sonda-eventos');   /* as duas: cada PR acrescentou uma */
     if (precisaAdmin) {
-      if (!ADMIN_KEY || urlObj.searchParams.get('k') !== ADMIN_KEY) {
+      if (!ADMIN_KEY || lerChaveAdmin(req, urlObj) !== ADMIN_KEY) {
         return json(res, 404, { error: 'not found', path });
       }
     }
@@ -258,13 +265,13 @@ const server = http.createServer(async (req, res) => {
      "as coletas diárias já cobrem ela" e não era verdade. Este agendador roda as coletas de
      marketplace de cada empresa da lista, uma vez ao dia, sem depender de checkout. */
   if (path === '/coletas-diarias/estado') {
-    if (!ADMIN_KEY || urlObj.searchParams.get('k') !== ADMIN_KEY) { json(res, 404, { error: 'not found' }); return; }
+    if (!ADMIN_KEY || lerChaveAdmin(req, urlObj) !== ADMIN_KEY) { json(res, 404, { error: 'not found' }); return; }
     json(res, 200, global.__coletasDiarias || { nunca_rodou: true });
     return;
   }
 
   if (path === '/embarcar') {
-    if (!ADMIN_KEY || urlObj.searchParams.get('k') !== ADMIN_KEY) { json(res, 404, { error: 'not found' }); return; }
+    if (!ADMIN_KEY || lerChaveAdmin(req, urlObj) !== ADMIN_KEY) { json(res, 404, { error: 'not found' }); return; }
     const emb = require('./lib/embarcar-empresa');
     const empresa = String(urlObj.searchParams.get('empresa') || '').toLowerCase().trim();
     if (!empresa) { json(res, 400, { ok: false, erro: 'informe ?empresa=<girassol|good|amb>' }); return; }
@@ -314,7 +321,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
   if (path === '/embarcar/status') {
-    if (!ADMIN_KEY || urlObj.searchParams.get('k') !== ADMIN_KEY) { json(res, 404, { error: 'not found' }); return; }
+    if (!ADMIN_KEY || lerChaveAdmin(req, urlObj) !== ADMIN_KEY) { json(res, 404, { error: 'not found' }); return; }
     const empresa = String(urlObj.searchParams.get('empresa') || '').toLowerCase().trim();
     const st = (global.__embarques || {})[empresa];
     json(res, 200, st || { ok: false, erro: 'nenhum embarque para ' + empresa + ' neste processo' });
@@ -323,7 +330,7 @@ const server = http.createServer(async (req, res) => {
 
   if (path.startsWith('/tiktok/')) {
     if (path !== '/tiktok/callback') {
-      if (!ADMIN_KEY || urlObj.searchParams.get('k') !== ADMIN_KEY) {
+      if (!ADMIN_KEY || lerChaveAdmin(req, urlObj) !== ADMIN_KEY) {
         return json(res, 404, { error: 'not found', path });
       }
     }
@@ -340,7 +347,7 @@ const server = http.createServer(async (req, res) => {
   // ── TikTok ADS (18/08) — API for Business, app SEPARADO do Shop ────────────────
   if (path.startsWith('/tiktok-ads/')) {
     if (path !== '/tiktok-ads/callback') {
-      if (!ADMIN_KEY || urlObj.searchParams.get('k') !== ADMIN_KEY) {
+      if (!ADMIN_KEY || lerChaveAdmin(req, urlObj) !== ADMIN_KEY) {
         return json(res, 404, { error: 'not found', path });
       }
     }
@@ -391,7 +398,7 @@ const server = http.createServer(async (req, res) => {
   // Fase sonda: provar o contrato da API de invoices com vendas reais antes do motor.
   // Tudo atrás da ADMIN_KEY (sem callback: usa os mlTokenManager que já existem).
   if (path.startsWith('/ml-full/')) {
-    if (!ADMIN_KEY || urlObj.searchParams.get('k') !== ADMIN_KEY) {
+    if (!ADMIN_KEY || lerChaveAdmin(req, urlObj) !== ADMIN_KEY) {
       return json(res, 404, { error: 'not found', path });
     }
     try {

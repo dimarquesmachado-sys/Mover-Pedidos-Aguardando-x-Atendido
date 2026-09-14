@@ -484,8 +484,15 @@ function routes(readBody) {
       );
       if (_meu && !_pub && !_central) {
         const _op = validarSessao(req.headers['cookie']);
-        if (!_op) { json(res, 401, { ok: false, erro: 'Sessão necessária. Faça login.' }); return true; }
-        req._op = _op;
+        if (!_op) {
+          // 14/09 (Codex, P2): mesma folga do AMB/Girassol — rotas como backfill-detalhes,
+          // backfill-nf, ml-sync-fees, custo-sync e etiqueta-diag validam ADMIN_KEY por conta
+          // própria, mas sem isto o gate matava a chamada com 401 antes de a rota avaliar a
+          // chave (e chamada por header nunca chegava lá).
+          const _kG = lerChaveAdmin(req, urlObj);
+          if (process.env.ADMIN_KEY && _kG === process.env.ADMIN_KEY) { req._op = 'admin-key'; }
+          else { json(res, 401, { ok: false, erro: 'Sessão necessária. Faça login.' }); return true; }
+        } else { req._op = _op; }
       }
     }
 
@@ -752,7 +759,7 @@ function routes(readBody) {
        na hora com o keep-alive, devolvendo se ficou viva. A env do Render vira só a semente de
        emergência. */
     if (method === 'POST' && p === '/good-checkout-offline/shopee-sessao-cookies') {
-      const kC = ((urlObj.searchParams && urlObj.searchParams.get('k')) || String(req.headers['x-admin-key'] || '')).trim();
+      const kC = lerChaveAdmin(req, urlObj);
       if (!(process.env.ADMIN_KEY && kC === process.env.ADMIN_KEY)) { json(res, 404, { error: 'not found' }); return true; }
       let corpo = '';
       await new Promise(r => { req.on('data', c => { corpo += c; if (corpo.length > 262144) req.destroy(); }); req.on('end', r); req.on('error', r); });

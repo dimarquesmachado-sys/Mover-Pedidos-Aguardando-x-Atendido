@@ -26,13 +26,21 @@ assert.strictEqual(veioPorHeader({ headers: { 'x-admin-key': 'x' } }), true);
 assert.strictEqual(veioPorHeader({ headers: {} }), false, 'serve pra medir o uso legado antes de fechar a janela');
 
 /* nenhuma rota pode ter ficado lendo a query DIRETO — senão ela nunca aceitaria header, e a
-   migração ficaria pela metade sem ninguém notar */
-const alvos = ['amb-checkout-offline/index.js', 'girassol-backup-offline/gbo-app.js', 'good-checkout-offline/index.js'];
+   migração ficaria pela metade sem ninguém notar. O regex antigo só pegava
+   `const k = urlObj.searchParams...` no começo da linha — passava reto por leituras
+   envolvidas em String(...) ou parênteses extras (Codex, P2: 3 rotas escaparam assim). */
+const alvos = [
+  'index.js',
+  'amb-checkout-offline/index.js',
+  'girassol-backup-offline/gbo-app.js',
+  'good-checkout-offline/index.js',
+  'lib/checkout/rota-depara-sku.js',
+];
 for (const arq of alvos) {
   const s = fs.readFileSync(path.join(__dirname, '..', arq), 'utf8');
   const cruas = s.split('\n')
     .filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l))
-    .filter(l => /const \w+ = \(?urlObj\.searchParams/.test(l) && /get\('k'\)/.test(l));
+    .filter(l => /searchParams\.get\('k'\)/.test(l));
   assert.deepStrictEqual(cruas, [], arq + ': ainda lê a chave direto da query (não aceitaria header): ' + cruas.join(' | '));
   assert.ok(/lerChaveAdmin/.test(s), arq + ': precisa usar o helper');
 }

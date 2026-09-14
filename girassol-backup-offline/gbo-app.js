@@ -1033,7 +1033,7 @@ function routes(readBody) {
        na hora com o keep-alive, devolvendo se ficou viva. A env do Render vira só a semente de
        emergência. */
     if (method === 'POST' && p === '/girassol-backup-offline/shopee-sessao-cookies') {
-      const kC = ((urlObj.searchParams && urlObj.searchParams.get('k')) || String(req.headers['x-admin-key'] || '')).trim();
+      const kC = lerChaveAdmin(req, urlObj);
       if (!(process.env.ADMIN_KEY && kC === process.env.ADMIN_KEY)) { json(res, 404, { error: 'not found' }); return true; }
       let corpo = '';
       await new Promise(r => { req.on('data', c => { corpo += c; if (corpo.length > 262144) req.destroy(); }); req.on('end', r); req.on('error', r); });
