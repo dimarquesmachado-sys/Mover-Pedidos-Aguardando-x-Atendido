@@ -15,10 +15,10 @@ const path = require('path');
 
 const EMPRESAS = ['amb-checkout-offline', 'girassol-backup-offline', 'good-checkout-offline'];
 
-for (const arq of ['comum', 'produtos']) {
+for (const arq of ['comum', 'produtos', 'etiquetas', 'email-docs']) {
   const { criar } = require('../lib/checkout/' + arq);
   assert.throws(() => criar({}), /falta tag/, arq + ': tag é obrigatória');
-  assert.throws(() => criar({ tag: 'X' }), /falta base/, arq + ': base é obrigatória');
+  assert.throws(() => criar({ tag: 'X' }), /falta (base|pecas)/, arq + ': as dependências são obrigatórias');
 
   const base = Object.keys(require('../' + EMPRESAS[0] + '/' + arq + '.js')).sort();
   assert.ok(base.length > 0, arq + ': a fachada não expõe nada');
@@ -45,7 +45,7 @@ for (const arq of ['comum', 'produtos']) {
    nada: dá sensação de proteção configurada. O teste passa a conferir a lista de verdade. */
 {
   const esp = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '.github', 'espelhos.json'), 'utf8'));
-  for (const arq of ['comum.js', 'produtos.js']) {
+  for (const arq of ['comum.js', 'produtos.js', 'etiquetas.js', 'email-docs.js']) {
     assert.ok(!esp.identicos.includes(arq),
       arq + ' ainda está em `identicos` — o espelho compararia fachadas de 8 linhas em vez do que importa');
   }
@@ -56,4 +56,4 @@ for (const arq of ['comum', 'produtos']) {
   }
 }
 
-console.log('OK: comum e produtos — uma lib para as três, contrato idêntico, tag por empresa e base injetado');
+console.log('OK: comum, produtos, etiquetas e email-docs — uma lib para as três, contrato idêntico, tag por empresa e dependências injetadas');
