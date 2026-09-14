@@ -20,20 +20,29 @@ const EMPRESAS = ['amb-checkout-offline', 'girassol-backup-offline', 'good-check
 const fonte = (p) => fs.readFileSync(path.join(__dirname, '..', p, 'nf.js'), 'utf8');
 const dados = (p) => require('../' + p + '/emitente-fallback.js');
 
-const cnpjs = {};
+/* Codex #431 (P2): checar só unicidade entre pares deixa passar troca de dono (ex.: a AMB
+   recebendo o objeto da GOOD) ou um CNPJ inventado mas único — nenhum dos dois bate com
+   outra empresa, então o teste antigo não via nada de errado. Aqui é dado fiscal (CNPJ/IE não
+   mudam à toa), então travar o valor exato de cada empresa é o certo, não um exagero. */
+const ESPERADO = {
+  'amb-checkout-offline': { razao: 'AMBTOTAL MAGAZINE LTDA', cnpj: '64289091000100', ie: '157362152117' },
+  'girassol-backup-offline': { razao: 'Magazine Girassol Ltda', cnpj: '27548456000147', ie: '675.374.241.113' },
+  'good-checkout-offline': null,   // sem dados próprios ainda — fallback tem que continuar nulo
+};
+
 for (const emp of EMPRESAS) {
   const d = dados(emp);
-  cnpjs[emp] = d ? String(d.cnpj || '') : null;
+  const esperado = ESPERADO[emp];
   assert.ok(/require\('\.\/emitente-fallback'\)/.test(fonte(emp)),
     emp + ': o nf.js tem que LER os dados do arquivo da empresa, não trazê-los embutido');
-}
-
-/* o CNPJ de uma empresa não pode aparecer no fallback de outra */
-const usados = Object.entries(cnpjs).filter(([, c]) => c);
-for (const [emp, cnpj] of usados) {
-  const outros = usados.filter(([e2]) => e2 !== emp).map(([, c]) => c);
-  assert.ok(!outros.includes(cnpj),
-    emp + ': o fallback usa o CNPJ ' + cnpj + ', que é de outra empresa — sairia impresso na DANFE');
+  if (esperado === null) {
+    assert.strictEqual(d, null, emp + ': era pra continuar sem dados próprios (fallback nulo)');
+  } else {
+    assert.ok(d, emp + ': devia ter dados próprios e o fallback está nulo');
+    assert.strictEqual(d.razao, esperado.razao, emp + ': razão social não é a desta empresa — ' + JSON.stringify(d));
+    assert.strictEqual(d.cnpj, esperado.cnpj, emp + ': CNPJ não é o desta empresa — ' + JSON.stringify(d));
+    assert.strictEqual(d.ie, esperado.ie, emp + ': IE não é a desta empresa — ' + JSON.stringify(d));
+  }
 }
 
 /* quem não tem dados próprios não pode inventar: fallback nulo e bloco vazio */
