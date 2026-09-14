@@ -124,7 +124,10 @@ vale a mesma regra do 2.9: medir e classificar antes de fundir.
    `comum`, `produtos`, `etiquetas` e `email-docs` viraram libs. Sobra `nf.js`, que segue
    espelhado de propósito: os dados de cada empresa saíram dele para `emitente-fallback.js`
    (#431), então ele voltou a ser idêntico e não tem exceção nenhuma no verificador
-2. extrair repositório de manifesto/cache e o ciclo base
+2. extrair repositório de manifesto/cache e o ciclo base — 🔄 **funções do `base.js` feitas**
+   (PR #433): as 20 funções e os caches em memória viraram `lib/checkout/base-funcoes.js`;
+   a configuração da empresa (envs, `SIT_*`, janelas, pausas) ficou no `base.js`, que é onde
+   ela deve estar. Falta o ciclo base
 3. extrair histórico/backfill/vendas-sync sobre um contexto de checkout explícito
 4. consolidar rotas em registradores por capacidade
 5. deixar os entrypoints apenas compondo contexto e capacidades

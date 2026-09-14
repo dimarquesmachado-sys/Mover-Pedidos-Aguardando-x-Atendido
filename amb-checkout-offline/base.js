@@ -47,114 +47,20 @@ const MKT_NOME = { ml: 'Mercado Livre', shopee: 'Shopee', amazon: 'Amazon', maga
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-function ensureDir(d) { try { fs.mkdirSync(d, { recursive: true }); } catch (e) {} }
-
-function readJson(file, fb) { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { return fb; } }
-
-function writeJson(file, obj) {
-  try { fs.writeFileSync(file, JSON.stringify(obj, null, 2)); }
-  catch (e) { console.error('[AMBBKP] write', file, e.message); }
-}
-
-function dataISO(d) { return d.toISOString().slice(0, 10); }
-
-function json(res, code, body) { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(body)); }
-
-function html(res, code, body) { res.writeHead(code, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store, no-cache, must-revalidate', 'Pragma': 'no-cache', 'Expires': '0' }); res.end(body); }
-
-
-// acessores de cache em disco
-const manifest       = () => readJson(MANIFEST_FILE, {});
-const salvarManifest = (m) => writeJson(MANIFEST_FILE, m);
-const skuEanCache    = () => readJson(SKU_EAN_FILE, {});
-const locCache       = () => readJson(LOC_FILE, {});
-const salvarLoc      = (m) => writeJson(LOC_FILE, m);
-const salvarSkuEan   = (m) => writeJson(SKU_EAN_FILE, m);
-const lerIndiceEan = () => readJson(EAN_INDEX_FILE, {});
-
-function lerReservas() {
-  const r = readJson(RESERVAS_FILE, {});
-  const agora = Date.now();
-  let mudou = false;
-  for (const id of Object.keys(r)) {
-    const t = Date.parse(r[id] && r[id].em) || 0;
-    if (!t || agora - t > RESERVA_TTL_MS) { delete r[id]; mudou = true; }
-  }
-  if (mudou) writeJson(RESERVAS_FILE, r);
-  return r;
-}
-
-function lerOperadores() {
-  const raw = process.env.AMBBKP_OPERADORES || '';
-  const map = {};
-  raw.split(',').forEach(par => {
-    const i = par.indexOf(':');
-    if (i > 0) {
-      const nome = par.slice(0, i).trim();
-      const senha = par.slice(i + 1).trim();
-      if (nome) map[nome] = senha;
-    }
-  });
-  return map;
-}
-
-function lerAdmins() {
-  return (process.env.AMBBKP_ADMIN || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
-}
-
-function ehAdmin(nome) {
-  const a = lerAdmins();
-  return a.length === 0 || a.includes(String(nome || '').trim().toLowerCase());
-}
-
-/* 22/08 (Codex #183): 3º parâmetro OPCIONAL `signal`, pra quem chama poder CANCELAR de verdade.
-   Sem ele, o Promise.race do ciclo rejeitava só a espera — o fetch continuava vivo aqui dentro, e
-   cada página que estourava o prazo deixava até 4 conexões penduradas, acumulando a cada ciclo. */
-async function blingGet(pathUrl, tentativas = 3, signal = undefined) {
-  let token;
-  try { token = await garantirToken(); }
-  catch (e) { return { ok: false, status: 401, data: null, erro: 'token: ' + e.message }; }
-  for (let t = 0; t < tentativas; t++) {
-    if (signal && signal.aborted) return { ok: false, status: 0, data: null, erro: 'abortado' };
-    let r;
-    try {
-      const _op = { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } };
-      if (signal) _op.signal = signal;
-      r = await fetch(BLING_BASE + pathUrl, _op);
-    } catch (e) {
-      if (signal && signal.aborted) return { ok: false, status: 0, data: null, erro: 'abortado' };
-      await sleep(800); continue;
-    }
-    if (r.status === 429) { await sleep(1500 * (t + 1)); continue; }
-    const txt = await r.text();
-    let data = null; try { data = JSON.parse(txt); } catch (e) {}
-    return { ok: r.ok, status: r.status, data };
-  }
-  return { ok: false, status: 429, data: null };
-}
-
-async function blingWrite(method, pathUrl, body) {
-  let token;
-  try { token = await garantirToken(); }
-  catch (e) { return { ok: false, status: 401, data: null, erro: 'token: ' + e.message }; }
-  for (let t = 0; t < 3; t++) {
-    const opts = { method, headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } };
-    if (body !== undefined && body !== null) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
-    let r;
-    try { r = await fetch(BLING_BASE + pathUrl, opts); }
-    catch (e) { await sleep(800); continue; }
-    if (r.status === 429) { await sleep(1500 * (t + 1)); continue; }
-    const txt = await r.text();
-    let data = null; try { data = JSON.parse(txt); } catch (e) {}
-    return { ok: r.ok, status: r.status, data, raw: (txt || '').slice(0, 300) };
-  }
-  return { ok: false, status: 429, data: null };
-}
-
-async function moverSituacao(blingId, idSituacao) {
-  return await blingWrite('PATCH', `/pedidos/vendas/${blingId}/situacoes/${idSituacao}`, null);
-}
-
+/* 14/09 — as funções deste arquivo foram pra lib/checkout/base-funcoes.js: eram 91 linhas
+   iguais nas três empresas, com exatamente DUAS envs diferentes. O que fica aqui é a
+   CONFIGURAÇÃO desta empresa — envs, situações do Bling, janelas, pausas —, que é o que a
+   torna ela mesma e não se unifica. Os caches em memória foram junto com as funções, porque
+   é quem os lê e escreve: separar os dois quebrou o boot na primeira tentativa. */
+const _fn = require('../lib/checkout/base-funcoes').criar({
+  tag: 'AMBBKP',
+  envOperadores: 'AMBBKP_OPERADORES',
+  envAdmin: 'AMBBKP_ADMIN',
+  BLING_BASE, garantirToken, PAUSA_MS,
+  MANIFEST_FILE, SKU_EAN_FILE, LOC_FILE, EAN_INDEX_FILE, RESERVAS_FILE, RESERVA_TTL_MS,
+  sleep,
+});
+const { ensureDir, readJson, writeJson, dataISO, json, html, lerReservas, lerOperadores, lerAdmins, ehAdmin, blingGet, blingWrite, moverSituacao, manifest, salvarManifest, skuEanCache, locCache, salvarLoc, salvarSkuEan, lerIndiceEan } = _fn;
 
 module.exports = {
   fs, path, fetch, garantirToken, BLING_BASE,
