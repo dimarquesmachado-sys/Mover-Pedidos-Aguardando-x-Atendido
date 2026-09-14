@@ -69,6 +69,8 @@ const APLICACOES = [
 const _skipBruto = (process.env.SKIP_EMPRESAS || '').split(',').map(s => s.trim()).filter(Boolean);
 const SKIP = new Set(_skipBruto.map(x => (_registro && _registro.normalizar(x)) || x.toLowerCase()));
 
+const extras = [];   /* lojas que nascem do contrato, sem pasta */
+
 function _lojasAtivas() {
   const ids = Object.keys(LOJAS);
   let escolhidas = ids;
@@ -80,10 +82,23 @@ function _lojasAtivas() {
     escolhidas = ativas.map(e => e.id).filter(id => ids.includes(id));
     /* loja no contrato e ativa na env, mas sem pasta aqui: avisa ALTO em vez de sumir em
        silêncio — é exatamente o caso da "quarta empresa" enquanto a fábrica não existe. */
+    /* 14/09 — loja no contrato SEM pasta agora é MONTADA a partir do registro, em vez de só
+       avisada. É o critério de aceitação da auditoria: empresa nova entra com registro e
+       credenciais, sem pasta e sem editar JavaScript. As três existentes seguem com as
+       pastas delas de propósito: carregam história (caminho de token relativo ao módulo, env
+       sem prefixo, estratégia própria de retentativa no F1) que o montador não deve
+       adivinhar — e adivinhar aqui custaria token perdido no meio do expediente. */
     for (const e of ativas) {
       if (!ids.includes(e.id)) {
-        console.warn('[config] a loja "' + e.id + '" está no contrato e ativa, mas ainda não tem módulo fiscal aqui — ' +
-                     'ela NÃO sobe rotas nem crons (falta a fábrica de módulo fiscal, próximo passo da auditoria)');
+        try {
+          const { montarEmpresa } = require('../lib/fiscal/montar-empresa');
+          const ocupados = ids.map(k => { try { return Number(String(LOJAS[k]().crons.nfeMl).split(',')[0]); } catch (e2) { return null; } })
+                              .filter(n => n != null && !isNaN(n));
+          extras.push(montarEmpresa(e.id, { registro: _registro, ocupadosF3: ocupados }));
+          console.log('[config] loja "' + e.id + '" montada a partir do contrato (sem pasta)');
+        } catch (err) {
+          console.error('[config] não consegui montar a loja "' + e.id + '" a partir do contrato: ' + (err.message || err));
+        }
       }
     }
   }
@@ -93,7 +108,7 @@ function _lojasAtivas() {
   });
 }
 
-const lojas = _lojasAtivas().map(id => LOJAS[id]());
+const lojas = _lojasAtivas().map(id => LOJAS[id]()).concat(extras);
 
 const aplicacoes = APLICACOES.filter(m => {
   const id = String((m && m.id) || '').toLowerCase();

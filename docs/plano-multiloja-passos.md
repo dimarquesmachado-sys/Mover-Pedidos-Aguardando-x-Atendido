@@ -49,9 +49,12 @@ desligar a renovação local.
 - [x] **fábrica de módulo fiscal** (PR #424): rotas, helpers e a forma do módulo saíram das
       três pastas para `lib/fiscal/criar-modulo.js` — o que sobra em cada pasta é fiação
       (quais peças entram) e os crons, que seguem por empresa porque o F3 é escalonado
-- [ ] as PEÇAS (fluxos, tokens, cliente Bling) também nascerem do registro — é o que falta
-      para a loja existir sem pasta nenhuma. Hoje o config **avisa alto** quando há loja no
-      contrato sem módulo, em vez de ela sumir em silêncio
+- [x] **as peças nascem do registro** (`lib/fiscal/montar-empresa.js`, PR #429): loja que
+      está no contrato e não tem pasta é **montada** — rotinas, rotas e crons —, com o F3 num
+      minuto de cron livre pra não disputar cota com as existentes. O teste de aceitação da
+      auditoria passa: uma quarta empresa nasce só de dado, sem pasta e sem editar JavaScript.
+      As três atuais seguem com pasta de propósito — carregam história (caminho de token
+      relativo, env sem prefixo, estratégia própria no F1) que o montador não deve adivinhar
 
 ## Fase 2 — fábrica fiscal  ✅ FILA CONCLUÍDA (13/09)
 
