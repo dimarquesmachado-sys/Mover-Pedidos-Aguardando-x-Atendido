@@ -35,8 +35,8 @@ const aplica = process.argv.includes('--aplica');
 
 function emitenteCorrigido(pasta) {
   const fallback = require(path.join('..', pasta, 'emitente-fallback.js'));
-  // GOOD ainda não tem dados próprios: o comportamento atual do nf.js pra fallback nulo é
-  // sair com o bloco vazio (em vez de inventar ou repetir a Girassol) — ver good-checkout-offline/nf.js.
+  // rede de segurança: se algum dia uma empresa ficar sem fallback próprio de novo, o nf.js
+  // sai com o bloco vazio (em vez de inventar ou repetir a Girassol) — ver <empresa>/nf.js.
   return fallback || { razao: '', cnpj: '', ie: '', endereco: '' };
 }
 
@@ -68,7 +68,7 @@ for (const emp of EMPRESAS) {
         dados.emitente = correto;
         fs.writeFileSync(arq, JSON.stringify(dados, null, 2));
         corrigidos++;
-        console.log(`  → corrigido para ${correto.razao ? correto.razao : '(bloco vazio, ' + emp.pasta + ' ainda sem dados próprios)'}`);
+        console.log(`  → corrigido para ${correto.razao ? correto.razao : '(bloco vazio, ' + emp.pasta + ' sem fallback próprio)'}`);
       }
     }
   }

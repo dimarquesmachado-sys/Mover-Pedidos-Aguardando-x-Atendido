@@ -27,7 +27,7 @@ const dados = (p) => require('../' + p + '/emitente-fallback.js');
 const ESPERADO = {
   'amb-checkout-offline': { razao: 'AMBTOTAL MAGAZINE LTDA', cnpj: '64289091000100', ie: '157362152117' },
   'girassol-backup-offline': { razao: 'Magazine Girassol Ltda', cnpj: '27548456000147', ie: '675.374.241.113' },
-  'good-checkout-offline': null,   // sem dados próprios ainda — fallback tem que continuar nulo
+  'good-checkout-offline': { razao: 'GOOD IMPORT MAGAZINE LTDA', cnpj: '32461988000182', ie: '675.374.437.111' },
 };
 
 for (const emp of EMPRESAS) {
