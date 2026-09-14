@@ -12,7 +12,7 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { carregar } = require('../lib/empresas/registro');
+const { carregar, ContratoInvalidoError } = require('../lib/empresas/registro');
 
 // 1) alias de borda → id canônico
 const mp = carregar({ servico: 'mover-pedidos' });
@@ -54,6 +54,22 @@ assert.throws(comContrato({
   b: { id_canonico: 'b', slug_http: '/b', sufixo_tabelas: '_igual', capacidades: [] },
 }), /sufixo_tabelas .* colide/, 'tabela compartilhada entre empresas tem que explodir');
 assert.throws(comContrato({ a: { nome: 'sem id' } }), /sem id_canonico/);
+
+// 4a) contrato LIDO (JSON válido) mas sem o bloco `empresas` (ausente, vazio, null, tipo
+// errado) é regra violada, não "ilegível" — tem que ser ContratoInvalidoError, senão o
+// catch de config/empresas.js confunde os dois e cai no modo antigo, que ignora EMPRESAS
+// e sobe todas as lojas conhecidas (Codex, P1 r2)
+function comContratoCru(objCru) {
+  const arq = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'contr-')), 'c.json');
+  fs.writeFileSync(arq, JSON.stringify(objCru));
+  return () => carregar({ caminho: arq, servico: 'mover-pedidos' });
+}
+for (const semEmpresas of [{}, { empresas: {} }, { empresas: null }, { empresas: [] }, 'nao-e-objeto']) {
+  let erro;
+  try { comContratoCru(semEmpresas)(); } catch (e) { erro = e; }
+  assert.ok(erro instanceof ContratoInvalidoError,
+    'contrato sem o bloco `empresas` (' + JSON.stringify(semEmpresas) + ') tem que ser ContratoInvalidoError — veio ' + (erro && erro.constructor.name));
+}
 
 // 4b) `capacidades` é OBRIGATÓRIA (Codex, P2) — ausente, ou de outro tipo, tem que explodir,
 // não virar null silencioso em temCapacidade() pra uma empresa que esqueceu de declarar
