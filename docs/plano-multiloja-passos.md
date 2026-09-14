@@ -128,6 +128,10 @@ vale a mesma regra do 2.9: medir e classificar antes de fundir.
    (PR #433): as 20 funções e os caches em memória viraram `lib/checkout/base-funcoes.js`;
    a configuração da empresa (envs, `SIT_*`, janelas, pausas) ficou no `base.js`, que é onde
    ela deve estar. Falta o ciclo base
+2b. `ciclo.js` **CLASSIFICADO** (PR #434, `docs/fase3-diferencas-ciclo.md`): é a peça mais
+   divergente do repo (AMB 1.227, GOOD 1.112, Girassol 747 linhas). Três diferenças, e só uma
+   é pergunta aberta — a alavanca `ESPERA_FULL_MS`, que a Girassol não tem. **Não extrair
+   antes de decidir isso.**
 3. extrair histórico/backfill/vendas-sync sobre um contexto de checkout explícito
 4. consolidar rotas em registradores por capacidade
 5. deixar os entrypoints apenas compondo contexto e capacidades
