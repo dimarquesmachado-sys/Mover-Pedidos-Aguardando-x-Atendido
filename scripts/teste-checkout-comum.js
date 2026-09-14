@@ -40,4 +40,20 @@ for (const arq of ['comum', 'produtos']) {
   assert.ok(!/require\('\.\/base'\)/.test(lib), arq + ': a lib voltou a importar ./base — aponta pro lugar errado');
 }
 
+/* Codex #430: eu tinha "removido" os arquivos do espelho criando uma chave que NENHUM código
+   lia — o verifica itera `identicos`, e eles seguiam lá. Chave morta em config é pior que
+   nada: dá sensação de proteção configurada. O teste passa a conferir a lista de verdade. */
+{
+  const esp = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '.github', 'espelhos.json'), 'utf8'));
+  for (const arq of ['comum.js', 'produtos.js']) {
+    assert.ok(!esp.identicos.includes(arq),
+      arq + ' ainda está em `identicos` — o espelho compararia fachadas de 8 linhas em vez do que importa');
+  }
+  for (const chave of Object.keys(esp)) {
+    if (chave.startsWith('ignorar_arquivos')) {
+      assert.fail('a chave "' + chave + '" não é lida pelo verifica — config morta finge proteção que não existe');
+    }
+  }
+}
+
 console.log('OK: comum e produtos — uma lib para as três, contrato idêntico, tag por empresa e base injetado');
