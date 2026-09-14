@@ -7849,6 +7849,7 @@ const CUSTO_FILE_DIARIO = path.join(CACHE_DIR, '_custos.json');   /* o mesmo cam
    no próprio código). O estado do custo-sync entra por FUNÇÃO (o host recria o objeto a
    cada varredura) e a vigência retroativa da madrugada por acessor. */
 const _custoDiarioMod = require('../lib/checkout/custo-diario').criar({
+  empresa: 'amb',                                 /* identifica quem segura a trava pesada */
   CUSTO_FILE: CUSTO_FILE_DIARIO,
   readJson,
   escrever: (p, o) => fs.writeFileSync(p, JSON.stringify(o)),
