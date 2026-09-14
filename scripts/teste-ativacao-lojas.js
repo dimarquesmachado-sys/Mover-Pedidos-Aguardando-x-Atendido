@@ -35,5 +35,10 @@ assert.ok(/ainda não tem módulo fiscal aqui/.test(cfg),
   'loja no contrato sem módulo tem que AVISAR alto — senão a quarta empresa some em silêncio');
 assert.ok(/SKIP_EMPRESAS/.test(cfg) && /normalizar/.test(cfg),
   'o SKIP tem que passar pelo registro, senão "amb" e "ambtotal" desligam coisas diferentes');
+/* 14/09 (Codex, P1) — contrato LIDO mas com regra violada (alias colidindo, capacidade
+   fora do vocabulário) tem que abortar o boot, não cair no "modo antigo" do catch genérico:
+   nesse modo a ativação por EMPRESAS é ignorada e todas as lojas conhecidas sobem. */
+assert.ok(/instanceof _registroLib\.ContratoInvalidoError/.test(cfg) && /throw e/.test(cfg),
+  'contrato inválido (não "ilegível") tem que ser relançado, não engolido pelo catch');
 
 console.log('OK: ativação — alias e canônico valem igual, lista() preservada pro estado gravado, e o config separa lojas de aplicações com um filtro só');

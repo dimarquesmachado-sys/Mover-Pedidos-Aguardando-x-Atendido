@@ -45,4 +45,17 @@ fs.writeFileSync(arq, JSON.stringify({ empresas: { x: { id_canonico: 'x', capaci
 assert.throws(() => carregar({ caminho: arq }), /capacidade desconhecida/,
   'digitação errada no contrato tem que FALHAR no boot, não desligar recurso em silêncio');
 
-console.log('OK: capacidades — batem com o que existe no repositório, e capacidade fora do vocabulário derruba o boot');
+/* achado do Codex (P2): empresa que OMITE `capacidades` (ou declara outro tipo) passava
+   batido pela checagem — só validava quando o campo já era array. temCapacidade() voltava a
+   devolver null pra ela, a ambiguidade que este commit existe pra fechar. */
+const arqSemCampo = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'cap-')), 'c.json');
+fs.writeFileSync(arqSemCampo, JSON.stringify({ empresas: { x: { id_canonico: 'x' } } }));
+assert.throws(() => carregar({ caminho: arqSemCampo }), /não declara `capacidades`/,
+  'empresa sem `capacidades` tem que FALHAR no boot, não herdar null em temCapacidade()');
+
+const arqTipoErrado = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'cap-')), 'c.json');
+fs.writeFileSync(arqTipoErrado, JSON.stringify({ empresas: { x: { id_canonico: 'x', capacidades: 'fiscal' } } }));
+assert.throws(() => carregar({ caminho: arqTipoErrado }), /não declara `capacidades`/,
+  '`capacidades` que não é lista tem que FALHAR no boot');
+
+console.log('OK: capacidades — batem com o que existe no repositório, capacidade fora do vocabulário derruba o boot, e omitir a declaração também derruba');

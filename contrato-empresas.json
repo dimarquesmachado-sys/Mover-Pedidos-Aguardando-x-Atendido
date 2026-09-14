@@ -51,7 +51,7 @@
     "      reintroduz a invalidação de cache que a gente acabou de tirar.",
     "      Sugestão do Mover-Pedidos."
   ],
-  "versao": "v11",
+  "versao": 11,
   "atualizado_em": "2026-09-10",
   "servicos": {
     "_nota": "os serviços que leem este contrato. `dono_hoje`/`dono_alvo` só podem citar nomes daqui.",
