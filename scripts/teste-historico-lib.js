@@ -30,6 +30,21 @@ assert.ok(!/\|\|\s*base\./.test(semComentario),
 assert.ok(!/require\('\.\/(nf|ciclo|base)'\)/.test(semComentario),
   'a lib importa da pasta da empresa — dentro de lib/checkout esse caminho aponta pro lugar errado');
 
+/* Codex #436 (P2): PAUSA_MS não pode ser um ternário que resolve pro MESMO lado nos dois
+   ramos — foi exatamente esse copiar-colar (`ctx.PAUSA_MS != null ? ctx.PAUSA_MS : ctx.PAUSA_MS`)
+   que fazia sleep(undefined) virar timer de 0ms entre as chamadas do /buscar-pedido ao Bling. */
+assert.ok(!/(ctx\.PAUSA_MS)\s*(!=\s*null)?\s*\?\s*\1\s*:\s*\1/.test(semComentario),
+  'PAUSA_MS não pode ser um ternário tautológico — mesmo valor nos dois ramos (bug do Codex #436 P2)');
+assert.ok(/'PAUSA_MS'/.test(lib),
+  'a lib tem que exigir PAUSA_MS no ctx — sem isso o ritmo da API vira 0ms em silêncio');
+
+/* Codex #436 (P1): a coluna credito_ml (bônus de envio Flex) só existe no vendas_historico da
+   AMB — a extração pra lib única tinha derrubado essa soma em silêncio pra todo mundo. */
+assert.ok(/TEM_CREDITO_ML\s*=\s*EMPRESA === 'amb'/.test(lib),
+  'a lib tem que restringir o credito_ml à AMB — Girassol/GOOD não têm essa coluna e levariam 400 do PostgREST');
+assert.ok(/TEM_CREDITO_ML \? \(Number\(l\.credito_ml\)/.test(lib),
+  'o credito_ml (bônus Flex) tem que voltar a somar na margem da AMB (Codex #436 P1)');
+
 /* cada fachada declara a própria identidade */
 const fachadas = [['girassol-backup-offline', 'historico.js', 'girassol'], ['amb-checkout-offline', 'amb-historico.js', 'amb']];
 const ids = [];
@@ -37,6 +52,7 @@ for (const [pasta, arq, empresa] of fachadas) {
   const s = fs.readFileSync(path.join(__dirname, '..', pasta, arq), 'utf8');
   assert.ok(new RegExp("empresa: '" + empresa + "'").test(s), pasta + ': tem que declarar a própria empresa');
   assert.ok(/CACHE_DIR: base\.CACHE_DIR/.test(s), pasta + ': os caminhos vêm do base DESTA pasta');
+  assert.ok(/PAUSA_MS: base\.PAUSA_MS/.test(s), pasta + ': o ritmo da API tem que vir do base DESTA pasta (Codex #436 P2)');
   assert.ok(/pecas: \{ nf: require/.test(s), pasta + ': as peças da empresa entram por injeção');
   ids.push(empresa);
   const m = require('../' + pasta + '/' + arq);
