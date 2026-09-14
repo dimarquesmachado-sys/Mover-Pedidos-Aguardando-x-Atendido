@@ -22,6 +22,7 @@ function rotasHistorico(ctx) {
     blingGet: base.blingGet,
     json: base.json,
     sleep: base.sleep,
+    PAUSA_MS: base.PAUSA_MS,
     pecas: { nf: require('./nf'), ciclo: require('./ciclo') },
   }, ctx || {}));
 }
