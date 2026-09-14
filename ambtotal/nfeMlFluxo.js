@@ -8,7 +8,7 @@
 module.exports = require('../lib/fiscal/nfe-ml-fluxo').criarFluxoNFeML({
   rotulo: 'AMB',
   envMaxNfeMl: 'AMB_MAX_NFE_ML',
-  envNfJanelaDias: 'NF_JANELA_DIAS_F3',
+  envNfJanelaDias: 'AMB_NF_JANELA_DIAS',
   envF3MaxChecagens: 'AMB_F3_MAX_CHECAGENS',
   pecas: {
     blingApi: require('./blingApi'),
