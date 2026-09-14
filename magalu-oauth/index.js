@@ -25,6 +25,7 @@
 const fs   = require('fs');
 const path = require('path');
 const { json, html, readBody } = require('../lib/http');
+const { lerChaveAdmin } = require('../lib/http/chave-admin');
 
 const VERSAO = 'magalu-oauth v1 b42';
 
@@ -263,7 +264,7 @@ async function tratar(req, res, urlObj) {
 
   if (p === '/magalu/nf-full' || p === '/magalu/nf-full/baixar' || p === '/magalu/nf-full/arquivo' || p === '/magalu/nf-full/rodar' || p === '/magalu/nf-full/importar' || p === '/magalu/nf-full/cookie' || p === '/magalu/nf-full/cookie-testar' || p === '/magalu/nf-full/ext/estado' || p === '/magalu/nf-full/ext/registrar' || p === '/magalu/nf-full/diag') {
     const CHAVE_ADMIN = process.env.ADMIN_KEY || '';
-    if (!CHAVE_ADMIN || q.get('k') !== CHAVE_ADMIN) { json(res, 404, { error: 'not found', path: p }); return true; }
+    if (!CHAVE_ADMIN || lerChaveAdmin(req, urlObj) !== CHAVE_ADMIN) { json(res, 404, { error: 'not found', path: p }); return true; }
 
     const eData = s => /^\d{4}-\d{2}-\d{2}$/.test(s);
     const fmtD  = d => d.toISOString().slice(0, 10);
@@ -892,7 +893,7 @@ ${andamento}
   if (method === 'GET' && p === '/magalu/pedido-sonda') {
     const empS = String(q.get('empresa') || '').toLowerCase().trim();
     if (!EMPRESAS_VALIDAS.includes(empS)) { json(res, 400, { ok: false, erro: 'empresa inválida' }); return true; }
-    const kS = String(q.get('k') || '').trim();
+    const kS = lerChaveAdmin(req, urlObj);
     if (!process.env.ADMIN_KEY || kS !== process.env.ADMIN_KEY) { json(res, 404, { error: 'not found' }); return true; }
     const idS = String(q.get('id') || '').trim();
     if (!idS) { json(res, 400, { ok: false, erro: 'use ?id={uuid ou code do pedido}' }); return true; }
@@ -933,7 +934,7 @@ ${andamento}
   if (method === 'GET' && p === '/magalu/pedidos-do-dia') {
     const emp = String(q.get('empresa') || '').toLowerCase().trim();
     if (!EMPRESAS_VALIDAS.includes(emp)) { json(res, 400, { ok: false, erro: 'empresa inválida' }); return true; }
-    const kD = String(q.get('k') || '').trim();
+    const kD = lerChaveAdmin(req, urlObj);
     if (!process.env.ADMIN_KEY || kD !== process.env.ADMIN_KEY) { json(res, 404, { error: 'not found' }); return true; }
     let tok = '';
     try { tok = await getAccessToken(emp); }

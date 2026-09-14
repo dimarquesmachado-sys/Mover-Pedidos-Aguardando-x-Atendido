@@ -18,6 +18,7 @@
 //  ENV: TIKTOK_ADS_APP_ID · TIKTOK_ADS_SECRET · (opcional) TIKTOK_ADS_REDIRECT
 const path = require('path');
 const fs = require('fs');
+const { lerChaveAdmin } = require('../lib/http/chave-admin');
 
 const APP_ID = process.env.TIKTOK_ADS_APP_ID || '';
 const SECRET = process.env.TIKTOK_ADS_SECRET || '';
@@ -53,7 +54,7 @@ async function tratar(req, res, urlObj, json) {
   const p = urlObj.pathname;
   const q = urlObj.searchParams;
   const ADM = process.env.ADMIN_KEY || '';
-  const admOk = () => ADM && q.get('k') === ADM;
+  const admOk = () => ADM && lerChaveAdmin(req, urlObj) === ADM;
 
   if (p === '/tiktok-ads/status') {
     if (!admOk()) { json(res, 404, { error: 'not found' }); return true; }

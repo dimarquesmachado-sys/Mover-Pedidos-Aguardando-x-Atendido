@@ -21,6 +21,7 @@
 const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
+const { lerChaveAdmin } = require('../lib/http/chave-admin');
 
 const APP_KEY = process.env.TIKTOK_APP_KEY || '';
 const APP_SECRET = process.env.TIKTOK_APP_SECRET || '';
@@ -145,7 +146,7 @@ async function tratar(req, res, urlObj, json) {
   const p = urlObj.pathname;
   const q = urlObj.searchParams;
   const ADM = process.env.ADMIN_KEY || '';
-  const admOk = () => ADM && q.get('k') === ADM;
+  const admOk = () => ADM && lerChaveAdmin(req, urlObj) === ADM;
 
   if (p === '/tiktok/status') {
     if (!admOk()) { json(res, 404, { error: 'not found' }); return true; }

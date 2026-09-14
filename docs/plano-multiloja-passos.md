@@ -144,6 +144,9 @@ segredo.
       incluindo a TRAVA CENTRAL e os endpoints globais do `index.js` raiz (diagnóstico,
       magalu, tiktok, embarcar, ml-full) e o gate de sessão do GOOD, que r2 do Codex pegou
       ainda lendo só `?k=` ou derrubando a chamada antes de a rota migrada avaliar a chave.
+      3ª rodada: os gates internos de magalu-oauth (`/magalu/nf-full*`, `/magalu/pedido-sonda`,
+      `/magalu/pedidos-do-dia`) e o `admOk()` de tiktok-oauth/tiktok-ads tinham o mesmo furo,
+      por trás de um alias `q = urlObj.searchParams` que o teste ainda não cobria.
       A chave já tinha deixado de ser ecoada nas respostas (PR #399).
 - [ ] fechar a janela: medir o uso legado (`veioPorHeader`) e só então recusar `?k=`
 - [ ] README ainda se apresenta como "Girassol v2.0", monoempresa

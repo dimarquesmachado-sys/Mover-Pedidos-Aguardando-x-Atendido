@@ -28,21 +28,33 @@ assert.strictEqual(veioPorHeader({ headers: {} }), false, 'serve pra medir o uso
 /* nenhuma rota pode ter ficado lendo a query DIRETO — senão ela nunca aceitaria header, e a
    migração ficaria pela metade sem ninguém notar. O regex antigo só pegava
    `const k = urlObj.searchParams...` no começo da linha — passava reto por leituras
-   envolvidas em String(...) ou parênteses extras (Codex, P2: 3 rotas escaparam assim). */
+   envolvidas em String(...) ou parênteses extras (Codex, P2: 3 rotas escaparam assim).
+   14/09 (3ª rodada): ampliado pra `.get('k')` puro (sem exigir `searchParams.` colado antes),
+   porque magalu-oauth/tiktok-oauth/tiktok-ads leem por um alias `q = urlObj.searchParams` —
+   e o tiktok-ads tinha o MESMO furo (admOk() comparava direto com q.get('k')). */
 const alvos = [
   'index.js',
   'amb-checkout-offline/index.js',
   'girassol-backup-offline/gbo-app.js',
   'good-checkout-offline/index.js',
   'lib/checkout/rota-depara-sku.js',
+  'tiktok-ads/index.js',
 ];
 for (const arq of alvos) {
   const s = fs.readFileSync(path.join(__dirname, '..', arq), 'utf8');
   const cruas = s.split('\n')
     .filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l))
-    .filter(l => /searchParams\.get\('k'\)/.test(l));
+    .filter(l => /\.get\('k'\)/.test(l));
   assert.deepStrictEqual(cruas, [], arq + ': ainda lê a chave direto da query (não aceitaria header): ' + cruas.join(' | '));
   assert.ok(/lerChaveAdmin/.test(s), arq + ': precisa usar o helper');
 }
 
-console.log('OK: chave de admin — header ganha da query, URL antiga segue valendo, e nenhuma rota dos checkouts lê a query direto');
+/* magalu-oauth e tiktok-oauth ecoam ?k= em links de "voltar pro painel" DEPOIS do gate (a
+   query segue valendo como compat, então a URL construída é legítima) — não dá pra banir
+   todo '.get('k')' sem falso-positivo aqui, mas o GATE em si precisa usar o helper. */
+for (const arq of ['magalu-oauth/index.js', 'tiktok-oauth/index.js']) {
+  const s = fs.readFileSync(path.join(__dirname, '..', arq), 'utf8');
+  assert.ok(/lerChaveAdmin/.test(s), arq + ': precisa usar o helper no gate de admin');
+}
+
+console.log('OK: chave de admin — header ganha da query, URL antiga segue valendo, e nenhuma rota dos checkouts/orquestrador lê a query direto');
