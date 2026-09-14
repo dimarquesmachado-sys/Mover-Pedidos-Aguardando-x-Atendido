@@ -144,6 +144,21 @@ sucesso nem falha) e aceitou-e-não-aplicou — e o contador no resumo do F1.
 **Custo consciente:** uma leitura a mais por pedido movido. É cota do Bling gasta de
 propósito, bem mais barata que um pedido parado que ninguém vê.
 
+## Achado do F1/F2 (14/09): estratégia de retentativa diferente, não dívida
+
+Medido por **conjunto de linhas** (o diff posicional mentia por causa de ordem): AMB e GOOD
+são **idênticas** no `fluxos.js`. A Girassol difere porque usa outra estratégia:
+
+- ela **marca o pedido como feito** assim que o move é confirmado, e por isso precisa de
+  `destravado` para reabri-lo quando o Bling desfaz — sem isso o pedido ficaria preso;
+- AMB e GOOD **não marcam no sucesso** (dependem de o pedido sair da lista de ATENDIDO),
+  então não têm o que destravar.
+
+As duas funcionam, e nenhuma tem capacidade que a outra não tenha. Unificar aqui seria
+**escolher uma estratégia para todas** — decisão de operação, não de refatoração, e sem
+sintoma que a justifique hoje. Por isso as gêmeas foram para `lib/fiscal/fluxos-pedidos.js`
+e a Girassol ficou com a implementação dela, registrada aqui para ninguém "consertar" depois.
+
 ## Demais diferenças (classificação rápida)
 
 - `mlApi.js`: diff é só **rótulo de log** (`[mlApi]` vs `[AMB mlApi]`) e a lista de exports (a

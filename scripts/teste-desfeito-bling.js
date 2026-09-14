@@ -10,8 +10,16 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 
-for (const emp of ['ambtotal', 'good', 'girassol']) {
-  const s = fs.readFileSync(path.join(__dirname, '..', emp, 'fluxos.js'), 'utf8');
+/* 14/09: o F1/F2 das gêmeas saiu das pastas e virou lib/fiscal/fluxos-pedidos.js (elas eram
+   idênticas). A Girassol segue com implementação própria, por usar outra estratégia de
+   retentativa. A garantia deste teste não mudou — ela vale pras TRÊS —, só mudou onde cada
+   uma guarda o código: a lib responde pelas gêmeas, a pasta responde pela Girassol. */
+const FONTES = [
+  ['AMB/GOOD (lib)', path.join(__dirname, '..', 'lib', 'fiscal', 'fluxos-pedidos.js')],
+  ['girassol', path.join(__dirname, '..', 'girassol', 'fluxos.js')],
+];
+for (const [emp, caminho] of FONTES) {
+  const s = fs.readFileSync(caminho, 'utf8');
 
   assert.ok(/_movidosPorNos = new Map\(\)/.test(s), emp + ': falta o mapa do que movemos');
   assert.ok(/_movidosPorNos\.set\(String\(p\.id\), \{ em: Date\.now\(\)/.test(s),
