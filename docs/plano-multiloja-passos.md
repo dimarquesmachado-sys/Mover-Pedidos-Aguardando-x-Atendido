@@ -42,6 +42,10 @@ desligar a renovação local.
 - [x] `valida()` aceita alias **ou** id canônico; `listaCanonica()` para código novo. `lista()`
       preservada de propósito: há estado gravado com esses nomes (o token do Magalu é o
       arquivo `/data/<empresa>.json`) — PR #421
+- [x] **capacidades declaradas no contrato** (v11) — derivadas do código, com vocabulário
+      FECHADO: capacidade fora da lista derruba o boot, em vez de virar recurso desligado em
+      silêncio. ⚠️ o contrato é espelhado byte a byte com o Devoluções: mudança aqui exige o
+      PR gêmeo lá (Devoluções #283)
 - [ ] fábrica de módulo fiscal: hoje a loja ainda precisa de pasta + `require` (o config
       **avisa alto** quando há loja no contrato sem módulo, em vez de sumir em silêncio)
 
