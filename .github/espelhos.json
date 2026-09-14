@@ -62,7 +62,7 @@
       "UI_BUILD = 'b"
     ],
     "base.js": [
-      "function blingGet",
+      "base-funcoes').criar(",
       "EMAIL_DEST = process.env",
       "SIT_VERIFICADO",
       "garantirToken"
@@ -88,5 +88,6 @@
   "_nota_assinaturas_index": "22/08 (Codex #183): 'validarSessao' sozinho NAO protegia — o verificador faz includes no arquivo inteiro, e a definicao da funcao sempre existe por causa das outras rotas. Se alguem apagasse o guarda de UMA rota sensivel, passava. Agora as assinaturas sao TRECHOS DE USO — a chamada com o cookie, o teste da ADMIN_KEY e o 404 de rota inexistente — que so aparecem quando o guarda esta de fato aplicado numa rota.",
   "_nota_ignorar": "14/09 (Codex #430): comum.js e produtos.js saíram de `identicos` — a lista que o verifica REALMENTE lê. Eu tinha criado uma chave `ignorar_arquivos` que nenhum código consultava: o espelho seguia comparando os arquivos e eu achava que não. Chave morta em config é pior que nada, porque dá sensação de proteção configurada. Os dois viraram fachadas de lib/checkout/ e quem os protege agora é scripts/teste-checkout-comum.js.",
   "_nota_emitente": "14/09: os dados do emitente saíram do nf.js e viraram emitente-fallback.js em cada pasta — por isso o nf.js voltou a ser IDÊNTICO nas três e não precisa mais de exceção. Manter dado de empresa dentro de código compartilhado foi o que permitiu a AMB e a GOOD carregarem o CNPJ da Girassol sem ninguém notar: a linha estava na lista de exceções, então a divergência era 'esperada' e o conteúdo nunca foi olhado.",
-  "_nota_espelhos": "14/09 (Fase 3, passo 1): comum, produtos, etiquetas e email-docs saíram desta lista porque deixaram de ser CÓPIA — viraram fachadas de lib/checkout/. Sobram nf.js (ainda espelhado de verdade) e danfe-simplificado/fusao-etiqueta, que já eram fachadas de lib. Quem protege o que saiu são os testes das libs, que conferem contrato e parâmetros por empresa em vez de só comparar bytes."
+  "_nota_espelhos": "14/09 (Fase 3, passo 1): comum, produtos, etiquetas e email-docs saíram desta lista porque deixaram de ser CÓPIA — viraram fachadas de lib/checkout/. Sobram nf.js (ainda espelhado de verdade) e danfe-simplificado/fusao-etiqueta, que já eram fachadas de lib. Quem protege o que saiu são os testes das libs, que conferem contrato e parâmetros por empresa em vez de só comparar bytes.",
+  "_nota_assinaturas_base": "14/09: a assinatura do base.js procurava 'function blingGet', que saiu pra lib/checkout/base-funcoes.js. Ela mudou de ALVO em vez de sumir: o base prova agora que CHAMA a lib e que a configuração da empresa continua nele. A função em si é provada por scripts/teste-base-funcoes.js — aqui não cabe, porque esta checagem procura o arquivo DENTRO da pasta de cada empresa (tentei e ela acusou 'NÃO EXISTE' nas três)."
 }
