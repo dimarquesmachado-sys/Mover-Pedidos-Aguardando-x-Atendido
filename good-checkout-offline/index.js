@@ -1,5 +1,10 @@
 'use strict';
 
+/* 14/09 (auditoria, P2): a chave passa a ser lida do HEADER primeiro; a query
+   continua aceita porque há dezenas de URLs salvas com &k= — cortar de uma vez
+   quebraria o trabalho de quem opera pelo navegador. */
+const { lerChaveAdmin } = require('../lib/http/chave-admin');
+
 // ════════════════════════════════════════════════════════════════════════
 //  GOOD · CHECKOUT OFFLINE — FASE 1 (poller) + FASE 2 (bipagem)   (Mover-Pedidos)
 // ════════════════════════════════════════════════════════════════════════
@@ -479,8 +484,15 @@ function routes(readBody) {
       );
       if (_meu && !_pub && !_central) {
         const _op = validarSessao(req.headers['cookie']);
-        if (!_op) { json(res, 401, { ok: false, erro: 'Sessão necessária. Faça login.' }); return true; }
-        req._op = _op;
+        if (!_op) {
+          // 14/09 (Codex, P2): mesma folga do AMB/Girassol — rotas como backfill-detalhes,
+          // backfill-nf, ml-sync-fees, custo-sync e etiqueta-diag validam ADMIN_KEY por conta
+          // própria, mas sem isto o gate matava a chamada com 401 antes de a rota avaliar a
+          // chave (e chamada por header nunca chegava lá).
+          const _kG = lerChaveAdmin(req, urlObj);
+          if (process.env.ADMIN_KEY && _kG === process.env.ADMIN_KEY) { req._op = 'admin-key'; }
+          else { json(res, 401, { ok: false, erro: 'Sessão necessária. Faça login.' }); return true; }
+        } else { req._op = _op; }
       }
     }
 
@@ -520,7 +532,7 @@ function routes(readBody) {
     if (method === 'GET' && p === '/good-checkout-offline/nf-travadas') {
       try {
         const trav = require('../lib/nf-travadas');
-        const kT = urlObj.searchParams.get('k') || '';
+        const kT = lerChaveAdmin(req, urlObj);
         const resolver = urlObj.searchParams.get('resolver');
         if (resolver) {
           if (!(process.env.ADMIN_KEY && kT === process.env.ADMIN_KEY)) { json(res, 404, { error: 'not found' }); return true; }
@@ -536,7 +548,7 @@ function routes(readBody) {
     }
 
     if (method === 'GET' && p === '/good-checkout-offline/duplicatas') {
-      const kD = urlObj.searchParams.get('k') || '';
+      const kD = lerChaveAdmin(req, urlObj);
       if (!(process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY)) { json(res, 404, { error: 'not found' }); return true; }
       const de = urlObj.searchParams.get('de') || '', ate = urlObj.searchParams.get('ate') || '';
       if (!/^\d{4}-\d{2}-\d{2}$/.test(de) || !/^\d{4}-\d{2}-\d{2}$/.test(ate)) {
@@ -553,14 +565,14 @@ function routes(readBody) {
     }
 
     if (method === 'GET' && p === '/good-checkout-offline/backfill-status') {
-      const kS = urlObj.searchParams.get('k') || '';
+      const kS = lerChaveAdmin(req, urlObj);
       if (!(process.env.ADMIN_KEY && kS === process.env.ADMIN_KEY)) { json(res, 404, { error: 'not found' }); return true; }
       json(res, 200, global.__bfGood || { estado: 'nunca rodou neste processo' });
       return true;
     }
 
     if ((method === 'GET' || method === 'POST') && p === '/good-checkout-offline/backfill-vendas') {
-      const kB = urlObj.searchParams.get('k') || '';
+      const kB = lerChaveAdmin(req, urlObj);
       if (!(process.env.ADMIN_KEY && kB === process.env.ADMIN_KEY)) { json(res, 404, { error: 'not found' }); return true; }
       const de = urlObj.searchParams.get('de') || '';
       const ate = urlObj.searchParams.get('ate') || '';
@@ -747,7 +759,7 @@ function routes(readBody) {
        na hora com o keep-alive, devolvendo se ficou viva. A env do Render vira só a semente de
        emergência. */
     if (method === 'POST' && p === '/good-checkout-offline/shopee-sessao-cookies') {
-      const kC = ((urlObj.searchParams && urlObj.searchParams.get('k')) || String(req.headers['x-admin-key'] || '')).trim();
+      const kC = lerChaveAdmin(req, urlObj);
       if (!(process.env.ADMIN_KEY && kC === process.env.ADMIN_KEY)) { json(res, 404, { error: 'not found' }); return true; }
       let corpo = '';
       await new Promise(r => { req.on('data', c => { corpo += c; if (corpo.length > 262144) req.destroy(); }); req.on('end', r); req.on('error', r); });
@@ -1171,7 +1183,7 @@ function routes(readBody) {
     // retroativamente. Uso: /good-checkout-offline/backfill-valores?k=ADMIN_KEY&dias=31
     // Roda em background (~400ms por pedido, respeitando o rate limit). Chame de novo p/ ver o progresso.
     if ((method === 'POST' || method === 'GET') && p === '/good-checkout-offline/backfill-valores') {
-      const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const k = lerChaveAdmin(req, urlObj);
       if (!process.env.ADMIN_KEY || k !== process.env.ADMIN_KEY) { json(res, 404, { error: 'not found' }); return true; }
       if (_bf.rodando) { json(res, 200, { ok: true, rodando: true, progresso: _bf.feitos + '/' + _bf.total, ok_ate_agora: _bf.ok, falhas: _bf.falhas, iniciado_em: _bf.iniciado_em }); return true; }
       const dias = Math.max(1, Math.min(120, Number(urlObj.searchParams.get('dias') || 31)));
@@ -1214,7 +1226,7 @@ function routes(readBody) {
     // ADMIN (?k=): BACKFILL DE DETALHES — preenche UF + valor POR ITEM dos já finalizados
     // Uso: /good-checkout-offline/backfill-detalhes?k=ADMIN_KEY&dias=31
     if ((method === 'POST' || method === 'GET') && p === '/good-checkout-offline/backfill-detalhes') {
-      const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const k = lerChaveAdmin(req, urlObj);
       if (!process.env.ADMIN_KEY || k !== process.env.ADMIN_KEY) { json(res, 404, { error: 'not found' }); return true; }
       if (_bfd.rodando) { json(res, 200, { ok: true, rodando: true, progresso: _bfd.feitos + '/' + _bfd.total, ok_ate_agora: _bfd.ok, falhas: _bfd.falhas, iniciado_em: _bfd.iniciado_em }); return true; }
       const dias = Math.max(1, Math.min(120, Number(urlObj.searchParams.get('dias') || 31)));
@@ -1413,7 +1425,7 @@ function routes(readBody) {
     // Preenche vprod_nf (Σ itens da NOTA) nos finalizados → produtos EXATO + frete EXATO (valor − vprod_nf), retroativo.
     // Uso: /good-checkout-offline/backfill-nf?k=ADMIN_KEY&dias=45   (roda em segundos)
     if ((method === 'POST' || method === 'GET') && p === '/good-checkout-offline/backfill-nf') {
-      const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const k = lerChaveAdmin(req, urlObj);
       const sessB = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || (sessB && ehAdmin(sessB)))) { json(res, 404, { error: 'not found' }); return true; }
       const r = backfillNFLocal(urlObj.searchParams.get('dias'));
@@ -1467,7 +1479,7 @@ function routes(readBody) {
     // ADMIN (?k=): PESCA de tarifas/frete REAIS do ML agora (também roda sozinha todo dia às 04:40)
     // Uso: /good-checkout-offline/ml-sync-fees?k=ADMIN_KEY&dias=31 — chame de novo p/ ver o progresso
     if ((method === 'POST' || method === 'GET') && p === '/good-checkout-offline/ml-sync-fees') {
-      const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const k = lerChaveAdmin(req, urlObj);
       const sessA = validarSessao(req.headers['cookie']);
       const autorizado = (process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || (sessA && ehAdmin(sessA));
       if (!autorizado) { json(res, 404, { error: 'not found' }); return true; }
@@ -1481,7 +1493,7 @@ function routes(readBody) {
 
     // ADMIN (?k= ou sessão): RAIO-X da cobertura por mês — onde estão os buracos de valor/UF
     if (method === 'GET' && p === '/good-checkout-offline/debug-cobertura') {
-      const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const k = lerChaveAdmin(req, urlObj);
       const sessX = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || (sessX && ehAdmin(sessX)))) { json(res, 404, { error: 'not found' }); return true; }
       const confX = readJson(CONFERIDOS_FILE, {});
@@ -1505,7 +1517,7 @@ function routes(readBody) {
     // com cara de data/hora, pra decidirmos com o payload real se o Bling guarda a hora da venda.
     // Uso: /good-checkout-offline/debug-pedido?id=116063  (o nº que aparece na coluna Pedido)
     if (method === 'GET' && p === '/good-checkout-offline/debug-pedido') {
-      const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const k = lerChaveAdmin(req, urlObj);
       const sessP = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || (sessP && ehAdmin(sessP)))) { json(res, 404, { error: 'not found' }); return true; }
       const idQ = String(urlObj.searchParams.get('id') || '').trim();
@@ -1549,7 +1561,7 @@ function routes(readBody) {
     // Mostra TODAS as chaves do produto + campos de preco/custo + o que /estoques/saldos e /produtos/fornecedores devolvem.
     // Uso: /good-checkout-offline/debug-sku?sku=KP16&k=SUA_CHAVE
     if (method === 'GET' && p === '/good-checkout-offline/debug-sku') {
-      const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const k = lerChaveAdmin(req, urlObj);
       const sessP = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || (sessP && ehAdmin(sessP)))) { json(res, 404, { error: 'not found' }); return true; }
       const skuQ = String(urlObj.searchParams.get('sku') || '').trim();
@@ -1589,7 +1601,7 @@ function routes(readBody) {
     Nasceu do desenho do Diego: "ter esse histórico fácil no card, e poder alterar manualmente,
     ou pedir importação do bling". */
     if (p === '/good-checkout-offline/custo-historico') {
-      const kH = urlObj.searchParams.get('k') || '';
+      const kH = lerChaveAdmin(req, urlObj);
       const sH = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kH === process.env.ADMIN_KEY) || (sH && ehAdmin(sH)))) { json(res, 404, { error: 'not found' }); return true; }
 
@@ -1668,7 +1680,7 @@ function routes(readBody) {
     POST /good-checkout-offline/sku-depara-manual {apagar}    → remove
     Pro caso do "464"/"465", que não têm produto_id e o Bling não consegue ligar sozinho. */
     if (p === '/good-checkout-offline/sku-depara-manual') {
-      const kM2 = urlObj.searchParams.get('k') || '';
+      const kM2 = lerChaveAdmin(req, urlObj);
       const sM2 = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kM2 === process.env.ADMIN_KEY) || (sM2 && ehAdmin(sM2)))) { json(res, 404, { error: 'not found' }); return true; }
 
@@ -1808,7 +1820,7 @@ function routes(readBody) {
     NÃO altera nada sozinho: devolve os pares e o Diego decide (o `sku-repara`, que já existe,
     é quem troca no histórico). */
     if (method === 'GET' && p === '/good-checkout-offline/sku-depara') {
-      const kD = urlObj.searchParams.get('k') || '';
+      const kD = lerChaveAdmin(req, urlObj);
       const sD = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sD && ehAdmin(sD)))) { json(res, 404, { error: 'not found' }); return true; }
 
@@ -1849,7 +1861,7 @@ function routes(readBody) {
     }
 
     if (p === '/good-checkout-offline/custos-manuais') {
-      const kM = urlObj.searchParams.get('k') || '';
+      const kM = lerChaveAdmin(req, urlObj);
       const sM = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kM === process.env.ADMIN_KEY) || (sM && ehAdmin(sM)))) { json(res, 404, { error: 'not found' }); return true; }
 
@@ -1910,7 +1922,7 @@ function routes(readBody) {
     }
 
     if (method === 'GET' && p === '/good-checkout-offline/custo-sync') {
-      const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const k = lerChaveAdmin(req, urlObj);
       const sessC = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || (sessC && ehAdmin(sessC)))) { json(res, 404, { error: 'not found' }); return true; }
       if (urlObj.searchParams.get('status')) { json(res, 200, { ok: true, rodando: !!_cst.rodando, progresso: _cst.feitos + '/' + _cst.total, ok_ate_agora: _cst.ok, falhas: _cst.falhas, inicio: _cst.inicio }); return true; }
@@ -2542,7 +2554,7 @@ function routes(readBody) {
     // dois formatos, pra decidir com dado em vez de suposição. Só leitura.
     // Uso: GET /good-checkout-offline/etiqueta-diag?id=<idBling>&k=ADMIN_KEY
     if (method === 'GET' && p === '/good-checkout-offline/etiqueta-diag') {
-      const kE = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const kE = lerChaveAdmin(req, urlObj);
       const sE = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kE === process.env.ADMIN_KEY) || (sE && ehAdmin(sE)))) { json(res, 404, { error: 'not found' }); return true; }
       const idE = String(urlObj.searchParams.get('id') || '').replace(/\D/g, '');

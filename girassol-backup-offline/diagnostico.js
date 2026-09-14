@@ -1,4 +1,9 @@
 'use strict';
+
+/* 14/09 (auditoria, P2): a chave passa a ser lida do HEADER primeiro; a query
+   continua aceita porque há dezenas de URLs salvas com &k= — cortar de uma vez
+   quebraria o trabalho de quem opera pelo navegador. */
+const { lerChaveAdmin } = require('../lib/http/chave-admin');
 // ════════════════════════════════════════════════════════════════════════
 //  GIRASSOL · BACKUP OFFLINE — MÓDULO DE DIAGNÓSTICO  (extraído do index.js em 03/08/2026)
 // ════════════════════════════════════════════════════════════════════════
@@ -45,7 +50,7 @@ function rotasDiagnostico(ctx) {
     //   (b) as linhas do HISTÓRICO desse SKU estão com custo nulo, e o fallback pega?
     // Uso: /girassol-backup-offline/debug-custo?sku=90-lisa-125mm-KIT62&k=SUA_CHAVE
     if (method === 'GET' && p === '/girassol-backup-offline/debug-custo') {
-      const kD = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const kD = lerChaveAdmin(req, urlObj);
       const sD = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sD && ehAdmin(sD)))) { json(res, 404, { error: 'not found' }); return true; }
       const skuD = String((urlObj.searchParams && urlObj.searchParams.get('sku')) || '').trim();
@@ -103,7 +108,7 @@ function rotasDiagnostico(ctx) {
     // e nosso, nao da integracao ML->Bling. Esta rota pergunta ao Bling de varios jeitos e diz
     // exatamente onde a venda esta (ou nao esta), em vez de eu deduzir.
     if (method === 'GET' && p === '/girassol-backup-offline/diag-venda-ml') {
-      const kD = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const kD = lerChaveAdmin(req, urlObj);
       const sD = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sD && ehAdmin(sD)))) { json(res, 404, { error: 'not found' }); return true; }
       const vend = String(urlObj.searchParams.get('venda') || '').trim();
@@ -173,7 +178,7 @@ function rotasDiagnostico(ctx) {
     // custo de 1. Auditei os 7 caminhos de cálculo e todos multiplicam por qtd — então o suspeito
     // é a QUANTIDADE que chega, não a conta. Esta rota mostra item a item o que o servidor tem.
     if (method === 'GET' && p === '/girassol-backup-offline/debug-custo-pedido') {
-      const kQ = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const kQ = lerChaveAdmin(req, urlObj);
       const sQ = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kQ === process.env.ADMIN_KEY) || (sQ && ehAdmin(sQ)))) { json(res, 404, { error: 'not found' }); return true; }
       const num = String((urlObj.searchParams && urlObj.searchParams.get('numero')) || '').trim();
@@ -229,7 +234,7 @@ function rotasDiagnostico(ctx) {
 
     // DIAGNÓSTICO de um pedido: mostra o que o servidor sabe (venda + conferido). Uso: ?numero=117238
     if (method === 'GET' && p === '/girassol-backup-offline/diag-pedido') {
-      const kX = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const kX = lerChaveAdmin(req, urlObj);
       const sessX = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kX === process.env.ADMIN_KEY) || (sessX && ehAdmin(sessX)))) { json(res, 404, { error: 'not found' }); return true; }
       const numX = String((urlObj.searchParams && urlObj.searchParams.get('numero')) || '').trim();
@@ -250,7 +255,7 @@ function rotasDiagnostico(ctx) {
     // SONDA (sessão OU ?k=): investiga um ID INTERNO de pedido do Bling (o que apareceu cru na Análise).
     // Uso: /girassol-backup-offline/sonda-bling-pedido?id=26341228931
     if (method === 'GET' && p === '/girassol-backup-offline/sonda-bling-pedido') {
-      const kD = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const kD = lerChaveAdmin(req, urlObj);
       const sessD = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
       const idQ = String((urlObj.searchParams && urlObj.searchParams.get('id')) || '').replace(/\D/g, '');
@@ -279,7 +284,7 @@ function rotasDiagnostico(ctx) {
     // estornos, taxas. Usa MP_ACCESS_TOKEN_GIRASSOL (app do MP da Girassol). Temporária.
     // Uso: /girassol-backup-offline/sonda-mp?pid=PAYMENT_ID  (ou &nl=NUMERO_DA_VENDA pra achar o payment_id via ML)
     if (method === 'GET' && p === '/girassol-backup-offline/sonda-mp') {
-      const kD = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const kD = lerChaveAdmin(req, urlObj);
       const sessD = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
       const mpTok = process.env.MP_ACCESS_TOKEN_GIRASSOL;
@@ -319,7 +324,7 @@ function rotasDiagnostico(ctx) {
     // return-cost (frete de retorno). É temporária — sai depois que a integração estiver validada.
     // Uso: /girassol-backup-offline/sonda-ml-claims
     if (method === 'GET' && p === '/girassol-backup-offline/sonda-ml-claims') {
-      const kD = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const kD = lerChaveAdmin(req, urlObj);
       const sessD = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
       let tk = null;
@@ -370,7 +375,7 @@ function rotasDiagnostico(ctx) {
     // ML recentes. Pra eu ver a estrutura exata e integrar quem-paga-o-quê. Temporária.
     // Uso: /girassol-backup-offline/sonda-ml-pagamento  (opcional &nl=NUMERO_DA_VENDA pra um pedido específico)
     if (method === 'GET' && p === '/girassol-backup-offline/sonda-ml-pagamento') {
-      const kD = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const kD = lerChaveAdmin(req, urlObj);
       const sessD = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && kD === process.env.ADMIN_KEY) || (sessD && ehAdmin(sessD)))) { json(res, 404, { error: 'not found' }); return true; }
       let tk = null;
@@ -412,7 +417,7 @@ function rotasDiagnostico(ctx) {
 
     // ADMIN (?k= ou sessão): RAIO-X da cobertura por mês — onde estão os buracos de valor/UF
     if (method === 'GET' && p === '/girassol-backup-offline/debug-cobertura') {
-      const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const k = lerChaveAdmin(req, urlObj);
       const sessX = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || (sessX && ehAdmin(sessX)))) { json(res, 404, { error: 'not found' }); return true; }
       const confX = readJson(CONFERIDOS_FILE, {});
@@ -436,7 +441,7 @@ function rotasDiagnostico(ctx) {
     // com cara de data/hora, pra decidirmos com o payload real se o Bling guarda a hora da venda.
     // Uso: /girassol-backup-offline/debug-pedido?id=116063  (o nº que aparece na coluna Pedido)
     if (method === 'GET' && p === '/girassol-backup-offline/debug-pedido') {
-      const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const k = lerChaveAdmin(req, urlObj);
       const sessP = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || (sessP && ehAdmin(sessP)))) { json(res, 404, { error: 'not found' }); return true; }
       const idQ = String(urlObj.searchParams.get('id') || '').trim();
@@ -480,7 +485,7 @@ function rotasDiagnostico(ctx) {
     // Mostra TODAS as chaves do produto + campos de preco/custo + o que /estoques/saldos e /produtos/fornecedores devolvem.
     // Uso: /girassol-backup-offline/debug-sku?sku=KP16&k=SUA_CHAVE
     if (method === 'GET' && p === '/girassol-backup-offline/debug-sku') {
-      const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const k = lerChaveAdmin(req, urlObj);
       const sessP = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || (sessP && ehAdmin(sessP)))) { json(res, 404, { error: 'not found' }); return true; }
       const skuQ = String(urlObj.searchParams.get('sku') || '').trim();
@@ -510,7 +515,7 @@ function rotasDiagnostico(ctx) {
     // ADMIN (?k=): RAIO-X DO DINHEIRO NO ML — order + shipment + /costs crus, p/ mapear estorno/tarifas.
     // Uso: /girassol-backup-offline/debug-ml?id=116454&k=SUA_CHAVE   (nº do pedido, da venda ou id Bling)
     if (method === 'GET' && p === '/girassol-backup-offline/debug-ml') {
-      const k = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const k = lerChaveAdmin(req, urlObj);
       const sessM = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || (sessM && ehAdmin(sessM)))) { json(res, 404, { error: 'not found' }); return true; }
       const q0 = String(urlObj.searchParams.get('id') || '').replace(/\D/g, '');
@@ -569,7 +574,7 @@ function rotasDiagnostico(ctx) {
     // o que tem no conf, o que tem no snapshot (snap.nf) e o resultado CRU da chamada /nfe/{id} feita AGORA.
     // Revela na hora onde o preenchimento tranca: snapshot sem nf.id? Bling recusando? campo com outro nome?
     if (method === 'GET' && p === '/girassol-backup-offline/debug-nf-emissao') {
-      const kE = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const kE = lerChaveAdmin(req, urlObj);
       if (!process.env.ADMIN_KEY || kE !== process.env.ADMIN_KEY) { json(res, 404, { error: 'not found' }); return true; }
       const confE = readJson(CONFERIDOS_FILE, {});
       const corteE = Date.now() - 4 * 86400000;
@@ -598,7 +603,7 @@ function rotasDiagnostico(ctx) {
 
     // DEBUG (?k=): 3 itens CRUS da listagem /pedidos/vendas — confirma se o Bling manda loja.id e numeroLoja
     if (method === 'GET' && p === '/girassol-backup-offline/debug-vendas-raw') {
-      const kD = (urlObj.searchParams && urlObj.searchParams.get('k')) || '';
+      const kD = lerChaveAdmin(req, urlObj);
       if (!process.env.ADMIN_KEY || kD !== process.env.ADMIN_KEY) { json(res, 404, { error: 'not found' }); return true; }
       const isoDD = dt => dt.toISOString().slice(0, 10);
       const hjD = new Date(); const inD = new Date(hjD); inD.setDate(inD.getDate() - 3); const fiD = new Date(hjD); fiD.setDate(fiD.getDate() + 1);

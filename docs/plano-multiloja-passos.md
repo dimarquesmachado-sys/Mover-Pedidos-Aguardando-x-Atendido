@@ -139,8 +139,13 @@ segredo.
 ## Itens soltos da auditoria (não bloqueiam as fases)
 
 - [ ] `npm test` apontando para `scripts/verifica.js` (hoje só existe o CI)
-- [ ] migrar autenticação administrativa de `?k=` para header, com janela de compatibilidade
-      — parcialmente endereçado em 13/09: a chave **deixou de ser ecoada** nas respostas (PR #399)
+- [x] autenticação administrativa aceita **header** (`x-admin-key` ou `Bearer`), com a query
+      mantida como compatibilidade — leituras migradas para `lib/http/chave-admin.js` (PR #426),
+      incluindo a TRAVA CENTRAL e os endpoints globais do `index.js` raiz (diagnóstico,
+      magalu, tiktok, embarcar, ml-full) e o gate de sessão do GOOD, que r2 do Codex pegou
+      ainda lendo só `?k=` ou derrubando a chamada antes de a rota migrada avaliar a chave.
+      A chave já tinha deixado de ser ecoada nas respostas (PR #399).
+- [ ] fechar a janela: medir o uso legado (`veioPorHeader`) e só então recusar `?k=`
 - [ ] README ainda se apresenta como "Girassol v2.0", monoempresa
 - [ ] observabilidade por empresa/capacidade em disco (hoje o diagnóstico morre no restart)
 
