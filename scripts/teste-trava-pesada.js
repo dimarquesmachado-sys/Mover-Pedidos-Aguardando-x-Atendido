@@ -30,10 +30,38 @@ assert.ok(trava.quemEsta(), 'sair() com nome de outro não pode liberar a trava 
 trava.sair('custo:girassol');
 assert.strictEqual(trava.quemEsta(), null);
 
-/* cadeado eterno é pior que a sobreposição que ele evita: processo que morreu sem soltar
+/* cadeado eterno é pior que a sobreposição que ele evita: dono sem sinal de vida
    não pode travar a casa pra sempre */
 const fonte = require('fs').readFileSync(require('path').join(__dirname, '..', 'lib', 'checkout', 'trava-pesada.js'), 'utf8');
 assert.ok(/TETO_MS/.test(fonte) && /liberando à força/.test(fonte), 'tem que existir teto que libera dono antigo demais');
+
+/* Codex P1 (#422): o teto media desde o INÍCIO — uma rodada legítima e longa (fila grande:
+   a 1,2s/SKU, ~4.500 SKUs já passam de 90 min) tinha a própria trava tomada por baixo dela
+   enquanto ainda rodava, e a outra empresa entrava — a sobreposição que a trava existe pra
+   evitar. Simula com o relógio: dono renovando o sinal de vida sobrevive além dos 90 min
+   corridos desde que ENTROU; dono que para de renovar é liberado 90 min depois do ÚLTIMO
+   sinal, não do início. */
+{
+  const RealDate = Date;
+  let agoraFake = 1000000000000; // qualquer T0
+  global.Date = class extends RealDate { static now() { return agoraFake; } };
+  try {
+    assert.strictEqual(trava.tentarEntrar('custo:amb').ok, true);
+    agoraFake += 80 * 60000; // +80min: ainda dentro do teto
+    trava.renovar(); // rodada viva avisa que segue em pé
+    agoraFake += 85 * 60000; // +165min desde o início, mas só 85min desde o sinal
+    assert.strictEqual(trava.tentarEntrar('custo:girassol').ok, false,
+      'renovar() tem que manter a trava viva além dos 90min corridos desde o INÍCIO');
+    agoraFake += 91 * 60000; // +91min sem NENHUM sinal novo
+    assert.strictEqual(trava.tentarEntrar('custo:girassol').ok, true,
+      'sem sinal de vida por 90min, mesmo tendo renovado antes, a trava tem que soltar');
+  } finally {
+    global.Date = RealDate;
+    trava.sair('custo:girassol');
+    trava.sair('custo:amb');
+  }
+  assert.strictEqual(trava.quemEsta(), null, 'ambiente do teste tem que sair limpo pros próximos testes');
+}
 
 /* e o custo diário precisa soltar no finally, inclusive quando dá erro */
 const cd = require('fs').readFileSync(require('path').join(__dirname, '..', 'lib', 'checkout', 'custo-diario.js'), 'utf8');
