@@ -235,7 +235,40 @@ const fakeOk = async (c) => {
   assert.strictEqual(detalhes, 3, 'UMA chamada de detalhe por canal (não por pedido): esperava 3, veio ' + detalhes);
   assert.ok(!r10.recursos.canais_de_venda.itens.some(c => '_idPedido' in c), 'o id usado na busca é ruído interno');
 
-  /* 10. erro de rede num candidato não pode derrubar a descoberta inteira */
+  /* 10. FORMATOS NA ORDEM CERTA + A PROVA DIZ POR QUE FALHOU (15/09, dado real).
+     Dois erros meus que o retorno da AMB expôs:
+     · 586075287702374196 (18 dígitos) foi rotulado SHOPEE porque meu padrão dela era
+       "6 dígitos + 8 alfanuméricos" — e dígito É alfanumérico, então engoliu o do TikTok.
+       Agora a Shopee exige ao menos uma LETRA e a ordem vai do específico ao genérico.
+     · a prova dizia só "não consegui provar", que é exatamente a parede que critiquei nos
+       caminhos do Bling: sem saber o que o ML respondeu, ninguém conserta. */
+  const { criar: criar2 } = require('../lib/checkout/descobrir-ids');
+  const porFormato = async (c) => {
+    if (c === '/depositos') return { status: 200, data: { data: [] } };
+    if (c === '/situacoes/modulos') return { status: 404, data: null };
+    const md = /\/pedidos\/vendas\/(\d+)$/.exec(c);
+    if (md) return { status: 200, data: { data: { numeroPedidoLoja: md[1] === '1' ? '586075287702374196' : '250915ABCD12' } } };
+    const mp = /pagina=(\d+)/.exec(c);
+    if (mp) return mp[1] === '1' ? { status: 200, data: { data: [{ id: 1, loja: { id: 111 } }, { id: 2, loja: { id: 222 } }] } } : { status: 200, data: { data: [] } };
+    return { status: 404, data: null };
+  };
+  const gf = global.fetch;
+  global.fetch = async (url) => {
+    if (/users\/me/.test(url)) return { ok: true, json: async () => ({ id: 3148025116 }) };
+    return { ok: false, status: 403 };   // o ML recusa a consulta do pedido
+  };
+  const r11 = await criar2({ rotulo: 'T', blingGet: porFormato, prefixoEnv: 'T_', garantirTokenML: async () => 'tok' }).descobrir();
+  const c11 = Object.fromEntries(r11.recursos.canais_de_venda.itens.map(c => [c.id, c]));
+  assert.ok(/TikTok/.test(c11[111].nome || ''),
+    '18 dígitos é TikTok, não Shopee — o padrão da Shopee engolia por aceitar dígito como alfanumérico');
+  assert.ok(/Shopee/.test(c11[222].nome || ''), 'com letra no meio, aí sim é Shopee');
+
+  assert.ok(Array.isArray(r11.sugestao.por_que_nao_provei) && r11.sugestao.por_que_nao_provei.length,
+    'quando a prova falha, o retorno tem que dizer O QUE o ML respondeu — senão vira parede');
+  assert.ok(r11.sugestao.por_que_nao_provei.some(d => d.status === 403), 'o status tem que aparecer');
+  global.fetch = gf;
+
+  /* 11. erro de rede num candidato não pode derrubar a descoberta inteira */
   const fakeExplode = async (c) => { if (c === '/depositos') throw new Error('timeout'); return { status: 200, data: { data: [] } }; };
   const r2 = await criar({ rotulo: 'T', blingGet: fakeExplode }).descobrir();
   assert.ok(r2.recursos.depositos, 'o recurso que falhou tem que aparecer no resultado');
