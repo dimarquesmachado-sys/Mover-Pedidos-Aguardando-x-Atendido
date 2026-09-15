@@ -474,14 +474,11 @@ function routes(readBody) {
   /* 15/09 — /api/contexto: identidade e capacidades desta empresa, pro painel se montar
      sozinho em vez de cada HTML saber de qual empresa ele é (base da Fase 4). Só identidade
      e capacidade: nada de credencial, caminho ou env — isto chega no navegador do galpão. */
-  const _ctxApi = require('../lib/checkout/contexto-api').criar({
+  const _ctxApi = require('../lib/checkout/contexto-api').montar({
     empresa: 'good',
     modulo: 'good-checkout-offline',
-    registro: require('../lib/empresas/registro').carregar({ servico: 'mover-pedidos' }),
     json,
-    /* a versão da UI vive no HTML, não aqui — o lint pegou a suposição. Quem serve o
-       painel é que sabe; enquanto não passar, a rota devolve null em vez de mentir. */
-    uiBuild: (typeof VERSAO !== 'undefined' ? VERSAO : null),
+    painelHtml: path.join(__dirname, 'painel.html'),
   });
   return async function handle(req, res, urlObj) {
     if (await _ctxApi(req, res, urlObj)) return true;
