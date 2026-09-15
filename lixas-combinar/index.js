@@ -967,7 +967,12 @@ function routes(readBody) {
         if (!graosResult.ok || !graosResult.graos || graosResult.graos.length === 0) {
           json(res, 500, { ok: false, erro: 'erro_consultar_graos_bling', detalhe: graosResult.erro }); return true;
         }
-        const graosDisponiveis = graosResult.graos.map(g => g.grao);
+        // Leva o ESTOQUE junto, nao so o nome: com "g80, g240" a IA tratava grao com 20
+        // lixas igual a grao com 500, escolhia, e o Bling recusava no PUT (code 67).
+        // Graos zerados nem entram na lista.
+        const graosDisponiveis = graosResult.graos
+          .filter(g => Number(g.estoque_lixas) > 0)
+          .map(g => `${g.grao} (${Number(g.estoque_lixas)} lixas em estoque)`);
         const unidadesPorPacote = graosResult.unidades_por_pacote || 10;
         const ml = require('../auto-mensagens/mlApi');
         // total REAL = lixas_por_kit x quantidade comprada (multi-kit: 4 kits de 100 = 400)
