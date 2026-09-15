@@ -27,8 +27,8 @@ assert.ok(/falta GOOD_BLING_CLIENT_ID/.test(r1.saida), 'tem que dizer QUAL env f
 /* com tudo presente, passa */
 const comEnv = {};
 for (const n of ['BLING_CLIENT_ID', 'BLING_CLIENT_SECRET', 'BLING_REDIRECT_URI', 'NF_BLING_CLIENT_ID',
-                 'NF_BLING_CLIENT_SECRET', 'NF_BLING_REDIRECT_URI', 'ML_CLIENT_ID', 'ML_CLIENT_SECRET',
-                 'ML_REDIRECT_URI', 'OPERADORES', 'ADMIN']) comEnv['GOOD_' + n] = 'valor-secreto-do-teste';
+                 'NF_BLING_CLIENT_SECRET', 'NF_BLING_REDIRECT_URI', 'ME_LOJA_IDS', 'ML_CLIENT_ID',
+                 'ML_CLIENT_SECRET', 'ML_REDIRECT_URI', 'OPERADORES', 'ADMIN']) comEnv['GOOD_' + n] = 'valor-secreto-do-teste';
 const r2 = roda(['validar', 'good'], comEnv);
 assert.strictEqual(r2.code, 0, 'com as envs no lugar, tem que passar: ' + r2.saida.slice(-200));
 

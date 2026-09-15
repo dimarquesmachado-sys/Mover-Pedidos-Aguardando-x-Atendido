@@ -37,6 +37,10 @@ const ENVS_POR_CAPACIDADE = {
   fiscal: [
     'BLING_CLIENT_ID', 'BLING_CLIENT_SECRET', 'BLING_REDIRECT_URI',
     'NF_BLING_CLIENT_ID', 'NF_BLING_CLIENT_SECRET', 'NF_BLING_REDIRECT_URI',
+    /* 15/09 (P2 do Codex) — empresa nova é OBRIGADA a declarar o canal do ML
+       (lib/fiscal/montar-empresa.js); sem isso na lista, "validar"/"plano" diziam
+       "pronta" e a montagem falhava no boot mesmo assim. */
+    'ME_LOJA_IDS',
   ],
   ml: ['ML_CLIENT_ID', 'ML_CLIENT_SECRET', 'ML_REDIRECT_URI'],
   checkout: ['OPERADORES', 'ADMIN'],
