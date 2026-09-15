@@ -188,7 +188,8 @@ credencial.
       ainda lendo só `?k=` ou derrubando a chamada antes de a rota migrada avaliar a chave.
       A chave já tinha deixado de ser ecoada nas respostas (PR #399).
 - [ ] fechar a janela: medir o uso legado (`veioPorHeader`) e só então recusar `?k=`
-- [ ] README ainda se apresenta como "Girassol v2.0", monoempresa
+- [x] README reescrito (15/09): descreve o serviço multiempresa, aponta para os documentos de
+      embarque e de diferenças, e registra as regras da casa (PR #478)
 - [ ] observabilidade por empresa/capacidade em disco (hoje o diagnóstico morre no restart)
 
 ## Regras que evitam a duplicação voltar
