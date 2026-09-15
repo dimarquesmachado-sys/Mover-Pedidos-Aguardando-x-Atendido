@@ -429,6 +429,12 @@ async function shopeeKeepAlive() {
   }
 }
 
+const _rotasCatalogo = require('../lib/checkout/rotas-catalogo').criar({
+  prefixo: '/girassol-backup-offline', json, blingGet, ehAdmin, skuEanCache, lerIndiceEan, salvarNoIndiceEan,
+  getPossiveisGtins, produtoDetalhe, primeiraImagem, locCache, localizacaoDeProduto,
+  indexarCatalogoCompleto, getIdxStatus,
+});
+
 // ─── Rotas HTTP (namespaced) ────────────────────────────────────────────
 // A rotina noturna precisa das funcoes deste arquivo, entao e montada aqui.
 // O agendador da RAIZ registra sozinho qualquer chave nova de `crons` que tenha
@@ -854,6 +860,9 @@ function routes(readBody) {
     painelHtml: path.join(__dirname, 'painel.html'),
   });
   return async function handle(req, res, urlObj) {
+    /* 15/09 — rotas de catálogo (buscar produto + indexação de EAN) vieram pra
+       lib/checkout/rotas-catalogo.js: eram idênticas nas três e se apoiam entre si. */
+    if (await _rotasCatalogo(req, res, urlObj, req.method, validarSessao)) return true;
     if (await _ctxApi(req, res, urlObj)) return true;
 
     /* 15/09 — descoberta dos ids desta empresa NO BLING (canais de venda, depósitos e
@@ -3402,79 +3411,12 @@ function routes(readBody) {
     }
 
     // busca um produto por SKU ou EAN (telinha de consulta/edição de localização do estoquista)
-    if (method === 'GET' && p === '/girassol-backup-offline/buscar-produto') {
-      const q = String(urlObj.searchParams.get('q') || '').trim();
-      if (!q) { json(res, 200, { ok: false, erro: 'busca vazia' }); return true; }
-      const dig = q.replace(/\D/g, '');
-      const pareceEan = dig.length >= 8 && dig.length <= 14 && /^\d+$/.test(q.replace(/\s/g, ''));
-      let prod = null;
-      const porSku = async (codigo) => {
-        const base = String(codigo || '').trim();
-        const variantes = [...new Set([base, base.toUpperCase(), base.toLowerCase()])];
-        for (const v of variantes) {                           // ?codigo= do Bling é case-sensitive → tenta as 3 caixas
-          const r = await blingGet(`/produtos?codigo=${encodeURIComponent(v)}&limite=1`);
-          const it = r.ok && r.data && r.data.data && r.data.data[0];
-          if (it && it.id) return await produtoDetalhe(it.id);
-        }
-        return null;
-      };
-      if (!pareceEan) prod = await porSku(q);                 // SKU é o caminho 100%
-      if (!prod && dig.length >= 8) {                          // EAN: cache reverso → API do Bling
-        const se = skuEanCache();
-        let achou = null;
-        for (const sku of Object.keys(se)) { if (String(se[sku]).replace(/\D/g, '') === dig) { achou = sku; break; } }
-        if (achou) prod = await porSku(achou);
-        if (!prod) {                                           // índice de EAN (cresce sozinho / indexação total) — rápido e confiável
-          const hit = lerIndiceEan()[dig];
-          if (hit && hit.id) prod = await produtoDetalhe(hit.id);
-        }
-        if (!prod) {                                           // último recurso: filtro do Bling (lento, pouco confiável)
-          for (const campo of ['gtin', 'gtinTributario', 'ean', 'codigoBarras']) {
-            const r = await blingGet(`/produtos?${campo}=${encodeURIComponent(q)}&limite=5`);
-            const itens = (r.ok && r.data && r.data.data) || [];
-            for (const it of itens) {
-              if (!it.id) continue;
-              const det = await produtoDetalhe(it.id);
-              if (det && getPossiveisGtins(det).some(e => String(e).replace(/\D/g, '') === dig)) { prod = det; break; }
-            }
-            if (prod) break;
-          }
-        }
-      }
-      if (!prod && pareceEan) prod = await porSku(q);          // às vezes o código É o número digitado
-      if (!prod) { json(res, 200, { ok: false, erro: 'nada encontrado p/ "' + q + '"' }); return true; }
-      salvarNoIndiceEan(prod);                                 // alimenta o índice — toda resolução entra no cache
-      const est = prod.estoque || {};
-      let localizacao = localizacaoDeProduto(prod);            // 1º: Bling (fonte da verdade)
-      if (!localizacao) {                                      // 2º: cache local (localização editada pelo painel)
-        const lc = locCache(); const sk = prod.codigo || '';
-        localizacao = lc[sk] || lc[sk.toUpperCase()] || lc[sk.toLowerCase()] || '';
-      }
-      json(res, 200, { ok: true, produto: {
-        sku: prod.codigo || '',
-        nome: prod.nome || '',
-        ean: getPossiveisGtins(prod)[0] || '',
-        estoque: (est.saldoVirtualTotal != null ? est.saldoVirtualTotal : (est.saldoVirtual != null ? est.saldoVirtual : null)),
-        localizacao: localizacao,
-        img: primeiraImagem(prod)
-      } });
-      return true;
-    }
+
 
 
     // ─── indexar catálogo inteiro (1x; deixa todo EAN achável na hora) — só admin ───
-    if (method === 'GET' && p === '/girassol-backup-offline/indexar-catalogo') {
-      const op = String(urlObj.searchParams.get('op') || '');
-      if (!ehAdmin(op)) { json(res, 200, { ok: false, precisa_admin: true, erro: 'só admin pode indexar' }); return true; }
-      if (getIdxStatus().rodando) { json(res, 200, { ok: true, started: false, jaRodando: true, status: getIdxStatus() }); return true; }
-      indexarCatalogoCompleto();                       // dispara em background (não aguarda)
-      json(res, 200, { ok: true, started: true });
-      return true;
-    }
-    if (method === 'GET' && p === '/girassol-backup-offline/indexar-status') {
-      json(res, 200, { ok: true, status: getIdxStatus() });
-      return true;
-    }
+
+
 
     // ─── QZ Tray: assinatura (mata o popup "Untrusted") ───
     // serve o certificado público p/ o QZ confiar
