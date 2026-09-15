@@ -174,7 +174,35 @@ const fakeOk = async (c) => {
   assert.ok(/PALPITE/.test(r8.sugestao.confira), 'sem prova, tem que se declarar palpite');
   global.fetch = globalFetch;
 
-  /* 8. erro de rede num candidato não pode derrubar a descoberta inteira */
+  /* 8. IDENTIFICAR PELO FORMATO (15/09): na AMB sobrou um canal sem nome e sem depósito
+     (206027680, 13 pedidos). Cada marketplace numera os pedidos de um jeito próprio e
+     estável, e isso identifica o canal. Vem marcado como "deduzido do formato" — diferente
+     do "PROVADO" do ML, porque a origem de cada afirmação tem que continuar visível. */
+  const comFormatos = async (c) => {
+    if (c === '/depositos') return { status: 200, data: { data: [{ id: 2, descricao: 'Shopee 206017368 (Fulfillment)' }] } };
+    const mp = /pagina=(\d+)/.exec(c);
+    if (mp) return mp[1] === '1' ? { status: 200, data: { data: [
+      { loja: { id: 206017293 }, numeroLoja: '2000012345678901' },
+      { loja: { id: 206017368 }, numeroLoja: '250915ABCDEF12' },
+      { loja: { id: 206027680 }, numeroLoja: 'LU-4455667788' },
+      { loja: { id: 777 }, numeroLoja: 'FORMATO-DESCONHECIDO' }] } } : { status: 200, data: { data: [] } };
+    return { status: 404, data: null };
+  };
+  const r9 = await criar({ rotulo: 'T', blingGet: comFormatos }).descobrir();
+  const por = Object.fromEntries(r9.recursos.canais_de_venda.itens.map(c => [c.id, c]));
+
+  assert.ok(/Magalu/.test(por[206027680].nome), 'LU-... é Magalu — era o canal que sobrava sem identificação');
+  assert.ok(/formato/.test(por[206027680].obs), 'tem que dizer que foi deduzido do FORMATO, não afirmar como prova');
+  assert.strictEqual(por[206017368].nome, 'Shopee', 'o depósito tem precedência sobre o formato — é informação, não dedução');
+  assert.ok(/depósito/.test(por[206017368].obs));
+
+  /* o que não reconhece não pode calar: sem o exemplo, o dono não tem como identificar */
+  assert.strictEqual(por[777].nome, null, 'formato desconhecido não pode virar palpite');
+  assert.strictEqual(por[777].exemplo_pedido, 'FORMATO-DESCONHECIDO',
+    'tem que mostrar o número de exemplo — é com ele que o dono reconhece o canal no Bling');
+  assert.ok(/não identifiquei/.test(por[777].leia || ''));
+
+  /* 9. erro de rede num candidato não pode derrubar a descoberta inteira */
   const fakeExplode = async (c) => { if (c === '/depositos') throw new Error('timeout'); return { status: 200, data: { data: [] } }; };
   const r2 = await criar({ rotulo: 'T', blingGet: fakeExplode }).descobrir();
   assert.ok(r2.recursos.depositos, 'o recurso que falhou tem que aparecer no resultado');
