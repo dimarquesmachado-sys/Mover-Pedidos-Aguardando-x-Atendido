@@ -1014,15 +1014,23 @@ function routes(readBody) {
 
         // Se a IA entendeu claro, salva o pedido estruturado pra o botao montar usar.
         let salvo = false;
+        let motivoNaoSalvo = null;
         if (iaResult.categoria === 'claro' && Array.isArray(iaResult.pedido_estruturado) && iaResult.pedido_estruturado.length > 0) {
-          await lcp.atualizarVenda(orderId, {
+          const _uIa = await lcp.atualizarVenda(orderId, {
             ia_categoria: 'claro',
             ia_confianca: iaResult.confianca,
             ia_interpretacao: (iaResult.interpretacao || '').slice(0, 300),
             ia_pedido_estruturado: JSON.stringify(iaResult.pedido_estruturado),
             ia_processado_em: new Date().toISOString()
           });
-          salvo = true;
+          // So e "pronto pra montar" se o pedido FICOU no banco: o Montar+NF le o
+          // ia_pedido_estruturado de la. Marcar pronto com a gravacao falha mostrava o
+          // botao, e o clique montava um pedido vazio.
+          salvo = !!(_uIa && _uIa.ok && (!Array.isArray(_uIa.data) || _uIa.data.length === 1));
+          if (!salvo) {
+            motivoNaoSalvo = (_uIa && (_uIa.causa || _uIa.motivo)) || 'gravacao recusada';
+            console.error(`[lixas-combinar ia-instrucao] order ${orderId} interpretacao clara mas NAO gravada: ${motivoNaoSalvo}`);
+          }
         }
 
         json(res, 200, {
@@ -1033,6 +1041,7 @@ function routes(readBody) {
           pedido_estruturado: iaResult.pedido_estruturado || null,
           msg_ia: iaResult.msg_pra_cliente || null,
           pronto_pra_montar: salvo,
+          motivo_nao_salvo: motivoNaoSalvo,
           total_interpretado: Array.isArray(iaResult.pedido_estruturado)
             ? iaResult.pedido_estruturado.reduce((s, g) => s + (Number(g.quantidade) || 0), 0)
             : null

@@ -326,6 +326,22 @@ CLASSIFIQUE em UMA destas 2 categorias:
    NAO consegue resolver sozinho. AÇÃO: diga AO VENDEDOR (em msg_pra_cliente) o que falta
    ou esta errado pra ele corrigir a instrucao. NUNCA peca nada ao cliente neste modo.
 
+SUBSTITUICAO EXPLICITA — QUANDO O VENDEDOR JA DECIDIU, NAO PERGUNTE:
+Se a instrucao contem uma regra de substituicao ("se nao tiver, manda o mais proximo",
+"substitui pelo mais perto", "troca pelo que tiver", "o mais proximo disponivel") e um
+grao pedido NAO esta na lista, APLIQUE a regra e classifique como "claro":
+  a) escolha, entre os graos DISPONIVEIS, o de valor numerico mais proximo do pedido;
+  b) se houver empate, ou se o mais proximo JA estiver no pedido (juntar dois itens num
+     so nao e o que o vendedor quer), escolha o proximo DISPONIVEL ACIMA;
+  c) mantenha a quantidade original do item substituido;
+  d) na "interpretacao" e na msg_pra_cliente, diga explicitamente a troca feita
+     (ex.: "g150 -> g240, o mais proximo disponivel").
+Exemplo: pedido "50 do 150 e 50 do 80, se nao tiver manda o mais proximo", disponiveis
+g80, g240, g320: g150 nao existe; o mais proximo e g80, mas ele ja esta no pedido; entao
+vai pro proximo acima -> g240. Resultado: 50 do 80 + 50 do 240, categoria "claro".
+So classifique como "ambiguo" se NAO houver regra de substituicao na instrucao, ou se
+nenhum grao disponivel puder receber a quantidade (lista vazia).
+
 REGRAS:
 - NUNCA invente graos fora da lista de disponiveis.
 - Em "claro", msg_pra_cliente eh uma CONFIRMACAO curta e cordial do pedido (sera mostrada
