@@ -789,7 +789,7 @@ function routes(readBody) {
       try {
         const d = require('../lib/checkout/descobrir-ids').criar({ rotulo: 'AMB', blingGet , /* o token do ML vem do gerenciador fiscal DESTA empresa — o lint pegou que eu
        supus uma variável `garantirTokenML` solta que não existe aqui. */
-      garantirTokenML: () => require('../ambtotal/mlTokenManager').garantirTokenML(), envNomes: {"atendido": "AMBBKP_SIT_ATENDIDO", "despachados": "AMBBKP_SIT_DESPACHADOS", "verificado": "AMBBKP_SIT_VERIFICADO", "aguardando": "AMB_SITUACAO_AGUARDANDO", "meLojaIds": "AMB_ME_LOJA_IDS"} });
+      garantirTokenML: () => require('../ambtotal/mlTokenManager').garantirTokenML(), envNomes: {"atendido": "AMBBKP_SIT_ATENDIDO", "despachados": "AMBBKP_SIT_DESPACHADOS", "verificado": "AMBBKP_SIT_VERIFICADO", "aguardando": "AMB_SITUACAO_AGUARDANDO", "meLojaIds": "AMB_ME_LOJA_IDS"}, padroesEnv: {"AMBBKP_SIT_ATENDIDO": "9", "AMBBKP_SIT_DESPACHADOS": "745123", "AMBBKP_SIT_VERIFICADO": "24", "AMB_SITUACAO_AGUARDANDO": "745122", "AMB_ME_LOJA_IDS": "206017293"}  });
         json(res, 200, await d.descobrir());
       } catch (e) { json(res, 500, { ok: false, erro: String(e.message || e) }); }
       return true;

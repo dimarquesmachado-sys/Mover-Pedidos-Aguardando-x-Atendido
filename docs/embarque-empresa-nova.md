@@ -48,7 +48,14 @@ GOOD, e o dado estava no XML de toda NF-e autorizada.
    ```
 
    Substitui o mapeamento no DevTools, tela por tela, que foi como as unidades e depósitos da
-   AMB entraram no arquivo de referência. **O retorno traz as envs prontas pra colar** —
+   AMB entraram no arquivo de referência.
+
+   **O retorno CONFERE o que já está no Render** e separa em quatro: o que bate (nada a
+   fazer), o que está com **valor diferente** (o caso perigoso — configurado errado e nada
+   acusa), o que não existe mas cujo padrão do código já é o valor certo (criar não muda
+   nada) e o que precisa mesmo ser criado. Antes disso, era o dono que comparava env por env.
+
+   **E traz as envs prontas pra colar** —
    situações casadas pelo nome (Atendido, AGUARDANDO, DESPACHADOS, Verificado) e o canal do
    ML sugerido, marcado como palpite a confirmar.
 

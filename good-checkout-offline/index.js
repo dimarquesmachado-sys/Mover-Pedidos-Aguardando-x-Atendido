@@ -494,7 +494,7 @@ function routes(readBody) {
       try {
         const d = require('../lib/checkout/descobrir-ids').criar({ rotulo: 'GOOD', blingGet , /* o token do ML vem do gerenciador fiscal DESTA empresa — o lint pegou que eu
        supus uma variável `garantirTokenML` solta que não existe aqui. */
-      garantirTokenML: () => require('../good/mlTokenManager').garantirTokenML(), envNomes: {"atendido": "GOODBKP_SIT_ATENDIDO", "despachados": "GOODBKP_SIT_DESPACHADOS", "verificado": "GOODBKP_SIT_VERIFICADO", "aguardando": "GOOD_SITUACAO_AGUARDANDO", "meLojaIds": "GOOD_ME_LOJA_IDS"} });
+      garantirTokenML: () => require('../good/mlTokenManager').garantirTokenML(), envNomes: {"atendido": "GOODBKP_SIT_ATENDIDO", "despachados": "GOODBKP_SIT_DESPACHADOS", "verificado": "GOODBKP_SIT_VERIFICADO", "aguardando": "GOOD_SITUACAO_AGUARDANDO", "meLojaIds": "GOOD_ME_LOJA_IDS"}, padroesEnv: {"GOODBKP_SIT_ATENDIDO": "9", "GOODBKP_SIT_DESPACHADOS": "0", "GOODBKP_SIT_VERIFICADO": "24", "GOOD_SITUACAO_AGUARDANDO": "745122", "GOOD_ME_LOJA_IDS": "206017293"}  });
         json(res, 200, await d.descobrir());
       } catch (e) { json(res, 500, { ok: false, erro: String(e.message || e) }); }
       return true;
