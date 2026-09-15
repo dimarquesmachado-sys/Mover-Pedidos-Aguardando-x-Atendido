@@ -218,6 +218,34 @@ const server = http.createServer(async (req, res) => {
     return json(res, 200, { alerta: m.length > 0, mudos: m.map(x => ({ modulo: x.modulo, empresa: x.empresa, dias: x.dias })) });
   }
 
+  /* 15/09 — PÁGINA DE EMBARQUE: uma tela com o que falta autorizar em cada empresa. Antes
+     eram três URLs por empresa e nenhum jeito de saber o que já estava feito sem tentar. O
+     desenho repete o do tiktok-oauth, que virou página de botões depois de ele reclamar de
+     "4 URLs na mão". Protegida por chave: diz quais contas faltam autorizar, e isso é mapa
+     de quem quiser entrar. */
+  if (path === '/embarque') {
+    /* usa o helper de hoje: header primeiro, query como compatibilidade. Eu tinha lido o
+       ?k= direto e o próprio teste que criei mais cedo pegou — a chave na URL é justamente o
+       que a migração existe pra evitar. */
+    const k = require('./lib/http/chave-admin').lerChaveAdmin(req, urlObj);
+    if (!process.env.ADMIN_KEY || k !== process.env.ADMIN_KEY) {
+      res.writeHead(403, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ ok: false, erro: 'chave inválida' }));
+    }
+    const painel = require('./lib/fiscal/painel-embarque').criar({
+      base: process.env.HOST_PUBLICO || 'https://mover-pedidos-aguardando-x-atendido.onrender.com',
+      html: true,
+      empresas: [
+        { id: 'amb', nome: 'AMBTotal', slug: '/amb', arquivoBling: '/data/ambtotal/bling-tokens.json', arquivoBlingNF: '/data/ambtotal/nf-tokens.json', arquivoML: '/data/ambtotal/ml-tokens.json' },
+        { id: 'good', nome: 'GOOD Import', slug: '/good', arquivoBling: '/data/good/bling-tokens.json', arquivoBlingNF: '/data/good/nf-tokens.json', arquivoML: '/data/good/ml-tokens.json' },
+        { id: 'girassol', nome: 'Magazine Girassol', slug: '', arquivoBling: require('path').join(__dirname, 'girassol', 'data', 'tokens.json'), arquivoBlingNF: require('path').join(__dirname, 'girassol', 'data', 'nf_tokens.json'), arquivoML: '/data/ml_tokens.json' },
+      ],
+    });
+    if (urlObj.searchParams && urlObj.searchParams.get('json') === '1') return json(res, 200, { ok: true, empresas: painel.estado() });
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+    return res.end(painel.pagina());
+  }
+
   // Rota global de health
   if (path === '/health' || path === '/') {
     return json(res, 200, {
