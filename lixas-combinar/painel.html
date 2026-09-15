@@ -235,7 +235,7 @@
 
 <div id="app" style="display:none">
 <header>
-  <h1>🌻 Lixas A COMBINAR <span class="badge">Pendentes</span><span class="ver" style="font-size:11px;font-weight:normal;color:#9ca3af;margin-left:8px;font-family:monospace;">v15/09 · estoque-auto</span></h1>
+  <h1>🌻 Lixas A COMBINAR <span class="badge">Pendentes</span><span class="ver" style="font-size:11px;font-weight:normal;color:#9ca3af;margin-left:8px;font-family:monospace;">v15/09 · nf-numero</span></h1>
   <div class="toolbar">
     <button onclick="recarregar()">🔄 Atualizar</button>
     <span class="user-info" id="user-info"></span>
@@ -299,6 +299,18 @@ const API_BASE = '/lixas-combinar';
  * de estourar "Unexpected token '<'". HTML no corpo = o Render respondeu por ele
  * (servico reiniciando apos deploy, dormindo, ou 502 do proxy), nao o painel.
  */
+/** Bloco de NF pro modal: numero/serie/chave quando ha; sem "?" perdido. */
+function fmtNF(d) {
+  const num = d.numero ? `${d.numero}${d.serie ? '/' + d.serie : ''}` : null;
+  const linhas = [];
+  linhas.push(num ? `NF: ${num}` : `NF: gerada (numero ainda nao atribuido pelo Bling)`);
+  if (d.nfeId) linhas.push(`ID no Bling: ${d.nfeId}`);
+  linhas.push(d.chave ? `Chave: ${d.chave}` : 'Chave: aguardando SEFAZ');
+  if (d.situacao != null) linhas.push(`Situacao: ${d.situacao}`);
+  if (!num) linhas.push('\nO Bling atribui numero e chave ao processar a nota — normalmente em segundos. Ao recarregar o painel o card ja mostra.');
+  return linhas.join('\n');
+}
+
 async function lerJson(r) {
   const ct = (r.headers.get('content-type') || '').toLowerCase();
   const texto = await r.text();
@@ -850,7 +862,7 @@ async function emitirNF(orderId) {
       if (d.jaEmitida) {
         mostrarModal('ℹ️ NF já estava emitida', (d.mensagem || 'Esta venda já possui NF-e no Bling.') + '\n\nRegistrado — o botão Emitir NF vai sumir deste card.', false);
       } else {
-        const texto = `✅ NF-e EMITIDA!\n\nNF ID: ${d.nfeId || '?'}\nNumero: ${d.numero || '?'}\nSerie: ${d.serie || '?'}\nChave: ${d.chave || '(aguardando SEFAZ)'}\n\nConfira no Bling.`;
+        const texto = `✅ NF-e EMITIDA!\n\n${fmtNF(d)}\n\nConfira no Bling.`;
         mostrarModal('✅ NF emitida', texto, false);
       }
       await recarregar();
@@ -1068,7 +1080,7 @@ async function montarSubstituirAvisar(orderId) {
       } catch (e) { avisoTxt = `\n\n⚠️ NF saiu, mas o aviso ao cliente falhou: ${e.message}`; }
     }
 
-    mostrarModal('✅ Pedido + NF + cliente', `✅ MONTADO + NF EMITIDA!\n\nPedido ID: ${d1.pedidoId}\nNF: ${d2.numero || '?'} / chave ${d2.chave || '(aguardando SEFAZ)'}${avisoTxt}`, false);
+    mostrarModal('✅ Pedido + NF + cliente', `✅ MONTADO + NF EMITIDA!\n\nPedido ID: ${d1.pedidoId}\n${fmtNF(d2)}${avisoTxt}`, false);
     await recarregar();
   } catch (e) {
     mostrarModal('❌ Erro', e.message, true);
@@ -1127,7 +1139,7 @@ async function montarComNF(orderId, graos) {
       return;
     }
     if (d2.ok) {
-      const texto = `✅ PEDIDO MONTADO + NF EMITIDA!\n\nPedido ID: ${d1.pedidoId}\nNF ID: ${d2.nfeId || '?'}\nNumero: ${d2.numero || '?'}\nSerie: ${d2.serie || '?'}\nChave: ${d2.chave || '(aguardando SEFAZ)'}\n\nConfira no Bling.`;
+      const texto = `✅ PEDIDO MONTADO + NF EMITIDA!\n\nPedido ID: ${d1.pedidoId}\n${fmtNF(d2)}\n\nConfira no Bling.`;
       mostrarModal('✅ Pedido + NF prontos', texto, false);
     } else {
       // Itens ja foram montados; so a NF falhou. Avisa e deixa o botao "Emitir NF" pra retry.
