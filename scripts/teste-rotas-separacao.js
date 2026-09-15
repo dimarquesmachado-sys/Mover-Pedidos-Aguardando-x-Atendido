@@ -43,4 +43,16 @@ for (const arq of ['amb-checkout-offline/index.js', 'girassol-backup-offline/gbo
   }
 }
 
+/* Codex #482 (P2) + o boot que quebrou no CI: o log de /salvar-localizacao dizia [AMB] fixo,
+   e o conserto foi passar o `tag` da empresa. Só que `base.tag` era UNDEFINED nas três — o
+   valor existia dentro do base.js, passado pro base-funcoes, mas nunca foi exportado. O boot
+   inteiro morria na primeira empresa a montar, e passou aqui porque eu testei com a lib já
+   carregada em memória; só o clone limpo do CI reproduziu.
+   Este teste trava o conserto na origem: cada base tem que EXPORTAR o próprio tag. */
+for (const [pasta, esperado] of [['amb-checkout-offline', 'AMBBKP'], ['girassol-backup-offline', 'GIRABKP'], ['good-checkout-offline', 'GOODBKP']]) {
+  const base = require('../' + pasta + '/base');
+  assert.strictEqual(base.tag, esperado,
+    pasta + ': base.tag tem que ser "' + esperado + '" — undefined aqui derruba o boot de todas');
+}
+
 console.log('OK: rotas de separação — uma lib para as três, dependência ausente derruba na criação e a delegação fica depois do portão');
