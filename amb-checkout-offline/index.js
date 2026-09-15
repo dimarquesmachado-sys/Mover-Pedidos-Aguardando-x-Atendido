@@ -798,9 +798,6 @@ function routes(readBody) {
     painelHtml: path.join(__dirname, 'painel.html'),
   });
   return async function handle(req, res, urlObj) {
-    /* 15/09 — rotas de catálogo (buscar produto + indexação de EAN) vieram pra
-       lib/checkout/rotas-catalogo.js: eram idênticas nas três e se apoiam entre si. */
-    if (await _rotasCatalogo(req, res, urlObj, req.method, validarSessao)) return true;
     if (await _ctxApi(req, res, urlObj)) return true;
 
     /* 15/09 — descoberta dos ids desta empresa NO BLING (canais de venda, depósitos e
@@ -861,6 +858,13 @@ function routes(readBody) {
         } else { req._op = _op; }
       }
     }
+
+    /* 15/09 — rotas de catálogo (buscar produto + indexação de EAN) vieram pra
+       lib/checkout/rotas-catalogo.js: eram idênticas nas três e se apoiam entre si.
+       Codex (P1): tem que rodar DEPOIS da guarda de sessão acima — o handler da lib
+       não valida sessão sozinho, e antes da guarda ficava aberta pra buscar-produto
+       e indexar-status sem cookie nenhum. */
+    if (await _rotasCatalogo(req, res, urlObj, method)) return true;
 
     // ── SONDA DE UNIDADE DE NEGÓCIO (temporária, diagnóstico) ───────────
     // Objetivo: descobrir ONDE, no JSON do pedido da API do Bling, aparece a

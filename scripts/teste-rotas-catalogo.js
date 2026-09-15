@@ -33,11 +33,14 @@ assert.strictEqual(typeof handle, 'function');
 /* o prefixo isola: a instância de uma empresa não pode atender o caminho de outra */
 (async () => {
   const res = {};
-  const fora = await handle({ headers: {} }, res, { pathname: '/y/indexar-status', searchParams: new URLSearchParams() }, 'GET', () => true);
+  const fora = await handle({ headers: {} }, res, { pathname: '/y/indexar-status', searchParams: new URLSearchParams() }, 'GET');
   assert.strictEqual(fora, false, 'caminho de outra empresa não pode ser capturado');
 })();
 
-/* as três pastas não podem ter a cópia de volta */
+/* as três pastas não podem ter a cópia de volta, e a delegação tem que vir DEPOIS
+   da guarda de sessão — Codex (P1): a lib não valida sessão sozinha (buscar-produto
+   e indexar-status saem sem checagem nenhuma), então se a chamada vier antes da
+   guarda essas rotas ficam abertas sem cookie. */
 for (const arq of ['amb-checkout-offline/index.js', 'girassol-backup-offline/gbo-app.js', 'good-checkout-offline/index.js']) {
   const s = fs.readFileSync(path.join(__dirname, '..', arq), 'utf8');
   assert.ok(/_rotasCatalogo/.test(s), arq + ': tem que delegar pra lib');
@@ -45,6 +48,11 @@ for (const arq of ['amb-checkout-offline/index.js', 'girassol-backup-offline/gbo
     assert.ok(!new RegExp("p === '/[\\w-]+/" + rota + "'").test(s),
       arq + ': a cópia de /' + rota + ' voltou pra pasta — é por aí que a divergência retorna');
   }
+  const posGuarda = s.indexOf('GUARDA DE SESSÃO');
+  const posDelega = s.indexOf('_rotasCatalogo(req, res, urlObj, method)');
+  assert.ok(posGuarda !== -1, arq + ': guarda de sessão sumiu do módulo');
+  assert.ok(posDelega > posGuarda,
+    arq + ': _rotasCatalogo tem que ser chamado DEPOIS da guarda de sessão, senão buscar-produto e indexar-status ficam sem sessão');
 }
 
 console.log('OK: rotas de catálogo — uma lib para as três, dependência ausente derruba na criação e o prefixo isola cada empresa');
