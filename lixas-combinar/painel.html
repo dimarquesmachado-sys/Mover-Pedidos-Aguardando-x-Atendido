@@ -938,6 +938,7 @@ async function iaInterpretar(orderId) {
       if (resultDiv) resultDiv.innerHTML = `
         <div class="instr-ok">
           ✅ <b>IA entendeu:</b> ${esc(linhas)} — <b>total ${d.total_interpretado} lixas</b>
+          ${d.quantidades_inferidas ? `<div class="instr-interp">🔢 Quantidades que o sistema completou: ${esc(d.quantidades_inferidas)}</div>` : ''}
           ${d.interpretacao ? `<div class="instr-interp">${esc(d.interpretacao)}</div>` : ''}
           <button class="btn-full" style="margin-top:8px;width:100%" onclick="montarComNF('${orderId}')">✅ Pedido OK + Emitir NF</button>
         </div>`;
