@@ -235,7 +235,73 @@ const fakeOk = async (c) => {
   assert.strictEqual(detalhes, 3, 'UMA chamada de detalhe por canal (não por pedido): esperava 3, veio ' + detalhes);
   assert.ok(!r10.recursos.canais_de_venda.itens.some(c => '_idPedido' in c), 'o id usado na busca é ruído interno');
 
-  /* 10. erro de rede num candidato não pode derrubar a descoberta inteira */
+  /* 10. FORMATOS NA ORDEM CERTA + A PROVA DIZ POR QUE FALHOU (15/09, dado real).
+     Dois erros meus que o retorno da AMB expôs:
+     · 586075287702374196 (18 dígitos) foi rotulado SHOPEE porque meu padrão dela era
+       "6 dígitos + 8 alfanuméricos" — e dígito É alfanumérico, então engoliu o do TikTok.
+       Agora a Shopee exige ao menos uma LETRA e a ordem vai do específico ao genérico.
+     · a prova dizia só "não consegui provar", que é exatamente a parede que critiquei nos
+       caminhos do Bling: sem saber o que o ML respondeu, ninguém conserta. */
+  const { criar: criar2 } = require('../lib/checkout/descobrir-ids');
+  const porFormato = async (c) => {
+    if (c === '/depositos') return { status: 200, data: { data: [] } };
+    if (c === '/situacoes/modulos') return { status: 404, data: null };
+    const md = /\/pedidos\/vendas\/(\d+)$/.exec(c);
+    if (md) return { status: 200, data: { data: { numeroPedidoLoja: md[1] === '1' ? '586075287702374196' : '250915ABCD12' } } };
+    const mp = /pagina=(\d+)/.exec(c);
+    if (mp) return mp[1] === '1' ? { status: 200, data: { data: [{ id: 1, loja: { id: 111 } }, { id: 2, loja: { id: 222 } }] } } : { status: 200, data: { data: [] } };
+    return { status: 404, data: null };
+  };
+  const gf = global.fetch;
+  global.fetch = async (url) => {
+    if (/users\/me/.test(url)) return { ok: true, json: async () => ({ id: 3148025116 }) };
+    return { ok: false, status: 403 };   // o ML recusa a consulta do pedido
+  };
+  const r11 = await criar2({ rotulo: 'T', blingGet: porFormato, prefixoEnv: 'T_', garantirTokenML: async () => 'tok' }).descobrir();
+  const c11 = Object.fromEntries(r11.recursos.canais_de_venda.itens.map(c => [c.id, c]));
+  assert.ok(/TikTok/.test(c11[111].nome || ''),
+    '18 dígitos é TikTok, não Shopee — o padrão da Shopee engolia por aceitar dígito como alfanumérico');
+  assert.ok(/Shopee/.test(c11[222].nome || ''), 'com letra no meio, aí sim é Shopee');
+
+  assert.ok(Array.isArray(r11.sugestao.por_que_nao_provei) && r11.sugestao.por_que_nao_provei.length,
+    'quando a prova falha, o retorno tem que dizer O QUE o ML respondeu — senão vira parede');
+  assert.ok(r11.sugestao.por_que_nao_provei.some(d => d.status === 403), 'o status tem que aparecer');
+  global.fetch = gf;
+
+  /* 11. Codex #456: a falha ANTES do laço da prova também tem que aparecer. Se o token do ML
+     rejeita ou o /users/me não responde, a prova nem chega a rodar — e era exatamente aí que
+     o diagnóstico ficava vazio, no caso MAIS COMUM (token expirado, app sem permissão). */
+  global.fetch = async () => ({ ok: false, status: 401 });   // /users/me recusa
+  const r12 = await criar2({ rotulo: 'T', blingGet: porFormato, prefixoEnv: 'T_', garantirTokenML: async () => 'tok' }).descobrir();
+  assert.strictEqual(r12.recursos.mercado_livre.ok, false);
+  assert.ok(r12.sugestao.por_que_nao_provei && r12.sugestao.por_que_nao_provei.length,
+    'token/identidade falhando é o caso mais comum — não pode ser o único sem explicação');
+  assert.ok(/identidade no ML falhou antes/.test(r12.sugestao.por_que_nao_provei[0].leia || ''));
+
+  const semTokenNenhum = await criar2({ rotulo: 'T', blingGet: porFormato, prefixoEnv: 'T_' }).descobrir();
+  assert.ok(semTokenNenhum.sugestao.por_que_nao_provei, 'sem token nenhum, também tem que explicar');
+  global.fetch = gf;
+
+  /* 11b. o mesmo buraco, um passo mais fundo: _provarCanalML chama garantirTokenML de NOVO,
+     independente da chamada que _identidadeML já fez. Se esse segundo token cair — a
+     identidade já tinha saído bem, então ml.ok é true e o laço da prova de fato começa —
+     o catch devolvia null em silêncio, sem nada em _diagProva. */
+  let chamadasToken = 0;
+  const tokenCaiNaProva = async () => {
+    chamadasToken++;
+    if (chamadasToken === 1) return 'tok';   // 1ª chamada: _identidadeML, sai bem
+    throw new Error('token caiu durante a prova');   // 2ª chamada: dentro de _provarCanalML
+  };
+  global.fetch = async (url) => (/users\/me/.test(url) ? { ok: true, json: async () => ({ id: 3148025116 }) } : { ok: false, status: 500 });
+  const r13 = await criar2({ rotulo: 'T', blingGet: porFormato, prefixoEnv: 'T_', garantirTokenML: tokenCaiNaProva }).descobrir();
+  assert.strictEqual(r13.recursos.mercado_livre.ok, true, 'a identidade saiu bem — só a 2ª chamada do token falha');
+  assert.ok(r13.sugestao.por_que_nao_provei && r13.sugestao.por_que_nao_provei.length,
+    'o token falhando DENTRO da prova (depois de a identidade já ter saído) também precisa aparecer');
+  assert.ok(/token caiu durante a prova/.test(JSON.stringify(r13.sugestao.por_que_nao_provei)),
+    'o motivo relatado tem que ser o erro real, não um "não consegui provar" genérico');
+  global.fetch = gf;
+
+  /* 12. erro de rede num candidato não pode derrubar a descoberta inteira */
   const fakeExplode = async (c) => { if (c === '/depositos') throw new Error('timeout'); return { status: 200, data: { data: [] } }; };
   const r2 = await criar({ rotulo: 'T', blingGet: fakeExplode }).descobrir();
   assert.ok(r2.recursos.depositos, 'o recurso que falhou tem que aparecer no resultado');
