@@ -141,11 +141,19 @@ vale a mesma regra do 2.9: medir e classificar antes de fundir.
 Os HTMLs ainda são aplicações inteiras por empresa. Shell comum, marca vinda de
 `/api/contexto`, recurso escondido por **capacidade** e não por nome de empresa.
 
-## Fase 5 — onboarding declarativo  ⬜
+## Fase 5 — onboarding declarativo  ✅ FEITA (14/09, PR #439)
 
-`node scripts/empresa.js validar <nova>` e `plano <nova>`: lista envs faltando, capacidades,
-slugs, tabelas, donos de token, callbacks OAuth, crons e passos de embarque — sem mostrar
-segredo.
+`node scripts/empresa.js validar <empresa>` — **portão**: sai com código 1 se faltar registro,
+capacidade ou env obrigatória, com o nome EXATO da env que falta no Render. Avisa também
+quando a conta é renovada por outro serviço (o risco do refresh de uso único).
+
+`node scripts/empresa.js plano <empresa>` — os passos de embarque: envs por nome, callbacks
+com **URL completa**, autorização inicial, fatia do Supabase, diretório persistente, crons que
+vão nascer (com o aviso do minuto escalonado do F3) e como ativar.
+
+**Nenhum valor de segredo é impresso** — só o nome da env e se está presente. É regra, não
+gosto: uma ferramenta de diagnóstico que vaza chave é pior que não ter ferramenta, e o teste
+falha se algum valor aparecer na saída.
 
 ---
 
