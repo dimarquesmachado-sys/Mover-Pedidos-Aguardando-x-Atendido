@@ -176,6 +176,8 @@ const fakeOk = async (c) => {
   assert.ok(/PROVADO/.test(canalML.obs || ''), 'a prova tem que ficar registrada no item');
   assert.strictEqual(r7.sugestao.colar_no_render.A_ME_LOJA_IDS, '206017293');
   assert.ok(/PROVADO/.test(r7.sugestao.confira), 'provado não pode sair com o texto de "confirme antes de colar"');
+  assert.ok(!/PROVADO\s*—\s*PROVADO/.test(r7.sugestao.confira),
+    'a palavra não pode sair duplicada: o obs já começa com PROVADO, e esta é a frase que decide se o dono confia');
   assert.ok(!r7.recursos.canais_de_venda.itens.some(c => '_amostra' in c), 'a amostra é ruído interno, não vai pro retorno');
 
   /* sem conseguir provar, a ajuda continua — mas declarada como palpite */
