@@ -141,7 +141,40 @@ const fakeOk = async (c) => {
   assert.ok(/token expirado/.test(tokenQuebrado.recursos.mercado_livre.erro || ''), 'tem que repassar o motivo real');
   assert.ok(tokenQuebrado.recursos.situacoes.ok, 'token quebrado não derruba a descoberta do Bling');
 
-  /* 7. erro de rede num candidato não pode derrubar a descoberta inteira */
+  /* 7. PROVA vs PALPITE (15/09): sobrava um canal sem nome (133 pedidos na AMB) e a sugestão
+     pedia "confirme que é mesmo o do ML". Dá pra confirmar sozinho — pega um numeroLoja
+     daquele canal e pergunta ao ML se o pedido é nosso. O teste guarda a distinção, que é o
+     ponto: prova e palpite não podem sair com a mesma cara pra quem lê. */
+  const comPedidoML = async (c) => {
+    const mp = /pagina=(\d+)/.exec(c);
+    if (mp) return mp[1] === '1' ? { status: 200, data: { data: [
+      { loja: { id: 206017293 }, numeroLoja: '2000012345678901' },
+      { loja: { id: 206017368 }, numeroLoja: '250915ABCDEF' }] } } : { status: 200, data: { data: [] } };
+    return fakeReal(c);
+  };
+  const globalFetch = global.fetch;
+  global.fetch = async (url) => {
+    if (/users\/me/.test(url)) return { ok: true, json: async () => ({ id: 3148025116, nickname: 'AMBTOTAL' }) };
+    if (/orders\/2000012345678901/.test(url)) return { ok: true, json: async () => ({ seller: { id: 3148025116 } }) };
+    return { ok: false, status: 404 };
+  };
+  const r7 = await criar({ rotulo: 'AMB', blingGet: comPedidoML, prefixoEnv: 'A_', garantirTokenML: async () => 'tok' }).descobrir();
+  const canalML = r7.recursos.canais_de_venda.itens.find(c => c.id === 206017293);
+  assert.strictEqual(canalML.nome, 'Mercado Livre', 'o canal tem que ser PROVADO pelo pedido, não adivinhado');
+  assert.ok(/PROVADO/.test(canalML.obs || ''), 'a prova tem que ficar registrada no item');
+  assert.strictEqual(r7.sugestao.colar_no_render.A_ME_LOJA_IDS, '206017293');
+  assert.ok(/PROVADO/.test(r7.sugestao.confira), 'provado não pode sair com o texto de "confirme antes de colar"');
+  assert.ok(!r7.recursos.canais_de_venda.itens.some(c => '_amostra' in c), 'a amostra é ruído interno, não vai pro retorno');
+
+  /* sem conseguir provar, a ajuda continua — mas declarada como palpite */
+  global.fetch = async (url) => (/users\/me/.test(url)
+    ? { ok: true, json: async () => ({ id: 3148025116 }) } : { ok: false, status: 403 });
+  const r8 = await criar({ rotulo: 'AMB', blingGet: comPedidoML, prefixoEnv: 'A_', garantirTokenML: async () => 'tok' }).descobrir();
+  assert.ok(r8.sugestao.colar_no_render.A_ME_LOJA_IDS, 'perder a prova não pode significar perder a sugestão');
+  assert.ok(/PALPITE/.test(r8.sugestao.confira), 'sem prova, tem que se declarar palpite');
+  global.fetch = globalFetch;
+
+  /* 8. erro de rede num candidato não pode derrubar a descoberta inteira */
   const fakeExplode = async (c) => { if (c === '/depositos') throw new Error('timeout'); return { status: 200, data: { data: [] } }; };
   const r2 = await criar({ rotulo: 'T', blingGet: fakeExplode }).descobrir();
   assert.ok(r2.recursos.depositos, 'o recurso que falhou tem que aparecer no resultado');
