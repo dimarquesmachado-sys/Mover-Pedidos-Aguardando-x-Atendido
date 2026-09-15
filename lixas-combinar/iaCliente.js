@@ -295,8 +295,15 @@ CONTEXTO DA VENDA:
 - Produto: ${descricaoProduto}
 ${_blocoTotal(lixasPorKit, qtdKits, totalLixas)}
 - Quantidades em MULTIPLOS DE ${unidadesPorPacote}
-- Graos disponiveis no Bling AGORA: ${graosDisponiveis.join(', ')}
+- Graos disponiveis no Bling AGORA (com o estoque de cada um): ${graosDisponiveis.join(', ')}
 - A soma das quantidades deve dar EXATAMENTE ${totalLixas} lixas
+
+ESTOQUE E LIMITE, NAO SUGESTAO:
+Cada grao vem com quantas lixas ha em estoque. A quantidade que voce colocar num grao
+NAO pode passar desse numero. Se a ordem do vendedor pede mais do que ha (ex.: 50 do
+240 e so ha 20), NAO monte assim: classifique "ambiguo" e diga ao vendedor exatamente
+quanto ha de cada grao envolvido, pra ele redistribuir. Ao aplicar "o mais proximo",
+so considere graos com estoque suficiente pra quantidade pedida.
 
 REGRA PRINCIPAL — A PALAVRA DO VENDEDOR E FINAL:
 A instrucao do vendedor E o pedido a montar. Monte EXATAMENTE o que ele mandou.
