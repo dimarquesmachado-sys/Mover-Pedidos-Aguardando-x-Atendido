@@ -362,7 +362,10 @@ async function rotinaLerRespostas() {
                 continue;
               }
 
-              const graosDisponiveis = graosResult.graos.map(g => g.grao);
+              // So graos COM estoque (mesmo criterio da mensagem inicial): grao zerado
+              // na lista faz a IA aceitar um pedido que o Bling recusa no PUT.
+              let graosDisponiveis = graosResult.graos.filter(g => Number(g.estoque_lixas) > 0).map(g => g.grao);
+              if (graosDisponiveis.length === 0) graosDisponiveis = graosResult.graos.map(g => g.grao);
               // total REAL = lixas_por_kit x quantidade comprada (1 unidade do anuncio = 1 kit).
               // CRITICO p/ multi-kit: se a cliente comprou 4 kits de 100, o total e 400, nao 100.
               // Le a quantity do ML pelo MESMO helper da auto-emissao (extrairSkuACombinar).
