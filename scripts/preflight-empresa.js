@@ -33,9 +33,22 @@ function ok(msg)   { console.log('  ✓ ' + msg); }
 function ruim(msg) { console.log('  ✗ ' + msg); return 1; }
 function nota(msg) { console.log('  · ' + msg); }
 
-async function checarSupabase(id) {
+/* lib/supabase.js:req já prepende '/rest/v1/' e devolve o corpo cru em `.body` (string) —
+   os callers existentes (amb-checkout-offline, gbo-app.js) fazem JSON.parse antes de usar. */
+function corpo(r) {
+  try { const j = JSON.parse(r.body || '[]'); return Array.isArray(j) ? j : []; }
+  catch (e) { return []; }
+}
+
+async function checarSupabase(e) {
   console.log('\nSupabase (histórico de vendas)');
   let problemas = 0;
+
+  /* o id CANÔNICO do contrato não é sempre o identificador operacional do Supabase — a
+     AMBTotal é 'ambtotal' no contrato mas grava (e é filtrada) como 'amb', o mesmo valor
+     que o contrato já registra em `sufixo_tabelas` ('_amb') pra essa divergência de propósito.
+     girassol/good não divergem, então isto cai de volta no próprio id. */
+  const id = e.sufixoTabelas.replace(/^_/, '') || e.id;
 
   const c = supa.cfg(id);
   if (!c.url || !c.key) {
@@ -44,7 +57,7 @@ async function checarSupabase(id) {
   ok('credenciais presentes (url e key)');
 
   /* 1. a tabela responde? */
-  const r = await supa.req(id, null, 'GET', '/rest/v1/vendas_historico?select=empresa&limit=1');
+  const r = await supa.req(id, null, 'GET', 'vendas_historico?select=empresa&limit=1');
   if (!r.ok) {
     problemas += ruim('a tabela vendas_historico não respondeu (HTTP ' + r.status + ') — confira URL, chave e se a tabela existe');
     return problemas;
@@ -53,17 +66,18 @@ async function checarSupabase(id) {
 
   /* 2. a coluna `empresa` existe? sem ela, o filtro por empresa não isola nada e
      uma loja lê os números da outra — o pior sintoma possível, porque parece certo. */
-  const rf = await supa.req(id, null, 'GET', '/rest/v1/vendas_historico?empresa=eq.' + id + '&select=empresa&limit=1');
+  const rf = await supa.req(id, null, 'GET', 'vendas_historico?empresa=eq.' + id + '&select=empresa&limit=1');
   if (!rf.ok) problemas += ruim('filtro por empresa falhou (HTTP ' + rf.status + ') — a coluna `empresa` existe?');
   else ok('filtro empresa=eq.' + id + ' aceito');
 
-  /* 3. quantas linhas esta empresa já tem */
-  const n = await supa.count(id, null, 'empresa=eq.' + id);
+  /* 3. quantas linhas esta empresa já tem (count() já escopa por empresa sozinho —
+     o 2º argumento é pra filtro ADICIONAL, não pra repetir o empresa=eq.) */
+  const n = await supa.count(id, null);
   if (n == null) nota('não consegui contar as linhas (Content-Range ausente) — não é bloqueio');
   else nota('linhas já gravadas para ' + id + ': ' + n);
 
-  /* 4. isolamento de verdade: escreve uma sentinela e confere que ela NÃO aparece
-     no filtro de outra empresa. Só com --escrever. */
+  /* 4. isolamento de verdade: escreve uma sentinela, confere que ela volta com a empresa
+     certa, confere que SOME ao filtrar por outra empresa, e remove no fim. Só com --escrever. */
   if (!ESCREVER) {
     nota('isolamento não testado (rode com --escrever pra gravar e remover uma linha sentinela)');
     return problemas;
@@ -71,21 +85,38 @@ async function checarSupabase(id) {
 
   const marca = 'PREFLIGHT-' + Date.now();
   const linha = { empresa: id, numero_loja: marca, data_venda: new Date().toISOString().slice(0, 10) };
-  const ins = await supa.req(id, null, 'POST', '/rest/v1/vendas_historico', [linha]);
+  const ins = await supa.req(id, null, 'POST', 'vendas_historico', [linha]);
   if (!ins.ok) {
     problemas += ruim('não consegui INSERIR a sentinela (HTTP ' + ins.status + ') — política de escrita (RLS) ou colunas obrigatórias');
-  } else {
-    ok('inserção aceita');
-    const lida = await supa.req(id, null, 'GET', '/rest/v1/vendas_historico?numero_loja=eq.' + marca + '&select=empresa');
-    const achou = lida.ok && Array.isArray(lida.data) && lida.data.length;
-    if (!achou) problemas += ruim('inseri mas não consegui LER a sentinela de volta');
-    else if (lida.data[0].empresa !== id) problemas += ruim('a sentinela voltou com empresa="' + lida.data[0].empresa + '" — isolamento quebrado');
-    else ok('sentinela lida de volta com a empresa certa');
-
-    const del = await supa.req(id, null, 'DELETE', '/rest/v1/vendas_historico?numero_loja=eq.' + marca);
-    if (!del.ok) problemas += ruim('NÃO consegui remover a sentinela ' + marca + ' — remova à mão, ela ficaria no histórico');
-    else ok('sentinela removida');
+    return problemas;
   }
+  ok('inserção aceita');
+
+  const lida = await supa.req(id, null, 'GET', 'vendas_historico?numero_loja=eq.' + marca + '&select=empresa');
+  const linhasLidas = corpo(lida);
+  if (!lida.ok || !linhasLidas.length) problemas += ruim('inseri mas não consegui LER a sentinela de volta');
+  else if (linhasLidas[0].empresa !== id) problemas += ruim('a sentinela voltou com empresa="' + linhasLidas[0].empresa + '" — isolamento quebrado');
+  else ok('sentinela lida de volta com a empresa certa');
+
+  /* prova o isolamento de verdade: a sentinela some quando a pergunta é feita com o
+     filtro de QUALQUER OUTRA empresa — é exatamente a query que a loja errada faria. */
+  const outra = await supa.req(id, null, 'GET', 'vendas_historico?numero_loja=eq.' + marca + '&empresa=neq.' + id + '&select=empresa');
+  const linhasOutra = corpo(outra);
+  if (!outra.ok) problemas += ruim('não consegui testar o isolamento contra outra empresa (HTTP ' + outra.status + ')');
+  else if (linhasOutra.length) problemas += ruim('a sentinela aparece filtrando por empresa≠"' + id + '" — isolamento quebrado');
+  else ok('sentinela some ao filtrar por empresa≠"' + id + '" — isolamento provado');
+
+  const del = await supa.req(id, null, 'DELETE', 'vendas_historico?numero_loja=eq.' + marca);
+  if (!del.ok) {
+    problemas += ruim('NÃO consegui remover a sentinela ' + marca + ' — remova à mão, ela ficaria no histórico');
+    return problemas;
+  }
+  /* DELETE sem representation pode voltar 200 mesmo sem apagar nenhuma linha (ex.: RLS que
+     deixa inserir mas não apagar) — só o .ok não prova a remoção, tem que reler. */
+  const conf = await supa.req(id, null, 'GET', 'vendas_historico?numero_loja=eq.' + marca + '&select=empresa');
+  const sobrou = corpo(conf);
+  if (!conf.ok || sobrou.length) problemas += ruim('a sentinela ' + marca + ' ainda está lá depois do DELETE — remova à mão, ela ficaria no histórico');
+  else ok('sentinela removida');
   return problemas;
 }
 
@@ -109,11 +140,16 @@ async function checarML(registro, id) {
   ok('credenciais presentes');
 
   /* o dono do refresh: duas contas renovando o mesmo token de uso único deixa uma com
-     token morto. Isto é o risco nº 1 da auditoria e aparece aqui, antes do cron. */
+     token morto. Isto é o risco nº 1 da auditoria e aparece aqui, antes do cron.
+     `dono_hoje.ml` é LISTA (pode ter mais de um serviço renovando ao mesmo tempo — é a
+     VERDADE de hoje, não o desejado), então nunca é uma string pra comparar direto. */
   const e = registro.obter(id);
-  const dono = (e.donoHoje && (e.donoHoje.mercadolivre || e.donoHoje.ml)) || null;
-  if (dono && dono !== 'mover-pedidos') {
-    nota('o refresh desta conta é do serviço "' + dono + '" — este serviço deve LER o token, nunca renovar');
+  const brutos = (e.donoHoje && (e.donoHoje.mercadolivre || e.donoHoje.ml)) || [];
+  const donos = Array.isArray(brutos) ? brutos : (brutos ? [brutos] : []);
+  if (!donos.includes('mover-pedidos')) {
+    if (donos.length) nota('o refresh desta conta é do serviço "' + donos.join(', ') + '" — este serviço deve LER o token, nunca renovar');
+  } else if (donos.length > 1) {
+    nota('CONFLITO ATIVO: mais de um serviço renova esta conta (' + donos.join(', ') + ') — dois renovando o mesmo token de uso único derruba um deles');
   }
   return 0;
 }
@@ -134,7 +170,7 @@ async function principal() {
   console.log('Confere se as credenciais FUNCIONAM, não só se existem. Nenhum valor é impresso.');
 
   let problemas = 0;
-  problemas += await checarSupabase(e.id);
+  problemas += await checarSupabase(e);
   if (registro.temCapacidade(e.id, 'fiscal')) problemas += await checarBling(registro, e.id);
   if (registro.temCapacidade(e.id, 'ml')) problemas += await checarML(registro, e.id);
 

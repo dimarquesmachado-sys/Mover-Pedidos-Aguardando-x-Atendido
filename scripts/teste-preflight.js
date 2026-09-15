@@ -19,8 +19,10 @@ function roda(args, env) {
   catch (e) { return { saida: (e.stdout || '') + (e.stderr || ''), code: e.status }; }
 }
 
-/* sem credenciais, tem que FALHAR dizendo o nome exato da env */
-const r1 = roda(['good']);
+/* sem credenciais, tem que FALHAR dizendo o nome exato da env — limpa explicitamente,
+   `roda()` herda o env do processo pai e uma máquina com a GOOD real configurada faria
+   este caso passar por sorte, não por comportamento */
+const r1 = roda(['good'], { SUPABASE_URL_VENDAS_GOOD: '', SUPABASE_KEY_VENDAS_GOOD: '' });
 assert.strictEqual(r1.code, 1, 'sem credenciais o preflight tem que falhar — ele é portão antes do cron');
 assert.ok(/SUPABASE_URL_VENDAS_GOOD/.test(r1.saida), 'tem que dizer o nome EXATO da env que falta');
 
