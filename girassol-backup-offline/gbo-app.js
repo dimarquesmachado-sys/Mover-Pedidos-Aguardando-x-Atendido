@@ -4562,7 +4562,7 @@ async function backfillVendas(de, ate, empresa, ctx){
       for (let tent = 1; tent <= 6; tent++) {
         const r = await _blingGet('/pedidos/vendas?dataInicial='+de+'&dataFinal='+ate+'&pagina='+pg+'&limite=100');
         if (r && r.ok) { lista = (r.data && r.data.data) || []; break; }
-        const ehLimite = r && r.status === 429 && r.limite !== false && !r.rede;   /* 03/09: só limite REAL, não rede caída */
+        const ehLimite = r && r.status === 429 && r.limite === true;   /* 15/09 (Codex #324): não excluir mais por r.rede — um lote com 429 real + rede caída ainda é limite real */
         if (ehLimite && esperas429 < 3) {
           esperas429++;
           const esperaL = [120, 240, 480][esperas429 - 1] * 1000;
@@ -4638,7 +4638,7 @@ async function backfillVendas(de, ate, empresa, ctx){
           let rd = null;
           try { rd = await _blingGet('/pedidos/vendas/'+p.id); det = (rd&&rd.ok&&rd.data&&rd.data.data)||null; } catch(e){}
           if (det) break;
-          if (rd && rd.status === 429 && rd.limite !== false && !rd.rede && esperas429d < 3) {   /* só limite real */
+          if (rd && rd.status === 429 && rd.limite === true && esperas429d < 3) {   /* 15/09 (Codex #324): idem — não excluir por rd.rede */
             esperas429d++;
             const esperaL = [120, 240, 480][esperas429d - 1] * 1000;
             _backfill.msg = 'detalhe do pedido ' + p.id + ': limite do Bling, aguardando ' + (esperaL/60000) + ' min (' + esperas429d + '/3)';

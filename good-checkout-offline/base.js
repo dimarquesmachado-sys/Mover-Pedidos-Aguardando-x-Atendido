@@ -153,8 +153,14 @@ async function blingGet(pathUrl, tentativas = 3, signal = undefined) {
   /* 03/09 (Codex #323): este 429 de "esgotou as tentativas" era devolvido igual pra limite
      REAL do Bling e pra rede caída — e o backfill passou a esperar 2/4/8 min no 429, o que
      numa queda de rede só atrasa sem ajudar. O status continua 429 (quem já o lê não muda),
-     mas `limite` diz se o Bling de fato respondeu 429 em alguma tentativa. */
-  return { ok: false, status: 429, data: null, limite: viu429 && !viuRede, rede: viuRede };
+     mas `limite` diz se o Bling de fato respondeu 429 em alguma tentativa.
+     15/09 (Codex #324): `limite` exigia NENHUMA falha de rede no lote inteiro — bastava UMA
+     tentativa cair por rede junto de um 429 real (ex.: 429, rede, 429) pra `limite` virar
+     false e o backfill perder a espera longa mesmo tendo visto o limite de verdade. Agora
+     `limite` só pergunta "algum 429 real aconteceu?"; `rede` continua reportando se alguma
+     tentativa caiu por rede, pra quem quiser tratar os dois separadamente. GOOD não tem o
+     backfill do ano/noturno que lê esses campos, mas o base.js é espelhado nas 3 empresas. */
+  return { ok: false, status: 429, data: null, limite: viu429, rede: viuRede };
 }
 
 async function blingWrite(method, pathUrl, body) {
