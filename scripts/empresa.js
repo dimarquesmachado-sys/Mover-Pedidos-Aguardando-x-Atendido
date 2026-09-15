@@ -143,17 +143,35 @@ function plano(alvo) {
   console.log('   abrir o callback acima e autorizar; se o redirect não puder ser usado,');
   console.log('   o POST ' + base + slug + '/setup aceita o code à mão.');
 
-  console.log('\n4. Dados:');
+  /* 15/09 — a EXPEDIÇÃO muda pra onde o checkout manda o pedido conferido, e isso é decisão
+     de operação que ninguém adivinha lendo código. O plano diz o efeito em vez de deixar o
+     dono lembrar: sem app de Expedição não existe etapa depois da conferência. */
+  {
+    const temExp = registro.temCapacidade(e.id, 'expedicao') === true;
+    console.log('\n4. Expedição (muda o destino do pedido conferido):');
+    if (temExp) {
+      console.log('   esta empresa TEM app de Expedição: o checkout manda o conferido pra VERIFICADO,');
+      console.log('   e o app move pra DESPACHADOS quando a equipe bipa na entrega à transportadora.');
+    } else {
+      console.log('   esta empresa NÃO tem app de Expedição: não há etapa depois da conferência, então');
+      console.log('   o checkout manda o pedido conferido DIRETO pra DESPACHADOS.');
+      console.log('   ⚠️ a env de VERIFICADO desta empresa recebe o id do DESPACHADOS dela — não é engano.');
+      console.log('   Se um dia ela ganhar Expedição, declare "expedicao" nas capacidades e troque a env.');
+    }
+    console.log('   (o /descobrir-ids já sugere o id certo pros dois casos)');
+  }
+
+  console.log('\n5. Dados:');
   console.log('   fatia do Supabase:  vendas_historico?empresa=eq.' + e.id);
   console.log('   sufixo de tabelas:  ' + (e.sufixoTabelas || '(nenhum)'));
   console.log('   diretório de dados: /data/' + e.id + '   (precisa ser disco persistente no Render)');
 
-  console.log('\n5. Crons que vão nascer:');
+  console.log('\n6. Crons que vão nascer:');
   console.log('   expediente a cada 3 min · virada 00:10 · manhã (06:00, 06:30, 07:00) · NFs a cada 5 min');
   console.log('   F3 (NF-e→ML): em minuto ESCALONADO, escolhido automaticamente entre os livres —');
   console.log('   as empresas não podem disparar no mesmo minuto ou brigam pela cota do Bling.');
 
-  console.log('\n6. Ativação:');
+  console.log('\n7. Ativação:');
   console.log('   EMPRESAS deve conter "' + e.id + '" (ou estar vazia, que ativa todas as do contrato).');
   console.log('   SKIP_EMPRESAS desliga qualquer módulo por id ou alias.');
 
