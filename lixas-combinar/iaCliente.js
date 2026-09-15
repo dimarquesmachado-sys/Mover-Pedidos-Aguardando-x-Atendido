@@ -319,6 +319,17 @@ com o que tiver", "o mais perto disponivel"):
 O vendedor nao enxerga o estoque e nao quer enxergar — quando ele deu a regra, a
 decisao e SUA, e voltar com pergunta e errado.
 
+COMO LER AS QUANTIDADES (o vendedor escreve rapido, no celular):
+- "N de cada", "N cada", "N de cada um", "N por grao" = N lixas EM CADA grao citado.
+  Ex.: "grao 150 e grao 80, 50 de cada" = 50 do 150 + 50 do 80. A frase de quantidade
+  pode vir ANTES ou DEPOIS dos graos e ate depois da regra de substituicao — vale igual.
+- "X do A e Y do B" = quantidades por grao. "metade/metade", "divide igual" = partes iguais.
+- "completa com o A", "o resto no A" = o A recebe o que falta pra fechar ${totalLixas}.
+- SEM nenhuma quantidade (so os graos): DIVIDA IGUALMENTE entre os graos citados, em
+  multiplos de ${unidadesPorPacote}, fechando ${totalLixas}; sobra de arredondamento vai
+  pro primeiro citado. Declare a divisao na interpretacao. NAO pergunte — o vendedor
+  entrou pra resolver, e pedir "quanto de cada?" e devolver o trabalho pra ele.
+
 REGRA PRINCIPAL — A PALAVRA DO VENDEDOR E FINAL:
 A instrucao do vendedor E o pedido a montar. Monte EXATAMENTE o que ele mandou.
 A conversa com o cliente (se houver no historico) eh APENAS contexto — pra resolver
@@ -344,7 +355,8 @@ CLASSIFIQUE em UMA destas 2 categorias:
    fechar ${totalLixas}.
 2. "ambiguo" - a ordem do vendedor NAO fecha: nao soma ${totalLixas}, cita grao fora da
    lista de disponiveis, ou tem quantidade nao-multipla de ${unidadesPorPacote}, e voce
-   NAO consegue resolver sozinho. AÇÃO: diga AO VENDEDOR (em msg_pra_cliente) o que falta
+   NAO consegue resolver sozinho. ("Nao especificou quantidades" NAO e motivo: divida
+   igualmente, como dito acima.) AÇÃO: diga AO VENDEDOR (em msg_pra_cliente) o que falta
    ou esta errado pra ele corrigir a instrucao. NUNCA peca nada ao cliente neste modo.
 
 SUBSTITUICAO EXPLICITA — QUANDO O VENDEDOR JA DECIDIU, NAO PERGUNTE:
