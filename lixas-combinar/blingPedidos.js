@@ -241,6 +241,28 @@ function calcularRateio({ valorTotalPedido, graosEscolhidos, graosDisponiveis, u
   const linhas = [];
   let somaSubtotais = 0;
 
+  // 4a. ESTOQUE ANTES DE TUDO. graosDisponiveis ja traz estoque_lixas (lixasService), mas
+  // ate aqui so se conferia que o grao EXISTE — a quantidade nunca era checada, e o
+  // Bling recusava com code 67 ("saldo insuficiente") so na hora do PUT, depois de a IA
+  // ter escolhido e o operador ter clicado. Aqui a falta aparece ANTES, dizendo QUAL grao
+  // e QUANTO ha, pra ele redistribuir. Grao sem o campo (chamador antigo) nao e barrado.
+  const semSaldo = [];
+  for (const g of graosEscolhidos) {
+    const filho = graosDisponiveis.find(x => String(x.grao) === String(g.grao));
+    if (!filho || filho.estoque_lixas == null) continue;
+    const disp = Number(filho.estoque_lixas);
+    if (Number.isFinite(disp) && Number(g.quantidade) > disp) {
+      semSaldo.push({ grao: String(g.grao), pedido: Number(g.quantidade), disponivel: disp });
+    }
+  }
+  if (semSaldo.length) {
+    const txt = semSaldo.map(s => `g${s.grao}: pedido ${s.pedido}, em estoque ${s.disponivel}`).join(' · ');
+    return { ok: false, etapa: 'estoque', erro: `Estoque insuficiente — ${txt}`, faltam: semSaldo,
+             graos_com_saldo: graosDisponiveis
+               .filter(x => Number(x.estoque_lixas) > 0)
+               .map(x => ({ grao: String(x.grao), disponivel: Number(x.estoque_lixas) })) };
+  }
+
   for (const g of graosEscolhidos) {
     const filho = graosDisponiveis.find(x => String(x.grao) === String(g.grao));
     if (!filho) {
