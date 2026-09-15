@@ -54,4 +54,20 @@ const r4 = roda(['plano', 'nao-existe'], comEnv);
 assert.notStrictEqual(r4.code, 0, 'empresa fora do contrato tem que falhar');
 assert.ok(/não está no contrato/.test(r4.saida));
 
+/* 15/09 — a EXPEDIÇÃO entra no plano porque muda o destino do pedido conferido, e isso é
+   decisão de operação que ninguém adivinha lendo código. A empresa nova que vem por aí NÃO
+   terá o app, então o plano precisa dizer que a env de VERIFICADO dela recebe o id do
+   DESPACHADOS — senão alguém "conserta" isso depois, como eu quase fiz com a AMB e a GOOD. */
+{
+  const comExp = roda(['plano', 'girassol'], comEnv);
+  assert.ok(/TEM app de Expedição/.test(comExp.saida), 'o plano da Girassol tem que dizer que ela tem Expedição');
+  assert.ok(/VERIFICADO/.test(comExp.saida));
+
+  const semExp = roda(['plano', 'good'], comEnv);
+  assert.ok(/NÃO tem app de Expedição/.test(semExp.saida), 'e o da GOOD, que não tem');
+  assert.ok(/DIRETO pra DESPACHADOS/.test(semExp.saida), 'tem que dizer o EFEITO, não só a ausência');
+  assert.ok(/não é engano/.test(semExp.saida),
+    'e avisar que a env de VERIFICADO com id de DESPACHADOS é proposital — senão alguém conserta depois');
+}
+
 console.log('OK: CLI de empresa — validar é portão, plano traz URL completa e fatia certa, e nenhum valor de segredo é impresso');
