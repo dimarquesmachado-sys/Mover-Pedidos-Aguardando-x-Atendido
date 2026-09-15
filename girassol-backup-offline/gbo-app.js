@@ -851,7 +851,7 @@ function routes(readBody) {
       try {
         const d = require('../lib/checkout/descobrir-ids').criar({ rotulo: 'GIRASSOL', blingGet , /* o token do ML vem do gerenciador fiscal DESTA empresa — o lint pegou que eu
        supus uma variável `garantirTokenML` solta que não existe aqui. */
-      garantirTokenML: () => require('../girassol/mlTokenManager').garantirTokenML(), prefixoEnv: 'GIRABKP_' });
+      garantirTokenML: () => require('../girassol/mlTokenManager').garantirTokenML(), envNomes: {"atendido": "GIRABKP_SIT_ATENDIDO", "verificado": "GIRABKP_SIT_VERIFICADO", "aguardando": "SITUACAO_AGUARDANDO", "meLojaIds": "ME_LOJA_IDS"} });
         json(res, 200, await d.descobrir());
       } catch (e) { json(res, 500, { ok: false, erro: String(e.message || e) }); }
       return true;
