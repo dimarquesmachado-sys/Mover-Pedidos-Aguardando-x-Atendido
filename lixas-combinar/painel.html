@@ -948,6 +948,15 @@ async function iaInterpretar(orderId) {
           ${d.msg_ia ? `<div class="instr-interp">💬 ${esc(d.msg_ia)}</div>` : ''}
           <div class="instr-hint2">Reescreva a instrução com mais detalhe (quantidades exatas por grão) e clique Interpretar de novo.</div>
         </div>`;
+    } else if (d.categoria === 'claro' && !d.pronto_pra_montar) {
+      // A IA entendeu, mas o pedido NAO ficou gravado — sem isso o Montar+NF nao tem o
+      // que montar. Dizer "tente reformular" aqui mandava o operador reescrever uma
+      // instrucao que estava certa.
+      if (resultDiv) resultDiv.innerHTML = `
+        <div class="instr-erro">
+          ⚠️ <b>A IA entendeu</b> (${esc(d.interpretacao || '')}), <b>mas não consegui gravar o pedido</b>${d.motivo_nao_salvo ? ' — ' + esc(d.motivo_nao_salvo) : ''}.
+          <div class="instr-hint2">Não é a instrução: é o banco. Aguarde uns segundos, dê Ctrl+Shift+R e clique Interpretar de novo. Se repetir, me avise com este texto.</div>
+        </div>`;
     } else {
       if (resultDiv) resultDiv.innerHTML = `<div class="instr-erro">IA classificou como <b>${esc(d.categoria)}</b> — ${esc(d.interpretacao || 'não dá pra montar com isso')}. Tente reformular.</div>`;
     }
