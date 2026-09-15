@@ -88,6 +88,27 @@ item 2 acima, não um item isolado.
   comentário no código diz que a AMBTotal não vende nesse canal. Não é falta, é ausência de
   operação; mas inverte o sentido do que a tabela antiga sugeria.
 
+## A diferença mais importante NÃO está no código: é a operação física (15/09)
+
+A Girassol tem o **app de Expedição**. A AMB e a GOOD não.
+
+Isso explica o que parecia erro de configuração: `SIT_VERIFICADO` da AMB e da GOOD aponta
+para o id de **DESPACHADOS** delas (745123 e 749990), enquanto a Girassol usa 24.
+
+| empresa | pedido conferido no checkout vai para | vira DESPACHADOS quando |
+|---|---|---|
+| Girassol | VERIFICADO (24) | a equipe **bipa na entrega à transportadora**, no app de Expedição |
+| AMB | DESPACHADOS (745123) | na própria conferência — não há etapa depois |
+| GOOD | DESPACHADOS (749990) | idem |
+
+**Não uniformizar.** A Girassol tem uma etapa física a mais, então o fluxo dela tem um estado
+a mais. Igualar apagaria a Expedição do desenho — e o sintoma seria pedido marcado como
+despachado antes de sair do galpão.
+
+Vale como regra geral desta fase: **diferença entre empresas nem sempre é dívida.** Quando ela
+espelha uma diferença da operação, é o código estando certo. O jeito de saber é perguntar ao
+dono, não medir o diff — foi assim que esta apareceu.
+
 ## Recomendação
 
 Não extrair o `ciclo.js` inteiro ainda. O caminho com melhor retorno e menor risco:
