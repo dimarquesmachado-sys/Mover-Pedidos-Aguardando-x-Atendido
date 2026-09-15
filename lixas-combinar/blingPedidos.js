@@ -753,17 +753,59 @@ async function gerarNFe(pedidoId) {
     };
   }
 
-  // Resposta tipica: { data: { id, numero, serie, chaveAcesso? } }
-  const data = r.data?.data || r.data || {};
+  // O gerar-nfe do Bling v3 devolve pouco (na pratica so o id, e nem sempre no mesmo
+  // lugar) — numero/serie/chave so existem depois que a nota e processada. Entao:
+  // (1) acha o id em qualquer formato; (2) se nao veio, pega em notaFiscal.id do pedido;
+  // (3) consulta GET /nfe/{id} pra preencher numero, serie, chave e situacao.
+  const raw = r.data;
+  console.log(`[blingPedidos] gerar-nfe pedido ${pedidoId} respondeu: ${JSON.stringify(raw).slice(0, 400)}`);
+  let nfeId = _acharIdNota(raw);
+
+  if (!nfeId) {
+    try {
+      const det = await obterPedidoCompleto(pedidoId);
+      const nf = det.ok ? det.pedido?.notaFiscal : null;
+      nfeId = (nf && typeof nf === 'object') ? nf.id : nf;
+      if (nfeId) console.log(`[blingPedidos] id da NF veio do pedido: ${nfeId}`);
+    } catch (e) {
+      console.warn(`[blingPedidos] nao consegui ler notaFiscal.id do pedido ${pedidoId}: ${e.message}`);
+    }
+  }
+
+  let numero = null, serie = null, chave = null, situacao = null;
+  if (nfeId) {
+    try {
+      const rn = await fetchBling('GET', `/nfe/${nfeId}`);
+      const d = rn.ok ? (rn.data?.data || rn.data || {}) : {};
+      numero   = d.numero ?? null;
+      serie    = d.serie ?? null;
+      chave    = d.chaveAcesso || d.chave || null;
+      situacao = d.situacao ?? null;
+      if (!rn.ok) console.warn(`[blingPedidos] GET /nfe/${nfeId} -> HTTP ${rn.status}`);
+    } catch (e) {
+      console.warn(`[blingPedidos] nao consegui consultar a NF ${nfeId}: ${e.message}`);
+    }
+  }
+
   return {
     ok: true,
     status: r.status,
-    nfeId: data.id,
-    numero: data.numero,
-    serie: data.serie,
-    chave: data.chaveAcesso || data.chave,
-    raw: r.data
+    nfeId: nfeId ? Number(nfeId) : null,
+    numero, serie, chave, situacao,
+    raw
   };
+}
+
+/** Acha o id da nota em qualquer formato que o Bling ja devolveu ou possa devolver. */
+function _acharIdNota(raw) {
+  if (!raw) return null;
+  const d = raw.data ?? raw;
+  const cand = [
+    d?.id, d?.idNotaFiscal, d?.notaFiscal?.id, d?.nfe?.id,
+    Array.isArray(d) ? d[0]?.id : null,
+    Array.isArray(d?.notasFiscais) ? d.notasFiscais[0]?.id : null
+  ].find(x => x != null && Number(x) > 0);
+  return cand != null ? Number(cand) : null;
 }
 
 module.exports = {
