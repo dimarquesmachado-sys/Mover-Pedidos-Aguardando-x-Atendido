@@ -268,7 +268,21 @@ const fakeOk = async (c) => {
   assert.ok(r11.sugestao.por_que_nao_provei.some(d => d.status === 403), 'o status tem que aparecer');
   global.fetch = gf;
 
-  /* 11. erro de rede num candidato não pode derrubar a descoberta inteira */
+  /* 11. Codex #456: a falha ANTES do laço da prova também tem que aparecer. Se o token do ML
+     rejeita ou o /users/me não responde, a prova nem chega a rodar — e era exatamente aí que
+     o diagnóstico ficava vazio, no caso MAIS COMUM (token expirado, app sem permissão). */
+  global.fetch = async () => ({ ok: false, status: 401 });   // /users/me recusa
+  const r12 = await criar2({ rotulo: 'T', blingGet: porFormato, prefixoEnv: 'T_', garantirTokenML: async () => 'tok' }).descobrir();
+  assert.strictEqual(r12.recursos.mercado_livre.ok, false);
+  assert.ok(r12.sugestao.por_que_nao_provei && r12.sugestao.por_que_nao_provei.length,
+    'token/identidade falhando é o caso mais comum — não pode ser o único sem explicação');
+  assert.ok(/identidade no ML falhou antes/.test(r12.sugestao.por_que_nao_provei[0].leia || ''));
+
+  const semTokenNenhum = await criar2({ rotulo: 'T', blingGet: porFormato, prefixoEnv: 'T_' }).descobrir();
+  assert.ok(semTokenNenhum.sugestao.por_que_nao_provei, 'sem token nenhum, também tem que explicar');
+  global.fetch = gf;
+
+  /* 12. erro de rede num candidato não pode derrubar a descoberta inteira */
   const fakeExplode = async (c) => { if (c === '/depositos') throw new Error('timeout'); return { status: 200, data: { data: [] } }; };
   const r2 = await criar({ rotulo: 'T', blingGet: fakeExplode }).descobrir();
   assert.ok(r2.recursos.depositos, 'o recurso que falhou tem que aparecer no resultado');
