@@ -422,6 +422,9 @@ const fakeOk = async (c) => {
   const r = await criarC({
     rotulo: 'C', blingGet: bling,
     envNomes: { atendido: 'C_SIT_ATENDIDO', verificado: 'C_SIT_VERIFICADO', despachados: 'C_SIT_DESPACHADOS', meLojaIds: 'C_ME_LOJA_IDS' },
+    /* 15/09: este bloco espera o destino VERIFICADO=24, que é o desenho de quem TEM app de
+       Expedição — agora precisa dizer isso, porque sem a capacidade o destino vira DESPACHADOS. */
+    temExpedicao: true,
     padroesEnv: { C_SIT_VERIFICADO: '24', C_SIT_DESPACHADOS: '0' },
   }).descobrir();
   const c = r.sugestao.conferencia;
@@ -566,4 +569,44 @@ const fakeOk = async (c) => {
   a6.ok(/parei na página/.test(r3.recursos.situacoes.aviso || ''), 'e a lista parcial tem que se DECLARAR parcial');
 
   console.log('OK: situações — percorre todas as páginas, não duplica, não trava e declara quando a lista ficou parcial');
+})().catch(e => { console.error(e.message); process.exit(1); });
+
+/* ─── 15/09: o destino do pedido conferido depende da EXPEDIÇÃO ───────────────
+   A Girassol tem o app de Expedição, onde a equipe bipa na ENTREGA à transportadora. Lá o
+   pedido conferido vai pra VERIFICADO e só vira DESPACHADOS depois. A AMB e a GOOD não têm
+   esse app — não existe etapa seguinte —, então o checkout já manda direto pra DESPACHADOS.
+   Antes disso eu sugeria VERIFICADO pra todas e a conferência acusava AMB e GOOD como "valor
+   diferente"; eu levei ao dono como possível engano e era o desenho CERTO. A diferença virou
+   capacidade declarada justamente pra parar de parecer erro. */
+(async () => {
+  const a7 = require('assert');
+  const { criar: criarG } = require('../lib/checkout/descobrir-ids');
+  const bling = async (c) => {
+    if (c === '/depositos') return { status: 200, data: { data: [] } };
+    if (c === '/situacoes/modulos') return { status: 200, data: { data: [{ id: 98310, nome: 'Pedidos de Venda' }] } };
+    if (/situacoes\/modulos\/98310\?pagina=1/.test(c)) return { status: 200, data: { data: [
+      { id: 9, nome: 'Atendido' }, { id: 24, nome: 'Verificado' }, { id: 745123, nome: 'DESPACHADOS' }] } };
+    if (/situacoes\/modulos\/98310\?pagina=/.test(c)) return { status: 200, data: { data: [] } };
+    return { status: 404, data: null };
+  };
+  const NOMES = { atendido: 'X_SIT_ATENDIDO', despachados: 'X_SIT_DESPACHADOS', verificado: 'X_SIT_VERIFICADO' };
+
+  const comExp = await criarG({ rotulo: 'X', blingGet: bling, envNomes: NOMES, temExpedicao: true }).descobrir();
+  a7.strictEqual(comExp.sugestao.colar_no_render.X_SIT_VERIFICADO, '24',
+    'com app de Expedição, o conferido vai pra VERIFICADO — o app move pra DESPACHADOS depois');
+  a7.ok(/TEM app de Expedição/.test(comExp.sugestao.sobre_expedicao), 'e o retorno explica o porquê');
+
+  const semExp = await criarG({ rotulo: 'X', blingGet: bling, envNomes: NOMES, temExpedicao: false }).descobrir();
+  a7.strictEqual(semExp.sugestao.colar_no_render.X_SIT_VERIFICADO, '745123',
+    'sem Expedição, o conferido já vai pra DESPACHADOS — não há etapa depois');
+  a7.ok(/NÃO tem app de Expedição/.test(semExp.sugestao.sobre_expedicao),
+    'o retorno tem que dizer POR QUE o destino não é VERIFICADO, senão parece erro de configuração de novo');
+
+  /* e a capacidade tem que estar declarada no contrato, não adivinhada */
+  const reg = require('../lib/empresas/registro').carregar({ servico: 'mover-pedidos' });
+  a7.strictEqual(reg.temCapacidade('girassol', 'expedicao'), true, 'a Girassol tem Expedição');
+  a7.strictEqual(reg.temCapacidade('amb', 'expedicao'), false, 'a AMB não tem');
+  a7.strictEqual(reg.temCapacidade('good', 'expedicao'), false, 'a GOOD não tem');
+
+  console.log('OK: expedição — o destino do pedido conferido sai da CAPACIDADE declarada, e o retorno explica o porquê');
 })().catch(e => { console.error(e.message); process.exit(1); });
