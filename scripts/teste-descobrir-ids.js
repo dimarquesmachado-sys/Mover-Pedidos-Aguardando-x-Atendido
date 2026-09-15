@@ -491,6 +491,37 @@ const fakeOk = async (c) => {
   console.log('OK: conferência robusta — lista com vírgula, valor em branco, padrão de outro consumidor e palpite');
 })().catch(e => { console.error(e.message); process.exit(1); });
 
+/* ─── 15/09: "não tem pedido" ≠ "não consegui perguntar" ──────────────────────
+   A GOOD voltou "nenhum pedido recente trouxe loja" numa rodada e SEIS canais na anterior.
+   A causa não era ausência de venda — era a chamada falhando (cota do Bling, 429, timeout) e
+   eu engolindo o erro com um break mudo. Dizer "não tem pedido" quando a verdade é "não
+   consegui perguntar" manda o dono investigar o lugar errado, e ele levaria isso pro Bling
+   procurando venda sumida. */
+(async () => {
+  const a5 = require('assert');
+  const { criar: criarE } = require('../lib/checkout/descobrir-ids');
+  const semDeposito = { status: 200, data: { data: [] } };
+
+  /* cota estourada: tem que dizer que FALHOU e mostrar o status */
+  const r429 = await criarE({ rotulo: 'T', blingGet: async (c) => (/pedidos\/vendas\?pagina/.test(c) ? { status: 429, data: null } : (c === '/depositos' ? semDeposito : { status: 404, data: null })) }).descobrir();
+  const c429 = r429.recursos.canais_de_venda;
+  a5.strictEqual(c429.ok, false);
+  a5.ok(/FALHOU/.test(c429.leia), 'chamada com 429 não pode virar "a empresa não tem vendas"');
+  a5.ok(c429.tentei.some(d => d.status === 429), 'o status tem que aparecer pra saber que é cota');
+
+  /* exceção de rede: mesma coisa, com o motivo real */
+  const rErro = await criarE({ rotulo: 'T', blingGet: async (c) => { if (/pedidos\/vendas\?pagina/.test(c)) throw new Error('socket hang up'); return c === '/depositos' ? semDeposito : { status: 404, data: null }; } }).descobrir();
+  a5.ok(/FALHOU/.test(rErro.recursos.canais_de_venda.leia));
+  a5.ok(rErro.recursos.canais_de_venda.tentei.some(d => /socket hang up/.test(d.erro || '')), 'o motivo real tem que ser repassado');
+
+  /* e a empresa que REALMENTE não tem pedido continua com a mensagem dela */
+  const rVazio = await criarE({ rotulo: 'T', blingGet: async (c) => (/pedidos\/vendas\?pagina/.test(c) ? { status: 200, data: { data: [] } } : (c === '/depositos' ? semDeposito : { status: 404, data: null })) }).descobrir();
+  a5.ok(/nenhum pedido recente/.test(rVazio.recursos.canais_de_venda.leia),
+    'página vazia de verdade continua dizendo que não há pedido — as duas causas mandam investigar lugares diferentes');
+
+  console.log('OK: canais — falha de chamada e ausência de pedido têm mensagens DIFERENTES, com o status ou o erro real');
+})().catch(e => { console.error(e.message); process.exit(1); });
+
 /* ─── 15/09: a lista de situações vinha INCOMPLETA ────────────────────────────
    O dono mandou o print do select do Bling da Girassol e faltava uma situação na minha
    lista: "Checkout parcial" (126724). A API devolve paginado e eu lia só a primeira página.
