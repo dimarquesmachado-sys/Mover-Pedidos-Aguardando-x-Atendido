@@ -235,11 +235,30 @@ const server = http.createServer(async (req, res) => {
     const painel = require('./lib/fiscal/painel-embarque').criar({
       base: process.env.HOST_PUBLICO || 'https://mover-pedidos-aguardando-x-atendido.onrender.com',
       html: true,
-      empresas: [
-        { id: 'amb', nome: 'AMBTotal', slug: '/amb', arquivoBling: '/data/ambtotal/bling-tokens.json', arquivoBlingNF: '/data/ambtotal/nf-tokens.json', arquivoML: '/data/ambtotal/ml-tokens.json' },
-        { id: 'good', nome: 'GOOD Import', slug: '/good', arquivoBling: '/data/good/bling-tokens.json', arquivoBlingNF: '/data/good/nf-tokens.json', arquivoML: '/data/good/ml-tokens.json' },
-        { id: 'girassol', nome: 'Magazine Girassol', slug: '', arquivoBling: require('path').join(__dirname, 'girassol', 'data', 'tokens.json'), arquivoBlingNF: require('path').join(__dirname, 'girassol', 'data', 'nf_tokens.json'), arquivoML: '/data/ml_tokens.json' },
-      ],
+      /* 15/09 — a ENV precede o padrão do código, e eu tinha cravado só o padrão: a Girassol
+         apareceu com "2 pendentes" na primeira rodada, sendo que o Bling dela roda todo dia.
+         Ela guarda os tokens onde TOKEN_FILE / NF_TOKEN_FILE mandam (o padrão dela é relativo
+         ao módulo, que no Render é efêmero). Resolver aqui igual ao código é obrigatório:
+         "pendente" falso manda o dono reautorizar uma conta que está funcionando — e a
+         reautorização do Bling invalida o refresh anterior. */
+      empresas: (() => {
+        const p = require('path');
+        const onde = (env, padrao) => (process.env[env] && String(process.env[env]).trim()) || padrao;
+        return [
+          { id: 'amb', nome: 'AMBTotal', slug: '/amb',
+            arquivoBling: onde('AMB_TOKEN_FILE', '/data/ambtotal/bling-tokens.json'),
+            arquivoBlingNF: onde('AMB_NF_TOKEN_FILE', '/data/ambtotal/nf-tokens.json'),
+            arquivoML: onde('AMB_ML_TOKEN_FILE', '/data/ambtotal/ml-tokens.json') },
+          { id: 'good', nome: 'GOOD Import', slug: '/good',
+            arquivoBling: onde('GOOD_TOKEN_FILE', '/data/good/bling-tokens.json'),
+            arquivoBlingNF: onde('GOOD_NF_TOKEN_FILE', '/data/good/nf-tokens.json'),
+            arquivoML: onde('GOOD_ML_TOKEN_FILE', '/data/good/ml-tokens.json') },
+          { id: 'girassol', nome: 'Magazine Girassol', slug: '',
+            arquivoBling: onde('TOKEN_FILE', p.join(__dirname, 'girassol', 'data', 'tokens.json')),
+            arquivoBlingNF: onde('NF_TOKEN_FILE', p.join(__dirname, 'girassol', 'data', 'nf_tokens.json')),
+            arquivoML: onde('ML_TOKEN_FILE', '/data/ml_tokens.json') },
+        ];
+      })(),
     });
     if (urlObj.searchParams && urlObj.searchParams.get('json') === '1') return json(res, 200, { ok: true, empresas: painel.estado() });
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });

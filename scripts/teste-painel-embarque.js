@@ -50,3 +50,41 @@ assert.ok(!/garantirToken|renovarToken|fetch\(/.test(fonte),
   'a tela lê ARQUIVO; usar o token poderia disparar renovação de refresh de uso único só por alguém ter aberto a página');
 
 console.log('OK: página de embarque — token ausente nunca aparece autorizado, nada é renovado ao abrir e nenhum valor vaza');
+
+/* ─── 15/09: a ENV precede o padrão — a página apareceu mentindo ──────────────
+   Na primeira rodada em produção, a Girassol apareceu com "2 pendentes" no Bling, sendo que
+   o Bling dela roda todo dia. Eu tinha cravado o caminho PADRÃO dos arquivos de token e
+   ignorado que a env manda: ela guarda onde TOKEN_FILE / NF_TOKEN_FILE apontam, porque o
+   padrão dela é relativo ao módulo e no Render isso é efêmero.
+   "Pendente" falso é grave nesta tela: manda o dono reautorizar uma conta que está
+   funcionando — e a reautorização do Bling INVALIDA o refresh anterior. A tela criaria o
+   problema que existe pra evitar.
+   Este teste compara os nomes de env usados na página com os que cada gerenciador declara. */
+{
+  const fsE = require('fs');
+  const pathE = require('path');
+  const raiz = pathE.join(__dirname, '..');
+  const idx = fsE.readFileSync(pathE.join(raiz, 'index.js'), 'utf8');
+
+  const PARES = [
+    ['ambtotal/tokenManager.js', 'AMB_TOKEN_FILE'],
+    ['ambtotal/nfTokenManager.js', 'AMB_NF_TOKEN_FILE'],
+    ['ambtotal/mlTokenManager.js', 'AMB_ML_TOKEN_FILE'],
+    ['good/tokenManager.js', 'GOOD_TOKEN_FILE'],
+    ['good/nfTokenManager.js', 'GOOD_NF_TOKEN_FILE'],
+    ['good/mlTokenManager.js', 'GOOD_ML_TOKEN_FILE'],
+    ['girassol/tokenManager.js', 'TOKEN_FILE'],
+    ['girassol/nfTokenManager.js', 'NF_TOKEN_FILE'],
+    ['girassol/mlTokenManager.js', 'ML_TOKEN_FILE'],
+  ];
+  for (const [arq, env] of PARES) {
+    const fonte = fsE.readFileSync(pathE.join(raiz, arq), 'utf8');
+    assert.ok(new RegExp("envTokenFile: '" + env + "'").test(fonte),
+      arq + ' declara outra env de token — a página estaria olhando o arquivo errado');
+    assert.ok(idx.includes("'" + env + "'"),
+      'a página de embarque não consulta ' + env + ' — ela leria o caminho PADRÃO e diria "pendente" pra uma conta autorizada');
+  }
+  assert.ok(/const onde = \(env, padrao\)/.test(idx), 'a resolução tem que ser env primeiro, padrão depois');
+}
+
+console.log('OK: caminho do token — a página resolve com a env primeiro, igual ao código, e os nomes conferem com cada gerenciador');
