@@ -132,7 +132,23 @@ vale a mesma regra do 2.9: medir e classificar antes de fundir.
    divergente do repo (AMB 1.227, GOOD 1.112, Girassol 747 linhas). Três diferenças, e só uma
    é pergunta aberta — a alavanca `ESPERA_FULL_MS`, que a Girassol não tem. **Não extrair
    antes de decidir isso.**
-3. extrair histórico/backfill/vendas-sync sobre um contexto de checkout explícito
+3. extrair histórico/backfill/vendas-sync sobre um contexto de checkout explícito — histórico
+   ✅ (#437, #438). **Medido em 15/09**, o que resta no entrypoint (8.391 linhas na AMB):
+
+   | função | linhas | diferença AMB×Girassol |
+   |---|---:|---:|
+   | `routes` | 4.111 | 1.733 |
+   | `backfillVendas` | 471 | 187 |
+   | `vendasSync` | 425 | 112 |
+   | `custoSync` | 185 | **0** |
+   | `_tokenMLCanario` | 172 | 2 |
+   | `mlBillingSync` | 132 | 3 |
+   | `_mlbCategoria` | 40 | **0** → ✅ extraída (#443) |
+
+   ⚠️ `custoSync` é idêntica mas tem ~15 dependências no entrypoint — é GRUPO, não função.
+   Extrair só ela repetiria o erro dos caches do `base` (levar a função e deixar o estado).
+   E é a rotina do custo diário, que mexe com dinheiro: precisa do contexto de checkout
+   primeiro, que é o bloqueador nº 2 da auditoria de prontidão.
 4. consolidar rotas em registradores por capacidade
 5. deixar os entrypoints apenas compondo contexto e capacidades
 
