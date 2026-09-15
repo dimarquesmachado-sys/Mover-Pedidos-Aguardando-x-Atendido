@@ -492,7 +492,9 @@ function routes(readBody) {
       const _k = lerChaveAdmin(req, urlObj);
       if (_k !== process.env.ADMIN_KEY) { json(res, 403, { ok: false, erro: 'chave inválida' }); return true; }
       try {
-        const d = require('../lib/checkout/descobrir-ids').criar({ rotulo: 'GOOD', blingGet , prefixoEnv: 'GOODBKP_' });
+        const d = require('../lib/checkout/descobrir-ids').criar({ rotulo: 'GOOD', blingGet , /* o token do ML vem do gerenciador fiscal DESTA empresa — o lint pegou que eu
+       supus uma variável `garantirTokenML` solta que não existe aqui. */
+      garantirTokenML: () => require('../good/mlTokenManager').garantirTokenML(), prefixoEnv: 'GOODBKP_' });
         json(res, 200, await d.descobrir());
       } catch (e) { json(res, 500, { ok: false, erro: String(e.message || e) }); }
       return true;
