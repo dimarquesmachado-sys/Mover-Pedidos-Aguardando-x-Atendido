@@ -323,3 +323,38 @@ const fakeOk = async (c) => {
 
   console.log('OK: descoberta de ids — resume o que achou, lista o que TENTOU quando não achou, e falha de um recurso não derruba os outros');
 })().catch(e => { console.error(e.message); process.exit(1); });
+
+/* ─── 15/09: O PACOTE NÃO TEM VENDEDOR, O PEDIDO TEM ──────────────────────────
+   Na GOOD a prova falhou assim: /orders deu 404 e /packs respondeu 200 "sem campo de
+   vendedor". Quem mostrou isso foi o diagnóstico criado no commit anterior — é o retorno
+   dele que apontou a causa, e não um palpite meu. O numeroPedidoLoja dela é um PACK, e o
+   pacote traz só a lista de pedidos; o vendedor vive no PEDIDO. Um salto a mais resolve. */
+(async () => {
+  const assert2 = require('assert');
+  const { criar: criarP } = require('../lib/checkout/descobrir-ids');
+  const NOMES = { atendido: 'X_SIT_ATENDIDO', aguardando: 'X_SITUACAO_AGUARDANDO',
+                  despachados: 'X_SIT_DESPACHADOS', verificado: 'X_SIT_VERIFICADO', meLojaIds: 'X_ME_LOJA_IDS' };
+  const guardado = global.fetch;
+  global.fetch = async (url) => {
+    if (/users\/me/.test(url)) return { ok: true, json: async () => ({ id: 397644542 }) };
+    if (/\/orders\/2000015043150893$/.test(url)) return { ok: false, status: 404 };      // como na GOOD
+    if (/\/packs\/2000015043150893$/.test(url)) return { ok: true, json: async () => ({ orders: [{ id: 5551234 }] }) };
+    if (/\/orders\/5551234$/.test(url)) return { ok: true, json: async () => ({ seller: { id: 397644542 } }) };
+    return { ok: false, status: 404 };
+  };
+  const bling = async (c) => {
+    if (c === '/depositos') return { status: 200, data: { data: [] } };
+    if (c === '/situacoes/modulos') return { status: 404, data: null };
+    if (/\/pedidos\/vendas\/\d+$/.test(c)) return { status: 200, data: { data: { numeroPedidoLoja: '2000015043150893' } } };
+    const mp = /pagina=(\d+)/.exec(c);
+    if (mp) return mp[1] === '1' ? { status: 200, data: { data: [{ id: 1, loja: { id: 203296034 } }] } } : { status: 200, data: { data: [] } };
+    return { status: 404, data: null };
+  };
+  const r = await criarP({ rotulo: 'GOOD', blingGet: bling, envNomes: NOMES, garantirTokenML: async () => 'tok' }).descobrir();
+  const canal = r.recursos.canais_de_venda.itens.find(c => c.id === 203296034);
+  assert2.strictEqual(canal.nome, 'Mercado Livre', 'o vendedor tem que ser achado no pedido DENTRO do pacote');
+  assert2.ok(/PROVADO/.test(canal.obs || ''), 'isso conta como PROVA, não como dedução por formato');
+  assert2.ok(/PROVADO/.test(r.sugestao.confira), 'e a sugestão deixa de ser palpite');
+  global.fetch = guardado;
+  console.log('OK: prova pelo pacote — quando /orders dá 404 e o pacote não traz vendedor, segue pro pedido de dentro');
+})().catch(e => { console.error(e.message); process.exit(1); });
