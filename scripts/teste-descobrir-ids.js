@@ -26,20 +26,65 @@ const fakeOk = async (c) => {
   assert.strictEqual(r1.recursos.depositos.itens[0].nome, 'Geral', 'o nome do depósito é o que o dono reconhece');
   assert.ok(r1.recursos.depositos.itens[0].id, 'sem id não serve pra nada');
 
-  /* 2. caminho que NÃO responde: tem que dizer o que tentou, não fingir vazio */
-  assert.strictEqual(r1.recursos.canais_de_venda.ok, false);
-  assert.ok(Array.isArray(r1.recursos.canais_de_venda.tentei) && r1.recursos.canais_de_venda.tentei.length >= 1,
+  /* 2. recurso que não achou nada tem que EXPLICAR, não fingir vazio. Os canais mudaram de
+     estratégia (agora vêm dos pedidos), então quem guarda o "diga o que tentou" aqui são as
+     situações, que ainda usam caminhos candidatos. */
+  assert.strictEqual(r1.recursos.situacoes.ok, false);
+  assert.ok(Array.isArray(r1.recursos.situacoes.tentei) && r1.recursos.situacoes.tentei.length >= 1,
     'tem que LISTAR os caminhos tentados — senão o próximo a mexer repete o mesmo chute');
-  assert.ok(/permissão/.test(r1.recursos.canais_de_venda.leia || ''),
+  assert.ok(/permissão/.test(r1.recursos.situacoes.leia || ''),
     'tem que sugerir a causa mais provável (permissão do app), não deixar o dono no escuro');
+  assert.strictEqual(r1.recursos.canais_de_venda.ok, false, 'sem pedidos, não há canal a descobrir');
+  assert.ok(/pedido/.test(r1.recursos.canais_de_venda.leia || ''),
+    'tem que dizer que depende de pedidos recentes — o dono precisa saber POR QUE veio vazio');
 
-  /* 3. cada recurso declara PARA QUE serve: lista de id sem propósito não ajuda ninguém */
+  /* 3. AJUSTES COM DADO REAL (15/09, retorno da AMB):
+     · /situacoes/modulos devolve os MÓDULOS, não as situações — precisa do 2º passo pelo id
+       do módulo de Pedidos de Venda;
+     · /canais-de-venda e /lojas deram 404 nos dois, então os canais são derivados dos
+       PEDIDOS, que trazem `loja: {id, nome}` num endpoint que sabemos que funciona. */
+  const fakeCompleto = async (c) => {
+    if (c === '/situacoes/modulos') return { status: 200, data: { data: [{ id: 98310, nome: 'Pedidos de Venda' }, { id: 849, nome: 'Ordens de Produção' }] } };
+    if (c === '/situacoes/modulos/98310') return { status: 200, data: { data: [{ id: 9, nome: 'Atendido' }, { id: 6, nome: 'Em aberto' }] } };
+    /* o falso precisa PAGINAR como o Bling real: devolver a mesma página sempre fazia a
+       contagem triplicar, e eu quase "consertei" o código por causa do meu próprio falso. */
+    const mp = /^\/pedidos\/vendas\?pagina=(\d+)/.exec(c);
+    if (mp) {
+      if (mp[1] !== '1') return { status: 200, data: { data: [] } };
+      return { status: 200, data: { data: [
+        { id: 1, loja: { id: 206017293, nome: 'Mercado Livre' } },
+        { id: 2, loja: { id: 206017368, nome: 'Shopee' } },
+        { id: 3, loja: { id: 206017293, nome: 'Mercado Livre' } },
+      ] } };
+    }
+    return { status: 404, data: null };
+  };
+  const r3 = await criar({ rotulo: 'T', blingGet: fakeCompleto }).descobrir();
+
+  assert.strictEqual(r3.recursos.situacoes.ok, true, 'as situações têm que vir do 2º passo');
+  assert.strictEqual(r3.recursos.situacoes.modulo.id, 98310, 'tem que seguir o módulo de Pedidos de Venda');
+  assert.ok(r3.recursos.situacoes.itens.some(i => /atendido/i.test(i.nome || '')), 'faltou a situação Atendido');
+
+  assert.strictEqual(r3.recursos.canais_de_venda.ok, true, 'os canais têm que sair dos pedidos');
+  const ml = r3.recursos.canais_de_venda.itens[0];
+  assert.strictEqual(ml.id, 206017293, 'o canal mais frequente vem primeiro — é o que o dono procura');
+  assert.strictEqual(ml.pedidos, 2, 'tem que contar quantos pedidos vieram de cada canal');
+  assert.ok(/Mercado Livre/.test(ml.nome), 'sem o NOME o dono não sabe qual id é o do ML');
+
+  /* módulo ausente não pode virar "sem situações" em silêncio */
+  const semModulo = async (c) => (c === '/situacoes/modulos' ? { status: 200, data: { data: [{ id: 1, nome: 'Outra coisa' }] } } : { status: 404, data: null });
+  const r4 = await criar({ rotulo: 'T', blingGet: semModulo }).descobrir();
+  assert.strictEqual(r4.recursos.situacoes.ok, false);
+  assert.ok(/não achei o módulo/.test(r4.recursos.situacoes.erro), 'tem que dizer que não achou o módulo, e listar os que achou');
+
+  /* 4. cada recurso declara PARA QUE serve: lista de id sem propósito não ajuda ninguém */
   for (const [nome, spec] of Object.entries(RECURSOS)) {
     assert.ok(spec.para && spec.para.length > 10, nome + ': falta dizer pra que serve');
-    assert.ok(Array.isArray(spec.caminhos) && spec.caminhos.length, nome + ': falta candidato de caminho');
+    assert.ok(Array.isArray(spec.caminhos), nome + ': caminhos tem que ser lista (vazia quando o recurso é derivado)');
+    assert.ok(spec.caminhos.length || spec.derivar, nome + ': sem caminho e sem forma de derivar, o recurso não descobre nada');
   }
 
-  /* 4. erro de rede num candidato não pode derrubar a descoberta inteira */
+  /* 5. erro de rede num candidato não pode derrubar a descoberta inteira */
   const fakeExplode = async (c) => { if (c === '/depositos') throw new Error('timeout'); return { status: 200, data: { data: [] } }; };
   const r2 = await criar({ rotulo: 'T', blingGet: fakeExplode }).descobrir();
   assert.ok(r2.recursos.depositos, 'o recurso que falhou tem que aparecer no resultado');
