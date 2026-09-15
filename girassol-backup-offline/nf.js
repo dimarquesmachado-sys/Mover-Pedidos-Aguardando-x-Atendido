@@ -18,9 +18,11 @@ const EMITENTE_FALLBACK = require('./emitente-fallback');
 const _emitAuto = require('../lib/checkout/emitente-descobrir').criar({
   rotulo: 'GIRABKP',
   /* o `base` aqui é desestruturado, não existe como objeto — o lint pegou a suposição.
-     CACHE_DIR já vem da desestruturação acima, e é por EMPRESA: arquivo compartilhado foi
-     como a AMB e a GOOD acabaram imprimindo o CNPJ da Girassol. */
-  arquivo: require('path').join(CACHE_DIR, '..', 'emitente-descoberto.json'),
+     CACHE_DIR já vem da desestruturação acima, e é por EMPRESA: o '..' que existiu aqui
+     subia pra FORA do diretório da empresa (/data/cache-offline/emitente-descoberto.json,
+     compartilhado pelas três) — Codex #445 pegou, era o mesmo erro do CNPJ da Girassol
+     de novo, só que num arquivo diferente. */
+  arquivo: require('path').join(CACHE_DIR, 'emitente-descoberto.json'),
 });
 
 function parseNF(nf) {
@@ -309,8 +311,11 @@ async function dadosNFSimp(nfId, numeroPedido) {
        três de propósito — o nf.js é espelhado, e regra que vale só numa empresa é a porta
        por onde a divergência volta. */
     /* toda NF que passa por aqui ensina: se o emitente veio no XML, ele é gravado e passa a
-       servir de rede pra quando NÃO vier. */
-    emitente: (x.emit && x.emit.razao) ? (_emitAuto.aprender(x.emit) || x.emit) : (_emitAuto.vigente(EMITENTE_FALLBACK) || (() => {
+       servir de rede pra quando NÃO vier. Mas quem imprime é sempre o XML desta nota — depois
+       da 1ª aprendizagem, aprender() devolve o que já estava gravado (pra não regravar à toa,
+       ver emitente-descobrir.js), e usar esse retorno aqui prendia a DANFE nos dados antigos
+       pra sempre, mesmo com um emitente atual e válido na mão (Codex #445). */
+    emitente: (x.emit && x.emit.razao) ? (_emitAuto.aprender(x.emit), x.emit) : (_emitAuto.vigente(EMITENTE_FALLBACK) || (() => {
       console.warn('[nf] XML sem emitente, sem fallback declarado e nada aprendido ainda — a DANFE sai sem o bloco. Assim que UMA nota autorizada passar por aqui, o emitente é aprendido sozinho.');
       return { razao: '', cnpj: '', ie: '', endereco: '' };
     })()),
