@@ -482,6 +482,21 @@ function routes(readBody) {
   });
   return async function handle(req, res, urlObj) {
     if (await _ctxApi(req, res, urlObj)) return true;
+
+    /* 15/09 — descoberta dos ids desta empresa NO BLING (canais de venda, depósitos e
+       situações). Pedido do dono em 26/08: hoje esses ids são mapeados no DevTools, tela por
+       tela, e é a maior fonte de digitação no embarque — e a que mais erra, porque id de
+       FILIAL e id de UNIDADE DE NEGÓCIO são espaços diferentes. Com o token que a empresa já
+       tem depois do OAuth, dá pra simplesmente perguntar. */
+    if (urlObj.pathname === '/good-checkout-offline/descobrir-ids') {
+      const _k = lerChaveAdmin(req, urlObj);
+      if (_k !== process.env.ADMIN_KEY) { json(res, 403, { ok: false, erro: 'chave inválida' }); return true; }
+      try {
+        const d = require('../lib/checkout/descobrir-ids').criar({ rotulo: 'GOOD', blingGet });
+        json(res, 200, await d.descobrir());
+      } catch (e) { json(res, 500, { ok: false, erro: String(e.message || e) }); }
+      return true;
+    }
     const { method } = req;
     const p = urlObj.pathname;
 
