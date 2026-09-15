@@ -55,4 +55,21 @@ for (const arq of ['amb-checkout-offline/index.js', 'girassol-backup-offline/gbo
     arq + ': _rotasCatalogo tem que ser chamado DEPOIS da guarda de sessão, senão buscar-produto e indexar-status ficam sem sessão');
 }
 
+/* Codex #480 (P1) — A POSIÇÃO DA DELEGAÇÃO É PARTE DA SEGURANÇA.
+   A delegação foi parar no TOPO do handle e, com isso, /buscar-produto e /indexar-status
+   passaram a responder SEM autenticação: antes da extração esses corpos ficavam ABAIXO do
+   portão de sessão do módulo. Corpo idêntico não garante contexto idêntico — conferi que as
+   três rotas eram iguais entre as empresas e não conferi o que vinha ANTES delas.
+   Este teste trava a posição nos três arquivos. Sem ele, o conserto depende de alguém
+   lembrar da regra na próxima extração — e é justamente o que não acontece. */
+for (const arq of ['amb-checkout-offline/index.js', 'girassol-backup-offline/gbo-app.js', 'good-checkout-offline/index.js']) {
+  const s = fs.readFileSync(path.join(__dirname, '..', arq), 'utf8');
+  const portao = s.indexOf("erro: 'Sessão necessária. Faça login.'");
+  const delega = s.indexOf('_rotasCatalogo(req, res, urlObj');
+  assert.ok(portao > 0, arq + ': não achei o portão de sessão');
+  assert.ok(delega > 0, arq + ': não achei a delegação');
+  assert.ok(delega > portao,
+    arq + ': a delegação está ANTES do portão — as rotas de catálogo responderiam sem autenticação');
+}
+
 console.log('OK: rotas de catálogo — uma lib para as três, dependência ausente derruba na criação e o prefixo isola cada empresa');
