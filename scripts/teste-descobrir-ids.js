@@ -393,3 +393,48 @@ const fakeOk = async (c) => {
   global.fetch = guardado;
   console.log('OK: prova pelo pacote — percorre todos os pedidos do pacote antes de desistir');
 })().catch(e => { console.error(e.message); process.exit(1); });
+
+/* ─── 15/09: A ROTA CONFERE, EM VEZ DE O DONO CONFERIR ────────────────────────
+   Até agora a rota sugeria as envs e o dono comparava com o Render uma a uma. Ela já tem as
+   duas pontas — o valor descoberto e o nome da env —, então comparar é trabalho dela.
+   O teste guarda os quatro desfechos, e o que importa é o terceiro: env ausente cujo PADRÃO
+   do código já é o valor certo não precisa ser criada, e dizer isso evita trabalho inútil;
+   env ausente cujo padrão é OUTRO valor é obrigatória, e confundir as duas faria o dono ou
+   perder tempo à toa ou deixar a empresa com o valor de outra. */
+(async () => {
+  const a3 = require('assert');
+  const { criar: criarC } = require('../lib/checkout/descobrir-ids');
+  const antes = { A: process.env.C_SIT_ATENDIDO, M: process.env.C_ME_LOJA_IDS };
+  process.env.C_SIT_ATENDIDO = '9';       // igual ao descoberto
+  process.env.C_ME_LOJA_IDS = '999';      // DIFERENTE — o caso perigoso
+  delete process.env.C_SIT_VERIFICADO;    // ausente, padrão do código bate
+  delete process.env.C_SIT_DESPACHADOS;   // ausente, padrão do código NÃO bate
+
+  const bling = async (c) => {
+    if (c === '/depositos') return { status: 200, data: { data: [] } };
+    if (c === '/situacoes/modulos') return { status: 200, data: { data: [{ id: 98310, nome: 'Pedidos de Venda' }] } };
+    if (c === '/situacoes/modulos/98310') return { status: 200, data: { data: [
+      { id: 9, nome: 'Atendido' }, { id: 24, nome: 'Verificado' }, { id: 749990, nome: 'DESPACHADOS' }] } };
+    const mp = /pagina=(\d+)/.exec(c);
+    if (mp) return mp[1] === '1' ? { status: 200, data: { data: [{ id: 1, loja: { id: 203146903 }, numeroLoja: '2000012345678901' }] } } : { status: 200, data: { data: [] } };
+    return { status: 404, data: null };
+  };
+  const r = await criarC({
+    rotulo: 'C', blingGet: bling,
+    envNomes: { atendido: 'C_SIT_ATENDIDO', verificado: 'C_SIT_VERIFICADO', despachados: 'C_SIT_DESPACHADOS', meLojaIds: 'C_ME_LOJA_IDS' },
+    padroesEnv: { C_SIT_VERIFICADO: '24', C_SIT_DESPACHADOS: '0' },
+  }).descobrir();
+  const c = r.sugestao.conferencia;
+
+  a3.ok(c.ok.some(x => x.env === 'C_SIT_ATENDIDO'), 'o que bate tem que sair como bate — não dá trabalho a ninguém');
+  a3.ok(c.diferente.some(x => x.env === 'C_ME_LOJA_IDS' && x.no_render === '999'),
+    'valor DIFERENTE é o caso perigoso: alguém configurou errado e ninguém vê');
+  a3.ok(c.ausente_mas_padrao_ok.some(x => x.env === 'C_SIT_VERIFICADO'),
+    'ausente com padrão igual: criar não muda nada, e dizer isso evita trabalho inútil');
+  a3.ok(c.ausente_precisa_criar.some(x => x.env === 'C_SIT_DESPACHADOS' && x.padrao_do_codigo === '0'),
+    'ausente com padrão DIFERENTE é obrigatória — e mostrar o padrão explica por quê');
+
+  if (antes.A === undefined) delete process.env.C_SIT_ATENDIDO; else process.env.C_SIT_ATENDIDO = antes.A;
+  if (antes.M === undefined) delete process.env.C_ME_LOJA_IDS; else process.env.C_ME_LOJA_IDS = antes.M;
+  console.log('OK: conferência — separa o que bate, o que está DIFERENTE, o que não precisa criar e o que precisa');
+})().catch(e => { console.error(e.message); process.exit(1); });
