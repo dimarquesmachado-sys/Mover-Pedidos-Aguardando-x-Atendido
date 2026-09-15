@@ -1,0 +1,50 @@
+'use strict';
+/* 14/09 — Fase 5 da auditoria: o onboarding vira comando. Antes, saber se uma empresa estava
+   pronta significava abrir o Render, conferir env por env e descobrir o resto no primeiro
+   erro de produção — de madrugada, porque é quando os crons rodam.
+   O teste guarda três coisas:
+     • o validar FALHA (código 1) quando falta env obrigatória — ele é portão, não relatório;
+     • NENHUM valor de segredo é impresso, só o nome da env. O dono já teve a ADMIN_KEY
+       exposta num link; ferramenta de diagnóstico que vaza chave é pior que não ter;
+     • o plano mostra os callbacks com URL COMPLETA e o sufixo certo de cada empresa. */
+const assert = require('assert');
+const { execFileSync } = require('child_process');
+const path = require('path');
+
+const CLI = path.join(__dirname, 'empresa.js');
+function roda(args, env) {
+  try { return { saida: execFileSync('node', [CLI].concat(args), { encoding: 'utf8', env: Object.assign({}, process.env, env || {}) }), code: 0 }; }
+  catch (e) { return { saida: (e.stdout || '') + (e.stderr || ''), code: e.status }; }
+}
+
+/* portão: sem envs, falha */
+const semEnv = {};
+for (const n of ['GOOD_BLING_CLIENT_ID', 'GOOD_ML_CLIENT_ID', 'GOOD_ADMIN']) semEnv[n] = '';
+const r1 = roda(['validar', 'good'], semEnv);
+assert.strictEqual(r1.code, 1, 'validar tem que SAIR COM ERRO quando falta env — é portão de deploy, não relatório');
+assert.ok(/falta GOOD_BLING_CLIENT_ID/.test(r1.saida), 'tem que dizer QUAL env falta, pelo nome exato do Render');
+
+/* com tudo presente, passa */
+const comEnv = {};
+for (const n of ['BLING_CLIENT_ID', 'BLING_CLIENT_SECRET', 'BLING_REDIRECT_URI', 'NF_BLING_CLIENT_ID',
+                 'NF_BLING_CLIENT_SECRET', 'NF_BLING_REDIRECT_URI', 'ML_CLIENT_ID', 'ML_CLIENT_SECRET',
+                 'ML_REDIRECT_URI', 'OPERADORES', 'ADMIN']) comEnv['GOOD_' + n] = 'valor-secreto-do-teste';
+const r2 = roda(['validar', 'good'], comEnv);
+assert.strictEqual(r2.code, 0, 'com as envs no lugar, tem que passar: ' + r2.saida.slice(-200));
+
+/* NUNCA imprimir segredo */
+assert.ok(!/valor-secreto-do-teste/.test(r2.saida), 'o CLI IMPRIMIU o valor de uma env — isso não pode acontecer nunca');
+const r3 = roda(['plano', 'good'], comEnv);
+assert.ok(!/valor-secreto-do-teste/.test(r3.saida), 'o plano imprimiu valor de env');
+
+/* plano: URL completa e o slug da empresa certa */
+assert.ok(/https:\/\/[^\s]+\/good\/callback\b/.test(r3.saida), 'o plano tem que trazer a URL COMPLETA do callback');
+assert.ok(/empresa=eq\.good/.test(r3.saida), 'tem que dizer a fatia do Supabase da empresa');
+assert.ok(/escalonad/i.test(r3.saida), 'tem que avisar do minuto escalonado do F3 — empresas no mesmo minuto brigam por cota');
+
+/* empresa fora do contrato não inventa nada */
+const r4 = roda(['plano', 'nao-existe'], comEnv);
+assert.notStrictEqual(r4.code, 0, 'empresa fora do contrato tem que falhar');
+assert.ok(/não está no contrato/.test(r4.saida));
+
+console.log('OK: CLI de empresa — validar é portão, plano traz URL completa e fatia certa, e nenhum valor de segredo é impresso');
