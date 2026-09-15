@@ -76,7 +76,10 @@ ${exemplo}
 Quanto antes responder, mais rápido postaremos!`;
     }
 
-    let graosArr = r.graos.map(g => g.grao);
+    // So graos COM estoque: listar grao zerado convida o cliente a escolher algo que o
+    // Bling vai recusar depois (code 67), e a conversa volta pra pedir troca.
+    let graosArr = r.graos.filter(g => Number(g.estoque_lixas) > 0).map(g => g.grao);
+    if (graosArr.length === 0) graosArr = r.graos.map(g => g.grao);   // estoque nao veio: cai no antigo
     let msg = montar(graosArr);
 
     // Safety: se ultrapassar 350, vai removendo graos do fim (mais grossos)
