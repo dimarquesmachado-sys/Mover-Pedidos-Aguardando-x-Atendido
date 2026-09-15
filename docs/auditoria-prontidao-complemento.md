@@ -20,16 +20,24 @@ se dividem em duas naturezas muito diferentes, e só uma delas bloqueia:
 | natureza | quantas | exemplo | bloqueia uma empresa nova? |
 |---|---:|---|---|
 | diagnóstico / manual (aberta por URL quando algo dá errado) | **23** | `/debug-custo`, `/sonda-ml-claims`, `/magalu-debug`, `/sku-orfaos`, `/shopee-semear` | **não** — são ferramentas de investigação, criadas conforme cada empresa teve cada problema |
-| usada pelo painel (operação depende) | **1** | `/canario-estado` (Girassol) | sim, se a empresa nova precisar do canário |
+| usada pelo dashboard (operação depende) | **2** | `/canario-estado` (Girassol), `/produto-fotos` (AMB) | sim, se a empresa nova precisar dela |
 
-Conferido lendo o `painel.html` de cada empresa: das 25 rotas exclusivas, **uma** aparece no
-painel. As outras 24 ninguém chama no dia a dia — existem porque alguém investigou um
-problema naquela empresa e deixou a ferramenta pronta.
+Conferido lendo o `painel.html`/`dashboard.html` de cada empresa: das 25 rotas exclusivas,
+**duas** aparecem em chamadas automáticas do front — `/canario-estado`, que o painel da
+Girassol consulta, e `/produto-fotos`, que o dashboard da AMB busca sozinho sempre que um SKU
+visível na tela ainda não tem foto em cache (`amb-dashboard.html:2569`). As outras 23 ninguém
+chama no dia a dia — existem porque alguém investigou um problema naquela empresa e deixou a
+ferramenta pronta.
 
-**O que isso muda:** a assimetria de rotas é sintoma de história, não de funcionalidade
-faltando. Ela não deve entrar na conta de "o que falta pra ligar a quarta empresa" — e, pela
-regra do dono ("uma tem, agora ambas têm"), o caminho natural é portar as ferramentas de
-diagnóstico quando alguém precisar delas, não antes.
+**O que isso muda:** a maior parte da assimetria de rotas (23 das 25) é sintoma de história,
+não de funcionalidade faltando, e não deve entrar na conta de "o que falta pra ligar a quarta
+empresa". As duas exceções — `/canario-estado` e `/produto-fotos` — são dependência real do
+dashboard de quem já as tem; se a peça de dashboard for reaproveitada tal como está para uma
+empresa nova, ela herda a chamada e precisa da rota correspondente (ou de uma tela sem essa
+chamada). Pela regra do dono ("uma tem, agora ambas têm"), o caminho natural pras 23
+ferramentas de diagnóstico é portar quando alguém precisar delas, não antes; as duas rotas
+operacionais não podem esperar por essa regra porque já são chamadas a cada carregamento da
+tela, não sob demanda.
 
 **O que NÃO muda:** os bloqueadores reais da auditoria seguem de pé, e são outros — checkout
 declarativo, painel por capacidades, dono único do token, paridade de números e preflight
