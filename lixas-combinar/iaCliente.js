@@ -298,12 +298,26 @@ ${_blocoTotal(lixasPorKit, qtdKits, totalLixas)}
 - Graos disponiveis no Bling AGORA (com o estoque de cada um): ${graosDisponiveis.join(', ')}
 - A soma das quantidades deve dar EXATAMENTE ${totalLixas} lixas
 
-ESTOQUE E LIMITE, NAO SUGESTAO:
-Cada grao vem com quantas lixas ha em estoque. A quantidade que voce colocar num grao
-NAO pode passar desse numero. Se a ordem do vendedor pede mais do que ha (ex.: 50 do
-240 e so ha 20), NAO monte assim: classifique "ambiguo" e diga ao vendedor exatamente
-quanto ha de cada grao envolvido, pra ele redistribuir. Ao aplicar "o mais proximo",
-so considere graos com estoque suficiente pra quantidade pedida.
+ESTOQUE E LIMITE — E VOCE RESOLVE, O VENDEDOR NAO VE O ESTOQUE:
+Cada grao vem com quantas lixas ha em estoque. A quantidade num grao NUNCA pode passar
+desse numero. Quando a ordem pede mais do que ha, o que fazer depende de o vendedor ter
+dado ou nao uma regra de substituicao ("se nao tiver, manda o mais proximo", "completa
+com o que tiver", "o mais perto disponivel"):
+  COM regra de substituicao -> RESOLVA SOZINHO e classifique "claro":
+    a) coloque no grao pedido TUDO o que ha em estoque dele;
+    b) o que sobrar vai pro grao DISPONIVEL de valor mais proximo que tenha saldo pra
+       receber a sobra (se o mais proximo ja esta no pedido ou nao tem saldo suficiente,
+       o proximo mais proximo; empate -> o de cima);
+    c) se ainda sobrar, continue pelo proximo mais proximo ate fechar ${totalLixas};
+    d) declare cada realocacao na "interpretacao" e na msg_pra_cliente.
+    Exemplo: "50 do 80 e 50 do 240, se nao tiver manda o mais proximo", estoque
+    80 (20 lixas), 240 (2060), 320 (7060): o g80 recebe 20 (tudo que ha); os 30 que
+    sobraram vao pro g240 (o mais proximo com saldo) -> 20 do 80 + 80 do 240 = 100,
+    "claro", interpretacao "g80 so tinha 20: os 30 restantes foram pro g240".
+  SEM regra de substituicao -> classifique "ambiguo" e diga ao vendedor quanto ha de
+    cada grao envolvido, pra ele decidir.
+O vendedor nao enxerga o estoque e nao quer enxergar — quando ele deu a regra, a
+decisao e SUA, e voltar com pergunta e errado.
 
 REGRA PRINCIPAL — A PALAVRA DO VENDEDOR E FINAL:
 A instrucao do vendedor E o pedido a montar. Monte EXATAMENTE o que ele mandou.
@@ -337,7 +351,8 @@ SUBSTITUICAO EXPLICITA — QUANDO O VENDEDOR JA DECIDIU, NAO PERGUNTE:
 Se a instrucao contem uma regra de substituicao ("se nao tiver, manda o mais proximo",
 "substitui pelo mais perto", "troca pelo que tiver", "o mais proximo disponivel") e um
 grao pedido NAO esta na lista, APLIQUE a regra e classifique como "claro":
-  a) escolha, entre os graos DISPONIVEIS, o de valor numerico mais proximo do pedido;
+  a) escolha, entre os graos DISPONIVEIS COM SALDO pra quantidade, o de valor numerico
+     mais proximo do pedido;
   b) se houver empate, ou se o mais proximo JA estiver no pedido (juntar dois itens num
      so nao e o que o vendedor quer), escolha o proximo DISPONIVEL ACIMA;
   c) mantenha a quantidade original do item substituido;
