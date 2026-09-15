@@ -18,9 +18,12 @@ const lib = require('../lib/checkout/historico');
 assert.throws(() => lib.rotasHistorico({ empresa: 'x' }), /falta /,
   'contexto incompleto tem que derrubar no boot, não virar herança silenciosa de outra empresa');
 
+/* 14/09 — a GOOD entrou: ela nunca teve histórico (por isso não tinha dashboard), e o painel
+   dela já CHAMAVA /good-checkout-offline/historico, batendo numa rota inexistente. */
 const FACHADAS = [
   ['amb-checkout-offline', 'amb-historico', 'amb'],
   ['girassol-backup-offline', 'historico', 'girassol'],
+  ['good-checkout-offline', 'historico-good', 'good'],
 ];
 
 for (const [pasta, arq, empresa] of FACHADAS) {
@@ -46,4 +49,19 @@ const empresas = FACHADAS.map(([pasta, arq]) => {
 });
 assert.strictEqual(new Set(empresas).size, empresas.length, 'duas empresas lendo a mesma fatia: ' + empresas.join(', '));
 
-console.log('OK: histórico único — a lib exige contexto completo, e cada empresa lê a própria fatia, o próprio cache e o próprio admin');
+/* a alíquota do Simples é tabela MENSAL e por empresa (AMB 4%→8,82%, Girassol 11,4%→15%).
+   A da GOOD ainda não foi informada, e o teste guarda a honestidade disso: tabela VAZIA cai
+   no padrão do cálculo, e ninguém deve preenchê-la com chute — imposto inventado vira número
+   errado no lugar de número ausente. */
+{
+  const idx = fs.readFileSync(path.join(__dirname, '..', 'good-checkout-offline', 'index.js'), 'utf8');
+  const m = /const DEFAULT_ALIQ_BK_GOOD = (\{[^}]*\});/.exec(idx);
+  assert.ok(m, 'a GOOD precisa declarar a tabela de alíquotas, nem que vazia');
+  const tabela = JSON.parse(m[1].replace(/'/g, '"').replace(/(\d{4}-\d{2}):/g, '"$1":'));
+  const valores = Object.values(tabela);
+  if (valores.length) {
+    for (const v of valores) assert.ok(Number(v) > 0, 'alíquota da GOOD com valor inválido: ' + v);
+  }
+}
+
+console.log('OK: histórico único nas TRÊS — a lib exige contexto completo, e cada empresa lê a própria fatia, o próprio cache e o próprio admin');

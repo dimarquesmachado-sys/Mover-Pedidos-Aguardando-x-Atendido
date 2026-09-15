@@ -36,8 +36,19 @@ passaram a fachadas que declaram o contexto delas. A lib **não tem fallback** �
 incompleto derruba no boot, em vez de a empresa herdar em silêncio o cache, o admin ou o
 cliente Bling da outra (o bug do Codex #197).
 
-Falta o passo 3 (**conferir os números da AMB contra a foto de referência**) e o 4 (**ligar a
-GOOD** — aí ela ganha o dashboard).
+**Passo 4 feito (PR #438): a GOOD tem histórico.** A rota
+`/good-checkout-offline/historico` existe e responde — tudo o que faltava já estava lá: o
+`base` com as dependências, o backfill gravando no Supabase com `empresa='good'` e o painel
+**já chamando a rota**, que até então não existia.
+
+Fica pendente, e depende do dono:
+
+1. **as alíquotas mensais do Simples da GOOD** — cada empresa tem a sua (AMB 4%→8,82% em 2026;
+   Girassol 11,4%→15%). A da GOOD está **vazia de propósito**: o cálculo cai no padrão de 15%
+   e o imposto sai aproximado até ela ser informada. Chutar seria inventar imposto;
+2. **conferir os números da AMB** contra a foto de referência, depois da unificação;
+3. o `dashboard.html` da GOOD (a AMB e a Girassol têm o deles; o painel dela já consome os
+   dados, mas a tela cheia de análise ainda não existe).
 
 ## Caminho recomendado
 

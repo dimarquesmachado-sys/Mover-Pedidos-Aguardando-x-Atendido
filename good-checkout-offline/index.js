@@ -447,8 +447,29 @@ async function decodificarZplShopee(txt) {
   return saida;
 }
 
+/* 14/09 — HISTÓRICO DA GOOD. Tudo o que faltava já existia: o `base` tem as dependências, o
+   backfill já grava no Supabase com empresa='good', e o painel JÁ CHAMAVA
+   /good-checkout-offline/historico — a chamada existia e batia numa rota que não existia.
+   Agora a rota existe, usando a mesma lib da AMB e da Girassol.
+
+   ⚠️ ALÍQUOTAS: cada empresa tem a PRÓPRIA tabela mensal do Simples (a AMB vai de 4% a 8,82%
+   em 2026; a Girassol, de 11,4% a 15%). A da GOOD é dado que o dono precisa informar, e por
+   isso a tabela abaixo está VAZIA de propósito: o cálculo cai no padrão de 15% e as alíquotas
+   salvas no painel continuam tendo precedência. Chutar alíquota seria inventar imposto —
+   número errado é pior que número ausente. */
+const DEFAULT_ALIQ_BK_GOOD = {};
+const _histCacheGood = {};
+const _supaGood = require('../lib/supabase');
+const { rotasHistorico } = require('./historico-good');
+
 // ─── Rotas HTTP (namespaced) ────────────────────────────────────────────
 function routes(readBody) {
+  const hist = rotasHistorico({
+    validarSessao,
+    supaCfg: (empresa) => _supaGood.cfg(empresa),
+    DEFAULT_ALIQ_BK: DEFAULT_ALIQ_BK_GOOD,
+    histCache: _histCacheGood,
+  });
   return async function handle(req, res, urlObj) {
     const { method } = req;
     const p = urlObj.pathname;
@@ -3407,6 +3428,11 @@ function routes(readBody) {
       json(res, 200, out);
       return true;
     }
+
+    /* 14/09 — histórico da GOOD. A delegação fica no FIM, logo antes do return false, na
+       mesma posição que a Girassol usa: nenhuma rota declarada antes (/pedido/, /etiqueta/,
+       /imprimir/…) casa com as seis do histórico, então a ordem de casamento não muda. */
+    if (await hist(req, res, urlObj)) return true;
 
     return false; // não tratou
   };
