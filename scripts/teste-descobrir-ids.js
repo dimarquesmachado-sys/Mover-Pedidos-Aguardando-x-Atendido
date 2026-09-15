@@ -57,7 +57,7 @@ const fakeOk = async (c) => {
        PEDIDOS, que trazem `loja: {id, nome}` num endpoint que sabemos que funciona. */
   const fakeCompleto = async (c) => {
     if (c === '/situacoes/modulos') return { status: 200, data: { data: [{ id: 98310, nome: 'Pedidos de Venda' }, { id: 849, nome: 'Ordens de Produção' }] } };
-    if (c === '/situacoes/modulos/98310') return { status: 200, data: { data: [{ id: 9, nome: 'Atendido' }, { id: 6, nome: 'Em aberto' }] } };
+    if (/^\/situacoes\/modulos\/98310(\?|$)/.test(c)) return { status: 200, data: { data: /pagina=1\b/.test(c) || !/pagina=/.test(c) ? [{ id: 9, nome: 'Atendido' }, { id: 6, nome: 'Em aberto' }] : [] } };
     /* o falso precisa PAGINAR como o Bling real: devolver a mesma página sempre fazia a
        contagem triplicar, e eu quase "consertei" o código por causa do meu próprio falso. */
     const mp = /^\/pedidos\/vendas\?pagina=(\d+)/.exec(c);
@@ -105,8 +105,8 @@ const fakeOk = async (c) => {
     if (c === '/depositos') return { status: 200, data: { data: [
       { id: 1, descricao: 'Geral' }, { id: 2, descricao: 'Shopee 206017368 (Fulfillment)' }, { id: 3, descricao: 'Magalu 206018666 (Fulfillment)' }] } };
     if (c === '/situacoes/modulos') return { status: 200, data: { data: [{ id: 98310, nome: 'Pedidos de Venda' }] } };
-    if (c === '/situacoes/modulos/98310') return { status: 200, data: { data: [
-      { id: 9, nome: 'Atendido' }, { id: 24, nome: 'Verificado' }, { id: 745122, nome: 'AGUARDANDO' }, { id: 745123, nome: 'DESPACHADOS' }] } };
+    if (/^\/situacoes\/modulos\/98310(\?|$)/.test(c)) return { status: 200, data: { data: /pagina=1\b/.test(c) || !/pagina=/.test(c) ? [
+      { id: 9, nome: 'Atendido' }, { id: 24, nome: 'Verificado' }, { id: 745122, nome: 'AGUARDANDO' }, { id: 745123, nome: 'DESPACHADOS' }] : [] } };
     const mp = /pagina=(\d+)/.exec(c);
     if (mp) return mp[1] === '1' ? { status: 200, data: { data: [
       { loja: { id: 206017293 } }, { loja: { id: 206017293 } }, { loja: { id: 206017368 } }, { loja: { id: 206018666 } }] } } : { status: 200, data: { data: [] } };
@@ -129,7 +129,7 @@ const fakeOk = async (c) => {
 
   /* situação que não existe naquele Bling tem que aparecer como não encontrada, nunca
      casada com a errada por aproximação */
-  const semDespachados = async (c) => (c === '/situacoes/modulos/98310'
+  const semDespachados = async (c) => (/^\/situacoes\/modulos\/98310(\?|$)/.test(c)
     ? { status: 200, data: { data: [{ id: 9, nome: 'Atendido' }] } } : fakeReal(c));
   const r6 = await criar({ rotulo: 'X', blingGet: semDespachados, envNomes: NOMES_T }).descobrir();
   assert.ok(r6.sugestao.nao_encontrei.includes('T_SIT_DESPACHADOS'),
@@ -413,8 +413,8 @@ const fakeOk = async (c) => {
   const bling = async (c) => {
     if (c === '/depositos') return { status: 200, data: { data: [] } };
     if (c === '/situacoes/modulos') return { status: 200, data: { data: [{ id: 98310, nome: 'Pedidos de Venda' }] } };
-    if (c === '/situacoes/modulos/98310') return { status: 200, data: { data: [
-      { id: 9, nome: 'Atendido' }, { id: 24, nome: 'Verificado' }, { id: 749990, nome: 'DESPACHADOS' }] } };
+    if (/^\/situacoes\/modulos\/98310(\?|$)/.test(c)) return { status: 200, data: { data: /pagina=1\b/.test(c) || !/pagina=/.test(c) ? [
+      { id: 9, nome: 'Atendido' }, { id: 24, nome: 'Verificado' }, { id: 749990, nome: 'DESPACHADOS' }] : [] } };
     const mp = /pagina=(\d+)/.exec(c);
     if (mp) return mp[1] === '1' ? { status: 200, data: { data: [{ id: 1, loja: { id: 203146903 }, numeroLoja: '2000012345678901' }] } } : { status: 200, data: { data: [] } };
     return { status: 404, data: null };
@@ -448,7 +448,7 @@ const fakeOk = async (c) => {
   const bling = async (c) => {
     if (c === '/depositos') return { status: 200, data: { data: [] } };
     if (c === '/situacoes/modulos') return { status: 200, data: { data: [{ id: 98310, nome: 'Pedidos de Venda' }] } };
-    if (c === '/situacoes/modulos/98310') return { status: 200, data: { data: [{ id: 9, nome: 'Atendido' }] } };
+    if (/^\/situacoes\/modulos\/98310(\?|$)/.test(c)) return { status: 200, data: { data: /pagina=1\b/.test(c) || !/pagina=/.test(c) ? [{ id: 9, nome: 'Atendido' }] : [] } };
     const mp = /pagina=(\d+)/.exec(c);
     if (mp) return mp[1] === '1' ? { status: 200, data: { data: [{ id: 1, loja: { id: 206017293 }, numeroLoja: '2000012345678901' }] } } : { status: 200, data: { data: [] } };
     return { status: 404, data: null };
@@ -520,4 +520,50 @@ const fakeOk = async (c) => {
     'página vazia de verdade continua dizendo que não há pedido — as duas causas mandam investigar lugares diferentes');
 
   console.log('OK: canais — falha de chamada e ausência de pedido têm mensagens DIFERENTES, com o status ou o erro real');
+})().catch(e => { console.error(e.message); process.exit(1); });
+
+/* ─── 15/09: a lista de situações vinha INCOMPLETA ────────────────────────────
+   O dono mandou o print do select do Bling da Girassol e faltava uma situação na minha
+   lista: "Checkout parcial" (126724). A API devolve paginado e eu lia só a primeira página.
+   Uma lista de ids que se APRESENTA como completa e não é vale menos que lista nenhuma —
+   ninguém desconfia dela, e o id que falta é justamente o que ninguém vai procurar. */
+(async () => {
+  const a6 = require('assert');
+  const { criar: criarF } = require('../lib/checkout/descobrir-ids');
+  const PAGS = {
+    '1': [{ id: 6, nome: 'Em aberto' }, { id: 9, nome: 'Atendido' }],
+    '2': [{ id: 126724, nome: 'Checkout parcial' }, { id: 743515, nome: 'DESPACHADOS' }],
+    '3': [],
+  };
+  const bling = async (c) => {
+    if (c === '/depositos') return { status: 200, data: { data: [] } };
+    if (c === '/situacoes/modulos') return { status: 200, data: { data: [{ id: 98310, nome: 'Pedidos de Venda' }] } };
+    const m = /situacoes\/modulos\/98310\?pagina=(\d+)/.exec(c);
+    if (m) return { status: 200, data: { data: PAGS[m[1]] || [] } };
+    return { status: 404, data: null };
+  };
+  const r = await criarF({ rotulo: 'GIR', blingGet: bling }).descobrir();
+  const ids = r.recursos.situacoes.itens.map(i => i.id);
+  a6.ok(ids.includes(126724), 'o "Checkout parcial" está na 2ª página — ler só a 1ª entrega lista incompleta');
+  a6.ok(ids.includes(743515), 'e o DESPACHADOS também');
+  a6.strictEqual(new Set(ids).size, ids.length, 'sem repetidos entre páginas');
+
+  /* Bling que ignora o parâmetro `pagina` devolveria a mesma página pra sempre: parar sem
+     fingir que acabou é melhor que laço infinito */
+  const sempreIgual = async (c) => (/situacoes\/modulos\/98310\?pagina=/.test(c)
+    ? { status: 200, data: { data: PAGS['1'] } } : bling(c));
+  const r2 = await criarF({ rotulo: 'GIR', blingGet: sempreIgual }).descobrir();
+  a6.strictEqual(r2.recursos.situacoes.itens.length, 2, 'página repetida não pode duplicar nem travar');
+
+  /* falha no meio: devolve o que já achou, avisando — melhor que perder tudo */
+  let n = 0;
+  const falhaNaSegunda = async (c) => {
+    if (/situacoes\/modulos\/98310\?pagina=/.test(c)) { n++; return n === 1 ? { status: 200, data: { data: PAGS['1'] } } : { status: 429, data: null }; }
+    return bling(c);
+  };
+  const r3 = await criarF({ rotulo: 'GIR', blingGet: falhaNaSegunda }).descobrir();
+  a6.strictEqual(r3.recursos.situacoes.itens.length, 2, 'o que já veio não se perde');
+  a6.ok(/parei na página/.test(r3.recursos.situacoes.aviso || ''), 'e a lista parcial tem que se DECLARAR parcial');
+
+  console.log('OK: situações — percorre todas as páginas, não duplica, não trava e declara quando a lista ficou parcial');
 })().catch(e => { console.error(e.message); process.exit(1); });
