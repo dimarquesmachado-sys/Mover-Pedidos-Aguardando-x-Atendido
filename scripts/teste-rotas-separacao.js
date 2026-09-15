@@ -11,7 +11,7 @@ const path = require('path');
 const { criar } = require('../lib/checkout/rotas-separacao');
 
 const deps = {
-  prefixo: '/x', json: () => {}, readBody: async () => ({}), readJson: () => ({}), writeJson: () => {},
+  prefixo: '/x', tag: 'XBKP', json: () => {}, readBody: async () => ({}), readJson: () => ({}), writeJson: () => {},
   blingGet: async () => ({}), blingWrite: async () => ({}), lerReservas: () => ({}),
   locCache: {}, localizacaoDeProduto: () => null, salvarLoc: () => {},
   montarSeparacao: async () => [], montarSeparacaoPorPedido: async () => [],
@@ -19,7 +19,7 @@ const deps = {
 };
 
 assert.throws(() => criar({}), /falta prefixo/);
-for (const faltando of ['lerReservas', 'montarSeparacao', 'RESERVAS_FILE']) {
+for (const faltando of ['tag', 'lerReservas', 'montarSeparacao', 'RESERVAS_FILE']) {
   const parcial = Object.assign({}, deps); delete parcial[faltando];
   assert.throws(() => criar(parcial), new RegExp('falta ' + faltando),
     'dependência ausente derruba na criação, não na primeira chamada');

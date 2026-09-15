@@ -489,7 +489,7 @@ function routes(readBody) {
   /* criado DENTRO do routes porque o `readBody` chega como parâmetro dele — o lint pegou
      que eu tinha posto a criação no topo do arquivo, onde ele não existe. */
   const _rotasSeparacao = require('../lib/checkout/rotas-separacao').criar({
-    prefixo: '/good-checkout-offline', json, readBody, readJson, writeJson, blingGet, blingWrite, lerReservas,
+    prefixo: '/good-checkout-offline', tag: base.tag, json, readBody, readJson, writeJson, blingGet, blingWrite, lerReservas,
     locCache, localizacaoDeProduto, salvarLoc, montarSeparacao, montarSeparacaoPorPedido,
     RESERVAS_FILE, LOC_LOG_FILE,
   });
