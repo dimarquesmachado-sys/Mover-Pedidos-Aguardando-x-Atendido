@@ -48,7 +48,15 @@ GOOD, e o dado estava no XML de toda NF-e autorizada.
    ```
 
    Substitui o mapeamento no DevTools, tela por tela, que foi como as unidades e depósitos da
-   AMB entraram no arquivo de referência. A rota **diz quais caminhos tentou** quando um
+   AMB entraram no arquivo de referência. **O retorno traz as envs prontas pra colar** —
+   situações casadas pelo nome (Atendido, AGUARDANDO, DESPACHADOS, Verificado) e o canal do
+   ML sugerido, marcado como palpite a confirmar.
+
+   O que o Bling respondeu de verdade (AMB, 15/09), pra ninguém repetir o chute:
+   `/depositos` funciona · `/situacoes/modulos` devolve MÓDULOS (Pedidos de Venda = 98310) e
+   as situações vêm num 2º passo · `/canais-de-venda` e `/lojas` dão **404**, então os canais
+   saem dos pedidos — que trazem `loja.id` mas **não** o nome, e o nome vem do cruzamento com
+   os depósitos (`Shopee 206017368`, `Magalu 206018666`). A rota **diz quais caminhos tentou** quando um
    recurso não responde, em vez de reportar lista vazia — 404 tratado como "não tem nada"
    diria que a empresa não tem depósito, e essa mentira custa horas.
 
