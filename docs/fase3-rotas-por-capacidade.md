@@ -40,6 +40,33 @@ As quase-idênticas, com a distância: `/backfill-nf-auto` (4), `/ciclo-agora` (
 
 Faltam 15 das idênticas e as 6 quase-idênticas.
 
+## O critério mudou depois da primeira fatia (P1 do Codex no #480)
+
+A medição acima compara o **corpo** das rotas entre as empresas. Isso não basta, e a primeira
+extração provou: ao mover as três rotas de catálogo, a delegação foi parar no topo do handle
+e `/buscar-produto` e `/indexar-status` passaram a responder **sem autenticação** — antes da
+extração esses corpos ficavam **abaixo do portão de sessão** do módulo.
+
+**Corpo idêntico não garante contexto idêntico.** O que roda antes da rota é parte do que ela
+faz, e mover código muda isso em silêncio: nada quebra, nada loga, a rota responde 200 — só
+que para qualquer um.
+
+Então o critério para as próximas fatias tem dois lados:
+
+1. **o corpo é igual entre as empresas?** (a tabela acima responde)
+2. **a rota fica depois da mesma guarda nas três?** — e a delegação precisa entrar
+   exatamente naquele ponto, nunca antes.
+
+Nas rotas do checkout, o portão central é o que responde
+`Sessão necessária. Faça login.`; há exceções declaradas ali mesmo (rotas públicas e as de
+`/run`, `/setup`, `/robo`, `/forcar` e `/debug`, que têm auth própria). Uma rota que hoje está
+**fora** do portão e outra que está **dentro** não podem ir para o mesmo registrador sem que
+essa diferença vire parâmetro explícito.
+
+`scripts/teste-rotas-catalogo.js` trava a posição da delegação nos três arquivos. Cada
+registrador novo precisa do mesmo travamento — a regra sozinha não segurou: ela já estava
+escrita neste documento quando foi quebrada.
+
 ## Como extrair sem repetir os erros de hoje
 
 1. **Um registrador por vez, começando pelas idênticas.** Elas não exigem decisão: o corpo já
