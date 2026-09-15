@@ -202,7 +202,30 @@ const fakeOk = async (c) => {
     'tem que mostrar o número de exemplo — é com ele que o dono reconhece o canal no Bling');
   assert.ok(/não identifiquei/.test(por[777].leia || ''));
 
-  /* 9. erro de rede num candidato não pode derrubar a descoberta inteira */
+  /* 9. A AMOSTRA VEM DO DETALHE (15/09): o retorno real mostrou a prova falhando com "não
+     consegui provar pelo ML", e a causa era simples — a LISTA de pedidos do Bling nem sempre
+     traz `numeroLoja`. O próprio F1 já sabia disso: ele faz `pDetalhe?.numeroLoja ||
+     p?.numeroLoja`. Sem amostra, nem a prova nem a dedução por formato funcionam.
+     Custo importa aqui: é UMA chamada de detalhe por CANAL desconhecido, não por pedido. */
+  let detalhes = 0;
+  const listaSemNumero = async (c) => {
+    if (c === '/depositos') return { status: 200, data: { data: [] } };
+    if (c === '/situacoes/modulos') return { status: 404, data: null };
+    const md = /\/pedidos\/vendas\/(\d+)$/.exec(c);
+    if (md) { detalhes++; return { status: 200, data: { data: { id: Number(md[1]), numeroLoja: md[1] === '1' ? '2000012345678901' : 'LU-99887766' } } }; }
+    const mp = /pagina=(\d+)/.exec(c);
+    if (mp) return mp[1] === '1' ? { status: 200, data: { data: [
+      { id: 1, loja: { id: 111 } }, { id: 2, loja: { id: 222 } }, { id: 3, loja: { id: 111 } }] } } : { status: 200, data: { data: [] } };
+    return { status: 404, data: null };
+  };
+  const r10 = await criar({ rotulo: 'T', blingGet: listaSemNumero }).descobrir();
+  const c10 = Object.fromEntries(r10.recursos.canais_de_venda.itens.map(c => [c.id, c]));
+  assert.ok(/Mercado Livre/.test(c10[111].nome || ''), 'sem a busca do detalhe, este canal ficaria sem nome');
+  assert.ok(/Magalu/.test(c10[222].nome || ''));
+  assert.strictEqual(detalhes, 2, 'UMA chamada de detalhe por canal (não por pedido): esperava 2, veio ' + detalhes);
+  assert.ok(!r10.recursos.canais_de_venda.itens.some(c => '_idPedido' in c), 'o id usado na busca é ruído interno');
+
+  /* 10. erro de rede num candidato não pode derrubar a descoberta inteira */
   const fakeExplode = async (c) => { if (c === '/depositos') throw new Error('timeout'); return { status: 200, data: { data: [] } }; };
   const r2 = await criar({ rotulo: 'T', blingGet: fakeExplode }).descobrir();
   assert.ok(r2.recursos.depositos, 'o recurso que falhou tem que aparecer no resultado');
