@@ -55,9 +55,12 @@ for (const emp of EMPRESAS) {
   assert.ok(String(dados(emp).cnpj || '').length >= 14, emp + ': CNPJ do emitente parece inválido');
   assert.ok(String(dados(emp).ie || '').length > 0, emp + ': falta a IE do emitente');
 
-  /* o tratamento do nulo continua no código: é a rede pra empresa NOVA, que entra sem dados.
-     Vale nas três — regra que existe só numa empresa é a porta por onde a divergência volta. */
-  assert.ok(/EMITENTE_FALLBACK \|\|/.test(s), emp + ': falta tratar o fallback nulo');
+  /* 15/09 — a promessa CRESCEU: além de tratar o fallback nulo, o sistema agora APRENDE o
+     emitente do XML da primeira NF autorizada. Foi um atrito real — ontem eu tive que pedir
+     ao dono o CNPJ da GOOD, e o dado estava no XML o tempo todo. Numa empresa nova, ninguém
+     digita nada: basta a primeira nota sair. */
+  assert.ok(/_emitAuto\.vigente\(EMITENTE_FALLBACK\)/.test(s), emp + ': falta a rede do emitente aprendido');
+  assert.ok(/_emitAuto\.aprender\(x\.emit\)/.test(s), emp + ': a NF tem que ENSINAR o emitente quando ele vem no XML');
   assert.ok(/razao: '', cnpj: '', ie: ''/.test(s), emp + ': o bloco vazio tem que ser explícito');
 }
 
