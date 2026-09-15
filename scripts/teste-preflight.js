@@ -26,6 +26,17 @@ const r1 = roda(['good'], { SUPABASE_URL_VENDAS_GOOD: '', SUPABASE_KEY_VENDAS_GO
 assert.strictEqual(r1.code, 1, 'sem credenciais o preflight tem que falhar — ele é portão antes do cron');
 assert.ok(/SUPABASE_URL_VENDAS_GOOD/.test(r1.saida), 'tem que dizer o nome EXATO da env que falta');
 
+/* regressão (Codex, P1): o alias "amb" tem que testar o Supabase OPERACIONAL (env *_AMB,
+   linhas empresa="amb"), não o id_canonico do contrato ("ambtotal") — a AMBTotal só existe
+   como "ambtotal" no contrato, mas o checkout dela sempre falou com o Supabase como "amb". */
+const r3 = roda(['amb'], {
+  SUPABASE_URL_VENDAS_AMB: '', SUPABASE_KEY_VENDAS_AMB: '',
+  SUPABASE_URL_VENDAS_AMBTOTAL: 'https://nao-e-esta-a-env-certa.invalido', SUPABASE_KEY_VENDAS_AMBTOTAL: 'nao-e-esta',
+});
+assert.strictEqual(r3.code, 1, 'sem SUPABASE_*_AMB (mesmo com *_AMBTOTAL presente) o preflight tem que falhar');
+assert.ok(/SUPABASE_URL_VENDAS_AMB\b/.test(r3.saida), 'tem que apontar a env operacional AMB, não o id_canonico');
+assert.ok(!/SUPABASE_URL_VENDAS_AMBTOTAL/.test(r3.saida), 'não pode confundir id_canonico "ambtotal" com o identificador operacional "amb"');
+
 /* nenhum valor de segredo impresso */
 const seg = 'SEGREDO-QUE-NAO-PODE-APARECER';
 const r2 = roda(['good'], {
