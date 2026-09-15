@@ -32,6 +32,14 @@ As idênticas: `/backfill-detalhes`, `/backfill-nf`, `/backfill-valores`, `/busc
 As quase-idênticas, com a distância: `/backfill-nf-auto` (4), `/ciclo-agora` (4),
 `/conferido` (3), `/ir-shopee` (2), `/lista` (2), `/ml-fee` (4).
 
+## Feito até agora
+
+- ✅ **catálogo** (PR #480): `/buscar-produto`, `/indexar-catalogo` e `/indexar-status` →
+  `lib/checkout/rotas-catalogo.js`. Escolhidas por coesão, não por tamanho: buscar produto usa
+  o índice de EAN que as outras duas constroem e acompanham.
+
+Faltam 15 das idênticas e as 6 quase-idênticas.
+
 ## Como extrair sem repetir os erros de hoje
 
 1. **Um registrador por vez, começando pelas idênticas.** Elas não exigem decisão: o corpo já
