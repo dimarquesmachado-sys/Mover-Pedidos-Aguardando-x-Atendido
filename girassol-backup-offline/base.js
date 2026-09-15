@@ -63,6 +63,10 @@ const _fn = require('../lib/checkout/base-funcoes').criar({
 const { ensureDir, readJson, writeJson, dataISO, json, html, lerReservas, lerOperadores, lerAdmins, ehAdmin, blingGet, blingWrite, moverSituacao, manifest, salvarManifest, skuEanCache, locCache, salvarLoc, salvarSkuEan, lerIndiceEan } = _fn;
 
 module.exports = {
+  /* 15/09 — o `tag` já existia aqui, passado pro base-funcoes, mas não era EXPORTADO:
+     quem lia `base.tag` recebia undefined, e o boot morria na primeira empresa a montar.
+     Exportar é o conserto na origem — a informação já estava no lugar certo. */
+  tag: 'GIRABKP',
   fs, path, fetch, garantirToken, BLING_BASE,
   CACHE_DIR, SIT_ATENDIDO, SIT_VERIFICADO, SYNC_ON, JANELA_DIAS, PAUSA_MS, RETENCAO_DIAS, ETIQ_FORMATO, CRON_EXPR,
   MANIFEST_FILE, SKU_EAN_FILE, CONFERIDOS_FILE, RESERVAS_FILE, RESERVA_TTL_MS,
