@@ -863,7 +863,7 @@ function routes(readBody) {
        tem depois do OAuth, dá pra simplesmente perguntar. */
     if (urlObj.pathname === '/girassol-backup-offline/descobrir-ids') {
       const _k = lerChaveAdmin(req, urlObj);
-      if (_k !== process.env.ADMIN_KEY) { json(res, 403, { ok: false, erro: 'chave inválida' }); return true; }
+      if (!process.env.ADMIN_KEY || _k !== process.env.ADMIN_KEY) { json(res, 403, { ok: false, erro: 'chave inválida' }); return true; }
       try {
         const d = require('../lib/checkout/descobrir-ids').criar({ rotulo: 'GIRASSOL', blingGet , /* o token do ML vem do gerenciador fiscal DESTA empresa — o lint pegou que eu
        supus uma variável `garantirTokenML` solta que não existe aqui. */

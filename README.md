@@ -29,7 +29,7 @@ marketplaces, no mesmo processo.
 | Fluxo | O quê |
 |---|---|
 | F1 · a cada 3 min | ATENDIDO → AGUARDANDO: tira da tela do estoquista o pedido do ML que ainda não tem etiqueta |
-| F2 · 00:10, 06:00, 06:30, 07:00 | AGUARDANDO → ATENDIDO: o ML libera as etiquetas de madrugada |
+| F2 · 00:10, 06:00, 06:30, 07:00 e depois a cada 15 min | AGUARDANDO → ATENDIDO: o ML libera as etiquetas de madrugada, e o cron continua rodando o dia todo pra pegar liberações que saem fora da janela |
 | F3 · a cada 10 min | manda ao marketplace a NF-e emitida |
 | Corrigir-NFs · a cada 5 min | conserta e reenvia NF-e rejeitada pela SEFAZ |
 
@@ -43,8 +43,10 @@ rápidas, backup, Madeira Madeira, entre outras.
 
 **Uma empresa é um registro**, não uma pasta. O `contrato-empresas.json` é a fonte de
 verdade: id canônico, aliases, slug HTTP, prefixo de env por serviço, sufixo de tabelas e
-**capacidades**. O `lib/empresas/registro.js` lê o contrato e valida colisões no boot — duas
-empresas com o mesmo prefixo de env leriam a mesma credencial em silêncio.
+**capacidades**. O `lib/empresas/registro.js` lê o contrato e valida colisões no boot — alias,
+`slug_http` e `sufixo_tabelas` repetidos entre empresas derrubam o boot. O `prefixo_env_historico`
+por serviço **não** entra nessa validação hoje: duas empresas com o mesmo prefixo aí leriam a
+mesma credencial em silêncio, sem aviso.
 
 ⚠️ **O contrato é espelhado byte a byte com o repositório Devoluções.** Qualquer mudança nele
 exige o PR gêmeo lá, e o verificador acusa enquanto os dois não baterem — vale até para o
@@ -72,9 +74,11 @@ node scripts/preflight-empresa.js <empresa>       # a env FUNCIONA? (rodar NO RE
 
 Duas rotas, ambas protegidas por chave de admin:
 
-- `/<empresa>/descobrir-ids` — pergunta ao Bling os depósitos, as situações e os canais de
-  venda, identifica qual é o do Mercado Livre (provando contra a conta), sugere as envs com
-  os nomes que o código lê e **confere** contra o que está no Render.
+- `/<slug>-checkout-offline/descobrir-ids` (na Girassol, `/girassol-backup-offline/descobrir-ids`)
+  — pergunta ao Bling os depósitos, as situações e os canais de venda, identifica qual é o do
+  Mercado Livre (provando contra a conta), sugere as envs com os nomes que o código lê e
+  **confere** contra o que está no Render. A tabela de URLs por empresa está em
+  [`docs/embarque-empresa-nova.md`](docs/embarque-empresa-nova.md).
 - `/embarque` — uma tela com o que falta autorizar em cada empresa.
 
 ---
@@ -87,7 +91,10 @@ Duas rotas, ambas protegidas por chave de admin:
   `escopo-de-variaveis`, `onclick-existe`, `campo-tem-produtor`, entre outros.
 - Autenticação administrativa aceita **header** (`x-admin-key` ou `Bearer`); a query `?k=`
   segue aceita por compatibilidade.
-- Nada de segredo em resposta, log ou tela de diagnóstico — nem parcial.
+- Nada de segredo em log ou tela de diagnóstico — nem parcial. Exceção conhecida e não
+  regra: `/debug/token`, `/debug/token-nf` e `/debug/token-ml` (por empresa, atrás de
+  `ADMIN_KEY`) devolvem o token de acesso completo na resposta — é debug manual de OAuth,
+  não log nem tela.
 
 ---
 
