@@ -1,156 +1,104 @@
-# Bling Automação GIRASSOL — v2.0
+# Bling Automação — multiempresa
 
-Serviço Node.js rodando no **Render** que automatiza a troca de status de pedidos no Bling, eliminando a dependência do Google Sheets.
+Serviço Node.js no **Render** que roda a operação de e-commerce de **três empresas** —
+Magazine Girassol, AMBTotal e GOOD Import — sobre contas separadas do Bling e dos
+marketplaces, no mesmo processo.
+
+> Este README descrevia "Bling Automação GIRASSOL — v2.0", de quando o serviço atendia uma
+> empresa só e fazia uma coisa só, e ainda mandava descompactar um zip. Foi reescrito em
+> 15/09/2026: quem chega abre este arquivo primeiro, e README desatualizado desorienta mais
+> do que a ausência dele.
 
 ---
 
-## O problema que resolve
+## Por onde começar
 
-Pedidos do Mercado Livre entram como **ATENDIDO** no Bling (pela emissão automática de NF), mas sem etiqueta de envio ainda disponível. Isso polui a tela de checkout dos estoquistas — eles veem o pedido, separam o produto, mas a etiqueta não imprime porque o ML ainda não liberou.
-
-### Solução
-
-| Horário | Ação |
+| Se você quer… | Abra |
 |---|---|
-| **A cada 3 min** (06h–23h59) | ATENDIDO → AGUARDANDO (remove da tela dos estoquistas pedidos ML sem rastreio) |
-| **00:10** | AGUARDANDO → ATENDIDO (ML libera etiquetas à meia-noite) + limpa memória |
-| **06:00** | AGUARDANDO → ATENDIDO (repescagem antes de abrir) |
-| **06:30** | AGUARDANDO → ATENDIDO (reforço) |
-| **07:00** | AGUARDANDO → ATENDIDO (abertura) |
-
-> ⚡ **3 minutos vs 30 minutos**: um pedido sem etiqueta fica no máximo ~3 min visível, ao invés de ~29 min como era no Google Sheets.
+| entender a consolidação multiempresa e onde ela parou | [`docs/plano-multiloja-passos.md`](docs/plano-multiloja-passos.md) |
+| **ligar uma empresa nova** | [`docs/embarque-empresa-nova.md`](docs/embarque-empresa-nova.md) |
+| saber por que as empresas diferem em alguma coisa | [`docs/fase2-diferencas-girassol.md`](docs/fase2-diferencas-girassol.md) e [`docs/fase3-diferencas-ciclo.md`](docs/fase3-diferencas-ciclo.md) |
+| retomar o contexto numa conversa nova | [`docs/CONTEXTO-NOVA-CONVERSA-CLAUDE.md`](docs/CONTEXTO-NOVA-CONVERSA-CLAUDE.md) |
 
 ---
 
-## Setup passo a passo
+## O que o serviço faz
 
-### 1. Criar repositório no GitHub
+**Fiscal** — uma pasta por empresa, com o código em `lib/fiscal/`:
 
-```bash
-# Descompacte o zip, entre na pasta e:
-git init
-git add .
-git commit -m "feat: bling automacao girassol v2"
-git remote add origin https://github.com/SEU_USER/bling-automacao-girassol.git
-git push -u origin main
-```
-
-### 2. Criar serviço no Render
-
-1. Acesse [render.com](https://render.com) → **New → Web Service**
-2. Conecte sua conta GitHub e selecione o repositório
-3. Configure:
-   - **Runtime:** Node
-   - **Build Command:** `npm install`
-   - **Start Command:** `node index.js`
-   - **Plan:** `Starter` ← **obrigatório** (Free hiberna e mata os crons)
-
-### 3. Adicionar Persistent Disk
-
-Painel do serviço → **Disks** → **Add Disk**
-- **Name:** tokens-disk
-- **Mount Path:** `/data`
-- **Size:** 1 GB
-
-### 4. Configurar variáveis de ambiente
-
-Painel → **Environment** → adicione:
-
-| Variável | Valor |
+| Fluxo | O quê |
 |---|---|
-| `BLING_CLIENT_ID` | seu client_id |
-| `BLING_CLIENT_SECRET` | seu client_secret |
-| `BLING_REDIRECT_URI` | `https://sua-url.onrender.com/callback` |
-| `TOKEN_FILE` | `/data/tokens.json` |
-| `TZ` | `America/Sao_Paulo` |
-| `SITUACAO_AGUARDANDO` | `7259` |
-| `ME_LOJA_IDS` | `203584107` |
+| F1 · a cada 3 min | ATENDIDO → AGUARDANDO: tira da tela do estoquista o pedido do ML que ainda não tem etiqueta |
+| F2 · 00:10, 06:00, 06:30, 07:00 | AGUARDANDO → ATENDIDO: o ML libera as etiquetas de madrugada |
+| F3 · a cada 10 min | manda ao marketplace a NF-e emitida |
+| Corrigir-NFs · a cada 5 min | conserta e reenvia NF-e rejeitada pela SEFAZ |
 
-### 5. Gerar token inicial (uma única vez)
-
-Após o deploy, obtenha o `auth_code` no Bling:
-> Configurações → Integrações → sua app → **Gerar código de autorização**
-> Copie o parâmetro `code` da URL de redirecionamento
-
-Depois envie para o serviço:
-
-```bash
-curl -X POST https://sua-url.onrender.com/setup \
-  -H "Content-Type: application/json" \
-  -d '{"auth_code":"COLE_O_CODIGO_AQUI"}'
-```
-
-Resposta esperada:
-```json
-{ "ok": true, "message": "Tokens gerados e salvos ✓" }
-```
-
-A partir daí, o refresh é automático — nunca precisa repetir esse passo.
-
-### 6. Configurar deploy automático via GitHub Actions (opcional)
-
-No GitHub → Settings → Secrets → **New repository secret**:
-- **Name:** `RENDER_DEPLOY_HOOK`
-- **Value:** URL do deploy hook do Render (painel → Settings → Deploy Hook)
-
-A partir daí, todo `git push main` faz um deploy automático no Render.
+**Checkout offline** — separação, conferência, etiquetas, histórico de vendas e margem, por
+empresa. **Aplicações** — ponto, estoque, alerta de frágil, imagens do Drive, respostas
+rápidas, backup, Madeira Madeira, entre outras.
 
 ---
 
-## Endpoints
+## Como a multiempresa funciona
 
-| Método | URL | Descrição |
-|---|---|---|
-| GET | `/` ou `/health` | Status do serviço |
-| POST | `/setup` | Gera token inicial `{"auth_code":"..."}` |
-| POST | `/run/expedicao` | Dispara F1 manualmente (ATENDIDO→AGUARDANDO) |
-| POST | `/run/virada` | Dispara rotina virada manualmente |
-| POST | `/run/manha` | Dispara rotina manhã manualmente |
+**Uma empresa é um registro**, não uma pasta. O `contrato-empresas.json` é a fonte de
+verdade: id canônico, aliases, slug HTTP, prefixo de env por serviço, sufixo de tabelas e
+**capacidades**. O `lib/empresas/registro.js` lê o contrato e valida colisões no boot — duas
+empresas com o mesmo prefixo de env leriam a mesma credencial em silêncio.
+
+⚠️ **O contrato é espelhado byte a byte com o repositório Devoluções.** Qualquer mudança nele
+exige o PR gêmeo lá, e o verificador acusa enquanto os dois não baterem — vale até para o
+campo de data.
+
+**As capacidades decidem o comportamento**, não o nome da empresa. Exemplo real: só a
+Girassol tem `expedicao`, e é isso que define para onde o checkout manda o pedido conferido —
+com Expedição vai para VERIFICADO e o app move para DESPACHADOS quando a equipe bipa na
+entrega; sem ela, vai direto para DESPACHADOS.
+
+**Nem toda diferença entre empresas é dívida.** Pausas e cota são por conta; os crons do F3
+são escalonados para não disputarem a cota do Bling; o caminho dos arquivos de token é estado
+vivo. Antes de "uniformizar" qualquer coisa, leia os documentos de diferenças acima.
 
 ---
 
-## Estrutura do projeto
+## Ferramentas de operação
 
 ```
-bling-automacao/
-├── index.js              # HTTP server + agendamento cron
-├── fluxos.js             # Lógica dos fluxos F1 e F2
-├── blingApi.js           # Wrapper da API Bling + rate-limit
-├── tokenManager.js       # OAuth: geração, renovação, persistência
-├── render.yaml           # Configuração declarativa do Render
-├── .github/
-│   └── workflows/
-│       └── deploy.yml    # CI/CD: push → lint → deploy
-├── package.json
-├── .env.example
-├── .gitignore
-└── data/                 # Criado automaticamente
-    └── tokens.json       # Gerado pelo /setup (não commitado)
+node scripts/verifica.js                          # portão antes de qualquer push
+node scripts/empresa.js validar <empresa>         # a env existe?
+node scripts/empresa.js plano <empresa>           # os passos de embarque
+node scripts/preflight-empresa.js <empresa>       # a env FUNCIONA? (rodar NO RENDER)
 ```
+
+Duas rotas, ambas protegidas por chave de admin:
+
+- `/<empresa>/descobrir-ids` — pergunta ao Bling os depósitos, as situações e os canais de
+  venda, identifica qual é o do Mercado Livre (provando contra a conta), sugere as envs com
+  os nomes que o código lê e **confere** contra o que está no Render.
+- `/embarque` — uma tela com o que falta autorizar em cada empresa.
+
+---
+
+## Regras da casa
+
+- `node scripts/verifica.js` **antes de todo push**: sintaxe, painéis, espelhos, paridade,
+  contrato e a bateria inteira. Sai `PODE SUBIR` ou `NAO SUBIR`.
+- **Apontamento que se repete vira teste**, não regra escrita: `imports-existem`,
+  `escopo-de-variaveis`, `onclick-existe`, `campo-tem-produtor`, entre outros.
+- Autenticação administrativa aceita **header** (`x-admin-key` ou `Bearer`); a query `?k=`
+  segue aceita por compatibilidade.
+- Nada de segredo em resposta, log ou tela de diagnóstico — nem parcial.
 
 ---
 
 ## Detalhes técnicos
 
-- **Rate limit:** espaçamento automático entre requisições (≥300ms GET, ≥700ms PATCH) com retry em 429
-- **Concorrência:** guard interno impede duas execuções simultâneas do mesmo fluxo
-- **Token renovado mid-flight:** se o token expirar durante uma execução, é renovado e a operação é retentada
-- **Memória diária:** pedidos já processados no F1 não são reprocessados no mesmo dia (reset à meia-noite)
-- **Sem banco de dados:** tokens em arquivo JSON em disco persistente; memória do dia em RAM
-
-Teste de revisão automática Claude + Codex.
-
----
-
-## Contexto para assistentes e planejamento
-
-Para a consolidação multiempresa (juntar o que é comum às empresas e fazer uma empresa nova
-entrar só com configuração), o arquivo a abrir primeiro é o
-[plano multiloja em passos](docs/plano-multiloja-passos.md): ele diz onde paramos, o que vem a
-seguir e a receita de cada extração. Ele existe porque conversa não é memória — a análise já
-foi feita duas vezes, e a primeira se perdeu.
-
-Antes de iniciar uma conversa nova sobre arquitetura, integrações, dashboard ou onboarding de
-empresas, leia o [contexto geral para o Claude](docs/CONTEXTO-NOVA-CONVERSA-CLAUDE.md). O documento
-registra o mapa atual do sistema, erros recorrentes nas revisões, regras de trabalho, prioridades
-técnicas e recomendações para Mercado Livre, Shopee, Magalu e TikTok Shop.
+- **Ritmo do Bling:** espaçamento entre chamadas com retry em 429, configurável **por
+  empresa** — a cota é da conta, não do código.
+- **Token renovado no meio do caminho:** se expirar durante uma execução, é renovado e a
+  operação é retentada. O refresh do ML é de **uso único**: dois serviços renovando a mesma
+  conta deixam um com token morto.
+- **Rotinas pesadas não se sobrepõem:** uma trava única do processo adia a segunda em vez de
+  enfileirar — enfileirar guardaria trabalho na memória, que é o recurso escasso aqui.
+- **Sem banco:** tokens em arquivo no disco persistente; histórico de vendas no Supabase, com
+  a fatia de cada empresa isolada por `empresa=eq.<id>`.
