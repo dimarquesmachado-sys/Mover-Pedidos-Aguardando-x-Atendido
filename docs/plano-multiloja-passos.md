@@ -133,7 +133,10 @@ vale a mesma regra do 2.9: medir e classificar antes de fundir.
    é pergunta aberta — a alavanca `ESPERA_FULL_MS`, que a Girassol não tem. **Não extrair
    antes de decidir isso.**
 3. extrair histórico/backfill/vendas-sync sobre um contexto de checkout explícito
-4. consolidar rotas em registradores por capacidade
+4. consolidar rotas em registradores por capacidade — 📏 **MEDIDO** (15/09,
+   `docs/fase3-rotas-por-capacidade.md`): dos 3 checkouts (121/98/80 rotas), **45 existem nas
+   três** — e delas **18 têm corpo idêntico** e 6 quase. Esse é o grupo seguro pra começar; as
+   21 divergentes são o próximo `ciclo.js` (classificar antes)
 5. deixar os entrypoints apenas compondo contexto e capacidades
 
 ## Fase 4 — painel único orientado a capacidades  🔄 COMEÇOU
