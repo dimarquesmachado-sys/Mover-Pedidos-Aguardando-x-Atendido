@@ -23,6 +23,14 @@ fs.writeFileSync(arq, JSON.stringify({
 }));
 const registro = carregar({ caminho: arq, servico: 'mover-pedidos' });
 
+/* 15/09 — empresa nova precisa declarar o CANAL DE VENDA do ML dela. O padrão herdado
+   (206017293) é de outra empresa, e o F1 usa isso pra decidir o que é venda do ML: herdar
+   faria a empresa nova julgar os pedidos dela pelo canal alheio — e ignorar tudo, em
+   silêncio. O teste prova os dois lados: sem a env, não monta; com ela, monta. */
+assert.throws(() => montarEmpresa('quarta', { registro }), /ME_LOJA_IDS/,
+  'sem o canal do ML declarado, a empresa nova NÃO pode ser montada');
+process.env.QUARTA_ME_LOJA_IDS = '999888777';
+
 const mod = montarEmpresa('quarta', { registro });
 
 /* o módulo sai completo, no mesmo formato que o orquestrador espera das outras */

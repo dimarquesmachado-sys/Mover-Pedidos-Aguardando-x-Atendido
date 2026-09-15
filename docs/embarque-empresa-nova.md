@@ -37,6 +37,22 @@ GOOD, e o dado estava no XML de toda NF-e autorizada.
    pronto e grava o token sem ninguém copiar código.
 4. **O primeiro OAuth de cada conta.** Um clique por conta, e só.
 
+## Um risco achado no caminho (15/09)
+
+O `ME_LOJA_IDS` — que diz ao F1 **quais canais de venda do Bling são do Mercado Livre** —
+tinha um id **cravado como padrão** (`206017293`, da primeira empresa que existiu no serviço).
+Qualquer empresa sem essa env usava o canal de OUTRA pra decidir o que era venda dela. Mesma
+classe do CNPJ trocado na DANFE: funciona, e funciona errado.
+
+- **empresa nova:** agora é **obrigatório** declarar o canal — sem ele, a montagem falha no
+  boot em vez de a empresa ignorar todos os pedidos em silêncio;
+- **empresas atuais:** o padrão continua, porque não dá para ver o Render daqui e removê-lo
+  quebraria quem depende dele. Mas o boot agora **diz a verdade**: registra se a empresa está
+  usando env própria ou o id herdado.
+
+⚠️ **Vale conferir no log do Render** se alguma das três aparece com o aviso "usando o id
+herdado". Se aparecer, o F1 dela está julgando os pedidos pelo canal de outra empresa.
+
 ## O que ainda falta automatizar (fila, por retorno)
 
 1. ✅ **Descobrir os ids do Bling** (15/09) — canais de venda, depósitos e situações:

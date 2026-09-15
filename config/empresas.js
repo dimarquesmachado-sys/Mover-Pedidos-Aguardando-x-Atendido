@@ -88,17 +88,20 @@ function _lojasAtivas() {
        pastas delas de propósito: carregam história (caminho de token relativo ao módulo, env
        sem prefixo, estratégia própria de retentativa no F1) que o montador não deve
        adivinhar — e adivinhar aqui custaria token perdido no meio do expediente. */
+    /* 15/09 (P1 do Codex) — o catch aqui embaixo engolia o erro de montagem: logava e
+       seguia o boot sem a empresa, mesmo pra erro de CONFIGURAÇÃO (ex.: falta ME_LOJA_IDS).
+       Isso contradiz o resto deste arquivo — EMPRESAS inválida já aborta o boot (ver acima)
+       — e contradiz o que o guard de ME_LOJA_IDS promete: "a montagem falha no boot em vez
+       de a empresa ignorar todos os pedidos em silêncio". Empresa ativa e no contrato que
+       não consegue montar é configuração quebrada: deixa o erro subir e derrubar o boot,
+       não vira loja fantasma sem rotas nem crons. */
     for (const e of ativas) {
       if (!ids.includes(e.id)) {
-        try {
-          const { montarEmpresa } = require('../lib/fiscal/montar-empresa');
-          const ocupados = ids.map(k => { try { return Number(String(LOJAS[k]().crons.nfeMl).split(',')[0]); } catch (e2) { return null; } })
-                              .filter(n => n != null && !isNaN(n));
-          extras.push(montarEmpresa(e.id, { registro: _registro, ocupadosF3: ocupados }));
-          console.log('[config] loja "' + e.id + '" montada a partir do contrato (sem pasta)');
-        } catch (err) {
-          console.error('[config] não consegui montar a loja "' + e.id + '" a partir do contrato: ' + (err.message || err));
-        }
+        const { montarEmpresa } = require('../lib/fiscal/montar-empresa');
+        const ocupados = ids.map(k => { try { return Number(String(LOJAS[k]().crons.nfeMl).split(',')[0]); } catch (e2) { return null; } })
+                            .filter(n => n != null && !isNaN(n));
+        extras.push(montarEmpresa(e.id, { registro: _registro, ocupadosF3: ocupados }));
+        console.log('[config] loja "' + e.id + '" montada a partir do contrato (sem pasta)');
       }
     }
   }

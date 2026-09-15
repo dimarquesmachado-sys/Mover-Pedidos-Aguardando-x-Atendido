@@ -51,6 +51,18 @@ const ENVS_OPCIONAIS = {
   checkout: ['MAX_PEDIDOS_F1', 'MAX_PEDIDOS_F2', 'F1_REMOVE_MAX', 'F1_REMOVE_ESPERA_MIN'],
 };
 
+/* 15/09 (P2 do Codex, revisão) — ME_LOJA_IDS NÃO entra no mapa fixo acima porque a exigência
+   dela MUDA por empresa, não por capacidade: uma primeira versão deste arquivo pôs ME_LOJA_IDS
+   direto em ENVS_POR_CAPACIDADE.fiscal, e isso quebrou "validar" pras TRÊS empresas que já
+   estão no ar (girassol/ambtotal/good) — sem GOOD_ME_LOJA_IDS no Render (o caso real hoje, que
+   o próprio boot só AVISA como "usando o id herdado"), validar good passou a dizer "NÃO está
+   pronta pra subir", o que é falso: ela sobe e funciona, com o padrão herdado — decisão
+   deliberada e documentada em docs/embarque-empresa-nova.md, porque não dá pra ver o Render
+   daqui e trocar isso quebraria quem já depende do padrão. Quem é montada SEM pasta por
+   lib/fiscal/montar-empresa.js não tem essa saída: a montagem RECUSA subir sem a env própria
+   (ver o throw lá). A exigência aqui reflete exatamente essa distinção. */
+const LOJAS_COM_PASTA = new Set(['girassol', 'ambtotal', 'good']);
+
 function _capacidades(registro, id) {
   const todas = Object.keys(ENVS_POR_CAPACIDADE);
   return todas.filter(c => registro.temCapacidade(id, c));
@@ -62,6 +74,18 @@ function _envsDe(registro, id, mapa) {
     for (const suf of (mapa[cap] || [])) out.push({ cap, nome: registro.nomeEnv(id, suf) });
   }
   return out;
+}
+
+/* obrigatórias e opcionais já com ME_LOJA_IDS no lado certo pra esta empresa (ver nota acima). */
+function _envsFiscais(registro, id) {
+  const obrig = _envsDe(registro, id, ENVS_POR_CAPACIDADE);
+  const opc = _envsDe(registro, id, ENVS_OPCIONAIS);
+  if (_capacidades(registro, id).includes('fiscal')) {
+    const meLojaIds = { cap: 'fiscal', nome: registro.nomeEnv(id, 'ME_LOJA_IDS') };
+    if (LOJAS_COM_PASTA.has(id)) opc.push(meLojaIds);
+    else obrig.push(meLojaIds);
+  }
+  return { obrig, opc };
 }
 
 function validar(alvo) {
@@ -87,13 +111,12 @@ function validar(alvo) {
     problemas++;
   }
 
-  const obrig = _envsDe(registro, e.id, ENVS_POR_CAPACIDADE);
+  const { obrig, opc } = _envsFiscais(registro, e.id);
   const faltando = obrig.filter(x => !process.env[x.nome]);
   console.log('\nEnvs obrigatórias: ' + (obrig.length - faltando.length) + '/' + obrig.length + ' presentes');
   for (const f of faltando) console.log('  ✗ falta ' + f.nome + '   (capacidade: ' + f.cap + ')');
   problemas += faltando.length;
 
-  const opc = _envsDe(registro, e.id, ENVS_OPCIONAIS);
   const semOpc = opc.filter(x => !process.env[x.nome]);
   if (semOpc.length) {
     console.log('\nAjuste fino (tem padrão no código, não bloqueia): ' + semOpc.length + ' env(s) não definida(s)');
@@ -128,7 +151,7 @@ function plano(alvo) {
   console.log('PLANO DE EMBARQUE — ' + e.nome + ' (' + e.id + ')\n');
 
   console.log('1. Envs no Render (nome EXATO; o valor você cola lá, nunca aqui):');
-  for (const x of _envsDe(registro, e.id, ENVS_POR_CAPACIDADE)) {
+  for (const x of _envsFiscais(registro, e.id).obrig) {
     console.log('   ' + (process.env[x.nome] ? '✓' : '·') + ' ' + x.nome);
   }
 

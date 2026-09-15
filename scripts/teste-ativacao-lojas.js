@@ -33,12 +33,19 @@ assert.ok(/const APLICACOES = \[/.test(cfg), 'o config tem que declarar APLICACO
 assert.ok(/_registro\.ativas\(\)/.test(cfg), 'as lojas ativas têm que vir do registro, não de lista fixa');
 /* 14/09 — a promessa EVOLUIU: ontem, loja no contrato sem pasta só era avisada; hoje ela é
    MONTADA a partir do registro (lib/fiscal/montar-empresa.js). Teste que guarda a promessa
-   velha impediria a nova, então ele passa a exigir o comportamento atual — e o aviso de
-   falha continua existindo pra o caso de a montagem não dar certo. */
+   velha impediria a nova, então ele passa a exigir o comportamento atual. */
 assert.ok(/montarEmpresa\(/.test(cfg),
   'loja no contrato sem pasta tem que ser MONTADA pelo registro — é o critério de aceitação da auditoria');
-assert.ok(/não consegui montar a loja/.test(cfg),
-  'se a montagem falhar, tem que gritar — silêncio aqui esconderia uma empresa inteira fora do ar');
+/* 15/09 (Codex, P1) — a montagem tinha um try/catch em volta que ENGOLIA erro de
+   configuração (ex.: falta ME_LOJA_IDS): logava e seguia o boot sem a empresa, mesmo com ela
+   ativa e no contrato — o oposto do que o guard de ME_LOJA_IDS promete ("a montagem falha no
+   boot"). Removido: se montarEmpresa() falhar, o erro tem que ESCAPAR e abortar o boot, igual
+   já acontece pro ContratoInvalidoError logo abaixo — não pode virar loja fantasma sem rotas
+   nem crons em silêncio. */
+assert.ok(!/não consegui montar a loja/.test(cfg),
+  'a montagem falhando não pode mais virar só um log — o erro tem que abortar o boot');
+assert.ok(!/catch \(err\)/.test(cfg),
+  'não pode existir um catch engolindo o erro de montarEmpresa() — deixa ele subir');
 assert.ok(/SKIP_EMPRESAS/.test(cfg) && /normalizar/.test(cfg),
   'o SKIP tem que passar pelo registro, senão "amb" e "ambtotal" desligam coisas diferentes');
 /* 14/09 (Codex, P1) — contrato LIDO mas com regra violada (alias colidindo, capacidade
