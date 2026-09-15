@@ -119,6 +119,9 @@
 
   .card-info { font-size: 13px; color: #555; margin: 4px 0; }
   .card-info b { color: #333; }
+  .card-ids { font-size: 12px; color: #6b7280; font-family: ui-monospace, Menlo, monospace; }
+  .card-ids b.copiavel { cursor: pointer; color: #2563eb; border-bottom: 1px dotted #93c5fd; }
+  .card-ids b.copiavel:hover { background: #eff6ff; }
   .card-msg {
     background: #f9f9f9; padding: 8px; border-radius: 4px; font-size: 12px; color: #555;
     margin-top: 8px; max-height: 80px; overflow-y: auto;
@@ -232,7 +235,7 @@
 
 <div id="app" style="display:none">
 <header>
-  <h1>🌻 Lixas A COMBINAR <span class="badge">Pendentes</span><span class="ver" style="font-size:11px;font-weight:normal;color:#9ca3af;margin-left:8px;font-family:monospace;">v14/08 · layout</span></h1>
+  <h1>🌻 Lixas A COMBINAR <span class="badge">Pendentes</span><span class="ver" style="font-size:11px;font-weight:normal;color:#9ca3af;margin-left:8px;font-family:monospace;">v15/09 · ids+erros</span></h1>
   <div class="toolbar">
     <button onclick="recarregar()">🔄 Atualizar</button>
     <span class="user-info" id="user-info"></span>
@@ -291,6 +294,35 @@
 <script>
 const API_BASE = '/lixas-combinar';
 
+/**
+ * Le a resposta como JSON — e, quando NAO for JSON, explica o que aconteceu em vez
+ * de estourar "Unexpected token '<'". HTML no corpo = o Render respondeu por ele
+ * (servico reiniciando apos deploy, dormindo, ou 502 do proxy), nao o painel.
+ */
+function copiar(texto, el) {
+  navigator.clipboard.writeText(String(texto)).then(() => {
+    const antes = el.textContent; el.textContent = '✓ copiado';
+    setTimeout(() => { el.textContent = antes; }, 900);
+  }).catch(() => { window.prompt('Copie:', texto); });
+}
+
+async function lerJson(r) {
+  const ct = (r.headers.get('content-type') || '').toLowerCase();
+  const texto = await r.text();
+  if (ct.includes('application/json') || /^\s*[\[{]/.test(texto)) {
+    try { return JSON.parse(texto); }
+    catch (e) { throw new Error(`Resposta invalida do servidor (HTTP ${r.status}): ${texto.slice(0, 120)}`); }
+  }
+  const ehHtml = /^\s*<!doctype|^\s*<html/i.test(texto);
+  if (ehHtml && (r.status === 502 || r.status === 503 || r.status === 504)) {
+    throw new Error(`Servidor indisponivel (HTTP ${r.status}) — provavelmente reiniciando apos um deploy. Aguarde ~1 min e tente de novo.`);
+  }
+  if (ehHtml) {
+    throw new Error(`O servidor respondeu uma pagina HTML (HTTP ${r.status}) em vez de dados — geralmente e o Render reiniciando. Recarregue o painel (Ctrl+Shift+R) e tente de novo.`);
+  }
+  throw new Error(`Resposta inesperada (HTTP ${r.status}): ${texto.slice(0, 120)}`);
+}
+
 function token() { return localStorage.getItem('lixas_combinar_token') || ''; }
 function setToken(t) { localStorage.setItem('lixas_combinar_token', t); }
 function clearToken() { localStorage.removeItem('lixas_combinar_token'); localStorage.removeItem('lixas_combinar_user'); }
@@ -310,7 +342,7 @@ async function fazerLogin() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ usuario: u, senha: p })
     });
-    const d = await r.json();
+    const d = await lerJson(r);
     if (!d.ok) { err.textContent = d.erro || 'Falha no login'; return; }
     setToken(d.token);
     setUser(u);
@@ -363,7 +395,7 @@ async function carregarBolsao(qual) {
   try {
     const r = await fetch(url, { headers: { 'X-Session-Token': token() } });
     if (r.status === 401) { logout(); return; }
-    const d = await r.json();
+    const d = await lerJson(r);
     if (!d.ok) { el.innerHTML = `<div class="empty">Erro: ${d.erro || 'desconhecido'}</div>`; return; }
     renderStats(d.stats || {});
     const lista = d.pendentes || [];
@@ -572,6 +604,9 @@ function renderCard(v) {
       <div class="card-info">📦 SKU: <b>${esc(v.sku_a_combinar || '-')}</b></div>
       <div class="card-info">👤 ${esc(v.buyer_nome || '-')} ${v.total_msgs_cliente ? `(${v.total_msgs_cliente} msg${v.total_msgs_cliente > 1 ? 's' : ''})` : ''}</div>
       <div class="card-info">🛒 Venda: ${dataVenda}</div>
+      <div class="card-info card-ids">
+        🔢 Venda <b class="copiavel" title="clique pra copiar" onclick="copiar('${esc(v.order_id)}', this)">#${esc(v.order_id)}</b>${v.pack_id && String(v.pack_id) !== String(v.order_id) ? ` · Pack <b class="copiavel" title="clique pra copiar" onclick="copiar('${esc(v.pack_id)}', this)">#${esc(v.pack_id)}</b>` : ''}${v.bling_pedido_id ? ` · Bling <b class="copiavel" title="clique pra copiar" onclick="copiar('${esc(v.bling_pedido_id)}', this)">#${esc(v.bling_pedido_id)}</b>` : ''}
+      </div>
       ${checadoEm}
       ${v.ultima_resposta_cliente ? `
         <div class="card-resposta">💬 <b>${esc(v.ultima_resposta_cliente).slice(0, 300)}</b>
@@ -588,7 +623,7 @@ function renderCard(v) {
       ` : ''}
       <div class="card-actions">
         <a href="${msgLink}" target="_blank" title="Abre a conversa com o cliente no Mercado Livre">💬 Abrir ML</a>
-        <a href="${orderLink}" target="_blank" title="Abre o detalhe da venda no Mercado Livre">🛒 Venda</a>
+        <a href="${orderLink}" target="_blank" title="Abre o detalhe desta venda no painel de vendedor do ML (mesmo destino do numero acima)">🛒 Venda no ML</a>
         ${botaoML}
         ${botoesBling}
         ${v.processado_manual_em && !v.nf_emitida_em && !_canceladaOuQuar ? `<button title="Desfaz a marca de conclusão manual e devolve a venda pra Pendentes. Use se a NF de fora não saiu, ou se marcou o card errado." onclick="desfazerConclusao('${v.order_id}')">↩️ Desfazer conclusão</button>` : ''}
@@ -609,7 +644,7 @@ async function verificarML(orderId) {
       headers: { 'X-Session-Token': token() }
     });
     if (r.status === 401) { logout(); return; }
-    const d = await r.json();
+    const d = await lerJson(r);
     if (!d.ok) { alert('Erro: ' + (d.erro || 'desconhecido')); return; }
 
     if (d.indeterminado) {
@@ -673,7 +708,7 @@ async function desfazerConclusao(orderId) {
       method: 'POST', headers: { 'X-Session-Token': token() }
     });
     if (r.status === 401) { logout(); return; }
-    const d = await r.json();
+    const d = await lerJson(r);
     if (d.ok) await recarregar();
     else mostrarModal('❌ Não deu', (d.mensagem || d.erro || JSON.stringify(d)), true);
   } catch (e) { mostrarModal('❌ Erro', e.message, true); }
@@ -686,7 +721,7 @@ async function reconhecerAlerta(orderId) {
       method: 'POST', headers: { 'X-Session-Token': token() }
     });
     if (r.status === 401) { logout(); return; }
-    const d = await r.json();
+    const d = await lerJson(r);
     if (d.ok) await recarregar();
     else mostrarModal('❌ Erro', JSON.stringify(d, null, 2), true);
   } catch (e) { mostrarModal('❌ Erro', e.message, true); }
@@ -706,7 +741,7 @@ async function marcarProcessado(orderId) {
       headers: { 'X-Session-Token': token() }
     });
     if (r.status === 401) { logout(); return; }
-    const d = await r.json();
+    const d = await lerJson(r);
     if (d.ok) { await recarregar(); }
     else { alert('Erro: ' + (d.erro || 'desconhecido')); }
   } catch (e) {
@@ -725,7 +760,7 @@ async function recuperarNF(orderId) {
       headers: { 'X-Session-Token': token() }
     });
     if (r.status === 401) { logout(); return; }
-    const d = await r.json();
+    const d = await lerJson(r);
 
     if (d.emitida) {
       mostrarModal('⚠️ NF EMITIDA — mas não registrada',
@@ -764,7 +799,7 @@ async function testarBling(orderId, dryRun) {
       body: '{}'
     });
     if (r.status === 401) { logout(); return; }
-    const d = await r.json();
+    const d = await lerJson(r);
 
     if (d.ok) {
       if (dryRun) {
@@ -806,7 +841,7 @@ async function emitirNF(orderId) {
       body: '{}'
     });
     if (r.status === 401) { logout(); return; }
-    const d = await r.json();
+    const d = await lerJson(r);
 
     // emitida:true = a NF SAIU, so a gravacao falhou. Sem este ramo, o painel dizia que
     // a nota nao saiu e mandava tentar de novo — uma segunda emissao de algo irreversivel.
@@ -852,7 +887,7 @@ async function confirmarCliente(orderId) {
       body: '{}'
     });
     if (r.status === 401) { logout(); return; }
-    const d = await r.json();
+    const d = await lerJson(r);
 
     if (d.ok) {
       if (d.jaConfirmado) {
@@ -891,7 +926,7 @@ async function iaInterpretar(orderId) {
       body: JSON.stringify({ instrucao })
     });
     if (r.status === 401) { logout(); return; }
-    const d = await r.json();
+    const d = await lerJson(r);
 
     if (!d.ok) {
       if (resultDiv) resultDiv.innerHTML = `<div class="instr-erro">❌ ${esc(d.erro || 'falha')} ${d.detalhe ? '— ' + esc(d.detalhe) : ''}</div>`;
@@ -934,7 +969,7 @@ async function substituirPreview(orderId) {
       body: '{}'
     });
     if (r.status === 401) { logout(); return; }
-    const d = await r.json();
+    const d = await lerJson(r);
 
     if (d.erro === 'nao_consegui_ler_pedido') {
       mostrarModalHTML('🔧 Substituição automática', `<div class="instr-erro">❌ Não consegui ler o pedido do cliente automaticamente.<div class="instr-hint2">Texto lido: "${esc(d.texto || '')}". Use o "🧠 Interpretar" digitando os grãos na mão.</div></div>`);
@@ -988,7 +1023,7 @@ async function montarSubstituirAvisar(orderId) {
       body: JSON.stringify({ graos: sub.graos })
     });
     if (r1.status === 401) { logout(); return; }
-    const d1 = await r1.json();
+    const d1 = await lerJson(r1);
     if (!d1.ok) { mostrarModal('❌ Erro ao montar', `${d1.erro || ''}\n\n${JSON.stringify(d1, null, 2)}`, true); return; }
 
     // 2 — emite a NF
@@ -996,7 +1031,7 @@ async function montarSubstituirAvisar(orderId) {
       method: 'POST', headers: { 'X-Session-Token': token(), 'Content-Type': 'application/json' }, body: '{}'
     });
     if (r2.status === 401) { logout(); return; }
-    const d2 = await r2.json();
+    const d2 = await lerJson(r2);
 
     // emitida:true = a NF SAIU, so a gravacao falhou. Sem isto o operador leria que a
     // nota nao saiu e mandaria emitir de novo — segunda NF de algo irreversivel.
@@ -1022,7 +1057,7 @@ async function montarSubstituirAvisar(orderId) {
           method: 'POST', headers: { 'X-Session-Token': token(), 'Content-Type': 'application/json' },
           body: JSON.stringify({ msg: sub.msg })
         });
-        const d3 = await r3.json();
+        const d3 = await lerJson(r3);
         avisoTxt = d3.ok
           ? `\n\n📨 Cliente avisado da substituição (${d3.via}).`
           : `\n\n⚠️ NF saiu, mas o aviso ao cliente FALHOU: ${d3.erro || ''}. Você pode mandar manual no ML.`;
@@ -1053,7 +1088,7 @@ async function montarComNF(orderId, graos) {
       body: JSON.stringify(Array.isArray(graos) && graos.length ? { graos } : {})
     });
     if (r1.status === 401) { logout(); return; }
-    const d1 = await r1.json();
+    const d1 = await lerJson(r1);
     if (!d1.ok) {
       const textoErro = `❌ ERRO ao montar itens (${d1.etapa || 'desconhecida'}):\n\n${d1.erro || ''}\n\n${JSON.stringify(d1, null, 2)}`;
       mostrarModal('❌ Erro ao montar', textoErro, true);
@@ -1067,7 +1102,7 @@ async function montarComNF(orderId, graos) {
       body: '{}'
     });
     if (r2.status === 401) { logout(); return; }
-    const d2 = await r2.json();
+    const d2 = await lerJson(r2);
 
     // emitida:true = a NF SAIU, so a gravacao falhou. Sem este ramo o operador leria
     // "a NF NAO saiu, use Emitir NF de novo" — provocando uma SEGUNDA nota.
