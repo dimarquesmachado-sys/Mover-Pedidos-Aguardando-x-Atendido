@@ -88,6 +88,38 @@ item 2 acima, não um item isolado.
   comentário no código diz que a AMBTotal não vende nesse canal. Não é falta, é ausência de
   operação; mas inverte o sentido do que a tabela antiga sugeria.
 
+## A diferença mais importante NÃO está no código: é a operação física (15/09)
+
+A Girassol tem o **app de Expedição**. A AMB e a GOOD não.
+
+Isso explica o que parecia erro de configuração: hoje, no ambiente de produção, `SIT_VERIFICADO`
+da AMB e da GOOD aponta para o id de **DESPACHADOS** delas (745123 e 749990), enquanto a
+Girassol usa 24.
+
+| empresa | pedido conferido no checkout vai para (env atual) | vira DESPACHADOS quando |
+|---|---|---|
+| Girassol | VERIFICADO (24) | a equipe **bipa na entrega à transportadora**, no app de Expedição |
+| AMB | DESPACHADOS (745123) | na própria conferência — não há etapa depois |
+| GOOD | DESPACHADOS (749990) | idem |
+
+**Importante: 745123 e 749990 são overrides só da env de deploy, não default do repositório.**
+`amb-checkout-offline/base.js:15` e `good-checkout-offline/base.js:15` caem para `24` na
+ausência de `AMBBKP_SIT_VERIFICADO`/`GOODBKP_SIT_VERIFICADO` — o mesmo valor da Girassol — e o
+próprio `padroesEnv` documentado nesses módulos repete `24` como padrão. Se algum dia o deploy
+da AMB ou da GOOD for recriado sem essa variável setada, o checkout volta a mandar o pedido
+conferido para VERIFICADO em vez de DESPACHADOS, e como nenhuma das duas tem o app de Expedição
+pra tirar o pedido de lá depois, ele fica parado nesse estado sem que nada no código acuse o
+problema. Isso não está resolvido neste documento — é um risco de configuração a rastrear
+(garantir que o override esteja setado nos dois deploys), não uma leitura errada da operação.
+
+**Não uniformizar o desenho.** A Girassol tem uma etapa física a mais, então o fluxo dela tem
+um estado a mais. Igualar apagaria a Expedição do desenho — e o sintoma seria pedido marcado
+como despachado antes de sair do galpão.
+
+Vale como regra geral desta fase: **diferença entre empresas nem sempre é dívida.** Quando ela
+espelha uma diferença da operação, é o código estando certo. O jeito de saber é perguntar ao
+dono, não medir o diff — foi assim que esta apareceu.
+
 ## Recomendação
 
 Não extrair o `ciclo.js` inteiro ainda. O caminho com melhor retorno e menor risco:
