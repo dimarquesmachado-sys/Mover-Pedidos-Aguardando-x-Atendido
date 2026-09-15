@@ -84,7 +84,47 @@ const fakeOk = async (c) => {
     assert.ok(spec.caminhos.length || spec.derivar, nome + ': sem caminho e sem forma de derivar, o recurso não descobre nada');
   }
 
-  /* 5. erro de rede num candidato não pode derrubar a descoberta inteira */
+  /* 5. CRUZAMENTO E SUGESTÃO (15/09, do retorno real): os pedidos trazem loja.id mas NÃO o
+     nome — e uma lista de números não diz ao dono qual é o do ML. Os DEPÓSITOS nomeiam os
+     canais ("Shopee 206017368 (Fulfillment)"), então o cruzamento dá nome sem pedir nada.
+     E a sugestão de envs é o passo que tira a digitação: em vez de ler ids e descobrir qual
+     é qual, ele recebe as linhas prontas pra colar no Render. */
+  const fakeReal = async (c) => {
+    if (c === '/depositos') return { status: 200, data: { data: [
+      { id: 1, descricao: 'Geral' }, { id: 2, descricao: 'Shopee 206017368 (Fulfillment)' }, { id: 3, descricao: 'Magalu 206018666 (Fulfillment)' }] } };
+    if (c === '/situacoes/modulos') return { status: 200, data: { data: [{ id: 98310, nome: 'Pedidos de Venda' }] } };
+    if (c === '/situacoes/modulos/98310') return { status: 200, data: { data: [
+      { id: 9, nome: 'Atendido' }, { id: 24, nome: 'Verificado' }, { id: 745122, nome: 'AGUARDANDO' }, { id: 745123, nome: 'DESPACHADOS' }] } };
+    const mp = /pagina=(\d+)/.exec(c);
+    if (mp) return mp[1] === '1' ? { status: 200, data: { data: [
+      { loja: { id: 206017293 } }, { loja: { id: 206017293 } }, { loja: { id: 206017368 } }, { loja: { id: 206018666 } }] } } : { status: 200, data: { data: [] } };
+    return { status: 404, data: null };
+  };
+  const r5 = await criar({ rotulo: 'AMB', blingGet: fakeReal, prefixoEnv: 'AMBBKP_' }).descobrir();
+
+  const porId = Object.fromEntries(r5.recursos.canais_de_venda.itens.map(c => [c.id, c.nome]));
+  assert.strictEqual(porId[206017368], 'Shopee', 'o depósito nomeia o canal da Shopee');
+  assert.strictEqual(porId[206018666], 'Magalu', 'o depósito nomeia o canal da Magalu');
+
+  const env = r5.sugestao.colar_no_render;
+  assert.strictEqual(env.AMBBKP_SITUACAO_ATENDIDO, '9', 'a situação é casada pelo NOME, não por posição');
+  assert.strictEqual(env.AMBBKP_SITUACAO_AGUARDANDO, '745122');
+  assert.strictEqual(env.AMBBKP_SITUACAO_DESPACHADOS, '745123');
+  assert.strictEqual(env.AMBBKP_ME_LOJA_IDS, '206017293',
+    'o ML é o canal mais usado que NÃO foi nomeado como outro marketplace');
+  assert.ok(/confirme/i.test(r5.sugestao.confira),
+    'a sugestão do ML é PALPITE e tem que se declarar como tal — colar id errado faz o F1 ignorar todos os pedidos');
+
+  /* situação que não existe naquele Bling tem que aparecer como não encontrada, nunca
+     casada com a errada por aproximação */
+  const semDespachados = async (c) => (c === '/situacoes/modulos/98310'
+    ? { status: 200, data: { data: [{ id: 9, nome: 'Atendido' }] } } : fakeReal(c));
+  const r6 = await criar({ rotulo: 'X', blingGet: semDespachados, prefixoEnv: 'X_' }).descobrir();
+  assert.ok(r6.sugestao.nao_encontrei.includes('SITUACAO_DESPACHADOS'),
+    'situação ausente tem que ser DECLARADA, não adivinhada por aproximação de nome');
+  assert.strictEqual(r6.sugestao.colar_no_render.X_SITUACAO_DESPACHADOS, undefined);
+
+  /* 6. erro de rede num candidato não pode derrubar a descoberta inteira */
   const fakeExplode = async (c) => { if (c === '/depositos') throw new Error('timeout'); return { status: 200, data: { data: [] } }; };
   const r2 = await criar({ rotulo: 'T', blingGet: fakeExplode }).descobrir();
   assert.ok(r2.recursos.depositos, 'o recurso que falhou tem que aparecer no resultado');
