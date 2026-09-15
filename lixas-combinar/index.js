@@ -406,6 +406,60 @@ function completarQuantidadesInstrucao(instrucao, totalLixas, mult) {
   };
 }
 
+/**
+ * REALOCA pelo ESTOQUE, deterministico, depois que a IA respondeu.
+ * A IA recebe o estoque e a regra, mas nao obedece de forma confiavel: devolvia
+ * "50 do 80" com 20 em estoque, e o operador so descobria no Montar+NF.
+ *   - com regra de substituicao na instrucao: o grao fica com o que ha; a sobra vai pro
+ *     grao mais proximo (valor) que tenha capacidade; empate -> o de cima; repete ate zerar
+ *   - sem regra: devolve a falta pra virar "ambiguo" ANTES do botao aparecer
+ * @returns {{ pedido, notas:string[], faltou:null|string }}
+ */
+function realocarPorEstoque(pedido, graos, temRegra, mult) {
+  const cap = {};   // capacidade restante por grao
+  for (const g of graos) cap[String(g.grao)] = Math.max(0, Number(g.estoque_lixas) || 0);
+  const itens = pedido.map(p => ({ grao: String(p.grao), quantidade: Number(p.quantidade) || 0 }));
+  const notas = [];
+  // 1) reserva o que cabe em cada grao pedido
+  const sobras = [];
+  for (const it of itens) {
+    const disp = cap[it.grao] != null ? cap[it.grao] : Infinity;   // grao sem info: nao barra
+    if (it.quantidade > disp) {
+      sobras.push({ de: it.grao, qtd: it.quantidade - disp });
+      it.quantidade = disp;
+    }
+    if (cap[it.grao] != null) cap[it.grao] -= it.quantidade;
+  }
+  if (!sobras.length) return { pedido: itens, notas, faltou: null };
+  if (!temRegra) {
+    const txt = sobras.map(s => `g${s.de}: faltam ${s.qtd} (tem ${Number(graos.find(g => String(g.grao) === s.de)?.estoque_lixas) || 0})`).join(' · ');
+    return { pedido: itens, notas, faltou: txt };
+  }
+  // 2) realoca cada sobra pro mais proximo com capacidade (em multiplos de `mult`)
+  for (const s of sobras) {
+    let resto = s.qtd;
+    const alvo = Number(s.de);
+    const candidatos = Object.keys(cap)
+      .filter(g => cap[g] >= mult)
+      .sort((x, y) => (Math.abs(Number(x) - alvo) - Math.abs(Number(y) - alvo)) || (Number(y) - Number(x)));
+    for (const g of candidatos) {
+      if (resto <= 0) break;
+      const pode = Math.floor(Math.min(cap[g], resto) / mult) * mult;
+      if (pode <= 0) continue;
+      const ja = itens.find(i => i.grao === g);
+      if (ja) ja.quantidade += pode; else itens.push({ grao: g, quantidade: pode });
+      cap[g] -= pode; resto -= pode;
+      notas.push(`g${s.de} so tinha ${s.qtd === resto + pode ? '' : ''}${Number(graos.find(x => String(x.grao) === s.de)?.estoque_lixas) || 0}: ${pode} foram pro g${g} (o mais proximo com saldo)`);
+    }
+    if (resto > 0) return { pedido: itens, notas, faltou: `nao ha estoque suficiente em nenhum grao pra realocar ${resto} lixas do g${s.de}` };
+  }
+  return { pedido: itens.filter(i => i.quantidade > 0), notas, faltou: null };
+}
+
+function temRegraSubstituicao(txt) {
+  return /mais\s+pr[oó]ximo|mais\s+perto|substitu|troca\s+pel|o\s+que\s+tiver|se\s+n[aã]o\s+tiver|completa\s+com\s+o\s+que/i.test(String(txt || ''));
+}
+
 // ── Router (interface esperada pelo orquestrador raiz) ───────────────
 function routes(readBody) {
   return async function handle(req, res, urlObj) {
@@ -1073,6 +1127,22 @@ function routes(readBody) {
 
         // Se a IA entendeu claro, salva o pedido estruturado pra o botao montar usar.
         let salvo = false;
+        // ESTOQUE, deterministico, em cima do que a IA devolveu
+        let notasEstoque = [];
+        if (iaResult.categoria === 'claro' && Array.isArray(iaResult.pedido_estruturado) && iaResult.pedido_estruturado.length > 0) {
+          const re = realocarPorEstoque(iaResult.pedido_estruturado, graosResult.graos, temRegraSubstituicao(instrucao), unidadesPorPacote);
+          if (re.faltou) {
+            iaResult.categoria = 'ambiguo';
+            iaResult.msg_pra_cliente = `Estoque insuficiente — ${re.faltou}. Diga como redistribuir, ou escreva "se nao tiver, manda o mais proximo" que eu resolvo.`;
+            iaResult.interpretacao = (iaResult.interpretacao || '') + ' [barrado pelo estoque]';
+          } else if (re.notas.length) {
+            iaResult.pedido_estruturado = re.pedido;
+            notasEstoque = re.notas;
+            iaResult.interpretacao = ((iaResult.interpretacao || '') + ' | ' + re.notas.join('; ')).slice(0, 300);
+            console.log(`[ia-instrucao] order ${orderId} realocado pelo estoque: ${re.notas.join('; ')}`);
+          }
+        }
+
         let motivoNaoSalvo = null;
         if (iaResult.categoria === 'claro' && Array.isArray(iaResult.pedido_estruturado) && iaResult.pedido_estruturado.length > 0) {
           const _uIa = await lcp.atualizarVenda(orderId, {
@@ -1102,6 +1172,7 @@ function routes(readBody) {
           pronto_pra_montar: salvo,
           motivo_nao_salvo: motivoNaoSalvo,
           quantidades_inferidas: _comp.inferido ? _comp.inferido.linha : null,
+          realocado_por_estoque: notasEstoque.length ? notasEstoque : null,
           total_interpretado: Array.isArray(iaResult.pedido_estruturado)
             ? iaResult.pedido_estruturado.reduce((s, g) => s + (Number(g.quantidade) || 0), 0)
             : null
