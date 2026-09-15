@@ -235,7 +235,7 @@
 
 <div id="app" style="display:none">
 <header>
-  <h1>🌻 Lixas A COMBINAR <span class="badge">Pendentes</span><span class="ver" style="font-size:11px;font-weight:normal;color:#9ca3af;margin-left:8px;font-family:monospace;">v15/09 · qtd-auto+links</span></h1>
+  <h1>🌻 Lixas A COMBINAR <span class="badge">Pendentes</span><span class="ver" style="font-size:11px;font-weight:normal;color:#9ca3af;margin-left:8px;font-family:monospace;">v15/09 · estoque-auto</span></h1>
   <div class="toolbar">
     <button onclick="recarregar()">🔄 Atualizar</button>
     <span class="user-info" id="user-info"></span>
@@ -932,6 +932,7 @@ async function iaInterpretar(orderId) {
         <div class="instr-ok">
           ✅ <b>IA entendeu:</b> ${esc(linhas)} — <b>total ${d.total_interpretado} lixas</b>
           ${d.quantidades_inferidas ? `<div class="instr-interp">🔢 Quantidades que o sistema completou: ${esc(d.quantidades_inferidas)}</div>` : ''}
+          ${Array.isArray(d.realocado_por_estoque) && d.realocado_por_estoque.length ? `<div class="instr-interp">📦 Ajustado pelo estoque: ${esc(d.realocado_por_estoque.join('; '))}</div>` : ''}
           ${d.interpretacao ? `<div class="instr-interp">${esc(d.interpretacao)}</div>` : ''}
           <button class="btn-full" style="margin-top:8px;width:100%" onclick="montarComNF('${orderId}')">✅ Pedido OK + Emitir NF</button>
         </div>`;
