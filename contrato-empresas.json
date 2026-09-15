@@ -55,7 +55,7 @@
     "      Sugestão do Mover-Pedidos."
   ],
   "versao": 11,
-  "atualizado_em": "2026-09-10",
+  "atualizado_em": "2026-09-14",
   "servicos": {
     "_nota": "os serviços que leem este contrato. `dono_hoje`/`dono_alvo` só podem citar nomes daqui.",
     "lista": [
