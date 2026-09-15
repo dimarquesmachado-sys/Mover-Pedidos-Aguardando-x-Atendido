@@ -151,6 +151,22 @@ const { BLING_BASE, CACHE_DIR, SIT_ATENDIDO, SIT_DESPACHADOS, SIT_VERIFICADO, SY
   ARQUIVO_DIR, ARQUIVO_DIAS, SMTP_HOST, SMTP_PORT, EMAIL_USER, EMAIL_PASS, EMAIL_DEST, SCHEMA, LOJA_MKT, MKT_NOME,
   sleep, ensureDir, readJson, writeJson, dataISO, json, html, manifest, salvarManifest, skuEanCache, locCache, salvarLoc,
   salvarSkuEan, lerIndiceEan, lerReservas, lerOperadores, lerAdmins, ehAdmin, blingGet, blingWrite, moverSituacao } = base;
+
+/* 15/09 — a capacidade "expedicao" e a env de VERIFICADO precisam CONCORDAR. São dois lugares
+   diferentes e nada obriga o segundo a acompanhar o primeiro: declarar a capacidade e esquecer
+   a env deixa o app de Expedição sem nada pra bipar, e o contrário deixa pedido parado num
+   estado sem saída. Os dois são silenciosos — por isso a checagem grita no boot. */
+{
+  const _exp = require('../lib/checkout/conferir-expedicao').conferir({
+    rotulo: 'AMBBKP',
+    temExpedicao: require('../lib/empresas/registro').carregar({ servico: 'mover-pedidos' }).temCapacidade('amb', 'expedicao') === true,
+    SIT_VERIFICADO,
+    /* a Girassol NÃO desestrutura SIT_DESPACHADOS (quem move pra lá é o app de Expedição), e
+       o lint pegou a suposição. Lendo do base direto, funciona nas três. */
+    SIT_DESPACHADOS: require('./base').SIT_DESPACHADOS || 0,
+  });
+  if (!_exp.ok) console.error(_exp.aviso);
+}
 const { parseNF, acharNFporRange, nfDoPedido, serieDaNFdoPedido, carregarNFs, acharNFnaLista, baixarDanfe, parseXmlNF, baixarXmlNF, dadosNFSimp } = require('./nf');
 const { baixarEtiqueta, baixarEtiquetaPDF, labelaryPost, zplParaPdf, etiquetaPdf } = require('./etiquetas');
 // ─── Módulos extraídos (Lote 1: comum/produtos/arquivo/separacao/email-docs) ────────
