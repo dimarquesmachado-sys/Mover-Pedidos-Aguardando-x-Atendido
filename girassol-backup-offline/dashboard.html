@@ -396,7 +396,7 @@ const MOD = '/girassol-backup-offline';
     return _f(u, o);
   };
 })();
-const DASH_BUILD = 'd226';
+const DASH_BUILD = 'd227';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -632,7 +632,16 @@ function renderHistLinhas(iv){
     '<th class="num" title="comissão do marketplace — REAL quando o canal informa; senão a % que você configurou lá embaixo">Tarifa (−)</th><th class="num" title="frete que sai do SEU bolso: real do ML, motoboy do Flex ou estimativa do Bling">Frete vend. (−)</th><th class="num" title="margem de contribuição: venda − imposto − comissão − frete − custo">💎 M.C.</th><th class="num" title="a margem em % sobre o valor dos produtos">MC %</th></tr>'+
     (ps.length? ps.map(function(o){
       const pcm = o.vnota>0 ? Math.round(o.margem/o.vnota*1000)/10 : null;
-      const skus = (o.itens||[]).map(function(i){ return (i.qtd>1?i.qtd+'× ':'')+esc(i.sku||''); }).join('<br>');
+      /* 15/09 (Diego notou que o NOME do produto sumia no período longo): esta tabela mostrava
+         só o SKU, e a quantidade só quando era maior que 1. A tela do dia sempre mostrou o nome
+         e o "1×" — a diferença não era intencional, é a mesma história dos links que sumiam
+         aqui em 20/08: a tabela do BANCO foi ficando pra trás da tabela do cache.
+         Agora usa a mesma régua: quantidade sempre, SKU, e o nome embaixo quando existir. */
+      const skus = (o.itens||[]).map(function(i){
+        const nm = i.descricao || (typeof SKUINFO!=='undefined' && SKUINFO[i.sku] && SKUINFO[i.sku].nome) || '';
+        return '<div style="margin-bottom:3px"><b style="color:#7dd3fc">'+(Number(i.qtd)||1)+'\u00d7</b> '+esc(i.sku||'')+
+               (nm?'<div class="desc">'+esc(nm)+'</div>':'')+'</div>';
+      }).join('');
       return '<tr>'+
         '<td class="dim" style="white-space:nowrap">'+esc(String(o.data||'').slice(8,10)+'/'+String(o.data||'').slice(5,7))+'</td>'+
         /* 20/08 (Diego notou que os links sumiam no período longo): esta tabela vem do BANCO e
