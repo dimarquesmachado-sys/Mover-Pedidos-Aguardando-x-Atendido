@@ -136,10 +136,18 @@ vale a mesma regra do 2.9: medir e classificar antes de fundir.
 4. consolidar rotas em registradores por capacidade
 5. deixar os entrypoints apenas compondo contexto e capacidades
 
-## Fase 4 — painel único orientado a capacidades  ⬜
+## Fase 4 — painel único orientado a capacidades  🔄 COMEÇOU
 
-Os HTMLs ainda são aplicações inteiras por empresa. Shell comum, marca vinda de
-`/api/contexto`, recurso escondido por **capacidade** e não por nome de empresa.
+**Medido em 15/09 e o quadro é melhor do que parecia:** os três `painel.html` têm ~2.000
+linhas cada e diferem em **73 a 109 linhas** com os nomes normalizados — quase tudo MARCA
+(logo em base64, `<title>`, `<h1>`, versão da UI). São o mesmo painel copiado três vezes por
+causa de um logo.
+
+- [x] **`/api/contexto`** (PR #442): cada empresa responde com id, nome, slug e **capacidades
+      vindas do contrato**. É o que permite o HTML perguntar quem ele é em vez de saber.
+      Nada de credencial, caminho ou env na resposta — isto chega no navegador do galpão.
+- [ ] shell comum consumindo `/api/contexto` (marca e recursos por capacidade)
+- [ ] esconder recurso por **capacidade**, nunca por nome de empresa
 
 ## Fase 5 — onboarding declarativo  ✅ FEITA (14/09, PR #439)
 
