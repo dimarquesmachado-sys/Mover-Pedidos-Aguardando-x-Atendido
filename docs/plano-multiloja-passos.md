@@ -157,6 +157,19 @@ falha se algum valor aparecer na saída.
 
 ---
 
+## Antes de ligar uma empresa nova — os dois comandos
+
+```
+node scripts/empresa.js validar <empresa>      # a env EXISTE?     (roda em qualquer lugar)
+node scripts/empresa.js plano <empresa>        # os passos de embarque
+node scripts/preflight-empresa.js <empresa>    # a env FUNCIONA?   (rodar NO RENDER)
+node scripts/preflight-empresa.js <empresa> --escrever   # prova o isolamento do Supabase
+```
+
+A diferença entre `validar` e `preflight` é a que importa: env preenchida com valor errado
+passa no primeiro e quebra no primeiro cron, de madrugada. Nenhum dos dois imprime valor de
+credencial.
+
 ## Itens soltos da auditoria (não bloqueiam as fases)
 
 - [ ] `npm test` apontando para `scripts/verifica.js` (hoje só existe o CI)
