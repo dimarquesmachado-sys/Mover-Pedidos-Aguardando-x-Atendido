@@ -29,6 +29,16 @@ empresa errada.
 
 Esse desenho é o alvo. A AMB ainda usa caminho fixo.
 
+## Estado (14/09, PR #436)
+
+Passos 1 e 2 **feitos**: o histórico virou `lib/checkout/historico.js` e as duas empresas
+passaram a fachadas que declaram o contexto delas. A lib **não tem fallback** — contexto
+incompleto derruba no boot, em vez de a empresa herdar em silêncio o cache, o admin ou o
+cliente Bling da outra (o bug do Codex #197).
+
+Falta o passo 3 (**conferir os números da AMB contra a foto de referência**) e o 4 (**ligar a
+GOOD** — aí ela ganha o dashboard).
+
 ## Caminho recomendado
 
 1. **Ampliar o `ctx`** do histórico da Girassol para cobrir o que a AMB usa de diferente
