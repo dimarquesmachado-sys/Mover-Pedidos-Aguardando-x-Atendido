@@ -11,6 +11,18 @@
 const assert = require('assert');
 const { criar, RECURSOS } = require('../lib/checkout/descobrir-ids');
 
+/* 15/09 — os nomes das envs deixaram de ser montados por prefixo e passaram a vir de quem as
+   LÊ, porque a versão por prefixo sugeria envs que não existiam (AMBBKP_SITUACAO_ATENDIDO
+   quando o código lê AMBBKP_SIT_ATENDIDO). Aqui os nomes são fictícios de propósito: quem
+   garante que os REAIS conferem é scripts/teste-envs-sugeridas-existem.js. */
+const NOMES_AMB = { atendido: 'AMBBKP_SIT_ATENDIDO', aguardando: 'AMB_SITUACAO_AGUARDANDO',
+                    despachados: 'AMBBKP_SIT_DESPACHADOS', verificado: 'AMBBKP_SIT_VERIFICADO',
+                    meLojaIds: 'AMB_ME_LOJA_IDS' };
+const NOMES_A = { atendido: 'A_SIT_ATENDIDO', aguardando: 'A_SITUACAO_AGUARDANDO',
+                  despachados: 'A_SIT_DESPACHADOS', verificado: 'A_SIT_VERIFICADO', meLojaIds: 'A_ME_LOJA_IDS' };
+const NOMES_T = { atendido: 'T_SIT_ATENDIDO', aguardando: 'T_SITUACAO_AGUARDANDO',
+                  despachados: 'T_SIT_DESPACHADOS', verificado: 'T_SIT_VERIFICADO', meLojaIds: 'T_ME_LOJA_IDS' };
+
 assert.throws(() => criar({}), /falta rotulo/);
 
 /* 1. caminho que responde: devolve os itens resumidos */
@@ -100,17 +112,17 @@ const fakeOk = async (c) => {
       { loja: { id: 206017293 } }, { loja: { id: 206017293 } }, { loja: { id: 206017368 } }, { loja: { id: 206018666 } }] } } : { status: 200, data: { data: [] } };
     return { status: 404, data: null };
   };
-  const r5 = await criar({ rotulo: 'AMB', blingGet: fakeReal, prefixoEnv: 'AMBBKP_' }).descobrir();
+  const r5 = await criar({ rotulo: 'AMB', blingGet: fakeReal, envNomes: NOMES_AMB }).descobrir();
 
   const porId = Object.fromEntries(r5.recursos.canais_de_venda.itens.map(c => [c.id, c.nome]));
   assert.strictEqual(porId[206017368], 'Shopee', 'o depósito nomeia o canal da Shopee');
   assert.strictEqual(porId[206018666], 'Magalu', 'o depósito nomeia o canal da Magalu');
 
   const env = r5.sugestao.colar_no_render;
-  assert.strictEqual(env.AMBBKP_SITUACAO_ATENDIDO, '9', 'a situação é casada pelo NOME, não por posição');
-  assert.strictEqual(env.AMBBKP_SITUACAO_AGUARDANDO, '745122');
-  assert.strictEqual(env.AMBBKP_SITUACAO_DESPACHADOS, '745123');
-  assert.strictEqual(env.AMBBKP_ME_LOJA_IDS, '206017293',
+  assert.strictEqual(env.AMBBKP_SIT_ATENDIDO, '9', 'a situação é casada pelo NOME, não por posição');
+  assert.strictEqual(env.AMB_SITUACAO_AGUARDANDO, '745122');
+  assert.strictEqual(env.AMBBKP_SIT_DESPACHADOS, '745123');
+  assert.strictEqual(env.AMB_ME_LOJA_IDS, '206017293',
     'o ML é o canal mais usado que NÃO foi nomeado como outro marketplace');
   assert.ok(/confirme/i.test(r5.sugestao.confira),
     'a sugestão do ML é PALPITE e tem que se declarar como tal — colar id errado faz o F1 ignorar todos os pedidos');
@@ -119,22 +131,22 @@ const fakeOk = async (c) => {
      casada com a errada por aproximação */
   const semDespachados = async (c) => (c === '/situacoes/modulos/98310'
     ? { status: 200, data: { data: [{ id: 9, nome: 'Atendido' }] } } : fakeReal(c));
-  const r6 = await criar({ rotulo: 'X', blingGet: semDespachados, prefixoEnv: 'X_' }).descobrir();
-  assert.ok(r6.sugestao.nao_encontrei.includes('SITUACAO_DESPACHADOS'),
+  const r6 = await criar({ rotulo: 'X', blingGet: semDespachados, envNomes: NOMES_T }).descobrir();
+  assert.ok(r6.sugestao.nao_encontrei.includes('T_SIT_DESPACHADOS'),
     'situação ausente tem que ser DECLARADA, não adivinhada por aproximação de nome');
-  assert.strictEqual(r6.sugestao.colar_no_render.X_SITUACAO_DESPACHADOS, undefined);
+  assert.strictEqual(r6.sugestao.colar_no_render.T_SIT_DESPACHADOS, undefined);
 
   /* 6. IDENTIDADE NO ML (15/09): o /users/me já é chamado 8 a 10 vezes espalhadas por
      empresa, e a GOOD não chamava nenhuma — ela não sabia o próprio seller id. No embarque
      esse é o dado que confirma que o token autorizado é da CONTA CERTA; o erro caro aqui não
      é errar o id, é autorizar a conta de outra empresa e descobrir depois. */
-  const semToken = await criar({ rotulo: 'X', blingGet: fakeReal, prefixoEnv: 'X_' }).descobrir();
+  const semToken = await criar({ rotulo: 'X', blingGet: fakeReal, envNomes: NOMES_T }).descobrir();
   assert.strictEqual(semToken.recursos.mercado_livre.ok, false, 'sem token, não inventa identidade');
   assert.ok(/token do ML/.test(semToken.recursos.mercado_livre.leia || ''), 'tem que dizer POR QUE não descobriu');
   assert.ok(semToken.recursos.depositos.ok, 'a ausência do token do ML não pode derrubar o resto');
 
   const tokenQuebrado = await criar({
-    rotulo: 'X', blingGet: fakeReal, prefixoEnv: 'X_',
+    rotulo: 'X', blingGet: fakeReal, envNomes: NOMES_T,
     garantirTokenML: async () => { throw new Error('token expirado'); },
   }).descobrir();
   assert.strictEqual(tokenQuebrado.recursos.mercado_livre.ok, false);
@@ -158,7 +170,7 @@ const fakeOk = async (c) => {
     if (/orders\/2000012345678901/.test(url)) return { ok: true, json: async () => ({ seller: { id: 3148025116 } }) };
     return { ok: false, status: 404 };
   };
-  const r7 = await criar({ rotulo: 'AMB', blingGet: comPedidoML, prefixoEnv: 'A_', garantirTokenML: async () => 'tok' }).descobrir();
+  const r7 = await criar({ rotulo: 'AMB', blingGet: comPedidoML, envNomes: NOMES_A, garantirTokenML: async () => 'tok' }).descobrir();
   const canalML = r7.recursos.canais_de_venda.itens.find(c => c.id === 206017293);
   assert.strictEqual(canalML.nome, 'Mercado Livre', 'o canal tem que ser PROVADO pelo pedido, não adivinhado');
   assert.ok(/PROVADO/.test(canalML.obs || ''), 'a prova tem que ficar registrada no item');
@@ -171,7 +183,7 @@ const fakeOk = async (c) => {
   /* sem conseguir provar, a ajuda continua — mas declarada como palpite */
   global.fetch = async (url) => (/users\/me/.test(url)
     ? { ok: true, json: async () => ({ id: 3148025116 }) } : { ok: false, status: 403 });
-  const r8 = await criar({ rotulo: 'AMB', blingGet: comPedidoML, prefixoEnv: 'A_', garantirTokenML: async () => 'tok' }).descobrir();
+  const r8 = await criar({ rotulo: 'AMB', blingGet: comPedidoML, envNomes: NOMES_A, garantirTokenML: async () => 'tok' }).descobrir();
   assert.ok(r8.sugestao.colar_no_render.A_ME_LOJA_IDS, 'perder a prova não pode significar perder a sugestão');
   assert.ok(/PALPITE/.test(r8.sugestao.confira), 'sem prova, tem que se declarar palpite');
   global.fetch = globalFetch;
@@ -259,7 +271,7 @@ const fakeOk = async (c) => {
     if (/users\/me/.test(url)) return { ok: true, json: async () => ({ id: 3148025116 }) };
     return { ok: false, status: 403 };   // o ML recusa a consulta do pedido
   };
-  const r11 = await criar2({ rotulo: 'T', blingGet: porFormato, prefixoEnv: 'T_', garantirTokenML: async () => 'tok' }).descobrir();
+  const r11 = await criar2({ rotulo: 'T', blingGet: porFormato, envNomes: NOMES_T, garantirTokenML: async () => 'tok' }).descobrir();
   const c11 = Object.fromEntries(r11.recursos.canais_de_venda.itens.map(c => [c.id, c]));
   assert.ok(/TikTok/.test(c11[111].nome || ''),
     '18 dígitos é TikTok, não Shopee — o padrão da Shopee engolia por aceitar dígito como alfanumérico');
@@ -274,13 +286,13 @@ const fakeOk = async (c) => {
      rejeita ou o /users/me não responde, a prova nem chega a rodar — e era exatamente aí que
      o diagnóstico ficava vazio, no caso MAIS COMUM (token expirado, app sem permissão). */
   global.fetch = async () => ({ ok: false, status: 401 });   // /users/me recusa
-  const r12 = await criar2({ rotulo: 'T', blingGet: porFormato, prefixoEnv: 'T_', garantirTokenML: async () => 'tok' }).descobrir();
+  const r12 = await criar2({ rotulo: 'T', blingGet: porFormato, envNomes: NOMES_T, garantirTokenML: async () => 'tok' }).descobrir();
   assert.strictEqual(r12.recursos.mercado_livre.ok, false);
   assert.ok(r12.sugestao.por_que_nao_provei && r12.sugestao.por_que_nao_provei.length,
     'token/identidade falhando é o caso mais comum — não pode ser o único sem explicação');
   assert.ok(/identidade no ML falhou antes/.test(r12.sugestao.por_que_nao_provei[0].leia || ''));
 
-  const semTokenNenhum = await criar2({ rotulo: 'T', blingGet: porFormato, prefixoEnv: 'T_' }).descobrir();
+  const semTokenNenhum = await criar2({ rotulo: 'T', blingGet: porFormato, envNomes: NOMES_T }).descobrir();
   assert.ok(semTokenNenhum.sugestao.por_que_nao_provei, 'sem token nenhum, também tem que explicar');
   global.fetch = gf;
 
@@ -295,7 +307,7 @@ const fakeOk = async (c) => {
     throw new Error('token caiu durante a prova');   // 2ª chamada: dentro de _provarCanalML
   };
   global.fetch = async (url) => (/users\/me/.test(url) ? { ok: true, json: async () => ({ id: 3148025116 }) } : { ok: false, status: 500 });
-  const r13 = await criar2({ rotulo: 'T', blingGet: porFormato, prefixoEnv: 'T_', garantirTokenML: tokenCaiNaProva }).descobrir();
+  const r13 = await criar2({ rotulo: 'T', blingGet: porFormato, envNomes: NOMES_T, garantirTokenML: tokenCaiNaProva }).descobrir();
   assert.strictEqual(r13.recursos.mercado_livre.ok, true, 'a identidade saiu bem — só a 2ª chamada do token falha');
   assert.ok(r13.sugestao.por_que_nao_provei && r13.sugestao.por_que_nao_provei.length,
     'o token falhando DENTRO da prova (depois de a identidade já ter saído) também precisa aparecer');
