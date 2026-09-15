@@ -72,7 +72,17 @@ GOOD, e o dado estava no XML de toda NF-e autorizada.
    o erro caro do embarque: não é errar o id, é autorizar a conta de outra empresa e só
    descobrir depois. A GOOD não sabia o próprio seller id — agora sabe.
    Faltam **Shopee** e **Magalu**, que têm o mesmo padrão de "quem sou eu".
-3. **Uma página de embarque** que mostre, numa tela: o que já autorizou (✓), o que falta, e o
+3. ✅ **Página de embarque** (15/09):
+
+   ```
+   https://mover-pedidos-aguardando-x-atendido.onrender.com/embarque?k=SUA_ADMIN_KEY
+   ```
+
+   Uma tela com cada empresa e cada conta (Bling, Bling NF, Mercado Livre), marcando ✅ o que
+   já está autorizado e oferecendo o clique no que falta. Lê o token em **disco**: não gasta
+   chamada de API nem dispara renovação de refresh só porque alguém abriu a página.
+
+4. ~~Uma página de embarque~~ que mostre, numa tela: o que já autorizou (✓), o que falta, e o
    botão de cada autorização pendente — hoje é preciso abrir três URLs separadas.
 4. **Gerar a entrada do contrato** por comando, escrevendo **nos dois repositórios**
    (o arquivo é espelhado byte a byte, e errar isso deixa a bateria vermelha dos dois lados).
