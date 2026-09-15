@@ -282,6 +282,25 @@ const fakeOk = async (c) => {
   assert.ok(semTokenNenhum.sugestao.por_que_nao_provei, 'sem token nenhum, também tem que explicar');
   global.fetch = gf;
 
+  /* 11b. o mesmo buraco, um passo mais fundo: _provarCanalML chama garantirTokenML de NOVO,
+     independente da chamada que _identidadeML já fez. Se esse segundo token cair — a
+     identidade já tinha saído bem, então ml.ok é true e o laço da prova de fato começa —
+     o catch devolvia null em silêncio, sem nada em _diagProva. */
+  let chamadasToken = 0;
+  const tokenCaiNaProva = async () => {
+    chamadasToken++;
+    if (chamadasToken === 1) return 'tok';   // 1ª chamada: _identidadeML, sai bem
+    throw new Error('token caiu durante a prova');   // 2ª chamada: dentro de _provarCanalML
+  };
+  global.fetch = async (url) => (/users\/me/.test(url) ? { ok: true, json: async () => ({ id: 3148025116 }) } : { ok: false, status: 500 });
+  const r13 = await criar2({ rotulo: 'T', blingGet: porFormato, prefixoEnv: 'T_', garantirTokenML: tokenCaiNaProva }).descobrir();
+  assert.strictEqual(r13.recursos.mercado_livre.ok, true, 'a identidade saiu bem — só a 2ª chamada do token falha');
+  assert.ok(r13.sugestao.por_que_nao_provei && r13.sugestao.por_que_nao_provei.length,
+    'o token falhando DENTRO da prova (depois de a identidade já ter saído) também precisa aparecer');
+  assert.ok(/token caiu durante a prova/.test(JSON.stringify(r13.sugestao.por_que_nao_provei)),
+    'o motivo relatado tem que ser o erro real, não um "não consegui provar" genérico');
+  global.fetch = gf;
+
   /* 12. erro de rede num candidato não pode derrubar a descoberta inteira */
   const fakeExplode = async (c) => { if (c === '/depositos') throw new Error('timeout'); return { status: 200, data: { data: [] } }; };
   const r2 = await criar({ rotulo: 'T', blingGet: fakeExplode }).descobrir();
