@@ -787,7 +787,9 @@ function routes(readBody) {
       const _k = lerChaveAdmin(req, urlObj);
       if (_k !== process.env.ADMIN_KEY) { json(res, 403, { ok: false, erro: 'chave inválida' }); return true; }
       try {
-        const d = require('../lib/checkout/descobrir-ids').criar({ rotulo: 'AMB', blingGet , prefixoEnv: 'AMBBKP_' });
+        const d = require('../lib/checkout/descobrir-ids').criar({ rotulo: 'AMB', blingGet , /* o token do ML vem do gerenciador fiscal DESTA empresa — o lint pegou que eu
+       supus uma variável `garantirTokenML` solta que não existe aqui. */
+      garantirTokenML: () => require('../ambtotal/mlTokenManager').garantirTokenML(), prefixoEnv: 'AMBBKP_' });
         json(res, 200, await d.descobrir());
       } catch (e) { json(res, 500, { ok: false, erro: String(e.message || e) }); }
       return true;

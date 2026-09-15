@@ -60,8 +60,11 @@ GOOD, e o dado estava no XML de toda NF-e autorizada.
    recurso não responde, em vez de reportar lista vazia — 404 tratado como "não tem nada"
    diria que a empresa não tem depósito, e essa mentira custa horas.
 
-2. **Descobrir o seller id dos marketplaces** (ML, Shopee, Magalu) depois do OAuth — os
-   tokens já permitem perguntar "quem sou eu".
+2. 🔄 **Identidade nos marketplaces** — **ML feito** (15/09): a mesma rota devolve `seller_id`,
+   apelido e e-mail da conta autorizada. Isso confirma que o token é da **conta certa**, que é
+   o erro caro do embarque: não é errar o id, é autorizar a conta de outra empresa e só
+   descobrir depois. A GOOD não sabia o próprio seller id — agora sabe.
+   Faltam **Shopee** e **Magalu**, que têm o mesmo padrão de "quem sou eu".
 3. **Uma página de embarque** que mostre, numa tela: o que já autorizou (✓), o que falta, e o
    botão de cada autorização pendente — hoje é preciso abrir três URLs separadas.
 4. **Gerar a entrada do contrato** por comando, escrevendo **nos dois repositórios**

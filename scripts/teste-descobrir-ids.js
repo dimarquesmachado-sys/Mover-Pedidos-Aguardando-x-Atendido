@@ -124,7 +124,24 @@ const fakeOk = async (c) => {
     'situação ausente tem que ser DECLARADA, não adivinhada por aproximação de nome');
   assert.strictEqual(r6.sugestao.colar_no_render.X_SITUACAO_DESPACHADOS, undefined);
 
-  /* 6. erro de rede num candidato não pode derrubar a descoberta inteira */
+  /* 6. IDENTIDADE NO ML (15/09): o /users/me já é chamado 8 a 10 vezes espalhadas por
+     empresa, e a GOOD não chamava nenhuma — ela não sabia o próprio seller id. No embarque
+     esse é o dado que confirma que o token autorizado é da CONTA CERTA; o erro caro aqui não
+     é errar o id, é autorizar a conta de outra empresa e descobrir depois. */
+  const semToken = await criar({ rotulo: 'X', blingGet: fakeReal, prefixoEnv: 'X_' }).descobrir();
+  assert.strictEqual(semToken.recursos.mercado_livre.ok, false, 'sem token, não inventa identidade');
+  assert.ok(/token do ML/.test(semToken.recursos.mercado_livre.leia || ''), 'tem que dizer POR QUE não descobriu');
+  assert.ok(semToken.recursos.depositos.ok, 'a ausência do token do ML não pode derrubar o resto');
+
+  const tokenQuebrado = await criar({
+    rotulo: 'X', blingGet: fakeReal, prefixoEnv: 'X_',
+    garantirTokenML: async () => { throw new Error('token expirado'); },
+  }).descobrir();
+  assert.strictEqual(tokenQuebrado.recursos.mercado_livre.ok, false);
+  assert.ok(/token expirado/.test(tokenQuebrado.recursos.mercado_livre.erro || ''), 'tem que repassar o motivo real');
+  assert.ok(tokenQuebrado.recursos.situacoes.ok, 'token quebrado não derruba a descoberta do Bling');
+
+  /* 7. erro de rede num candidato não pode derrubar a descoberta inteira */
   const fakeExplode = async (c) => { if (c === '/depositos') throw new Error('timeout'); return { status: 200, data: { data: [] } }; };
   const r2 = await criar({ rotulo: 'T', blingGet: fakeExplode }).descobrir();
   assert.ok(r2.recursos.depositos, 'o recurso que falhou tem que aparecer no resultado');
