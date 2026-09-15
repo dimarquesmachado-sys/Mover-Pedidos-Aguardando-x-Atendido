@@ -39,15 +39,28 @@ GOOD, e o dado estava no XML de toda NF-e autorizada.
 
 ## O que ainda falta automatizar (fila, por retorno)
 
-1. **Descobrir o seller id de cada marketplace** depois do OAuth (ML, Shopee, Magalu). Hoje
-   alguns são configurados à mão; os tokens já permitem perguntar "quem sou eu".
-2. **Uma página de embarque** que mostre, numa tela: o que já autorizou (✓), o que falta, e o
+1. ✅ **Descobrir os ids do Bling** (15/09) — canais de venda, depósitos e situações:
+
+   ```
+   https://mover-pedidos-aguardando-x-atendido.onrender.com/amb-checkout-offline/descobrir-ids?k=SUA_ADMIN_KEY
+   https://mover-pedidos-aguardando-x-atendido.onrender.com/girassol-backup-offline/descobrir-ids?k=SUA_ADMIN_KEY
+   https://mover-pedidos-aguardando-x-atendido.onrender.com/good-checkout-offline/descobrir-ids?k=SUA_ADMIN_KEY
+   ```
+
+   Substitui o mapeamento no DevTools, tela por tela, que foi como as unidades e depósitos da
+   AMB entraram no arquivo de referência. A rota **diz quais caminhos tentou** quando um
+   recurso não responde, em vez de reportar lista vazia — 404 tratado como "não tem nada"
+   diria que a empresa não tem depósito, e essa mentira custa horas.
+
+2. **Descobrir o seller id dos marketplaces** (ML, Shopee, Magalu) depois do OAuth — os
+   tokens já permitem perguntar "quem sou eu".
+3. **Uma página de embarque** que mostre, numa tela: o que já autorizou (✓), o que falta, e o
    botão de cada autorização pendente — hoje é preciso abrir três URLs separadas.
-3. **Gerar a entrada do contrato** por comando, escrevendo **nos dois repositórios**
+4. **Gerar a entrada do contrato** por comando, escrevendo **nos dois repositórios**
    (o arquivo é espelhado byte a byte, e errar isso deixa a bateria vermelha dos dois lados).
-4. **Checkout declarativo** — bloqueador nº 2 da auditoria. Enquanto não existir, a empresa
+5. **Checkout declarativo** — bloqueador nº 2 da auditoria. Enquanto não existir, a empresa
    nova ganha fiscal e histórico sem pasta, mas o checkout ainda precisa de uma.
-5. **Painel por capacidades** — base pronta (`/api/contexto`); falta o shell comum.
+6. **Painel por capacidades** — base pronta (`/api/contexto`); falta o shell comum.
 
 ## Sequência segura, quando for ligar de verdade
 
