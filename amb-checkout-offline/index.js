@@ -778,6 +778,13 @@ const _noturna = criarNoturna({
 });
 
 function routes(readBody) {
+  /* criado DENTRO do routes porque o `readBody` chega como parâmetro dele — o lint pegou
+     que eu tinha posto a criação no topo do arquivo, onde ele não existe. */
+  const _rotasSeparacao = require('../lib/checkout/rotas-separacao').criar({
+    prefixo: '/amb-checkout-offline', json, readBody, readJson, writeJson, blingGet, blingWrite, lerReservas,
+    locCache, localizacaoDeProduto, salvarLoc, montarSeparacao, montarSeparacaoPorPedido,
+    RESERVAS_FILE, LOC_LOG_FILE,
+  });
 
   // histórico/análise: histCache vai por REFERÊNCIA — o backfill e o /backfill-limpar
   // esvaziam esse mesmo objeto aqui no index e isso tem que valer lá dentro também.
@@ -865,6 +872,8 @@ function routes(readBody) {
        não valida sessão sozinho, e antes da guarda ficava aberta pra buscar-produto
        e indexar-status sem cookie nenhum. */
     if (await _rotasCatalogo(req, res, urlObj, method)) return true;
+      /* mesma posição da de catálogo: DEPOIS do portão de sessão (Codex #480). */
+      if (await _rotasSeparacao(req, res, urlObj, method)) return true;
 
     // ── SONDA DE UNIDADE DE NEGÓCIO (temporária, diagnóstico) ───────────
     // Objetivo: descobrir ONDE, no JSON do pedido da API do Bling, aparece a
@@ -4312,36 +4321,10 @@ function routes(readBody) {
     }
 
     // salva a localização de um SKU no Bling (PATCH /produtos/{id}) + atualiza o cache + registra quem editou
-    if (method === 'POST' && p === '/amb-checkout-offline/salvar-localizacao') {
-      let body = {};
-      try { body = await readBody(req); } catch (e) {}
-      const sku = String(body.sku || '').trim();
-      const localizacao = String(body.localizacao == null ? '' : body.localizacao).trim();
-      const op = String(body.op || '').trim();
-      if (!sku || sku === '(sem SKU)') { json(res, 200, { ok: false, erro: 'SKU inválido' }); return true; }
-      const busca = await blingGet(`/produtos?codigo=${encodeURIComponent(sku)}&limite=1`);
-      const item = busca.ok && busca.data && busca.data.data && busca.data.data[0];
-      if (!item || !item.id) { json(res, 200, { ok: false, erro: 'produto não encontrado p/ SKU ' + sku }); return true; }
-      const patch = await blingWrite('PATCH', `/produtos/${item.id}`, { estoque: { localizacao } });
-      if (!patch.ok) { json(res, 200, { ok: false, erro: (patch.data && patch.data.error && (patch.data.error.description || patch.data.error.type)) || ('erro Bling ' + patch.status) }); return true; }
-      const locC = locCache();
-      const locAntiga = locC[sku] || localizacaoDeProduto(item) || '';
-      locC[sku] = localizacao; salvarLoc(locC);
-      const log = readJson(LOC_LOG_FILE, []);
-      log.push({ op: op || '?', sku, de: locAntiga, para: localizacao, em: new Date().toISOString() });
-      if (log.length > 3000) log.splice(0, log.length - 3000);    // mantém os últimos 3000
-      writeJson(LOC_LOG_FILE, log);
-      console.log(`[AMBBKP] localização ${sku}: "${locAntiga}" → "${localizacao}" por ${op || '?'}`);
-      json(res, 200, { ok: true, sku, localizacao, de: locAntiga });
-      return true;
-    }
+
 
     // auditoria: log de edições de localização (quem mudou o quê e quando). uso: /localizacoes-log
-    if (method === 'GET' && p === '/amb-checkout-offline/localizacoes-log') {
-      const log = readJson(LOC_LOG_FILE, []);
-      json(res, 200, { ok: true, total: log.length, log: log.slice(-500).reverse() });
-      return true;
-    }
+
 
     // busca um produto por SKU ou EAN (telinha de consulta/edição de localização do estoquista)
 
@@ -4442,16 +4425,8 @@ function routes(readBody) {
     }
 
     // LISTA DE SEPARAÇÃO — agregado de itens a separar (do cache). ?mkt=ml|shopee|... ou vazio = todos
-    if (method === 'GET' && p === '/amb-checkout-offline/separacao') {
-      const mkt = urlObj.searchParams.get('mkt');
-      json(res, 200, montarSeparacao(mkt && mkt !== 'todos' ? mkt : null));
-      return true;
-    }
-    if (method === 'GET' && p === '/amb-checkout-offline/separacao-por-pedido') {
-      const mkt = urlObj.searchParams.get('mkt');
-      json(res, 200, montarSeparacaoPorPedido(mkt && mkt !== 'todos' ? mkt : null));
-      return true;
-    }
+
+
 
     // HISTÓRICO — últimos pedidos finalizados (do conferidos.json), mais recentes primeiro
     // 11/08: a rota /historico INLINE foi REMOVIDA daqui.
@@ -4713,32 +4688,10 @@ function routes(readBody) {
     }
 
     // RESERVA um pedido p/ um operador (presença entre PCs — quadradinho colorido tipo Bling)
-    if (method === 'POST' && p === '/amb-checkout-offline/reservar') {
-      const body = await readBody(req);
-      const id = String(body.id || '');
-      const user = String(body.user || '').trim();
-      if (!id) { json(res, 400, { erro: 'id obrigatório' }); return true; }
-      const r = lerReservas();
-      const dono = r[id] && r[id].user;
-      if (dono && user && dono !== user && !body.forcar) {   // já tem OUTRO operador nesse pedido
-        json(res, 200, { ok: false, reservado_por: dono, em: r[id].em });
-        return true;
-      }
-      r[id] = { user, em: new Date().toISOString() };
-      writeJson(RESERVAS_FILE, r);
-      json(res, 200, { ok: true });
-      return true;
-    }
+
 
     // LIBERA a reserva (ao voltar pra lista / finalizar)
-    if (method === 'POST' && p === '/amb-checkout-offline/liberar') {
-      const body = await readBody(req);
-      const id = String(body.id || '');
-      const r = lerReservas();
-      if (r[id]) { delete r[id]; writeJson(RESERVAS_FILE, r); }
-      json(res, 200, { ok: true });
-      return true;
-    }
+
 
     // REABRIR um pedido finalizado por engano: tira da fila de conferidos → volta pra lista.
     // Aceita o bling_id OU o número visível. Se já tinha ido pra VERIFICADO, devolve pra ATENDIDO no Bling.

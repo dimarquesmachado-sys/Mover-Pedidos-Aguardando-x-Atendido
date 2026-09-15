@@ -38,7 +38,12 @@ As quase-idênticas, com a distância: `/backfill-nf-auto` (4), `/ciclo-agora` (
   `lib/checkout/rotas-catalogo.js`. Escolhidas por coesão, não por tamanho: buscar produto usa
   o índice de EAN que as outras duas constroem e acompanham.
 
-Faltam 15 das idênticas e as 6 quase-idênticas.
+- ✅ **separação e localização** (PR #482): `/salvar-localizacao`, `/localizacoes-log`,
+  `/separacao`, `/separacao-por-pedido`, `/reservar` e `/liberar` →
+  `lib/checkout/rotas-separacao.js`. Primeira fatia escolhida já com o critério dos **dois
+  lados**: corpo idêntico **e** todas depois do portão de sessão nas três empresas.
+
+Faltam 9 das idênticas e as 6 quase-idênticas.
 
 ## O critério mudou depois da primeira fatia (P1 do Codex no #480)
 
