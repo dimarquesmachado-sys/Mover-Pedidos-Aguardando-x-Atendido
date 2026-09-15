@@ -354,6 +354,58 @@ async function checarMlAntesDeEscrever(orderId, lcp, opts) {
 // se reiniciar, recomeca do zero e a varredura continua completa ao longo das cargas).
 let _curReconc = 0;
 
+/**
+ * COMPLETA AS QUANTIDADES da instrucao do vendedor ANTES de mandar pra IA.
+ * O prompt pede "divida igualmente quando nao houver quantidade", mas o modelo nao
+ * obedece de forma confiavel e devolve "quanto de cada?" — o vendedor entrou pra
+ * resolver, nao pra ser perguntado. Aqui e deterministico:
+ *   - "grao 150 e grao 80, se nao tiver manda o mais proximo"  -> 50 do 150 e 50 do 80
+ *   - "grao 150 e grao 80, 50 de cada"                          -> 50 do 150 e 50 do 80
+ *   - "50 do 150 e 50 do 80" (ja tem quantidades)               -> intocado
+ * Devolve a instrucao original + uma linha explicita de quantidades (a IA ainda faz a
+ * substituicao/estoque em cima disso). Nunca substitui o texto do vendedor.
+ */
+function completarQuantidadesInstrucao(instrucao, totalLixas, mult) {
+  const txt = String(instrucao || '');
+  // graos citados: "grao 150", "grão 80", "g150", "do 150", "de 80"
+  const graos = [];
+  for (const m of txt.matchAll(/(?:gr[aã]o\s*|\bg|\b(?:do|de)\s+)(\d{2,4})\b/gi)) {
+    if (!graos.includes(m[1])) graos.push(m[1]);
+  }
+  // "N de cada" / "N cada" / "N por grao" -> N em cada grao
+  const cada = txt.match(/\b(\d{1,3})\s*(?:un|unidades|lixas)?\s*(?:de\s+)?(?:cada|por\s+gr[aã]o)\b/i);
+  // Com "N de cada" na frase, numeros soltos de 2-4 digitos sao graos ("20 de cada: 24, 80, 120")
+  if (cada) {
+    for (const m of txt.matchAll(/\b(\d{2,4})\b/g)) {
+      if (m[1] !== cada[1] && !graos.includes(m[1])) graos.push(m[1]);
+    }
+  }
+  if (!graos.length) return { instrucao: txt, inferido: null };
+  // ja tem quantidade explicita por grao? "50 do 80", "50 de g80", "50un g80", "50x g80".
+  // O CONECTOR e obrigatorio: sem ele, "150" casava como quantidade 1 + grao 50.
+  const temQtdPorGrao = /\b\d{1,3}\s*(?:un|unidades|lixas)?\s*(?:x\s*|(?:do|de|no)\s+|un\s+)g?\s*(?:gr[aã]o\s*)?\d{2,4}\b/i.test(txt);
+
+  let qtds = null, motivo = null;
+  if (cada) {
+    const n = Number(cada[1]);
+    qtds = graos.map(g => ({ grao: g, quantidade: n }));
+    motivo = `"${cada[0].trim()}" = ${n} em cada grao citado`;
+  } else if (!temQtdPorGrao) {
+    // divide igual em multiplos de `mult`, sobra no primeiro citado
+    const base = Math.floor(totalLixas / graos.length / mult) * mult;
+    let sobra = totalLixas - base * graos.length;
+    qtds = graos.map((g, i) => ({ grao: g, quantidade: base + (i === 0 ? sobra : 0) }));
+    motivo = `sem quantidade na instrucao: dividido igualmente (${totalLixas} em ${graos.length} graos)`;
+  }
+  if (!qtds) return { instrucao: txt, inferido: null };
+
+  const linha = qtds.map(q => `${q.quantidade} do ${q.grao}`).join(' e ');
+  return {
+    instrucao: `${txt}\n\n[QUANTIDADES — ${motivo}]: ${linha}. Aplique a regra de substituicao/estoque da instrucao sobre estas quantidades.`,
+    inferido: { quantidades: qtds, motivo, linha }
+  };
+}
+
 // ── Router (interface esperada pelo orquestrador raiz) ───────────────
 function routes(readBody) {
   return async function handle(req, res, urlObj) {
@@ -1003,8 +1055,10 @@ function routes(readBody) {
         // de cliente). O classificador entra em modoVendedor — nunca cai em fora_escopo;
         // a palavra do vendedor prevalece sobre a conversa do cliente (que vira so contexto).
         const ia = require('./iaCliente');
+        const _comp = completarQuantidadesInstrucao(instrucao, totalLixas, unidadesPorPacote);
+        if (_comp.inferido) console.log(`[ia-instrucao] order ${orderId} quantidades completadas: ${_comp.inferido.linha} (${_comp.inferido.motivo})`);
         const iaResult = await ia.interpretarRespostaCliente({
-          mensagemCliente: instrucao,
+          mensagemCliente: _comp.instrucao,
           descricaoProduto: graosResult.descricao,
           totalLixas,
           unidadesPorPacote,
@@ -1047,6 +1101,7 @@ function routes(readBody) {
           msg_ia: iaResult.msg_pra_cliente || null,
           pronto_pra_montar: salvo,
           motivo_nao_salvo: motivoNaoSalvo,
+          quantidades_inferidas: _comp.inferido ? _comp.inferido.linha : null,
           total_interpretado: Array.isArray(iaResult.pedido_estruturado)
             ? iaResult.pedido_estruturado.reduce((s, g) => s + (Number(g.quantidade) || 0), 0)
             : null
