@@ -621,12 +621,18 @@ async function _resumoDoShipment(shippingId) {
     // e sido cancelado ali. Usar esse marco criava alerta urgente falso — card vermelho
     // de "nao despachar" pra pacote que nunca teve etiqueta. Exige prova real: carimbo
     // de impressao, substatus imprimivel, ou ter chegado a ser postado.
+    // ★ 'ready_to_print' = etiqueta DISPONIVEL pra imprimir, NAO etiqueta gerada. No Flex
+    // isso acontece no instante em que a venda e paga — antes de o cliente escolher os
+    // graos e antes da NF. Tratar como "gerada" (versao anterior) mandava a venda pro
+    // bolsao Resolvidos e bloqueava a leitura da resposta do cliente: G100 chegou, foi
+    // descartado em silencio, 6 dias de atraso. So conta como etiqueta com PROVA de
+    // impressao (carimbo ou substatus 'printed') ou postagem.
     const jaImprimiu = !!(d.date_first_printed || d.date_printed
-                          || sub === 'printed' || sub === 'ready_to_print'
+                          || sub === 'printed'
                           || (d.status_history && (d.status_history.date_first_printed
                                                    || d.status_history.date_shipped)));
     const temEtiqueta = postado
-                     || (st === 'ready_to_ship' && !SEM_ETIQUETA_AINDA.includes(sub))
+                     || (st === 'ready_to_ship' && jaImprimiu)
                      || (st === 'cancelled' && jaImprimiu);
 
     return {
