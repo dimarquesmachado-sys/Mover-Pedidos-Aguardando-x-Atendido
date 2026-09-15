@@ -354,7 +354,42 @@ const fakeOk = async (c) => {
   const canal = r.recursos.canais_de_venda.itens.find(c => c.id === 203296034);
   assert2.strictEqual(canal.nome, 'Mercado Livre', 'o vendedor tem que ser achado no pedido DENTRO do pacote');
   assert2.ok(/PROVADO/.test(canal.obs || ''), 'isso conta como PROVA, não como dedução por formato');
+  assert2.ok(/\/packs → \/orders\/5551234/.test(canal.obs || ''),
+    'o obs tem que registrar o CAMINHO real da prova (pedido de dentro do pacote), não o /packs de fora');
   assert2.ok(/PROVADO/.test(r.sugestao.confira), 'e a sugestão deixa de ser palpite');
-  global.fetch = guardado;
   console.log('OK: prova pelo pacote — quando /orders dá 404 e o pacote não traz vendedor, segue pro pedido de dentro');
+
+  /* ─── Codex (#464): O PACOTE PODE TER MAIS DE UM PEDIDO ─────────────────────
+     O apontamento: se o pacote trouxer vários pedidos e o PRIMEIRO falhar (404, cancelado),
+     parar em `orders[0]` jogava fora a prova mesmo com outro pedido do MESMO pacote provando
+     o vendedor. Este teste tem um pacote com 2 pedidos: o primeiro devolve 404, o segundo
+     prova o vendedor — e o resultado tem que achar o segundo em vez de desistir no primeiro.
+     Roda DENTRO do mesmo IIFE (não em um novo, concorrente) porque os blocos deste arquivo
+     compartilham `global.fetch` como estado global: um novo IIFE não-esperado corre junto com
+     este e um pisa no mock do outro antes do await resolver. */
+  const NOMES_Y = { atendido: 'Y_SIT_ATENDIDO', aguardando: 'Y_SITUACAO_AGUARDANDO',
+                    despachados: 'Y_SIT_DESPACHADOS', verificado: 'Y_SIT_VERIFICADO', meLojaIds: 'Y_ME_LOJA_IDS' };
+  global.fetch = async (url) => {
+    if (/users\/me/.test(url)) return { ok: true, json: async () => ({ id: 397644542 }) };
+    if (/\/orders\/9000000000001$/.test(url)) return { ok: false, status: 404 };
+    if (/\/packs\/9000000000001$/.test(url)) return { ok: true, json: async () => ({ orders: [{ id: 111 }, { id: 222 }] }) };
+    if (/\/orders\/111$/.test(url)) return { ok: false, status: 404 };                          // 1º pedido do pacote falha
+    if (/\/orders\/222$/.test(url)) return { ok: true, json: async () => ({ seller: { id: 397644542 } }) };   // 2º prova
+    return { ok: false, status: 404 };
+  };
+  const blingY = async (c) => {
+    if (c === '/depositos') return { status: 200, data: { data: [] } };
+    if (c === '/situacoes/modulos') return { status: 404, data: null };
+    if (/\/pedidos\/vendas\/\d+$/.test(c)) return { status: 200, data: { data: { numeroPedidoLoja: '9000000000001' } } };
+    const mp = /pagina=(\d+)/.exec(c);
+    if (mp) return mp[1] === '1' ? { status: 200, data: { data: [{ id: 1, loja: { id: 203296099 } }] } } : { status: 200, data: { data: [] } };
+    return { status: 404, data: null };
+  };
+  const rY = await criarP({ rotulo: 'GOOD', blingGet: blingY, envNomes: NOMES_Y, garantirTokenML: async () => 'tok' }).descobrir();
+  const canalY = rY.recursos.canais_de_venda.itens.find(c => c.id === 203296099);
+  assert2.strictEqual(canalY.nome, 'Mercado Livre',
+    'o 1º pedido do pacote falhou, mas o 2º prova o vendedor — não pode desistir no primeiro');
+  assert2.ok(/\/packs → \/orders\/222/.test(canalY.obs || ''), 'o obs tem que apontar o pedido que REALMENTE provou (222), não o 111');
+  global.fetch = guardado;
+  console.log('OK: prova pelo pacote — percorre todos os pedidos do pacote antes de desistir');
 })().catch(e => { console.error(e.message); process.exit(1); });
