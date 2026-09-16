@@ -56,12 +56,17 @@ const ENVS_OPCIONAIS = {
    herdado como padrão no boot, então marcar a env como obrigatória fazia "validar" dizer
    "NÃO está pronta" pra empresa que subia e funcionava.
 
-   16/09 (Codex #485, P2) — o padrão herdado SAIU de lib/fiscal/bling-api.js (ver o throw lá):
-   as TRÊS empresas com pasta agora derrubam o boot sem a env própria, exatamente como quem é
-   montada sem pasta por lib/fiscal/montar-empresa.js já fazia. A distinção que justificava
-   LOJAS_COM_PASTA desapareceu com o padrão — manter esta lista faria "validar good" dizer
-   "pronta pra subir" pra uma empresa que quebra no primeiro require. ME_LOJA_IDS agora é
-   obrigatória pra QUALQUER empresa com a capacidade fiscal, pasta ou não. */
+   16/09 (Codex #485, P2) — o padrão herdado SAIU de lib/fiscal/bling-api.js (ver o throw lá
+   dentro de canaisDeclarados()). Isso NÃO derruba mais o boot das três empresas com pasta —
+   a proteção mudou de lugar na 2ª rodada do mesmo dia (do boot pro USO, pra não levar as
+   outras duas junto nem deixar o CI vermelho sem env). O servidor sobe sem o canal; quem
+   recusa é a decisão do F1/F2/F3, a cada ciclo, com a causa no log.
+   Mesmo assim ME_LOJA_IDS continua obrigatória AQUI, no "validar": subir sem ela é subir com
+   a fiscal desligada por trás de um health check verde, e "validar" é o portão que existe
+   pra pegar isso ANTES do deploy — não pra copiar o que o boot faz. A distinção que
+   justificava LOJAS_COM_PASTA (padrão herdado só pras três com pasta) desapareceu; manter a
+   lista faria "validar good" dizer "pronta pra subir" pra uma empresa sem canal nenhum.
+   ME_LOJA_IDS é obrigatória pra QUALQUER empresa com a capacidade fiscal, pasta ou não. */
 
 function _capacidades(registro, id) {
   const todas = Object.keys(ENVS_POR_CAPACIDADE);
