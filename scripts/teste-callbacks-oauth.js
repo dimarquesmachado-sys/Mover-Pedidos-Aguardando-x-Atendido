@@ -1,4 +1,12 @@
 'use strict';
+
+/* 16/09 — o id de canal do ML deixou de ter padrão no código: empresa sem a env julgava os
+   pedidos dela pelo canal de OUTRA, em silêncio. Este teste montava o módulo fiscal sem
+   definir a env e passava APOIADO nesse padrão — ou seja, ele provava menos do que parecia.
+   Definir aqui explicita a dependência que o código sempre teve. */
+for (const n of ['ME_LOJA_IDS', 'AMB_ME_LOJA_IDS', 'GOOD_ME_LOJA_IDS', 'QUARTA_ME_LOJA_IDS', 'NOVA_ME_LOJA_IDS', 'X_ME_LOJA_IDS', 'TESTE_ME_LOJA_IDS']) {
+  if (!process.env[n]) process.env[n] = '111222333';
+}
 /* Passo 2.9, 1º achado (13/09): a Girassol não tinha a rota de CALLBACK do Bling.
    AMB e GOOD já tinham: o navegador volta da autorização com o `code` na URL e o token é
    gerado sozinho. Na Girassol, quem autorizava precisava copiar o código da barra de

@@ -16,7 +16,17 @@ const { garantirTokenML } = require('./mlTokenManager');
 const BLING_API = 'https://api.bling.com.br/Api/v3';
 const ML_API    = 'https://api.mercadolibre.com';
 
-const LOJA_ID            = parseInt((process.env.ME_LOJA_IDS || '203146903').split(',')[0]);
+/* 16/09 — este padrão é o id da PRÓPRIA Girassol, então nunca foi contaminação cruzada como
+   o do bling-api (que era o da AMB). Mesmo assim vira env obrigatória: id de canal cravado em
+   código é dado de conta dentro de lógica, e a env já existe e está certa em produção — a
+   rota /descobrir-ids provou o canal contra a conta do ML. */
+const LOJA_ID = (() => {
+  const v = String(process.env.ME_LOJA_IDS || '').trim();
+  if (!v) throw new Error('[GIRASSOL importarPedido] falta ME_LOJA_IDS — rode /girassol-backup-offline/descobrir-ids pra obter o id do canal');
+  const n = parseInt(v.split(',')[0], 10);
+  if (!n || isNaN(n)) throw new Error('[GIRASSOL importarPedido] ME_LOJA_IDS sem id válido: "' + v + '"');
+  return n;
+})();
 const INTERMEDIADOR_CNPJ = process.env.NF_INTERMEDIADOR_CNPJ || '03007331000141';
 const INTERMEDIADOR_NOME = process.env.NF_INTERMEDIADOR_NOME || 'MAGAZINEGIRASSOL';
 
