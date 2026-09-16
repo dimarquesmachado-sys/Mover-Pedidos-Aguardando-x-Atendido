@@ -20,13 +20,22 @@ const ML_API    = 'https://api.mercadolibre.com';
    o do bling-api (que era o da AMB). Mesmo assim vira env obrigatória: id de canal cravado em
    código é dado de conta dentro de lógica, e a env já existe e está certa em produção — a
    rota /descobrir-ids provou o canal contra a conta do ML. */
+/* 16/09 — o padrão aqui era o id da PRÓPRIA Girassol, então nunca foi contaminação cruzada
+   como o do bling-api (que era o da AMB). Mesmo assim o id sai do código: é dado de conta
+   dentro de lógica.
+   Mas a checagem NÃO pode lançar na carga do módulo — isso derruba o boot pelo require, e o
+   servidor inteiro cai porque UMA empresa não declarou o canal. Quem usa é que exige. */
 const LOJA_ID = (() => {
-  const v = String(process.env.ME_LOJA_IDS || '').trim();
-  if (!v) throw new Error('[GIRASSOL importarPedido] falta ME_LOJA_IDS — rode /girassol-backup-offline/descobrir-ids pra obter o id do canal');
-  const n = parseInt(v.split(',')[0], 10);
-  if (!n || isNaN(n)) throw new Error('[GIRASSOL importarPedido] ME_LOJA_IDS sem id válido: "' + v + '"');
-  return n;
+  const n = parseInt(String(process.env.ME_LOJA_IDS || '').trim().split(',')[0], 10);
+  return (n && !isNaN(n)) ? n : null;
 })();
+function lojaIdObrigatorio() {
+  if (!LOJA_ID) {
+    throw new Error('[GIRASSOL importarPedido] falta ME_LOJA_IDS — rode ' +
+      '/girassol-backup-offline/descobrir-ids (prova o canal contra a conta do ML) e cole o valor no Render');
+  }
+  return LOJA_ID;
+}
 const INTERMEDIADOR_CNPJ = process.env.NF_INTERMEDIADOR_CNPJ || '03007331000141';
 const INTERMEDIADOR_NOME = process.env.NF_INTERMEDIADOR_NOME || 'MAGAZINEGIRASSOL';
 
@@ -242,7 +251,7 @@ async function testarImportarPedido(numeroML, confirmar = false) {
   const payload = {
     numeroLoja: String(numeroML),
     data: dataPedido,
-    loja: { id: LOJA_ID },
+    loja: { id: lojaIdObrigatorio() },
     contato: contato ? { id: contato.id } : undefined,
     itens: itensBling,
     intermediador: { cnpj: INTERMEDIADOR_CNPJ, nomeUsuario: INTERMEDIADOR_NOME },
