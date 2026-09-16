@@ -70,6 +70,19 @@ for (const arq of ['amb-checkout-offline/ciclo.js', 'girassol-backup-offline/cic
   assert.ok(/ultimo_tropeco/.test(b2), arq + ': o tropeço tem que ficar num campo separado');
 }
 
+/* Codex #484, 2ª rodada: o mesmo buraco de "corpo ilegível" existia TAMBÉM na indexação, e
+   lá o estrago é maior — na rota o dono lê uma mensagem errada; na indexação o índice é
+   publicado truncado e a busca fica cega. Eu tinha fechado num lugar e deixado no outro.
+   Regra que este teste guarda: resposta OK com corpo que não dá pra ler NÃO é lista vazia. */
+for (const arq of ['amb-checkout-offline/ciclo.js', 'girassol-backup-offline/ciclo.js', 'good-checkout-offline/ciclo.js']) {
+  const s = fs.readFileSync(path.join(raiz, arq), 'utf8');
+  const b3 = /async function indexarCatalogoCompleto[\s\S]*?\n\}/.exec(s)[0];
+  assert.ok(!/const itens = \(r\.data && r\.data\.data\) \|\| \[\]/.test(b3),
+    arq + ': o `|| []` transforma corpo ilegível em lista vazia, e o break lê isso como "acabou o catálogo"');
+  assert.ok(/!Array\.isArray\(r\.data\.data\)/.test(b3),
+    arq + ': falta conferir que o corpo veio no formato esperado antes de usá-lo');
+}
+
 /* (3) resposta que chegou mas não foi ENTENDIDA também não é ausência */
 {
   const s = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'rotas-separacao.js'), 'utf8');

@@ -106,8 +106,24 @@ async function indexarCatalogoCompleto() {
         throw new Error('indexação abortada na página ' + pagina + ': HTTP ' + r.status +
                         ' — o índice anterior foi preservado');
       }
-      tentativas = 0;                                  // a página veio: zera o contador
-      const itens = (r.data && r.data.data) || [];
+      /* Codex #484, 2ª rodada: 2xx com corpo ILEGÍVEL (JSON quebrado ou formato inesperado)
+         deixa `ok: true` e `data` null — e este `|| []` transformava isso em lista vazia,
+         que o `break` lia como "acabou o catálogo". Exatamente o mesmo buraco que eu tinha
+         acabado de fechar na rota de localização, e aqui o estrago é maior: lá o dono lê uma
+         mensagem errada; aqui o índice é publicado truncado e a busca fica cega.
+         Não basta a resposta ter CHEGADO, nem ter vindo OK: ela precisa ter sido ENTENDIDA. */
+      if (!r.data || !Array.isArray(r.data.data)) {
+        if (tentativas < 3) {
+          tentativas++;
+          idxStatus.ultimo_tropeco = 'página ' + pagina + ' veio OK mas ilegível (tentativa ' + tentativas + ' de 3)';
+          await sleep(PAUSA * 4 * tentativas);
+          continue;                                    // MESMA página
+        }
+        throw new Error('indexação abortada na página ' + pagina +
+                        ': o Bling respondeu OK mas o corpo não pôde ser lido — o índice anterior foi preservado');
+      }
+      tentativas = 0;                                  // a página veio E foi lida: zera o contador
+      const itens = r.data.data;
       if (!itens.length) break;                        // agora isto significa mesmo "acabou"
       for (const it of itens) {
         idxStatus.feitos++;
