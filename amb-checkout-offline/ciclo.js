@@ -79,11 +79,32 @@ async function indexarCatalogoCompleto() {
   const novo = lerIndiceEan();                       // parte do que já existe
   const PAUSA = Number(process.env.AMBBKP_PAUSA_MS || 700);
   try {
-    let pagina = 1;
+    let pagina = 1, tentativas = 0;
     while (pagina <= 500) {                           // trava de segurança
       const r = await blingGet(`/produtos?pagina=${pagina}&limite=100`);
-      const itens = (r.ok && r.data && r.data.data) || [];
-      if (!itens.length) break;
+      /* 16/09 — ACHADO VINDO DO REPO DE DEVOLUÇÕES: lá a busca por nome da AMB ficou cega o
+         dia todo porque um 401 PASSAGEIRO do Bling matou o índice na primeira página — e o
+         token estava bom. Aqui era a mesma armadilha: `r.ok` falso devolvia lista vazia e o
+         `break` tratava isso como "acabou o catálogo", salvando um índice VAZIO por cima do
+         bom. Falha e fim de lista chegavam iguais.
+         Agora são casos separados: lista vazia com resposta OK é fim; resposta que não veio OK
+         é FALHA — tenta de novo (401 e 5xx são passageiros: token renova, serviço volta) e,
+         se insistir, ABORTA sem salvar, preservando o índice anterior. Índice velho serve;
+         índice vazio cega a busca. */
+      if (!r.ok) {
+        const passageiro = [401, 403, 429, 500, 502, 503, 504].includes(Number(r.status));
+        if (passageiro && tentativas < 3) {
+          tentativas++;
+          idxStatus.erro = 'HTTP ' + r.status + ' na página ' + pagina + ' — tentativa ' + tentativas + ' de 3';
+          await sleep(PAUSA * 4 * tentativas);
+          continue;                                    // MESMA página
+        }
+        throw new Error('indexação abortada na página ' + pagina + ': HTTP ' + r.status +
+                        ' — o índice anterior foi preservado');
+      }
+      tentativas = 0;                                  // a página veio: zera o contador
+      const itens = (r.data && r.data.data) || [];
+      if (!itens.length) break;                        // agora isto significa mesmo "acabou"
       for (const it of itens) {
         idxStatus.feitos++;
         if (!it.id) continue;
@@ -100,8 +121,13 @@ async function indexarCatalogoCompleto() {
       await sleep(PAUSA);
       pagina++;
     }
-  } catch (e) { idxStatus.erro = String(e && e.message || e); }
-  writeJson(EAN_INDEX_FILE, novo);
+  } catch (e) { idxStatus.erro = String(e && e.message || e); idxStatus.abortou = true; }
+  /* 16/09 — o salvamento final rodava MESMO depois do erro, gravando o índice parcial por
+     cima do bom. Somado ao `break` silencioso, era assim que uma falha passageira do Bling
+     cegava a busca até alguém reindexar à mão. Índice velho serve; parcial engana, porque a
+     busca responde "não encontrado" com a mesma cara de sempre. */
+  if (!idxStatus.abortou) writeJson(EAN_INDEX_FILE, novo);
+  else console.warn('[índice EAN] abortado — índice anterior preservado: ' + idxStatus.erro);
   idxStatus.rodando = false;
   idxStatus.fim = new Date().toISOString();
 }
