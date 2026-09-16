@@ -45,4 +45,14 @@ for (const arq of ['lib/fiscal/bling-api.js', 'girassol/importarPedido.js']) {
   assert.ok(/function lojaIdObrigatorio\(\)/.test(s), 'falta o guarda no segundo consumidor');
 }
 
+/* o guarda do F3 (nfe-ml-fluxo.js) tem o PRÓPRIO throw de canal vazio — ele lê ME_LOJA_IDS
+   exportado direto, não passa por canaisDeclarados(). Sem reusar a mesma mensagem do F1, ele
+   caía de volta no molde "/descobrir-ids do checkout-offline dela", que não existe como rota
+   e não diz a env que falta (achado do Codex nesta rodada). */
+{
+  const s = fs.readFileSync(path.join(raiz, 'lib', 'fiscal', 'nfe-ml-fluxo.js'), 'utf8');
+  assert.ok(/throw new Error\(mensagemCanalFaltando\(\)\)/.test(s),
+    'o guarda do F3 tem que reusar mensagemCanalFaltando() do blingApi — senão a rota real e a env somem de novo');
+}
+
 console.log('OK: canal do ML — nenhum id herdado como padrão; sem a env o serviço SOBE, mas a decisão do F1 recusa em vez de responder "não é do ML" em silêncio');
