@@ -200,6 +200,12 @@ async function criarPedido(token, payload) {
 
 // ── Fluxo principal ───────────────────────────────────────────────────
 async function testarImportarPedido(numeroML, confirmar = false) {
+  /* Codex #485 (P2): a checagem do canal ficava lá embaixo, ao montar o pedido — depois de
+     criarContato() já ter ESCRITO um contato no Bling. Falhar depois de escrever deixa lixo
+     na conta do dono, e o reparo automático do canário chama isto sozinho. Confere antes de
+     tocar em qualquer coisa. */
+  lojaIdObrigatorio();
+
   const log = [];
   const blingToken = await garantirToken();
   const mlToken    = await garantirTokenML();

@@ -28,7 +28,10 @@ assert.ok(/falta GOOD_BLING_CLIENT_ID/.test(r1.saida), 'tem que dizer QUAL env f
    herdado saiu de lib/fiscal/bling-api.js, então good também derruba o boot sem a env
    própria agora, igual quem nasce sem pasta. "validar" tem que dizer isso ANTES do deploy,
    não deixar a pessoa descobrir no primeiro require em produção. */
-const semLoja = {};
+/* Codex #485 (P2): `{}` só ACRESCENTA ao process.env — num ambiente que já define a env
+   (diagnosticar o Render configurado, por exemplo), o teste herdava o valor e passava por
+   acaso, provando o contrário do que diz provar. Apagar explicitamente é o único jeito. */
+const semLoja = { ME_LOJA_IDS: '', AMB_ME_LOJA_IDS: '', GOOD_ME_LOJA_IDS: '', GIRASSOL_ME_LOJA_IDS: '' };
 for (const n of ['BLING_CLIENT_ID', 'BLING_CLIENT_SECRET', 'BLING_REDIRECT_URI', 'NF_BLING_CLIENT_ID',
                  'NF_BLING_CLIENT_SECRET', 'NF_BLING_REDIRECT_URI', 'ML_CLIENT_ID',
                  'ML_CLIENT_SECRET', 'ML_REDIRECT_URI', 'OPERADORES', 'ADMIN']) semLoja['GOOD_' + n] = 'valor-secreto-do-teste';

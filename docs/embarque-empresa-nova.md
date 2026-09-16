@@ -55,11 +55,20 @@ classe do CNPJ trocado na DANFE: funciona, e funciona errado.
   **obrigatória** pra qualquer empresa com a capacidade fiscal — não existe mais o caso "sobe
   com o padrão herdado".
 
-⚠️ **Se uma empresa subir sem `ME_LOJA_IDS`, o servidor inteiro não sobe** — as lojas
-carregam juntas em `config/empresas.js`, então a falta do canal de UMA derruba as outras
-também. A mensagem do erro diz como sair disso sem editar código: `SKIP_EMPRESAS=<empresa>`
-tira só ela da lista, o resto (inclusive a rota `/descobrir-ids` DELA) sobe, e dá pra pegar o
-valor certo antes de reativar.
+⚠️ **Se uma empresa subir sem a env do canal do ML, o servidor SOBE — e só ela fica parada.**
+O comportamento mudou em 16/09: antes a ausência derrubava o boot inteiro, o que fazia uma
+empresa mal configurada levar as outras duas junto. Agora a recusa está no ponto em que o
+estrago aconteceria:
+
+- a decisão "este pedido é do Mercado Livre?" **recusa** em vez de responder "não é" pra tudo
+  (responder "não é" era o silêncio que o id herdado causava: o F1 ignorava tudo sem erro);
+- o **F3** se recusa a rodar com a lista de canais vazia — senão o relatório diria "0 NFs
+  enviadas", que parece dia fraco e não configuração faltando;
+- a importação de pedido da Girassol confere **antes** de criar contato no Bling, pra não
+  deixar lixo na conta do dono e falhar depois.
+
+Em todos os casos o log traz a rota `/descobrir-ids` **daquela** empresa, que prova o canal
+contra a conta do ML e devolve o valor pronto pra colar.
 
 ## O que ainda falta automatizar (fila, por retorno)
 
