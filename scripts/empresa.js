@@ -51,17 +51,17 @@ const ENVS_OPCIONAIS = {
   checkout: ['MAX_PEDIDOS_F1', 'MAX_PEDIDOS_F2', 'F1_REMOVE_MAX', 'F1_REMOVE_ESPERA_MIN'],
 };
 
-/* 15/09 (P2 do Codex, revisão) — ME_LOJA_IDS NÃO entra no mapa fixo acima porque a exigência
-   dela MUDA por empresa, não por capacidade: uma primeira versão deste arquivo pôs ME_LOJA_IDS
-   direto em ENVS_POR_CAPACIDADE.fiscal, e isso quebrou "validar" pras TRÊS empresas que já
-   estão no ar (girassol/ambtotal/good) — sem GOOD_ME_LOJA_IDS no Render (o caso real hoje, que
-   o próprio boot só AVISA como "usando o id herdado"), validar good passou a dizer "NÃO está
-   pronta pra subir", o que é falso: ela sobe e funciona, com o padrão herdado — decisão
-   deliberada e documentada em docs/embarque-empresa-nova.md, porque não dá pra ver o Render
-   daqui e trocar isso quebraria quem já depende do padrão. Quem é montada SEM pasta por
-   lib/fiscal/montar-empresa.js não tem essa saída: a montagem RECUSA subir sem a env própria
-   (ver o throw lá). A exigência aqui reflete exatamente essa distinção. */
-const LOJAS_COM_PASTA = new Set(['girassol', 'ambtotal', 'good']);
+/* 15/09 (P2 do Codex, revisão) — ME_LOJA_IDS não entrou no mapa fixo acima porque, NAQUELE
+   dia, a exigência mudava por empresa: girassol/ambtotal/good (LOJAS_COM_PASTA) tinham o id
+   herdado como padrão no boot, então marcar a env como obrigatória fazia "validar" dizer
+   "NÃO está pronta" pra empresa que subia e funcionava.
+
+   16/09 (Codex #485, P2) — o padrão herdado SAIU de lib/fiscal/bling-api.js (ver o throw lá):
+   as TRÊS empresas com pasta agora derrubam o boot sem a env própria, exatamente como quem é
+   montada sem pasta por lib/fiscal/montar-empresa.js já fazia. A distinção que justificava
+   LOJAS_COM_PASTA desapareceu com o padrão — manter esta lista faria "validar good" dizer
+   "pronta pra subir" pra uma empresa que quebra no primeiro require. ME_LOJA_IDS agora é
+   obrigatória pra QUALQUER empresa com a capacidade fiscal, pasta ou não. */
 
 function _capacidades(registro, id) {
   const todas = Object.keys(ENVS_POR_CAPACIDADE);
@@ -76,14 +76,12 @@ function _envsDe(registro, id, mapa) {
   return out;
 }
 
-/* obrigatórias e opcionais já com ME_LOJA_IDS no lado certo pra esta empresa (ver nota acima). */
+/* obrigatórias e opcionais já com ME_LOJA_IDS na lista certa pra esta empresa (ver nota acima). */
 function _envsFiscais(registro, id) {
   const obrig = _envsDe(registro, id, ENVS_POR_CAPACIDADE);
   const opc = _envsDe(registro, id, ENVS_OPCIONAIS);
   if (_capacidades(registro, id).includes('fiscal')) {
-    const meLojaIds = { cap: 'fiscal', nome: registro.nomeEnv(id, 'ME_LOJA_IDS') };
-    if (LOJAS_COM_PASTA.has(id)) opc.push(meLojaIds);
-    else obrig.push(meLojaIds);
+    obrig.push({ cap: 'fiscal', nome: registro.nomeEnv(id, 'ME_LOJA_IDS') });
   }
   return { obrig, opc };
 }

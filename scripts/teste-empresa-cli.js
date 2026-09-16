@@ -24,20 +24,22 @@ const r1 = roda(['validar', 'good'], semEnv);
 assert.strictEqual(r1.code, 1, 'validar tem que SAIR COM ERRO quando falta env — é portão de deploy, não relatório');
 assert.ok(/falta GOOD_BLING_CLIENT_ID/.test(r1.saida), 'tem que dizer QUAL env falta, pelo nome exato do Render');
 
-/* com tudo presente, passa */
-const comEnv = {};
+/* com tudo presente MENOS ME_LOJA_IDS, ainda falha — 16/09 (Codex #485, P2): o padrão
+   herdado saiu de lib/fiscal/bling-api.js, então good também derruba o boot sem a env
+   própria agora, igual quem nasce sem pasta. "validar" tem que dizer isso ANTES do deploy,
+   não deixar a pessoa descobrir no primeiro require em produção. */
+const semLoja = {};
 for (const n of ['BLING_CLIENT_ID', 'BLING_CLIENT_SECRET', 'BLING_REDIRECT_URI', 'NF_BLING_CLIENT_ID',
                  'NF_BLING_CLIENT_SECRET', 'NF_BLING_REDIRECT_URI', 'ML_CLIENT_ID',
-                 'ML_CLIENT_SECRET', 'ML_REDIRECT_URI', 'OPERADORES', 'ADMIN']) comEnv['GOOD_' + n] = 'valor-secreto-do-teste';
+                 'ML_CLIENT_SECRET', 'ML_REDIRECT_URI', 'OPERADORES', 'ADMIN']) semLoja['GOOD_' + n] = 'valor-secreto-do-teste';
+const r1b = roda(['validar', 'good'], semLoja);
+assert.strictEqual(r1b.code, 1, 'sem GOOD_ME_LOJA_IDS, "validar good" tem que sair com erro — a empresa não sobe mais sem ela');
+assert.ok(/GOOD_ME_LOJA_IDS/.test(r1b.saida), 'tem que apontar GOOD_ME_LOJA_IDS como a pendência');
+
+/* com tudo presente, passa */
+const comEnv = Object.assign({}, semLoja, { GOOD_ME_LOJA_IDS: '203296034' });
 const r2 = roda(['validar', 'good'], comEnv);
 assert.strictEqual(r2.code, 0, 'com as envs no lugar, tem que passar: ' + r2.saida.slice(-200));
-/* 15/09 (P2 do Codex, revisão) — de propósito, SEM GOOD_ME_LOJA_IDS no comEnv acima. good tem
-   pasta própria e o padrão herdado é decisão deliberada, documentada em
-   docs/embarque-empresa-nova.md — marcar essa env como obrigatória pra ela faria "validar"
-   dizer "NÃO está pronta" pra uma empresa que sobe e funciona hoje. A obrigatoriedade é só
-   pra quem nasce SEM pasta (lib/fiscal/montar-empresa.js recusa montar sem a env própria). */
-assert.ok(!/ME_LOJA_IDS/.test(r2.saida),
-  'good tem pasta própria — ME_LOJA_IDS não pode aparecer como pendência pra ela, só ajuste fino');
 
 /* NUNCA imprimir segredo */
 assert.ok(!/valor-secreto-do-teste/.test(r2.saida), 'o CLI IMPRIMIU o valor de uma env — isso não pode acontecer nunca');
