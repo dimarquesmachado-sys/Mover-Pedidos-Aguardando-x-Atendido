@@ -95,7 +95,11 @@ async function indexarCatalogoCompleto() {
         const passageiro = [401, 403, 429, 500, 502, 503, 504].includes(Number(r.status));
         if (passageiro && tentativas < 3) {
           tentativas++;
-          idxStatus.erro = 'HTTP ' + r.status + ' na página ' + pagina + ' — tentativa ' + tentativas + ' de 3';
+          /* Codex #484 (P2): isto ficava grudado mesmo quando a tentativa seguinte dava certo,
+             e os três painéis mostram `st.erro` junto do "índice pronto" — toda indexação que
+             se RECUPEROU aparecia como se tivesse falhado. Alarme falso recorrente ensina a
+             ignorar o alarme, que é pior que não ter. Vai pra um campo separado. */
+          idxStatus.ultimo_tropeco = 'HTTP ' + r.status + ' na página ' + pagina + ' (tentativa ' + tentativas + ' de 3)';
           await sleep(PAUSA * 4 * tentativas);
           continue;                                    // MESMA página
         }
@@ -117,7 +121,12 @@ async function indexarCatalogoCompleto() {
         }
         for (const e of eans) { if (!novo[e]) idxStatus.eans++; novo[e] = { sku: sku || '', nome: nome || '', id: it.id }; }
       }
-      writeJson(EAN_INDEX_FILE, novo);                 // salva a cada página (resiliente a queda)
+      /* Codex #484 (P2): eu guardei o salvamento FINAL e esqueci deste, que publica a cada
+         página — então o índice parcial já estava em disco muito antes do aborto, e meu
+         conserto não protegia nada. O "resiliente a queda" fazia sentido quando o parcial
+         era melhor que nada; deixou de fazer quando o parcial CEGA a busca em silêncio.
+         Agora acumula em memória e publica uma vez só, no fim, se a varredura completou. */
+      idxStatus.paginas = pagina;
       await sleep(PAUSA);
       pagina++;
     }
