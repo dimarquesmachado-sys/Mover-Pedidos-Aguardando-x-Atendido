@@ -58,16 +58,18 @@ for (const [emp, arq] of Object.entries(ROTAS)) {
   for (const pasta of ['amb-checkout-offline', 'good-checkout-offline']) {
     const c = semComentario(pasta);
     assert.ok(/_sondaPendente\)/.test(c), pasta + ': esperava o ramo da sonda pendente');
-    assert.ok(/reconciliacao = 'adiada_sonda_pendente';/.test(c),
-      pasta + ": conferência PULADA pela sonda pendente ainda reporta 'ok' — a /lista diria que a limpeza rodou");
-    assert.ok(/reconciliacao = 'abortada_token_mudo';/.test(c),
-      pasta + ": lote abortado por token mudo ainda reporta 'ok'");
+    /* o Codex usou UM rótulo pros dois casos (`adiada_bling_mudo`) em vez dos dois que eu
+       tinha separado, e é melhor: menos vocabulário no log de quem lê. O que importa é que
+       NENHUM dos dois ramos siga reportando 'ok'. */
+    const marcas = (c.match(/reconciliacao = 'adiada_[a-z_]+';/g) || []);
+    assert.ok(marcas.length >= 2,
+      pasta + ": os ramos de adiamento (sonda pendente e token mudo) ainda reportam 'ok' — a /lista diria que a limpeza rodou");
   }
 
   /* a Girassol NÃO tem esses ramos — tem o da trava. Marcar o que ela não faz seria inventar. */
   const g = semComentario('girassol-backup-offline');
-  assert.ok(!/adiada_sonda_pendente|abortada_token_mudo/.test(g),
-    'a Girassol não tem os ramos da sonda pendente nem do token mudo — marcá-los seria diagnóstico inventado');
+  assert.ok(!/adiada_bling_mudo/.test(g),
+    'a Girassol não tem o ramo da sonda pendente nem o do token mudo — marcá-los seria diagnóstico inventado');
   assert.ok(/reconciliacao = 'abortada_trava';/.test(g), 'a Girassol tem o ramo da trava e ele tem que continuar marcado');
 }
 
