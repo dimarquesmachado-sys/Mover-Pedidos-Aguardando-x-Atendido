@@ -22,7 +22,7 @@ funções e deixei os caches; no `historico` quase levei a lógica sem o context
 |---|---:|---|
 | **corpo idêntico** (normalizando o nome da empresa) | **18** | vão para um registrador comum |
 | **quase idêntico** (≤6 linhas de diferença) | **6** | ler a diferença: se for config, vira parâmetro |
-| divergente | 21 | classificar antes, como foi feito com o `ciclo.js` |
+| divergente | ~~21~~ **6** | classificar antes (o 21 era medição inflada — ver seção abaixo) |
 
 As idênticas: `/backfill-detalhes`, `/backfill-nf`, `/backfill-valores`, `/buscar-produto`,
 `/indexar-catalogo`, `/indexar-status`, `/liberar`, `/localizacoes-log`, `/ml-sync-fees`,
@@ -83,7 +83,8 @@ o único lugar que diz POR QUE a limpeza foi pulada, e sem ele as duas mostram o
 (pedido despachado preso como "sem etiqueta", 13/08) sem a causa.
 
 **As 18 rotas idênticas estão todas em lib.** Faltam as 6 quase-idênticas (≤6 linhas de
-diferença, cada uma exigindo classificar se é config, capacidade ou regra) e as 21 divergentes,
+diferença, cada uma exigindo classificar se é config, capacidade ou regra) e as **6**
+divergentes (o número era 21 por medição inflada — ver a seção "A medição estava inflada"),
 que são o próximo `ciclo.js`.
 
 ## O critério mudou depois da primeira fatia (P1 do Codex no #480)
