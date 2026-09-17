@@ -101,6 +101,13 @@ const { purgar, arquivarFinalizado, purgarArquivo, purgarConferidos } = require(
 let _ultimoCicloAgora = 0;   // trava anti-spam do botão 'Bling agora' (1 disparo/min)
 let _bf = { rodando: false, feitos: 0, total: 0, ok: 0, falhas: 0, iniciado_em: null };   // status do backfill de valores
 let _bfd = { rodando: false, feitos: 0, total: 0, ok: 0, falhas: 0, iniciado_em: null };   // status do backfill de DETALHES (uf + valor por item)
+/* 17/09 — o status do backfill de vendas da GOOD morava numa VARIÁVEL GLOBAL do processo
+   (`_bfGood`), e as três empresas rodam no MESMO processo. Hoje não há colisão porque
+   o nome tem "Good" dentro, mas o padrão é a armadilha: a empresa nova que copiar este bloco
+   herda o nome junto, e aí duas empresas passam a escrever no mesmo status — cada uma lendo o
+   progresso do backfill da outra, sem erro nenhum. É a mesma classe do id de canal herdado.
+   Agora é estado do módulo, como o _bf e o _bfd logo acima. */
+let _bfGood = { estado: 'nunca rodou neste processo' };
 let _skuInfoCache = null;   // cache em memória do sku-info (saldo/preço/custo)
 let _mls = { rodando: false, feitos: 0, total: 0, ok: 0, falhas: 0, iniciado_em: null, erros: {}, amostras: [] };   // pesca de tarifas/frete REAIS do ML
 
@@ -678,9 +685,16 @@ function routes(readBody) {
     }
 
     if (method === 'GET' && p === '/good-checkout-offline/backfill-status') {
+      /* 17/09 — a AMB e a Girassol aceitam chave OU sessão de admin nesta rota; a GOOD aceitava
+         só chave. É a mesma capacidade do #492, ao contrário: lá o admin logado não alcançava
+         rotas que só aceitavam sessão; aqui ele não alcança uma que só aceita chave — abrir o
+         painel e consultar o backfill não funcionava na GOOD sem colar a chave na URL.
+         (O 404 em vez de 403 é proposital e fica: rota de diagnóstico não confirma que existe
+         pra quem não tem credencial.) */
       const kS = lerChaveAdmin(req, urlObj);
-      if (!(process.env.ADMIN_KEY && kS === process.env.ADMIN_KEY)) { json(res, 404, { error: 'not found' }); return true; }
-      json(res, 200, global.__bfGood || { estado: 'nunca rodou neste processo' });
+      const sessS = validarSessao(req.headers['cookie']);
+      if (!((process.env.ADMIN_KEY && kS === process.env.ADMIN_KEY) || (sessS && ehAdmin(sessS)))) { json(res, 404, { error: 'not found' }); return true; }
+      json(res, 200, _bfGood || { estado: 'nunca rodou neste processo' });
       return true;
     }
 
@@ -711,10 +725,10 @@ function routes(readBody) {
            dispara DUAS vezes o MESMO mês, os períodos batem e o segundo apareceria como
            sucesso. Marco de quem é a rodada, decidido ANTES de disparar, resolve sem
            depender de comparar datas. */
-        const jaAtivo = global.__bfGood && global.__bfGood.estado === 'rodando';
+        const jaAtivo = _bfGood && _bfGood.estado === 'rodando';
         if (jaAtivo) {
           json(res, 409, { ok: false, empresa: 'good', de, ate,
-            erro: 'já existe um backfill da GOOD em andamento (' + (global.__bfGood.de || '') + '→' + (global.__bfGood.ate || '') + ') — aguarde terminar',
+            erro: 'já existe um backfill da GOOD em andamento (' + (_bfGood.de || '') + '→' + (_bfGood.ate || '') + ') — aguarde terminar',
             /* Codex #309 r5: sobrou o placeholder aqui quando corrigi o outro — mesmo
                problema, link que não abre, na resposta que o dono mais vai ver (a de
                "já tem um rodando"). */
@@ -722,7 +736,7 @@ function routes(readBody) {
           return true;
         }
         const marca = Date.now().toString(36);
-        global.__bfGood = { estado: 'rodando', de, ate, marca, iniciado: new Date().toISOString() };
+        _bfGood = { estado: 'rodando', de, ate, marca, iniciado: new Date().toISOString() };
         gbo.backfillVendas(de, ate, 'good', ctxGood)
           .then(r => {
             /* 31/08 — agora a função DIZ o que aconteceu: toda saída dela devolve `desfecho`
@@ -747,7 +761,7 @@ function routes(readBody) {
               nao_rodou: ['nao_rodou', d.msg || 'recusou iniciar'],
             };
             const [estado, motivo] = MAPA[desf] || ['ok', null];
-            global.__bfGood = {
+            _bfGood = {
               estado, motivo, desfecho: desf, de, ate, marca,
               terminado: new Date().toISOString(),
               pedidos: d.pedidos, itens: d.itens, gravados: d.gravados, erros: d.erros, fase: d.fase || null,
@@ -755,7 +769,7 @@ function routes(readBody) {
             console.log('[GOOD backfill]', desf, JSON.stringify(d).slice(0, 180));
           })
           .catch(e => {
-            global.__bfGood = { estado: 'falhou', de, ate, erro: String(e.message || e).slice(0, 200), terminado: new Date().toISOString() };
+            _bfGood = { estado: 'falhou', de, ate, erro: String(e.message || e).slice(0, 200), terminado: new Date().toISOString() };
             console.error('[GOOD backfill] falhou:', e.message);
           });
         json(res, 202, { ok: true, empresa: 'good', de, ate, em_background: true,
