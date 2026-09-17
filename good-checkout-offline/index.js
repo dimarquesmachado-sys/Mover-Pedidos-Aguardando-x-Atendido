@@ -506,6 +506,11 @@ function routes(readBody) {
     lerChaveAdmin, mlSyncFees, shopeeKeepAlive, shopeeSessaoLer, CACHE_DIR, MANIFEST_FILE,
     SHOPEE_ENV_COOKIE, VERSAO, statusMlSync: _mls,
   });
+  const _rotasConferido = require('../lib/checkout/rotas-conferido').criar({
+    prefixo: '/good-checkout-offline', json, readBody, readJson, writeJson, lerReservas, moverSituacao,
+    arquivarFinalizado, sincronizarConferidos, rodarCiclo, CONFERIDOS_FILE, RESERVAS_FILE,
+    CACHE_DIR, SIT_VERIFICADO, SYNC_ON, VERSAO,
+  });
   const hist = rotasHistorico({
     validarSessao,
     supaCfg: (empresa) => _supaGood.cfg(empresa),
@@ -602,6 +607,7 @@ function routes(readBody) {
       if (await _rotasSeparacao(req, res, urlObj, method)) return true;
       if (await _rotasBackfill(req, res, urlObj, method, validarSessao)) return true;
       if (await _rotasNfAnexar(req, res, urlObj, method, validarSessao)) return true;
+      if (await _rotasConferido(req, res, urlObj, method, validarSessao)) return true;
 
     // raiz do módulo → manda pro painel (evita "not found" ao abrir a URL base)
     if (method === 'GET' && (p === '/good-checkout-offline' || p === '/good-checkout-offline/')) {
@@ -1824,12 +1830,7 @@ function routes(readBody) {
       return true;
     }
 
-    if ((method === 'POST' || method === 'GET') && p === '/good-checkout-offline/run') {
-      const forcar = /[?&]force=1\b/.test(urlObj.search || '');
-      rodarCiclo(forcar ? 'manual-force' : 'manual', forcar);
-      json(res, 200, { mensagem: `Ciclo${forcar ? ' (FORCE — re-cacheia tudo)' : ''} iniciado. Veja /good-checkout-offline/status.`, versao: VERSAO });
-      return true;
-    }
+
 
     // salva a localização de um SKU no Bling (PATCH /produtos/{id}) + atualiza o cache + registra quem editou
 
@@ -2229,82 +2230,10 @@ function routes(readBody) {
     }
 
     // marca pedido como conferido offline (entra na fila p/ sync na Fase 3)
-    if (method === 'POST' && p === '/good-checkout-offline/conferido') {
-      const body = await readBody(req);
-      const id = String(body.id || '');
-      if (!id) { json(res, 400, { erro: 'id obrigatório' }); return true; }
-      const snapC = readJson(path.join(CACHE_DIR, String(id), 'pedido.json'), null);
-      const conf = readJson(CONFERIDOS_FILE, {});
-      if (conf[id]) {   // JÁ finalizado por alguém → não refaz, não reimprime, não re-sincroniza
-        json(res, 200, { ok: false, ja_finalizado: true, por: conf[id].user || '', em: conf[id].conferido_em });
-        return true;
-      }
-      conf[id] = {
-        user: body.user || '',
-        conferido_em: new Date().toISOString(),
-        sincronizado: false,
-        numero: snapC ? snapC.numero : (body.numero || null),
-        cliente: snapC ? (snapC.cliente || '') : '',
-        marketplace: snapC ? (snapC.marketplace || null) : null,
-        flex: !!(snapC && snapC.flex),
-        servico: snapC ? (snapC.servico || '') : '',
-        nf_numero: (snapC && snapC.nf && snapC.nf.numero) || null,
-        /* 16/09 — PORTE: a AMB e a Girassol gravam o `nf_id` na conferência e a GOOD não, e
-           por isso o link ↗ que abre a NF no Bling nunca aparecia no painel dela — o front já
-           sabe desenhar (`if(!souAdmin() || !p.nf_id) return ''`), só nunca recebeu o dado.
-           Não é diferença de operação: é capacidade que ficou pra trás. Regra da casa: uma
-           tem, agora ambas têm.
-           17/09 (Codex): SEM o `!snapC.nf_anexada` a linha gravaria o id da nota CANCELADA
-           quando o admin anexa a NF à mão — o ciclo.js documenta (linha ~1021) que
-           `snap.nf.id` nesse caso nunca é atualizado, continua apontando pra nota velha. O
-           mesmo furo existia na AMB e na Girassol antes deste porte; fica corrigido nas três. */
-        nf_id: (snapC && !snapC.nf_anexada && snapC.nf && snapC.nf.id) || null,   // ID interno da NF — link direto pro Bling
-        nf_emissao: (snapC && snapC.nf && snapC.nf.dataEmissao) || null,   // b10: hora da NF gravada na bipagem (pronto pro dia em que o dashboard chegar aqui)
-        valor: (snapC && snapC.total != null) ? Number(snapC.total) : null,   // faturamento (total do pedido)
-        uf: (snapC && snapC.uf) || null,
-        vprod_nf: (function(){ try {   // Σ itens da NOTA (fonte fiscal) → produtos EXATO; frete = valor − vprod_nf
-          const ds = readJson(path.join(CACHE_DIR, String(id), 'nf-simp.json'), null);
-          if (ds && Array.isArray(ds.itens) && ds.itens.length) { const s2 = ds.itens.reduce((a,i)=>a+(Number(i.valorTotal)||0),0); return isFinite(s2)&&s2>0 ? Math.round(s2*100)/100 : null; }
-        } catch (e) {} return null; })(),
-        municipio: (snapC && snapC.municipio) || null,
-        numero_loja: (snapC && snapC.numero_loja) || null,
-        venda_dia: (snapC && snapC.venda_dia) || null,
-        taxa_mkt: (snapC && snapC.taxa_mkt) || null,
-        frete_mkt: (snapC && snapC.frete_mkt) || null,
-        itens: snapC ? (snapC.itens || []).map(it => ({ sku: it.sku || '', descricao: String(it.descricao || '').slice(0, 90), qtd: it.qtd || 1, valor_unit: (it.valor_unit != null ? it.valor_unit : null), valor_total: (it.valor_total != null ? it.valor_total : null) })) : []
-      };
-      writeJson(CONFERIDOS_FILE, conf);            // grava na fila primeiro — nunca perde
-      arquivarFinalizado(id);                       // arquiva etiqueta + meta p/ reimprimir/reenviar depois (Parte A)
-      { const rsvF = lerReservas(); if (rsvF[id]) { delete rsvF[id]; writeJson(RESERVAS_FILE, rsvF); } }   // finalizou → solta a reserva
 
-      // ESPELHO EM TEMPO REAL: se o sync tá ligado e o Bling responde, move p/ VERIFICADO já.
-      // Se o Bling estiver fora, fica na fila e o cron sincroniza quando ele voltar.
-      let sincronizado = false, blingOffline = false;
-      if (SYNC_ON) {
-        const r = await moverSituacao(id, SIT_VERIFICADO);
-        if (r.ok) {
-          conf[id].sincronizado = true;
-          conf[id].sincronizado_em = new Date().toISOString();
-          delete conf[id].sync_erro;
-          sincronizado = true;
-          console.log(`[GOODBKP] conferido ${id} → ${SIT_VERIFICADO} (espelho na hora) OK`);
-        } else {
-          conf[id].sync_erro = String(r.status || 'err');
-          blingOffline = true;
-          console.log(`[GOODBKP] conferido ${id} ficou na fila (bling ${r.status}) — sincroniza depois`);
-        }
-        writeJson(CONFERIDOS_FILE, conf);
-      }
-      json(res, 200, { ok: true, id, sincronizado, bling_offline: blingOffline });
-      return true;
-    }
 
     // FASE 3 — força o sync da fila de conferidos → VERIFICADO (24). Botão "Sincronizar" / manual.
-    if ((method === 'POST' || method === 'GET') && p === '/good-checkout-offline/sincronizar') {
-      const r = await sincronizarConferidos();
-      json(res, 200, { ok: true, ...r });
-      return true;
-    }
+
 
     // DEBUG — testa mover UM pedido p/ VERIFICADO (ou outro id via ?situacao=). Mostra resposta crua do Bling.
     // uso: /good-checkout-offline/debug-mover/{idDoPedido}

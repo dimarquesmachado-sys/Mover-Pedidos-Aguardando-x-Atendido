@@ -54,7 +54,14 @@ As quase-idênticas, com a distância: `/backfill-nf-auto` (4), `/ciclo-agora` (
   (80 linhas) e a única com diferença real: o **id da empresa** no aviso ao Devoluções —
   configuração, não regra, virou parâmetro. Mais um estado vivo (`_mls`) por referência.
 
-Faltam 3 das idênticas e as 6 quase-idênticas.
+- ✅ **conferência e ciclo** (PR #489): `/conferido`, `/run` e `/sincronizar` →
+  `lib/checkout/rotas-conferido.js`. O `SIT_VERIFICADO` entra **injetado**: ele é o destino do
+  pedido conferido e depende da **Expedição** — uma lib não decide o fluxo físico de uma
+  empresa que ela não conhece.
+
+**As 18 rotas idênticas estão todas em lib.** Faltam as 6 quase-idênticas (≤6 linhas de
+diferença, cada uma exigindo classificar se é config, capacidade ou regra) e as 21 divergentes,
+que são o próximo `ciclo.js`.
 
 ## O critério mudou depois da primeira fatia (P1 do Codex no #480)
 
