@@ -43,7 +43,13 @@ As quase-idênticas, com a distância: `/backfill-nf-auto` (4), `/ciclo-agora` (
   `lib/checkout/rotas-separacao.js`. Primeira fatia escolhida já com o critério dos **dois
   lados**: corpo idêntico **e** todas depois do portão de sessão nas três empresas.
 
-Faltam 9 das idênticas e as 6 quase-idênticas.
+- ✅ **backfill do histórico** (PR #486): `/backfill-detalhes`, `/backfill-nf` e
+  `/backfill-valores` → `lib/checkout/rotas-backfill.js`. Aqui o lint pegou o que a varredura
+  de dependências não vê: `_bf` e `_bfd` não são valores, são **estado vivo** — objetos de
+  status que as rotas leem e escrevem durante o backfill. Entram por REFERÊNCIA e por empresa;
+  copiá-los faria a rota reportar um progresso que não é o do backfill de verdade.
+
+Faltam 6 das idênticas e as 6 quase-idênticas.
 
 ## O critério mudou depois da primeira fatia (P1 do Codex no #480)
 

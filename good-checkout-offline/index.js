@@ -493,6 +493,14 @@ function routes(readBody) {
     locCache, localizacaoDeProduto, salvarLoc, montarSeparacao, montarSeparacaoPorPedido,
     RESERVAS_FILE, LOC_LOG_FILE,
   });
+  const _rotasBackfill = require('../lib/checkout/rotas-backfill').criar({
+    prefixo: '/good-checkout-offline', json, readJson, writeJson, ehAdmin, lerChaveAdmin,
+    detalhePedido, backfillNFLocal,
+    /* o `dorme` do corpo original era uma const LOCAL de outra função, não existia aqui —
+       o lint pegou. O módulo tem `sleep`, que é a mesma coisa com outro nome. */
+    dorme: sleep, CONFERIDOS_FILE,
+    statusValores: _bf, statusDetalhes: _bfd,
+  });
   const hist = rotasHistorico({
     validarSessao,
     supaCfg: (empresa) => _supaGood.cfg(empresa),
@@ -587,6 +595,7 @@ function routes(readBody) {
     if (await _rotasCatalogo(req, res, urlObj, method)) return true;
       /* mesma posição da de catálogo: DEPOIS do portão de sessão (Codex #480). */
       if (await _rotasSeparacao(req, res, urlObj, method)) return true;
+      if (await _rotasBackfill(req, res, urlObj, method, validarSessao)) return true;
 
     // raiz do módulo → manda pro painel (evita "not found" ao abrir a URL base)
     if (method === 'GET' && (p === '/good-checkout-offline' || p === '/good-checkout-offline/')) {
@@ -1274,116 +1283,11 @@ function routes(readBody) {
     // que não têm valor gravado (finalizados antes da atualização do faturamento) e preenche
     // retroativamente. Uso: /good-checkout-offline/backfill-valores?k=ADMIN_KEY&dias=31
     // Roda em background (~400ms por pedido, respeitando o rate limit). Chame de novo p/ ver o progresso.
-    if ((method === 'POST' || method === 'GET') && p === '/good-checkout-offline/backfill-valores') {
-      const k = lerChaveAdmin(req, urlObj);
-      if (!process.env.ADMIN_KEY || k !== process.env.ADMIN_KEY) { json(res, 404, { error: 'not found' }); return true; }
-      if (_bf.rodando) { json(res, 200, { ok: true, rodando: true, progresso: _bf.feitos + '/' + _bf.total, ok_ate_agora: _bf.ok, falhas: _bf.falhas, iniciado_em: _bf.iniciado_em }); return true; }
-      const dias = Math.max(1, Math.min(120, Number(urlObj.searchParams.get('dias') || 31)));
-      const corte = Date.now() - dias * 86400000;
-      const confIni = readJson(CONFERIDOS_FILE, {});
-      const alvos = Object.keys(confIni).filter(id => {
-        const c = confIni[id];
-        return c && (c.valor == null) && c.conferido_em && new Date(c.conferido_em).getTime() >= corte;
-      });
-      if (!alvos.length) { json(res, 200, { ok: true, mensagem: 'nada a preencher — todos os finalizados dos últimos ' + dias + ' dias já têm valor' }); return true; }
-      _bf = { rodando: true, feitos: 0, total: alvos.length, ok: 0, falhas: 0, iniciado_em: new Date().toISOString() };
-      json(res, 200, { ok: true, iniciado: true, pedidos_sem_valor: alvos.length, dias, mensagem: 'backfill rodando em background (~' + Math.ceil(alvos.length * 0.5 / 60) + ' min) — chame esta URL de novo pra ver o progresso' });
-      (async () => {
-        const dorme = ms => new Promise(r => setTimeout(r, ms));
-        const pendentes = {};
-        const salvar = () => {
-          if (!Object.keys(pendentes).length) return;
-          const c2 = readJson(CONFERIDOS_FILE, {});
-          for (const [id, v] of Object.entries(pendentes)) { if (c2[id]) c2[id].valor = v; }
-          writeJson(CONFERIDOS_FILE, c2);
-          for (const id of Object.keys(pendentes)) delete pendentes[id];
-        };
-        for (const id of alvos) {
-          try {
-            const det = await detalhePedido(id);
-            if (det && det.total != null && isFinite(Number(det.total))) { pendentes[id] = Number(det.total); _bf.ok++; }
-            else _bf.falhas++;
-          } catch (e) { _bf.falhas++; }
-          _bf.feitos++;
-          if (_bf.feitos % 15 === 0) { salvar(); console.log(`[BACKFILL] ${_bf.feitos}/${_bf.total} (ok=${_bf.ok} falhas=${_bf.falhas})`); }
-          await dorme(400);
-        }
-        salvar();
-        _bf.rodando = false;
-        console.log(`[BACKFILL] ✔ concluído: ${_bf.ok} valor(es) preenchido(s), ${_bf.falhas} falha(s) de ${_bf.total}`);
-      })().catch(e => { _bf.rodando = false; console.log('[BACKFILL] ✗ ' + e.message); });
-      return true;
-    }
+
 
     // ADMIN (?k=): BACKFILL DE DETALHES — preenche UF + valor POR ITEM dos já finalizados
     // Uso: /good-checkout-offline/backfill-detalhes?k=ADMIN_KEY&dias=31
-    if ((method === 'POST' || method === 'GET') && p === '/good-checkout-offline/backfill-detalhes') {
-      const k = lerChaveAdmin(req, urlObj);
-      if (!process.env.ADMIN_KEY || k !== process.env.ADMIN_KEY) { json(res, 404, { error: 'not found' }); return true; }
-      if (_bfd.rodando) { json(res, 200, { ok: true, rodando: true, progresso: _bfd.feitos + '/' + _bfd.total, ok_ate_agora: _bfd.ok, falhas: _bfd.falhas, iniciado_em: _bfd.iniciado_em }); return true; }
-      const dias = Math.max(1, Math.min(120, Number(urlObj.searchParams.get('dias') || 31)));
-      const corte = Date.now() - dias * 86400000;
-      const confIni = readJson(CONFERIDOS_FILE, {});
-      const alvos = Object.keys(confIni).filter(id => {
-        const c = confIni[id];
-        if (!c || !c.conferido_em || new Date(c.conferido_em).getTime() < corte) return false;
-        const semItemValor = Array.isArray(c.itens) && c.itens.length && c.itens.some(it => it.valor_total == null);
-        return c.uf == null || c.valor == null || semItemValor;
-      });
-      if (!alvos.length) { json(res, 200, { ok: true, mensagem: 'nada a preencher — últimos ' + dias + ' dias já têm UF e valores por item' }); return true; }
-      _bfd = { rodando: true, feitos: 0, total: alvos.length, ok: 0, falhas: 0, iniciado_em: new Date().toISOString() };
-      json(res, 200, { ok: true, iniciado: true, pedidos_a_detalhar: alvos.length, dias, mensagem: 'backfill de detalhes rodando (~' + Math.ceil(alvos.length * 0.5 / 60) + ' min) — chame de novo pra ver o progresso' });
-      (async () => {
-        const dorme = ms => new Promise(r => setTimeout(r, ms));
-        const pend = {};
-        const salvar = () => {
-          if (!Object.keys(pend).length) return;
-          const c2 = readJson(CONFERIDOS_FILE, {});
-          for (const [id, d] of Object.entries(pend)) {
-            if (!c2[id]) continue;
-            if (d.valor != null && c2[id].valor == null) c2[id].valor = d.valor;
-            if (d.uf) c2[id].uf = d.uf;
-            if (d.municipio) c2[id].municipio = d.municipio;
-            if (d.taxa_mkt != null && c2[id].taxa_mkt == null) c2[id].taxa_mkt = d.taxa_mkt;
-            if (d.venda_dia && !c2[id].venda_dia) c2[id].venda_dia = d.venda_dia;
-            if (d.frete_mkt != null && c2[id].frete_mkt == null) c2[id].frete_mkt = d.frete_mkt;
-            if (d.porSku && Array.isArray(c2[id].itens)) {
-              c2[id].itens.forEach(it => {
-                const v = d.porSku[String(it.sku || '').trim()];
-                if (v != null && it.valor_total == null) { it.valor_unit = v; it.valor_total = v * Number(it.qtd || 1); }
-              });
-            }
-          }
-          writeJson(CONFERIDOS_FILE, c2);
-          for (const id of Object.keys(pend)) delete pend[id];
-        };
-        for (const id of alvos) {
-          try {
-            const det = await detalhePedido(id);
-            if (det) {
-              const porSku = {};
-              (det.itens || []).forEach(it => { const c = String(it.codigo || (it.produto && it.produto.codigo) || '').trim(); if (c && it.valor != null) porSku[c] = Number(it.valor); });
-              pend[id] = {
-                valor: (det.total != null ? Number(det.total) : null),
-                uf: (det.transporte && det.transporte.etiqueta && det.transporte.etiqueta.uf) || null,
-                municipio: (det.transporte && det.transporte.etiqueta && det.transporte.etiqueta.municipio) || null,
-                venda_dia: (det.data ? String(det.data).slice(0, 10) : null),
-                taxa_mkt: (det.taxas && isFinite(Number(det.taxas.taxaComissao)) && Number(det.taxas.taxaComissao) > 0) ? Math.round(Number(det.taxas.taxaComissao) * 100) / 100 : null,
-                frete_mkt: (det.taxas && isFinite(Number(det.taxas.custoFrete)) && Number(det.taxas.custoFrete) > 0) ? Math.round(Number(det.taxas.custoFrete) * 100) / 100 : null,
-                porSku
-              };
-              _bfd.ok++;
-            } else _bfd.falhas++;
-          } catch (e) { _bfd.falhas++; }
-          _bfd.feitos++;
-          if (_bfd.feitos % 15 === 0) { salvar(); console.log(`[BACKFILL-DET] ${_bfd.feitos}/${_bfd.total}`); }
-          await dorme(400);
-        }
-        salvar(); _bfd.rodando = false;
-        console.log(`[BACKFILL-DET] ✔ concluído: ${_bfd.ok} ok, ${_bfd.falhas} falha(s) de ${_bfd.total}`);
-      })().catch(e => { _bfd.rodando = false; console.log('[BACKFILL-DET] ✗ ' + e.message); });
-      return true;
-    }
+
 
     // DASHBOARD (sessão admin): saldo/preço/custo por SKU, cache 6h em disco — alimenta a projeção de estoque
     if (method === 'POST' && p === '/good-checkout-offline/sku-info') {
@@ -1516,15 +1420,7 @@ function routes(readBody) {
     // ADMIN (?k=): BACKFILL-NF — 100% LOCAL (lê nf-simp.json do cache/arquivo; ZERO chamadas ao Bling).
     // Preenche vprod_nf (Σ itens da NOTA) nos finalizados → produtos EXATO + frete EXATO (valor − vprod_nf), retroativo.
     // Uso: /good-checkout-offline/backfill-nf?k=ADMIN_KEY&dias=45   (roda em segundos)
-    if ((method === 'POST' || method === 'GET') && p === '/good-checkout-offline/backfill-nf') {
-      const k = lerChaveAdmin(req, urlObj);
-      const sessB = validarSessao(req.headers['cookie']);
-      if (!((process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || (sessB && ehAdmin(sessB)))) { json(res, 404, { error: 'not found' }); return true; }
-      const r = backfillNFLocal(urlObj.searchParams.get('dias'));
-      json(res, 200, { ok: true, ...r,
-        mensagem: r.preenchidos_pela_nf ? ('✓ ' + r.preenchidos_pela_nf + ' pedido(s) ganharam produtos/frete EXATOS da nota (leitura local, sem API)') : 'nada novo a preencher' });
-      return true;
-    }
+
 
     // DASHBOARD (sessão admin): CONFIG FISCAL — alíquota do Simples POR MÊS + taxa % por canal
     if ((method === 'GET' || method === 'POST') && p === '/good-checkout-offline/config-fiscal') {
