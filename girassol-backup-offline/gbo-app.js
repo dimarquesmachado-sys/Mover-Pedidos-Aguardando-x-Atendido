@@ -4237,6 +4237,12 @@ async function backfillVendas(de, ate, empresa, ctx){
   const _readJson  = _ctx && _ctx.readJson  ? _ctx.readJson  : readJson;
   const _CACHE_DIR = _ctx && _ctx.CACHE_DIR ? _ctx.CACHE_DIR : CACHE_DIR;
   const _supaReq   = _ctx && _ctx.supaReq   ? _ctx.supaReq   : supaReq;
+  /* Codex #499 (P1): a tabela de alíquotas era a DESTE módulo, fixa. Rodando pra outra empresa
+     (a GOOD chama esta função com o contexto dela), o backfill aplicava as alíquotas da
+     GIRASSOL nos pedidos da GOOD — imposto de outra empresa, gravado no histórico, sem erro
+     nenhum. Segue o mesmo padrão das outras peças do ctx: usa a de quem chamou, cai na daqui
+     só quando ninguém passou. */
+  const _ALIQ_BK   = _ctx && _ctx.DEFAULT_ALIQ_BK ? _ctx.DEFAULT_ALIQ_BK : DEFAULT_ALIQ_BK;
   /* O guarda mora AQUI, não em cada rota: a noturna e o /backfill-ano chamam esta função direto.
      Mesmo lugar da trava do canário logo abaixo, pelo mesmo motivo. */
   if (_reparoAtivo) {
@@ -4295,7 +4301,7 @@ async function backfillVendas(de, ate, empresa, ctx){
     _backfill.shopee = { escrow_fechou: 0, escrow_com_sobra: 0, escrow_sem_resposta: 0, escrow_erro: 0,
                          comissao_somada: 0, comissao_que_o_bling_dava: 0, frete_liquido_visto: 0,
                          modo: SHOPEE_TODOS ? 'todos os pedidos' : 'so quando o Bling nao trouxe taxa' };
-    const aliqBk = mes => ((cfg.aliquotas && Number(cfg.aliquotas[mes]) > 0) ? Number(cfg.aliquotas[mes]) : (DEFAULT_ALIQ_BK[mes]!=null?DEFAULT_ALIQ_BK[mes]:15));   // salvo <= 0 não é configuração: cai no padrão
+    const aliqBk = mes => ((cfg.aliquotas && Number(cfg.aliquotas[mes]) > 0) ? Number(cfg.aliquotas[mes]) : (_ALIQ_BK[mes]!=null?_ALIQ_BK[mes]:15));   // salvo <= 0 não é configuração: cai no padrão
     // 11/08 (herdado da AMB, achado pelo Codex): NADA é apagado antes da coleta terminar.
     // A versão antiga deletava o período aqui e gravava página a página — uma queda do Bling
     // no meio deixava o histórico MEIO VAZIO. Foi exatamente o que aconteceu em 03/08 e

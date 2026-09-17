@@ -727,6 +727,9 @@ function routes(readBody) {
           /* conferido em lib/supabase.js: req é (empresa, metodo, pathQuery, body) — eu tinha
              escrito com a assinatura errada e o corpo iria pro lugar do pathQuery. */
           supaReq: (empresa, metodo, pq, body) => supaGood.req(empresa, metodo, pq, body),
+          /* Codex #499 (P1): sem isto, o backfill usava as alíquotas da GIRASSOL nos pedidos da
+             GOOD — imposto de outra empresa gravado no histórico, sem erro nenhum. */
+          DEFAULT_ALIQ_BK: DEFAULT_ALIQ_BK_GOOD,
         };
         /* roda em BACKGROUND: um mês de backfill leva minutos e o navegador desiste antes */
         /* 30/08: guarda o estado pra dar pra acompanhar sem caçar no log do Render — foi a

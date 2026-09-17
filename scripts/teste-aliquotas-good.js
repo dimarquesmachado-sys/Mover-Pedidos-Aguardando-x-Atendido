@@ -70,4 +70,31 @@ for (const mes of ['2026-08', '2026-09', '2026-10', '2026-11', '2026-12']) {
     '0% no painel é campo em branco — tem que cair na tabela, não zerar o imposto');
 }
 
+/* Codex #499 (P1) — O BACKFILL TAMBÉM PRECISA DA TABELA CERTA. A rota de backfill de vendas
+   da GOOD chama a função da Girassol passando um contexto; a tabela de alíquotas era a do
+   módulo da GIRASSOL, fixa. Rodando pra GOOD, o backfill gravaria o imposto da Girassol nos
+   pedidos dela — e as tabelas são diferentes de verdade (janeiro: 11,41% × 11,82%).
+   Imposto de outra empresa entrando no histórico, sem erro nenhum. */
+{
+  const gbo = fs.readFileSync(path.join(__dirname, '..', 'girassol-backup-offline/gbo-app.js'), 'utf8');
+
+  /* a função tem que usar a tabela do CONTEXTO, caindo na própria só quando ninguém passou */
+  assert.ok(/_ctx && _ctx\.DEFAULT_ALIQ_BK \? _ctx\.DEFAULT_ALIQ_BK : DEFAULT_ALIQ_BK/.test(gbo),
+    'o backfill não aceita a tabela de alíquotas de quem chamou — aplicaria a da Girassol em outra empresa');
+  assert.ok(!/\(DEFAULT_ALIQ_BK\[mes\]!=null\?DEFAULT_ALIQ_BK\[mes\]:15\)/.test(gbo),
+    'o cálculo ainda lê a tabela do módulo direto, ignorando o contexto');
+
+  /* e a GOOD tem que passar a dela */
+  const idx = fs.readFileSync(path.join(__dirname, '..', 'good-checkout-offline/index.js'), 'utf8');
+  const ctx = /const ctxGood = \{[\s\S]*?\n        \};/.exec(idx);
+  assert.ok(ctx, 'não achei o ctxGood do backfill');
+  assert.ok(/DEFAULT_ALIQ_BK: DEFAULT_ALIQ_BK_GOOD/.test(ctx[0]),
+    'o ctxGood não passa a tabela da GOOD — o backfill usaria a da Girassol');
+
+  /* as duas tabelas PRECISAM ser diferentes: se alguém as igualar, o teste acima vira decorativo */
+  const gTab = eval('(' + /const DEFAULT_ALIQ_BK = (\{[^}]*\})/.exec(gbo)[1] + ')');
+  assert.notStrictEqual(gTab['2026-01'], tabela['2026-01'],
+    'as alíquotas de janeiro da Girassol e da GOOD ficaram iguais — conferir, porque são empresas com faturamentos diferentes');
+}
+
 console.log('OK: alíquotas da GOOD — os 7 meses apurados conferem, agosto+ segue sem valor, e o painel mantém precedência');
