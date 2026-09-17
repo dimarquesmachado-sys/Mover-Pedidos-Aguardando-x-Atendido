@@ -50,10 +50,10 @@ classe do CNPJ trocado na DANFE: funciona, e funciona errado.
 - **16/09:** a prova veio de produção — `/descobrir-ids` conferiu o canal de cada empresa
   contra a própria conta do ML e bateu com o Render (AMB `206017293`, Girassol `203146903`,
   GOOD `203296034`). Ninguém dependia do herdado, então ele **saiu de vez**
-  (`lib/fiscal/bling-api.js`): as três empresas com pasta agora derrubam o boot sem o canal
-  próprio, igual quem nasce sem pasta. `empresa.js validar` cobra `ME_LOJA_IDS` como
-  **obrigatória** pra qualquer empresa com a capacidade fiscal — não existe mais o caso "sobe
-  com o padrão herdado".
+  (`lib/fiscal/bling-api.js`): as três empresas com pasta perdem o padrão herdado, igual quem
+  nasce sem pasta. A recusa fica no **uso** (F1/F2/F3), não no boot — ver o aviso abaixo.
+  `empresa.js validar` cobra `ME_LOJA_IDS` como **obrigatória** pra qualquer empresa com a
+  capacidade fiscal — não existe mais o caso "sobe com o padrão herdado" passando no portão.
 
 ⚠️ **Se uma empresa subir sem a env do canal do ML, o servidor SOBE — e só ela fica parada.**
 O comportamento mudou em 16/09: antes a ausência derrubava o boot inteiro, o que fazia uma

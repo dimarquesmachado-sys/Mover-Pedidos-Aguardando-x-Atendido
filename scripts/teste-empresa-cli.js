@@ -39,6 +39,14 @@ const r1b = roda(['validar', 'good'], semLoja);
 assert.strictEqual(r1b.code, 1, 'sem GOOD_ME_LOJA_IDS, "validar good" tem que sair com erro — a empresa não sobe mais sem ela');
 assert.ok(/GOOD_ME_LOJA_IDS/.test(r1b.saida), 'tem que apontar GOOD_ME_LOJA_IDS como a pendência');
 
+/* 17/09 (Codex #485, P2): presente mas malformada ("abc") também tem que falhar — o
+   parse de lib/fiscal/bling-api.js filtra isso pra lista vazia no runtime, e o F1/F2/F3
+   param igual a env ausente. "validar" tinha só `!process.env[nome]`, que aprovava isso. */
+const comLojaInvalida = Object.assign({}, semLoja, { GOOD_ME_LOJA_IDS: 'abc' });
+const r1c = roda(['validar', 'good'], comLojaInvalida);
+assert.strictEqual(r1c.code, 1, 'GOOD_ME_LOJA_IDS=abc tem que sair com erro — não sobra id numérico depois do parse');
+assert.ok(/GOOD_ME_LOJA_IDS/.test(r1c.saida), 'tem que apontar GOOD_ME_LOJA_IDS como a pendência mesmo estando presente');
+
 /* com tudo presente, passa */
 const comEnv = Object.assign({}, semLoja, { GOOD_ME_LOJA_IDS: '203296034' });
 const r2 = roda(['validar', 'good'], comEnv);

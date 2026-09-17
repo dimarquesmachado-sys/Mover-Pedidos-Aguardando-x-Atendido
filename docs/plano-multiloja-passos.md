@@ -193,8 +193,11 @@ credencial.
 - [x] **canal do ML herdado REMOVIDO** (16/09, P1 da revisão): o padrão `206017293` era o
       canal da AMB, e empresa sem env própria julgava os pedidos dela pelo canal de outra, em
       silêncio. Saiu com evidência de produção — `/descobrir-ids` provou o canal de cada uma
-      contra a conta do ML e conferiu contra o Render. Agora a ausência da env **derruba o
-      boot**, com a mensagem dizendo como obter o valor
+      contra a conta do ML e conferiu contra o Render. A ausência da env não derruba mais o
+      boot (isso mudou na 2ª rodada do mesmo dia, pra não levar as outras duas junto): o
+      servidor sobe e só a empresa sem canal fica parada, com a mensagem — dizendo como obter
+      o valor — no log a cada ciclo do F1/F2/F3. `empresa.js validar` cobra a env ANTES do
+      deploy, que é o portão que substitui o boot como sinal de "pronta pra subir"
 - [ ] fechar a janela: medir o uso legado (`veioPorHeader`) e só então recusar `?k=`
 - [x] README reescrito (15/09): descreve o serviço multiempresa, aponta para os documentos de
       embarque e de diferenças, e registra as regras da casa (PR #478)
