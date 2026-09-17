@@ -71,7 +71,10 @@ function corpoDaRota(arq, mod, rota) {
    bloco certo, não a lista */
 {
   const corpo = corpoDaRota('good-checkout-offline/index.js', 'good-checkout-offline', 'backfill-status');
-  assert.ok(corpo.length <= 10,
+  /* o teto separa o corpo da rota (~6-13 linhas) do bloco de exceções (24+). Subiu de 10 pra
+     15 em 17/09 porque a própria rota cresceu — ganhou a checagem de sessão e o comentário
+     que a explica. O que o teto precisa distinguir continua valendo com folga. */
+  assert.ok(corpo.length <= 15,
     'corpo de /backfill-status tem ' + corpo.length + ' linhas — a medição provavelmente pegou a lista de exceções do portão, não a rota');
 
   /* 17/09 — o tamanho pega o caso de hoje; o CONTEÚDO pega a classe. Um dia a lista de
@@ -83,8 +86,13 @@ function corpoDaRota(arq, mod, rota) {
     'inteiro achando que era uma rota de status');
   assert.ok(!/shopee-sessao-cookies/.test(texto),
     'o corpo medido contém outras rotas — é a lista de exceções, não a declaração');
-  assert.ok(corpo.some((l) => l.includes('__bfGood')),
-    'corpo de /backfill-status não bate com o handler real — a extração pegou o bloco errado');
+  /* 17/09 — a marca era `__bfGood`, a variável GLOBAL onde a GOOD guardava o status do
+     backfill. Ela saiu (estado de empresa não mora em global — as três rodam no mesmo
+     processo e a empresa nova copiaria o nome junto), então a marca passou a ser `_bfGood`,
+     o estado do módulo que a substituiu. O que o teste prova continua o mesmo: que o corpo
+     medido é o da ROTA e não o da lista de exceções do portão. */
+  assert.ok(corpo.some((l) => l.includes('_bfGood')),
+    'o corpo medido não cita o status do backfill — provavelmente não é o corpo da rota');
 }
 
 /* as divergentes não entram nesta fase — se sumirem da declaração de alguma das três, ou a
