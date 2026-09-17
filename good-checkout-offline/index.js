@@ -2249,6 +2249,12 @@ function routes(readBody) {
         flex: !!(snapC && snapC.flex),
         servico: snapC ? (snapC.servico || '') : '',
         nf_numero: (snapC && snapC.nf && snapC.nf.numero) || null,
+        /* 16/09 — PORTE: a AMB e a Girassol gravam o `nf_id` na conferência e a GOOD não, e
+           por isso o link ↗ que abre a NF no Bling nunca aparecia no painel e no dashboard
+           dela — o front já sabe desenhar (`if(!souAdmin() || !p.nf_id) return ''`), só nunca
+           recebeu o dado. Não é diferença de operação: é capacidade que ficou pra trás.
+           Regra da casa: uma tem, agora ambas têm. */
+        nf_id: (snapC && snapC.nf && snapC.nf.id) || null,   // ID interno da NF — link direto pro Bling
         nf_emissao: (snapC && snapC.nf && snapC.nf.dataEmissao) || null,   // b10: hora da NF gravada na bipagem (pronto pro dia em que o dashboard chegar aqui)
         valor: (snapC && snapC.total != null) ? Number(snapC.total) : null,   // faturamento (total do pedido)
         uf: (snapC && snapC.uf) || null,
