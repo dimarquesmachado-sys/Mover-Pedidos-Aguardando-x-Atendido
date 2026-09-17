@@ -523,7 +523,12 @@ function routes(readBody) {
       try {
         const d = require('../lib/checkout/descobrir-ids').criar({ rotulo: 'GOOD', blingGet , /* o token do ML vem do gerenciador fiscal DESTA empresa — o lint pegou que eu
        supus uma variável `garantirTokenML` solta que não existe aqui. */
-      garantirTokenML: () => require('../good/mlTokenManager').garantirTokenML(), envNomes: {"atendido": "GOODBKP_SIT_ATENDIDO", "despachados": "GOODBKP_SIT_DESPACHADOS", "verificado": "GOODBKP_SIT_VERIFICADO", "aguardando": "GOOD_SITUACAO_AGUARDANDO", "meLojaIds": "GOOD_ME_LOJA_IDS"}, temExpedicao: require('../lib/empresas/registro').carregar({ servico: 'mover-pedidos' }).temCapacidade('good', 'expedicao') === true , padroesEnv: {"GOODBKP_SIT_ATENDIDO": "9", "GOODBKP_SIT_DESPACHADOS": "0", "GOODBKP_SIT_VERIFICADO": "24", "GOOD_SITUACAO_AGUARDANDO": "745122", "GOOD_ME_LOJA_IDS": "206017293"}  });
+      garantirTokenML: () => require('../good/mlTokenManager').garantirTokenML(), envNomes: {"atendido": "GOODBKP_SIT_ATENDIDO", "despachados": "GOODBKP_SIT_DESPACHADOS", "verificado": "GOODBKP_SIT_VERIFICADO", "aguardando": "GOOD_SITUACAO_AGUARDANDO", "meLojaIds": "GOOD_ME_LOJA_IDS"}, temExpedicao: require('../lib/empresas/registro').carregar({ servico: 'mover-pedidos' }).temCapacidade('good', 'expedicao') === true , /* 16/09 (P2 do Codex): o padrão do canal do ML foi REMOVIDO do código — declarar
+           aqui faria a conferência dizer "não existe no Render, mas o padrão do código já é
+           este valor, criar não muda nada", que hoje é o contrário da verdade: sem a env, o
+           F1 e o F3 se recusam a rodar. Dizer que está tudo bem quando não está é o pior
+           jeito de errar numa ferramenta de conferência. */
+        padroesEnv: {"GOODBKP_SIT_ATENDIDO": "9", "GOODBKP_SIT_DESPACHADOS": "0", "GOODBKP_SIT_VERIFICADO": "24", "GOOD_SITUACAO_AGUARDANDO": "745122"}  });
         json(res, 200, await d.descobrir());
       } catch (e) { json(res, 500, { ok: false, erro: String(e.message || e) }); }
       return true;

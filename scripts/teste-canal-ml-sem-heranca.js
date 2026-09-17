@@ -74,4 +74,37 @@ for (const arq of ['lib/fiscal/bling-api.js', 'girassol/importarPedido.js']) {
     'e não pode anunciar /descobrir-ids pra empresa sem pasta');
 }
 
+/* 16/09 (3 P2 do Codex) — os três são o mesmo princípio: NÃO FINGIR QUE ESTÁ TUDO BEM.
+   (1) `203296034,abc` virava lista "válida" com um id só — o F1 seguia e ignorava todos os
+       pedidos do canal digitado errado, sem erro e sem aviso. Um item ruim invalida a lista;
+   (2) a fábrica seguia a mesma regra frouxa pra empresa nova;
+   (3) a conferência ainda declarava o canal como "padrão do código", então diria "não existe
+       no Render, mas o padrão já cobre" — sendo que o padrão foi REMOVIDO e, sem a env, o F1
+       e o F3 se recusam a rodar. Dizer que está tudo bem quando não está é o pior jeito de
+       errar numa ferramenta de conferência. */
+{
+  const s = fs.readFileSync(path.join(raiz, 'lib', 'fiscal', 'bling-api.js'), 'utf8');
+  const bloco = /const _itens = [\s\S]*?const ME_LOJA_IDS = [^;]+;/.exec(s);
+  assert.ok(bloco, 'não achei o parser da lista de canais');
+  const lista = (v) => new Function('_lojaIdsBrutos', bloco[0] + ' return ME_LOJA_IDS;')(v);
+  assert.deepStrictEqual(lista('203296034'), [203296034]);
+  assert.deepStrictEqual(lista('203296034,206069383'), [203296034, 206069383], 'lista com vírgula é válida — ML normal + Full');
+  assert.deepStrictEqual(lista('203296034,abc'), [],
+    'um item inválido invalida a LISTA INTEIRA — descartar só o ruim faria a empresa ignorar o canal digitado errado em silêncio');
+  assert.deepStrictEqual(lista('abc'), []);
+
+  const f = fs.readFileSync(path.join(raiz, 'lib', 'fiscal', 'montar-empresa.js'), 'utf8');
+  assert.ok(/some\(x => !\/\^\\d\+\$\/\.test\(x\)\)/.test(f),
+    'a fábrica tem que seguir a mesma regra: um item ruim invalida a lista');
+}
+
+/* (3) a conferência não pode declarar um padrão que não existe mais */
+for (const arq of ['amb-checkout-offline/index.js', 'girassol-backup-offline/gbo-app.js', 'good-checkout-offline/index.js']) {
+  const s = fs.readFileSync(path.join(raiz, arq), 'utf8');
+  const m = /padroesEnv: (\{[^}]*\})/.exec(s);
+  assert.ok(m, arq + ': não achei padroesEnv');
+  assert.ok(!/ME_LOJA_IDS/.test(m[1]),
+    arq + ': o canal do ML voltou pros padrões — a conferência diria "o padrão já cobre" quando o padrão não existe mais');
+}
+
 console.log('OK: canal do ML — nenhum id herdado como padrão; sem a env o serviço SOBE, mas a decisão do F1 recusa em vez de responder "não é do ML" em silêncio');
