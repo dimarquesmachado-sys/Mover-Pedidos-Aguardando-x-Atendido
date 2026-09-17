@@ -1,3 +1,7 @@
+/* 17/09 — a rota `conferido` saiu das três pastas para lib/checkout/rotas-conferido.js (5ª
+   fatia do passo 4), então a paridade dos campos passou a ser estrutural: existe UM código
+   só. O que este teste guarda agora é o que a unificação NÃO garante sozinha — que o campo
+   e a guarda continuem lá, e que nenhuma pasta volte a ter cópia própria. */
 'use strict';
 /* 16/09 — PORTE DE CAPACIDADE achado ao medir a 5ª fatia do passo 4: a AMB e a Girassol
    gravavam o `nf_id` na conferência do pedido e a GOOD não. O efeito era invisível no
@@ -14,11 +18,7 @@ const fs = require('fs');
 const path = require('path');
 const raiz = path.join(__dirname, '..');
 
-const ARQS = {
-  amb: 'amb-checkout-offline/index.js',
-  girassol: 'girassol-backup-offline/gbo-app.js',
-  good: 'good-checkout-offline/index.js',
-};
+const ARQS = { lib: 'lib/checkout/rotas-conferido.js' };
 
 /* os campos que a conferência grava a partir do snapshot têm que ser os MESMOS nas três.
    16/09 (Codex): a lista é uma CONSTANTE fixa, não derivada de uma das empresas — se
@@ -51,6 +51,12 @@ for (const [emp, arq] of Object.entries(ARQS)) {
   assert.ok(/nf_id:\s*\(snapC && !snapC\.nf_anexada && snapC\.nf && snapC\.nf\.id\)/.test(s),
     emp + ': não grava o nf_id (com a guarda de nf_anexada) na conferência — o link ↗ que abre a NF no Bling ' +
     'some da tela ou aponta pra nota cancelada');
+}
+
+for (const arq of ['amb-checkout-offline/index.js', 'girassol-backup-offline/gbo-app.js', 'good-checkout-offline/index.js']) {
+  const s = fs.readFileSync(path.join(raiz, arq), 'utf8');
+  assert.ok(!/nf_id:\s*\(snapC/.test(s),
+    arq + ': a gravação do nf_id voltou pra pasta — é por aí que a divergência entre as três retorna');
 }
 
 console.log('OK: paridade da conferência — as três gravam os mesmos campos, incluindo o nf_id que dá o link pro Bling');
