@@ -55,4 +55,23 @@ for (const arq of ['lib/fiscal/bling-api.js', 'girassol/importarPedido.js']) {
     'o guarda do F3 tem que reusar mensagemCanalFaltando() do blingApi — senão a rota real e a env somem de novo');
 }
 
+/* 16/09 (P2 do Codex) — NÃO ANUNCIAR ROTA QUE A EMPRESA NÃO TEM. Empresa montada pelo
+   contrato não tem pasta de checkout, logo não tem /descobrir-ids própria: mandá-la rodar
+   essa rota é mandar o dono a um 404, e ele procura o que não existe em vez de resolver.
+   E a fábrica aceitava `NOVA_ME_LOJA_IDS=abc` (só checava presença) — mesmo erro que o
+   validar tinha: o valor existe, a empresa monta, e o F1/F3 se recusam a rodar depois. */
+{
+  const s = fs.readFileSync(path.join(raiz, 'lib', 'fiscal', 'bling-api.js'), 'utf8');
+  const msg = /function mensagemCanalFaltando\(\)[\s\S]*?\n  \}/.exec(s)[0];
+  assert.ok(/montada pelo contrato/.test(msg),
+    'rótulo fora da tabela é empresa da fábrica — a mensagem não pode mandar rodar uma rota que ela não tem');
+  assert.ok(!/Rode o \/descobrir-ids do checkout-offline desta empresa/.test(msg));
+
+  const f = fs.readFileSync(path.join(raiz, 'lib', 'fiscal', 'montar-empresa.js'), 'utf8');
+  assert.ok(/\/\^\\d\+\$\//.test(f) || /test\(x\)/.test(f),
+    'a fábrica tem que validar o FORMATO dos ids, não só a presença');
+  assert.ok(!/descobrir-ids/.test(f) || /não tem rota \/descobrir-ids/.test(f),
+    'e não pode anunciar /descobrir-ids pra empresa sem pasta');
+}
+
 console.log('OK: canal do ML — nenhum id herdado como padrão; sem a env o serviço SOBE, mas a decisão do F1 recusa em vez de responder "não é do ML" em silêncio');
