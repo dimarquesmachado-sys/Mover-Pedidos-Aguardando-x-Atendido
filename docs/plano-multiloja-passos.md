@@ -194,9 +194,10 @@ credencial.
       canal da AMB, e empresa sem env própria julgava os pedidos dela pelo canal de outra, em
       silêncio. Saiu com evidência de produção — `/descobrir-ids` provou o canal de cada uma
       contra a conta do ML e conferiu contra o Render. A ausência da env **não derruba o boot**
-      (isso levaria as outras empresas junto, e o CI não passa essas envs): quem recusa é quem
-      DECIDE — o predicado do F1/F2 e o fluxo do F3 —, com a rota `/descobrir-ids` daquela
-      empresa na mensagem. Só a empresa mal configurada fica parada
+      (mudou na 2ª rodada do mesmo dia, pra não levar as outras duas junto, e porque o CI não
+      passa essas envs): o servidor sobe e só a empresa sem canal fica parada, com a mensagem
+      — dizendo como obter o valor — no log a cada ciclo do F1/F2/F3. O `empresa.js validar`
+      cobra a env ANTES do deploy, e é ele que substitui o boot como sinal de "pronta"
 - [x] **`empresa.js validar` confere o FORMATO, não só a presença** (16/09): `ME_LOJA_IDS=abc`
       passava como "presente" e o validar dizia "pronta", enquanto em produção o F1 e o F3 se
       recusariam a rodar. Portão que aprova configuração quebrada é pior que não ter portão —

@@ -81,12 +81,21 @@ function _envsDe(registro, id, mapa) {
   return out;
 }
 
+/* 17/09 (Codex #485, P2) — mesma regra de parsing de lib/fiscal/bling-api.js
+   (canaisDeclarados()): `GOOD_ME_LOJA_IDS=abc` passa em "presente", mas vira ME_LOJA_IDS
+   vazio no runtime, e o F1/F2/F3 param igual a se a env não existisse — só que sem o
+   "✗ falta" que o validar daria. Estar presente não basta; tem que sobrar pelo menos um
+   id numérico depois do parse, senão o portão aprova uma empresa que não vai mover pedido. */
+function _meLojaIdsValido(valor) {
+  return String(valor || '').split(',').map(x => Number(String(x).trim())).some(n => n && !isNaN(n));
+}
+
 /* obrigatórias e opcionais já com ME_LOJA_IDS na lista certa pra esta empresa (ver nota acima). */
 function _envsFiscais(registro, id) {
   const obrig = _envsDe(registro, id, ENVS_POR_CAPACIDADE);
   const opc = _envsDe(registro, id, ENVS_OPCIONAIS);
   if (_capacidades(registro, id).includes('fiscal')) {
-    obrig.push({ cap: 'fiscal', nome: registro.nomeEnv(id, 'ME_LOJA_IDS') });
+    obrig.push({ cap: 'fiscal', nome: registro.nomeEnv(id, 'ME_LOJA_IDS'), validar: _meLojaIdsValido });
   }
   return { obrig, opc };
 }
@@ -116,9 +125,11 @@ function validar(alvo) {
 
   const { obrig, opc } = _envsFiscais(registro, e.id);
   const faltando = obrig.filter(x => !process.env[x.nome]);
-  console.log('\nEnvs obrigatórias: ' + (obrig.length - faltando.length) + '/' + obrig.length + ' presentes');
+  const invalidas = obrig.filter(x => process.env[x.nome] && x.validar && !x.validar(process.env[x.nome]));
+  console.log('\nEnvs obrigatórias: ' + (obrig.length - faltando.length - invalidas.length) + '/' + obrig.length + ' presentes e válidas');
   for (const f of faltando) console.log('  ✗ falta ' + f.nome + '   (capacidade: ' + f.cap + ')');
-  problemas += faltando.length;
+  for (const f of invalidas) console.log('  ✗ ' + f.nome + ' está presente mas com valor inválido   (capacidade: ' + f.cap + ')');
+  problemas += faltando.length + invalidas.length;
 
   /* 16/09 (P2 do Codex) — PRESENÇA NÃO É VALIDADE. `GOOD_ME_LOJA_IDS=abc` passava aqui como
      "presente" e o validar saía "pronta", mas em produção a lista de canais fica vazia e o F1
