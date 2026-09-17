@@ -19,7 +19,7 @@ const deps = {
   lerReservas: () => ({}), moverSituacao: async () => ({}), arquivarFinalizado: () => {},
   sincronizarConferidos: async () => ({}), rodarCiclo: async () => ({}),
   CONFERIDOS_FILE: '/tmp/c.json', RESERVAS_FILE: '/tmp/r.json', CACHE_DIR: '/tmp',
-  SIT_VERIFICADO: 24, SYNC_ON: true, VERSAO: 'teste', tag: 'TESTE',
+  SIT_VERIFICADO: 24, SYNC_ON: true, VERSAO: 'teste',
 };
 
 assert.throws(() => criar({}), /falta prefixo/);
