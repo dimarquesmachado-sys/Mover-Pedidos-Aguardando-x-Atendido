@@ -19,11 +19,11 @@ const deps = {
   lerReservas: () => ({}), moverSituacao: async () => ({}), arquivarFinalizado: () => {},
   sincronizarConferidos: async () => ({}), rodarCiclo: async () => ({}),
   CONFERIDOS_FILE: '/tmp/c.json', RESERVAS_FILE: '/tmp/r.json', CACHE_DIR: '/tmp',
-  SIT_VERIFICADO: 24, SYNC_ON: true, VERSAO: 'teste', rotulo: 'TESTE',
+  SIT_VERIFICADO: 24, SYNC_ON: true, VERSAO: 'teste', tag: 'TESTE',
 };
 
 assert.throws(() => criar({}), /falta prefixo/);
-for (const faltando of ['SIT_VERIFICADO', 'arquivarFinalizado', 'rodarCiclo', 'RESERVAS_FILE']) {
+for (const faltando of ['SIT_VERIFICADO', 'arquivarFinalizado', 'rodarCiclo', 'RESERVAS_FILE', 'tag']) {
   const parcial = Object.assign({}, deps); delete parcial[faltando];
   assert.throws(() => criar(parcial), new RegExp('falta ' + faltando),
     'dependência ausente derruba na criação, não na primeira chamada');
@@ -70,7 +70,7 @@ for (const arq of ['amb-checkout-offline/index.js', 'girassol-backup-offline/gbo
   const codigo = s.replace(/\/\*[\s\S]*?\*\//g, '').split('\n').filter(l => !/^\s*\/\//.test(l)).join('\n');
   assert.ok(!/AMBBKP|amb-checkout-offline/.test(codigo),
     'a lib tem rótulo ou slug da AMB cravado — as três rodam no mesmo processo');
-  assert.ok(/\[\$\{rotulo\}\]/.test(codigo), 'o log tem que usar o rótulo injetado');
+  assert.ok(/\[\$\{tag\}\]/.test(codigo), 'o log tem que usar o rótulo injetado');
   assert.ok(/\$\{prefixo\}\/status/.test(codigo), 'a rota de status tem que sair do prefixo injetado');
 
   /* prova de verdade: três instâncias, três respostas */
@@ -84,7 +84,7 @@ for (const arq of ['amb-checkout-offline/index.js', 'girassol-backup-offline/gbo
   const vistas = [];
   for (const [pref, rot] of [['/a', 'A'], ['/b', 'B']]) {
     const h = criar(Object.assign({}, base, {
-      prefixo: pref, rotulo: rot,
+      prefixo: pref, tag: rot,
       json: (r, c, corpo) => vistas.push(corpo && corpo.mensagem),
     }));
     h({ headers: {} }, {}, { pathname: pref + '/run', searchParams: new URLSearchParams() }, 'GET', () => true);

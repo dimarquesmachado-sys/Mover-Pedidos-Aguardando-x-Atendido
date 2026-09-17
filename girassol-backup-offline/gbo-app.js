@@ -861,7 +861,7 @@ function routes(readBody) {
   const _rotasConferido = require('../lib/checkout/rotas-conferido').criar({
     prefixo: '/girassol-backup-offline', tag: base.tag, json, readBody, readJson, writeJson, lerReservas, moverSituacao,
     arquivarFinalizado, sincronizarConferidos, rodarCiclo, CONFERIDOS_FILE, RESERVAS_FILE,
-    CACHE_DIR, SIT_VERIFICADO, SYNC_ON, VERSAO,
+    CACHE_DIR, SIT_VERIFICADO, rotulo: base.tag, SYNC_ON, VERSAO,
   });
   // handler das rotas de diagnóstico (debug-*, sonda-*, diag-*, /backup, /restaurar).
   // Montado UMA vez; a chamada fica no fim do handle, logo antes do return false.
