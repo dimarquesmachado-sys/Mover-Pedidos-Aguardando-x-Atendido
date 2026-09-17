@@ -1312,11 +1312,17 @@ function routes(readBody) {
       for (const sku of aResolver) {
         try {
           let prod = null;
-          for (const v of [...new Set([sku, sku.toUpperCase(), sku.toLowerCase()])]) {
-            const r = await bg(`/produtos?codigo=${encodeURIComponent(v)}&limite=10&criterio=5`);
-            const it = escolherProdutoAtivo(r.ok && r.data && r.data.data, sku, null, 10);   // 19/08: nunca um cadastro excluído
-            if (it && it.id) { const d = await bg(`/produtos/${it.id}`); prod = (d.ok && d.data && d.data.data) || it; break; }
-            await dorme(300);
+          /* Codex #497 (r4): a cópia inline (caixa exata/maiúscula/minúscula + reserva do inativo)
+             veio "espelhada" da GOOD e trouxe junto os mesmos dois bugs que a review achou lá:
+             um cadastro sem `situacao` na 1ª variante travava o laço como se fosse ATIVO (a
+             variante seguinte, com o ativo de verdade, nunca era tentada), e se o detalhe da
+             reserva falhasse o produto virava `null` em vez de manter a reserva (perdendo saldo/
+             preço/custo que já tínhamos). resolverProdutoPorSku (lib/checkout/produto-ativo.js,
+             já usado no custo-sync desta empresa) resolve os dois num lugar só. */
+          const _res = await resolverProdutoPorSku(sku, bg, 10);
+          if (_res.produto && _res.produto.id) {
+            const d = await bg(`/produtos/${_res.produto.id}`);
+            prod = (d.ok && d.data && d.data.data) || _res.produto;
           }
           if (prod && prod.id) {
             const forn = prod.fornecedor || {};
