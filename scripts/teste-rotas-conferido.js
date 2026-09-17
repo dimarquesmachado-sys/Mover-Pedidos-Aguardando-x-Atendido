@@ -15,7 +15,7 @@ const { criar } = require('../lib/checkout/rotas-conferido');
 const raiz = path.join(__dirname, '..');
 
 const deps = {
-  prefixo: '/x', json: () => {}, readBody: async () => ({}), readJson: () => ({}), writeJson: () => {},
+  prefixo: '/x', tag: 'XBKP', json: () => {}, readBody: async () => ({}), readJson: () => ({}), writeJson: () => {},
   lerReservas: () => ({}), moverSituacao: async () => ({}), arquivarFinalizado: () => {},
   sincronizarConferidos: async () => ({}), rodarCiclo: async () => ({}),
   CONFERIDOS_FILE: '/tmp/c.json', RESERVAS_FILE: '/tmp/r.json', CACHE_DIR: '/tmp',

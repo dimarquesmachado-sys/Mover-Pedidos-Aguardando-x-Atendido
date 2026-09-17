@@ -859,7 +859,7 @@ function routes(readBody) {
     SHOPEE_ENV_COOKIE, VERSAO, statusMlSync: _mls,
   });
   const _rotasConferido = require('../lib/checkout/rotas-conferido').criar({
-    prefixo: '/girassol-backup-offline', json, readBody, readJson, writeJson, lerReservas, moverSituacao,
+    prefixo: '/girassol-backup-offline', tag: base.tag, json, readBody, readJson, writeJson, lerReservas, moverSituacao,
     arquivarFinalizado, sincronizarConferidos, rodarCiclo, CONFERIDOS_FILE, RESERVAS_FILE,
     CACHE_DIR, SIT_VERIFICADO, SYNC_ON, VERSAO,
   });
