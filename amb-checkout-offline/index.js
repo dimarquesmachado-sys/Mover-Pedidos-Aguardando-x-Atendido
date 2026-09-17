@@ -4535,7 +4535,10 @@ function routes(readBody) {
         flex: !!(snapC && snapC.flex),
         servico: snapC ? (snapC.servico || '') : '',
         nf_numero: (snapC && snapC.nf && snapC.nf.numero) || null,
-        nf_id: (snapC && snapC.nf && snapC.nf.id) || null,   // ID interno da NF — link direto pro Bling
+        // 17/09 (Codex, achado no porte da GOOD): sem o `!snapC.nf_anexada` este campo
+        // gravaria o id da nota CANCELADA quando o admin anexa a NF à mão — ciclo.js
+        // (linha ~1021) documenta que `snap.nf.id` não é atualizado nesse fluxo.
+        nf_id: (snapC && !snapC.nf_anexada && snapC.nf && snapC.nf.id) || null,   // ID interno da NF — link direto pro Bling
         nf_emissao: (snapC && snapC.nf && snapC.nf.dataEmissao) || null,   // b11: hora da NF já entra na bipagem (dashboard ordena por ela)
         valor: (snapC && snapC.total != null) ? Number(snapC.total) : null,   // faturamento (total do pedido)
         uf: (snapC && snapC.uf) || null,

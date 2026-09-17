@@ -1717,7 +1717,7 @@ function renderHist(lista){
     if(aberto){
       const its = h.itens||[];
       det = '<div class="histdet">'+
-        '<div>'+(mk?esc(mk.n):'')+(h.servico?' · '+esc(h.servico):'')+(h.flex?' · <b>⚡ FLEX</b>':'')+(h.nf_numero?' · NF '+esc(h.nf_numero):'')+' '+linksMkt(h)+'</div>'+
+        '<div>'+(mk?esc(mk.n):'')+(h.servico?' · '+esc(h.servico):'')+(h.flex?' · <b>⚡ FLEX</b>':'')+(h.nf_numero?' · NF '+esc(h.nf_numero):'')+' '+linkBlingNF(h)+linksMkt(h)+'</div>'+
         (h.cliente?'<div>👤 '+esc(h.cliente)+'</div>':'')+
         (its.length
           ? its.map(it=>'<div class="histit"><b>'+(it.qtd||1)+'×</b> '+esc(it.sku||'?')+(it.descricao?' — '+esc(it.descricao):'')+'</div>').join('')
