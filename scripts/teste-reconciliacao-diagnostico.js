@@ -44,4 +44,31 @@ for (const [emp, arq] of Object.entries(ROTAS)) {
     emp + ': a /lista não expõe `reconciliacao` — agora que o ciclo calcula, o campo tem que chegar na tela');
 }
 
+/* Codex #491 (P2) — 'ok' SÓ QUANDO A RECONCILIAÇÃO CONCLUIU. Havia ramos em que ela é
+   ADIADA (a sonda do ciclo anterior não assentou) ou ABORTADA (token mudo no meio do lote), e
+   nos dois o valor ficava 'ok': a /lista diria que a limpeza rodou, e o dono procuraria em
+   outro lugar a pasta órfã que continua no painel.
+   ⚠️ Cada empresa marca o que REALMENTE acontece nela: a AMB e a GOOD têm os ramos da sonda
+   pendente e do token mudo; a Girassol tem o da trava. Marcar na Girassol um ramo que ela não
+   tem seria inventar diagnóstico. */
+{
+  const semComentario = (p) => fs.readFileSync(path.join(raiz, p, 'ciclo.js'), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '').split('\n').filter(l => !/^\s*\/\//.test(l)).join('\n');
+
+  for (const pasta of ['amb-checkout-offline', 'good-checkout-offline']) {
+    const c = semComentario(pasta);
+    assert.ok(/_sondaPendente\)/.test(c), pasta + ': esperava o ramo da sonda pendente');
+    assert.ok(/reconciliacao = 'adiada_sonda_pendente';/.test(c),
+      pasta + ": conferência PULADA pela sonda pendente ainda reporta 'ok' — a /lista diria que a limpeza rodou");
+    assert.ok(/reconciliacao = 'abortada_token_mudo';/.test(c),
+      pasta + ": lote abortado por token mudo ainda reporta 'ok'");
+  }
+
+  /* a Girassol NÃO tem esses ramos — tem o da trava. Marcar o que ela não faz seria inventar. */
+  const g = semComentario('girassol-backup-offline');
+  assert.ok(!/adiada_sonda_pendente|abortada_token_mudo/.test(g),
+    'a Girassol não tem os ramos da sonda pendente nem do token mudo — marcá-los seria diagnóstico inventado');
+  assert.ok(/reconciliacao = 'abortada_trava';/.test(g), 'a Girassol tem o ramo da trava e ele tem que continuar marcado');
+}
+
 console.log('OK: reconciliação — as três calculam e expõem, e o ramo da fila vazia NÃO foi copiado pra quem roda com ela');

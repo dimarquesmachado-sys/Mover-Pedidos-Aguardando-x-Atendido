@@ -957,6 +957,10 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
         let confirmados = 0, mantidos = 0, semResposta = 0, adiados = 0, mudo = false, tentados = 0;
         if (_sondaPendente) {
           console.log(`[AMBBKP] reconciliação: conferência PULADA — chamada do ciclo anterior ainda pendurada no token; ${aRemover.length} candidato(s) adiado(s)`);
+          /* Codex #491 (P2): aqui a reconciliação foi ADIADA, não concluída — todo candidato
+             ficou pra outro ciclo. Reportar 'ok' diria que a limpeza rodou e faria o dono
+             procurar em outro lugar a pasta órfã que continua no painel. */
+          reconciliacao = 'adiada_sonda_pendente';
         } else {
         /* Codex #205 r5: fatia FIXA daria fome — os mesmos 15 primeiros seriam tentados em
            todo ciclo (a ordem do manifest é estável) e, se preservados, o 16º em diante
@@ -1011,6 +1015,8 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
               continue;
             }
             mudo = true; adiados += (loteConf.length - iC);   // 2º: dois ids diferentes mudos = token; aborta
+            /* Codex #491 (P2): token mudo aborta o lote e adia o resto — também não é 'ok'. */
+            reconciliacao = 'abortada_token_mudo';
             /* r7fix: a pendurada é registrada ANTES do break — depois dele é código morto
                (foi exatamente o que o Codex pegou na primeira versão disto). */
             _sondaPendente = pd.emVoo().catch(() => {}).then(() => { _sondaPendente = null; });
