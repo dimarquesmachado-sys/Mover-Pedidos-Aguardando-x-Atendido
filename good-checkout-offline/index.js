@@ -1936,6 +1936,7 @@ function routes(readBody) {
            `reconciliacao` fica anotado como porte de VERDADE a fazer: é o único lugar que diz
            POR QUE a limpeza foi pulada, e sem ele estas duas mostram o sintoma (pedido
            despachado preso como "sem etiqueta", 13/08) sem a causa. */
+        reconciliacao: (getUltimoResumo() || {}).reconciliacao || null,   // 17/09: o ciclo desta empresa passou a calcular
         paginas_refeitas: (getUltimoResumo() || {}).paginasRefeitas || 0,
         prontos: prontos.length,
         sem_etiqueta: semEtiq.length,
