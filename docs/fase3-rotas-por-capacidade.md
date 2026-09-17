@@ -49,7 +49,12 @@ As quase-idênticas, com a distância: `/backfill-nf-auto` (4), `/ciclo-agora` (
   status que as rotas leem e escrevem durante o backfill. Entram por REFERÊNCIA e por empresa;
   copiá-los faria a rota reportar um progresso que não é o do backfill de verdade.
 
-Faltam 6 das idênticas e as 6 quase-idênticas.
+- ✅ **NF anexada e sessão dos marketplaces** (PR #487): `/nf-anexar`, `/shopee-sessao` e
+  `/ml-sync-fees` → `lib/checkout/rotas-nf-anexar.js`. O `nf-anexar` era a maior das idênticas
+  (80 linhas) e a única com diferença real: o **id da empresa** no aviso ao Devoluções —
+  configuração, não regra, virou parâmetro. Mais um estado vivo (`_mls`) por referência.
+
+Faltam 3 das idênticas e as 6 quase-idênticas.
 
 ## O critério mudou depois da primeira fatia (P1 do Codex no #480)
 
