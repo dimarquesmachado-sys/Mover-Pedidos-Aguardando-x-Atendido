@@ -1,18 +1,14 @@
 'use strict';
-/* 17/09 — a MEDIÇÃO das rotas estava inflada, e o erro tinha risco junto: minha regex casava
-   com qualquer MENÇÃO a `p === '/<empresa>/<rota>'`, e a GOOD tem uma lista de EXCEÇÕES do
-   portão de sessão que cita várias rotas por nome. A `/backfill-status`, de 6 linhas de corpo,
-   aparecia com 25 de diferença porque eu capturava aquele bloco — e extrair "aquilo" teria
-   movido a TRAVA CENTRAL DE AUTENTICAÇÃO junto.
+/* 17/09 — a MEDIÇÃO das rotas estava inflada, e o erro tinha risco junto. A regex casava com
+   qualquer menção a `p === '/<empresa>/<rota>'`, e a GOOD tem uma lista de EXCEÇÕES do portão
+   de sessão que cita várias rotas por nome. A `/backfill-status`, de 6 linhas, aparecia com 25
+   de diferença porque eu capturava aquele bloco — e extrair "aquilo" teria movido a trava
+   central de autenticação junto.
 
-   ⚠️ Codex #493: a primeira versão deste teste comparava CONJUNTOS DE NOMES, e a regressão
-   nunca foi sobre nomes — era sobre qual BLOCO o medidor escolhe quando o mesmo nome aparece
-   duas vezes no arquivo. Agora ele extrai o corpo de verdade e confere que veio a declaração,
-   não a lista de exceções.
-
-   E não trava contagem mínima: esta fase MOVE declarações para handlers compartilhados de
-   propósito, então exigir um piso faria o teste acusar exatamente o trabalho que ele deveria
-   acompanhar. */
+   O número de divergentes caiu de 21 para 6 quando a medição passou a contar DECLARAÇÃO em vez
+   de menção. Este teste guarda essa distinção extraindo o CORPO de verdade (não só o nome da
+   rota) e travando as seis divergentes — que não entram nesta fase de extração e por isso não
+   podem sumir do conjunto comum às três, ao contrário das quase-idênticas (Codex, 17/09). */
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
@@ -24,65 +20,96 @@ const ALVOS = [
   ['good-checkout-offline/index.js', 'good-checkout-offline'],
 ];
 
-/* A FUNÇÃO SOB TESTE: dado um arquivo e uma rota, devolve o CORPO da declaração.
-   É esta escolha — qual bloco pegar — que estava errada e que o teste precisa exercitar. */
-function corpoDaRota(texto, mod, nome) {
-  const re = new RegExp(
-    String.raw`^( *)if \([^\n]*p === (?:R\('` + nome + String.raw`'\)|'/` + mod + '/' + nome +
-    String.raw`')[^\n]*\{ *$`, 'm');
-  const m = re.exec(texto);
-  if (!m) return null;
-  const fim = texto.indexOf('\n' + m[1] + '}', m.index);
-  if (fim < 0) return null;
-  return texto.slice(m.index, fim);
+/* as seis divergentes ficam de fora desta fase (viram o próximo ciclo.js) — diferente das
+   quase-idênticas, elas não têm extração planejada, então continuam declaradas nas três */
+const DIVERGENTES = ['status', 'config-fiscal', 'sku-info', 'etiqueta-anexar', 'custo-sync', 'backfill-status'];
+
+/* declaração = `if (… p === … ) {` abrindo bloco no fim da linha.
+   menção em lista de exceções termina com `||` e não abre bloco. */
+function reDeclaracao(mod, rota) {
+  return new RegExp(String.raw`^ *if \([^\n]*p === (?:R\('${rota}'\)|'/${mod}/${rota}')[^\n]*\{ *$`, 'm');
 }
 
-/* 1. O CASO QUE PRODUZIU O ERRO: na GOOD, `backfill-status` aparece DUAS vezes — na lista de
-   exceções do portão e na declaração da rota. O medidor tem que pegar a segunda. */
-{
-  const s = fs.readFileSync(path.join(raiz, 'good-checkout-offline/index.js'), 'utf8');
-  const mencoes = (s.match(/p === '\/good-checkout-offline\/backfill-status'/g) || []).length;
-  assert.ok(mencoes >= 2,
-    'esperava que /backfill-status aparecesse na lista de exceções E na declaração — ' +
-    'se isso mudou, a armadilha mudou de forma e a medição precisa ser revista');
-
-  const corpo = corpoDaRota(s, 'good-checkout-offline', 'backfill-status');
-  assert.ok(corpo, 'o medidor não achou a declaração de /backfill-status na GOOD');
-
-  /* a prova: o corpo NÃO pode conter a trava de sessão nem as outras rotas da lista */
-  assert.ok(!/Sessão necessária\. Faça login\./.test(corpo),
-    'o medidor pegou a LISTA DE EXCEÇÕES: o corpo contém a trava central de sessão. ' +
-    'Extrair isso moveria a autenticação do módulo inteiro achando que era uma rota de status');
-  assert.ok(!/shopee-sessao-cookies/.test(corpo),
-    'o corpo contém outras rotas — é a lista de exceções, não a declaração');
-  assert.ok(corpo.split('\n').length < 15,
-    'o corpo de /backfill-status tem ~6 linhas; veio ' + corpo.split('\n').length +
-    ' — sinal de que o medidor capturou o bloco errado');
+function declaradas(arq, mod) {
+  const s = fs.readFileSync(path.join(raiz, arq), 'utf8');
+  const out = new Set();
+  const re = new RegExp(String.raw`^ *if \([^\n]*p === (?:R\('([\w-]+)'\)|'/` + mod + String.raw`/([\w-]+)')[^\n]*\{ *$`, 'gm');
+  let m;
+  while ((m = re.exec(s))) out.add(m[1] || m[2]);
+  return out;
 }
 
-/* 2. O corpo extraído tem que ser plausível em TODAS as rotas comuns: nenhuma pode arrastar a
-   trava de sessão junto. É a forma geral do mesmo erro. */
-{
-  const arquivos = ALVOS.map(([arq, mod]) => [mod, fs.readFileSync(path.join(raiz, arq), 'utf8')]);
-  const declaradas = (texto, mod) => {
-    const re = new RegExp(String.raw`^ *if \([^\n]*p === (?:R\('([\w-]+)'\)|'/` + mod +
-      String.raw`/([\w-]+)')[^\n]*\{ *$`, 'gm');
-    const out = new Set();
-    let m;
-    while ((m = re.exec(texto))) out.add(m[1] || m[2]);
-    return out;
-  };
-  const conjuntos = arquivos.map(([mod, texto]) => declaradas(texto, mod));
-  const comuns = [...conjuntos[0]].filter(r => conjuntos[1].has(r) && conjuntos[2].has(r));
-
-  for (const [mod, texto] of arquivos) {
-    for (const nome of comuns) {
-      const corpo = corpoDaRota(texto, mod, nome);
-      if (!corpo) continue;
-      assert.ok(!/Sessão necessária\. Faça login\./.test(corpo),
-        mod + ': o corpo medido de /' + nome + ' contém a trava de sessão — o medidor pegou o bloco errado');
+/* extrai o CORPO da rota a partir da linha de DECLARAÇÃO (nunca da primeira menção), contando
+   chaves até fechar no mesmo nível — é exatamente o passo que a medição original pulou */
+function corpoDaRota(arq, mod, rota) {
+  const linhas = fs.readFileSync(path.join(raiz, arq), 'utf8').split('\n');
+  const re = reDeclaracao(mod, rota);
+  const inicio = linhas.findIndex((l) => re.test(l));
+  assert.ok(inicio >= 0, arq + ': declaração de /' + rota + ' não encontrada');
+  let prof = 0;
+  let fim = -1;
+  for (let i = inicio; i < linhas.length && fim < 0; i++) {
+    for (const ch of linhas[i]) {
+      if (ch === '{') prof++;
+      else if (ch === '}') { prof--; if (prof === 0) { fim = i; break; } }
     }
   }
+  assert.ok(fim >= 0, arq + ': corpo de /' + rota + ' nunca fecha');
+  return linhas.slice(inicio, fim + 1);
 }
 
-console.log('OK: medição de rotas — o medidor extrai a DECLARAÇÃO e não a lista de exceções, e nenhum corpo medido arrasta a trava de sessão');
+/* a lista de exceções da GOOD é o que enganava a medição — se ela mudar de forma, a medição
+   precisa ser revista junto, e é por isso que o teste a vigia */
+{
+  const s = fs.readFileSync(path.join(raiz, 'good-checkout-offline/index.js'), 'utf8');
+  assert.ok(/p === '\/good-checkout-offline\/[\w-]+' \|\|/.test(s),
+    'a lista de exceções do portão sumiu ou mudou de forma — revisar a medição de rotas junto');
+}
+
+/* o corpo real de /backfill-status tem 6 linhas; a medição errada pegava a lista de exceções
+   (25 de diferença). Corpo curto e com o sinal do handler real prova que a extração achou o
+   bloco certo, não a lista */
+{
+  const corpo = corpoDaRota('good-checkout-offline/index.js', 'good-checkout-offline', 'backfill-status');
+  assert.ok(corpo.length <= 10,
+    'corpo de /backfill-status tem ' + corpo.length + ' linhas — a medição provavelmente pegou a lista de exceções do portão, não a rota');
+
+  /* 17/09 — o tamanho pega o caso de hoje; o CONTEÚDO pega a classe. Um dia a lista de
+     exceções pode encolher pra menos de 10 linhas e o teste passaria com o bloco errado.
+     O que nunca pode acontecer é o corpo medido conter a trava de sessão. */
+  const texto = corpo.join('\n');
+  assert.ok(!/Sessão necessária\. Faça login\./.test(texto),
+    'o corpo medido contém a TRAVA DE SESSÃO — extrair isso moveria a autenticação do módulo ' +
+    'inteiro achando que era uma rota de status');
+  assert.ok(!/shopee-sessao-cookies/.test(texto),
+    'o corpo medido contém outras rotas — é a lista de exceções, não a declaração');
+  assert.ok(corpo.some((l) => l.includes('__bfGood')),
+    'corpo de /backfill-status não bate com o handler real — a extração pegou o bloco errado');
+}
+
+/* as divergentes não entram nesta fase — se sumirem da declaração de alguma das três, ou a
+   rota foi perdida ou a medição quebrou. Ao contrário de um piso fixo sobre o total de rotas
+   comuns, isto sobrevive à extração planejada das quase-idênticas sem falhar o CI. */
+const conjuntos = ALVOS.map(([arq, mod]) => declaradas(arq, mod));
+for (const rota of DIVERGENTES) {
+  ALVOS.forEach(([arq], i) => {
+    assert.ok(conjuntos[i].has(rota),
+      arq + ': /' + rota + ' não aparece mais como declaração — rota sumiu ou a medição quebrou');
+  });
+}
+
+for (let i = 0; i < ALVOS.length; i++) {
+  assert.ok(conjuntos[i].size >= 20,
+    ALVOS[i][0] + ': só ' + conjuntos[i].size + ' rotas declaradas — a regex de medição provavelmente quebrou');
+}
+
+/* 17/09 — POR QUE ESTE TESTE NÃO GENERALIZA PARA TODAS AS ROTAS.
+   Tentei estender a checagem a todas as rotas comuns e ela acusou três casos seguidos que
+   eram LEGÍTIMOS: a /produto-fotos valida sessão dentro dela mesma (com a mesma mensagem), e
+   a /ml-trocar-code cita outra rota no próprio corpo. O extrator por indentação é heurístico —
+   ele não sabe onde a rota termina quando há blocos aninhados na mesma coluna.
+   Um guarda que acusa o certo é pior que guarda nenhum: ensina a ignorar o vermelho. Então
+   ele fica no caso PROVADO (a /backfill-status da GOOD, onde o mesmo nome aparece na lista de
+   exceções e na declaração), que é exatamente a regressão que aconteceu. */
+
+console.log('OK: medição de rotas — conta declaração e não menção, extrai o corpo de verdade e trava as seis divergentes que não saem desta fase');
