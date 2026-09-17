@@ -27,14 +27,22 @@ function montarZip(arquivos) {
     const nomeBuf = Buffer.from(nome, 'utf8');
     const dados = zlib.deflateRawSync(conteudo);
     const crc = require('zlib').crc32 ? require('zlib').crc32(conteudo) : 0;
+    /* Codex #496 (P2): o fixture PRECISA ser em modo streaming, senão não reproduz o zip do
+       marketplace — e um parser ingênuo (que lê os tamanhos do header local) passaria no
+       teste. Em streaming, crc e tamanhos ficam ZERADOS aqui e só existem no diretório
+       central; é exatamente por isso que o parser lê de lá. */
     const lh = Buffer.alloc(30);
-    lh.writeUInt32LE(0x04034b50, 0); lh.writeUInt16LE(20, 4); lh.writeUInt16LE(8, 8);
-    lh.writeUInt32LE(crc, 14); lh.writeUInt32LE(dados.length, 18);
-    lh.writeUInt32LE(conteudo.length, 22); lh.writeUInt16LE(nomeBuf.length, 26);
+    lh.writeUInt32LE(0x04034b50, 0); lh.writeUInt16LE(20, 4);
+    lh.writeUInt16LE(0x08, 6);          // flag bit 3: tamanhos no descritor, não aqui
+    lh.writeUInt16LE(8, 8);
+    lh.writeUInt32LE(0, 14); lh.writeUInt32LE(0, 18); lh.writeUInt32LE(0, 22);   // ZERADOS
+    lh.writeUInt16LE(nomeBuf.length, 26);
     locais.push(Buffer.concat([lh, nomeBuf, dados]));
 
     const ch = Buffer.alloc(46);
-    ch.writeUInt32LE(0x02014b50, 0); ch.writeUInt16LE(20, 6); ch.writeUInt16LE(8, 10);
+    ch.writeUInt32LE(0x02014b50, 0); ch.writeUInt16LE(20, 6);
+    ch.writeUInt16LE(0x08, 8);          // a mesma flag, espelhada no diretório central
+    ch.writeUInt16LE(8, 10);
     ch.writeUInt32LE(crc, 16); ch.writeUInt32LE(dados.length, 20);
     ch.writeUInt32LE(conteudo.length, 24); ch.writeUInt16LE(nomeBuf.length, 28);
     ch.writeUInt32LE(off, 42);
@@ -61,6 +69,26 @@ function montarZip(arquivos) {
   assert.strictEqual(ents[0].nome, 'etiqueta1.pdf');
   assert.ok(ents[0].conteudo.toString().includes('etiqueta um'), 'o conteúdo não foi descomprimido');
   assert.ok(ents[1].conteudo.toString().includes('etiqueta dois'));
+}
+
+/* Codex #496 (P2) — A PROVA QUE FALTAVA: um parser INGÊNUO (que lê os tamanhos do header
+   local) tem que FALHAR neste fixture. Sem isso, o teste só provava que o nosso funciona, não
+   que o formato do marketplace é o que exige ler o diretório central — e uma regressão que
+   trocasse a leitura passaria despercebida. */
+{
+  const zip = montarZip([['etq.pdf', Buffer.from('%PDF-1.4 etiqueta em streaming')]]);
+
+  /* o ingênuo: pega tamanho comprimido do header local (offset 18) */
+  const tamNoHeaderLocal = zip.readUInt32LE(18);
+  assert.strictEqual(tamNoHeaderLocal, 0,
+    'o fixture não está em modo streaming — com os tamanhos preenchidos aqui, um parser ' +
+    'ingênuo passaria e o teste não provaria nada sobre o formato do marketplace');
+
+  /* e o nosso, lendo o diretório central, acha o conteúdo de verdade */
+  const ents = lerZipEntradas(zip);
+  assert.strictEqual(ents.length, 1);
+  assert.ok(ents[0].conteudo.toString().includes('etiqueta em streaming'),
+    'o parser não descomprimiu a entrada em modo streaming — é exatamente o caso do marketplace');
 }
 
 /* entrada inválida devolve lista vazia em vez de explodir: a rota chama isso com o que o
