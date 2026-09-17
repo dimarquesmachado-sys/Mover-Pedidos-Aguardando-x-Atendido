@@ -30,14 +30,21 @@ function montarZip(arquivos) {
     /* Codex #496 (P2): o fixture PRECISA ser em modo streaming, senão não reproduz o zip do
        marketplace — e um parser ingênuo (que lê os tamanhos do header local) passaria no
        teste. Em streaming, crc e tamanhos ficam ZERADOS aqui e só existem no diretório
-       central; é exatamente por isso que o parser lê de lá. */
+       central; é exatamente por isso que o parser lê de lá. A flag bit 3 promete um
+       DESCRITOR depois dos dados comprimidos — sem ele o arquivo não é um zip streaming
+       de verdade, só um header mentindo sobre a flag (Codex #496, r2). */
     const lh = Buffer.alloc(30);
     lh.writeUInt32LE(0x04034b50, 0); lh.writeUInt16LE(20, 4);
     lh.writeUInt16LE(0x08, 6);          // flag bit 3: tamanhos no descritor, não aqui
     lh.writeUInt16LE(8, 8);
     lh.writeUInt32LE(0, 14); lh.writeUInt32LE(0, 18); lh.writeUInt32LE(0, 22);   // ZERADOS
     lh.writeUInt16LE(nomeBuf.length, 26);
-    locais.push(Buffer.concat([lh, nomeBuf, dados]));
+    const desc = Buffer.alloc(16);   // descritor prometido pela flag bit 3: assinatura + crc + tamanhos
+    desc.writeUInt32LE(0x08074b50, 0);
+    desc.writeUInt32LE(crc, 4);
+    desc.writeUInt32LE(dados.length, 8);
+    desc.writeUInt32LE(conteudo.length, 12);
+    locais.push(Buffer.concat([lh, nomeBuf, dados, desc]));
 
     const ch = Buffer.alloc(46);
     ch.writeUInt32LE(0x02014b50, 0); ch.writeUInt16LE(20, 6);
@@ -47,7 +54,7 @@ function montarZip(arquivos) {
     ch.writeUInt32LE(conteudo.length, 24); ch.writeUInt16LE(nomeBuf.length, 28);
     ch.writeUInt32LE(off, 42);
     central.push(Buffer.concat([ch, nomeBuf]));
-    off += 30 + nomeBuf.length + dados.length;
+    off += 30 + nomeBuf.length + dados.length + desc.length;
   }
   const corpo = Buffer.concat(locais);
   const dir = Buffer.concat(central);
