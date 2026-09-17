@@ -109,6 +109,18 @@ let _bfd = { rodando: false, feitos: 0, total: 0, ok: 0, falhas: 0, iniciado_em:
    Agora é estado do módulo, como o _bf e o _bfd logo acima. */
 let _bfGood = { estado: 'nunca rodou neste processo' };
 let _skuInfoCache = null;   // cache em memória do sku-info (saldo/preço/custo)
+
+/* 17/09 — PORTE: a AMB e a Girassol escolhem o produto ATIVO quando o Bling devolve mais de um
+   cadastro pro mesmo SKU; a GOOD pedia `limite=1` e ficava com o PRIMEIRO. Se houver cadastro
+   antigo excluído, ela lê o custo dele — e custo errado vira MARGEM ERRADA no dashboard, pior
+   que margem ausente porque ninguém desconfia de um número plausível.
+   O conserto é de 19/08 e nunca chegou aqui; a lib já existe e já serve as outras duas. */
+const _produtoAtivo = require('../lib/checkout/produto-ativo').criar({
+  CACHE_DIR, readJson, writeJson,
+  lerSkuInfoCache: () => _skuInfoCache,
+  gravarSkuInfoCache: (v) => { _skuInfoCache = v; },
+});
+const { escolherProdutoAtivo } = _produtoAtivo;
 let _mls = { rodando: false, feitos: 0, total: 0, ok: 0, falhas: 0, iniciado_em: null, erros: {}, amostras: [] };   // pesca de tarifas/frete REAIS do ML
 
 // BACKFILL-NF LOCAL: lê nf-simp.json (cache/arquivo) e preenche vprod_nf nos conferidos sem ele.
@@ -1264,8 +1276,10 @@ function routes(readBody) {
         try {
           let prod = null;
           for (const v of [...new Set([sku, sku.toUpperCase(), sku.toLowerCase()])]) {
-            const r = await bg(`/produtos?codigo=${encodeURIComponent(v)}&limite=1&criterio=5`);
-            const it = r.ok && r.data && r.data.data && r.data.data[0];
+            /* 17/09: pede 10 e escolhe o ATIVO. Com `limite=1` o Bling podia devolver um cadastro
+               EXCLUÍDO e esta empresa lia o custo dele. */
+            const r = await bg(`/produtos?codigo=${encodeURIComponent(v)}&limite=10&criterio=5`);
+            const it = escolherProdutoAtivo(r.ok && r.data && r.data.data, sku, null, 10);   // 19/08: nunca um cadastro excluído
             if (it && it.id) { const d = await bg(`/produtos/${it.id}`); prod = (d.ok && d.data && d.data.data) || it; break; }
             await dorme(300);
           }
@@ -3207,8 +3221,10 @@ async function custoSync(fresh) {
     try {
       let prod = null;
       for (const v of [...new Set([sku, sku.toUpperCase(), sku.toLowerCase()])]) {
-        const r = await bg2(`/produtos?codigo=${encodeURIComponent(v)}&limite=1&criterio=5`);
-        const it = r.ok && r.data && r.data.data && r.data.data[0];
+        /* 17/09: pede 10 e escolhe o ATIVO. Com `limite=1` o Bling podia devolver um cadastro
+           EXCLUÍDO e esta empresa lia o custo dele. */
+        const r = await bg2(`/produtos?codigo=${encodeURIComponent(v)}&limite=10&criterio=5`);
+        const it = escolherProdutoAtivo(r.ok && r.data && r.data.data, sku, null, 10);   // 19/08: nunca um cadastro excluído
         if (it && it.id) { const d = await bg2(`/produtos/${it.id}`); prod = (d.ok && d.data && d.data.data) || it; break; }
         await dorme(600);
       }
