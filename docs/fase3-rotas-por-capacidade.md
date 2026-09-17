@@ -113,6 +113,36 @@ essa diferença vire parâmetro explícito.
 registrador novo precisa do mesmo travamento — a regra sozinha não segurou: ela já estava
 escrita neste documento quando foi quebrada.
 
+## ⚠️ A medição estava inflada — corrigida em 17/09
+
+O número de "21 divergentes" saiu de uma regex que casava com **qualquer menção** à rota, não
+só com a declaração dela. A GOOD tem uma **lista de exceções do portão de sessão** que cita
+várias rotas por nome:
+
+```js
+p === '/good-checkout-offline/backfill-status' ||
+p === '/good-checkout-offline/shopee-sessao-cookies' ||   // auth própria por ADMIN_KEY
+...
+```
+
+Minha medição pegava esse bloco como se fosse o corpo da rota. Resultado: a
+`/backfill-status`, de 6 linhas, aparecia com 25 de diferença — e, se eu tivesse "extraído"
+aquilo, teria levado **a trava central de sessão** junto.
+
+**Números reais, medindo só a declaração** (`if (… p === … ) {` com fechamento na mesma
+indentação):
+
+| | contagem |
+|---|---:|
+| rotas comuns às três | 24 |
+| **divergentes (>6 linhas)** | **6** |
+
+As seis: `status` (59), `config-fiscal` (35), `sku-info` (26), `etiqueta-anexar` (25),
+`custo-sync` (21), `backfill-status` (7).
+
+A lição vale além desta fase: **medição frouxa infla o trabalho e esconde o risco**. Aqui ela
+teria feito alguém mover a guarda de autenticação achando que era uma rota de status.
+
 ## Como extrair sem repetir os erros de hoje
 
 1. **Um registrador por vez, começando pelas idênticas.** Elas não exigem decisão: o corpo já
