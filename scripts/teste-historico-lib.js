@@ -50,17 +50,26 @@ const empresas = FACHADAS.map(([pasta, arq]) => {
 assert.strictEqual(new Set(empresas).size, empresas.length, 'duas empresas lendo a mesma fatia: ' + empresas.join(', '));
 
 /* a alíquota do Simples é tabela MENSAL e por empresa (AMB 4%→8,82%, Girassol 11,4%→15%).
-   A da GOOD ainda não foi informada, e o teste guarda a honestidade disso: tabela VAZIA cai
-   no padrão do cálculo, e ninguém deve preenchê-la com chute — imposto inventado vira número
-   errado no lugar de número ausente. */
+   17/09: a da GOOD deixou de estar vazia — o dono informou os valores APURADOS de jan–jul/2026.
+   A honestidade que o teste guarda continua a mesma, só mudou de forma: antes era "não
+   preencher com chute", agora é "não inventar mês que não fechou". Os valores em si estão
+   travados em scripts/teste-aliquotas-good.js.
+   O parser aqui passou a tolerar comentário dentro do bloco — o JSON.parte antigo quebrava
+   com a nota que explica por que agosto em diante fica sem valor. */
 {
   const idx = fs.readFileSync(path.join(__dirname, '..', 'good-checkout-offline', 'index.js'), 'utf8');
-  const m = /const DEFAULT_ALIQ_BK_GOOD = (\{[^}]*\});/.exec(idx);
-  assert.ok(m, 'a GOOD precisa declarar a tabela de alíquotas, nem que vazia');
-  const tabela = JSON.parse(m[1].replace(/'/g, '"').replace(/(\d{4}-\d{2}):/g, '"$1":'));
+  const m = /const DEFAULT_ALIQ_BK_GOOD = (\{[\s\S]*?\n\});/.exec(idx);
+  assert.ok(m, 'a GOOD precisa declarar a tabela de alíquotas');
+  const tabela = eval('(' + m[1] + ')');
   const valores = Object.values(tabela);
-  if (valores.length) {
-    for (const v of valores) assert.ok(Number(v) > 0, 'alíquota da GOOD com valor inválido: ' + v);
+  for (const v of valores) assert.ok(Number(v) > 0, 'alíquota da GOOD com valor inválido: ' + v);
+
+  /* nenhum mês que ainda não fechou pode ter valor: estimar é o erro que a tabela vazia evitava */
+  const hoje = new Date();
+  const mesAtual = hoje.getUTCFullYear() + '-' + String(hoje.getUTCMonth() + 1).padStart(2, '0');
+  for (const mes of Object.keys(tabela)) {
+    assert.ok(mes < mesAtual,
+      'a tabela tem alíquota para ' + mes + ', que ainda não fechou — imposto estimado vira número errado na tela');
   }
 }
 
