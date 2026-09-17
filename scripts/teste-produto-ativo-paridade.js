@@ -86,6 +86,22 @@ for (const [emp, arq] of Object.entries(MODULOS)) {
 
   /* P2: id novo invalida o sku-info, senão saldo e preço continuam vindo do cadastro velho */
   assert.ok(/_limparSkuInfo\(sku\)/.test(s), 'trocou o id e não invalidou o sku-info em cache');
+
+  /* P1 (r2): a /sku-info descarta o custo em cache quando conclui "só excluído", mas quem
+     POPULA `_custos.json` é o custo-sync — sem apagar `cc[sku]` também aqui, o custo do
+     cadastro apagado sobrevive indefinidamente nesse cache (o "sister cost-sync path" que o
+     Codex apontou). Tem que virar lápide, e a lápide tem que ter grace no filtro de alvos
+     (senão bate o Bling de novo a cada rodada pro mesmo SKU já confirmado apagado). */
+  assert.ok(/apagado_em: Date\.now\(\)/.test(s),
+    'custo-sync não apaga/tumba cc[sku] quando conclui que só há cadastro excluído — sobrevive indefinidamente no cache permanente');
+  assert.ok(/k\.apagado_em/.test(s),
+    'o filtro de alvos não conhece a lápide — sem grace, bate o Bling de novo a cada rodada pro mesmo SKU confirmado apagado');
+
+  /* P1 (r2): 429/timeout numa variante não pode virar "confirmado excluído" só porque outra
+     variante, sem falha, devolveu só cadastro excluído — a falha esconde o que a variante
+     de verdade tinha (podia ser o ativo). */
+  assert.ok(/_falhaBusca/.test(s),
+    'não distingue "todas as variantes concluíram excluído" de "uma variante falhou (429/timeout)" — pode apagar custo bom por causa de instabilidade da rede');
 }
 
 /* P2: o inativo só entra como ÚLTIMO recurso, depois de tentar todas as variantes de caixa */
