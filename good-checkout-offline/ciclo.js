@@ -735,6 +735,13 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
     const cacheEan = skuEanCache();
     const locC     = locCache();
     const { ok: listaOk, completa: listaCompleta, pedidos: atendidos, idsFullVistos, idsSemSerie, paginas_refeitas: pagRef, falhou_na_pagina: pagFalha } = await listarAtendidos();
+    /* 17/09 — PORTE do diagnóstico da reconciliação (a Girassol tinha, estas não). É o
+       único lugar que diz POR QUE a limpeza do cache foi pulada: sem ele o painel mostra
+       o sintoma (pedido despachado preso como "sem etiqueta") e ninguém liga à causa.
+       ⚠️ os ramos NÃO são copiados da Girassol: aqui a reconciliação roda também com fila
+       VAZIA desde que haja cache a conferir (conserto dos fantasmas, 25/08). Copiar o
+       'pulada_lista_vazia' dela marcaria como pulado um ciclo que RODOU. */
+    let reconciliacao = 'ok';
     console.log(`[GOODBKP] ${atendidos.length} pedido(s) ATENDIDO(${SIT_ATENDIDO}) na janela de ${JANELA_DIAS}d (bling ok=${listaOk})`);
 
     // EXPURGO FULL: remove do cache os pedidos que a lista trouxe como Full
@@ -775,6 +782,7 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
     // RECONCILIAÇÃO: remove do cache quem NÃO está mais em ATENDIDO (enviado/processado).
     // Só roda se o Bling respondeu E veio algo — assim, se o Bling cair, o cache offline é preservado.
     if (listaOk && !listaCompleta) {
+      reconciliacao = 'pulada_lista_incompleta';
       console.log('[GOODBKP] ⚠️ lista do Bling veio INCOMPLETA (falhou no meio da paginação) — reconciliação PULADA, cache preservado');
     }
     /* Porte do #205 (fantasmas imortais da AMB, 26/08): a guarda `atendidos.length > 0`
@@ -783,6 +791,7 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
        pasta órfã nunca sair. Agora ela roda também com fila vazia DESDE QUE haja cache a
        conferir — e, nesse caso, SÓ pelo caminho da confirmação individual: pedido a pedido
        no Bling, nunca remoção em massa apoiada em lista vazia. */
+    if (!listaOk) reconciliacao = 'sem_lista';
     if (listaOk && listaCompleta && (atendidos.length > 0 || Object.keys(man).length > 0)) {
       const idsAtuais = new Set(atendidos.map(p => String(p.id)));
       // Pedidos ocultados pelo filtro Full continuam no Bling — não podem
@@ -840,6 +849,10 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
            aborta o ciclo pendurando UMA promessa — os seguintes pulam até ela assentar. */
         let confirmados = 0, mantidos = 0, semResposta = 0, adiados = 0, mudo = false;
         if (_sondaPendente) {
+          /* Codex #491: aqui a conferência inteira é pulada — todo `aRemover` fica pendurado
+             sem resposta, mas antes ficava mudo em 'ok'. A tela dizia "reconciliação em dia"
+             bem no ciclo em que ela nem rodou, escondendo do painel o motivo do "sem etiqueta". */
+          reconciliacao = 'adiada_bling_mudo';
           console.log(`[GOODBKP] reconciliação: conferência PULADA — chamada do ciclo anterior ainda pendurada no token; ${aRemover.length} candidato(s) adiado(s)`);
         } else {
         const prazoDet = (fn, ms) => {
@@ -900,6 +913,7 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
               continue;
             }
             mudo = true; adiados += (loteConf.length - iC);   // 2º: dois ids diferentes mudos = token; aborta
+            reconciliacao = 'adiada_bling_mudo';              // Codex #491: sobra candidato sem confirmar — não é 'ok'
             _sondaPendente = pd.emVoo().catch(() => {}).then(() => { _sondaPendente = null; });
             break;
           }
@@ -918,6 +932,12 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
         _cursorConfirmacao = comunsC.length ? (giroC + Math.max(1, tentadosComuns)) % comunsC.length : 0;
         _cursorFull = fullTodos.length ? (gF + Math.max(1, tentadosFull)) % fullTodos.length : 0;
         if (confirmados) salvarManifest(man);
+        /* Codex #491 r2: o abort por mudez já vira 'adiada_bling_mudo' lá em cima, mas sobram
+           DOIS caminhos que também deixam candidato sem confirmar e não tocavam em `reconciliacao`:
+           o excesso além da fatia de 15 (`adiados = aRemover.length - loteConf.length`) e o 1º
+           estouro isolado (pula o pedido, `adiados++`, continua sem abortar). Nos dois, 'ok' era
+           mentira — havia "sem etiqueta" pendurado que o próximo ciclo ainda precisa conferir. */
+        if (adiados > 0 && reconciliacao === 'ok') reconciliacao = 'adiada_parcial';
         console.log(`[GOODBKP] reconciliação conferida: ${confirmados} removido(s) — ${mantidos} seguem em ATENDIDO — ${semResposta} sem resposta (preservados) — ${adiados} adiado(s) p/ o próximo ciclo${mudo ? ' — BLING MUDO: conferência ABORTADA neste ciclo, tenta no próximo' : ''}`);
         }
       } else if (aRemover.length) {
@@ -1145,6 +1165,7 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
       duracaoSeg: Math.round((Date.now() - t0) / 1000),
       blingOk: listaOk,                            // o Bling respondeu neste ciclo? (p/ o /saude)
       paginasRefeitas: pagRef || 0,                // 22/08: quantas páginas precisaram de re-tentativa
+      reconciliacao,                               // 'ok' | 'pulada_lista_incompleta' | 'sem_lista' | 'adiada_bling_mudo' | 'adiada_parcial'
       falhouNaPagina: pagFalha || null,            // se a lista veio incompleta, em qual página parou
       total: ids.length,
       comEtiqueta: ids.filter(i => man[i].tem_etiqueta).length,
