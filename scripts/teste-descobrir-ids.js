@@ -491,6 +491,18 @@ const fakeOk = async (c) => {
   if (alvo) a4.ok(/PALPITE/.test(alvo.atencao || ''),
     'sem a prova do ML, o valor é palpite e não pode ser apresentado como certeza a criar');
 
+    /* 16/09 (P2 do Codex): a conferência tem que usar a MESMA régua do consumidor. O blingApi
+     passou a recusar a lista inteira quando um item é inválido; aqui a checagem continuava
+     frouxa e `203296034,abc` apareceria em `ok` — dizendo "está configurado" sobre um valor
+     que faz o F1 e o F3 se recusarem a rodar. Conferência que diverge do consumidor é pior
+     que conferência nenhuma: ela existe pra ser acreditada. */
+  process.env.D_ME_LOJA_IDS = '206017293,abc';
+  const cInval = (await rodar()).sugestao.conferencia;
+  a4.ok(!cInval.ok.some(x => x.env === 'D_ME_LOJA_IDS'),
+    'lista com item inválido NÃO pode aparecer como configurada');
+  a4.ok(cInval.diferente.some(x => x.env === 'D_ME_LOJA_IDS' && /INVÁLIDO/.test(x.leia || '')),
+    'tem que apontar o item inválido e dizer que o F1/F3 recusam a lista inteira');
+
   console.log('OK: conferência robusta — lista com vírgula, valor em branco, padrão de outro consumidor e palpite');
 })().catch(e => { console.error(e.message); process.exit(1); });
 

@@ -16,7 +16,26 @@ const { garantirTokenML } = require('./mlTokenManager');
 const BLING_API = 'https://api.bling.com.br/Api/v3';
 const ML_API    = 'https://api.mercadolibre.com';
 
-const LOJA_ID            = parseInt((process.env.ME_LOJA_IDS || '203146903').split(',')[0]);
+/* 16/09 — este padrão é o id da PRÓPRIA Girassol, então nunca foi contaminação cruzada como
+   o do bling-api (que era o da AMB). Mesmo assim vira env obrigatória: id de canal cravado em
+   código é dado de conta dentro de lógica, e a env já existe e está certa em produção — a
+   rota /descobrir-ids provou o canal contra a conta do ML. */
+/* 16/09 — o padrão aqui era o id da PRÓPRIA Girassol, então nunca foi contaminação cruzada
+   como o do bling-api (que era o da AMB). Mesmo assim o id sai do código: é dado de conta
+   dentro de lógica.
+   Mas a checagem NÃO pode lançar na carga do módulo — isso derruba o boot pelo require, e o
+   servidor inteiro cai porque UMA empresa não declarou o canal. Quem usa é que exige. */
+const LOJA_ID = (() => {
+  const n = parseInt(String(process.env.ME_LOJA_IDS || '').trim().split(',')[0], 10);
+  return (n && !isNaN(n)) ? n : null;
+})();
+function lojaIdObrigatorio() {
+  if (!LOJA_ID) {
+    throw new Error('[GIRASSOL importarPedido] falta ME_LOJA_IDS — rode ' +
+      '/girassol-backup-offline/descobrir-ids (prova o canal contra a conta do ML) e cole o valor no Render');
+  }
+  return LOJA_ID;
+}
 const INTERMEDIADOR_CNPJ = process.env.NF_INTERMEDIADOR_CNPJ || '03007331000141';
 const INTERMEDIADOR_NOME = process.env.NF_INTERMEDIADOR_NOME || 'MAGAZINEGIRASSOL';
 
@@ -181,6 +200,12 @@ async function criarPedido(token, payload) {
 
 // ── Fluxo principal ───────────────────────────────────────────────────
 async function testarImportarPedido(numeroML, confirmar = false) {
+  /* Codex #485 (P2): a checagem do canal ficava lá embaixo, ao montar o pedido — depois de
+     criarContato() já ter ESCRITO um contato no Bling. Falhar depois de escrever deixa lixo
+     na conta do dono, e o reparo automático do canário chama isto sozinho. Confere antes de
+     tocar em qualquer coisa. */
+  lojaIdObrigatorio();
+
   const log = [];
   const blingToken = await garantirToken();
   const mlToken    = await garantirTokenML();
@@ -232,7 +257,7 @@ async function testarImportarPedido(numeroML, confirmar = false) {
   const payload = {
     numeroLoja: String(numeroML),
     data: dataPedido,
-    loja: { id: LOJA_ID },
+    loja: { id: lojaIdObrigatorio() },
     contato: contato ? { id: contato.id } : undefined,
     itens: itensBling,
     intermediador: { cnpj: INTERMEDIADOR_CNPJ, nomeUsuario: INTERMEDIADOR_NOME },

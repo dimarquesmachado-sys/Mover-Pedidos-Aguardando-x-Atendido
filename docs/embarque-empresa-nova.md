@@ -37,21 +37,38 @@ GOOD, e o dado estava no XML de toda NF-e autorizada.
    pronto e grava o token sem ninguém copiar código.
 4. **O primeiro OAuth de cada conta.** Um clique por conta, e só.
 
-## Um risco achado no caminho (15/09)
+## Um risco achado no caminho (15/09, fechado em 16/09)
 
 O `ME_LOJA_IDS` — que diz ao F1 **quais canais de venda do Bling são do Mercado Livre** —
 tinha um id **cravado como padrão** (`206017293`, da primeira empresa que existiu no serviço).
 Qualquer empresa sem essa env usava o canal de OUTRA pra decidir o que era venda dela. Mesma
 classe do CNPJ trocado na DANFE: funciona, e funciona errado.
 
-- **empresa nova:** agora é **obrigatório** declarar o canal — sem ele, a montagem falha no
-  boot em vez de a empresa ignorar todos os pedidos em silêncio;
-- **empresas atuais:** o padrão continua, porque não dá para ver o Render daqui e removê-lo
-  quebraria quem depende dele. Mas o boot agora **diz a verdade**: registra se a empresa está
-  usando env própria ou o id herdado.
+- **15/09:** o padrão saiu pra **empresa nova** (`lib/fiscal/montar-empresa.js` recusa montar
+  sem o canal próprio), mas ficou pras três já no ar — não dava pra ver o Render daqui, e
+  removê-lo sem prova quebraria quem dependesse dele. O boot só **dizia a verdade** no log.
+- **16/09:** a prova veio de produção — `/descobrir-ids` conferiu o canal de cada empresa
+  contra a própria conta do ML e bateu com o Render (AMB `206017293`, Girassol `203146903`,
+  GOOD `203296034`). Ninguém dependia do herdado, então ele **saiu de vez**
+  (`lib/fiscal/bling-api.js`): as três empresas com pasta perdem o padrão herdado, igual quem
+  nasce sem pasta. A recusa fica no **uso** (F1/F2/F3), não no boot — ver o aviso abaixo.
+  `empresa.js validar` cobra `ME_LOJA_IDS` como **obrigatória** pra qualquer empresa com a
+  capacidade fiscal — não existe mais o caso "sobe com o padrão herdado" passando no portão.
 
-⚠️ **Vale conferir no log do Render** se alguma das três aparece com o aviso "usando o id
-herdado". Se aparecer, o F1 dela está julgando os pedidos pelo canal de outra empresa.
+⚠️ **Se uma empresa subir sem a env do canal do ML, o servidor SOBE — e só ela fica parada.**
+O comportamento mudou em 16/09: antes a ausência derrubava o boot inteiro, o que fazia uma
+empresa mal configurada levar as outras duas junto. Agora a recusa está no ponto em que o
+estrago aconteceria:
+
+- a decisão "este pedido é do Mercado Livre?" **recusa** em vez de responder "não é" pra tudo
+  (responder "não é" era o silêncio que o id herdado causava: o F1 ignorava tudo sem erro);
+- o **F3** se recusa a rodar com a lista de canais vazia — senão o relatório diria "0 NFs
+  enviadas", que parece dia fraco e não configuração faltando;
+- a importação de pedido da Girassol confere **antes** de criar contato no Bling, pra não
+  deixar lixo na conta do dono e falhar depois.
+
+Em todos os casos o log traz a rota `/descobrir-ids` **daquela** empresa, que prova o canal
+contra a conta do ML e devolve o valor pronto pra colar.
 
 ## O que ainda falta automatizar (fila, por retorno)
 

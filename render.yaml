@@ -86,7 +86,18 @@ services:
       - key: AMB_PAUSA_MS
         value: "700"
 
-      # ─── GOOD IMPORT (descomentar na Etapa 2B) ──────────────────────
+      # ─── GOOD IMPORT (resto do bloco descomenta na Etapa 2B) ────────
+      # 16/09 (Codex #485, P2) — GOOD está no contrato e ativa por padrão (EMPRESAS vazia ativa
+      # as três lojas), e ME_LOJA_IDS é obrigatória pra qualquer empresa com capacidade fiscal
+      # (lib/fiscal/bling-api.js — o padrão herdado saiu). A ausência não derruba mais o boot
+      # (isso mudou na 2ª rodada do mesmo dia, pra não levar as outras duas junto nem deixar o
+      # CI vermelho sem essas envs): um deploy NOVO a partir deste Blueprint sobe GOOD sem
+      # GOOD_ME_LOJA_IDS normalmente, mas o F1/F3 dela param no primeiro pedido, em produção,
+      # sem erro de deploy pra avisar antes. `sync: false` não mexe no valor que já está no
+      # Render hoje (a empresa está no ar, com o valor certo); só garante que um blueprint
+      # deploy NOVO peça o valor em vez de deixar essa lacuna passar despercebida.
+      - key: GOOD_ME_LOJA_IDS
+        sync: false
       # - key: GOOD_TOKEN_FILE
       #   value: /data/good/bling-tokens.json
       # ... etc

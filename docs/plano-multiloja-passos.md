@@ -190,6 +190,18 @@ credencial.
       magalu, tiktok, embarcar, ml-full) e o gate de sessão do GOOD, que r2 do Codex pegou
       ainda lendo só `?k=` ou derrubando a chamada antes de a rota migrada avaliar a chave.
       A chave já tinha deixado de ser ecoada nas respostas (PR #399).
+- [x] **canal do ML herdado REMOVIDO** (16/09, P1 da revisão): o padrão `206017293` era o
+      canal da AMB, e empresa sem env própria julgava os pedidos dela pelo canal de outra, em
+      silêncio. Saiu com evidência de produção — `/descobrir-ids` provou o canal de cada uma
+      contra a conta do ML e conferiu contra o Render. A ausência da env **não derruba o boot**
+      (mudou na 2ª rodada do mesmo dia, pra não levar as outras duas junto, e porque o CI não
+      passa essas envs): o servidor sobe e só a empresa sem canal fica parada, com a mensagem
+      — dizendo como obter o valor — no log a cada ciclo do F1/F2/F3. O `empresa.js validar`
+      cobra a env ANTES do deploy, e é ele que substitui o boot como sinal de "pronta"
+- [x] **`empresa.js validar` confere o FORMATO, não só a presença** (16/09): `ME_LOJA_IDS=abc`
+      passava como "presente" e o validar dizia "pronta", enquanto em produção o F1 e o F3 se
+      recusariam a rodar. Portão que aprova configuração quebrada é pior que não ter portão —
+      é ele que dá a confirmação pra seguir pro deploy
 - [ ] fechar a janela: medir o uso legado (`veioPorHeader`) e só então recusar `?k=`
 - [x] README reescrito (15/09): descreve o serviço multiempresa, aponta para os documentos de
       embarque e de diferenças, e registra as regras da casa (PR #478)

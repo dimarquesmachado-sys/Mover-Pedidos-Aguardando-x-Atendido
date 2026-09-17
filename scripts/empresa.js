@@ -51,17 +51,22 @@ const ENVS_OPCIONAIS = {
   checkout: ['MAX_PEDIDOS_F1', 'MAX_PEDIDOS_F2', 'F1_REMOVE_MAX', 'F1_REMOVE_ESPERA_MIN'],
 };
 
-/* 15/09 (P2 do Codex, revisão) — ME_LOJA_IDS NÃO entra no mapa fixo acima porque a exigência
-   dela MUDA por empresa, não por capacidade: uma primeira versão deste arquivo pôs ME_LOJA_IDS
-   direto em ENVS_POR_CAPACIDADE.fiscal, e isso quebrou "validar" pras TRÊS empresas que já
-   estão no ar (girassol/ambtotal/good) — sem GOOD_ME_LOJA_IDS no Render (o caso real hoje, que
-   o próprio boot só AVISA como "usando o id herdado"), validar good passou a dizer "NÃO está
-   pronta pra subir", o que é falso: ela sobe e funciona, com o padrão herdado — decisão
-   deliberada e documentada em docs/embarque-empresa-nova.md, porque não dá pra ver o Render
-   daqui e trocar isso quebraria quem já depende do padrão. Quem é montada SEM pasta por
-   lib/fiscal/montar-empresa.js não tem essa saída: a montagem RECUSA subir sem a env própria
-   (ver o throw lá). A exigência aqui reflete exatamente essa distinção. */
-const LOJAS_COM_PASTA = new Set(['girassol', 'ambtotal', 'good']);
+/* 15/09 (P2 do Codex, revisão) — ME_LOJA_IDS não entrou no mapa fixo acima porque, NAQUELE
+   dia, a exigência mudava por empresa: girassol/ambtotal/good (LOJAS_COM_PASTA) tinham o id
+   herdado como padrão no boot, então marcar a env como obrigatória fazia "validar" dizer
+   "NÃO está pronta" pra empresa que subia e funcionava.
+
+   16/09 (Codex #485, P2) — o padrão herdado SAIU de lib/fiscal/bling-api.js (ver o throw lá
+   dentro de canaisDeclarados()). Isso NÃO derruba mais o boot das três empresas com pasta —
+   a proteção mudou de lugar na 2ª rodada do mesmo dia (do boot pro USO, pra não levar as
+   outras duas junto nem deixar o CI vermelho sem env). O servidor sobe sem o canal; quem
+   recusa é a decisão do F1/F2/F3, a cada ciclo, com a causa no log.
+   Mesmo assim ME_LOJA_IDS continua obrigatória AQUI, no "validar": subir sem ela é subir com
+   a fiscal desligada por trás de um health check verde, e "validar" é o portão que existe
+   pra pegar isso ANTES do deploy — não pra copiar o que o boot faz. A distinção que
+   justificava LOJAS_COM_PASTA (padrão herdado só pras três com pasta) desapareceu; manter a
+   lista faria "validar good" dizer "pronta pra subir" pra uma empresa sem canal nenhum.
+   ME_LOJA_IDS é obrigatória pra QUALQUER empresa com a capacidade fiscal, pasta ou não. */
 
 function _capacidades(registro, id) {
   const todas = Object.keys(ENVS_POR_CAPACIDADE);
@@ -76,14 +81,21 @@ function _envsDe(registro, id, mapa) {
   return out;
 }
 
-/* obrigatórias e opcionais já com ME_LOJA_IDS no lado certo pra esta empresa (ver nota acima). */
+/* 17/09 (Codex #485, P2) — mesma regra de parsing de lib/fiscal/bling-api.js
+   (canaisDeclarados()): `GOOD_ME_LOJA_IDS=abc` passa em "presente", mas vira ME_LOJA_IDS
+   vazio no runtime, e o F1/F2/F3 param igual a se a env não existisse — só que sem o
+   "✗ falta" que o validar daria. Estar presente não basta; tem que sobrar pelo menos um
+   id numérico depois do parse, senão o portão aprova uma empresa que não vai mover pedido. */
+function _meLojaIdsValido(valor) {
+  return String(valor || '').split(',').map(x => Number(String(x).trim())).some(n => n && !isNaN(n));
+}
+
+/* obrigatórias e opcionais já com ME_LOJA_IDS na lista certa pra esta empresa (ver nota acima). */
 function _envsFiscais(registro, id) {
   const obrig = _envsDe(registro, id, ENVS_POR_CAPACIDADE);
   const opc = _envsDe(registro, id, ENVS_OPCIONAIS);
   if (_capacidades(registro, id).includes('fiscal')) {
-    const meLojaIds = { cap: 'fiscal', nome: registro.nomeEnv(id, 'ME_LOJA_IDS') };
-    if (LOJAS_COM_PASTA.has(id)) opc.push(meLojaIds);
-    else obrig.push(meLojaIds);
+    obrig.push({ cap: 'fiscal', nome: registro.nomeEnv(id, 'ME_LOJA_IDS'), validar: _meLojaIdsValido });
   }
   return { obrig, opc };
 }
@@ -113,9 +125,37 @@ function validar(alvo) {
 
   const { obrig, opc } = _envsFiscais(registro, e.id);
   const faltando = obrig.filter(x => !process.env[x.nome]);
-  console.log('\nEnvs obrigatórias: ' + (obrig.length - faltando.length) + '/' + obrig.length + ' presentes');
+  const invalidas = obrig.filter(x => process.env[x.nome] && x.validar && !x.validar(process.env[x.nome]));
+  console.log('\nEnvs obrigatórias: ' + (obrig.length - faltando.length - invalidas.length) + '/' + obrig.length + ' presentes e válidas');
   for (const f of faltando) console.log('  ✗ falta ' + f.nome + '   (capacidade: ' + f.cap + ')');
-  problemas += faltando.length;
+  for (const f of invalidas) console.log('  ✗ ' + f.nome + ' está presente mas com valor inválido   (capacidade: ' + f.cap + ')');
+  problemas += faltando.length + invalidas.length;
+
+  /* 16/09 (P2 do Codex) — PRESENÇA NÃO É VALIDADE. `GOOD_ME_LOJA_IDS=abc` passava aqui como
+     "presente" e o validar saía "pronta", mas em produção a lista de canais fica vazia e o F1
+     e o F3 se recusam a rodar. O portão que aprova uma configuração quebrada é pior que não
+     ter portão: ele dá a confirmação que faz o dono seguir pro deploy.
+     Só o formato que dá pra conferir daqui — conteúdo é o `preflight` que prova. */
+  const FORMATO = {
+    ME_LOJA_IDS: {
+      ok: (v) => String(v).split(',').map(x => x.trim()).filter(Boolean).every(x => /^\d+$/.test(x)) &&
+                 String(v).split(',').some(x => x.trim()),
+      leia: 'lista de ids numéricos separados por vírgula (ex.: 206017293 ou 206017293,206069383)',
+    },
+    SITUACAO_AGUARDANDO: { ok: (v) => /^\d+$/.test(String(v).trim()), leia: 'um id numérico' },
+  };
+  const malformadas = [];
+  for (const x of obrig) {
+    const v = process.env[x.nome];
+    if (!v) continue;                                  // ausência já foi contada acima
+    const sufixo = Object.keys(FORMATO).find(k => x.nome.endsWith(k));
+    if (!sufixo) continue;
+    if (!FORMATO[sufixo].ok(v)) malformadas.push({ nome: x.nome, leia: FORMATO[sufixo].leia });
+  }
+  for (const m of malformadas) {
+    console.log('  ✗ ' + m.nome + ' está presente mas MALFORMADA — esperado: ' + m.leia);
+  }
+  problemas += malformadas.length;
 
   const semOpc = opc.filter(x => !process.env[x.nome]);
   if (semOpc.length) {
@@ -125,10 +165,20 @@ function validar(alvo) {
   /* dono do refresh: duas contas renovando o mesmo token de uso único é o risco que a
      auditoria pôs no topo — aqui ele aparece ANTES de embarcar, não depois. */
   const contas = e.contas || {};
-  for (const [conta, info] of Object.entries(contas)) {
-    const dono = (info && info.dono_hoje) || e.donoHoje;
-    if (dono && dono !== 'mover-pedidos') {
-      console.log('\n⚠ a conta "' + conta + '" é renovada por "' + dono + '" — este serviço deve LER o token, nunca renovar.');
+  /* 16/09 — o contrato v12 mudou a forma disto e o aviso saía "[object Object]": `dono_hoje` é
+     um OBJETO por integração (bling, ml, ...) com a LISTA de serviços que renovam hoje, não um
+     texto. Ler como texto não só imprimia lixo como escondia o que importa — mais de um
+     serviço na lista é o conflito ATIVO de refresh, que é o risco nº 1 da auditoria. */
+  const donoPorIntegracao = e.donoHoje && typeof e.donoHoje === 'object' ? e.donoHoje : {};
+  for (const [integracao, quem] of Object.entries(donoPorIntegracao)) {
+    if (integracao.startsWith('_')) continue;                 // _nota e afins
+    const lista = Array.isArray(quem) ? quem : (quem ? [quem] : []);
+    if (lista.length > 1) {
+      console.log('\n⚠ CONFLITO ATIVO em "' + integracao + '": ' + lista.join(' e ') +
+        ' renovam o mesmo token. O refresh é de uso único — um deles fica com token morto.');
+    } else if (lista.length === 1 && lista[0] !== 'mover-pedidos') {
+      console.log('\n⚠ "' + integracao + '" é renovada por "' + lista[0] +
+        '" — este serviço deve LER o token, nunca renovar.');
     }
   }
 

@@ -1,4 +1,12 @@
 'use strict';
+
+/* 16/09 — o id de canal do ML deixou de ter padrão no código: empresa sem a env julgava os
+   pedidos dela pelo canal de OUTRA, em silêncio. Este teste montava o módulo fiscal sem
+   definir a env e passava APOIADO nesse padrão — ou seja, ele provava menos do que parecia.
+   Definir aqui explicita a dependência que o código sempre teve. */
+for (const n of ['ME_LOJA_IDS', 'AMB_ME_LOJA_IDS', 'GOOD_ME_LOJA_IDS', 'QUARTA_ME_LOJA_IDS', 'NOVA_ME_LOJA_IDS', 'X_ME_LOJA_IDS', 'TESTE_ME_LOJA_IDS']) {
+  if (!process.env[n]) process.env[n] = '111222333';
+}
 /* 13/09 — PORTE do envio NATIVO Bling → marketplace (decisão do dono: "uma tem, agora ambas
    têm"). Contexto que dá o peso: isto vale no REENVIO MANUAL, que é o caso em que o envio
    automático já falhou. Antes, AMB e GOOD só repetiam ali o mesmo push de XML que não tinha
