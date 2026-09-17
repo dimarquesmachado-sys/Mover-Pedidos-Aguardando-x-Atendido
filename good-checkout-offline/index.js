@@ -391,28 +391,10 @@ async function shopeeKeepAlive() {
   }
 }
 
-const lerZipEntradas = buf => {   // lê pelo DIRETÓRIO CENTRAL (o zip vem em modo streaming, tamanhos zerados no header local)
-  const zlibA = require('zlib');
-  let eocd = -1;
-  for (let x = buf.length - 22; x >= 0 && x > buf.length - 66000; x--) { if (buf.readUInt32LE(x) === 0x06054b50) { eocd = x; break; } }
-  if (eocd < 0) return [];
-  const qtd = buf.readUInt16LE(eocd + 10);
-  let off = buf.readUInt32LE(eocd + 16);
-  const saida = [];
-  for (let k = 0; k < qtd && off + 46 < buf.length; k++) {
-    if (buf.readUInt32LE(off) !== 0x02014b50) break;
-    const metodo = buf.readUInt16LE(off + 10), tamComp = buf.readUInt32LE(off + 20);
-    const fnLen = buf.readUInt16LE(off + 28), exLen = buf.readUInt16LE(off + 30), cmLen = buf.readUInt16LE(off + 32);
-    const nome = buf.slice(off + 46, off + 46 + fnLen).toString('utf8');
-    const loc = buf.readUInt32LE(off + 42);
-    const lfn = buf.readUInt16LE(loc + 26), lex = buf.readUInt16LE(loc + 28);
-    const ini = loc + 30 + lfn + lex;
-    const dados = tamComp > 0 ? buf.slice(ini, ini + tamComp) : buf.slice(ini);
-    try { saida.push({ nome, conteudo: metodo === 0 ? dados : zlibA.inflateRawSync(dados, { finishFlush: zlibA.constants.Z_SYNC_FLUSH }) }); } catch (e) {}
-    off += 46 + fnLen + exLen + cmLen;
-  }
-  return saida;
-};
+/* 17/09 — o parser saiu daqui pra lib/checkout/zip-etiquetas.js, que agora serve as três.
+   Esta empresa já o tinha no escopo do módulo (a rota de massa reusa) — foi a AMB e a
+   Girassol que vieram pro ponto dela, não o contrário. */
+const lerZipEntradas = require('../lib/checkout/zip-etiquetas').lerZipEntradas;
 
 
 // ─── DECODIFICADOR DAS ETIQUETAS RASTER DA SHOPEE (b18) ─────────────────────────────
