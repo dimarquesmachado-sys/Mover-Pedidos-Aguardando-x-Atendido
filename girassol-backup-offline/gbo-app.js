@@ -1312,11 +1312,23 @@ function routes(readBody) {
       for (const sku of aResolver) {
         try {
           let prod = null;
+          /* Codex #497 (P2): `escolherProdutoAtivo` cai pro primeiro NÃO-EXCLUÍDO quando a página não
+             tem nenhum ATIVO. Como este laço parava no primeiro resultado, a variante de caixa exata
+             podia entregar um INATIVO e as outras variantes — que talvez tivessem o ativo — nunca eram
+             tentadas. O inativo agora fica em reserva e só é usado se nenhuma variante trouxer ativo. */
+          let _reserva = null;
           for (const v of [...new Set([sku, sku.toUpperCase(), sku.toLowerCase()])]) {
             const r = await bg(`/produtos?codigo=${encodeURIComponent(v)}&limite=10&criterio=5`);
             const it = escolherProdutoAtivo(r.ok && r.data && r.data.data, sku, null, 10);   // 19/08: nunca um cadastro excluído
-            if (it && it.id) { const d = await bg(`/produtos/${it.id}`); prod = (d.ok && d.data && d.data.data) || it; break; }
+            const _ehAtivo = it && (it.situacao === undefined || String(it.situacao).toUpperCase() === 'A');
+            if (it && it.id && !_ehAtivo) { if (!_reserva) _reserva = it; }
+            else if (it && it.id) { const d = await bg(`/produtos/${it.id}`); prod = (d.ok && d.data && d.data.data) || it; break; }
             await dorme(300);
+          }
+          if (!prod && _reserva && _reserva.id) {
+            /* nenhuma variante trouxe ATIVO: usa o inativo como último recurso, dizendo que foi. */
+            console.log('[PRODUTO] ' + sku + ': nenhum cadastro ATIVO em nenhuma variante — usando o inativo ' + _reserva.id);
+            const dR = await bg(`/produtos/${_reserva.id}`); prod = (dR.ok && dR.data && dR.data.data) || null;
           }
           if (prod && prod.id) {
             const forn = prod.fornecedor || {};

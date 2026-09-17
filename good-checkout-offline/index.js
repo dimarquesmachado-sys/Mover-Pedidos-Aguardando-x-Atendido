@@ -1275,13 +1275,26 @@ function routes(readBody) {
       for (const sku of aResolver) {
         try {
           let prod = null;
+          /* Codex #497 (P2): `escolherProdutoAtivo` cai pro primeiro NÃO-EXCLUÍDO quando a página não
+             tem nenhum ATIVO. Como este laço parava no primeiro resultado, a variante de caixa exata
+             podia entregar um INATIVO e as outras variantes — que talvez tivessem o ativo — nunca eram
+             tentadas. O inativo agora fica em reserva e só é usado se nenhuma variante trouxer ativo. */
+          let _reserva = null;
+          const _infoBusca = {};   // a lib marca aqui 'todos_excluidos' / 'inconclusivo'
           for (const v of [...new Set([sku, sku.toUpperCase(), sku.toLowerCase()])]) {
             /* 17/09: pede 10 e escolhe o ATIVO. Com `limite=1` o Bling podia devolver um cadastro
                EXCLUÍDO e esta empresa lia o custo dele. */
             const r = await bg(`/produtos?codigo=${encodeURIComponent(v)}&limite=10&criterio=5`);
-            const it = escolherProdutoAtivo(r.ok && r.data && r.data.data, sku, null, 10);   // 19/08: nunca um cadastro excluído
-            if (it && it.id) { const d = await bg(`/produtos/${it.id}`); prod = (d.ok && d.data && d.data.data) || it; break; }
+            const it = escolherProdutoAtivo(r.ok && r.data && r.data.data, sku, _infoBusca, 10);   // 19/08: nunca um cadastro excluído
+            const _ehAtivo = it && (it.situacao === undefined || String(it.situacao).toUpperCase() === 'A');
+            if (it && it.id && !_ehAtivo) { if (!_reserva) _reserva = it; }
+            else if (it && it.id) { const d = await bg(`/produtos/${it.id}`); prod = (d.ok && d.data && d.data.data) || it; break; }
             await dorme(300);
+          }
+          if (!prod && _reserva && _reserva.id) {
+            /* nenhuma variante trouxe ATIVO: usa o inativo como último recurso, dizendo que foi. */
+            console.log('[PRODUTO] ' + sku + ': nenhum cadastro ATIVO em nenhuma variante — usando o inativo ' + _reserva.id);
+            const dR = await bg(`/produtos/${_reserva.id}`); prod = (dR.ok && dR.data && dR.data.data) || null;
           }
           if (prod && prod.id) {
             const forn = prod.fornecedor || {};
@@ -1293,8 +1306,21 @@ function routes(readBody) {
                nunca teve. Ficou visível agora: ao parar de inventar carimbo, o destino legado
                virou "velho", cai aqui, e a consulta usa o SKU ANTIGO (que não existe mais no
                Bling) — então o de-para novo gravava custo NULO justamente onde deveria herdar. */
-            const kP = _custoLib.custoDeSku(_ccAll, sku);
-            if (kP && kP.custo != null) {
+            /* Codex #497 (P1): quando o Bling devolve SÓ cadastros excluídos, escolherProdutoAtivo
+               devolve null e cair aqui RESTAURAVA o custo em cache — que é justamente o custo do
+               cadastro excluído, gravado pela lógica antiga. A proteção do #186 existe pro caso de
+               FALHA de consulta (429, timeout), não pro caso de "consultei e o que existe está
+               apagado". São opostos: numa o dado velho é o melhor que temos, na outra ele é
+               exatamente o dado ruim que estamos tentando tirar. */
+            /* o `r` era do laço e não existe aqui — o lint pegou. A informação que SOBREVIVE ao
+               laço é a marca que a lib escreve no `info`: ela diz se a consulta concluiu que
+               todos os cadastros estão excluídos (≠ de consulta que falhou ou veio inconclusiva). */
+            const _soExcluidos = !!(_infoBusca && _infoBusca.todos_excluidos && !_infoBusca.inconclusivo) && !_reserva;
+            const kP = _soExcluidos ? null : _custoLib.custoDeSku(_ccAll, sku);
+            if (_soExcluidos) {
+              ids[sku] = null;
+              if (resolveFalhas < 3) console.log('[SKU-INFO] ' + sku + ': todos os cadastros estão EXCLUÍDOS no Bling — custo em cache DESCARTADO (veio de cadastro apagado)');
+            } else if (kP && kP.custo != null) {
               ids[sku] = { id: kP.id || null, preco: (kP.preco != null ? kP.preco : null), custo: kP.custo };
             } else { ids[sku] = null; if (resolveFalhas < 3) console.log('[SKU-INFO] nao resolveu', sku); resolveFalhas++; }
           }
@@ -3211,7 +3237,11 @@ async function custoSync(fresh) {
   const todos = new Set();
   for (const c of Object.values(conf)) { for (const it of ((c && c.itens) || [])) { if (it && it.sku) todos.add(String(it.sku)); } }
   const SETE_D = 7 * 24 * 3600 * 1000;
-  const alvos = [...todos].filter(sk => { const k = cc[sk]; return fresh || !k || !k.id || (Date.now() - (k.ts || 0)) > SETE_D || k.custo == null; });
+  /* Codex #497 (P1): os SKUs já gravados pela lógica ANTIGA (limite=1) têm id, custo e carimbo
+     recente — este filtro os pularia por 7 dias, e o conserto não alcançaria justamente o dado
+     errado que ele existe pra corrigir. A marca `sel` diz qual seletor gravou a entrada. */
+  const SEL_ATUAL = 'ativo-v1';
+  const alvos = [...todos].filter(sk => { const k = cc[sk]; return fresh || !k || !k.id || k.sel !== SEL_ATUAL || (Date.now() - (k.ts || 0)) > SETE_D || k.custo == null; });
   _cst = { rodando: true, feitos: 0, total: alvos.length, ok: 0, falhas: 0, inicio: new Date().toISOString() };
   console.log('[CUSTO] sync iniciando — ' + alvos.length + ' SKU(s) a resolver (tartaruga: ~1,2s/chamada)');
   const dorme = ms => new Promise(r => setTimeout(r, ms));
@@ -3220,13 +3250,26 @@ async function custoSync(fresh) {
   for (const sku of alvos) {
     try {
       let prod = null;
+      /* Codex #497 (P2): `escolherProdutoAtivo` cai pro primeiro NÃO-EXCLUÍDO quando a página não
+         tem nenhum ATIVO. Como este laço parava no primeiro resultado, a variante de caixa exata
+         podia entregar um INATIVO e as outras variantes — que talvez tivessem o ativo — nunca eram
+         tentadas. O inativo agora fica em reserva e só é usado se nenhuma variante trouxer ativo. */
+      let _reserva = null;
+      const _infoBusca = {};   // a lib marca aqui 'todos_excluidos' / 'inconclusivo'
       for (const v of [...new Set([sku, sku.toUpperCase(), sku.toLowerCase()])]) {
         /* 17/09: pede 10 e escolhe o ATIVO. Com `limite=1` o Bling podia devolver um cadastro
            EXCLUÍDO e esta empresa lia o custo dele. */
         const r = await bg2(`/produtos?codigo=${encodeURIComponent(v)}&limite=10&criterio=5`);
-        const it = escolherProdutoAtivo(r.ok && r.data && r.data.data, sku, null, 10);   // 19/08: nunca um cadastro excluído
-        if (it && it.id) { const d = await bg2(`/produtos/${it.id}`); prod = (d.ok && d.data && d.data.data) || it; break; }
+        const it = escolherProdutoAtivo(r.ok && r.data && r.data.data, sku, _infoBusca, 10);   // 19/08: nunca um cadastro excluído
+        const _ehAtivo = it && (it.situacao === undefined || String(it.situacao).toUpperCase() === 'A');
+        if (it && it.id && !_ehAtivo) { if (!_reserva) _reserva = it; }
+        else if (it && it.id) { const d = await bg2(`/produtos/${it.id}`); prod = (d.ok && d.data && d.data.data) || it; break; }
         await dorme(600);
+      }
+      if (!prod && _reserva && _reserva.id) {
+        /* nenhuma variante trouxe ATIVO: usa o inativo como último recurso, dizendo que foi. */
+        console.log('[PRODUTO] ' + sku + ': nenhum cadastro ATIVO em nenhuma variante — usando o inativo ' + _reserva.id);
+        const dR = await bg2(`/produtos/${_reserva.id}`); prod = (dR.ok && dR.data && dR.data.data) || null;
       }
       if (prod && prod.id) {
         const forn = prod.fornecedor || {};
@@ -3241,7 +3284,14 @@ async function custoSync(fresh) {
         /* 21/08: antes de sobrescrever, anota a linha do tempo — o Bling só guarda o custo
            ATUAL, então esta é a única chance de registrar que até ontem valia outro. */
         if (_custoNovo != null) { try { registrarCustoVigente(sku, _custoNovo, 'bling'); } catch (e) {} }
-        cc[sku] = { id: prod.id, preco: (prod.preco != null && isFinite(Number(prod.preco))) ? Number(prod.preco) : null, custo: _custoNovo, ts: Date.now() };
+        const _idAntes = (cc[sku] && cc[sku].id) || null;
+        cc[sku] = { id: prod.id, preco: (prod.preco != null && isFinite(Number(prod.preco))) ? Number(prod.preco) : null, custo: _custoNovo, ts: Date.now(), sel: SEL_ATUAL };
+        /* Codex #497 (P2): se o id MUDOU, o sku-info em cache aponta pro cadastro antigo (o
+           excluído) e continuaria servindo saldo e preço dele até expirar sozinho. */
+        if (_idAntes && _idAntes !== prod.id) {
+          try { _produtoAtivo._limparSkuInfo(sku); } catch (e) {}
+          console.log('[CUSTO] ' + sku + ': id mudou de ' + _idAntes + ' para ' + prod.id + ' (cadastro ativo) — sku-info invalidado');
+        }
         _cst.ok++;
       } else { _cst.falhas++; _anotarFalhaCusto(sku, 'o Bling não devolveu o produto (resposta sem dados)'); }
     } catch (e) { _cst.falhas++; _anotarFalhaCusto(sku, String((e && e.message) || e).slice(0, 160)); }
