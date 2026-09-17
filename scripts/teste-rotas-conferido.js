@@ -19,7 +19,7 @@ const deps = {
   lerReservas: () => ({}), moverSituacao: async () => ({}), arquivarFinalizado: () => {},
   sincronizarConferidos: async () => ({}), rodarCiclo: async () => ({}),
   CONFERIDOS_FILE: '/tmp/c.json', RESERVAS_FILE: '/tmp/r.json', CACHE_DIR: '/tmp',
-  SIT_VERIFICADO: 24, SYNC_ON: true, VERSAO: 'teste',
+  SIT_VERIFICADO: 24, SYNC_ON: true, VERSAO: 'teste', rotulo: 'TESTE',
 };
 
 assert.throws(() => criar({}), /falta prefixo/);
@@ -57,6 +57,41 @@ for (const arq of ['amb-checkout-offline/index.js', 'girassol-backup-offline/gbo
   for (const rota of ['conferido', 'sincronizar']) {
     assert.ok(!new RegExp("p === '/[\\w-]+/" + rota + "'").test(s), arq + ': a cópia de /' + rota + ' voltou');
   }
+}
+
+/* 17/09 (2 P2 do Codex) — O RÓTULO E O PREFIXO TINHAM FICADO CRAVADOS COMO AMB.
+   As três empresas rodam no MESMO processo: o log da Girassol sairia como [AMBBKP], e a
+   resposta do /run dela mandaria o operador olhar /amb-checkout-offline/status. Log que
+   atribui a ação à empresa errada é pior que log nenhum — manda investigar a conta errada. */
+{
+  const s = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'rotas-conferido.js'), 'utf8');
+  /* tirar os comentários DE VERDADE: meu filtro por linha não pegava continuação de bloco,
+     e o teste acusava a menção que está dentro do próprio comentário que explica o conserto. */
+  const codigo = s.replace(/\/\*[\s\S]*?\*\//g, '').split('\n').filter(l => !/^\s*\/\//.test(l)).join('\n');
+  assert.ok(!/AMBBKP|amb-checkout-offline/.test(codigo),
+    'a lib tem rótulo ou slug da AMB cravado — as três rodam no mesmo processo');
+  assert.ok(/\[\$\{rotulo\}\]/.test(codigo), 'o log tem que usar o rótulo injetado');
+  assert.ok(/\$\{prefixo\}\/status/.test(codigo), 'a rota de status tem que sair do prefixo injetado');
+
+  /* prova de verdade: três instâncias, três respostas */
+  const base = {
+    json: () => {}, readBody: async () => ({}), readJson: () => ({}), writeJson: () => {},
+    lerReservas: () => ({}), moverSituacao: async () => ({}), arquivarFinalizado: () => {},
+    sincronizarConferidos: async () => ({}), rodarCiclo: async () => ({}),
+    CONFERIDOS_FILE: '/tmp/c.json', RESERVAS_FILE: '/tmp/r.json', CACHE_DIR: '/tmp',
+    SIT_VERIFICADO: 24, SYNC_ON: true, VERSAO: 't',
+  };
+  const vistas = [];
+  for (const [pref, rot] of [['/a', 'A'], ['/b', 'B']]) {
+    const h = criar(Object.assign({}, base, {
+      prefixo: pref, rotulo: rot,
+      json: (r, c, corpo) => vistas.push(corpo && corpo.mensagem),
+    }));
+    h({ headers: {} }, {}, { pathname: pref + '/run', searchParams: new URLSearchParams() }, 'GET', () => true);
+  }
+  assert.ok(vistas[0] !== vistas[1], 'duas empresas responderam a MESMA rota de status');
+  assert.ok(/\/a\/status/.test(vistas[0]) && /\/b\/status/.test(vistas[1]),
+    'cada empresa tem que apontar pro PRÓPRIO status');
 }
 
 console.log('OK: rotas de conferência — uma lib para as três, o destino do conferido vem injetado (depende da Expedição) e a guarda do nf_id segue de pé');
