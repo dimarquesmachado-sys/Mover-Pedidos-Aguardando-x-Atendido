@@ -1872,7 +1872,7 @@ function routes(readBody) {
       const k = lerChaveAdmin(req, urlObj);
       const sessC = validarSessao(req.headers['cookie']);
       if (!((process.env.ADMIN_KEY && k === process.env.ADMIN_KEY) || (sessC && ehAdmin(sessC)))) { json(res, 404, { error: 'not found' }); return true; }
-      if (urlObj.searchParams.get('status')) { json(res, 200, { ok: true, rodando: !!_cst.rodando, progresso: _cst.feitos + '/' + _cst.total, ok_ate_agora: _cst.ok, falhas: _cst.falhas, inicio: _cst.inicio }); return true; }
+      if (urlObj.searchParams.get('status')) { json(res, 200, { ok: true, rodando: !!_cst.rodando, progresso: _cst.feitos + '/' + _cst.total, ok_ate_agora: _cst.ok, falhas: _cst.falhas, falhas_detalhe: _cst.falhas_detalhe || [], inicio: _cst.inicio }); return true; }
       const skuProbe = urlObj.searchParams.get('sku');
       if (skuProbe) { const ccP = readJson(path.join(CACHE_DIR, '_custos.json'), {}); json(res, 200, { ok: true, sku: skuProbe, no_cache_permanente: ccP[skuProbe] || null, total_no_cache: Object.keys(ccP).length }); return true; }
       if (_cst.rodando) { json(res, 200, { ok: true, ja_rodando: true, progresso: _cst.feitos + '/' + _cst.total }); return true; }
@@ -3195,7 +3195,18 @@ function routes(readBody) {
    esteja rodando a rodada pesada da vez, recriando o mesmo 503. custoSyncTravado cobre as
    duas portas desta empresa (tartaruga e disparo manual); a GOOD não tem custo-diário. */
 const travaPesada = require('../lib/checkout/trava-pesada');
-let _cst = { rodando: false, feitos: 0, total: 0, ok: 0, falhas: 0, inicio: null };
+let _cst = { rodando: false, feitos: 0, total: 0, ok: 0, falhas: 0, inicio: null, falhas_detalhe: [] };
+
+/* 17/09 — PORTE: a AMB e a Girassol guardam o MOTIVO de cada falha do sync de custo; a GOOD só
+   contava quantas foram. "3 falhas" não diz o que fazer — o SKU e o motivo dizem. Guarda as
+   últimas 10, e o ?status=1 mostra. */
+function _anotarFalhaCusto(sku, motivo) {
+  try {
+    if (!Array.isArray(_cst.falhas_detalhe)) _cst.falhas_detalhe = [];
+    _cst.falhas_detalhe.unshift({ sku: String(sku || '?'), motivo: String(motivo || '?'), em: new Date().toISOString() });
+    if (_cst.falhas_detalhe.length > 10) _cst.falhas_detalhe.length = 10;
+  } catch (e) {}
+}
 async function custoSync(fresh) {
   if (_cst.rodando) return;
   const CUSTO_FILE = path.join(CACHE_DIR, '_custos.json');
@@ -3234,8 +3245,8 @@ async function custoSync(fresh) {
         if (_custoNovo != null) { try { registrarCustoVigente(sku, _custoNovo, 'bling'); } catch (e) {} }
         cc[sku] = { id: prod.id, preco: (prod.preco != null && isFinite(Number(prod.preco))) ? Number(prod.preco) : null, custo: _custoNovo, ts: Date.now() };
         _cst.ok++;
-      } else { _cst.falhas++; }
-    } catch (e) { _cst.falhas++; }
+      } else { _cst.falhas++; _anotarFalhaCusto(sku, 'o Bling não devolveu o produto (resposta sem dados)'); }
+    } catch (e) { _cst.falhas++; _anotarFalhaCusto(sku, String((e && e.message) || e).slice(0, 160)); }
     _cst.feitos++; desdeGravei++;
     if (desdeGravei >= 10) { desdeGravei = 0; try { writeJson(path.join(CACHE_DIR, '_custos.json'), cc); } catch (e) {} }
     /* Codex P1 (trava-pesada): fila grande o bastante (a 1,2s/SKU, ~4.500 SKUs) passa dos 90
