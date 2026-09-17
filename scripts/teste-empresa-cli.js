@@ -75,4 +75,30 @@ assert.ok(/não está no contrato/.test(r4.saida));
     'e avisar que a env de VERIFICADO com id de DESPACHADOS é proposital — senão alguém conserta depois');
 }
 
+/* 16/09 (P2 do Codex) — PRESENÇA NÃO É VALIDADE. `GOOD_ME_LOJA_IDS=abc` passava como
+   "presente" e o validar saía "pronta", mas em produção a lista de canais fica vazia e o F1
+   e o F3 se recusam a rodar. Portão que APROVA configuração quebrada é pior que não ter
+   portão: é ele que dá a confirmação pro dono seguir pro deploy. */
+{
+  const malformado = Object.assign({}, comEnv, { GOOD_ME_LOJA_IDS: 'abc' });
+  const r = roda(['validar', 'good'], malformado);
+  assert.notStrictEqual(r.code, 0, 'env presente mas malformada tem que reprovar');
+  assert.ok(/MALFORMADA/.test(r.saida), 'e dizer que o problema é o FORMATO, não a ausência');
+  assert.ok(/ids numéricos/.test(r.saida), 'com o formato esperado escrito — senão o dono não sabe o que corrigir');
+
+  const bom = Object.assign({}, comEnv, { GOOD_ME_LOJA_IDS: '203296034,206069383' });
+  const r2 = roda(['validar', 'good'], bom);
+  assert.ok(!/MALFORMADA/.test(r2.saida), 'lista com vírgula é VÁLIDA — ML normal + ML Full na mesma env');
+}
+
+/* 16/09 — o contrato v12 mudou a forma do `dono_hoje`: é um OBJETO por integração com a LISTA
+   de serviços que renovam. Lido como texto, o aviso saía "[object Object]" — e isso não era só
+   feio: escondia o CONFLITO ATIVO de refresh, que é o risco nº 1 da auditoria. */
+{
+  const r = roda(['validar', 'good'], comEnv);
+  assert.ok(!/\[object Object\]/.test(r.saida), 'o aviso de dono não pode imprimir objeto cru');
+  assert.ok(/CONFLITO ATIVO/.test(r.saida),
+    'mais de um serviço renovando a mesma integração é conflito de refresh e tem que aparecer — o token é de uso único');
+}
+
 console.log('OK: CLI de empresa — validar é portão, plano traz URL completa e fatia certa, e nenhum valor de segredo é impresso');

@@ -120,6 +120,32 @@ function validar(alvo) {
   for (const f of faltando) console.log('  ✗ falta ' + f.nome + '   (capacidade: ' + f.cap + ')');
   problemas += faltando.length;
 
+  /* 16/09 (P2 do Codex) — PRESENÇA NÃO É VALIDADE. `GOOD_ME_LOJA_IDS=abc` passava aqui como
+     "presente" e o validar saía "pronta", mas em produção a lista de canais fica vazia e o F1
+     e o F3 se recusam a rodar. O portão que aprova uma configuração quebrada é pior que não
+     ter portão: ele dá a confirmação que faz o dono seguir pro deploy.
+     Só o formato que dá pra conferir daqui — conteúdo é o `preflight` que prova. */
+  const FORMATO = {
+    ME_LOJA_IDS: {
+      ok: (v) => String(v).split(',').map(x => x.trim()).filter(Boolean).every(x => /^\d+$/.test(x)) &&
+                 String(v).split(',').some(x => x.trim()),
+      leia: 'lista de ids numéricos separados por vírgula (ex.: 206017293 ou 206017293,206069383)',
+    },
+    SITUACAO_AGUARDANDO: { ok: (v) => /^\d+$/.test(String(v).trim()), leia: 'um id numérico' },
+  };
+  const malformadas = [];
+  for (const x of obrig) {
+    const v = process.env[x.nome];
+    if (!v) continue;                                  // ausência já foi contada acima
+    const sufixo = Object.keys(FORMATO).find(k => x.nome.endsWith(k));
+    if (!sufixo) continue;
+    if (!FORMATO[sufixo].ok(v)) malformadas.push({ nome: x.nome, leia: FORMATO[sufixo].leia });
+  }
+  for (const m of malformadas) {
+    console.log('  ✗ ' + m.nome + ' está presente mas MALFORMADA — esperado: ' + m.leia);
+  }
+  problemas += malformadas.length;
+
   const semOpc = opc.filter(x => !process.env[x.nome]);
   if (semOpc.length) {
     console.log('\nAjuste fino (tem padrão no código, não bloqueia): ' + semOpc.length + ' env(s) não definida(s)');
@@ -128,10 +154,20 @@ function validar(alvo) {
   /* dono do refresh: duas contas renovando o mesmo token de uso único é o risco que a
      auditoria pôs no topo — aqui ele aparece ANTES de embarcar, não depois. */
   const contas = e.contas || {};
-  for (const [conta, info] of Object.entries(contas)) {
-    const dono = (info && info.dono_hoje) || e.donoHoje;
-    if (dono && dono !== 'mover-pedidos') {
-      console.log('\n⚠ a conta "' + conta + '" é renovada por "' + dono + '" — este serviço deve LER o token, nunca renovar.');
+  /* 16/09 — o contrato v12 mudou a forma disto e o aviso saía "[object Object]": `dono_hoje` é
+     um OBJETO por integração (bling, ml, ...) com a LISTA de serviços que renovam hoje, não um
+     texto. Ler como texto não só imprimia lixo como escondia o que importa — mais de um
+     serviço na lista é o conflito ATIVO de refresh, que é o risco nº 1 da auditoria. */
+  const donoPorIntegracao = e.donoHoje && typeof e.donoHoje === 'object' ? e.donoHoje : {};
+  for (const [integracao, quem] of Object.entries(donoPorIntegracao)) {
+    if (integracao.startsWith('_')) continue;                 // _nota e afins
+    const lista = Array.isArray(quem) ? quem : (quem ? [quem] : []);
+    if (lista.length > 1) {
+      console.log('\n⚠ CONFLITO ATIVO em "' + integracao + '": ' + lista.join(' e ') +
+        ' renovam o mesmo token. O refresh é de uso único — um deles fica com token morto.');
+    } else if (lista.length === 1 && lista[0] !== 'mover-pedidos') {
+      console.log('\n⚠ "' + integracao + '" é renovada por "' + lista[0] +
+        '" — este serviço deve LER o token, nunca renovar.');
     }
   }
 
