@@ -932,6 +932,12 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
         _cursorConfirmacao = comunsC.length ? (giroC + Math.max(1, tentadosComuns)) % comunsC.length : 0;
         _cursorFull = fullTodos.length ? (gF + Math.max(1, tentadosFull)) % fullTodos.length : 0;
         if (confirmados) salvarManifest(man);
+        /* Codex #491 r2: o abort por mudez já vira 'adiada_bling_mudo' lá em cima, mas sobram
+           DOIS caminhos que também deixam candidato sem confirmar e não tocavam em `reconciliacao`:
+           o excesso além da fatia de 15 (`adiados = aRemover.length - loteConf.length`) e o 1º
+           estouro isolado (pula o pedido, `adiados++`, continua sem abortar). Nos dois, 'ok' era
+           mentira — havia "sem etiqueta" pendurado que o próximo ciclo ainda precisa conferir. */
+        if (adiados > 0 && reconciliacao === 'ok') reconciliacao = 'adiada_parcial';
         console.log(`[GOODBKP] reconciliação conferida: ${confirmados} removido(s) — ${mantidos} seguem em ATENDIDO — ${semResposta} sem resposta (preservados) — ${adiados} adiado(s) p/ o próximo ciclo${mudo ? ' — BLING MUDO: conferência ABORTADA neste ciclo, tenta no próximo' : ''}`);
         }
       } else if (aRemover.length) {
@@ -1159,7 +1165,7 @@ async function rodarCiclo(motivo = 'cron', forcar = false) {
       duracaoSeg: Math.round((Date.now() - t0) / 1000),
       blingOk: listaOk,                            // o Bling respondeu neste ciclo? (p/ o /saude)
       paginasRefeitas: pagRef || 0,                // 22/08: quantas páginas precisaram de re-tentativa
-      reconciliacao,                               // 'ok' | 'pulada_lista_incompleta' | 'sem_lista' | 'adiada_bling_mudo'
+      reconciliacao,                               // 'ok' | 'pulada_lista_incompleta' | 'sem_lista' | 'adiada_bling_mudo' | 'adiada_parcial'
       falhouNaPagina: pagFalha || null,            // se a lista veio incompleta, em qual página parou
       total: ids.length,
       comEtiqueta: ids.filter(i => man[i].tem_etiqueta).length,
