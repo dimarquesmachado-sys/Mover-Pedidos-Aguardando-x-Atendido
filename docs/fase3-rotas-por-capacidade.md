@@ -65,9 +65,15 @@ As quase-idênticas, com a distância: `/backfill-nf-auto` (4), `/ciclo-agora` (
 |---|---:|---:|---|
 | `ir-shopee` | 84 | 2 | **config** — nome da env do cookie na mensagem de erro |
 | `lista` | 37 | 2 | **capacidade** — a Girassol expõe diagnóstico do ciclo que as outras não |
-| `ml-fee` | 26 | 6 | a classificar |
-| `ciclo-agora` | 12 | 4 | a classificar |
-| `backfill-nf-auto` | 8 | 4 | a classificar |
+| `ml-fee` | 26 | 6 | **capacidade** — a GOOD aceitava só sessão; AMB e Girassol aceitam chave ✅ portado |
+| `ciclo-agora` | 12 | 4 | **a mesma** (auth por chave) ✅ portado |
+| `backfill-nf-auto` | 8 | 4 | **a mesma** (auth por chave) ✅ portado |
+
+**As três últimas diferenças eram a MESMA coisa:** a AMB e a Girassol aceitam chave de admin ou
+sessão nas rotas administrativas; a GOOD aceitava só sessão — em **seis** rotas. Rotina
+automática, cron externo e diagnóstico por URL não têm sessão de navegador, então essas rotas
+eram inalcançáveis por chave só nela, com um 403 que parece permissão negada e é desenho
+faltando. Portado (#492) e travado em teste.
 
 ⚠️ **Da `lista`, só metade dava pra portar.** `paginasRefeitas` o `ciclo.js` das três produz e
 foi portado; **`reconciliacao` só a Girassol calcula** — expor onde ninguém preenche é devolver
