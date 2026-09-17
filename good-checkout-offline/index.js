@@ -120,7 +120,7 @@ const _produtoAtivo = require('../lib/checkout/produto-ativo').criar({
   lerSkuInfoCache: () => _skuInfoCache,
   gravarSkuInfoCache: (v) => { _skuInfoCache = v; },
 });
-const { escolherProdutoAtivo } = _produtoAtivo;
+const { resolverProdutoPorSku } = _produtoAtivo;
 let _mls = { rodando: false, feitos: 0, total: 0, ok: 0, falhas: 0, iniciado_em: null, erros: {}, amostras: [] };   // pesca de tarifas/frete REAIS do ML
 
 // BACKFILL-NF LOCAL: lê nf-simp.json (cache/arquivo) e preenche vprod_nf nos conferidos sem ele.
@@ -1275,33 +1275,17 @@ function routes(readBody) {
       for (const sku of aResolver) {
         try {
           let prod = null;
-          /* Codex #497 (P2): `escolherProdutoAtivo` cai pro primeiro NÃO-EXCLUÍDO quando a página não
-             tem nenhum ATIVO. Como este laço parava no primeiro resultado, a variante de caixa exata
-             podia entregar um INATIVO e as outras variantes — que talvez tivessem o ativo — nunca eram
-             tentadas. O inativo agora fica em reserva e só é usado se nenhuma variante trouxer ativo. */
-          let _reserva = null;
-          const _infoBusca = {};   // a lib marca aqui 'todos_excluidos' / 'inconclusivo'
-          /* Codex #497 (P1, r2): a lib só marca `_infoBusca` quando a variante devolveu cadastros
-             (mesmo que todos excluídos) — quando `r.ok` é falso (429, timeout), a lista chega
-             vazia e a lib não tem como saber que era FALHA, não "não achei nada". Sem isto, uma
-             variante que falhou podia esconder o ativo e OUTRA variante, com só excluído, ainda
-             assim concluía "confirmadamente apagado". */
-          let _falhaBusca = false;
-          for (const v of [...new Set([sku, sku.toUpperCase(), sku.toLowerCase()])]) {
-            /* 17/09: pede 10 e escolhe o ATIVO. Com `limite=1` o Bling podia devolver um cadastro
-               EXCLUÍDO e esta empresa lia o custo dele. */
-            const r = await bg(`/produtos?codigo=${encodeURIComponent(v)}&limite=10&criterio=5`);
-            if (!r || !r.ok) _falhaBusca = true;
-            const it = escolherProdutoAtivo(r.ok && r.data && r.data.data, sku, _infoBusca, 10);   // 19/08: nunca um cadastro excluído
-            const _ehAtivo = it && (it.situacao === undefined || String(it.situacao).toUpperCase() === 'A');
-            if (it && it.id && !_ehAtivo) { if (!_reserva) _reserva = it; }
-            else if (it && it.id) { const d = await bg(`/produtos/${it.id}`); prod = (d.ok && d.data && d.data.data) || it; break; }
-            await dorme(300);
-          }
-          if (!prod && _reserva && _reserva.id) {
-            /* nenhuma variante trouxe ATIVO: usa o inativo como último recurso, dizendo que foi. */
-            console.log('[PRODUTO] ' + sku + ': nenhum cadastro ATIVO em nenhuma variante — usando o inativo ' + _reserva.id);
-            const dR = await bg(`/produtos/${_reserva.id}`); prod = (dR.ok && dR.data && dR.data.data) || null;
+          /* Codex #497 (r4): esta cópia inline (caixa exata/maiúscula/minúscula, reserva do
+             inativo, distinção falha×inconclusivo×excluído) levou P1+P2 em três rodadas de review
+             — cada correção fechava um buraco desta cópia sem tocar a de custo-sync (nem a da AMB/
+             Girassol, que herdaram o mesmo bug ao serem "espelhadas"). resolverProdutoPorSku
+             (lib/checkout/produto-ativo.js) já resolve tudo isso num lugar só e é o mesmo código
+             que o custo-sync desta e das outras duas empresas usa — usar aqui fecha as cópias de
+             uma vez em vez de continuar consertando ponto a ponto. */
+          const _res = await resolverProdutoPorSku(sku, bg, 10);
+          if (_res.produto && _res.produto.id) {
+            const d = await bg(`/produtos/${_res.produto.id}`);
+            prod = (d.ok && d.data && d.data.data) || _res.produto;
           }
           if (prod && prod.id) {
             const forn = prod.fornecedor || {};
@@ -1313,16 +1297,14 @@ function routes(readBody) {
                nunca teve. Ficou visível agora: ao parar de inventar carimbo, o destino legado
                virou "velho", cai aqui, e a consulta usa o SKU ANTIGO (que não existe mais no
                Bling) — então o de-para novo gravava custo NULO justamente onde deveria herdar. */
-            /* Codex #497 (P1): quando o Bling devolve SÓ cadastros excluídos, escolherProdutoAtivo
-               devolve null e cair aqui RESTAURAVA o custo em cache — que é justamente o custo do
-               cadastro excluído, gravado pela lógica antiga. A proteção do #186 existe pro caso de
-               FALHA de consulta (429, timeout), não pro caso de "consultei e o que existe está
-               apagado". São opostos: numa o dado velho é o melhor que temos, na outra ele é
-               exatamente o dado ruim que estamos tentando tirar. */
-            /* o `r` era do laço e não existe aqui — o lint pegou. A informação que SOBREVIVE ao
-               laço é a marca que a lib escreve no `info`: ela diz se a consulta concluiu que
-               todos os cadastros estão excluídos (≠ de consulta que falhou ou veio inconclusiva). */
-            const _soExcluidos = !!(_infoBusca && _infoBusca.todos_excluidos && !_infoBusca.inconclusivo) && !_reserva && !_falhaBusca;
+            /* Codex #497 (P1): quando o Bling devolve SÓ cadastros excluídos, resolverProdutoPorSku
+               devolve produto nulo e cair aqui RESTAURAVA o custo em cache — que é justamente o
+               custo do cadastro excluído, gravado pela lógica antiga. A proteção do #186 existe
+               pro caso de FALHA de consulta (429, timeout), não pro caso de "consultei e o que
+               existe está apagado". São opostos: numa o dado velho é o melhor que temos, na outra
+               ele é exatamente o dado ruim que estamos tentando tirar. `todosExcluidos` já vem
+               false quando a lib não teve certeza (busca falhou, página cheia, ou sobrou reserva). */
+            const _soExcluidos = !!_res.todosExcluidos;
             const kP = _soExcluidos ? null : _custoLib.custoDeSku(_ccAll, sku);
             if (_soExcluidos) {
               ids[sku] = null;
@@ -3266,28 +3248,12 @@ async function custoSync(fresh) {
   for (const sku of alvos) {
     try {
       let prod = null;
-      /* Codex #497 (P2): `escolherProdutoAtivo` cai pro primeiro NÃO-EXCLUÍDO quando a página não
-         tem nenhum ATIVO. Como este laço parava no primeiro resultado, a variante de caixa exata
-         podia entregar um INATIVO e as outras variantes — que talvez tivessem o ativo — nunca eram
-         tentadas. O inativo agora fica em reserva e só é usado se nenhuma variante trouxer ativo. */
-      let _reserva = null;
-      const _infoBusca = {};   // a lib marca aqui 'todos_excluidos' / 'inconclusivo'
-      let _falhaBusca = false;   // Codex #497 (P1, r2): 429/timeout não pode virar "confirmado excluído"
-      for (const v of [...new Set([sku, sku.toUpperCase(), sku.toLowerCase()])]) {
-        /* 17/09: pede 10 e escolhe o ATIVO. Com `limite=1` o Bling podia devolver um cadastro
-           EXCLUÍDO e esta empresa lia o custo dele. */
-        const r = await bg2(`/produtos?codigo=${encodeURIComponent(v)}&limite=10&criterio=5`);
-        if (!r || !r.ok) _falhaBusca = true;
-        const it = escolherProdutoAtivo(r.ok && r.data && r.data.data, sku, _infoBusca, 10);   // 19/08: nunca um cadastro excluído
-        const _ehAtivo = it && (it.situacao === undefined || String(it.situacao).toUpperCase() === 'A');
-        if (it && it.id && !_ehAtivo) { if (!_reserva) _reserva = it; }
-        else if (it && it.id) { const d = await bg2(`/produtos/${it.id}`); prod = (d.ok && d.data && d.data.data) || it; break; }
-        await dorme(600);
-      }
-      if (!prod && _reserva && _reserva.id) {
-        /* nenhuma variante trouxe ATIVO: usa o inativo como último recurso, dizendo que foi. */
-        console.log('[PRODUTO] ' + sku + ': nenhum cadastro ATIVO em nenhuma variante — usando o inativo ' + _reserva.id);
-        const dR = await bg2(`/produtos/${_reserva.id}`); prod = (dR.ok && dR.data && dR.data.data) || null;
+      /* Codex #497 (r4): mesma troca da /sku-info — usa o resolvedor compartilhado
+         (resolverProdutoPorSku) em vez da cópia inline, que era a 2ª cópia do mesmo bug. */
+      const _res = await resolverProdutoPorSku(sku, bg2, 10);
+      if (_res.produto && _res.produto.id) {
+        const d = await bg2(`/produtos/${_res.produto.id}`);
+        prod = (d.ok && d.data && d.data.data) || _res.produto;
       }
       if (prod && prod.id) {
         const forn = prod.fornecedor || {};
@@ -3311,7 +3277,7 @@ async function custoSync(fresh) {
           console.log('[CUSTO] ' + sku + ': id mudou de ' + _idAntes + ' para ' + prod.id + ' (cadastro ativo) — sku-info invalidado');
         }
         _cst.ok++;
-      } else if (_infoBusca.todos_excluidos && !_infoBusca.inconclusivo && !_falhaBusca && !_reserva) {
+      } else if (_res.todosExcluidos) {
         /* Codex #497 (P1, r2): confirmado — só existe cadastro EXCLUÍDO no Bling pra este SKU, em
            TODAS as variantes, sem nenhuma busca ter falhado. É o "sister cost-sync path" que o
            Codex apontou: a /sku-info já descartava o custo do cadastro apagado, mas quem
@@ -3323,7 +3289,7 @@ async function custoSync(fresh) {
         try { _produtoAtivo._limparSkuInfo(sku); } catch (e) {}
         _cst.ok++;
         console.log('[CUSTO] ' + sku + ': só havia cadastro EXCLUÍDO no Bling — custo removido dos DOIS caches (era ' + JSON.stringify(_custoApagado) + ')');
-      } else { _cst.falhas++; _anotarFalhaCusto(sku, 'o Bling não devolveu o produto (resposta sem dados)'); }
+      } else { _cst.falhas++; _anotarFalhaCusto(sku, _res.inconclusivo ? ('busca inconclusiva — ' + _res.motivo) : 'o Bling não devolveu o produto (resposta sem dados)'); }
     } catch (e) { _cst.falhas++; _anotarFalhaCusto(sku, String((e && e.message) || e).slice(0, 160)); }
     _cst.feitos++; desdeGravei++;
     if (desdeGravei >= 10) { desdeGravei = 0; try { writeJson(path.join(CACHE_DIR, '_custos.json'), cc); } catch (e) {} }
