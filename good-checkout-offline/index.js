@@ -507,7 +507,7 @@ function routes(readBody) {
     SHOPEE_ENV_COOKIE, VERSAO, statusMlSync: _mls,
   });
   const _rotasConferido = require('../lib/checkout/rotas-conferido').criar({
-    prefixo: '/good-checkout-offline', json, readBody, readJson, writeJson, lerReservas, moverSituacao,
+    prefixo: '/good-checkout-offline', tag: base.tag, json, readBody, readJson, writeJson, lerReservas, moverSituacao,
     arquivarFinalizado, sincronizarConferidos, rodarCiclo, CONFERIDOS_FILE, RESERVAS_FILE,
     CACHE_DIR, SIT_VERIFICADO, SYNC_ON, VERSAO,
   });
