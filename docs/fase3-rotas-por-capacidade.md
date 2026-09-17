@@ -59,6 +59,23 @@ As quase-idênticas, com a distância: `/backfill-nf-auto` (4), `/ciclo-agora` (
   pedido conferido e depende da **Expedição** — uma lib não decide o fluxo físico de uma
   empresa que ela não conhece.
 
+## Classificação das quase-idênticas (17/09)
+
+| rota | linhas | difer | o que é a diferença |
+|---|---:|---:|---|
+| `ir-shopee` | 84 | 2 | **config** — nome da env do cookie na mensagem de erro |
+| `lista` | 37 | 2 | **capacidade** — a Girassol expõe diagnóstico do ciclo que as outras não |
+| `ml-fee` | 26 | 6 | a classificar |
+| `ciclo-agora` | 12 | 4 | a classificar |
+| `backfill-nf-auto` | 8 | 4 | a classificar |
+
+⚠️ **Da `lista`, só metade dava pra portar.** `paginasRefeitas` o `ciclo.js` das três produz e
+foi portado; **`reconciliacao` só a Girassol calcula** — expor onde ninguém preenche é devolver
+null pra sempre, que é pior que não ter, porque a tela mostra o diagnóstico vazio e parece que
+está tudo bem. Portar o CÁLCULO da reconciliação para a AMB e a GOOD fica como item próprio: é
+o único lugar que diz POR QUE a limpeza foi pulada, e sem ele as duas mostram o sintoma
+(pedido despachado preso como "sem etiqueta", 13/08) sem a causa.
+
 **As 18 rotas idênticas estão todas em lib.** Faltam as 6 quase-idênticas (≤6 linhas de
 diferença, cada uma exigindo classificar se é config, capacidade ou regra) e as 21 divergentes,
 que são o próximo `ciclo.js`.

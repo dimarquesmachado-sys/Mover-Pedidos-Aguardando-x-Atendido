@@ -4214,6 +4214,16 @@ function routes(readBody) {
       json(res, 200, {
         versao: VERSAO,
         ciclo_rodou_em: (getUltimoResumo() || {}).rodouEm || null,   // p/ o painel mostrar há quanto tempo o Bling foi consultado
+        /* 17/09 — PORTE PARCIAL, e o teste é que separou o que dava do que não dava.
+           Ao classificar as rotas quase-idênticas, a /lista da Girassol expunha DOIS campos de
+           diagnóstico que as outras não. Eu ia portar os dois, mas o ciclo.js daqui só produz
+           UM: `paginasRefeitas` existe nas três; `reconciliacao` só a Girassol calcula.
+           Expor um campo que ninguém preenche seria devolver null pra sempre — pior que não
+           ter, porque a tela mostra o diagnóstico vazio e parece que está tudo bem.
+           `reconciliacao` fica anotado como porte de VERDADE a fazer: é o único lugar que diz
+           POR QUE a limpeza foi pulada, e sem ele estas duas mostram o sintoma (pedido
+           despachado preso como "sem etiqueta", 13/08) sem a causa. */
+        paginas_refeitas: (getUltimoResumo() || {}).paginasRefeitas || 0,
         prontos: prontos.length,
         sem_etiqueta: semEtiq.length,
         sem_etiqueta_pedidos: semEtiq,
