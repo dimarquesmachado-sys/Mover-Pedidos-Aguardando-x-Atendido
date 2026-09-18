@@ -22,15 +22,11 @@ funções e deixei os caches; no `historico` quase levei a lógica sem o context
 |---|---:|---|
 | **corpo idêntico** (normalizando o nome da empresa) | ~~18~~ **19** | vão para um registrador comum |
 | **quase idêntico** (≤6 linhas de diferença) | ~~6~~ **7** | ler a diferença: se for config, vira parâmetro |
-<<<<<<< HEAD
-| divergente | ~~21~~ ~~6~~ **4** | classificar antes (três correções de medição em 17/09 — ver a seção no fim) |
-=======
 | divergente (por tamanho) | ~~21~~ ~~6~~ **3** | classificar antes (duas correções de medição em 17/09 — ver a seção no fim) |
 | **divergente por CONTRATO** (mesmo nome, resposta diferente) | **1** | `backfill-status` — GOOD devolve outro contrato, não é a mesma rota (ver a seção no fim) |
 
 19 + 7 + 3 + 1 = **30**, batendo com o total do topo. `backfill-status` não some no meio do
 caminho: ele só não entra na conta de "divergente por tamanho" porque a causa não é tamanho.
->>>>>>> 9180ea7fa9ada11b8df098f83306e6248481ab61
 
 As idênticas: `/backfill-detalhes`, `/backfill-nf`, `/backfill-valores`, `/buscar-produto`,
 `/indexar-catalogo`, `/indexar-status`, `/liberar`, `/localizacoes-log`, `/ml-sync-fees`,
