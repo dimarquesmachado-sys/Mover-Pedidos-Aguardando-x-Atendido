@@ -64,9 +64,10 @@ assert.strictEqual(new Set(empresas).size, empresas.length, 'duas empresas lendo
   const valores = Object.values(tabela);
   for (const v of valores) assert.ok(Number(v) > 0, 'alíquota da GOOD com valor inválido: ' + v);
 
-  /* nenhum mês que ainda não fechou pode ter valor: estimar é o erro que a tabela vazia evitava */
-  const hoje = new Date();
-  const mesAtual = hoje.getUTCFullYear() + '-' + String(hoje.getUTCMonth() + 1).padStart(2, '0');
+  /* nenhum mês que ainda não fechou pode ter valor: estimar é o erro que a tabela vazia evitava.
+     Codex #504 (P2, espelhado de scripts/teste-aliquotas-good.js): UTC erra o mês nas últimas
+     horas do dia em SP (21h-23h59 BRT já é dia seguinte em UTC) — monta pelo relógio de SP. */
+  const mesAtual = new Date().toLocaleString('sv-SE', { timeZone: 'America/Sao_Paulo' }).slice(0, 7);
   for (const mes of Object.keys(tabela)) {
     assert.ok(mes < mesAtual,
       'a tabela tem alíquota para ' + mes + ', que ainda não fechou — imposto estimado vira número errado na tela');
