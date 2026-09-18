@@ -474,7 +474,23 @@ async function decodificarZplShopee(txt) {
    isso a tabela abaixo está VAZIA de propósito: o cálculo cai no padrão de 15% e as alíquotas
    salvas no painel continuam tendo precedência. Chutar alíquota seria inventar imposto —
    número errado é pior que número ausente. */
-const DEFAULT_ALIQ_BK_GOOD = {};
+/* 17/09/2026 — ALÍQUOTAS REAIS DO ANO. O comentário acima explica por que esta tabela ficava
+   vazia: chutar alíquota seria inventar imposto. Agora o dado não é chute — são os valores
+   APURADOS, informados pelo dono, que disse que "não mudam mais". Era o que a auditoria
+   listava como aproximação a confirmar (o padrão de 15% entrava no lugar).
+
+   O que continua valendo: as alíquotas salvas no painel (⚙️) têm PRECEDÊNCIA sobre esta
+   tabela — ela é o que o cálculo usa quando o painel não tem valor para o mês.
+
+   ⚠️ Mudar um valor AQUI não reaplica sozinho no histórico já gravado: a reaplicação (#498)
+   dispara ao salvar pelo painel. Corrigir por aqui e depois salvar o mesmo mês no ⚙️ é o que
+   recalcula as linhas antigas. */
+const DEFAULT_ALIQ_BK_GOOD = {
+  '2026-01': 11.819396, '2026-02': 12.7287, '2026-03': 13.2889, '2026-04': 14.2829,
+  '2026-05': 14.8073,   '2026-06': 15.0707, '2026-07': 15.03,
+  /* agosto em diante ainda não apurados — sem valor aqui, o cálculo cai no padrão, e é isso
+     que deve acontecer: estimar mês que não fechou é o erro que este bloco evitava. */
+};
 const _histCacheGood = {};
 const _supaGood = require('../lib/supabase');
 const { rotasHistorico } = require('./historico-good');
@@ -732,6 +748,9 @@ function routes(readBody) {
           /* conferido em lib/supabase.js: req é (empresa, metodo, pathQuery, body) — eu tinha
              escrito com a assinatura errada e o corpo iria pro lugar do pathQuery. */
           supaReq: (empresa, metodo, pq, body) => supaGood.req(empresa, metodo, pq, body),
+          /* Codex #499 (P1): sem isto, o backfill usava as alíquotas da GIRASSOL nos pedidos da
+             GOOD — imposto de outra empresa gravado no histórico, sem erro nenhum. */
+          DEFAULT_ALIQ_BK: DEFAULT_ALIQ_BK_GOOD,
         };
         /* roda em BACKGROUND: um mês de backfill leva minutos e o navegador desiste antes */
         /* 30/08: guarda o estado pra dar pra acompanhar sem caçar no log do Render — foi a
