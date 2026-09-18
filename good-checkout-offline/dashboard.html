@@ -570,8 +570,15 @@ async function carregar(){
     return;
   }
   HIST = d;
+  /* a origem chega FORA de `totais` (é do período, não um total) — carrego junto pra o card
+     não precisar de um segundo parâmetro atravessando três funções */
+  d.totais.__aliquotas = d.aliquotas_usadas || null;
   pintarCards(d.totais);
   pintarAvisos(d.totais);
+  /* 18/09 — período vazio não é "não há vendas": pode ser só o período errado. A GOOD tem
+     histórico só de agosto, e a tela abria em "Mês" (setembro) mostrando tudo zerado — o dono
+     concluiu, com razão, que não havia venda alguma. Agora ela DIZ onde tem dado. */
+  if(Number(d.totais.pedidos||0) === 0) avisarOndeTemDado();
   carregarLinhas();
 }
 
@@ -581,7 +588,7 @@ function pintarCards(t){
   const mc  = Number(t.margem)||0, ped = Number(t.pedidos)||0, un = Number(t.unidades)||0;
   const cards = [
     ['💰','Faturamento Total', BRL(fat), ped+' pedidos · '+un+' unidades'],
-    ['🧾','Impostos', BRL(imp), fat>0 ? PCT(imp/fat*100)+' do faturamento' : '—'],
+    ['🧾','Impostos', BRL(imp), legendaImposto(t, fat, imp)],
     ['📦','Custo de Produtos', BRL(cus), un+' unidades vendidas'],
     ['🚚','Taxas e Fretes', BRL(com+fre), fat>0 ? PCT((com+fre)/fat*100)+' do faturamento' : '—'],
     ['💎','Lucro Bruto (M.C.)', BRL(mc), fat>0 ? PCT(mc/fat*100) : '—'],
@@ -590,6 +597,29 @@ function pintarCards(t){
   document.getElementById('cards').innerHTML = cards.map(([ic,tit,val,sub]) =>
     '<div class="card"><div class="card-tit">'+ic+' '+esc(tit)+'</div>' +
     '<div class="card-val">'+esc(val)+'</div><div class="card-sub">'+esc(sub)+'</div></div>').join('');
+}
+
+/* 18/09 — o card de imposto passa a dizer DE ONDE veio a alíquota. O dono olhou "15% do
+   faturamento" logo depois de eu carregar as alíquotas apuradas da GOOD e teve que perguntar
+   se tinham pegado: tinham, mas agosto não está na lista dele e caiu no padrão.
+   Número sem origem obriga a perguntar, e perguntar toda vez custa o mesmo que não ter. */
+function legendaImposto(t, fat, imp){
+  const base = fat>0 ? PCT(imp/fat*100)+' do faturamento' : '—';
+  const orig = t && t.__aliquotas || null;
+  if(!orig) return base;
+  const meses = Object.keys(orig).sort();
+  if(!meses.length) return base;
+  const fontes = [...new Set(meses.map(m => orig[m].fonte))];
+  if(fontes.length === 1 && fontes[0] === 'apurada')
+    return base + ' · alíquota apurada' + (meses.length===1 ? ' de '+meses[0] : '');
+  if(fontes.length === 1 && fontes[0] === 'painel')
+    return base + ' · alíquota salva no ⚙️';
+  if(fontes.length === 1 && fontes[0] === 'padrao')
+    return base + ' · ⚠️ alíquota PADRÃO — ' + (meses.length===1 ? meses[0]+' não apurado' : 'meses não apurados');
+  /* período com meses de origens diferentes: dizer quais caíram no padrão, que é o que o dono
+     precisa corrigir — os outros estão certos e não pedem ação */
+  const semApurar = meses.filter(m => orig[m].fonte === 'padrao');
+  return base + ' · ⚠️ padrão em ' + semApurar.join(', ');
 }
 
 function pintarAvisos(t){
@@ -606,6 +636,24 @@ function pintarAvisos(t){
     av.push(t.impostos_recalculados+' imposto(s) recalculado(s) com a alíquota atual');
   document.getElementById('avisos').innerHTML = av.length
     ? '<div class="bloco">' + av.map(a => '<div class="aviso">'+a+'</div>').join('') + '</div>' : '';
+}
+
+async function avisarOndeTemDado(){
+  /* pergunta o ANO inteiro: se houver dado em qualquer mês, mostra quais — é a informação que
+     transforma "não há vendas" em "não há vendas NESTE período". */
+  const ano = new Date().getFullYear();
+  let d = null;
+  try {
+    const r = await fetch(MOD+'/historico-longo?de='+ano+'-01-01&ate='+ano+'-12-31', {credentials:'same-origin'});
+    d = await r.json().catch(()=>null);
+  } catch(e){ return; }
+  if(!(d && d.ok && d.dias)) return;
+  const meses = [...new Set(Object.keys(d.dias).map(x => x.slice(0,7)))].sort();
+  if(!meses.length) return;
+  const el = document.getElementById('avisos');
+  el.innerHTML = '<div class="bloco"><div class="aviso">Nenhum pedido <b>neste período</b> — ' +
+    'mas há histórico em: ' + meses.map(m => '<b>'+m+'</b>').join(', ') + '. ' +
+    'O backfill de vendas desta empresa ainda não cobriu os outros meses.</div></div>' + el.innerHTML;
 }
 
 async function carregarLinhas(){
