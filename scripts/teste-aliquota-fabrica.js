@@ -31,21 +31,41 @@ for (const [emp, arq] of Object.entries(TELAS)) {
   assert.ok(marca, emp + ': o campo não marca quando está mostrando valor DE FÁBRICA — ' +
     'sem a marca, o salvar não tem como distinguir o que o dono digitou do que ele só viu');
 
-  const m = /const deFabrica = i\.dataset\.fabrica === '1' && String\(i\.value\) === String\(i\.defaultValue\);\s*\n\s*aliquotas\[i\.dataset\.aliq\] = \(i\.value === '' \|\| deFabrica\) \? null : Number\(i\.value\);/.exec(html);
+  const m = /const deFabrica = i\.dataset\.fabrica === '1' && i\.dataset\.tocado !== '1';\s*\n\s*aliquotas\[i\.dataset\.aliq\] = \(i\.value === '' \|\| deFabrica\) \? null : Number\(i\.value\);/.exec(html);
   assert.ok(m, emp + ': o salvar ainda manda todos os campos igual — valor de fábrica viraria config');
 
-  /* exercita a regra extraída do próprio arquivo, nos quatro casos reais */
-  const decide = new Function('i', m[0].replace('aliquotas[i.dataset.aliq] =', 'return') + '\n');
-  const campo = (value, defaultValue, fabrica) => ({ value, defaultValue, dataset: { fabrica, aliq: 'x' } });
+  /* Codex (P2): decidir por comparação de valor (i.value === i.defaultValue) não distinguia
+     "nunca tocou" de "digitou de propósito o mesmo número que já estava de fábrica" — os dois
+     mandavam null e a confirmação do dono sumia. Quem decide agora é o TOQUE (marcado no
+     oninput), não o valor final. */
+  const oninput = /oninput="this\.dataset\.tocado=\\'1\\'"/.test(html);
+  assert.ok(oninput, emp + ': o campo de alíquota não marca `tocado` ao editar — sem isso o salvar não ' +
+    'distingue "nunca tocou" de "digitou de novo o valor de fábrica", e a confirmação do dono vira null');
 
-  assert.strictEqual(decide(campo('8.82', '8.82', '1')), null,
+  /* exercita a regra extraída do próprio arquivo, nos cinco casos reais */
+  const decide = new Function('i', m[0].replace('aliquotas[i.dataset.aliq] =', 'return') + '\n');
+  const campo = (value, tocado, fabrica) => ({ value, dataset: { fabrica, tocado, aliq: 'x' } });
+
+  assert.strictEqual(decide(campo('8.82', undefined, '1')), null,
     emp + ': mês cinza NÃO tocado tem que ir como null — senão a estimativa vira config e vence o código depois');
-  assert.strictEqual(decide(campo('8.40952', '8.82', '1')), 8.40952,
+  assert.strictEqual(decide(campo('8.40952', '1', '1')), 8.40952,
     emp + ': mês que o dono DIGITOU tem que virar config');
-  assert.strictEqual(decide(campo('6.0414', '6.0414', undefined)), 6.0414,
+  assert.strictEqual(decide(campo('8.82', '1', '1')), 8.82,
+    emp + ': mês cinza que o dono digitou de propósito o MESMO valor de fábrica (apuração bateu ' +
+    'igual) tem que virar config — comparar só o valor final perdia essa confirmação');
+  assert.strictEqual(decide(campo('6.0414', undefined, undefined)), 6.0414,
     emp + ': mês que já era salvo (sem marca de fábrica) tem que continuar salvo');
-  assert.strictEqual(decide(campo('', '8.82', '1')), null,
+  assert.strictEqual(decide(campo('', '1', '1')), null,
     emp + ': campo limpo tem que apagar');
+
+  /* Codex (P1): campo já SALVO (branco, sem marca de fábrica) cujo valor bate com o de fábrica
+     atual precisa de um jeito explícito de limpar — pode ser sobra do bug antigo que gravava o
+     valor de fábrica sozinho. O botão só aparece nesse caso; não apaga nada sozinho. */
+  const botaoLimpar = /suspeita\s*=\s*salvo!=null\s*&&\s*padrao!=null\s*&&\s*Number\(salvo\)===Number\(padrao\)/.test(html) &&
+    /suspeita\?\s*'<button/.test(html);
+  assert.ok(botaoLimpar, emp + ': falta o botão explícito p/ limpar um mês salvo que bate igual com o ' +
+    'valor de fábrica — sem ele, um mês poluído pelo bug antigo (já persistido antes deste conserto) ' +
+    'fica preso como config pra sempre');
 }
 
 /* a GOOD resolve pelo outro caminho: o campo nasce VAZIO e o valor apurado aparece ao lado.
