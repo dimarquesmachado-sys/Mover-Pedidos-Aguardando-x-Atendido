@@ -56,6 +56,29 @@ function declaradas(arq, mod) {
 
 /* extrai o CORPO da rota a partir da linha de DECLARAÇÃO (nunca da primeira menção), contando
    chaves até fechar no mesmo nível — é exatamente o passo que a medição original pulou */
+/* Codex #501 (P2, r4): contar `{` e `}` crus conta também os que estão DENTRO de string,
+   template ou regex — `'{ ok: true }'` numa mensagem desequilibra a contagem e o extrator pega
+   o bloco errado, que é a mesma classe de erro das três correções de medição de hoje. Não vou
+   escrever um parser de JavaScript aqui; apago o conteúdo de string, template, regex e
+   comentário ANTES de contar, preservando o tamanho pra os índices continuarem válidos. */
+function semLiterais(linha) {
+  let fora = '', modo = null, esc = false;
+  for (let i = 0; i < linha.length; i++) {
+    const c = linha[i];
+    if (modo) {
+      fora += (c === '\n') ? c : ' ';
+      if (esc) { esc = false; continue; }
+      if (c === '\\') { esc = true; continue; }
+      if (c === modo) modo = null;
+      continue;
+    }
+    if (c === '"' || c === "'" || c === '`') { modo = c; fora += ' '; continue; }
+    if (c === '/' && linha[i + 1] === '/') { fora += ' '.repeat(linha.length - i); break; }
+    fora += c;
+  }
+  return fora;
+}
+
 function corpoDaRota(arq, mod, rota) {
   const linhas = fs.readFileSync(path.join(raiz, arq), 'utf8').split('\n');
   const re = reDeclaracao(mod, rota);
@@ -64,7 +87,7 @@ function corpoDaRota(arq, mod, rota) {
   let prof = 0;
   let fim = -1;
   for (let i = inicio; i < linhas.length && fim < 0; i++) {
-    for (const ch of linhas[i]) {
+    for (const ch of semLiterais(linhas[i])) {
       if (ch === '{') prof++;
       else if (ch === '}') { prof--; if (prof === 0) { fim = i; break; } }
     }
@@ -186,7 +209,19 @@ for (let i = 0; i < ALVOS.length; i++) {
       '/' + rota + ' está inline em ' + ondeEsta.length + ' de ' + ALVOS.length + ' empresas (' +
       ondeEsta.map(([, m]) => m).join(', ') + '). Extração pela metade: ou a rota sai das três ' +
       'pra uma lib, ou fica nas três — do jeito que está, uma empresa mudou e as outras não.');
-    if (ondeEsta.length === 0) continue;   // extraída das três — a paridade virou estrutural
+    if (ondeEsta.length === 0) {
+      /* Codex #501 (P2, r4): "sumiu das três" pode ser extração (bom) ou apagamento (péssimo),
+         e pular sem olhar trata os dois igual. Se virou lib, tem que existir um registrador
+         comum que a cite — e as três têm que delegar pra ele. */
+      const libs = fs.readdirSync(path.join(raiz, 'lib', 'checkout'))
+        .filter((f) => f.endsWith('.js'))
+        .filter((f) => new RegExp("prefixo \\+ '/" + rota + "'").test(
+          fs.readFileSync(path.join(raiz, 'lib', 'checkout', f), 'utf8')));
+      assert.ok(libs.length > 0,
+        '/' + rota + ' sumiu das três pastas e nenhuma lib de lib/checkout a registra — ' +
+        'não foi extração, foi perda: a rota deixou de existir.');
+      continue;   // extraída de verdade — a paridade virou estrutural
+    }
     const ref = semRotulo(corpoDaRota(ALVOS[0][0], ALVOS[0][1], rota).join('\n'), ALVOS[0][1]);
     for (let i = 1; i < ALVOS.length; i++) {
       const outro = semRotulo(corpoDaRota(ALVOS[i][0], ALVOS[i][1], rota).join('\n'), ALVOS[i][1]);

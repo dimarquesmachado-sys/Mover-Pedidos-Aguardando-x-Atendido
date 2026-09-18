@@ -22,12 +22,17 @@ funções e deixei os caches; no `historico` quase levei a lógica sem o context
 |---|---:|---|
 | **corpo idêntico** (normalizando o nome da empresa) | ~~18~~ **19** | vão para um registrador comum |
 | **quase idêntico** (≤6 linhas de diferença) | ~~6~~ **7** | ler a diferença: se for config, vira parâmetro |
-| divergente | ~~21~~ ~~6~~ **3** | classificar antes (duas correções de medição em 17/09 — ver a seção no fim) |
+| divergente | ~~21~~ ~~6~~ **4** | classificar antes (três correções de medição em 17/09 — ver a seção no fim) |
 
 As idênticas: `/backfill-detalhes`, `/backfill-nf`, `/backfill-valores`, `/buscar-produto`,
 `/indexar-catalogo`, `/indexar-status`, `/liberar`, `/localizacoes-log`, `/ml-sync-fees`,
 `/nf-anexar`, `/reservar`, `/run`, `/salvar-localizacao`, `/separacao`,
-`/separacao-por-pedido`, `/shopee-sessao`, `/sincronizar`, `/status` e mais uma.
+`/separacao-por-pedido`, `/shopee-sessao`, `/sincronizar`, `/status` e `/saude`.
+
+> **19 + 7 + 4 = 30**, que fecha com o total acima. O `/backfill-status` conta como divergente
+> mesmo tendo só 4 linhas de diferença: o que diverge nele é o **contrato de resposta** — a AMB
+> e a Girassol devolvem `{ ok, status, ano }`, a GOOD devolve o estado do backfill de vendas
+> dela. Mesmo nome, propósitos diferentes; extrair juntaria dois contratos num só.
 
 As quase-idênticas, com a distância: `/backfill-nf-auto` (4), `/ciclo-agora` (4),
 `/conferido` (3), `/ir-shopee` (2), `/lista` (2), `/ml-fee` (4), `/etiqueta-anexar` (4).
