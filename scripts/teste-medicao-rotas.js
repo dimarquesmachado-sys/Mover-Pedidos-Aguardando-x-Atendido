@@ -239,6 +239,18 @@ for (let i = 0; i < ALVOS.length; i++) {
       assert.ok(libs.length > 0,
         '/' + rota + ' sumiu das três pastas e nenhuma lib de lib/checkout a registra — ' +
         'não foi extração, foi perda: a rota deixou de existir.');
+      /* Codex #501 (P2, r5): a lib registrar a rota não garante que as TRÊS a chamem — o
+         comentário acima já prometia isso ("as três têm que delegar pra ele") e o código não
+         conferia. Se só duas empresas importarem o módulo, a terceira perde a rota em
+         silêncio e este guarda passava do mesmo jeito (mesmo padrão de
+         scripts/teste-rotas-catalogo.js, que trava `_rotasCatalogo` nos três arquivos). */
+      ALVOS.forEach(([arq]) => {
+        const s = fs.readFileSync(path.join(raiz, arq), 'utf8');
+        const delega = libs.some((f) => new RegExp("require\\(['\"][^'\"]*" + f.slice(0, -3) + "['\"]\\)").test(s));
+        assert.ok(delega,
+          arq + ': /' + rota + ' saiu da declaração inline, mas o arquivo não importa nenhuma ' +
+          'lib de lib/checkout que a registre — extração pela metade, esta empresa perdeu a rota.');
+      });
       continue;
     }
     const ref = semRotulo(corpoDaRota(ALVOS[0][0], ALVOS[0][1], rota).join('\n'), ALVOS[0][1]);

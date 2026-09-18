@@ -91,12 +91,12 @@ está tudo bem. Portar o CÁLCULO da reconciliação para a AMB e a GOOD fica co
 o único lugar que diz POR QUE a limpeza foi pulada, e sem ele as duas mostram o sintoma
 (pedido despachado preso como "sem etiqueta", 13/08) sem a causa.
 
-**18 das 19 rotas idênticas já estão em lib — falta a `/status`**, reclassificada em 17/09 (era
-tida como divergente por um erro de medição). Faltam as 7 quase-idênticas (≤6 linhas de
-diferença, cada uma exigindo classificar se é config, capacidade ou regra), as **3** divergentes
-por tamanho (o número passou por duas correções de medição no mesmo dia — ver a seção no fim) e
-a `/backfill-status`, que diverge por CONTRATO (não por tamanho) e por isso não entra nessa
-conta de três — as quatro juntas são o próximo `ciclo.js`.
+**17 das 19 rotas idênticas já estão em lib — faltam `/status` e `/saude`**, ambas reclassificadas
+em 17/09 (eram tidas como divergente e quase-idêntica, respectivamente, por erro de medição).
+Faltam as 7 quase-idênticas (≤6 linhas de diferença, cada uma exigindo classificar se é config,
+capacidade ou regra), as **3** divergentes por tamanho (o número passou por duas correções de
+medição no mesmo dia — ver a seção no fim) e a `/backfill-status`, que diverge por CONTRATO (não
+por tamanho) e por isso não entra nessa conta de três — as quatro juntas são o próximo `ciclo.js`.
 
 ## O critério mudou depois da primeira fatia (P1 do Codex no #480)
 
