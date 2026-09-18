@@ -152,12 +152,17 @@ Contando CHAVES (o jeito que o `teste-medicao-rotas.js` já usa desde o conserto
 |---|---:|---:|---|
 | `status` | 20 | **0** | idêntica |
 | `etiqueta-anexar` | 50 | **4** | quase idêntica |
-| `saude` | 30 | **2** | quase idêntica |
+| `saude` | 30 | **0** | idêntica (era "2" — ver abaixo) |
 | `config-fiscal` | 45 | 49 | divergente |
 | `sku-info` | 94 | 24 | divergente |
 | `custo-sync` | 33 | 21 | divergente |
 
-**Duas correções de medição no mesmo dia, e as duas pra menos.** A lição que fica escrita: para
+A `/saude` aparecia com 2 de diferença por um terceiro erro de medição, menor e do mesmo tipo:
+o normalizador trocava `AMBBKP` por marcador com `\b` nas duas pontas, então **`AMBBKP_SYNC_ON`
+ficava intacto** — o nome da env dentro de uma string de aviso parecia divergência de código.
+Eu ia até dar uma folga à Girassol achando que era o app de Expedição dela. Não era.
+
+**Três correções de medição no mesmo dia, e as três pra menos.** A lição que fica escrita: para
 delimitar bloco em JavaScript, contar chaves — indentação é convenção, não estrutura, e um
 medidor frouxo infla o trabalho e esconde o risco (na primeira correção, ele teria feito mover
 a trava de sessão).

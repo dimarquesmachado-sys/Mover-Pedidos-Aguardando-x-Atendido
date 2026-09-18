@@ -26,7 +26,11 @@ const ALVOS = [
    idêntica — mantê-las aqui exigiria que a declaração continuasse em cada pasta, e é
    exatamente isso que a extração vai remover. O guarda passaria a reprovar o trabalho que ele
    deveria acompanhar, e alguém contornaria o vermelho. */
-const DIVERGENTES = ['config-fiscal', 'sku-info', 'custo-sync'];
+/* Codex #501 (P2, r2): o `backfill-status` volta. Eu o tirei olhando só o TAMANHO do corpo (7
+   linhas, 4 de diferença), mas o que diverge nele é o CONTRATO DE RESPOSTA: a AMB e a Girassol
+   devolvem { ok, status, ano }, a GOOD devolve o estado do backfill de vendas dela. São rotas
+   com o mesmo nome e propósitos diferentes — extrair juntaria dois contratos num só. */
+const DIVERGENTES = ['config-fiscal', 'sku-info', 'custo-sync', 'backfill-status'];
 
 /* backfill-status não divergiu por TAMANHO — a razão de ficar de fora é outra (a lista de
    exceções do portão da GOOD já a citou por engano, ver o bloco dedicado logo abaixo), mas
@@ -144,7 +148,11 @@ for (let i = 0; i < ALVOS.length; i++) {
      seguia verde. E eu ainda tolerava 4 linhas de folga, o que só piorava. Agora compara o
      corpo NORMALIZADO linha a linha: rótulo e slug da empresa viram marcador, o resto tem que
      ser igual. */
-  const semRotulo = (t) => t.replace(/\b(GIRABKP|GOODBKP|AMBBKP)\b/g, '_T_')
+  /* Codex #501 (P2, r2) + o que o próprio teste mostrou: o \b antes de GIRABKP não casa quando
+     o rótulo faz parte de um NOME DE ENV dentro de string — "AMBBKP_SYNC_ON" ficava intacto e
+     a /saude parecia divergir nas duas empresas. Sem o \b final, o prefixo vira marcador em
+     qualquer posição, e aí a diferença some: as três são IGUAIS nesta rota. */
+  const semRotulo = (t) => t.replace(/\b(GIRABKP|GOODBKP|AMBBKP)/g, '_T_')
     .replace(/\b(girassol-backup-offline|good-checkout-offline|amb-checkout-offline)\b/g, '_M_')
     .replace(/\/\*[\s\S]*?\*\//g, '')
     .split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('//'));
@@ -153,14 +161,27 @@ for (let i = 0; i < ALVOS.length; i++) {
      /saude tem UMA linha (a Girassol confere o app de Expedição, que só ela tem). Tolerância
      folgada aqui não guarda nada — foi assim que a troca de `Object.keys` por `Object.values`
      passou batido na primeira versão deste guarda. */
-  const LIMITE = { status: 0, saude: 1 };
+  /* Codex #501 (P2, r2): eu tirei a /status do conjunto protegido PRA ELA PODER SER EXTRAÍDA e,
+     na mesma rodada, escrevi um guarda que exige encontrá-la inline nas três — o `corpoDaRota`
+     derruba o teste quando a declaração some. Na primeira extração dela, o CI ficaria vermelho
+     por causa do trabalho que ele deveria acompanhar.
+     Agora o guarda só age enquanto a rota ESTÁ inline: extraída, não há o que comparar, e a
+     paridade passa a ser estrutural (uma lib só). */
+  const LIMITE = { status: 0, saude: 0 };
   for (const [rota, limite] of Object.entries(LIMITE)) {
+    const presente = ALVOS.every(([arq, mod]) => reDeclaracao(mod, rota)
+      .test(fs.readFileSync(path.join(raiz, arq), 'utf8').split('\n').find((l) => reDeclaracao(mod, rota).test(l)) || ''));
+    if (!presente) continue;   // extraída pra lib — a paridade virou estrutural
     const ref = semRotulo(corpoDaRota(ALVOS[0][0], ALVOS[0][1], rota).join('\n'));
     for (let i = 1; i < ALVOS.length; i++) {
       const outro = semRotulo(corpoDaRota(ALVOS[i][0], ALVOS[i][1], rota).join('\n'));
       const difs = ref.filter((l, k) => outro[k] !== l).length + Math.abs(ref.length - outro.length);
-      assert.ok(difs <= limite,
-        ALVOS[i][0] + ': /' + rota + ' difere em ' + difs + ' linha(s) da AMB (limite ' + limite + '). ' +
+      /* a folga acabou: com o normalizador consertado, /status e /saude são IDÊNTICAS nas três.
+         Eu ia dar 1 linha de folga à Girassol achando que a diferença era o app de Expedição —
+         era só o nome da env na mensagem. Folga baseada em suposição é como guarda nenhum. */
+      const lim = limite;
+      assert.ok(difs <= lim,
+        ALVOS[i][0] + ': /' + rota + ' difere em ' + difs + ' linha(s) da AMB (limite ' + lim + '). ' +
         'Ou o corpo mudou numa empresa só — e aí a correção tem que ir pras três —, ' +
         'ou o medidor voltou a engolir a rota seguinte.');
     }
