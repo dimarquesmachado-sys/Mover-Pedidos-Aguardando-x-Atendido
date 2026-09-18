@@ -800,6 +800,13 @@ async function abrirConfig(){
      tabela que o dono não vê. Ele não tinha como saber qual alíquota estava valendo em cada
      mês. Agora a rota devolve as APURADAS e cada linha diz o que vale hoje e de onde vem. */
   const apuradas = d.apuradas || {};
+  /* 18/09 — APURADO NÃO É O MESMO QUE "ESTÁ NA TABELA". A tabela da AMB e da Girassol tem os
+     dois misturados (a AMB estima jul-dez pela curva do RBT12p; a Girassol deixava agosto em
+     15% de palpite), e só o comentário em prosa dizia qual era qual.
+     O ritual do dono é mensal: ele ESTIMA o mês e, por volta do dia 20, a contabilidade manda a
+     apuração. Chamar a estimativa de "apurada" faria ele deixar de conferir o DAS de um mês
+     achando que já conferiu — a mentira mais cara que esta tela poderia contar. */
+  const jaApurados = new Set(d.apurados_meses || []);
   // Codex (P2): toISOString() é UTC puro — na última noite do mês em SP (UTC já virou dia 1
   // do mês seguinte) isto classificava o mês corrente como fechado e inventava um "falta
   // apurar" falso. hojeSP() é o relógio de SP que o resto da tela já usa (linha ~521).
@@ -817,7 +824,8 @@ async function abrirConfig(){
     const ALQ = v => String(v).replace('.', ',') + '%';
     let vale;
     if(salvo != null && Number(salvo) > 0) vale = '<b>'+ALQ(salvo)+'</b> · salva aqui';
-    else if(apur != null)                  vale = '<b>'+ALQ(apur)+'</b> · apurada';
+    else if(apur != null && jaApurados.has(k)) vale = '<b>'+ALQ(apur)+'</b> · apurada';
+    else if(apur != null)                  vale = '<b class="bad">'+ALQ(apur)+'</b> · ⚠️ ESTIMATIVA — falta a apuração';
     else if(k === hoje)                    vale = '<span class="dim">mês em andamento — usa o padrão até fechar</span>';
     else if(k > hoje)                      vale = '<span class="dim">mês ainda não fechou</span>';
     /* só mês PASSADO sem alíquota merece alarme: é o único que o dono pode resolver agora.

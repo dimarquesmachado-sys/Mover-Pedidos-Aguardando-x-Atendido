@@ -485,6 +485,13 @@ async function decodificarZplShopee(txt) {
    ⚠️ Mudar um valor AQUI não reaplica sozinho no histórico já gravado: a reaplicação (#498)
    dispara ao salvar pelo painel. Corrigir por aqui e depois salvar o mesmo mês no ⚙️ é o que
    recalcula as linhas antigas. */
+/* 18/09 — a GOOD tem a lista também, pelo mesmo motivo das outras duas: a tabela dela é toda
+   apurada HOJE, mas nada impede alguém de acrescentar uma estimativa amanhã, e aí a tela
+   passaria a chamá-la de apurada. A lista é o que diz a verdade, não a presença na tabela. */
+/* ⚠️ agosto entra junto com o valor, no #504 — a lista e a tabela têm que andar juntas, e o
+   teste reprova se divergirem: marcar como apurado um mês sem valor é prometer um dado que
+   não está lá. Foi exatamente o que ele pegou quando eu adiantei a lista. */
+const ALIQ_APURADOS = ['2026-01', '2026-02', '2026-03', '2026-04', '2026-05', '2026-06', '2026-07'];
 const DEFAULT_ALIQ_BK_GOOD = {
   '2026-01': 11.819396, '2026-02': 12.7287, '2026-03': 13.2889, '2026-04': 14.2829,
   '2026-05': 14.8073,   '2026-06': 15.0707, '2026-07': 15.03,
@@ -1445,7 +1452,7 @@ function routes(readBody) {
    doze campos vazios e o dono não tem como saber qual alíquota está valendo: vazio ali
    significa "usa a tabela", e a tabela ele não vê. Campo em branco que esconde um valor
    ativo é a mesma armadilha do card sem origem. */
-if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK_GOOD, config: readJson(CFG_FILE, { aliquotas: {}, taxas: {} }) }); return true; }
+if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK_GOOD, apurados_meses: ALIQ_APURADOS, config: readJson(CFG_FILE, { aliquotas: {}, taxas: {} }) }); return true; }
       let body = {}; try { const _rb = await readBody(req); body = (_rb && typeof _rb === 'object') ? _rb : JSON.parse(_rb || '{}'); } catch (e) {}   // tolerante: lib/http passou a devolver objeto ja parseado
       const atual = readJson(CFG_FILE, { aliquotas: {}, taxas: {} });
       const _aliqAntes = Object.assign({}, atual.aliquotas || {});   // p/ saber o que mudou de verdade

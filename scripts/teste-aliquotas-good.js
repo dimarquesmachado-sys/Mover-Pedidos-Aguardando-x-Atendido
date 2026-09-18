@@ -97,4 +97,41 @@ for (const mes of ['2026-08', '2026-09', '2026-10', '2026-11', '2026-12']) {
     'as alíquotas de janeiro da Girassol e da GOOD ficaram iguais — conferir, porque são empresas com faturamentos diferentes');
 }
 
+/* 18/09 — APURADO NÃO É O MESMO QUE "ESTÁ NA TABELA". O dono explicou o ritual: ele ESTIMA o
+   mês, e por volta do dia 20 a contabilidade manda a apuração — é então que o número certo
+   entra. As tabelas da AMB e da Girassol sempre tiveram os dois misturados (a AMB estima
+   jul-dez pela curva do RBT12p; a Girassol deixava agosto em 15% de palpite), e só o
+   comentário em prosa dizia qual era qual.
+
+   A tela nova diz "apurada" ao lado de cada mês. Sem esta lista, ela chamaria ESTIMATIVA de
+   apurada — e essa é a mentira mais cara que ela poderia contar: o dono deixa de conferir o
+   DAS de um mês achando que já conferiu. */
+for (const [emp, arq, lista] of [
+  ['amb', 'amb-checkout-offline/index.js', 'DEFAULT_ALIQ_BK'],
+  ['girassol', 'girassol-backup-offline/gbo-app.js', 'DEFAULT_ALIQ_BK'],
+  ['good', 'good-checkout-offline/index.js', 'DEFAULT_ALIQ_BK_GOOD'],
+]) {
+  const s = fs.readFileSync(path.join(__dirname, '..', arq), 'utf8');
+  assert.ok(/const ALIQ_APURADOS = \[/.test(s),
+    emp + ': falta a lista de meses APURADOS — a tela chamaria estimativa de apurada');
+  assert.ok(/apurados_meses: ALIQ_APURADOS/.test(s),
+    emp + ': a rota /config-fiscal não devolve a lista — a tela não teria como distinguir');
+
+  /* todo mês marcado como apurado precisa existir na tabela: marcar como apurado um mês sem
+     valor seria prometer um dado que não está lá */
+  const apurados = eval(/const ALIQ_APURADOS = (\[[^\]]*\])/.exec(s)[1]);
+  const tab = eval('(' + new RegExp('const ' + lista + ' = (\\{[\\s\\S]*?\\n?\\});').exec(s)[1] + ')');
+  for (const m of apurados) {
+    assert.ok(tab[m] != null, emp + ': ' + m + ' está marcado como apurado mas não tem valor na tabela');
+  }
+}
+
+/* e a tela precisa usar a lista, não a mera presença na tabela */
+{
+  const tela = fs.readFileSync(path.join(__dirname, '..', 'good-checkout-offline', 'dashboard.html'), 'utf8');
+  assert.ok(/jaApurados\.has\(k\)/.test(tela),
+    'a tela decide "apurada" pela presença na tabela — estimativa apareceria como apurada');
+  assert.ok(/ESTIMATIVA/.test(tela), 'a tela não avisa quando o valor é estimativa');
+}
+
 console.log('OK: alíquotas da GOOD — os 7 meses apurados conferem, agosto+ segue sem valor, e o painel mantém precedência');
