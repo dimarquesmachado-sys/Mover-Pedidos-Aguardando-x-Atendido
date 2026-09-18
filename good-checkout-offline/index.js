@@ -1445,7 +1445,19 @@ function routes(readBody) {
       let body = {}; try { const _rb = await readBody(req); body = (_rb && typeof _rb === 'object') ? _rb : JSON.parse(_rb || '{}'); } catch (e) {}   // tolerante: lib/http passou a devolver objeto ja parseado
       const atual = readJson(CFG_FILE, { aliquotas: {}, taxas: {} });
       const _aliqAntes = Object.assign({}, atual.aliquotas || {});   // p/ saber o que mudou de verdade
-      if (body.aliquotas && typeof body.aliquotas === 'object') for (const [k2, v2] of Object.entries(body.aliquotas)) { const n2 = Number(v2); if (/^\d{4}-\d{2}$/.test(k2) && isFinite(n2) && n2 >= 0 && n2 <= 40) atual.aliquotas[k2] = n2; else if (v2 === null) delete atual.aliquotas[k2]; }
+      // Codex #502 (P2, r2): MESMO BUG que já foi corrigido na AMB e na Girassol — campo em BRANCO
+      // chega como `null`, e `Number(null)` é 0, que passa em `isFinite && >=0` ANTES do teste de
+      // null (a ordem antiga testava o range primeiro). O front (r1 desta PR) já manda `null` pro
+      // mês limpo, mas aqui esse `null` nunca chegava a cair no `delete`: o mês continuava salvo,
+      // só que com 0% em vez do valor antigo — "limpar" seguia não limpando de verdade.
+      // O teste de null/vazio vem primeiro aqui; zero explícito também não é aceito (no Simples não existe 0%).
+      if (body.aliquotas && typeof body.aliquotas === 'object') for (const [k2, v2] of Object.entries(body.aliquotas)) {
+        if (!/^\d{4}-\d{2}$/.test(k2)) continue;
+        if (v2 === null || v2 === '' || v2 === undefined) { delete atual.aliquotas[k2]; continue; }
+        const n2 = Number(v2);
+        if (isFinite(n2) && n2 > 0 && n2 <= 40) atual.aliquotas[k2] = n2;
+        else if (isFinite(n2) && n2 === 0) delete atual.aliquotas[k2];   // 0% = campo vazio, não configuração
+      }
       if (body.taxas && typeof body.taxas === 'object') for (const [k2, v2] of Object.entries(body.taxas)) { const n2 = Number(v2); if (isFinite(n2) && n2 >= 0 && n2 <= 50) atual.taxas[String(k2).toLowerCase()] = n2; else if (v2 === null) delete atual.taxas[String(k2).toLowerCase()]; }
       if (body.flex && typeof body.flex === 'object') { atual.flex = atual.flex || {}; for (const [k2, v2] of Object.entries(body.flex)) { const n2 = Number(v2); if ((k2 === 'geral' || k2 === 'shopee') && isFinite(n2) && n2 >= 0 && n2 <= 100) atual.flex[k2] = n2; else if (v2 === null) delete atual.flex[k2]; } }
       writeJson(CFG_FILE, atual);
