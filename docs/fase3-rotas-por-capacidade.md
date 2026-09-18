@@ -22,7 +22,15 @@ funções e deixei os caches; no `historico` quase levei a lógica sem o context
 |---|---:|---|
 | **corpo idêntico** (normalizando o nome da empresa) | ~~18~~ **19** | vão para um registrador comum |
 | **quase idêntico** (≤6 linhas de diferença) | ~~6~~ **7** | ler a diferença: se for config, vira parâmetro |
+<<<<<<< HEAD
 | divergente | ~~21~~ ~~6~~ **4** | classificar antes (três correções de medição em 17/09 — ver a seção no fim) |
+=======
+| divergente (por tamanho) | ~~21~~ ~~6~~ **3** | classificar antes (duas correções de medição em 17/09 — ver a seção no fim) |
+| **divergente por CONTRATO** (mesmo nome, resposta diferente) | **1** | `backfill-status` — GOOD devolve outro contrato, não é a mesma rota (ver a seção no fim) |
+
+19 + 7 + 3 + 1 = **30**, batendo com o total do topo. `backfill-status` não some no meio do
+caminho: ele só não entra na conta de "divergente por tamanho" porque a causa não é tamanho.
+>>>>>>> 9180ea7fa9ada11b8df098f83306e6248481ab61
 
 As idênticas: `/backfill-detalhes`, `/backfill-nf`, `/backfill-valores`, `/buscar-produto`,
 `/indexar-catalogo`, `/indexar-status`, `/liberar`, `/localizacoes-log`, `/ml-sync-fees`,
@@ -89,9 +97,10 @@ o único lugar que diz POR QUE a limpeza foi pulada, e sem ele as duas mostram o
 
 **18 das 19 rotas idênticas já estão em lib — falta a `/status`**, reclassificada em 17/09 (era
 tida como divergente por um erro de medição). Faltam as 7 quase-idênticas (≤6 linhas de
-diferença, cada uma exigindo classificar se é config, capacidade ou regra) e as **3** divergentes
-(o número passou por duas correções de medição no mesmo dia — ver a seção no fim),
-que são o próximo `ciclo.js`.
+diferença, cada uma exigindo classificar se é config, capacidade ou regra), as **3** divergentes
+por tamanho (o número passou por duas correções de medição no mesmo dia — ver a seção no fim) e
+a `/backfill-status`, que diverge por CONTRATO (não por tamanho) e por isso não entra nessa
+conta de três — as quatro juntas são o próximo `ciclo.js`.
 
 ## O critério mudou depois da primeira fatia (P1 do Codex no #480)
 
