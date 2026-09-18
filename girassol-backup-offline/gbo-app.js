@@ -1459,7 +1459,15 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
          A marcação é DELE: ninguém consegue deduzir isso do número. Guardada como lista, não
          como campo dentro da alíquota, pra não mexer no formato que o cálculo já lê. */
       if (Array.isArray(body.apuradas)) {
-        atual.apuradas = body.apuradas.filter(m => /^\d{4}-\d{2}$/.test(m));
+        const novasApuradas = body.apuradas.filter(m => /^\d{4}-\d{2}$/.test(m));
+        // Codex (P2): body.aliquotas sempre traz as 12 chaves do ano que o formulário mostrou
+        // (mesmo mês vazio manda null) — dá pra saber qual ano o dono está editando e preservar
+        // os apurados de anos anteriores, que o formulário nem carrega nem manda de volta.
+        // Sem isto, o primeiro salvamento após a virada do ano apagava as marcações antigas.
+        const chavesAno = (body.aliquotas && typeof body.aliquotas === 'object') ? Object.keys(body.aliquotas) : [];
+        const anoForm = chavesAno.length ? chavesAno[0].slice(0, 4) : null;
+        const apuradasAntigas = Array.isArray(atual.apuradas) ? atual.apuradas : [];
+        atual.apuradas = anoForm ? apuradasAntigas.filter(m => m.slice(0, 4) !== anoForm).concat(novasApuradas) : novasApuradas;
       }
       if (body.taxas && typeof body.taxas === 'object') for (const [k2, v2] of Object.entries(body.taxas)) { const n2 = Number(v2); if (isFinite(n2) && n2 >= 0 && n2 <= 50) atual.taxas[String(k2).toLowerCase()] = n2; else if (v2 === null) delete atual.taxas[String(k2).toLowerCase()]; }
       if (body.flex && typeof body.flex === 'object') { atual.flex = atual.flex || {}; for (const [k2, v2] of Object.entries(body.flex)) { const n2 = Number(v2); if (['ml', 'shopee', 'outros', 'geral'].indexOf(k2) >= 0 && isFinite(n2) && n2 >= 0 && n2 <= 100) atual.flex[k2] = n2; else if (v2 === null) delete atual.flex[k2]; } }
