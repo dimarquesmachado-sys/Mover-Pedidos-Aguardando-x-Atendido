@@ -43,6 +43,17 @@ for (const [emp, arq] of Object.entries(MODULOS)) {
     'continuaria servindo e pareceria que a correção "não pegou"');
 }
 
+/* Codex #506 (P2) — a GOOD checava `Number(v2)` ANTES de checar null. Como `Number(null)`
+   é 0, e 0 passa em `isFinite && n2 >= 0`, o `else if (v2 === null)` nunca era alcançado: um
+   mês limpo no ⚙️ (que manda `null` pra apagar) ficava gravado como 0% em vez de apagado —
+   e zero salvo aparecia de novo como "valor configurado" no próximo carregamento da tela. */
+for (const [emp, arq] of Object.entries(MODULOS)) {
+  const s = fs.readFileSync(path.join(raiz, arq), 'utf8');
+  assert.ok(/v2 === null \|\| v2 === '' \|\| v2 === undefined\) \{ delete atual\.aliquotas\[k2\]; continue; \}/.test(s),
+    emp + ': o `null` (campo limpo/zero) precisa ser tratado ANTES da coerção Number(v2) — ' +
+    'Number(null) é 0 e passa no teste de faixa, deixando o delete inalcançável');
+}
+
 /* a lib é a mesma para as três: ninguém pode ter uma cópia própria do cálculo */
 {
   const lib = fs.readFileSync(path.join(raiz, 'lib', 'imposto-cancelados.js'), 'utf8');

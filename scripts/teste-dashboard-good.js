@@ -143,4 +143,21 @@ for (const [emp, arq] of Object.entries({
     emp + ': /config-fiscal não devolve as alíquotas apuradas — o ⚙️ mostraria campos vazios sem dizer o que vale');
 }
 
+/* 18/09 — ZERO NÃO É ALÍQUOTA. O dono abriu o ⚙️ e viu set-dez com "0" no campo, como se
+   alguém tivesse configurado alíquota zero. O backend já sabe disso desde 19/08 ("mês salvo
+   como 0% era campo em BRANCO gravado por engano") e ignora o zero no cálculo — só a tela é
+   que o exibia, e salvar de novo o REGRAVAVA.
+   Tela dizendo uma coisa e imposto seguindo outra é a classe de erro mais cara deste painel. */
+{
+  const jsZ = /<script>([\s\S]*?)<\/script>/.exec(html)[1];
+
+  /* não EXIBE zero */
+  assert.ok(/salvo!=null&&Number\(salvo\)>0\?salvo:''/.test(jsZ),
+    'o campo mostra "0" como valor configurado — o cálculo ignora esse zero, então a tela mente');
+
+  /* não SALVA zero: manda null, que o servidor apaga */
+  assert.ok(/if\(n === 0\)\{ aliquotas\[k\] = null; continue; \}/.test(jsZ),
+    'zero é enviado como alíquota válida — fica gravado na config sem valer nada no cálculo');
+}
+
 console.log('OK: dashboard da GOOD — a tela existe, o JS compila, e ela só chama rotas que a GOOD responde');
