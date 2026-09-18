@@ -28,6 +28,13 @@ const ALVOS = [
    deveria acompanhar, e alguém contornaria o vermelho. */
 const DIVERGENTES = ['config-fiscal', 'sku-info', 'custo-sync'];
 
+/* backfill-status não divergiu por TAMANHO — a razão de ficar de fora é outra (a lista de
+   exceções do portão da GOOD já a citou por engano, ver o bloco dedicado logo abaixo), mas
+   também não tem extração planejada e precisa continuar declarada nas três, como as acima.
+   Ficou fora de DIVERGENTES pra não confundir com "as três que a nova medição aponta", mas
+   sai do loop de baixo do mesmo jeito — senão amb e girassol perdem essa checagem. */
+const PESADAS = ['backfill-status'];
+
 /* declaração = `if (… p === … ) {` abrindo bloco no fim da linha.
    menção em lista de exceções termina com `||` e não abre bloco. */
 function reDeclaracao(mod, rota) {
@@ -103,7 +110,7 @@ function corpoDaRota(arq, mod, rota) {
    rota foi perdida ou a medição quebrou. Ao contrário de um piso fixo sobre o total de rotas
    comuns, isto sobrevive à extração planejada das quase-idênticas sem falhar o CI. */
 const conjuntos = ALVOS.map(([arq, mod]) => declaradas(arq, mod));
-for (const rota of DIVERGENTES) {
+for (const rota of [...DIVERGENTES, ...PESADAS]) {
   ALVOS.forEach(([arq], i) => {
     assert.ok(conjuntos[i].has(rota),
       arq + ': /' + rota + ' não aparece mais como declaração — rota sumiu ou a medição quebrou');

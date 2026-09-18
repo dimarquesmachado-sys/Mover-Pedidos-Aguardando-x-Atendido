@@ -20,17 +20,17 @@ funções e deixei os caches; no `historico` quase levei a lógica sem o context
 
 | grupo | quantas | o que fazer |
 |---|---:|---|
-| **corpo idêntico** (normalizando o nome da empresa) | **18** | vão para um registrador comum |
-| **quase idêntico** (≤6 linhas de diferença) | **6** | ler a diferença: se for config, vira parâmetro |
+| **corpo idêntico** (normalizando o nome da empresa) | ~~18~~ **19** | vão para um registrador comum |
+| **quase idêntico** (≤6 linhas de diferença) | ~~6~~ **7** | ler a diferença: se for config, vira parâmetro |
 | divergente | ~~21~~ ~~6~~ **3** | classificar antes (duas correções de medição em 17/09 — ver a seção no fim) |
 
 As idênticas: `/backfill-detalhes`, `/backfill-nf`, `/backfill-valores`, `/buscar-produto`,
 `/indexar-catalogo`, `/indexar-status`, `/liberar`, `/localizacoes-log`, `/ml-sync-fees`,
 `/nf-anexar`, `/reservar`, `/run`, `/salvar-localizacao`, `/separacao`,
-`/separacao-por-pedido`, `/shopee-sessao`, `/sincronizar` e mais uma.
+`/separacao-por-pedido`, `/shopee-sessao`, `/sincronizar`, `/status` e mais uma.
 
 As quase-idênticas, com a distância: `/backfill-nf-auto` (4), `/ciclo-agora` (4),
-`/conferido` (3), `/ir-shopee` (2), `/lista` (2), `/ml-fee` (4).
+`/conferido` (3), `/ir-shopee` (2), `/lista` (2), `/ml-fee` (4), `/etiqueta-anexar` (4).
 
 ## Feito até agora
 
@@ -82,7 +82,8 @@ está tudo bem. Portar o CÁLCULO da reconciliação para a AMB e a GOOD fica co
 o único lugar que diz POR QUE a limpeza foi pulada, e sem ele as duas mostram o sintoma
 (pedido despachado preso como "sem etiqueta", 13/08) sem a causa.
 
-**As 18 rotas idênticas estão todas em lib.** Faltam as 6 quase-idênticas (≤6 linhas de
+**18 das 19 rotas idênticas já estão em lib — falta a `/status`**, reclassificada em 17/09 (era
+tida como divergente por um erro de medição). Faltam as 7 quase-idênticas (≤6 linhas de
 diferença, cada uma exigindo classificar se é config, capacidade ou regra) e as **3** divergentes
 (o número passou por duas correções de medição no mesmo dia — ver a seção no fim),
 que são o próximo `ciclo.js`.
