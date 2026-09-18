@@ -1436,7 +1436,7 @@ function routes(readBody) {
    doze campos vazios e o dono não tem como saber qual alíquota está valendo: vazio ali
    significa "usa a tabela", e a tabela ele não vê. Campo em branco que esconde um valor
    ativo é a mesma armadilha do card sem origem. */
-if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, config: readJson(CFG_FILE, { aliquotas: {}, taxas: {} }) }); return true; }
+if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, apurados_meses: ALIQ_APURADOS, config: readJson(CFG_FILE, { aliquotas: {}, taxas: {} }) }); return true; }
       let body = {}; try { const _rb = await readBody(req); body = (_rb && typeof _rb === 'object') ? _rb : JSON.parse(_rb || '{}'); } catch (e) {}   // tolerante: lib/http passou a devolver objeto ja parseado
       const atual = readJson(CFG_FILE, { aliquotas: {}, taxas: {} });
       const _aliqAntes = Object.assign({}, atual.aliquotas || {});   // 01/08: p/ saber o que mudou
@@ -4080,6 +4080,14 @@ const supaCount = (empresa, filtro)            => _supa.count(empresa, filtro);
 // ─── BACKFILL do histórico de vendas pro Supabase ────────────────────────────────────────────
 // 19/08 — julho FECHOU em 14,4007% (era 14,1 de estimativa) e agosto fica pré-definido em 15%.
 // Os meses seguintes seguem 15% como palpite até cada apuração sair. O ⚙️ sempre tem prioridade.
+/* 18/09 — QUAIS MESES SÃO APURADOS E QUAIS SÃO ESTIMATIVA. O comentário acima sempre disse
+   isso em prosa, mas o código não distinguia: a tabela era uma lista de números iguais, e a
+   tela nova da GOOD (que diz "apurada" ao lado de cada mês) chamaria ESTIMATIVA de apurada se
+   fosse portada assim. Chamar palpite de dado apurado é a mentira mais cara que esta tela
+   poderia contar — o dono confere o DAS por cima de um número que ele acha conferido.
+   O ritual dele é mensal: estima o mês, e por volta do dia 20 a contabilidade manda a
+   apuração; é aí que o valor certo entra pelo ⚙️. Esta lista é o que separa um do outro. */
+const ALIQ_APURADOS = ['2026-01', '2026-02', '2026-03', '2026-04', '2026-05', '2026-06', '2026-07'];
 const DEFAULT_ALIQ_BK = { '2026-01':11.409280, '2026-02':11.3254, '2026-03':12.3402, '2026-04':13.6001, '2026-05':13.9149, '2026-06':14.056, '2026-07':14.4007, '2026-08':15, '2026-09':15, '2026-10':15, '2026-11':15, '2026-12':15 };
 // ─── 19/08: destravar o padrão novo de julho ────────────────────────────────────
 // Codex (P2): o ⚙️ preenche cada campo com o valor de fábrica em cinza e o salvamento envia TODOS

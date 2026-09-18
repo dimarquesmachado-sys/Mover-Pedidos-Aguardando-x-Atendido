@@ -1580,7 +1580,7 @@ function routes(readBody) {
    doze campos vazios e o dono não tem como saber qual alíquota está valendo: vazio ali
    significa "usa a tabela", e a tabela ele não vê. Campo em branco que esconde um valor
    ativo é a mesma armadilha do card sem origem. */
-if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, config: readJson(CFG_FILE, { aliquotas: {}, taxas: {} }) }); return true; }
+if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, apurados_meses: ALIQ_APURADOS, config: readJson(CFG_FILE, { aliquotas: {}, taxas: {} }) }); return true; }
       let body = {}; try { const _rb = await readBody(req); body = (_rb && typeof _rb === 'object') ? _rb : JSON.parse(_rb || '{}'); } catch (e) {}   // tolerante: lib/http passou a devolver objeto ja parseado
       const atual = readJson(CFG_FILE, { aliquotas: {}, taxas: {} });
       const _aliqAntes = Object.assign({}, atual.aliquotas || {});   // 01/08: p/ saber o que mudou
@@ -5827,6 +5827,14 @@ async function cacaMagaluCron() {
 //   jun: 6,0414% (DAS 07.20.26195.0275043-6 sobre 167.947,46)
 //   jul/ago: ESTIMATIVAS pela curva do RBT12p com maio retificado (jul ~8,58 · ago ~8,82) —
 //   confirmar quando os DAS saírem e ajustar no ⚙️ (ou aqui) + reaplicar-imposto.
+/* 18/09 — QUAIS MESES SÃO APURADOS E QUAIS SÃO ESTIMATIVA. O comentário acima sempre disse
+   isso em prosa, mas o código não distinguia: a tabela era uma lista de números iguais, e a
+   tela nova da GOOD (que diz "apurada" ao lado de cada mês) chamaria ESTIMATIVA de apurada se
+   fosse portada assim. Chamar palpite de dado apurado é a mentira mais cara que esta tela
+   poderia contar — o dono confere o DAS por cima de um número que ele acha conferido.
+   O ritual dele é mensal: estima o mês, e por volta do dia 20 a contabilidade manda a
+   apuração; é aí que o valor certo entra pelo ⚙️. Esta lista é o que separa um do outro. */
+const ALIQ_APURADOS = ['2026-01', '2026-02', '2026-03', '2026-04', '2026-05', '2026-06'];
 const DEFAULT_ALIQ_BK = { '2026-01':4.0, '2026-02':4.0, '2026-03':4.0, '2026-04':4.0, '2026-05':5.2792, '2026-06':6.0414, '2026-07':8.58, '2026-08':8.82, '2026-09':8.82, '2026-10':8.82, '2026-11':8.82, '2026-12':8.82 };
 let _reparoAtivo = false;  // trava do sku-repara — backfill e caça checam antes de começar
 const _histCache = {};   // agregados do Supabase por período (10 min)
