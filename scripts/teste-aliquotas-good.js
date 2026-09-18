@@ -43,8 +43,10 @@ for (const [mes, valor] of Object.entries(ESPERADO)) {
    alíquota, porque apurar exige o mês terminado. Escrita assim, ela vale sozinha no ano que
    vem. */
 {
-  const agora = new Date();
-  const mesCorrente = agora.getUTCFullYear() + '-' + String(agora.getUTCMonth() + 1).padStart(2, '0');
+  /* mês fecha pelo relógio de São Paulo, não pelo UTC: nas últimas 3h de cada mês em BRT
+     (21h–23h59), o UTC já virou o mês seguinte, e getUTCMonth() liberaria um valor estimado
+     pro mês local ainda em aberto — o dashboard usa o mesmo fuso pra essa conta. */
+  const mesCorrente = new Date().toLocaleString('sv-SE', { timeZone: 'America/Sao_Paulo' }).slice(0, 7);
   for (const mes of Object.keys(tabela)) {
     assert.ok(mes < mesCorrente,
       'a tabela tem alíquota para ' + mes + ', que ainda não fechou — imposto estimado vira ' +
@@ -73,8 +75,10 @@ for (const [mes, valor] of Object.entries(ESPERADO)) {
   assert.strictEqual(escolher({}, tabela)('2026-03'), 13.2889,
     'sem valor no painel, o cálculo tem que usar a alíquota apurada');
 
-  /* mês não apurado: nem painel nem tabela → null, e o chamador cai no padrão */
-  assert.strictEqual(escolher({}, tabela)('2026-09'), null,
+  /* mês não apurado: nem painel nem tabela → null, e o chamador cai no padrão.
+     Tabela sintética isolada (não a "tabela" real, que ganha um mês novo a cada apuração) —
+     senão este teste voltaria a ficar preso a um mês fixo que um dia é apurado de verdade. */
+  assert.strictEqual(escolher({}, { '2026-03': 13.2889 })('2099-12'), null,
     'mês sem alíquota apurada tem que devolver null em vez de inventar um número');
 
   /* 0% no painel é campo em branco gravado por engano, não alíquota (regra de 19/08) */
