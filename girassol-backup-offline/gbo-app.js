@@ -1451,6 +1451,16 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
         if (isFinite(n2) && n2 > 0 && n2 <= 40) atual.aliquotas[k2] = n2;
         else if (isFinite(n2) && n2 === 0) delete atual.aliquotas[k2];   // 0% = campo vazio, não configuração
       }
+      /* 18/09 — QUAL MÊS JÁ FOI APURADO, dito pelo dono. O ritual dele: estima o mês e, por
+         volta do dia 20, a contabilidade manda a apuração. Depois de salvo, a tela não
+         distinguia uma coisa da outra — agosto apurado e setembro estimado apareciam iguais
+         como "salva aqui", e ele não tinha como saber, olhando três empresas, quais ainda
+         faltavam trocar.
+         A marcação é DELE: ninguém consegue deduzir isso do número. Guardada como lista, não
+         como campo dentro da alíquota, pra não mexer no formato que o cálculo já lê. */
+      if (Array.isArray(body.apuradas)) {
+        atual.apuradas = body.apuradas.filter(m => /^\d{4}-\d{2}$/.test(m));
+      }
       if (body.taxas && typeof body.taxas === 'object') for (const [k2, v2] of Object.entries(body.taxas)) { const n2 = Number(v2); if (isFinite(n2) && n2 >= 0 && n2 <= 50) atual.taxas[String(k2).toLowerCase()] = n2; else if (v2 === null) delete atual.taxas[String(k2).toLowerCase()]; }
       if (body.flex && typeof body.flex === 'object') { atual.flex = atual.flex || {}; for (const [k2, v2] of Object.entries(body.flex)) { const n2 = Number(v2); if (['ml', 'shopee', 'outros', 'geral'].indexOf(k2) >= 0 && isFinite(n2) && n2 >= 0 && n2 <= 100) atual.flex[k2] = n2; else if (v2 === null) delete atual.flex[k2]; } }
       // 05/08 (b115): CIÊNCIA da alíquota herdada. Quando um mês não tem alíquota própria

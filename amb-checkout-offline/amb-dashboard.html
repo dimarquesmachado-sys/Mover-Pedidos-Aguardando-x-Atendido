@@ -404,7 +404,7 @@ const MOD = '/amb-checkout-offline';
     return _f(u, o);
   };
 })();
-const DASH_BUILD = 'a37';
+const DASH_BUILD = 'a38';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -2720,6 +2720,12 @@ function renderCfg(){
     '<div style="font-size:12px;color:var(--mut);margin-bottom:6px">📅 Alíquota do Simples por mês (%) — os 12 meses de '+hojeSP().slice(0,4)+' · valores em cinza = de fábrica (edite e salve p/ sobrepor; o cálculo recalcula sozinho)</div>'+
     '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px 14px">'+ mesesAno().map(m=>{
       const NM=['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'][Number(m.slice(5,7))-1];
+      const APURADAS = new Set(CFG.apuradas || []);
+      /* 18/09 — o aviso que faz do ⚙️ a lista de pendências do dia 20: meses COM valor salvo
+         que ainda NÃO foram marcados como apurados. Mês sem valor não entra — não há o que
+         trocar nele. */
+      window._aliqEstimadas = Object.keys(CFG.aliquotas || {})
+        .filter(mm => Number(CFG.aliquotas[mm]) > 0 && !APURADAS.has(mm)).sort();
       const salvo = CFG.aliquotas[m], padrao = (typeof DEFAULT_ALIQ!=='undefined' && DEFAULT_ALIQ[m]!=null)? DEFAULT_ALIQ[m] : null;
       const val = salvo!=null? salvo : (padrao!=null? padrao : '');
       return '<label style="font-size:12px;color:var(--mut);display:flex;align-items:center;gap:6px;justify-content:space-between"><b style="min-width:56px">'+NM+'/'+m.slice(2,4)+'</b>'+
@@ -2731,9 +2737,24 @@ function renderCfg(){
        gravada no painel VENCE a tabela do código depois, quando a apuração chegar.
        O dono viu isso: set-dez estavam cinza, ele salvou agosto, e os quatro viraram config. */
     (salvo==null&&padrao!=null?' data-fabrica="1"':'')+
-    ' title="'+(salvo!=null?'valor salvo por você':(padrao!=null?'de fábrica ('+padrao+'%) — edite p/ sobrepor':'sem alíquota'))+'"></label>';
+    ' title="'+(salvo!=null?'valor salvo por você':(padrao!=null?'de fábrica ('+padrao+'%) — edite p/ sobrepor':'sem alíquota'))+'">'+
+    /* 18/09 — a marcação de APURADA é do dono: ninguém deduz isso do número. Sem ela, um mês
+       estimado e um apurado ficam idênticos depois de salvos ("salva aqui" nos dois), e ele não
+       tem como saber quais faltam trocar quando a contabilidade manda a apuração — que é
+       exatamente o trabalho dele por volta do dia 20, nas três empresas. */
+    '<label style="font-size:11px;color:var(--mut);display:flex;align-items:center;gap:3px;margin-left:4px" '+
+    'title="marque quando o valor vier da apuração da contabilidade; sem marca, é estimativa">'+
+    '<input type="checkbox" data-apurada="'+m+'"'+(APURADAS.has(m)?' checked':'')+'> apurada</label>'+
+    '</label>';
     }).join('')+'</div>'+
     (_aliqHerdadas.size ? '<div class="aviso" style="margin:10px 0">\u26a0\ufe0f M\u00eas sem al\u00edquota pr\u00f3pria usando a de outro m\u00eas: '+
+    /* 18/09 — a lista de pendências do dia 20: o que está salvo mas ainda é ESTIMATIVA. Sem
+       isto, o dono precisa lembrar de cor quais meses trocou em cada uma das três empresas. */
+    ((window._aliqEstimadas && window._aliqEstimadas.length)
+      ? '<div class="aviso" style="margin:10px 0">\u26a0\ufe0f Ainda como <b>estimativa</b>: ' +
+        window._aliqEstimadas.join(', ') +
+        ' \u2014 marque <b>apurada</b> quando a contabilidade mandar o valor do m\u00eas.</div>'
+      : '') +
        Array.from(_aliqHerdadas).map(x=>x.split('\u2190')[0]+' \u2190 '+x.split('\u2190')[1]).join(' \u00b7 ')+
        '. Preencha o valor certo aqui embaixo \u2014 sen\u00e3o o imposto sai aproximado.</div>' : '')+
     '<div style="font-size:12px;color:var(--mut);margin:14px 0 6px">🏪 Tarifa por canal (% sobre produtos) — estimativa p/ o agregado; na busca, ML usa a REAL. <b>Deixar 0 = n\u00e3o configurado</b> (o pedido sem comiss\u00e3o real fica fora da margem, em vez de entrar com tarifa zero e inflar o lucro)</div>'+
@@ -2778,11 +2799,16 @@ async function salvarCfg(){
       const deFabrica = i.dataset.fabrica === '1' && String(i.value) === String(i.defaultValue);
       aliquotas[i.dataset.aliq] = (i.value === '' || deFabrica) ? null : Number(i.value);
     });
+    /* só marca como apurado o mês que TEM valor salvo: marcar um mês vazio prometeria uma
+       apuração que não existe. */
+    const apuradas = [...document.querySelectorAll('[data-apurada]')]
+      .filter(c => c.checked && aliquotas[c.dataset.apurada] != null)
+      .map(c => c.dataset.apurada);
   document.querySelectorAll('[data-taxa]').forEach(i=>{ taxas[i.dataset.taxa] = i.value===''?null:Number(i.value); });
   const flex={}; document.querySelectorAll('[data-flex]').forEach(i=>{ flex[i.dataset.flex] = i.value===''?null:Number(i.value); });
   const msg=$('cfgMsg'); msg.textContent='salvando…';
   try{
-    const r = await fetch(MOD+'/config-fiscal',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({aliquotas,taxas,flex})});
+    const r = await fetch(MOD+'/config-fiscal',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({aliquotas,taxas,flex,apuradas})});
     const d = await r.json();
     // nível de desconto do frete Magalu — salvo na sua própria rota (não é config fiscal)
     const magSel = $('magNivelSel');
