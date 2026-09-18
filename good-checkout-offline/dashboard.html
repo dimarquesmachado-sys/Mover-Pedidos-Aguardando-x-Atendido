@@ -853,6 +853,11 @@ async function salvarConfig(){
     // Codex (P2): mês limpo manda `null` explícito — o servidor só APAGA a alíquota salva
     // quando recebe null; omitir a chave (como antes) fazia ele manter o valor antigo, ao
     // contrário do que o placeholder promete ("vazio = usa a tabela do código").
+    /* 18/09 — o mesmo princípio da AMB e da Girassol: campo que está apenas EXIBINDO a
+       alíquota apurada do código não pode virar config ao salvar. Aqui o campo já nasce vazio
+       quando não há valor salvo (o valor apurado aparece ao lado, não dentro), então este
+       ramo do vazio já resolve — o comentário fica pra quem mexer depois não "melhorar" isso
+       preenchendo o campo com o valor de fábrica. */
     if(vTxt === ''){ aliquotas[k] = null; continue; }
     const n = Number(vTxt);
     // Codex (P2): valida ANTES de mandar — o servidor aceita só 0–40 e ignora em silêncio
