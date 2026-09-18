@@ -54,6 +54,45 @@ function declaradas(arq, mod) {
   return out;
 }
 
+/* Codex #501 (P2, r4): contar chave por CARACTERE CRU confunde código com comentário e string —
+   um `}` dentro de uma mensagem de erro ou de um comentário explicando o próprio código fechava
+   o bloco cedo demais, e o que viesse depois (a diferença de verdade) nunca era comparado.
+   `paraContagem` devolve a linha sem o CONTEÚDO de comentário (bloco ou linha) e de string
+   simples/dupla — só o que sobra conta como chave de código. As linhas ORIGINAIS continuam
+   sendo o que `corpoDaRota` devolve; só a contagem que ignora esse texto.
+   Não cobre template literal com `${}` nem regex — isso pediria um parser de verdade, e o
+   arquivo já documenta abaixo (POR QUE ESTE TESTE NÃO GENERALIZA) que um heurístico que erra
+   feio é pior que nenhum. Hoje nenhuma das rotas que passam por aqui (status, saude,
+   backfill-status) usa template ou regex com chave no corpo — se um dia usar, o teste do
+   tamanho/conteúdo abaixo vai denunciar. */
+function paraContagem(linha, jaEmComentarioBloco) {
+  let limpa = '';
+  let emBloco = jaEmComentarioBloco;
+  let i = 0;
+  while (i < linha.length) {
+    if (emBloco) {
+      const fim = linha.indexOf('*/', i);
+      if (fim === -1) { i = linha.length; break; }
+      emBloco = false;
+      i = fim + 2;
+      continue;
+    }
+    const ch = linha[i];
+    const prox = linha[i + 1];
+    if (ch === '/' && prox === '*') { emBloco = true; i += 2; continue; }
+    if (ch === '/' && prox === '/') break;   // resto da linha é comentário de linha
+    if (ch === "'" || ch === '"') {
+      let j = i + 1;
+      while (j < linha.length && linha[j] !== ch) { if (linha[j] === '\\') j++; j++; }
+      i = j + 1;
+      continue;
+    }
+    limpa += ch;
+    i++;
+  }
+  return { limpa, emBloco };
+}
+
 /* extrai o CORPO da rota a partir da linha de DECLARAÇÃO (nunca da primeira menção), contando
    chaves até fechar no mesmo nível — é exatamente o passo que a medição original pulou */
 function corpoDaRota(arq, mod, rota) {
@@ -63,8 +102,11 @@ function corpoDaRota(arq, mod, rota) {
   assert.ok(inicio >= 0, arq + ': declaração de /' + rota + ' não encontrada');
   let prof = 0;
   let fim = -1;
+  let emComentarioBloco = false;
   for (let i = inicio; i < linhas.length && fim < 0; i++) {
-    for (const ch of linhas[i]) {
+    const { limpa, emBloco } = paraContagem(linhas[i], emComentarioBloco);
+    emComentarioBloco = emBloco;
+    for (const ch of limpa) {
       if (ch === '{') prof++;
       else if (ch === '}') { prof--; if (prof === 0) { fim = i; break; } }
     }
