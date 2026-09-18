@@ -20,17 +20,26 @@ funções e deixei os caches; no `historico` quase levei a lógica sem o context
 
 | grupo | quantas | o que fazer |
 |---|---:|---|
-| **corpo idêntico** (normalizando o nome da empresa) | **18** | vão para um registrador comum |
-| **quase idêntico** (≤6 linhas de diferença) | **6** | ler a diferença: se for config, vira parâmetro |
-| divergente | 6 | classificar antes, como foi feito com o `ciclo.js` |
+| **corpo idêntico** (normalizando o nome da empresa) | ~~18~~ **19** | vão para um registrador comum |
+| **quase idêntico** (≤6 linhas de diferença) | ~~6~~ **7** | ler a diferença: se for config, vira parâmetro |
+| divergente (por tamanho) | ~~21~~ ~~6~~ **3** | classificar antes (duas correções de medição em 17/09 — ver a seção no fim) |
+| **divergente por CONTRATO** (mesmo nome, resposta diferente) | **1** | `backfill-status` — GOOD devolve outro contrato, não é a mesma rota (ver a seção no fim) |
+
+19 + 7 + 3 + 1 = **30**, batendo com o total do topo. `backfill-status` não some no meio do
+caminho: ele só não entra na conta de "divergente por tamanho" porque a causa não é tamanho.
 
 As idênticas: `/backfill-detalhes`, `/backfill-nf`, `/backfill-valores`, `/buscar-produto`,
 `/indexar-catalogo`, `/indexar-status`, `/liberar`, `/localizacoes-log`, `/ml-sync-fees`,
 `/nf-anexar`, `/reservar`, `/run`, `/salvar-localizacao`, `/separacao`,
-`/separacao-por-pedido`, `/shopee-sessao`, `/sincronizar` e mais uma.
+`/separacao-por-pedido`, `/shopee-sessao`, `/sincronizar`, `/status` e `/saude`.
+
+> **19 + 7 + 4 = 30**, que fecha com o total acima. O `/backfill-status` conta como divergente
+> mesmo tendo só 4 linhas de diferença: o que diverge nele é o **contrato de resposta** — a AMB
+> e a Girassol devolvem `{ ok, status, ano }`, a GOOD devolve o estado do backfill de vendas
+> dela. Mesmo nome, propósitos diferentes; extrair juntaria dois contratos num só.
 
 As quase-idênticas, com a distância: `/backfill-nf-auto` (4), `/ciclo-agora` (4),
-`/conferido` (3), `/ir-shopee` (2), `/lista` (2), `/ml-fee` (4).
+`/conferido` (3), `/ir-shopee` (2), `/lista` (2), `/ml-fee` (4), `/etiqueta-anexar` (4).
 
 ## Feito até agora
 
@@ -82,9 +91,12 @@ está tudo bem. Portar o CÁLCULO da reconciliação para a AMB e a GOOD fica co
 o único lugar que diz POR QUE a limpeza foi pulada, e sem ele as duas mostram o sintoma
 (pedido despachado preso como "sem etiqueta", 13/08) sem a causa.
 
-**As 18 rotas idênticas estão todas em lib.** Faltam as 6 quase-idênticas (≤6 linhas de
-diferença, cada uma exigindo classificar se é config, capacidade ou regra) e as 6 divergentes,
-que são o próximo `ciclo.js`.
+**17 das 19 rotas idênticas já estão em lib — faltam `/status` e `/saude`**, ambas reclassificadas
+em 17/09 (eram tidas como divergente e quase-idêntica, respectivamente, por erro de medição).
+Faltam as 7 quase-idênticas (≤6 linhas de diferença, cada uma exigindo classificar se é config,
+capacidade ou regra), as **3** divergentes por tamanho (o número passou por duas correções de
+medição no mesmo dia — ver a seção no fim) e a `/backfill-status`, que diverge por CONTRATO (não
+por tamanho) e por isso não entra nessa conta de três — as quatro juntas são o próximo `ciclo.js`.
 
 ## O critério mudou depois da primeira fatia (P1 do Codex no #480)
 
@@ -137,8 +149,33 @@ indentação):
 | rotas comuns às três | 24 |
 | **divergentes (>6 linhas)** | **6** |
 
-As seis: `status` (59), `config-fiscal` (35), `sku-info` (26), `etiqueta-anexar` (25),
-`custo-sync` (21), `backfill-status` (7).
+### 17/09 — a conta caiu de novo: são TRÊS, não seis
+
+A medição de 493 contava a declaração certa, mas delimitava o CORPO por indentação. Onde a
+rota tem bloco aninhado fechando na mesma coluna, ela engolia o que vinha depois — na GOOD, a
+`/status` (20 linhas) aparecia com 59 de diferença porque o extrator levava junto a `/saude`
+inteira, que as três têm.
+
+Contando CHAVES (o jeito que o `teste-medicao-rotas.js` já usa desde o conserto do Codex):
+
+| rota | linhas | difer | |
+|---|---:|---:|---|
+| `status` | 20 | **0** | idêntica |
+| `etiqueta-anexar` | 50 | **4** | quase idêntica |
+| `saude` | 30 | **0** | idêntica (era "2" — ver abaixo) |
+| `config-fiscal` | 45 | 49 | divergente |
+| `sku-info` | 94 | 24 | divergente |
+| `custo-sync` | 33 | 21 | divergente |
+
+A `/saude` aparecia com 2 de diferença por um terceiro erro de medição, menor e do mesmo tipo:
+o normalizador trocava `AMBBKP` por marcador com `\b` nas duas pontas, então **`AMBBKP_SYNC_ON`
+ficava intacto** — o nome da env dentro de uma string de aviso parecia divergência de código.
+Eu ia até dar uma folga à Girassol achando que era o app de Expedição dela. Não era.
+
+**Três correções de medição no mesmo dia, e as três pra menos.** A lição que fica escrita: para
+delimitar bloco em JavaScript, contar chaves — indentação é convenção, não estrutura, e um
+medidor frouxo infla o trabalho e esconde o risco (na primeira correção, ele teria feito mover
+a trava de sessão).
 
 A lição vale além desta fase: **medição frouxa infla o trabalho e esconde o risco**. Aqui ela
 teria feito alguém mover a guarda de autenticação achando que era uma rota de status.
