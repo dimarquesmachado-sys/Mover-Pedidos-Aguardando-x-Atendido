@@ -626,6 +626,9 @@ function legendaImposto(t, fat, imp){
   /* período com meses de origens diferentes: dizer quais caíram no padrão, que é o que o dono
      precisa corrigir — os outros estão certos e não pedem ação */
   const semApurar = meses.filter(m => orig[m].fonte === 'padrao');
+  // Codex (P2): painel+apurada misturados também caem aqui (fontes.length>1), mas nenhum mês
+  // é padrão — sem este corte o card gritava "⚠️ padrão em " sem citar mês nenhum.
+  if(!semApurar.length) return base + ' · alíquotas de fontes diferentes por mês';
   return base + ' · ⚠️ padrão em ' + semApurar.join(', ');
 }
 
@@ -648,12 +651,16 @@ function pintarAvisos(t){
 async function avisarOndeTemDado(){
   /* pergunta o ANO inteiro: se houver dado em qualquer mês, mostra quais — é a informação que
      transforma "não há vendas" em "não há vendas NESTE período". */
+  const meu = SEQ_CARDS;   // Codex (P2): se o período mudar antes desta resposta chegar, esta
+                            // busca (que nem passa por SEQ_CARDS no fetch principal) não pode
+                            // sobrescrever o aviso do período que o dono já está vendo agora
   const ano = new Date().getFullYear();
   let d = null;
   try {
     const r = await fetch(MOD+'/historico-longo?de='+ano+'-01-01&ate='+ano+'-12-31', {credentials:'same-origin'});
     d = await r.json().catch(()=>null);
   } catch(e){ return; }
+  if(meu !== SEQ_CARDS) return;
   if(!(d && d.ok && d.dias)) return;
   const meses = [...new Set(Object.keys(d.dias).map(x => x.slice(0,7)))].sort();
   if(!meses.length) return;
@@ -779,13 +786,26 @@ async function abrirConfig(){
     const r = await fetch(MOD+'/config-fiscal', {credentials:'same-origin'});
     d = await r.json().catch(()=>null);
   } catch(e){ d = null; }
-  const aliq = (d && d.ok && d.config && d.config.aliquotas) || {};
+  if(!(d && d.ok)){
+    // Codex (P2): erro (ou sessão de admin expirada) não pode virar tabela vazia — vazio aqui
+    // é lido como "usa o padrão do código", e o modal chegava a anunciar "15% · padrão —
+    // falta apurar" pra meses passados sem ter carregado configuração nenhuma.
+    const motivo = (d && d.erro) ? esc(d.erro) : 'não consegui falar com o servidor';
+    document.getElementById('camposAliq').innerHTML =
+      '<div class="aviso">Não consegui carregar as alíquotas: <b>'+motivo+'</b>.</div>';
+    return;
+  }
+  const aliq = (d.config && d.config.aliquotas) || {};
   /* 18/09 — o ⚙️ mostrava doze campos vazios, e vazio ali significa "usa a tabela do código" —
      tabela que o dono não vê. Ele não tinha como saber qual alíquota estava valendo em cada
      mês. Agora a rota devolve as APURADAS e cada linha diz o que vale hoje e de onde vem. */
-  const apuradas = (d && d.ok && d.apuradas) || {};
-  const ano = new Date().getFullYear();
-  const hoje = new Date().toISOString().slice(0,7);
+  const apuradas = d.apuradas || {};
+  // Codex (P2): toISOString() é UTC puro — na última noite do mês em SP (UTC já virou dia 1
+  // do mês seguinte) isto classificava o mês corrente como fechado e inventava um "falta
+  // apurar" falso. hojeSP() é o relógio de SP que o resto da tela já usa (linha ~521).
+  const hojeStr = hojeSP();
+  const ano = hojeStr.slice(0,4);
+  const hoje = hojeStr.slice(0,7);
   let html = '';
   for(let m=1; m<=12; m++){
     const k = ano+'-'+String(m).padStart(2,'0');
@@ -813,7 +833,10 @@ async function abrirConfig(){
 function fecharConfig(){ document.getElementById('modalConfig').style.display = 'none'; }
 
 async function salvarConfig(){
-  const ano = new Date().getFullYear();
+  // precisa ser o MESMO ano que abrirConfig() usou pra nomear os campos ('aliq_'+k) — se um
+  // usar hojeSP() e o outro o relógio local do navegador, os dois podem divergir bem na virada
+  // do ano e o document.getElementById('aliq_'+k) abaixo vira null.
+  const ano = hojeSP().slice(0,4);
   const aliquotas = {};
   const invalidos = [];
   for(let m=1; m<=12; m++){
@@ -848,6 +871,9 @@ async function salvarConfig(){
     }
     document.getElementById('msgConfig').innerHTML =
       'salvo — os meses alterados estão sendo <b>recalculados no histórico</b>.';
+    // Codex (P2): sem isto os rótulos "· apurada"/"· salva aqui" ficavam com a origem de ANTES
+    // de salvar — o campo já mostrava o valor novo, mas o rótulo ao lado dizia a fonte antiga.
+    abrirConfig();
     setTimeout(recarregar, 1500);
   } catch(e){ document.getElementById('msgConfig').textContent = 'não consegui salvar.'; }
 }
