@@ -395,6 +395,47 @@
     .tw table{min-width:560px}
   }
 
+  /* ══════════════ MARCAÇÃO PRÓPRIA DESTA TELA ══════════════
+     17/09 — a tela nasceu MENOR que a da AMB/Girassol de propósito (ver comentário no topo do
+     arquivo), com marcação mais simples (.card, .bloco, .campo…) em vez de reaproveitar os
+     componentes grandes (.kpi, .sec, .hdr…) que o resto deste bloco de estilo define. Essas
+     classes nunca ganharam regra própria: a página inteira renderizava sem nenhum estilo — o
+     bug raiz por trás do modal "sumido" e da tabela sem rolagem que o Codex apontou. */
+  header.top{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;padding:6px 0 14px}
+  .marca{display:flex;align-items:center;gap:8px}
+  .marca .logo{width:30px;height:30px;border-radius:9px;background:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:19px}
+  .build{font-size:10px;font-weight:700;color:var(--dim);border:1px solid var(--line);border-radius:5px;padding:1px 6px;letter-spacing:.05em}
+  .acoes{display:flex;gap:8px;flex-wrap:wrap}
+  nav.periodos{display:flex;gap:6px;flex-wrap:wrap;margin:4px 0}
+  .periodos .per{background:var(--card);border:1px solid var(--line);color:var(--mut);border-radius:999px;
+        padding:7px 15px;font-size:12.5px;font-weight:600;cursor:pointer;transition:all .15s}
+  .periodos .per:hover{border-color:var(--line2);color:var(--tx)}
+  .periodos .per.on{border-color:var(--ac);color:#fff;background:linear-gradient(135deg,#1e2650,#232d5e);box-shadow:0 0 0 1px var(--ac) inset}
+  section.cards{display:flex;flex-wrap:wrap;gap:12px;margin:14px 0}
+  .card{background:linear-gradient(160deg,var(--card2),var(--card));border:1px solid var(--line);border-radius:var(--r);
+        flex:1 1 150px;min-width:146px;padding:14px 16px}
+  .card-tit{font-size:11px;color:var(--mut);font-weight:600;letter-spacing:.02em}
+  .card-val{font-size:21px;font-weight:800;letter-spacing:-.02em;margin-top:3px;font-variant-numeric:tabular-nums}
+  .card-sub{font-size:10.5px;color:var(--dim);margin-top:2px}
+  .bloco{background:linear-gradient(170deg,var(--card2),var(--card));border:1px solid var(--line);border-radius:var(--r);
+        padding:18px;margin:14px 0}
+  .bloco h2{font-size:14px;font-weight:800;margin:0 0 10px;letter-spacing:-.01em}
+  .campo{background:var(--card);border:1px solid var(--line);color:var(--tx);border-radius:9px;
+        padding:9px 12px;font-size:13px;width:100%;max-width:420px}
+  .campo.mini{max-width:110px;padding:7px 9px}
+  .paginacao{display:flex;align-items:center;gap:10px;margin-top:12px}
+  .linhaCfg{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:6px 0;font-size:12.5px}
+  .qtd{color:var(--ac2)}
+  /* Codex P1: o modal ficava fora da tela (sem overlay fixo, entrava no fluxo normal do documento) */
+  .modal{position:fixed;inset:0;background:rgba(5,8,16,.72);z-index:80;align-items:center;justify-content:center;padding:16px}
+  .modal-corpo{background:var(--card2);border:1px solid var(--line);border-radius:var(--r);padding:20px;
+        max-width:480px;width:100%;max-height:86vh;overflow:auto}
+  @media(max-width:720px){
+    section.cards{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+    .card{min-width:0;padding:10px 12px}
+    .card-val{font-size:17px} .card-tit{font-size:10px} .card-sub{font-size:9.5px}
+  }
+
 </style>
 </head>
 <body>
@@ -419,7 +460,9 @@
 
   <section class="bloco">
     <h2>🔍 Buscar Pedido e Lucro</h2>
-    <div class="dim">nº do pedido · NF · nº da venda no marketplace · SKU · parte do título</div>
+    <!-- Codex (P2): a busca chama só /buscar-lucro, que filtra numero_pedido/numero_loja/sku/descrição —
+         não indexa número de NF (isso é /buscar-pedido, ao vivo no Bling, que esta tela não usa). -->
+    <div class="dim">nº do pedido · nº da venda no marketplace · SKU · parte do título</div>
     <input id="busca" class="campo" placeholder="digite e tecle Enter" onkeydown="if(event.key==='Enter')buscar()">
     <div id="resBusca"></div>
   </section>
@@ -450,12 +493,29 @@
 
 <script>
 const MOD = '/good-checkout-offline';
+// Codex (P1): quem abre o dashboard por ?k=ADMIN_KEY não tem cookie — propaga a chave a
+// TODAS as chamadas do módulo, senão cada fetch cai em 403/404 e a tela vira avisos de erro.
+// Mesmo padrão da AMB e da Girassol (amb-dashboard.html / girassol dashboard.html).
+(function(){
+  const K = new URLSearchParams(location.search).get('k');
+  if (!K) return;
+  const _f = window.fetch.bind(window);
+  window.fetch = function(u, o){
+    try { if (typeof u === 'string' && u.indexOf(MOD) === 0) u += (u.indexOf('?') >= 0 ? '&' : '?') + 'k=' + encodeURIComponent(K); } catch(e){}
+    return _f(u, o);
+  };
+})();
 const esc = s => String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const BRL = v => 'R$ ' + (Math.round((Number(v)||0)*100)/100).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
 const PCT = v => (Math.round((Number(v)||0)*10)/10).toLocaleString('pt-BR',{maximumFractionDigits:1}) + '%';
-const d10 = d => d.toISOString().slice(0,10);
+// Codex (P1): toISOString() converte pra UTC — perto das 21h no horário de Brasília isso já
+// é o dia seguinte em UTC, e "Hoje"/"Ontem" pediam a janela errada ao servidor. Mesmo padrão
+// da AMB e da Girassol: monta a data pelo relógio de São Paulo, não pelo fuso do navegador.
+const hojeSP = () => new Date().toLocaleString('sv-SE',{timeZone:'America/Sao_Paulo'}).slice(0,10);
+const spDate = ms => new Date(ms).toLocaleString('sv-SE',{timeZone:'America/Sao_Paulo'}).slice(0,10);
 
 let PERIODO = 'mes', HIST = null, PAGINA = 1;
+let SEQ_CARDS = 0, SEQ_LINHAS = 0;
 
 /* os períodos que a tela oferece — os mesmos nomes da AMB, pra quem usa as duas não reaprender */
 const PERIODOS = [
@@ -464,17 +524,18 @@ const PERIODOS = [
 ];
 
 function janela(p){
-  const hj = new Date(); const fim = new Date(hj);
-  let ini = new Date(hj);
+  const hoje = hojeSP();
+  let de = hoje, ate = hoje;
   if(p==='hoje'){}
-  else if(p==='ontem'){ ini.setDate(ini.getDate()-1); fim.setDate(fim.getDate()-1); }
-  else if(p==='7d'){ ini.setDate(ini.getDate()-6); }
-  else if(p==='30d'){ ini.setDate(ini.getDate()-29); }
-  else if(p==='mes'){ ini = new Date(hj.getFullYear(), hj.getMonth(), 1); }
-  else if(p==='mesant'){ ini = new Date(hj.getFullYear(), hj.getMonth()-1, 1);
-                         fim.setTime(new Date(hj.getFullYear(), hj.getMonth(), 0).getTime()); }
-  else if(p==='ano'){ ini = new Date(hj.getFullYear(), 0, 1); }
-  return { de: d10(ini), ate: d10(fim) };
+  else if(p==='ontem'){ const o = spDate(Date.now()-86400000); de=o; ate=o; }
+  else if(p==='7d'){ de = spDate(Date.now()-6*86400000); }
+  else if(p==='30d'){ de = spDate(Date.now()-29*86400000); }
+  else if(p==='mes'){ de = hoje.slice(0,8)+'01'; }
+  else if(p==='mesant'){ const [Y,M] = hoje.split('-').map(Number); const pm = new Date(Y,M-2,1);
+    const y2 = pm.getFullYear(), m2 = String(pm.getMonth()+1).padStart(2,'0');
+    de = y2+'-'+m2+'-01'; ate = y2+'-'+m2+'-'+String(new Date(Y,M-1,0).getDate()).padStart(2,'0'); }
+  else if(p==='ano'){ de = hoje.slice(0,4)+'-01-01'; }
+  return { de, ate };
 }
 
 function pintarPeriodos(){
@@ -488,6 +549,7 @@ function trocar(p){ PERIODO = p; PAGINA = 1; pintarPeriodos(); carregar(); }
 function recarregar(){ PAGINA = 1; carregar(); }
 
 async function carregar(){
+  const meu = ++SEQ_CARDS;   // Codex (P2): resposta atrasada de um período trocado não pode sobrescrever o atual
   pintarPeriodos();
   const j = janela(PERIODO);
   document.getElementById('cards').innerHTML = '<div class="dim">carregando…</div>';
@@ -496,6 +558,7 @@ async function carregar(){
     const r = await fetch(MOD+'/historico-longo?de='+j.de+'&ate='+j.ate, {credentials:'same-origin'});
     d = await r.json().catch(()=>null);
   } catch(e){ d = null; }
+  if(meu !== SEQ_CARDS) return;   // o usuário já trocou de período enquanto isto estava no ar
 
   if(!(d && d.ok && d.totais)){
     /* dizer O QUE aconteceu, não só que falhou — a mensagem genérica manda procurar no lugar errado */
@@ -534,8 +597,11 @@ function pintarAvisos(t){
   /* estes três campos existem pra ser mostrados: são o que explica um número que parece errado */
   if(Number(t.pedidos_sem_imposto)>0)
     av.push(t.pedidos_sem_imposto+' pedido(s) <b>sem imposto calculado</b> — a alíquota do mês pode não estar definida no ⚙️');
-  if(Number(t.skus_sem_custo)>0)
-    av.push(t.skus_sem_custo+' SKU(s) <b>sem custo</b> ('+(Number(t.un_sem_custo)||0)+' unidades) — a margem sai maior do que é');
+  // Codex (P1): skus_sem_custo vem do servidor como ARRAY de SKUs, não contagem — Number([...]) dá NaN
+  // e o aviso nunca aparecia, mesmo com SKU comum (alfanumérico) sem custo cadastrado.
+  const _skusSemCusto = Array.isArray(t.skus_sem_custo) ? t.skus_sem_custo : [];
+  if(_skusSemCusto.length>0)
+    av.push(_skusSemCusto.length+' SKU(s) <b>sem custo</b> ('+(Number(t.un_sem_custo)||0)+' unidades) — a margem sai maior do que é');
   if(Number(t.impostos_recalculados)>0)
     av.push(t.impostos_recalculados+' imposto(s) recalculado(s) com a alíquota atual');
   document.getElementById('avisos').innerHTML = av.length
@@ -543,13 +609,16 @@ function pintarAvisos(t){
 }
 
 async function carregarLinhas(){
+  const meu = ++SEQ_LINHAS;   // Codex (P2): idem carregar() — não deixa resposta velha pisar na lista do período atual
   const j = janela(PERIODO);
+  const paginaPedida = PAGINA;
   document.getElementById('tabela').innerHTML = '<div class="dim">carregando a lista…</div>';
   let d = null;
   try {
-    const r = await fetch(MOD+'/historico-linhas?de='+j.de+'&ate='+j.ate+'&pagina='+PAGINA, {credentials:'same-origin'});
+    const r = await fetch(MOD+'/historico-linhas?de='+j.de+'&ate='+j.ate+'&pagina='+paginaPedida, {credentials:'same-origin'});
     d = await r.json().catch(()=>null);
   } catch(e){ d = null; }
+  if(meu !== SEQ_LINHAS) return;
   if(!(d && d.ok)){
     document.getElementById('tabela').innerHTML =
       '<div class="aviso">Não consegui carregar a lista agora — isto <b>não</b> quer dizer que não há pedidos.</div>';
@@ -561,19 +630,21 @@ async function carregarLinhas(){
     'página '+(d.pagina||PAGINA)+(d.total_paginas ? ' de '+d.total_paginas : '');
 
   document.getElementById('tabela').innerHTML = peds.length ? (
-    '<table class="tab"><thead><tr>' +
-    '<th>DATA</th><th>PEDIDO</th><th>CANAL</th><th>PRODUTO</th><th class="n">UN.</th>' +
-    '<th class="n">VENDA</th><th class="n">CUSTO</th><th class="n">IMPOSTO</th>' +
-    '<th class="n">TARIFA</th><th class="n">FRETE</th><th class="n">M.C.</th><th class="n">MC %</th>' +
+    // Codex (P1): sem o wrapper .tw a tabela larga (12 colunas) não rola de lado no celular —
+    // html/body usam overflow-x:clip, então as colunas financeiras da direita ficavam inalcançáveis.
+    '<div class="tw"><table class="tab"><thead><tr>' +
+    '<th>DATA</th><th>PEDIDO</th><th>CANAL</th><th>PRODUTO</th><th class="num">UN.</th>' +
+    '<th class="num">VENDA</th><th class="num">CUSTO</th><th class="num">IMPOSTO</th>' +
+    '<th class="num">TARIFA</th><th class="num">FRETE</th><th class="num">M.C.</th><th class="num">MC %</th>' +
     '</tr></thead><tbody>' +
-    peds.map(linhaPedido).join('') + '</tbody></table>'
+    peds.map(linhaPedido).join('') + '</tbody></table></div>'
   ) : '<div class="dim">nenhum pedido neste período.</div>';
 
   const tp = d.total_paginas || 1;
   document.getElementById('paginacao').innerHTML = tp > 1 ? (
-    '<button class="btn" '+(PAGINA<=1?'disabled':'')+' onclick="irPagina('+(PAGINA-1)+')">← Anterior</button>' +
-    '<span class="dim"> página '+PAGINA+' de '+tp+' </span>' +
-    '<button class="btn" '+(PAGINA>=tp?'disabled':'')+' onclick="irPagina('+(PAGINA+1)+')">Próxima →</button>'
+    '<button class="btn" '+(paginaPedida<=1?'disabled':'')+' onclick="irPagina('+(paginaPedida-1)+')">← Anterior</button>' +
+    '<span class="dim"> página '+paginaPedida+' de '+tp+' </span>' +
+    '<button class="btn" '+(paginaPedida>=tp?'disabled':'')+' onclick="irPagina('+(paginaPedida+1)+')">Próxima →</button>'
   ) : '';
 }
 
@@ -581,8 +652,17 @@ function irPagina(n){ PAGINA = Math.max(1, n); carregarLinhas(); }
 
 function linhaPedido(o){
   const itens = o.itens || [];
-  const mc = Number(o.margem);
-  const venda = Number(o.valor_total)||0;
+  // Codex (P1): /historico-linhas devolve numero/un/vnota e /buscar-lucro devolve numero/vnota/mc —
+  // nenhum dos dois manda pedido/unidades/valor_total, que era o que esta função lia. Resultado:
+  // pedido em branco, venda R$ 0,00 e M.C. errada em toda linha. Lê o nome que cada rota manda de
+  // verdade; "unidades" soma sempre os itens (a fonte mais confiável — presente nas duas rotas).
+  const numPedido = o.pedido != null ? o.pedido : o.numero;
+  const venda = Number(o.valor_total != null ? o.valor_total : o.vnota) || 0;
+  const un = itens.reduce((s,i) => s + (Number(i.qtd)||0), 0) || Number(o.unidades != null ? o.unidades : o.un) || 0;
+  // margem: historico-linhas manda `margem`; buscar-lucro manda `mc` (null quando a M.C. está
+  // incompleta — precisa continuar "—", não virar R$ 0,00 por causa do Number(null) === 0).
+  const mcBruta = o.margem != null ? o.margem : o.mc;
+  const mc = mcBruta != null ? Number(mcBruta) : NaN;
   const pct = venda>0 && isFinite(mc) ? (mc/venda*100) : null;
   const prod = itens.map(function(i){
     /* quantidade SEMPRE, e o nome quando existir — foi o conserto de 16/09 na tela da AMB:
@@ -593,17 +673,17 @@ function linhaPedido(o){
   }).join('');
   return '<tr>' +
     '<td>'+esc(String(o.data||'').slice(8,10)+'/'+String(o.data||'').slice(5,7))+'</td>' +
-    '<td><b>'+esc(o.pedido||'')+'</b></td>' +
+    '<td><b>'+esc(numPedido||'')+'</b></td>' +
     '<td>'+esc(o.canal||'')+'</td>' +
     '<td>'+prod+'</td>' +
-    '<td class="n">'+(Number(o.unidades)||itens.length)+'</td>' +
-    '<td class="n">'+BRL(venda)+'</td>' +
-    '<td class="n">'+BRL(o.custo)+'</td>' +
-    '<td class="n">'+BRL(o.imposto)+'</td>' +
-    '<td class="n">'+BRL(o.comissao)+'</td>' +
-    '<td class="n">'+BRL(o.frete)+'</td>' +
-    '<td class="n '+(mc>=0?'ok':'bad')+'">'+(isFinite(mc)?BRL(mc):'—')+'</td>' +
-    '<td class="n">'+(pct!=null?PCT(pct):'—')+'</td>' +
+    '<td class="num">'+(un||itens.length)+'</td>' +
+    '<td class="num">'+BRL(venda)+'</td>' +
+    '<td class="num">'+BRL(o.custo)+'</td>' +
+    '<td class="num">'+BRL(o.imposto)+'</td>' +
+    '<td class="num">'+BRL(o.comissao)+'</td>' +
+    '<td class="num">'+BRL(o.frete)+'</td>' +
+    '<td class="num '+(mc>=0?'ok':'bad')+'">'+(isFinite(mc)?BRL(mc):'—')+'</td>' +
+    '<td class="num">'+(pct!=null?PCT(pct):'—')+'</td>' +
     '</tr>';
 }
 
@@ -616,16 +696,23 @@ async function buscar(){
     const r = await fetch(MOD+'/buscar-lucro?q='+encodeURIComponent(q), {credentials:'same-origin'});
     d = await r.json().catch(()=>null);
   } catch(e){ d = null; }
-  if(!d || !d.ok){
-    /* separar "não achei" de "não consegui procurar": mandam fazer coisas diferentes */
-    document.getElementById('resBusca').innerHTML = d
-      ? '<div class="aviso">Nada encontrado para <b>'+esc(q)+'</b>.</div>'
-      : '<div class="aviso">Não consegui fazer a busca agora — isto <b>não</b> quer dizer que o pedido não existe.</div>';
+  if(!d){
+    document.getElementById('resBusca').innerHTML =
+      '<div class="aviso">Não consegui fazer a busca agora — isto <b>não</b> quer dizer que o pedido não existe.</div>';
+    return;
+  }
+  if(!d.ok){
+    // Codex (P2): d truthy com ok:false é uma FALHA (Supabase fora do ar, sessão expirada…),
+    // não uma busca que terminou vazia — tratar como "nada encontrado" manda o operador
+    // duvidar de um pedido real só porque a busca nem chegou a rodar.
+    const motivo = d.erro ? esc(d.erro) : 'não consegui fazer a busca agora';
+    document.getElementById('resBusca').innerHTML =
+      '<div class="aviso">Não consegui buscar: <b>'+motivo+'</b> — isto <b>não</b> quer dizer que o pedido não existe.</div>';
     return;
   }
   const achados = d.pedidos || (d.pedido ? [d.pedido] : []);
   document.getElementById('resBusca').innerHTML = achados.length
-    ? '<table class="tab"><tbody>' + achados.map(linhaPedido).join('') + '</tbody></table>'
+    ? '<div class="tw"><table class="tab"><tbody>' + achados.map(linhaPedido).join('') + '</tbody></table></div>'
     : '<div class="aviso">Nada encontrado para <b>'+esc(q)+'</b>.</div>';
 }
 
@@ -652,10 +739,24 @@ function fecharConfig(){ document.getElementById('modalConfig').style.display = 
 async function salvarConfig(){
   const ano = new Date().getFullYear();
   const aliquotas = {};
+  const invalidos = [];
   for(let m=1; m<=12; m++){
     const k = ano+'-'+String(m).padStart(2,'0');
-    const v = (document.getElementById('aliq_'+k).value || '').trim().replace(',', '.');
-    if(v !== '') aliquotas[k] = Number(v);
+    const vTxt = (document.getElementById('aliq_'+k).value || '').trim().replace(',', '.');
+    // Codex (P2): mês limpo manda `null` explícito — o servidor só APAGA a alíquota salva
+    // quando recebe null; omitir a chave (como antes) fazia ele manter o valor antigo, ao
+    // contrário do que o placeholder promete ("vazio = usa a tabela do código").
+    if(vTxt === ''){ aliquotas[k] = null; continue; }
+    const n = Number(vTxt);
+    // Codex (P2): valida ANTES de mandar — o servidor aceita só 0–40 e ignora em silêncio
+    // qualquer coisa fora disso (texto vira null no JSON, fora da faixa não muda nada), mas
+    // sempre respondia ok:true, então a tela anunciava "salvo" sem a alíquota ter sido aplicada.
+    if(!isFinite(n) || n < 0 || n > 40){ invalidos.push(k); continue; }
+    aliquotas[k] = n;
+  }
+  if(invalidos.length){
+    document.getElementById('msgConfig').innerHTML = 'alíquota inválida em <b>'+invalidos.join(', ')+'</b> (use 0 a 40) — nada foi salvo.';
+    return;
   }
   document.getElementById('msgConfig').textContent = 'salvando…';
   try {
@@ -665,10 +766,13 @@ async function salvarConfig(){
       body: JSON.stringify({ aliquotas })
     });
     const d = await r.json().catch(()=>null);
-    document.getElementById('msgConfig').innerHTML = (d && d.ok)
-      ? 'salvo — os meses alterados estão sendo <b>recalculados no histórico</b>.'
-      : 'não consegui salvar. Tente de novo.';
-    if(d && d.ok) setTimeout(recarregar, 1500);
+    if(!(d && d.ok)){
+      document.getElementById('msgConfig').textContent = 'não consegui salvar. Tente de novo.';
+      return;
+    }
+    document.getElementById('msgConfig').innerHTML =
+      'salvo — os meses alterados estão sendo <b>recalculados no histórico</b>.';
+    setTimeout(recarregar, 1500);
   } catch(e){ document.getElementById('msgConfig').textContent = 'não consegui salvar.'; }
 }
 
