@@ -19,6 +19,7 @@ const ESPERADO = {
   '2026-05': 14.8073,
   '2026-06': 15.0707,
   '2026-07': 15.03,
+  '2026-08': 14.9946,
 };
 
 const s = fs.readFileSync(path.join(__dirname, '..', 'good-checkout-offline/index.js'), 'utf8');
@@ -33,11 +34,22 @@ for (const [mes, valor] of Object.entries(ESPERADO)) {
     'alíquota errada não quebra nada, só faz a margem sair errada com um número plausível');
 }
 
-/* agosto em diante NÃO pode estar preenchido: o mês que ainda não fechou não tem alíquota
-   apurada, e estimá-lo é exatamente o erro que a tabela vazia evitava */
-for (const mes of ['2026-08', '2026-09', '2026-10', '2026-11', '2026-12']) {
-  assert.ok(tabela[mes] === undefined,
-    mes + ' está preenchido, mas não foi apurado — estimar o mês que não fechou é inventar imposto');
+/* 18/09 — A LISTA CRAVADA ESTAVA ERRADA e o próprio teste mostrou: eu tinha escrito
+   ['2026-08', ..., '2026-12'] como "meses que não podem ter alíquota", e agosto FECHOU. A
+   lista envelhece a cada mês apurado, e o teste passaria a reprovar dado legítimo — guarda que
+   acusa o certo ensina a ignorar o vermelho.
+
+   A regra de verdade não é sobre meses nomeados: é que mês que AINDA NÃO FECHOU não pode ter
+   alíquota, porque apurar exige o mês terminado. Escrita assim, ela vale sozinha no ano que
+   vem. */
+{
+  const agora = new Date();
+  const mesCorrente = agora.getUTCFullYear() + '-' + String(agora.getUTCMonth() + 1).padStart(2, '0');
+  for (const mes of Object.keys(tabela)) {
+    assert.ok(mes < mesCorrente,
+      'a tabela tem alíquota para ' + mes + ', que ainda não fechou — imposto estimado vira ' +
+      'número errado na tela, e número errado é pior que número ausente');
+  }
 }
 
 /* A PRECEDÊNCIA vive na lib do histórico, não no módulo — minha primeira versão deste teste
@@ -97,4 +109,4 @@ for (const mes of ['2026-08', '2026-09', '2026-10', '2026-11', '2026-12']) {
     'as alíquotas de janeiro da Girassol e da GOOD ficaram iguais — conferir, porque são empresas com faturamentos diferentes');
 }
 
-console.log('OK: alíquotas da GOOD — os 7 meses apurados conferem, agosto+ segue sem valor, e o painel mantém precedência');
+console.log('OK: alíquotas da GOOD — os meses apurados conferem, nenhum mês em aberto tem valor, e o painel mantém precedência');

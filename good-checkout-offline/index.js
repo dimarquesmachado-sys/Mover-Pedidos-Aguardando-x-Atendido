@@ -488,6 +488,7 @@ async function decodificarZplShopee(txt) {
 const DEFAULT_ALIQ_BK_GOOD = {
   '2026-01': 11.819396, '2026-02': 12.7287, '2026-03': 13.2889, '2026-04': 14.2829,
   '2026-05': 14.8073,   '2026-06': 15.0707, '2026-07': 15.03,
+  '2026-08': 14.9946,   // apurada em 18/09
   /* agosto em diante ainda não apurados — sem valor aqui, o cálculo cai no padrão, e é isso
      que deve acontecer: estimar mês que não fechou é o erro que este bloco evitava. */
 };
