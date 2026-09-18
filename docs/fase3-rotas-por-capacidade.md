@@ -137,8 +137,28 @@ indentação):
 | rotas comuns às três | 24 |
 | **divergentes (>6 linhas)** | **6** |
 
-As seis: `status` (59), `config-fiscal` (35), `sku-info` (26), `etiqueta-anexar` (25),
-`custo-sync` (21), `backfill-status` (7).
+### 17/09 — a conta caiu de novo: são TRÊS, não seis
+
+A medição de 493 contava a declaração certa, mas delimitava o CORPO por indentação. Onde a
+rota tem bloco aninhado fechando na mesma coluna, ela engolia o que vinha depois — na GOOD, a
+`/status` (20 linhas) aparecia com 59 de diferença porque o extrator levava junto a `/saude`
+inteira, que as três têm.
+
+Contando CHAVES (o jeito que o `teste-medicao-rotas.js` já usa desde o conserto do Codex):
+
+| rota | linhas | difer | |
+|---|---:|---:|---|
+| `status` | 20 | **0** | idêntica |
+| `etiqueta-anexar` | 50 | **4** | quase idêntica |
+| `saude` | 30 | **2** | quase idêntica |
+| `config-fiscal` | 45 | 49 | divergente |
+| `sku-info` | 94 | 24 | divergente |
+| `custo-sync` | 33 | 21 | divergente |
+
+**Duas correções de medição no mesmo dia, e as duas pra menos.** A lição que fica escrita: para
+delimitar bloco em JavaScript, contar chaves — indentação é convenção, não estrutura, e um
+medidor frouxo infla o trabalho e esconde o risco (na primeira correção, ele teria feito mover
+a trava de sessão).
 
 A lição vale além desta fase: **medição frouxa infla o trabalho e esconde o risco**. Aqui ela
 teria feito alguém mover a guarda de autenticação achando que era uma rota de status.

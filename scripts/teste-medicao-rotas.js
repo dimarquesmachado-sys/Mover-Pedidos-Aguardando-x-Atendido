@@ -7,7 +7,7 @@
 
    O número de divergentes caiu de 21 para 6 quando a medição passou a contar DECLARAÇÃO em vez
    de menção. Este teste guarda essa distinção extraindo o CORPO de verdade (não só o nome da
-   rota) e travando as seis divergentes — que não entram nesta fase de extração e por isso não
+   rota) e travando as rotas pesadas — que não entram nesta fase de extração e por isso não
    podem sumir do conjunto comum às três, ao contrário das quase-idênticas (Codex, 17/09). */
 const assert = require('assert');
 const fs = require('fs');
@@ -20,7 +20,7 @@ const ALVOS = [
   ['good-checkout-offline/index.js', 'good-checkout-offline'],
 ];
 
-/* as seis divergentes ficam de fora desta fase (viram o próximo ciclo.js) — diferente das
+/* as rotas pesadas ficam de fora desta fase (viram o próximo ciclo.js) — diferente das
    quase-idênticas, elas não têm extração planejada, então continuam declaradas nas três */
 const DIVERGENTES = ['status', 'config-fiscal', 'sku-info', 'etiqueta-anexar', 'custo-sync', 'backfill-status'];
 
@@ -120,4 +120,26 @@ for (let i = 0; i < ALVOS.length; i++) {
    ele fica no caso PROVADO (a /backfill-status da GOOD, onde o mesmo nome aparece na lista de
    exceções e na declaração), que é exatamente a regressão que aconteceu. */
 
-console.log('OK: medição de rotas — conta declaração e não menção, extrai o corpo de verdade e trava as seis divergentes que não saem desta fase');
+/* 17/09 — A MEDIÇÃO CAIU DE SEIS PRA TRÊS, e pelo mesmo tipo de erro da vez anterior: o
+   script solto que eu usava delimitava o corpo por INDENTAÇÃO. Onde a rota tem bloco aninhado
+   fechando na mesma coluna, ele engolia o que vinha depois — na GOOD, a /status (20 linhas)
+   aparecia com 59 de diferença porque levava junto a /saude inteira, que as três têm.
+   Este teste já conta CHAVES (conserto do Codex), e é por isso que ele não errou junto. O
+   assert abaixo mantém a diferença medida honesta: se a /status voltar a "divergir", é o
+   medidor que quebrou, não o código. */
+{
+  const semRotulo = (t) => t.replace(/\b(GIRABKP|GOODBKP|AMBBKP)\b/g, '_T_')
+    .replace(/\b(girassol-backup-offline|good-checkout-offline|amb-checkout-offline)\b/g, '_M_')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('//'));
+
+  const ref = semRotulo(corpoDaRota(ALVOS[0][0], ALVOS[0][1], 'status').join('\n'));
+  for (let i = 1; i < ALVOS.length; i++) {
+    const outro = semRotulo(corpoDaRota(ALVOS[i][0], ALVOS[i][1], 'status').join('\n'));
+    assert.ok(Math.abs(outro.length - ref.length) <= 4,
+      ALVOS[i][0] + ': a /status mede ' + outro.length + ' linhas contra ' + ref.length +
+      ' na AMB — ou ela divergiu de verdade, ou o medidor voltou a engolir a rota seguinte');
+  }
+}
+
+console.log('OK: medição de rotas — conta declaração e não menção, delimita o corpo por CHAVES (não por indentação) e trava as rotas pesadas que não saem desta fase');
