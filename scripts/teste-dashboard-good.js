@@ -70,4 +70,77 @@ assert.ok(/Number\(i\.qtd\)\s*\|\|\s*1/.test(js[1]),
 assert.ok(/i\.descricao/.test(js[1]),
   'a tabela precisa mostrar o NOME do produto, não só o SKU');
 
+/* 18/09 — O CARD TEM QUE DIZER DE ONDE VEIO A ALÍQUOTA. O dono olhou "15% do faturamento"
+   logo depois de eu carregar as alíquotas apuradas da GOOD e teve que perguntar se tinham
+   pegado. Tinham: agosto não está na lista dele e caiu no padrão, que é o certo — mas a tela
+   não dizia, e número sem origem obriga a perguntar toda vez. */
+{
+  const jsTela = /<script>([\s\S]*?)<\/script>/.exec(html)[1];
+  const legenda = new Function(
+    /const PCT = [^\n]*/.exec(jsTela)[0] + ';' +
+    /function legendaImposto[\s\S]*?\n\}/.exec(jsTela)[0] + '; return legendaImposto;')();
+
+  const soPadrao = legenda({ __aliquotas: { '2026-08': { valor: null, fonte: 'padrao' } } }, 100, 15);
+  assert.ok(/PADRÃO/.test(soPadrao) && /2026-08/.test(soPadrao),
+    'mês sem alíquota apurada tem que AVISAR, e dizer qual mês — senão o dono lê 15% e acha que a apurada não pegou');
+
+  const apurada = legenda({ __aliquotas: { '2026-07': { valor: 15.03, fonte: 'apurada' } } }, 100, 15);
+  assert.ok(/apurada/.test(apurada) && !/PADRÃO/.test(apurada), 'mês apurado não pode ser marcado como padrão');
+
+  const misto = legenda({ __aliquotas: { '2026-07': { fonte: 'apurada' }, '2026-08': { fonte: 'padrao' } } }, 100, 15);
+  assert.ok(/2026-08/.test(misto) && !/2026-07/.test(misto),
+    'no período misto, o aviso tem que citar SÓ os meses que precisam de ação — os apurados não pedem nada');
+
+  /* rota antiga, sem o campo: a tela não pode quebrar nem inventar origem */
+  assert.ok(!/PADRÃO|apurada|⚙️/.test(legenda({}, 100, 15)),
+    'sem informação de origem, o card não pode afirmar nada sobre a alíquota');
+}
+
+/* e o backend precisa REPORTAR a origem — card que lê campo inexistente não avisa nada */
+{
+  const lib = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'historico.js'), 'utf8');
+  assert.ok(/aliquotas_usadas: _aliqOrigem/.test(lib),
+    'a lib do histórico não devolve a origem da alíquota — o card não teria o que mostrar');
+  for (const fonte of ['painel', 'apurada', 'padrao']) {
+    assert.ok(new RegExp("fonte: '" + fonte + "'").test(lib), 'a lib não marca a origem ' + fonte);
+  }
+}
+
+/* período vazio: dizer ONDE tem dado, em vez de deixar parecer que não há vendas */
+assert.ok(/function avisarOndeTemDado/.test(js[1]),
+  'período sem pedidos precisa dizer em que meses HÁ histórico — foi assim que a GOOD pareceu não ter venda alguma');
+
+/* 18/09 — O ⚙️ MOSTRAVA DOZE CAMPOS VAZIOS. Vazio ali significa "usa a tabela do código", e a
+   tabela o dono não vê — ele não tinha como saber qual alíquota estava valendo em cada mês.
+   Campo em branco que esconde um valor ativo é a mesma armadilha do card sem origem. */
+{
+  const jsT = /<script>([\s\S]*?)<\/script>/.exec(html)[1];
+
+  assert.ok(/d\.apuradas/.test(jsT), 'o ⚙️ não lê as alíquotas apuradas — as linhas ficariam sem valor');
+  assert.ok(/apurada/.test(jsT) && /salva aqui/.test(jsT),
+    'cada linha precisa dizer de ONDE vem a alíquota daquele mês');
+
+  /* alíquota vai com a precisão informada: o dono passou 11,819396% e arredondar esconde
+     justamente o dígito que ele conferiu no DAS */
+  assert.ok(/String\(v\)\.replace\('\.', ','\)/.test(jsT),
+    'a alíquota do ⚙️ não pode passar pelo PCT de uma casa — perde a precisão informada');
+
+  /* mês corrente e futuro NÃO levam alarme: o dono não tem como apurar o que não fechou, e
+     alarme que não se pode atender ensina a ignorar o alarme */
+  assert.ok(/k === hoje/.test(jsT), 'falta tratar o mês em andamento — ele apareceria como "falta apurar"');
+  assert.ok(/mês ainda não fechou/.test(jsT), 'falta tratar os meses futuros');
+}
+
+/* e as TRÊS rotas de config-fiscal devolvem as apuradas: contrato igual nas três, senão a
+   próxima tela que precisar disso descobre que só uma empresa responde */
+for (const [emp, arq] of Object.entries({
+  amb: 'amb-checkout-offline/index.js',
+  girassol: 'girassol-backup-offline/gbo-app.js',
+  good: 'good-checkout-offline/index.js',
+})) {
+  const s = fs.readFileSync(path.join(raiz, arq), 'utf8');
+  assert.ok(/ok: true, apuradas: DEFAULT_ALIQ_BK/.test(s),
+    emp + ': /config-fiscal não devolve as alíquotas apuradas — o ⚙️ mostraria campos vazios sem dizer o que vale');
+}
+
 console.log('OK: dashboard da GOOD — a tela existe, o JS compila, e ela só chama rotas que a GOOD responde');
