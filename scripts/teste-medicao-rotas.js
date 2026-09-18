@@ -22,7 +22,11 @@ const ALVOS = [
 
 /* as rotas pesadas ficam de fora desta fase (viram o próximo ciclo.js) — diferente das
    quase-idênticas, elas não têm extração planejada, então continuam declaradas nas três */
-const DIVERGENTES = ['status', 'config-fiscal', 'sku-info', 'etiqueta-anexar', 'custo-sync', 'backfill-status'];
+/* Codex #501 (P2): `status` e `etiqueta-anexar` foram RECLASSIFICADAS como idêntica e quase
+   idêntica — mantê-las aqui exigiria que a declaração continuasse em cada pasta, e é
+   exatamente isso que a extração vai remover. O guarda passaria a reprovar o trabalho que ele
+   deveria acompanhar, e alguém contornaria o vermelho. */
+const DIVERGENTES = ['config-fiscal', 'sku-info', 'custo-sync'];
 
 /* declaração = `if (… p === … ) {` abrindo bloco no fim da linha.
    menção em lista de exceções termina com `||` e não abre bloco. */
@@ -128,17 +132,31 @@ for (let i = 0; i < ALVOS.length; i++) {
    assert abaixo mantém a diferença medida honesta: se a /status voltar a "divergir", é o
    medidor que quebrou, não o código. */
 {
+  /* Codex #501 (P2): comparar TAMANHO deixava passar mudança de conteúdo — trocar um campo da
+     resposta, uma condição ou uma chamada numa das empresas mantinha a contagem e o teste
+     seguia verde. E eu ainda tolerava 4 linhas de folga, o que só piorava. Agora compara o
+     corpo NORMALIZADO linha a linha: rótulo e slug da empresa viram marcador, o resto tem que
+     ser igual. */
   const semRotulo = (t) => t.replace(/\b(GIRABKP|GOODBKP|AMBBKP)\b/g, '_T_')
     .replace(/\b(girassol-backup-offline|good-checkout-offline|amb-checkout-offline)\b/g, '_M_')
     .replace(/\/\*[\s\S]*?\*\//g, '')
     .split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('//'));
 
-  const ref = semRotulo(corpoDaRota(ALVOS[0][0], ALVOS[0][1], 'status').join('\n'));
-  for (let i = 1; i < ALVOS.length; i++) {
-    const outro = semRotulo(corpoDaRota(ALVOS[i][0], ALVOS[i][1], 'status').join('\n'));
-    assert.ok(Math.abs(outro.length - ref.length) <= 4,
-      ALVOS[i][0] + ': a /status mede ' + outro.length + ' linhas contra ' + ref.length +
-      ' na AMB — ou ela divergiu de verdade, ou o medidor voltou a engolir a rota seguinte');
+  /* o limite é o que o código É HOJE, medido: /status tem diferença ZERO entre as três, e
+     /saude tem UMA linha (a Girassol confere o app de Expedição, que só ela tem). Tolerância
+     folgada aqui não guarda nada — foi assim que a troca de `Object.keys` por `Object.values`
+     passou batido na primeira versão deste guarda. */
+  const LIMITE = { status: 0, saude: 1 };
+  for (const [rota, limite] of Object.entries(LIMITE)) {
+    const ref = semRotulo(corpoDaRota(ALVOS[0][0], ALVOS[0][1], rota).join('\n'));
+    for (let i = 1; i < ALVOS.length; i++) {
+      const outro = semRotulo(corpoDaRota(ALVOS[i][0], ALVOS[i][1], rota).join('\n'));
+      const difs = ref.filter((l, k) => outro[k] !== l).length + Math.abs(ref.length - outro.length);
+      assert.ok(difs <= limite,
+        ALVOS[i][0] + ': /' + rota + ' difere em ' + difs + ' linha(s) da AMB (limite ' + limite + '). ' +
+        'Ou o corpo mudou numa empresa só — e aí a correção tem que ir pras três —, ' +
+        'ou o medidor voltou a engolir a rota seguinte.');
+    }
   }
 }
 
