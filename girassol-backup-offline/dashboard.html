@@ -396,13 +396,13 @@ const MOD = '/girassol-backup-offline';
     return _f(u, o);
   };
 })();
-const DASH_BUILD = 'd227';
+const DASH_BUILD = 'd230';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
 let periodo = 'dia', pDe = '', pAte = '';   // abre no DIA (pedido do Diego)
 let SKUINFO = {}, skuInfoCarregado = false, _skuLoading = false;
-let CFG = { aliquotas:{}, taxas:{}, ciencia_aliq:{} };   // alíquota Simples por mês (YYYY-MM: %) + tarifa % por canal + ciência das herdadas
+let CFG = { aliquotas:{}, taxas:{}, ciencia_aliq:{}, apuradas:[] };   // alíquota Simples por mês (YYYY-MM: %) + tarifa % por canal + ciência das herdadas + meses marcados como apurados
 let MAG_NIVEL = '50';   // nível de desconto do frete Magalu (coparticipação): 'sem'|'25'|'50' (default 50%)
 // Alíquotas 2026 da GIRASSOL vindas de fábrica (editáveis no ⚙️; o que você salvar SOBREPÕE estas):
 /* 19/08 — julho FECHOU: o Simples Nacional da Girassol saiu em 14,4007% (era 14,1 de estimativa).
@@ -1126,7 +1126,7 @@ async function boot(){
     DADOS = d.itens;
     VENDAS = Array.isArray(d.vendas_bling) ? d.vendas_bling : [];
     prepararVendas();
-    try{ const rc = await fetch(MOD+'/config-fiscal',{credentials:'same-origin'}); const dc = await rc.json(); if(dc&&dc.config) CFG = { aliquotas: dc.config.aliquotas||{}, taxas: dc.config.taxas||{}, flex: dc.config.flex||{}, ciencia_aliq: dc.config.ciencia_aliq||{} }; }catch(e){}
+    try{ const rc = await fetch(MOD+'/config-fiscal',{credentials:'same-origin'}); const dc = await rc.json(); if(dc&&dc.config) CFG = { aliquotas: dc.config.aliquotas||{}, taxas: dc.config.taxas||{}, flex: dc.config.flex||{}, ciencia_aliq: dc.config.ciencia_aliq||{}, apuradas: dc.config.apuradas||[] }; }catch(e){}
     try{ const rm = await fetch(MOD+'/config-frete-magalu',{credentials:'same-origin'}); const dm = await rm.json(); if(dm&&dm.config&&dm.config.nivel_desconto) MAG_NIVEL = dm.config.nivel_desconto; }catch(e){}
     montar();
   }catch(e){
@@ -2671,12 +2671,36 @@ function renderCfg(){
     '<div style="font-size:12px;color:var(--mut);margin-bottom:6px">📅 Alíquota do Simples por mês (%) — os 12 meses de '+hojeSP().slice(0,4)+' · valores em cinza = de fábrica (edite e salve p/ sobrepor; o cálculo recalcula sozinho)</div>'+
     '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px 14px">'+ mesesAno().map(m=>{
       const NM=['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'][Number(m.slice(5,7))-1];
+      const APURADAS = new Set(CFG.apuradas || []);
+      window._aliqEstimadas = Object.keys(CFG.aliquotas || {})
+        .filter(mm => Number(CFG.aliquotas[mm]) > 0 && !APURADAS.has(mm)).sort();
       const salvo = CFG.aliquotas[m], padrao = (typeof DEFAULT_ALIQ!=='undefined' && DEFAULT_ALIQ[m]!=null)? DEFAULT_ALIQ[m] : null;
       const val = salvo!=null? salvo : (padrao!=null? padrao : '');
       return '<label style="font-size:12px;color:var(--mut);display:flex;align-items:center;gap:6px;justify-content:space-between"><b style="min-width:56px">'+NM+'/'+m.slice(2,4)+'</b>'+
         '<input type="number" step="0.0001" min="0" max="40" data-aliq="'+m+'" value="'+val+'" placeholder="%" '+
-        'style="width:96px'+(salvo==null&&padrao!=null?';color:#8b96b3':'')+'" title="'+(salvo!=null?'valor salvo por você':(padrao!=null?'de fábrica ('+padrao+'%) — edite p/ sobrepor':'sem alíquota'))+'"></label>';
+        'style="width:96px'+(salvo==null&&padrao!=null?';color:#8b96b3':'')+'"'+
+        /* 18/09 — o mesmo conserto da AMB: o campo já sabia que mostrava valor DE FÁBRICA (é o
+           que o pinta de cinza), mas o salvar mandava todos igual, e salvar por causa de um mês
+           gravava os outros como escolha do dono. Estimativa gravada no painel VENCE a tabela do
+           código quando a apuração chega — silenciosamente. */
+        (salvo==null&&padrao!=null?' data-fabrica="1"':'')+
+        ' title="'+(salvo!=null?'valor salvo por você':(padrao!=null?'de fábrica ('+padrao+'%) — edite p/ sobrepor':'sem alíquota'))+'">'+
+        /* 18/09 — a marcação de APURADA é do dono: ninguém deduz isso do número. Sem ela, mês
+           estimado e apurado ficam idênticos depois de salvos, e ele não sabe quais faltam
+           trocar quando a apuração chega — o trabalho dele por volta do dia 20, nas três. */
+        '<label style="font-size:11px;color:var(--mut);display:flex;align-items:center;gap:3px;margin-left:4px" '+
+        'title="marque quando o valor vier da apuração da contabilidade; sem marca, é estimativa">'+
+        '<input type="checkbox" data-apurada="'+m+'"'+(APURADAS.has(m)?' checked':'')+'> apurada</label>'+
+        '</label>';
     }).join('')+'</div>'+
+    /* 18/09 — a lista de pendências do dia 20: o que está salvo mas ainda é ESTIMATIVA. O
+       cálculo de window._aliqEstimadas já existia acima, mas nunca tinha sido inserido no
+       HTML — o aviso simplesmente não aparecia nesta tela (Codex, P2). */
+    ((window._aliqEstimadas && window._aliqEstimadas.length)
+      ? '<div class="aviso" style="margin:10px 0">\u26a0\ufe0f Ainda como <b>estimativa</b>: ' +
+        window._aliqEstimadas.join(', ') +
+        ' \u2014 marque <b>apurada</b> quando a contabilidade mandar o valor do m\u00eas.</div>'
+      : '') +
     (_aliqHerdadas.size ? '<div class="aviso" style="margin:10px 0">\u26a0\ufe0f M\u00eas sem al\u00edquota pr\u00f3pria usando a de outro m\u00eas: '+
        Array.from(_aliqHerdadas).map(x=>x.split('\u2190')[0]+' \u2190 '+x.split('\u2190')[1]).join(' \u00b7 ')+
        '. Preencha o valor certo aqui embaixo \u2014 sen\u00e3o o imposto sai aproximado.</div>' : '')+
@@ -2715,18 +2739,31 @@ async function acompanharReaplicar(){
 
 async function salvarCfg(){
   const aliquotas={}, taxas={};
-  document.querySelectorAll('[data-aliq]').forEach(i=>{ aliquotas[i.dataset.aliq] = i.value===''?null:Number(i.value); });
+  document.querySelectorAll('[data-aliq]').forEach(i=>{
+      /* só vira config o que o dono digitou: campo de fábrica não editado manda null, que é a
+         verdade ("não tenho valor salvo") e deixa a tabela do código mandar. */
+      const deFabrica = i.dataset.fabrica === '1' && String(i.value) === String(i.defaultValue);
+      /* Codex (P2): marcar "apurada" sobre o valor de fábrica intocado é o dono confirmando
+         que a apuração bateu com o que a tabela já mostrava — sem isto o valor virava null e a
+         marca "apurada" não tinha o que salvar (não dava pra confirmar um palpite que acertou). */
+      const apuradaEl = document.querySelector('[data-apurada="'+i.dataset.aliq+'"]');
+      const confirmaApurada = deFabrica && apuradaEl && apuradaEl.checked;
+      aliquotas[i.dataset.aliq] = (i.value === '' || (deFabrica && !confirmaApurada)) ? null : Number(i.value);
+    });
+    const apuradas = [...document.querySelectorAll('[data-apurada]')]
+      .filter(c => c.checked && aliquotas[c.dataset.apurada] != null)
+      .map(c => c.dataset.apurada);
   document.querySelectorAll('[data-taxa]').forEach(i=>{ taxas[i.dataset.taxa] = i.value===''?null:Number(i.value); });
   const flex={}; document.querySelectorAll('[data-flex]').forEach(i=>{ flex[i.dataset.flex] = i.value===''?null:Number(i.value); });
   const msg=$('cfgMsg'); msg.textContent='salvando…';
   try{
-    const r = await fetch(MOD+'/config-fiscal',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({aliquotas,taxas,flex})});
+    const r = await fetch(MOD+'/config-fiscal',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({aliquotas,taxas,flex,apuradas})});
     const d = await r.json();
     // nível de desconto do frete Magalu — salvo na sua própria rota (não é config fiscal)
     const magSel = $('magNivelSel');
     if(magSel){ try{ await fetch(MOD+'/config-frete-magalu',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({nivel_desconto:magSel.value})}); }catch(e){} }
     if(d&&d.ok){
-      CFG={aliquotas:d.config.aliquotas||{},taxas:d.config.taxas||{},flex:d.config.flex||{},ciencia_aliq:d.config.ciencia_aliq||{}};
+      CFG={aliquotas:d.config.aliquotas||{},taxas:d.config.taxas||{},flex:d.config.flex||{},ciencia_aliq:d.config.ciencia_aliq||{},apuradas:d.config.apuradas||[]};
       render();
       // 01/08: se alguma ALÍQUOTA mudou, o servidor já saiu reaplicando nas linhas gravadas do
       // histórico. Aqui a gente acompanha e mostra o progresso ao lado do botão, até terminar.

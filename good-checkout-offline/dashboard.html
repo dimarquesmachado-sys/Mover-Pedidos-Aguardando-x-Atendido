@@ -452,7 +452,7 @@
     <div class="marca">
       <span class="logo">📦</span>
       <h1>Inteligência de Vendas · <b>GOOD Import</b></h1>
-      <span class="build" id="build">g1</span>
+      <span class="build" id="build">g2</span>
     </div>
     <div class="acoes">
       <button class="btn" onclick="abrirConfig()">⚙️ Impostos</button>
@@ -807,6 +807,8 @@ async function abrirConfig(){
      apuração. Chamar a estimativa de "apurada" faria ele deixar de conferir o DAS de um mês
      achando que já conferiu — a mentira mais cara que esta tela poderia contar. */
   const jaApurados = new Set(d.apurados_meses || []);
+  /* o que o DONO marcou (config), diferente do que o CÓDIGO traz como apurado (tabela) */
+  const APURADAS = new Set((d.config && d.config.apuradas) || []);
   // Codex (P2): toISOString() é UTC puro — na última noite do mês em SP (UTC já virou dia 1
   // do mês seguinte) isto classificava o mês corrente como fechado e inventava um "falta
   // apurar" falso. hojeSP() é o relógio de SP que o resto da tela já usa (linha ~521).
@@ -834,7 +836,14 @@ async function abrirConfig(){
     else                                   vale = '<b class="bad">15%</b> · ⚠️ padrão — falta apurar';
     html += '<label class="linhaCfg"><span>'+k+'</span>' +
             '<input class="campo mini" id="aliq_'+k+'" value="'+esc(salvo!=null?salvo:'')+'" placeholder="—">' +
-            '<span class="dim vale">'+vale+'</span></label>';
+            '<span class="dim vale">'+vale+'</span>' +
+            /* 18/09 — a marcação de APURADA é do dono: ninguém deduz do número se aquele valor
+               veio da contabilidade ou é palpite dele. Sem ela, mês estimado e apurado ficam
+               idênticos depois de salvos. */
+            '<label class="dim" style="font-size:11px;display:flex;align-items:center;gap:3px" ' +
+            'title="marque quando o valor vier da apuração da contabilidade; sem marca, é estimativa">' +
+            '<input type="checkbox" data-apurada="'+k+'"'+(APURADAS.has(k)?' checked':'')+'> apurada</label>' +
+            '</label>';
   }
   document.getElementById('camposAliq').innerHTML = html;
 }
@@ -853,6 +862,11 @@ async function salvarConfig(){
     // Codex (P2): mês limpo manda `null` explícito — o servidor só APAGA a alíquota salva
     // quando recebe null; omitir a chave (como antes) fazia ele manter o valor antigo, ao
     // contrário do que o placeholder promete ("vazio = usa a tabela do código").
+    /* 18/09 — o mesmo princípio da AMB e da Girassol: campo que está apenas EXIBINDO a
+       alíquota apurada do código não pode virar config ao salvar. Aqui o campo já nasce vazio
+       quando não há valor salvo (o valor apurado aparece ao lado, não dentro), então este
+       ramo do vazio já resolve — o comentário fica pra quem mexer depois não "melhorar" isso
+       preenchendo o campo com o valor de fábrica. */
     if(vTxt === ''){ aliquotas[k] = null; continue; }
     const n = Number(vTxt);
     // Codex (P2): valida ANTES de mandar — o servidor aceita só 0–40 e ignora em silêncio
@@ -870,7 +884,8 @@ async function salvarConfig(){
     const r = await fetch(MOD+'/config-fiscal', {
       method: 'POST', credentials: 'same-origin',
       headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ aliquotas })
+      body: JSON.stringify({ aliquotas, apuradas: [...document.querySelectorAll('[data-apurada]')]
+        .filter(c => c.checked && aliquotas[c.dataset.apurada] != null).map(c => c.dataset.apurada) })
     });
     const d = await r.json().catch(()=>null);
     if(!(d && d.ok)){
