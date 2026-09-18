@@ -488,13 +488,14 @@ async function decodificarZplShopee(txt) {
 /* 18/09 — a GOOD tem a lista também, pelo mesmo motivo das outras duas: a tabela dela é toda
    apurada HOJE, mas nada impede alguém de acrescentar uma estimativa amanhã, e aí a tela
    passaria a chamá-la de apurada. A lista é o que diz a verdade, não a presença na tabela. */
-/* ⚠️ agosto entra junto com o valor, no #504 — a lista e a tabela têm que andar juntas, e o
-   teste reprova se divergirem: marcar como apurado um mês sem valor é prometer um dado que
-   não está lá. Foi exatamente o que ele pegou quando eu adiantei a lista. */
-const ALIQ_APURADOS = ['2026-01', '2026-02', '2026-03', '2026-04', '2026-05', '2026-06', '2026-07'];
+/* a lista e a tabela andam JUNTAS: o teste reprova se divergirem, porque marcar como apurado
+   um mês sem valor é prometer um dado que não está lá. Foi o que ele pegou quando eu adiantei
+   agosto aqui antes de o #504 entrar — agora o valor está lá e a lista acompanha. */
+const ALIQ_APURADOS = ['2026-01', '2026-02', '2026-03', '2026-04', '2026-05', '2026-06', '2026-07', '2026-08'];
 const DEFAULT_ALIQ_BK_GOOD = {
   '2026-01': 11.819396, '2026-02': 12.7287, '2026-03': 13.2889, '2026-04': 14.2829,
   '2026-05': 14.8073,   '2026-06': 15.0707, '2026-07': 15.03,
+  '2026-08': 14.9946,   // apurada em 18/09
   /* agosto em diante ainda não apurados — sem valor aqui, o cálculo cai no padrão, e é isso
      que deve acontecer: estimar mês que não fechou é o erro que este bloco evitava. */
 };
