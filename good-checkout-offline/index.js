@@ -519,6 +519,27 @@ function routes(readBody) {
     histCache: _histCacheGood,
   });
 
+  /* 17/09 — PORTE: a AMB e a Girassol REAPLICAM o imposto nos pedidos já gravados quando a
+     alíquota de um mês muda; a GOOD só salvava a alíquota nova. Efeito: corrigir a alíquota de
+     um mês passado não mexia em nada do que já estava no histórico — a tela seguia mostrando a
+     margem calculada com a alíquota velha, sem erro nenhum.
+     A lib existe desde 25/08 e serve as outras duas; a GOOD nunca foi ligada. Ela usa só 6
+     peças do contexto (`CACHE_DIR`, `DEFAULT_ALIQ_BK`, `histCache`, `path`, `readJson`,
+     `supaCfg`), e a GOOD já tem as seis — não precisa do `garantirSitCancel`, que é do
+     varrerCancelados, a função irmã. */
+  const _impLibGood = require('../lib/imposto-cancelados');
+  const _ctxImpGood = {
+    readJson,
+    get supaCfg()         { return (empresa) => _supaGood.cfg(empresa); },
+    get CACHE_DIR()       { return CACHE_DIR; },
+    get DEFAULT_ALIQ_BK() { return DEFAULT_ALIQ_BK_GOOD; },
+    get histCache()       { return _histCacheGood; },
+    get path()            { return path; },
+    log: console.log,
+  };
+  const reaplicarImposto = (meses) => _impLibGood.reaplicarImposto(_ctxImpGood, meses, 'good');
+  const estadoImposto = () => _impLibGood.estadoReaplicarImposto('good');
+
   /* 15/09 — /api/contexto: identidade e capacidades desta empresa, pro painel se montar
      sozinho em vez de cada HTML saber de qual empresa ele é (base da Fase 4). Só identidade
      e capacidade: nada de credencial, caminho ou env — isto chega no navegador do galpão. */
@@ -1404,12 +1425,46 @@ function routes(readBody) {
       if (method === 'GET') { json(res, 200, { ok: true, config: readJson(CFG_FILE, { aliquotas: {}, taxas: {} }) }); return true; }
       let body = {}; try { const _rb = await readBody(req); body = (_rb && typeof _rb === 'object') ? _rb : JSON.parse(_rb || '{}'); } catch (e) {}   // tolerante: lib/http passou a devolver objeto ja parseado
       const atual = readJson(CFG_FILE, { aliquotas: {}, taxas: {} });
+      const _aliqAntes = Object.assign({}, atual.aliquotas || {});   // p/ saber o que mudou de verdade
       if (body.aliquotas && typeof body.aliquotas === 'object') for (const [k2, v2] of Object.entries(body.aliquotas)) { const n2 = Number(v2); if (/^\d{4}-\d{2}$/.test(k2) && isFinite(n2) && n2 >= 0 && n2 <= 40) atual.aliquotas[k2] = n2; else if (v2 === null) delete atual.aliquotas[k2]; }
       if (body.taxas && typeof body.taxas === 'object') for (const [k2, v2] of Object.entries(body.taxas)) { const n2 = Number(v2); if (isFinite(n2) && n2 >= 0 && n2 <= 50) atual.taxas[String(k2).toLowerCase()] = n2; else if (v2 === null) delete atual.taxas[String(k2).toLowerCase()]; }
       if (body.flex && typeof body.flex === 'object') { atual.flex = atual.flex || {}; for (const [k2, v2] of Object.entries(body.flex)) { const n2 = Number(v2); if ((k2 === 'geral' || k2 === 'shopee') && isFinite(n2) && n2 >= 0 && n2 <= 100) atual.flex[k2] = n2; else if (v2 === null) delete atual.flex[k2]; } }
       writeJson(CFG_FILE, atual);
-      json(res, 200, { ok: true, config: atual });
+      /* Codex #498 (P2): a resposta dizia só {ok:true}, sem contar SE algo ia ser reaplicado —
+         a AMB e a Girassol respondem `reaplicando` com os meses e têm /reaplicar-status pro
+         admin acompanhar; a GOOD respondia igual tenha mudado alíquota ou não, e não tinha como
+         saber se a correção rodou, ficou na fila (ver lib/imposto-cancelados.js) ou nem achou
+         Supabase configurado. Calculado ANTES da resposta, como na AMB e na Girassol. */
+      const _mudou = [...new Set([...Object.keys(_aliqAntes), ...Object.keys(atual.aliquotas || {})])]
+        .filter(m => Number(_aliqAntes[m] || 0) !== Number((atual.aliquotas || {})[m] || 0));
+      json(res, 200, { ok: true, config: atual, reaplicando: _mudou });
+
+      /* 17/09 — PORTE (a AMB e a Girassol faziam, a GOOD não): salvar a alíquota nova não
+         mexia em NADA do que já estava gravado. Corrigir a alíquota de um mês passado deixava
+         a tela mostrando a margem calculada com a alíquota velha, sem erro nenhum.
+         Duas coisas, na ordem: limpar o cache do histórico (senão o agregado de até 30 min
+         atrás continuaria servindo e pareceria que "não pegou") e reaplicar nas linhas do
+         Supabase, SÓ nos meses que mudaram de verdade. Roda em background: a resposta já foi,
+         e o dashboard acompanha pelo /reaplicar-status. */
+      try {
+        const _nk = Object.keys(_histCacheGood).length;
+        for (const _k of Object.keys(_histCacheGood)) delete _histCacheGood[_k];
+        if (_nk) console.log('[FISCAL] config salva — cache do histórico limpo (' + _nk + ')');
+      } catch (e) {}
+      try {
+        if (_mudou.length) {
+          console.log('[FISCAL] alíquota mudou em: ' + _mudou.join(', ') + ' — reaplicando no histórico');
+          reaplicarImposto(_mudou).catch(e => console.log('[FISCAL] ✗ ' + e.message));
+        }
+      } catch (e) {}
       return true;
+    }
+
+    // 17/09 — progresso do "reaplicar imposto" (o dashboard mostra no rodapé da seção Impostos),
+    // igual à AMB e à Girassol — sem isso não dá pra distinguir uma correção concluída de uma
+    // que ficou na fila (rodada anterior em curso) ou não achou Supabase configurado.
+    if (method === 'GET' && p === '/good-checkout-offline/reaplicar-status') {
+      json(res, 200, { ok: true, status: estadoImposto() }); return true;
     }
 
     // DASHBOARD (sessão admin): TARIFA REAL do Mercado Livre p/ um pedido (sale_fee da API), com cache permanente
