@@ -152,8 +152,13 @@ for (let i = 0; i < ALVOS.length; i++) {
      o rótulo faz parte de um NOME DE ENV dentro de string — "AMBBKP_SYNC_ON" ficava intacto e
      a /saude parecia divergir nas duas empresas. Sem o \b final, o prefixo vira marcador em
      qualquer posição, e aí a diferença some: as três são IGUAIS nesta rota. */
-  const semRotulo = (t) => t.replace(/\b(GIRABKP|GOODBKP|AMBBKP)/g, '_T_')
-    .replace(/\b(girassol-backup-offline|good-checkout-offline|amb-checkout-offline)\b/g, '_M_')
+  /* Codex #501 (P2, r3): mapear os TRÊS prefixos para o mesmo marcador em TODO arquivo escondia
+     o erro de copiar e colar entre empresas — a mensagem da AMB citando GOODBKP normalizava
+     igual e passava. Cada arquivo só pode ter o rótulo DELE normalizado; o rótulo de outra
+     empresa ali dentro é justamente o bug que queremos ver. */
+  const ROTULO = { 'amb-checkout-offline': 'AMBBKP', 'girassol-backup-offline': 'GIRABKP', 'good-checkout-offline': 'GOODBKP' };
+  const semRotulo = (t, mod) => t.replace(new RegExp('\\b' + ROTULO[mod], 'g'), '_T_')
+    .replace(new RegExp('\\b' + mod + '\\b', 'g'), '_M_')
     .replace(/\/\*[\s\S]*?\*\//g, '')
     .split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('//'));
 
@@ -169,12 +174,22 @@ for (let i = 0; i < ALVOS.length; i++) {
      paridade passa a ser estrutural (uma lib só). */
   const LIMITE = { status: 0, saude: 0 };
   for (const [rota, limite] of Object.entries(LIMITE)) {
-    const presente = ALVOS.every(([arq, mod]) => reDeclaracao(mod, rota)
-      .test(fs.readFileSync(path.join(raiz, arq), 'utf8').split('\n').find((l) => reDeclaracao(mod, rota).test(l)) || ''));
-    if (!presente) continue;   // extraída pra lib — a paridade virou estrutural
-    const ref = semRotulo(corpoDaRota(ALVOS[0][0], ALVOS[0][1], rota).join('\n'));
+    /* Codex #501 (P2, r3): `every` virava false com a rota faltando em UMA empresa só, e o
+       `continue` desligava a comparação em silêncio — que é exatamente o caso perigoso:
+       extração pela metade ou apagamento acidental. Ou está inline nas TRÊS (compara), ou saiu
+       das TRÊS (paridade estrutural). Meio a meio é erro e tem que reprovar. */
+    const ondeEsta = ALVOS.filter(([arq, mod]) => {
+      const linhas = fs.readFileSync(path.join(raiz, arq), 'utf8').split('\n');
+      return linhas.some((l) => reDeclaracao(mod, rota).test(l));
+    });
+    assert.ok(ondeEsta.length === 0 || ondeEsta.length === ALVOS.length,
+      '/' + rota + ' está inline em ' + ondeEsta.length + ' de ' + ALVOS.length + ' empresas (' +
+      ondeEsta.map(([, m]) => m).join(', ') + '). Extração pela metade: ou a rota sai das três ' +
+      'pra uma lib, ou fica nas três — do jeito que está, uma empresa mudou e as outras não.');
+    if (ondeEsta.length === 0) continue;   // extraída das três — a paridade virou estrutural
+    const ref = semRotulo(corpoDaRota(ALVOS[0][0], ALVOS[0][1], rota).join('\n'), ALVOS[0][1]);
     for (let i = 1; i < ALVOS.length; i++) {
-      const outro = semRotulo(corpoDaRota(ALVOS[i][0], ALVOS[i][1], rota).join('\n'));
+      const outro = semRotulo(corpoDaRota(ALVOS[i][0], ALVOS[i][1], rota).join('\n'), ALVOS[i][1]);
       const difs = ref.filter((l, k) => outro[k] !== l).length + Math.abs(ref.length - outro.length);
       /* a folga acabou: com o normalizador consertado, /status e /saude são IDÊNTICAS nas três.
          Eu ia dar 1 linha de folga à Girassol achando que a diferença era o app de Expedição —
