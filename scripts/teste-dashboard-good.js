@@ -110,4 +110,37 @@ assert.ok(/i\.descricao/.test(js[1]),
 assert.ok(/function avisarOndeTemDado/.test(js[1]),
   'período sem pedidos precisa dizer em que meses HÁ histórico — foi assim que a GOOD pareceu não ter venda alguma');
 
+/* 18/09 — O ⚙️ MOSTRAVA DOZE CAMPOS VAZIOS. Vazio ali significa "usa a tabela do código", e a
+   tabela o dono não vê — ele não tinha como saber qual alíquota estava valendo em cada mês.
+   Campo em branco que esconde um valor ativo é a mesma armadilha do card sem origem. */
+{
+  const jsT = /<script>([\s\S]*?)<\/script>/.exec(html)[1];
+
+  assert.ok(/d\.apuradas/.test(jsT), 'o ⚙️ não lê as alíquotas apuradas — as linhas ficariam sem valor');
+  assert.ok(/apurada/.test(jsT) && /salva aqui/.test(jsT),
+    'cada linha precisa dizer de ONDE vem a alíquota daquele mês');
+
+  /* alíquota vai com a precisão informada: o dono passou 11,819396% e arredondar esconde
+     justamente o dígito que ele conferiu no DAS */
+  assert.ok(/String\(v\)\.replace\('\.', ','\)/.test(jsT),
+    'a alíquota do ⚙️ não pode passar pelo PCT de uma casa — perde a precisão informada');
+
+  /* mês corrente e futuro NÃO levam alarme: o dono não tem como apurar o que não fechou, e
+     alarme que não se pode atender ensina a ignorar o alarme */
+  assert.ok(/k === hoje/.test(jsT), 'falta tratar o mês em andamento — ele apareceria como "falta apurar"');
+  assert.ok(/mês ainda não fechou/.test(jsT), 'falta tratar os meses futuros');
+}
+
+/* e as TRÊS rotas de config-fiscal devolvem as apuradas: contrato igual nas três, senão a
+   próxima tela que precisar disso descobre que só uma empresa responde */
+for (const [emp, arq] of Object.entries({
+  amb: 'amb-checkout-offline/index.js',
+  girassol: 'girassol-backup-offline/gbo-app.js',
+  good: 'good-checkout-offline/index.js',
+})) {
+  const s = fs.readFileSync(path.join(raiz, arq), 'utf8');
+  assert.ok(/ok: true, apuradas: DEFAULT_ALIQ_BK/.test(s),
+    emp + ': /config-fiscal não devolve as alíquotas apuradas — o ⚙️ mostraria campos vazios sem dizer o que vale');
+}
+
 console.log('OK: dashboard da GOOD — a tela existe, o JS compila, e ela só chama rotas que a GOOD responde');

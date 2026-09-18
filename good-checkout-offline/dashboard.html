@@ -22,6 +22,13 @@
   ────────────────────────────────────────────────────────────────────────────
 -->
 <style>
+/* 18/09 — a linha do ⚙️ passou a ter três partes (mês · campo · o que vale hoje). Sem isto o
+   texto de ajuda saía cortado no meio, como o dono viu: "vazio = usa a ta". */
+.linhaCfg { display:flex; align-items:center; gap:10px; margin:6px 0 }
+.linhaCfg > span:first-child { min-width:72px }
+.linhaCfg .campo.mini { width:110px; margin:0 }
+.linhaCfg .vale { flex:1; font-size:12px }
+
 
   :root{
     --bg:#0a0e1a; --bg2:#0d1326; --card:#131a30; --card2:#182138;
@@ -773,12 +780,33 @@ async function abrirConfig(){
     d = await r.json().catch(()=>null);
   } catch(e){ d = null; }
   const aliq = (d && d.ok && d.config && d.config.aliquotas) || {};
+  /* 18/09 — o ⚙️ mostrava doze campos vazios, e vazio ali significa "usa a tabela do código" —
+     tabela que o dono não vê. Ele não tinha como saber qual alíquota estava valendo em cada
+     mês. Agora a rota devolve as APURADAS e cada linha diz o que vale hoje e de onde vem. */
+  const apuradas = (d && d.ok && d.apuradas) || {};
   const ano = new Date().getFullYear();
+  const hoje = new Date().toISOString().slice(0,7);
   let html = '';
   for(let m=1; m<=12; m++){
     const k = ano+'-'+String(m).padStart(2,'0');
+    const salvo = aliq[k];
+    const apur = apuradas[k];
+    /* a alíquota vai com a precisão que o dono informou (ele passou 11,819396%) — arredondar
+       aqui esconderia justamente o dígito que ele conferiu no DAS. O PCT de uma casa serve pro
+       card, não pra este campo. */
+    const ALQ = v => String(v).replace('.', ',') + '%';
+    let vale;
+    if(salvo != null && Number(salvo) > 0) vale = '<b>'+ALQ(salvo)+'</b> · salva aqui';
+    else if(apur != null)                  vale = '<b>'+ALQ(apur)+'</b> · apurada';
+    else if(k === hoje)                    vale = '<span class="dim">mês em andamento — usa o padrão até fechar</span>';
+    else if(k > hoje)                      vale = '<span class="dim">mês ainda não fechou</span>';
+    /* só mês PASSADO sem alíquota merece alarme: é o único que o dono pode resolver agora.
+       Avisar sobre o mês corrente seria cobrar uma ação impossível, e alarme que não se pode
+       atender ensina a ignorar o alarme. */
+    else                                   vale = '<b class="bad">15%</b> · ⚠️ padrão — falta apurar';
     html += '<label class="linhaCfg"><span>'+k+'</span>' +
-            '<input class="campo mini" id="aliq_'+k+'" value="'+esc(aliq[k]!=null?aliq[k]:'')+'" placeholder="vazio = usa a tabela do código"></label>';
+            '<input class="campo mini" id="aliq_'+k+'" value="'+esc(salvo!=null?salvo:'')+'" placeholder="—">' +
+            '<span class="dim vale">'+vale+'</span></label>';
   }
   document.getElementById('camposAliq').innerHTML = html;
 }

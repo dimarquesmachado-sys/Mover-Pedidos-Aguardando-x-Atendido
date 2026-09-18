@@ -1441,7 +1441,11 @@ function routes(readBody) {
       const _okAdm = (process.env.ADMIN_KEY && _kAdm === process.env.ADMIN_KEY) || (opSess && ehAdmin(opSess));
       if (!_okAdm) { json(res, 403, { ok: false, erro: 'apenas admin' }); return true; }
       const CFG_FILE = path.join(CACHE_DIR, '_config-fiscal.json');
-      if (method === 'GET') { json(res, 200, { ok: true, config: readJson(CFG_FILE, { aliquotas: {}, taxas: {} }) }); return true; }
+      /* 18/09 — a rota devolve TAMBÉM as alíquotas apuradas do código. Sem isso, o ⚙️ mostra
+   doze campos vazios e o dono não tem como saber qual alíquota está valendo: vazio ali
+   significa "usa a tabela", e a tabela ele não vê. Campo em branco que esconde um valor
+   ativo é a mesma armadilha do card sem origem. */
+if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK_GOOD, config: readJson(CFG_FILE, { aliquotas: {}, taxas: {} }) }); return true; }
       let body = {}; try { const _rb = await readBody(req); body = (_rb && typeof _rb === 'object') ? _rb : JSON.parse(_rb || '{}'); } catch (e) {}   // tolerante: lib/http passou a devolver objeto ja parseado
       const atual = readJson(CFG_FILE, { aliquotas: {}, taxas: {} });
       const _aliqAntes = Object.assign({}, atual.aliquotas || {});   // p/ saber o que mudou de verdade
