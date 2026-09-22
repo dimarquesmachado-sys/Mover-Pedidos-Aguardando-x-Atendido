@@ -42,7 +42,7 @@ for (const [emp, arq] of Object.entries(TELAS)) {
   assert.ok(marca, emp + ': o campo não marca quando está mostrando valor DE FÁBRICA — ' +
     'sem a marca, o salvar não tem como distinguir o que o dono digitou do que ele só viu');
 
-  assert.ok(/oninput="this\.dataset\.tocado=1"/.test(html),
+  assert.ok(/oninput="this\.dataset\.tocado=\\'1\\'"/.test(html),
     emp + ': o campo não rastreia que a mão do dono passou ali — "editado" volta a ser decidido comparando texto, ' +
     'e retypar o mesmo valor de fábrica de propósito vira null de novo');
 

@@ -396,7 +396,7 @@ const MOD = '/girassol-backup-offline';
     return _f(u, o);
   };
 })();
-const DASH_BUILD = 'd230';
+const DASH_BUILD = 'd231';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -2683,6 +2683,12 @@ function renderCfg(){
       const NM=['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'][Number(m.slice(5,7))-1];
       const salvo = CFG.aliquotas[m], padrao = (typeof DEFAULT_ALIQ!=='undefined' && DEFAULT_ALIQ[m]!=null)? DEFAULT_ALIQ[m] : null;
       const val = salvo!=null? salvo : (padrao!=null? padrao : '');
+      /* Codex (P1): campo já salvo (não cinza) cujo valor bate exatamente com o de fábrica
+         atual pode ser sobra do bug antigo — a versão anterior gravava os meses cinza com o
+         valor de fábrica ao salvar por causa de outro mês. Não dá pra saber, só olhando o
+         número, se foi o bug ou o dono confirmando de propósito; por isso não apaga sozinho
+         — só oferece o botão pra quem quiser limpar e voltar a deixar a tabela do código mandar. */
+      const suspeita = salvo!=null && padrao!=null && Number(salvo)===Number(padrao);
       return '<label style="font-size:12px;color:var(--mut);display:flex;align-items:center;gap:6px;justify-content:space-between"><b style="min-width:56px">'+NM+'/'+m.slice(2,4)+'</b>'+
         '<input type="number" step="0.0001" min="0" max="40" data-aliq="'+m+'" value="'+val+'" placeholder="%" '+
         'style="width:96px'+(salvo==null&&padrao!=null?';color:#8b96b3':'')+'"'+
@@ -2691,15 +2697,15 @@ function renderCfg(){
            gravava os outros como escolha do dono. Estimativa gravada no painel VENCE a tabela do
            código quando a apuração chega — silenciosamente. */
         (salvo==null&&padrao!=null?' data-fabrica="1"':'')+
-        /* 22/09 (Codex P2) — mesmo conserto da AMB: "de fábrica" não pode ser decidido
-           comparando o texto final com o defaultValue (digitar de novo o MESMO número que a
-           fábrica já mostrava parecia campo intocado). oninput marca que a mão do dono passou. */
-        ' oninput="this.dataset.tocado=1"'+
+        /* Codex (P2): comparar valor final com defaultValue não distinguia "não tocou" de
+           "digitou de novo o mesmo número de fábrica" — os dois mandavam null e o dono perdia
+           a confirmação proposital. Agora quem decide é o TOQUE. */
+        ' oninput="this.dataset.tocado=\'1\'"'+
         ' title="'+(salvo!=null?'valor salvo por você':(padrao!=null?'de fábrica ('+padrao+'%) — edite p/ sobrepor':'sem alíquota'))+'">'+
-        /* 18/09 — a marcação de APURADA é do dono: ninguém deduz isso do número. Sem ela, mês
-           estimado e apurado ficam idênticos depois de salvos, e ele não sabe quais faltam
-           trocar quando a apuração chega — o trabalho dele por volta do dia 20, nas três. */
-        '<label style="font-size:11px;color:var(--mut);display:flex;align-items:center;gap:3px;margin-left:4px" '+
+        (suspeita? '<button type="button" onclick="var c=this.previousElementSibling;c.value=\'\';c.dataset.tocado=\'1\';this.remove();" '+
+          'style="border:1px solid #3d4a72;background:transparent;color:#8b96b3;border-radius:4px;font-size:10px;cursor:pointer;padding:1px 5px" '+
+          'title="salvo igual ao de fábrica — pode ser sobra do bug antigo que gravava sozinho; clique p/ limpar e voltar a usar a tabela do código">↺</button>' : '')+
+    '<label style="font-size:11px;color:var(--mut);display:flex;align-items:center;gap:3px;margin-left:4px" '+
         'title="marque quando o valor vier da apuração da contabilidade; sem marca, é estimativa">'+
         '<input type="checkbox" data-apurada="'+m+'"'+(APURADAS.has(m)?' checked':'')+'> apurada</label>'+
         '</label>';
@@ -2753,11 +2759,11 @@ async function acompanharReaplicar(){
 async function salvarCfg(){
   const aliquotas={}, taxas={};
   document.querySelectorAll('[data-aliq]').forEach(i=>{
-      /* só vira config o que o dono digitou: campo de fábrica não editado manda null, que é a
+      /* só vira config o que o dono digitou: campo de fábrica não TOCADO manda null, que é a
          verdade ("não tenho valor salvo") e deixa a tabela do código mandar.
-         22/09 (Codex P2): "digitou" agora é rastreado pelo oninput (dataset.tocado), não por
-         comparar o texto final com o defaultValue — retypar de propósito o MESMO número que a
-         fábrica já mostrava antes virava null igual a campo intocado. */
+         Codex (P2): usar `tocado` (marcado no oninput) em vez de comparar valor final com
+         defaultValue — senão digitar de propósito o mesmo número de fábrica também virava
+         null, e o dono perdia a confirmação. */
       const deFabrica = i.dataset.fabrica === '1' && i.dataset.tocado !== '1';
       /* Codex (P2): marcar "apurada" sobre o valor de fábrica intocado é o dono confirmando
          que a apuração bateu com o que a tabela já mostrava — sem isto o valor virava null e a
