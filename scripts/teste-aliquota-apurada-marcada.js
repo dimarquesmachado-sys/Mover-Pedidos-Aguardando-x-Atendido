@@ -149,22 +149,55 @@ for (const emp of ['amb', 'girassol']) {
    telas que a calculam (Codex #2: a Girassol calculava mas nunca mostrava) */
 for (const emp of ['amb', 'girassol']) {
   const html = fs.readFileSync(path.join(raiz, ARQ_TELA[emp]), 'utf8');
-  const m = /window\._aliqEstimadas = Object\.keys\(CFG\.aliquotas \|\| \{\}\)\s*\n\s*\.filter\([^;]*;/.exec(html);
+  /* 22/09 (Codex P2, 3ª rodada) — A LISTA VARRIA SÓ O QUE ESTAVA SALVO. As estimativas que
+     vivem só na TABELA DE FÁBRICA nunca apareciam: a Girassol tem 15% de palpite em ago-dez e
+     a AMB em jul-dez, e sem sobreposição no painel a lista do dia 20 dizia "nenhuma pendência"
+     enquanto vários meses calculavam imposto com chute. A varredura agora é por mês EFETIVO —
+     manda o salvo, se houver; senão o de fábrica — e cada origem tem a sua lista de apurados. */
+  const m = /window\._aliqEstimadas = \[\.\.\._mesesComValor\][\s\S]*?\}\)\.sort\(\);/.exec(html);
   assert.ok(m, emp + ': não achei o cálculo das pendências');
   assert.ok(/Ainda como <b>estimativa<\/b>/.test(html),
     emp + ': calcula as pendências mas não mostra o aviso na tela');
 
-  const pendentes = new Function('CFG', 'APURADAS', 'const window = {};\n' + m[0] + '\nreturn window._aliqEstimadas;');
-  const CFG = { aliquotas: { '2026-07': 7.5896, '2026-08': 8.40952, '2026-09': 10, '2026-10': 10 } };
+  const prep = /const _mesesComValor = new Set\(\[[\s\S]*?\]\);[\s\S]*?const _mesCorrente = [^;]*;/.exec(html);
+  assert.ok(prep, emp + ': não achei o preparo da varredura');
+  const pendentes = (CFG, APURADAS, DEFAULT_ALIQ, hojeSP) =>
+    new Function('CFG', 'APURADAS', 'DEFAULT_ALIQ', 'hojeSP',
+      'const window = {};\n' + prep[0] + '\n' + m[0] + '\nreturn window._aliqEstimadas;')(CFG, APURADAS, DEFAULT_ALIQ, hojeSP);
 
-  assert.deepStrictEqual(pendentes(CFG, new Set()), ['2026-07', '2026-08', '2026-09', '2026-10'],
-    emp + ': sem nada marcado, TODOS os meses salvos são pendência');
-  assert.deepStrictEqual(pendentes(CFG, new Set(['2026-07', '2026-08'])), ['2026-09', '2026-10'],
-    emp + ': marcados jul e ago, sobram set e out — que é a lista que o dono precisa no dia 20');
+  const hoje = () => '2026-09-22';
+  const FABRICA = { '2026-07': 8.58, '2026-08': 8.82, '2026-09': 8.82, '2026-10': 8.82 };
 
-  /* mês SEM valor salvo não é pendência: não há o que trocar nele */
-  assert.deepStrictEqual(pendentes({ aliquotas: { '2026-11': 0 } }, new Set()), [],
-    emp + ': mês sem alíquota salva não pode virar pendência — zero não é valor');
+  /* o caso que motivou o apontamento: NADA salvo no painel, tudo vindo da fábrica */
+  assert.deepStrictEqual(
+    pendentes({ aliquotas: {}, apuradosFabrica: [] }, new Set(), FABRICA, hoje),
+    ['2026-07', '2026-08'],
+    emp + ': estimativa que vive só na tabela de fábrica tem que entrar na lista — é ela que ' +
+    'está calculando imposto com palpite');
+
+  /* mês de fábrica JÁ apurado no código não é pendência */
+  assert.deepStrictEqual(
+    pendentes({ aliquotas: {}, apuradosFabrica: ['2026-07'] }, new Set(), FABRICA, hoje),
+    ['2026-08'], emp + ': mês apurado na tabela do código não pode aparecer como pendência');
+
+  /* o salvo VENCE a fábrica: quem decide a pendência é a marca do dono, não a do código */
+  assert.deepStrictEqual(
+    pendentes({ aliquotas: { '2026-07': 7.5896 }, apuradosFabrica: ['2026-07'] }, new Set(), FABRICA, hoje),
+    ['2026-07', '2026-08'],
+    emp + ': com valor salvo por cima, quem vale é a marcação DO DONO — a do código é de outro número');
+
+  assert.deepStrictEqual(
+    pendentes({ aliquotas: { '2026-07': 7.5896 }, apuradosFabrica: [] }, new Set(['2026-07']), FABRICA, hoje),
+    ['2026-08'], emp + ': mês salvo e marcado pelo dono sai da lista');
+
+  /* mês corrente e futuro não são pendência: não há apuração a cobrar de quem não fechou.
+     (O teste precisa de uma fábrica SÓ com set/out, senão jul e ago entram pela tabela e o
+     caso não isola o que quer provar — errei isso na primeira escrita e o próprio teste
+     acusou.) */
+  const FUTURO = { '2026-09': 8.82, '2026-10': 8.82 };
+  assert.deepStrictEqual(
+    pendentes({ aliquotas: { '2026-09': 10, '2026-10': 10 }, apuradosFabrica: [] }, new Set(), FUTURO, hoje),
+    [], emp + ': mês em andamento ou futuro não pode ser cobrado — alarme que não se pode atender ensina a ignorar alarme');
 }
 
 /* AMB e Girassol: 22/09 (Codex P2, 2ª rodada) — a pendência de um ano que o formulário não
@@ -175,6 +208,29 @@ for (const emp of ['amb', 'girassol']) {
   const html = fs.readFileSync(path.join(raiz, ARQ_TELA[emp]), 'utf8');
   assert.ok(/data-fora-ano="1"/.test(html),
     emp + ': a pendência de um mês de ano anterior não tem checkbox — fica presa no aviso pra sempre');
+}
+
+/* 22/09 (Codex P2, 3ª rodada) — O MÊS DE ANO ANTERIOR PRECISA DE CAMPO, NÃO SÓ DA CAIXINHA.
+   Quando a contabilidade manda a apuração de dezembro em janeiro, o valor quase nunca é igual
+   à estimativa que ficou salva. Com só a caixinha, marcar "apurada" fazia o aviso sumir e a
+   ESTIMATIVA VELHA seguir calculando — o pior desfecho: o dono acha que resolveu e o número
+   continua errado. E a GOOD não tinha linha nenhuma: a pendência simplesmente sumia da tela. */
+for (const [emp, arq] of Object.entries(ARQ_TELA)) {
+  const html = fs.readFileSync(path.join(raiz, arq), 'utf8');
+  assert.ok(/data-fora-ano="1"/.test(html),
+    emp + ': não há controle pro mês de ano anterior — a pendência some da tela na virada do ano');
+  assert.ok(/data-aliq="'\+mm\+'" data-fora-ano="1"|data-fora-ano="1" value="'\+esc\(aliq\[k\]\)/.test(html),
+    emp + ': o mês de ano anterior tem só a caixinha, sem campo de valor — marcar "apurada" faria ' +
+    'o aviso sumir com a estimativa velha ainda calculando o imposto');
+}
+
+/* e o salvar das TRÊS tem que recusar alíquota fora da faixa ANTES de postar: o servidor
+   ignora o valor inválido e mantém o anterior, mas o filtro tirava o mês de `apuradas` — a
+   requisição voltava "ok" com a alíquota certa e a marcação apagada, sem nada avisar */
+for (const [emp, arq] of Object.entries(ARQ_TELA)) {
+  const html = fs.readFileSync(path.join(raiz, arq), 'utf8');
+  assert.ok(/nada foi salvo/.test(html),
+    emp + ': o salvar não recusa alíquota fora da faixa antes de postar — a marcação some em silêncio');
 }
 
 console.log('OK: alíquota apurada — as três guardam e mostram a marcação do dono, o aviso lista só os meses ' +

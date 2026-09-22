@@ -452,7 +452,7 @@
     <div class="marca">
       <span class="logo">📦</span>
       <h1>Inteligência de Vendas · <b>GOOD Import</b></h1>
-      <span class="build" id="build">g2</span>
+      <span class="build" id="build">g3</span>
     </div>
     <div class="acoes">
       <button class="btn" onclick="abrirConfig()">⚙️ Impostos</button>
@@ -849,6 +849,27 @@ async function abrirConfig(){
             '<input type="checkbox" data-apurada="'+k+'"'+(APURADAS.has(k)?' checked':'')+'> apurada</label>' +
             '</label>';
   }
+  /* 22/09 (Codex P2) — PENDÊNCIA DE ANO ANTERIOR. O formulário desenha só os 12 meses do ano
+     corrente, mas o servidor PRESERVA de propósito as alíquotas e marcações de anos passados.
+     Sem uma linha aqui, um dezembro salvo e ainda não apurado some da tela na virada do ano:
+     continua calculando imposto com a estimativa e não há como corrigir nem marcar.
+     A linha vem com CAMPO, não só com a caixinha — quando a contabilidade manda a apuração de
+     dezembro em janeiro, o valor quase nunca é igual ao palpite que ficou salvo. */
+  const foraDoAno = Object.keys(aliq)
+    .filter(k => k.slice(0,4) !== String(ano) && Number(aliq[k]) > 0 && !APURADAS.has(k))
+    .sort();
+  if(foraDoAno.length){
+    html += '<div class="dim" style="margin:10px 0 4px">⚠️ Pendência de outro ano — ainda como estimativa:</div>';
+    for(const k of foraDoAno){
+      html += '<label class="linhaCfg"><span>'+k+'</span>' +
+              '<input class="campo mini" id="aliq_'+k+'" data-fora-ano="1" value="'+esc(aliq[k])+'">' +
+              '<span class="dim vale">salva aqui · <b class="bad">⚠️ estimativa</b></span>' +
+              '<label class="dim" style="font-size:11px;display:flex;align-items:center;gap:3px" ' +
+              'title="corrija o valor com a apuração e marque; sem marca, segue como estimativa">' +
+              '<input type="checkbox" data-apurada="'+k+'" data-fora-ano="1"> apurada</label>' +
+              '</label>';
+    }
+  }
   document.getElementById('camposAliq').innerHTML = html;
 }
 function fecharConfig(){ document.getElementById('modalConfig').style.display = 'none'; }
@@ -884,8 +905,20 @@ async function salvarConfig(){
     if(!isFinite(n) || n < 0 || n > 40){ invalidos.push(k); continue; }
     aliquotas[k] = n;
   }
+  /* 22/09 (Codex P2) — os meses de ANO ANTERIOR também entram. O laço acima cobre só os 12 do
+     ano corrente; sem isto, corrigir a apuração de um dezembro pendente não ia junto e a linha
+     nova seria decorativa. Mesmo tratamento: vazio e zero apagam, fora da faixa barra tudo. */
+  for(const el of document.querySelectorAll('[data-fora-ano="1"][id^="aliq_"]')){
+    const k = el.id.slice(5);
+    const vTxt = (el.value || '').trim().replace(',', '.');
+    if(vTxt === ''){ aliquotas[k] = null; continue; }
+    const n = Number(vTxt);
+    if(n === 0){ aliquotas[k] = null; continue; }
+    if(!isFinite(n) || n < 0 || n > 40){ invalidos.push(k); continue; }
+    aliquotas[k] = n;
+  }
   if(invalidos.length){
-    document.getElementById('msgConfig').innerHTML = 'alíquota inválida em <b>'+invalidos.join(', ')+'</b> (use 0 a 40) — nada foi salvo.';
+    document.getElementById('msgConfig').innerHTML = 'alíquota inválida em <b>'+invalidos.sort().join(', ')+'</b> (use 0 a 40) — nada foi salvo.';
     return;
   }
   document.getElementById('msgConfig').textContent = 'salvando…';

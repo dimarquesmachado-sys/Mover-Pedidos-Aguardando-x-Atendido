@@ -404,7 +404,7 @@ const MOD = '/amb-checkout-offline';
     return _f(u, o);
   };
 })();
-const DASH_BUILD = 'a40';
+const DASH_BUILD = 'a41';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -1131,7 +1131,7 @@ async function boot(){
     DADOS = d.itens;
     VENDAS = Array.isArray(d.vendas_bling) ? d.vendas_bling : [];
     prepararVendas();
-    try{ const rc = await fetch(MOD+'/config-fiscal',{credentials:'same-origin'}); const dc = await rc.json(); if(dc&&dc.config) CFG = { aliquotas: dc.config.aliquotas||{}, taxas: dc.config.taxas||{}, flex: dc.config.flex||{}, ciencia_aliq: dc.config.ciencia_aliq||{}, apuradas: dc.config.apuradas||[] }; }catch(e){}
+    try{ const rc = await fetch(MOD+'/config-fiscal',{credentials:'same-origin'}); const dc = await rc.json(); if(dc&&dc.config) CFG = { aliquotas: dc.config.aliquotas||{}, taxas: dc.config.taxas||{}, flex: dc.config.flex||{}, ciencia_aliq: dc.config.ciencia_aliq||{}, apuradas: dc.config.apuradas||[], apuradosFabrica: dc.apurados_meses||[] }; }catch(e){}
     try{ const rm = await fetch(MOD+'/config-frete-magalu',{credentials:'same-origin'}); const dm = await rm.json(); if(dm&&dm.config&&dm.config.nivel_desconto) MAG_NIVEL = dm.config.nivel_desconto; }catch(e){}
     montar();
   }catch(e){
@@ -2721,8 +2721,24 @@ function renderCfg(){
   /* 18/09 — o aviso que faz do ⚙️ a lista de pendências do dia 20: meses COM valor salvo
      que ainda NÃO foram marcados como apurados. Mês sem valor não entra — não há o que
      trocar nele. */
-  window._aliqEstimadas = Object.keys(CFG.aliquotas || {})
-    .filter(mm => Number(CFG.aliquotas[mm]) > 0 && !APURADAS.has(mm)).sort();
+  /* 22/09 (Codex P2) — A LISTA VARRIA SÓ O QUE ESTAVA SALVO, e deixava de fora justamente os
+         meses que mais precisam aparecer: os que calculam imposto com a ESTIMATIVA DE FÁBRICA e
+         ninguém sobrepôs. Na Girassol a tabela tem 15% de palpite em ago-dez; sem sobreposição,
+         a lista do dia 20 mostrava "nenhuma pendência" enquanto cinco meses rodavam com chute.
+         Agora a varredura é por MÊS EFETIVO: quem manda no cálculo é o salvo, se houver, senão o
+         de fábrica — e cada um tem a própria lista de apurados (a do dono e a do código). */
+      const _mesesComValor = new Set([
+        ...Object.keys(CFG.aliquotas || {}).filter(mm => Number(CFG.aliquotas[mm]) > 0),
+        ...Object.keys(typeof DEFAULT_ALIQ !== 'undefined' ? DEFAULT_ALIQ : {}),
+      ]);
+      const _apuradosFabrica = new Set(CFG.apuradosFabrica || []);
+      /* mês que ainda não fechou não é pendência: não há apuração a cobrar de quem não terminou */
+      const _mesCorrente = (typeof hojeSP === 'function' ? hojeSP() : new Date().toISOString()).slice(0, 7);
+      window._aliqEstimadas = [..._mesesComValor].filter(mm => {
+        if (mm >= _mesCorrente) return false;
+        const temSalvo = Number((CFG.aliquotas || {})[mm]) > 0;
+        return temSalvo ? !APURADAS.has(mm) : !_apuradosFabrica.has(mm);
+      }).sort();
   /* 22/09 (Codex P2) — o formulário só desenha os 12 meses do ano CORRENTE, mas o scan acima
      olha todos os anos guardados (o backend agora preserva apurados de anos anteriores). Um
      dezembro pendente virava aviso permanente sem checkbox nenhum pra resolver — o dono não
@@ -2777,7 +2793,24 @@ function renderCfg(){
       ? '<div class="aviso" style="margin:10px 0">\u26a0\ufe0f Ainda como <b>estimativa</b>: ' +
         (estimadasAno.length ? estimadasAno.join(', ') : '') +
         (estimadasAno.length && estimadasForaAno.length ? ' \u00b7 ' : '') +
-        estimadasForaAno.map(mm=>'<label style="margin-left:4px"><input type="checkbox" data-apurada="'+mm+'" data-fora-ano="1"> '+mm+'</label>').join(' ') +
+        /* 22/09 (Codex P2) — O MÊS DE ANO ANTERIOR PRECISA DE CAMPO, NÃO SÓ DA CAIXINHA. Quando
+           a contabilidade manda a apuração de dezembro em janeiro, o valor quase nunca é igual
+           à estimativa que ficou salva. Com só a caixinha, marcar "apurada" fazia o aviso sumir
+           e a ESTIMATIVA VELHA seguir calculando o imposto — o pior desfecho possível aqui:
+           o dono acha que resolveu e o número continua errado.
+           Agora o mês fora do ano traz o próprio input; o valor digitado entra junto no
+           `aliquotas` do POST, do mesmo jeito que os meses do ano corrente. */
+        estimadasForaAno.map(mm=>'<label style="margin-left:6px;white-space:nowrap">'+
+          '<input type="checkbox" data-apurada="'+mm+'" data-fora-ano="1"> '+mm+' '+
+          '<input type="number" step="0.0001" min="0" max="40" data-aliq="'+mm+'" data-fora-ano="1"'+
+          /* mesma regra do #507 aqui: se o campo está só EXIBINDO o valor de fábrica, ele não
+             pode virar config por estar na tela — e marcar a caixinha ao lado é o dono
+             confirmando que a apuração bateu com a tabela (o confirmaApurada do salvar). */
+          (CFG.aliquotas[mm]==null && typeof DEFAULT_ALIQ!=="undefined" && DEFAULT_ALIQ[mm]!=null ? ' data-fabrica="1"' : '')+' '+
+          'value="'+(CFG.aliquotas[mm]!=null?CFG.aliquotas[mm]:(typeof DEFAULT_ALIQ!=="undefined"&&DEFAULT_ALIQ[mm]!=null?DEFAULT_ALIQ[mm]:""))+'" '+
+          'oninput="this.dataset.tocado=\'1\'" style="width:78px" '+
+          'title="a apuração de um mês de ano anterior quase nunca bate com a estimativa que ficou salva — corrija aqui antes de marcar">'+
+          '</label>').join(' ') +
         ' \u2014 marque <b>apurada</b> quando a contabilidade mandar o valor do m\u00eas.</div>'
       : '') +
     (_aliqHerdadas.size ? '<div class="aviso" style="margin:10px 0">\u26a0\ufe0f M\u00eas sem al\u00edquota pr\u00f3pria usando a de outro m\u00eas: '+
@@ -2840,6 +2873,19 @@ async function salvarCfg(){
        Os checkboxes "fora do ano" (pendência de ano anterior, sem input de alíquota na tela)
        já se referem a um valor que SABEMOS válido — é por isso que entraram na lista de
        pendências — então não precisam passar pelo aliquotas[...] daqui. */
+    /* 22/09 (Codex P2) — RECUSAR ANTES DE ENVIAR, como a GOOD já faz. Digitar 41 num mês que
+       já era apurado fazia três coisas ao mesmo tempo: o servidor ignorava o 41 e MANTINHA a
+       alíquota anterior, o filtro abaixo tirava o mês de `apuradas`, e a requisição voltava
+       "ok". Resultado: a alíquota certa continuava lá, a marcação sumia, e nada avisava.
+       Alíquota fora do intervalo agora barra o salvamento inteiro e diz qual mês. */
+    const _foraDoIntervalo = Object.keys(aliquotas)
+      .filter(mm => aliquotas[mm] != null && !(Number(aliquotas[mm]) > 0 && Number(aliquotas[mm]) <= 40));
+    if (_foraDoIntervalo.length) {
+      const _msg = $('cfgMsg');
+      if (_msg) _msg.innerHTML = 'alíquota inválida em <b>' + _foraDoIntervalo.sort().join(', ') +
+        '</b> (use um valor entre 0 e 40) — nada foi salvo.';
+      return;
+    }
     const apuradas = [...document.querySelectorAll('[data-apurada]')]
       .filter(c => c.checked && (c.dataset.foraAno === '1' || (aliquotas[c.dataset.apurada] > 0 && aliquotas[c.dataset.apurada] <= 40)))
       .map(c => c.dataset.apurada);
