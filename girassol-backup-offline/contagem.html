@@ -407,7 +407,7 @@
   <header class="top">
     <div class="marca"><span class="logo">📦</span>
       <h1>Contagem de Estoque · <b>Magazine Girassol</b></h1>
-      <span class="build">c1</span>
+      <span class="build">c2</span>
     </div>
   </header>
 
@@ -421,6 +421,7 @@
     <div class="dim">SKU · código de barras (EAN) · parte do nome</div>
     <input id="busca" class="campo" autofocus autocomplete="off"
            placeholder="bipe o código ou digite e tecle Enter"
+           oninput="aoDigitar(this.value)"
            onkeydown="if(event.key==='Enter'){event.preventDefault();procurar();}">
     <div id="resultado"></div>
   </section>
@@ -457,6 +458,29 @@ let LIMPAR_TIMER = null;
 function hojeISO(){ return new Date().toLocaleString('sv-SE',{timeZone:'America/Sao_Paulo'}).slice(0,10); }
 function horaSP(iso){ try { return new Date(iso).toLocaleString('sv-SE',{timeZone:'America/Sao_Paulo'}).slice(11,16); } catch(e){ return String(iso||'').slice(11,16); } }
 
+/* 22/09 — MOSTRA ENQUANTO DIGITA, pedido do dono: "ele digitar lixa e já ir mostrando todos os
+   produtos com esse nome". É o padrão da consulta do checkout offline (oninput).
+
+   Duas travas que o pedido não menciona mas o galpão exige:
+   · espera 300 ms parado antes de procurar — sem isso "lixa" dispara 4 buscas, e quem digita
+     rápido gera respostas que chegam fora de ordem;
+   · enquanto digita, só o ÍNDICE LOCAL. O Bling fica reservado pro Enter e pro clique no item,
+     que é quando precisamos do saldo real. Buscar lá por tecla seria a cota da conta indo
+     embora — e a operação perde primeiro. */
+let _tDigita = null, _seqBusca = 0;
+
+function aoDigitar(v){
+  clearTimeout(_tDigita);
+  const q = String(v || '').trim();
+  if(q.length < 3){
+    /* abaixo de 3 letras não procura: viria meio catálogo. Limpa o que estava na tela pra não
+       deixar resultado velho de outra busca enganando quem olha. */
+    if(!ESCOLHIDO) document.getElementById('resultado').innerHTML = '';
+    return;
+  }
+  _tDigita = setTimeout(() => buscarPorNome(q, false), 300);
+}
+
 async function procurar(){
   const q = document.getElementById('busca').value.trim();
   if(!q) return;
@@ -489,12 +513,17 @@ async function procurar(){
 }
 
 async function buscarPorNome(q, veioDeCodigo){
+  /* com a busca saindo a cada pausa, duas respostas podem chegar fora de ordem e a lista de
+     "lix" sobrescrever a de "lixa". O contador diz qual é a mais recente; as atrasadas somem
+     em silêncio. */
+  const meu = ++_seqBusca;
   const alvo = document.getElementById('resultado');
   let d = null;
   try {
     const r = await fetch(MOD+'/contagem-buscar-nome?q='+encodeURIComponent(q), {credentials:'same-origin'});
     d = await r.json().catch(()=>null);
   } catch(e){ d = null; }
+  if(meu !== _seqBusca) return;
   if(!d || !d.ok){
     alvo.innerHTML = '<div class="aviso">Não consegui procurar agora — isto <b>não</b> quer dizer que o produto não existe. Tente de novo.</div>';
     return;
@@ -525,6 +554,8 @@ async function abrirPorSku(sku){
 }
 
 function mostrarProduto(p){
+  clearTimeout(_tDigita);   // escolheu: para de procurar enquanto ele digita a quantidade
+  _seqBusca++;              // e descarta qualquer resposta que ainda esteja a caminho
   if(LIMPAR_TIMER){ clearTimeout(LIMPAR_TIMER); LIMPAR_TIMER = null; }   // veio um produto novo: o reset pendente do lançamento anterior não pode apagar ESTE
   ESCOLHIDO = p;
   document.getElementById('resultado').innerHTML = '';

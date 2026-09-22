@@ -122,4 +122,19 @@ assert.ok(/enviado_ao_bling: false/.test(lib),
     'a tela não trata a falha ao salvar — a pessoa seguiria pro próximo item e a contagem se perderia');
 }
 
+/* 22/09 — MOSTRA ENQUANTO DIGITA, pedido do dono: "ele digitar lixa e já ir mostrando todos os
+   produtos com esse nome". As duas travas abaixo não estão no pedido, mas sem elas a tela fica
+   pior do que era: sem a espera, cada tecla vira uma busca; sem o contador de ordem, a resposta
+   de "lix" chega depois e sobrescreve a lista de "lixa". */
+{
+  const js = /<script>([\s\S]*?)<\/script>/.exec(html)[1];
+  assert.ok(/oninput="aoDigitar\(this\.value\)"/.test(html),
+    'a busca não acontece enquanto digita — o dono pediu ver a lista aparecendo');
+  assert.ok(/setTimeout\(\(\) => buscarPorNome\(q, false\), 300\)/.test(js),
+    'falta a espera antes de buscar — "lixa" dispararia 4 buscas seguidas');
+  assert.ok(/const meu = \+\+_seqBusca;/.test(js) && /if\(meu !== _seqBusca\) return;/.test(js),
+    'sem controle de ordem, a resposta de "lix" pode chegar depois e sobrescrever a de "lixa"');
+  assert.ok(/q\.length < 3/.test(js), 'falta o piso de 3 letras na tela');
+}
+
 console.log('OK: contagem de estoque — registro interno (nunca escreve no Bling), sessão nas 4 rotas, quantidade validada e busca por nome sem gastar cota');
