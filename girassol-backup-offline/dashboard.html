@@ -396,7 +396,7 @@ const MOD = '/girassol-backup-offline';
     return _f(u, o);
   };
 })();
-const DASH_BUILD = 'd227';
+const DASH_BUILD = 'd229';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -2673,9 +2673,29 @@ function renderCfg(){
       const NM=['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'][Number(m.slice(5,7))-1];
       const salvo = CFG.aliquotas[m], padrao = (typeof DEFAULT_ALIQ!=='undefined' && DEFAULT_ALIQ[m]!=null)? DEFAULT_ALIQ[m] : null;
       const val = salvo!=null? salvo : (padrao!=null? padrao : '');
+      /* Codex (P1): campo já salvo (não cinza) cujo valor bate exatamente com o de fábrica
+         atual pode ser sobra do bug antigo — a versão anterior gravava os meses cinza com o
+         valor de fábrica ao salvar por causa de outro mês. Não dá pra saber, só olhando o
+         número, se foi o bug ou o dono confirmando de propósito; por isso não apaga sozinho
+         — só oferece o botão pra quem quiser limpar e voltar a deixar a tabela do código mandar. */
+      const suspeita = salvo!=null && padrao!=null && Number(salvo)===Number(padrao);
       return '<label style="font-size:12px;color:var(--mut);display:flex;align-items:center;gap:6px;justify-content:space-between"><b style="min-width:56px">'+NM+'/'+m.slice(2,4)+'</b>'+
         '<input type="number" step="0.0001" min="0" max="40" data-aliq="'+m+'" value="'+val+'" placeholder="%" '+
-        'style="width:96px'+(salvo==null&&padrao!=null?';color:#8b96b3':'')+'" title="'+(salvo!=null?'valor salvo por você':(padrao!=null?'de fábrica ('+padrao+'%) — edite p/ sobrepor':'sem alíquota'))+'"></label>';
+        'style="width:96px'+(salvo==null&&padrao!=null?';color:#8b96b3':'')+'"'+
+        /* 18/09 — o mesmo conserto da AMB: o campo já sabia que mostrava valor DE FÁBRICA (é o
+           que o pinta de cinza), mas o salvar mandava todos igual, e salvar por causa de um mês
+           gravava os outros como escolha do dono. Estimativa gravada no painel VENCE a tabela do
+           código quando a apuração chega — silenciosamente. */
+        (salvo==null&&padrao!=null?' data-fabrica="1"':'')+
+        /* Codex (P2): comparar valor final com defaultValue não distinguia "não tocou" de
+           "digitou de novo o mesmo número de fábrica" — os dois mandavam null e o dono perdia
+           a confirmação proposital. Agora quem decide é o TOQUE. */
+        ' oninput="this.dataset.tocado=\'1\'"'+
+        ' title="'+(salvo!=null?'valor salvo por você':(padrao!=null?'de fábrica ('+padrao+'%) — edite p/ sobrepor':'sem alíquota'))+'">'+
+        (suspeita? '<button type="button" onclick="var c=this.previousElementSibling;c.value=\'\';c.dataset.tocado=\'1\';this.remove();" '+
+          'style="border:1px solid #3d4a72;background:transparent;color:#8b96b3;border-radius:4px;font-size:10px;cursor:pointer;padding:1px 5px" '+
+          'title="salvo igual ao de fábrica — pode ser sobra do bug antigo que gravava sozinho; clique p/ limpar e voltar a usar a tabela do código">↺</button>' : '')+
+        '</label>';
     }).join('')+'</div>'+
     (_aliqHerdadas.size ? '<div class="aviso" style="margin:10px 0">\u26a0\ufe0f M\u00eas sem al\u00edquota pr\u00f3pria usando a de outro m\u00eas: '+
        Array.from(_aliqHerdadas).map(x=>x.split('\u2190')[0]+' \u2190 '+x.split('\u2190')[1]).join(' \u00b7 ')+
@@ -2715,7 +2735,15 @@ async function acompanharReaplicar(){
 
 async function salvarCfg(){
   const aliquotas={}, taxas={};
-  document.querySelectorAll('[data-aliq]').forEach(i=>{ aliquotas[i.dataset.aliq] = i.value===''?null:Number(i.value); });
+  document.querySelectorAll('[data-aliq]').forEach(i=>{
+      /* só vira config o que o dono digitou: campo de fábrica não TOCADO manda null, que é a
+         verdade ("não tenho valor salvo") e deixa a tabela do código mandar.
+         Codex (P2): usar `tocado` (marcado no oninput) em vez de comparar valor final com
+         defaultValue — senão digitar de propósito o mesmo número de fábrica também virava
+         null, e o dono perdia a confirmação. */
+      const deFabrica = i.dataset.fabrica === '1' && i.dataset.tocado !== '1';
+      aliquotas[i.dataset.aliq] = (i.value === '' || deFabrica) ? null : Number(i.value);
+    });
   document.querySelectorAll('[data-taxa]').forEach(i=>{ taxas[i.dataset.taxa] = i.value===''?null:Number(i.value); });
   const flex={}; document.querySelectorAll('[data-flex]').forEach(i=>{ flex[i.dataset.flex] = i.value===''?null:Number(i.value); });
   const msg=$('cfgMsg'); msg.textContent='salvando…';
