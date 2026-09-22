@@ -835,7 +835,11 @@ async function abrirConfig(){
        atender ensina a ignorar o alarme. */
     else                                   vale = '<b class="bad">15%</b> · ⚠️ padrão — falta apurar';
     html += '<label class="linhaCfg"><span>'+k+'</span>' +
-            '<input class="campo mini" id="aliq_'+k+'" value="'+esc(salvo!=null?salvo:'')+'" placeholder="—">' +
+            /* 18/09 — ZERO NÃO É ALÍQUOTA, e a tela mostrava "0" como se fosse valor configurado. O
+               backend já sabe disso desde 19/08 ("mês salvo como 0% era campo em BRANCO gravado por
+               engano") e ignora o zero no cálculo — só a tela é que o exibia. O dono viu set-dez com
+               0 e teve que perguntar; pior, salvar de novo REGRAVA o zero. */
+            '<input class="campo mini" id="aliq_'+k+'" value="'+esc(salvo!=null&&Number(salvo)>0?salvo:'')+'" placeholder="—">' +
             '<span class="dim vale">'+vale+'</span>' +
             /* 18/09 — a marcação de APURADA é do dono: ninguém deduz do número se aquele valor
                veio da contabilidade ou é palpite dele. Sem ela, mês estimado e apurado ficam
@@ -869,6 +873,11 @@ async function salvarConfig(){
        preenchendo o campo com o valor de fábrica. */
     if(vTxt === ''){ aliquotas[k] = null; continue; }
     const n = Number(vTxt);
+    /* 18/09 — zero recebe o MESMO tratamento de campo limpo: manda null e o servidor apaga.
+       Antes ele era gravado como alíquota válida, o cálculo o ignorava (regra de 19/08) e a
+       configuração ficava com um valor que não valia nada — a tela dizendo uma coisa e o
+       imposto seguindo outra. */
+    if(n === 0){ aliquotas[k] = null; continue; }
     // Codex (P2): valida ANTES de mandar — o servidor aceita só 0–40 e ignora em silêncio
     // qualquer coisa fora disso (texto vira null no JSON, fora da faixa não muda nada), mas
     // sempre respondia ok:true, então a tela anunciava "salvo" sem a alíquota ter sido aplicada.
