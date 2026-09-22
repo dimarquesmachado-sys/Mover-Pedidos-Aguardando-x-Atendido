@@ -233,6 +233,26 @@ for (const [emp, arq] of Object.entries(ARQ_TELA)) {
     emp + ': o salvar não recusa alíquota fora da faixa antes de postar — a marcação some em silêncio');
 }
 
+/* AMB e Girassol: a faixa que o BACKEND aceita é 0 ≤ x ≤ 40 (0 é campo LIMPO, regra de 18/09 —
+   ver teste-aliquota-fabrica.js e o próprio backend em index.js/gbo-app.js), não 0 < x ≤ 40.
+   A primeira versão do bloqueio acima usou `> 0`, e isso barrava o SALVAMENTO INTEIRO (não só o
+   mês) sempre que qualquer mês tivesse 0 digitado — mesmo sendo a forma normal de apagar uma
+   alíquota salva por este mesmo botão. */
+for (const emp of ['amb', 'girassol']) {
+  const html = fs.readFileSync(path.join(raiz, ARQ_TELA[emp]), 'utf8');
+  const bloco = /const _foraDoIntervalo = Object\.keys\(aliquotas\)\s*\n\s*\.filter\([^;]*;/.exec(html);
+  assert.ok(bloco, emp + ': não achei a validação de faixa antes de montar apuradas/postar');
+
+  const foraDoIntervalo = new Function('aliquotas', bloco[0] + '\nreturn _foraDoIntervalo;');
+
+  assert.deepStrictEqual(foraDoIntervalo({ '2026-01': 0, '2026-02': 8.4, '2026-03': null }), [],
+    emp + ': 0 é a forma normal de LIMPAR uma alíquota salva (18/09) — não pode bloquear o salvamento inteiro');
+  assert.deepStrictEqual(foraDoIntervalo({ '2026-01': 40 }), [],
+    emp + ': 40 é o EXTREMO aceito pelo backend — não pode ser tratado como inválido');
+  assert.deepStrictEqual(foraDoIntervalo({ '2026-01': 41, '2026-02': -1, '2026-03': 8.4 }), ['2026-01', '2026-02'],
+    emp + ': 41 e -1 estão fora da faixa que o backend aceita — têm que bloquear o salvamento');
+}
+
 console.log('OK: alíquota apurada — as três guardam e mostram a marcação do dono, o aviso lista só os meses ' +
   'que faltam trocar (com jeito de resolver pendência de ano anterior), a confirmação sobre valor de fábrica ' +
   'salva mesmo retypando o mesmo número, marcar apurada exige o mesmo intervalo que o backend aceita, e a ' +

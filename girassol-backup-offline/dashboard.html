@@ -396,7 +396,7 @@ const MOD = '/girassol-backup-offline';
     return _f(u, o);
   };
 })();
-const DASH_BUILD = 'd232';
+const DASH_BUILD = 'd233';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -2812,9 +2812,14 @@ async function salvarCfg(){
        já era apurado fazia três coisas ao mesmo tempo: o servidor ignorava o 41 e MANTINHA a
        alíquota anterior, o filtro abaixo tirava o mês de `apuradas`, e a requisição voltava
        "ok". Resultado: a alíquota certa continuava lá, a marcação sumia, e nada avisava.
-       Alíquota fora do intervalo agora barra o salvamento inteiro e diz qual mês. */
+       Alíquota fora do intervalo agora barra o salvamento inteiro e diz qual mês.
+       22/09 (Codex P2, 3ª rodada — revisão) — a faixa aceita pelo backend é 0 ≤ x ≤ 40, não
+       0 < x ≤ 40: zero é o campo LIMPO (regra de 18/09, é assim que se apaga uma alíquota
+       salva por aqui mesmo), não um erro. Usar `> 0` aqui bloqueava o salvamento INTEIRO só
+       porque um mês qualquer tinha 0 digitado — mesmo estando dentro da faixa que o próprio
+       backend aceita. */
     const _foraDoIntervalo = Object.keys(aliquotas)
-      .filter(mm => aliquotas[mm] != null && !(Number(aliquotas[mm]) > 0 && Number(aliquotas[mm]) <= 40));
+      .filter(mm => aliquotas[mm] != null && !(Number(aliquotas[mm]) >= 0 && Number(aliquotas[mm]) <= 40));
     if (_foraDoIntervalo.length) {
       const _msg = $('cfgMsg');
       if (_msg) _msg.innerHTML = 'alíquota inválida em <b>' + _foraDoIntervalo.sort().join(', ') +
