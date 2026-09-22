@@ -84,8 +84,13 @@
   .item{display:flex;align-items:center;gap:12px;background:var(--card2);
         border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:8px 0}
   .item .info{flex:1;min-width:0}
+  /* Codex #511 (P2): nowrap + ellipsis deixava o nome longo só como "Luminária Chão Piso…", e
+     o `title` só aparece com o mouse parado em cima — no celular do galpão, que é onde esta
+     tela é usada, não existe. Quem confere precisa LER o nome pra saber que produto contou.
+     Duas linhas cabem e resolvem; além disso o corte volta. */
   .item .nome{font-size:14px;font-weight:600;line-height:1.3;
-              overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+              display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;
+              overflow:hidden}
   .item .meta{font-size:12px;color:var(--mut);margin-top:2px}
   .item .qtd-box{text-align:center;flex:none;min-width:58px}
   .item .qtd-num{font-size:24px;font-weight:700;line-height:1}
@@ -112,7 +117,7 @@
   <header class="top">
     <div class="marca"><span class="logo">📦</span>
       <h1>Contagem de Estoque · <b>Magazine Girassol</b></h1>
-      <span class="build">c6</span>
+      <span class="build">c7</span>
     </div>
   </header>
 
@@ -446,8 +451,17 @@ async function ajustar(id, delta, botao){
   carregarHoje();
 }
 
+let _seqLista = 0;
+
 async function carregarHoje(recomecar){
-  if(recomecar !== false){ OFFSET_LISTA = 0; ACUMULADO = []; }
+  /* Codex #511 (P2): ajustar dois cartões quase ao mesmo tempo disparava DOIS carregarHoje().
+     Cada um zera o ACUMULADO compartilhado e depois espera a rede — as duas respostas se
+     misturavam no mesmo array e a lista saía com itens repetidos ou faltando. O contador diz
+     qual recarga é a atual; as antigas desistem antes de mexer no acumulado. */
+  /* só uma RECARGA NOVA pega token novo; a continuação da paginação mantém o dela, senão ela
+     invalidaria a si mesma a cada página. */
+  if(recomecar !== false){ _seqLista++; OFFSET_LISTA = 0; ACUMULADO = []; }
+  const minhaLista = _seqLista;
   const alvo = document.getElementById('hoje');
   let d = null;
   try {
@@ -458,6 +472,7 @@ async function carregarHoje(recomecar){
     const r = await fetch(MOD+'/contagem-lista?de='+hojeISO()+'&offset='+(OFFSET_LISTA||0), {credentials:'same-origin'});
     d = await r.json().catch(()=>null);
   } catch(e){ d = null; }
+  if(minhaLista !== _seqLista) return;   // outra recarga começou; esta já não vale
   if(!(d && d.ok)){ alvo.innerHTML = '<span class="dim">não consegui carregar a lista agora.</span>'; return; }
   ACUMULADO = ACUMULADO.concat(d.lancamentos || []);
   /* enquanto houver mais, continua puxando — a lista do dia tem que estar inteira, senão quem

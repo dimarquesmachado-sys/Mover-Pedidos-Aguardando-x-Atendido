@@ -264,4 +264,32 @@ for (const [emp, arq] of Object.entries({
     'clique repetido no + manda vários ajustes e a tela fica diferente do que foi gravado');
 }
 
+/* 22/09 (Codex #511, 4 P2) — o primeiro é o que apareceria no PRIMEIRO DEPLOY por cima de um
+   arquivo existente: os lançamentos gravados antes desta versão não têm `id`, e apareceriam sem
+   os botões + e − — umas linhas ajustáveis e outras não, sem explicação na tela. */
+{
+  const lib4 = fs.readFileSync(LIB, 'utf8');
+  const js4 = /<script>([\s\S]*?)<\/script>/.exec(html)[1];
+
+  assert.ok(/const carimbarIds = \(d\) =>/.test(lib4),
+    'lançamento antigo não ganha id — ficaria sem os botões pra sempre');
+  assert.ok((lib4.match(/if \(carimbarIds\(d\)\) gravar\(d\);/g) || []).length >= 2,
+    'o carimbo não roda nos dois caminhos (lista e ajuste)');
+
+  /* a rota é chamável direto, sem passar pelos botões: sem esta trava, um inteiro qualquer
+     levaria a contagem acima do teto que o LANÇAMENTO recusa — dois caminhos, duas regras */
+  assert.ok(/if \(delta !== 1 && delta !== -1\)/.test(lib4),
+    'o ajuste aceita qualquer inteiro — a rota não passa só pelos botões');
+
+  /* duas recargas simultâneas misturavam o mesmo ACUMULADO */
+  assert.ok(/if\(recomecar !== false\)\{ _seqLista\+\+;/.test(js4) && /if\(minhaLista !== _seqLista\) return;/.test(js4),
+    'ajustar dois cartões juntos dispara duas recargas que se misturam no mesmo array');
+
+  /* nome cortado: o `title` não existe pra quem usa o dedo, e esta tela é de celular de galpão */
+  const css4 = /<style>([\s\S]*?)<\/style>/.exec(html)[1];
+  assert.ok(/-webkit-line-clamp:2/.test(css4) && !/\.item \.nome\{[^}]*white-space:nowrap/.test(css4),
+    'o nome longo aparece só truncado — no celular não há mouse pra revelar o title, e quem ' +
+    'confere precisa LER o nome pra saber que produto contou');
+}
+
 console.log('OK: contagem de estoque — registro interno (nunca escreve no Bling), sessão nas 4 rotas, quantidade validada e busca por nome sem gastar cota');
