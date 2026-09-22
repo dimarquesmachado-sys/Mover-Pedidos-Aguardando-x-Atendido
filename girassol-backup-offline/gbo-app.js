@@ -856,7 +856,7 @@ function routes(readBody) {
      "readBody is not defined" — o comentário já estava aqui, e eu não li. */
   const _rotasContagem = require('../lib/checkout/rotas-contagem').criar({
     prefixo: '/girassol-backup-offline', json, validarSessao, lerIndiceEan,
-    CACHE_DIR, readJson, writeJson, readBody,
+    CACHE_DIR, readJson, writeJson, readBody, blingGet,
     empresa: { pasta: 'girassol-backup-offline' },
   });
   const _rotasBackfill = require('../lib/checkout/rotas-backfill').criar({

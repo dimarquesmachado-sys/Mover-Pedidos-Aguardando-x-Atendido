@@ -448,8 +448,14 @@
 const MOD = '/girassol-backup-offline';
 const esc = s => String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let ESCOLHIDO = null;
+let LIMPAR_TIMER = null;
 
-function hojeISO(){ return new Date().toISOString().slice(0,10); }
+/* Codex (P2): toISOString() é UTC. Entre 21h e meia-noite em São Paulo já é dia seguinte em
+   UTC — "Contagens de hoje" pedia a data de amanhã 3h mais cedo e a lista ficava vazia bem no
+   fim do turno. Mesmo padrão do resto da casa (painel.html, dashboard.html): sv-SE com
+   timeZone força o fuso certo sem depender do TZ do servidor. */
+function hojeISO(){ return new Date().toLocaleString('sv-SE',{timeZone:'America/Sao_Paulo'}).slice(0,10); }
+function horaSP(iso){ try { return new Date(iso).toLocaleString('sv-SE',{timeZone:'America/Sao_Paulo'}).slice(11,16); } catch(e){ return String(iso||'').slice(11,16); } }
 
 async function procurar(){
   const q = document.getElementById('busca').value.trim();
@@ -461,7 +467,13 @@ async function procurar(){
      índice local — o Bling é cota da conta, e busca por nome dispararia uma
      consulta por tecla. */
   const soDigitos = q.replace(/\D/g, '');
-  const pareceCodigo = /^[A-Za-z0-9._-]+$/.test(q) || (soDigitos.length >= 8 && soDigitos.length <= 14);
+  /* Codex (P2): qualquer palavra única (sem espaço) batia aqui — "luminaria", "martelo" — e
+     ISSO ia pro /buscar-produto primeiro, que tenta o Bling em 3 caixas antes de desistir.
+     A busca por nome comum (o caso mais frequente) gastava 2-3 chamadas da cota por tecla,
+     exatamente o que a busca local existe pra evitar. SKU de verdade tem dígito; nome não
+     precisa. Se um dia existir SKU 100% alfabético, o fallback pro nome (linha abaixo)
+     ainda encontra pelo índice — essa tela nunca fica cega, só evita o desperdício comum. */
+  const pareceCodigo = (/^[A-Za-z0-9._-]+$/.test(q) && /\d/.test(q)) || (soDigitos.length >= 8 && soDigitos.length <= 14);
 
   if(pareceCodigo){
     let d = null;
@@ -513,6 +525,7 @@ async function abrirPorSku(sku){
 }
 
 function mostrarProduto(p){
+  if(LIMPAR_TIMER){ clearTimeout(LIMPAR_TIMER); LIMPAR_TIMER = null; }   // veio um produto novo: o reset pendente do lançamento anterior não pode apagar ESTE
   ESCOLHIDO = p;
   document.getElementById('resultado').innerHTML = '';
   document.getElementById('prodEscolhido').innerHTML =
@@ -521,15 +534,40 @@ function mostrarProduto(p){
     '<div><h3>'+esc(p.nome || '(sem nome)')+'</h3>' +
     '<div class="dim">SKU <b>'+esc(p.sku)+'</b>'+(p.ean?' · EAN '+esc(p.ean):'')+'</div>' +
     (p.localizacao ? '<div class="dim">📍 '+esc(p.localizacao)+'</div>' : '') +
-    '<div style="margin-top:6px">Saldo no Bling agora: <b>'+(p.estoque!=null?esc(p.estoque):'—')+'</b></div>' +
+    '<div style="margin-top:6px">Saldo no Bling agora: <b id="saldoAgora">'+(p.estoque!=null?esc(p.estoque):'—')+' <span class="dim" style="font-size:10px">(conferindo…)</span></b></div>' +
     '</div></div>';
   document.getElementById('painelLanc').style.display = '';
   const q = document.getElementById('qtd');
+  q.disabled = false;
   q.value = '';            // nunca pré-preencher com o saldo do Bling: a pessoa
   q.focus();               // confirmaria o número da tela em vez de contar
+  atualizarSaldoAoVivo(p);
+}
+
+/* Codex (P1): /buscar-produto usa um cache sem TTL (limpo só quando o ciclo do checkout
+   roda) — pra quem já foi resolvido no ciclo atual, o saldo mostrado pode ser velho de
+   horas. Aqui o saldo É o dado guardado como "agora"; uma venda no meio do caminho vira
+   uma divergência gravada errada e permanente. Busca de novo, sem cache, direto no Bling,
+   e só então libera pra digitar — se essa segunda chamada falhar, fica o saldo que veio
+   do /buscar-produto (com o aviso já sumindo), melhor que travar quem está contando. */
+async function atualizarSaldoAoVivo(p){
+  let d = null;
+  try {
+    const r = await fetch(MOD+'/contagem-saldo?sku='+encodeURIComponent(p.sku), {credentials:'same-origin'});
+    d = await r.json().catch(()=>null);
+  } catch(e){ d = null; }
+  if(ESCOLHIDO !== p) return;   // trocou de produto enquanto a chamada estava no ar
+  const el = document.getElementById('saldoAgora');
+  if(d && d.ok && d.saldo != null){
+    ESCOLHIDO.estoque = d.saldo;
+    if(el) el.innerHTML = esc(d.saldo);
+  } else if(el){
+    el.innerHTML = (p.estoque!=null?esc(p.estoque):'—') + ' <span class="dim" style="font-size:10px">(pode estar desatualizado)</span>';
+  }
 }
 
 function limpar(){
+  LIMPAR_TIMER = null;
   ESCOLHIDO = null;
   document.getElementById('painelLanc').style.display = 'none';
   document.getElementById('msgLanc').textContent = '';
@@ -565,7 +603,15 @@ async function lancar(){
   const dif = (ESCOLHIDO.estoque != null) ? (n - Number(ESCOLHIDO.estoque)) : null;
   msg.innerHTML = '✅ Contagem salva' + (dif != null && dif !== 0
     ? ' — <b>diferença de '+(dif>0?'+':'')+dif+'</b> em relação ao Bling.' : '.');
-  setTimeout(limpar, 1200);
+  /* Codex (P2): o produto e o campo de quantidade ficavam ativos por 1.2s depois do "salvo".
+     Nesse intervalo, o leitor de código de barras — o jeito normal de usar esta tela — manda
+     as teclas do PRÓXIMO item pro campo de quantidade do item ANTERIOR, e o Enter dele
+     lançava uma contagem errada. Trava o campo e já devolve o foco pra busca na hora: o
+     próximo bipe cai no lugar certo mesmo antes do reset visual terminar. */
+  document.getElementById('qtd').disabled = true;
+  document.getElementById('busca').value = '';
+  document.getElementById('busca').focus();
+  LIMPAR_TIMER = setTimeout(limpar, 1200);
   carregarHoje();
 }
 
@@ -582,7 +628,7 @@ async function carregarHoje(){
     '<th class="n">CONTADO</th><th class="n">BLING</th><th class="n">DIF.</th><th>QUEM</th></tr></thead><tbody>' +
     d.lancamentos.map(l => {
       const dif = l.divergencia;
-      return '<tr><td>'+esc(String(l.quando).slice(11,16))+'</td>' +
+      return '<tr><td>'+esc(horaSP(l.quando))+'</td>' +
         '<td><b>'+esc(l.sku)+'</b></td>' +
         '<td>'+esc(l.nome)+'</td>' +
         '<td class="n"><b>'+l.contado+'</b></td>' +
