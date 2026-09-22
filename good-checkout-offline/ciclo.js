@@ -9,7 +9,7 @@ const path  = require('path');
 const fetch = require('node-fetch');
 const base  = require('./base');
 const { BLING_BASE, CACHE_DIR, SIT_ATENDIDO, SIT_DESPACHADOS, SIT_VERIFICADO, SYNC_ON, JANELA_DIAS, PAUSA_MS, RETENCAO_DIAS, ETIQ_FORMATO, CRON_EXPR,
-  MANIFEST_FILE, SKU_EAN_FILE, CONFERIDOS_FILE, RESERVAS_FILE, RESERVA_TTL_MS, KIT_CACHE_FILE, LOC_FILE, LOC_LOG_FILE, EAN_INDEX_FILE,
+  MANIFEST_FILE, SKU_EAN_FILE, CONFERIDOS_FILE, RESERVAS_FILE, RESERVA_TTL_MS, KIT_CACHE_FILE, LOC_FILE, LOC_LOG_FILE, EAN_INDEX_FILE, EAN_INDEX_STATUS_FILE,
   ARQUIVO_DIR, ARQUIVO_DIAS, SMTP_HOST, SMTP_PORT, EMAIL_USER, EMAIL_PASS, EMAIL_DEST, SCHEMA, LOJA_MKT, MKT_NOME,
   sleep, ensureDir, readJson, writeJson, dataISO, json, html, manifest, salvarManifest, skuEanCache, locCache, salvarLoc,
   salvarSkuEan, lerIndiceEan, lerReservas, lerOperadores, lerAdmins, ehAdmin, blingGet, blingWrite, moverSituacao } = base;
@@ -54,7 +54,10 @@ let rodando = false;
 let rodandoDesde = 0;   // watchdog: se um ciclo pendurar (fetch sem resposta), a flag ficava presa e TODO cron seguinte era pulado em silencio
 let ultimoResumo = { rodouEm: null, total: 0, comEtiqueta: 0, semEtiqueta: 0, novos: 0, erros: 0 };
 let ultimoSync = { em: null, pendentes: 0, ok: 0, falhas: 0 };
-let idxStatus = { rodando: false, feitos: 0, eans: 0, em: null, fim: null, erro: null };
+/* Codex #510 (P2): `fim` é memória de processo — um restart zerava pra null mesmo com o índice
+   completo e intacto em disco, e a busca por nome passava a alertar "catálogo incompleto" à
+   toa. Semeia do arquivo que sobrevive ao restart; grava nele toda vez que `fim` muda aqui. */
+let idxStatus = { rodando: false, feitos: 0, eans: 0, em: null, fim: (readJson(EAN_INDEX_STATUS_FILE, {}) || {}).fim || null, erro: null };
 function getUltimoResumo() { return ultimoResumo; }
 function getUltimoSync()   { return ultimoSync; }
 function getIdxStatus()    { return idxStatus; }
@@ -148,6 +151,7 @@ async function indexarCatalogoCompleto() {
   else console.warn('[índice EAN] abortado — índice anterior preservado: ' + idxStatus.erro);
   idxStatus.rodando = false;
   idxStatus.fim = new Date().toISOString();
+  writeJson(EAN_INDEX_STATUS_FILE, { fim: idxStatus.fim });
 }
 
 async function sincronizarConferidos() {

@@ -1929,6 +1929,7 @@ let _tNome = null, _seqNome = 0;
 function buscarPorNomeAoDigitar(v){
   clearTimeout(_tNome);
   const q = String(v || '').trim();
+  buscaProd = null;   // resultado por nome não é seleção válida até abrir um item (etiqueta não pode cair no produto antigo)
   /* código de barras bipado entra aqui também (o leitor "digita"), mas ele termina com Enter,
      que dispara o fazerBusca — a espera abaixo garante que a busca por nome não atropele. */
   if(q.length < 3){ if($('buscaRes')) $('buscaRes').innerHTML = ''; return; }
@@ -1939,7 +1940,11 @@ async function rodarBuscaNome(q){
   const meu = ++_seqNome;
   const r = await api('/amb-checkout-offline/buscar-produto-nome?q='+encodeURIComponent(q)).catch(()=>null);
   if(meu !== _seqNome) return;   // outra digitação já saiu; esta resposta é velha
-  if(!r || !r.ok || !$('buscaRes')) return;
+  if(!$('buscaRes')) return;
+  if(!r || !r.ok){
+    $('buscaRes').innerHTML = '<div class="sepempty">não deu pra buscar — tenta de novo</div>';
+    return;
+  }
   if(!r.itens.length){
     /* "índice vazio/incompleto" e "não achei" mandam fazer coisas opostas */
     $('buscaRes').innerHTML = (r.indice_vazio || !r.indice_completo)
@@ -1947,23 +1952,27 @@ async function rodarBuscaNome(q){
       : '<div class="sepempty">nenhum produto com esse nome</div>';
     return;
   }
+  /* SKU vem do índice local (fora do controle desta página) — nunca vira código JS inline;
+     fica só em atributo (escapado por esc) e o clique é ligado depois, por addEventListener */
   $('buscaRes').innerHTML = r.itens.map(it =>
-    '<div class="bcard" style="cursor:pointer" onclick="abrirPorSkuNoPainel('+JSON.stringify(it.sku).replace(/"/g,'&quot;')+')">'+
+    '<div class="bcard" style="cursor:pointer" data-sku="'+esc(it.sku)+'">'+
       '<div><div class="bnome">'+esc(it.nome||'(sem nome)')+'</div>'+
       '<div class="bsku">SKU '+esc(it.sku)+(it.ean?' · EAN '+esc(it.ean):'')+'</div></div>'+
     '</div>').join('');
+  $('buscaRes').querySelectorAll('.bcard[data-sku]').forEach(el =>
+    el.addEventListener('click', () => abrirPorSkuNoPainel(el.dataset.sku)));
 }
 
 function abrirPorSkuNoPainel(sku){
   /* reusa o caminho que já existe: enche o campo e roda a busca normal, que vai ao Bling
      buscar saldo, foto e localização do momento */
   if($('buscaInp')) $('buscaInp').value = sku;
-  clearTimeout(_tNome); _seqNome++;
   fazerBusca();
 }
 
 async function fazerBusca(){
   const q = ($('buscaInp').value||'').trim(); if(!q) return;
+  clearTimeout(_tNome); _seqNome++;   // Enter/clique cancela a busca por nome pendente: a exata manda, senão o card do bipe vira lista de nome atrasada
   $('buscaRes').innerHTML = '<div class="sepempty">buscando…</div>';
   const r = await api('/amb-checkout-offline/buscar-produto?q='+encodeURIComponent(q)).catch(()=>null);
   if(!r || !r.ok){ $('buscaRes').innerHTML = '<div class="sepempty">'+esc((r&&r.erro)||'não encontrado')+'</div>'; buscaProd=null; return; }
