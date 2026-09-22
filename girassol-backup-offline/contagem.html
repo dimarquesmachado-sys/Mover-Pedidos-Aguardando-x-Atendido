@@ -567,6 +567,12 @@ async function atualizarSaldoAoVivo(p){
 }
 
 function limpar(){
+  /* "Cancelar" pode ser clicado DENTRO da janela de 1.2s do reset automático pós-salvar
+     (o painel continua visível até o timer rodar). Sem cancelar o setTimeout de verdade
+     — só zerar a variável não basta —, ele dispara depois sozinho e apaga o PRÓXIMO
+     produto que o funcionário já tinha aberto: o mesmo bug da corrida do scanner (Codex
+     P2), só que pelo caminho do botão em vez do bipe. */
+  if(LIMPAR_TIMER){ clearTimeout(LIMPAR_TIMER); }
   LIMPAR_TIMER = null;
   ESCOLHIDO = null;
   document.getElementById('painelLanc').style.display = 'none';
