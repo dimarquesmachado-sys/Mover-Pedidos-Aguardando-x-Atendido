@@ -452,7 +452,7 @@
     <div class="marca">
       <span class="logo">📦</span>
       <h1>Inteligência de Vendas · <b>GOOD Import</b></h1>
-      <span class="build" id="build">g1</span>
+      <span class="build" id="build">g3</span>
     </div>
     <div class="acoes">
       <button class="btn" onclick="abrirConfig()">⚙️ Impostos</button>
@@ -807,6 +807,8 @@ async function abrirConfig(){
      apuração. Chamar a estimativa de "apurada" faria ele deixar de conferir o DAS de um mês
      achando que já conferiu — a mentira mais cara que esta tela poderia contar. */
   const jaApurados = new Set(d.apurados_meses || []);
+  /* o que o DONO marcou (config), diferente do que o CÓDIGO traz como apurado (tabela) */
+  const APURADAS = new Set((d.config && d.config.apuradas) || []);
   // Codex (P2): toISOString() é UTC puro — na última noite do mês em SP (UTC já virou dia 1
   // do mês seguinte) isto classificava o mês corrente como fechado e inventava um "falta
   // apurar" falso. hojeSP() é o relógio de SP que o resto da tela já usa (linha ~521).
@@ -838,7 +840,35 @@ async function abrirConfig(){
                engano") e ignora o zero no cálculo — só a tela é que o exibia. O dono viu set-dez com
                0 e teve que perguntar; pior, salvar de novo REGRAVA o zero. */
             '<input class="campo mini" id="aliq_'+k+'" value="'+esc(salvo!=null&&Number(salvo)>0?salvo:'')+'" placeholder="—">' +
-            '<span class="dim vale">'+vale+'</span></label>';
+            '<span class="dim vale">'+vale+'</span>' +
+            /* 18/09 — a marcação de APURADA é do dono: ninguém deduz do número se aquele valor
+               veio da contabilidade ou é palpite dele. Sem ela, mês estimado e apurado ficam
+               idênticos depois de salvos. */
+            '<label class="dim" style="font-size:11px;display:flex;align-items:center;gap:3px" ' +
+            'title="marque quando o valor vier da apuração da contabilidade; sem marca, é estimativa">' +
+            '<input type="checkbox" data-apurada="'+k+'"'+(APURADAS.has(k)?' checked':'')+'> apurada</label>' +
+            '</label>';
+  }
+  /* 22/09 (Codex P2) — PENDÊNCIA DE ANO ANTERIOR. O formulário desenha só os 12 meses do ano
+     corrente, mas o servidor PRESERVA de propósito as alíquotas e marcações de anos passados.
+     Sem uma linha aqui, um dezembro salvo e ainda não apurado some da tela na virada do ano:
+     continua calculando imposto com a estimativa e não há como corrigir nem marcar.
+     A linha vem com CAMPO, não só com a caixinha — quando a contabilidade manda a apuração de
+     dezembro em janeiro, o valor quase nunca é igual ao palpite que ficou salvo. */
+  const foraDoAno = Object.keys(aliq)
+    .filter(k => k.slice(0,4) !== String(ano) && Number(aliq[k]) > 0 && !APURADAS.has(k))
+    .sort();
+  if(foraDoAno.length){
+    html += '<div class="dim" style="margin:10px 0 4px">⚠️ Pendência de outro ano — ainda como estimativa:</div>';
+    for(const k of foraDoAno){
+      html += '<label class="linhaCfg"><span>'+k+'</span>' +
+              '<input class="campo mini" id="aliq_'+k+'" data-fora-ano="1" value="'+esc(aliq[k])+'">' +
+              '<span class="dim vale">salva aqui · <b class="bad">⚠️ estimativa</b></span>' +
+              '<label class="dim" style="font-size:11px;display:flex;align-items:center;gap:3px" ' +
+              'title="corrija o valor com a apuração e marque; sem marca, segue como estimativa">' +
+              '<input type="checkbox" data-apurada="'+k+'" data-fora-ano="1"> apurada</label>' +
+              '</label>';
+    }
   }
   document.getElementById('camposAliq').innerHTML = html;
 }
@@ -875,8 +905,20 @@ async function salvarConfig(){
     if(!isFinite(n) || n < 0 || n > 40){ invalidos.push(k); continue; }
     aliquotas[k] = n;
   }
+  /* 22/09 (Codex P2) — os meses de ANO ANTERIOR também entram. O laço acima cobre só os 12 do
+     ano corrente; sem isto, corrigir a apuração de um dezembro pendente não ia junto e a linha
+     nova seria decorativa. Mesmo tratamento: vazio e zero apagam, fora da faixa barra tudo. */
+  for(const el of document.querySelectorAll('[data-fora-ano="1"][id^="aliq_"]')){
+    const k = el.id.slice(5);
+    const vTxt = (el.value || '').trim().replace(',', '.');
+    if(vTxt === ''){ aliquotas[k] = null; continue; }
+    const n = Number(vTxt);
+    if(n === 0){ aliquotas[k] = null; continue; }
+    if(!isFinite(n) || n < 0 || n > 40){ invalidos.push(k); continue; }
+    aliquotas[k] = n;
+  }
   if(invalidos.length){
-    document.getElementById('msgConfig').innerHTML = 'alíquota inválida em <b>'+invalidos.join(', ')+'</b> (use 0 a 40) — nada foi salvo.';
+    document.getElementById('msgConfig').innerHTML = 'alíquota inválida em <b>'+invalidos.sort().join(', ')+'</b> (use 0 a 40) — nada foi salvo.';
     return;
   }
   document.getElementById('msgConfig').textContent = 'salvando…';
@@ -884,7 +926,8 @@ async function salvarConfig(){
     const r = await fetch(MOD+'/config-fiscal', {
       method: 'POST', credentials: 'same-origin',
       headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ aliquotas })
+      body: JSON.stringify({ aliquotas, apuradas: [...document.querySelectorAll('[data-apurada]')]
+        .filter(c => c.checked && aliquotas[c.dataset.apurada] != null).map(c => c.dataset.apurada) })
     });
     const d = await r.json().catch(()=>null);
     if(!(d && d.ok)){
