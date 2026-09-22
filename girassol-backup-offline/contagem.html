@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Contagem de Estoque · Magazine Girassol</title>
+<!--
+  ─────────────────────────────────────────────────────────────────────────────
+  CONTAGEM DE ESTOQUE — registro interno (22/09/2026)  ·  build c1
+
+  Pedido do dono: o funcionário acha o produto por SKU, EAN ou PARTE DO NOME, vê
+  o nome completo e a foto, e lança a quantidade que contou.
+
+  Três coisas que ele decidiu e que estão por trás de cada escolha aqui:
+   · NÃO grava no Bling. É registro interno; ele revisa e decide o que enviar.
+     A tela diz isso em letra grande, pra ninguém achar que ajustou o saldo.
+   · É CONTAGEM (o saldo que a pessoa contou), não entrada/saída.
+   · Girassol primeiro; a lib já nasce com a empresa como parâmetro.
+
+  Feita pra galpão: campo grande, foco automático, leitor de código de barras
+  funciona sozinho (ele digita e dá Enter), e o teclado numérico abre no celular.
+  ────────────────────────────────────────────────────────────────────────────
+-->
+<style>
+
+  :root{
+    --bg:#0a0e1a; --bg2:#0d1326; --card:#131a30; --card2:#182138;
+    --line:#232d4a; --line2:#2d3a5e;
+    --tx:#e7ecf6; --mut:#8b96b3; --dim:#5a6485;
+    --ac:#6366f1; --ac2:#818cf8; --ok:#22c55e; --ok2:#4ade80;
+    --warn:#f59e0b; --bad:#ef4444; --cy:#22d3ee;
+    --r:14px;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:radial-gradient(1200px 500px at 70% -100px,#151d3a 0%,var(--bg) 55%);color:var(--tx);
+       font:14px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Inter,sans-serif;padding:0 16px 40px}
+  a{color:var(--ac2);text-decoration:none}
+  .wrap{max-width:min(1720px,96vw);margin:0 auto}
+  .hdr{position:sticky;top:0;z-index:50;background:linear-gradient(180deg,rgba(10,14,26,.97) 70%,rgba(10,14,26,0));
+       padding:14px 0 10px;margin:0 -16px;padding-left:16px;padding-right:16px}
+  .hrow{max-width:min(1720px,96vw);margin:0 auto;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  /* cabeçalho: filtros à esquerda · atalhos à direita, tudo dentro da faixa fixa */
+  .hbot{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding-bottom:8px}
+  .hleft{flex:1 1 auto;min-width:0}
+  .atalhos{flex:0 0 auto;display:flex;gap:8px;align-items:flex-start;max-width:66%}
+  /* d197 (pedido do Diego): eram 11 atalhos em grade de 5 = TRÊS linhas (5+5+1), e a
+     última sozinha ficava feia. Com 6 colunas dá 6+5 = DUAS linhas cheias.
+     Pra caber em 6, os botões ficaram um pouco menores e os rótulos mais longos
+     foram encurtados — o nome inteiro continua no title, ao passar o mouse. */
+  .atGrid{display:grid;grid-template-columns:repeat(6,1fr);gap:5px;flex:1 1 auto}
+  .atGrid .chip{width:100%;justify-content:center;text-align:center}
+  .atalhos .chip{white-space:nowrap;padding:5px 7px;font-size:11px;letter-spacing:-.01em}
+  h1{font-size:17px;font-weight:800;margin:0;letter-spacing:-.02em;display:flex;align-items:center;gap:8px}
+  h1 .logo{width:30px;height:30px;border-radius:9px;background:linear-gradient(135deg,#fbbf24,#f59e0b);
+           display:inline-flex;align-items:center;justify-content:center;font-size:16px}
+  .badge{font-size:10px;font-weight:700;color:var(--dim);border:1px solid var(--line);border-radius:5px;padding:1px 6px;letter-spacing:.05em}
+  .hlinks{margin-left:auto;font-size:12px;color:var(--mut)}
+  /* d200 (pedido do Diego): MESMA paleta do checkout, pra nao ter dois padroes.
+     Bling roxo · NF verde · marketplace azul — em todos os lugares onde o link
+     aparece (Buscar Pedido, Analise de Vendas, detalhe do pedido). */
+  .lkB{color:#a78bfa;text-decoration:none;font-weight:700}   /* Bling    */
+  .lkN{color:#4ade80;text-decoration:none;font-weight:700}   /* NF       */
+  .lkM{color:#38bdf8;text-decoration:none;font-weight:700}   /* mercado  */
+  .lkB:hover,.lkN:hover,.lkM:hover{text-decoration:underline}
+  .chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+  .chip{background:var(--card);border:1px solid var(--line);color:var(--mut);border-radius:999px;
+        padding:7px 15px;font-size:12.5px;font-weight:600;cursor:pointer;transition:all .15s}
+  .chip:hover{border-color:var(--line2);color:var(--tx)}
+  .chip.on{border-color:var(--ac);color:#fff;background:linear-gradient(135deg,#1e2650,#232d5e);box-shadow:0 0 0 1px var(--ac) inset}
+  .custom{display:none;gap:8px;margin-top:8px;align-items:center;flex-wrap:wrap;font-size:12.5px;color:var(--mut)}
+  input[type=date],input[type=number]{background:var(--card);border:1px solid var(--line);color:var(--tx);border-radius:9px;padding:7px 10px;font-size:12.5px}
+  .cover{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px;font-size:11.5px;color:var(--mut)}
+  .pill{border:1px solid var(--line);border-radius:999px;padding:3px 10px;background:var(--card)}
+  .pill b{font-weight:800}
+  .pill.g b{color:var(--ok)} .pill.w{border-color:#f59e0b44} .pill.w b{color:var(--warn)}
+  .kpis{display:flex;flex-wrap:nowrap;overflow-x:auto;gap:12px;margin:18px 0;padding-bottom:6px}
+  .kpis::-webkit-scrollbar{height:6px}
+  .kpis::-webkit-scrollbar-thumb{background:var(--line2);border-radius:3px}
+  .kpi{background:linear-gradient(160deg,var(--card2),var(--card));border:1px solid var(--line);border-radius:var(--r);
+       flex:1 1 150px;min-width:146px;
+       padding:14px 16px;position:relative;overflow:hidden;transition:transform .15s,border-color .15s}
+  .kpi:hover{transform:translateY(-2px);border-color:var(--line2)}
+  .kpi::before{content:'';position:absolute;inset:0 0 auto 0;height:3px;background:var(--kc,var(--ac));opacity:.9}
+  /* 28/07: o ícone ficava sozinho numa linha acima do título. Agora ele e o título
+     ficam LADO A LADO — "💰 Faturamento Total" — e sobra altura no card. */
+  .kpi .ic{font-size:15px;opacity:.9;float:left;margin:0 6px 0 0;line-height:1.25}
+  .kpi .l{font-size:11px;color:var(--mut);font-weight:600;letter-spacing:.02em;margin-top:1px;
+          display:block;overflow:hidden}
+  .kpi .v,.kpi .s{clear:both}
+  .kpi .v{font-size:21px;font-weight:800;letter-spacing:-.02em;margin-top:3px;font-variant-numeric:tabular-nums}
+  .kpi .s{font-size:10.5px;color:var(--dim);margin-top:2px}
+  /* o cabeçalho é fixo: reserva a altura dele pra o atalho parar no INÍCIO da seção, não em cima dela */
+  .sec{scroll-margin-top:calc(var(--hdrH,104px) + 14px);background:linear-gradient(170deg,var(--card2),var(--card));border:1px solid var(--line);border-radius:var(--r);
+       padding:18px;margin:14px 0}
+  .sec h2{font-size:14px;font-weight:800;margin:0 0 14px;letter-spacing:-.01em;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .sec h2 .hint{font-size:10.5px;font-weight:600;color:var(--dim);margin-left:auto}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:860px){ .grid2{grid-template-columns:1fr} }
+  .chartbox{position:relative;height:230px}
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  th{color:var(--mut);text-align:left;font-weight:700;font-size:11px;letter-spacing:.04em;text-transform:uppercase;
+     padding:8px 10px;border-bottom:1px solid var(--line2);white-space:nowrap;user-select:none}
+  th.sort{cursor:pointer} th.sort:hover{color:var(--tx)}
+  /* cabecalho congelado: o wrapper .tw rola por dentro e o <th> gruda no topo dele */
+  /* 29/07 — TRAVA: a página não pode ficar mais larga que a tela. Sem isso, uma tabela larga
+     empurra o documento pro lado, dá pra arrastar a tela e o cabeçalho fixo e os botões
+     flutuantes "somem" (ficam presos na tela enquanto a página desliza por baixo).
+     Uso 'clip' e não 'hidden' de propósito: 'hidden' criaria uma área de rolagem e quebraria
+     tudo que é grudado; 'clip' só corta, sem virar rolagem. */
+  html{overflow-x:clip}
+  body{overflow-x:clip;max-width:100vw}
+  .tw{border-radius:10px}
+  .tw th{position:sticky;top:var(--hdrH,104px);z-index:3;background:#141b33;box-shadow:0 2px 6px rgba(0,0,0,.45)}
+  .tw thead th{top:0}
+
+  td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:middle}
+  tbody tr{transition:background .12s}
+  tbody tr:hover{background:#ffffff08}
+  tr:last-child td{border-bottom:none}
+  .num{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+  .bar{background:#ffffff10;border-radius:99px;height:7px;overflow:hidden;min-width:60px}
+  .bar>i{display:block;height:7px;border-radius:99px;background:linear-gradient(90deg,var(--ac),var(--ac2))}
+  .bar>i.g{background:linear-gradient(90deg,#16a34a,var(--ok2))}
+  .rank{display:inline-flex;width:24px;height:24px;border-radius:8px;align-items:center;justify-content:center;
+        font-size:11px;font-weight:800;background:#ffffff0d;color:var(--mut)}
+  .rank.r1{background:linear-gradient(135deg,#fbbf24,#d97706);color:#1a1204}
+  .rank.r2{background:linear-gradient(135deg,#e2e8f0,#94a3b8);color:#1e293b}
+  .rank.r3{background:linear-gradient(135deg,#f6ad7b,#c2703d);color:#2d1505}
+  .sku{font-weight:700} .desc{font-size:11px;color:var(--mut);line-height:1.3;
+        display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden;
+        white-space:normal;word-break:break-word}
+  .cvS{opacity:.65;font-size:11px;display:inline-block;width:9px}
+  /* 19/08 (Diego printou a tela a meio carregar e leu metade do faturamento como se fosse
+     o total): no período longo os cards ficavam mostrando o CACHE enquanto o histórico não
+     chegava, sem dizer nada. Agora eles ficam esmaecidos e uma faixa avisa. */
+  .kpis.carregando{opacity:.45;filter:saturate(.5)}
+  .avisoCarr{display:flex;align-items:center;gap:8px;margin:14px 0 -6px;padding:9px 14px;border-radius:10px;
+        background:#78350f22;border:1px solid #f59e0b55;color:#fbbf24;font-size:12.5px;font-weight:600}
+    .mut{color:var(--mut)} .dim{color:var(--dim)} .ok{color:var(--ok)} .warn{color:var(--warn)} .bad{color:var(--bad)}
+  .cvg{font-size:10px;color:var(--warn);background:#f59e0b14;border:1px solid #f59e0b33;border-radius:5px;padding:1px 5px;margin-left:6px;white-space:nowrap}
+  .st{display:inline-block;font-size:10.5px;font-weight:700;border-radius:6px;padding:2px 8px}
+  .st.ok{background:#22c55e1a;color:var(--ok2);border:1px solid #22c55e33}
+  .st.w{background:#f59e0b1a;color:var(--warn);border:1px solid #f59e0b33}
+  .st.b{background:#ef44441a;color:#f87171;border:1px solid #ef444433}
+  .aviso{font-size:12px;color:var(--warn);margin-top:10px;background:#f59e0b0d;border:1px solid #f59e0b26;border-radius:9px;padding:8px 12px}
+  .nota{font-size:11px;color:var(--dim);margin-top:14px;line-height:1.6}
+  .btn{background:linear-gradient(135deg,var(--ac),#4f46e5);border:none;color:#fff;border-radius:10px;padding:9px 16px;
+       font-size:12.5px;font-weight:700;cursor:pointer;transition:filter .15s}
+  .btn:hover{filter:brightness(1.15)} .btn[disabled]{opacity:.5;cursor:default}
+  .loginbox{max-width:440px;margin:80px auto;text-align:center;background:var(--card);border:1px solid var(--line);
+            border-radius:16px;padding:40px 30px}
+  .skel{color:var(--dim);text-align:center;padding:30px}
+  ::-webkit-scrollbar{height:8px;width:8px} ::-webkit-scrollbar-thumb{background:var(--line2);border-radius:99px}
+  /* tabela de estados: colunas juntinhas, sem espaço à toa */
+  #tUF td,#tUF th{padding:5px 6px;font-size:12px}
+  #tUF td.num,#tUF th.num{padding-left:4px;padding-right:6px}
+  #twUF table{min-width:0}
+  /* coluna com explicação: sublinhado pontilhado discreto avisa que dá pra passar o mouse */
+  th[title]{cursor:help;text-decoration:underline dotted rgba(255,255,255,.28);text-underline-offset:3px}
+  th[title]:hover{color:#cfe0ff}
+  /* legenda do rodapé da Análise */
+  .lg{display:inline-flex;align-items:center;gap:5px}
+  .lg i{width:11px;height:11px;border-radius:2px;display:inline-block}
+  /* barra da Análise */
+  .anPerLinha{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
+  .anPerLinha:empty,.anPerLinha:has(#anPerChips:empty){margin-bottom:0}
+  .anBarra{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
+  .anSel{flex:0 0 auto;max-width:220px}
+  .anBusca{flex:1 1 240px;min-width:160px}
+  /* campo com rótulo em cima (Plano de Compra) */
+  /* totais da Análise: 3 por linha; a última linha estica pra preencher */
+  .miniTot{flex:1 1 calc(33.33% - 6px);min-width:96px}
+  /* 02/08: na seção de despesas do ML são 5 caixas — com 33% cada, as duas últimas esticavam
+     pra meia tela num monitor largo. Aqui elas ganham um teto e ficam do mesmo tamanho. */
+  #mlbCards .miniTot{flex:0 1 210px;min-width:170px}
+  #mlbCards>div{gap:8px}
+  /* 29/07: busca + Excel + ↻ num grupo indivisivel - antes o Excel caia sozinho numa linha
+     quando os botoes de periodo ocupavam muito espaco. Agora eles andam sempre juntos. */
+  .grpBusca{display:flex;gap:6px;align-items:center;flex:1 1 320px;min-width:260px}
+  .grpBusca .campoBusca{flex:1 1 auto;min-width:0;max-width:340px}
+  .grpBusca .btFiltro{flex:0 0 auto}
+  /* seletores do Plano de Compra - o rotulo vive DENTRO da opcao, entao sempre da pra ler */
+  .cpSel{background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:9px;
+         padding:8px 9px;font-size:12.5px;font-weight:600;cursor:pointer;max-width:210px}
+  .cpSel:hover{border-color:var(--line2)}
+  .selSempre{display:inline-block!important;background:var(--bg2);border:1px solid var(--line);color:var(--tx);
+             border-radius:9px;padding:7px 9px;font-size:12.5px}
+  /* botões auxiliares menores (recarregar do Bling / sincronizar custos) */
+  .btMini{padding:6px 10px;font-size:12px}
+  /* barra que repete o cabeçalho da tabela em leitura (só no celular) */
+  #cabFlut{position:fixed;z-index:45;display:none;pointer-events:none;
+           box-shadow:0 4px 12px rgba(0,0,0,.55);border-radius:0 0 8px 8px;overflow:hidden}
+  #cabFlut .cabInner{overflow:hidden}
+  #cabFlut table{border-collapse:collapse;background:#141b33}
+  #cabFlut th{background:#141b33;color:var(--mut);font-size:10.5px;font-weight:700;text-align:left;
+              padding:7px 8px;border-bottom:1px solid var(--line2);white-space:nowrap;
+              text-transform:uppercase;letter-spacing:.02em}
+  #cabFlut th .sort,#cabFlut th span{pointer-events:none}
+  /* navegador flutuante entre cards */
+  #navCards{position:fixed;right:14px;bottom:16px;z-index:60;display:flex;flex-direction:column;gap:6px;
+            opacity:0;transition:opacity .18s}
+  #navCards button{width:38px;height:34px;border-radius:9px;cursor:pointer;font-size:13px;line-height:1;
+            background:rgba(19,26,48,.92);border:1px solid var(--line2);color:#cfe0ff;backdrop-filter:blur(4px);
+            box-shadow:0 3px 10px rgba(0,0,0,.4)}
+  #navCards button:hover{background:#1d4ed8;border-color:#1d4ed8;color:#fff}
+  #navCards button.topo{font-size:15px;height:30px;opacity:.85}
+  /* cartões de venda (só aparecem no celular) */
+  .vcards{display:none}
+  .vcard{background:var(--card);border:1px solid var(--line);border-radius:11px;padding:10px 12px}
+  .vcTopo{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-bottom:5px}
+  .vcNum{font-weight:800;font-size:14px}
+  .vcHora{color:var(--mut);font-size:11px;margin-left:auto}
+  .vcSku{font-size:12px;color:#cfe0ff;font-family:ui-monospace,monospace;line-height:1.35;margin-bottom:6px;word-break:break-word}
+  .vcNums{display:grid;grid-template-columns:1fr 1fr;gap:5px}   /* 4 quadrinhos em 2x2 */
+  .vcB{background:var(--bg2);border-radius:7px;padding:5px 7px}
+  .vcB i{display:block;font-style:normal;font-size:9px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut)}
+  .vcB b{font-size:12.5px;font-variant-numeric:tabular-nums}
+  .selPer{display:none}
+  .selAt{display:none}
+  .selFiltro{display:none}
+  .soCel{display:none}
+  .covResumo{display:none}
+  #coverTopo .covResumo{display:inline-flex;align-items:center;gap:5px;cursor:pointer;font:inherit;font-size:11px;padding:4px 9px}
+  /* botão de volta pro checkout — pedido do Diego 11/08: "não só o escrito" */
+  .btnCheckout{display:inline-flex;align-items:center;gap:6px;background:#1e3a8a;border:1px solid #3b82f6;color:#dbeafe;padding:5px 14px;border-radius:8px;text-decoration:none;font-weight:700;font-size:12px;white-space:nowrap}
+  .btnCheckout:hover{background:#1d4ed8;color:#fff}
+  /* indicador de cobertura: destaque roxo, colado no "← checkout" */
+  #coverTopo .covResumo{background:#4c1d95;border:1px solid #6d28d9;color:#ddd6fe;white-space:nowrap}
+  #coverTopo .covResumo:hover{background:#5b21b6;border-color:#7c3aed}
+  #coverTopoDet{width:100%}
+  /* d195 (pedido do Diego): o card "Ao Vivo" saiu da grade pra abrir espaço pro card
+     de Taxas. O 🔄 do topo já fazia o mesmo papel no celular desde sempre — agora
+     vale em qualquer tela. */
+  .btnVivo{display:inline-block;background:#38bdf822;border:1px solid #38bdf855;color:#7dd3fc;border-radius:8px;
+           padding:6px 10px;font-size:15px;cursor:pointer;line-height:1}
+  /* ══════════════ CELULAR ══════════════ */
+  @media(max-width:720px){
+    body{padding:0 8px 30px}
+    .sec{padding:12px;border-radius:12px}
+    .desc{max-width:150px}
+    /* as tabelas que sobram (TOP Produtos, Por Canal, Projeção) rolam de lado sem esticar a página */
+    .tw{max-width:100%;overflow-x:auto}
+    /* 29/07: overflow-x cria uma área de rolagem própria e QUEBRA o cabeçalho grudado.
+       Nas tabelas que cabem na tela (colunas já reduzidas) tiramos o overflow, e aí o
+       cabeçalho gruda igual ao do computador. */
+    /* 29/07 — VOLTOU ATRÁS: eu tinha forçado as tabelas a caber, e isso espremeu tudo e estragou
+       a leitura. O card PODE rolar de lado; o que não pode é a PÁGINA sair da borda — e disso
+       cuida a trava em html/body lá em cima. O cabeçalho grudado agora é feito por código
+       (barra flutuante), porque dentro de uma área que rola de lado o 'sticky' não funciona. */
+    .twFit{overflow-x:auto!important;max-width:100%}
+    .tw table{min-width:640px}
+    #secAnalise .vcards+.tw{display:none}
+    /* cards: 2 por linha em vez de rolagem lateral */
+    .kpis{display:grid;grid-template-columns:1fr 1fr;overflow-x:visible;gap:8px;margin:6px 0 12px}
+    .kpi{min-width:0!important;padding:10px 12px}
+    .kpi .v{font-size:17px} .kpi .l{font-size:10px} .kpi .s{font-size:9.5px}
+    .kpi .ic{font-size:15px}
+    /* alvos de toque maiores */
+    .chip{padding:9px 13px;font-size:13px}
+    button.chip,.btn{min-height:38px}
+    h2{font-size:15px}
+    .hint{display:none}
+    /* no celular o cabeçalho empilha e a barra de atalhos rola de lado */
+    .hbot{flex-direction:column;gap:6px}
+    /* período: 8 botões viram 1 seletor · atalhos idem */
+    .chips{display:none}
+    .atalhos{display:none}
+    .selAt{display:block;width:100%;background:var(--bg2);border:1px solid var(--line);color:var(--tx);
+           border-radius:9px;padding:9px 10px;font-size:14px;font-weight:700;margin-top:6px}
+    /* botão de atualizar sobe pro topo (o card "Ao Vivo" some da grade) */
+    .kpiVivo{display:none}                    /* o 🔄 do topo faz o mesmo papel */
+    #kpis .kpi:last-child:nth-child(odd){grid-column:1 / -1}
+    /* ── barras de filtro dos cards ──
+       mesma ideia do cabeçalho: o que era uma fileira de botões vira um seletor.
+    /* linha 2: o grupo inteiro ocupa a largura */
+    .grpBusca{flex:1 1 100%!important;min-width:0!important;order:3;gap:5px}
+    /* !important porque esses dois têm display:flex escrito no próprio elemento, e estilo
+       embutido ganha da folha de estilo — sem isso os botões continuavam aparecendo junto do seletor */
+    #prevChips,#projChips,.rotFiltro{display:none!important}
+    .soDesk{display:none}
+    .soCel{display:inline}
+    .selFiltro{display:block;flex:1 1 calc(100% - 84px);min-width:0;
+               background:var(--bg2);border:1px solid var(--line);color:var(--tx);
+               border-radius:9px;padding:9px 10px;font-size:14px;font-weight:700}
+    /* 28/07: as contas batiam EXATAMENTE 100% e a linha quebrava por um fio. Agora sobra folga,
+       e o seletor encolheu — ele estava tomando quase a linha inteira sozinho. */
+    .campoDias{flex:0 0 62px!important;order:2}
+    /* linha 2: busca + Excel + ↻, tudo junto (a busca cede o espaço) */
+    .campoBusca{flex:1 1 calc(100% - 118px)!important;order:3;min-width:90px!important}
+    .btFiltro{order:4;flex:0 0 auto;padding:8px 9px;font-size:12.5px}
+    .selFiltro{flex:1 1 calc(100% - 84px);order:1;padding:7px 8px;font-size:13px;min-width:0}
+    /* Análise no celular: [canal][busca] em cima, [chips][ações][paginação] embaixo */
+    /* 3 caixas de total por linha, e a última linha divide o espaço entre as que sobraram */
+    .miniTot{flex:1 1 calc(33.33% - 5px)!important;min-width:0!important;padding:6px 7px!important}
+    .miniTot>div:first-child{font-size:8.5px!important}
+    .miniTot>div:last-child{font-size:12px!important}
+    .anBarra{gap:6px}
+    .anSel{flex:0 0 auto!important;max-width:128px;font-size:12px;padding:7px 6px}
+    .anBusca{flex:1 1 calc(100% - 136px)!important;min-width:0!important;font-size:16px}
+    .anAcao{padding:8px 9px;font-size:12.5px}
+    #anInfo{flex:0 1 auto;order:5;font-size:11px;white-space:nowrap;margin:0}   /* junto das setas, não numa linha só pra ele */
+    /* Plano de Compra: 3 campos dividem a linha 1; curva + busca + botões na linha 2 */
+    /* Plano de Compra: 2 seletores por linha, legiveis */
+    .cpSel{flex:1 1 calc(50% - 4px);max-width:none;min-width:0;font-size:12.5px;padding:9px 8px}
+    #qCompra{flex:1 1 calc(100% - 196px)!important;min-width:80px!important;order:3}
+    /* botões auxiliares: pequenos e na mesma linha */
+    .btMini{padding:6px 9px!important;font-size:11.5px!important}
+    #projBox{font-size:11.5px}
+    /* os 2 gráficos por dia tinham um respiro maior que os outros cards */
+    .grid2{gap:12px}
+    .grid2>.sec{margin-bottom:0}
+    /* no celular elas viravam uma fileira apertada; agora a busca ocupa a linha toda
+       e os botões/campos pequenos ficam embaixo, sem espremer */
+    #qPrev,#qProj,#qTop{flex:1 1 100%!important;min-width:0!important;font-size:16px!important;padding:9px 10px!important}
+    #prevDiasLivre,#projDiasLivre{width:70px!important;font-size:14px!important}
+    #prevChips,#projChips{gap:5px}
+    #prevChips .chip,#projChips .chip{padding:7px 10px;font-size:12.5px}
+    /* navegador flutuante: um pouco maior no dedo e fora do caminho do rodapé */
+    #navCards{right:10px;bottom:26px;gap:5px}   /* mais alto: no Android o rodapé do navegador cobria */
+    #navCards button{width:42px;height:38px;font-size:14px}
+    /* previsão: no celular só o essencial (produto, vendidas, tendência, 1 mês, 1 ano) */
+    #tPrev tr>*:nth-child(1),#tPrev tr>*:nth-child(5),#tPrev tr>*:nth-child(7),#tPrev tr>*:nth-child(8){display:none}
+    #tPrev table,#tPrev{min-width:0}
+    .selPer{display:block;width:100%;background:var(--bg2);border:1px solid var(--line);color:var(--tx);
+            border-radius:9px;padding:9px 10px;font-size:14px;font-weight:700}
+    /* ── CABEÇALHO COMPACTO ── */
+    /* o resumo mora SÓ no topo (ao lado do checkout); o de baixo sai de cena */
+    #coverTopo .covResumo{display:inline-flex!important;align-items:center;gap:5px;cursor:pointer;font:inherit}
+    #cover .covResumo{display:none}
+    #cover .covItem{display:none}
+    #cover.aberto .covItem{display:inline-flex}
+    #cover{gap:6px;margin-top:4px}
+    /* título menor, numa linha só */
+    h1{font-size:16px;line-height:1.25}
+    .hrow{gap:6px;align-items:flex-start}
+    h1{flex:1 1 100%}
+    /* 🔄 · ← checkout · status: tudo numa linha, à esquerda */
+    .hlinks{flex-direction:row!important;align-items:center!important;gap:10px;width:100%;
+            justify-content:flex-start!important;flex-wrap:wrap;margin-top:6px}
+    h1{margin-bottom:2px}
+    .hbot{margin-top:8px}
+    .hdr{padding-bottom:8px}
+    .hlinks>div{gap:10px!important}
+    /* os dois seletores lado a lado */
+    .hbot{flex-direction:row!important;gap:8px;align-items:flex-start;padding-bottom:4px}
+    .hdr{padding-bottom:2px}
+    #histAviso:empty{display:none;margin:0}
+    .hleft{flex:1 1 0;min-width:0}
+    .selAt{flex:1 1 0;min-width:0;margin-top:0}
+    .selPer,.selAt{padding:8px 8px;font-size:13px}
+    .atalhos{max-width:100%;justify-content:flex-start;overflow-x:auto;flex-wrap:nowrap!important;
+             -webkit-overflow-scrolling:touch;padding-bottom:2px}
+    .atalhos .chip{flex:0 0 auto;white-space:nowrap}
+    /* tabelas mais compactas */
+    table{font-size:11.5px}
+    td{padding:7px 6px} th{padding:6px 6px;font-size:9.5px}
+    .tw{overflow-x:auto;-webkit-overflow-scrolling:touch}
+    /* 29/07 — VOLTOU ATRÁS: eu tinha forçado as tabelas a caber, e isso espremeu tudo e estragou
+       a leitura. O card PODE rolar de lado; o que não pode é a PÁGINA sair da borda — e disso
+       cuida a trava em html/body lá em cima. O cabeçalho grudado agora é feito por código
+       (barra flutuante), porque dentro de uma área que rola de lado o 'sticky' não funciona. */
+    .twFit{overflow-x:auto!important;max-width:100%}
+    /* ANÁLISE no celular: a tabela some e cada venda vira um CARTÃO (ver .vcards) */
+    #secAnalise .tw{display:none}
+    .vcards{display:flex;flex-direction:column;gap:8px}
+    /* TOP PRODUTOS: esconde curva e participação */
+    /* 29/07: a coluna 7 (💎 Lucro Bruto, o VALOR da M.C.) estava escondida — sobrava a % sem o
+       valor. Agora ela fica, e saem o nº da linha, o Custo e o Retorno/custo. */
+    #tProd tr>*:nth-child(1),#tProd tr>*:nth-child(6),#tProd tr>*:nth-child(9){display:none}
+    /* cabeçalho congelado da tabela desligado no celular (brigava com a barra fixa) */
+    .tw th{position:static;box-shadow:none}
+    /* rodapé de paginação empilha */
+    #anRodape{flex-wrap:nowrap;gap:6px;overflow-x:auto}   /* tudo numa linha só */
+    /* mapa do Brasil menor */
+    #ufMapa{transform:scale(.86);transform-origin:top left}
+  }
+  /* ══════════════ CELULAR ESTREITO ══════════════ */
+  @media(max-width:520px){
+    .kpis{grid-template-columns:1fr 1fr}
+    .kpi .v{font-size:16px}
+    #tProd tr>*:nth-child(3){display:none}   /* tela bem estreita: sai também a Curva */
+    table{font-size:11px} td{padding:6px 5px}
+    .sskus div{font-size:11px}
+    .vcNums{grid-template-columns:1fr 1fr}
+    .vcNum{font-size:13px}
+    .tw table{min-width:560px}
+  }
+
+/* específicos desta tela */
+.prod { display:flex; gap:14px; align-items:flex-start; margin:14px 0 }
+.prod img { width:120px; height:120px; object-fit:contain; background:#0d1220; border-radius:8px; flex:none }
+.prod .semfoto { width:120px; height:120px; display:flex; align-items:center; justify-content:center;
+  background:#0d1220; border-radius:8px; color:var(--mut); font-size:11px; text-align:center; flex:none }
+.prod h3 { margin:0 0 6px; font-size:16px; line-height:1.3 }
+.qtd { font-size:28px; width:150px; text-align:center; padding:10px }
+.lista-nome { display:block; width:100%; text-align:left; padding:10px 12px; margin:4px 0;
+  background:#141a2e; border:1px solid #2a3350; border-radius:8px; color:inherit; cursor:pointer }
+.lista-nome:hover { border-color:#4a5a8f }
+.lista-nome b { display:block; font-size:13px }
+.lista-nome span { font-size:11px; color:var(--mut) }
+.aviso-interno { background:#2a2410; border:1px solid #6b5a1f; border-radius:8px; padding:10px 12px; margin:10px 0 }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="marca"><span class="logo">📦</span>
+      <h1>Contagem de Estoque · <b>Magazine Girassol</b></h1>
+      <span class="build">c1</span>
+    </div>
+  </header>
+
+  <div class="aviso-interno">
+    Isto é <b>registro interno</b> — o saldo do Bling <b>não</b> é alterado por esta tela.
+    As contagens ficam guardadas pra conferência.
+  </div>
+
+  <section class="bloco">
+    <h2>🔍 Procurar produto</h2>
+    <div class="dim">SKU · código de barras (EAN) · parte do nome</div>
+    <input id="busca" class="campo" autofocus autocomplete="off"
+           placeholder="bipe o código ou digite e tecle Enter"
+           onkeydown="if(event.key==='Enter'){event.preventDefault();procurar();}">
+    <div id="resultado"></div>
+  </section>
+
+  <section class="bloco" id="painelLanc" style="display:none">
+    <h2>✍️ Lançar contagem</h2>
+    <div id="prodEscolhido"></div>
+    <label class="dim" for="qtd">Quantidade contada</label><br>
+    <input id="qtd" class="campo qtd" type="number" inputmode="numeric" min="0" step="1"
+           onkeydown="if(event.key==='Enter'){event.preventDefault();lancar();}">
+    <div style="margin-top:12px">
+      <button class="btn" onclick="lancar()">Salvar contagem</button>
+      <button class="btn" onclick="limpar()">Cancelar</button>
+    </div>
+    <div id="msgLanc" class="dim" style="margin-top:8px"></div>
+  </section>
+
+  <section class="bloco">
+    <h2>📋 Contagens de hoje</h2>
+    <div id="hoje"><span class="dim">carregando…</span></div>
+  </section>
+</div>
+
+<script>
+const MOD = '/girassol-backup-offline';
+const esc = s => String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let ESCOLHIDO = null;
+
+function hojeISO(){ return new Date().toISOString().slice(0,10); }
+
+async function procurar(){
+  const q = document.getElementById('busca').value.trim();
+  if(!q) return;
+  const alvo = document.getElementById('resultado');
+  alvo.innerHTML = '<span class="dim">procurando…</span>';
+
+  /* SKU e EAN vão ao Bling (precisam do saldo e da foto do momento); nome vai no
+     índice local — o Bling é cota da conta, e busca por nome dispararia uma
+     consulta por tecla. */
+  const soDigitos = q.replace(/\D/g, '');
+  const pareceCodigo = /^[A-Za-z0-9._-]+$/.test(q) || (soDigitos.length >= 8 && soDigitos.length <= 14);
+
+  if(pareceCodigo){
+    let d = null;
+    try {
+      const r = await fetch(MOD+'/buscar-produto?q='+encodeURIComponent(q), {credentials:'same-origin'});
+      d = await r.json().catch(()=>null);
+    } catch(e){ d = null; }
+    if(d && d.ok && d.produto){ mostrarProduto(d.produto); return; }
+    /* não achou como código: tenta pelo nome antes de desistir — SKU com letras
+       também casa com a busca de nome, e o funcionário não tem que saber disso */
+  }
+  await buscarPorNome(q, pareceCodigo);
+}
+
+async function buscarPorNome(q, veioDeCodigo){
+  const alvo = document.getElementById('resultado');
+  let d = null;
+  try {
+    const r = await fetch(MOD+'/contagem-buscar-nome?q='+encodeURIComponent(q), {credentials:'same-origin'});
+    d = await r.json().catch(()=>null);
+  } catch(e){ d = null; }
+  if(!d || !d.ok){
+    alvo.innerHTML = '<div class="aviso">Não consegui procurar agora — isto <b>não</b> quer dizer que o produto não existe. Tente de novo.</div>';
+    return;
+  }
+  if(d.erro && !d.itens.length){ alvo.innerHTML = '<span class="dim">'+esc(d.erro)+'</span>'; return; }
+  if(!d.itens.length){
+    /* separar "o índice está vazio" de "não achei": mandam fazer coisas opostas */
+    alvo.innerHTML = d.indice_vazio
+      ? '<div class="aviso">A busca por nome ainda não está disponível — o catálogo precisa ser indexado uma vez. Avise o responsável.</div>'
+      : '<div class="aviso">Nada encontrado para <b>'+esc(q)+'</b>'+(veioDeCodigo?' (nem como código, nem no nome)':'')+'.</div>';
+    return;
+  }
+  alvo.innerHTML = '<div class="dim">'+d.itens.length+' resultado(s) — toque no produto:</div>' +
+    d.itens.map(it => '<button class="lista-nome" onclick="abrirPorSku('+JSON.stringify(it.sku).replace(/"/g,'&quot;')+')">' +
+      '<b>'+esc(it.nome || '(sem nome)')+'</b><span>'+esc(it.sku)+(it.ean?' · '+esc(it.ean):'')+'</span></button>').join('');
+}
+
+async function abrirPorSku(sku){
+  const alvo = document.getElementById('resultado');
+  alvo.innerHTML = '<span class="dim">abrindo '+esc(sku)+'…</span>';
+  let d = null;
+  try {
+    const r = await fetch(MOD+'/buscar-produto?q='+encodeURIComponent(sku), {credentials:'same-origin'});
+    d = await r.json().catch(()=>null);
+  } catch(e){ d = null; }
+  if(d && d.ok && d.produto) mostrarProduto(d.produto);
+  else alvo.innerHTML = '<div class="aviso">Não consegui abrir <b>'+esc(sku)+'</b> agora.</div>';
+}
+
+function mostrarProduto(p){
+  ESCOLHIDO = p;
+  document.getElementById('resultado').innerHTML = '';
+  document.getElementById('prodEscolhido').innerHTML =
+    '<div class="prod">' +
+    (p.img ? '<img src="'+esc(p.img)+'" alt="">' : '<div class="semfoto">sem foto<br>no Bling</div>') +
+    '<div><h3>'+esc(p.nome || '(sem nome)')+'</h3>' +
+    '<div class="dim">SKU <b>'+esc(p.sku)+'</b>'+(p.ean?' · EAN '+esc(p.ean):'')+'</div>' +
+    (p.localizacao ? '<div class="dim">📍 '+esc(p.localizacao)+'</div>' : '') +
+    '<div style="margin-top:6px">Saldo no Bling agora: <b>'+(p.estoque!=null?esc(p.estoque):'—')+'</b></div>' +
+    '</div></div>';
+  document.getElementById('painelLanc').style.display = '';
+  const q = document.getElementById('qtd');
+  q.value = '';            // nunca pré-preencher com o saldo do Bling: a pessoa
+  q.focus();               // confirmaria o número da tela em vez de contar
+}
+
+function limpar(){
+  ESCOLHIDO = null;
+  document.getElementById('painelLanc').style.display = 'none';
+  document.getElementById('msgLanc').textContent = '';
+  document.getElementById('busca').value = '';
+  document.getElementById('busca').focus();
+}
+
+async function lancar(){
+  if(!ESCOLHIDO) return;
+  const msg = document.getElementById('msgLanc');
+  const bruto = (document.getElementById('qtd').value || '').trim();
+  if(bruto === ''){ msg.innerHTML = '<b>Digite a quantidade contada.</b>'; return; }
+  const n = Number(bruto);
+  if(!isFinite(n) || n < 0 || Math.floor(n) !== n){
+    msg.innerHTML = '<b>Quantidade inválida</b> — use um número inteiro a partir de 0.'; return;
+  }
+  msg.textContent = 'salvando…';
+  let d = null;
+  try {
+    const r = await fetch(MOD+'/contagem-lancar', {
+      method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ sku: ESCOLHIDO.sku, nome: ESCOLHIDO.nome, ean: ESCOLHIDO.ean,
+                             contado: n, saldo_bling: ESCOLHIDO.estoque })
+    });
+    d = await r.json().catch(()=>null);
+  } catch(e){ d = null; }
+  if(!(d && d.ok)){
+    /* não dizer "salvo" sem ter salvo: a pessoa segue pro próximo item e a
+       contagem se perde sem ninguém notar */
+    msg.innerHTML = '<b>Não salvou.</b> ' + esc((d && d.erro) || 'tente de novo') + '';
+    return;
+  }
+  const dif = (ESCOLHIDO.estoque != null) ? (n - Number(ESCOLHIDO.estoque)) : null;
+  msg.innerHTML = '✅ Contagem salva' + (dif != null && dif !== 0
+    ? ' — <b>diferença de '+(dif>0?'+':'')+dif+'</b> em relação ao Bling.' : '.');
+  setTimeout(limpar, 1200);
+  carregarHoje();
+}
+
+async function carregarHoje(){
+  const alvo = document.getElementById('hoje');
+  let d = null;
+  try {
+    const r = await fetch(MOD+'/contagem-lista?de='+hojeISO(), {credentials:'same-origin'});
+    d = await r.json().catch(()=>null);
+  } catch(e){ d = null; }
+  if(!(d && d.ok)){ alvo.innerHTML = '<span class="dim">não consegui carregar a lista agora.</span>'; return; }
+  if(!d.lancamentos.length){ alvo.innerHTML = '<span class="dim">nenhuma contagem hoje ainda.</span>'; return; }
+  alvo.innerHTML = '<table class="tab"><thead><tr><th>HORA</th><th>SKU</th><th>PRODUTO</th>' +
+    '<th class="n">CONTADO</th><th class="n">BLING</th><th class="n">DIF.</th><th>QUEM</th></tr></thead><tbody>' +
+    d.lancamentos.map(l => {
+      const dif = l.divergencia;
+      return '<tr><td>'+esc(String(l.quando).slice(11,16))+'</td>' +
+        '<td><b>'+esc(l.sku)+'</b></td>' +
+        '<td>'+esc(l.nome)+'</td>' +
+        '<td class="n"><b>'+l.contado+'</b></td>' +
+        '<td class="n">'+(l.saldo_bling_na_hora!=null?l.saldo_bling_na_hora:'—')+'</td>' +
+        '<td class="n '+(dif==null?'':(dif===0?'ok':'bad'))+'">'+(dif==null?'—':(dif>0?'+':'')+dif)+'</td>' +
+        '<td>'+esc(l.quem)+'</td></tr>';
+    }).join('') + '</tbody></table>';
+}
+
+carregarHoje();
+</script>
+</body>
+</html>
