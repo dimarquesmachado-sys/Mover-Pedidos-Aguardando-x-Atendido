@@ -292,4 +292,40 @@ for (const [emp, arq] of Object.entries({
     'confere precisa LER o nome pra saber que produto contou');
 }
 
+/* 22/09 — DIGITAR A QUANTIDADE NA LINHA E EXCLUIR, pedidos do dono depois de usar a tela:
+   "pra eu não ter que digitar de novo o 404 caso queira adicionar mais 1". Os botões resolvem
+   de 1 em 1; com diferença grande, digitar erra menos que clicar dez vezes. */
+{
+  const lib5 = fs.readFileSync(LIB, 'utf8');
+  const js5 = /<script>([\s\S]*?)<\/script>/.exec(html)[1];
+
+  assert.ok(/prefixo \+ '\/contagem-definir'/.test(lib5), 'não há rota pra digitar a quantidade');
+  assert.ok(/prefixo \+ '\/contagem-excluir'/.test(lib5), 'não há rota pra excluir');
+
+  /* a mesma validação do lançamento: o número é o ponto do recurso inteiro */
+  const defin = lib5.slice(lib5.indexOf("'/contagem-definir'"), lib5.indexOf("'/contagem-excluir'"));
+  assert.ok(/Math\.floor\(n\) !== n/.test(defin) && /n > 1000000/.test(defin),
+    'digitar a quantidade não passa pela mesma validação do lançamento — dois caminhos, duas regras');
+  assert.ok(/l\.ajustes\.push\(\{ de: l\.contado, para: n/.test(defin),
+    'digitar sobrescreve sem guardar de onde veio — o registro vira caixa preta');
+
+  /* excluir NÃO apaga do arquivo: some da lista e fica a trilha */
+  assert.ok(/l\.excluido = true;/.test(lib5) && /l\.excluido_por/.test(lib5),
+    'a exclusão apaga o registro — o dono perderia a chance de saber que alguém contou e desfez');
+  assert.ok(/const vivos = d\.lancamentos\.filter\(l => l && !l\.excluido\)/.test(lib5),
+    'o excluído continua aparecendo na lista');
+  assert.ok(/x\.id === id && !x\.excluido/.test(lib5),
+    'dá pra ajustar um lançamento já excluído');
+
+  /* na tela: confirmação antes de excluir, e o número editável não usa prompt() */
+  assert.ok(/confirm\('Excluir a contagem/.test(js5), 'exclui sem confirmar');
+  /* olha o CÓDIGO, não os comentários: a frase que explica POR QUE não uso prompt() contém a
+     palavra, e a primeira versão deste assert acusou o próprio comentário. Já caí nisso hoje
+     com o blingWrite — falso positivo ensina a ignorar o vermelho. */
+  const js5codigo = js5.replace(/\/\*[\s\S]*?\*\//g, '').split('\n').filter(l => !l.trim().startsWith('//')).join('\n');
+  assert.ok(/data-editar/.test(js5) && !/prompt\(/.test(js5codigo),
+    'a edição usa prompt() — no celular ele tapa a tela e não mostra qual produto está sendo editado');
+  assert.ok(/ev\.key === 'Escape'/.test(js5), 'não dá pra desistir da edição');
+}
+
 console.log('OK: contagem de estoque — registro interno (nunca escreve no Bling), sessão nas 4 rotas, quantidade validada e busca por nome sem gastar cota');

@@ -100,6 +100,13 @@
                      border:1px solid var(--line);background:var(--card);color:var(--tx);cursor:pointer}
   .mais-menos button:hover{border-color:var(--ac2)}
   .mais-menos button:disabled{opacity:.4;cursor:default}
+  .qtd-num.edit{background:none;border:0;color:inherit;font:inherit;font-size:24px;font-weight:700;
+                cursor:pointer;padding:2px 6px;border-radius:8px}
+  .qtd-num.edit:hover{background:var(--card);outline:1px solid var(--line)}
+  .qtd-edit{width:76px;font-size:22px;font-weight:700;text-align:center;padding:6px;
+            background:#0d1220;color:var(--tx);border:1px solid var(--ac);border-radius:8px}
+  .mais-menos .excluir{font-size:17px}
+  .mais-menos .excluir:hover{border-color:var(--bad);color:var(--bad)}
   .dif{font-size:12px;font-weight:600;padding:2px 7px;border-radius:20px;flex:none}
   .dif.zero{background:#12351f;color:var(--ok)}
   .dif.nao{background:#3a1a1a;color:var(--bad)}
@@ -117,7 +124,7 @@
   <header class="top">
     <div class="marca"><span class="logo">📦</span>
       <h1>Contagem de Estoque · <b>Magazine Girassol</b></h1>
-      <span class="build">c7</span>
+      <span class="build">c8</span>
     </div>
   </header>
 
@@ -453,6 +460,67 @@ async function ajustar(id, delta, botao){
 
 let _seqLista = 0;
 
+/* 22/09 — digitar a quantidade na própria linha. O número vira um campo, salva no Enter ou ao
+   sair, e o Esc desiste. Não usa prompt(): no celular ele abre uma caixa do sistema que tapa a
+   tela e não mostra qual produto está sendo editado. */
+function editarQtd(botao){
+  const item = botao.closest('.item');
+  const atual = botao.textContent.trim();
+  const campo = document.createElement('input');
+  campo.type = 'number'; campo.inputMode = 'numeric'; campo.min = '0'; campo.step = '1';
+  campo.value = atual; campo.className = 'qtd-edit';
+  botao.replaceWith(campo);
+  campo.focus(); campo.select();
+
+  let encerrado = false;
+  const desistir = () => { if(encerrado) return; encerrado = true; carregarHoje(); };
+  const salvar = async () => {
+    if(encerrado) return; encerrado = true;
+    const v = (campo.value || '').trim();
+    if(v === '' || v === atual) return carregarHoje();
+    campo.disabled = true;
+    let d = null;
+    try {
+      const r = await fetch(MOD+'/contagem-definir', {
+        method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ id: item.dataset.id, contado: v })
+      });
+      d = await r.json().catch(()=>null);
+    } catch(e){ d = null; }
+    /* não deixa o número editado na tela se o servidor não confirmou: número que não foi
+       gravado é pior que número que não mudou */
+    if(!(d && d.ok)) alert((d && d.erro) || 'não consegui salvar — a quantidade não foi alterada');
+    carregarHoje();
+  };
+  campo.addEventListener('keydown', ev => {
+    if(ev.key === 'Enter'){ ev.preventDefault(); salvar(); }
+    if(ev.key === 'Escape'){ ev.preventDefault(); desistir(); }
+  });
+  campo.addEventListener('blur', salvar);
+}
+
+/* excluir, com confirmação — pedido do dono. No servidor a linha não some do arquivo: fica
+   marcada com quem tirou e quando, e some só da lista. */
+async function excluir(item, botao){
+  const nome = (item.querySelector('.nome') || {}).textContent || 'este lançamento';
+  if(!confirm('Excluir a contagem de "' + nome.trim() + '"?\n\nIsso tira a linha da lista do dia.')) return;
+  item.querySelectorAll('button').forEach(b => b.disabled = true);
+  let d = null;
+  try {
+    const r = await fetch(MOD+'/contagem-excluir', {
+      method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ id: item.dataset.id })
+    });
+    d = await r.json().catch(()=>null);
+  } catch(e){ d = null; }
+  if(!(d && d.ok)){
+    alert((d && d.erro) || 'não consegui excluir — a linha continua valendo');
+    item.querySelectorAll('button').forEach(b => b.disabled = false);
+    return;
+  }
+  carregarHoje();
+}
+
 async function carregarHoje(recomecar){
   /* Codex #511 (P2): ajustar dois cartões quase ao mesmo tempo disparava DOIS carregarHoje().
      Cada um zera o ACUMULADO compartilhado e depois espera a rede — as duas respostas se
@@ -510,10 +578,18 @@ async function carregarHoje(recomecar){
           '</div>' +
         '</div>' +
         '<span class="dif '+classeDif+'">'+esc(textoDif)+'</span>' +
-        '<div class="qtd-box"><div class="qtd-num">'+l.contado+'</div><div class="qtd-lbl">contado</div></div>' +
+        /* 22/09 — o número é CLICÁVEL: o dono pediu poder digitar a quantidade na linha em vez
+           de refazer a busca ("pra eu não ter que digitar de novo o 404"). Os botões resolvem
+           de 1 em 1; quando a diferença é grande, digitar erra menos que clicar dez vezes. */
+        '<div class="qtd-box">' +
+          (l.id ? '<button class="qtd-num edit" data-editar="1" title="clique pra digitar a quantidade">'+l.contado+'</button>'
+                : '<div class="qtd-num">'+l.contado+'</div>') +
+          '<div class="qtd-lbl">contado</div>' +
+        '</div>' +
         (l.id ? '<div class="mais-menos">' +
           '<button data-ajuste="-1" title="tirar 1">−</button>' +
           '<button data-ajuste="1" title="acrescentar 1">+</button>' +
+          '<button class="excluir" data-excluir="1" title="excluir este lançamento">🗑</button>' +
         '</div>' : '') +
       '</div>';
     }).join('');
@@ -521,8 +597,14 @@ async function carregarHoje(recomecar){
   /* os botões entram por addEventListener, não por onclick com o id concatenado: o SKU e o id
      vêm de dado gravado, e montar código a partir deles foi exatamente o XSS que o Codex achou
      no painel (#510). */
-  alvo.querySelectorAll('.item .mais-menos button').forEach(b => {
+  alvo.querySelectorAll('.item .mais-menos button[data-ajuste]').forEach(b => {
     b.addEventListener('click', () => ajustar(b.closest('.item').dataset.id, Number(b.dataset.ajuste), b));
+  });
+  alvo.querySelectorAll('.item [data-editar]').forEach(b => {
+    b.addEventListener('click', () => editarQtd(b));
+  });
+  alvo.querySelectorAll('.item [data-excluir]').forEach(b => {
+    b.addEventListener('click', () => excluir(b.closest('.item'), b));
   });
 }
 
