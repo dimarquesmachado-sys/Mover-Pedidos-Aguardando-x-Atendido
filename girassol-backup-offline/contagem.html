@@ -407,7 +407,7 @@
   <header class="top">
     <div class="marca"><span class="logo">📦</span>
       <h1>Contagem de Estoque · <b>Magazine Girassol</b></h1>
-      <span class="build">c2</span>
+      <span class="build">c3</span>
     </div>
   </header>
 
@@ -490,6 +490,7 @@ async function procurar(){
   /* SKU e EAN vão ao Bling (precisam do saldo e da foto do momento); nome vai no
      índice local — o Bling é cota da conta, e busca por nome dispararia uma
      consulta por tecla. */
+  const meuPed = ++_seqBusca;   // mesma trava: o último bipe é o que vale
   const soDigitos = q.replace(/\D/g, '');
   /* Codex (P2): qualquer palavra única (sem espaço) batia aqui — "luminaria", "martelo" — e
      ISSO ia pro /buscar-produto primeiro, que tenta o Bling em 3 caixas antes de desistir.
@@ -505,6 +506,7 @@ async function procurar(){
       const r = await fetch(MOD+'/buscar-produto?q='+encodeURIComponent(q), {credentials:'same-origin'});
       d = await r.json().catch(()=>null);
     } catch(e){ d = null; }
+    if(meuPed !== _seqBusca) return;   // outro código foi bipado enquanto este vinha
     if(d && d.ok && d.produto){ mostrarProduto(d.produto); return; }
     /* não achou como código: tenta pelo nome antes de desistir — SKU com letras
        também casa com a busca de nome, e o funcionário não tem que saber disso */
@@ -542,6 +544,10 @@ async function buscarPorNome(q, veioDeCodigo){
 }
 
 async function abrirPorSku(sku){
+  /* Codex #509 (P2): bipar um segundo código com o primeiro ainda em voo fazia as DUAS
+     respostas chamarem mostrarProduto — e valia a que chegasse por último, mesmo sendo a mais
+     antiga. A contagem então ia pro produto errado. Mesma trava da busca por nome. */
+  const meu = ++_seqBusca;
   const alvo = document.getElementById('resultado');
   alvo.innerHTML = '<span class="dim">abrindo '+esc(sku)+'…</span>';
   let d = null;
@@ -549,6 +555,7 @@ async function abrirPorSku(sku){
     const r = await fetch(MOD+'/buscar-produto?q='+encodeURIComponent(sku), {credentials:'same-origin'});
     d = await r.json().catch(()=>null);
   } catch(e){ d = null; }
+  if(meu !== _seqBusca) return;   // outro código foi bipado enquanto este vinha
   if(d && d.ok && d.produto) mostrarProduto(d.produto);
   else alvo.innerHTML = '<div class="aviso">Não consegui abrir <b>'+esc(sku)+'</b> agora.</div>';
 }
@@ -612,8 +619,27 @@ function limpar(){
   document.getElementById('busca').focus();
 }
 
+let _salvando = false;
+
 async function lancar(){
   if(!ESCOLHIDO) return;
+  /* Codex #509 (P2): em conexão lenta o botão e o Enter continuavam ativos até a resposta
+     chegar — dois cliques (ou Enter repetido, que é o reflexo de quem bipa o dia todo) mandavam
+     dois POST iguais, e o servidor gravava os dois: a mesma contagem aparecia em dobro e a
+     revisão não teria como saber qual era real. */
+  if(_salvando) return;
+  _salvando = true;
+  const btnSalvar = document.querySelector('#painelLanc .btn');
+  if(btnSalvar) btnSalvar.disabled = true;
+  try {
+    await lancarDeVerdade();
+  } finally {
+    _salvando = false;
+    if(btnSalvar) btnSalvar.disabled = false;
+  }
+}
+
+async function lancarDeVerdade(){
   const msg = document.getElementById('msgLanc');
   const bruto = (document.getElementById('qtd').value || '').trim();
   if(bruto === ''){ msg.innerHTML = '<b>Digite a quantidade contada.</b>'; return; }
@@ -652,18 +678,32 @@ async function lancar(){
   carregarHoje();
 }
 
-async function carregarHoje(){
+let OFFSET_LISTA = 0, ACUMULADO = [];
+
+async function carregarHoje(recomecar){
+  if(recomecar !== false){ OFFSET_LISTA = 0; ACUMULADO = []; }
   const alvo = document.getElementById('hoje');
   let d = null;
   try {
-    const r = await fetch(MOD+'/contagem-lista?de='+hojeISO(), {credentials:'same-origin'});
+    /* Codex #509 (P2): o servidor devolve no máximo 500 por vez e informa `tem_mais` /
+       `proximo_offset`, mas a tela pedia sempre o offset zero e ignorava o resto — num dia de
+       inventário com mais de 500 itens, os primeiros lançamentos sumiam da lista em silêncio,
+       e quem contou não teria como conferir o que já fez. Agora busca as páginas seguintes. */
+    const r = await fetch(MOD+'/contagem-lista?de='+hojeISO()+'&offset='+(OFFSET_LISTA||0), {credentials:'same-origin'});
     d = await r.json().catch(()=>null);
   } catch(e){ d = null; }
   if(!(d && d.ok)){ alvo.innerHTML = '<span class="dim">não consegui carregar a lista agora.</span>'; return; }
-  if(!d.lancamentos.length){ alvo.innerHTML = '<span class="dim">nenhuma contagem hoje ainda.</span>'; return; }
+  ACUMULADO = ACUMULADO.concat(d.lancamentos || []);
+  /* enquanto houver mais, continua puxando — a lista do dia tem que estar inteira, senão quem
+     contou não consegue conferir o próprio trabalho */
+  if(d.tem_mais && d.proximo_offset != null && ACUMULADO.length < 5000){
+    OFFSET_LISTA = d.proximo_offset;
+    return carregarHoje(false);
+  }
+  if(!ACUMULADO.length){ alvo.innerHTML = '<span class="dim">nenhuma contagem hoje ainda.</span>'; return; }
   alvo.innerHTML = '<table class="tab"><thead><tr><th>HORA</th><th>SKU</th><th>PRODUTO</th>' +
     '<th class="n">CONTADO</th><th class="n">BLING</th><th class="n">DIF.</th><th>QUEM</th></tr></thead><tbody>' +
-    d.lancamentos.map(l => {
+    ACUMULADO.map(l => {
       const dif = l.divergencia;
       return '<tr><td>'+esc(horaSP(l.quando))+'</td>' +
         '<td><b>'+esc(l.sku)+'</b></td>' +

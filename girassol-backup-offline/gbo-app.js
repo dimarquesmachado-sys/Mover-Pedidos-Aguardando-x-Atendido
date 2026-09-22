@@ -856,6 +856,8 @@ function routes(readBody) {
      "readBody is not defined" — o comentário já estava aqui, e eu não li. */
   const _rotasContagem = require('../lib/checkout/rotas-contagem').criar({
     prefixo: '/girassol-backup-offline', json, validarSessao, lerIndiceEan,
+    /* pra a busca distinguir "índice vazio" de "catálogo nunca indexado" */
+    getIdxStatus,
     CACHE_DIR, readJson, writeJson, readBody, blingGet,
     empresa: { pasta: 'girassol-backup-offline' },
   });

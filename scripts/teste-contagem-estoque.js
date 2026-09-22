@@ -137,4 +137,52 @@ assert.ok(/enviado_ao_bling: false/.test(lib),
   assert.ok(/q\.length < 3/.test(js), 'falta o piso de 3 letras na tela');
 }
 
+/* 22/09 (Codex #509, 7 apontamentos) — os dois P1 são sobre PERDER DADO, que é o pior que esta
+   tela pode fazer: ela existe pra registrar trabalho físico que ninguém vai refazer. */
+{
+  const lib2 = fs.readFileSync(LIB, 'utf8');
+
+  /* P1: o saldo tem que ser o do INSTANTE do lançamento. Vinha do navegador, capturado quando o
+     produto foi aberto — e entre abrir e salvar cabe a contagem física inteira, com venda ou
+     ajuste no meio. A divergência nascia errada e fica assim pra sempre: é registro. */
+  assert.ok(/let saldoBling = await saldoAoVivo\(sku\);/.test(lib2),
+    'o lançamento ainda confia no saldo que o NAVEGADOR mandou — a divergência gravada nasce ' +
+    'comparando o contado de agora com o saldo de minutos atrás');
+  assert.ok(/saldo_conferido_na_hora/.test(lib2),
+    'não registra se o saldo foi conferido na hora ou herdado da tela — a revisão precisa saber ' +
+    'antes de confiar na divergência');
+
+  /* P1: gravação atômica. writeJson trunca o arquivo; disco cheio no meio deixava o histórico
+     vazio, e o ler() devolvia lista vazia em silêncio — a gravação seguinte apagava o resto. */
+  assert.ok(/fs\.renameSync\(tmp, alvo\)/.test(lib2),
+    'a gravação não é atômica — uma falha no meio deixa o histórico do dia truncado ou vazio');
+  assert.ok(/throw new Error\('arquivo de contagens ilegível'\)/.test(lib2),
+    'arquivo ilegível ainda vira lista vazia — a próxima gravação apagaria o que sobrou');
+
+  /* P2: dia de São Paulo, não UTC */
+  assert.ok(/toLocaleString\('sv-SE', \{ timeZone: 'America\/Sao_Paulo' \}\)/.test(lib2),
+    'o filtro compara carimbo UTC com dia local — o turno das 21h-23h59 aparecia no dia seguinte inteiro');
+
+  /* P2: "vazio" e "incompleto" mandam fazer coisas diferentes */
+  assert.ok(/indice_completo/.test(lib2),
+    'a busca não distingue índice VAZIO de catálogo NUNCA INDEXADO — com um produto só no índice, ' +
+    'a tela diria "nada encontrado" pra tudo, como se os produtos não existissem');
+}
+
+/* os três P2 da tela */
+{
+  const js2 = /<script>([\s\S]*?)<\/script>/.exec(html)[1];
+
+  assert.ok(/if\(_salvando\) return;/.test(js2),
+    'clique duplo ou Enter repetido manda dois POST iguais — a mesma contagem entra em dobro');
+  assert.ok(/btnSalvar\.disabled = true/.test(js2), 'o botão não é travado durante o envio');
+
+  assert.ok(/if\(meuPed !== _seqBusca\) return;/.test(js2) && /if\(meu !== _seqBusca\) return;/.test(js2),
+    'bipar um segundo código com o primeiro em voo deixa valer a resposta que chegar por último — ' +
+    'a contagem iria pro produto errado');
+
+  assert.ok(/d\.tem_mais && d\.proximo_offset != null/.test(js2),
+    'a lista ignora a paginação — num dia com mais de 500 lançamentos os primeiros somem em silêncio');
+}
+
 console.log('OK: contagem de estoque — registro interno (nunca escreve no Bling), sessão nas 4 rotas, quantidade validada e busca por nome sem gastar cota');
