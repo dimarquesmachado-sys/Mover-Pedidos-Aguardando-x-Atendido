@@ -328,4 +328,26 @@ for (const [emp, arq] of Object.entries({
   assert.ok(/ev\.key === 'Escape'/.test(js5), 'não dá pra desistir da edição');
 }
 
+/* 22/09 (Codex #511, 2ª rodada) — dois furos que só apareceram DEPOIS de digitar a quantidade
+   na linha e excluir entrarem: o botão + isolado ainda não tinha o mesmo teto dos outros dois
+   caminhos pro campo, e editar a linha não travava os botões vizinhos dela. */
+{
+  const lib6 = fs.readFileSync(LIB, 'utf8');
+  const js6 = /<script>([\s\S]*?)<\/script>/.exec(html)[1];
+
+  /* um lançamento já no teto de 1.000.000 aceitava +1 e ia pra 1.000.001 — o ajuste não tinha
+     o mesmo teto do lançamento e do /contagem-definir pro mesmo campo */
+  const ajustar6 = lib6.slice(lib6.indexOf("'/contagem-ajustar'"), lib6.indexOf("'/contagem-definir'"));
+  assert.ok(/if \(novo > 1000000\)/.test(ajustar6),
+    'o ajuste (+) não tem teto — um lançamento no limite passa de 1.000.000 clicando +');
+
+  /* editar a quantidade na linha e tocar no + ou − logo em seguida disparava o blur (que salva
+     o valor digitado) e o click (que ajusta) sem ordem garantida entre os dois — o ajuste podia
+     ser sobrescrito pelo valor absoluto do blur, perdendo o toque em silêncio */
+  const editarQtd6 = js6.slice(js6.indexOf('function editarQtd'), js6.indexOf('function excluir'));
+  assert.ok(/\.mais-menos button/.test(editarQtd6) && /disabled = true/.test(editarQtd6),
+    'editar a quantidade não trava os botões + / − / excluir da mesma linha — o blur do ' +
+    'campo e o clique num deles correm sem ordem garantida');
+}
+
 console.log('OK: contagem de estoque — registro interno (nunca escreve no Bling), sessão nas 4 rotas, quantidade validada e busca por nome sem gastar cota');
