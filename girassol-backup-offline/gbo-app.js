@@ -435,6 +435,7 @@ const _rotasCatalogo = require('../lib/checkout/rotas-catalogo').criar({
   indexarCatalogoCompleto, getIdxStatus,
 });
 
+
 // ─── Rotas HTTP (namespaced) ────────────────────────────────────────────
 // A rotina noturna precisa das funcoes deste arquivo, entao e montada aqui.
 // O agendador da RAIZ registra sozinho qualquer chave nova de `crons` que tenha
@@ -845,6 +846,21 @@ function routes(readBody) {
     locCache, localizacaoDeProduto, salvarLoc, montarSeparacao, montarSeparacaoPorPedido,
     RESERVAS_FILE, LOC_LOG_FILE,
   });
+
+  /* 22/09 — CONTAGEM DE ESTOQUE (registro interno). Pedido do dono: tela pro funcionário achar
+     o produto por SKU, EAN ou parte do nome, ver nome completo e foto, e lançar o que contou.
+     NÃO grava no Bling — ele revisa depois e decide o que enviar; por isso o contexto abaixo
+     não passa blingWrite nenhum, e a lib não tem como escrever lá nem por engano.
+     ⚠️ Montado DENTRO do routes pelo mesmo motivo da irmã acima: o `readBody` chega como
+     PARÂMETRO daqui. Escrevi fora na primeira tentativa e o boot caiu com
+     "readBody is not defined" — o comentário já estava aqui, e eu não li. */
+  const _rotasContagem = require('../lib/checkout/rotas-contagem').criar({
+    prefixo: '/girassol-backup-offline', json, validarSessao, lerIndiceEan,
+    /* pra a busca distinguir "índice vazio" de "catálogo nunca indexado" */
+    getIdxStatus,
+    CACHE_DIR, readJson, writeJson, readBody, blingGet,
+    empresa: { pasta: 'girassol-backup-offline' },
+  });
   const _rotasBackfill = require('../lib/checkout/rotas-backfill').criar({
     prefixo: '/girassol-backup-offline', json, readJson, writeJson, ehAdmin, lerChaveAdmin,
     detalhePedido, backfillNFLocal,
@@ -952,6 +968,7 @@ function routes(readBody) {
        não valida sessão sozinho, e antes da guarda ficava aberta pra buscar-produto
        e indexar-status sem cookie nenhum. */
     if (await _rotasCatalogo(req, res, urlObj, method)) return true;
+  if (await _rotasContagem(req, res, urlObj, method)) return true;
       /* mesma posição da de catálogo: DEPOIS do portão de sessão (Codex #480). */
       if (await _rotasSeparacao(req, res, urlObj, method)) return true;
       if (await _rotasBackfill(req, res, urlObj, method, validarSessao)) return true;

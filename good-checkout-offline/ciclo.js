@@ -121,7 +121,14 @@ async function indexarCatalogoCompleto() {
           await sleep(PAUSA);
           if (det) { eans = getPossiveisGtins(det).map(e => String(e).replace(/\D/g, '')).filter(e => e.length >= 8); nome = det.nome || nome; sku = det.codigo || sku; }
         }
-        for (const e of eans) { if (!novo[e]) idxStatus.eans++; novo[e] = { sku: sku || '', nome: nome || '', id: it.id }; }
+        if (eans.length) {
+          for (const e of eans) { if (!novo[e]) idxStatus.eans++; novo[e] = { sku: sku || '', nome: nome || '', id: it.id }; }
+        } else if (sku) {
+          // Codex (P2): sem GTIN, o produto nunca entrava no índice — e é o índice de EAN que
+          // a busca por nome da contagem de estoque usa. Chave sintética prefixada (nunca é só
+          // dígitos, ao contrário de um EAN de verdade) pra não colidir com o lookup por dígitos.
+          novo['sku:' + sku] = { sku: sku, nome: nome || '', id: it.id };
+        }
       }
       /* Codex #484 (P2): eu guardei o salvamento FINAL e esqueci deste, que publica a cada
          página — então o índice parcial já estava em disco muito antes do aborto, e meu

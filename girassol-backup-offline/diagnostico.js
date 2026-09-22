@@ -37,6 +37,11 @@ const { servicoDoPedido, ehFlex } = require('./comum');
 const { localizacaoDeProduto, produtoDetalhe } = require('./produtos');
 const { detalhePedido } = require('./ciclo');
 const { gerarDanfeSimplificado } = require('./danfe-simplificado');
+/* Codex #509 (P1): a contagem de estoque é a ÚNICA cópia durável dos lançamentos — não vem do
+   Bling, e não tinha lugar nenhum no backup/restauração. Migrar ou recuperar o disco persistente
+   pelo fluxo suportado perdia toda contagem em silêncio, mesmo com o resto do estado voltando
+   normal. Mesmo caminho do arquivo em lib/checkout/rotas-contagem.js (CACHE_DIR + este nome). */
+const CONTAGEM_FILE = path.join(CACHE_DIR, '_contagem-estoque.json');
 
 function rotasDiagnostico(ctx) {
   const { VERSAO, validarSessao, supaCfg, readBody } = ctx;
@@ -688,7 +693,8 @@ function rotasDiagnostico(ctx) {
         conferidos: readJson(CONFERIDOS_FILE, {}),
         localizacoes: readJson(LOC_FILE, {}),
         indice_ean: readJson(EAN_INDEX_FILE, {}),
-        localizacoes_log: readJson(LOC_LOG_FILE, [])
+        localizacoes_log: readJson(LOC_LOG_FILE, []),
+        contagem_estoque: readJson(CONTAGEM_FILE, { lancamentos: [] })
       };
       const nome = 'backup-good-offline-' + new Date().toISOString().slice(0, 10) + '.json';
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Disposition': 'attachment; filename="' + nome + '"' });
@@ -721,6 +727,10 @@ function rotasDiagnostico(ctx) {
       if (body.localizacoes && typeof body.localizacoes === 'object') { writeJson(LOC_FILE, body.localizacoes); restaurados.push('localizações (' + Object.keys(body.localizacoes).length + ')'); }
       if (body.indice_ean && typeof body.indice_ean === 'object') { writeJson(EAN_INDEX_FILE, body.indice_ean); restaurados.push('índice EAN (' + Object.keys(body.indice_ean).length + ')'); }
       if (Array.isArray(body.localizacoes_log)) { writeJson(LOC_LOG_FILE, body.localizacoes_log); restaurados.push('log (' + body.localizacoes_log.length + ')'); }
+      if (body.contagem_estoque && Array.isArray(body.contagem_estoque.lancamentos)) {
+        writeJson(CONTAGEM_FILE, body.contagem_estoque);
+        restaurados.push('contagem de estoque (' + body.contagem_estoque.lancamentos.length + ')');
+      }
       json(res, 200, { ok: restaurados.length > 0, restaurados });
       return true;
     }
