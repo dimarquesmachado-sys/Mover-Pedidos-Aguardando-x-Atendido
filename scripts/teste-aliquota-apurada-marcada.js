@@ -98,8 +98,11 @@ for (const [emp, arq] of Object.entries(ARQ_TELA)) {
 /* AMB e Girassol: 22/09 (Codex P2, 2ª rodada) — marcar "0" e apurada junto passava pela regra
    antiga (0 != null), mas o backend trata 0 como campo vazio e apaga a alíquota (mesma regra de
    18/09 que a GOOD já tinha). A marca "apurada" tem que exigir o mesmo intervalo que o backend
-   aceita (0 < x ≤ 40) — ou vir de um checkbox "fora do ano", que já se refere a um valor que
-   SABEMOS válido (é por isso que ele está na lista de pendências, não precisa reconferir). */
+   aceita (0 < x ≤ 40) — INCLUSIVE o checkbox "fora do ano": 22/09 (Codex P2, 4ª rodada) — a
+   3ª rodada deu campo próprio a essas linhas (antes só tinham a caixinha), e por isso deixaram
+   de ser "um valor que já sabemos válido" — o dono pode limpar ou digitar algo fora da faixa
+   ali igual a qualquer outro mês, e o bypass antigo deixava a marca entrar sem alíquota
+   nenhuma por trás. */
 for (const emp of ['amb', 'girassol']) {
   const html = fs.readFileSync(path.join(raiz, ARQ_TELA[emp]), 'utf8');
   const m = /const apuradas = (\[\.\.\.document\.querySelectorAll\('\[data-apurada\]'\)\][\s\S]*?\.map\(c => c\.dataset\.apurada\));/.exec(html);
@@ -121,10 +124,14 @@ for (const emp of ['amb', 'girassol']) {
     montarApuradas(fakeDoc([{ checked: false, dataset: { apurada: '2026-11' } }]), { '2026-11': 8.4 }), [],
     emp + ': checkbox desmarcada não pode entrar na lista');
   assert.deepStrictEqual(
-    montarApuradas(fakeDoc([{ checked: true, dataset: { apurada: '2025-12', foraAno: '1' } }]), {}), ['2025-12'],
-    emp + ': o checkbox "fora do ano" (pendência de ano anterior, sem input de alíquota na tela) tem que ' +
-    'entrar na lista mesmo sem entrada em aliquotas — Codex apontou que essas pendências ficavam sem ' +
-    'como ser resolvidas depois que o formulário passou a preservar apurados de anos anteriores');
+    montarApuradas(fakeDoc([{ checked: true, dataset: { apurada: '2025-12', foraAno: '1' } }]), {}), [],
+    emp + ': o checkbox "fora do ano" SEM valor aceito no campo próprio dele não pode entrar na lista — ' +
+    'campo limpo ou fora da faixa apaga a alíquota no backend, e a marca ficaria sem alíquota nenhuma ' +
+    'por trás (Codex P2, 4ª rodada)');
+  assert.deepStrictEqual(
+    montarApuradas(fakeDoc([{ checked: true, dataset: { apurada: '2025-12', foraAno: '1' } }]), { '2025-12': 8.4 }),
+    ['2025-12'],
+    emp + ': o checkbox "fora do ano" COM valor aceito no campo próprio dele tem que entrar na lista');
 }
 
 /* AMB e Girassol CACHEIAM a config num objeto CFG global — se ele perder `apuradas` no boot ou

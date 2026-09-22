@@ -396,7 +396,7 @@ const MOD = '/girassol-backup-offline';
     return _f(u, o);
   };
 })();
-const DASH_BUILD = 'd233';
+const DASH_BUILD = 'd234';
 let DADOS = [];
 let VENDAS = [];   // sincronizador do Bling: TODAS as vendas por data, qualquer situação
 let SINT = [];     // as ainda NÃO bipadas viram linhas sintéticas na Análise
@@ -2806,8 +2806,10 @@ async function salvarCfg(){
       aliquotas[i.dataset.aliq] = (i.value === '' || (deFabrica && !confirmaApurada)) ? null : Number(i.value);
     });
     /* só marca como apurado o mês que TEM valor salvo E aceito (o backend só grava 0 < x ≤ 40 —
-       22/09 Codex P2). Os checkboxes "fora do ano" já se referem a um valor que SABEMOS válido
-       (é por isso que entraram na lista de pendências), então pulam o aliquotas[...] daqui. */
+       22/09 Codex P2). Codex (P2, 2ª leitura): os checkboxes "fora do ano" ganharam CAMPO
+       PRÓPRIO (acima), e por causa disso deixaram de ser "um valor que já sabemos válido" — o
+       dono pode limpar ou digitar um valor inválido ali igual a qualquer outro mês. Por isso
+       agora passam pela MESMA checagem de aliquotas[...], sem bypass. */
     /* 22/09 (Codex P2) — RECUSAR ANTES DE ENVIAR, como a GOOD já faz. Digitar 41 num mês que
        já era apurado fazia três coisas ao mesmo tempo: o servidor ignorava o 41 e MANTINHA a
        alíquota anterior, o filtro abaixo tirava o mês de `apuradas`, e a requisição voltava
@@ -2827,7 +2829,7 @@ async function salvarCfg(){
       return;
     }
     const apuradas = [...document.querySelectorAll('[data-apurada]')]
-      .filter(c => c.checked && (c.dataset.foraAno === '1' || (aliquotas[c.dataset.apurada] > 0 && aliquotas[c.dataset.apurada] <= 40)))
+      .filter(c => c.checked && aliquotas[c.dataset.apurada] > 0 && aliquotas[c.dataset.apurada] <= 40)
       .map(c => c.dataset.apurada);
   document.querySelectorAll('[data-taxa]').forEach(i=>{ taxas[i.dataset.taxa] = i.value===''?null:Number(i.value); });
   const flex={}; document.querySelectorAll('[data-flex]').forEach(i=>{ flex[i.dataset.flex] = i.value===''?null:Number(i.value); });
@@ -2839,7 +2841,10 @@ async function salvarCfg(){
     const magSel = $('magNivelSel');
     if(magSel){ try{ await fetch(MOD+'/config-frete-magalu',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({nivel_desconto:magSel.value})}); }catch(e){} }
     if(d&&d.ok){
-      CFG={aliquotas:d.config.aliquotas||{},taxas:d.config.taxas||{},flex:d.config.flex||{},ciencia_aliq:d.config.ciencia_aliq||{},apuradas:d.config.apuradas||[]};
+      /* Codex (P2): a resposta do POST só devolve `config` — apurados_meses (a tabela de
+         fábrica, fixa no código) não vem nela. Sem carregar de CFG, o render() logo depois
+         tratava todo mês passado só-de-fábrica como estimativa pendente até o próximo reload. */
+      CFG={aliquotas:d.config.aliquotas||{},taxas:d.config.taxas||{},flex:d.config.flex||{},ciencia_aliq:d.config.ciencia_aliq||{},apuradas:d.config.apuradas||[],apuradosFabrica:CFG.apuradosFabrica||[]};
       render();
       // 01/08: se alguma ALÍQUOTA mudou, o servidor já saiu reaplicando nas linhas gravadas do
       // histórico. Aqui a gente acompanha e mostra o progresso ao lado do botão, até terminar.
