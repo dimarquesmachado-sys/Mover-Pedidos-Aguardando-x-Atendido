@@ -226,4 +226,42 @@ for (const [emp, arq] of Object.entries({
     emp + ': o fazerBusca perdeu o `async` — o `await` dentro dele quebra a tela inteira');
 }
 
+/* 22/09 — A TELA ESTAVA FEIA, e por um motivo concreto: eu tinha copiado o bloco de estilo do
+   dashboard e as classes que usava (wrap, bloco, campo, tab…) NÃO EXISTIAM lá — só `aviso`.
+   Saiu sem caixa, sem tabela e com fonte enorme. Copiar CSS de outra tela e torcer pra as
+   classes baterem foi o erro; agora elas são definidas onde são usadas, e o teste confere. */
+{
+  const css = /<style>([\s\S]*?)<\/style>/.exec(html)[1];
+  const usadas = new Set([...html.matchAll(/class="([^"]+)"/g)]
+    .flatMap(m => m[1].split(/\s+/)).filter(c => c && !c.includes("'")));
+  const semCss = [...usadas].filter(c => !new RegExp('\\.' + c.replace(/-/g, '\\-') + '[\\s,{:.]').test(css));
+  assert.deepStrictEqual(semCss, [],
+    'classe(s) usadas na tela sem CSS: ' + semCss.join(', ') + ' — foi assim que ela saiu sem ' +
+    'caixa e com fonte gigante');
+}
+
+/* + e − na lista do dia, pedido do dono */
+{
+  const lib3 = fs.readFileSync(LIB, 'utf8');
+  const js3 = /<script>([\s\S]*?)<\/script>/.exec(html)[1];
+
+  assert.ok(/prefixo \+ '\/contagem-ajustar'/.test(lib3), 'não há rota pra ajustar a quantidade');
+  assert.ok(/const id = Date\.now\(\)\.toString\(36\)/.test(lib3),
+    'o lançamento não tem id — ajustar por posição no array atinge a linha errada quando outro ' +
+    'funcionário lança ao mesmo tempo');
+
+  /* o ajuste NÃO pode apagar o valor anterior: esta tela existe pra conferir depois */
+  assert.ok(/l\.ajustes\.push\(\{ de: l\.contado, para: novo/.test(lib3),
+    'o ajuste sobrescreve a quantidade sem guardar de onde veio — o registro vira caixa preta');
+  assert.ok(/if \(novo < 0\)/.test(lib3), 'deixa a contagem ficar negativa');
+  assert.ok(/l\.divergencia = novo - Number\(l\.saldo_bling_na_hora\)/.test(lib3),
+    'a divergência não acompanha o ajuste — é justamente ela que o dono olha na revisão');
+
+  /* botões por addEventListener, não por onclick montado com o id — é o XSS do #510 */
+  assert.ok(/addEventListener\('click'/.test(js3) && /data-ajuste/.test(js3),
+    'os botões + e − montam código a partir de dado gravado — mesmo buraco que o Codex achou no painel');
+  assert.ok(/par\.forEach\(b => b\.disabled = true\)/.test(js3),
+    'clique repetido no + manda vários ajustes e a tela fica diferente do que foi gravado');
+}
+
 console.log('OK: contagem de estoque — registro interno (nunca escreve no Bling), sessão nas 4 rotas, quantidade validada e busca por nome sem gastar cota');
