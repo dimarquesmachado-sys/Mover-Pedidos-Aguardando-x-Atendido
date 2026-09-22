@@ -76,7 +76,10 @@ for (const [emp, arq] of Object.entries(TELAS)) {
      com o que está SALVO (`salvo`), nunca com o valor apurado do código (`apur`). O valor
      apurado aparece ao lado, como legenda — se alguém o mover pra dentro do campo, ele vira
      config no primeiro Salvar. */
-  const campoGood = /id="aliq_'\+k\+'" value="'\+esc\(([^)]*)\)\+'"/.exec(html);
+  /* pega o conteúdo do esc(...) até o `)+'"` que fecha o atributo — a expressão lá dentro
+     pode ter parênteses próprios (o #506 acrescentou `Number(salvo)>0`), e a versão anterior
+     desta regex parava no primeiro `)` e deixava de achar o campo. */
+  const campoGood = /id="aliq_'\+k\+'" value="'\+esc\(([\s\S]*?)\)\+'"/.exec(html);
   assert.ok(campoGood, 'GOOD: não achei a montagem do campo de alíquota');
   assert.ok(/salvo/.test(campoGood[1]) && !/\bapur\b/.test(campoGood[1]),
     'GOOD: o campo está sendo preenchido com o valor APURADO do código (' + campoGood[1] + ') — ' +
