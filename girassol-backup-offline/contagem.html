@@ -407,7 +407,7 @@
   <header class="top">
     <div class="marca"><span class="logo">📦</span>
       <h1>Contagem de Estoque · <b>Magazine Girassol</b></h1>
-      <span class="build">c4</span>
+      <span class="build">c5</span>
     </div>
   </header>
 
@@ -531,7 +531,7 @@ async function buscarPorNome(q, veioDeCodigo){
   const alvo = document.getElementById('resultado');
   let d = null;
   try {
-    const r = await fetch(MOD+'/contagem-buscar-nome?q='+encodeURIComponent(q), {credentials:'same-origin'});
+    const r = await fetch(MOD+'/buscar-produto-nome?q='+encodeURIComponent(q), {credentials:'same-origin'});
     d = await r.json().catch(()=>null);
   } catch(e){ d = null; }
   if(meu !== _seqBusca) return;

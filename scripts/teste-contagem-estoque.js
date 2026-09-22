@@ -49,7 +49,10 @@ for (const proibido of ['blingWrite', 'blingPost', 'blingPut', 'blingPatch']) {
 }
 
 /* ── 2) as quatro rotas exigem sessão ── */
-for (const rota of ['/contagem', '/contagem-buscar-nome', '/contagem-lancar', '/contagem-lista']) {
+/* 22/09 — a busca por nome MUDOU DE CASA: virou /buscar-produto-nome na lib de CATÁLOGO, que
+   as três empresas já registram, pra o 🔎 do painel ganhar junto e sumir a cópia. Aqui ficam
+   as rotas que são mesmo da contagem. */
+for (const rota of ['/contagem', '/contagem-lancar', '/contagem-lista']) {
   const i = lib.indexOf("prefixo + '" + rota + "'");
   assert.ok(i > 0, 'rota ' + rota + ' sumiu da lib');
   const trecho = lib.slice(i, i + 400);
@@ -84,17 +87,24 @@ assert.ok(/divergencia: \(saldoBling != null/.test(lib),
 assert.ok(/enviado_ao_bling: false/.test(lib),
   'falta a marca de "ainda não enviado" — é ela que deixa o dono saber o que já tratou');
 
-/* ── 5) busca por nome não pode ir ao Bling ── */
+/* ── 5) busca por nome: mora no CATÁLOGO e não pode ir ao Bling ── */
 {
-  const i = lib.indexOf("'/contagem-buscar-nome'");
-  const trecho = lib.slice(i, lib.indexOf("'/contagem-lancar'")).replace(/\/\*[\s\S]*?\*\//g, '');
+  const cat = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'rotas-catalogo.js'), 'utf8');
+  const i = cat.indexOf("'/buscar-produto-nome'");
+  assert.ok(i > 0, 'a busca por nome não está na lib de catálogo — o painel das três não a teria');
+  const trecho = cat.slice(i, cat.indexOf("'/buscar-produto'", i)).replace(/\/\*[\s\S]*?\*\//g, '');
   assert.ok(!/blingGet/.test(trecho),
     'a busca por NOME consulta o Bling — o funcionário digitando dispararia uma chamada por tecla, ' +
     'e a cota é da conta: a operação perde primeiro');
   assert.ok(/lerIndiceEan\(\)/.test(trecho), 'a busca por nome não usa o índice local');
   assert.ok(/q\.length < 3/.test(trecho), 'falta o piso de 3 letras — com 1 ou 2 a lista vem inútil');
-  assert.ok(/indice_vazio/.test(trecho),
-    'não distingue "índice vazio" de "não achei" — as duas coisas mandam fazer ações opostas');
+  assert.ok(/indice_vazio/.test(trecho) && /indice_completo/.test(trecho),
+    'não distingue "índice vazio" de "catálogo nunca indexado" de "não achei" — mandam ações diferentes');
+
+  /* e a contagem não pode ter ficado com uma CÓPIA da busca */
+  assert.ok(!lib.includes("'/contagem-buscar-nome'"),
+    'sobrou a cópia da busca por nome na lib da contagem — duas cópias divergem, e foi justamente ' +
+    'o que o dono perguntou ao ver duas buscas parecidas');
 }
 
 /* ── 6) a tela ── */
@@ -163,10 +173,14 @@ assert.ok(/enviado_ao_bling: false/.test(lib),
   assert.ok(/toLocaleString\('sv-SE', \{ timeZone: 'America\/Sao_Paulo' \}\)/.test(lib2),
     'o filtro compara carimbo UTC com dia local — o turno das 21h-23h59 aparecia no dia seguinte inteiro');
 
-  /* P2: "vazio" e "incompleto" mandam fazer coisas diferentes */
-  assert.ok(/indice_completo/.test(lib2),
-    'a busca não distingue índice VAZIO de catálogo NUNCA INDEXADO — com um produto só no índice, ' +
-    'a tela diria "nada encontrado" pra tudo, como se os produtos não existissem');
+  /* P2: "vazio" e "incompleto" mandam fazer coisas diferentes — conferido na lib de CATÁLOGO,
+     que é onde a busca por nome passou a morar (22/09) */
+  {
+    const cat2 = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'rotas-catalogo.js'), 'utf8');
+    assert.ok(/indice_completo/.test(cat2),
+      'a busca não distingue índice VAZIO de catálogo NUNCA INDEXADO — com um produto só no índice, ' +
+      'a tela diria "nada encontrado" pra tudo, como se os produtos não existissem');
+  }
 }
 
 /* os três P2 da tela */
@@ -183,6 +197,33 @@ assert.ok(/enviado_ao_bling: false/.test(lib),
 
   assert.ok(/d\.tem_mais && d\.proximo_offset != null/.test(js2),
     'a lista ignora a paginação — num dia com mais de 500 lançamentos os primeiros somem em silêncio');
+}
+
+/* 22/09 — O 🔎 DO PAINEL GANHOU A BUSCA POR NOME, nas TRÊS. O dono perguntou por que a
+   contagem não usava a busca do painel: usava, pra SKU e EAN — a mesma rota /buscar-produto.
+   O que só a contagem tinha era procurar por PARTE DO NOME. Em vez de deixar duas buscas
+   parecidas convivendo, a por nome mudou pra lib de catálogo, que as três registram. */
+for (const [emp, arq] of Object.entries({
+  amb: 'amb-checkout-offline/painel.html',
+  girassol: 'girassol-backup-offline/painel.html',
+  good: 'good-checkout-offline/painel.html',
+})) {
+  const pn = fs.readFileSync(path.join(raiz, arq), 'utf8');
+  const jsP = (pn.match(/<script>([\s\S]*?)<\/script>/g) || []).join('\n');
+
+  assert.ok(/oninput="buscarPorNomeAoDigitar\(this\.value\)"/.test(pn),
+    emp + ': o 🔎 do painel não busca por nome enquanto digita');
+  assert.ok(/buscar-produto-nome/.test(pn),
+    emp + ': o painel não chama a rota de busca por nome');
+  assert.ok(/setTimeout\(\(\) => rodarBuscaNome\(q\), 300\)/.test(jsP),
+    emp + ': falta a espera — cada tecla viraria uma requisição');
+  assert.ok(/if\(meu !== _seqNome\) return;/.test(jsP),
+    emp + ': sem controle de ordem, a resposta de "lix" sobrescreve a de "lixa"');
+
+  /* o fazerBusca original é async e continua sendo: a inserção não pode ter comido o `async`,
+     que foi exatamente o que aconteceu na primeira tentativa */
+  assert.ok(/async function fazerBusca\(\)/.test(jsP),
+    emp + ': o fazerBusca perdeu o `async` — o `await` dentro dele quebra a tela inteira');
 }
 
 console.log('OK: contagem de estoque — registro interno (nunca escreve no Bling), sessão nas 4 rotas, quantidade validada e busca por nome sem gastar cota');
