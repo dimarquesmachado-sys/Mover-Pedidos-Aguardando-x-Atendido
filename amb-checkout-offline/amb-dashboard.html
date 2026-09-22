@@ -2716,16 +2716,24 @@ function mesesAno(){
 function renderCfg(){
   const box=$('cfgBox'); if(!box) return;
   const NOMEC={ml:'Mercado Livre',shopee:'Shopee',magalu:'Magalu',amazon:'Amazon',tiktok:'TikTok',madeira:'MadeiraMadeira',leroy:'Leroy',outro:'Outro'};
+  const anoAtual = hojeSP().slice(0,4);
+  const APURADAS = new Set(CFG.apuradas || []);
+  /* 18/09 — o aviso que faz do ⚙️ a lista de pendências do dia 20: meses COM valor salvo
+     que ainda NÃO foram marcados como apurados. Mês sem valor não entra — não há o que
+     trocar nele. */
+  window._aliqEstimadas = Object.keys(CFG.aliquotas || {})
+    .filter(mm => Number(CFG.aliquotas[mm]) > 0 && !APURADAS.has(mm)).sort();
+  /* 22/09 (Codex P2) — o formulário só desenha os 12 meses do ano CORRENTE, mas o scan acima
+     olha todos os anos guardados (o backend agora preserva apurados de anos anteriores). Um
+     dezembro pendente virava aviso permanente sem checkbox nenhum pra resolver — o dono não
+     tinha como marcar apurada uma estimativa de um ano que a tela não desenha mais. Os meses de
+     fora do ano corrente ganham um checkbox avulso no próprio aviso, abaixo. */
+  const estimadasAno = window._aliqEstimadas.filter(mm => mm.slice(0,4) === anoAtual);
+  const estimadasForaAno = window._aliqEstimadas.filter(mm => mm.slice(0,4) !== anoAtual);
   box.innerHTML =
-    '<div style="font-size:12px;color:var(--mut);margin-bottom:6px">📅 Alíquota do Simples por mês (%) — os 12 meses de '+hojeSP().slice(0,4)+' · valores em cinza = de fábrica (edite e salve p/ sobrepor; o cálculo recalcula sozinho)</div>'+
+    '<div style="font-size:12px;color:var(--mut);margin-bottom:6px">📅 Alíquota do Simples por mês (%) — os 12 meses de '+anoAtual+' · valores em cinza = de fábrica (edite e salve p/ sobrepor; o cálculo recalcula sozinho)</div>'+
     '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px 14px">'+ mesesAno().map(m=>{
       const NM=['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'][Number(m.slice(5,7))-1];
-      const APURADAS = new Set(CFG.apuradas || []);
-      /* 18/09 — o aviso que faz do ⚙️ a lista de pendências do dia 20: meses COM valor salvo
-         que ainda NÃO foram marcados como apurados. Mês sem valor não entra — não há o que
-         trocar nele. */
-      window._aliqEstimadas = Object.keys(CFG.aliquotas || {})
-        .filter(mm => Number(CFG.aliquotas[mm]) > 0 && !APURADAS.has(mm)).sort();
       const salvo = CFG.aliquotas[m], padrao = (typeof DEFAULT_ALIQ!=='undefined' && DEFAULT_ALIQ[m]!=null)? DEFAULT_ALIQ[m] : null;
       const val = salvo!=null? salvo : (padrao!=null? padrao : '');
       return '<label style="font-size:12px;color:var(--mut);display:flex;align-items:center;gap:6px;justify-content:space-between"><b style="min-width:56px">'+NM+'/'+m.slice(2,4)+'</b>'+
@@ -2737,6 +2745,12 @@ function renderCfg(){
        gravada no painel VENCE a tabela do código depois, quando a apuração chegar.
        O dono viu isso: set-dez estavam cinza, ele salvou agosto, e os quatro viraram config. */
     (salvo==null&&padrao!=null?' data-fabrica="1"':'')+
+    /* 22/09 (Codex P2) — "de fábrica" não pode ser decidido comparando o texto final com o
+       defaultValue: digitar de novo o MESMO número que a fábrica já mostrava (o dono conferiu
+       a apuração e bateu) parecia campo intocado, virava null, e a estimativa digitada de
+       propósito se perdia. oninput marca que a MÃO do dono passou ali — intocado é só o que
+       nunca dispara este evento, não "ainda tem o mesmo valor de antes". */
+    ' oninput="this.dataset.tocado=1"'+
     ' title="'+(salvo!=null?'valor salvo por você':(padrao!=null?'de fábrica ('+padrao+'%) — edite p/ sobrepor':'sem alíquota'))+'">'+
     /* 18/09 — a marcação de APURADA é do dono: ninguém deduz isso do número. Sem ela, um mês
        estimado e um apurado ficam idênticos depois de salvos ("salva aqui" nos dois), e ele não
@@ -2751,9 +2765,11 @@ function renderCfg(){
        isto, o dono precisa lembrar de cor quais meses trocou em cada uma das três empresas.
        Independe de haver mês herdado — em anos com todos os meses de fábrica preenchidos
        (_aliqHerdadas vazio), o aviso não aparecia nunca. */
-    ((window._aliqEstimadas && window._aliqEstimadas.length)
+    ((estimadasAno.length || estimadasForaAno.length)
       ? '<div class="aviso" style="margin:10px 0">\u26a0\ufe0f Ainda como <b>estimativa</b>: ' +
-        window._aliqEstimadas.join(', ') +
+        (estimadasAno.length ? estimadasAno.join(', ') : '') +
+        (estimadasAno.length && estimadasForaAno.length ? ' \u00b7 ' : '') +
+        estimadasForaAno.map(mm=>'<label style="margin-left:4px"><input type="checkbox" data-apurada="'+mm+'" data-fora-ano="1"> '+mm+'</label>').join(' ') +
         ' \u2014 marque <b>apurada</b> quando a contabilidade mandar o valor do m\u00eas.</div>'
       : '') +
     (_aliqHerdadas.size ? '<div class="aviso" style="margin:10px 0">\u26a0\ufe0f M\u00eas sem al\u00edquota pr\u00f3pria usando a de outro m\u00eas: '+
@@ -2797,8 +2813,12 @@ async function salvarCfg(){
   document.querySelectorAll('[data-aliq]').forEach(i=>{
       /* campo que veio de fábrica e NÃO foi editado manda null: null é "não tenho valor
          salvo", que é a verdade — e deixa a tabela do código mandar, inclusive quando ela for
-         corrigida com a apuração. Só vira config o que o dono digitou. */
-      const deFabrica = i.dataset.fabrica === '1' && String(i.value) === String(i.defaultValue);
+         corrigida com a apuração. Só vira config o que o dono digitou.
+         22/09 (Codex P2): "digitou" agora é rastreado pelo oninput (dataset.tocado), não por
+         comparar o texto final com o defaultValue — retypar de propósito o MESMO número que a
+         fábrica já mostrava (a apuração bateu com o palpite) antes virava null igual a campo
+         intocado, e a confirmação do dono sumia mesmo ele tendo mexido no campo. */
+      const deFabrica = i.dataset.fabrica === '1' && i.dataset.tocado !== '1';
       /* Codex (P2): marcar "apurada" sobre o valor de fábrica intocado é o dono confirmando
          que a apuração bateu com o que a tabela já mostrava — sem isto o valor virava null e a
          marca "apurada" não tinha o que salvar (não dava pra confirmar um palpite que acertou). */
@@ -2806,10 +2826,14 @@ async function salvarCfg(){
       const confirmaApurada = deFabrica && apuradaEl && apuradaEl.checked;
       aliquotas[i.dataset.aliq] = (i.value === '' || (deFabrica && !confirmaApurada)) ? null : Number(i.value);
     });
-    /* só marca como apurado o mês que TEM valor salvo: marcar um mês vazio prometeria uma
-       apuração que não existe. */
+    /* só marca como apurado o mês que TEM valor salvo E aceito (o backend só grava 0 < x ≤ 40;
+       fora disso ele apaga o campo — 22/09 Codex P2). Marcar "0 e apurada" antes passava batido
+       aqui (0 != null) e voltava do servidor como marca sem alíquota nenhuma por trás.
+       Os checkboxes "fora do ano" (pendência de ano anterior, sem input de alíquota na tela)
+       já se referem a um valor que SABEMOS válido — é por isso que entraram na lista de
+       pendências — então não precisam passar pelo aliquotas[...] daqui. */
     const apuradas = [...document.querySelectorAll('[data-apurada]')]
-      .filter(c => c.checked && aliquotas[c.dataset.apurada] != null)
+      .filter(c => c.checked && (c.dataset.foraAno === '1' || (aliquotas[c.dataset.apurada] > 0 && aliquotas[c.dataset.apurada] <= 40)))
       .map(c => c.dataset.apurada);
   document.querySelectorAll('[data-taxa]').forEach(i=>{ taxas[i.dataset.taxa] = i.value===''?null:Number(i.value); });
   const flex={}; document.querySelectorAll('[data-flex]').forEach(i=>{ flex[i.dataset.flex] = i.value===''?null:Number(i.value); });

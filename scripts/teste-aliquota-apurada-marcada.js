@@ -22,7 +22,19 @@
       mostrava) virava null e a marca não tinha o que salvar.
    4) o servidor SUBSTITUÍA a lista inteira de apurados pela do formulário, que só cobre os 12
       meses do ano corrente — o primeiro salvamento após a virada do ano apagava os apurados de
-      anos anteriores. */
+      anos anteriores.
+
+   22/09 (revisão do Codex, 2ª rodada, AMB/Girassol) — os quatro consertos acima abriram três
+   frestas novas:
+   5) o aviso de pendência (_aliqEstimadas) varre TODOS os anos guardados, mas o formulário só
+      desenha os 12 meses do ano corrente — um dezembro pendente de ano anterior virava aviso
+      permanente sem checkbox nenhum pra resolver. Ganhou checkbox avulso no próprio aviso.
+   6) marcar "0" e "apurada" junto passava pela regra antiga (0 != null), mas o backend trata 0
+      como campo vazio e apaga a alíquota — a marca ficava sem valor nenhum por trás. A tela
+      agora só aceita a marca com o mesmo intervalo que o backend aceita (0 < x ≤ 40).
+   7) "editado" era decidido comparando o texto final com o defaultValue — retypar de propósito
+      o MESMO número que a fábrica já mostrava virava null igual a campo nunca tocado. Virou
+      dataset.tocado, ligado por oninput. */
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
@@ -66,14 +78,53 @@ for (const [emp, arq] of Object.entries(ARQ_SERVIDOR)) {
     emp + ': desmarcar apurada no mesmo ano não está removendo o mês desmarcado');
 }
 
-/* as TRÊS telas têm a caixinha, mandam a lista, e só marcam mês que TEM valor salvo */
+/* as TRÊS telas têm a caixinha e mostram o que já foi marcado */
 for (const [emp, arq] of Object.entries(ARQ_TELA)) {
   const html = fs.readFileSync(path.join(raiz, arq), 'utf8');
   assert.ok(/data-apurada="'\+/.test(html), emp + ': a tela não tem a marcação de apurada por mês');
   assert.ok(/APURADAS\.has\(/.test(html), emp + ': a tela não mostra o que já foi marcado — a marca sumiria a cada abertura');
+}
+
+/* GOOD manda a lista pelo caminho antigo: o campo nasce vazio (nunca mostra o valor apurado do
+   código dentro do input — ver teste-aliquota-fabrica.js), então "aliquotas[...] != null" já
+   basta — n===0 vira null antes de chegar aqui (regra de 18/09, este mesmo arquivo abaixo). */
+{
+  const html = fs.readFileSync(path.join(raiz, ARQ_TELA.good), 'utf8');
   assert.ok(/apuradas/.test(html) && /checked && aliquotas\[c\.dataset\.apurada\] != null/.test(html),
-    emp + ': a tela não envia a lista, ou marca mês SEM valor salvo — marcar um mês vazio prometeria ' +
+    'good: a tela não envia a lista, ou marca mês SEM valor salvo — marcar um mês vazio prometeria ' +
     'uma apuração que não existe');
+}
+
+/* AMB e Girassol: 22/09 (Codex P2, 2ª rodada) — marcar "0" e apurada junto passava pela regra
+   antiga (0 != null), mas o backend trata 0 como campo vazio e apaga a alíquota (mesma regra de
+   18/09 que a GOOD já tinha). A marca "apurada" tem que exigir o mesmo intervalo que o backend
+   aceita (0 < x ≤ 40) — ou vir de um checkbox "fora do ano", que já se refere a um valor que
+   SABEMOS válido (é por isso que ele está na lista de pendências, não precisa reconferir). */
+for (const emp of ['amb', 'girassol']) {
+  const html = fs.readFileSync(path.join(raiz, ARQ_TELA[emp]), 'utf8');
+  const m = /const apuradas = (\[\.\.\.document\.querySelectorAll\('\[data-apurada\]'\)\][\s\S]*?\.map\(c => c\.dataset\.apurada\));/.exec(html);
+  assert.ok(m, emp + ': não achei a expressão que monta a lista de apurados pro envio');
+
+  /* roda a expressão INTEIRA do arquivo (filter + map), não uma cópia da regra — com um
+     document.querySelectorAll fake devolvendo as caixinhas do teste */
+  const montarApuradas = new Function('document', 'aliquotas', 'return ' + m[1] + ';');
+  const fakeDoc = (checkboxes) => ({ querySelectorAll: () => checkboxes });
+
+  assert.deepStrictEqual(
+    montarApuradas(fakeDoc([{ checked: true, dataset: { apurada: '2026-11' } }]), { '2026-11': 0 }), [],
+    emp + ': marcar apurada sobre um mês que o backend vai gravar como 0 (= vazio) não pode entrar na lista — ' +
+    'a marca ficaria sem alíquota nenhuma por trás');
+  assert.deepStrictEqual(
+    montarApuradas(fakeDoc([{ checked: true, dataset: { apurada: '2026-11' } }]), { '2026-11': 8.4 }), ['2026-11'],
+    emp + ': mês com valor aceito (0 < x ≤ 40) e marcado tem que entrar na lista');
+  assert.deepStrictEqual(
+    montarApuradas(fakeDoc([{ checked: false, dataset: { apurada: '2026-11' } }]), { '2026-11': 8.4 }), [],
+    emp + ': checkbox desmarcada não pode entrar na lista');
+  assert.deepStrictEqual(
+    montarApuradas(fakeDoc([{ checked: true, dataset: { apurada: '2025-12', foraAno: '1' } }]), {}), ['2025-12'],
+    emp + ': o checkbox "fora do ano" (pendência de ano anterior, sem input de alíquota na tela) tem que ' +
+    'entrar na lista mesmo sem entrada em aliquotas — Codex apontou que essas pendências ficavam sem ' +
+    'como ser resolvidas depois que o formulário passou a preservar apurados de anos anteriores');
 }
 
 /* AMB e Girassol CACHEIAM a config num objeto CFG global — se ele perder `apuradas` no boot ou
@@ -116,5 +167,17 @@ for (const emp of ['amb', 'girassol']) {
     emp + ': mês sem alíquota salva não pode virar pendência — zero não é valor');
 }
 
+/* AMB e Girassol: 22/09 (Codex P2, 2ª rodada) — a pendência de um ano que o formulário não
+   desenha mais precisa de um jeito de ser resolvida, senão vira aviso permanente. Ganhou
+   checkbox avulso, com marca própria (data-fora-ano) pro filtro do salvar reconhecer que aquele
+   valor já é sabido válido (Codex #5). */
+for (const emp of ['amb', 'girassol']) {
+  const html = fs.readFileSync(path.join(raiz, ARQ_TELA[emp]), 'utf8');
+  assert.ok(/data-fora-ano="1"/.test(html),
+    emp + ': a pendência de um mês de ano anterior não tem checkbox — fica presa no aviso pra sempre');
+}
+
 console.log('OK: alíquota apurada — as três guardam e mostram a marcação do dono, o aviso lista só os meses ' +
-  'que faltam trocar, a confirmação sobre valor de fábrica salva, e a virada de ano não apaga os apurados antigos');
+  'que faltam trocar (com jeito de resolver pendência de ano anterior), a confirmação sobre valor de fábrica ' +
+  'salva mesmo retypando o mesmo número, marcar apurada exige o mesmo intervalo que o backend aceita, e a ' +
+  'virada de ano não apaga os apurados antigos');

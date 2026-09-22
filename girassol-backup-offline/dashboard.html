@@ -2667,13 +2667,20 @@ function mesesAno(){
 function renderCfg(){
   const box=$('cfgBox'); if(!box) return;
   const NOMEC={ml:'Mercado Livre',shopee:'Shopee',magalu:'Magalu',amazon:'Amazon',tiktok:'TikTok',madeira:'MadeiraMadeira',leroy:'Leroy',outro:'Outro'};
+  const anoAtual = hojeSP().slice(0,4);
+  const APURADAS = new Set(CFG.apuradas || []);
+  window._aliqEstimadas = Object.keys(CFG.aliquotas || {})
+    .filter(mm => Number(CFG.aliquotas[mm]) > 0 && !APURADAS.has(mm)).sort();
+  /* 22/09 (Codex P2) — mesmo conserto da AMB: o formulário só desenha os 12 meses do ano
+     CORRENTE, mas o scan acima olha todos os anos guardados (o backend preserva apurados de
+     anos anteriores). Um dezembro pendente virava aviso permanente sem checkbox nenhum pra
+     resolver. Os meses de fora do ano corrente ganham um checkbox avulso no aviso, abaixo. */
+  const estimadasAno = window._aliqEstimadas.filter(mm => mm.slice(0,4) === anoAtual);
+  const estimadasForaAno = window._aliqEstimadas.filter(mm => mm.slice(0,4) !== anoAtual);
   box.innerHTML =
-    '<div style="font-size:12px;color:var(--mut);margin-bottom:6px">📅 Alíquota do Simples por mês (%) — os 12 meses de '+hojeSP().slice(0,4)+' · valores em cinza = de fábrica (edite e salve p/ sobrepor; o cálculo recalcula sozinho)</div>'+
+    '<div style="font-size:12px;color:var(--mut);margin-bottom:6px">📅 Alíquota do Simples por mês (%) — os 12 meses de '+anoAtual+' · valores em cinza = de fábrica (edite e salve p/ sobrepor; o cálculo recalcula sozinho)</div>'+
     '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px 14px">'+ mesesAno().map(m=>{
       const NM=['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'][Number(m.slice(5,7))-1];
-      const APURADAS = new Set(CFG.apuradas || []);
-      window._aliqEstimadas = Object.keys(CFG.aliquotas || {})
-        .filter(mm => Number(CFG.aliquotas[mm]) > 0 && !APURADAS.has(mm)).sort();
       const salvo = CFG.aliquotas[m], padrao = (typeof DEFAULT_ALIQ!=='undefined' && DEFAULT_ALIQ[m]!=null)? DEFAULT_ALIQ[m] : null;
       const val = salvo!=null? salvo : (padrao!=null? padrao : '');
       return '<label style="font-size:12px;color:var(--mut);display:flex;align-items:center;gap:6px;justify-content:space-between"><b style="min-width:56px">'+NM+'/'+m.slice(2,4)+'</b>'+
@@ -2684,6 +2691,10 @@ function renderCfg(){
            gravava os outros como escolha do dono. Estimativa gravada no painel VENCE a tabela do
            código quando a apuração chega — silenciosamente. */
         (salvo==null&&padrao!=null?' data-fabrica="1"':'')+
+        /* 22/09 (Codex P2) — mesmo conserto da AMB: "de fábrica" não pode ser decidido
+           comparando o texto final com o defaultValue (digitar de novo o MESMO número que a
+           fábrica já mostrava parecia campo intocado). oninput marca que a mão do dono passou. */
+        ' oninput="this.dataset.tocado=1"'+
         ' title="'+(salvo!=null?'valor salvo por você':(padrao!=null?'de fábrica ('+padrao+'%) — edite p/ sobrepor':'sem alíquota'))+'">'+
         /* 18/09 — a marcação de APURADA é do dono: ninguém deduz isso do número. Sem ela, mês
            estimado e apurado ficam idênticos depois de salvos, e ele não sabe quais faltam
@@ -2696,9 +2707,11 @@ function renderCfg(){
     /* 18/09 — a lista de pendências do dia 20: o que está salvo mas ainda é ESTIMATIVA. O
        cálculo de window._aliqEstimadas já existia acima, mas nunca tinha sido inserido no
        HTML — o aviso simplesmente não aparecia nesta tela (Codex, P2). */
-    ((window._aliqEstimadas && window._aliqEstimadas.length)
+    ((estimadasAno.length || estimadasForaAno.length)
       ? '<div class="aviso" style="margin:10px 0">\u26a0\ufe0f Ainda como <b>estimativa</b>: ' +
-        window._aliqEstimadas.join(', ') +
+        (estimadasAno.length ? estimadasAno.join(', ') : '') +
+        (estimadasAno.length && estimadasForaAno.length ? ' \u00b7 ' : '') +
+        estimadasForaAno.map(mm=>'<label style="margin-left:4px"><input type="checkbox" data-apurada="'+mm+'" data-fora-ano="1"> '+mm+'</label>').join(' ') +
         ' \u2014 marque <b>apurada</b> quando a contabilidade mandar o valor do m\u00eas.</div>'
       : '') +
     (_aliqHerdadas.size ? '<div class="aviso" style="margin:10px 0">\u26a0\ufe0f M\u00eas sem al\u00edquota pr\u00f3pria usando a de outro m\u00eas: '+
@@ -2741,8 +2754,11 @@ async function salvarCfg(){
   const aliquotas={}, taxas={};
   document.querySelectorAll('[data-aliq]').forEach(i=>{
       /* só vira config o que o dono digitou: campo de fábrica não editado manda null, que é a
-         verdade ("não tenho valor salvo") e deixa a tabela do código mandar. */
-      const deFabrica = i.dataset.fabrica === '1' && String(i.value) === String(i.defaultValue);
+         verdade ("não tenho valor salvo") e deixa a tabela do código mandar.
+         22/09 (Codex P2): "digitou" agora é rastreado pelo oninput (dataset.tocado), não por
+         comparar o texto final com o defaultValue — retypar de propósito o MESMO número que a
+         fábrica já mostrava antes virava null igual a campo intocado. */
+      const deFabrica = i.dataset.fabrica === '1' && i.dataset.tocado !== '1';
       /* Codex (P2): marcar "apurada" sobre o valor de fábrica intocado é o dono confirmando
          que a apuração bateu com o que a tabela já mostrava — sem isto o valor virava null e a
          marca "apurada" não tinha o que salvar (não dava pra confirmar um palpite que acertou). */
@@ -2750,8 +2766,11 @@ async function salvarCfg(){
       const confirmaApurada = deFabrica && apuradaEl && apuradaEl.checked;
       aliquotas[i.dataset.aliq] = (i.value === '' || (deFabrica && !confirmaApurada)) ? null : Number(i.value);
     });
+    /* só marca como apurado o mês que TEM valor salvo E aceito (o backend só grava 0 < x ≤ 40 —
+       22/09 Codex P2). Os checkboxes "fora do ano" já se referem a um valor que SABEMOS válido
+       (é por isso que entraram na lista de pendências), então pulam o aliquotas[...] daqui. */
     const apuradas = [...document.querySelectorAll('[data-apurada]')]
-      .filter(c => c.checked && aliquotas[c.dataset.apurada] != null)
+      .filter(c => c.checked && (c.dataset.foraAno === '1' || (aliquotas[c.dataset.apurada] > 0 && aliquotas[c.dataset.apurada] <= 40)))
       .map(c => c.dataset.apurada);
   document.querySelectorAll('[data-taxa]').forEach(i=>{ taxas[i.dataset.taxa] = i.value===''?null:Number(i.value); });
   const flex={}; document.querySelectorAll('[data-flex]').forEach(i=>{ flex[i.dataset.flex] = i.value===''?null:Number(i.value); });
