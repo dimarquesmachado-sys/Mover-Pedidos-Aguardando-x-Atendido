@@ -407,7 +407,7 @@
   <header class="top">
     <div class="marca"><span class="logo">📦</span>
       <h1>Contagem de Estoque · <b>Magazine Girassol</b></h1>
-      <span class="build">c3</span>
+      <span class="build">c4</span>
     </div>
   </header>
 
@@ -434,7 +434,7 @@
            onkeydown="if(event.key==='Enter'){event.preventDefault();lancar();}">
     <div style="margin-top:12px">
       <button class="btn" onclick="lancar()">Salvar contagem</button>
-      <button class="btn" onclick="limpar()">Cancelar</button>
+      <button id="btCancelar" class="btn" onclick="limpar()">Cancelar</button>
     </div>
     <div id="msgLanc" class="dim" style="margin-top:8px"></div>
   </section>
@@ -473,8 +473,11 @@ function aoDigitar(v){
   clearTimeout(_tDigita);
   const q = String(v || '').trim();
   if(q.length < 3){
-    /* abaixo de 3 letras não procura: viria meio catálogo. Limpa o que estava na tela pra não
-       deixar resultado velho de outra busca enganando quem olha. */
+    /* Codex #509 (P2, r3): apagar de volta pra menos de 3 letras limpava a TELA, mas não
+       invalidava a busca ainda em voo — ela passava direto pela checagem de _seqBusca lá
+       embaixo (nada tinha incrementado o contador) e repopulava a lista pra um texto que já
+       não está mais no campo, deixando o funcionário escolher pelo texto errado. */
+    _seqBusca++;
     if(!ESCOLHIDO) document.getElementById('resultado').innerHTML = '';
     return;
   }
@@ -484,6 +487,12 @@ function aoDigitar(v){
 async function procurar(){
   const q = document.getElementById('busca').value.trim();
   if(!q) return;
+  /* Codex #509 (P1, r3): o Enter do leitor de código de barras cai bem dentro da janela dos
+     300ms do debounce — aoDigitar já tinha agendado um buscarPorNome pro texto anterior, e
+     ele dispara sozinho DEPOIS, incrementando _seqBusca e fazendo a resposta certa (a deste
+     código) ser descartada como se fosse velha. Cancela o debounce antes de tudo, igual
+     mostrarProduto já fazia pro caminho do clique. */
+  clearTimeout(_tDigita);
   const alvo = document.getElementById('resultado');
   alvo.innerHTML = '<span class="dim">procurando…</span>';
 
@@ -532,10 +541,17 @@ async function buscarPorNome(q, veioDeCodigo){
   }
   if(d.erro && !d.itens.length){ alvo.innerHTML = '<span class="dim">'+esc(d.erro)+'</span>'; return; }
   if(!d.itens.length){
-    /* separar "o índice está vazio" de "não achei": mandam fazer coisas opostas */
+    /* separar "o índice está vazio" de "não achei" de "não achei, mas o catálogo ainda não foi
+       indexado por INTEIRO": as três mandam fazer coisas diferentes. Codex #509 (P2, r3): o
+       servidor já manda indice_completo (basta UM produto resolvido antes pro índice deixar
+       de estar vazio, sem que isso signifique cobertura completa), mas esta tela ainda só
+       olhava indice_vazio — "nada encontrado" parecia definitivo quando podia só ser produto
+       ainda não indexado. */
     alvo.innerHTML = d.indice_vazio
       ? '<div class="aviso">A busca por nome ainda não está disponível — o catálogo precisa ser indexado uma vez. Avise o responsável.</div>'
-      : '<div class="aviso">Nada encontrado para <b>'+esc(q)+'</b>'+(veioDeCodigo?' (nem como código, nem no nome)':'')+'.</div>';
+      : (!d.indice_completo
+        ? '<div class="aviso">Não encontrei <b>'+esc(q)+'</b>'+(veioDeCodigo?' (nem como código, nem no nome)':'')+', mas o catálogo ainda não foi indexado por inteiro — pode ser que o produto exista e ainda não apareça aqui. Tente o SKU ou o código de barras, ou avise o responsável pra indexar o catálogo.</div>'
+        : '<div class="aviso">Nada encontrado para <b>'+esc(q)+'</b>'+(veioDeCodigo?' (nem como código, nem no nome)':'')+'.</div>');
     return;
   }
   alvo.innerHTML = '<div class="dim">'+d.itens.length+' resultado(s) — toque no produto:</div>' +
@@ -630,12 +646,23 @@ async function lancar(){
   if(_salvando) return;
   _salvando = true;
   const btnSalvar = document.querySelector('#painelLanc .btn');
+  const btnCancelar = document.getElementById('btCancelar');
+  const campoBusca = document.getElementById('busca');
+  /* Codex #509 (P2, r3): só o botão Salvar era travado. Cancelar e a busca continuavam livres
+     durante o POST — cancelar no meio do caminho zera ESCOLHIDO, e um salvamento que terminasse
+     bem-sucedido DEPOIS disso quebraria tentando ler campos de um produto que já não existe
+     mais; abrir OUTRO produto no meio do caminho fazia a resposta do lançamento anterior
+     aparecer (e travar/destravar campos) em cima do produto novo, errado. */
   if(btnSalvar) btnSalvar.disabled = true;
+  if(btnCancelar) btnCancelar.disabled = true;
+  if(campoBusca) campoBusca.disabled = true;
   try {
     await lancarDeVerdade();
   } finally {
     _salvando = false;
     if(btnSalvar) btnSalvar.disabled = false;
+    if(btnCancelar) btnCancelar.disabled = false;
+    if(campoBusca) campoBusca.disabled = false;
   }
 }
 
@@ -647,13 +674,18 @@ async function lancarDeVerdade(){
   if(!isFinite(n) || n < 0 || Math.floor(n) !== n){
     msg.innerHTML = '<b>Quantidade inválida</b> — use um número inteiro a partir de 0.'; return;
   }
+  /* Codex #509 (P2, r3): captura o produto ENVIADO agora — com busca e Cancelar travados ele
+     não pode mais mudar até a resposta voltar, mas ler direto de ESCOLHIDO mais abaixo seria
+     confiar nisso por acidente. Usar a cópia local deixa a garantia explícita mesmo se o
+     travamento de UI acima um dia for removido ou contornado. */
+  const produto = ESCOLHIDO;
   msg.textContent = 'salvando…';
   let d = null;
   try {
     const r = await fetch(MOD+'/contagem-lancar', {
       method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ sku: ESCOLHIDO.sku, nome: ESCOLHIDO.nome, ean: ESCOLHIDO.ean,
-                             contado: n, saldo_bling: ESCOLHIDO.estoque })
+      body: JSON.stringify({ sku: produto.sku, nome: produto.nome, ean: produto.ean,
+                             contado: n, saldo_bling: produto.estoque })
     });
     d = await r.json().catch(()=>null);
   } catch(e){ d = null; }
@@ -663,7 +695,7 @@ async function lancarDeVerdade(){
     msg.innerHTML = '<b>Não salvou.</b> ' + esc((d && d.erro) || 'tente de novo') + '';
     return;
   }
-  const dif = (ESCOLHIDO.estoque != null) ? (n - Number(ESCOLHIDO.estoque)) : null;
+  const dif = (produto.estoque != null) ? (n - Number(produto.estoque)) : null;
   msg.innerHTML = '✅ Contagem salva' + (dif != null && dif !== 0
     ? ' — <b>diferença de '+(dif>0?'+':'')+dif+'</b> em relação ao Bling.' : '.');
   /* Codex (P2): o produto e o campo de quantidade ficavam ativos por 1.2s depois do "salvo".
@@ -672,8 +704,10 @@ async function lancarDeVerdade(){
      lançava uma contagem errada. Trava o campo e já devolve o foco pra busca na hora: o
      próximo bipe cai no lugar certo mesmo antes do reset visual terminar. */
   document.getElementById('qtd').disabled = true;
-  document.getElementById('busca').value = '';
-  document.getElementById('busca').focus();
+  const campoBusca = document.getElementById('busca');
+  campoBusca.value = '';
+  campoBusca.disabled = false;   // destrava ANTES do focus: campo desabilitado não recebe foco
+  campoBusca.focus();
   LIMPAR_TIMER = setTimeout(limpar, 1200);
   carregarHoje();
 }
@@ -695,22 +729,37 @@ async function carregarHoje(recomecar){
   if(!(d && d.ok)){ alvo.innerHTML = '<span class="dim">não consegui carregar a lista agora.</span>'; return; }
   ACUMULADO = ACUMULADO.concat(d.lancamentos || []);
   /* enquanto houver mais, continua puxando — a lista do dia tem que estar inteira, senão quem
-     contou não consegue conferir o próprio trabalho */
+     contou não consegue conferir o próprio trabalho. O teto de 5000 é só trava de segurança
+     contra um dia anormal (ou um bug no servidor que nunca zere tem_mais) prender a tela num
+     laço de fetch sem fim — não é um limite que se espera bater na operação normal. */
   if(d.tem_mais && d.proximo_offset != null && ACUMULADO.length < 5000){
     OFFSET_LISTA = d.proximo_offset;
     return carregarHoje(false);
   }
+  /* Codex #509 (P2, r3): quando o teto acima interrompe e AINDA sobra mais (`d.tem_mais`
+     continua true), a lista antes era desenhada como se estivesse completa — quem revisa não
+     tinha como saber que faltavam lançamentos mais antigos do dia. Agora avisa. */
+  const truncado = !!(d.tem_mais && ACUMULADO.length >= 5000);
   if(!ACUMULADO.length){ alvo.innerHTML = '<span class="dim">nenhuma contagem hoje ainda.</span>'; return; }
-  alvo.innerHTML = '<table class="tab"><thead><tr><th>HORA</th><th>SKU</th><th>PRODUTO</th>' +
+  alvo.innerHTML =
+    (truncado ? '<div class="aviso">Mostrando os '+ACUMULADO.length+' lançamentos mais recentes de hoje — há mais no arquivo que esta tela não carrega de uma vez. Filtre por período na revisão pra ver o resto.</div>' : '') +
+    '<table class="tab"><thead><tr><th>HORA</th><th>SKU</th><th>PRODUTO</th>' +
     '<th class="n">CONTADO</th><th class="n">BLING</th><th class="n">DIF.</th><th>QUEM</th></tr></thead><tbody>' +
     ACUMULADO.map(l => {
       const dif = l.divergencia;
+      /* Codex #509 (P2, r3): quando a busca do saldo no instante do lançamento falha, o servidor
+         grava o valor herdado da tela e marca `saldo_conferido_na_hora: false` — mas esta tabela
+         mostrava saldo e diferença exatamente iguais aos de um lançamento conferido de verdade.
+         Quem revisa não tinha como distinguir "divergência real" de "divergência pode estar
+         desatualizada", que são decisões diferentes (ajustar o Bling, ou recontar antes). */
+      const naoConferido = l.saldo_conferido_na_hora === false && l.saldo_bling_na_hora != null;
+      const marcaConf = naoConferido ? ' <span class="dim" title="saldo não conferido no Bling no instante do lançamento — pode estar desatualizado">⚠</span>' : '';
       return '<tr><td>'+esc(horaSP(l.quando))+'</td>' +
         '<td><b>'+esc(l.sku)+'</b></td>' +
         '<td>'+esc(l.nome)+'</td>' +
         '<td class="n"><b>'+l.contado+'</b></td>' +
-        '<td class="n">'+(l.saldo_bling_na_hora!=null?l.saldo_bling_na_hora:'—')+'</td>' +
-        '<td class="n '+(dif==null?'':(dif===0?'ok':'bad'))+'">'+(dif==null?'—':(dif>0?'+':'')+dif)+'</td>' +
+        '<td class="n">'+(l.saldo_bling_na_hora!=null?l.saldo_bling_na_hora:'—')+marcaConf+'</td>' +
+        '<td class="n '+(dif==null?'':(dif===0?'ok':'bad'))+'">'+(dif==null?'—':(dif>0?'+':'')+dif)+marcaConf+'</td>' +
         '<td>'+esc(l.quem)+'</td></tr>';
     }).join('') + '</tbody></table>';
 }
