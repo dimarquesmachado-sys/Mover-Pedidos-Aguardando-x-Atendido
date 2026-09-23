@@ -328,4 +328,36 @@ for (const [emp, arq] of Object.entries({
   assert.ok(/ev\.key === 'Escape'/.test(js5), 'não dá pra desistir da edição');
 }
 
+/* 22/09 — KIT NÃO PODE SER CONTADO. O dono explicou a regra: `80-AE-8F-125mm-KIT40` é um kit,
+   e lançar estoque nele no Bling DÁ ERRO — quem conta inventário são os COMPONENTES
+   (`10-AE-8F-125mm-g24` e `-g40`), que são produtos normais. Variação é contável.
+   Contar um kit geraria um número que NUNCA poderia ser lançado, e quem conferisse depois
+   gastaria tempo entendendo por quê. */
+{
+  const lib6 = fs.readFileSync(LIB, 'utf8');
+  const cat6 = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'rotas-catalogo.js'), 'utf8');
+  const ciclo = fs.readFileSync(path.join(raiz, 'girassol-backup-offline', 'ciclo.js'), 'utf8');
+
+  /* a marca nasce na indexação — `formato === 'E'` é composição no Bling, já documentado em
+     amb-drive-imagens (que preserva a estrutura justamente porque o Bling recusa sem ela) */
+  assert.ok(/const ehKit = String\(\(det && det\.formato\) \|\| it\.formato \|\| ''\)\.toUpperCase\(\) === 'E'/.test(ciclo),
+    'a indexação não marca kit — a busca não teria como escondê-los');
+  assert.ok(/kit: ehKit/.test(ciclo), 'a marca não vai pro índice');
+
+  assert.ok(/if \(it\.kit === true\) continue;/.test(cat6),
+    'a busca por nome mostra kit — o funcionário contaria algo que não dá pra lançar');
+
+  /* e a trava que NÃO depende do índice: índice antigo não tem a marca, e o SKU do kit pode
+     ser digitado direto */
+  assert.ok(/async function ehKitNoBling\(sku\)/.test(lib6),
+    'o lançamento não confere kit no Bling — a busca sozinha não basta, porque o índice antigo ' +
+    'não tem a marca e o SKU pode ser digitado direto');
+  assert.ok(/esse SKU é um KIT/.test(lib6), 'o lançamento aceita kit');
+
+  /* falha de rede NÃO pode bloquear produto legítimo: recusar o certo é pior que deixar passar
+     um kit que a busca já escondeu */
+  assert.ok(/catch \(e\) \{ return \{ kit: false, sabido: false \}; \}/.test(lib6),
+    'falha na consulta bloquearia o lançamento de um produto legítimo');
+}
+
 console.log('OK: contagem de estoque — registro interno (nunca escreve no Bling), sessão nas 4 rotas, quantidade validada e busca por nome sem gastar cota');
