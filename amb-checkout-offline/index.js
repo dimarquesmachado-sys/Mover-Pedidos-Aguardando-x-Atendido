@@ -6072,7 +6072,11 @@ async function backfillVendas(de, ate, empresa){
       for (let tent = 1; tent <= 6; tent++) {
         const r = await blingGet('/pedidos/vendas?dataInicial='+de+'&dataFinal='+ate+'&pagina='+pg+'&limite=100');
         if (r && r.ok) { lista = (r.data && r.data.data) || []; break; }
-        const ehLimite = r && (r.status === 429);
+        /* 23/09 (retomada do #324): só espera 2/4/8 min quando é limite REAL do Bling. Antes
+           bastava o status 429, que a função também devolvia pra rede caída — e aí uma queda
+           de rede custava ~14 min por página sem ajudar. `limite` vem do blingGet; resposta
+           sem o campo (chamador antigo) mantém o comportamento de antes. */
+        const ehLimite = r && (r.status === 429) && (r.limite !== false);
         if (ehLimite && esperas429 < 3) {
           esperas429++;
           const esperaL = [120, 240, 480][esperas429 - 1] * 1000;
@@ -6141,10 +6145,26 @@ async function backfillVendas(de, ate, empresa){
         // ficando de fora do histórico numa rodada que termina "concluido". Numa varredura do
         // ano são ~20 mil detalhes a 2,3 req/s durante 6h — dava pra perder dezenas assim.
         // (Foi o que produziu o `erros: 1` da rodada de 10/02.)
+        /* 23/09 (retomada do #324 — esta é a parte GRAVE): a listagem ganhou 2/4/8 MINUTOS no
+           limite do Bling, mas o detalhe seguia com 3/8/20/40 SEGUNDOS. Se o limite pegasse
+           aqui, as 4 tentativas queimavam em ~71s, o pedido virava `sem_detalhe` — e a rodada
+           SEGUIA até o DELETE, trocando o histórico antigo por um novo COM BURACOS.
+           Agora o limite REAL aqui espera igual à listagem. */
         let det=null;
+        let esperas429det = 0;
         for (let td = 1; td <= 4; td++) {
-          try { const rd = await blingGet('/pedidos/vendas/'+p.id); det = (rd&&rd.ok&&rd.data&&rd.data.data)||null; } catch(e){}
+          let _rdet = null;
+          try { const rd = await blingGet('/pedidos/vendas/'+p.id); _rdet = rd; det = (rd&&rd.ok&&rd.data&&rd.data.data)||null; } catch(e){}
           if (det) break;
+          if (_rdet && _rdet.status === 429 && _rdet.limite !== false && esperas429det < 3) {
+            esperas429det++;
+            const espL = [120, 240, 480][esperas429det - 1] * 1000;
+            console.log('[BACKFILL] detalhe do pedido ' + p.id + ': limite do Bling — aguardando ' + (espL/60000) + ' min');
+            _backfill.msg = 'detalhe do pedido ' + p.id + ': limite do Bling, aguardando ' + (espL/60000) + ' min';
+            await dorme(espL);
+            td--;
+            continue;
+          }
           const espD = [3, 8, 20, 40][td - 1] * 1000;
           console.log('[BACKFILL] detalhe do pedido ' + p.id + ' falhou — tentativa ' + td + '/4, aguardando ' + (espD/1000) + 's');
           _backfill.msg = 'detalhe do pedido ' + p.id + ': tentativa ' + td + '/4';
@@ -6152,6 +6172,17 @@ async function backfillVendas(de, ate, empresa){
         }
         await dorme(430);   // rate limit do Bling (~2,3 req/s)
         if(!det){
+          // Codex #516 (P1): esgotar as 3 esperas longas E AINDA ASSIM continuar 429/limite
+          // é o Bling seguindo limitado por mais de ~14 min — não um pedido isolado com
+          // problema. Deixar a rodada seguir até o DELETE reproduziria o BURACO que este PR
+          // existe pra evitar. Aborta como a listagem já faz: nada é apagado, roda de novo.
+          if (esperas429det >= 3) {
+            _backfill.fase = 'erro';
+            _backfill.msg = 'detalhe do pedido ' + p.id + ': limite do Bling persistente (>14 min) — rodada ABORTADA e NADA foi apagado: o histórico antigo do período continua inteiro. Rode de novo mais tarde.';
+            console.log('[BACKFILL] ✗ abortado no detalhe do pedido ' + p.id + ' — limite do Bling persistente, histórico do período ficou incompleto, rode de novo');
+            _backfill.rodando = false; _backfill.fim = new Date().toISOString();
+            _limparSpool(); return;
+          }
           _backfill.erros++;
           if (!_backfill.sem_detalhe) _backfill.sem_detalhe = [];
           if (_backfill.sem_detalhe.length < 30) _backfill.sem_detalhe.push(p.id);   // quais pedidos ficaram de fora
