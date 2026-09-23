@@ -361,7 +361,7 @@ async function procurar(){
   await buscarPorNome(q, pareceCodigo);
 }
 
-async function buscarPorNome(q, veioDeCodigo, offset, acumulado){
+async function buscarPorNome(q, veioDeCodigo, aposNome, aposSku, acumulado, totalConhecido){
   /* com a busca saindo a cada pausa, duas respostas podem chegar fora de ordem e a lista de
      "lix" sobrescrever a de "lixa". O contador diz qual é a mais recente; as atrasadas somem
      em silêncio. */
@@ -370,15 +370,26 @@ async function buscarPorNome(q, veioDeCodigo, offset, acumulado){
   let d = null;
   try {
     /* 'tudo' não manda limite (o servidor devolve a lista inteira); 'partes' manda o passo
-       da vez, que cresce a cada "ver mais". */
+       da vez, que cresce a cada "ver mais". apos_nome/apos_sku são o CURSOR do último item já
+       mostrado, não uma posição numérica (Codex #521 P2, ver comentário no servidor). */
     const passo = (MODO_LISTA === 'partes') ? PASSOS[Math.min(_nPassos, PASSOS.length - 1)] : 0;
     const r = await fetch(MOD+'/buscar-produto-nome?q='+encodeURIComponent(q)
-                          +'&offset='+(offset||0)+(passo ? '&limite='+passo : ''), {credentials:'same-origin'});
+                          +'&apos_nome='+encodeURIComponent(aposNome||'')+'&apos_sku='+encodeURIComponent(aposSku||'')
+                          +(passo ? '&limite='+passo : ''), {credentials:'same-origin'});
     d = await r.json().catch(()=>null);
   } catch(e){ d = null; }
   if(meu !== _seqBusca) return;
   if(!d || !d.ok){
-    alvo.innerHTML = '<div class="aviso">Não consegui procurar agora — isto <b>não</b> quer dizer que o produto não existe. Tente de novo.</div>';
+    /* 23/09 — Codex #521 (P2): isto rodava também quando era o "ver mais" de uma página
+       SEGUINTE que falhou — e sobrescrevia a tela inteira, jogando fora a página anterior que
+       já tinha carregado com sucesso (e qualquer card aberto nela). A pessoa perdia a lista
+       toda por causa de UM clique que falhou, e tinha que refazer a busca do zero. Se já havia
+       lista acumulada, mantém ela na tela e só oferece tentar de novo o pedaço que falhou. */
+    if(acumulado && acumulado.length){
+      renderListaBusca(acumulado, totalConhecido, q, veioDeCodigo, aposNome, aposSku, true);
+    } else {
+      alvo.innerHTML = '<div class="aviso">Não consegui procurar agora — isto <b>não</b> quer dizer que o produto não existe. Tente de novo.</div>';
+    }
     return;
   }
   if(d.erro && !d.itens.length){ alvo.innerHTML = '<span class="dim">'+esc(d.erro)+'</span>'; return; }
@@ -409,11 +420,20 @@ async function buscarPorNome(q, veioDeCodigo, offset, acumulado){
      simplesmente não caíam no sorteio. O servidor agora ordena tudo e pagina; aqui a gente
      acumula e oferece o resto, em vez de fingir que são só 30. */
   const lista = (acumulado || []).concat(d.itens || []);
-  const falta = d.total - lista.length;
+  renderListaBusca(lista, d.total, q, veioDeCodigo, d.proximo_apos_nome, d.proximo_apos_sku, false);
+}
+
+/* 23/09 — Codex #521 (P2): extraído de dentro de buscarPorNome pra poder redesenhar a MESMA
+   lista acumulada tanto no caminho feliz (página nova chegou) quanto no de erro (página nova
+   falhou, mas a anterior continua boa e não pode sumir da tela — nem o card que já estava
+   aberto nela). */
+function renderListaBusca(lista, total, q, veioDeCodigo, aposNome, aposSku, falhouCarregarMais){
+  const alvo = document.getElementById('resultado');
+  const falta = total - lista.length;
   alvo.innerHTML =
     '<div class="topo-lista">' +
-      '<span class="dim">'+lista.length+' de '+d.total+' resultado(s) — toque no produto:</span>' +
-      (d.total > PASSOS[0]
+      '<span class="dim">'+lista.length+' de '+total+' resultado(s) — toque no produto:</span>' +
+      (total > PASSOS[0]
         ? '<span class="modo">' +
             '<button class="chip'+(MODO_LISTA==='tudo'?' on':'')+'" data-modo="tudo">tudo</button>' +
             '<button class="chip'+(MODO_LISTA==='partes'?' on':'')+'" data-modo="partes">em partes</button>' +
@@ -433,7 +453,10 @@ async function buscarPorNome(q, veioDeCodigo, offset, acumulado){
       '</button>' +
         '<div class="abre" data-abre="'+esc(it.sku)+'"></div>' +
       '</div>').join('') +
-    (falta > 0 ? '<button class="btn sec" id="btVerMais" style="width:100%;margin-top:8px">ver mais '+Math.min(falta, PASSOS[Math.min(_nPassos+1, PASSOS.length-1)])+' (faltam '+falta+')</button>' : '');
+    (falhouCarregarMais
+      ? '<div class="aviso" style="margin-top:8px">Não consegui carregar mais agora — a lista acima continua boa.</div>' +
+        '<button class="btn sec" id="btVerMais" style="width:100%;margin-top:8px">tentar de novo</button>'
+      : (falta > 0 ? '<button class="btn sec" id="btVerMais" style="width:100%;margin-top:8px">ver mais '+Math.min(falta, PASSOS[Math.min(_nPassos+1, PASSOS.length-1)])+' (faltam '+falta+')</button>' : ''));
 
   alvo.querySelectorAll('.chip[data-modo]').forEach(b => {
     b.addEventListener('click', () => {
@@ -450,8 +473,8 @@ async function buscarPorNome(q, veioDeCodigo, offset, acumulado){
     btMais.textContent = 'carregando…';
     /* o contador de ordem é reaproveitado: se a pessoa digitar outra coisa enquanto isto
        carrega, a resposta velha é descartada como qualquer outra */
-    _nPassos++;                         // 50 → 100 → 200
-    buscarPorNome(q, veioDeCodigo, d.proximo_offset, lista);
+    if(!falhouCarregarMais) _nPassos++;   // 50 → 100 → 200; um retry pede o MESMO passo de novo
+    buscarPorNome(q, veioDeCodigo, aposNome, aposSku, lista, total);
   });
   /* por addEventListener, não por onclick montado com o SKU: foi o XSS que o Codex achou no
      painel (#510), e aqui o SKU vem de dado gravado igual. */

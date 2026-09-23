@@ -37,9 +37,10 @@ const handler = criar({
   primeiraImagem: () => '', locCache: () => ({}), localizacaoDeProduto: () => '',
   indexarCatalogoCompleto: async () => {}, getIdxStatus: () => ({ fim: 'x' }),
 });
-const pagina = async (off, lim) => {
+const pagina = async (aposNome, aposSku, lim) => {
   const r = {};
-  const qs = 'q=lixa&offset=' + off + (lim ? '&limite=' + lim : '');
+  const qs = 'q=lixa&apos_nome=' + encodeURIComponent(aposNome || '') +
+    '&apos_sku=' + encodeURIComponent(aposSku || '') + (lim ? '&limite=' + lim : '');
   await handler({ headers: {} }, r, new URL('http://x/x/buscar-produto-nome?' + qs), 'GET');
   return r._o;
 };
@@ -48,14 +49,14 @@ const pagina = async (off, lim) => {
   /* 23/09 — o dono pediu TUDO de uma vez como PADRÃO: sem `limite`, vem a lista inteira.
      O modo em partes continua existindo pra quando a lista ficar grande demais pro celular
      do galpão, com passos que crescem (50 → 100 → 200). */
-  const tudo = await pagina(0);
+  const tudo = await pagina();
   assert.strictEqual(tudo.itens.length, 50,
     'sem `limite` a busca tinha que devolver TUDO — é o padrão que o dono pediu');
   assert.strictEqual(tudo.tem_mais, false, 'diz que há mais quando mandou tudo');
   assert.deepStrictEqual(tudo.itens.map(i => i.nome), [...tudo.itens.map(i => i.nome)].sort((a, b) => a.localeCompare(b, 'pt-BR')),
     'a lista completa não veio ordenada');
 
-  const p1 = await pagina(0, 30);
+  const p1 = await pagina(null, null, 30);
 
   assert.strictEqual(p1.total, 50,
     '`total` tem que ser quantos CASARAM (50), não quantos couberam na página — senão a tela ' +
@@ -69,12 +70,53 @@ const pagina = async (off, lim) => {
     'a lista foi cortada ANTES de ordenar — o que aparece são resultados SORTEADOS da ordem ' +
     'interna do índice, e o que o dono procura pode simplesmente não cair no sorteio');
 
-  const p2 = await pagina(p1.proximo_offset, 30);
+  const p2 = await pagina(p1.proximo_apos_nome, p1.proximo_apos_sku, 30);
   const todos = [...p1.itens, ...p2.itens].map(i => i.nome);
   assert.strictEqual(new Set(todos).size, 50, 'a paginação repetiu ou perdeu item');
   assert.deepStrictEqual(todos, [...todos].sort((a, b) => a.localeCompare(b, 'pt-BR')),
     'as páginas não formam uma ordem contínua — item da página 2 deveria vir depois de todos da 1');
   assert.strictEqual(p2.tem_mais, false, 'diz que há mais quando acabou');
+
+  /* Codex #521 (P2): com offset NUMÉRICO, um item inserido no índice ANTES da posição 30
+     empurrava tudo uma casa pra frente — a página 2 (slice 30..60) repetia o último item que a
+     página 1 já tinha mostrado. O cursor por (nome, sku) reposiciona pelo CONTEÚDO do último
+     item mostrado (não pela posição), então essa mesma inserção não pode fazer a página
+     seguinte repetir item. */
+  const ultimoDaP1 = p1.itens[p1.itens.length - 1].nome;   // 'Lixa Disco GRÃO:0300'
+  idx['sku:NOVA'] = { sku: 'NOVA', nome: 'Lixa Disco GRÃO:0015', id: 999 };   // entra ANTES da posição 30
+  const p2depoisDeInserir = await pagina(p1.proximo_apos_nome, p1.proximo_apos_sku, 30);
+  const nomesP2 = p2depoisDeInserir.itens.map(i => i.nome);
+  assert.strictEqual(p2depoisDeInserir.total, 51, 'o novo item entrou no total');
+  assert.ok(!nomesP2.includes(ultimoDaP1),
+    'a página 2 repetiu o último item da página 1 — é o bug do offset numérico voltando');
+  assert.deepStrictEqual(nomesP2, p2.itens.map(i => i.nome),
+    'inserção ANTES do cursor não deveria mudar nada do que vem DEPOIS dele');
+  delete idx['sku:NOVA'];
+
+  console.log('OK: cursor por (nome, sku) sobrevive a inserção no índice entre páginas');
+
+  /* Codex #521 (P1): o `break` em 2000 (era 30) cortava ANTES de ordenar de novo, num teto
+     mais alto — o mesmo bug, só que escondido atrás de um número redondo maior. Índice com
+     2200 casando prova que não sobrou teto nenhum: TODOS entram no total, mesmo sem `limite`. */
+  const idxGrande = {};
+  for (let i = 1; i <= 2200; i++) {
+    const nome = 'Parafuso ' + String(i).padStart(4, '0');
+    idxGrande['sku:P' + i] = { sku: 'P' + i, nome, id: i };
+  }
+  const handlerGrande = criar({
+    prefixo: '/x', json: (r, st, o) => { r._o = o; }, blingGet: async () => ({ ok: false }),
+    ehAdmin: () => true, skuEanCache: () => ({}), lerIndiceEan: () => idxGrande,
+    salvarNoIndiceEan: () => {}, getPossiveisGtins: () => [], produtoDetalhe: async () => null,
+    primeiraImagem: () => '', locCache: () => ({}), localizacaoDeProduto: () => '',
+    indexarCatalogoCompleto: async () => {}, getIdxStatus: () => ({ fim: 'x' }),
+  });
+  const rGrande = {};
+  await handlerGrande({ headers: {} }, rGrande, new URL('http://x/x/buscar-produto-nome?q=parafuso'), 'GET');
+  assert.strictEqual(rGrande._o.total, 2200,
+    'o corte em 2000 ANTES de ordenar voltou — resultado além do teto some sem avisar');
+  assert.strictEqual(rGrande._o.itens.length, 2200, 'modo "tudo" (sem limite) tem que trazer todos os 2200');
+
+  console.log('OK: sem teto escondido cortando antes de ordenar, nem em catálogo grande');
 
   /* a TELA: 'tudo' é o padrão, e o modo em partes cresce 50 → 100 → 200 */
   const html = fs.readFileSync(path.join(raiz, 'girassol-backup-offline', 'contagem.html'), 'utf8');
@@ -90,8 +132,18 @@ const pagina = async (off, lim) => {
   assert.ok(/data-modo="tudo"/.test(js) && /data-modo="partes"/.test(js),
     'o seletor dos dois modos sumiu da tela');
   /* o seletor só aparece quando há o que escolher */
-  assert.ok(/d\.total > PASSOS\[0\]/.test(js),
+  assert.ok(/total > PASSOS\[0\]/.test(js),
     'o seletor aparece mesmo com lista curta — botão que não muda nada é ruído');
+
+  /* Codex #521 (P2): "ver mais" que falha não pode apagar a lista já carregada */
+  assert.ok(/function renderListaBusca\(/.test(js),
+    'a renderização da lista não foi extraída — não dá pra reusar no caminho de erro sem duplicar tudo');
+  assert.ok(/if\(acumulado && acumulado\.length\)\{\s*\n\s*renderListaBusca\(acumulado, totalConhecido/.test(js),
+    'falha ao carregar mais página ainda apaga a lista já acumulada em vez de manter e oferecer retry');
+  assert.ok(/if\(!falhouCarregarMais\) _nPassos\+\+;/.test(js),
+    'um retry depois de falha avança o passo — deveria pedir de novo o MESMO tamanho que falhou');
+
+  console.log('OK: tudo por padrao, em partes 50/100/200, e "ver mais" que falha preserva a lista');
 
   /* 23/09 — o clique ABRE O CARD na própria lista. Antes ele apagava `#resultado` e trocava
      de tela: "some com todos os outros e me mostra só o produto que cliquei". Num inventário
