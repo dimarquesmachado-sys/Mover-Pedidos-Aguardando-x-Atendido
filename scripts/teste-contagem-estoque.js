@@ -553,4 +553,41 @@ for (const [emp, arq] of Object.entries({
     'foto, o funcionário clica, e da próxima busca vem sem');
 }
 
+/* 23/09 (Codex #514, P1, 2ª leva) — o teste acima provou que a REGRA de lerIndiceEan preserva um
+   EAN-8 que declara `ean: chave`. Mas nenhum escritor de produção (salvarNoIndiceEan nem os três
+   indexarCatalogoCompleto) gravava esse campo — todo EAN-8 real caía no mesmo balde do NCM e
+   era apagado na leitura seguinte. A regra "estreita" nunca preservou nada de verdade. Este teste
+   olha os ESCRITORES, não a regra: sem ele, a lacuna passa despercebida de novo. */
+{
+  const prod3 = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'produtos.js'), 'utf8');
+  assert.ok(/idx\[e\] = comMarca/.test(prod3) && /ean: e/.test(prod3),
+    'salvarNoIndiceEan não declara `ean` na entrada — lerIndiceEan vai apagar todo EAN-8 real ' +
+    'na leitura seguinte, junto com o NCM');
+
+  for (const [emp, arq] of Object.entries({
+    girassol: 'girassol-backup-offline', amb: 'amb-checkout-offline', good: 'good-checkout-offline',
+  })) {
+    const ciclo = fs.readFileSync(path.join(raiz, arq, 'ciclo.js'), 'utf8');
+    assert.ok(/novo\[e\] = \{[^}]*ean: e[^}]*\}/.test(ciclo),
+      emp + '/ciclo.js: a indexação completa não declara `ean` na entrada — lerIndiceEan vai ' +
+      'apagar todo EAN-8 real na leitura seguinte, junto com o NCM');
+  }
+}
+
+/* 23/09 (Codex #514, P2) — a trava de 500 páginas (50 mil produtos) existia só pra não rodar pra
+   sempre, mas ao ESTOURAR ela publicava `novo` do mesmo jeito que uma varredura terminada de
+   verdade — e como `novo` nasce vazio (P1), um catálogo maior que 50 mil produtos faria a
+   varredura APAGAR do índice tudo além da página 500, o oposto de "trava de segurança". */
+{
+  for (const [emp, arq] of Object.entries({
+    girassol: 'girassol-backup-offline', amb: 'amb-checkout-offline', good: 'good-checkout-offline',
+  })) {
+    const ciclo = fs.readFileSync(path.join(raiz, arq, 'ciclo.js'), 'utf8');
+    assert.ok(/catalogoCompleto = true.*break/.test(ciclo) || /catalogoCompleto = true;\s*break;/.test(ciclo),
+      emp + '/ciclo.js: a página vazia final não marca o catálogo como completo');
+    assert.ok(/if \(!catalogoCompleto\)/.test(ciclo),
+      emp + '/ciclo.js: estourar a trava de 500 páginas publica o índice truncado em vez de abortar');
+  }
+}
+
 console.log('OK: contagem de estoque — registro interno (nunca escreve no Bling), sessão nas 4 rotas, quantidade validada e busca por nome sem gastar cota');

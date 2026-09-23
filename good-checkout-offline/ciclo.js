@@ -76,7 +76,7 @@ async function indexarCatalogoCompleto() {
   const novo = {};
   const PAUSA = Number(process.env.GOODBKP_PAUSA_MS || 700);
   try {
-    let pagina = 1, tentativas = 0;
+    let pagina = 1, tentativas = 0, catalogoCompleto = false;
     while (pagina <= 500) {                           // trava de segurança
       const r = await blingGet(`/produtos?pagina=${pagina}&limite=100`);
       /* 16/09 — ACHADO VINDO DO REPO DE DEVOLUÇÕES: lá a busca por nome da AMB ficou cega o
@@ -121,7 +121,7 @@ async function indexarCatalogoCompleto() {
       }
       tentativas = 0;                                  // a página veio E foi lida: zera o contador
       const itens = r.data.data;
-      if (!itens.length) break;                        // agora isto significa mesmo "acabou"
+      if (!itens.length) { catalogoCompleto = true; break; }   // agora isto significa mesmo "acabou"
       for (const it of itens) {
         idxStatus.feitos++;
         if (!it.id) continue;
@@ -132,8 +132,13 @@ async function indexarCatalogoCompleto() {
           await sleep(PAUSA);
           if (det) { eans = getPossiveisGtins(det).map(e => String(e).replace(/\D/g, '')).filter(e => e.length >= 8); nome = det.nome || nome; sku = det.codigo || sku; }
         }
+        /* Codex #514 (P1, 2ª leva): `lerIndiceEan()` só preserva uma chave de 8 dígitos na
+           leitura se o valor gravado declarar aquele número como `ean` — é o único jeito dela
+           saber que não é um NCM sobrando de antes do conserto do coletor. Sem `ean: e` aqui,
+           todo EAN-8 real que esta varredura gravasse seria apagado na primeira leitura
+           seguinte, junto com o NCM. */
         if (eans.length) {
-          for (const e of eans) { if (!novo[e]) idxStatus.eans++; novo[e] = { sku: sku || '', nome: nome || '', id: it.id }; }
+          for (const e of eans) { if (!novo[e]) idxStatus.eans++; novo[e] = { sku: sku || '', nome: nome || '', id: it.id, ean: e }; }
         } else if (sku) {
           // Codex (P2): sem GTIN, o produto nunca entrava no índice — e é o índice de EAN que
           // a busca por nome da contagem de estoque usa. Chave sintética prefixada (nunca é só
@@ -149,6 +154,17 @@ async function indexarCatalogoCompleto() {
       idxStatus.paginas = pagina;
       await sleep(PAUSA);
       pagina++;
+    }
+    /* Codex #514 (P2): a trava de 500 páginas (50 mil produtos) existia só pra não rodar pra
+       sempre — mas ao ESTOURAR ela o laço só para de iterar, sem passar por `catalogoCompleto`.
+       Isso publicava `novo` do mesmo jeito que uma varredura terminada de verdade, e como agora
+       `novo` NASCE VAZIO (Codex #514, P1), um catálogo com mais de 50 mil produtos faria a
+       varredura apagar do índice tudo que está além da página 500 — o oposto de "trava de
+       segurança". Estourar o limite sem ter visto a página vazia final é o mesmo caso que HTTP
+       ruim ou corpo ilegível: aborta e preserva o índice anterior. */
+    if (!catalogoCompleto) {
+      throw new Error('indexação abortada: catálogo tem mais de 500 páginas (trava de segurança) ' +
+                      '— o índice anterior foi preservado');
     }
   } catch (e) { idxStatus.erro = String(e && e.message || e); idxStatus.abortou = true; }
   /* 16/09 — o salvamento final rodava MESMO depois do erro, gravando o índice parcial por
