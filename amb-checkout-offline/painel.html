@@ -1938,7 +1938,11 @@ function buscarPorNomeAoDigitar(v){
 
 async function rodarBuscaNome(q){
   const meu = ++_seqNome;
-  const r = await api('/amb-checkout-offline/buscar-produto-nome?q='+encodeURIComponent(q)).catch(()=>null);
+  /* Codex #521 (P2): sem `limite`, a rota manda TUDO que casou (é o que a contagem quer por
+     padrão). Aqui não tem paginação nenhuma — cada letra digitada re-renderiza a lista inteira
+     em innerHTML — então um termo largo virava milhares de .bcard no DOM a cada tecla. Mantém
+     o teto de sempre. */
+  const r = await api('/amb-checkout-offline/buscar-produto-nome?q='+encodeURIComponent(q)+'&limite=30').catch(()=>null);
   if(meu !== _seqNome) return;   // outra digitação já saiu; esta resposta é velha
   if(!$('buscaRes')) return;
   if(!r || !r.ok){
