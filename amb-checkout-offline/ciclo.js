@@ -79,7 +79,13 @@ function getIdxStatus()    { return idxStatus; }
 async function indexarCatalogoCompleto() {
   if (idxStatus.rodando) return;
   idxStatus = { rodando: true, feitos: 0, eans: 0, em: new Date().toISOString(), fim: null, erro: null };
-  const novo = lerIndiceEan();                       // parte do que já existe
+  /* Codex #513 (P2): partir do índice existente parecia "preservar o que já existe", mas
+     uma reindexação total varre o catálogo INTEIRO — toda chave viva é regravada aqui embaixo.
+     Semear do antigo só servia pra manter para sempre chaves que pararam de ser emitidas (o
+     caso real: NCM que entrava como EAN antes deste PR e nunca mais seria removido, porque
+     nenhum produto volta a emiti-lo). Começa vazio; o `abortou` acima continua protegendo
+     contra publicar um índice truncado quando a varredura falha no meio. */
+  const novo = {};
   const PAUSA = Number(process.env.AMBBKP_PAUSA_MS || 700);
   try {
     let pagina = 1, tentativas = 0;
