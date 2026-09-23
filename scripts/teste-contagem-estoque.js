@@ -436,4 +436,17 @@ for (const [emp, arq] of Object.entries({
   assert.ok(!filtra(''), 'vazio devia ser recusado');
 }
 
+/* 23/09 — o LOGO da Girassol na tela, pedido do dono. É a MESMA imagem do painel, copiada de
+   lá em vez de recriada: duas versões da marca em telas irmãs é o tipo de coisa que ninguém
+   nota até ficar errada numa delas. */
+{
+  const pega = (arq) => [...fs.readFileSync(path.join(raiz, arq), 'utf8')
+    .matchAll(/base64,([A-Za-z0-9+/=]{400,})/g)].map(m => m[1]);
+  const naContagem = pega('girassol-backup-offline/contagem.html');
+  const noPainel = pega('girassol-backup-offline/painel.html');
+  assert.ok(naContagem.length > 0, 'a tela de contagem não tem o logo');
+  assert.ok(naContagem.every(img => noPainel.includes(img)),
+    'o logo da contagem não é o mesmo do painel — duas versões da marca divergem sem ninguém notar');
+}
+
 console.log('OK: contagem de estoque — registro interno (nunca escreve no Bling), sessão nas 4 rotas, quantidade validada e busca por nome sem gastar cota');
