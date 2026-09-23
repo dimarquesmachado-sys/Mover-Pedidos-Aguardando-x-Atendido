@@ -140,6 +140,9 @@
   .btn:hover{filter:brightness(1.07)}
   .btn:disabled{opacity:.45;cursor:default;filter:none}
   #btCancelar{background:var(--carta2);color:var(--texto);border:1px solid var(--linha)}
+  /* botão secundário (ver mais): não compete com o âmbar, que marca a ação principal */
+  .btn.sec{background:var(--carta2);color:var(--texto);border:1px solid var(--linha);font-weight:500}
+  .btn.sec:hover{border-color:var(--girassol);filter:none}
 
   /* ── contagens do dia ── */
   .item{display:flex;align-items:center;gap:13px;background:var(--carta);
@@ -193,7 +196,7 @@
       <span class="logo-girassol" role="img" aria-label="Magazine Girassol"></span>
       <h1>Contagem de estoque</h1>
       <span class="empresa">Magazine Girassol</span>
-      <span class="build">c15</span>
+      <span class="build">c16</span>
     </div>
   </header>
 
@@ -325,7 +328,7 @@ async function procurar(){
   await buscarPorNome(q, pareceCodigo);
 }
 
-async function buscarPorNome(q, veioDeCodigo){
+async function buscarPorNome(q, veioDeCodigo, offset, acumulado){
   /* com a busca saindo a cada pausa, duas respostas podem chegar fora de ordem e a lista de
      "lix" sobrescrever a de "lixa". O contador diz qual é a mais recente; as atrasadas somem
      em silêncio. */
@@ -333,7 +336,7 @@ async function buscarPorNome(q, veioDeCodigo){
   const alvo = document.getElementById('resultado');
   let d = null;
   try {
-    const r = await fetch(MOD+'/buscar-produto-nome?q='+encodeURIComponent(q), {credentials:'same-origin'});
+    const r = await fetch(MOD+'/buscar-produto-nome?q='+encodeURIComponent(q)+'&offset='+(offset||0), {credentials:'same-origin'});
     d = await r.json().catch(()=>null);
   } catch(e){ d = null; }
   if(meu !== _seqBusca) return;
@@ -364,8 +367,14 @@ async function buscarPorNome(q, veioDeCodigo){
      · o NCM sumiu. Vinha colado no SKU parecendo código de barras — era o NCM entrando no
        índice pela varredura larga de `tributacao` (consertado em produtos.js). O que sobra é
        EAN de verdade, e só aparece quando existe. */
-  alvo.innerHTML = '<div class="dim">'+d.itens.length+' resultado(s) — toque no produto:</div>' +
-    d.itens.map(it =>
+  /* 23/09 — a lista vinha cortada em 30 ANTES de ser ordenada, então eram 30 SORTEADAS do
+     índice, não as 30 primeiras: o dono procurava "lixas" e as variações que ele queria
+     simplesmente não caíam no sorteio. O servidor agora ordena tudo e pagina; aqui a gente
+     acumula e oferece o resto, em vez de fingir que são só 30. */
+  const lista = (acumulado || []).concat(d.itens || []);
+  const falta = d.total - lista.length;
+  alvo.innerHTML = '<div class="dim">'+lista.length+' de '+d.total+' resultado(s) — toque no produto:</div>' +
+    lista.map(it =>
       '<button class="lista-nome" data-sku="'+esc(it.sku)+'">' +
         (it.img ? '<img class="thumb" src="'+esc(it.img)+'" alt="" loading="lazy">'
                 : '<span class="thumb semfoto-mini">sem<br>foto</span>') +
@@ -374,7 +383,17 @@ async function buscarPorNome(q, veioDeCodigo){
           '<span class="sku-linha"><span class="sku-tag">SKU</span> '+esc(it.sku)+
             (it.ean ? '<span class="ean">código de barras '+esc(it.ean)+'</span>' : '')+'</span>' +
         '</span>' +
-      '</button>').join('');
+      '</button>').join('') +
+    (falta > 0 ? '<button class="btn sec" id="btVerMais" style="width:100%;margin-top:6px">ver mais '+Math.min(falta,30)+' (de '+falta+' restantes)</button>' : '');
+
+  const btMais = document.getElementById('btVerMais');
+  if(btMais) btMais.addEventListener('click', () => {
+    btMais.disabled = true;
+    btMais.textContent = 'carregando…';
+    /* o contador de ordem é reaproveitado: se a pessoa digitar outra coisa enquanto isto
+       carrega, a resposta velha é descartada como qualquer outra */
+    buscarPorNome(q, veioDeCodigo, d.proximo_offset, lista);
+  });
   /* por addEventListener, não por onclick montado com o SKU: foi o XSS que o Codex achou no
      painel (#510), e aqui o SKU vem de dado gravado igual. */
   alvo.querySelectorAll('.lista-nome').forEach(b => {
