@@ -77,6 +77,11 @@
               background:var(--card2);border:1px solid var(--line);border-radius:10px;
               color:inherit;cursor:pointer;font:inherit}
   .lista-nome:hover{border-color:var(--ac2)}
+  .lista-nome .thumb-res{width:52px;height:52px;border-radius:9px;background:var(--carta2);
+                         flex:none;object-fit:contain}
+  .lista-nome .res-txt{flex:1;min-width:0}
+  .lista-nome .res-sku{display:block;font-size:12.5px;color:var(--calmo);margin-top:3px}
+  .lista-nome .res-sku b{display:inline;font-size:13px;color:var(--texto);font-weight:600}
   .lista-nome b{display:block;font-size:14px;margin-bottom:2px}
   .lista-nome span{font-size:12px;color:var(--mut)}
 
@@ -127,7 +132,7 @@
   <header class="top">
     <div class="marca"><span class="logo">📦</span>
       <h1>Contagem de Estoque · <b>Magazine Girassol</b></h1>
-      <span class="build">c11</span>
+      <span class="build">c12</span>
     </div>
   </header>
 
@@ -275,8 +280,21 @@ async function buscarPorNome(q, veioDeCodigo){
     return;
   }
   alvo.innerHTML = '<div class="dim">'+d.itens.length+' resultado(s) — toque no produto:</div>' +
-    d.itens.map(it => '<button class="lista-nome" onclick="abrirPorSku('+JSON.stringify(it.sku).replace(/"/g,'&quot;')+')">' +
-      '<b>'+esc(it.nome || '(sem nome)')+'</b><span>'+esc(it.sku)+(it.ean?' · '+esc(it.ean):'')+'</span></button>').join('');
+    /* 23/09 — FOTO já na primeira busca (o dono: "nessa 1a pesquisa, já mostra as imagens, não
+       só depois que clica") e o SKU ROTULADO, em destaque. O número que vinha ao lado era NCM,
+       não código de barras — saiu: mostrar código errado é pior que não mostrar nenhum. O que
+       a pessoa confere contra a etiqueta é o SKU, então ele ganha a palavra na frente. */
+    d.itens.map(it => '<button class="lista-nome" data-sku="'+esc(it.sku)+'">' +
+      (it.img ? '<img class="thumb-res" src="'+esc(it.img)+'" alt="" loading="lazy">'
+              : '<span class="thumb-res semfoto-mini">sem<br>foto</span>') +
+      '<span class="res-txt"><b>'+esc(it.nome || '(sem nome)')+'</b>' +
+      '<span class="res-sku">SKU <b>'+esc(it.sku)+'</b></span></span>' +
+      '</button>').join('');
+  /* por addEventListener e não por onclick montado com o SKU: SKU com aspas ou barra viraria
+     código — o XSS que o Codex achou no painel (#510). */
+  alvo.querySelectorAll('.lista-nome[data-sku]').forEach(b => {
+    b.addEventListener('click', () => abrirPorSku(b.dataset.sku));
+  });
 }
 
 async function abrirPorSku(sku){

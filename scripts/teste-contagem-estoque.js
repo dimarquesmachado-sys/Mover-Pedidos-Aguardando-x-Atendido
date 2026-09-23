@@ -426,4 +426,40 @@ for (const [emp, arq] of Object.entries({
   assert.ok(!filtra(''), 'vazio devia ser recusado');
 }
 
+/* 23/09 — O NÚMERO AO LADO DO SKU ERA O NCM. O dono viu na tela, mas o estrago era maior que
+   cosmético: a rede que procura GTIN varria a tributação INTEIRA, e NCM tem exatamente 8
+   dígitos — o tamanho de um EAN-8. Ele entrava como código de barras e virava CHAVE do índice;
+   como vários produtos dividem o mesmo NCM, um sobrescrevia o outro em silêncio e a busca por
+   aquele número devolvia o produto errado. */
+{
+  const prod = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'produtos.js'), 'utf8');
+  assert.ok(/NAO_E_GTIN/.test(prod),
+    'a rede de GTIN ainda varre a tributação inteira — o NCM entra como código de barras e vira ' +
+    'chave do índice, onde produtos diferentes se sobrescrevem');
+
+  /* a regra exercitada, não só a presença do nome */
+  const re = /const NAO_E_GTIN = (\/[^;]*\/i);/.exec(prod);
+  assert.ok(re, 'não achei a lista de campos que não são GTIN');
+  const NAO = eval(re[1]);
+  assert.ok(NAO.test('ncm'), 'ncm devia ser recusado');
+  assert.ok(NAO.test('NCM'), 'a checagem tem que ignorar caixa');
+  assert.ok(NAO.test('cest'), 'cest devia ser recusado');
+  assert.ok(!NAO.test('gtinEmbalagem'), 'gtinEmbalagem é GTIN de verdade e devia passar');
+
+  /* a tela: SKU rotulado, sem o número duvidoso, e foto já na primeira busca */
+  const js8 = /<script>([\s\S]*?)<\/script>/.exec(html)[1];
+  assert.ok(!/it\.ean/.test(js8),
+    'a lista de resultados ainda mostra o "ean" do índice — que é NCM nos registros já gravados');
+  assert.ok(/SKU <b>/.test(js8), 'o SKU não está rotulado na lista de resultados');
+  assert.ok(/thumb-res/.test(js8),
+    'a primeira busca não mostra foto — o dono pediu ver a imagem antes de clicar');
+
+  /* a foto sai do ÍNDICE, não de uma consulta por resultado: até 30 por digitação */
+  const ciclo8 = fs.readFileSync(path.join(raiz, 'girassol-backup-offline', 'ciclo.js'), 'utf8');
+  assert.ok(/const foto = primeiraImagem\(det \|\| it\)/.test(ciclo8),
+    'a indexação não guarda a foto — a busca teria que pedir uma por resultado ao Bling');
+  const cat8 = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'rotas-catalogo.js'), 'utf8');
+  assert.ok(/img: it\.img \|\| ''/.test(cat8), 'a rota de busca não devolve a foto');
+}
+
 console.log('OK: contagem de estoque — registro interno (nunca escreve no Bling), sessão nas 4 rotas, quantidade validada e busca por nome sem gastar cota');
