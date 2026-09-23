@@ -285,11 +285,21 @@ for (const [emp, arq] of Object.entries({
   assert.ok(/if\(recomecar !== false\)\{ _seqLista\+\+;/.test(js4) && /if\(minhaLista !== _seqLista\) return;/.test(js4),
     'ajustar dois cartões juntos dispara duas recargas que se misturam no mesmo array');
 
-  /* nome cortado: o `title` não existe pra quem usa o dedo, e esta tela é de celular de galpão */
+  /* O NOME DO PRODUTO NÃO PODE SER CORTADO, de jeito nenhum. Com prefixo longo igual — "Lixa
+     4 Pol. 100mm Diamantada … GRÃO:50" e "… GRÃO:3000" — truncar esconde justamente o que
+     diferencia, e o `title` não existe pra quem usa o dedo.
+     A regra é essa, não uma forma específica de CSS: a primeira versão deste assert EXIGIA
+     `-webkit-line-clamp:2`, que era o próprio corte; quando ele foi removido de vez, o teste
+     passou a reprovar o conserto. Teste que trava a implementação em vez do comportamento
+     envelhece contra quem está melhorando o código. */
   const css4 = /<style>([\s\S]*?)<\/style>/.exec(html)[1];
-  assert.ok(/-webkit-line-clamp:2/.test(css4) && !/\.item \.nome\{[^}]*white-space:nowrap/.test(css4),
-    'o nome longo aparece só truncado — no celular não há mouse pra revelar o title, e quem ' +
-    'confere precisa LER o nome pra saber que produto contou');
+  const regraNome = /\.item \.nome\{([^}]*)\}/.exec(css4);
+  assert.ok(regraNome, 'não achei a regra do nome do produto');
+  for (const corte of ['line-clamp', 'white-space:nowrap', 'text-overflow:ellipsis']) {
+    assert.ok(!regraNome[1].includes(corte),
+      'o nome do produto é cortado por `' + corte + '` — com prefixo longo igual, some justamente ' +
+      'o que diferencia um produto do outro, e no celular não há mouse pra revelar o title');
+  }
 }
 
 /* 22/09 — DIGITAR A QUANTIDADE NA LINHA E EXCLUIR, pedidos do dono depois de usar a tela:

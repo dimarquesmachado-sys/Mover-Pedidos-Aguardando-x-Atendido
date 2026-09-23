@@ -22,102 +22,143 @@
   ────────────────────────────────────────────────────────────────────────────
 -->
 <style>
-/* 22/09 — CSS PRÓPRIO. A primeira versão herdou o bloco de estilo do dashboard, e as classes
-   que eu usava (wrap, bloco, campo, tab…) simplesmente NÃO EXISTIAM lá: só `aviso` existia.
-   Resultado: tela sem caixa, sem tabela e com fonte enorme — o dono viu e disse "tá horrível".
-   Copiar estilo de outra tela e torcer pra as classes baterem foi o erro; aqui as classes são
-   definidas onde são usadas.
-   Feito pra galpão: alvo grande pro dedo, contraste alto, e nada que exija mira. */
+/* ═══ CONTAGEM DE ESTOQUE · decisões de design ═══════════════════════════════
+   Quem usa: o pessoal do galpão, de pé, num monitor compartilhado ou no celular,
+   bipando código o turno inteiro. O trabalho da tela é um só: achar o produto
+   rápido e registrar quanto tem. Tudo que não serve a isso sai.
+
+   COR — âmbar de girassol (#F2B33D) sobre azul-noite. O âmbar não é enfeite:
+   é a cor da empresa e a única cor forte da página, então ela marca exatamente
+   onde a pessoa deve agir (a busca em foco, o botão de salvar). Verde e vermelho
+   ficam reservados pro que é leitura de dado — confere / não confere.
+
+   TIPO — família do sistema, de propósito: fonte web num celular de galpão com
+   wifi ruim atrasa a primeira tela, e aqui velocidade é a função. A hierarquia
+   vem de tamanho e peso, não de mais uma família.
+
+   O QUE NÃO TEM, e é escolha: nada em CAIXA ALTA (rótulo gritado cansa e não
+   informa), nenhum rótulo flutuando acima de campo que já se explica, e a
+   quantidade grande é o número em si — não um card com borda e sombra em volta.
+   ──────────────────────────────────────────────────────────────────────────── */
   :root{
-    --bg:#0a0e1a; --card:#131a30; --card2:#182138; --line:#232d4a;
-    --tx:#e7ecf6; --mut:#8b96b3; --ac:#6366f1; --ac2:#818cf8;
-    --ok:#22c55e; --warn:#f59e0b; --bad:#ef4444; --r:12px;
+    --noite:#0b1020;      /* fundo */
+    --carta:#141b2e;      /* superfície */
+    --carta2:#1b2439;     /* superfície sobre superfície */
+    --linha:#273149;
+    --texto:#e8ecf5;
+    --calmo:#8d9ab8;      /* texto secundário */
+    --girassol:#f2b33d;   /* a cor da empresa — e a única cor de ação */
+    --girassol-fraco:#3a2e12;
+    --confere:#3ddc84;
+    --difere:#ff6b6b;
   }
   *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--tx);
-       font:15px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Inter,sans-serif;
-       padding:0 14px 60px}
-  .wrap{max-width:1100px;margin:0 auto}
+  body{margin:0;background:var(--noite);color:var(--texto);
+       font:16px/1.55 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Inter,sans-serif;
+       padding:0 16px 72px;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:820px;margin:0 auto}   /* linha curta: nome de produto se lê melhor */
 
-  .top{display:flex;align-items:center;gap:10px;padding:14px 0 10px;flex-wrap:wrap}
-  .marca{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
-  .top h1{font-size:18px;margin:0;font-weight:600}
-  .top .logo{font-size:22px}
-  .build{font-size:11px;color:var(--mut);background:var(--card);padding:2px 7px;border-radius:20px}
+  /* cabeçalho discreto — ele não é o assunto */
+  .top{padding:20px 0 4px}
+  .marca{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+  .marca h1{font-size:19px;font-weight:600;margin:0;letter-spacing:-.01em}
+  .marca .empresa{font-size:14px;color:var(--calmo)}
+  .build{font-size:11px;color:var(--calmo);opacity:.6;margin-left:auto}
 
-  .bloco{background:var(--card);border:1px solid var(--line);border-radius:var(--r);
-         padding:14px;margin:12px 0}
-  .bloco h2{font-size:15px;margin:0 0 8px;font-weight:600}
-  .dim{color:var(--mut);font-size:13px}
+  /* ── a busca, que é o herói ── */
+  .busca-hero{display:flex;align-items:center;gap:10px;margin:18px 0 8px;
+              background:var(--carta);border:1.5px solid var(--linha);
+              border-radius:14px;padding:0 14px;transition:border-color .12s}
+  .busca-hero:focus-within{border-color:var(--girassol);
+                           box-shadow:0 0 0 4px var(--girassol-fraco)}
+  .busca-icone{font-size:20px;opacity:.75;flex:none}
+  .busca-campo{flex:1;min-width:0;border:0;outline:0;background:none;color:var(--texto);
+               font:500 19px/1.2 inherit;padding:18px 0}
+  .busca-campo::placeholder{color:var(--calmo);font-weight:400}
+  .busca-limpar{border:0;background:none;color:var(--calmo);font-size:26px;line-height:1;
+                cursor:pointer;padding:6px 4px;display:none}
+  .busca-limpar:hover{color:var(--texto)}
+  .busca-hero.tem-texto .busca-limpar{display:block}
+  .busca-ajuda{color:var(--calmo);font-size:13px;margin:0 0 18px;padding:0 2px}
+  .nota-interna{color:var(--calmo);font-size:13px;margin:26px 0 8px;padding-left:12px;
+                border-left:2px solid var(--linha)}
 
-  .campo{width:100%;padding:12px 14px;font-size:17px;background:#0d1220;color:var(--tx);
-         border:1px solid var(--line);border-radius:10px;outline:none}
-  .campo:focus{border-color:var(--ac)}
-  .campo.qtd{width:160px;font-size:26px;text-align:center;padding:12px}
+  /* ── resultados da busca: alvo grande, um por linha ── */
+  .lista-nome{display:flex;gap:12px;align-items:center;width:100%;text-align:left;
+              padding:13px 14px;margin:8px 0;background:var(--carta);
+              border:1px solid var(--linha);border-radius:12px;color:inherit;
+              cursor:pointer;font:inherit}
+  .lista-nome:hover,.lista-nome:focus-visible{border-color:var(--girassol);outline:0}
+  .lista-nome b{display:block;font-size:15px;font-weight:600;line-height:1.35}
+  .lista-nome span{font-size:12.5px;color:var(--calmo)}
 
-  .btn{padding:11px 18px;font-size:15px;font-weight:600;border-radius:10px;cursor:pointer;
-       background:var(--ac);color:#fff;border:0}
-  .btn:disabled{opacity:.5;cursor:default}
-  .btn.sec{background:var(--card2);color:var(--tx);border:1px solid var(--line)}
+  .aviso{background:var(--carta);border:1px solid var(--linha);border-left:3px solid var(--girassol);
+         border-radius:0 10px 10px 0;padding:12px 14px;margin:10px 0;font-size:14px}
 
-  .aviso-interno{background:#2a2410;border:1px solid #6b5a1f;border-radius:var(--r);
-                 padding:11px 13px;margin:10px 0;font-size:14px}
-  .aviso{background:#2a1a10;border:1px solid #7a4a1f;border-radius:10px;padding:10px 12px;margin:8px 0}
-
-  /* produto escolhido */
-  .prod{display:flex;gap:14px;align-items:flex-start;margin:10px 0 14px}
-  .prod img,.prod .semfoto{width:110px;height:110px;border-radius:10px;background:#0d1220;flex:none}
+  /* ── lançar ── */
+  .bloco{background:var(--carta);border:1px solid var(--linha);border-radius:14px;
+         padding:16px;margin:16px 0}
+  .bloco h2{font-size:15px;font-weight:600;margin:0 0 10px}
+  .dim{color:var(--calmo);font-size:13px}
+  .prod{display:flex;gap:14px;align-items:flex-start;margin:4px 0 16px}
+  .prod img,.prod .semfoto{width:104px;height:104px;border-radius:10px;background:var(--carta2);flex:none}
   .prod img{object-fit:contain}
-  .prod .semfoto{display:flex;align-items:center;justify-content:center;color:var(--mut);
+  .prod .semfoto{display:flex;align-items:center;justify-content:center;color:var(--calmo);
                  font-size:11px;text-align:center}
-  .prod h3{margin:0 0 5px;font-size:16px;line-height:1.3;font-weight:600}
+  .prod h3{margin:0 0 6px;font-size:16px;font-weight:600;line-height:1.35}
 
-  /* lista de resultados por nome — alvo grande, um por linha */
-  .lista-nome{display:block;width:100%;text-align:left;padding:12px 14px;margin:6px 0;
-              background:var(--card2);border:1px solid var(--line);border-radius:10px;
-              color:inherit;cursor:pointer;font:inherit}
-  .lista-nome:hover{border-color:var(--ac2)}
-  .lista-nome b{display:block;font-size:14px;margin-bottom:2px}
-  .lista-nome span{font-size:12px;color:var(--mut)}
+  .campo{width:100%;padding:12px 14px;font-size:16px;background:var(--noite);color:var(--texto);
+         border:1px solid var(--linha);border-radius:10px;outline:none}
+  .campo:focus{border-color:var(--girassol)}
+  .campo.qtd{width:150px;font-size:30px;font-weight:700;text-align:center;padding:10px}
 
-  /* contagens de hoje — CARTÃO por item, com os botões do lado (pedido do dono) */
-  .item{display:flex;align-items:center;gap:12px;background:var(--card2);
-        border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:8px 0}
-  .item .thumb{width:46px;height:46px;border-radius:8px;background:#0d1220;flex:none;object-fit:contain}
-  .item .semfoto-mini{display:flex;align-items:center;justify-content:center;color:var(--mut);
+  .btn{padding:13px 20px;font-size:15px;font-weight:600;border-radius:11px;cursor:pointer;
+       background:var(--girassol);color:#231a05;border:0}
+  .btn:hover{filter:brightness(1.07)}
+  .btn:disabled{opacity:.45;cursor:default;filter:none}
+  #btCancelar{background:var(--carta2);color:var(--texto);border:1px solid var(--linha)}
+
+  /* ── contagens do dia ── */
+  .item{display:flex;align-items:center;gap:13px;background:var(--carta);
+        border:1px solid var(--linha);border-radius:12px;padding:11px 13px;margin:9px 0}
+  .item .thumb{width:48px;height:48px;border-radius:9px;background:var(--carta2);
+               flex:none;object-fit:contain}
+  .item .semfoto-mini{display:flex;align-items:center;justify-content:center;color:var(--calmo);
                       font-size:9px;line-height:1.1;text-align:center}
   .item .info{flex:1;min-width:0}
-  /* Codex #511 (P2, r2): nowrap+ellipsis cortava pra uma linha; trocar por -webkit-line-clamp:2
-     só empurrou o corte pra duas — nomes maiores que isso continuavam truncados, e o `title`
-     não existe no toque, que é como esta tela é usada no galpão. Quem confere precisa LER o
-     nome inteiro pra saber que produto contou, não uma aproximação. Sem clamp nem overflow
-     escondido, o card cresce em altura conforme o nome precisar — é card avulso, não célula de
-     tabela, então não há vizinho que a altura extra atrapalhe. */
-  .item .nome{font-size:14px;font-weight:600;line-height:1.3}
-  .item .meta{font-size:12px;color:var(--mut);margin-top:2px}
-  .item .qtd-box{text-align:center;flex:none;min-width:58px}
-  .item .qtd-num{font-size:24px;font-weight:700;line-height:1}
-  .item .qtd-lbl{font-size:10px;color:var(--mut);text-transform:uppercase}
-  .mais-menos{display:flex;gap:6px;flex:none}
-  .mais-menos button{width:44px;height:44px;font-size:22px;font-weight:700;border-radius:10px;
-                     border:1px solid var(--line);background:var(--card);color:var(--tx);cursor:pointer}
-  .mais-menos button:hover{border-color:var(--ac2)}
+  /* nome sem corte: com prefixo longo igual ("Lixa 4 Pol. 100mm Diamantada… GRÃO:50" e
+     "…GRÃO:3000"), truncar esconde justamente o que diferencia. O cartão cresce. */
+  .item .nome{font-size:14.5px;font-weight:600;line-height:1.35}
+  .item .meta{font-size:12.5px;color:var(--calmo);margin-top:3px}
+  .item .sku{font-weight:600;color:var(--texto);opacity:.85}
+  .item .qtd-box{text-align:center;flex:none;min-width:56px}
+  .item .qtd-num{font-size:26px;font-weight:700;line-height:1.05}
+  .item .qtd-lbl{font-size:11px;color:var(--calmo)}
+  .qtd-num.edit{background:none;border:0;color:inherit;font:inherit;font-size:26px;
+                font-weight:700;cursor:pointer;padding:2px 7px;border-radius:8px}
+  .qtd-num.edit:hover{background:var(--carta2)}
+  .qtd-edit{width:82px;font-size:24px;font-weight:700;text-align:center;padding:6px;
+            background:var(--noite);color:var(--texto);border:1.5px solid var(--girassol);
+            border-radius:9px}
+  .mais-menos{display:flex;gap:7px;flex:none}
+  .mais-menos button{width:44px;height:44px;font-size:21px;font-weight:600;border-radius:11px;
+                     border:1px solid var(--linha);background:var(--carta2);color:var(--texto);
+                     cursor:pointer}
+  .mais-menos button:hover{border-color:var(--girassol)}
   .mais-menos button:disabled{opacity:.4;cursor:default}
-  .qtd-num.edit{background:none;border:0;color:inherit;font:inherit;font-size:24px;font-weight:700;
-                cursor:pointer;padding:2px 6px;border-radius:8px}
-  .qtd-num.edit:hover{background:var(--card);outline:1px solid var(--line)}
-  .qtd-edit{width:76px;font-size:22px;font-weight:700;text-align:center;padding:6px;
-            background:#0d1220;color:var(--tx);border:1px solid var(--ac);border-radius:8px}
-  .mais-menos .excluir{font-size:17px}
-  .mais-menos .excluir:hover{border-color:var(--bad);color:var(--bad)}
-  .dif{font-size:12px;font-weight:600;padding:2px 7px;border-radius:20px;flex:none}
-  .dif.zero{background:#12351f;color:var(--ok)}
-  .dif.nao{background:#3a1a1a;color:var(--bad)}
-  .dif.sem{background:var(--card);color:var(--mut)}
+  .mais-menos .excluir{font-size:16px}
+  .mais-menos .excluir:hover{border-color:var(--difere)}
+  .dif{font-size:12px;font-weight:600;padding:3px 9px;border-radius:20px;flex:none;white-space:nowrap}
+  .dif.zero{background:rgba(61,220,132,.13);color:var(--confere)}
+  .dif.nao{background:rgba(255,107,107,.13);color:var(--difere)}
+  .dif.sem{background:var(--carta2);color:var(--calmo)}
 
+  :focus-visible{outline:2px solid var(--girassol);outline-offset:2px}
+  @media (prefers-reduced-motion:reduce){*{transition:none!important}}
   @media (max-width:560px){
+    .busca-campo{font-size:17px;padding:16px 0}
     .item{flex-wrap:wrap}
-    .item .info{flex-basis:100%}
+    .item .info{flex-basis:calc(100% - 61px)}
     .campo.qtd{width:100%}
   }
 </style>
@@ -125,26 +166,33 @@
 <body>
 <div class="wrap">
   <header class="top">
-    <div class="marca"><span class="logo">📦</span>
-      <h1>Contagem de Estoque · <b>Magazine Girassol</b></h1>
-      <span class="build">c11</span>
+    <div class="marca">
+      <h1>Contagem de estoque</h1>
+      <span class="empresa">Magazine Girassol</span>
+      <span class="build">c12</span>
     </div>
   </header>
 
-  <div class="aviso-interno">
-    Isto é <b>registro interno</b> — o saldo do Bling <b>não</b> é alterado por esta tela.
-    As contagens ficam guardadas pra conferência.
-  </div>
-
-  <section class="bloco">
-    <h2>🔍 Procurar produto</h2>
-    <div class="dim">SKU · código de barras (EAN) · parte do nome</div>
-    <input id="busca" class="campo" autofocus autocomplete="off"
-           placeholder="bipe o código ou digite e tecle Enter"
+  <!-- A BUSCA É O HERÓI DESTA TELA. O funcionário passa o turno nela: bipa, procura, lança,
+       repete. Antes era um campo pequeno espremido embaixo de um rótulo — o dono disse que
+       estava "muito ruim, layout bem pobre", e estava: o elemento mais usado era o menor da
+       página. Agora ela ocupa a largura toda, tem altura de alvo de dedo e o texto grande o
+       bastante pra ser lido de pé, a um braço de distância do monitor do galpão. -->
+  <div class="busca-hero">
+    <span class="busca-icone" aria-hidden="true">🔍</span>
+    <input id="busca" class="busca-campo" autofocus autocomplete="off"
+           placeholder="Bipe o código ou digite o produto"
+           aria-label="Procurar produto por SKU, código de barras ou nome"
            oninput="aoDigitar(this.value)"
            onkeydown="if(event.key==='Enter'){event.preventDefault();procurar();}">
-    <div id="resultado"></div>
-  </section>
+    <button type="button" id="btLimparBusca" class="busca-limpar" title="limpar" aria-label="Limpar busca">×</button>
+  </div>
+  <p class="busca-ajuda">Procura por SKU, código de barras ou parte do nome. Kits não aparecem —
+    conte os produtos que compõem o kit.</p>
+
+  <div id="resultado"></div>
+
+  <p class="nota-interna">O saldo do Bling não muda por aqui. As contagens ficam guardadas pra você conferir.</p>
 
   <section class="bloco" id="painelLanc" style="display:none">
     <h2>✍️ Lançar contagem</h2>
@@ -190,6 +238,9 @@ function horaSP(iso){ try { return new Date(iso).toLocaleString('sv-SE',{timeZon
 let _tDigita = null, _seqBusca = 0;
 
 function aoDigitar(v){
+  /* o × só aparece quando há o que limpar: botão permanente que não faz nada vira ruído */
+  const hero = document.querySelector('.busca-hero');
+  if(hero) hero.classList.toggle('tem-texto', String(v || '').length > 0);
   clearTimeout(_tDigita);
   const q = String(v || '').trim();
   if(q.length < 3){
@@ -588,10 +639,14 @@ async function carregarHoje(recomecar){
                : '<div class="thumb semfoto-mini">sem<br>foto</div>') +
         '<div class="info">' +
           '<div class="nome" title="'+esc(l.nome)+'">'+esc(l.nome || '(sem nome)')+'</div>' +
-          '<div class="meta">'+esc(l.sku)+' · '+esc(horaSP(l.quando))+' · '+esc(l.quem||'') +
-          (l.saldo_bling_na_hora != null ? ' · Bling '+l.saldo_bling_na_hora : '') +
-          (naoConferido ? ' <span title="saldo não conferido no Bling na hora do lançamento — pode estar desatualizado">⚠</span>' : '') +
-          ((l.ajustes && l.ajustes.length) ? ' · <span title="quantidade ajustada depois do lançamento">ajustado '+l.ajustes.length+'×</span>' : '') +
+          /* a linha de baixo vira FRASE em vez de campos colados com pontinhos. Os pontos
+             obrigam a pessoa a decifrar qual pedaço é o quê; "às 20:00 por Diego" ela lê
+             direto. O SKU fica destacado porque é o que ela confere contra a etiqueta. */
+          '<div class="meta"><span class="sku">'+esc(l.sku)+'</span>' +
+          ' · às '+esc(horaSP(l.quando))+(l.quem ? ' por '+esc(l.quem) : '') +
+          (l.saldo_bling_na_hora != null ? ' · Bling tinha '+l.saldo_bling_na_hora : '') +
+          (naoConferido ? ' <span title="o saldo não foi conferido no Bling na hora — pode estar desatualizado">⚠</span>' : '') +
+          ((l.ajustes && l.ajustes.length) ? ' · ajustado '+l.ajustes.length+'×' : '') +
           '</div>' +
         '</div>' +
         '<span class="dif '+classeDif+'">'+esc(textoDif)+'</span>' +
@@ -626,6 +681,20 @@ async function carregarHoje(recomecar){
 }
 
 carregarHoje();
+
+/* limpar a busca devolve o foco ao campo: quem bipa o próximo código não deve precisar
+   clicar de novo */
+(function(){
+  const bt = document.getElementById('btLimparBusca');
+  const campo = document.getElementById('busca');
+  if(!bt || !campo) return;
+  bt.addEventListener('click', () => {
+    campo.value = '';
+    aoDigitar('');
+    document.getElementById('resultado').innerHTML = '';
+    campo.focus();
+  });
+})();
 </script>
 </body>
 </html>
