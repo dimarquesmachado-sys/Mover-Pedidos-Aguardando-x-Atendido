@@ -63,7 +63,18 @@ const montar = () => ({
 /* a rota de depuração existe pras três: sem ela, consertar isto vira suposição — e cada
    suposição errada custa uma varredura de 3 horas pra descobrir */
 const cat = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'rotas-catalogo.js'), 'utf8');
-assert.ok(/debug-produto\//.test(cat), 'a rota de depuração do produto cru sumiu');
+assert.ok(/debug-produto-cru\//.test(cat), 'a rota de depuração do produto cru sumiu');
+
+/* Codex #520 (P2): o nome NÃO pode colidir com a `/debug-produto/` que a AMB e a GOOD já têm
+   (aquela mostra estoque e localização). Esta lib é registrada ANTES dos handlers delas, então
+   um nome repetido aqui derruba a ferramenta de diagnóstico das duas — e só se descobre na
+   hora em que se precisa dela. */
+assert.ok(!/startsWith\(prefixo \+ '\/debug-produto\/'\)/.test(cat),
+  'a rota da lib voltou a se chamar /debug-produto/ e tapa a que a AMB e a GOOD já têm');
+for (const arq of ['amb-checkout-offline/index.js', 'good-checkout-offline/index.js']) {
+  const s2 = fs.readFileSync(path.join(raiz, arq), 'utf8');
+  assert.ok(/debug-produto/.test(s2), arq + ': a rota própria de depuração sumiu');
+}
 assert.ok(/variacao: \(raw && raw\.variacao\)/.test(cat),
   'a depuração não mostra o campo `variacao` — que é exatamente o que precisa ser conferido');
 assert.ok(/if \(!ehAdmin\(op\)\) \{ json\(res, 403/.test(cat), 'a depuração não exige admin');
