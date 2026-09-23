@@ -1678,13 +1678,19 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
       
          ⚠️ Veio do PR #330 (04/09), que ficou 562 commits atrás e não dava mais
          merge. Refeito sobre o código de hoje — e aqui `de`/`ate` nasciam DEPOIS
-         desta checagem: copiar daria `de is not defined`. */
+         desta checagem: copiar daria `de is not defined`.
+
+         Codex (#517 P2): `_backfill` é COMPARTILHADO com a GOOD — o
+         good-checkout-offline chama gbo.backfillVendas(de, ate, 'good', ctx).
+         Sem checar a empresa, uma rodada da GOOD começada há poucos segundos
+         fazia esta rota da GIRASSOL achar que era eco DELA e responder
+         "iniciado" sem disparar nada — histórico da Girassol ficava parado. */
       if (_backfill.rodando) {
-        const mesmoPeriodo = _backfill.de === de && _backfill.ate === ate;
+        const mesmoPeriodo = _backfill.empresa === 'girassol' && _backfill.de === de && _backfill.ate === ate;
         const segs = _backfill.inicio
           ? (Date.now() - Date.parse(_backfill.inicio)) / 1000 : 1e9;
         if (mesmoPeriodo && segs < 30) {
-          return json(res, 200, { ok: true, msg: 'backfill iniciado', de, ate });
+          json(res, 200, { ok: true, msg: 'backfill iniciado', de, ate }); return true;
         }
         json(res, 200, { ok: false, msg: 'já tem um backfill rodando — acompanhe em /backfill-status', status: _backfill }); return true;
       }

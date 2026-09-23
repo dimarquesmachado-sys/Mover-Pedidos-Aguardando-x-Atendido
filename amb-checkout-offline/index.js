@@ -2096,7 +2096,7 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
         const segs = _backfill.inicio
           ? (Date.now() - Date.parse(_backfill.inicio)) / 1000 : 1e9;
         if (mesmoPeriodo && segs < 30) {
-          return json(res, 200, { ok: true, msg: 'backfill iniciado', de, ate });
+          json(res, 200, { ok: true, msg: 'backfill iniciado', de, ate }); return true;
         }
         json(res, 200, { ok: false, msg: 'já tem um backfill rodando — acompanhe em /backfill-status', status: _backfill }); return true;
       }
