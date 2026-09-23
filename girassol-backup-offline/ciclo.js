@@ -90,18 +90,27 @@ async function indexarCatalogoCompleto() {
         if (!it.id) continue;
         let eans = getPossiveisGtins(it).map(e => String(e).replace(/\D/g, '')).filter(e => e.length >= 8);
         let nome = it.nome, sku = it.codigo;
+        let det = null;   // usado fora do if pra ler o `formato` quando o detalhe foi buscado
         if (!eans.length) {                            // lista não trouxe GTIN → busca no detalhe
-          const det = await produtoDetalhe(it.id);
+          det = await produtoDetalhe(it.id);
           await sleep(PAUSA);
           if (det) { eans = getPossiveisGtins(det).map(e => String(e).replace(/\D/g, '')).filter(e => e.length >= 8); nome = det.nome || nome; sku = det.codigo || sku; }
         }
+        /* 22/09 — KIT NÃO PODE SER CONTADO. O dono explicou: `80-AE-8F-125mm-KIT40` é um kit,
+           e lançar estoque nele no Bling dá erro — quem conta inventário são os COMPONENTES
+           (`10-AE-8F-125mm-g24`, `10-AE-8F-125mm-g40`), que são produtos normais e aparecem
+           na busca como qualquer outro. Variação também é contável.
+           `formato === 'E'` é composição no Bling (já documentado em amb-drive-imagens), então
+           a marca vai junto no índice e a busca esconde esses. Sem custo extra: o campo já vem
+           na listagem que esta varredura faz. */
+        const ehKit = String((det && det.formato) || it.formato || '').toUpperCase() === 'E';
         if (eans.length) {
-          for (const e of eans) { if (!novo[e]) idxStatus.eans++; novo[e] = { sku: sku || '', nome: nome || '', id: it.id }; }
+          for (const e of eans) { if (!novo[e]) idxStatus.eans++; novo[e] = { sku: sku || '', nome: nome || '', id: it.id, kit: ehKit }; }
         } else if (sku) {
           // Codex (P2): sem GTIN, o produto nunca entrava no índice — e é o índice de EAN que
           // a busca por nome da contagem de estoque usa. Chave sintética prefixada (nunca é só
           // dígitos, ao contrário de um EAN de verdade) pra não colidir com o lookup por dígitos.
-          novo['sku:' + sku] = { sku: sku, nome: nome || '', id: it.id };
+          novo['sku:' + sku] = { sku: sku, nome: nome || '', id: it.id, kit: ehKit };
         }
       }
       /* Codex #484 (P2): eu guardei o salvamento FINAL e esqueci deste, que publica a cada

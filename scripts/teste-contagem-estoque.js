@@ -226,4 +226,204 @@ for (const [emp, arq] of Object.entries({
     emp + ': o fazerBusca perdeu o `async` — o `await` dentro dele quebra a tela inteira');
 }
 
+/* 22/09 — A TELA ESTAVA FEIA, e por um motivo concreto: eu tinha copiado o bloco de estilo do
+   dashboard e as classes que usava (wrap, bloco, campo, tab…) NÃO EXISTIAM lá — só `aviso`.
+   Saiu sem caixa, sem tabela e com fonte enorme. Copiar CSS de outra tela e torcer pra as
+   classes baterem foi o erro; agora elas são definidas onde são usadas, e o teste confere. */
+{
+  const css = /<style>([\s\S]*?)<\/style>/.exec(html)[1];
+  const usadas = new Set([...html.matchAll(/class="([^"]+)"/g)]
+    .flatMap(m => m[1].split(/\s+/)).filter(c => c && !c.includes("'")));
+  const semCss = [...usadas].filter(c => !new RegExp('\\.' + c.replace(/-/g, '\\-') + '[\\s,{:.]').test(css));
+  assert.deepStrictEqual(semCss, [],
+    'classe(s) usadas na tela sem CSS: ' + semCss.join(', ') + ' — foi assim que ela saiu sem ' +
+    'caixa e com fonte gigante');
+}
+
+/* + e − na lista do dia, pedido do dono */
+{
+  const lib3 = fs.readFileSync(LIB, 'utf8');
+  const js3 = /<script>([\s\S]*?)<\/script>/.exec(html)[1];
+
+  assert.ok(/prefixo \+ '\/contagem-ajustar'/.test(lib3), 'não há rota pra ajustar a quantidade');
+  assert.ok(/const id = Date\.now\(\)\.toString\(36\)/.test(lib3),
+    'o lançamento não tem id — ajustar por posição no array atinge a linha errada quando outro ' +
+    'funcionário lança ao mesmo tempo');
+
+  /* o ajuste NÃO pode apagar o valor anterior: esta tela existe pra conferir depois */
+  assert.ok(/l\.ajustes\.push\(\{ de: l\.contado, para: novo/.test(lib3),
+    'o ajuste sobrescreve a quantidade sem guardar de onde veio — o registro vira caixa preta');
+  assert.ok(/if \(novo < 0\)/.test(lib3), 'deixa a contagem ficar negativa');
+  assert.ok(/l\.divergencia = novo - Number\(l\.saldo_bling_na_hora\)/.test(lib3),
+    'a divergência não acompanha o ajuste — é justamente ela que o dono olha na revisão');
+
+  /* botões por addEventListener, não por onclick montado com o id — é o XSS do #510 */
+  assert.ok(/addEventListener\('click'/.test(js3) && /data-ajuste/.test(js3),
+    'os botões + e − montam código a partir de dado gravado — mesmo buraco que o Codex achou no painel');
+  assert.ok(/par\.forEach\(b => b\.disabled = true\)/.test(js3),
+    'clique repetido no + manda vários ajustes e a tela fica diferente do que foi gravado');
+}
+
+/* 22/09 (Codex #511, 4 P2) — o primeiro é o que apareceria no PRIMEIRO DEPLOY por cima de um
+   arquivo existente: os lançamentos gravados antes desta versão não têm `id`, e apareceriam sem
+   os botões + e − — umas linhas ajustáveis e outras não, sem explicação na tela. */
+{
+  const lib4 = fs.readFileSync(LIB, 'utf8');
+  const js4 = /<script>([\s\S]*?)<\/script>/.exec(html)[1];
+
+  assert.ok(/const carimbarIds = \(d\) =>/.test(lib4),
+    'lançamento antigo não ganha id — ficaria sem os botões pra sempre');
+  assert.ok((lib4.match(/if \(carimbarIds\(d\)\) gravar\(d\);/g) || []).length >= 2,
+    'o carimbo não roda nos dois caminhos (lista e ajuste)');
+
+  /* a rota é chamável direto, sem passar pelos botões: sem esta trava, um inteiro qualquer
+     levaria a contagem acima do teto que o LANÇAMENTO recusa — dois caminhos, duas regras */
+  assert.ok(/if \(delta !== 1 && delta !== -1\)/.test(lib4),
+    'o ajuste aceita qualquer inteiro — a rota não passa só pelos botões');
+
+  /* duas recargas simultâneas misturavam o mesmo ACUMULADO */
+  assert.ok(/if\(recomecar !== false\)\{ _seqLista\+\+;/.test(js4) && /if\(minhaLista !== _seqLista\) return;/.test(js4),
+    'ajustar dois cartões juntos dispara duas recargas que se misturam no mesmo array');
+
+  /* nome cortado: o `title` não existe pra quem usa o dedo, e esta tela é de celular de galpão */
+  const css4 = /<style>([\s\S]*?)<\/style>/.exec(html)[1];
+  assert.ok(/-webkit-line-clamp:2/.test(css4) && !/\.item \.nome\{[^}]*white-space:nowrap/.test(css4),
+    'o nome longo aparece só truncado — no celular não há mouse pra revelar o title, e quem ' +
+    'confere precisa LER o nome pra saber que produto contou');
+}
+
+/* 22/09 — DIGITAR A QUANTIDADE NA LINHA E EXCLUIR, pedidos do dono depois de usar a tela:
+   "pra eu não ter que digitar de novo o 404 caso queira adicionar mais 1". Os botões resolvem
+   de 1 em 1; com diferença grande, digitar erra menos que clicar dez vezes. */
+{
+  const lib5 = fs.readFileSync(LIB, 'utf8');
+  const js5 = /<script>([\s\S]*?)<\/script>/.exec(html)[1];
+
+  assert.ok(/prefixo \+ '\/contagem-definir'/.test(lib5), 'não há rota pra digitar a quantidade');
+  assert.ok(/prefixo \+ '\/contagem-excluir'/.test(lib5), 'não há rota pra excluir');
+
+  /* a mesma validação do lançamento: o número é o ponto do recurso inteiro */
+  const defin = lib5.slice(lib5.indexOf("'/contagem-definir'"), lib5.indexOf("'/contagem-excluir'"));
+  assert.ok(/Math\.floor\(n\) !== n/.test(defin) && /n > 1000000/.test(defin),
+    'digitar a quantidade não passa pela mesma validação do lançamento — dois caminhos, duas regras');
+  assert.ok(/l\.ajustes\.push\(\{ de: l\.contado, para: n/.test(defin),
+    'digitar sobrescreve sem guardar de onde veio — o registro vira caixa preta');
+
+  /* excluir NÃO apaga do arquivo: some da lista e fica a trilha */
+  assert.ok(/l\.excluido = true;/.test(lib5) && /l\.excluido_por/.test(lib5),
+    'a exclusão apaga o registro — o dono perderia a chance de saber que alguém contou e desfez');
+  assert.ok(/const vivos = d\.lancamentos\.filter\(l => l && !l\.excluido\)/.test(lib5),
+    'o excluído continua aparecendo na lista');
+  assert.ok(/x\.id === id && !x\.excluido/.test(lib5),
+    'dá pra ajustar um lançamento já excluído');
+
+  /* na tela: confirmação antes de excluir, e o número editável não usa prompt() */
+  assert.ok(/confirm\('Excluir a contagem/.test(js5), 'exclui sem confirmar');
+  /* olha o CÓDIGO, não os comentários: a frase que explica POR QUE não uso prompt() contém a
+     palavra, e a primeira versão deste assert acusou o próprio comentário. Já caí nisso hoje
+     com o blingWrite — falso positivo ensina a ignorar o vermelho. */
+  const js5codigo = js5.replace(/\/\*[\s\S]*?\*\//g, '').split('\n').filter(l => !l.trim().startsWith('//')).join('\n');
+  assert.ok(/data-editar/.test(js5) && !/prompt\(/.test(js5codigo),
+    'a edição usa prompt() — no celular ele tapa a tela e não mostra qual produto está sendo editado');
+  assert.ok(/ev\.key === 'Escape'/.test(js5), 'não dá pra desistir da edição');
+}
+
+/* 22/09 (Codex #511, 2ª rodada) — dois furos que só apareceram DEPOIS de digitar a quantidade
+   na linha e excluir entrarem: o botão + isolado ainda não tinha o mesmo teto dos outros dois
+   caminhos pro campo, e editar a linha não travava os botões vizinhos dela. */
+{
+  const lib6 = fs.readFileSync(LIB, 'utf8');
+  const js6 = /<script>([\s\S]*?)<\/script>/.exec(html)[1];
+
+  /* um lançamento já no teto de 1.000.000 aceitava +1 e ia pra 1.000.001 — o ajuste não tinha
+     o mesmo teto do lançamento e do /contagem-definir pro mesmo campo */
+  const ajustar6 = lib6.slice(lib6.indexOf("'/contagem-ajustar'"), lib6.indexOf("'/contagem-definir'"));
+  assert.ok(/if \(novo > 1000000\)/.test(ajustar6),
+    'o ajuste (+) não tem teto — um lançamento no limite passa de 1.000.000 clicando +');
+
+  /* editar a quantidade na linha e tocar no + ou − logo em seguida disparava o blur (que salva
+     o valor digitado) e o click (que ajusta) sem ordem garantida entre os dois — o ajuste podia
+     ser sobrescrito pelo valor absoluto do blur, perdendo o toque em silêncio */
+  const editarQtd6 = js6.slice(js6.indexOf('function editarQtd'), js6.indexOf('function excluir'));
+  assert.ok(/\.mais-menos button/.test(editarQtd6) && /disabled = true/.test(editarQtd6),
+    'editar a quantidade não trava os botões + / − / excluir da mesma linha — o blur do ' +
+    'campo e o clique num deles correm sem ordem garantida');
+}
+
+/* 22/09 — KIT NÃO PODE SER CONTADO. O dono explicou a regra: `80-AE-8F-125mm-KIT40` é um kit,
+   e lançar estoque nele no Bling DÁ ERRO — quem conta inventário são os COMPONENTES
+   (`10-AE-8F-125mm-g24` e `-g40`), que são produtos normais. Variação é contável.
+   Contar um kit geraria um número que NUNCA poderia ser lançado, e quem conferisse depois
+   gastaria tempo entendendo por quê. */
+{
+  const lib6 = fs.readFileSync(LIB, 'utf8');
+  const cat6 = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'rotas-catalogo.js'), 'utf8');
+  const ciclo = fs.readFileSync(path.join(raiz, 'girassol-backup-offline', 'ciclo.js'), 'utf8');
+
+  /* a marca nasce na indexação — `formato === 'E'` é composição no Bling, já documentado em
+     amb-drive-imagens (que preserva a estrutura justamente porque o Bling recusa sem ela) */
+  assert.ok(/const ehKit = String\(\(det && det\.formato\) \|\| it\.formato \|\| ''\)\.toUpperCase\(\) === 'E'/.test(ciclo),
+    'a indexação não marca kit — a busca não teria como escondê-los');
+  assert.ok(/kit: ehKit/.test(ciclo), 'a marca não vai pro índice');
+
+  assert.ok(/if \(it\.kit === true\) continue;/.test(cat6),
+    'a busca por nome mostra kit — o funcionário contaria algo que não dá pra lançar');
+
+  /* e a trava que NÃO depende do índice: índice antigo não tem a marca, e o SKU do kit pode
+     ser digitado direto */
+  assert.ok(/async function ehKitNoBling\(sku\)/.test(lib6),
+    'o lançamento não confere kit no Bling — a busca sozinha não basta, porque o índice antigo ' +
+    'não tem a marca e o SKU pode ser digitado direto');
+  assert.ok(/esse SKU é um KIT/.test(lib6), 'o lançamento aceita kit');
+
+  /* falha de rede NÃO pode bloquear produto legítimo: recusar o certo é pior que deixar passar
+     um kit que a busca já escondeu */
+  assert.ok(/return \{ kit: false, sabido: false \};/.test(lib6),
+    'falha na consulta bloquearia o lançamento de um produto legítimo');
+
+  /* Codex #511 (P1, 2ª leva): sem abort, um Bling que aceita a conexão e nunca responde
+     deixava /contagem-lancar pendurado pra sempre — mesmo bug que o #509 já tinha achado (e
+     corrigido) em saldoAoVivo, só que aqui ainda faltava o remédio */
+  const ehKit6 = lib6.slice(lib6.indexOf('async function ehKitNoBling'), lib6.indexOf('async function saldoAoVivo'));
+  assert.ok(/new AbortController\(\)/.test(ehKit6) && /setTimeout\(\(\) => controle\.abort\(\), 15000\)/.test(ehKit6),
+    'ehKitNoBling sem abort — um Bling que nunca responde trava o lançamento pra sempre');
+
+  /* Codex #511 (P2, 2ª leva): `?codigo=` do Bling é case-sensitive — só tentar a grafia
+     recebida deixava um SKU de kit em caixa diferente da cadastrada passar batido aqui,
+     mesmo que saldoAoVivo achasse o mesmo produto pela variante certa logo depois */
+  assert.ok(/const variantes = \[\.\.\.new Set\(\[sku, sku\.toUpperCase\(\), sku\.toLowerCase\(\)\]\)\];/.test(ehKit6),
+    'ehKitNoBling só tenta a grafia recebida — um SKU de kit em outra caixa escapa da trava');
+
+  /* Codex #511 (P2, 2ª leva): salvarNoIndiceEan regrava a entrada inteira sem o campo `kit` —
+     abrir um kit por SKU/EAN exato apagava a marca que a indexação completa tinha posto, e
+     ele voltava a aparecer na busca por nome até a próxima reindexação total */
+  const prod6 = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'produtos.js'), 'utf8');
+  assert.ok(/kit: String\(prod\.formato \|\| ''\)\.toUpperCase\(\) === 'E'/.test(prod6),
+    'salvarNoIndiceEan apaga a marca de kit do índice ao resolver o produto de novo');
+}
+
+/* 22/09 — A FOTO NA LINHA das contagens, pedido do dono. Num inventário de lixas com nomes
+   quase iguais, a imagem distingue mais rápido que ler o nome inteiro.
+   Guardada NO LANÇAMENTO, não buscada na hora de listar: buscá-la por linha custaria uma
+   chamada ao Bling POR ITEM da lista, e a cota é da conta. A tela já tem a URL na mão quando
+   o produto foi escolhido. */
+{
+  const lib7 = fs.readFileSync(LIB, 'utf8');
+  const js7 = /<script>([\s\S]*?)<\/script>/.exec(html)[1];
+
+  assert.ok(/img: produto\.img/.test(js7), 'a tela não manda a foto ao lançar');
+  assert.ok(/class="thumb"/.test(js7), 'a linha das contagens não mostra a foto');
+
+  /* só http(s): outro esquema não tem o que fazer num <img> a não ser surpresa */
+  const guarda = /img: \(\(\) => \{[\s\S]*?\}\)\(\),/.exec(lib7);
+  assert.ok(guarda, 'o lançamento não guarda a foto');
+  assert.ok(/\^https\?:\\\/\\\//.test(guarda[0]),
+    'a foto é guardada sem checar o esquema da URL');
+
+  const filtra = (u) => /^https?:\/\//i.test(String(u||'').trim());
+  assert.ok(filtra('https://bling.com/f.jpg'), 'url http(s) devia passar');
+  assert.ok(!filtra('javascript:alert(1)'), 'javascript: devia ser recusado');
+  assert.ok(!filtra(''), 'vazio devia ser recusado');
+}
+
 console.log('OK: contagem de estoque — registro interno (nunca escreve no Bling), sessão nas 4 rotas, quantidade validada e busca por nome sem gastar cota');
