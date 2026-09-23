@@ -378,8 +378,28 @@ for (const [emp, arq] of Object.entries({
 
   /* falha de rede NÃO pode bloquear produto legítimo: recusar o certo é pior que deixar passar
      um kit que a busca já escondeu */
-  assert.ok(/catch \(e\) \{ return \{ kit: false, sabido: false \}; \}/.test(lib6),
+  assert.ok(/return \{ kit: false, sabido: false \};/.test(lib6),
     'falha na consulta bloquearia o lançamento de um produto legítimo');
+
+  /* Codex #511 (P1, 2ª leva): sem abort, um Bling que aceita a conexão e nunca responde
+     deixava /contagem-lancar pendurado pra sempre — mesmo bug que o #509 já tinha achado (e
+     corrigido) em saldoAoVivo, só que aqui ainda faltava o remédio */
+  const ehKit6 = lib6.slice(lib6.indexOf('async function ehKitNoBling'), lib6.indexOf('async function saldoAoVivo'));
+  assert.ok(/new AbortController\(\)/.test(ehKit6) && /setTimeout\(\(\) => controle\.abort\(\), 15000\)/.test(ehKit6),
+    'ehKitNoBling sem abort — um Bling que nunca responde trava o lançamento pra sempre');
+
+  /* Codex #511 (P2, 2ª leva): `?codigo=` do Bling é case-sensitive — só tentar a grafia
+     recebida deixava um SKU de kit em caixa diferente da cadastrada passar batido aqui,
+     mesmo que saldoAoVivo achasse o mesmo produto pela variante certa logo depois */
+  assert.ok(/const variantes = \[\.\.\.new Set\(\[sku, sku\.toUpperCase\(\), sku\.toLowerCase\(\)\]\)\];/.test(ehKit6),
+    'ehKitNoBling só tenta a grafia recebida — um SKU de kit em outra caixa escapa da trava');
+
+  /* Codex #511 (P2, 2ª leva): salvarNoIndiceEan regrava a entrada inteira sem o campo `kit` —
+     abrir um kit por SKU/EAN exato apagava a marca que a indexação completa tinha posto, e
+     ele voltava a aparecer na busca por nome até a próxima reindexação total */
+  const prod6 = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'produtos.js'), 'utf8');
+  assert.ok(/kit: String\(prod\.formato \|\| ''\)\.toUpperCase\(\) === 'E'/.test(prod6),
+    'salvarNoIndiceEan apaga a marca de kit do índice ao resolver o produto de novo');
 }
 
 /* 22/09 — A FOTO NA LINHA das contagens, pedido do dono. Num inventário de lixas com nomes
