@@ -206,5 +206,49 @@ const pagina = async (aposNome, aposSku, lim) => {
   assert.ok(/scroll-padding-top/.test(cssT),
     'sem scroll-padding o item clicado pode ficar escondido atrás da barra fixa');
 
-  console.log('OK: ordena antes de cortar; tudo por padrao; card abre NA LISTA; salvar nao mexe na lista; busca fixa no alto');
+  /* 23/09 (Codex #521, 6 apontamentos no card inline) — dois P1: */
+
+  /* P1: `Number('')` é 0. Clicar Salvar com o campo VAZIO gravava contagem ZERO — e zero é um
+     número legítimo (produto que acabou), então nem o servidor nem quem revisa depois consegue
+     distinguir "contei zero" de "cliquei sem digitar". */
+  assert.ok(/const bruto = String\(campo\.value \|\| ''\)\.trim\(\);/.test(js) && /if\(bruto === ''\)/.test(js),
+    'campo vazio vira contagem ZERO — indistinguível de uma contagem real de zero');
+  const validar = (v) => {
+    const bruto = String(v || '').trim();
+    if (bruto === '') return 'vazio';
+    const n = Number(bruto);
+    return (isFinite(n) && n >= 0 && Math.floor(n) === n) ? n : 'invalido';
+  };
+  assert.strictEqual(validar(''), 'vazio', 'vazio passou');
+  assert.strictEqual(validar('   '), 'vazio', 'só espaços passou');
+  assert.strictEqual(validar('0'), 0, 'ZERO DIGITADO tem que passar — produto que acabou conta zero');
+  assert.strictEqual(validar('-3'), 'invalido', 'negativo passou');
+
+  /* P1: o card inline NÃO pode mexer no `ESCOLHIDO` global, que é do fluxo do bipe. Os dois
+     podem estar abertos: bipa um código (painel abre), depois procura por nome e abre um card.
+     Trocar o global fazia o Salvar DAQUELE painel lançar o produto DESTE card. */
+  const corpoAbrir = /async function abrirNaLista[\s\S]*?\n\}/.exec(js);
+  assert.ok(corpoAbrir, 'sumiu a abertura inline');
+  assert.ok(!/ESCOLHIDO = p;/.test(corpoAbrir[0]),
+    'o card inline sobrescreve o ESCOLHIDO global — o painel do bipe lançaria o produto errado');
+  assert.ok(/painelVelho\.style\.display = 'none'/.test(corpoAbrir[0]),
+    'o painel do fluxo antigo fica aberto junto com o card — dois formulários apontando pra produtos diferentes');
+
+  /* P2: abrir outro card descartava o que já estava digitado no anterior, sem perguntar */
+  assert.ok(/Você digitou uma quantidade no produto aberto e ainda não salvou/.test(js),
+    'abrir outro produto joga fora a quantidade digitada no anterior em silêncio');
+  assert.ok(/Espere o lançamento em andamento terminar/.test(js),
+    'abrir outro card durante um salvamento em voo descarta o formulário no meio do envio');
+
+  /* P2: abrir um card cancelava a paginação em voo (contador compartilhado com a busca) */
+  assert.ok(/const meu = \+\+_seqAbrir;/.test(js),
+    'abrir um card usa o contador da BUSCA — clicar num produto enquanto o "ver mais" carrega ' +
+    'descarta aquela resposta e o botão fica em "carregando…" pra sempre');
+
+  /* P2: o saldo do card vinha de cache sem TTL, rotulado "agora" */
+  assert.ok(/contagem-saldo\?sku=/.test(corpoAbrir[0]),
+    'o card mostra saldo de cache sem revalidar, mas o chama de "agora" — e a divergência ' +
+    'gravada nasce desse número');
+
+  console.log('OK: ordena antes de cortar; tudo por padrao; card inline sem tocar no estado antigo; vazio nao vira zero');
 })().catch(e => { console.error(e); process.exit(1); });

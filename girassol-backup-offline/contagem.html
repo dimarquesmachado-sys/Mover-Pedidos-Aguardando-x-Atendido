@@ -165,6 +165,7 @@
                border-radius:0 0 12px 12px;padding:11px 13px;margin-top:-1px}
   .linha-qtd{display:flex;gap:9px;align-items:center;margin-top:8px}
   .linha-qtd .campo.qtd{width:150px;font-size:24px}
+  .saldo-card{color:var(--texto)}
   .msg-inline{margin-top:7px;min-height:1em}
   .ok-inline{background:rgba(61,220,132,.13);color:var(--confere);font-size:13px;font-weight:600;
              padding:8px 13px;border-radius:0 0 12px 12px;margin-top:-1px}
@@ -222,7 +223,7 @@
       <span class="logo-girassol" role="img" aria-label="Magazine Girassol"></span>
       <h1>Contagem de estoque</h1>
       <span class="empresa">Magazine Girassol</span>
-      <span class="build">c19</span>
+      <span class="build">c20</span>
     </div>
   </header>
 
@@ -300,6 +301,7 @@ let _tDigita = null, _seqBusca = 0;
 /* 23/09 — modo da lista de resultados. O dono pediu TUDO de uma vez por padrão, com a opção
    de ver em partes quando a lista ficar grande demais pro celular do galpão. Os passos
    crescem (50 → 100 → 200): quem vai até o fim chega rápido. */
+let _seqAbrir = 0;   // contador SÓ das aberturas de card (não mexe no da busca)
 let MODO_LISTA = 'tudo';
 const PASSOS = [50, 100, 200];
 let _nPassos = 0;
@@ -504,13 +506,39 @@ async function abrirNaLista(sku){
     caixa.innerHTML = ''; caixa.dataset.aberto = '';
     return;
   }
-  /* só um aberto por vez: dois formulários na tela convidam a digitar no errado */
-  document.querySelectorAll('.abre[data-aberto="1"]').forEach(c => { c.innerHTML = ''; c.dataset.aberto = ''; });
+  /* Codex #521 (P2): só um aberto por vez — dois formulários convidam a digitar no errado —,
+     mas fechar o outro NÃO pode jogar fora o que já foi digitado nele sem perguntar. A
+     confirmação de cima só cobria clicar de novo no MESMO card. */
+  for (const c of document.querySelectorAll('.abre[data-aberto="1"]')) {
+    const campoAberto = c.querySelector('.campo.qtd');
+    const salvando = campoAberto && campoAberto.disabled;   // salvamento em voo: nunca descartar
+    const digitado = campoAberto && campoAberto.value.trim() !== '';
+    if (salvando) {
+      alert('Espere o lançamento em andamento terminar antes de abrir outro produto.');
+      return;
+    }
+    if (digitado && !confirm('Você digitou uma quantidade no produto aberto e ainda não salvou. Descartar?')) return;
+    c.innerHTML = ''; c.dataset.aberto = '';
+  }
+
+  /* e some com o painel do fluxo antigo, se estiver aberto: dois formulários de lançamento na
+     tela, um deles apontando pra outro produto, é convite a erro */
+  const painelVelho = document.getElementById('painelLanc');
+  if(painelVelho && painelVelho.style.display !== 'none'){
+    painelVelho.style.display = 'none';
+    const pe = document.getElementById('prodEscolhido');
+    if(pe) pe.innerHTML = '';
+    ESCOLHIDO = null;
+  }
 
   caixa.dataset.aberto = '1';
   caixa.innerHTML = '<div class="dim" style="padding:8px 2px">buscando no Bling…</div>';
 
-  const meu = ++_seqBusca;
+  /* Codex #521 (P2): abrir um card NÃO pode invalidar a paginação em voo. Eu usava o
+     `_seqBusca`, que é o contador da BUSCA — então clicar num produto já visível enquanto o
+     "ver mais" carregava descartava aquela resposta, e o botão ficava em "carregando…" pra
+     sempre. Contador próprio. */
+  const meu = ++_seqAbrir;
   let d = null;
   try {
     const r = await fetch(MOD+'/buscar-produto?q='+encodeURIComponent(sku), {credentials:'same-origin'});
@@ -522,12 +550,19 @@ async function abrirNaLista(sku){
     return;
   }
   const p = d.produto;
-  ESCOLHIDO = p;
+  /* Codex #521 (P1): NÃO mexer no `ESCOLHIDO` global. Ele pertence ao fluxo antigo (bipe →
+     painel de baixo), que pode estar aberto ao mesmo tempo: o operador bipa um código, o painel
+     abre, e ele então procura por nome e abre um card na lista. Trocar o global aqui fazia o
+     Salvar DAQUELE painel lançar o produto DESTE card — contagem no produto errado, sem
+     nenhum aviso. Cada card inline carrega o seu próprio produto. */
   caixa.innerHTML =
     '<div class="form-inline">' +
       '<div class="dim">' +
         (p.localizacao ? '📍 '+esc(p.localizacao)+' · ' : '') +
-        'Saldo no Bling agora: <b>'+(p.estoque!=null?esc(p.estoque):'—')+'</b>' +
+        /* Codex #521 (P2): `/buscar-produto` usa cache sem TTL, então este número pode ser de
+           horas atrás — e a divergência gravada nasce dele. O painel antigo já revalidava; o
+           card inline passa a fazer o mesmo, marcando enquanto confere. */
+        'Saldo no Bling agora: <b class="saldo-card">'+(p.estoque!=null?esc(p.estoque):'—')+'</b>' +
       '</div>' +
       '<div class="linha-qtd">' +
         '<input class="campo qtd" type="number" inputmode="numeric" min="0" step="1" placeholder="quantidade contada">' +
@@ -540,12 +575,36 @@ async function abrirNaLista(sku){
   const botao = caixa.querySelector('[data-salvar]');
   campo.focus();
   campo.addEventListener('keydown', ev => { if(ev.key === 'Enter'){ ev.preventDefault(); botao.click(); } });
+
+  /* revalida o saldo no Bling, sem travar o campo: ela já pode digitar enquanto isso */
+  (async () => {
+    let r = null;
+    try {
+      const rr = await fetch(MOD+'/contagem-saldo?sku='+encodeURIComponent(p.sku), {credentials:'same-origin'});
+      r = await rr.json().catch(()=>null);
+    } catch(e){ r = null; }
+    if(meu !== _seqAbrir || caixa.dataset.aberto !== '1') return;
+    const el = caixa.querySelector('.saldo-card');
+    if(!el) return;
+    if(r && r.ok && r.saldo != null){ p.estoque = r.saldo; el.textContent = r.saldo; }
+    else { el.insertAdjacentHTML('afterend', ' <span class="dim" style="font-size:10px">(pode estar desatualizado)</span>'); }
+  })();
   botao.addEventListener('click', () => salvarNaLista(p, caixa, campo, botao));
 }
 
 async function salvarNaLista(p, caixa, campo, botao){
   const msg = caixa.querySelector('.msg-inline');
-  const n = Number(String(campo.value || '').trim());
+  /* Codex #521 (P1): `Number('')` é 0, então clicar Salvar com o campo VAZIO gravava uma
+     contagem de zero — e zero é um número legítimo (produto que acabou), então nem o servidor
+     nem quem revisa depois consegue distinguir "contei zero" de "cliquei sem digitar".
+     Campo vazio não é contagem: é engano. */
+  const bruto = String(campo.value || '').trim();
+  if(bruto === ''){
+    msg.textContent = 'digite a quantidade contada antes de salvar';
+    campo.focus();
+    return;
+  }
+  const n = Number(bruto);
   if(!(isFinite(n) && n >= 0 && Math.floor(n) === n)){
     msg.textContent = 'quantidade inválida — use um número inteiro a partir de 0';
     campo.focus();
