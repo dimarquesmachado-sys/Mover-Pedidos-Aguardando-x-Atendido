@@ -62,7 +62,11 @@ function getUltimoResumo() { return ultimoResumo; }
 function getUltimoSync()   { return ultimoSync; }
 function getIdxStatus()    { return idxStatus; }
 
-async function indexarCatalogoCompleto() {
+/* 23/09 — MODO PROFUNDO (opcional), igual ao da Girassol: busca o detalhe de TODOS pra saber
+   quem é kit, porque a listagem pode dizer "S" pra algo com composição. Custa uma chamada por
+   produto, então não é o padrão — dispara com `?profundo=1`, fora do horário do galpão. */
+async function indexarCatalogoCompleto(opcoes) {
+  const profundo = !!(opcoes && opcoes.profundo);
   if (idxStatus.rodando) return;
   idxStatus = { rodando: true, feitos: 0, eans: 0, em: new Date().toISOString(), fim: null, erro: null };
   /* Codex #514 (P1): partir do índice em disco parecia "resiliente", mas isso fazia a
@@ -127,7 +131,7 @@ async function indexarCatalogoCompleto() {
         if (!it.id) continue;
         let eans = getPossiveisGtins(it).map(e => String(e).replace(/\D/g, '')).filter(e => e.length >= 8);
         let nome = it.nome, sku = it.codigo;
-        if (!eans.length) {                            // lista não trouxe GTIN → busca no detalhe
+        if (!eans.length || profundo) {                            // lista não trouxe GTIN → busca no detalhe
           const det = await produtoDetalhe(it.id);
           await sleep(PAUSA);
           if (det) { eans = getPossiveisGtins(det).map(e => String(e).replace(/\D/g, '')).filter(e => e.length >= 8); nome = det.nome || nome; sku = det.codigo || sku; }

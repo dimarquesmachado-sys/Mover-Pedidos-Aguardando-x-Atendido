@@ -33,9 +33,18 @@ function getUltimoResumo() { return ultimoResumo; }
 function getUltimoSync()   { return ultimoSync; }
 function getIdxStatus()    { return idxStatus; }
 
-async function indexarCatalogoCompleto() {
+/* 23/09 — MODO PROFUNDO (opcional). A varredura normal só busca o detalhe de quem não tem EAN
+   na listagem, e isso basta pra nome e foto. Mas NÃO basta pra saber se é kit: a listagem pode
+   dizer "S" pra algo que tem composição, e quem decide é `estrutura.componentes`, que muitas
+   vezes só vem no detalhe.
+   Na Girassol isso é metade do catálogo — então existe o modo profundo, que busca o detalhe de
+   TODOS. Custa ~9.000 chamadas a mais e mais de uma hora, por isso não é o padrão: o dono roda
+   quando o galpão está parado. */
+async function indexarCatalogoCompleto(opcoes) {
+  const profundo = !!(opcoes && opcoes.profundo);
   if (idxStatus.rodando) return;
   idxStatus = { rodando: true, feitos: 0, eans: 0, em: new Date().toISOString(), fim: null, erro: null };
+  idxStatus.profundo = profundo; idxStatus.kits = 0;
   /* Codex #514 (P1): partir do índice em disco parecia "resiliente", mas isso fazia a
      varredura completa NUNCA remover uma chave inválida gravada antes — exatamente o caso do
      NCM-como-EAN: o filtro novo (acima) parou de CRIAR essas chaves, mas uma reindexação total
@@ -99,7 +108,7 @@ async function indexarCatalogoCompleto() {
         let eans = getPossiveisGtins(it).map(e => String(e).replace(/\D/g, '')).filter(e => e.length >= 8);
         let nome = it.nome, sku = it.codigo;
         let det = null;   // usado fora do if pra ler o `formato` quando o detalhe foi buscado
-        if (!eans.length) {                            // lista não trouxe GTIN → busca no detalhe
+        if (!eans.length || profundo) {   // sem GTIN, ou modo profundo: precisa do detalhe
           det = await produtoDetalhe(it.id);
           await sleep(PAUSA);
           if (det) { eans = getPossiveisGtins(det).map(e => String(e).replace(/\D/g, '')).filter(e => e.length >= 8); nome = det.nome || nome; sku = det.codigo || sku; }
@@ -111,7 +120,14 @@ async function indexarCatalogoCompleto() {
            `formato === 'E'` é composição no Bling (já documentado em amb-drive-imagens), então
            a marca vai junto no índice e a busca esconde esses. Sem custo extra: o campo já vem
            na listagem que esta varredura faz. */
-        const ehKit = String((det && det.formato) || it.formato || '').toUpperCase() === 'E';
+        /* quem decide é a COMPOSIÇÃO; o `formato` é o reforço. `V` é pai de grade, que também
+           não tem estoque próprio. Sem o detalhe (modo normal), só o formato da listagem dá —
+           e é por isso que o modo profundo existe. */
+        const _alvo = det || it;
+        const _comps = (_alvo.estrutura && (_alvo.estrutura.componentes || _alvo.estrutura.itens))
+                    || _alvo.composicao || _alvo.componentes || [];
+        const _fmt = String((det && det.formato) || it.formato || '').toUpperCase();
+        const ehKit = (Array.isArray(_comps) && _comps.length > 0) || _fmt === 'E' || _fmt === 'V';
         /* 23/09 — a FOTO entra no índice. O dono pediu ver a imagem já na primeira lista de
            resultados, não só depois de clicar. Buscá-la ali custaria uma chamada ao Bling POR
            RESULTADO (até 30 por busca, a cada tecla) — inviável. Aqui vem de graça: a listagem
@@ -122,6 +138,7 @@ async function indexarCatalogoCompleto() {
            saber que não é um NCM sobrando de antes do conserto do coletor. Sem `ean: e` aqui,
            todo EAN-8 real que esta varredura gravasse seria apagado na primeira leitura
            seguinte, junto com o NCM. */
+        if (ehKit) idxStatus.kits++;
         if (eans.length) {
           for (const e of eans) { if (!novo[e]) idxStatus.eans++; novo[e] = { sku: sku || '', nome: nome || '', id: it.id, kit: ehKit, img: foto, ean: e }; }
         } else if (sku) {

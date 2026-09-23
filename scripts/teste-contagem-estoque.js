@@ -372,8 +372,21 @@ for (const [emp, arq] of Object.entries({
 
   /* a marca nasce na indexação — `formato === 'E'` é composição no Bling, já documentado em
      amb-drive-imagens (que preserva a estrutura justamente porque o Bling recusa sem ela) */
-  assert.ok(/const ehKit = String\(\(det && det\.formato\) \|\| it\.formato \|\| ''\)\.toUpperCase\(\) === 'E'/.test(ciclo),
-    'a indexação não marca kit — a busca não teria como escondê-los');
+  /* 23/09 — o `formato` da LISTAGEM não basta, e os três casos vieram do dono:
+     · a lista pode dizer "S" pra algo que tem composição;
+     · `V` é pai de grade, que também não tem estoque próprio;
+     · quem decide é `estrutura.componentes`.
+     A primeira versão deste assert travava a forma antiga (só `formato === 'E'`) e teria
+     reprovado esta melhoria — trava o comportamento. */
+  assert.ok(/const ehKit = \(Array\.isArray\(_comps\) && _comps\.length > 0\) \|\| _fmt === 'E' \|\| _fmt === 'V'/.test(ciclo),
+    'a indexação decide kit só pelo `formato` — a listagem pode dizer "S" pra algo com composição');
+
+  /* exercita a regra nos quatro casos */
+  const decide = (comps, fmt) => (Array.isArray(comps) && comps.length > 0) || fmt === 'E' || fmt === 'V';
+  assert.ok(decide([{ codigo: 'A' }], 'S'), 'kit que a lista diz "S" tem que ser pego pela composição');
+  assert.ok(decide([], 'E'), 'kit declarado tem que ser pego');
+  assert.ok(decide([], 'V'), 'pai de grade não tem estoque próprio — não é contável');
+  assert.ok(!decide([], 'S'), 'produto simples não pode ser barrado');
   assert.ok(/kit: ehKit/.test(ciclo), 'a marca não vai pro índice');
 
   assert.ok(/if \(it\.kit === true\) continue;/.test(cat6),
@@ -588,6 +601,35 @@ for (const [emp, arq] of Object.entries({
     assert.ok(/if \(!catalogoCompleto\)/.test(ciclo),
       emp + '/ciclo.js: estourar a trava de 500 páginas publica o índice truncado em vez de abortar');
   }
+}
+
+/* 23/09 — a TRAVA DO LANÇAMENTO é o ponto onde não pode passar: ela roda uma vez por
+   lançamento (não por produto do catálogo), então buscar o detalhe ali é barato — e é o único
+   lugar que alcança o kit que a listagem não denunciou. */
+{
+  const libK = fs.readFileSync(LIB, 'utf8');
+  assert.ok(/const det = await ctx\.blingGet\(`\/produtos\/\$\{it\.id\}`/.test(libK),
+    'a trava do lançamento só olha a listagem — kit com EAN passaria');
+  assert.ok(/estrutura\.componentes \|\| prod\.estrutura\.itens/.test(libK),
+    'a trava não olha a composição, que é quem decide de verdade');
+  assert.ok(/fmt === 'V'/.test(libK), 'o pai de grade passa como produto contável');
+  assert.ok(/componentes: comps\.slice\(0, 12\)/.test(libK),
+    'barra o kit sem dizer QUAIS produtos contar — a pessoa fica parada');
+}
+
+/* o modo profundo existe nas três, e NÃO é o padrão (custa ~9.000 chamadas na Girassol) */
+for (const [emp, arq] of Object.entries({
+  amb: 'amb-checkout-offline/ciclo.js',
+  girassol: 'girassol-backup-offline/ciclo.js',
+  good: 'good-checkout-offline/ciclo.js',
+})) {
+  const c = fs.readFileSync(path.join(raiz, arq), 'utf8');
+  assert.ok(/const profundo = !!\(opcoes && opcoes\.profundo\)/.test(c),
+    emp + ': não tem modo profundo — sem ele, a marca de kit depende de um campo que a listagem ' +
+    'nem sempre traz');
+  assert.ok(/if \(!eans\.length \|\| profundo\)/.test(c), emp + ': o modo profundo não busca o detalhe');
+  assert.ok(!/indexarCatalogoCompleto\(\{ *profundo: *true/.test(c),
+    emp + ': o modo profundo virou padrão — são ~9.000 chamadas a mais, com o galpão operando');
 }
 
 console.log('OK: contagem de estoque — registro interno (nunca escreve no Bling), sessão nas 4 rotas, quantidade validada e busca por nome sem gastar cota');
