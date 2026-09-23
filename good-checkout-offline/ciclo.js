@@ -65,7 +65,15 @@ function getIdxStatus()    { return idxStatus; }
 async function indexarCatalogoCompleto() {
   if (idxStatus.rodando) return;
   idxStatus = { rodando: true, feitos: 0, eans: 0, em: new Date().toISOString(), fim: null, erro: null };
-  const novo = lerIndiceEan();                       // parte do que já existe
+  /* Codex #514 (P1): partir do índice em disco parecia "resiliente", mas isso fazia a
+     varredura completa NUNCA remover uma chave inválida gravada antes — exatamente o caso do
+     NCM-como-EAN (lib/checkout/produtos.js): o filtro novo parou de CRIAR essas chaves, mas
+     uma reindexação total não apagava as que já estavam lá, porque elas nunca são revisitadas
+     (não são um EAN de produto nenhum). Como este laço varre o catálogo INTEIRO, uma varredura
+     que TERMINA (só grava `writeJson` se não abortou — ver abaixo) é a fotografia completa e
+     correta do catálogo: começa vazio. Se abortar, o objeto em memória é descartado e o índice
+     antigo em disco continua valendo — nada se perde. */
+  const novo = {};
   const PAUSA = Number(process.env.GOODBKP_PAUSA_MS || 700);
   try {
     let pagina = 1, tentativas = 0;
