@@ -149,9 +149,15 @@ async function indexarCatalogoCompleto(opcoes) {
            caminho vai ao Bling, que devolve o nome montado.
            Guardo id→nome de todo produto e o pai de cada variação; no FIM da varredura (quando
            já vi o pai, venha ele antes ou depois) componho "nome do pai + nome da variação".
-           Sem custo: nenhuma chamada a mais ao Bling. */
+           Sem custo: nenhuma chamada a mais ao Bling.
+           Codex (P1): no modo raso (sem GTIN não entra aqui — profundo=false e já tem EAN),
+           `det` nunca é buscado e `_alvo` é o item da LISTAGEM, que não traz
+           `variacao.produtoPai` (isso só vem no detalhe). A listagem traz o mesmo dado como
+           `idProdutoPai` solto — é o fallback abaixo, senão a variação com EAN nunca ganhava
+           o nome do pai na varredura padrão. */
         const _pai = (_alvo.variacao && _alvo.variacao.produtoPai) || null;
-        const _paiId = _pai && (_pai.id || _pai.idProduto || (typeof _pai === 'number' ? _pai : null));
+        const _paiId = (_pai && (_pai.id || _pai.idProduto || (typeof _pai === 'number' ? _pai : null)))
+                    || _alvo.idProdutoPai || it.idProdutoPai || null;
         if (it.id) _nomePorId[it.id] = nome || '';
         if (_paiId) _paiDeSku[sku || ('id:' + it.id)] = _paiId;
         /* Codex #514 (P1, 2ª leva): `lerIndiceEan()` só preserva uma chave de 8 dígitos na
