@@ -285,11 +285,21 @@ for (const [emp, arq] of Object.entries({
   assert.ok(/if\(recomecar !== false\)\{ _seqLista\+\+;/.test(js4) && /if\(minhaLista !== _seqLista\) return;/.test(js4),
     'ajustar dois cartões juntos dispara duas recargas que se misturam no mesmo array');
 
-  /* nome cortado: o `title` não existe pra quem usa o dedo, e esta tela é de celular de galpão */
+  /* O NOME DO PRODUTO NÃO PODE SER CORTADO, de jeito nenhum. Com prefixo longo igual — "Lixa
+     4 Pol. 100mm Diamantada … GRÃO:50" e "… GRÃO:3000" — truncar esconde justamente o que
+     diferencia, e o `title` não existe pra quem usa o dedo.
+     A regra é essa, não uma forma específica de CSS: a primeira versão deste assert EXIGIA
+     `-webkit-line-clamp:2`, que era o próprio corte; quando ele foi removido de vez, o teste
+     passou a reprovar o conserto. Teste que trava a implementação em vez do comportamento
+     envelhece contra quem está melhorando o código. */
   const css4 = /<style>([\s\S]*?)<\/style>/.exec(html)[1];
-  assert.ok(/-webkit-line-clamp:2/.test(css4) && !/\.item \.nome\{[^}]*white-space:nowrap/.test(css4),
-    'o nome longo aparece só truncado — no celular não há mouse pra revelar o title, e quem ' +
-    'confere precisa LER o nome pra saber que produto contou');
+  const regraNome = /\.item \.nome\{([^}]*)\}/.exec(css4);
+  assert.ok(regraNome, 'não achei a regra do nome do produto');
+  for (const corte of ['line-clamp', 'white-space:nowrap', 'text-overflow:ellipsis']) {
+    assert.ok(!regraNome[1].includes(corte),
+      'o nome do produto é cortado por `' + corte + '` — com prefixo longo igual, some justamente ' +
+      'o que diferencia um produto do outro, e no celular não há mouse pra revelar o title');
+  }
 }
 
 /* 22/09 — DIGITAR A QUANTIDADE NA LINHA E EXCLUIR, pedidos do dono depois de usar a tela:
@@ -424,6 +434,43 @@ for (const [emp, arq] of Object.entries({
   assert.ok(filtra('https://bling.com/f.jpg'), 'url http(s) devia passar');
   assert.ok(!filtra('javascript:alert(1)'), 'javascript: devia ser recusado');
   assert.ok(!filtra(''), 'vazio devia ser recusado');
+}
+
+/* 23/09 — o LOGO da Girassol na tela, pedido do dono. É a MESMA imagem do painel, copiada de
+   lá em vez de recriada: duas versões da marca em telas irmãs é o tipo de coisa que ninguém
+   nota até ficar errada numa delas. */
+{
+  const pega = (arq) => [...fs.readFileSync(path.join(raiz, arq), 'utf8')
+    .matchAll(/base64,([A-Za-z0-9+/=]{400,})/g)].map(m => m[1]);
+  const naContagem = pega('girassol-backup-offline/contagem.html');
+  const noPainel = pega('girassol-backup-offline/painel.html');
+  assert.ok(naContagem.length > 0, 'a tela de contagem não tem o logo');
+  assert.ok(naContagem.every(img => noPainel.includes(img)),
+    'o logo da contagem não é o mesmo do painel — duas versões da marca divergem sem ninguém notar');
+}
+
+/* 23/09 (Codex #512) — dois erros meus no PR que existia justamente pra consertar o visual. */
+{
+  const cssT = /<style>([\s\S]*?)<\/style>/.exec(html)[1].replace(/\/\*[\s\S]*?\*\//g, '');
+  const corpo = html.slice(html.indexOf('<body>'));
+
+  /* `font:500 19px/1.2 inherit` é inválido: `inherit` é palavra-chave de valor único e não
+     entra no atalho junto de peso e tamanho. O navegador descarta a declaração INTEIRA — e o
+     campo herói voltava ao tamanho padrão do input, que é o "campo pequeno" reclamado. */
+  const atalhos = [...cssT.matchAll(/font:([^;}]*)/g)].map(m => m[1].trim());
+  const invalidos = atalhos.filter(v => v.includes('inherit') && v !== 'inherit');
+  assert.deepStrictEqual(invalidos, [],
+    'atalho `font` com `inherit` misturado a outros valores: ' + invalidos.join(' | ') +
+    ' — o navegador descarta a regra toda e o campo perde tamanho e peso');
+
+  /* o aviso de que o Bling NÃO muda tem que vir antes de qualquer ação: é o que impede o
+     mal-entendido mais caro desta tela. Empurrado pra baixo dos resultados, uma busca por nome
+     desenha até 30 produtos antes dele e ninguém lê. */
+  assert.ok(corpo.indexOf('nota-interna') < corpo.indexOf('busca-hero'),
+    'o aviso de que o saldo do Bling não muda ficou depois da busca — alguém contaria achando ' +
+    'que ajustou o estoque');
+  assert.ok(/\.nota-interna\{[^}]*girassol/.test(cssT),
+    'o aviso perdeu o destaque e virou texto apagado');
 }
 
 console.log('OK: contagem de estoque — registro interno (nunca escreve no Bling), sessão nas 4 rotas, quantidade validada e busca por nome sem gastar cota');
