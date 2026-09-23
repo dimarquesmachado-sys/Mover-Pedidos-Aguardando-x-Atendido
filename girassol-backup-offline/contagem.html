@@ -148,6 +148,18 @@
   .chip{font:inherit;font-size:12px;padding:4px 11px;border-radius:20px;cursor:pointer;
         background:var(--carta2);color:var(--calmo);border:1px solid var(--linha)}
   .chip.on{background:var(--girassol-fraco);color:var(--girassol);border-color:var(--girassol)}
+  /* formulário que abre dentro do resultado */
+  .res{margin:8px 0}
+  .res .lista-nome{margin:0}
+  .abre:empty{display:none}
+  .form-inline{background:var(--carta2);border:1px solid var(--linha);border-top:0;
+               border-radius:0 0 12px 12px;padding:11px 13px;margin-top:-1px}
+  .linha-qtd{display:flex;gap:9px;align-items:center;margin-top:8px}
+  .linha-qtd .campo.qtd{width:150px;font-size:24px}
+  .msg-inline{margin-top:7px;min-height:1em}
+  .ok-inline{background:rgba(61,220,132,.13);color:var(--confere);font-size:13px;font-weight:600;
+             padding:8px 13px;border-radius:0 0 12px 12px;margin-top:-1px}
+  @media (max-width:560px){ .linha-qtd{flex-wrap:wrap} .linha-qtd .campo.qtd{width:100%} }
 
   /* ── contagens do dia ── */
   .item{display:flex;align-items:center;gap:13px;background:var(--carta);
@@ -201,7 +213,7 @@
       <span class="logo-girassol" role="img" aria-label="Magazine Girassol"></span>
       <h1>Contagem de estoque</h1>
       <span class="empresa">Magazine Girassol</span>
-      <span class="build">c17</span>
+      <span class="build">c18</span>
     </div>
   </header>
 
@@ -400,6 +412,7 @@ async function buscarPorNome(q, veioDeCodigo, offset, acumulado){
         : '') +
     '</div>' +
     lista.map(it =>
+      '<div class="res" data-res="'+esc(it.sku)+'">' +
       '<button class="lista-nome" data-sku="'+esc(it.sku)+'">' +
         (it.img ? '<img class="thumb" src="'+esc(it.img)+'" alt="" loading="lazy">'
                 : '<span class="thumb semfoto-mini">sem<br>foto</span>') +
@@ -408,7 +421,9 @@ async function buscarPorNome(q, veioDeCodigo, offset, acumulado){
           '<span class="sku-linha"><span class="sku-tag">SKU</span> '+esc(it.sku)+
             (it.ean ? '<span class="ean">código de barras '+esc(it.ean)+'</span>' : '')+'</span>' +
         '</span>' +
-      '</button>').join('') +
+      '</button>' +
+        '<div class="abre" data-abre="'+esc(it.sku)+'"></div>' +
+      '</div>').join('') +
     (falta > 0 ? '<button class="btn sec" id="btVerMais" style="width:100%;margin-top:8px">ver mais '+Math.min(falta, PASSOS[Math.min(_nPassos+1, PASSOS.length-1)])+' (faltam '+falta+')</button>' : '');
 
   alvo.querySelectorAll('.chip[data-modo]').forEach(b => {
@@ -431,9 +446,94 @@ async function buscarPorNome(q, veioDeCodigo, offset, acumulado){
   });
   /* por addEventListener, não por onclick montado com o SKU: foi o XSS que o Codex achou no
      painel (#510), e aqui o SKU vem de dado gravado igual. */
+  /* 23/09 — o clique ABRE O CARD ali mesmo, em vez de apagar a lista e trocar de tela. O dono:
+     "some com todos os outros e me mostra só o produto que cliquei". Num inventário ele desce
+     a lista contando um atrás do outro; perder o lugar a cada item custa tempo e faz recontar
+     pra achar onde parou. */
   alvo.querySelectorAll('.lista-nome').forEach(b => {
-    b.addEventListener('click', () => abrirPorSku(b.dataset.sku));
+    b.addEventListener('click', () => abrirNaLista(b.dataset.sku));
   });
+}
+
+/* abre o formulário DENTRO do resultado clicado, sem mexer no resto da lista */
+async function abrirNaLista(sku){
+  const caixa = document.querySelector('.abre[data-abre="' + (window.CSS && CSS.escape ? CSS.escape(sku) : sku) + '"]');
+  if(!caixa) return;
+
+  /* clicar de novo no mesmo fecha — e fechar não pode perder o que ele digitou sem avisar */
+  if(caixa.dataset.aberto === '1'){
+    const campo = caixa.querySelector('.campo.qtd');
+    if(campo && campo.value.trim() !== '' && !confirm('Fechar sem salvar a quantidade digitada?')) return;
+    caixa.innerHTML = ''; caixa.dataset.aberto = '';
+    return;
+  }
+  /* só um aberto por vez: dois formulários na tela convidam a digitar no errado */
+  document.querySelectorAll('.abre[data-aberto="1"]').forEach(c => { c.innerHTML = ''; c.dataset.aberto = ''; });
+
+  caixa.dataset.aberto = '1';
+  caixa.innerHTML = '<div class="dim" style="padding:8px 2px">buscando no Bling…</div>';
+
+  const meu = ++_seqBusca;
+  let d = null;
+  try {
+    const r = await fetch(MOD+'/buscar-produto?q='+encodeURIComponent(sku), {credentials:'same-origin'});
+    d = await r.json().catch(()=>null);
+  } catch(e){ d = null; }
+  if(caixa.dataset.aberto !== '1') return;        // ele fechou enquanto carregava
+  if(!(d && d.ok && d.produto)){
+    caixa.innerHTML = '<div class="aviso">Não consegui abrir esse produto agora. Tente de novo.</div>';
+    return;
+  }
+  const p = d.produto;
+  ESCOLHIDO = p;
+  caixa.innerHTML =
+    '<div class="form-inline">' +
+      '<div class="dim">' +
+        (p.localizacao ? '📍 '+esc(p.localizacao)+' · ' : '') +
+        'Saldo no Bling agora: <b>'+(p.estoque!=null?esc(p.estoque):'—')+'</b>' +
+      '</div>' +
+      '<div class="linha-qtd">' +
+        '<input class="campo qtd" type="number" inputmode="numeric" min="0" step="1" placeholder="quantidade contada">' +
+        '<button class="btn" data-salvar="1">Salvar</button>' +
+      '</div>' +
+      '<div class="msg-inline dim"></div>' +
+    '</div>';
+
+  const campo = caixa.querySelector('.campo.qtd');
+  const botao = caixa.querySelector('[data-salvar]');
+  campo.focus();
+  campo.addEventListener('keydown', ev => { if(ev.key === 'Enter'){ ev.preventDefault(); botao.click(); } });
+  botao.addEventListener('click', () => salvarNaLista(p, caixa, campo, botao));
+}
+
+async function salvarNaLista(p, caixa, campo, botao){
+  const msg = caixa.querySelector('.msg-inline');
+  const n = Number(String(campo.value || '').trim());
+  if(!(isFinite(n) && n >= 0 && Math.floor(n) === n)){
+    msg.textContent = 'quantidade inválida — use um número inteiro a partir de 0';
+    campo.focus();
+    return;
+  }
+  botao.disabled = true; campo.disabled = true;
+  msg.textContent = 'salvando…';
+  let d = null;
+  try {
+    const r = await fetch(MOD+'/contagem-lancar', {
+      method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ sku: p.sku, nome: p.nome, ean: p.ean, img: p.img,
+                             contado: n, saldo_bling: p.estoque })
+    });
+    d = await r.json().catch(()=>null);
+  } catch(e){ d = null; }
+  if(!(d && d.ok)){
+    /* não dizer "salvo" sem ter salvo: ele segue pro próximo item e a contagem se perde */
+    msg.textContent = (d && d.erro) || 'não consegui salvar — a contagem NÃO foi registrada';
+    botao.disabled = false; campo.disabled = false;
+    return;
+  }
+  caixa.innerHTML = '<div class="ok-inline">✓ contado '+n+'</div>';
+  caixa.dataset.aberto = '';
+  carregarHoje();
 }
 
 async function abrirPorSku(sku){

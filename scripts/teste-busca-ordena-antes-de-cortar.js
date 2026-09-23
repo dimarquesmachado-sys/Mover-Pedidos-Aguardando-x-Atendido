@@ -93,5 +93,29 @@ const pagina = async (off, lim) => {
   assert.ok(/d\.total > PASSOS\[0\]/.test(js),
     'o seletor aparece mesmo com lista curta — botão que não muda nada é ruído');
 
-  console.log('OK: busca por nome ordena ANTES de cortar; tudo por padrao, em partes 50/100/200 por opcao');
+  /* 23/09 — o clique ABRE O CARD na própria lista. Antes ele apagava `#resultado` e trocava
+     de tela: "some com todos os outros e me mostra só o produto que cliquei". Num inventário
+     ele desce a lista contando um atrás do outro, e perder o lugar a cada item custa tempo e
+     faz recontar pra achar onde parou. */
+  assert.ok(/function abrirNaLista\(sku\)/.test(js),
+    'o clique não abre o formulário na lista — ainda troca de tela a cada produto');
+  assert.ok(/b\.addEventListener\('click', \(\) => abrirNaLista\(b\.dataset\.sku\)\)/.test(js),
+    'o resultado da busca ainda chama o caminho que apaga a lista');
+  assert.ok(/data-abre=/.test(js), 'não há espaço no card pra o formulário abrir');
+
+  /* só um aberto por vez: dois formulários na tela convidam a digitar no errado */
+  assert.ok(/querySelectorAll\('\.abre\[data-aberto="1"\]'\)/.test(js),
+    'abre vários formulários ao mesmo tempo');
+
+  /* fechar não pode perder o que foi digitado sem avisar */
+  assert.ok(/confirm\('Fechar sem salvar a quantidade digitada\?'\)/.test(js),
+    'fechar o card descarta a quantidade digitada em silêncio');
+
+  /* e salvar não pode dizer "ok" sem ter salvo */
+  assert.ok(/'não consegui salvar — a contagem NÃO foi registrada'/.test(js),
+    'a falha ao salvar não é mostrada — a pessoa segue pro próximo e a contagem se perde');
+  assert.ok(/CSS\.escape\(sku\)/.test(js),
+    'o SKU entra num seletor CSS sem escapar — SKU com caractere especial quebra a abertura');
+
+  console.log('OK: busca ordena antes de cortar; tudo por padrao; e o card abre NA LISTA sem trocar de tela');
 })().catch(e => { console.error(e); process.exit(1); });
