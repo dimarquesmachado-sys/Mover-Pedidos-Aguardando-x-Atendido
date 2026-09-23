@@ -40,7 +40,7 @@ let _not = {
 const hojeMenos = d => new Date(Date.now() - d * 864e5).toISOString().slice(0, 10);
 
 function criarNoturna(ctx) {
-  const { mlBillingSync, backfillVendas, mlSyncFees, varrerCancelados, canarioCron, podarExpedicao,
+  const { mlBillingSync, backfillVendas, backfillEstado, mlSyncFees, varrerCancelados, canarioCron, podarExpedicao,
           coletarDevolucoes, coletarCarteira, coletarAds, conferirMarketplaces, coletarFinanceiroTikTok, completarTarifaTikTok, VERSAO, validarSessao, ehAdmin, json } = ctx;
   const dorme = ms => new Promise(r => setTimeout(r, ms));
 
@@ -50,7 +50,11 @@ function criarNoturna(ctx) {
     _not.etapas.push(reg);
     try {
       const r = await fn();
-      reg.estado = 'ok';
+      // Codex (P2): retorno 'PULADO: ...' virava 'ok' aqui, e o resumo final só olha
+      // 'erro' — a noite dizia "tudo concluído" sem ter rodado a etapa. Agora fica
+      // como estado próprio, visível no resumo.
+      const pulada = typeof r === 'string' && r.startsWith('PULADO:');
+      reg.estado = pulada ? 'pulado' : 'ok';
       reg.detalhe = (typeof r === 'string') ? r : (r ? JSON.stringify(r).slice(0, 300) : 'ok');
     } catch (e) {
       reg.estado = 'erro';
@@ -58,7 +62,8 @@ function criarNoturna(ctx) {
       console.log('[NOTURNA] ✗ ' + nome + ': ' + reg.detalhe);
     }
     reg.ms = Date.now() - t0;
-    console.log('[NOTURNA] ' + (reg.estado === 'ok' ? '✓' : '✗') + ' ' + nome + ' (' + Math.round(reg.ms / 1000) + 's) ' + reg.detalhe.slice(0, 120));
+    const icone = reg.estado === 'ok' ? '✓' : (reg.estado === 'pulado' ? '⏭️' : '✗');
+    console.log('[NOTURNA] ' + icone + ' ' + nome + ' (' + Math.round(reg.ms / 1000) + 's) ' + reg.detalhe.slice(0, 120));
     return reg;
   }
 
@@ -167,6 +172,17 @@ function criarNoturna(ctx) {
 
     // 2. histórico dos últimos 3 dias, já com o billing fresco
     await etapa('backfill dos últimos 3 dias', async () => {
+      /* 05/09 — A NOTURNA CEDE. Ela roda às 3:30 e faz o backfill dos últimos 3 dias; quando
+         o dono está rodando um MÊS de histórico à noite (o único horário em que pode, por
+         causa da cota do Bling), ela assumia o estado e matava a rodada dele no meio. Hoje
+         isso aconteceu: julho morreu aos 20 minutos porque a noturna começou. Ela roda todo
+         dia — o mês de histórico não. Havendo backfill em curso, esta etapa se declara
+         pulada e a noite segue nas outras. */
+      const _est = (typeof backfillEstado === 'function') ? backfillEstado() : null;
+      if (_est && _est.rodando) {
+        console.log('[noturna] backfill de ' + _est.de + ' a ' + _est.ate + ' em curso — pulei os 3 dias pra não atropelar');
+        return 'PULADO: backfill manual em curso (' + _est.de + ' a ' + _est.ate + ')';
+      }
       const rB = await backfillVendas(hojeMenos(3), hojeMenos(0), 'girassol');
       // Codex (#105): o retorno era ignorado — se a trava do canário adiasse o backfill, a
       // etapa dizia "concluída" e a única atualização diária do histórico sumia em silêncio.
@@ -281,7 +297,11 @@ function criarNoturna(ctx) {
     }
 
     const erros = _not.etapas.filter(e => e.estado === 'erro');
-    _not.resumo = erros.length ? ('⚠️ ' + erros.length + ' etapa(s) com erro: ' + erros.map(e => e.nome).join(', ')) : '✅ todas as etapas concluídas';
+    const pulados = _not.etapas.filter(e => e.estado === 'pulado');
+    const partesResumo = [];
+    if (erros.length) partesResumo.push(erros.length + ' etapa(s) com erro: ' + erros.map(e => e.nome).join(', '));
+    if (pulados.length) partesResumo.push(pulados.length + ' etapa(s) pulada(s): ' + pulados.map(e => e.nome).join(', '));
+    _not.resumo = partesResumo.length ? ('⚠️ ' + partesResumo.join(' · ')) : '✅ todas as etapas concluídas';
     _not.rodando = false;
     _not.fim = new Date().toISOString();
     console.log('[NOTURNA] ═══ fim — ' + _not.resumo + ' ═══');
