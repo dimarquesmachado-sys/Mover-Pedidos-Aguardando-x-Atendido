@@ -53,6 +53,9 @@
     --difere:#ff6b6b;
   }
   *{box-sizing:border-box}
+  /* a barra grudada precisa que a rolagem pare um pouco antes, senão o item que a pessoa
+     clica pode ficar escondido atrás dela */
+  html{scroll-padding-top:86px}
   body{margin:0;background:var(--noite);color:var(--texto);
        font:16px/1.55 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Inter,sans-serif;
        padding:0 16px 72px;-webkit-font-smoothing:antialiased}
@@ -74,9 +77,15 @@
   .build{font-size:11px;color:var(--calmo);opacity:.6;margin-left:auto}
 
   /* ── a busca, que é o herói ── */
-  .busca-hero{display:flex;align-items:center;gap:10px;margin:18px 0 8px;
+  /* 23/09 — A BARRA FICA FIXA NO ALTO. Pedido do dono, e o motivo é o fluxo dele: com "tudo"
+     por padrão a lista pode ter centenas de itens, e ele desce lançando um a um. Ter que rolar
+     lá pra cima pra trocar a busca quebra a sequência.
+     O fundo é opaco (não translúcido) porque os cartões passam POR BAIXO dela ao rolar. */
+  .busca-hero{position:sticky;top:0;z-index:20;
+              display:flex;align-items:center;gap:10px;margin:18px 0 8px;
               background:var(--carta);border:1.5px solid var(--linha);
-              border-radius:14px;padding:0 14px;transition:border-color .12s}
+              border-radius:14px;padding:0 14px;transition:border-color .12s;
+              box-shadow:0 6px 18px rgba(5,8,18,.55)}
   .busca-hero:focus-within{border-color:var(--girassol);
                            box-shadow:0 0 0 4px var(--girassol-fraco)}
   .busca-icone{font-size:20px;opacity:.75;flex:none}
@@ -213,7 +222,7 @@
       <span class="logo-girassol" role="img" aria-label="Magazine Girassol"></span>
       <h1>Contagem de estoque</h1>
       <span class="empresa">Magazine Girassol</span>
-      <span class="build">c18</span>
+      <span class="build">c19</span>
     </div>
   </header>
 

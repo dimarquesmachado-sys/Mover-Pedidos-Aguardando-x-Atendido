@@ -139,5 +139,20 @@ const pagina = async (off, lim) => {
   assert.ok(/carregarHoje\(\)/.test(corpoSalvar[0]),
     'salvar não atualiza a lista de contagens do dia');
 
-  console.log('OK: busca ordena antes de cortar; tudo por padrao; card abre NA LISTA; e salvar NAO mexe na lista');
+  /* 23/09 — a barra de busca fica FIXA no alto. Pedido do dono, e o motivo é o fluxo: com
+     "tudo" por padrão a lista pode ter centenas de itens e ele desce lançando um a um; rolar
+     de volta pro topo pra trocar a busca quebra a sequência. */
+  const cssT = /<style>([\s\S]*?)<\/style>/.exec(html)[1];
+  const regraBusca = /\.busca-hero\{([^}]*)\}/.exec(cssT);
+  assert.ok(regraBusca, 'sumiu a regra da barra de busca');
+  assert.ok(/position:sticky/.test(regraBusca[1]),
+    'a barra de busca não fica fixa — numa lista longa ele teria que rolar até o topo a cada troca');
+  assert.ok(/z-index:\s*\d+/.test(regraBusca[1]),
+    'a barra fixa sem z-index fica ATRÁS dos cartões que passam por baixo');
+  assert.ok(/background:var\(--carta\)/.test(regraBusca[1]),
+    'a barra fixa precisa de fundo opaco — os cartões passam por baixo dela');
+  assert.ok(/scroll-padding-top/.test(cssT),
+    'sem scroll-padding o item clicado pode ficar escondido atrás da barra fixa');
+
+  console.log('OK: ordena antes de cortar; tudo por padrao; card abre NA LISTA; salvar nao mexe na lista; busca fixa no alto');
 })().catch(e => { console.error(e); process.exit(1); });
