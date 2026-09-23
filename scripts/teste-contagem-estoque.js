@@ -382,4 +382,28 @@ for (const [emp, arq] of Object.entries({
     'falha na consulta bloquearia o lançamento de um produto legítimo');
 }
 
+/* 22/09 — A FOTO NA LINHA das contagens, pedido do dono. Num inventário de lixas com nomes
+   quase iguais, a imagem distingue mais rápido que ler o nome inteiro.
+   Guardada NO LANÇAMENTO, não buscada na hora de listar: buscá-la por linha custaria uma
+   chamada ao Bling POR ITEM da lista, e a cota é da conta. A tela já tem a URL na mão quando
+   o produto foi escolhido. */
+{
+  const lib7 = fs.readFileSync(LIB, 'utf8');
+  const js7 = /<script>([\s\S]*?)<\/script>/.exec(html)[1];
+
+  assert.ok(/img: produto\.img/.test(js7), 'a tela não manda a foto ao lançar');
+  assert.ok(/class="thumb"/.test(js7), 'a linha das contagens não mostra a foto');
+
+  /* só http(s): outro esquema não tem o que fazer num <img> a não ser surpresa */
+  const guarda = /img: \(\(\) => \{[\s\S]*?\}\)\(\),/.exec(lib7);
+  assert.ok(guarda, 'o lançamento não guarda a foto');
+  assert.ok(/\^https\?:\\\/\\\//.test(guarda[0]),
+    'a foto é guardada sem checar o esquema da URL');
+
+  const filtra = (u) => /^https?:\/\//i.test(String(u||'').trim());
+  assert.ok(filtra('https://bling.com/f.jpg'), 'url http(s) devia passar');
+  assert.ok(!filtra('javascript:alert(1)'), 'javascript: devia ser recusado');
+  assert.ok(!filtra(''), 'vazio devia ser recusado');
+}
+
 console.log('OK: contagem de estoque — registro interno (nunca escreve no Bling), sessão nas 4 rotas, quantidade validada e busca por nome sem gastar cota');

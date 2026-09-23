@@ -83,6 +83,9 @@
   /* contagens de hoje — CARTÃO por item, com os botões do lado (pedido do dono) */
   .item{display:flex;align-items:center;gap:12px;background:var(--card2);
         border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:8px 0}
+  .item .thumb{width:46px;height:46px;border-radius:8px;background:#0d1220;flex:none;object-fit:contain}
+  .item .semfoto-mini{display:flex;align-items:center;justify-content:center;color:var(--mut);
+                      font-size:9px;line-height:1.1;text-align:center}
   .item .info{flex:1;min-width:0}
   /* Codex #511 (P2): nowrap + ellipsis deixava o nome longo só como "Luminária Chão Piso…", e
      o `title` só aparece com o mouse parado em cima — no celular do galpão, que é onde esta
@@ -124,7 +127,7 @@
   <header class="top">
     <div class="marca"><span class="logo">📦</span>
       <h1>Contagem de Estoque · <b>Magazine Girassol</b></h1>
-      <span class="build">c9</span>
+      <span class="build">c10</span>
     </div>
   </header>
 
@@ -402,6 +405,7 @@ async function lancarDeVerdade(){
     const r = await fetch(MOD+'/contagem-lancar', {
       method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ sku: produto.sku, nome: produto.nome, ean: produto.ean,
+                             img: produto.img,   // 22/09: a foto viaja junto pra aparecer na lista
                              contado: n, saldo_bling: produto.estoque })
     });
     d = await r.json().catch(()=>null);
@@ -577,6 +581,11 @@ async function carregarHoje(recomecar){
       const classeDif = dif == null ? 'sem' : (dif === 0 ? 'zero' : 'nao');
       const textoDif = dif == null ? 'sem saldo' : (dif === 0 ? 'confere' : (dif > 0 ? '+'+dif : String(dif)));
       return '<div class="item" data-id="'+esc(l.id||'')+'">' +
+        /* 22/09 — a FOTO na linha, pedido do dono: num inventário de lixas com nomes quase
+           iguais, a imagem distingue mais rápido que ler o nome inteiro. Vem guardada do
+           lançamento — buscá-la aqui custaria uma chamada ao Bling POR LINHA da lista. */
+        (l.img ? '<img class="thumb" src="'+esc(l.img)+'" alt="" loading="lazy">'
+               : '<div class="thumb semfoto-mini">sem<br>foto</div>') +
         '<div class="info">' +
           '<div class="nome" title="'+esc(l.nome)+'">'+esc(l.nome || '(sem nome)')+'</div>' +
           '<div class="meta">'+esc(l.sku)+' · '+esc(horaSP(l.quando))+' · '+esc(l.quem||'') +
