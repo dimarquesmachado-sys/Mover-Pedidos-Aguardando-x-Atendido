@@ -50,7 +50,11 @@ function criarNoturna(ctx) {
     _not.etapas.push(reg);
     try {
       const r = await fn();
-      reg.estado = 'ok';
+      // Codex (P2): retorno 'PULADO: ...' virava 'ok' aqui, e o resumo final só olha
+      // 'erro' — a noite dizia "tudo concluído" sem ter rodado a etapa. Agora fica
+      // como estado próprio, visível no resumo.
+      const pulada = typeof r === 'string' && r.startsWith('PULADO:');
+      reg.estado = pulada ? 'pulado' : 'ok';
       reg.detalhe = (typeof r === 'string') ? r : (r ? JSON.stringify(r).slice(0, 300) : 'ok');
     } catch (e) {
       reg.estado = 'erro';
@@ -58,7 +62,8 @@ function criarNoturna(ctx) {
       console.log('[NOTURNA] ✗ ' + nome + ': ' + reg.detalhe);
     }
     reg.ms = Date.now() - t0;
-    console.log('[NOTURNA] ' + (reg.estado === 'ok' ? '✓' : '✗') + ' ' + nome + ' (' + Math.round(reg.ms / 1000) + 's) ' + reg.detalhe.slice(0, 120));
+    const icone = reg.estado === 'ok' ? '✓' : (reg.estado === 'pulado' ? '⏭️' : '✗');
+    console.log('[NOTURNA] ' + icone + ' ' + nome + ' (' + Math.round(reg.ms / 1000) + 's) ' + reg.detalhe.slice(0, 120));
     return reg;
   }
 
@@ -284,7 +289,11 @@ function criarNoturna(ctx) {
     }
 
     const erros = _not.etapas.filter(e => e.estado === 'erro');
-    _not.resumo = erros.length ? ('⚠️ ' + erros.length + ' etapa(s) com erro: ' + erros.map(e => e.nome).join(', ')) : '✅ todas as etapas concluídas';
+    const pulados = _not.etapas.filter(e => e.estado === 'pulado');
+    const partesResumo = [];
+    if (erros.length) partesResumo.push(erros.length + ' etapa(s) com erro: ' + erros.map(e => e.nome).join(', '));
+    if (pulados.length) partesResumo.push(pulados.length + ' etapa(s) pulada(s): ' + pulados.map(e => e.nome).join(', '));
+    _not.resumo = partesResumo.length ? ('⚠️ ' + partesResumo.join(' · ')) : '✅ todas as etapas concluídas';
     _not.rodando = false;
     _not.fim = new Date().toISOString();
     console.log('[NOTURNA] ═══ fim — ' + _not.resumo + ' ═══');
