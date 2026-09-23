@@ -1665,9 +1665,29 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
       // Codex (#105): mão dupla — se o canário está consultando o Bling AGORA, o backfill
       // espera. Sem isto, iniciar um por cima recriava o 429 que acabamos de evitar.
       if (_canario.rodando) { json(res, 200, { ok: false, msg: 'o canário está conferindo o Bling agora (desde ' + _canario.desde + ') — espere alguns segundos e tente de novo' }); return true; }
-      if (_backfill.rodando) { json(res, 200, { ok: false, msg: 'já tem um backfill rodando — acompanhe em /backfill-status', status: _backfill }); return true; }
       const de = String((urlObj.searchParams && urlObj.searchParams.get('de')) || '2026-01-01').slice(0, 10);
       const ate = String((urlObj.searchParams && urlObj.searchParams.get('ate')) || new Date().toISOString().slice(0, 10)).slice(0, 10);
+      /* 23/09 — ECO DA PRÓPRIA CHAMADA. O dono reclamou 3×: ao abrir a URL o
+         navegador faz DUAS requisições; a primeira dispara e a segunda via o
+         estado já `rodando`, respondendo "já tem um backfill rodando" — sobre
+         o backfill que ELE MESMO acabou de criar. Parecia recusa, e chegamos a
+         investigar um fantasma por causa disso.
+      
+         Mesmo período + começou há poucos segundos = eco: responde iniciado.
+         Outro período, ou rodada antiga, continua recusando de verdade.
+      
+         ⚠️ Veio do PR #330 (04/09), que ficou 562 commits atrás e não dava mais
+         merge. Refeito sobre o código de hoje — e aqui `de`/`ate` nasciam DEPOIS
+         desta checagem: copiar daria `de is not defined`. */
+      if (_backfill.rodando) {
+        const mesmoPeriodo = _backfill.de === de && _backfill.ate === ate;
+        const segs = _backfill.inicio
+          ? (Date.now() - Date.parse(_backfill.inicio)) / 1000 : 1e9;
+        if (mesmoPeriodo && segs < 30) {
+          return json(res, 200, { ok: true, msg: 'backfill iniciado', de, ate });
+        }
+        json(res, 200, { ok: false, msg: 'já tem um backfill rodando — acompanhe em /backfill-status', status: _backfill }); return true;
+      }
       backfillVendas(de, ate, 'girassol');   // NÃO await — roda em background
       json(res, 200, { ok: true, msg: '✅ backfill iniciado em background (só Girassol). Acompanhe em /backfill-status. Ele deleta o período antes e regrava, então pode rodar de novo sem duplicar.', de, ate });
       return true;
