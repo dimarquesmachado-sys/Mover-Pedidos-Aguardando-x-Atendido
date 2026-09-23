@@ -822,28 +822,6 @@ function rotasDiagnostico(ctx) {
       return true;
     }
 
-    // DEBUG: dumpa o produto CRU por SKU — vê formato + estrutura/componentes da composição
-    // uso: /girassol-backup-offline/debug-produto/{SKU}
-    if (method === 'GET' && p.startsWith('/girassol-backup-offline/debug-produto/')) {
-      if (!ehAdmin((urlObj.searchParams && urlObj.searchParams.get('op')) || '')) { json(res, 403, { ok: false, erro: 'apenas admin (use ?op=SEU_NOME)' }); return true; }
-      const sku = decodeURIComponent(p.split('/').filter(Boolean).pop() || '');
-      const lista = await blingGet(`/produtos?codigo=${encodeURIComponent(sku)}&limite=1`);
-      const item = lista.data && lista.data.data && lista.data.data[0];
-      let raw = null, detStatus = null;
-      if (item && item.id) { const r = await blingGet(`/produtos/${item.id}`); detStatus = r.status; raw = (r.data && r.data.data) || null; await sleep(PAUSA_MS); }
-      json(res, 200, {
-        sku,
-        da_lista: item ? { id: item.id, formato: item.formato, idProdutoPai: item.idProdutoPai } : null,
-        detalhe_status: detStatus,
-        campos_detalhe: raw ? Object.keys(raw) : null,
-        formato_detalhe: raw && raw.formato,
-        tem_estrutura: !!(raw && raw.estrutura),
-        estrutura: (raw && raw.estrutura) || null,
-        variacao: (raw && raw.variacao) || null
-      });
-      return true;
-    }
-
     // DEBUG: dumpa a ESTRUTURA dos produtos de um pedido (variação / composição / kit)
     // uso: /girassol-backup-offline/debug-estrutura/{idDoPedido}
     if (method === 'GET' && p.startsWith('/girassol-backup-offline/debug-estrutura/')) {

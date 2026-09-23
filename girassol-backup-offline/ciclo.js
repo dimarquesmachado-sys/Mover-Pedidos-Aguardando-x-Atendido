@@ -54,6 +54,8 @@ async function indexarCatalogoCompleto(opcoes) {
      catálogo: começa vazio. Se abortar, o objeto em memória é descartado e o índice antigo
      em disco continua valendo — nada se perde. */
   const novo = {};
+  const _nomePorId = {};   // id → nome, de todo produto visto (pra compor o da variação)
+  const _paiDeSku  = {};   // sku da variação → id do pai
   const PAUSA = Number(process.env.GIRABKP_PAUSA_MS || 700);
   try {
     let pagina = 1, tentativas = 0, catalogoCompleto = false;
@@ -139,6 +141,25 @@ async function indexarCatalogoCompleto(opcoes) {
            RESULTADO (até 30 por busca, a cada tecla) — inviável. Aqui vem de graça: a listagem
            que esta varredura já faz traz `imagemURL`. */
         const foto = primeiraImagem(det || it) || '';
+
+        /* 23/09 — NOME DA VARIAÇÃO. O dono achou: a variação `10-lisa-125mm-100` tem
+           Descrição "GRÃO:g100" — o nome completo ("10 X Lixas Disco Grão Liso…") mora só no
+           PAI (`10-lisa-125mm-PAI-X`). Então procurar "lixa" não achava nenhuma variação, que
+           é justamente o que se conta na prateleira; só o SKU exato funcionava, porque aquele
+           caminho vai ao Bling, que devolve o nome montado.
+           Guardo id→nome de todo produto e o pai de cada variação; no FIM da varredura (quando
+           já vi o pai, venha ele antes ou depois) componho "nome do pai + nome da variação".
+           Sem custo: nenhuma chamada a mais ao Bling.
+           Codex (P1): no modo raso (sem GTIN não entra aqui — profundo=false e já tem EAN),
+           `det` nunca é buscado e `_alvo` é o item da LISTAGEM, que não traz
+           `variacao.produtoPai` (isso só vem no detalhe). A listagem traz o mesmo dado como
+           `idProdutoPai` solto — é o fallback abaixo, senão a variação com EAN nunca ganhava
+           o nome do pai na varredura padrão. */
+        const _pai = (_alvo.variacao && _alvo.variacao.produtoPai) || null;
+        const _paiId = (_pai && (_pai.id || _pai.idProduto || (typeof _pai === 'number' ? _pai : null)))
+                    || _alvo.idProdutoPai || it.idProdutoPai || null;
+        if (it.id) _nomePorId[it.id] = nome || '';
+        if (_paiId) _paiDeSku[sku || ('id:' + it.id)] = _paiId;
         /* Codex #514 (P1, 2ª leva): `lerIndiceEan()` só preserva uma chave de 8 dígitos na
            leitura se o valor gravado declarar aquele número como `ean` — é o único jeito dela
            saber que não é um NCM sobrando de antes do conserto do coletor. Sem `ean: e` aqui,
@@ -179,6 +200,23 @@ async function indexarCatalogoCompleto(opcoes) {
      cima do bom. Somado ao `break` silencioso, era assim que uma falha passageira do Bling
      cegava a busca até alguém reindexar à mão. Índice velho serve; parcial engana, porque a
      busca responde "não encontrado" com a mesma cara de sempre. */
+  /* compõe o nome das variações agora que o catálogo inteiro foi visto */
+  if (!idxStatus.abortou) {
+    let compostos = 0;
+    for (const chave of Object.keys(novo)) {
+      const it = novo[chave];
+      if (!it || !it.sku) continue;
+      const paiId = _paiDeSku[it.sku];
+      if (!paiId) continue;
+      const nomePai = _nomePorId[paiId];
+      if (!nomePai) continue;                       // pai não veio na varredura: deixa como está
+      const atual = String(it.nome || '');
+      if (atual.toLowerCase().startsWith(nomePai.toLowerCase().slice(0, 20))) continue;  // já completo
+      it.nome = (nomePai + ' ' + atual).trim();
+      compostos++;
+    }
+    idxStatus.nomes_compostos = compostos;
+  }
   if (!idxStatus.abortou) writeJson(EAN_INDEX_FILE, novo);
   else console.warn('[índice EAN] abortado — índice anterior preservado: ' + idxStatus.erro);
   idxStatus.rodando = false;
