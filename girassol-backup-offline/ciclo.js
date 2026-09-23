@@ -54,6 +54,14 @@ async function indexarCatalogoCompleto(opcoes) {
      catálogo: começa vazio. Se abortar, o objeto em memória é descartado e o índice antigo
      em disco continua valendo — nada se perde. */
   const novo = {};
+  /* Codex #515 (P2, r4): a varredura NORMAL (sem `profundo=1`, o botão "Indexar" comum) não
+     busca o detalhe de quem já tem EAN na listagem — só a listagem, cujo `formato` pode dizer
+     "S" pra algo que uma varredura profunda anterior já viu como kit de verdade (composição só
+     vem no detalhe). Sem consultar o índice velho, essa passagem sem evidência própria
+     reescrevia `kit: false` por cima do veredito caro — apagando-o silenciosamente a cada
+     reindexação normal seguinte. Lido uma vez, fora do laço: é o mesmo arquivo que
+     `lerIndiceEan()` já lê em outros pontos da casa. */
+  const indiceAntigo = lerIndiceEan();
   const PAUSA = Number(process.env.GIRABKP_PAUSA_MS || 700);
   try {
     let pagina = 1, tentativas = 0, catalogoCompleto = false;
@@ -132,8 +140,19 @@ async function indexarCatalogoCompleto(opcoes) {
            publicar `false` ali seria afirmar o contrário do que se foi verificar.
            `null` = não sei: a busca não esconde, mas a trava do lançamento pega. */
         const _semVeredito = profundo && !det;
-        const ehKit = _semVeredito ? null
-                    : ((Array.isArray(_comps) && _comps.length > 0) || _fmt === 'E' || _fmt === 'V');
+        let ehKit = _semVeredito ? null
+                  : ((Array.isArray(_comps) && _comps.length > 0) || _fmt === 'E' || _fmt === 'V');
+        /* Codex #515 (P2, r4): sem `det` (produto já tinha EAN na listagem — o caso comum de
+           uma varredura NORMAL), a única evidência é o `formato` da LISTAGEM: não vale contra
+           um veredito `true` que uma varredura profunda anterior já tirou do detalhe de
+           verdade. Só entra quando esta passagem não tem nada próprio pra dizer — se `det` foi
+           buscado e não achou composição nem `E`/`V`, isso É evidência real, não sobrescreve. */
+        if (!ehKit && !_semVeredito && !det) {
+          const antes = eans.length
+            ? eans.some(e => indiceAntigo[e] && indiceAntigo[e].kit === true)
+            : !!(sku && indiceAntigo['sku:' + sku] && indiceAntigo['sku:' + sku].kit === true);
+          if (antes) ehKit = true;
+        }
         /* 23/09 — a FOTO entra no índice. O dono pediu ver a imagem já na primeira lista de
            resultados, não só depois de clicar. Buscá-la ali custaria uma chamada ao Bling POR
            RESULTADO (até 30 por busca, a cada tecla) — inviável. Aqui vem de graça: a listagem

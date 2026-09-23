@@ -672,7 +672,7 @@ for (const [emp, arq] of Object.entries({
     amb: 'amb-checkout-offline/ciclo.js', good: 'good-checkout-offline/ciclo.js',
   })) {
     const c = fs.readFileSync(path.join(raiz, arq), 'utf8');
-    assert.ok(/const ehKit = _semVeredito \? null/.test(c),
+    assert.ok(/let ehKit = _semVeredito \? null/.test(c),
       emp + ': o modo profundo busca o detalhe mas NÃO classifica — a varredura cara não serve ' +
       'pro que foi feita');
     assert.ok(/novo\[e\] = \{ kit: ehKit/.test(c), emp + ': a marca não vai pro índice');
@@ -697,6 +697,85 @@ for (const [emp, arq] of Object.entries({
     /* e o produto SEM GTIN (chave sintética `sku:`) também precisa da marca — não só quem tem EAN */
     assert.ok(/novo\['sku:' \+ sku\] = \{ kit: ehKit/.test(c),
       emp + ': produto sem GTIN não ganha a marca de kit — só quem tem EAN é classificado');
+  }
+}
+
+/* Codex #515 (P2, r4) — apontamentos do Codex que sobraram depois do conserto do ReferenceError:
+   1) resolverComponentes só lia `produto.id`/`.codigo`/`.nome`; componentes no formato
+      `componente: { id, codigo, nome }` (a MESMA forma que amb-drive-imagens/blingProdutos.js lê
+      e escreve ao preservar composição num PATCH) chegavam sem sku nem nome, o filtro
+      `sku || nome` os derrubava, e a recusa saía com a mensagem genérica de novo.
+   2) a varredura NORMAL (sem `profundo=1`) reconstrói `novo` do zero a cada rodada e não busca o
+      detalhe de quem já tem EAN — só a listagem, cujo `formato` pode dizer "S" pra algo que uma
+      varredura profunda anterior já classificou como kit de verdade (via composição, só visível
+      no detalhe). O botão "Indexar" comum do painel roda sem `profundo=1`; sem consultar o
+      índice velho, essa passagem sem evidência própria apagava o veredito caro em silêncio a
+      cada reindexação normal seguinte. */
+{
+  const rc = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'rotas-contagem.js'), 'utf8');
+  const rcBloco = /async function resolverComponentes\(comps, sinal\) \{[\s\S]*?\n  \}/.exec(rc);
+  assert.ok(rcBloco, 'resolverComponentes sumiu ou mudou de forma — o teste abaixo não acha a função');
+
+  /* exercita a função DE PRODUÇÃO, não uma cópia da regra */
+  const resolverComponentes = new Function('ctx',
+    rcBloco[0] + '; return resolverComponentes;')({ blingGet: async () => ({ ok: false }) });
+
+  /* async por causa do fallback de busca — sem `await` aqui, o processo pode encerrar antes da
+     promise assentar e a asserção nunca reprova nada. `process.exitCode` garante que uma
+     falha aqui vermelhe o teste mesmo tendo rodado depois do resto do arquivo (síncrono). */
+  resolverComponentes([
+    { componente: { id: 99, codigo: 'C-1', nome: 'Componente Um' }, quantidade: 3 },
+    { produto: { id: 1, codigo: 'P-1', nome: 'Produto Um' }, quantidade: 2 },
+    { componente: { id: 7 }, quantidade: 1 },   // só id, nem no formato produto — cai na busca (que falha aqui) e sai como "id 7"
+  ], null).then(saida => {
+    assert.deepStrictEqual(saida, [
+      { sku: 'C-1', nome: 'Componente Um', qtd: 3 },
+      { sku: 'P-1', nome: 'Produto Um', qtd: 2 },
+      { sku: 'id 7', nome: '', qtd: 1 },
+    ], 'componente no formato `componente: { id, codigo, nome }` não foi resolvido — a mensagem ' +
+       'de recusa sairia sem dizer o que contar');
+  }).catch(e => { console.error(e); process.exitCode = 1; });
+}
+
+{
+  for (const [emp, arq] of Object.entries({
+    girassol: 'girassol-backup-offline', amb: 'amb-checkout-offline', good: 'good-checkout-offline',
+  })) {
+    const ciclo = fs.readFileSync(path.join(raiz, arq, 'ciclo.js'), 'utf8');
+
+    assert.ok(/const indiceAntigo = lerIndiceEan\(\);/.test(ciclo),
+      emp + '/ciclo.js: não lê o índice velho antes da varredura — não tem como preservar o ' +
+      'veredito de uma varredura profunda anterior');
+
+    const bloco = /const _alvo = det \|\| it;[\s\S]*?\n {8}\}\n/.exec(ciclo);
+    assert.ok(bloco, emp + '/ciclo.js: não achei o bloco de classificação de kit — mudou de forma');
+
+    /* exercita a classificação DE PRODUÇÃO com um item que já tem EAN na listagem (não busca
+       detalhe: profundo=false e eans.length>0, o caso comum de uma reindexação normal) */
+    const calcEhKit = (det, it, profundo, eans, sku, indiceAntigo) =>
+      new Function('det', 'it', 'profundo', 'eans', 'sku', 'indiceAntigo',
+        bloco[0] + '; return ehKit;')(det, it, profundo, eans, sku, indiceAntigo);
+
+    const itSemEvidencia = { formato: 'S' };   // listagem não traz composição nem E/V — sem evidência própria
+    assert.strictEqual(
+      calcEhKit(null, itSemEvidencia, false, ['789'], null, { '789': { kit: true } }),
+      true,
+      emp + '/ciclo.js: reindexação normal sem evidência própria APAGOU o kit que a varredura ' +
+      'profunda anterior tinha marcado — o kit volta a aparecer na busca por nome');
+    assert.strictEqual(
+      calcEhKit(null, itSemEvidencia, false, [], 'SKU1', { 'sku:SKU1': { kit: true } }),
+      true,
+      emp + '/ciclo.js: o mesmo vale pro produto sem GTIN (chave sintética `sku:`)');
+    assert.strictEqual(
+      calcEhKit(null, itSemEvidencia, false, ['789'], null, {}),
+      false,
+      emp + '/ciclo.js: sem veredito anterior nenhum, o produto sem evidência não pode nascer kit');
+    const detReal = { formato: 'S', estrutura: { componentes: [] } };   // detalhe FOI buscado e não achou composição — evidência real
+    assert.strictEqual(
+      calcEhKit(detReal, { formato: 'S' }, false, ['789'], null, { '789': { kit: true } }),
+      false,
+      emp + '/ciclo.js: quando o detalhe FOI buscado e não achou kit, isso é evidência real — não ' +
+      'deveria herdar um veredito antigo por cima dela');
   }
 }
 
