@@ -466,6 +466,14 @@ let _seqLista = 0;
 function editarQtd(botao){
   const item = botao.closest('.item');
   const atual = botao.textContent.trim();
+  /* Codex #511 (P2, r2): o toque no + ou − logo depois de editar disparava o `blur` (que salva o
+     valor digitado via /contagem-definir) e o `click` do botão (que manda /contagem-ajustar) sem
+     ordem garantida entre os dois — o ajuste podia terminar primeiro e ser sobrescrito pelo
+     valor absoluto do blur, perdendo o toque em silêncio. Trava os botões da linha enquanto a
+     edição está aberta; toda saída (salvar, desistir, erro) já termina em carregarHoje(), que
+     redesenha a linha inteira com os botões de volta. */
+  const irmaos = item.querySelectorAll('.mais-menos button');
+  irmaos.forEach(b => b.disabled = true);
   const campo = document.createElement('input');
   campo.type = 'number'; campo.inputMode = 'numeric'; campo.min = '0'; campo.step = '1';
   campo.value = atual; campo.className = 'qtd-edit';
