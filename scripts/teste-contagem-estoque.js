@@ -512,4 +512,45 @@ for (const [emp, arq] of Object.entries({
     'o SKU aparece solto como um número qualquer — é o que se confere contra a etiqueta da prateleira');
 }
 
+/* 23/09 (Codex #514, P1) — consertar o coletor impede NCM NOVO, mas o índice SE REALIMENTA DE
+   SI MESMO: os três indexadores completos partem de lerIndiceEan() e regravam o que leram, então
+   os NCM já gravados sobreviveriam a toda varredura futura. E são eles o problema: 8 dígitos é
+   o formato de um EAN-8, e um bipe legítimo pode cair no produto errado. */
+{
+  const base = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'base-funcoes.js'), 'utf8');
+  const bloco = /const lerIndiceEan = \(\) => \{[\s\S]*?\n  \};/.exec(base);
+  assert.ok(bloco, 'lerIndiceEan voltou a ser leitura crua — o NCM já gravado nunca sai');
+
+  /* exercita a limpeza DE PRODUÇÃO, não uma cópia da regra */
+  const tmp = fs.mkdtempSync(path.join(require('os').tmpdir(), 'idx-'));
+  const arq = path.join(tmp, 'ean-indice.json');
+  fs.writeFileSync(arq, JSON.stringify({
+    '84672100':      { sku: '404', nome: 'Martelete', id: 1 },                    // NCM
+    '79088401':      { sku: 'X8', nome: 'EAN-8 real', id: 3, ean: '79088401' },   // EAN-8 legítimo
+    '7908840107701': { sku: 'L', nome: 'Lixa', id: 2 },                           // EAN-13
+    'sku:SEMEAN':    { sku: 'SEMEAN', nome: 'Sem código', id: 4 },
+  }));
+  const ler = new Function('readJson', 'writeJson', 'EAN_INDEX_FILE', bloco[0] + '; return lerIndiceEan;')(
+    (f, d) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { return d; } },
+    (f, o) => fs.writeFileSync(f, JSON.stringify(o)),
+    arq);
+  const chaves = Object.keys(ler());
+
+  assert.ok(!chaves.includes('84672100'), 'o NCM já gravado continua no índice de código de barras');
+  assert.ok(chaves.includes('79088401'),
+    'a limpeza levou junto um EAN-8 LEGÍTIMO — o produto declara esse número como código dele');
+  assert.ok(chaves.includes('7908840107701') && chaves.includes('sku:SEMEAN'),
+    'a limpeza mexeu em chave que não devia (EAN-13 ou chave sintética)');
+  assert.deepStrictEqual(Object.keys(JSON.parse(fs.readFileSync(arq, 'utf8'))), chaves,
+    'a limpeza não foi gravada — voltaria a sujar na próxima leitura');
+}
+
+/* P2: a foto sobrevive a abrir o produto pela busca */
+{
+  const prod2 = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'produtos.js'), 'utf8');
+  assert.ok(/img: primeiraImagem\(prod\) \|\| imgAntes \|\| ''/.test(prod2),
+    'abrir o produto pela busca apaga a foto que a indexação guardou — o resultado aparece com ' +
+    'foto, o funcionário clica, e da próxima busca vem sem');
+}
+
 console.log('OK: contagem de estoque — registro interno (nunca escreve no Bling), sessão nas 4 rotas, quantidade validada e busca por nome sem gastar cota');
