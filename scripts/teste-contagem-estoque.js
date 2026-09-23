@@ -473,4 +473,43 @@ for (const [emp, arq] of Object.entries({
     'o aviso perdeu o destaque e virou texto apagado');
 }
 
+/* 23/09 — O NCM ESTAVA ENTRANDO NO ÍNDICE DE CÓDIGO DE BARRAS. O dono viu na tela ("está
+   trazendo a informação do NCM") e o rótulo errado era o MENOR dos problemas: NCM tem 8
+   dígitos, que é exatamente o formato de um EAN-8. Ele virava chave do índice de EAN, então
+   bipar um EAN-8 de verdade podia cair no produto errado.
+   A causa: `getPossiveisGtins` varria TODOS os valores de `tributacao` aceitando qualquer
+   string com 8+ caracteres — e ncm, cest e afins moram ali. */
+{
+  const prod = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'produtos.js'), 'utf8');
+  const m = /for \(const \[k, v\] of Object\.entries\(obj\.tributacao\)\)[\s\S]*?\n    \}/.exec(prod);
+  assert.ok(m, 'a varredura de `tributacao` voltou a aceitar qualquer campo — o NCM entra como código de barras');
+  assert.ok(/gtin\|ean\|barras/i.test(m[0]),
+    'a varredura não filtra pelo NOME do campo — ncm e cest entram como se fossem GTIN');
+
+  /* exercita a regra: só chave de código de barras passa */
+  const passa = (k) => /gtin|ean|barras/i.test(k);
+  for (const k of ['ncm', 'cest', 'origem', 'codigoListaServicos']) {
+    assert.ok(!passa(k), k + ' não pode entrar como código de barras');
+  }
+  for (const k of ['gtinTributario', 'codigoBarrasTributario', 'eanTributario']) {
+    assert.ok(passa(k), k + ' devia entrar');
+  }
+}
+
+/* a foto e o SKU na PRIMEIRA lista de resultados, pedidos do dono */
+{
+  const cat8 = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'rotas-catalogo.js'), 'utf8');
+  const js8 = /<script>([\s\S]*?)<\/script>/.exec(html)[1];
+  const ciclo8 = fs.readFileSync(path.join(raiz, 'girassol-backup-offline', 'ciclo.js'), 'utf8');
+
+  assert.ok(/img: foto/.test(ciclo8) && /primeiraImagem\(det \|\| it\)/.test(ciclo8),
+    'a indexação não guarda a foto — mostrá-la na busca custaria uma chamada ao Bling POR ' +
+    'RESULTADO, a cada tecla digitada');
+  assert.ok(/img: it\.img \|\| ''/.test(cat8), 'a busca não devolve a foto');
+  assert.ok(/class="thumb"/.test(js8) && js8.indexOf('class="thumb"') < js8.indexOf('sku-tag'),
+    'a lista de resultados não mostra a foto antes de clicar');
+  assert.ok(/sku-tag">SKU</.test(js8),
+    'o SKU aparece solto como um número qualquer — é o que se confere contra a etiqueta da prateleira');
+}
+
 console.log('OK: contagem de estoque — registro interno (nunca escreve no Bling), sessão nas 4 rotas, quantidade validada e busca por nome sem gastar cota');

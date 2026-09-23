@@ -102,8 +102,18 @@
               border:1px solid var(--linha);border-radius:12px;color:inherit;
               cursor:pointer;font:inherit}
   .lista-nome:hover,.lista-nome:focus-visible{border-color:var(--girassol);outline:0}
+  .lista-nome .thumb{width:52px;height:52px;border-radius:9px;background:var(--carta2);
+                     flex:none;object-fit:contain}
+  .lista-nome .semfoto-mini{display:flex;align-items:center;justify-content:center;
+                            color:var(--calmo);font-size:9px;line-height:1.1;text-align:center}
+  .lista-nome .corpo{flex:1;min-width:0}
   .lista-nome b{display:block;font-size:15px;font-weight:600;line-height:1.35}
-  .lista-nome span{font-size:12.5px;color:var(--calmo)}
+  .lista-nome .sku-linha{display:block;font-size:12.5px;color:var(--calmo);margin-top:3px}
+  /* o SKU ganha etiqueta e peso: é o que a pessoa confere contra a prateleira */
+  .lista-nome .sku-tag{display:inline-block;font-size:10px;font-weight:700;color:var(--girassol);
+                       background:var(--girassol-fraco);padding:1px 6px;border-radius:5px;
+                       margin-right:5px;vertical-align:1px}
+  .lista-nome .ean{display:block;font-size:11.5px;opacity:.75;margin-top:1px}
 
   .aviso{background:var(--carta);border:1px solid var(--linha);border-left:3px solid var(--girassol);
          border-radius:0 10px 10px 0;padding:12px 14px;margin:10px 0;font-size:14px}
@@ -183,7 +193,7 @@
       <span class="logo-girassol" role="img" aria-label="Magazine Girassol"></span>
       <h1>Contagem de estoque</h1>
       <span class="empresa">Magazine Girassol</span>
-      <span class="build">c14</span>
+      <span class="build">c15</span>
     </div>
   </header>
 
@@ -346,9 +356,30 @@ async function buscarPorNome(q, veioDeCodigo){
         : '<div class="aviso">Nada encontrado para <b>'+esc(q)+'</b>'+(veioDeCodigo?' (nem como código, nem no nome)':'')+'.</div>');
     return;
   }
+  /* 23/09 — três mudanças pedidas pelo dono depois de usar:
+     · FOTO já aqui, não só depois de clicar — num resultado de lixas com nome quase igual, a
+       imagem decide mais rápido que o texto;
+     · SKU escrito como SKU. Ele é o que se confere contra a etiqueta da prateleira, e vinha
+       solto como um número qualquer;
+     · o NCM sumiu. Vinha colado no SKU parecendo código de barras — era o NCM entrando no
+       índice pela varredura larga de `tributacao` (consertado em produtos.js). O que sobra é
+       EAN de verdade, e só aparece quando existe. */
   alvo.innerHTML = '<div class="dim">'+d.itens.length+' resultado(s) — toque no produto:</div>' +
-    d.itens.map(it => '<button class="lista-nome" onclick="abrirPorSku('+JSON.stringify(it.sku).replace(/"/g,'&quot;')+')">' +
-      '<b>'+esc(it.nome || '(sem nome)')+'</b><span>'+esc(it.sku)+(it.ean?' · '+esc(it.ean):'')+'</span></button>').join('');
+    d.itens.map(it =>
+      '<button class="lista-nome" data-sku="'+esc(it.sku)+'">' +
+        (it.img ? '<img class="thumb" src="'+esc(it.img)+'" alt="" loading="lazy">'
+                : '<span class="thumb semfoto-mini">sem<br>foto</span>') +
+        '<span class="corpo">' +
+          '<b>'+esc(it.nome || '(sem nome)')+'</b>' +
+          '<span class="sku-linha"><span class="sku-tag">SKU</span> '+esc(it.sku)+
+            (it.ean ? '<span class="ean">código de barras '+esc(it.ean)+'</span>' : '')+'</span>' +
+        '</span>' +
+      '</button>').join('');
+  /* por addEventListener, não por onclick montado com o SKU: foi o XSS que o Codex achou no
+     painel (#510), e aqui o SKU vem de dado gravado igual. */
+  alvo.querySelectorAll('.lista-nome').forEach(b => {
+    b.addEventListener('click', () => abrirPorSku(b.dataset.sku));
+  });
 }
 
 async function abrirPorSku(sku){

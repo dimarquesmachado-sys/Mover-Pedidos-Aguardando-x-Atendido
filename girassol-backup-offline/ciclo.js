@@ -104,13 +104,18 @@ async function indexarCatalogoCompleto() {
            a marca vai junto no índice e a busca esconde esses. Sem custo extra: o campo já vem
            na listagem que esta varredura faz. */
         const ehKit = String((det && det.formato) || it.formato || '').toUpperCase() === 'E';
+        /* 23/09 — a FOTO entra no índice. O dono pediu ver a imagem já na primeira lista de
+           resultados, não só depois de clicar. Buscá-la ali custaria uma chamada ao Bling POR
+           RESULTADO (até 30 por busca, a cada tecla) — inviável. Aqui vem de graça: a listagem
+           que esta varredura já faz traz `imagemURL`. */
+        const foto = primeiraImagem(det || it) || '';
         if (eans.length) {
-          for (const e of eans) { if (!novo[e]) idxStatus.eans++; novo[e] = { sku: sku || '', nome: nome || '', id: it.id, kit: ehKit }; }
+          for (const e of eans) { if (!novo[e]) idxStatus.eans++; novo[e] = { sku: sku || '', nome: nome || '', id: it.id, kit: ehKit, img: foto }; }
         } else if (sku) {
           // Codex (P2): sem GTIN, o produto nunca entrava no índice — e é o índice de EAN que
           // a busca por nome da contagem de estoque usa. Chave sintética prefixada (nunca é só
           // dígitos, ao contrário de um EAN de verdade) pra não colidir com o lookup por dígitos.
-          novo['sku:' + sku] = { sku: sku, nome: nome || '', id: it.id, kit: ehKit };
+          novo['sku:' + sku] = { sku: sku, nome: nome || '', id: it.id, kit: ehKit, img: foto };
         }
       }
       /* Codex #484 (P2): eu guardei o salvamento FINAL e esqueci deste, que publica a cada
