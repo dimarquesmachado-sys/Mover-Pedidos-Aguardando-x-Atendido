@@ -117,5 +117,27 @@ const pagina = async (off, lim) => {
   assert.ok(/CSS\.escape\(sku\)/.test(js),
     'o SKU entra num seletor CSS sem escapar — SKU com caractere especial quebra a abertura');
 
-  console.log('OK: busca ordena antes de cortar; tudo por padrao; e o card abre NA LISTA sem trocar de tela');
+  /* ★ O FLUXO QUE O DONO DESCREVEU, e que é o motivo de tudo isto existir:
+     "posso procurar lixa e ir colocando de várias outras. Assim só clico, abro o card, informo
+     a quantidade e salvo. E já posso ir pra outras mais embaixo e fazer o mesmo. Senão vou ter
+     que buscar de novo, rolar a página etc."
+     Ou seja: SALVAR NÃO PODE MEXER NA LISTA DE RESULTADOS. O fluxo antigo limpava o campo de
+     busca e agendava um reset da tela 1,2s depois de lançar (fazia sentido quando cada
+     lançamento trocava de tela) — e esse caminho continua existindo pro bipe. O caminho novo
+     não pode encostar nele. */
+  const corpoSalvar = /async function salvarNaLista[\s\S]*?\n\}/.exec(js);
+  assert.ok(corpoSalvar, 'sumiu o salvamento inline');
+  for (const [trecho, porque] of [
+    ['limpar()', 'chama limpar() — a lista de resultados seria apagada depois de cada lançamento'],
+    ["getElementById('busca')", 'mexe no campo de busca — o texto procurado sumiria a cada item'],
+    ['LIMPAR_TIMER', 'agenda o reset da tela — a lista sumiria 1,2s depois de salvar'],
+    ["resultado').innerHTML", 'apaga a lista de resultados ao salvar'],
+  ]) {
+    assert.ok(!corpoSalvar[0].includes(trecho),
+      'salvar pela lista ' + porque + ', e aí ele teria que buscar de novo e rolar a página a cada produto');
+  }
+  assert.ok(/carregarHoje\(\)/.test(corpoSalvar[0]),
+    'salvar não atualiza a lista de contagens do dia');
+
+  console.log('OK: busca ordena antes de cortar; tudo por padrao; card abre NA LISTA; e salvar NAO mexe na lista');
 })().catch(e => { console.error(e); process.exit(1); });
