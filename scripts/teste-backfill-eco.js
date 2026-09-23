@@ -21,12 +21,21 @@ for (const [emp, arq] of Object.entries({
      Sem checar a empresa, um backfill da GOOD respondia "iniciado" na rota da Girassol.
      A AMB tem seu próprio `_backfill` e `backfillVendas` isolados (nunca chamado com outra
      empresa), então não precisa dessa checagem extra. */
-  const regexMesmoPeriodo = emp === 'girassol'
-    ? /const mesmoPeriodo = _backfill\.empresa === 'girassol' && _backfill\.de === de && _backfill\.ate === ate;/
-    : /const mesmoPeriodo = _backfill\.de === de && _backfill\.ate === ate;/;
-  assert.ok(regexMesmoPeriodo.test(s),
-    emp + ': não distingue o eco da própria chamada — a 2ª requisição do navegador mostra ' +
-    'como recusa o backfill que o usuário acabou de criar');
+  /* 23/09: a checagem de empresa é OBRIGATÓRIA na Girassol (a GOOD importa o módulo dela) e
+     está na AMB também, por escolha: hoje ninguém chama o backfillVendas da AMB com outra
+     empresa, mas a checagem custa nada e trava o dia em que alguém o fizer — é o mesmo tipo de
+     acoplamento que produziu este bug. O teste exige o literal e confere que ele BATE com o
+     que a rota dispara; se alguém mudar um e esquecer o outro, o eco nunca casa e o bug volta
+     calado. */
+  const cmp = /const mesmoPeriodo = _backfill\.empresa === '(\w+)' && _backfill\.de === de && _backfill\.ate === ate;/.exec(s);
+  assert.ok(cmp,
+    emp + ': o eco não distingue a empresa dona da rodada — a 2ª requisição do navegador mostra ' +
+    'como recusa o backfill que o usuário acabou de criar, e uma rodada de OUTRA empresa faz ' +
+    'esta rota dizer "já foi iniciado" sem nada ter começado aqui');
+  const chamada = /backfillVendas\(de, ate, '(\w+)'/.exec(s.slice(s.indexOf('const mesmoPeriodo = _backfill.empresa')));
+  assert.ok(chamada, emp + ': não achei a chamada do backfill logo abaixo da comparação');
+  assert.strictEqual(cmp[1], chamada[1],
+    emp + ': a empresa comparada (' + cmp[1] + ') é diferente da que a rota dispara (' + chamada[1] + ')');
   assert.ok(/segundos < 30/.test(s), emp + ': sem janela de tempo, qualquer rechamada viraria eco');
 
   /* a janela precisa do carimbo de início; sem ele, `1e9` faz cair na recusa — e é o certo,

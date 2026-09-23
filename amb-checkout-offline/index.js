@@ -2087,7 +2087,9 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
            várias vezes. Se o período pedido é o MESMO e a rodada começou há poucos segundos,
            é eco: responde 'iniciado'. Só quando é outro período (ou rodada antiga) é recusa
            de verdade. */
-        const mesmoPeriodo = _backfill.de === de && _backfill.ate === ate;
+        /* Codex (#519): mesmo cuidado que a Girassol recebeu — a empresa faz parte da
+           identidade da rodada. Aqui a rota dispara com 'amb' (ver a chamada logo abaixo). */
+        const mesmoPeriodo = _backfill.empresa === 'amb' && _backfill.de === de && _backfill.ate === ate;
         const segundos = _backfill.inicio ? (Date.now() - Date.parse(_backfill.inicio)) / 1000 : 1e9;
         if (mesmoPeriodo && segundos < 30) {
           json(res, 200, { ok: true, msg: '✅ backfill deste período já foi iniciado (há ' + Math.round(segundos) + 's) — acompanhe em /backfill-status', de, ate, status: _backfill });
