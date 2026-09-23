@@ -131,35 +131,40 @@ async function indexarCatalogoCompleto(opcoes) {
         if (!it.id) continue;
         let eans = getPossiveisGtins(it).map(e => String(e).replace(/\D/g, '')).filter(e => e.length >= 8);
         let nome = it.nome, sku = it.codigo;
+        let det = null;   // usado fora do if — precisa sobreviver ao bloco pra classificar kit abaixo
         if (!eans.length || profundo) {                            // lista não trouxe GTIN → busca no detalhe
-          const det = await produtoDetalhe(it.id);
+          det = await produtoDetalhe(it.id);
           await sleep(PAUSA);
           if (det) { eans = getPossiveisGtins(det).map(e => String(e).replace(/\D/g, '')).filter(e => e.length >= 8); nome = det.nome || nome; sku = det.codigo || sku; }
         }
+        /* Codex #515 (P2): o modo profundo buscava o detalhe mas NÃO classificava — as entradas
+           saíam sem `kit` nenhum, então a varredura cara não servia pro que foi feita.
+           Quem decide é a COMPOSIÇÃO; `E` e `V` (pai de grade) reforçam.
+           Fica FORA dos dois ramos abaixo (antes era só dentro de `eans.length`, e `det` era
+           declarado dentro do primeiro `if` — um `ReferenceError` toda vez que o produto já
+           tinha EAN, e o produto sem GTIN nunca ganhava a marca): os dois precisam do mesmo
+           veredito, calculado uma vez. */
+        const _alvo = det || it;
+        const _comps = (_alvo.estrutura && (_alvo.estrutura.componentes || _alvo.estrutura.itens))
+                    || _alvo.composicao || _alvo.componentes || [];
+        const _fmt = String((det && det.formato) || it.formato || '').toUpperCase();
+        /* Codex #515 (P2): detalhe que FALHOU não pode virar "não é kit". No modo profundo, sem
+           detalhe não há veredito — marca como desconhecido pra ninguém confiar no silêncio. */
+        const _semVeredito = profundo && !det;
+        const ehKit = _semVeredito ? null
+                   : ((Array.isArray(_comps) && _comps.length > 0) || _fmt === 'E' || _fmt === 'V');
         /* Codex #514 (P1, 2ª leva): `lerIndiceEan()` só preserva uma chave de 8 dígitos na
            leitura se o valor gravado declarar aquele número como `ean` — é o único jeito dela
            saber que não é um NCM sobrando de antes do conserto do coletor. Sem `ean: e` aqui,
            todo EAN-8 real que esta varredura gravasse seria apagado na primeira leitura
            seguinte, junto com o NCM. */
         if (eans.length) {
-          /* Codex #515 (P2): o modo profundo buscava o detalhe mas NÃO classificava — as entradas
-             saíam sem `kit` nenhum, então a varredura cara não servia pro que foi feita.
-             Quem decide é a COMPOSIÇÃO; `E` e `V` (pai de grade) reforçam. */
-          const _alvo = det || it;
-          const _comps = (_alvo.estrutura && (_alvo.estrutura.componentes || _alvo.estrutura.itens))
-                      || _alvo.composicao || _alvo.componentes || [];
-          const _fmt = String((det && det.formato) || it.formato || '').toUpperCase();
-          /* Codex #515 (P2): detalhe que FALHOU não pode virar "não é kit". No modo profundo, sem
-             detalhe não há veredito — marca como desconhecido pra ninguém confiar no silêncio. */
-          const _semVeredito = profundo && !det;
-          const ehKit = _semVeredito ? null
-                     : ((Array.isArray(_comps) && _comps.length > 0) || _fmt === 'E' || _fmt === 'V');
           for (const e of eans) { if (!novo[e]) idxStatus.eans++; novo[e] = { kit: ehKit, sku: sku || '', nome: nome || '', id: it.id, ean: e }; }
         } else if (sku) {
           // Codex (P2): sem GTIN, o produto nunca entrava no índice — e é o índice de EAN que
           // a busca por nome da contagem de estoque usa. Chave sintética prefixada (nunca é só
           // dígitos, ao contrário de um EAN de verdade) pra não colidir com o lookup por dígitos.
-          novo['sku:' + sku] = { sku: sku, nome: nome || '', id: it.id };
+          novo['sku:' + sku] = { kit: ehKit, sku: sku, nome: nome || '', id: it.id };
         }
       }
       /* Codex #484 (P2): eu guardei o salvamento FINAL e esqueci deste, que publica a cada

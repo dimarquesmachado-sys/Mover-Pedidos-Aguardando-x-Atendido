@@ -676,6 +676,27 @@ for (const [emp, arq] of Object.entries({
       emp + ': o modo profundo busca o detalhe mas NÃO classifica — a varredura cara não serve ' +
       'pro que foi feita');
     assert.ok(/novo\[e\] = \{ kit: ehKit/.test(c), emp + ': a marca não vai pro índice');
+
+    /* Codex #515 (P2, r3) — a classificação usa `det` FORA do `if (!eans.length || profundo)`
+       que o declara. Sem hoistar a variável pra fora desse bloco, `det` não existe naquele
+       escopo: toda vez que o produto JÁ tinha EAN (o caso comum), a leitura de `det` explode
+       com ReferenceError — e como isso roda dentro do loop de páginas, a excecão sobe, o
+       `catch` externo aborta a varredura inteira, e o índice de AMB/GOOD nunca mais atualiza. */
+    assert.ok(/let det = null;/.test(c),
+      emp + ': `det` não está declarado fora do `if` que o preenche — ReferenceError sempre ' +
+      'que o produto já tem EAN, abortando toda reindexação completa');
+    const idxIf = c.indexOf('if (!eans.length || profundo)');
+    const idxUsoAlvo = c.indexOf('const _alvo = det || it;');
+    assert.ok(idxIf > 0 && idxUsoAlvo > idxIf,
+      emp + ': não achei a classificação de kit depois do bloco que busca o detalhe');
+    const idxFimIf = c.indexOf('}', idxIf);
+    assert.ok(idxUsoAlvo > idxFimIf,
+      emp + ': a classificação de kit usa `det` de dentro do próprio bloco que o declara — ' +
+      'fora dele (produto que já tinha EAN) é ReferenceError');
+
+    /* e o produto SEM GTIN (chave sintética `sku:`) também precisa da marca — não só quem tem EAN */
+    assert.ok(/novo\['sku:' \+ sku\] = \{ kit: ehKit/.test(c),
+      emp + ': produto sem GTIN não ganha a marca de kit — só quem tem EAN é classificado');
   }
 }
 
