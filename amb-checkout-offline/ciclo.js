@@ -156,7 +156,19 @@ async function indexarCatalogoCompleto(opcoes) {
            todo EAN-8 real que esta varredura gravasse seria apagado na primeira leitura
            seguinte, junto com o NCM. */
         if (eans.length) {
-          for (const e of eans) { if (!novo[e]) idxStatus.eans++; novo[e] = { sku: sku || '', nome: nome || '', id: it.id, ean: e }; }
+          /* Codex #515 (P2): o modo profundo buscava o detalhe mas NÃO classificava — as entradas
+             saíam sem `kit` nenhum, então a varredura cara não servia pro que foi feita.
+             Quem decide é a COMPOSIÇÃO; `E` e `V` (pai de grade) reforçam. */
+          const _alvo = det || it;
+          const _comps = (_alvo.estrutura && (_alvo.estrutura.componentes || _alvo.estrutura.itens))
+                      || _alvo.composicao || _alvo.componentes || [];
+          const _fmt = String((det && det.formato) || it.formato || '').toUpperCase();
+          /* Codex #515 (P2): detalhe que FALHOU não pode virar "não é kit". No modo profundo, sem
+             detalhe não há veredito — marca como desconhecido pra ninguém confiar no silêncio. */
+          const _semVeredito = profundo && !det;
+          const ehKit = _semVeredito ? null
+                     : ((Array.isArray(_comps) && _comps.length > 0) || _fmt === 'E' || _fmt === 'V');
+          for (const e of eans) { if (!novo[e]) idxStatus.eans++; novo[e] = { kit: ehKit, sku: sku || '', nome: nome || '', id: it.id, ean: e }; }
         } else if (sku) {
           // Codex (P2): sem GTIN, o produto nunca entrava no índice — e é o índice de EAN que
           // a busca por nome da contagem de estoque usa. Chave sintética prefixada (nunca é só

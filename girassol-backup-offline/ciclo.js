@@ -127,7 +127,13 @@ async function indexarCatalogoCompleto(opcoes) {
         const _comps = (_alvo.estrutura && (_alvo.estrutura.componentes || _alvo.estrutura.itens))
                     || _alvo.composicao || _alvo.componentes || [];
         const _fmt = String((det && det.formato) || it.formato || '').toUpperCase();
-        const ehKit = (Array.isArray(_comps) && _comps.length > 0) || _fmt === 'E' || _fmt === 'V';
+        /* Codex #515 (P2): detalhe que FALHOU não pode virar "não é kit". É exatamente o caso
+           que o modo profundo existe pra resolver — listagem dizendo "S" pra um kit —, e
+           publicar `false` ali seria afirmar o contrário do que se foi verificar.
+           `null` = não sei: a busca não esconde, mas a trava do lançamento pega. */
+        const _semVeredito = profundo && !det;
+        const ehKit = _semVeredito ? null
+                    : ((Array.isArray(_comps) && _comps.length > 0) || _fmt === 'E' || _fmt === 'V');
         /* 23/09 — a FOTO entra no índice. O dono pediu ver a imagem já na primeira lista de
            resultados, não só depois de clicar. Buscá-la ali custaria uma chamada ao Bling POR
            RESULTADO (até 30 por busca, a cada tecla) — inviável. Aqui vem de graça: a listagem
