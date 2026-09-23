@@ -86,7 +86,15 @@ const pagina = async (aposNome, aposSku, lim) => {
   idx['sku:NOVA'] = { sku: 'NOVA', nome: 'Lixa Disco GRÃO:0015', id: 999 };   // entra ANTES da posição 30
   const p2depoisDeInserir = await pagina(p1.proximo_apos_nome, p1.proximo_apos_sku, 30);
   const nomesP2 = p2depoisDeInserir.itens.map(i => i.nome);
-  assert.strictEqual(p2depoisDeInserir.total, 51, 'o novo item entrou no total');
+  /* Codex #521 (P2, retomado): `total` já foi `itens.length` (51, contando o item inserido) e
+     depois virou `inicio + itens.slice(inicio).length` — que é sempre igual a `itens.length` de
+     novo (`inicio + (itens.length - inicio)`), um "conserto" que não mudava nada e ainda dizia
+     51. Um item inserido ANTES do cursor nunca é alcançado por nenhuma página seguinte — contá-lo
+     fazia a tela prometer "1 a mais" que a paginação jamais entregava, e a página final vinha
+     vazia. `total` tem que ser só o que é alcançável A PARTIR deste cursor: igual ao de `p2`
+     (20), porque a inserção ficou pra trás dele e não muda nada do que vem depois. */
+  assert.strictEqual(p2depoisDeInserir.total, p2.total,
+    'o item inserido ANTES do cursor entrou no total — a paginação promete um item que nunca alcança');
   assert.ok(!nomesP2.includes(ultimoDaP1),
     'a página 2 repetiu o último item da página 1 — é o bug do offset numérico voltando');
   assert.deepStrictEqual(nomesP2, p2.itens.map(i => i.nome),
@@ -120,6 +128,7 @@ const pagina = async (aposNome, aposSku, lim) => {
 
   /* a TELA: 'tudo' é o padrão, e o modo em partes cresce 50 → 100 → 200 */
   const html = fs.readFileSync(path.join(raiz, 'girassol-backup-offline', 'contagem.html'), 'utf8');
+  const cat = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'rotas-catalogo.js'), 'utf8');
   const js = /<script>([\s\S]*?)<\/script>/.exec(html)[1];
 
   assert.ok(/let MODO_LISTA = 'tudo';/.test(js),
@@ -251,4 +260,31 @@ const pagina = async (aposNome, aposSku, lim) => {
     'gravada nasce desse número');
 
   console.log('OK: ordena antes de cortar; tudo por padrao; card inline sem tocar no estado antigo; vazio nao vira zero');
+
+  /* 23/09 (Codex #521, retomado) — a correção anterior de `total` no servidor
+     (`inicio + itens.slice(inicio).length`) era um NO-OP: sempre igual a `itens.length`, o
+     mesmo valor de antes. `total` no cliente também nunca somava o que já tinha vindo em
+     páginas anteriores — cada resposta pisava na anterior. */
+  assert.ok(/total: itens\.length - inicio,/.test(cat),
+    'o servidor ainda manda `total` = itens.length inteiro (com quem ficou pra trás do cursor) ' +
+    'em vez de só o alcançável a partir daqui — o "conserto" anterior era um no-op');
+  assert.ok(/const totalAcumulado = \(acumulado \? acumulado\.length : 0\) \+ d\.total;/.test(js),
+    'o total mostrado na tela não soma o que já veio em páginas anteriores — cada "ver mais" ' +
+    'reseta a contagem pro tamanho só desta página');
+
+  /* e a página final de uma paginação (0 itens, porque não sobra nada depois do cursor) não
+     pode cair no aviso de "nada encontrado" e apagar a lista já acumulada */
+  assert.ok(/if\(acumulado && acumulado\.length && !d\.itens\.length\)\{/.test(js),
+    'uma página vazia com lista já acumulada ainda cai no aviso de "nada encontrado" e apaga ' +
+    'os resultados já mostrados — fim de paginação não é o mesmo que não achar nada');
+
+  /* e o painel do fluxo ANTIGO (bipe) não pode ser fechado em silêncio se tinha uma quantidade
+     digitada ou um salvamento em voo — mesma trava que já existe pro card inline */
+  const corpoAbrir2 = /async function abrirNaLista[\s\S]*?\n\}/.exec(js);
+  assert.ok(/if\(_salvando\)\{[\s\S]{0,80}alert\(/.test(corpoAbrir2[0]),
+    'abrir um card fecha o painel antigo mesmo com um "Salvar contagem" dele em voo');
+  assert.ok(/qtdVelho[\s\S]{0,40}!== ''[\s\S]{0,40}confirm\(/.test(corpoAbrir2[0]),
+    'abrir um card fecha o painel antigo e descarta uma quantidade já digitada nele, sem perguntar');
+
+  console.log('OK: total da paginacao soma paginas anteriores e nao e mais um no-op; painel antigo nao perde dado em silencio');
 })().catch(e => { console.error(e); process.exit(1); });

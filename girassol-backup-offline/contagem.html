@@ -223,7 +223,7 @@
       <span class="logo-girassol" role="img" aria-label="Magazine Girassol"></span>
       <h1>Contagem de estoque</h1>
       <span class="empresa">Magazine Girassol</span>
-      <span class="build">c20</span>
+      <span class="build">c21</span>
     </div>
   </header>
 
@@ -399,6 +399,18 @@ async function buscarPorNome(q, veioDeCodigo, aposNome, aposSku, acumulado, tota
     }
     return;
   }
+  /* 23/09 — Codex #521 (P2): `total` do servidor conta só o que é alcançável A PARTIR do
+     cursor desta página (ver comentário em rotas-catalogo.js), não o total acumulado da busca
+     inteira — item que ficou pra trás do cursor (inserido no índice depois que a pessoa
+     começou a rolar) nunca é alcançado por nenhuma página seguinte, e contá-lo fazia a tela
+     prometer "1 a mais" que a paginação jamais entregava. Mesmo assim, se algo mudar no índice
+     bem entre o clique em "ver mais" e a resposta (item removido, por exemplo), a página pode
+     voltar vazia mesmo com lista acumulada em tela — e isso é FIM DE PAGINAÇÃO, não "não achei
+     nada": sem esta checagem, cairia nos avisos abaixo e apagaria os resultados já mostrados. */
+  if(acumulado && acumulado.length && !d.itens.length){
+    renderListaBusca(acumulado, acumulado.length, q, veioDeCodigo, aposNome, aposSku, false);
+    return;
+  }
   if(d.erro && !d.itens.length){ alvo.innerHTML = '<span class="dim">'+esc(d.erro)+'</span>'; return; }
   if(!d.itens.length){
     /* separar "o índice está vazio" de "não achei" de "não achei, mas o catálogo ainda não foi
@@ -427,7 +439,10 @@ async function buscarPorNome(q, veioDeCodigo, aposNome, aposSku, acumulado, tota
      simplesmente não caíam no sorteio. O servidor agora ordena tudo e pagina; aqui a gente
      acumula e oferece o resto, em vez de fingir que são só 30. */
   const lista = (acumulado || []).concat(d.itens || []);
-  renderListaBusca(lista, d.total, q, veioDeCodigo, d.proximo_apos_nome, d.proximo_apos_sku, false);
+  /* `d.total` é só o alcançável A PARTIR do cursor desta página (Codex #521 P2) — pra mostrar
+     o total acumulado da busca inteira, soma com o que já tinha vindo em páginas anteriores. */
+  const totalAcumulado = (acumulado ? acumulado.length : 0) + d.total;
+  renderListaBusca(lista, totalAcumulado, q, veioDeCodigo, d.proximo_apos_nome, d.proximo_apos_sku, false);
 }
 
 /* 23/09 — Codex #521 (P2): extraído de dentro de buscarPorNome pra poder redesenhar a MESMA
@@ -522,9 +537,20 @@ async function abrirNaLista(sku){
   }
 
   /* e some com o painel do fluxo antigo, se estiver aberto: dois formulários de lançamento na
-     tela, um deles apontando pra outro produto, é convite a erro */
+     tela, um deles apontando pra outro produto, é convite a erro. Codex #521 (revisão): isto
+     fechava incondicionalmente — se o painel antigo tinha uma quantidade DIGITADA (bipou um
+     código, começou a digitar, aí procurou por nome sem ter terminado), ou um "Salvar
+     contagem" daquele painel ainda em voo, a contagem em andamento sumia em silêncio. Mesma
+     trava que já existe pro card inline (`confirm`/`alert` acima) e pro fechar-o-mesmo-card. */
   const painelVelho = document.getElementById('painelLanc');
   if(painelVelho && painelVelho.style.display !== 'none'){
+    if(_salvando){
+      alert('Espere o lançamento em andamento terminar antes de abrir outro produto.');
+      return;
+    }
+    const qtdVelho = document.getElementById('qtd');
+    if(qtdVelho && qtdVelho.value.trim() !== ''
+       && !confirm('Você digitou uma quantidade no formulário de cima e ainda não salvou. Descartar?')) return;
     painelVelho.style.display = 'none';
     const pe = document.getElementById('prodEscolhido');
     if(pe) pe.innerHTML = '';
