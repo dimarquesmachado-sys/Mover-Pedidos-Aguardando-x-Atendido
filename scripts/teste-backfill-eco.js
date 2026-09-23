@@ -16,7 +16,15 @@ for (const [emp, arq] of Object.entries({
 })) {
   const s = fs.readFileSync(path.join(raiz, arq), 'utf8');
 
-  assert.ok(/const mesmoPeriodo = _backfill\.de === de && _backfill\.ate === ate;/.test(s),
+  /* Codex (#519): gbo-app.js é o MESMO módulo que good-checkout-offline/index.js importa
+     (gbo.backfillVendas) pra rodar o backfill da GOOD — o `_backfill` ali é compartilhado.
+     Sem checar a empresa, um backfill da GOOD respondia "iniciado" na rota da Girassol.
+     A AMB tem seu próprio `_backfill` e `backfillVendas` isolados (nunca chamado com outra
+     empresa), então não precisa dessa checagem extra. */
+  const regexMesmoPeriodo = emp === 'girassol'
+    ? /const mesmoPeriodo = _backfill\.empresa === 'girassol' && _backfill\.de === de && _backfill\.ate === ate;/
+    : /const mesmoPeriodo = _backfill\.de === de && _backfill\.ate === ate;/;
+  assert.ok(regexMesmoPeriodo.test(s),
     emp + ': não distingue o eco da própria chamada — a 2ª requisição do navegador mostra ' +
     'como recusa o backfill que o usuário acabou de criar');
   assert.ok(/segundos < 30/.test(s), emp + ': sem janela de tempo, qualquer rechamada viraria eco');
@@ -32,21 +40,24 @@ for (const [emp, arq] of Object.entries({
     emp + ': recusa sem dizer qual período está rodando — o dono não saberia o que o bloqueou');
 }
 
-/* exercita a decisão nos quatro casos */
+/* exercita a decisão nos cinco casos — a da rota da Girassol, que também confere a empresa
+   dona da rodada (gbo-app.js é compartilhado com a GOOD) */
 const decidir = (bf, de, ate) => {
-  const mesmo = bf.de === de && bf.ate === ate;
+  const mesmo = bf.empresa === 'girassol' && bf.de === de && bf.ate === ate;
   const seg = bf.inicio ? (Date.now() - Date.parse(bf.inicio)) / 1000 : 1e9;
   return (mesmo && seg < 30) ? 'eco' : 'recusa';
 };
 const agora = new Date().toISOString();
 const dezMin = new Date(Date.now() - 600000).toISOString();
-assert.strictEqual(decidir({ de: 'a', ate: 'b', inicio: agora }, 'a', 'b'), 'eco',
+assert.strictEqual(decidir({ empresa: 'girassol', de: 'a', ate: 'b', inicio: agora }, 'a', 'b'), 'eco',
   'a 2ª requisição do navegador ainda aparece como recusa');
-assert.strictEqual(decidir({ de: 'a', ate: 'b', inicio: dezMin }, 'a', 'b'), 'recusa',
+assert.strictEqual(decidir({ empresa: 'girassol', de: 'a', ate: 'b', inicio: dezMin }, 'a', 'b'), 'recusa',
   'rodada de 10 min atrás virou eco — o usuário acharia que disparou de novo');
-assert.strictEqual(decidir({ de: 'x', ate: 'y', inicio: agora }, 'a', 'b'), 'recusa',
+assert.strictEqual(decidir({ empresa: 'girassol', de: 'x', ate: 'y', inicio: agora }, 'a', 'b'), 'recusa',
   'outro período rodando virou eco — duas rodadas pesadas juntas derrubam o serviço');
-assert.strictEqual(decidir({ de: 'a', ate: 'b' }, 'a', 'b'), 'recusa',
+assert.strictEqual(decidir({ empresa: 'girassol', de: 'a', ate: 'b' }, 'a', 'b'), 'recusa',
   'estado sem carimbo de início virou eco');
+assert.strictEqual(decidir({ empresa: 'good', de: 'a', ate: 'b', inicio: agora }, 'a', 'b'), 'recusa',
+  'Codex #519: um backfill da GOOD com o mesmo período apareceu como "iniciado" na rota da Girassol');
 
 console.log('OK: a 2a requisicao do navegador nao aparece mais como recusa, e a recusa legitima diz qual periodo ocupa');

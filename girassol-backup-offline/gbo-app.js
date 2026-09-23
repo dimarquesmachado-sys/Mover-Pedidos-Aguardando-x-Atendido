@@ -1674,8 +1674,12 @@ if (method === 'GET') { json(res, 200, { ok: true, apuradas: DEFAULT_ALIQ_BK, ap
            backfill que o próprio usuário acabou de criar. Parecia recusa e confundiu o dono
            várias vezes. Se o período pedido é o MESMO e a rodada começou há poucos segundos,
            é eco: responde 'iniciado'. Só quando é outro período (ou rodada antiga) é recusa
-           de verdade. */
-        const mesmoPeriodo = _backfill.de === de && _backfill.ate === ate;
+           de verdade.
+           Codex (#519): este `_backfill` é o MESMO módulo que a GOOD importa (gbo.backfillVendas)
+           pra rodar o próprio backfill — sem checar a empresa, um backfill da GOOD com o mesmo
+           período respondia "iniciado" aqui na rota da Girassol, sem nenhum backfill da Girassol
+           ter começado. */
+        const mesmoPeriodo = _backfill.empresa === 'girassol' && _backfill.de === de && _backfill.ate === ate;
         const segundos = _backfill.inicio ? (Date.now() - Date.parse(_backfill.inicio)) / 1000 : 1e9;
         if (mesmoPeriodo && segundos < 30) {
           json(res, 200, { ok: true, msg: '✅ backfill deste período já foi iniciado (há ' + Math.round(segundos) + 's) — acompanhe em /backfill-status', de, ate, status: _backfill });
