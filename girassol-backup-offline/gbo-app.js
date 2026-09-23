@@ -4529,6 +4529,17 @@ async function backfillVendas(de, ate, empresa, ctx){
         }
         await dorme(430);   // rate limit do Bling (~2,3 req/s)
         if(!det){
+          // Codex #516 (P1): esgotar as 3 esperas longas E AINDA ASSIM continuar 429/limite
+          // é o Bling seguindo limitado por mais de ~14 min — não um pedido isolado com
+          // problema. Deixar a rodada seguir até o DELETE reproduziria o BURACO que este PR
+          // existe pra evitar. Aborta como a listagem já faz: nada é apagado, roda de novo.
+          if (esperas429det >= 3) {
+            _backfill.fase = 'erro';
+            _backfill.msg = 'detalhe do pedido ' + p.id + ': limite do Bling persistente (>14 min) — rodada ABORTADA e NADA foi apagado: o histórico antigo do período continua inteiro. Rode de novo mais tarde.';
+            console.log('[BACKFILL] ✗ abortado no detalhe do pedido ' + p.id + ' — limite do Bling persistente, histórico do período ficou incompleto, rode de novo');
+            _backfill.rodando = false; _backfill.fim = new Date().toISOString();
+            _limparSpool(); return Object.assign({}, _backfill, { desfecho: 'abortado', ok: false });
+          }
           _backfill.erros++;
           if (!_backfill.sem_detalhe) _backfill.sem_detalhe = [];
           if (_backfill.sem_detalhe.length < 30) _backfill.sem_detalhe.push(p.id);   // quais pedidos ficaram de fora
