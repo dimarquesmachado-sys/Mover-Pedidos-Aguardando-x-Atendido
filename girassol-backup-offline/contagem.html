@@ -80,16 +80,21 @@
   .busca-hero:focus-within{border-color:var(--girassol);
                            box-shadow:0 0 0 4px var(--girassol-fraco)}
   .busca-icone{font-size:20px;opacity:.75;flex:none}
+  /* Codex #512 (P2): `font:500 19px/1.2 inherit` é INVÁLIDO — `inherit` é palavra-chave de
+     valor único e não entra no atalho junto de peso e tamanho. O navegador descartava a
+     declaração inteira, e o campo herói ficava com o tamanho padrão do input: exatamente o
+     "campo pequeno" que este PR existe pra consertar. Propriedades separadas. */
   .busca-campo{flex:1;min-width:0;border:0;outline:0;background:none;color:var(--texto);
-               font:500 19px/1.2 inherit;padding:18px 0}
+               font-family:inherit;font-weight:500;font-size:19px;line-height:1.2;padding:18px 0}
   .busca-campo::placeholder{color:var(--calmo);font-weight:400}
   .busca-limpar{border:0;background:none;color:var(--calmo);font-size:26px;line-height:1;
                 cursor:pointer;padding:6px 4px;display:none}
   .busca-limpar:hover{color:var(--texto)}
   .busca-hero.tem-texto .busca-limpar{display:block}
   .busca-ajuda{color:var(--calmo);font-size:13px;margin:0 0 18px;padding:0 2px}
-  .nota-interna{color:var(--calmo);font-size:13px;margin:26px 0 8px;padding-left:12px;
-                border-left:2px solid var(--linha)}
+  .nota-interna{color:var(--texto);font-size:14px;margin:14px 0 0;padding:11px 14px;
+                background:var(--girassol-fraco);border-left:3px solid var(--girassol);
+                border-radius:0 10px 10px 0}
 
   /* ── resultados da busca: alvo grande, um por linha ── */
   .lista-nome{display:flex;gap:12px;align-items:center;width:100%;text-align:left;
@@ -178,7 +183,7 @@
       <span class="logo-girassol" role="img" aria-label="Magazine Girassol"></span>
       <h1>Contagem de estoque</h1>
       <span class="empresa">Magazine Girassol</span>
-      <span class="build">c13</span>
+      <span class="build">c14</span>
     </div>
   </header>
 
@@ -187,6 +192,13 @@
        estava "muito ruim, layout bem pobre", e estava: o elemento mais usado era o menor da
        página. Agora ela ocupa a largura toda, tem altura de alvo de dedo e o texto grande o
        bastante pra ser lido de pé, a um braço de distância do monitor do galpão. -->
+  <!-- Codex #512 (P2): eu tinha empurrado este aviso pra BAIXO dos resultados e deixado em
+       cinza 13px. Uma busca por nome desenha até 30 produtos antes dele — na prática, ninguém
+       leria. E é o aviso que impede o mal-entendido mais caro desta tela: alguém contar achando
+       que ajustou o estoque do Bling. Volta pro topo, antes de qualquer ação. -->
+  <p class="nota-interna">O saldo do Bling <b>não muda</b> por aqui — isto é registro interno,
+    guardado pra você conferir depois.</p>
+
   <div class="busca-hero">
     <span class="busca-icone" aria-hidden="true">🔍</span>
     <input id="busca" class="busca-campo" autofocus autocomplete="off"
@@ -201,7 +213,7 @@
 
   <div id="resultado"></div>
 
-  <p class="nota-interna">O saldo do Bling não muda por aqui. As contagens ficam guardadas pra você conferir.</p>
+
 
   <section class="bloco" id="painelLanc" style="display:none">
     <h2>✍️ Lançar contagem</h2>

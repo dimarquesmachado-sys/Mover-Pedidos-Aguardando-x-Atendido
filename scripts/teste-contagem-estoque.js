@@ -449,4 +449,28 @@ for (const [emp, arq] of Object.entries({
     'o logo da contagem não é o mesmo do painel — duas versões da marca divergem sem ninguém notar');
 }
 
+/* 23/09 (Codex #512) — dois erros meus no PR que existia justamente pra consertar o visual. */
+{
+  const cssT = /<style>([\s\S]*?)<\/style>/.exec(html)[1].replace(/\/\*[\s\S]*?\*\//g, '');
+  const corpo = html.slice(html.indexOf('<body>'));
+
+  /* `font:500 19px/1.2 inherit` é inválido: `inherit` é palavra-chave de valor único e não
+     entra no atalho junto de peso e tamanho. O navegador descarta a declaração INTEIRA — e o
+     campo herói voltava ao tamanho padrão do input, que é o "campo pequeno" reclamado. */
+  const atalhos = [...cssT.matchAll(/font:([^;}]*)/g)].map(m => m[1].trim());
+  const invalidos = atalhos.filter(v => v.includes('inherit') && v !== 'inherit');
+  assert.deepStrictEqual(invalidos, [],
+    'atalho `font` com `inherit` misturado a outros valores: ' + invalidos.join(' | ') +
+    ' — o navegador descarta a regra toda e o campo perde tamanho e peso');
+
+  /* o aviso de que o Bling NÃO muda tem que vir antes de qualquer ação: é o que impede o
+     mal-entendido mais caro desta tela. Empurrado pra baixo dos resultados, uma busca por nome
+     desenha até 30 produtos antes dele e ninguém lê. */
+  assert.ok(corpo.indexOf('nota-interna') < corpo.indexOf('busca-hero'),
+    'o aviso de que o saldo do Bling não muda ficou depois da busca — alguém contaria achando ' +
+    'que ajustou o estoque');
+  assert.ok(/\.nota-interna\{[^}]*girassol/.test(cssT),
+    'o aviso perdeu o destaque e virou texto apagado');
+}
+
 console.log('OK: contagem de estoque — registro interno (nunca escreve no Bling), sessão nas 4 rotas, quantidade validada e busca por nome sem gastar cota');
