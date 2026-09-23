@@ -372,8 +372,27 @@ for (const [emp, arq] of Object.entries({
 
   /* a marca nasce na indexação — `formato === 'E'` é composição no Bling, já documentado em
      amb-drive-imagens (que preserva a estrutura justamente porque o Bling recusa sem ela) */
-  assert.ok(/const ehKit = String\(\(det && det\.formato\) \|\| it\.formato \|\| ''\)\.toUpperCase\(\) === 'E'/.test(ciclo),
-    'a indexação não marca kit — a busca não teria como escondê-los');
+  /* 23/09 — o `formato` da LISTAGEM não basta, e os três casos vieram do dono:
+     · a lista pode dizer "S" pra algo que tem composição;
+     · `V` é pai de grade, que também não tem estoque próprio;
+     · quem decide é `estrutura.componentes`.
+     A primeira versão deste assert travava a forma antiga (só `formato === 'E'`) e teria
+     reprovado esta melhoria — trava o comportamento. */
+  assert.ok(/\(Array\.isArray\(_comps\) && _comps\.length > 0\) \|\| _fmt === 'E' \|\| _fmt === 'V'/.test(ciclo),
+    'a indexação decide kit só pelo `formato` — a listagem pode dizer "S" pra algo com composição');
+
+  /* Codex #515: detalhe que FALHOU no modo profundo não pode ser publicado como "não é kit" —
+     é exatamente o caso que o modo profundo foi feito pra resolver, e afirmar o contrário do
+     que se foi verificar é pior que não saber. */
+  assert.ok(/const _semVeredito = profundo && !det;/.test(ciclo),
+    'detalhe que falhou vira "não é kit" — a varredura cara publicaria o oposto do que apurou');
+
+  /* exercita a regra nos quatro casos */
+  const decide = (comps, fmt) => (Array.isArray(comps) && comps.length > 0) || fmt === 'E' || fmt === 'V';
+  assert.ok(decide([{ codigo: 'A' }], 'S'), 'kit que a lista diz "S" tem que ser pego pela composição');
+  assert.ok(decide([], 'E'), 'kit declarado tem que ser pego');
+  assert.ok(decide([], 'V'), 'pai de grade não tem estoque próprio — não é contável');
+  assert.ok(!decide([], 'S'), 'produto simples não pode ser barrado');
   assert.ok(/kit: ehKit/.test(ciclo), 'a marca não vai pro índice');
 
   assert.ok(/if \(it\.kit === true\) continue;/.test(cat6),
@@ -407,9 +426,17 @@ for (const [emp, arq] of Object.entries({
   /* Codex #511 (P2, 2ª leva): salvarNoIndiceEan regrava a entrada inteira sem o campo `kit` —
      abrir um kit por SKU/EAN exato apagava a marca que a indexação completa tinha posto, e
      ele voltava a aparecer na busca por nome até a próxima reindexação total */
+  /* 23/09: este assert travava a FORMA (`kit: String(prod.formato) === 'E'`), e o conserto do
+     #515 a substituiu — composição decide, formato reforça, e veredito anterior é preservado
+     quando o objeto não permite afirmar. Trava o comportamento: a marca não pode ser perdida
+     nem negada por engano. É a terceira vez hoje que um assert de forma reprova uma melhoria. */
   const prod6 = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'produtos.js'), 'utf8');
-  assert.ok(/kit: String\(prod\.formato \|\| ''\)\.toUpperCase\(\) === 'E'/.test(prod6),
-    'salvarNoIndiceEan apaga a marca de kit do índice ao resolver o produto de novo');
+  const regraKit = /kit: \(\(\) => \{[\s\S]*?\}\)\(\),/.exec(prod6);
+  assert.ok(regraKit, 'salvarNoIndiceEan não calcula mais a marca de kit — ela some ao reabrir o produto');
+  assert.ok(/estrutura\.componentes/.test(regraKit[0]),
+    'a marca é recalculada só pelo formato — composição é quem decide');
+  assert.ok(/antes === true/.test(regraKit[0]),
+    'não preserva o veredito da varredura profunda quando o objeto não permite afirmar');
 }
 
 /* 22/09 — A FOTO NA LINHA das contagens, pedido do dono. Num inventário de lixas com nomes
@@ -587,6 +614,89 @@ for (const [emp, arq] of Object.entries({
       emp + '/ciclo.js: a página vazia final não marca o catálogo como completo');
     assert.ok(/if \(!catalogoCompleto\)/.test(ciclo),
       emp + '/ciclo.js: estourar a trava de 500 páginas publica o índice truncado em vez de abortar');
+  }
+}
+
+/* 23/09 — a TRAVA DO LANÇAMENTO é o ponto onde não pode passar: ela roda uma vez por
+   lançamento (não por produto do catálogo), então buscar o detalhe ali é barato — e é o único
+   lugar que alcança o kit que a listagem não denunciou. */
+{
+  const libK = fs.readFileSync(LIB, 'utf8');
+  assert.ok(/const det = await ctx\.blingGet\(`\/produtos\/\$\{it\.id\}`/.test(libK),
+    'a trava do lançamento só olha a listagem — kit com EAN passaria');
+  assert.ok(/estrutura\.componentes \|\| prod\.estrutura\.itens/.test(libK),
+    'a trava não olha a composição, que é quem decide de verdade');
+  assert.ok(/fmt === 'V'/.test(libK), 'o pai de grade passa como produto contável');
+  /* o que importa é a pessoa sair sabendo o que contar, não a forma de montar a lista —
+     o conserto do #515 moveu isso pra resolverComponentes, que ainda resolve por id */
+  assert.ok(/componentes: await resolverComponentes\(comps\.slice\(0, 12\)/.test(libK),
+    'barra o kit sem dizer QUAIS produtos contar — a pessoa fica parada');
+}
+
+/* o modo profundo existe nas três, e NÃO é o padrão (custa ~9.000 chamadas na Girassol) */
+for (const [emp, arq] of Object.entries({
+  amb: 'amb-checkout-offline/ciclo.js',
+  girassol: 'girassol-backup-offline/ciclo.js',
+  good: 'good-checkout-offline/ciclo.js',
+})) {
+  const c = fs.readFileSync(path.join(raiz, arq), 'utf8');
+  assert.ok(/const profundo = !!\(opcoes && opcoes\.profundo\)/.test(c),
+    emp + ': não tem modo profundo — sem ele, a marca de kit depende de um campo que a listagem ' +
+    'nem sempre traz');
+  assert.ok(/if \(!eans\.length \|\| profundo\)/.test(c), emp + ': o modo profundo não busca o detalhe');
+  assert.ok(!/indexarCatalogoCompleto\(\{ *profundo: *true/.test(c),
+    emp + ': o modo profundo virou padrão — são ~9.000 chamadas a mais, com o galpão operando');
+}
+
+/* Codex #515 (P2, r2) — os três buracos que sobraram do meu conserto. */
+{
+  const prodK = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'produtos.js'), 'utf8');
+  const libK2 = fs.readFileSync(LIB, 'utf8');
+
+  /* abrir o produto pela busca apagava o veredito da varredura profunda */
+  assert.ok(/if \(antes === true && !Array\.isArray\(cmp\)\) return true;/.test(prodK),
+    'abrir o produto pela busca nega o kit que a varredura profunda tinha marcado — ele volta ' +
+    'a aparecer na busca até a próxima varredura');
+
+  /* componente que vem só com id precisa de nome, senão a mensagem sai vazia */
+  assert.ok(/async function resolverComponentes/.test(libK2),
+    'componente que vem só com `produto.id` sairia sem sku nem nome — a mensagem ficaria ' +
+    '"conte os produtos que o compõem:" e nada depois');
+  assert.ok(/buscados < 6/.test(libK2),
+    'resolver componente sem teto transforma uma recusa em rajada de chamadas');
+  assert.ok(/if \(!sku && !nome && id\) sku = 'id ' \+ id;/.test(libK2),
+    'componente que não resolveu sai vazio da lista');
+
+  /* AMB e GOOD também classificam: eu tinha ligado o modo profundo nelas SEM a decisão */
+  for (const [emp, arq] of Object.entries({
+    amb: 'amb-checkout-offline/ciclo.js', good: 'good-checkout-offline/ciclo.js',
+  })) {
+    const c = fs.readFileSync(path.join(raiz, arq), 'utf8');
+    assert.ok(/const ehKit = _semVeredito \? null/.test(c),
+      emp + ': o modo profundo busca o detalhe mas NÃO classifica — a varredura cara não serve ' +
+      'pro que foi feita');
+    assert.ok(/novo\[e\] = \{ kit: ehKit/.test(c), emp + ': a marca não vai pro índice');
+
+    /* Codex #515 (P2, r3) — a classificação usa `det` FORA do `if (!eans.length || profundo)`
+       que o declara. Sem hoistar a variável pra fora desse bloco, `det` não existe naquele
+       escopo: toda vez que o produto JÁ tinha EAN (o caso comum), a leitura de `det` explode
+       com ReferenceError — e como isso roda dentro do loop de páginas, a excecão sobe, o
+       `catch` externo aborta a varredura inteira, e o índice de AMB/GOOD nunca mais atualiza. */
+    assert.ok(/let det = null;/.test(c),
+      emp + ': `det` não está declarado fora do `if` que o preenche — ReferenceError sempre ' +
+      'que o produto já tem EAN, abortando toda reindexação completa');
+    const idxIf = c.indexOf('if (!eans.length || profundo)');
+    const idxUsoAlvo = c.indexOf('const _alvo = det || it;');
+    assert.ok(idxIf > 0 && idxUsoAlvo > idxIf,
+      emp + ': não achei a classificação de kit depois do bloco que busca o detalhe');
+    const idxFimIf = c.indexOf('}', idxIf);
+    assert.ok(idxUsoAlvo > idxFimIf,
+      emp + ': a classificação de kit usa `det` de dentro do próprio bloco que o declara — ' +
+      'fora dele (produto que já tinha EAN) é ReferenceError');
+
+    /* e o produto SEM GTIN (chave sintética `sku:`) também precisa da marca — não só quem tem EAN */
+    assert.ok(/novo\['sku:' \+ sku\] = \{ kit: ehKit/.test(c),
+      emp + ': produto sem GTIN não ganha a marca de kit — só quem tem EAN é classificado');
   }
 }
 
