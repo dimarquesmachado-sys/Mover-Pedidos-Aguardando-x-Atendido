@@ -143,6 +143,11 @@
   /* botão secundário (ver mais): não compete com o âmbar, que marca a ação principal */
   .btn.sec{background:var(--carta2);color:var(--texto);border:1px solid var(--linha);font-weight:500}
   .btn.sec:hover{border-color:var(--girassol);filter:none}
+  .topo-lista{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:2px 0 8px}
+  .topo-lista .modo{display:flex;gap:5px;margin-left:auto}
+  .chip{font:inherit;font-size:12px;padding:4px 11px;border-radius:20px;cursor:pointer;
+        background:var(--carta2);color:var(--calmo);border:1px solid var(--linha)}
+  .chip.on{background:var(--girassol-fraco);color:var(--girassol);border-color:var(--girassol)}
 
   /* ── contagens do dia ── */
   .item{display:flex;align-items:center;gap:13px;background:var(--carta);
@@ -196,7 +201,7 @@
       <span class="logo-girassol" role="img" aria-label="Magazine Girassol"></span>
       <h1>Contagem de estoque</h1>
       <span class="empresa">Magazine Girassol</span>
-      <span class="build">c16</span>
+      <span class="build">c17</span>
     </div>
   </header>
 
@@ -271,6 +276,13 @@ function horaSP(iso){ try { return new Date(iso).toLocaleString('sv-SE',{timeZon
      embora — e a operação perde primeiro. */
 let _tDigita = null, _seqBusca = 0;
 
+/* 23/09 — modo da lista de resultados. O dono pediu TUDO de uma vez por padrão, com a opção
+   de ver em partes quando a lista ficar grande demais pro celular do galpão. Os passos
+   crescem (50 → 100 → 200): quem vai até o fim chega rápido. */
+let MODO_LISTA = 'tudo';
+const PASSOS = [50, 100, 200];
+let _nPassos = 0;
+
 function aoDigitar(v){
   /* o × só aparece quando há o que limpar: botão permanente que não faz nada vira ruído */
   const hero = document.querySelector('.busca-hero');
@@ -336,7 +348,11 @@ async function buscarPorNome(q, veioDeCodigo, offset, acumulado){
   const alvo = document.getElementById('resultado');
   let d = null;
   try {
-    const r = await fetch(MOD+'/buscar-produto-nome?q='+encodeURIComponent(q)+'&offset='+(offset||0), {credentials:'same-origin'});
+    /* 'tudo' não manda limite (o servidor devolve a lista inteira); 'partes' manda o passo
+       da vez, que cresce a cada "ver mais". */
+    const passo = (MODO_LISTA === 'partes') ? PASSOS[Math.min(_nPassos, PASSOS.length - 1)] : 0;
+    const r = await fetch(MOD+'/buscar-produto-nome?q='+encodeURIComponent(q)
+                          +'&offset='+(offset||0)+(passo ? '&limite='+passo : ''), {credentials:'same-origin'});
     d = await r.json().catch(()=>null);
   } catch(e){ d = null; }
   if(meu !== _seqBusca) return;
@@ -373,7 +389,16 @@ async function buscarPorNome(q, veioDeCodigo, offset, acumulado){
      acumula e oferece o resto, em vez de fingir que são só 30. */
   const lista = (acumulado || []).concat(d.itens || []);
   const falta = d.total - lista.length;
-  alvo.innerHTML = '<div class="dim">'+lista.length+' de '+d.total+' resultado(s) — toque no produto:</div>' +
+  alvo.innerHTML =
+    '<div class="topo-lista">' +
+      '<span class="dim">'+lista.length+' de '+d.total+' resultado(s) — toque no produto:</span>' +
+      (d.total > PASSOS[0]
+        ? '<span class="modo">' +
+            '<button class="chip'+(MODO_LISTA==='tudo'?' on':'')+'" data-modo="tudo">tudo</button>' +
+            '<button class="chip'+(MODO_LISTA==='partes'?' on':'')+'" data-modo="partes">em partes</button>' +
+          '</span>'
+        : '') +
+    '</div>' +
     lista.map(it =>
       '<button class="lista-nome" data-sku="'+esc(it.sku)+'">' +
         (it.img ? '<img class="thumb" src="'+esc(it.img)+'" alt="" loading="lazy">'
@@ -384,7 +409,16 @@ async function buscarPorNome(q, veioDeCodigo, offset, acumulado){
             (it.ean ? '<span class="ean">código de barras '+esc(it.ean)+'</span>' : '')+'</span>' +
         '</span>' +
       '</button>').join('') +
-    (falta > 0 ? '<button class="btn sec" id="btVerMais" style="width:100%;margin-top:6px">ver mais '+Math.min(falta,30)+' (de '+falta+' restantes)</button>' : '');
+    (falta > 0 ? '<button class="btn sec" id="btVerMais" style="width:100%;margin-top:8px">ver mais '+Math.min(falta, PASSOS[Math.min(_nPassos+1, PASSOS.length-1)])+' (faltam '+falta+')</button>' : '');
+
+  alvo.querySelectorAll('.chip[data-modo]').forEach(b => {
+    b.addEventListener('click', () => {
+      if(MODO_LISTA === b.dataset.modo) return;
+      MODO_LISTA = b.dataset.modo;
+      _nPassos = 0;                       // trocar de modo recomeça a lista do zero
+      buscarPorNome(q, veioDeCodigo);
+    });
+  });
 
   const btMais = document.getElementById('btVerMais');
   if(btMais) btMais.addEventListener('click', () => {
@@ -392,6 +426,7 @@ async function buscarPorNome(q, veioDeCodigo, offset, acumulado){
     btMais.textContent = 'carregando…';
     /* o contador de ordem é reaproveitado: se a pessoa digitar outra coisa enquanto isto
        carrega, a resposta velha é descartada como qualquer outra */
+    _nPassos++;                         // 50 → 100 → 200
     buscarPorNome(q, veioDeCodigo, d.proximo_offset, lista);
   });
   /* por addEventListener, não por onclick montado com o SKU: foi o XSS que o Codex achou no

@@ -37,14 +37,25 @@ const handler = criar({
   primeiraImagem: () => '', locCache: () => ({}), localizacaoDeProduto: () => '',
   indexarCatalogoCompleto: async () => {}, getIdxStatus: () => ({ fim: 'x' }),
 });
-const pagina = async (off) => {
+const pagina = async (off, lim) => {
   const r = {};
-  await handler({ headers: {} }, r, new URL('http://x/x/buscar-produto-nome?q=lixa&offset=' + off), 'GET');
+  const qs = 'q=lixa&offset=' + off + (lim ? '&limite=' + lim : '');
+  await handler({ headers: {} }, r, new URL('http://x/x/buscar-produto-nome?' + qs), 'GET');
   return r._o;
 };
 
 (async () => {
-  const p1 = await pagina(0);
+  /* 23/09 — o dono pediu TUDO de uma vez como PADRÃO: sem `limite`, vem a lista inteira.
+     O modo em partes continua existindo pra quando a lista ficar grande demais pro celular
+     do galpão, com passos que crescem (50 → 100 → 200). */
+  const tudo = await pagina(0);
+  assert.strictEqual(tudo.itens.length, 50,
+    'sem `limite` a busca tinha que devolver TUDO — é o padrão que o dono pediu');
+  assert.strictEqual(tudo.tem_mais, false, 'diz que há mais quando mandou tudo');
+  assert.deepStrictEqual(tudo.itens.map(i => i.nome), [...tudo.itens.map(i => i.nome)].sort((a, b) => a.localeCompare(b, 'pt-BR')),
+    'a lista completa não veio ordenada');
+
+  const p1 = await pagina(0, 30);
 
   assert.strictEqual(p1.total, 50,
     '`total` tem que ser quantos CASARAM (50), não quantos couberam na página — senão a tela ' +
@@ -58,12 +69,29 @@ const pagina = async (off) => {
     'a lista foi cortada ANTES de ordenar — o que aparece são resultados SORTEADOS da ordem ' +
     'interna do índice, e o que o dono procura pode simplesmente não cair no sorteio');
 
-  const p2 = await pagina(p1.proximo_offset);
+  const p2 = await pagina(p1.proximo_offset, 30);
   const todos = [...p1.itens, ...p2.itens].map(i => i.nome);
   assert.strictEqual(new Set(todos).size, 50, 'a paginação repetiu ou perdeu item');
   assert.deepStrictEqual(todos, [...todos].sort((a, b) => a.localeCompare(b, 'pt-BR')),
     'as páginas não formam uma ordem contínua — item da página 2 deveria vir depois de todos da 1');
   assert.strictEqual(p2.tem_mais, false, 'diz que há mais quando acabou');
 
-  console.log('OK: busca por nome ordena ANTES de cortar, e pagina o resto');
+  /* a TELA: 'tudo' é o padrão, e o modo em partes cresce 50 → 100 → 200 */
+  const html = fs.readFileSync(path.join(raiz, 'girassol-backup-offline', 'contagem.html'), 'utf8');
+  const js = /<script>([\s\S]*?)<\/script>/.exec(html)[1];
+
+  assert.ok(/let MODO_LISTA = 'tudo';/.test(js),
+    "a tela não abre mostrando tudo — o dono pediu 'tudo' como padrão");
+  assert.ok(/const PASSOS = \[50, 100, 200\];/.test(js), 'os passos do modo em partes mudaram');
+  assert.ok(/MODO_LISTA === 'partes'\) \? PASSOS\[Math\.min\(_nPassos/.test(js),
+    'o modo em partes não manda limite — viria tudo de qualquer jeito');
+  assert.ok(/_nPassos\+\+/.test(js), 'o passo não cresce — ficaria 50 em 50 pra sempre');
+  assert.ok(/_nPassos = 0;/.test(js), 'trocar de modo não recomeça a lista');
+  assert.ok(/data-modo="tudo"/.test(js) && /data-modo="partes"/.test(js),
+    'o seletor dos dois modos sumiu da tela');
+  /* o seletor só aparece quando há o que escolher */
+  assert.ok(/d\.total > PASSOS\[0\]/.test(js),
+    'o seletor aparece mesmo com lista curta — botão que não muda nada é ruído');
+
+  console.log('OK: busca por nome ordena ANTES de cortar; tudo por padrao, em partes 50/100/200 por opcao');
 })().catch(e => { console.error(e); process.exit(1); });
