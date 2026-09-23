@@ -139,18 +139,25 @@ async function indexarCatalogoCompleto() {
         if (!it.id) continue;
         let eans = getPossiveisGtins(it).map(e => String(e).replace(/\D/g, '')).filter(e => e.length >= 8);
         let nome = it.nome, sku = it.codigo;
+        let det = null;   // usado fora do if pra ler o `formato` quando o detalhe foi buscado
         if (!eans.length) {                            // lista não trouxe GTIN → busca no detalhe
-          const det = await produtoDetalhe(it.id);
+          det = await produtoDetalhe(it.id);
           await sleep(PAUSA);
           if (det) { eans = getPossiveisGtins(det).map(e => String(e).replace(/\D/g, '')).filter(e => e.length >= 8); nome = det.nome || nome; sku = det.codigo || sku; }
         }
+        // Espelhado do girassol (kit/foto no índice completo — Codex #513, auditoria da função):
+        // esta cópia nunca marcava kit nem gravava a foto na reindexação total, só na resolução
+        // incremental (salvarNoIndiceEan). Resultado: logo após reindexar, kit aparecia na busca
+        // por nome e nenhum produto tinha foto até alguém abrir cada um individualmente.
+        const ehKit = String((det && det.formato) || it.formato || '').toUpperCase() === 'E';
+        const foto = primeiraImagem(det || it) || '';
         if (eans.length) {
-          for (const e of eans) { if (!novo[e]) idxStatus.eans++; novo[e] = { sku: sku || '', nome: nome || '', id: it.id }; }
+          for (const e of eans) { if (!novo[e]) idxStatus.eans++; novo[e] = { sku: sku || '', nome: nome || '', id: it.id, kit: ehKit, img: foto }; }
         } else if (sku) {
           // Codex (P2): sem GTIN, o produto nunca entrava no índice — e é o índice de EAN que
           // a busca por nome da contagem de estoque usa. Chave sintética prefixada (nunca é só
           // dígitos, ao contrário de um EAN de verdade) pra não colidir com o lookup por dígitos.
-          novo['sku:' + sku] = { sku: sku, nome: nome || '', id: it.id };
+          novo['sku:' + sku] = { sku: sku, nome: nome || '', id: it.id, kit: ehKit, img: foto };
         }
       }
       /* Codex #484 (P2): eu guardei o salvamento FINAL e esqueci deste, que publica a cada
