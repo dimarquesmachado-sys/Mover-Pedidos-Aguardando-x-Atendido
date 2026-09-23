@@ -473,4 +473,121 @@ for (const [emp, arq] of Object.entries({
     'o aviso perdeu o destaque e virou texto apagado');
 }
 
+/* 23/09 — O NCM ESTAVA ENTRANDO NO ÍNDICE DE CÓDIGO DE BARRAS. O dono viu na tela ("está
+   trazendo a informação do NCM") e o rótulo errado era o MENOR dos problemas: NCM tem 8
+   dígitos, que é exatamente o formato de um EAN-8. Ele virava chave do índice de EAN, então
+   bipar um EAN-8 de verdade podia cair no produto errado.
+   A causa: `getPossiveisGtins` varria TODOS os valores de `tributacao` aceitando qualquer
+   string com 8+ caracteres — e ncm, cest e afins moram ali. */
+{
+  const prod = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'produtos.js'), 'utf8');
+  const m = /for \(const \[k, v\] of Object\.entries\(obj\.tributacao\)\)[\s\S]*?\n    \}/.exec(prod);
+  assert.ok(m, 'a varredura de `tributacao` voltou a aceitar qualquer campo — o NCM entra como código de barras');
+  assert.ok(/gtin\|ean\|barras/i.test(m[0]),
+    'a varredura não filtra pelo NOME do campo — ncm e cest entram como se fossem GTIN');
+
+  /* exercita a regra: só chave de código de barras passa */
+  const passa = (k) => /gtin|ean|barras/i.test(k);
+  for (const k of ['ncm', 'cest', 'origem', 'codigoListaServicos']) {
+    assert.ok(!passa(k), k + ' não pode entrar como código de barras');
+  }
+  for (const k of ['gtinTributario', 'codigoBarrasTributario', 'eanTributario']) {
+    assert.ok(passa(k), k + ' devia entrar');
+  }
+}
+
+/* a foto e o SKU na PRIMEIRA lista de resultados, pedidos do dono */
+{
+  const cat8 = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'rotas-catalogo.js'), 'utf8');
+  const js8 = /<script>([\s\S]*?)<\/script>/.exec(html)[1];
+  const ciclo8 = fs.readFileSync(path.join(raiz, 'girassol-backup-offline', 'ciclo.js'), 'utf8');
+
+  assert.ok(/img: foto/.test(ciclo8) && /primeiraImagem\(det \|\| it\)/.test(ciclo8),
+    'a indexação não guarda a foto — mostrá-la na busca custaria uma chamada ao Bling POR ' +
+    'RESULTADO, a cada tecla digitada');
+  assert.ok(/img: it\.img \|\| ''/.test(cat8), 'a busca não devolve a foto');
+  assert.ok(/class="thumb"/.test(js8) && js8.indexOf('class="thumb"') < js8.indexOf('sku-tag'),
+    'a lista de resultados não mostra a foto antes de clicar');
+  assert.ok(/sku-tag">SKU</.test(js8),
+    'o SKU aparece solto como um número qualquer — é o que se confere contra a etiqueta da prateleira');
+}
+
+/* 23/09 (Codex #514, P1) — consertar o coletor impede NCM NOVO, mas o índice SE REALIMENTA DE
+   SI MESMO: os três indexadores completos partem de lerIndiceEan() e regravam o que leram, então
+   os NCM já gravados sobreviveriam a toda varredura futura. E são eles o problema: 8 dígitos é
+   o formato de um EAN-8, e um bipe legítimo pode cair no produto errado. */
+{
+  const base = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'base-funcoes.js'), 'utf8');
+  const bloco = /const lerIndiceEan = \(\) => \{[\s\S]*?\n  \};/.exec(base);
+  assert.ok(bloco, 'lerIndiceEan voltou a ser leitura crua — o NCM já gravado nunca sai');
+
+  /* exercita a limpeza DE PRODUÇÃO, não uma cópia da regra */
+  const tmp = fs.mkdtempSync(path.join(require('os').tmpdir(), 'idx-'));
+  const arq = path.join(tmp, 'ean-indice.json');
+  fs.writeFileSync(arq, JSON.stringify({
+    '84672100':      { sku: '404', nome: 'Martelete', id: 1 },                    // NCM
+    '79088401':      { sku: 'X8', nome: 'EAN-8 real', id: 3, ean: '79088401' },   // EAN-8 legítimo
+    '7908840107701': { sku: 'L', nome: 'Lixa', id: 2 },                           // EAN-13
+    'sku:SEMEAN':    { sku: 'SEMEAN', nome: 'Sem código', id: 4 },
+  }));
+  const ler = new Function('readJson', 'writeJson', 'EAN_INDEX_FILE', bloco[0] + '; return lerIndiceEan;')(
+    (f, d) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { return d; } },
+    (f, o) => fs.writeFileSync(f, JSON.stringify(o)),
+    arq);
+  const chaves = Object.keys(ler());
+
+  assert.ok(!chaves.includes('84672100'), 'o NCM já gravado continua no índice de código de barras');
+  assert.ok(chaves.includes('79088401'),
+    'a limpeza levou junto um EAN-8 LEGÍTIMO — o produto declara esse número como código dele');
+  assert.ok(chaves.includes('7908840107701') && chaves.includes('sku:SEMEAN'),
+    'a limpeza mexeu em chave que não devia (EAN-13 ou chave sintética)');
+  assert.deepStrictEqual(Object.keys(JSON.parse(fs.readFileSync(arq, 'utf8'))), chaves,
+    'a limpeza não foi gravada — voltaria a sujar na próxima leitura');
+}
+
+/* P2: a foto sobrevive a abrir o produto pela busca */
+{
+  const prod2 = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'produtos.js'), 'utf8');
+  assert.ok(/img: primeiraImagem\(prod\) \|\| imgAntes \|\| ''/.test(prod2),
+    'abrir o produto pela busca apaga a foto que a indexação guardou — o resultado aparece com ' +
+    'foto, o funcionário clica, e da próxima busca vem sem');
+}
+
+/* 23/09 (Codex #514, P1, 2ª leva) — o teste acima provou que a REGRA de lerIndiceEan preserva um
+   EAN-8 que declara `ean: chave`. Mas nenhum escritor de produção (salvarNoIndiceEan nem os três
+   indexarCatalogoCompleto) gravava esse campo — todo EAN-8 real caía no mesmo balde do NCM e
+   era apagado na leitura seguinte. A regra "estreita" nunca preservou nada de verdade. Este teste
+   olha os ESCRITORES, não a regra: sem ele, a lacuna passa despercebida de novo. */
+{
+  const prod3 = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'produtos.js'), 'utf8');
+  assert.ok(/idx\[e\] = comMarca/.test(prod3) && /ean: e/.test(prod3),
+    'salvarNoIndiceEan não declara `ean` na entrada — lerIndiceEan vai apagar todo EAN-8 real ' +
+    'na leitura seguinte, junto com o NCM');
+
+  for (const [emp, arq] of Object.entries({
+    girassol: 'girassol-backup-offline', amb: 'amb-checkout-offline', good: 'good-checkout-offline',
+  })) {
+    const ciclo = fs.readFileSync(path.join(raiz, arq, 'ciclo.js'), 'utf8');
+    assert.ok(/novo\[e\] = \{[^}]*ean: e[^}]*\}/.test(ciclo),
+      emp + '/ciclo.js: a indexação completa não declara `ean` na entrada — lerIndiceEan vai ' +
+      'apagar todo EAN-8 real na leitura seguinte, junto com o NCM');
+  }
+}
+
+/* 23/09 (Codex #514, P2) — a trava de 500 páginas (50 mil produtos) existia só pra não rodar pra
+   sempre, mas ao ESTOURAR ela publicava `novo` do mesmo jeito que uma varredura terminada de
+   verdade — e como `novo` nasce vazio (P1), um catálogo maior que 50 mil produtos faria a
+   varredura APAGAR do índice tudo além da página 500, o oposto de "trava de segurança". */
+{
+  for (const [emp, arq] of Object.entries({
+    girassol: 'girassol-backup-offline', amb: 'amb-checkout-offline', good: 'good-checkout-offline',
+  })) {
+    const ciclo = fs.readFileSync(path.join(raiz, arq, 'ciclo.js'), 'utf8');
+    assert.ok(/catalogoCompleto = true.*break/.test(ciclo) || /catalogoCompleto = true;\s*break;/.test(ciclo),
+      emp + '/ciclo.js: a página vazia final não marca o catálogo como completo');
+    assert.ok(/if \(!catalogoCompleto\)/.test(ciclo),
+      emp + '/ciclo.js: estourar a trava de 500 páginas publica o índice truncado em vez de abortar');
+  }
+}
+
 console.log('OK: contagem de estoque — registro interno (nunca escreve no Bling), sessão nas 4 rotas, quantidade validada e busca por nome sem gastar cota');
