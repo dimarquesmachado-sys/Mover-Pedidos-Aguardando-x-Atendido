@@ -514,7 +514,7 @@ function renderListaBusca(lista, total, q, veioDeCodigo, aposNome, aposSku, falh
         '<div class="abre" data-abre="'+esc(it.sku)+'">' +
           '<div class="form-inline">' +
             '<div class="linha-qtd">' +
-              '<input class="campo qtd" type="number" inputmode="numeric" min="0" step="1" placeholder=\'+JSON.stringify(rotuloQtd())+\'>' +
+              '<input class="campo qtd" type="number" inputmode="numeric" min="0" step="1" placeholder="'+esc(rotuloQtd())+'">' +
               '<button class="btn" data-salvar="1">Salvar</button>' +
               '<span class="dim saldo-info"></span>' +
             '</div>' +
