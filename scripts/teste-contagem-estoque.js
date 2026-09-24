@@ -1114,7 +1114,7 @@ for (const [emp, arq] of Object.entries({
 
   /* a razão principal: recusas duplicadas divergem, e a que ficar frouxa deixa passar o que a
      outra recusa — aparecendo só como estoque errado no Bling, sem desfazer */
-  assert.ok(/const r = await aplicarUm\(f\.id, sess, dep, marca\);/.test(libT),
+  assert.ok(/const r = await aplicarUm\(f\.id, sess, dep, marcaAtual\);/.test(libT),
     'o lote não reusa a `aplicarUm` do botão individual — travas duplicadas divergem, e o erro ' +
     'só apareceria como estoque errado no Bling');
   const iLote = libT.indexOf("'/contagem-lancar-todas'");
@@ -1182,6 +1182,21 @@ for (const [emp, arq] of Object.entries({
   assert.ok(/const restantes = Math\.max\(0, fila\.length - 200\)/.test(libB),
     'acima de 200 o lote manda "lançar por partes", mas remontava a mesma fila e recusava de novo');
   assert.ok(/d\.restantes/.test(jsB), 'a tela não oferece a rodada seguinte quando sobra fila');
+
+  /* P1 (r2, minha auditoria em cima do fix acima): a fila inteira reserva com UM carimbo, mas o
+     TTL de 120s do `emAndamento` foi pensado pra detectar um APLICAR ÚNICO que caiu no meio —
+     não um lote de até 200 itens com chamadas ao Bling (mais ainda sob 429). Passados 120s do
+     início do lote, os itens que ainda esperam a vez voltariam a aparecer como "não em
+     andamento" pras rotas de edição, reabrindo a MESMA janela que a reserva upfront existe pra
+     fechar. Sem renovar o carimbo a cada item, um lote de umas dezenas de itens pra cima reabre
+     a corrida que este PR inteiro existe pra fechar. */
+  assert.ok(/let marcaAtual = marca;/.test(libB),
+    'o lote usa um só carimbo (`marca`) do início ao fim — passados 120s, os itens que ainda ' +
+    'esperam a vez voltam a parecer "livres" pras rotas de edição, e a reserva upfront deixa de ' +
+    'proteger justamente quem mais precisa (o fim de uma fila grande)');
+  assert.ok(/if \(l && l\.aplicando_em === marcaAtual && !l\.aplicado_em\) \{ l\.aplicando_em = agora; mexeu = true; \}/.test(libB),
+    'o lote não renova o carimbo do resto da fila a cada item — o TTL de 120s expira antes de ' +
+    'um lote grande terminar');
 }
 
 console.log('OK: contagem de estoque — registro interno (nunca escreve no Bling), sessão nas 4 rotas, quantidade validada e busca por nome sem gastar cota');
