@@ -258,7 +258,7 @@
       <span class="logo-girassol" role="img" aria-label="Magazine Girassol"></span>
       <h1>Contagem de estoque</h1>
       <span class="empresa">Magazine Girassol</span>
-      <span class="build">c33</span>
+      <span class="build">c34</span>
     </div>
   </header>
 
@@ -395,20 +395,7 @@ async function procurar(){
      mostrarProduto já fazia pro caminho do clique. */
   clearTimeout(_tDigita);
   const alvo = document.getElementById('resultado');
-  /* a aba filtra o que é DESENHADO; a lista completa continua em ACUMULADO, porque os
-     contadores das abas precisam dela */
-  const lancados = ACUMULADO.filter(l => l.aplicado_em);
-  const pendentes = ACUMULADO.filter(l => !l.aplicado_em);
-  const visiveis = ABA === 'sim' ? lancados : (ABA === 'nao' ? pendentes : ACUMULADO);
-  const podeLancar = pendentes.filter(l => l.id && l.tipo === 'somar');
-  prontosNaTela = podeLancar;
-
   alvo.innerHTML =
-    '<div class="abas">' +
-      '<button class="aba'+(ABA==='nao'?' on':'')+'" data-aba="nao">a lançar ('+pendentes.length+')</button>' +
-      '<button class="aba'+(ABA==='sim'?' on':'')+'" data-aba="sim">no Bling ('+lancados.length+')</button>' +
-      '<button class="aba'+(ABA==='todos'?' on':'')+'" data-aba="todos">todos ('+ACUMULADO.length+')</button>' +
-    '</div>' +
  '<span class="dim">procurando…</span>';
 
   /* SKU e EAN vão ao Bling (precisam do saldo e da foto do momento); nome vai no
@@ -1170,7 +1157,20 @@ async function carregarHoje(recomecar){
   /* 22/09 — CARTÃO por item, em vez de tabela. Pedido do dono: ver nome, SKU e quantidade, com
      + e − do lado pra acrescentar ou tirar sem refazer a contagem (o funcionário acha mais uma
      caixa no canto e soma). Tabela de 7 colunas num celular de galpão não se lê nem se toca. */
+  /* a aba filtra o que é DESENHADO; a lista completa continua em ACUMULADO, porque os
+     contadores das abas precisam dela */
+  const lancados = ACUMULADO.filter(l => l.aplicado_em);
+  const pendentes = ACUMULADO.filter(l => !l.aplicado_em);
+  const visiveis = ABA === 'sim' ? lancados : (ABA === 'nao' ? pendentes : ACUMULADO);
+  const podeLancar = pendentes.filter(l => l.id && l.tipo === 'somar');
+  prontosNaTela = podeLancar;
+
   alvo.innerHTML =
+    '<div class="abas">' +
+      '<button class="aba'+(ABA==='nao'?' on':'')+'" data-aba="nao">a lançar ('+pendentes.length+')</button>' +
+      '<button class="aba'+(ABA==='sim'?' on':'')+'" data-aba="sim">no Bling ('+lancados.length+')</button>' +
+      '<button class="aba'+(ABA==='todos'?' on':'')+'" data-aba="todos">todos ('+ACUMULADO.length+')</button>' +
+    '</div>' +
     (truncado ? '<div class="aviso">Mostrando os '+ACUMULADO.length+' lançamentos mais recentes de hoje — há mais no arquivo que esta tela não carrega de uma vez.</div>' : '') +
     /* 24/09 — CONVERTER TODAS DE UMA VEZ. Ele lançou ~10 itens antes de os dois modos
        existirem, todos querendo somar, e cada um ficou como contagem. Trocar uma a uma é o
