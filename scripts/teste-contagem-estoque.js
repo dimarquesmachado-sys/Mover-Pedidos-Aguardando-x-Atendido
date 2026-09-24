@@ -82,8 +82,14 @@ for (const rota of ['/contagem', '/contagem-lancar', '/contagem-lista']) {
 assert.ok(/saldo_bling_na_hora/.test(lib),
   'a contagem não guarda o saldo do Bling do momento — a divergência deixaria de ser auditável, ' +
   'porque a revisão compararia a contagem de ontem com o saldo de hoje');
-assert.ok(/divergencia: \(saldoBling != null/.test(lib),
-  'a divergência não é calculada no lançamento');
+/* 23/09 — a divergência só existe em CONTAGEM. No modo somar, "10" é "chegaram 10", não "a
+   prateleira tem 10": comparar com o saldo daria um número sem significado, e número errado é
+   pior que número ausente. */
+assert.ok(/divergencia: \(String\(body\.tipo \|\| ''\) !== 'somar' && saldoBling != null/.test(lib),
+  'a divergência não é calculada no lançamento, ou é calculada também no modo somar');
+assert.ok(/tipo: \(String\(body\.tipo \|\| ''\) === 'somar'\) \? 'somar' : 'contagem'/.test(lib),
+  'o lançamento não grava O QUE o número significa — na revisão, "10" não diz se o Bling ' +
+  'recebe 10 ou +10, e aplicar o errado põe o estoque errado sem ninguém descobrir por quê');
 assert.ok(/enviado_ao_bling: false/.test(lib),
   'falta a marca de "ainda não enviado" — é ela que deixa o dono saber o que já tratou');
 
@@ -698,6 +704,74 @@ for (const [emp, arq] of Object.entries({
     assert.ok(/novo\['sku:' \+ sku\] = \{ kit: ehKit/.test(c),
       emp + ': produto sem GTIN não ganha a marca de kit — só quem tem EAN é classificado');
   }
+}
+
+/* 23/09 — DOIS MODOS, e a diferença entre eles é a coisa mais perigosa desta tela.
+   O dono: "eu quero olhar aqui do meu lado, se tem 10 produtos A, e só digitar 10, pra
+   ADICIONAR 10 ao total". Isso é ENTRADA. O que a tela fazia era CONTAGEM: "há 10 na
+   prateleira", com divergência contra o Bling.
+   Os dois usos são legítimos — hoje ele registra estoque que não está na prateleira; amanhã
+   quer inventário —, mas o registro precisa dizer qual é: na hora de aplicar no Bling, "10"
+   sozinho não diz se o estoque vai PRA 10 ou SOMA 10. Aplicar o errado põe o estoque errado e
+   ninguém descobre por quê. */
+{
+  const os2 = require('os');
+  const dir2 = fs.mkdtempSync(path.join(os2.tmpdir(), 'modo-'));
+  let corpo2 = {};
+  const { criar: criarContagem } = require(LIB.replace(/\.js$/, ''));
+  const rc2 = criarContagem({
+    prefixo: '/x', json: (r, st, o) => { r._o = o; }, validarSessao: () => ({ nome: 'Diego' }),
+    lerIndiceEan: () => ({}), CACHE_DIR: dir2,
+    readJson: (f, d) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { return d; } },
+    writeJson: () => true, readBody: async () => corpo2, empresa: { pasta: 'girassol-backup-offline' },
+    blingGet: async (u) => u.includes('/estoques/saldos')
+      ? { ok: true, data: { data: [{ saldoVirtualTotal: 3 }] } }
+      : { ok: true, data: { data: [{ id: 1, codigo: 'A', formato: 'S' }] } },
+  });
+  const lancar2 = async (tipo) => {
+    corpo2 = { sku: 'A', nome: 'Produto A', contado: 10, tipo };
+    const res = {};
+    await rc2({ headers: {} }, res, new URL('http://x/x/contagem-lancar'), 'POST');
+    return res._o;
+  };
+
+  (async () => {
+    await lancar2('somar');
+    await lancar2('contagem');
+    await lancar2(undefined);            // sem tipo: tem que cair no seguro
+    const ls = JSON.parse(fs.readFileSync(path.join(dir2, '_contagem-estoque.json'), 'utf8')).lancamentos;
+
+    assert.strictEqual(ls[0].tipo, 'somar', 'o tipo somar não foi gravado');
+    assert.strictEqual(ls[0].divergencia, null,
+      'o modo SOMAR gravou divergência — "chegaram 10" comparado com o saldo dá um número sem ' +
+      'significado, e número errado é pior que número ausente');
+
+    assert.strictEqual(ls[1].tipo, 'contagem', 'o tipo contagem não foi gravado');
+    assert.strictEqual(ls[1].divergencia, 7,
+      'a CONTAGEM perdeu a divergência — contou 10, o sistema dizia 3, e é esse 7 que o dono revisa');
+
+    assert.strictEqual(ls[2].tipo, 'contagem',
+      'lançamento sem tipo não caiu em contagem — o padrão tem que ser o que calcula divergência, ' +
+      'porque um acréscimo aplicado como total zeraria o resto do estoque daquele produto');
+  })().catch(e => { console.error(e); process.exit(1); });
+}
+
+/* e a TELA tem que deixar claro o que o número significa, antes e depois de digitar */
+{
+  const js9 = /<script>([\s\S]*?)<\/script>/.exec(html)[1];
+  assert.ok(/let MODO_LANC = 'somar';/.test(js9), 'a tela não tem modo de lançamento');
+  assert.ok(/tipo: MODO_LANC/.test(js9), 'a tela não manda o tipo ao lançar — o servidor cairia no padrão');
+  /* os botões do seletor estão no HTML, não no script */
+  assert.ok(/data-lanc="somar"/.test(html) && /data-lanc="contagem"/.test(html),
+    'não há como escolher o modo na tela');
+  assert.ok(/\.modo-lanc \.chip\[data-lanc\]/.test(js9),
+    'os botões do seletor não têm handler — trocar o modo não faria nada');
+  assert.ok(/'quantidade a somar' : 'total contado'/.test(js9),
+    'o campo não diz o que digitar — o rótulo é a única defesa contra digitar no modo errado');
+  assert.ok(/l\.tipo === 'somar' \? 'a somar' : 'contado'/.test(js9),
+    'a lista do dia não distingue os dois — na revisão "10" não diz se o Bling recebe 10 ou +10');
+  assert.ok(/Você tem quantidades digitadas e não salvas\. Trocar o modo agora\?/.test(js9),
+    'trocar de modo com quantidades digitadas as reinterpreta em silêncio');
 }
 
 console.log('OK: contagem de estoque — registro interno (nunca escreve no Bling), sessão nas 4 rotas, quantidade validada e busca por nome sem gastar cota');

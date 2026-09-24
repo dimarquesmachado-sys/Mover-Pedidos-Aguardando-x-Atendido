@@ -187,6 +187,11 @@
   .item .qtd-box{text-align:center;flex:none;min-width:56px}
   .item .qtd-num{font-size:26px;font-weight:700;line-height:1.05}
   .item .qtd-lbl{font-size:11px;color:var(--calmo)}
+  /* o seletor de modo fica no alto e legível: digitar no modo errado gera dado que ninguém
+     consegue corrigir depois, porque "10" não diz sozinho se era total ou acréscimo */
+  .modo-lanc{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:14px 0 4px;
+             font-size:13px;color:var(--calmo)}
+  .modo-lanc .chip{font-size:12.5px;padding:6px 13px}
   .qtd-num.edit{background:none;border:0;color:inherit;font:inherit;font-size:26px;
                 font-weight:700;cursor:pointer;padding:2px 7px;border-radius:8px}
   .qtd-num.edit:hover{background:var(--carta2)}
@@ -223,7 +228,7 @@
       <span class="logo-girassol" role="img" aria-label="Magazine Girassol"></span>
       <h1>Contagem de estoque</h1>
       <span class="empresa">Magazine Girassol</span>
-      <span class="build">c20</span>
+      <span class="build">c21</span>
     </div>
   </header>
 
@@ -238,6 +243,12 @@
        que ajustou o estoque do Bling. Volta pro topo, antes de qualquer ação. -->
   <p class="nota-interna">O saldo do Bling <b>não muda</b> por aqui — isto é registro interno,
     guardado pra você conferir depois.</p>
+
+  <div class="modo-lanc">
+    <span>O número que eu digitar é:</span>
+    <button type="button" class="chip on" data-lanc="somar">para somar ao estoque</button>
+    <button type="button" class="chip" data-lanc="contagem">o total contado na prateleira</button>
+  </div>
 
   <div class="busca-hero">
     <span class="busca-icone" aria-hidden="true">🔍</span>
@@ -302,6 +313,12 @@ let _tDigita = null, _seqBusca = 0;
    de ver em partes quando a lista ficar grande demais pro celular do galpão. Os passos
    crescem (50 → 100 → 200): quem vai até o fim chega rápido. */
 let _seqAbrir = 0;   // contador SÓ das aberturas de card (não mexe no da busca)
+/* 23/09 — O QUE O NÚMERO SIGNIFICA. 'somar' = "+10 ao que já existe" (o uso de hoje: estoque
+   que não está na prateleira do galpão). 'contagem' = "há 10 na prateleira", que calcula
+   divergência contra o Bling — é o inventário.
+   Fica no alto e bem visível: quem digitar no modo errado gera dado que ninguém consegue
+   corrigir depois, porque 10 não diz sozinho se era total ou acréscimo. */
+let MODO_LANC = 'somar';
 let MODO_LISTA = 'tudo';
 const PASSOS = [50, 100, 200];
 let _nPassos = 0;
@@ -565,7 +582,7 @@ async function abrirNaLista(sku){
         'Saldo no Bling agora: <b class="saldo-card">'+(p.estoque!=null?esc(p.estoque):'—')+'</b>' +
       '</div>' +
       '<div class="linha-qtd">' +
-        '<input class="campo qtd" type="number" inputmode="numeric" min="0" step="1" placeholder="quantidade contada">' +
+        '<input class="campo qtd" type="number" inputmode="numeric" min="0" step="1" placeholder="'+esc(MODO_LANC === 'somar' ? 'quantidade a somar' : 'total contado')+'">' +
         '<button class="btn" data-salvar="1">Salvar</button>' +
       '</div>' +
       '<div class="msg-inline dim"></div>' +
@@ -617,6 +634,7 @@ async function salvarNaLista(p, caixa, campo, botao){
     const r = await fetch(MOD+'/contagem-lancar', {
       method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ sku: p.sku, nome: p.nome, ean: p.ean, img: p.img,
+                             tipo: MODO_LANC,
                              contado: n, saldo_bling: p.estoque })
     });
     d = await r.json().catch(()=>null);
@@ -759,6 +777,7 @@ async function lancarDeVerdade(){
       method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ sku: produto.sku, nome: produto.nome, ean: produto.ean,
                              img: produto.img,   // 22/09: a foto viaja junto pra aparecer na lista
+                             tipo: MODO_LANC,
                              contado: n, saldo_bling: produto.estoque })
     });
     d = await r.json().catch(()=>null);
@@ -956,9 +975,11 @@ async function carregarHoje(recomecar){
            de refazer a busca ("pra eu não ter que digitar de novo o 404"). Os botões resolvem
            de 1 em 1; quando a diferença é grande, digitar erra menos que clicar dez vezes. */
         '<div class="qtd-box">' +
-          (l.id ? '<button class="qtd-num edit" data-editar="1" title="clique pra digitar a quantidade">'+l.contado+'</button>'
+          (l.id ? '<button class="qtd-num edit" data-editar="1" title="clique pra digitar a quantidade">'+(l.tipo === 'somar' ? '+' : '')+l.contado+'</button>'
                 : '<div class="qtd-num">'+l.contado+'</div>') +
-          '<div class="qtd-lbl">contado</div>' +
+          /* 23/09 — o rótulo diz o que o número É. Na revisão, "10" sem contexto não deixa
+             decidir se o Bling recebe 10 ou +10. */
+          '<div class="qtd-lbl">'+(l.tipo === 'somar' ? 'a somar' : 'contado')+'</div>' +
         '</div>' +
         (l.id ? '<div class="mais-menos">' +
           '<button data-ajuste="-1" title="tirar 1">−</button>' +
@@ -983,6 +1004,23 @@ async function carregarHoje(recomecar){
 }
 
 carregarHoje();
+
+/* o seletor de modo: troca o texto dos campos junto, pra não sobrar dúvida do que digitar */
+(function(){
+  const rotulo = () => MODO_LANC === 'somar' ? 'quantidade a somar' : 'total contado';
+  document.querySelectorAll('.modo-lanc .chip[data-lanc]').forEach(b => {
+    b.addEventListener('click', () => {
+      if(MODO_LANC === b.dataset.lanc) return;
+      const pendente = [...document.querySelectorAll('#resultado .campo.qtd')].some(c => c.value.trim() !== '');
+      if(pendente && !confirm('Você tem quantidades digitadas e não salvas. Trocar o modo agora?')) return;
+      MODO_LANC = b.dataset.lanc;
+      document.querySelectorAll('.modo-lanc .chip').forEach(o => o.classList.toggle('on', o.dataset.lanc === MODO_LANC));
+      document.querySelectorAll('#resultado .campo.qtd').forEach(c => { c.placeholder = rotulo(); });
+      const antigo = document.getElementById('qtd');
+      if(antigo) antigo.placeholder = rotulo();
+    });
+  });
+})();
 
 /* limpar a busca devolve o foco ao campo: quem bipa o próximo código não deve precisar
    clicar de novo */
