@@ -861,7 +861,6 @@ function routes(readBody) {
     CACHE_DIR, readJson, writeJson, readBody, blingGet,
     /* pra /contagem-saldo resolver a localização sob demanda, no foco do card (Codex #522 P2) */
     produtoDetalhe, localizacaoDeProduto, locCache,
-    empresa: { pasta: 'girassol-backup-offline' },
     /* 24/09 — pra APLICAR a entrada no estoque do Bling: blingWrite faz o POST, ehAdmin
        decide quem pode (o desenho é o funcionário informar e o dono aprovar). */
     blingWrite, ehAdmin,
