@@ -516,7 +516,12 @@ function renderListaBusca(lista, total, q, veioDeCodigo, aposNome, aposSku, falh
     '</div>' +
     lista.map(it =>
       '<div class="res" data-res="'+esc(it.sku)+'">' +
-      '<button class="lista-nome" data-sku="'+esc(it.sku)+'">' +
+      /* Codex #528 (P2): era um <button> — HTML não permite conteúdo interativo (o <a> do
+         Bling logo abaixo) dentro de um <button>, e o link acabava incorporado/perdido pra
+         leitor de tela ou teclado. Vira <div role="button" tabindex="0">: mesma ativação por
+         clique/teclado (Enter/Space tratados no listener abaixo), mas sem a restrição de
+         conteúdo do <button> nativo. */
+      '<div class="lista-nome" role="button" tabindex="0" data-sku="'+esc(it.sku)+'">' +
         (it.img ? '<img class="thumb" src="'+esc(it.img)+'" alt="" loading="lazy">'
                 : '<span class="thumb semfoto-mini">sem<br>foto</span>') +
         '<span class="corpo">' +
@@ -532,7 +537,7 @@ function renderListaBusca(lista, total, q, veioDeCodigo, aposNome, aposSku, falh
             : esc(it.sku))+
             (it.ean ? '<span class="ean">código de barras '+esc(it.ean)+'</span>' : '')+'</span>' +
         '</span>' +
-      '</button>' +
+      '</div>' +
         /* 23/09 — O CAMPO JÁ VEM ABERTO. O dono: "por que já não traz todos com o cardzinho
            aberto? aí eu só coloco o número e salvo". Num inventário são centenas de itens, e
            um clique a menos em cada um é muito tempo.
@@ -592,7 +597,15 @@ function renderListaBusca(lista, total, q, veioDeCodigo, aposNome, aposSku, falh
     const botao = res.querySelector('[data-salvar]');
     if(!it || !campo || !botao) return;
 
-    res.querySelector('.lista-nome').addEventListener('click', () => campo.focus());
+    const nomeEl = res.querySelector('.lista-nome');
+    nomeEl.addEventListener('click', () => campo.focus());
+    /* Codex #528 (P2): virou div[role=button] (não é mais <button>), então o navegador não
+       ativa mais sozinho no Enter/Espaço — o teclado dependia disso. */
+    nomeEl.addEventListener('keydown', e => {
+      if(e.key !== 'Enter' && e.key !== ' ') return;
+      e.preventDefault();
+      campo.focus();
+    });
 
     /* o saldo do Bling só é buscado quando ELE toca neste produto — uma chamada por item
        contado, não por item listado */
@@ -715,7 +728,14 @@ function mostrarProduto(p){
     '<div class="prod">' +
     (p.img ? '<img src="'+esc(p.img)+'" alt="">' : '<div class="semfoto">sem foto<br>no Bling</div>') +
     '<div><h3>'+esc(p.nome || '(sem nome)')+'</h3>' +
-    '<div class="dim">SKU <b>'+esc(p.sku)+'</b>'+(p.ean?' · EAN '+esc(p.ean):'')+'</div>' +
+    /* Codex #528 (P2): o link só existia no card da lista (renderListaBusca) — o caminho
+       principal do leitor de código de barras vinha direto pra cá sem o SKU virar link.
+       /buscar-produto agora devolve `id`; sem ele (produto achado por outra via), plano B é
+       o SKU como texto. */
+    '<div class="dim">SKU <b>'+(p.id
+      ? '<a class="link-bling" href="https://www.bling.com.br/estoque.php?buscaid='+esc(p.id)+'"'+
+        ' target="_blank" rel="noopener" title="abrir o estoque deste produto no Bling">'+esc(p.sku)+' ↗</a>'
+      : esc(p.sku))+'</b>'+(p.ean?' · EAN '+esc(p.ean):'')+'</div>' +
     (p.localizacao ? '<div class="dim">📍 '+esc(p.localizacao)+'</div>' : '') +
     '<div style="margin-top:6px">Saldo no Bling agora: <b id="saldoAgora">'+(p.estoque!=null?esc(p.estoque):'—')+' <span class="dim" style="font-size:10px">(conferindo…)</span></b></div>' +
     '</div></div>';

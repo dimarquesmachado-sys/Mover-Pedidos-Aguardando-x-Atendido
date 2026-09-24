@@ -1484,12 +1484,17 @@ for (const [emp, arq] of Object.entries({
    16473065046. */
 {
   const libK2 = fs.readFileSync(LIB, 'utf8');
+  const catK2 = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'rotas-catalogo.js'), 'utf8');
   const jsK2 = /<script>([\s\S]*?)<\/script>/.exec(html)[1];
 
   /* o id vem do ÍNDICE LOCAL: zero chamada ao Bling por linha, e a cota é da conta */
   assert.ok(/const idx = lerIndiceEan\(\) \|\| \{\};/.test(libK2) && /idPorSku\[it\.sku\] = it\.id/.test(libK2),
     'a lista não resolve o id do produto — ou resolve consultando o Bling, o que custaria uma ' +
     'chamada por linha');
+  /* Codex #528 (P2): SKU "constructor"/"toString"/"__proto__" resolvia pra propriedade
+     herdada de {} em vez de dado real — precisa de um mapa sem protótipo */
+  assert.ok(/const idPorSku = Object\.create\(null\)/.test(libK2),
+    'idPorSku é um objeto comum — um SKU tipo "constructor" ou "__proto__" perde o id real');
   /* o do lançamento já aplicado vence: foi com ele que a entrada foi feita */
   assert.ok(/!l\.bling_produto_id && idPorSku\[l\.sku\]/.test(libK2),
     'o id do índice sobrescreve o do lançamento aplicado — o certo é o que foi usado na entrada');
@@ -1503,11 +1508,29 @@ for (const [emp, arq] of Object.entries({
   assert.ok(/: '<span class="sku">'\+esc\(l\.sku\)\+'<\/span>'/.test(jsK2),
     'sem id conhecido o SKU vira link mesmo assim — abriria a tela errada no Bling');
 
-  /* o clique no link não pode disparar o cartão (foco no campo, seleção) */
+  /* o clique no link não pode disparar o cartão (foco no campo, seleção) — a 3ª ocorrência
+     (mostrarProduto) não precisa: não está dentro de um cartão clicável */
   assert.strictEqual((jsK2.match(/onclick="event\.stopPropagation\(\)"/g) || []).length, 2,
     'o link do SKU dispara o clique do cartão — conferir o saldo no Bling mexeria na seleção aqui');
-  assert.strictEqual((jsK2.match(/rel="noopener"/g) || []).length, 2,
+  assert.strictEqual((jsK2.match(/rel="noopener"/g) || []).length, 3,
     'link que abre em aba nova sem `noopener`');
+
+  /* Codex #528 (P2): o caminho do leitor de código de barras (SKU/EAN exato) ia direto a
+     mostrarProduto() sem passar pela lista — sem o id aqui, esse caminho nunca linkava */
+  assert.ok(/id: prod\.id \|\| null/.test(catK2),
+    '/buscar-produto não devolve o id do produto — o caminho de SKU/EAN escaneado fica sem link');
+  assert.ok(/estoque\.php\?buscaid='\+esc\(p\.id\)/.test(jsK2),
+    'mostrarProduto não linka o SKU pro estoque no Bling');
+
+  /* Codex #528 (P2): era um <button> envolvendo o <a> do Bling — HTML não permite conteúdo
+     interativo dentro de <button>. Virou div[role=button][tabindex=0], com Enter/Espaço
+     tratados manualmente já que o navegador não ativa mais sozinho. */
+  assert.ok(!/'<button class="lista-nome"/.test(jsK2),
+    'o cartão do resultado da busca voltou a ser um <button> — não pode conter o <a> do Bling');
+  assert.ok(/'<div class="lista-nome" role="button" tabindex="0"/.test(jsK2),
+    'o cartão do resultado da busca não tem role="button"/tabindex — perde acessibilidade por teclado');
+  assert.ok(/nomeEl\.addEventListener\('keydown'/.test(jsK2),
+    'sem <button> nativo, Enter/Espaço no cartão do resultado da busca não faz mais nada');
 }
 
 console.log('OK: contagem de estoque — registro interno (nunca escreve no Bling), sessão nas 4 rotas, quantidade validada e busca por nome sem gastar cota');
