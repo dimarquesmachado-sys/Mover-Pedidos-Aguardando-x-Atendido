@@ -250,7 +250,7 @@
       <span class="logo-girassol" role="img" aria-label="Magazine Girassol"></span>
       <h1>Contagem de estoque</h1>
       <span class="empresa">Magazine Girassol</span>
-      <span class="build">c28</span>
+      <span class="build">c29</span>
     </div>
   </header>
 
@@ -970,6 +970,36 @@ async function trocarTipo(item, botao){
 
 /* lança a entrada no estoque do Bling. Confirmação explícita porque NÃO TEM DESFAZER:
    corrigir exige outro lançamento, de saída. */
+/* lança TODOS os acréscimos do dia. Uma por vez no servidor, pra não estourar a cota. */
+async function lancarTodasNoBling(botao){
+  const quantos = (botao.textContent.match(/\d+/) || ['?'])[0];
+  if(!confirm('Lançar ' + quantos + ' acréscimo(s) no estoque do Bling?\n\nIsso altera o saldo real e NÃO TEM DESFAZER. Confira as quantidades antes.')) return;
+  botao.disabled = true;
+  botao.textContent = 'lançando… (não feche a página)';
+  let d = null;
+  try {
+    const r = await fetch(MOD+'/contagem-lancar-todas', {
+      method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ dia: hojeISO() })
+    });
+    d = await r.json().catch(()=>null);
+  } catch(e){ d = null; }
+  if(!(d && d.ok)){
+    alert((d && d.erro) || 'não consegui lançar — confira no Bling o que entrou antes de tentar de novo');
+    carregarHoje();
+    return;
+  }
+  /* mostra o que falhou item a item: "3 de 10" sem dizer QUAIS não ajuda ninguém */
+  if(d.falhas){
+    const ruins = (d.itens || []).filter(i => !i.ok && !i.parou).map(i => '· ' + (i.sku || '') + ': ' + i.erro).join('\n');
+    const parou = (d.itens || []).find(i => i.parou);
+    alert(d.feitos + ' lançado(s), ' + d.falhas + ' com problema:\n\n' + ruins + (parou ? '\n\n' + parou.erro : ''));
+  } else {
+    alert(d.feitos + ' lançamento(s) enviados ao estoque do Bling.');
+  }
+  carregarHoje();
+}
+
 async function aplicarNoBling(item, botao){
   const nome = ((item.querySelector('.nome')||{}).textContent || 'este item').trim();
   const qtd = ((item.querySelector('.qtd-num')||{}).textContent || '').replace('+','');
@@ -1047,6 +1077,19 @@ async function carregarHoje(recomecar){
      caixa no canto e soma). Tabela de 7 colunas num celular de galpão não se lê nem se toca. */
   alvo.innerHTML =
     (truncado ? '<div class="aviso">Mostrando os '+ACUMULADO.length+' lançamentos mais recentes de hoje — há mais no arquivo que esta tela não carrega de uma vez.</div>' : '') +
+    /* 24/09 — LANÇAR TODOS DE UMA VEZ. Dez cliques no 📦 era o que existia. O aviso só aparece
+       quando há acréscimos prontos, e diz a soma total: é a última chance de ver que o número
+       está errado ANTES de uma escrita que não tem desfazer. */
+    (() => {
+      const prontos = ACUMULADO.filter(l => l.id && l.tipo === 'somar' && !l.aplicado_em);
+      if(!prontos.length) return '';
+      const soma = prontos.reduce((t, l) => t + (Number(l.contado) || 0), 0);
+      return '<div class="aviso" id="avisoLancar">' +
+        '<b>'+prontos.length+'</b> acréscimo(s) prontos, somando <b>'+soma+'</b> unidade(s). ' +
+        'Lançar tudo no estoque do Bling de uma vez?' +
+        '<button class="btn" id="btLancarTodas" style="margin-top:8px;width:100%">📦 lançar os '+prontos.length+' no Bling</button>' +
+      '</div>';
+    })() +
     ACUMULADO.map(l => {
       const dif = l.divergencia;
       /* saldo não conferido no instante do lançamento: a divergência pode estar velha, e isso
@@ -1124,6 +1167,8 @@ async function carregarHoje(recomecar){
   alvo.querySelectorAll('.item [data-editar]').forEach(b => {
     b.addEventListener('click', () => editarQtd(b));
   });
+  const btTodas = document.getElementById('btLancarTodas');
+  if(btTodas) btTodas.addEventListener('click', () => lancarTodasNoBling(btTodas));
   alvo.querySelectorAll('.item [data-aplicar]').forEach(b => {
     b.addEventListener('click', () => aplicarNoBling(b.closest('.item'), b));
   });

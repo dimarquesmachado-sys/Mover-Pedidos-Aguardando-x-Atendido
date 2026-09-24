@@ -1035,8 +1035,13 @@ for (const [emp, arq] of Object.entries({
   assert.ok(/if \(ctx\.lerAdmins\(\)\.length === 0\) return false;/.test(libA),
     'sem lista de admins configurada, qualquer um lança no estoque real — ausência de lista ' +
     'não é permissão, é configuração faltando');
-  assert.strictEqual((libA.match(/ehAdminExplicito\(sess\)/g) || []).length, 2,
-    'as duas rotas que expõem ou escrevem estoque (aplicar e depósitos) precisam da checagem explícita');
+  /* TODA rota que expõe ou escreve estoque precisa da checagem explícita. Conta por baixo, pra
+     rota nova nascer coberta em vez de reprovar o teste por existir. */
+  const rotasEstoque = ['/contagem-aplicar', '/contagem-lancar-todas', '/contagem-depositos']
+    .filter(r => libA.includes("'" + r + "'"));
+  assert.ok((libA.match(/ehAdminExplicito\(sess\)/g) || []).length >= rotasEstoque.length,
+    'há ' + rotasEstoque.length + ' rotas que expõem ou escrevem estoque e menos checagens ' +
+    'explícitas de admin — alguma delas aceita qualquer sessão');
 
   /* P1: o POST de estoque NÃO é idempotente, e o blingWrite repete quando o fetch estoura —
      Bling grava, conexão cai, repete, soma em DOBRO no estoque real */
@@ -1098,6 +1103,49 @@ for (const [emp, arq] of Object.entries({
     'a tela ainda promete que o saldo do Bling nunca muda, e agora existe um botão que muda');
   assert.ok(/📦/.test(html) && /lança no Bling/.test(html),
     'o aviso não diz QUAL ação escreve no Bling — é a única que não tem desfazer');
+}
+
+/* 24/09 — LANÇAR TODOS DE UMA VEZ. O dono: "esses eu lancei de manhã quando eu achava que já
+   tava certo... só pra eu não perder tempo de novo". Dez cliques no 📦 era o que existia.
+   ⚠️ São N escritas IRREVERSÍVEIS seguidas — por isso o lote NÃO tem trava própria. */
+{
+  const libT = fs.readFileSync(LIB, 'utf8');
+  assert.ok(/prefixo \+ '\/contagem-lancar-todas'/.test(libT), 'não há lançamento em lote');
+
+  /* a razão principal: recusas duplicadas divergem, e a que ficar frouxa deixa passar o que a
+     outra recusa — aparecendo só como estoque errado no Bling, sem desfazer */
+  assert.ok(/const r = await aplicarUm\(f\.id, sess, dep\);/.test(libT),
+    'o lote não reusa a `aplicarUm` do botão individual — travas duplicadas divergem, e o erro ' +
+    'só apareceria como estoque errado no Bling');
+  const iLote = libT.indexOf("'/contagem-lancar-todas'");
+  const iFim = libT.indexOf("'/contagem-aplicar'", iLote);
+  const corpoLote = libT.slice(iLote, iFim > 0 ? iFim : iLote + 3000);
+  assert.ok(!/lib\.entrada\(/.test(corpoLote),
+    'o lote chama a entrada direto, pulando as recusas da aplicarUm');
+
+  /* a fila é uma FOTO: aplicarUm relê o arquivo a cada item, e trabalhar sobre lista viva
+     faria o mesmo item entrar duas vezes */
+  assert.ok(/\.map\(l => \(\{ id: l\.id, sku: l\.sku, qtd: Number\(l\.contado\) \}\)\)/.test(libT),
+    'a fila do lote é a lista viva — o mesmo item pode entrar duas vezes');
+
+  /* sequencial e com respiro: a cota é da conta, e em paralelo o Bling recusa por limite */
+  assert.ok(/setTimeout\(s2 => /.test(libT) || /await new Promise\(s2/.test(libT),
+    'o lote dispara sem respiro entre os itens — a cota do Bling é da conta');
+  assert.ok(/if \(seguidas >= 3\)/.test(libT),
+    'o lote insiste depois de falhas seguidas — três seguidas é problema geral (token, cota, ' +
+    'depósito), e insistir só queima cota');
+
+  /* e o dia é obrigatório, como no outro lote */
+  assert.ok(/informe o dia \(AAAA-MM-DD\)/.test(corpoLote),
+    'o lote aceita rodar sem dia — lançaria acréscimos de outros dias no estoque real');
+
+  /* a tela precisa dizer QUAIS falharam: "3 de 10" sem os nomes não ajuda ninguém */
+  const jsT2 = /<script>([\s\S]*?)<\/script>/.exec(html)[1];
+  assert.ok(/filter\(i => !i\.ok && !i\.parou\)/.test(jsT2),
+    'a tela mostra quantos falharam mas não quais — sem o SKU não dá pra agir');
+  assert.ok(/somando <b>'\+soma\+'<\/b>/.test(jsT2),
+    'o aviso não mostra a soma total — é a última chance de ver um número errado antes de uma ' +
+    'escrita sem desfazer');
 }
 
 console.log('OK: contagem de estoque — registro interno (nunca escreve no Bling), sessão nas 4 rotas, quantidade validada e busca por nome sem gastar cota');
