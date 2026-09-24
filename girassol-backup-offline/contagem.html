@@ -12,8 +12,11 @@
   o nome completo e a foto, e lança a quantidade que contou.
 
   Três coisas que ele decidiu e que estão por trás de cada escolha aqui:
-   · NÃO grava no Bling. É registro interno; ele revisa e decide o que enviar.
-     A tela diz isso em letra grande, pra ninguém achar que ajustou o saldo.
+   · CONTAR não grava no Bling. É registro interno; ele revisa e decide o que enviar.
+     A tela diz isso em letra grande, pra ninguém achar que contar já ajustou o saldo.
+   · 24/09 — exceção: o botão 📦 (só admin, só tipo SOMAR) É a escrita real no Bling.
+     O aviso do topo foi ajustado pra não prometer "nada aqui muda o Bling" quando agora
+     uma ação específica muda (Codex #524).
    · É CONTAGEM (o saldo que a pessoa contou), não entrada/saída.
    · Girassol primeiro; a lib já nasce com a empresa como parâmetro.
 
@@ -240,8 +243,8 @@
        cinza 13px. Uma busca por nome desenha até 30 produtos antes dele — na prática, ninguém
        leria. E é o aviso que impede o mal-entendido mais caro desta tela: alguém contar achando
        que ajustou o estoque do Bling. Volta pro topo, antes de qualquer ação. -->
-  <p class="nota-interna">O saldo do Bling <b>não muda</b> por aqui — isto é registro interno,
-    guardado pra você conferir depois.</p>
+  <p class="nota-interna"><b>Contar aqui não muda</b> o saldo do Bling — fica guardado pra
+    revisão depois. (O botão 📦 na lista do dia é a exceção: ele SIM lança no Bling de verdade.)</p>
 
   <div class="busca-hero">
     <span class="busca-icone" aria-hidden="true">🔍</span>
@@ -980,17 +983,21 @@ async function carregarHoje(recomecar){
         /* 22/09 — o número é CLICÁVEL: o dono pediu poder digitar a quantidade na linha em vez
            de refazer a busca ("pra eu não ter que digitar de novo o 404"). Os botões resolvem
            de 1 em 1; quando a diferença é grande, digitar erra menos que clicar dez vezes. */
+        /* Codex #524 (P2): editar/ajustar/excluir um lançamento JÁ aplicado no Bling mudava o
+           registro auditado sem tocar no Bling de verdade (ou apagava a evidência de que um
+           movimento real aconteceu). As rotas agora recusam isso; aqui a tela já nem oferece o
+           botão — o "✅ no Bling" na linha de cima vira o único estado visível. */
         '<div class="qtd-box">' +
-          (l.id ? '<button class="qtd-num edit" data-editar="1" title="clique pra digitar a quantidade">'+l.contado+'</button>'
+          (l.id && !l.aplicado_em ? '<button class="qtd-num edit" data-editar="1" title="clique pra digitar a quantidade">'+l.contado+'</button>'
                 : '<div class="qtd-num">'+l.contado+'</div>') +
           '<div class="qtd-lbl">contado</div>' +
         '</div>' +
-        (l.id ? '<div class="mais-menos">' +
+        (l.id && !l.aplicado_em ? '<div class="mais-menos">' +
           '<button data-ajuste="-1" title="tirar 1">−</button>' +
           '<button data-ajuste="1" title="acrescentar 1">+</button>' +
-          /* 24/09 — LANÇAR NO BLING. Só em lançamento do tipo SOMAR e ainda não aplicado: é
-             a única ação desta tela que mexe no saldo real, e é de mão única. */
-          (l.tipo === 'somar' && !l.aplicado_em
+          /* 24/09 — LANÇAR NO BLING. Só em lançamento do tipo SOMAR: é a única ação desta tela
+             que mexe no saldo real, e é de mão única. */
+          (l.tipo === 'somar'
             ? '<button class="aplicar" data-aplicar="1" title="lançar esta entrada no estoque do Bling">📦</button>'
             : '') +
           '<button class="excluir" data-excluir="1" title="excluir este lançamento">🗑</button>' +
