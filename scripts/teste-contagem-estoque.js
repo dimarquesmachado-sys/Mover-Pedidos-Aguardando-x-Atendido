@@ -1035,8 +1035,13 @@ for (const [emp, arq] of Object.entries({
   assert.ok(/if \(ctx\.lerAdmins\(\)\.length === 0\) return false;/.test(libA),
     'sem lista de admins configurada, qualquer um lança no estoque real — ausência de lista ' +
     'não é permissão, é configuração faltando');
-  assert.strictEqual((libA.match(/ehAdminExplicito\(sess\)/g) || []).length, 2,
-    'as duas rotas que expõem ou escrevem estoque (aplicar e depósitos) precisam da checagem explícita');
+  /* TODA rota que expõe ou escreve estoque precisa da checagem explícita. Conta por baixo, pra
+     rota nova nascer coberta em vez de reprovar o teste por existir. */
+  const rotasEstoque = ['/contagem-aplicar', '/contagem-lancar-todas', '/contagem-depositos']
+    .filter(r => libA.includes("'" + r + "'"));
+  assert.ok((libA.match(/ehAdminExplicito\(sess\)/g) || []).length >= rotasEstoque.length,
+    'há ' + rotasEstoque.length + ' rotas que expõem ou escrevem estoque e menos checagens ' +
+    'explícitas de admin — alguma delas aceita qualquer sessão');
 
   /* P1: o POST de estoque NÃO é idempotente, e o blingWrite repete quando o fetch estoura —
      Bling grava, conexão cai, repete, soma em DOBRO no estoque real */
@@ -1128,6 +1133,235 @@ for (const [emp, arq] of Object.entries({
   assert.ok(/const paraTrocar = ACUMULADO\.filter/.test(jsL),
     'o aviso de conversão aparece sempre — botão que não muda nada é ruído');
   assert.ok(/!l\.aplicado_em/.test(jsL), 'o aviso conta lançamentos já aplicados, que não serão tocados');
+}
+
+/* 24/09 — LANÇAR TODOS DE UMA VEZ. O dono: "esses eu lancei de manhã quando eu achava que já
+   tava certo... só pra eu não perder tempo de novo". Dez cliques no 📦 era o que existia.
+   ⚠️ São N escritas IRREVERSÍVEIS seguidas — por isso o lote NÃO tem trava própria. */
+{
+  const libT = fs.readFileSync(LIB, 'utf8');
+  assert.ok(/prefixo \+ '\/contagem-lancar-todas'/.test(libT), 'não há lançamento em lote');
+
+  /* a razão principal: recusas duplicadas divergem, e a que ficar frouxa deixa passar o que a
+     outra recusa — aparecendo só como estoque errado no Bling, sem desfazer */
+  assert.ok(/r = await aplicarUm\(f\.id, sess, dep, marcaAtual\);/.test(libT),
+    'o lote não reusa a `aplicarUm` do botão individual — travas duplicadas divergem, e o erro ' +
+    'só apareceria como estoque errado no Bling');
+  const iLote = libT.indexOf("'/contagem-lancar-todas'");
+  const iFim = libT.indexOf("'/contagem-aplicar'", iLote);
+  const corpoLote = libT.slice(iLote, iFim > 0 ? iFim : iLote + 3000);
+  assert.ok(!/lib\.entrada\(/.test(corpoLote),
+    'o lote chama a entrada direto, pulando as recusas da aplicarUm');
+
+  /* a fila é uma FOTO: aplicarUm relê o arquivo a cada item, e trabalhar sobre lista viva
+     faria o mesmo item entrar duas vezes */
+  assert.ok(/\.map\(l => \(\{ id: l\.id, sku: l\.sku, qtd: Number\(l\.contado\) \}\)\)/.test(libT),
+    'a fila do lote é a lista viva — o mesmo item pode entrar duas vezes');
+
+  /* sequencial e com respiro: a cota é da conta, e em paralelo o Bling recusa por limite */
+  assert.ok(/setTimeout\(s2 => /.test(libT) || /await new Promise\(s2/.test(libT),
+    'o lote dispara sem respiro entre os itens — a cota do Bling é da conta');
+  assert.ok(/if \(seguidas >= 3\)/.test(libT),
+    'o lote insiste depois de falhas seguidas — três seguidas é problema geral (token, cota, ' +
+    'depósito), e insistir só queima cota');
+
+  /* e o dia é obrigatório, como no outro lote */
+  assert.ok(/informe o dia \(AAAA-MM-DD\)/.test(corpoLote),
+    'o lote aceita rodar sem dia — lançaria acréscimos de outros dias no estoque real');
+
+  /* a tela precisa dizer QUAIS falharam: "3 de 10" sem os nomes não ajuda ninguém */
+  const jsT2 = /<script>([\s\S]*?)<\/script>/.exec(html)[1];
+  assert.ok(/filter\(i => !i\.ok && !i\.parou\)/.test(jsT2),
+    'a tela mostra quantos falharam mas não quais — sem o SKU não dá pra agir');
+  assert.ok(/somando <b>'\+soma\+'<\/b>/.test(jsT2),
+    'o aviso não mostra a soma total — é a última chance de ver um número errado antes de uma ' +
+    'escrita sem desfazer');
+}
+
+/* 24/09 (Codex #526, 3 P1 + 2 P2) — os três P1 são formas diferentes do mesmo risco: o lote
+   prometer uma coisa e o Bling receber outra, numa escrita sem desfazer. */
+{
+  const libB = fs.readFileSync(LIB, 'utf8');
+  const jsB = /<script>([\s\S]*?)<\/script>/.exec(html)[1];
+
+  /* P1: só o item da vez ficava reservado; os outros seguiam editáveis, e a `aplicarUm` relê o
+     registro — mexer no + / − de uma linha ainda não enviada mandava um número DIFERENTE do
+     que ele confirmou na tela */
+  assert.ok(/if \(fila\.some\(f => f\.id === l\.id\)\) l\.aplicando_em = marca;/.test(libB),
+    'o lote não reserva a fila inteira antes de começar — dá pra alterar uma linha que ainda ' +
+    'não foi enviada, e o Bling recebe outro número');
+  assert.ok(/l\.aplicando_em !== reservaDoLote/.test(libB),
+    'a própria reserva do lote seria lida como concorrência e recusaria todos os itens');
+
+  /* P1: o lote devolve ok:true COM aviso quando o Bling aceitou mas o marcador não gravou */
+  assert.ok(/filter\(i => i\.ok && i\.aviso\)/.test(jsB),
+    'o aviso de "aceito no Bling mas não registrado aqui" passa como sucesso comum — quando a ' +
+    'reserva expira o item volta a parecer pendente e o próximo clique soma de novo');
+
+  /* P1: lista truncada faria o botão prometer menos do que o servidor executa */
+  assert.ok(/if\(truncado\) return/.test(jsB),
+    'com a lista do dia truncada, o botão diz "lançar os 30" e o servidor lança o dia inteiro');
+
+  /* P2: as recusas mais comuns são DO ITEM (kit, sem custo, sem SKU) — parar em 3 seguidas
+     abortava todos os válidos que vinham depois, e a nova tentativa parava no mesmo lugar */
+  assert.ok(/não consegui consultar\|HTTP 401/.test(libB),
+    'o lote para em 3 falhas seguidas mesmo quando elas são do ITEM — três kits em sequência ' +
+    'abortariam todos os válidos seguintes');
+
+  /* P2: "lance por partes" sem existir parte nenhuma */
+  assert.ok(/const restantes = Math\.max\(0, fila\.length - 200\)/.test(libB),
+    'acima de 200 o lote manda "lançar por partes", mas remontava a mesma fila e recusava de novo');
+  assert.ok(/d\.restantes/.test(jsB), 'a tela não oferece a rodada seguinte quando sobra fila');
+
+  /* P1 (r2, minha auditoria em cima do fix acima): a fila inteira reserva com UM carimbo, mas o
+     TTL de 120s do `emAndamento` foi pensado pra detectar um APLICAR ÚNICO que caiu no meio —
+     não um lote de até 200 itens com chamadas ao Bling (mais ainda sob 429). Passados 120s do
+     início do lote, os itens que ainda esperam a vez voltariam a aparecer como "não em
+     andamento" pras rotas de edição, reabrindo a MESMA janela que a reserva upfront existe pra
+     fechar. Sem renovar o carimbo a cada item, um lote de umas dezenas de itens pra cima reabre
+     a corrida que este PR inteiro existe pra fechar. */
+  assert.ok(/let marcaAtual = marca;/.test(libB),
+    'o lote usa um só carimbo (`marca`) do início ao fim — passados 120s, os itens que ainda ' +
+    'esperam a vez voltam a parecer "livres" pras rotas de edição, e a reserva upfront deixa de ' +
+    'proteger justamente quem mais precisa (o fim de uma fila grande)');
+  assert.ok(/if \(l && l\.aplicando_em === marcaAtual && !l\.aplicado_em\) \{ l\.aplicando_em = agora; mexeu = true; \}/.test(libB),
+    'o lote não renova o carimbo do resto da fila a cada item — o TTL de 120s expira antes de ' +
+    'um lote grande terminar');
+}
+
+/* 24/09 (Codex #526, r3) — P1 + P2 achados depois que os dois rounds acima já tinham fechado a
+   corrida DENTRO de um lote. Estes dois são sobre o que acontece EM VOLTA dele. */
+{
+  const libC = fs.readFileSync(LIB, 'utf8');
+
+  /* P1: `blingWrite` perdendo a resposta devolve "não recebi confirmação do Bling (falha de
+     rede)" — a escrita pode JÁ ter chegado no Bling, só a confirmação que se perdeu. Esse é
+     o pior caso possível pra continuar insistindo: sem contar como falha GERAL, o lote seguia
+     mandando as próximas escritas sobre a mesma conexão ruim, multiplicando os lançamentos que
+     podem estar duplicados no Bling sem ninguém saber. */
+  assert.ok(/const geral = .*\/[^/]*falha de rede[^/]*\/i\.test/.test(libC),
+    'uma falha de rede AMBÍGUA do Bling (pode já ter escrito, só a confirmação que se perdeu) ' +
+    'não conta como falha geral — o lote segue mandando escritas sobre a mesma conexão ruim');
+
+  /* P2: duas abas (ou dois admins) chamando /contagem-lancar-todas quase juntas liam a mesma
+     fila ANTES de qualquer uma reservar — cada uma disparava seu próprio laço sequencial, mas
+     os dois laços rodavam em PARALELO um do outro: duas rodadas de chamadas ao Bling ao mesmo
+     tempo pra mesma conta, o cenário de 429 que o laço sequencial existe pra evitar. */
+  const iLoteC = libC.indexOf("'/contagem-lancar-todas'");
+  const iFimC = libC.indexOf("'/contagem-aplicar'", iLoteC);
+  const corpoLoteC = libC.slice(iLoteC, iFimC > 0 ? iFimC : iLoteC + 4000);
+  assert.ok(/_loteLancandoTodas/.test(corpoLoteC),
+    'duas chamadas simultâneas a /contagem-lancar-todas disparam dois laços sequenciais em ' +
+    'PARALELO um do outro — mesma conta, duas rodadas de chamadas ao Bling ao mesmo tempo');
+  assert.ok(/if \(_loteLancandoTodas\) \{/.test(corpoLoteC) && /_loteLancandoTodas = true;/.test(corpoLoteC),
+    'a trava do lote não recusa uma segunda chamada concorrente antes de montar a fila');
+  assert.ok(/\} finally \{\s*_loteLancandoTodas = false;/.test(corpoLoteC),
+    'a trava do lote não é liberada em TODO caminho de saída (erro de leitura, fila vazia, ' +
+    'falha ao reservar, fim normal) — uma vez presa, ninguém lança o dia de novo sem reiniciar');
+}
+
+/* 24/09 (Codex #526, 3 P1 na 2ª rodada) — os três são sobre o lote mandar pro Bling algo
+   diferente do que o dono confirmou, ou mandar DUAS vezes. */
+{
+  const libF = fs.readFileSync(LIB, 'utf8');
+  const entF = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'estoque-entrada.js'), 'utf8');
+  const jsF = /<script>([\s\S]*?)<\/script>/.exec(html)[1];
+
+  /* P1: a tela mandava só o dia e o servidor remontava a fila. Se alguém criasse um acréscimo
+     ou mudasse uma quantidade entre carregar a página e clicar, ele confirmava "10 somando 47"
+     e o Bling recebia outra coisa — sem desfazer. */
+  assert.ok(/itens: prontosNaTela\.map/.test(jsF),
+    'a tela não manda a FOTO do que confirmou — o servidor lançaria uma fila diferente da que ' +
+    'ele viu na tela');
+  assert.ok(/const foto = Array\.isArray\(body\.itens\)/.test(libF) && /desatualizado: true/.test(libF),
+    'o servidor não confere a foto contra o arquivo — divergir do confirmado é o erro mais caro ' +
+    'possível numa escrita sem desfazer');
+
+  /* P1: POST que perde a resposta PODE ter entrado no Bling. Sem marca, a rodada seguinte
+     pegaria o mesmo item e somaria de novo. */
+  assert.ok(/ambiguo: true/.test(entF) && /ambiguo: semResposta/.test(entF),
+    'timeout e "sem resposta" no POST não são marcados como AMBÍGUOS — viram "não lançou", e ' +
+    'relançar duplicaria o estoque');
+  assert.ok(/if \(r\.ambiguo\) l2\.ultima_falha_ambigua = true/.test(libF),
+    'a marca de escrita ambígua não é gravada no lançamento');
+  assert.ok(/\.filter\(l => !l\.ultima_falha_ambigua\)/.test(libF),
+    'a fila do lote inclui escrita ambígua — o item pode já ter entrado no Bling e entraria de novo');
+
+  /* P1: `blingGet` não tem timeout; uma conexão pendurada travava a rodada e as reservas */
+  assert.ok(/function comTeto\(promessa, ms, oQue\)/.test(entF),
+    'a entrada não tem teto de tempo — uma conexão que não responde pendura a rodada inteira e ' +
+    'deixa as reservas presas');
+  assert.ok((entF.match(/comTeto\(/g) || []).length >= 4,
+    'alguma etapa da entrada ficou sem teto de tempo');
+  /* e o teto do POST não pode dizer "nada foi lançado" */
+  assert.ok(/NÃO SEI se a entrada foi registrada/.test(entF),
+    'o timeout do POST afirma que nada entrou — pode ter entrado, e o dono lançaria de novo');
+}
+
+/* 24/09 (Codex #526, r4) — a 3ª rodada de revisão achou furos nos próprios consertos da 2ª:
+   o `ambiguo: true` se perdia no caminho de volta, o classificador de falha geral não via essa
+   marca, a renovação do lock só rodava ENTRE itens (não durante um item lento), a tela mandava
+   uma foto que incluía linha que o servidor já tinha excluído, e nada espaçava as 3 chamadas ao
+   Bling de dentro de UM item. */
+{
+  const libF2 = fs.readFileSync(LIB, 'utf8');
+  const entF2 = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'estoque-entrada.js'), 'utf8');
+  const jsF2 = /<script>([\s\S]*?)<\/script>/.exec(html)[1];
+
+  /* P1: o classificador de falha geral do lote precisa da marca ESTRUTURADA, não só do texto —
+     o teto de 45s por etapa devolve mensagens nova que não batem em nenhuma palavra do regex
+     antigo. */
+  assert.ok(/const geral = \(r && r\.ambiguo\) \|\|/.test(libF2),
+    'o lote ainda classifica falha geral só por TEXTO — o timeout de 45s por etapa devolve ' +
+    'mensagens que não batem no regex, e a rodada seguiria mandando escritas sobre uma conexão ' +
+    'travada sem nunca parar');
+
+  /* P1: a renovação da reserva tem que rodar TAMBÉM enquanto o item da vez está em andamento —
+     um item pode encadear até 3 tetos de 45s (135s), mais que o TTL de 120s do emAndamento. */
+  assert.ok(/function renovarReserva\(\)/.test(libF2) && /setInterval\(renovarReserva/.test(libF2)
+    && /clearInterval\(batendo\)/.test(libF2),
+    'a reserva só é renovada ENTRE itens — um item que sozinho passa dos 120s (3 tetos de 45s ' +
+    'encadeados) deixa os OUTROS da fila com o carimbo velho, liberando a edição de uma linha ' +
+    'que o lote ainda vai processar');
+
+  /* P2: a FOTO que a tela manda tem que excluir o que o servidor também exclui da fila —
+     senão um item com escrita ambígua (fora da fila automática) aparece como "sumiu" e recusa
+     o lote inteiro. */
+  assert.ok(/ACUMULADO\.filter\(l => l\.id && l\.tipo === 'somar' && !l\.aplicado_em && !l\.ultima_falha_ambigua\)/.test(jsF2),
+    'a tela monta a foto sem excluir quem tem `ultima_falha_ambigua` — o servidor tira essa ' +
+    'linha da fila, a foto ainda a inclui, e a comparação recusa o lote inteiro por causa de um ' +
+    'item que nem deveria estar nela');
+
+  /* P2: nada espaçava as chamadas DE DENTRO de um item (busca, cadastro, POST) — só o laço de
+     fora, entre itens. */
+  assert.ok(/async function blingGet\(\.\.\.args\) \{ await _sleep\(_PAUSA_MS\)/.test(entF2)
+    && /async function blingWrite\(\.\.\.args\) \{ await _sleep\(_PAUSA_MS\)/.test(entF2),
+    'as chamadas ao Bling de dentro de um item não são espaçadas — 3 chamadas rápidas seguidas ' +
+    'por item bastam pra estourar sozinhas o limite de ~3 req/s da conta');
+
+  /* funcional: o `ambiguo: true` que o blingWrite devolve (escrita que PODE ter chegado no
+     Bling) tem que sobreviver até o retorno de `entrada` — é o que `aplicarUm` usa pra marcar
+     `ultima_falha_ambigua` e tirar o item da fila automática do lote. */
+  const { criar: criarEntrada } = require(path.join(raiz, 'lib', 'checkout', 'estoque-entrada'));
+  let chamadasSleep = 0;
+  const libEnt = criarEntrada({
+    blingGet: async (u) => /\/produtos\?codigo=/.test(u)
+      ? { ok: true, data: { data: [{ id: 1, codigo: 'SKU1' }] } }
+      : { ok: true, data: { data: { id: 1, formato: 'S', precoCusto: 10 } } },
+    blingWrite: async () => ({ ok: false, status: 0, ambiguo: true, erro: 'rede: caiu no meio' }),
+    sleep: async () => { chamadasSleep++; },
+  });
+  (async () => {
+    const r = await libEnt.entrada({ sku: 'SKU1', quantidade: 5, depositoId: 999 });
+    assert.strictEqual(r.ok, false, 'a escrita ambígua não devolveu ok:false');
+    assert.strictEqual(r.ambiguo, true,
+      'o retorno perdeu o `ambiguo: true` que o blingWrite mandou — sem ele, aplicarUm não marca ' +
+      '`ultima_falha_ambigua`, e o item volta pra fila automática podendo somar DE NOVO um ' +
+      'lançamento que talvez já tenha entrado no Bling');
+    assert.ok(chamadasSleep >= 3,
+      'a pausa entre chamadas ao Bling não está de fato sendo chamada — foram só ' + chamadasSleep +
+      ' (busca, cadastro e POST deveriam gerar pelo menos 3)');
+  })().catch(e => { console.error(e); process.exit(1); });
 }
 
 console.log('OK: contagem de estoque — registro interno (nunca escreve no Bling), sessão nas 4 rotas, quantidade validada e busca por nome sem gastar cota');

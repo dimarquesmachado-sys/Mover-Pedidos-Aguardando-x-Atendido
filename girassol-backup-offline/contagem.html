@@ -250,7 +250,7 @@
       <span class="logo-girassol" role="img" aria-label="Magazine Girassol"></span>
       <h1>Contagem de estoque</h1>
       <span class="empresa">Magazine Girassol</span>
-      <span class="build">c29</span>
+      <span class="build">c32</span>
     </div>
   </header>
 
@@ -833,6 +833,7 @@ async function lancarDeVerdade(){
 }
 
 let OFFSET_LISTA = 0, ACUMULADO = [];
+let prontosNaTela = [];   // o que o aviso de lançar em lote mostrou por último
 
 /* Codex #523 (P2): +/−, editar a quantidade e trocar o tipo (⇄) são três rotas independentes
    que leem e regravam o MESMO registro JSON — cada uma travava só os próprios botões, então
@@ -994,6 +995,56 @@ async function trocarTipo(item, botao){
 
 /* lança a entrada no estoque do Bling. Confirmação explícita porque NÃO TEM DESFAZER:
    corrigir exige outro lançamento, de saída. */
+/* lança TODOS os acréscimos do dia. Uma por vez no servidor, pra não estourar a cota. */
+async function lancarTodasNoBling(botao){
+  const quantos = (botao.textContent.match(/\d+/) || ['?'])[0];
+  if(!confirm('Lançar ' + quantos + ' acréscimo(s) no estoque do Bling?\n\nIsso altera o saldo real e NÃO TEM DESFAZER. Confira as quantidades antes.')) return;
+  botao.disabled = true;
+  botao.textContent = 'lançando… (não feche a página)';
+  let d = null;
+  try {
+    const r = await fetch(MOD+'/contagem-lancar-todas', {
+      method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'},
+      /* Codex #526 (P1): eu mandava só o dia, e o servidor remontava a fila sozinho. Se outra
+         pessoa criasse um acréscimo (ou mudasse uma quantidade) entre o carregamento desta
+         página e o clique, ele confirmaria "10 somando 47" e o Bling receberia outra coisa —
+         numa escrita sem desfazer. Vai a FOTO do que ele viu: ids e quantidades. */
+      body: JSON.stringify({
+        dia: hojeISO(),
+        itens: prontosNaTela.map(l => ({ id: l.id, qtd: Number(l.contado) })),
+      })
+    });
+    d = await r.json().catch(()=>null);
+  } catch(e){ d = null; }
+  if(!(d && d.ok)){
+    alert((d && d.erro) || 'não consegui lançar — confira no Bling o que entrou antes de tentar de novo');
+    carregarHoje();
+    return;
+  }
+  /* mostra o que falhou item a item: "3 de 10" sem dizer QUAIS não ajuda ninguém */
+  if(d.falhas){
+    const ruins = (d.itens || []).filter(i => !i.ok && !i.parou).map(i => '· ' + (i.sku || '') + ': ' + i.erro).join('\n');
+    const parou = (d.itens || []).find(i => i.parou);
+    alert(d.feitos + ' lançado(s), ' + d.falhas + ' com problema:\n\n' + ruins + (parou ? '\n\n' + parou.erro : ''));
+  } else {
+    alert(d.feitos + ' lançamento(s) enviados ao estoque do Bling.');
+  }
+  /* Codex #526 (P1): a `aplicarUm` devolve ok:true COM aviso quando o Bling aceitou mas o
+     marcador local não gravou — e eu só olhava `d.falhas`, então isso passava como sucesso
+     comum. Sem o aviso, o lançamento volta a parecer pendente quando a reserva expira, e o
+     próximo clique soma DE NOVO no estoque real. */
+  const ambiguos = (d.itens || []).filter(i => i.ok && i.aviso);
+  if(ambiguos.length){
+    alert('⚠️ ATENÇÃO — ' + ambiguos.length + ' lançamento(s) foram aceitos pelo Bling mas NÃO ficaram registrados aqui:\n\n' +
+      ambiguos.map(i => '· ' + i.sku).join('\n') +
+      '\n\nConfira no Bling e NÃO lance esses de novo.');
+  }
+  if(d.restantes){
+    alert('Ainda faltam ' + d.restantes + ' — clique de novo pra lançar a próxima parte.');
+  }
+  carregarHoje();
+}
+
 async function aplicarNoBling(item, botao){
   const nome = ((item.querySelector('.nome')||{}).textContent || 'este item').trim();
   const qtd = ((item.querySelector('.qtd-num')||{}).textContent || '').replace('+','');
@@ -1087,6 +1138,30 @@ async function carregarHoje(recomecar){
         '<button class="btn sec" id="btMarcarTodas" style="margin-top:8px;width:100%">marcar os '+paraTrocar.length+' como “a somar”</button>' +
       '</div>';
     })()) +
+    /* 24/09 — LANÇAR TODOS DE UMA VEZ. Dez cliques no 📦 era o que existia. O aviso só aparece
+       quando há acréscimos prontos, e diz a soma total: é a última chance de ver que o número
+       está errado ANTES de uma escrita que não tem desfazer. */
+    (() => {
+      /* Codex #526 (P2, r4): o servidor tira da `fila` quem tem `ultima_falha_ambigua` (o
+         Bling pode já ter recebido essa escrita — só o dono, item a item, decide relançar).
+         Esta lista não filtrava isso: a FOTO mandava o item ambíguo, o servidor não o achava
+         na fila dele, e classificava como "sumiu" — recusando o lote inteiro por causa de UM
+         item que nem deveria estar na foto. */
+      const prontos = ACUMULADO.filter(l => l.id && l.tipo === 'somar' && !l.aplicado_em && !l.ultima_falha_ambigua);
+      prontosNaTela = prontos;   // a foto que o botão vai enviar, pra o servidor conferir
+      if(!prontos.length) return '';
+      /* Codex #526 (P1): com a lista TRUNCADA (dia com mais de 5.000 registros), o botão diria
+         "lançar os 30" mas o servidor varre o dia inteiro e lançaria mais do que ele viu — numa
+         escrita que não tem desfazer. Sem a lista completa na tela, o lote não é oferecido. */
+      if(truncado) return '<div class="aviso">A lista do dia está grande demais pra caber aqui, ' +
+        'então o botão de lançar tudo fica escondido — lance pelo 📦 de cada linha.</div>';
+      const soma = prontos.reduce((t, l) => t + (Number(l.contado) || 0), 0);
+      return '<div class="aviso" id="avisoLancar">' +
+        '<b>'+prontos.length+'</b> acréscimo(s) prontos, somando <b>'+soma+'</b> unidade(s). ' +
+        'Lançar tudo no estoque do Bling de uma vez?' +
+        '<button class="btn" id="btLancarTodas" style="margin-top:8px;width:100%">📦 lançar os '+prontos.length+' no Bling</button>' +
+      '</div>';
+    })() +
     ACUMULADO.map(l => {
       const dif = l.divergencia;
       /* saldo não conferido no instante do lançamento: a divergência pode estar velha, e isso
@@ -1164,6 +1239,8 @@ async function carregarHoje(recomecar){
   alvo.querySelectorAll('.item [data-editar]').forEach(b => {
     b.addEventListener('click', () => editarQtd(b));
   });
+  const btTodas = document.getElementById('btLancarTodas');
+  if(btTodas) btTodas.addEventListener('click', () => lancarTodasNoBling(btTodas));
   alvo.querySelectorAll('.item [data-aplicar]').forEach(b => {
     b.addEventListener('click', () => aplicarNoBling(b.closest('.item'), b));
   });
