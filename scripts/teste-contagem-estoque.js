@@ -1467,6 +1467,16 @@ for (const [emp, arq] of Object.entries({
   assert.ok(/if \(!modoSelecao\) \{[\s\S]{0,300}sobrando/.test(libG),
     'no modo "todos" o servidor não confere se sobrou item elegível fora da foto — um acréscimo ' +
     'criado depois que a tela carregou sairia sem lançar e sem avisar');
+
+  /* P2: com ABA === 'sim' (aba "no Bling"), `visiveis` só mostra o que já foi lançado — o
+     painel de lote não pode oferecer "lançar todos" ali, porque quem revisa não vê produto
+     nem quantidade dos pendentes antes de confirmar uma escrita sem desfazer. */
+  const iAviso = jsG.indexOf("id=\"avisoLancar\"");
+  const iIifeAviso = jsG.lastIndexOf('(() => {', iAviso);
+  const corpoAvisoLote = jsG.slice(iIifeAviso, iAviso);
+  assert.ok(/if\(ABA === 'sim'\) return '';/.test(corpoAvisoLote),
+    'o painel de lançar em lote aparece na aba "no Bling", onde os itens pendentes não estão ' +
+    'visíveis pra conferir antes de uma escrita sem desfazer');
 }
 
 console.log('OK: contagem de estoque — registro interno (nunca escreve no Bling), sessão nas 4 rotas, quantidade validada e busca por nome sem gastar cota');

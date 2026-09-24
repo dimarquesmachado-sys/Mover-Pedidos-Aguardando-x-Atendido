@@ -1205,6 +1205,11 @@ async function carregarHoje(recomecar){
        quando há acréscimos prontos, e diz a soma total: é a última chance de ver que o número
        está errado ANTES de uma escrita que não tem desfazer. */
     (() => {
+      /* Codex #527 (P2): o painel de lançamento em lote listava e confirmava "todos" mesmo com
+         a aba em "no Bling" (ABA === 'sim') — ali `visiveis` só mostra o que já foi enviado, e
+         quem revisa não tinha como ver produto/quantidade dos pendentes antes de confirmar uma
+         escrita sem desfazer. O painel só faz sentido nas abas onde o pendente aparece na tela. */
+      if(ABA === 'sim') return '';
       /* Codex #526 (P2, r4): o servidor tira da `fila` quem tem `ultima_falha_ambigua` (o
          Bling pode já ter recebido essa escrita — só o dono, item a item, decide relançar).
          Esta lista não filtrava isso: a FOTO mandava o item ambíguo, o servidor não o achava
