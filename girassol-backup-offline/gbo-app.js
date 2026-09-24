@@ -859,6 +859,8 @@ function routes(readBody) {
     /* pra a busca distinguir "índice vazio" de "catálogo nunca indexado" */
     getIdxStatus,
     CACHE_DIR, readJson, writeJson, readBody, blingGet,
+    /* pra /contagem-saldo resolver a localização sob demanda, no foco do card (Codex #522 P2) */
+    produtoDetalhe, localizacaoDeProduto, locCache,
     empresa: { pasta: 'girassol-backup-offline' },
   });
   const _rotasBackfill = require('../lib/checkout/rotas-backfill').criar({
