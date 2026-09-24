@@ -973,8 +973,18 @@ for (const [emp, arq] of Object.entries({
 
   /* P2: divergência nula no modo somar é intencional (não há saldo pra comparar), não "sem
      saldo" (que soa como falha da consulta ao Bling) */
-  assert.ok(js10.includes("const ehSomar = l.tipo === 'somar';") && js10.includes("'não se aplica'"),
-    'a lista do dia mostra "sem saldo" pra todo lançamento somar — parece que a consulta ao Bling falhou');
+  /* 24/09: o problema que este assert protege continua valendo — "sem saldo" num lançamento
+     somar sugere falha de consulta que não houve. O que mudou é o texto: o claude[bot] pôs
+     "não se aplica", o dono leu e perguntou o que não se aplicava, e agora o selo mostra a
+     própria operação ("+2 estoque"). Trava o COMPORTAMENTO: somar tem texto próprio, e não é
+     nenhum dos dois que sugerem falha. */
+  assert.ok(js10.includes("const ehSomar = l.tipo === 'somar';"),
+    'a lista do dia não distingue o lançamento somar na hora de montar o selo');
+  const textoSomar = /const textoDif = ehSomar \? ([^:]+):/.exec(js10);
+  assert.ok(textoSomar, 'o selo não tem texto próprio pro lançamento somar');
+  assert.ok(!/sem saldo/.test(textoSomar[1]),
+    'o selo de um lançamento somar diz "sem saldo" — parece que a consulta ao Bling falhou, e ' +
+    'não falhou: não há o que comparar');
   const cssT10 = /<style>([\s\S]*?)<\/style>/.exec(html)[1];
   assert.ok(/\.dif\.na\{/.test(cssT10), 'a classe "na" do badge de divergência não tem CSS — sai sem estilo');
 }
@@ -1402,6 +1412,17 @@ for (const [emp, arq] of Object.entries({
   /* trocar de aba não pode perder a seleção nem repintar à toa */
   assert.ok(/atualizarAvisoLote\(\)/.test(jsS),
     'marcar uma caixinha repinta a lista inteira — perderia o rolamento numa lista de dezenas');
+}
+
+/* 24/09 — o dono leu "não se aplica" no selo e perguntou o que não se aplicava. O selo mostra
+   a DIVERGÊNCIA, mas quem olha o card não sabe que aquele lugar é o da divergência: o texto
+   tem que dizer o que a linha É, não o que ela não tem. */
+{
+  const jsD = /<script>([\s\S]*?)<\/script>/.exec(html)[1];
+  assert.ok(!/'não se aplica'/.test(jsD),
+    'o selo diz "não se aplica" sem dizer o que — o dono leu e não entendeu, que é a prova');
+  assert.ok(/ehSomar \? \('\+' \+ l\.contado \+ ' estoque'\)/.test(jsD),
+    'o selo de um acréscimo não mostra a operação — é ela que ele confere antes de mandar pro Bling');
 }
 
 console.log('OK: contagem de estoque — registro interno (nunca escreve no Bling), sessão nas 4 rotas, quantidade validada e busca por nome sem gastar cota');

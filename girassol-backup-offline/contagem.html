@@ -239,7 +239,9 @@
   .dif.zero{background:rgba(61,220,132,.13);color:var(--confere)}
   .dif.nao{background:rgba(255,107,107,.13);color:var(--difere)}
   .dif.sem{background:var(--carta2);color:var(--calmo)}
-  .dif.na{background:var(--carta2);color:var(--calmo);font-style:italic}
+  /* o selo de um acréscimo não é "ausência de divergência" apagada em itálico: é a operação
+     que vai pro Bling, e a cor da marca marca isso */
+  .dif.na{background:var(--girassol-fraco);color:var(--girassol)}
 
   :focus-visible{outline:2px solid var(--girassol);outline-offset:2px}
   @media (prefers-reduced-motion:reduce){*{transition:none!important}}
@@ -258,7 +260,7 @@
       <span class="logo-girassol" role="img" aria-label="Magazine Girassol"></span>
       <h1>Contagem de estoque</h1>
       <span class="empresa">Magazine Girassol</span>
-      <span class="build">c34</span>
+      <span class="build">c35</span>
     </div>
   </header>
 
@@ -1231,7 +1233,12 @@ async function carregarHoje(recomecar){
          sugeria uma falha que não existiu. É um terceiro estado, não o mesmo caso de "sem saldo". */
       const ehSomar = l.tipo === 'somar';
       const classeDif = ehSomar ? 'na' : (dif == null ? 'sem' : (dif === 0 ? 'zero' : 'nao'));
-      const textoDif = ehSomar ? 'não se aplica' : (dif == null ? 'sem saldo' : (dif === 0 ? 'confere' : (dif > 0 ? '+'+dif : String(dif))));
+      /* 24/09 — o dono leu "não se aplica" e perguntou o que não se aplicava. O selo mostra a
+         DIVERGÊNCIA, mas quem olha o card não tem como saber que aquele lugar é o da
+         divergência — então o texto tem que dizer o que a linha É, não o que ela não tem.
+         "+2 estoque" se explica sozinho e ainda repete a operação, que é o que importa
+         conferir antes de mandar pro Bling. */
+      const textoDif = ehSomar ? ('+' + l.contado + ' estoque') : (dif == null ? 'sem saldo' : (dif === 0 ? 'confere' : (dif > 0 ? '+'+dif : String(dif))));
       const selecionavel = !!(l.id && l.tipo === 'somar' && !l.aplicado_em);
       return '<div class="item'+(selecionavel && SELECIONADOS.has(l.id) ? ' marcado' : '')+'" data-id="'+esc(l.id||'')+'">' +
         /* a caixinha só existe no que PODE ser lançado: caixa desabilitada em linha já enviada
