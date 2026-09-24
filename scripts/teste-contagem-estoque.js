@@ -1479,4 +1479,35 @@ for (const [emp, arq] of Object.entries({
     'visíveis pra conferir antes de uma escrita sem desfazer');
 }
 
+/* 24/09 — O SKU VIRA LINK pra tela de estoque do produto no Bling. Pedido do dono, com os dois
+   exemplos que ele mesmo levantou: 10-AE-8F-125mm-g240 → buscaid=16473065044, e o -g320 →
+   16473065046. */
+{
+  const libK2 = fs.readFileSync(LIB, 'utf8');
+  const jsK2 = /<script>([\s\S]*?)<\/script>/.exec(html)[1];
+
+  /* o id vem do ÍNDICE LOCAL: zero chamada ao Bling por linha, e a cota é da conta */
+  assert.ok(/const idx = lerIndiceEan\(\) \|\| \{\};/.test(libK2) && /idPorSku\[it\.sku\] = it\.id/.test(libK2),
+    'a lista não resolve o id do produto — ou resolve consultando o Bling, o que custaria uma ' +
+    'chamada por linha');
+  /* o do lançamento já aplicado vence: foi com ele que a entrada foi feita */
+  assert.ok(/!l\.bling_produto_id && idPorSku\[l\.sku\]/.test(libK2),
+    'o id do índice sobrescreve o do lançamento aplicado — o certo é o que foi usado na entrada');
+
+  assert.ok(/estoque\.php\?buscaid='\+esc\(l\.bling_produto_id\)/.test(jsK2),
+    'a lista do dia não linka o SKU pro estoque no Bling');
+  assert.ok(/estoque\.php\?buscaid='\+esc\(it\.id\)/.test(jsK2),
+    'o resultado da busca não linka o SKU — a busca já devolve o id, é de graça');
+
+  /* sem id, TEXTO: link que abre a tela errada é pior que link nenhum */
+  assert.ok(/: '<span class="sku">'\+esc\(l\.sku\)\+'<\/span>'/.test(jsK2),
+    'sem id conhecido o SKU vira link mesmo assim — abriria a tela errada no Bling');
+
+  /* o clique no link não pode disparar o cartão (foco no campo, seleção) */
+  assert.strictEqual((jsK2.match(/onclick="event\.stopPropagation\(\)"/g) || []).length, 2,
+    'o link do SKU dispara o clique do cartão — conferir o saldo no Bling mexeria na seleção aqui');
+  assert.strictEqual((jsK2.match(/rel="noopener"/g) || []).length, 2,
+    'link que abre em aba nova sem `noopener`');
+}
+
 console.log('OK: contagem de estoque — registro interno (nunca escreve no Bling), sessão nas 4 rotas, quantidade validada e busca por nome sem gastar cota');

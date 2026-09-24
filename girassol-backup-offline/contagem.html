@@ -196,6 +196,9 @@
   .item .nome{font-size:14.5px;font-weight:600;line-height:1.35}
   .item .meta{font-size:12.5px;color:var(--calmo);margin-top:3px}
   .item .sku{font-weight:600;color:var(--texto);opacity:.85}
+  /* o link do SKU se parece com link, mas sem gritar: quem confere já sabe onde clicar */
+  a.link-bling{color:var(--girassol);text-decoration:none;border-bottom:1px dotted currentColor}
+  a.link-bling:hover{border-bottom-style:solid}
   .item .qtd-box{text-align:center;flex:none;min-width:56px}
   .item .qtd-num{font-size:26px;font-weight:700;line-height:1.05}
   .item .qtd-lbl{font-size:11px;color:var(--calmo)}
@@ -260,7 +263,7 @@
       <span class="logo-girassol" role="img" aria-label="Magazine Girassol"></span>
       <h1>Contagem de estoque</h1>
       <span class="empresa">Magazine Girassol</span>
-      <span class="build">c35</span>
+      <span class="build">c36</span>
     </div>
   </header>
 
@@ -518,7 +521,15 @@ function renderListaBusca(lista, total, q, veioDeCodigo, aposNome, aposSku, falh
                 : '<span class="thumb semfoto-mini">sem<br>foto</span>') +
         '<span class="corpo">' +
           '<b>'+esc(it.nome || '(sem nome)')+'</b>' +
-          '<span class="sku-linha"><span class="sku-tag">SKU</span> '+esc(it.sku)+
+          /* 24/09 — o SKU do resultado também abre o estoque no Bling. A busca já devolve o
+             `id` (vem do índice), então é de graça. O clique no link não pode abrir o card:
+             `stopPropagation`, senão conferir o saldo lá viraria lançar aqui. */
+          '<span class="sku-linha"><span class="sku-tag">SKU</span> '+
+          (it.id
+            ? '<a class="link-bling" href="https://www.bling.com.br/estoque.php?buscaid='+esc(it.id)+'"'+
+              ' target="_blank" rel="noopener" title="abrir o estoque deste produto no Bling"'+
+              ' onclick="event.stopPropagation()">'+esc(it.sku)+' ↗</a>'
+            : esc(it.sku))+
             (it.ean ? '<span class="ean">código de barras '+esc(it.ean)+'</span>' : '')+'</span>' +
         '</span>' +
       '</button>' +
@@ -1276,7 +1287,16 @@ async function carregarHoje(recomecar){
           /* a linha de baixo vira FRASE em vez de campos colados com pontinhos. Os pontos
              obrigam a pessoa a decifrar qual pedaço é o quê; "às 20:00 por Diego" ela lê
              direto. O SKU fica destacado porque é o que ela confere contra a etiqueta. */
-          '<div class="meta"><span class="sku">'+esc(l.sku)+'</span>' +
+          /* 24/09 — o SKU vira LINK pra tela de estoque do produto no Bling, quando se sabe o id.
+             Pedido do dono: conferir o saldo sem ir procurar lá. `rel=noopener` porque abre em
+             aba nova, e `stopPropagation` porque o cartão inteiro leva o foco pro campo —
+             sem isso, clicar no link também mexeria na seleção. */
+          '<div class="meta">' +
+          (l.bling_produto_id
+            ? '<a class="sku link-bling" href="https://www.bling.com.br/estoque.php?buscaid='+esc(l.bling_produto_id)+'"'+
+              ' target="_blank" rel="noopener" title="abrir o estoque deste produto no Bling"'+
+              ' onclick="event.stopPropagation()">'+esc(l.sku)+' ↗</a>'
+            : '<span class="sku">'+esc(l.sku)+'</span>') +
           ' · às '+esc(horaSP(l.quando))+(l.quem ? ' por '+esc(l.quem) : '') +
           (l.saldo_bling_na_hora != null ? ' · Bling tinha '+l.saldo_bling_na_hora : '') +
           (naoConferido ? ' <span title="o saldo não foi conferido no Bling na hora — pode estar desatualizado">⚠</span>' : '') +
