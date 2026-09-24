@@ -1028,42 +1028,57 @@ for (const [emp, arq] of Object.entries({
 
   /* P1: `ehAdmin` devolve TRUE com a lista de admins VAZIA (comportamento antigo). Eu me apoiei
      nele sem ler isso: com a env não configurada, QUALQUER pessoa logada lançaria no estoque. */
-  assert.ok(/if \(!listaAdmins\.length\)/.test(libA),
-    'sem lista de admins configurada, qualquer um lança no estoque real — ausência de lista não ' +
-    'é permissão, é configuração faltando');
+  /* o claude[bot] extraiu `ehAdminExplicito`, que é melhor que a minha versão: eu repetia a
+     leitura da env em duas rotas, ele usa o `lerAdmins` que já existe e centraliza a regra. */
+  assert.ok(/const ehAdminExplicito = \(sess\) => \{/.test(libA),
+    'não há checagem de admin EXPLÍCITA — o `ehAdmin` comum devolve true com a lista vazia');
+  assert.ok(/if \(ctx\.lerAdmins\(\)\.length === 0\) return false;/.test(libA),
+    'sem lista de admins configurada, qualquer um lança no estoque real — ausência de lista ' +
+    'não é permissão, é configuração faltando');
+  assert.strictEqual((libA.match(/ehAdminExplicito\(sess\)/g) || []).length, 2,
+    'as duas rotas que expõem ou escrevem estoque (aplicar e depósitos) precisam da checagem explícita');
 
   /* P1: o POST de estoque NÃO é idempotente, e o blingWrite repete quando o fetch estoura —
      Bling grava, conexão cai, repete, soma em DOBRO no estoque real */
-  assert.ok(/tentativas: 1/.test(entA),
-    'a entrada de estoque usa a repetição automática — um timeout depois do commit soma em dobro');
-  assert.ok(/opcoes && opcoes\.tentativas/.test(baseA),
-    'o blingWrite não aceita limitar tentativas');
-  assert.ok(/const _tentativas = Math\.max\(1/.test(baseA) && /t < _tentativas/.test(baseA),
-    'o laço do blingWrite ignora o limite — quem chama não consegue impedir a repetição');
+  /* o claude[bot] chegou numa versão MAIS PRECISA que a minha e ficou com ela: eu cortava TODAS
+     as tentativas (`tentativas: 1`), mas repetir no 429 é seguro — o 429 significa que a
+     requisição NÃO foi processada. O perigoso é só a repetição em cima de EXCEÇÃO DE REDE, que
+     é quando não dá pra saber se o Bling gravou antes de a conexão cair. */
+  assert.ok(/semRetryDeRede/.test(entA),
+    'a entrada de estoque repete em cima de exceção de rede — se o Bling gravou e a conexão caiu ' +
+    'antes da resposta, o envio repetido soma em DOBRO no estoque real');
+  assert.ok(/semRetryDeRede/.test(baseA),
+    'o blingWrite não deixa desligar a repetição de rede — quem chama sabe se o POST é ' +
+    'idempotente, essa função não');
 
   /* P1: sem o detalhe do produto eu não sei se é kit nem o custo — e aprovava mesmo assim */
-  assert.ok(/if \(!det\) return \{ pode: false, motivo: 'sem-detalhe'/.test(entA),
+  assert.ok(/if \(!det\) return \{ pode: false/.test(entA),
     'sem conseguir ler o cadastro, a entrada era aprovada às cegas: kit aceito põe saldo onde ' +
     'ele não existe, e a escrita não tem desfazer');
 
   /* P1: se o marcador local não grava, a linha continua com o botão e o próximo clique soma de novo */
-  assert.ok(/aplicouSemRegistrar/.test(libA),
+  assert.ok(/let marcado = false;/.test(libA) && /if \(r\.ok && !marcado\)/.test(libA),
     'o Bling pode receber a entrada sem que o registro local saiba — e aí o botão continua lá, ' +
-    'convidando a lançar de novo');
+    'convidando a lançar de novo no estoque real');
 
   /* P2: lançamento aplicado vira histórico; alterar depois descola o registro do que foi enviado */
-  assert.strictEqual((libA.match(/já foi aplicado no Bling em/g) || []).length, 4,
-    'as quatro rotas que ALTERAM um lançamento (ajustar, definir, excluir, trocar tipo) precisam ' +
-    'recusar o que já foi aplicado');
+  /* são CINCO recusas: as quatro rotas que alteram (ajustar, definir, excluir, trocar tipo) e a
+     própria rota de aplicar, que não pode reaplicar. Conta pelo número pra que tirar qualquer
+     uma delas reprove — sem as cinco, o registro descola do que foi enviado ao Bling, ou o
+     estoque soma em dobro. */
+  assert.ok((libA.match(/já foi aplicado no Bling/g) || []).length >= 5,
+    'falta alguma recusa de lançamento já aplicado: as quatro rotas que ALTERAM (ajustar, ' +
+    'definir, excluir, trocar tipo) e a de APLICAR, que não pode reaplicar');
 
   /* P2: a busca por código é "contém" e eu olhava 5 resultados — o exato pode estar na página 2 */
-  assert.ok(/pag <= 5/.test(entA) && /limite=100/.test(entA),
+  assert.ok(/for \(let pagina = 1; pagina <= 5; pagina\+\+\)/.test(entA) && /limite=100/.test(entA),
     'a busca do produto olha poucos resultados — com `10-lisa-125mm-100` e `-1000` no catálogo, ' +
     'o exato pode ficar de fora e a entrada diria "não encontrado"');
 
   /* P2: falha na listagem de depósitos virava lista vazia e ok */
-  assert.ok(/e\.semResposta = true;/.test(entA),
-    'falha ao listar depósitos vira lista vazia com ok — o dono concluiria que não há depósito');
+  assert.ok(/if \(!r \|\| !r\.ok\) throw new Error\('não consegui consultar os depósitos/.test(entA),
+    'falha ao listar depósitos vira lista vazia com ok — o dono concluiria que a empresa não ' +
+    'tem depósito e iria caçar no Bling à toa');
 
   /* P2: a observação é irreversível, e a data vinha em UTC */
   assert.ok(/timeZone: 'America\/Sao_Paulo' \}\)\.slice\(0, 10\)/.test(libA),
@@ -1074,13 +1089,14 @@ for (const [emp, arq] of Object.entries({
     'depois de um retry bem-sucedido a linha mostra "no Bling" E "falhou" ao mesmo tempo');
 
   /* P2: a rota dos depósitos era documentada como admin e aceitava qualquer sessão */
-  assert.ok(/só o responsável vê os depósitos/.test(libA), 'a rota de depósitos não exige admin');
+  assert.ok(/só o responsável pode consultar os depósitos do Bling/.test(libA),
+    'a rota de depósitos não exige admin — é metadado de configuração da empresa');
 
   /* P2: o aviso da tela ainda prometia que ela NUNCA mexe no Bling, enquanto o botão novo
      escreve de verdade. Um aviso que virou mentira é pior que nenhum: a pessoa confia nele. */
   assert.ok(!/O saldo do Bling <b>não muda<\/b> por aqui/.test(html),
     'a tela ainda promete que o saldo do Bling nunca muda, e agora existe um botão que muda');
-  assert.ok(/Só o botão <b>📦<\/b>/.test(html),
+  assert.ok(/📦/.test(html) && /lança no Bling/.test(html),
     'o aviso não diz QUAL ação escreve no Bling — é a única que não tem desfazer');
 }
 
