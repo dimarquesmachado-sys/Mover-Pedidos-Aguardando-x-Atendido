@@ -284,8 +284,12 @@ for (const [emp, arq] of Object.entries({
    classes baterem foi o erro; agora elas são definidas onde são usadas, e o teste confere. */
 {
   const css = /<style>([\s\S]*?)<\/style>/.exec(html)[1];
-  const usadas = new Set([...html.matchAll(/class="([^"]+)"/g)]
-    .flatMap(m => m[1].split(/\s+/)).filter(c => c && !c.includes("'")));
+  /* 24/09: só as classes LITERAIS. O atributo pode ser montado em tempo de execução
+     (`class="item'+(x ? ' marcado' : '')+'"`), e ali os pedaços de expressão não são nomes de
+     classe — o teste acusava `&&` e `SELECIONADOS.has(l.id)` como classes sem CSS. Um falso
+     positivo desses ensina a ignorar o vermelho, que é pior que não ter o teste. */
+  const usadas = new Set([...html.matchAll(/class="([a-zA-Z0-9 _-]+)"/g)]
+    .flatMap(m => m[1].split(/\s+/)).filter(Boolean));
   const semCss = [...usadas].filter(c => !new RegExp('\\.' + c.replace(/-/g, '\\-') + '[\\s,{:.]').test(css));
   assert.deepStrictEqual(semCss, [],
     'classe(s) usadas na tela sem CSS: ' + semCss.join(', ') + ' — foi assim que ela saiu sem ' +
@@ -1270,9 +1274,14 @@ for (const [emp, arq] of Object.entries({
   /* P1: a tela mandava só o dia e o servidor remontava a fila. Se alguém criasse um acréscimo
      ou mudasse uma quantidade entre carregar a página e clicar, ele confirmava "10 somando 47"
      e o Bling recebia outra coisa — sem desfazer. */
-  assert.ok(/itens: prontosNaTela\.map/.test(jsF),
+  /* 24/09: a foto agora também ESCOLHE (caixinhas de seleção). Continua sendo a foto do que ele
+     viu — o que muda é que pode ser um subconjunto. */
+  assert.ok(/itens: \(prontosNaTela\.filter\(l => SELECIONADOS\.has\(l\.id\)\)/.test(jsF),
     'a tela não manda a FOTO do que confirmou — o servidor lançaria uma fila diferente da que ' +
     'ele viu na tela');
+  assert.ok(/Number\(i2\.qtd\) !== f\.qtd/.test(libF),
+    'com seleção, a conferência de QUANTIDADE se perdeu — escolher 3 de 10 não pode abrir mão ' +
+    'de lançar exatamente o número que ele viu');
   assert.ok(/const foto = Array\.isArray\(body\.itens\)/.test(libF) && /desatualizado: true/.test(libF),
     'o servidor não confere a foto contra o arquivo — divergir do confirmado é o erro mais caro ' +
     'possível numa escrita sem desfazer');
@@ -1362,6 +1371,37 @@ for (const [emp, arq] of Object.entries({
       'a pausa entre chamadas ao Bling não está de fato sendo chamada — foram só ' + chamadasSleep +
       ' (busca, cadastro e POST deveriam gerar pelo menos 3)');
   })().catch(e => { console.error(e); process.exit(1); });
+}
+
+/* 24/09 — ABAS E SELEÇÃO. Pedido do dono depois de lançar pela primeira vez: as linhas
+   continuavam misturadas, e lançar TODOS nem sempre é o que ele quer. */
+{
+  const jsS = /<script>([\s\S]*?)<\/script>/.exec(html)[1];
+  const libS = fs.readFileSync(LIB, 'utf8');
+
+  assert.ok(/data-aba="nao"/.test(jsS) && /data-aba="sim"/.test(jsS) && /data-aba="todos"/.test(jsS),
+    'faltam as abas de lançados / a lançar / todos');
+  assert.ok(/let ABA = 'nao';/.test(jsS),
+    'a tela não abre no que FALTA lançar — é o que ele precisa ver primeiro');
+
+  /* a caixinha só no que pode ser lançado: caixa desabilitada em linha já enviada é convite a
+     clicar e achar que não funcionou */
+  assert.ok(/const selecionavel = !!\(l\.id && l\.tipo === 'somar' && !l\.aplicado_em\);/.test(jsS),
+    'a caixinha de seleção aparece em linha que não pode ser lançada');
+
+  /* nada marcado = vão todos, e o botão DIZ isso */
+  assert.ok(/marcados\.length \? marcados : prontos/.test(jsS),
+    'sem seleção o lote não cai de volta em "todos" — o botão prometeria algo que não faz');
+
+  /* e no servidor, a foto passou a ESCOLHER sem deixar de CONFERIR */
+  assert.ok(/fila\.length = 0;/.test(libS) && /fila\.push\(\.\.\.escolhidos\)/.test(libS),
+    'o servidor ignora a seleção e lança a fila inteira do dia');
+  assert.ok(/nenhum item selecionado/.test(libS),
+    'uma seleção vazia cairia em "lançar tudo" — o oposto do que ele pediu');
+
+  /* trocar de aba não pode perder a seleção nem repintar à toa */
+  assert.ok(/atualizarAvisoLote\(\)/.test(jsS),
+    'marcar uma caixinha repinta a lista inteira — perderia o rolamento numa lista de dezenas');
 }
 
 console.log('OK: contagem de estoque — registro interno (nunca escreve no Bling), sessão nas 4 rotas, quantidade validada e busca por nome sem gastar cota');
