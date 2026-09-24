@@ -1199,4 +1199,35 @@ for (const [emp, arq] of Object.entries({
     'um lote grande terminar');
 }
 
+/* 24/09 (Codex #526, r3) — P1 + P2 achados depois que os dois rounds acima já tinham fechado a
+   corrida DENTRO de um lote. Estes dois são sobre o que acontece EM VOLTA dele. */
+{
+  const libC = fs.readFileSync(LIB, 'utf8');
+
+  /* P1: `blingWrite` perdendo a resposta devolve "não recebi confirmação do Bling (falha de
+     rede)" — a escrita pode JÁ ter chegado no Bling, só a confirmação que se perdeu. Esse é
+     o pior caso possível pra continuar insistindo: sem contar como falha GERAL, o lote seguia
+     mandando as próximas escritas sobre a mesma conexão ruim, multiplicando os lançamentos que
+     podem estar duplicados no Bling sem ninguém saber. */
+  assert.ok(/const geral = \/[^/]*falha de rede[^/]*\/i\.test/.test(libC),
+    'uma falha de rede AMBÍGUA do Bling (pode já ter escrito, só a confirmação que se perdeu) ' +
+    'não conta como falha geral — o lote segue mandando escritas sobre a mesma conexão ruim');
+
+  /* P2: duas abas (ou dois admins) chamando /contagem-lancar-todas quase juntas liam a mesma
+     fila ANTES de qualquer uma reservar — cada uma disparava seu próprio laço sequencial, mas
+     os dois laços rodavam em PARALELO um do outro: duas rodadas de chamadas ao Bling ao mesmo
+     tempo pra mesma conta, o cenário de 429 que o laço sequencial existe pra evitar. */
+  const iLoteC = libC.indexOf("'/contagem-lancar-todas'");
+  const iFimC = libC.indexOf("'/contagem-aplicar'", iLoteC);
+  const corpoLoteC = libC.slice(iLoteC, iFimC > 0 ? iFimC : iLoteC + 4000);
+  assert.ok(/_loteLancandoTodas/.test(corpoLoteC),
+    'duas chamadas simultâneas a /contagem-lancar-todas disparam dois laços sequenciais em ' +
+    'PARALELO um do outro — mesma conta, duas rodadas de chamadas ao Bling ao mesmo tempo');
+  assert.ok(/if \(_loteLancandoTodas\) \{/.test(corpoLoteC) && /_loteLancandoTodas = true;/.test(corpoLoteC),
+    'a trava do lote não recusa uma segunda chamada concorrente antes de montar a fila');
+  assert.ok(/\} finally \{\s*_loteLancandoTodas = false;/.test(corpoLoteC),
+    'a trava do lote não é liberada em TODO caminho de saída (erro de leitura, fila vazia, ' +
+    'falha ao reservar, fim normal) — uma vez presa, ninguém lança o dia de novo sem reiniciar');
+}
+
 console.log('OK: contagem de estoque — registro interno (nunca escreve no Bling), sessão nas 4 rotas, quantidade validada e busca por nome sem gastar cota');
