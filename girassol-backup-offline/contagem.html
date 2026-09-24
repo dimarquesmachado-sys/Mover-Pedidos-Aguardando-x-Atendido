@@ -250,7 +250,7 @@
       <span class="logo-girassol" role="img" aria-label="Magazine Girassol"></span>
       <h1>Contagem de estoque</h1>
       <span class="empresa">Magazine Girassol</span>
-      <span class="build">c31</span>
+      <span class="build">c32</span>
     </div>
   </header>
 
@@ -1142,7 +1142,12 @@ async function carregarHoje(recomecar){
        quando há acréscimos prontos, e diz a soma total: é a última chance de ver que o número
        está errado ANTES de uma escrita que não tem desfazer. */
     (() => {
-      const prontos = ACUMULADO.filter(l => l.id && l.tipo === 'somar' && !l.aplicado_em);
+      /* Codex #526 (P2, r4): o servidor tira da `fila` quem tem `ultima_falha_ambigua` (o
+         Bling pode já ter recebido essa escrita — só o dono, item a item, decide relançar).
+         Esta lista não filtrava isso: a FOTO mandava o item ambíguo, o servidor não o achava
+         na fila dele, e classificava como "sumiu" — recusando o lote inteiro por causa de UM
+         item que nem deveria estar na foto. */
+      const prontos = ACUMULADO.filter(l => l.id && l.tipo === 'somar' && !l.aplicado_em && !l.ultima_falha_ambigua);
       prontosNaTela = prontos;   // a foto que o botão vai enviar, pra o servidor conferir
       if(!prontos.length) return '';
       /* Codex #526 (P1): com a lista TRUNCADA (dia com mais de 5.000 registros), o botão diria

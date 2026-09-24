@@ -867,6 +867,11 @@ function routes(readBody) {
        `lerAdmins` vai junto pra a rota poder EXIGIR admin configurado nesta escrita irreversível,
        em vez de herdar o "vazio = sem restrição" de rotas menos arriscadas. */
     blingWrite, ehAdmin, lerAdmins,
+    /* Codex #526 (P2, r4): cada item lançado faz até 3 chamadas ao Bling seguidas (busca,
+       cadastro, POST) — sem pausa ENTRE elas, só depois do item inteiro. A conta é limitada a
+       ~3 req/s (mesmo PAUSA_MS de 350ms usado no resto desta pasta); espaçar as chamadas de
+       dentro de um item evita fabricar os próprios 429 do lote. */
+    PAUSA_MS, sleep,
     empresa: {
       pasta: 'girassol-backup-offline',
       /* o depósito é POR EMPRESA. O da GOOD é 4956031259; o da Girassol ainda não foi

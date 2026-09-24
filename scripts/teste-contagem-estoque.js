@@ -1144,7 +1144,7 @@ for (const [emp, arq] of Object.entries({
 
   /* a razão principal: recusas duplicadas divergem, e a que ficar frouxa deixa passar o que a
      outra recusa — aparecendo só como estoque errado no Bling, sem desfazer */
-  assert.ok(/const r = await aplicarUm\(f\.id, sess, dep, marcaAtual\);/.test(libT),
+  assert.ok(/r = await aplicarUm\(f\.id, sess, dep, marcaAtual\);/.test(libT),
     'o lote não reusa a `aplicarUm` do botão individual — travas duplicadas divergem, e o erro ' +
     'só apareceria como estoque errado no Bling');
   const iLote = libT.indexOf("'/contagem-lancar-todas'");
@@ -1204,7 +1204,7 @@ for (const [emp, arq] of Object.entries({
 
   /* P2: as recusas mais comuns são DO ITEM (kit, sem custo, sem SKU) — parar em 3 seguidas
      abortava todos os válidos que vinham depois, e a nova tentativa parava no mesmo lugar */
-  assert.ok(/const geral = \/não consegui consultar\|HTTP 401/.test(libB),
+  assert.ok(/não consegui consultar\|HTTP 401/.test(libB),
     'o lote para em 3 falhas seguidas mesmo quando elas são do ITEM — três kits em sequência ' +
     'abortariam todos os válidos seguintes');
 
@@ -1239,7 +1239,7 @@ for (const [emp, arq] of Object.entries({
      o pior caso possível pra continuar insistindo: sem contar como falha GERAL, o lote seguia
      mandando as próximas escritas sobre a mesma conexão ruim, multiplicando os lançamentos que
      podem estar duplicados no Bling sem ninguém saber. */
-  assert.ok(/const geral = \/[^/]*falha de rede[^/]*\/i\.test/.test(libC),
+  assert.ok(/const geral = .*\/[^/]*falha de rede[^/]*\/i\.test/.test(libC),
     'uma falha de rede AMBÍGUA do Bling (pode já ter escrito, só a confirmação que se perdeu) ' +
     'não conta como falha geral — o lote segue mandando escritas sobre a mesma conexão ruim');
 
@@ -1296,6 +1296,72 @@ for (const [emp, arq] of Object.entries({
   /* e o teto do POST não pode dizer "nada foi lançado" */
   assert.ok(/NÃO SEI se a entrada foi registrada/.test(entF),
     'o timeout do POST afirma que nada entrou — pode ter entrado, e o dono lançaria de novo');
+}
+
+/* 24/09 (Codex #526, r4) — a 3ª rodada de revisão achou furos nos próprios consertos da 2ª:
+   o `ambiguo: true` se perdia no caminho de volta, o classificador de falha geral não via essa
+   marca, a renovação do lock só rodava ENTRE itens (não durante um item lento), a tela mandava
+   uma foto que incluía linha que o servidor já tinha excluído, e nada espaçava as 3 chamadas ao
+   Bling de dentro de UM item. */
+{
+  const libF2 = fs.readFileSync(LIB, 'utf8');
+  const entF2 = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'estoque-entrada.js'), 'utf8');
+  const jsF2 = /<script>([\s\S]*?)<\/script>/.exec(html)[1];
+
+  /* P1: o classificador de falha geral do lote precisa da marca ESTRUTURADA, não só do texto —
+     o teto de 45s por etapa devolve mensagens nova que não batem em nenhuma palavra do regex
+     antigo. */
+  assert.ok(/const geral = \(r && r\.ambiguo\) \|\|/.test(libF2),
+    'o lote ainda classifica falha geral só por TEXTO — o timeout de 45s por etapa devolve ' +
+    'mensagens que não batem no regex, e a rodada seguiria mandando escritas sobre uma conexão ' +
+    'travada sem nunca parar');
+
+  /* P1: a renovação da reserva tem que rodar TAMBÉM enquanto o item da vez está em andamento —
+     um item pode encadear até 3 tetos de 45s (135s), mais que o TTL de 120s do emAndamento. */
+  assert.ok(/function renovarReserva\(\)/.test(libF2) && /setInterval\(renovarReserva/.test(libF2)
+    && /clearInterval\(batendo\)/.test(libF2),
+    'a reserva só é renovada ENTRE itens — um item que sozinho passa dos 120s (3 tetos de 45s ' +
+    'encadeados) deixa os OUTROS da fila com o carimbo velho, liberando a edição de uma linha ' +
+    'que o lote ainda vai processar');
+
+  /* P2: a FOTO que a tela manda tem que excluir o que o servidor também exclui da fila —
+     senão um item com escrita ambígua (fora da fila automática) aparece como "sumiu" e recusa
+     o lote inteiro. */
+  assert.ok(/ACUMULADO\.filter\(l => l\.id && l\.tipo === 'somar' && !l\.aplicado_em && !l\.ultima_falha_ambigua\)/.test(jsF2),
+    'a tela monta a foto sem excluir quem tem `ultima_falha_ambigua` — o servidor tira essa ' +
+    'linha da fila, a foto ainda a inclui, e a comparação recusa o lote inteiro por causa de um ' +
+    'item que nem deveria estar nela');
+
+  /* P2: nada espaçava as chamadas DE DENTRO de um item (busca, cadastro, POST) — só o laço de
+     fora, entre itens. */
+  assert.ok(/async function blingGet\(\.\.\.args\) \{ await _sleep\(_PAUSA_MS\)/.test(entF2)
+    && /async function blingWrite\(\.\.\.args\) \{ await _sleep\(_PAUSA_MS\)/.test(entF2),
+    'as chamadas ao Bling de dentro de um item não são espaçadas — 3 chamadas rápidas seguidas ' +
+    'por item bastam pra estourar sozinhas o limite de ~3 req/s da conta');
+
+  /* funcional: o `ambiguo: true` que o blingWrite devolve (escrita que PODE ter chegado no
+     Bling) tem que sobreviver até o retorno de `entrada` — é o que `aplicarUm` usa pra marcar
+     `ultima_falha_ambigua` e tirar o item da fila automática do lote. */
+  const { criar: criarEntrada } = require(path.join(raiz, 'lib', 'checkout', 'estoque-entrada'));
+  let chamadasSleep = 0;
+  const libEnt = criarEntrada({
+    blingGet: async (u) => /\/produtos\?codigo=/.test(u)
+      ? { ok: true, data: { data: [{ id: 1, codigo: 'SKU1' }] } }
+      : { ok: true, data: { data: { id: 1, formato: 'S', precoCusto: 10 } } },
+    blingWrite: async () => ({ ok: false, status: 0, ambiguo: true, erro: 'rede: caiu no meio' }),
+    sleep: async () => { chamadasSleep++; },
+  });
+  (async () => {
+    const r = await libEnt.entrada({ sku: 'SKU1', quantidade: 5, depositoId: 999 });
+    assert.strictEqual(r.ok, false, 'a escrita ambígua não devolveu ok:false');
+    assert.strictEqual(r.ambiguo, true,
+      'o retorno perdeu o `ambiguo: true` que o blingWrite mandou — sem ele, aplicarUm não marca ' +
+      '`ultima_falha_ambigua`, e o item volta pra fila automática podendo somar DE NOVO um ' +
+      'lançamento que talvez já tenha entrado no Bling');
+    assert.ok(chamadasSleep >= 3,
+      'a pausa entre chamadas ao Bling não está de fato sendo chamada — foram só ' + chamadasSleep +
+      ' (busca, cadastro e POST deveriam gerar pelo menos 3)');
+  })().catch(e => { console.error(e); process.exit(1); });
 }
 
 console.log('OK: contagem de estoque — registro interno (nunca escreve no Bling), sessão nas 4 rotas, quantidade validada e busca por nome sem gastar cota');
