@@ -929,6 +929,30 @@ function editarQtd(botao){
 /* excluir, com confirmação — pedido do dono. No servidor a linha não some do arquivo: fica
    marcada com quem tirou e quando, e some só da lista. */
 /* troca o significado de um lançamento já gravado (acréscimo ⇄ total contado) */
+/* converte todas as contagens NÃO APLICADAS do dia em acréscimo, de uma vez */
+async function marcarTodasComoSomar(botao){
+  const quantas = (botao.textContent.match(/\d+/) || ['?'])[0];
+  if(!confirm('Marcar ' + quantas + ' lançamento(s) como ACRÉSCIMO ao estoque?\n\nAs quantidades não mudam — só o que elas significam. Lançamentos já enviados ao Bling não são tocados.')) return;
+  botao.disabled = true;
+  botao.textContent = 'convertendo…';
+  let d = null;
+  try {
+    const r = await fetch(MOD+'/contagem-marcar-todas', {
+      method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ tipo: 'somar', dia: hojeISO() })
+    });
+    d = await r.json().catch(()=>null);
+  } catch(e){ d = null; }
+  if(!(d && d.ok)){
+    alert((d && d.erro) || 'não consegui converter — nada foi alterado');
+    botao.disabled = false;
+    carregarHoje();
+    return;
+  }
+  if(d.puladas) alert(d.mudadas + ' convertido(s). ' + d.puladas + ' não foram tocados por já terem sido lançados no Bling.');
+  carregarHoje();
+}
+
 async function trocarTipo(item, botao){
   /* Codex #523 (P2): editar a quantidade e clicar no ⇄ dispara DOIS envios ao mesmo tempo — o
      blur do campo manda o /contagem-definir e o clique manda o /contagem-tipo. Os dois leem e
@@ -1090,6 +1114,22 @@ async function carregarHoje(recomecar){
      caixa no canto e soma). Tabela de 7 colunas num celular de galpão não se lê nem se toca. */
   alvo.innerHTML =
     (truncado ? '<div class="aviso">Mostrando os '+ACUMULADO.length+' lançamentos mais recentes de hoje — há mais no arquivo que esta tela não carrega de uma vez.</div>' : '') +
+    /* 24/09 — CONVERTER TODAS DE UMA VEZ. Ele lançou ~10 itens antes de os dois modos
+       existirem, todos querendo somar, e cada um ficou como contagem. Trocar uma a uma é o
+       que existia; este aviso só aparece quando há o que converter, e some sozinho depois.
+       Codex #525 (P2): o servidor converte TODOS os lançamentos do dia, não só os que esta
+       tela carregou — com a lista truncada (>5000), o número no botão mentiria sobre o
+       tamanho do lote de verdade. Sem botão aqui; a conversão em lote de um dia truncado
+       precisa ser feita fora desta tela. */
+    (truncado ? '' : (() => {
+      const paraTrocar = ACUMULADO.filter(l => l.id && (l.tipo || 'contagem') === 'contagem' && !l.aplicado_em);
+      if(!paraTrocar.length) return '';
+      return '<div class="aviso" id="avisoLote">' +
+        '<b>'+paraTrocar.length+'</b> lançamento(s) marcados como <b>total contado</b>. ' +
+        'Se você queria <b>somar ao estoque</b>, converta de uma vez:' +
+        '<button class="btn sec" id="btMarcarTodas" style="margin-top:8px;width:100%">marcar os '+paraTrocar.length+' como “a somar”</button>' +
+      '</div>';
+    })()) +
     /* 24/09 — LANÇAR TODOS DE UMA VEZ. Dez cliques no 📦 era o que existia. O aviso só aparece
        quando há acréscimos prontos, e diz a soma total: é a última chance de ver que o número
        está errado ANTES de uma escrita que não tem desfazer. */
@@ -1193,6 +1233,8 @@ async function carregarHoje(recomecar){
   alvo.querySelectorAll('.item [data-excluir]').forEach(b => {
     b.addEventListener('click', () => excluir(b.closest('.item'), b));
   });
+  const btLote = document.getElementById('btMarcarTodas');
+  if(btLote) btLote.addEventListener('click', () => marcarTodasComoSomar(btLote));
   alvo.querySelectorAll('.item .trocar-tipo').forEach(b => {
     b.addEventListener('click', () => trocarTipo(b.closest('.item'), b));
   });
