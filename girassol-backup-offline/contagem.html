@@ -250,7 +250,7 @@
       <span class="logo-girassol" role="img" aria-label="Magazine Girassol"></span>
       <h1>Contagem de estoque</h1>
       <span class="empresa">Magazine Girassol</span>
-      <span class="build">c30</span>
+      <span class="build">c31</span>
     </div>
   </header>
 
@@ -833,6 +833,7 @@ async function lancarDeVerdade(){
 }
 
 let OFFSET_LISTA = 0, ACUMULADO = [];
+let prontosNaTela = [];   // o que o aviso de lançar em lote mostrou por último
 
 /* Codex #523 (P2): +/−, editar a quantidade e trocar o tipo (⇄) são três rotas independentes
    que leem e regravam o MESMO registro JSON — cada uma travava só os próprios botões, então
@@ -1004,7 +1005,14 @@ async function lancarTodasNoBling(botao){
   try {
     const r = await fetch(MOD+'/contagem-lancar-todas', {
       method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ dia: hojeISO() })
+      /* Codex #526 (P1): eu mandava só o dia, e o servidor remontava a fila sozinho. Se outra
+         pessoa criasse um acréscimo (ou mudasse uma quantidade) entre o carregamento desta
+         página e o clique, ele confirmaria "10 somando 47" e o Bling receberia outra coisa —
+         numa escrita sem desfazer. Vai a FOTO do que ele viu: ids e quantidades. */
+      body: JSON.stringify({
+        dia: hojeISO(),
+        itens: prontosNaTela.map(l => ({ id: l.id, qtd: Number(l.contado) })),
+      })
     });
     d = await r.json().catch(()=>null);
   } catch(e){ d = null; }
@@ -1135,6 +1143,7 @@ async function carregarHoje(recomecar){
        está errado ANTES de uma escrita que não tem desfazer. */
     (() => {
       const prontos = ACUMULADO.filter(l => l.id && l.tipo === 'somar' && !l.aplicado_em);
+      prontosNaTela = prontos;   // a foto que o botão vai enviar, pra o servidor conferir
       if(!prontos.length) return '';
       /* Codex #526 (P1): com a lista TRUNCADA (dia com mais de 5.000 registros), o botão diria
          "lançar os 30" mas o servidor varre o dia inteiro e lançaria mais do que ele viu — numa

@@ -1260,4 +1260,42 @@ for (const [emp, arq] of Object.entries({
     'falha ao reservar, fim normal) — uma vez presa, ninguém lança o dia de novo sem reiniciar');
 }
 
+/* 24/09 (Codex #526, 3 P1 na 2ª rodada) — os três são sobre o lote mandar pro Bling algo
+   diferente do que o dono confirmou, ou mandar DUAS vezes. */
+{
+  const libF = fs.readFileSync(LIB, 'utf8');
+  const entF = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'estoque-entrada.js'), 'utf8');
+  const jsF = /<script>([\s\S]*?)<\/script>/.exec(html)[1];
+
+  /* P1: a tela mandava só o dia e o servidor remontava a fila. Se alguém criasse um acréscimo
+     ou mudasse uma quantidade entre carregar a página e clicar, ele confirmava "10 somando 47"
+     e o Bling recebia outra coisa — sem desfazer. */
+  assert.ok(/itens: prontosNaTela\.map/.test(jsF),
+    'a tela não manda a FOTO do que confirmou — o servidor lançaria uma fila diferente da que ' +
+    'ele viu na tela');
+  assert.ok(/const foto = Array\.isArray\(body\.itens\)/.test(libF) && /desatualizado: true/.test(libF),
+    'o servidor não confere a foto contra o arquivo — divergir do confirmado é o erro mais caro ' +
+    'possível numa escrita sem desfazer');
+
+  /* P1: POST que perde a resposta PODE ter entrado no Bling. Sem marca, a rodada seguinte
+     pegaria o mesmo item e somaria de novo. */
+  assert.ok(/ambiguo: true/.test(entF) && /ambiguo: semResposta/.test(entF),
+    'timeout e "sem resposta" no POST não são marcados como AMBÍGUOS — viram "não lançou", e ' +
+    'relançar duplicaria o estoque');
+  assert.ok(/if \(r\.ambiguo\) l2\.ultima_falha_ambigua = true/.test(libF),
+    'a marca de escrita ambígua não é gravada no lançamento');
+  assert.ok(/\.filter\(l => !l\.ultima_falha_ambigua\)/.test(libF),
+    'a fila do lote inclui escrita ambígua — o item pode já ter entrado no Bling e entraria de novo');
+
+  /* P1: `blingGet` não tem timeout; uma conexão pendurada travava a rodada e as reservas */
+  assert.ok(/function comTeto\(promessa, ms, oQue\)/.test(entF),
+    'a entrada não tem teto de tempo — uma conexão que não responde pendura a rodada inteira e ' +
+    'deixa as reservas presas');
+  assert.ok((entF.match(/comTeto\(/g) || []).length >= 4,
+    'alguma etapa da entrada ficou sem teto de tempo');
+  /* e o teto do POST não pode dizer "nada foi lançado" */
+  assert.ok(/NÃO SEI se a entrada foi registrada/.test(entF),
+    'o timeout do POST afirma que nada entrou — pode ter entrado, e o dono lançaria de novo');
+}
+
 console.log('OK: contagem de estoque — registro interno (nunca escreve no Bling), sessão nas 4 rotas, quantidade validada e busca por nome sem gastar cota');
