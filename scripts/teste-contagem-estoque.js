@@ -128,8 +128,14 @@ for (const rota of ['/contagem', '/contagem-lancar', '/contagem-lista']) {
 assert.ok(/saldo_bling_na_hora/.test(lib),
   'a contagem não guarda o saldo do Bling do momento — a divergência deixaria de ser auditável, ' +
   'porque a revisão compararia a contagem de ontem com o saldo de hoje');
-assert.ok(/divergencia: \(saldoBling != null/.test(lib),
-  'a divergência não é calculada no lançamento');
+/* 23/09 — a divergência só existe em CONTAGEM. No modo somar, "10" é "chegaram 10", não "a
+   prateleira tem 10": comparar com o saldo daria um número sem significado, e número errado é
+   pior que número ausente. */
+assert.ok(/divergencia: \(String\(body\.tipo \|\| ''\) !== 'somar' && saldoBling != null/.test(lib),
+  'a divergência não é calculada no lançamento, ou é calculada também no modo somar');
+assert.ok(/tipo: \(String\(body\.tipo \|\| ''\) === 'somar'\) \? 'somar' : 'contagem'/.test(lib),
+  'o lançamento não grava O QUE o número significa — na revisão, "10" não diz se o Bling ' +
+  'recebe 10 ou +10, e aplicar o errado põe o estoque errado sem ninguém descobrir por quê');
 assert.ok(/enviado_ao_bling: false/.test(lib),
   'falta a marca de "ainda não enviado" — é ela que deixa o dono saber o que já tratou');
 
@@ -306,7 +312,16 @@ for (const [emp, arq] of Object.entries({
   /* botões por addEventListener, não por onclick montado com o id — é o XSS do #510 */
   assert.ok(/addEventListener\('click'/.test(js3) && /data-ajuste/.test(js3),
     'os botões + e − montam código a partir de dado gravado — mesmo buraco que o Codex achou no painel');
-  assert.ok(/par\.forEach\(b => b\.disabled = true\)/.test(js3),
+
+  /* Codex #523 (P2): +/−, editar a quantidade e trocar o tipo (⇄) mutam o MESMO registro —
+     controlesLinha() é o que trava as três rotas juntas; se ela parar de cobrir alguma, a
+     omitida some do array e volta a correr destravada durante as outras. */
+  const controlesLinhaSrc = js3.slice(js3.indexOf('function controlesLinha'), js3.indexOf('function controlesLinha') + 400);
+  assert.ok(/\.mais-menos button/.test(controlesLinhaSrc) && /data-editar/.test(controlesLinhaSrc) && /\.trocar-tipo/.test(controlesLinhaSrc),
+    'controlesLinha não cobre mais-menos, editar e trocar-tipo juntos — as três rotas mutam a mesma linha sem travar as outras');
+
+  const ajustarSrc = js3.slice(js3.indexOf('async function ajustar'), js3.indexOf('let _seqLista'));
+  assert.ok(/controlesLinha\(item\)/.test(ajustarSrc) && /disabled = true/.test(ajustarSrc),
     'clique repetido no + manda vários ajustes e a tela fica diferente do que foi gravado');
 }
 
@@ -401,9 +416,16 @@ for (const [emp, arq] of Object.entries({
      o valor digitado) e o click (que ajusta) sem ordem garantida entre os dois — o ajuste podia
      ser sobrescrito pelo valor absoluto do blur, perdendo o toque em silêncio */
   const editarQtd6 = js6.slice(js6.indexOf('function editarQtd'), js6.indexOf('function excluir'));
-  assert.ok(/\.mais-menos button/.test(editarQtd6) && /disabled = true/.test(editarQtd6),
-    'editar a quantidade não trava os botões + / − / excluir da mesma linha — o blur do ' +
+  assert.ok(/controlesLinha\(item\)/.test(editarQtd6) && /disabled = true/.test(editarQtd6),
+    'editar a quantidade não trava os botões + / − / excluir / trocar-tipo da mesma linha — o blur do ' +
     'campo e o clique num deles correm sem ordem garantida');
+
+  /* Codex #523 (P2): o mesmo furo do parágrafo acima existia entre editar e o botão ⇄ de trocar
+     o tipo — trocarTipo() só travava a si mesmo, deixando +/−/editar livres durante o POST. */
+  const trocarTipo6 = js6.slice(js6.indexOf('async function trocarTipo'), js6.indexOf('async function excluir'));
+  assert.ok(/controlesLinha\(item\)/.test(trocarTipo6) && /disabled = true/.test(trocarTipo6),
+    'trocar o tipo (⇄) não trava os botões + / − / editar da mesma linha — uma resposta pode ' +
+    'sobrescrever a outra em silêncio');
 }
 
 /* 22/09 — KIT NÃO PODE SER CONTADO. O dono explicou a regra: `80-AE-8F-125mm-KIT40` é um kit,
@@ -746,6 +768,226 @@ for (const [emp, arq] of Object.entries({
   }
 }
 
+/* 23/09 — DOIS MODOS, e a diferença entre eles é a coisa mais perigosa desta tela.
+   O dono: "eu quero olhar aqui do meu lado, se tem 10 produtos A, e só digitar 10, pra
+   ADICIONAR 10 ao total". Isso é ENTRADA. O que a tela fazia era CONTAGEM: "há 10 na
+   prateleira", com divergência contra o Bling.
+   Os dois usos são legítimos — hoje ele registra estoque que não está na prateleira; amanhã
+   quer inventário —, mas o registro precisa dizer qual é: na hora de aplicar no Bling, "10"
+   sozinho não diz se o estoque vai PRA 10 ou SOMA 10. Aplicar o errado põe o estoque errado e
+   ninguém descobre por quê. */
+{
+  const os2 = require('os');
+  const dir2 = fs.mkdtempSync(path.join(os2.tmpdir(), 'modo-'));
+  let corpo2 = {};
+  const { criar: criarContagem } = require(LIB.replace(/\.js$/, ''));
+  const rc2 = criarContagem({
+    prefixo: '/x', json: (r, st, o) => { r._o = o; }, validarSessao: () => ({ nome: 'Diego' }),
+    lerIndiceEan: () => ({}), CACHE_DIR: dir2,
+    readJson: (f, d) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { return d; } },
+    writeJson: () => true, readBody: async () => corpo2, empresa: { pasta: 'girassol-backup-offline' },
+    /* o #522 ampliou o contrato do contexto (produtoDetalhe, localizacaoDeProduto, locCache —
+       o card inline usa). Estes testes nasceram antes e não passavam, o que derrubava a lib
+       inteira já no `criar`. */
+    produtoDetalhe: async () => null, localizacaoDeProduto: () => '', locCache: () => ({}),
+    blingGet: async (u) => u.includes('/estoques/saldos')
+      ? { ok: true, data: { data: [{ saldoVirtualTotal: 3 }] } }
+      : { ok: true, data: { data: [{ id: 1, codigo: 'A', formato: 'S' }] } },
+  });
+  const lancar2 = async (tipo) => {
+    corpo2 = { sku: 'A', nome: 'Produto A', contado: 10, tipo };
+    const res = {};
+    await rc2({ headers: {} }, res, new URL('http://x/x/contagem-lancar'), 'POST');
+    return res._o;
+  };
+
+  (async () => {
+    await lancar2('somar');
+    await lancar2('contagem');
+    await lancar2(undefined);            // sem tipo: tem que cair no seguro
+    const ls = JSON.parse(fs.readFileSync(path.join(dir2, '_contagem-estoque.json'), 'utf8')).lancamentos;
+
+    assert.strictEqual(ls[0].tipo, 'somar', 'o tipo somar não foi gravado');
+    assert.strictEqual(ls[0].divergencia, null,
+      'o modo SOMAR gravou divergência — "chegaram 10" comparado com o saldo dá um número sem ' +
+      'significado, e número errado é pior que número ausente');
+
+    assert.strictEqual(ls[1].tipo, 'contagem', 'o tipo contagem não foi gravado');
+    assert.strictEqual(ls[1].divergencia, 7,
+      'a CONTAGEM perdeu a divergência — contou 10, o sistema dizia 3, e é esse 7 que o dono revisa');
+
+    assert.strictEqual(ls[2].tipo, 'contagem',
+      'lançamento sem tipo não caiu em contagem — o padrão tem que ser o que calcula divergência, ' +
+      'porque um acréscimo aplicado como total zeraria o resto do estoque daquele produto');
+  })().catch(e => { console.error(e); process.exit(1); });
+}
+
+/* e a TELA tem que deixar claro o que o número significa, antes e depois de digitar */
+{
+  const js9 = /<script>([\s\S]*?)<\/script>/.exec(html)[1];
+  assert.ok(/let MODO_LANC = 'somar';/.test(js9), 'a tela não tem modo de lançamento');
+  /* Codex #523: passou a capturar `const tipo = MODO_LANC` antes do envio (mesma trava contra
+     corrida de `produto = ESCOLHIDO`), então o valor viaja como `tipo` e não mais como
+     `tipo: MODO_LANC` — o que importa é que MODO_LANC ainda alimenta o campo enviado. */
+  assert.ok(/tipo: MODO_LANC/.test(js9) || /const tipo = MODO_LANC;/.test(js9),
+    'a tela não manda o tipo ao lançar — o servidor cairia no padrão');
+  /* os botões do seletor estão no HTML, não no script */
+  assert.ok(/data-lanc="somar"/.test(html) && /data-lanc="contagem"/.test(html),
+    'não há como escolher o modo na tela');
+  assert.ok(/\.modo-lanc \.chip\[data-lanc\]/.test(js9),
+    'os botões do seletor não têm handler — trocar o modo não faria nada');
+  /* Codex #523 (P1): o rótulo é a ÚNICA defesa contra digitar no modo errado — o erro que
+     ninguém corrige depois, porque "10" não diz sozinho se era total ou acréscimo. Com 'somar'
+     como padrão, os resultados da busca nasciam dizendo "quantidade contada".
+     UMA função só: quatro pontos escrevem esse texto (o input dos resultados, as duas mensagens
+     de campo vazio e o seletor), e texto na mão em qualquer um deles fica pra trás. */
+  assert.ok(/'quantidade a somar' : 'total contado'/.test(js9),
+    'o campo não diz o que digitar — o rótulo é a única defesa contra digitar no modo errado');
+  assert.ok(!/placeholder="quantidade contada"/.test(html),
+    'o campo dos resultados nasce com texto FIXO — no modo somar ele pediria o total contado');
+
+  /* Codex #523 (P1, r2): eu escapei as aspas ao interpolar e a EXPRESSÃO virou texto — o campo
+     mostrava literalmente "+esc(rotuloQtd())+" pro funcionário. `node --check` não pega: a
+     string é válida, só diz outra coisa.
+     Este teste EXECUTA a linha que monta o input e confere o HTML que sai. */
+  {
+    const linha = html.split('\n').find(l => l.includes('campo qtd') && l.includes('placeholder'));
+    assert.ok(linha, 'sumiu o input de quantidade dos resultados');
+    const gerado = new Function('esc', 'rotuloQtd',
+      'return ' + linha.trim().replace(/\s*\+\s*$/, ''))(String, () => 'quantidade a somar');
+    assert.ok(gerado.includes('placeholder="quantidade a somar"'),
+      'o placeholder do campo não é avaliado — sai literal na tela: ' + gerado.slice(-60));
+    assert.ok(!/rotuloQtd|JSON\.stringify/.test(gerado),
+      'a expressão vazou pra dentro do texto do campo');
+  }
+  const defs = (js9.match(/function rotuloQtd|const rotuloQtd/g) || []).length;
+  assert.strictEqual(defs, 1,
+    'há ' + defs + ' definições do rótulo do modo — duas cópias divergem, e é exatamente o que ' +
+    'essa função existe pra evitar');
+  assert.ok((js9.match(/rotuloQtd\(\)/g) || []).length >= 4,
+    'algum ponto que mostra o texto do campo não passa pela função — vai ficar pra trás na troca de modo');
+  assert.ok(/l\.tipo === 'somar' \? 'a somar' : 'contado'/.test(js9),
+    'a lista do dia não distingue os dois — na revisão "10" não diz se o Bling recebe 10 ou +10');
+  assert.ok(/Você tem quantidades digitadas e não salvas\. Trocar o modo agora\?/.test(js9),
+    'trocar de modo com quantidades digitadas as reinterpreta em silêncio');
+}
+
+/* 24/09 — CORRIGIR O QUE JÁ FOI GRAVADO. O dono lançou ~10 itens antes de os dois modos
+   existirem, querendo SOMAR, e tudo ficou como contagem: "Bling tinha 1115, contado 7,
+   divergência −1108". Os números que ele digitou estão certos; o que estava errado é o que
+   eles SIGNIFICAM — e isso não dá pra adivinhar por ele (reescrever sozinho seria o mesmo erro
+   ao contrário), então ele marca e fica a trilha de quem marcou. */
+{
+  const os3 = require('os');
+  const { criar: criarC3 } = require(LIB.replace(/\.js$/, ''));
+  const dir3 = fs.mkdtempSync(path.join(os3.tmpdir(), 'tipo-'));
+  const arq3 = path.join(dir3, '_contagem-estoque.json');
+  /* a linha exatamente como ficou gravada: SEM tipo, com divergência absurda */
+  fs.writeFileSync(arq3, JSON.stringify({ lancamentos: [{
+    id: 'x1', sku: '10-AE-8F-125mm-g100', nome: 'Lixas g100', contado: 7,
+    saldo_bling_na_hora: 1115, divergencia: -1108, quando: new Date().toISOString(), quem: 'Diego',
+  }] }));
+  let corpo3 = {};
+  const rc3 = criarC3({
+    prefixo: '/x', json: (r, st, o) => { r._o = o; }, validarSessao: () => ({ nome: 'Diego' }),
+    lerIndiceEan: () => ({}), CACHE_DIR: dir3,
+    readJson: (f, d) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { return d; } },
+    writeJson: () => true, readBody: async () => corpo3, empresa: { pasta: 'girassol-backup-offline' },
+    produtoDetalhe: async () => null, localizacaoDeProduto: () => '', locCache: () => ({}),
+    blingGet: async () => ({ ok: false }),
+  });
+  const trocar = async (c) => {
+    corpo3 = c; const res = {};
+    await rc3({ headers: {} }, res, new URL('http://x/x/contagem-tipo'), 'POST');
+    return res._o;
+  };
+  const ler3 = () => JSON.parse(fs.readFileSync(arq3, 'utf8')).lancamentos[0];
+
+  (async () => {
+    const r1 = await trocar({ id: 'x1', tipo: 'somar' });
+    assert.ok(r1 && r1.ok, 'não dá pra corrigir o tipo de um lançamento já gravado');
+    const l1 = ler3();
+    assert.strictEqual(l1.tipo, 'somar', 'o tipo não mudou');
+    assert.strictEqual(l1.contado, 7, 'a QUANTIDADE foi alterada — ela estava certa, só o significado não');
+    assert.strictEqual(l1.divergencia, null,
+      'virou acréscimo mas manteve a divergência de −1108 contra o Bling');
+    assert.ok(Array.isArray(l1.tipo_trocas) && l1.tipo_trocas[0].de === 'contagem',
+      'a troca não deixa trilha — num registro de conferência, mudar o significado sem rastro ' +
+      'é pior que não mudar');
+
+    /* e o caminho de volta: a divergência é recalculada do saldo guardado NO MOMENTO do
+       lançamento, não de um saldo de agora */
+    await trocar({ id: 'x1', tipo: 'contagem' });
+    assert.strictEqual(ler3().divergencia, -1108,
+      'voltando pra contagem, a divergência não foi recalculada do saldo guardado');
+
+    assert.ok(!(await trocar({ id: 'x1', tipo: 'xxx' })).ok, 'aceitou um tipo inválido');
+    assert.ok(!(await trocar({ id: 'naoexiste', tipo: 'somar' })).ok, 'aceitou id inexistente');
+  })().catch(e => { console.error(e); process.exit(1); });
+}
+
+/* 24/09 (Codex #523, 2 P1 + 2 P2) — o painel de baixo (bipe / busca direta por SKU-EAN, via
+   mostrarProduto) tinha rótulo e mensagem de sucesso FIXOS, alheios ao modo somar/contagem que
+   só o card inline da lista de resultados acompanhava. Quem bipa e segue o rótulo do painel
+   digitava o total da prateleira mesmo no modo somar. Os outros dois são efeitos colaterais dos
+   dois modos: o botão "+10" quebrando o editor de número, e a divergência nula do somar sendo
+   lida como "consulta ao Bling falhou". */
+{
+  const js10 = /<script>([\s\S]*?)<\/script>/.exec(html)[1];
+
+  /* P1: rótulo e placeholder do painel legado vêm da MESMA função usada pelo seletor de modo —
+     duas fontes de texto foi como ele ficou desatualizado da primeira vez */
+  assert.ok(/id="lblQtd"/.test(html), 'o rótulo da quantidade não tem id — não dá pra atualizar com o modo');
+  assert.ok(js10.includes("const rotuloQtd = () => MODO_LANC === 'somar' ? 'quantidade a somar' : 'total contado';"),
+    'falta a função única de rótulo/placeholder — texto duplicado diverge de novo entre o painel e o card inline');
+  assert.ok(js10.includes("document.getElementById('lblQtd').textContent = lblQtdTexto();"),
+    'mostrarProduto (bipe / SKU direto) não atualiza o rótulo do painel legado ao abrir — quem bipa vê o texto do modo errado');
+  assert.ok(js10.includes('q.placeholder = rotuloQtd();'),
+    'mostrarProduto não atualiza o placeholder do campo #qtd ao abrir');
+
+  /* P1: a mensagem de sucesso e a divergência do painel legado seguem o TIPO capturado no
+     envio, não o MODO_LANC de agora — mesma regra do servidor (divergência só existe fora do
+     modo somar), e a mesma trava de corrida que já protege `produto = ESCOLHIDO` */
+  assert.ok((js10.match(/const tipo = MODO_LANC;/g) || []).length >= 2,
+    'o tipo do lançamento não é capturado antes do await (painel legado e card inline) — pode ' +
+    'mudar por baixo enquanto a resposta está a caminho');
+  assert.ok(js10.includes("tipo !== 'somar' && produto.estoque != null"),
+    'a divergência do painel legado ainda é calculada no modo somar — "diferença" sem significado, igual ao servidor evita');
+  assert.ok(js10.includes("tipo === 'somar' ? 'Acréscimo salvo' : 'Contagem salva'"),
+    'a mensagem de sucesso do painel legado diz sempre "Contagem salva", mesmo no modo somar');
+
+  /* P1: trocar o modo com o painel legado aberto e uma quantidade digitada tem que avisar,
+     igual já acontecia só para os cards inline */
+  assert.ok(js10.includes("painelAberto && qtdAntigo && qtdAntigo.value.trim() !== ''"),
+    'trocar o modo não confere a quantidade pendente do painel legado (#qtd) — só a dos cards ' +
+    'inline, deixando o número do painel ser reinterpretado em silêncio');
+
+  /* P2: o botão do modo somar mostra "+10", que um <input type="number"> rejeita como valor —
+     o editor da linha tem que tirar o prefixo antes de preencher o campo */
+  assert.ok(js10.includes("botao.textContent.trim().replace(/^\\+/, '')"),
+    'editarQtd copia o texto do botão (com "+") direto pro campo numérico — o navegador zera o campo');
+
+  /* P2: divergência nula no modo somar é intencional (não há saldo pra comparar), não "sem
+     saldo" (que soa como falha da consulta ao Bling) */
+  assert.ok(js10.includes("const ehSomar = l.tipo === 'somar';") && js10.includes("'não se aplica'"),
+    'a lista do dia mostra "sem saldo" pra todo lançamento somar — parece que a consulta ao Bling falhou');
+  const cssT10 = /<style>([\s\S]*?)<\/style>/.exec(html)[1];
+  assert.ok(/\.dif\.na\{/.test(cssT10), 'a classe "na" do badge de divergência não tem CSS — sai sem estilo');
+}
+
+/* Codex #523 (P2): editar a quantidade e clicar no ⇄ disparava DOIS envios sobre o MESMO
+   lançamento — o blur manda /contagem-definir, o clique manda /contagem-tipo. Os dois leem e
+   regravam, então o segundo pode gravar por cima com o valor antigo: o número digitado some,
+   ou o tipo volta sozinho. */
+{
+  const jsT = /<script>([\s\S]*?)<\/script>/.exec(html)[1];
+  const corpo = /async function trocarTipo[\s\S]*?\n\}/.exec(jsT);
+  assert.ok(corpo, 'sumiu a troca de tipo');
+  assert.ok(/const editando = item\.querySelector\('\.qtd-edit'\);/.test(corpo[0]),
+    'trocar o tipo com a quantidade em edição dispara dois envios no mesmo lançamento — um ' +
+    'grava por cima do outro e o número digitado some');
+}
+
 /* 24/09 — APLICAR NO ESTOQUE DO BLING. É a última etapa do app que o dono descreveu em 22/09:
    o funcionário informa a quantidade, ele aprova, um botão lança. O caminho é o MESMO que já
    roda em produção no ciclo de defeitos (ele mandou a função inteira pra não redescobrirmos as
@@ -775,6 +1017,71 @@ for (const [emp, arq] of Object.entries({
   /* e o depósito: o id é diferente em cada empresa, chutar põe saldo no lugar errado */
   assert.ok(/depósito não configurado para esta empresa/.test(ent),
     'sem depósito configurado a lib tenta mesmo assim');
+}
+
+/* 24/09 (Codex #524, 5 P1 + 7 P2) — a escrita no Bling é de MÃO ÚNICA, então cada um destes
+   existe porque o erro correspondente não teria conserto pela tela. */
+{
+  const libA = fs.readFileSync(LIB, 'utf8');
+  const entA = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'estoque-entrada.js'), 'utf8');
+  const baseA = fs.readFileSync(path.join(raiz, 'lib', 'checkout', 'base-funcoes.js'), 'utf8');
+
+  /* P1: `ehAdmin` devolve TRUE com a lista de admins VAZIA (comportamento antigo). Eu me apoiei
+     nele sem ler isso: com a env não configurada, QUALQUER pessoa logada lançaria no estoque. */
+  assert.ok(/if \(!listaAdmins\.length\)/.test(libA),
+    'sem lista de admins configurada, qualquer um lança no estoque real — ausência de lista não ' +
+    'é permissão, é configuração faltando');
+
+  /* P1: o POST de estoque NÃO é idempotente, e o blingWrite repete quando o fetch estoura —
+     Bling grava, conexão cai, repete, soma em DOBRO no estoque real */
+  assert.ok(/tentativas: 1/.test(entA),
+    'a entrada de estoque usa a repetição automática — um timeout depois do commit soma em dobro');
+  assert.ok(/opcoes && opcoes\.tentativas/.test(baseA),
+    'o blingWrite não aceita limitar tentativas');
+  assert.ok(/const _tentativas = Math\.max\(1/.test(baseA) && /t < _tentativas/.test(baseA),
+    'o laço do blingWrite ignora o limite — quem chama não consegue impedir a repetição');
+
+  /* P1: sem o detalhe do produto eu não sei se é kit nem o custo — e aprovava mesmo assim */
+  assert.ok(/if \(!det\) return \{ pode: false, motivo: 'sem-detalhe'/.test(entA),
+    'sem conseguir ler o cadastro, a entrada era aprovada às cegas: kit aceito põe saldo onde ' +
+    'ele não existe, e a escrita não tem desfazer');
+
+  /* P1: se o marcador local não grava, a linha continua com o botão e o próximo clique soma de novo */
+  assert.ok(/aplicouSemRegistrar/.test(libA),
+    'o Bling pode receber a entrada sem que o registro local saiba — e aí o botão continua lá, ' +
+    'convidando a lançar de novo');
+
+  /* P2: lançamento aplicado vira histórico; alterar depois descola o registro do que foi enviado */
+  assert.strictEqual((libA.match(/já foi aplicado no Bling em/g) || []).length, 4,
+    'as quatro rotas que ALTERAM um lançamento (ajustar, definir, excluir, trocar tipo) precisam ' +
+    'recusar o que já foi aplicado');
+
+  /* P2: a busca por código é "contém" e eu olhava 5 resultados — o exato pode estar na página 2 */
+  assert.ok(/pag <= 5/.test(entA) && /limite=100/.test(entA),
+    'a busca do produto olha poucos resultados — com `10-lisa-125mm-100` e `-1000` no catálogo, ' +
+    'o exato pode ficar de fora e a entrada diria "não encontrado"');
+
+  /* P2: falha na listagem de depósitos virava lista vazia e ok */
+  assert.ok(/e\.semResposta = true;/.test(entA),
+    'falha ao listar depósitos vira lista vazia com ok — o dono concluiria que não há depósito');
+
+  /* P2: a observação é irreversível, e a data vinha em UTC */
+  assert.ok(/timeZone: 'America\/Sao_Paulo' \}\)\.slice\(0, 10\)/.test(libA),
+    'a data da observação usa UTC — lançamento das 21h-23h59 grava o dia seguinte no Bling');
+
+  /* P2: sucesso depois de falha mostrava os dois na mesma linha */
+  assert.ok(/delete l2\.ultima_falha;/.test(libA),
+    'depois de um retry bem-sucedido a linha mostra "no Bling" E "falhou" ao mesmo tempo');
+
+  /* P2: a rota dos depósitos era documentada como admin e aceitava qualquer sessão */
+  assert.ok(/só o responsável vê os depósitos/.test(libA), 'a rota de depósitos não exige admin');
+
+  /* P2: o aviso da tela ainda prometia que ela NUNCA mexe no Bling, enquanto o botão novo
+     escreve de verdade. Um aviso que virou mentira é pior que nenhum: a pessoa confia nele. */
+  assert.ok(!/O saldo do Bling <b>não muda<\/b> por aqui/.test(html),
+    'a tela ainda promete que o saldo do Bling nunca muda, e agora existe um botão que muda');
+  assert.ok(/Só o botão <b>📦<\/b>/.test(html),
+    'o aviso não diz QUAL ação escreve no Bling — é a única que não tem desfazer');
 }
 
 console.log('OK: contagem de estoque — registro interno (nunca escreve no Bling), sessão nas 4 rotas, quantidade validada e busca por nome sem gastar cota');
